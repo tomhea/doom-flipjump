@@ -1,0 +1,32 @@
+$ python scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v4.json --fjm build/doom_e1m1_blocked38.fjm --labels scratchpad/12m/atlas/blocked38.labels.tsv.gz --pixel-every 1 --proxy --json docs/ship-evidence/blocked38_b0_v4.json
+  model replays: 11 runs reproduce the set's poses (14 s, outside the lock)
+b0_scenarios: doom_e1m1_blocked38.fjm sha256 457e175106f10776 | set combat_scenarios_v4.json (11 runs, keys 2724202d088cfd0c) | startup+menu 216,249 ops (exact)
+  run                   avg (exact)  p50 +-2^18         p80         max  state     pixels    cam  dr sonl
+  R0-west-hall           18,154,040  18,087,936  19,136,512  19,922,944  100/100   100/100     0   1   50
+  R0-aftermath           16,303,938  16,777,216  17,563,648  24,903,680  100/100   100/100     0   0   12
+  R0-south-hall          12,023,790  12,582,912  13,369,344  14,942,208  100/100   100/100     0   0   16
+  R0-imp-court           15,199,520  15,204,352  16,515,072  18,874,368  100/100   100/100     0   0   20
+  R0-northwest            9,750,770   9,961,472  10,485,760  11,010,048  100/100   100/100     0   0   72
+  R0-courtyard           15,522,831  15,728,640  16,515,072  19,398,656  100/100   100/100     0   0   17
+  R2-barrel-hall         12,958,726  13,107,200  13,369,344  13,631,488  100/100   100/100     0   0   36
+  R2-spectre-corridor    11,452,565  11,796,480  12,058,624  13,369,344  100/100   100/100     0   1   17
+  R2-east-yard           13,352,214  14,155,776  15,728,640  17,825,792  100/100   100/100     0   0   14
+  R3-west                 7,767,078   8,126,464   9,699,328  15,204,352  100/100   100/100     0   0   31
+  R3-mid                 10,272,148  10,223,616  10,485,760  12,320,768  100/100   100/100     0   0   63
+  B0 BINDING (mean + p80)/2 over 11 runs: 14,250,398 ops/frame   (mean 12,977,965, p80 run R0-courtyard = 15,522,831)
+  per-frame maximum: 24,903,680 ops (+/- 2^18) in R0-aftermath; run averages 7,767,078 .. 18,154,039; headroom to 22M: 7,749,602
+  STRAFE UNDERCOUNT (--proxy: each strafe-only frame given a forward step into the same landing):
+    R0-west-hall         +8,154,296 ops over 50 strafe-only frames = 163,086 per frame; state 100/100; picture identical: True
+    R0-aftermath         +2,063,881 ops over 12 strafe-only frames = 171,990 per frame; state 100/100; picture identical: True
+    R0-south-hall        +2,306,541 ops over 16 strafe-only frames = 144,159 per frame; state 100/100; picture identical: True
+    R0-imp-court         +2,181,506 ops over 20 strafe-only frames = 109,075 per frame; state 100/100; picture identical: True
+    R0-northwest         +8,461,647 ops over 72 strafe-only frames = 117,523 per frame; state 100/100; picture identical: True
+    R0-courtyard         +2,586,283 ops over 17 strafe-only frames = 152,134 per frame; state 100/100; picture identical: True
+    R2-barrel-hall       +3,081,772 ops over 36 strafe-only frames = 85,605 per frame; state 100/100; picture identical: True
+    R2-spectre-corridor  +1,902,489 ops over 17 strafe-only frames = 111,911 per frame; state 100/100; picture identical: True
+    R2-east-yard         +3,100,459 ops over 14 strafe-only frames = 221,461 per frame; state 100/100; picture identical: True
+    R3-west              +3,167,449 ops over 31 strafe-only frames = 102,176 per frame; state 100/100; picture identical: True
+    R3-mid               +7,112,076 ops over 63 strafe-only frames = 112,890 per frame; state 100/100; picture identical: True
+    binding with the collision tic on strafe-only frames: 14,283,383 (B0 + 32,985); 126,777 ops per strafe-only frame over 348 frames
+B0 OK
+rc=0

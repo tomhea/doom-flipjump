@@ -634,7 +634,7 @@ ns sim {
     // The clear is per LEAF, not per thing (~100 visited leaves against ~30 loaded things a frame),
     // and it is skipped entirely when the leaf's list is empty -- the overwhelming case once the
     // statics bake, since only a leaf holding a monster has a list at all.
-    def thing_pass throw, n_th, thpos, anim, sel, selret \
+    def thing_pass throw, n_th, thpos, anim, sel, selret, lthi \
             @ body, loop, alive, done, clear, empty, h, hp, hq \
             < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf, \
               sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
@@ -683,6 +683,7 @@ ns sim {
         hex.sparse_zero HOT_PAD, 4, sp_base2
         hex.sparse_zero HOT_PAD, 2, sp_dw
         hex.sparse_zero HOT_PAD, 2, sp_lt
+        rep(anim, k) hex.zero 2, lthi                          // M7 P3.1: the class's second byte
       empty:
     }
 }

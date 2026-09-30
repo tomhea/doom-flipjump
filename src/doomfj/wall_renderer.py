@@ -635,7 +635,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
 
 def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                          spr_base, spr_ldbase, spr_dw, spr_cls, *, spr_cache: dict,
-                         keep=None, view_rows=()):
+                         keep=None, view_rows=(), ltw: int = 1):
     """M14-e — everything the runtime thing table needs, baked ONCE by thing index.
 
     The static path bakes one xor-involution block per (subsector, thing), which is only possible
@@ -696,7 +696,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
         "\n".join(thpos),
         # ⚠ ssflr / sslgt / ltbase are NOT emitted any more: every one of them was indexed by the
         # SUBSECTOR, so the emitter knows the answer and `subsector_action` bakes it into the leaf.
-        generate_packed_lut_fj("sprlt", sprlt, 1),
+        generate_packed_lut_fj("sprlt", sprlt, ltw),        # M7 P3.1: `ltw` bytes a class
     ])
     # the per-leaf lists hold a thing's index + 1 in a byte (things.LIST_MAX_THINGS, the one bound)
     from doomfj.things import LIST_MAX_THINGS
@@ -1433,7 +1433,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS, _MT_LTB, _MT_BINDS = (
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                              spr_base, spr_ldbase, spr_dw, spr_cls, spr_cache=spr_cache,
-                             keep=_mt_keep, view_rows=_p31["view_rows"] if _p31 else ())
+                             keep=_mt_keep, view_rows=_p31["view_rows"] if _p31 else (),
+                             ltw=2 if _p31 else 1)
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
     # (the hot block below), where they persist instead of being rebuilt every frame
@@ -1499,7 +1500,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{'sprlt' if mt else '0'}, {_MT_NLTI}, "
                 # M7 P3.1: mirrored monster views, the animated runtime body only
                 f"{1 if (mt and _ANIM) else 0}, {'trb_mir' if (mt and _ANIM) else 0}, "
-                f"{'trb_mu' if (mt and _ANIM) else 0}"]
+                f"{'trb_mu' if (mt and _ANIM) else 0}, "
+                # M7 P3.1: the light class's width in bytes (two in the animated game tier)
+                f"{2 if _ANIM else 1}"]
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -2583,7 +2586,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                if _do_things else []),
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",
-                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt, {_ANIM}, {_ANIM_SEL}",
+                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt, {_ANIM}, {_ANIM_SEL}, "
+                f"{'sp_lt_hi' if _ANIM else 0}",
                 "stl.fret tp_ret"] if moving_things else []),
              # M7 P3.1: the row select and the rotation leaf it calls
              *((_p31["select"] + _p31["rotation"]) if _p31 else []),
@@ -2756,6 +2760,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
              "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
              "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
+             # M7 P3.1: the light class's SECOND byte, right behind `sp_lt` (`ltw` = 2, animated only)
+             *(["sp_lt_hi: hex.vec 2"] if _ANIM else []),
              "sp_tzmax: hex.vec 8", "sp_mon: hex.vec 2",
              # M14-perf: the thing INDEX the hot load ran on, so the deferred cold load can read
              # its row after the reject. Declared unconditionally (it costs w/4 nibbles) because
@@ -3738,7 +3744,9 @@ def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, s
         for ln in sorted({rm.wall_lightnum(s.light, 0) for s in secs}):
             for h in heights:
                 cls_of.setdefault((ln, h), len(cls_of))
-    assert len(cls_of) * STEP_COL_STRIDE <= 0x10000, f"sprite light classes overflow: {len(cls_of)}"
+    # M7 P3.1: the monsters' views take the class to TWO bytes (`ltw`, the animated game tier only)
+    _lim = 0x10000 if not extra_heights else 0x1000000
+    assert len(cls_of) * STEP_COL_STRIDE <= _lim, f"sprite light classes overflow: {len(cls_of)}"
     out = [f"// V4 sprite shade rows: {len(cls_of)} (light, sprite-height) classes x "
            f"{STEP_COL_STRIDE} dw, indexed class<<8 | bucket height", "sprlight:"]
     for (ln, units) in cls_of:

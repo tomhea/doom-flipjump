@@ -662,3 +662,35 @@ per drawn monster and the probe per culled one); size <= +0.2M words (the REJECT
    re-keyed (the wake cells and `thseen` persist).
 
 **Row**: (filled after the build)
+
+
+## P3.2b chase (class F) -- declared 2026-09-30, before its build
+
+**What**: `docs/gp-monsters.md` section 8.4. The monsters run the model's `chase` mode: A_Chase MOVES -- movecount,
+P_Move (the step, the other monsters' and the player's boxes, the static blockers and the lines in the monsters'
+cells at radius 30 with ML_BLOCKMONSTERS and the drop-off, the seed through ptloc_walk), P_NewChaseDir with its cap
+of 6, the relink of a changed leaf, the WR lifts a step crosses, a refused step in a monster door's box pressing it;
+the REJECT row by the monster's sector at run time; a closing door reversing on a monster; P_ChangeSector on the
+lifts. No attack is decided (P3.2c).
+
+**Budget**: ops <= +0.4M on the binding metric (the model's 2.32 tries a frame at ~80K a try, ~0.19M mean,
+`p32b_chase_census_v5.log`; the rest the per-slot copy in / out); size <= +2.5M words (the monster cells, a REJECT row
+per sector, the unrolled thing test and the door contacts per monster).
+
+**Kill criteria** (class F):
+1. Host: the chase mode with its controls (`test_monsters_chase.py`: the wake mode does not move, the full mode
+   decides); the probe's new cell group all-or-none.
+2. fj: the monsters' cells, the seed and the static blockers against `World.try_move_lines` / `try_move_monster`
+   with doors, lifts and the switch in random states (`test_monster_cells_fj.py`, three controls); the whole chase
+   tic against the model's chase mode over 40 frames -- every slot's state, position, floor, leaf, movedir,
+   movecount and P_Random state, the door presses, the lift triggers and the final leaf lists, with a lift
+   crossing, a capped NewChaseDir and a door press in the script (`test_monster_chase_fj.py`, three controls: no
+   cap, no thing test, no relink).
+3. m2_std_gate, m3_gate, p2a_gate byte- and state-exact (thpos_rt / thss_rt read for every runtime thing) with the
+   monsters stepped inside each gate's doors and lifts (`MonsterPhase.frame`); their selftests; B0 v5 exact (the
+   mirror re-stepped with the monsters' presses and boxes).
+4. CAP-22 on v5; size <= 35%; msframe recorded.
+5. pinreport 20 of 20 (the heat list p32a: `sim.line_test`, re-signed here, is on no hot path); the restore sets
+   re-keyed (the chase's cells, `bar_solid`, `mh_prev` persist).
+
+**Row**: (filled after the build)

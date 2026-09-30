@@ -165,7 +165,12 @@ def main():
     mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE)
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
-                                            len(order), nwalk, nmon=mph.world.layout.nmon)
+                                            len(order), nwalk, nmon=mph.world.layout.nmon, nrt=mviews.nrt)
+    # M7 P3.2b: the monsters step inside this gate's fixed world -- its doors shut and idle, every lift at its top;
+    # a monster that pressed a door or crossed a lift line would change that world, which this gate does not model:
+    # it refuses rather than draw the wrong one
+    from doomfj.movers import MoverPhase
+    mps0 = MoverPhase(secs, lds, sds, mw.vertexes(args.map)).initial()
     print("  {:,} ops -> {} frames".format(ops, len(got)))
 
     # the oracle's mirror: the device's delivery rule (one event per poll, due once the tic clock
@@ -200,16 +205,18 @@ def main():
         if mode == 0:
             state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene)
             pusedn = 0                              # this script never holds use
-            mph.tic(state.x, state.y, state.angle)  # M7 P3.1: the monsters after the player
+            _dps, _mps = mph.frame(phase0, mps0, state.x, state.y, state.angle)   # M7 P3.1 / P3.2b
+            assert _dps == phase0 and _mps == mps0, "frame %d: a monster pressed a door or a lift" % f
             # M7 P3.2a: the frame's picture decides the next tic's seen (rendered below, per world frame)
             _seen = set()
             rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map), scene,
                                  thing_hidden=hidden[skill], thing_views=mviews(mph, state.x, state.y),
-                                 seen_out=_seen, **render_kw)
+                                 thing_positions=mviews.positions(mph), seen_out=_seen, **render_kw)
             mph.set_seen(mviews.slots_of(_seen))
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
                      "ng": ng, "before": before, "pusedn": pusedn,
-                     "mstate": mph.state(), "views": mviews(mph, state.x, state.y)})
+                     "mstate": {**mph.state(), **mviews.rt_state(mph)}, "views": mviews(mph, state.x, state.y),
+                     "positions": mviews.positions(mph)})
 
     ok, menus, worlds, moved, oracle_ng, first_bad = True, 0, 0, 0, {}, None
     state_bad, state_checked = None, 0
@@ -230,7 +237,8 @@ def main():
         else:
             want = bytes(rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map),
                                               scene, thing_hidden=hidden[row["skill"]],
-                                              thing_views=row["views"], **render_kw))
+                                              thing_views=row["views"], thing_positions=row["positions"],
+                                              **render_kw))
             kind = "world %-7s" % SKILL_NAMES[row["skill"]]
             worlds += 1
             if row["ng"] is not None:

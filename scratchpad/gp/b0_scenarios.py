@@ -101,6 +101,8 @@ def model_frames(run: dict, proxy: bool = False) -> list:
                     "mheights": mirror.mp.heights(mirror.mstate),
                     "post_doors": tuple(ws.d_state),
                     "strafe_only": S.has_strafe(kd) and not (kd.get("forward") or kd.get("back"))})
+    if out:
+        out[0]["run_setup"] = run["setup"]              # M7 P3.2b: drive re-steps the mirror with the monsters
     return out
 
 
@@ -150,11 +152,24 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         from doomfj.wall_renderer import BOOT_SKILL
         from doomfj.wall_renderer import MONSTER_MODE
         mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE)
+    # M7 P3.2b: monsters that MOVE press the monster doors (`dreq`, which b0 does not inject: it persists into the
+    # binary's next door tic) and hold closing doors open -- so the expectation is the mirror RE-STEPPED here with
+    # them: each frame's door tic gets their boxes, and their presses join the mirror's pending requests. (Their
+    # lift triggers need nothing: b0 writes the lifts, `lreq` included, at every frame start.)
+    chase = mph is not None and mph.world.monsters not in ("idle", "wake") and override is None
+    cm = S.BinaryMirror(S.start_world(frames[0]["run_setup"])) if chase and frames else None
     for f, fr in enumerate(frames):
-        if mph is not None:
-            _ep = override[f][0] if override is not None else fr["exp"][0]
-            mph.tic(_ep[0] & 0xFFFFFFFF, _ep[1] & 0xFFFFFFFF, _ep[2])
-        epose, edoors = override[f] if override is not None else fr["exp"]
+        mheights = fr.get("mheights")
+        if chase:
+            epose, edoors = cm.step(fr["inj"], fr["keys"], fr["doors"], fr["movers"], others=mph.boxes())
+            cm.state, cm.mstate = mph.frame(cm.state, cm.mstate, epose[0] & 0xFFFFFFFF, epose[1] & 0xFFFFFFFF,
+                                            epose[2])
+            mheights = cm.mp.heights(cm.mstate)
+        else:
+            if mph is not None:
+                _ep = override[f][0] if override is not None else fr["exp"][0]
+                mph.tic(_ep[0] & 0xFFFFFFFF, _ep[1] & 0xFFFFFFFF, _ep[2])
+            epose, edoors = override[f] if override is not None else fr["exp"]
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
             got["viewx"], got["viewy"], got["viewangle"], got["dstate"]) == (
@@ -164,16 +179,20 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         d_part = fr.get("post_doors") is not None and tuple(edoors) != tuple(fr["post_doors"])
         cam += c_part
         door += d_part
-        if f % pixel_every == 0 or c_part or d_part:
+        check = f % pixel_every == 0 or c_part or d_part
+        # M7 P3.2a: the monsters' seen flags come from EVERY picture, checked or not
+        if check or mph is not None:
             _seen = set()
             want = orc.render(P_signed(epose[0]), P_signed(epose[1]), epose[2], tuple(edoors),
-                              movers=fr.get("mheights"),
+                              movers=mheights,
                               views=orc.monster_views(mph, P_signed(epose[0]), P_signed(epose[1]))
-                              if mph is not None else None, seen_out=_seen)
+                              if mph is not None else None, seen_out=_seen,
+                              positions=orc.monster_positions(mph) if mph is not None else None)
             if mph is not None:
                 mph.set_seen(orc._mviews.slots_of(_seen))
-            pix_ok.append(r.frames[mf + f] == want)
-            pix_frames.append(f)
+            if check:
+                pix_ok.append(r.frames[mf + f] == want)
+                pix_frames.append(f)
     return {"ops_total": r.ops, "frame_ops": ops_f, "state_ok": state_ok, "pix_ok": pix_ok,
             "pix_frames": pix_frames, "cam_parts": cam, "door_parts": door,
             "presented": len(r.frames), "seconds": r.seconds, "frames": r.frames[mf:]}

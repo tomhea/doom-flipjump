@@ -247,7 +247,9 @@ height 0 -- every rule is live, the drop-off one included.
    (`World.door_touched` counts them; P2b's fj tests only the player -- sound while monsters stood still); and a
    moving lift sets the floor of every active monster standing in its sector (P_ChangeSector,
    `_door_phase_scene`), so each slot keeps its sector.
-8. **Live leaves**: `thing_live_subsectors` excludes a sector with no height AT SPAWN -- every closed door. A monster
+8. **Live leaves** -- ALREADY SOUND (checked 2026-09-30): the emitter asks `thing_live_subsectors` on the doors-OPEN
+   map (`_dsecs_open`, M2-R3), so an opened door's leaves are live. The hazard it guards: on the stored map the
+   predicate excludes a sector with no height AT SPAWN -- every closed door. A monster
    that walks through an opened door would stand in a pruned leaf and vanish with no error, the bug class that
    function exists to prevent. The tier with moving monsters keeps every door and lift sector live.
 

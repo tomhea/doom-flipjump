@@ -84,7 +84,7 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     # M7 P2b: `contact`/`passes`/`radius` arm the REVERSAL (the player's box against the door's
     # rectangle, read-only) -- not the collision table; the census below runs on the armed text
     assert list(inspect.signature(doorcode.door_tic_lines).parameters) == \
-        ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius"], (
+        ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius", "mon_press", "mon_contact"], (
             "door_tic_lines takes collision inputs again")
     secs, lds, sds, verts = level
     slots = sorted(doors)
@@ -92,8 +92,12 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     text = "\n".join(doorcode.door_tic_lines(
         slots, {si: len(doors[si]) for si in slots}, use_boxes_xy(secs, lds, sds, verts),
         contact=door_contact_geo(secs, lds, sds, verts),
-        passes={si: pass_state(secs, lds, sds, si) for si in slots}))
+        passes={si: pass_state(secs, lds, sds, si) for si in slots},
+        # M7 P3.2b: armed with the monsters' presses and contacts too -- they only READ (thpos_rt, mon_active)
+        mon_press=frozenset(slots[:3]),
+        mon_contact=[("thpos_rt + 0*dw", "thpos_rt + 8*dw", 20, "mon_active + 0*dw")]))
     assert "_rev:" in text, "the census must see the reversal's code"
+    assert "thpos_rt" in text and "mon_active" in text, "the census must see the monsters' code"
     assert "wflip" not in text and "lnrow" not in text and "ca_" not in text
     written = set()
     for m in re.finditer(r"hex\.(?:set|zero|inc|dec|xor_by|mov) (?:\d+, )?([A-Za-z_]\w*)", text):

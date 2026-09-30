@@ -54,6 +54,50 @@ class MonsterPhase:
             ws.pangle = angle & 0xFFFFFFFF
         self.world._monsters_phase(TicEvents(0))
 
+    # ---- M7 P3.2b "chase": the monsters and the gate's doors and lifts act on each other ------------------------
+    def sync(self, doors: dict, lifts: tuple, switched: int) -> None:
+        """the gate's doors {sector: (state, dir, sub, wait)}, lifts ((state, dir, sub, wait) per lift, sector order)
+        and floor switch this frame -> the monsters' collision scene (World._door_phase_scene, which also sets the
+        floor of every monster standing on a mover that moved -- P_ChangeSector)"""
+        w, ws = self.world, self.world.ws
+        for d, si in enumerate(w.door_order):
+            ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = doors[si]
+        for k, st in enumerate(lifts):
+            ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k] = st
+        ws.f_switch = int(bool(switched))
+        w._door_phase_scene()
+
+    def requests(self) -> Tuple[frozenset, frozenset]:
+        """(door sectors the monsters pressed, lift sectors they triggered) this tic -- the gate's next door and
+        mover phases take them (`DoorPhase` / `MoverPhase` state `req`); cleared here, as the model's phases do"""
+        w, ws = self.world, self.world.ws
+        doors = frozenset(si for d, si in enumerate(w.door_order) if ws.d_monreq[d])
+        lifts = frozenset(si for k, si in enumerate(w.lift_order) if ws.l_req[k])
+        for d in range(len(w.door_order)):
+            ws.d_monreq[d] = 0
+        for k in range(len(w.lift_order)):
+            ws.l_req[k] = 0
+        return doors, lifts
+
+    def frame(self, dps, mps, x16: int, y16: int, angle: int):
+        """M7 P3.2b: ONE world frame of the monsters inside a gate, after its door, lift and player phases -- the
+        gate's doors (a `doors.DoorPhase` state) and movers (a `movers.MoverPhase` state, or None) into the monsters'
+        world, the tic with the player's pose, and the monsters' door presses and lift triggers handed back into the
+        two states' `req` for the next frame -> (dps, mps). Idle and wake monsters press nothing, so it is the plain
+        tic for them."""
+        ds, fired, req, card = dps
+        lifts, lreq, sw = mps if mps is not None else ((), frozenset(), 0)
+        self.sync(ds, lifts, sw)
+        self.tic(x16, y16, angle)
+        dr, lr = self.requests()
+        return (ds, fired, frozenset(req) | dr, card), ((lifts, frozenset(lreq) | lr, sw) if mps is not None else None)
+
+    def boxes(self) -> list:
+        """[(x16, y16, r16)] of every live monster -- a closing door reverses on them (World.door_touched)"""
+        w, ws = self.world, self.world.ws
+        return [(ws.mon_x[m] << 16, ws.mon_y[m] << 16, w.mon_radius[m] << 16) for m in range(w.layout.nmon)
+                if ws.mon_active[m] and ws.mon_health[m] > 0]
+
     def set_seen(self, slots) -> None:
         """the picture just drawn: its seen monsters (slots) are the next tic's `mon_seen`"""
         ws = self.world.ws
@@ -70,6 +114,11 @@ class MonsterPhase:
             out.update({"mon_target": tuple(ws.mon_target[:n]), "mon_reaction": tuple(ws.mon_reaction[:n]),
                         "mon_threshold": tuple(ws.mon_threshold[:n]), "mon_movedir": tuple(ws.mon_movedir[:n]),
                         "sched_cursor": ws.sched_cursor, "thseen": tuple(ws.mon_seen[:n])})
+        if self.world.monsters not in ("idle", "wake"):   # M7 P3.2b: the move's cells (the position is thpos_rt,
+            out.update({"mon_movecount": tuple(v & 0xFF for v in ws.mon_movecount[:n]),   # the leaf thss_rt)
+                        "mon_rng": tuple(ws.mon_rng[:n]),
+                        "mon_floorz": tuple(v & 0xFFFF for v in ws.mon_floorz[:n]),
+                        "msec": tuple(self.world._mon_sector(m) for m in range(n))})
         return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:
@@ -92,12 +141,47 @@ class MonsterViews:
     def __init__(self, rm, map_wad, mapname: str, sprite_wad, world):
         from doomfj.things import drawable_things
         from doomfj.wall_renderer import anim_frames, anim_patches
-        drawable, _ = drawable_things(rm, map_wad.things(mapname), sprite_wad, {})
+        drawable, draw_idx = drawable_things(rm, map_wad.things(mapname), sprite_wad, {})
         key = {(t.type, t.x, t.y, t.angle, t.flags): i for i, t in enumerate(drawable)}
         self.n = len(drawable)
         self.mdi = [key[(t.type, t.x, t.y, t.angle, t.flags)] for t in world.mon_things]
         self.patches = anim_patches(sprite_wad, anim_frames(map_wad, mapname))
         self.rm = rm
+        # M7 P3.2b: the RUNTIME things, as the emitter picks them (wall_renderer's `_mt_keep`: the drawables
+        # `baked_thing_mask` leaves unbaked, in WAD order) -- the index space of thpos_rt / thss_rt
+        from doomfj.mapcompiler import bake_bsp
+        from doomfj.reference_model import MONSTER_TYPES
+        from doomfj.things import baked_thing_mask
+        self.drawable = drawable
+        self.cmap = bake_bsp(map_wad, mapname)
+        baked = baked_thing_mask(rm, self.cmap, drawable, MONSTER_TYPES)
+        keep = sorted(i for i, b in zip(draw_idx, baked) if not b)
+        self.rt_drawable = [draw_idx.index(i) for i in keep]          # runtime thing t -> drawable index
+        self.nrt = len(keep)
+        self.rt = [keep.index(draw_idx[di]) for di in self.mdi]      # slot -> runtime thing
+
+    def positions(self, phase: "MonsterPhase") -> list:
+        """M7 P3.2b: `render_wall_frame(thing_positions=...)` -- every drawable where it stands, the monsters where
+        the phase has moved them (map units)"""
+        ws = phase.world.ws
+        out = [(t.x, t.y) for t in self.drawable]
+        for m, di in enumerate(self.mdi):
+            out[di] = (ws.mon_x[m], ws.mon_y[m])
+        return out
+
+    def rt_state(self, phase: "MonsterPhase") -> dict:
+        """M7 P3.2b: the runtime things' `thpos_rt` (16.16 x | y << 32) and `thss_rt` (the leaf) as the probe reads
+        them -- the monsters where the phase has them, every other runtime thing at its spawn"""
+        ws, pos = phase.world.ws, self.positions(phase)
+        M = 0xFFFFFFFF
+        thpos, thss = [], []
+        for di in self.rt_drawable:
+            x, y = pos[di]
+            thpos.append(((x << 16) & M) | (((y << 16) & M) << 32))
+            thss.append(self.rm.point_in_subsector(self.cmap, x, y))
+        for m, t in enumerate(self.rt):                   # a monster's leaf is the model's own
+            thss[t] = ws.mon_leaf[m]
+        return {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss)}
 
     def slots_of(self, seen_drawables) -> set:
         """a render's `seen_out` (drawable indices) as monster slots"""

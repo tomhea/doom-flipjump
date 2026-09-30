@@ -54,15 +54,17 @@ def door_decls(ndoors: int, nwalk: int = 0) -> list:
     ]
 
 
-def _box_test(d: int, box, hit: str, miss: str) -> list:
-    """`in_use_box` in fj: four signed compares of the 16.16 player position against baked corners.
+def _box_test(d: int, box, hit: str, miss: str, regs=("viewx", "viewy")) -> list:
+    """`in_use_box` in fj: four signed compares of the 16.16 player position against baked corners (M7 P3.2b:
+    `regs` -- a monster's position, `monstermove.move_leaf_lines`' door boxes).
 
     The box is axis-aligned precisely so this needs no multiply and no line side test -- see the
     compromise noted in `doors.use_boxes`."""
     x0, y0, x1, y1 = box
     out = []
-    for k, (reg, val, want_ge) in enumerate((("viewx", x0, True), ("viewx", x1, False),
-                                             ("viewy", y0, True), ("viewy", y1, False))):
+    rx, ry = regs
+    for k, (reg, val, want_ge) in enumerate(((rx, x0, True), (rx, x1, False),
+                                             (ry, y0, True), (ry, y1, False))):
         tag = f"dub{d}_{k}"
         out.append(f"    hex.set 8, dbox, {(val << 16) & 0xFFFFFFFF:#x}")
         if want_ge:                    # miss when reg < val
@@ -170,20 +172,21 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
         f"  {p}_done:"]
 
 
-def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str) -> list:
+def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str, regs=("viewx", "viewy")) -> list:
     """`doors.touches_door` in fj for the player at (`viewx`, `viewy`), box half-width `radius`:
     the centre strictly inside the door's rectangle, or the box straddling one of its two-sided
-    lines (strict, both axes) -> `yes`; else `no`."""
+    lines (strict, both axes) -> `yes`; else `no`. M7 P3.2b: `regs` -- a monster's 16.16 position (thpos_rt)."""
     (x0, y0, x1, y1), lines = geo
+    rx, ry = regs
     r = radius << 16
     out = []
 
     def between(t, reg, lo16, hi16, fail):
         return (_scmp_const(reg, lo16, fail, fail, f"{t}a") + [f"  {t}a:"]
                 + _scmp_const(reg, hi16, f"{t}b", fail, fail) + [f"  {t}b:"])
-    tests = [((("viewx", x0 << 16, x1 << 16), ("viewy", y0 << 16, y1 << 16)))]
+    tests = [(((rx, x0 << 16, x1 << 16), (ry, y0 << 16, y1 << 16)))]
     for axis, coord, lo, hi in lines:
-        across, along = ("viewy", "viewx") if axis == "y" else ("viewx", "viewy")
+        across, along = (ry, rx) if axis == "y" else (rx, ry)
         tests.append(((across, (coord << 16) - r, (coord << 16) + r),
                       (along, (lo << 16) - r, (hi << 16) + r)))
     for k, pair in enumerate(tests):
@@ -200,7 +203,8 @@ def reverse_mask(pass_at: int, stride: int, nstates: int) -> int:
     return sum(1 << s for s in range(nstates) if s >= pass_at > s - stride)
 
 
-def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None, radius=16) -> list:
+def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None, radius=16, mon_press=frozenset(),
+                   mon_contact=()) -> list:
     """One frame of every door. `slots` is the emitter's door order (`sorted(door sectors)`),
     `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units (none for a
     walk-over door), `kinds[si]` its `doors.door_kinds` kind (all "plain" when omitted).
@@ -221,6 +225,9 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
     out = ["// == M2-R4: the doors, one tic each ==================================",
            "//   dr<d>_*  door <d> (index into sorted(door sectors))",
            "//   the mirror of doomfj.doors.door_tic -- read them together"]
+    # M7 P3.2b: `mon_press` -- the doors a MONSTER presses (its refused step in the door's monster box sets `dreq`,
+    # monstermove.move_leaf_lines), taken like a walk-over request; `mon_contact` -- [(x16 cell, y16 cell, radius,
+    # active cell)] per monster, a closing door reversing on a live one as on the player (World.door_touched)
     kinds = kinds or {si: "plain" for si in slots}
     for d, si in enumerate(slots):
         n = nstates[si]
@@ -235,7 +242,7 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
         p = f"dr{d}"
         box = boxes.get(si)
         trigger = []
-        if kind == "walkover":            # only these get requests in P2a (monsters' come with P3),
+        if kind == "walkover" or si in mon_press:   # walk-over requests (P2a) and monster presses (P3.2b)
             trigger = [f"    hex.if0 1, {rq}, {p}_use",   # so an idle plain door still costs 3 ops
                        f"    hex.zero 1, {rq}",           # ... pressed once
                        f"    ;{p}_press",
@@ -249,9 +256,14 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
             trigger += _box_test(d, box, f"{p}_press", f"{p}_moved")
         rev = None
         if contact is not None and not stay:
-            rev = (reverse_mask(passes[si], stride, n),
-                   lambda yes, no, _g=contact[si], _p=p: door_contact_lines(f"{_p}_ct", _g, radius,
-                                                                           yes, no))
+            def _rev(yes, no, _g=contact[si], _p=p):
+                out_ = door_contact_lines(f"{_p}_ct", _g, radius, yes, f"{_p}_cm0" if mon_contact else no)
+                for j, (xr, yr, rad, act) in enumerate(mon_contact):
+                    nx_ = f"{_p}_cm{j + 1}" if j + 1 < len(mon_contact) else no
+                    out_ += [f"  {_p}_cm{j}:", f"    hex.if0 1, {act}, {nx_}"]
+                    out_ += door_contact_lines(f"{_p}_cn{j}", _g, rad, yes, nx_, regs=(xr, yr))
+                return out_
+            rev = (reverse_mask(passes[si], stride, n), _rev)
         out += [f"  // ---- door {d} (sector {si}, {kind}): {n} states ----",
                 *machine_lines(p, st, dr, sub, wt, last, trigger, stride=stride,
                                top_wait=0 if stay else WAIT, reverse=rev)]
@@ -372,13 +384,15 @@ def walkover_lines(triggers, slots, radius: int) -> list:
     return out
 
 
-def _crossed_lines(p: str, axis: str, coord: int, lo: int, hi: int, radius: int, fire) -> list:
+def _crossed_lines(p: str, axis: str, coord: int, lo: int, hi: int, radius: int, fire,
+                   regs=("cm_ox", "cm_oy", "viewx", "viewy")) -> list:
     """`doors.crossed` in fj on the move (`cm_ox`, `cm_oy`) -> (`viewx`, `viewy`): the centre
     changed side of the axis line (`c <= L`) and the new centre is strictly inside the segment's
     extent inflated by `radius` -> the `fire` lines; either way on to `<p>_no`. The walk-over doors
-    (`walkover_lines`, behind their W1 latch) and the WR lifts (`movercode.lift_walk_lines`)."""
-    a_old, a_new, o_new = (("cm_oy", "viewy", "viewx") if axis == "y" else
-                           ("cm_ox", "viewx", "viewy"))
+    (`walkover_lines`, behind their W1 latch) and the WR lifts (`movercode.lift_walk_lines`). M7 P3.2b: `regs` =
+    (old x, old y, new x, new y), 16.16 -- a monster's step (`monstermove.move_leaf_lines`)."""
+    ox, oy, nx, ny = regs
+    a_old, a_new, o_new = (oy, ny, nx) if axis == "y" else (ox, nx, ny)
     L = coord << 16
     out = []
     # old side: le_old = old <= L  -> {p}_ol (le) / {p}_og (gt)

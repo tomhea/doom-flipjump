@@ -664,8 +664,9 @@ class DoorPhase:
     def initial(self):
         return (dict(self._initial), (0,) * len(self.triggers), frozenset(), 0)
 
-    def tic(self, state, use: bool, x16: int, y16: int, has_blue=None):
-        """`has_blue`: None takes the state's card"""
+    def tic(self, state, use: bool, x16: int, y16: int, has_blue=None, others=()):
+        """`has_blue`: None takes the state's card. `others` (M7 P3.2b): the live monsters' boxes [(x16, y16, r16)]
+        -- a closing door reverses on them as on the player (World.door_touched)"""
         ds, fired, req, card = state
         if has_blue is None:
             has_blue = bool(card)
@@ -675,7 +676,8 @@ class DoorPhase:
             pressed = (use and box is not None and can_open(kind, has_blue)
                        and in_use_box_fixed(box, x16, y16)) or si in req
             blocked = (self.contact is not None and ds[si][1] == CLOSING
-                       and touches_door(self.contact[si], x16, y16, 16 << 16))
+                       and (touches_door(self.contact[si], x16, y16, 16 << 16)
+                            or any(touches_door(self.contact[si], ox, oy, orr) for ox, oy, orr in others)))
             out[si] = door_tic(ds[si], self.nstates[si], bool(pressed),
                                stride=door_stride(kind), stay=door_stay(kind), blocked=blocked,
                                pass_at=self.passes[si])

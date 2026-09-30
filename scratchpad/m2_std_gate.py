@@ -507,13 +507,13 @@ def main():
     mp = MoverPhase(secs, lds, sds, mw.vertexes(args.map))
     exits = exit_boxes(lds, mw.vertexes(args.map))
 
-    def tic(dps, st, kd, used, mps=None, pusedn=1):
+    def tic(dps, st, kd, used, mps=None, pusedn=1, others=()):
         """the binary's frame: the door tic (`used`: use held), the lifts, the use press, then the
         player's move against the doors not yet passable over the movers' floors -> (door phase
         state, player state) -- and with `mps` given, (door, player, mover phase, pusedn)"""
         with_movers = mps is not None
         mps = mp.initial() if mps is None else mps
-        dps = dp.tic(dps, used, st.x, st.y)
+        dps = dp.tic(dps, used, st.x, st.y, others=others)     # M7 P3.2b: reversal on the monsters too
         mps = mp.tic(mps)
         if kd.get("use"):
             if not pusedn:
@@ -749,7 +749,7 @@ def main():
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
                                             len(order), len(dp.triggers), len(mp.order),
-                                            nmon=mph.world.layout.nmon)
+                                            nmon=mph.world.layout.nmon, nrt=mviews.nrt)
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")
@@ -800,7 +800,7 @@ def main():
             sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr,
                                                        sel, (dstates[si] for si in order),
                                                        dps, order, (lvdone, pusedn),
-                                                       mps, mp.order, mph.state()))
+                                                       mps, mp.order, {**mph.state(), **mviews.rt_state(mph)}))
             state_checked += 1
             print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
                   % (f, ",".join(sorted(menu_events[f])) or "-", "-",
@@ -814,21 +814,24 @@ def main():
         used = bool(kd.get("use")) and not args.selftest
         if kd.get("use") and in_use_box_fixed(boxes[target], state.x, state.y):
             in_box_when_pressed = True
-        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn)
+        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=mph.boxes())
         dstates = dps[0]
-        mph.tic(state.x, state.y, state.angle)          # M7 P3.1: the monsters after the player
+        # M7 P3.1: the monsters after the player; P3.2b: inside the doors and lifts (their presses -> next frame)
+        dps, mps = mph.frame(dps, mps, state.x, state.y, state.angle)
         rsc = build_scene(mw, mw, args.map,
                           {**heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}),
                            **mp.heights(mps)})
         want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
                                           thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
                                           thing_views=mviews(mph, state.x, state.y),
+                                          thing_positions=mviews.positions(mph),
                                           seen_out=(_seen := set()), **GAME_RENDER_KW))
         mph.set_seen(mviews.slots_of(_seen))            # M7 P3.2a: this picture's seen -> the next tic
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
                                                    (dstates[si] for si in order), dps, order,
-                                                   (lvdone, pusedn), mps, mp.order, mph.state()))
+                                                   (lvdone, pusedn), mps, mp.order,
+                                                   {**mph.state(), **mviews.rt_state(mph)}))
         state_checked += 1
         path[f] = (state.x, state.y, state.angle)
         ok &= same

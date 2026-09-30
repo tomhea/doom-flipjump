@@ -575,3 +575,25 @@ price, and it is small against the budget (+0.3M for all of P3).
 4. msframe NOT SEPARATED with the pictures identical: not B SLOWER, class S ships.
 5. pinreport 20 of 20; the restore sets re-keyed (`p30_rekey.log`).
 
+
+## P3.1 idle life (class F) -- declared 2026-09-30, before blocked40's build
+
+**What**: `docs/gp-monsters.md` section 7. The monsters run their state machine in the model's `idle` mode (nothing
+wakes): per slot the tic and one `mstate` step; drawn at their state's frame and DOOM's rotation for the viewer
+(`doomfj.monsters`), mirrored views included -- the renderer reads a runtime thing's row through a row select
+(a static thing its own row, a monster its view's), the light class two bytes wide (`ltw`).
+
+**Budget**: ops <= +0.15M on the binding metric (the tic ~53 slot tests, the row select and rotation per drawn
+monster); size <= +0.4M words (the view rows, the light classes, the slot code).
+
+**Kill criteria** (class F):
+1. Host: the idle mode, the view rule and the oracle's views each with a control (`test_monsters_idle.py`).
+2. fj: the tic, the rotation, the row select and the tables on the engine against the model's rules, mutants
+   caught (`test_monster_tic_fj.py`, `test_monster_rotation_fj.py`, `test_monster_rowselect_fj.py`,
+   `test_monster_tables_fj.py`); the record's mirror and light-width parameters in `test_sprite_bank_fj.py`.
+3. m2_std_gate, m3_gate, p2a_gate byte- and state-exact with every gate's oracle running `MonsterPhase` and
+   drawing its views; their selftests reject where they must; B0 v4 exact (the idle monsters from the boot image).
+4. CAP-22 on v4; size <= 35%; msframe recorded (the pictures differ from blocked38's -- monsters animate).
+5. pinreport 20 of 20 with the re-keyed heat list (`heat_blocked27_p31`); the restore sets re-keyed.
+
+**Row**: (filled after the build)

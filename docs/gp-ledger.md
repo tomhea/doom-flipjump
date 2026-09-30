@@ -633,3 +633,32 @@ heat_blocked27_p31 regenerated, its groups identical (the pool reads only those)
 4. CAP-22 on v4 (14,447,782); size 28.65%; msframe recorded (NOT SEPARATED).
 5. pinreport 20 of 20 with `heat_blocked27_p31`; the restore sets re-keyed (`p31_rekey.log`).
 
+**Row**: (filled after the build)
+
+
+## P3.2a wake (class F) -- declared 2026-09-30, before blocked41's build
+
+**What**: `docs/gp-monsters.md` sections 8.2-8.3, rung P3.2a. The monsters run the model's `wake` mode under the
+seen rule (combat set v5): the render marks each monster it SEES (some column open at the base monster size cull,
+before the count budgets and the soft raise -- `seen_probe`), and the next frame's tic reads the flags. The tic walks
+the slots from `sched_cursor`, at most K = 6 heavy slots a frame (the first deferred is the next cursor); A_Look
+wakes on seen, or REJECT-visible within 128 and not behind; A_Chase in `wake` runs its counters and the turn
+(`mturn`), and nothing moves yet (P3.2b).
+
+**Budget**: ops <= +0.3M on the binding metric (the slot walk, one REJECT row read per near sleeper, the seen mark
+per drawn monster and the probe per culled one); size <= +0.2M words (the REJECT rows of the monsters' sectors,
+`lfsec`, the unrolled slots).
+
+**Kill criteria** (class F):
+1. Host: the seen rule, REJECT and the wake mode each with a control (`test_sight*.py`, the world's wake tests).
+2. fj: the wake tic on the engine against the model's wake mode, a mutated REJECT row and a mutated turn table
+   caught (`test_monster_wake_fj.py`); `seen = 0` leaves the transplanted record exact (`test_sprite_bank_fj.py`);
+   the `seen = 1` mark and probe are proven where they run whole -- `thseen` state-exact in the gates below.
+3. m2_std_gate, m3_gate, p2a_gate byte- and state-exact with every gate's oracle ticking `MonsterPhase` in `wake`
+   and feeding it the seen set of the picture it drew; their selftests reject where they must; B0 v5 exact.
+4. v5 frozen (the owner's approval stands if every criterion still passes on the measured B0); CAP-22 on v5;
+   size <= 35%; msframe recorded (the pictures differ from blocked40's -- monsters wake and turn).
+5. pinreport 20 of 20 with the re-keyed heat list (`frame.thing_record_body` 28 -> 32); the restore sets
+   re-keyed (the wake cells and `thseen` persist).
+
+**Row**: (filled after the build)

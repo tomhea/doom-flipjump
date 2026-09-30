@@ -834,7 +834,7 @@ class World(CombatMixin):
         self.sight_rule, self.seen_hook = sight_rule, seen_hook
         if sight_rule == "seen":
             from doomfj import sight as _S
-            self.reject = _S.load_reject(self.mapname)
+            self.reject = _S.load_reject(self.mapname, self.mw)
             self.wake_sight, self.attack_sight = _S.wake_sight, _S.attack_sight
         else:
             self.wake_sight = self.attack_sight = lambda w, m: w.sight(w, m)

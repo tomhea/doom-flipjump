@@ -79,7 +79,7 @@ def test_the_digest_sees_every_field_and_survives_a_copy(world):
     assert world.ws.copy().digest() == base
     for f in world.schema:              # R9: a one-unit change anywhere moves the digest
         c = world.ws.copy()
-        if f.count == 1:
+        if not f.array:
             setattr(c, f.name, getattr(c, f.name) ^ 1)
         else:
             arr = getattr(c, f.name)

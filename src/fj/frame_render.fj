@@ -536,11 +536,18 @@ ns frame {
         ;dst
     }
 
-    def rec_seen_mark sa, sflag, one @ done {
+    // ⚠ THE ARM (blocked41, 2026-10-01): `hex.write_hex` arms the pointer library at `sa` -- the seen flags, FAR
+    // outside the hot-data window -- and the record's next reads are the NARROW `read_byte5` (arm5 moves only the low
+    // five hexes, exact only while the last arm is inside the same 16^5 window). Unrearmed, the next read took
+    // thseen's high hexes with a hot-block low part and jumped into code (NullIP two ops later). So after the write
+    // the mark re-arms at `rearm`, a hot-block pointer the caller is about to read through (a full arm: exact from
+    // anywhere). The skip paths never armed, so they leave the arm where it was.
+    def rec_seen_mark sa, sflag, one, rearm @ done {
         hex.if1 1, sflag, done
         hex.set 1, sflag, 1
         hex.if0 w/4, sa, done
         hex.write_hex sa, one
+        hex.pointers.set_flip_and_jump_pointers rearm
       done:
     }
 
@@ -718,7 +725,7 @@ ns frame {
         hex.if0 1, trb_drawn_v, slot_check          // a nearer wall owns this column -> the thing is hidden
         ;col_next
       slot_check:
-        rep(seen, k) .rec_seen_mark sa, sflag, one        // M7 P3.2a: an OPEN column -- seen
+        rep(seen, k) .rec_seen_mark sa, sflag, one, trb_sprflag_p   // M7 P3.2a: an OPEN column -- seen
         frame.read_byte5 trb_sprflag_v, trb_sprflag_p
         hex.if0 2, trb_sprflag_v, slot_a            // no fragment yet -> slot A (offset 0, flag 1)
         // V4b: slot A taken -- take slot B (byte offset 8 of the same 16-byte slot, flag 2),
@@ -815,7 +822,7 @@ ns frame {
         rep(seen, k) hex.inc 2, trb_col_x
         rep(seen, k) .rec_goto seen_loop
       seen_hit:
-        rep(seen, k) .rec_seen_mark sa, sflag, one
+        rep(seen, k) .rec_seen_mark sa, sflag, one, trb_drawn_p
         rep(seen, k) .rec_goto ret
                                                 //   (budget/monbudget/dsoft*) or a min-height bar
                                                 //   (sprbminh/lowh) — reloaded before each cmp

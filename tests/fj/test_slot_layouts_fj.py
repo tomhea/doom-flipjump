@@ -643,7 +643,7 @@ def record_bindings(frame_text, emitter_text):
 # turns them on -- so no module constant binds them and no one integer is in every emitted call. This harness binds
 # them OFF, where they expand no op (`feature_lines_are_gated` checks that every line naming one is a rep() line), so
 # it tests the layout the build writes; their ON path is issue #109's F1.
-FEATURE_OFF = {"mir": "0", "mirf": "0", "miru": "0"}
+FEATURE_OFF = {"mir": "0", "mirf": "0", "miru": "0", "seen": "0", "sa": "0", "sflag": "0", "one": "0"}
 
 
 def feature_lines_are_gated(code):

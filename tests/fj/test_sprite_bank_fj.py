@@ -368,7 +368,8 @@ def _record_macros(src):
     e_b = lines.index("      set_tstop:")
     out, pars = [], {}
     for name, part in (("t_rec_thing", lines[s_a:e_a]), ("t_rec_cols", lines[s_b:e_b])):
-        code = [ln.split("//")[0].rstrip() for ln in part]
+        # the record's own helper macros (`.rec_...`, namespace-relative in `frame`) called by their full name
+        code = [ln.split("//")[0].rstrip().replace(" .rec_", " frame.rec_") for ln in part]
         code = "\n".join(ln for ln in code if ln.strip())
         labels = set(re.findall(r"^\s*(\w+):", code, re.M))
         used = set(_IDENT.findall(code))
@@ -397,7 +398,9 @@ def _shade(lt, hb):
     return (lt * 97 + hb * 7 + 3) & 0xFF
 
 
-def _record_program(src, cases):
+def _record_program(src, cases, seen_on=False):
+    """`seen_on` (M7 P3.2a): the seen mark ON -- each case's flag `t_thseen[c]`, declared a whole 16^5 window past the
+    hot block, and one more output line with every flag"""
     pars, macros = _record_macros(src)
     # the values the emitter passes (wall_renderer._thing_leaf_body); the sections name no others
     args = dict(hdb=wr.sprite_hd_bucket(CFG), deg=1, sprbminh=DEG_SPRB_MINH,
@@ -405,6 +408,8 @@ def _record_program(src, cases):
                 slotstride=wr.SPR_SLOT_STRIDE, ltw=1,          # M7 P3.1: a one-byte light class ...
                 mir=0, mirf=0, miru=0,                        # ... no mirrored views ...
                 seen=0, sa=0, sflag=0, one=0)                 # ... and no seen flags (M7 P3.2a)
+    if seen_on:
+        args.update(seen=1, sa="t_sa", sflag="t_sflag", one="t_one")
     argl = {m: ", ".join(str(args[p]) for p in ps) for m, ps in pars.items()}
     main = ["stl.startup_and_init_all",
             # the renderer's hot-data block, as the emitter places it: a fresh 16^5-bit window, so
@@ -425,6 +430,8 @@ def _record_program(src, cases):
                  "    hex.set 8, trb_tytop, %d" % (tytop & 0xFFFFFFFF),
                  "    hex.set 8, trb_thpx, %d" % thpx,
                  "    stl.fcall t_thing_leaf, t_ret"]
+        if seen_on:                                      # this thing's flag, not yet marked
+            main += ["    hex.set w/4, t_sa, t_thseen + %d*dw" % c, "    hex.zero 1, t_sflag"]
         for u in range(N_COLS):
             x = N_COLS * c + u
             main += ["    hex.set 8, trb_col_x, %d" % x, "    hex.set 8, trb_tx2, %d" % x,
@@ -447,6 +454,8 @@ def _record_program(src, cases):
                 min_b = max(0, min(SPRITE_HEIGHT_BUCKETS, b + MIN_B_DELTA[tier][u]))
                 body = [0, min_b, 255, 255, 5]
                 bank += [";%#x * dw" % v for v in body] + [";0 * dw"] * (wr.SPR_BLOCK_STRIDE - 5)
+    if seen_on:
+        main += ["    hex.print_as_digit 1, t_thseen + %d*dw, 0" % c for c in range(len(cases))] + ["    stl.output 10"]
     main += ["    stl.loop",
              "t_thing_leaf:", "    t_rec_thing %s" % argl["t_rec_thing"],
              "    hex.print_as_digit 8, trb_blk_const, 0", "    stl.output_char 32",
@@ -463,8 +472,12 @@ def _record_program(src, cases):
              "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_base2: hex.vec 4", "sp_lt: hex.vec 2",
              "thfar: hex.vec 1", "hdfl: hex.vec 1", "ballow: hex.vec 1",
              "sprlight:", *[";%#x * dw" % _shade(lt, h) for lt in (0, 1) for h in range(256)],
-             wr.hoisted_scratch_fj(CFG), *bank, ""]
-    return "\n".join(main)
+             wr.hoisted_scratch_fj(CFG), *bank]
+    if seen_on:
+        main += ["t_sa: hex.vec w/4", "t_sflag: hex.vec 1", "t_one: hex.vec 1, 1",
+                 "pad 16384",                              # a fresh 16^5-bit window: NOT the hot block's
+                 "t_thseen: hex.vec %d" % len(cases)]
+    return "\n".join(main + [""])
 
 
 def _record_faults(cases, out):
@@ -524,6 +537,36 @@ RECORD_MUTANTS = {
                                          "hex.cmp 2, trb_bucket, trb_run_last, col_next, col_next, do_store"),
     "thfar read inverted": ("rep(spn, k) hex.if0 1, thfar, hd_done", "rep(spn, k) hex.if1 1, thfar, hd_done"),
 }
+
+
+def test_the_record_marks_seen_and_keeps_the_arm(record_cases, tmp_path):
+    """M7 P3.2a: with the seen mark ON every thing whose column reaches `slot_check` (all of them: nothing is walled)
+    is marked in a flag a whole window from the hot block, and the record still writes exactly its layout -- the
+    mark re-arms the pointer library in the hot window (blocked41 died without it)"""
+    src = (ROOT / "src/fj/frame_render.fj").read_text(encoding="utf-8")
+    out = _assemble_run(tmp_path, "recseen", _record_program(src, record_cases, seen_on=True), SRC)
+    lines = out.decode("ascii").split("\n")
+    assert lines[len(record_cases) + 3] == "1" * len(record_cases), lines[len(record_cases) + 3]
+    bad = _record_faults(record_cases, out)
+    assert bad == [], "%d faults, first %s" % (len(bad), bad[:3])
+
+
+def test_control_a_mark_that_does_not_rearm_is_caught(record_cases, tmp_path):
+    """R9: the same run with the mark's re-arm deleted must not pass"""
+    src = (ROOT / "src/fj/frame_render.fj").read_text(encoding="utf-8")
+    old = "        hex.pointers.set_flip_and_jump_pointers rearm\n"
+    assert src.replace("\r\n", "\n").count(old) == 1, "re-point this control: the re-arm moved"
+    src = src.replace("\r\n", "\n").replace(old, "")
+    fr = tmp_path / "frame_render.fj"                  # the mark's BODY is frame_render.fj's own: assemble the mutant
+    fr.write_text(src, encoding="utf-8")
+    srcs = [fr if x.name == "frame_render.fj" else x for x in SRC]
+    try:
+        out = _assemble_run(tmp_path, "recseenmut", _record_program(src, record_cases, seen_on=True), srcs)
+        lines = out.decode("ascii").split("\n")
+        ok = lines[len(record_cases) + 3] == "1" * len(record_cases) and not _record_faults(record_cases, out)
+    except Exception:                          # a crash, a short output: the harness said no
+        ok = False
+    assert not ok, "a mark without its re-arm passed: the harness cannot see the arm"
 
 
 @pytest.mark.parametrize("name", sorted(RECORD_MUTANTS))

@@ -26,15 +26,28 @@ class Reject:
         return not (self.data[k >> 3] >> (k & 7)) & 1
 
 
-def load_reject(mapname: str = "E1M1") -> Reject:
-    """the map's REJECT from the full asset wad (the test fixture carries none; the maps are identical)"""
-    from doomfj.build import DEFAULT_SPRITE_WAD, _resolve_sprite_wad
-    from doomfj.config import DEFAULT_MAP_WAD
+def load_reject(mapname: str = "E1M1", map_wad=None) -> Reject:
+    """the map's REJECT: its OWN wad's lump (`map_wad`, the world's; the default map wad when None); else the asset
+    wad's for the same map -- the test fixture carries none, and its E1M1 is the asset wad's (same sector count,
+    asserted); else ALL VISIBLE, which is how DOOM reads a map with no REJECT (nothing rejected)"""
     from doomfj.wad import WadFile
-    mw = WadFile.from_path(DEFAULT_MAP_WAD)
-    art = _resolve_sprite_wad(mw, DEFAULT_SPRITE_WAD)
-    assert len(art.sectors(mapname)) == len(mw.sectors(mapname)), "the asset wad's map differs"
-    return Reject(bytes(art._map_lump(mapname, "REJECT").data), len(mw.sectors(mapname)))
+    if map_wad is None:
+        from doomfj.config import DEFAULT_MAP_WAD
+        map_wad = WadFile.from_path(DEFAULT_MAP_WAD)
+    nsec = len(map_wad.sectors(mapname))
+    try:
+        return Reject(bytes(map_wad._map_lump(mapname, "REJECT").data), nsec)
+    except KeyError:
+        pass
+    try:
+        from doomfj.build import DEFAULT_SPRITE_WAD, _resolve_sprite_wad
+        art = _resolve_sprite_wad(map_wad, DEFAULT_SPRITE_WAD)
+        if art is not map_wad and mapname in art.names():
+            assert len(art.sectors(mapname)) == nsec, "the asset wad's map differs"
+            return Reject(bytes(art._map_lump(mapname, "REJECT").data), nsec)
+    except (KeyError, ValueError, OSError):
+        pass
+    return Reject(bytes((nsec * nsec + 7) // 8), nsec)
 
 
 def _dist(world, m) -> int:

@@ -472,3 +472,60 @@ arbiter, does not separate the two binaries.
    counted the screen's bytes as words. No kill criterion.
 5. pinreport 20 of 20; the restore sets re-keyed (`p2a2_rekey.log`).
 
+## P2b lifts, the floor switch, door reversal (class F) -- L0 declared 2026-09-28, before any build
+
+**What**: `docs/gp-lifts.md` (the spike, `docs/gp-lift-spike.md`, with its defaults). L0 (host):
+`doomfj.movers` -- lifts 98/103 as the door machine on the floor, the instant floor switch, the
+WR/SR/S1 triggers -- and door reversal in `doors.door_tic`; the model runs them. L1-L3: the fj side.
+
+**Budget** (the spike's, kill at 1.25x attributed): ops <= +0.1M on the binding metric; size <=
++0.35M words; plane ids: 233 after P2a.1 + the spike's +21 = 254 of 255 (fallback: quant 24).
+
+**Kill criteria**:
+1. Host: the movers' geometry, the lift cycle in frames, a trigger ignored while active, the
+   triggers, the height override; the model's rides, SR press, switch, monster WR, monster floors,
+   restart, sight/sound nodes; door reversal at the pass step (both halves of the contact rule) --
+   each with a mutation caught.
+2. The frozen set: the model moves v3 (R2-spectre-corridor rides lift 103) -> v4 needs THE OWNER's
+   approval before any P2b binary is measured against the cap.
+3. L1-L3: byte- and state-exact gates with the movers in every oracle; plane ids <= 255.
+
+**Row** (blocked37, sha256 `770209700dfbac8c`, built at 7041353, the PR #103 review's fix -- the movers'
+two-sided neighbours, pillar 129 to 136; `docs/ship-evidence/blocked37_*`. blocked36, the pre-review build at
+4118d8d, measured within a few thousand ops of it: `blocked36_*`):
+
+| measure | blocked35 (P2a.2) | blocked37 (P2b) | delta |
+|---|---|---|---|
+| combat set binding | v3 14,218,744 | v4 **14,223,921** | the sets differ in one run; the 10 shared runs: mean -19,765 |
+| ... R2-spectre-corridor (v3 walks, v4 rides lift 103) | 11,066,540 | 11,398,567 | +332,027 (a different route) |
+| ... with strafe's collision (proxy) | v3 14,253,712 | v4 14,256,695 | |
+| gamespeed binding | 13,745,300 | 13,642,413 | **-102,887** |
+| size (% of 2^27) | 27.21% | 28.24% | **+1,373,516 words** (budget +0.35M) |
+| plane ids | 233 | 254 | +21 (the spike's count, exact) |
+| ms/frame (msframe, one run, A = blocked35, a quiet box) | 61.5 | 61.6 | NOT SEPARATED (the arms part at frame 33: lift 98) |
+| ... pixel-identical, first 30 frames, 9 reps | 90.9 | 92.9 | NOT SEPARATED (pairs 0.965 .. 1.063, median x0.981; 8 of 9 below 1) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**The size, attributed** (`blocked35_poolmap.log` -> `blocked36_poolmap.log`, label families): the
+pool's payload +413,822 words (+12,931 tables); below the pool +960,448 -- +273K in labelled code
+(plane-band thunks `vpb_t`, the per-state seg consts `seg*_*_consts_st*`, the mover dispatch
+`dr*_ct_*`, the dual-end seg code) and +687K in the program's UNLABELLED tail after `m1_reset` (code:
+ops that fall through, 5.67M -> 6.01M ops -- read as the assembler's out-of-line flip sequences for
+the new code, NOT confirmed). The spike's 241K counted band ids, band bodies, pair blocks and state
+blocks only. All of it is the rung's own code. **Kill criterion (size, 1.25x) BREACHED -- the owner,
+2026-09-29: ship blocked36** (blocked37 carries the review's fix, the same size to -754 words); the end-of-game size projection moves from ~32.6-33.3% to ~33.7-34.4%.
+
+**Verdict: every kill criterion met but the size budget, which the owner waived.**
+1. Host: 1,400 passed on the re-keyed tree (`blocked37_host_suite.log`); the movers' geometry, the
+   lift cycle, the triggers, the rides, door reversal, each with a mutation caught
+   (`tests/host/test_movers_model.py` and the P2b host tests).
+2. The frozen set: v4 FROZEN by the owner (`p2b_v4_freeze.log`) -- re-planned on the tree with PR
+   #99's planner fix, R0-imp-court back to v3's exact keys, so v4 = v3 but R2-spectre-corridor; B0 on
+   v4 exact on every frame of 11 runs; `--selftest` on v4 (`p2b_v4_selftest.log`).
+3. m3_gate, m2_std_gate byte- and state-exact with the movers read; p2a_gate S1-S13, every control
+   parting; B0 v4 pixel-exact (first run without the movers' heights parted exactly on the lift run:
+   `blocked36_b0_v4_no_mover_heights.log`, the harness fixed); plane ids 254 <= 255.
+4. CAP-22: v4 14.22M <= 22M, size 28.24% <= 35%; msframe NOT SEPARATED. Ops: -102,887 on the
+   binding metric (budget +0.1M).
+
+

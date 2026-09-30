@@ -316,6 +316,10 @@ reversal; `docs/gp-lifts.md`) next.
 ### P2b -- lifts and the floor switch
 `docs/gp-lift-spike.md`'s rung plan: host-only work and FAIL-first tests, 1-3 render-tier builds,
 then two game builds. Budget: ops <= +0.1M, size <= +0.35M words, plane ids <= 243.
+**P2b DONE 2026-09-30** (blocked37 ships; `docs/gp-lifts.md`, `docs/gp-ledger.md`): gamespeed
+-102,887, plane ids 254, size +1.37M words (OVER the +0.35M budget; the owner: ship). **The CAP-22
+set is v4 from here** (v3 but R2-spectre-corridor, which rides lift 103), frozen by the owner.
+**Phase 2 is done**; P3 (monsters alive) next.
 
 ### P3 -- monsters alive
 First a build that EMITS every new table and calls none of it -- its delta is the pure placement tax.

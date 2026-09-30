@@ -78,7 +78,7 @@ def startup_ops(gb) -> int:
 
 def drive_view(gb, table, orc, poses, *, pixels=True, check_every=1, expect=None) -> dict:
     """VIEW mode: frame f draws poses[f] exactly (see the module docstring)"""
-    cells = P.game_cells(orc.ndoors, orc.nwalk)
+    cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift)
     p = P.Probe(cells, table, gb.width)
     readback = {}
 
@@ -103,7 +103,7 @@ def drive_tic(gb, table, orc, poses, *, pixels=True, check_every=1, pre_override
     keys as events -- gamespeed's composition with the pose injected"""
     import gamespeed as GS
     import m2_std_gate as gate
-    cells = P.game_cells(orc.ndoors, orc.nwalk)
+    cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift)
     p = P.Probe(cells, table, gb.width)
     mf = gate.MENU_FRAMES
     per_frame = [{} for _ in range(mf)] + [dict(pz.get("keys") or {}) for pz in poses]
@@ -205,7 +205,7 @@ def selftest(fjm: Path, labels: Path, run: int, every: int, count: int, planned:
             fails.append(name)
 
     orc = P.Oracle()
-    table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk).values()})
+    table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift).values()})
     gb = P.GameBinary(fjm)
     print("b0 selftest -- %s sha256 %s (loaded %.1f s)" % (fjm.name, gb.sha[:16], gb.load_seconds),
           flush=True)
@@ -325,7 +325,7 @@ def main():
     print("  (poses ready in %.1f s, outside the binary lock)" % (time.time() - t), flush=True)
     with P.binary_lock(a.stream):
         orc = P.Oracle()
-        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk).values()})
+        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift).values()})
         gb = P.GameBinary(fjm)
         su = startup_ops(gb)
         print("b0: %s sha256 %s, mode %s, startup %s ops (exact)"

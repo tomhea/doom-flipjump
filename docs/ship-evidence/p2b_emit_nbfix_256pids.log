@@ -1,0 +1,9 @@
+$ python plan/p2b/emit_check.py   # the game tier emitted with doors.neighbours fixed at the root (door 145 -> 260)
+pid bake: 256 pairs baked, 255 addressable at PID_NIBBLES=2
+Traceback (most recent call last):
+  File "C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\plan\p2b\emit_check.py", line 18, in <module>
+    parts = emit_wall_renderer(wad, "E1M1", Config(), sprite_wad=_resolve_sprite_wad(wad, DEFAULT_SPRITE_WAD),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-m7i\src\doomfj\wall_renderer.py", line 1701, in emit_wall_renderer
+    assert len(lines_pid) < 16 ** cfg.PID_NIBBLES, (
+AssertionError: E1M1 bakes 256 pids, past the 255 that 2 nibbles address -- raise Config.PID_NIBBLES

@@ -1,0 +1,26 @@
+$ python scratchpad/12m/msframe.py --a C:/Users/tomhe/Documents/doom-m7h/build/doom_e1m1_blocked35.fjm --b build/doom_e1m1_blocked37.fjm --frames 30 --reps 9 --note "M7 P2b: blocked37 vs blocked35 on the first 30 forward frames (before lift 98 parts the pictures)"
+machine : power plan 'Turbo'; busy processes: none
+msframe : A=doom_e1m1_blocked35.fjm B=doom_e1m1_blocked37.fjm, 30 game frames, 9 reps, cpu 2, resolution 3%
+  rep 0  A         93.9 ms   161.7M fj/s  yard 3.63->3.49G   |  B         94.2 ms   160.2M fj/s  yard 3.46->3.64G
+  rep 1  A        100.6 ms   150.9M fj/s  yard 3.64->3.64G   |  B         94.6 ms   159.4M fj/s  yard 3.53->3.59G
+  rep 2  A         91.7 ms   165.5M fj/s  yard 3.56->3.63G   |  B         92.9 ms   162.4M fj/s  yard 3.43->3.64G
+  rep 3  A         90.7 ms   167.3M fj/s  yard 3.62->3.62G   |  B         92.5 ms   163.1M fj/s  yard 3.62->3.62G
+  rep 4  A         90.9 ms   167.0M fj/s  yard 3.59->3.61G   |  B         92.4 ms   163.2M fj/s  yard 3.60->3.64G
+  rep 5  A         90.5 ms   167.8M fj/s  yard 3.63->3.62G   |  B         92.3 ms   163.4M fj/s  yard 3.63->3.62G
+  rep 6  A         91.1 ms   166.7M fj/s  yard 3.63->3.64G   |  B         94.3 ms   159.9M fj/s  yard 3.62->3.56G
+  rep 7  A         90.8 ms   167.1M fj/s  yard 3.63->3.57G   |  B         92.6 ms   162.9M fj/s  yard 3.44->3.63G
+  rep 8  A         90.5 ms   167.7M fj/s  yard 3.59->3.65G   |  B         92.9 ms   162.4M fj/s  yard 3.61->3.63G
+
+  A        median    90.9 ms/frame  [90.5 .. 100.6]    167.0M fj/s   15,177,584 ops/frame   cell=4 flat
+  B        median    92.9 ms/frame  [92.3 .. 94.6]    162.4M fj/s   15,085,315 ops/frame   cell=4 flat
+
+  pixels identical across arms and reps : YES
+  ops identical across arms             : no   (expected when the arms are different binaries; not when they are one engine A/B)
+  per-pair A/B ms ratio                 : 0.997 1.063 0.987 0.981 0.983 0.980 0.965 0.980 0.974
+  median ratio                          : 0.981  (>1 = B faster)
+  VERDICT: NOT SEPARATED   (rule: all 9 pairs agree in sign AND |median ratio - 1| > 3%)
+  engine A: 79af8639f57bfa50 full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  engine B: 79af8639f57bfa50 full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.62G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+rc=0

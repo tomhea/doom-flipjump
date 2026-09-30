@@ -81,12 +81,19 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     only READ (the player's position for the use box, the key byte). And it cannot be HANDED the
     collision any more: before P1.2 a caller that passed the pass states and door lines got the
     patch, one that did not got a door that never stopped being a wall."""
+    # M7 P2b: `contact`/`passes`/`radius` arm the REVERSAL (the player's box against the door's
+    # rectangle, read-only) -- not the collision table; the census below runs on the armed text
     assert list(inspect.signature(doorcode.door_tic_lines).parameters) == \
-        ["slots", "nstates", "boxes", "kinds"], "door_tic_lines takes collision inputs again"
+        ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius"], (
+            "door_tic_lines takes collision inputs again")
     secs, lds, sds, verts = level
     slots = sorted(doors)
-    text = "\n".join(doorcode.door_tic_lines(slots, {si: len(doors[si]) for si in slots},
-                                             use_boxes_xy(secs, lds, sds, verts)))
+    from doomfj.doors import door_contact_geo, pass_state
+    text = "\n".join(doorcode.door_tic_lines(
+        slots, {si: len(doors[si]) for si in slots}, use_boxes_xy(secs, lds, sds, verts),
+        contact=door_contact_geo(secs, lds, sds, verts),
+        passes={si: pass_state(secs, lds, sds, si) for si in slots}))
+    assert "_rev:" in text, "the census must see the reversal's code"
     assert "wflip" not in text and "lnrow" not in text and "ca_" not in text
     written = set()
     for m in re.finditer(r"hex\.(?:set|zero|inc|dec|xor_by|mov) (?:\d+, )?([A-Za-z_]\w*)", text):

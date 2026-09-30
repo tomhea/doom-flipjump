@@ -72,6 +72,9 @@ DOOR_PERSIST = ("dstate", "ddir", "dsub", "dwait",
 # `thnext`, the lists' links, is not here because the restore set never carried it: bind_things
 # rewrote every entry every frame, so it never needed restoring; it persists by not being restored.
 THING_PERSIST = ("sshead", "thss_rt", "thpos_rt")
+# M7 P2b: ...and the movers' (doomfj.movers), in the tier that has doors: each lift's four door-shaped
+# cells and its pending trigger, and the floor switch -- world state exactly as the doors' is.
+MOVER_PERSIST = ("lstate", "ldir", "lsub", "lwait", "lreq", "fswitch")
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:
@@ -80,7 +83,7 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
     the two cannot disagree about what persists."""
     if not standalone:
         return ()
-    return (STANDALONE_PERSIST + (DOOR_PERSIST if doors else ())
+    return (STANDALONE_PERSIST + (DOOR_PERSIST + MOVER_PERSIST if doors else ())
             + (THING_PERSIST if moving_things else ()))
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"

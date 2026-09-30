@@ -66,7 +66,8 @@ M32 = 0xFFFFFFFF
 KEYFLAG = {"forward": "kb_f", "back": "kb_b", "turn_left": "kb_l", "turn_right": "kb_r",
            "use": "kb_u"}
 READ = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "dstate", "ddir", "dsub", "dwait", "dreq",
-        "pcard", "wfired", "lvdone", "pusedn")
+        "pcard", "wfired", "lvdone", "pusedn",
+        "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch")        # M7 P2b
 MENU_CODES = {"enter": 0x0D, "esc": 0x1B}
 CARD_TYPE = 5
 
@@ -84,7 +85,11 @@ class Mirror:
 
     def __init__(self, dsim: "onewalk.DoorSim", card_di: int, ctl: str | None = None):
         self.sim, self.dp, self.ctl, self.card_di = dsim, dsim.dp, ctl, card_di
+        if ctl == "no_reversal":                  # M7 P2b's control: doors that close on the player
+            self.dp = D.DoorPhase(dsim.secs, dsim.lds, dsim.sds, dsim.mw.vertexes(dsim.mapname),
+                                  dsim.boxes, card_at=dsim.dp.card_at, reversal=False)
         self.exits = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))     # M7 P2a.2
+        self.mp = dsim.mp                                                        # M7 P2b
 
     @contextlib.contextmanager
     def _rules(self):
@@ -110,12 +115,15 @@ class Mirror:
         taken, out = False, []
         mode, scr, sel = 0, 0, SKILLS.index(BOOT_SKILL)      # poked into the world; sel baked
         pusedn, lvdone = 1, 0                                  # baked: G_PlayerReborn's usedown
+        mp, ms = self.mp, self.mp.initial()                    # M7 P2b: every lift at its top
         with self._rules():
             for kd in keys:
                 mode, scr, sel, ng = menu_step(mode, scr, sel, set(kd.get("menu", ())))
                 if ng is not None:                            # NEW GAME: the level start
                     st = SimState(sim.spawn.x, sim.spawn.y, sim.spawn.angle, sim.mapname)
                     ph, taken, pusedn = dp.initial(), False, 1
+                    if self.ctl != "restart_movers":
+                        ms = mp.initial()
                     if self.ctl != "restart":
                         lvdone = 0
                 drawn = ("menu", scr, sel) if mode else "world"
@@ -123,11 +131,14 @@ class Mirror:
                     use = bool(kd.get("use"))
                     has_blue = {"card": True, "no_card": False}.get(self.ctl)
                     ph = dp.tic(ph, use, st.x, st.y, has_blue=has_blue)
+                    ms = mp.tic(ms)                           # M7 P2b: the lifts after the doors
                     if use:                                   # the exit: a PRESS in its box
                         if not pusedn or self.ctl == "edge":
                             pusedn = 1
                             if any(in_use_box_fixed(b, st.x, st.y) for b in self.exits):
                                 lvdone, mode, scr = 1, 1, LEVEL_DONE_SCR
+                            elif self.ctl != "no_use_lines":  # else the SR lifts and the switch
+                                ms = mp.use_press(ms, st.x, st.y)
                     else:
                         pusedn = 0
                     blocked = frozenset(li for si in sim.order if ph[0][si][0] < sim.passes[si]
@@ -140,7 +151,8 @@ class Mirror:
                         if self.ctl == "reach" and dp.card_at is not None:
                             z = dp.card_at[2]
                         cur[0] = dp.touch(cur[0], cx, cy, z)
-                    new = sim.rm.step_sim(st, kd, scene=sim._scene(blocked), touch=touch)
+                    new = sim.rm.step_sim(st, kd, scene=sim._scene(blocked, mp.heights(ms)),
+                                          touch=touch)
                     ph = cur[0]
                     taken |= ph[3] == 1 and pcard == 0
                     if self.ctl == "w1":       # every crossing presses; the bits still read fired
@@ -150,15 +162,19 @@ class Mirror:
                         ph = (ph[0], tuple(a | b for a, b in zip(was, ph[1])), ph[2], ph[3])
                     else:
                         ph = dp.after_move(ph, (st.x, st.y), (new.x, new.y))
+                    if self.ctl != "no_wr":
+                        ms = mp.after_move(ms, (st.x, st.y), (new.x, new.y))
                     st = new
                 out.append({"pose": (st.x, st.y, st.angle), "phase": ph, "taken": taken,
                             "mode": mode, "scr": scr, "sel": sel, "lvdone": lvdone,
-                            "pusedn": pusedn, "drawn": drawn})
+                            "pusedn": pusedn, "drawn": drawn, "movers": ms,
+                            "mheights": mp.heights(ms)})
         return out
 
 
-def expected_cells(fr: dict, order: list) -> dict:
+def expected_cells(fr: dict, order: list, mover_order=()) -> dict:
     ds, fired, req, card = fr["phase"]
+    lifts, lreq, sw = fr["movers"]
     x, y, a = fr["pose"]
     doors = [ds[si] for si in order]
     return {"viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": a & M32,
@@ -166,7 +182,11 @@ def expected_cells(fr: dict, order: list) -> dict:
             "dstate": tuple(d[0] for d in doors), "ddir": tuple(d[1] for d in doors),
             "dsub": tuple(d[2] for d in doors), "dwait": tuple(d[3] for d in doors),
             "dreq": tuple(int(si in req) for si in order), "pcard": card,
-            "wfired": P.wfired_value(fired), "lvdone": fr["lvdone"], "pusedn": fr["pusedn"]}
+            "wfired": P.wfired_value(fired), "lvdone": fr["lvdone"], "pusedn": fr["pusedn"],
+            # M7 P2b
+            "lstate": tuple(t[0] for t in lifts), "ldir": tuple(t[1] for t in lifts),
+            "lsub": tuple(t[2] for t in lifts), "lwait": tuple(t[3] for t in lifts),
+            "lreq": tuple(int(si in lreq) for si in mover_order), "fswitch": sw}
 
 
 def screen(orc, scr: int, sel: int) -> bytes:
@@ -272,6 +292,24 @@ def exit_pose(dsim):
     raise AssertionError("no standing pose in the exit box")
 
 
+def _standing(dsim, xy, angle):
+    x, y = xy
+    assert _ok(dsim, x << 16, y << 16), ("not a standing pose", xy)
+    return (x << 16, y << 16, angle)
+
+
+def _in_box(dsim, box):
+    """a standing pose inside a use box, nearest its centre"""
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+    for r in range(0, 64, 4):
+        for dx, dy in ((r, 0), (-r, 0), (0, r), (0, -r), (r, r), (-r, -r), (r, -r), (-r, r)):
+            x, y = cx + dx, cy + dy
+            if x0 <= x <= x1 and y0 <= y <= y1 and _ok(dsim, x << 16, y << 16):
+                return (x << 16, y << 16, 0)
+    raise AssertionError("no standing pose in the box %s" % (box,))
+
+
 def trigger_pose(dsim, trig, back: int = 40):
     """`back` units before the trigger line's middle, facing across it"""
     _si, axis, coord, lo, hi = trig
@@ -331,6 +369,42 @@ def scenarios(dsim, card) -> list:
                     "claim": lambda tr, si=si: tr[-1]["phase"][0][si][0] == n[si] - 1
                     and sum(1 for fr in tr if si in fr["phase"][2]) == 1})
     F_ = {"forward": True}
+    # ---- M7 P2b: the movers --------------------------------------------------------------------------
+    k98, k103 = dsim.mp.order.index(98), dsim.mp.order.index(103)
+
+    def ride(tr, k):
+        st = [fr["movers"][0][k][0] for fr in tr]
+        return max(st) == 9 and st[-1] == 0 and st.index(9) < len(st) - 1
+
+    out.append({
+        "name": "S9 over lift 98's WR line: it rides down, waits, comes back up",
+        "pose": _standing(dsim, (40, 256), 0), "keys": [F_] * 3 + [I] * 50, "pcard": 0,
+        "controls": ["no_wr"], "claim": lambda tr: ride(tr, k98)})
+    sr = [b for t, b in dsim.mp.use if t == 2]
+    out.append({
+        "name": "S10 an SR press at lift 103: it rides",
+        "pose": _in_box(dsim, sr[0]), "keys": [I, U] + [I] * 50, "pcard": 0,
+        "controls": ["no_use_lines"], "claim": lambda tr: ride(tr, k103)})
+    out.append({
+        "name": "S11 the floor switch: a press lowers the pillars at once",
+        "pose": _in_box(dsim, dsim.mp.switch_boxes[0]), "keys": [I, U, I, I], "pcard": 0,
+        "controls": ["no_use_lines"],
+        "claim": lambda tr: [fr["movers"][2] for fr in tr] == [0, 1, 1, 1]
+        and tr[1]["mheights"][129][0] == 136})
+    out.append({
+        "name": "S12 NEW GAME puts a riding lift back",
+        "pose": _standing(dsim, (40, 256), 0),
+        "keys": [F_] * 3 + [I] * 4 + [{"menu": ["esc"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
+        + [I] * 3, "pcard": 0, "controls": ["restart_movers"],
+        "claim": lambda tr: tr[6]["movers"][0][k98][0] > 0 and tr[-1]["movers"][0][k98][0] == 0})
+    p10 = dsim.passes[10]
+    out.append({
+        "name": "S13 standing in door 10 as it closes: it goes back up at its pass state",
+        "pose": door_front(dsim, 10), "keys": [U] * 2 + [I] * 8 + [F] * 3 + [I] * 70, "pcard": 0,
+        "controls": ["no_reversal"],
+        "claim": lambda tr: min(fr["phase"][0][10][0] for fr in tr[12:]) == p10
+        and any(a["phase"][0][10][1] == D.CLOSING and b["phase"][0][10][1] == D.OPENING
+                for a, b in zip(tr, tr[1:]))})
     out.append({
         "name": "S8 the exit: a press ends the level; LEVEL COMPLETE; the frozen world; NEW GAME",
         "pose": exit_pose(dsim),
@@ -370,7 +444,7 @@ def main(argv=None) -> int:
     print("P2A GATE -- %d scenarios%s" % (len(scen), "" if a.oracle_only else ", %s" % a.fjm))
     if not a.oracle_only:
         gb = P.GameBinary(ROOT / a.fjm)
-        cells = P.game_cells(orc.ndoors, orc.nwalk)
+        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift)
         table = P.LabelTable.load(ROOT / a.labels, {c.label for c in cells.values()})
         assert not table.absent & {"dreq", "pcard", "wfired"}, (
             "the label table has no %s: a binary before P2a.1" % sorted(table.absent))
@@ -385,7 +459,8 @@ def main(argv=None) -> int:
         for ctl in sc["controls"]:
             alt = Mirror(dsim, card_di[0], ctl).run(sc["pose"], sc["keys"], sc["pcard"])
             part = next((f for f, (x, y) in enumerate(zip(want, alt))
-                         if expected_cells(x, dsim.order) != expected_cells(y, dsim.order)), None)
+                         if expected_cells(x, dsim.order, dsim.mp.order)
+                         != expected_cells(y, dsim.order, dsim.mp.order)), None)
             ok &= part is not None
             print("  CONTROL %-8s the oracle without the rule parts at frame %s%s" % (
                 ctl, part, "" if part is not None else " -- NEVER: the scenario is VACUOUS, FAIL"))
@@ -406,14 +481,14 @@ def main(argv=None) -> int:
         r = gb.run(len(sc["keys"]), menu_events(sc["keys"]), p)
         s_bad = x_bad = None
         for f, fr in enumerate(want):
-            exp = expected_cells(fr, dsim.order)
+            exp = expected_cells(fr, dsim.order, dsim.mp.order)
             got = reads[f] if f < len(reads) else {}
             if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
                 s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
             if fr["drawn"] == "world":
                 pic = orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
                                  tuple(fr["phase"][0][si][0] for si in dsim.order),
-                                 hidden_extra=card_di if fr["taken"] else ())
+                                 hidden_extra=card_di if fr["taken"] else (), movers=fr["mheights"])
             else:
                 pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):

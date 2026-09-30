@@ -72,6 +72,8 @@ from doomfj.doorcode import door_line_ids                                   # no
 from doomfj.doors import (door_states, in_use_box_fixed, pass_state,        # noqa: E402
                           use_boxes_xy)
 from doomfj.doors import DoorPhase                      # noqa: E402  (M7 P2a.1)
+from doomfj.doors import exit_boxes                     # noqa: E402  (M7 P2a.2)
+from doomfj.movers import MoverPhase                    # noqa: E402  (M7 P2b)
 from doomfj.mapcompiler import bake_bsp                                     # noqa: E402
 from doomfj.reference_model import ANGLE_TURN, _signed, build_scene         # noqa: E402
 from doomfj.wad import WadFile                                              # noqa: E402
@@ -286,12 +288,17 @@ class DoorSim:
         # M7 P2a.1: the door phase itself -- kinds, cards, strides, the walk-over triggers
         self.dp = DoorPhase(self.secs, self.lds, self.sds, self.mw.vertexes(mapname), self.boxes,
                             card_at=self._card_at)
+        # M7 P2b: the movers -- the lifts tic after the doors, the SR lifts and the floor switch
+        # take a use PRESS, the WR lines an accepted move, and their floors are the scene's
+        self.mp = MoverPhase(self.secs, self.lds, self.sds, self.mw.vertexes(mapname))
+        self.exits = exit_boxes(self.lds, self.mw.vertexes(mapname))
         self._scenes = {}
         self.reset()
 
     def reset(self):
         self.dstate = self.dp.initial()
         self.ds = self.dstate[0]
+        self.mstate, self.pusedn = self.mp.initial(), 1    # M7 P2b / P2a.2: G_PlayerReborn's usedown
         # HIGH-WATER MARK PER DOOR, and it is not a nicety. A door opens in 8 frames and re-shuts
         # WAIT=37 frames after the player stops holding use, so the state at the END of a
         # 3,400-frame walk says almost nothing about whether the walk ever went through it. The
@@ -300,11 +307,18 @@ class DoorSim:
         self.ever = {si: 0 for si in self.order}
         return self.spawn
 
-    def _scene(self, blocked):
-        if blocked not in self._scenes:
-            self._scenes[blocked] = build_scene(self.mw, self.mw, self.mapname,
-                                                self.open_h, blocked)
-        return self._scenes[blocked]
+    def _scene(self, blocked, mh=None):
+        """the collision scene: doors open, the not-yet-passable doors' lines blocked, and (M7 P2b)
+        the movers' floors `mh` (movers.MoverPhase.heights)"""
+        key = (blocked, tuple(sorted((mh or {}).items())))
+        if key not in self._scenes:
+            self._scenes[key] = build_scene(self.mw, self.mw, self.mapname,
+                                            {**self.open_h, **(mh or {})}, blocked)
+        return self._scenes[key]
+
+    def mover_heights(self):
+        """M7 P2b: the movers off their stored floors, now"""
+        return self.mp.heights(self.mstate)
 
     def in_any_box(self, st):
         return any(in_use_box_fixed(self.boxes[si], st.x, st.y) for si in self.order
@@ -319,6 +333,17 @@ class DoorSim:
     def step(self, st, kd):
         self.dstate = self.dp.tic(self.dstate, bool(kd.get("use")), st.x, st.y)
         self.ds = self.dstate[0]
+        # M7 P2b: the lifts after the doors; a use press (the exit's edge) takes the SR lifts and
+        # the switch -- a press IN the exit box would end the level, which no walk here models
+        self.mstate = self.mp.tic(self.mstate)
+        if kd.get("use"):
+            if not self.pusedn:
+                assert not any(in_use_box_fixed(b, st.x, st.y) for b in self.exits), (
+                    "a use press in the exit box: the level would end (P2a.2)")
+                self.mstate = self.mp.use_press(self.mstate, st.x, st.y)
+            self.pusedn = 1
+        else:
+            self.pusedn = 0
         for si in self.order:
             if self.ds[si][0] > self.ever[si]:
                 self.ever[si] = self.ds[si][0]
@@ -327,9 +352,11 @@ class DoorSim:
 
         def touch(cx, cy, z):
             self.dstate = self.dp.touch(self.dstate, cx, cy, z)
-        new = self.rm.step_sim(st, kd, scene=self._scene(blocked), touch=touch)
+        new = self.rm.step_sim(st, kd, scene=self._scene(blocked, self.mover_heights()),
+                               touch=touch)
         self.dstate = self.dp.after_move(self.dstate, (st.x, st.y), (new.x, new.y))
         self.ds = self.dstate[0]
+        self.mstate = self.mp.after_move(self.mstate, (st.x, st.y), (new.x, new.y))
         return new
 
     def doors_open(self):

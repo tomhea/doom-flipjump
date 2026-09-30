@@ -92,6 +92,7 @@ from doomfj import gamedata as gd                                           # no
 from doomfj import world as W                                               # noqa: E402
 from doomfj.combat import FIREBALL_R, SECTOR_HURT, STRAFE_MOVE              # noqa: E402
 from doomfj.doors import OPENING, DoorPhase, in_use_box_fixed              # noqa: E402
+from doomfj.movers import MoverPhase                                        # noqa: E402  (M7 P2b)
 from doomfj.fixedpoint import _signed, fixed_mul                            # noqa: E402
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, Scene, SimState  # noqa: E402
 
@@ -733,28 +734,54 @@ class BinaryMirror:
         assert self.dp.order == list(w.door_order)
         self.state = self.dp.initial()
         self.ds = [self.state[0][si] for si in w.door_order]
+        # M7 P2b: the movers (movers.MoverPhase) after the doors; a use press takes the SR lifts
+        # and the switch (b0's runs never press in the exit box)
+        self.mp = MoverPhase(w.secs, w.lds, w.sds, w.mw.vertexes(w.mapname))
+        assert self.mp.order == list(w.lift_order)
+        self.mstate, self.pusedn = self.mp.initial(), 1
         self._scenes = {}
 
-    def step(self, pre, kd, doors=None):
+    def step(self, pre, kd, doors=None, movers=None):
         """`doors`: the door tuples (state, dir, sub, wait) b0 writes at the frame start (the
-        model's pre-tic doors); None keeps the mirror's own"""
+        model's pre-tic doors); None keeps the mirror's own. `movers` (M7 P2b): the model's pre-tic
+        mover state (`mover_state`), written the same way"""
         w = self.w
         if doors is not None:
             self.state = ({si: tuple(doors[d]) for d, si in enumerate(w.door_order)},
                           *self.state[1:])
+        if movers is not None:
+            self.mstate = movers
         self.state = self.dp.tic(self.state, bool(kd.get("use")), pre[0], pre[1])
         self.ds = [self.state[0][si] for si in w.door_order]
+        self.mstate = self.mp.tic(self.mstate)
+        if kd.get("use"):
+            if not self.pusedn:
+                self.mstate = self.mp.use_press(self.mstate, pre[0], pre[1])
+            self.pusedn = 1
+        else:
+            self.pusedn = 0
         blocked = frozenset(li for d, si in enumerate(w.door_order)
                             if self.ds[d][0] < w.door_pass[si] for li in w.door_lines.get(si, ()))
-        if blocked not in self._scenes:
-            self._scenes[blocked] = Scene(w.mw, w.mw, w.mapname, w.cmap, w.open_h, blocked)
+        mh = self.mp.heights(self.mstate)
+        key = (blocked, tuple(sorted(mh.items())))
+        if key not in self._scenes:
+            self._scenes[key] = Scene(w.mw, w.mw, w.mapname, w.cmap, {**w.open_h, **mh}, blocked)
 
         def touch(cx, cy, z):
             self.state = self.dp.touch(self.state, cx, cy, z)
         st = w.rm.step_sim(SimState(pre[0], pre[1], pre[2], w.mapname), b0_keys(kd),
-                           scene=self._scenes[blocked], touch=touch)
+                           scene=self._scenes[key], touch=touch)
         self.state = self.dp.after_move(self.state, (pre[0], pre[1]), (st.x, st.y))
+        self.mstate = self.mp.after_move(self.mstate, (pre[0], pre[1]), (st.x, st.y))
         return (st.x, st.y, st.angle), tuple(s[0] for s in self.ds)
+
+
+def mover_state(w):
+    """M7 P2b: the model's movers as a movers.MoverPhase state -- what b0 writes at the frame start"""
+    ws = w.ws
+    return (tuple((ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k])
+                  for k in range(len(w.lift_order))),
+            frozenset(si for k, si in enumerate(w.lift_order) if ws.l_req[k]), ws.f_switch)
 
 
 def door_tuples(w) -> list:
@@ -1262,6 +1289,7 @@ def replay(run: dict, census: bool = False) -> dict:
             if has_strafe(kd) and kd.get(want):
                 n["dodges"] += 1
         pre_doors = door_tuples(w)
+        pre_movers = mover_state(w)                    # M7 P2b
         pressed = [bool(kd.get("use")) and w.player_alive() and w.player_can_open(si)
                    and si in w.door_boxes and in_use_box_fixed(w.door_boxes[si], ws.px, ws.py)
                    for si in w.door_order]
@@ -1279,7 +1307,7 @@ def replay(run: dict, census: bool = False) -> dict:
                 elif monreq[d]:
                     opened_monster.add(d)
         inj, bkeys = b0_injection(w.rm, pre, post, kd)
-        bpose, bdoors = mirror.step(inj, bkeys, pre_doors)
+        bpose, bdoors = mirror.step(inj, bkeys, pre_doors, pre_movers)
         n["cam_part"] += bpose != (post[0], post[1], post[2] & M32)
         n["door_part"] += bdoors != tuple(ws.d_state)
         n["use_strafe"] += bool(kd.get("use")) and has_strafe(kd)
@@ -1919,13 +1947,14 @@ def selftest(doc: dict) -> int:
         kd = str_to_keys(s)
         pre = (w.ws.px, w.ws.py, w.ws.pangle)
         pre_d = door_tuples(w)
+        pre_m = mover_state(w)
         w.tic(kd)
         post = (w.ws.px, w.ws.py, w.ws.pangle)
         inj, bk = b0_injection(w.rm, pre, post, kd)
         if post[:2] != pre[:2]:
             moving += 1
             inj = (inj[0] + UNIT, inj[1], inj[2])
-            parts += mirror.step(inj, bk, pre_d)[0] != (post[0], post[1], post[2] & M32)
+            parts += mirror.step(inj, bk, pre_d, pre_m)[0] != (post[0], post[1], post[2] & M32)
     check("S11 an injection one unit off parts the camera on every moving frame",
           moving > 0 and parts == moving, "%d/%d" % (parts, moving))
     print("")

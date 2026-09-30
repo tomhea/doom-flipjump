@@ -158,18 +158,22 @@ def cell_lists(rows, radius: int) -> dict:
 
 
 def check_position_cells(rows, lists, x16: int, y16: int, radius: int, seed_floor: int,
-                         seed_ceil: int, shut=frozenset()):
+                         seed_ceil: int, shut=frozenset(), openbottom=None):
     """The cell routine, executed in PYTHON -- what `collision_cells_fj` emits, in its order: the
     centre's cell, each listed line through the one shared test, a wall LATCHING the refusal (a line
     stub cannot jump out of its two calls), and the SEED restored when the latch is set.
 
     `shut`: the door lines still below their pass state -- the stub xors FLAG_BLOCKING in for them.
+    `openbottom`: M7 P2b, `{linedef: floor}` for the mover lines at their movers' present states
+    (`mover_openbottoms`) -- the opening floor the stub's per-state block xors in.
     Returns `(ok, floorz, ceilingz)`, map units, as `ReferenceModel.check_position` does."""
+    openbottom = openbottom or {}
     ok, floorz, ceilz = True, seed_floor, seed_ceil
     bx_lo, bx_hi = x16 - radius, x16 + radius
     by_lo, by_hi = y16 - radius, y16 + radius
     for li in lists.get((cell_of(x16), cell_of(y16)), ()):
-        (v1x, v1y, dx, dy, minx, maxx, miny, maxy, slope, flags, opentop, openbottom) = rows[li]
+        (v1x, v1y, dx, dy, minx, maxx, miny, maxy, slope, flags, opentop, ob) = rows[li]
+        ob = openbottom.get(li, ob)
         if (bx_hi <= minx << 16 or bx_lo >= maxx << 16
                 or by_hi <= miny << 16 or by_lo >= maxy << 16):
             continue
@@ -179,8 +183,27 @@ def check_position_cells(rows, lists, x16: int, y16: int, radius: int, seed_floo
         if flags or li in shut:
             ok = False                            # the latch; the remaining lines still run
             continue
-        floorz, ceilz = max(floorz, openbottom), min(ceilz, opentop)
+        floorz, ceilz = max(floorz, ob), min(ceilz, opentop)
     return (True, floorz, ceilz) if ok else (False, seed_floor, seed_ceil)
+
+
+def mover_line_openings(lds, sds, secs, mover_secs: dict) -> dict:
+    """M7 P2b: `{linedef: [openbottom at state 0, 1, ...]}` for every two-sided line touching a
+    mover. `mover_secs` = `{mover sector: [the sector list at each of its states]}` -- a line's
+    opening floor is max(front floor, back floor) with the mover at that state (a mover's CEILING
+    never moves, so its opentop is the row's). A line between two movers is refused: its opening
+    would be two-dimensional (none on E1M1, asserted)."""
+    out = {}
+    for li, ld in enumerate(lds):
+        if ld.back == -1:
+            continue
+        f, b = sds[ld.front].sector, sds[ld.back].sector
+        mv = [m for m in (f, b) if m in mover_secs]
+        if not mv:
+            continue
+        assert len(set(mv)) == 1, "line %d touches two movers %s" % (li, mv)
+        out[li] = [max(sv[f].floor_h, sv[b].floor_h) for sv in mover_secs[mv[0]]]
+    return out
 
 
 # the line under test's argument cells and their widths in nibbles, in declaration order -- ONE
@@ -239,7 +262,7 @@ def _xor_lines(consts) -> list:
     return out
 
 
-def collision_cells_fj(pfx: str, rows, lists, doors=None) -> tuple:
+def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None) -> tuple:
     """`(fj text, root label)`: the player's cell routine for `lists` (`cell_lists`) over `rows`
     (`line_rows`) -- the tree, a stub per distinct list, a stub per listed line, and the ONE
     shared `sim.line_test`.
@@ -250,10 +273,16 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None) -> tuple:
     is no second copy of the door's state to keep in step with it. A line on two doors (between two
     door sectors) refuses while EITHER is shut, which is the oracle's union.
 
+    `movers`: M7 P2b, `{linedef: (state cell, [openbottom per state])}` for the lines touching a
+    mover (`mover_line_openings`). Such a stub xors its constants WITHOUT the opening floor, then
+    `sim.jump16` on the mover's state nibble picks a block that xors that state's floor into
+    `ca_ob` around the shared test (states past the last reuse the last block).
+
     Entered by `stl.fcall <root>, cc_ret` (`sim.check_cells`) once the box, `cp_ok = 1` and the
     seeded opening are set; returns through `cc_ret`. The text jumps over itself, so it can sit
     anywhere in a part. Labels are `{pfx}_cc*`: map-prefixed, since fj top-level labels are global."""
     doors = doors or {}
+    movers = movers or {}
     L = f"{pfx}_cc"
     none = f"{L}_none"
     stubs = {key: f"{L}_s{k}" for k, key in enumerate(sorted(set(lists.values())))}
@@ -304,10 +333,23 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None) -> tuple:
                ["    stl.fret cc_ret"]
     out += [f"{none}:", "    stl.fret cc_ret"]
     for li in used:
-        xors = _xor_lines(line_constants(rows[li]))
+        row = rows[li]
+        if li in movers:                  # M7 P2b: the opening floor comes from the mover's state
+            assert li not in doors and row[9] == 0, "mover line %d is a door line or blocks" % li
+            row = row[:11] + (0,)
+        xors = _xor_lines(line_constants(row))
         lab = f"{L}_l{li}"
         out += [f"{lab}:"] + xors
-        if li in doors:
+        if li in movers:
+            cell, obs = movers[li]
+            blocks = [f"{lab}_m{k}" for k in range(len(obs))]
+            out += [f"    sim.jump16 {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
+            for k, ob in enumerate(obs):
+                obx = _xor_lines([("ca_ob", ob & M32)])
+                out += [f"  {blocks[k]}:", *obx, f"    stl.fcall {L}_test, cc_tret", *obx,
+                        f"    ;{lab}_mout"]
+            out += [f"  {lab}_mout:"]
+        elif li in doors:
             assert rows[li][9] == 0, (
                 "door line %d carries static flags %d -- xoring FLAG_BLOCKING would clear them"
                 % (li, rows[li][9]))

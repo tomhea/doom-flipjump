@@ -1,0 +1,5 @@
+$ PYTHONPATH=src python -m pytest tests/host/test_movers.py -q  (R1: before doomfj.movers exists)
+=========================== short test summary info ===========================
+ERROR tests/host/test_movers.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.75s

@@ -1,0 +1,18 @@
+$ python scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v2.json --fjm build/doom_e1m1_blocked36.fjm --labels scratchpad/12m/atlas/blocked36.labels.tsv.gz --pixel-every 1 --proxy --json docs/ship-evidence/blocked36_b0_v2.json
+Traceback (most recent call last):
+  File "C:\Users\tomhe\Documents\doom-m7i\scratchpad\gp\b0_scenarios.py", line 424, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\tomhe\Documents\doom-m7i\scratchpad\gp\b0_scenarios.py", line 419, in main
+    return b0(Path(a.file), Path(a.fjm), Path(a.labels), a.pixel_every,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-m7i\scratchpad\gp\b0_scenarios.py", line 173, in b0
+    runs = [(run["name"], model_frames(run), model_frames(run, proxy=True) if proxy else None)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-m7i\scratchpad\gp\b0_scenarios.py", line 173, in <listcomp>
+    runs = [(run["name"], model_frames(run), model_frames(run, proxy=True) if proxy else None)
+                          ^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-m7i\scratchpad\gp\b0_scenarios.py", line 93, in model_frames
+    raise AssertionError("%s frame %d: the model no longer reproduces the set's pose (%s vs "
+AssertionError: R2-spectre-corridor frame 4: the model no longer reproduces the set's pose ((102568438, -27027702, 678238942) vs [102568438, -25683727, 678238942]) -- the model or the file changed
+rc=1

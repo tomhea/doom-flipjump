@@ -345,3 +345,87 @@ def test_baked_point_location_matches_point_in_subsector(ptloc_fjm, level):
         fj.run(ptloc_fjm, io_device=io, print_time=False, print_termination=False)
         got = int(io.get_output(allow_incomplete_output=True).decode().split("\n")[0], 16)
         assert got == rm.point_in_subsector(cmap, x, y), f"({x},{y}): fj ss{got}"
+
+
+# ── M7 P2b: the mover lines, RUN ─────────────────────────────────────────────────────────────────────
+
+def _mover_setup(lvl):
+    from doomfj import movers as MV
+    from doomfj.collision import mover_line_openings
+    ls = MV.lift_states(lvl.secs, lvl.lds, lvl.sds)
+    sw = MV.switch_sectors(lvl.secs, lvl.lds, lvl.sds)
+    lifts = sorted(ls)
+    per = {si: [apply_sector_heights(lvl.secs, {si: (h, lvl.secs[si].ceil_h)}) for h in ls[si]]
+           for si in lifts}
+    for si, (low, _h) in sw.items():
+        per[si] = [lvl.secs, apply_sector_heights(lvl.secs, {si: (low, lvl.secs[si].ceil_h)})]
+    obs = mover_line_openings(lvl.lds, lvl.sds, lvl.secs, per)
+    cell_of_mover = {si: f"lstate + {k}*dw" for k, si in enumerate(lifts)}
+    cell_of_mover.update({si: "fswitch" for si in sw})
+    movers = {}
+    for li, ob in obs.items():
+        f, b = lvl.sds[lvl.lds[li].front].sector, lvl.sds[lvl.lds[li].back].sector
+        movers[li] = (cell_of_mover[f if f in per else b], ob)
+    return ls, sw, lifts, movers, obs
+
+
+@pytest.fixture(scope="module")
+def mover_fjm(tmp_path_factory, level):
+    _ls, _sw, _lifts, movers, _obs = _mover_setup(level)
+    cells, root = collision_cells_fj("e1m1", level.rows, level.lists, doors=level.doors, movers=movers)
+    nd = len(level.order)
+    prog = "\n".join([
+        "stl.startup_and_init_all", f"hex.set 8, cprad, {PLAYER_RADIUS}",
+        # every door open: its lines read their (open) state; the movers' cells from the record
+        *[f"hex.set 1, dstate + {d}*dw, {level.nstates[d] - 1}" for d in range(nd)],
+        "loop:", "hex.input 1, wmagic", "hex.if0 2, wmagic, done",
+        *[f"hex.input 4, {r}" for r in ("cpx", "cpy", "cp_seedf", "cp_seedc")],
+        "hex.input 1, lstate", "hex.input 1, rbyte", "hex.mov 1, fswitch, rbyte",
+        *[ln.replace("ROOT", root) for ln in CHECK_BODY],
+        ";loop", "done:", "stl.loop", cells,
+        "wmagic: hex.vec 2", "rbyte: hex.vec 2", f"dstate: hex.vec {2 * ((nd + 1) // 2)}",
+        "lstate: hex.vec 2", "fswitch: hex.vec 1", *COLLISION_STATE_DECLS]) + "\n"
+    tmp = tmp_path_factory.mktemp("movercells")
+    src = tmp / "movers.fj"
+    src.write_text(prog, encoding="utf-8")
+    out = tmp / "movers.fjm"
+    consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
+    fj.assemble([consts.resolve(), FIXP.resolve(), SIM.resolve(), src.resolve()], out,
+                memory_width=W, print_time=False)
+    return out
+
+
+def test_the_mover_lines_follow_their_movers_states(mover_fjm, level):
+    """Centres on and beside every mover line, each lift at every state and the switch both ways:
+    the emitted routine's verdict and opening is the oracle's check_position on a scene with the
+    movers there -- and moves with the state on most lines"""
+    ls, sw, lifts, movers, obs = _mover_setup(level)
+    samples, want = [], []
+    feed = b""
+    for li in sorted(movers):
+        (x1, y1), (x2, y2) = level.cmap.vertexes[level.lds[li].v1], level.cmap.vertexes[level.lds[li].v2]
+        for k0 in range(len(ls[lifts[0]])):
+            k1, swk = (k0 * 3) % len(ls[lifts[1]]), k0 % 2
+            heights = {lifts[0]: (ls[lifts[0]][k0], level.secs[lifts[0]].ceil_h),
+                       lifts[1]: (ls[lifts[1]][k1], level.secs[lifts[1]].ceil_h)}
+            if swk:
+                heights.update({si: (low, level.secs[si].ceil_h) for si, (low, _h) in sw.items()})
+            scene = build_scene(level.wad, level.wad, "E1M1", {**level.open_h, **heights}, frozenset())
+            for dx, dy in ((0, 0), (6, 6), (-6, -6)):
+                x16, y16 = ((x1 + x2) // 2 + dx) << 16, ((y1 + y2) // 2 + dy) << 16
+                sf, sc = level.seed(scene, x16, y16)
+                feed += bytes([0xD0]) + struct.pack("<IIII", x16 & M32, y16 & M32, sf & M32, sc & M32)
+                feed += bytes([k0 | (k1 << 4), swk])
+                samples.append((li, k0, k1, swk, dx))
+                want.append(level.rm.check_position(scene, x16, y16))
+    io = FixedIO(feed + bytes([0]))
+    fj.run(mover_fjm, io_device=io, print_time=False, print_termination=False)
+    out = io.get_output(allow_incomplete_output=True).decode().split("\n")
+    got = [(int(out[3 * k], 16) == 1, _sg(out[3 * k + 1]), _sg(out[3 * k + 2])) for k in range(len(samples))]
+    bad = [(samples[k], g, w) for k, (g, w) in enumerate(zip(got, want)) if g != w]
+    assert not bad, bad[:5]
+    per_line = {}
+    for s, w in zip(samples, want):
+        if s[4] == 0:
+            per_line.setdefault(s[0], set()).add(w)
+    assert sum(len(v) > 1 for v in per_line.values()) >= 20

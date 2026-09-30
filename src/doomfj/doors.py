@@ -60,8 +60,29 @@ DEFAULT_QUANT = 16
 OPEN_GAP = 4              # P_DoorRaise: min(neighbouring ceiling) - 4
 
 
+NO_SIDE = (0xFFFF, -1)          # a linedef's missing side: 0xFFFF raw, -1 as the WAD parser gives it
+
+
+def two_sided_neighbours(lds, sds):
+    """sector -> the set of sectors sharing a TWO-SIDED linedef with it: DOOM's getNextSector, which
+    skips a line without a back side. The movers' rule (PR #103 review: `neighbours` below reads a
+    one-sided line's -1 back as the last sidedef's sector)."""
+    out: dict = {}
+    for ld in lds:
+        if ld.front in NO_SIDE or ld.back in NO_SIDE:
+            continue
+        f, b = sds[ld.front].sector, sds[ld.back].sector
+        if f != b:
+            out.setdefault(f, set()).add(b)
+            out.setdefault(b, set()).add(f)
+    return out
+
+
 def neighbours(lds, sds):
-    """sector -> the set of sectors sharing a linedef with it."""
+    """sector -> the set of sectors sharing a linedef with it. ⚠ KNOWN DEVIATION (issue #104 F1): a
+    one-sided line's back is -1 from the parser and reads `sds[-1]` (sector 105) here, so walk-over
+    door 145 opens to 228 where DOOM opens it to 260. The doors keep it because the true height
+    needs 256 plane ids, past the byte (PR #103, 2026-09-29); `two_sided_neighbours` is DOOM's rule."""
     out: dict = {}
     for ld in lds:
         f = sds[ld.front].sector if ld.front != 0xFFFF and ld.front < len(sds) else None
@@ -346,12 +367,18 @@ def in_use_box_fixed(box, x16: int, y16: int) -> bool:
     return (x0 << 16) <= x16 <= (x1 << 16) and (y0 << 16) <= y16 <= (y1 << 16)
 
 
-def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = False) -> tuple:
+def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = False,
+             wait_frames: int = WAIT, blocked: bool = False, pass_at: int = 0) -> tuple:
     """One tic of one door. `st` is `(state, dir, sub, wait)`; returns the next one.
 
     M7 P2a.1: `stride` stops a step (BLAZE_STRIDE for the blazing door, clamped at both ends) and
     `stay` for a door that stays open (the walk-over doors: reaching the top sets no wait, so it
-    never closes, and a press on it at the top changes nothing).
+    never closes, and a press on it at the top changes nothing). M7 P2b: `wait_frames` the frames
+    fully "open" before it returns (a lift's LIFT_WAIT at its bottom -- doomfj.movers).
+    M7 P2b, REVERSAL ON THINGS (docs/gp-lift-spike.md section 4; T_VerticalDoor's crush branch for
+    every E1M1 door type that closes): a CLOSING door whose step would take it from `pass_at` (its
+    pass state, or above) to below it goes back UP instead when `blocked` -- a shootable thing
+    touches it -- and the state does not move that frame.
 
     THE WHOLE STATE MACHINE, and it is written with nothing but increments, decrements and
     zero-tests on purpose: that is the instruction set the fj side has cheaply. A compare against a
@@ -360,7 +387,7 @@ def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = 
     keeps an idle door at exactly one 1-nibble test.
     """
     state, dr, sub, wait = st
-    top_wait = 0 if stay else WAIT
+    top_wait = 0 if stay else wait_frames
     if used and dr != OPENING:
         # a press always means "open", including on a door that is closing (DOOM reverses) and on
         # one that is already open and waiting (it restarts the wait).
@@ -380,6 +407,8 @@ def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = 
         sub -= 1
         if sub == 0:
             sub = SPEED
+            if blocked and state >= pass_at > state - stride:
+                return (state, OPENING, sub, wait)      # reversed on a thing: no step this frame
             state -= stride
             if state <= 0:
                 state, dr = 0, IDLE
@@ -519,6 +548,50 @@ def exit_boxes(lds, verts, rng: int = USE_RANGE) -> list:
     return out
 
 
+def door_contact_geo(secs, lds, sds, verts) -> dict:
+    """M7 P2b: `{door sector: (rect, lines)}` -- the door's rectangle `(x0, y0, x1, y1)` and its
+    two-sided lines as `(axis, coord, lo, hi)` ("y": y = coord, x in [lo, hi]), for `touches_door`.
+    Every E1M1 door is an axis-aligned rectangle of four axis-aligned lines (asserted)."""
+    tbl = door_states(secs, lds, sds)
+    out = {}
+    for si in sorted(tbl):
+        mine = [ld for ld in lds if sds[ld.front].sector == si
+                or (ld.back not in (-1, 0xFFFF) and ld.back < len(sds) and sds[ld.back].sector == si)]
+        pts = [(verts[v].x, verts[v].y) if hasattr(verts[v], "x") else tuple(verts[v][:2])
+               for ld in mine for v in (ld.v1, ld.v2)]
+        xs, ys = [x for x, _ in pts], [y for _, y in pts]
+        lines = []
+        for ld in mine:
+            if ld.back in (-1, 0xFFFF) or ld.back >= len(sds):
+                continue                                 # a track wall: nothing stands across it
+            (ax, ay), (bx, by) = [(verts[v].x, verts[v].y) if hasattr(verts[v], "x")
+                                  else tuple(verts[v][:2]) for v in (ld.v1, ld.v2)]
+            assert ax == bx or ay == by, "door %d line is not axis-aligned" % si
+            lines.append(("y", ay, min(ax, bx), max(ax, bx)) if ay == by
+                         else ("x", ax, min(ay, by), max(ay, by)))
+        assert len(mine) == 4, "door %d is not a four-line rectangle" % si
+        out[si] = ((min(xs), min(ys), max(xs), max(ys)), lines)
+    return out
+
+
+def touches_door(geo, x16: int, y16: int, r16: int) -> bool:
+    """M7 P2b, the reversal's contact (docs/gp-lift-spike.md section 4): a thing at 16.16 (x16, y16)
+    with half-width r16 touches the door when its box STRADDLES one of the door's two-sided lines --
+    check_position's test: the bboxes overlap and P_BoxOnLineSide is -1, which for an axis-aligned
+    line is `coord - r < c < coord + r` across it and the extent's `lo - r < o < hi + r` along it,
+    all strict -- or its centre is strictly inside the door's rectangle (a 32-thick door holds a
+    centred 32-wide box whose edges lie ON both lines). The model's `door_touched` and the fj
+    (`doorcode.door_contact_lines`) are this."""
+    (x0, y0, x1, y1), lines = geo
+    if (x0 << 16) < x16 < (x1 << 16) and (y0 << 16) < y16 < (y1 << 16):
+        return True
+    for axis, coord, lo, hi in lines:
+        c, o = (y16, x16) if axis == "y" else (x16, y16)
+        if (coord << 16) - r16 < c < (coord << 16) + r16 and (lo << 16) - r16 < o < (hi << 16) + r16:
+            return True
+    return False
+
+
 def walkover_triggers(secs, lds, sds, verts) -> list:
     """`[(door sector, axis, coord, lo, hi)]`, one per walk-over tag, in door-sector order: the
     tag's W1 lines are collinear and axis-aligned on E1M1 (asserted), so each tag is ONE segment --
@@ -573,13 +646,18 @@ class DoorPhase:
     card): `touch` is the model's `_touch_specials` for it -- the boxes overlap (CARD_BOX, strict) and
     the card is within reach of the floor the player stands on."""
 
-    def __init__(self, secs, lds, sds, verts, boxes, quant: int = DEFAULT_QUANT, card_at=None):
+    def __init__(self, secs, lds, sds, verts, boxes, quant: int = DEFAULT_QUANT, card_at=None,
+                 reversal: bool = True):
         self.card_at = card_at
         tbl = door_states(secs, lds, sds, quant)
         self.order = sorted(tbl)
         self.nstates = {si: len(v) for si, v in tbl.items()}
         self.kinds = door_kinds(secs, lds, sds)
         self.boxes = boxes                                 # use_boxes_xy: no walk-over door in it
+        # M7 P2b: reversal on the player (touches_door at the tic-start position); off for a
+        # binary before P2b or a control
+        self.contact = door_contact_geo(secs, lds, sds, verts) if reversal else None
+        self.passes = {si: pass_state(secs, lds, sds, si, quant=quant) for si in self.nstates}
         self.triggers = walkover_triggers(secs, lds, sds, verts)
         self._initial = initial_states(secs, lds, sds, quant)
 
@@ -596,8 +674,11 @@ class DoorPhase:
             kind, box = self.kinds[si], self.boxes.get(si)
             pressed = (use and box is not None and can_open(kind, has_blue)
                        and in_use_box_fixed(box, x16, y16)) or si in req
+            blocked = (self.contact is not None and ds[si][1] == CLOSING
+                       and touches_door(self.contact[si], x16, y16, 16 << 16))
             out[si] = door_tic(ds[si], self.nstates[si], bool(pressed),
-                               stride=door_stride(kind), stay=door_stay(kind))
+                               stride=door_stride(kind), stay=door_stay(kind), blocked=blocked,
+                               pass_at=self.passes[si])
         return (out, fired, frozenset(), card)
 
     def after_move(self, state, old16: tuple, new16: tuple, radius: int = 16):

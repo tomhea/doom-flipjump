@@ -56,6 +56,8 @@ from doomfj.doors import (DEFAULT_QUANT, DoorPhase, compare_stamp,       # noqa:
                           door_states, heights_for_states, in_use_box_fixed,
                           pass_state, read_stamp, stamp_path, use_boxes_xy)
 from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
+from doomfj.movers import MoverPhase                                      # noqa: E402  (M7 P2b)
+from doomfj.doors import exit_boxes                                       # noqa: E402
 from doomfj.menu import MENU_KEYS, menu_step                              # noqa: E402
 from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
 from doomfj.reference_model import (ANGLE_TURN, ReferenceModel, build_scene,  # noqa: E402
@@ -184,8 +186,13 @@ def walkable_cells(rm, scene, sx, sy, goal_pred=None, cell=NAV_CELL, cap=400000)
     return None, seen
 
 
-def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500):
-    """Grid-BFS a walkable path to `goal`, then steer along it. Same contract as `plan_to`."""
+def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500, step=None,
+                  hold=None):
+    """Grid-BFS a walkable path to `goal`, then steer along it. Same contract as `plan_to`.
+    `step(st, kd)` (M7 P2b): the frame the steering runs -- a stateful stepper carrying doors and
+    movers (a lift lowers under a route that crosses its WR line). `hold(st)`: while true the
+    steerer stands still -- on a lowered lift it rides the whole cycle instead of walking off into
+    the level below. Default: the static `rm.step_sim` on `scene`."""
     import math
     gx, gy = goal
     hit = accept or (lambda st: ((st.x >> 16) - gx) ** 2 + ((st.y >> 16) - gy) ** 2 <= radius ** 2)
@@ -208,6 +215,11 @@ def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500):
                 if len(script) >= max_tics:
                     return None
                 x, y = _signed(st.x, 32) / 65536.0, _signed(st.y, 32) / 65536.0
+                if hold is not None and hold(st):
+                    kd = {k: False for k in KEY_NAMES}
+                    st = step(st, kd)
+                    script.append(kd)
+                    continue
                 if (x - wx) ** 2 + (y - wy) ** 2 <= (NAV_CELL * 0.9) ** 2:
                     break
                 want = int(math.atan2(wy - y, wx - x) / (2 * math.pi) * (1 << 32)) & 0xFFFFFFFF
@@ -219,7 +231,7 @@ def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500):
                     kd["turn_left" if diff > 0 else "turn_right"] = True
                 else:
                     kd["forward"] = True
-                st = rm.step_sim(st, kd, scene=scene)
+                st = step(st, kd) if step is not None else rm.step_sim(st, kd, scene=scene)
                 script.append(kd)
                 if hit(st):
                     return script
@@ -489,19 +501,38 @@ def main():
     dp = DoorPhase(secs, lds, sds, mw.vertexes(args.map), boxes,
                    card_at=rm.blue_card_at(build_scene(mw, mw, args.map)))
     assert dp.order == order
+    # M7 P2b: the movers (doomfj.movers.MoverPhase) -- the lifts tic after the doors, the SR lifts
+    # and the floor switch take a use PRESS (the exit's edge; this gate never presses in the exit
+    # box), the WR lines an accepted move
+    mp = MoverPhase(secs, lds, sds, mw.vertexes(args.map))
+    exits = exit_boxes(lds, mw.vertexes(args.map))
 
-    def tic(dps, st, kd, used):
-        """the binary's frame: the door tic (`used`: use held), then the player's move against the
-        doors not yet passable -> (door phase state, player state)"""
+    def tic(dps, st, kd, used, mps=None, pusedn=1):
+        """the binary's frame: the door tic (`used`: use held), the lifts, the use press, then the
+        player's move against the doors not yet passable over the movers' floors -> (door phase
+        state, player state) -- and with `mps` given, (door, player, mover phase, pusedn)"""
+        with_movers = mps is not None
+        mps = mp.initial() if mps is None else mps
         dps = dp.tic(dps, used, st.x, st.y)
+        mps = mp.tic(mps)
+        if kd.get("use"):
+            if not pusedn:
+                assert not any(in_use_box_fixed(b, st.x, st.y) for b in exits), "a press at the exit"
+                mps = mp.use_press(mps, st.x, st.y)
+            pusedn = 1
+        else:
+            pusedn = 0
         blk = frozenset(li for si in order if dps[0][si][0] < passes[si]
                         for li in lines_of.get(si, ()))
         cur = [dps]
 
         def touch(cx, cy, z):
             cur[0] = dp.touch(cur[0], cx, cy, z)
-        new = rm.step_sim(st, kd, scene=build_scene(mw, mw, args.map, open_h, blk), touch=touch)
-        return dp.after_move(cur[0], (st.x, st.y), (new.x, new.y)), new
+        new = rm.step_sim(st, kd, scene=build_scene(mw, mw, args.map, {**open_h, **mp.heights(mps)},
+                                                    blk), touch=touch)
+        dps = dp.after_move(cur[0], (st.x, st.y), (new.x, new.y))
+        mps = mp.after_move(mps, (st.x, st.y), (new.x, new.y))
+        return (dps, new, mps, pusedn) if with_movers else (dps, new)
 
     # the door to walk to: the nearest one to the spawn, by the same measure the planner minimises
     sp = spawn_state(mw, args.map)
@@ -530,6 +561,28 @@ def main():
     # door. The sprites still come from `art`, via render_wall_frame's own `sprite_wad`.
     walk_scene = build_scene(mw, mw, args.map)           # doors shut: what the walk really sees
 
+    def stepper(dps, mps, u):
+        """M7 P2b: the binary's whole frame as a stateful step(st, kd) from a given world state --
+        the lift the route crosses (98: the only way out of the start room) goes down under the
+        player, who then walks against its rim until it is back up"""
+        cur = {"d": dps, "m": mps, "u": u}
+
+        def step(st, kd):
+            cur["d"], st2, cur["m"], cur["u"] = tic(cur["d"], st, kd, bool(kd.get("use")),
+                                                    cur["m"], cur["u"])
+            return st2
+        step.state = cur
+
+        def hold(st):
+            """on a lift that is not at its top: ride it (movers.MoverPhase's state)"""
+            ss = cmap.subsectors[rm.point_in_subsector(cmap, _signed(st.x, 32) >> 16,
+                                                       _signed(st.y, 32) >> 16)]
+            ld_ = lds[cmap.segs[ss.firstseg].linedef]
+            sec_ = sds[ld_.front if cmap.segs[ss.firstseg].side == 0 else ld_.back].sector
+            return sec_ in mp.order and cur["m"][0][mp.order.index(sec_)][0] != 0
+        step.hold = hold
+        return step
+
     # THE DOORWAY, not the use box. The box is inflated by USE_RANGE and its south edge is 90 units
     # clear of the opening, so "reach the box" put the player alongside the door and the walk-through
     # leg then went AROUND it. Both legs aim at the gap between the door's own two line segments:
@@ -553,10 +606,12 @@ def main():
     # from the opening, which made the walk-through leg detour 84 waypoints to x=168 and back.
     # Require BOTH: the box (where `use` actually works) and the threshold (where walking through
     # is one short straight leg, which matters because the door is only passable for WAIT frames).
+    _s0 = stepper(dp.initial(), mp.initial(), 1)
     route = plan_walkable(rm, walk_scene, sp, approach, 40,
                           accept=lambda st: in_use_box_fixed(boxes[target], st.x, st.y)
                           and ((st.x >> 16) - approach[0]) ** 2
-                          + ((st.y >> 16) - approach[1]) ** 2 <= 72 ** 2)
+                          + ((st.y >> 16) - approach[1]) ** 2 <= 72 ** 2,
+                          step=_s0, hold=_s0.hold)
     assert route, "no route from the spawn to door %d's threshold at %s" % (target, approach)
 
     # menu frames, then the walk, then the press, then stand and watch the door work
@@ -574,15 +629,17 @@ def main():
     # door's infinite line -- called that a crossing. So the walk-through is now a route to a point
     # on the FAR SIDE of the door's own line segment, planned against the scene with the door open,
     # and the control below tests segment-against-segment.
-    st, dps = sp, dp.initial()
+    st, dps, mps, u = sp, dp.initial(), mp.initial(), 1
     for kd in route + press + opening:
-        dps, st = tic(dps, st, kd, bool(kd.get("use")))
+        dps, st, mps, u = tic(dps, st, kd, bool(kd.get("use")), mps, u)
     ds = dps[0]
     assert ds[target][0] == nstates[target] - 1, (
         "door %d is at state %d, not open, after %d frames of waiting"
         % (target, ds[target][0], args.open_wait))
 
-    through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st, beyond, 40)
+    _s1 = stepper(dps, mps, u)
+    through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st, beyond, 40,
+                            step=_s1, hold=_s1.hold)
     assert through, "no route through door %d's opening to %s" % (target, beyond)
 
     # ⚠ CONTROL 0 -- THE ROUTE MUST BE PHYSICALLY WALKABLE. The beam this gate used until
@@ -600,8 +657,9 @@ def main():
 
     _vx = cmap.vertexes
     _tun, _cs = [], sp
+    _step0 = stepper(dp.initial(), mp.initial(), 1)          # M7 P2b: the route's own frames
     for _kd in route:
-        _ns = rm.step_sim(_cs, _kd, scene=walk_scene)
+        _ns = _step0(_cs, _kd)
         _a = (_signed(_cs.x, 32) / 65536.0, _signed(_cs.y, 32) / 65536.0)
         _b = (_signed(_ns.x, 32) / 65536.0, _signed(_ns.y, 32) / 65536.0)
         if _a != _b:
@@ -660,15 +718,16 @@ def main():
 
     if args.dry:
         st, dps, md, scr, sel = sp, dp.initial(), 1, 0, SKILLS.index(BOOT_SKILL)
+        mps, u = mp.initial(), 1
         for f in range(frames):
             kd = keys_by_frame[f]
             md, scr, sel, ng = menu_step(md, scr, sel, menu_events[f])
             if ng is not None:
-                st, dps = sp, dp.initial()
+                st, dps, mps, u = sp, dp.initial(), mp.initial(), 1
             if md == 1:
                 continue
             inb = in_use_box_fixed(boxes[target], st.x, st.y)
-            dps, st = tic(dps, st, kd, bool(kd.get("use")))
+            dps, st, mps, u = tic(dps, st, kd, bool(kd.get("use")), mps, u)
             ds = dps[0]
             print("  %3d %-6s (%6d,%6d) door%d=%d%s"
                   % (f, "".join(n[0] for n in sorted(kd) if kd[n]) or "-",
@@ -683,7 +742,7 @@ def main():
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
     import gatestate as GST
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
-                                            len(order), len(dp.triggers))
+                                            len(order), len(dp.triggers), len(mp.order))
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")
@@ -697,6 +756,7 @@ def main():
     # M7 P2a.2: use held last tic (baked 1: G_PlayerReborn), and the level not done -- the route
     # never reaches the exit (p2a_gate's S8 does)
     pusedn, lvdone = 1, 0
+    mps = mp.initial()                                  # M7 P2b: every lift at its top
     # the binary boots into the MAIN menu with the boot skill highlighted
     mode, scr, sel = 1, 0, SKILLS.index(BOOT_SKILL)
     # M7 P1.5: the game tier boots at BOOT_SKILL's level start, so the oracle hides what that
@@ -723,12 +783,14 @@ def main():
                 if not args.selftest_restart_doors:     # ...and C7's control skips the doors
                     dps = dp.initial()
                     dstates = dps[0]
+                    mps = mp.initial()
                 pusedn, lvdone = 1, 0
         if mode == 1:                                   # a menu frame tics nothing
             menu_pics.setdefault((scr, sel), set()).add(got[f])
             sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr,
                                                        sel, (dstates[si] for si in order),
-                                                       dps, order, (lvdone, pusedn)))
+                                                       dps, order, (lvdone, pusedn),
+                                                       mps, mp.order))
             state_checked += 1
             print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
                   % (f, ",".join(sorted(menu_events[f])) or "-", "-",
@@ -742,18 +804,18 @@ def main():
         used = bool(kd.get("use")) and not args.selftest
         if kd.get("use") and in_use_box_fixed(boxes[target], state.x, state.y):
             in_box_when_pressed = True
-        dps, state = tic(dps, state, kd, used)
+        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn)
         dstates = dps[0]
-        pusedn = int(bool(kd.get("use")))           # the binary's duse: the key held, not `used`
         rsc = build_scene(mw, mw, args.map,
-                          heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}))
+                          {**heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}),
+                           **mp.heights(mps)})
         want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
                                           thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
                                           **GAME_RENDER_KW))
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
                                                    (dstates[si] for si in order), dps, order,
-                                                   (lvdone, pusedn)))
+                                                   (lvdone, pusedn), mps, mp.order))
         state_checked += 1
         path[f] = (state.x, state.y, state.angle)
         ok &= same

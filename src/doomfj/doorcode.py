@@ -74,7 +74,133 @@ def _box_test(d: int, box, hit: str, miss: str) -> list:
     return out
 
 
-def door_tic_lines(slots, nstates, boxes, kinds=None) -> list:
+def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigger: list, *,
+                  stride: int = 1, top_wait: int = WAIT, reverse=None) -> list:
+    """ONE door machine's frame, after its trigger lines (which fall into `<p>_press` to press and
+    jump to `<p>_moved` not to): `doors.door_tic` in fj, on the cells `st`/`dr`/`sub`/`wt` (the
+    last a WAIT_NIBBLES counter), `last` = nstates - 1. `top_wait` is the wait set on reaching the
+    top (0: a stay door; M7 P2b: LIFT_WAIT for a lift, whose "top" is its bottom floor).
+    The doors (`door_tic_lines`) and the lifts (`movercode.lift_tic_lines`) both emit from here.
+    `reverse` (M7 P2b, `doors.door_tic`'s reversal): `(mask, contact)` -- on a CLOSING step from a
+    state in `mask` (the states whose step leaves the pass state), `contact(yes, no)`'s lines decide
+    whether a thing touches the door; touched, the door turns to OPENING without stepping."""
+    set_wait = ([f"    hex.zero {WAIT_NIBBLES}, {wt}"] if not top_wait else
+                [f"    hex.set {WAIT_NIBBLES}, {wt}, {top_wait}"])
+    up = []
+    for k in range(stride):                             # `state += stride`, clamped at the top
+        up += [f"    hex.inc 1, {st}",
+               f"    hex.xor_by 1, {st}, {last}",
+               f"    hex.if0 1, {st}, {p}_open",
+               f"    hex.xor_by 1, {st}, {last}"]
+    down = []
+    for k in range(stride):                             # `state -= stride`, clamped at shut
+        down += [f"    hex.dec 1, {st}",
+                 f"    hex.if0 1, {st}, {p}_shut"]
+    return [
+        # ---- the trigger: `if used and dr != OPENING` -------------------------------
+        *trigger,
+        f"  {p}_press:",
+        # dir != OPENING, tested by xoring OPENING in and asking for zero. The xor is an
+        # involution, so both branches put it back.
+        f"    hex.xor_by 1, {dr}, {OPENING}",
+        f"    hex.if0 1, {dr}, {p}_already",
+        f"    hex.xor_by 1, {dr}, {OPENING}",
+        f"    hex.set 1, {dr}, {OPENING}",
+        f"    hex.set 1, {sub}, {SPEED}",
+        f"    hex.zero {WAIT_NIBBLES}, {wt}",
+        # ...and `if state == nstates - 1` on a press: an already-open door goes back to
+        # IDLE with a full wait rather than trying to open past its last state.
+        f"    hex.xor_by 1, {st}, {last}",
+        f"    hex.if0 1, {st}, {p}_pressopen",
+        f"    hex.xor_by 1, {st}, {last}",
+        f"    ;{p}_moved",
+        f"  {p}_pressopen:",
+        f"    hex.xor_by 1, {st}, {last}",
+        f"    hex.zero 1, {dr}",
+        *set_wait,
+        f"    ;{p}_moved",
+        f"  {p}_already:",
+        f"    hex.xor_by 1, {dr}, {OPENING}",
+        f"  {p}_moved:",
+        # ---- the motion --------------------------------------------------------------
+        # THE IDLE COST IS THIS LINE. A door standing still with no timer pays this test
+        # and the `dwait` one below, and nothing else.
+        f"    hex.if0 1, {dr}, {p}_idle",
+        f"    hex.dec 1, {sub}",
+        f"    hex.if0 1, {sub}, {p}_step",
+        f"    ;{p}_done",
+        f"  {p}_step:",
+        f"    hex.set 1, {sub}, {SPEED}",
+        f"    hex.xor_by 1, {dr}, {OPENING}",
+        f"    hex.if0 1, {dr}, {p}_up",
+        f"    hex.xor_by 1, {dr}, {OPENING}",
+        *([] if reverse is None else [
+            # M7 P2b: reversal -- the pass step of a closing door, a thing in it: back up, no step
+            f"    hex.if_flags {st}, {reverse[0]:#06x}, {p}_dn, {p}_rv",
+            f"  {p}_rv:",
+            *reverse[1](f"{p}_rev", f"{p}_dn"),
+            f"  {p}_rev:",
+            f"    hex.set 1, {dr}, {OPENING}",
+            f"    ;{p}_done",
+            f"  {p}_dn:"]),
+        # closing: `stride` steps down, and IDLE when it reaches shut
+        *down,
+        f"    ;{p}_done",
+        f"  {p}_shut:",
+        f"    hex.zero 1, {dr}",
+        f"    ;{p}_done",
+        f"  {p}_up:",
+        f"    hex.xor_by 1, {dr}, {OPENING}",
+        *up,
+        f"    ;{p}_done",
+        f"  {p}_open:",
+        f"    hex.xor_by 1, {st}, {last}",
+        f"    hex.zero 1, {dr}",
+        *set_wait,
+        f"    ;{p}_done",
+        # ---- idle: run the open-wait down --------------------------------------------
+        f"  {p}_idle:",
+        f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_done",
+        f"    hex.dec {WAIT_NIBBLES}, {wt}",
+        f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_close",
+        f"    ;{p}_done",
+        f"  {p}_close:",
+        f"    hex.set 1, {dr}, {CLOSING}",
+        f"    hex.set 1, {sub}, {SPEED}",
+        f"  {p}_done:"]
+
+
+def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str) -> list:
+    """`doors.touches_door` in fj for the player at (`viewx`, `viewy`), box half-width `radius`:
+    the centre strictly inside the door's rectangle, or the box straddling one of its two-sided
+    lines (strict, both axes) -> `yes`; else `no`."""
+    (x0, y0, x1, y1), lines = geo
+    r = radius << 16
+    out = []
+
+    def between(t, reg, lo16, hi16, fail):
+        return (_scmp_const(reg, lo16, fail, fail, f"{t}a") + [f"  {t}a:"]
+                + _scmp_const(reg, hi16, f"{t}b", fail, fail) + [f"  {t}b:"])
+    tests = [((("viewx", x0 << 16, x1 << 16), ("viewy", y0 << 16, y1 << 16)))]
+    for axis, coord, lo, hi in lines:
+        across, along = ("viewy", "viewx") if axis == "y" else ("viewx", "viewy")
+        tests.append(((across, (coord << 16) - r, (coord << 16) + r),
+                      (along, (lo << 16) - r, (hi << 16) + r)))
+    for k, pair in enumerate(tests):
+        fail = f"{tag}_n{k}"
+        for j, (reg, lo16, hi16) in enumerate(pair):
+            out += between(f"{tag}_{k}{j}", reg, lo16 & 0xFFFFFFFF, hi16 & 0xFFFFFFFF, fail)
+        out += [f"    ;{yes}", f"  {fail}:"]
+    return out + [f"    ;{no}"]
+
+
+def reverse_mask(pass_at: int, stride: int, nstates: int) -> int:
+    """the states whose CLOSING step (`stride` stops) leaves `pass_at` -- `doors.door_tic`'s
+    `state >= pass_at > state - stride` -- as an `hex.if_flags` value mask"""
+    return sum(1 << s for s in range(nstates) if s >= pass_at > s - stride)
+
+
+def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None, radius=16) -> list:
     """One frame of every door. `slots` is the emitter's door order (`sorted(door sectors)`),
     `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units (none for a
     walk-over door), `kinds[si]` its `doors.door_kinds` kind (all "plain" when omitted).
@@ -86,6 +212,9 @@ def door_tic_lines(slots, nstates, boxes, kinds=None) -> list:
 
     Nothing here touches collision: a door's lines read its `dstate` when they are tested
     (`collision.collision_cells_fj`), so the state this walks IS the door's collision too.
+
+    M7 P2b: `contact` (`doors.door_contact_geo`) and `passes` (each door's pass state) arm the
+    reversal on every door that closes -- the player touching it (`door_contact_lines`).
 
     The label prefix is `dr{slot}_`, so the emitted names say which door they belong to.
     """
@@ -118,81 +247,14 @@ def door_tic_lines(slots, nstates, boxes, kinds=None) -> list:
             if kind == "blue":
                 trigger += [f"    hex.if0 1, pcard, {p}_moved"]   # EV_VerticalDoor: the blue card
             trigger += _box_test(d, box, f"{p}_press", f"{p}_moved")
-        up = []
-        for k in range(stride):                             # `state += stride`, clamped at the top
-            up += [f"    hex.inc 1, {st}",
-                   f"    hex.xor_by 1, {st}, {last}",
-                   f"    hex.if0 1, {st}, {p}_open",
-                   f"    hex.xor_by 1, {st}, {last}"]
-        down = []
-        for k in range(stride):                             # `state -= stride`, clamped at shut
-            down += [f"    hex.dec 1, {st}",
-                     f"    hex.if0 1, {st}, {p}_shut"]
+        rev = None
+        if contact is not None and not stay:
+            rev = (reverse_mask(passes[si], stride, n),
+                   lambda yes, no, _g=contact[si], _p=p: door_contact_lines(f"{_p}_ct", _g, radius,
+                                                                           yes, no))
         out += [f"  // ---- door {d} (sector {si}, {kind}): {n} states ----",
-                # ---- the trigger: `if used and dr != OPENING` -------------------------------
-                *trigger,
-                f"  {p}_press:",
-                # dir != OPENING, tested by xoring OPENING in and asking for zero. The xor is an
-                # involution, so both branches put it back.
-                f"    hex.xor_by 1, {dr}, {OPENING}",
-                f"    hex.if0 1, {dr}, {p}_already",
-                f"    hex.xor_by 1, {dr}, {OPENING}",
-                f"    hex.set 1, {dr}, {OPENING}",
-                f"    hex.set 1, {sub}, {SPEED}",
-                f"    hex.zero {WAIT_NIBBLES}, {wt}",
-                # ...and `if state == nstates - 1` on a press: an already-open door goes back to
-                # IDLE with a full wait rather than trying to open past its last state.
-                f"    hex.xor_by 1, {st}, {last}",
-                f"    hex.if0 1, {st}, {p}_pressopen",
-                f"    hex.xor_by 1, {st}, {last}",
-                f"    ;{p}_moved",
-                f"  {p}_pressopen:",
-                f"    hex.xor_by 1, {st}, {last}",
-                f"    hex.zero 1, {dr}",
-                *([f"    hex.zero {WAIT_NIBBLES}, {wt}"] if stay else
-                  [f"    hex.set {WAIT_NIBBLES}, {wt}, {WAIT}"]),
-                f"    ;{p}_moved",
-                f"  {p}_already:",
-                f"    hex.xor_by 1, {dr}, {OPENING}",
-                f"  {p}_moved:",
-                # ---- the motion --------------------------------------------------------------
-                # THE IDLE COST IS THIS LINE. A door standing still with no timer pays this test
-                # and the `dwait` one below, and nothing else.
-                f"    hex.if0 1, {dr}, {p}_idle",
-                f"    hex.dec 1, {sub}",
-                f"    hex.if0 1, {sub}, {p}_step",
-                f"    ;{p}_done",
-                f"  {p}_step:",
-                f"    hex.set 1, {sub}, {SPEED}",
-                f"    hex.xor_by 1, {dr}, {OPENING}",
-                f"    hex.if0 1, {dr}, {p}_up",
-                f"    hex.xor_by 1, {dr}, {OPENING}",
-                # closing: `stride` steps down, and IDLE when it reaches shut
-                *down,
-                f"    ;{p}_done",
-                f"  {p}_shut:",
-                f"    hex.zero 1, {dr}",
-                f"    ;{p}_done",
-                f"  {p}_up:",
-                f"    hex.xor_by 1, {dr}, {OPENING}",
-                *up,
-                f"    ;{p}_done",
-                f"  {p}_open:",
-                f"    hex.xor_by 1, {st}, {last}",
-                f"    hex.zero 1, {dr}",
-                *([f"    hex.zero {WAIT_NIBBLES}, {wt}"] if stay else
-                  [f"    hex.set {WAIT_NIBBLES}, {wt}, {WAIT}"]),
-                f"    ;{p}_done",
-                # ---- idle: run the open-wait down --------------------------------------------
-                f"  {p}_idle:",
-                f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_done",
-                f"    hex.dec {WAIT_NIBBLES}, {wt}",
-                f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_close",
-                f"    ;{p}_done",
-                f"  {p}_close:",
-                f"    hex.set 1, {dr}, {CLOSING}",
-                f"    hex.set 1, {sub}, {SPEED}",
-                f"  {p}_done:"]
+                *machine_lines(p, st, dr, sub, wt, last, trigger, stride=stride,
+                               top_wait=0 if stay else WAIT, reverse=rev)]
     return out
 
 
@@ -303,22 +365,31 @@ def walkover_lines(triggers, slots, radius: int) -> list:
     for k, (si, axis, coord, lo, hi) in enumerate(triggers):
         d = slots.index(si)
         p = f"wo{k}"
-        a_old, a_new, o_new = (("cm_oy", "viewy", "viewx") if axis == "y" else
-                               ("cm_ox", "viewx", "viewy"))
-        L = coord << 16
         out += [f"    hex.if0 1, wfired + {k}*dw, {p}_try", f"    ;{p}_no", f"  {p}_try:"]
-        # old side: le_old = old <= L  -> {p}_ol (le) / {p}_og (gt)
-        out += _scmp_const(a_old, L, f"{p}_ol", f"{p}_ol", f"{p}_og")
-        out += [f"  {p}_ol:"]                                  # old on the low side: new must be above
-        out += _scmp_const(a_new, L, f"{p}_no", f"{p}_no", f"{p}_x")
-        out += [f"  {p}_og:"]                                  # old above: new must be low
-        out += _scmp_const(a_new, L, f"{p}_x", f"{p}_x", f"{p}_no")
-        out += [f"  {p}_x:"]
-        out += _scmp_const(o_new, (lo - radius) << 16, f"{p}_no", f"{p}_no", f"{p}_x1")
-        out += [f"  {p}_x1:"]
-        out += _scmp_const(o_new, (hi + radius) << 16, f"{p}_fire", f"{p}_no", f"{p}_no")
-        out += [f"  {p}_fire:",
-                f"    hex.set 1, wfired + {k}*dw, 1",
-                f"    hex.set 1, dreq + {d}*dw, 1",
-                f"  {p}_no:"]
+        out += _crossed_lines(p, axis, coord, lo, hi, radius,
+                              [f"    hex.set 1, wfired + {k}*dw, 1",
+                               f"    hex.set 1, dreq + {d}*dw, 1"])
+    return out
+
+
+def _crossed_lines(p: str, axis: str, coord: int, lo: int, hi: int, radius: int, fire) -> list:
+    """`doors.crossed` in fj on the move (`cm_ox`, `cm_oy`) -> (`viewx`, `viewy`): the centre
+    changed side of the axis line (`c <= L`) and the new centre is strictly inside the segment's
+    extent inflated by `radius` -> the `fire` lines; either way on to `<p>_no`. The walk-over doors
+    (`walkover_lines`, behind their W1 latch) and the WR lifts (`movercode.lift_walk_lines`)."""
+    a_old, a_new, o_new = (("cm_oy", "viewy", "viewx") if axis == "y" else
+                           ("cm_ox", "viewx", "viewy"))
+    L = coord << 16
+    out = []
+    # old side: le_old = old <= L  -> {p}_ol (le) / {p}_og (gt)
+    out += _scmp_const(a_old, L, f"{p}_ol", f"{p}_ol", f"{p}_og")
+    out += [f"  {p}_ol:"]                                  # old on the low side: new must be above
+    out += _scmp_const(a_new, L, f"{p}_no", f"{p}_no", f"{p}_x")
+    out += [f"  {p}_og:"]                                  # old above: new must be low
+    out += _scmp_const(a_new, L, f"{p}_x", f"{p}_x", f"{p}_no")
+    out += [f"  {p}_x:"]
+    out += _scmp_const(o_new, (lo - radius) << 16, f"{p}_no", f"{p}_no", f"{p}_x1")
+    out += [f"  {p}_x1:"]
+    out += _scmp_const(o_new, (hi + radius) << 16, f"{p}_fire", f"{p}_no", f"{p}_no")
+    out += [f"  {p}_fire:", *fire, f"  {p}_no:"]
     return out

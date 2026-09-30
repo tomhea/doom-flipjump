@@ -203,3 +203,45 @@ P3.2 is too large for one build, so it ships in three, each against a named mode
   so the mode runs the attack states without damage).
 The frozen set v5 is the full model; B0 on it is exact from P3.2c on, when the mode's tic equals the model's for
 everything v5 exercises but damage.
+
+### 8.4 P3.2b "chase" -- the design (numbers first: `docs/ship-evidence/p32b_chase_census_v5.log`)
+
+**The model mode** `chase`: A_Chase whole except the melee and missile decisions (P3.2c) -- the movecount, P_Move,
+P_NewChaseDir (the D5 cap of 6 distinct tries), a failed step in a monster door's box pressing it, the WR lifts a
+step crosses, the relink. It consumes no random numbers the decisions would (the missile range's `_rand`), so it
+is its own model, gated like `idle` and `wake`.
+
+**The numbers** (the full model on v5, 1,100 frames): P_Move position tests per frame mean 2.32, p80 4, max 17;
+moves 1.70; relinks 0.10 (max 2); NewChaseDir 0.36 (capped 0.03); monster door presses 1 in 1,100 frames; 46
+active monsters (53 slots: radius 20 x 43, 30 x 10; speed 8 / 10; height 56; none DROPOFF or FLOAT); 22 barrels
+and 57 decorations block. Refusals by verdict: wall 224, dropoff 207, step 145, thing 83, monster line 19,
+height 0 -- every rule is live, the drop-off one included.
+
+**The pieces** (each on the engine against the model in a tests/fj harness, with mutants, before the build):
+1. *The monster cells*: a second `collision_cells_fj` set at radius 30 (a superset of 20's lists; the box uses the
+   slot's true radius at run time, so the test is exact for both), its rows with ML_BLOCKMONSTERS folded into
+   blocking and each line's LOW floor (the drop-off), under its own prefix, testing through a new
+   `sim.line_test_mon` (the player's `sim.line_test` keeps its expansion -- and its heat keys). The rules of
+   `try_move_monster` in a new `sim.try_move_mon`: ceil - floor < 56, ceil - z < 56, floor - z > 24, and
+   floor - dropoff > 24.
+2. *The seed and the leaf in one descent*: `_bsp_descend_code` with a new tag whose leaves set the seed heights
+   (per mover state, as the player's) AND the leaf index -- the new position's subsector is what the relink needs.
+3. *The things*: the other monster slots unrolled (the mover's own `mon_active` cleared around its tries, so no
+   run-time self test), the player's box at 16.16, and the static barrels and decorations as per-cell box lists
+   in the monster cells' stubs (compile-time, radius 30 plus the thing's).
+4. *Positions at run time*: the slot code reads its monster's integer position from `thpos_rt` (P3.2a baked the
+   spawn), keeps `mon_floorz`, `mon_movecount`, `mon_rng` and the monster's SECTOR per slot, and selects the REJECT
+   row by that sector at run time (the rows of every sector a monster can stand in).
+5. *NewChaseDir and P_Move* as shared leaves; the step table `step_delta(speed, dir)` compile-time.
+6. *The relink*: `sim.leaf_unlink` / `sim.leaf_link` on the runtime thing index (the model links by mobile index:
+   the emitter asserts the two orders agree), `thss_rt` and `thpos_rt` written.
+7. *Triggers*: the lift walk-over test with the monster's old and new position and radius (`_crossed_lines` takes
+   its registers as parameters -- a fan-out edit); a refused step inside a monster door's use box sets `dreq`, and
+   the door tic takes it for those doors.
+8. **Live leaves**: `thing_live_subsectors` excludes a sector with no height AT SPAWN -- every closed door. A monster
+   that walks through an opened door would stand in a pruned leaf and vanish with no error, the bug class that
+   function exists to prevent. The tier with moving monsters keeps every door and lift sector live.
+
+**Cost, estimated** (to be measured): a try is one descent (~32K, the player's measured seed walk), the cells
+(~20K) and the thing loop (~30K) -- ~80K; 2.32 tries a frame is ~0.19M mean, 0.32M at p80.
+

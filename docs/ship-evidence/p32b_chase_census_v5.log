@@ -1,0 +1,23 @@
+$ python scratchpad/gp/chase_census.py scratchpad/gp/scenarios/combat_scenarios_v5.json
+set scratchpad/gp/scenarios/combat_scenarios_v5.json: 11 runs, 1100 frames; sight rule seen
+  tries        per frame: mean   2.32  p50   1  p80   4  p99  13  max  17
+  moves        per frame: mean   1.70  p50   1  p80   4  p99   6  max   6
+  relinks      per frame: mean   0.10  p50   0  p80   0  p99   1  max   2
+  newchasedir  per frame: mean   0.36  p50   0  p80   1  p99   3  max   4
+  capped       per frame: mean   0.03  p50   0  p80   0  p99   1  max   1
+  door_uses    per frame: mean   0.00  p50   0  p80   0  p99   0  max   1
+  heavy        per frame: mean   1.78  p50   1  p80   4  p99   6  max   6
+  deferred     per frame: mean   0.01  p50   0  p80   0  p99   0  max   2
+  active       per frame: mean  46.00  p50  46  p80  46  p99  46  max  46
+  refused tries by verdict: {'thing': 83, 'wall': 224, 'monsterline': 19, 'height': 0, 'step': 145, 'dropoff': 207}
+  R0-west-hall           tries/frame mean 1.10 max 7
+  R0-aftermath           tries/frame mean 0.66 max 7
+  R0-south-hall          tries/frame mean 2.19 max 12
+  R0-imp-court           tries/frame mean 4.69 max 15
+  R0-northwest           tries/frame mean 0.38 max 2
+  R0-courtyard           tries/frame mean 3.16 max 13
+  R2-barrel-hall         tries/frame mean 4.57 max 14
+  R2-spectre-corridor    tries/frame mean 5.47 max 17
+  R2-east-yard           tries/frame mean 1.58 max 8
+  R3-west                tries/frame mean 0.87 max 5
+  R3-mid                 tries/frame mean 0.86 max 4

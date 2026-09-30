@@ -10,14 +10,20 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked37.fjm`, sha256 `770209700dfbac8c` (first 16 hex), built 2026-09-29 from the command in 1b (M7 P2b, lifts, the floor switch, door reversal; after the PR #103 review -- the movers' two-sided neighbours) | class F -- pixels move, so no byte-identical rebuild; built with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked37_build.log`) |
-| **ms/frame** | **61.6 ms/frame** (61.2-62.3), against **61.5** (61.2-62.1) for blocked35 in the same run on a quiet box (230M fj/s) -- **NOT SEPARATED: median x1.003**; msframe's forward walk rides lift 98 from frame 33, so a pixel-identical A/B on the first 30 frames: **92.9** vs **90.9**, NOT SEPARATED (median x0.981); the re-freeze reads **61.9** (61.4-62.0) | `msframe.py --a build/doom_e1m1_blocked35.fjm --b build/doom_e1m1_blocked37.fjm` (200 frames x 5 reps; `--frames 30 --reps 9`), pinned core (`blocked37_msframe.log`, `blocked37_msframe_30.log`; `blocked37_msframe_freeze.log`) |
-| **fj ops/s** | **227.8 M** on the re-freeze (228.8 M in the A/B run, blocked35 230.5 M) | ops/frame **14,091,809** on msframe's forward-walk script (blocked35 14,185,609) |
-| **binding metric** (owner spec) | (mean+p80)/2 = **13,642,413 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked37.fjm`, 2026-09-30 (`docs/ship-evidence/blocked37_gamespeed.log`); `gamespeed_trail.py`: the binary's pose and door states equal `--validate`'s record on every frame of all ten runs, both controls rejected |
-| **size** | **28.24% of 2^27 -- PASS** (37,897,880 words; span 91,548,800) -- over the rung's own +0.35M budget, shipped by the owner's decision (2026-09-29) | same run |
-| **combat set v4** (the CAP-22 set from P2b on: v3's keys but R2-spectre-corridor, which rides lift 103; frozen by the owner 2026-09-29 -- `p2b_v4_freeze.log`; rehashed after the review's fix -- `p2b_v4_rehash.log`) | (mean+p80)/2 = **14,223,921**; **14,256,695** with strafe's collision; every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v4.json --pixel-every 1 --proxy` (`blocked37_b0_v4.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked38.fjm`, sha256 `457e175106f10776` (first 16 hex), built 2026-09-30 from the command in 1b (M7 P3.0, the monster tables, uncalled) | class S -- pixels identical to blocked37 (P2b); built with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked38_build.log`) |
+| **ms/frame** | **61.7 ms/frame** (61.3-62.2), against **61.3** (61.0-62.4) for blocked37 in the same run on a quiet box (~230M fj/s), pixels identical -- **NOT SEPARATED: median x0.995** (pairs 1.002 0.995 0.994 0.990 0.999); the re-freeze reads **61.5** (61.3-61.7) | `msframe.py --a build/doom_e1m1_blocked37.fjm --b build/doom_e1m1_blocked38.fjm`, 200 frames x 5 reps, pinned core (`blocked38_msframe.log`; `blocked38_msframe_freeze.log`) |
+| **fj ops/s** | **230.3 M** on the re-freeze (229.5 M in the A/B run, blocked37 229.9 M) | ops/frame **14,162,434** on msframe's forward-walk script (blocked37 14,091,809) |
+| **binding metric** (owner spec) | (mean+p80)/2 = **13,696,511 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked38.fjm`, 2026-09-30 (`docs/ship-evidence/blocked38_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
+| **size** | **28.24% of 2^27 -- PASS** (37,908,816 words; span 91,548,800) | same run |
+| **combat set v4** (the CAP-22 set from P2b on; frozen by the owner 2026-09-29 -- `p2b_v4_freeze.log`) | (mean+p80)/2 = **14,250,398**; **14,283,383** with strafe's collision; every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v4.json --pixel-every 1 --proxy` (`blocked38_b0_v4.log`) |
 
-**What it is:** blocked35 with the movers (M7 P2b, `docs/gp-lifts.md`), class F: lifts 98 and 103
+**What it is:** blocked37 with the monster phase's tables emitted and called by nothing (M7 P3.0,
+`docs/gp-monsters.md` section 6), class S: `mstate` (the monster state table), `mturn`, `mopp`, `mrnd`. Its
+delta is the pure placement tax the handoff asked P3 to price first: +54,098 on gamespeed, +26,477 on v4,
++10,936 words, and msframe NOT SEPARATED with every pixel identical. The binary it replaced, blocked37 (sha256
+`770209700dfbac8c`), is kept in `build/` as the comparison arm.
+
+**What blocked37 was (P2b):** blocked35 with the movers (M7 P2b, `docs/gp-lifts.md`), class F: lifts 98 and 103
 (the door machine on the floor, 10 stops each, WR 88 / SR 62), the instant floor switch (S1 23:
 sectors 76/126/129), and doors reversing on the player at their pass state -- every rule from
 `doomfj.movers` / `doomfj.doors`, plane ids 254 of 255. The gates are byte- and state-exact (m3_gate,
@@ -32,8 +38,9 @@ msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
 baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen on this binary
-(re-frozen 2026-09-30 on blocked37: 61.9 ms/frame [61.4 .. 62.0], yardstick 3.63G,
-227.8M fj/s -- `blocked37_msframe_freeze.log`; blocked36's 2026-09-29 read 77.4 on a slow box;
+(re-frozen 2026-09-30 on blocked38: 61.5 ms/frame [61.3 .. 61.7], yardstick 3.63G,
+230.3M fj/s -- `blocked38_msframe_freeze.log`; blocked37's the same day read 61.9 [61.4 .. 62.0];
+blocked36's 2026-09-29 read 77.4 on a slow box;
 blocked35's the same day read 62.1 [61.4 .. 63.9];
 blocked34's 61.3 [60.6 .. 61.5];
 blocked33's the day before read 61.8 [61.7 .. 62.5]; blocked32's freeze that day read 70.1 at 11:54 on a

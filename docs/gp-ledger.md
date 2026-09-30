@@ -552,4 +552,26 @@ lines, ~226K labelled words before its tables and tail).
    P3's entry price by the owner.
 5. pinreport: no hot word lost.
 
-**Row**: (filled after the build)
+**Row** (blocked38, sha256 `457e175106f10776`, built at 8cb0865; `docs/ship-evidence/blocked38_*`):
+
+| measure | blocked37 (P2b) | blocked38 (P3.0) | delta |
+|---|---|---|---|
+| combat set v4 binding | 14,223,921 | 14,250,398 | +26,477 |
+| gamespeed binding | 13,642,413 | 13,696,511 | +54,098 |
+| profx mean frame (gamespeed's games) | 11,600,461 | 11,650,201 | +49,740 (the render walk +48,435) |
+| size (% of 2^27) | 28.24% | 28.24% | +10,936 words (budget 0.1M) |
+| ms/frame (msframe, one run, A = blocked37, pixels identical) | 61.3 | 61.7 | NOT SEPARATED (x0.995) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**The placement tax**: nothing calls the four tables, and every phase but the render walk is flat (+/- 1K); the
+render walk moved +48,435 -- the blocking pass re-rolling its pins on a changed table count. That is P3's entry
+price, and it is small against the budget (+0.3M for all of P3).
+
+**Verdict: every kill criterion met.**
+1. Host: `tests/host/test_monstercode.py` (each table against its source, a packing mutation caught).
+2. fj: `tests/fj/test_monster_tables_fj.py` -- every entry twice on the engine, a mutated entry caught.
+3. m2_std_gate, m3_gate byte- and state-exact with their selftests; p2a_gate S1-S13; deg_gate BYTE-EXACT with
+   EVERY op count equal to blocked37's; B0 v4 exact on every frame.
+4. msframe NOT SEPARATED with the pictures identical: not B SLOWER, class S ships.
+5. pinreport 20 of 20; the restore sets re-keyed (`p30_rekey.log`).
+

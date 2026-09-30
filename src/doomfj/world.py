@@ -1232,10 +1232,15 @@ class World(CombatMixin):
         """P_TryMove for monster `m` to (nx, ny) in map units: (verdict, new floorz). Things first,
         then lines (P_CheckPosition's order; the verdict does not depend on it), then P_TryMove's
         height, step and drop-off rules."""
+        if self._thing_blocker(m, nx, ny, self.mon_radius[m]) is not None:
+            return V_THING, None
+        return self.try_move_lines(m, nx, ny)
+
+    def try_move_lines(self, m: int, nx: int, ny: int) -> Tuple[str, Optional[int]]:
+        """try_move_monster's LINE half (M7 P3.2b: what the fj monster cells and `sim.try_move_mon` compute):
+        P_CheckPosition's lines, then the height, step and drop-off rules -- (verdict, new floorz)."""
         ws = self.ws
         r, h = self.mon_radius[m], self.mon_height[m]
-        if self._thing_blocker(m, nx, ny, r) is not None:
-            return V_THING, None
         verdict, floorz, ceilz, dropoffz = self.check_lines(nx << 16, ny << 16, r << 16,
                                                             monster=True)
         if verdict != OK:

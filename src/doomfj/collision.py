@@ -187,6 +187,29 @@ def check_position_cells(rows, lists, x16: int, y16: int, radius: int, seed_floo
     return (True, floorz, ceilz) if ok else (False, seed_floor, seed_ceil)
 
 
+def line_lowfloors(lds, sds, secs) -> dict:
+    """M7 P3.2b: `{linedef: lowfloor}` -- min(front floor, back floor) for every two-sided line (P_LineOpening's
+    lowfloor, the drop-off). Doors move ceilings, never floors, so the spawn map serves; a mover line's comes per
+    state (`mover_line_lowfloors`)."""
+    return {li: min(secs[sds[ld.front].sector].floor_h, secs[sds[ld.back].sector].floor_h)
+            for li, ld in enumerate(lds) if ld.back != -1}
+
+
+def mover_line_lowfloors(lds, sds, secs, mover_secs: dict) -> dict:
+    """M7 P3.2b: `mover_line_openings`' twin for the low floor -- `{linedef: [lowfloor per mover state]}`."""
+    out = {}
+    for li, ld in enumerate(lds):
+        if ld.back == -1:
+            continue
+        f, b = sds[ld.front].sector, sds[ld.back].sector
+        mv = [m for m in (f, b) if m in mover_secs]
+        if not mv:
+            continue
+        assert len(set(mv)) == 1, "line %d touches two movers %s" % (li, mv)
+        out[li] = [min(sv[f].floor_h, sv[b].floor_h) for sv in mover_secs[mv[0]]]
+    return out
+
+
 def mover_line_openings(lds, sds, secs, mover_secs: dict) -> dict:
     """M7 P2b: `{linedef: [openbottom at state 0, 1, ...]}` for every two-sided line touching a
     mover. `mover_secs` = `{mover sector: [the sector list at each of its states]}` -- a line's
@@ -212,7 +235,12 @@ def mover_line_openings(lds, sds, secs, mover_secs: dict) -> dict:
 ARG_CELLS = (("ca_minx", 8), ("ca_maxx", 8), ("ca_miny", 8), ("ca_maxy", 8),
              ("ca_v1x", 8), ("ca_v1y", 8), ("ca_dx", 8), ("ca_dy", 8),
              ("ca_ob", 8), ("ca_ot", 8), ("ca_slope", 1), ("ca_flags", 1))
-_ARG_WIDTH = dict(ARG_CELLS)
+# M7 P3.2b: the monster cells' extra argument -- a line's LOW floor (the drop-off), xored like the opening; with the
+# drop-off accumulator. Declared apart from CELL_DECLS (whose order the restore sets fingerprint), only where
+# monsters move.
+ARG_CELLS_MON = (("ca_lf", 8),)
+MON_CELL_DECLS = ["ca_lf: hex.vec 8", "cp_drop: hex.vec 8"]
+_ARG_WIDTH = dict(ARG_CELLS + ARG_CELLS_MON)
 
 # the argument cells and return registers the cell routine adds to the state part
 CELL_DECLS = [
@@ -262,7 +290,8 @@ def _xor_lines(consts) -> list:
     return out
 
 
-def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None) -> tuple:
+def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: str = "cc",
+                       lowfloor=None) -> tuple:
     """`(fj text, root label)`: the player's cell routine for `lists` (`cell_lists`) over `rows`
     (`line_rows`) -- the tree, a stub per distinct list, a stub per listed line, and the ONE
     shared `sim.line_test`.
@@ -280,10 +309,16 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None) -> tuple:
 
     Entered by `stl.fcall <root>, cc_ret` (`sim.check_cells`) once the box, `cp_ok = 1` and the
     seeded opening are set; returns through `cc_ret`. The text jumps over itself, so it can sit
-    anywhere in a part. Labels are `{pfx}_cc*`: map-prefixed, since fj top-level labels are global."""
+    anywhere in a part. Labels are `{pfx}_{tag}*`: map-prefixed, since fj top-level labels are global.
+
+    M7 P3.2b, the MONSTERS' cells: `tag` names the set apart from the player's ("cc"), and `lowfloor`
+    (`{linedef: lowfloor}`, `line_lowfloors`) makes it track the drop-off -- each passable line's stub also xors
+    its low floor into `ca_lf`, and the shared test is `sim.line_test 1, ca_lf, cp_drop`. A mover line's value
+    is then `(state cell, [openbottom per state], [lowfloor per state])` and its per-state block xors both.
+    Without `lowfloor` the text is the player's, and the test `sim.line_test 0, 0, 0` (no op added)."""
     doors = doors or {}
     movers = movers or {}
-    L = f"{pfx}_cc"
+    L = f"{pfx}_{tag}"
     none = f"{L}_none"
     stubs = {key: f"{L}_s{k}" for k, key in enumerate(sorted(set(lists.values())))}
     used = sorted({li for key in stubs for li in key})
@@ -337,15 +372,19 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None) -> tuple:
         if li in movers:                  # M7 P2b: the opening floor comes from the mover's state
             assert li not in doors and row[9] == 0, "mover line %d is a door line or blocks" % li
             row = row[:11] + (0,)
-        xors = _xor_lines(line_constants(row))
+        consts = line_constants(row)
+        if lowfloor is not None and row[9] == 0 and li not in movers:   # M7 P3.2b: the drop-off
+            consts += [("ca_lf", lowfloor[li] & M32)] if lowfloor[li] & M32 else []
+        xors = _xor_lines(consts)
         lab = f"{L}_l{li}"
         out += [f"{lab}:"] + xors
         if li in movers:
-            cell, obs = movers[li]
+            cell, obs, *lfs = movers[li]
+            assert bool(lfs) == (lowfloor is not None), "a mover line's low floors come with the drop-off"
             blocks = [f"{lab}_m{k}" for k in range(len(obs))]
             out += [f"    sim.jump16 {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
             for k, ob in enumerate(obs):
-                obx = _xor_lines([("ca_ob", ob & M32)])
+                obx = _xor_lines([("ca_ob", ob & M32)] + ([("ca_lf", lfs[0][k] & M32)] if lfs else []))
                 out += [f"  {blocks[k]}:", *obx, f"    stl.fcall {L}_test, cc_tret", *obx,
                         f"    ;{lab}_mout"]
             out += [f"  {lab}_mout:"]
@@ -368,8 +407,30 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None) -> tuple:
         else:
             out.append(f"    stl.fcall {L}_test, cc_tret")
         out += xors + ["    stl.fret cc_lret"]
-    out += [f"{L}_test:", "    sim.line_test", "    stl.fret cc_tret", f"{L}_end:"]
+    test = "sim.line_test 1, ca_lf, cp_drop" if lowfloor is not None else "sim.line_test 0, 0, 0"
+    out += [f"{L}_test:", f"    {test}", "    stl.fret cc_tret", f"{L}_end:"]
     return "\n".join(out) + "\n", root
+
+
+# M7 P3.2b: the monsters' cells are built for the WIDEST monster; a narrower one's box is its own radius at run time
+# (`cprad`), so the lists are a superset and the test exact for both (cell_lists' corner argument needs 2r >= a cell)
+MONSTER_CELL_RADIUS = 30 << 16
+
+
+def monster_cells_fj(pfx: str, lds, verts, secs, sds, *, secs_open, door_line_ids, doors, msecs: dict,
+                     mcell: dict, ml_blocking: int, ml_blockmonsters: int) -> tuple:
+    """M7 P3.2b: `(fj text, root label)` -- the MONSTERS' cell routine (docs/gp-monsters.md 8.4): the player's
+    construction (`line_rows` with the doors' open openings, `doors` as the player's `collision_cells_fj` takes
+    them, the movers' per-state openings from `msecs` / `mcell`) with ML_BLOCKMONSTERS folded into blocking, the
+    lists at MONSTER_CELL_RADIUS, and every line's low floor for the drop-off. Labels `{pfx}_mc*`."""
+    rows = line_rows(lds, verts, secs, sds, ml_blocking | ml_blockmonsters, secs_open=secs_open,
+                     door_line_ids=door_line_ids)
+    obs = mover_line_openings(lds, sds, secs, msecs)
+    lfs = mover_line_lowfloors(lds, sds, secs, msecs)
+    movers = {li: (mcell[m_], obs[li], lfs[li]) for li in obs
+              for m_ in [next(x for x in (sds[lds[li].front].sector, sds[lds[li].back].sector) if x in msecs)]}
+    return collision_cells_fj(pfx, rows, cell_lists(rows, MONSTER_CELL_RADIUS), doors=doors, movers=movers,
+                              tag="mc", lowfloor=line_lowfloors(lds, sds, secs))
 
 
 # ── the emitter's side: the state and the move ─────────────────────────────────────────────────

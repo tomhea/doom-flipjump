@@ -790,7 +790,9 @@ def main():
                     dps = dp.initial()
                     dstates = dps[0]
                     mps = mp.initial()
-                    mph.reset(BOOT_SKILL)               # M7 P3.1: the monsters too
+                # M7 P3.1: the monsters too -- OUTSIDE the doors control, which must part on the doors
+                # alone (the state at the NEW GAME frame with its picture exact)
+                mph.reset(BOOT_SKILL)
                 pusedn, lvdone = 1, 0
         if mode == 1:                                   # a menu frame tics nothing
             menu_pics.setdefault((scr, sel), set()).add(got[f])

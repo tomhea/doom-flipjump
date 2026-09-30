@@ -557,7 +557,9 @@ def scope_rule(emitter_text, params, used):
 # the rooms the emitter is run on: a lamp alone bakes (the game tier then emits both record bodies,
 # n_thc 1, nltic 1); 24 things led by monsters take the room's one leaf into the runtime lists (n_thc 2,
 # nltic 2 -- the index widths that follow the runtime thing count)
-_KINDS = [3004, 9, 3001, 3002, 58, 3003, 3006, 2028, 2011, 2012, 2014, 2015, 2018, 2019, 2035]
+# M7 P3.1: every kind is one the model knows (gamedata.THING_TYPES) -- the game tier's emitter builds a World for the
+# monsters now, and E1M1 has no baron (3003) or lost soul (3006): the room's two of them became a shotgun and a clip
+_KINDS = [3004, 9, 3001, 3002, 58, 2001, 2007, 2028, 2011, 2012, 2014, 2015, 2018, 2019, 2035]
 ROOMS = [[(64, 64, 2028)],
          [(16 + (i % 12) * 20, 16 + (i // 12) * 20, _KINDS[i % len(_KINDS)]) for i in range(24)]]
 EMIT = r"""
@@ -636,13 +638,31 @@ def record_bindings(frame_text, emitter_text):
     return out
 
 
+# M7 P3: the record's rep()-gated FEATURE switches (P3.1's mirror: `mir`, and `mirf` / `miru`, the cells it names;
+# P3.2a's seen mark: `seen`, `sa`, `sflag`, `one`) are bound PER LEAF -- a monster-capable leaf of the animated tier
+# turns them on -- so no module constant binds them and no one integer is in every emitted call. This harness binds
+# them OFF, where they expand no op (`feature_lines_are_gated` checks that every line naming one is a rep() line), so
+# it tests the layout the build writes; their ON path is issue #109's F1.
+FEATURE_OFF = {"mir": "0", "mirf": "0", "miru": "0"}
+
+
+def feature_lines_are_gated(code):
+    """every code line naming a FEATURE_OFF parameter is a `rep(<switch>, ...)` line -- so OFF expands no op"""
+    bad = [ln.strip() for ln in _code(code).splitlines()
+           if any(re.search(r"\b%s\b" % f, ln) for f in FEATURE_OFF) and not re.match(r"\s*rep\(", ln)]
+    if bad:
+        raise BindingRefused("a feature switch outside rep(): %s" % bad[:2])
+
+
 def agreed_binding(frame_text, emitter_text, used):
     """the parameters of `used` and the ONE integer each takes in every emitted call -- refused
-    unless the scope rule holds first"""
+    unless the scope rule holds first (the FEATURE_OFF switches: bound off, above)"""
     params = [p for p in def_params(frame_text) if p in used]
-    scope_rule(emitter_text, def_params(frame_text), params)
+    checked = [p for p in params if p not in FEATURE_OFF]
+    scope_rule(emitter_text, def_params(frame_text), checked)
     bindings = record_bindings(frame_text, emitter_text)
-    for p in params:
+    bindings = [dict(b, **{f: v for f, v in FEATURE_OFF.items() if f in params}) for b in bindings]
+    for p in checked:
         seen = {b[p] for b in bindings}
         if len(seen) != 1:
             raise BindingRefused("the emitted calls bind %s to %s" % (p, sorted(seen)))
@@ -658,6 +678,7 @@ def transplant(frame_text, emitter_text):
     code = body[body.index("        hex.inc 2, gps_nslot"):body.index("      set_tstop:")]
     labels = re.findall(r"^\s*(\w+):\s*(?://.*)?$", code, re.M)
     words = set(re.findall(r"\b[a-z_][a-z0-9_]*\b", _code(code)))
+    feature_lines_are_gated(code)
     params, bound = agreed_binding(frame_text, emitter_text, words)
     macro = ("ns frame {\n    def lay_rec %s @ %s < %s {\n%s      ret:\n    }\n}\n"
              % (", ".join(params), ", ".join(labels + ["ret"]), ", ".join(sorted(words & GLOBALS)), code))

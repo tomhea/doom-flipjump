@@ -83,7 +83,7 @@ def _perturb(ws):
     for f in ws.schema:
         if f.name in C.RESTART_KEEP:
             continue
-        if f.count == 1:
+        if not f.array:
             setattr(ws, f.name, getattr(ws, f.name) ^ 1)
         else:
             arr = getattr(ws, f.name)

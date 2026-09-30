@@ -346,7 +346,7 @@ class CombatMixin:
         snap = self.level_start(ws.skill)
         for name in self.restart_fields:
             fld = ws._fields[name]
-            if fld.count == 1:
+            if not fld.array:
                 setattr(ws, name, getattr(snap, name))
             else:
                 dst, src = getattr(ws, name), getattr(snap, name)

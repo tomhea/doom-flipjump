@@ -224,11 +224,16 @@ height 0 -- every rule is live, the drop-off one included.
    `sim.line_test_mon` (the player's `sim.line_test` keeps its expansion -- and its heat keys). The rules of
    `try_move_monster` in a new `sim.try_move_mon`: ceil - floor < 56, ceil - z < 56, floor - z > 24, and
    floor - dropoff > 24.
-2. *The seed and the leaf in one descent*: `_bsp_descend_code` with a new tag whose leaves set the seed heights
-   (per mover state, as the player's) AND the leaf index -- the new position's subsector is what the relink needs.
+2. *The seed and the leaf*: the baked point location every thing uses (`ptloc_walk`, integer position) and a
+   three-nibble jump on its leaf to a stub that sets the seed heights -- a mover's leaf by the mover's state
+   (`monstermove.monster_seed_fj`; standalone-testable, where a third BSP descent would run only inside the
+   renderer). The leaf stays in `ptss` for the relink.
 3. *The things*: the other monster slots unrolled (the mover's own `mon_active` cleared around its tries, so no
    run-time self test), the player's box at 16.16, and the static barrels and decorations as per-cell box lists
-   in the monster cells' stubs (compile-time, radius 30 plus the thing's).
+   in the monster cells' stubs (`thing_cell_lists`, the lines' exact-interval rule; a presence cell each where
+   the thing can be absent -- `bar_solid` for a barrel, a per-skill flag for a decoration some skill lacks).
+   A thing refusal latches `cp_ok` like a wall: fj reads only ok and the lines' floor, so the model's
+   things-then-lines order is free.
 4. *Positions at run time*: the slot code reads its monster's integer position from `thpos_rt` (P3.2a baked the
    spawn), keeps `mon_floorz`, `mon_movecount`, `mon_rng` and the monster's SECTOR per slot, and selects the REJECT
    row by that sector at run time (the rows of every sector a monster can stand in).
@@ -238,6 +243,10 @@ height 0 -- every rule is live, the drop-off one included.
 7. *Triggers*: the lift walk-over test with the monster's old and new position and radius (`_crossed_lines` takes
    its registers as parameters -- a fan-out edit); a refused step inside a monster door's use box sets `dreq`, and
    the door tic takes it for those doors.
+7b. *Doors and lifts react*: a closing door at its pass step reverses when a live MONSTER touches its lines
+   (`World.door_touched` counts them; P2b's fj tests only the player -- sound while monsters stood still); and a
+   moving lift sets the floor of every active monster standing in its sector (P_ChangeSector,
+   `_door_phase_scene`), so each slot keeps its sector.
 8. **Live leaves**: `thing_live_subsectors` excludes a sector with no height AT SPAWN -- every closed door. A monster
    that walks through an opened door would stand in a pruned leaf and vanish with no error, the bug class that
    function exists to prevent. The tier with moving monsters keeps every door and lift sector live.

@@ -253,6 +253,26 @@ ns sim {
     // monster (ceil - floor >= height), fit it where it stands (ceil - z >= height), be no step up of more than
     // maxstep, and no drop of more than dropmax (no monster on E1M1 is DROPOFF or FLOAT). Map units; here_floor
     // is z, an 8-nibble signed cell.
+    // M7 P3.2b: PIT_CheckThing for a monster against ONE static blocker its stub xored in (ca_tx, ca_ty: the thing's
+    // integer position; ca_tr: its radius) -- |tx - x| < r + tr on BOTH axes refuses: the latch, as a wall's (the
+    // model tests things before lines, but only the verdict's ok and the lines' floor are read, so order is free).
+    // x, y and r are the integer halves of cpx, cpy and cprad (a monster's candidate is a whole map unit).
+    def thing_test @ yax, hit, nxt < cpx, cpy, cprad, cp_ok, ca_tx, ca_ty, ca_tr, ct_a, ct_b {
+        hex.mov 4, ct_b, cprad + 4*dw
+        hex.add 4, ct_b, ca_tr
+        hex.mov 4, ct_a, ca_tx
+        hex.sub 4, ct_a, cpx + 4*dw
+        hex.abs 4, ct_a
+        hex.scmp 4, ct_a, ct_b, yax, nxt, nxt
+      yax:
+        hex.mov 4, ct_a, ca_ty
+        hex.sub 4, ct_a, cpy + 4*dw
+        hex.abs 4, ct_a
+        hex.scmp 4, ct_a, ct_b, hit, nxt, nxt
+      hit:
+        hex.zero 1, cp_ok
+      nxt:
+    }
     def try_move_mon root, height, maxstep, here_floor, dropmax \
             @ body, fail, done, out, t1, t2, t3, cst, gap \
             < cp_ok, cp_floor, cp_ceil, cp_drop, cp_seedf, mv_ok {

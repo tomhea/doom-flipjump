@@ -2074,9 +2074,10 @@ class ReferenceModel:
                     # spend the frame's budget while 24 monsters were turned away. Both counters are
                     # monotone, so fj still latches `tstop` once BOTH are spent.
                     mon = t.type in MONSTER_TYPES
-                    # M7 P3.2 (docs/gp-monsters.md 8.2, D3 e): SEEN -- the sprite projects in front and
-                    # one of its columns is still OPEN when its leaf is reached, tested BEFORE the
-                    # budgets and the minimum-size cull, so sight never depends on degradation
+                    # M7 P3.2 (docs/gp-monsters.md 8.2, D3 e): SEEN -- the sprite projects in front at the
+                    # BASE monster size cull (MIN_SPRITE_H_MONSTER, not the soft budgets' raise) and one of
+                    # its columns is still OPEN when its leaf is reached, tested BEFORE the count budgets:
+                    # sight never depends on degradation
                     if seen_out is not None and mon:
                         _sart = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None
                                  else self.art_of_lump(sprite_wad, tview[0], spr_cache))
@@ -2084,7 +2085,7 @@ class ReferenceModel:
                             _sss = scene.cmap.subsectors[ss_first[seg_i]]
                             _ssec = self._seg_sector(lds, sds, secs, scene.cmap.segs[_sss.firstseg])
                             _spr = self.project_thing(viewx, viewy, viewangle, viewz, t.x, t.y,
-                                                      _ssec.floor_h, _sart, 0)
+                                                      _ssec.floor_h, _sart, MIN_SPRITE_H_MONSTER)
                             if _spr is not None and any(not drawn[x] for x in
                                                         range(max(0, _spr[0]), min(W, _spr[1] + 1))):
                                 seen_out.add(t_di)

@@ -554,7 +554,10 @@ class TicEvents:
         return dataclasses.asdict(self)
 
 
-MONSTER_MODES = ("idle", "full")
+# M7 P3 (docs/gp-monsters.md): the MODEL MODES a rung's binary is exact against -- "idle" (P3.1: nothing wakes),
+# "wake" (P3.2a: A_Look wakes; A_Chase runs its counters and re-acquires, but neither moves nor decides an
+# attack), "full" (everything)
+MONSTER_MODES = ("idle", "wake", "full")
 
 
 def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:
@@ -1079,6 +1082,8 @@ class World(CombatMixin):
                 return
             self._set_state(m, info.spawnstate, True, ev)
             return
+        if self.monsters == "wake":
+            return                                       # P3.2a: no attack decision, no move
         if ws.mon_justattacked[m]:
             ws.mon_justattacked[m] = 0
             self._new_chase_dir(m, ev)

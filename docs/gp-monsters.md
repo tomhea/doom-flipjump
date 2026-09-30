@@ -173,8 +173,11 @@ is a behaviour change: a new set version (v5) and the owner's approval before an
 The model's sight moves from exact 2D LOS to the handoff's rule (7.2, D3 e); the frozen set is re-planned as v5
 under it and put to the owner with its criteria and B0 before it is frozen.
 - **seen** (`mon_seen`, per monster): set by the picture of the PREVIOUS frame -- the monster's sprite projects in
-  front of the viewer and at least one of its columns is still OPEN (no wall drawn there yet) when the walk reaches
-  its leaf, tested BEFORE the thing budgets and the minimum-size cull (D3 e: sight must not depend on degradation).
+  front of the viewer at the BASE monster size cull (`MIN_SPRITE_H_MONSTER`; the soft budgets' raise does not
+  apply) and at least one of its columns is still OPEN (no wall drawn there yet) when the walk reaches its leaf,
+  tested BEFORE the count budgets (D3 e: sight must not depend on degradation). The fixed base cull stays: it is not
+  a degradation, and keeping it lets the fj reuse the draw path's projection (a `fixed_div`, ~38.5K) -- an extra
+  projection only when a count budget is spent or the soft raise rejected the monster.
   `reference_model.render_wall_frame(seen_out=)` records it; the fj records it in the thing pass. Level start: none.
 - **waking sight** (A_Look's ambush test and P_LookForPlayers, A_Chase's re-acquire included): seen, or the
   monster's sector REJECT-visible from the player's (E1M1's REJECT lump, `assets/freedoom1.wad`) AND

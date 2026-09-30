@@ -158,3 +158,19 @@ today, ~1-4M even if a cell walk cut the candidates tenfold: an order of magnitu
 (handoff 7.2, D3 e) costs a flag write per drawn monster; its behaviour differs from LOS for 0.19 monsters per fight
 frame with sight but not drawn (mostly behind the player) and 0.02 drawn without sight (phase 0's census, s4v1). It
 is a behaviour change: a new set version (v5) and the owner's approval before any P3.2 binary is measured.
+
+### 8.2 The sight rule, DECIDED (the owner, 2026-09-30: "Seen rule + set v5")
+
+The model's sight moves from exact 2D LOS to the handoff's rule (7.2, D3 e); the frozen set is re-planned as v5
+under it and put to the owner with its criteria and B0 before it is frozen.
+- **seen** (`mon_seen`, per monster): set by the picture of the PREVIOUS frame -- the monster's sprite projects in
+  front of the viewer and at least one of its columns is still OPEN (no wall drawn there yet) when the walk reaches
+  its leaf, tested BEFORE the thing budgets and the minimum-size cull (D3 e: sight must not depend on degradation).
+  `reference_model.render_wall_frame(seen_out=)` records it; the fj records it in the thing pass. Level start: none.
+- **waking sight** (A_Look's ambush test and P_LookForPlayers, A_Chase's re-acquire included): seen, or the
+  monster's sector REJECT-visible from the player's (E1M1's REJECT lump, `assets/freedoom1.wad`) AND
+  P_AproxDistance <= 128. The facing test (behind and beyond MELEERANGE: not seen) applies as before.
+- **attack sight** (the melee and missile range checks): seen, or within 128 units and the exact 2D LOS
+  (`World.los_points`) -- the handoff's "short trace over the collision cells" for a near monster not drawn.
+- The model steps it through a hook: after each tic, `doomfj.sight.SeenHook` renders the world as the binary draws
+  it (positions, views, what is hidden) and writes `mon_seen`. A World without the hook sees nothing drawn.

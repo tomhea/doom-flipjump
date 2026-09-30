@@ -529,3 +529,50 @@ blocks only. All of it is the rung's own code. **Kill criterion (size, 1.25x) BR
    binding metric (budget +0.1M).
 
 
+
+## P3.0 the monster tables, uncalled (class S) -- declared 2026-09-29, before the build
+
+**What**: `docs/gp-monsters.md` section 6. `doomfj.monstercode` emits four D4 tables in the game tier, called by
+nothing: `mstate` (the monster state table: next, tics, action, view group, over `gamedata.STATE_INDEX`), `mturn`
+(A_Chase's turn), `mopp` (P_NewChaseDir's opposite), `mrnd` (the monster stream's P3 call sites folded into one
+outcome table, D10). The monster collision cells are NOT in P3.0 -- their shape is P3.2's (the drop-off and
+BLOCKMONSTERS rules decide the stubs), and pricing showed each radius class is a player-sized cell set (~52K fj
+lines, ~226K labelled words before its tables and tail).
+
+**Budget**: size <= +0.1M words (four small tables); ops: the placement tax only (nothing is called).
+
+**Kill criteria** (class S: no pixel moves):
+1. Host: each table equals its Python source -- gamedata's states (127 monster states, 77 view groups),
+   `world.turn_toward`, `gamedata.OPPOSITE`, `rng.outcome_table` -- with a packing mutation caught
+   (`tests/host/test_monstercode.py`).
+2. fj: every entry of every table looked up twice on the engine against its source, a mutated entry caught
+   (`tests/fj/test_monster_tables_fj.py`).
+3. Every gate byte- and state-exact; deg_gate byte-exact with the SAME picture; B0 v4 exact.
+4. msframe against P2b's binary: B SLOWER does not ship (class S) unless explained as placement and accepted as
+   P3's entry price by the owner.
+5. pinreport: no hot word lost.
+
+**Row** (blocked38, sha256 `457e175106f10776`, built at 8cb0865; `docs/ship-evidence/blocked38_*`):
+
+| measure | blocked37 (P2b) | blocked38 (P3.0) | delta |
+|---|---|---|---|
+| combat set v4 binding | 14,223,921 | 14,250,398 | +26,477 |
+| gamespeed binding | 13,642,413 | 13,696,511 | +54,098 |
+| profx mean frame (gamespeed's games) | 11,600,461 | 11,650,201 | +49,740 (the render walk +48,435) |
+| size (% of 2^27) | 28.24% | 28.24% | +10,936 words (budget 0.1M) |
+| ms/frame (msframe, one run, A = blocked37, pixels identical) | 61.3 | 61.7 | NOT SEPARATED (x0.995) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**The placement tax**: nothing calls the four tables. Outside the render walk the phases moved by at most +1,249
+(collision 123,868 -> 125,117, its seed walks +701; eye point +302; move/turn -202; the rest within +/- 70); the
+render walk moved +48,435 -- the blocking pass re-rolling its pins on a changed table count. That is P3's entry
+price, and it is small against the budget (+0.3M for all of P3).
+
+**Verdict: every kill criterion met.**
+1. Host: `tests/host/test_monstercode.py` (each table against its source, a packing mutation caught).
+2. fj: `tests/fj/test_monster_tables_fj.py` -- every entry twice on the engine, a mutated entry caught.
+3. m2_std_gate, m3_gate byte- and state-exact with their selftests; p2a_gate S1-S13; deg_gate BYTE-EXACT with
+   EVERY op count equal to blocked37's; B0 v4 exact on every frame.
+4. msframe NOT SEPARATED with the pictures identical: not B SLOWER, class S ships.
+5. pinreport 20 of 20; the restore sets re-keyed (`p30_rekey.log`).
+

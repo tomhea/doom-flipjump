@@ -323,6 +323,9 @@ set is v4 from here** (v3 but R2-spectre-corridor, which rides lift 103), frozen
 
 ### P3 -- monsters alive
 First a build that EMITS every new table and calls none of it -- its delta is the pure placement tax.
+**P3.0 DONE 2026-09-30** (blocked38 ships, class S: the tables' placement tax +54,098 on gamespeed, msframe NOT
+SEPARATED; `docs/gp-monsters.md`, `docs/gp-ledger.md`). P3.1 (idle life) next; P3.2 waits on the owner's sight
+decision (exact LOS against the handoff's "seen" rule, raised with measured numbers).
 Then the state machine, K-slot scheduler, RNG, animation and rotation, waking, chase on the cells,
 thing collision, per-move rebind in use, doors opened by monsters and reversing on them, D3's
 compositor rules. Gate: `fight` (partial), fuzz. Budget +0.3M.

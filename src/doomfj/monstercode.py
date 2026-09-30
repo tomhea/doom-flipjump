@@ -372,6 +372,21 @@ def _sub16(dst, a, b):
     return ["    hex.mov 4, %s, %s" % (dst, a), "    hex.sub 4, %s, %s" % (dst, b)]
 
 
+P32A_PERSISTED = ("mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen")
+
+
+def persisted_monster_decls(w, mode: str) -> list:
+    """the monsters' PERSISTED cells as the emitter declares them, for the game tier's model `mode` (widths from the
+    schema; values do not matter): the restore sets' standalone globals (scratchpad/m5_setfile.py) and the test that
+    checks them (tests/host/test_restore_set_shipped.py) both read this one list"""
+    n = w.layout.nmon
+    out = monster_decls(w.schema, n)
+    if mode in ("wake", "chase"):
+        out += [d for d in p32a_decls(w.schema, n, {f: [0] * n for f in P32A_FIELDS}, n)
+                if d.split(":")[0] in P32A_PERSISTED]
+    return out
+
+
 def p32a_decls(schema, nmon: int, values: dict, nthings: int) -> list:
     """the wake tic's cells (target, reaction, threshold, movedir per slot; the cursor), its scratch, and the
     per-SLOT seen flags `thseen` the render writes (`nthings` = the slots they cover)"""

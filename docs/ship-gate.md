@@ -57,7 +57,7 @@ the same series, with the same counts cache; blocked25's own line, 09-11 18:04, 
 and followed the renderer fix of FINDINGS CE):
 
 ```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p14.json.gz
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p31.json.gz
 ```
 
 `build_labeled.py` wraps `build_blocked.py` with the label spy on (everything after `--` is
@@ -147,7 +147,7 @@ the same counts) -- as after PR #87 (item 4). The next ship build re-signs it. (
 it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
 
 **blocked31 (2026-09-27, M7 P1.4): the line changes its heat list** to
-`--pin-heat scratchpad/12m/heat_blocked27_p14.json.gz` -- blocked27's list re-keyed through the four
+`--pin-heat scratchpad/12m/heat_blocked27_p31.json.gz` -- blocked27's list re-keyed through the four
 parameter-count changes P1.4 made on its paths (`heat_rekey.py`; the list records the renames, and
 pinreport reads the hot words through them). The source changed, so the counts cache MISSED and
 recounted (21,118 groups before alias merging, 342,750 tables, 2,044 s) and the build, at 311f23f,

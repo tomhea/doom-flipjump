@@ -1,0 +1,7 @@
+$ python scratchpad/12m/heat_rekey.py --in scratchpad/12m/heat_blocked27_p16.json.gz --out scratchpad/12m/heat_blocked27_p31.json.gz --rename sim.thing_pass:3:7 --rename sim.thing_load:4:7 --rename frame.thing_load_cold:4:5 --rename frame.thing_record_body:24:28
+  sim.thing_pass(3)->(7)                           3 group key(s), 579 site path(s)
+  sim.thing_load(4)->(7)                           0 group key(s), 493 site path(s)
+  frame.thing_load_cold(4)->(5)                    0 group key(s), 140 site path(s)
+  frame.thing_record_body(24)->(28)                0 group key(s), 2,428 site path(s)
+scratchpad/12m/heat_blocked27_p31.json.gz: 20 groups, 35,894 sites; decompressed sha256 1468d7fbf91b235d
+rc=0

@@ -98,9 +98,17 @@ class SeenHook:
         for m, v in self._mviews(world).items():
             views[self.views.mdi[m]] = v
         seen = set()
-        world.rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, world.mapname), self._scene(world),
-                                   sprite_wad=self.art, thing_positions=pos, thing_hidden=hidden,
-                                   thing_views=views, seen_out=seen, **self.kw)
+        # the picture is the BINARY's, whatever instruments the oracle module (scratchpad/gp/census_lib patches
+        # reference_model's drawable_things / baked_thing_mask to draw ITS frame): render through the real ones
+        from doomfj import reference_model as RMOD, things as TH
+        saved = (RMOD.drawable_things, RMOD.baked_thing_mask)
+        RMOD.drawable_things, RMOD.baked_thing_mask = TH.drawable_things, TH.baked_thing_mask
+        try:
+            world.rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, world.mapname), self._scene(world),
+                                       sprite_wad=self.art, thing_positions=pos, thing_hidden=hidden,
+                                       thing_views=views, seen_out=seen, **self.kw)
+        finally:
+            RMOD.drawable_things, RMOD.baked_thing_mask = saved
         for m in range(n):
             ws.mon_seen[m] = int(self.views.mdi[m] in seen)
 

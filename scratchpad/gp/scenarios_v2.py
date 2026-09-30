@@ -321,10 +321,17 @@ def angle_err(want: int, have: int) -> int:
 
 
 def new_world() -> "W.World":
-    w = W.World(skill=SKILL, sight_rule=SIGHT_RULE)
+    return apply_sight_rule(W.World(skill=SKILL))
+
+
+def apply_sight_rule(w) -> "W.World":
+    """the set's sight rule on ANY world -- the census makes its own (census_lib), and a world without the rule
+    replays a different model (the v5 plan's first validation: the census world ran exact LOS)"""
+    hook = None
     if SIGHT_RULE == "seen":
         from doomfj.sight import SeenHook
-        w.seen_hook = SeenHook(w)           # this tic's picture writes the next tic's mon_seen
+        hook = SeenHook(w)                  # this tic's picture writes the next tic's mon_seen
+    w.set_sight_rule(SIGHT_RULE, hook)
     return w
 
 
@@ -1284,7 +1291,7 @@ def replay(run: dict, census: bool = False) -> dict:
     """one frozen run on a fresh model: poses, events, the population (geometric; DRAWN too when
     `census`, on the census's own World), doors, movement, dodges, B0's camera reconstruction"""
     c = new_census() if census else None
-    w = start_world(run["setup"], c.world if c else None)
+    w = start_world(run["setup"], apply_sight_rule(c.world) if c else None)
     mirror = BinaryMirror(w)
     keys = [str_to_keys(s) for s in run["keys"]]
     poses, pops = [], []

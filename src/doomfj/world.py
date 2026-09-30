@@ -599,14 +599,7 @@ class World(CombatMixin):
         # M7 P3.2 (docs/gp-monsters.md 8.2; the owner, 2026-09-30): "seen" -- waking by the picture or
         # REJECT within 128 units, attacking by the picture or the near-trace -- else (the default,
         # set v4's model) one exact-LOS `sight` for both. `seen_hook` writes mon_seen after each tic.
-        assert sight_rule in ("los", "seen"), sight_rule
-        self.sight_rule, self.seen_hook = sight_rule, seen_hook
-        if sight_rule == "seen":
-            from doomfj import sight as _S
-            self.reject = _S.load_reject(mapname)
-            self.wake_sight, self.attack_sight = _S.wake_sight, _S.attack_sight
-        else:
-            self.wake_sight = self.attack_sight = lambda w, m: w.sight(w, m)
+        self.set_sight_rule(sight_rule, seen_hook)
         self.k_heavy = k_heavy
         self.cursor_policy = cursor_policy
         self.strict = strict
@@ -831,6 +824,18 @@ class World(CombatMixin):
         self._decor_now = self._decor_for(skill)
 
     # ---------------------------------------------------------------------------- the tic
+    def set_sight_rule(self, sight_rule: str, seen_hook=None) -> None:
+        """M7 P3.2: the sight rule (docs/gp-monsters.md 8.2) -- "seen": waking by the picture or REJECT within 128,
+        attacking by the picture or the near exact LOS; "los": one exact-LOS `sight` for both (v2 .. v4)"""
+        assert sight_rule in ("los", "seen"), sight_rule
+        self.sight_rule, self.seen_hook = sight_rule, seen_hook
+        if sight_rule == "seen":
+            from doomfj import sight as _S
+            self.reject = _S.load_reject(self.mapname)
+            self.wake_sight, self.attack_sight = _S.wake_sight, _S.attack_sight
+        else:
+            self.wake_sight = self.attack_sight = lambda w, m: w.sight(w, m)
+
     def tic(self, keys: Optional[dict] = None) -> TicEvents:
         keys = {k: bool((keys or {}).get(k)) for k in KEYS}
         ev = TicEvents(tic=self.tic_count)

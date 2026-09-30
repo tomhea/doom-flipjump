@@ -35,22 +35,42 @@ class MonsterPhase:
                  rm=None):
         from doomfj import gamedata as gd
         from doomfj.world import World
-        self.world = World(map_wad, mapname, gd.SK_HARD if skill is None else skill, rm=rm, monsters=mode)
+        # M7 P3.2a: a mode that wakes sees by the picture (docs/gp-monsters.md 8.2) -- the gate hands it the
+        # seen set of the picture it drew (`set_seen`), as the binary's render writes its flags
+        self.world = World(map_wad, mapname, gd.SK_HARD if skill is None else skill, rm=rm, monsters=mode,
+                           sight_rule="los" if mode == "idle" else "seen")
         self.gd = gd
 
     def reset(self, skill: int) -> None:
         self.world.reset(skill)
 
-    def tic(self) -> None:
+    def tic(self, x16: Optional[int] = None, y16: Optional[int] = None, angle: Optional[int] = None) -> None:
+        """one monster tic -- the player where the gate's world put him this frame (the wake mode looks at him)"""
         from doomfj.world import TicEvents
+        ws = self.world.ws
+        if x16 is not None:
+            ws.px = x16 - (1 << 32) if x16 >> 31 & 1 else x16
+            ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
+            ws.pangle = angle & 0xFFFFFFFF
         self.world._monsters_phase(TicEvents(0))
+
+    def set_seen(self, slots) -> None:
+        """the picture just drawn: its seen monsters (slots) are the next tic's `mon_seen`"""
+        ws = self.world.ws
+        for m in range(self.world.layout.nmon):
+            ws.mon_seen[m] = int(m in slots)
 
     def state(self) -> Dict[str, tuple]:
         """the cells the fj holds per monster slot: (mon_state, mon_tics, mon_facing, mon_active)"""
         ws = self.world.ws
         n = self.world.layout.nmon
-        return {"mon_state": tuple(ws.mon_state[:n]), "mon_tics": tuple(ws.mon_tics[:n]),
-                "mon_facing": tuple(ws.mon_facing[:n]), "mon_active": tuple(ws.mon_active[:n])}
+        out = {"mon_state": tuple(ws.mon_state[:n]), "mon_tics": tuple(ws.mon_tics[:n]),
+               "mon_facing": tuple(ws.mon_facing[:n]), "mon_active": tuple(ws.mon_active[:n])}
+        if self.world.monsters != "idle":        # M7 P3.2a: the wake mode's cells, and the seen flags
+            out.update({"mon_target": tuple(ws.mon_target[:n]), "mon_reaction": tuple(ws.mon_reaction[:n]),
+                        "mon_threshold": tuple(ws.mon_threshold[:n]), "mon_movedir": tuple(ws.mon_movedir[:n]),
+                        "sched_cursor": ws.sched_cursor, "thseen": tuple(ws.mon_seen[:n])})
+        return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:
         """{monster slot: (lump, mirrored)} for every active monster, seen from the viewer"""
@@ -78,6 +98,10 @@ class MonsterViews:
         self.mdi = [key[(t.type, t.x, t.y, t.angle, t.flags)] for t in world.mon_things]
         self.patches = anim_patches(sprite_wad, anim_frames(map_wad, mapname))
         self.rm = rm
+
+    def slots_of(self, seen_drawables) -> set:
+        """a render's `seen_out` (drawable indices) as monster slots"""
+        return {m for m, di in enumerate(self.mdi) if di in seen_drawables}
 
     def __call__(self, phase: "MonsterPhase", x16: int, y16: int) -> list:
         out = [None] * self.n

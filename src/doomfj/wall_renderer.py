@@ -132,6 +132,9 @@ TIER_FLAGS = ("things", "player_sim", "collide", "moving_things",
 from doomfj import gamedata as _gd                               # noqa: E402 (after the oracle)
 SKILLS = (_gd.SK_EASY, _gd.SK_MEDIUM, _gd.SK_HARD)
 BOOT_SKILL = _gd.SK_HARD
+# M7 P3 (docs/gp-monsters.md): the game tier's MONSTER MODE -- the model mode its binary is exact against
+# ("idle" P3.1, "wake" P3.2a)
+MONSTER_MODE = "wake"
 
 
 def tier_flags(tier: str) -> dict:
@@ -1422,8 +1425,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _p31 = p31_parts(rm, map_wad, mapname, sprite_wad, _anim,
                          [map_wad.things(mapname)[w_] for w_ in sorted(_mt_keep)],
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
-                         cache=spr_cache)
+                         cache=spr_cache, mode=MONSTER_MODE)
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
+    _SEEN = 1 if (_p31 and _p31.get("mode") == "wake") else 0
     _ANIM_SEL = "thsel_leaf, thsel_ret" if _ANIM else "0, 0"
     if _ANIM:
         sprlight, spr_cls = _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds,
@@ -1502,7 +1506,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{1 if (mt and _ANIM) else 0}, {'trb_mir' if (mt and _ANIM) else 0}, "
                 f"{'trb_mu' if (mt and _ANIM) else 0}, "
                 # M7 P3.1: the light class's width in bytes (two in the animated game tier)
-                f"{2 if _ANIM else 1}"]
+                f"{2 if _ANIM else 1}, "
+                # M7 P3.2a: SEEN -- the runtime body of the wake mode marks each monster's flag
+                f"{1 if (mt and _SEEN) else 0}, {'sp_sa' if (mt and _SEEN) else 0}, "
+                f"{'trb_seenf' if (mt and _SEEN) else 0}, {'trb_one' if (mt and _SEEN) else 0}"]
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -2369,6 +2376,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M13-bakedbands: lines mode has NO per-frame band state to reset (the lists are static data)
     pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
     pass1 += [f";{_pfx(mapname)}_dsc_walk", "dsc_done:"]
+    # M7 P3.2a: the monsters tic AFTER the eye's point location (the wake mode's REJECT reads the player's
+    # sector) and before the render, which marks this frame's seen flags for the next tic
+    pass1 += list(_p31.get("tic_after_eye", ())) if _p31 else []
     pass1.append("present.begin_frame_collines")
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
@@ -2447,6 +2457,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               # called by nothing yet -- the build that carries them prices the placement tax
               + (_monster_tables() if _movers_on else [])
               + ([_p31["mview"], _p31["mrot"]] if _p31 else [])            # M7 P3.1
+              + (list(_p31.get("tables", ())) if _p31 else [])             # M7 P3.2a: REJECT rows, lfsec
               # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
               # which changes the shipped text and so its emit hash -- caught by
               # scratchpad/cr/emit_baseline.py, which is exactly what that control is for.
@@ -2590,7 +2601,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{'sp_lt_hi' if _ANIM else 0}",
                 "stl.fret tp_ret"] if moving_things else []),
              # M7 P3.1: the row select and the rotation leaf it calls
-             *((_p31["select"] + _p31["rotation"]) if _p31 else []),
+             *((_p31["select"] + _p31["rotation"] + list(_p31.get("leaves", ()))) if _p31 else []),
              # idea 20 / tuning round 5: 288 ops land the pass-2 leaf region on a cheaper
              # base -- the first time THIS point fired in five rounds.
              "rep(288, i) stl.fj 0, 0",
@@ -2645,6 +2656,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
           *(mover_decls(len(_lift_slot)) if _movers_on else []),          # M7 P2b
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
+          *(_p31.get("decls_wake", ()) if _p31 else ()),
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2

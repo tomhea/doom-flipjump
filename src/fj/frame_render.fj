@@ -530,8 +530,22 @@ ns frame {
       skip:
     }
 
-    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic, mir, mirf, miru, ltw \
-            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end \
+    // M7 P3.2a: mark a monster SEEN once per record -- write 1 at the address in `sa` (its per-thing flag, which
+    // the next frame's monster tic reads); `sa` 0 = no flag (a static thing)
+    def rec_goto dst {                          // a jump a rep() can gate
+        ;dst
+    }
+
+    def rec_seen_mark sa, sflag, one @ done {
+        hex.if1 1, sflag, done
+        hex.set 1, sflag, 1
+        hex.if0 w/4, sa, done
+        hex.write_hex sa, one
+      done:
+    }
+
+    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic, mir, mirf, miru, ltw, seen, sa, sflag, one \
+            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_hit \
             < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, \
               gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8 {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
@@ -543,9 +557,11 @@ ns frame {
         // is all-columns-WALL-DRAWN -- NOT the plane-attribution counter. Stopping on
         // n_claimed==vieww instead hid every monster in a room the moment a near marking seg
         // finished the plane claim (history: docs/handoff-visual-features.md).
+        rep(seen, k) hex.zero 1, sflag               // M7 P3.2a: this thing not yet marked seen
         hex.if0 2, sp_mon, scenery_budget
         hex.set 2, trb_climit, monbudget
-        hex.cmp 2, n_mon, trb_climit, budget_ok, ret, ret
+        rep(1-seen, k) hex.cmp 2, n_mon, trb_climit, budget_ok, ret, ret
+        rep(seen, k) hex.cmp 2, n_mon, trb_climit, budget_ok, seen_probe, seen_probe
       scenery_budget:
         hex.set 2, trb_climit, budget
         hex.cmp 2, n_thing, trb_climit, budget_ok, ret, ret
@@ -571,7 +587,8 @@ ns frame {
         // outputs. Pricing by ADDING keeps the frame byte-exact -- a stub would price itself
         // plus everything downstream (fj-cost-model, the `noproj` retraction).
         rep(ttwice, k) proj.project_thing trb_dvis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dthp, trb_dtis, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
-        hex.if0 1, trb_vis, ret
+        rep(1-seen, k) hex.if0 1, trb_vis, ret
+        rep(seen, k) hex.if0 1, trb_vis, seen_probe2
         // M14-perf: PAST EVERY REJECT -- now, and only now, read the half of the row that only a
         // drawn sprite needs. `mt` is 0 on the static path, where the registers are baked by the
         // leaf's xor_by block instead and this expands to nothing.
@@ -701,6 +718,7 @@ ns frame {
         hex.if0 1, trb_drawn_v, slot_check          // a nearer wall owns this column -> the thing is hidden
         ;col_next
       slot_check:
+        rep(seen, k) .rec_seen_mark sa, sflag, one        // M7 P3.2a: an OPEN column -- seen
         frame.read_byte5 trb_sprflag_v, trb_sprflag_p
         hex.if0 2, trb_sprflag_v, slot_a            // no fragment yet -> slot A (offset 0, flag 1)
         // V4b: slot A taken -- take slot B (byte offset 8 of the same 16-byte slot, flag 2),
@@ -763,6 +781,42 @@ ns frame {
         hex.set 1, tstop, 1
       ret:
         stl.fret thing_ret
+        // M7 P3.2a (docs/gp-monsters.md 8.2): SEEN for a monster the draw path turned away -- the count budget
+        // (seen_probe) or the soft raise's min size (seen_probe2, only when degfl raised it): project at the
+        // BASE size (degfl 0) and look for one open column. `sa` is 0 for a thing with no seen flag.
+      seen_probe2:
+        rep(seen, k) hex.if0 1, degfl, ret
+      seen_probe:
+        rep(seen, k) hex.if0 w/4, sa, ret
+      seen_proj:
+        rep(seen, k) hex.set 1, degfl, 0
+        rep(seen, k) proj.project_thing trb_vis, trb_tx1, trb_tx2, trb_tytop, trb_thpx, trb_tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
+        rep(seen, k) hex.if0 1, trb_vis, ret
+      seen_scan:
+        rep(seen, k) hex.mov 8, trb_col_x, trb_tx1
+        rep(seen, k) hex.sign 8, trb_tx1, seen_x1neg, seen_x1ok
+      seen_x1neg:
+        rep(seen, k) hex.zero 8, trb_col_x
+      seen_x1ok:
+        rep(seen, k) hex.set 8, trb_cbound, viewwc
+        rep(seen, k) hex.dec 8, trb_cbound
+        rep(seen, k) hex.scmp 8, trb_tx2, trb_cbound, seen_x2ok, seen_x2ok, seen_x2c
+      seen_x2c:
+        rep(seen, k) hex.mov 8, trb_tx2, trb_cbound
+      seen_x2ok:
+        rep(seen, k) hex.set w/4, trb_drawn_b, drawn
+        rep(seen, k) frame.ptr_index4 trb_drawn_p, trb_drawn_b, trb_col_x
+      seen_loop:
+        rep(seen, k) hex.cmp 2, trb_col_x, trb_tx2, seen_col, seen_col, ret
+      seen_col:
+        rep(seen, k) hex.read_hex trb_drawn_v, trb_drawn_p
+        rep(seen, k) hex.if0 1, trb_drawn_v, seen_hit
+        rep(seen, k) hex.ptr_add trb_drawn_p, 1
+        rep(seen, k) hex.inc 2, trb_col_x
+        rep(seen, k) .rec_goto seen_loop
+      seen_hit:
+        rep(seen, k) .rec_seen_mark sa, sflag, one
+        rep(seen, k) .rec_goto ret
                                                 //   (budget/monbudget/dsoft*) or a min-height bar
                                                 //   (sprbminh/lowh) — reloaded before each cmp
       end:

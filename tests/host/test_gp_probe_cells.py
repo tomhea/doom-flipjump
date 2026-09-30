@@ -103,9 +103,14 @@ def test_only_the_skill_menu_is_optional(tmp_path):
     for one in ("mon_state", "mon_active"):               # M7 P3.1: the monsters' four
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))
+    for one in ("mon_target", "thseen"):                   # M7 P3.2a: the wake mode's six
+        with pytest.raises(KeyError, match="come together"):
+            _table(tmp_path, drop=(one,))
     assert P.OPTIONAL_LABELS == {"menu_scr", "menu_sel", "dreq", "pcard", "wfired", "lvdone", "pusedn",
                                  "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",
-                                 "mon_state", "mon_tics", "mon_facing", "mon_active"}
+                                 "mon_state", "mon_tics", "mon_facing", "mon_active",
+                                 "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",
+                                 "thseen"}
 
 
 def test_a_table_before_p2a1_loads_and_its_door_cells_are_dropped(tmp_path):

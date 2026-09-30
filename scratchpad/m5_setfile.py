@@ -88,6 +88,13 @@ def standalone_globals(doors_wad=None, mapname="E1M1"):
         from doomfj.world import World
         wd = World(w, mapname)
         out += monster_decls(wd.schema, wd.layout.nmon)
+        # M7 P3.2a: the wake mode's cells (p32a_decls' persisted ones -- the scratch is rewritten every frame)
+        from doomfj.monstercode import P32A_FIELDS, p32a_decls
+        n = wd.layout.nmon
+        keep = [d for d in p32a_decls(wd.schema, n, {f: [0] * n for f in P32A_FIELDS}, n)
+                if d.split(":")[0] in ("mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",
+                                            "thseen")]
+        out += keep
     return out
 
 

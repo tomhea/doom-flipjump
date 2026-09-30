@@ -220,7 +220,7 @@ def _thing_key(t):
 
 
 def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_near: bool, boot_skill: int,
-              skills, cache: dict) -> dict:
+              skills, cache: dict, mode: str = "idle") -> dict:
     """everything P3.1 adds to the game tier, from the model's own sources:
       * `view_rows`: one thing row per distinct monster VIEW (lump, mirrored) -- `things.thing_rows`' layout from the
         view's art, dw's bit 7 set for a mirrored view -- appended after the runtime things' own rows;
@@ -265,7 +265,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     nrows = nt + len(rows)
     rn = max(1, ((nrows - 1).bit_length() + 3) // 4)
     # the monster slots, and which runtime thing each is
-    w = World(map_wad, mapname, boot_skill, rm=rm)
+    assert mode in ("idle", "wake"), mode
+    wake = mode == "wake"
+    w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los")
     nmon, schema = w.layout.nmon, w.schema
     if nmon == 0 or not rows:
         return None                      # a map without monsters animates nothing
@@ -273,16 +275,20 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     rt_slot = [slot_of.get(_thing_key(t)) for t in rt_things]
     assert sorted(m for m in rt_slot if m is not None) == list(range(nmon)), "every monster slot is a runtime thing"
 
+    fields = P31_FIELDS + (P32A_FIELDS if wake else ())
+
     def values(sk):
         w.reset(sk)
-        return {f: list(getattr(w.ws, f)[:nmon]) for f in P31_FIELDS}
+        return {f: list(getattr(w.ws, f)[:nmon]) for f in fields}
 
     boot = values(boot_skill)
     restart = []
     for sk in skills:
         v = values(sk)
         restart.append(["    hex.set %d, %s + %d*dw, %d" % (cell_nibbles(schema, f), f, cell_nibbles(schema, f) * m,
-                                                            v[f][m]) for f in P31_FIELDS for m in range(nmon)])
+                                                            v[f][m]) for f in fields for m in range(nmon)]
+                       + (["    hex.set %d, sched_cursor, %d" % (cell_nibbles(schema, "sched_cursor"), w.ws.sched_cursor),
+                           "    hex.zero %d, thseen" % nmon] if wake else []))
     # the row select
     sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
         "thsel_h%d" % h if 16 * h < nt else "thsel_none" for h in range(16))]
@@ -291,6 +297,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             "thsel_s%d" % (16 * h + l) if 16 * h + l < nt else "thsel_none" for l in range(16))]
     for t, m in enumerate(rt_slot):
         sel.append("  thsel_s%d:" % t)
+        if wake:
+            sel.append("    hex.set w/4, sp_sa, thseen + %d*dw" % m if m is not None else "    hex.zero w/4, sp_sa")
         if m is not None:
             sel += ["    hex.mov 8, mr_tx, sp_x", "    hex.mov 8, mr_ty, sp_y",
                     "    hex.mov 1, mr_face, mon_facing + %d*dw" % m,
@@ -302,11 +310,33 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     "    mview.lookup sp_ti, ts_idx"]
         sel.append("    stl.fret thsel_ret")
     sel += ["  thsel_none:", "    stl.fret thsel_ret"]
+    extra = {}
+    if wake:
+        w.reset(boot_skill)
+        secs = sorted({w._mon_sector(m) for m in range(nmon)})
+        slots = [dict(t=m, x=w.ws.mon_x[m], y=w.ws.mon_y[m], rj="rj%d" % w._mon_sector(m),
+                      see_idx=gd.STATE_INDEX[w.mon_info[m].seestate],
+                      see_tics=gd.STATES[w.mon_info[m].seestate].tics) for m in range(nmon)]
+        nleaf = len(w.cmap.subsectors)
+        extra = {
+            "tic_after_eye": (p32a_tic_lines(schema, nmon, slots, exit_guard=True)
+                              + ["    hex.zero %d, thseen" % nmon]),               # the render marks this frame's
+            "tables": ([generate_dispatch_table_fj("rj%d" % s_, [int(w.reject.visible(s_, q)) for q in range(w.reject.nsec)],
+                                                   index_nibbles=2, result_nibbles=1) for s_ in secs]
+                       + [generate_dispatch_table_fj("lfsec", list(w.leaf_sector),
+                                                     index_nibbles=max(1, ((nleaf - 1).bit_length() + 3) // 4),
+                                                     result_nibbles=2)]),
+            "leaves": p32a_leaves(),
+            "decls_wake": (p32a_decls(schema, nmon, {**{f: boot[f] for f in P32A_FIELDS}, "sched_cursor": w.ws.sched_cursor},
+                                 nmon)
+                      + P32A_SCRATCH + ["sp_sa: hex.vec w/4", "trb_seenf: hex.vec 1", "trb_one: hex.vec 1, 1"]),
+        }
     return {
+        "mode": mode, **extra,
         "view_rows": rows, "nrows": nrows, "views": views, "rt_slot": rt_slot, "nmon": nmon, "schema": schema,
         "mview": generate_dispatch_table_fj("mview", mview, index_nibbles=3, result_nibbles=rn),
         "mrot": rot_table_fj(), "select": sel, "rotation": rotation_leaf_lines(1),
-        "tic": mon_tic_lines(schema, nmon),
+        "tic": [] if wake else mon_tic_lines(schema, nmon),
         "decls": (monster_decls(schema, nmon, boot) + MT_DECLS + ROT_DECLS
                   + ["ts_row: hex.vec 6", "ts_idx: hex.vec 3", "thsel_ret: hex.vec w/4",
                      "trb_mir: hex.vec 1", "trb_mu: hex.vec 2"]),
@@ -344,7 +374,7 @@ def _sub16(dst, a, b):
 
 def p32a_decls(schema, nmon: int, values: dict, nthings: int) -> list:
     """the wake tic's cells (target, reaction, threshold, movedir per slot; the cursor), its scratch, and the
-    per-runtime-thing seen flags `thseen` the render writes"""
+    per-SLOT seen flags `thseen` the render writes (`nthings` = the slots they cover)"""
     out = []
     for name in P32A_FIELDS:
         nib = cell_nibbles(schema, name)

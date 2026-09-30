@@ -148,10 +148,12 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     if "mon_state" in table.addrs:
         from doomfj.monsters import MonsterPhase
         from doomfj.wall_renderer import BOOT_SKILL
-        mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode="idle")
+        from doomfj.wall_renderer import MONSTER_MODE
+        mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE)
     for f, fr in enumerate(frames):
         if mph is not None:
-            mph.tic()
+            _ep = override[f][0] if override is not None else fr["exp"][0]
+            mph.tic(_ep[0] & 0xFFFFFFFF, _ep[1] & 0xFFFFFFFF, _ep[2])
         epose, edoors = override[f] if override is not None else fr["exp"]
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
@@ -163,10 +165,13 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         cam += c_part
         door += d_part
         if f % pixel_every == 0 or c_part or d_part:
+            _seen = set()
             want = orc.render(P_signed(epose[0]), P_signed(epose[1]), epose[2], tuple(edoors),
                               movers=fr.get("mheights"),
                               views=orc.monster_views(mph, P_signed(epose[0]), P_signed(epose[1]))
-                              if mph is not None else None)
+                              if mph is not None else None, seen_out=_seen)
+            if mph is not None:
+                mph.set_seen(orc._mviews.slots_of(_seen))
             pix_ok.append(r.frames[mf + f] == want)
             pix_frames.append(f)
     return {"ops_total": r.ops, "frame_ops": ops_f, "state_ok": state_ok, "pix_ok": pix_ok,

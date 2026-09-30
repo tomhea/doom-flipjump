@@ -402,7 +402,8 @@ def _record_program(src, cases):
     # the values the emitter passes (wall_renderer._thing_leaf_body); the sections name no others
     args = dict(hdb=wr.sprite_hd_bucket(CFG), deg=1, sprbminh=DEG_SPRB_MINH,
                 spn=1 if DEG_SPR_NEAR_TZ else 0, lowh=DEG_SPR_LOWRES_H,
-                slotstride=wr.SPR_SLOT_STRIDE)
+                slotstride=wr.SPR_SLOT_STRIDE, ltw=1,          # M7 P3.1: a one-byte light class ...
+                mir=0, mirf=0, miru=0)                        # ... and no mirrored views
     argl = {m: ", ".join(str(args[p]) for p in ps) for m, ps in pars.items()}
     main = ["stl.startup_and_init_all",
             # the renderer's hot-data block, as the emitter places it: a fresh 16^5-bit window, so

@@ -70,7 +70,8 @@ READ = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "dstate", "ddir", "ds
         "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",        # M7 P2b
         "mon_state", "mon_tics", "mon_facing", "mon_active",          # M7 P3.1
         "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",   # M7 P3.2a
-        "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt")                   # M7 P3.2b
+        "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt",                   # M7 P3.2b
+        "mon_justattacked")                                                                       # M7 P3.2c
 MENU_CODES = {"enter": 0x0D, "esc": 0x1B}
 CARD_TYPE = 5
 

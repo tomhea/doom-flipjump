@@ -113,7 +113,7 @@ def test_only_the_skill_menu_is_optional(tmp_path):
                                  "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",
                                  "mon_state", "mon_tics", "mon_facing", "mon_active",
                                  "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",
-                                 "thseen", "mon_movecount", "mon_rng", "mon_floorz", "msec"}
+                                 "thseen", "mon_movecount", "mon_rng", "mon_floorz", "msec", "mon_justattacked"}
 
 
 def test_a_table_before_p2a1_loads_and_its_door_cells_are_dropped(tmp_path):

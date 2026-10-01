@@ -133,8 +133,8 @@ from doomfj import gamedata as _gd                               # noqa: E402 (a
 SKILLS = (_gd.SK_EASY, _gd.SK_MEDIUM, _gd.SK_HARD)
 BOOT_SKILL = _gd.SK_HARD
 # M7 P3 (docs/gp-monsters.md): the game tier's MONSTER MODE -- the model mode its binary is exact against
-# ("idle" P3.1, "wake" P3.2a, "chase" P3.2b)
-MONSTER_MODE = "chase"
+# ("idle" P3.1, "wake" P3.2a, "chase" P3.2b, "decide" P3.2c)
+MONSTER_MODE = "decide"
 
 
 def tier_flags(tier: str) -> dict:
@@ -1432,7 +1432,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
                          cache=spr_cache, mode=MONSTER_MODE)
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
-    _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase")) else 0
+    _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide")) else 0
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
     _chase = _p31.get("chase") if _p31 else None
     if _chase:
@@ -2314,6 +2314,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             from doomfj.collision import monster_cells_fj
             from doomfj.monstermove import (chase_leaf_lines, monster_seed_fj, move_leaf_lines, ncd_leaf_lines,
                                             things_leaf_lines, walk_leaf_lines)
+            from doomfj.monsterdecide import decide_leaves as _decide_leaves
             from doomfj.world import CHASE_DEADZONE, DROPOFF_MAX, NEWCHASEDIR_MAX_TRIES, STEP_UP
             _mcells, _mroot = monster_cells_fj(
                 _pfx(mapname), lds, verts, secs, sds, secs_open=_dsecs_open,
@@ -2330,6 +2331,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"])
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
+                # M7 P3.2c: the decisions, the attack actions and the near LOS (monsterdecide, monstersight)
+                + ((_decide_leaves() + _p31["decide_lines"]) if _p31.get("decide_lines") else [])
                 + ["mm_block_end:"]) + BSn
         else:
             _mon_move = ""

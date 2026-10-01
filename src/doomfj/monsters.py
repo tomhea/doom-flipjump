@@ -119,6 +119,8 @@ class MonsterPhase:
                         "mon_rng": tuple(ws.mon_rng[:n]),
                         "mon_floorz": tuple(v & 0xFFFF for v in ws.mon_floorz[:n]),
                         "msec": tuple(self.world._mon_sector(m) for m in range(n))})
+        if self.world.monsters not in ("idle", "wake", "chase"):   # M7 P3.2c: the missile decision's flag
+            out["mon_justattacked"] = tuple(ws.mon_justattacked[:n])
         return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:

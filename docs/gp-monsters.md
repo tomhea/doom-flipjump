@@ -256,3 +256,33 @@ height 0 -- every rule is live, the drop-off one included.
 **Cost, estimated** (to be measured): a try is one descent (~32K, the player's measured seed walk), the cells
 (~20K) and the thing loop (~30K) -- ~80K; 2.32 tries a frame is ~0.19M mean, 0.32M at p80.
 
+
+### 8.5 P3.2c "decide" -- the design (as written; numbers: `docs/ship-evidence/p32c_decide_census_v5.log`)
+
+**The model mode** `decide` (`World(monsters="decide")`): A_Chase whole -- `justattacked` -> clear it and
+P_NewChaseDir; the melee decision (a melee state, P_AproxDistance < MELEE_REACH (60), the attack sight); the
+missile decision (a missile state, movecount 0, the attack sight, reaction 0, then `P_Random < min(dist - bias,
+200)` refuses); the decided state entered with its A_FaceTarget. The attack states' actions face and DRAW exactly
+as the full model's (`combat._attack_rolls`: 3 draws per bullet, the claw's and the bite's one each when in melee
+reach) and apply nothing -- damage and the imp's fireball (which draws from `rng_fx`) are P5, so the monster stream
+is the full model's and P5 adds effects without moving a random number (`tests/host/test_monsters_decide.py`: the
+decide mode runs in lockstep with the full model's monsters until the player dies; control: a decide mode without
+the draws parts). `justhit` is 0 until damage (P4) and `ambush` matters only to sound (P4): neither is held in fj.
+
+**The fj** (`doomfj.monsterdecide`, `doomfj.monstersight`, `monstercode.p32c_slot_lines`):
+- `mm_decide` replaces `mm_chase` in the slot's move call, with the decision's inputs in the move's context; a
+  decision returns `mm_dec` (1 melee, 2 missile) and the facing, and the slot enters the state (`mon_justattacked`
+  per slot, persisted).
+- The slot's action dispatch runs A_FaceTarget and its type's attack action through `md_attack` (the facing,
+  then `mon_rng += draws`).
+- `mm_as`, the attack sight: seen, or within NEAR and `sl_los` -- the exact 2D LOS of `World.los_points` from the
+  monster's integer position to the player's 16.16 one. The candidates are a per-256-unit-cell list of the sight
+  segments whose box reaches the cell grown by NEAR + 1 (a superset: `test_monster_sight_fj`'s
+  `test_the_cell_lists_hold_every_candidate`, with the margin-0 control); a door's, a lift's or the switch's segment
+  counts at the states its opening is shut (the model's height rules, one mask per segment); the touch is
+  `segments_touch` on four orientation signs, each a 48-bit product difference (`hex.mul_lo 12`), the player's
+  16.16 coordinates kept whole -- the operands are bounded at emit time from the map's extent (< 2^13 units).
+- Harnesses: `tests/fj/test_monster_sight_fj.py` (900 traces, every door and lift state, touches and collinear
+  traces; controls: the dynamic segments always shut, strict crossings only, no margin, o4 without its o3 term) and
+  `tests/fj/test_monster_decide_fj.py` (120 frames against the decide mode; controls: no roll, no LOS, justattacked
+  never read, no draws).

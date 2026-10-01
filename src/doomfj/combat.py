@@ -846,6 +846,9 @@ class CombatMixin:
         if not self.ws.mon_target[m]:
             return
         self._a_face_target(m)
+        if self.monsters == "decide":                    # M7 P3.2c: the rolls without their effects (P5)
+            self._attack_rolls(m, action)
+            return
         if action == "A_PosAttack":
             self._mon_hitscan(m, 1, ev)
         elif action == "A_SPosAttack":
@@ -858,6 +861,22 @@ class CombatMixin:
         elif action == "A_SargAttack":
             if self._check_melee_range(m):
                 self._mon_melee(m, self.sites.sarg_bite, ev)
+        else:
+            raise NotImplementedError(action)
+
+    def _attack_rolls(self, m: int, action: str) -> None:
+        """the `decide` mode's attack: every draw the full model's attack takes from the monster's stream, in its
+        order, and nothing else -- a bullet's spread and damage, the claw, the bite. The imp's fireball draws from
+        `rng_fx` (P5), not from the monster's stream."""
+        if action in ("A_PosAttack", "A_SPosAttack"):
+            for _ in range(1 if action == "A_PosAttack" else 3):
+                self._roll("mon_rng", self.sites.mon_bullet, m)
+        elif action == "A_TroopAttack":
+            if self._check_melee_range(m):
+                self._roll("mon_rng", self.sites.troop_claw, m)
+        elif action == "A_SargAttack":
+            if self._check_melee_range(m):
+                self._roll("mon_rng", self.sites.sarg_bite, m)
         else:
             raise NotImplementedError(action)
 

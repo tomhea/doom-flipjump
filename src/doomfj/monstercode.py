@@ -265,9 +265,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     nrows = nt + len(rows)
     rn = max(1, ((nrows - 1).bit_length() + 3) // 4)
     # the monster slots, and which runtime thing each is
-    assert mode in ("idle", "wake", "chase"), mode
-    wake = mode in ("wake", "chase")                 # M7 P3.2b: the chase mode is the wake mode plus the move
-    chase = mode == "chase"
+    assert mode in ("idle", "wake", "chase", "decide"), mode
+    wake = mode in ("wake", "chase", "decide")       # M7 P3.2b: the chase mode is the wake mode plus the move
+    chase = mode in ("chase", "decide")              # M7 P3.2c: the decide mode is the chase plus the decisions
+    decide = mode == "decide"
     w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los")
     nmon, schema = w.layout.nmon, w.schema
     if nmon == 0 or not rows:
@@ -276,7 +277,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     rt_slot = [slot_of.get(_thing_key(t)) for t in rt_things]
     assert sorted(m for m in rt_slot if m is not None) == list(range(nmon)), "every monster slot is a runtime thing"
 
-    fields = P31_FIELDS + (P32A_FIELDS if wake else ()) + (P32B_FIELDS if chase else ())
+    from doomfj.monsterdecide import P32C_FIELDS, type_decide
+    fields = (P31_FIELDS + (P32A_FIELDS if wake else ()) + (P32B_FIELDS if chase else ())
+              + (P32C_FIELDS if decide else ()))
     slot_t = {m: t for t, m in enumerate(rt_slot) if m is not None}
 
     def values(sk):
@@ -327,7 +330,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         slots = [dict(t=m, x=w.ws.mon_x[m], y=w.ws.mon_y[m], rj="rj%d" % w._mon_sector(m),
                       see_idx=gd.STATE_INDEX[w.mon_info[m].seestate],
                       see_tics=gd.STATES[w.mon_info[m].seestate].tics,
-                      **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m])} if chase else {}))
+                      **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m])} if chase else {}),
+                      **({"dc": type_decide(w.mon_info[m])} if decide else {}))
                  for m in range(nmon)]
         nleaf = len(w.cmap.subsectors)
         extra = {
@@ -358,6 +362,12 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                                                           for b in range(len(w.barrel_things)))),
                    "mh_prev: hex.vec %d" % (len(w.lift_order) + 1), "mcf_val: hex.vec 4", "mcf_hit: hex.vec 1",
                    "mcf_ret: hex.vec w/4"])
+            if decide:                                 # M7 P3.2c: the justattacked flags, the context, the LOS
+                from doomfj.monsterdecide import context_decls
+                from doomfj.monstersight import SL_DECLS, near_los_lines
+                extra["decls_wake"] += (p32c_decls(schema, nmon, {f: boot[f] for f in P32C_FIELDS})
+                                        + context_decls() + SL_DECLS)
+                extra["decide_lines"] = near_los_lines(w)
             extra["chase"] = dict(
                 static_things=things, lift_walk=list(w.lift_walk), lift_order=list(w.lift_order),
                 mon_door_boxes=[(si, w.mon_door_boxes[si]) for si in w.door_order if si in w.mon_door_boxes],
@@ -414,14 +424,17 @@ def persisted_monster_decls(w, mode: str) -> list:
     checks them (tests/host/test_restore_set_shipped.py) both read this one list"""
     n = w.layout.nmon
     out = monster_decls(w.schema, n)
-    if mode in ("wake", "chase"):
+    if mode in ("wake", "chase", "decide"):
         out += [d for d in p32a_decls(w.schema, n, {f: [0] * n for f in P32A_FIELDS}, n)
                 if d.split(":")[0] in P32A_PERSISTED]
-    if mode == "chase":                  # M7 P3.2b: the move's per-slot cells and msec, the barrels, mh_prev
+    if mode in ("chase", "decide"):                  # M7 P3.2b: the move's per-slot cells and msec, the barrels, mh_prev
         out += [d for d in p32b_decls(w.schema, n, {f: [0] * n for f in P32B_FIELDS}, [0] * n)
                 if d.split(":")[0] in P32B_FIELDS + ("msec",)]
         out += ["bar_solid: hex.vec %d" % max(1, len(w.barrel_things)),
                 "mh_prev: hex.vec %d" % (len(w.lift_order) + 1)]
+    if mode == "decide":                 # M7 P3.2c: the missile decision's flag
+        from doomfj.monsterdecide import P32C_FIELDS
+        out += p32c_decls(w.schema, n, {f: [0] * n for f in P32C_FIELDS})
     return out
 
 
@@ -456,7 +469,8 @@ def _sign_branch(cell, kind, yes, no):
             "  %s_z:" % yes, "    hex.if0 4, %s, %s" % (cell, no), "    ;%s" % yes]
 
 
-def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, mv=None) -> list:
+def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, mv=None,
+              dc=None) -> list:
     """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
     A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
     REJECT row of its spawn sector (indexed by the player's sector); t: its seen flag's index (`thseen`).
@@ -464,7 +478,11 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     `mv` (M7 P3.2b, the CHASE mode: `dict(rt=runtime thing, radius=, speed=)`): the monster MOVES -- A_Look reads
     its position from `thpos_rt` and its REJECT row by its sector (`msec`, mt_rj_leaf) at run time, and A_Chase
     goes on after the turn to the move (monstermove.chase_leaf_lines: movecount, P_Move, P_NewChaseDir) through
-    the context cells, its own `mon_active` cleared around the call so the thing test skips it."""
+    the context cells, its own `mon_active` cleared around the call so the thing test skips it.
+
+    `dc` (M7 P3.2c, the DECIDE mode: `monsterdecide.type_decide`'s dict): A_Chase decides before it moves
+    (`mm_decide`), a decision enters the melee or missile state, and the attack states' actions run
+    (`md_attack`: the facing and the draws)."""
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     nthr = cell_nibbles(schema, "mon_threshold")
     ST, TI, AC = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_active + %d*dw" % m
@@ -500,7 +518,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "  %slight:" % L,
            "    hex.mov 2, %s, mt_nxt" % ST,
            "    hex.mov 1, %s, mt_row + 2*dw" % TI,
-           "    sim.jump16 mt_row + 3*dw, %s, %slook, %schase, %s" % (nxt, L, L, ", ".join([nxt] * 13)),
+           "    sim.jump16 mt_row + 3*dw, %s" % ", ".join(_action_targets(L, nxt, dc)),
            # ---- A_Look: threshold 0; no sound before P4; P_LookForPlayers (not all around) -----------------
            "  %slook:" % L,
            "    hex.zero %d, %s" % (nthr, TH),
@@ -551,7 +569,9 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    hex.mov 1, mt_ti + 1*dw, %s" % MD,
             "    mturn.lookup %s, mt_ti" % FA]
     if mv:
-        out += ["  %smv:" % L] + p32b_move_lines(m, schema=schema, **mv)
+        out += ["  %smv:" % L] + p32b_move_lines(m, schema=schema, **mv, dc=dict(dc, t=t) if dc else None)
+    if dc:
+        out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt)
     out += ["  %s:" % nxt]
     return out
 
@@ -560,9 +580,11 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
 P32B_FIELDS = ("mon_movecount", "mon_rng", "mon_floorz")
 
 
-def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema) -> list:
+def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, dc=None) -> list:
     """slot m's move: its cells into the context, `mm_chase` (its own mon_active cleared, so the thing test skips
-    it), the context back -- position into thpos_rt, the leaf into thss_rt, the sector into msec"""
+    it), the context back -- position into thpos_rt, the leaf into thss_rt, the sector into msec. `dc` (M7 P3.2c):
+    `mm_decide` instead, with the decision's inputs (justattacked, seen, the kinds, reaction) and justattacked back;
+    the slot then enters a decided state (p32c_slot_lines)"""
     nz, nr, nc = (cell_nibbles(schema, f) for f in ("mon_floorz", "mon_rng", "mon_movecount"))
     assert (nz, nr, nc) == (4, 2, 2), (nz, nr, nc)
     assert radius in (20, 30) and speed in (8, 10), (radius, speed)
@@ -579,13 +601,66 @@ def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema) -> list
             "    hex.zero w/4, mm_leafw", "    hex.mov 3, mm_leafw, %s" % SS,
             "    hex.mov 2, mm_sec, %s" % SC,
             "    hex.zero 1, %s" % AC,
-            "    stl.fcall mm_chase, mm_cret",
+            *(["    hex.mov 1, mm_ja, mon_justattacked + %d*dw" % m, "    hex.mov 1, mm_seen, thseen + %d*dw" % dc["t"],
+               "    hex.set 1, mm_mk, %d" % dc["mk"], "    hex.mov 1, mm_re, mon_reaction + %d*dw" % m,
+               "    stl.fcall mm_decide, mm_dret", "    hex.mov 1, mon_justattacked + %d*dw, mm_ja" % m]
+              if dc else ["    stl.fcall mm_chase, mm_cret"]),
             "    hex.set 1, %s, 1" % AC,
             "    hex.mov 4, %s, mm_x" % X, "    hex.mov 4, %s, mm_y" % Y,
             "    hex.mov 4, %s, mm_z" % FZ,
             "    hex.mov 1, %s, mm_dir" % MD, "    hex.mov 2, %s, mm_rng" % RN, "    hex.mov 2, %s, mm_mc" % MC,
             "    hex.mov 3, %s, mm_leafw" % SS,
             "    hex.mov 2, %s, mm_sec" % SC]
+
+
+# ---- M7 P3.2c "decide" -----------------------------------------------------------------------------------------
+def _action_targets(L: str, nxt: str, dc) -> list:
+    """the slot's action dispatch: A_Look, A_Chase, and in the decide mode the attack states' actions its type runs"""
+    tg = [nxt] * 16
+    tg[MON_ACTIONS.index("A_Look")] = "%slook" % L
+    tg[MON_ACTIONS.index("A_Chase")] = "%schase" % L
+    for a in sorted(dc["acts"]) if dc else ():
+        tg[MON_ACTIONS.index(a)] = "%sk_%s" % (L, a)
+    return tg
+
+
+def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str) -> list:
+    """after mm_decide: a decision enters its state (A_FaceTarget's facing from the leaf); and the attack states'
+    actions -- each sets its kind and runs md_attack on the slot's position, seen flag and stream"""
+    from doomfj.monsterdecide import ATTACK_KINDS
+    ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
+    ST, TI, FA = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_facing + %d*dw" % (nf * m)
+    TG, RN = "mon_target + %d*dw" % m, "mon_rng + %d*dw" % (2 * m)
+    L = "mw%d_" % m
+    out = ["    hex.if0 1, mm_dec, %s" % nxt, "    hex.mov 1, %s, mm_fa" % FA]
+    if dc["mel"] and dc["mis"]:
+        out.append("    hex.if_flags mm_dec, 2, %sdmis, %sdmel" % (L, L))
+    for lab, st in (("dmel", dc["mel"]), ("dmis", dc["mis"])):
+        if st:
+            out += ["  %s%s:" % (L, lab), "    hex.set %d, %s, %d" % (ns, ST, st[0]),
+                    "    hex.set %d, %s, %d" % (nt, TI, st[1]), "    ;%s" % nxt]
+    for a in sorted(dc["acts"]):
+        out += ["  %sk_%s:" % (L, a), "    hex.set 1, mm_kind, %d" % ATTACK_KINDS[a], "    ;%sk_go" % L]
+    if dc["acts"]:
+        out += ["  %sk_go:" % L,
+                "    hex.if0 1, %s, %s" % (TG, nxt),
+                "    hex.mov 4, mm_x, thpos_rt + %d*dw" % (16 * rt + 4),
+                "    hex.mov 4, mm_y, thpos_rt + %d*dw" % (16 * rt + 12),
+                "    hex.mov 1, mm_seen, thseen + %d*dw" % t, "    hex.mov 2, mm_rng, %s" % RN,
+                "    stl.fcall md_attack, md_ret",
+                "    hex.mov 1, %s, mm_fa" % FA, "    hex.mov 2, %s, mm_rng" % RN,
+                "    ;%s" % nxt]
+    return out
+
+
+def p32c_decls(schema, nmon: int, values: dict) -> list:
+    from doomfj.monsterdecide import P32C_FIELDS
+    out = []
+    for name in P32C_FIELDS:
+        nib = cell_nibbles(schema, name)
+        out.append("%s: hex.vec %d, %d" % (name, nib * nmon, sum(v << (4 * nib * m) for m, v in
+                                                                 enumerate(values[name]))))
+    return out
 
 
 def p32b_decls(schema, nmon: int, values: dict, msec: list) -> list:

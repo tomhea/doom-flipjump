@@ -17,7 +17,9 @@ the last picture did not show.
     -- the model's orientations over a positive 2^16 or 2^32, so the same signs. A touch: o1, o2 straddle (they
     differ and are not both nonzero of one sign) and so do o3, o4; or all four are 0 -- collinear, where the model's
     projection overlap always holds here because the box reject just passed on the same boxes.
-The first touching segment ends the walk with `sl_hit` = 1. Every operand is bounded at emit time (`_bounds`).
+The first touching segment ends the walk with `sl_hit` = 1 -- after it RETURNS: `stl.fcall` xors the return
+address into its register and only the return xors it back, so a callee that jumps away leaves it armed and the
+next call lands nowhere (the first harness run died so, at its fourth record). Every operand is bounded at emit time (`_bounds`).
 """
 from typing import Dict, List, Tuple
 
@@ -115,6 +117,12 @@ def map_cells(w) -> List[Tuple[int, int]]:
             for cy in range(min(ys) >> SIGHT_CELL_SHIFT, (max(ys) >> SIGHT_CELL_SHIFT) + 1)]
 
 
+def _subc(n: int, cell: str, v: int) -> List[str]:
+    """cell -= v (mod 16^n); nothing for 0 (`hex.sub_constant` refuses a zero constant)"""
+    v &= 16 ** n - 1
+    return ["    hex.sub_constant %d, %s, %d" % (n, cell, v)] if v else []
+
+
 def _seg_block(k: int, s: dict) -> List[str]:
     L = "sg%d_" % k
     (ax, ay), (bx, by) = s["a"], s["b"]
@@ -126,16 +134,16 @@ def _seg_block(k: int, s: dict) -> List[str]:
             return out + ["    stl.fret sl_sret"]           # never shut: it never blocks
         mask = sum(1 << st for st in shut)
         out += ["    hex.if_flags %s, %d, %sout, %sgo" % (cell, mask, L, L), "  %sgo:" % L]
-    out += ["    hex.mov 8, sl_t, sl_x0", "    hex.sub_constant 8, sl_t, %d" % (((maxx << 16) + 1) & M32),
+    out += ["    hex.mov 8, sl_t, sl_x0", *_subc(8, "sl_t", (maxx << 16) + 1),
             "    hex.sign 8, sl_t, %sa, %sout" % (L, L),          # x0 > maxx: the trace passes beside it
             "  %sa:" % L,
-            "    hex.mov 8, sl_t, sl_x1", "    hex.sub_constant 8, sl_t, %d" % ((minx << 16) & M32),
+            "    hex.mov 8, sl_t, sl_x1", *_subc(8, "sl_t", minx << 16),
             "    hex.sign 8, sl_t, %sout, %sb" % (L, L),          # x1 < minx
             "  %sb:" % L,
-            "    hex.mov 8, sl_t, sl_y0", "    hex.sub_constant 8, sl_t, %d" % (((maxy << 16) + 1) & M32),
+            "    hex.mov 8, sl_t, sl_y0", *_subc(8, "sl_t", (maxy << 16) + 1),
             "    hex.sign 8, sl_t, %sc, %sout" % (L, L),
             "  %sc:" % L,
-            "    hex.mov 8, sl_t, sl_y1", "    hex.sub_constant 8, sl_t, %d" % ((miny << 16) & M32),
+            "    hex.mov 8, sl_t, sl_y1", *_subc(8, "sl_t", miny << 16),
             "    hex.sign 8, sl_t, %sout, %sd" % (L, L),
             "  %sd:" % L,
             "    hex.set 12, sl_dx, %d" % ((bx - ax) & M48), "    hex.set 12, sl_dy, %d" % ((by - ay) & M48)]
@@ -181,7 +189,7 @@ def seg_test_lines() -> List[str]:
             "  sl_zz:",
             "    hex.if0 1, sl_k34, sl_touch",
             "  sl_miss:", "    stl.fret sl_sret",
-            "  sl_touch:", "    hex.set 1, sl_hit, 1", "    ;sl_done",
+            "  sl_touch:", "    hex.set 1, sl_hit, 1", "    stl.fret sl_sret",
             "sl_mul:", "    hex.mul_lo 12, sl_r, sl_m1, sl_m2", "    stl.fret sl_mret"]
     return out
 
@@ -215,7 +223,11 @@ def near_los_lines(w) -> List[str]:
         if idx not in lid:
             lab = "sl_l%d" % len(lid)
             lid[idx] = lab
-            body.extend(["  %s:" % lab] + ["    stl.fcall sg%d, sl_sret" % k for k in idx] + ["    ;sl_done"])
+            # each segment RETURNS (an fcall's register is armed until its return un-flips it), then a touch
+            # ends the walk
+            body.extend(["  %s:" % lab] + [ln for k in idx for ln in ("    stl.fcall sg%d, sl_sret" % k,
+                                                                      "    hex.if1 1, sl_hit, sl_done")]
+                        + ["    ;sl_done"])
         return lid[idx]
 
     def node(reg: str, targets: List[str]) -> str:

@@ -50,6 +50,16 @@ def mul_const(src: int, c: int, n: int) -> int:
     return _wrap(_wrap(src, bits) * c, bits)
 
 
+def aprox_distance(dx: int, dy: int) -> int:
+    """P_AproxDistance: |dx| + |dy| - min(|dx|, |dy|) / 2, in the units it is given. The ONE definition (M7 P3.3):
+    `world.aprox_distance` is this name re-exported, the oracle's depth key (`reference_model.aprox_depth_key`)
+    calls it, and the fj's `mt_dist_leaf` is exact against it."""
+    dx, dy = abs(dx), abs(dy)
+    if dx < dy:
+        return dx + dy - (dx >> 1)
+    return dx + dy - (dy >> 1)
+
+
 def encode_fixed_point(value: float, fraction_bits: int, total_bits: int) -> int:
     """Encode a real value as a two's-complement fixed-point word (16.16 = fraction_bits=16,
     total_bits=32). Rounds to nearest; raises ValueError if it doesn't fit the signed format.

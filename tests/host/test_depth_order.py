@@ -49,5 +49,36 @@ def test_depth_order_changes_the_overlap(frame96):
 
 
 def test_the_game_render_setting_is_the_fj_rule():
-    from doomfj.reference_model import GAME_RENDER_KW
+    from doomfj.reference_model import GAME_RENDER_KW, HOSTED_RENDER_KW
     assert GAME_RENDER_KW.get("rt_depth_order") == "aprox"
+    assert not HOSTED_RENDER_KW.get("rt_depth_order"), "the hosted tiers' fj walks index order"
+
+
+def test_a_mode_that_cannot_emit_the_walk_is_refused():
+    """B1 of the pre-review: the game tier's depth rule with a monster mode that emits no depth walk RAISES (it
+    used to emit sim.thing_pass silently); the chase/decide modes take it, and an explicit False turns it off."""
+    from doomfj import monstercode as MC
+    for mode in ("idle", "wake"):
+        with pytest.raises(AssertionError, match="cannot emit the depth walk"):
+            MC.depth_walk(mode)
+        assert MC.depth_walk(mode, False) is False
+    assert all(MC.depth_walk(m) is True for m in MC.DEPTH_MODES)
+    with pytest.raises(AssertionError, match="P_AproxDistance only"):
+        MC.depth_walk("decide", "tz")
+
+
+def test_a_misspelt_depth_order_fails(frame96):
+    """F6 of the pre-review: render_wall_frame takes False/None/"aprox"/"tz"; anything else used to fall through
+    to the aprox key"""
+    with pytest.raises(AssertionError, match="rt_depth_order"):
+        _render(frame96, "aprx")
+
+
+def test_the_oracle_key_is_the_shared_aprox_distance():
+    """F4 of the pre-review: one P_AproxDistance -- world's name is fixedpoint's function, and the oracle's depth
+    key is it on the view position's signed integer part"""
+    from doomfj import fixedpoint, world
+    from doomfj.reference_model import aprox_depth_key
+    assert world.aprox_distance is fixedpoint.aprox_distance
+    assert aprox_depth_key((-3 << 16 | 0x8000) & 0xFFFFFFFF, 5 << 16, 7, -20) == fixedpoint.aprox_distance(10, -25)
+    assert fixedpoint.aprox_distance(-10, 4) == 10 + 4 - 2

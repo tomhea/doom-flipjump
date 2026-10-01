@@ -302,10 +302,19 @@ thing and a per-thing store behind pointers (the pin veto and the arm windows th
 aprox key orders differently from `tz` on 2 of the 1,100 frames (28 px) -- things overlap on screen only along
 nearly one ray, where distance order IS depth order.
 
+**Scoped to the game tier** (pre-review r1): the hosted tiers move runtime things too but still walk index order
+(`sim.thing_pass`), so their gates (m1_gate, m2_r3_gate, m2_r4_gate, m2_pass_probe) ask the oracle for
+`HOSTED_RENDER_KW` = `GAME_RENDER_KW` without the rule (`test_oracle_calls_in_step` pins which gate asks for which).
+`monstercode.depth_walk` RAISES when the game setting asks for the order and the monster mode cannot emit the walk
+(idle, wake); `render_wall_frame` refuses an unknown `rt_depth_order`. The key is `reference_model.aprox_depth_key`
+over the ONE `fixedpoint.aprox_distance` (`world.aprox_distance` is the same function).
+
 **The fj** (`sim.thing_pass_depth`, the game tier's walk): a leaf with one thing draws it as `thing_pass`; a longer
 list is drawn in ROUNDS, each scanning the list for the least (key, index) above the last one drawn -- no
 per-thing storage, pointer READS only, `td_*` named registers (monstercode.P33_DECLS). n things cost n^2 key
 reads; the lists are short (2-5). Harness: `tests/fj/test_thing_pass_depth_fj.py` (160 records x 4 leaves of 1-4
-things, ties and reorders, the sprite registers clear after every leaf; controls: the first candidate taken, the
-key without dy, the tie toward the later index); `tests/host/test_depth_order.py` (frame 96: the order changes the
+things, ties and reorders, a budget stop `tstop` after k draws counted across leaves, all 13 cleared registers zero
+after every leaf; strict controls: the first candidate taken, the key without dy, the tie toward the later index,
+either tstop test removed -- the order parts, registers clear -- and sp_lt's clear narrowed -- the order holds,
+sp_lt alone dirty); `tests/host/test_depth_order.py` (frame 96: the order changes the
 picture, aprox = tz there). D3 a (drops and effects before monsters) waits for P4/P5, which create them.

@@ -220,7 +220,7 @@ def _thing_key(t):
 
 
 def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_near: bool, boot_skill: int,
-              skills, cache: dict, mode: str = "idle") -> dict:
+              skills, cache: dict, mode: str = "idle", depth_order=None) -> dict:
     """everything P3.1 adds to the game tier, from the model's own sources:
       * `view_rows`: one thing row per distinct monster VIEW (lump, mirrored) -- `things.thing_rows`' layout from the
         view's art, dw's bit 7 set for a mirrored view -- appended after the runtime things' own rows;
@@ -266,6 +266,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     rn = max(1, ((nrows - 1).bit_length() + 3) // 4)
     # the monster slots, and which runtime thing each is
     assert mode in ("idle", "wake", "chase", "decide"), mode
+    # M7 P3.3 (D3 d): the leaf walk the game tier's picture asks for -- RAISES for a mode that cannot emit it.
+    # `depth_order` None is GAME_RENDER_KW's; a unit fixture that builds no leaf walk passes False.
+    depth = depth_walk(mode, depth_order)
     wake = mode in ("wake", "chase", "decide")       # M7 P3.2b: the chase mode is the wake mode plus the move
     chase = mode in ("chase", "decide")              # M7 P3.2c: the decide mode is the chase plus the decisions
     decide = mode == "decide"
@@ -369,10 +372,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                                         + context_decls() + SL_DECLS)
                 extra["decide_lines"] = near_los_lines(w)
             # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
-            # render setting says so -- the walk's registers (sim.thing_pass_depth)
-            from doomfj.reference_model import GAME_RENDER_KW
-            if GAME_RENDER_KW.get("rt_depth_order"):
-                assert GAME_RENDER_KW["rt_depth_order"] == "aprox", "the fj walk keys by P_AproxDistance only"
+            # render setting says so (depth_walk, above) -- the walk's registers (sim.thing_pass_depth)
+            if depth:
                 extra["decls_wake"] += P33_DECLS
                 extra["depth"] = True
             extra["chase"] = dict(
@@ -747,6 +748,29 @@ def p32b_rj_leaf(sectors) -> list:
 
 
 K_SLOTS = 6                          # world.K_HEAVY: heavy monster actions per tic (D5)
+
+# M7 P3.3: the monster modes that emit sim.thing_pass_depth -- the walk's registers come with the chase block
+DEPTH_MODES = ("chase", "decide")
+
+
+def depth_walk(mode: str, order=None) -> bool:
+    """M7 P3.3 (D3 d): does the game tier walk a leaf's runtime things NEAREST FIRST (`sim.thing_pass_depth`)?
+    `order` is the oracle's `rt_depth_order` the binary must match; None reads GAME_RENDER_KW's, the ONE game-tier
+    setting. Only DEPTH_MODES emit the walk, so a mode that cannot while the setting asks for it RAISES: emitting
+    `sim.thing_pass` instead draws index order against an oracle that sorts, and only a byte gate would notice."""
+    if order is None:
+        from doomfj.reference_model import GAME_RENDER_KW     # lazy: reference_model is the oracle, not a dep
+        order = GAME_RENDER_KW.get("rt_depth_order")
+    if not order:
+        return False
+    assert order == "aprox", "the fj walk keys by P_AproxDistance only, not rt_depth_order=%r" % (order,)
+    assert mode in DEPTH_MODES, (
+        "monster mode %r cannot emit the depth walk (only %s do), yet the game tier's render setting asks for "
+        "rt_depth_order=%r -- the binary would walk index order against a sorted oracle. Build a %s game tier, or "
+        "drop rt_depth_order from GAME_RENDER_KW for this mode." % (mode, "/".join(DEPTH_MODES), order,
+                                                                   "/".join(DEPTH_MODES)))
+    return True
+
 
 # M7 P3.3: sim.thing_pass_depth's registers (named globals: no @-local data in a game-tier macro)
 P33_DECLS = (["td_%s: hex.vec w/4" % r for r in ("head", "e", "t", "p", "q", "best", "lt", "poff", "pbase", "pptr")]

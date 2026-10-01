@@ -22,6 +22,11 @@ disqualifies it, and so does a mutation (`del X[k]`, `X[k] = v`, `X |= ...`, `X.
 directly or through a bare alias `Y = X`. A `dict(<shared>, ...)` that switches a forced key off is
 not shared (PR #88 rounds 2-4).
 
+M7 P3.3 SCOPED IT BY TIER: the shared set is one of TWO names. `GAME_RENDER_KW` is the game tier's picture,
+which draws a leaf's runtime things nearest first (D3 d, `rt_depth_order`); `HOSTED_RENDER_KW` is the same set
+without that rule, because the hosted tiers' fj walks a leaf in index order. Both carry every forced key; which
+gate asks for which is pinned by HOSTED_GATES below.
+
 What it does NOT check:
 - the values, only the presence. A file that passes `sky=False` on a map that has sky would
   satisfy this and still be wrong. It is a tripwire for the omission, which is the failure that
@@ -41,7 +46,11 @@ ROOT = Path(__file__).resolve().parents[2]
 # allowed to say `sky=False` -- what it may not do is stay silent.
 FORCED = ("sky", "near_steps", "stack_steps", "bbox_cull", "degrade")
 EMITTERS = ("emit_wall_renderer", "build_wall_renderer")
-SHARED = "GAME_RENDER_KW"          # reference_model's one game-tier keyword set
+# reference_model's tier keyword sets: the game tier's, and the hosted tiers' (the same without D3 d, M7 P3.3)
+SHARED = ("GAME_RENDER_KW", "HOSTED_RENDER_KW")
+# M7 P3.3: the gates that drive a HOSTED binary (hosted-loop, hosted-doors) -- they ask for HOSTED_RENDER_KW
+HOSTED_GATES = frozenset({"scratchpad/m1_gate.py", "scratchpad/m2_r3_gate.py", "scratchpad/m2_r4_gate.py",
+                          "scratchpad/m2_pass_probe.py"})
 
 
 BINARY_RUNNERS = ("FjmRunner", "_fjcore", "GameBinary")
@@ -119,7 +128,7 @@ def _bindings(tree):
         elif isinstance(n, ast.arg):
             rebound.add(n.arg)
         elif isinstance(n, (ast.Import, ast.ImportFrom)):
-            rebound |= {(a.asname or a.name).split(".")[0] for a in n.names if a.name != SHARED}
+            rebound |= {(a.asname or a.name).split(".")[0] for a in n.names if a.name not in SHARED}
         elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             rebound.add(n.name)
         elif isinstance(n, ast.ExceptHandler) and n.name:
@@ -149,8 +158,8 @@ def shared_names(tree) -> set:
     which the file never mutates (PR #88 rounds 3-4)."""
     assigns, rebound, mutated = _bindings(tree)
     out = rebound | mutated
-    roots = {SHARED} | {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
-                        for a in n.names if a.name == SHARED}
+    roots = set(SHARED) | {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+                           for a in n.names if a.name in SHARED}
     names = {r for r in roots if r not in out and all(_is_shared(v, roots) for v in assigns.get(r, []))}
     grown = True
     while grown:
@@ -241,6 +250,44 @@ def test_the_shared_set_turns_on_every_forced_feature():
     from doomfj.reference_model import GAME_RENDER_KW
     assert all(GAME_RENDER_KW.get(k) is True for k in FORCED), GAME_RENDER_KW
     assert GAME_RENDER_KW.get("things") is True and GAME_RENDER_KW.get("wall_mode") == "W1R"
+
+
+def test_the_hosted_set_is_the_game_set_without_depth_order():
+    """M7 P3.3: the hosted tiers' set differs from the game tier's in D3 d ALONE -- every forced key stays on, so
+    a splat of it asks for everything the emitter does -- and the game tier's set does ask for the depth order."""
+    from doomfj.reference_model import GAME_RENDER_KW, HOSTED_RENDER_KW
+    assert GAME_RENDER_KW.get("rt_depth_order") == "aprox"
+    assert HOSTED_RENDER_KW == dict(GAME_RENDER_KW, rt_depth_order=False)
+    hosted = ("from doomfj.reference_model import HOSTED_RENDER_KW\n"
+              "rm.render_wall_frame(s, scene, sprite_wad=art, **HOSTED_RENDER_KW)\n")
+    assert out_of_step(hosted, gate=True) == [], "a splat of the hosted set asks for all the forced keys"
+    weak = ("from doomfj.reference_model import HOSTED_RENDER_KW\n"
+            "rm.render_wall_frame(s, scene, **dict(HOSTED_RENDER_KW, sky=False))\n")
+    assert out_of_step(weak, gate=True) == [(2, list(FORCED))], "a forced key switched off in the hosted set"
+
+
+def test_each_gate_asks_for_its_own_tiers_set():
+    """M7 P3.3 (B1 of the pre-review): a hosted gate that splats GAME_RENDER_KW compares a depth-sorted oracle
+    with a binary that walks index order. The HOSTED_GATES name HOSTED_RENDER_KW and never GAME_RENDER_KW; no
+    other tracked tool names HOSTED_RENDER_KW (a game-tier gate that did would drop the depth rule)."""
+    import re
+    files = subprocess.run(["git", "ls-files", "*.py"], cwd=ROOT,
+                           capture_output=True, text=True).stdout.split()
+    assert set(HOSTED_GATES) <= set(files), sorted(set(HOSTED_GATES) - set(files))
+    bad = []
+    for rel in files:
+        if not rel.startswith(("scratchpad/", "src/", "scripts/")) or rel == "src/doomfj/reference_model.py":
+            continue
+        try:
+            source = (ROOT / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        game, hosted = (bool(re.search(r"\b%s\b" % n, source)) for n in SHARED)
+        if rel in HOSTED_GATES and (game or not hosted):
+            bad.append("%s: a hosted gate must ask for HOSTED_RENDER_KW only" % rel)
+        elif rel not in HOSTED_GATES and hosted:
+            bad.append("%s: names HOSTED_RENDER_KW but is not a hosted gate (HOSTED_GATES)" % rel)
+    assert not bad, "\n".join(bad)
 
 
 def test_a_splat_counts_only_when_it_is_the_shared_set():

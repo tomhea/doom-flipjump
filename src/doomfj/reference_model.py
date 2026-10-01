@@ -29,6 +29,7 @@ from dataclasses import dataclass, replace
 
 from doomfj.config import Config, PNEAR_SEG_BUDGET
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
+from doomfj.fixedpoint import aprox_distance                   # P_AproxDistance, ONE definition (M7 P3.3)
 from doomfj.mapcompiler import (  # shared geometry (R6)
     NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side, seg_affine_coeffs,
     bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector,
@@ -71,8 +72,16 @@ GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
                       near_steps=True, stack_steps=True, things=True, degrade=True, sky=True,
                       bbox_cull=True,
                       # M7 P3.3 (D3 d): a leaf's runtime things nearest first by P_AproxDistance from the
-                      # player -- the game tier's sim.thing_pass_depth (the emitter reads THIS key)
+                      # player -- the game tier's sim.thing_pass_depth (the emitter reads THIS key, and
+                      # monstercode.depth_walk refuses a monster mode that cannot emit the walk)
                       rt_depth_order="aprox")
+# THE HOSTED TIERS' PICTURE (M7 P3.3): the game tier's set WITHOUT D3 d. The hosted tiers (hosted, hosted-doors,
+# hosted-loop, hosted-nocollide) move runtime things too -- the host sends their positions -- but their fj walks
+# a leaf's list in INDEX order (`sim.thing_pass`); the depth walk is the GAME tier's alone. A gate that drives a
+# hosted binary (m1_gate, m2_r3_gate, m2_r4_gate, m2_pass_probe) asks for THIS set, or it compares a sorted oracle
+# with an unsorted binary on every leaf holding two moved things.
+HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False)
+RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_order: off, or the key
 # ⚠ DOOM's forwardmove 0x32 (=50) is a THRUST, not a displacement. `P_Thrust` adds `move*2048` to
 # momx/momy, and against FRICTION 0xE800 (0.90625) the steady state is 50*2048/65536 / 0.09375 =
 # ~16.7 map-units per tic. This sim has no momentum -- `step_sim` applies the constant DIRECTLY as
@@ -351,11 +360,11 @@ DEG_DDA_FACES = 1                 # OPTION A (DEFAULT ON): step-face/stacked-pie
                                   # narrow-face-seg gate frames but wins the distribution.
 
 
-def _aprox_distance(dx: int, dy: int) -> int:
-    """P_AproxDistance on integers -- world.aprox_distance's formula (world imports this module, not the reverse);
-    M7 P3.3's depth key for a leaf's runtime things"""
-    dx, dy = abs(dx), abs(dy)
-    return dx + dy - (min(dx, dy) >> 1)
+def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
+    """M7 P3.3 (D3 d), `rt_depth_order="aprox"`: a runtime thing's depth key -- P_AproxDistance from the player's
+    INTEGER position (the 16.16 view position's signed integer part) to the thing at map units (tx, ty). The fj
+    walk (`sim.thing_pass_depth`) keys by exactly this; its harness calls this function, not a copy."""
+    return aprox_distance(tx - (_signed(viewx, 32) >> 16), ty - (_signed(viewy, 32) >> 16))
 
 
 def sprite_bucket(h: int, view_h: int) -> int:
@@ -1889,6 +1898,9 @@ class ReferenceModel:
         (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff) for the gates to inspect.
         Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces this
         bit-exactly (D12)."""
+        # M7 P3.3: a misspelt depth order must fail here, not fall through to the "aprox" key
+        assert rt_depth_order in RT_DEPTH_ORDERS, (
+            f"rt_depth_order={rt_depth_order!r}: one of {RT_DEPTH_ORDERS}")
         cfg = self.cfg
         # 25M-CAP: `degrade=True` turns on the whole certified adaptive-degradation package;
         # the individual deg_* kwargs stay as research overrides (any explicit value wins --
@@ -2059,8 +2071,7 @@ class ReferenceModel:
             if rt_depth_order:
                 _key = ((lambda _t: self.view_depth(viewx, viewy, viewangle, _t.x, _t.y))
                         if rt_depth_order == "tz" else
-                        (lambda _t: _aprox_distance(_t.x - (_signed(viewx, 32) >> 16),
-                                                    _t.y - (_signed(viewy, 32) >> 16))))
+                        (lambda _t: aprox_depth_key(viewx, viewy, _t.x, _t.y)))
                 for _lst in things_by_ss.values():
                     _nb = sum(1 for _e in _lst if _baked[_e[2]])
                     if len(_lst) - _nb > 1:

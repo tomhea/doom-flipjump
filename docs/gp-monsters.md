@@ -286,3 +286,26 @@ the draws parts). `justhit` is 0 until damage (P4) and `ambush` matters only to 
   traces; controls: the dynamic segments always shut, strict crossings only, no margin, o4 without its o3 term) and
   `tests/fj/test_monster_decide_fj.py` (120 frames against the decide mode; controls: no roll, no LOS, justattacked
   never read, no draws).
+
+### 8.6 P3.3 -- depth order inside a leaf (D3 d; numbers: `docs/ship-evidence/p33_depth_census_v5.log`)
+
+The walk is front-to-back and a sprite pixel is written once, so inside one leaf the NEAR thing must be drawn
+first. Until P3.3 a leaf's runtime things were drawn in the list's ascending index order (`sim.thing_pass`), which
+once monsters move draws a far monster over a near one. The census on v5 (the full model, every frame drawn as the
+binary draws it): depth order changes 25 of 1,100 frames (2.27%), 4,357 px, up to 915 px on one frame
+(R0-aftermath 83-99); leaves holding 2+ active monsters: 12.5 a frame (they spawn in groups).
+
+**The rule** (the oracle's `render_wall_frame(rt_depth_order="aprox")`, carried by `GAME_RENDER_KW` -- the emitter
+reads THAT key): a leaf's baked things first as before, then its runtime things by P_AproxDistance from the
+player's integer position, ties by ascending index. The true view depth `tz` would need four fixed multiplies per
+thing and a per-thing store behind pointers (the pin veto and the arm windows that killed blocked41/42); the
+aprox key orders differently from `tz` on 2 of the 1,100 frames (28 px) -- things overlap on screen only along
+nearly one ray, where distance order IS depth order.
+
+**The fj** (`sim.thing_pass_depth`, the game tier's walk): a leaf with one thing draws it as `thing_pass`; a longer
+list is drawn in ROUNDS, each scanning the list for the least (key, index) above the last one drawn -- no
+per-thing storage, pointer READS only, `td_*` named registers (monstercode.P33_DECLS). n things cost n^2 key
+reads; the lists are short (2-5). Harness: `tests/fj/test_thing_pass_depth_fj.py` (160 records x 4 leaves of 1-4
+things, ties and reorders, the sprite registers clear after every leaf; controls: the first candidate taken, the
+key without dy, the tie toward the later index); `tests/host/test_depth_order.py` (frame 96: the order changes the
+picture, aprox = tz there). D3 a (drops and effects before monsters) waits for P4/P5, which create them.

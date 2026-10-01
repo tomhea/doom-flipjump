@@ -368,6 +368,13 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 extra["decls_wake"] += (p32c_decls(schema, nmon, {f: boot[f] for f in P32C_FIELDS})
                                         + context_decls() + SL_DECLS)
                 extra["decide_lines"] = near_los_lines(w)
+            # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
+            # render setting says so -- the walk's registers (sim.thing_pass_depth)
+            from doomfj.reference_model import GAME_RENDER_KW
+            if GAME_RENDER_KW.get("rt_depth_order"):
+                assert GAME_RENDER_KW["rt_depth_order"] == "aprox", "the fj walk keys by P_AproxDistance only"
+                extra["decls_wake"] += P33_DECLS
+                extra["depth"] = True
             extra["chase"] = dict(
                 static_things=things, lift_walk=list(w.lift_walk), lift_order=list(w.lift_order),
                 mon_door_boxes=[(si, w.mon_door_boxes[si]) for si in w.door_order if si in w.mon_door_boxes],
@@ -740,6 +747,11 @@ def p32b_rj_leaf(sectors) -> list:
 
 
 K_SLOTS = 6                          # world.K_HEAVY: heavy monster actions per tic (D5)
+
+# M7 P3.3: sim.thing_pass_depth's registers (named globals: no @-local data in a game-tier macro)
+P33_DECLS = (["td_%s: hex.vec w/4" % r for r in ("head", "e", "t", "p", "q", "best", "lt", "poff", "pbase", "pptr")]
+             + ["td_pos: hex.vec 16", "td_bk: hex.vec 4", "td_lk: hex.vec 4", "td_have: hex.vec 1",
+                "td_first: hex.vec 1"])
 
 
 def p32a_leaves() -> list:

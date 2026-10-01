@@ -2637,7 +2637,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                if _do_things else []),
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",
-                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt, {_ANIM}, {_ANIM_SEL}, "
+                # M7 P3.3 (D3 d): the game tier's walk draws a leaf's runtime things nearest first
+                f"sim.thing_pass{'_depth' if (_p31 and _p31.get('depth')) else ''} throw, {_MT_NTH}, thpos_rt, "
+                f"{_ANIM}, {_ANIM_SEL}, "
                 f"{'sp_lt_hi' if _ANIM else 0}",
                 "stl.fret tp_ret"] if moving_things else []),
              # M7 P3.1: the row select and the rotation leaf it calls

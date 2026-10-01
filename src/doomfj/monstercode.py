@@ -16,6 +16,8 @@ from typing import Dict, List, Tuple
 from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.lut_generator import generate_dispatch_table_fj
+from doomfj.sight import NEAR
+from doomfj.world import K_HEAVY, LOOK_BEHIND_REACH
 
 MONSTER_TYPES = ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT", "MT_SHADOWS")
 # action ids; the sound actions (A_Pain, A_Scream, A_XScream) are no-ops (D5: no sound) and read 0
@@ -392,8 +394,8 @@ P32A_FIELDS = ("mon_target", "mon_reaction", "mon_threshold", "mon_movedir")
 HEAVY_IDS = (MON_ACTIONS.index("A_Chase"), MON_ACTIONS.index("A_FaceTarget"),
              MON_ACTIONS.index("A_PosAttack"), MON_ACTIONS.index("A_SPosAttack"),
              MON_ACTIONS.index("A_TroopAttack"), MON_ACTIONS.index("A_SargAttack"))
-NEAR_UNITS = 128                     # doomfj.sight.NEAR: REJECT wakes within this
-BEHIND_REACH = 64                    # world.LOOK_BEHIND_REACH: P_LookForPlayers sees behind within this
+NEAR_UNITS = NEAR                    # doomfj.sight.NEAR (R6: one source): REJECT wakes within this
+BEHIND_REACH = LOOK_BEHIND_REACH     # world.LOOK_BEHIND_REACH: P_LookForPlayers sees behind within this
 
 
 def wake_reachable_actions() -> set:
@@ -739,7 +741,7 @@ def p32b_rj_leaf(sectors) -> list:
     return out
 
 
-K_SLOTS = 6                          # world.K_HEAVY: heavy monster actions per tic (D5)
+K_SLOTS = K_HEAVY                    # world.K_HEAVY: heavy monster actions per tic (D5)
 
 
 def p32a_leaves() -> list:
@@ -800,5 +802,8 @@ def p32a_tic_lines(schema, nmon: int, slots: list, exit_guard: bool) -> list:
     return out
 
 
-P32A_SCRATCH = ["mt_c128: hex.vec 4, 128", "mt_c64: hex.vec 4, 64", "mt_s: hex.vec 4", "mt_n: hex.vec 2",
-                "mt_psok: hex.vec 1", "mt_ret: hex.vec w/4"]
+# mt_c128 / mt_c64 hold NEAR_UNITS / BEHIND_REACH: the LABELS keep their names (fj globals, the frozen ABI), the
+# VALUES come from the one source each (R6); `hex.cmp 4` compares them as 4-nibble words
+assert 0 < NEAR_UNITS < 16 ** 4 and 0 < BEHIND_REACH < 16 ** 4
+P32A_SCRATCH = ["mt_c128: hex.vec 4, %d" % NEAR_UNITS, "mt_c64: hex.vec 4, %d" % BEHIND_REACH,
+                "mt_s: hex.vec 4", "mt_n: hex.vec 2", "mt_psok: hex.vec 1", "mt_ret: hex.vec w/4"]

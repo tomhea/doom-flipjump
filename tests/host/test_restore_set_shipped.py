@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from doomfj.build import DOOR_PERSIST, STANDALONE_PERSIST, THING_PERSIST
+from doomfj.build import DOOR_PERSIST, MONSTER_PERSIST, STANDALONE_PERSIST, THING_PERSIST
 from doomfj.collision import CHECK_SCRATCH_DECLS
 from doomfj.selfreset import decl_words
 from doomfj.wad import WadFile
@@ -227,6 +227,46 @@ def test_the_thing_cells_are_in_the_standalone_set_too():
     standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
     absent = [n for n in THING_PERSIST if n not in standalone]
     assert not absent, "THING_PERSIST names %s, absent from the standalone set" % absent
+
+
+def _monster_persist_absent(standalone, mode) -> tuple:
+    """(the MONSTER_PERSIST names the emitter declares at model `mode` -- monstercode.persisted_monster_decls, the
+    list m5_setfile adds -- and those of them the set `standalone` does not carry)"""
+    from doomfj.monstercode import persisted_monster_decls
+    from doomfj.world import World
+    declared = {decl_words(d)[0] for d in persisted_monster_decls(World(), mode)}
+    names = [n for n in MONSTER_PERSIST if n in declared]
+    return names, [n for n in names if n not in standalone]
+
+
+def test_the_monster_cells_are_in_the_standalone_set_too():
+    """M7 P3: `MONSTER_PERSIST` keeps the monsters' world state (state, tics, facing, target, the move's cells,
+    justattacked...) across the reset, which `emit_reset_part` can do only for labels the set carries -- it refuses
+    the build otherwise, an hour in. Every rung that adds a persisted cell re-keys the set; a rung that did not
+    fails here, in milliseconds. The names checked are the ones the emitter declares for the SHIPPED mode
+    (wall_renderer.MONSTER_MODE): MONSTER_PERSIST also names the later modes' cells, which an earlier mode lacks."""
+    from doomfj.wall_renderer import MONSTER_MODE
+    standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
+    names, absent = _monster_persist_absent(standalone, MONSTER_MODE)
+    assert names, "MONSTER_MODE %r declares none of MONSTER_PERSIST -- the test checks nothing" % MONSTER_MODE
+    assert not absent, ("MONSTER_PERSIST names %s, declared at MONSTER_MODE %r and absent from the standalone set "
+                        "-- re-key it" % (absent, MONSTER_MODE))
+
+
+def test_the_monster_cells_check_passes_a_set_that_carries_them():
+    """R9 for the test above, both ways: a set that carries the names passes and a set short of one is named by it
+    -- the shipped set at an earlier mode it was keyed for (wake, P3.2a), and the shipped set with the shipped
+    mode's names added, then one taken away"""
+    from doomfj.wall_renderer import MONSTER_MODE
+    standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
+    wake, absent = _monster_persist_absent(standalone, "wake")
+    assert "mon_target" in wake and "thseen" in wake and absent == []
+    names, _ = _monster_persist_absent(set(), MONSTER_MODE)
+    assert set(wake) < set(names)
+    full = standalone | set(names)
+    assert _monster_persist_absent(full, MONSTER_MODE) == (names, [])
+    assert _monster_persist_absent(full - {names[-1]}, MONSTER_MODE)[1] == [names[-1]]
+    assert _monster_persist_absent(full - {"mon_state"}, MONSTER_MODE)[1] == ["mon_state"]
 
 
 # The standalone cells that persist by NOT being in the set: nothing restores them, so what one

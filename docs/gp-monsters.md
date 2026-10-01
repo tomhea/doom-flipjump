@@ -257,7 +257,7 @@ height 0 -- every rule is live, the drop-off one included.
 (~20K) and the thing loop (~30K) -- ~80K; 2.32 tries a frame is ~0.19M mean, 0.32M at p80.
 
 
-### 8.5 P3.2c "decide" -- the design (as written; numbers: `docs/ship-evidence/p32c_decide_census_v5.log`)
+### 8.5 P3.2c "decide" -- the design (as written; numbers: `docs/ship-evidence/p32c_decide_census_v5.log`, by `scratchpad/gp/p32c_decide_census.py`)
 
 **The model mode** `decide` (`World(monsters="decide")`): A_Chase whole -- `justattacked` -> clear it and
 P_NewChaseDir; the melee decision (a melee state, P_AproxDistance < MELEE_REACH (60), the attack sight); the

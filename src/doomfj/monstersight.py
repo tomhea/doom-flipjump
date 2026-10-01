@@ -24,8 +24,10 @@ next call lands nowhere (the first harness run died so, at its fourth record). E
 """
 from typing import Dict, List, Tuple
 
+from doomfj.sight import NEAR
+
 SIGHT_CELL_SHIFT = 8                 # a sight cell: 256 map units of the integer position (nibbles 3 and 2)
-NEAR_UNITS = 128                     # doomfj.sight.NEAR
+NEAR_UNITS = NEAR                    # doomfj.sight.NEAR (R6: one source)
 NEAR_MARGIN = NEAR_UNITS + 1         # the trace reaches NEAR whole units plus the player's fraction
 M32, M48 = (1 << 32) - 1, (1 << 48) - 1
 STRADDLE = (1, 2, 4, 6, 8, 9)        # sign codes c1*4 + c2 (zero 0, positive 1, negative 2) that straddle
@@ -116,12 +118,6 @@ def map_cells(w) -> List[Tuple[int, int]]:
     xs, ys = [v[0] for v in vs], [v[1] for v in vs]
     return [(cx & 0xFF, cy & 0xFF) for cx in range(min(xs) >> SIGHT_CELL_SHIFT, (max(xs) >> SIGHT_CELL_SHIFT) + 1)
             for cy in range(min(ys) >> SIGHT_CELL_SHIFT, (max(ys) >> SIGHT_CELL_SHIFT) + 1)]
-
-
-def _subc(n: int, cell: str, v: int) -> List[str]:
-    """cell -= v (mod 16^n); nothing for 0 (`hex.sub_constant` refuses a zero constant)"""
-    v &= 16 ** n - 1
-    return ["    hex.sub_constant %d, %s, %d" % (n, cell, v)] if v else []
 
 
 def _seg_block(k: int, s: dict) -> List[str]:

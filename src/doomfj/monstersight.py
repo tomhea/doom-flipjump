@@ -8,8 +8,9 @@ the last picture did not show.
     cell, so the list holds every segment whose box the trace's box can meet (`test_monster_sight`).
   * ONE BLOCK PER SEGMENT: a dynamic segment (a door's, a lift's or the floor switch's sector on one side) first
     reads that sector's state cell and goes on only at a state whose opening is shut (<= 0; `closed_states`, the
-    model's height rules); then the model's bounding-box reject, in 16.16; then its constants into the registers
-    and the shared test `sl_seg`.
+    model's height rules); then its constants are XORed into zeroed registers (one op a nibble: the first version
+    computed with them in place, ~9k ops a block, 5.4M for E1M1's 593) and the shared test `sl_seg` runs the
+    model's bounding-box reject in 16.16, the rest, and zeroes them again.
   * `sl_seg`: `world.segments_touch` on the signs of four orientations, each an exact 48-bit product difference
     (`hex.mul_lo 12`, one shared leaf). With P the monster, Q the player, A, B the segment's ends, u = Q - P (16.16)
     and a = A - P, b = B - P, d = B - A (integers):
@@ -124,6 +125,9 @@ def _subc(n: int, cell: str, v: int) -> List[str]:
 
 
 def _seg_block(k: int, s: dict) -> List[str]:
+    """segment k: (a dynamic one: its sector shut, else return) its constants XORed into the zeroed registers --
+    `hex.xor_by` costs one op a nibble, where a `hex.set 8` is 256 and a `hex.sub_constant 8` 755 -- then the shared
+    test, which zeroes them again on every exit"""
     L = "sg%d_" % k
     (ax, ay), (bx, by) = s["a"], s["b"]
     minx, maxx, miny, maxy = s["box"]
@@ -134,23 +138,16 @@ def _seg_block(k: int, s: dict) -> List[str]:
             return out + ["    stl.fret sl_sret"]           # never shut: it never blocks
         mask = sum(1 << st for st in shut)
         out += ["    hex.if_flags %s, %d, %sout, %sgo" % (cell, mask, L, L), "  %sgo:" % L]
-    out += ["    hex.mov 8, sl_t, sl_x0", *_subc(8, "sl_t", (maxx << 16) + 1),
-            "    hex.sign 8, sl_t, %sa, %sout" % (L, L),          # x0 > maxx: the trace passes beside it
-            "  %sa:" % L,
-            "    hex.mov 8, sl_t, sl_x1", *_subc(8, "sl_t", minx << 16),
-            "    hex.sign 8, sl_t, %sout, %sb" % (L, L),          # x1 < minx
-            "  %sb:" % L,
-            "    hex.mov 8, sl_t, sl_y0", *_subc(8, "sl_t", (maxy << 16) + 1),
-            "    hex.sign 8, sl_t, %sc, %sout" % (L, L),
-            "  %sc:" % L,
-            "    hex.mov 8, sl_t, sl_y1", *_subc(8, "sl_t", miny << 16),
-            "    hex.sign 8, sl_t, %sout, %sd" % (L, L),
-            "  %sd:" % L,
-            "    hex.set 12, sl_dx, %d" % ((bx - ax) & M48), "    hex.set 12, sl_dy, %d" % ((by - ay) & M48)]
-    for reg, v, pos in (("sl_ax", ax, "mm_x"), ("sl_ay", ay, "mm_y"), ("sl_bx", bx, "mm_x"), ("sl_by", by, "mm_y")):
-        out += ["    hex.set 4, %s, %d" % (reg, v & 0xFFFF), "    hex.sub 4, %s, %s" % (reg, pos),
-                "    hex.sign_extend 12, 4, %s" % reg]
-    return out + ["    ;sl_seg", "  %sout:" % L, "    stl.fret sl_sret"]
+    for reg, n, v in (("sl_cx1", 8, (maxx << 16) + 1), ("sl_cx0", 8, minx << 16),
+                      ("sl_cy1", 8, (maxy << 16) + 1), ("sl_cy0", 8, miny << 16),
+                      ("sl_ax", 4, ax), ("sl_ay", 4, ay), ("sl_bx", 4, bx), ("sl_by", 4, by)):
+        v &= 16 ** n - 1
+        if v:
+            out.append("    hex.xor_by %d, %s, %d" % (n, reg, v))
+    out += ["    ;sl_seg"]
+    if s["dyn"]:
+        out += ["  %sout:" % L, "    stl.fret sl_sret"]
+    return out
 
 
 def _cross(dst: str, x1: str, y1: str, x2: str, y2: str) -> List[str]:
@@ -173,7 +170,20 @@ def _code(o: str, k: str, weight: int, tag: str) -> List[str]:
 def seg_test_lines() -> List[str]:
     """`sl_seg` (entered by a segment block's tail jump; returns through sl_sret, or ends the walk on a touch) and
     the product leaf"""
-    out = ["sl_seg:", "    hex.zero 1, sl_k12", "    hex.zero 1, sl_k34"]
+    out = ["sl_seg:"]
+    # the model's box reject, in 16.16 (the constants: maxx + 1, minx, maxy + 1, miny, all << 16)
+    for t, reg, c, keep_neg in (("a", "sl_x0", "sl_cx1", True), ("b", "sl_x1", "sl_cx0", False),
+                                ("c", "sl_y0", "sl_cy1", True), ("d", "sl_y1", "sl_cy0", False)):
+        nxt = "sl_b" + t
+        out += ["    hex.mov 8, sl_t, %s" % reg, "    hex.sub 8, sl_t, %s" % c,
+                "    hex.sign 8, sl_t, %s" % ((nxt + ", sl_clr") if keep_neg else ("sl_clr, " + nxt)),
+                "  %s:" % nxt]
+    # the ends relative to the monster (16-bit integers, sign-extended), and d = b - a
+    for reg, pos in (("sl_ax", "mm_x"), ("sl_ay", "mm_y"), ("sl_bx", "mm_x"), ("sl_by", "mm_y")):
+        out += ["    hex.sub 4, %s, %s" % (reg, pos), "    hex.sign_extend 12, 4, %s" % reg]
+    out += ["    hex.mov 12, sl_dx, sl_bx", "    hex.sub 12, sl_dx, sl_ax",
+            "    hex.mov 12, sl_dy, sl_by", "    hex.sub 12, sl_dy, sl_ay",
+            "    hex.zero 1, sl_k12", "    hex.zero 1, sl_k34"]
     out += _cross("sl_o", "sl_ux", "sl_uy", "sl_ax", "sl_ay") + _code("sl_o", "sl_k12", 4, "sl_c1")
     out += _cross("sl_o", "sl_ux", "sl_uy", "sl_bx", "sl_by") + _code("sl_o", "sl_k12", 1, "sl_c2")
     out.append("    sim.jump16 sl_k12, " + ", ".join(
@@ -188,8 +198,13 @@ def seg_test_lines() -> List[str]:
             "    sim.jump16 sl_k34, " + ", ".join("sl_touch" if c in STRADDLE else "sl_miss" for c in range(16)),
             "  sl_zz:",
             "    hex.if0 1, sl_k34, sl_touch",
-            "  sl_miss:", "    stl.fret sl_sret",
-            "  sl_touch:", "    hex.set 1, sl_hit, 1", "    stl.fret sl_sret",
+            "    ;sl_miss",
+            "  sl_touch:", "    hex.set 1, sl_hit, 1",
+            "  sl_miss:",
+            "  sl_clr:",                                   # every exit: the constant registers back to zero
+            "    hex.zero 8, sl_cx1", "    hex.zero 8, sl_cx0", "    hex.zero 8, sl_cy1", "    hex.zero 8, sl_cy0",
+            "    hex.zero 12, sl_ax", "    hex.zero 12, sl_ay", "    hex.zero 12, sl_bx", "    hex.zero 12, sl_by",
+            "    stl.fret sl_sret",
             "sl_mul:", "    hex.mul_lo 12, sl_r, sl_m1, sl_m2", "    stl.fret sl_mret"]
     return out
 
@@ -261,7 +276,8 @@ def near_los_lines(w) -> List[str]:
 
 SL_DECLS = (["sl_hit: hex.vec 1", "sl_k12: hex.vec 1", "sl_k34: hex.vec 1",
              "sl_px: hex.vec 8", "sl_py: hex.vec 8", "sl_x0: hex.vec 8", "sl_x1: hex.vec 8", "sl_y0: hex.vec 8",
-             "sl_y1: hex.vec 8", "sl_t: hex.vec 8"]
+             "sl_y1: hex.vec 8", "sl_t: hex.vec 8",
+             "sl_cx1: hex.vec 8", "sl_cx0: hex.vec 8", "sl_cy1: hex.vec 8", "sl_cy0: hex.vec 8"]
             + ["%s: hex.vec 12" % r for r in ("sl_ux", "sl_uy", "sl_ax", "sl_ay", "sl_bx", "sl_by", "sl_dx", "sl_dy",
                                                "sl_m1", "sl_m2", "sl_r", "sl_o", "sl_o3", "sl_t12")]
             + ["sl_ret: hex.vec w/4", "sl_sret: hex.vec w/4", "sl_mret: hex.vec w/4"])

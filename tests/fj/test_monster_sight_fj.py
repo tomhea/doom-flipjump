@@ -9,7 +9,8 @@ turns on their sector's state.
 
 ⚠ ONE IMAGE, MANY RECORDS: a leaf that leaves a register dirty corrupts the next record.
 ⚠ THE CONTROLS (R9): dynamic segments read as always shut, the touching codes dropped from the straddle (strict
-crossings only), the lists built without the NEAR margin, and o4 without its o3 term must each part from the model.
+crossings only), the lists built without the NEAR margin, and o4 without its o3 term, and constant registers
+not cleared between segments must each part from the model.
 """
 import random
 import struct
@@ -111,6 +112,9 @@ def _lines(w, mut=None):
         text = "\n".join(ln for ln in text.split("\n")
                          if not (ln.startswith("    hex.if_flags ") and ("dstate" in ln or "lstate" in ln
                                                                         or "fswitch" in ln)))
+    if mut == "noclr":                                    # the constant registers left for the next segment
+        assert text.count("    hex.zero 8, sl_cx1" + chr(10)) == 1
+        text = text.replace("    hex.zero 8, sl_cx1" + chr(10), "")
     if mut == "noshift":
         assert text.count("    hex.add 12, sl_o, sl_t12\n") == 1
         text = text.replace("    hex.add 12, sl_o, sl_t12\n", "")
@@ -211,7 +215,7 @@ def test_the_near_los_follows_the_model(tmp_path, world, sample):
     assert not bad, "%d of %d parted, first %s" % (len(bad), len(s), bad[:3])
 
 
-@pytest.mark.parametrize("mut", ["nodyn", "touch", "margin", "noshift"])
+@pytest.mark.parametrize("mut", ["nodyn", "touch", "margin", "noshift", "noclr"])
 def test_control_a_broken_los_is_caught(tmp_path, world, sample, mut):
     s, want = sample
     got = _run(tmp_path, world, s, "slos_" + mut, mut=mut)

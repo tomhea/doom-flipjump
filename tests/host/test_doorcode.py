@@ -102,7 +102,9 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     written = set()
     for m in re.finditer(r"hex\.(?:set|zero|inc|dec|xor_by|mov) (?:\d+, )?([A-Za-z_]\w*)", text):
         written.add(m.group(1))
-    assert written <= {"dstate", "ddir", "dsub", "dwait", "duse", "dbox", "dreq"}, sorted(written)
+    # M7 P3.2b: the monsters' contact leaves write only their own registers (dc_x / dc_y / dc_hit)
+    assert written <= {"dstate", "ddir", "dsub", "dwait", "duse", "dbox", "dreq", "dc_x", "dc_y", "dc_hit"}, \
+        sorted(written)
     assert {"dstate", "ddir", "dsub", "dwait"} <= written, "the census is not seeing the writes"
 
 

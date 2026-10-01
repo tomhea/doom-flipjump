@@ -196,6 +196,9 @@ P3.2 is too large for one build, so it ships in three, each against a named mode
   wake (seen, or the REJECT row and <= 128 -- sound waits for P4's shots), the K = 6 scheduler with the window and
   the shared A_Chase leaf -- whose counters, turn and target run but whose MOVE and attack decisions wait (mode
   `wake`: awake monsters turn toward the player in place).
+  SHIPPED 2026-10-01 as blocked43 (`docs/gp-ledger.md` P3.2a). As built: the mark is `frame.rec_seen_mark`, which
+  re-arms the pointer library at its caller's next pointer (arm5 moves five hexes only), and `thseen` is in the pin
+  veto `selfreset.POINTER_READ_CELLS` -- the two rules the dead builds blocked41 and blocked42 taught.
 - **P3.2b "chase"**: P_Move / P_TryMove on the monster cells (radius 30 lists with ML_BLOCKMONSTERS, the step,
   height and drop-off rules, the things as boxes), P_NewChaseDir with `mrnd`, the relink (`sim.leaf_unlink` /
   `leaf_link`), `thpos_rt` written, monster doors (`dreq`) and WR lifts.

@@ -220,8 +220,9 @@ height 0 -- every rule is live, the drop-off one included.
 **The pieces** (each on the engine against the model in a tests/fj harness, with mutants, before the build):
 1. *The monster cells*: a second `collision_cells_fj` set at radius 30 (a superset of 20's lists; the box uses the
    slot's true radius at run time, so the test is exact for both), its rows with ML_BLOCKMONSTERS folded into
-   blocking and each line's LOW floor (the drop-off), under its own prefix, testing through a new
-   `sim.line_test_mon` (the player's `sim.line_test` keeps its expansion -- and its heat keys). The rules of
+   blocking and each line's LOW floor (the drop-off), under its own prefix, testing through the one
+   `sim.line_test drop, lf, dropc` -- the monster cells pass `1, ca_lf, cp_drop` (track the drop-off), the player's
+   `0, 0, 0`, which adds no op to his expansion (`collision.collision_cells_fj`'s `lowfloor`). The rules of
    `try_move_monster` in a new `sim.try_move_mon`: ceil - floor < 56, ceil - z < 56, floor - z > 24, and
    floor - dropoff > 24.
 2. *The seed and the leaf*: the baked point location every thing uses (`ptloc_walk`, integer position) and a

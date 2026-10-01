@@ -171,6 +171,8 @@ def thing_cell_lists(things, radius: int) -> dict:
         for cx in xs:
             for cy in ys:
                 out.setdefault((cx, cy), []).append(k)
+    bad = [c for c in out if not (_CELL_MIN <= c[0] <= _CELL_MAX and _CELL_MIN <= c[1] <= _CELL_MAX)]
+    assert not bad, "thing cells beyond the tree's 16-bit reach, e.g. %s" % bad[:3]
     return {c: tuple(v) for c, v in out.items()}
 
 

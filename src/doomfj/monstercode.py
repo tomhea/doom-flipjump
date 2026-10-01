@@ -283,6 +283,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     fields = (P31_FIELDS + (P32A_FIELDS if wake else ()) + (P32B_FIELDS if chase else ())
               + (P32C_FIELDS if decide else ()))
     slot_t = {m: t for t, m in enumerate(rt_slot) if m is not None}
+    # the relink (docs/gp-monsters.md 8.4 piece 6): fj links the leaf lists by RUNTIME thing index, the model by
+    # monster slot -- the lists' orders agree only while the slots run in runtime-thing order
+    assert [slot_t[m] for m in range(nmon)] == sorted(slot_t.values()), (
+        "the monster slots are not in runtime-thing order: the fj's leaf lists would part from the model's")
 
     def values(sk):
         w.reset(sk)
@@ -293,7 +297,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     for sk in skills:
         v = values(sk)
         restart.append(["    hex.set %d, %s + %d*dw, %d" % (cell_nibbles(schema, f), f, cell_nibbles(schema, f) * m,
-                                                            v[f][m]) for f in fields for m in range(nmon)]
+                                                            v[f][m] & (16 ** cell_nibbles(schema, f) - 1))
+                        for f in fields for m in range(nmon)]
                        + (["    hex.set %d, sched_cursor, %d" % (cell_nibbles(schema, "sched_cursor"), w.ws.sched_cursor),
                            "    hex.zero %d, thseen" % nmon] if wake else [])
                        # M7 P3.2b: each monster's sector, and the barrels this skill stands
@@ -337,7 +342,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                  for m in range(nmon)]
         nleaf = len(w.cmap.subsectors)
         extra = {
-            "tic_after_eye": ((p32b_change_sector_lines(w, nmon) if chase else [])
+            "tic_after_eye": ((p32b_change_sector_lines(w, nmon, exit_guard=True) if chase else [])
                               + p32a_tic_lines(schema, nmon, slots, exit_guard=True)
                               + ["    hex.zero %d, thseen" % nmon]),               # the render marks this frame's
             "tables": ([generate_dispatch_table_fj("rj%d" % s_, [int(w.reject.visible(s_, q)) for q in range(w.reject.nsec)],
@@ -679,11 +684,16 @@ def p32b_decls(schema, nmon: int, values: dict, msec: list) -> list:
     return out + P32B_CONTEXT + ["mt_ms: hex.vec 2", "mt_rjret: hex.vec w/4"]
 
 
-def p32b_change_sector_lines(w, nmon: int) -> list:
+def p32b_change_sector_lines(w, nmon: int, *, exit_guard: bool) -> list:
     """P_ChangeSector for the lifts (world._door_phase_scene): when a mover's state differs from the last frame's
     (`mh_prev` holds each lift's state and the switch) every ACTIVE monster standing in a mover's sector takes that
     sector's floor at the mover's state. The model's trigger is the movers' heights off their stored floors; a
-    lift's stops are distinct heights (asserted), so a state change is a height change and the two agree."""
+    lift's stops are distinct heights (asserted), so a state change is a height change and the two agree.
+
+    `exit_guard`: a finished level (`lvdone`) skips it, `mh_prev` included -- the gates' mirrors skip the whole
+    monster frame then (p2a_gate: `if not lvdone: mph.frame`, whose `sync` IS this), the exit-press frame too,
+    where the lifts have already ticked; `mt_tic`'s own guard (p32a_tic_lines) covers only the tic after it.
+    (tests/fj/test_change_sector_fj.py)"""
     from doomfj.movers import mover_heights
     lifts = list(w.lift_order)
     for si in lifts:
@@ -694,8 +704,10 @@ def p32b_change_sector_lines(w, nmon: int) -> list:
     for si in w.switch:
         low_hi = mover_heights(w.secs, w.lift_stops, {}, w.switch, True)
         movers[si] = ("fswitch", [w.secs[si].floor_h, low_hi.get(si, (w.secs[si].floor_h, 0))[0]])
-    out = ["  // M7 P3.2b: P_ChangeSector -- the movers moved since the last frame: their monsters take the new floor",
-           "    hex.cmp %d, mh_prev, lstate, mcs_chg, mcs_sw, mcs_chg" % nl if nl else "    ;mcs_sw",
+    out = ["  // M7 P3.2b: P_ChangeSector -- the movers moved since the last frame: their monsters take the new floor"]
+    if exit_guard:
+        out.append("    hex.if1 1, lvdone, mcs_skip")                   # a finished level: the world is frozen
+    out += ["    hex.cmp %d, mh_prev, lstate, mcs_chg, mcs_sw, mcs_chg" % nl if nl else "    ;mcs_sw",
            "  mcs_sw:",
            "    hex.cmp 1, mh_prev + %d*dw, fswitch, mcs_chg, mcs_skip, mcs_chg" % nl,
            "  mcs_chg:"]

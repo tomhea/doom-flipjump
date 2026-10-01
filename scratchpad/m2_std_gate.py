@@ -744,7 +744,8 @@ def main():
     # M7 P3.1: the idle monsters -- the model's own phase (doomfj.monsters) from the boot skill's
     # level start, a tic per world frame after the player, reset by NEW GAME; drawn, cells read
     from doomfj.monsters import MonsterPhase, MonsterViews
-    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode="idle")
+    from doomfj.wall_renderer import MONSTER_MODE
+    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE)
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
                                             len(order), len(dp.triggers), len(mp.order),
@@ -815,14 +816,15 @@ def main():
             in_box_when_pressed = True
         dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn)
         dstates = dps[0]
-        mph.tic()                                       # M7 P3.1: the monsters after the player
+        mph.tic(state.x, state.y, state.angle)          # M7 P3.1: the monsters after the player
         rsc = build_scene(mw, mw, args.map,
                           {**heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}),
                            **mp.heights(mps)})
         want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
                                           thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
                                           thing_views=mviews(mph, state.x, state.y),
-                                          **GAME_RENDER_KW))
+                                          seen_out=(_seen := set()), **GAME_RENDER_KW))
+        mph.set_seen(mviews.slots_of(_seen))            # M7 P3.2a: this picture's seen -> the next tic
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
                                                    (dstates[si] for si in order), dps, order,

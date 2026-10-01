@@ -1,0 +1,4 @@
+$ python scratchpad/12m/heat_rekey.py --in scratchpad/12m/heat_blocked27_p31.json.gz --out scratchpad/12m/heat_blocked27_p32a.json.gz --rename frame.thing_record_body:28:32
+  frame.thing_record_body(28)->(32)                0 group key(s), 2,428 site path(s)
+scratchpad/12m/heat_blocked27_p32a.json.gz: 20 groups, 35,894 sites; decompressed sha256 b18cad1989958fe9
+rc=0

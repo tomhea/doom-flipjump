@@ -55,7 +55,10 @@ BYTE_ARRAY_NAMES = ("sshead", "pclm", "sfflag")
 # takes for the value -- so the blocking pass must never pin these (build_blocked.pin_state_veto).
 # While only the pass-2 reset wrote them they were never candidates; NEW GAME's restart is the first
 # pass-1 code to `hex.set` thss_rt / thpos_rt.
-POINTER_READ_CELLS = ("thpos_rt", "thss_rt", "sshead", "thnext")
+# M7 P3.2a: `thseen`, the seen flags the record WRITES through a pointer (frame.rec_seen_mark: `hex.write_hex sa`) --
+# a pinned word rests at its reader table's base, and a pointer read / write takes that for the value: blocked42
+# flipped a redirect bit there that never came back, and the tic's next `hex.zero` looped forever
+POINTER_READ_CELLS = ("thpos_rt", "thss_rt", "sshead", "thnext", "thseen")
 # declared cells per reachable cell: sshead is over-allocated 2x, the per-column arrays are 1:1
 _DECLARED_RATIO = {"sshead": 2, "pclm": 1, "sfflag": 1}
 

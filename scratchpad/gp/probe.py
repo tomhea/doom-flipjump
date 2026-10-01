@@ -144,7 +144,9 @@ def _read_quiet(p: Path) -> str:
 OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcard", "wfired"}),
                    frozenset({"lvdone", "pusedn"}),       # M7 P2a.2: the exit's two cells
                    frozenset({"lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"}),  # M7 P2b
-                   frozenset({"mon_state", "mon_tics", "mon_facing", "mon_active"}))  # M7 P3.1
+                   frozenset({"mon_state", "mon_tics", "mon_facing", "mon_active"}),  # M7 P3.1
+                   frozenset({"mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",
+                              "thseen"}))                                               # M7 P3.2a
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -638,6 +640,12 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0) -> di
         cells["mon_state"] = Cell("mon_state", "hex", 2, count=nmon)
         for name in ("mon_tics", "mon_facing", "mon_active"):
             cells[name] = Cell(name, "hex", 1, count=nmon)
+        # M7 P3.2a: the wake mode's cells; `thseen` is per monster SLOT (nmon), the render's marks
+        for name in ("mon_target", "mon_reaction", "mon_movedir"):
+            cells[name] = Cell(name, "hex", 1, count=nmon)
+        cells["mon_threshold"] = Cell("mon_threshold", "hex", 2, count=nmon)
+        cells["sched_cursor"] = Cell("sched_cursor", "hex", 2)
+        cells["thseen"] = Cell("thseen", "hex", 1, count=nmon)     # per SLOT, written by the render
     return cells
 
 
@@ -747,7 +755,7 @@ class Oracle:
         return self._scenes[(key, mkey)]
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
-               views=None) -> bytes:
+               views=None, seen_out=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art"""
@@ -755,7 +763,8 @@ class Oracle:
         return bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
                                                thing_hidden=set(self.hidden) | set(hidden_extra),
-                                               thing_views=views, **self.RENDER_KW))
+                                               thing_views=views, seen_out=seen_out,
+                                               **self.RENDER_KW))
 
     # -- M7 P3.1: the monsters' views (doomfj.monsters.MonsterViews, the one mapping) -------------
     def monster_views(self, phase, x16, y16) -> list:

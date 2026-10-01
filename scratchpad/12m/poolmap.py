@@ -102,7 +102,7 @@ from build_blocked import _counts_sig, _load_counts                      # noqa:
 
 # ship-gate 1b's build command, plus build_blocked.py's own defaults for what it does not pass
 SHIP_GATE = dict(pool_base=0x60000000, span_bits=0x9FFFFFE0, spread=2, spread_min_count=256,
-                 max_slot_ops=512, width_buckets=True, heat="scratchpad/12m/heat_blocked27_p31.json.gz",
+                 max_slot_ops=512, width_buckets=True, heat="scratchpad/12m/heat_blocked27_p32a.json.gz",
                  tier="game", map="E1M1", wad="tests/fixtures/freedoom_e1m1.wad")
 
 

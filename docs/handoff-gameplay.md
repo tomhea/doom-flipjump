@@ -327,9 +327,10 @@ First a build that EMITS every new table and calls none of it -- its delta is th
 SEPARATED; `docs/gp-monsters.md`, `docs/gp-ledger.md`).
 **P3.1 DONE 2026-09-30** (blocked40 ships, class F: the monsters' state machine and views in the `idle` mode;
 +243,680 on gamespeed -- over its +0.15M budget, the per-drawn-monster row select -- msframe NOT SEPARATED).
-P3.2 next: the owner chose the "seen" sight rule and the set v5 (`docs/gp-monsters.md` 8.2). It ships in three
-rungs, each a model mode -- P3.2a wake, P3.2b chase, P3.2c decide -- defined with P3.2a's branch
-(`docs/gp-monsters.md` 8.3 there).
+The owner chose the "seen" sight rule and the set v5 (`docs/gp-monsters.md` 8.2); P3.2 ships in three rungs, each a
+model mode (8.3). **P3.2a DONE 2026-10-01** (blocked43, class F: the monsters wake and turn; +146,045 on gamespeed,
+size +1.33M words -- over its budget, the unrolled slots' tables -- msframe NOT SEPARATED; v5 FROZEN, the CAP-22 set
+from here). P3.2b (chase: the monsters move) next, then P3.2c (decide).
 Then the state machine, K-slot scheduler, RNG, animation and rotation, waking, chase on the cells,
 thing collision, per-move rebind in use, doors opened by monsters and reversing on them, D3's
 compositor rules. Gate: `fight` (partial), fuzz. Budget +0.3M.

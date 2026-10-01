@@ -104,6 +104,15 @@ CACHE_DIR = Path(os.environ.get("GP_NAV_CACHE", r"C:\Users\tomhe\AppData\Local\T
 VERSION = "v2"
 FRAMES = 100
 SKILL = gd.SK_HARD
+# M7 P3.2 (docs/gp-monsters.md 8.2): the set's SIGHT RULE -- "los" (v2 .. v4: exact 2D line of sight) or "seen"
+# (v5: the picture, REJECT within 128, the near-trace; the owner, 2026-09-30). A set file names its own
+# (`sight_rule`, absent = "los"); every load of a set applies it (`use_sight_rule`) before a world is made.
+SIGHT_RULE = "los"
+
+
+def use_sight_rule(doc: dict) -> None:
+    global SIGHT_RULE
+    SIGHT_RULE = doc.get("sight_rule", "los")
 UNIT = 1 << 16
 M32 = 0xFFFFFFFF
 CELL = 16
@@ -312,7 +321,18 @@ def angle_err(want: int, have: int) -> int:
 
 
 def new_world() -> "W.World":
-    return W.World(skill=SKILL)
+    return apply_sight_rule(W.World(skill=SKILL))
+
+
+def apply_sight_rule(w) -> "W.World":
+    """the set's sight rule on ANY world -- the census makes its own (census_lib), and a world without the rule
+    replays a different model (the v5 plan's first validation: the census world ran exact LOS)"""
+    hook = None
+    if SIGHT_RULE == "seen":
+        from doomfj.sight import SeenHook
+        hook = SeenHook(w)                  # this tic's picture writes the next tic's mon_seen
+    w.set_sight_rule(SIGHT_RULE, hook)
+    return w
 
 
 def asleep(w, m: int) -> bool:
@@ -1271,7 +1291,7 @@ def replay(run: dict, census: bool = False) -> dict:
     """one frozen run on a fresh model: poses, events, the population (geometric; DRAWN too when
     `census`, on the census's own World), doors, movement, dodges, B0's camera reconstruction"""
     c = new_census() if census else None
-    w = start_world(run["setup"], c.world if c else None)
+    w = start_world(run["setup"], apply_sight_rule(c.world) if c else None)
     mirror = BinaryMirror(w)
     keys = [str_to_keys(s) for s in run["keys"]]
     poses, pops = [], []
@@ -1688,6 +1708,7 @@ def plan_refusal(path: Path):
 
 def freeze(path: Path, b0_path: Path, approver: str, record: str, grown_from=None) -> int:
     doc = json.loads(Path(path).read_text(encoding="ascii"))
+    use_sight_rule(doc)
     print("FREEZE %s (%d runs), B0 %s, approver %r" % (path, len(doc["runs"]), b0_path, approver),
           flush=True)
     grown = None
@@ -2054,6 +2075,7 @@ def schema_growth(set_path: Path, ref: str) -> dict:
     archived into a temp dir) and on this tree, compared by `grown_compare`; plus the control that
     `ref`'s tree reproduces every final digest the set recorded (it IS the frozen model)."""
     doc = json.loads(Path(set_path).read_text(encoding="ascii"))
+    use_sight_rule(doc)
     arc = subprocess.run(["git", "archive", "--format=tar", ref, "src", "scratchpad/gp",
                           "tests/fixtures"], cwd=str(ROOT), capture_output=True)
     if arc.returncode:
@@ -2106,6 +2128,7 @@ def rehash(path: Path, reason: str) -> int:
     and the changed files. No owner step: nothing the set measures moved. If F3 or F4 fail, the
     model's BEHAVIOUR changed -- that is not a rehash; it needs the owner (a v3)."""
     doc = json.loads(Path(path).read_text(encoding="ascii"))
+    use_sight_rule(doc)
     ms = [replay(run, census=True) for run in doc["runs"]]
     for name, ok, det in freeze_checks(doc, ms):
         print("  %s %s  %s" % (name.split()[0], "ok  " if ok else "FAIL", det), flush=True)
@@ -2144,6 +2167,8 @@ def main():
     ap.add_argument("--approval-record", help="--freeze: the approval's words and where they are")
     ap.add_argument("--no-census", action="store_true", help="validate without the drawn count")
     ap.add_argument("--file", default=str(SCEN_FILE))
+    ap.add_argument("--sight", choices=("los", "seen"), default="los",
+                    help="--plan: the NEW set's sight rule (M7 P3.2; 'seen' is set v5's)")
     ap.add_argument("--grown-from", metavar="REF",
                     help="--freeze: the set's digests may change by SCHEMA GROWTH only -- the witness "
                          "compares the tree at git REF (the one the set was frozen at) with this one")
@@ -2154,7 +2179,9 @@ def main():
             print("PLAN REFUSED: %s (nothing written)" % why, flush=True)
             return 1
         t0 = time.time()
+        use_sight_rule({"sight_rule": a.sight})
         doc = plan_set()
+        doc["sight_rule"] = SIGHT_RULE
         res = validate(doc, census=True, quiet=False)
         record_validation(doc, res)
         doc["hashes"] = code_hashes()
@@ -2173,6 +2200,7 @@ def main():
     if a.rehash:
         return rehash(Path(a.file), a.rehash)
     doc = json.loads(Path(a.file).read_text(encoding="ascii"))
+    use_sight_rule(doc)
     if a.validate:
         t0 = time.time()
         res = validate(doc, census=not a.no_census, quiet=False)

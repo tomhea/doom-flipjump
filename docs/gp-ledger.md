@@ -633,3 +633,69 @@ heat_blocked27_p31 regenerated, its groups identical (the pool reads only those)
 4. CAP-22 on v4 (14,447,782); size 28.65%; msframe recorded (NOT SEPARATED).
 5. pinreport 20 of 20 with `heat_blocked27_p31`; the restore sets re-keyed (`p31_rekey.log`).
 
+**Row**: (filled after the build)
+
+
+## P3.2a wake (class F) -- declared 2026-09-30, before blocked41's build
+
+**What**: `docs/gp-monsters.md` sections 8.2-8.3, rung P3.2a. The monsters run the model's `wake` mode under the
+seen rule (combat set v5): the render marks each monster it SEES (some column open at the base monster size cull,
+before the count budgets and the soft raise -- `seen_probe`), and the next frame's tic reads the flags. The tic walks
+the slots from `sched_cursor`, at most K = 6 heavy slots a frame (the first deferred is the next cursor); A_Look
+wakes on seen, or REJECT-visible within 128 and not behind; A_Chase in `wake` runs its counters and the turn
+(`mturn`), and nothing moves yet (P3.2b).
+
+**Budget**: ops <= +0.3M on the binding metric (the slot walk, one REJECT row read per near sleeper, the seen mark
+per drawn monster and the probe per culled one); size <= +0.2M words (the REJECT rows of the monsters' sectors,
+`lfsec`, the unrolled slots).
+
+**Kill criteria** (class F):
+1. Host: the seen rule, REJECT and the wake mode each with a control (`tests/host/test_sight.py`, added in review: REJECT bit for bit, the wake and attack sights,
+   SeenHook, set_seen; the world's wake tests).
+2. fj: the wake tic on the engine against the model's wake mode, a mutated REJECT row and a mutated turn table
+   caught (`test_monster_wake_fj.py`); `seen = 0` leaves the transplanted record exact (`test_sprite_bank_fj.py`);
+   the `seen = 1` mark and probe are proven where they run whole -- `thseen` state-exact in the gates below.
+3. m2_std_gate, m3_gate, p2a_gate byte- and state-exact with every gate's oracle ticking `MonsterPhase` in `wake`
+   and feeding it the seen set of the picture it drew; their selftests reject where they must; B0 v5 exact.
+4. v5 frozen (the owner's approval stands if every criterion still passes on the measured B0); CAP-22 on v5;
+   size <= 35%; msframe recorded (the pictures differ from blocked40's -- monsters wake and turn).
+5. pinreport 20 of 20 with the re-keyed heat list (`frame.thing_record_body` 28 -> 32); the restore sets
+   re-keyed (the wake cells and `thseen` persist).
+
+**Row** (blocked43, sha256 `3c3a87d474d975e5`, built at df7c4b8; `docs/ship-evidence/blocked43_*`):
+
+| measure | blocked40 (P3.1) | blocked43 (P3.2a) | delta |
+|---|---|---|---|
+| combat set binding | v4 14,447,782 | **v5** 14,400,185 | the set changed (v5, the seen rule) |
+| gamespeed binding | 13,940,191 | 14,086,236 | +146,045 (budget 0.3M) |
+| profx mean frame (gamespeed's games) | 11,845,713 | 11,948,995 | +103,282 |
+| size (% of 2^27) | 28.65% | 29.64% | +1,330,204 words (budget 0.2M: OVER) |
+| ms/frame (msframe, one run, A = blocked40; the pictures differ, so its pixel check reads NO) | 64.2 | 63.6 | NOT SEPARATED (x0.999) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**OVER the size budget**: +1.33M words against the +0.2M declared. The pool's preflight says where: +17,701 tables
+(371,471 -> 389,172) in +848 groups, +1.21M words of pool demand -- every hex op of the new code carries its own
+lookup table here, and the tic is 53 unrolled slots (and the seen probe sits in both record expansions). The ops are
+inside the budget. Not a kill criterion; size stays far inside 35% (29.64%).
+
+**Two dead builds, two pointer rules** (both now written down in `src/fj/frame_render.fj` and `selfreset.py`):
+blocked41 died at its first world frame (NullIP): `rec_seen_mark`'s `hex.write_hex` armed the pointer library at
+`thseen`, outside the hot-data 16^5 window, and the column loop's next `frame.read_byte5` (arm5 moves only five hexes)
+jumped into code -- the mark now re-arms at the pointer its caller reads next. blocked42 then looped forever:
+`--pin-state-cells` pre-arms every `hex.vec` cell at its reader table's base, a pointer write took that base for the
+value and left a redirect bit flipped in `thseen[22]`, and the tic's next `hex.zero` cycled -- `thseen` joined the pin
+veto. Neither is visible to an unpinned tests/fj harness; the record harness now runs the mark ON with the flags a
+window away (control: no re-arm), and `test_monstercode` pins the veto. The chain now proves a binary presents frames
+(`_smoke_frames.py`, under a timeout) before any gate runs.
+
+**Verdict: every kill criterion met.**
+1. Host: the seen rule, REJECT and the wake mode with their controls; the probe's wake group all-or-none.
+2. fj: `test_monster_wake_fj.py` (the wake tic against the model, a mutated REJECT row and turn table caught);
+   `test_sprite_bank_fj.py` runs the record with the mark ON (every thing marked, the layout exact; the mark without
+   its re-arm caught); `test_slot_layouts_fj.py` binds the switch off.
+3. m2_std_gate, m3_gate byte- and state-exact with their selftests; p2a_gate S1-S13 and S8 (the exit: no tic on the
+   frame its press ends the level); B0 v5 exact on every frame; deg_gate BYTE-EXACT with every op count equal to
+   blocked40's.
+4. v5 FROZEN (F1-F5 PASS, `p32a_v5_freeze.log`); CAP-22 on v5 (14,400,185); size 29.64%; msframe recorded.
+5. pinreport 20 of 20 with `heat_blocked27_p32a`; the restore sets re-keyed (`p32a_rekey.log`).
+

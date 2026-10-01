@@ -158,11 +158,12 @@ def test_provenance_names_commands_that_exist(doc):
 # -- M5: the two sets differ in exactly the two ways the standalone PROGRAM differs ---------------
 
 def _monster_decls():
-    """M7 P3.1: the monsters' cells as the emitter declares them (monstercode.monster_decls)"""
-    from doomfj.monstercode import monster_decls
+    """M7 P3.1: the monsters' persisted cells as the emitter declares them, at the game tier's model mode
+    (monstercode.persisted_monster_decls -- the list m5_setfile adds; P3.2a: the wake mode's cells too)"""
+    from doomfj.monstercode import persisted_monster_decls
+    from doomfj.wall_renderer import MONSTER_MODE
     from doomfj.world import World
-    w = World()
-    return monster_decls(w.schema, w.layout.nmon)
+    return persisted_monster_decls(World(), MONSTER_MODE)
 
 
 def test_the_standalone_set_drops_only_the_wire_magic():

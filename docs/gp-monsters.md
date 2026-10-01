@@ -173,8 +173,11 @@ is a behaviour change: a new set version (v5) and the owner's approval before an
 The model's sight moves from exact 2D LOS to the handoff's rule (7.2, D3 e); the frozen set is re-planned as v5
 under it and put to the owner with its criteria and B0 before it is frozen.
 - **seen** (`mon_seen`, per monster): set by the picture of the PREVIOUS frame -- the monster's sprite projects in
-  front of the viewer and at least one of its columns is still OPEN (no wall drawn there yet) when the walk reaches
-  its leaf, tested BEFORE the thing budgets and the minimum-size cull (D3 e: sight must not depend on degradation).
+  front of the viewer at the BASE monster size cull (`MIN_SPRITE_H_MONSTER`; the soft budgets' raise does not
+  apply) and at least one of its columns is still OPEN (no wall drawn there yet) when the walk reaches its leaf,
+  tested BEFORE the count budgets (D3 e: sight must not depend on degradation). The fixed base cull stays: it is not
+  a degradation, and keeping it lets the fj reuse the draw path's projection (a `fixed_div`, ~38.5K) -- an extra
+  projection only when a count budget is spent or the soft raise rejected the monster.
   `reference_model.render_wall_frame(seen_out=)` records it; the fj records it in the thing pass. Level start: none.
 - **waking sight** (A_Look's ambush test and P_LookForPlayers, A_Chase's re-acquire included): seen, or the
   monster's sector REJECT-visible from the player's (E1M1's REJECT lump, `assets/freedoom1.wad`) AND
@@ -183,3 +186,24 @@ under it and put to the owner with its criteria and B0 before it is frozen.
   (`World.los_points`) -- the handoff's "short trace over the collision cells" for a near monster not drawn.
 - The model steps it through a hook: after each tic, `doomfj.sight.SeenHook` renders the world as the binary draws
   it (positions, views, what is hidden) and writes `mon_seen`. A World without the hook sees nothing drawn.
+
+### 8.3 P3.2's rungs (each a model mode, a build, its gates)
+
+P3.2 is too large for one build, so it ships in three, each against a named model mode:
+- **P3.2a "wake"**: `mon_seen` recorded by the fj thing pass (the monster's projection and one open column, before
+  the budgets -- inside the column loop for a drawn monster, a short scan for one the budgets or the size cull
+  turn away; per monster SLOT `thseen[m]`, which the monster's slot code reads at a compile-time address), A_Look's
+  wake (seen, or the REJECT row and <= 128 -- sound waits for P4's shots), the K = 6 scheduler with the window and
+  the shared A_Chase leaf -- whose counters, turn and target run but whose MOVE and attack decisions wait (mode
+  `wake`: awake monsters run A_Chase's turn toward their movedir -- DI_EAST until P3.2b's NewChaseDir sets one --
+  in place; they do not yet turn toward the player).
+  SHIPPED 2026-10-01 as blocked43 (`docs/gp-ledger.md` P3.2a). As built: the mark is `frame.rec_seen_mark`, which
+  re-arms the pointer library at its caller's next pointer (arm5 moves five hexes only), and `thseen` is in the pin
+  veto `selfreset.POINTER_READ_CELLS` -- the two rules the dead builds blocked41 and blocked42 taught.
+- **P3.2b "chase"**: P_Move / P_TryMove on the monster cells (radius 30 lists with ML_BLOCKMONSTERS, the step,
+  height and drop-off rules, the things as boxes), P_NewChaseDir with `mrnd`, the relink (`sim.leaf_unlink` /
+  `leaf_link`), `thpos_rt` written, monster doors (`dreq`) and WR lifts.
+- **P3.2c "decide"**: the melee and missile decisions and their states (A_FaceTarget; the attacks' EFFECTS are P5,
+  so the mode runs the attack states without damage).
+The frozen set v5 is the full model; B0 on it is exact from P3.2c on, when the mode's tic equals the model's for
+everything v5 exercises but damage.

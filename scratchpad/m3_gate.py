@@ -161,7 +161,8 @@ def main():
     # M7 P3.1: the idle monsters -- the model's own phase (doomfj.monsters), from the boot skill's
     # level start, a tic per world frame, reset by NEW GAME; drawn with their views, cells read
     from doomfj.monsters import MonsterPhase, MonsterViews
-    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode="idle")
+    from doomfj.wall_renderer import MONSTER_MODE
+    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE)
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
                                             len(order), nwalk, nmon=mph.world.layout.nmon)
@@ -199,7 +200,13 @@ def main():
         if mode == 0:
             state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene)
             pusedn = 0                              # this script never holds use
-            mph.tic()                               # M7 P3.1: the monsters after the player
+            mph.tic(state.x, state.y, state.angle)  # M7 P3.1: the monsters after the player
+            # M7 P3.2a: the frame's picture decides the next tic's seen (rendered below, per world frame)
+            _seen = set()
+            rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map), scene,
+                                 thing_hidden=hidden[skill], thing_views=mviews(mph, state.x, state.y),
+                                 seen_out=_seen, **render_kw)
+            mph.set_seen(mviews.slots_of(_seen))
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
                      "ng": ng, "before": before, "pusedn": pusedn,
                      "mstate": mph.state(), "views": mviews(mph, state.x, state.y)})

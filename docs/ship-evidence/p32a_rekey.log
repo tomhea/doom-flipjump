@@ -1,0 +1,93 @@
+# the restore-set re-key of m7-awake 6a18c60
+=== 19:52:13 python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p32a.tsv.gz
+$ python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p32a.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 2842s: 1,786,270 labels -> scratchpad\_ca_labels_p32a.tsv.gz (14.0 MB)
+code_start word: 17308
+rc=0
+=== 20:41:13 python scratchpad/ca_remap_set.py --labels scratchpad/_ca_labels_p32a.tsv.gz --old-labels scratchpad/_ca_labels_p31.tsv.gz
+$ python scratchpad/ca_remap_set.py --labels scratchpad/_ca_labels_p32a.tsv.gz --old-labels scratchpad/_ca_labels_p31.tsv.gz
+labels in the set      : 436
+  unchanged            : 436
+  re-keyed             : 0
+  dropped (register gone): 0  []
+  span changed, held whole -> resized: 0  
+words: 11,432 -> 11,432  (delta +0)  negative = a dropped register or a shrunk array; positive =
+      a grown array, or the superset taken where the old->new mapping was ambiguous --
+      see the comments above.
+production loader accepts it: 11,432 words, layout fingerprint 6287a37148a1c23a
+wrote src/doomfj/data/m1_restore_set.json.gz
+rc=0
+=== 20:41:30 python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p32a.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+$ python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p32a.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+added 0 words over 328 globals (2 check + 326 hoisted)
+src/doomfj/data/m1_restore_set.json.gz: 11432 -> 11432 words over 436 entries
+rc=0
+=== 20:41:34 python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p32a.tsv.gz
+$ python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p32a.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 3639s: 2,030,741 labels -> scratchpad\_ca_labels_std_p32a.tsv.gz (15.8 MB)
+code_start word: 17308
+rc=0
+=== 21:43:56 python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p32a.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+$ python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p32a.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+dropped wmagic; added 1450 words over 42 standalone globals (incl. the per-door state)
+src/doomfj/data/m5_restore_set.json.gz: 11432 -> 12878 words over 436 -> 477 entries
+persist: viewx, viewy, viewangle, kb_f, kb_b, kb_l, kb_r, kb_u, mode, menu_scr, menu_sel, lvdone, pusedn, dstate, ddir, dsub, dwait, dreq, pcard, wfired, lstate, ldir, lsub, lwait, lreq, fswitch, sshead, thss_rt, thpos_rt, mon_state, mon_tics, mon_facing, mon_active, mon_target, mon_reaction, mon_threshold, mon_movedir, sched_cursor, thseen
+rc=0
+=== 21:44:02 python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+$ python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+............F.......                                                     [100%]
+================================== FAILURES ===================================
+______________ test_the_standalone_set_drops_only_the_wire_magic ______________
+
+    def test_the_standalone_set_drops_only_the_wire_magic():
+        """The hosted program checks a MAGIC byte on the wire; the standalone one has no wire. That is
+        the ONLY label allowed to disappear -- anything else vanishing is a hole, and a hole hangs."""
+        hosted = {e[0] for e in _load(SETS["hosted"])["entries"]}
+        standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
+        assert hosted - standalone == {"wmagic"}, (
+            "the standalone set drops %s; only 'wmagic' may go" % sorted(hosted - standalone))
+        # M2-R4: ...and the per-door state, because the shipped standalone tier has RUNTIME DOORS. The
+        # names come from `door_decls` at the map's own door count rather than being written out here,
+        # so a map with a different number of doors does not need this test edited -- and `duse`/`dbox`
+        # are deliberately absent: they are rewritten every frame, so they are ordinary residue the
+        # reset restores like anything else.
+        from doomfj.doorcode import door_decls
+        from doomfj.doors import door_states
+        _w = WadFile.from_path("tests/fixtures/freedoom_e1m1.wad")
+        _nd = len(door_states(_w.sectors("E1M1"), _w.linedefs("E1M1"), _w.sidedefs("E1M1")))
+        from doomfj.movercode import mover_decls
+        from doomfj.movers import lift_states
+        _nl = len(lift_states(_w.sectors("E1M1"), _w.linedefs("E1M1"), _w.sidedefs("E1M1")))
+        expected = {name for name, _ in
+                    (decl_words(d) for d in list(STANDALONE_SCRATCH_DECLS) + door_decls(_nd)
+                     + mover_decls(_nl)                 # M7 P2b: the movers' cells
+                     + _monster_decls())}                # M7 P3.1: the monsters' cells
+>       assert standalone - hosted == expected, (
+            "the standalone set adds %s, which is not STANDALONE_SCRATCH_DECLS + the door state"
+            % sorted(standalone - hosted))
+E       AssertionError: the standalone set adds ['dbox', 'ddir', 'dreq', 'dstate', 'dsub', 'duse', 'dwait', 'ev_dn', 'ev_enter', 'ev_esc', 'ev_up', 'fswitch', 'kb_b', 'kb_f', 'kb_l', 'kb_r', 'kb_u', 'kbcode', 'kbstat', 'ldir', 'lreq', 'lstate', 'lsub', 'lvdone', 'lwait', 'menu_scr', 'menu_sel', 'mode', 'mon_active', 'mon_facing', 'mon_movedir', 'mon_reaction', 'mon_state', 'mon_target', 'mon_threshold', 'mon_tics', 'pcard', 'pusedn', 'rs_ret', 'sched_cursor', 'thseen', 'wfired'], which is not STANDALONE_SCRATCH_DECLS + the door state
+E       assert {'dbox', 'ddi..., 'duse', ...} == {'dbox', 'ddi..., 'duse', ...}
+E         
+E         Extra items in the left set:
+E         'sched_cursor'
+E         'mon_target'
+E         'mon_movedir'
+E         'mon_reaction'
+E         'thseen'
+E         'mon_threshold'
+E         Use -v to get more diff
+
+tests\host\test_restore_set_shipped.py:191: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_restore_set_shipped.py::test_the_standalone_set_drops_only_the_wire_magic
+1 failed, 19 passed in 0.73s
+rc=1
+# the step above failed on the TEST's stale expectation (P3.1's monster cells only); the test and m5_setfile now read monstercode.persisted_monster_decls -- re-run:
+$ python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+....................                                                     [100%]
+20 passed in 0.26s
+rc=0

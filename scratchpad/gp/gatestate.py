@@ -25,7 +25,8 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "dreq", "pcard", "wfired",        # M7 P2a.1: doors.DoorPhase's (req, card, fired)
                "lvdone", "pusedn",               # M7 P2a.2: the exit's
                "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",   # M7 P2b: movers.MoverPhase's
-               "mon_state", "mon_tics", "mon_facing", "mon_active")   # M7 P3.1: monsters.MonsterPhase's
+               "mon_state", "mon_tics", "mon_facing", "mon_active",   # M7 P3.1: monsters.MonsterPhase's
+               "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen")  # P3.2a
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
@@ -48,7 +49,8 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int 
     return r.frames, r.ops, reads
 
 
-MONSTER_NAMES = {"mon_state", "mon_tics", "mon_facing", "mon_active"}
+MONSTER_NAMES = {"mon_state", "mon_tics", "mon_facing", "mon_active",
+                 "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen"}
 
 
 def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None,

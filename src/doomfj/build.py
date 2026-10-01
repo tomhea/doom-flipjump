@@ -77,7 +77,10 @@ THING_PERSIST = ("sshead", "thss_rt", "thpos_rt")
 MOVER_PERSIST = ("lstate", "ldir", "lsub", "lwait", "lreq", "fswitch")
 # M7 P3.1: the monsters' cells (monstercode.P31_FIELDS), the game tier's alone -- it is the only one
 # whose monsters live (docs/gp-monsters.md)
-MONSTER_PERSIST = ("mon_state", "mon_tics", "mon_facing", "mon_active")
+MONSTER_PERSIST = ("mon_state", "mon_tics", "mon_facing", "mon_active",
+                   # M7 P3.2a (the wake mode): the chase's cells, the cursor, and the seen flags -- the render
+                   # writes them for the NEXT frame's tic, so they must survive the reset between the two
+                   "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen")
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:

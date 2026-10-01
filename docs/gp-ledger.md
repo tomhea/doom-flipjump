@@ -650,7 +650,8 @@ per drawn monster and the probe per culled one); size <= +0.2M words (the REJECT
 `lfsec`, the unrolled slots).
 
 **Kill criteria** (class F):
-1. Host: the seen rule, REJECT and the wake mode each with a control (`test_sight*.py`, the world's wake tests).
+1. Host: the seen rule, REJECT and the wake mode each with a control (`tests/host/test_sight.py`, added in review: REJECT bit for bit, the wake and attack sights,
+   SeenHook, set_seen; the world's wake tests).
 2. fj: the wake tic on the engine against the model's wake mode, a mutated REJECT row and a mutated turn table
    caught (`test_monster_wake_fj.py`); `seen = 0` leaves the transplanted record exact (`test_sprite_bank_fj.py`);
    the `seen = 1` mark and probe are proven where they run whole -- `thseen` state-exact in the gates below.
@@ -669,7 +670,7 @@ per drawn monster and the probe per culled one); size <= +0.2M words (the REJECT
 | gamespeed binding | 13,940,191 | 14,086,236 | +146,045 (budget 0.3M) |
 | profx mean frame (gamespeed's games) | 11,845,713 | 11,948,995 | +103,282 |
 | size (% of 2^27) | 28.65% | 29.64% | +1,330,204 words (budget 0.2M: OVER) |
-| ms/frame (msframe, one run, A = blocked40) | 64.2 | 63.6 | NOT SEPARATED (x0.999) |
+| ms/frame (msframe, one run, A = blocked40; the pictures differ, so its pixel check reads NO) | 64.2 | 63.6 | NOT SEPARATED (x0.999) |
 | hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
 
 **OVER the size budget**: +1.33M words against the +0.2M declared. The pool's preflight says where: +17,701 tables

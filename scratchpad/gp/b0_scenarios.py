@@ -150,6 +150,9 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         from doomfj.wall_renderer import BOOT_SKILL
         from doomfj.wall_renderer import MONSTER_MODE
         mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE)
+    # M7 P3.2a: a monster that can wake reads the seen flags of the LAST picture, which the binary marks on every
+    # frame -- so the model's picture (and its seen flags) is taken on every frame too, whatever `pixel_every`
+    seen_every = mph is not None and mph.world.monsters != "idle"
     for f, fr in enumerate(frames):
         if mph is not None:
             _ep = override[f][0] if override is not None else fr["exp"][0]
@@ -164,7 +167,7 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         d_part = fr.get("post_doors") is not None and tuple(edoors) != tuple(fr["post_doors"])
         cam += c_part
         door += d_part
-        if f % pixel_every == 0 or c_part or d_part:
+        if f % pixel_every == 0 or c_part or d_part or seen_every:
             _seen = set()
             want = orc.render(P_signed(epose[0]), P_signed(epose[1]), epose[2], tuple(edoors),
                               movers=fr.get("mheights"),

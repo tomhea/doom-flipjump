@@ -192,10 +192,11 @@ under it and put to the owner with its criteria and B0 before it is frozen.
 P3.2 is too large for one build, so it ships in three, each against a named model mode:
 - **P3.2a "wake"**: `mon_seen` recorded by the fj thing pass (the monster's projection and one open column, before
   the budgets -- inside the column loop for a drawn monster, a short scan for one the budgets or the size cull
-  turn away; per runtime thing `thseen[t]`, which the monster's slot code reads at a compile-time address), A_Look's
+  turn away; per monster SLOT `thseen[m]`, which the monster's slot code reads at a compile-time address), A_Look's
   wake (seen, or the REJECT row and <= 128 -- sound waits for P4's shots), the K = 6 scheduler with the window and
   the shared A_Chase leaf -- whose counters, turn and target run but whose MOVE and attack decisions wait (mode
-  `wake`: awake monsters turn toward the player in place).
+  `wake`: awake monsters run A_Chase's turn toward their movedir -- DI_EAST until P3.2b's NewChaseDir sets one --
+  in place; they do not yet turn toward the player).
   SHIPPED 2026-10-01 as blocked43 (`docs/gp-ledger.md` P3.2a). As built: the mark is `frame.rec_seen_mark`, which
   re-arms the pointer library at its caller's next pointer (arm5 moves five hexes only), and `thseen` is in the pin
   veto `selfreset.POINTER_READ_CELLS` -- the two rules the dead builds blocked41 and blocked42 taught.

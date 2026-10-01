@@ -327,9 +327,11 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
         pre_doors = [tuple(dsim.ds[si]) for si in dsim.order]
         st = dsim.step(st, kd)
         bk = S.b0_keys(kd)
-        frames.append({"inj": pre, "keys": bk, "doors": pre_doors,
-                       "exp": mirror.step(pre, bk, pre_doors), "post": (st.x, st.y, st.angle),
-                       "post_doors": tuple(dsim.ds[si][0] for si in dsim.order)})
+        exp = mirror.step(pre, bk, pre_doors)
+        # M7 P2b: the route rides a lift (frames 31-73): the picture needs the mirror's mover heights
+        frames.append({"inj": pre, "keys": bk, "doors": pre_doors, "exp": exp, "post": (st.x, st.y, st.angle),
+                       "post_doors": tuple(dsim.ds[si][0] for si in dsim.order),
+                       "mheights": mirror.mp.heights(mirror.mstate)})
     doc = json.loads(Path(doc_path).read_text(encoding="ascii"))
     S.use_sight_rule(doc)
     runs = {r["name"]: r for r in doc["runs"]}
@@ -374,9 +376,16 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
         table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon).values()})
         gb = P.GameBinary(fjm)
         r1 = drive(gb, table, orc, frames, pixel_every=10)
-        check("T1 gamespeed run %d, every door written each frame, reproduces the recorded total"
-              % B.RECORDED_TIC_RUN, r1["ops_total"] == B.RECORDED_TIC_OPS,
-              "%s vs %s" % (format(r1["ops_total"], ","), format(B.RECORDED_TIC_OPS, ",")))
+        # the recorded total and calibration belong to ONE binary (probe.RECORDED_SHA16): on any other they are
+        # SKIPPED by name, never passed
+        recorded = gb.sha.startswith(P.RECORDED_SHA16)
+        if recorded:
+            check("T1 gamespeed run %d, every door written each frame, reproduces the recorded total"
+                  % B.RECORDED_TIC_RUN, r1["ops_total"] == B.RECORDED_TIC_OPS,
+                  "%s vs %s" % (format(r1["ops_total"], ","), format(B.RECORDED_TIC_OPS, ",")))
+        else:
+            print("  T1 recorded total: SKIPPED -- recorded for sha256 %s..., this is %s (%s ops)"
+                  % (P.RECORDED_SHA16, gb.sha[:16], format(r1["ops_total"], ",")), flush=True)
         check("T1 ... state-exact and byte-exact against the mirror, which never parts from DoorSim",
               all(r1["state_ok"]) and all(r1["pix_ok"]) and r1["cam_parts"] == 0 and r1["door_parts"] == 0,
               "state %d/%d pixels %d/%d parts %d/%d" % (sum(r1["state_ok"]), len(r1["state_ok"]),
@@ -387,8 +396,12 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
         check("T2 an expectation one turn off FAILS the state check on every frame",
               not any(r2["state_ok"]), "%d/%d accepted" % (sum(r2["state_ok"]), len(r2["state_ok"])))
         menu = gb.run(gate.MENU_FRAMES).ops
-        check("T3 startup + menu measured through this driver = the recorded calibration",
-              menu == P.RECORDED_CALIBRATION, "%s" % format(menu, ","))
+        if recorded:
+            check("T3 startup + menu measured through this driver = the recorded calibration",
+                  menu == P.RECORDED_CALIBRATION, "%s" % format(menu, ","))
+        else:
+            print("  T3 recorded calibration: SKIPPED -- recorded for sha256 %s... (%s ops here)"
+                  % (P.RECORDED_SHA16, format(menu, ",")), flush=True)
         good = drive(gb, table, orc, court, pixel_every=1)
         plain = drive(gb, table, P.Oracle(), court, pixel_every=1)
         check("T4 the game oracle passes the courtyard's sky frames, state- and pixel-exact",

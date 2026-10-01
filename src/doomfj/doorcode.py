@@ -229,6 +229,9 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
     # monstermove.move_leaf_lines), taken like a walk-over request; `mon_contact` -- [(x16 cell, y16 cell, radius,
     # active cell)] per monster, a closing door reversing on a live one as on the player (World.door_touched)
     kinds = kinds or {si: "plain" for si in slots}
+    # the monsters' contact tests are SHARED: one leaf per (door, radius) on the registers dc_x / dc_y -- inline they
+    # were one signed constant compare (1,808 ops) per bound, door and monster, ~14.6M ops for E1M1's 53 monsters
+    leaves: dict = {}
     for d, si in enumerate(slots):
         n = nstates[si]
         last = n - 1
@@ -260,13 +263,24 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
                 out_ = door_contact_lines(f"{_p}_ct", _g, radius, yes, f"{_p}_cm0" if mon_contact else no)
                 for j, (xr, yr, rad, act) in enumerate(mon_contact):
                     nx_ = f"{_p}_cm{j + 1}" if j + 1 < len(mon_contact) else no
-                    out_ += [f"  {_p}_cm{j}:", f"    hex.if0 1, {act}, {nx_}"]
-                    out_ += door_contact_lines(f"{_p}_cn{j}", _g, rad, yes, nx_, regs=(xr, yr))
+                    leaf = leaves.setdefault((_p, rad), (f"{_p}_mc{rad}", _g, rad))[0]
+                    out_ += [f"  {_p}_cm{j}:", f"    hex.if0 1, {act}, {nx_}",
+                             f"    hex.mov 8, dc_x, {xr}", f"    hex.mov 8, dc_y, {yr}",
+                             f"    stl.fcall {leaf}, dc_ret",
+                             f"    hex.if1 1, dc_hit, {yes}", f"    ;{nx_}"]
                 return out_
             rev = (reverse_mask(passes[si], stride, n), _rev)
         out += [f"  // ---- door {d} (sector {si}, {kind}): {n} states ----",
                 *machine_lines(p, st, dr, sub, wt, last, trigger, stride=stride,
                                top_wait=0 if stay else WAIT, reverse=rev)]
+    if leaves:                           # the contact leaves and their registers, jumped over
+        out += ["    ;dc_leaves_end"]
+        for lab, geo, rad in leaves.values():
+            out += [f"{lab}:", *door_contact_lines(f"{lab}_t", geo, rad, f"{lab}_y", f"{lab}_n", regs=("dc_x", "dc_y")),
+                    f"  {lab}_y:", "    hex.set 1, dc_hit, 1", "    stl.fret dc_ret",
+                    f"  {lab}_n:", "    hex.zero 1, dc_hit", "    stl.fret dc_ret"]
+        out += ["dc_x: hex.vec 8", "dc_y: hex.vec 8", "dc_hit: hex.vec 1", "dc_ret: hex.vec w/4",
+                "dc_leaves_end:"]
     return out
 
 

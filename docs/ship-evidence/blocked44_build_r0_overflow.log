@@ -1,0 +1,45 @@
+# flipjump: the installed editable 1.5.1 at C:/Users/tomhe/Documents/flipjump-151, bc8ee63; doom m7-chase 5399be4
+$ python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/blocked44.labels.tsv.gz -- game --out build/doom_e1m1_blocked44.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p32a.json.gz
+label spy armed -> scratchpad/12m/atlas/blocked44.labels.tsv.gz
+build: build_blocked.py game --out build/doom_e1m1_blocked44.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p32a.json.gz
+blocking: pool base 0x60000000, span 0x9fffffe0
+pin-heat: scratchpad/12m/heat_blocked27_p32a.json.gz (sha256 b18cad1989958fe9...): 20 hot groups, 35,894 hot sites
+macros allowed: hex.double_exact_xor, hex.exact_xor, hex.quadrupled_exact_xor, hex.shifts.shl_bit_once, hex.shifts.shr_bit_once, hex.sparse_double_exact_xor, hex.sparse_exact_xor, hex.triple_exact_xor, sim.jump16
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+  counts cache is for a DIFFERENT program -- recounting
+Traceback (most recent call last):
+  File "C:\Users\tomhe\Documents\doom-m7m\scratchpad\12m\build_labeled.py", line 72, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Users\tomhe\Documents\doom-m7m\scratchpad\12m\build_labeled.py", line 59, in main
+    runpy.run_path(str(ROOT / "scratchpad" / "12m" / "build_blocked.py"),
+  File "<frozen runpy>", line 291, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\tomhe\Documents\doom-m7m\scratchpad\12m\build_blocked.py", line 593, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\tomhe\Documents\doom-m7m\scratchpad\12m\build_blocked.py", line 527, in main
+    info = build_wall_renderer(ROOT / a.out, wad_path=str(ROOT / a.wad), mapname=a.map,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-m7m\src\doomfj\build.py", line 393, in build_wall_renderer
+    labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-m7m\src\doomfj\selfreset.py", line 142, in capture_labels
+    fj.assemble([Path(p).resolve() for p in paths], Path(out_fjm), memory_width=W,
+  File "C:\Users\tomhe\Documents\doom-m7m\scratchpad\12m\build_blocked.py", line 443, in assemble_blocked
+    real_assemble(*out_arg, **probe)
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\flipjump_quickstart.py", line 76, in assemble
+    assembler.assemble(
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\assembler\assembler.py", line 524, in assemble
+    raise fj_exception
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\assembler\assembler.py", line 483, in assemble
+    ops, labels = resolve_macros(
+                  ^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\assembler\preprocessor.py", line 1405, in resolve_macros
+    preprocessor_data.finish(show_statistics)
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\assembler\preprocessor.py", line 1006, in finish
+    raise FlipJumpPreprocessorException(
+flipjump.utils.exceptions.FlipJumpPreprocessorException: table-placement: the program reached 0x857cc840, which is inside the table pool based at 0x60000000. Raise pool_base, or relocate fewer tables.
+rc=1
+sha256sum: build/doom_e1m1_blocked44.fjm: No such file or directory

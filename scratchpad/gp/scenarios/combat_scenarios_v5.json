@@ -1,6 +1,6 @@
 {
  "version": "v2",
- "status": "PLANNED -- B0 and the owner's freeze pending (`--freeze`)",
+ "status": "FROZEN",
  "map": "E1M1",
  "skill": "hard",
  "frames": 100,
@@ -24982,8 +24982,8 @@
   "scratchpad/gp/census_lib.py": "7126b6c0a1210408",
   "scratchpad/gp/scenarios_v2.py": "c3399284f57a5bb5",
   "src/doomfj/__init__.py": "e3b0c44298fc1c14",
-  "src/doomfj/build.py": "a1bd37f8e9dfdab8",
-  "src/doomfj/combat.py": "4a51078bfe8ea86f",
+  "src/doomfj/build.py": "8e71bcf96db48c61",
+  "src/doomfj/combat.py": "42743bab073ffcc8",
   "src/doomfj/config.py": "aeb52d573b01cb12",
   "src/doomfj/doorcode.py": "01954c55def670a0",
   "src/doomfj/doors.py": "80b7edd62bee1715",
@@ -24993,22 +24993,275 @@
   "src/doomfj/lut_generator.py": "366a1df5160b039c",
   "src/doomfj/mapcompiler.py": "9e0b131c1b54ccd3",
   "src/doomfj/menu.py": "c54f54602de841a9",
-  "src/doomfj/monsters.py": "0184f06d1933cc7a",
+  "src/doomfj/monsters.py": "1f41584a51643efc",
   "src/doomfj/movercode.py": "4b898f96bb45a30c",
   "src/doomfj/movers.py": "7eb6793209e57a8c",
-  "src/doomfj/reference_model.py": "b41bd6e378737a2a",
+  "src/doomfj/reference_model.py": "5297ac5eed30536d",
   "src/doomfj/rng.py": "5a842d315933a0b0",
-  "src/doomfj/sight.py": "b5ec3ba190ac76b0",
+  "src/doomfj/sight.py": "b45e7b56a82c285c",
   "src/doomfj/spritebank.py": "55a9c3a60b81d040",
   "src/doomfj/tables.py": "f2ab5c664db1f028",
   "src/doomfj/texturecompiler.py": "6836e27f7d824674",
   "src/doomfj/things.py": "f670b48c3587f345",
   "src/doomfj/wad.py": "aced7d2f9eb1a2ba",
-  "src/doomfj/wall_renderer.py": "2d3b8e26954ada5f",
+  "src/doomfj/wall_renderer.py": "d5ed2276007081d4",
   "src/doomfj/wireformat.py": "493f39d19ac571f1",
-  "src/doomfj/world.py": "6c20915edafc8a07",
+  "src/doomfj/world.py": "a8394168028daee5",
   "tests/fixtures/freedoom_e1m1.wad": "944287723835997b"
  },
  "planned_at_git_head": "54ea4ae",
- "keys_sha": "794fa332d21c447e"
+ "keys_sha": "794fa332d21c447e",
+ "b0": {
+  "binding": 14400184.995909091,
+  "mean": 13209281.82181818,
+  "p80_run": 15591088.17,
+  "p80_run_name": "R0-courtyard",
+  "frame_max": 24641536,
+  "frame_max_run": "R0-aftermath",
+  "frame_max_note": "+/- 2^18 (probe.py)",
+  "per_run": {
+   "R0-west-hall": {
+    "avg_exact": 18638445.12,
+    "p50": 18350080,
+    "p80": 19660800,
+    "max": 20447232,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 49
+   },
+   "R0-aftermath": {
+    "avg_exact": 16627688.66,
+    "p50": 16777216,
+    "p80": 18087936,
+    "max": 24641536,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 13
+   },
+   "R0-south-hall": {
+    "avg_exact": 12525632.27,
+    "p50": 13369344,
+    "p80": 13893632,
+    "max": 15728640,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 16
+   },
+   "R0-imp-court": {
+    "avg_exact": 15285354.66,
+    "p50": 15204352,
+    "p80": 16777216,
+    "max": 19660800,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 1,
+    "strafe_only_frames": 20
+   },
+   "R0-northwest": {
+    "avg_exact": 9782743.44,
+    "p50": 9961472,
+    "p80": 10485760,
+    "max": 11010048,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 74
+   },
+   "R0-courtyard": {
+    "avg_exact": 15591088.17,
+    "p50": 15728640,
+    "p80": 16515072,
+    "max": 19922944,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 17
+   },
+   "R2-barrel-hall": {
+    "avg_exact": 13511353.71,
+    "p50": 13369344,
+    "p80": 13631488,
+    "max": 17563648,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 36
+   },
+   "R2-spectre-corridor": {
+    "avg_exact": 11595256.72,
+    "p50": 11796480,
+    "p80": 12582912,
+    "max": 13893632,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 19
+   },
+   "R2-east-yard": {
+    "avg_exact": 13120153.71,
+    "p50": 13369344,
+    "p80": 16777216,
+    "max": 17563648,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 13
+   },
+   "R3-west": {
+    "avg_exact": 8370963.67,
+    "p50": 8126464,
+    "p80": 10747904,
+    "max": 16252928,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 33
+   },
+   "R3-mid": {
+    "avg_exact": 10253419.91,
+    "p50": 10223616,
+    "p80": 10485760,
+    "max": 12058624,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 63
+   }
+  },
+  "fjm": "build\\doom_e1m1_blocked43.fjm",
+  "fjm_sha256": "3c3a87d474d975e59c45d928cde5601478f9142fba5a670edb1c6281e3f5b20a",
+  "labels_sha256": "ba0c3a17e0856a4f820a51c039c959763ab1abfffa92bb9dd788968a7f09b5ce",
+  "keys_sha": "794fa332d21c447e",
+  "driver_sha16": "cb244701ca25b732",
+  "command": "python scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v5.json --pixel-every 1 --proxy --json docs/ship-evidence/blocked43_b0_v5.json",
+  "base_ops": 225700,
+  "strafe_undercount": {
+   "binding_proxy": 14435039.260909092,
+   "mean_proxy": 13252183.381818183,
+   "p80_proxy": 15617895.14,
+   "delta_binding": 34854.265000000596,
+   "strafe_only_frames": 353,
+   "delta_total": 47191716,
+   "per_strafe_only_frame": 133687.5807365439,
+   "per_run": {
+    "R0-west-hall": {
+     "delta_total": 9083548,
+     "strafe_only_frames": 49,
+     "per_strafe_only_frame": 185378.5306122449,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 18729280.6
+    },
+    "R0-aftermath": {
+     "delta_total": 2216925,
+     "strafe_only_frames": 13,
+     "per_strafe_only_frame": 170532.6923076923,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 16649857.91
+    },
+    "R0-south-hall": {
+     "delta_total": 2389327,
+     "strafe_only_frames": 16,
+     "per_strafe_only_frame": 149332.9375,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 12549525.54
+    },
+    "R0-imp-court": {
+     "delta_total": 2262556,
+     "strafe_only_frames": 20,
+     "per_strafe_only_frame": 113127.8,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 15307980.22
+    },
+    "R0-northwest": {
+     "delta_total": 9166987,
+     "strafe_only_frames": 74,
+     "per_strafe_only_frame": 123878.2027027027,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 9874413.31
+    },
+    "R0-courtyard": {
+     "delta_total": 2680697,
+     "strafe_only_frames": 17,
+     "per_strafe_only_frame": 157688.0588235294,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 15617895.14
+    },
+    "R2-barrel-hall": {
+     "delta_total": 3211326,
+     "strafe_only_frames": 36,
+     "per_strafe_only_frame": 89203.5,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 13543466.97
+    },
+    "R2-spectre-corridor": {
+     "delta_total": 2248958,
+     "strafe_only_frames": 19,
+     "per_strafe_only_frame": 118366.21052631579,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 11617746.3
+    },
+    "R2-east-yard": {
+     "delta_total": 3005949,
+     "strafe_only_frames": 13,
+     "per_strafe_only_frame": 231226.84615384616,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 13150213.2
+    },
+    "R3-west": {
+     "delta_total": 3480635,
+     "strafe_only_frames": 33,
+     "per_strafe_only_frame": 105473.78787878787,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 8405770.02
+    },
+    "R3-mid": {
+     "delta_total": 7444808,
+     "strafe_only_frames": 63,
+     "per_strafe_only_frame": 118171.55555555556,
+     "state_ok": 100,
+     "same_picture": true,
+     "avg_exact_proxy": 10327867.99
+    }
+   },
+   "method": "each strafe-only frame injected one FORWARD step behind the model's landing with forward delivered: blocked27 runs its collision tic into the same pose (same picture); the difference is exact"
+  }
+ },
+ "owner_approval": {
+  "by": "the owner",
+  "on": "2026-10-01",
+  "record": "the owner, 2026-09-30, in the M7 session (AskUserQuestion on the v5 plan: \"Approve v5 (Recommended)\" -- freeze once B0 is measured, if every criterion still passes)"
+ },
+ "freeze": {
+  "kind": "owner freeze",
+  "approved_by": "the owner",
+  "approved_on": "2026-10-01",
+  "approval_record": "the owner, 2026-09-30, in the M7 session (AskUserQuestion on the v5 plan: \"Approve v5 (Recommended)\" -- freeze once B0 is measured, if every criterion still passes)",
+  "frozen_at_git_head": "64a9755",
+  "files_not_at_head": [],
+  "rule": "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. SCHEMA GROWTH (owner, 2026-09-28): a re-freeze with --grown-from REF may record new final digests when every pose and drawn population reproduces and the witness (state_dump.py, the tree at REF against this one) holds every pre-existing cell equal after every frame -- door cells by sector, sound cells by sector -- and REF's tree reproduces the recorded digests; only added cells may differ. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
+ }
 }

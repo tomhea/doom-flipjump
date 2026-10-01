@@ -52,7 +52,8 @@ from doomfj.wad import WadFile, decode_picture                               # n
 RENDER_KW = dict(RMOD.GAME_RENDER_KW)       # the ONE game-tier keyword set (PR #87, R6)
 _OLD_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
                  near_steps=True, stack_steps=True, things=True, degrade=True,
-                 sky=True, bbox_cull=True)
+                 sky=True, bbox_cull=True,
+                 rt_depth_order="aprox")   # M7 P3.3 (D3 d): a leaf's runtime things nearest first
 ORIG_MONSTER_TYPES = RMOD.MONSTER_TYPES
 from doomfj.combat import aim_window as _aim_window                          # noqa: E402
 AIM_LO, AIM_HI = _aim_window(ReferenceModel(Config()))   # the pellet window: ONE definition

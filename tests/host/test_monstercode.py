@@ -1,3 +1,4 @@
+from pathlib import Path
 """M7 P3.0: doomfj.monstercode's tables hold the model's rules -- each checked against the model's own source
 (gamedata's states, world.turn_toward, gamedata.OPPOSITE, rng's outcome composition), with a mutation of the
 packing caught."""
@@ -67,3 +68,14 @@ def test_control_a_packing_mutation_is_caught(monkeypatch):
             st, row = gd.STATES[s], _unpack(vals[gd.STATE_INDEX[s]])
             assert row["tics"] == (15 if st.tics < 0 else st.tics), s
             assert MC.MON_ACTIONS[row["action"]] == (None if st.action in MC.SOUND_ACTIONS else st.action), s
+
+
+def test_the_seen_flags_are_never_pinned():
+    """M7 P3.2a: `thseen` is written through a POINTER (frame.rec_seen_mark), so `--pin-state-cells` must leave it
+    canonical -- a pinned cell rests at its reader table's base, which a pointer access takes for the value (blocked42
+    looped forever on it). The pin veto is selfreset.POINTER_READ_CELLS; the fj harnesses build without pinning, so
+    only this list keeps the bug out of the shipped build."""
+    from doomfj.selfreset import POINTER_READ_CELLS
+    src = (Path(__file__).resolve().parents[2] / "src/fj/frame_render.fj").read_text(encoding="utf-8")
+    assert "hex.write_hex sa" in src, "the mark no longer writes through `sa`: re-point this test"
+    assert "thseen" in POINTER_READ_CELLS

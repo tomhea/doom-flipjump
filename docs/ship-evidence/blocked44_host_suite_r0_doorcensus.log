@@ -1,0 +1,76 @@
+$ python -m pytest tests/host -q -p no:cacheprovider
+........................................................................ [  5%]
+...............................................................F........ [ 10%]
+........................................................................ [ 15%]
+........................................................................ [ 20%]
+........................................................................ [ 25%]
+........................................................................ [ 30%]
+........................................................................ [ 35%]
+........................................................................ [ 40%]
+........................................................................ [ 45%]
+........................................................................ [ 50%]
+........................................................................ [ 55%]
+..............................................ss........................ [ 60%]
+........................................................................ [ 65%]
+........................................................................ [ 71%]
+........................................................................ [ 76%]
+........................................................................ [ 81%]
+........................................................................ [ 86%]
+...................................................xx................... [ 91%]
+........................................................................ [ 96%]
+...................................................                      [100%]
+================================== FAILURES ===================================
+_____________ test_the_door_tic_touches_only_the_doors_own_cells ______________
+
+level = ([Sector(floor_h=-160, ceil_h=376, floor_tex='RROCK18', ceil_tex='CEIL5_1', light=202, special=0, tag=0), Sector(floor... middle='-', sector=46), ...], [(2656, 608), (2624, 597), (1784, 1416), (1952, 1184), (1872, 1792), (1936, 1952), ...])
+doors = {10: [-128, -112, -96, -80, -64, -48, ...], 34: [-128, -112, -96, -80, -64, -48, ...], 48: [-128, -112, -96, -80, -64, -48, ...], 51: [-128, -112, -96, -80, -64, -48, ...], ...}
+
+    def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
+        """Before P1.2 the tic flipped each door line's blocking bit in the collision table on the two
+        steps that cross the pass state -- a second copy of the door's state. Now nothing in the tic
+        may write outside `dstate`/`ddir`/`dsub`/`dwait`/`duse`/`dbox`; every other cell it names is
+        only READ (the player's position for the use box, the key byte). And it cannot be HANDED the
+        collision any more: before P1.2 a caller that passed the pass states and door lines got the
+        patch, one that did not got a door that never stopped being a wall."""
+        # M7 P2b: `contact`/`passes`/`radius` arm the REVERSAL (the player's box against the door's
+        # rectangle, read-only) -- not the collision table; the census below runs on the armed text
+        assert list(inspect.signature(doorcode.door_tic_lines).parameters) == \
+            ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius", "mon_press", "mon_contact"], (
+                "door_tic_lines takes collision inputs again")
+        secs, lds, sds, verts = level
+        slots = sorted(doors)
+        from doomfj.doors import door_contact_geo, pass_state
+        text = "\n".join(doorcode.door_tic_lines(
+            slots, {si: len(doors[si]) for si in slots}, use_boxes_xy(secs, lds, sds, verts),
+            contact=door_contact_geo(secs, lds, sds, verts),
+            passes={si: pass_state(secs, lds, sds, si) for si in slots},
+            # M7 P3.2b: armed with the monsters' presses and contacts too -- they only READ (thpos_rt, mon_active)
+            mon_press=frozenset(slots[:3]),
+            mon_contact=[("thpos_rt + 0*dw", "thpos_rt + 8*dw", 20, "mon_active + 0*dw")]))
+        assert "_rev:" in text, "the census must see the reversal's code"
+        assert "thpos_rt" in text and "mon_active" in text, "the census must see the monsters' code"
+        assert "wflip" not in text and "lnrow" not in text and "ca_" not in text
+        written = set()
+        for m in re.finditer(r"hex\.(?:set|zero|inc|dec|xor_by|mov) (?:\d+, )?([A-Za-z_]\w*)", text):
+            written.add(m.group(1))
+>       assert written <= {"dstate", "ddir", "dsub", "dwait", "duse", "dbox", "dreq"}, sorted(written)
+E       AssertionError: ['dbox', 'dc_hit', 'dc_x', 'dc_y', 'ddir', 'dreq', ...]
+E       assert {'dbox', 'dc_..., 'dreq', ...} <= {'dbox', 'ddi..., 'duse', ...}
+E         
+E         Extra items in the left set:
+E         'dc_x'
+E         'dc_hit'
+E         'dc_y'
+
+tests\host\test_doorcode.py:105: AssertionError
+============================== warnings summary ===============================
+tests/host/test_emitter_call_sites.py::test_every_tracked_caller_passes_keywords_the_emitter_has
+tests/host/test_no_decimal_wire.py::test_every_screen_is_fed_the_binary_wire
+tests/host/test_oracle_calls_in_step.py::test_every_gate_asks_the_oracle_for_what_it_emits
+  <unknown>:1: DeprecationWarning: invalid escape sequence '\_'
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/host/test_doorcode.py::test_the_door_tic_touches_only_the_doors_own_cells
+1 failed, 1414 passed, 2 skipped, 1 deselected, 2 xfailed, 3 warnings in 186.69s (0:03:06)
+rc=1

@@ -152,3 +152,96 @@ def test_a_mutated_reversal_fails(tmp_path, lvl, name):
     assert bad != good, "the mutant changed nothing"
     recs = records(lvl)
     assert _run(tmp_path, "mut", program(lvl, bad), feed(lvl, recs)) != expect(lvl, recs), name
+
+
+# ---- M7 P3.2b: the reversal on MONSTERS (`mon_contact`: the shared contact leaf per door and radius) -----------
+MONS = ((20, 1), (30, 1), (30, 0))   # (radius, active): the third is inactive -- a closing door ignores it
+FAR = -30000 << 16
+
+
+def mon_program(lvl, text=None):
+    order, n = lvl["order"], lvl["n"]
+    mc = [("mx + %d*dw" % (8 * j), "my + %d*dw" % (8 * j), r, "mact + %d*dw" % j) for j, (r, _a) in enumerate(MONS)]
+    tic = text if text is not None else door_tic_lines(order, n, lvl["boxes"], lvl["kinds"], contact=lvl["geo"],
+                                                        passes=lvl["passes"], mon_contact=mc)
+    prog = program(lvl, text=tic)
+    pre = "hex.input 4, viewy"
+    ins = [pre] + ["hex.input 4, mx + %d*dw" % (8 * j) for j in range(len(MONS))] + \
+          ["hex.input 4, my + %d*dw" % (8 * j) for j in range(len(MONS))] + \
+          ["hex.input 2, mact"]                                     # one nibble per monster
+    prog = prog.replace(pre, "\n".join(ins), 1)
+    return prog + "\n".join(["mx: hex.vec %d" % (8 * len(MONS)), "my: hex.vec %d" % (8 * len(MONS)),
+                             "mact: hex.vec 4"]) + "\n"
+
+
+def mon_records(lvl):
+    """per closing door and state round its pass step: ONE monster on each edge of the rule at its radius (the
+    others and the player far away)"""
+    out = []
+    for si in lvl["order"]:
+        if D.door_stay(lvl["kinds"][si]):
+            continue
+        (x0, y0, x1, y1), lines = lvl["geo"][si]
+        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+        p, n = lvl["passes"][si], lvl["n"][si]
+        for j, (r, _a) in enumerate(MONS):
+            pts = [(cx << 16, cy << 16), ((x0 << 16) + 1, cy << 16)]
+            for axis, coord, lo, hi in lines:
+                for dc in (-(r << 16), -(r << 16) + 1, (r << 16) - 1, r << 16):
+                    c = (coord << 16) + dc
+                    o = ((lo + hi) // 2) << 16
+                    pts.append((o, c) if axis == "y" else (c, o))
+            for state in sorted({p, min(n - 1, p + 1)}):
+                for x, y in pts:
+                    out.append((si, state, j, x, y))
+    return out
+
+
+def mon_expect(lvl, recs):
+    want = []
+    for si, state, j, x, y in recs:
+        r, act = MONS[j]
+        for sj in lvl["order"]:
+            if sj != si:
+                want += [0, 0]
+                continue
+            kind = lvl["kinds"][si]
+            blocked = bool(act) and D.touches_door(lvl["geo"][si], x, y, r << 16)
+            st = D.door_tic((state, D.CLOSING, 1, 0), lvl["n"][si], False, stride=D.door_stride(kind),
+                            stay=D.door_stay(kind), blocked=blocked, pass_at=lvl["passes"][si])
+            want += [st[0], st[1]]
+    return want
+
+
+def mon_feed(lvl, recs):
+    out = b""
+    for si, state, j, x, y in recs:
+        xs = [x if k == j else FAR for k in range(len(MONS))]
+        ys = [y if k == j else FAR for k in range(len(MONS))]
+        out += bytes([1]) + struct.pack("<II", FAR & M32, FAR & M32)
+        out += b"".join(struct.pack("<I", v & M32) for v in xs) + b"".join(struct.pack("<I", v & M32) for v in ys)
+        out += struct.pack("<H", sum(a << (4 * k) for k, (_r, a) in enumerate(MONS)))
+        for sj in lvl["order"]:
+            out += bytes([state, D.CLOSING]) if sj == si else bytes([0, 0])
+    return out
+
+
+def test_a_closing_door_reverses_on_a_live_monster(tmp_path, lvl):
+    recs = mon_records(lvl)
+    want = mon_expect(lvl, recs)
+    assert _run(tmp_path, "mrev", mon_program(lvl), mon_feed(lvl, recs)) == want
+    rev = sum(1 for k in range(0, len(want), 2) if want[k + 1] == D.OPENING)
+    assert 30 < rev < len(recs), "reversals on monsters and closings both"
+
+
+@pytest.mark.parametrize("mut", ["inactive counts", "one radius for all"])
+def test_a_mutated_monster_reversal_fails(tmp_path, lvl, mut):
+    mc = [("mx + %d*dw" % (8 * j), "my + %d*dw" % (8 * j), r, "mact + %d*dw" % j) for j, (r, _a) in enumerate(MONS)]
+    if mut == "one radius for all":
+        mc = [(x, y, 20, a) for x, y, _r, a in mc]
+    bad = door_tic_lines(lvl["order"], lvl["n"], lvl["boxes"], lvl["kinds"], contact=lvl["geo"],
+                         passes=lvl["passes"], mon_contact=mc)
+    if mut == "inactive counts":
+        bad = [ln.replace("hex.if0 1, mact + 2*dw,", "hex.if0 1, mact + 0*dw,") for ln in bad]
+    recs = mon_records(lvl)
+    assert _run(tmp_path, "mmut", mon_program(lvl, bad), mon_feed(lvl, recs)) != mon_expect(lvl, recs), mut

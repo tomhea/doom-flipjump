@@ -90,10 +90,8 @@ def octant_leaf_lines() -> List[str]:
 
 
 def as_leaf_lines() -> List[str]:
-    """`mm_as`: the attack sight, once (mm_asok) -- needs mt_d current"""
-    from doomfj.sight import NEAR
-    from doomfj.monstersight import NEAR_UNITS
-    assert NEAR == NEAR_UNITS
+    """`mm_as`: the attack sight, once (mm_asok) -- needs mt_d current; mt_c128 is P3.2a's NEAR
+    (monstercode.P32A_SCRATCH, from sight.NEAR)"""
     return ["mm_as:",
             "    hex.if1 1, mm_asok, mm_as_out",
             "    hex.set 1, mm_asok, 1", "    hex.set 1, mm_asr, 1",
@@ -163,7 +161,9 @@ def decide_leaf_lines() -> List[str]:
 
 
 def attack_leaf_lines() -> List[str]:
-    """`md_attack` (stl.fcall md_attack, md_ret): mm_kind's action, its facing and its draws"""
+    """`md_attack` (stl.fcall md_attack, md_ret): mm_kind's action, its facing and its draws (combat.BULLETS
+    bullets of 3 draws each for the hitscanners)"""
+    from doomfj.combat import BULLETS
     k = draws()
     pos = [ATTACK_KINDS[a] for a in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack")]
     tg = ["md_out"] * 16
@@ -173,8 +173,9 @@ def attack_leaf_lines() -> List[str]:
            "    stl.fcall mm_todist, mm_tdret",
            "    stl.fcall mm_octant, mm_ocret",
            "    sim.jump16 mm_kind, " + ", ".join(tg),
-           "  md_pos:", "    hex.add_constant 2, mm_rng, %d" % k["bullet"], "    ;md_out",
-           "  md_spos:", "    hex.add_constant 2, mm_rng, %d" % (3 * k["bullet"]), "    ;md_out"]
+           "  md_pos:", "    hex.add_constant 2, mm_rng, %d" % (BULLETS["A_PosAttack"] * k["bullet"]), "    ;md_out",
+           "  md_spos:", "    hex.add_constant 2, mm_rng, %d" % (BULLETS["A_SPosAttack"] * k["bullet"]),
+           "    ;md_out"]
     for lab, n in (("md_claw", k["claw"]), ("md_bite", k["bite"])):
         out += ["  %s:" % lab,
                 "    hex.cmp 4, mt_d, mt_c60, %s_r, md_out, md_out" % lab,

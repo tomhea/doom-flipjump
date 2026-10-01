@@ -190,6 +190,7 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
     import gamespeed as GS
     import m2_std_gate as gate
     doc = json.loads(Path(doc_path).read_text(encoding="ascii"))
+    S.use_sight_rule(doc)          # M7 P3.2: the set names its sight rule (v5: "seen"); its replay runs under it
     t0 = time.time()
     runs = [(run["name"], model_frames(run), model_frames(run, proxy=True) if proxy else None)
             for run in doc["runs"]]
@@ -327,6 +328,7 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
                        "exp": mirror.step(pre, bk, pre_doors), "post": (st.x, st.y, st.angle),
                        "post_doors": tuple(dsim.ds[si][0] for si in dsim.order)})
     doc = json.loads(Path(doc_path).read_text(encoding="ascii"))
+    S.use_sight_rule(doc)
     runs = {r["name"]: r for r in doc["runs"]}
     court = model_frames(runs["R0-courtyard"])[:6]
     nw, nwp = model_frames(runs["R0-northwest"])[:30], model_frames(runs["R0-northwest"], proxy=True)[:30]

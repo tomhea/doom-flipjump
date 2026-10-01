@@ -68,7 +68,8 @@ KEYFLAG = {"forward": "kb_f", "back": "kb_b", "turn_left": "kb_l", "turn_right":
 READ = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "dstate", "ddir", "dsub", "dwait", "dreq",
         "pcard", "wfired", "lvdone", "pusedn",
         "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",        # M7 P2b
-        "mon_state", "mon_tics", "mon_facing", "mon_active")          # M7 P3.1
+        "mon_state", "mon_tics", "mon_facing", "mon_active",          # M7 P3.1
+        "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen")   # M7 P3.2a
 MENU_CODES = {"enter": 0x0D, "esc": 0x1B}
 CARD_TYPE = 5
 
@@ -173,9 +174,15 @@ class Mirror:
                     if self.ctl != "no_wr":
                         ms = mp.after_move(ms, (st.x, st.y), (new.x, new.y))
                     st = new
-                    mph.tic(st.x, st.y, st.angle)             # M7 P3.1: the monsters after the player
-                    if self.seenfn is not None:               # M7 P3.2a: this picture's seen, for the next
-                        mph.set_seen(self.seenfn(mph, st, ph, ms, taken))
+                    # M7 P3.1: the monsters after the player -- P3.2a: unless THIS frame's press ended the level
+                    # (the binary's tic runs after the player and skips on lvdone)
+                    if not lvdone:
+                        mph.tic(st.x, st.y, st.angle)
+                # M7 P3.2a: every frame that draws the WORLD marks the seen flags (the exit's own frame and the
+                # frozen world's too: the tic is skipped, its zero and the render are not); a menu frame skips the
+                # whole world pass and leaves them as they were
+                if self.seenfn is not None and drawn == "world":
+                    mph.set_seen(self.seenfn(mph, st, ph, ms, taken))
                 out.append({"pose": (st.x, st.y, st.angle), "phase": ph, "taken": taken,
                             "mode": mode, "scr": scr, "sel": sel, "lvdone": lvdone,
                             "pusedn": pusedn, "drawn": drawn, "movers": ms,

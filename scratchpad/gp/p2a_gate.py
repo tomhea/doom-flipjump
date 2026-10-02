@@ -69,7 +69,8 @@ READ = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "dstate", "ddir", "ds
         "pcard", "wfired", "lvdone", "pusedn",
         "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",        # M7 P2b
         "mon_state", "mon_tics", "mon_facing", "mon_active",          # M7 P3.1
-        "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen")   # M7 P3.2a
+        "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",   # M7 P3.2a
+        "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt")                   # M7 P3.2b
 MENU_CODES = {"enter": 0x0D, "esc": 0x1B}
 CARD_TYPE = 5
 
@@ -94,6 +95,8 @@ class Mirror:
         self.mp = dsim.mp                                                        # M7 P2b
         self.viewfn = None            # M7 P3.1: (MonsterPhase, x16, y16) -> the render's thing_views
         self.seenfn = None            # M7 P3.2a: (MonsterPhase, pose, door phase, movers, taken) -> seen slots
+        self.posfn = None             # M7 P3.2b: MonsterPhase -> the render's thing_positions
+        self.rtfn = None              # M7 P3.2b: MonsterPhase -> the runtime things' thpos_rt / thss_rt
 
     @contextlib.contextmanager
     def _rules(self):
@@ -139,7 +142,7 @@ class Mirror:
                 if mode == 0 and not (lvdone and self.ctl != "frozen"):
                     use = bool(kd.get("use"))
                     has_blue = {"card": True, "no_card": False}.get(self.ctl)
-                    ph = dp.tic(ph, use, st.x, st.y, has_blue=has_blue)
+                    ph = dp.tic(ph, use, st.x, st.y, has_blue=has_blue, others=mph.boxes())   # P3.2b
                     ms = mp.tic(ms)                           # M7 P2b: the lifts after the doors
                     if use:                                   # the exit: a PRESS in its box
                         if not pusedn or self.ctl == "edge":
@@ -175,9 +178,9 @@ class Mirror:
                         ms = mp.after_move(ms, (st.x, st.y), (new.x, new.y))
                     st = new
                     # M7 P3.1: the monsters after the player -- P3.2a: unless THIS frame's press ended the level
-                    # (the binary's tic runs after the player and skips on lvdone)
+                    # (the binary's tic runs after the player and skips on lvdone); P3.2b: inside the doors and lifts
                     if not lvdone:
-                        mph.tic(st.x, st.y, st.angle)
+                        ph, ms = mph.frame(ph, ms, st.x, st.y, st.angle)
                 # M7 P3.2a: every frame that draws the WORLD marks the seen flags (the exit's own frame and the
                 # frozen world's too: the tic is skipped, its zero and the render are not); a menu frame skips the
                 # whole world pass and leaves them as they were
@@ -186,8 +189,10 @@ class Mirror:
                 out.append({"pose": (st.x, st.y, st.angle), "phase": ph, "taken": taken,
                             "mode": mode, "scr": scr, "sel": sel, "lvdone": lvdone,
                             "pusedn": pusedn, "drawn": drawn, "movers": ms,
-                            "mheights": mp.heights(ms), "mstate": mph.state(),
-                            "views": self.viewfn(mph, st.x, st.y) if self.viewfn else None})
+                            "mheights": mp.heights(ms),
+                            "mstate": {**mph.state(), **(self.rtfn(mph) if self.rtfn else {})},
+                            "views": self.viewfn(mph, st.x, st.y) if self.viewfn else None,
+                            "positions": self.posfn(mph) if self.posfn else None})
         return out
 
 
@@ -198,7 +203,8 @@ def seen_of(orc, dsim, card_di):
         seen = set()
         orc.render(st.x, st.y, st.angle, tuple(ph[0][si][0] for si in dsim.order),
                    hidden_extra=(card_di,) if taken else (), movers=dsim.mp.heights(ms),
-                   views=orc.monster_views(mph, st.x, st.y), seen_out=seen)
+                   views=orc.monster_views(mph, st.x, st.y), seen_out=seen,
+                   positions=orc.monster_positions(mph))
         return orc._mviews.slots_of(seen)
     return fn
 
@@ -476,7 +482,7 @@ def main(argv=None) -> int:
     print("P2A GATE -- %d scenarios%s" % (len(scen), "" if a.oracle_only else ", %s" % a.fjm))
     if not a.oracle_only:
         gb = P.GameBinary(ROOT / a.fjm)
-        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon)
+        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt)
         table = P.LabelTable.load(ROOT / a.labels, {c.label for c in cells.values()})
         assert not table.absent & {"dreq", "pcard", "wfired"}, (
             "the label table has no %s: a binary before P2a.1" % sorted(table.absent))
@@ -484,6 +490,7 @@ def main(argv=None) -> int:
         mirror = Mirror(dsim, card_di[0])
         mirror.viewfn = orc.monster_views                     # M7 P3.1: the monsters' views
         mirror.seenfn = seen_of(orc, dsim, card_di[0])        # M7 P3.2a: the picture's seen
+        mirror.posfn, mirror.rtfn = orc.monster_positions, orc.monster_rt   # M7 P3.2b
         want = mirror.run(sc["pose"], sc["keys"], sc["pcard"])
         claim = bool(sc["claim"](want))
         ok &= claim
@@ -524,7 +531,7 @@ def main(argv=None) -> int:
                 pic = orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
                                  tuple(fr["phase"][0][si][0] for si in dsim.order),
                                  hidden_extra=card_di if fr["taken"] else (), movers=fr["mheights"],
-                                 views=fr["views"])
+                                 views=fr["views"], positions=fr["positions"])
             else:
                 pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):

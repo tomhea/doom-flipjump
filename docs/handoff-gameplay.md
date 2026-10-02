@@ -330,7 +330,7 @@ SEPARATED; `docs/gp-monsters.md`, `docs/gp-ledger.md`).
 The owner chose the "seen" sight rule and the set v5 (`docs/gp-monsters.md` 8.2); P3.2 ships in three rungs, each a
 model mode (8.3). **P3.2a DONE 2026-10-01** (blocked43, class F: the monsters wake and turn; +146,045 on gamespeed,
 size +1.33M words -- over its budget, the unrolled slots' tables -- msframe NOT SEPARATED; v5 FROZEN, the CAP-22 set
-from here). P3.2b (chase: the monsters move) next, then P3.2c (decide).
+from here). **P3.2b DONE 2026-10-02** (blocked44, class F: the monsters move -- P_Move on their own cells, NewChaseDir, the relink, P_ChangeSector, monster doors; +366,657 on gamespeed, size +5,017,552 words -- over its +2.5M budget -- now **33.38% of the 35% target**; msframe B SLOWER: median x0.934). P3.2c (decide) next; it carries P_ChangeSector's `lvdone` guard (796cdcc).
 Then the state machine, K-slot scheduler, RNG, animation and rotation, waking, chase on the cells,
 thing collision, per-move rebind in use, doors opened by monsters and reversing on them, D3's
 compositor rules. Gate: `fight` (partial), fuzz. Budget +0.3M.

@@ -146,7 +146,8 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"}),  # M7 P2b
                    frozenset({"mon_state", "mon_tics", "mon_facing", "mon_active"}),  # M7 P3.1
                    frozenset({"mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",
-                              "thseen"}))                                               # M7 P3.2a
+                              "thseen"}),                                               # M7 P3.2a
+                   frozenset({"mon_movecount", "mon_rng", "mon_floorz", "msec"}))       # M7 P3.2b
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -607,7 +608,7 @@ class GameBinary:
 # the game tier's cells and known values, and the oracle side
 # ================================================================================================
 
-def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0) -> dict:
+def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: int = 0) -> dict:
     """the persisted world state of the standalone game tier (build.STANDALONE_PERSIST +
     DOOR_PERSIST) as probe cells. `menu_scr` / `menu_sel` are OPTIONAL_LABELS: a Probe on a binary
     built before M7 P1.5 drops them (its label table has neither); so are M7 P2a.1's `dreq`
@@ -646,6 +647,13 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0) -> di
         cells["mon_threshold"] = Cell("mon_threshold", "hex", 2, count=nmon)
         cells["sched_cursor"] = Cell("sched_cursor", "hex", 2)
         cells["thseen"] = Cell("thseen", "hex", 1, count=nmon)     # per SLOT, written by the render
+        # M7 P3.2b: the chase's per-slot cells (monstercode.p32b_decls)
+        for name, width in (("mon_movecount", 2), ("mon_rng", 2), ("mon_floorz", 4), ("msec", 2)):
+            cells[name] = Cell(name, "hex", width, count=nmon)
+    # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
+    if nrt:
+        cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt)
+        cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt)
     return cells
 
 
@@ -755,7 +763,7 @@ class Oracle:
         return self._scenes[(key, mkey)]
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
-               views=None, seen_out=None) -> bytes:
+               views=None, seen_out=None, positions=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art"""
@@ -764,15 +772,33 @@ class Oracle:
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
                                                thing_hidden=set(self.hidden) | set(hidden_extra),
                                                thing_views=views, seen_out=seen_out,
+                                               thing_positions=positions,              # M7 P3.2b
                                                **self.RENDER_KW))
 
     # -- M7 P3.1: the monsters' views (doomfj.monsters.MonsterViews, the one mapping) -------------
-    def monster_views(self, phase, x16, y16) -> list:
-        """`render(views=)` for a `monsters.MonsterPhase` seen from (x16, y16)"""
+    def _mv(self, world):
         if getattr(self, "_mviews", None) is None:
             from doomfj.monsters import MonsterViews
-            self._mviews = MonsterViews(self.rm, self.mw, self.mapname, self.art, phase.world)
-        return self._mviews(phase, x16, y16)
+            self._mviews = MonsterViews(self.rm, self.mw, self.mapname, self.art, world)
+        return self._mviews
+
+    def monster_views(self, phase, x16, y16) -> list:
+        """`render(views=)` for a `monsters.MonsterPhase` seen from (x16, y16)"""
+        return self._mv(phase.world)(phase, x16, y16)
+
+    def monster_positions(self, phase) -> list:
+        """M7 P3.2b: `render(positions=)` -- every drawable where it stands, the monsters where the phase has them"""
+        return self._mv(phase.world).positions(phase)
+
+    def monster_rt(self, phase) -> dict:
+        """M7 P3.2b: the runtime things' thpos_rt / thss_rt as the probe reads them"""
+        return self._mv(phase.world).rt_state(phase)
+
+    @property
+    def nrt(self) -> int:
+        """M7 P3.2b: the runtime things (the index space of thpos_rt / thss_rt)"""
+        from doomfj.world import World
+        return self._mv(World(self.mw, self.mapname)).nrt
 
     def monster_drawable(self, world) -> list:
         from doomfj.monsters import MonsterViews

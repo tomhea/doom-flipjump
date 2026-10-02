@@ -100,13 +100,50 @@ def model_frames(run: dict, proxy: bool = False) -> list:
                     # its move -- p2a_gate's rule); without them a lift in view parts the picture
                     "mheights": mirror.mp.heights(mirror.mstate),
                     "post_doors": tuple(ws.d_state),
-                    "strafe_only": S.has_strafe(kd) and not (kd.get("forward") or kd.get("back"))})
+                    "strafe_only": S.has_strafe(kd) and not (kd.get("forward") or kd.get("back")),
+                    # M7 P3.2b: drive re-steps the mirror with the monsters from the run's setup -- on EVERY
+                    # frame, since a caller may hand drive a slice that starts mid-run (the selftest's T5)
+                    "run_setup": run["setup"]})
     return out
+
+
+# the frame keys `drive` reads by subscript (the others -- movers, mheights, post_doors, strafe_only -- by .get)
+DRIVE_READS = ("inj", "keys", "doors", "exp", "post", "run_setup")
+
+
+def missing_drive_keys(frames: list) -> list:
+    """[(frame index, key)] of every DRIVE_READS key a frame lacks"""
+    return [(i, k) for i, fr in enumerate(frames) for k in DRIVE_READS if k not in fr]
+
+
+def doorsim_frames(keys: list, mirror) -> list:
+    """gamespeed's recorded tic run as b0 frames (the selftest's T1): onewalk.DoorSim's pre-tic pose and doors
+    injected, its keys delivered, `mirror` (a scenarios_v2.BinaryMirror) the expectation. DoorSim has no movers
+    (`movers` None: the mirror keeps its own, its heights ride as `mheights`) and starts in the new
+    world at its own start pose (`run_setup`)."""
+    import onewalk
+    dsim = onewalk.DoorSim()
+    st = dsim.reset()
+    setup = {"pose": (st.x, st.y, st.angle)}
+    frames = []
+    for kd in keys:
+        pre = (st.x, st.y, st.angle)
+        pre_doors = [tuple(dsim.ds[si]) for si in dsim.order]
+        st = dsim.step(st, kd)
+        bk = S.b0_keys(kd)
+        exp = mirror.step(pre, bk, pre_doors)
+        # M7 P2b: the route rides a lift (frames 31-73): the picture needs the mirror's mover heights
+        frames.append({"inj": pre, "keys": bk, "doors": pre_doors, "movers": None, "exp": exp,
+                       "post": (st.x, st.y, st.angle), "post_doors": tuple(dsim.ds[si][0] for si in dsim.order),
+                       "mheights": mirror.mp.heights(mirror.mstate), "run_setup": setup})
+    return frames
 
 
 def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) -> dict:
     """one run through the binary: inject and deliver per `frames`; check against the expectation
     (`override`: a list of (pose, doors) to check against instead)"""
+    gaps = missing_drive_keys(frames)
+    assert not gaps, "drive reads keys these frames lack, e.g. %s" % gaps[:4]
     import gamespeed as GS
     import m2_std_gate as gate
     mf = gate.MENU_FRAMES
@@ -144,7 +181,7 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     # M7 P3.1: the binary's monsters live IDLE from its boot image (the model's own phase, a tic per
     # world frame after the player); B0 injects the player, doors and movers, not them, so the
     # picture it expects is the static set's world with those monsters' views (docs/gp-monsters.md 5)
-    mph = mviews = None
+    mph = None
     if "mon_state" in table.addrs:
         from doomfj.monsters import MonsterPhase
         from doomfj.wall_renderer import BOOT_SKILL
@@ -153,11 +190,24 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     # M7 P3.2a: a monster that can wake reads the seen flags of the LAST picture, which the binary marks on every
     # frame -- so the model's picture (and its seen flags) is taken on every frame too, whatever `pixel_every`
     seen_every = mph is not None and mph.world.monsters != "idle"
+    # M7 P3.2b: monsters that MOVE press the monster doors (`dreq`, which b0 does not inject: it persists into the
+    # binary's next door tic) and hold closing doors open -- so the expectation is the mirror RE-STEPPED here with
+    # them: each frame's door tic gets their boxes, and their presses join the mirror's pending requests. (Their
+    # lift triggers need nothing: b0 writes the lifts, `lreq` included, at every frame start.)
+    chase = mph is not None and mph.world.monsters not in ("idle", "wake") and override is None
+    cm = S.BinaryMirror(S.start_world(frames[0]["run_setup"])) if chase and frames else None
     for f, fr in enumerate(frames):
-        if mph is not None:
-            _ep = override[f][0] if override is not None else fr["exp"][0]
-            mph.tic(_ep[0] & 0xFFFFFFFF, _ep[1] & 0xFFFFFFFF, _ep[2])
-        epose, edoors = override[f] if override is not None else fr["exp"]
+        mheights = fr.get("mheights")
+        if chase:
+            epose, edoors = cm.step(fr["inj"], fr["keys"], fr["doors"], fr.get("movers"), others=mph.boxes())
+            cm.state, cm.mstate = mph.frame(cm.state, cm.mstate, epose[0] & 0xFFFFFFFF, epose[1] & 0xFFFFFFFF,
+                                            epose[2])
+            mheights = cm.mp.heights(cm.mstate)
+        else:
+            if mph is not None:
+                _ep = override[f][0] if override is not None else fr["exp"][0]
+                mph.tic(_ep[0] & 0xFFFFFFFF, _ep[1] & 0xFFFFFFFF, _ep[2])
+            epose, edoors = override[f] if override is not None else fr["exp"]
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
             got["viewx"], got["viewy"], got["viewangle"], got["dstate"]) == (
@@ -167,16 +217,21 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         d_part = fr.get("post_doors") is not None and tuple(edoors) != tuple(fr["post_doors"])
         cam += c_part
         door += d_part
-        if f % pixel_every == 0 or c_part or d_part or seen_every:
+        check = f % pixel_every == 0 or c_part or d_part or seen_every
+        # M7 P3.2a: the monsters' seen flags come from EVERY picture, checked or not (and a monster that can
+        # wake makes every picture a checked one: `seen_every`)
+        if check or mph is not None:
             _seen = set()
             want = orc.render(P_signed(epose[0]), P_signed(epose[1]), epose[2], tuple(edoors),
-                              movers=fr.get("mheights"),
+                              movers=mheights,
                               views=orc.monster_views(mph, P_signed(epose[0]), P_signed(epose[1]))
-                              if mph is not None else None, seen_out=_seen)
+                              if mph is not None else None, seen_out=_seen,
+                              positions=orc.monster_positions(mph) if mph is not None else None)
             if mph is not None:
                 mph.set_seen(orc._mviews.slots_of(_seen))
-            pix_ok.append(r.frames[mf + f] == want)
-            pix_frames.append(f)
+            if check:
+                pix_ok.append(r.frames[mf + f] == want)
+                pix_frames.append(f)
     return {"ops_total": r.ops, "frame_ops": ops_f, "state_ok": state_ok, "pix_ok": pix_ok,
             "pix_frames": pix_frames, "cam_parts": cam, "door_parts": door,
             "presented": len(r.frames), "seconds": r.seconds, "frames": r.frames[mf:]}
@@ -304,7 +359,6 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
     every door written each frame), its state and pixel checks have teeth, a door write takes
     effect, and the strafe proxy changes the ops and not the picture."""
     import m2_std_gate as gate
-    import onewalk
     import b0 as B
     fails = []
 
@@ -319,19 +373,7 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
     # T1: gamespeed run 0 as frames: DoorSim's pre-tic pose and doors injected, its keys delivered
     import gamespeed as GS
     keys = GS.script(B.RECORDED_TIC_RUN)
-    dsim = onewalk.DoorSim()
-    st = dsim.reset()
-    frames = []
-    for kd in keys:
-        pre = (st.x, st.y, st.angle)
-        pre_doors = [tuple(dsim.ds[si]) for si in dsim.order]
-        st = dsim.step(st, kd)
-        bk = S.b0_keys(kd)
-        exp = mirror.step(pre, bk, pre_doors)
-        # M7 P2b: the route rides a lift (frames 31-73): the picture needs the mirror's mover heights
-        frames.append({"inj": pre, "keys": bk, "doors": pre_doors, "exp": exp, "post": (st.x, st.y, st.angle),
-                       "post_doors": tuple(dsim.ds[si][0] for si in dsim.order),
-                       "mheights": mirror.mp.heights(mirror.mstate)})
+    frames = doorsim_frames(keys, mirror)
     doc = json.loads(Path(doc_path).read_text(encoding="ascii"))
     S.use_sight_rule(doc)
     runs = {r["name"]: r for r in doc["runs"]}

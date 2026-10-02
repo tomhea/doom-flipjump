@@ -265,8 +265,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     nrows = nt + len(rows)
     rn = max(1, ((nrows - 1).bit_length() + 3) // 4)
     # the monster slots, and which runtime thing each is
-    assert mode in ("idle", "wake"), mode
-    wake = mode == "wake"
+    assert mode in ("idle", "wake", "chase"), mode
+    wake = mode in ("wake", "chase")                 # M7 P3.2b: the chase mode is the wake mode plus the move
+    chase = mode == "chase"
     w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los")
     nmon, schema = w.layout.nmon, w.schema
     if nmon == 0 or not rows:
@@ -275,7 +276,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     rt_slot = [slot_of.get(_thing_key(t)) for t in rt_things]
     assert sorted(m for m in rt_slot if m is not None) == list(range(nmon)), "every monster slot is a runtime thing"
 
-    fields = P31_FIELDS + (P32A_FIELDS if wake else ())
+    fields = P31_FIELDS + (P32A_FIELDS if wake else ()) + (P32B_FIELDS if chase else ())
+    slot_t = {m: t for t, m in enumerate(rt_slot) if m is not None}
 
     def values(sk):
         w.reset(sk)
@@ -288,7 +290,13 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         restart.append(["    hex.set %d, %s + %d*dw, %d" % (cell_nibbles(schema, f), f, cell_nibbles(schema, f) * m,
                                                             v[f][m]) for f in fields for m in range(nmon)]
                        + (["    hex.set %d, sched_cursor, %d" % (cell_nibbles(schema, "sched_cursor"), w.ws.sched_cursor),
-                           "    hex.zero %d, thseen" % nmon] if wake else []))
+                           "    hex.zero %d, thseen" % nmon] if wake else [])
+                       # M7 P3.2b: each monster's sector, and the barrels this skill stands
+                       + (["    hex.set %d, msec, %d" % (2 * nmon, sum(w._mon_sector(m) << (8 * m) for m in range(nmon))),
+                           "    hex.set %d, bar_solid, %d" % (max(1, len(w.barrel_things)),
+                                                          sum(w.ws.bar_solid[b] << (4 * b)
+                                                              for b in range(len(w.barrel_things))))]
+                          if chase else []))
     # the row select
     sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
         "thsel_h%d" % h if 16 * h < nt else "thsel_none" for h in range(16))]
@@ -313,24 +321,49 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     extra = {}
     if wake:
         w.reset(boot_skill)
-        secs = sorted({w._mon_sector(m) for m in range(nmon)})
+        # M7 P3.2b: a monster that moves can stand in any sector -- every leaf's sector gets its REJECT row
+        secs = (sorted({s_ for s_ in w.leaf_sector if s_ >= 0}) if chase
+                else sorted({w._mon_sector(m) for m in range(nmon)}))
         slots = [dict(t=m, x=w.ws.mon_x[m], y=w.ws.mon_y[m], rj="rj%d" % w._mon_sector(m),
                       see_idx=gd.STATE_INDEX[w.mon_info[m].seestate],
-                      see_tics=gd.STATES[w.mon_info[m].seestate].tics) for m in range(nmon)]
+                      see_tics=gd.STATES[w.mon_info[m].seestate].tics,
+                      **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m])} if chase else {}))
+                 for m in range(nmon)]
         nleaf = len(w.cmap.subsectors)
         extra = {
-            "tic_after_eye": (p32a_tic_lines(schema, nmon, slots, exit_guard=True)
+            "tic_after_eye": ((p32b_change_sector_lines(w, nmon) if chase else [])
+                              + p32a_tic_lines(schema, nmon, slots, exit_guard=True)
                               + ["    hex.zero %d, thseen" % nmon]),               # the render marks this frame's
             "tables": ([generate_dispatch_table_fj("rj%d" % s_, [int(w.reject.visible(s_, q)) for q in range(w.reject.nsec)],
                                                    index_nibbles=2, result_nibbles=1) for s_ in secs]
                        + [generate_dispatch_table_fj("lfsec", list(w.leaf_sector),
                                                      index_nibbles=max(1, ((nleaf - 1).bit_length() + 3) // 4),
                                                      result_nibbles=2)]),
-            "leaves": p32a_leaves(),
+            "leaves": p32a_leaves() + (p32b_rj_leaf(secs) if chase else []),
             "decls_wake": (p32a_decls(schema, nmon, {**{f: boot[f] for f in P32A_FIELDS}, "sched_cursor": w.ws.sched_cursor},
                                  nmon)
                       + P32A_SCRATCH + ["sp_sa: hex.vec w/4", "trb_seenf: hex.vec 1", "trb_one: hex.vec 1, 1"]),
         }
+        if chase:
+            from doomfj.collision import MON_CELL_DECLS
+            from doomfj.monstermove import monster_seed_decls, static_blockers
+            from doomfj.things import LEAF_LINK_DECLS
+            things, var = static_blockers(w)
+            assert not var, "a decoration some skill lacks needs its mc_don flag set at NEW GAME"
+            nb = max(1, len(w.barrel_things))
+            extra["decls_wake"] += (
+                p32b_decls(schema, nmon, {f: boot[f] for f in P32B_FIELDS}, [w._mon_sector(m) for m in range(nmon)])
+                + MON_CELL_DECLS + monster_seed_decls() + LEAF_LINK_DECLS
+                + ["bar_solid: hex.vec %d, %d" % (nb, sum(w.ws.bar_solid[b] << (4 * b)
+                                                          for b in range(len(w.barrel_things)))),
+                   "mh_prev: hex.vec %d" % (len(w.lift_order) + 1), "mcf_val: hex.vec 4", "mcf_hit: hex.vec 1",
+                   "mcf_ret: hex.vec w/4"])
+            extra["chase"] = dict(
+                static_things=things, lift_walk=list(w.lift_walk), lift_order=list(w.lift_order),
+                mon_door_boxes=[(si, w.mon_door_boxes[si]) for si in w.door_order if si in w.mon_door_boxes],
+                slots_rt=[(slot_t[m], w.mon_radius[m]) for m in range(nmon)],
+                mon_radius=[w.mon_radius[m] for m in range(nmon)], height=w.mon_height[0])
+            assert len(set(w.mon_height[:nmon])) == 1, "one monster height: try_move_mon takes it at compile time"
     return {
         "mode": mode, **extra,
         "view_rows": rows, "nrows": nrows, "views": views, "rt_slot": rt_slot, "nmon": nmon, "schema": schema,
@@ -384,6 +417,11 @@ def persisted_monster_decls(w, mode: str) -> list:
     if mode in ("wake", "chase"):
         out += [d for d in p32a_decls(w.schema, n, {f: [0] * n for f in P32A_FIELDS}, n)
                 if d.split(":")[0] in P32A_PERSISTED]
+    if mode == "chase":                  # M7 P3.2b: the move's per-slot cells and msec, the barrels, mh_prev
+        out += [d for d in p32b_decls(w.schema, n, {f: [0] * n for f in P32B_FIELDS}, [0] * n)
+                if d.split(":")[0] in P32B_FIELDS + ("msec",)]
+        out += ["bar_solid: hex.vec %d" % max(1, len(w.barrel_things)),
+                "mh_prev: hex.vec %d" % (len(w.lift_order) + 1)]
     return out
 
 
@@ -418,10 +456,15 @@ def _sign_branch(cell, kind, yes, no):
             "  %s_z:" % yes, "    hex.if0 4, %s, %s" % (cell, no), "    ;%s" % yes]
 
 
-def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema) -> list:
+def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, mv=None) -> list:
     """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
     A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
-    REJECT row of its spawn sector (indexed by the player's sector); t: its runtime thing (the render's seen flag)."""
+    REJECT row of its spawn sector (indexed by the player's sector); t: its seen flag's index (`thseen`).
+
+    `mv` (M7 P3.2b, the CHASE mode: `dict(rt=runtime thing, radius=, speed=)`): the monster MOVES -- A_Look reads
+    its position from `thpos_rt` and its REJECT row by its sector (`msec`, mt_rj_leaf) at run time, and A_Chase
+    goes on after the turn to the move (monstermove.chase_leaf_lines: movecount, P_Move, P_NewChaseDir) through
+    the context cells, its own `mon_active` cleared around the call so the thing test skips it."""
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     nthr = cell_nibbles(schema, "mon_threshold")
     ST, TI, AC = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_active + %d*dw" % m
@@ -462,15 +505,18 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "  %slook:" % L,
            "    hex.zero %d, %s" % (nthr, TH),
            "    hex.mov 4, mt_dx, viewx + 4*dw",
-           "    hex.sub_constant 4, mt_dx, %d" % (x & 0xFFFF),
+           ("    hex.sub 4, mt_dx, thpos_rt + %d*dw" % (16 * mv["rt"] + 4) if mv else
+            "    hex.sub_constant 4, mt_dx, %d" % (x & 0xFFFF)),
            "    hex.mov 4, mt_dy, viewy + 4*dw",
-           "    hex.sub_constant 4, mt_dy, %d" % (y & 0xFFFF),
+           ("    hex.sub 4, mt_dy, thpos_rt + %d*dw" % (16 * mv["rt"] + 12) if mv else
+            "    hex.sub_constant 4, mt_dy, %d" % (y & 0xFFFF)),
            "    stl.fcall mt_dist_leaf, mt_ret",                  # mt_d = P_AproxDistance(dx, dy)
            "    hex.if1 1, thseen + %d*dw, %sbehind" % (t, L),     # seen by last frame's picture
            "    hex.cmp 4, mt_d, mt_c128, %snear, %snear, %s" % (L, L, nxt),
            "  %snear:" % L,
            "    stl.fcall mt_psec_leaf, mt_ret",                  # psec, once a frame
-           "    %s.lookup mt_rj, psec" % rj,
+           *(["    hex.mov 2, mt_ms, msec + %d*dw" % (2 * m), "    stl.fcall mt_rj_leaf, mt_rjret"] if mv else
+             ["    %s.lookup mt_rj, psec" % rj]),
            "    hex.if0 1, mt_rj, %s" % nxt,
            "  %sbehind:" % L,                                  # behind and beyond 64: not seen
            "    sim.jump16 %s, %s" % (FA, ", ".join(["%sf%d" % (L, k) for k in range(8)] + [nxt] * 8))]
@@ -499,12 +545,122 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    hex.if0 %d, %s, %st0" % (nthr, TH, L),
             "    hex.dec %d, %s" % (nthr, TH),
             "  %st0:" % L,
-            "    hex.if_flags %s, %d, %sturn, %s" % (MD, 1 << 8, L, nxt),
+            "    hex.if_flags %s, %d, %sturn, %s" % (MD, 1 << 8, L, ("%smv" % L) if mv else nxt),
             "  %sturn:" % L,
             "    hex.mov 1, mt_ti, %s" % FA,
             "    hex.mov 1, mt_ti + 1*dw, %s" % MD,
-            "    mturn.lookup %s, mt_ti" % FA,
-            "  %s:" % nxt]
+            "    mturn.lookup %s, mt_ti" % FA]
+    if mv:
+        out += ["  %smv:" % L] + p32b_move_lines(m, schema=schema, **mv)
+    out += ["  %s:" % nxt]
+    return out
+
+
+# ---- M7 P3.2b "chase" ------------------------------------------------------------------------------------------
+P32B_FIELDS = ("mon_movecount", "mon_rng", "mon_floorz")
+
+
+def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema) -> list:
+    """slot m's move: its cells into the context, `mm_chase` (its own mon_active cleared, so the thing test skips
+    it), the context back -- position into thpos_rt, the leaf into thss_rt, the sector into msec"""
+    nz, nr, nc = (cell_nibbles(schema, f) for f in ("mon_floorz", "mon_rng", "mon_movecount"))
+    assert (nz, nr, nc) == (4, 2, 2), (nz, nr, nc)
+    assert radius in (20, 30) and speed in (8, 10), (radius, speed)
+    X, Y = "thpos_rt + %d*dw" % (16 * rt + 4), "thpos_rt + %d*dw" % (16 * rt + 12)
+    FZ, RN, MC = "mon_floorz + %d*dw" % (4 * m), "mon_rng + %d*dw" % (2 * m), "mon_movecount + %d*dw" % (2 * m)
+    MD, AC, SS = "mon_movedir + %d*dw" % m, "mon_active + %d*dw" % m, "thss_rt + %d*dw" % (16 * rt)
+    SC = "msec + %d*dw" % (2 * m)
+    return ["    hex.mov 4, mm_x, %s" % X, "    hex.mov 4, mm_y, %s" % Y,
+            "    hex.mov 4, mm_z, %s" % FZ, "    hex.sign_extend 8, 4, mm_z",
+            "    hex.set 2, mm_r, %d" % radius, "    hex.set 1, mm_r30, %d" % int(radius == 30),
+            "    hex.set 1, mm_spd, %d" % int(speed == 10),
+            "    hex.mov 1, mm_dir, %s" % MD, "    hex.mov 2, mm_rng, %s" % RN, "    hex.mov 2, mm_mc, %s" % MC,
+            "    hex.set w/4, mm_tw, %d" % rt,
+            "    hex.zero w/4, mm_leafw", "    hex.mov 3, mm_leafw, %s" % SS,
+            "    hex.mov 2, mm_sec, %s" % SC,
+            "    hex.zero 1, %s" % AC,
+            "    stl.fcall mm_chase, mm_cret",
+            "    hex.set 1, %s, 1" % AC,
+            "    hex.mov 4, %s, mm_x" % X, "    hex.mov 4, %s, mm_y" % Y,
+            "    hex.mov 4, %s, mm_z" % FZ,
+            "    hex.mov 1, %s, mm_dir" % MD, "    hex.mov 2, %s, mm_rng" % RN, "    hex.mov 2, %s, mm_mc" % MC,
+            "    hex.mov 3, %s, mm_leafw" % SS,
+            "    hex.mov 2, %s, mm_sec" % SC]
+
+
+def p32b_decls(schema, nmon: int, values: dict, msec: list) -> list:
+    """the chase's per-slot cells (movecount, P_Random state, floorz; `msec`, each monster's sector), the move's
+    context, and the REJECT leaf's operand"""
+    from doomfj.monstermove import P32B_CONTEXT
+    out = []
+    for name in P32B_FIELDS:
+        nib = cell_nibbles(schema, name)
+        vals = [v & (16 ** nib - 1) for v in values[name]]
+        out.append("%s: hex.vec %d, %d" % (name, nib * nmon, sum(v << (4 * nib * m) for m, v in enumerate(vals))))
+    assert all(0 <= s_ < 256 for s_ in msec), msec
+    out.append("msec: hex.vec %d, %d" % (2 * nmon, sum(v << (8 * m) for m, v in enumerate(msec))))
+    return out + P32B_CONTEXT + ["mt_ms: hex.vec 2", "mt_rjret: hex.vec w/4"]
+
+
+def p32b_change_sector_lines(w, nmon: int) -> list:
+    """P_ChangeSector for the lifts (world._door_phase_scene): when a mover's state differs from the last frame's
+    (`mh_prev` holds each lift's state and the switch) every ACTIVE monster standing in a mover's sector takes that
+    sector's floor at the mover's state. The model's trigger is the movers' heights off their stored floors; a
+    lift's stops are distinct heights (asserted), so a state change is a height change and the two agree."""
+    from doomfj.movers import mover_heights
+    lifts = list(w.lift_order)
+    for si in lifts:
+        assert len(set(w.lift_stops[si])) == len(w.lift_stops[si]), (si, w.lift_stops[si])
+    nl = len(lifts)
+    movers = {si: ("lstate + %d*dw" % k, [mover_heights(w.secs, w.lift_stops, {si: st}, {}, False).get(
+        si, (w.secs[si].floor_h, 0))[0] for st in range(len(w.lift_stops[si]))]) for k, si in enumerate(lifts)}
+    for si in w.switch:
+        low_hi = mover_heights(w.secs, w.lift_stops, {}, w.switch, True)
+        movers[si] = ("fswitch", [w.secs[si].floor_h, low_hi.get(si, (w.secs[si].floor_h, 0))[0]])
+    out = ["  // M7 P3.2b: P_ChangeSector -- the movers moved since the last frame: their monsters take the new floor",
+           "    hex.cmp %d, mh_prev, lstate, mcs_chg, mcs_sw, mcs_chg" % nl if nl else "    ;mcs_sw",
+           "  mcs_sw:",
+           "    hex.cmp 1, mh_prev + %d*dw, fswitch, mcs_chg, mcs_skip, mcs_chg" % nl,
+           "  mcs_chg:"]
+    out += (["    hex.mov %d, mh_prev, lstate" % nl] if nl else []) + ["    hex.mov 1, mh_prev + %d*dw, fswitch" % nl]
+    for m in range(nmon):
+        out += ["    hex.if0 1, mon_active + %d*dw, mcs_m%d" % (m, m),
+                "    hex.mov 2, mt_ms, msec + %d*dw" % (2 * m),
+                "    stl.fcall mcf_leaf, mcf_ret",
+                "    hex.if0 1, mcf_hit, mcs_m%d" % m,
+                "    hex.mov 4, mon_floorz + %d*dw, mcf_val" % (4 * m),
+                "  mcs_m%d:" % m]
+    out += ["    ;mcs_skip"]
+    # mcf_leaf: the sector in mt_ms -> (mcf_hit, mcf_val = its floor at its mover's state)
+    hs = sorted({si >> 4 for si in movers})
+    out += ["  mcf_leaf:", "    hex.zero 1, mcf_hit",
+            "    sim.jump16 mt_ms + 1*dw, " + ", ".join("mcf_h%d" % h if h in hs else "mcf_out" for h in range(16))]
+    for h in hs:
+        out += ["  mcf_h%d:" % h, "    sim.jump16 mt_ms, " + ", ".join(
+            "mcf_s%d" % (16 * h + l) if 16 * h + l in movers else "mcf_out" for l in range(16))]
+    for si, (cell, floors) in sorted(movers.items()):
+        labs = ["mcf_s%d_%d" % (si, k) for k in range(len(floors))]
+        out += ["  mcf_s%d:" % si, "    sim.jump16 %s, %s" % (cell, ", ".join(labs + [labs[-1]] * (16 - len(labs))))]
+        for k, fl in enumerate(floors):
+            out += ["  %s:" % labs[k], "    hex.set 4, mcf_val, %d" % (fl & 0xFFFF), "    ;mcf_one"]
+    out += ["  mcf_one:", "    hex.set 1, mcf_hit, 1", "  mcf_out:", "    stl.fret mcf_ret", "  mcs_skip:"]
+    return out
+
+
+def p32b_rj_leaf(sectors) -> list:
+    """`mt_rj_leaf`: mt_rj = REJECT-visible(mt_ms -> psec) -- a two-nibble jump on the monster's sector to that
+    sector's row (`rj<sector>`, indexed by the player's sector); `sectors`: every one a monster can stand in"""
+    secs = sorted(set(sectors))
+    have = set(secs)
+    out = ["mt_rj_leaf:", "    sim.jump16 mt_ms + 1*dw, " + ", ".join(
+        "mt_rjh%d" % h if any(16 * h <= s_ < 16 * h + 16 for s_ in secs) else "mt_rj_none" for h in range(16))]
+    for h in range(16):
+        if any(16 * h <= s_ < 16 * h + 16 for s_ in secs):
+            out += ["  mt_rjh%d:" % h, "    sim.jump16 mt_ms, " + ", ".join(
+                "mt_rjs%d" % (16 * h + l) if 16 * h + l in have else "mt_rj_none" for l in range(16))]
+    for s_ in secs:
+        out += ["  mt_rjs%d:" % s_, "    rj%d.lookup mt_rj, psec" % s_, "    stl.fret mt_rjret"]
+    out += ["  mt_rj_none:", "    hex.zero 1, mt_rj", "    stl.fret mt_rjret"]
     return out
 
 

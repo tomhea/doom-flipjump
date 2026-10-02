@@ -761,17 +761,18 @@ class BinaryMirror:
         self.mstate, self.pusedn = self.mp.initial(), 1
         self._scenes = {}
 
-    def step(self, pre, kd, doors=None, movers=None):
+    def step(self, pre, kd, doors=None, movers=None, others=()):
         """`doors`: the door tuples (state, dir, sub, wait) b0 writes at the frame start (the
         model's pre-tic doors); None keeps the mirror's own. `movers` (M7 P2b): the model's pre-tic
-        mover state (`mover_state`), written the same way"""
+        mover state (`mover_state`), written the same way. `others` (M7 P3.2b): the binary's live monsters'
+        boxes at the frame start -- a closing door reverses on them"""
         w = self.w
         if doors is not None:
             self.state = ({si: tuple(doors[d]) for d, si in enumerate(w.door_order)},
                           *self.state[1:])
         if movers is not None:
             self.mstate = movers
-        self.state = self.dp.tic(self.state, bool(kd.get("use")), pre[0], pre[1])
+        self.state = self.dp.tic(self.state, bool(kd.get("use")), pre[0], pre[1], others=others)
         self.ds = [self.state[0][si] for si in w.door_order]
         self.mstate = self.mp.tic(self.mstate)
         if kd.get("use"):

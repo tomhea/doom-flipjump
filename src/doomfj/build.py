@@ -80,7 +80,10 @@ MOVER_PERSIST = ("lstate", "ldir", "lsub", "lwait", "lreq", "fswitch")
 MONSTER_PERSIST = ("mon_state", "mon_tics", "mon_facing", "mon_active",
                    # M7 P3.2a (the wake mode): the chase's cells, the cursor, and the seen flags -- the render
                    # writes them for the NEXT frame's tic, so they must survive the reset between the two
-                   "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen")
+                   "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",
+                   # M7 P3.2b (the chase mode): the move's per-slot cells and each monster's sector; the barrels
+                   # the skill stands (NEW GAME sets them); the movers' last state (P_ChangeSector's trigger)
+                   "mon_movecount", "mon_rng", "mon_floorz", "msec", "bar_solid", "mh_prev")
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:

@@ -26,14 +26,15 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "lvdone", "pusedn",               # M7 P2a.2: the exit's
                "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",   # M7 P2b: movers.MoverPhase's
                "mon_state", "mon_tics", "mon_facing", "mon_active",   # M7 P3.1: monsters.MonsterPhase's
-               "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen")  # P3.2a
+               "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",  # P3.2a
+               "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt")   # P3.2b
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
-                      nmon: int = 0):
+                      nmon: int = 0, nrt: int = 0):
     """-> (the presented frames' pixel indices, the exact op total, [the STATE_NAMES cells read at
     each present]). `labels` is the build's own label table (build_labeled.py writes it)."""
-    cells = {n: c for n, c in P.game_cells(ndoors, nwalk, nlift, nmon).items() if n in STATE_NAMES}
+    cells = {n: c for n, c in P.game_cells(ndoors, nwalk, nlift, nmon, nrt).items() if n in STATE_NAMES}
     # M7 P3.1: a gate that does not pass `nmon` asks for no monster cells (a binary before P3.1)
     missing = sorted(set(STATE_NAMES) - set(cells) - (set() if nmon else MONSTER_NAMES))
     assert not missing, "probe.game_cells lost %s -- the state check would skip them" % missing
@@ -50,7 +51,8 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int 
 
 
 MONSTER_NAMES = {"mon_state", "mon_tics", "mon_facing", "mon_active",
-                 "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen"}
+                 "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",
+                 "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt"}
 
 
 def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None,

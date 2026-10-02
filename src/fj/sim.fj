@@ -143,8 +143,8 @@ ns sim {
     // A stub xors in only what its line's path reads here -- an axis line leaves ca_dx/ca_dy zero,
     // a wall its opening -- and nothing here writes a ca_* cell, so the stub's second xor is what
     // zeroes them. Every value arrives in its working form: no table read, no conversion.
-    def line_test @ nxt, hit, k_a, k_b, k_c, k_d, axis, diag, do_h, do_v, do_pos, do_neg, h1, \
-                    v1c, cmp_p, open_f, open_c, set_f, set_c \
+    def line_test drop, lf, dropc @ nxt, hit, k_a, k_b, k_c, k_d, axis, diag, do_h, do_v, do_pos, do_neg, h1, \
+                    v1c, cmp_p, open_f, open_c, set_f, set_c, lowf, set_d \
             < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil, ca_minx, ca_maxx, \
               ca_miny, ca_maxy, ca_v1x, ca_v1y, ca_dx, ca_dy, ca_slope, ca_flags, ca_ob, ca_ot, \
               cl_side1, cl_side2 {
@@ -193,9 +193,13 @@ ns sim {
       set_f:
         hex.mov 8, cp_floor, ca_ob
       open_c:                                   // opentop -> ceilingz = min
-        hex.scmp 8, ca_ot, cp_ceil, set_c, nxt, nxt
+        hex.scmp 8, ca_ot, cp_ceil, set_c, lowf, lowf
       set_c:
         hex.mov 8, cp_ceil, ca_ot
+      lowf:                                     // M7 P3.2b (drop = 1, the monsters' cells): lowfloor -> dropoffz
+        rep(drop, k) hex.scmp 8, lf, dropc, set_d, nxt, nxt        //   = min. drop = 0 (the player): no op, so
+      set_d:                                    //   lowf IS nxt and the player's expansion is unchanged
+        rep(drop, k) hex.mov 8, dropc, lf
       nxt:
     }
 }
@@ -244,6 +248,66 @@ ns sim {
     // NOT IMPLEMENTED, deliberately and permissively: the "don't stand over a dropoff" test. It
     // only ever REFUSES moves, so leaving it out cannot block a move DOOM would allow. The oracle
     // omits it identically -- see ReferenceModel.check_position's docstring.
+    // M7 P3.2b: P_TryMove's rules for a MONSTER (world.try_move_lines): the drop-off floor starts at the seed's
+    // floor and the monster cells' line test lowers it (sim.line_test drop = 1); then the opening must fit the
+    // monster (ceil - floor >= height), fit it where it stands (ceil - z >= height), be no step up of more than
+    // maxstep, and no drop of more than dropmax (no monster on E1M1 is DROPOFF or FLOAT). Map units; here_floor
+    // is z, an 8-nibble signed cell.
+    // M7 P3.2b: PIT_CheckThing for a monster against ONE static blocker its stub xored in (ca_tx, ca_ty: the thing's
+    // integer position; ca_tr: its radius) -- |tx - x| < r + tr on BOTH axes refuses: the latch, as a wall's (the
+    // model tests things before lines, but only the verdict's ok and the lines' floor are read, so order is free).
+    // x, y and r are the integer halves of cpx, cpy and cprad (a monster's candidate is a whole map unit).
+    def thing_test @ yax, hit, nxt < cpx, cpy, cprad, cp_ok, ca_tx, ca_ty, ca_tr, ct_a, ct_b {
+        hex.mov 4, ct_b, cprad + 4*dw
+        hex.add 4, ct_b, ca_tr
+        hex.mov 4, ct_a, ca_tx
+        hex.sub 4, ct_a, cpx + 4*dw
+        hex.abs 4, ct_a
+        hex.scmp 4, ct_a, ct_b, yax, nxt, nxt
+      yax:
+        hex.mov 4, ct_a, ca_ty
+        hex.sub 4, ct_a, cpy + 4*dw
+        hex.abs 4, ct_a
+        hex.scmp 4, ct_a, ct_b, hit, nxt, nxt
+      hit:
+        hex.zero 1, cp_ok
+      nxt:
+    }
+    def try_move_mon root, height, maxstep, here_floor, dropmax \
+            @ body, fail, done, out, t1, t2, t3, cst, gap \
+            < cp_ok, cp_floor, cp_ceil, cp_drop, cp_seedf, mv_ok {
+        ;body
+      cst: hex.vec 8
+      gap: hex.vec 8
+      body:
+        hex.mov 8, cp_drop, cp_seedf
+        .check_cells root
+        hex.if0 1, cp_ok, fail
+        hex.set 8, cst, height
+        hex.mov 8, gap, cp_ceil                // ceilz - floorz < height
+        hex.sub 8, gap, cp_floor
+        hex.scmp 8, gap, cst, fail, t1, t1
+      t1:
+        hex.mov 8, gap, cp_ceil                // ceilz - z < height
+        hex.sub 8, gap, here_floor
+        hex.scmp 8, gap, cst, fail, t2, t2
+      t2:
+        hex.set 8, cst, maxstep
+        hex.mov 8, gap, cp_floor               // floorz - z > maxstep
+        hex.sub 8, gap, here_floor
+        hex.scmp 8, gap, cst, t3, t3, fail
+      t3:
+        hex.set 8, cst, dropmax
+        hex.mov 8, gap, cp_floor               // floorz - dropoffz > dropmax
+        hex.sub 8, gap, cp_drop
+        hex.scmp 8, gap, cst, done, done, fail
+      done:
+        hex.set 1, mv_ok, 1
+        ;out
+      fail:
+        hex.set 1, mv_ok, 0
+      out:
+    }
     def try_move root, height, maxstep, here_floor \
             @ body, fail, done, out, tall, cst, gap, step \
             < cp_ok, cp_floor, cp_ceil, mv_ok {    // the box/seed globals belong to check_cells

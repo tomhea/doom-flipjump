@@ -203,6 +203,7 @@ P3.2 is too large for one build, so it ships in three, each against a named mode
 - **P3.2b "chase"**: P_Move / P_TryMove on the monster cells (radius 30 lists with ML_BLOCKMONSTERS, the step,
   height and drop-off rules, the things as boxes), P_NewChaseDir with `mrnd`, the relink (`sim.leaf_unlink` /
   `leaf_link`), `thpos_rt` written, monster doors (`dreq`) and WR lifts.
+  SHIPPED 2026-10-02 as blocked44 (`docs/gp-ledger.md` P3.2b).
 - **P3.2c "decide"**: the melee and missile decisions and their states (A_FaceTarget; the attacks' EFFECTS are P5,
   so the mode runs the attack states without damage).
 The frozen set v5 is the full model; B0 on it is exact from P3.2c on, when the mode's tic equals the model's for
@@ -259,4 +260,10 @@ height 0 -- every rule is live, the drop-off one included.
 
 **Cost, estimated** (to be measured): a try is one descent (~32K, the player's measured seed walk), the cells
 (~20K) and the thing loop (~30K) -- ~80K; 2.32 tries a frame is ~0.19M mean, 0.32M at p80.
+
+**As built** (SHIPPED 2026-10-02 as blocked44, sha256 `06e8912c4d4d3b96`; `docs/gp-ledger.md` P3.2b): measured
++366,657 on gamespeed's binding (14,086,236 -> 14,452,893), +898,983 on v5's (15,299,168), +385,240 on profx's mean
+frame; size +5,017,552 words (33.38% of 2^27). The door contacts are one leaf per (door, radius) on `dc_x` / `dc_y` --
+inlined per monster they were 8,056 compares (~14.6M ops) and the first build overran the table pool (ee6761c).
+P_ChangeSector runs outside the `lvdone` exit guard here; P3.2c's branch fixes it (796cdcc).
 

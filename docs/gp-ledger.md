@@ -729,4 +729,68 @@ per sector, the unrolled thing test and the door contacts per monster).
 5. pinreport 20 of 20 (the heat list p32a: `sim.line_test`, re-signed here, is on no hot path); the restore sets
    re-keyed (the chase's cells, `bar_solid`, `mh_prev` persist).
 
-**Row**: (filled after the build)
+**Row** (blocked44, sha256 `06e8912c4d4d3b96`, built at 2f76124; `docs/ship-evidence/blocked44_*`):
+
+| measure | blocked43 (P3.2a) | blocked44 (P3.2b) | delta |
+|---|---|---|---|
+| combat set binding (v5) | 14,400,185 | 15,299,168 | +898,983 |
+| ... with strafe's collision | 14,435,039 | 15,335,250 | +900,211 |
+| v5 per-frame maximum (+/- 2^18) | 24,641,536 | 25,427,968 (R0-aftermath) | +786,432 |
+| gamespeed binding | 14,086,236 | 14,452,893 | +366,657 (budget 0.4M: inside) |
+| profx mean frame (gamespeed's games) | 11,948,995 | 12,334,235 | +385,240 |
+| size (% of 2^27) | 29.64% | 33.38% | +5,017,552 words (budget 2.5M: OVER) |
+| pool tables (build) | 389,172 in 25,184 groups | 466,633 in 33,572 groups | +77,461 tables |
+| ms/frame (msframe, one run, A = blocked43; the pictures differ, so its pixel check reads NO) | 62.2 | 66.4 | B SLOWER (x0.934) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**msframe B SLOWER is the class-F price (D8), explained**: on msframe's forward walk blocked44 runs 14,944,344
+ops/frame against 14,336,652 (+607,692, +4.2%: the awake monsters along the walk now MOVE every frame -- mm_chase /
+mm_move / the thing test / the relinks -- where blocked43's only turned) and its rate fell 230.6 -> 225.2 M fj/s
+(-2.3%: the new code and the 77,461 new pool tables re-roll the placement); together 62.2 -> 66.4 ms/frame (x0.934, all
+five pairs one sign). Far under the ~90 ms tripwire; recorded, not a kill criterion for a class F rung.
+
+The design's estimate was ~0.19M mean, 0.32M at p80 (`docs/gp-monsters.md` 8.4); gamespeed moved +366,657. Where profx
+puts it (phases.py, ops/frame, blocked43 -> blocked44; lines that moved >= 10,000): render walk, all 11,651,545 ->
+11,883,836; (glue between phases) 22,518 -> 167,927; seg_pass2_leaf 3,508,143 -> 3,665,644; seg_pass1_ts_leaf
+2,452,237 -> 2,481,799; seg_pass1_leaf 2,366,520 -> 2,324,892; bspcode walk (nodes, pos_leaf, ss code) 885,891 ->
+913,828; thing_leaf_b 718,112 -> 779,699; thing_leaf 722,700 -> 702,631; thing_pass_leaf 634,555 -> 650,839.
+
+**OVER the size budget**: +5,017,552 words against the +2.5M declared -- +2,467,118 below the pool (the program,
+25,576,624 -> 28,043,742) and +2,550,434 in it (14,210,886 -> 16,761,320 payload words; +77,461 tables). The size
+audit (`scratchpad/plan/p32b/size_audit`) found the "12M unexplained" a layout mix-up -- the counting pass's
+UNRELOCATED layout against the final one: the final program is 7.29M ops, and the counting layout's headroom 3.49M.
+**Size is now 33.38% of 2^27 against the 35% target: 2,171,142 words (1.62 points) of room left -- less than this rung
+alone added.** One more rung of this size crosses the target; raising it (the owner's 2026-09-25 note already says 35%
+conflicts with even two levels) or buying words back is the owner's call.
+
+**One dead build, one stopped chain.** r0 (at 5399be4, `blocked44_build_r0_overflow.log`) died in the COUNTING pass:
+"the program reached 0x857cc840, which is inside the table pool based at 0x60000000" -- the counting assembly lays the
+program out unrelocated, and the game tier's door tic had inlined the contact test of every door for each of the 53
+monster slots: 8,056 signed constant compares (hex.set 8 + hex.scmp 8, 1,808 ops each), ~14.6M ops. ee6761c gives each
+(door, radius) one contact leaf on `dc_x` / `dc_y` (a monster costs two moves, a call and a flag test), with
+`tests/fj/test_door_reversal_fj.py` (a closing door reverses on a LIVE monster exactly as `door_tic`, 738 records, 528
+reversals; a door ignores an inactive one; controls: the inactive flag read from another slot, one radius for all).
+The r1 chain then stopped at its host suite (`blocked44_host_suite_r0_doorcensus.log`): `test_doorcode`'s write census
+did not admit the contact leaves' own registers (`dc_x`, `dc_y`, `dc_hit`) -- 2f76124, a test fix; the build is at
+that commit.
+
+**Known divergence, carried to P3.2c:** P_ChangeSector runs outside the `lvdone` exit guard. Fixed on P3.2c's branch,
+796cdcc.
+
+**Verdict: every kill criterion met.**
+1. Host: 1415 passed, 2 skipped, 1 deselected, 2 xfailed, 3 warnings (`blocked44_host_suite.log`),
+   `test_monsters_chase.py` with its controls (the wake mode does not move, the full mode decides) among them; the
+   probe's chase group all-or-none.
+2. fj, on the engine against the model (the runs the commits record): `test_monster_cells_fj.py` (3 passed, f322b47:
+   700 moves verdict- and floor-exact, ML_BLOCKMONSTERS and the drop-off each caught; the seed and the static
+   blockers, 0843a6f); `test_monster_chase_fj.py` (the chase tic over 40 frames ALL EQUAL, 895de7f; the no-cap control
+   was VACUOUS -- a monster boxed in on all 8 sides ends at NODIR either way -- so slot 3 now stands at CAP_SPOT and
+   `test_the_cap_decides_something` requires the capless model to part); `test_door_reversal_fj.py` (ee6761c). The
+   whole files re-run: 22 passed (`p32b_fj_harnesses.log`).
+3. m2_std_gate (452 frames) and m3_gate (32 frames) byte- and state-exact, their 6 selftests PASS; p2a_gate 13
+   scenarios state- and pixel-exact with the monsters stepped inside its doors and lifts; B0 v5 exact on every frame
+   (11 runs, 1,100 frames: state and pixels); deg_gate BYTE-EXACT with every op count equal to blocked43's.
+4. CAP-22 on v5: 15,299,168 (headroom 6,700,832; the per-frame maximum 25,427,968 in R0-aftermath is not the cap's
+   measure); gamespeed 14,452,893 PASS; size 33.38% (<= 35%); msframe recorded (B SLOWER: median x0.934).
+5. pinreport 20 of 20 with `heat_blocked27_p32a`; the restore sets re-keyed (`p32b_rekey.log` 20 passed in 0.28s;
+   `p32b2_rekey.log` 20 passed in 0.31s).

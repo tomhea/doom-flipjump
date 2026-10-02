@@ -694,3 +694,44 @@ per sector, the unrolled thing test and the door contacts per monster).
    re-keyed (the chase's cells, `bar_solid`, `mh_prev` persist).
 
 **Row**: (filled after the build)
+
+
+## P3.4 the key-map help screen (class F) -- declared 2026-10-02, before the build
+
+**What**: `docs/gp-help.md`. A HELP screen -- the keys that work today and what they do, a baked
+frame from `doomfj.menu`'s one generator -- opened from the main menu (its new HELP item: up / down /
+enter, or h) and from the world (h); esc or h close it back to where it was opened. 'e' is a second
+use key; 'h' the help event. No new persisted cell: `menu_scr` 3 / 4 / 5 (the help from the menu,
+from the world; the main menu on HELP). The main menu loses QUIT (never selectable).
+
+**Budget**: ops ESTIMATE ~+0 on the binding metric (one `hex.if0` and one `hex.zero` a world frame;
+a tiny-harness ESTIMATE of +1.9 to +6.5 ops a frame, `docs/gp-help.md` section 3); size <= +0.12M
+words -- ESTIMATE 97,088 words for the 6,068 new stream bytes (the help 4,770, the main menu on HELP
+1,318, the main menu -18) at P2a.2's 8 ops x 2 words a byte, plus the decode and the state lines.
+(The brief proposed +0.1M; the frames alone are 97% of that, so +0.1M would be a coin toss on
+arithmetic already done -- the coordinator decides whether to hold the rung to it.) No plane ids.
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. Host: `menu_step`'s help rules (`test_the_help_rules`: both opens, both closes, the main menu's two
+   items clamped, h ignored on the skill screen and LEVEL COMPLETE, the event order); the help picture
+   decoded by the real device equals the oracle's, its title and every row glyph-exact in their
+   colours and nothing else inked, with a moved-pixel control and a too-wide-row control;
+   `menu_screen_pixels` gives the seven states seven pictures, the help one picture under both ids.
+2. fj: `kb.poll`'s 'e' and 'h' against the mirror, with controls; the help lists EXACTLY the keys
+   that work (run, both directions, an unbound-key control); the state machine's nine help scripts
+   with four mutants caught (`test_skill_menu.py`); the whole menu block frame by frame through both
+   devices, two controls (`test_menu_screens.py`).
+3. Gates: `m3_gate` byte- and state-exact on all 50 frames -- the help from the world (W held across
+   it, no move) and from the main menu, both closes, all seven menu pictures -- and its four selftests
+   rejected where they must (`--selftest-help` at frame 34); `m2_std_gate`, `p2a_gate` byte- and
+   state-exact (their scripts never press h; the main menu's down now moves a highlight -- neither
+   presses it on the main menu); B0 on v5 exact.
+4. Gameplay ops unchanged within noise: the binding metric on v5 and gamespeed's may move only by
+   placement, which `profx/phases.py` must show -- the input phase within +100 ops a frame of P3.3's
+   binary and the rung's own phases flat; CAP-22 on v5; size <= +0.12M words and <= 35%; msframe
+   recorded (B SLOWER without an explanation kills it).
+5. pinreport 20 of 20; the restore sets re-keyed (`ev_help` is a new restore-set label; no persist
+   change); `probe.RECORDED_CALIBRATION` re-recorded (the startup + 2 menu frames changed: the main
+   menu's picture and its state path).
+
+**Row**: (filled after the build)

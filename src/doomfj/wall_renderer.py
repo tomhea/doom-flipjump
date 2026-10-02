@@ -61,6 +61,7 @@ from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS,       # M7 
 from doomfj.movercode import lift_tic_lines, lift_walk_lines, mover_decls, use_line_lines
 from doomfj.doorcode import _box_test                                     # M7 P2a.2: the exit's box
 from doomfj.menu import LEVEL_DONE_SCR                                    # M7 P2a.2
+from doomfj.menu import HELP_GAME_SCR, HELP_MENU_SCR, MAIN_HELP_SCR      # M7 P3.4
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
@@ -346,10 +347,15 @@ STANDALONE_POLLS = 8
 
 # M3 -- the menu the standalone tier boots into. Entries only; the picture is derived
 # (doomfj.menu), and the colours come from the wad's own PLAYPAL.
-DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "QUIT"]
+# M7 P3.4 (docs/gp-help.md): two items, NEW GAME and HELP -- up / down move between them. QUIT went:
+# it never did anything (no item was selectable but NEW GAME, and the program has no quit).
+DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP"]
 # which entry is highlighted. 2 = "NEW GAME" in DEFAULT_MENU -- an index that means nothing for a
 # caller-supplied list, so `menu_entries` brings its own `menu_selected`.
 DEFAULT_MENU_SELECTED = 2
+# M7 P3.4: the main menu's HELP item -- the row `menu_scr` MAIN_HELP_SCR highlights. A caller-supplied
+# menu must have one too (`_menu_lines` finds it by name).
+MENU_HELP_ITEM = "HELP"
 
 # M7 P1.5 -- the SKILL SCREEN NEW GAME opens (docs/gp-skill-menu.md): entry SKILL_MENU_FIRST + k is
 # skill SKILLS[k], and `menu_sel` holds k, baked to the boot skill's (hard).
@@ -363,9 +369,10 @@ LEVEL_DONE_SELECTED = 2
 
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
-# `mode`). `menu_scr` (0 = the main menu, 1 = the skill screen) and `menu_sel` (the highlighted
+# `mode`). `menu_scr` (0 = the main menu, 1 = the skill screen; M7 P2a.2 / P3.4: 2 LEVEL COMPLETE,
+# 3 / 4 the help opened from the menu / the world, 5 the main menu on HELP) and `menu_sel` (the highlighted
 # skill) are PERSISTED -- build.STANDALONE_PERSIST, the one intended hole in that set -- for the
-# reason `mode` is: a screen that reset every frame could never be left. The four EVENT cells are
+# reason `mode` is: a screen that reset every frame could never be left. The EVENT cells are
 # zeroed before every frame's polls (`_standalone_input_lines`), so a frame starts with none, and
 # `rs_ret` is the restart block's fcall return register, which `stl.fret` leaves zero: ordinary
 # residue, restored like any other.
@@ -375,6 +382,8 @@ MENU_STATE_DECLS = [
     # last tic; 1 at the level start, G_PlayerReborn), persisted like `mode`
     "lvdone: hex.vec 1, 0", "pusedn: hex.vec 1, 1",
     "ev_enter: hex.vec 1", "ev_esc: hex.vec 1", "ev_up: hex.vec 1", "ev_dn: hex.vec 1",
+    # M7 P3.4: the help key's event, zeroed before the polls like the four above
+    "ev_help: hex.vec 1",
     "rs_ret: hex.vec w/4",
 ]
 
@@ -469,33 +478,48 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
     frame; jumping past the tail would break that assert. So the menu ends where the world ends.
 
     M7 P1.5 -- THE STATE MACHINE (docs/gp-skill-menu.md). The polls only record events
-    (`ev_enter`, `ev_esc`, `ev_up`, `ev_dn`); here, first match wins, in the order esc, enter, up,
-    down:
+    (`ev_enter`, `ev_esc`, `ev_up`, `ev_dn`; M7 P3.4: `ev_help`); here, first match wins, in the
+    order esc, enter, (help,) up, down:
       * in the world: esc or enter opens the MAIN menu (M3's toggle, kept);
       * on the main menu: esc resumes the world, enter opens the SKILL screen;
       * on the skill screen: esc goes back, up / down move the highlight (clamped), and enter runs
         the highlighted skill's RESTART BLOCK and enters the world -- on this very frame, so the
         world frame drawn is the level start (the model's `new_game`: the restart, then the tic).
     Every screen is a baked frame: the main menu, and the skill screen once per highlighted skill.
+    M7 P3.4 (docs/gp-help.md): the main menu once more with its HELP item highlighted, and the help
+    screen -- `menu_screen_pixels` is the oracle's side of this branch.
     `restart` is `restart_lines(...)`; the game tier always passes it.
     """
-    from doomfj.menu import fj as menu_fj, palette_colours
+    from doomfj.menu import fj as menu_fj, help_fj, palette_colours
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
+    assert MENU_HELP_ITEM in entries, "the main menu needs its %r item (M7 P3.4)" % MENU_HELP_ITEM
     common, _skills = restart
     return [
         # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
         *menu_state_lines(restart),
-        # -- the frame: the world, or one of the four baked screens
+        # -- the frame: the world, or one of the baked screens
         "hex.if0 1, mode, do_world",
         "hex.if0 1, menu_scr, mf_main",
+        # M7 P3.4: the help (either id) and the main menu with HELP highlighted
+        f"hex.if_flags menu_scr, {_P34_SCREENS}, mf_np34, mf_p34",
+        "mf_np34:",
         f"hex.if_flags menu_scr, 1<<{LEVEL_DONE_SCR}, mf_nlv, mf_lv",     # M7 P2a.2
         "mf_nlv:",
         *_skill_dispatch("mf_s"),
         "mf_main:",
         menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, selected, colours,
                 label="menu_frame", end_marker=False),
+        ";frame_end",
+        "mf_p34:",
+        f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mf_help, mf_mainh",
+        "mf_mainh:",
+        menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, entries.index(MENU_HELP_ITEM), colours,
+                label="menu_frame_help", end_marker=False),
+        ";frame_end",
+        "mf_help:",
+        help_fj(cfg.VIEW_W, cfg.VIEW_H, colours, label="menu_help", end_marker=False),
         ";frame_end",
         *[line for k in range(len(SKILLS)) for line in (
             f"mf_s{k}:",
@@ -516,13 +540,20 @@ def menu_state_lines(restart) -> list:
     `menu_scr`, `menu_sel` and -- on a skill's NEW GAME -- the restart block out. No frame: the
     caller draws. `restart` is `restart_lines(...)`; its shared routine (`restart_common`, fcall'd
     with `rs_ret`) must be placed by the caller where nothing falls into it.
-    tests/fj/test_skill_menu.py runs exactly these lines."""
+    tests/fj/test_skill_menu.py runs exactly these lines.
+
+    M7 P3.4 (docs/gp-help.md; `doomfj.menu.menu_step` is the rules' other mirror): the help screen
+    and the main menu's second item. In the WORLD the only addition is one `if0` on `ev_help`,
+    reached when neither esc nor enter is down -- the one state branch a world frame pays."""
     _common, skills = restart
     assert len(skills) == len(SKILLS), "one restart block per skill: %d for %d" % (len(skills),
                                                                                   len(SKILLS))
     return [
         "hex.if0 1, mode, mn_world",
         "hex.if0 1, menu_scr, mn_main",
+        # M7 P3.4: the help (HELP_MENU_SCR / HELP_GAME_SCR) and the main menu on HELP
+        f"hex.if_flags menu_scr, {_P34_SCREENS}, mn_np34, mn_p34",
+        "mn_np34:",
         # -- M7 P2a.2: the level-complete screen -- esc or enter: the main menu
         f"hex.if_flags menu_scr, 1<<{LEVEL_DONE_SCR}, mn_nlv, mn_lv",
         "mn_lv:",
@@ -546,17 +577,63 @@ def menu_state_lines(restart) -> list:
         "mn_r1:", *skills[1], ";mn_started",
         "mn_r2:", *skills[2],
         "mn_started:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
-        # -- the main menu
+        # -- M7 P3.4: the help screen and the main menu with HELP highlighted
+        "mn_p34:",
+        f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mn_help, mn_mainh",
+        # the help: esc or h close it -- to the main menu (HELP highlighted) when it was opened
+        # there, to the world when it was opened from the world
+        "mn_help:",
+        "hex.if0 1, ev_esc, mn_h1", ";mn_hclose", "mn_h1:",
+        "hex.if0 1, ev_help, mn_done",
+        "mn_hclose:", f"hex.if_flags menu_scr, 1<<{HELP_GAME_SCR}, mn_hmenu, mn_hgame",
+        "mn_hgame:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
+        "mn_hmenu:", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
+        # the main menu on HELP: esc resumes the world, enter or h open the help, up goes to NEW
+        # GAME (down is clamped: HELP is the last item)
+        "mn_mainh:",
+        "hex.if0 1, ev_esc, mn_q1", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
+        "mn_q1:",
+        "hex.if0 1, ev_enter, mn_q2", ";mn_tohelp", "mn_q2:",
+        "hex.if0 1, ev_help, mn_q3", ";mn_tohelp", "mn_q3:",
+        "hex.if0 1, ev_up, mn_done", "hex.zero 1, menu_scr", ";mn_done",
+        "mn_tohelp:", f"hex.set 1, menu_scr, {HELP_MENU_SCR}", ";mn_done",
+        # -- the main menu (NEW GAME highlighted)
         "mn_main:",
         "hex.if0 1, ev_esc, mn_m1", "hex.zero 1, mode", ";mn_done", "mn_m1:",
-        "hex.if0 1, ev_enter, mn_done", "hex.set 1, menu_scr, 1", ";mn_done",
+        "hex.if0 1, ev_enter, mn_m2", "hex.set 1, menu_scr, 1", ";mn_done", "mn_m2:",
+        # M7 P3.4: h opens the help; down highlights HELP (up is clamped: NEW GAME is the first)
+        "hex.if0 1, ev_help, mn_m3", ";mn_tohelp", "mn_m3:",
+        "hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
         # -- the world
         "mn_world:",
         "hex.if0 1, ev_esc, mn_w1", ";mn_open", "mn_w1:",
-        "hex.if0 1, ev_enter, mn_done",
-        "mn_open:", "hex.set 1, mode, 1", "hex.zero 1, menu_scr",
+        "hex.if0 1, ev_enter, mn_w2",
+        "mn_open:", "hex.set 1, mode, 1", "hex.zero 1, menu_scr", ";mn_done",
+        # M7 P3.4: h opens the help, which closes back to the world
+        "mn_w2:", "hex.if0 1, ev_help, mn_done",
+        "hex.set 1, mode, 1", f"hex.set 1, menu_scr, {HELP_GAME_SCR}",
         "mn_done:",
     ]
+
+
+# M7 P3.4: the `menu_scr` values the help screen and the main menu's HELP highlight own, as an
+# `if_flags` mask (`menu_scr` is a nibble: bit k of the mask is scr == k)
+_P34_SCREENS = "(1<<%d)|(1<<%d)|(1<<%d)" % (HELP_MENU_SCR, HELP_GAME_SCR, MAIN_HELP_SCR)
+
+
+def menu_screen_pixels(cfg, colours, scr: int, sel: int) -> list:
+    """M7 P3.4 -- THE ORACLE'S PICTURE of a menu frame: what `_menu_lines` bakes for `menu_scr` =
+    `scr` (and, on the skill screen, `menu_sel` = `sel`) -- the main menu on either item, the skill
+    screen, LEVEL COMPLETE or the help. ONE mapping from the state to the screen, for every gate
+    and test that compares a menu frame (each kept its own table until this rung)."""
+    from doomfj.menu import help_pixels, pixels
+    if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
+        return help_pixels(cfg.VIEW_W, cfg.VIEW_H, colours)
+    lines, hi = {0: (DEFAULT_MENU, DEFAULT_MENU_SELECTED),
+                 MAIN_HELP_SCR: (DEFAULT_MENU, DEFAULT_MENU.index(MENU_HELP_ITEM)),
+                 1: (SKILL_MENU, SKILL_MENU_FIRST + sel),
+                 LEVEL_DONE_SCR: (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED)}[scr]
+    return pixels(cfg.VIEW_W, cfg.VIEW_H, lines, hi, colours)
 
 
 def exit_lines(boxes, press_miss=()) -> list:
@@ -602,8 +679,9 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
         # state machine reads them
         "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
+        "hex.zero 1, ev_help",                                          # M7 P3.4
         f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, "
-        f"ev_enter, ev_esc, ev_up, ev_dn, bad",
+        f"ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
         # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
         "hex.zero 2, pkeys",

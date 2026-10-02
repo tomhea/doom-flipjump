@@ -1,0 +1,45 @@
+# the restore-set re-key of m7-depth b4cb75b
+=== 19:10:20 python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p33.tsv.gz
+$ python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p33.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 1972s: 1,786,272 labels -> scratchpad\_ca_labels_p33.tsv.gz (14.0 MB)
+code_start word: 17308
+rc=0
+=== 19:44:48 python scratchpad/ca_remap_set.py --labels scratchpad/_ca_labels_p33.tsv.gz --old-labels scratchpad/_ca_labels_p32b2.tsv.gz
+$ python scratchpad/ca_remap_set.py --labels scratchpad/_ca_labels_p33.tsv.gz --old-labels scratchpad/_ca_labels_p32b2.tsv.gz
+labels in the set      : 436
+  unchanged            : 436
+  re-keyed             : 0
+  dropped (register gone): 0  []
+  span changed, held whole -> resized: 0  
+words: 11,432 -> 11,432  (delta +0)  negative = a dropped register or a shrunk array; positive =
+      a grown array, or the superset taken where the old->new mapping was ambiguous --
+      see the comments above.
+production loader accepts it: 11,432 words, layout fingerprint 6287a37148a1c23a
+wrote src/doomfj/data/m1_restore_set.json.gz
+rc=0
+=== 19:45:00 python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p33.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+$ python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p33.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+added 0 words over 328 globals (2 check + 326 hoisted)
+src/doomfj/data/m1_restore_set.json.gz: 11432 -> 11432 words over 436 entries
+rc=0
+=== 19:45:04 python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p33.tsv.gz
+$ python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p33.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 2675s: 2,325,535 labels -> scratchpad\_ca_labels_std_p33.tsv.gz (18.0 MB)
+code_start word: 17308
+rc=0
+=== 20:31:17 python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p33.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+$ python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p33.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+dropped wmagic; added 2668 words over 50 standalone globals (incl. the per-door state)
+src/doomfj/data/m5_restore_set.json.gz: 11432 -> 14096 words over 436 -> 485 entries
+persist: viewx, viewy, viewangle, kb_f, kb_b, kb_l, kb_r, kb_u, mode, menu_scr, menu_sel, lvdone, pusedn, dstate, ddir, dsub, dwait, dreq, pcard, wfired, lstate, ldir, lsub, lwait, lreq, fswitch, sshead, thss_rt, thpos_rt, mon_state, mon_tics, mon_facing, mon_active, mon_target, mon_reaction, mon_threshold, mon_movedir, sched_cursor, thseen, mon_movecount, mon_rng, mon_floorz, msec, bar_solid, mh_prev, mon_justattacked
+rc=0
+=== 20:31:22 python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+$ python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+......................                                                   [100%]
+22 passed in 0.78s
+rc=0
+=== REKEY DONE 20:31:24

@@ -642,7 +642,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells["mon_state"] = Cell("mon_state", "hex", 2, count=nmon)
         for name in ("mon_tics", "mon_facing", "mon_active"):
             cells[name] = Cell(name, "hex", 1, count=nmon)
-        # M7 P3.2a: the wake mode's cells; `thseen` is per RUNTIME thing (nthings), the render's
+        # M7 P3.2a: the wake mode's cells; `thseen` is per monster SLOT (nmon), the render's marks
         for name in ("mon_target", "mon_reaction", "mon_movedir"):
             cells[name] = Cell(name, "hex", 1, count=nmon)
         cells["mon_threshold"] = Cell("mon_threshold", "hex", 2, count=nmon)

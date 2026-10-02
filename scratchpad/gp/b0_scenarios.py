@@ -119,7 +119,8 @@ def missing_drive_keys(frames: list) -> list:
 def doorsim_frames(keys: list, mirror) -> list:
     """gamespeed's recorded tic run as b0 frames (the selftest's T1): onewalk.DoorSim's pre-tic pose and doors
     injected, its keys delivered, `mirror` (a scenarios_v2.BinaryMirror) the expectation. DoorSim has no movers
-    (`movers` None: the mirror keeps its own) and starts in the new world at its own start pose (`run_setup`)."""
+    (`movers` None: the mirror keeps its own, its heights ride as `mheights`) and starts in the new
+    world at its own start pose (`run_setup`)."""
     import onewalk
     dsim = onewalk.DoorSim()
     st = dsim.reset()
@@ -130,9 +131,11 @@ def doorsim_frames(keys: list, mirror) -> list:
         pre_doors = [tuple(dsim.ds[si]) for si in dsim.order]
         st = dsim.step(st, kd)
         bk = S.b0_keys(kd)
-        frames.append({"inj": pre, "keys": bk, "doors": pre_doors, "movers": None,
-                       "exp": mirror.step(pre, bk, pre_doors), "post": (st.x, st.y, st.angle),
-                       "post_doors": tuple(dsim.ds[si][0] for si in dsim.order), "run_setup": setup})
+        exp = mirror.step(pre, bk, pre_doors)
+        # M7 P2b: the route rides a lift (frames 31-73): the picture needs the mirror's mover heights
+        frames.append({"inj": pre, "keys": bk, "doors": pre_doors, "movers": None, "exp": exp,
+                       "post": (st.x, st.y, st.angle), "post_doors": tuple(dsim.ds[si][0] for si in dsim.order),
+                       "mheights": mirror.mp.heights(mirror.mstate), "run_setup": setup})
     return frames
 
 
@@ -184,6 +187,9 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         from doomfj.wall_renderer import BOOT_SKILL
         from doomfj.wall_renderer import MONSTER_MODE
         mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE)
+    # M7 P3.2a: a monster that can wake reads the seen flags of the LAST picture, which the binary marks on every
+    # frame -- so the model's picture (and its seen flags) is taken on every frame too, whatever `pixel_every`
+    seen_every = mph is not None and mph.world.monsters != "idle"
     # M7 P3.2b: monsters that MOVE press the monster doors (`dreq`, which b0 does not inject: it persists into the
     # binary's next door tic) and hold closing doors open -- so the expectation is the mirror RE-STEPPED here with
     # them: each frame's door tic gets their boxes, and their presses join the mirror's pending requests. (Their
@@ -211,8 +217,9 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         d_part = fr.get("post_doors") is not None and tuple(edoors) != tuple(fr["post_doors"])
         cam += c_part
         door += d_part
-        check = f % pixel_every == 0 or c_part or d_part
-        # M7 P3.2a: the monsters' seen flags come from EVERY picture, checked or not
+        check = f % pixel_every == 0 or c_part or d_part or seen_every
+        # M7 P3.2a: the monsters' seen flags come from EVERY picture, checked or not (and a monster that can
+        # wake makes every picture a checked one: `seen_every`)
         if check or mph is not None:
             _seen = set()
             want = orc.render(P_signed(epose[0]), P_signed(epose[1]), epose[2], tuple(edoors),
@@ -411,9 +418,16 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
         table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon).values()})
         gb = P.GameBinary(fjm)
         r1 = drive(gb, table, orc, frames, pixel_every=10)
-        check("T1 gamespeed run %d, every door written each frame, reproduces the recorded total"
-              % B.RECORDED_TIC_RUN, r1["ops_total"] == B.RECORDED_TIC_OPS,
-              "%s vs %s" % (format(r1["ops_total"], ","), format(B.RECORDED_TIC_OPS, ",")))
+        # the recorded total and calibration belong to ONE binary (probe.RECORDED_SHA16): on any other they are
+        # SKIPPED by name, never passed
+        recorded = gb.sha.startswith(P.RECORDED_SHA16)
+        if recorded:
+            check("T1 gamespeed run %d, every door written each frame, reproduces the recorded total"
+                  % B.RECORDED_TIC_RUN, r1["ops_total"] == B.RECORDED_TIC_OPS,
+                  "%s vs %s" % (format(r1["ops_total"], ","), format(B.RECORDED_TIC_OPS, ",")))
+        else:
+            print("  T1 recorded total: SKIPPED -- recorded for sha256 %s..., this is %s (%s ops)"
+                  % (P.RECORDED_SHA16, gb.sha[:16], format(r1["ops_total"], ",")), flush=True)
         check("T1 ... state-exact and byte-exact against the mirror, which never parts from DoorSim",
               all(r1["state_ok"]) and all(r1["pix_ok"]) and r1["cam_parts"] == 0 and r1["door_parts"] == 0,
               "state %d/%d pixels %d/%d parts %d/%d" % (sum(r1["state_ok"]), len(r1["state_ok"]),
@@ -424,8 +438,12 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
         check("T2 an expectation one turn off FAILS the state check on every frame",
               not any(r2["state_ok"]), "%d/%d accepted" % (sum(r2["state_ok"]), len(r2["state_ok"])))
         menu = gb.run(gate.MENU_FRAMES).ops
-        check("T3 startup + menu measured through this driver = the recorded calibration",
-              menu == P.RECORDED_CALIBRATION, "%s" % format(menu, ","))
+        if recorded:
+            check("T3 startup + menu measured through this driver = the recorded calibration",
+                  menu == P.RECORDED_CALIBRATION, "%s" % format(menu, ","))
+        else:
+            print("  T3 recorded calibration: SKIPPED -- recorded for sha256 %s... (%s ops here)"
+                  % (P.RECORDED_SHA16, format(menu, ",")), flush=True)
         good = drive(gb, table, orc, court, pixel_every=1)
         plain = drive(gb, table, P.Oracle(), court, pixel_every=1)
         check("T4 the game oracle passes the courtyard's sky frames, state- and pixel-exact",

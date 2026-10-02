@@ -3,9 +3,9 @@
 The chase branch of `drive` re-steps a mirror from `frames[0]["run_setup"]` and writes `fr["movers"]`; only
 model_frames' FIRST frame carried `run_setup` and the selftest's T1 (gamespeed's DoorSim run) carried neither, so
 `--selftest` raised KeyError at T1, and T5's slice (`frs[k0-2:k0+6]`) started on a frame without it. Now every frame
-model_frames returns carries `run_setup`, T1's frames come from `doorsim_frames`, and `drive` refuses a frame list
-missing a key it reads (`missing_drive_keys`). These tests hold all three -- and that DRIVE_READS names every key
-`drive` subscripts, so the check cannot fall behind the code.
+model_frames returns carries `run_setup`, T1's frames come from `doorsim_frames` (with the mirror's `mheights`, as
+main's T1 has them), and `drive` refuses a frame list missing a key it reads (`missing_drive_keys`). These tests hold
+all three -- and that DRIVE_READS names every key `drive` subscripts, so the check cannot fall behind the code.
 """
 import importlib.util
 import inspect
@@ -68,6 +68,7 @@ def test_doorsim_frames_carry_the_new_world_and_no_movers(b0s):
                                 b0s.S.BinaryMirror(w))
     assert b0s.missing_drive_keys(frames) == []
     assert all(fr["movers"] is None for fr in frames)
+    assert all(fr["mheights"] is not None for fr in frames), "T1's picture needs the mirror's mover heights (M7 P2b)"
     assert frames[0]["run_setup"]["pose"] == frames[0]["inj"]
 
 

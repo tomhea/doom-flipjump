@@ -1,0 +1,4 @@
+$ python scratchpad/12m/msframe.py --a C:/Users/tomhe/Documents/doom-m7j/build/doom_e1m1_blocked40.fjm --b build/doom_e1m1_blocked43.fjm --note M7 P3.2a wake (the seen rule; the mark re-arms; thseen unpinned; heat p32a): blocked43 vs doom_e1m1_blocked40.fjm
+machine : power plan 'Turbo'; busy processes: Malwarebytes(31144) 0.5s/s
+REFUSING to measure on a busy machine (a runaway process cost most of 2026-09-12's numbers). Kill them or pass --ignore-busy and say so in the note.
+rc=1

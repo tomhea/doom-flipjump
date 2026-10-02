@@ -1,5 +1,8 @@
 # M7 P1.5 -- the skill filter and the skill menu (design, before the build)
 
+> M7 P3.4 (2026-10-02) grew this menu: the main menu has a HELP item (NEW GAME / HELP, up / down),
+> and `menu_scr` 3 / 4 / 5 are the help screen and the main menu on HELP -- `docs/gp-help.md`.
+
 The handoff's rung P1.5 (`docs/handoff-gameplay.md` section 10; decision D7): **the build spawns per
 skill; NEW GAME asks easy / medium / hard and starts from that skill's level-start state** -- the
 full restart block is P7. Class F: pixels move (the multiplayer-only things go, and the monsters and

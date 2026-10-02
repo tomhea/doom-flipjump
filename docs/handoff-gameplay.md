@@ -330,6 +330,9 @@ SEPARATED; `docs/gp-monsters.md`, `docs/gp-ledger.md`).
 P3.2 next: the owner chose the "seen" sight rule and the set v5 (`docs/gp-monsters.md` 8.2). It ships in three
 rungs, each a model mode -- P3.2a wake, P3.2b chase, P3.2c decide -- defined with P3.2a's branch
 (`docs/gp-monsters.md` 8.3 there).
+**P3.4 the key-map HELP screen** (the owner, 2026-10-02; `docs/gp-help.md`, class F, kill criteria in
+`docs/gp-ledger.md`): a baked help frame listing only the keys that work today, opened from the main
+menu's new HELP item (or h) and from the world (h); 'e' a second use key. P4 updates it (below).
 Then the state machine, K-slot scheduler, RNG, animation and rotation, waking, chase on the cells,
 thing collision, per-move rebind in use, doors opened by monsters and reversing on them, D3's
 compositor rules. Gate: `fight` (partial), fuzz. Budget +0.3M.
@@ -338,6 +341,12 @@ compositor rules. Gate: `fight` (partial), fuzz. Budget +0.3M.
 Input (fire, 1-4, strafe; the device already sends the keys), the weapon state machine, the aim
 window, monster pain/death/corpses/drops, the weapon overlay and the status bar (the flipjump
 device PR: the partial-ditto tokens and the bar's ditto). Gate: `fight`. Budget +0.6M.
+**The owner's target key map (approved 2026-10-02)**: move W / S and UP / DOWN; turn the LEFT / RIGHT
+arrows; strafe A / D and , / . (**A / D move from turn to strafe in P4**); use SPACE or E (E landed in
+P3.4); fire CTRL; weapons 1-4; menu ESC / ENTER; help H. P4 re-binds `kb.poll` to it and updates the
+help screen with it (`menu.HELP_ROWS` / `HELP_KEYCODES`; `test_keyboard_input.py`'s
+`test_the_help_screen_lists_exactly_the_keys_that_work` holds the screen and the poll together, both
+directions) -- `docs/gp-help.md` section 4.
 
 ### P5 -- monster attacks
 Hitscan with real sight, melee, the fireball pool, player health and armor, palette flashes.

@@ -1,0 +1,4 @@
+$ python -m pytest tests/fj/test_monster_cells_fj.py tests/fj/test_monster_chase_fj.py tests/fj/test_door_reversal_fj.py tests/fj/test_leaf_lists_fj.py -q -p no:cacheprovider
+......................                                                   [100%]
+22 passed in 2372.15s (0:39:32)
+rc=0

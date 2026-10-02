@@ -1,0 +1,4 @@
+$ python scratchpad/12m/profx/profx.py maps
+  marker 23 (ptloc done (write_hex)) not found -- skipped
+maps -> C:\Users\tomhe\AppData\Local\Temp\profx: 25 objects, 2281702 label words, 30 markers, reset code ends at word 14581376
+rc=0

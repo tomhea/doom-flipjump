@@ -192,15 +192,21 @@ under it and put to the owner with its criteria and B0 before it is frozen.
 P3.2 is too large for one build, so it ships in three, each against a named model mode:
 - **P3.2a "wake"**: `mon_seen` recorded by the fj thing pass (the monster's projection and one open column, before
   the budgets -- inside the column loop for a drawn monster, a short scan for one the budgets or the size cull
-  turn away; per runtime thing `thseen[t]`, which the monster's slot code reads at a compile-time address), A_Look's
+  turn away; per monster SLOT `thseen[m]`, which the monster's slot code reads at a compile-time address), A_Look's
   wake (seen, or the REJECT row and <= 128 -- sound waits for P4's shots), the K = 6 scheduler with the window and
   the shared A_Chase leaf -- whose counters, turn and target run but whose MOVE and attack decisions wait (mode
-  `wake`: awake monsters turn toward the player in place).
+  `wake`: awake monsters run A_Chase's turn toward their movedir -- DI_EAST until P3.2b's NewChaseDir sets one --
+  in place; they do not yet turn toward the player).
+  SHIPPED 2026-10-01 as blocked43 (`docs/gp-ledger.md` P3.2a). As built: the mark is `frame.rec_seen_mark`, which
+  re-arms the pointer library at its caller's next pointer (arm5 moves five hexes only), and `thseen` is in the pin
+  veto `selfreset.POINTER_READ_CELLS` -- the two rules the dead builds blocked41 and blocked42 taught.
 - **P3.2b "chase"**: P_Move / P_TryMove on the monster cells (radius 30 lists with ML_BLOCKMONSTERS, the step,
   height and drop-off rules, the things as boxes), P_NewChaseDir with `mrnd`, the relink (`sim.leaf_unlink` /
   `leaf_link`), `thpos_rt` written, monster doors (`dreq`) and WR lifts.
+  SHIPPED 2026-10-02 as blocked44 (`docs/gp-ledger.md` P3.2b).
 - **P3.2c "decide"**: the melee and missile decisions and their states (A_FaceTarget; the attacks' EFFECTS are P5,
   so the mode runs the attack states without damage).
+  SHIPPED 2026-10-02 as blocked45 (`docs/gp-ledger.md` P3.2c).
 The frozen set v5 is the full model; B0 on it is exact from P3.2c on, when the mode's tic equals the model's for
 everything v5 exercises but damage.
 
@@ -257,6 +263,12 @@ height 0 -- every rule is live, the drop-off one included.
 **Cost, estimated** (to be measured): a try is one descent (~32K, the player's measured seed walk), the cells
 (~20K) and the thing loop (~30K) -- ~80K; 2.32 tries a frame is ~0.19M mean, 0.32M at p80.
 
+**As built** (SHIPPED 2026-10-02 as blocked44, sha256 `06e8912c4d4d3b96`; `docs/gp-ledger.md` P3.2b): measured
++366,657 on gamespeed's binding (14,086,236 -> 14,452,893), +898,983 on v5's (15,299,168), +385,240 on profx's mean
+frame; size +5,017,552 words (33.38% of 2^27). The door contacts are one leaf per (door, radius) on `dc_x` / `dc_y` --
+inlined per monster they were 8,056 compares (~14.6M ops) and the first build overran the table pool (ee6761c).
+P_ChangeSector runs outside the `lvdone` exit guard here; P3.2c's branch fixes it (796cdcc).
+
 
 ### 8.5 P3.2c "decide" -- the design (as written; numbers: `docs/ship-evidence/p32c_decide_census_v5.log`, by `scratchpad/gp/p32c_decide_census.py`)
 
@@ -287,6 +299,13 @@ the draws parts). `justhit` is 0 until damage (P4) and `ambush` matters only to 
   traces; controls: the dynamic segments always shut, strict crossings only, no margin, o4 without its o3 term) and
   `tests/fj/test_monster_decide_fj.py` (120 frames against the decide mode; controls: no roll, no LOS, justattacked
   never read, no draws).
+
+**As built** (SHIPPED 2026-10-02 as blocked45, sha256 `25957324521286dd`; `docs/gp-ledger.md` P3.2c): measured +9,795
+on gamespeed's binding (14,452,893 -> 14,462,688), -211,944 on v5's (15,087,224), -12,572 on profx's mean frame; size
++726,572 words (33.92% of 2^27). The near LOS went from 5.52M to 0.19M ops before the build (e24ab75): a segment XORs
+its constants into zeroed registers (`hex.xor_by`, one op a nibble) and the shared `sl_seg` does the box reject, the
+ends and d, zeroing on every exit. P_ChangeSector runs inside the `lvdone` exit guard (796cdcc,
+`tests/fj/test_change_sector_fj.py`).
 
 ### 8.6 P3.3 -- depth order inside a leaf (D3 d; numbers: `docs/ship-evidence/p33_depth_census_v5.log`)
 

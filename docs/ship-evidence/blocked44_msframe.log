@@ -1,0 +1,22 @@
+$ python scratchpad/12m/msframe.py --a build/doom_e1m1_blocked43.fjm --b build/doom_e1m1_blocked44.fjm --note "M7 P3.2b chase (r1: shared door contact leaves): blocked44 vs doom_e1m1_blocked43.fjm"
+machine : power plan 'Turbo'; busy processes: none
+msframe : A=doom_e1m1_blocked43.fjm B=doom_e1m1_blocked44.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  A         63.1 ms   227.2M fj/s  yard 3.63->3.65G   |  B         68.1 ms   219.6M fj/s  yard 3.64->3.65G
+  rep 1  A         62.2 ms   230.6M fj/s  yard 3.64->3.65G   |  B         66.9 ms   223.3M fj/s  yard 3.63->3.64G
+  rep 2  A         62.1 ms   231.0M fj/s  yard 3.64->3.65G   |  B         66.0 ms   226.4M fj/s  yard 3.65->3.63G
+  rep 3  A         62.2 ms   230.6M fj/s  yard 3.61->3.66G   |  B         66.3 ms   225.4M fj/s  yard 3.65->3.65G
+  rep 4  A         62.0 ms   231.3M fj/s  yard 3.65->3.65G   |  B         66.4 ms   225.2M fj/s  yard 3.62->3.49G
+
+  A        median    62.2 ms/frame  [62.0 .. 63.1]    230.6M fj/s   14,336,652 ops/frame   cell=4 flat
+  B        median    66.4 ms/frame  [66.0 .. 68.1]    225.2M fj/s   14,944,344 ops/frame   cell=4 flat
+
+  pixels identical across arms and reps : NO  <- speed below is MEANINGLESS
+  ops identical across arms             : no   (expected when the arms are different binaries; not when they are one engine A/B)
+  per-pair A/B ms ratio                 : 0.927 0.929 0.940 0.938 0.934
+  median ratio                          : 0.934  (>1 = B faster)
+  VERDICT: B SLOWER   (rule: all 5 pairs agree in sign AND |median ratio - 1| > 3%)
+  engine A: 79af8639f57bfa50 full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  engine B: 79af8639f57bfa50 full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.65G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+rc=0

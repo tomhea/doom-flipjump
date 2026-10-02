@@ -327,9 +327,10 @@ First a build that EMITS every new table and calls none of it -- its delta is th
 SEPARATED; `docs/gp-monsters.md`, `docs/gp-ledger.md`).
 **P3.1 DONE 2026-09-30** (blocked40 ships, class F: the monsters' state machine and views in the `idle` mode;
 +243,680 on gamespeed -- over its +0.15M budget, the per-drawn-monster row select -- msframe NOT SEPARATED).
-P3.2 next: the owner chose the "seen" sight rule and the set v5 (`docs/gp-monsters.md` 8.2). It ships in three
-rungs, each a model mode -- P3.2a wake, P3.2b chase, P3.2c decide -- defined with P3.2a's branch
-(`docs/gp-monsters.md` 8.3 there).
+The owner chose the "seen" sight rule and the set v5 (`docs/gp-monsters.md` 8.2); P3.2 ships in three rungs, each a
+model mode (8.3). **P3.2a DONE 2026-10-01** (blocked43, class F: the monsters wake and turn; +146,045 on gamespeed,
+size +1.33M words -- over its budget, the unrolled slots' tables -- msframe NOT SEPARATED; v5 FROZEN, the CAP-22 set
+from here). **P3.2b DONE 2026-10-02** (blocked44, class F: the monsters move -- P_Move on their own cells, NewChaseDir, the relink, P_ChangeSector, monster doors; +366,657 on gamespeed, size +5,017,552 words -- over its +2.5M budget -- now **33.38% of the 35% target**; msframe B SLOWER: median x0.934). **P3.2c DONE 2026-10-02** (blocked45, class F: the monsters decide to attack -- the melee and missile decisions, A_FaceTarget, the attack states' draws without damage, the exact near LOS; +9,795 on gamespeed, -211,944 on v5, size +726,572 words -- now **33.92% of the 35% target**; msframe NOT SEPARATED: median x1.000; P_ChangeSector inside the `lvdone` guard, 796cdcc). P3.3 (D3's compositor rules for moving things: depth order inside a leaf, drops/effects before monsters) next; it ends phase 3.
 **P3.4 the key-map HELP screen** (the owner, 2026-10-02; `docs/gp-help.md`, class F, kill criteria in
 `docs/gp-ledger.md`): a baked help frame listing only the keys that work today, opened from the main
 menu's new HELP item (or h) and from the world (h); 'e' a second use key. P4 updates it (below).

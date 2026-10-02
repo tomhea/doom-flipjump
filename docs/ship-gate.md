@@ -10,14 +10,49 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked40.fjm`, sha256 `dc1e85e52f48a299` (first 16 hex), built 2026-09-30 from the command in 1b (M7 P3.1, idle life: the monsters' state machine and views) | class F -- the pictures differ from blocked38 (monsters animate); built with the installed flipjump 1.5.1 at `bc8ee63` from m7-monsters 7608ef3 (`docs/ship-evidence/blocked40_build.log`) |
-| **ms/frame** | **64.2 ms/frame** (63.2-64.3), against **62.7** (61.8-63.9) for blocked38 in the same run on a quiet box (~226M fj/s) -- **NOT SEPARATED: median x0.978** (pairs 0.994 0.978 0.962 0.984 0.978); the re-freeze reads **63.7** (63.6-63.8) | `msframe.py --a build/doom_e1m1_blocked38.fjm --b build/doom_e1m1_blocked40.fjm`, 200 frames x 5 reps, pinned core (`blocked40_msframe.log`; `blocked40_msframe_freeze.log`; the first attempt refused a busy box, `blocked40_msframe_r0_busy.log`) |
-| **fj ops/s** | **227.6 M** on the re-freeze (225.6 M in the A/B run, blocked38 226.0 M) | ops/frame **14,496,297** on msframe's forward-walk script (blocked38 14,162,434) |
-| **binding metric** (owner spec) | (mean+p80)/2 = **13,940,191 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked40.fjm`, 2026-09-30 (`docs/ship-evidence/blocked40_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
-| **size** | **28.65% of 2^27 -- PASS** (38,457,306 words; span 91,882,368) | same run |
-| **combat set v4** (the CAP-22 set from P2b on; frozen by the owner 2026-09-29 -- `p2b_v4_freeze.log`) | (mean+p80)/2 = **14,447,782**; **14,481,633** with strafe's collision; every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v4.json --pixel-every 1 --proxy` (`blocked40_b0_v4.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked45.fjm`, sha256 `25957324521286dd` (first 16 hex), built 2026-10-02 from the command in 1b (M7 P3.2c, the monsters DECIDE to attack) | class F -- the pictures differ from blocked44 (monsters face and enter their attack states); built with the installed flipjump 1.5.1 at `bc8ee63` from m7-decide 197682c (`docs/ship-evidence/blocked45_build.log`) |
+| **ms/frame** | **66.7 ms/frame** (66.5-71.1), against **67.6** (66.7-70.9) for blocked44 in the same run (~222M fj/s) -- **NOT SEPARATED: median x1.000** (pairs 0.996 0.983 1.010 1.000 1.016; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames); the msframe baseline's re-freeze on blocked45 waits for a quiet window | `msframe.py --a build/doom_e1m1_blocked44.fjm --b build/doom_e1m1_blocked45.fjm`, 200 frames x 5 reps, pinned core (`blocked45_msframe.log`) |
+| **fj ops/s** | **222.2 M** in the A/B run (blocked44 221.0 M) | ops/frame **14,828,598** on msframe's forward-walk script (blocked44 14,944,344) |
+| **binding metric** (owner spec) | (mean+p80)/2 = **14,462,688 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked45.fjm`, 2026-10-02 (`docs/ship-evidence/blocked45_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
+| **size** | **33.92% of 2^27 -- PASS** (45,531,634 words; span 97,874,112) -- 1,444,570 words under the 35% target | same run |
+| **combat set v5** (the CAP-22 set from P3.2a on: the seen rule; FROZEN 2026-10-01 on the owner's 2026-09-30 approval -- `p32a_v5_freeze.log`) | (mean+p80)/2 = **15,087,224**; **15,122,674** with strafe's collision; every frame pixel-exact and B0-state-exact (pose, doors, mode; the monster cells are m2_std/m3/p2a's) | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v5.json --pixel-every 1 --proxy` (`blocked45_b0_v5.log`) |
 
-**What it is:** blocked38 with the monsters ALIVE in the model's `idle` mode (M7 P3.1, `docs/gp-monsters.md`
+**What it is:** blocked44 with the monsters DECIDING to attack in the model's `decide` mode (M7 P3.2c,
+`docs/gp-monsters.md` section 8.5), class F: A_Chase whole -- `justattacked` (per slot, persisted) clears and re-picks
+the direction; the melee decision (a melee state, P_AproxDistance < MELEE_REACH 60, the attack sight) and the missile
+decision (a missile state, movecount 0, the attack sight, reaction 0, then the P_Random refusal); the decided state
+entered with A_FaceTarget. The attack states' actions face and DRAW exactly as the full model's and apply nothing --
+damage is P5. The attack sight is seen, or within NEAR and `sl_los`, the exact near LOS (per-256-unit-cell candidate
+segment lists, a door's, a lift's or the switch's segment by its state, four 48-bit orientation signs), 5.52M -> 0.19M
+ops after e24ab75 (a segment XORs its constants into zeroed registers). It carries P3.2b's review fixes (796cdcc):
+P_ChangeSector now runs inside the `lvdone` exit guard (`tests/fj/test_change_sector_fj.py`), B0's selftest frames,
+the slot-order assert and the hardening. The binary it replaced, blocked44 (sha256 `06e8912c4d4d3b96`), is kept in
+`build/` as the comparison arm.
+
+**What blocked44 was (P3.2b):** blocked43 with the monsters MOVING in the model's `chase` mode (M7 P3.2b, `docs/gp-monsters.md`
+section 8.4), class F: A_Chase steps -- P_Move / P_TryMove on the monsters' own collision cells (radius 30 lists with
+ML_BLOCKMONSTERS folded in, the step, height and drop-off rules, the static barrels and decorations as per-cell boxes,
+the other monsters and the player as boxes), P_NewChaseDir with the D5 cap of 6, the relink of a changed leaf
+(`sim.leaf_unlink` / `sim.leaf_link`), the seed through `ptloc_walk`, P_ChangeSector on the lifts, a refused step in a
+monster door's box pressing it, and a closing door reversing on a live monster. No attack is decided yet (P3.2c). The
+first build (r0, at 5399be4) died in the counting pass: the program reached `0x857cc840`, inside the table pool based
+at `0x60000000` -- the door tic inlined the contact test of every door for each of the 53 monster slots, 8,056 signed
+constant compares (~14.6M ops), and the counting pass assembles the program UNRELOCATED; one contact leaf per (door,
+radius) on `dc_x` / `dc_y` fixed it (ee6761c, with `tests/fj/test_door_reversal_fj.py`). Known divergence, carried to
+P3.2c: P_ChangeSector runs outside the `lvdone` exit guard (fixed on P3.2c's branch, 796cdcc). The binary it replaced,
+blocked43 (sha256 `3c3a87d474d975e5`), is kept in `build/` as the comparison arm.
+
+**What blocked43 was (P3.2a):** blocked40 with the monsters WAKING under the seen rule the owner decided (M7 P3.2a, `docs/gp-monsters.md`
+sections 8.2-8.3), class F: the render marks each monster it SEES (`frame.rec_seen_mark`: an open column at the base
+size, before the count budgets and the soft raise), and the next frame's tic walks the slots from `sched_cursor` (K = 6
+heavy slots, deferral), A_Look waking on seen or REJECT-visible within 128 and not behind, A_Chase running its counters
+and the turn. Nothing moves yet (P3.2b). Two builds died first, each on a pointer rule of the game tier: blocked41
+(NullIP -- the mark's `write_hex` left the pointer arm outside the 16^5 window the narrow `read_byte5` assumes; the mark
+now re-arms) and blocked42 (an endless `hex.zero` -- `--pin-state-cells` pinned `thseen`, and a pointer write takes a
+pinned cell's base for its value; `thseen` joined the pin veto, `selfreset.POINTER_READ_CELLS`). The binary it
+replaced, blocked40 (sha256 `dc1e85e52f48a299`), is kept in `build/` as the comparison arm.
+
+**What blocked40 was (P3.1):** blocked38 with the monsters ALIVE in the model's `idle` mode (M7 P3.1, `docs/gp-monsters.md`
 section 7), class F: every slot runs its tic and one `mstate` step (nothing wakes -- sight waits for P3.2), and the
 renderer draws each monster at its state's frame and DOOM's rotation for the viewer, mirrored views included --
 a runtime thing's row comes through a row select (`thsel_leaf`: a static thing its own row, a monster its view's),
@@ -48,8 +83,8 @@ msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
 baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen on this binary
-(re-frozen 2026-09-30 on blocked40: 63.7 ms/frame [63.6 .. 63.8], yardstick 3.64G,
-227.6M fj/s -- `blocked40_msframe_freeze.log`; blocked38's the same day read 61.5 [61.3 .. 61.7];
+(re-frozen 2026-10-02 on blocked44: 73.1 ms/frame [72.3 .. 76.2], yardstick 3.50G,
+204.4M fj/s -- `blocked44_msframe_freeze.log`; blocked40's 2026-09-30 read 63.7 [63.6 .. 63.8]; blocked38's the same day read 61.5 [61.3 .. 61.7];
 blocked37's the same day read 61.9 [61.4 .. 62.0];
 blocked36's 2026-09-29 read 77.4 on a slow box;
 blocked35's the same day read 62.1 [61.4 .. 63.9];

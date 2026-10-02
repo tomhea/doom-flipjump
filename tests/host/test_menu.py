@@ -248,7 +248,7 @@ def test_the_help_screen_draws_its_title_and_every_row_where_the_layout_says():
     """legibility, checked glyph by glyph: the title centred at HELP_TITLE_Y in the highlight colour;
     every row's key and description in the 5x7 font, in the text colour, the keys left-aligned in one
     column and the descriptions in another; the credit as on every screen; NOTHING else inked. And
-    the rows are the key map the owner asked for, in his order."""
+    the rows are the key map the owner asked for, in the owner's order."""
     from doomfj.menu import (CREDIT, CREDIT_MARGIN, GLYPH_GAP, HELP_COL_GAP, HELP_PITCH, HELP_ROWS,
                              HELP_ROWS_Y, HELP_TITLE, HELP_TITLE_Y, SMALL_GLYPH_H, _GLYPHS,
                              _SMALL_GLYPHS, help_pixels, text_width)
@@ -264,7 +264,7 @@ def test_the_help_screen_draws_its_title_and_every_row_where_the_layout_says():
     assert [k for k, _ in HELP_ROWS] == ["W / UP", "S / DOWN", "A / LEFT", "D / RIGHT", "SPACE / E",
                                         "", "ENTER", "ESC", "H"]
     assert " ".join(d for _, d in HELP_ROWS) == ("MOVE FORWARD MOVE BACK TURN LEFT TURN RIGHT USE: "
-                                                 "DOORS, SWITCHES, LIFTS SELECT MENU THIS HELP")
+                                                 "DOORS, SWITCHES, LIFTS SELECT MENU / BACK THIS HELP")
     assert all(ch in _GLYPHS for label in [HELP_TITLE] + [s for row in HELP_ROWS for s in row]
                for ch in label), "a help character the font cannot draw would print as a blank"
     grid = help_pixels(W, H, COLOURS)

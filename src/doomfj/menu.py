@@ -173,7 +173,7 @@ HELP_ROWS = (
     ("SPACE / E", "USE: DOORS,"),
     ("", "SWITCHES, LIFTS"),             # the use row, two lines: one would be 45 px too wide
     ("ENTER", "SELECT"),
-    ("ESC", "MENU"),
+    ("ESC", "MENU / BACK"),                  # in the help, Esc closes it (owner 2026-10-02)
     ("H", "THIS HELP"),
 )
 # every key name the rows show, as the keyboard device's keycodes (the SDL codes pygame_window

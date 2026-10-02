@@ -26,7 +26,7 @@ colours:
   SPACE / E   USE: DOORS,
               SWITCHES, LIFTS                  <- one row would be 45 px too wide
   ENTER       SELECT
-  ESC         MENU
+  ESC         MENU / BACK   (in the help, Esc closes it)
   H           THIS HELP                         TOMHE.APP  <- the credit, as on every screen
 ```
 

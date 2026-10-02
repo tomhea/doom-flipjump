@@ -794,3 +794,79 @@ that commit.
    measure); gamespeed 14,452,893 PASS; size 33.38% (<= 35%); msframe recorded (B SLOWER: median x0.934).
 5. pinreport 20 of 20 with `heat_blocked27_p32a`; the restore sets re-keyed (`p32b_rekey.log` 20 passed in 0.28s;
    `p32b2_rekey.log` 20 passed in 0.31s).
+
+
+## P3.2c decide (class F) -- written at ship, 2026-10-02: NO budget was declared before blocked45's build
+
+**What**: `docs/gp-monsters.md` section 8.5. The monsters run the model's `decide` mode: A_Chase whole --
+`justattacked` (per slot, persisted) clears and re-picks the direction; the melee decision (a melee state,
+P_AproxDistance < MELEE_REACH 60, the attack sight); the missile decision (a missile state, movecount 0, the attack
+sight, reaction 0, then `P_Random < min(dist - bias, 200)` refuses); the decided state entered with A_FaceTarget. The
+attack states' actions face and DRAW as the full model's (`combat._attack_rolls`) and apply nothing: damage and the
+fireball are P5, so the monster random stream is already the full model's. The attack sight is seen, or within NEAR
+and `sl_los`, the exact 2D LOS of `World.los_points` on per-256-unit-cell candidate lists with 48-bit orientation
+signs. It carries P3.2b's review fixes (796cdcc): P_ChangeSector inside the `lvdone` exit guard, B0's selftest frames,
+the slot-order assert, the hardening.
+
+**Budget**: none was declared in this file before the build -- a gap in the rung's process (every rung before it
+declared one first); it is NOT back-filled here. What priced the work before the build is the census
+(`p32c_decide_census_v5.log`, `scratchpad/gp/p32c_decide_census.py`) on v5's 1100 frames: per frame, mean 0.02
+decisions, 0.01 attack actions, 0.20 attack-sight calls and 0.01 near LOS traces (6 traces in all) -- and the near LOS
+was cut from 5.52M to 0.19M ops before the build (e24ab75).
+
+**Kill criteria** (class F, as run):
+1. Host: the decide mode in lockstep with the full model's monsters until the player dies, two runs (all seen; the
+   player parked by an active monster), the no-draws control parting in both (`tests/host/test_monsters_decide.py`);
+   the restore sets carry every persisted monster cell (`test_restore_set_shipped`'s monster-cells test and its
+   control).
+2. fj: the near LOS against `World.los_points` (`tests/fj/test_monster_sight_fj.py`: 900 traces, every door and lift
+   state; controls: the dynamic segments always shut, strict crossings only, no margin, o4 without its o3 term,
+   registers left uncleared); the decide tic against the model (`tests/fj/test_monster_decide_fj.py`: 120 frames;
+   controls: no roll, no LOS, justattacked never read, no draws); P_ChangeSector against `World._door_phase_scene`
+   (`tests/fj/test_change_sector_fj.py`; controls nomh, noswitch, noactive, nolvdone).
+3. m2_std_gate, m3_gate, p2a_gate byte- and state-exact with the gates' oracles in `decide`; their selftests; B0 v5
+   exact on every frame; deg_gate byte-exact.
+4. CAP-22 on v5; size <= 35%; msframe recorded (D8).
+5. pinreport 20 of 20 (heat list p32a); the restore sets re-keyed (`mon_justattacked` persists).
+
+**Row** (blocked45, sha256 `25957324521286dd`, built at 197682c; `docs/ship-evidence/blocked45_*`):
+
+| measure | blocked44 (P3.2b) | blocked45 (P3.2c) | delta |
+|---|---|---|---|
+| combat set binding (v5) | 15,299,168 | 15,087,224 | -211,944 |
+| ... with strafe's collision | 15,335,250 | 15,122,674 | -212,576 |
+| v5 per-frame maximum (+/- 2^18) | 25,427,968 | 25,690,112 (R0-aftermath) | +262,144 |
+| gamespeed binding | 14,452,893 | 14,462,688 | +9,795 (no budget declared) |
+| profx mean frame (gamespeed's games) | 12,334,235 | 12,321,663 | -12,572 |
+| size (% of 2^27) | 33.38% | 33.92% | +726,572 words (no budget declared) |
+| pool tables (build) | 466,633 in 33,572 groups | 471,582 in 33,949 groups | +4,949 tables |
+| ms/frame (msframe, one run, A = blocked44; the pictures differ, so its pixel check reads NO) | 67.6 | 66.7 | NOT SEPARATED (x1.000) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+The census priced the decisions small (0.02 a frame on v5), and gamespeed moved +9,795, B0 v5 -211,944. Where profx
+puts it (phases.py, ops/frame, blocked44 -> blocked45; lines that moved >= 10,000): seg_pass2_leaf 3,665,644 ->
+3,623,277; seg_pass1_leaf 2,324,892 -> 2,366,784; bspcode walk (nodes, pos_leaf, ss code) 913,828 -> 896,926;
+thing_pass_leaf 650,839 -> 669,426. Why v5 fell by 211,944 is not attributed: phases.py has no monster-tic phase
+(#113), and no run here measured the tic alone.
+
+**Size**: +726,572 words -- +555,196 below the pool (the program, 28,043,742 -> 28,598,938) and +171,376 in it
+(16,761,320 -> 16,932,696 payload words; +4,949 tables). **Size is now 33.92% of 2^27 against the 35% target:
+1,444,570 words (1.08 points) of room left.** The target's raise is still the owner's call (#113).
+
+**msframe NOT SEPARATED is the class-F record (D8)**: 67.6 -> 66.7 ms/frame (pairs 0.996 0.983 1.010 1.000 1.016),
+14,944,344 -> 14,828,598 ops/frame on msframe's walk, 221.0 -> 222.2 M fj/s. The re-freeze of the `shipped` baseline
+on blocked45 waits for a quiet window.
+
+**Verdict: every kill criterion met -- criterion 2's P_ChangeSector run on its commit's record (see there).**
+1. Host: 1427 passed, 2 skipped, 1 deselected, 2 xfailed, 3 warnings (`blocked45_host_suite.log`, at the build's
+   commit 197682c), `test_monsters_decide.py` and `test_restore_set_shipped.py` among them.
+2. fj: `test_monster_sight_fj.py` 8 passed in 32.37s (`p32c_sight_fj.log`), `test_monster_decide_fj.py` 6 passed in
+   2284.07s (`p32c_decide_fj.log`) -- both at e24ab75; 7d9d851 then moved NEAR / reach / K to one source each with the
+   emitted text IDENTICAL (its message: the decide harness's parts sha256 472145c1...); `test_change_sector_fj.py` (6
+   passed in 16.70s, as 796cdcc's message records -- no log of it is in ship-evidence).
+3. m2_std_gate (452 frames) and m3_gate (32 frames) byte- and state-exact, their 6 selftests PASS; p2a_gate 13
+   scenarios state- and pixel-exact; B0 v5 exact on every frame (11 runs, 1,100 frames: state and pixels); deg_gate
+   BYTE-EXACT with every op count equal to blocked44's.
+4. CAP-22 on v5: 15,087,224 (headroom 6,912,776; the per-frame maximum 25,690,112 in R0-aftermath is not the cap's
+   measure); gamespeed 14,462,688 PASS; size 33.92% (<= 35%); msframe recorded (NOT SEPARATED: median x1.000).
+5. pinreport 20 of 20 with `heat_blocked27_p32a`; the restore sets re-keyed (`p32c_rekey.log` 22 passed in 0.72s).

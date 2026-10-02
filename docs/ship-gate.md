@@ -10,14 +10,26 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked44.fjm`, sha256 `06e8912c4d4d3b96` (first 16 hex), built 2026-10-01 from the command in 1b (M7 P3.2b, the monsters MOVE: chase) | class F -- the pictures differ from blocked43 (monsters walk); built with the installed flipjump 1.5.1 at `bc8ee63` from m7-chase 2f76124 (`docs/ship-evidence/blocked44_build.log`); the first build overran the table pool (`blocked44_build_r0_overflow.log`, see below) |
-| **ms/frame** | **66.4 ms/frame** (66.0-68.1), against **62.2** (62.0-63.1) for blocked43 in the same run (~225M fj/s) -- **B SLOWER: median x0.934** (pairs 0.927 0.929 0.940 0.938 0.934; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames); the re-freeze reads **73.1** (72.3-76.2) | `msframe.py --a build/doom_e1m1_blocked43.fjm --b build/doom_e1m1_blocked44.fjm`, 200 frames x 5 reps, pinned core (`blocked44_msframe.log`; the first attempt refused a busy box -- `blocked44_msframe_r0_busy.log`; the second ran out of memory loading the image -- `blocked44_msframe_r1_oom.log`) |
-| **fj ops/s** | **225.2 M** in the A/B run (blocked43 230.6 M) | ops/frame **14,944,344** on msframe's forward-walk script (blocked43 14,336,652) |
-| **binding metric** (owner spec) | (mean+p80)/2 = **14,452,893 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked44.fjm`, 2026-10-01 (`docs/ship-evidence/blocked44_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
-| **size** | **33.38% of 2^27 -- PASS** (44,805,062 words; span 97,686,912) -- 2,171,142 words under the 35% target | same run |
-| **combat set v5** (the CAP-22 set from P3.2a on: the seen rule; FROZEN 2026-10-01 on the owner's 2026-09-30 approval -- `p32a_v5_freeze.log`) | (mean+p80)/2 = **15,299,168**; **15,335,250** with strafe's collision; every frame pixel-exact and B0-state-exact (pose, doors, mode; the monster cells are m2_std/m3/p2a's) | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v5.json --pixel-every 1 --proxy` (`blocked44_b0_v5.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked45.fjm`, sha256 `25957324521286dd` (first 16 hex), built 2026-10-02 from the command in 1b (M7 P3.2c, the monsters DECIDE to attack) | class F -- the pictures differ from blocked44 (monsters face and enter their attack states); built with the installed flipjump 1.5.1 at `bc8ee63` from m7-decide 197682c (`docs/ship-evidence/blocked45_build.log`) |
+| **ms/frame** | **66.7 ms/frame** (66.5-71.1), against **67.6** (66.7-70.9) for blocked44 in the same run (~222M fj/s) -- **NOT SEPARATED: median x1.000** (pairs 0.996 0.983 1.010 1.000 1.016; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames); the msframe baseline's re-freeze on blocked45 waits for a quiet window | `msframe.py --a build/doom_e1m1_blocked44.fjm --b build/doom_e1m1_blocked45.fjm`, 200 frames x 5 reps, pinned core (`blocked45_msframe.log`) |
+| **fj ops/s** | **222.2 M** in the A/B run (blocked44 221.0 M) | ops/frame **14,828,598** on msframe's forward-walk script (blocked44 14,944,344) |
+| **binding metric** (owner spec) | (mean+p80)/2 = **14,462,688 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked45.fjm`, 2026-10-02 (`docs/ship-evidence/blocked45_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
+| **size** | **33.92% of 2^27 -- PASS** (45,531,634 words; span 97,874,112) -- 1,444,570 words under the 35% target | same run |
+| **combat set v5** (the CAP-22 set from P3.2a on: the seen rule; FROZEN 2026-10-01 on the owner's 2026-09-30 approval -- `p32a_v5_freeze.log`) | (mean+p80)/2 = **15,087,224**; **15,122,674** with strafe's collision; every frame pixel-exact and B0-state-exact (pose, doors, mode; the monster cells are m2_std/m3/p2a's) | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v5.json --pixel-every 1 --proxy` (`blocked45_b0_v5.log`) |
 
-**What it is:** blocked43 with the monsters MOVING in the model's `chase` mode (M7 P3.2b, `docs/gp-monsters.md`
+**What it is:** blocked44 with the monsters DECIDING to attack in the model's `decide` mode (M7 P3.2c,
+`docs/gp-monsters.md` section 8.5), class F: A_Chase whole -- `justattacked` (per slot, persisted) clears and re-picks
+the direction; the melee decision (a melee state, P_AproxDistance < MELEE_REACH 60, the attack sight) and the missile
+decision (a missile state, movecount 0, the attack sight, reaction 0, then the P_Random refusal); the decided state
+entered with A_FaceTarget. The attack states' actions face and DRAW exactly as the full model's and apply nothing --
+damage is P5. The attack sight is seen, or within NEAR and `sl_los`, the exact near LOS (per-256-unit-cell candidate
+segment lists, a door's, a lift's or the switch's segment by its state, four 48-bit orientation signs), 5.52M -> 0.19M
+ops after e24ab75 (a segment XORs its constants into zeroed registers). It carries P3.2b's review fixes (796cdcc):
+P_ChangeSector now runs inside the `lvdone` exit guard (`tests/fj/test_change_sector_fj.py`), B0's selftest frames,
+the slot-order assert and the hardening. The binary it replaced, blocked44 (sha256 `06e8912c4d4d3b96`), is kept in
+`build/` as the comparison arm.
+
+**What blocked44 was (P3.2b):** blocked43 with the monsters MOVING in the model's `chase` mode (M7 P3.2b, `docs/gp-monsters.md`
 section 8.4), class F: A_Chase steps -- P_Move / P_TryMove on the monsters' own collision cells (radius 30 lists with
 ML_BLOCKMONSTERS folded in, the step, height and drop-off rules, the static barrels and decorations as per-cell boxes,
 the other monsters and the player as boxes), P_NewChaseDir with the D5 cap of 6, the relink of a changed leaf

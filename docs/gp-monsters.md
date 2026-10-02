@@ -206,6 +206,7 @@ P3.2 is too large for one build, so it ships in three, each against a named mode
   SHIPPED 2026-10-02 as blocked44 (`docs/gp-ledger.md` P3.2b).
 - **P3.2c "decide"**: the melee and missile decisions and their states (A_FaceTarget; the attacks' EFFECTS are P5,
   so the mode runs the attack states without damage).
+  SHIPPED 2026-10-02 as blocked45 (`docs/gp-ledger.md` P3.2c).
 The frozen set v5 is the full model; B0 on it is exact from P3.2c on, when the mode's tic equals the model's for
 everything v5 exercises but damage.
 
@@ -298,3 +299,10 @@ the draws parts). `justhit` is 0 until damage (P4) and `ambush` matters only to 
   traces; controls: the dynamic segments always shut, strict crossings only, no margin, o4 without its o3 term) and
   `tests/fj/test_monster_decide_fj.py` (120 frames against the decide mode; controls: no roll, no LOS, justattacked
   never read, no draws).
+
+**As built** (SHIPPED 2026-10-02 as blocked45, sha256 `25957324521286dd`; `docs/gp-ledger.md` P3.2c): measured +9,795
+on gamespeed's binding (14,452,893 -> 14,462,688), -211,944 on v5's (15,087,224), -12,572 on profx's mean frame; size
++726,572 words (33.92% of 2^27). The near LOS went from 5.52M to 0.19M ops before the build (e24ab75): a segment XORs
+its constants into zeroed registers (`hex.xor_by`, one op a nibble) and the shared `sl_seg` does the box reject, the
+ends and d, zeroing on every exit. P_ChangeSector runs inside the `lvdone` exit guard (796cdcc,
+`tests/fj/test_change_sector_fj.py`).

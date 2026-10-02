@@ -188,7 +188,8 @@ def test_the_skill_dispatch_refuses_a_fourth_skill(monkeypatch):
 def test_the_menu_keys_are_the_devices():
     """the keycodes kb.poll turns into the menu's events (src/fj/input.fj's table)"""
     from doomfj.menu import MENU_KEYS
-    assert MENU_KEYS == {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn"}
+    assert MENU_KEYS == {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn",
+                         0x68: "help"}                     # M7 P3.4: 'h'
 
 
 # -- M7 P1.5 (the owner, 2026-09-27): the credit, and an M that reads as an M ----------------------
@@ -230,3 +231,141 @@ def test_the_lines_are_5x7_and_both_fonts_draw_an_m_with_two_stems_and_a_dip():
         assert [k for k, r in enumerate(rows) if r[2] == "#"] == [2, 3]
     assert text_width("M.") == 5 + 1 + 2                      # widths add, one gap between
     assert text_width("MH", _SMALL_GLYPHS) == 5 + 1 + 3
+
+
+# -- M7 P3.4: the HELP screen (docs/gp-help.md) -----------------------------------------------------
+
+def test_the_help_stream_paints_exactly_the_help_picture():
+    """the one-generator rule for the help: the stream fj emits, decoded by the REAL device, is the
+    oracle's picture"""
+    from doomfj.menu import help_pixels, help_stream
+    screen = _present(help_stream(W, H, COLOURS))
+    assert screen.frame_count == 1
+    assert screen.pixel_indices == help_pixels(W, H, COLOURS)
+
+
+def test_the_help_screen_draws_its_title_and_every_row_where_the_layout_says():
+    """legibility, checked glyph by glyph: the title centred at HELP_TITLE_Y in the highlight colour;
+    every row's key and description in the 5x7 font, in the text colour, the keys left-aligned in one
+    column and the descriptions in another; the credit as on every screen; NOTHING else inked. And
+    the rows are the key map the owner asked for, in his order."""
+    from doomfj.menu import (CREDIT, CREDIT_MARGIN, GLYPH_GAP, HELP_COL_GAP, HELP_PITCH, HELP_ROWS,
+                             HELP_ROWS_Y, HELP_TITLE, HELP_TITLE_Y, SMALL_GLYPH_H, _GLYPHS,
+                             _SMALL_GLYPHS, help_pixels, text_width)
+
+    def ink(label, x0, y0, font=_GLYPHS):
+        out, x = set(), x0
+        for ch in label:
+            rows = font[ch].split("|")
+            out |= {(x + gx, y0 + gy) for gy, r in enumerate(rows) for gx, c in enumerate(r) if c == "#"}
+            x += len(rows[0]) + GLYPH_GAP
+        return out
+
+    assert [k for k, _ in HELP_ROWS] == ["W / UP", "S / DOWN", "A / LEFT", "D / RIGHT", "SPACE / E",
+                                        "", "ENTER", "ESC", "H"]
+    assert " ".join(d for _, d in HELP_ROWS) == ("MOVE FORWARD MOVE BACK TURN LEFT TURN RIGHT USE: "
+                                                 "DOORS, SWITCHES, LIFTS SELECT MENU THIS HELP")
+    assert all(ch in _GLYPHS for label in [HELP_TITLE] + [s for row in HELP_ROWS for s in row]
+               for ch in label), "a help character the font cannot draw would print as a blank"
+    grid = help_pixels(W, H, COLOURS)
+    got = {c: {(i % W, i // W) for i, p in enumerate(grid) if p == c} for c in COLOURS[1:]}
+    title = ink(HELP_TITLE, (W - text_width(HELP_TITLE)) // 2, HELP_TITLE_Y)
+    keys_w = max(text_width(k) for k, _ in HELP_ROWS)
+    table_w = keys_w + HELP_COL_GAP + max(text_width(d) for _, d in HELP_ROWS)
+    x_keys = (W - table_w) // 2
+    rows = set()
+    for r, (key, what) in enumerate(HELP_ROWS):
+        y = HELP_ROWS_Y + r * HELP_PITCH
+        rows |= ink(key, x_keys, y) | ink(what, x_keys + keys_w + HELP_COL_GAP, y)
+    credit = ink(CREDIT, W - CREDIT_MARGIN - text_width(CREDIT, _SMALL_GLYPHS),
+                 H - CREDIT_MARGIN - SMALL_GLYPH_H, _SMALL_GLYPHS)
+    assert got[COLOURS[2]] == title
+    assert got[COLOURS[1]] == rows
+    assert got[COLOURS[3]] == credit
+    assert max(y for _x, y in rows) < H - CREDIT_MARGIN - SMALL_GLYPH_H, "a row reaches the credit"
+    assert all(0 <= x < W for x, _y in rows | title)
+
+
+def test_the_help_screen_is_not_the_menu_and_is_not_blank():
+    """R9: two mirrors that agree on a blank screen, or on the main menu, agree about nothing"""
+    from doomfj.menu import help_pixels
+    grid = help_pixels(W, H, COLOURS)
+    assert len(set(grid)) == 4
+    assert grid != pixels(W, H, ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP"], 2, COLOURS)
+    assert sum(1 for p in grid if p == COLOURS[1]) > 1000      # nine rows of 5x7 text
+
+
+def test_a_wrong_help_picture_is_caught():
+    """R9 negative control for the help's differential: one pixel of the oracle moved, and the
+    device's decode of the stream must disagree with it"""
+    from doomfj.menu import help_pixels, help_stream
+    good = help_pixels(W, H, COLOURS)
+    bad = list(good)
+    bad[W * 20 + 30] ^= 0xFF
+    screen = _present(help_stream(W, H, COLOURS))
+    assert screen.pixel_indices == good and screen.pixel_indices != bad
+
+
+def test_the_help_layout_refuses_a_row_too_wide(monkeypatch):
+    """R9 for the layout's asserts: a row wider than the screen stops the generator instead of
+    clipping the key map"""
+    import doomfj.menu as menu
+    monkeypatch.setattr(menu, "HELP_ROWS", menu.HELP_ROWS + (("SPACE / E", "USE: DOORS, SWITCHES, LIFTS"),))
+    with pytest.raises(AssertionError, match="wider than the screen"):
+        menu.help_pixels(W, H, COLOURS)
+
+
+def test_the_help_rules():
+    """menu_step's help: h in the world and on the main menu, enter on HELP, esc or h closing back
+    to where it was opened, the main menu's two items clamped, h ignored on the skill screen and
+    LEVEL COMPLETE, and esc / enter winning over h"""
+    from doomfj.menu import (HELP_GAME_SCR as HG, HELP_MENU_SCR as HM, LEVEL_DONE_SCR as LD,
+                             MAIN_HELP_SCR as MH, menu_step)
+    assert menu_step(0, 0, 2, {"help"}) == (1, HG, 2, None)       # the world: h opens the help
+    assert menu_step(1, HG, 2, {"help"}) == (0, 0, 2, None)       # ...h closes it to the world
+    assert menu_step(1, HG, 2, {"esc"}) == (0, 0, 2, None)        # ...and so does esc
+    assert menu_step(1, HG, 2, {"enter", "up", "dn"}) == (1, HG, 2, None)
+    assert menu_step(1, 0, 2, {"help"}) == (1, HM, 2, None)       # the main menu: h opens it
+    assert menu_step(1, 0, 2, {"dn"}) == (1, MH, 2, None)         # ...down highlights HELP
+    assert menu_step(1, 0, 2, {"up"}) == (1, 0, 2, None)          # ...up is clamped
+    assert menu_step(1, MH, 2, {"enter"}) == (1, HM, 2, None)     # HELP: enter opens it
+    assert menu_step(1, MH, 2, {"help"}) == (1, HM, 2, None)      # ...and so does h
+    assert menu_step(1, MH, 2, {"up"}) == (1, 0, 2, None)         # ...up to NEW GAME
+    assert menu_step(1, MH, 2, {"dn"}) == (1, MH, 2, None)        # ...down is clamped
+    assert menu_step(1, MH, 2, {"esc"}) == (0, 0, 2, None)        # ...esc resumes the world
+    assert menu_step(1, HM, 2, {"esc"}) == (1, MH, 2, None)       # the menu's help: back to HELP
+    assert menu_step(1, HM, 2, {"help"}) == (1, MH, 2, None)
+    assert menu_step(1, HM, 2, set()) == (1, HM, 2, None)
+    assert menu_step(1, 1, 1, {"help"}) == (1, 1, 1, None)        # the skill screen ignores h
+    assert menu_step(1, LD, 1, {"help"}) == (1, LD, 1, None)      # ...and so does LEVEL COMPLETE
+    assert menu_step(0, 0, 2, {"esc", "help"}) == (1, 0, 2, None)  # esc and enter win over h
+    assert menu_step(1, 0, 2, {"enter", "help"}) == (1, 1, 2, None)
+    assert menu_step(1, 0, 2, {"help", "dn"}) == (1, HM, 2, None)  # ...and h over up / down
+
+
+def test_the_menu_screens_are_one_mapping():
+    """`wall_renderer.menu_screen_pixels` -- the oracle's picture for every menu state -- gives each
+    state the picture `_menu_lines` bakes for it: the two main-menu highlights, the three skill
+    highlights, LEVEL COMPLETE and the help, the two help ids ONE picture; seven distinct pictures"""
+    from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_SCR, MAIN_HELP_SCR,
+                             help_pixels)
+    from doomfj.wall_renderer import DEFAULT_MENU, MENU_HELP_ITEM, menu_screen_pixels
+    cfg = CFG
+    assert DEFAULT_MENU == ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP"]
+    states = [(0, 2), (MAIN_HELP_SCR, 2), (1, 0), (1, 1), (1, 2), (LEVEL_DONE_SCR, 2),
+              (HELP_MENU_SCR, 2), (HELP_GAME_SCR, 2)]
+    pics = {s: tuple(menu_screen_pixels(cfg, COLOURS, *s)) for s in states}
+    assert pics[(HELP_MENU_SCR, 2)] == pics[(HELP_GAME_SCR, 2)] == tuple(help_pixels(W, H, COLOURS))
+    assert len(set(pics.values())) == 7
+    assert pics[(MAIN_HELP_SCR, 2)] == tuple(pixels(W, H, DEFAULT_MENU,
+                                                    DEFAULT_MENU.index(MENU_HELP_ITEM), COLOURS))
+
+
+def test_the_main_menu_must_have_a_help_item():
+    """`_menu_lines` finds the HELP item by name; a menu without one must stop the emitter"""
+    from doomfj.wad import WadFile
+    from doomfj.wall_renderer import _menu_lines, restart_lines
+    spawn = type("Spawn", (), {"x": 0, "y": 0, "angle": 0})()
+    restart = restart_lines(spawn, 0, [], [], 1, [([0], [], [])] * 3)
+    with pytest.raises(AssertionError, match="HELP"):
+        _menu_lines(CFG, WadFile.from_path("tests/fixtures/freedoom_assets.wad"), ["A", "QUIT"], 0, restart=restart)

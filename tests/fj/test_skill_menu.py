@@ -21,6 +21,11 @@ the mirror on some script. Until the P1.5 review this printed only viewx, dstate
 side and one flag, and no skill linked two things -- so a restart that missed viewy, viewangle, the
 other door cells, the bindings, the positions or a link passed, and only the list zeroing had a
 control.
+
+M7 P3.4 (docs/gp-help.md): the HELP screen and the main menu's second item run here too -- h from
+the world and from the main menu, enter on HELP, esc / h closing back to where the help was opened,
+up / down on the main menu clamped at both items, h ignored on the skill screen and on LEVEL
+COMPLETE (`HELP_SCRIPTS`), with mutants of the new lines as controls.
 """
 from pathlib import Path
 
@@ -31,7 +36,8 @@ from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, Scr
 from doomfj.config import Config
 from doomfj.doorcode import WAIT_NIBBLES
 from doomfj.harness import W
-from doomfj.menu import LEVEL_DONE_SCR, MENU_KEYS, menu_step
+from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_SCR, MAIN_HELP_SCR, MENU_KEYS,
+                         menu_step)
 from doomfj.things import spawn_leaf_lists
 from doomfj.wall_renderer import (BOOT_SKILL, MENU_STATE_DECLS, SKILLS, menu_state_lines,
                                   restart_lines)
@@ -39,6 +45,7 @@ from doomfj.wall_renderer import (BOOT_SKILL, MENU_STATE_DECLS, SKILLS, menu_sta
 SRC = [Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
 POLLS, FRAMES = 4, 8
 ENTER, ESC, UP, DOWN, W_KEY, S_KEY = 0x0D, 0x1B, 0x80, 0x81, 0x77, 0x73
+H_KEY = 0x68                                        # M7 P3.4: help
 M32 = 0xFFFFFFFF
 
 # the synthetic level: the spawn (a NEGATIVE y, so the 32-bit wrap is checked), two doors, three
@@ -128,9 +135,9 @@ def _program(state_lines, common, scr0=0):
         "stl.startup_and_init_all",
         "tm_frame:",
         "    hex.zero 1, ev_enter", "    hex.zero 1, ev_esc", "    hex.zero 1, ev_up",
-        "    hex.zero 1, ev_dn",
+        "    hex.zero 1, ev_dn", "    hex.zero 1, ev_help",
         f"    rep({POLLS}, i) kb.poll kstat, kcode, kb_f, kb_b, kb_l, kb_r, kb_u, "
-        "ev_enter, ev_esc, ev_up, ev_dn, bad",
+        "ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
         *state_lines,
         *_dump(),
         "    hex.inc 2, tm_count",
@@ -236,6 +243,44 @@ LEVEL_DONE_SCRIPTS = {
 }
 
 
+# M7 P3.4 -- the help screen and the main menu's HELP item (docs/gp-help.md)
+HELP_SCRIPTS = {
+    "help: h in the world opens it; h closes it back to the world": [
+        (0, True, ESC), (1, False, ESC), (4, True, H_KEY), (5, False, H_KEY),
+        (8, True, H_KEY), (9, False, H_KEY)],
+    "help: from the world, esc closes it back to the world, not the menu": [
+        (0, True, ESC), (1, False, ESC), (4, True, H_KEY), (5, False, H_KEY),
+        (12, True, ESC), (13, False, ESC)],
+    "help: down to HELP, enter opens it, esc back to the menu on HELP, up to NEW GAME": [
+        (0, True, DOWN), (1, False, DOWN), (4, True, ENTER), (5, False, ENTER),
+        (8, True, ESC), (9, False, ESC), (12, True, W_KEY), (13, False, W_KEY),
+        (16, True, ENTER), (17, False, ENTER)],
+    "help: the main menu clamps at both items": [
+        (0, True, UP), (1, False, UP), (4, True, S_KEY), (5, False, S_KEY),
+        (8, True, DOWN), (9, False, DOWN), (12, True, UP), (13, False, UP),
+        (16, True, W_KEY), (17, False, W_KEY)],
+    "help: h on the main menu opens it, h closes it; esc on HELP resumes the world": [
+        (0, True, H_KEY), (1, False, H_KEY), (4, True, H_KEY), (5, False, H_KEY),
+        (8, True, ESC), (9, False, ESC), (12, True, H_KEY), (13, False, H_KEY)],
+    "help: h on HELP opens it too; up / down / enter do nothing on the help": [
+        (0, True, DOWN), (1, False, DOWN), (4, True, H_KEY), (5, False, H_KEY),
+        (8, True, UP), (9, False, UP), (10, True, DOWN), (11, False, DOWN),
+        (12, True, ENTER), (13, False, ENTER), (20, True, H_KEY), (21, False, H_KEY)],
+    "help: the skill screen ignores h; esc, then the world's help": [
+        (0, True, ENTER), (1, False, ENTER), (4, True, H_KEY), (5, False, H_KEY),
+        (8, True, ESC), (9, False, ESC), (12, True, ESC), (13, False, ESC),
+        (16, True, H_KEY), (17, False, H_KEY)],
+    "help: esc and h in one frame: esc wins (the main menu, not the help)": [
+        (0, True, ESC), (1, False, ESC), (4, True, ESC), (5, True, H_KEY), (6, False, ESC),
+        (7, False, H_KEY)],
+    "help: new game from the help-opened menu still starts the skill": [
+        (0, True, H_KEY), (1, False, H_KEY), (4, True, ESC), (5, False, ESC),
+        (8, True, UP), (9, False, UP), (12, True, ENTER), (13, False, ENTER),
+        (16, True, ENTER), (17, False, ENTER)],
+}
+LEVEL_DONE_HELP_SCRIPT = [(0, True, H_KEY), (1, False, H_KEY), (4, True, ENTER), (5, False, ENTER)]
+
+
 def _restart():
     return restart_lines(SPAWN, NDOORS, BINDS, POS, NSS, PER_SKILL, nlift=NLIFT)
 
@@ -265,6 +310,66 @@ def test_the_level_complete_screen_follows_the_rules(shipped_done, name):
     ev = LEVEL_DONE_SCRIPTS[name]
     got, want = _run(shipped_done, ev), _expected(ev, LEVEL_DONE_SCR)[0]
     assert got == want, _first_difference(name, got, want)
+
+
+@pytest.mark.parametrize("name", sorted(HELP_SCRIPTS))
+def test_the_help_screen_follows_the_rules(shipped, name):
+    """M7 P3.4: the help and the main menu's two items, the RUN lines against `menu_step`"""
+    got, want = _run(shipped, HELP_SCRIPTS[name]), _expected(HELP_SCRIPTS[name])[0]
+    assert got == want, _first_difference(name, got, want)
+
+
+def test_level_complete_ignores_h(shipped_done):
+    got, want = _run(shipped_done, LEVEL_DONE_HELP_SCRIPT), _expected(LEVEL_DONE_HELP_SCRIPT,
+                                                                      LEVEL_DONE_SCR)[0]
+    assert got == want, _first_difference("level complete ignores h", got, want)
+    assert [ln[1] for ln in want[:2]] == [str(LEVEL_DONE_SCR), "0"], want[:2]
+
+
+def test_the_help_scripts_reach_every_new_state():
+    """R9 against a vacuous script set: the help scripts pass through both help ids, the main menu
+    on both items, the world and the skill screen, and close the help BOTH ways -- to the world from
+    HELP_GAME_SCR and to the main menu on HELP from HELP_MENU_SCR"""
+    runs = {n: _expected(HELP_SCRIPTS[n])[1] for n in HELP_SCRIPTS}
+    seen = {(s["mode"], s["scr"]) for r in runs.values() for s in r}
+    assert seen == {(0, 0), (1, 0), (1, 1), (1, MAIN_HELP_SCR), (1, HELP_MENU_SCR),
+                    (1, HELP_GAME_SCR)}, seen
+    boot = {"mode": 1, "scr": 0}                    # every script starts on the main menu
+    steps = {((a["mode"], a["scr"]), (b["mode"], b["scr"])) for r in runs.values()
+             for a, b in zip([boot] + r, r)}
+    assert ((1, HELP_GAME_SCR), (0, 0)) in steps and ((1, HELP_MENU_SCR), (1, MAIN_HELP_SCR)) in steps
+    assert ((0, 0), (1, HELP_GAME_SCR)) in steps and ((1, 0), (1, HELP_MENU_SCR)) in steps
+    assert ((1, MAIN_HELP_SCR), (1, HELP_MENU_SCR)) in steps and ((1, MAIN_HELP_SCR), (1, 0)) in steps
+    assert ((1, 0), (1, MAIN_HELP_SCR)) in steps and ((1, MAIN_HELP_SCR), (0, 0)) in steps
+
+
+def _mutate(lines, old, new):
+    assert lines.count(old) == 1, old
+    return [new if ln == old else ln for ln in lines]
+
+
+HELP_MUTANTS = {
+    # the world's help closes to the main menu instead of the world
+    "closing the world's help goes to the menu": ("mn_hgame:", "mn_hgame: ;mn_hmenu"),
+    # h in the world does nothing
+    "the world ignores h": ("mn_w2:", "mn_w2: ;mn_done"),
+    # enter on HELP starts the skill screen (NEW GAME's action)
+    "enter on HELP acts as NEW GAME": ("mn_q1:", "mn_q1: ;mn_m1"),
+    # down on the main menu does not reach HELP
+    "the main menu's down is dropped": ("mn_m3:", "mn_m3: ;mn_done"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(HELP_MUTANTS))
+def test_a_broken_help_is_caught(tmp_path, name):
+    """R9: each mutant of the new state lines, assembled through the same harness, must disagree
+    with the mirror on some help script"""
+    common, _ = _restart()
+    lines = menu_state_lines(_restart())
+    bad_lines = _mutate(lines, *HELP_MUTANTS[name])
+    bad = _assemble(tmp_path, "helpbad", bad_lines, common)
+    caught = [n for n in HELP_SCRIPTS if _run(bad, HELP_SCRIPTS[n]) != _expected(HELP_SCRIPTS[n])[0]]
+    assert caught, "a menu where %s passed every help script" % name
 
 
 def test_a_level_complete_screen_that_ignores_enter_is_caught(tmp_path):

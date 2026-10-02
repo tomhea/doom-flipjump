@@ -18,6 +18,11 @@ tic, due when tic >= event.tic), NOT from the program -- so this compares two in
 M7 P1.5: the poll no longer toggles the menu's `mode`; it records the menu's EVENTS -- enter, esc,
 and the down edges of forward and back as up / down -- which the caller zeroes before a frame's
 polls. The printed line is the four held flags, then the four events of that frame.
+
+M7 P3.4: 'e' is a second USE key (space's held flag) and 'h' the HELP event (docs/gp-help.md); the
+line now prints the use flag after the four and the help event after the four events. And the help
+screen lists ONLY keys that work: every key it names must do something here, and every key this
+macro binds must be on it (`test_the_help_screen_lists_exactly_the_keys_that_work`).
 """
 from pathlib import Path
 
@@ -28,34 +33,38 @@ from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, Scr
 
 from doomfj.config import Config
 from doomfj.harness import W
+from doomfj.menu import HELP_KEYCODES, HELP_ROWS, MENU_KEYS, help_key_names
 
 SRC = [Path("src/fj") / "input.fj"]
 CFG = Config()
 
 POLLS = 8          # polls per "frame", the same unroll the emitter uses
 FRAMES = 6
-KEYS = ("f", "b", "l", "r")
-EVENTS = ("E", "X", "U", "D")      # the menu's events: enter, esc, up (forward), down (back)
+KEYS = ("f", "b", "l", "r", "u")    # M7 P3.4: the use flag printed too
+EVENTS = ("E", "X", "U", "D", "H")  # the menu's events: enter, esc, up (forward), down (back), help
 
-# keycode -> which flag, mirroring the macro's own comment table
+# keycode -> which flag, mirroring the macro's own comment table. M7 P3.4: space and 'e' are USE.
 BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b",
-           0x61: "l", 0x82: "l", 0x64: "r", 0x83: "r"}
+           0x61: "l", 0x82: "l", 0x64: "r", 0x83: "r", 0x20: "u", 0x65: "u"}
+# keycode -> the event its DOWN edge records (enter, esc, and M7 P3.4's help)
+EVENT_KEYS = {0x0D: "E", 0x1B: "X", 0x68: "H"}
 
 
 def _program() -> str:
     lines = ["stl.startup_and_init_all"]
     for _ in range(FRAMES):
-        lines += [f"hex.zero 1, {e}" for e in ("kent", "kesc", "kup", "kdn")]
+        lines += [f"hex.zero 1, {e}" for e in ("kent", "kesc", "kup", "kdn", "khelp")]
         lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, kuse, "
-                     "kent, kesc, kup, kdn, bad")
+                     "kent, kesc, kup, kdn, khelp, bad")
         lines += [f"hex.print_as_digit k{name}, 0" for name in
-                  ("fwd", "back", "left", "right", "ent", "esc", "up", "dn")]
+                  ("fwd", "back", "left", "right", "use", "ent", "esc", "up", "dn", "help")]
         lines.append("stl.output 10")
     lines += ["stl.loop",
               # the halt a non-keyboard input stream gets -- '!' so a rejected run is visible
               "bad:", "stl.output_char 0x21", "stl.loop",
               "kstat: hex.vec 1", "kcode: hex.vec 2",
               "kent: hex.vec 1", "kesc: hex.vec 1", "kup: hex.vec 1", "kdn: hex.vec 1",
+              "khelp: hex.vec 1",                     # M7 P3.4
               "kfwd: hex.vec 1", "kback: hex.vec 1", "kleft: hex.vec 1", "kright: hex.vec 1",
               # M2-R4: the USE key (space, 0x20) is a held flag like the four above
               "kuse: hex.vec 1"]
@@ -81,10 +90,11 @@ def _run(fjm: Path, events) -> list:
     return text.split("\n")[:FRAMES]
 
 
-def _expected(events, binding=None) -> list:
+def _expected(events, binding=None, event_keys=None) -> list:
     """the same thing in plain python, from the DEVICE's contract: at most one event per tic, due
     once the tic clock reaches it; the program prints its flags after every POLLS polls."""
     binding = BINDING if binding is None else binding
+    event_keys = EVENT_KEYS if event_keys is None else event_keys
     pending = sorted((KeyEvent(*e) for e in events), key=lambda e: e.tic)
     held = {name: 0 for name in KEYS}
     ev = {name: 0 for name in EVENTS}
@@ -95,9 +105,9 @@ def _expected(events, binding=None) -> list:
         if index < len(pending) and pending[index].tic <= tic:
             event = pending[index]
             index += 1
-            if event.keycode in (0x0D, 0x1B):      # enter / esc: events, DOWN edge only
+            if event.keycode in event_keys:        # enter / esc / help: events, DOWN edge only
                 if event.is_down:
-                    ev["E" if event.keycode == 0x0D else "X"] = 1
+                    ev[event_keys[event.keycode]] = 1
             else:
                 name = binding.get(event.keycode)
                 if name is not None:
@@ -143,6 +153,20 @@ SCRIPTS = {
                                                   (2, False, 0x0D), (16, False, 0x77)],
     "forward and back are the menu's up and down": [(0, True, 0x80), (1, False, 0x80),
                                                     (9, True, 0x73), (10, False, 0x73)],
+    # M7 P3.4: 'e' is a second use key -- the SAME held flag as space -- and 'h' the help event
+    "space holds use": [(0, True, 0x20), (12, False, 0x20)],
+    "e holds use like space": [(0, True, 0x65), (12, False, 0x65)],
+    "space and e share one flag": [(0, True, 0x20), (9, False, 0x20), (10, True, 0x65),
+                                   (20, False, 0x65)],
+    "h is an event on its down edge only": [(0, True, 0x68), (1, False, 0x68)],
+    "h held across frames: no event on its up edge": [(0, True, 0x68), (9, False, 0x68)],
+    "h does not disturb the held keys": [(0, True, 0x77), (1, True, 0x68), (2, False, 0x68),
+                                         (3, True, 0x65), (16, False, 0x77), (17, False, 0x65)],
+    # the 0x6_ row's other keys are NOT bound: 'b' 'c' 'f' 'g' 'i' between a, d, e and h, read
+    # and discarded -- and the stream stays in phase after them
+    "the 0x6_ row's unbound keys are discarded": [(0, True, 0x62), (1, True, 0x66), (2, True, 0x67),
+                                                  (3, True, 0x69), (4, True, 0x63), (5, True, 0x68),
+                                                  (6, True, 0x61), (9, False, 0x61)],
 }
 
 
@@ -171,7 +195,8 @@ def test_the_mirror_is_not_vacuous():
             for name, digit in zip(KEYS + EVENTS, frame):
                 seen_high[name] |= digit == "1"
     assert all(seen_high.values()), seen_high
-    assert any(frame != "00000000" for frame in _expected(SCRIPTS["hold w across frames"]))
+    assert any(frame != "0" * len(KEYS + EVENTS)
+               for frame in _expected(SCRIPTS["hold w across frames"]))
 
 
 def test_the_up_edge_scripts_straddle_a_frame():
@@ -179,7 +204,8 @@ def test_the_up_edge_scripts_straddle_a_frame():
     NEXT, with the event in the first frame only -- a pair inside one frame could not tell a poll
     that acts on the up edge from one that acts on the down edge."""
     for name, event in (("enter held across frames: no event on its up edge", "E"),
-                        ("esc held across frames: no event on its up edge", "X")):
+                        ("esc held across frames: no event on its up edge", "X"),
+                        ("h held across frames: no event on its up edge", "H")):
         slot = len(KEYS) + EVENTS.index(event)          # the digit that event prints in
         (t0, down0, _), (t1, down1, _) = SCRIPTS[name]
         assert down0 and not down1 and t1 // POLLS == t0 // POLLS + 1, name
@@ -192,3 +218,34 @@ def test_negative_control_a_wrong_binding_is_caught(kb_fjm):
     deliberately unbound in the macro; a mirror that bound it would have to be rejected."""
     events = [(0, True, 0x71)]
     assert _run(kb_fjm, events) != _expected(events, {**BINDING, 0x71: "f"})
+
+
+def test_negative_control_the_new_keys_are_caught(kb_fjm):
+    """R9 (M7 P3.4): a mirror without 'e' as use, or without 'h' as help, must be rejected"""
+    for script in ("e holds use like space", "h is an event on its down edge only"):
+        events = SCRIPTS[script]
+        assert _run(kb_fjm, events) == _expected(events)
+        no_e = {k: v for k, v in BINDING.items() if k != 0x65}
+        no_h = {k: v for k, v in EVENT_KEYS.items() if k != 0x68}
+        assert _run(kb_fjm, events) != _expected(events, no_e, no_h), script
+
+
+def _does_something(kb_fjm, code) -> bool:
+    """the key, pressed, sets a held flag or records an event in kb.poll (the RUN program)"""
+    return _run(kb_fjm, [(0, True, code)])[0] != "0" * len(KEYS + EVENTS)
+
+
+def test_the_help_screen_lists_exactly_the_keys_that_work(kb_fjm):
+    """M7 P3.4 (the owner: list ONLY the keys that work today). Every key name in the help screen's
+    rows has a keycode (`menu.HELP_KEYCODES`), and kb.poll -- RUN, not read -- does something on
+    each; and every keycode the macro binds (the held flags and the events) is named on the screen.
+    R9: an unbound key ('q', and 'g' in the 0x6_ row) does nothing, so `_does_something` can say
+    no."""
+    named = [n for key, _what in HELP_ROWS for n in help_key_names(key)]
+    assert sorted(named) == sorted(HELP_KEYCODES), (sorted(named), sorted(HELP_KEYCODES))
+    dead = [n for n in named if not _does_something(kb_fjm, HELP_KEYCODES[n])]
+    assert not dead, "the help screen names keys kb.poll ignores: %r" % dead
+    bound = set(BINDING) | set(EVENT_KEYS)
+    assert bound == set(HELP_KEYCODES.values()), sorted(bound ^ set(HELP_KEYCODES.values()))
+    assert set(MENU_KEYS) <= bound, "a menu key the poll does not bind"
+    assert not _does_something(kb_fjm, 0x71) and not _does_something(kb_fjm, 0x67)

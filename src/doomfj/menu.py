@@ -13,6 +13,10 @@ this repo has paid for three times.
 
 The colours are DERIVED from the wad's own PLAYPAL (darkest entry, brightest entry, most saturated
 red), not chosen as magic indices, so a different palette moves them together in both mirrors.
+
+M7 P3.4 -- the HELP screen (docs/gp-help.md) is one more baked frame from this module: a key map, not
+a list of lines, so it has its own layout (`_help_bitmap`) but the same fonts, colours, credit and
+encoder, and the same one-generator-two-mirrors rule (`help_pixels` / `help_stream` / `help_fj`).
 """
 from __future__ import annotations
 
@@ -44,6 +48,7 @@ _GLYPHS = {
     " ": "   |   |   |   |   |   |   ", "-": "    |    |    |####|    |    |    ",
     ".": "  |  |  |  |  |##|##", ":": "  |##|##|  |##|##|  ",
     "/": "    #|    #|   # |  #  | #   |#    |#    ", ">": "#    | #   |  #  |   # |  #  | #   |#    ",
+    ",": "   |   |   |   | ##| ##|#  ",                          # M7 P3.4: the help screen's
 }
 GLYPH_W, GLYPH_H, GLYPH_GAP = 5, 7, 1
 CELL_W = GLYPH_W + GLYPH_GAP            # the usual advance; the truncation budget below counts it
@@ -140,14 +145,94 @@ def _bitmap(width, height, lines, selected, colours):
         label = label.upper()[:width // CELL_W]
         x0 = max(0, (width - text_width(label)) // 2)
         _draw(out, width, height, label, x0, top + row * (GLYPH_H + 2), ink)
-    _draw(out, width, height, CREDIT, width - CREDIT_MARGIN - text_width(CREDIT, _SMALL_GLYPHS),
-          height - CREDIT_MARGIN - SMALL_GLYPH_H, credit, _SMALL_GLYPHS)
+    _draw_credit(out, width, height, credit)
     return out
+
+
+def _draw_credit(out, width, height, ink):
+    """the owner's CREDIT in the bottom-right corner, small (3x5): every baked screen carries it"""
+    _draw(out, width, height, CREDIT, width - CREDIT_MARGIN - text_width(CREDIT, _SMALL_GLYPHS),
+          height - CREDIT_MARGIN - SMALL_GLYPH_H, ink, _SMALL_GLYPHS)
 
 
 def pixels(width, height, lines, selected, colours):
     """What the ORACLE expects on screen."""
     return _bitmap(width, height, lines, selected, colours)
+
+
+# -------------------------------------------------------------------------------------------------
+# M7 P3.4 -- THE HELP SCREEN (docs/gp-help.md): the key map, ONLY the keys that work today
+# (src/fj/input.fj's kb.poll). P4 adds strafe, fire and the weapons, and moves A / D from turn to
+# strafe -- and updates these rows with them (the owner's target map, docs/gp-help.md section 4).
+HELP_TITLE = "HELP - CONTROLS"
+HELP_ROWS = (
+    ("W / UP", "MOVE FORWARD"),
+    ("S / DOWN", "MOVE BACK"),
+    ("A / LEFT", "TURN LEFT"),
+    ("D / RIGHT", "TURN RIGHT"),
+    ("SPACE / E", "USE: DOORS,"),
+    ("", "SWITCHES, LIFTS"),             # the use row, two lines: one would be 45 px too wide
+    ("ENTER", "SELECT"),
+    ("ESC", "MENU"),
+    ("H", "THIS HELP"),
+)
+# every key name the rows show, as the keyboard device's keycodes (the SDL codes pygame_window
+# delivers; input.fj's table). tests/fj/test_keyboard_input.py runs kb.poll on each and requires it
+# to DO something -- a held flag or a menu event -- so the screen cannot list a dead key.
+HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEFT": 0x82,
+                 "D": 0x64, "RIGHT": 0x83, "SPACE": 0x20, "E": 0x65, "ENTER": 0x0D, "ESC": 0x1B,
+                 "H": 0x68}
+HELP_TITLE_Y = 2                         # the title's top row
+HELP_ROWS_Y = 13                         # the first key row's top row
+HELP_PITCH = GLYPH_H + 2                 # the menu's line pitch
+HELP_COL_GAP = 8                         # px between the key column and the description column
+
+
+def help_key_names(key: str) -> list:
+    """the key names a key-column cell shows: "SPACE / E" -> ["SPACE", "E"]; "" -> []"""
+    return [k.strip() for k in key.split("/") if k.strip()]
+
+
+def _help_bitmap(width, height, colours):
+    """The help screen as a width*height list of palette indices -- THE picture, for both mirrors:
+    the title centred in the highlight colour, then the key map as two left-aligned columns (keys,
+    then what they do) in the text colour, the table centred as a block, and the credit. The layout
+    is ASSERTED to fit -- inside the screen, and clear of the credit's rows -- so a longer row or a
+    smaller screen stops the emitter instead of drawing over the corner."""
+    background, text, highlight, credit = colours
+    out = [background] * (width * height)
+    keys_w = max(text_width(k) for k, _d in HELP_ROWS)
+    table_w = keys_w + HELP_COL_GAP + max(text_width(d) for _k, d in HELP_ROWS)
+    x_keys = (width - table_w) // 2
+    x_desc = x_keys + keys_w + HELP_COL_GAP
+    bottom = HELP_ROWS_Y + (len(HELP_ROWS) - 1) * HELP_PITCH + GLYPH_H
+    assert x_keys >= 0 and text_width(HELP_TITLE) <= width, "the help table is wider than the screen"
+    assert bottom <= height - CREDIT_MARGIN - SMALL_GLYPH_H, (
+        "the help table reaches the credit's rows: bottom %d" % bottom)
+    _draw(out, width, height, HELP_TITLE, (width - text_width(HELP_TITLE)) // 2, HELP_TITLE_Y,
+          highlight)
+    for row, (key, what) in enumerate(HELP_ROWS):
+        y = HELP_ROWS_Y + row * HELP_PITCH
+        _draw(out, width, height, key, x_keys, y, text)
+        _draw(out, width, height, what, x_desc, y, text)
+    _draw_credit(out, width, height, credit)
+    return out
+
+
+def help_pixels(width, height, colours):
+    """What the ORACLE expects on screen while the help is up."""
+    return _help_bitmap(width, height, colours)
+
+
+def help_stream(width, height, colours) -> bytes:
+    """The 0x0B frame that paints exactly `help_pixels()` -- `stream()`'s encoder."""
+    return _encode(_help_bitmap(width, height, colours), width, height)
+
+
+def help_fj(width, height, colours, label: str = "menu_help", end_marker: bool = True) -> str:
+    """The baked help frame as fj -- `fj()`'s shape: one `stl.output_char` per stream byte."""
+    return _fj_text(help_stream(width, height, colours), label, end_marker,
+                    "M7 P3.4: the baked help frame")
 
 
 def stream(width, height, lines, selected, colours) -> bytes:
@@ -160,9 +245,13 @@ def stream(width, height, lines, selected, colours) -> bytes:
     # distinguishable from DITTO/END, and a run's `y2` is one byte, so this encoder is correct only
     # while width < 0xFE and height <= 0xFF. At 160x100 that is far off; assert rather than assume,
     # because a resolution change would otherwise corrupt the stream instead of failing.
+    return _encode(_bitmap(width, height, lines, selected, colours), width, height)
+
+
+def _encode(grid, width, height) -> bytes:
+    """a width*height picture -> its 0x0B stream (see `stream`): every baked screen's ONE encoder"""
     assert width < DITTO, "0x0B column tags must stay below DITTO (0xFE); width=%d" % width
     assert height <= END, "0x0B run bounds are one byte; height=%d" % height
-    grid = _bitmap(width, height, lines, selected, colours)
     out = bytearray([0x0B])
     previous = None
     for x in range(width):
@@ -192,15 +281,20 @@ def fj(width, height, lines, selected, colours, label: str = "menu_frame",
     ~2 ops per byte, and a menu stream is ~1 kB — so a menu frame costs order 2,000 ops against a
     world frame's ~28,000,000. The mode flag that chooses between them is the whole of M3's cost.
     """
-    data = stream(width, height, lines, selected, colours)
+    return _fj_text(stream(width, height, lines, selected, colours), label, end_marker,
+                    "M3: the baked menu frame")
+
+
+def _fj_text(data: bytes, label: str, end_marker: bool, what: str) -> str:
+    """a stream as fj: one `stl.output_char` per byte under `label`"""
     if not end_marker:
         # the caller supplies the end-of-frame byte from a SHARED tail -- see
         # wall_renderer._menu_lines, where both frame producers fall into one tail
         assert data[-1] == END
         data = data[:-1]
     body = "\n".join("    stl.output_char %d" % b for b in data)
-    return ("// M3: the baked menu frame -- %d bytes of 0x0B column run-lists, all constants\n"
-            "%s:\n%s\n" % (len(data), label, body))
+    return ("// %s -- %d bytes of 0x0B column run-lists, all constants\n"
+            "%s:\n%s\n" % (what, len(data), label, body))
 
 
 # -------------------------------------------------------------------------------------------------
@@ -211,21 +305,40 @@ def fj(width, height, lines, selected, colours, label: str = "menu_frame",
 
 # the keyboard device's keycodes the menu hears (src/fj/input.fj's table): enter and esc, and the
 # forward keys (w, up arrow) as "up" and the back keys (s, down arrow) as "dn". Down edges only.
-MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn"}
+# M7 P3.4: 'h' as "help" (the device has no F1; docs/gp-help.md).
+MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn",
+             0x68: "help"}
 # M7 P2a.2 -- `menu_scr`'s third screen: LEVEL COMPLETE, opened by the exit switch (docs/gp-exit.md)
 LEVEL_DONE_SCR = 2
+# M7 P3.4 (docs/gp-help.md) -- the HELP screen, one picture under two ids, because closing it goes
+# back to where it was opened from: HELP_MENU_SCR from the main menu (closes to the main menu, HELP
+# highlighted), HELP_GAME_SCR from the world (closes to the world). And the main menu now has two
+# items, NEW GAME and HELP: menu_scr 0 is the main menu with NEW GAME highlighted, MAIN_HELP_SCR the
+# same menu with HELP highlighted. No new persisted cell: `menu_scr` already persists.
+HELP_MENU_SCR = 3
+HELP_GAME_SCR = 4
+MAIN_HELP_SCR = 5
+HELP_SCREENS = (HELP_MENU_SCR, HELP_GAME_SCR)
 
 
 def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
     """One frame of the menu -> `(mode, scr, sel, new_game)`.
 
-    `mode` is 1 on a menu frame and 0 in the world; `scr` 0 is the main menu, 1 the skill screen
-    and LEVEL_DONE_SCR (2) the level-complete screen the exit opens -- esc or enter leave it for the
-    main menu (M7 P2a.2); `sel` is the highlighted skill, an index into wall_renderer.SKILLS. `events` is the set
-    of this frame's events ("esc", "enter", "up", "dn"), and the FIRST of them in that order is the
-    one acted on. `new_game` is the chosen skill's index on the frame NEW GAME is picked -- that
-    frame restarts the level at the skill and then runs the world's tic, as the program does -- and
-    None on every other frame."""
+    `mode` is 1 on a menu frame and 0 in the world; `scr` 0 is the main menu (NEW GAME
+    highlighted), 1 the skill screen and LEVEL_DONE_SCR (2) the level-complete screen the exit opens
+    -- esc or enter leave it for the main menu (M7 P2a.2); M7 P3.4: MAIN_HELP_SCR (5) is the main
+    menu with HELP highlighted, HELP_MENU_SCR (3) and HELP_GAME_SCR (4) the help screen opened from
+    the main menu and from the world. `sel` is the highlighted skill, an index into
+    wall_renderer.SKILLS. `events` is the set of this frame's events ("esc", "enter", "help", "up",
+    "dn"), and the FIRST of them in that order is the one acted on. `new_game` is the chosen skill's
+    index on the frame NEW GAME is picked -- that frame restarts the level at the skill and then
+    runs the world's tic, as the program does -- and None on every other frame.
+
+    M7 P3.4 (docs/gp-help.md): in the world, h opens the help (HELP_GAME_SCR); on the main menu, up
+    / down move between NEW GAME and HELP (clamped), and enter on HELP -- or h on either item --
+    opens it (HELP_MENU_SCR); on the help screen, esc or h close it, back to where it was opened
+    from: the main menu with HELP highlighted, or the world. The skill screen and LEVEL COMPLETE
+    ignore h."""
     # The skills the screen offers are wall_renderer.SKILLS: ONE tuple for the emitter's screens,
     # its dispatch and these rules (R6 -- this module kept its own `MENU_SKILLS = 3` until the P1.5
     # review). Imported here, not at the top, because wall_renderer imports this module.
@@ -233,16 +346,34 @@ def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
     if mode == 0:                                   # the world: esc or enter opens the main menu
         if "esc" in events or "enter" in events:
             return 1, 0, sel, None
+        if "help" in events:                        # M7 P3.4: h opens the help
+            return 1, HELP_GAME_SCR, sel, None
         return 0, scr, sel, None
+    if scr in HELP_SCREENS:                         # M7 P3.4: the help -- esc or h close it
+        if "esc" in events or "help" in events:
+            return (1, MAIN_HELP_SCR, sel, None) if scr == HELP_MENU_SCR else (0, 0, sel, None)
+        return 1, scr, sel, None
+    if scr == MAIN_HELP_SCR:                        # M7 P3.4: the main menu, HELP highlighted
+        if "esc" in events:
+            return 0, 0, sel, None
+        if "enter" in events or "help" in events:
+            return 1, HELP_MENU_SCR, sel, None
+        if "up" in events:
+            return 1, 0, sel, None
+        return 1, MAIN_HELP_SCR, sel, None
     if scr == LEVEL_DONE_SCR:                       # level complete: on to the main menu
         if "esc" in events or "enter" in events:
             return 1, 0, sel, None
         return 1, LEVEL_DONE_SCR, sel, None
-    if scr == 0:                                    # the main menu
+    if scr == 0:                                    # the main menu, NEW GAME highlighted
         if "esc" in events:
             return 0, 0, sel, None                  # resume the world where it was
         if "enter" in events:
             return 1, 1, sel, None                  # NEW GAME: the skill screen
+        if "help" in events:                        # M7 P3.4: h opens the help from here too
+            return 1, HELP_MENU_SCR, sel, None
+        if "dn" in events:                          # M7 P3.4: down to HELP
+            return 1, MAIN_HELP_SCR, sel, None
         return 1, 0, sel, None
     if "esc" in events:                             # the skill screen: back to the main menu
         return 1, 0, sel, None

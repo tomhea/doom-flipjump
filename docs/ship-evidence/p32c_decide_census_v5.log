@@ -1,0 +1,7 @@
+set scratchpad/gp/scenarios/combat_scenarios_v5.json (seen): 1100 frames
+  decisions            per frame: mean 0.02  p80 0  p99 1  max 2
+  attack actions       per frame: mean 0.01  p80 0  p99 1  max 1
+  attack-sight calls   per frame: mean 0.20  p80 0  p99 2  max 3
+  near LOS traces      per frame: mean 0.01  p80 0  p99 0  max 1
+  candidate segments per near trace: mean 0.0  p80 0  max 0  (6 traces)
+rc=0

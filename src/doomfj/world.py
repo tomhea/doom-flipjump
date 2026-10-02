@@ -557,8 +557,10 @@ class TicEvents:
 # M7 P3 (docs/gp-monsters.md): the MODEL MODES a rung's binary is exact against -- "idle" (P3.1: nothing wakes),
 # "wake" (P3.2a: A_Look wakes; A_Chase runs its counters and re-acquires, but neither moves nor decides an
 # attack), "chase" (P3.2b: A_Chase moves -- P_Move, P_NewChaseDir, the relink, monster doors and lifts -- but
-# decides no attack), "full" (everything)
-MONSTER_MODES = ("idle", "wake", "chase", "full")
+# decides no attack), "decide" (P3.2c: A_Chase decides melee and missile, the attack states run, and the attack
+# actions face and ROLL -- the monster's stream is the full model's -- but apply nothing: damage and the fireball
+# are P5), "full" (everything)
+MONSTER_MODES = ("idle", "wake", "chase", "decide", "full")
 
 
 def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:

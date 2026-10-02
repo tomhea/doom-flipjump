@@ -1,0 +1,4 @@
+$ python -m pytest tests/fj/test_monster_sight_fj.py -q -p no:cacheprovider
+........                                                                 [100%]
+8 passed in 32.37s
+rc=0

@@ -147,7 +147,8 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"mon_state", "mon_tics", "mon_facing", "mon_active"}),  # M7 P3.1
                    frozenset({"mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",
                               "thseen"}),                                               # M7 P3.2a
-                   frozenset({"mon_movecount", "mon_rng", "mon_floorz", "msec"}))       # M7 P3.2b
+                   frozenset({"mon_movecount", "mon_rng", "mon_floorz", "msec"}),       # M7 P3.2b
+                   frozenset({"mon_justattacked"}))                                     # M7 P3.2c
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -650,6 +651,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         # M7 P3.2b: the chase's per-slot cells (monstercode.p32b_decls)
         for name, width in (("mon_movecount", 2), ("mon_rng", 2), ("mon_floorz", 4), ("msec", 2)):
             cells[name] = Cell(name, "hex", width, count=nmon)
+        cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon)   # M7 P3.2c
     # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
     if nrt:
         cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt)

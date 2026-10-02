@@ -27,7 +27,8 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",   # M7 P2b: movers.MoverPhase's
                "mon_state", "mon_tics", "mon_facing", "mon_active",   # M7 P3.1: monsters.MonsterPhase's
                "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",  # P3.2a
-               "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt")   # P3.2b
+               "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt",   # P3.2b
+               "mon_justattacked")                                                       # P3.2c
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
@@ -52,7 +53,7 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int 
 
 MONSTER_NAMES = {"mon_state", "mon_tics", "mon_facing", "mon_active",
                  "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",
-                 "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt"}
+                 "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt", "mon_justattacked"}
 
 
 def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None,

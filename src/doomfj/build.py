@@ -83,7 +83,9 @@ MONSTER_PERSIST = ("mon_state", "mon_tics", "mon_facing", "mon_active",
                    "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",
                    # M7 P3.2b (the chase mode): the move's per-slot cells and each monster's sector; the barrels
                    # the skill stands (NEW GAME sets them); the movers' last state (P_ChangeSector's trigger)
-                   "mon_movecount", "mon_rng", "mon_floorz", "msec", "bar_solid", "mh_prev")
+                   "mon_movecount", "mon_rng", "mon_floorz", "msec", "bar_solid", "mh_prev",
+                   # M7 P3.2c (the decide mode): the missile decision's flag
+                   "mon_justattacked")
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:

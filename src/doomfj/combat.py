@@ -97,6 +97,7 @@ def _W():
 # RULES (combat). One definition each; the emitter is meant to read them too.
 # ================================================================================================
 MISSILERANGE_U = gd.MISSILERANGE >> 16      # 2048: bullets, monster hitscan
+BULLETS = {"A_PosAttack": 1, "A_SPosAttack": 3}   # a hitscanner's bullets per attack (monsterdecide reads it)
 PUNCH_REACH = gd.MELEERANGE >> 16           # 64: A_Punch's MELEERANGE
 SAW_REACH = PUNCH_REACH + 1                 # 65: A_Saw's MELEERANGE+1
 HIT_HALF_WIDTH = 20                         # monster hitscan: the player's effective half-width
@@ -846,10 +847,11 @@ class CombatMixin:
         if not self.ws.mon_target[m]:
             return
         self._a_face_target(m)
-        if action == "A_PosAttack":
-            self._mon_hitscan(m, 1, ev)
-        elif action == "A_SPosAttack":
-            self._mon_hitscan(m, 3, ev)
+        if self.monsters == "decide":                    # M7 P3.2c: the rolls without their effects (P5)
+            self._attack_rolls(m, action)
+            return
+        if action in BULLETS:
+            self._mon_hitscan(m, BULLETS[action], ev)
         elif action == "A_TroopAttack":
             if self._check_melee_range(m):
                 self._mon_melee(m, self.sites.troop_claw, ev)
@@ -858,6 +860,22 @@ class CombatMixin:
         elif action == "A_SargAttack":
             if self._check_melee_range(m):
                 self._mon_melee(m, self.sites.sarg_bite, ev)
+        else:
+            raise NotImplementedError(action)
+
+    def _attack_rolls(self, m: int, action: str) -> None:
+        """the `decide` mode's attack: every draw the full model's attack takes from the monster's stream, in its
+        order, and nothing else -- a bullet's spread and damage, the claw, the bite. The imp's fireball draws from
+        `rng_fx` (P5), not from the monster's stream."""
+        if action in BULLETS:
+            for _ in range(BULLETS[action]):
+                self._roll("mon_rng", self.sites.mon_bullet, m)
+        elif action == "A_TroopAttack":
+            if self._check_melee_range(m):
+                self._roll("mon_rng", self.sites.troop_claw, m)
+        elif action == "A_SargAttack":
+            if self._check_melee_range(m):
+                self._roll("mon_rng", self.sites.sarg_bite, m)
         else:
             raise NotImplementedError(action)
 

@@ -1,0 +1,4 @@
+$ python -m pytest tests/fj/test_monster_decide_fj.py -q -p no:cacheprovider
+......                                                                   [100%]
+6 passed in 2284.07s (0:38:04)
+rc=0

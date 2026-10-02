@@ -206,6 +206,7 @@ P3.2 is too large for one build, so it ships in three, each against a named mode
   SHIPPED 2026-10-02 as blocked44 (`docs/gp-ledger.md` P3.2b).
 - **P3.2c "decide"**: the melee and missile decisions and their states (A_FaceTarget; the attacks' EFFECTS are P5,
   so the mode runs the attack states without damage).
+  SHIPPED 2026-10-02 as blocked45 (`docs/gp-ledger.md` P3.2c).
 The frozen set v5 is the full model; B0 on it is exact from P3.2c on, when the mode's tic equals the model's for
 everything v5 exercises but damage.
 
@@ -225,8 +226,9 @@ height 0 -- every rule is live, the drop-off one included.
 **The pieces** (each on the engine against the model in a tests/fj harness, with mutants, before the build):
 1. *The monster cells*: a second `collision_cells_fj` set at radius 30 (a superset of 20's lists; the box uses the
    slot's true radius at run time, so the test is exact for both), its rows with ML_BLOCKMONSTERS folded into
-   blocking and each line's LOW floor (the drop-off), under its own prefix, testing through a new
-   `sim.line_test_mon` (the player's `sim.line_test` keeps its expansion -- and its heat keys). The rules of
+   blocking and each line's LOW floor (the drop-off), under its own prefix, testing through the one
+   `sim.line_test drop, lf, dropc` -- the monster cells pass `1, ca_lf, cp_drop` (track the drop-off), the player's
+   `0, 0, 0`, which adds no op to his expansion (`collision.collision_cells_fj`'s `lowfloor`). The rules of
    `try_move_monster` in a new `sim.try_move_mon`: ceil - floor < 56, ceil - z < 56, floor - z > 24, and
    floor - dropoff > 24.
 2. *The seed and the leaf*: the baked point location every thing uses (`ptloc_walk`, integer position) and a
@@ -267,3 +269,40 @@ frame; size +5,017,552 words (33.38% of 2^27). The door contacts are one leaf pe
 inlined per monster they were 8,056 compares (~14.6M ops) and the first build overran the table pool (ee6761c).
 P_ChangeSector runs outside the `lvdone` exit guard here; P3.2c's branch fixes it (796cdcc).
 
+
+### 8.5 P3.2c "decide" -- the design (as written; numbers: `docs/ship-evidence/p32c_decide_census_v5.log`, by `scratchpad/gp/p32c_decide_census.py`)
+
+**The model mode** `decide` (`World(monsters="decide")`): A_Chase whole -- `justattacked` -> clear it and
+P_NewChaseDir; the melee decision (a melee state, P_AproxDistance < MELEE_REACH (60), the attack sight); the
+missile decision (a missile state, movecount 0, the attack sight, reaction 0, then `P_Random < min(dist - bias,
+200)` refuses); the decided state entered with its A_FaceTarget. The attack states' actions face and DRAW exactly
+as the full model's (`combat._attack_rolls`: 3 draws per bullet, the claw's and the bite's one each when in melee
+reach) and apply nothing -- damage and the imp's fireball (which draws from `rng_fx`) are P5, so the monster stream
+is the full model's and P5 adds effects without moving a random number (`tests/host/test_monsters_decide.py`: the
+decide mode runs in lockstep with the full model's monsters until the player dies; control: a decide mode without
+the draws parts). `justhit` is 0 until damage (P4) and `ambush` matters only to sound (P4): neither is held in fj.
+
+**The fj** (`doomfj.monsterdecide`, `doomfj.monstersight`, `monstercode.p32c_slot_lines`):
+- `mm_decide` replaces `mm_chase` in the slot's move call, with the decision's inputs in the move's context; a
+  decision returns `mm_dec` (1 melee, 2 missile) and the facing, and the slot enters the state (`mon_justattacked`
+  per slot, persisted).
+- The slot's action dispatch runs A_FaceTarget and its type's attack action through `md_attack` (the facing,
+  then `mon_rng += draws`).
+- `mm_as`, the attack sight: seen, or within NEAR and `sl_los` -- the exact 2D LOS of `World.los_points` from the
+  monster's integer position to the player's 16.16 one. The candidates are a per-256-unit-cell list of the sight
+  segments whose box reaches the cell grown by NEAR + 1 (a superset: `test_monster_sight_fj`'s
+  `test_the_cell_lists_hold_every_candidate`, with the margin-0 control); a door's, a lift's or the switch's segment
+  counts at the states its opening is shut (the model's height rules, one mask per segment); the touch is
+  `segments_touch` on four orientation signs, each a 48-bit product difference (`hex.mul_lo 12`), the player's
+  16.16 coordinates kept whole -- the operands are bounded at emit time from the map's extent (< 2^13 units).
+- Harnesses: `tests/fj/test_monster_sight_fj.py` (900 traces, every door and lift state, touches and collinear
+  traces; controls: the dynamic segments always shut, strict crossings only, no margin, o4 without its o3 term) and
+  `tests/fj/test_monster_decide_fj.py` (120 frames against the decide mode; controls: no roll, no LOS, justattacked
+  never read, no draws).
+
+**As built** (SHIPPED 2026-10-02 as blocked45, sha256 `25957324521286dd`; `docs/gp-ledger.md` P3.2c): measured +9,795
+on gamespeed's binding (14,452,893 -> 14,462,688), -211,944 on v5's (15,087,224), -12,572 on profx's mean frame; size
++726,572 words (33.92% of 2^27). The near LOS went from 5.52M to 0.19M ops before the build (e24ab75): a segment XORs
+its constants into zeroed registers (`hex.xor_by`, one op a nibble) and the shared `sl_seg` does the box reject, the
+ends and d, zeroing on every exit. P_ChangeSector runs inside the `lvdone` exit guard (796cdcc,
+`tests/fj/test_change_sector_fj.py`).

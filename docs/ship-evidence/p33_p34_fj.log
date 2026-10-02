@@ -1,0 +1,5 @@
+$ python -m pytest tests/fj/test_menu_screens.py tests/fj/test_menu_frame.py tests/fj/test_keyboard_input.py tests/fj/test_skill_menu.py tests/fj/test_menu_mode.py tests/fj/test_thing_pass_depth_fj.py -q -p no:cacheprovider
+........................................................................ [ 80%]
+.................                                                        [100%]
+89 passed in 34.48s
+rc=0

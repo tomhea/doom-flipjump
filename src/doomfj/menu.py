@@ -14,9 +14,10 @@ this repo has paid for three times.
 The colours are DERIVED from the wad's own PLAYPAL (darkest entry, brightest entry, most saturated
 red), not chosen as magic indices, so a different palette moves them together in both mirrors.
 
-M7 P3.4 -- the HELP screen (docs/gp-help.md) is one more baked frame from this module: a key map, not
-a list of lines, so it has its own layout (`_help_bitmap`) but the same fonts, colours, credit and
-encoder, and the same one-generator-two-mirrors rule (`help_pixels` / `help_stream` / `help_fj`).
+M7 P3.4 -- the HELP screen (docs/gp-help.md) is one more baked frame from this module: a key map
+drawn as keycaps, not a list of lines, so it has its own layout (`help_layout`) but the same fonts,
+colours, credit and encoder, and the same one-generator-two-mirrors rule (`help_pixels` /
+`help_stream` / `help_fj`).
 """
 from __future__ import annotations
 
@@ -49,6 +50,13 @@ _GLYPHS = {
     ".": "  |  |  |  |  |##|##", ":": "  |##|##|  |##|##|  ",
     "/": "    #|    #|   # |  #  | #   |#    |#    ", ">": "#    | #   |  #  |   # |  #  | #   |#    ",
     ",": "   |   |   |   | ##| ##|#  ",                          # M7 P3.4: the help screen's
+    # M7 P3.4: the help's ARROW keys, under their OWN characters -- '>' is the menu's selection
+    # marker and must not change, so no arrow overrides '<' or '>'. Up / down 5x7; left / right
+    # 7x7, a long shaft, so they read as arrows beside the 5-wide up / down (the owner's prototype).
+    "↑": "  #  | ### |# # #|  #  |  #  |  #  |  #  ",                   # up
+    "↓": "  #  |  #  |  #  |  #  |# # #| ### |  #  ",                   # down
+    "←": "       |  #    | #     |#######| #     |  #    |       ",     # left
+    "→": "       |    #  |     # |#######|     # |    #  |       ",     # right
 }
 GLYPH_W, GLYPH_H, GLYPH_GAP = 5, 7, 1
 CELL_W = GLYPH_W + GLYPH_GAP            # the usual advance; the truncation budget below counts it
@@ -149,10 +157,16 @@ def _bitmap(width, height, lines, selected, colours):
     return out
 
 
+def credit_box(width, height) -> tuple:
+    """the credit's bounding box `(x, y, w, h)`: CREDIT_MARGIN px from the right and bottom edges"""
+    w = text_width(CREDIT, _SMALL_GLYPHS)
+    return width - CREDIT_MARGIN - w, height - CREDIT_MARGIN - SMALL_GLYPH_H, w, SMALL_GLYPH_H
+
+
 def _draw_credit(out, width, height, ink):
     """the owner's CREDIT in the bottom-right corner, small (3x5): every baked screen carries it"""
-    _draw(out, width, height, CREDIT, width - CREDIT_MARGIN - text_width(CREDIT, _SMALL_GLYPHS),
-          height - CREDIT_MARGIN - SMALL_GLYPH_H, ink, _SMALL_GLYPHS)
+    x, y, _w, _h = credit_box(width, height)
+    _draw(out, width, height, CREDIT, x, y, ink, _SMALL_GLYPHS)
 
 
 def pixels(width, height, lines, selected, colours):
@@ -162,59 +176,146 @@ def pixels(width, height, lines, selected, colours):
 
 # -------------------------------------------------------------------------------------------------
 # M7 P3.4 -- THE HELP SCREEN (docs/gp-help.md): the key map, ONLY the keys that work today
-# (src/fj/input.fj's kb.poll). P4 adds strafe, fire and the weapons, and moves A / D from turn to
-# strafe -- and updates these rows with them (the owner's target map, docs/gp-help.md section 4).
+# (src/fj/input.fj's kb.poll), drawn as KEYCAPS -- the owner's choice on 2026-10-02 from rendered
+# prototypes: the movement keys as the keyboard's two inverted-T clusters, W/A/S/D "OR" the arrows,
+# with a two-line legend beside them; below, one row of caps per remaining action, what it does
+# beside. P4 adds strafe, fire and the weapons, and moves A / D from turn to strafe -- and updates
+# these with them (the owner's target map, docs/gp-help.md section 4).
 HELP_TITLE = "HELP - CONTROLS"
+# the inverted-T clusters, left to right, HELP_OR between them: each is (up, left, down, right)
+HELP_CLUSTERS = (("W", "A", "S", "D"), ("UP", "LEFT", "DOWN", "RIGHT"))
+HELP_OR = "OR"
+# what a cap shows where it is not the key's own name: the arrows' own glyphs
+HELP_CAP_LEGENDS = {"UP": "↑", "DOWN": "↓", "LEFT": "←", "RIGHT": "→"}
+# the legend beside the clusters: one line beside the top caps, one beside the bottom caps
+HELP_CLUSTER_LEGEND = ("↑ ↓ MOVE", "← → TURN")
+# the use keys' description, two lines -- the owner's wording (2026-10-02), ONE place to change it
+HELP_USE_LINES = ("USE: DOORS,", "SWITCHES, LIFTS")
+# below the clusters, one row per action: (its keys, drawn as caps; its description's lines)
 HELP_ROWS = (
-    ("W / UP", "MOVE FORWARD"),
-    ("S / DOWN", "MOVE BACK"),
-    ("A / LEFT", "TURN LEFT"),
-    ("D / RIGHT", "TURN RIGHT"),
-    ("SPACE / E", "USE: DOORS,"),
-    ("", "SWITCHES, LIFTS"),             # the use row, two lines: one would be 45 px too wide
-    ("ENTER", "SELECT"),
-    ("ESC", "MENU / BACK"),                  # in the help, Esc closes it (owner 2026-10-02)
-    ("H", "THIS HELP"),
+    (("SPACE", "E"), HELP_USE_LINES),
+    (("ENTER",), ("SELECT",)),
+    (("ESC",), ("MENU / BACK",)),                # in the help, Esc closes it (owner 2026-10-02)
+    (("H",), ("THIS HELP",)),
 )
-# every key name the rows show, as the keyboard device's keycodes (the SDL codes pygame_window
-# delivers; input.fj's table). tests/fj/test_keyboard_input.py runs kb.poll on each and requires it
-# to DO something -- a held flag or a menu event -- so the screen cannot list a dead key.
+# every key name the screen shows (`help_key_names`), as the keyboard device's keycodes (the SDL
+# codes pygame_window delivers; input.fj's table). tests/fj/test_keyboard_input.py runs kb.poll on
+# each and requires it to DO something -- a held flag or a menu event -- so the screen cannot list a
+# dead key.
 HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEFT": 0x82,
                  "D": 0x64, "RIGHT": 0x83, "SPACE": 0x20, "E": 0x65, "ENTER": 0x0D, "ESC": 0x1B,
                  "H": 0x68}
+# THE GEOMETRY, px. A cap is a 1-px box in the credit's dim gray with 1 px of padding round its
+# legend, the legend centred; every cap of a cluster is as wide as its widest legend's cap (W/A/S/D
+# 9, the arrows 11), and each cap of a key row fits its own legend.
 HELP_TITLE_Y = 2                         # the title's top row
-HELP_ROWS_Y = 13                         # the first key row's top row
-HELP_PITCH = GLYPH_H + 2                 # the menu's line pitch
-HELP_COL_GAP = 8                         # px between the key column and the description column
+HELP_X = 6                               # the left margin: the clusters and the key column
+HELP_CLUSTERS_Y = 12                     # the clusters' top row
+HELP_CAP_BORDER = 1
+HELP_CAP_PAD = 1
+HELP_CAP_INSET = HELP_CAP_BORDER + HELP_CAP_PAD      # a cap's edge to its legend
+HELP_CAP_H = GLYPH_H + 2 * HELP_CAP_INSET           # every cap's outer height
+HELP_CAP_GAP = 1                         # between a cluster's caps
+HELP_OR_GAP = 4                          # either side of HELP_OR
+HELP_LEGEND_GAP = 7                      # the last cluster to its legend
+HELP_ROWS_GAP = 3                        # the clusters' bottom to the first key row
+HELP_KEY_GAP = 2                         # between a key row's caps
+HELP_DESC_GAP = 6                        # the widest key row to the descriptions
+HELP_ROW_PITCH = HELP_CAP_H + 1          # one key row to the next...
+HELP_LINE_PITCH = GLYPH_H + 2            # ...plus this per extra description line (menu pitch)
 
 
-def help_key_names(key: str) -> list:
-    """the key names a key-column cell shows: "SPACE / E" -> ["SPACE", "E"]; "" -> []"""
-    return [k.strip() for k in key.split("/") if k.strip()]
+def help_key_names() -> list:
+    """every key name the help screen shows, in screen order: the clusters', then the rows'"""
+    return ([k for cluster in HELP_CLUSTERS for k in cluster]
+            + [k for keys, _lines in HELP_ROWS for k in keys])
+
+
+def help_cap_legend(key: str) -> str:
+    """what `key`'s cap shows: its own glyph (the arrows) or its name"""
+    return HELP_CAP_LEGENDS.get(key, key)
+
+
+def help_cap_width(legend: str) -> int:
+    """the outer width of the narrowest cap that holds `legend`"""
+    return text_width(legend) + 2 * HELP_CAP_INSET
+
+
+def help_layout(width, height) -> tuple:
+    """THE help screen's layout: `(caps, texts)` -- `caps` the keycaps as `(key, x, y, w)`, each an
+    outer box HELP_CAP_H high; `texts` every string drawn, as `(label, x, y, role)`, role
+    "title" (the highlight colour) or "text" (the text colour), the caps' legends among them.
+    ASSERTED inside the screen, so a longer row or a smaller screen stops the emitter instead of
+    clipping the map."""
+    caps, texts = [], [(HELP_TITLE, (width - text_width(HELP_TITLE)) // 2, HELP_TITLE_Y, "title")]
+
+    def cap(key, x, y, w):
+        legend = help_cap_legend(key)
+        caps.append((key, x, y, w))
+        texts.append((legend, x + (w - text_width(legend)) // 2, y + HELP_CAP_INSET, "text"))
+
+    # the clusters: an inverted T each -- the up cap over the middle of left, down, right
+    bottom_y = HELP_CLUSTERS_Y + HELP_CAP_H + HELP_CAP_GAP
+    x = HELP_X
+    for i, (up, left, down, right) in enumerate(HELP_CLUSTERS):
+        if i:
+            texts.append((HELP_OR, x + HELP_OR_GAP, bottom_y + HELP_CAP_INSET, "text"))
+            x += HELP_OR_GAP + text_width(HELP_OR) + HELP_OR_GAP
+        w = max(help_cap_width(help_cap_legend(k)) for k in (up, left, down, right))
+        cap(up, x + w + HELP_CAP_GAP, HELP_CLUSTERS_Y, w)
+        for col, key in enumerate((left, down, right)):
+            cap(key, x + col * (w + HELP_CAP_GAP), bottom_y, w)
+        x += 3 * w + 2 * HELP_CAP_GAP
+    for row, line in enumerate(HELP_CLUSTER_LEGEND):
+        texts.append((line, x + HELP_LEGEND_GAP,
+                      HELP_CLUSTERS_Y + row * (HELP_CAP_H + HELP_CAP_GAP) + HELP_CAP_INSET, "text"))
+    # the key rows: caps from the left margin, the descriptions in one column after the widest row
+    keys_w = max(sum(help_cap_width(help_cap_legend(k)) for k in keys)
+                 + HELP_KEY_GAP * (len(keys) - 1) for keys, _lines in HELP_ROWS)
+    x_desc = HELP_X + keys_w + HELP_DESC_GAP
+    y = bottom_y + HELP_CAP_H + HELP_ROWS_GAP
+    for keys, lines in HELP_ROWS:
+        x = HELP_X
+        for key in keys:
+            w = help_cap_width(help_cap_legend(key))
+            cap(key, x, y, w)
+            x += w + HELP_KEY_GAP
+        for i, line in enumerate(lines):
+            texts.append((line, x_desc, y + HELP_CAP_INSET + i * HELP_LINE_PITCH, "text"))
+        y += HELP_ROW_PITCH + HELP_LINE_PITCH * (len(lines) - 1)
+    boxes = [(x, y, w, HELP_CAP_H) for _k, x, y, w in caps] + \
+            [(x, y, text_width(label), GLYPH_H) for label, x, y, _r in texts]
+    outside = [(x, y, w, h) for x, y, w, h in boxes
+               if x < 0 or y < 0 or x + w > width or y + h > height]
+    assert not outside, "the help layout is outside the screen: %r" % outside
+    return caps, texts
+
+
+def _draw_box(out, width, x0, y0, w, h, ink):
+    """the 1-px outline of a w*h rectangle at (x0, y0): a keycap"""
+    for x in range(x0, x0 + w):
+        out[y0 * width + x] = out[(y0 + h - 1) * width + x] = ink
+    for y in range(y0, y0 + h):
+        out[y * width + x0] = out[y * width + x0 + w - 1] = ink
 
 
 def _help_bitmap(width, height, colours):
     """The help screen as a width*height list of palette indices -- THE picture, for both mirrors:
-    the title centred in the highlight colour, then the key map as two left-aligned columns (keys,
-    then what they do) in the text colour, the table centred as a block, and the credit. The layout
-    is ASSERTED to fit -- inside the screen, and clear of the credit's rows -- so a longer row or a
-    smaller screen stops the emitter instead of drawing over the corner."""
+    `help_layout` drawn -- the caps' boxes in the credit's dim gray, the title in the highlight
+    colour, every other string (the caps' legends among them) in the text colour -- and the credit.
+    ASSERTED clear of the credit: no pixel of the table inside the credit's box (the credit is
+    bottom-right and the H cap reaches as low on the left, so a whole-row rule would be wrong)."""
     background, text, highlight, credit = colours
     out = [background] * (width * height)
-    keys_w = max(text_width(k) for k, _d in HELP_ROWS)
-    table_w = keys_w + HELP_COL_GAP + max(text_width(d) for _k, d in HELP_ROWS)
-    x_keys = (width - table_w) // 2
-    x_desc = x_keys + keys_w + HELP_COL_GAP
-    bottom = HELP_ROWS_Y + (len(HELP_ROWS) - 1) * HELP_PITCH + GLYPH_H
-    assert x_keys >= 0 and text_width(HELP_TITLE) <= width, "the help table is wider than the screen"
-    assert bottom <= height - CREDIT_MARGIN - SMALL_GLYPH_H, (
-        "the help table reaches the credit's rows: bottom %d" % bottom)
-    _draw(out, width, height, HELP_TITLE, (width - text_width(HELP_TITLE)) // 2, HELP_TITLE_Y,
-          highlight)
-    for row, (key, what) in enumerate(HELP_ROWS):
-        y = HELP_ROWS_Y + row * HELP_PITCH
-        _draw(out, width, height, key, x_keys, y, text)
-        _draw(out, width, height, what, x_desc, y, text)
+    caps, texts = help_layout(width, height)
+    for _key, x, y, w in caps:
+        _draw_box(out, width, x, y, w, HELP_CAP_H, credit)
+    for label, x, y, role in texts:
+        _draw(out, width, height, label, x, y, highlight if role == "title" else text)
+    cx, cy, cw, ch = credit_box(width, height)
+    over = [(x, y) for y in range(max(0, cy), min(height, cy + ch))
+            for x in range(max(0, cx), min(width, cx + cw)) if out[y * width + x] != background]
+    assert not over, "the help table reaches the credit's corner: %r" % over[:4]
     _draw_credit(out, width, height, credit)
     return out
 

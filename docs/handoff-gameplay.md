@@ -344,7 +344,7 @@ device PR: the partial-ditto tokens and the bar's ditto). Gate: `fight`. Budget 
 **The owner's target key map (approved 2026-10-02)**: move W / S and UP / DOWN; turn the LEFT / RIGHT
 arrows; strafe A / D and , / . (**A / D move from turn to strafe in P4**); use SPACE or E (E landed in
 P3.4); fire CTRL; weapons 1-4; menu ESC / ENTER; help H. P4 re-binds `kb.poll` to it and updates the
-help screen with it (`menu.HELP_ROWS` / `HELP_KEYCODES`; `test_keyboard_input.py`'s
+help screen with it (`menu.HELP_CLUSTERS` / `HELP_ROWS` / `HELP_KEYCODES`; `test_keyboard_input.py`'s
 `test_the_help_screen_lists_exactly_the_keys_that_work` holds the screen and the poll together, both
 directions) -- `docs/gp-help.md` section 4.
 

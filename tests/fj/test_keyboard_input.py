@@ -33,7 +33,7 @@ from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, Scr
 
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.menu import HELP_KEYCODES, HELP_ROWS, MENU_KEYS, help_key_names
+from doomfj.menu import HELP_KEYCODES, MENU_KEYS, help_key_names
 
 SRC = [Path("src/fj") / "input.fj"]
 CFG = Config()
@@ -236,12 +236,12 @@ def _does_something(kb_fjm, code) -> bool:
 
 
 def test_the_help_screen_lists_exactly_the_keys_that_work(kb_fjm):
-    """M7 P3.4 (the owner: list ONLY the keys that work today). Every key name in the help screen's
-    rows has a keycode (`menu.HELP_KEYCODES`), and kb.poll -- RUN, not read -- does something on
-    each; and every keycode the macro binds (the held flags and the events) is named on the screen.
-    R9: an unbound key ('q', and 'g' in the 0x6_ row) does nothing, so `_does_something` can say
-    no."""
-    named = [n for key, _what in HELP_ROWS for n in help_key_names(key)]
+    """M7 P3.4 (the owner: list ONLY the keys that work today). Every key the help screen draws a
+    cap for (`menu.help_key_names`) has a keycode (`menu.HELP_KEYCODES`), and kb.poll -- RUN, not
+    read -- does something on each; and every keycode the macro binds (the held flags and the
+    events) is named on the screen. R9: an unbound key ('q', and 'g' in the 0x6_ row) does nothing,
+    so `_does_something` can say no."""
+    named = help_key_names()
     assert sorted(named) == sorted(HELP_KEYCODES), (sorted(named), sorted(HELP_KEYCODES))
     dead = [n for n in named if not _does_something(kb_fjm, HELP_KEYCODES[n])]
     assert not dead, "the help screen names keys kb.poll ignores: %r" % dead

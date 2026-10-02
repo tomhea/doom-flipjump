@@ -15,20 +15,39 @@ between them, clamped at both ends; enter on NEW GAME opens the skill screen as 
 HELP opens the help; h on either item opens it too.
 
 The help screen, 160x100 like every menu screen, drawn by `doomfj.menu` with the menu's fonts and
-colours:
+colours, its keys drawn as KEYCAPS:
 
 ```
-            HELP - CONTROLS                    <- the 5x7 font, the highlight colour, centred
-  W / UP      MOVE FORWARD                     <- two left-aligned columns in the text colour,
-  S / DOWN    MOVE BACK                           the table centred as a block
-  A / LEFT    TURN LEFT
-  D / RIGHT   TURN RIGHT
-  SPACE / E   USE: DOORS,
-              SWITCHES, LIFTS                  <- one row would be 45 px too wide
-  ENTER       SELECT
-  ESC         MENU / BACK   (in the help, Esc closes it)
-  H           THIS HELP                         TOMHE.APP  <- the credit, as on every screen
+            HELP - CONTROLS                    <- the 5x7 font, the highlight colour, centred (y 2)
+     [W]            [^]      ^ v MOVE          <- two inverted-T clusters at y 12: W/A/S/D "OR" the
+  [A][S][D]  OR  [<][v][>]   < > TURN             arrows, a legend line beside each cap row
+  [SPACE] [E]   USE: DOORS,                    <- below (3 px gap): a row of caps per action, what
+                SWITCHES, LIFTS                   it does in one column after the widest row
+  [ENTER]       SELECT
+  [ESC]         MENU / BACK   (in the help, Esc closes it)
+  [H]           THIS HELP                       TOMHE.APP  <- the credit, as on every screen
 ```
+
+(the sketch's `^ v < >` are the screen's arrow glyphs.) A cap is a 1-px box in the credit's dim
+gray (`palette_colours`' fourth colour) with 1 px of padding round its legend, which is centred in
+the text colour: GLYPH_H + 4 = 11 px high; every cap of a cluster as wide as its widest legend's cap
+(W/A/S/D 9, the arrows 11, their caps 1 px apart), a key row's caps each fitting their own legend
+(2 px apart). Key rows are 12 px apart, plus 9 for each extra description line. The geometry is
+named constants in `doomfj.menu` (`HELP_X`, `HELP_CLUSTERS_Y`, `HELP_CAP_*`, `HELP_*_GAP`,
+`HELP_ROW_PITCH`, `HELP_LINE_PITCH`), the layout one function (`help_layout`), and it is ASSERTED
+inside the screen and clear of the credit's box (not the credit's rows: the H cap's bottom row is
+the credit's top row, on the left).
+
+The arrows are glyphs of their OWN -- up / down 5x7 and left / right 7x7, under the characters
+U+2191 / U+2193 / U+2190 / U+2192 in the 5x7 font's table -- not `<` / `>`: `>` is the menu's
+selection marker, and every other menu screen is byte-identical to before (pixels, stream and fj
+text of the main, skill, LEVEL COMPLETE, clipped and empty screens, checked before / after).
+
+**The design is the owner's choice (2026-10-02), from rendered prototypes** (plain text with arrow
+glyphs; every key a cap; the keyboard's clusters; refinements of each): keycaps, the two clusters,
+and use described as what it works on -- `menu.HELP_USE_LINES`, "USE: DOORS, / SWITCHES, LIFTS", one
+constant so a wording change is one line (and the host test's expected text). Items are picked up
+by walking over them, so no key does it; P6 (pickups) adds that line to the screen.
 
 Esc or h close it, back to where it was opened from: the main menu (HELP highlighted), or the
 world, where it was -- the help frame, like every menu frame, skips the tic, so nothing moves
@@ -82,9 +101,10 @@ the state machine on world frames, m7-depth against this branch, 20 frames): +1.
 popcount of its address), and some 10^-6 of a 14M-op frame. Gameplay ops are unchanged within noise;
 the rung's binding delta will be placement (`docs/gp-ledger.md`, P2a.2's row for how that reads).
 
-The menu frames themselves: the help stream is 4,770 bytes (text-dense: ~3.5x a menu screen), the
-main menu on HELP 1,318, the main menu 1,346 (was 1,364 with QUIT). Size ESTIMATE: 6,068 new stream
-bytes x 8 ops x 2 words = 97,088 words, plus the decode and the state lines.
+The menu frames themselves: the help stream is 5,014 bytes as keycaps (4,770 as the first,
+text-only design; ~3.7x a menu screen), the main menu on HELP 1,318, the main menu 1,346 (was 1,364
+with QUIT). Size ESTIMATE: 6,312 new stream bytes x 8 ops x 2 words = 100,992 words (97,088 for the
+text-only design), plus the decode and the state lines.
 
 ## 4. The owner's target key map (approved 2026-10-02, for P4)
 
@@ -99,17 +119,21 @@ bytes x 8 ops x 2 words = 97,088 words, plus the decode and the state lines.
 | menu | ESC / ENTER | as now |
 | help | H | as now |
 
-P4 changes `kb.poll` (strafe, fire and the digit keys; A / D re-bound), `menu.HELP_ROWS` and
-`HELP_KEYCODES` with it -- `tests/fj/test_keyboard_input.py`'s
+P4 changes `kb.poll` (strafe, fire and the digit keys; A / D re-bound), `menu.HELP_CLUSTERS`,
+`HELP_CLUSTER_LEGEND`, `HELP_ROWS` and `HELP_KEYCODES` with it -- `tests/fj/test_keyboard_input.py`'s
 `test_the_help_screen_lists_exactly_the_keys_that_work` fails until the screen and the poll agree,
 in both directions. Recorded in `docs/handoff-gameplay.md`, P4.
 
 ## 5. Tests and gates
 
 - Host (`tests/host/test_menu.py`): the help stream decoded by the real device is the oracle's
-  picture; the title and every row's glyphs exactly where the layout says, in their colours, and
-  nothing else inked (legibility, glyph by glyph); the rows are the owner's map; not blank, not the
-  menu; R9 -- one pixel of the oracle moved is caught, a too-wide row stops the generator; the rules
+  picture; `help_layout` is the owner's design, PINNED cap by cap and string by string (every legend
+  centred in its cap); every cap's outline, glyph and the credit exactly where the pinned design
+  says, in their colours, and nothing else inked (legibility, box by box and glyph by glyph); the
+  words are the owner's (`HELP_USE_LINES`); every key named has a cap and a keycode; the arrows are
+  their own glyphs and `>` is untouched; not blank, not the menu; R9 -- one pixel of the oracle moved
+  is caught, a cap moved by 1 px or the left arrow drawn as `<` fails the design check, a row past
+  the right or bottom edge and a table in the credit's corner stop the generator; the rules
   (`test_the_help_rules`); the one mapping gives seven distinct pictures; a main menu without HELP
   stops the emitter.
 - fj, `kb.poll` (`tests/fj/test_keyboard_input.py`): 'e' holds use like space, one shared flag; 'h'

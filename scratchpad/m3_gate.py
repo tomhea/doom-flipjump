@@ -4,6 +4,7 @@
     python scratchpad/m3_gate.py --selftest          # R9: every frame claimed to be a world frame
     python scratchpad/m3_gate.py --selftest-skill    # R9 (M7 P1.5): the oracle starts the WRONG skill
     python scratchpad/m3_gate.py --selftest-state    # R9 (M7 P1.5): a state no picture shows is wrong
+    python scratchpad/m3_gate.py --selftest-help     # R9 (M7 P3.4): the world's help closes to the MENU
 
 The binary boots into the MAIN MENU (`mode` bakes to 1, `menu_scr` to 0). M7 P1.5 gave the menu a
 skill screen (docs/gp-skill-menu.md; `doomfj.menu.menu_step` is the rules' oracle side): in the
@@ -39,6 +40,13 @@ THE THINGS THIS GATE EXISTS TO CATCH, none of which a single-frame check would s
      show `menu_scr`, so pixels alone would pass a screen cell that NEW GAME left wrong;
      --selftest-state (R9) expects exactly that from the oracle, and must be rejected on the first
      NEW GAME frame by the state check alone.
+  6. THE HELP (M7 P3.4, docs/gp-help.md). From the world (h), the help is up, W held across it moves
+     nobody, and esc closes it back to the WORLD where it was; from the main menu -- down to its
+     HELP item and enter, and h on either item -- the help is up and esc / h close it back to the
+     main menu on HELP; h again from the world and h closes it. Every help and main-menu frame is
+     compared to `wall_renderer.menu_screen_pixels`, the one mapping from the menu's state to its
+     picture. --selftest-help (R9): the oracle closes the world's help to the main menu, and the
+     gate must reject it at the frame esc leaves the help (HELP_CLOSED_TO_WORLD).
 """
 import argparse
 import sys
@@ -51,18 +59,20 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.doors import door_states, initial_states, walkover_triggers   # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
-from doomfj.menu import MENU_KEYS, menu_step, palette_colours, pixels     # noqa: E402
+from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, MAIN_HELP_SCR,    # noqa: E402
+                         MENU_KEYS, menu_step, palette_colours)
 from doomfj.reference_model import (ReferenceModel, SimState,             # noqa: E402
                                     build_scene, spawn_state)
 from doomfj.things import skill_hidden                                    # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.wall_renderer import (BOOT_SKILL, DEFAULT_MENU,               # noqa: E402
-                                  DEFAULT_MENU_SELECTED, SKILL_MENU, SKILL_MENU_FIRST, SKILLS,
-                                  STANDALONE_POLLS)
+                                  SKILL_MENU, SKILL_MENU_FIRST, SKILLS, STANDALONE_POLLS,
+                                  menu_screen_pixels)
 from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent               # noqa: E402
 
 ENTER, ESC, K_FWD, K_BACK = 0x0D, 0x1B, 0x77, 0x73
+K_HELP = 0x68                                  # M7 P3.4: the help key
 SKILL_NAMES = {s: n for s, n in zip(SKILLS, ("easy", "medium", "hard"))}
 
 
@@ -95,10 +105,33 @@ SCRIPT = (
     + press(27, ENTER) + press(28, ENTER)      # the main menu, the skill screen (medium)
     + press(29, K_BACK)                        # down: hard
     + press(30, ENTER)                         # NEW GAME at hard
+    # M7 P3.4 -- THE HELP (docs/gp-help.md), in the world at hard's level start
+    + press(32, K_HELP)                        # h in the world: the help, from frame 32
+    + [(32, 2, True, K_FWD)]                   # W pressed WHILE THE HELP IS UP, held
+    + [(34, 0, False, K_FWD)]                  # ... released,
+    + [(34, 1, True, ESC), (34, 2, False, ESC)]   # ... and esc: the WORLD again from frame 34
+    + press(36, ENTER)                         # the main menu
+    + press(37, K_BACK)                        # down: HELP highlighted
+    + press(38, ENTER)                         # enter on HELP: the help, from the menu
+    + press(40, K_HELP)                        # h: back to the main menu, HELP highlighted
+    + press(41, K_HELP)                        # h on HELP: the help again
+    + press(42, ESC)                           # esc: back to the main menu on HELP
+    + press(43, K_FWD)                         # up: NEW GAME highlighted
+    + press(44, K_HELP)                        # h on NEW GAME: the help
+    + press(45, ESC)                           # esc: the main menu on HELP
+    + press(46, ESC)                           # esc: the world, where it was
+    + press(47, K_HELP)                        # h: the help, from the world
+    + press(48, K_HELP)                        # h: the world again
 )
-FRAMES = 32
+FRAMES = 50
 WITH_W_HELD = (6, 7, 8)                        # menu frames while W is held
 NEW_GAMES = (20, 25, 30)                       # easy, medium, hard
+WITH_W_HELD_HELP = (32, 33)                    # M7 P3.4: help frames while W is held
+HELP_CLOSED_TO_WORLD = 34                      # M7 P3.4: esc leaves the world's help
+HELP_CLOSED_TO_MENU = 40                       # M7 P3.4: h leaves the menu's help
+# M7 P3.4: every menu picture the script must show -- (menu_scr, the highlight on the skill screen)
+ALL_SCREENS = ({(0, None), (MAIN_HELP_SCR, None), (HELP_MENU_SCR, None), (HELP_GAME_SCR, None)}
+               | {(1, k) for k in range(len(SKILLS))})
 
 
 def main():
@@ -119,6 +152,9 @@ def main():
                     help="R9 (M7 P1.5): the oracle expects the skill screen's menu_scr on the world "
                          "frames from the first NEW GAME -- invisible in a world frame; the STATE "
                          "check must reject it")
+    ap.add_argument("--selftest-help", action="store_true",
+                    help="R9 (M7 P3.4): the oracle closes the world's help to the MAIN MENU; the "
+                         "gate must FAIL at frame %d" % HELP_CLOSED_TO_WORLD)
     args = ap.parse_args()
 
     mw = WadFile.from_path(str(ROOT / args.wad))
@@ -127,11 +163,9 @@ def main():
     rm = ReferenceModel(cfg)
     scene = build_scene(mw, mw, args.map)
     colours = palette_colours(bytes(b for rgb in mw.playpal(0) for b in rgb))
-    screens = {(0, None): bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU_SELECTED,
-                                       colours))}
-    for k in range(len(SKILLS)):
-        screens[(1, k)] = bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k,
-                                       colours))
+    # M7 P3.4: the menu's pictures through the ONE mapping from its state (the help joined them)
+    screens = {key: bytes(menu_screen_pixels(cfg, colours, key[0], key[1] or 0))
+               for key in ALL_SCREENS}
     render_kw = dict(GAME_RENDER_KW, sprite_wad=art)
     hidden = {s: skill_hidden(rm, mw.things(args.map), art, s) for s in SKILLS}
 
@@ -142,7 +176,9 @@ def main():
           % (SKILL_MENU[SKILL_MENU_FIRST:], [len(hidden[s]) for s in SKILLS],
              SKILL_NAMES[BOOT_SKILL]))
     print("script : boot in menu -> esc@2 -> walk -> enter@6 (W held) -> esc@9 -> the skill "
-          "screen @13, clamp both ends, back, NEW GAME at easy@20, medium@25, hard@30")
+          "screen @13, clamp both ends, back, NEW GAME at easy@20, medium@25, hard@30 -> the help "
+          "from the world @32 (W held) -> esc@34 -> the main menu, HELP @37, its help @38, h@40, "
+          "h@41, esc@42, up@43, h@44, esc@45, esc@46 -> the help from the world @47, h@48")
 
     if not args.labels:
         print("  NO --labels. This gate is byte- AND state-exact (M7 P1.5), and without the build's")
@@ -192,7 +228,11 @@ def main():
                 name = {K_FWD: "forward", K_BACK: "back"}.get(e.keycode)
                 if name:
                     held[name] = e.is_down
-        mode, scr, sel, ng = menu_step(mode, scr, sel, ev)
+        if (args.selftest_help and mode == 1 and scr == HELP_GAME_SCR
+                and ("esc" in ev or "help" in ev)):
+            mode, scr, ng = 1, 0, None                  # THE HELP'S NEGATIVE CONTROL (M7 P3.4)
+        else:
+            mode, scr, sel, ng = menu_step(mode, scr, sel, ev)
         before = state
         if ng is not None:
             # NEW GAME: the chosen skill's level start, then this frame's tic. THE R9 CONTROL
@@ -229,9 +269,10 @@ def main():
         if args.selftest:
             is_menu = False                             # THE NEGATIVE CONTROL
         if is_menu:
-            key = (0, None) if row["scr"] == 0 else (1, row["sel"])
+            key = (row["scr"], row["sel"] if row["scr"] == 1 else None)
             want = screens[key]
-            kind = "MENU  main   " if row["scr"] == 0 else "MENU  skill %d" % row["sel"]
+            kind = {0: "MENU  main   ", MAIN_HELP_SCR: "MENU  main/H ", HELP_MENU_SCR: "MENU  help/m ",
+                    HELP_GAME_SCR: "MENU  help/g "}.get(row["scr"], "MENU  skill %d" % row["sel"])
             screens_seen.add(key)
             menus += 1
         else:
@@ -272,6 +313,15 @@ def main():
     # skip the tic, the player would have walked through them.
     held_menu = [rows[f]["state"] for f in WITH_W_HELD]
     frozen = len({(s.x, s.y, s.angle) for s in held_menu}) == 1
+    # M7 P3.4: the help with W held moves nobody either -- the frame before it is a world frame, so
+    # the help frames must hold ITS pose
+    held_help = [rows[f]["state"] for f in (WITH_W_HELD_HELP[0] - 1, *WITH_W_HELD_HELP)]
+    help_frozen = len({(s.x, s.y, s.angle) for s in held_help}) == 1
+    help_both_ways = (rows[HELP_CLOSED_TO_WORLD]["mode"] == 0
+                      and rows[HELP_CLOSED_TO_WORLD - 1]["scr"] == HELP_GAME_SCR
+                      and (rows[HELP_CLOSED_TO_MENU]["mode"], rows[HELP_CLOSED_TO_MENU]["scr"])
+                      == (1, MAIN_HELP_SCR)
+                      and rows[HELP_CLOSED_TO_MENU - 1]["scr"] == HELP_MENU_SCR)
     walked = (rows[NEW_GAMES[0]]["before"].x, rows[NEW_GAMES[0]]["before"].y) != (spawn.x, spawn.y)
     reset = all((rows[f]["state"].x, rows[f]["state"].y, rows[f]["state"].angle)
                 == (spawn.x, spawn.y, spawn.angle) for f in NEW_GAMES)
@@ -286,6 +336,14 @@ def main():
     print("  CONTROL: the screens shown: main menu %s, the skill screen at highlights %s of %d"
           % ("yes" if (0, None) in screens_seen else "!! no",
              sorted(k for m, k in screens_seen if m == 1), len(SKILLS)))
+    print("  CONTROL (P3.4): the main menu on HELP %s, the help from the menu %s, from the world %s"
+          % tuple("yes" if (s, None) in screens_seen else "!! no"
+                  for s in (MAIN_HELP_SCR, HELP_MENU_SCR, HELP_GAME_SCR)))
+    print("  CONTROL (P3.4): the player did NOT move during the %d help frames with W held: %s"
+          % (len(WITH_W_HELD_HELP), "ok" if help_frozen else "!! IT MOVED"))
+    print("  CONTROL (P3.4): the help closed back to the world (frame %d) and to the main menu on "
+          "HELP (frame %d): %s" % (HELP_CLOSED_TO_WORLD, HELP_CLOSED_TO_MENU,
+                                  "yes" if help_both_ways else "!! no"))
     print("  CONTROL: the first NEW GAME found the player walked away (%s), and every NEW GAME "
           "frame is the spawn view (%s)" % ("yes" if walked else "!! no", "yes" if reset else "!! no"))
     print("  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: %s"
@@ -297,8 +355,8 @@ def main():
              else "!! no -- frame %s" % state_bad if state_bad is not None
              else "!! only %d of %d frames were checked" % (state_checked, FRAMES)))
     vacuous = (menus < 2 or worlds < 2 or moved < 2 or not frozen or not walked or not reset
-               or len(screens_seen) != 1 + len(SKILLS) or not told)
-    if vacuous and not (args.selftest or args.selftest_skill):
+               or screens_seen != ALL_SCREENS or not told or not help_frozen or not help_both_ways)
+    if vacuous and not (args.selftest or args.selftest_skill or args.selftest_help):
         print("  !! VACUOUS -- this script does not exercise the menu machine")
 
     ok = ok and not vacuous and len(got) >= FRAMES
@@ -314,13 +372,17 @@ def main():
                  "FAIL -- " + ("the gate did not notice" if state_bad is None else
                                "state %s, pixels %s" % (state_bad, first_bad))))
         return 0 if caught else 1
-    if args.selftest or args.selftest_skill:
+    if args.selftest or args.selftest_skill or args.selftest_help:
         # rejected for the RIGHT reason: the first wrong frame is the first one the mutation moves
-        # (frame 0 is a menu frame; the first NEW GAME is the first frame drawn at a wrong skill)
-        expect = 0 if args.selftest else NEW_GAMES[0]
+        # (frame 0 is a menu frame; the first NEW GAME is the first frame drawn at a wrong skill;
+        # M7 P3.4: the frame esc leaves the world's help is the first the wrong close moves)
+        expect = (0 if args.selftest else NEW_GAMES[0] if args.selftest_skill
+                  else HELP_CLOSED_TO_WORLD)
         caught = first_bad == expect
         print("SELFTEST (%s): " % ("every frame claimed to be a world frame" if args.selftest else
-                                   "the oracle starts the next skill at every NEW GAME")
+                                   "the oracle starts the next skill at every NEW GAME"
+                                   if args.selftest_skill else
+                                   "the oracle closes the world's help to the main menu")
               + ("PASS -- the gate rejected it at frame %d, where it must" % expect if caught else
                  "FAIL -- " + ("the gate did not notice" if first_bad is None else
                                "it failed at frame %d, not %d" % (first_bad, expect))))

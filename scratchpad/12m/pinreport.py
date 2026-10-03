@@ -92,19 +92,16 @@ def rekey_by_heat(key, lab, by_heat):
 
 
 def heat_renames(heat_path):
-    """the `name:old:new` renames a heat list was re-keyed through (heat_rekey.py records them as
-    `rekeyed.renames`), as (name, old, new) -- [] for a list never re-keyed, or no list"""
+    """the renames a heat list was re-keyed through (heat_rekey.py records them as `rekeyed.renames`):
+    (name, old, new) parameter counts or ("text", OLD, NEW) -- [] for a list never re-keyed, or no list"""
     if not heat_path:
         return []
     import gzip
     opener = gzip.open if str(heat_path).endswith(".gz") else open
     with opener(heat_path, "rt", encoding="utf-8") as fh:
         doc = json.load(fh)
-    out = []
-    for r in (doc.get("rekeyed") or {}).get("renames", []):
-        name, old, new = r.rsplit(":", 2)
-        out.append((name, int(old), int(new)))
-    return out
+    from heat_rekey import parse_rename          # `name:old:new`, or (M7 P3.3) `text:OLD=>NEW`
+    return [parse_rename(r) for r in (doc.get("rekeyed") or {}).get("renames", [])]
 
 
 def rename_hot(hot, renames):
@@ -113,12 +110,12 @@ def rename_hot(hot, renames):
     renames every path through it: the pool matched the re-keyed list, so the report must look the
     words up under the names the build has (M7 P1.4: emit_col_lines 45 -> 38 left rank 14
     UNRESOLVED while the build had pinned it)."""
-    from heat_rekey import pattern
+    from heat_rekey import apply_rename
     words = []
     for h in hot["words"]:
         key = h["key"]
-        for name, old, new in renames:
-            key = pattern(name, old).sub("%s(%d)" % (name, new), key)
+        for r in renames:                       # parameter counts, or (M7 P3.3) whole-token text rewrites
+            key = apply_rename(r, key)
         words.append(dict(h, key=key))
     return dict(hot, words=words)
 
@@ -239,7 +236,7 @@ def run(a):
     if renames:
         hot = rename_hot(hot, renames)
         print("hot words carried through the heat list's %d rename(s): %s"
-              % (len(renames), ", ".join("%s %d->%d" % r for r in renames)))
+              % (len(renames), ", ".join(__import__("heat_rekey").rename_label(r) for r in renames)))
     image = FjmImage(a.fjm)
     lab = label_dict(a.labels)
     recon = reconstruct(a.counts_cache, heat=load_heat(a.heat)) if a.counts_cache else None

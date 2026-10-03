@@ -36,24 +36,47 @@ def pattern(name, old):
     return re.compile(r"(?<![\w.])" + re.escape(name) + r"\(" + str(old) + r"\)")
 
 
+# M7 P3.3: a second kind -- ("text", OLD, NEW), a whole-token rewrite of OLD (no name character on either side), for a
+# rung that MOVES a hot cell to another macro or to a global, which a parameter count cannot express:
+# sim.thing_pass(7)'s local `hp` became sim.thing_pass_depth(7)'s global `td_p`
+TEXT = "text"
+
+
+def text_pattern(old):
+    return re.compile(r"(?<![\w.])" + re.escape(old) + r"(?![\w(])")
+
+
+def apply_rename(r, s):
+    """one rename on one string: (name, old, new) parameter counts, or ("text", OLD, NEW)"""
+    if r[0] == TEXT:
+        return text_pattern(r[1]).sub(r[2].replace("\\", "\\\\"), s)
+    name, old, new = r
+    return pattern(name, old).sub("%s(%d)" % (name, new), s)
+
+
+def rename_label(r):
+    return "%s:%s=>%s" % r if r[0] == TEXT else "%s:%d:%d" % r
+
+
 def rekey(doc, renames):
     """(new doc, {rename: (group keys touched, site paths touched)}); refuses a merge or a no-op"""
     groups = doc["groups"]
     stats = {}
-    for name, old, new in renames:
-        pat, rep = pattern(name, old), "%s(%d)" % (name, new)
+    for r in renames:
+        what = ("%s -> %s" % (r[1], r[2])) if r[0] == TEXT else ("%s(%d) -> (%d)" % r)
+        pat = text_pattern(r[1]) if r[0] == TEXT else pattern(r[0], r[1])
         nk = sum(1 for g in groups if pat.search(g))
         ns = sum(1 for sites in groups.values() for s in sites if pat.search(s[0]))
         if nk + ns == 0:
-            raise SystemExit("rename %s(%d) -> (%d) matches nothing in the list" % (name, old, new))
+            raise SystemExit("rename %s matches nothing in the list" % what)
         out = {}
         for g, sites in groups.items():
-            g2 = pat.sub(rep, g)
+            g2 = apply_rename(r, g)
             if g2 in out:
-                raise SystemExit("rename %s(%d) -> (%d) merges two group keys: %r" % (name, old, new, g2))
-            out[g2] = [[pat.sub(rep, s[0])] + list(s[1:]) for s in sites]
+                raise SystemExit("rename %s merges two group keys: %r" % (what, g2))
+            out[g2] = [[apply_rename(r, s[0])] + list(s[1:]) for s in sites]
         groups = out
-        stats["%s(%d)->(%d)" % (name, old, new)] = (nk, ns)
+        stats[what.replace(" -> ", "->")] = (nk, ns)
     new_doc = dict(doc, groups=groups)
     # the renames ACCUMULATE: a list re-keyed from a re-keyed list carries its parent's renames first, so a
     # reader replaying them (pinreport.rename_hot, from the ORIGINAL hot list) reaches this list's names. Recording
@@ -61,12 +84,16 @@ def rekey(doc, renames):
     # blocked40's pinreport UNRESOLVED on a word the build had placed.
     prior = (doc.get("rekeyed") or {}).get("renames", [])
     new_doc["rekeyed"] = {"from_sites_sha256": doc.get("sites_sha256"),
-                          "renames": list(prior) + ["%s:%d:%d" % r for r in renames]}
+                          "renames": list(prior) + [rename_label(r) for r in renames]}
     new_doc["sites_sha256"] = hashlib.sha256(json.dumps(groups, sort_keys=True).encode()).hexdigest()
     return new_doc, stats
 
 
 def parse_rename(text):
+    """`name:old:new` (parameter counts) or `text:OLD=>NEW` (a whole-token rewrite)"""
+    if text.startswith(TEXT + ":") and "=>" in text:
+        old, new = text[len(TEXT) + 1:].split("=>", 1)
+        return TEXT, old, new
     name, old, new = text.rsplit(":", 2)
     return name, int(old), int(new)
 
@@ -98,6 +125,29 @@ def selftest():
     twice, _ = rekey(new, [("stream.emit_col_lines", 38, 37)])
     if twice["rekeyed"]["renames"] != ["stream.emit_col_lines:45:38", "walk:7:6", "stream.emit_col_lines:38:37"]:
         fails.append("a re-key of a re-keyed list dropped its parent's renames: %s" % twice["rekeyed"]["renames"])
+    # M7 P3.3: a TEXT rename is whole-token: `sim.thing_pass(7)` must leave `sim.thing_pass_depth(7)` and
+    # `xsim.thing_pass(7)` alone, `a---hp` must leave `a---hpx` alone; it round-trips through the recorded label
+    tdoc = {"groups": {"((sim.thing_pass(7)---hp + 64) + 32)": [["sim.thing_pass(7)---hex.read_byte(2)---x", 0, 64],
+                                                                ["sim.thing_pass_depth(7)---y", 0, 64]],
+                       "((g---hpx + 0) + 32)": [["xsim.thing_pass(7)---z", 0, 64]]}}
+    tr = [parse_rename("text:sim.thing_pass(7)=>sim.thing_pass_depth(7)"),
+          parse_rename("text:sim.thing_pass_depth(7)---hp=>td_p")]
+    t2, tstats = rekey(tdoc, tr)
+    if sorted(t2["groups"]) != ["((g---hpx + 0) + 32)", "((td_p + 64) + 32)"]:
+        fails.append("the text renames did not reach exactly the whole tokens: %s" % sorted(t2["groups"]))
+    tsites = sorted(s[0] for v in t2["groups"].values() for s in v)
+    if tsites != ["sim.thing_pass_depth(7)---hex.read_byte(2)---x", "sim.thing_pass_depth(7)---y",
+                  "xsim.thing_pass(7)---z"]:
+        fails.append("the text renames touched the wrong site paths: %s" % tsites)
+    if t2["rekeyed"]["renames"] != ["text:sim.thing_pass(7)=>sim.thing_pass_depth(7)",
+                                    "text:sim.thing_pass_depth(7)---hp=>td_p"] or \
+            [parse_rename(x) for x in t2["rekeyed"]["renames"]] != tr:
+        fails.append("a text rename does not round-trip through its recorded label: %s" % t2["rekeyed"]["renames"])
+    try:
+        rekey(tdoc, [parse_rename("text:nothing_here=>x")])
+        fails.append("a text rename that matches nothing was accepted")
+    except SystemExit:
+        pass
     merge = {"groups": {"k(1)": [["p", 0, 16]], "k(2)": [["q", 0, 16]]}}
     try:
         rekey(merge, [("k", 1, 2)])
@@ -115,7 +165,8 @@ def main():
     ap.add_argument("--in", dest="src")
     ap.add_argument("--out")
     ap.add_argument("--rename", action="append", default=[], type=parse_rename,
-                    help="name:old_param_count:new_param_count (repeatable)")
+                    help="name:old_param_count:new_param_count, or text:OLD=>NEW (a whole-token rewrite; "
+                         "repeatable, applied in order)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:

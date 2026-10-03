@@ -63,7 +63,7 @@ equals everything the set exercises (section 5).
 | **P3.0** | every new TABLE emitted, nothing calls it | S (no pixel moves) | static | all gates byte-exact, ops unchanged but placement; the tables run in `tests/fj` against their Python source |
 | **P3.1** | idle life: the scheduler, the state machine, animation and rotation of monsters that never wake | F | idle (A_Look sees and hears nothing) | + a monster gate: poked states, N frames, state- and byte-exact |
 | **P3.2** | awake: sight (section 4), sound, A_Chase, P_Move on the cells, P_NewChaseDir + RNG, relink, monster doors and lifts, the attack DECISIONS (effects are P5) | F | awake | + fights: B0 on the frozen set with the monsters injected per frame |
-| **P3.3** | D3's compositor rules for moving things (depth order inside a leaf, drops/effects before monsters) | F | awake | B0 pixel-exact on the set |
+| **P3.3** | D3's compositor rules for moving things (depth order inside a leaf, drops/effects before monsters) -- the depth order SHIPPED 2026-10-03 as blocked46 with P3.4 (8.6); drops/effects wait for P4/P5 | F | awake | B0 pixel-exact on the set |
 
 ## 4. Open decision for P3.2 (the owner's, with numbers before any code): the sight rule
 
@@ -207,6 +207,8 @@ P3.2 is too large for one build, so it ships in three, each against a named mode
 - **P3.2c "decide"**: the melee and missile decisions and their states (A_FaceTarget; the attacks' EFFECTS are P5,
   so the mode runs the attack states without damage).
   SHIPPED 2026-10-02 as blocked45 (`docs/gp-ledger.md` P3.2c).
+- After the three: **P3.3**, the depth order inside a leaf (8.6) -- SHIPPED 2026-10-03 as blocked46, one build with P3.4
+  (`docs/gp-ledger.md` P3.3, P3.4). Phase 3 is complete.
 The frozen set v5 is the full model; B0 on it is exact from P3.2c on, when the mode's tic equals the model's for
 everything v5 exercises but damage.
 
@@ -306,3 +308,42 @@ on gamespeed's binding (14,452,893 -> 14,462,688), -211,944 on v5's (15,087,224)
 its constants into zeroed registers (`hex.xor_by`, one op a nibble) and the shared `sl_seg` does the box reject, the
 ends and d, zeroing on every exit. P_ChangeSector runs inside the `lvdone` exit guard (796cdcc,
 `tests/fj/test_change_sector_fj.py`).
+
+### 8.6 P3.3 -- depth order inside a leaf (D3 d; numbers: `docs/ship-evidence/p33_depth_census_v5.log`)
+
+The walk is front-to-back and a sprite pixel is written once, so inside one leaf the NEAR thing must be drawn
+first. Until P3.3 a leaf's runtime things were drawn in the list's ascending index order (`sim.thing_pass`), which
+once monsters move draws a far monster over a near one. The census on v5 (the full model, every frame drawn as the
+binary draws it): depth order changes 25 of 1,100 frames (2.27%), 4,357 px, up to 915 px on one frame
+(R0-aftermath 83-99); leaves holding 2+ active monsters: 12.5 a frame (they spawn in groups).
+
+**The rule** (the oracle's `render_wall_frame(rt_depth_order="aprox")`, carried by `GAME_RENDER_KW` -- the emitter
+reads THAT key): a leaf's baked things first as before, then its runtime things by P_AproxDistance from the
+player's integer position, ties by ascending index. The true view depth `tz` would need four fixed multiplies per
+thing and a per-thing store behind pointers (the pin veto and the arm windows that killed blocked41/42); the
+aprox key orders differently from `tz` on 2 of the 1,100 frames (28 px) -- things overlap on screen only along
+nearly one ray, where distance order IS depth order.
+
+**Scoped to the game tier** (pre-review r1): the hosted tiers move runtime things too but still walk index order
+(`sim.thing_pass`), so their gates (m1_gate, m2_r3_gate, m2_r4_gate, m2_pass_probe) ask the oracle for
+`HOSTED_RENDER_KW` = `GAME_RENDER_KW` without the rule (`test_oracle_calls_in_step` pins which gate asks for which).
+`monstercode.depth_walk` RAISES when the game setting asks for the order and the monster mode cannot emit the walk
+(idle, wake); `render_wall_frame` refuses an unknown `rt_depth_order`. The key is `reference_model.aprox_depth_key`
+over the ONE `fixedpoint.aprox_distance` (`world.aprox_distance` is the same function).
+
+**The fj** (`sim.thing_pass_depth`, the game tier's walk): a leaf with one thing draws it as `thing_pass`; a longer
+list is drawn in ROUNDS, each scanning the list for the least (key, index) above the last one drawn -- no
+per-thing storage, pointer READS only, `td_*` named registers (monstercode.P33_DECLS). n things cost n^2 key
+reads; the lists are short (2-5). Harness: `tests/fj/test_thing_pass_depth_fj.py` (160 records x 4 leaves of 1-4
+things, ties and reorders, a budget stop `tstop` after k draws counted across leaves, all 13 cleared registers zero
+after every leaf; strict controls: the first candidate taken, the key without dy, the tie toward the later index,
+either tstop test removed -- the order parts, registers clear -- and sp_lt's clear narrowed -- the order holds,
+sp_lt alone dirty); `tests/host/test_depth_order.py` (frame 96: the order changes the
+picture, aprox = tz there). D3 a (drops and effects before monsters) waits for P4/P5, which create them.
+
+**As built** (SHIPPED 2026-10-03 as blocked46, sha256 `b7c9e110be1494d8`, one build with P3.4; `docs/gp-ledger.md`
+P3.3 / P3.4): measured +780,607 on gamespeed's binding (14,462,688 -> 15,243,295), +472,852 on v5's (15,560,076),
++590,176 on profx's mean frame -- P3.4's help screen is in the same numbers; size +355,886 words (34.19% of 2^27). The
+walk's pointer register is the global `td_p`, so the heat list followed it (`heat_blocked27_p33`, 7e97a5a) after r0's
+pin report left 3 hot words unresolved. v5's frozen record (its drawn census, F4) must be re-recorded under the rule
+(`p33_v5_validate_depth.log`).

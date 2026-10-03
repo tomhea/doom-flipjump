@@ -56,10 +56,9 @@ from doomfj.fixedpoint import _signed                                        # n
 from doomfj.reference_model import SimState                                  # noqa: E402
 from doomfj.things import drawable_things                                    # noqa: E402
 from doomfj.doors import exit_boxes                                          # noqa: E402
-from doomfj.menu import LEVEL_DONE_SCR, menu_step, palette_colours, pixels   # noqa: E402
-from doomfj.wall_renderer import (BOOT_SKILL, DEFAULT_MENU, DEFAULT_MENU_SELECTED,  # noqa: E402
-                                  LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, SKILL_MENU,
-                                  SKILL_MENU_FIRST, SKILLS, STANDALONE_POLLS)
+from doomfj.menu import LEVEL_DONE_SCR, menu_step, palette_colours           # noqa: E402
+from doomfj.wall_renderer import (BOOT_SKILL, SKILLS, STANDALONE_POLLS,     # noqa: E402
+                                  menu_screen_pixels)
 from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent             # noqa: E402
 
 M32 = 0xFFFFFFFF
@@ -229,12 +228,10 @@ def expected_cells(fr: dict, order: list, mover_order=()) -> dict:
 
 
 def screen(orc, scr: int, sel: int) -> bytes:
-    """a menu screen's picture: the main menu, the skill screen at `sel`, or LEVEL COMPLETE"""
-    lines, hi = {0: (DEFAULT_MENU, DEFAULT_MENU_SELECTED), 1: (SKILL_MENU, SKILL_MENU_FIRST + sel),
-                 LEVEL_DONE_SCR: (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED)}[scr]
-    cfg = orc.rm.cfg
+    """a menu screen's picture: the main menu, the skill screen at `sel`, LEVEL COMPLETE -- or (M7
+    P3.4) the main menu on HELP and the help: `wall_renderer.menu_screen_pixels`, the one mapping"""
     colours = palette_colours(bytes(b for rgb in orc.mw.playpal(0) for b in rgb))
-    return bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, lines, hi, colours))
+    return bytes(menu_screen_pixels(orc.rm.cfg, colours, scr, sel))
 
 
 def menu_events(keys: list) -> list:

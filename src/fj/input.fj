@@ -34,6 +34,9 @@
 //     enter 0x0D  esc 0x1B      the menu's ENTER / ESC events, on the DOWN edge only
 //                               (M7 P1.5: recorded, not acted on -- see the events below)
 //     space 0x20                 M2-R4's USE key: the door flag, held like the four above
+//     'e' 0x65                   M7 P3.4: a second USE key, the same held flag as space
+//     'h' 0x68                   M7 P3.4: the HELP event, on the DOWN edge only (the device has
+//                                no F1); docs/gp-help.md
 // Anything else is read and DISCARDED. The discard happens AFTER the keycode byte is consumed --
 // there is deliberately no early exit that would skip that read.
 //
@@ -43,13 +46,14 @@
 // `_menu_lines`). A poll only records: M3's poll toggled `mode` here, which cannot tell the main
 // menu from the skill screen. Forward and back still set their held flags as well -- the menu
 // frame skips the tic, so a held key moves nobody while the menu is up.
+// M7 P3.4: `ev_help` is the fifth event, h's down edge, zeroed and acted on the same way.
 // ==============================================================================================
 
 ns kb {
     // One poll. `stat` is a 1-hex scratch, `code` a 2-hex scratch (both written before they are
     // read, so both are ordinary restore-set cells); `f`/`b`/`l`/`r` are the persistent 1-hex
     // held-key flags, in wireformat.py's key order: forward, back, turn_left, turn_right.
-    def poll stat, code, f, b, l, r, u, ev_enter, ev_esc, ev_up, ev_dn, bad @ done, legal, hi1, hi2, hi6, hi7, lo0, lo1, lo2, k_enter, enter_dn, k_esc, esc_dn, hi8, k_fwd, k_back, k_left, k_right, k_use, lo6, lo6_d, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn, u_up, u_dn {
+    def poll stat, code, f, b, l, r, u, ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad @ done, legal, hi1, hi2, hi6, hi7, lo0, lo1, lo2, k_enter, enter_dn, k_esc, esc_dn, hi8, k_fwd, k_back, k_left, k_right, k_use, lo6, lo6_d, lo6_e, lo6_h, k_help, help_dn, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn, u_up, u_dn {
         hex.input_hex stat
         // 0x0, 0x8 and 0x9 are the ONLY statuses the keyboard device produces. Anything else means
         // this program is not reading a keyboard -- someone piped a file in, or ran it with the
@@ -81,10 +85,14 @@ ns kb {
       lo2:                                      // 0x2_ : space (0x20) is M2-R4's USE key
         hex.if_flags code, 1<<0x0, done, k_use
 
-      lo6:                                      // 0x6_ : 'a' turn left, 'd' turn right
-        hex.if_flags code, 1<<0x1, lo6_d, k_left
+      lo6:                                      // 0x6_ : 'a' turn left, 'd' turn right,
+        hex.if_flags code, 1<<0x1, lo6_d, k_left //        'e' use, 'h' help (M7 P3.4)
       lo6_d:
-        hex.if_flags code, 1<<0x4, done, k_right
+        hex.if_flags code, 1<<0x4, lo6_e, k_right
+      lo6_e:
+        hex.if_flags code, 1<<0x5, lo6_h, k_use
+      lo6_h:
+        hex.if_flags code, 1<<0x8, done, k_help
 
       lo7:                                      // 0x7_ : 'w' forward, 's' back
         hex.if_flags code, 1<<0x7, lo7_s, k_fwd
@@ -148,6 +156,12 @@ ns kb {
         hex.if_flags stat, 0xAAAA, done, esc_dn
       esc_dn:
         hex.set 1, ev_esc, 1
+        ;done
+        // M7 P3.4: the help key, the same down-edge event as enter and esc
+      k_help:
+        hex.if_flags stat, 0xAAAA, done, help_dn
+      help_dn:
+        hex.set 1, ev_help, 1
       done:
     }
 }

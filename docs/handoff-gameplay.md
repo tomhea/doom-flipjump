@@ -1,6 +1,6 @@
 # Handoff: the fully playable E1M1, under 22M ops/frame
 
-**Status (2026-09-26): phase 0 is DONE; phase 1 is NEXT and not started.** Everything below is the
+**Status (2026-10-03): phases 0-3 are DONE (phase 3 ended with blocked46, P3.3 + P3.4); P4, the player's combat, is NEXT.** Everything below is the
 whole plan, as the owner approved it, updated with phase 0's measurements. It replaces nothing:
 `docs/plan-gameplay.md` is the record of how the plan was made (research missions, red team,
 decision rounds); this file is what to execute. Phase 0's evidence is committed on branch `gameplay-p0`
@@ -330,13 +330,13 @@ SEPARATED; `docs/gp-monsters.md`, `docs/gp-ledger.md`).
 The owner chose the "seen" sight rule and the set v5 (`docs/gp-monsters.md` 8.2); P3.2 ships in three rungs, each a
 model mode (8.3). **P3.2a DONE 2026-10-01** (blocked43, class F: the monsters wake and turn; +146,045 on gamespeed,
 size +1.33M words -- over its budget, the unrolled slots' tables -- msframe NOT SEPARATED; v5 FROZEN, the CAP-22 set
-from here). **P3.2b DONE 2026-10-02** (blocked44, class F: the monsters move -- P_Move on their own cells, NewChaseDir, the relink, P_ChangeSector, monster doors; +366,657 on gamespeed, size +5,017,552 words -- over its +2.5M budget -- now **33.38% of the 35% target**; msframe B SLOWER: median x0.934). **P3.2c DONE 2026-10-02** (blocked45, class F: the monsters decide to attack -- the melee and missile decisions, A_FaceTarget, the attack states' draws without damage, the exact near LOS; +9,795 on gamespeed, -211,944 on v5, size +726,572 words -- now **33.92% of the 35% target**; msframe NOT SEPARATED: median x1.000; P_ChangeSector inside the `lvdone` guard, 796cdcc). P3.3 (D3's compositor rules for moving things: depth order inside a leaf, drops/effects before monsters) next; it ends phase 3.
+from here). **P3.2b DONE 2026-10-02** (blocked44, class F: the monsters move -- P_Move on their own cells, NewChaseDir, the relink, P_ChangeSector, monster doors; +366,657 on gamespeed, size +5,017,552 words -- over its +2.5M budget -- now **33.38% of the 35% target**; msframe B SLOWER: median x0.934). **P3.2c DONE 2026-10-02** (blocked45, class F: the monsters decide to attack -- the melee and missile decisions, A_FaceTarget, the attack states' draws without damage, the exact near LOS; +9,795 on gamespeed, -211,944 on v5, size +726,572 words -- now **33.92% of the 35% target**; msframe NOT SEPARATED: median x1.000; P_ChangeSector inside the `lvdone` guard, 796cdcc). **P3.3 + P3.4 DONE 2026-10-03, one rung** (blocked46, class F, the owner united them: a leaf's runtime things drawn nearest first, `sim.thing_pass_depth`; the key-map HELP screen from the main menu's HELP item or H, E a second use key; +780,607 on gamespeed, +472,852 on v5, size +355,886 words -- now **34.19% of the 35% target**; msframe NOT SEPARATED: median x0.958). **PHASE 3 IS COMPLETE**: summed from the ledger's rows, +1,600,882 on gamespeed against its +0.3M budget (`docs/gp-ledger.md`, Phase 3 summed). D3 a (drops and effects before monsters) moves to P4/P5, which create them. **P4 (the player's combat) is next**, with the owner's key map (approved 2026-10-02, P4 below).
 **P3.4 the key-map HELP screen** (the owner, 2026-10-02; `docs/gp-help.md`, class F, kill criteria in
 `docs/gp-ledger.md`): a baked help frame listing only the keys that work today, opened from the main
-menu's new HELP item (or h) and from the world (h); 'e' a second use key. P4 updates it (below).
+menu's new HELP item (or h) and from the world (h); 'e' a second use key. P4 updates it (below). SHIPPED 2026-10-03 with P3.3 as blocked46 (`docs/gp-ledger.md` P3.4).
 Then the state machine, K-slot scheduler, RNG, animation and rotation, waking, chase on the cells,
 thing collision, per-move rebind in use, doors opened by monsters and reversing on them, D3's
-compositor rules. Gate: `fight` (partial), fuzz. Budget +0.3M.
+compositor rules. Gate: `fight` (partial), fuzz. Budget +0.3M. (Summed at the phase's end: +1,600,882, OVER -- `docs/gp-ledger.md`, Phase 3 summed.)
 
 ### P4 -- the player's combat
 Input (fire, 1-4, strafe; the device already sends the keys), the weapon state machine, the aim

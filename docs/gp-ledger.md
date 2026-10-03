@@ -872,6 +872,43 @@ on blocked45 waits for a quiet window.
 5. pinreport 20 of 20 with `heat_blocked27_p32a`; the restore sets re-keyed (`p32c_rekey.log` 22 passed in 0.72s).
 
 
+## P3.3 depth order inside a leaf (class F) -- written at ship, 2026-10-03: NO budget or kill criteria were declared in this file before blocked46's build
+
+**What**: `docs/gp-monsters.md` section 8.6 (D3 d). The walk is front-to-back and a sprite pixel is written once, so
+inside one leaf the NEAR thing must be drawn first; until P3.3 a leaf's runtime things were drawn in index order
+(`sim.thing_pass`). Now `sim.thing_pass_depth` (the game tier) draws a longer list in rounds, each taking the least
+(P_AproxDistance from the player's integer position, index) above the last drawn -- no per-thing storage, pointer
+reads only; the oracle's `render_wall_frame(rt_depth_order="aprox")` through `GAME_RENDER_KW`; the hosted tiers keep
+index order (`HOSTED_RENDER_KW`). D3 a (drops and effects before monsters) waits for P4/P5, which create them.
+
+**Budget**: none was declared here before the build -- a gap in the rung's process, as at P3.2c; it is NOT
+back-filled. The design was priced by the census (`p33_depth_census_v5.log`) on v5's 1,100 frames: the depth order
+changes 25 frames (2.27%), 4,357 px, up to 915 px on one (R0-aftermath frame 96); the aprox key draws another picture
+than the true depth tz on 2 frames (28 px); leaves holding 2+ active monsters: 12.54 a frame. Phase 3's own budget
+(+0.3M, `docs/handoff-gameplay.md` P3) is the only declared number that covers it -- see "Phase 3 summed" below.
+
+**Kill criteria** (class F, as run -- written at ship, not before):
+1. Host: `tests/host/test_depth_order.py` (frame 96: the order changes the picture, aprox = tz there);
+   `test_oracle_calls_in_step.py` pins which gate asks for `GAME_RENDER_KW` and which for `HOSTED_RENDER_KW`;
+   `monstercode.depth_walk` raises when the setting asks for an order the mode cannot emit.
+2. fj: `tests/fj/test_thing_pass_depth_fj.py` (160 records x 4 leaves of 1-4 things, ties and reorders, the `tstop`
+   budget stop counted across leaves, all 13 cleared registers zero after every leaf; strict controls: the first
+   candidate taken, the key without dy, the tie toward the later index, either tstop test removed, sp_lt's clear
+   narrowed).
+3. m2_std_gate, m3_gate, p2a_gate byte- and state-exact with the game oracle's depth order; their selftests; B0 v5
+   exact on every frame; deg_gate byte-exact.
+4. CAP-22 on v5; size <= 35%; msframe recorded (D8).
+5. pinreport 20 of 20 (heat list p33); the restore sets re-keyed.
+
+**v5 under the depth rule** (`p33_v5_validate_depth.log`, before main froze v5 on this branch): F3 PASS -- the replay
+reproduces every frozen pose and digest (11/11 runs: the depth order moves no trajectory); F4 FAIL -- the drawn census
+differs on 6 runs (a binding monster budget now drops by depth, not by index); F1 / F2 / F5 FAIL / FAIL / FAIL -- the
+set was PLANNED on this branch, FROZEN on main. The frozen record's drawn census and file hashes must be re-recorded
+(a follow-up; B0 on v5 itself is exact on every frame of blocked46).
+
+**Row and verdict**: one build carries P3.3 and P3.4 -- the owner united them on 2026-10-02 ("lets get over with it
+much faster. No need for another entire testing pass for another menu"). The row and both verdicts are P3.4's, below.
+
 ## P3.4 the key-map help screen (class F) -- declared 2026-10-02, before the build
 
 **What**: `docs/gp-help.md`. A HELP screen -- the keys that work today and what they do, a baked
@@ -910,4 +947,100 @@ arithmetic already done -- the coordinator decides whether to hold the rung to i
    change); `probe.RECORDED_CALIBRATION` re-recorded (the startup + 2 menu frames changed: the main
    menu's picture and its state path).
 
-**Row**: (filled after the build)
+**Row** (the UNITED rung P3.3 + P3.4: blocked46, sha256 `b7c9e110be1494d8`, built at 5748228 with `heat_blocked27_p33`; `docs/ship-evidence/blocked46_*`):
+
+| measure | blocked45 (P3.2c) | blocked46 (P3.3 + P3.4) | delta |
+|---|---|---|---|
+| combat set binding (v5) | 15,087,224 | 15,560,076 | +472,852 |
+| ... with strafe's collision | 15,122,674 | 15,594,013 | +471,339 |
+| v5 per-frame maximum (+/- 2^18) | 25,690,112 | 26,214,400 (R0-aftermath) | +524,288 |
+| gamespeed binding | 14,462,688 | 15,243,295 | +780,607 (P3.4: ~+0 ESTIMATE; P3.3: none declared) |
+| profx mean frame (gamespeed's games) | 12,321,663 | 12,911,839 | +590,176 |
+| input phase (phases.py) | 1,137 | 1,193 | +56 (P3.4's bound +100) |
+| size (% of 2^27) | 33.92% | 34.19% | +355,886 words (P3.4's budget +120,000: OVER) |
+| pool tables (build) | 471,582 in 33,949 groups | 473,950 in 34,185 groups | +2,368 tables |
+| ms/frame (msframe, one run, A = blocked45; the pictures differ, so its pixel check reads NO) | 77.1 | 79.5 | NOT SEPARATED (x0.958) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**r0, stopped at the pin report.** The first build (r0, sha256 `fc45c241867e738c`, at 7dfc22a, `blocked46_r0pins_*`
+logs) passed the smoke run, m2_std_gate (452 frames), m3_gate (50 frames, the help visits included) and the 6 gate
+selftests, then STOPPED at its pin report: 17 of 20 hot words, 3 UNRESOLVED (an ESTIMATE of ~106,873 ops/frame of lost
+pins) -- the walk's pointer register moved from `sim.thing_pass`'s local `hp` to `sim.thing_pass_depth`'s global
+`td_p`, so `heat_blocked27_p32a` named words this program no longer has. 7e97a5a taught `heat_rekey` / `pinreport` a
+whole-token text rename and wrote `heat_blocked27_p33`; on r0's binary B0 v5 was exact on every frame (15,621,284,
+`blocked46_r0pins_b0_v5_precheck.log`) and p2a_gate passed (13 scenarios, `blocked46_r0pins_p2a_precheck.log`). r1 is
+the same program built with `heat_blocked27_p33`; its evidence is `blocked46_*`.
+
+**Where the ops went** (one binary for two rungs: P3.4's "placement only" clause cannot be judged apart from P3.3's
+walk). gamespeed moved +780,607, B0 v5 +472,852, profx's mean frame +590,176; the input phase 1,137 -> 1,193 (+56,
+P3.4's bound +100: inside). phases.py lines that moved >= 10,000 ops/frame (blocked45 -> blocked46): render walk, all
+11,878,314 -> 12,479,305; seg_pass2_leaf 3,623,277 -> 3,578,343; seg_pass1_ts_leaf 2,472,239 -> 2,500,839;
+seg_pass1_leaf 2,366,784 -> 2,354,320; thing_pass_leaf 669,426 -> 1,328,319; bspcode walk (nodes, pos_leaf, ss code)
+896,926 -> 848,554; thing_leaf_b 782,615 -> 801,257. **The depth walk is the cost**: `thing_pass_leaf`, the leaf
+thing walk that `sim.thing_pass_depth` replaces, moved +658,893 -- n rounds that each recompute every candidate's
+P_AproxDistance key; the other lines net to placement. Caching each leaf's keys once is follow-up #117.
+
+**Size**: +355,886 words **OVER** P3.4's declared +120,000 -- shipped on the coordinator's statement: P3.4's +0.12M
+was declared for the help screen alone; this binary also carries P3.3's depth walk, which declared no budget (the two
+rungs were united on 2026-10-02 and no single-rung binary was built). The build logs split the +355,886 words as
++178,272 of pool demand (46,794,944 -> 46,973,216 words; +2,368 tables) and +177,614 below the pool. The help frames
+alone were estimated at 97,088 words before the build; the rest is not attributed per rung, because nothing measured
+the rungs apart. Size is 34.19% of 2^27, still under the 35% target. -- +217,388 below the pool (the program,
+28,598,938 -> 28,816,326) and +138,498 in it (16,932,696 -> 17,071,194 payload words; +2,368 tables). P3.4's +120,000
+was declared for P3.4 ALONE (the help stream ESTIMATE 100,992 words); P3.3's walk, with no budget, is in the same
+delta. **Size is now 34.19% of 2^27 against the 35% target: 1,088,684 words (0.81 points) of room left.**
+
+**msframe NOT SEPARATED is the class-F record (D8)**: 77.1 -> 79.5 ms/frame (pairs 1.134 0.958 0.911 0.976 0.954),
+14,828,598 -> 15,580,689 ops/frame on msframe's walk, 192.3 -> 195.9 M fj/s. The `shipped` baseline is still
+blocked44's: neither blocked45 nor blocked46 has been frozen (#115).
+
+**Verdict P3.3 (as run): every criterion met.**
+1. Host: 1454 passed, 2 skipped, 1 deselected, 2 xfailed, 3 warnings (`blocked46_host_suite.log`, at the build's
+   commit 5748228), `test_depth_order.py` and `test_oracle_calls_in_step.py` among them.
+2. fj: `test_thing_pass_depth_fj.py` in `p33_p34_fj.log` (89 passed in 34.48s, with the help screen's fj tests).
+3. m2_std_gate (452 frames), m3_gate (50 frames), p2a_gate (13 scenarios) byte- and state-exact; 7 gate selftests
+   PASS; B0 v5 exact on every frame (11 runs, 1,100 frames: state and pixels); deg_gate BYTE-EXACT with every op count
+   equal to blocked45's.
+4. CAP-22 on v5: 15,560,076 (headroom 6,439,924; the per-frame maximum 26,214,400 in R0-aftermath is not the cap's
+   measure); gamespeed 15,243,295 PASS; size 34.19% (<= 35%); msframe recorded (NOT SEPARATED: median x0.958).
+5. pinreport 20 of 20 with `heat_blocked27_p33` (r0's 17 of 20 above); the restore sets re-keyed (`p33_rekey.log` 22
+   passed in 0.78s).
+
+**Verdict P3.4 (its declared kill criteria): met, with the coordinator's stated exceptions: size over +120,000.**
+1. Host: 1454 passed, 2 skipped, 1 deselected, 2 xfailed, 3 warnings (`blocked46_host_suite.log`):
+   `test_the_help_rules`, the help picture through the real device glyph-exact with its controls, the seven states'
+   seven pictures (`tests/host/test_menu.py`).
+2. fj: `p33_p34_fj.log` -- 89 passed in 34.48s: `test_menu_screens.py`, `test_menu_frame.py`,
+   `test_keyboard_input.py`, `test_skill_menu.py`, `test_menu_mode.py`, `test_thing_pass_depth_fj.py`.
+3. Gates: m3_gate byte- and state-exact on all 50 frames (the help from the world and from the main menu, both closes,
+   all seven menu pictures); `--selftest-help`: "SELFTEST (the oracle closes the world's help to the main menu): PASS
+   -- the gate rejected it at frame 34, where it must" (`blocked46_gate_selftests.log`); m2_std_gate (452 frames) and
+   p2a_gate (13 scenarios) byte- and state-exact; B0 on v5 exact.
+4. The input phase +56 ops a frame (bound +100: inside); the binding metrics moved +780,607 (gamespeed) and +472,852
+   (v5) with P3.3's walk in the same binary; CAP-22 on v5 15,560,076; size +355,886 words (OVER +120,000) and 34.19%
+   (<= 35%); msframe recorded (NOT SEPARATED: median x0.958).
+5. pinreport 20 of 20; the restore sets re-keyed (`p33_rekey.log` 22 passed in 0.78s; `ev_help` is in the standalone
+   set). `probe.RECORDED_CALIBRATION` (518_147) was NOT re-recorded, and need not be: it is blocked27's number, keyed
+   by `RECORDED_SHA16` (`38b09a7331f4f52b`), and probe's C5 / B0's T3 SKIP on every other binary -- the criterion as
+   declared named a check that never runs on blocked46.
+
+
+## Phase 3 summed (written at P3.3 + P3.4's ship, 2026-10-03; issue #115)
+
+SUMMED from the rows above, NOT re-measured: each rung's gamespeed binding delta as its own row recorded it (one A
+binary to the next; the rows telescope -- each starts where the last ended, checked when this was written).
+
+| rung | gamespeed binding | delta |
+|---|---|---|
+| P3.0 | 13,642,413 -> 13,696,511 | +54,098 |
+| P3.1 | 13,696,511 -> 13,940,191 | +243,680 |
+| P3.2a | 13,940,191 -> 14,086,236 | +146,045 |
+| P3.2b | 14,086,236 -> 14,452,893 | +366,657 |
+| P3.2c | 14,452,893 -> 14,462,688 | +9,795 |
+| P3.3 + P3.4 | 14,462,688 -> 15,243,295 | +780,607 |
+| **phase 3** | **13,642,413 -> 15,243,295** | **+1,600,882** |
+
+**Against the phase's budget of +0.3M** (`docs/handoff-gameplay.md`, P3): +1,600,882, OVER -- 5.34x the budget. This
+file's header puts a cumulative overrun to the owner (the projection > 22M minus the remaining budgets minus a 15%
+reserve -> stop); this section records the sum and does not apply that rule. P3.2c and P3.3 declared no budget of
+their own. The CAP-22 measure is v5's: 15,560,076 (headroom 6,439,924 to 22M).

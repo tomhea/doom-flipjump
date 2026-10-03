@@ -10,14 +10,32 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked45.fjm`, sha256 `25957324521286dd` (first 16 hex), built 2026-10-02 from the command in 1b (M7 P3.2c, the monsters DECIDE to attack) | class F -- the pictures differ from blocked44 (monsters face and enter their attack states); built with the installed flipjump 1.5.1 at `bc8ee63` from m7-decide 197682c (`docs/ship-evidence/blocked45_build.log`) |
-| **ms/frame** | **66.7 ms/frame** (66.5-71.1), against **67.6** (66.7-70.9) for blocked44 in the same run (~222M fj/s) -- **NOT SEPARATED: median x1.000** (pairs 0.996 0.983 1.010 1.000 1.016; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames); the msframe baseline's re-freeze on blocked45 waits for a quiet window | `msframe.py --a build/doom_e1m1_blocked44.fjm --b build/doom_e1m1_blocked45.fjm`, 200 frames x 5 reps, pinned core (`blocked45_msframe.log`) |
-| **fj ops/s** | **222.2 M** in the A/B run (blocked44 221.0 M) | ops/frame **14,828,598** on msframe's forward-walk script (blocked44 14,944,344) |
-| **binding metric** (owner spec) | (mean+p80)/2 = **14,462,688 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked45.fjm`, 2026-10-02 (`docs/ship-evidence/blocked45_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
-| **size** | **33.92% of 2^27 -- PASS** (45,531,634 words; span 97,874,112) -- 1,444,570 words under the 35% target | same run |
-| **combat set v5** (the CAP-22 set from P3.2a on: the seen rule; FROZEN 2026-10-01 on the owner's 2026-09-30 approval -- `p32a_v5_freeze.log`) | (mean+p80)/2 = **15,087,224**; **15,122,674** with strafe's collision; every frame pixel-exact and B0-state-exact (pose, doors, mode; the monster cells are m2_std/m3/p2a's) | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v5.json --pixel-every 1 --proxy` (`blocked45_b0_v5.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked46.fjm`, sha256 `b7c9e110be1494d8` (first 16 hex), built 2026-10-03 from the command in 1b (M7 P3.3 + P3.4, one rung: the depth order inside a leaf and the key-map HELP screen) | class F -- the pictures differ from blocked45 (a near monster drawn over a far one in a shared leaf; the main menu's HELP item and the help screen); built with the installed flipjump 1.5.1 at `bc8ee63` from m7-depth 5748228 with `--pin-heat scratchpad/12m/heat_blocked27_p33.json.gz` (`docs/ship-evidence/blocked46_build.log`) |
+| **ms/frame** | **79.5 ms/frame** (71.4-82.1), against **77.1** (74.4-80.9) for blocked45 in the same run (~195M fj/s) -- **NOT SEPARATED: median x0.958** (pairs 1.134 0.958 0.911 0.976 0.954; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames); the `shipped` baseline is NOT yet frozen on it -- still blocked44's; re-freeze on a quiet box | `msframe.py --a build/doom_e1m1_blocked45.fjm --b build/doom_e1m1_blocked46.fjm`, 200 frames x 5 reps, pinned core (`blocked46_msframe.log`) |
+| **fj ops/s** | **195.9 M** in the A/B run (blocked45 192.3 M) | ops/frame **15,580,689** on msframe's forward-walk script (blocked45 14,828,598) |
+| **binding metric** (owner spec) | (mean+p80)/2 = **15,243,295 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked46.fjm`, 2026-10-03 (`docs/ship-evidence/blocked46_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
+| **size** | **34.19% of 2^27 -- PASS** (45,887,520 words; span 98,046,240) -- 1,088,684 words under the 35% target | same run |
+| **combat set v5** (the CAP-22 set from P3.2a on: the seen rule; FROZEN 2026-10-01 on the owner's 2026-09-30 approval -- `p32a_v5_freeze.log`) | (mean+p80)/2 = **15,560,076**; **15,594,013** with strafe's collision; every frame pixel-exact and B0-state-exact (pose, doors, mode; the monster cells are m2_std/m3/p2a's) | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v5.json --pixel-every 1 --proxy` (`blocked46_b0_v5.log`) |
 
-**What it is:** blocked44 with the monsters DECIDING to attack in the model's `decide` mode (M7 P3.2c,
+**What it is:** blocked45 with two rungs in one build (the owner united them, 2026-10-02). **P3.3**
+(`docs/gp-monsters.md` 8.6, D3 d): a leaf's runtime things are drawn NEAREST FIRST -- `sim.thing_pass_depth` draws a
+longer list in rounds, each taking the least (P_AproxDistance from the player's integer position, index) above the
+last drawn, pointer reads only; the oracle's `rt_depth_order="aprox"` in `GAME_RENDER_KW` (the hosted tiers keep index
+order, `HOSTED_RENDER_KW`). On v5 the order changes 25 of 1,100 frames (4,357 px); the aprox key differs from the true
+depth tz on 2 frames (28 px). **P3.4** (`docs/gp-help.md`): the HELP screen -- keycaps for W/A/S/D and the arrows,
+SPACE / E "USE: DOORS, SWITCHES, LIFTS", ENTER, ESC "MENU / BACK", H -- opened from the main menu's new HELP item or
+with H in the game; E is a second use key; the main menu lost QUIT (never selectable). The first build (r0, sha256
+`fc45c241867e738c`, at 7dfc22a, `blocked46_r0pins_*` logs) passed the smoke run, m2_std_gate (452 frames), m3_gate (50
+frames, the help visits included) and the 6 gate selftests, then STOPPED at its pin report: 17 of 20 hot words, 3
+UNRESOLVED (an ESTIMATE of ~106,873 ops/frame of lost pins) -- the walk's pointer register moved from
+`sim.thing_pass`'s local `hp` to `sim.thing_pass_depth`'s global `td_p`, so `heat_blocked27_p32a` named words this
+program no longer has. 7e97a5a taught `heat_rekey` / `pinreport` a whole-token text rename and wrote
+`heat_blocked27_p33`; on r0's binary B0 v5 was exact on every frame (15,621,284,
+`blocked46_r0pins_b0_v5_precheck.log`) and p2a_gate passed (13 scenarios, `blocked46_r0pins_p2a_precheck.log`). r1 is
+the same program built with `heat_blocked27_p33`; its evidence is `blocked46_*`. The binary it replaced, blocked45
+(sha256 `25957324521286dd`), is kept in `build/` as the comparison arm.
+
+**What blocked45 was (P3.2c):** blocked44 with the monsters DECIDING to attack in the model's `decide` mode (M7 P3.2c,
 `docs/gp-monsters.md` section 8.5), class F: A_Chase whole -- `justattacked` (per slot, persisted) clears and re-picks
 the direction; the melee decision (a melee state, P_AproxDistance < MELEE_REACH 60, the attack sight) and the missile
 decision (a missile state, movecount 0, the attack sight, reaction 0, then the P_Random refusal); the decided state
@@ -82,7 +100,9 @@ blocked25 read 99-104 ms/frame with a background video render at ~0.3-0.45 core 
 msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27 has not been timed
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
-baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen on this binary
+baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is NOT frozen on this binary:
+it is still blocked44's -- blocked45 was never frozen, and blocked46 must be re-frozen on a quiet box
+(`msframe.py --a build/doom_e1m1_blocked46.fjm --save-baseline shipped`, into `blocked46_msframe_freeze.log`)
 (re-frozen 2026-10-02 on blocked44: 73.1 ms/frame [72.3 .. 76.2], yardstick 3.50G,
 204.4M fj/s -- `blocked44_msframe_freeze.log`; blocked40's 2026-09-30 read 63.7 [63.6 .. 63.8]; blocked38's the same day read 61.5 [61.3 .. 61.7];
 blocked37's the same day read 61.9 [61.4 .. 62.0];
@@ -191,6 +211,12 @@ assembler the same files and the same persist tuple at 87c2c75 and at the head
 is signed by 87c2c75's (`aab5be8f`), so on main this line MISSES the cache and recounts once (~34 min,
 the same counts) -- as after PR #87 (item 4). The next ship build re-signs it. (A first build of this rung was stopped in pass 1:
 it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
+
+**blocked46 (2026-10-03, M7 P3.3 + P3.4): the line's heat list is `heat_blocked27_p33`** -- `heat_blocked27_p32a` with
+`sim.thing_pass(7)` -> `sim.thing_pass_depth(7)` (3 keys, 579 sites) and the walk's pointer register,
+`sim.thing_pass`'s local `hp` -> the depth walk's global `td_p` (3 keys), by `heat_rekey.py`'s new whole-token text
+rename (7e97a5a). r0 (`blocked46_r0pins_build.log`) was built with `heat_blocked27_p32a` and its pin report left 3
+words UNRESOLVED.
 
 **blocked40 (2026-09-30, M7 P3.1): the line's heat list is `heat_blocked27_p31`** -- the P1.6 list
 (`heat_blocked27_p16`, never used by a build: every build from P1.6 to P3.0 pinned with the stale p14, issue #107)

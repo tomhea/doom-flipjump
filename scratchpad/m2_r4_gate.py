@@ -49,7 +49,8 @@ from doomfj.doors import (door_states, door_tic, heights_for_states,      # noqa
 from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
 from doomfj.harness import W                                              # noqa: E402
 from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
-from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
+# M7 P3.3: a HOSTED binary walks a leaf's things in index order -- the hosted set, not the game tier's
+from doomfj.reference_model import HOSTED_RENDER_KW                        # noqa: E402
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,      # noqa: E402
                                     ReferenceModel, SimState, build_scene, spawn_state)
 from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots  # noqa: E402
@@ -226,7 +227,7 @@ def main():
         want_state = (_signed32(state.x), _signed32(state.y), state.angle)
         rsc = build_scene(mw, mw, args.map,
                           heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}))
-        want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art, **GAME_RENDER_KW))
+        want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art, **HOSTED_RENDER_KW))
         # C1c: fj's OWN collision answer, not just its picture. The gate feeds the oracle's
         # position in each frame, so without this the fj side's door collision could be wrong in
         # both directions and every frame would still be byte-exact -- it would be rendering the

@@ -789,9 +789,7 @@ def octant(dx, dy):
     return {(False, False): 1, (True, False): 3, (True, True): 5, (False, True): 7}[(sx, sy)]
 
 
-def aprox(dx, dy):
-    ax, ay = abs(dx), abs(dy)
-    return ax + ay - ((ax if ax < ay else ay) >> 1)
+from doomfj.fixedpoint import aprox_distance as aprox  # noqa: E402 -- the ONE P_AproxDistance (M7 P3.3)
 
 
 PRELUDE_OCT = [

@@ -1,0 +1,13 @@
+set scratchpad/gp/scenarios/combat_scenarios_v5.json (seen): 1100 frames
+  frames whose picture changes with depth order: 25 (2.27%), 4357 pixels in all
+  frames where the aprox-distance key draws another picture than tz: 2 (28 px)
+  leaves holding 2+ active monsters, summed over frames: 13795 (12.54 a frame)
+       915 px  R0-aftermath frame 96
+       769 px  R0-aftermath frame 97
+       385 px  R0-aftermath frame 95
+       320 px  R0-aftermath frame 99
+       318 px  R0-aftermath frame 98
+       272 px  R0-aftermath frame 83
+       183 px  R0-aftermath frame 84
+       168 px  R0-aftermath frame 94
+rc=0

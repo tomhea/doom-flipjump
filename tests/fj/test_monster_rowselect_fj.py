@@ -41,7 +41,7 @@ def setup():
     # the row select reads no bank region: a stand-in anim_index with the real widths
     anim = {k: (0, rm.art_of_lump(art, lump, cache)[2], mir) for k, (lump, mir) in patches.items()}
     p31 = MC.p31_parts(rm, mw, "E1M1", art, anim, rt, spr_near=True, boot_skill=BOOT_SKILL, skills=SKILLS,
-                       cache=cache)
+                       cache=cache, depth_order=False)   # idle: the row select alone, no leaf walk (M7 P3.3)
     return rm, rt, patches, p31
 
 

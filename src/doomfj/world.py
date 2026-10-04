@@ -89,6 +89,7 @@ from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.combat import CombatMixin, STRAFE_MOVE, WEAPON_KEYS  # noqa: F401 (re-export)
 from doomfj.doorcode import door_line_ids
+from doomfj.fixedpoint import aprox_distance  # noqa: F401 -- P_AproxDistance, ONE definition (M7 P3.3); re-exported
 from doomfj.doors import crossed                                   # M7 P2b: WR lifts
 from doomfj.doors import door_contact_geo, touches_door            # M7 P2b: reversal
 from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states,  # M7 P2b
@@ -139,12 +140,8 @@ VERDICTS = (V_THING, V_WALL, V_MONLINE, V_HEIGHT, V_STEP, V_DROPOFF)
 # ================================================================================================
 # GEOMETRY -- integer, exact, no multiply by a runtime value except where the oracle already does
 # ================================================================================================
-def aprox_distance(dx: int, dy: int) -> int:
-    """P_AproxDistance: |dx| + |dy| - min(|dx|, |dy|) / 2, in the units it is given."""
-    dx, dy = abs(dx), abs(dy)
-    if dx < dy:
-        return dx + dy - (dx >> 1)
-    return dx + dy - (dy >> 1)
+# `aprox_distance` (P_AproxDistance) is fixedpoint's, imported above: the oracle's depth key shares it (M7 P3.3),
+# and the name stays importable from here for combat, sight, the scenario tools and the tests
 
 
 def octant_of(dx: int, dy: int) -> int:

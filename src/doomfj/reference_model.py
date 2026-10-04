@@ -29,6 +29,7 @@ from dataclasses import dataclass, replace
 
 from doomfj.config import Config, PNEAR_SEG_BUDGET
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
+from doomfj.fixedpoint import aprox_distance                   # P_AproxDistance, ONE definition (M7 P3.3)
 from doomfj.mapcompiler import (  # shared geometry (R6)
     NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side, seg_affine_coeffs,
     bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector,
@@ -69,7 +70,18 @@ VIEWHEIGHT = 41                    # DOOM player eye height above the floor (map
 # `sprite_wad` separately. `bbox_cull` changes no pixel; it decides which things are reached.
 GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
                       near_steps=True, stack_steps=True, things=True, degrade=True, sky=True,
-                      bbox_cull=True)
+                      bbox_cull=True,
+                      # M7 P3.3 (D3 d): a leaf's runtime things nearest first by P_AproxDistance from the
+                      # player -- the game tier's sim.thing_pass_depth (the emitter reads THIS key, and
+                      # monstercode.depth_walk refuses a monster mode that cannot emit the walk)
+                      rt_depth_order="aprox")
+# THE HOSTED TIERS' PICTURE (M7 P3.3): the game tier's set WITHOUT D3 d. The hosted tiers (hosted, hosted-doors,
+# hosted-loop, hosted-nocollide) move runtime things too -- the host sends their positions -- but their fj walks
+# a leaf's list in INDEX order (`sim.thing_pass`); the depth walk is the GAME tier's alone. A gate that drives a
+# hosted binary (m1_gate, m2_r3_gate, m2_r4_gate, m2_pass_probe) asks for THIS set, or it compares a sorted oracle
+# with an unsorted binary on every leaf holding two moved things.
+HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False)
+RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_order: off, or the key
 # ⚠ DOOM's forwardmove 0x32 (=50) is a THRUST, not a displacement. `P_Thrust` adds `move*2048` to
 # momx/momy, and against FRICTION 0xE800 (0.90625) the steady state is 50*2048/65536 / 0.09375 =
 # ~16.7 map-units per tic. This sim has no momentum -- `step_sim` applies the constant DIRECTLY as
@@ -346,6 +358,13 @@ DEG_DDA_FACES = 1                 # OPTION A (DEFAULT ON): step-face/stacked-pie
                                   # the 260-frame sweep: median 17.19 -> 16.51M, mean -0.23M,
                                   # worst -1.0M. The per-seg setup loses ~0.5M on a few
                                   # narrow-face-seg gate frames but wins the distribution.
+
+
+def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
+    """M7 P3.3 (D3 d), `rt_depth_order="aprox"`: a runtime thing's depth key -- P_AproxDistance from the player's
+    INTEGER position (the 16.16 view position's signed integer part) to the thing at map units (tx, ty). The fj
+    walk (`sim.thing_pass_depth`) keys by exactly this; its harness calls this function, not a copy."""
+    return aprox_distance(tx - (_signed(viewx, 32) >> 16), ty - (_signed(viewy, 32) >> 16))
 
 
 def sprite_bucket(h: int, view_h: int) -> int:
@@ -1610,6 +1629,15 @@ class ReferenceModel:
             runs.pop(i)
         return r0, runs
 
+    def view_depth(self, viewx, viewy, viewangle, tx_map, ty_map) -> int:
+        """R_ProjectSprite's depth `tz` of a thing at map units (tx, ty): the rotated coordinate along the view,
+        16.16 -- project_thing's, and (M7 P3.3, D3 d) the key a leaf's runtime things are drawn by"""
+        tr_x = _signed((tx_map << 16) - viewx, 32)
+        tr_y = _signed((ty_map << 16) - viewy, 32)
+        gxt = _signed(fixed_mul(tr_x & ANGLE_MASK, self.read_cos(viewangle), 8, 4), 32)
+        gyt = -_signed(fixed_mul(tr_y & ANGLE_MASK, self.read_sin(viewangle), 8, 4), 32)
+        return gxt - gyt
+
     def project_thing(self, viewx, viewy, viewangle, viewz, tx_map, ty_map, tz_map, art,
                       min_h: int | None = None):
         """V4 — R_ProjectSprite in this repo's fixed point: the billboard's screen box.
@@ -1625,9 +1653,7 @@ class ReferenceModel:
         tr_x = _signed((tx_map << 16) - viewx, 32)
         tr_y = _signed((ty_map << 16) - viewy, 32)
         vcos, vsin = self.read_cos(viewangle), self.read_sin(viewangle)
-        gxt = _signed(fixed_mul(tr_x & ANGLE_MASK, vcos, 8, 4), 32)
-        gyt = -_signed(fixed_mul(tr_y & ANGLE_MASK, vsin, 8, 4), 32)
-        tz = gxt - gyt
+        tz = self.view_depth(viewx, viewy, viewangle, tx_map, ty_map)
         if tz < SPRITE_MINZ:
             return None
         # the shared block-FP reciprocal, NOT a true divide: `hex.fixed_div 8,4` is 38,500 fj ops
@@ -1835,7 +1861,7 @@ class ReferenceModel:
                           deg_stack_scale: int | None = None, deg_mark: int | None = None,
                           deg_lip_scale: int | None = None,
                           thing_positions=None, thing_hidden=None, thing_views=None,
-                          seen_out: set | None = None,
+                          seen_out: set | None = None, rt_depth_order=False,
                           degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
@@ -1872,6 +1898,9 @@ class ReferenceModel:
         (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff) for the gates to inspect.
         Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces this
         bit-exactly (D12)."""
+        # M7 P3.3: a misspelt depth order must fail here, not fall through to the "aprox" key
+        assert rt_depth_order in RT_DEPTH_ORDERS, (
+            f"rt_depth_order={rt_depth_order!r}: one of {RT_DEPTH_ORDERS}")
         cfg = self.cfg
         # 25M-CAP: `degrade=True` turns on the whole certified adaptive-degradation package;
         # the individual deg_* kwargs stay as research overrides (any explicit value wins --
@@ -2037,6 +2066,16 @@ class ReferenceModel:
                     # binding is ALREADY position-driven, so M14-e needs no new logic here
                     things_by_ss.setdefault(
                         self.point_in_subsector(scene.cmap, t.x, t.y), []).append((t, _views[_di], _di))
+            # M7 P3.3 (D3 d): a leaf's RUNTIME things nearest first -- the walk is front-to-back and a sprite
+            # pixel is written once, so within a leaf the near one must be drawn before the far one
+            if rt_depth_order:
+                _key = ((lambda _t: self.view_depth(viewx, viewy, viewangle, _t.x, _t.y))
+                        if rt_depth_order == "tz" else
+                        (lambda _t: aprox_depth_key(viewx, viewy, _t.x, _t.y)))
+                for _lst in things_by_ss.values():
+                    _nb = sum(1 for _e in _lst if _baked[_e[2]])
+                    if len(_lst) - _nb > 1:
+                        _lst[_nb:] = sorted(_lst[_nb:], key=lambda _e: _key(_e[0]))
             for _si, _ss in enumerate(scene.cmap.subsectors):
                 if _ss.numsegs and _si in things_by_ss:
                     ss_first[_ss.firstseg] = _si              # the walk's arrival point for its things

@@ -37,7 +37,8 @@ from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,      # noqa
                                     ReferenceModel, SimState, build_scene, spawn_state)
 from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots  # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
-from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
+# M7 P3.3: a HOSTED binary walks a leaf's things in index order -- the hosted set, not the game tier's
+from doomfj.reference_model import HOSTED_RENDER_KW                        # noqa: E402
 from doomfj.wireformat import (encode_bindings, encode_feed,              # noqa: E402
                                encode_things, encode_visibility)
 from flipjump.interpreter.fjm_run import IOReadOnEOF                      # noqa: E402
@@ -129,7 +130,7 @@ def wire(vx, vy, va, keys=0, dx=0, dy=0):
 
 def oracle(vx, vy, va):
     return bytes(rm.render_wall_frame(
-        SimState(vx << 16, vy << 16, va, "E1M1"), scene, sprite_wad=art, **GAME_RENDER_KW))
+        SimState(vx << 16, vy << 16, va, "E1M1"), scene, sprite_wad=art, **HOSTED_RENDER_KW))
 
 
 def run_all(fjm, blob):

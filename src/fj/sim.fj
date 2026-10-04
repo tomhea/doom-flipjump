@@ -2,7 +2,7 @@
 // sim.fj           the player sim: collision against real linedefs, thing binding.
 // STATUS  LIVE - the generated main
 // ENTRY   sim.check_cells, sim.try_move, sim.bind_things, sim.thing_pass, sim.leaf_link/unlink
-// SIZE    11 macros (sim.fix16 .. sim.thing_pass)
+// SIZE    12 macros (sim.fix16 .. sim.thing_pass_depth)
 // NOTE    `@` holds control-flow labels ONLY; the scratch is named globals (`ca_*` / `cc_*` in
 //         collision.py::CELL_DECLS, `cl_side*` in CHECK_SCRATCH_DECLS). An @-local vec in a macro
 //         expanded N times is N cells the M1 restore set could only name by expansion path.
@@ -748,6 +748,99 @@ ns sim {
         hex.sparse_zero HOT_PAD, 2, sp_dw
         hex.sparse_zero HOT_PAD, 2, sp_lt
         rep(anim, k) hex.zero 2, lthi                          // M7 P3.1: the class's second byte
+      empty:
+    }
+
+    // M7 P3.3 (D3 d) sim.thing_pass_depth -- thing_pass, with a leaf's runtime things drawn NEAREST FIRST. The walk
+    // is front-to-back and a sprite pixel is written once, so inside a leaf a far monster drawn before a near one
+    // would cover it. The depth key is P_AproxDistance from the player's integer position to the thing's (mt_dist_leaf,
+    // the monsters' own leaf), ties by the list's ascending index -- the oracle's `rt_depth_order="aprox"` (census:
+    // depth order moves 25 of v5's 1,100 frames; this key differs from the true view depth tz on 2 of them, 28 px).
+    // A leaf with one thing draws it as thing_pass does. A longer list is drawn in ROUNDS: each round scans the list
+    // for the least (key, index) above the last one drawn, with no per-thing storage -- the scan re-reads positions
+    // (pointer READS only, as thing_load's) -- so n things cost n^2 key reads, and nothing is written but registers.
+    // The registers are the named globals `td_*` (monstercode.P33_DECLS): no @-local data.
+    def thing_pass_depth throw, n_th, thpos, anim, sel, selret, lthi \
+            @ multi, single, round, scan, cand_eq, cand, take, next, round_end, done, empty \
+            < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf, viewx, viewy, mt_dx, mt_dy, mt_d, mt_ret, \
+              mt_dist_leaf, td_head, td_e, td_t, td_p, td_q, td_best, td_bk, td_lk, td_lt, td_have, td_first, \
+              td_pos, td_poff, td_pbase, td_pptr, \
+              sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
+              sp_mon, sp_base, sp_base2, sp_dw, sp_lt {
+        hex.set w/4, td_q, sshead
+        hex.ptr_index td_p, td_q, cur_ss
+        hex.sparse_zero HOT_PAD, w/4, td_head
+        hex.read_byte td_head, td_p
+        hex.if0 w/4, td_head, empty
+        hex.mov w/4, td_t, td_head
+        hex.dec w/4, td_t
+        hex.set w/4, td_q, thnext
+        hex.ptr_index td_p, td_q, td_t
+        hex.sparse_zero HOT_PAD, w/4, td_e
+        hex.read_byte td_e, td_p
+        hex.if0 w/4, td_e, single
+        ;multi
+      single:                                  // one thing: as thing_pass
+        hex.if1 1, tstop, done
+        .thing_load throw, n_th, thpos, td_t, anim, sel, selret
+        stl.fcall thing_leaf, thing_ret
+        ;done
+      multi:
+        hex.set 1, td_first, 1
+      round:
+        hex.if1 1, tstop, done
+        hex.zero 1, td_have
+        hex.mov w/4, td_e, td_head
+      scan:
+        hex.if0 w/4, td_e, round_end
+        hex.mov w/4, td_t, td_e
+        hex.dec w/4, td_t
+        .thing_pos_read thpos, td_t, td_pos, td_poff, td_pbase, td_pptr
+        hex.mov 4, mt_dx, sp_x + 4*dw          // the integer parts: thing - player
+        hex.sub 4, mt_dx, viewx + 4*dw
+        hex.mov 4, mt_dy, sp_y + 4*dw
+        hex.sub 4, mt_dy, viewy + 4*dw
+        stl.fcall mt_dist_leaf, mt_ret         // mt_d = the key
+        hex.if1 1, td_first, cand
+        hex.cmp 4, mt_d, td_lk, next, cand_eq, cand
+      cand_eq:
+        hex.cmp w/4, td_t, td_lt, next, next, cand
+      cand:                                    // (key, t) > the last drawn: a candidate
+        hex.if0 1, td_have, take
+        hex.cmp 4, mt_d, td_bk, take, next, next   // equal key, later t: not better (the scan is ascending)
+      take:
+        hex.mov w/4, td_best, td_t
+        hex.mov 4, td_bk, mt_d
+        hex.set 1, td_have, 1
+      next:
+        hex.set w/4, td_q, thnext
+        hex.ptr_index td_p, td_q, td_t
+        hex.sparse_zero HOT_PAD, w/4, td_e
+        hex.read_byte td_e, td_p
+        ;scan
+      round_end:
+        hex.if0 1, td_have, done
+        hex.mov 4, td_lk, td_bk
+        hex.mov w/4, td_lt, td_best
+        hex.zero 1, td_first
+        .thing_load throw, n_th, thpos, td_best, anim, sel, selret
+        stl.fcall thing_leaf, thing_ret
+        ;round
+      done:                                    // thing_pass's clear, for the same reason
+        hex.sparse_zero HOT_PAD, 8, sp_x
+        hex.sparse_zero HOT_PAD, 8, sp_y
+        hex.sparse_zero HOT_PAD, 8, sp_z
+        hex.sparse_zero HOT_PAD, 8, sp_left
+        hex.sparse_zero HOT_PAD, 8, sp_w
+        hex.sparse_zero HOT_PAD, 8, sp_hh
+        hex.sparse_zero HOT_PAD, 8, sp_tzmax
+        hex.sparse_zero HOT_PAD, 8, sp_tzmax2
+        hex.sparse_zero HOT_PAD, 2, sp_mon
+        hex.sparse_zero HOT_PAD, 4, sp_base
+        hex.sparse_zero HOT_PAD, 4, sp_base2
+        hex.sparse_zero HOT_PAD, 2, sp_dw
+        hex.sparse_zero HOT_PAD, 2, sp_lt
+        rep(anim, k) hex.zero 2, lthi
       empty:
     }
 }

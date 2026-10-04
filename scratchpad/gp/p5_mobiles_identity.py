@@ -93,17 +93,16 @@ def main(argv=None) -> int:
             scenes[key] = build_scene(w.mw, w.mw, w.mapname, dict(w.heights_now))
         sc = scenes[key]
         st = SimState(ws.px, ws.py, ws.pangle, w.mapname)
-        kw = dict(sprite_wad=art, thing_views=mv(ph, ws.px, ws.py), thing_positions=mv.positions(ph),
-                  **GAME_RENDER_KW)
-        p_old = bytes(rm_old.render_wall_frame(st, sc, **kw))
-        p_new = bytes(rm_new.render_wall_frame(st, sc, mobiles=[], **kw))
-        p_none = bytes(rm_new.render_wall_frame(st, sc, mobiles=None, **kw))
+        kw = dict(sprite_wad=art, thing_views=mv(ph, ws.px, ws.py), thing_positions=mv.positions(ph))
+        p_old = bytes(rm_old.render_wall_frame(st, sc, **kw, **GAME_RENDER_KW))
+        p_new = bytes(rm_new.render_wall_frame(st, sc, mobiles=[], **kw, **GAME_RENDER_KW))
+        p_none = bytes(rm_new.render_wall_frame(st, sc, mobiles=None, **kw, **GAME_RENDER_KW))
         mobs = ph.mobiles()
         n += 1
         same += p_old == p_new == p_none
         if mobs:
             mob_frames += 1
-            p_mob = bytes(rm_new.render_wall_frame(st, sc, mobiles=mobs, **kw))
+            p_mob = bytes(rm_new.render_wall_frame(st, sc, mobiles=mobs, **kw, **GAME_RENDER_KW))
             d = sum(x != y for x, y in zip(p_mob, p_new))
             mob_differs += d > 0
             print("  frame %3d: %s  mobiles %s -> %d px drawn" % (

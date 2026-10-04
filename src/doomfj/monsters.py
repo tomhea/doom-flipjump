@@ -13,6 +13,22 @@ ANG45 = 0x20000000
 MASK32 = 0xFFFFFFFF
 
 
+def mobile_rows(world) -> int:
+    """M7 P5 (docs/gp-p5-interface.md): the runtime-thing rows the MOBILES add after the WAD's runtime things -- fireball
+    slot s is row nt + s (s < FIREBALL_POOL), blood slot s row nt + FIREBALL_POOL + s -- in a world whose monsters
+    spawn fireballs ("full") or whose player's shots bleed (world.player_bleeds); 0 before P5"""
+    from doomfj.world import FIREBALL_POOL, FX_POOL, player_bleeds
+    return FIREBALL_POOL + FX_POOL if (world.monsters == "full" or player_bleeds(world.player)) else 0
+
+
+def mobile_lump(state_name: str) -> str:
+    """M7 P5: the sprite lump a mobile (fireball, blood, puff) is drawn with in state `state_name` -- its frame's
+    single-rotation `...0` lump (BAL1A0 .. BAL1E0, BLUDA0 .. BLUDC0, PUFFA0 .. PUFFD0)"""
+    from doomfj import gamedata as gd
+    st = gd.STATES[state_name]
+    return "%s%s0" % (st.sprite, chr(ord("A") + st.frame_index))
+
+
 def rotation(rm, view_x16: int, view_y16: int, thing_x16: int, thing_y16: int, facing: int) -> int:
     """DOOM's sprite rotation 1..8 of a thing facing octant `facing`, seen from (view_x16, view_y16)"""
     ang = rm.point_to_angle(view_x16, view_y16, thing_x16, thing_y16)
@@ -41,7 +57,8 @@ class MonsterPhase:
         # weapon half below steps the player's weapon in the same world the monsters live in
         # M7 P4.2a: a player whose shots resolve aims with THE PICTURE's window (combat.window_aim), which the gate
         # writes from each render's `aim_out` (`set_aim`), as the binary's render writes `aim_sid`
-        aim = World.window_aim if player in ("shoot", "hit", "full") else None
+        from doomfj.world import player_resolves
+        aim = World.window_aim if player_resolves(player) else None
         self.world = World(map_wad, mapname, gd.SK_HARD if skill is None else skill, rm=rm, monsters=mode,
                            sight_rule="los" if mode == "idle" else "seen", player=player, aim=aim)
         self.gd = gd
@@ -49,15 +66,25 @@ class MonsterPhase:
     def reset(self, skill: int) -> None:
         self.world.reset(skill)
 
-    def tic(self, x16: Optional[int] = None, y16: Optional[int] = None, angle: Optional[int] = None) -> None:
-        """one monster tic -- the player where the gate's world put him this frame (the wake mode looks at him)"""
+    def tic(self, x16: Optional[int] = None, y16: Optional[int] = None, angle: Optional[int] = None):
+        """one monster tic -- the player where the gate's world put him this frame (the wake mode looks at him).
+        M7 P5: and then the rest of world.tic's order after the monsters -- the fireballs, the barrels, the effects
+        (`_projectiles_phase`, `_barrels_phase`, `_fx_phase`; before P5 nothing spawns into the pools and the barrels
+        only animate). -> the tic's events (also kept as `last_tic`)"""
         from doomfj.world import TicEvents
-        ws = self.world.ws
+        w = self.world
+        ws = w.ws
         if x16 is not None:
             ws.px = x16 - (1 << 32) if x16 >> 31 & 1 else x16
             ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
             ws.pangle = angle & 0xFFFFFFFF
-        self.world._monsters_phase(TicEvents(0))
+        ev = TicEvents(0)
+        w._monsters_phase(ev)
+        w._projectiles_phase(ev)
+        w._barrels_phase(ev)
+        w._fx_phase(ev)
+        self.last_tic = ev
+        return ev
 
     # ---- M7 P3.2b "chase": the monsters and the gate's doors and lifts act on each other ------------------------
     def sync(self, doors: dict, lifts: tuple, switched: int) -> None:
@@ -116,8 +143,19 @@ class MonsterPhase:
             ws.pangle = angle & 0xFFFFFFFF
         k = {n: bool(keys.get(n)) for n in KEYS}
         ev = TicEvents(0)
+        ws = w.ws
+        if ws.p_dead:                     # M7 P5: P_DeathThink's weapon half (the restart on use is P7's)
+            w._move_psprites(k, ev)
+            if ws.p_damagecount:
+                ws.p_damagecount -= 1
+            return ev
         w._weapon_keys(k)
         w._move_psprites(k, ev)
+        # M7 P5: the flashes fade after the psprites, in the model's player-phase order (combat._player_phase)
+        if ws.p_damagecount:
+            ws.p_damagecount -= 1
+        if ws.p_bonuscount:
+            ws.p_bonuscount -= 1
         return ev
 
     def weapon_state(self) -> Dict[str, int]:
@@ -125,6 +163,7 @@ class MonsterPhase:
         if self.world.player == "walk":
             return {}
         from doomfj import weaponcode as WC
+        from doomfj.world import player_resolves
         ws, gd = self.world.ws, self.gd
         idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(WC.weapon_states())}
         wst, fst = gd.STATE_NAMES[ws.p_wpn_state], gd.STATE_NAMES[ws.p_flash_state]
@@ -133,7 +172,7 @@ class MonsterPhase:
                 "wp_rf": ws.p_refire, "wp_ad": ws.p_attackdown, "am_clip": ws.p_ammo[gd.AM_CLIP],
                 "am_shell": ws.p_ammo[gd.AM_SHELL],
                 "wp_own": sum(int(bool(ws.p_owned[w])) << (4 * i) for i, w in enumerate(WC.WEAPONS)),
-                **({"aim_sid": tuple(ws.aim_sid)} if self.world.player in ("shoot", "hit", "full") else {}),
+                **({"aim_sid": tuple(ws.aim_sid)} if player_resolves(self.world.player) else {}),
                 "rng_pl": ws.rng_player, "wp_frm": WC.overlay_frames().index(WC.psprite_lump(wst)),
                 "fl_frm": 0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0
                 else 1 + WC.flash_frames().index(WC.psprite_lump(fst))}
@@ -189,12 +228,65 @@ class MonsterPhase:
                         "msec": tuple(self.world._mon_sector(m) for m in range(n))})
         if self.world.monsters not in ("idle", "wake", "chase"):   # M7 P3.2c: the missile decision's flag
             out["mon_justattacked"] = tuple(ws.mon_justattacked[:n])
-        if self.world.player in ("shoot", "hit", "full"):       # M7 P4.2a: the damage's cells (health in its 12 bits)
+        from doomfj.world import player_bleeds, player_hears, player_resolves
+        if player_resolves(self.world.player):                  # M7 P4.2a: the damage's cells (health in its 12 bits)
             out.update({"mon_health": tuple(v & 0xFFF for v in ws.mon_health[:n]),
                         "mon_shootable": tuple(ws.mon_shootable[:n]), "mon_solid": tuple(ws.mon_solid[:n]),
                         "mon_justhit": tuple(ws.mon_justhit[:n])})
-        if self.world.player in ("hit", "full"):                 # M7 P4.2b: who heard, who still waits in ambush
+        if player_hears(self.world.player):                     # M7 P4.2b: who heard, who still waits in ambush
             out.update({"mon_ambush": tuple(ws.mon_ambush[:n]), "snd_alert": tuple(ws.snd_alert)})
+        if self.world.monsters == "full":                        # M7 P5: the attacks land -- hurtcode's player cells
+            out.update(self.hurt_state())                        # and projcode's fireball pool
+            out.update(self.proj_state())
+        if self.world.monsters == "full" or player_bleeds(self.world.player):   # M7 P5: the blood pool, its stream
+            out.update(self.fx_state())
+        return out
+
+    # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------
+    def hurt_state(self) -> Dict[str, int]:
+        """hurtcode's player cells in their own units: p_hp the health's 12 bits (3 nibbles, two's complement -- a
+        killing blow takes it below 0), p_ar the armor points (2 nibbles, 0..200), p_at the armor type (0 none,
+        1 green, 2 blue), p_dc the damage count (2 nibbles, 0..100), p_dead (PST_DEAD, 0/1)"""
+        ws = self.world.ws
+        return {"p_hp": ws.p_health & 0xFFF, "p_ar": ws.p_armor, "p_at": ws.p_armortype, "p_dc": ws.p_damagecount,
+                "p_dead": ws.p_dead}
+
+    def proj_state(self) -> Dict[str, tuple]:
+        """projcode's fireball pool, per slot (FIREBALL_POOL of them): pj_act 0/1; pj_x / pj_y the 16.16 position and
+        pj_mx / pj_my the 16.16 momentum, each its 32 bits unsigned (8 nibbles); pj_st the GAMEDATA state index (2
+        nibbles: S_TBALL1 .. S_TBALLX3); pj_ti the tics left (1 nibble). A free slot is all zeros (the model's
+        P_RemoveMobj zeroes it, and so does the level start)"""
+        ws = self.world.ws
+        return {"pj_act": tuple(ws.proj_active), "pj_x": tuple(v & MASK32 for v in ws.proj_x),
+                "pj_y": tuple(v & MASK32 for v in ws.proj_y), "pj_mx": tuple(v & MASK32 for v in ws.proj_momx),
+                "pj_my": tuple(v & MASK32 for v in ws.proj_momy), "pj_st": tuple(ws.proj_state),
+                "pj_ti": tuple(ws.proj_tics)}
+
+    def fx_state(self) -> Dict[str, object]:
+        """projcode's blood pool, per slot (FX_POOL of them), in pj_*'s units (fx_x / fx_y always whole map units: the
+        spawn point is one), and the effects' stream rng_fx (2 nibbles)"""
+        ws = self.world.ws
+        return {"fx_act": tuple(ws.fx_active), "fx_x": tuple(v & MASK32 for v in ws.fx_x),
+                "fx_y": tuple(v & MASK32 for v in ws.fx_y), "fx_st": tuple(ws.fx_state),
+                "fx_ti": tuple(ws.fx_tics), "rng_fx": ws.rng_fx}
+
+    def palette(self) -> int:
+        """the PLAYPAL index this world frame is shown with (combat.palette_index: ST_doPaletteStuff)"""
+        from doomfj.combat import palette_index
+        return palette_index(self.world.ws)
+
+    def mobiles(self) -> list:
+        """`render_wall_frame(mobiles=...)`: [(x, y, lump)] of every live mobile in ROW order -- the fireball slots,
+        then the blood slots -- at its whole map units (the 16.16 position floored: its thpos_rt row carries no
+        fraction), drawn with its state's frame (`mobile_lump`)"""
+        from doomfj.world import FIREBALL_POOL, FX_POOL
+        ws, gd, out = self.world.ws, self.gd, []
+        for s in range(FIREBALL_POOL):
+            if ws.proj_active[s]:
+                out.append((ws.proj_x[s] >> 16, ws.proj_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.proj_state[s]])))
+        for s in range(FX_POOL):
+            if ws.fx_active[s]:
+                out.append((ws.fx_x[s] >> 16, ws.fx_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])))
         return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:
@@ -247,7 +339,11 @@ class MonsterViews:
 
     def rt_state(self, phase: "MonsterPhase") -> dict:
         """M7 P3.2b: the runtime things' `thpos_rt` (16.16 x | y << 32) and `thss_rt` (the leaf) as the probe reads
-        them -- the monsters where the phase has them, every other runtime thing at its spawn"""
+        them -- the monsters where the phase has them, every other runtime thing at its spawn.
+        M7 P5: then the MOBILE rows (`mobile_rows`): fireball slot s at row nrt + s, blood slot s at nrt +
+        FIREBALL_POOL + s -- a live slot's whole-unit position (16.16 with the fraction ZERO: `MonsterPhase.mobiles`'
+        x, y) and its leaf (the model's proj_leaf / fx_leaf), a free slot (0, 0)"""
+        from doomfj.world import FIREBALL_POOL, FX_POOL
         ws, pos = phase.world.ws, self.positions(phase)
         M = 0xFFFFFFFF
         thpos, thss = [], []
@@ -257,7 +353,18 @@ class MonsterViews:
             thss.append(self.rm.point_in_subsector(self.cmap, x, y))
         for m, t in enumerate(self.rt):                   # a monster's leaf is the model's own
             thss[t] = ws.mon_leaf[m]
+        if mobile_rows(phase.world):
+            for act, xs, ys, leaf, n in ((ws.proj_active, ws.proj_x, ws.proj_y, ws.proj_leaf, FIREBALL_POOL),
+                                         (ws.fx_active, ws.fx_x, ws.fx_y, ws.fx_leaf, FX_POOL)):
+                for s in range(n):
+                    live = bool(act[s])
+                    thpos.append(((((xs[s] >> 16) << 16) & M) | ((((ys[s] >> 16) << 16) & M) << 32)) if live else 0)
+                    thss.append(leaf[s] if live else 0)
         return {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss)}
+
+    def nrows(self, phase: "MonsterPhase") -> int:
+        """M7 P5: the rows of thpos_rt / thss_rt the probe reads -- the runtime things, then the mobiles"""
+        return self.nrt + mobile_rows(phase.world)
 
     def aim_things(self, phase: "MonsterPhase") -> Dict[int, Tuple[int, int]]:
         """M7 P4.2a: `render_wall_frame(aim_things=...)` -- {drawable index: (sid, radius)} for every shootable living

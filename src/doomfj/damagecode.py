@@ -46,8 +46,9 @@ from doomfj.lut_generator import generate_dispatch_table_fj
 # the per-slot cells P4.2a adds (world.build_schema's widths: health 12 bits signed -> 3 nibbles, the flags 1)
 P42_FIELDS = ("mon_health", "mon_shootable", "mon_solid", "mon_justhit")
 # the player modes whose shots hurt monsters (world.PLAYER_MODES): the emitter adds this module when the game tier's
-# PLAYER_MODE is one of them
-DAMAGE_PLAYER_MODES = ("shoot", "hit", "full")
+# PLAYER_MODE is one of them -- M7 P5: derived from the ONE rule, world.player_resolves
+from doomfj.world import PLAYER_MODES as _PLAYER_MODES, player_resolves as _player_resolves   # noqa: E402
+DAMAGE_PLAYER_MODES = tuple(m for m in _PLAYER_MODES if _player_resolves(m))
 DM_MAX = 20                          # the largest damage a shot deals in P4.2a (the fist and the saw: 20)
 TICS_FOREVER = 15
 

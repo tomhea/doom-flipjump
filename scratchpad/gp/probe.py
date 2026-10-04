@@ -153,7 +153,13 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad", "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm"}),
                    frozenset({"aim_sid"}),                                              # M7 P4.2a: the window
                    frozenset({"mon_health", "mon_shootable", "mon_solid", "mon_justhit"}),   # M7 P4.2a: the damage
-                   frozenset({"mon_ambush", "snd_alert"}))                              # M7 P4.2b: the noise
+                   frozenset({"mon_ambush", "snd_alert"}),                              # M7 P4.2b: the noise
+                   # M7 P5 (docs/gp-p5-interface.md): the attacks -- hurtcode's player cells and the palette ...
+                   frozenset({"p_hp", "p_ar", "p_at", "p_dc", "p_dead", "pal_cur"}),
+                   # ... projcode's fireball pool ...
+                   frozenset({"pj_act", "pj_x", "pj_y", "pj_mx", "pj_my", "pj_st", "pj_ti"}),
+                   # ... and its blood pool with the effects' stream
+                   frozenset({"fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -667,6 +673,18 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", 4), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1)):
         cells[name] = Cell(name, "hex", width)
     cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=17)          # M7 P4.2a: the aim window (doomfj.aimcode)
+    # M7 P5 (docs/gp-p5-interface.md, "the cells' units"; monsters.MonsterPhase.hurt_state / proj_state / fx_state):
+    # the player's health (12 bits, read unsigned -- the oracle masks), armor, armor type, damage count, death, and
+    # the palette the last present showed (hurtcode); the fireball pool and the blood pool (projcode), rng_fx
+    for name, width in (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("p_dc", 2), ("p_dead", 1), ("pal_cur", 1),
+                        ("rng_fx", 2)):
+        cells[name] = Cell(name, "hex", width)
+    from doomfj.world import FIREBALL_POOL, FX_POOL
+    for pool, n in (("pj", FIREBALL_POOL), ("fx", FX_POOL)):
+        cells[pool + "_act"] = Cell(pool + "_act", "hex", 1, count=n)
+        for name, width in (("_x", 8), ("_y", 8), ("_st", 2), ("_ti", 1)) + ((("_mx", 8), ("_my", 8))
+                                                                             if pool == "pj" else ()):
+            cells[pool + name] = Cell(pool + name, "hex", width, count=n)
     if nrt:
         cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt)
         cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt)
@@ -693,6 +711,12 @@ def wfired_value(fired) -> object:
 
 
 KEYS_UP = {"kb_f": 0, "kb_b": 0, "kb_l": 0, "kb_r": 0, "kb_u": 0}
+
+
+def palette_sha(wad, index: int) -> str:
+    """M7 P5: the sha1[:12] `ProbeScreen` records for a present that shows `wad`'s PLAYPAL[index] -- the oracle's side
+    of `RunResult.palettes` (combat.palette_index on a world frame, 0 on a menu frame)"""
+    return hashlib.sha1(bytes(b for rgb in wad.playpal(index) for b in rgb)).hexdigest()[:12]
 
 
 class Oracle:
@@ -793,13 +817,15 @@ class Oracle:
         return self._scenes[(key, mkey)]
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
-               views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None) -> bytes:
+               views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
+               mobiles=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
         M7 P4.0: the GAME SCREEN -- the view with the weapon over it and the status bar below
         (`hud.GameScreen`); the bar's card is lit when the card is gone from the world (`hidden_extra`
-        names the card and nothing else -- P2a.1's one use of it)"""
+        names the card and nothing else -- P2a.1's one use of it).
+        M7 P5: `mobiles` -- `monsters.MonsterPhase.mobiles()`, the fireballs and the blood"""
         from doomfj.reference_model import SimState
         view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
@@ -807,6 +833,7 @@ class Oracle:
                                                thing_views=views, seen_out=seen_out,
                                                thing_positions=positions,              # M7 P3.2b
                                                aim_things=aim_things, aim_out=aim_out,  # M7 P4.2a
+                                               mobiles=mobiles,                         # M7 P5
                                                **self.RENDER_KW))
         # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
         return self.screen.frame(view, card=bool(hidden_extra), **(screen_kw or {}))
@@ -840,9 +867,18 @@ class Oracle:
 
     @property
     def nrt(self) -> int:
-        """M7 P3.2b: the runtime things (the index space of thpos_rt / thss_rt)"""
-        from doomfj.world import World
-        return self._mv(World(self.mw, self.mapname)).nrt
+        """M7 P3.2b: the runtime things (the index space of thpos_rt / thss_rt).
+        M7 P5: and the mobile rows after them when the game tier's modes have mobiles (monsters.mobile_rows)"""
+        from doomfj.monsters import MonsterPhase
+        from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+        ph = MonsterPhase(self.mw, self.mapname, mode=MONSTER_MODE, rm=self.rm, player=PLAYER_MODE)
+        return self._mv(ph.world).nrows(ph)
+
+    def palette_sha(self, index: int) -> str:
+        """M7 P5: what `GameBinary.run`'s screen records at a present showing PLAYPAL[index] -- the ASSET wad's
+        (`self.art`, freedoom1.wad: the fixture map wad carries palette 0 alone, and its palette 0 is the asset
+        wad's byte for byte; hurtcode bakes playpal<k> from the asset wad) -- a menu frame shows index 0"""
+        return palette_sha(self.art, index)
 
     def monster_drawable(self, world) -> list:
         from doomfj.monsters import MonsterViews

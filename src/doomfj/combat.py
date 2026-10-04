@@ -255,6 +255,27 @@ def fireball_momentum_table(rm) -> List[Tuple[int, int]]:
             for i in range(rm.cfg.TRIG_N)]
 
 
+# M7 P5: THE PALETTE (st_stuff.c ST_doPaletteStuff, Chocolate Doom) -- the PLAYPAL index the frame is shown with
+STARTREDPALS, NUMREDPALS = 1, 8             # the damage flash: palettes 1..8
+STARTBONUSPALS, NUMBONUSPALS = 9, 4         # the pickup flash: palettes 9..12
+# (RADIATIONPAL 13: pw_ironfeet -- E1M1 holds no radiation suit, and the schema no powers[pw_ironfeet])
+
+
+def palette_index(ws) -> int:
+    """ST_doPaletteStuff for the single player's cells: the damage count -- raised to the berserk's fading
+    `12 - (strength >> 6)` while pw_strength runs -- picks a red palette `min(7, (cnt + 7) >> 3) + 1`; else the bonus
+    count a gold one `min(3, (bc + 7) >> 3) + 9`; else 0. The fj's `palidx` (hurtcode) computes the same; a menu frame
+    shows palette 0 whatever the cells hold (the gates' rule, not this function's)."""
+    cnt = ws.p_damagecount
+    if ws.p_strength:
+        cnt = max(cnt, 12 - (ws.p_strength >> 6))
+    if cnt:
+        return min(NUMREDPALS - 1, (cnt + 7) >> 3) + STARTREDPALS
+    if ws.p_bonuscount:
+        return min(NUMBONUSPALS - 1, (ws.p_bonuscount + 7) >> 3) + STARTBONUSPALS
+    return 0
+
+
 # ================================================================================================
 # THE MIXIN
 # ================================================================================================
@@ -276,10 +297,12 @@ class CombatMixin:
         rm = self.rm
         self.aim = aim or type(self).aim_geometric
         self.player_blocking = player_blocking
-        # M7 P4 (world.PLAYER_MODES): what the player's mode applies -- a shot that RESOLVES (shoot, hit, full), the
-        # shot's NOISE (hit, full), and everything else -- effects, barrels, drops, the player thing's states (full)
-        self._p_resolve = self.player in ("shoot", "hit", "full")
-        self._p_noise = self.player in ("hit", "full")
+        # M7 P4 (world.PLAYER_MODES): what the player's mode applies -- a shot that RESOLVES (world.player_resolves), the
+        # shot's NOISE (world.player_hears), M7 P5 the BLOOD of a monster it hits (world.player_bleeds: "fx", "full"),
+        # and everything else -- barrels, puffs, drops, the player thing's states, nukage (full)
+        self._p_resolve = W.player_resolves(self.player)
+        self._p_noise = W.player_hears(self.player)
+        self._p_fx = W.player_bleeds(self.player)
         self._p_full = self.player == "full"
         self.sites = Sites(rm)
         self.aim_centre = rm.angle_to_x(0)
@@ -372,7 +395,8 @@ class CombatMixin:
             self._death_think(keys, ev)
             self._player_mobj_tick()
             return
-        self._special_sector(ev)                 # at the tic-start position, as in DOOM
+        if self._p_full:                          # M7 P5: nukage is the full model's alone (no fj mirror before it)
+            self._special_sector(ev)             # at the tic-start position, as in DOOM
         moving = keys["forward"] != keys["back"] or keys["strafe_left"] != keys["strafe_right"]
         if moving and ws.p_mobj_state == gd.STATE_INDEX["S_PLAY"]:
             self._set_player_mobj("S_PLAY_RUN1")                      # P_MovePlayer
@@ -690,7 +714,7 @@ class CombatMixin:
         if tgt is None:
             return
         kind, i = tgt
-        if self._p_full:                          # M7 P4.2: the effects are P5's (the effects stream with them)
+        if self._p_fx:                            # M7 P5 "fx": the blood (only "full" aims at a barrel: its puff)
             self._spawn_fx_at_target("puff" if kind == "bar" else "blood", x, y, dmg,
                                      weapon == "fist", ev)
         if kind == "mon":

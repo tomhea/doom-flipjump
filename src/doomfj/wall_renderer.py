@@ -1123,7 +1123,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P4.2a: the shots resolve through the aim window and hurt (the player mode shoots)
     # M7 P4.2b: ... and make NOISE (nz_leaf at each fire point; monstercode.p31_parts emits the leaf at the same mode)
     from doomfj.noisecode import NOISE_PLAYER_MODES
-    _wpn = weapon_parts(map_wad, mapname, shoot=PLAYER_MODE in ("shoot", "hit", "full"),
+    from doomfj.world import player_resolves as _player_resolves
+    _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES) if menu else None
     cmap = bake_bsp(map_wad, mapname)
     verts = cmap.vertexes
@@ -1568,7 +1569,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide")) else 0
     # M7 P4.2a (doomfj.aimcode): the game tier's AIM WINDOW, when its player's shots resolve -- recorded by the runtime
     # monsters' projections (their seen machinery reaches xscale for every monster D3 e counts)
-    _AIM = 1 if (_SEEN and menu and PLAYER_MODE in ("shoot", "hit", "full")) else 0
+    _AIM = 1 if (_SEEN and menu and _player_resolves(PLAYER_MODE)) else 0
     if _AIM:
         from doomfj import aimcode as _aimcode
         from doomfj.combat import aim_window as _aim_window

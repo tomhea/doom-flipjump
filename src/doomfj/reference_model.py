@@ -362,6 +362,18 @@ DEG_DDA_FACES = 1                 # OPTION A (DEFAULT ON): step-face/stacked-pie
                                   # narrow-face-seg gate frames but wins the distribution.
 
 
+# M7 P5 (docs/gp-p5-interface.md): the MOBILES -- fireballs and blood, runtime things the model's pools hold
+MISSILE_Z = 32                    # a mobile stands this far above its leaf's floor: P_SpawnMissile's 4*8*FRACUNIT
+
+
+@dataclass(frozen=True)
+class MobileThing:
+    """a mobile as the thing walk sees it: where it is (whole map units), and no WAD type (-1: not a monster)"""
+    x: int
+    y: int
+    type: int = -1
+
+
 def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
     """M7 P3.3 (D3 d), `rt_depth_order="aprox"`: a runtime thing's depth key -- P_AproxDistance from the player's
     INTEGER position (the 16.16 view position's signed integer part) to the thing at map units (tx, ty). The fj
@@ -1907,7 +1919,7 @@ class ReferenceModel:
                           thing_positions=None, thing_hidden=None, thing_views=None,
                           seen_out: set | None = None, rt_depth_order=False,
                           aim_things: dict | None = None, aim_out: list | None = None,
-                          degrade: bool = False) -> bytes:
+                          mobiles=None, degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -1953,10 +1965,21 @@ class ReferenceModel:
         when the walk reaches the thing's leaf. Recorded where the seen test is -- after the full
         stop, before the budgets -- for a thing with `tz >= MINZ`, `|tx| <= tz << 2`, within its
         BASE size bound (the fj's `sp_tzmax`) and `tz <= MISSILERANGE << 16`. It writes only the
-        window: no pixel changes."""
+        window: no pixel changes.
+
+        `mobiles` (M7 P5, docs/gp-p5-interface.md): [(x, y, lump)] -- the fireballs and the blood
+        (`monsters.MonsterPhase.mobiles`, in ROW order: runtime things nt, nt+1, ...) at whole map
+        units, each drawn with its single-rotation sprite `lump`. A mobile is a RUNTIME thing of its
+        leaf, after that leaf's WAD things (and, under `rt_depth_order`, sorted with the leaf's other
+        runtime things by the same key -- the row order breaks ties), of the SCENERY class (it
+        counts against THING_BUDGET, never MONSTER_BUDGET), always at the BASE minimum height
+        MIN_SPRITE_H (the graduated acceptance's raise does not apply), standing MISSILE_Z = 32
+        units above its leaf's floor (P_SpawnMissile's `z + 4*8*FRACUNIT`), and it is never SEEN
+        (`seen_out`) nor AIMED (`aim_things`). Empty or None draws exactly what it drew before."""
         # M7 P3.3: a misspelt depth order must fail here, not fall through to the "aprox" key
         assert rt_depth_order in RT_DEPTH_ORDERS, (
             f"rt_depth_order={rt_depth_order!r}: one of {RT_DEPTH_ORDERS}")
+        assert things or not mobiles, "the mobiles are drawn by the thing walk: they need things=True"
         cfg = self.cfg
         # M7 P4.2a: the aim window's cells (all 0 at the frame start: the fj prologue) and depths
         if aim_things is not None or aim_out is not None:
@@ -2133,6 +2156,12 @@ class ReferenceModel:
                     # binding is ALREADY position-driven, so M14-e needs no new logic here
                     things_by_ss.setdefault(
                         self.point_in_subsector(scene.cmap, t.x, t.y), []).append((t, _views[_di], _di))
+            # M7 P5: the MOBILES, runtime things after the WAD's (index _ndraw + k: never a drawable index, so
+            # never baked, seen or aimed), each with its one view
+            _ndraw = len(_drawable)
+            for _k, (_mx, _my, _mlump) in enumerate(mobiles or ()):
+                things_by_ss.setdefault(self.point_in_subsector(scene.cmap, _mx, _my), []).append(
+                    (MobileThing(_mx, _my), (_mlump, False), _ndraw + _k))
             # M7 P3.3 (D3 d): a leaf's RUNTIME things nearest first -- the walk is front-to-back and a sprite
             # pixel is written once, so within a leaf the near one must be drawn before the far one
             if rt_depth_order:
@@ -2140,7 +2169,7 @@ class ReferenceModel:
                         if rt_depth_order == "tz" else
                         (lambda _t: aprox_depth_key(viewx, viewy, _t.x, _t.y)))
                 for _lst in things_by_ss.values():
-                    _nb = sum(1 for _e in _lst if _baked[_e[2]])
+                    _nb = sum(1 for _e in _lst if _e[2] < _ndraw and _baked[_e[2]])
                     if len(_lst) - _nb > 1:
                         _lst[_nb:] = sorted(_lst[_nb:], key=lambda _e: _key(_e[0]))
             for _si, _ss in enumerate(scene.cmap.subsectors):
@@ -2180,6 +2209,7 @@ class ReferenceModel:
                     # spend the frame's budget while 24 monsters were turned away. Both counters are
                     # monotone, so fj still latches `tstop` once BOTH are spent.
                     mon = t.type in MONSTER_TYPES
+                    mob = t_di >= _ndraw                 # M7 P5: a mobile (scenery: never seen, never aimed)
                     # M7 P3.2 (docs/gp-monsters.md 8.2, D3 e): SEEN -- the sprite projects in front at the
                     # BASE monster size cull (MIN_SPRITE_H_MONSTER, not the soft budgets' raise) and one of
                     # its columns is still OPEN when its leaf is reached, tested BEFORE the count budgets:
@@ -2236,14 +2266,14 @@ class ReferenceModel:
                     # the frames that are already heavy. Light frames never reach SOFT and keep
                     # every speck. Monsters keep their own (looser) pair, per the owner's policy.
                     minh_ = MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H
-                    if deg_things is not None:
+                    if deg_things is not None and not mob:   # M7 P5: a mobile keeps the BASE bound
                         soft_s, minh2_s, soft_m, minh2_m = deg_things
                         if mon and n_mon >= soft_m:
                             minh_ = minh2_m
                         elif not mon and n_thing >= soft_s:
                             minh_ = minh2_s
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
-                                            t.x, t.y, tsec.floor_h, art, minh_)
+                                            t.x, t.y, tsec.floor_h + (MISSILE_Z if mob else 0), art, minh_)
                     if pr is None:
                         continue
                     if mon:

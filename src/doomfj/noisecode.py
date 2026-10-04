@@ -34,7 +34,9 @@ from typing import Dict, List, Tuple
 # the persisted cells the noise adds (build.MONSTER_PERSIST must carry them in a tier whose player mode is "hit" or
 # "full": a reset that restored them would forget every alert and every ambush cleared, each frame)
 PERSIST = ("snd_alert", "mon_ambush")
-NOISE_PLAYER_MODES = ("hit", "full")     # world.PLAYER_MODES whose shot floods the sound (combat._p_noise)
+# world.PLAYER_MODES whose shot floods the sound (combat._p_noise) -- M7 P5: derived from the ONE rule, world.player_hears
+from doomfj.world import PLAYER_MODES as _PLAYER_MODES, player_hears as _player_hears   # noqa: E402
+NOISE_PLAYER_MODES = tuple(m for m in _PLAYER_MODES if _player_hears(m))
 
 
 def sound_edges(w) -> List[Tuple[int, int, str, int, int]]:

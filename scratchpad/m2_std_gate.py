@@ -105,10 +105,13 @@ class Recording(InMemoryScreen):
     def __init__(self, **kw):
         super().__init__(**kw)
         self.frames = []
+        self.palettes = []                  # M7 P5: the palette each present showed (probe.ProbeScreen's record)
 
     def _present(self):
         super()._present()
         self.frames.append(bytes(self.pixel_indices))
+        import hashlib
+        self.palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb)).hexdigest()[:12])
 
 
 class Stopper(KeyboardIO):
@@ -770,9 +773,11 @@ def main():
     from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
     mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
+    pals = []                                           # M7 P5: the palette each present showed
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
                                             len(order), len(dp.triggers), len(mp.order),
-                                            nmon=mph.world.layout.nmon, nrt=mviews.nrt)
+                                            nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
+                                            palettes_out=pals)
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")
@@ -825,6 +830,7 @@ def main():
                                                        dps, order, (lvdone, pusedn),
                                                        mps, mp.order, {**mph.state(), **mviews.rt_state(mph),
                                                                        **mph.weapon_state()}))
+            sbad.update(GST.palette_diff(pals, f, art, 0))     # M7 P5: a menu frame shows PLAYPAL 0
             state_checked += 1
             print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
                   % (f, ",".join(sorted(menu_events[f])) or "-", "-",
@@ -854,7 +860,8 @@ def main():
                                           thing_views=mviews(mph, state.x, state.y),
                                           thing_positions=mviews.positions(mph),
                                           seen_out=(_seen := set()), aim_things=mviews.aim_things(mph),
-                                          aim_out=(_aim := [0] * 17), **GAME_RENDER_KW)),
+                                          aim_out=(_aim := [0] * 17), mobiles=mph.mobiles(),   # M7 P5
+                                          **GAME_RENDER_KW)),
                             card=bool(dps[3]), **mph.screen_kw())     # M7 P4.1: the weapon's frame, the bar
         mph.set_aim(_aim)                               # M7 P4.2a: this picture's window -> the next frame's shots
         mph.set_seen(mviews.slots_of(_seen))            # M7 P3.2a: this picture's seen -> the next tic
@@ -863,6 +870,7 @@ def main():
                                                    (dstates[si] for si in order), dps, order,
                                                    (lvdone, pusedn), mps, mp.order,
                                                    {**mph.state(), **mviews.rt_state(mph), **mph.weapon_state()}))
+        sbad.update(GST.palette_diff(pals, f, art, mph.palette()))   # M7 P5: the frame's damage / pickup flash
         state_checked += 1
         path[f] = (state.x, state.y, state.angle)
         ok &= same
@@ -896,7 +904,8 @@ def main():
                 alt[target] = k
                 asc = build_scene(mw, mw, args.map, heights_for_states(secs, lds, sds, alt))
                 pic = screen.frame(bytes(rm.render_wall_frame(state, asc, sprite_wad=art, thing_hidden=hidden,
-                                                 **GAME_RENDER_KW)), card=bool(dps[3]), **mph.screen_kw())
+                                                 mobiles=mph.mobiles(), **GAME_RENDER_KW)),
+                                   card=bool(dps[3]), **mph.screen_kw())
                 nd = sum(a != b for a, b in zip(got[f], pic))
                 if nd == 0 or k <= dstates[target][0] + 1:
                     print("     vs oracle with door at state %-2d : %s"

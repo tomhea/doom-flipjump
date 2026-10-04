@@ -565,8 +565,32 @@ MONSTER_MODES = ("idle", "wake", "chase", "decide", "full")
 # "walk" (through P4.0): no weapon at all; "fire" (P4.1): the weapon keys, the psprite machine, ammo, refire and
 # every rng_player draw, with nothing applied (no player-thing state, no noise, no target, no effect, no damage);
 # "shoot" (P4.2a): the shot resolves through the aim and hurts monsters -- damage, pain, death -- with no noise, no
-# effect, no barrel, no drop; "hit" (P4.2b): the noise alert too; "full": everything
-PLAYER_MODES = ("walk", "fire", "shoot", "hit", "full")
+# effect, no barrel, no drop; "hit" (P4.2b): the noise alert too; "fx" (P5): "hit" + the player's shot spawning BLOOD
+# on the monster it hits (`_spawn_fx_at_target`: the fx pool and the rng_fx stream); "full": everything -- what "fx"
+# still leaves out is the full model's alone: barrels (aim, damage, blasts), puffs, drops, pickups' bonuscount and
+# berserk, player blocking by things, nukage (`_special_sector`), the player thing's states, the death think (P7)
+PLAYER_MODES = ("walk", "fire", "shoot", "hit", "fx", "full")
+
+
+def player_resolves(mode: str) -> bool:
+    """M7 P5: the ONE rule "a shot in player mode `mode` resolves through the aim and hurts" (P4.2a "shoot" and every
+    mode after it) -- combat._p_resolve, damagecode.DAMAGE_PLAYER_MODES, the aim window, the damage cells"""
+    assert mode in PLAYER_MODES, mode
+    return mode in ("shoot", "hit", "fx", "full")
+
+
+def player_hears(mode: str) -> bool:
+    """M7 P5: the ONE rule "a shot in player mode `mode` is HEARD" (P4.2b "hit" and after: P_NoiseAlert) --
+    combat._p_noise, noisecode.NOISE_PLAYER_MODES, the alert cells"""
+    assert mode in PLAYER_MODES, mode
+    return mode in ("hit", "fx", "full")
+
+
+def player_bleeds(mode: str) -> bool:
+    """M7 P5: the ONE rule "a shot in player mode `mode` that hits a monster spawns its BLOOD" ("fx" and "full":
+    `_spawn_fx_at_target`, the fx pool, rng_fx) -- combat._p_fx"""
+    assert mode in PLAYER_MODES, mode
+    return mode in ("fx", "full")
 AIM_COLUMNS = 17                   # the aim window's columns (combat.aim_window's 72..88; asserted at _combat_init)
 
 

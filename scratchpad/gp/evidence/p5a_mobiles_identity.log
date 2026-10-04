@@ -1,0 +1,61 @@
+  frame  40: identical  mobiles [(742, 360, 'BLUDC0')] -> 0 px drawn
+  frame  41: identical  mobiles [(742, 360, 'BLUDC0')] -> 0 px drawn
+  frame  42: identical  mobiles [(742, 360, 'BLUDC0')] -> 0 px drawn
+  frame  43: identical  mobiles [(742, 360, 'BLUDC0')] -> 0 px drawn
+  frame  44: identical  mobiles [(742, 360, 'BLUDC0')] -> 0 px drawn
+  frame  45: identical  mobiles [(742, 360, 'BLUDB0')] -> 0 px drawn
+  frame  46: identical  mobiles [(742, 360, 'BLUDB0')] -> 0 px drawn
+  frame  47: identical  mobiles [(742, 360, 'BLUDB0')] -> 0 px drawn
+  frame  48: identical  mobiles [(742, 360, 'BLUDB0')] -> 0 px drawn
+  frame  49: identical  mobiles [(742, 360, 'BLUDB0')] -> 0 px drawn
+  frame  50: identical  mobiles [(742, 360, 'BLUDB0')] -> 0 px drawn
+  frame  51: identical  mobiles [(742, 360, 'BLUDB0')] -> 0 px drawn
+  frame  52: identical  mobiles [(742, 360, 'BLUDB0')] -> 0 px drawn
+  frame  53: identical  mobiles [(742, 360, 'BLUDA0')] -> 0 px drawn
+  frame  54: identical  mobiles [(742, 360, 'BLUDA0')] -> 0 px drawn
+  frame  55: identical  mobiles [(742, 360, 'BLUDA0')] -> 0 px drawn
+  frame  56: identical  mobiles [(742, 360, 'BLUDA0')] -> 0 px drawn
+  frame  57: identical  mobiles [(742, 360, 'BLUDA0')] -> 0 px drawn
+  frame  58: identical  mobiles [(742, 360, 'BLUDA0')] -> 0 px drawn
+  frame  59: identical  mobiles [(846, 424, 'BLUDB0'), (742, 360, 'BLUDA0')] -> 0 px drawn
+  frame  60: identical  mobiles [(846, 424, 'BLUDB0'), (742, 360, 'BLUDA0')] -> 0 px drawn
+  frame  61: identical  mobiles [(846, 424, 'BLUDB0')] -> 0 px drawn
+  frame  62: identical  mobiles [(846, 424, 'BLUDB0')] -> 0 px drawn
+  frame  63: identical  mobiles [(827, 392, 'BAL1B0'), (846, 424, 'BLUDB0')] -> 0 px drawn
+  frame  64: identical  mobiles [(818, 397, 'BAL1B0'), (846, 424, 'BLUDB0')] -> 0 px drawn
+  frame  65: identical  mobiles [(810, 402, 'BAL1B0'), (846, 424, 'BLUDB0')] -> 0 px drawn
+  frame  66: identical  mobiles [(802, 408, 'BAL1B0'), (846, 424, 'BLUDA0')] -> 0 px drawn
+  frame  67: identical  mobiles [(793, 413, 'BAL1A0'), (846, 424, 'BLUDA0')] -> 0 px drawn
+  frame  68: identical  mobiles [(785, 418, 'BAL1A0'), (846, 424, 'BLUDA0')] -> 0 px drawn
+  frame  69: identical  mobiles [(776, 424, 'BAL1A0'), (846, 424, 'BLUDA0')] -> 0 px drawn
+  frame  70: identical  mobiles [(768, 429, 'BAL1A0'), (846, 424, 'BLUDA0')] -> 0 px drawn
+  frame  71: identical  mobiles [(759, 434, 'BAL1B0'), (846, 424, 'BLUDA0')] -> 0 px drawn
+  frame  72: identical  mobiles [(751, 440, 'BAL1B0'), (846, 424, 'BLUDA0')] -> 0 px drawn
+  frame  73: identical  mobiles [(751, 440, 'BAL1C0'), (846, 424, 'BLUDA0')] -> 499 px drawn
+  frame  74: identical  mobiles [(751, 440, 'BAL1C0')] -> 476 px drawn
+  frame  75: identical  mobiles [(751, 440, 'BAL1C0')] -> 551 px drawn
+  frame  76: identical  mobiles [(751, 440, 'BAL1D0')] -> 478 px drawn
+  frame  77: identical  mobiles [(751, 440, 'BAL1D0')] -> 478 px drawn
+  frame  78: identical  mobiles [(751, 440, 'BAL1D0')] -> 478 px drawn
+  frame  79: identical  mobiles [(751, 440, 'BAL1D0'), (854, 424, 'BLUDC0')] -> 478 px drawn
+  frame  80: identical  mobiles [(751, 440, 'BAL1D0'), (854, 424, 'BLUDC0')] -> 609 px drawn
+  frame  81: identical  mobiles [(751, 440, 'BAL1D0'), (854, 424, 'BLUDC0')] -> 617 px drawn
+  frame  82: identical  mobiles [(751, 440, 'BAL1E0'), (854, 424, 'BLUDC0')] -> 842 px drawn
+  frame  83: identical  mobiles [(751, 440, 'BAL1E0'), (854, 424, 'BLUDB0')] -> 697 px drawn
+  frame  84: identical  mobiles [(751, 440, 'BAL1E0'), (854, 424, 'BLUDB0')] -> 872 px drawn
+  frame  85: identical  mobiles [(751, 440, 'BAL1E0'), (854, 424, 'BLUDB0')] -> 872 px drawn
+  frame  86: identical  mobiles [(751, 440, 'BAL1E0'), (854, 424, 'BLUDB0')] -> 801 px drawn
+  frame  87: identical  mobiles [(751, 440, 'BAL1E0'), (854, 424, 'BLUDB0')] -> 737 px drawn
+  frame  88: identical  mobiles [(854, 424, 'BLUDB0')] -> 0 px drawn
+  frame  89: identical  mobiles [(854, 424, 'BLUDB0')] -> 0 px drawn
+  frame  90: identical  mobiles [(854, 424, 'BLUDB0')] -> 0 px drawn
+  frame  91: identical  mobiles [(854, 424, 'BLUDA0')] -> 0 px drawn
+  frame  92: identical  mobiles [(854, 424, 'BLUDA0')] -> 0 px drawn
+  frame  93: identical  mobiles [(854, 424, 'BLUDA0')] -> 0 px drawn
+  frame  94: identical  mobiles [(854, 424, 'BLUDA0')] -> 0 px drawn
+  frame  95: identical  mobiles [(854, 424, 'BLUDA0')] -> 0 px drawn
+  frame  96: identical  mobiles [(854, 424, 'BLUDA0')] -> 0 px drawn
+  frame  97: identical  mobiles [(854, 424, 'BLUDA0')] -> 0 px drawn
+  frame  98: identical  mobiles [(854, 424, 'BLUDA0')] -> 0 px drawn
+  frame  99: identical  mobiles [(787, 349, 'BLUDB0')] -> 0 px drawn
+MOBILES IDENTITY (R0-west-hall, frames 40..99): 60/60 frames identical to the unmodified oracle (m7-p5) with mobiles=[] and None; 60 frames held a live mobile, on 15 of them the mobiles drew -- PASS (34 s)

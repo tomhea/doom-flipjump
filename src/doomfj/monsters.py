@@ -152,6 +152,14 @@ class MonsterPhase:
         for m in range(self.world.layout.nmon):
             ws.mon_seen[m] = int(m in slots)
 
+    def set_aim(self, cells) -> None:
+        """M7 P4.2a: the picture just drawn: its aim window (`render_wall_frame(aim_out=)`, 17 sids) is the next tic's
+        `aim_sid` -- what `combat.window_aim` reads (docs/gp-aim-window.md 6)"""
+        arr = self.world.ws.aim_sid
+        assert len(cells) == len(arr), (len(cells), len(arr))
+        for i, v in enumerate(cells):
+            arr[i] = v
+
     def state(self) -> Dict[str, tuple]:
         """the cells the fj holds per monster slot: (mon_state, mon_tics, mon_facing, mon_active)"""
         ws = self.world.ws
@@ -232,6 +240,12 @@ class MonsterViews:
         for m, t in enumerate(self.rt):                   # a monster's leaf is the model's own
             thss[t] = ws.mon_leaf[m]
         return {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss)}
+
+    def aim_things(self, phase: "MonsterPhase") -> Dict[int, Tuple[int, int]]:
+        """M7 P4.2a: `render_wall_frame(aim_things=...)` -- {drawable index: (sid, radius)} for every shootable living
+        monster (`combat.CombatMixin.shootable_targets`' monster half): sid = 1 + slot, the radius its class (20, 30;
+        the render widens it to r_eff for the view angle). Everything else is transparent to the window."""
+        return {self.mdi[m]: (m + 1, r) for kind, m, _x, _y, r in phase.world.shootable_targets() if kind == "mon"}
 
     def slots_of(self, seen_drawables) -> set:
         """a render's `seen_out` (drawable indices) as monster slots"""

@@ -13,7 +13,7 @@ the stream `rng_pl` (and the P4.1 cells), so a shot that draws a different count
 The model runs in its "fire" mode, whose `ev.shots` carries each shot's column and damage, and -- when the model
 has them -- in its "shoot" and "hit" modes with the stub aim, where the aim must also be asked the same columns in
 the same order and every `ev.hits` entry must be one of the calls (the reach test only removes calls). "hit" also
-hurts the player (P5's pain roll draws on rng_player), so it is compared up to the first tic the player is hurt.
+hurts the player (P5's pain roll draws on rng_player), so "hit" and "shoot" are compared up to the first tic the player is hurt.
 
 R9: four mutants of the emitted text, each caught (the first differing tic is printed):
   * column +1: every window read takes the next cell
@@ -226,7 +226,7 @@ def test_the_shot_is_the_model_tic_by_tic(tmp_path, saw, seed, mode):
     want = _model(script, windows, saw, mode)
     got = _run_fj(tmp_path, "shot", script, windows, saw)
     assert len(got) == len(want), "the program printed %d tics of %d" % (len(got), len(want))
-    cut = next((t for t, r in enumerate(want) if r["hurt"]), N) if mode == "hit" else N
+    cut = next((t for t, r in enumerate(want) if r["hurt"]), N) if mode in ("hit", "shoot") else N
     want, got = want[:cut], got[:cut]
     bad = _first_bad(got, want)
     assert bad is None, "tic %d: fj %s, model %s" % (bad, got[bad], want[bad])

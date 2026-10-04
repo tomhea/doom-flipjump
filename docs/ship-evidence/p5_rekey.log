@@ -1,0 +1,45 @@
+# the restore-set re-key of m7-p5 c21513b
+=== 17:51:18 python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p5.tsv.gz
+$ python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p5.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 1985s: 1,786,272 labels -> scratchpad\_ca_labels_p5.tsv.gz (14.0 MB)
+code_start word: 17308
+rc=0
+=== 18:25:59 python scratchpad/ca_remap_set.py --labels scratchpad/_ca_labels_p5.tsv.gz --old-labels scratchpad/_ca_labels_p4.tsv.gz
+$ python scratchpad/ca_remap_set.py --labels scratchpad/_ca_labels_p5.tsv.gz --old-labels scratchpad/_ca_labels_p4.tsv.gz
+labels in the set      : 436
+  unchanged            : 436
+  re-keyed             : 0
+  dropped (register gone): 0  []
+  span changed, held whole -> resized: 0  
+words: 11,432 -> 11,432  (delta +0)  negative = a dropped register or a shrunk array; positive =
+      a grown array, or the superset taken where the old->new mapping was ambiguous --
+      see the comments above.
+production loader accepts it: 11,432 words, layout fingerprint 6287a37148a1c23a
+wrote src/doomfj/data/m1_restore_set.json.gz
+rc=0
+=== 18:26:12 python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p5.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+$ python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p5.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+added 0 words over 328 globals (2 check + 326 hoisted)
+src/doomfj/data/m1_restore_set.json.gz: 11432 -> 11432 words over 436 entries
+rc=0
+=== 18:26:16 python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p5.tsv.gz
+$ python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p5.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 2418s: 2,339,582 labels -> scratchpad\_ca_labels_std_p5.tsv.gz (18.2 MB)
+code_start word: 17308
+rc=0
+=== 19:08:14 python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p5.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+$ python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p5.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+dropped wmagic; added 4450 words over 102 standalone globals (incl. the per-door state)
+src/doomfj/data/m5_restore_set.json.gz: 11432 -> 15878 words over 436 -> 537 entries
+persist: viewx, viewy, viewangle, kb_f, kb_b, kb_l, kb_r, kb_u, mode, menu_scr, menu_sel, lvdone, pusedn, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, dstate, ddir, dsub, dwait, dreq, pcard, wfired, lstate, ldir, lsub, lwait, lreq, fswitch, sshead, thss_rt, thpos_rt, mon_state, mon_tics, mon_facing, mon_active, mon_target, mon_reaction, mon_threshold, mon_movedir, sched_cursor, thseen, mon_movecount, mon_rng, mon_floorz, msec, bar_solid, mh_prev, mon_justattacked, mon_health, mon_shootable, mon_solid, mon_justhit, mon_ambush, snd_alert, hud_v, hud_s, hud_full, wp_rdy, wp_pend, wp_st, wp_tics, wp_sy, fl_st, fl_tics, wp_rf, wp_ad, am_clip, am_shell, wp_own, rng_pl, wp_frm, fl_frm, aim_sid, aim_tz, p_hp, p_ar, p_at, p_dc, p_dead, pal_cur, pj_act, pj_x, pj_y, pj_mx, pj_my, pj_st, pj_ti, fx_act, fx_x, fx_y, fx_st, fx_ti, rng_fx
+rc=0
+=== 19:08:22 python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+$ python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+......................                                                   [100%]
+22 passed in 1.02s
+rc=0
+=== REKEY DONE 19:08:26

@@ -793,13 +793,16 @@ class Oracle:
         return self._scenes[(key, mkey)]
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
-               views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None) -> bytes:
+               views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
+               card=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
         M7 P4.0: the GAME SCREEN -- the view with the weapon over it and the status bar below
-        (`hud.GameScreen`); the bar's card is lit when the card is gone from the world (`hidden_extra`
-        names the card and nothing else -- P2a.1's one use of it)"""
+        (`hud.GameScreen`); the bar's card is lit when `card` (the player OWNS it: `pcard`, the cell the binary's bar
+        reads -- hudcode.VALUE_CELLS) and, when `card` is None, when the card is gone from the world (`hidden_extra`
+        names the card and nothing else -- P2a.1's one use of it). The two agree in play; a gate that POKES pcard
+        without taking the card (p2a S3) must pass `card`."""
         from doomfj.reference_model import SimState
         view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
@@ -809,7 +812,7 @@ class Oracle:
                                                aim_things=aim_things, aim_out=aim_out,  # M7 P4.2a
                                                **self.RENDER_KW))
         # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
-        return self.screen.frame(view, card=bool(hidden_extra), **(screen_kw or {}))
+        return self.screen.frame(view, card=bool(hidden_extra) if card is None else bool(card), **(screen_kw or {}))
 
     @property
     def screen(self):

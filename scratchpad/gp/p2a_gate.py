@@ -521,7 +521,10 @@ def main(argv=None) -> int:
                              "pcard": sc["pcard"]})
             pr.write_cells(vals)
         p.on_frame_start(start)
-        p.on_present(lambda pr, f: reads.append(pr.read_cells(list(READ))))
+        # every cell the probe holds (P.game_cells: each later rung's group joins there), not READ alone -- READ was
+        # a hand list the P4 cells never joined, so the binary's side of their comparison read None
+        assert set(READ) <= set(cells), sorted(set(READ) - set(cells))
+        p.on_present(lambda pr, f: reads.append(pr.read_cells(list(cells))))
         r = gb.run(len(sc["keys"]), menu_events(sc["keys"]), p)
         s_bad = x_bad = None
         for f, fr in enumerate(want):
@@ -533,7 +536,8 @@ def main(argv=None) -> int:
                 pic = orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
                                  tuple(fr["phase"][0][si][0] for si in dsim.order),
                                  hidden_extra=card_di if fr["taken"] else (), movers=fr["mheights"],
-                                 views=fr["views"], positions=fr["positions"], screen_kw=fr.get("skw"))
+                                 views=fr["views"], positions=fr["positions"], screen_kw=fr.get("skw"),
+                                 card=fr["phase"][3])           # the bar's card is pcard's (S3 pokes it)
             else:
                 pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):

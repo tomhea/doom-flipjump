@@ -529,10 +529,12 @@ def _p5_assert_labels(texts) -> None:
     the names are P5_SHARED_LABELS' documented owners)"""
     import re
     want = set(P5_SHARED_LABELS)
-    pat = re.compile(r"(?m)^[ \t]*(%s):" % "|".join(sorted(map(re.escape, want), key=len, reverse=True)))
+    # a pattern string, not re.compile: tests/fj/test_slot_layouts_fj's scope rule refuses the word `compile` in an
+    # emitter module (REFLECTION); re caches the compiled pattern either way
+    pat = r"(?m)^[ \t]*(%s):" % "|".join(sorted(map(re.escape, want), key=len, reverse=True))
     seen = set()
     for _name, text in texts:
-        seen.update(pat.findall(text))
+        seen.update(re.findall(pat, text))
         if seen == want:
             break
     missing = sorted(want - seen)

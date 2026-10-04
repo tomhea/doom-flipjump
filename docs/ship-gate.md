@@ -358,7 +358,7 @@ explained before shipping.
    --b build/<new>.fjm` is the same measurement; what `--against` adds is the check that arm A IS
    the frozen binary (its hash). Use the explicit form only with the shipped sha256 in the record.
 3. **The owner's metric.** `python scratchpad/12m/gamespeed.py --fjm build/<new>.fjm` (both
-   targets: (mean+p80)/2 <= 20,000,000 ops/frame, size <= 40% -- RAISED from 35% in M7 P4.0, gp-combat C2), then a separate `--validate` run
+   targets: (mean+p80)/2 <= 20,000,000 ops/frame, size <= 42% -- RAISED from 35% in M7 P4.0 (gp-combat C2, 40%) and to 42% by the owner after P5, 2026-10-04), then a separate `--validate` run
    (it is a mode: 10/10 distinct end cells) and `--selftest` (SELFTEST PASS; its N6g is the only
    check that the host test's recorded keys are still what the planner plays -- CI does not run
    it). `--validate` replays the ORACLE; when the new binary moves, collides or opens doors

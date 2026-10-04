@@ -45,7 +45,8 @@ import m2_std_gate as gate                                                # noqa
 from m2_std_gate import MENU_FRAMES, menu_exit_events, to_events           # noqa: E402
 
 SPEED_TARGET = 20_000_000          # 80th-percentile RUN's average ops/frame
-SIZE_TARGET_PCT = 40.0             # of the address ceiling (M7 P4.0, gp-combat C2: raised from 35, the owner 2026-09-25 + 2026-10-04)
+SIZE_TARGET_PCT = 42.0             # of the address ceiling: 42% acceptable "if things get messy or big" (the owner 2026-10-04,
+#                                    after P5 at 35.16%); 40% from M7 P4.0 (gp-combat C2), 35% before
 
 
 # ----------------------------------------------------------------------------------------------

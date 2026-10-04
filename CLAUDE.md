@@ -21,7 +21,7 @@ on 2026-09-06 and the 12M-ops render target is SUPERSEDED.** Success is now two 
 COMBINED FULL GAME (collision + sim + reset included): the binding speed of 10x100-frame games,
 `(mean + p80) / 2` of the runs' ops/frame (the owner's 2026-09-06 refinement of the p80; the
 `gamespeed.py` docstring says why) at <= 20M ops/frame, and the binary at <= 35% of 2^27 words
-(**the size target was RAISED to <= 40% from M7 P4.0 on** -- `docs/gp-combat.md` C2, the owner 2026-09-25 + 2026-10-04;
+(**the size target was RAISED to <= 40% from M7 P4.0 on** -- `docs/gp-combat.md` C2, the owner 2026-09-25 + 2026-10-04 -- **and to <= 42% after P5: "its ok to get to 42% if things get messy or big" (the owner, 2026-10-04)**;
 `gamespeed.SIZE_TARGET_PCT` is 40; the 22M ops cap is unchanged).
 **Both are MET by the shipped binary -- see the ship-gate section below for the standing numbers
 and their provenance.** The 2026-09-06 baseline that first priced this goal (p80 24,723,058, 93.50%

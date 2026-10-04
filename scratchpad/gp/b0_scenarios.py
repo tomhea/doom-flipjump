@@ -94,6 +94,10 @@ def model_frames(run: dict, proxy: bool = False) -> list:
                                  "%s) -- the model or the file changed" % (run["name"], i, post,
                                                                            run["poses"][i]))
         inj, bkeys = S.b0_injection(w.rm, pre, post, kd, proxy=proxy)
+        # M7 P4.2a: the TRIGGER is delivered too -- fire and the number keys -- so the binary shoots where the set's
+        # player shoots, through its own picture's window, and every hit, pain and death is checked against the
+        # mirror's (the injected pose carries the model's strafe; the weapon moves no pose)
+        bkeys = dict(bkeys, **{k: True for k in ("fire", "w1", "w2", "w3", "w4") if kd.get(k)})
         out.append({"inj": inj, "keys": bkeys, "doors": pre_doors, "movers": pre_movers,
                     "exp": mirror.step(inj, bkeys, pre_doors, pre_movers), "post": post,
                     # M7 P2b: the movers' heights the binary draws this frame (the mirror's, after
@@ -185,8 +189,11 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     if "mon_state" in table.addrs:
         from doomfj.monsters import MonsterPhase
         from doomfj.wall_renderer import BOOT_SKILL
-        from doomfj.wall_renderer import MONSTER_MODE
-        mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE)
+        from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+        # M7 P4.1: the player's weapon too. b0 delivers only `scenarios_v2.B0_KEYS` (no fire, no number keys, no
+        # strafe -- the model's strafe reaches the binary through the injected pose), so the binary's weapon only
+        # rises and idles, and the mirror steps the same keys
+        mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE, player=PLAYER_MODE)
     # M7 P3.2a: a monster that can wake reads the seen flags of the LAST picture, which the binary marks on every
     # frame -- so the model's picture (and its seen flags) is taken on every frame too, whatever `pixel_every`
     seen_every = mph is not None and mph.world.monsters != "idle"
@@ -198,8 +205,13 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     cm = S.BinaryMirror(S.start_world(frames[0]["run_setup"])) if chase and frames else None
     for f, fr in enumerate(frames):
         mheights = fr.get("mheights")
+        # M7 P4.1 / P4.2a: the weapon tics FIRST, as the binary's does -- after the doors, before the player's move and
+        # the monsters' tic -- at the frame's injected (pre-move) pose: a shot that hits lands before the monster acts
+        _boxes = mph.boxes() if mph is not None else ()   # the door tic precedes the weapon (and its kills)
+        if mph is not None:
+            mph.weapon(fr["keys"], fr["inj"][0] & M32, fr["inj"][1] & M32, fr["inj"][2])
         if chase:
-            epose, edoors = cm.step(fr["inj"], fr["keys"], fr["doors"], fr.get("movers"), others=mph.boxes())
+            epose, edoors = cm.step(fr["inj"], fr["keys"], fr["doors"], fr.get("movers"), others=_boxes)
             cm.state, cm.mstate = mph.frame(cm.state, cm.mstate, epose[0] & 0xFFFFFFFF, epose[1] & 0xFFFFFFFF,
                                             epose[2])
             mheights = cm.mp.heights(cm.mstate)
@@ -226,7 +238,12 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                               movers=mheights,
                               views=orc.monster_views(mph, P_signed(epose[0]), P_signed(epose[1]))
                               if mph is not None else None, seen_out=_seen,
-                              positions=orc.monster_positions(mph) if mph is not None else None)
+                              positions=orc.monster_positions(mph) if mph is not None else None,
+                              screen_kw=mph.screen_kw() if mph is not None else None,
+                              aim_things=orc._mv(mph.world).aim_things(mph) if mph is not None else None,
+                              aim_out=(_aim := [0] * 17))
+            if mph is not None:
+                mph.set_aim(_aim)                        # M7 P4.2a: the window, for the next frame's weapon
             if mph is not None:
                 mph.set_seen(orc._mviews.slots_of(_seen))
             if check:

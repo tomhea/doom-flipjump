@@ -201,16 +201,16 @@ def test_mapunits_is_a_SIGNED_shift_of_the_same_encoder():
 # -- the key byte: both directions, both spellings -----------------------------------------------
 
 def test_keys_round_trip_over_all_256_byte_values():
-    """The docstring's claim, as a sweep: bits 5..7 do not exist on EITHER side, so a malformed byte
-    reads the same in both mirrors. Two names sharing a bit, or a name added at a bit the fj side
-    does not test, stops this being the identity on the low five bits -- and a keypress is then
-    silently dropped or duplicated. test_doorcode pins keys_dict at KEY_USE and 0xFF only."""
-    defined = KEY_FORWARD | KEY_BACK | KEY_TURN_LEFT | KEY_TURN_RIGHT | max(KEY_NAMES.values())
-    assert defined == 0x1F
+    """The docstring's claim, as a sweep: M7 P4.1 gave bits 5..7 their names (strafe left / right, fire), so every
+    bit of the byte is a key and the round trip is the identity. Two names sharing a bit, or a bit without a name,
+    stops it being the identity -- and a keypress is then silently dropped or duplicated."""
+    defined = 0
+    for bit in KEY_NAMES.values():
+        defined |= bit
+    assert defined == 0xFF
     assert len(set(KEY_NAMES.values())) == len(KEY_NAMES), "two key names share a bit"
     for b in range(256):
-        assert keys_byte(keys_dict(b)) == b & 0x1F, f"byte {b:#04x} did not round trip"
-        assert keys_dict(b) == keys_dict(b & 0x1F), f"byte {b:#04x} reads a bit above 4"
+        assert keys_byte(keys_dict(b)) == b, f"byte {b:#04x} did not round trip"
         assert set(keys_dict(b)) == set(KEY_NAMES)
 
 
@@ -220,12 +220,12 @@ def test_the_int_branch_and_the_dict_branch_agree():
     the same frame -- a trajectory split only the cumulative m5_gate would catch, and only after it
     has already gone wrong on frame 0."""
     for b in range(256):
-        assert keys_byte(b) & 0x1F == keys_byte(keys_dict(b))
+        assert keys_byte(b) == keys_byte(keys_dict(b))
         # ...and the two spellings produce the same wire byte through the encoder itself
-        assert encode_feed(0, 0, 0, b)[-1] & 0x1F == encode_feed(0, 0, 0, keys_dict(b))[-1]
+        assert encode_feed(0, 0, 0, b)[-1] == encode_feed(0, 0, 0, keys_dict(b))[-1]
     assert keys_byte(0x1FF) == 0xFF, "an int key must be masked to one byte"
     assert keys_byte({}) == 0, "a dict with no names pressed is no keys"
-    assert keys_byte({"strafe_left": True, "fire": True}) == 0, "an unknown name must contribute nothing"
+    assert keys_byte({"w1": True, "menu": True}) == 0, "an unknown name must contribute nothing"
 
 
 def test_each_movement_mask_is_derived_from_its_OWN_key_bit():
@@ -259,11 +259,14 @@ def test_every_movement_key_is_live_in_the_oracle_and_use_is_not():
     idle = rm.step_sim(st, keys_dict(0), scene=None)
     assert idle == st, "no key pressed must move nothing"
     for name, bit in KEY_NAMES.items():
-        moved = rm.step_sim(st, keys_dict(bit), scene=None)
-        if name == "use":
-            assert moved == idle, "'use' is the doors key and must not reach step_sim"
+        # M7 P4.1: the strafe keys move only the game tier's sim (`strafe=True`); fire is the weapon's
+        moved = rm.step_sim(st, keys_dict(bit), scene=None, strafe=True)
+        if name in ("use", "fire"):
+            assert moved == idle, "'%s' is not a movement key and must not reach step_sim" % name
         else:
             assert moved != idle, f"pressing '{name}' changed nothing in the oracle"
+        if name.startswith("strafe"):
+            assert rm.step_sim(st, keys_dict(bit), scene=None) == idle, "a hosted tier must not strafe"
 
 
 # -- the thing table: bindings, positions, visibility --------------------------------------------

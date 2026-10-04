@@ -44,9 +44,15 @@ KEY_TURN_RIGHT = 1 << 3
 # the low nibble exactly, and the fj side tests a nibble at a time with `hex.if_flags` -- so bit 4
 # is the first bit that costs nothing to add: it is `pkeys + 1*dw` under the same mask as bit 0.
 KEY_USE = 1 << 4
+# M7 P4.1 (docs/gp-combat.md, the owner's key map): the high nibble's other three bits -- strafe left, strafe right
+# and fire. The game tier's sim and weapon read them; a hosted tier reads none of them, so its pictures are unchanged.
+KEY_STRAFE_LEFT = 1 << 5
+KEY_STRAFE_RIGHT = 1 << 6
+KEY_FIRE = 1 << 7
 KEY_NAMES = {"forward": KEY_FORWARD, "back": KEY_BACK,
              "turn_left": KEY_TURN_LEFT, "turn_right": KEY_TURN_RIGHT,
-             "use": KEY_USE}
+             "use": KEY_USE, "strafe_left": KEY_STRAFE_LEFT, "strafe_right": KEY_STRAFE_RIGHT,
+             "fire": KEY_FIRE}
 
 # The fj side tests these bits with `hex.if_flags`, whose mask is a set of NIBBLE VALUES rather
 # than a bit mask: mask bit v is set iff nibble value v should take the "flag set" branch. So
@@ -58,14 +64,16 @@ KEY_BACK_MASK = _NIBBLE_MASK[1]           # 0xCCCC
 KEY_TURN_LEFT_MASK = _NIBBLE_MASK[2]      # 0xF0F0
 KEY_TURN_RIGHT_MASK = _NIBBLE_MASK[3]     # 0xFF00
 KEY_USE_MASK = _NIBBLE_MASK[0]            # 0xAAAA, applied to the HIGH nibble (pkeys + 1*dw)
+KEY_STRAFE_LEFT_MASK = _NIBBLE_MASK[1]    # 0xCCCC, the high nibble (M7 P4.1)
+KEY_STRAFE_RIGHT_MASK = _NIBBLE_MASK[2]   # 0xF0F0, the high nibble
+KEY_FIRE_MASK = _NIBBLE_MASK[3]           # 0xFF00, the high nibble
 
 
 def keys_dict(byte: int) -> dict:
     """The wire's key byte as the dict `ReferenceModel.step_sim` reads.
 
-    Bits 0..3 are the movement keys (the low nibble, which is all `step_sim` reads) and bit 4 is
-    M2-R4's use key (the low bit of the high nibble). Bits 5..7 do not exist on either side, so a
-    malformed byte reads the same in both mirrors."""
+    Bits 0..3 are the movement keys (the low nibble) and bit 4 is M2-R4's use key (the low bit of the high
+    nibble); M7 P4.1 adds bits 5..7 -- strafe left, strafe right, fire -- which only the game tier reads."""
     return {name: bool(byte & bit) for name, bit in KEY_NAMES.items()}
 
 

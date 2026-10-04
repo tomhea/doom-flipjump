@@ -73,7 +73,7 @@ def monster_seed_decls(label: str = "ms_seed") -> list:
 # The slot code (unrolled per monster, monstercode) copies its monster into the CONTEXT cells below, calls the
 # shared leaves, and copies back. The leaves never see a slot index: the other monsters' boxes are tested
 # unrolled over every slot with compile-time addresses, and the mover is excluded by its slot clearing its own
-# `mon_active` around the call.
+# `mon_active` (M7 P4.2a: `mon_solid`) around the call.
 # ================================================================================================================
 
 P32B_CONTEXT = [
@@ -106,12 +106,13 @@ def _add_const(n: int, cell: str, v: int) -> list:
     return ["    hex.add_constant %d, %s, %d" % (n, cell, v)] if v else []
 
 
-def things_leaf_lines(slots) -> list:
+def things_leaf_lines(slots, solid: str = "mon_active") -> list:
     """`mm_things`: mm_blk = 1 when a SOLID thing's box overlaps the candidate (world._thing_blocker's monsters and
-    player; the static blockers are in the cells). `slots`: [(runtime thing, radius)] per monster slot. The mover's
-    own slot is inactive during the call. The player is tested at 16.16: |px - (nx << 16)| < (r + 16) << 16.
-    (P5: a dead player, and a monster whose MF_SOLID A_Fall cleared, stop blocking -- here every active monster
-    blocks and the player is alive.)"""
+    player; the static blockers are in the cells). `slots`: [(runtime thing, radius)] per monster slot. `solid`: the
+    per-slot flag a monster blocks by -- M7 P4.2a: `mon_solid`, MF_SOLID, which A_Fall clears (a corpse stops
+    blocking); `mon_active` before monsters die, where the two are equal. The mover's own flag is clear during the
+    call (monstercode.p32b_move_lines, the same `solid`). The player is tested at 16.16: |px - (nx << 16)| <
+    (r + 16) << 16. (P5: a dead player stops blocking -- here the player is alive.)"""
     out = ["mm_things:",
            "    hex.zero 1, mm_blk",
            "    hex.zero 2, mm_bd20 + 2*dw", "    hex.mov 2, mm_bd20, mm_r", "    hex.mov 4, mm_bd30, mm_bd20",
@@ -120,7 +121,7 @@ def things_leaf_lines(slots) -> list:
         bd = "mm_bd%d" % rad
         assert rad in (20, 30), rad
         nj = "mm_th%d_n" % j
-        out += ["    hex.if0 1, mon_active + %d*dw, %s" % (j, nj),
+        out += ["    hex.if0 1, %s + %d*dw, %s" % (solid, j, nj),
                 "    hex.mov 4, ct_a, thpos_rt + %d*dw" % (16 * t + 4),
                 "    hex.sub 4, ct_a, mm_nx", "    hex.abs 4, ct_a",
                 "    hex.scmp 4, ct_a, %s, mm_th%d_y, %s, %s" % (bd, j, nj, nj),

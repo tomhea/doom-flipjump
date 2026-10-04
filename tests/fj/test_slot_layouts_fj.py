@@ -105,7 +105,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FJ_NAMES = ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
             "plane_bands.fj", "stream_render.fj")
 EMITTER = "wall_renderer.py"
-CFG = Config()
+# M7 P4.0: the game tier's OWN config -- the emitter rebinds `cfg = tier_cfg(cfg, tier)` (an 84-row view under the bar)
+CFG = wr.tier_cfg(Config(), "game")
 VIEW_W = CFG.VIEW_W
 STRIDE, B_BYTE = wr.SPR_SLOT_STRIDE, wr.SPR_SLOT_B_BYTE
 SLOT_BYTES, BIAS, NSLOTS = wr.SPR_THING_SLOT_BYTES, wr.SPR_THING_Y0_BIAS, wr.SPR_THING_SLOTS
@@ -286,8 +287,10 @@ class BindingRefused(Exception):
 # ---- the scope rule: why the rooms' values are every map's ------------------------------------------
 # A range argument is an expression in the emitter's f-string. Each name in it is resolved as Python
 # resolves it (symtable), and must be bound where no map reaches it:
-#   * `cfg`      -- the emitter's parameter, never rebound there: a frozen Config, and the ship build
-#                   passes Config(), as the rooms do;
+#   * `cfg`      -- the emitter's parameter, a frozen Config (the ship build passes Config(), as the rooms
+#                   do), rebound only by ONE top-level `cfg = tier_cfg(cfg, tier)` (M7 P4.0: the game
+#                   tier's view under the bar) with `tier` a keyword-only parameter never rebound -- a
+#                   function of the Config and the tier name alone, which the harness calls itself (CFG);
 #   * `deg_flag` -- bound once in the emitter, at its top level, to an int literal;
 #   * a MODULE name bound once, at module level, by `NAME = <constant expression>`, by a def whose
 #     own names obey this rule, or by an import from a doomfj module where the same holds -- and that
@@ -534,7 +537,16 @@ def scope_rule(emitter_text, params, used):
                     if n.id == "cfg":
                         sig = ewr[0].args
                         own = [a for a in sig.posonlyargs + sig.args + sig.kwonlyargs if a.arg == "cfg"]
-                        if len(own) != 1 or binds != own:
+                        # M7 P4.0: the one rebinding allowed -- `cfg = tier_cfg(cfg, tier)` at the top level
+                        tiered = [st.targets[0] for st in ewr[0].body
+                                  if isinstance(st, ast.Assign) and len(st.targets) == 1
+                                  and isinstance(st.targets[0], ast.Name) and st.targets[0].id == "cfg"
+                                  and ast.dump(st.value) == ast.dump(ast.parse("tier_cfg(cfg, tier)",
+                                                                               mode="eval").body)]
+                        tier_own = [a for a in sig.kwonlyargs if a.arg == "tier"]
+                        tier_binds = [b for b in in_ewr if "tier" in _bound_names(b)]
+                        if len(own) != 1 or binds != own + tiered[:1] or len(tiered) > 1 \
+                                or (tiered and (len(tier_own) != 1 or tier_binds != tier_own)):
                             raise BindingRefused("cfg is bound in the emitter other than as its parameter")
                         if not Config.__dataclass_params__.frozen:
                             raise BindingRefused("Config is not frozen")
@@ -957,6 +969,13 @@ MUTANTS = [
      "viewwc, viewh, ds, hdb, slotstride, ttwice,", "viewwc, viewh, ds, slotstride, hdb, ttwice,"),
     ("r4: the emitter passes twice the slot stride", "write", EMITTER,
      "{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, ", "{sprite_hd_bucket(cfg)}, {2 * SPR_SLOT_STRIDE}, "),
+    # M7 P4.0: the one rebinding of cfg the rule allows -- any other is refused
+    ("P4: cfg rebound to a fixed tier", "write", EMITTER,
+     "    cfg = tier_cfg(cfg, tier) ", "    cfg = tier_cfg(cfg, 'game') "),
+    ("P4: cfg rebound twice", "write", EMITTER,
+     "    cfg = tier_cfg(cfg, tier) ", "    cfg = tier_cfg(cfg, tier); cfg = tier_cfg(cfg, tier) "),
+    ("P4: tier rebound before the rebinding", "write", EMITTER,
+     "    cfg = tier_cfg(cfg, tier) ", "    tier = 'game'; cfg = tier_cfg(cfg, tier) "),
     # the review's round-5 edits
     ("r5: deg_flag computed per tier", "write", EMITTER,
      "    deg_flag = 1 ", "    deg_flag = 1 if not standalone else 0 "),

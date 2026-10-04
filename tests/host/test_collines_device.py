@@ -194,3 +194,89 @@ def test_negative_control_frame_not_presented(monkeypatch):
     monkeypatch.setattr(InMemoryScreen, "_handle_collines_byte", broken)
     lab, upstream = _both(_random_frame(random.Random(1)))
     assert upstream.frame_count != lab.frame_count
+
+
+# -- M7 P4.0 (docs/gp-partial-ditto.md, flipjump#364): PARTIAL DITTO [0xFD][y] and KEEP [0xFC][y] --------------------
+# Both decoders learned the two tokens in the same step; this differential is what keeps the gate's decoder and the
+# player's device from drifting (gp-partial-ditto section 8). The tokens exist only on a screen of <= 251 rows.
+PARTIAL, KEEP = 0xFD, 0xFC
+
+
+def _token_frame(rng, width=W, height=H):
+    """a valid 0x0B frame that mixes pairs, full dittos, partial dittos and keeps -- and, as the game frame does,
+    revisits columns after the first pass (the weapon and bar records)"""
+    out = bytearray([0x0B])
+    for column in list(range(width)) + [rng.randrange(width) for _ in range(width // 4)]:
+        if rng.random() < 0.1:
+            continue
+        out.append(column)
+        if column > 0 and rng.random() < 0.15:
+            out.append(DITTO)
+            continue
+        cursor = 0
+        while cursor < height and rng.random() < 0.85:
+            y = rng.randint(cursor, min(height, cursor + 12))
+            r = rng.random()
+            if r < 0.2 and column > 0:
+                out += bytes([PARTIAL, y])
+            elif r < 0.4:
+                out += bytes([KEEP, y])
+            else:
+                out += bytes([y, rng.randrange(NCOLORS)])
+            cursor = y
+        out.append(END)
+    out.append(END)
+    return bytes(out)
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_the_tokens_match_the_lab_decoder(seed):
+    rng = random.Random(100 + seed)
+    stream = b"".join(_token_frame(rng) for _ in range(40))
+    lab, upstream = _both(stream)
+    assert upstream.frame_count == lab.frame_count == 40
+    assert upstream.pixel_indices == lab.pixel_indices
+
+
+def test_partial_ditto_copies_only_its_rows_and_keep_keeps():
+    """column 1: rows [0, 5) copied from column 0, then a pair; column 2 written, then its top kept next frame"""
+    f1 = bytes([0x0B, 0, H, 7, END, 1, PARTIAL, 5, H, 9, END, 2, H, 3, END, END])
+    f2 = bytes([0x0B, 2, KEEP, 10, H, 4, END, END])
+    lab, upstream = _both(f1 + f2)
+    for dev in (lab, upstream):
+        col = lambda x: [dev.pixel_indices[y * W + x] for y in range(H)]   # noqa: E731
+        assert col(1) == [7] * 5 + [9] * (H - 5)
+        assert col(2) == [3] * 10 + [4] * (H - 10)
+
+
+def test_negative_control_partial_ditto_one_row_too_many(monkeypatch):
+    """the device copies [cursor, y] -- one row past the token's -- and the differential must part"""
+    original = InMemoryScreen._handle_collines_byte
+
+    def broken(self, byte):
+        token, column, row = getattr(self, "_collines_token", None), self._collines_column, self._collines_row
+        result = original(self, byte)
+        if token == PARTIAL and byte < self.height:
+            self.pixel_indices[byte * self.width + column] = self.pixel_indices[byte * self.width + column - 1]
+        return result
+
+    monkeypatch.setattr(InMemoryScreen, "_handle_collines_byte", broken)
+    lab, upstream = _both(b"".join(_token_frame(random.Random(5)) for _ in range(10)))
+    assert upstream.pixel_indices != lab.pixel_indices
+
+
+def test_negative_control_keep_writes(monkeypatch):
+    """a KEEP that paints its rows (colour 0) instead of leaving them -- the overlay would erase the world"""
+    original = InMemoryScreen._handle_collines_byte
+
+    def broken(self, byte):
+        token, column, row = getattr(self, "_collines_token", None), self._collines_column, self._collines_row
+        result = original(self, byte)
+        if token == KEEP:
+            for y in range(row, byte):
+                self.pixel_indices[y * self.width + column] = 0
+        return result
+
+    monkeypatch.setattr(InMemoryScreen, "_handle_collines_byte", broken)
+    lab, upstream = _both(b"".join(_token_frame(random.Random(6)) for _ in range(10)))
+    assert upstream.pixel_indices != lab.pixel_indices

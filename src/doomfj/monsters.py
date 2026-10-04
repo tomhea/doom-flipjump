@@ -32,13 +32,18 @@ class MonsterPhase:
     re-implements a monster rule."""
 
     def __init__(self, map_wad=None, mapname: str = "E1M1", skill: Optional[int] = None, *, mode: str = "idle",
-                 rm=None):
+                 rm=None, player: str = "walk"):
         from doomfj import gamedata as gd
         from doomfj.world import World
         # M7 P3.2a: a mode that wakes sees by the picture (docs/gp-monsters.md 8.2) -- the gate hands it the
         # seen set of the picture it drew (`set_seen`), as the binary's render writes its flags
+        # M7 P4.1: the PLAYER's model mode too (world.PLAYER_MODES; the gates pass wall_renderer.PLAYER_MODE) -- the
+        # weapon half below steps the player's weapon in the same world the monsters live in
+        # M7 P4.2a: a player whose shots resolve aims with THE PICTURE's window (combat.window_aim), which the gate
+        # writes from each render's `aim_out` (`set_aim`), as the binary's render writes `aim_sid`
+        aim = World.window_aim if player in ("shoot", "hit", "full") else None
         self.world = World(map_wad, mapname, gd.SK_HARD if skill is None else skill, rm=rm, monsters=mode,
-                           sight_rule="los" if mode == "idle" else "seen")
+                           sight_rule="los" if mode == "idle" else "seen", player=player, aim=aim)
         self.gd = gd
 
     def reset(self, skill: int) -> None:
@@ -92,6 +97,61 @@ class MonsterPhase:
         dr, lr = self.requests()
         return (ds, fired, frozenset(req) | dr, card), ((lifts, frozenset(lreq) | lr, sw) if mps is not None else None)
 
+    # ---- M7 P4.1: the weapon half (docs/gp-combat.md section 1) -------------------------------------------------------
+    def weapon(self, keys: dict, x16: Optional[int] = None, y16: Optional[int] = None,
+               angle: Optional[int] = None):
+        """ONE world frame of the player's weapon: the number keys, then P_MovePsprites -- the model's own
+        (`combat._weapon_keys`, `_move_psprites`) in the world's player mode. A gate calls it on every world frame
+        that tics (not a menu frame, not a finished level), with the frame's held keys. M7 P4.2a: and with the
+        player's PRE-MOVE pose -- the binary's weapon runs before the player's move, so a melee reach and a shot's
+        target are measured from where the player stood when the frame began. -> the tic's events"""
+        from doomfj.world import KEYS, TicEvents
+        w = self.world
+        if w.player == "walk":
+            return TicEvents(0)
+        if x16 is not None:
+            ws = w.ws
+            ws.px = x16 - (1 << 32) if x16 >> 31 & 1 else x16
+            ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
+            ws.pangle = angle & 0xFFFFFFFF
+        k = {n: bool(keys.get(n)) for n in KEYS}
+        ev = TicEvents(0)
+        w._weapon_keys(k)
+        w._move_psprites(k, ev)
+        return ev
+
+    def weapon_state(self) -> Dict[str, int]:
+        """the weapon's fj cells (doomfj.weaponcode), in the cells' own units: the psprite states as LOCAL indices"""
+        if self.world.player == "walk":
+            return {}
+        from doomfj import weaponcode as WC
+        ws, gd = self.world.ws, self.gd
+        idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(WC.weapon_states())}
+        wst, fst = gd.STATE_NAMES[ws.p_wpn_state], gd.STATE_NAMES[ws.p_flash_state]
+        return {"wp_rdy": ws.p_ready, "wp_pend": ws.p_pending, "wp_st": idx[ws.p_wpn_state], "wp_tics": ws.p_wpn_tics,
+                "wp_sy": ws.p_wpn_sy, "fl_st": idx[ws.p_flash_state], "fl_tics": ws.p_flash_tics,
+                "wp_rf": ws.p_refire, "wp_ad": ws.p_attackdown, "am_clip": ws.p_ammo[gd.AM_CLIP],
+                "am_shell": ws.p_ammo[gd.AM_SHELL],
+                "wp_own": sum(int(bool(ws.p_owned[w])) << (4 * i) for i, w in enumerate(WC.WEAPONS)),
+                **({"aim_sid": tuple(ws.aim_sid)} if self.world.player in ("shoot", "hit", "full") else {}),
+                "rng_pl": ws.rng_player, "wp_frm": WC.overlay_frames().index(WC.psprite_lump(wst)),
+                "fl_frm": 0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0
+                else 1 + WC.flash_frames().index(WC.psprite_lump(fst))}
+
+    def screen_kw(self) -> dict:
+        """`hud.GameScreen.frame`'s keywords for the player's weapon and bar: the psprites' lumps and the values"""
+        if self.world.player == "walk":
+            return {}
+        from doomfj import weaponcode as WC
+        ws, gd = self.world.ws, self.gd
+        fst = gd.STATE_NAMES[ws.p_flash_state]
+        ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL]}.get(ws.p_ready)
+        return {"weapon": WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
+                "flash": None if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
+                "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,
+                           "owned": (bool(ws.p_owned[gd.WP_PISTOL]), bool(ws.p_owned[gd.WP_SHOTGUN]),
+                                     bool(ws.p_owned[gd.WP_CHAINSAW]))}}
+
     def boxes(self) -> list:
         """[(x16, y16, r16)] of every live monster -- a closing door reverses on them (World.door_touched)"""
         w, ws = self.world, self.world.ws
@@ -103,6 +163,14 @@ class MonsterPhase:
         ws = self.world.ws
         for m in range(self.world.layout.nmon):
             ws.mon_seen[m] = int(m in slots)
+
+    def set_aim(self, cells) -> None:
+        """M7 P4.2a: the picture just drawn: its aim window (`render_wall_frame(aim_out=)`, 17 sids) is the next tic's
+        `aim_sid` -- what `combat.window_aim` reads (docs/gp-aim-window.md 6)"""
+        arr = self.world.ws.aim_sid
+        assert len(cells) == len(arr), (len(cells), len(arr))
+        for i, v in enumerate(cells):
+            arr[i] = v
 
     def state(self) -> Dict[str, tuple]:
         """the cells the fj holds per monster slot: (mon_state, mon_tics, mon_facing, mon_active)"""
@@ -121,6 +189,12 @@ class MonsterPhase:
                         "msec": tuple(self.world._mon_sector(m) for m in range(n))})
         if self.world.monsters not in ("idle", "wake", "chase"):   # M7 P3.2c: the missile decision's flag
             out["mon_justattacked"] = tuple(ws.mon_justattacked[:n])
+        if self.world.player in ("shoot", "hit", "full"):       # M7 P4.2a: the damage's cells (health in its 12 bits)
+            out.update({"mon_health": tuple(v & 0xFFF for v in ws.mon_health[:n]),
+                        "mon_shootable": tuple(ws.mon_shootable[:n]), "mon_solid": tuple(ws.mon_solid[:n]),
+                        "mon_justhit": tuple(ws.mon_justhit[:n])})
+        if self.world.player in ("hit", "full"):                 # M7 P4.2b: who heard, who still waits in ambush
+            out.update({"mon_ambush": tuple(ws.mon_ambush[:n]), "snd_alert": tuple(ws.snd_alert)})
         return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:
@@ -184,6 +258,12 @@ class MonsterViews:
         for m, t in enumerate(self.rt):                   # a monster's leaf is the model's own
             thss[t] = ws.mon_leaf[m]
         return {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss)}
+
+    def aim_things(self, phase: "MonsterPhase") -> Dict[int, Tuple[int, int]]:
+        """M7 P4.2a: `render_wall_frame(aim_things=...)` -- {drawable index: (sid, radius)} for every shootable living
+        monster (`combat.CombatMixin.shootable_targets`' monster half): sid = 1 + slot, the radius its class (20, 30;
+        the render widens it to r_eff for the view angle). Everything else is transparent to the window."""
+        return {self.mdi[m]: (m + 1, r) for kind, m, _x, _y, r in phase.world.shootable_targets() if kind == "mon"}
 
     def slots_of(self, seen_drawables) -> set:
         """a render's `seen_out` (drawable indices) as monster slots"""

@@ -24,6 +24,7 @@ from doomfj.lut_generator import (
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
+from doomfj.reference_model import STRAFE_MOVE                                   # M7 P4.1
 from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
                                     apply_sector_heights, spawn_state)
@@ -31,7 +32,8 @@ from doomfj.config import Config
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
                                KEY_FORWARD_MASK, KEY_BACK_MASK,
-                               KEY_TURN_LEFT_MASK, KEY_TURN_RIGHT_MASK, KEY_USE_MASK)
+                               KEY_TURN_LEFT_MASK, KEY_TURN_RIGHT_MASK, KEY_USE_MASK,
+                               KEY_STRAFE_LEFT_MASK, KEY_STRAFE_RIGHT_MASK)     # M7 P4.1
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
                                 NF_SUBSECTOR, seg_affine_coeffs, bbox_gate_boxes,
                                 thing_live_subsectors,
@@ -136,6 +138,10 @@ BOOT_SKILL = _gd.SK_HARD
 # M7 P3 (docs/gp-monsters.md): the game tier's MONSTER MODE -- the model mode its binary is exact against
 # ("idle" P3.1, "wake" P3.2a, "chase" P3.2b, "decide" P3.2c)
 MONSTER_MODE = "decide"
+# M7 P4 (docs/gp-combat.md section 1): the game tier's PLAYER MODE -- the model mode its weapon is exact against
+# ("walk" through P4.0, "fire" P4.1: the trigger without its effects, "hit" P4.2); a mode whose shots hurt
+# (damagecode.DAMAGE_PLAYER_MODES) adds the monsters' damage to p31_parts -- MONSTER_MODE must then be "decide"
+PLAYER_MODE = "hit"                      # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD
 
 
 def tier_flags(tier: str) -> dict:
@@ -145,6 +151,17 @@ def tier_flags(tier: str) -> dict:
         raise ValueError("unknown tier %r -- choose one of: %s. A new combination is a new row in "
                          "wall_renderer.TIERS, not a new parameter." % (tier, ", ".join(sorted(TIERS))))
     return {flag: TIERS[tier].get(flag, False) for flag in TIER_FLAGS}
+
+
+def tier_cfg(cfg, tier: str):
+    """M7 P4.0 (docs/gp-combat.md section 2, D6): the Config a tier is emitted AND assembled with. The game tier (the
+    one with a menu) has the status bar, so its view is `hud.VIEW_ROWS` rows -- whatever config the caller passed, so a
+    100-row game binary cannot be built. Every other tier keeps the whole screen. `build_wall_renderer` (which writes
+    the fj constants: VIEW_H, CENTERY) and `emit_wall_renderer` both go through here, so the two cannot disagree."""
+    from dataclasses import replace
+    from doomfj import hud
+    cfg = cfg or Config()
+    return replace(cfg, VIEW_ROWS=hud.VIEW_ROWS) if tier_flags(tier)["menu"] else cfg
 # The V-tier picture features, retired into the default when their gates certified:
 # V2 sky, V3 step faces, V5 stacked step faces, the thing bbox cull, and the 25M-CAP
 # degradation package. Reported by `metrics['features']` FROM HERE, because every
@@ -247,7 +264,7 @@ def _int_part_lines(dst, src, neg, pos):
             f"{neg}:", f"hex.set 6, {dst} + 4*dw, 0xFFFFFF", f";{pos}", f"{pos}:"]
 
 
-def _player_sim_lines(collide: bool = False) -> list:
+def _player_sim_lines(collide: bool = False, strafe: bool = False) -> list:
     """M14-c — ONE TIC OF THE PLAYER SIM, in fj. The exact mirror of
     `ReferenceModel.step_sim`: turn first, then a collision-free move along the NEW angle.
 
@@ -267,6 +284,16 @@ def _player_sim_lines(collide: bool = False) -> list:
     """
     turn = ANGLE_TURN & 0xFFFFFFFF
     fwd = FORWARD_MOVE & 0xFFFFFFFF
+    # M7 P4.1 (the game tier, `strafe`): the side step -- `step_sim(strafe=True)` and the model's _player_move: the side
+    # magnitude from the high nibble's strafe bits, then dx += FixedMul(side, sin), dy -= FixedMul(side, cos) after the
+    # forward step, all along the NEW angle. A frame that neither moves nor strafes skips the trig as before.
+    side = ([f"hex.zero 8, psid",
+             f"hex.if_flags pkeys + dw, {KEY_STRAFE_RIGHT_MASK:#06x}, simsr_no, simsr_yes",
+             "simsr_yes:", f"hex.add_constant 8, psid, {STRAFE_MOVE & 0xFFFFFFFF:#x}",
+             "simsr_no:",
+             f"hex.if_flags pkeys + dw, {KEY_STRAFE_LEFT_MASK:#06x}, simsl_no, simsl_yes",
+             "simsl_yes:", f"hex.add_constant 8, psid, {-STRAFE_MOVE & 0xFFFFFFFF:#x}",
+             "simsl_no:"] if strafe else [])
     return [
         f"hex.if_flags pkeys, {KEY_TURN_LEFT_MASK:#06x}, simtl_no, simtl_yes",
         "simtl_yes:", f"hex.add_constant 8, viewangle, {turn:#x}",
@@ -281,7 +308,10 @@ def _player_sim_lines(collide: bool = False) -> list:
         f"hex.if_flags pkeys, {KEY_BACK_MASK:#06x}, simbk_no, simbk_yes",
         "simbk_yes:", f"hex.add_constant 8, pmove, {-FORWARD_MOVE & 0xFFFFFFFF:#x}",
         "simbk_no:",
-        "hex.if0 8, pmove, simmv_done",          # neither key, or both: the oracle does not move
+        *side,
+        # neither key, or both: the oracle does not move (M7 P4.1: unless it strafes)
+        *(["hex.if0 8, pmove, simmv_nf", ";simmv_go", "simmv_nf:", "hex.if0 8, psid, simmv_done", "simmv_go:"]
+          if strafe else ["hex.if0 8, pmove, simmv_done"]),
         # the finesine index is the BAM's top 12 bits (angle_shift = 32 - log2(TRIG_N) = 20 = 5
         # nibbles), exactly `read_sin`'s `(angle >> angle_shift) & (TRIG_N - 1)`
         "hex.mov 8, pangt, viewangle", "hex.shr_hex 8, 5, pangt", "hex.mov 3, pangi, pangt",
@@ -289,6 +319,8 @@ def _player_sim_lines(collide: bool = False) -> list:
         "finesine.read_sin pmvs, pangi",
         "hex.fixed_mul_lo 8, 4, pmvdx, pmove, pmvc",
         "hex.fixed_mul_lo 8, 4, pmvdy, pmove, pmvs",
+        *(["hex.fixed_mul_lo 8, 4, psdx, psid, pmvs", "hex.add 8, pmvdx, psdx",
+           "hex.fixed_mul_lo 8, 4, psdy, psid, pmvc", "hex.sub 8, pmvdy, psdy"] if strafe else []),
         # M14-d: with collision on the move is a REQUEST -- `move_with_collision_lines` decides
         # where it actually lands. Without it the delta is applied straight, as M14-c shipped.
         *(["hex.mov 8, cm_dx, pmvdx", "hex.mov 8, cm_dy, pmvdy", ";simcollide"] if collide else
@@ -399,6 +431,9 @@ STANDALONE_SCRATCH_DECLS = [
     "kb_u: hex.vec 1, 0",
     "kbstat: hex.vec 1", "kbcode: hex.vec 2",
     "kb_f: hex.vec 1", "kb_b: hex.vec 1", "kb_l: hex.vec 1", "kb_r: hex.vec 1",
+    # M7 P4.1: the new held flags -- strafe left / right, fire, the number keys 1..4 (persisted with the others)
+    "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1",
+    "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
     # M3: which frame producer runs. 1 = MENU, 0 = world, and it BAKES to 1 so the game boots
     # into the menu. Persisted like the key flags -- a mode that reset every frame would flicker
     # between the two pictures. It is declared even when the menu is off (two words) so both
@@ -409,7 +444,7 @@ STANDALONE_SCRATCH_DECLS = [
 ]
 
 
-def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0,
+def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
                   monsters=None) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
@@ -442,6 +477,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
               f"    rep({len(rt_binds)}, i) m1.zerobyte thnext + i*dw",
+              *[f"    {line}" for line in hud],                  # M7 P4.0: the bar's level-start values
               "    stl.fret rs_ret"]
     skills = []
     for head, nxt, vis in per_skill:
@@ -465,7 +501,7 @@ def _skill_dispatch(prefix: str) -> list:
     return [f"hex.if0 1, menu_sel, {prefix}0", f"hex.if_flags menu_sel, 1<<1, {prefix}2, {prefix}1"]
 
 
-def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
+def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) -> list:
     """M3 — the MENU frames, and the branch that chooses them.
 
     A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
@@ -501,6 +537,7 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
         *menu_state_lines(restart),
         # -- the frame: the world, or one of the baked screens
         "hex.if0 1, mode, do_world",
+        *hud,                              # M7 P4.0: a menu frame covers the bar -- redraw it on the next world frame
         "hex.if0 1, menu_scr, mf_main",
         # M7 P3.4: the help (either id) and the main menu with HELP highlighted
         f"hex.if_flags menu_scr, {_P34_SCREENS}, mf_np34, mf_p34",
@@ -509,25 +546,25 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
         "mf_nlv:",
         *_skill_dispatch("mf_s"),
         "mf_main:",
-        menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, selected, colours,
+        menu_fj(cfg.W, cfg.H, entries, selected, colours,
                 label="menu_frame", end_marker=False),
         ";frame_end",
         "mf_p34:",
         f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mf_help, mf_mainh",
         "mf_mainh:",
-        menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, entries.index(MENU_HELP_ITEM), colours,
+        menu_fj(cfg.W, cfg.H, entries, entries.index(MENU_HELP_ITEM), colours,
                 label="menu_frame_help", end_marker=False),
         ";frame_end",
         "mf_help:",
-        help_fj(cfg.VIEW_W, cfg.VIEW_H, colours, label="menu_help", end_marker=False),
+        help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False),
         ";frame_end",
         *[line for k in range(len(SKILLS)) for line in (
             f"mf_s{k}:",
-            menu_fj(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours,
+            menu_fj(cfg.W, cfg.H, SKILL_MENU, SKILL_MENU_FIRST + k, colours,
                     label=f"menu_skill{k}", end_marker=False),
             ";frame_end")],
         "mf_lv:",
-        menu_fj(cfg.VIEW_W, cfg.VIEW_H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours,
+        menu_fj(cfg.W, cfg.H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours,
                 label="menu_level_done", end_marker=False),
         ";frame_end",
         *common,                           # fcall'd only: every screen above ends in a jump
@@ -628,12 +665,12 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int) -> list:
     and test that compares a menu frame (each kept its own table until this rung)."""
     from doomfj.menu import help_pixels, pixels
     if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
-        return help_pixels(cfg.VIEW_W, cfg.VIEW_H, colours)
+        return help_pixels(cfg.W, cfg.H, colours)
     lines, hi = {0: (DEFAULT_MENU, DEFAULT_MENU_SELECTED),
                  MAIN_HELP_SCR: (DEFAULT_MENU, DEFAULT_MENU.index(MENU_HELP_ITEM)),
                  1: (SKILL_MENU, SKILL_MENU_FIRST + sel),
                  LEVEL_DONE_SCR: (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED)}[scr]
-    return pixels(cfg.VIEW_W, cfg.VIEW_H, lines, hi, colours)
+    return pixels(cfg.W, cfg.H, lines, hi, colours)
 
 
 def exit_lines(boxes, press_miss=()) -> list:
@@ -661,7 +698,7 @@ def exit_lines(boxes, press_miss=()) -> list:
 
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
-                            press_miss=(), monster_tic=()) -> list:
+                            press_miss=(), monster_tic=(), weapon=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -681,6 +718,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
         "hex.zero 1, ev_help",                                          # M7 P3.4
         f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, "
+        "kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, "                        # M7 P4.1
         f"ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
         # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
@@ -691,6 +729,10 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         "hex.if0 1, kb_r, sa_nr", "hex.xor_by pkeys, 0x8", "sa_nr:",
         # M2-R4: the use key is bit 4, i.e. the HIGH nibble's bit 0 -- see wireformat.KEY_USE.
         "hex.if0 1, kb_u, sa_nu", "hex.xor_by pkeys + dw, 0x1", "sa_nu:",
+        # M7 P4.1: strafe left / right and fire -- bits 5, 6, 7 (wireformat.KEY_STRAFE_LEFT / _RIGHT / KEY_FIRE)
+        "hex.if0 1, kb_sl, sa_nsl", "hex.xor_by pkeys + dw, 0x2", "sa_nsl:",
+        "hex.if0 1, kb_sr, sa_nsr", "hex.xor_by pkeys + dw, 0x4", "sa_nsr:",
+        "hex.if0 1, kb_fi, sa_nfi", "hex.xor_by pkeys + dw, 0x8", "sa_nfi:",
         *(menu or []),                     # M3: the menu frame + the branch past the world
         # M7 P2a.2: a finished level is FROZEN -- no door tic, no player tic (the model's frozen
         # tic); the frame draws the world where it stopped
@@ -703,7 +745,9 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
            f"duse_yess:", "hex.xor_by 1, duse, 1",
            f"duse_nos:", *door_lines] if door_lines else []),
         *(exit_lines(exit_boxes_, press_miss) if exit_boxes_ else []),
-        *_player_sim_lines(collide),
+        # M7 P4.1: the weapon -- the model's player phase runs the number keys and the psprites before the move
+        *weapon,
+        *_player_sim_lines(collide, strafe=True),        # M7 P4.1: the game tier strafes
         # M7 P3.1: the monsters tic after the player (the model's order: doors, player, monsters);
         # a frozen level skips them with the player
         *monster_tic,
@@ -981,6 +1025,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     things, player_sim, collide = _t["things"], _t["player_sim"], _t["collide"]
     moving_things, standalone = _t["moving_things"], _t["standalone"]
     menu, doors = _t["menu"], _t["doors"]
+    cfg = tier_cfg(cfg, tier)                         # M7 P4.0: the game tier's view is 84 rows (the bar)
     # the menu's text and the door quantisation were parameters that every caller left at the
     # default; they are the constants they always were.
     menu_entries, menu_selected, door_quant = None, DEFAULT_MENU_SELECTED, DOOR_QUANT
@@ -1070,6 +1115,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # fit the EXISTING 16-byte stride, so the whole-nibble shift stays.
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
+    # M7 P4.0 (docs/gp-combat.md section 2): the game tier's status bar and weapon overlay (doomfj.hudcode)
+    from doomfj.hudcode import game_hud_parts
+    _hud = game_hud_parts(rm, asset_wad, sprite_wad, map_wad.sectors(mapname)) if menu else None
+    # M7 P4.1 (doomfj.weaponcode): the player's weapon, the model's "fire" mode
+    from doomfj.weaponcode import weapon_parts
+    # M7 P4.2a: the shots resolve through the aim window and hurt (the player mode shoots)
+    # M7 P4.2b: ... and make NOISE (nz_leaf at each fire point; monstercode.p31_parts emits the leaf at the same mode)
+    from doomfj.noisecode import NOISE_PLAYER_MODES
+    _wpn = weapon_parts(map_wad, mapname, shoot=PLAYER_MODE in ("shoot", "hit", "full"),
+                        noise=PLAYER_MODE in NOISE_PLAYER_MODES) if menu else None
     cmap = bake_bsp(map_wad, mapname)
     verts = cmap.vertexes
     lds = map_wad.linedefs(mapname); sds = map_wad.sidedefs(mapname)
@@ -1508,15 +1563,27 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _p31 = p31_parts(rm, map_wad, mapname, sprite_wad, _anim,
                          [map_wad.things(mapname)[w_] for w_ in sorted(_mt_keep)],
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
-                         cache=spr_cache, mode=MONSTER_MODE)
+                         cache=spr_cache, mode=MONSTER_MODE, player=PLAYER_MODE if menu else "walk")
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
     _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide")) else 0
+    # M7 P4.2a (doomfj.aimcode): the game tier's AIM WINDOW, when its player's shots resolve -- recorded by the runtime
+    # monsters' projections (their seen machinery reaches xscale for every monster D3 e counts)
+    _AIM = 1 if (_SEEN and menu and PLAYER_MODE in ("shoot", "hit", "full")) else 0
+    if _AIM:
+        from doomfj import aimcode as _aimcode
+        from doomfj.combat import aim_window as _aim_window
+        assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
+        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX)
+        _aim_decls = _aimcode.decls() + [_aimcode.table_text(rm)]
+    else:
+        _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
     _chase = _p31.get("chase") if _p31 else None
     if _chase:
         _door_tic = _make_door_tic(
             mon_press=frozenset(si for si, _b in _chase["mon_door_boxes"]),
-            mon_contact=[(f"thpos_rt + {16 * t_}*dw", f"thpos_rt + {16 * t_ + 8}*dw", r_, f"mon_active + {m_}*dw")
+            mon_contact=[(f"thpos_rt + {16 * t_}*dw", f"thpos_rt + {16 * t_ + 8}*dw", r_,
+                          f"{_chase['live']} + {m_}*dw")         # M7 P4.2a: a LIVE monster (mon_shootable)
                          for m_, (t_, r_) in enumerate(_chase["slots_rt"])])
     _ANIM_SEL = "thsel_leaf, thsel_ret" if _ANIM else "0, 0"
     if _ANIM:
@@ -1599,7 +1666,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{2 if _ANIM else 1}, "
                 # M7 P3.2a: SEEN -- the runtime body of the wake mode marks each monster's flag
                 f"{1 if (mt and _SEEN) else 0}, {'sp_sa' if (mt and _SEEN) else 0}, "
-                f"{'trb_seenf' if (mt and _SEEN) else 0}, {'trb_one' if (mt and _SEEN) else 0}"]
+                f"{'trb_seenf' if (mt and _SEEN) else 0}, {'trb_one' if (mt and _SEEN) else 0}, "
+                # M7 P4.2a: the runtime monsters' body records the aim window when the player's shots resolve
+                f"{1 if (mt and _SEEN and _AIM) else 0}"]
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -2402,7 +2471,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _mon_move = BSn.join(
                 ["    ;mm_block_end", _mcells]
                 + monster_seed_fj(cmap, lds, sds, _dsecs_open, _msecs, _mcell)
-                + things_leaf_lines(_chase["slots_rt"])
+                + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"])   # M7 P4.2a: mon_solid
                 + move_leaf_lines(root=_mroot, lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:])
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
@@ -2410,7 +2479,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
                 # M7 P3.2c: the decisions, the attack actions and the near LOS (monsterdecide, monstersight)
-                + ((_decide_leaves() + _p31["decide_lines"]) if _p31.get("decide_lines") else [])
+                + ((_decide_leaves(justhit=bool(_p31.get("justhit"))) + _p31["decide_lines"])
+                   if _p31.get("decide_lines") else [])
                 + ["mm_block_end:"]) + BSn
         else:
             _mon_move = ""
@@ -2429,10 +2499,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
-            monsters=_p31["restart"] if _p31 else None)
+            monsters=_p31["restart"] if _p31 else None,
+            hud=(list(_hud["restart"]) + list(_wpn["restart"])
+                 + ([f"hex.zero {2 * 17}, aim_sid"] if _AIM else [])) if _hud else ())   # M7 P4.2a: no aim
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
-                               restart=_restart)
+                               restart=_restart, hud=_hud["menu"] if _hud else ())
                    if menu else None)
     # M7 P2a.2: the exit switch, where the game has a menu to open and doors (its use key, `duse`)
     _exit = (exit_boxes(lds, map_wad.vertexes(mapname)) if (standalone and menu and _door_tic)
@@ -2445,6 +2517,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                    if (_movers_on and _exit) else [])
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, monster_tic=_p31["tic"] if _p31 else (),
+                                  weapon=_wpn["tic"] if _wpn else (),
                                   door_lines=_door_tic,
                                   exit_boxes_=_exit, press_miss=_press_miss)
           if standalone else
@@ -2497,6 +2570,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P3.2a: the monsters tic AFTER the eye's point location (the wake mode's REJECT reads the player's
     # sector) and before the render, which marks this frame's seen flags for the next tic
     pass1 += list(_p31.get("tic_after_eye", ())) if _p31 else []
+    # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
+    # runs before this, has already read last frame's)
+    if _AIM:
+        from doomfj.aimcode import prologue_lines as _aim_prologue
+        pass1 += _aim_prologue()
     pass1.append("present.begin_frame_collines")
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
@@ -2593,6 +2671,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # lands on it), and the title+icon cost 8,440 ops and 0.57 ms each time. They moved
     # to the ENTRY part, ahead of the `;__hot_end` jump, so they run once at boot.
     prelude = ["present.set_palette palette"]
+    # M7 P4.0: the GAME SCREEN tier (the bar) sends its init and boot palette from the ENTRY part, once:
+    # `init_screen` ZEROES the device's palette AND pixels (ScreenIO._init_screen), and the M1 reset re-enters at
+    # `__hot_end`, so per frame it would blank every bar column hudcode's tail does not redraw (it redraws only the
+    # changed ones: the device keeps the rest)
+    _boot_screen = (["present.init_screen" if standalone else "present.init_screen_stream 0"] + prelude
+                    if _hud else None)
     postlude_palette = []
     # ── PARTITIONED EMISSION ────────────────────────────────────────────────────────────
     # The emitted program is built as ORDERED, NAMED PARTS instead of one 107M-char blob, so
@@ -2640,6 +2724,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # BOOT-ONLY, and this time really: everything below `;__hot_end` is re-entered by the M1
         # reset every frame, everything above it runs once. The window title and icon belong above.
         *_chrome_calls,
+        # M7 P4.0: the game-screen tier's screen init and its boot palette run ONCE, here (`_boot_screen`) --
+        # `init_screen` zeroes the device's palette and pixels (ScreenIO._init_screen), so re-sent every frame it
+        # would blank the bar columns the tail does not redraw
+        *(_boot_screen if _boot_screen else []),
         *hotdata[:1],                                  # the `;__hot_end` jump over the tables
       ]),
       ("tables", [
@@ -2649,15 +2737,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # M5: standalone is run by the plain `fj` CLI, whose stock InMemoryScreen wants the
           # 8-byte init. `flush_mode` governs only the 0x07 pixel-stream mode, which the 0x0B
           # frames this tier presents do not use, so dropping it costs the picture nothing.
-          "present.init_screen" if standalone else
-          "present.init_screen_stream 0",
-          *prelude,
+          *([] if _boot_screen else
+            ["present.init_screen" if standalone else "present.init_screen_stream 0"]),
+          *([] if _boot_screen else prelude),
           *pass1, *pass2, *plane_pass,
           # M3: both frame producers fall into ONE tail. The label goes BEFORE the tail's
           # `stl.output_char 0xFF`, so the line preceding `stl.loop` is still that 0xFF and
           # `selfreset.emit_reset_part`'s structural assert is untouched.
-          *postlude_palette, *(["frame_end:"] if menu else []), *present_tail, "stl.loop",
+          *postlude_palette, *(_hud["tail"] if _hud else []),            # M7 P4.0: the weapon, the bar
+          *(["frame_end:"] if menu else []), *present_tail, "stl.loop",
           "bad: stl.loop",
+          *(_aim_leaf if _AIM else []),                 # M7 P4.2a: the aim window's shared leaf
           *fb_leaves,
           *((["seg_pass1_leaf:", "stl.fret seg_ret"]
              + (["seg_pass2_leaf:", "stl.fret seg_ret2"])) if "segstub" in ablate else
@@ -2777,6 +2867,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
           *(mover_decls(len(_lift_slot)) if _movers_on else []),          # M7 P2b
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
+          *(_hud["decls"] if _hud else []),                               # M7 P4.0: the bar
+          *(_wpn["decls"] + _wpn["tables"] if _wpn else []),                # M7 P4.1: the weapon
+          *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage
@@ -2792,6 +2885,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",
              "pmvc: hex.vec 8", "pmvs: hex.vec 8",
              "pmvdx: hex.vec 8", "pmvdy: hex.vec 8"] if player_sim else []),
+          # M7 P4.1: the strafe's side magnitude and its two deltas (the game tier's sim)
+          *(["psid: hex.vec 8", "psdx: hex.vec 8", "psdy: hex.vec 8"] if standalone else []),
           # the shared affine-distance output of wall_x_range (consumed by wall_setup_sgn as
           # rw_distance-pre-abs). ⚠ CR-2026-08 (PJ-2) removed viewxa/viewxs/viewya/viewys from
           # here; `sgn_aff` is NOT dead with them -- it is the OUTPUT, read at 10 call sites.

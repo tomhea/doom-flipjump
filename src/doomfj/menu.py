@@ -187,16 +187,18 @@ HELP_CLUSTERS = (("W", "A", "S", "D"), ("UP", "LEFT", "DOWN", "RIGHT"))
 HELP_OR = "OR"
 # what a cap shows where it is not the key's own name: the arrows' own glyphs
 HELP_CAP_LEGENDS = {"UP": "↑", "DOWN": "↓", "LEFT": "←", "RIGHT": "→"}
-# the legend beside the clusters: one line beside the top caps, one beside the bottom caps
-HELP_CLUSTER_LEGEND = ("↑ ↓ MOVE", "← → TURN")
+# the legend beside the clusters, top to bottom. M7 P4.1 (the owner's key map, approved 2026-10-02): W / S and the up /
+# down arrows move, A / D STRAFE, the left / right arrows turn
+HELP_CLUSTER_LEGEND = ("↑ ↓ MOVE", "A D STRAFE", "← → TURN")
 # the use keys' description, two lines -- the owner's wording (2026-10-02), ONE place to change it
 HELP_USE_LINES = ("USE: DOORS,", "SWITCHES, LIFTS")
-# below the clusters, one row per action: (its keys, drawn as caps; its description's lines)
+# below the clusters, rows of ITEMS -- (its keys, drawn as caps; its description's lines) -- laid left to right. M7
+# P4.1: fire, the weapons and the second strafe pair joined the table, so a row holds up to two items to fit 100 rows.
 HELP_ROWS = (
-    (("SPACE", "E"), HELP_USE_LINES),
-    (("ENTER",), ("SELECT",)),
-    (("ESC",), ("MENU / BACK",)),                # in the help, Esc closes it (owner 2026-10-02)
-    (("H",), ("THIS HELP",)),
+    ((("SPACE", "E"), HELP_USE_LINES),),
+    ((("CTRL",), ("FIRE",)), (("1", "2", "3", "4"), ("WEAPONS",))),
+    (((",", "."), ("STRAFE",)), (("ENTER",), ("SELECT",))),
+    ((("ESC",), ("MENU / BACK",)), (("H",), ("HELP",))),     # in the help, Esc closes it (owner 2026-10-02)
 )
 # every key name the screen shows (`help_key_names`), as the keyboard device's keycodes (the SDL
 # codes pygame_window delivers; input.fj's table). tests/fj/test_keyboard_input.py runs kb.poll on
@@ -204,13 +206,15 @@ HELP_ROWS = (
 # dead key.
 HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEFT": 0x82,
                  "D": 0x64, "RIGHT": 0x83, "SPACE": 0x20, "E": 0x65, "ENTER": 0x0D, "ESC": 0x1B,
-                 "H": 0x68}
+                 "H": 0x68,
+                 # M7 P4.1: fire (ctrl -- pygame_window's 0x85), the number keys, the second strafe pair
+                 "CTRL": 0x85, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, ",": 0x2C, ".": 0x2E}
 # THE GEOMETRY, px. A cap is a 1-px box in the credit's dim gray with 1 px of padding round its
 # legend, the legend centred; every cap of a cluster is as wide as its widest legend's cap (W/A/S/D
 # 9, the arrows 11), and each cap of a key row fits its own legend.
 HELP_TITLE_Y = 2                         # the title's top row
 HELP_X = 6                               # the left margin: the clusters and the key column
-HELP_CLUSTERS_Y = 12                     # the clusters' top row
+HELP_CLUSTERS_Y = 11                     # the clusters' top row (M7 P4.1: one row up, for the fourth key row)
 HELP_CAP_BORDER = 1
 HELP_CAP_PAD = 1
 HELP_CAP_INSET = HELP_CAP_BORDER + HELP_CAP_PAD      # a cap's edge to its legend
@@ -218,9 +222,11 @@ HELP_CAP_H = GLYPH_H + 2 * HELP_CAP_INSET           # every cap's outer height
 HELP_CAP_GAP = 1                         # between a cluster's caps
 HELP_OR_GAP = 4                          # either side of HELP_OR
 HELP_LEGEND_GAP = 7                      # the last cluster to its legend
-HELP_ROWS_GAP = 3                        # the clusters' bottom to the first key row
-HELP_KEY_GAP = 2                         # between a key row's caps
-HELP_DESC_GAP = 6                        # the widest key row to the descriptions
+HELP_LEGEND_PITCH = GLYPH_H + 1          # one legend line to the next (M7 P4.1: three lines beside two cap rows)
+HELP_ROWS_GAP = 2                        # the clusters' bottom to the first key row
+HELP_KEY_GAP = 2                         # between an item's caps
+HELP_DESC_GAP = 6                        # an item's caps to its description
+HELP_ITEM_GAP = 8                        # an item's description to the next item in its row (M7 P4.1)
 HELP_ROW_PITCH = HELP_CAP_H + 1          # one key row to the next...
 HELP_LINE_PITCH = GLYPH_H + 2            # ...plus this per extra description line (menu pitch)
 
@@ -228,7 +234,7 @@ HELP_LINE_PITCH = GLYPH_H + 2            # ...plus this per extra description li
 def help_key_names() -> list:
     """every key name the help screen shows, in screen order: the clusters', then the rows'"""
     return ([k for cluster in HELP_CLUSTERS for k in cluster]
-            + [k for keys, _lines in HELP_ROWS for k in keys])
+            + [k for row in HELP_ROWS for keys, _lines in row for k in keys])
 
 
 def help_cap_legend(key: str) -> str:
@@ -267,22 +273,21 @@ def help_layout(width, height) -> tuple:
             cap(key, x + col * (w + HELP_CAP_GAP), bottom_y, w)
         x += 3 * w + 2 * HELP_CAP_GAP
     for row, line in enumerate(HELP_CLUSTER_LEGEND):
-        texts.append((line, x + HELP_LEGEND_GAP,
-                      HELP_CLUSTERS_Y + row * (HELP_CAP_H + HELP_CAP_GAP) + HELP_CAP_INSET, "text"))
-    # the key rows: caps from the left margin, the descriptions in one column after the widest row
-    keys_w = max(sum(help_cap_width(help_cap_legend(k)) for k in keys)
-                 + HELP_KEY_GAP * (len(keys) - 1) for keys, _lines in HELP_ROWS)
-    x_desc = HELP_X + keys_w + HELP_DESC_GAP
+        texts.append((line, x + HELP_LEGEND_GAP, HELP_CLUSTERS_Y + 1 + row * HELP_LEGEND_PITCH, "text"))
+    # the key rows: each item's caps from its x, its description after them, the next item after that
     y = bottom_y + HELP_CAP_H + HELP_ROWS_GAP
-    for keys, lines in HELP_ROWS:
+    for row in HELP_ROWS:
         x = HELP_X
-        for key in keys:
-            w = help_cap_width(help_cap_legend(key))
-            cap(key, x, y, w)
-            x += w + HELP_KEY_GAP
-        for i, line in enumerate(lines):
-            texts.append((line, x_desc, y + HELP_CAP_INSET + i * HELP_LINE_PITCH, "text"))
-        y += HELP_ROW_PITCH + HELP_LINE_PITCH * (len(lines) - 1)
+        for keys, lines in row:
+            for key in keys:
+                w = help_cap_width(help_cap_legend(key))
+                cap(key, x, y, w)
+                x += w + HELP_KEY_GAP
+            x += HELP_DESC_GAP - HELP_KEY_GAP
+            for i, line in enumerate(lines):
+                texts.append((line, x, y + HELP_CAP_INSET + i * HELP_LINE_PITCH, "text"))
+            x += max(text_width(line) for line in lines) + HELP_ITEM_GAP
+        y += HELP_ROW_PITCH + HELP_LINE_PITCH * (max(len(lines) for _keys, lines in row) - 1)
     boxes = [(x, y, w, HELP_CAP_H) for _k, x, y, w in caps] + \
             [(x, y, text_width(label), GLYPH_H) for label, x, y, _r in texts]
     outside = [(x, y, w, h) for x, y, w, h in boxes

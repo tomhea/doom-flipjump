@@ -81,11 +81,14 @@ ENTER, ESC = 0x0D, 0x1B
 # while enter now opens the skill screen. So esc means the same on every binary, before P1.5 and
 # after, and a driver needs no switch per binary. `menu_exit_events` is the ONE composition.
 MENU_EXIT = ESC
-K_FWD, K_BACK, K_LEFT, K_RIGHT, K_USE = 0x77, 0x73, 0x61, 0x64, 0x20
+# M7 P4.1 (the owner's key map): only the ARROWS turn now -- A / D strafe -- so the scripts' turns are the arrows', and
+# strafe, fire and the number keys have codes of their own (input.fj's table)
+K_FWD, K_BACK, K_LEFT, K_RIGHT, K_USE = 0x77, 0x73, 0x82, 0x83, 0x20
+K_SL, K_SR, K_FIRE = 0x61, 0x64, 0x85
 BINDING = {K_FWD: "forward", K_BACK: "back", K_LEFT: "turn_left",
-           K_RIGHT: "turn_right", K_USE: "use"}
-CODE = {"forward": K_FWD, "back": K_BACK, "turn_left": K_LEFT,
-        "turn_right": K_RIGHT, "use": K_USE}
+           K_RIGHT: "turn_right", K_USE: "use", K_SL: "strafe_left", K_SR: "strafe_right", K_FIRE: "fire",
+           0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4"}
+CODE = {name: code for code, name in BINDING.items()}
 
 MENU_FRAMES = 2                 # frames 0..1 are the menu; MENU_EXIT lands on frame 2's polls
 
@@ -355,9 +358,9 @@ def to_events(per_frame):
     An event at tic `f*POLLS` is delivered on the first poll of frame f, so the flag is set before
     that frame's tic reads it -- the same rule `held_per_frame` re-implements below, from the other
     side, which is what makes the two independent."""
-    out, held = [], {k: False for k in KEY_NAMES}
+    out, held = [], {k: False for k in CODE}             # M7 P4.1: every bound key (the number keys too)
     for f, keys in enumerate(per_frame):
-        for name in KEY_NAMES:
+        for name in CODE:
             want = bool(keys.get(name))
             if want != held[name]:
                 out.append(KeyEvent(f * STANDALONE_POLLS, want, CODE[name]))
@@ -371,7 +374,7 @@ def held_per_frame(events, frames):
     `doomfj.menu.MENU_KEYS` names whose key went DOWN during the frame's polls (kb.poll
     edge-triggers them), which `doomfj.menu.menu_step` turns into the menu's state."""
     pending = sorted(events, key=lambda e: e.tic)
-    held = {name: False for name in KEY_NAMES}
+    held = {name: False for name in CODE}                 # M7 P4.1: every bound key
     out, menu_events, i = [], [], 0
     this_frame = set()
     for tic in range(frames * STANDALONE_POLLS):
@@ -455,7 +458,11 @@ def main():
 
     mw = WadFile.from_path(str(ROOT / args.wad))
     art = WadFile.from_path(str(ROOT / args.asset))
-    rm = ReferenceModel(Config())
+    # M7 P4.0: the GAME tier's 84-row view and its screen -- the weapon over the view, the bar below (hud.GameScreen)
+    from doomfj.config import GAME_CFG
+    from doomfj.hud import GameScreen
+    rm = ReferenceModel(GAME_CFG)
+    screen = GameScreen(rm, mw, art, mw.sectors(args.map))
     cmap = bake_bsp(mw, args.map)
     secs, lds, sds = mw.sectors(args.map), mw.linedefs(args.map), mw.sidedefs(args.map)
     # ── CONTROL 5, BEFORE 4.5 BILLION OPS ───────────────────────────────────────────────────
@@ -528,7 +535,7 @@ def main():
 
         def touch(cx, cy, z):
             cur[0] = dp.touch(cur[0], cx, cy, z)
-        new = rm.step_sim(st, kd, scene=build_scene(mw, mw, args.map, {**open_h, **mp.heights(mps)},
+        new = rm.step_sim(st, kd, strafe=True, scene=build_scene(mw, mw, args.map, {**open_h, **mp.heights(mps)},
                                                     blk), touch=touch)
         dps = dp.after_move(cur[0], (st.x, st.y), (new.x, new.y))
         mps = mp.after_move(mps, (st.x, st.y), (new.x, new.y))
@@ -678,6 +685,22 @@ def main():
     print("  CONTROL 0: the planned route crosses no solid linedef: yes (%d frames re-simulated)"
           % len(route))
 
+    # M7 P4.1: THE TRIGGER, laid over the first walk (it moves nobody): the pistol held (a shot, the flash, refire),
+    # tapped, the fist on key 1 and a punch held, the pistol back on key 2 -- the weapon's states, the flash's
+    # overlay and the bar's ammo, end to end. NEW GAME (below) must put them back at the level start.
+    route = [dict(kd) for kd in route]
+    trig = {}
+    for f in range(4, 22):
+        trig.setdefault(f, set()).add("fire")
+    trig.setdefault(26, set()).add("fire")
+    trig.setdefault(30, set()).add("w1")
+    for f in range(48, 60):
+        trig.setdefault(f, set()).add("fire")
+    trig.setdefault(64, set()).add("w2")
+    for f, names in trig.items():
+        if f < len(route):
+            for n in names:
+                route[f][n] = True
     script = [{} for _ in range(MENU_FRAMES)] + route + press + opening + through
     # M7 P1.5 -- NEW GAME PUTS THE LEVEL BACK. Walked through while the door is still OPEN -- it has
     # started to shut, and the menu frames then hold it where it is, since they tic nothing: enter
@@ -744,8 +767,8 @@ def main():
     # M7 P3.1: the idle monsters -- the model's own phase (doomfj.monsters) from the boot skill's
     # level start, a tic per world frame after the player, reset by NEW GAME; drawn, cells read
     from doomfj.monsters import MonsterPhase, MonsterViews
-    from doomfj.wall_renderer import MONSTER_MODE
-    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE)
+    from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
                                             len(order), len(dp.triggers), len(mp.order),
@@ -800,7 +823,8 @@ def main():
             sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr,
                                                        sel, (dstates[si] for si in order),
                                                        dps, order, (lvdone, pusedn),
-                                                       mps, mp.order, {**mph.state(), **mviews.rt_state(mph)}))
+                                                       mps, mp.order, {**mph.state(), **mviews.rt_state(mph),
+                                                                       **mph.weapon_state()}))
             state_checked += 1
             print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
                   % (f, ",".join(sorted(menu_events[f])) or "-", "-",
@@ -814,24 +838,31 @@ def main():
         used = bool(kd.get("use")) and not args.selftest
         if kd.get("use") and in_use_box_fixed(boxes[target], state.x, state.y):
             in_box_when_pressed = True
-        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=mph.boxes())
+        # M7 P4.1: the player's weapon, every world frame -- P4.2a: BEFORE the move, from the frame's starting pose
+        # (the binary's weapon runs before its player sim: a shot's target and a melee's reach are measured there)
+        _boxes = mph.boxes()                            # the door tic runs BEFORE the weapon: this frame's shots
+        mph.weapon(kd, state.x, state.y, state.angle)   # have not yet killed what a closing door reverses on
+        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=_boxes)
         dstates = dps[0]
         # M7 P3.1: the monsters after the player; P3.2b: inside the doors and lifts (their presses -> next frame)
         dps, mps = mph.frame(dps, mps, state.x, state.y, state.angle)
         rsc = build_scene(mw, mw, args.map,
                           {**heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}),
                            **mp.heights(mps)})
-        want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
+        want = screen.frame(bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
                                           thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
                                           thing_views=mviews(mph, state.x, state.y),
                                           thing_positions=mviews.positions(mph),
-                                          seen_out=(_seen := set()), **GAME_RENDER_KW))
+                                          seen_out=(_seen := set()), aim_things=mviews.aim_things(mph),
+                                          aim_out=(_aim := [0] * 17), **GAME_RENDER_KW)),
+                            card=bool(dps[3]), **mph.screen_kw())     # M7 P4.1: the weapon's frame, the bar
+        mph.set_aim(_aim)                               # M7 P4.2a: this picture's window -> the next frame's shots
         mph.set_seen(mviews.slots_of(_seen))            # M7 P3.2a: this picture's seen -> the next tic
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
                                                    (dstates[si] for si in order), dps, order,
                                                    (lvdone, pusedn), mps, mp.order,
-                                                   {**mph.state(), **mviews.rt_state(mph)}))
+                                                   {**mph.state(), **mviews.rt_state(mph), **mph.weapon_state()}))
         state_checked += 1
         path[f] = (state.x, state.y, state.angle)
         ok &= same
@@ -864,8 +895,8 @@ def main():
                 alt = {si: dstates[si][0] for si in order}
                 alt[target] = k
                 asc = build_scene(mw, mw, args.map, heights_for_states(secs, lds, sds, alt))
-                pic = bytes(rm.render_wall_frame(state, asc, sprite_wad=art, thing_hidden=hidden,
-                                                 **GAME_RENDER_KW))
+                pic = screen.frame(bytes(rm.render_wall_frame(state, asc, sprite_wad=art, thing_hidden=hidden,
+                                                 **GAME_RENDER_KW)), card=bool(dps[3]), **mph.screen_kw())
                 nd = sum(a != b for a, b in zip(got[f], pic))
                 if nd == 0 or k <= dstates[target][0] + 1:
                     print("     vs oracle with door at state %-2d : %s"

@@ -487,6 +487,10 @@ def test_pkeys_is_rebuilt_with_wireformats_own_bit_values():
         "kb_l": ("pkeys", WF.KEY_TURN_LEFT),
         "kb_r": ("pkeys", WF.KEY_TURN_RIGHT),
         "kb_u": ("pkeys + dw", WF.KEY_USE >> 4),
+        # M7 P4.1: strafe left / right and fire, the high nibble's other bits
+        "kb_sl": ("pkeys + dw", WF.KEY_STRAFE_LEFT >> 4),
+        "kb_sr": ("pkeys + dw", WF.KEY_STRAFE_RIGHT >> 4),
+        "kb_fi": ("pkeys + dw", WF.KEY_FIRE >> 4),
     }
     assert WF.KEY_USE == 1 << 4, "KEY_USE left the high nibble -- `pkeys + dw` is now wrong"
 

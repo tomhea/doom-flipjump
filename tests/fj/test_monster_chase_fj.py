@@ -8,9 +8,11 @@ mm_chase, mm_move, mm_things, mm_ncd, mm_walk), the monsters' cells with the sta
 ptloc_walk, the relink (sim.leaf_unlink / leaf_link) and the REJECT leaf by the monster's sector. The world is
 woken at the start (World.wake_all) so every monster chases; the player walks a script past the monster groups.
 Doors and lifts do not tic here (their presses and triggers are compared, then cleared on both sides).
+M7 P4.2a: the slots run with `dmg` (damagecode), so a monster blocks by `mon_solid` (World._thing_blocker: MF_SOLID),
+and slot CORPSE lies dead from the start -- its last death state, A_Fall run, shootable 0 -- where the others walk.
 
-R9: a NewChaseDir without its cap, a move that ignores the other monsters, and a relink that never happens must
-each part from the model.
+R9: a NewChaseDir without its cap, a move that ignores the other monsters, a relink that never happens, and a thing
+test that still reads `mon_active` (the corpse blocks) must each part from the model.
 """
 import random
 from pathlib import Path
@@ -18,6 +20,7 @@ from pathlib import Path
 import flipjump as fj
 import pytest
 
+from doomfj import damagecode as DC
 from doomfj import gamedata as gd
 from doomfj import monstercode as MC
 from doomfj import monstermove as MM
@@ -40,6 +43,7 @@ PIT_SPOT = (855, 1163)               # slot 1: every direction refused -- NewCha
 LIFT_PLAYER = (1313, -100)           # the player north of the lift for the first frames
 DOOR_SPOT = (2255, 276)              # slot 2 (radius 30) in door 54's monster use box, 7 of 8 steps refused
 CAP_SPOT = (719, 1706)               # slot 3: ONE direction open (west) -- the cap stops NewChaseDir before it
+CORPSE = 20                          # M7 P4.2a: dead from the start, in the way of the monsters around it
 
 
 def _world():
@@ -49,7 +53,19 @@ def _world():
     w.teleport_monster(1, *PIT_SPOT)
     w.teleport_monster(2, *DOOR_SPOT)
     w.teleport_monster(3, *CAP_SPOT)
+    _kill(w, CORPSE)
     return w
+
+
+def _kill(w, m, solid=False):
+    """slot m a corpse: its last death state (forever), shootable 0, health 0 -- and MF_SOLID gone (A_Fall), unless
+    `solid` (the control's world, where it would still block)"""
+    s = w.mon_info[m].deathstate
+    while gd.STATES[s].tics >= 0:
+        s = gd.STATES[s].next
+    ws = w.ws
+    ws.mon_state[m], ws.mon_tics[m] = gd.STATE_INDEX[s], 15
+    ws.mon_shootable[m], ws.mon_health[m], ws.mon_solid[m] = 0, 0, int(solid)
 
 
 def _script(w):
@@ -80,8 +96,10 @@ def _row(w):
     return s
 
 
-def _expected(script) -> bytes:
+def _expected(script, corpse_solid=False) -> bytes:
     w = _world()
+    if corpse_solid:
+        _kill(w, CORPSE, solid=True)
     ws, n = w.ws, w.layout.nmon
     lines = []
     for x16, y16, ang, seen in script:
@@ -115,7 +133,7 @@ def _parts(w, mut=None):
         info = w.mon_info[m]
         slots.append(dict(t=m, x=ws.mon_x[m], y=ws.mon_y[m], rj="", see_idx=gd.STATE_INDEX[info.seestate],
                           see_tics=gd.STATES[info.seestate].tics,
-                          mv=dict(rt=m, radius=w.mon_radius[m], speed=w.mon_speed[m])))
+                          mv=dict(rt=m, radius=w.mon_radius[m], speed=w.mon_speed[m]), dmg=mut != "active"))
     secs = sorted({w.leaf_sector[s] for s in range(len(w.cmap.subsectors))})
     tables = MC.p30_tables_fj()
     tables += [generate_dispatch_table_fj("rj%d" % s, [int(w.reject.visible(s, q)) for q in range(w.reject.nsec)],
@@ -130,6 +148,7 @@ def _parts(w, mut=None):
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
              + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n)
              + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, msec)
+             + DC.field_decls(schema, n, {f: list(getattr(ws, f)[:n]) for f in DC.P42_FIELDS})
              + MC.MT_DECLS + MC.P32A_SCRATCH + point_location_decls() + COLLISION_STATE_DECLS + MON_CELL_DECLS
              + LEAF_LINK_DECLS + MM.monster_seed_decls()
              + ["viewx: hex.vec 8", "viewy: hex.vec 8", "mt_tret: hex.vec w/4",
@@ -144,7 +163,8 @@ def _parts(w, mut=None):
                 "bar_solid: hex.vec %d, %d" % (2 * len(w.barrel_things),
                                                 sum(ws.bar_solid[b] << (4 * b) for b in range(len(w.barrel_things)))),
                 "mc_don: hex.vec 2"])
-    move = (MM.things_leaf_lines([(m, w.mon_radius[m]) for m in range(n)])
+    move = (MM.things_leaf_lines([(m, w.mon_radius[m]) for m in range(n)],
+                                 solid="mon_active" if mut == "active" else "mon_solid")
             + MM.move_leaf_lines(root=root, lift_trigs=lift_trigs, door_boxes=door_boxes, dropmax=DROPOFF_MAX,
                                  stepup=STEP_UP, height=56)
             + MM.ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
@@ -246,6 +266,13 @@ def test_the_script_exercises_every_path():
     assert all(tot[k] >= v for k, v in want.items()), (tot, want)
 
 
+def test_the_corpse_decides_something():
+    """the `active` control can only bite where the corpse is in a monster's way: the model with the corpse still
+    MF_SOLID must part from the script's"""
+    script = _script(_world())
+    assert _expected(script) != _expected(script, corpse_solid=True), "the corpse is in nobody's way"
+
+
 def test_the_cap_decides_something():
     """the `nocap` control can only bite where a direction the cap forbids would have been OPEN (a monster boxed in
     on every side ends at NODIR either way): the model itself, run without the cap, must part from the script"""
@@ -264,6 +291,6 @@ def test_the_chase_tic_follows_the_model(tmp_path):
     assert _run(tmp_path, "mchase"), "the fj chase tic parted from the model's chase mode"
 
 
-@pytest.mark.parametrize("mut", ["nocap", "nothings", "norelink"])
+@pytest.mark.parametrize("mut", ["nocap", "nothings", "norelink", "active"])
 def test_control_a_broken_move_is_caught(tmp_path, mut):
     assert not _run(tmp_path, "mchase_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut

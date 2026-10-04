@@ -159,8 +159,13 @@ def main():
 
     mw = WadFile.from_path(str(ROOT / args.wad))
     art = WadFile.from_path(str(ROOT / args.asset))
-    cfg = Config()
+    # M7 P4.0: the GAME tier's config (the 84-row view under the status bar) and its screen (hud.GameScreen);
+    # a menu frame still covers the whole W x H screen (menu_screen_pixels draws at cfg.W x cfg.H)
+    from doomfj.config import GAME_CFG
+    from doomfj.hud import GameScreen
+    cfg = GAME_CFG
     rm = ReferenceModel(cfg)
+    gscreen = GameScreen(rm, mw, art, mw.sectors(args.map))
     scene = build_scene(mw, mw, args.map)
     colours = palette_colours(bytes(b for rgb in mw.playpal(0) for b in rgb))
     # M7 P3.4: the menu's pictures through the ONE mapping from its state (the help joined them)
@@ -197,8 +202,8 @@ def main():
     # M7 P3.1: the idle monsters -- the model's own phase (doomfj.monsters), from the boot skill's
     # level start, a tic per world frame, reset by NEW GAME; drawn with their views, cells read
     from doomfj.monsters import MonsterPhase, MonsterViews
-    from doomfj.wall_renderer import MONSTER_MODE
-    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE)
+    from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
                                             len(order), nwalk, nmon=mph.world.layout.nmon, nrt=mviews.nrt)
@@ -243,7 +248,9 @@ def main():
         if ng is not None:
             pusedn = 1                              # the restart block
         if mode == 0:
-            state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene)
+            # M7 P4.1: the weapon tics with the world (no fire held here) -- P4.2a: before the move, at its pose
+            mph.weapon(held, state.x, state.y, state.angle)
+            state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene, strafe=True)
             pusedn = 0                              # this script never holds use
             _dps, _mps = mph.frame(phase0, mps0, state.x, state.y, state.angle)   # M7 P3.1 / P3.2b
             assert _dps == phase0 and _mps == mps0, "frame %d: a monster pressed a door or a lift" % f
@@ -251,11 +258,14 @@ def main():
             _seen = set()
             rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map), scene,
                                  thing_hidden=hidden[skill], thing_views=mviews(mph, state.x, state.y),
-                                 thing_positions=mviews.positions(mph), seen_out=_seen, **render_kw)
+                                 thing_positions=mviews.positions(mph), seen_out=_seen,
+                                 aim_things=mviews.aim_things(mph), aim_out=(_aim := [0] * 17), **render_kw)
             mph.set_seen(mviews.slots_of(_seen))
+            mph.set_aim(_aim)                       # M7 P4.2a: the window this picture recorded
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
                      "ng": ng, "before": before, "pusedn": pusedn,
-                     "mstate": {**mph.state(), **mviews.rt_state(mph)}, "views": mviews(mph, state.x, state.y),
+                     "mstate": {**mph.state(), **mviews.rt_state(mph), **mph.weapon_state()},
+                     "skw": mph.screen_kw(), "views": mviews(mph, state.x, state.y),
                      "positions": mviews.positions(mph)})
 
     ok, menus, worlds, moved, oracle_ng, first_bad = True, 0, 0, 0, {}, None
@@ -276,10 +286,10 @@ def main():
             screens_seen.add(key)
             menus += 1
         else:
-            want = bytes(rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map),
+            want = gscreen.frame(bytes(rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map),
                                               scene, thing_hidden=hidden[row["skill"]],
                                               thing_views=row["views"], thing_positions=row["positions"],
-                                              **render_kw))
+                                              **render_kw)), **row["skw"])
             kind = "world %-7s" % SKILL_NAMES[row["skill"]]
             worlds += 1
             if row["ng"] is not None:

@@ -125,8 +125,8 @@ class Mirror:
         mp, ms = self.mp, self.mp.initial()                    # M7 P2b: every lift at its top
         # M7 P3.1: the idle monsters from the boot image's level start (doomfj.monsters)
         from doomfj.monsters import MonsterPhase
-        from doomfj.wall_renderer import MONSTER_MODE
-        mph = MonsterPhase(sim.mw, sim.mapname, BOOT_SKILL, rm=sim.rm, mode=MONSTER_MODE)
+        from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+        mph = MonsterPhase(sim.mw, sim.mapname, BOOT_SKILL, rm=sim.rm, mode=MONSTER_MODE, player=PLAYER_MODE)
         with self._rules():
             for kd in keys:
                 mode, scr, sel, ng = menu_step(mode, scr, sel, set(kd.get("menu", ())))
@@ -163,8 +163,9 @@ class Mirror:
                         if self.ctl == "reach" and dp.card_at is not None:
                             z = dp.card_at[2]
                         cur[0] = dp.touch(cur[0], cx, cy, z)
+                    mph.weapon(kd, st.x, st.y, st.angle)      # M7 P4.1: the weapon, after the use press (pre-move)
                     new = sim.rm.step_sim(st, kd, scene=sim._scene(blocked, mp.heights(ms)),
-                                          touch=touch)
+                                          touch=touch, strafe=True)
                     ph = cur[0]
                     taken |= ph[3] == 1 and pcard == 0
                     if self.ctl == "w1":       # every crossing presses; the bits still read fired
@@ -190,7 +191,9 @@ class Mirror:
                             "mode": mode, "scr": scr, "sel": sel, "lvdone": lvdone,
                             "pusedn": pusedn, "drawn": drawn, "movers": ms,
                             "mheights": mp.heights(ms),
-                            "mstate": {**mph.state(), **(self.rtfn(mph) if self.rtfn else {})},
+                            "mstate": {**mph.state(), **(self.rtfn(mph) if self.rtfn else {}),
+                                       **mph.weapon_state()},
+                            "skw": mph.screen_kw(),                                   # M7 P4.1
                             "views": self.viewfn(mph, st.x, st.y) if self.viewfn else None,
                             "positions": self.posfn(mph) if self.posfn else None})
         return out
@@ -200,11 +203,12 @@ def seen_of(orc, dsim, card_di):
     """M7 P3.2a: (MonsterPhase, pose, door phase, movers, taken) -> the monster slots the frame's picture SEES --
     the same render the gate compares against, with `seen_out`"""
     def fn(mph, st, ph, ms, taken):
-        seen = set()
+        seen, aim = set(), [0] * 17
         orc.render(st.x, st.y, st.angle, tuple(ph[0][si][0] for si in dsim.order),
                    hidden_extra=(card_di,) if taken else (), movers=dsim.mp.heights(ms),
                    views=orc.monster_views(mph, st.x, st.y), seen_out=seen,
-                   positions=orc.monster_positions(mph))
+                   positions=orc.monster_positions(mph), aim_things=orc._mviews.aim_things(mph), aim_out=aim)
+        mph.set_aim(aim)                    # M7 P4.2a: this picture's window -> the next frame's shots
         return orc._mviews.slots_of(seen)
     return fn
 
@@ -517,7 +521,10 @@ def main(argv=None) -> int:
                              "pcard": sc["pcard"]})
             pr.write_cells(vals)
         p.on_frame_start(start)
-        p.on_present(lambda pr, f: reads.append(pr.read_cells(list(READ))))
+        # every cell the probe holds (P.game_cells: each later rung's group joins there), not READ alone -- READ was
+        # a hand list the P4 cells never joined, so the binary's side of their comparison read None
+        assert set(READ) <= set(cells), sorted(set(READ) - set(cells))
+        p.on_present(lambda pr, f: reads.append(pr.read_cells(list(cells))))
         r = gb.run(len(sc["keys"]), menu_events(sc["keys"]), p)
         s_bad = x_bad = None
         for f, fr in enumerate(want):
@@ -529,7 +536,8 @@ def main(argv=None) -> int:
                 pic = orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
                                  tuple(fr["phase"][0][si][0] for si in dsim.order),
                                  hidden_extra=card_di if fr["taken"] else (), movers=fr["mheights"],
-                                 views=fr["views"], positions=fr["positions"])
+                                 views=fr["views"], positions=fr["positions"], screen_kw=fr.get("skw"),
+                                 card=fr["phase"][3])           # the bar's card is pcard's (S3 pokes it)
             else:
                 pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):

@@ -148,7 +148,12 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",
                               "thseen"}),                                               # M7 P3.2a
                    frozenset({"mon_movecount", "mon_rng", "mon_floorz", "msec"}),       # M7 P3.2b
-                   frozenset({"mon_justattacked"}))                                     # M7 P3.2c
+                   frozenset({"mon_justattacked"}),                                     # M7 P3.2c
+                   # M7 P4.1: the player's weapon (doomfj.weaponcode.PERSIST, the cells' widths below)
+                   frozenset({"wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad", "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm"}),
+                   frozenset({"aim_sid"}),                                              # M7 P4.2a: the window
+                   frozenset({"mon_health", "mon_shootable", "mon_solid", "mon_justhit"}),   # M7 P4.2a: the damage
+                   frozenset({"mon_ambush", "snd_alert"}))                              # M7 P4.2b: the noise
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -652,11 +657,32 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         for name, width in (("mon_movecount", 2), ("mon_rng", 2), ("mon_floorz", 4), ("msec", 2)):
             cells[name] = Cell(name, "hex", width, count=nmon)
         cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon)   # M7 P3.2c
+        cells["mon_health"] = Cell("mon_health", "hex", 3, count=nmon)               # M7 P4.2a: the damage
+        cells["mon_ambush"] = Cell("mon_ambush", "hex", 1, count=nmon)               # M7 P4.2b: the noise
+        cells["snd_alert"] = Cell("snd_alert", "hex", 1, count=_nsound())
+        for name in ("mon_shootable", "mon_solid", "mon_justhit"):
+            cells[name] = Cell(name, "hex", 1, count=nmon)
     # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
+    # M7 P4.1: the player's weapon -- one cell each, `wp_own` the four owned flags as one 4-nibble value
+    for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", 4), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1)):
+        cells[name] = Cell(name, "hex", width)
+    cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=17)          # M7 P4.2a: the aim window (doomfj.aimcode)
     if nrt:
         cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt)
         cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt)
     return cells
+
+
+def _nsound() -> int:
+    """M7 P4.2b: E1M1's sound nodes (World.layout.nsound) -- `snd_alert`'s count, from the model once"""
+    global _NSOUND
+    if _NSOUND is None:
+        from doomfj.world import World
+        _NSOUND = World(monsters="idle").layout.nsound
+    return _NSOUND
+
+
+_NSOUND = None
 
 
 def wfired_value(fired) -> object:
@@ -684,7 +710,9 @@ class Oracle:
         self.mw = WadFile.from_path(str(ROOT / wad))
         self.art = WadFile.from_path(str(ROOT / asset))
         self.mapname = mapname
-        self.rm = ReferenceModel(Config())
+        # M7 P4.0: the GAME tier's config -- the 84-row view under the status bar (config.GAME_CFG)
+        from doomfj.config import GAME_CFG
+        self.rm = ReferenceModel(GAME_CFG)
         self.secs = self.mw.sectors(mapname)
         self.lds, self.sds = self.mw.linedefs(mapname), self.mw.sidedefs(mapname)
         self.door_order = sorted(door_states(self.secs, self.lds, self.sds))
@@ -765,17 +793,34 @@ class Oracle:
         return self._scenes[(key, mkey)]
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
-               views=None, seen_out=None, positions=None) -> bytes:
+               views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
+               card=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
-        `thing_views` list (`monster_views`), None for every thing's type art"""
+        `thing_views` list (`monster_views`), None for every thing's type art.
+        M7 P4.0: the GAME SCREEN -- the view with the weapon over it and the status bar below
+        (`hud.GameScreen`); the bar's card is lit when `card` (the player OWNS it: `pcard`, the cell the binary's bar
+        reads -- hudcode.VALUE_CELLS) and, when `card` is None, when the card is gone from the world (`hidden_extra`
+        names the card and nothing else -- P2a.1's one use of it). The two agree in play; a gate that POKES pcard
+        without taking the card (p2a S3) must pass `card`."""
         from doomfj.reference_model import SimState
-        return bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
+        view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
                                                thing_hidden=set(self.hidden) | set(hidden_extra),
                                                thing_views=views, seen_out=seen_out,
                                                thing_positions=positions,              # M7 P3.2b
+                                               aim_things=aim_things, aim_out=aim_out,  # M7 P4.2a
                                                **self.RENDER_KW))
+        # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
+        return self.screen.frame(view, card=bool(hidden_extra) if card is None else bool(card), **(screen_kw or {}))
+
+    @property
+    def screen(self):
+        """M7 P4.0: the oracle's game screen (built once: it bakes the weapon's runs)"""
+        if getattr(self, "_screen", None) is None:
+            from doomfj.hud import GameScreen
+            self._screen = GameScreen(self.rm, self.mw, self.art, self.secs)   # the palette the build bakes: the map wad's
+        return self._screen
 
     # -- M7 P3.1: the monsters' views (doomfj.monsters.MonsterViews, the one mapping) -------------
     def _mv(self, world):

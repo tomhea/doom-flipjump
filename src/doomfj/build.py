@@ -55,7 +55,9 @@ _STANDALONE_INCLUDES = ["input.fj"]
 # are the menu's own memory, and a reset that restored them would drop every keypress on them.
 STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
                       "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode", "menu_scr", "menu_sel",
-                      "lvdone", "pusedn")   # M7 P2a.2: the level is done; use held last tic
+                      "lvdone", "pusedn",   # M7 P2a.2: the level is done; use held last tic
+                      # M7 P4.1: the new held flags (strafe, fire, the number keys) -- held keys, like kb_u
+                      "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4")
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it
@@ -85,7 +87,23 @@ MONSTER_PERSIST = ("mon_state", "mon_tics", "mon_facing", "mon_active",
                    # the skill stands (NEW GAME sets them); the movers' last state (P_ChangeSector's trigger)
                    "mon_movecount", "mon_rng", "mon_floorz", "msec", "bar_solid", "mh_prev",
                    # M7 P3.2c (the decide mode): the missile decision's flag
-                   "mon_justattacked")
+                   "mon_justattacked",
+                   # M7 P4.2a (doomfj.damagecode): the damage's cells -- a reset that restored them would undo every hit
+                   "mon_health", "mon_shootable", "mon_solid", "mon_justhit",
+                   # M7 P4.2b (doomfj.noisecode): who heard a shot, and who still waits in ambush
+                   "mon_ambush", "snd_alert")
+
+# M7 P4.0 (docs/gp-combat.md section 2; doomfj.hudcode): the status bar's memory, the game tier's alone -- the values
+# (`hud_v`), what the screen shows (`hud_s`) and the redraw-all flag (`hud_full`). A reset that restored them would
+# redraw the whole bar every frame (the pictures stay right, the ops do not), and P4.1's values would snap back to the
+# level start; the device keeps the bar's rows between frames, so the shadows must too.
+HUD_PERSIST = ("hud_v", "hud_s", "hud_full")
+# M7 P4.1 (doomfj.weaponcode): the weapon's memory -- the psprites, the height, refire, the ammo, the owned weapons and
+# the player's stream; the game tier's alone, like the bar
+from doomfj.weaponcode import PERSIST as WEAPON_PERSIST                         # noqa: E402
+# M7 P4.2a (doomfj.aimcode): the aim window the last picture recorded, for this frame's weapon -- `aim_tz` too, only so
+# the reset leaves it alone (it is read only behind a non-zero `aim_sid` the same walk wrote)
+AIM_PERSIST = ("aim_sid", "aim_tz")
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:
@@ -96,7 +114,28 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
         return ()
     return (STANDALONE_PERSIST + (DOOR_PERSIST + MOVER_PERSIST if doors else ())
             + (THING_PERSIST if moving_things else ())
-            + (MONSTER_PERSIST if (standalone and moving_things) else ()))
+            + (MONSTER_PERSIST if (standalone and moving_things) else ())
+            + HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST)   # M7 P4.0 / P4.1 / P4.2a: the game tier's
+
+
+def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
+    """M7 P4: the declarations of HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST, taken from the emitters' own decl lists
+    (widths matter to a restore set, values do not) -- the ONE list scratchpad/m5_setfile.py adds to the standalone set
+    and test_restore_set_shipped expects there (the hosted set has no game screen). Refuses a persist name no emitter
+    declares."""
+    from doomfj import aimcode, hud, hudcode
+    from doomfj import weaponcode as WC
+    from doomfj.selfreset import decl_words
+    names = HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST
+    cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START)))
+            + WC.weapon_decls(WC.level_start(map_wad, mapname), WC.weapon_states(), WC.overlay_frames())
+            + WC.weapon_const_decls() + aimcode.decls())
+    by = {}
+    for d in cand:
+        by.setdefault(decl_words(d)[0], d)
+    missing = [n for n in names if n not in by]
+    assert not missing, "persist names no game-screen emitter declares: %r" % missing
+    return [by[n] for n in names]
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 
@@ -338,7 +377,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
     not-running feature is exactly the class of bug that cost this repo the most (docs/opt-experiments.md).
     """
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
-    cfg = cfg or Config()
+    from doomfj.wall_renderer import tier_cfg
+    cfg = tier_cfg(cfg, tier)          # M7 P4.0: the game tier's 84-row view, in the constants AND the emission
     wad = WadFile.from_path(wad_path)
     # ONE NAME, and everything that used to be a parameter falls out of it or out of `cfg`.
     _t = tier_flags(tier)

@@ -100,6 +100,8 @@ RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_
 # unswept test -- a long enough step still tunnels -- it stays under it. Sub-stepping the move is
 # the actual fix and is a DUPLICATED change (reference_model.move_with_collision AND
 # collision.move_with_collision_lines AND src/fj/sim.fj).
+# M7 P4.1: the side step a strafe key moves, per tic (the gameplay model's; DOOM's sidemove thrust at steady state)
+STRAFE_MOVE = 13 << 16
 FORWARD_MOVE = 16 << 16           # 16.16 map-units per tic ~= DOOM's steady-state run; S0 magnitude
 ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
 
@@ -993,7 +995,7 @@ class ReferenceModel:
         return x, y
 
     # ── sim ──
-    def step_sim(self, state: SimState, keys: dict, *, scene=None, touch=None) -> SimState:
+    def step_sim(self, state: SimState, keys: dict, *, scene=None, touch=None, strafe: bool = False) -> SimState:
         """One tic: turn, then move -- against the level's lines when `scene` is given (M14-d), and
         freely when it is not (the M9 collision-free sim every earlier gate speaks).
         FixedMul(move, cos/sin) in 16.16 (n=8 nibbles, f=4 fraction nibbles) mirrors the fj path
@@ -1009,12 +1011,26 @@ class ReferenceModel:
             move += FORWARD_MOVE
         if keys.get("back"):
             move -= FORWARD_MOVE
+        # M7 P4.1: STRAFE -- DOOM's P_MovePlayer side thrust along `angle - ANG90`, i.e. (sin a, -cos a), each a
+        # FixedMul like the forward step: the model's `combat._player_move`, and the game tier's fj sim
+        side = 0
+        if strafe:
+            if keys.get("strafe_right"):
+                side += STRAFE_MOVE
+            if keys.get("strafe_left"):
+                side -= STRAFE_MOVE
 
         x, y = state.x, state.y
-        if move:
-            m = move & 0xFFFFFFFF  # two's-complement; fixed_mul interprets the sign (n=8)
-            dx = fixed_mul(m, self.read_cos(angle), 8, 4)
-            dy = fixed_mul(m, self.read_sin(angle), 8, 4)
+        if move or side:
+            dx = dy = 0
+            if move:
+                m = move & 0xFFFFFFFF  # two's-complement; fixed_mul interprets the sign (n=8)
+                dx = fixed_mul(m, self.read_cos(angle), 8, 4)
+                dy = fixed_mul(m, self.read_sin(angle), 8, 4)
+            if side:
+                sd = side & 0xFFFFFFFF
+                dx += fixed_mul(sd, self.read_sin(angle), 8, 4)
+                dy -= fixed_mul(sd, self.read_cos(angle), 8, 4)
             if scene is None:
                 x, y = (x + dx) & 0xFFFFFFFF, (y + dy) & 0xFFFFFFFF
             else:
@@ -1638,18 +1654,12 @@ class ReferenceModel:
         gyt = -_signed(fixed_mul(tr_y & ANGLE_MASK, self.read_sin(viewangle), 8, 4), 32)
         return gxt - gyt
 
-    def project_thing(self, viewx, viewy, viewangle, viewz, tx_map, ty_map, tz_map, art,
-                      min_h: int | None = None):
-        """V4 — R_ProjectSprite in this repo's fixed point: the billboard's screen box.
-
-        Returns `(x1, x2, ytop, h, istep, tz)` — inclusive column range, the screen row of the
-        sprite's top, its exact on-screen pixel height, the DOWNSCALED-texel-per-column DDA step,
-        and the view-space depth (SPR-NEAR keys quality tiers off it) — or
-        None if the thing is behind the eye, too near, or outside the view. Mirrors DOOM: the two
-        rotated coordinates `tz` (depth) and `tx` (lateral) from one cos/sin pair and four
-        FixedMuls, then ONE FixedDiv for the scale."""
-        cfg = self.cfg
-        _cols, dh, _dw, wpx, wph, left, top = art[:7]
+    def project_thing_core(self, viewx, viewy, viewangle, tx_map, ty_map):
+        """R_ProjectSprite's first half, the ONE computation the sprite and (M7 P4.2a) the aim
+        window's box both take (docs/gp-aim-window.md 2.2, so the two cannot drift): the view depth
+        `tz`, the lateral `tx` and the reciprocal `xscale`, all 16.16 -> `(tz, tx, xscale)`, or None
+        when the thing is nearer than MINZ (before the reciprocal) or outside DOOM's 90-degree
+        lateral bound `|tx| > tz << 2`."""
         tr_x = _signed((tx_map << 16) - viewx, 32)
         tr_y = _signed((ty_map << 16) - viewy, 32)
         vcos, vsin = self.read_cos(viewangle), self.read_sin(viewangle)
@@ -1659,12 +1669,46 @@ class ReferenceModel:
         # the shared block-FP reciprocal, NOT a true divide: `hex.fixed_div 8,4` is 38,500 fj ops
         # and this runs for every thing that survives the FOV reject. Same re-bless the wall scale
         # took (M13-scalerecip); `proj.scale_recip_div` mirrors this bit for bit (R6).
-        xscale = self._scale_recip_div(cfg.PROJECTION << 16, tz)
+        xscale = self._scale_recip_div(self.cfg.PROJECTION << 16, tz)
         gxt2 = -_signed(fixed_mul(tr_x & ANGLE_MASK, vsin, 8, 4), 32)
         gyt2 = _signed(fixed_mul(tr_y & ANGLE_MASK, vcos, 8, 4), 32)
         tx = -(gyt2 + gxt2)
         if abs(tx) > (tz << 2):                       # DOOM's off-screen reject
             return None
+        return tz, tx, xscale
+
+    def aim_window_cols(self) -> tuple:
+        """M7 P4.2a: the aim window's first and last screen columns -- `combat.aim_window`, the ONE
+        definition (the pellet spread through the angle-to-column table), cached per model"""
+        if getattr(self, "_aim_window", None) is None:
+            from doomfj.combat import aim_window      # lazy: combat imports this module
+            self._aim_window = tuple(aim_window(self))
+        return self._aim_window
+
+    @staticmethod
+    def sprite_height_px(wph: int, xscale: int) -> int:
+        """a sprite of `wph` world pixels at reciprocal `xscale`: its on-screen height in rows --
+        the base min-height test's left side (project_thing's `h`; the fj rejects the identical set
+        on depth, `sp_tzmax`, through `sprite_tz_min_size`)"""
+        return _signed(fixed_mul((wph << 16) & ANGLE_MASK, xscale, 8, 4), 32) >> 16
+
+    def project_thing(self, viewx, viewy, viewangle, viewz, tx_map, ty_map, tz_map, art,
+                      min_h: int | None = None):
+        """V4 — R_ProjectSprite in this repo's fixed point: the billboard's screen box.
+
+        Returns `(x1, x2, ytop, h, istep, tz)` — inclusive column range, the screen row of the
+        sprite's top, its exact on-screen pixel height, the DOWNSCALED-texel-per-column DDA step,
+        and the view-space depth (SPR-NEAR keys quality tiers off it) — or
+        None if the thing is behind the eye, too near, or outside the view. Mirrors DOOM: the two
+        rotated coordinates `tz` (depth) and `tx` (lateral) from one cos/sin pair and four
+        FixedMuls, then ONE FixedDiv for the scale (`project_thing_core`, shared with the aim
+        window's box)."""
+        cfg = self.cfg
+        _cols, dh, _dw, wpx, wph, left, top = art[:7]
+        core = self.project_thing_core(viewx, viewy, viewangle, tx_map, ty_map)
+        if core is None:
+            return None
+        tz, tx, xscale = core
         cxf = cfg.CENTERX << 16
         txl = tx - (left << 16)
         x1 = (cxf + _signed(fixed_mul(txl & ANGLE_MASK, xscale, 8, 4), 32)) >> 16
@@ -1673,7 +1717,7 @@ class ReferenceModel:
             return None
         gzt = ((tz_map + top) << 16) - viewz
         ytop = (cfg.CENTERY << 16) - _signed(fixed_mul(gzt & ANGLE_MASK, xscale, 8, 4), 32)
-        h = _signed(fixed_mul((wph << 16) & ANGLE_MASK, xscale, 8, 4), 32) >> 16
+        h = self.sprite_height_px(wph, xscale)
         if h < (MIN_SPRITE_H if min_h is None else min_h):
             return None                               # too small to see
             # ⚠ fj does NOT reach this test for the small case: `sp_tzmin` rejects on DEPTH right
@@ -1862,6 +1906,7 @@ class ReferenceModel:
                           deg_lip_scale: int | None = None,
                           thing_positions=None, thing_hidden=None, thing_views=None,
                           seen_out: set | None = None, rt_depth_order=False,
+                          aim_things: dict | None = None, aim_out: list | None = None,
                           degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
@@ -1897,11 +1942,33 @@ class ReferenceModel:
         given, receives the per-column plane records
         (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff) for the gates to inspect.
         Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces this
-        bit-exactly (D12)."""
+        bit-exactly (D12).
+
+        `aim_things` / `aim_out` (M7 P4.2a, docs/gp-aim-window.md 1 and 2.2): THE AIM WINDOW. Give
+        `aim_things` = {drawable index: (sid 1..53, radius class r)} for the shootable living
+        things and `aim_out` = a list of the window's 17 cells (columns `aim_window_cols()`, 72..88
+        at 160 wide); the cells start at 0 (the fj prologue) and each ends holding the sid of the
+        nearest (integer `tz >> 16`, strictly nearer overwrites) listed thing whose +-r_eff box
+        (`combat.CombatMixin.aim_radius`) covers the column while it is still open (`drawn[c] == 0`)
+        when the walk reaches the thing's leaf. Recorded where the seen test is -- after the full
+        stop, before the budgets -- for a thing with `tz >= MINZ`, `|tx| <= tz << 2`, within its
+        BASE size bound (the fj's `sp_tzmax`) and `tz <= MISSILERANGE << 16`. It writes only the
+        window: no pixel changes."""
         # M7 P3.3: a misspelt depth order must fail here, not fall through to the "aprox" key
         assert rt_depth_order in RT_DEPTH_ORDERS, (
             f"rt_depth_order={rt_depth_order!r}: one of {RT_DEPTH_ORDERS}")
         cfg = self.cfg
+        # M7 P4.2a: the aim window's cells (all 0 at the frame start: the fj prologue) and depths
+        if aim_things is not None or aim_out is not None:
+            assert aim_things is not None and aim_out is not None, "aim_things and aim_out go together"
+            assert things, "the aim window is recorded by the thing walk: it needs things=True"
+            aim_lo, aim_hi = self.aim_window_cols()
+            assert len(aim_out) == aim_hi - aim_lo + 1, (len(aim_out), aim_lo, aim_hi)
+            aim_out[:] = [0] * len(aim_out)
+            aim_tz = [0] * len(aim_out)
+            aim_reff: dict = {}                  # radius class -> this frame's r_eff
+            from doomfj.combat import MISSILERANGE_U, CombatMixin as _CM   # lazy: combat imports this
+            aim_tzmax = MISSILERANGE_U << 16
         # 25M-CAP: `degrade=True` turns on the whole certified adaptive-degradation package;
         # the individual deg_* kwargs stay as research overrides (any explicit value wins --
         # CR-2026-08: the sentinel is None, not falsiness, so an explicit 0 = "this lever OFF").
@@ -2128,6 +2195,33 @@ class ReferenceModel:
                             if _spr is not None and any(not drawn[x] for x in
                                                         range(max(0, _spr[0]), min(W, _spr[1] + 1))):
                                 seen_out.add(t_di)
+                    # M7 P4.2a (docs/gp-aim-window.md 1.3-1.6, 2.2): THE AIM WINDOW, at the seen test's point --
+                    # after the full stop, before the budgets, so a degraded-out monster can still be shot.
+                    # The box is +-r_eff around the thing's centre through the sprite's own tz/tx/xscale
+                    # (project_thing_core), the span divide-free: P = tx*xscale, Q = r_eff*xscale (1.4)
+                    if aim_things is not None and t_di in aim_things:
+                        _asid, _ar = aim_things[t_di]
+                        _aart = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None
+                                 else self.art_of_lump(sprite_wad, tview[0], spr_cache))
+                        _acore = (None if _aart is None else
+                                  self.project_thing_core(viewx, viewy, viewangle, t.x, t.y))
+                        if (_acore is not None and _acore[0] <= aim_tzmax
+                                and self.sprite_height_px(_aart[4], _acore[2])
+                                >= (MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H)):   # the BASE bound
+                            _atz, _atx, _axs = _acore
+                            if _ar not in aim_reff:
+                                aim_reff[_ar] = _CM.aim_radius(self, viewangle & ANGLE_MASK, _ar)
+                            _aP = _signed(fixed_mul(_atx & ANGLE_MASK, _axs, 8, 4), 32)
+                            _aQ = aim_reff[_ar] * _axs
+                            _ax1 = ((cfg.CENTERX << 16) + _aP - _aQ) >> 16
+                            _ax2 = (((cfg.CENTERX << 16) + _aP + _aQ) >> 16) - 1
+                            _atzi = _atz >> 16
+                            for _ac in range(max(_ax1, aim_lo), min(_ax2, aim_hi) + 1):
+                                if drawn[_ac]:
+                                    continue                 # a solid wall nearer: the column is closed
+                                _ak = _ac - aim_lo
+                                if aim_out[_ak] == 0 or _atzi < aim_tz[_ak]:   # strictly nearer overwrites
+                                    aim_out[_ak], aim_tz[_ak] = _asid, _atzi
                     if (n_mon >= MONSTER_BUDGET) if mon else (n_thing >= THING_BUDGET):
                         continue                         # ... `continue`, not `break`: a scenery
                     art = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None   # budget must not

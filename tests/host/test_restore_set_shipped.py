@@ -184,11 +184,13 @@ def test_the_standalone_set_drops_only_the_wire_magic():
     _nd = len(door_states(_w.sectors("E1M1"), _w.linedefs("E1M1"), _w.sidedefs("E1M1")))
     from doomfj.movercode import mover_decls
     from doomfj.movers import lift_states
+    from doomfj.build import game_screen_persisted_decls
     _nl = len(lift_states(_w.sectors("E1M1"), _w.linedefs("E1M1"), _w.sidedefs("E1M1")))
     expected = {name for name, _ in
                 (decl_words(d) for d in list(STANDALONE_SCRATCH_DECLS) + door_decls(_nd)
                  + mover_decls(_nl)                 # M7 P2b: the movers' cells
-                 + _monster_decls())}                # M7 P3.1: the monsters' cells
+                 + _monster_decls()                 # M7 P3.1: the monsters' cells
+                 + game_screen_persisted_decls(_w))}   # M7 P4: the bar, the weapon, the aim window
     assert standalone - hosted == expected, (
         "the standalone set adds %s, which is not STANDALONE_SCRATCH_DECLS + the door state"
         % sorted(standalone - hosted))
@@ -201,6 +203,15 @@ def test_the_persist_labels_are_all_in_the_standalone_set():
     standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
     absent = [n for n in STANDALONE_PERSIST if n not in standalone]
     assert not absent, "STANDALONE_PERSIST names %s, absent from the standalone set" % absent
+    # M7 P4: ...and EVERY name the game tier's reset leaves alone (build.persist_labels, the one composition the
+    # reset and m5_setfile ask) -- checking STANDALONE_PERSIST alone let the game screen's cells reach the re-key's
+    # last step before anything refused them
+    from doomfj.build import persist_labels
+    from doomfj.wall_renderer import TIERS
+    every = persist_labels(standalone=True, doors=True, moving_things=TIERS["game"]["moving_things"])
+    assert set(STANDALONE_PERSIST) < set(every)
+    absent = [n for n in every if n not in standalone]
+    assert not absent, "build.persist_labels names %s, absent from the standalone set" % absent
 
 
 def test_the_door_cells_are_in_the_standalone_set_too():

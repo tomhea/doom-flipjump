@@ -283,7 +283,7 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("g_leveldone", 1, group="game", phase="S3b", doc="the exit switch was used: world frozen")
     # -- input and mode (existing standalone persist set) ----------------------------------------
     f("mode", 1, group="input", phase="existing", label="mode", doc="1 = menu frame producer")
-    for k in "fblru":
+    for k in ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4"):   # M7 P4.1: strafe, fire, 1..4
         f("kb_" + k, 1, group="input", phase="existing", label="kb_" + k, doc="held key flag")
     # -- player --------------------------------------------------------------------------------
     f("px", 32, signed=True, group="player", phase="existing", label="viewx", doc="16.16")
@@ -309,6 +309,9 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("p_bonuscount", 8, group="player", phase="S3b", doc="gold palette flash")
     f("p_strength", 16, group="player", phase="S3b", doc="berserk: powers[pw_strength] counter")
     f("p_cards", 1, count=gd.NUMCARDS, group="player", phase="S3b", doc="keys; E1M1: blue card")
+    # M7 P4.2a (docs/gp-aim-window.md): THE AIM WINDOW the last picture recorded -- per screen column of the pellet
+    # spread (combat.aim_window: 72..88 at 160 wide), 0 or 1 + the nearest shootable monster slot whose box covers it
+    f("aim_sid", 7, count=AIM_COLUMNS, group="player", phase="P4.2", doc="the window: 0 or 1 + monster slot")
     f("p_mobj_state", 8, group="player", phase="S3b", doc="the player thing's state")
     f("p_mobj_tics", 4, group="player", phase="S3b", doc="its tics; 15 = forever")
     f("p_dead", 1, group="player", phase="S3b", doc="playerstate == PST_DEAD")
@@ -558,6 +561,13 @@ class TicEvents:
 # actions face and ROLL -- the monster's stream is the full model's -- but apply nothing: damage and the fireball
 # are P5), "full" (everything)
 MONSTER_MODES = ("idle", "wake", "chase", "decide", "full")
+# M7 P4 (docs/gp-combat.md section 1): the PLAYER's model mode a rung's binary is exact against --
+# "walk" (through P4.0): no weapon at all; "fire" (P4.1): the weapon keys, the psprite machine, ammo, refire and
+# every rng_player draw, with nothing applied (no player-thing state, no noise, no target, no effect, no damage);
+# "shoot" (P4.2a): the shot resolves through the aim and hurts monsters -- damage, pain, death -- with no noise, no
+# effect, no barrel, no drop; "hit" (P4.2b): the noise alert too; "full": everything
+PLAYER_MODES = ("walk", "fire", "shoot", "hit", "full")
+AIM_COLUMNS = 17                   # the aim window's columns (combat.aim_window's 72..88; asserted at _combat_init)
 
 
 def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:
@@ -586,7 +596,7 @@ class World(CombatMixin):
                  sight: Optional[Callable[["World", int], bool]] = None,
                  k_heavy: int = K_HEAVY, cursor_policy: Callable = next_cursor,
                  strict: bool = False, aim: Optional[Callable] = None,
-                 player_blocking: bool = True, monsters: str = "full", sight_rule: str = "los",
+                 player_blocking: bool = True, monsters: str = "full", sight_rule: str = "los", player: str = "full",
                  seen_hook: Optional[Callable[["World"], None]] = None):
         if map_wad is None:
             from doomfj.config import DEFAULT_MAP_WAD
@@ -598,6 +608,8 @@ class World(CombatMixin):
         # "idle" (P3.1): the states run, A_Look sees and hears nothing; "full": everything
         assert monsters in MONSTER_MODES, monsters
         self.monsters = monsters
+        assert player in PLAYER_MODES, player
+        self.player = player                        # M7 P4: the player's model mode
         self.sight = sight or World.los_to_player
         # M7 P3.2 (docs/gp-monsters.md 8.2; the owner, 2026-09-30): "seen" -- waking by the picture or
         # REJECT within 128 units, attacking by the picture or the near-trace -- else (the default,

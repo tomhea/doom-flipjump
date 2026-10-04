@@ -75,11 +75,10 @@ from doomfj import rng as R
 from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
 from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
-from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE
+from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE   # STRAFE_MOVE: M7 P4.1, the ONE value
 
 # 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
 # FORWARD_MOVE, rounded (plan section 2, input). world.py re-exports it.
-STRAFE_MOVE = 13 << 16
 
 # the aim box's width is looked up on the view angle's top bits (aim_radius; gp-aim-window 1.7)
 AIM_REFF_BITS = 8
@@ -128,7 +127,8 @@ WEAPON_KEYS = ("w1", "w2", "w3", "w4")      # DOOM's number keys 1..4 -> WP_FIST
 # The restart block (plan 6.7) writes every schema field back to its level-start value EXCEPT
 # these: the skill (the menu's choice, and the block's input -- it picks WHICH level start), the
 # menu mode and the held-key flags are input state, not level state.
-RESTART_KEEP = ("skill", "mode", "kb_f", "kb_b", "kb_l", "kb_r", "kb_u")
+RESTART_KEEP = ("skill", "mode", "kb_f", "kb_b", "kb_l", "kb_r", "kb_u",
+                "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4")      # M7 P4.1
 SUBRANDOM_MAX = 255                         # |P_SubRandom()| <= 255
 DROP_ITEM = {"MT_CLIP": 2007, "MT_SHOTGUN": 2001}   # the dropped thing's editor number
 RUN_STATES = ("S_PLAY_RUN1", "S_PLAY_RUN2", "S_PLAY_RUN3", "S_PLAY_RUN4")
@@ -276,10 +276,17 @@ class CombatMixin:
         rm = self.rm
         self.aim = aim or type(self).aim_geometric
         self.player_blocking = player_blocking
+        # M7 P4 (world.PLAYER_MODES): what the player's mode applies -- a shot that RESOLVES (shoot, hit, full), the
+        # shot's NOISE (hit, full), and everything else -- effects, barrels, drops, the player thing's states (full)
+        self._p_resolve = self.player in ("shoot", "hit", "full")
+        self._p_noise = self.player in ("hit", "full")
+        self._p_full = self.player == "full"
         self.sites = Sites(rm)
         self.aim_centre = rm.angle_to_x(0)
         self.aim_lo, self.aim_hi = aim_window(rm, self.sites)
         assert self.aim_lo < self.aim_centre < self.aim_hi
+        from doomfj.world import AIM_COLUMNS
+        assert self.aim_hi - self.aim_lo + 1 == AIM_COLUMNS, (self.aim_lo, self.aim_hi)
         self.hwt = half_width_table(rm.sine)
         self.fireball_mom = fireball_momentum_table(rm)
         self.restart_fields = tuple(f.name for f in self.schema if f.name not in RESTART_KEEP)
@@ -369,14 +376,16 @@ class CombatMixin:
         moving = keys["forward"] != keys["back"] or keys["strafe_left"] != keys["strafe_right"]
         if moving and ws.p_mobj_state == gd.STATE_INDEX["S_PLAY"]:
             self._set_player_mobj("S_PLAY_RUN1")                      # P_MovePlayer
-        self._weapon_keys(keys)
+        if self.player != "walk":                 # M7 P4: "walk" (through P4.0) has no weapon
+            self._weapon_keys(keys)
         if keys["use"]:
             if not ws.p_usedown:
                 ws.p_usedown = 1
                 self._use_lines(ev)
         else:
             ws.p_usedown = 0
-        self._move_psprites(keys, ev)
+        if self.player != "walk":
+            self._move_psprites(keys, ev)
         if ws.p_strength:
             ws.p_strength = min(ws.p_strength + 1, 0xFFFF)
         if ws.p_damagecount:
@@ -625,17 +634,20 @@ class CombatMixin:
         ws = self.ws
         if not self._check_ammo(keys, ev):
             return
-        self._set_player_mobj("S_PLAY_ATK1")
+        if self._p_full:                          # M7 P4: the player thing's states are the full model's alone ...
+            self._set_player_mobj("S_PLAY_ATK1")
         ev.fired.append(gd.WEAPONINFO[ws.p_ready].name)
         self._set_psprite("wpn", gd.WEAPONINFO[ws.p_ready].atkstate, keys, ev)
-        self.noise_alert(ev)
+        if self._p_noise:                         # ... and the noise is "hit"'s on (P4.2b floods the sound)
+            self.noise_alert(ev)
 
     def _a_fire_bullets(self, weapon: str, pellets: int, keys: dict, ev) -> None:
         """A_FirePistol (the first shot of a trigger pull is accurate) / A_FireShotgun (7 pellets):
         the player's attack state, one round of ammo, the flash, P_BulletSlope (the aim does it),
         then P_GunShot per pellet."""
         ws = self.ws
-        self._set_player_mobj("S_PLAY_ATK2")
+        if self._p_full:
+            self._set_player_mobj("S_PLAY_ATK2")
         ws.p_ammo[gd.WEAPONINFO[ws.p_ready].ammo] -= 1
         self._set_psprite("flash", gd.WEAPONINFO[ws.p_ready].flashstate, keys, ev)
         accurate = pellets == 1 and not ws.p_refire
@@ -666,6 +678,9 @@ class CombatMixin:
         centre must be within `reach`, then the effect (blood, or a puff on a no-blood thing) and
         the damage, in PTR_ShootTraverse's order."""
         ws, W = self.ws, _W()
+        if not self._p_resolve:                   # M7 P4.1 "fire": rolled, recorded, resolved against nothing
+            ev.shots.append((weapon, col, None, dmg))
+            return
         tgt = self.aim(self, col)
         if tgt is not None:
             x, y = self._target_xy(tgt)
@@ -675,8 +690,9 @@ class CombatMixin:
         if tgt is None:
             return
         kind, i = tgt
-        self._spawn_fx_at_target("puff" if kind == "bar" else "blood", x, y, dmg,
-                                 weapon == "fist", ev)
+        if self._p_full:                          # M7 P4.2: the effects are P5's (the effects stream with them)
+            self._spawn_fx_at_target("puff" if kind == "bar" else "blood", x, y, dmg,
+                                     weapon == "fist", ev)
         if kind == "mon":
             self.damage_monster(i, dmg, ("player", -1), ev)
         else:
@@ -699,6 +715,8 @@ class CombatMixin:
             if ws.mon_active[m] and ws.mon_shootable[m] and ws.mon_health[m] > 0:
                 out.append(("mon", m, ws.mon_x[m], ws.mon_y[m], self.mon_radius[m]))
         for b, t in enumerate(self.barrel_things):
+            if not self._p_full:                  # M7 P4.2: the barrels are P6's -- transparent to the aim before it
+                break
             if ws.bar_state[b] and ws.bar_health[b] > 0:
                 out.append(("bar", b, t.x, t.y, BARREL_R))
         return out
@@ -715,6 +733,14 @@ class CombatMixin:
         s = abs(_signed(rm.read_sin(a) & M32, 32))
         c = abs(_signed(rm.read_cos(a) & M32, 32))
         return (r * (s + c) + 32768) >> 16
+
+    @staticmethod
+    def window_aim(world, col: int):
+        """M7 P4.2a: the aim THE PICTURE recorded (`ws.aim_sid`, written from the render's `aim_out` -- the binary's
+        `frame.aim_record`): column `col`'s nearest shootable monster, or None. The gates' worlds aim with this; the
+        model's own runs keep `aim_geometric` (v5's frozen trajectory is the geometric aim's)."""
+        sid = world.ws.aim_sid[col - world.aim_lo]
+        return None if sid == 0 else ("mon", sid - 1)
 
     @staticmethod
     def aim_geometric(world, col: int):
@@ -785,7 +811,7 @@ class CombatMixin:
         self._set_state(m, info.xdeathstate if gib else info.deathstate, True, ev)
         v = self._roll("mon_rng", self.sites.tics_roll, m)
         ws.mon_tics[m] = max(1, ws.mon_tics[m] - v)
-        if self.dropper[m] is not None:
+        if self.dropper[m] is not None and self._p_full:    # M7 P4.2: the drops are P6's
             ws.mon_drop[m] = 1
         ev.kills.append(("mon", m, "gib" if gib else "death"))
 

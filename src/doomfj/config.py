@@ -57,6 +57,9 @@ class Config:
     H: int = 100
     # ── other base constants ──
     BPP: int = 8        # bits/pixel -> 256 colors
+    # M7 P4.0 (D6): the 3D view's rows when a status bar takes the screen's bottom rows; 0 = the whole screen.
+    # The GAME tier's config sets 84 (`GAME_CFG`); every other tier keeps 0.
+    VIEW_ROWS: int = 0
     TRIG_N: int = 4096  # trig LUT entries, 16**3 (§1.2/§2.1)
     NATIVE_W: int = 320  # DOOM's native authoring width (the F8 UI + D5 texture downscale reference)
     # M4 -- HOW WIDE A PLANE-PAIR ID IS, in nibbles. 2 (one byte) is E1M1's shipped width and the
@@ -156,7 +159,9 @@ class Config:
 
     @property
     def VIEW_H(self) -> int:
-        return self.H
+        """3D viewport height: the whole screen, or (M7 P4.0, D6) VIEW_ROWS when a status bar takes the rows below it.
+        A screen drawn over EVERY row (a menu frame) uses H, never this."""
+        return self.VIEW_ROWS or self.H
 
     @property
     def CENTERX(self) -> int:
@@ -240,3 +245,8 @@ class Config:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return out
+
+
+# M7 P4.0 (docs/gp-combat.md section 2, D6): THE GAME TIER'S SCREEN -- 160x100 with a 16-row status bar, so a 160x84
+# view (DOOM's 168-of-200 layout at half resolution). CENTERX and PROJECTION are unchanged: only rows clip.
+GAME_CFG = Config(VIEW_ROWS=84)

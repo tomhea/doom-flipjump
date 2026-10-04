@@ -90,6 +90,10 @@ def standalone_globals(doors_wad=None, mapname="E1M1"):
         from doomfj.wall_renderer import MONSTER_MODE
         from doomfj.world import World
         out += persisted_monster_decls(World(w, mapname), MONSTER_MODE)
+        # M7 P4: ...and the game screen's persisted cells -- the bar, the weapon, the aim window -- which the hosted
+        # set never had (no bar there). The emitter's own decls, filtered to build's persist names, ONE source each
+        from doomfj.build import game_screen_persisted_decls
+        out += game_screen_persisted_decls(w, mapname)
     return out
 
 
@@ -241,24 +245,29 @@ def selftest():
 
     # C5 (M7 P1.3): a THING_PERSIST label missing from the set must refuse under the persist names
     # main() passes -- step 4 used to check STANDALONE_PERSIST only.
-    def without_sshead():
+    def with_persist(drop=()):
+        """the synthetic set carrying every persist name (one word each) except `drop`"""
         d = doc()
-        d["entries"].append(["sshead", 0])
-        a2, n2 = addresses[:-1] + [base, base + 1, base + 2, base + 3],             names[:-1] + ["sshead", "thss_rt", "thpos_rt", "zzz_end"]
+        have = {e[0] for e in d["entries"]}
+        extra = [n for n in persist_names(None) if n not in have]
+        assert {"sshead", "thss_rt", "thpos_rt"} <= set(extra)
+        d["entries"] += [[n, 0] for n in extra if n not in drop]
+        a2 = addresses[:-1] + [base + i for i in range(len(extra) + 1)]
+        n2 = names[:-1] + extra + ["zzz_end"]
         return derive(d, a2, n2, persist=persist_names(None))
+
+    def without_sshead():
+        return with_persist(drop=("thss_rt", "thpos_rt"))
     c5 = refuses(without_sshead)
     print("C5 a THING_PERSIST label not in the set -> %s" % ("refused ok" if c5 else "!! ACCEPTED"))
 
-    # C5's other half: with all three THING_PERSIST labels in the set, the same call is ACCEPTED --
-    # so the refusal above is about the missing two, not about the table this control builds
+    # C5's other half: with every persist label in the set (the three THING_PERSIST ones and every later rung's),
+    # the same call is ACCEPTED -- so the refusal above is about the missing two, not about the table this control
+    # builds. (It once named only the three, and refused as soon as the monsters' and the game screen's cells joined.)
     def with_all_three():
-        d = doc()
-        d["entries"] += [["sshead", 0], ["thss_rt", 0], ["thpos_rt", 0]]
-        a2, n2 = addresses[:-1] + [base, base + 1, base + 2, base + 3], \
-            names[:-1] + ["sshead", "thss_rt", "thpos_rt", "zzz_end"]
-        return derive(d, a2, n2, persist=persist_names(None))
+        return with_persist()
     c5b = not refuses(with_all_three)
-    print("C5b all three THING_PERSIST labels in the set -> %s"
+    print("C5b every persist label in the set -> %s"
           % ("accepted ok" if c5b else "!! REFUSED"))
 
     good = ok and c1 and c2 and c3 and c4 and c5 and c5b

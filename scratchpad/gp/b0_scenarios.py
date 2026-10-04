@@ -87,6 +87,10 @@ def model_frames(run: dict, proxy: bool = False) -> list:
         pre = (ws.px, ws.py, ws.pangle)
         pre_doors = S.door_tuples(w)
         pre_movers = S.mover_state(w)                  # M7 P2b
+        # M7 P5 (F2): the player's health, armor and armor type BEFORE the tic -- injected like the pose, so the
+        # binary's bar and its monsters' damage start each frame from the frozen model's player
+        pre_hurt = (ws.p_health, ws.p_armor, ws.p_armortype)
+        assert ws.p_health > 0 and not ws.p_dead, "%s frame %d: the frozen model's player is dead" % (run["name"], i)
         w.tic(kd)
         post = (ws.px, ws.py, ws.pangle)
         if list(post) != list(run["poses"][i]):
@@ -107,7 +111,7 @@ def model_frames(run: dict, proxy: bool = False) -> list:
                     "strafe_only": S.has_strafe(kd) and not (kd.get("forward") or kd.get("back")),
                     # M7 P3.2b: drive re-steps the mirror with the monsters from the run's setup -- on EVERY
                     # frame, since a caller may hand drive a slice that starts mid-run (the selftest's T5)
-                    "run_setup": run["setup"]})
+                    "run_setup": run["setup"], "hurt": pre_hurt})
     return out
 
 
@@ -171,16 +175,25 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
             vals.update({"lstate": tuple(t[0] for t in lifts), "ldir": tuple(t[1] for t in lifts),
                          "lsub": tuple(t[2] for t in lifts), "lwait": tuple(t[3] for t in lifts),
                          "lreq": tuple(int(si in req) for si in orc.lift_order), "fswitch": sw})
+        if inject_hurt and fr.get("hurt") is not None:   # M7 P5: the frozen model's pre-tic health / armor
+            hp, ar, at = fr["hurt"]
+            vals.update({"p_hp": hp & 0xFFF, "p_ar": ar, "p_at": at})
         pr.write_cells(vals)
 
     def present(pr, f):
         if f >= mf:
             readback[f - mf] = pr.read_cells(["viewx", "viewy", "viewangle", "dstate", "mode"])
+    # M7 P5: a binary with hurtcode's cells takes the frozen model's player each frame (`hurt`); one without them
+    # (a binary before P5: the probe dropped the optional group) is not injected, and neither is its mirror
+    inject_hurt = "p_hp" in p.cells
     p.on_frame_start(start)
     p.on_present(present)
     r = gb.run(len(per_frame), events, p, pre_run=lambda pr: pr.verify_known(orc.known_pristine()))
     ops_f = p.frame_ops()[mf:mf + len(frames)]
     state_ok, pix_ok, pix_frames = [], [], []
+    # M7 P5: the menu frames' palettes (PLAYPAL 0), then one per game frame (below); the frames whose mirror died
+    pal_ok = [i < len(r.palettes) and r.palettes[i] == orc.palette_sha(0) for i in range(mf)]
+    dead = []
     cam = door = 0
     # M7 P3.1: the binary's monsters live IDLE from its boot image (the model's own phase, a tic per
     # world frame after the player); B0 injects the player, doors and movers, not them, so the
@@ -208,6 +221,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         # M7 P4.1 / P4.2a: the weapon tics FIRST, as the binary's does -- after the doors, before the player's move and
         # the monsters' tic -- at the frame's injected (pre-move) pose: a shot that hits lands before the monster acts
         _boxes = mph.boxes() if mph is not None else ()   # the door tic precedes the weapon (and its kills)
+        if mph is not None and inject_hurt and fr.get("hurt") is not None:   # M7 P5: as `start` writes them
+            mph.world.ws.p_health, mph.world.ws.p_armor, mph.world.ws.p_armortype = fr["hurt"]
         if mph is not None:
             mph.weapon(fr["keys"], fr["inj"][0] & M32, fr["inj"][1] & M32, fr["inj"][2])
         if chase:
@@ -220,6 +235,13 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                 _ep = override[f][0] if override is not None else fr["exp"][0]
                 mph.tic(_ep[0] & 0xFFFFFFFF, _ep[1] & 0xFFFFFFFF, _ep[2])
             epose, edoors = override[f] if override is not None else fr["exp"]
+        # M7 P5: no B0 frame may reach a death -- the injected health is the frozen model's, so a mirror whose
+        # monsters killed the player inside one frame describes a run the set never made
+        if mph is not None and mph.world.ws.p_dead:
+            dead.append(f)
+        # M7 P5: the palette this present showed: the mirror's damage flash (combat.palette_index)
+        pal_ok.append(mf + f < len(r.palettes)
+                      and r.palettes[mf + f] == orc.palette_sha(mph.palette() if mph is not None else 0))
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
             got["viewx"], got["viewy"], got["viewangle"], got["dstate"]) == (
@@ -241,7 +263,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                               positions=orc.monster_positions(mph) if mph is not None else None,
                               screen_kw=mph.screen_kw() if mph is not None else None,
                               aim_things=orc._mv(mph.world).aim_things(mph) if mph is not None else None,
-                              aim_out=(_aim := [0] * 17))
+                              aim_out=(_aim := [0] * 17),
+                              mobiles=mph.mobiles() if mph is not None else None)     # M7 P5
             if mph is not None:
                 mph.set_aim(_aim)                        # M7 P4.2a: the window, for the next frame's weapon
             if mph is not None:
@@ -250,7 +273,7 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                 pix_ok.append(r.frames[mf + f] == want)
                 pix_frames.append(f)
     return {"ops_total": r.ops, "frame_ops": ops_f, "state_ok": state_ok, "pix_ok": pix_ok,
-            "pix_frames": pix_frames, "cam_parts": cam, "door_parts": door,
+            "pix_frames": pix_frames, "cam_parts": cam, "door_parts": door, "pal_ok": pal_ok, "dead": dead,
             "presented": len(r.frames), "seconds": r.seconds, "frames": r.frames[mf:]}
 
 
@@ -352,6 +375,9 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
                            "the same pose (same picture); the difference is exact"}
     bad = [r["name"] for r in results
            if not (all(r["state_ok"]) and all(r["pix_ok"]) and r["presented"] == len(r["state_ok"]) + 2)]
+    # M7 P5: every present's palette, and no frame whose mirror died
+    bad += [r["name"] + "(palette)" for r in results if not all(r["pal_ok"])]
+    bad += [r["name"] + "(dead at %s)" % r["dead"][:3] for r in results if r["dead"]]
     if proxy:
         bad += [r["name"] + "(proxy)" for r in results
                 if not (all(r["proxy"]["state_ok"]) and r["proxy_same_picture"])]

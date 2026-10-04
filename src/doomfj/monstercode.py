@@ -334,7 +334,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             "thsel_s%d" % (16 * h + l) if 16 * h + l < nt else "thsel_none" for l in range(16))]
     # M7 P4.2a (doomfj.aimcode): a tier whose player SHOOTS gives every runtime thing its aim id -- 1 + slot while
     # the monster is shootable (a corpse is not: damage clears it), 0 for any other thing -- and its radius class
-    shoot = player in ("shoot", "hit", "full")
+    from doomfj.world import player_resolves
+    shoot = player_resolves(player)
     for t, m in enumerate(rt_slot):
         sel.append("  thsel_s%d:" % t)
         if wake:

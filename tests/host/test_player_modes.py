@@ -236,3 +236,103 @@ def test_the_control_shoot_without_the_noise_parts():
     test above pins, not only the alerts it writes"""
     parted, _upto, _w, _n = _hit_run("shoot", _noisy())
     assert parted is not None, "a mode without the noise went unnoticed on the monster cells"
+
+
+# ---- M7 P5: "fx" -- "hit" plus the BLOOD of the monster a shot hits (`_spawn_fx_at_target`: the fx pool, rng_fx). What
+# "full" adds over "fx" is exactly: barrels (in the aim, their damage, their blasts), puffs (only a barrel takes one),
+# drops, nukage (`_special_sector`) and the player thing's states. So with monsters that ATTACK (the full monster mode:
+# hitscans, claws, bites and fireballs land on the player) and a player who shoots back, "fx" equals "full" on every
+# monster cell, every stream (rng_player, rng_fx, each monster's), both pools and every player cell at EVERY tic until
+# the first tic the full model shoots or blasts a barrel, drops an item, picks one up or hurts on nukage -- that tic
+# itself not compared. Each setup must compare 100 tics at least, make blood, hurt the player and (the imp) fly
+# fireballs, so the comparison is not vacuous.
+FX_FIELDS = HIT_FIELDS + ("mon_rng", "proj_active", "proj_state", "proj_tics", "proj_x", "proj_y", "proj_momx",
+                          "proj_momy", "proj_leaf", "fx_active", "fx_state", "fx_tics", "fx_x", "fx_y", "fx_leaf",
+                          "p_ammo")
+FX_SCALARS = ("rng_player", "rng_fx", "p_health", "p_armor", "p_armortype", "p_damagecount", "p_bonuscount", "p_dead",
+              "px", "py", "pangle", "p_ready", "p_wpn_state", "p_wpn_tics", "p_flash_state", "p_refire")
+# (slot, the player's pose facing it) -- an imp (fireballs, the claw) and a demon (the bite): neither drops anything
+FX_SETUPS = {"imp": (3, (848, 864, 0x40000000)), "demon": (28, (1608, -248, 0x00000000))}
+
+
+def _fx_snap(w):
+    ws = w.ws
+    return {f: tuple(getattr(ws, f)) for f in FX_FIELDS} | {f: getattr(ws, f) for f in FX_SCALARS}
+
+
+def _fx_world(mode, kind, bleed=True):
+    w = World(skill=gd.SK_HARD, monsters="full", player=mode)
+    if not bleed:
+        w._p_fx = False                                       # the control: "fx" without the blood
+    m, (x, y, ang) = FX_SETUPS[kind]
+    ws = w.ws
+    w.teleport_player(x << 16, y << 16, ang)
+    ws.mon_target[m], ws.mon_reaction[m] = 1, 0               # awake, its target the player
+    ws.mon_state[m] = gd.STATE_INDEX[w.mon_info[m].seestate]
+    ws.mon_tics[m] = 1
+    ws.p_health, ws.p_armor, ws.p_armortype = 200, 200, 2     # a soulsphere and blue armor: he outlives the run
+    return w, m
+
+
+def _fx_keys(n=240):
+    out = []
+    for t in range(n):
+        k = {name: False for name in KEYS}
+        k["fire"] = (t % 40) < 24
+        out.append(k)
+    return out
+
+
+def _full_left_fx(ev, w) -> bool:
+    """the full model did something this tic that "fx" leaves out: a barrel shot or blasted, a drop, a pickup, nukage"""
+    return (any(h[1] == "bar" for h in ev.hits) or bool(ev.barrel_blasts) or any(w.ws.mon_drop) or bool(ev.pickups)
+            or bool(ev.nukage))
+
+
+def _fx_run(kind, bleed=True):
+    a, _m = _fx_world("fx", kind, bleed)
+    b, _ = _fx_world("full", kind)
+    seen = {"fx_spawns": 0, "player_hurt": 0, "proj_spawns": 0, "hits": 0}
+    keys = _fx_keys()
+    for t, k in enumerate(keys):
+        ea, eb = a.tic(k), b.tic(k)
+        if _full_left_fx(eb, b):
+            return None, [], seen, t
+        for f in seen:
+            seen[f] += len(getattr(ea, f))
+        assert not a.ws.p_dead, "tic %d: the player died -- the setup must keep him alive" % t
+        sa, sb = _fx_snap(a), _fx_snap(b)
+        if sa != sb:
+            return t, sorted(f for f in sa if sa[f] != sb[f]), seen, t
+    return None, [], seen, len(keys)
+
+
+@pytest.mark.parametrize("kind", sorted(FX_SETUPS))
+def test_fx_mode_is_the_full_model(kind):
+    parted, fields, seen, upto = _fx_run(kind)
+    assert parted is None, "tic %s: fx parted from full on %s" % (parted, fields)
+    assert upto >= 100, "compared only %d tics" % upto
+    assert seen["fx_spawns"] >= 1 and seen["player_hurt"] >= 1 and seen["hits"] >= 1, seen
+    if kind == "imp":
+        assert seen["proj_spawns"] >= 1, seen
+
+
+def test_the_control_fx_without_blood_parts_on_rng_fx():
+    """R9: the same run with "fx"'s blood switched off parts from the full model -- on rng_fx (and the fx pool)"""
+    parted, fields, _seen, _upto = _fx_run("imp", bleed=False)
+    assert parted is not None and "rng_fx" in fields, (parted, fields)
+
+
+def test_mode_helpers_are_one_rule():
+    """world.player_resolves / player_hears / player_bleeds name the modes; the emitters' tuples derive from them"""
+    from doomfj.damagecode import DAMAGE_PLAYER_MODES
+    from doomfj.noisecode import NOISE_PLAYER_MODES
+    from doomfj.world import PLAYER_MODES, player_bleeds, player_hears, player_resolves
+    assert PLAYER_MODES == ("walk", "fire", "shoot", "hit", "fx", "full")
+    assert DAMAGE_PLAYER_MODES == tuple(m for m in PLAYER_MODES if player_resolves(m)) == ("shoot", "hit", "fx", "full")
+    assert NOISE_PLAYER_MODES == tuple(m for m in PLAYER_MODES if player_hears(m)) == ("hit", "fx", "full")
+    assert tuple(m for m in PLAYER_MODES if player_bleeds(m)) == ("fx", "full")
+    for m in PLAYER_MODES:
+        w = World(skill=gd.SK_HARD, monsters="idle", player=m)
+        assert (w._p_resolve, w._p_noise, w._p_fx, w._p_full) == (
+            player_resolves(m), player_hears(m), player_bleeds(m), m == "full"), m

@@ -97,6 +97,11 @@ class Mirror:
         self.seenfn = None            # M7 P3.2a: (MonsterPhase, pose, door phase, movers, taken) -> seen slots
         self.posfn = None             # M7 P3.2b: MonsterPhase -> the render's thing_positions
         self.rtfn = None              # M7 P3.2b: MonsterPhase -> the runtime things' thpos_rt / thss_rt
+        # M7 P5 (hurt_gate.py drives this Mirror): the model modes (None: wall_renderer's), a setup applied to the
+        # boot level start's monster phase before frame 0 (what the gate pokes into the binary), and the phase
+        self.mmode = self.pmode = None
+        self.setup = None
+        self.mph = None
 
     @contextlib.contextmanager
     def _rules(self):
@@ -126,9 +131,14 @@ class Mirror:
         # M7 P3.1: the idle monsters from the boot image's level start (doomfj.monsters)
         from doomfj.monsters import MonsterPhase
         from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
-        mph = MonsterPhase(sim.mw, sim.mapname, BOOT_SKILL, rm=sim.rm, mode=MONSTER_MODE, player=PLAYER_MODE)
+        mph = MonsterPhase(sim.mw, sim.mapname, BOOT_SKILL, rm=sim.rm, mode=self.mmode or MONSTER_MODE,
+                           player=self.pmode or PLAYER_MODE)
+        if self.setup is not None:                            # M7 P5: the scenario's poked start
+            self.setup(mph)
+        self.mph = mph
         with self._rules():
             for kd in keys:
+                wev, mph.last_tic = None, None                # M7 P5: this frame's weapon and tic events
                 mode, scr, sel, ng = menu_step(mode, scr, sel, set(kd.get("menu", ())))
                 if ng is not None:                            # NEW GAME: the level start
                     st = SimState(sim.spawn.x, sim.spawn.y, sim.spawn.angle, sim.mapname)
@@ -163,7 +173,7 @@ class Mirror:
                         if self.ctl == "reach" and dp.card_at is not None:
                             z = dp.card_at[2]
                         cur[0] = dp.touch(cur[0], cx, cy, z)
-                    mph.weapon(kd, st.x, st.y, st.angle)      # M7 P4.1: the weapon, after the use press (pre-move)
+                    wev = mph.weapon(kd, st.x, st.y, st.angle)   # M7 P4.1: the weapon, after the use press (pre-move)
                     new = sim.rm.step_sim(st, kd, scene=sim._scene(blocked, mp.heights(ms)),
                                           touch=touch, strafe=True)
                     ph = cur[0]
@@ -194,6 +204,9 @@ class Mirror:
                             "mstate": {**mph.state(), **(self.rtfn(mph) if self.rtfn else {}),
                                        **mph.weapon_state()},
                             "skw": mph.screen_kw(),                                   # M7 P4.1
+                            # M7 P5: the fireballs and the blood, and the palette the present shows (a menu: 0)
+                            "mobiles": mph.mobiles(), "pal": mph.palette() if drawn == "world" else 0,
+                            "ev": (wev, mph.last_tic),
                             "views": self.viewfn(mph, st.x, st.y) if self.viewfn else None,
                             "positions": self.posfn(mph) if self.posfn else None})
         return out
@@ -207,10 +220,21 @@ def seen_of(orc, dsim, card_di):
         orc.render(st.x, st.y, st.angle, tuple(ph[0][si][0] for si in dsim.order),
                    hidden_extra=(card_di,) if taken else (), movers=dsim.mp.heights(ms),
                    views=orc.monster_views(mph, st.x, st.y), seen_out=seen,
-                   positions=orc.monster_positions(mph), aim_things=orc._mviews.aim_things(mph), aim_out=aim)
+                   positions=orc.monster_positions(mph), aim_things=orc._mviews.aim_things(mph), aim_out=aim,
+                   mobiles=mph.mobiles())                                     # M7 P5
         mph.set_aim(aim)                    # M7 P4.2a: this picture's window -> the next frame's shots
         return orc._mviews.slots_of(seen)
     return fn
+
+
+def hooked(mirror: "Mirror", orc, dsim, card_di) -> "Mirror":
+    """the oracle's hooks on a Mirror -- the monsters' views (P3.1), the picture's seen (P3.2a), positions and the
+    runtime rows (P3.2b). A CONTROL's Mirror takes them too (M7 P5 found it did not: from P3.2b on its cells lacked
+    thpos_rt / thss_rt, so EVERY control parted at frame 0 on the missing keys alone and none was tested)"""
+    mirror.viewfn = orc.monster_views
+    mirror.seenfn = seen_of(orc, dsim, card_di)
+    mirror.posfn, mirror.rtfn = orc.monster_positions, orc.monster_rt
+    return mirror
 
 
 def expected_cells(fr: dict, order: list, mover_order=()) -> dict:
@@ -489,10 +513,7 @@ def main(argv=None) -> int:
         assert not table.absent & {"dreq", "pcard", "wfired"}, (
             "the label table has no %s: a binary before P2a.1" % sorted(table.absent))
     for sc in scen:
-        mirror = Mirror(dsim, card_di[0])
-        mirror.viewfn = orc.monster_views                     # M7 P3.1: the monsters' views
-        mirror.seenfn = seen_of(orc, dsim, card_di[0])        # M7 P3.2a: the picture's seen
-        mirror.posfn, mirror.rtfn = orc.monster_positions, orc.monster_rt   # M7 P3.2b
+        mirror = hooked(Mirror(dsim, card_di[0]), orc, dsim, card_di[0])
         want = mirror.run(sc["pose"], sc["keys"], sc["pcard"])
         claim = bool(sc["claim"](want))
         ok &= claim
@@ -501,7 +522,8 @@ def main(argv=None) -> int:
             ", pcard poked 1" if sc["pcard"] else ""))
         print("  the oracle does what the scenario claims: %s" % ("yes" if claim else "NO -- FAIL"))
         for ctl in sc["controls"]:
-            alt = Mirror(dsim, card_di[0], ctl).run(sc["pose"], sc["keys"], sc["pcard"])
+            alt = hooked(Mirror(dsim, card_di[0], ctl), orc, dsim, card_di[0]).run(sc["pose"], sc["keys"],
+                                                                               sc["pcard"])
             part = next((f for f, (x, y) in enumerate(zip(want, alt))
                          if expected_cells(x, dsim.order, dsim.mp.order)
                          != expected_cells(y, dsim.order, dsim.mp.order)), None)
@@ -521,9 +543,13 @@ def main(argv=None) -> int:
                              "pcard": sc["pcard"]})
             pr.write_cells(vals)
         p.on_frame_start(start)
-        p.on_present(lambda pr, f: reads.append(pr.read_cells(list(READ))))
+        # every cell the expectation names (READ, and M7 P4/P5's weapon, damage and attack cells the monster phase
+        # adds): a name the probe dropped (an optional group this binary lacks) reads as missing and parts
+        names = sorted({k for fr in want for k in expected_cells(fr, dsim.order, dsim.mp.order)} | set(READ))
+        names = [k for k in names if k in p.cells]
+        p.on_present(lambda pr, f, names=names: reads.append(pr.read_cells(names)))
         r = gb.run(len(sc["keys"]), menu_events(sc["keys"]), p)
-        s_bad = x_bad = None
+        s_bad = x_bad = p_bad = None
         for f, fr in enumerate(want):
             exp = expected_cells(fr, dsim.order, dsim.mp.order)
             got = reads[f] if f < len(reads) else {}
@@ -533,16 +559,21 @@ def main(argv=None) -> int:
                 pic = orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
                                  tuple(fr["phase"][0][si][0] for si in dsim.order),
                                  hidden_extra=card_di if fr["taken"] else (), movers=fr["mheights"],
-                                 views=fr["views"], positions=fr["positions"], screen_kw=fr.get("skw"))
+                                 views=fr["views"], positions=fr["positions"], screen_kw=fr.get("skw"),
+                                 mobiles=fr["mobiles"])                       # M7 P5
             else:
                 pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):
                 x_bad = (f, P.px_diff(r.frames[f], pic) if f < len(r.frames) else -1)
-        ok &= s_bad is None and x_bad is None
-        print("  binary: %d frames, %s ops -- STATE %s, PIXELS %s" % (
+            # M7 P5: the palette the present showed -- combat.palette_index on a world frame, 0 on a menu frame
+            if p_bad is None and (f >= len(r.palettes) or r.palettes[f] != orc.palette_sha(fr["pal"])):
+                p_bad = (f, fr["pal"])
+        ok &= s_bad is None and x_bad is None and p_bad is None
+        print("  binary: %d frames, %s ops -- STATE %s, PIXELS %s, PALETTE %s" % (
             len(r.frames), format(r.ops, ","),
             "exact on every frame" if s_bad is None else "PART at frame %d: %s" % s_bad,
-            "byte-exact on every frame" if x_bad is None else "PART at frame %d (%d px)" % x_bad))
+            "byte-exact on every frame" if x_bad is None else "PART at frame %d (%d px)" % x_bad,
+            "exact on every frame" if p_bad is None else "PART at frame %d (the oracle's PLAYPAL %d)" % p_bad))
     print("\nP2A GATE %s (%.0f s)" % ("PASS" if ok else "FAIL", time.time() - t0))
     return 0 if ok else 1
 

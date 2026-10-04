@@ -283,7 +283,7 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("g_leveldone", 1, group="game", phase="S3b", doc="the exit switch was used: world frozen")
     # -- input and mode (existing standalone persist set) ----------------------------------------
     f("mode", 1, group="input", phase="existing", label="mode", doc="1 = menu frame producer")
-    for k in "fblru":
+    for k in ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4"):   # M7 P4.1: strafe, fire, 1..4
         f("kb_" + k, 1, group="input", phase="existing", label="kb_" + k, doc="held key flag")
     # -- player --------------------------------------------------------------------------------
     f("px", 32, signed=True, group="player", phase="existing", label="viewx", doc="16.16")

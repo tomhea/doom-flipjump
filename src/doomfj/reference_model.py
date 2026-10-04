@@ -100,6 +100,8 @@ RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_
 # unswept test -- a long enough step still tunnels -- it stays under it. Sub-stepping the move is
 # the actual fix and is a DUPLICATED change (reference_model.move_with_collision AND
 # collision.move_with_collision_lines AND src/fj/sim.fj).
+# M7 P4.1: the side step a strafe key moves, per tic (the gameplay model's; DOOM's sidemove thrust at steady state)
+STRAFE_MOVE = 13 << 16
 FORWARD_MOVE = 16 << 16           # 16.16 map-units per tic ~= DOOM's steady-state run; S0 magnitude
 ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
 
@@ -993,7 +995,7 @@ class ReferenceModel:
         return x, y
 
     # ── sim ──
-    def step_sim(self, state: SimState, keys: dict, *, scene=None, touch=None) -> SimState:
+    def step_sim(self, state: SimState, keys: dict, *, scene=None, touch=None, strafe: bool = False) -> SimState:
         """One tic: turn, then move -- against the level's lines when `scene` is given (M14-d), and
         freely when it is not (the M9 collision-free sim every earlier gate speaks).
         FixedMul(move, cos/sin) in 16.16 (n=8 nibbles, f=4 fraction nibbles) mirrors the fj path
@@ -1009,12 +1011,26 @@ class ReferenceModel:
             move += FORWARD_MOVE
         if keys.get("back"):
             move -= FORWARD_MOVE
+        # M7 P4.1: STRAFE -- DOOM's P_MovePlayer side thrust along `angle - ANG90`, i.e. (sin a, -cos a), each a
+        # FixedMul like the forward step: the model's `combat._player_move`, and the game tier's fj sim
+        side = 0
+        if strafe:
+            if keys.get("strafe_right"):
+                side += STRAFE_MOVE
+            if keys.get("strafe_left"):
+                side -= STRAFE_MOVE
 
         x, y = state.x, state.y
-        if move:
-            m = move & 0xFFFFFFFF  # two's-complement; fixed_mul interprets the sign (n=8)
-            dx = fixed_mul(m, self.read_cos(angle), 8, 4)
-            dy = fixed_mul(m, self.read_sin(angle), 8, 4)
+        if move or side:
+            dx = dy = 0
+            if move:
+                m = move & 0xFFFFFFFF  # two's-complement; fixed_mul interprets the sign (n=8)
+                dx = fixed_mul(m, self.read_cos(angle), 8, 4)
+                dy = fixed_mul(m, self.read_sin(angle), 8, 4)
+            if side:
+                sd = side & 0xFFFFFFFF
+                dx += fixed_mul(sd, self.read_sin(angle), 8, 4)
+                dy -= fixed_mul(sd, self.read_cos(angle), 8, 4)
             if scene is None:
                 x, y = (x + dx) & 0xFFFFFFFF, (y + dy) & 0xFFFFFFFF
             else:

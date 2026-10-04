@@ -1082,3 +1082,48 @@ frames, `scratchpad/plan/p4/view84` in the session, recorded in gp-combat C5).
 5. pinreport 20 of 20, and the restore sets re-keyed (`hud_v`, `hud_s`, `hud_full` are new state).
 
 **Row**: (filled after the build)
+
+
+## P4.1 the trigger (class F) -- declared 2026-10-04, before the build
+
+**What**: `docs/gp-combat.md` section 1. The model's "fire" mode (`World(player="fire")`, `wall_renderer.PLAYER_MODE`):
+- **The owner's key map** (approved 2026-10-02): A / D and ',' / '.' strafe, only the arrows turn, ctrl fires,
+  1..4 are held weapon keys. Seven new persisted held flags.
+- **The help screen** updated to that map: three legend lines beside the clusters, and two-item key rows.
+- **Strafe** in the game tier's sim, and `step_sim(strafe=True)` in the oracle. The side step is the model's
+  `combat._player_move`.
+- **The weapon** (`doomfj.weaponcode`): DOOM's psprite machine for the fist, pistol, shotgun and chainsaw. Each state
+  is a baked block, and a nested P_SetPsprite is a tail jump. The flash is an fcall'd chain. The ammo checks and
+  DOOM's out-of-ammo preference are included, and each shot advances the player's stream by its draws (1 for the
+  accurate pistol shot, 3 for every other shot).
+- **The screen**: the overlay drawn per weapon frame (`wp_frm`) with the flash over it (`fl_frm`), and the bar's
+  ammo and arms written by the weapon tic.
+
+Nothing is applied: no target, no damage, no noise (P4.2). The aim window moved to P4.2 with the hit (gp-combat C1):
+"fire" never reads a shot's outcome.
+
+**Budget** (ESTIMATES; their basis):
+- v5 binding: **+0.02 .. +0.08M**.
+  - The weapon's tic is a few hundred ops a frame plus a state block on transitions.
+  - The overlay costs what P4.0's did: one constant frame of ~5-7K ops, plus the dispatch.
+  - Strafe costs two `fixed_mul_lo` on the frames that strafe.
+  - B0 delivers no fire and no strafe, so the binary's weapon only idles there.
+- gamespeed: the same, plus the arrows now turning: gamespeed's scripts turn, and the turn is the same tic.
+- size: **<= +0.6M words**. 14 more weapon frames and 3 flash frames of constant records, at ~5K words each before
+  the pool factor, plus the state blocks.
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. Host: `tests/host/test_player_modes.py` ("fire" equals "full" on every weapon field and the player's stream for
+   400 tics, a gun that draws nothing parts); `tests/host/test_menu.py` (the re-pinned help screen and its controls);
+   `tests/host/test_hud.py`.
+2. fj: `tests/fj/test_weapon_fj.py` (the real weapon text equals the fire mode on every tic of two 600-tic runs,
+   with four mutants caught); `tests/fj/test_player_strafe_fj.py` (every key combination at five poses and a
+   300-tic trajectory, two mutants caught); `tests/fj/test_keyboard_input.py` (the new map; the help lists exactly
+   the keys the poll binds); `test_hud_fj.py`; the menu fj tests.
+3. Gates: m2_std_gate, m3_gate, p2a_gate and B0 v5, byte- and state-exact, with the weapon cells in the state check
+   and the psprite frames in the picture; their selftests rejected where they must; deg_gate unchanged.
+4. v5 binding within +0.1M of P4.0's; size <= +0.6M words and <= 40%; msframe recorded (D8).
+5. pinreport 20 of 20, and the restore sets re-keyed (the weapon cells persist; `psid`/`psdx`/`psdy`, `wp_bcd` and
+   `fl_ret` are scratch).
+
+**Row**: (filled after the build)

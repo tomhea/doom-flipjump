@@ -11,7 +11,7 @@ phases, dont stop until 5 is merged". Kill criteria and budgets are declared per
 
 | id | decision | why |
 |---|---|---|
-| C1 | P4 ships in THREE rungs. **P4.0** is the screen: the 160x84 view, the status bar, and the ready weapon drawn. **P4.1** is the trigger, plus the aim window it reads: the key map, strafe, the weapon state machine, ammo, and shots resolved and rolled but applying nothing (`player="fire"`). **P4.2** is the hit: damage, pain, death, corpses, drops and the noise alert (`player="hit"`). | A build is ~2.5 h plus ~1.5 h of evidence, so fewer rungs. Each rung has one model mode it is exact against, as P3's did. |
+| C1 | P4 ships in THREE rungs. **P4.0** is the screen: the 160x84 view, the status bar, and the ready weapon drawn. **P4.1** is the trigger (the aim window moved to P4.2: "fire" never reads a shot's outcome, so its rolls need no target): the key map, strafe, the weapon state machine, ammo, and shots resolved and rolled but applying nothing (`player="fire"`). **P4.2** is the hit: damage, pain, death, corpses, drops and the noise alert (`player="hit"`). | A build is ~2.5 h plus ~1.5 h of evidence, so fewer rungs. Each rung has one model mode it is exact against, as P3's did. |
 | C2 | **The size target rises to 40% of 2^27.** P4 is estimated to land at 35.2-36.7%, and P5 adds the fight sprites. | The owner's 2026-09-25 note: "35% conflicts with even 2 levels -- raise it". On 2026-10-03 the owner was asked "raise the target, or buy space back?" and answered "continue". The 22M ops cap is unchanged and still binding. |
 | C3 | **The status bar is option C** (section 2): a flat dark bar in the MENU's fonts. Numbers are red in the 5x7 font, labels gray in the 3x5 font, owned weapons yellow, and the blue key a card. It is not DOOM's STBAR downscaled. | The prototypes were rendered: `scratchpad/plan/p4/hud` in the session, copied to `docs/gp-combat/`. STBAR at half resolution makes its labels illegible ("AMMO" and "HEALTH" are mush). Option C reads cleanly and matches the menu the owner chose. |
 | C4 | **The weapon is a KEEP overlay** (`docs/gp-partial-ditto.md` 5(b)): records after the view, `[x][0xFC][wtop][pairs/keeps][0xFF]`. The view's dittos become partial dittos, `[x][0xFD][84][0xFF]`. | The world emitter is unchanged and every ditto survives. |
@@ -53,3 +53,22 @@ B0 v5. Their selftests must be rejected where they should be. deg_gate must be u
 the visual tier). The restore sets are re-keyed. Every new fj leaf gets a tests/fj harness with
 strict mutant controls (R9), and the device tokens get flipjump unit tests plus a cross-decoder
 fuzz in doom.
+
+## 4. P4.1, the trigger (as designed; the ledger declares it)
+
+- **Keys**: the owner's map. A / D and ',' / '.' strafe, only the arrows turn, ctrl fires, and 1..4 are held flags.
+  `input.fj` binds them; `menu.HELP_ROWS` lists them and nothing else (`test_keyboard_input` runs the poll on every
+  key the screen names).
+- **Strafe**: `step_sim(strafe=True)` is the model's side step, and so is the game tier's `_player_sim_lines`.
+- **The weapon** (`doomfj.weaponcode`):
+  - one baked block per psprite state, with a nested P_SetPsprite as a tail jump;
+  - targets that depend on the ready weapon dispatch on `wp_rdy`;
+  - the flash is an fcall'd chain;
+  - each shot advances the player's stream by its draws.
+- **The overlay**: the weapon frame `wp_frm`, then the flash frame `fl_frm` over it. The bar's ammo comes from
+  `ammobcd` and its arms from `wp_own`, both written each tic.
+- **The gates**: `MonsterPhase` grows a weapon half (`weapon`, `weapon_state`, `screen_kw`) in the world's player
+  mode.
+  - m2_std_gate's first walk holds and taps fire and switches to the fist and back.
+  - B0 delivers only its five keys, as before. The model's strafe reaches the binary through the injected pose, and
+    the binary's weapon only rises and idles there.

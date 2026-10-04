@@ -202,8 +202,8 @@ def main():
     # M7 P3.1: the idle monsters -- the model's own phase (doomfj.monsters), from the boot skill's
     # level start, a tic per world frame, reset by NEW GAME; drawn with their views, cells read
     from doomfj.monsters import MonsterPhase, MonsterViews
-    from doomfj.wall_renderer import MONSTER_MODE
-    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE)
+    from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
                                             len(order), nwalk, nmon=mph.world.layout.nmon, nrt=mviews.nrt)
@@ -248,8 +248,9 @@ def main():
         if ng is not None:
             pusedn = 1                              # the restart block
         if mode == 0:
-            state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene)
+            state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene, strafe=True)
             pusedn = 0                              # this script never holds use
+            mph.weapon(held)                        # M7 P4.1: the weapon tics with the world (no fire held here)
             _dps, _mps = mph.frame(phase0, mps0, state.x, state.y, state.angle)   # M7 P3.1 / P3.2b
             assert _dps == phase0 and _mps == mps0, "frame %d: a monster pressed a door or a lift" % f
             # M7 P3.2a: the frame's picture decides the next tic's seen (rendered below, per world frame)
@@ -260,7 +261,8 @@ def main():
             mph.set_seen(mviews.slots_of(_seen))
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
                      "ng": ng, "before": before, "pusedn": pusedn,
-                     "mstate": {**mph.state(), **mviews.rt_state(mph)}, "views": mviews(mph, state.x, state.y),
+                     "mstate": {**mph.state(), **mviews.rt_state(mph), **mph.weapon_state()},
+                     "skw": mph.screen_kw(), "views": mviews(mph, state.x, state.y),
                      "positions": mviews.positions(mph)})
 
     ok, menus, worlds, moved, oracle_ng, first_bad = True, 0, 0, 0, {}, None
@@ -284,7 +286,7 @@ def main():
             want = gscreen.frame(bytes(rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map),
                                               scene, thing_hidden=hidden[row["skill"]],
                                               thing_views=row["views"], thing_positions=row["positions"],
-                                              **render_kw)))
+                                              **render_kw)), **row["skw"])
             kind = "world %-7s" % SKILL_NAMES[row["skill"]]
             worlds += 1
             if row["ng"] is not None:

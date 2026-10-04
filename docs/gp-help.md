@@ -157,3 +157,15 @@ in both directions. Recorded in `docs/handoff-gameplay.md`, P4.
   frame 34.
 - `probe.RECORDED_CALIBRATION` (startup + 2 menu frames, to the op) and the restore sets (`ev_help`
   is a new label) are re-recorded / re-keyed on the rung's build.
+
+
+## 5. The P4.1 update (2026-10-04)
+
+P4.1 bound the owner's map, and the help screen now lists it:
+- the clusters' legend has three lines: "↑ ↓ MOVE", "A D STRAFE", "← → TURN";
+- the key rows hold up to two items each, to fit 100 rows: [SPACE][E] use; [CTRL] fire and [1][2][3][4] weapons;
+  [,][.] strafe and [ENTER] select; [ESC] menu / back and [H] help;
+- the clusters sit one row higher (HELP_CLUSTERS_Y 11).
+
+`test_menu.py` re-pins the caps and the texts. `test_the_help_screen_lists_exactly_the_keys_that_work` still holds
+the screen and the poll together in both directions.

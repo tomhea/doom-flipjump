@@ -164,3 +164,95 @@ def test_the_checks_catch_a_broken_tail(tmp_path, name, mutate, frame):
     assert mutate(text) != text, "the mutant %s changed nothing -- its pattern no longer matches the emitter" % name
     frames, want = _run(tmp_path, name, mutate)
     assert _first_bad(frames, want) == frame
+
+
+# ---- M7 P4.1: the overlay chosen per frame -- the weapon frame `wp_frm`, the flash frame `fl_frm` over it ----------
+PSPRITES = [(0, 0), (1, 1), (4, 0), (5, 2), (5, 3), (7, 0), (13, 0), (2, 1)]      # (wp_frm, fl_frm) per frame
+
+
+def _psprite_program(mutate=None):
+    from doomfj import weaponcode as WC
+    art = WadFile.from_path(str(ROOT / "assets" / "freedoom1.wad"))
+    colours = hud.bar_colours(bytes(b for rgb in art.playpal(0) for b in rgb))
+    cols = lambda lump: hud.psprite_columns(art.get_data(lump))      # noqa: E731
+    weapons, flashes = [cols(l) for l in WC.overlay_frames()], [cols(l) for l in WC.flash_frames()]
+    row = art.colormap()[0]
+    text = "\n".join(hudcode.hud_tail_lines(colours, (weapons, flashes), row, view_rows=VH))
+    if mutate is not None:
+        text = mutate(text)
+    start = hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))
+    lines = ["stl.startup_and_init_all", "present.init_screen", ";frames", *hudcode.hud_decls(start),
+             "pcard: hex.vec 1", "hud_ret: hex.vec w/4", "wp_frm: hex.vec 1", "fl_frm: hex.vec 1",
+             "hud_tail_leaf:", text, "stl.fret hud_ret", "frames:"]
+    for f, (wf, ff) in enumerate(PSPRITES):
+        lines.append("present.begin_frame_collines")
+        for x in range(WIDTH):
+            rec, _px = _view_column(f, x)
+            lines += [f"stl.output_char {b}" for b in rec]
+        lines += [f"hex.set 1, wp_frm, {wf}", f"hex.set 1, fl_frm, {ff}",
+                  "stl.fcall hud_tail_leaf, hud_ret", "stl.output_char 0xFF"]
+    lines.append("stl.loop")
+    return "\n".join(lines) + "\n", colours, weapons, flashes, row
+
+
+def _psprite_expected(colours, weapons, flashes, row):
+    screen, frames = [0] * (WIDTH * H), []
+    bar = hud.bar_pixels(colours, **hudcode.LEVEL_START)
+    for f, (wf, ff) in enumerate(PSPRITES):
+        for x in range(WIDTH):
+            _rec, px = _view_column(f, x)
+            for y in range(VH):
+                screen[y * WIDTH + x] = screen[y * WIDTH + x - 1] if px is None else px[y]
+        for ov in [weapons[wf]] + ([flashes[ff - 1]] if ff else []):
+            for x, runs in ov.items():
+                for y0, y1, texel in runs:
+                    for y in range(y0, y1):
+                        screen[y * WIDTH + x] = row[texel]
+        for y in range(hud.BAR_ROWS):
+            for x in range(WIDTH):
+                screen[(VH + y) * WIDTH + x] = bar[y][x]
+        frames.append(list(screen))
+    return frames
+
+
+def _psprite_run(tmp_path, name, mutate=None):
+    text, colours, weapons, flashes, row = _psprite_program(mutate)
+    src = tmp_path / (name + ".fj")
+    src.write_text(text, encoding="utf-8")
+    out = tmp_path / (name + ".fjm")
+    consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
+    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve()], out, memory_width=W,
+                print_time=False)
+    frames = []
+
+    class Rec(_Screen):
+        def _present(self):
+            super()._present()
+            frames.append(list(self.pixel_indices))
+    fj.run(out, io_device=Rec(), print_time=False, print_termination=False)
+    return frames, _psprite_expected(colours, weapons, flashes, row)
+
+
+def test_every_psprite_frame_is_the_oracle_picture(tmp_path):
+    frames, want = _psprite_run(tmp_path, "psp")
+    bad = _first_bad(frames, want)
+    assert bad is None, "frame %d differs: weapon frame / flash %s" % (bad, PSPRITES[bad])
+
+
+def test_the_control_a_flash_drawn_under_the_weapon(tmp_path):
+    """R9: the psprites in the wrong order (the flash's records first) part at the first frame whose flash overlaps
+    its weapon frame in another colour"""
+    def swap(t):
+        i, j = t.index("hex.if_flags wp_frm"), t.index("hex.if_flags fl_frm")
+        k = t.index("hff_end:") + len("hff_end:")
+        w_end = t.index("hwf_end:") + len("hwf_end:")
+        return t[:i] + t[j:k] + "\n" + t[i:w_end] + t[k:]
+    frames, want = _psprite_run(tmp_path, "pspswap", swap)
+    # the first frame where the order can show: its flash covers weapon pixels in another colour
+    _t, _c, weapons, flashes, row = _psprite_program()
+
+    def px(ov):
+        return {(x, y): row[t] for x, runs in ov.items() for y0, y1, t in runs for y in range(y0, y1)}
+    first = next(f for f, (wf, ff) in enumerate(PSPRITES)
+                 if ff and any(px(weapons[wf]).get(k, c) != c for k, c in px(flashes[ff - 1]).items()))
+    assert _first_bad(frames, want) == first

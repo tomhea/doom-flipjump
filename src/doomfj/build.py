@@ -55,7 +55,9 @@ _STANDALONE_INCLUDES = ["input.fj"]
 # are the menu's own memory, and a reset that restored them would drop every keypress on them.
 STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
                       "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode", "menu_scr", "menu_sel",
-                      "lvdone", "pusedn")   # M7 P2a.2: the level is done; use held last tic
+                      "lvdone", "pusedn",   # M7 P2a.2: the level is done; use held last tic
+                      # M7 P4.1: the new held flags (strafe, fire, the number keys) -- held keys, like kb_u
+                      "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4")
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it
@@ -92,6 +94,9 @@ MONSTER_PERSIST = ("mon_state", "mon_tics", "mon_facing", "mon_active",
 # redraw the whole bar every frame (the pictures stay right, the ops do not), and P4.1's values would snap back to the
 # level start; the device keeps the bar's rows between frames, so the shadows must too.
 HUD_PERSIST = ("hud_v", "hud_s", "hud_full")
+# M7 P4.1 (doomfj.weaponcode): the weapon's memory -- the psprites, the height, refire, the ammo, the owned weapons and
+# the player's stream; the game tier's alone, like the bar
+from doomfj.weaponcode import PERSIST as WEAPON_PERSIST                         # noqa: E402
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:
@@ -103,7 +108,7 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
     return (STANDALONE_PERSIST + (DOOR_PERSIST + MOVER_PERSIST if doors else ())
             + (THING_PERSIST if moving_things else ())
             + (MONSTER_PERSIST if (standalone and moving_things) else ())
-            + HUD_PERSIST)                       # M7 P4.0: every standalone tier is the game tier, with the bar
+            + HUD_PERSIST + WEAPON_PERSIST)      # M7 P4.0 / P4.1: every standalone tier is the game tier
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 

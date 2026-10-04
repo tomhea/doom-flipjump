@@ -185,8 +185,11 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     if "mon_state" in table.addrs:
         from doomfj.monsters import MonsterPhase
         from doomfj.wall_renderer import BOOT_SKILL
-        from doomfj.wall_renderer import MONSTER_MODE
-        mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE)
+        from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+        # M7 P4.1: the player's weapon too. b0 delivers only `scenarios_v2.B0_KEYS` (no fire, no number keys, no
+        # strafe -- the model's strafe reaches the binary through the injected pose), so the binary's weapon only
+        # rises and idles, and the mirror steps the same keys
+        mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE, player=PLAYER_MODE)
     # M7 P3.2a: a monster that can wake reads the seen flags of the LAST picture, which the binary marks on every
     # frame -- so the model's picture (and its seen flags) is taken on every frame too, whatever `pixel_every`
     seen_every = mph is not None and mph.world.monsters != "idle"
@@ -208,6 +211,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                 _ep = override[f][0] if override is not None else fr["exp"][0]
                 mph.tic(_ep[0] & 0xFFFFFFFF, _ep[1] & 0xFFFFFFFF, _ep[2])
             epose, edoors = override[f] if override is not None else fr["exp"]
+        if mph is not None:
+            mph.weapon(fr["keys"])                       # M7 P4.1: the weapon tics with the world
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
             got["viewx"], got["viewy"], got["viewangle"], got["dstate"]) == (
@@ -226,7 +231,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                               movers=mheights,
                               views=orc.monster_views(mph, P_signed(epose[0]), P_signed(epose[1]))
                               if mph is not None else None, seen_out=_seen,
-                              positions=orc.monster_positions(mph) if mph is not None else None)
+                              positions=orc.monster_positions(mph) if mph is not None else None,
+                              screen_kw=mph.screen_kw() if mph is not None else None)
             if mph is not None:
                 mph.set_seen(orc._mviews.slots_of(_seen))
             if check:

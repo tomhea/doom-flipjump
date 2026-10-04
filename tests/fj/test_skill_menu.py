@@ -136,7 +136,7 @@ def _program(state_lines, common, scr0=0):
         "tm_frame:",
         "    hex.zero 1, ev_enter", "    hex.zero 1, ev_esc", "    hex.zero 1, ev_up",
         "    hex.zero 1, ev_dn", "    hex.zero 1, ev_help",
-        f"    rep({POLLS}, i) kb.poll kstat, kcode, kb_f, kb_b, kb_l, kb_r, kb_u, "
+        f"    rep({POLLS}, i) kb.poll kstat, kcode, kb_f, kb_b, kb_l, kb_r, kb_u, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, "
         "ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
         *state_lines,
         *_dump(),
@@ -149,6 +149,7 @@ def _program(state_lines, common, scr0=0):
         *[f"menu_scr: hex.vec 1, {scr0}" if d.startswith("menu_scr:") else d for d in MENU_DECLS_CLEAN],
         "kstat: hex.vec 1", "kcode: hex.vec 2", "kb_f: hex.vec 1", "kb_b: hex.vec 1",
         "kb_l: hex.vec 1", "kb_r: hex.vec 1", "kb_u: hex.vec 1",
+        "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1", "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",   # M7 P4.1
         "tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {FRAMES}",
         "tm_base: hex.vec w/4", "tm_idx: hex.vec w/4", "tm_p: hex.vec w/4", "tm_v: hex.vec 2",
         *cells,

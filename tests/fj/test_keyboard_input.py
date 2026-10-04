@@ -40,12 +40,14 @@ CFG = Config()
 
 POLLS = 8          # polls per "frame", the same unroll the emitter uses
 FRAMES = 6
-KEYS = ("f", "b", "l", "r", "u")    # M7 P3.4: the use flag printed too
+KEYS = ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4")   # M7 P4.1: strafe, fire, 1..4
 EVENTS = ("E", "X", "U", "D", "H")  # the menu's events: enter, esc, up (forward), down (back), help
 
-# keycode -> which flag, mirroring the macro's own comment table. M7 P3.4: space and 'e' are USE.
-BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b",
-           0x61: "l", 0x82: "l", 0x64: "r", 0x83: "r", 0x20: "u", 0x65: "u"}
+# keycode -> which flag, mirroring the macro's own comment table. M7 P3.4: space and 'e' are USE. M7 P4.1 (the owner's
+# key map): A / D and ',' / '.' STRAFE, only the arrows turn, ctrl fires, '1'..'4' are the weapon keys.
+BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b", 0x82: "l", 0x83: "r", 0x20: "u", 0x65: "u",
+           0x61: "sl", 0x2C: "sl", 0x64: "sr", 0x2E: "sr", 0x85: "fi",
+           0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4"}
 # keycode -> the event its DOWN edge records (enter, esc, and M7 P3.4's help)
 EVENT_KEYS = {0x0D: "E", 0x1B: "X", 0x68: "H"}
 
@@ -55,9 +57,10 @@ def _program() -> str:
     for _ in range(FRAMES):
         lines += [f"hex.zero 1, {e}" for e in ("kent", "kesc", "kup", "kdn", "khelp")]
         lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, kuse, "
-                     "kent, kesc, kup, kdn, khelp, bad")
+                     "ksl, ksr, kfi, kw1, kw2, kw3, kw4, kent, kesc, kup, kdn, khelp, bad")
         lines += [f"hex.print_as_digit k{name}, 0" for name in
-                  ("fwd", "back", "left", "right", "use", "ent", "esc", "up", "dn", "help")]
+                  ("fwd", "back", "left", "right", "use", "sl", "sr", "fi", "w1", "w2", "w3", "w4",
+                   "ent", "esc", "up", "dn", "help")]
         lines.append("stl.output 10")
     lines += ["stl.loop",
               # the halt a non-keyboard input stream gets -- '!' so a rejected run is visible
@@ -67,7 +70,10 @@ def _program() -> str:
               "khelp: hex.vec 1",                     # M7 P3.4
               "kfwd: hex.vec 1", "kback: hex.vec 1", "kleft: hex.vec 1", "kright: hex.vec 1",
               # M2-R4: the USE key (space, 0x20) is a held flag like the four above
-              "kuse: hex.vec 1"]
+              "kuse: hex.vec 1",
+              # M7 P4.1: strafe, fire, the number keys
+              "ksl: hex.vec 1", "ksr: hex.vec 1", "kfi: hex.vec 1",
+              "kw1: hex.vec 1", "kw2: hex.vec 1", "kw3: hex.vec 1", "kw4: hex.vec 1"]
     return "\n".join(lines) + "\n"
 
 
@@ -124,15 +130,26 @@ SCRIPTS = {
     "nothing at all": [],
     "hold w across frames": [(0, True, 0x77)],
     "press and release w": [(0, True, 0x77), (10, False, 0x77)],
-    "every key down, then up": [(0, True, 0x77), (1, True, 0x73), (2, True, 0x61),
-                                (3, True, 0x64), (16, False, 0x77), (17, False, 0x73),
-                                (18, False, 0x61), (19, False, 0x64)],
+    "every key down, then up": [(0, True, 0x77), (1, True, 0x73), (2, True, 0x82),
+                                (3, True, 0x83), (16, False, 0x77), (17, False, 0x73),
+                                (18, False, 0x82), (19, False, 0x83)],
     "the arrows bind the same": [(0, True, 0x80), (1, True, 0x82), (12, False, 0x80),
                                  (13, False, 0x82)],
+    # M7 P4.1: the owner's key map -- A / D strafe (not turn), ',' / '.' strafe too, ctrl fires, 1..4 are held
+    "a and d strafe, the arrows turn": [(0, True, 0x61), (1, True, 0x83), (9, False, 0x61), (10, True, 0x64),
+                                        (17, False, 0x64), (18, False, 0x83), (19, True, 0x82), (25, False, 0x82)],
+    "comma and period strafe like a and d": [(0, True, 0x2C), (9, False, 0x2C), (10, True, 0x2E), (20, False, 0x2E)],
+    "ctrl holds fire": [(0, True, 0x85), (17, False, 0x85)],
+    "the number keys are held": [(0, True, 0x31), (1, True, 0x32), (9, False, 0x31), (10, True, 0x33),
+                                 (11, True, 0x34), (18, False, 0x32), (19, False, 0x33), (27, False, 0x34)],
+    # the 0x3_ row's unbound digits and the 0x8_ row's shift / alt are read and discarded, in phase
+    "the unbound digits, shift and alt are discarded": [(0, True, 0x30), (1, True, 0x35), (2, True, 0x84),
+                                                        (3, True, 0x86), (4, True, 0x39), (5, True, 0x2D),
+                                                        (6, True, 0x31), (12, False, 0x31)],
     # THE PHASE TEST: unrecognised keycodes between real ones. If a poll ever skipped the keycode
     # byte, every event after the first junk key would be read out of phase and the flags would be
     # garbage from there on.
-    "junk keys between real ones": [(0, True, 0x71), (1, True, 0x77), (2, True, 0x2E),
+    "junk keys between real ones": [(0, True, 0x71), (1, True, 0x77), (2, True, 0x2F),
                                     (3, True, 0x64), (9, False, 0x5B), (10, False, 0x77),
                                     (20, True, 0xFF), (21, True, 0x73)],
     "a key held down twice never sticks off": [(0, True, 0x77), (1, True, 0x77),

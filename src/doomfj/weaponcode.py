@@ -89,10 +89,11 @@ def overlay_frames(states=None) -> List[str]:
 
 
 def flash_frames() -> List[str]:
-    """the FLASH psprite's distinct lumps: `fl_frm` is 1 + the index here, 0 = no flash"""
+    """the FLASH psprite's distinct lumps: `fl_frm` is 1 + the index here, 0 = no flash. Only states that last a tic
+    are ever drawn: S_LIGHTDONE (0 tics, straight on to S_NULL) names SHTGE0, which no wad has."""
     out = []
     for s in flash_states():
-        if s != gd.S_NULL and psprite_lump(s) not in out:
+        if s != gd.S_NULL and gd.STATES[s].tics != 0 and psprite_lump(s) not in out:
             out.append(psprite_lump(s))
     assert len(out) <= 15, out
     return out
@@ -129,7 +130,7 @@ def weapon_decls(start: dict, states: List[str], frames: List[str]) -> List[str]
             f"am_clip: hex.vec 3, {start['ammo'][gd.AM_CLIP]}", f"am_shell: hex.vec 3, {start['ammo'][gd.AM_SHELL]}",
             f"wp_own: hex.vec {len(WEAPONS)}, {own}", f"rng_pl: hex.vec 2, {start['rng_player']}",
             f"wp_frm: hex.vec 1, {frames.index(psprite_lump(wst))}",
-            f"fl_frm: hex.vec 1, {0 if fst == gd.S_NULL else 1 + flash_frames().index(psprite_lump(fst))}",
+            f"fl_frm: hex.vec 1, {0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else 1 + flash_frames().index(psprite_lump(fst))}",
             "fl_ret: hex.vec w/4", "wp_bcd: hex.vec 3"]
 
 
@@ -147,7 +148,8 @@ def weapon_lines(states: List[str], frames: List[str]) -> List[str]:
     """the frame's weapon tic: the number keys, then P_MovePsprites (the weapon, then the flash), then the bar's ammo
     and arms. Falls through at `wp_end`. Uses `pkeys` (fire: the high nibble's bit 3) and the held `kb_w1..kb_w4`."""
     idx = {s: i for i, s in enumerate(states)}
-    flash_frame = {s: (0 if s == gd.S_NULL else 1 + flash_frames().index(psprite_lump(s))) for s in flash_states()}
+    flash_frame = {s: (0 if s == gd.S_NULL or gd.STATES[s].tics == 0 else 1 + flash_frames().index(psprite_lump(s)))
+                   for s in flash_states()}
     info = gd.WEAPONINFO
     wen = lambda s: "wen%d" % idx[s]                                   # noqa: E731
     fen = lambda s: "fen%d" % idx[s]                                   # noqa: E731
@@ -205,6 +207,8 @@ def weapon_lines(states: List[str], frames: List[str]) -> List[str]:
         out += [f"{fen(s)}:", f"hex.set 2, fl_st, {idx[s]}", f"hex.set 1, fl_tics, {st.tics}",
                 f"hex.set 1, fl_frm, {flash_frame[s]}",
                 f";{fen(st.next)}" if st.tics == 0 else "stl.fret fl_ret"]
+    # a state cell holding no state of its psprite: the program's halt (never reached by a fall-through)
+    out += ["wp_bad:", ";bad"]
     # -- 4. the bar: the ready weapon's ammo (blank for the fist and the chainsaw) and the owned weapons 2 3 4
     out += ["wp_bar:"]
     out += _by_ready("wpb", {gd.WP_FIST: "wpb_none", gd.WP_PISTOL: "wpb_clip", gd.WP_SHOTGUN: "wpb_shell",
@@ -324,3 +328,43 @@ def _action(action, p: str, wen, fen, flash_frame) -> List[str]:
 
 def weapon_const_decls() -> List[str]:
     return [f"wp_bottom_c: hex.vec 2, {BOTTOM}", f"wp_top_c: hex.vec 2, {TOP}"]
+
+
+# the weapon's PERSISTENT cells (build.WEAPON_PERSIST): the M1 reset must leave them alone -- a weapon restored to the
+# level start every frame would never fire. `wp_bcd` (written before it is read) and `fl_ret` (the fcall register) are
+# ordinary scratch.
+PERSIST = ("wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad", "am_clip",
+           "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm")
+
+
+def level_start(map_wad, mapname: str) -> dict:
+    """the model's level start for the player's weapon (it does not depend on the skill): the fields
+    `weapon_decls` and `restart_lines` bake"""
+    from doomfj.world import World
+    w = World(map_wad, mapname, gd.SK_HARD, monsters="idle", player="fire")
+    ws = w.ws
+    return {f: getattr(ws, f) for f in ("p_ready", "p_pending", "p_wpn_state", "p_wpn_tics", "p_wpn_sy",
+                                        "p_flash_state", "p_flash_tics", "p_refire", "p_attackdown", "rng_player")}         | {"ammo": list(ws.p_ammo), "owned": list(ws.p_owned)}
+
+
+def restart_lines(start: dict, states: List[str], frames: List[str]) -> List[str]:
+    """NEW GAME: every persistent weapon cell back to its level-start value (the decls' own values)"""
+    out = []
+    for decl in weapon_decls(start, states, frames):
+        label, _, rest = decl.partition(": hex.vec ")
+        if label in PERSIST:
+            n, _, v = rest.partition(", ")
+            out.append(f"hex.set {n}, {label}, {v or 0}")
+    assert len(out) == len(PERSIST), (out, PERSIST)
+    return out
+
+
+def weapon_parts(map_wad, mapname: str) -> dict:
+    """everything the game tier's emitter splices in for the weapon: `decls` (the cells, the two constants, the ammo
+    digit table), `tic` (the frame's weapon lines), `restart` (NEW GAME's values)"""
+    from doomfj.lut_generator import generate_dispatch_table_fj
+    start = level_start(map_wad, mapname)
+    states, frames = weapon_states(), overlay_frames()
+    return {"decls": weapon_decls(start, states, frames) + weapon_const_decls(),
+            "tables": [generate_dispatch_table_fj("ammobcd", ammo_digit_values(), index_nibbles=3, result_nibbles=3)],
+            "tic": weapon_lines(states, frames), "restart": restart_lines(start, states, frames), "start": start}

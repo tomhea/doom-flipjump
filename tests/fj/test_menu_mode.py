@@ -40,7 +40,7 @@ def _program(mode_init):
         "present.init_screen",
         # M7 P1.5: the poll records the menu's events (the state machine that acts on them is
         # tests/fj/test_skill_menu.py's); here only the BRANCH on `mode` is under test
-        "rep(4, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, ev_enter, ev_esc, ev_up, ev_dn, "
+        "rep(4, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, ev_enter, ev_esc, ev_up, ev_dn, "
         "ev_help, bad",
         "hex.if0 1, mode, do_world",
         menu_fj(VW, VH, LINES, 2, COLOURS, label="menu_frame", end_marker=False),
@@ -57,6 +57,7 @@ def _program(mode_init):
         "kbstat: hex.vec 1", "kbcode: hex.vec 2",
         "kb_f: hex.vec 1", "kb_b: hex.vec 1", "kb_l: hex.vec 1", "kb_r: hex.vec 1",
         "kb_u: hex.vec 1",          # M2-R4: the USE key, held like the four above
+        "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1", "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",   # M7 P4.1
         "ev_enter: hex.vec 1", "ev_esc: hex.vec 1", "ev_up: hex.vec 1", "ev_dn: hex.vec 1",
         "ev_help: hex.vec 1",       # M7 P3.4
     ]) + "\n"

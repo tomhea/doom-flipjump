@@ -148,7 +148,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",
                               "thseen"}),                                               # M7 P3.2a
                    frozenset({"mon_movecount", "mon_rng", "mon_floorz", "msec"}),       # M7 P3.2b
-                   frozenset({"mon_justattacked"}))                                     # M7 P3.2c
+                   frozenset({"mon_justattacked"}),                                     # M7 P3.2c
+                   # M7 P4.1: the player's weapon (doomfj.weaponcode.PERSIST, the cells' widths below)
+                   frozenset({"wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad", "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -653,6 +655,9 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
             cells[name] = Cell(name, "hex", width, count=nmon)
         cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon)   # M7 P3.2c
     # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
+    # M7 P4.1: the player's weapon -- one cell each, `wp_own` the four owned flags as one 4-nibble value
+    for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", 4), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1)):
+        cells[name] = Cell(name, "hex", width)
     if nrt:
         cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt)
         cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt)
@@ -767,7 +772,7 @@ class Oracle:
         return self._scenes[(key, mkey)]
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
-               views=None, seen_out=None, positions=None) -> bytes:
+               views=None, seen_out=None, positions=None, screen_kw=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
@@ -781,7 +786,8 @@ class Oracle:
                                                thing_views=views, seen_out=seen_out,
                                                thing_positions=positions,              # M7 P3.2b
                                                **self.RENDER_KW))
-        return self.screen.frame(view, card=bool(hidden_extra))
+        # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
+        return self.screen.frame(view, card=bool(hidden_extra), **(screen_kw or {}))
 
     @property
     def screen(self):

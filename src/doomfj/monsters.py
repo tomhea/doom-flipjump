@@ -32,13 +32,15 @@ class MonsterPhase:
     re-implements a monster rule."""
 
     def __init__(self, map_wad=None, mapname: str = "E1M1", skill: Optional[int] = None, *, mode: str = "idle",
-                 rm=None):
+                 rm=None, player: str = "walk"):
         from doomfj import gamedata as gd
         from doomfj.world import World
         # M7 P3.2a: a mode that wakes sees by the picture (docs/gp-monsters.md 8.2) -- the gate hands it the
         # seen set of the picture it drew (`set_seen`), as the binary's render writes its flags
+        # M7 P4.1: the PLAYER's model mode too (world.PLAYER_MODES; the gates pass wall_renderer.PLAYER_MODE) -- the
+        # weapon half below steps the player's weapon in the same world the monsters live in
         self.world = World(map_wad, mapname, gd.SK_HARD if skill is None else skill, rm=rm, monsters=mode,
-                           sight_rule="los" if mode == "idle" else "seen")
+                           sight_rule="los" if mode == "idle" else "seen", player=player)
         self.gd = gd
 
     def reset(self, skill: int) -> None:
@@ -91,6 +93,52 @@ class MonsterPhase:
         self.tic(x16, y16, angle)
         dr, lr = self.requests()
         return (ds, fired, frozenset(req) | dr, card), ((lifts, frozenset(lreq) | lr, sw) if mps is not None else None)
+
+    # ---- M7 P4.1: the weapon half (docs/gp-combat.md section 1) -------------------------------------------------------
+    def weapon(self, keys: dict):
+        """ONE world frame of the player's weapon: the number keys, then P_MovePsprites -- the model's own
+        (`combat._weapon_keys`, `_move_psprites`) in the world's player mode. A gate calls it on every world frame
+        that tics (not a menu frame, not a finished level), with the frame's held keys. -> the tic's events"""
+        from doomfj.world import KEYS, TicEvents
+        w = self.world
+        if w.player == "walk":
+            return TicEvents(0)
+        k = {n: bool(keys.get(n)) for n in KEYS}
+        ev = TicEvents(0)
+        w._weapon_keys(k)
+        w._move_psprites(k, ev)
+        return ev
+
+    def weapon_state(self) -> Dict[str, int]:
+        """the weapon's fj cells (doomfj.weaponcode), in the cells' own units: the psprite states as LOCAL indices"""
+        if self.world.player == "walk":
+            return {}
+        from doomfj import weaponcode as WC
+        ws, gd = self.world.ws, self.gd
+        idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(WC.weapon_states())}
+        wst, fst = gd.STATE_NAMES[ws.p_wpn_state], gd.STATE_NAMES[ws.p_flash_state]
+        return {"wp_rdy": ws.p_ready, "wp_pend": ws.p_pending, "wp_st": idx[ws.p_wpn_state], "wp_tics": ws.p_wpn_tics,
+                "wp_sy": ws.p_wpn_sy, "fl_st": idx[ws.p_flash_state], "fl_tics": ws.p_flash_tics,
+                "wp_rf": ws.p_refire, "wp_ad": ws.p_attackdown, "am_clip": ws.p_ammo[gd.AM_CLIP],
+                "am_shell": ws.p_ammo[gd.AM_SHELL],
+                "wp_own": sum(int(bool(ws.p_owned[w])) << (4 * i) for i, w in enumerate(WC.WEAPONS)),
+                "rng_pl": ws.rng_player, "wp_frm": WC.overlay_frames().index(WC.psprite_lump(wst)),
+                "fl_frm": 0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0
+                else 1 + WC.flash_frames().index(WC.psprite_lump(fst))}
+
+    def screen_kw(self) -> dict:
+        """`hud.GameScreen.frame`'s keywords for the player's weapon and bar: the psprites' lumps and the values"""
+        if self.world.player == "walk":
+            return {}
+        from doomfj import weaponcode as WC
+        ws, gd = self.world.ws, self.gd
+        fst = gd.STATE_NAMES[ws.p_flash_state]
+        ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL]}.get(ws.p_ready)
+        return {"weapon": WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
+                "flash": None if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
+                "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,
+                           "owned": (bool(ws.p_owned[gd.WP_PISTOL]), bool(ws.p_owned[gd.WP_SHOTGUN]),
+                                     bool(ws.p_owned[gd.WP_CHAINSAW]))}}
 
     def boxes(self) -> list:
         """[(x16, y16, r16)] of every live monster -- a closing door reverses on them (World.door_touched)"""

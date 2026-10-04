@@ -24,6 +24,7 @@ from doomfj.lut_generator import (
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
+from doomfj.reference_model import STRAFE_MOVE                                   # M7 P4.1
 from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
                                     apply_sector_heights, spawn_state)
@@ -31,7 +32,8 @@ from doomfj.config import Config
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
                                KEY_FORWARD_MASK, KEY_BACK_MASK,
-                               KEY_TURN_LEFT_MASK, KEY_TURN_RIGHT_MASK, KEY_USE_MASK)
+                               KEY_TURN_LEFT_MASK, KEY_TURN_RIGHT_MASK, KEY_USE_MASK,
+                               KEY_STRAFE_LEFT_MASK, KEY_STRAFE_RIGHT_MASK)     # M7 P4.1
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
                                 NF_SUBSECTOR, seg_affine_coeffs, bbox_gate_boxes,
                                 thing_live_subsectors,
@@ -136,6 +138,9 @@ BOOT_SKILL = _gd.SK_HARD
 # M7 P3 (docs/gp-monsters.md): the game tier's MONSTER MODE -- the model mode its binary is exact against
 # ("idle" P3.1, "wake" P3.2a, "chase" P3.2b, "decide" P3.2c)
 MONSTER_MODE = "decide"
+# M7 P4 (docs/gp-combat.md section 1): the game tier's PLAYER MODE -- the model mode its weapon is exact against
+# ("walk" through P4.0, "fire" P4.1: the trigger without its effects, "hit" P4.2)
+PLAYER_MODE = "fire"
 
 
 def tier_flags(tier: str) -> dict:
@@ -258,7 +263,7 @@ def _int_part_lines(dst, src, neg, pos):
             f"{neg}:", f"hex.set 6, {dst} + 4*dw, 0xFFFFFF", f";{pos}", f"{pos}:"]
 
 
-def _player_sim_lines(collide: bool = False) -> list:
+def _player_sim_lines(collide: bool = False, strafe: bool = False) -> list:
     """M14-c — ONE TIC OF THE PLAYER SIM, in fj. The exact mirror of
     `ReferenceModel.step_sim`: turn first, then a collision-free move along the NEW angle.
 
@@ -278,6 +283,16 @@ def _player_sim_lines(collide: bool = False) -> list:
     """
     turn = ANGLE_TURN & 0xFFFFFFFF
     fwd = FORWARD_MOVE & 0xFFFFFFFF
+    # M7 P4.1 (the game tier, `strafe`): the side step -- `step_sim(strafe=True)` and the model's _player_move: the side
+    # magnitude from the high nibble's strafe bits, then dx += FixedMul(side, sin), dy -= FixedMul(side, cos) after the
+    # forward step, all along the NEW angle. A frame that neither moves nor strafes skips the trig as before.
+    side = ([f"hex.zero 8, psid",
+             f"hex.if_flags pkeys + dw, {KEY_STRAFE_RIGHT_MASK:#06x}, simsr_no, simsr_yes",
+             "simsr_yes:", f"hex.add_constant 8, psid, {STRAFE_MOVE & 0xFFFFFFFF:#x}",
+             "simsr_no:",
+             f"hex.if_flags pkeys + dw, {KEY_STRAFE_LEFT_MASK:#06x}, simsl_no, simsl_yes",
+             "simsl_yes:", f"hex.add_constant 8, psid, {-STRAFE_MOVE & 0xFFFFFFFF:#x}",
+             "simsl_no:"] if strafe else [])
     return [
         f"hex.if_flags pkeys, {KEY_TURN_LEFT_MASK:#06x}, simtl_no, simtl_yes",
         "simtl_yes:", f"hex.add_constant 8, viewangle, {turn:#x}",
@@ -292,7 +307,10 @@ def _player_sim_lines(collide: bool = False) -> list:
         f"hex.if_flags pkeys, {KEY_BACK_MASK:#06x}, simbk_no, simbk_yes",
         "simbk_yes:", f"hex.add_constant 8, pmove, {-FORWARD_MOVE & 0xFFFFFFFF:#x}",
         "simbk_no:",
-        "hex.if0 8, pmove, simmv_done",          # neither key, or both: the oracle does not move
+        *side,
+        # neither key, or both: the oracle does not move (M7 P4.1: unless it strafes)
+        *(["hex.if0 8, pmove, simmv_nf", ";simmv_go", "simmv_nf:", "hex.if0 8, psid, simmv_done", "simmv_go:"]
+          if strafe else ["hex.if0 8, pmove, simmv_done"]),
         # the finesine index is the BAM's top 12 bits (angle_shift = 32 - log2(TRIG_N) = 20 = 5
         # nibbles), exactly `read_sin`'s `(angle >> angle_shift) & (TRIG_N - 1)`
         "hex.mov 8, pangt, viewangle", "hex.shr_hex 8, 5, pangt", "hex.mov 3, pangi, pangt",
@@ -300,6 +318,8 @@ def _player_sim_lines(collide: bool = False) -> list:
         "finesine.read_sin pmvs, pangi",
         "hex.fixed_mul_lo 8, 4, pmvdx, pmove, pmvc",
         "hex.fixed_mul_lo 8, 4, pmvdy, pmove, pmvs",
+        *(["hex.fixed_mul_lo 8, 4, psdx, psid, pmvs", "hex.add 8, pmvdx, psdx",
+           "hex.fixed_mul_lo 8, 4, psdy, psid, pmvc", "hex.sub 8, pmvdy, psdy"] if strafe else []),
         # M14-d: with collision on the move is a REQUEST -- `move_with_collision_lines` decides
         # where it actually lands. Without it the delta is applied straight, as M14-c shipped.
         *(["hex.mov 8, cm_dx, pmvdx", "hex.mov 8, cm_dy, pmvdy", ";simcollide"] if collide else
@@ -410,6 +430,9 @@ STANDALONE_SCRATCH_DECLS = [
     "kb_u: hex.vec 1, 0",
     "kbstat: hex.vec 1", "kbcode: hex.vec 2",
     "kb_f: hex.vec 1", "kb_b: hex.vec 1", "kb_l: hex.vec 1", "kb_r: hex.vec 1",
+    # M7 P4.1: the new held flags -- strafe left / right, fire, the number keys 1..4 (persisted with the others)
+    "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1",
+    "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
     # M3: which frame producer runs. 1 = MENU, 0 = world, and it BAKES to 1 so the game boots
     # into the menu. Persisted like the key flags -- a mode that reset every frame would flicker
     # between the two pictures. It is declared even when the menu is off (two words) so both
@@ -674,7 +697,7 @@ def exit_lines(boxes, press_miss=()) -> list:
 
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
-                            press_miss=(), monster_tic=()) -> list:
+                            press_miss=(), monster_tic=(), weapon=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -694,6 +717,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
         "hex.zero 1, ev_help",                                          # M7 P3.4
         f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, "
+        "kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, "                        # M7 P4.1
         f"ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
         # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
@@ -704,6 +728,10 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         "hex.if0 1, kb_r, sa_nr", "hex.xor_by pkeys, 0x8", "sa_nr:",
         # M2-R4: the use key is bit 4, i.e. the HIGH nibble's bit 0 -- see wireformat.KEY_USE.
         "hex.if0 1, kb_u, sa_nu", "hex.xor_by pkeys + dw, 0x1", "sa_nu:",
+        # M7 P4.1: strafe left / right and fire -- bits 5, 6, 7 (wireformat.KEY_STRAFE_LEFT / _RIGHT / KEY_FIRE)
+        "hex.if0 1, kb_sl, sa_nsl", "hex.xor_by pkeys + dw, 0x2", "sa_nsl:",
+        "hex.if0 1, kb_sr, sa_nsr", "hex.xor_by pkeys + dw, 0x4", "sa_nsr:",
+        "hex.if0 1, kb_fi, sa_nfi", "hex.xor_by pkeys + dw, 0x8", "sa_nfi:",
         *(menu or []),                     # M3: the menu frame + the branch past the world
         # M7 P2a.2: a finished level is FROZEN -- no door tic, no player tic (the model's frozen
         # tic); the frame draws the world where it stopped
@@ -716,7 +744,9 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
            f"duse_yess:", "hex.xor_by 1, duse, 1",
            f"duse_nos:", *door_lines] if door_lines else []),
         *(exit_lines(exit_boxes_, press_miss) if exit_boxes_ else []),
-        *_player_sim_lines(collide),
+        # M7 P4.1: the weapon -- the model's player phase runs the number keys and the psprites before the move
+        *weapon,
+        *_player_sim_lines(collide, strafe=True),        # M7 P4.1: the game tier strafes
         # M7 P3.1: the monsters tic after the player (the model's order: doors, player, monsters);
         # a frozen level skips them with the player
         *monster_tic,
@@ -1087,6 +1117,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P4.0 (docs/gp-combat.md section 2): the game tier's status bar and weapon overlay (doomfj.hudcode)
     from doomfj.hudcode import game_hud_parts
     _hud = game_hud_parts(rm, asset_wad, sprite_wad, map_wad.sectors(mapname)) if menu else None
+    # M7 P4.1 (doomfj.weaponcode): the player's weapon, the model's "fire" mode
+    from doomfj.weaponcode import weapon_parts
+    _wpn = weapon_parts(map_wad, mapname) if menu else None
     cmap = bake_bsp(map_wad, mapname)
     verts = cmap.vertexes
     lds = map_wad.linedefs(mapname); sds = map_wad.sidedefs(mapname)
@@ -2446,7 +2479,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
-            monsters=_p31["restart"] if _p31 else None, hud=_hud["restart"] if _hud else ())
+            monsters=_p31["restart"] if _p31 else None,
+            hud=(list(_hud["restart"]) + list(_wpn["restart"])) if _hud else ())
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart, hud=_hud["menu"] if _hud else ())
@@ -2462,6 +2496,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                    if (_movers_on and _exit) else [])
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, monster_tic=_p31["tic"] if _p31 else (),
+                                  weapon=_wpn["tic"] if _wpn else (),
                                   door_lines=_door_tic,
                                   exit_boxes_=_exit, press_miss=_press_miss)
           if standalone else
@@ -2796,6 +2831,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *(mover_decls(len(_lift_slot)) if _movers_on else []),          # M7 P2b
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
           *(_hud["decls"] if _hud else []),                               # M7 P4.0: the bar
+          *(_wpn["decls"] + _wpn["tables"] if _wpn else []),                # M7 P4.1: the weapon
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage
@@ -2811,6 +2847,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",
              "pmvc: hex.vec 8", "pmvs: hex.vec 8",
              "pmvdx: hex.vec 8", "pmvdy: hex.vec 8"] if player_sim else []),
+          # M7 P4.1: the strafe's side magnitude and its two deltas (the game tier's sim)
+          *(["psid: hex.vec 8", "psdx: hex.vec 8", "psdy: hex.vec 8"] if standalone else []),
           # the shared affine-distance output of wall_x_range (consumed by wall_setup_sgn as
           # rw_distance-pre-abs). ⚠ CR-2026-08 (PJ-2) removed viewxa/viewxs/viewya/viewys from
           # here; `sgn_aff` is NOT dead with them -- it is the OUTPUT, read at 10 call sites.

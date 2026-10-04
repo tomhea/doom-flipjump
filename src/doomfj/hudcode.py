@@ -70,6 +70,16 @@ def weapon_record_lines(overlay: Dict[int, list], colormap_row: Sequence[int]) -
     return out
 
 
+def _frame_dispatch(prefix: str, cell: str, blocks: List[List[str]], end: str) -> List[str]:
+    """draw blocks[v] for the nibble v in `cell`, then jump to `end`"""
+    assert len(blocks) <= 16, len(blocks)
+    out = []
+    for v, block in enumerate(blocks):
+        out += [f"hex.if_flags {cell}, 1<<{v}, {prefix}_n{v}, {prefix}_y{v}", f"{prefix}_y{v}:", *block,
+                f";{end}", f"{prefix}_n{v}:"]
+    return out + [f";{end}"]
+
+
 def hud_decls(level_start: Sequence[int]) -> List[str]:
     n = len(hud.bar_slots())
     assert len(level_start) == n
@@ -94,7 +104,17 @@ def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_r
     slots = hud.bar_slots()
     owned_cols = {x for _n, x0, w, _v in slots for x in range(x0, x0 + w)}
     out = ["// M7 P4.0 (doomfj.hudcode): the weapon overlay, then the bar's changed columns"]
-    out += weapon_record_lines(overlay, colormap_row)
+    if isinstance(overlay, dict):
+        out += weapon_record_lines(overlay, colormap_row)
+    else:
+        # M7 P4.1: one overlay per weapon frame, chosen by `wp_frm`; then the flash's, by `fl_frm` (0 = none) -- the
+        # psprites in DOOM's order, the flash's records after the weapon's (the device draws a later record over)
+        weapons, flashes = overlay
+        out += _frame_dispatch("hwf", "wp_frm", [weapon_record_lines(o, colormap_row) for o in weapons], "hwf_end")
+        out += ["hwf_end:"]
+        out += _frame_dispatch("hff", "fl_frm", [[]] + [weapon_record_lines(o, colormap_row) for o in flashes],
+                               "hff_end")
+        out += ["hff_end:"]
     # the full redraw: the static columns, and every shadow stale
     out += ["hex.if0 1, hud_full, hud_slots"]
     for x in range(160):
@@ -139,7 +159,12 @@ def game_hud_parts(rm, asset_wad, sprite_wad, sectors) -> dict:
                             "needs the row selected per frame" % (len(rows), sorted(rows)))
     row = asset_wad.colormap()[rows.pop()]
     start = slot_codes(hud.slot_values(**LEVEL_START))
-    overlay = hud.psprite_columns(sprite_wad.get_data(READY_WEAPON), view_w=rm.cfg.VIEW_W, view_rows=rm.cfg.VIEW_H)
+    # M7 P4.1: every weapon frame (`wp_frm` indexes weaponcode.overlay_frames) and every flash frame (`fl_frm` - 1)
+    from doomfj import weaponcode as WC
+
+    def cols(lump):
+        return hud.psprite_columns(sprite_wad.get_data(lump), view_w=rm.cfg.VIEW_W, view_rows=rm.cfg.VIEW_H)
+    overlay = ([cols(lump) for lump in WC.overlay_frames()], [cols(lump) for lump in WC.flash_frames()])
     return {"decls": hud_decls(start), "restart": hud_restart_lines(start), "menu": ["hex.set 1, hud_full, 1"],
             "tail": hud_tail_lines(colours, overlay, row, view_rows=rm.cfg.VIEW_H), "colours": colours,
             "overlay": overlay, "colormap_row": row}

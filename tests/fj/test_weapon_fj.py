@@ -97,7 +97,7 @@ def _program(start, mut=None):
             text,
             *[x for c, n in CELLS for x in ("hex.print_as_digit %d, %s, 0" % (n, c), "stl.output 44")],
             "stl.output 10", ";loop",
-            "wp_bad:", ";bad", "bad:", "stl.loop", "done:", "stl.loop",
+            "bad:", "stl.loop", "done:", "stl.loop",
             "rmagic: hex.vec 2", "kin: hex.vec 2", "pkeys: hex.vec 2",
             "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
             *WC.weapon_decls(start, states, frames), *WC.weapon_const_decls(),
@@ -128,7 +128,8 @@ def _want(row, states, frames):
     return [row["p_ready"], row["p_pending"], idx[row["p_wpn_state"]], row["p_wpn_tics"], row["p_wpn_sy"],
             idx[row["p_flash_state"]], row["p_flash_tics"], row["p_refire"], row["p_attackdown"],
             row["ammo"][gd.AM_CLIP], row["ammo"][gd.AM_SHELL], row["rng_player"],
-            frames.index(WC.psprite_lump(wst)), 0 if fst == gd.S_NULL else 1 + WC.flash_frames().index(WC.psprite_lump(fst)),
+            frames.index(WC.psprite_lump(wst)),
+            0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else 1 + WC.flash_frames().index(WC.psprite_lump(fst)),
             bar[0] | bar[1] << 4 | bar[2] << 8, bar[9] | bar[10] << 4 | bar[11] << 8]
 
 

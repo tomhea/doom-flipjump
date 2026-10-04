@@ -75,11 +75,10 @@ from doomfj import rng as R
 from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
 from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
-from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE
+from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE   # STRAFE_MOVE: M7 P4.1, the ONE value
 
 # 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
 # FORWARD_MOVE, rounded (plan section 2, input). world.py re-exports it.
-STRAFE_MOVE = 13 << 16
 
 # the aim box's width is looked up on the view angle's top bits (aim_radius; gp-aim-window 1.7)
 AIM_REFF_BITS = 8
@@ -128,7 +127,8 @@ WEAPON_KEYS = ("w1", "w2", "w3", "w4")      # DOOM's number keys 1..4 -> WP_FIST
 # The restart block (plan 6.7) writes every schema field back to its level-start value EXCEPT
 # these: the skill (the menu's choice, and the block's input -- it picks WHICH level start), the
 # menu mode and the held-key flags are input state, not level state.
-RESTART_KEEP = ("skill", "mode", "kb_f", "kb_b", "kb_l", "kb_r", "kb_u")
+RESTART_KEEP = ("skill", "mode", "kb_f", "kb_b", "kb_l", "kb_r", "kb_u",
+                "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4")      # M7 P4.1
 SUBRANDOM_MAX = 255                         # |P_SubRandom()| <= 255
 DROP_ITEM = {"MT_CLIP": 2007, "MT_SHOTGUN": 2001}   # the dropped thing's editor number
 RUN_STATES = ("S_PLAY_RUN1", "S_PLAY_RUN2", "S_PLAY_RUN3", "S_PLAY_RUN4")

@@ -274,20 +274,30 @@ class GameScreen:
         from doomfj import hudcode
         assert rm.cfg.VIEW_H == VIEW_ROWS, ("the game screen needs the game tier's 84-row config "
                                            "(config.GAME_CFG), not %d rows" % rm.cfg.VIEW_H)
+        from doomfj import weaponcode as WC
         parts = hudcode.game_hud_parts(rm, asset_wad, sprite_wad, sectors)
         self.cfg = rm.cfg
-        self.colours, self.overlay, self.row = parts["colours"], parts["overlay"], parts["colormap_row"]
+        self.colours, self.row = parts["colours"], parts["colormap_row"]
+        weapons, flashes = parts["overlay"]
+        self.overlays = dict(zip(WC.overlay_frames(), weapons)) | dict(zip(WC.flash_frames(), flashes))
         self.level_start = dict(hudcode.LEVEL_START)
 
-    def frame(self, view: bytes, *, card: bool = False, values: Optional[dict] = None) -> bytes:
-        """the game screen for a rendered view (W x H bytes whose rows >= VIEW_ROWS are unused) and the bar's values"""
+    def frame(self, view: bytes, *, card: bool = False, values: Optional[dict] = None,
+              weapon: Optional[str] = None, flash: Optional[str] = None) -> bytes:
+        """the game screen for a rendered view (W x H bytes whose rows >= VIEW_ROWS are unused), the bar's values, and
+        (M7 P4.1) the psprites' lumps -- the weapon's (the ready pistol at the level start when None) and the flash's,
+        drawn in DOOM's order, the flash over the weapon"""
+        from doomfj import hudcode
         w = self.cfg.W
         rows = [list(view[y * w:(y + 1) * w]) for y in range(VIEW_ROWS)]
         vals = dict(self.level_start if values is None else values, blue=bool(card))
         bar = bar_pixels(self.colours, **vals)
         out = rows
-        for x, runs in self.overlay.items():
-            for y0, y1, texel in runs:
-                for y in range(y0, y1):
-                    out[y][x] = self.row[texel]
+        for lump in (weapon or hudcode.READY_WEAPON, flash):
+            if lump is None:
+                continue
+            for x, runs in self.overlays[lump].items():
+                for y0, y1, texel in runs:
+                    for y in range(y0, y1):
+                        out[y][x] = self.row[texel]
         return bytes(c for row in out + bar for c in row)

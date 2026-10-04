@@ -72,3 +72,12 @@ fuzz in doom.
   - m2_std_gate's first walk holds and taps fire and switches to the fist and back.
   - B0 delivers only its five keys, as before. The model's strafe reaches the binary through the injected pose, and
     the binary's weapon only rises and idles there.
+
+## 5. Rungs united (the owner, 2026-10-04: "try to merge small rungs, if you think it will make the overall things faster")
+
+P4.1 (the trigger) and P4.2a (the hit: the aim window, shots resolved, damage, pain and death) ship as ONE build, on
+`m7-shoot`. That saves one re-key, build and evidence cycle, about 6 h, against a few hours' wait for P4.2a. The ledger
+declares them together.
+
+P4.2b (the noise alert and A_Look's sound branch) joins the build if it is ready when P4.2a is; otherwise it rides
+with P5.

@@ -1084,7 +1084,7 @@ frames, `scratchpad/plan/p4/view84` in the session, recorded in gp-combat C5).
 **Row**: (filled after the build)
 
 
-## P4.1 the trigger (class F) -- declared 2026-10-04, before the build
+## P4.1 the trigger (class F) -- declared 2026-10-04, before the build; UNITED with P4.2a into one build (the owner, 2026-10-04: merge small rungs -- gp-combat section 5)
 
 **What**: `docs/gp-combat.md` section 1. The model's "fire" mode (`World(player="fire")`, `wall_renderer.PLAYER_MODE`):
 - **The owner's key map** (approved 2026-10-02): A / D and ',' / '.' strafe, only the arrows turn, ctrl fires,

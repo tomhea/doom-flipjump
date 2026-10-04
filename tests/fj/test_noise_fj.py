@@ -401,9 +401,10 @@ def _drun(tmp_path, monkeypatch, name, mut=None) -> bool:
     script = _dscript(D, w)
     want = _dexpected(D, script)
     body = ["stl.startup_and_init_all"]
-    for x16, y16, ang, seen, alert in script:
+    for x16, y16, ang, seen, jh, alert in script:          # jh: P4.2a's justhit pokes (the decide harness's)
         body += ["hex.set 8, viewx, %d" % x16, "hex.set 8, viewy, %d" % y16,
                  "hex.set %d, thseen, %d" % (n, sum(1 << (4 * m) for m in seen)),
+                 *["hex.set 1, mon_justhit + %d*dw, 1" % m for m in sorted(jh)],
                  "hex.set %d, snd_alert, %d" % (w.nsound, sum(1 << (4 * k) for k in alert)),
                  "stl.fcall mt_tic_leaf, mt_tret"]
         for m in range(n):
@@ -417,6 +418,9 @@ def _drun(tmp_path, monkeypatch, name, mut=None) -> bool:
                      "hex.print_as_digit 2, mon_movecount + %d*dw, 0" % (2 * m),
                      "hex.print_as_digit 2, mon_rng + %d*dw, 0" % (2 * m),
                      "hex.print_as_digit 1, mon_justattacked + %d*dw, 0" % m,
+                     # M7 P4.2a: the decide harness's row (D._row) carries justhit and solid since the damage merged
+                     "hex.print_as_digit 1, mon_justhit + %d*dw, 0" % m,
+                     "hex.print_as_digit 1, mon_solid + %d*dw, 0" % m,
                      "hex.print_as_digit 4, thpos_rt + %d*dw, 0" % (16 * m + 4),
                      "hex.print_as_digit 4, thpos_rt + %d*dw, 0" % (16 * m + 12),
                      "hex.print_as_digit 4, mon_floorz + %d*dw, 0" % (4 * m),

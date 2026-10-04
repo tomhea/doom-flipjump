@@ -139,7 +139,8 @@ BOOT_SKILL = _gd.SK_HARD
 # ("idle" P3.1, "wake" P3.2a, "chase" P3.2b, "decide" P3.2c)
 MONSTER_MODE = "decide"
 # M7 P4 (docs/gp-combat.md section 1): the game tier's PLAYER MODE -- the model mode its weapon is exact against
-# ("walk" through P4.0, "fire" P4.1: the trigger without its effects, "hit" P4.2)
+# ("walk" through P4.0, "fire" P4.1: the trigger without its effects, "hit" P4.2); a mode whose shots hurt
+# (damagecode.DAMAGE_PLAYER_MODES) adds the monsters' damage to p31_parts -- MONSTER_MODE must then be "decide"
 PLAYER_MODE = "fire"
 
 
@@ -1554,11 +1555,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # rotation. `_ANIM` is the compile-time switch every P3.1 macro argument reads.
     _p31 = None
     if _do_things and standalone and moving_things:
+        from doomfj.damagecode import damage_on
         from doomfj.monstercode import p31_parts
         _p31 = p31_parts(rm, map_wad, mapname, sprite_wad, _anim,
                          [map_wad.things(mapname)[w_] for w_ in sorted(_mt_keep)],
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
-                         cache=spr_cache, mode=MONSTER_MODE)
+                         cache=spr_cache, mode=MONSTER_MODE,
+                         damage=damage_on(PLAYER_MODE))     # M7 P4.2a: the shots hurt (damagecode)
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
     _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide")) else 0
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
@@ -1566,7 +1569,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     if _chase:
         _door_tic = _make_door_tic(
             mon_press=frozenset(si for si, _b in _chase["mon_door_boxes"]),
-            mon_contact=[(f"thpos_rt + {16 * t_}*dw", f"thpos_rt + {16 * t_ + 8}*dw", r_, f"mon_active + {m_}*dw")
+            mon_contact=[(f"thpos_rt + {16 * t_}*dw", f"thpos_rt + {16 * t_ + 8}*dw", r_,
+                          f"{_chase['live']} + {m_}*dw")         # M7 P4.2a: a LIVE monster (mon_shootable)
                          for m_, (t_, r_) in enumerate(_chase["slots_rt"])])
     _ANIM_SEL = "thsel_leaf, thsel_ret" if _ANIM else "0, 0"
     if _ANIM:
@@ -2452,7 +2456,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _mon_move = BSn.join(
                 ["    ;mm_block_end", _mcells]
                 + monster_seed_fj(cmap, lds, sds, _dsecs_open, _msecs, _mcell)
-                + things_leaf_lines(_chase["slots_rt"])
+                + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"])   # M7 P4.2a: mon_solid
                 + move_leaf_lines(root=_mroot, lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:])
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
@@ -2460,7 +2464,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
                 # M7 P3.2c: the decisions, the attack actions and the near LOS (monsterdecide, monstersight)
-                + ((_decide_leaves() + _p31["decide_lines"]) if _p31.get("decide_lines") else [])
+                + ((_decide_leaves(justhit=bool(_p31.get("justhit"))) + _p31["decide_lines"])
+                   if _p31.get("decide_lines") else [])
                 + ["mm_block_end:"]) + BSn
         else:
             _mon_move = ""

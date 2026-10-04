@@ -239,7 +239,13 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     the P42 cells join `fields` (so NEW GAME restores them), damagecode's decls / leaves / table ride in
     `decls_wake` / `decide_lines` / `tables`, the slots run A_Fall and carry justhit (`p32a_slot(dmg=True)`), and
     `chase` names the per-slot flags the thing test (`solid`: mon_solid) and the door contact (`live`:
-    mon_shootable) read -- mon_active for both without it."""
+    mon_shootable) read -- mon_active for both without it.
+
+    M7 P5: the monster mode "full" is "decide" with the attacks APPLIED (it needs a hurtable player mode,
+    hurtcode.hurt_on, and vice versa -- asserted). It adds the MOBILES (docs/gp-p5-interface.md): `nmob` runtime
+    things after the WAD's (monsters.mobile_rows' rule), one view row per mobile lump after the monsters' views
+    (`mobile_view_rows`), their row-select stubs (`mobile_select_lines`) and `mobview`; the pools themselves
+    (`proj`: projcode.proj_parts at this `nt`); damagecode's blood (`fx`); and `world`, the World the parts came from."""
     from doomfj.monsters import view_of
     from doomfj.things import THING_ROW_BYTES
     from doomfj.wall_renderer import (DEG_MINH2_MON, MIN_SPRITE_H_MONSTER, anim_frames, anim_patches)
@@ -272,23 +278,42 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     if not rows:
         return None                      # a map without monsters animates nothing
     assert len(THING_ROW_BYTES) == len(rows[0])
-    nrows = nt + len(rows)
-    rn = max(1, ((nrows - 1).bit_length() + 3) // 4)
     # the monster slots, and which runtime thing each is
-    assert mode in ("idle", "wake", "chase", "decide"), mode
+    assert mode in ("idle", "wake", "chase", "decide", "full"), mode
     # M7 P3.3 (D3 d): the leaf walk the game tier's picture asks for -- RAISES for a mode that cannot emit it.
     # `depth_order` None is GAME_RENDER_KW's; a unit fixture that builds no leaf walk passes False.
     depth = depth_walk(mode, depth_order)
-    wake = mode in ("wake", "chase", "decide")       # M7 P3.2b: the chase mode is the wake mode plus the move
-    chase = mode in ("chase", "decide")              # M7 P3.2c: the decide mode is the chase plus the decisions
-    decide = mode == "decide"
-    from doomfj.damagecode import damage_on
+    wake = mode in ("wake", "chase", "decide", "full")   # M7 P3.2b: the chase mode is the wake mode plus the move
+    chase = mode in ("chase", "decide", "full")          # M7 P3.2c: the decide mode is the chase plus the decisions
+    decide = mode in ("decide", "full")                  # M7 P5: "full" is the decide mode with its attacks APPLIED
+    full = mode == "full"
+    from doomfj.damagecode import damage_on, fx_on
     damage = damage_on(player)
     assert not damage or decide, "damage (M7 P4.2a) runs on the decide mode's slots: mode %r" % mode
     # M7 P5 (doomfj.hurtcode): a player mode whose monsters HURT the player -- the player can die, and the slots
-    # lose their target while he is dead (p32a_slot's `hurt`); the decide mode's slots carry it
+    # lose their target while he is dead (p32a_slot's `hurt`); the decide mode's slots carry it. The model hurts the
+    # player in the monster mode "full" alone (combat: "decide" rolls and applies nothing), so the two must agree:
+    # a "full" tier whose weapon cannot be hurt, or a hurtable player whose monsters never attack, is refused
     from doomfj.hurtcode import hurt_on
     hurt = hurt_on(player) and decide
+    assert not decide or hurt == full, (
+        "M7 P5: monster mode %r with player mode %r -- the monsters' attacks land (\"full\") exactly when the player "
+        "can be hurt (hurtcode.HURT_PLAYER_MODES)" % (mode, player))
+    # M7 P5 (docs/gp-p5-interface.md, THE MOBILE ROWS): the fireball and blood pools' runtime things nt .. nt + nmob - 1,
+    # by the model's ONE rule (monsters.mobile_rows), and one VIEW row per mobile lump after the monsters' views
+    from types import SimpleNamespace
+    from doomfj.monsters import mobile_rows
+    nmob = mobile_rows(SimpleNamespace(monsters=mode, player=player))
+    bleed = fx_on(player)
+    assert not nmob or full, ("M7 P5: the mobiles (%d rows) are emitted with the fireball pool, the monster mode "
+                              "\"full\" -- mode %r, player %r" % (nmob, mode, player))
+    assert not bleed or (damage and full), "M7 P5: the blood (fx_on) rides the damage and the pools"
+    mob_first = nt + len(rows)
+    mob_rows, mob_view = (mobile_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
+                                           first=mob_first) if nmob else ([], {}))
+    rows = rows + mob_rows
+    nrows = nt + len(rows)
+    rn = max(1, ((nrows - 1).bit_length() + 3) // 4)
     w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los")
     nmon, schema = w.layout.nmon, w.schema
     if nmon == 0 or not rows:
@@ -330,12 +355,15 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                                                               for b in range(len(w.barrel_things))))]
                           if chase else [])
                        + (noise_restart_lines(w) if hear else []))           # M7 P4.2b: no node has heard a shot
-    # the row select
+    # the row select -- M7 P5: over the runtime things AND the mobiles (things nt .. nt + nmob - 1)
+    ntm = nt + nmob
+    from doomfj.things import LIST_MAX_THINGS
+    assert ntm <= LIST_MAX_THINGS and ntm <= 256, (nt, nmob, "the lists and the two-level select hold 254 things")
     sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
-        "thsel_h%d" % h if 16 * h < nt else "thsel_none" for h in range(16))]
-    for h in range((nt + 15) // 16):
+        "thsel_h%d" % h if 16 * h < ntm else "thsel_none" for h in range(16))]
+    for h in range((ntm + 15) // 16):
         sel += ["  thsel_h%d:" % h, "    sim.jump16 sp_ti, " + ", ".join(
-            "thsel_s%d" % (16 * h + l) if 16 * h + l < nt else "thsel_none" for l in range(16))]
+            "thsel_s%d" % (16 * h + l) if 16 * h + l < ntm else "thsel_none" for l in range(16))]
     # M7 P4.2a (doomfj.aimcode): a tier whose player SHOOTS gives every runtime thing its aim id -- 1 + slot while
     # the monster is shootable (a corpse is not: damage clears it), 0 for any other thing -- and its radius class
     from doomfj.world import player_resolves
@@ -362,6 +390,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     "    hex.zero w/4, sp_ti",
                     "    mview.lookup sp_ti, ts_idx"]
         sel.append("    stl.fret thsel_ret")
+    sel += mobile_select_lines(nt, nmob, wake=wake, shoot=shoot)
     sel += ["  thsel_none:", "    stl.fret thsel_ret"]
     extra = {}
     if wake:
@@ -418,11 +447,17 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 extra["decide_lines"] = near_los_lines(w)
                 if damage:                             # M7 P4.2a: the monsters' damage (damagecode)
                     from doomfj.damagecode import damage_parts
-                    dmp = damage_parts(w, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill)
+                    # M7 P5: a hit in reach spawns the BLOOD (damagecode.fx_on: dm_leaf calls projcode's fx_spawn)
+                    dmp = damage_parts(w, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
+                                       fx=bleed)
                     extra["decls_wake"] += dmp["decls"]
                     extra["decide_lines"] += dmp["lines"]
                     extra["tables"] += dmp["tables"]
                     extra["justhit"] = True
+                if full:                               # M7 P5: the fireball and blood pools (doomfj.projcode)
+                    from doomfj.projcode import proj_parts
+                    extra["proj"] = proj_parts(w, nt=nt)
+                    extra["proj"]["nt"] = nt
             # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
             # render setting says so (depth_walk, above) -- the walk's registers (sim.thing_pass_depth)
             if depth:
@@ -447,9 +482,65 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         "tic": [] if wake else mon_tic_lines(schema, nmon),
         "decls": (monster_decls(schema, nmon, boot) + MT_DECLS + ROT_DECLS
                   + ["ts_row: hex.vec 6", "ts_idx: hex.vec 3", "thsel_ret: hex.vec w/4",
-                     "trb_mir: hex.vec 1", "trb_mu: hex.vec 2"]),
+                     "trb_mir: hex.vec 1", "trb_mu: hex.vec 2"]
+                  + (["ts_mob: hex.vec 2"] if nmob else [])),                  # M7 P5: a mobile's state
         "restart": restart, "view_heights": sorted({max(1, r[2]) for r in rows}),
+        # M7 P5: the mobiles -- how many runtime things follow the WAD's, the view row of each pool state (`mobview`,
+        # indexed by the state cell pj_st / fx_st), the first mobile view row, the model World the parts came from
+        "nmob": nmob, "mob_view": mob_view, "mob_first": mob_first, "world": w,
+        **({"mobview": generate_dispatch_table_fj("mobview", [mob_view.get(i, 0) for i in range(max(mob_view) + 1)],
+                                                  index_nibbles=2, result_nibbles=rn)} if nmob else {}),
     }
+
+
+# ---- M7 P5: the MOBILES' rows (docs/gp-p5-interface.md, THE MOBILE ROWS) ---------------------------------------
+def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict, first: int):
+    """-> (rows, {state index: row}): one thing row per distinct mobile LUMP (`monsters.mobile_lump` of every pool
+    state, projcode.pool_states' order), `things.thing_rows`' layout -- how the oracle draws a mobile
+    (reference_model.render_wall_frame(mobiles=)), field by field:
+      * its state's frame at rotation 0, never mirrored: the anim bank's `(sprite, letter, 0)` region, dw's bit 7 clear;
+      * z: `project_thing` reads the floor only as `(floor + top) << 16`, so standing MISSILE_Z above the leaf's floor
+        IS the art's top offset + MISSILE_Z (sim.thing_load adds the row's int16 zoff to the leaf's `ss_flr`);
+      * the SCENERY class (sp_mon 0: THING_BUDGET), at the BASE minimum height MIN_SPRITE_H -- both depth bounds
+        (sp_tzmax, and sp_tzmax2 which the graduated acceptance switches to) are the base one, so the raise binds
+        nothing, as the oracle's `not mob` keeps it;
+      * the near (LD) region 2*dw on, as a monster view's.
+    `first`: the row index of the first one (after the runtime things and the monsters' views)."""
+    from doomfj.monsters import mobile_lump
+    from doomfj.projcode import pool_states
+    from doomfj.reference_model import MIN_SPRITE_H, MISSILE_Z
+    rows, lump_row, by_state = [], {}, {}
+    for s in pool_states():
+        lump = mobile_lump(s)
+        if lump not in lump_row:
+            assert len(lump) == 6 and lump[5] == "0", (s, lump, "a mobile is drawn from a single-rotation lump")
+            base, dw, mir = anim_index[(lump[:4], lump[4], 0)]
+            art = rm.art_of_lump(sprite_wad, lump, cache)
+            assert not mir and dw == art[2] and dw < 0x80, (lump, mir, dw, art[2])
+            tzmin = rm.sprite_tz_min_size(art[4], MIN_SPRITE_H) & 0xFFFFFFFF
+            rows.append((art[5], art[3], art[4], art[6] + MISSILE_Z, tzmin, tzmin,
+                         base, base + 2 * dw if spr_near else 0, 0, dw))
+            lump_row[lump] = first + len(rows) - 1
+        by_state[gd.STATE_INDEX[s]] = lump_row[lump]
+    return rows, by_state
+
+
+def mobile_select_lines(nt: int, nmob: int, *, wake: bool, shoot: bool) -> list:
+    """the row select's stubs for the mobiles (`thsel_leaf`, p31_parts): thing nt + s for fireball slot s < FIREBALL_POOL,
+    nt + FIREBALL_POOL + s for blood slot s -- each stub copies its slot's state cell (pj_st / fx_st) into `ts_mob` and
+    jumps to ONE shared tail (copy-stub + shared leaf: no per-slot logic), which clears what a scenery thing clears
+    (no seen flag, aim id 0: never seen, never aimed) and looks the state's view row up in `mobview`"""
+    if not nmob:
+        return []
+    from doomfj.world import FIREBALL_POOL, FX_POOL
+    assert nmob == FIREBALL_POOL + FX_POOL, (nmob, FIREBALL_POOL, FX_POOL)
+    out = []
+    for k in range(nmob):
+        cell = ("pj_st + %d*dw" % (2 * k) if k < FIREBALL_POOL else "fx_st + %d*dw" % (2 * (k - FIREBALL_POOL)))
+        out += ["  thsel_s%d:" % (nt + k), "    hex.mov 2, ts_mob, %s" % cell, "    ;thsel_mob"]
+    return out + (["  thsel_mob:"] + (["    hex.zero w/4, sp_sa"] if wake else [])
+                  + (["    hex.zero 2, sp_sid"] if shoot else [])
+                  + ["    hex.zero w/4, sp_ti", "    mobview.lookup sp_ti, ts_mob", "    stl.fret thsel_ret"])
 
 
 # ---- P3.2a: the WAKE tic (docs/gp-monsters.md 8.3) -------------------------------------------------------------
@@ -498,24 +589,24 @@ def persisted_monster_decls(w, mode: str, damage=None, player: str = None) -> li
     if damage is None:
         from doomfj.damagecode import damage_on
         from doomfj.wall_renderer import PLAYER_MODE
-        damage = damage_on(PLAYER_MODE) and mode == "decide"
+        damage = damage_on(PLAYER_MODE) and mode in ("decide", "full")   # M7 P5: "full" decides too
     out = monster_decls(w.schema, n)
-    if mode in ("wake", "chase", "decide"):
+    if mode in ("wake", "chase", "decide", "full"):
         out += [d for d in p32a_decls(w.schema, n, {f: [0] * n for f in P32A_FIELDS}, n)
                 if d.split(":")[0] in P32A_PERSISTED]
-    if mode in ("chase", "decide"):                  # M7 P3.2b: the move's per-slot cells and msec, the barrels, mh_prev
+    if mode in ("chase", "decide", "full"):          # M7 P3.2b: the move's per-slot cells and msec, the barrels, mh_prev
         out += [d for d in p32b_decls(w.schema, n, {f: [0] * n for f in P32B_FIELDS}, [0] * n)
                 if d.split(":")[0] in P32B_FIELDS + ("msec",)]
         out += ["bar_solid: hex.vec %d" % max(1, len(w.barrel_things)),
                 "mh_prev: hex.vec %d" % (len(w.lift_order) + 1)]
-    if mode == "decide":                 # M7 P3.2c: the missile decision's flag
+    if mode in ("decide", "full"):       # M7 P3.2c: the missile decision's flag
         from doomfj.monsterdecide import P32C_FIELDS
         out += p32c_decls(w.schema, n, {f: [0] * n for f in P32C_FIELDS})
     if damage:                           # M7 P4.2a: health, shootable, solid, justhit
         from doomfj.damagecode import P42_FIELDS, field_decls
         out += field_decls(w.schema, n, {f: [0] * n for f in P42_FIELDS})
     from doomfj.noisecode import NOISE_PLAYER_MODES, PERSIST as NOISE_PERSIST
-    if mode in ("wake", "chase", "decide") and player in NOISE_PLAYER_MODES:   # M7 P4.2b: the alerts, the ambushers
+    if mode in ("wake", "chase", "decide", "full") and player in NOISE_PLAYER_MODES:   # M7 P4.2b: the alerts, the ambushers
         out += [d for d in [ambush_decl(n, [0] * n)] + noise_decls(w) if d.split(":")[0] in NOISE_PERSIST]
     return out
 
@@ -884,7 +975,7 @@ def p32b_rj_leaf(sectors) -> list:
 K_SLOTS = K_HEAVY                    # world.K_HEAVY: heavy monster actions per tic (D5)
 
 # M7 P3.3: the monster modes that emit sim.thing_pass_depth -- the walk's registers come with the chase block
-DEPTH_MODES = ("chase", "decide")
+DEPTH_MODES = ("chase", "decide", "full")
 
 
 def depth_walk(mode: str, order=None) -> bool:

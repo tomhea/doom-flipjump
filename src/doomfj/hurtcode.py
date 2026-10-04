@@ -48,7 +48,8 @@ stream): palidx[p_dc] against `pal_cur`; only on a change `present.set_palette p
 only if nothing else re-sends the palette per frame: the M1 reset re-enters at `__hot_end`, ahead of the main
 part's `present.init_screen` / `present.set_palette palette` -- and `init_screen` ZEROES the device's palette
 (ScreenIO._init_screen). Those two lines must move to the boot-only entry part (beside the window chrome) when
-these lines are spliced, or the device shows playpal 0 again every frame after the first change.
+these lines are spliced, or the device shows playpal 0 again every frame after the first change. (M7 P5 integration:
+done -- wall_renderer's `_boot_screen`, for the game-screen tier.)
 """
 from __future__ import annotations
 

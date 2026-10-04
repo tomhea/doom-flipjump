@@ -136,12 +136,15 @@ from doomfj import gamedata as _gd                               # noqa: E402 (a
 SKILLS = (_gd.SK_EASY, _gd.SK_MEDIUM, _gd.SK_HARD)
 BOOT_SKILL = _gd.SK_HARD
 # M7 P3 (docs/gp-monsters.md): the game tier's MONSTER MODE -- the model mode its binary is exact against
-# ("idle" P3.1, "wake" P3.2a, "chase" P3.2b, "decide" P3.2c)
-MONSTER_MODE = "decide"
+# ("idle" P3.1, "wake" P3.2a, "chase" P3.2b, "decide" P3.2c, "full" P5: the attacks land -- the bullets, the claw and
+# the bite through hurtcode's dp_go, the imp's fireball through projcode's pool)
+MONSTER_MODE = "full"
 # M7 P4 (docs/gp-combat.md section 1): the game tier's PLAYER MODE -- the model mode its weapon is exact against
 # ("walk" through P4.0, "fire" P4.1: the trigger without its effects, "hit" P4.2); a mode whose shots hurt
-# (damagecode.DAMAGE_PLAYER_MODES) adds the monsters' damage to p31_parts -- MONSTER_MODE must then be "decide"
-PLAYER_MODE = "hit"                      # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD
+# (damagecode.DAMAGE_PLAYER_MODES) adds the monsters' damage to p31_parts -- MONSTER_MODE must then decide ("decide" or
+# "full"); M7 P5: "fx" ("hit" + the blood a hit spawns) is the one a "full" MONSTER_MODE pairs with (hurtcode.hurt_on:
+# the player can be hurt exactly when the monsters' attacks land -- monstercode.p31_parts asserts the pair)
+PLAYER_MODE = "fx"                       # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD; P5: it BLEEDS
 
 
 def tier_flags(tier: str) -> dict:
@@ -445,7 +448,7 @@ STANDALONE_SCRATCH_DECLS = [
 
 
 def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
-                  monsters=None) -> tuple:
+                  monsters=None, nmobile=0) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -457,7 +460,11 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
     flips in its non-zero list bytes (bit k of a byte cell is `cell + dbit + k`, the address
     `m1.zerobyte` itself flips) and sets its `thvis` flags. `per_skill[k]` is
     `things.skill_level_start(...)` for skill k. The block runs on the one frame a skill is picked,
-    so its ops are that frame's, not every frame's."""
+    so its ops are that frame's, not every frame's.
+
+    M7 P5: `nmobile` -- the mobiles' runtime things after the WAD's (monstercode.p31_parts' `nmob`): their links
+    are zeroed with the others' (a level start links no pool thing; projcode's restart lines, passed in `hud`, zero
+    their rows and empty the pools)."""
     common = ["restart_common:",
               f"    hex.set 8, viewx, {spawn.x & 0xFFFFFFFF}",
               f"    hex.set 8, viewy, {spawn.y & 0xFFFFFFFF}",
@@ -476,7 +483,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
               *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
-              f"    rep({len(rt_binds)}, i) m1.zerobyte thnext + i*dw",
+              f"    rep({len(rt_binds) + nmobile}, i) m1.zerobyte thnext + i*dw",
               *[f"    {line}" for line in hud],                  # M7 P4.0: the bar's level-start values
               "    stl.fret rs_ret"]
     skills = []
@@ -490,6 +497,86 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
         out += list(monsters[len(skills)]) if monsters else []
         skills.append(out)
     return common, skills
+
+
+def p5_tic_lines(hrt) -> list:
+    """M7 P5 -- the frame's tic after the monsters' (`tic_after_eye`): the fireballs, then the blood (projcode's
+    `pj_phase` / `fx_phase`, each skipping itself while `lvdone`: world.tic's order monsters -> projectiles ->
+    barrels -> effects), then the bar's health and armor (`hrt` is hurtcode.hurt_parts' dict: its `bar`, hp_bar)
+    from what the frame's damage left, inside the frozen-level guard -- a finished level changes neither"""
+    return ["stl.fcall pj_phase, pj_pret", "stl.fcall fx_phase, fx_pret",
+            "hex.if1 1, lvdone, p5_bar_skip", *hrt["bar"], "p5_bar_skip:"]
+
+
+# M7 P5: the labels the P5 text READS that other parts of the program must define (projcode.proj_parts' docstring:
+# the decide leaves' octant and context, the point location, the leaf lists, the collision state; hurtcode's bar and
+# rng_pl; damagecode's dm_leaf calling fx_spawn) -- `_p5_assert_labels` checks each is defined in the emitted parts
+P5_SHARED_LABELS = ("mm_x", "mm_y", "viewx", "viewy", "lvdone", "cpx", "cpy", "cprad", "cp_ok", "ptx", "pty", "ptss",
+                    "ptloc_walk", "ptloc_ret", "sshead", "thnext", "ll_enc", "thpos_rt", "thss_rt", "mt_dx", "mt_dy",
+                    "mt_ax", "mt_ay", "mm_octant", "mm_ocret", "mm_fa", "rng_pl", "hud_v", "wp_st", "wp_sy",
+                    "wp_tics", "wp_frm", "wp_bottom_c", "dm_leaf", "md_attack", "sp_sa", "sp_sid", "sp_ti",
+                    "thsel_ret", "palette",
+                    # P5's own: what its callers jump to
+                    "dp_go", "dp_ret", "dp_dmg", "pj_spawn", "pj_sret", "pj_phase", "fx_spawn", "fx_sret", "fx_phase",
+                    "p_hp", "p_dead", "pal_cur", "rng_fx", "ts_mob", "thsel_mob")
+# ... and the namespaces (generated tables) it calls into
+P5_SHARED_NS = ("finesine", "ammobcd", "mobview", "mbul", "trclaw", "sgbite", "dpsav", "palidx", "fxrnd", "pjst")
+
+
+def _p5_assert_labels(texts) -> None:
+    """M7 P5: refuse an emission that lacks a label the P5 text reads -- ONE pass over the parts (a missing one is an
+    assembler error ~10 minutes later, or worse a label of the same name meaning something else is not caught here:
+    the names are P5_SHARED_LABELS' documented owners)"""
+    import re
+    want = set(P5_SHARED_LABELS)
+    pat = re.compile(r"(?m)^[ \t]*(%s):" % "|".join(sorted(map(re.escape, want), key=len, reverse=True)))
+    seen = set()
+    for _name, text in texts:
+        seen.update(pat.findall(text))
+        if seen == want:
+            break
+    missing = sorted(want - seen)
+    ns_missing = [n for n in P5_SHARED_NS if not any(("ns %s {" % n) in text for _nm, text in texts)]
+    assert not missing and not ns_missing, (
+        "M7 P5: the emitted program does not define %s (labels) / %s (namespaces) that the monsters' attacks read"
+        % (missing, ns_missing))
+
+
+def _p5_model_asserts(p31, proj, hrt) -> None:
+    """M7 P5 -- the emitter's constants tied to the model's (assert, don't trust): the pool sizes, the mobile row count
+    and its rule, the pool states' indices, the mobiles' lumps and rows, MISSILE_Z, the damage bounds"""
+    from types import SimpleNamespace
+    from doomfj import gamedata as gd
+    from doomfj import hurtcode, projcode
+    from doomfj.combat import FIREBALL_INFO
+    from doomfj.monsters import mobile_lump, mobile_rows
+    from doomfj.reference_model import MISSILE_Z
+    from doomfj.world import FIREBALL_POOL, FX_POOL
+    assert (FIREBALL_POOL, FX_POOL) == (8, 2) == projcode._pool_sizes(), (FIREBALL_POOL, FX_POOL)
+    assert p31["nmob"] == FIREBALL_POOL + FX_POOL == mobile_rows(
+        SimpleNamespace(monsters=MONSTER_MODE, player=PLAYER_MODE)), p31["nmob"]
+    # the pool states (docs/gp-p5-interface.md): S_BLOOD1..3 = 39..41, S_TBALL1/2 = 46/47, S_TBALLX1..3 = 48..50
+    names = {"S_BLOOD1": 39, "S_BLOOD2": 40, "S_BLOOD3": 41, "S_TBALL1": 46, "S_TBALL2": 47, "S_TBALLX1": 48,
+             "S_TBALLX2": 49, "S_TBALLX3": 50}
+    assert {s: gd.STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
+    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states()) == sorted(names.values())
+    assert (FIREBALL_INFO.spawnstate, FIREBALL_INFO.deathstate) == ("S_TBALL1", "S_TBALLX1")
+    mv = p31["mob_view"]
+    assert sorted(mv) == sorted(names.values()), sorted(mv)
+    rows, nt = p31["view_rows"], len(p31["rt_slot"])
+    by_lump = {}
+    for s in projcode.pool_states():
+        row = mv[gd.STATE_INDEX[s]]
+        assert p31["mob_first"] <= row < nt + len(rows), (s, row)
+        by_lump.setdefault(mobile_lump(s), set()).add(row)
+        r = rows[row - nt]
+        assert r[8] == 0 and r[4] == r[5] and r[9] < 0x80, (s, r)        # scenery, base bound twice, not mirrored
+    assert all(len(v) == 1 for v in by_lump.values()) and len({min(v) for v in by_lump.values()}) == len(by_lump)
+    assert MISSILE_Z == 32, MISSILE_Z
+    assert proj["nt"] == nt
+    # the damage dp_go takes: every source fits DP_MAX (the fireball's impact: fxrnd's nibbles 0-1)
+    assert max(v & 0xFF for v in projcode.fxrnd_values()) <= hurtcode.DP_MAX
+    assert hrt["persist"] == hurtcode.PERSIST and proj["persist"] == projcode.PERSIST
 
 
 def _skill_dispatch(prefix: str) -> list:
@@ -760,7 +847,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
 
 def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                          spr_base, spr_ldbase, spr_dw, spr_cls, *, spr_cache: dict,
-                         keep=None, view_rows=(), ltw: int = 1):
+                         keep=None, view_rows=(), ltw: int = 1, mobiles: int = 0):
     """M14-e — everything the runtime thing table needs, baked ONCE by thing index.
 
     The static path bakes one xor-involution block per (subsector, thing), which is only possible
@@ -809,7 +896,10 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     # slot): the wire writes it with `hex.input 8` and sim reads it with ptr_index + read_hex 16.
     # Emitting it as a packed LUT would put the strides a factor of 2 apart -- see handoff-m14 5.
     # (the value is `things.thing_pos_value`, which NEW GAME's restart block bakes too -- R6)
-    thpos = ["thpos_rt:"] + [f"    hex.vec 16, {thing_pos_value(t)}" for t in things]
+    # M7 P5: + the MOBILES' rows (monstercode.p31_parts' `nmob`: the fireball and blood pools' runtime things nt ..),
+    # zero -- a free slot's row, in no leaf list (projcode writes a live slot's whole-unit position here)
+    thpos = (["thpos_rt:"] + [f"    hex.vec 16, {thing_pos_value(t)}" for t in things]
+             + ["    hex.vec 16, 0"] * mobiles)
     text = "\n".join([
         # M14-perf: HOT (everything a reject can reach) and COLD (what only a drawn sprite needs).
         # See doomfj.things -- 94.1% of loads are rejected, and read_table_packed is linear in the
@@ -825,8 +915,8 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     ])
     # the per-leaf lists hold a thing's index + 1 in a byte (things.LIST_MAX_THINGS, the one bound)
     from doomfj.things import LIST_MAX_THINGS
-    assert nt <= LIST_MAX_THINGS, (
-        f"{mapname} has {nt} runtime things; the byte lists hold {LIST_MAX_THINGS}")
+    assert nt + mobiles <= LIST_MAX_THINGS, (
+        f"{mapname} has {nt} runtime things and {mobiles} mobiles; the byte lists hold {LIST_MAX_THINGS}")
     decls = ["cur_ss: hex.vec w/4", "tp_ret: ;0",
              # the leaf's baked floor height and sprlt row base (see subsector_action)
              "ss_flr: hex.vec 4", "ss_ltb: hex.vec 4",
@@ -1124,8 +1214,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P4.2b: ... and make NOISE (nz_leaf at each fire point; monstercode.p31_parts emits the leaf at the same mode)
     from doomfj.noisecode import NOISE_PLAYER_MODES
     from doomfj.world import player_resolves as _player_resolves
-    _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
-                        noise=PLAYER_MODE in NOISE_PLAYER_MODES) if menu else None
+    # M7 P5 (doomfj.hurtcode, doomfj.projcode): the monsters' attacks LAND -- the player can be hurt and die, the imps'
+    # fireballs fly and a hit bleeds. ONE switch for the whole splice, from the two model modes (p31_parts asserts
+    # the pair is coherent) -- and a map WITH monsters (p31_parts, below: a monster-less game tier has nobody to
+    # hurt the player, and no pools). The weapon then reads the health and death cells (weapon_parts(hurt=)), so it
+    # is built once that is known.
+    from doomfj.hurtcode import hurt_on as _hurt_on
+    _P5 = bool(menu and MONSTER_MODE == "full" and _hurt_on(PLAYER_MODE))
     cmap = bake_bsp(map_wad, mapname)
     verts = cmap.vertexes
     lds = map_wad.linedefs(mapname); sds = map_wad.sidedefs(mapname)
@@ -1566,7 +1661,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
                          cache=spr_cache, mode=MONSTER_MODE, player=PLAYER_MODE if menu else "walk")
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
-    _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide")) else 0
+    _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide", "full")) else 0
     # M7 P4.2a (doomfj.aimcode): the game tier's AIM WINDOW, when its player's shots resolve -- recorded by the runtime
     # monsters' projections (their seen machinery reaches xscale for every monster D3 e counts)
     _AIM = 1 if (_SEEN and menu and _player_resolves(PLAYER_MODE)) else 0
@@ -1586,6 +1681,25 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             mon_contact=[(f"thpos_rt + {16 * t_}*dw", f"thpos_rt + {16 * t_ + 8}*dw", r_,
                           f"{_chase['live']} + {m_}*dw")         # M7 P4.2a: a LIVE monster (mon_shootable)
                          for m_, (t_, r_) in enumerate(_chase["slots_rt"])])
+    # M7 P5 (docs/gp-p5-interface.md, the coordinator's part): the monsters' attacks -- hurtcode's player cells, dp_go,
+    # the bar's health / armor and the palette; projcode's fireball and blood pools (p31_parts builds them: their
+    # runtime things follow the WAD's, `nt`); the mobile rows (p31_parts' `nmob`, `mobview`)
+    _proj = _p31.get("proj") if _p31 else None
+    _hrt = None
+    _P5 = _P5 and _p31 is not None                     # a map without monsters: nothing attacks
+    _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
+                        noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5) if menu else None
+    if _P5:
+        assert _proj and _p31.get("nmob"), (
+            "M7 P5: MONSTER_MODE 'full' needs p31_parts' pools and mobile rows -- a map with monsters, the game tier")
+        from doomfj.hurtcode import hurt_parts
+        _w5 = _p31["world"]
+        _w5.reset(BOOT_SKILL)
+        # boot_wad: the asset wad, whose palette 0 the boot sends as `palette` -- hurtcode asserts playpal0 equals it
+        _hrt = hurt_parts(_w5, sprite_wad=sprite_wad, boot_wad=asset_wad)
+        _p5_model_asserts(_p31, _proj, _hrt)
+    else:
+        assert not _proj and not (_p31 and _p31.get("nmob")), "the pools and mobile rows are P5's (MONSTER_MODE 'full')"
     _ANIM_SEL = "thsel_leaf, thsel_ret" if _ANIM else "0, 0"
     if _ANIM:
         sprlight, spr_cls = _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds,
@@ -1596,7 +1710,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                              spr_base, spr_ldbase, spr_dw, spr_cls, spr_cache=spr_cache,
                              keep=_mt_keep, view_rows=_p31["view_rows"] if _p31 else (),
-                             ltw=2 if _p31 else 1)
+                             ltw=2 if _p31 else 1, mobiles=_p31["nmob"] if _p31 else 0)
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
     # (the hot block below), where they persist instead of being rebuilt every frame
@@ -1636,6 +1750,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             ["thvis:"] + [f"    hex.vec 2, {v}" for v in _BOOT_VIS] if standalone else
             [f"thvis: hex.vec {2 * _MT_NVIS}"])
     _MT_NROWS = _p31["nrows"] if _p31 else _MT_NT         # M7 P3.1: + the view rows
+    # M7 P5: the mobiles are runtime things nt .. nt + nmob - 1 of THIS table -- the pools' `nt` must be its runtime
+    # thing count (MonsterViews.nrt's index space: the drawables the bake leaves to the runtime path), and the lists'
+    # declared `thnext` extent (2 * nt, the span the restore set carries) must hold the mobiles' links
+    _MT_NMOB = _p31["nmob"] if _p31 else 0
+    if _MT_NMOB:
+        assert _proj["nt"] == _MT_NT == len(_mt_keep), (_proj["nt"], _MT_NT, len(_mt_keep))
+        assert _MT_NT + _MT_NMOB <= 2 * _MT_NT, "thnext's declared cells cannot hold the mobiles' links"
     _MT_NTH = _index_nibbles(max(1, _MT_NROWS))       # the row index's width, as check_line's is
     _MT_NSSN = _index_nibbles(max(1, _MT_NSS))
     _MT_NLTI = _index_nibbles(max(1, len(_MT_LTB) * _MT_NROWS)) if moving_things else 1
@@ -2472,7 +2593,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _mon_move = BSn.join(
                 ["    ;mm_block_end", _mcells]
                 + monster_seed_fj(cmap, lds, sds, _dsecs_open, _msecs, _mcell)
-                + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"])   # M7 P4.2a: mon_solid
+                + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"],   # M7 P4.2a: mon_solid
+                                    hurt=bool(_chase.get("hurt")))                # M7 P5: a dead player blocks nothing
                 + move_leaf_lines(root=_mroot, lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:])
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
@@ -2480,8 +2602,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
                 # M7 P3.2c: the decisions, the attack actions and the near LOS (monsterdecide, monstersight)
-                + ((_decide_leaves(justhit=bool(_p31.get("justhit"))) + _p31["decide_lines"])
+                + ((_decide_leaves(justhit=bool(_p31.get("justhit")),
+                                   full=bool(_chase.get("hurt")))       # M7 P5: md_attack APPLIES its draws
+                    + _p31["decide_lines"])
                    if _p31.get("decide_lines") else [])
+                # M7 P5: the leaves the attacks land through -- dp_go (hurtcode), the pools' spawns, phases and shared
+                # leaves (projcode), and the missile cells (which jump over themselves); behind this block's guard,
+                # where nothing falls in
+                + ((list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]]) if _hrt else [])
                 + ["mm_block_end:"]) + BSn
         else:
             _mon_move = ""
@@ -2502,10 +2630,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
             monsters=_p31["restart"] if _p31 else None,
             hud=(list(_hud["restart"]) + list(_wpn["restart"])
-                 + ([f"hex.zero {2 * 17}, aim_sid"] if _AIM else [])) if _hud else ())   # M7 P4.2a: no aim
+                 + ([f"hex.zero {2 * 17}, aim_sid"] if _AIM else [])                       # M7 P4.2a: no aim
+                 # M7 P5: the player's health, armor, damage count, death and palette at the level start; the
+                 # pools empty, their rows zero, rng_fx at its seed
+                 + (list(_hrt["restart"]) + list(_proj["restart"]) if _hrt else [])) if _hud else (),
+            nmobile=_MT_NMOB)
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
-                               restart=_restart, hud=_hud["menu"] if _hud else ())
+                               restart=_restart,
+                               # M7 P5: a menu frame shows PLAYPAL 0 (hurtcode.pal_menu_lines: sent only on a change)
+                               hud=(list(_hud["menu"]) + (list(_hrt["menu_palette"]) if _hrt else []))
+                               if _hud else ())
                    if menu else None)
     # M7 P2a.2: the exit switch, where the game has a menu to open and doors (its use key, `duse`)
     _exit = (exit_boxes(lds, map_wad.vertexes(mapname)) if (standalone and menu and _door_tic)
@@ -2518,7 +2653,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                    if (_movers_on and _exit) else [])
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, monster_tic=_p31["tic"] if _p31 else (),
-                                  weapon=_wpn["tic"] if _wpn else (),
+                                  # M7 P5: the damage count fades right after the weapon tic (hurtcode's
+                                  # `tic`: MonsterPhase.weapon's order, after the psprites)
+                                  weapon=((list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))
+                                          if _wpn else ()),
                                   door_lines=_door_tic,
                                   exit_boxes_=_exit, press_miss=_press_miss)
           if standalone else
@@ -2571,11 +2709,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P3.2a: the monsters tic AFTER the eye's point location (the wake mode's REJECT reads the player's
     # sector) and before the render, which marks this frame's seen flags for the next tic
     pass1 += list(_p31.get("tic_after_eye", ())) if _p31 else []
+    # M7 P5: then the fireballs and the blood (world.tic's order: monsters, projectiles, barrels, effects -- each phase
+    # skips itself while `lvdone`), then the bar's health and armor from what the frame's damage left (inside the
+    # same guard: a frozen level changes neither)
+    if _hrt:
+        pass1 += p5_tic_lines(_hrt)
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
     # runs before this, has already read last frame's)
     if _AIM:
         from doomfj.aimcode import prologue_lines as _aim_prologue
         pass1 += _aim_prologue()
+    # M7 P5: the frame's palette -- after everything that moves the damage count, BEFORE the record stream starts
+    # (a command byte inside the run-lists would corrupt them); sent only on a change (hurtcode.pal_lines)
+    if _hrt:
+        pass1 += list(_hrt["palette"])
     pass1.append("present.begin_frame_collines")
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
@@ -2632,7 +2779,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                       # persist (build.THING_PERSIST) where bind_things rebuilt them every frame.
                       # The 2x extents are unchanged: the M1 restore set spans them.
                       + ([NLJ.join(["thss_rt:"]
-                                   + [f"    hex.vec 16, {ss}" for ss in _MT_BINDS])]
+                                   + [f"    hex.vec 16, {ss}" for ss in _MT_BINDS]
+                                   # M7 P5: the mobiles' leaves -- 0, in no list, until a slot spawns
+                                   + ["    hex.vec 16, 0"] * _MT_NMOB)]
                          if standalone else [f"thss_rt: hex.vec {16 * _MT_NT}"])
                       if moving_things else []))
     # ⚠ ANCHOR, not decoration. frame.arm5 -- the five-hex pointer arm -- is exact only while
@@ -2654,6 +2803,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               # called by nothing yet -- the build that carries them prices the placement tax
               + (_monster_tables() if _movers_on else [])
               + ([_p31["mview"], _p31["mrot"]] if _p31 else [])            # M7 P3.1
+              + ([_p31["mobview"]] if (_p31 and _p31.get("mobview")) else [])   # M7 P5: the mobiles' view rows
               + (list(_p31.get("tables", ())) if _p31 else [])             # M7 P3.2a: REJECT rows, lfsec
               # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
               # which changes the shipped text and so its emit hash -- caught by
@@ -2672,6 +2822,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # lands on it), and the title+icon cost 8,440 ops and 0.57 ms each time. They moved
     # to the ENTRY part, ahead of the `;__hot_end` jump, so they run once at boot.
     prelude = ["present.set_palette palette"]
+    # M7 P5: the GAME SCREEN tier (the bar, P4.0; the damage palette, P5) sends its init and boot palette from the
+    # ENTRY part, once: `init_screen` ZEROES the device's palette AND pixels (ScreenIO._init_screen), and the M1 reset
+    # re-enters at `__hot_end`, so per frame it would put playpal 0 back behind hurtcode's `pal_cur` and blank every
+    # bar column hudcode's tail does not redraw (it redraws only the changed ones: the device keeps the rest)
+    _boot_screen = (["present.init_screen" if standalone else "present.init_screen_stream 0"] + prelude
+                    if _hud else None)
     postlude_palette = []
     # ── PARTITIONED EMISSION ────────────────────────────────────────────────────────────
     # The emitted program is built as ORDERED, NAMED PARTS instead of one 107M-char blob, so
@@ -2719,6 +2875,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # BOOT-ONLY, and this time really: everything below `;__hot_end` is re-entered by the M1
         # reset every frame, everything above it runs once. The window title and icon belong above.
         *_chrome_calls,
+        # M7 P5: the game-screen tier's screen init and its boot palette run ONCE, here (`_boot_screen`) --
+        # `init_screen` zeroes the device's palette and pixels (ScreenIO._init_screen), so re-sent every frame it would
+        # put playpal 0 back behind `pal_cur` (hurtcode.pal_lines sends a palette only on a change) and blank the bar
+        *(_boot_screen if _boot_screen else []),
         *hotdata[:1],                                  # the `;__hot_end` jump over the tables
       ]),
       ("tables", [
@@ -2728,9 +2888,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # M5: standalone is run by the plain `fj` CLI, whose stock InMemoryScreen wants the
           # 8-byte init. `flush_mode` governs only the 0x07 pixel-stream mode, which the 0x0B
           # frames this tier presents do not use, so dropping it costs the picture nothing.
-          "present.init_screen" if standalone else
-          "present.init_screen_stream 0",
-          *prelude,
+          *([] if _boot_screen else
+            ["present.init_screen" if standalone else "present.init_screen_stream 0"]),
+          *([] if _boot_screen else prelude),
           *pass1, *pass2, *plane_pass,
           # M3: both frame producers fall into ONE tail. The label goes BEFORE the tail's
           # `stl.output_char 0xFF`, so the line preceding `stl.loop` is still that 0xFF and
@@ -2860,6 +3020,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
           *(_hud["decls"] if _hud else []),                               # M7 P4.0: the bar
           *(_wpn["decls"] + _wpn["tables"] if _wpn else []),                # M7 P4.1: the weapon
+          # M7 P5: the player's hurt cells and the attacks' tables (mbul, trclaw, sgbite, dpsav, palidx, and playpal0..8
+          # as device data), the pools' cells, window and tables (fxrnd, pjst) -- data and self-guarded tables
+          *((list(_hrt["decls"]) + list(_proj["decls"]) + list(_hrt["tables"]) + list(_proj["tables"]))
+            if _hrt else []),
           *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *_collide_decls,                                  # M14-d collision state
@@ -3005,6 +3169,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
       ]),
     ]
     _texts = [(n, chr(10).join(g)) for n, g in _parts if g]
+    if _hrt:                                       # M7 P5: every label the attacks' text reads is defined
+        _p5_assert_labels(_texts)
     main = chr(10).join(t for _, t in _texts)
     return (_texts if return_parts else main)
 

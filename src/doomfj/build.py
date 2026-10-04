@@ -104,6 +104,14 @@ from doomfj.weaponcode import PERSIST as WEAPON_PERSIST                         
 # M7 P4.2a (doomfj.aimcode): the aim window the last picture recorded, for this frame's weapon -- `aim_tz` too, only so
 # the reset leaves it alone (it is read only behind a non-zero `aim_sid` the same walk wrote)
 AIM_PERSIST = ("aim_sid", "aim_tz")
+# M7 P5 (doomfj.hurtcode): the player's health, armor, armor type, damage count and death, and the palette the last
+# present showed (`pal_cur`: a reset that restored it would re-send the red palette every frame, or never) -- the
+# game tier's alone, like the weapon
+from doomfj.hurtcode import PERSIST as HURT_PERSIST                             # noqa: E402
+# M7 P5 (doomfj.projcode): the fireball and blood pools -- every slot's cells -- and the effects' stream `rng_fx`; a
+# reset that restored them would empty the pools every frame. (Their runtime things' rows are thpos_rt / thss_rt's,
+# THING_PERSIST, and their links thnext's, which persists by not being restored.)
+from doomfj.projcode import PERSIST as PROJ_PERSIST                             # noqa: E402
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:
@@ -115,7 +123,8 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
     return (STANDALONE_PERSIST + (DOOR_PERSIST + MOVER_PERSIST if doors else ())
             + (THING_PERSIST if moving_things else ())
             + (MONSTER_PERSIST if (standalone and moving_things) else ())
-            + HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST)   # M7 P4.0 / P4.1 / P4.2a: the game tier's
+            + HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST    # M7 P4.0 / P4.1 / P4.2a: the game tier's
+            + HURT_PERSIST + PROJ_PERSIST)                  # M7 P5: the player's hurt cells, the pools
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 

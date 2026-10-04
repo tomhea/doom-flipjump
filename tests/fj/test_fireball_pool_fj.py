@@ -159,7 +159,9 @@ def _row(w, nt):
         s += "%x%08x%08x%08x%08x%02x%x" % (ws.proj_active[k], ws.proj_x[k] & M32, ws.proj_y[k] & M32,
                                           ws.proj_momx[k] & M32, ws.proj_momy[k] & M32, ws.proj_state[k],
                                           ws.proj_tics[k])
-        s += "%08x%08x%03x" % (ws.proj_y[k] & M32, ws.proj_x[k] & M32, ws.proj_leaf[k])
+        # the runtime thing's row: the WHOLE-UNIT position (the fraction cleared -- docs/gp-p5-interface.md, THE
+        # MOBILE ROWS: monsters.MonsterViews.rt_state's), and the leaf
+        s += "%08x%08x%03x" % (ws.proj_y[k] & M32 & ~0xFFFF, ws.proj_x[k] & M32 & ~0xFFFF, ws.proj_leaf[k])
     return s + "%02x" % ws.rng_fx
 
 

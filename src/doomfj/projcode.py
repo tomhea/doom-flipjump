@@ -23,7 +23,8 @@ THE CELLS (slot-major, one field after another; `world.build_schema`'s proj_* / 
     pj_st   2 x 8            proj_state             rng_fx  2        the effects stream (rng.STREAM_FX's seed)
     pj_ti   1 x 8            proj_tics
 Fireball slot s is runtime thing `nt + s`, blood slot s is `nt + FIREBALL_POOL + s`: their `thpos_rt` row holds the
-16.16 position (x in nibbles 0-7, y in 8-15, as `things.thing_pos_value`) and their `thss_rt` row the leaf (3
+WHOLE-UNIT position -- the 16.16 position with the fraction cleared (x in nibbles 0-7, y in 8-15, as
+`things.thing_pos_value`; M7 P5 integration, `_copy_out`) -- and their `thss_rt` row the leaf (3
 nibbles) -- the model's derived proj_leaf / fx_leaf; a free slot's rows are 0. The leaf lists hold them as runtime
 things (`sim.leaf_link`), so a leaf's list is ascending: monsters, then fireballs, then blood (the model's mobiles).
 `proj_src` is not held: only the model's event log reads it.
@@ -284,9 +285,16 @@ def _roll() -> List[str]:
 
 
 def _copy_out(prefix: str, s: int, t: int, fields) -> List[str]:
-    """the window into slot s of pool `prefix` and into runtime thing t's thpos_rt / thss_rt rows"""
+    """the window into slot s of pool `prefix` and into runtime thing t's thpos_rt / thss_rt rows. The row holds the
+    WHOLE-UNIT position (docs/gp-p5-interface.md, THE MOBILE ROWS: the 16.16 position with its fraction CLEARED --
+    the floor, as the model's `MonsterViews.rt_state` and the oracle's mobiles at `x >> 16`): the renderer projects a
+    mobile from its row, so a row that kept pw_x's fraction would draw a different picture. M7 P5 integration: the
+    fraction nibbles are written 0 and only the integer half (nibbles 4-7) is copied."""
     out = ["    hex.mov %d, %s + %d*dw, pw_%s" % (nib, name, nib * s, name[3:]) for name, nib in fields]
-    return out + ["    hex.mov 8, thpos_rt + %d*dw, pw_x" % (16 * t), "    hex.mov 8, thpos_rt + %d*dw, pw_y" % (16 * t + 8),
+    return out + ["    hex.zero 4, thpos_rt + %d*dw" % (16 * t),
+                  "    hex.mov 4, thpos_rt + %d*dw, pw_x + 4*dw" % (16 * t + 4),
+                  "    hex.zero 4, thpos_rt + %d*dw" % (16 * t + 8),
+                  "    hex.mov 4, thpos_rt + %d*dw, pw_y + 4*dw" % (16 * t + 12),
                   "    hex.mov 3, thss_rt + %d*dw, pw_leaf" % (16 * t)]
 
 

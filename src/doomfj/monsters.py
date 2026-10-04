@@ -189,6 +189,10 @@ class MonsterPhase:
                         "msec": tuple(self.world._mon_sector(m) for m in range(n))})
         if self.world.monsters not in ("idle", "wake", "chase"):   # M7 P3.2c: the missile decision's flag
             out["mon_justattacked"] = tuple(ws.mon_justattacked[:n])
+        if self.world.player in ("shoot", "hit", "full"):       # M7 P4.2a: the damage's cells (health in its 12 bits)
+            out.update({"mon_health": tuple(v & 0xFFF for v in ws.mon_health[:n]),
+                        "mon_shootable": tuple(ws.mon_shootable[:n]), "mon_solid": tuple(ws.mon_solid[:n]),
+                        "mon_justhit": tuple(ws.mon_justhit[:n])})
         return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:

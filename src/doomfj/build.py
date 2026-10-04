@@ -87,7 +87,9 @@ MONSTER_PERSIST = ("mon_state", "mon_tics", "mon_facing", "mon_active",
                    # the skill stands (NEW GAME sets them); the movers' last state (P_ChangeSector's trigger)
                    "mon_movecount", "mon_rng", "mon_floorz", "msec", "bar_solid", "mh_prev",
                    # M7 P3.2c (the decide mode): the missile decision's flag
-                   "mon_justattacked")
+                   "mon_justattacked",
+                   # M7 P4.2a (doomfj.damagecode): the damage's cells -- a reset that restored them would undo every hit
+                   "mon_health", "mon_shootable", "mon_solid", "mon_justhit")
 
 # M7 P4.0 (docs/gp-combat.md section 2; doomfj.hudcode): the status bar's memory, the game tier's alone -- the values
 # (`hud_v`), what the screen shows (`hud_s`) and the redraw-all flag (`hud_full`). A reset that restored them would

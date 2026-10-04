@@ -232,7 +232,14 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         on the index into one stub per runtime thing -- a static thing keeps its own row, a monster's stub runs the
         rotation leaf on its slot's facing and looks up its state's view group (rule 1: the index selects CODE);
       * `rotation`: the rotation leaf; `tic`: the per-slot tic; `decls`: the cells (the boot skill's level start)
-        and the scratch; `restart`: per skill, the lines NEW GAME writes the cells with."""
+        and the scratch; `restart`: per skill, the lines NEW GAME writes the cells with.
+
+    `player` (M7 P4.2a): the game tier's PLAYER_MODE. A mode whose shots hurt (`damagecode.damage_on`; it needs
+    the monster mode "decide") adds the monsters' DAMAGE:
+    the P42 cells join `fields` (so NEW GAME restores them), damagecode's decls / leaves / table ride in
+    `decls_wake` / `decide_lines` / `tables`, the slots run A_Fall and carry justhit (`p32a_slot(dmg=True)`), and
+    `chase` names the per-slot flags the thing test (`solid`: mon_solid) and the door contact (`live`:
+    mon_shootable) read -- mon_active for both without it."""
     from doomfj.monsters import view_of
     from doomfj.things import THING_ROW_BYTES
     from doomfj.wall_renderer import (DEG_MINH2_MON, MIN_SPRITE_H_MONSTER, anim_frames, anim_patches)
@@ -275,6 +282,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     wake = mode in ("wake", "chase", "decide")       # M7 P3.2b: the chase mode is the wake mode plus the move
     chase = mode in ("chase", "decide")              # M7 P3.2c: the decide mode is the chase plus the decisions
     decide = mode == "decide"
+    from doomfj.damagecode import damage_on
+    damage = damage_on(player)
+    assert not damage or decide, "damage (M7 P4.2a) runs on the decide mode's slots: mode %r" % mode
     w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los")
     nmon, schema = w.layout.nmon, w.schema
     if nmon == 0 or not rows:
@@ -284,11 +294,12 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     assert sorted(m for m in rt_slot if m is not None) == list(range(nmon)), "every monster slot is a runtime thing"
 
     from doomfj.monsterdecide import P32C_FIELDS, type_decide
+    from doomfj.damagecode import P42_FIELDS
     from doomfj.noisecode import NOISE_PLAYER_MODES
     # M7 P4.2b (doomfj.noisecode): a player whose shot makes NOISE -- A_Look's sound branch, the per-slot ambush flags
     hear = wake and player in NOISE_PLAYER_MODES
     fields = (P31_FIELDS + (P32A_FIELDS if wake else ()) + (P32B_FIELDS if chase else ())
-              + (P32C_FIELDS if decide else ()) + (P42B_FIELDS if hear else ()))
+              + (P32C_FIELDS if decide else ()) + (P42_FIELDS if damage else ()) + (P42B_FIELDS if hear else ()))
     slot_t = {m: t for t, m in enumerate(rt_slot) if m is not None}
     # the relink (docs/gp-monsters.md 8.4 piece 6): fj links the leaf lists by RUNTIME thing index, the model by
     # monster slot -- the lists' orders agree only while the slots run in runtime-thing order
@@ -358,6 +369,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                       see_tics=gd.STATES[w.mon_info[m].seestate].tics,
                       **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m])} if chase else {}),
                       **({"dc": type_decide(w.mon_info[m])} if decide else {}),
+                      **({"dmg": True} if damage else {}),
                       **({"hear": True, "sec": w._mon_sector(m)} if hear else {}))
                  for m in range(nmon)]
         nleaf = len(w.cmap.subsectors)
@@ -397,6 +409,13 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 extra["decls_wake"] += (p32c_decls(schema, nmon, {f: boot[f] for f in P32C_FIELDS})
                                         + context_decls() + SL_DECLS)
                 extra["decide_lines"] = near_los_lines(w)
+                if damage:                             # M7 P4.2a: the monsters' damage (damagecode)
+                    from doomfj.damagecode import damage_parts
+                    dmp = damage_parts(w, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill)
+                    extra["decls_wake"] += dmp["decls"]
+                    extra["decide_lines"] += dmp["lines"]
+                    extra["tables"] += dmp["tables"]
+                    extra["justhit"] = True
             # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
             # render setting says so (depth_walk, above) -- the walk's registers (sim.thing_pass_depth)
             if depth:
@@ -406,7 +425,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 static_things=things, lift_walk=list(w.lift_walk), lift_order=list(w.lift_order),
                 mon_door_boxes=[(si, w.mon_door_boxes[si]) for si in w.door_order if si in w.mon_door_boxes],
                 slots_rt=[(slot_t[m], w.mon_radius[m]) for m in range(nmon)],
-                mon_radius=[w.mon_radius[m] for m in range(nmon)], height=w.mon_height[0])
+                mon_radius=[w.mon_radius[m] for m in range(nmon)], height=w.mon_height[0],
+                # M7 P4.2a: what blocks a move (World._thing_blocker: MF_SOLID) and what holds a closing door
+                # (World.door_touched: alive -- mon_shootable, damagecode.check_model_rules)
+                solid="mon_solid" if damage else "mon_active", live="mon_shootable" if damage else "mon_active")
             assert len(set(w.mon_height[:nmon])) == 1, "one monster height: try_move_mon takes it at compile time"
     return {
         "mode": mode, **extra,
@@ -453,16 +475,21 @@ def _sub16(dst, a, b):
 P32A_PERSISTED = ("mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen")
 
 
-def persisted_monster_decls(w, mode: str, player: str = None) -> list:
+def persisted_monster_decls(w, mode: str, damage=None, player: str = None) -> list:
     """the monsters' PERSISTED cells as the emitter declares them, for the game tier's model `mode` (widths from the
     schema; values do not matter): the restore sets' standalone globals (scratchpad/m5_setfile.py) and the test that
-    checks them (tests/host/test_restore_set_shipped.py) both read this one list. `player` (M7 P4.2b): the player's
-    model mode -- None reads wall_renderer.PLAYER_MODE, the ONE game-tier setting, so no caller can forget it and
-    key a set without the noise's cells"""
+    checks them (tests/host/test_restore_set_shipped.py) both read this one list. `damage` (M7 P4.2a): the P42
+    cells too -- None reads the game tier's PLAYER_MODE (wall_renderer, damagecode.damage_on), as the emitter does.
+    `player` (M7 P4.2b): the player's model mode for the noise's cells -- None reads wall_renderer.PLAYER_MODE too,
+    so no caller can forget it and key a set without them"""
     if player is None:
         from doomfj.wall_renderer import PLAYER_MODE         # lazy: the emitter imports this module
         player = PLAYER_MODE
     n = w.layout.nmon
+    if damage is None:
+        from doomfj.damagecode import damage_on
+        from doomfj.wall_renderer import PLAYER_MODE
+        damage = damage_on(PLAYER_MODE) and mode == "decide"
     out = monster_decls(w.schema, n)
     if mode in ("wake", "chase", "decide"):
         out += [d for d in p32a_decls(w.schema, n, {f: [0] * n for f in P32A_FIELDS}, n)
@@ -475,6 +502,9 @@ def persisted_monster_decls(w, mode: str, player: str = None) -> list:
     if mode == "decide":                 # M7 P3.2c: the missile decision's flag
         from doomfj.monsterdecide import P32C_FIELDS
         out += p32c_decls(w.schema, n, {f: [0] * n for f in P32C_FIELDS})
+    if damage:                           # M7 P4.2a: health, shootable, solid, justhit
+        from doomfj.damagecode import P42_FIELDS, field_decls
+        out += field_decls(w.schema, n, {f: [0] * n for f in P42_FIELDS})
     from doomfj.noisecode import NOISE_PLAYER_MODES, PERSIST as NOISE_PERSIST
     if mode in ("wake", "chase", "decide") and player in NOISE_PLAYER_MODES:   # M7 P4.2b: the alerts, the ambushers
         out += [d for d in [ambush_decl(n, [0] * n)] + noise_decls(w) if d.split(":")[0] in NOISE_PERSIST]
@@ -513,7 +543,7 @@ def _sign_branch(cell, kind, yes, no):
 
 
 def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, mv=None,
-              dc=None, hear: bool = False, sec: int = None) -> list:
+              dc=None, dmg: bool = False, hear: bool = False, sec: int = None) -> list:
     """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
     A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
     REJECT row of its spawn sector (indexed by the player's sector); t: its seen flag's index (`thseen`).
@@ -526,6 +556,10 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     `dc` (M7 P3.2c, the DECIDE mode: `monsterdecide.type_decide`'s dict): A_Chase decides before it moves
     (`mm_decide`), a decision enters the melee or missile state, and the attack states' actions run
     (`md_attack`: the facing and the draws).
+
+    `dmg` (M7 P4.2a, a player mode whose shots hurt: damagecode): monsters die -- A_Fall clears the slot's
+    `mon_solid`, the move excludes the mover by its `mon_solid` (the thing test reads mon_solid, World._thing_blocker),
+    and the decision carries `mon_justhit` (`mm_jh`, A_Chase's P_CheckMissileRange).
 
     `hear` (M7 P4.2b, the player mode "hit": doomfj.noisecode): A_Look's SOUND branch first, as the model's -- the
     node of the monster's sector (`msec` with `mv`, else its spawn sector `sec`) heard a shot (`nz_heard`): the
@@ -568,7 +602,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "  %slight:" % L,
            "    hex.mov 2, %s, mt_nxt" % ST,
            "    hex.mov 1, %s, mt_row + 2*dw" % TI,
-           "    sim.jump16 mt_row + 3*dw, %s" % ", ".join(_action_targets(L, nxt, dc)),
+           "    sim.jump16 mt_row + 3*dw, %s" % ", ".join(_action_targets(L, nxt, dc, fall=dmg)),
            # ---- A_Look: threshold 0; no sound before P4; P_LookForPlayers (not all around) -----------------
            "  %slook:" % L,
            "    hex.zero %d, %s" % (nthr, TH),
@@ -614,6 +648,8 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    hex.set %d, %s, %d" % (ns, ST, see_idx),        # D-WAKE: the see state, no action run now
             "    hex.set %d, %s, %d" % (nt, TI, see_tics),
             "    ;%s" % nxt,
+            # ---- M7 P4.2a: A_Fall -- the corpse stops blocking (World._run_action) ------------------------------
+            *(["  %sfall:" % L, "    hex.zero 1, mon_solid + %d*dw" % m, "    ;%s" % nxt] if dmg else []),
             # ---- A_Chase in the wake mode: the counters and the turn; the target is never lost before P5 -------
             "  %schase:" % L,
             "    hex.if0 1, %s, %sr0" % (RE, L),
@@ -628,7 +664,8 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    hex.mov 1, mt_ti + 1*dw, %s" % MD,
             "    mturn.lookup %s, mt_ti" % FA]
     if mv:
-        out += ["  %smv:" % L] + p32b_move_lines(m, schema=schema, **mv, dc=dict(dc, t=t) if dc else None)
+        out += ["  %smv:" % L] + p32b_move_lines(m, schema=schema, **mv, dc=dict(dc, t=t, jh=dmg) if dc else None,
+                                                 solid="mon_solid" if dmg else "mon_active")
     if dc:
         out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt, hear=hear)
     out += ["  %s:" % nxt]
@@ -639,17 +676,20 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
 P32B_FIELDS = ("mon_movecount", "mon_rng", "mon_floorz")
 
 
-def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, dc=None) -> list:
-    """slot m's move: its cells into the context, `mm_chase` (its own mon_active cleared, so the thing test skips
+def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, dc=None, solid: str = "mon_active") -> list:
+    """slot m's move: its cells into the context, `mm_chase` (its own `solid` flag cleared, so the thing test skips
     it), the context back -- position into thpos_rt, the leaf into thss_rt, the sector into msec. `dc` (M7 P3.2c):
     `mm_decide` instead, with the decision's inputs (justattacked, seen, the kinds, reaction) and justattacked back;
-    the slot then enters a decided state (p32c_slot_lines)"""
+    the slot then enters a decided state (p32c_slot_lines); `dc["jh"]` (M7 P4.2a): justhit in and back too.
+    `solid`: the per-slot flag `monstermove.things_leaf_lines` tests -- the same name on both sides (mon_active
+    until monsters die; M7 P4.2a: mon_solid, SET again after the move: a monster that moves is alive and solid,
+    damagecode.check_model_rules)"""
     nz, nr, nc = (cell_nibbles(schema, f) for f in ("mon_floorz", "mon_rng", "mon_movecount"))
     assert (nz, nr, nc) == (4, 2, 2), (nz, nr, nc)
     assert radius in (20, 30) and speed in (8, 10), (radius, speed)
     X, Y = "thpos_rt + %d*dw" % (16 * rt + 4), "thpos_rt + %d*dw" % (16 * rt + 12)
     FZ, RN, MC = "mon_floorz + %d*dw" % (4 * m), "mon_rng + %d*dw" % (2 * m), "mon_movecount + %d*dw" % (2 * m)
-    MD, AC, SS = "mon_movedir + %d*dw" % m, "mon_active + %d*dw" % m, "thss_rt + %d*dw" % (16 * rt)
+    MD, AC, SS = "mon_movedir + %d*dw" % m, "%s + %d*dw" % (solid, m), "thss_rt + %d*dw" % (16 * rt)
     SC = "msec + %d*dw" % (2 * m)
     return ["    hex.mov 4, mm_x, %s" % X, "    hex.mov 4, mm_y, %s" % Y,
             "    hex.mov 4, mm_z, %s" % FZ, "    hex.sign_extend 8, 4, mm_z",
@@ -662,7 +702,9 @@ def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, dc=None
             "    hex.zero 1, %s" % AC,
             *(["    hex.mov 1, mm_ja, mon_justattacked + %d*dw" % m, "    hex.mov 1, mm_seen, thseen + %d*dw" % dc["t"],
                "    hex.set 1, mm_mk, %d" % dc["mk"], "    hex.mov 1, mm_re, mon_reaction + %d*dw" % m,
-               "    stl.fcall mm_decide, mm_dret", "    hex.mov 1, mon_justattacked + %d*dw, mm_ja" % m]
+               *(["    hex.mov 1, mm_jh, mon_justhit + %d*dw" % m] if dc.get("jh") else []),
+               "    stl.fcall mm_decide, mm_dret", "    hex.mov 1, mon_justattacked + %d*dw, mm_ja" % m,
+               *(["    hex.mov 1, mon_justhit + %d*dw, mm_jh" % m] if dc.get("jh") else [])]
               if dc else ["    stl.fcall mm_chase, mm_cret"]),
             "    hex.set 1, %s, 1" % AC,
             "    hex.mov 4, %s, mm_x" % X, "    hex.mov 4, %s, mm_y" % Y,
@@ -673,11 +715,14 @@ def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, dc=None
 
 
 # ---- M7 P3.2c "decide" -----------------------------------------------------------------------------------------
-def _action_targets(L: str, nxt: str, dc) -> list:
-    """the slot's action dispatch: A_Look, A_Chase, and in the decide mode the attack states' actions its type runs"""
+def _action_targets(L: str, nxt: str, dc, fall: bool = False) -> list:
+    """the slot's action dispatch: A_Look, A_Chase, and in the decide mode the attack states' actions its type runs;
+    `fall` (M7 P4.2a): A_Fall"""
     tg = [nxt] * 16
     tg[MON_ACTIONS.index("A_Look")] = "%slook" % L
     tg[MON_ACTIONS.index("A_Chase")] = "%schase" % L
+    if fall:
+        tg[MON_ACTIONS.index("A_Fall")] = "%sfall" % L
     for a in sorted(dc["acts"]) if dc else ():
         tg[MON_ACTIONS.index(a)] = "%sk_%s" % (L, a)
     return tg
@@ -844,6 +889,22 @@ P33_DECLS = (["td_%s: hex.vec w/4" % r for r in ("head", "e", "t", "p", "q", "be
 def p32a_leaves() -> list:
     """the wake tic's two shared leaves: mt_d = P_AproxDistance(mt_dx, mt_dy) (world.aprox_distance), and psec = the
     player's sector (world.player_sector: the point location of the INTEGER map position), once a frame"""
+    return dist_leaf_lines() + [
+            "mt_psec_leaf:",
+            "    hex.if1 1, mt_psok, mt_psec_done",
+            "    hex.zero 10, ptx", "    hex.mov 4, ptx, viewx + 4*dw", "    hex.sign_extend 10, 4, ptx",
+            "    hex.zero 10, pty", "    hex.mov 4, pty, viewy + 4*dw", "    hex.sign_extend 10, 4, pty",
+            "    stl.fcall ptloc_walk, ptloc_ret",
+            "    lfsec.lookup psec, ptss",
+            "    hex.set 1, mt_psok, 1",
+            "  mt_psec_done:",
+            "    stl.fret mt_ret"]
+
+
+def dist_leaf_lines() -> list:
+    """`mt_dist_leaf` (stl.fcall mt_dist_leaf, mt_ret): mt_d = P_AproxDistance(mt_dx, mt_dy) (world.aprox_distance),
+    |dx| and |dy| left in mt_ax, mt_ay -- p32a_leaves' first leaf, alone for a caller without the point location
+    (M7 P4.2a: damagecode's reach test)"""
     out = ["mt_dist_leaf:"]
     for c, a in (("mt_dx", "mt_ax"), ("mt_dy", "mt_ay")):
         out += ["    hex.mov 4, %s, %s" % (a, c),
@@ -861,15 +922,6 @@ def p32a_leaves() -> list:
             "    hex.add 4, mt_t, mt_ay",
             "    hex.sub 4, mt_t, mt_d",
             "    hex.mov 4, mt_d, mt_t",
-            "    stl.fret mt_ret",
-            "mt_psec_leaf:",
-            "    hex.if1 1, mt_psok, mt_psec_done",
-            "    hex.zero 10, ptx", "    hex.mov 4, ptx, viewx + 4*dw", "    hex.sign_extend 10, 4, ptx",
-            "    hex.zero 10, pty", "    hex.mov 4, pty, viewy + 4*dw", "    hex.sign_extend 10, 4, pty",
-            "    stl.fcall ptloc_walk, ptloc_ret",
-            "    lfsec.lookup psec, ptss",
-            "    hex.set 1, mt_psok, 1",
-            "  mt_psec_done:",
             "    stl.fret mt_ret"]
     return out
 

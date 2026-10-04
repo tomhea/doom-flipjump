@@ -151,7 +151,8 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"mon_justattacked"}),                                     # M7 P3.2c
                    # M7 P4.1: the player's weapon (doomfj.weaponcode.PERSIST, the cells' widths below)
                    frozenset({"wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad", "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm"}),
-                   frozenset({"aim_sid"}))                                             # M7 P4.2a: the window
+                   frozenset({"aim_sid"}),                                              # M7 P4.2a: the window
+                   frozenset({"mon_health", "mon_shootable", "mon_solid", "mon_justhit"}))   # M7 P4.2a: the damage
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -655,6 +656,9 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         for name, width in (("mon_movecount", 2), ("mon_rng", 2), ("mon_floorz", 4), ("msec", 2)):
             cells[name] = Cell(name, "hex", width, count=nmon)
         cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon)   # M7 P3.2c
+        cells["mon_health"] = Cell("mon_health", "hex", 3, count=nmon)               # M7 P4.2a: the damage
+        for name in ("mon_shootable", "mon_solid", "mon_justhit"):
+            cells[name] = Cell(name, "hex", 1, count=nmon)
     # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
     # M7 P4.1: the player's weapon -- one cell each, `wp_own` the four owned flags as one 4-nibble value
     for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", 4), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1)):

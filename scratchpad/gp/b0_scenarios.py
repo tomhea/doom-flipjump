@@ -94,6 +94,10 @@ def model_frames(run: dict, proxy: bool = False) -> list:
                                  "%s) -- the model or the file changed" % (run["name"], i, post,
                                                                            run["poses"][i]))
         inj, bkeys = S.b0_injection(w.rm, pre, post, kd, proxy=proxy)
+        # M7 P4.2a: the TRIGGER is delivered too -- fire and the number keys -- so the binary shoots where the set's
+        # player shoots, through its own picture's window, and every hit, pain and death is checked against the
+        # mirror's (the injected pose carries the model's strafe; the weapon moves no pose)
+        bkeys = dict(bkeys, **{k: True for k in ("fire", "w1", "w2", "w3", "w4") if kd.get(k)})
         out.append({"inj": inj, "keys": bkeys, "doors": pre_doors, "movers": pre_movers,
                     "exp": mirror.step(inj, bkeys, pre_doors, pre_movers), "post": post,
                     # M7 P2b: the movers' heights the binary draws this frame (the mirror's, after

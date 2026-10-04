@@ -10,7 +10,7 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked46.fjm`, sha256 `b7c9e110be1494d8` (first 16 hex), built 2026-10-03 from the command in 1b (M7 P3.3 + P3.4, one rung: the depth order inside a leaf and the key-map HELP screen) | class F -- the pictures differ from blocked45 (a near monster drawn over a far one in a shared leaf; the main menu's HELP item and the help screen); built with the installed flipjump 1.5.1 at `bc8ee63` from m7-depth 5748228 with `--pin-heat scratchpad/12m/heat_blocked27_p33.json.gz` (`docs/ship-evidence/blocked46_build.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked46.fjm`, sha256 `b7c9e110be1494d8` (first 16 hex), built 2026-10-03 from the command in 1b (M7 P3.3 + P3.4, one rung: the depth order inside a leaf and the key-map HELP screen) | class F -- the pictures differ from blocked45 (a near monster drawn over a far one in a shared leaf; the main menu's HELP item and the help screen); built with the installed flipjump 1.5.1 at `bc8ee63` from m7-depth 5748228 with `--pin-heat scratchpad/12m/heat_blocked27_p42.json.gz` (`docs/ship-evidence/blocked46_build.log`) |
 | **ms/frame** | **79.5 ms/frame** (71.4-82.1), against **77.1** (74.4-80.9) for blocked45 in the same run (~195M fj/s) -- **NOT SEPARATED: median x0.958** (pairs 1.134 0.958 0.911 0.976 0.954; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames); the `shipped` baseline is NOT yet frozen on it -- still blocked44's; re-freeze on a quiet box | `msframe.py --a build/doom_e1m1_blocked45.fjm --b build/doom_e1m1_blocked46.fjm`, 200 frames x 5 reps, pinned core (`blocked46_msframe.log`) |
 | **fj ops/s** | **195.9 M** in the A/B run (blocked45 192.3 M) | ops/frame **15,580,689** on msframe's forward-walk script (blocked45 14,828,598) |
 | **binding metric** (owner spec) | (mean+p80)/2 = **15,243,295 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked46.fjm`, 2026-10-03 (`docs/ship-evidence/blocked46_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
@@ -123,7 +123,7 @@ the same series, with the same counts cache; blocked25's own line, 09-11 18:04, 
 and followed the renderer fix of FINDINGS CE):
 
 ```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p33.json.gz
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p42.json.gz
 ```
 
 `build_labeled.py` wraps `build_blocked.py` with the label spy on (everything after `--` is

@@ -1,14 +1,18 @@
 """M7 P3.2c (docs/gp-monsters.md 8.5): the DECIDE tic on the real flipjump engine against the model's decide mode
 (World(monsters="decide", sight_rule="seen")) -- every slot's state, tics, facing, target, reaction, threshold,
 movedir, movecount, P_Random state, justattacked, position, floorz and leaf, and the cursor, after every frame.
+M7 P4.2a: justhit and solid too -- the slots run with `dmg` (damagecode): the decision reads and clears `mon_justhit`
+(poked on the parked-by monster on random frames, both sides), and one monster DIES at the start (its death state,
+shootable 0, health 0) so its tic runs A_Fall, which clears `mon_solid`, the flag the thing test reads.
 
 The whole tic runs: the slots (monstercode.p32a_slot with `dc`), the chase's leaves, the decision (`mm_decide`), the
 attack actions (`md_attack`), the attack sight with the near LOS (`mm_as`, `sl_los`). The world is woken at the
 start (a subset: see _world); the script parks the player by a demon, an imp, a zombieman and a shotgun guy in turn -- in melee reach,
 within NEAR, and beyond -- with random seen flags, so the near LOS runs both ways, and the model moves with it.
 
-R9: a missile decision without its roll, an attack sight that never traces, a justattacked that is never read, and
-attacks that draw nothing must each part from the model.
+R9: a missile decision without its roll, an attack sight that never traces, a justattacked that is never read,
+attacks that draw nothing, a justhit that is never cleared, and an A_Fall that clears nothing must each part from the
+model.
 """
 import random
 from pathlib import Path
@@ -16,6 +20,7 @@ from pathlib import Path
 import flipjump as fj
 import pytest
 
+from doomfj import damagecode as DC
 from doomfj import gamedata as gd
 from doomfj import monstercode as MC
 from doomfj import monsterdecide as MD
@@ -47,7 +52,16 @@ def _world():
             w._set_state(m, w.mon_info[m].seestate, False, TicEvents(0))
     for m in tg:
         w.ws.mon_reaction[m] = 0
+    d = _dying(w)                        # M7 P4.2a: a monster killed at the start -- its tic reaches A_Fall
+    w.ws.mon_shootable[d], w.ws.mon_health[d] = 0, 0
+    w._set_state(d, w.mon_info[d].deathstate, True, TicEvents(0))
     return w
+
+
+def _dying(w):
+    """the first asleep active monster that is none of the targets"""
+    tg = _targets(w)
+    return next(m for m in range(w.layout.nmon) if w.ws.mon_active[m] and m not in tg and m % 4)
 
 
 def _targets(w):
@@ -62,17 +76,20 @@ def _signed32(v):
     return v - (1 << 32) if v >> 31 else v
 
 
-def _set(w, x16, y16, ang, seen):
+def _set(w, x16, y16, ang, seen, jh):
     ws = w.ws
     ws.px, ws.py, ws.pangle = _signed32(x16), _signed32(y16), ang
     for m in range(w.layout.nmon):
         ws.mon_seen[m] = int(m in seen)
+    for m in jh:                         # M7 P4.2a: a hit's MF_JUSTHIT, as damage leaves it
+        ws.mon_justhit[m] = 1
 
 
 def _script():
     """per frame: (player x16, y16, angle, seen slots), placed by the model's CURRENT positions as it runs"""
     w = _world()
     rnd = random.Random(5)                   # a seed whose script runs all four attacks in 120 frames
+    rjh = random.Random(0x42A)               # M7 P4.2a: the justhit pokes (their own stream: rnd's script stands)
     n = w.layout.nmon
     act = [m for m in range(n) if w.ws.mon_active[m]]
     tg = _targets(w)
@@ -87,7 +104,7 @@ def _script():
         y16 = ((w.ws.mon_y[m] + dy * k) << 16 | rnd.choice((0, rnd.randrange(1 << 16)))) & M32
         seen = set(rnd.sample(act, 6)) | ({m} if rnd.random() < 0.5 else set())
         seen.discard(m) if m in seen and rnd.random() < 0.3 else None
-        out.append((x16, y16, rnd.randrange(1 << 32), seen))
+        out.append((x16, y16, rnd.randrange(1 << 32), seen, set(a for a in act if rjh.random() < 0.2)))
         _set(w, *out[-1])
         w._monsters_phase(TicEvents(0))
     return out
@@ -95,9 +112,10 @@ def _script():
 
 def _row(w):
     ws, n = w.ws, w.layout.nmon
-    s = "".join("%02x%x%x%x%x%02x%x%02x%02x%x%04x%04x%04x%03x" % (
+    s = "".join("%02x%x%x%x%x%02x%x%02x%02x%x%x%x%04x%04x%04x%03x" % (
         ws.mon_state[m], ws.mon_tics[m], ws.mon_facing[m], ws.mon_target[m], ws.mon_reaction[m],
         ws.mon_threshold[m], ws.mon_movedir[m], ws.mon_movecount[m] & 0xFF, ws.mon_rng[m], ws.mon_justattacked[m],
+        ws.mon_justhit[m], ws.mon_solid[m],
         ws.mon_x[m] & 0xFFFF, ws.mon_y[m] & 0xFFFF, ws.mon_floorz[m] & 0xFFFF, ws.mon_leaf[m]) for m in range(n))
     return s + "%02x" % ws.sched_cursor
 
@@ -131,7 +149,8 @@ def _parts(w, mut=None):
         info = w.mon_info[m]
         slots.append(dict(t=m, x=ws.mon_x[m], y=ws.mon_y[m], rj="", see_idx=gd.STATE_INDEX[info.seestate],
                           see_tics=gd.STATES[info.seestate].tics,
-                          mv=dict(rt=m, radius=w.mon_radius[m], speed=w.mon_speed[m]), dc=MD.type_decide(info)))
+                          mv=dict(rt=m, radius=w.mon_radius[m], speed=w.mon_speed[m]), dc=MD.type_decide(info),
+                          dmg=True))
     secs = sorted({w.leaf_sector[s] for s in range(len(w.cmap.subsectors))})
     tables = MC.p30_tables_fj()
     tables += [generate_dispatch_table_fj("rj%d" % s, [int(w.reject.visible(s, q)) for q in range(w.reject.nsec)],
@@ -148,6 +167,7 @@ def _parts(w, mut=None):
              + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n)
              + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, msec)
              + MC.p32c_decls(schema, n, {f: vals[f] for f in MD.P32C_FIELDS})
+             + DC.field_decls(schema, n, {f: list(getattr(ws, f)[:n]) for f in DC.P42_FIELDS}) + ["mm_jh: hex.vec 1"]
              + MD.context_decls() + MS.SL_DECLS
              + MC.MT_DECLS + MC.P32A_SCRATCH + point_location_decls() + COLLISION_STATE_DECLS + MON_CELL_DECLS
              + LEAF_LINK_DECLS + MM.monster_seed_decls()
@@ -163,12 +183,12 @@ def _parts(w, mut=None):
                 "bar_solid: hex.vec %d, %d" % (2 * len(w.barrel_things),
                                                 sum(ws.bar_solid[b] << (4 * b) for b in range(len(w.barrel_things)))),
                 "mc_don: hex.vec 2"])
-    move = (MM.things_leaf_lines([(m, w.mon_radius[m]) for m in range(n)])
+    move = (MM.things_leaf_lines([(m, w.mon_radius[m]) for m in range(n)], solid="mon_solid")
             + MM.move_leaf_lines(root=root, lift_trigs=lift_trigs, door_boxes=door_boxes, dropmax=DROPOFF_MAX,
                                  stepup=STEP_UP, height=56)
             + MM.ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
             + MM.walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES)
-            + MM.chase_leaf_lines() + MD.decide_leaves() + MS.near_los_lines(w))
+            + MM.chase_leaf_lines() + MD.decide_leaves(justhit=True) + MS.near_los_lines(w))
     code = (["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False) + ["    stl.fret mt_tret"]
             + MC.p32a_leaves() + MC.p32b_rj_leaf(secs) + move + seed)
     text = "\n".join(code + [cells] + tables) + "\n"
@@ -176,7 +196,11 @@ def _parts(w, mut=None):
                        "    ;mm_dc_yes\n"),
             "nolos": ("    stl.fcall sl_los, sl_ret\n", "    hex.zero 1, sl_hit\n"),
             "nojust": ("    hex.if0 1, mm_ja, mm_dc_m\n", "    ;mm_dc_m\n"),
-            "nodraws": ("    sim.jump16 mm_kind, ", "    sim.jump16 mm_zero, ")}
+            "nodraws": ("    sim.jump16 mm_kind, ", "    sim.jump16 mm_zero, "),
+            # M7 P4.2a: justhit never cleared; the dying monster's A_Fall clears nothing
+            "nojhclear": ("    hex.zero 1, mm_jh\n", ""),
+            "nofall": ("  mw%d_fall:\n    hex.zero 1, mon_solid + %d*dw\n" % (_dying(w), _dying(w)),
+                       "  mw%d_fall:\n" % _dying(w))}
     if mut:
         old, new = muts[mut]
         assert text.count(old) == 1, (mut, text.count(old))
@@ -192,10 +216,11 @@ def _build(tmp_path, name, mut=None):
     n = w.layout.nmon
     script = _script()
     body = ["stl.startup_and_init_all"]
-    for x16, y16, ang, seen in script:
+    for x16, y16, ang, seen, jh in script:
         body += ["hex.set 8, viewx, %d" % x16, "hex.set 8, viewy, %d" % y16,
-                 "hex.set %d, thseen, %d" % (n, sum(1 << (4 * m) for m in seen)),
-                 "stl.fcall mt_tic_leaf, mt_tret"]
+                 "hex.set %d, thseen, %d" % (n, sum(1 << (4 * m) for m in seen))]
+        body += ["hex.set 1, mon_justhit + %d*dw, 1" % m for m in sorted(jh)]
+        body += ["stl.fcall mt_tic_leaf, mt_tret"]
         for m in range(n):
             body += ["hex.print_as_digit 2, mon_state + %d*dw, 0" % (2 * m),
                      "hex.print_as_digit 1, mon_tics + %d*dw, 0" % m,
@@ -207,6 +232,8 @@ def _build(tmp_path, name, mut=None):
                      "hex.print_as_digit 2, mon_movecount + %d*dw, 0" % (2 * m),
                      "hex.print_as_digit 2, mon_rng + %d*dw, 0" % (2 * m),
                      "hex.print_as_digit 1, mon_justattacked + %d*dw, 0" % m,
+                     "hex.print_as_digit 1, mon_justhit + %d*dw, 0" % m,
+                     "hex.print_as_digit 1, mon_solid + %d*dw, 0" % m,
                      "hex.print_as_digit 4, thpos_rt + %d*dw, 0" % (16 * m + 4),
                      "hex.print_as_digit 4, thpos_rt + %d*dw, 0" % (16 * m + 12),
                      "hex.print_as_digit 4, mon_floorz + %d*dw, 0" % (4 * m),
@@ -244,18 +271,24 @@ def test_the_script_exercises_every_path():
         traces[v] += 1
         return v
     w.los_to_player = counting
-    dec, acts, ja = set(), set(), 0
+    dec, acts, ja, jh = set(), set(), 0, 0
+    d = _dying(w)
+    assert ws.mon_solid[d], "the dying monster starts solid"
     for fr in script:
         _set(w, *fr)
         before = list(ws.mon_justattacked[:n])
+        bjh = list(ws.mon_justhit[:n])
         ev = TicEvents(0)
         w._monsters_phase(ev)
         dec |= {k for _, k in ev.decisions}
         acts |= {a for _, a in ev.attacks}
         ja += sum(1 for m in range(n) if before[m] and not ws.mon_justattacked[m])
+        jh += sum(1 for m in range(n) if bjh[m] and not ws.mon_justhit[m])
     assert dec == {"melee", "missile"}, dec
     assert acts >= {"A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack"}, acts
     assert ja >= 1, "no justattacked was ever read"
+    assert jh >= 4, "justhit was read %d times" % jh
+    assert not ws.mon_solid[d], "the dying monster never ran A_Fall"
     assert traces[True] >= 2 and traces[False] >= 2, traces    # test_monster_sight_fj covers the LOS in depth
 
 
@@ -263,6 +296,6 @@ def test_the_decide_tic_follows_the_model(tmp_path):
     assert _run(tmp_path, "mdecide"), "the fj decide tic parted from the model's decide mode"
 
 
-@pytest.mark.parametrize("mut", ["noroll", "nolos", "nojust", "nodraws"])
+@pytest.mark.parametrize("mut", ["noroll", "nolos", "nojust", "nodraws", "nojhclear", "nofall"])
 def test_control_a_broken_decision_is_caught(tmp_path, mut):
     assert not _run(tmp_path, "mdecide_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut

@@ -11,7 +11,8 @@ context (`monstermove.P32B_CONTEXT`) plus a few cells (`P32C_CONTEXT`):
     state, movecount 0, the attack sight, reaction 0, then the roll: P_Random < min(dist - bias, cap) refuses), else
     the move (`mm_chase`). A decision faces the player (the attack state's A_FaceTarget) and sets mm_dec (1 melee,
     2 missile) for the slot to enter the state; the missile decision sets justattacked. `justhit` is 0 until damage
-    (P4) and is not read;
+    (P4) and is read only by `decide_leaf_lines(justhit=True)` (M7 P4.2a: `mm_jh`, world._check_missile_range --
+    after the attack sight, a set justhit is cleared and decides the missile with no roll);
   * `md_attack`: an attack state's action in the decide mode (combat._attack_rolls): A_FaceTarget's facing, then
     every draw the full model's attack takes from the monster's stream -- 3 per bullet, the claw's and the bite's
     one each when in melee range with the attack sight -- and no effect (P5).
@@ -104,9 +105,10 @@ def as_leaf_lines() -> List[str]:
             "  mm_as_out:", "    stl.fret mm_asret"]
 
 
-def decide_leaf_lines() -> List[str]:
+def decide_leaf_lines(justhit: bool = False) -> List[str]:
     """`mm_decide` (stl.fcall mm_decide, mm_dret) -- see the module docstring; the bias and cap are
-    world.MISSILE_BIAS / MISSILE_NOMELEE_BIAS / MISSILE_CAP, compared as rand + bias >= min(d, bias + cap)"""
+    world.MISSILE_BIAS / MISSILE_NOMELEE_BIAS / MISSILE_CAP, compared as rand + bias >= min(d, bias + cap).
+    `justhit` (M7 P4.2a): the context's `mm_jh` (damagecode declares it) is read and cleared"""
     from doomfj.world import MISSILE_BIAS, MISSILE_CAP, MISSILE_NOMELEE_BIAS
     b1, b2 = MISSILE_BIAS, MISSILE_BIAS + MISSILE_NOMELEE_BIAS
     return ["mm_decide:",
@@ -134,6 +136,10 @@ def decide_leaf_lines() -> List[str]:
             "  mm_dc_ms2:",
             "    stl.fcall mm_as, mm_asret",
             "    hex.if0 1, mm_asr, mm_dc_mv",
+            *(["    hex.if0 1, mm_jh, mm_dc_rc",                                 # MF_JUSTHIT: clear it, and attack
+               "    hex.zero 1, mm_jh",
+               "    ;mm_dc_yes",
+               "  mm_dc_rc:"] if justhit else []),
             "    hex.if0 1, mm_re, mm_dc_roll",
             "    ;mm_dc_mv",
             "  mm_dc_roll:",
@@ -187,8 +193,9 @@ def attack_leaf_lines() -> List[str]:
     return out + ["  md_out:", "    stl.fret md_ret"]
 
 
-def decide_leaves() -> List[str]:
-    return todist_leaf_lines() + octant_leaf_lines() + as_leaf_lines() + decide_leaf_lines() + attack_leaf_lines()
+def decide_leaves(justhit: bool = False) -> List[str]:
+    return (todist_leaf_lines() + octant_leaf_lines() + as_leaf_lines() + decide_leaf_lines(justhit)
+            + attack_leaf_lines())
 
 
 def type_decide(info) -> dict:

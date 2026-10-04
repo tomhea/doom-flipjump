@@ -185,6 +185,8 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
     out = ["// M7 P4.1 (doomfj.weaponcode): the weapon keys, P_MovePsprites, the bar's ammo + arms"]
     # -- 1. P_PlayerThink's BT_CHANGE: the LOWEST held number key names the weapon; 1 is the chainsaw when owned
     #    (berserk would keep the fist up -- P6); a weapon not owned, or already up, changes nothing
+    if hurt:                                                          # M7 P5: a dead player's tic skips the keys
+        out += ["hex.if1 1, p_dead, wk_end"]                          # (MonsterPhase.weapon: psprites + p_dc only)
     out += ["hex.if0 1, kb_w1, wk_2",
             "hex.if0 1, wp_own + %d*dw, wk_fist" % OWN[gd.WP_CHAINSAW],
             "hex.if_flags wp_rdy, 1<<%d, wk_saw, wk_end" % gd.WP_CHAINSAW,

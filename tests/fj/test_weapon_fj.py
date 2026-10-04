@@ -224,7 +224,7 @@ def _hurt_script(kind, seed=5):
         k["fire"] = fire or (kind == "refire" and t > 40 and (window is None or t - window < 20))
         if window is None and not ws.p_dead and rng.random() < 0.01:
             k[rng.choice(("w1", "w2", "w3"))] = True
-        if kind == "kill" and not ws.p_dead and t % 12 == 11:
+        if kind in ("kill", "deadkeys") and not ws.p_dead and t % 12 == 11:
             dmg = rng.choice((3, 6, 9, 12, 15, 24, 40))
         if kind == "ready" and window is None and t > 30 and ws.p_wpn_state in ready and ws.p_wpn_sy == WC.TOP \
                 and ws.p_pending == gd.WP_NOCHANGE:
@@ -233,9 +233,11 @@ def _hurt_script(kind, seed=5):
             pokes, window = 1, t
         if window is not None and not ws.p_dead and t - window == 9:
             pokes |= 2                                     # dead before A_Lower can reach the bottom (16 tics)
-        if window is not None or ws.p_dead:
+        if window is not None or (ws.p_dead and kind != "deadkeys"):
             for key in ("w1", "w2", "w3", "w4"):
                 k[key] = False
+        if kind == "deadkeys" and ws.p_dead and rng.random() < 0.3:   # a dead player's number keys change nothing
+            k[rng.choice(("w1", "w2", "w3", "w4"))] = True
         if pokes & 1:
             ws.p_health = 0
         if pokes & 2:
@@ -295,6 +297,8 @@ HURT_MUTS = {
     "refirehp": (r"(a\d+go:\n)hex\.sign 3, p_hp, a\d+no, a\d+hz\na\d+hz:\nhex\.if0 3, p_hp, a\d+no\n", r"\1"),
     # A_Lower: the dead player's weapon goes on to the pending weapon's raise
     "lowerdead": (r"hex\.if1 1, p_dead, a\d+dd\n", ""),
+    # P_PlayerThink: a dead player's number keys still change the pending weapon (the P5 pre-review's B1)
+    "deadkeys": (r"hex\.if1 1, p_dead, wk_end\n", ""),
 }
 
 
@@ -329,6 +333,11 @@ def test_the_hurt_scripts_reach_their_paths():
         before, after = rows[t0 - 1], rows[t0 + 3]
         assert after["p_wpn_sy"] > before["p_wpn_sy"] or after["p_wpn_state"] != before["p_wpn_state"], kind
         assert rows[-1]["p_wpn_sy"] == WC.BOTTOM and rows[-1]["p_dead"]
+    script, rows = _hurt_script("deadkeys")
+    td = next(t for t, r in enumerate(rows) if r["p_dead"])
+    pressed = [t for t in range(td + 1, len(rows)) if any(script[t][0][x] for x in ("w1", "w2", "w3"))]
+    assert len(pressed) >= 10, len(pressed)                           # keys naming owned weapons, after the death
+    assert all(rows[t]["p_pending"] == rows[td]["p_pending"] for t in range(td, len(rows)))   # ... change nothing
     script, rows = _hurt_script("refire")
     t0 = next(t for t, (_k, p, _d) in enumerate(script) if p & 1)
     tr = next(t for t in range(t0, t0 + 20) if gd.STATES[gd.STATE_NAMES[rows[t]["p_wpn_state"]]].action == "A_ReFire")
@@ -336,7 +345,7 @@ def test_the_hurt_scripts_reach_their_paths():
     assert rows[tr]["p_refire"] == 0 and rows[t0 + 19]["ammo"] == rows[tr]["ammo"]     # ... which refused
 
 
-@pytest.mark.parametrize("kind", ["kill", "ready", "refire"])
+@pytest.mark.parametrize("kind", ["kill", "ready", "refire", "deadkeys"])
 def test_the_hurt_weapon_is_the_model_tic_by_tic(tmp_path, kind):
     got, want = _hurt_run(tmp_path, "wpnh_" + kind, kind)
     bad = _first_bad(got, want)
@@ -345,7 +354,8 @@ def test_the_hurt_weapon_is_the_model_tic_by_tic(tmp_path, kind):
                                              if got[bad][i] != want[bad][i]})
 
 
-@pytest.mark.parametrize("mut,kind", [("readyhp", "ready"), ("refirehp", "refire"), ("lowerdead", "kill")])
+@pytest.mark.parametrize("mut,kind", [("readyhp", "ready"), ("refirehp", "refire"), ("lowerdead", "kill"),
+                                      ("deadkeys", "deadkeys")])
 def test_the_checks_catch_a_broken_hurt_weapon(tmp_path, mut, kind):
     got, want = _hurt_run(tmp_path, "wpnh_" + mut, kind, mut)
     bad = _first_bad(got, want)

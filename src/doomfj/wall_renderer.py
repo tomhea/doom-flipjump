@@ -1121,7 +1121,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P4.1 (doomfj.weaponcode): the player's weapon, the model's "fire" mode
     from doomfj.weaponcode import weapon_parts
     # M7 P4.2a: the shots resolve through the aim window and hurt (the player mode shoots)
-    _wpn = weapon_parts(map_wad, mapname, shoot=PLAYER_MODE in ("shoot", "hit", "full")) if menu else None
+    # M7 P4.2b: ... and make NOISE (nz_leaf at each fire point; monstercode.p31_parts emits the leaf at the same mode)
+    from doomfj.noisecode import NOISE_PLAYER_MODES
+    _wpn = weapon_parts(map_wad, mapname, shoot=PLAYER_MODE in ("shoot", "hit", "full"),
+                        noise=PLAYER_MODE in NOISE_PLAYER_MODES) if menu else None
     cmap = bake_bsp(map_wad, mapname)
     verts = cmap.vertexes
     lds = map_wad.linedefs(mapname); sds = map_wad.sidedefs(mapname)

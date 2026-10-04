@@ -16,6 +16,7 @@ from typing import Dict, List, Tuple
 from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.lut_generator import generate_dispatch_table_fj
+from doomfj.noisecode import ambush_decl, noise_decls, noise_leaf_lines, noise_restart_lines
 from doomfj.sight import NEAR
 from doomfj.world import K_HEAVY, LOOK_BEHIND_REACH
 
@@ -294,8 +295,11 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
 
     from doomfj.monsterdecide import P32C_FIELDS, type_decide
     from doomfj.damagecode import P42_FIELDS
+    from doomfj.noisecode import NOISE_PLAYER_MODES
+    # M7 P4.2b (doomfj.noisecode): a player whose shot makes NOISE -- A_Look's sound branch, the per-slot ambush flags
+    hear = wake and player in NOISE_PLAYER_MODES
     fields = (P31_FIELDS + (P32A_FIELDS if wake else ()) + (P32B_FIELDS if chase else ())
-              + (P32C_FIELDS if decide else ()) + (P42_FIELDS if damage else ()))
+              + (P32C_FIELDS if decide else ()) + (P42_FIELDS if damage else ()) + (P42B_FIELDS if hear else ()))
     slot_t = {m: t for t, m in enumerate(rt_slot) if m is not None}
     # the relink (docs/gp-monsters.md 8.4 piece 6): fj links the leaf lists by RUNTIME thing index, the model by
     # monster slot -- the lists' orders agree only while the slots run in runtime-thing order
@@ -320,7 +324,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                            "    hex.set %d, bar_solid, %d" % (max(1, len(w.barrel_things)),
                                                           sum(w.ws.bar_solid[b] << (4 * b)
                                                               for b in range(len(w.barrel_things))))]
-                          if chase else []))
+                          if chase else [])
+                       + (noise_restart_lines(w) if hear else []))           # M7 P4.2b: no node has heard a shot
     # the row select
     sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
         "thsel_h%d" % h if 16 * h < nt else "thsel_none" for h in range(16))]
@@ -364,7 +369,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                       see_tics=gd.STATES[w.mon_info[m].seestate].tics,
                       **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m])} if chase else {}),
                       **({"dc": type_decide(w.mon_info[m])} if decide else {}),
-                      **({"dmg": True} if damage else {}))
+                      **({"dmg": True} if damage else {}),
+                      **({"hear": True, "sec": w._mon_sector(m)} if hear else {}))
                  for m in range(nmon)]
         nleaf = len(w.cmap.subsectors)
         extra = {
@@ -376,10 +382,12 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                        + [generate_dispatch_table_fj("lfsec", list(w.leaf_sector),
                                                      index_nibbles=max(1, ((nleaf - 1).bit_length() + 3) // 4),
                                                      result_nibbles=2)]),
-            "leaves": p32a_leaves() + (p32b_rj_leaf(secs) if chase else []),
+            "leaves": p32a_leaves() + (p32b_rj_leaf(secs) if chase else []) + (noise_leaf_lines(w) if hear else []),
             "decls_wake": (p32a_decls(schema, nmon, {**{f: boot[f] for f in P32A_FIELDS}, "sched_cursor": w.ws.sched_cursor},
                                  nmon)
-                      + P32A_SCRATCH + ["sp_sa: hex.vec w/4", "trb_seenf: hex.vec 1", "trb_one: hex.vec 1, 1"]),
+                      + P32A_SCRATCH + ["sp_sa: hex.vec w/4", "trb_seenf: hex.vec 1", "trb_one: hex.vec 1, 1"]
+                      + ([ambush_decl(nmon, boot["mon_ambush"])] + noise_decls(w) if hear else [])
+                      + (["mt_ms: hex.vec 2"] if hear and not chase else [])),     # nz_heard's operand (chase: p32b)
         }
         if chase:
             from doomfj.collision import MON_CELL_DECLS
@@ -437,6 +445,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
 
 # ---- P3.2a: the WAKE tic (docs/gp-monsters.md 8.3) -------------------------------------------------------------
 P32A_FIELDS = ("mon_target", "mon_reaction", "mon_threshold", "mon_movedir")
+P42B_FIELDS = ("mon_ambush",)       # M7 P4.2b (doomfj.noisecode): the per-slot cell the noise adds
 HEAVY_IDS = (MON_ACTIONS.index("A_Chase"), MON_ACTIONS.index("A_FaceTarget"),
              MON_ACTIONS.index("A_PosAttack"), MON_ACTIONS.index("A_SPosAttack"),
              MON_ACTIONS.index("A_TroopAttack"), MON_ACTIONS.index("A_SargAttack"))
@@ -466,11 +475,16 @@ def _sub16(dst, a, b):
 P32A_PERSISTED = ("mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen")
 
 
-def persisted_monster_decls(w, mode: str, damage=None) -> list:
+def persisted_monster_decls(w, mode: str, damage=None, player: str = None) -> list:
     """the monsters' PERSISTED cells as the emitter declares them, for the game tier's model `mode` (widths from the
     schema; values do not matter): the restore sets' standalone globals (scratchpad/m5_setfile.py) and the test that
     checks them (tests/host/test_restore_set_shipped.py) both read this one list. `damage` (M7 P4.2a): the P42
-    cells too -- None reads the game tier's PLAYER_MODE (wall_renderer, damagecode.damage_on), as the emitter does"""
+    cells too -- None reads the game tier's PLAYER_MODE (wall_renderer, damagecode.damage_on), as the emitter does.
+    `player` (M7 P4.2b): the player's model mode for the noise's cells -- None reads wall_renderer.PLAYER_MODE too,
+    so no caller can forget it and key a set without them"""
+    if player is None:
+        from doomfj.wall_renderer import PLAYER_MODE         # lazy: the emitter imports this module
+        player = PLAYER_MODE
     n = w.layout.nmon
     if damage is None:
         from doomfj.damagecode import damage_on
@@ -491,6 +505,9 @@ def persisted_monster_decls(w, mode: str, damage=None) -> list:
     if damage:                           # M7 P4.2a: health, shootable, solid, justhit
         from doomfj.damagecode import P42_FIELDS, field_decls
         out += field_decls(w.schema, n, {f: [0] * n for f in P42_FIELDS})
+    from doomfj.noisecode import NOISE_PLAYER_MODES, PERSIST as NOISE_PERSIST
+    if mode in ("wake", "chase", "decide") and player in NOISE_PLAYER_MODES:   # M7 P4.2b: the alerts, the ambushers
+        out += [d for d in [ambush_decl(n, [0] * n)] + noise_decls(w) if d.split(":")[0] in NOISE_PERSIST]
     return out
 
 
@@ -526,7 +543,7 @@ def _sign_branch(cell, kind, yes, no):
 
 
 def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, mv=None,
-              dc=None, dmg: bool = False) -> list:
+              dc=None, dmg: bool = False, hear: bool = False, sec: int = None) -> list:
     """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
     A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
     REJECT row of its spawn sector (indexed by the player's sector); t: its seen flag's index (`thseen`).
@@ -542,9 +559,16 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
 
     `dmg` (M7 P4.2a, a player mode whose shots hurt: damagecode): monsters die -- A_Fall clears the slot's
     `mon_solid`, the move excludes the mover by its `mon_solid` (the thing test reads mon_solid, World._thing_blocker),
-    and the decision carries `mon_justhit` (`mm_jh`, A_Chase's P_CheckMissileRange)."""
+    and the decision carries `mon_justhit` (`mm_jh`, A_Chase's P_CheckMissileRange).
+
+    `hear` (M7 P4.2b, the player mode "hit": doomfj.noisecode): A_Look's SOUND branch first, as the model's -- the
+    node of the monster's sector (`msec` with `mv`, else its spawn sector `sec`) heard a shot (`nz_heard`): the
+    target is set, and a monster without MTF_AMBUSH (`mon_ambush`) wakes; an ambusher needs the waking sight (seen,
+    or the REJECT row within 128) and wakes without the facing test, or else does not wake at all (the model's
+    look that follows asks the same sight). A_FaceTarget clears `mon_ambush` (p32c_slot_lines)."""
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     nthr = cell_nibbles(schema, "mon_threshold")
+    assert not hear or mv or sec is not None, "a hearing slot needs its sector: msec (mv) or the spawn sector"
     ST, TI, AC = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_active + %d*dw" % m
     FA, TG = "mon_facing + %d*dw" % (nf * m), "mon_target + %d*dw" % m
     RE, TH, MD = "mon_reaction + %d*dw" % m, "mon_threshold + %d*dw" % (nthr * m), "mon_movedir + %d*dw" % m
@@ -582,6 +606,14 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            # ---- A_Look: threshold 0; no sound before P4; P_LookForPlayers (not all around) -----------------
            "  %slook:" % L,
            "    hex.zero %d, %s" % (nthr, TH),
+           *(["    hex.zero 1, nz_amb",                                   # M7 P4.2b: the sound branch
+              ("    hex.mov 2, mt_ms, msec + %d*dw" % (2 * m) if mv else "    hex.set 2, mt_ms, %d" % (sec or 0)),
+              "    stl.fcall nz_heard, nz_hret",
+              "    hex.if0 1, nz_h, %ssee" % L,
+              "    hex.set 1, %s, 1" % TG,
+              "    hex.if0 1, mon_ambush + %d*dw, %swake" % (m, L),     # not an ambusher: wakes at once
+              "    hex.set 1, nz_amb, 1",                                 # an ambusher: the sight decides
+              "  %ssee:" % L] if hear else []),
            "    hex.mov 4, mt_dx, viewx + 4*dw",
            ("    hex.sub 4, mt_dx, thpos_rt + %d*dw" % (16 * mv["rt"] + 4) if mv else
             "    hex.sub_constant 4, mt_dx, %d" % (x & 0xFFFF)),
@@ -597,6 +629,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
              ["    %s.lookup mt_rj, psec" % rj]),
            "    hex.if0 1, mt_rj, %s" % nxt,
            "  %sbehind:" % L,                                  # behind and beyond 64: not seen
+           *(["    hex.if1 1, nz_amb, %swake" % L] if hear else []),   # a heard ambusher in sight: no facing test
            "    sim.jump16 %s, %s" % (FA, ", ".join(["%sf%d" % (L, k) for k in range(8)] + [nxt] * 8))]
     for k in range(8):
         cell, kind = FACING_BEHIND[k]
@@ -634,7 +667,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
         out += ["  %smv:" % L] + p32b_move_lines(m, schema=schema, **mv, dc=dict(dc, t=t, jh=dmg) if dc else None,
                                                  solid="mon_solid" if dmg else "mon_active")
     if dc:
-        out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt)
+        out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt, hear=hear)
     out += ["  %s:" % nxt]
     return out
 
@@ -695,15 +728,19 @@ def _action_targets(L: str, nxt: str, dc, fall: bool = False) -> list:
     return tg
 
 
-def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str) -> list:
+def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear: bool = False) -> list:
     """after mm_decide: a decision enters its state (A_FaceTarget's facing from the leaf); and the attack states'
-    actions -- each sets its kind and runs md_attack on the slot's position, seen flag and stream"""
+    actions -- each sets its kind and runs md_attack on the slot's position, seen flag and stream. `hear` (M7 P4.2b):
+    each A_FaceTarget -- the decided state's, and every attack action's, behind its target test -- clears
+    `mon_ambush`"""
     from doomfj.monsterdecide import ATTACK_KINDS
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     ST, TI, FA = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_facing + %d*dw" % (nf * m)
     TG, RN = "mon_target + %d*dw" % m, "mon_rng + %d*dw" % (2 * m)
     L = "mw%d_" % m
     out = ["    hex.if0 1, mm_dec, %s" % nxt, "    hex.mov 1, %s, mm_fa" % FA]
+    amb = ["    hex.zero 1, mon_ambush + %d*dw" % m] if hear else []       # M7 P4.2b: A_FaceTarget's MF_AMBUSH
+    out += amb
     if dc["mel"] and dc["mis"]:
         out.append("    hex.if_flags mm_dec, 2, %sdmis, %sdmel" % (L, L))
     for lab, st in (("dmel", dc["mel"]), ("dmis", dc["mis"])):
@@ -715,6 +752,7 @@ def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str) -> l
     if dc["acts"]:
         out += ["  %sk_go:" % L,
                 "    hex.if0 1, %s, %s" % (TG, nxt),
+                *amb,
                 "    hex.mov 4, mm_x, thpos_rt + %d*dw" % (16 * rt + 4),
                 "    hex.mov 4, mm_y, thpos_rt + %d*dw" % (16 * rt + 12),
                 "    hex.mov 1, mm_seen, thseen + %d*dw" % t, "    hex.mov 2, mm_rng, %s" % RN,

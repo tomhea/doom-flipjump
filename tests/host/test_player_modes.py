@@ -167,3 +167,72 @@ def test_the_control_a_painless_shoot_mode_parts(monkeypatch):
         if _mon_snap(a) != _mon_snap(b):
             return
     raise AssertionError("a painless shoot mode went unnoticed")
+
+
+# ---- M7 P4.2b: "hit" -- "shoot" plus the shot's NOISE (P_NoiseAlert, combat._fire_weapon). What "full" adds over "hit"
+# is exactly: the player thing's states (S_PLAY_ATK1/2: no monster reads them), the effects (puffs and blood -- the
+# rng_fx stream and the fx pool: no monster reads them), the BARRELS in the aim (a barrel shot, and its blast, hurts
+# monsters) and the DROPS (an item the player may pick up, which moves his ammo and so his shots). So with monsters
+# that hear and act (the decide mode: they wake, chase and decide, and apply nothing to the player), "hit" equals
+# "full" on every monster cell and every alert at EVERY tic until the first tic the full model shoots a barrel, blasts
+# one, or drops an item -- that tic itself not compared (its shot may already differ).
+HIT_FIELDS = MON_FIELDS + ("mon_ambush", "mon_movedir", "mon_facing", "mon_x", "mon_y", "mon_movecount",
+                           "mon_justattacked", "mon_active", "snd_alert")
+
+
+def _noisy(seed=3, n=600):
+    """walk about the start, turning, the trigger held for stretches"""
+    rng = random.Random(seed)
+    out, fire = [], False
+    for t in range(n):
+        k = {name: False for name in KEYS}
+        if rng.random() < 0.1:
+            fire = not fire
+        k["fire"] = fire
+        k["turn_left"] = rng.random() < 0.15
+        k["forward"] = rng.random() < 0.3
+        out.append(k)
+    return out
+
+
+def _hit_snap(w, fields=HIT_FIELDS):
+    return {f: tuple(getattr(w.ws, f)) for f in fields} | {"rng_player": w.ws.rng_player}
+
+
+def _full_left_hit(ev, w) -> bool:
+    """the full model did something this tic that "hit" leaves out AND a monster can feel: a barrel shot or blasted, a
+    drop made"""
+    return any(h[1] == "bar" for h in ev.hits) or bool(ev.barrel_blasts) or any(w.ws.mon_drop)
+
+
+def _hit_run(mode, keys):
+    """(the first tic `mode` parts from "full" -- on the monster cells, and for "hit" the alerts too -- or None; the
+    tics compared; the full model's sound wakes and noise tics over them)"""
+    a = World(skill=gd.SK_HARD, monsters="decide", player=mode)
+    b = World(skill=gd.SK_HARD, monsters="decide", player="full")
+    fields = HIT_FIELDS if mode == "hit" else tuple(f for f in HIT_FIELDS if f != "snd_alert")
+    wakes = noise = 0
+    for t, k in enumerate(keys):
+        a.tic(k)
+        eb = b.tic(k)
+        if _full_left_hit(eb, b):
+            return None, t, wakes, noise
+        wakes += sum(1 for _m, how in eb.wakes if how == "sound")
+        noise += eb.noise
+        if _hit_snap(a, fields) != _hit_snap(b, fields):
+            return t, t, wakes, noise
+    return None, len(keys), wakes, noise
+
+
+def test_hit_mode_is_the_full_model_on_the_monsters():
+    parted, upto, wakes, noise = _hit_run("hit", _noisy())
+    assert parted is None, "tic %d: hit parted from full" % parted
+    assert upto >= 300, "compared only %d tics" % upto
+    assert noise >= 10 and wakes >= 3, "the script made %d noises that woke %d monsters" % (noise, wakes)
+
+
+def test_the_control_shoot_without_the_noise_parts():
+    """R9: the same script in "shoot" (no noise) parts from the full model on a MONSTER cell -- the noise is what the
+    test above pins, not only the alerts it writes"""
+    parted, _upto, _w, _n = _hit_run("shoot", _noisy())
+    assert parted is not None, "a mode without the noise went unnoticed on the monster cells"

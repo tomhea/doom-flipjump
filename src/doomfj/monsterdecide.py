@@ -15,7 +15,8 @@ context (`monstermove.P32B_CONTEXT`) plus a few cells (`P32C_CONTEXT`):
     after the attack sight, a set justhit is cleared and decides the missile with no roll);
   * `md_attack`: an attack state's action in the decide mode (combat._attack_rolls): A_FaceTarget's facing, then
     every draw the full model's attack takes from the monster's stream -- 3 per bullet, the claw's and the bite's
-    one each when in melee range with the attack sight -- and no effect (P5).
+    one each when in melee range with the attack sight -- and no effect (P5). M7 P5's `full` emission applies them
+    (attack_leaf_lines: the bullets' hits, the claw and the bite through doomfj.hurtcode's dp_go, the imp's fireball).
 """
 from typing import List
 
@@ -166,9 +167,18 @@ def decide_leaf_lines(justhit: bool = False) -> List[str]:
             "    stl.fret mm_dret"]
 
 
-def attack_leaf_lines() -> List[str]:
+def attack_leaf_lines(full: bool = False) -> List[str]:
     """`md_attack` (stl.fcall md_attack, md_ret): mm_kind's action, its facing and its draws (combat.BULLETS
-    bullets of 3 draws each for the hitscanners)"""
+    bullets of 3 draws each for the hitscanners).
+
+    `full` (M7 P5, doomfj.hurtcode; off, the text is P3.2c's to the byte): the draws are APPLIED, as the model's
+    `_monster_attack` -- a hitscanner's attack sight once (`md_hs`: p_dead 0 and `mm_as`, combat._mon_hitscan's
+    `player_alive() and attack_sight`), then per bullet (`md_bul`) the 3-draw `mbul` row and a hit when seen and
+    mt_d < L (the row's nibbles 1-3: hurtcode.mbul_values) -> `dp_go` with the row's damage; the claw and the bite
+    (the reach and the attack sight as before) look their 1-draw damage up (`trclaw` / `sgbite`) -> `dp_go`; the
+    imp outside melee (out of reach or out of sight: _check_melee_range false) spawns its fireball through
+    `stl.fcall pj_spawn, pj_sret` (agent C, doomfj.projcode) with mm_x / mm_y as the monster's position. The
+    program must then hold hurtcode's decls (md_row, md_seen, md_bret, dp_dmg), dp_go, the tables and pj_spawn."""
     from doomfj.combat import BULLETS
     k = draws()
     pos = [ATTACK_KINDS[a] for a in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack")]
@@ -178,24 +188,64 @@ def attack_leaf_lines() -> List[str]:
            "    hex.zero 1, mm_asok",
            "    stl.fcall mm_todist, mm_tdret",
            "    stl.fcall mm_octant, mm_ocret",
-           "    sim.jump16 mm_kind, " + ", ".join(tg),
-           "  md_pos:", "    hex.add_constant 2, mm_rng, %d" % (BULLETS["A_PosAttack"] * k["bullet"]), "    ;md_out",
-           "  md_spos:", "    hex.add_constant 2, mm_rng, %d" % (BULLETS["A_SPosAttack"] * k["bullet"]),
-           "    ;md_out"]
-    for lab, n in (("md_claw", k["claw"]), ("md_bite", k["bite"])):
+           "    sim.jump16 mm_kind, " + ", ".join(tg)]
+    if not full:
+        out += ["  md_pos:", "    hex.add_constant 2, mm_rng, %d" % (BULLETS["A_PosAttack"] * k["bullet"]),
+                "    ;md_out",
+                "  md_spos:", "    hex.add_constant 2, mm_rng, %d" % (BULLETS["A_SPosAttack"] * k["bullet"]),
+                "    ;md_out"]
+        for lab, n in (("md_claw", k["claw"]), ("md_bite", k["bite"])):
+            out += ["  %s:" % lab,
+                    "    hex.cmp 4, mt_d, mt_c60, %s_r, md_out, md_out" % lab,
+                    "  %s_r:" % lab,
+                    "    stl.fcall mm_as, mm_asret",
+                    "    hex.if0 1, mm_asr, md_out",
+                    "    hex.add_constant 2, mm_rng, %d" % n,
+                    "    ;md_out"]
+        return out + ["  md_out:", "    stl.fret md_ret"]
+    assert (k["bullet"], k["claw"], k["bite"]) == (3, 1, 1), k       # mbul folds 3 draws; trclaw / sgbite one
+    for lab, act in (("md_pos", "A_PosAttack"), ("md_spos", "A_SPosAttack")):
+        out += ["  %s:" % lab, "    stl.fcall md_hs, md_bret"]
+        out += ["    stl.fcall md_bul, md_bret"] * BULLETS[act]
+        out += ["    ;md_out"]
+    for lab, table, far in (("md_claw", "trclaw", "md_claw_f"), ("md_bite", "sgbite", "md_out")):
         out += ["  %s:" % lab,
-                "    hex.cmp 4, mt_d, mt_c60, %s_r, md_out, md_out" % lab,
+                "    hex.cmp 4, mt_d, mt_c60, %s_r, %s, %s" % (lab, far, far),
                 "  %s_r:" % lab,
                 "    stl.fcall mm_as, mm_asret",
-                "    hex.if0 1, mm_asr, md_out",
-                "    hex.add_constant 2, mm_rng, %d" % n,
+                "    hex.if0 1, mm_asr, %s" % far,
+                "    hex.inc 2, mm_rng",
+                "    %s.lookup dp_dmg, mm_rng" % table,
+                "    stl.fcall dp_go, dp_ret",
                 "    ;md_out"]
-    return out + ["  md_out:", "    stl.fret md_ret"]
+    out += ["  md_claw_f:",                                       # A_TroopAttack beyond melee: the fireball
+            "    stl.fcall pj_spawn, pj_sret",
+            "  md_out:", "    stl.fret md_ret",
+            # the hitscan's attack sight, once an attack: a dead player is not shootable
+            "  md_hs:",
+            "    hex.zero 1, md_seen",
+            "    hex.if1 1, p_dead, md_hs_out",
+            "    stl.fcall mm_as, mm_asret",
+            "    hex.mov 1, md_seen, mm_asr",
+            "  md_hs_out:", "    stl.fret md_bret",
+            # one bullet: P_Random x 3 folded into its row, then the hit
+            "  md_bul:",
+            "    hex.inc 2, mm_rng",
+            "    mbul.lookup md_row, mm_rng",
+            "    hex.add_constant 2, mm_rng, 2",
+            "    hex.if0 1, md_seen, md_bul_out",
+            "    hex.cmp 3, mt_d + 1*dw, md_row + 1*dw, md_bul_hit, md_bul_out, md_bul_out",   # mt_d < L
+            "  md_bul_hit:",
+            "    hex.zero 2, dp_dmg", "    hex.mov 1, dp_dmg, md_row",
+            "    stl.fcall dp_go, dp_ret",
+            "  md_bul_out:", "    stl.fret md_bret"]
+    return out
 
 
-def decide_leaves(justhit: bool = False) -> List[str]:
+def decide_leaves(justhit: bool = False, full: bool = False) -> List[str]:
+    """`full` (M7 P5): md_attack applies its draws (attack_leaf_lines(full=True)); off, P3.2c's text to the byte"""
     return (todist_leaf_lines() + octant_leaf_lines() + as_leaf_lines() + decide_leaf_lines(justhit)
-            + attack_leaf_lines())
+            + attack_leaf_lines(full))
 
 
 def type_decide(info) -> dict:

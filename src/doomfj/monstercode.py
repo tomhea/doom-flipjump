@@ -285,6 +285,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     from doomfj.damagecode import damage_on
     damage = damage_on(player)
     assert not damage or decide, "damage (M7 P4.2a) runs on the decide mode's slots: mode %r" % mode
+    # M7 P5 (doomfj.hurtcode): a player mode whose monsters HURT the player -- the player can die, and the slots
+    # lose their target while he is dead (p32a_slot's `hurt`); the decide mode's slots carry it
+    from doomfj.hurtcode import hurt_on
+    hurt = hurt_on(player) and decide
     w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los")
     nmon, schema = w.layout.nmon, w.schema
     if nmon == 0 or not rows:
@@ -371,7 +375,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                       **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m])} if chase else {}),
                       **({"dc": type_decide(w.mon_info[m])} if decide else {}),
                       **({"dmg": True} if damage else {}),
-                      **({"hear": True, "sec": w._mon_sector(m)} if hear else {}))
+                      **({"hear": True, "sec": w._mon_sector(m)} if hear else {}),
+                      **({"hurt": dict(sp=gd.STATE_INDEX[w.mon_info[m].spawnstate],
+                                       spt=gd.STATES[w.mon_info[m].spawnstate].tics)} if hurt else {}))
                  for m in range(nmon)]
         nleaf = len(w.cmap.subsectors)
         extra = {
@@ -429,7 +435,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 mon_radius=[w.mon_radius[m] for m in range(nmon)], height=w.mon_height[0],
                 # M7 P4.2a: what blocks a move (World._thing_blocker: MF_SOLID) and what holds a closing door
                 # (World.door_touched: alive -- mon_shootable, damagecode.check_model_rules)
-                solid="mon_solid" if damage else "mon_active", live="mon_shootable" if damage else "mon_active")
+                solid="mon_solid" if damage else "mon_active", live="mon_shootable" if damage else "mon_active",
+                # M7 P5: the emitter's things_leaf_lines(hurt=), decide_leaves(full=) and weapon_parts(hurt=)
+                **({"hurt": True} if hurt else {}))
             assert len(set(w.mon_height[:nmon])) == 1, "one monster height: try_move_mon takes it at compile time"
     return {
         "mode": mode, **extra,
@@ -544,7 +552,7 @@ def _sign_branch(cell, kind, yes, no):
 
 
 def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, mv=None,
-              dc=None, dmg: bool = False, hear: bool = False, sec: int = None) -> list:
+              dc=None, dmg: bool = False, hear: bool = False, sec: int = None, hurt=None) -> list:
     """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
     A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
     REJECT row of its spawn sector (indexed by the player's sector); t: its seen flag's index (`thseen`).
@@ -566,7 +574,14 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     node of the monster's sector (`msec` with `mv`, else its spawn sector `sec`) heard a shot (`nz_heard`): the
     target is set, and a monster without MTF_AMBUSH (`mon_ambush`) wakes; an ambusher needs the waking sight (seen,
     or the REJECT row within 128) and wakes without the facing test, or else does not wake at all (the model's
-    look that follows asks the same sight). A_FaceTarget clears `mon_ambush` (p32c_slot_lines)."""
+    look that follows asks the same sight). A_FaceTarget clears `mon_ambush` (p32c_slot_lines).
+
+    `hurt` (M7 P5, doomfj.hurtcode: the player can die -- `dict(sp=the spawn state's index, spt=its tics)`): the
+    target is LOST while the player is dead (`p_dead`, one flag: hurtcode keeps p_hp <= 0 <=> p_dead), as the model's
+    `player_alive()` guards -- A_Look neither hears nor sees (both of its branches need a live player); A_Chase's
+    threshold resets instead of counting down, and after the turn the monster returns to its spawn state (its
+    A_Look runs at once in the model and changes nothing more: the threshold is already 0) instead of deciding or
+    moving."""
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     nthr = cell_nibbles(schema, "mon_threshold")
     assert not hear or mv or sec is not None, "a hearing slot needs its sector: msec (mv) or the spawn sector"
@@ -607,6 +622,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            # ---- A_Look: threshold 0; no sound before P4; P_LookForPlayers (not all around) -----------------
            "  %slook:" % L,
            "    hex.zero %d, %s" % (nthr, TH),
+           *(["    hex.if1 1, p_dead, %s" % nxt] if hurt else []),        # M7 P5: no live player to hear or see
            *(["    hex.zero 1, nz_amb",                                   # M7 P4.2b: the sound branch
               ("    hex.mov 2, mt_ms, msec + %d*dw" % (2 * m) if mv else "    hex.set 2, mt_ms, %d" % (sec or 0)),
               "    stl.fcall nz_heard, nz_hret",
@@ -657,13 +673,22 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    hex.dec 1, %s" % RE,
             "  %sr0:" % L,
             "    hex.if0 %d, %s, %st0" % (nthr, TH, L),
+            *(["    hex.if1 1, p_dead, %sthz" % L] if hurt else []),       # M7 P5: a dead target resets it
             "    hex.dec %d, %s" % (nthr, TH),
+            *(["    ;%st0" % L, "  %sthz:" % L, "    hex.zero %d, %s" % (nthr, TH)] if hurt else []),
             "  %st0:" % L,
-            "    hex.if_flags %s, %d, %sturn, %s" % (MD, 1 << 8, L, ("%smv" % L) if mv else nxt),
+            "    hex.if_flags %s, %d, %sturn, %s" % (MD, 1 << 8, L, ("%sal" % L) if hurt else ("%smv" % L) if mv
+                                                      else nxt),
             "  %sturn:" % L,
             "    hex.mov 1, mt_ti, %s" % FA,
             "    hex.mov 1, mt_ti + 1*dw, %s" % MD,
             "    mturn.lookup %s, mt_ti" % FA]
+    if hurt:                                    # M7 P5: the target lost -> the spawn state (World._a_chase)
+        out += ["  %sal:" % L,
+                "    hex.if0 1, p_dead, %s" % (("%smv" % L) if mv else nxt),
+                "    hex.set %d, %s, %d" % (ns, ST, hurt["sp"]),
+                "    hex.set %d, %s, %d" % (nt, TI, hurt["spt"]),
+                "    ;%s" % nxt]
     if mv:
         out += ["  %smv:" % L] + p32b_move_lines(m, schema=schema, **mv, dc=dict(dc, t=t, jh=dmg) if dc else None,
                                                  solid="mon_solid" if dmg else "mon_active")

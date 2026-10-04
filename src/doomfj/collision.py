@@ -126,7 +126,7 @@ def cell_of(c16: int) -> int:
     return (c - (1 << 32) if c >> 31 else c) >> CELL_SHIFT
 
 
-def cell_lists(rows, radius: int) -> dict:
+def cell_lists(rows, radius: int, *, corner: bool = True) -> dict:
     """`{(cx, cy): (linedef, ...)}` -- every line whose bbox a box of half-width `radius` (16.16)
     centred ANYWHERE in the cell does not reject, ascending. A cell no line can touch is absent.
 
@@ -139,9 +139,13 @@ def cell_lists(rows, radius: int) -> dict:
     ⚠ COVERAGE IS CHECKABLE AT THE CORNERS, and the tests do it that way. That open interval is at
     least 2r wide, so while 2r is at least the cell (asserted) it cannot sit strictly inside the
     cell: if any centre in the cell escapes the reject, a CORNER does. An unlisted line is rejected
-    at all four corners of the cell."""
+    at all four corners of the cell.
+
+    M7 P5: `corner=False` lifts that assert for a box narrower than a cell (the fireball's, radius 6:
+    `projcode.missile_cell_lists`). The lists are the same exact interval rule; only the corner shortcut
+    for CHECKING them is gone, so such a set carries its own coverage proof (tests/host/test_projcode.py)."""
     S = 1 << CELL_SHIFT
-    assert 2 * radius >= S, "the corner argument needs a box at least one cell wide"
+    assert not corner or 2 * radius >= S, "the corner argument needs a box at least one cell wide"
     out: dict = {}
     for li, row in enumerate(rows):
         minx, maxx, miny, maxy = (v << 16 for v in row[4:8])
@@ -317,7 +321,8 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
     (`line_rows`) -- the tree, a stub per distinct list, a stub per listed line, and the ONE
     shared `sim.line_test`.
 
-    `doors`: `{linedef: ((door slot, pass state), ...)}` for the lines a door blocks. Such a line's
+    `doors`: `{linedef: ((door slot, pass state), ...)}` for the lines a door blocks (M7 P5: the slot may be a
+    state cell's name instead, e.g. `fswitch`, read the same way). Such a line's
     stub reads `dstate + slot*dw` and xors FLAG_BLOCKING in while the state is below the pass
     state -- the predicate the oracle's `blocked_lines` is built from (`doors.pass_state`), so there
     is no second copy of the door's state to keep in step with it. A line on two doors (between two
@@ -423,7 +428,9 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
             for k, (slot, pw) in enumerate(doors[li]):
                 shut_mask = (1 << min(max(pw, 0), 16)) - 1    # the states below the pass state
                 nxt = f"{lab}_d{k + 1}" if k + 1 < len(doors[li]) else f"{lab}_go"
-                out += ([f"  {lab}_d{k}:"] if k else []) +                     [f"    hex.if_flags dstate + {slot}*dw, {shut_mask:#06x}, {nxt}, {lab}_shut"]
+                # M7 P5: a slot may name its state CELL (the missile cells' floor switch, `fswitch`)
+                cell = slot if isinstance(slot, str) else f"dstate + {slot}*dw"
+                out += ([f"  {lab}_d{k}:"] if k else []) +                     [f"    hex.if_flags {cell}, {shut_mask:#06x}, {nxt}, {lab}_shut"]
             out += [f"  {lab}_shut:",
                     f"    hex.xor_by ca_flags, {FLAG_BLOCKING}",
                     f"    stl.fcall {L}_test, cc_tret",

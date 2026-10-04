@@ -20,8 +20,11 @@ THE CODE (no per-slot logic -- P3.2b's first build overflowed the table pool whe
   * `dm_go`: a two-level `sim.jump16` on dm_id to the slot's stub `dmg<m>`, which copies the slot's cells into the
     window (the `dm_*` registers), its position from thpos_rt, its damage PROFILE index (`dm_type`), calls `dm_leaf`
     and copies the cells back;
-  * `dm_leaf`, damage_monster's order: not shootable or health <= 0 -> nothing; P_AproxDistance(target - player) >
-    reach -> nothing; health -= damage; ONE P_Random on the monster's stream (both outcomes in the folded table
+  * `dm_leaf`, the model's order (`_line_attack`, then damage_monster): P_AproxDistance(target - player) > reach ->
+    nothing; M7 P5 (`fx`, the player modes FX_PLAYER_MODES): the BLOOD (projcode's fx_spawn on the target's position
+    and the damage) -- before the target's checks, as the model spawns it: the aim can name a monster an earlier pellet
+    of the same blast killed; then not shootable or health <= 0 -> nothing; health -= damage; ONE P_Random on the
+    monster's stream (both outcomes in the folded table
     `dmrnd`: either path draws exactly once); a dispatch on the profile sets its constants and its pain outcome;
     then the death (shootable 0, the death state and its tics, tics -= P_Random() & 3) or the hurt (the pain state and
     justhit on the roll; reaction 0; threshold 0 -> target, BASETHRESHOLD, and the spawn state -> the see state).
@@ -48,13 +51,20 @@ P42_FIELDS = ("mon_health", "mon_shootable", "mon_solid", "mon_justhit")
 # the player modes whose shots hurt monsters (world.PLAYER_MODES): the emitter adds this module when the game tier's
 # PLAYER_MODE is one of them -- M7 P5: derived from the ONE rule, world.player_resolves
 from doomfj.world import PLAYER_MODES as _PLAYER_MODES, player_resolves as _player_resolves   # noqa: E402
+from doomfj.world import player_bleeds as _player_bleeds   # noqa: E402
 DAMAGE_PLAYER_MODES = tuple(m for m in _PLAYER_MODES if _player_resolves(m))
+# M7 P5: the player modes whose hits spawn BLOOD (combat._line_attack's _spawn_fx_at_target): dm_leaf calls fx_spawn
+FX_PLAYER_MODES = tuple(m for m in _PLAYER_MODES if _player_bleeds(m))
 DM_MAX = 20                          # the largest damage a shot deals in P4.2a (the fist and the saw: 20)
 TICS_FOREVER = 15
 
 
 def damage_on(player_mode: str) -> bool:
     return player_mode in DAMAGE_PLAYER_MODES
+
+
+def fx_on(player_mode: str) -> bool:
+    return player_mode in FX_PLAYER_MODES
 
 
 # ---- the profiles: what P_DamageMobj reads from a monster's mobjinfo -----------------------------------------------
@@ -188,18 +198,20 @@ def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int]) -> Lis
     return out
 
 
-def leaf_lines(keys: Sequence[tuple]) -> List[str]:
+# M7 P5: the blood a hit spawns (projcode.fx_spawn: the target's integer position, the damage)
+FX_CALL = ["    hex.mov 4, fxs_x, dm_x", "    hex.mov 4, fxs_y, dm_y", "    hex.mov 2, fxs_dmg, dm_dmg",
+           "    stl.fcall fx_spawn, fx_sret"]
+
+
+def leaf_lines(keys: Sequence[tuple], fx: bool = False) -> List[str]:
     """`dm_leaf` (stl.fcall dm_leaf, dm_lret) on the window -- the module docstring's order. `keys`: the profiles
-    (`profiles(w)[0]`); mt_dist_leaf (monstercode.dist_leaf_lines) computes P_AproxDistance"""
+    (`profiles(w)[0]`); mt_dist_leaf (monstercode.dist_leaf_lines) computes P_AproxDistance. `fx` (M7 P5): a hit in
+    reach spawns blood (FX_CALL) before the target's own checks"""
     from doomfj.combat import MISSILERANGE_U
     classes = pain_classes(keys)
     assert 0 < len(keys) <= 16
     out = ["dm_leaf:",
-           "    hex.if0 1, dm_sh, dm_out",                                    # not shootable
-           "    hex.if_flags dm_hp + 2*dw, 0xFF00, dm_pos, dm_out",            # health < 0
-           "  dm_pos:",
-           "    hex.if0 3, dm_hp, dm_out",                                    # health == 0
-           # _line_attack's reach: P_AproxDistance(target - player) > reach -> no hit
+           # _line_attack's reach FIRST: P_AproxDistance(target - player) > reach -> no hit, no blood
            "    hex.if0 1, dm_melee, dm_far",
            "    hex.zero 4, dm_r4", "    hex.mov 2, dm_r4, dm_reach", "    ;dm_rch",
            "  dm_far:",
@@ -210,6 +222,11 @@ def leaf_lines(keys: Sequence[tuple]) -> List[str]:
            "    stl.fcall mt_dist_leaf, mt_ret",
            "    hex.cmp 4, mt_d, dm_r4, dm_in, dm_in, dm_out",
            "  dm_in:",
+           *(FX_CALL if fx else []),                                         # M7 P5: the blood, whatever the target
+           "    hex.if0 1, dm_sh, dm_out",                                    # not shootable
+           "    hex.if_flags dm_hp + 2*dw, 0xFF00, dm_pos, dm_out",            # health < 0
+           "  dm_pos:",
+           "    hex.if0 3, dm_hp, dm_out",                                    # health == 0
            "    hex.sub_shifted 3, 2, dm_hp, dm_dmg, 0",                       # health -= damage
            "    hex.inc 2, dm_rng",                                            # P_Random on the monster's stream:
            "    dmrnd.lookup dm_rr, dm_rng",                                   # v & 3, and the pain bits
@@ -252,11 +269,13 @@ def leaf_lines(keys: Sequence[tuple]) -> List[str]:
     return out
 
 
-def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = DM_MAX) -> dict:
+def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = DM_MAX, fx: bool = False) -> dict:
     """everything P4.2a's damage adds, for the World `w` (any monster mode; the emitter's needs P3.2c "decide"):
       * `decls`: the P42 cells at `boot_skill`'s level start, the interface, the window and the scratch;
       * `lines`: dm_go, the per-slot stubs, dm_leaf -- leaves (each ends in a fret), placed where nothing falls in;
       * `tables`: `dmrnd`, the folded P_Random outcomes.
+    `fx` (M7 P5, `fx_on(PLAYER_MODE)`): dm_leaf spawns the blood (projcode's fx_spawn, whose decls and lines the
+    caller adds).
     `slot_rt[m]`: monster slot m's runtime thing (its thpos_rt row). NEW GAME restores the P42 cells through
     p31_parts' `fields` (P42_FIELDS joins them when its `damage` is on)."""
     check_model_rules(w, max_dmg=max_dmg)
@@ -267,6 +286,6 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     vals = {f: list(getattr(snap, f)[:n]) for f in P42_FIELDS}
     return {"fields": P42_FIELDS,
             "decls": field_decls(w.schema, n, vals) + DM_INTERFACE + DM_WINDOW + DM_SCRATCH,
-            "lines": go_lines(w.schema, slot_rt, of) + leaf_lines(keys),
+            "lines": go_lines(w.schema, slot_rt, of) + leaf_lines(keys, fx=fx),
             "tables": [generate_dispatch_table_fj("dmrnd", dmrnd_values(pain_classes(keys)),
                                                   index_nibbles=2, result_nibbles=2)]}

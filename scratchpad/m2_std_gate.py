@@ -838,9 +838,11 @@ def main():
         used = bool(kd.get("use")) and not args.selftest
         if kd.get("use") and in_use_box_fixed(boxes[target], state.x, state.y):
             in_box_when_pressed = True
+        # M7 P4.1: the player's weapon, every world frame -- P4.2a: BEFORE the move, from the frame's starting pose
+        # (the binary's weapon runs before its player sim: a shot's target and a melee's reach are measured there)
+        mph.weapon(kd, state.x, state.y, state.angle)
         dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=mph.boxes())
         dstates = dps[0]
-        mph.weapon(kd)                                  # M7 P4.1: the player's weapon, every world frame
         # M7 P3.1: the monsters after the player; P3.2b: inside the doors and lifts (their presses -> next frame)
         dps, mps = mph.frame(dps, mps, state.x, state.y, state.angle)
         rsc = build_scene(mw, mw, args.map,
@@ -850,8 +852,10 @@ def main():
                                           thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
                                           thing_views=mviews(mph, state.x, state.y),
                                           thing_positions=mviews.positions(mph),
-                                          seen_out=(_seen := set()), **GAME_RENDER_KW)),
+                                          seen_out=(_seen := set()), aim_things=mviews.aim_things(mph),
+                                          aim_out=(_aim := [0] * 17), **GAME_RENDER_KW)),
                             card=bool(dps[3]), **mph.screen_kw())     # M7 P4.1: the weapon's frame, the bar
+        mph.set_aim(_aim)                               # M7 P4.2a: this picture's window -> the next frame's shots
         mph.set_seen(mviews.slots_of(_seen))            # M7 P3.2a: this picture's seen -> the next tic
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,

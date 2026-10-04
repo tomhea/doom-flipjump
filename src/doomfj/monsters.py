@@ -39,8 +39,11 @@ class MonsterPhase:
         # seen set of the picture it drew (`set_seen`), as the binary's render writes its flags
         # M7 P4.1: the PLAYER's model mode too (world.PLAYER_MODES; the gates pass wall_renderer.PLAYER_MODE) -- the
         # weapon half below steps the player's weapon in the same world the monsters live in
+        # M7 P4.2a: a player whose shots resolve aims with THE PICTURE's window (combat.window_aim), which the gate
+        # writes from each render's `aim_out` (`set_aim`), as the binary's render writes `aim_sid`
+        aim = World.window_aim if player in ("shoot", "hit", "full") else None
         self.world = World(map_wad, mapname, gd.SK_HARD if skill is None else skill, rm=rm, monsters=mode,
-                           sight_rule="los" if mode == "idle" else "seen", player=player)
+                           sight_rule="los" if mode == "idle" else "seen", player=player, aim=aim)
         self.gd = gd
 
     def reset(self, skill: int) -> None:
@@ -95,14 +98,22 @@ class MonsterPhase:
         return (ds, fired, frozenset(req) | dr, card), ((lifts, frozenset(lreq) | lr, sw) if mps is not None else None)
 
     # ---- M7 P4.1: the weapon half (docs/gp-combat.md section 1) -------------------------------------------------------
-    def weapon(self, keys: dict):
+    def weapon(self, keys: dict, x16: Optional[int] = None, y16: Optional[int] = None,
+               angle: Optional[int] = None):
         """ONE world frame of the player's weapon: the number keys, then P_MovePsprites -- the model's own
         (`combat._weapon_keys`, `_move_psprites`) in the world's player mode. A gate calls it on every world frame
-        that tics (not a menu frame, not a finished level), with the frame's held keys. -> the tic's events"""
+        that tics (not a menu frame, not a finished level), with the frame's held keys. M7 P4.2a: and with the
+        player's PRE-MOVE pose -- the binary's weapon runs before the player's move, so a melee reach and a shot's
+        target are measured from where the player stood when the frame began. -> the tic's events"""
         from doomfj.world import KEYS, TicEvents
         w = self.world
         if w.player == "walk":
             return TicEvents(0)
+        if x16 is not None:
+            ws = w.ws
+            ws.px = x16 - (1 << 32) if x16 >> 31 & 1 else x16
+            ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
+            ws.pangle = angle & 0xFFFFFFFF
         k = {n: bool(keys.get(n)) for n in KEYS}
         ev = TicEvents(0)
         w._weapon_keys(k)
@@ -122,6 +133,7 @@ class MonsterPhase:
                 "wp_rf": ws.p_refire, "wp_ad": ws.p_attackdown, "am_clip": ws.p_ammo[gd.AM_CLIP],
                 "am_shell": ws.p_ammo[gd.AM_SHELL],
                 "wp_own": sum(int(bool(ws.p_owned[w])) << (4 * i) for i, w in enumerate(WC.WEAPONS)),
+                **({"aim_sid": tuple(ws.aim_sid)} if self.world.player in ("shoot", "hit", "full") else {}),
                 "rng_pl": ws.rng_player, "wp_frm": WC.overlay_frames().index(WC.psprite_lump(wst)),
                 "fl_frm": 0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0
                 else 1 + WC.flash_frames().index(WC.psprite_lump(fst))}

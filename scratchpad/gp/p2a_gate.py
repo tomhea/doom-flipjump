@@ -163,7 +163,7 @@ class Mirror:
                         if self.ctl == "reach" and dp.card_at is not None:
                             z = dp.card_at[2]
                         cur[0] = dp.touch(cur[0], cx, cy, z)
-                    mph.weapon(kd)                            # M7 P4.1: the weapon, after the use press
+                    mph.weapon(kd, st.x, st.y, st.angle)      # M7 P4.1: the weapon, after the use press (pre-move)
                     new = sim.rm.step_sim(st, kd, scene=sim._scene(blocked, mp.heights(ms)),
                                           touch=touch, strafe=True)
                     ph = cur[0]
@@ -203,11 +203,12 @@ def seen_of(orc, dsim, card_di):
     """M7 P3.2a: (MonsterPhase, pose, door phase, movers, taken) -> the monster slots the frame's picture SEES --
     the same render the gate compares against, with `seen_out`"""
     def fn(mph, st, ph, ms, taken):
-        seen = set()
+        seen, aim = set(), [0] * 17
         orc.render(st.x, st.y, st.angle, tuple(ph[0][si][0] for si in dsim.order),
                    hidden_extra=(card_di,) if taken else (), movers=dsim.mp.heights(ms),
                    views=orc.monster_views(mph, st.x, st.y), seen_out=seen,
-                   positions=orc.monster_positions(mph))
+                   positions=orc.monster_positions(mph), aim_things=orc._mviews.aim_things(mph), aim_out=aim)
+        mph.set_aim(aim)                    # M7 P4.2a: this picture's window -> the next frame's shots
         return orc._mviews.slots_of(seen)
     return fn
 

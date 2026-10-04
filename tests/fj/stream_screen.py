@@ -19,7 +19,7 @@ fj op cost, which is identical either way.
 `present.init_screen_stream`, never the stock 8-byte `present.init_screen` (which stays untouched and
 is what every other test / build_doom keeps using against the stock `InMemoryScreen`)."""
 from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
-from flipjump.utils.exceptions import IOReadOnEOF
+from flipjump.utils.exceptions import IODeviceException, IOReadOnEOF
 
 # M13-raster: the block-FP reciprocal table is a pure Config-derived math constant (no asset-wad
 # dependency, no game data) shared SSOT-style with slope_div/recip32/scale_from_global_angle -- the
@@ -41,6 +41,13 @@ PROJ_ROW_BYTES = 30                # seg_geom row: 5x2B (v1x,v1y,v2x,v2y,segangl
                                    #   + 2x2B (ceil_h,floor_h) + 4x1B (light,lit,ceilbase,floorbase)
 UNCLAIMED_FVP = 0xFF               # a column record with fvp == 0xFF paints nothing
 SPANS_END_X = 0xFF                 # a fillCol record with x == 0xFF terminates the frame
+# P4 (docs/gp-partial-ditto.md): the two 0x0B in-list tokens, mirroring flipjump ScreenIO's
+# COLLINES_PARTIAL_DITTO / COLLINES_KEEP / COLLINES_TOKENS_MAX_HEIGHT (flipjump PR #364, branch
+# 1.5.1). Local copies on purpose: importing them would break every tests/fj gate on a flipjump
+# that predates them, and the cross-decoder test is what keeps the two decoders from drifting.
+CL_PARTIAL_DITTO = 0xFD            # [0xFD][y]: rows [cursor, y) copied from column x-1; the list continues
+CL_KEEP = 0xFC                     # [0xFC][y]: rows [cursor, y) left as they are; the list continues
+CL_TOKENS_MAX_HEIGHT = 0xFB        # the tokens exist only on a screen this tall or shorter
 
 # M13-raster interleaved record tags (a seg record's own tag byte is its x1, always < RASTER_TAG_FLOOR_VP
 # since VIEW_W <= 160; the three reserved high tags can never collide with a real column index).
@@ -72,11 +79,12 @@ class StreamScreen(InMemoryScreen):
         self._spans_active = False                 # M13-spanfill: inside a 0x0A fillCol span list
         # M13-lines3: inside a 0x0B packed column-run frame. _cl_x = the current column (None =
         # expecting a record tag byte); _cl_y = the fill cursor within the column; _cl_pend = a
-        # pending y2 byte awaiting its colour mate.
+        # pending y2 byte awaiting its colour mate; _cl_tok = a pending 0xFD/0xFC awaiting its row byte.
         self._cl_active = False
         self._cl_x = None
         self._cl_y = 0
         self._cl_pend = None
+        self._cl_tok = None
         self._spans_rec = bytearray()              # the current 4-byte [x][y1][y2][colour] record being read
         # M13-raster: the device rasterizer's static tables (loaded once via 0x0C, DMA-read directly
         # from fj memory -- see _execute_command) + per-frame state (reset each 0x0D).
@@ -172,6 +180,7 @@ class StreamScreen(InMemoryScreen):
             self._cl_x = None
             self._cl_y = 0
             self._cl_pend = None
+            self._cl_tok = None
             return
         if command == CMD_LOAD_RASTER_TABLES:
             self._require_initialized_screen()
@@ -271,6 +280,10 @@ class StreamScreen(InMemoryScreen):
     # fill rows [cursor, y2) of column x top-down starting at cursor=0, a single 0xFF ends the
     # column (y2 <= VIEW_H = 100 for real pairs, so 0xFF is unambiguous); 0xFF at tag position ends
     # the frame. The device holds only the fill cursor -- no clipping, no lookups, no decisions.
+    # P4: where a y2 is expected, on a screen of <= 0xFB rows, [0xFD][y] (PARTIAL DITTO) copies rows
+    # [cursor, y) from column x-1 and [0xFC][y] (KEEP) leaves them as they are; both set cursor = y
+    # and the list continues. cursor <= y <= height; 0xFD in column 0 is an error. Same grammar as
+    # flipjump ScreenIO.InMemoryScreen._handle_collines_byte.
 
     def _handle_collines_byte(self, byte: int) -> None:
         if self._cl_x is None:                         # expecting a record tag
@@ -282,6 +295,21 @@ class StreamScreen(InMemoryScreen):
             self._cl_x = byte
             self._cl_y = 0
             self._cl_pend = None
+            self._cl_tok = None
+            return
+        if self._cl_tok is not None:                   # the row byte of a PARTIAL DITTO / KEEP
+            tok, self._cl_tok = self._cl_tok, None
+            name = "PARTIAL DITTO" if tok == CL_PARTIAL_DITTO else "KEEP"
+            if byte > self.height:
+                raise IODeviceException(f"collines {name} to row {byte}, past the {self.height}-row screen")
+            if byte < self._cl_y:
+                raise IODeviceException(f"collines {name} to row {byte}, behind the fill cursor at {self._cl_y}"
+                                        " (the cursor only moves forward)")
+            if tok == CL_PARTIAL_DITTO:
+                x = self._cl_x
+                for y in range(self._cl_y, byte):
+                    self.pixel_indices[y * self.width + x] = self.pixel_indices[y * self.width + x - 1]
+            self._cl_y = byte                          # KEEP writes nothing: the rows keep what they hold
             return
         if self._cl_pend is None:
             if byte == 0xFF:                           # end of this column's list
@@ -297,6 +325,11 @@ class StreamScreen(InMemoryScreen):
                     self.pixel_indices[y * self.width + x] = \
                         self.pixel_indices[y * self.width + x - 1]
                 self._cl_x = None
+                return
+            if byte in (CL_PARTIAL_DITTO, CL_KEEP) and self.height <= CL_TOKENS_MAX_HEIGHT:
+                if byte == CL_PARTIAL_DITTO and self._cl_x == 0:
+                    raise IODeviceException("collines PARTIAL DITTO for column 0 (no left neighbour to copy)")
+                self._cl_tok = byte                    # the row byte follows
                 return
             self._cl_pend = byte                       # y2, awaiting its colour
             return

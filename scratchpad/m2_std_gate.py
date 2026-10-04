@@ -455,7 +455,11 @@ def main():
 
     mw = WadFile.from_path(str(ROOT / args.wad))
     art = WadFile.from_path(str(ROOT / args.asset))
-    rm = ReferenceModel(Config())
+    # M7 P4.0: the GAME tier's 84-row view and its screen -- the weapon over the view, the bar below (hud.GameScreen)
+    from doomfj.config import GAME_CFG
+    from doomfj.hud import GameScreen
+    rm = ReferenceModel(GAME_CFG)
+    screen = GameScreen(rm, mw, art, mw.sectors(args.map))
     cmap = bake_bsp(mw, args.map)
     secs, lds, sds = mw.sectors(args.map), mw.linedefs(args.map), mw.sidedefs(args.map)
     # ── CONTROL 5, BEFORE 4.5 BILLION OPS ───────────────────────────────────────────────────
@@ -821,11 +825,12 @@ def main():
         rsc = build_scene(mw, mw, args.map,
                           {**heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}),
                            **mp.heights(mps)})
-        want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
+        want = screen.frame(bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
                                           thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
                                           thing_views=mviews(mph, state.x, state.y),
                                           thing_positions=mviews.positions(mph),
-                                          seen_out=(_seen := set()), **GAME_RENDER_KW))
+                                          seen_out=(_seen := set()), **GAME_RENDER_KW)),
+                            card=bool(dps[3]))
         mph.set_seen(mviews.slots_of(_seen))            # M7 P3.2a: this picture's seen -> the next tic
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
@@ -864,8 +869,8 @@ def main():
                 alt = {si: dstates[si][0] for si in order}
                 alt[target] = k
                 asc = build_scene(mw, mw, args.map, heights_for_states(secs, lds, sds, alt))
-                pic = bytes(rm.render_wall_frame(state, asc, sprite_wad=art, thing_hidden=hidden,
-                                                 **GAME_RENDER_KW))
+                pic = screen.frame(bytes(rm.render_wall_frame(state, asc, sprite_wad=art, thing_hidden=hidden,
+                                                 **GAME_RENDER_KW)), card=bool(dps[3]))
                 nd = sum(a != b for a, b in zip(got[f], pic))
                 if nd == 0 or k <= dstates[target][0] + 1:
                     print("     vs oracle with door at state %-2d : %s"

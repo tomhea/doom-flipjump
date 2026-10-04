@@ -159,8 +159,13 @@ def main():
 
     mw = WadFile.from_path(str(ROOT / args.wad))
     art = WadFile.from_path(str(ROOT / args.asset))
-    cfg = Config()
+    # M7 P4.0: the GAME tier's config (the 84-row view under the status bar) and its screen (hud.GameScreen);
+    # a menu frame still covers the whole W x H screen (menu_screen_pixels draws at cfg.W x cfg.H)
+    from doomfj.config import GAME_CFG
+    from doomfj.hud import GameScreen
+    cfg = GAME_CFG
     rm = ReferenceModel(cfg)
+    gscreen = GameScreen(rm, mw, art, mw.sectors(args.map))
     scene = build_scene(mw, mw, args.map)
     colours = palette_colours(bytes(b for rgb in mw.playpal(0) for b in rgb))
     # M7 P3.4: the menu's pictures through the ONE mapping from its state (the help joined them)
@@ -276,10 +281,10 @@ def main():
             screens_seen.add(key)
             menus += 1
         else:
-            want = bytes(rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map),
+            want = gscreen.frame(bytes(rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map),
                                               scene, thing_hidden=hidden[row["skill"]],
                                               thing_views=row["views"], thing_positions=row["positions"],
-                                              **render_kw))
+                                              **render_kw)))
             kind = "world %-7s" % SKILL_NAMES[row["skill"]]
             worlds += 1
             if row["ng"] is not None:

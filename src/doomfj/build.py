@@ -87,6 +87,12 @@ MONSTER_PERSIST = ("mon_state", "mon_tics", "mon_facing", "mon_active",
                    # M7 P3.2c (the decide mode): the missile decision's flag
                    "mon_justattacked")
 
+# M7 P4.0 (docs/gp-combat.md section 2; doomfj.hudcode): the status bar's memory, the game tier's alone -- the values
+# (`hud_v`), what the screen shows (`hud_s`) and the redraw-all flag (`hud_full`). A reset that restored them would
+# redraw the whole bar every frame (the pictures stay right, the ops do not), and P4.1's values would snap back to the
+# level start; the device keeps the bar's rows between frames, so the shadows must too.
+HUD_PERSIST = ("hud_v", "hud_s", "hud_full")
+
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:
     """The labels the M1 reset leaves alone, for a tier's flags -- the ONE composition: the reset
@@ -96,7 +102,8 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
         return ()
     return (STANDALONE_PERSIST + (DOOR_PERSIST + MOVER_PERSIST if doors else ())
             + (THING_PERSIST if moving_things else ())
-            + (MONSTER_PERSIST if (standalone and moving_things) else ()))
+            + (MONSTER_PERSIST if (standalone and moving_things) else ())
+            + HUD_PERSIST)                       # M7 P4.0: every standalone tier is the game tier, with the bar
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 
@@ -338,7 +345,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
     not-running feature is exactly the class of bug that cost this repo the most (docs/opt-experiments.md).
     """
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
-    cfg = cfg or Config()
+    from doomfj.wall_renderer import tier_cfg
+    cfg = tier_cfg(cfg, tier)          # M7 P4.0: the game tier's 84-row view, in the constants AND the emission
     wad = WadFile.from_path(wad_path)
     # ONE NAME, and everything that used to be a parameter falls out of it or out of `cfg`.
     _t = tier_flags(tier)

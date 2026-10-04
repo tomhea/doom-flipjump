@@ -1044,3 +1044,41 @@ binary to the next; the rows telescope -- each starts where the last ended, chec
 file's header puts a cumulative overrun to the owner (the projection > 22M minus the remaining budgets minus a 15%
 reserve -> stop); this section records the sum and does not apply that rule. P3.2c and P3.3 declared no budget of
 their own. The CAP-22 measure is v5's: 15,560,076 (headroom 6,439,924 to 22M).
+
+
+## P4.0 the game screen (class F) -- declared 2026-10-04, before the build
+
+**What**: `docs/gp-combat.md` section 2. The game tier's view becomes 160x84 (`config.GAME_CFG`, D6), so the view's
+dittos become PARTIAL dittos `[0xFD][84][0xFF]` (the device change flipjump#364, merged into `1.5.1` at 1cd6e0c). A
+16-row status bar is drawn below the view in the menu's fonts: AMMO, HEALTH, ARMS, ARMOR, KEYS, redrawn per slot
+only when its value changes, and whole after every menu frame. The ready pistol (`PISGA0`) is drawn over the view as
+KEEP records with constant colours, because all of E1M1's sectors light a psprite with colormap row 0. The values
+are the level start's (100 / 0 / 50, the pistol), and the card is the doors' `pcard`. The aim window moved to P4.1
+(gp-combat C1), where it is first read. No v6: the 84-row view leaves every seen set of v5 unchanged (1,100 of 1,100
+frames, `scratchpad/plan/p4/view84` in the session, recorded in gp-combat C5).
+
+**Size target**: from this rung on it is **40% of 2^27** (gp-combat C2; the owner, 2026-09-25 and 2026-10-04).
+
+**Budget** (ESTIMATES; their basis):
+- v5 binding: **-0.3 .. -1.2M**. The 84-row view cuts the oracle's stream proxy by 10.0% (mean) and 11.0% (p80) and
+  floor/ceiling pixels by 20%. The weapon costs ~6K a frame (343 runs x 16 ops, baked), the bar's 13 slot tests
+  ~1-2K, and the partial dittos +16 ops each (~0.9K).
+- gamespeed: the same sign.
+- size: **<= +0.3M words**. The weapon's records, the bar's static columns and the 13 slots' variants come to
+  ~0.1M words of constant output, and placement adds to that.
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. Host: `tests/host/test_hud.py` (the slot columns equal the full bar for 4 value sets; a changed value changes
+   only its slot; the pistol's geometry, with a shifted-psprite control; one light row on E1M1; only the game tier
+   has the bar) and `tests/host/test_collines_device.py`'s token differential with its two controls.
+2. fj: `tests/fj/test_hud_fj.py`, 8 frames of the REAL emitted tail against the oracle's screen, every slot changed
+   and a menu frame in between, with three mutants rejected at the stated frames (inverted change test -> 0,
+   shadows not invalidated -> 6, KEEP one row short -> 0).
+3. Gates: m2_std_gate, m3_gate and p2a_gate byte- and state-exact against the oracle's game screen
+   (`hud.GameScreen`: the 84-row view, the weapon, the bar); their selftests rejected where they must; B0 on v5
+   exact; deg_gate unchanged (the visual tier keeps 100 rows), every op count to the digit.
+4. v5 binding must not RISE by more than 0.1M over blocked46's 15,560,076, because the 84-row saving is the
+   premise. gamespeed is recorded. size <= +0.3M words and <= 40%; msframe recorded (D8).
+5. pinreport 20 of 20, and the restore sets re-keyed (`hud_v`, `hud_s`, `hud_full` are new state).
+
+**Row**: (filled after the build)

@@ -145,6 +145,17 @@ def tier_flags(tier: str) -> dict:
         raise ValueError("unknown tier %r -- choose one of: %s. A new combination is a new row in "
                          "wall_renderer.TIERS, not a new parameter." % (tier, ", ".join(sorted(TIERS))))
     return {flag: TIERS[tier].get(flag, False) for flag in TIER_FLAGS}
+
+
+def tier_cfg(cfg, tier: str):
+    """M7 P4.0 (docs/gp-combat.md section 2, D6): the Config a tier is emitted AND assembled with. The game tier (the
+    one with a menu) has the status bar, so its view is `hud.VIEW_ROWS` rows -- whatever config the caller passed, so a
+    100-row game binary cannot be built. Every other tier keeps the whole screen. `build_wall_renderer` (which writes
+    the fj constants: VIEW_H, CENTERY) and `emit_wall_renderer` both go through here, so the two cannot disagree."""
+    from dataclasses import replace
+    from doomfj import hud
+    cfg = cfg or Config()
+    return replace(cfg, VIEW_ROWS=hud.VIEW_ROWS) if tier_flags(tier)["menu"] else cfg
 # The V-tier picture features, retired into the default when their gates certified:
 # V2 sky, V3 step faces, V5 stacked step faces, the thing bbox cull, and the 25M-CAP
 # degradation package. Reported by `metrics['features']` FROM HERE, because every
@@ -409,7 +420,7 @@ STANDALONE_SCRATCH_DECLS = [
 ]
 
 
-def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0,
+def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
                   monsters=None) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
@@ -442,6 +453,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
               f"    rep({len(rt_binds)}, i) m1.zerobyte thnext + i*dw",
+              *[f"    {line}" for line in hud],                  # M7 P4.0: the bar's level-start values
               "    stl.fret rs_ret"]
     skills = []
     for head, nxt, vis in per_skill:
@@ -465,7 +477,7 @@ def _skill_dispatch(prefix: str) -> list:
     return [f"hex.if0 1, menu_sel, {prefix}0", f"hex.if_flags menu_sel, 1<<1, {prefix}2, {prefix}1"]
 
 
-def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
+def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) -> list:
     """M3 — the MENU frames, and the branch that chooses them.
 
     A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
@@ -501,6 +513,7 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
         *menu_state_lines(restart),
         # -- the frame: the world, or one of the baked screens
         "hex.if0 1, mode, do_world",
+        *hud,                              # M7 P4.0: a menu frame covers the bar -- redraw it on the next world frame
         "hex.if0 1, menu_scr, mf_main",
         # M7 P3.4: the help (either id) and the main menu with HELP highlighted
         f"hex.if_flags menu_scr, {_P34_SCREENS}, mf_np34, mf_p34",
@@ -509,25 +522,25 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
         "mf_nlv:",
         *_skill_dispatch("mf_s"),
         "mf_main:",
-        menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, selected, colours,
+        menu_fj(cfg.W, cfg.H, entries, selected, colours,
                 label="menu_frame", end_marker=False),
         ";frame_end",
         "mf_p34:",
         f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mf_help, mf_mainh",
         "mf_mainh:",
-        menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, entries.index(MENU_HELP_ITEM), colours,
+        menu_fj(cfg.W, cfg.H, entries, entries.index(MENU_HELP_ITEM), colours,
                 label="menu_frame_help", end_marker=False),
         ";frame_end",
         "mf_help:",
-        help_fj(cfg.VIEW_W, cfg.VIEW_H, colours, label="menu_help", end_marker=False),
+        help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False),
         ";frame_end",
         *[line for k in range(len(SKILLS)) for line in (
             f"mf_s{k}:",
-            menu_fj(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours,
+            menu_fj(cfg.W, cfg.H, SKILL_MENU, SKILL_MENU_FIRST + k, colours,
                     label=f"menu_skill{k}", end_marker=False),
             ";frame_end")],
         "mf_lv:",
-        menu_fj(cfg.VIEW_W, cfg.VIEW_H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours,
+        menu_fj(cfg.W, cfg.H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours,
                 label="menu_level_done", end_marker=False),
         ";frame_end",
         *common,                           # fcall'd only: every screen above ends in a jump
@@ -628,12 +641,12 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int) -> list:
     and test that compares a menu frame (each kept its own table until this rung)."""
     from doomfj.menu import help_pixels, pixels
     if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
-        return help_pixels(cfg.VIEW_W, cfg.VIEW_H, colours)
+        return help_pixels(cfg.W, cfg.H, colours)
     lines, hi = {0: (DEFAULT_MENU, DEFAULT_MENU_SELECTED),
                  MAIN_HELP_SCR: (DEFAULT_MENU, DEFAULT_MENU.index(MENU_HELP_ITEM)),
                  1: (SKILL_MENU, SKILL_MENU_FIRST + sel),
                  LEVEL_DONE_SCR: (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED)}[scr]
-    return pixels(cfg.VIEW_W, cfg.VIEW_H, lines, hi, colours)
+    return pixels(cfg.W, cfg.H, lines, hi, colours)
 
 
 def exit_lines(boxes, press_miss=()) -> list:
@@ -981,6 +994,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     things, player_sim, collide = _t["things"], _t["player_sim"], _t["collide"]
     moving_things, standalone = _t["moving_things"], _t["standalone"]
     menu, doors = _t["menu"], _t["doors"]
+    cfg = tier_cfg(cfg, tier)                         # M7 P4.0: the game tier's view is 84 rows (the bar)
     # the menu's text and the door quantisation were parameters that every caller left at the
     # default; they are the constants they always were.
     menu_entries, menu_selected, door_quant = None, DEFAULT_MENU_SELECTED, DOOR_QUANT
@@ -1070,6 +1084,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # fit the EXISTING 16-byte stride, so the whole-nibble shift stays.
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
+    # M7 P4.0 (docs/gp-combat.md section 2): the game tier's status bar and weapon overlay (doomfj.hudcode)
+    from doomfj.hudcode import game_hud_parts
+    _hud = game_hud_parts(rm, asset_wad, sprite_wad, map_wad.sectors(mapname)) if menu else None
     cmap = bake_bsp(map_wad, mapname)
     verts = cmap.vertexes
     lds = map_wad.linedefs(mapname); sds = map_wad.sidedefs(mapname)
@@ -2429,10 +2446,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
-            monsters=_p31["restart"] if _p31 else None)
+            monsters=_p31["restart"] if _p31 else None, hud=_hud["restart"] if _hud else ())
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
-                               restart=_restart)
+                               restart=_restart, hud=_hud["menu"] if _hud else ())
                    if menu else None)
     # M7 P2a.2: the exit switch, where the game has a menu to open and doors (its use key, `duse`)
     _exit = (exit_boxes(lds, map_wad.vertexes(mapname)) if (standalone and menu and _door_tic)
@@ -2656,7 +2673,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # M3: both frame producers fall into ONE tail. The label goes BEFORE the tail's
           # `stl.output_char 0xFF`, so the line preceding `stl.loop` is still that 0xFF and
           # `selfreset.emit_reset_part`'s structural assert is untouched.
-          *postlude_palette, *(["frame_end:"] if menu else []), *present_tail, "stl.loop",
+          *postlude_palette, *(_hud["tail"] if _hud else []),            # M7 P4.0: the weapon, the bar
+          *(["frame_end:"] if menu else []), *present_tail, "stl.loop",
           "bad: stl.loop",
           *fb_leaves,
           *((["seg_pass1_leaf:", "stl.fret seg_ret"]
@@ -2777,6 +2795,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
           *(mover_decls(len(_lift_slot)) if _movers_on else []),          # M7 P2b
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
+          *(_hud["decls"] if _hud else []),                               # M7 P4.0: the bar
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage

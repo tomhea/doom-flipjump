@@ -684,7 +684,9 @@ class Oracle:
         self.mw = WadFile.from_path(str(ROOT / wad))
         self.art = WadFile.from_path(str(ROOT / asset))
         self.mapname = mapname
-        self.rm = ReferenceModel(Config())
+        # M7 P4.0: the GAME tier's config -- the 84-row view under the status bar (config.GAME_CFG)
+        from doomfj.config import GAME_CFG
+        self.rm = ReferenceModel(GAME_CFG)
         self.secs = self.mw.sectors(mapname)
         self.lds, self.sds = self.mw.linedefs(mapname), self.mw.sidedefs(mapname)
         self.door_order = sorted(door_states(self.secs, self.lds, self.sds))
@@ -768,14 +770,26 @@ class Oracle:
                views=None, seen_out=None, positions=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
-        `thing_views` list (`monster_views`), None for every thing's type art"""
+        `thing_views` list (`monster_views`), None for every thing's type art.
+        M7 P4.0: the GAME SCREEN -- the view with the weapon over it and the status bar below
+        (`hud.GameScreen`); the bar's card is lit when the card is gone from the world (`hidden_extra`
+        names the card and nothing else -- P2a.1's one use of it)"""
         from doomfj.reference_model import SimState
-        return bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
+        view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
                                                thing_hidden=set(self.hidden) | set(hidden_extra),
                                                thing_views=views, seen_out=seen_out,
                                                thing_positions=positions,              # M7 P3.2b
                                                **self.RENDER_KW))
+        return self.screen.frame(view, card=bool(hidden_extra))
+
+    @property
+    def screen(self):
+        """M7 P4.0: the oracle's game screen (built once: it bakes the weapon's runs)"""
+        if getattr(self, "_screen", None) is None:
+            from doomfj.hud import GameScreen
+            self._screen = GameScreen(self.rm, self.mw, self.art, self.secs)   # the palette the build bakes: the map wad's
+        return self._screen
 
     # -- M7 P3.1: the monsters' views (doomfj.monsters.MonsterViews, the one mapping) -------------
     def _mv(self, world):

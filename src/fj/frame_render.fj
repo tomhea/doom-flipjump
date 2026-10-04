@@ -2686,7 +2686,13 @@ ns frame {
         rep(pnear, k) .lines_ditto_plane pval8, p2_dpid, emit_ditto, emit_full
       emit_ditto:
         byte.emit x
-        stl.output_char 0xFE
+        // M7 P4.0 (docs/gp-partial-ditto.md 5a): under a status bar (VIEW_H < H) the ditto copies the VIEW's rows
+        // only -- [0xFD][VIEW_H][0xFF], a PARTIAL DITTO -- so the left column's bar is never copied; a full-screen
+        // view keeps the one-byte [0xFE]. Assembly-time: a tier without the bar emits exactly what it did.
+        rep(VIEW_H < H, k) stl.output_char 0xFD
+        rep(VIEW_H < H, k) stl.output_char VIEW_H
+        rep(VIEW_H < H, k) stl.output_char 0xFF
+        rep(VIEW_H >= H, k) stl.output_char 0xFE
         ;col_emitted
         // ==========================================================================================
         // == 4. EMIT, THEN SAVE THE SIGNATURE ==

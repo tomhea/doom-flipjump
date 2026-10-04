@@ -9,6 +9,9 @@ pickups, bonuscount, berserk, player blocking by things, nukage (`_special_secto
 death think and restart (P7). The player CAN die in the model; P5 builds the death MOMENT only (p_dead, the weapon's
 downstate, the +1 rng_player tics draw) and the AI's target loss; no gate may reach a death (assert deaths == 0).
 
+**SHIPPED 2026-10-04 as blocked48** (sha256 `69890d31f08b450b`), ONE build stacked on P4 (blocked47); where the build
+differs from this note, "As built" at the end says so (`docs/gp-ledger.md`, "P5 the monsters' attacks", its Row).
+
 ## Streams
 - mon_rng: bullets 3 draws each, claw 1, bite 1 (decide already draws them; P5 applies the outcomes)
 - rng_player (fj `rng_pl`): +1 per damage that lands (pain roll, or the death tics roll)
@@ -110,3 +113,34 @@ model's PRE-tic values (as it injects the pose; p_dc is the binary's own) and fa
 hurt_gate.py pokes at frame 0 every cell its setup moved from the boot level start -- MEASURED (its --oracle-only log
 prints them): mon_state, mon_tics, mon_target, mon_reaction, p_ar, p_at, wp_own, am_shell -- so each must be a
 persisted cell the probe can write; no scenario teleports a monster (no leaf list is poked).
+
+## As built (blocked48, 2026-10-04; `docs/ship-evidence/blocked48_*`)
+
+- **One rung, one build**, as planned: `MONSTER_MODE = "full"`, `PLAYER_MODE = "fx"`;
+  `world.PLAYER_MODES = ("walk", "fire", "shoot", "hit", "fx", "full")`, every literal mode tuple replaced by
+  `world.player_resolves` / `player_hears` / `player_bleeds` (e8d3683). `monstercode.p31_parts` asserts "full" <=> a
+  hurtable player (bf7efc6; F5 below: the "walk" + "full" pair trips it, and no tier builds it).
+- **A dead player's tic** is the note's ("only moves the psprites and fades p_dc"), but the fj did not hold it until
+  45441c4: the weapon's key block ran every tic, so a dead player's number keys changed `wp_pend` (the pre-review's
+  B1). `weapon_lines(hurt=True)` skips the keys on `p_dead`; `test_weapon_fj`'s `deadkeys` script and mutant hold it
+  (their fj runs were owed at ship -- the ledger's criterion 2).
+- **The mobile rows** hold the WHOLE-UNIT position: `projcode._copy_out` clears the 16.16 fraction (bf7efc6), as the
+  section above specifies.
+- **The screen**: `present.init_screen` and the boot palette run once, in the boot-only entry part (bf7efc6; the same
+  move as P4's 7dd242a, merged in fc11467): run per frame they zeroed the device's palette behind `pal_cur` and blanked
+  the bar.
+- **Persist**: `build.HURT_PERSIST` (`p_hp p_ar p_at p_dc p_dead pal_cur`) and `PROJ_PERSIST` (the `pj_*` / `fx_*`
+  cells and `rng_fx`) are in `build.persist_labels`; the standalone restore set carries them through
+  `build.game_screen_persisted_decls` (35fc488); the sets re-keyed at c21df5a.
+- **`pal_cur` is NOT a state cell** of the gates: it is in the probe's hurt group but not in
+  `gatestate.STATE_NAMES`, and `MonsterPhase.hurt_state` does not report it. What covers it is the palette check --
+  the sha1 of the device's palette at every present against the oracle's index (the pre-review's F6).
+- **hurt_gate on the binary**: H1-H6 and S1, 7 of 7 STATE, PIXELS and PALETTE exact on every frame, every event
+  counter nonzero, deaths 0, every control parting (`blocked48_hurt_gate.log`). S1 (8 in flight, 10 fizzles): 651,896,774
+  ops over 30 frames, ~21.7M/frame -- the stress case.
+- **Cost**: v5 16,037,431 (+186,258 on blocked47), gamespeed 15,531,315 (+127,652); size 35.16% of 2^27 (+1,212,406
+  words, against the declaration's ~+1.05M probe figure plus unpriced terms). The fireball's per-tic cost ESTIMATE is
+  still UNVERIFIED: hurt_gate logs scenario totals only.
+- **Open** (the P5 PR's follow-up issue, listed in the ledger): F1 no fj harness for the mobiles' drawing through
+  `sim.thing_pass_depth` / `thing_record_body`; F3 a dead player still walks, uses and holds doors (P7); F4 an assert
+  for the oracle's baked-things-first leaf list; F5; F7 `_w5.reset(BOOT_SKILL)` after the parts were built.

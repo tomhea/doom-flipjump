@@ -1,6 +1,6 @@
 # Handoff: the fully playable E1M1, under 22M ops/frame
 
-**Status (2026-10-04): phases 0-4 are DONE (phase 3 ended with blocked46, P3.3 + P3.4; P4, the player's combat, shipped as ONE build, blocked47); P5, monster attacks, is NEXT.** Everything below is the
+**Status (2026-10-04): phases 0-5 are DONE (phase 3 ended with blocked46, P3.3 + P3.4; P4, the player's combat, shipped as ONE build, blocked47; P5, the monsters' attacks, shipped as ONE build, blocked48); P6, pickups and barrels, is NEXT.** Everything below is the
 whole plan, as the owner approved it, updated with phase 0's measurements. It replaces nothing:
 `docs/plan-gameplay.md` is the record of how the plan was made (research missions, red team,
 decision rounds); this file is what to execute. Phase 0's evidence is committed on branch `gameplay-p0`
@@ -362,6 +362,20 @@ before monsters) waits for the rungs that create them.
 ### P5 -- monster attacks
 Hitscan with real sight, melee, the fireball pool, player health and armor, palette flashes.
 Gate: `hurt`, saturation. Budget +0.3M plus the fight sprites.
+**P5 DONE 2026-10-04, one rung** (blocked48, class F; `docs/gp-p5-interface.md`, `docs/gp-ledger.md` "P5 the monsters'
+attacks"): `MONSTER_MODE = "full"`, `PLAYER_MODE = "fx"`. The zombiemen's and sergeants' hitscan, the imp's claw and
+the demon's bite hurt the player through green / blue armor (`hurtcode`, one `dp_go`); the bar shows health and armor
+and the screen takes DOOM's red damage palettes; the death MOMENT only (p_dead, the weapon down, the monsters losing a
+dead target) -- the death think and restart are P7, and no gate reaches a death. The imp's fireball is an 8-slot pool
+(flight, the missile cells, impact, the explosion drawn, a fizzle when full) and the player's hits spawn blood from a
+2-slot pool (`projcode`). The gate is `scratchpad/gp/hurt_gate.py`: H1-H6 and the saturation case S1, 7 of 7 state-,
+pixel- and palette-exact, deaths 0; S1 (8 fireballs in flight) averaged ~21.7M ops/frame over its 30 frames -- the
+stress case, recorded. +127,652 on gamespeed (15,531,315), +186,258 on v5 (16,037,431) -- both inside the phase's
++0.3M; size +1,212,406 words, **35.16% against the 40% target** (above the old 35%); msframe NOT SEPARATED (x0.982,
+beside the owner's fullscan.py with `--ignore-busy`). No kill criterion exceeded; some fj runs were owed at ship (the
+ledger lists them with the pre-review's follow-ups). P5's effects (fireballs, blood) are drawn as runtime things of their
+leaf, sorted WITH the monsters by the aprox depth key (`docs/gp-p5-interface.md`), not ordered before them as D3 a
+reads; drops come in P6.
 
 ### P6 -- pickups and barrels. Gate `fight`. Budget +0.1M.
 ### P7 -- death, restart, exit. Gate `die`. Budget ~0.

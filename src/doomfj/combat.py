@@ -369,14 +369,16 @@ class CombatMixin:
         moving = keys["forward"] != keys["back"] or keys["strafe_left"] != keys["strafe_right"]
         if moving and ws.p_mobj_state == gd.STATE_INDEX["S_PLAY"]:
             self._set_player_mobj("S_PLAY_RUN1")                      # P_MovePlayer
-        self._weapon_keys(keys)
+        if self.player != "walk":                 # M7 P4: "walk" (through P4.0) has no weapon
+            self._weapon_keys(keys)
         if keys["use"]:
             if not ws.p_usedown:
                 ws.p_usedown = 1
                 self._use_lines(ev)
         else:
             ws.p_usedown = 0
-        self._move_psprites(keys, ev)
+        if self.player != "walk":
+            self._move_psprites(keys, ev)
         if ws.p_strength:
             ws.p_strength = min(ws.p_strength + 1, 0xFFFF)
         if ws.p_damagecount:
@@ -625,17 +627,20 @@ class CombatMixin:
         ws = self.ws
         if not self._check_ammo(keys, ev):
             return
-        self._set_player_mobj("S_PLAY_ATK1")
+        if self.player != "fire":                 # M7 P4.1: the "fire" mode has no player-thing state ...
+            self._set_player_mobj("S_PLAY_ATK1")
         ev.fired.append(gd.WEAPONINFO[ws.p_ready].name)
         self._set_psprite("wpn", gd.WEAPONINFO[ws.p_ready].atkstate, keys, ev)
-        self.noise_alert(ev)
+        if self.player != "fire":                 # ... and makes no noise (P4.2 floods the sound)
+            self.noise_alert(ev)
 
     def _a_fire_bullets(self, weapon: str, pellets: int, keys: dict, ev) -> None:
         """A_FirePistol (the first shot of a trigger pull is accurate) / A_FireShotgun (7 pellets):
         the player's attack state, one round of ammo, the flash, P_BulletSlope (the aim does it),
         then P_GunShot per pellet."""
         ws = self.ws
-        self._set_player_mobj("S_PLAY_ATK2")
+        if self.player != "fire":
+            self._set_player_mobj("S_PLAY_ATK2")
         ws.p_ammo[gd.WEAPONINFO[ws.p_ready].ammo] -= 1
         self._set_psprite("flash", gd.WEAPONINFO[ws.p_ready].flashstate, keys, ev)
         accurate = pellets == 1 and not ws.p_refire
@@ -666,6 +671,9 @@ class CombatMixin:
         centre must be within `reach`, then the effect (blood, or a puff on a no-blood thing) and
         the damage, in PTR_ShootTraverse's order."""
         ws, W = self.ws, _W()
+        if self.player == "fire":                 # M7 P4.1: rolled, recorded, resolved against nothing
+            ev.shots.append((weapon, col, None, dmg))
+            return
         tgt = self.aim(self, col)
         if tgt is not None:
             x, y = self._target_xy(tgt)

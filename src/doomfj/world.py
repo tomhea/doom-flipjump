@@ -558,6 +558,11 @@ class TicEvents:
 # actions face and ROLL -- the monster's stream is the full model's -- but apply nothing: damage and the fireball
 # are P5), "full" (everything)
 MONSTER_MODES = ("idle", "wake", "chase", "decide", "full")
+# M7 P4 (docs/gp-combat.md section 1): the PLAYER's model mode a rung's binary is exact against --
+# "walk" (through P4.0): no weapon at all; "fire" (P4.1): the weapon keys, the psprite machine, ammo, refire and
+# every rng_player draw, with nothing applied (no player-thing state, no noise, no target, no effect, no damage);
+# "hit" (P4.2): the shot resolves and hurts; "full": everything
+PLAYER_MODES = ("walk", "fire", "hit", "full")
 
 
 def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:
@@ -586,7 +591,7 @@ class World(CombatMixin):
                  sight: Optional[Callable[["World", int], bool]] = None,
                  k_heavy: int = K_HEAVY, cursor_policy: Callable = next_cursor,
                  strict: bool = False, aim: Optional[Callable] = None,
-                 player_blocking: bool = True, monsters: str = "full", sight_rule: str = "los",
+                 player_blocking: bool = True, monsters: str = "full", sight_rule: str = "los", player: str = "full",
                  seen_hook: Optional[Callable[["World"], None]] = None):
         if map_wad is None:
             from doomfj.config import DEFAULT_MAP_WAD
@@ -598,6 +603,8 @@ class World(CombatMixin):
         # "idle" (P3.1): the states run, A_Look sees and hears nothing; "full": everything
         assert monsters in MONSTER_MODES, monsters
         self.monsters = monsters
+        assert player in PLAYER_MODES, player
+        self.player = player                        # M7 P4: the player's model mode
         self.sight = sight or World.los_to_player
         # M7 P3.2 (docs/gp-monsters.md 8.2; the owner, 2026-09-30): "seen" -- waking by the picture or
         # REJECT within 128 units, attacking by the picture or the near-trace -- else (the default,

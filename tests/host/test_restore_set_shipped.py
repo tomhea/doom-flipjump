@@ -203,6 +203,15 @@ def test_the_persist_labels_are_all_in_the_standalone_set():
     standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
     absent = [n for n in STANDALONE_PERSIST if n not in standalone]
     assert not absent, "STANDALONE_PERSIST names %s, absent from the standalone set" % absent
+    # M7 P4: ...and EVERY name the game tier's reset leaves alone (build.persist_labels, the one composition the
+    # reset and m5_setfile ask) -- checking STANDALONE_PERSIST alone let the game screen's cells reach the re-key's
+    # last step before anything refused them
+    from doomfj.build import persist_labels
+    from doomfj.wall_renderer import TIERS
+    every = persist_labels(standalone=True, doors=True, moving_things=TIERS["game"]["moving_things"])
+    assert set(STANDALONE_PERSIST) < set(every)
+    absent = [n for n in every if n not in standalone]
+    assert not absent, "build.persist_labels names %s, absent from the standalone set" % absent
 
 
 def test_the_door_cells_are_in_the_standalone_set_too():

@@ -96,3 +96,74 @@ def test_the_control_a_silent_gun_parts_on_the_stream(monkeypatch):
             parted = t
             break
     assert parted is not None, "a gun that draws nothing went unnoticed"
+
+
+# ---- M7 P4.2a: "shoot" -- the shot resolves through the aim and hurts the monsters (damage, pain, death), with no
+# noise, no effect, no barrel, no drop. With idle monsters (they hear nothing and chase nothing) and the player facing
+# a monster, "shoot" equals "full" on the player's stream and EVERY monster cell damage touches, at every tic, until
+# the first tic the full model's shot finds a barrel (none in these setups: asserted).
+MON_FIELDS = ("mon_health", "mon_state", "mon_tics", "mon_rng", "mon_shootable", "mon_justhit", "mon_threshold",
+              "mon_target", "mon_reaction")
+
+
+def _facing(player, kind):
+    """a world whose player stands 110 units from a monster of `kind`, facing it -- the first (monster, side) whose
+    centre column the geometric aim names that monster in -- with the shotgun"""
+    w = World(skill=gd.SK_HARD, monsters="idle", player=player)
+    ws = w.ws
+    for m in (i for i in range(w.layout.nmon) if ws.mon_active[i] and w.mon_info[i].name == kind):
+        for dx, dy, ang in ((-110, 0, 0), (110, 0, 0x80000000), (0, -110, 0x40000000), (0, 110, 0xC0000000)):
+            ws.px, ws.py, ws.pangle = (ws.mon_x[m] + dx) << 16, (ws.mon_y[m] + dy) << 16, ang
+            if w.aim_geometric(w, w.aim_centre) == ("mon", m):
+                ws.p_owned[gd.WP_SHOTGUN] = 1
+                ws.p_ammo[gd.AM_SHELL] = 20
+                return w, m
+    raise AssertionError("no %s can be faced from 110 units" % kind)
+
+
+def _trigger(n=320):
+    out = []
+    for t in range(n):
+        k = {name: False for name in KEYS}
+        k["fire"] = (t % 45) < 32
+        k["w3"] = t == 120                                    # the shotgun for the second half
+        out.append(k)
+    return out
+
+
+def _mon_snap(w):
+    return {f: tuple(getattr(w.ws, f)) for f in MON_FIELDS} | {"rng_player": w.ws.rng_player}
+
+
+@pytest.mark.parametrize("kind", ["MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT"])
+def test_shoot_mode_hurts_as_the_full_model(kind):
+    a, m = _facing("shoot", kind)
+    b, _ = _facing("full", kind)
+    hits = 0
+    for t, k in enumerate(_trigger()):
+        ea, eb = a.tic(k), b.tic(k)
+        assert not any(h[1] == "bar" for h in eb.hits), "tic %d: the full model shot a barrel" % t
+        sa, sb = _mon_snap(a), _mon_snap(b)
+        assert sa == sb, "tic %d: %s" % (t, sorted(f for f in sa if sa[f] != sb[f]))
+        hits += len(ea.hits)
+    assert hits >= 1 and a.ws.mon_health[m] <= 0, (kind, hits, a.ws.mon_health[m])   # it was hit, and it died
+    assert not any(a.ws.mon_drop), "a shoot-mode kill dropped something (drops are P6's)"
+
+
+def test_the_control_a_painless_shoot_mode_parts(monkeypatch):
+    """R9: a "shoot" mode that never draws the pain roll parts from the full model on the monster's stream"""
+    from doomfj.combat import CombatMixin
+    orig = CombatMixin._roll
+
+    def no_pain(self, stream, site, idx=None):
+        if self.player == "shoot" and stream == "mon_rng" and site in self.sites.pain.values():
+            return 0
+        return orig(self, stream, site, idx)
+    monkeypatch.setattr(CombatMixin, "_roll", no_pain)
+    a, _m = _facing("shoot", "MT_SERGEANT")
+    b, _ = _facing("full", "MT_SERGEANT")
+    for t, k in enumerate(_trigger()):
+        a.tic(k), b.tic(k)
+        if _mon_snap(a) != _mon_snap(b):
+            return
+    raise AssertionError("a painless shoot mode went unnoticed")

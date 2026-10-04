@@ -16,11 +16,29 @@ THE ROLLS. In the "fire" mode a shot's outcome is never read, so the player's st
 pistol's accurate first shot, 3 for every other bullet, pellet, punch and saw tooth (`combat.Sites`: pistol_acc 1,
 gunshot 3, punch 3, saw 3). P4.2 reads the outcomes.
 
+THE SHOT (M7 P4.2a, `shoot=True`; off, the emission is P4.1's to the byte). Each shot reads its outcome from ONE folded
+table, `wpo` (D10), indexed like `rng.p_random_outcome` by the stream's state after the shot's FIRST draw. A row
+(`shot_row`) is the melee damage (nibbles 0-1: A_Punch's `(a%10+1)<<1`, which is A_Saw's `2*(a%10+1)`), the gun
+damage (nibble 2: P_GunShot's `5*(a%3+1)`) and the column INDEX into the aim window (nibbles 3-4: `col(b-c) -
+aim_lo`, 0..16), for the shot's three draws a, b, c (`shot_values`; `verify_shot_table` holds every field to
+`combat.Sites` at all 256 indices). The pistol's accurate shot draws once and reads only the gun damage: its column
+is the window's centre. The stream advances exactly as in "fire": +1 for the accurate shot, +3 for every other
+bullet, pellet, punch and saw tooth (the 3-draw leaf `sh_rd3` is `inc`, the lookup, `+2`).
+The column reads `aim_sid` (the window's 17 two-nibble cells; column aim_lo + i at `aim_sid + 2*i*dw`; 0 empty, else
+1 + the monster slot), and a shot whose cell is not 0 is handed on through the FIXED interface to the damage
+machinery: `dm_id` (2 nibbles) = the sid, `dm_dmg` (2) = the damage, `dm_melee` (1) = 1 for the fist and the saw, 0
+for bullets, `dm_reach` (2) = 64 for the fist, 65 for the saw (`combat.PUNCH_REACH` / `SAW_REACH`; written for melee
+only -- the callee applies the reach test), then `stl.fcall dm_go, dm_ret`. `dm_go` / `dm_ret` are the callee's
+labels and `aim_sid` the aim window's; this module declares `dm_id`, `dm_dmg`, `dm_melee`, `dm_reach`, `sh_row` and
+`sh_ret` (`shot_decls`) and the `wpo` table (`shot_table_fj`). The window holds monsters only in this rung: a barrel
+id (P6) would be handed on like a monster's.
+
 NOT HERE (the model's "fire" mode leaves them out too): the player thing's states, the noise alert, the target, every
 effect; p_health <= 0 (nothing hurts the player until P5) and berserk (P6) -- each marked where its test belongs.
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Dict, List
 
 from doomfj import gamedata as gd
@@ -144,9 +162,11 @@ def _by_ready(prefix: str, target: Dict[int, str]) -> List[str]:
     return out + [f";{target[ws[-1]]}"]
 
 
-def weapon_lines(states: List[str], frames: List[str]) -> List[str]:
+def weapon_lines(states: List[str], frames: List[str], shoot: bool = False) -> List[str]:
     """the frame's weapon tic: the number keys, then P_MovePsprites (the weapon, then the flash), then the bar's ammo
-    and arms. Falls through at `wp_end`. Uses `pkeys` (fire: the high nibble's bit 3) and the held `kb_w1..kb_w4`."""
+    and arms. Falls through at `wp_end`. Uses `pkeys` (fire: the high nibble's bit 3) and the held `kb_w1..kb_w4`.
+    `shoot` (P4.2a): every shot resolves through `aim_sid` and hands a monster to `dm_go` (the module docstring);
+    off, the text is P4.1's and no shot label exists."""
     idx = {s: i for i, s in enumerate(states)}
     flash_frame = {s: (0 if s == gd.S_NULL or gd.STATES[s].tics == 0 else 1 + flash_frames().index(psprite_lump(s)))
                    for s in flash_states()}
@@ -184,7 +204,7 @@ def weapon_lines(states: List[str], frames: List[str]) -> List[str]:
         st = gd.STATES[s]
         out += [f"{wen(s)}:", f"hex.set 2, wp_st, {idx[s]}", f"hex.set 1, wp_tics, {st.tics}",
                 f"hex.set 1, wp_frm, {frames.index(psprite_lump(s))}"]
-        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame)
+        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot)
         out += [f";{wen(st.next)}" if st.tics == 0 else ";wp_flash"]
     # -- 3. P_MovePsprites, the flash
     out += ["wp_flash:",
@@ -207,6 +227,8 @@ def weapon_lines(states: List[str], frames: List[str]) -> List[str]:
         out += [f"{fen(s)}:", f"hex.set 2, fl_st, {idx[s]}", f"hex.set 1, fl_tics, {st.tics}",
                 f"hex.set 1, fl_frm, {flash_frame[s]}",
                 f";{fen(st.next)}" if st.tics == 0 else "stl.fret fl_ret"]
+    if shoot:                                   # the shot's leaves: out of line, after the flash's last fret
+        out += shot_leaves()
     # a state cell holding no state of its psprite: the program's halt (never reached by a fall-through)
     out += ["wp_bad:", ";bad"]
     # -- 4. the bar: the ready weapon's ammo (blank for the fist and the chainsaw) and the owned weapons 2 3 4
@@ -266,8 +288,9 @@ def _fire_weapon(p: str, wen) -> List[str]:
             + _by_ready(f"{p}fa", {w: wen(info[w].atkstate) for w in WEAPONS}))
 
 
-def _action(action, p: str, wen, fen, flash_frame) -> List[str]:
-    """one state's action, inline; it ends by falling through (no psprite set) or by a tail jump"""
+def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False) -> List[str]:
+    """one state's action, inline; it ends by falling through (no psprite set) or by a tail jump. `shoot`: the fire
+    actions resolve their shots (`_shot_*`) instead of only advancing the stream."""
     info = gd.WEAPONINFO
     if action in (None, "A_Light0", "A_Light1", "A_Light2"):
         return []                                                        # extralight: dropped (plan section 2, C)
@@ -313,6 +336,8 @@ def _action(action, p: str, wen, fen, flash_frame) -> List[str]:
         w = gd.WP_PISTOL if pistol else gd.WP_SHOTGUN
         out = [f"hex.sub_constant 3, {AMMO_CELL[info[w].ammo]}, 1",
                f"stl.fcall {fen(info[w].flashstate)}, fl_ret"]
+        if shoot:
+            return out + (_shot_pistol(p) if pistol else _shot_shotgun(p))
         if pistol:                                                       # accurate = no refire: 1 draw, else 3
             out += [f"hex.if0 2, wp_rf, {p}acc", f"hex.add_constant 2, rng_pl, {DRAWS['gunshot']}", f";{p}drw",
                     f"{p}acc:", f"hex.add_constant 2, rng_pl, {DRAWS['pistol_acc']}", f"{p}drw:"]
@@ -320,14 +345,158 @@ def _action(action, p: str, wen, fen, flash_frame) -> List[str]:
             out += [f"hex.add_constant 2, rng_pl, {(7 * DRAWS['gunshot']) & 0xFF}"]
         return out
     if action == "A_Punch":
-        return [f"hex.add_constant 2, rng_pl, {DRAWS['punch']}"]
+        return _shot_melee(p, "punch") if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['punch']}"]
     if action == "A_Saw":
-        return [f"hex.add_constant 2, rng_pl, {DRAWS['saw']}"]
+        return _shot_melee(p, "saw") if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['saw']}"]
     raise NotImplementedError("%s on an E1M1 psprite" % action)
 
 
 def weapon_const_decls() -> List[str]:
     return [f"wp_bottom_c: hex.vec 2, {BOTTOM}", f"wp_top_c: hex.vec 2, {TOP}"]
+
+
+# ---- M7 P4.2a: the shot (the module docstring, THE SHOT) ---------------------------------------------------------
+AIM_N = 17                                      # aim_sid's cells: the window's columns aim_lo .. aim_hi
+SHOT_PELLETS = 7                                # A_FireShotgun: 7 x P_GunShot (combat._psp_action)
+SHOT_ROW_NIBBLES = 5                            # wpo's row: melee damage (0-1), gun damage (2), column index (3-4)
+DM_CELLS = (("dm_id", 2), ("dm_dmg", 2), ("dm_melee", 1), ("dm_reach", 2))   # the damage machinery's arguments
+
+
+def shot_row(melee: int, gun: int, col: int) -> int:
+    """one `wpo` row: the melee damage, the gun damage, the column's index in the aim window"""
+    assert 0 <= melee < 256 and 0 <= gun < 16 and 0 <= col < AIM_N, (melee, gun, col)
+    return melee | gun << 8 | col << 12
+
+
+def shot_fields(row: int):
+    """`shot_row`'s inverse: (melee damage, gun damage, column index)"""
+    return row & 0xFF, row >> 8 & 15, row >> 12
+
+
+@lru_cache(maxsize=None)
+def _default_sites():
+    from doomfj import combat as C
+    from doomfj.reference_model import ReferenceModel
+    rm = ReferenceModel()
+    return rm, C.Sites(rm)
+
+
+def shot_window(rm=None, sites=None):
+    """(aim_lo, aim_centre, aim_hi): the window's columns, from the model's own definitions (`combat.aim_window`,
+    `CombatMixin._combat_init`'s centre). The model's default ReferenceModel unless `rm` is given."""
+    from doomfj import combat as C
+    if rm is None:
+        rm, sites = _default_sites()
+    sites = sites or C.Sites(rm)
+    lo, hi = C.aim_window(rm, sites)
+    centre = rm.angle_to_x(0)
+    assert hi - lo + 1 == AIM_N and lo < centre < hi, (lo, centre, hi)
+    return lo, centre, hi
+
+
+def shot_values(rm=None, sites=None, fold=None) -> List[int]:
+    """`wpo`: the shot's rows by the stream's state after the shot's first draw (D10, `combat.outcome_table_k` with
+    k = 3). `fold` replaces the composition (the tests' negative control)."""
+    from doomfj import combat as C
+    if rm is None:
+        rm, sites = _default_sites()
+    sites = sites or C.Sites(rm)
+    lo, _c, _h = shot_window(rm, sites)
+    f = fold or (lambda a, b, c: shot_row((a % 10 + 1) << 1, 5 * (a % 3 + 1), sites.col(b - c) - lo))
+    return C.outcome_table_k(f, 3)
+
+
+def verify_shot_table(values, rm=None, sites=None) -> List[str]:
+    """[] when every field of `values` is `combat.Sites`' outcome at every index: the gun damage and column against
+    `gunshot`, the melee damage and column against `punch` and `saw`, the gun damage against `pistol_acc` (one draw:
+    its damage is the 3-draw row's first value). Else one line per failed check."""
+    from doomfj import combat as C
+    if rm is None:
+        rm, sites = _default_sites()
+    sites = sites or C.Sites(rm)
+    lo, _c, _h = shot_window(rm, sites)
+    bad = []
+    for name, k in (("pistol_acc", 1), ("gunshot", 3), ("punch", 3), ("saw", 3)):
+        if getattr(sites, name)[0] != k:
+            bad.append("%s draws %d, the leaf draws %d" % (name, getattr(sites, name)[0], k))
+    if len(values) != 256:
+        return bad + ["%d rows, want 256" % len(values)]
+    for n, row in enumerate(values):
+        melee, gun, col = shot_fields(row)
+        want = {"gunshot": (gun, lo + col), "punch": (melee, lo + col), "saw": (melee, lo + col), "pistol_acc": gun}
+        for name, w in want.items():
+            if getattr(sites, name)[1][n] != w:
+                bad.append("index %d: %s is %r, the row says %r" % (n, name, getattr(sites, name)[1][n], w))
+    return bad
+
+
+def shot_table_fj(rm=None) -> str:
+    from doomfj.lut_generator import generate_dispatch_table_fj
+    return generate_dispatch_table_fj("wpo", shot_values(rm), index_nibbles=2, result_nibbles=SHOT_ROW_NIBBLES)
+
+
+def shot_decls() -> List[str]:
+    """the shot's cells: the row, the leaves' fcall register, and the damage machinery's four arguments"""
+    return [f"sh_row: hex.vec {SHOT_ROW_NIBBLES}", "sh_ret: hex.vec w/4"] + [f"{c}: hex.vec {n}" for c, n in DM_CELLS]
+
+
+def _col_tree(cell: str) -> List[str]:
+    """jump to `shc_c<v>` for the 1-nibble value v of `cell`: a 4-level if_flags tree, one bit a level"""
+    out = []
+    for b in (3, 2, 1, 0):
+        mask = sum(1 << x for x in range(16) if x >> b & 1)
+        for v in range(0, 16, 1 << (b + 1)):
+            c0, c1 = ((f"shc_c{v}", f"shc_c{v | 1}") if b == 0 else (f"shc_{b - 1}_{v}", f"shc_{b - 1}_{v | 1 << b}"))
+            out += [f"shc_{b}_{v}:", f"hex.if_flags {cell}, {mask:#06x}, {c0}, {c1}"]
+    return out
+
+
+def shot_leaves() -> List[str]:
+    """the shot's fcall'd leaves (`sh_ret`). `sh_rd3`: a 3-draw shot -- the row at the post-increment state, the
+    stream +3 in all -- then `sh_col`: dm_id = aim_sid at the row's column. `sh_gun`: a bullet's hand-off -- when
+    dm_id names a target, the gun damage, not melee, and `dm_go`."""
+    out = ["// M7 P4.2a: the shot's leaves",
+           "sh_rd3:", "hex.inc 2, rng_pl", "wpo.lookup sh_row, rng_pl", "hex.add_constant 2, rng_pl, 2",
+           "sh_col:", "hex.if_flags sh_row + 4*dw, 1<<1, shc_3_0, shc_c16"]
+    out += _col_tree("sh_row + 3*dw")
+    for c in range(AIM_N):
+        out += [f"shc_c{c}:", f"hex.mov 2, dm_id, aim_sid + {2 * c}*dw", ";shc_end"]
+    out += ["shc_end:", "stl.fret sh_ret",
+            "sh_gun:", "hex.if0 2, dm_id, shg_end",
+            "hex.zero 1, dm_dmg + dw", "hex.mov 1, dm_dmg, sh_row + 2*dw", "hex.zero 1, dm_melee",
+            "stl.fcall dm_go, dm_ret",
+            "shg_end:", "stl.fret sh_ret"]
+    return out
+
+
+def _shot_pistol(p: str) -> List[str]:
+    """A_FirePistol's P_GunShot: accurate (refire 0) -- one draw, the gun damage, the window's centre -- else a
+    3-draw bullet"""
+    lo, centre, _hi = shot_window()
+    return [f"hex.if0 2, wp_rf, {p}acc",
+            "stl.fcall sh_rd3, sh_ret", "stl.fcall sh_gun, sh_ret", f";{p}drw",
+            f"{p}acc:", "hex.inc 2, rng_pl", "wpo.lookup sh_row, rng_pl",
+            f"hex.mov 2, dm_id, aim_sid + {2 * (centre - lo)}*dw",
+            "stl.fcall sh_gun, sh_ret",
+            f"{p}drw:"]
+
+
+def _shot_shotgun(p: str) -> List[str]:
+    """A_FireShotgun: SHOT_PELLETS 3-draw bullets, in order"""
+    out = []
+    for k in range(SHOT_PELLETS):
+        out += [f"{p}pel{k}:", "stl.fcall sh_rd3, sh_ret", "stl.fcall sh_gun, sh_ret"]
+    return out
+
+
+def _shot_melee(p: str, site: str) -> List[str]:
+    """A_Punch / A_Saw: a 3-draw shot; when the window names a target, the melee damage and the weapon's reach"""
+    from doomfj.combat import PUNCH_REACH, SAW_REACH
+    reach = {"punch": PUNCH_REACH, "saw": SAW_REACH}[site]
+    return ["stl.fcall sh_rd3, sh_ret", f"hex.if0 2, dm_id, {p}sx",
+            "hex.mov 2, dm_dmg, sh_row", "hex.set 1, dm_melee, 1", f"hex.set 2, dm_reach, {reach}",
+            "stl.fcall dm_go, dm_ret",
+            f"{p}sx:"]
 
 
 # the weapon's PERSISTENT cells (build.WEAPON_PERSIST): the M1 reset must leave them alone -- a weapon restored to the
@@ -359,12 +528,16 @@ def restart_lines(start: dict, states: List[str], frames: List[str]) -> List[str
     return out
 
 
-def weapon_parts(map_wad, mapname: str) -> dict:
+def weapon_parts(map_wad, mapname: str, shoot: bool = False) -> dict:
     """everything the game tier's emitter splices in for the weapon: `decls` (the cells, the two constants, the ammo
-    digit table), `tic` (the frame's weapon lines), `restart` (NEW GAME's values)"""
+    digit table), `tic` (the frame's weapon lines), `restart` (NEW GAME's values). `shoot` (P4.2a) adds the shot's
+    cells to `decls`, the `wpo` table to `tables` and its leaves to `tic`; the program must then also hold `aim_sid`
+    (the aim window) and `dm_go` / `dm_ret` (the damage machinery)."""
     from doomfj.lut_generator import generate_dispatch_table_fj
     start = level_start(map_wad, mapname)
     states, frames = weapon_states(), overlay_frames()
-    return {"decls": weapon_decls(start, states, frames) + weapon_const_decls(),
-            "tables": [generate_dispatch_table_fj("ammobcd", ammo_digit_values(), index_nibbles=3, result_nibbles=3)],
-            "tic": weapon_lines(states, frames), "restart": restart_lines(start, states, frames), "start": start}
+    tables = [generate_dispatch_table_fj("ammobcd", ammo_digit_values(), index_nibbles=3, result_nibbles=3)]
+    return {"decls": weapon_decls(start, states, frames) + weapon_const_decls() + (shot_decls() if shoot else []),
+            "tables": tables + ([shot_table_fj()] if shoot else []),
+            "tic": weapon_lines(states, frames, shoot), "restart": restart_lines(start, states, frames),
+            "start": start}

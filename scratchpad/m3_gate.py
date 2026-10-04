@@ -248,17 +248,20 @@ def main():
         if ng is not None:
             pusedn = 1                              # the restart block
         if mode == 0:
+            # M7 P4.1: the weapon tics with the world (no fire held here) -- P4.2a: before the move, at its pose
+            mph.weapon(held, state.x, state.y, state.angle)
             state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene, strafe=True)
             pusedn = 0                              # this script never holds use
-            mph.weapon(held)                        # M7 P4.1: the weapon tics with the world (no fire held here)
             _dps, _mps = mph.frame(phase0, mps0, state.x, state.y, state.angle)   # M7 P3.1 / P3.2b
             assert _dps == phase0 and _mps == mps0, "frame %d: a monster pressed a door or a lift" % f
             # M7 P3.2a: the frame's picture decides the next tic's seen (rendered below, per world frame)
             _seen = set()
             rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map), scene,
                                  thing_hidden=hidden[skill], thing_views=mviews(mph, state.x, state.y),
-                                 thing_positions=mviews.positions(mph), seen_out=_seen, **render_kw)
+                                 thing_positions=mviews.positions(mph), seen_out=_seen,
+                                 aim_things=mviews.aim_things(mph), aim_out=(_aim := [0] * 17), **render_kw)
             mph.set_seen(mviews.slots_of(_seen))
+            mph.set_aim(_aim)                       # M7 P4.2a: the window this picture recorded
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
                      "ng": ng, "before": before, "pusedn": pusedn,
                      "mstate": {**mph.state(), **mviews.rt_state(mph), **mph.weapon_state()},

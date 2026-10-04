@@ -551,7 +551,9 @@ ns frame {
       done:
     }
 
-    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic, mir, mirf, miru, ltw, seen, sa, sflag, one \
+    // M7 P4.2a: `aim` -- 1 when this body's projections record the aim window (the runtime monsters' body of a tier
+    // whose player shoots); `ttwice`'s measurement copy never records
+    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic, mir, mirf, miru, ltw, seen, sa, sflag, one, aim \
             @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_hit \
             < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, \
               gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8 {
@@ -589,11 +591,11 @@ ns frame {
       soft_under:
         rep(deg, k) hex.set 1, degfl, 0
       soft_done:
-        proj.project_thing trb_vis, trb_tx1, trb_tx2, trb_tytop, trb_thpx, trb_tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
+        proj.project_thing trb_vis, trb_tx1, trb_tx2, trb_tytop, trb_thpx, trb_tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz, aim
         // ablate "thingtwice" (measurement only): the SAME projection, SAME operands, dead
         // outputs. Pricing by ADDING keeps the frame byte-exact -- a stub would price itself
         // plus everything downstream (fj-cost-model, the `noproj` retraction).
-        rep(ttwice, k) proj.project_thing trb_dvis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dthp, trb_dtis, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
+        rep(ttwice, k) proj.project_thing trb_dvis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dthp, trb_dtis, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz, 0
         rep(1-seen, k) hex.if0 1, trb_vis, ret
         rep(seen, k) hex.if0 1, trb_vis, seen_probe2
         // M14-perf: PAST EVERY REJECT -- now, and only now, read the half of the row that only a
@@ -797,7 +799,7 @@ ns frame {
         rep(seen, k) hex.if0 w/4, sa, ret
       seen_proj:
         rep(seen, k) hex.set 1, degfl, 0
-        rep(seen, k) proj.project_thing trb_vis, trb_tx1, trb_tx2, trb_tytop, trb_thpx, trb_tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
+        rep(seen, k) proj.project_thing trb_vis, trb_tx1, trb_tx2, trb_tytop, trb_thpx, trb_tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz, aim
         rep(seen, k) hex.if0 1, trb_vis, ret
       seen_scan:
         rep(seen, k) hex.mov 8, trb_col_x, trb_tx1

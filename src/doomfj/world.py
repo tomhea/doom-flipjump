@@ -309,6 +309,9 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("p_bonuscount", 8, group="player", phase="S3b", doc="gold palette flash")
     f("p_strength", 16, group="player", phase="S3b", doc="berserk: powers[pw_strength] counter")
     f("p_cards", 1, count=gd.NUMCARDS, group="player", phase="S3b", doc="keys; E1M1: blue card")
+    # M7 P4.2a (docs/gp-aim-window.md): THE AIM WINDOW the last picture recorded -- per screen column of the pellet
+    # spread (combat.aim_window: 72..88 at 160 wide), 0 or 1 + the nearest shootable monster slot whose box covers it
+    f("aim_sid", 7, count=AIM_COLUMNS, group="player", phase="P4.2", doc="the window: 0 or 1 + monster slot")
     f("p_mobj_state", 8, group="player", phase="S3b", doc="the player thing's state")
     f("p_mobj_tics", 4, group="player", phase="S3b", doc="its tics; 15 = forever")
     f("p_dead", 1, group="player", phase="S3b", doc="playerstate == PST_DEAD")
@@ -561,8 +564,10 @@ MONSTER_MODES = ("idle", "wake", "chase", "decide", "full")
 # M7 P4 (docs/gp-combat.md section 1): the PLAYER's model mode a rung's binary is exact against --
 # "walk" (through P4.0): no weapon at all; "fire" (P4.1): the weapon keys, the psprite machine, ammo, refire and
 # every rng_player draw, with nothing applied (no player-thing state, no noise, no target, no effect, no damage);
-# "hit" (P4.2): the shot resolves and hurts; "full": everything
-PLAYER_MODES = ("walk", "fire", "hit", "full")
+# "shoot" (P4.2a): the shot resolves through the aim and hurts monsters -- damage, pain, death -- with no noise, no
+# effect, no barrel, no drop; "hit" (P4.2b): the noise alert too; "full": everything
+PLAYER_MODES = ("walk", "fire", "shoot", "hit", "full")
+AIM_COLUMNS = 17                   # the aim window's columns (combat.aim_window's 72..88; asserted at _combat_init)
 
 
 def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:

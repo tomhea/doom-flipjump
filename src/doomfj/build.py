@@ -97,6 +97,9 @@ HUD_PERSIST = ("hud_v", "hud_s", "hud_full")
 # M7 P4.1 (doomfj.weaponcode): the weapon's memory -- the psprites, the height, refire, the ammo, the owned weapons and
 # the player's stream; the game tier's alone, like the bar
 from doomfj.weaponcode import PERSIST as WEAPON_PERSIST                         # noqa: E402
+# M7 P4.2a (doomfj.aimcode): the aim window the last picture recorded, for this frame's weapon -- `aim_tz` too, only so
+# the reset leaves it alone (it is read only behind a non-zero `aim_sid` the same walk wrote)
+AIM_PERSIST = ("aim_sid", "aim_tz")
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:
@@ -108,7 +111,7 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
     return (STANDALONE_PERSIST + (DOOR_PERSIST + MOVER_PERSIST if doors else ())
             + (THING_PERSIST if moving_things else ())
             + (MONSTER_PERSIST if (standalone and moving_things) else ())
-            + HUD_PERSIST + WEAPON_PERSIST)      # M7 P4.0 / P4.1: every standalone tier is the game tier
+            + HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST)   # M7 P4.0 / P4.1 / P4.2a: the game tier's
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 

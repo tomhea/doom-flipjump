@@ -211,8 +211,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                 _ep = override[f][0] if override is not None else fr["exp"][0]
                 mph.tic(_ep[0] & 0xFFFFFFFF, _ep[1] & 0xFFFFFFFF, _ep[2])
             epose, edoors = override[f] if override is not None else fr["exp"]
-        if mph is not None:
-            mph.weapon(fr["keys"])                       # M7 P4.1: the weapon tics with the world
+        if mph is not None:                              # M7 P4.1: the weapon tics with the world (pre-move pose:
+            mph.weapon(fr["keys"], fr["inj"][0] & M32, fr["inj"][1] & M32, fr["inj"][2])   # the injected one)
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
             got["viewx"], got["viewy"], got["viewangle"], got["dstate"]) == (
@@ -232,7 +232,11 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                               views=orc.monster_views(mph, P_signed(epose[0]), P_signed(epose[1]))
                               if mph is not None else None, seen_out=_seen,
                               positions=orc.monster_positions(mph) if mph is not None else None,
-                              screen_kw=mph.screen_kw() if mph is not None else None)
+                              screen_kw=mph.screen_kw() if mph is not None else None,
+                              aim_things=orc._mv(mph.world).aim_things(mph) if mph is not None else None,
+                              aim_out=(_aim := [0] * 17))
+            if mph is not None:
+                mph.set_aim(_aim)                        # M7 P4.2a: the window, for the next frame's weapon
             if mph is not None:
                 mph.set_seen(orc._mviews.slots_of(_seen))
             if check:

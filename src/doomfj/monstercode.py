@@ -222,7 +222,7 @@ def _thing_key(t):
 
 
 def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_near: bool, boot_skill: int,
-              skills, cache: dict, mode: str = "idle", depth_order=None, damage: bool = False) -> dict:
+              skills, cache: dict, mode: str = "idle", depth_order=None, player: str = "walk") -> dict:
     """everything P3.1 adds to the game tier, from the model's own sources:
       * `view_rows`: one thing row per distinct monster VIEW (lump, mirrored) -- `things.thing_rows`' layout from the
         view's art, dw's bit 7 set for a mirrored view -- appended after the runtime things' own rows;
@@ -233,7 +233,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
       * `rotation`: the rotation leaf; `tic`: the per-slot tic; `decls`: the cells (the boot skill's level start)
         and the scratch; `restart`: per skill, the lines NEW GAME writes the cells with.
 
-    `damage` (M7 P4.2a: the game tier's PLAYER_MODE hurts monsters, `damagecode.damage_on`; needs mode "decide"):
+    `player` (M7 P4.2a): the game tier's PLAYER_MODE. A mode whose shots hurt (`damagecode.damage_on`; it needs
+    the monster mode "decide") adds the monsters' DAMAGE:
     the P42 cells join `fields` (so NEW GAME restores them), damagecode's decls / leaves / table ride in
     `decls_wake` / `decide_lines` / `tables`, the slots run A_Fall and carry justhit (`p32a_slot(dmg=True)`), and
     `chase` names the per-slot flags the thing test (`solid`: mon_solid) and the door contact (`live`:
@@ -280,6 +281,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     wake = mode in ("wake", "chase", "decide")       # M7 P3.2b: the chase mode is the wake mode plus the move
     chase = mode in ("chase", "decide")              # M7 P3.2c: the decide mode is the chase plus the decisions
     decide = mode == "decide"
+    from doomfj.damagecode import damage_on
+    damage = damage_on(player)
     assert not damage or decide, "damage (M7 P4.2a) runs on the decide mode's slots: mode %r" % mode
     w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los")
     nmon, schema = w.layout.nmon, w.schema
@@ -324,10 +327,21 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     for h in range((nt + 15) // 16):
         sel += ["  thsel_h%d:" % h, "    sim.jump16 sp_ti, " + ", ".join(
             "thsel_s%d" % (16 * h + l) if 16 * h + l < nt else "thsel_none" for l in range(16))]
+    # M7 P4.2a (doomfj.aimcode): a tier whose player SHOOTS gives every runtime thing its aim id -- 1 + slot while
+    # the monster is shootable (a corpse is not: damage clears it), 0 for any other thing -- and its radius class
+    shoot = player in ("shoot", "hit", "full")
     for t, m in enumerate(rt_slot):
         sel.append("  thsel_s%d:" % t)
         if wake:
             sel.append("    hex.set w/4, sp_sa, thseen + %d*dw" % m if m is not None else "    hex.zero w/4, sp_sa")
+        if shoot:
+            sel.append("    hex.zero 2, sp_sid")
+            if m is not None:
+                assert w.mon_radius[m] in (20, 30), (m, w.mon_radius[m])
+                sel += ["    hex.if0 1, mon_shootable + %d*dw, thsel_q%d" % (m, t),
+                        "    hex.set 2, sp_sid, %d" % (m + 1),
+                        "  thsel_q%d:" % t,
+                        "    hex.set 1, sp_rc, %d" % int(w.mon_radius[m] == 30)]
         if m is not None:
             sel += ["    hex.mov 8, mr_tx, sp_x", "    hex.mov 8, mr_ty, sp_y",
                     "    hex.mov 1, mr_face, mon_facing + %d*dw" % m,

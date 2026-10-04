@@ -29,7 +29,7 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",  # P3.2a
                "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt",   # P3.2b
                "mon_justattacked",                                                       # P3.2c
-               "wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad", "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm")   # P4.1: the weapon
+               "wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad", "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm", "aim_sid")   # P4.1: the weapon; P4.2a: the window
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,

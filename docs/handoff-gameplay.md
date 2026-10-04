@@ -1,6 +1,6 @@
 # Handoff: the fully playable E1M1, under 22M ops/frame
 
-**Status (2026-10-03): phases 0-3 are DONE (phase 3 ended with blocked46, P3.3 + P3.4); P4, the player's combat, is NEXT.** Everything below is the
+**Status (2026-10-04): phases 0-4 are DONE (phase 3 ended with blocked46, P3.3 + P3.4; P4, the player's combat, shipped as ONE build, blocked47); P5, monster attacks, is NEXT.** Everything below is the
 whole plan, as the owner approved it, updated with phase 0's measurements. It replaces nothing:
 `docs/plan-gameplay.md` is the record of how the plan was made (research missions, red team,
 decision rounds); this file is what to execute. Phase 0's evidence is committed on branch `gameplay-p0`
@@ -348,6 +348,16 @@ P3.4); fire CTRL; weapons 1-4; menu ESC / ENTER; help H. P4 re-binds `kb.poll` t
 help screen with it (`menu.HELP_CLUSTERS` / `HELP_ROWS` / `HELP_KEYCODES`; `test_keyboard_input.py`'s
 `test_the_help_screen_lists_exactly_the_keys_that_work` holds the screen and the poll together, both
 directions) -- `docs/gp-help.md` section 4.
+**P4 DONE 2026-10-04, one rung** (blocked47, class F; `docs/gp-combat.md`, `docs/gp-ledger.md` "P4 united"): the owner's
+"merge small rungs" put P4.0 (the 160x84 view under a 16-row status bar, the weapon drawn; flipjump#364's partial
+dittos, 1.5.1 >= `1cd6e0c`), P4.1 (the key map above, strafe, the psprite machine for fist / pistol / shotgun /
+chainsaw, ammo), P4.2a (the aim window, the shots, monster damage, pain, death, A_Fall) and P4.2b (the noise alert,
+A_Look's sound branch, ambush) into ONE build. +160,368 on gamespeed (15,403,663), +291,097 on v5 (15,851,173) --
+both inside the phase's +0.6M, but P4.0's own kill criterion 4 (v5 not to rise by more than 0.1M: the 84-row view's
+saving was the premise) is EXCEEDED and recorded; size +86,672 words, **34.25% against the size target, now 40%**
+(raised in P4.0, gp-combat C2); msframe NOT SEPARATED (x1.000, taken beside the owner's fullscan.py with
+`--ignore-busy`). Drops are not in P4 (P6, per the P4.2a declaration), nor effects (P5); D3 a (drops and effects
+before monsters) waits for the rungs that create them.
 
 ### P5 -- monster attacks
 Hitscan with real sight, melee, the fireball pool, player health and armor, palette flashes.

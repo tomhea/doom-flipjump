@@ -113,7 +113,13 @@ def test_only_the_skill_menu_is_optional(tmp_path):
                                  "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",
                                  "mon_state", "mon_tics", "mon_facing", "mon_active",
                                  "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",
-                                 "thseen", "mon_movecount", "mon_rng", "mon_floorz", "msec", "mon_justattacked"}
+                                 "thseen", "mon_movecount", "mon_rng", "mon_floorz", "msec", "mon_justattacked",
+                                 # M7 P4.1: the weapon; M7 P4.2a: the aim window
+                                 "wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad",
+                                 "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm", "aim_sid"}
+    for one in ("wp_rdy", "fl_frm"):                       # M7 P4.1: the weapon's fifteen come together
+        with pytest.raises(KeyError, match="come together"):
+            _table(tmp_path, drop=(one,))
 
 
 def test_a_table_before_p2a1_loads_and_its_door_cells_are_dropped(tmp_path):

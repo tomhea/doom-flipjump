@@ -33,7 +33,10 @@ labels and `aim_sid` the aim window's; this module declares `dm_id`, `dm_dmg`, `
 `sh_ret` (`shot_decls`) and the `wpo` table (`shot_table_fj`). The window holds monsters only in this rung: a barrel
 id (P6) would be handed on like a monster's.
 
-NOT HERE (the model's "fire" mode leaves them out too): the player thing's states, the noise alert, the target, every
+THE NOISE (M7 P4.2b, `noise=True`; off, the emission is P4.2a's to the byte): P_FireWeapon's P_NoiseAlert, an fcall
+of `nz_leaf` (doomfj.noisecode) at each fire point once the ammo check passed.
+
+NOT HERE (the model's "fire" mode leaves them out too): the player thing's states, the target, every
 effect; p_health <= 0 (nothing hurts the player until P5) and berserk (P6) -- each marked where its test belongs.
 """
 from __future__ import annotations
@@ -162,11 +165,13 @@ def _by_ready(prefix: str, target: Dict[int, str]) -> List[str]:
     return out + [f";{target[ws[-1]]}"]
 
 
-def weapon_lines(states: List[str], frames: List[str], shoot: bool = False) -> List[str]:
+def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, noise: bool = False) -> List[str]:
     """the frame's weapon tic: the number keys, then P_MovePsprites (the weapon, then the flash), then the bar's ammo
     and arms. Falls through at `wp_end`. Uses `pkeys` (fire: the high nibble's bit 3) and the held `kb_w1..kb_w4`.
     `shoot` (P4.2a): every shot resolves through `aim_sid` and hands a monster to `dm_go` (the module docstring);
-    off, the text is P4.1's and no shot label exists."""
+    off, the text is P4.1's and no shot label exists. `noise` (P4.2b, the "hit" mode): P_FireWeapon's P_NoiseAlert --
+    every fire point calls `nz_leaf` (doomfj.noisecode); off, the text is P4.2a's."""
+    assert shoot or not noise, "the noise is the hit mode's: it comes with the shot"
     idx = {s: i for i, s in enumerate(states)}
     flash_frame = {s: (0 if s == gd.S_NULL or gd.STATES[s].tics == 0 else 1 + flash_frames().index(psprite_lump(s)))
                    for s in flash_states()}
@@ -204,7 +209,7 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False) -> L
         st = gd.STATES[s]
         out += [f"{wen(s)}:", f"hex.set 2, wp_st, {idx[s]}", f"hex.set 1, wp_tics, {st.tics}",
                 f"hex.set 1, wp_frm, {frames.index(psprite_lump(s))}"]
-        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot)
+        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise)
         out += [f";{wen(st.next)}" if st.tics == 0 else ";wp_flash"]
     # -- 3. P_MovePsprites, the flash
     out += ["wp_flash:",
@@ -281,14 +286,17 @@ def _check_ammo(p: str, wen, ok: str) -> List[str]:
     return out + _by_ready(f"{p}cd", {w: wen(info[w].downstate) for w in WEAPONS})
 
 
-def _fire_weapon(p: str, wen) -> List[str]:
-    """P_FireWeapon: the ammo check, then the ready weapon's attack state (a tail jump)"""
+def _fire_weapon(p: str, wen, noise: bool = False) -> List[str]:
+    """P_FireWeapon: the ammo check, then the ready weapon's attack state (a tail jump). `noise` (P4.2b): the shot's
+    P_NoiseAlert once the ammo check passed -- the model alerts after the attack state is set, but nothing that state
+    runs reads `snd_alert` (only A_Look does, in the monsters' phase), so the order is free"""
     info = gd.WEAPONINFO
     return (_check_ammo(p, wen, f"{p}fok") + [f"{p}fok:"]
+            + (["stl.fcall nz_leaf, nz_ret"] if noise else [])
             + _by_ready(f"{p}fa", {w: wen(info[w].atkstate) for w in WEAPONS}))
 
 
-def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False) -> List[str]:
+def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: bool = False) -> List[str]:
     """one state's action, inline; it ends by falling through (no psprite set) or by a tail jump. `shoot`: the fire
     actions resolve their shots (`_shot_*`) instead of only advancing the stream."""
     info = gd.WEAPONINFO
@@ -301,7 +309,7 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False) -> List[
                 + [f"{p}np:", f"hex.if_flags pkeys + dw, {KEY_FIRE_MASK:#06x}, {p}nf, {p}f",
                    # "the missile launcher and bfg do not auto fire": E1M1 has neither, so a held key always fires
                    f"{p}f:", "hex.set 1, wp_ad, 1"]
-                + _fire_weapon(p, wen)
+                + _fire_weapon(p, wen, noise)
                 + [f"{p}nf:", "hex.zero 1, wp_ad", f"hex.set 2, wp_sy, {TOP}"])
     if action == "A_Lower":
         # (the dead player keeps it down -- P7; p_health <= 0 drops it -- P5)
@@ -328,7 +336,7 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False) -> List[
                  f"hex.if_flags wp_rf, 1<<15, {p}inc, {p}fire",
                  f"{p}inc:", "hex.inc 2, wp_rf",
                  f"{p}fire:"]
-                + _fire_weapon(p, wen)
+                + _fire_weapon(p, wen, noise)
                 + [f"{p}no:", "hex.zero 2, wp_rf"]
                 + _check_ammo(p + "r", wen, f"{p}ok") + [f"{p}ok:"])
     if action in ("A_FirePistol", "A_FireShotgun"):
@@ -528,16 +536,18 @@ def restart_lines(start: dict, states: List[str], frames: List[str]) -> List[str
     return out
 
 
-def weapon_parts(map_wad, mapname: str, shoot: bool = False) -> dict:
+def weapon_parts(map_wad, mapname: str, shoot: bool = False, noise: bool = False) -> dict:
     """everything the game tier's emitter splices in for the weapon: `decls` (the cells, the two constants, the ammo
     digit table), `tic` (the frame's weapon lines), `restart` (NEW GAME's values). `shoot` (P4.2a) adds the shot's
     cells to `decls`, the `wpo` table to `tables` and its leaves to `tic`; the program must then also hold `aim_sid`
-    (the aim window) and `dm_go` / `dm_ret` (the damage machinery)."""
+    (the aim window) and `dm_go` / `dm_ret` (the damage machinery). `noise` (P4.2b, the "hit" mode) calls
+    `nz_leaf` at every fire point: the program must then hold the noise's leaf and cells
+    (monstercode.p31_parts at a player mode in noisecode.NOISE_PLAYER_MODES)."""
     from doomfj.lut_generator import generate_dispatch_table_fj
     start = level_start(map_wad, mapname)
     states, frames = weapon_states(), overlay_frames()
     tables = [generate_dispatch_table_fj("ammobcd", ammo_digit_values(), index_nibbles=3, result_nibbles=3)]
     return {"decls": weapon_decls(start, states, frames) + weapon_const_decls() + (shot_decls() if shoot else []),
             "tables": tables + ([shot_table_fj()] if shoot else []),
-            "tic": weapon_lines(states, frames, shoot), "restart": restart_lines(start, states, frames),
+            "tic": weapon_lines(states, frames, shoot, noise), "restart": restart_lines(start, states, frames),
             "start": start}

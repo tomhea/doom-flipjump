@@ -222,7 +222,7 @@ def _thing_key(t):
 
 
 def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_near: bool, boot_skill: int,
-              skills, cache: dict, mode: str = "idle", depth_order=None) -> dict:
+              skills, cache: dict, mode: str = "idle", depth_order=None, player: str = "walk") -> dict:
     """everything P3.1 adds to the game tier, from the model's own sources:
       * `view_rows`: one thing row per distinct monster VIEW (lump, mirrored) -- `things.thing_rows`' layout from the
         view's art, dw's bit 7 set for a mirrored view -- appended after the runtime things' own rows;
@@ -316,10 +316,21 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     for h in range((nt + 15) // 16):
         sel += ["  thsel_h%d:" % h, "    sim.jump16 sp_ti, " + ", ".join(
             "thsel_s%d" % (16 * h + l) if 16 * h + l < nt else "thsel_none" for l in range(16))]
+    # M7 P4.2a (doomfj.aimcode): a tier whose player SHOOTS gives every runtime thing its aim id -- 1 + slot while
+    # the monster is shootable (a corpse is not: damage clears it), 0 for any other thing -- and its radius class
+    shoot = player in ("shoot", "hit", "full")
     for t, m in enumerate(rt_slot):
         sel.append("  thsel_s%d:" % t)
         if wake:
             sel.append("    hex.set w/4, sp_sa, thseen + %d*dw" % m if m is not None else "    hex.zero w/4, sp_sa")
+        if shoot:
+            sel.append("    hex.zero 2, sp_sid")
+            if m is not None:
+                assert w.mon_radius[m] in (20, 30), (m, w.mon_radius[m])
+                sel += ["    hex.if0 1, mon_shootable + %d*dw, thsel_q%d" % (m, t),
+                        "    hex.set 2, sp_sid, %d" % (m + 1),
+                        "  thsel_q%d:" % t,
+                        "    hex.set 1, sp_rc, %d" % int(w.mon_radius[m] == 30)]
         if m is not None:
             sel += ["    hex.mov 8, mr_tx, sp_x", "    hex.mov 8, mr_ty, sp_y",
                     "    hex.mov 1, mr_face, mon_facing + %d*dw" % m,

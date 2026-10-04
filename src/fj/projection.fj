@@ -1315,7 +1315,16 @@ ns proj {
     //   NAMING: tr_x/tr_y/gxt/gyt/tz/tx/xscale/gzt are R_ProjectSprite's own identifiers, kept so
     //   the fj reads next to r_things.c (see the conventions header).
     //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
-    def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg, spn, neartz \
+    // M7 P4.2a: `aim` (doomfj.aimcode) -- 1 for the runtime monsters' projections: a thing whose id `sp_sid` is not 0
+    // records itself in the AIM WINDOW the moment its xscale exists (the shared leaf `aim_record`), before any later
+    // reject -- an off-screen-row or budget-dropped monster can still be shot (D3 e). 0 expands to nothing.
+    def aim_hook @ skip < sp_sid, aim_record, aim_ret {
+        hex.if0 2, sp_sid, skip
+        stl.fcall aim_record, aim_ret
+      skip:
+    }
+
+    def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg, spn, neartz, aim \
             @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, h_ok, h_fits, clamp_tall, set_far, far_done, trig_calc, trig_have, linf_x_ok, linf_y_ok, reject, done, end, deg_far_hard \
             < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_dbound, pth_dtest, pth_c_centerxfix, pth_c_centeryfix, pth_c_viewh, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_gzt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
         hex.set 1, vis, 0
@@ -1453,6 +1462,7 @@ ns proj {
         // against a table reciprocal), so the ORACLE takes the same path: this is the same re-bless
         // the wall scale already took, not an approximation fj invented on its own.
         .scale_recip_div pth_xscale, pth_cproj, pth_tz, 1           // pth_xscale = (projection<<16) / pth_tz
+        rep(aim, k) .aim_hook                                          // M7 P4.2a: the aim window
       xscale_done:                                      // ⚠ label is never jumped to (dead)
         hex.set 8, pth_c_centerxfix, centerx*0x10000
         hex.mov 8, pth_tx_left, pth_tx

@@ -140,7 +140,7 @@ BOOT_SKILL = _gd.SK_HARD
 MONSTER_MODE = "decide"
 # M7 P4 (docs/gp-combat.md section 1): the game tier's PLAYER MODE -- the model mode its weapon is exact against
 # ("walk" through P4.0, "fire" P4.1: the trigger without its effects, "hit" P4.2)
-PLAYER_MODE = "fire"
+PLAYER_MODE = "shoot"                    # M7 P4.2a: the shot resolves and hurts
 
 
 def tier_flags(tier: str) -> dict:
@@ -1558,9 +1558,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _p31 = p31_parts(rm, map_wad, mapname, sprite_wad, _anim,
                          [map_wad.things(mapname)[w_] for w_ in sorted(_mt_keep)],
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
-                         cache=spr_cache, mode=MONSTER_MODE)
+                         cache=spr_cache, mode=MONSTER_MODE, player=PLAYER_MODE if menu else "walk")
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
     _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide")) else 0
+    # M7 P4.2a (doomfj.aimcode): the game tier's AIM WINDOW, when its player's shots resolve -- recorded by the runtime
+    # monsters' projections (their seen machinery reaches xscale for every monster D3 e counts)
+    _AIM = 1 if (_SEEN and menu and PLAYER_MODE in ("shoot", "hit", "full")) else 0
+    if _AIM:
+        from doomfj import aimcode as _aimcode
+        from doomfj.combat import aim_window as _aim_window
+        assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
+        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX)
+        _aim_decls = _aimcode.decls() + [_aimcode.table_text(rm)]
+    else:
+        _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
     _chase = _p31.get("chase") if _p31 else None
     if _chase:
@@ -1649,7 +1660,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{2 if _ANIM else 1}, "
                 # M7 P3.2a: SEEN -- the runtime body of the wake mode marks each monster's flag
                 f"{1 if (mt and _SEEN) else 0}, {'sp_sa' if (mt and _SEEN) else 0}, "
-                f"{'trb_seenf' if (mt and _SEEN) else 0}, {'trb_one' if (mt and _SEEN) else 0}"]
+                f"{'trb_seenf' if (mt and _SEEN) else 0}, {'trb_one' if (mt and _SEEN) else 0}, "
+                # M7 P4.2a: the runtime monsters' body records the aim window when the player's shots resolve
+                f"{1 if (mt and _SEEN and _AIM) else 0}"]
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -2480,7 +2493,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
             monsters=_p31["restart"] if _p31 else None,
-            hud=(list(_hud["restart"]) + list(_wpn["restart"])) if _hud else ())
+            hud=(list(_hud["restart"]) + list(_wpn["restart"])
+                 + ([f"hex.zero {2 * 17}, aim_sid"] if _AIM else [])) if _hud else ())   # M7 P4.2a: no aim
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart, hud=_hud["menu"] if _hud else ())
@@ -2549,6 +2563,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P3.2a: the monsters tic AFTER the eye's point location (the wake mode's REJECT reads the player's
     # sector) and before the render, which marks this frame's seen flags for the next tic
     pass1 += list(_p31.get("tic_after_eye", ())) if _p31 else []
+    # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
+    # runs before this, has already read last frame's)
+    if _AIM:
+        from doomfj.aimcode import prologue_lines as _aim_prologue
+        pass1 += _aim_prologue()
     pass1.append("present.begin_frame_collines")
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
@@ -2711,6 +2730,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *postlude_palette, *(_hud["tail"] if _hud else []),            # M7 P4.0: the weapon, the bar
           *(["frame_end:"] if menu else []), *present_tail, "stl.loop",
           "bad: stl.loop",
+          *(_aim_leaf if _AIM else []),                 # M7 P4.2a: the aim window's shared leaf
           *fb_leaves,
           *((["seg_pass1_leaf:", "stl.fret seg_ret"]
              + (["seg_pass2_leaf:", "stl.fret seg_ret2"])) if "segstub" in ablate else
@@ -2832,6 +2852,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
           *(_hud["decls"] if _hud else []),                               # M7 P4.0: the bar
           *(_wpn["decls"] + _wpn["tables"] if _wpn else []),                # M7 P4.1: the weapon
+          *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage

@@ -543,11 +543,10 @@ def main(argv=None) -> int:
                              "pcard": sc["pcard"]})
             pr.write_cells(vals)
         p.on_frame_start(start)
-        # every cell the expectation names (READ, and M7 P4/P5's weapon, damage and attack cells the monster phase
-        # adds): a name the probe dropped (an optional group this binary lacks) reads as missing and parts
-        names = sorted({k for fr in want for k in expected_cells(fr, dsim.order, dsim.mp.order)} | set(READ))
-        names = [k for k in names if k in p.cells]
-        p.on_present(lambda pr, f, names=names: reads.append(pr.read_cells(names)))
+        # every cell the probe holds (P.game_cells: each later rung's group joins there), not READ alone -- READ was
+        # a hand list the P4 cells never joined, so the binary's side of their comparison read None
+        assert set(READ) <= set(cells), sorted(set(READ) - set(cells))
+        p.on_present(lambda pr, f: reads.append(pr.read_cells(list(cells))))
         r = gb.run(len(sc["keys"]), menu_events(sc["keys"]), p)
         s_bad = x_bad = p_bad = None
         for f, fr in enumerate(want):
@@ -560,7 +559,8 @@ def main(argv=None) -> int:
                                  tuple(fr["phase"][0][si][0] for si in dsim.order),
                                  hidden_extra=card_di if fr["taken"] else (), movers=fr["mheights"],
                                  views=fr["views"], positions=fr["positions"], screen_kw=fr.get("skw"),
-                                 mobiles=fr["mobiles"])                       # M7 P5
+                                 mobiles=fr["mobiles"],                       # M7 P5
+                                 card=fr["phase"][3])           # the bar's card is pcard's (S3 pokes it)
             else:
                 pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):

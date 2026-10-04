@@ -72,3 +72,26 @@ fuzz in doom.
   - m2_std_gate's first walk holds and taps fire and switches to the fist and back.
   - B0 delivers only its five keys, as before. The model's strafe reaches the binary through the injected pose, and
     the binary's weapon only rises and idles there.
+
+## 5. P4.2a, the monsters' damage (`doomfj.damagecode`; as written, before its build)
+
+The model is `combat.damage_monster` / `_kill_monster` behind `_line_attack`'s reach test, in the player mode "shoot".
+- **The hand-off**: the shot sets `dm_id` (1 + slot), `dm_dmg`, `dm_melee`, `dm_reach` (`weaponcode.DM_CELLS`, the
+  caller's) and `stl.fcall dm_go, dm_ret`; every path returns through `dm_ret`.
+- **The code**: `dm_go` jumps on `dm_id` (two `sim.jump16`) to the slot's stub `dmg<m>`, which only COPIES the slot's
+  cells into the `dm_*` window, calls the ONE leaf `dm_leaf` and copies them back (no per-slot logic: the table pool,
+  ee6761c). The leaf: not shootable or health <= 0 -> nothing; P_AproxDistance(target - player) > reach -> nothing
+  (melee: `dm_reach`; bullets: 2048, which the aim window's tz <= 2048 does not imply); health -= damage; ONE draw
+  on the monster's stream through `dmrnd` (nibble 0 = v & 3, nibble 1 = the pain bits per painchance class); a
+  dispatch on the slot's damage profile (painchance and states; 4 on E1M1) for its constants; then the death or the
+  hurt in the model's order.
+- **What dies with it**: A_Fall clears `mon_solid` in the monster tic; the thing test (`mm_things`) reads `mon_solid`
+  and a closing door's contact reads `mon_shootable` (World.door_touched's live monster) instead of `mon_active`;
+  the decision reads and clears `mon_justhit` (`mm_jh`, P_CheckMissileRange).
+- **Asserted at emit time** (`damagecode.check_model_rules`): no gib at 20 damage, no death state under 4 tics (the
+  tics roll never clamps), no zero-tic or acting pain/death state, every type shootable and solid, A_Fall in every
+  death sequence and no A_Chase after it.
+- **Harnesses**: `tests/fj/test_monster_damage_fj.py` (320 shots against the model, eight controls),
+  `tests/host/test_damage_tables.py` (`dmrnd` against the slow formulas over all 256 states, with controls), the
+  decide harness with justhit pokes and a dying monster (controls: justhit never cleared, an A_Fall that clears
+  nothing), and the chase harness with a corpse in the way (control: the thing test on `mon_active`).

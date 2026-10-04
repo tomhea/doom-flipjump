@@ -1,7 +1,6 @@
 """M7 P4.2a (docs/gp-combat.md): the monsters' DAMAGE on the real flipjump engine -- `damagecode`'s dm_go / dm_leaf,
-the very text the emitter splices, against the model's own `_line_attack` -> `damage_monster` / `_kill_monster`
-(World(player="shoot") when the model has that mode, else "full": the two differ inside damage only in the drop,
-which fj does not hold).
+the very text the emitter splices, against the model's own `_line_attack` -> `damage_monster` / `_kill_monster` in
+the player mode "shoot" (World(player="shoot"): no drop, no effect, no barrel).
 
 Each record pokes ONE slot's cells identically on both sides -- health (around 0 and the hit's damage, so a hit
 leaves exactly 0), shootable, state (the spawn state, its second frame, the see state, the pain state, others),
@@ -11,7 +10,8 @@ record the slot's cells and its neighbour's are printed (the neighbour catches a
 A few records name no slot (dm_id 0).
 
 R9: no pain draw, `< 0` instead of `<= 0` for the death, the threshold reset when it is not 0, the see switch from a
-state other than the spawn state, `>=` for the reach, and the death without its tics roll must each part.
+state other than the spawn state, `>=` for the reach, the death without its tics roll, bullets without their 2048
+reach (the aim window's tz alone), and bullets reading the caller's stale `dm_reach` must each part.
 """
 import random
 from pathlib import Path
@@ -22,16 +22,18 @@ import pytest
 from doomfj import damagecode as DC
 from doomfj import gamedata as gd
 from doomfj import monstercode as MC
+from doomfj import rng as R
 from doomfj.combat import MISSILERANGE_U, PUNCH_REACH, SAW_REACH
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.world import PLAYER_MODES, TicEvents, World, aprox_distance
+from doomfj.weaponcode import DM_CELLS
+from doomfj.world import TicEvents, World, aprox_distance
 
 ROOT = Path(__file__).resolve().parents[2]
 FJ = ROOT / "src" / "fj"
 N = 320
 M32 = 0xFFFFFFFF
-PLAYER = "shoot" if "shoot" in PLAYER_MODES else "full"
+PLAYER = "shoot"
 CELLS = (("mon_health", 3), ("mon_shootable", 1), ("mon_state", 2), ("mon_tics", 1), ("mon_rng", 2),
          ("mon_threshold", 2), ("mon_reaction", 1), ("mon_target", 1), ("mon_justhit", 1), ("mon_solid", 1))
 
@@ -54,8 +56,9 @@ def _records(w):
         info = w.mon_info[m]
         dmg = rnd.randint(1, DC.DM_MAX)
         hp = rnd.choice((dmg, dmg, dmg - 1, dmg + 1, 1, 0, -2, rnd.randint(1, info.spawnhealth),
-                         rnd.randint(1, info.spawnhealth), info.spawnhealth))
-        st = rnd.choice((info.spawnstate, info.spawnstate, gd.STATES[info.spawnstate].next, info.seestate,
+                         rnd.randint(1, info.spawnhealth), info.spawnhealth, info.spawnhealth, dmg + 7))
+        st = rnd.choice((info.spawnstate, info.spawnstate, info.spawnstate, info.spawnstate,
+                         gd.STATES[info.spawnstate].next, info.seestate,
                          info.painstate, gd.STATES[info.seestate].next, info.missilestate if info.missilestate !=
                          gd.S_NULL else info.meleestate))
         pokes = {"mon_health": hp, "mon_shootable": int(rnd.random() < 0.9), "mon_state": gd.STATE_INDEX[st],
@@ -63,7 +66,7 @@ def _records(w):
                  "mon_threshold": rnd.choice((0, 0, 0, 1, rnd.randint(1, gd.BASETHRESHOLD))),
                  "mon_reaction": rnd.randrange(16), "mon_target": rnd.randrange(2), "mon_justhit": rnd.randrange(2)}
         melee = int(rnd.random() < 0.5)
-        reach = rnd.choice((PUNCH_REACH, SAW_REACH)) if melee else 0
+        reach = rnd.choice((PUNCH_REACH, SAW_REACH)) if melee else rnd.randrange(256)   # stale for bullets: unread
         lim = reach if melee else MISSILERANGE_U
         x, y = rnd.randint(-1500, 3000), rnd.randint(-3000, 1500)
         d = rnd.choice((lim, lim, lim - 1, lim + 1, rnd.randint(0, lim)))
@@ -79,8 +82,8 @@ def _records(w):
             while aprox_distance(dx, dy) < d:
                 dy += 1
         dx, dy = dx * rnd.choice((1, -1)), dy * rnd.choice((1, -1))
-        px16 = ((x + dx) << 16) | rnd.randrange(1 << 16)
-        py16 = ((y + dy) << 16) | rnd.choice((0, rnd.randrange(1 << 16)))
+        px16 = (((x + dx) << 16) | rnd.randrange(1 << 16)) & M32
+        py16 = (((y + dy) << 16) | rnd.choice((0, rnd.randrange(1 << 16)))) & M32
         out.append((m, pokes, (x, y), (px16, py16), dmg, melee, reach))
     return out
 
@@ -124,6 +127,8 @@ MUTANTS = {
     "reachge": ("    hex.cmp 4, mt_d, dm_r4, dm_in, dm_in, dm_out\n",
                 "    hex.cmp 4, mt_d, dm_r4, dm_in, dm_out, dm_out\n"),             # `>=` for the reach
     "notics": ("    hex.sub 1, dm_ti, dm_rr\n", ""),                                 # the death's tics roll unapplied
+    "nobulletreach": ("    hex.set 4, dm_r4, %d\n" % MISSILERANGE_U, "    hex.set 4, dm_r4, 65535\n"),   # tz only
+    "stalereach": ("    hex.if0 1, dm_melee, dm_far\n", ""),                         # bullets read the stale dm_reach
 }
 
 
@@ -135,6 +140,7 @@ def _program(w, mut=None):
              + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n)
              + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, [0] * n)
              + MC.P32A_SCRATCH + dp["decls"]
+             + ["%s: hex.vec %d" % cn for cn in DM_CELLS]                 # the caller's (weaponcode.shot_decls)
              + ["viewx: hex.vec 8", "viewy: hex.vec 8", "thpos_rt: hex.vec %d" % (16 * n)])
     text = "\n".join(MC.dist_leaf_lines() + dp["lines"] + dp["tables"]) + "\n"
     if mut:
@@ -190,7 +196,7 @@ def test_the_records_exercise_every_path():
     w = _world()
     ws = w.ws
     seen = dict(kill=0, kill0=0, pain=0, nopain=0, wake=0, thr0_other=0, thr_kept=0, miss=0, miss1=0, at=0,
-                unshootable=0, dead=0, none=0)
+                unshootable=0, dead=0, none=0, bmiss=0, bhit=0)
     for rec in _records(w):
         m, pokes, (x, y), (px16, py16), dmg, melee, reach = rec
         if m is None:
@@ -211,26 +217,27 @@ def test_the_records_exercise_every_path():
         elif d > lim:
             seen["miss"] += 1
             seen["miss1"] += d == lim + 1
+            seen["bmiss"] += not melee
         else:
             seen["at"] += d == lim
+            seen["bhit"] += not melee
             if ev.kills:
                 seen["kill"] += 1
                 seen["kill0"] += hp == dmg
             else:
-                seen["pain" if ws.mon_justhit[m] and not pokes["mon_justhit"] or ws.mon_state[m] ==
-                     gd.STATE_INDEX[w.mon_info[m].painstate] and pokes["mon_state"] != ws.mon_state[m]
-                     else "nopain"] += 1
-                if pokes["mon_threshold"] == 0:
-                    if pokes["mon_state"] == gd.STATE_INDEX[w.mon_info[m].spawnstate] and ws.mon_state[m] == \
-                            gd.STATE_INDEX[w.mon_info[m].seestate]:
-                        seen["wake"] += 1
-                    elif pokes["mon_state"] != gd.STATE_INDEX[w.mon_info[m].spawnstate]:
-                        seen["thr0_other"] += 1
-                else:
+                pain = R.p_random(before_rng)[0] < w.mon_info[m].painchance
+                seen["pain" if pain else "nopain"] += 1
+                spawn = pokes["mon_state"] == gd.STATE_INDEX[w.mon_info[m].spawnstate]
+                if pokes["mon_threshold"]:
                     seen["thr_kept"] += 1
+                elif spawn and not pain:
+                    seen["wake"] += 1
+                    assert ws.mon_state[m] == gd.STATE_INDEX[w.mon_info[m].seestate]
+                elif not spawn:
+                    seen["thr0_other"] += 1
             assert live and ws.mon_rng[m] == (before_rng + 1) & 0xFF, "a hit draws once"
     want = dict(kill=10, kill0=2, pain=10, nopain=5, wake=3, thr0_other=3, thr_kept=10, miss=10, miss1=3, at=10,
-                unshootable=5, dead=5, none=3)
+                unshootable=5, dead=5, none=3, bmiss=3, bhit=10)
     assert all(seen[k] >= v for k, v in want.items()), (seen, want)
 
 

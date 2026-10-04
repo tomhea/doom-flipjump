@@ -1,13 +1,16 @@
 """M7 P4.2a "shoot" (docs/gp-combat.md): the fj of P_DamageMobj on a MONSTER -- the model's `combat.damage_monster`
 and `_kill_monster` in the player mode "shoot" (no drop, no effect, no barrel), behind `_line_attack`'s reach test.
 
-THE INTERFACE (the player's shot is the caller):
+THE INTERFACE (the player's shot is the caller; `weaponcode.shot_decls` declares the four arguments,
+`weaponcode.DM_CELLS`, and this module the rest -- `dm_ret` included):
 
     dm_id     2 nibbles   1 + the monster slot hit (0: nothing -- dm_go returns at once)
     dm_dmg    2 nibbles   the damage, 1 .. DM_MAX
     dm_melee  1 nibble    1 for the fist and the saw: the target's centre must be within dm_reach
-    dm_reach  2 nibbles   64 fist / 65 saw; unused when dm_melee = 0, where the reach is MISSILERANGE_U (2048) --
-                          `_line_attack` tests every weapon's reach, the bullets' too
+    dm_reach  2 nibbles   64 fist / 65 saw; unread when dm_melee = 0 (the caller leaves it stale), where the reach is
+                          MISSILERANGE_U (2048): `_line_attack` tests the bullets' reach too, P_AproxDistance to the
+                          target's centre > 2048, which the aim window's tz <= 2048 does not imply (AproxDistance
+                          overestimates the true distance by up to ~12%, and tz is only its component on the view axis)
     stl.fcall dm_go, dm_ret
 
 `dm_go` returns through `stl.fret dm_ret` on EVERY path. It reads the player's position from viewx / viewy: the
@@ -129,8 +132,7 @@ def check_model_rules(w, *, max_dmg: int = DM_MAX) -> None:
 
 
 # ---- the decls -----------------------------------------------------------------------------------------------------
-DM_INTERFACE = ["dm_id: hex.vec 2", "dm_dmg: hex.vec 2", "dm_melee: hex.vec 1", "dm_reach: hex.vec 2",
-                "dm_ret: hex.vec w/4"]
+DM_INTERFACE = ["dm_ret: hex.vec w/4"]           # the arguments are the caller's (weaponcode.DM_CELLS)
 DM_WINDOW = ["dm_hp: hex.vec 3", "dm_sh: hex.vec 1", "dm_st: hex.vec 2", "dm_ti: hex.vec 1", "dm_rng: hex.vec 2",
              "dm_th: hex.vec 2", "dm_re: hex.vec 1", "dm_tg: hex.vec 1", "dm_jh: hex.vec 1",
              "dm_x: hex.vec 4", "dm_y: hex.vec 4", "dm_type: hex.vec 1"]

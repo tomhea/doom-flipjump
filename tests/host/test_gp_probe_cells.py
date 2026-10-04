@@ -117,7 +117,8 @@ def test_only_the_skill_menu_is_optional(tmp_path):
                                  # M7 P4.1: the weapon; M7 P4.2a: the aim window
                                  "wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad",
                                  "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm", "aim_sid",
-                                 "mon_health", "mon_shootable", "mon_solid", "mon_justhit"}       # M7 P4.2a: the damage
+                                 "mon_health", "mon_shootable", "mon_solid", "mon_justhit",       # M7 P4.2a: the damage
+                                 "mon_ambush", "snd_alert"}                                       # M7 P4.2b: the noise
     for one in ("wp_rdy", "fl_frm"):                       # M7 P4.1: the weapon's fifteen come together
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))

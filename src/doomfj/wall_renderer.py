@@ -141,7 +141,7 @@ MONSTER_MODE = "decide"
 # M7 P4 (docs/gp-combat.md section 1): the game tier's PLAYER MODE -- the model mode its weapon is exact against
 # ("walk" through P4.0, "fire" P4.1: the trigger without its effects, "hit" P4.2); a mode whose shots hurt
 # (damagecode.DAMAGE_PLAYER_MODES) adds the monsters' damage to p31_parts -- MONSTER_MODE must then be "decide"
-PLAYER_MODE = "shoot"                    # M7 P4.2a: the shot resolves and hurts
+PLAYER_MODE = "hit"                      # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD
 
 
 def tier_flags(tier: str) -> dict:

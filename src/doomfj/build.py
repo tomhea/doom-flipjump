@@ -89,7 +89,9 @@ MONSTER_PERSIST = ("mon_state", "mon_tics", "mon_facing", "mon_active",
                    # M7 P3.2c (the decide mode): the missile decision's flag
                    "mon_justattacked",
                    # M7 P4.2a (doomfj.damagecode): the damage's cells -- a reset that restored them would undo every hit
-                   "mon_health", "mon_shootable", "mon_solid", "mon_justhit")
+                   "mon_health", "mon_shootable", "mon_solid", "mon_justhit",
+                   # M7 P4.2b (doomfj.noisecode): who heard a shot, and who still waits in ambush
+                   "mon_ambush", "snd_alert")
 
 # M7 P4.0 (docs/gp-combat.md section 2; doomfj.hudcode): the status bar's memory, the game tier's alone -- the values
 # (`hud_v`), what the screen shows (`hud_s`) and the redraw-all flag (`hud_full`). A reset that restored them would

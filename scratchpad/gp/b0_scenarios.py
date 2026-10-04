@@ -205,8 +205,13 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     cm = S.BinaryMirror(S.start_world(frames[0]["run_setup"])) if chase and frames else None
     for f, fr in enumerate(frames):
         mheights = fr.get("mheights")
+        # M7 P4.1 / P4.2a: the weapon tics FIRST, as the binary's does -- after the doors, before the player's move and
+        # the monsters' tic -- at the frame's injected (pre-move) pose: a shot that hits lands before the monster acts
+        _boxes = mph.boxes() if mph is not None else ()   # the door tic precedes the weapon (and its kills)
+        if mph is not None:
+            mph.weapon(fr["keys"], fr["inj"][0] & M32, fr["inj"][1] & M32, fr["inj"][2])
         if chase:
-            epose, edoors = cm.step(fr["inj"], fr["keys"], fr["doors"], fr.get("movers"), others=mph.boxes())
+            epose, edoors = cm.step(fr["inj"], fr["keys"], fr["doors"], fr.get("movers"), others=_boxes)
             cm.state, cm.mstate = mph.frame(cm.state, cm.mstate, epose[0] & 0xFFFFFFFF, epose[1] & 0xFFFFFFFF,
                                             epose[2])
             mheights = cm.mp.heights(cm.mstate)
@@ -215,8 +220,6 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                 _ep = override[f][0] if override is not None else fr["exp"][0]
                 mph.tic(_ep[0] & 0xFFFFFFFF, _ep[1] & 0xFFFFFFFF, _ep[2])
             epose, edoors = override[f] if override is not None else fr["exp"]
-        if mph is not None:                              # M7 P4.1: the weapon tics with the world (pre-move pose:
-            mph.weapon(fr["keys"], fr["inj"][0] & M32, fr["inj"][1] & M32, fr["inj"][2])   # the injected one)
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
             got["viewx"], got["viewy"], got["viewangle"], got["dstate"]) == (

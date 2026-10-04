@@ -840,8 +840,9 @@ def main():
             in_box_when_pressed = True
         # M7 P4.1: the player's weapon, every world frame -- P4.2a: BEFORE the move, from the frame's starting pose
         # (the binary's weapon runs before its player sim: a shot's target and a melee's reach are measured there)
-        mph.weapon(kd, state.x, state.y, state.angle)
-        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=mph.boxes())
+        _boxes = mph.boxes()                            # the door tic runs BEFORE the weapon: this frame's shots
+        mph.weapon(kd, state.x, state.y, state.angle)   # have not yet killed what a closing door reverses on
+        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=_boxes)
         dstates = dps[0]
         # M7 P3.1: the monsters after the player; P3.2b: inside the doors and lifts (their presses -> next frame)
         dps, mps = mph.frame(dps, mps, state.x, state.y, state.angle)

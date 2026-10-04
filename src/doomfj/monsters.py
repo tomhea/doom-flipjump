@@ -193,6 +193,8 @@ class MonsterPhase:
             out.update({"mon_health": tuple(v & 0xFFF for v in ws.mon_health[:n]),
                         "mon_shootable": tuple(ws.mon_shootable[:n]), "mon_solid": tuple(ws.mon_solid[:n]),
                         "mon_justhit": tuple(ws.mon_justhit[:n])})
+        if self.world.player in ("hit", "full"):                 # M7 P4.2b: who heard, who still waits in ambush
+            out.update({"mon_ambush": tuple(ws.mon_ambush[:n]), "snd_alert": tuple(ws.snd_alert)})
         return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:

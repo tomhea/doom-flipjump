@@ -152,7 +152,8 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # M7 P4.1: the player's weapon (doomfj.weaponcode.PERSIST, the cells' widths below)
                    frozenset({"wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad", "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm"}),
                    frozenset({"aim_sid"}),                                              # M7 P4.2a: the window
-                   frozenset({"mon_health", "mon_shootable", "mon_solid", "mon_justhit"}))   # M7 P4.2a: the damage
+                   frozenset({"mon_health", "mon_shootable", "mon_solid", "mon_justhit"}),   # M7 P4.2a: the damage
+                   frozenset({"mon_ambush", "snd_alert"}))                              # M7 P4.2b: the noise
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -657,6 +658,8 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
             cells[name] = Cell(name, "hex", width, count=nmon)
         cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon)   # M7 P3.2c
         cells["mon_health"] = Cell("mon_health", "hex", 3, count=nmon)               # M7 P4.2a: the damage
+        cells["mon_ambush"] = Cell("mon_ambush", "hex", 1, count=nmon)               # M7 P4.2b: the noise
+        cells["snd_alert"] = Cell("snd_alert", "hex", 1, count=_nsound())
         for name in ("mon_shootable", "mon_solid", "mon_justhit"):
             cells[name] = Cell(name, "hex", 1, count=nmon)
     # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
@@ -668,6 +671,18 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt)
         cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt)
     return cells
+
+
+def _nsound() -> int:
+    """M7 P4.2b: E1M1's sound nodes (World.layout.nsound) -- `snd_alert`'s count, from the model once"""
+    global _NSOUND
+    if _NSOUND is None:
+        from doomfj.world import World
+        _NSOUND = World(monsters="idle").layout.nsound
+    return _NSOUND
+
+
+_NSOUND = None
 
 
 def wfired_value(fired) -> object:

@@ -1081,7 +1081,7 @@ frames, `scratchpad/plan/p4/view84` in the session, recorded in gp-combat C5).
    premise. gamespeed is recorded. size <= +0.3M words and <= 40%; msframe recorded (D8).
 5. pinreport 20 of 20, and the restore sets re-keyed (`hud_v`, `hud_s`, `hud_full` are new state).
 
-**Row**: (filled after the build)
+**Row**: the UNITED build's (blocked47: P4.0 + P4.1 + P4.2a + P4.2b) -- "P4 united: the row and the verdicts" below; no binary of this rung alone was built.
 
 
 ## P4.1 the trigger (class F) -- declared 2026-10-04, before the build; UNITED with P4.2a into one build (the owner, 2026-10-04: merge small rungs -- gp-combat section 5)
@@ -1126,7 +1126,7 @@ Nothing is applied: no target, no damage, no noise (P4.2). The aim window moved 
 5. pinreport 20 of 20, and the restore sets re-keyed (the weapon cells persist; `psid`/`psdx`/`psdy`, `wp_bcd` and
    `fl_ret` are scratch).
 
-**Row**: (filled after the build)
+**Row**: the UNITED build's (blocked47: P4.0 + P4.1 + P4.2a + P4.2b) -- "P4 united: the row and the verdicts" below; no binary of this rung alone was built.
 
 
 ## P4.2a the hit (class F) -- declared 2026-10-04, before the build; ONE build with P4.0 and P4.1 (gp-combat section 5)
@@ -1172,7 +1172,125 @@ frames).
 5. pinreport 20 of 20 with `heat_blocked27_p42`; the restore sets re-keyed (the weapon, window, bar and damage
    cells persist).
 
-**Row**: (filled after the build)
+**Row**: the UNITED build's (blocked47: P4.0 + P4.1 + P4.2a + P4.2b) -- "P4 united: the row and the verdicts" below; no binary of this rung alone was built.
+
+
+## P4.2b the noise (class F) -- written at ship, 2026-10-04: NO budget or kill criteria of its own were declared in this file before blocked47's build
+
+**What**: the shots are HEARD (`doomfj.noisecode`; the model's `PLAYER_MODE = "hit"`, 5fe7b81). At each shot the
+weapon fcalls `nz_leaf`: P_NoiseAlert's flood over E1M1's 35 sound edges from the player's sector at the pre-move
+pose (the open test on the dynamic sectors' door / lift / switch cells), ORed into the persisted `snd_alert`; A_Look's
+sound branch (`nz_heard`) wakes a non-ambusher and needs the waking sight for an ambusher; `mon_ambush` persists and
+clears at A_FaceTarget. It joined the united build under gp-combat section 5 ("P4.2b ... joins the build if it is
+ready when P4.2a is").
+
+**Budget**: none of its own. P4.2a's declaration says "No noise (P4.2b)", so no declared number covers it; it is NOT
+back-filled.
+
+**Kill criteria** (as run -- written at ship, not before): `tests/fj/test_noise_fj.py` (the flood against
+`World.noise_alert`, 182 sectors x 4 state mixes + 54 located points, controls onepass / noscratch / invert caught;
+the sound branch, noambush / deaf caught; the decide tic with hear, noface caught -- c1e179d; after the merged decide
+harness, its 3 decide tests and the flood with its controls 10 passed -- a151dc6); `tests/host/test_player_modes.py`
+(hit == full on the monster cells and alerts over 600 tics, a shoot control parts -- c1e179d); `mon_ambush` /
+`snd_alert` persisted and in the gates' state check (5fe7b81); then the united build's gates below.
+
+
+## P4 united: the row and the verdicts (blocked47, written at ship 2026-10-04)
+
+ONE build carries P4.0, P4.1, P4.2a and P4.2b (the owner, 2026-10-04: "try to merge small rungs"; gp-combat section
+5). **Row** (blocked47, sha256 `9e4ab7d92ff9649d`, built at 3bfe5ed with `heat_blocked27_p42` and flipjump 1.5.1 at
+`1cd6e0c`; `docs/ship-evidence/blocked47_*`):
+
+| measure | blocked46 (P3.3 + P3.4) | blocked47 (P4) | delta |
+|---|---|---|---|
+| combat set binding (v5) | 15,560,076 | 15,851,173 | +291,097 |
+| ... with strafe's collision | 15,594,013 | 15,889,348 | +295,335 |
+| v5 per-frame maximum (+/- 2^18) | 26,214,400 (R0-aftermath) | 25,427,968 (R0-aftermath) | -786,432 |
+| gamespeed binding | 15,243,295 | 15,403,663 | +160,368 |
+| gamespeed mean / p80 run | 12,911,839 / 17,574,751 | 13,035,385 / 17,771,942 | +123,546 / +197,191 |
+| input phase (phases.py) | 1,193 | 1,141 | -52 |
+| size (% of 2^27) | 34.19% | 34.25% | +86,672 words (the target is now 40%: 7,712,899 words of room) |
+| pool tables (build) | 473,950 in 34,185 groups | 483,308 in 35,102 groups | +9,358 tables |
+| ms/frame (msframe, one run, A = blocked46; the pictures differ, so its pixel check reads NO) | 73.4 | 73.0 | NOT SEPARATED (x1.000) |
+| hot words pinned (pinreport) | 20/20 | 20/20 (0 broken groups of 35,102) | 0 lost |
+
+**Where the ops went** (phases.py on gamespeed's games; one binary for four rungs, so nothing below is attributed per
+rung). profx's mean frame 12,911,839 -> 13,035,385 (+123,546). Lines that moved >= 10,000 ops/frame: move / turn
+10,172 -> 21,660 (+11,488); glue between phases 163,821 -> 175,291 (+11,470); render walk, all 12,479,305 ->
+12,573,119 (+93,814) -- inside it seg_pass1_leaf +130,754, seg_pass2_leaf -75,745, seg_pass1_ts_leaf -53,678, vpb
+bands-as-code (plane bands) -32,499, bspcode walk +26,216, thing_leaf +25,967, and a "bad/padding" line of 82,391
+that blocked46's profile did not have (not attributed here). The plane bands fell, as the 84-row view's premise said;
+the net did not.
+
+**Size**: +86,672 words -- below the pool 28,816,326 -> 28,590,852 (-225,474), in the pool 17,071,194 -> 17,383,340
+payload words (+312,146; +9,358 tables; demand 46,973,216 -> 47,366,720). 34.25% of 2^27. **The size target is 40%
+from P4.0 on** (gp-combat C2, the owner 2026-09-25 + 2026-10-04); the binary is also under the old 35% (1,002,012
+words of it left).
+
+**msframe NOT SEPARATED is the class-F record (D8)**: 73.4 -> 73.0 ms/frame (pairs 1.025 1.007 0.999 1.000 0.998),
+15,580,689 -> 15,632,447 ops/frame on msframe's walk, 212.2 -> 214.2 M fj/s. **The run was taken with
+`--ignore-busy`**: the owner's fullscan.py (pid 28924) ran beside it, logged as `python(28924) 1.0s/s`, not ours to
+stop; the run's note says so; its yardstick median read 3.47G, under ship-gate step 2's ~3.5 G quiet line. The `shipped` baseline is still blocked44's (#115).
+
+**Found and fixed during the rung** (each before blocked47 shipped):
+- 7dd242a: `init_screen` (it zeroes the device's palette and pixels) ran every frame in main, because the M1 reset
+  re-enters at `__hot_end`; it would have blanked every bar column the tail does not redraw. Moved to the entry part;
+  caught by the P5 integrator before the P4 build started.
+- 3bfe5ed: the re-key STOPPED at `m5_setfile` -- the standalone restore set never carried the game screen's persisted
+  cells (hud / weapon / aim). `build.game_screen_persisted_decls` is now the one list, read by `m5_setfile` and the
+  test; `m5_setfile --selftest`'s C5b positive control had been refusing since the monsters' cells joined and now
+  carries every persist name (`p4_rekey.log`: 436 -> 518 entries, 15,198 words; 22 passed).
+- f045865: blocked47's first p2a_gate run FAILED with pixels byte-exact and every P4 cell read as None -- the probe's
+  hand-kept READ list never took them. It now reads every game cell, which exposed the bar's card rule (the binary
+  reads `pcard`; the gate's oracle lit the card only when it was gone from the world: 38 px in S3). Re-run 13/13 exact.
+- 02993d7: `test_restore_set_shipped` now requires the standalone set to carry every `build.persist_labels` name, so
+  the next missing cell fails in a millisecond, not at the re-key's last step.
+
+**Verdict P4.0 (its declared kill criteria): NOT all met -- criterion 4's v5 bound is EXCEEDED.**
+1. Host: 1500 passed, 2 skipped, 1 deselected, 2 xfailed (`blocked47_host_suite.log`), `test_hud.py` and
+   `test_collines_device.py` among them.
+2. fj: `test_hud_fj.py` -- 4 passed with the three mutants rejected at frames 0 / 6 / 0 (599aada), then 6 passed with
+   the psprite frames and the flash (4ad32a9). No fj-suite log is in `blocked47_*`; these are the rung commits' runs.
+3. Gates: m2_std_gate (452 frames) and m3_gate (50 frames) byte- and state-exact, p2a_gate 13/13 (after f045865); the
+   7 gate selftests rejected where they must (`blocked47_gate_selftests.log`); B0 v5 exact on every frame (11 runs);
+   deg_gate BYTE-EXACT with every op count equal to blocked46's (`blocked47_deg_gate.log`).
+4. **v5 must not rise by more than 0.1M over 15,560,076: it rose +291,097 (15,851,173) -- EXCEEDED.** No P4.0-only
+   binary was built, so the rise cannot be split between P4.0's view and the trigger, hit and noise in the same
+   binary; but the summed v5 ESTIMATES of the three declared rungs (P4.0 -0.3 .. -1.2M, P4.1 +0.02 .. +0.08M, P4.2a
+   +0.02 .. +0.1M) are -1.16 .. -0.12M, and the measured +0.29M is outside that range: the 84-row saving premise did
+   not show in the net. Shipped on the coordinator's decision (this commit), as class F under D8: CAP-22 and size
+   pass. gamespeed +160,368 (the declaration said "the same sign" as v5's ESTIMATE; it is not). Size +86,672 words
+   (<= +0.3M: held) and 34.25% (<= 40%: held); msframe recorded.
+5. pinreport 20 of 20 (`heat_blocked27_p42`); the restore sets re-keyed with `hud_v`, `hud_s`, `hud_full` (3bfe5ed).
+
+**Verdict P4.1 (its declared kill criteria): met, except criterion 4's v5 comparison, which cannot be judged.**
+1. Host: the full suite above; `test_player_modes.py`, `test_menu.py` and `test_hud.py` among them.
+2. fj (the rung commits' runs, 4ad32a9): `test_weapon_fj` 6 passed, `test_player_strafe_fj` 4 passed,
+   `test_keyboard_input` + `test_menu` 72 passed, the menu fj tests 50 passed, `test_hud_fj` 6 passed.
+3. Gates as in P4.0's 3; m2_std_gate's first walk holds and taps fire and switches weapons (4ad32a9). The gates' state
+   check reads the weapon cells through the probe / gatestate (4ad32a9); the logs' CONTROL 7 line still names only
+   view, mode, menu and doors.
+4. "v5 within +0.1M of P4.0's": NOT JUDGEABLE -- no P4.0 binary exists to compare with; the united rise is in P4.0's
+   verdict. Size: the united +86,672 words is under P4.1's own <= +0.6M; 34.25% <= 40%; msframe recorded.
+5. pinreport 20 of 20; the weapon cells persist in both restore sets (3bfe5ed).
+
+**Verdict P4.2a (its declared kill criteria): met.**
+1. Host: `test_player_modes.py` (shoot == full for four types, a painless control parts -- 743e11f),
+   `test_aim_window_oracle.py` (6 passed, 83901a0), `test_damage_tables.py` (5 passed, 22e95fd),
+   `test_gp_shot_table.py` (4 passed, 2843dd0); the full suite above.
+2. fj (the rung commits' runs): `test_aim_record_fj` 5 passed, mutants r+1 / tie overwrite / drawn ignored / no range
+   test caught (743e11f); `test_player_shot_fj` 12 passed, 4 skipped, mutants col_plus1 / acc_table_col / six_pellets
+   / saw_not_melee caught (2843dd0); `test_monster_damage_fj` 320 shots, 8 of 8 controls caught; the decide harness
+   (nojhclear, nofall caught) and the chase harness with a corpse (active caught) (22e95fd).
+3. Gates as in P4.0's 3, with `aim_sid` and the damage cells in the probe / gatestate (74573bc); B0 on v5 delivers
+   fire and the number keys (v5 fires on 36 frames, ae16682) and is exact on every frame.
+4. CAP-22: v5 15,851,173 <= 22,000,000 (headroom 6,148,827). The rise against blocked46, the whole of P4: +291,097
+   (above). Size 34.25% <= 40%; the united +86,672 words is under P4.2a's own <= +0.5M; msframe recorded (NOT
+   SEPARATED).
+5. pinreport 20 of 20 with `heat_blocked27_p42`; the restore sets re-keyed (3bfe5ed; 02993d7 widened their test).
+
+**Against the phase's budget** (`docs/handoff-gameplay.md`, P4: +0.6M): gamespeed +160,368 and v5 +291,097 -- both
+inside it.
 
 
 ## P5 the monsters' attacks (class F) -- declared 2026-10-04, before the build

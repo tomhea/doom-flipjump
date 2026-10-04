@@ -1,0 +1,24 @@
+$ python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_blocked47.fjm
+SIZE: w=32  segments=483309  data=45,974,192 words (34.25% of 2^27)  span=98,439,744 words (73.34%)  file=34,979,774 bytes
+calibration: startup + 2 menu frames = 225,145 ops (subtracted from every run)
+  run  0: 1,860,885,229 ops / 102 presented -> raw 18,243,972, game-only 18,606,600 ops/frame
+  run  1: 739,089,983 ops / 102 presented -> raw 7,245,980, game-only 7,388,648 ops/frame
+  run  2: 1,777,419,397 ops / 102 presented -> raw 17,425,680, game-only 17,771,942 ops/frame
+  run  3: 1,873,192,606 ops / 102 presented -> raw 18,364,633, game-only 18,729,674 ops/frame
+  run  4: 1,051,917,771 ops / 102 presented -> raw 10,312,919, game-only 10,516,926 ops/frame
+  run  5: 1,185,339,232 ops / 102 presented -> raw 11,620,972, game-only 11,851,140 ops/frame
+  run  6: 999,174,421 ops / 102 presented -> raw 9,795,827, game-only 9,989,492 ops/frame
+  run  7: 981,124,835 ops / 102 presented -> raw 9,618,870, game-only 9,808,996 ops/frame
+  run  8: 1,253,574,488 ops / 102 presented -> raw 12,289,945, game-only 12,533,493 ops/frame
+  run  9: 1,315,918,575 ops / 102 presented -> raw 12,901,162, game-only 13,156,934 ops/frame
+
+==============================================================================
+SPEED  BINDING (mean+p80)/2: 15,403,663 ops/frame   (target <= 20,000,000)  PASS
+SPEED  mean run-average   : 13,035,385 ops/frame
+SPEED  80th-pct run avg   : 17,771,942 ops/frame
+SPEED  spread lo..hi      : 7,388,648 .. 18,729,674 ops/frame
+SPEED  raw (menu included): mean 12,781,996, 80th-pct 17,425,680 ops/frame
+SIZE   words              : 45,974,192 = 34.25% of 2^27   (target <= 40%)  PASS
+SIZE   span / file        : 98,439,744 words (73.34%) / 34,979,774 bytes
+==============================================================================
+rc=0

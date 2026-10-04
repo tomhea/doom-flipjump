@@ -85,8 +85,11 @@ def _set(w, x16, y16, ang, seen, jh):
         ws.mon_justhit[m] = 1
 
 
-def _script():
-    """per frame: (player x16, y16, angle, seen slots), placed by the model's CURRENT positions as it runs"""
+def _script(jh=True):
+    """per frame: (player x16, y16, angle, seen slots, justhit pokes), placed by the model's CURRENT positions as it
+    runs. `jh` False: no justhit pokes -- the script the `noroll` control runs (a poke stays set until the monster's
+    next decision, and a justhit decision skips the missile roll: with the pokes the model reaches the roll twice in
+    120 frames and both say yes, so a roll forced to yes moved nothing -- CI on #118)"""
     w = _world()
     rnd = random.Random(5)                   # a seed whose script runs all four attacks in 120 frames
     rjh = random.Random(0x42A)               # M7 P4.2a: the justhit pokes (their own stream: rnd's script stands)
@@ -104,7 +107,8 @@ def _script():
         y16 = ((w.ws.mon_y[m] + dy * k) << 16 | rnd.choice((0, rnd.randrange(1 << 16)))) & M32
         seen = set(rnd.sample(act, 6)) | ({m} if rnd.random() < 0.5 else set())
         seen.discard(m) if m in seen and rnd.random() < 0.3 else None
-        out.append((x16, y16, rnd.randrange(1 << 32), seen, set(a for a in act if rjh.random() < 0.2)))
+        out.append((x16, y16, rnd.randrange(1 << 32), seen,
+                    set(a for a in act if rjh.random() < 0.2) if jh else set()))
         _set(w, *out[-1])
         w._monsters_phase(TicEvents(0))
     return out
@@ -210,11 +214,11 @@ def _parts(w, mut=None):
     return decls, text
 
 
-def _build(tmp_path, name, mut=None):
+def _build(tmp_path, name, mut=None, jh=True):
     """-> (fj sources, the expected output)"""
     w = _world()
     n = w.layout.nmon
-    script = _script()
+    script = _script(jh)
     body = ["stl.startup_and_init_all"]
     for x16, y16, ang, seen, jh in script:
         body += ["hex.set 8, viewx, %d" % x16, "hex.set 8, viewy, %d" % y16,
@@ -251,8 +255,8 @@ def _build(tmp_path, name, mut=None):
     return srcs, _expected(script)
 
 
-def _run(tmp_path, name, mut=None) -> bool:
-    srcs, want = _build(tmp_path, name, mut)
+def _run(tmp_path, name, mut=None, jh=True) -> bool:
+    srcs, want = _build(tmp_path, name, mut, jh)
     return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
                                            should_raise_assertion_error=False)
 
@@ -298,4 +302,36 @@ def test_the_decide_tic_follows_the_model(tmp_path):
 
 @pytest.mark.parametrize("mut", ["noroll", "nolos", "nojust", "nodraws", "nojhclear", "nofall"])
 def test_control_a_broken_decision_is_caught(tmp_path, mut):
-    assert not _run(tmp_path, "mdecide_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut
+    # `noroll` runs the script without justhit pokes (`_script`): the one that reaches a roll that says no
+    assert not _run(tmp_path, "mdecide_" + mut, mut=mut, jh=(mut != "noroll")), \
+        "%s passed: the comparison is vacuous" % mut
+
+
+def test_the_noroll_script_reaches_a_roll_that_says_no(monkeypatch):
+    """the `noroll` control's script (no justhit pokes) must reach the missile roll and have it say NO at least once --
+    else a roll forced to yes moves nothing and the control is vacuous (it was, on #118's CI, under the pokes)"""
+    rolls = []
+    base = World._check_missile_range
+
+    def counting(self, m):
+        drawn = []
+        rand = self._rand
+
+        def r2(mm):
+            v = rand(mm)
+            drawn.append(v)
+            return v
+        self._rand = r2
+        try:
+            res = base(self, m)
+        finally:
+            del self._rand
+        if drawn:
+            rolls.append(res)
+        return res
+    monkeypatch.setattr(World, "_check_missile_range", counting)
+    _script(jh=False)
+    assert False in rolls, "the roll never said no over %d rolls" % len(rolls)
+    rolls.clear()
+    _script()
+    print("with the pokes: %d rolls, %d no" % (len(rolls), rolls.count(False)))

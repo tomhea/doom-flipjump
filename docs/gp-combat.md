@@ -5,6 +5,9 @@
 phases, dont stop until 5 is merged". Kill criteria and budgets are declared per rung in
 `docs/gp-ledger.md` before each build.
 
+**SHIPPED 2026-10-04 as blocked47** (sha256 `9e4ab7d92ff9649d`), ONE build of P4.0, P4.1, P4.2a and P4.2b; where the
+build differs from the design below, section 7 says so (`docs/gp-ledger.md`, "P4 united: the row and the verdicts").
+
 ---
 
 ## 0. The decisions taken (coordinator, under the owner's 2026-09-30 "be autonomous" rule)
@@ -104,3 +107,25 @@ The model is `combat.damage_monster` / `_kill_monster` behind `_line_attack`'s r
   `tests/host/test_damage_tables.py` (`dmrnd` against the slow formulas over all 256 states, with controls), the
   decide harness with justhit pokes and a dying monster (controls: justhit never cleared, an A_Fall that clears
   nothing), and the chase harness with a corpse in the way (control: the thing test on `mon_active`).
+
+## 7. As built (blocked47, 2026-10-04; `docs/ship-evidence/blocked47_*`)
+
+- **Rungs (C1, section 5)**: not three builds but ONE, carrying P4.0, P4.1, P4.2a and P4.2b (the noise was ready, so
+  it joined). No binary of any single rung exists, so the ledger's per-rung v5 comparisons could not be made apart.
+- **Model modes (section 1)**: `PLAYER_MODES = ("walk", "fire", "shoot", "hit", "full")` -- "shoot" (P4.2a: the shot
+  resolves through the aim window and hurts; no noise) was added between "fire" and "hit", and "hit" is "shoot" plus
+  the noise alert (P4.2b). The shipped `wall_renderer.PLAYER_MODE` is "hit". The aim window is P4.2a's, not P4.1's
+  ("fire" never reads a shot's outcome; section 2's "moved to P4.1" is superseded).
+- **The screen (section 2)**: `init_screen` and the boot palette run ONCE, in the entry part (7dd242a): in main they
+  ran every frame, because the M1 reset re-enters at `__hot_end`, and would have blanked every bar column the tail
+  does not redraw. The bar's card reads `pcard` (DOOM's rule; the p2a gate's oracle now does too, f045865). The
+  standalone restore set carries the game screen's persisted cells through `build.game_screen_persisted_decls`
+  (3bfe5ed).
+- **B0 (section 4)**: it no longer delivers only five keys -- from ae16682 it delivers fire and the number keys (v5
+  fires on 36 frames), and it steps the weapon BEFORE the monsters, the binary's order (5fe7b81).
+- **Size (C2)**: 34.25% of 2^27 (45,974,192 words, +86,672 on blocked46), not the 35.2-36.7% ESTIMATE; the target is
+  40%.
+- **Cost**: v5 15,851,173 (+291,097 on blocked46), gamespeed 15,403,663 (+160,368). P4.0's premise -- the 84-row view
+  cutting v5 by 0.3-1.2M -- did not show in the net: the plane bands fell (-32,499 on gamespeed's profile) and the
+  render walk as a whole rose (+93,814). P4.0's kill criterion 4 is recorded as EXCEEDED in the ledger.
+- **C5 (no v6)**: held -- B0 ran on v5 and was state- and pixel-exact on every frame of its 11 runs.

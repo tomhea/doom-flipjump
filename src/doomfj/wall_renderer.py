@@ -2671,6 +2671,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # lands on it), and the title+icon cost 8,440 ops and 0.57 ms each time. They moved
     # to the ENTRY part, ahead of the `;__hot_end` jump, so they run once at boot.
     prelude = ["present.set_palette palette"]
+    # M7 P4.0: the GAME SCREEN tier (the bar) sends its init and boot palette from the ENTRY part, once:
+    # `init_screen` ZEROES the device's palette AND pixels (ScreenIO._init_screen), and the M1 reset re-enters at
+    # `__hot_end`, so per frame it would blank every bar column hudcode's tail does not redraw (it redraws only the
+    # changed ones: the device keeps the rest)
+    _boot_screen = (["present.init_screen" if standalone else "present.init_screen_stream 0"] + prelude
+                    if _hud else None)
     postlude_palette = []
     # ── PARTITIONED EMISSION ────────────────────────────────────────────────────────────
     # The emitted program is built as ORDERED, NAMED PARTS instead of one 107M-char blob, so
@@ -2718,6 +2724,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # BOOT-ONLY, and this time really: everything below `;__hot_end` is re-entered by the M1
         # reset every frame, everything above it runs once. The window title and icon belong above.
         *_chrome_calls,
+        # M7 P4.0: the game-screen tier's screen init and its boot palette run ONCE, here (`_boot_screen`) --
+        # `init_screen` zeroes the device's palette and pixels (ScreenIO._init_screen), so re-sent every frame it
+        # would blank the bar columns the tail does not redraw
+        *(_boot_screen if _boot_screen else []),
         *hotdata[:1],                                  # the `;__hot_end` jump over the tables
       ]),
       ("tables", [
@@ -2727,9 +2737,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # M5: standalone is run by the plain `fj` CLI, whose stock InMemoryScreen wants the
           # 8-byte init. `flush_mode` governs only the 0x07 pixel-stream mode, which the 0x0B
           # frames this tier presents do not use, so dropping it costs the picture nothing.
-          "present.init_screen" if standalone else
-          "present.init_screen_stream 0",
-          *prelude,
+          *([] if _boot_screen else
+            ["present.init_screen" if standalone else "present.init_screen_stream 0"]),
+          *([] if _boot_screen else prelude),
           *pass1, *pass2, *plane_pass,
           # M3: both frame producers fall into ONE tail. The label goes BEFORE the tail's
           # `stl.output_char 0xFF`, so the line preceding `stl.loop` is still that 0xFF and

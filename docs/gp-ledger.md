@@ -1127,3 +1127,49 @@ Nothing is applied: no target, no damage, no noise (P4.2). The aim window moved 
    `fl_ret` are scratch).
 
 **Row**: (filled after the build)
+
+
+## P4.2a the hit (class F) -- declared 2026-10-04, before the build; ONE build with P4.0 and P4.1 (gp-combat section 5)
+
+**What**: the model's "shoot" mode (`World(player="shoot")`, `wall_renderer.PLAYER_MODE`):
+- **The aim window** (`doomfj.aimcode`; the oracle: `render_wall_frame(aim_out=)`). The runtime monsters'
+  projections record, per column 72..88, the nearest shootable monster whose r_eff box covers the column and no
+  nearer solid wall hides; `aim_sid` persists for the next frame's weapon.
+- **The shots** (`weaponcode`, shoot=True): each shot draws its outcome from the player's stream through the folded
+  table `wpo`, reads `aim_sid` at its column and hands the target to `dm_go`.
+- **The damage** (`doomfj.damagecode`): copy stubs into ONE `dm_leaf`, which does health, the bullet or melee reach,
+  the pain roll on the monster's stream, the death state with its tics roll, justhit and the threshold / target wake.
+  A_Fall clears `mon_solid`; the thing test and the door contact read `mon_solid` / `mon_shootable`.
+
+No noise (P4.2b), effects (P5), barrels, drops or berserk (P6). The gates step the weapon at the pre-move pose and
+write each picture's window back (`MonsterPhase.set_aim`); B0 delivers fire and the number keys (v5 fires on 36
+frames).
+
+**Budget** (ESTIMATES; their basis):
+- v5 binding: **+0.02 .. +0.1M**. The window costs ~0.05M a fight frame (gp-aim-window 3), now on monsters only. A
+  shot costs ~0.3K on a miss and ~3K on a hit; a kill also moves the monsters' own costs, so this is approximate.
+- size: **<= +0.5M words**. Three D4 tables (`aimr`, `wpo`, `dmrnd`), 53 copy stubs, the leaves and 17 column
+  blocks, and placement.
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. Host:
+   - `tests/host/test_player_modes.py`: shoot == full on every monster cell and the player's stream, for four types,
+     with a painless control.
+   - `test_aim_window_oracle.py` and `test_damage_tables.py`.
+   - `test_gp_shot_table.py`.
+2. fj, the real emitted text against the model, with every mutant caught:
+   - `test_aim_record_fj.py`: 400 records; mutants r+1, a tie overwriting, drawn ignored, no range test.
+   - `test_player_shot_fj.py`: 4 scripts x 1500 tics; mutants column+1, the accurate shot's column, 6 pellets, the
+     saw's melee flag.
+   - `test_monster_damage_fj.py`: 320 shots, 8 mutants.
+   - the decide and chase harnesses with justhit, A_Fall and a corpse not blocking.
+3. Gates, byte- and state-exact with `aim_sid` and the damage cells in the state check:
+   - m2_std_gate, m3_gate and p2a_gate;
+   - B0 on v5, firing, exact on every frame;
+   - deg_gate unchanged (the visual tier has no aim).
+4. v5 binding <= 22M (CAP-22). The rise is recorded against blocked46, the P4.0 + P4.1 + P4.2a sum. size <= 40%;
+   msframe recorded (D8).
+5. pinreport 20 of 20 with `heat_blocked27_p42`; the restore sets re-keyed (the weapon, window, bar and damage
+   cells persist).
+
+**Row**: (filled after the build)

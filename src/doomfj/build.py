@@ -116,6 +116,26 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
             + (THING_PERSIST if moving_things else ())
             + (MONSTER_PERSIST if (standalone and moving_things) else ())
             + HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST)   # M7 P4.0 / P4.1 / P4.2a: the game tier's
+
+
+def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
+    """M7 P4: the declarations of HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST, taken from the emitters' own decl lists
+    (widths matter to a restore set, values do not) -- the ONE list scratchpad/m5_setfile.py adds to the standalone set
+    and test_restore_set_shipped expects there (the hosted set has no game screen). Refuses a persist name no emitter
+    declares."""
+    from doomfj import aimcode, hud, hudcode
+    from doomfj import weaponcode as WC
+    from doomfj.selfreset import decl_words
+    names = HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST
+    cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START)))
+            + WC.weapon_decls(WC.level_start(map_wad, mapname), WC.weapon_states(), WC.overlay_frames())
+            + WC.weapon_const_decls() + aimcode.decls())
+    by = {}
+    for d in cand:
+        by.setdefault(decl_words(d)[0], d)
+    missing = [n for n in names if n not in by]
+    assert not missing, "persist names no game-screen emitter declares: %r" % missing
+    return [by[n] for n in names]
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 

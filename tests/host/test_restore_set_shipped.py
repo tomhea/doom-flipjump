@@ -184,11 +184,13 @@ def test_the_standalone_set_drops_only_the_wire_magic():
     _nd = len(door_states(_w.sectors("E1M1"), _w.linedefs("E1M1"), _w.sidedefs("E1M1")))
     from doomfj.movercode import mover_decls
     from doomfj.movers import lift_states
+    from doomfj.build import game_screen_persisted_decls
     _nl = len(lift_states(_w.sectors("E1M1"), _w.linedefs("E1M1"), _w.sidedefs("E1M1")))
     expected = {name for name, _ in
                 (decl_words(d) for d in list(STANDALONE_SCRATCH_DECLS) + door_decls(_nd)
                  + mover_decls(_nl)                 # M7 P2b: the movers' cells
-                 + _monster_decls())}                # M7 P3.1: the monsters' cells
+                 + _monster_decls()                 # M7 P3.1: the monsters' cells
+                 + game_screen_persisted_decls(_w))}   # M7 P4: the bar, the weapon, the aim window
     assert standalone - hosted == expected, (
         "the standalone set adds %s, which is not STANDALONE_SCRATCH_DECLS + the door state"
         % sorted(standalone - hosted))

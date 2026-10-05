@@ -11,7 +11,7 @@ carries them prices the pure placement tax.
     state: the value (nibbles 0-1: A_Chase's missile roll compares it), `> 200` (nibble 2 bit 0) and `& 1`
     (nibble 2 bit 1) for P_NewChaseDir, `& 15` (nibble 3) for the walk's movecount.
 """
-from typing import Dict, List, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 from doomfj import gamedata as gd
 from doomfj import rng as R
@@ -223,7 +223,8 @@ def _thing_key(t):
 
 
 def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_near: bool, boot_skill: int,
-              skills, cache: dict, mode: str = "idle", depth_order=None, player: str = "walk") -> dict:
+              skills, cache: dict, mode: str = "idle", depth_order=None, player: str = "walk",
+              static_bank=None) -> dict:
     """everything P3.1 adds to the game tier, from the model's own sources:
       * `view_rows`: one thing row per distinct monster VIEW (lump, mirrored) -- `things.thing_rows`' layout from the
         view's art, dw's bit 7 set for a mirrored view -- appended after the runtime things' own rows;
@@ -245,7 +246,17 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     hurtcode.hurt_on, and vice versa -- asserted). It adds the MOBILES (docs/gp-p5-interface.md): `nmob` runtime
     things after the WAD's (monsters.mobile_rows' rule), one view row per mobile lump after the monsters' views
     (`mobile_view_rows`), their row-select stubs (`mobile_select_lines`) and `mobview`; the pools themselves
-    (`proj`: projcode.proj_parts at this `nt`); damagecode's blood (`fx`); and `world`, the World the parts came from."""
+    (`proj`: projcode.proj_parts at this `nt`); damagecode's blood (`fx`); and `world`, the World the parts came from.
+
+    M7 P6 (docs/gp-p67-interface.md 4.3 / 5; the player mode "full", `barrelcode.barrels_on`): the PUFFS join the
+    mobiles' views (projcode `puffs`); the DROPS are `ndrop` more runtime things after the mobiles (nt + nmob + k,
+    dropper k), each selecting its item's view row (`drop_view_rows`, from the STATIC bank `static_bank` =
+    (spr_base, spr_ldbase, spr_dw): the item a map thing of that type is drawn with), never seen, never aimed; the
+    BARRELS get one view row per state lump (`barrel_view_rows`, the anim bank) and `barview` (state -> row), which
+    a RUNTIME barrel's stub looks up -- with its aim id 1 + nmon + b and radius class aimcode.RC_BARREL while it
+    stands (S_BAR1 / S_BAR2: a live barrel's health is > 0 exactly there); `barrel` is barrelcode.barrel_parts,
+    `bar_rt` {barrel: runtime thing}, `bar_view` {state: row} and `bar_rows` the rows (wall_renderer bakes the
+    other barrels' views from them)."""
     from doomfj.monsters import view_of
     from doomfj.things import THING_ROW_BYTES
     from doomfj.wall_renderer import (DEG_MINH2_MON, MIN_SPRITE_H_MONSTER, anim_frames, anim_patches)
@@ -309,15 +320,40 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                               "\"full\" -- mode %r, player %r" % (nmob, mode, player))
     assert not bleed or (damage and full), "M7 P5: the blood (fx_on) rides the damage and the pools"
     mob_first = nt + len(rows)
+    # M7 P6: barrels, drops and puffs (the player mode "full")
+    from doomfj.barrelcode import barrels_on
+    loot = bool(nmob) and barrels_on(player)
     mob_rows, mob_view = (mobile_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
-                                           first=mob_first) if nmob else ([], {}))
+                                           first=mob_first, puffs=loot) if nmob else ([], {}))
     rows = rows + mob_rows
+    drop_row, bar_view, bar_rows = {}, {}, []
+    if loot:
+        assert static_bank is not None, "M7 P6: the drops draw from the static bank (spr_base, spr_ldbase, spr_dw)"
+        d_rows, drop_row = drop_view_rows(rm, sprite_wad, static_bank, rt_things, spr_near=spr_near, cache=cache,
+                                          first=nt + len(rows))
+        rows = rows + d_rows
+        bar_rows, bar_view = barrel_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
+                                              first=nt + len(rows))
+        rows = rows + bar_rows
     nrows = nt + len(rows)
     rn = max(1, ((nrows - 1).bit_length() + 3) // 4)
     w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los")
     nmon, schema = w.layout.nmon, w.schema
     if nmon == 0 or not rows:
         return None                      # a map without monsters animates nothing
+    if loot:
+        # M7 P6 (the GIB, damagecode `full`): every xdeath state a slot can enter has its views -- the state table
+        # (monster_states follows every *state field) and a view row for each rotation (mview)
+        for m in range(nmon):
+            s_ = w.mon_info[m].xdeathstate
+            while s_ != gd.S_NULL:
+                st_ = gd.STATES[s_]
+                g_ = groups.index((st_.sprite, st_.frame & gd.FF_FRAMEMASK))
+                assert state_table_values()[gd.STATE_INDEX[s_]] and all(mview[(g_ << 4) | r_] for r_ in range(8)), (
+                    "M7 P6: the gib state %s has no view row" % s_)
+                if st_.tics < 0:
+                    break
+                s_ = st_.next
     slot_of = {_thing_key(t): m for m, t in enumerate(w.mon_things)}
     rt_slot = [slot_of.get(_thing_key(t)) for t in rt_things]
     assert sorted(m for m in rt_slot if m is not None) == list(range(nmon)), "every monster slot is a runtime thing"
@@ -356,7 +392,11 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                           if chase else [])
                        + (noise_restart_lines(w) if hear else []))           # M7 P4.2b: no node has heard a shot
     # the row select -- M7 P5: over the runtime things AND the mobiles (things nt .. nt + nmob - 1)
-    ntm = nt + nmob
+    # M7 P6: and the drops (nt + nmob .. + ndrop - 1)
+    from doomfj.barrelcode import droppers
+    drop_slots = droppers(w) if loot else []
+    ndrop = len(drop_slots)
+    ntm = nt + nmob + ndrop
     from doomfj.things import LIST_MAX_THINGS
     assert ntm <= LIST_MAX_THINGS and ntm <= 256, (nt, nmob, "the lists and the two-level select hold 254 things")
     sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
@@ -368,6 +408,12 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     # the monster is shootable (a corpse is not: damage clears it), 0 for any other thing -- and its radius class
     from doomfj.world import player_resolves
     shoot = player_resolves(player)
+    # M7 P6: the runtime barrels (a barrel the bake leaves to the leaf lists): their barrel index
+    bar_rt = {}
+    if loot:
+        bkey = {_thing_key(t): b for b, t in enumerate(w.barrel_things)}
+        bar_rt = {bkey[_thing_key(t)]: i for i, t in enumerate(rt_things) if _thing_key(t) in bkey}
+    rt_bar = {i: b for b, i in bar_rt.items()}
     for t, m in enumerate(rt_slot):
         sel.append("  thsel_s%d:" % t)
         if wake:
@@ -389,8 +435,11 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     "    hex.mov 2, ts_idx + 1*dw, ts_row + 4*dw",
                     "    hex.zero w/4, sp_ti",
                     "    mview.lookup sp_ti, ts_idx"]
+        if t in rt_bar:                      # M7 P6: a runtime barrel -- its state's view; aimed while it stands
+            sel += barrel_select_lines(t, rt_bar[t], nmon=nmon, shoot=shoot)
         sel.append("    stl.fret thsel_ret")
     sel += mobile_select_lines(nt, nmob, wake=wake, shoot=shoot)
+    sel += drop_select_lines(nt + nmob, [drop_row[w.dropper[m]] for m in drop_slots], wake=wake, shoot=shoot)
     sel += ["  thsel_none:", "    stl.fret thsel_ret"]
     extra = {}
     if wake:
@@ -445,18 +494,27 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 extra["decls_wake"] += (p32c_decls(schema, nmon, {f: boot[f] for f in P32C_FIELDS})
                                         + context_decls() + SL_DECLS)
                 extra["decide_lines"] = near_los_lines(w)
+                barrel = None
+                if loot:                               # M7 P6: the barrels, the blasts, the drops (barrelcode)
+                    from doomfj.barrelcode import barrel_parts
+                    barrel = barrel_parts(w, nt=nt, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
+                                          skills=skills, barrel_rt=bar_rt)
+                    assert barrel["drop_first"] == nt + nmob and barrel["ndrop"] == ndrop
+                    extra["barrel"] = barrel
                 if damage:                             # M7 P4.2a: the monsters' damage (damagecode)
                     from doomfj.damagecode import damage_parts
                     # M7 P5: a hit in reach spawns the BLOOD (damagecode.fx_on: dm_leaf calls projcode's fx_spawn)
+                    # M7 P6: the barrels' ids, the blast, the gib and the drops (`full`)
                     dmp = damage_parts(w, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
-                                       fx=bleed)
+                                       fx=bleed, full=loot, nbar=barrel["nbar"] if barrel else 0,
+                                       drops=barrel["drops"] if barrel else None)
                     extra["decls_wake"] += dmp["decls"]
                     extra["decide_lines"] += dmp["lines"]
                     extra["tables"] += dmp["tables"]
                     extra["justhit"] = True
                 if full:                               # M7 P5: the fireball and blood pools (doomfj.projcode)
                     from doomfj.projcode import proj_parts
-                    extra["proj"] = proj_parts(w, nt=nt)
+                    extra["proj"] = proj_parts(w, nt=nt, puffs=loot)
                     extra["proj"]["nt"] = nt
             # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
             # render setting says so (depth_walk, above) -- the walk's registers (sim.thing_pass_depth)
@@ -490,11 +548,15 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         "nmob": nmob, "mob_view": mob_view, "mob_first": mob_first, "world": w,
         **({"mobview": generate_dispatch_table_fj("mobview", [mob_view.get(i, 0) for i in range(max(mob_view) + 1)],
                                                   index_nibbles=2, result_nibbles=rn)} if nmob else {}),
+        # M7 P6: the drops' runtime things (after the mobiles), the barrels' views and the runtime barrels
+        "ndrop": ndrop, "drop_row": drop_row, "bar_view": bar_view, "bar_rows": bar_rows, "bar_rt": bar_rt,
+        **({"barview": generate_dispatch_table_fj("barview", [bar_view.get(i, 0) for i in range(max(bar_view) + 1)],
+                                                  index_nibbles=2, result_nibbles=rn)} if bar_view else {}),
     }
 
 
 # ---- M7 P5: the MOBILES' rows (docs/gp-p5-interface.md, THE MOBILE ROWS) ---------------------------------------
-def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict, first: int):
+def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict, first: int, puffs: bool = False):
     """-> (rows, {state index: row}): one thing row per distinct mobile LUMP (`monsters.mobile_lump` of every pool
     state, projcode.pool_states' order), `things.thing_rows`' layout -- how the oracle draws a mobile
     (reference_model.render_wall_frame(mobiles=)), field by field:
@@ -505,12 +567,13 @@ def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
         (sp_tzmax, and sp_tzmax2 which the graduated acceptance switches to) are the base one, so the raise binds
         nothing, as the oracle's `not mob` keeps it;
       * the near (LD) region 2*dw on, as a monster view's.
-    `first`: the row index of the first one (after the runtime things and the monsters' views)."""
+    `first`: the row index of the first one (after the runtime things and the monsters' views). M7 P6 (`puffs`): the
+    puff's states too (projcode.pool_states(puffs=True)), PUFFA0 .. PUFFD0 at MISSILE_Z as blood."""
     from doomfj.monsters import mobile_lump
     from doomfj.projcode import pool_states
     from doomfj.reference_model import MIN_SPRITE_H, MISSILE_Z
     rows, lump_row, by_state = [], {}, {}
-    for s in pool_states():
+    for s in pool_states(puffs):
         lump = mobile_lump(s)
         if lump not in lump_row:
             assert len(lump) == 6 and lump[5] == "0", (s, lump, "a mobile is drawn from a single-rotation lump")
@@ -541,6 +604,98 @@ def mobile_select_lines(nt: int, nmob: int, *, wake: bool, shoot: bool) -> list:
     return out + (["  thsel_mob:"] + (["    hex.zero w/4, sp_sa"] if wake else [])
                   + (["    hex.zero 2, sp_sid"] if shoot else [])
                   + ["    hex.zero w/4, sp_ti", "    mobview.lookup sp_ti, ts_mob", "    stl.fret thsel_ret"])
+
+
+# ---- M7 P6: the DROPS' and the BARRELS' rows (docs/gp-p67-interface.md 5) -------------------------------------
+def drop_types(rt_things) -> List[int]:
+    """the item types the map's monsters drop (combat.DROP_ITEM of gamedata.DROPS), ascending"""
+    from doomfj.combat import DROP_ITEM
+    names = {gd.MOBJINFO[n].doomednum: n for n in gd.MOBJINFO}
+    out = set()
+    for t in rt_things:
+        name = names.get(t.type)
+        if name and name in gd.DROPS and gd.DROPS[name] in DROP_ITEM:
+            out.add(DROP_ITEM[gd.DROPS[name]])
+    return sorted(out)
+
+
+def drop_view_rows(rm, sprite_wad, static_bank, rt_things, *, spr_near: bool, cache: dict, first: int):
+    """-> (rows, {item type: row}): one thing row per dropped item type -- the item a MAP thing of the type is drawn
+    with (its static-bank kind: `things.thing_rows`' fields), except as the oracle draws a drop
+    (reference_model.render_wall_frame(mobiles=) with z 0): standing ON the floor (the art's top + 0), the scenery
+    class at the BASE minimum height in both depth bounds (P5's mobile rule: never the raised bar)"""
+    from doomfj.reference_model import MIN_SPRITE_H
+    spr_base, spr_ldbase, spr_dw = static_bank
+    rows, row_of = [], {}
+    for ty in drop_types(rt_things):
+        art = rm.sprite_art(sprite_wad, ty, cache)
+        assert art is not None and ty in spr_base, (ty, "a dropped item the static bank does not hold")
+        assert spr_dw[ty] == art[2] and spr_dw[ty] < 0x80, (ty, spr_dw[ty], art[2])
+        tzmin = rm.sprite_tz_min_size(art[4], MIN_SPRITE_H) & 0xFFFFFFFF
+        rows.append((art[5], art[3], art[4], art[6], tzmin, tzmin, spr_base[ty],
+                     spr_ldbase[ty] if spr_near else 0, 0, spr_dw[ty]))
+        row_of[ty] = first + len(rows) - 1
+    return rows, row_of
+
+
+def barrel_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict, first: int):
+    """-> (rows, {state index: row}): one thing row per barrel state's lump (its frame at rotation 0: BAR1A0, BAR1B0,
+    BEXPA0 .. BEXPE0, `monsters.mobile_lump`'s rule), from the anim bank as a mobile's -- but a barrel stays a
+    SCENERY thing with the GRADUATED bounds a map barrel has today (`things.thing_rows`: MIN_SPRITE_H, and
+    DEG_MINH2_SCENERY for the raised bar), standing on its floor (the art's top + 0)"""
+    from doomfj.barrelcode import barrel_states
+    from doomfj.monsters import mobile_lump
+    from doomfj.reference_model import DEG_MINH2_SCENERY, MIN_SPRITE_H
+    rows, lump_row, by_state = [], {}, {}
+    for s in barrel_states():
+        lump = mobile_lump(s)
+        if lump not in lump_row:
+            base, dw, mir = anim_index[(lump[:4], lump[4], 0)]
+            art = rm.art_of_lump(sprite_wad, lump, cache)
+            assert not mir and dw == art[2] and dw < 0x80, (lump, mir, dw, art[2])
+            rows.append((art[5], art[3], art[4], art[6],
+                         rm.sprite_tz_min_size(art[4], MIN_SPRITE_H) & 0xFFFFFFFF,
+                         rm.sprite_tz_min_size(art[4], DEG_MINH2_SCENERY) & 0xFFFFFFFF,
+                         base, base + 2 * dw if spr_near else 0, 0, dw))
+            lump_row[lump] = first + len(rows) - 1
+        by_state[gd.STATE_INDEX[s]] = lump_row[lump]
+    return rows, by_state
+
+
+def barrel_select_lines(t: int, b: int, *, nmon: int, shoot: bool) -> list:
+    """runtime thing t, barrel b: the row of its state (`barview` on bar_st); while it STANDS (S_BAR1 / S_BAR2 --
+    `combat.shootable_targets`' state != 0 and health > 0: the killing blow takes S_BEXP) its aim id 1 + nmon + b and
+    the barrel's radius class. A removed barrel is in no list, so its stub never runs at state 0."""
+    from doomfj.aimcode import RC_BARREL
+    from doomfj.barrelcode import barrel_states
+    stand = [gd.STATE_INDEX[s] for s in barrel_states()[:2]]
+    assert [gd.STATES[s].sprite for s in barrel_states()[:2]] == ["BAR1", "BAR1"] and stand[1] == stand[0] + 1
+    out = []
+    if shoot:
+        L = "thsel_b%d" % t
+        out += ["    hex.set 2, ts_mob, %d" % stand[0],
+                "    hex.cmp 2, bar_st + %d*dw, ts_mob, %s_v, %s_a, %s_b" % (2 * b, L, L, L),
+                "  %s_b:" % L,
+                "    hex.inc 2, ts_mob",
+                "    hex.cmp 2, bar_st + %d*dw, ts_mob, %s_v, %s_a, %s_v" % (2 * b, L, L, L),
+                "  %s_a:" % L,
+                "    hex.set 2, sp_sid, %d" % (1 + nmon + b),
+                "    hex.set 1, sp_rc, %d" % RC_BARREL,
+                "  %s_v:" % L]
+    return out + ["    hex.zero w/4, sp_ti", "    barview.lookup sp_ti, bar_st + %d*dw" % (2 * b)]
+
+
+def drop_select_lines(first: int, rows: Sequence[int], *, wake: bool, shoot: bool) -> list:
+    """the row select's stubs for the drops: thing first + k selects its item's view row (a constant), no seen flag,
+    aim id 0 -- one shared tail"""
+    if not rows:
+        return []
+    out = []
+    for k, row in enumerate(rows):
+        out += ["  thsel_s%d:" % (first + k), "    hex.zero w/4, sp_ti", "    hex.set w/4, sp_ti, %d" % row,
+                "    ;thsel_drop"]
+    return out + (["  thsel_drop:"] + (["    hex.zero w/4, sp_sa"] if wake else [])
+                  + (["    hex.zero 2, sp_sid"] if shoot else []) + ["    stl.fret thsel_ret"])
 
 
 # ---- P3.2a: the WAKE tic (docs/gp-monsters.md 8.3) -------------------------------------------------------------

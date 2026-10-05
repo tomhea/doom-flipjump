@@ -39,6 +39,18 @@ What the emit-time asserts hold (each a model rule the code does NOT implement b
     health;
   * a monster whose A_Fall cleared mon_solid never moves again (no A_Chase after a death state), so the slot code
     may clear and SET its own mon_solid around its move.
+
+M7 P6 (`full`, the player mode "full": docs/gp-p67-interface.md 4.3; doomfj.barrelcode owns the other half):
+  * THE ID SPACE grows to 1 + nmon + nbarrel: id 1 + nmon + b jumps to barrelcode's `dmb<b>` (the reach, the PUFF,
+    damage_barrel), which returns through `stl.fret dm_ret` like a slot stub;
+  * dm_melee 2 = BLAST (combat._radius_attack -> damage_monster(source "player")): no reach test and no blood -- the
+    leaf starts at the target's checks. barrelcode's blast calls a slot's stub `dmg<m>` directly;
+  * THE GIB (combat._kill_monster): health < -spawnhealth and an xdeath state -> the xdeath state, with the same one
+    tics draw. The profile then carries spawnhealth and the xdeath state (`profile_key(gib=True)`); the "no gib"
+    assert gives way to the gib branch's own (every xdeath state >= 4 tics, A_Fall in its chain, DM_MAX_FULL);
+  * THE DROP: a kill on a DROPPER slot (World.dropper) calls barrelcode's `drop_link<k>` from the slot's stub, after
+    the cells are copied back (`dm_kd`, set by the kill, zeroed at the leaf's start);
+  * the blood's call sets `fxs_kind` 0 (projcode's fx_spawn spawns a puff too in this mode).
 """
 from typing import Dict, List, Sequence, Tuple
 
@@ -56,6 +68,8 @@ DAMAGE_PLAYER_MODES = tuple(m for m in _PLAYER_MODES if _player_resolves(m))
 # M7 P5: the player modes whose hits spawn BLOOD (combat._line_attack's _spawn_fx_at_target): dm_leaf calls fx_spawn
 FX_PLAYER_MODES = tuple(m for m in _PLAYER_MODES if _player_bleeds(m))
 DM_MAX = 20                          # the largest damage a shot deals in P4.2a (the fist and the saw: 20)
+DM_MAX_FULL = 200                    # M7 P6: the berserk fist (A_Punch x10); a barrel's blast deals <= 128
+BLAST = 2                            # M7 P6: dm_melee's value for a barrel's blast (no reach, no blood)
 TICS_FOREVER = 15
 
 
@@ -68,15 +82,17 @@ def fx_on(player_mode: str) -> bool:
 
 
 # ---- the profiles: what P_DamageMobj reads from a monster's mobjinfo -----------------------------------------------
-def profile_key(info) -> tuple:
-    return (info.painchance, info.painstate, info.deathstate, info.spawnstate, info.seestate)
+def profile_key(info, gib: bool = False) -> tuple:
+    """M7 P6 (`gib`): the gib's fields too -- spawnhealth and the xdeath state (S_NULL: none)"""
+    return ((info.painchance, info.painstate, info.deathstate, info.spawnstate, info.seestate)
+            + ((info.spawnhealth, info.xdeathstate) if gib else ()))
 
 
-def profiles(w) -> Tuple[List[tuple], List[int]]:
+def profiles(w, gib: bool = False) -> Tuple[List[tuple], List[int]]:
     """(the distinct damage profiles of the world's monster slots, in first-slot order; each slot's profile index)"""
     keys, of = [], []
     for m in range(w.layout.nmon):
-        k = profile_key(w.mon_info[m])
+        k = profile_key(w.mon_info[m], gib)
         if k not in keys:
             keys.append(k)
         of.append(keys.index(k))
@@ -109,17 +125,45 @@ def _tics(name: str) -> int:
     return TICS_FOREVER if t < 0 else t
 
 
-def check_model_rules(w, *, max_dmg: int = DM_MAX) -> None:
-    """the emit-time asserts of the module docstring, over the world's monster types"""
+def _death_chain_ok(start: str) -> None:
+    """a death (or xdeath) sequence: A_Fall clears MF_SOLID, and nothing after it moves the monster"""
     from doomfj.monstercode import MON_ACTIONS, SOUND_ACTIONS
-    keys, _of = profiles(w)
+    s, acts, seen = start, [], set()
+    while s != gd.S_NULL and s not in seen:
+        seen.add(s)
+        acts.append(gd.STATES[s].action)
+        if gd.STATES[s].tics < 0:
+            break
+        s = gd.STATES[s].next
+    assert "A_Fall" in acts, (start, acts)
+    assert not set(acts) & {"A_Chase", "A_Look", "A_FaceTarget"}, (start, acts)
+    assert all(a is None or a in SOUND_ACTIONS or a in MON_ACTIONS for a in acts), acts
+
+
+def check_model_rules(w, *, max_dmg: int = DM_MAX, gib: bool = False) -> None:
+    """the emit-time asserts of the module docstring, over the world's monster types. M7 P6 (`gib`): the gib branch
+    exists, so instead of "no gib" its own rules hold -- every xdeath state lasts >= 4 tics (no clamp), is entered
+    without an action (A_XScream is a sound), and its chain reaches A_Fall; the health cell holds 1 - max_dmg"""
+    from doomfj.monstercode import SOUND_ACTIONS
+    keys, _of = profiles(w, gib)
     assert len(pain_classes(keys)) <= 4, "the pain bits fill one nibble"
+    assert max_dmg < 256, "dm_dmg is two nibbles"
     for m in range(w.layout.nmon):
         info = w.mon_info[m]
         assert info.flags & gd.MF_SHOOTABLE and info.flags & gd.MF_SOLID, (m, "every monster shootable and solid")
-        # gib: health < -spawnhealth after a hit on a live (health >= 1) monster needs damage > spawnhealth + 1
-        assert max_dmg <= info.spawnhealth + 1, (m, info.spawnhealth, "a gib path would be needed")
-    for pc, pain, death, spawn, see in keys:
+        if gib:
+            assert 1 - max_dmg >= -(1 << 11), "mon_health's 12 bits"
+            x = info.xdeathstate
+            if x != gd.S_NULL:
+                st = gd.STATES[x]
+                assert 4 <= st.tics < TICS_FOREVER and gd.STATE_INDEX[x] < 256, (x, st.tics)
+                assert st.action is None or st.action in SOUND_ACTIONS, (x, st.action)
+                _death_chain_ok(x)
+            assert info.spawnhealth < (1 << 11), info.spawnhealth
+        else:
+            # gib: health < -spawnhealth after a hit on a live (health >= 1) monster needs damage > spawnhealth + 1
+            assert max_dmg <= info.spawnhealth + 1, (m, info.spawnhealth, "a gib path would be needed")
+    for pc, pain, death, spawn, see, *_g in keys:
         assert 0 < pc <= 256
         for s, run in ((pain, True), (death, True), (see, False)):
             st = gd.STATES[s]
@@ -128,17 +172,7 @@ def check_model_rules(w, *, max_dmg: int = DM_MAX) -> None:
             assert gd.STATE_INDEX[s] < 256
         assert gd.STATES[death].tics >= 4, (death, "tics - (P_Random() & 3) could clamp at 1")
         assert gd.STATE_INDEX[spawn] < 256 and see != gd.S_NULL
-        # the death sequence: A_Fall clears MF_SOLID, and nothing after it moves the monster
-        s, acts, seen = death, [], set()
-        while s != gd.S_NULL and s not in seen:
-            seen.add(s)
-            acts.append(gd.STATES[s].action)
-            if gd.STATES[s].tics < 0:
-                break
-            s = gd.STATES[s].next
-        assert "A_Fall" in acts, (death, acts)
-        assert not set(acts) & {"A_Chase", "A_Look", "A_FaceTarget"}, (death, acts)
-        assert all(a is None or a in SOUND_ACTIONS or a in MON_ACTIONS for a in acts), acts
+        _death_chain_ok(death)
     assert 0 < gd.BASETHRESHOLD < 128, "mon_threshold is 7 bits"
 
 
@@ -147,6 +181,8 @@ DM_INTERFACE = ["dm_ret: hex.vec w/4"]           # the arguments are the caller'
 DM_WINDOW = ["dm_hp: hex.vec 3", "dm_sh: hex.vec 1", "dm_st: hex.vec 2", "dm_ti: hex.vec 1", "dm_rng: hex.vec 2",
              "dm_th: hex.vec 2", "dm_re: hex.vec 1", "dm_tg: hex.vec 1", "dm_jh: hex.vec 1",
              "dm_x: hex.vec 4", "dm_y: hex.vec 4", "dm_type: hex.vec 1"]
+# M7 P6 (`full`): the kill flag the drop reads, the gib's bound and state
+DM_FULL_SCRATCH = ["dm_kd: hex.vec 1", "dm_nsh: hex.vec 3", "dm_xst: hex.vec 2", "dm_xti: hex.vec 1"]
 DM_SCRATCH = ["dm_rr: hex.vec 2", "dm_pn: hex.vec 1", "dm_r4: hex.vec 4",
               "dm_dst: hex.vec 2", "dm_dti: hex.vec 1", "dm_pst: hex.vec 2", "dm_pti: hex.vec 1",
               "dm_sp: hex.vec 2", "dm_se: hex.vec 2", "dm_seti: hex.vec 1", "dm_lret: hex.vec w/4",
@@ -173,17 +209,23 @@ WINDOW = (("dm_hp", "mon_health"), ("dm_sh", "mon_shootable"), ("dm_st", "mon_st
           ("dm_jh", "mon_justhit"))
 
 
-def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int]) -> List[str]:
-    """`dm_go` and the per-slot stubs `dmg<m>`: copy the slot's cells in, `dm_leaf`, copy them back"""
+def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int], *, nbar: int = 0,
+             drops: Dict[int, int] = None) -> List[str]:
+    """`dm_go` and the per-slot stubs `dmg<m>`: copy the slot's cells in, `dm_leaf`, copy them back. M7 P6: ids
+    n + 1 .. n + nbar jump to barrelcode's `dmb<b>`; `drops` {slot: dropper k}: a kill on slot m calls
+    `drop_link<k>` after the copy-back"""
     from doomfj.monstercode import cell_nibbles
     n = len(slot_rt)
-    assert len(slot_profile) == n and 0 < n < 255, n
-    nh = n // 16 + 1                                   # ids 1 .. n (id 0: nothing)
+    nid = n + nbar
+    assert len(slot_profile) == n and 0 < n and nid < 255, (n, nbar)
+    nh = nid // 16 + 1                                 # ids 1 .. nid (id 0: nothing)
+
+    def target(i):
+        return "dm_none" if not 1 <= i <= nid else "dmg%d" % (i - 1) if i <= n else "dmb%d" % (i - 1 - n)
     out = ["dm_go:",
            "    sim.jump16 dm_id + 1*dw, " + ", ".join("dm_h%d" % h if h < nh else "dm_none" for h in range(16))]
     for h in range(nh):
-        out += ["  dm_h%d:" % h, "    sim.jump16 dm_id, " + ", ".join(
-            "dmg%d" % (16 * h + l - 1) if 1 <= 16 * h + l <= n else "dm_none" for l in range(16))]
+        out += ["  dm_h%d:" % h, "    sim.jump16 dm_id, " + ", ".join(target(16 * h + l) for l in range(16))]
     for m in range(n):
         cells = [(reg, "%s + %d*dw" % (f, cell_nibbles(schema, f) * m), cell_nibbles(schema, f)) for reg, f in WINDOW]
         out += ["  dmg%d:" % m]
@@ -193,6 +235,9 @@ def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int]) -> Lis
                 "    hex.set 1, dm_type, %d" % slot_profile[m],
                 "    stl.fcall dm_leaf, dm_lret"]
         out += ["    hex.mov %d, %s, %s" % (nib, cell, reg) for reg, cell, nib in cells]
+        if drops and m in drops:                       # M7 P6: this call's kill drops the slot's item
+            out += ["    hex.if0 1, dm_kd, dmg%d_r" % m, "    stl.fcall drop_link%d, drl_ret" % drops[m],
+                    "  dmg%d_r:" % m]
         out += ["    stl.fret dm_ret"]
     out += ["  dm_none:", "    stl.fret dm_ret"]
     return out
@@ -201,16 +246,25 @@ def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int]) -> Lis
 # M7 P5: the blood a hit spawns (projcode.fx_spawn: the target's integer position, the damage)
 FX_CALL = ["    hex.mov 4, fxs_x, dm_x", "    hex.mov 4, fxs_y, dm_y", "    hex.mov 2, fxs_dmg, dm_dmg",
            "    stl.fcall fx_spawn, fx_sret"]
+# M7 P6: fx_spawn also spawns puffs -- the blood says so
+FX_CALL_FULL = ["    hex.zero 1, fxs_kind"] + FX_CALL
 
 
-def leaf_lines(keys: Sequence[tuple], fx: bool = False) -> List[str]:
+def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False) -> List[str]:
     """`dm_leaf` (stl.fcall dm_leaf, dm_lret) on the window -- the module docstring's order. `keys`: the profiles
     (`profiles(w)[0]`); mt_dist_leaf (monstercode.dist_leaf_lines) computes P_AproxDistance. `fx` (M7 P5): a hit in
-    reach spawns blood (FX_CALL) before the target's own checks"""
+    reach spawns blood (FX_CALL) before the target's own checks. `full` (M7 P6; `keys` are then
+    `profiles(w, gib=True)[0]`): dm_melee BLAST starts at the target's checks; the kill sets dm_kd and gibs"""
     from doomfj.combat import MISSILERANGE_U
     classes = pain_classes(keys)
     assert 0 < len(keys) <= 16
-    out = ["dm_leaf:",
+    assert not full or (fx and all(len(k) == 7 for k in keys)), "M7 P6: the full leaf gibs and bleeds"
+    out = ["dm_leaf:"]
+    if full:                                     # M7 P6: a blast skips the reach and the blood
+        out += ["    hex.zero 1, dm_kd",
+                "    hex.if_flags dm_melee, %d, dm_nbl, dm_chk" % (1 << BLAST),
+                "  dm_nbl:"]
+    out += [
            # _line_attack's reach FIRST: P_AproxDistance(target - player) > reach -> no hit, no blood
            "    hex.if0 1, dm_melee, dm_far",
            "    hex.zero 4, dm_r4", "    hex.mov 2, dm_r4, dm_reach", "    ;dm_rch",
@@ -222,7 +276,8 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False) -> List[str]:
            "    stl.fcall mt_dist_leaf, mt_ret",
            "    hex.cmp 4, mt_d, dm_r4, dm_in, dm_in, dm_out",
            "  dm_in:",
-           *(FX_CALL if fx else []),                                         # M7 P5: the blood, whatever the target
+           *((FX_CALL_FULL if full else FX_CALL) if fx else []),            # M7 P5: the blood, whatever the target
+           *(["  dm_chk:"] if full else []),
            "    hex.if0 1, dm_sh, dm_out",                                    # not shootable
            "    hex.if_flags dm_hp + 2*dw, 0xFF00, dm_pos, dm_out",            # health < 0
            "  dm_pos:",
@@ -232,10 +287,15 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False) -> List[str]:
            "    dmrnd.lookup dm_rr, dm_rng",                                   # v & 3, and the pain bits
            "    hex.zero 1, dm_pn",
            "    sim.jump16 dm_type, " + ", ".join("dm_p%d" % k if k < len(keys) else "dm_out" for k in range(16))]
-    for k, (pc, pain, death, spawn, see) in enumerate(keys):
+    for k, (pc, pain, death, spawn, see, *gib) in enumerate(keys):
         out += ["  dm_p%d:" % k,
-                "    hex.set 2, dm_dst, %d" % gd.STATE_INDEX[death], "    hex.set 1, dm_dti, %d" % _tics(death),
-                "    hex.set 2, dm_pst, %d" % gd.STATE_INDEX[pain], "    hex.set 1, dm_pti, %d" % _tics(pain),
+                "    hex.set 2, dm_dst, %d" % gd.STATE_INDEX[death], "    hex.set 1, dm_dti, %d" % _tics(death)]
+        if full:                                 # M7 P6: the gib -- below -spawnhealth, the xdeath state
+            hp0, xd = gib
+            xd = death if xd == gd.S_NULL else xd   # none: the gib test's both outcomes are the death
+            out += ["    hex.set 3, dm_nsh, %d" % (-hp0 & 0xFFF),
+                    "    hex.set 2, dm_xst, %d" % gd.STATE_INDEX[xd], "    hex.set 1, dm_xti, %d" % _tics(xd)]
+        out += ["    hex.set 2, dm_pst, %d" % gd.STATE_INDEX[pain], "    hex.set 1, dm_pti, %d" % _tics(pain),
                 "    hex.set 2, dm_sp, %d" % gd.STATE_INDEX[spawn],
                 "    hex.set 2, dm_se, %d" % gd.STATE_INDEX[see], "    hex.set 1, dm_seti, %d" % _tics(see),
                 "    hex.if_flags dm_rr + 1*dw, %d, dm_typed, dm_p%dy" % (pain_mask(classes.index(pc)), k),
@@ -261,15 +321,23 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False) -> List[str]:
             "    ;dm_out",
             # ---- P_KillMobj: not shootable, the death state, tics -= P_Random() & 3 (>= 4 tics: no clamp) -----
             "  dm_kill:",
-            "    hex.zero 1, dm_sh",
-            "    hex.mov 2, dm_st, dm_dst", "    hex.mov 1, dm_ti, dm_dti",
+            "    hex.zero 1, dm_sh"]
+    if full:                                     # M7 P6: the drop's flag; the gib (health < -spawnhealth)
+        out += ["    hex.set 1, dm_kd, 1",
+                "    hex.scmp 3, dm_hp, dm_nsh, dm_gib, dm_ngib, dm_ngib",
+                "  dm_gib:",
+                "    hex.mov 2, dm_st, dm_xst", "    hex.mov 1, dm_ti, dm_xti", "    ;dm_ktic",
+                "  dm_ngib:"]
+    out += ["    hex.mov 2, dm_st, dm_dst", "    hex.mov 1, dm_ti, dm_dti",
+            *(["  dm_ktic:"] if full else []),
             "    hex.sub 1, dm_ti, dm_rr",
             "  dm_out:",
             "    stl.fret dm_lret"]
     return out
 
 
-def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = DM_MAX, fx: bool = False) -> dict:
+def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = DM_MAX, fx: bool = False,
+                 full: bool = False, nbar: int = 0, drops: Dict[int, int] = None) -> dict:
     """everything P4.2a's damage adds, for the World `w` (any monster mode; the emitter's needs P3.2c "decide"):
       * `decls`: the P42 cells at `boot_skill`'s level start, the interface, the window and the scratch;
       * `lines`: dm_go, the per-slot stubs, dm_leaf -- leaves (each ends in a fret), placed where nothing falls in;
@@ -277,15 +345,22 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     `fx` (M7 P5, `fx_on(PLAYER_MODE)`): dm_leaf spawns the blood (projcode's fx_spawn, whose decls and lines the
     caller adds).
     `slot_rt[m]`: monster slot m's runtime thing (its thpos_rt row). NEW GAME restores the P42 cells through
-    p31_parts' `fields` (P42_FIELDS joins them when its `damage` is on)."""
-    check_model_rules(w, max_dmg=max_dmg)
+    p31_parts' `fields` (P42_FIELDS joins them when its `damage` is on).
+    `full` (M7 P6, the player mode "full"): the barrels' ids (`nbar`: barrelcode's dmb<b>), the BLAST mode, the gib
+    (max_dmg DM_MAX_FULL) and the drops (`drops` {slot: dropper k}: barrelcode's drop_link<k>)."""
+    if full:
+        max_dmg = max(max_dmg, DM_MAX_FULL)
+    else:
+        assert not nbar and not drops, "M7 P6: barrels and drops are the full mode's"
+    check_model_rules(w, max_dmg=max_dmg, gib=full)
     n = w.layout.nmon
     assert len(slot_rt) == n
-    keys, of = profiles(w)
+    keys, of = profiles(w, gib=full)
     snap = w.level_start(boot_skill)
     vals = {f: list(getattr(snap, f)[:n]) for f in P42_FIELDS}
     return {"fields": P42_FIELDS,
-            "decls": field_decls(w.schema, n, vals) + DM_INTERFACE + DM_WINDOW + DM_SCRATCH,
-            "lines": go_lines(w.schema, slot_rt, of) + leaf_lines(keys, fx=fx),
+            "decls": field_decls(w.schema, n, vals) + DM_INTERFACE + DM_WINDOW + DM_SCRATCH
+            + (DM_FULL_SCRATCH if full else []),
+            "lines": go_lines(w.schema, slot_rt, of, nbar=nbar, drops=drops) + leaf_lines(keys, fx=fx, full=full),
             "tables": [generate_dispatch_table_fj("dmrnd", dmrnd_values(pain_classes(keys)),
                                                   index_nibbles=2, result_nibbles=2)]}

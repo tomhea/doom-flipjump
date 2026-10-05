@@ -174,7 +174,7 @@ def test_the_screen_init_and_boot_palette_run_once_in_the_entry_part():
 def test_the_palette_goes_before_the_record_stream_and_the_phases_after_the_monsters():
     src = _src()
     i_eye = src.index('pass1 += list(_p31.get("tic_after_eye", ())) if _p31 else []')
-    i_p5 = src.index("pass1 += p5_tic_lines(_hrt)")
+    i_p5 = src.index("pass1 += p5_tic_lines(_hrt, barrels=bool(_bar))")      # M7 P6: + the barrels' phase
     i_pal = src.index('pass1 += list(_hrt["palette"])')
     i_begin = src.index('pass1.append("present.begin_frame_collines")')
     assert i_eye < i_p5 < i_pal < i_begin
@@ -191,3 +191,16 @@ def test_the_hurt_tic_menu_palette_restart_and_leaves_are_spliced():
     assert "full=bool(_chase.get(\"hurt\"))" in src and "hurt=bool(_chase.get(\"hurt\"))" in src
     assert "hurt=_P5) if menu else None" in src and "_P5 = _P5 and _p31 is not None" in src
     assert "_p5_assert_labels(_texts)" in src and "_p5_model_asserts(_p31, _proj, _hrt)" in src
+
+
+def test_the_barrels_phase_sits_between_the_fireballs_and_the_effects():
+    """M7 P6 (docs/gp-p67-interface.md 4.7): world.tic's order projectiles -> barrels -> effects; without barrels the
+    P5 tic is unchanged"""
+    hrt = {"bar": ["BAR"]}
+    assert WR.p5_tic_lines(hrt) == ["stl.fcall pj_phase, pj_pret", "stl.fcall fx_phase, fx_pret",
+                                    "hex.if1 1, lvdone, p5_bar_skip", "BAR", "p5_bar_skip:"]
+    got = WR.p5_tic_lines(hrt, barrels=True)
+    assert got[:3] == ["stl.fcall pj_phase, pj_pret", "stl.fcall bar_phase, bar_pret", "stl.fcall fx_phase, fx_pret"]
+    src = _src()
+    assert '+ (list(_bar["lines"]) if _bar else [])' in src and 'list(_bar["decls"]) + list(_bar["tables"])' in src
+    assert 'list(_bar["restart"][0]) if _bar else []' in src

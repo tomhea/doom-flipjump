@@ -16,6 +16,10 @@ THE LEAF (gp-aim-window 1.4 -- no divide):
     (`drawn[c]`) is skipped, an empty cell or a strictly nearer integer depth (tz >> 16) takes the thing.
 The cells: `aim_sid` (2 nibbles per column: 0 or 1 + slot) and `aim_tz` (3 nibbles: the integer depth), zeroed by the
 frame's prologue (`prologue_lines`), persisted across the reset (build.AIM_PERSIST) for the next frame's weapon.
+
+M7 P6 (`barrels`, the player mode "full": docs/gp-p67-interface.md 5): a standing BARREL records too -- id 1 + nmon + b,
+radius class RC_BARREL (combat.BARREL_R = 10): `aimr` carries r_eff(10) in nibbles 4-5 and the leaf picks it on
+class 2. The id still fits two nibbles (1 + 53 + 22 = 76).
 """
 from __future__ import annotations
 
@@ -24,23 +28,26 @@ from typing import List
 FIRST, NCOLS = 72, 17                  # combat.aim_window at 160 wide (asserted by the emitter against the model)
 MAXTZ = 2048 << 16                     # MISSILERANGE
 REFF_BITS = 8                          # combat.AIM_REFF_BITS
+RC_BARREL = 2                          # M7 P6: sp_rc's class for a barrel (radius 10)
 
 
-def reff_values(rm) -> List[int]:
-    """`aimr`: the view angle's top 8 bits -> r_eff(20) | r_eff(30) << 8 (combat.aim_radius, the ONE definition)"""
-    from doomfj.combat import CombatMixin, AIM_REFF_BITS
+def reff_values(rm, barrels: bool = False) -> List[int]:
+    """`aimr`: the view angle's top 8 bits -> r_eff(20) | r_eff(30) << 8 (combat.aim_radius, the ONE definition);
+    M7 P6 (`barrels`): | r_eff(BARREL_R) << 16"""
+    from doomfj.combat import CombatMixin, AIM_REFF_BITS, BARREL_R
     assert AIM_REFF_BITS == REFF_BITS
     out = []
     for i in range(1 << REFF_BITS):
         a = i << (32 - REFF_BITS)
         r20, r30 = CombatMixin.aim_radius(rm, a, 20), CombatMixin.aim_radius(rm, a, 30)
-        assert r20 < 256 and r30 < 256
-        out.append(r20 | r30 << 8)
+        r10 = CombatMixin.aim_radius(rm, a, BARREL_R)
+        assert r20 < 256 and r30 < 256 and r10 < 256
+        out.append(r20 | r30 << 8 | ((r10 << 16) if barrels else 0))
     return out
 
 
-def decls() -> List[str]:
-    return [f"aim_sid: hex.vec {2 * NCOLS}", f"aim_tz: hex.vec {3 * NCOLS}", "aim_rr: hex.vec 4",
+def decls(barrels: bool = False) -> List[str]:
+    return [f"aim_sid: hex.vec {2 * NCOLS}", f"aim_tz: hex.vec {3 * NCOLS}", f"aim_rr: hex.vec {6 if barrels else 4}",
             "aim_ret: hex.vec w/4", "sp_sid: hex.vec 2", "sp_rc: hex.vec 1",
             "ar_p: hex.vec 8", "ar_q: hex.vec 8", "ar_r16: hex.vec 8", "ar_x1: hex.vec 8", "ar_x2: hex.vec 8",
             "ar_lo: hex.vec 2", "ar_n: hex.vec 2", "ar_tzi: hex.vec 3",
@@ -52,14 +59,20 @@ def prologue_lines() -> List[str]:
     return [f"hex.zero {2 * NCOLS}, aim_sid", "aimr.lookup aim_rr, viewangle + 6*dw"]
 
 
-def leaf_lines(centerx: int) -> List[str]:
-    """`aim_record:` ... `stl.fret aim_ret` -- fcall'd from project_thing after pth_xscale, with sp_sid != 0"""
+def leaf_lines(centerx: int, barrels: bool = False) -> List[str]:
+    """`aim_record:` ... `stl.fret aim_ret` -- fcall'd from project_thing after pth_xscale, with sp_sid != 0.
+    M7 P6 (`barrels`): class RC_BARREL reads r_eff(10)"""
+    assert RC_BARREL == 2
     out = ["aim_record:",
            "hex.cmp 8, pth_tz, ar_maxtz, ar_in, ar_in, ar_out",               # beyond MISSILERANGE
            "ar_in:",
            "hex.zero 8, ar_r16",
-           "hex.if0 1, sp_rc, ar_r20",
-           "hex.mov 2, ar_r16 + 4*dw, aim_rr + 2*dw", ";ar_rok",               # r_eff(30) << 16
+           "hex.if0 1, sp_rc, ar_r20"]
+    if barrels:                                                                 # class 2: r_eff(10) << 16
+        out += ["hex.if_flags sp_rc, %d, ar_r30, ar_r10" % (1 << RC_BARREL),
+                "ar_r10:", "hex.mov 2, ar_r16 + 4*dw, aim_rr + 4*dw", ";ar_rok",
+                "ar_r30:"]
+    out += ["hex.mov 2, ar_r16 + 4*dw, aim_rr + 2*dw", ";ar_rok",               # r_eff(30) << 16
            "ar_r20:", "hex.mov 2, ar_r16 + 4*dw, aim_rr",                     # r_eff(20) << 16
            "ar_rok:",
            "hex.fixed_mul_lo 8, 4, ar_p, pth_tx, pth_xscale",                   # P = FixedMul(tx, xscale)
@@ -106,6 +119,7 @@ def leaf_lines(centerx: int) -> List[str]:
     return out
 
 
-def table_text(rm) -> str:
+def table_text(rm, barrels: bool = False) -> str:
     from doomfj.lut_generator import generate_dispatch_table_fj
-    return generate_dispatch_table_fj("aimr", reff_values(rm), index_nibbles=2, result_nibbles=4)
+    return generate_dispatch_table_fj("aimr", reff_values(rm, barrels), index_nibbles=2,
+                                      result_nibbles=6 if barrels else 4)

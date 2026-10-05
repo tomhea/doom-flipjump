@@ -725,3 +725,9 @@ The phase budgets are P6 +0.1M and P7 ~0.
   P5's recorded deviation for its mobiles. Taking them moves pictures in v5's frames, and census F4, so a v6.
 - **O3 -- gamespeed is not like-for-like after P6.** A blocking player stops at a zombie on runs 0 and 2. Recommend:
   re-record the trails and report the number with that note. Re-planning the routes (a gen 4) would be a metric change.
+
+**TAKEN (coordinator, 2026-10-05, under the owner's standing "be autonomous: take the recommended option, record it,
+report it" -- reported to the owner the same morning):** O1 OUT (a D5 simplification: the dead view stays at eye
+height, the weapon down, the red palette fades); O2 NOT taken (P5's deviation stands, v5's pictures do not move); O3
+re-record the trails and report gamespeed with the route note. The rung is UNITED (section 2), the fallback "loot"
+mode kept in reserve.

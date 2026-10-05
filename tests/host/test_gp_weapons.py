@@ -13,6 +13,17 @@ from doomfj import gamedata as gd
 from doomfj import world as W
 
 
+SHIPPED_WEAPON_TICS = W.WEAPON_TICS        # M7 P6+P7: the game's weapon tempo (the owner's x2, 2026-10-05)
+
+
+@pytest.fixture(autouse=True)
+def _doom_tics(monkeypatch):
+    """The timings below are DOOM's, in TICS: the weapon runs one DOOM tic a frame here (world.WEAPON_TICS = 1), so a
+    frame is a tic. The game runs SHIPPED_WEAPON_TICS a frame -- `test_the_game_runs_the_weapon_at_x2` holds that the
+    same machine then takes 1 / SHIPPED_WEAPON_TICS of the frames."""
+    monkeypatch.setattr(W, "WEAPON_TICS", 1)
+
+
 def _world(skill=gd.SK_HARD, **kw):
     return W.World(skill=skill, strict=True, **kw)
 
@@ -78,6 +89,29 @@ def test_the_pistol_fires_every_14_tics_and_only_the_first_shot_is_accurate():
     for _ in range(20):
         w.tic({})
     assert w.ws.p_refire == 0
+
+
+def test_the_game_runs_the_weapon_at_x2(monkeypatch):
+    """M7 P6+P7 (the owner: "the player should be able to fire at x2 speed"): at the shipped tempo the SAME DOOM tics
+    land WEAPON_TICS to a frame -- the pistol's shots of DOOM tics 18, 32, 46, 60 in frames 9, 16, 23, 30 (every 7),
+    a switch's 30 tics in 15 frames. The number keys are read once a frame. Control: the DOOM tempo (1) is the
+    tic list itself, which the tests above pin."""
+    assert SHIPPED_WEAPON_TICS == 2
+    monkeypatch.setattr(W, "WEAPON_TICS", SHIPPED_WEAPON_TICS)
+    w = _world()
+    shots = [ev.tic for ev in _run(w, {"fire": True}, 31) for _s in ev.shots]
+    assert shots == [t // SHIPPED_WEAPON_TICS for t in (18, 32, 46, 60)] == [9, 16, 23, 30]
+    assert w.ws.p_ammo[gd.AM_CLIP] == 50 - 4
+    w = _world()
+    _ready(w)
+    t0 = w.tic_count
+    w.tic({"w1": True})
+    while _state(w) != "S_PUNCH":
+        w.tic({})
+    assert w.tic_count - 1 - t0 == 30 // SHIPPED_WEAPON_TICS
+    monkeypatch.setattr(W, "WEAPON_TICS", 1)                 # the control: one tic a frame is not the game
+    w = _world()
+    assert [ev.tic for ev in _run(w, {"fire": True}, 31) for _s in ev.shots] == [18]
 
 
 def test_the_timing_check_fails_on_a_changed_state_table(monkeypatch):

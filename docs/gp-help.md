@@ -169,3 +169,17 @@ P4.1 bound the owner's map, and the help screen now lists it:
 
 `test_menu.py` re-pins the caps and the texts. `test_the_help_screen_lists_exactly_the_keys_that_work` still holds
 the screen and the poll together in both directions.
+
+
+## 6. The P6+P7 spacing update (2026-10-05)
+
+The owner, after playing blocked48: "use a bit more space between different categories". The words and the caps are
+unchanged; four spacings moved (`docs/gp-p67-interface.md` section 12.4):
+- `HELP_ITEM_GAP` 8 -> 12 and `HELP_DESC_GAP` 6 -> 4: the items of a row sit further apart, and each description
+  sits nearer its own caps;
+- `HELP_ROW_PITCH` = cap + 2: the key rows are 2 px apart instead of 1;
+- `HELP_LINE_PITCH` = glyph + 1: the use description's second line, now at the legend's pitch;
+- the clusters' legend is level with the caps' top.
+
+The screen is now full: the last row's HELP ends 1 px above the credit. Before and after:
+`docs/gp-p67/help_before.png`, `docs/gp-p67/help_after.png`.

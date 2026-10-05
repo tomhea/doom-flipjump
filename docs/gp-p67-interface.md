@@ -979,3 +979,222 @@ answer to the new tempo, which is what the set was always meant to be (a player,
 binding on the built binary (`b0_scenarios.py --file <v6>`); there is no oracle op model for a whole frame, so no
 oracle binding estimate exists -- section 11.3's +0.15 .. +0.4M (T) and -0.15 .. +0.05M (V) on top of blocked48's v5
 16,037,431 is the estimate until then.
+
+---
+
+## 12. Owner requests: aim at range, turn, fire rate, help spacing (package F, 2026-10-05)
+
+The owner played blocked48 on 2026-10-05 and asked for four things. They are on branch `p67-f`, off `m7-p67` b866606.
+
+### 12.1 "It's kind of hard to kill from afar, maybe too hard" -- MEASURED: the window matches DOOM; the TURN does not
+
+`scratchpad/gp/aim_range.py` measures the chance that one shot hits one monster at distance D. Its results are in
+`scratchpad/gp/aim_range.txt`, and `--selftest` is its R9 control. The target stands in the open, with no walls and
+no heights. DOOM's autoaim is vertical only, so it changes nothing here.
+- **Ours** is the model's own `CombatMixin.aim_geometric`, called per column on a one-target world. This is the
+  window's box formula; the window agrees with it on 99.94% of fight frames (`gp-aim-window.md`).
+  - The pistol's accurate shot is tested at column 80.
+  - A refire bullet or a pellet is tested at the column `Sites.gunshot` names, over all 256 stream states.
+  - A shotgun blast is 7 pellets from each start state.
+- **DOOM** is the 2D trace at view + (P_SubRandom() << 18), with the SAME draws. It tests PIT_AddThingIntercepts'
+  diagonal (chosen by the sign of dx ^ dy), and the crossing must lie within 2048 along the ray.
+- **The residual.** The player turns in whole steps, and the target's bearing is uniform against that lattice. So the
+  residual between the bearing and the nearest reachable view angle is uniform over ONE TURN STEP.
+  - The measure uses 32 bearings round the circle and a grid of 4 x 2^16 BAM.
+  - The player aims by the PICTURE, so each rule is centred on its own accurate-shot interval (see 12.1.3).
+
+Monsters: r 20 is the zombieman, the imp and the sergeant; r 30 is the demon. All numbers are MEASURED (32 views,
+grid 4).
+
+**12.1.1 The rule alone, at the same step (640 << 16 = 3.516 deg)** -- P(hit), ours / DOOM:
+
+| r | D | angular width | pistol 1st shot | refire bullet | shotgun P(>= 1 pellet) | pellets of 7 |
+|---|---|---|---|---|---|---|
+| 20 | 512 | 4.47 deg | 1.000 / 1.000 | 0.733 / 0.742 | 1.000 / 1.000 | 5.13 / 5.20 |
+| 20 | 768 | 2.98 deg | 0.984 / 0.981 | 0.551 / 0.543 | 0.996 / 0.997 | 3.86 / 3.80 |
+| 20 | 1024 | 2.24 deg | 0.816 / 0.806 | 0.430 / 0.420 | 0.983 / 0.986 | 3.01 / 2.94 |
+| 20 | 1536 | 1.49 deg | 0.544 / 0.539 | 0.295 / 0.289 | 0.919 / 0.928 | 2.06 / 2.02 |
+| 20 | 1920 | 1.19 deg | 0.428 / 0.432 | 0.236 / 0.234 | 0.851 / 0.869 | 1.65 / 1.64 |
+| 30 | 1024 | 3.36 deg | 1.000 / 1.000 | 0.605 / 0.598 | 0.998 / 0.998 | 4.23 / 4.18 |
+| 30 | 1536 | 2.24 deg | 0.813 / 0.806 | 0.430 / 0.420 | 0.983 / 0.986 | 3.01 / 2.94 |
+| 30 | 1920 | 1.79 deg | 0.644 / 0.647 | 0.349 / 0.343 | 0.956 / 0.961 | 2.44 / 2.40 |
+
+At 128 and 256 units every cell is 1.000, except the r-20 refire bullet at 256 (0.972 / 0.981).
+
+**The 17-column window is NOT harder than DOOM at range.** Every cell is within 0.02 of DOOM's.
+- The largest gap is the shotgun's P(>= 1) at 1920: 0.851 / 0.869. Pellets that land in one column share one answer,
+  so a blast's 7 pellets are slightly more correlated than DOOM's 7 rays.
+- A far box being only 1-2 columns wide costs nothing. The box's edges move continuously with the view angle:
+  `x1 = (cx + P - Q) >> 16` is an exact containment test of screen position c + 1.
+- r_eff (`gp-aim-window.md` 1.7) is DOOM's diagonal width.
+
+**So, per the brief: no window change.**
+
+**12.1.2 With the turn.** The table gives the pistol's accurate shot and the shotgun's P(>= 1) for four step sizes:
+- ours at 640, the shipped step;
+- ours at 960, the owner's x1.5 (12.2);
+- ours at 320, the proposed slow first frame (below);
+- DOOM's keyboard TAP: the slow turn, 320 << 16 = 1.758 deg.
+
+| r | D | pistol: ours 640 | ours 960 | ours 320 | DOOM tap | shotgun: ours 640 | ours 960 | ours 320 | DOOM tap |
+|---|---|---|---|---|---|---|---|---|---|
+| 20 | 512 | 1.000 | 0.946 | 1.000 | 1.000 | 1.000 | 0.997 | 1.000 | 1.000 |
+| 20 | 768 | 0.984 | 0.723 | 1.000 | 1.000 | 0.996 | 0.985 | 1.000 | 1.000 |
+| 20 | 1024 | 0.816 | 0.544 | 1.000 | 1.000 | 0.983 | 0.962 | 0.993 | 0.994 |
+| 20 | 1536 | 0.544 | 0.363 | 0.981 | 0.981 | 0.919 | 0.875 | 0.934 | 0.941 |
+| 20 | 1920 | 0.428 | 0.285 | 0.856 | 0.861 | 0.851 | 0.807 | 0.852 | 0.878 |
+| 30 | 1024 | 1.000 | 0.810 | 1.000 | 1.000 | 0.998 | 0.990 | 1.000 | 1.000 |
+| 30 | 1536 | 0.813 | 0.542 | 1.000 | 1.000 | 0.983 | 0.962 | 0.993 | 0.994 |
+| 30 | 1920 | 0.644 | 0.429 | 1.000 | 1.000 | 0.956 | 0.926 | 0.972 | 0.974 |
+
+**This is the owner's "hard from afar".**
+- A frame is one tic (D4), and one frame of a held arrow is the smallest turn: 640 << 16. That is TWICE DOOM's tap.
+- DOOM turns at angleturn[2] = 320 << 16 for the first SLOWTURNTICS = 6 tics a key is held, then at 640 (1280
+  running).
+- Past ~768 units a zombieman is narrower than one of our turn steps. The first pistol shot then hits a uniformly
+  placed target 0.43-0.82 of the time, where DOOM's tap gives 0.86-1.00.
+- **The owner's x1.5 turn (12.2) makes this worse**: 0.29-0.54.
+- The shotgun hides most of it, because its spread covers the step.
+
+Strafing is a fine control the game already has. A 13-unit side step moves a target at distance D by 13 / D rad:
+0.73 deg at 1024, 0.39 deg at 1920. That is finer than DOOM's tap, so a player who strafes to line up loses nothing.
+
+**PROPOSED, NOT BUILT -- DOOM's own rule, one frame long.**
+- **The rule**: the FIRST frame a turn key is held turns 320 << 16; every later frame of the hold turns ANGLE_TURN
+  (960).
+- **What it gives**: the "ours 320" columns above. That is DOOM's tap odds exactly, since the rule is DOOM's. A held
+  turn keeps the owner's x1.5 after its first frame.
+- **What it costs**:
+  - one persisted nibble `p_tnh` (a turn key was held last frame);
+  - ~8 fj lines in `wall_renderer._player_sim_lines(strafe=True)`;
+  - in the model, a `p_turnheld` schema field read in `combat._player_move`;
+  - every gate that steps the game tier's player through `rm.step_sim(strafe=True)` must carry it.
+- **Who must do it**: the gate side is package A's switch to `MonsterPhase.move` (World._player_move). After that
+  switch, the model side is one field in one function. The change also moves v5/v6 and the restart set (package D).
+- **Why not here**: it would be a third concurrent edit of the gates' player step. The coordinator must decide.
+
+**12.1.3 The window's 1-column bias (MEASURED, harmless).**
+- Our accurate shot's hit interval is centred 0.73-0.78 deg (~1.06 columns) LEFT of the true bearing.
+- The cause: column c is tested at screen position c + 1 (R_ProjectSprite's `x2 = (... >> 16) - 1` convention),
+  while the view's centre ray is at position 80.0.
+- The DRAWN sprite follows the same convention. A player who centres the picture is therefore centred on the hit
+  interval, and never sees the bias.
+- Centred on the true bearing instead, the pistol at 640 would read 0.688 / 0.804 (r 20, 1024).
+- DOOM has the same convention at 320 wide, at half the angle. 12.1.1 centres DOOM on the true bearing, which flatters
+  DOOM slightly.
+
+### 12.2 "Turning feels a bit slow during a fight, might need to x1.5 it" -- DONE
+
+`reference_model.ANGLE_TURN` goes from 640 << 16 to **960 << 16** (5.27 deg a frame).
+- It is the ONE definition. The model's `step_sim` and `combat._player_move` read it, and so does the fj's
+  `wall_renderer._player_sim_lines` (`hex.add_constant 8, viewangle, ...`). Every tier turns at the new rate.
+- The model has no slow turn and no run turn (DOOM's angleturn is {640, 1280, 320}). It has one rate, now x1.5. 12.1.2
+  shows what that costs at range, and proposes the slow first frame.
+- The reachable angles are now multiples of 2^22 BAM, 1024 a circle (they were multiples of 2^23).
+
+### 12.3 "My firing speed is slow ... fire at x2 speed" -- DONE
+
+The player's WEAPON runs **`world.WEAPON_TICS = 2`** DOOM tics a frame:
+- P_MovePsprites runs twice: the weapon state machine, the flash, A_ReFire, the raise and the lower.
+- The number keys run once, before it; the bar runs once, after it.
+- This deviates from D4 (one DOOM tic per frame) for the weapon alone. Package E builds the monsters' tempo the same
+  way, and the two constants should sit side by side in `world.py` (merge note, 12.6).
+
+**The model**: `combat.CombatMixin._weapon_tics` loops `_move_psprites` WEAPON_TICS times. Three places call it:
+`_player_phase`, `_death_think`, and both branches of the gates' `monsters.MonsterPhase.weapon`. Nothing else calls
+`_move_psprites`.
+
+**The fj**: `weaponcode.weapon_lines(tics=)` (default WEAPON_TICS) loops its ONE P_MovePsprites block. No code is
+duplicated.
+- The loop runs on a scratch nibble `wp_pass`: `wp_ptic:` ... `wp_ploop:` inc,
+  `hex.if_flags wp_pass, 1<<tics, wp_ptic, wp_pdone`, then `wp_pdone:` zeroes it.
+- At `tics=1` the text is P5's to the byte.
+- `wp_pass` is declared in `weapon_decls`. It is 0 at the end of every frame (the harness prints it), so the
+  restore-set re-key may either persist it or restore it.
+
+**The effect**: every weapon cycle takes half the frames.
+- Fire held, the pistol refires every 14 tics, the shotgun every 37, the fist every 17 and the saw every 8. These now
+  take 7, 18.5, 8.5 and 4 frames.
+- A weapon switch (16 tics down, 16 up) is also halved.
+
+**Ops (MEASURED in the tests/fj harness by `scratchpad/gp/weapon_tics_cost.py`; NOT in game):**
+- The second pass costs +403 ops/frame idle and +274 when firing; the harness's whole loop is 1.7-2.2K a frame.
+  So the second pass is ~0.3-0.4K a frame.
+- On top of that, the shots themselves double while the trigger is held. P4's read side costs ~0.1-0.15K a pistol
+  shot and ~1.9K a blast, plus `dm_go` per hit.
+- Estimate on v5: well under +0.01M/frame before placement. Placement (new labels and a new cell) re-rolls the pins,
+  as any change does.
+
+**Proof**: `tests/fj/test_weapon_fj.py` runs the real emitted text against `World`, tic by tic.
+- It covers 600 frames with both inventories.
+- It runs the P5 hurt scripts: kill, ready, refire and deadkeys. The "dead before A_Lower reaches the bottom" poke now
+  comes at 9 // WEAPON_TICS frames.
+- New: `test_the_weapon_runs_the_model_s_tics_per_frame`, plus R9 tempo mutants. The block run once a frame (tics=1,
+  the P5 text) is caught at frame 0; run three times, it is also caught at frame 0.
+- The eight P4/P5 mutants are still caught.
+
+### 12.4 "Use a bit more space between different categories" (the HELP screen) -- DONE
+
+`menu.py` changes four spacings:
+- the items of a row sit further apart, and each description nearer its own caps: `HELP_ITEM_GAP` 8 -> 12 and
+  `HELP_DESC_GAP` 6 -> 4, giving "[CTRL] FIRE    [1][2][3][4] WEAPONS";
+- the key rows are 2 px apart instead of 1 (`HELP_ROW_PITCH` = cap + 2);
+- that is paid for by the use description's second line, now at the legend's pitch (`HELP_LINE_PITCH` = glyph + 1);
+- the cluster legend is level with the caps' top.
+
+Nothing else fits: the screen is 100 rows, and the last row's HELP now ends 1 px above the credit.
+- Renders: `docs/gp-p67/help_before.png` and `docs/gp-p67/help_after.png`, made by `scratchpad/gp/help_shot.py`.
+- `tests/host/test_menu.py` re-pins every cap and string. Its R9 control now also rejects each of the four old
+  spacings.
+- `tests/fj/test_menu_screens.py` and `test_keyboard_input.py` pass unchanged, because the fj screens come from the
+  same `help_pixels`.
+- The help stream's size changes, so `probe.RECORDED_CALIBRATION` and the size are re-recorded on the build, as in
+  P3.4.
+
+### 12.5 What moves v5
+
+- **12.2 (the turn) and 12.3 (the weapon's tempo) MOVE v5.** Both are behaviour changes the owner asked for, and
+  package E's v6 carries them. Nothing was re-frozen here. MEASURED (`scenarios_v2.py --validate --no-census` on this
+  branch):
+  - F3 is stale on all 11 runs;
+  - the criteria FAIL ">= 8 kills": **1 kill**, down from the frozen 17. With the weapon's tempo alone (the turn put
+    back to 640) it is 5 kills, also stale on all 11 runs. v5's recorded keys were aimed with 640-BAM turns and
+    timed to one weapon tic a frame, so they now point past their targets and fire at other moments. **A v6 must
+    RE-PLAN the routes' aiming and firing, not only re-record the same keys.**
+  - B0's camera check parts on 2 frames;
+  - every other criterion holds: no deaths, 9 pickups, 3 doors, the three attack kinds, the dodges.
+- 12.4 (the help) moves no world frame. It changes only the help picture (class F, as in P3.4).
+- 12.1 changes nothing.
+
+**The host tests (MEASURED, `pytest tests/host`: 15 failed before the fixes below; each failure attributed by running
+it with one change reverted):**
+- **Fixed on this branch** (model unit tests whose scripts or timings the change moved):
+  - `test_gp_weapons` -- five DOOM-tic timing tests and the noise test. They now run at one weapon tic a frame (an
+    autouse fixture: they pin DOOM's tics). The new `test_the_game_runs_the_weapon_at_x2` pins the shipped tempo: the
+    pistol's shots in frames 9, 16, 23, 30, a switch in 15 frames, with the DOOM tempo as its control.
+  - `test_gp_restart` -- the weapon tempo: at x2 the imp died before it clawed, so `mon_melee` was 0 and the
+    claw-table control moved nothing. The imp now stands at (60, 60), and the player wears blue armor.
+  - `test_player_modes` (hit / shoot noise) -- the turn: seed 3's walk woke no monster by sound. The seed is now 8
+    (7 sound wakes, 63 noises; "shoot" parts at tic 172).
+  - `test_reference_model.test_step_turn_left` -- the pinned angle, 0x43C00000.
+- **Left failing, for package E's v6 / package A's trail re-record** (they replay v5 or a recorded trail; nothing
+  was re-frozen here):
+  - `test_aim_window_oracle::test_window_agrees_with_geometric_aim_on_the_slice` (both changes);
+  - `test_b0_scenarios_frames` (2 tests; the turn: "the model no longer reproduces the set's pose");
+  - `test_depth_order::test_depth_order_changes_the_overlap` (the turn: v5's R0-aftermath frame 96 moved);
+  - `test_gamespeed_validate::test_validate_replays_the_door_run_0_opens` (the turn: run 0 now ends at (671, 318),
+    not `BINARY_ENDS` (831, 653)).
+
+### 12.6 Merge notes for the integrator
+
+- **`world.py`**: `WEAPON_TICS` sits above `FIREBALL_POOL`. E's monster tempo constant belongs beside it.
+- **`combat.py`**: `_player_phase` and `_death_think` now call `_weapon_tics`. A and B edit both functions (the dead
+  latch, the restart); keep the call. `monsters.MonsterPhase.weapon` calls it too, and A adds the restart request and
+  the latch there.
+- **`weaponcode.py`**: `weapon_lines` gains `tics=`. When it loops, the flash section's three exits go to `wp_ploop`.
+  - B's weaponcode edits (berserk's x10, key 1's rule, the `p_dd0` latch on the key skip) touch the keys and the
+    actions, not the loop.
+  - The latch must sit BEFORE `wp_ptic:`, in the keys section, which runs once a frame.
+- **Gates and trails**: every gate that hard-codes a turn count and every recorded trail (`gamespeed.BINARY_ENDS`)
+  moves with 12.2. A/E re-record them together with O3's re-record. (`m2_std_gate`'s steering reads ANGLE_TURN
+  symbolically, so it adapts.)

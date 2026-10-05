@@ -254,18 +254,22 @@ def test_the_help_stream_paints_exactly_the_help_picture():
 # in them. Written out, not re-derived from `help_layout`: a layout change must change this table.
 # M7 P4.1: the help re-pinned for the owner's key map (approved 2026-10-02) -- three legend lines beside the clusters,
 # fire / the weapons / the second strafe pair as two-item rows (docs/gp-combat.md; the render, reviewed, in the PR)
+# M7 P6+P7 (the owner, 2026-10-05: "use a bit more space between different categories"): the items of a row further
+# apart and each description nearer its own caps (HELP_ITEM_GAP 8 -> 12, HELP_DESC_GAP 6 -> 4), the key rows 2 px apart
+# instead of 1 (HELP_ROW_PITCH), the two-line use description at the legend's 8-px pitch, the legend level with the
+# caps' top -- docs/gp-p67-interface.md section 12
 HELP_CAPS = [("W", 16, 11, 9), ("A", 6, 23, 9), ("S", 16, 23, 9), ("D", 26, 23, 9),
              ("UP", 66, 11, 11), ("LEFT", 54, 23, 11), ("DOWN", 66, 23, 11), ("RIGHT", 78, 23, 11),
-             ("SPACE", 6, 36, 33), ("E", 41, 36, 9), ("CTRL", 6, 57, 27), ("1", 70, 57, 9), ("2", 81, 57, 9),
-             ("3", 92, 57, 9), ("4", 103, 57, 9), (",", 6, 69, 7), (".", 15, 69, 6), ("ENTER", 70, 69, 33),
-             ("ESC", 6, 81, 21), ("H", 102, 81, 9)]
-HELP_LEGENDS = [("W", 18, 13), ("A", 8, 25), ("S", 18, 25), ("D", 28, 25), ("\u2191", 69, 13),
-                ("\u2190", 56, 25), ("\u2193", 69, 25), ("\u2192", 80, 25), ("SPACE", 8, 38), ("E", 43, 38),
-                ("CTRL", 8, 59), ("1", 72, 59), ("2", 83, 59), ("3", 94, 59), ("4", 105, 59), (",", 8, 71),
-                (".", 17, 71), ("ENTER", 72, 71), ("ESC", 8, 83), ("H", 104, 83)]
-HELP_TEXTS = [("OR", 39, 25), ("\u2191 \u2193 MOVE", 96, 12), ("A D STRAFE", 96, 20), ("\u2190 \u2192 TURN", 96, 28),
-              ("USE: DOORS,", 56, 38), ("SWITCHES, LIFTS", 56, 47), ("FIRE", 39, 59), ("WEAPONS", 118, 59),
-              ("STRAFE", 27, 71), ("SELECT", 109, 71), ("MENU / BACK", 33, 83), ("HELP", 117, 83)]
+             ("SPACE", 6, 36, 33), ("E", 41, 36, 9), ("CTRL", 6, 57, 27), ("1", 72, 57, 9), ("2", 83, 57, 9),
+             ("3", 94, 57, 9), ("4", 105, 57, 9), (",", 6, 70, 7), (".", 15, 70, 6), ("ENTER", 72, 70, 33),
+             ("ESC", 6, 83, 21), ("H", 104, 83, 9)]
+HELP_LEGENDS = [("W", 18, 13), ("A", 8, 25), ("S", 18, 25), ("D", 28, 25), ("↑", 69, 13),
+                ("←", 56, 25), ("↓", 69, 25), ("→", 80, 25), ("SPACE", 8, 38), ("E", 43, 38),
+                ("CTRL", 8, 59), ("1", 74, 59), ("2", 85, 59), ("3", 96, 59), ("4", 107, 59), (",", 8, 72),
+                (".", 17, 72), ("ENTER", 74, 72), ("ESC", 8, 85), ("H", 106, 85)]
+HELP_TEXTS = [("OR", 39, 25), ("↑ ↓ MOVE", 96, 11), ("A D STRAFE", 96, 19), ("← → TURN", 96, 27),
+              ("USE: DOORS,", 54, 38), ("SWITCHES, LIFTS", 54, 46), ("FIRE", 37, 59), ("WEAPONS", 118, 59),
+              ("STRAFE", 25, 72), ("SELECT", 109, 72), ("MENU / BACK", 31, 85), ("HELP", 117, 85)]
 
 
 def _ink(label, x0, y0, font=None):
@@ -337,8 +341,9 @@ def test_the_help_screen_draws_every_cap_and_glyph_where_the_design_says():
 
 def test_the_help_design_check_rejects_a_moved_cap_and_a_wrong_legend(monkeypatch):
     """R9 for the check above: a cluster's caps 1 px further apart (M7 P4.1: the key rows now reach the right
-    edge, so a wider KEY gap trips the screen assert first), or the left arrow's cap drawn with '<', and the pinned
-    design no longer matches the picture"""
+    edge, so a wider KEY gap trips the screen assert first), or the left arrow's cap drawn with '<', or (M7 P6+P7) any
+    one of the four spacings put back to its pre-2026-10-05 value, and the pinned design no longer matches the
+    picture"""
     import doomfj.menu as menu
     want = _help_want()
     monkeypatch.setattr(menu, "HELP_CAP_GAP", menu.HELP_CAP_GAP + 1)
@@ -346,6 +351,16 @@ def test_the_help_design_check_rejects_a_moved_cap_and_a_wrong_legend(monkeypatc
     monkeypatch.undo()
     monkeypatch.setattr(menu, "HELP_CAP_LEGENDS", dict(menu.HELP_CAP_LEGENDS, LEFT="<"))
     assert _help_got(menu.help_pixels(W, H, COLOURS))[COLOURS[1]] != want[COLOURS[1]]
+    # M7 P6+P7: the pre-2026-10-05 spacing (the owner asked for more room between the categories) is rejected
+    monkeypatch.undo()
+    for name, old in (("HELP_ITEM_GAP", 8), ("HELP_DESC_GAP", 6), ("HELP_ROW_PITCH", menu.HELP_CAP_H + 1),
+                      ("HELP_LINE_PITCH", menu.GLYPH_H + 2)):
+        monkeypatch.setattr(menu, name, old)
+        try:                                  # rejected: a different picture, or the screen assert (off the edge)
+            assert _help_got(menu.help_pixels(W, H, COLOURS)) != {c: want[c] for c in COLOURS[1:]}, name
+        except AssertionError as e:
+            assert "outside the screen" in str(e), (name, e)
+        monkeypatch.undo()
 
 
 def test_the_help_says_what_the_owner_chose():

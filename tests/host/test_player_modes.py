@@ -180,8 +180,10 @@ HIT_FIELDS = MON_FIELDS + ("mon_ambush", "mon_movedir", "mon_facing", "mon_x", "
                            "mon_justattacked", "mon_active", "snd_alert")
 
 
-def _noisy(seed=3, n=600):
-    """walk about the start, turning, the trigger held for stretches"""
+def _noisy(seed=8, n=600):
+    """walk about the start, turning, the trigger held for stretches. M7 P6+P7: the seed was 3; at the owner's x1.5
+    turn (reference_model.ANGLE_TURN 960 << 16) seeds 3..7 walk where their 50-60 shots wake no monster by sound, and
+    seed 8 is the first that does (7 sound wakes, 63 noises; "shoot" parts at tic 172)"""
     rng = random.Random(seed)
     out, fire = [], False
     for t in range(n):

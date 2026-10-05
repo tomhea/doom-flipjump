@@ -33,12 +33,12 @@ from doomfj.config import GAME_CFG
 from doomfj.harness import W
 from doomfj.lut_generator import generate_dispatch_table_fj
 from doomfj.reference_model import ReferenceModel
-from doomfj.world import KEYS, TicEvents, World
+from doomfj.world import KEYS, WEAPON_TICS, TicEvents, World
 
 N = 600
 CELLS = (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1),
          ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1),
-         ("hud_v", 3), ("hud_v + 9*dw", 3))
+         ("hud_v", 3), ("hud_v + 9*dw", 3), ("wp_pass", 1))   # M7 P6+P7: the tic counter, 0 after every frame
 
 
 def _script(seed=11):
@@ -82,10 +82,10 @@ MUTS = {
 }
 
 
-def _program(start, mut=None):
+def _program(start, mut=None, tics=None):
     states = WC.weapon_states()
     frames = WC.overlay_frames(states)
-    text = "\n".join(WC.weapon_lines(states, frames))
+    text = "\n".join(WC.weapon_lines(states, frames, tics=tics))
     if mut:
         old, new = MUTS[mut]
         assert old in text, mut
@@ -137,13 +137,13 @@ def _want(row, states, frames):
             row["ammo"][gd.AM_CLIP], row["ammo"][gd.AM_SHELL], row["rng_player"],
             frames.index(WC.psprite_lump(wst)),
             0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else 1 + WC.flash_frames().index(WC.psprite_lump(fst)),
-            bar[0] | bar[1] << 4 | bar[2] << 8, bar[9] | bar[10] << 4 | bar[11] << 8]
+            bar[0] | bar[1] << 4 | bar[2] << 8, bar[9] | bar[10] << 4 | bar[11] << 8, 0]
 
 
-def _run(tmp_path, name, mut=None, saw=True):
+def _run(tmp_path, name, mut=None, saw=True, tics=None):
     script = _script()
     w = _world(saw)
-    text, states, frames = _program(_start(w), mut)
+    text, states, frames = _program(_start(w), mut, tics)
     src = tmp_path / (name + ".fj")
     src.write_text(text, encoding="utf-8")
     out = tmp_path / (name + ".fjm")
@@ -175,6 +175,29 @@ def test_the_weapon_is_the_model_tic_by_tic(tmp_path, saw):
     assert {g[0] for g in got} == ({gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW} if saw else
                                    {gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN})
     assert any(g[9] == 0 for g in got) and any(g[10] == 0 for g in got) and any(g[5] for g in got)
+
+
+# M7 P6+P7 (the owner's x2 fire rate): the weapon runs world.WEAPON_TICS DOOM tics a frame -- the model's
+# combat._weapon_tics and the fj's ONE P_MovePsprites block looped (weapon_lines' default `tics`). R9: the block run
+# once a frame (the P5 text), or three times, against the same model -- each must part.
+def test_the_weapon_runs_the_model_s_tics_per_frame(tmp_path):
+    assert WEAPON_TICS == 2
+    text = "\n".join(WC.weapon_lines(WC.weapon_states(), WC.overlay_frames()))
+    assert text.count("wp_ptic:") == 1 and "hex.if_flags wp_pass, 1<<%d, wp_ptic, wp_pdone" % WEAPON_TICS in text
+    assert text.count("wp_next:") == 1 and text.count("wp_flash:") == 1   # ONE block, looped -- not unrolled
+    once = "\n".join(WC.weapon_lines(WC.weapon_states(), WC.overlay_frames(), tics=1))
+    assert "wp_pass" not in once and "wp_ptic" not in once                # tics=1: the P5 text
+    # every frame's printed row ends with wp_pass (CELLS): back to 0 after the loop, every frame (_want's last 0)
+    got, want = _run(tmp_path, "wpn_tics", tics=WEAPON_TICS)
+    assert _first_bad(got, want) is None
+
+
+@pytest.mark.parametrize("tics", [1, 3])
+def test_the_checks_catch_a_weapon_at_the_wrong_tempo(tmp_path, tics):
+    got, want = _run(tmp_path, "wpn_t%d" % tics, tics=tics)
+    bad = _first_bad(got, want)
+    assert bad is not None, "the weapon at %d tics a frame went unnoticed" % tics
+    print("tics=%d caught at frame %d" % (tics, bad))
 
 
 @pytest.mark.parametrize("mut", sorted(MUTS))
@@ -231,8 +254,8 @@ def _hurt_script(kind, seed=5):
             pokes, window = 1, t
         if kind == "refire" and window is None and t > 40 and ws.p_refire >= 1 and ws.p_wpn_state not in ready:
             pokes, window = 1, t
-        if window is not None and not ws.p_dead and t - window == 9:
-            pokes |= 2                                     # dead before A_Lower can reach the bottom (16 tics)
+        if window is not None and not ws.p_dead and t - window == 9 // WEAPON_TICS:
+            pokes |= 2                                     # dead before A_Lower can reach the bottom (16 tics: 8 frames at M7 P6+P7 x2)
         if window is not None or (ws.p_dead and kind != "deadkeys"):
             for key in ("w1", "w2", "w3", "w4"):
                 k[key] = False

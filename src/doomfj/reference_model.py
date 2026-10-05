@@ -107,7 +107,12 @@ RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_
 # M7 P4.1: the side step a strafe key moves, per tic (the gameplay model's; DOOM's sidemove thrust at steady state)
 STRAFE_MOVE = 13 << 16
 FORWARD_MOVE = 16 << 16           # 16.16 map-units per tic ~= DOOM's steady-state run; S0 magnitude
-ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
+# BAM per frame; turn-left adds, turn-right subtracts. ONE definition: the model (step_sim, combat._player_move) and
+# the fj sim (wall_renderer._player_sim_lines) both read it. DOOM's angleturn[] is {640, 1280, 320} << 16 (walk,
+# run, and the SLOW turn of the first SLOWTURNTICS = 6 tics a key is held); the model has no slow turn and no run
+# turn: one rate. M7 P6+P7 (the owner, 2026-10-05: "turning feels a bit slow during a fight, might need to x1.5
+# it"): 640 -> 960 (x1.5). docs/gp-p67-interface.md section 12 measures what it costs the aim at range.
+ANGLE_TURN = 960 << 16
 
 # ── M14-d: line collision (P_CheckPosition / PIT_CheckLine) ───────────────────────────────────
 PLAYER_RADIUS = 16 << 16          # MT_PLAYER radius, 16.16 (the half-width of the collision box)

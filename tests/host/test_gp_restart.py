@@ -17,13 +17,15 @@ from doomfj import world as W
 ROOT = Path(__file__).resolve().parents[2]
 
 # A scripted fight from the player's start: four monsters put in front of him, awake; he fires in
-# bursts, walks into them, switches to the fist and turns. Deterministic by construction.
+# bursts, walks into them, switches to the fist and turns. Deterministic by construction. M7 P6+P7: at the owner's x2
+# fire rate (world.WEAPON_TICS) the imp died before it ever clawed, so it now stands at (60, 60), not (220, 40), and
+# the player wears blue armor (200) to outlive the closer fight -- every event kind the vacuity check names happens.
 SCENARIO_SRC = """
 def scenario(W, gd, skill=None):
     w = W.World(monster_tics=1, skill=gd.SK_HARD if skill is None else skill)
     ws = w.ws
     px, py = ws.px >> 16, ws.py >> 16
-    for doomednum, dx, dy in ((3004, 160, 0), (3001, 220, 40), (9, 250, -40), (3002, 300, 0)):
+    for doomednum, dx, dy in ((3004, 160, 0), (3001, 60, 60), (9, 250, -40), (3002, 300, 0)):
         ms = [i for i in range(w.layout.nmon)
               if w.mon_things[i].type == doomednum and ws.mon_active[i]]
         if not ms:
@@ -42,6 +44,7 @@ def scenario(W, gd, skill=None):
         if 220 <= t < 232:
             k["turn_left"] = True
         keys.append(k)
+    ws.p_armortype, ws.p_armor = 2, 200
     return w, keys
 """
 _ns = {}

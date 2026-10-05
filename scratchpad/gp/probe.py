@@ -159,7 +159,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # ... projcode's fireball pool ...
                    frozenset({"pj_act", "pj_x", "pj_y", "pj_mx", "pj_my", "pj_st", "pj_ti"}),
                    # ... and its blood pool with the effects' stream
-                   frozenset({"fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx"}))
+                   frozenset({"fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx"}),
+                   # M7 P7: the dead view turns to the killer -- the attacker (hurtcode) and each fireball's shooter
+                   frozenset({"p_atk", "pj_src"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -677,12 +679,12 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     # the player's health (12 bits, read unsigned -- the oracle masks), armor, armor type, damage count, death, and
     # the palette the last present showed (hurtcode); the fireball pool and the blood pool (projcode), rng_fx
     for name, width in (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("p_dc", 2), ("p_dead", 1), ("pal_cur", 1),
-                        ("rng_fx", 2)):
+                        ("rng_fx", 2), ("p_atk", 2)):                      # M7 P7: p_atk, 0 or 1 + the slot
         cells[name] = Cell(name, "hex", width)
     from doomfj.world import FIREBALL_POOL, FX_POOL
     for pool, n in (("pj", FIREBALL_POOL), ("fx", FX_POOL)):
         cells[pool + "_act"] = Cell(pool + "_act", "hex", 1, count=n)
-        for name, width in (("_x", 8), ("_y", 8), ("_st", 2), ("_ti", 1)) + ((("_mx", 8), ("_my", 8))
+        for name, width in (("_x", 8), ("_y", 8), ("_st", 2), ("_ti", 1)) + ((("_mx", 8), ("_my", 8), ("_src", 2))
                                                                              if pool == "pj" else ()):
             cells[pool + name] = Cell(pool + name, "hex", width, count=n)
     if nrt:

@@ -788,7 +788,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
         out += ["  %smv:" % L] + p32b_move_lines(m, schema=schema, **mv, dc=dict(dc, t=t, jh=dmg) if dc else None,
                                                  solid="mon_solid" if dmg else "mon_active")
     if dc:
-        out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt, hear=hear)
+        out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt, hear=hear, src=bool(hurt))
     out += ["  %s:" % nxt]
     return out
 
@@ -849,7 +849,8 @@ def _action_targets(L: str, nxt: str, dc, fall: bool = False) -> list:
     return tg
 
 
-def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear: bool = False) -> list:
+def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear: bool = False,
+                    src: bool = False) -> list:
     """after mm_decide: a decision enters its state (A_FaceTarget's facing from the leaf); and the attack states'
     actions -- each sets its kind and runs md_attack on the slot's position, seen flag and stream. `hear` (M7 P4.2b):
     each A_FaceTarget -- the decided state's, and every attack action's, behind its target test -- clears
@@ -877,6 +878,8 @@ def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear
                 "    hex.mov 4, mm_x, thpos_rt + %d*dw" % (16 * rt + 4),
                 "    hex.mov 4, mm_y, thpos_rt + %d*dw" % (16 * rt + 12),
                 "    hex.mov 1, mm_seen, thseen + %d*dw" % t, "    hex.mov 2, mm_rng, %s" % RN,
+                # M7 P7 (`src`: the attacks land, hurtcode): the attacker's id for dp_go and a fireball's pj_src
+                *(["    hex.set 2, md_src, %d" % (m + 1)] if src else []),
                 "    stl.fcall md_attack, md_ret",
                 "    hex.mov 1, %s, mm_fa" % FA, "    hex.mov 2, %s, mm_rng" % RN,
                 "    ;%s" % nxt]

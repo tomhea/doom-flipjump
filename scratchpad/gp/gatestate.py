@@ -34,7 +34,8 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "mon_ambush", "snd_alert",                                           # P4.2b: the noise
                "p_hp", "p_ar", "p_at", "p_dc", "p_dead",                            # P5: hurtcode's player cells
                "pj_act", "pj_x", "pj_y", "pj_mx", "pj_my", "pj_st", "pj_ti",        # P5: the fireball pool
-               "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx")                # P5: the blood pool, rng_fx
+               "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx",                # P5: the blood pool, rng_fx
+               "p_atk", "pj_src")                                                   # P7: the killer, the shooters
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,

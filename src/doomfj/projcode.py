@@ -218,7 +218,8 @@ def missile_cells_fj(w, pfx: str = "e1m1", lists=None, doors=None) -> Tuple[str,
 
 
 # ---- the decls -------------------------------------------------------------------------------------------------
-PJ_FIELDS = (("pj_act", 1), ("pj_x", 8), ("pj_y", 8), ("pj_mx", 8), ("pj_my", 8), ("pj_st", 2), ("pj_ti", 1))
+PJ_FIELDS = (("pj_act", 1), ("pj_x", 8), ("pj_y", 8), ("pj_mx", 8), ("pj_my", 8), ("pj_st", 2), ("pj_ti", 1),
+             ("pj_src", 2))     # M7 P7: the shooter, 1 + its monster slot (0 free): the impact's attacker
 FX_FIELDS = (("fx_act", 1), ("fx_x", 8), ("fx_y", 8), ("fx_st", 2), ("fx_ti", 1))
 # the model's field each cell mirrors (agent A's gate state reads the same pairs)
 MODEL_FIELD = {"pj_act": "proj_active", "pj_x": "proj_x", "pj_y": "proj_y", "pj_mx": "proj_momx",
@@ -230,7 +231,7 @@ ARG_DECLS = ["fxs_x: hex.vec 4", "fxs_y: hex.vec 4", "fxs_dmg: hex.vec 2"]
 WINDOW_DECLS = ["pw_act: hex.vec 1", "pw_x: hex.vec 8", "pw_y: hex.vec 8", "pw_mx: hex.vec 8", "pw_my: hex.vec 8",
                 "pw_st: hex.vec 2", "pw_ti: hex.vec 1", "pw_t: hex.vec w/4", "pw_leaf: hex.vec w/4",
                 "pw_nx: hex.vec 8", "pw_ny: hex.vec 8", "pw_ok: hex.vec 1", "pw_ang: hex.vec 8", "pw_idx: hex.vec 3",
-                "pw_c: hex.vec 8", "pw_rr: hex.vec 3"]
+                "pw_c: hex.vec 8", "pw_rr: hex.vec 3", "pw_src: hex.vec 2"]
 RET_DECLS = ["pj_sret: hex.vec w/4", "pj_slret: hex.vec w/4", "pj_tret: hex.vec w/4", "pj_eret: hex.vec w/4",
              "pj_oret: hex.vec w/4", "pw_lkret: hex.vec w/4", "pw_ulret: hex.vec w/4", "pw_loret: hex.vec w/4",
              "pj_lret: hex.vec w/4", "pt_ret: hex.vec w/4", "pj_pret: hex.vec w/4", "fx_sret: hex.vec w/4",
@@ -325,6 +326,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True) -
             "    finesine.read_cos pw_mx, pw_idx", *_times10("pw_mx"),
             "    finesine.read_sin pw_my, pw_idx", *_times10("pw_my"),
             "    hex.set 1, pw_act, 1",
+            "    hex.mov 2, pw_src, md_src",                                 # M7 P7: the shooter (md_attack's)
             "    hex.set 2, pw_st, %d" % _sidx(sp), "    hex.set 1, pw_ti, %d" % _tics(sp),
             *_roll(), "    hex.sub 1, pw_ti, pw_rr + 2*dw",               # tics -= P_Random() & 3 (no clamp)
             *_half_step("pw_x", "pw_mx", "pj_hx"), *_half_step("pw_y", "pw_my", "pj_hy"),
@@ -352,6 +354,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True) -
             "  pj_hit:",                                                     # the impact: damage, refused
             *_roll(),
             "    hex.mov 2, dp_dmg, pw_rr",
+            "    hex.mov 2, dp_src, pw_src",                                 # M7 P7: the attacker is the shooter
             "    stl.fcall dp_go, dp_ret",
             "    stl.fret pj_tret",
             "  pj_tl:",                                                      # the lines: the missile cells
@@ -425,6 +428,7 @@ def pool_tic_lines() -> List[str]:
             "    stl.fcall pw_unlink, pw_ulret",
             "    hex.zero 1, pw_act", "    hex.zero 8, pw_x", "    hex.zero 8, pw_y", "    hex.zero 8, pw_mx",
             "    hex.zero 8, pw_my", "    hex.zero 2, pw_st", "    hex.zero w/4, pw_leaf",
+            "    hex.zero 2, pw_src",                                        # M7 P7
             "  pt_out:",
             "    stl.fret pt_ret"]
 

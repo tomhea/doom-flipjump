@@ -159,6 +159,7 @@ def _row(w, nt):
         s += "%x%08x%08x%08x%08x%02x%x" % (ws.proj_active[k], ws.proj_x[k] & M32, ws.proj_y[k] & M32,
                                           ws.proj_momx[k] & M32, ws.proj_momy[k] & M32, ws.proj_state[k],
                                           ws.proj_tics[k])
+        s += "%02x" % (ws.proj_src[k] + 1 if ws.proj_active[k] else 0)        # M7 P7: the shooter (1 + slot)
         # the runtime thing's row: the WHOLE-UNIT position (the fraction cleared -- docs/gp-p5-interface.md, THE
         # MOBILE ROWS: monsters.MonsterViews.rt_state's), and the leaf
         s += "%08x%08x%03x" % (ws.proj_y[k] & M32 & ~0xFFFF, ws.proj_x[k] & M32 & ~0xFFFF, ws.proj_leaf[k])
@@ -198,7 +199,8 @@ def _hooks(w, log, feed):
         finally:
             st["spawn"] = False
     w._leaf16, w._missile_try, w._spawn_fireball = leaf16, mtry, spawn
-    w.damage_player = lambda dmg, source, ev: log.append("h%02x" % dmg)
+    # M7 P7: and the attacker the hit names (1 + the shooter's slot)
+    w.damage_player = lambda dmg, source, ev: log.append("h%02x%02x" % (dmg, source[1] + 1))
 
 
 def _model(script, nt):
@@ -264,7 +266,8 @@ def leaf_dump_lines(nleaf: int) -> list:
             "    stl.output 10", "    stl.fret dump_ret"]
 
 
-MUTANTS = ("highest", "pool9", "boxle", "norelink", "nohalf", "nodraw")
+MUTANTS = ("highest", "pool9", "boxle", "norelink", "nohalf", "nodraw",
+           "nosrc", "srcfree")        # M7 P7: the impact names no attacker; a freed slot keeps its shooter
 ANGLE = "    proj.point_to_angle pw_ang, pw_x, pw_y, viewx, viewy, 1\n"
 FLIPPED = "    proj.point_to_angle pw_ang, viewx, viewy, pw_x, pw_y, 1\n    hex.xor_by pw_ang + 7*dw, 8\n"
 
@@ -285,6 +288,10 @@ def _mutate(text, mut):
     if mut == "nohalf":
         text = sub("  pj_hx_p:\n    hex.add 8, pw_x, pw_c\n", "  pj_hx_p:\n")
         return sub("  pj_hy_p:\n    hex.add 8, pw_y, pw_c\n", "  pj_hy_p:\n")
+    if mut == "nosrc":
+        return sub("    hex.mov 2, dp_src, pw_src\n", "")
+    if mut == "srcfree":
+        return sub("    hex.zero 2, pw_src\n", "")
     if mut == "nodraw":
         return sub("    hex.inc 2, rng_fx\n    fxrnd.lookup pw_rr, rng_fx\n    hex.sub 1, pw_ti, pw_rr + 2*dw\n"
                    "    stl.fret pj_eret\n", "    stl.fret pj_eret\n")
@@ -324,6 +331,7 @@ def _build(tmp_path, name, mut=None):
                  "    hex.print_as_digit 8, pj_my + %d*dw, 0" % (8 * s),
                  "    hex.print_as_digit 2, pj_st + %d*dw, 0" % (2 * s),
                  "    hex.print_as_digit 1, pj_ti + %d*dw, 0" % s,
+                 "    hex.print_as_digit 2, pj_src + %d*dw, 0" % (2 * s),
                  "    hex.print_as_digit 16, thpos_rt + %d*dw, 0" % (16 * t),
                  "    hex.print_as_digit 3, thss_rt + %d*dw, 0" % (16 * t)]
     dump += ["    hex.print_as_digit 2, rng_fx, 0", "    stl.output 10", "    stl.fret dump_ret"]
@@ -337,6 +345,7 @@ def _build(tmp_path, name, mut=None):
             "hex.input 1, fswitch", "hex.input 1, nsp",
             "sp_loop:", "hex.if0 2, nsp, sp_done",
             "hex.input 2, mm_x", "hex.input 2, mm_y",
+            "hex.set 2, md_src, 1",                        # M7 P7: the shooter is slot 0, as the model's
             "stl.fcall pj_spawn, pj_sret",
             "hex.dec 2, nsp", ";sp_loop",
             "sp_done:",
@@ -347,7 +356,8 @@ def _build(tmp_path, name, mut=None):
             ";loop",
             "done:", "stl.loop",
             # dp_go (agent B's): the stub prints the damage it was given
-            "dp_go:", "    stl.output 104", "    hex.print_as_digit 2, dp_dmg, 0", "    stl.fret dp_ret",
+            "dp_go:", "    stl.output 104", "    hex.print_as_digit 2, dp_dmg, 0",
+            "    hex.print_as_digit 2, dp_src, 0", "    hex.zero 2, dp_src", "    stl.fret dp_ret",   # M7 P7
             # ptloc_walk (the binary's shared point location, held to point_in_subsector by test_collision_fj; its
             # 682-node text alone assembles past this harness's memory bound): the stub prints the query and reads
             # the model's leaf
@@ -357,6 +367,7 @@ def _build(tmp_path, name, mut=None):
              + ["wmagic: hex.vec 2", "wlist: hex.vec 2", "nsp: hex.vec 2", "hpin: hex.vec 4",
                 "viewx: hex.vec 8", "viewy: hex.vec 8", "mm_x: hex.vec 4", "mm_y: hex.vec 4",
                 "p_hp: hex.vec 3", "p_dead: hex.vec 1", "lvdone: hex.vec 1", "dp_dmg: hex.vec 2",
+                "dp_src: hex.vec 2", "md_src: hex.vec 2",                   # M7 P7
                 "dp_ret: hex.vec w/4", "dump_ret: hex.vec w/4", "dl_i: hex.vec w/4", "dl_n: hex.vec w/4",
                 "dstate: hex.vec %d" % (2 * ((nd + 1) // 2)), "lstate: hex.vec %d" % (2 * ((nl + 1) // 2)),
                 "fswitch: hex.vec 2",

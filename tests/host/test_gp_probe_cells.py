@@ -122,7 +122,11 @@ def test_only_the_skill_menu_is_optional(tmp_path):
                                  # M7 P5: hurtcode's player cells and the palette, the fireball pool, the blood pool
                                  "p_hp", "p_ar", "p_at", "p_dc", "p_dead", "pal_cur",
                                  "pj_act", "pj_x", "pj_y", "pj_mx", "pj_my", "pj_st", "pj_ti",
-                                 "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx"}
+                                 "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx",
+                                 "p_atk", "pj_src"}                       # M7 P7: the killer, the shooters
+    for one in ("p_atk", "pj_src"):                        # M7 P7: the pair comes together
+        with pytest.raises(KeyError, match="come together"):
+            _table(tmp_path, drop=(one,))
     for one in ("wp_rdy", "fl_frm"):                       # M7 P4.1: the weapon's fifteen come together
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))

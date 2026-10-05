@@ -246,10 +246,11 @@ class MonsterPhase:
     def hurt_state(self) -> Dict[str, int]:
         """hurtcode's player cells in their own units: p_hp the health's 12 bits (3 nibbles, two's complement -- a
         killing blow takes it below 0), p_ar the armor points (2 nibbles, 0..200), p_at the armor type (0 none,
-        1 green, 2 blue), p_dc the damage count (2 nibbles, 0..100), p_dead (PST_DEAD, 0/1)"""
+        1 green, 2 blue), p_dc the damage count (2 nibbles, 0..100), p_dead (PST_DEAD, 0/1); M7 P7: p_atk the
+        attacker (2 nibbles: 0 none, 1 + the monster slot)"""
         ws = self.world.ws
         return {"p_hp": ws.p_health & 0xFFF, "p_ar": ws.p_armor, "p_at": ws.p_armortype, "p_dc": ws.p_damagecount,
-                "p_dead": ws.p_dead}
+                "p_dead": ws.p_dead, "p_atk": ws.p_attacker}
 
     def proj_state(self) -> Dict[str, tuple]:
         """projcode's fireball pool, per slot (FIREBALL_POOL of them): pj_act 0/1; pj_x / pj_y the 16.16 position and
@@ -260,7 +261,9 @@ class MonsterPhase:
         return {"pj_act": tuple(ws.proj_active), "pj_x": tuple(v & MASK32 for v in ws.proj_x),
                 "pj_y": tuple(v & MASK32 for v in ws.proj_y), "pj_mx": tuple(v & MASK32 for v in ws.proj_momx),
                 "pj_my": tuple(v & MASK32 for v in ws.proj_momy), "pj_st": tuple(ws.proj_state),
-                "pj_ti": tuple(ws.proj_tics)}
+                "pj_ti": tuple(ws.proj_tics),
+                # M7 P7: the shooter, 1 + its slot while the slot is live (P_RemoveMobj zeroes proj_src too)
+                "pj_src": tuple(ws.proj_src[s] + 1 if ws.proj_active[s] else 0 for s in range(len(ws.proj_src)))}
 
     def fx_state(self) -> Dict[str, object]:
         """projcode's blood pool, per slot (FX_POOL of them), in pj_*'s units (fx_x / fx_y always whole map units: the

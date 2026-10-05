@@ -110,9 +110,16 @@ SKILL = gd.SK_HARD
 SIGHT_RULE = "los"
 
 
+# M7 P6+P7 E (the owner, 2026-10-05): the set's MONSTER TEMPO -- the monsters' world tics per frame
+# (`world.MONSTER_TICS_PER_FRAME`). A set file names its own (`monster_tics`, absent = 1: v1 .. v5 were recorded at one
+# tic a frame); `use_sight_rule` applies it with the sight rule, so every load of a set replays the model it recorded.
+MONSTER_TICS = 1
+
+
 def use_sight_rule(doc: dict) -> None:
-    global SIGHT_RULE
+    global SIGHT_RULE, MONSTER_TICS
     SIGHT_RULE = doc.get("sight_rule", "los")
+    MONSTER_TICS = int(doc.get("monster_tics", 1))           # M7 P6+P7 E
 UNIT = 1 << 16
 M32 = 0xFFFFFFFF
 CELL = 16
@@ -332,6 +339,7 @@ def apply_sight_rule(w) -> "W.World":
         from doomfj.sight import SeenHook
         hook = SeenHook(w)                  # this tic's picture writes the next tic's mon_seen
     w.set_sight_rule(SIGHT_RULE, hook)
+    w.monster_tics = MONSTER_TICS           # M7 P6+P7 E: the set's monster tempo (absent = 1)
     return w
 
 
@@ -2180,9 +2188,11 @@ def main():
             print("PLAN REFUSED: %s (nothing written)" % why, flush=True)
             return 1
         t0 = time.time()
-        use_sight_rule({"sight_rule": a.sight})
+        # M7 P6+P7 E: a NEW plan is made at the game's monster tempo, and records it
+        use_sight_rule({"sight_rule": a.sight, "monster_tics": W.MONSTER_TICS_PER_FRAME})
         doc = plan_set()
         doc["sight_rule"] = SIGHT_RULE
+        doc["monster_tics"] = MONSTER_TICS
         res = validate(doc, census=True, quiet=False)
         record_validation(doc, res)
         doc["hashes"] = code_hashes()

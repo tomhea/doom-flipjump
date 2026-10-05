@@ -16,6 +16,7 @@ FRAMES = 36
 
 def _start():
     ph = MonsterPhase(mode="idle")
+    ph.world.monster_tics = 1          # M7 P6+P7 E: the leaf runs ONE DOOM tic (the frame's loop: test_monster_tempo_fj)
     ws, n = ph.world.ws, ph.world.layout.nmon
     act = [k for k in range(n) if ws.mon_active[k]]
     ws.mon_tics[act[0]] = 1                                         # steps on the first frame

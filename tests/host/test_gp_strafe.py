@@ -27,7 +27,7 @@ def s32(v):
 
 
 def _world(angle):
-    w = W.World(skill=gd.SK_HARD)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     w.ws.pangle = angle
     return w
 

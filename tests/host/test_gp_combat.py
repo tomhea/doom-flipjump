@@ -13,6 +13,7 @@ from doomfj.reference_model import SimState
 
 
 def _world(skill=gd.SK_HARD, **kw):
+    kw.setdefault("monster_tics", 1)      # M7 P6+P7 E: these scripts test DOOM tics (test_monster_tempo: a frame of 2)
     return W.World(skill=skill, strict=True, **kw)
 
 

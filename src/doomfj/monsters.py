@@ -67,7 +67,8 @@ class MonsterPhase:
         self.world.reset(skill)
 
     def tic(self, x16: Optional[int] = None, y16: Optional[int] = None, angle: Optional[int] = None):
-        """one monster tic -- the player where the gate's world put him this frame (the wake mode looks at him).
+        """one monster FRAME (M7 P6+P7 E: `world.monster_tics` tics, World._monster_world) -- the player where the
+        gate's world put him this frame (the wake mode looks at him).
         M7 P5: and then the rest of world.tic's order after the monsters -- the fireballs, the barrels, the effects
         (`_projectiles_phase`, `_barrels_phase`, `_fx_phase`; before P5 nothing spawns into the pools and the barrels
         only animate). -> the tic's events (also kept as `last_tic`)"""
@@ -79,10 +80,7 @@ class MonsterPhase:
             ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
             ws.pangle = angle & 0xFFFFFFFF
         ev = TicEvents(0)
-        w._monsters_phase(ev)
-        w._projectiles_phase(ev)
-        w._barrels_phase(ev)
-        w._fx_phase(ev)
+        w._monster_world(ev)              # M7 P6+P7 E: world.MONSTER_TICS_PER_FRAME tics, the model's own loop
         self.last_tic = ev
         return ev
 

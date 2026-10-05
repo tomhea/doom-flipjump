@@ -74,13 +74,17 @@ GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
                       # M7 P3.3 (D3 d): a leaf's runtime things nearest first by P_AproxDistance from the
                       # player -- the game tier's sim.thing_pass_depth (the emitter reads THIS key, and
                       # monstercode.depth_walk refuses a monster mode that cannot emit the walk)
-                      rt_depth_order="aprox")
+                      rt_depth_order="aprox",
+                      # M7 P6+P7 E (the owner, 2026-10-05: "make sure monsters are almost always seen", "you must
+                      # always show the fireballs", "monsters should always be shown"): THE ACTORS RULE -- see
+                      # render_wall_frame's `exempt_actors` (the emitter and monstercode read THIS key)
+                      exempt_actors=True)
 # THE HOSTED TIERS' PICTURE (M7 P3.3): the game tier's set WITHOUT D3 d. The hosted tiers (hosted, hosted-doors,
 # hosted-loop, hosted-nocollide) move runtime things too -- the host sends their positions -- but their fj walks
 # a leaf's list in INDEX order (`sim.thing_pass`); the depth walk is the GAME tier's alone. A gate that drives a
 # hosted binary (m1_gate, m2_r3_gate, m2_r4_gate, m2_pass_probe) asks for THIS set, or it compares a sorted oracle
 # with an unsorted binary on every leaf holding two moved things.
-HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False)
+HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False)   # (M7 P6+P7 E: the game's alone)
 RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_order: off, or the key
 # ⚠ DOOM's forwardmove 0x32 (=50) is a THRUST, not a displacement. `P_Thrust` adds `move*2048` to
 # momx/momy, and against FRICTION 0xE800 (0.90625) the steady state is 50*2048/65536 / 0.09375 =
@@ -1919,7 +1923,7 @@ class ReferenceModel:
                           thing_positions=None, thing_hidden=None, thing_views=None,
                           seen_out: set | None = None, rt_depth_order=False,
                           aim_things: dict | None = None, aim_out: list | None = None,
-                          mobiles=None, degrade: bool = False) -> bytes:
+                          mobiles=None, degrade: bool = False, exempt_actors: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -2007,6 +2011,22 @@ class ReferenceModel:
                 deg_mark = DEG_PNEAR
             if deg_lip_scale is None:
                 deg_lip_scale = DEG_LIP_SCALE
+        # M7 P6+P7 E (the owner, 2026-10-05): `exempt_actors` -- THE ACTORS (the monsters, live or dead, and the
+        # MOBILES: fireballs, blood) are always drawn when they have a visible pixel the walls leave open:
+        #   1. no soft raise: the monsters' soft count becomes the hard MONSTER_BUDGET (255: never reached, the union
+        #      holds 53), so a monster keeps its BASE bound (MIN_SPRITE_H_MONSTER) whatever the frame's load;
+        #   2. a mobile is an actor too: the monster category (n_mon) and the monster BASE bound (a far fireball
+        #      shorter than MIN_SPRITE_H no longer vanishes; monstercode.mobile_view_rows bakes the same);
+        #   3. no B-gate for an actor: its fragment takes slot B behind a nearer sprite at any height;
+        #   4. (every thing) a sprite with NO ROW inside the view -- the drawn bucket [ytop_b, ytop_b + hb) entirely
+        #      above or below it, e.g. the corpse the player stands on, whose feet-planted rows are all under the
+        #      view -- claims no fragment slot: it drew nothing, yet it held slot A in every column of its (wide)
+        #      span and left the monsters behind it to the B-gate. Pixel-neutral for itself; counted as before.
+        # The scenery keeps its graduated acceptance and the B-gate; the hard budgets stay the backstop. The fj gets
+        # the same from its `dsoftm` operand = `monbudget` (wall_renderer: the game tier), which switches 3 and 4
+        # on in frame.thing_record_body, and from the mobile rows' sp_mon 1 and base bound (2).
+        if exempt_actors and deg_things is not None:
+            deg_things = (deg_things[0], deg_things[1], MONSTER_BUDGET, deg_things[3])
         deg_sliver = deg_sliver or 0
         deg_stack_scale = deg_stack_scale or 0
         deg_mark = deg_mark or 0
@@ -2210,6 +2230,8 @@ class ReferenceModel:
                     # monotone, so fj still latches `tstop` once BOTH are spent.
                     mon = t.type in MONSTER_TYPES
                     mob = t_di >= _ndraw                 # M7 P5: a mobile (scenery: never seen, never aimed)
+                    # M7 P6+P7 E: an ACTOR -- the monster category, base bound and B-gate exemption (exempt_actors)
+                    act = mon or (mob and exempt_actors)
                     # M7 P3.2 (docs/gp-monsters.md 8.2, D3 e): SEEN -- the sprite projects in front at the
                     # BASE monster size cull (MIN_SPRITE_H_MONSTER, not the soft budgets' raise) and one of
                     # its columns is still OPEN when its leaf is reached, tested BEFORE the count budgets:
@@ -2252,7 +2274,7 @@ class ReferenceModel:
                                 _ak = _ac - aim_lo
                                 if aim_out[_ak] == 0 or _atzi < aim_tz[_ak]:   # strictly nearer overwrites
                                     aim_out[_ak], aim_tz[_ak] = _asid, _atzi
-                    if (n_mon >= MONSTER_BUDGET) if mon else (n_thing >= THING_BUDGET):
+                    if (n_mon >= MONSTER_BUDGET) if act else (n_thing >= THING_BUDGET):
                         continue                         # ... `continue`, not `break`: a scenery
                     art = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None   # budget must not
                            else self.art_of_lump(sprite_wad, tview[0], spr_cache))       # stop the
@@ -2265,18 +2287,18 @@ class ReferenceModel:
                     # min-size bar rises, so far specks stop paying the record loop exactly on
                     # the frames that are already heavy. Light frames never reach SOFT and keep
                     # every speck. Monsters keep their own (looser) pair, per the owner's policy.
-                    minh_ = MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H
+                    minh_ = MIN_SPRITE_H_MONSTER if act else MIN_SPRITE_H
                     if deg_things is not None and not mob:   # M7 P5: a mobile keeps the BASE bound
                         soft_s, minh2_s, soft_m, minh2_m = deg_things
-                        if mon and n_mon >= soft_m:
+                        if act and n_mon >= soft_m:
                             minh_ = minh2_m
-                        elif not mon and n_thing >= soft_s:
+                        elif not act and n_thing >= soft_s:
                             minh_ = minh2_s
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
                                             t.x, t.y, tsec.floor_h + (MISSILE_Z if mob else 0), art, minh_)
                     if pr is None:
                         continue
-                    if mon:
+                    if act:
                         n_mon += 1
                     else:
                         n_thing += 1
@@ -2298,6 +2320,8 @@ class ReferenceModel:
                     # column (fj picks it once per thing too: frame.thing_record_body)
                     tier = sprite_tier(hb, far_, hd_ok)
                     ytop_b = ytop + th_px - hb                # FEET planted: the bucket moves the top
+                    if exempt_actors and (ytop_b >= H or ytop_b + hb <= 0):
+                        continue                              # M7 P6+P7 E (4): no row in the view, no slot
                     lr = self.wall_light_row(self.wall_lightnum(tsec.light, 0), hb, art[4])
                     frac = (max(0, tx1) - tx1) * istep
                     for x in range(max(0, tx1), min(W, tx2 + 1)):
@@ -2322,7 +2346,7 @@ class ReferenceModel:
                         # its head to a potion's columns).
                         if sfrag[x] is None:
                             sfrag[x] = (ytop_b + st[0], st[1], lr)
-                        elif not b_minh or hb >= b_minh:
+                        elif not b_minh or hb >= b_minh or (act and exempt_actors):   # M7 P6+P7 E (3)
                             # 25M-CAP B-GATE: slot B only for fragments tall enough to plausibly
                             # show through slot A's gaps; a small/far B fragment is ~always
                             # occluded. The slot stays OPEN, so a later (taller) thing may claim

@@ -58,7 +58,7 @@ def _script(seed=11):
 def _world(saw=True):
     """the shotgun given; the chainsaw too, or not -- key 1 is the chainsaw when it is owned, so the fist is only
     ever up in a run without it"""
-    w = World(skill=gd.SK_HARD, monsters="idle", player="fire")
+    w = World(skill=gd.SK_HARD, monsters="idle", player="fire", monster_tics=1)   # M7 P6+P7 E: one DOOM tic
     ws = w.ws
     ws.p_owned[gd.WP_SHOTGUN] = 1
     ws.p_owned[gd.WP_CHAINSAW] = int(saw)

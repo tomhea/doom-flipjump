@@ -29,6 +29,9 @@ THE TIC (`World.tic`), in this order:
   3. monsters, in slot order from the scheduler's rotating cursor (see `_monsters_phase`); their
      attack actions now hurt the player and spawn fireballs;
   4. fireballs by pool slot, then 5. barrels by index, then 6. puffs/blood by pool slot;
+     M7 P6+P7 E (the owner, 2026-10-05): steps 3-6 are THE MONSTERS' WORLD and run `monster_tics`
+     (MONSTER_TICS_PER_FRAME = 2) times in a row (`_monster_world`) -- the player, the doors and the
+     lifts stay at one tic a frame;
   7. `leveltime += 1`.
 
 MONSTERS are DOOM's A_Look / A_Chase / P_Move / P_TryMove / P_NewChaseDir (Chocolate Doom's
@@ -112,6 +115,14 @@ NEWCHASEDIR_MAX_TRIES = 6          # distinct P_TryWalk directions per P_NewChas
 DIAG_STEP = {8: 6, 10: 7}          # rounded diagonal step per monster speed (D5)
 FIREBALL_POOL = 8                  # imp fireballs alive at once; a full pool fizzles (D5, S3b)
 FX_POOL = 2                        # puffs and blood alive at once (D5, S3b)
+# M7 P6+P7 package E (the owner, 2026-10-05: "the enemies shooting and walking feels slow ... maybe run 2 ticks each
+# time?"): THE MONSTERS' TEMPO -- the monsters' world (the monster tic with its attacks and the damage they deal, the
+# fireball pool, the barrels, the puff/blood pool) runs this many DOOM tics per FRAME; the player (move, turn, weapon,
+# pickups, nukage), the doors, the lifts, `leveltime` and the menu stay at one tic a frame (D4 for the player).
+# ONE definition: `World.monster_tics` defaults to it, the gates' MonsterPhase inherits it, and the emitter's
+# frame tic (wall_renderer.world_tic_lines) loops this many times. A frozen set recorded before it names its own
+# (`scenarios_v2.use_tempo`: absent = 1).
+MONSTER_TICS_PER_FRAME = 2
 TICS_FOREVER = 15                  # schema encoding of DOOM's tics == -1 (one nibble)
 MOVECOUNT_FLOOR = -1               # movecount saturates here; see `_a_chase`
 OCTANT_TAN_NUM, OCTANT_TAN_DEN = 106, 256   # tan(22.5 deg) ~ 106/256: the octant classifier
@@ -621,7 +632,8 @@ class World(CombatMixin):
                  k_heavy: int = K_HEAVY, cursor_policy: Callable = next_cursor,
                  strict: bool = False, aim: Optional[Callable] = None,
                  player_blocking: bool = True, monsters: str = "full", sight_rule: str = "los", player: str = "full",
-                 seen_hook: Optional[Callable[["World"], None]] = None):
+                 seen_hook: Optional[Callable[["World"], None]] = None,
+                 monster_tics: int = MONSTER_TICS_PER_FRAME):
         if map_wad is None:
             from doomfj.config import DEFAULT_MAP_WAD
             from doomfj.wad import WadFile
@@ -640,6 +652,8 @@ class World(CombatMixin):
         # set v4's model) one exact-LOS `sight` for both. `seen_hook` writes mon_seen after each tic.
         self.set_sight_rule(sight_rule, seen_hook)
         self.k_heavy = k_heavy
+        assert monster_tics >= 1, monster_tics
+        self.monster_tics = monster_tics            # M7 P6+P7 E: the monsters' world tics per frame
         self.cursor_policy = cursor_policy
         self.strict = strict
         self._build_level()
@@ -886,16 +900,28 @@ class World(CombatMixin):
             self._doors_phase(keys, ev)
             self._movers_phase(ev)
             self._player_phase(keys, ev)
-            self._monsters_phase(ev)
-            self._projectiles_phase(ev)
-            self._barrels_phase(ev)
-            self._fx_phase(ev)
+            self._monster_world(ev)              # M7 P6+P7 E: `monster_tics` tics of the monsters' world
             self.ws.leveltime = (self.ws.leveltime + 1) & 0xFFFF
         if self.seen_hook is not None:
             self.seen_hook(self)                 # M7 P3.2: this tic's picture -> the next tic's mon_seen
         self.tic_count += 1
         self.events.append(ev)
         return ev
+
+    def _monster_world(self, ev: TicEvents) -> None:
+        """M7 P6+P7 package E (the owner, 2026-10-05): THE MONSTERS' WORLD, `monster_tics` DOOM tics in one frame --
+        each tic is world.tic's steps 3-6 in order (the monsters from the scheduler's cursor, the fireballs, the
+        barrels, the puffs and blood), and the second tic starts where the first left every cell (the cursor, the
+        pools, every stream). Both tics see the frame's ONE player pose (he moved before them), the frame's doors and
+        movers, and the seen marks / aim of the picture the player last saw (`seen_hook` runs once, after the frame):
+        a monster that moves in the first tic keeps last picture's mark in the second, as any monster keeps it for
+        one tic. A player killed in the first tic is a dead target in the second. `MonsterPhase.tic` (the gates'
+        mirror) calls THIS, so the gates and the model cannot step a different number of tics."""
+        for _ in range(self.monster_tics):
+            self._monsters_phase(ev)
+            self._projectiles_phase(ev)
+            self._barrels_phase(ev)
+            self._fx_phase(ev)
 
     def run(self, key_script: Sequence[dict]) -> List[TicEvents]:
         return [self.tic(k) for k in key_script]

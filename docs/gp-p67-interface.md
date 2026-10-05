@@ -731,3 +731,182 @@ report it" -- reported to the owner the same morning):** O1 OUT (a D5 simplifica
 height, the weapon down, the red palette fades); O2 NOT taken (P5's deviation stands, v5's pictures do not move); O3
 re-record the trails and report gamespeed with the route note. The rung is UNITED (section 2), the fallback "loot"
 mode kept in reserve.
+
+---
+
+## 11. Owner requests: tempo x2 and monster visibility (package E, 2026-10-05)
+
+**The owner, after playing blocked48:** "the enemies shooting and walking feels slow ... maybe run 2 ticks each time?";
+"make sure monsters are almost always seen"; and (forwarded later the same day) "sometimes [the fireball] doesn't show
+at all ... you must always show the fireballs" and "monsters get off-rendered when I move a little bit to some side
+... a really small part of them is behind a corpse ... monsters should always be shown". Package E is (T) the tempo and
+(V) the visibility. Branch `p67-e`; every number below says MEASURED (with its command) or ESTIMATE.
+
+### 11.1 (T) THE TEMPO -- what runs twice, and in what order
+
+ONE definition: `world.MONSTER_TICS_PER_FRAME = 2` (`World(monster_tics=...)` defaults to it; the emitter imports it).
+`World._monster_world(ev)` is the monsters' world, run `monster_tics` times in a row; `World.tic` and the gates'
+mirror `MonsterPhase.tic` both call it, so a gate cannot step a different count than the model.
+
+| the frame (World.tic / the fj frame) | tics a frame |
+|---|---|
+| 0. the restart block; the frozen-level guard (`g_leveldone`) | once |
+| 1. doors (the use press; monster presses `d_monreq` from LAST frame), 2. movers | once |
+| 3. the PLAYER: nukage, weapon keys, use lines, psprites (the shot through the LAST picture's aim window, its noise flood), the `p_dc` / `p_bc` fades, berserk, the move with pickups and blocking | once |
+| **4. THE MONSTERS' WORLD x2:** [the monsters from `sched_cursor` (A_Look, A_Chase, the attacks -- hitscan, claw, bite, the fireball's spawn -- and the damage they deal through `damage_player`), the fireballs (`_projectiles_phase`), the barrels (`_barrels_phase`, package C), the puffs and blood (`_fx_phase`)], then the same four again | **2** |
+| 5. `leveltime` +1 (nukage's clock: the player's) | once |
+| 6. the picture: the `seen` marks (`seen_hook`), the aim window, the palette | once |
+
+Consequences, each by construction:
+- **Seen marks.** Both monster tics read the marks of the picture the player last saw (fj: `thseen` is zeroed ONCE,
+  after the loop; the model: `seen_hook` runs once, after `World.tic`). A monster that moved in the first tic keeps
+  last picture's mark in the second -- the staleness every mark already had, now up to two tics.
+- **Aim window and noise.** The player's shot resolves in step 3, before both tics, through last picture's window;
+  its noise floods there, so the FIRST monster tic hears it. Unchanged.
+- **RNG.** Every stream a monster tic, a fireball or an effect draws (`mon_rng[m]`, `rng_fx`, `rng_pl` for hits on
+  the player, `rng_world` for barrels) draws twice as often per frame -- the same calls in the same order, two tics'
+  worth. The player's own draws (P4's shot) stay once a frame.
+- **Damage and death.** Damage from both tics accumulates into `p_health` / `p_dc`; the damage count fades once a
+  frame (the player phase), so a hit's red flash lasts as many frames as before, and hits arrive twice as often. A
+  player killed in tic 1 is a dead target in tic 2 (P5's rule: lost as a target, blocks nothing).
+- **Doors and movers.** Both tics see the frame's doors and lifts. A monster's door press (`d_monreq`) or lift trigger
+  in either tic lands on the next frame's door / mover phase (idempotent if set twice). P_ChangeSector runs once,
+  before the loop (fj: `p32b_change_sector_lines` outside it; the model: `_door_phase_scene`).
+- **K = 6 heavy actions is per DOOM tic**, so a frame can run 12. Each phase keeps its own `lvdone` guard.
+- **G2 (package A's exit-frame fix)** wraps `_monster_world` and `leveltime` exactly as it wrapped the four phases.
+
+**fj** (`wall_renderer.world_tic_lines`, ONE composer, no per-slot code duplicated): `[P_ChangeSector] wt_rep = 2;
+wt_loop: [mt_tic .. mt_skip] [stl.fcall pj_phase] [(C: bar_phase)] [stl.fcall fx_phase]; wt_rep -= 1; if wt_rep: goto
+wt_loop; [thseen = 0] [the bar]`. `wt_rep` is one nibble (`WT_DECLS`), set every frame and 0 at every frame's end (its
+declared value: nothing for the M1 reset to restore). At tempo 1 the composer returns blocked48's text unchanged. It
+takes the pools' fcalls as every `stl.fcall` line before `hex.if1 1, lvdone, p5_bar_skip`, so package C's
+`stl.fcall bar_phase, bar_pret` inserted among them lands inside the loop with no edit here.
+
+### 11.2 (V) VISIBILITY -- what the budgets did, the ROOT CAUSES, and the actors rule
+
+**The sprite budgets as blocked48 has them (every tier):** `THING_BUDGET` / `MONSTER_BUDGET` 255 (never bind on
+E1M1: hard backstops, KEPT); the soft raise `DEG_SOFT_SCENERY` 3 -> 24 rows and `DEG_SOFT_MON` 4 -> 10 rows; the base
+bounds `MIN_SPRITE_H` 3 (scenery) and `MIN_SPRITE_H_MONSTER` 1; two write-once fragment slots per column, slot A
+first come, slot B only for a sprite at least `DEG_SPRB_MINH` 32 rows tall (the B-gate). P5's mobiles were SCENERY at
+`MIN_SPRITE_H`, exempt from the soft raise only.
+
+**The causes, reproduced in the ORACLE** (blocked48 draws the same pixels; `scratchpad/gp/p67e_visibility_probe.py`
+attributes every fragment slot to the thing that wrote it):
+1. **THE CORPSE (the owner's "a small part behind a corpse") -- ROOT CAUSE: a sprite with no row inside the view
+   still records fragments.** v5 R0-aftermath frame 57: the player stands on a corpse (tz 4 units). Its sprite is
+   under the view (its feet-planted rows all below row 84) yet spans every column, so it took slot A everywhere; every
+   monster behind it then needed slot B and was B-gated (a sergeant at 438 units, an imp at 1016, both under 32 rows):
+   they vanished WHOLE while in view and in a fight. Moving sideways changes the columns the corpse spans -- "when I
+   move a little bit to some side". In DOOM no sprite removes another; here an invisible one did.
+2. **THE FIREBALL -- the scenery base bound, and the B-gate.** A fireball (BAL1, ~15 px of art) farther than ~400
+   units projects under `MIN_SPRITE_H` = 3 rows: not drawn at all until it comes near; its explosion frames are
+   bigger, so "only the explosion is shown". MEASURED (`tests/host/test_actors_rule.py`): a fireball 500 units up the
+   open courtyard from v5's R0-courtyard pose draws 0 px under blocked48's rule, and draws under the new one. A
+   fireball in front of the imp that fired it also B-gates the imp out of those columns (the corpse's mechanism).
+3. **THE CROWD (the owner's "too much") -- the soft raise:** after 4 accepted monsters a monster needs 10 rows (~450
+   units on this 84-row view), so far monsters drop out exactly on the busy frames.
+
+**THE ACTORS RULE** (`render_wall_frame(exempt_actors=True)`, set in `GAME_RENDER_KW` only; `HOSTED_RENDER_KW` and
+deg_gate's keyword set keep blocked48's picture). An ACTOR is a monster (live or corpse) or a mobile:
+- (1) no soft raise for monsters: their soft count is the hard `MONSTER_BUDGET` (the hard budget stays the backstop);
+- (2) a mobile is an actor: the monster class (counted in `n_mon`) at the monster base bound
+  (`monstercode.mobile_view_rows`: `sp_mon` 1, both depth bounds at `MIN_SPRITE_H_MONSTER`);
+- (3) no B-gate for an actor: it takes slot B behind a nearer sprite at any height;
+- (4) EVERY thing: a sprite whose drawn bucket `[ytop_b, ytop_b + hb)` has no row in `[0, VIEW_H)` records nothing
+  (pixel-neutral for itself; still counted; a thing with a seen flag still goes through the seen probe, because the
+  oracle's seen test has no vertical part).
+The scenery keeps the soft raise and the B-gate. The two fragment slots stay (a structural limit, below).
+
+**fj, with no macro arity change:** the game tier passes `dsoftm = monbudget` (= `MONSTER_BUDGET`, from
+`GAME_RENDER_KW["exempt_actors"]`) to `frame.thing_record_body`, and inside it the ONE equality `dsoftm==monbudget`
+gates (4) (six rep-lines after the bucket's `trb_y0`, then `.rec_goto seen_probe` or `ret`) and (3) (`hex.if0 2,
+sp_mon, bslot_gate`, else `.rec_goto bslot_done`). Every other tier binds `dsoftm = DEG_SOFT_MON` (4 != 255), so the
+lines expand to nothing and its ops are unchanged (deg_gate). New @-locals only: `bslot_gate, offv_top, offv_out,
+offv_ok`.
+
+**MEASURED visibility on v5's frames** (`PYTHONPATH="src;." python scratchpad/gp/p67e_visibility_probe.py --every 2
+[--tempo 2]`: every 2nd frame of the 11 runs, 550 frames; "should show" = a live monster with an open column at its
+base size AND a row inside the view):
+
+| | tempo 1 (v5 as recorded) | tempo 2 (v5's keys replayed at x2) |
+|---|---|---|
+| live monster-frames that should show | 1,249 | 1,083 |
+| MISSING under blocked48's rule | 390 on 172 of 550 frames (soft raise 187, slots 203) | 327 on 164 frames (151 / 176) |
+| MISSING under the actors rule | **109 on 71 frames**: both slots taken 57; a 1-2 px speck whose sampled bank column is empty 52 | **63 on 53 frames** (both slots 23, specks 40) |
+| mobiles drawn with a row in the view (of all alive, in view or not) | 101 of 360 -> **167** | 71 of 269 -> **106** |
+| things recorded past every reject | +2.04 / frame | +1.71 / frame |
+| fragment columns recorded | **-6.9 / frame** (off-view sprites stop holding columns) | **-10.6 / frame** |
+
+What is left: (a) far specks (1-2 columns at ~2000 units, the low-res bank's sampled column empty) and (b) three sprites
+over the same columns (two slots). (b) is the next lever if the owner still sees it -- a third slot, or a per-column
+"no visible row in THIS column" test in the record loop (~0.3K ops per sprite column); not done here.
+
+### 11.3 Cost (ops/frame) and size
+
+**(T), the second monster-world tic.** MEASURED on blocked48 (profx `games_blocked48.marks.bin`, the run in
+`docs/ship-evidence/blocked48_profx_games.log`): the span from marker 18 (`dsc_done`) to marker 19
+(`e1m1_bspcode_walk`) over the 1,000 game frames (`phases.frames()`) -- it holds P_ChangeSector, the monster tic,
+`pj_phase`, `fx_phase`, the bar, the aim prologue and the palette: **mean 166,290, median 153,807, p80 247,923, p95
+416,172, p99 729,977, max 1,142,154, min 18,114 ops/frame.** The second tic repeats all of it but P_ChangeSector, the
+bar, the aim prologue and the palette (a few K). ESTIMATE: **+0.15M on the mean frame, +0.25M on the p80 frame, up to
++1.1M on the worst frame** of gamespeed's games. v5's fights are denser, and twice-as-fast monsters fire more
+fireballs (P5's UNVERIFIED ~0.1-0.15M per flying fireball per tic): **v5/v6 binding +0.15 .. +0.4M**. Against the
+cap: blocked48's v5 binding 16,037,431 + P6/P7's +0.0-0.15M + (T) -> **~16.2 .. 16.6M, under 22M with >= 5.4M of
+headroom.** The stress case S1 (21.7M/frame over 30 frames, 8 fireballs in flight) gets the second tic of 8 fireballs:
+**~+0.8 .. +1.2M -> ~22.5 .. 23M on S1's average** (a scenario: CAP-22 binds v5's (mean + p80)/2, D1). v5's
+single-frame maximum, 26.2M (+/- 2^18), may rise by up to the measured 1.14M span.
+
+**(V), the actors rule.** Its record test costs ~0.7K ops per recorded thing (a `hex.scmp 8` ~250; set, mov, add, dec,
+sign 8) and ~40 for the actor test: ~10-15K/frame at ~15 recorded things. Against that, the probe's deltas: +2.04
+things recorded (~5-10K each past the projection every thing already pays) and -6.9 fragment columns (each a record
+slot and its stream emit, ~10-20K: `an_fam.txt`'s ~30K sprite column on blocked27 x the v2 column's ~0.6). ESTIMATE
+**-0.15 .. +0.05M on v5**: the off-view test frees more work than the newly drawn actors cost. UNVERIFIED until B0.
+
+**Size.** (V): the transplanted section assembled with the game binding vs another tier's: **+7,296 words per
+`thing_record_body` instantiation** (MEASURED: `tests/fj/test_actor_record_fj.py`'s program with one call, 19,170 ->
+26,466 words); the game tier instantiates it twice (`thing_leaf`, `thing_leaf_b`): **~+14.6K words**. The mobile rows
+change values, not size. (T): the loop is six lines and one nibble, **< 0.1K words**. Total **~+15K words, +0.011% of
+2^27** (35.16% -> ~35.17% before P6/P7's own). Placement can move ops either way (the pins re-roll: pinreport).
+
+### 11.4 The frozen set: v6
+
+v5's replays MOVE under (T) and its drawn populations under (V) (the census picture is `GAME_RENDER_KW`), so F3 and
+F4 fail: a behaviour change, a **v6**, the owner's freeze.
+- **How v6 is made** (`scratchpad/gp/p67e_v6_record.py`, oracle-only, never freezes): v5's 11 runs -- names, setups,
+  checkpoints and KEYS byte for byte (the keys hash `794fa332d21c447e` is asserted unchanged) -- with `monster_tics:
+  2` and v5's sight rule "seen", replayed with the census; the poses, final digests, totals, drawn populations and the
+  CAP-22 criteria are recorded; status PLANNED, no B0, no approval. Its result: section 11.6.
+- **A set file names its tempo.** `scenarios_v2.use_sight_rule(doc)` also applies `doc["monster_tics"]` (absent = 1:
+  v1-v5 were recorded at one tic a frame) to every world it makes (`apply_sight_rule`), so `--validate`, B0's model
+  replay and the census replay each set under its own model; `--plan` records the game's tempo in a new set. (The
+  grown-schema witness `state_dump.py` calls `new_world()` without `use_sight_rule`: v5's tempo 1 is its default, and
+  it already ran v5 at the "los" rule -- a pre-existing gap, noted, not changed.)
+- **B0 injects nothing new.** It replays the set's model (v6: tempo 2) for the pre-tic pose, doors, movers and P5's
+  health / armor pin; the BINARY's monsters are its own, mirrored by `MonsterPhase` at `MONSTER_TICS_PER_FRAME` (the
+  binary's tempo). B0 on v5 still runs on a tempo-2 binary (v5 replays at 1, the binary's monsters run at 2); only the
+  injected health is the slower model's, so a mirror death there is possible.
+- **The freeze's catch:** `scenarios_v2.py --freeze` RE-PLANS and requires identical keys; v6's keys are v5's by
+  decision, not re-planned at tempo 2. The first freeze of v6 needs the owner AND a freeze path that accepts inherited
+  keys (or a re-plan, which is a different set) -- the coordinator's call.
+- **gamespeed**'s routes move too (monsters arrive sooner): its trails are package A's re-record (O3) anyway.
+
+### 11.5 Files the integrator merges (overlaps with A and C)
+
+- `src/doomfj/world.py`: `World.tic` (A's G2 wraps `_monster_world`).
+- `src/doomfj/monsters.py`: `MonsterPhase.tic` (A adds the player half).
+- `src/doomfj/wall_renderer.py`: `world_tic_lines` and its splice (C edits `p5_tic_lines`, which the composer reads
+  unchanged); the `_DSOFTM` binding beside `_thing_leaf_body`; `_p5_model_asserts`' mobile row class.
+- `src/doomfj/reference_model.py`: `exempt_actors` and the `act` lines in the thing loop (C adds the barrels to the aim
+  window and a `z` to `mobiles` there).
+- `src/fj/frame_render.fj`: `thing_record_body`'s two blocks (C's baked-barrel aim option (i) touches the same macro's
+  projection).
+- `src/doomfj/monstercode.py`: `mobile_view_rows` -- C's puffs join the pool states and become actors with no edit.
+  **Drops and barrel explosions are C's call**: drops look like pickups, so scenery is the D3-consistent choice;
+  barrels stay baked scenery (O2).
+- `scratchpad/gp/scenarios_v2.py` (`use_sight_rule`, `apply_sight_rule`, `--plan`; A edits `BinaryMirror`) and
+  `scratchpad/gp/census_lib.py` (the key-set copy check).
+- Tests that script single DOOM tics now pin `monster_tics=1`: `test_gp_combat`, `test_gp_restart`,
+  `test_gp_scheduler`, `test_gp_strafe`, `test_player_modes`, `test_p5_hurt_model`, and tests/fj `test_monster_tic_fj`,
+  `test_player_shot_fj`, `test_weapon_fj`. The tempo itself is `tests/host/test_monster_tempo.py` and
+  `tests/fj/test_monster_tempo_fj.py`; the actors rule `tests/host/test_actors_rule.py` and
+  `tests/fj/test_actor_record_fj.py` (and `test_sprite_bank_fj`'s record harness binds the non-game tier).

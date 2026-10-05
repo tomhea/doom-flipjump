@@ -37,7 +37,8 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx",                # P5: the blood pool, rng_fx
                # P6 / P7 (docs/gp-p67-interface.md 4.5): the loot, the barrels, the drops, the game's cells, thvis
                "p_bc", "p_str", "p_bp", "am_misl", "am_cell", "mdrop", "dr_live",
-               "bar_st", "bar_ti", "bar_hp", "bar_solid", "rng_wd", "lvtime", "g_rs", "g_skill", "thvis")
+               "bar_st", "bar_ti", "bar_hp", "bar_solid", "rng_wd", "lvtime", "g_rs", "g_skill", "thvis",
+               "p_atk", "pj_src")                                                   # P7: the killer, the shooters
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,

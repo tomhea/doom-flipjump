@@ -39,7 +39,8 @@ N = 360
 M32 = 0xFFFFFFFF
 ACTION = {3004: "A_PosAttack", 9: "A_SPosAttack", 3001: "A_TroopAttack", 3002: "A_SargAttack"}
 CELLS = (("mm_rng", 2), ("mm_fa", 1), ("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("p_dc", 2), ("p_dead", 1),
-         ("rng_pl", 2), ("pj_n", 1), ("pj_lx", 4), ("pj_ly", 4))
+         ("rng_pl", 2), ("pj_n", 1), ("pj_lx", 4), ("pj_ly", 4),
+         ("p_atk", 2))                    # M7 P7: the attacker a landed hit names (1 + the slot)
 
 
 def _world():
@@ -121,7 +122,7 @@ def _apply(w, slots, rec, fire, ev):
 def _row(w, m, fire) -> str:
     ws = w.ws
     vals = [ws.mon_rng[m], ws.mon_facing[m], ws.p_health & 0xFFF, ws.p_armor, ws.p_armortype, ws.p_damagecount,
-            ws.p_dead, ws.rng_player, fire.n & 15, fire.last[0] & 0xFFFF, fire.last[1] & 0xFFFF]
+            ws.p_dead, ws.rng_player, fire.n & 15, fire.last[0] & 0xFFFF, fire.last[1] & 0xFFFF, ws.p_attacker]
     return "".join("%0*x" % (n, v) for (_c, n), v in zip(CELLS, vals))
 
 
@@ -149,6 +150,11 @@ MUTANTS = {
                "    hex.cmp 4, mt_d, mt_c60, md_bite_r, md_bite_r, md_out\n"),
     "nofireball": ("    stl.fcall pj_spawn, pj_sret\n", ""),
     "bulnodmg": ("    hex.mov 1, dp_dmg, md_row\n", ""),
+    # M7 P7: a bullet's hit names no attacker; the claw's and the bite's neither
+    "bulnosrc": ("    hex.mov 2, dp_src, md_src\n    stl.fcall dp_go, dp_ret\n  md_bul_out:",
+                 "    stl.fcall dp_go, dp_ret\n  md_bul_out:"),
+    "meleenosrc": ("    hex.mov 2, dp_src, md_src\n    stl.fcall dp_go, dp_ret\n    ;md_out\n  md_bite:",
+                   "    stl.fcall dp_go, dp_ret\n    ;md_out\n  md_bite:"),
 }
 
 
@@ -181,6 +187,7 @@ def _program(w, mut=None):
 def _build(tmp_path, name, mut=None):
     w = _world()
     records = _records(w)
+    slots = _slots(w)
     kinds = MD.ATTACK_KINDS
     nib = {"p_health": ("p_hp", 3), "p_armor": ("p_ar", 2), "p_armortype": ("p_at", 1),
            "p_damagecount": ("p_dc", 2), "p_dead": ("p_dead", 1), "rng_player": ("rng_pl", 2)}
@@ -196,6 +203,7 @@ def _build(tmp_path, name, mut=None):
                  "hex.set 1, wp_tics, 1", "hex.set 2, wp_sy, 32",
                  "hex.set 1, wp_frm, %d" % frames.index(WC.psprite_lump(ready))]
         body += ["hex.set %d, %s, %d" % (nib[f][1], nib[f][0], v & (16 ** nib[f][1] - 1)) for f, v in pokes.items()]
+        body += ["hex.set 2, md_src, %d" % (slots[tp] + 1)]       # M7 P7: the slot stub's id
         body += ["stl.fcall md_attack, md_ret"]
         body += ["hex.print_as_digit %d, %s, 0" % (n, c) for c, n in CELLS]
         body += ["stl.output 10"]

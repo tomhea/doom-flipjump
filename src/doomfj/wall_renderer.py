@@ -403,6 +403,7 @@ LEVEL_DONE_MENU = ["LEVEL COMPLETE", "", "PRESS ENTER"]
 LEVEL_DONE_SELECTED = 2
 
 from doomfj import restartcode as _restartcode                    # noqa: E402 (M7 P7)
+from doomfj import hurtcode as _hurtcode                          # noqa: E402 (M7 P7: the death think's turn)
 
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
@@ -2763,6 +2764,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + ((list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]]) if _hrt else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
+                # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
+                + (_hurtcode.turn_lines([t_ for t_, _r in _chase["slots_rt"]])
+                   if (_hrt and menu and _restartcode.mortal(PLAYER_MODE)) else [])
                 + ["mm_block_end:"]) + BSn
         else:
             _mon_move = ""

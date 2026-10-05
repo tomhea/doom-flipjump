@@ -67,7 +67,10 @@ STARTREDPALS, NUMREDPALS = 1, 8     # st_stuff.c
 NPALETTES = STARTREDPALS + NUMREDPALS          # playpal0 .. playpal8: the game palette and the red ones (P5)
 # (cell, schema field, nibbles): the player's hurt cells (world.build_schema's widths, asserted in hurt_decls)
 CELLS = (("p_hp", "p_health", 3), ("p_ar", "p_armor", 2), ("p_at", "p_armortype", 1), ("p_dc", "p_damagecount", 2),
-         ("p_dead", "p_dead", 1))
+         ("p_dead", "p_dead", 1),
+         # M7 P7: player->attacker (0 none, else 1 + the monster slot): dp_go writes it from `dp_src`, the dead
+         # view turns to it (`turn_lines`)
+         ("p_atk", "p_attacker", 2))
 # the PERSISTENT cells (the M1 reset must leave them alone -- like weaponcode.PERSIST)
 PERSIST = tuple(c for c, _f, _n in CELLS) + ("pal_cur",)
 assert DC_CAP + DP_MAX < 256
@@ -186,7 +189,10 @@ def hurt_decls(start: Dict[str, int]) -> List[str]:
                "dp_c100: hex.vec 2, %d" % DC_CAP, "hp_v: hex.vec 3", "hp_bcd: hex.vec 3",
                # md_attack's full emission (monsterdecide.attack_leaf_lines(full=True)): the bullet row (nibble 3
                # is never written: the reach compare reads it as 0), the attack sight, the bullets' fcall register
-               "md_row: hex.vec 4", "md_seen: hex.vec 1", "md_bret: hex.vec w/4"])
+               "md_row: hex.vec 4", "md_seen: hex.vec 1", "md_bret: hex.vec w/4",
+               # M7 P7: the hit's source (dp_go's input, 0 after every call) and the attacking monster's id (the
+               # slot stubs set it before md_attack), 1 + slot; the dead view's turn (`turn_lines`)
+               "dp_src: hex.vec 2", "md_src: hex.vec 2"] + TURN_DECLS)
 
 
 def restart_lines(start: Dict[str, int]) -> List[str]:
@@ -209,6 +215,7 @@ def dp_lines() -> List[str]:
            "    hex.sign 3, p_hp, dp_out, dp_pos",                  # health < 0
            "  dp_pos:",
            "    hex.if0 3, p_hp, dp_out",                          # health == 0
+           "    hex.mov 2, p_atk, dp_src",                         # M7 P7: player->attacker = source
            "    hex.mov 2, dp_d, dp_dmg",
            "    hex.if0 1, p_at, dp_dc",
            "    hex.mov 2, dp_si, dp_dmg", "    hex.mov 1, dp_si + 2*dw, p_at",
@@ -246,7 +253,62 @@ def dp_lines() -> List[str]:
             "  dpk_bt:",
             "    hex.set 2, wp_sy, %d" % WC.BOTTOM,                   # the dead player's weapon stays down
             "  dp_out:",
+            "    hex.zero 2, dp_src",                              # M7 P7: a caller that names none is "no attacker"
             "    stl.fret dp_ret"]
+    return out
+
+# ---- M7 P7: the dead view turns to the killer (P_DeathThink; combat.CombatMixin._turn_to_attacker) ------------------
+ANG5 = 0x40000000 // 18
+TURN_DECLS = ["dt_t: hex.vec 2", "dt_off: hex.vec w/4", "dt_base: hex.vec w/4", "dt_p: hex.vec w/4",
+              "dt_d: hex.vec 8", "dt_c5: hex.vec 8, %d" % ANG5,
+              "dt_cm5: hex.vec 8, %d" % (-ANG5 & 0xFFFFFFFF), "dt_tret: hex.vec w/4"]
+
+
+def turn_lines(slot_rows: Sequence[int]) -> List[str]:
+    """`dt_turn` (stl.fcall dt_turn, dt_tret): the death think's turn and damage-flash fade, for a dead player.
+    `slot_rows[m]` = monster slot m's runtime thing: its thpos_rt row holds the whole-unit 16.16 position (the
+    model's mon_x / mon_y << 16). No attacker (p_atk 0): the flash fades. Else the attacker's row -- p_atk's two-level
+    dispatch sets only its index, one pointer read fetches the row -- and the angle from (viewx, viewy) to it through
+    the monsters' rotation leaf `mon_rot_leaf` (monstercode.rotation_leaf_lines: proj.point_to_angle, the oracle's
+    point_to_angle exactly, into mr_ang -- one shared instance instead of a second ~46K-word expansion);
+    delta = mr_ang - viewangle (mod 2^32): delta < ANG5 or delta > -ANG5 (unsigned) -> viewangle = the angle and the
+    flash fades; else viewangle +- ANG5, the short way (+ while delta < ANG180). PACKAGE B'S DEATH THINK calls this in
+    place of its plain p_dc fade (HOOK). The program must hold mon_rot_leaf (P3.1's) and thpos_rt."""
+    from doomfj.combat import ANG5 as MODEL_ANG5
+    assert ANG5 == MODEL_ANG5
+    n = len(slot_rows)
+    assert 0 < n + 1 <= 0x80 and all(0 <= t < 0x100 for t in slot_rows), (n, max(slot_rows))
+    hi = (n + 1 + 15) // 16
+    out = ["dt_turn:",
+           "    hex.if0 2, p_atk, dtt_fade",
+           "    sim.jump16 p_atk + 1*dw, " + ", ".join("dtt_h%d" % h if h < hi else "dtt_fade" for h in range(16))]
+    for h in range(hi):
+        out += ["  dtt_h%d:" % h, "    sim.jump16 p_atk, " + ", ".join(
+            "dtt_m%d" % (16 * h + k - 1) if 0 < 16 * h + k <= n else "dtt_fade" for k in range(16))]
+    for m, t in enumerate(slot_rows):
+        out += ["  dtt_m%d:" % m, "    hex.set 2, dt_t, %d" % t, "    ;dtt_go"]
+    out += ["  dtt_go:",
+            # the row's two INTEGER halves (nibbles 4-7 and 12-15 of thpos_rt + 16 * t: a monster's row has no
+            # fraction, the model's mon_x << 16) straight into mr_tx / mr_ty's, their fractions zeroed -- 8 pointer
+            # reads, not the row's 16 (each read is ~3K words of code: MEASURED, read_hex 16 = 48K)
+            "    hex.zero w/4, dt_off", "    hex.mov 2, dt_off + 1*dw, dt_t",
+            "    hex.set w/4, dt_base, thpos_rt + 4*dw",
+            "    hex.ptr_index dt_p, dt_base, dt_off",
+            "    hex.zero 4, mr_tx", "    hex.read_hex 4, mr_tx + 4*dw, dt_p",
+            "    hex.add_constant w/4, dt_p, 8*dw",
+            "    hex.zero 4, mr_ty", "    hex.read_hex 4, mr_ty + 4*dw, dt_p",
+            "    stl.fcall mon_rot_leaf, mr_ret",                                # mr_ang = R_PointToAngle2
+            "    hex.mov 8, dt_d, mr_ang", "    hex.sub 8, dt_d, viewangle",          # delta, mod 2^32
+            "    hex.cmp 8, dt_d, dt_c5, dtt_face, dtt_far, dtt_far",            # delta < ANG5
+            "  dtt_far:",
+            "    hex.cmp 8, dt_d, dt_cm5, dtt_turn, dtt_turn, dtt_face",         # delta > -ANG5
+            "  dtt_turn:",
+            "    hex.if_flags dt_d + 7*dw, 0xFF00, dtt_plus, dtt_minus",         # delta < ANG180: turn left
+            "  dtt_plus:", "    hex.add 8, viewangle, dt_c5", "    ;dtt_out",
+            "  dtt_minus:", "    hex.sub 8, viewangle, dt_c5", "    ;dtt_out",
+            "  dtt_face:", "    hex.mov 8, viewangle, mr_ang",
+            "  dtt_fade:", "    hex.if0 2, p_dc, dtt_out", "    hex.dec 2, p_dc",
+            "  dtt_out:", "    stl.fret dt_tret"]
     return out
 
 

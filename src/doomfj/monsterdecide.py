@@ -216,6 +216,7 @@ def attack_leaf_lines(full: bool = False) -> List[str]:
                 "    hex.if0 1, mm_asr, %s" % far,
                 "    hex.inc 2, mm_rng",
                 "    %s.lookup dp_dmg, mm_rng" % table,
+                "    hex.mov 2, dp_src, md_src",                  # M7 P7: the attacker (dp_go zeroes dp_src)
                 "    stl.fcall dp_go, dp_ret",
                 "    ;md_out"]
     out += ["  md_claw_f:",                                       # A_TroopAttack beyond melee: the fireball
@@ -237,6 +238,7 @@ def attack_leaf_lines(full: bool = False) -> List[str]:
             "    hex.cmp 3, mt_d + 1*dw, md_row + 1*dw, md_bul_hit, md_bul_out, md_bul_out",   # mt_d < L
             "  md_bul_hit:",
             "    hex.zero 2, dp_dmg", "    hex.mov 1, dp_dmg, md_row",
+            "    hex.mov 2, dp_src, md_src",                          # M7 P7: the attacker, every bullet
             "    stl.fcall dp_go, dp_ret",
             "  md_bul_out:", "    stl.fret md_bret"]
     return out

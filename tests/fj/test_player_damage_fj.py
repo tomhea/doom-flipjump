@@ -34,7 +34,14 @@ FJ = ROOT / "src" / "fj"
 N = 400
 # (fj cell, nibbles) printed after every record
 CELLS = (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("p_dc", 2), ("p_dead", 1), ("rng_pl", 2), ("wp_st", 2),
-         ("wp_tics", 1), ("wp_frm", 1), ("wp_sy", 2), ("hud_v + 3*dw", 3), ("hud_v + 6*dw", 3))
+         ("wp_tics", 1), ("wp_frm", 1), ("wp_sy", 2), ("hud_v + 3*dw", 3), ("hud_v + 6*dw", 3),
+         ("p_atk", 2))                    # M7 P7: player->attacker
+
+
+def _src(r: int) -> int:
+    """M7 P7: record r's source -- 0 (none: a caller that sets no dp_src, as sector damage) or 1 + a monster slot,
+    1..54 (every hi nibble). Derived from the index, so the records' own draws are P5's unchanged."""
+    return (r * 11) % 55
 
 
 def _world():
@@ -73,23 +80,23 @@ def _want(ws, states, frames) -> str:
                                              owned=(False, False, False), blue=False))
     vals = [ws.p_health & 0xFFF, ws.p_armor, ws.p_armortype, ws.p_damagecount, ws.p_dead, ws.rng_player,
             idx[ws.p_wpn_state], ws.p_wpn_tics, frames.index(WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state])),
-            ws.p_wpn_sy, bar[3] | bar[4] << 4 | bar[5] << 8, bar[6] | bar[7] << 4 | bar[8] << 8]
+            ws.p_wpn_sy, bar[3] | bar[4] << 4 | bar[5] << 8, bar[6] | bar[7] << 4 | bar[8] << 8, ws.p_attacker]
     return "".join("%0*x" % (n, v) for (_c, n), v in zip(CELLS, vals))
 
 
-def _apply(w, pokes, dmg, ev):
+def _apply(w, pokes, dmg, ev, src=1):
     ws = w.ws
     for f, v in pokes.items():
         setattr(ws, f, v)
-    w.damage_player(dmg, ("mon", 0), ev)
+    w.damage_player(dmg, ("mon", src - 1) if src else ("sector", 0), ev)
 
 
 def _expected(records) -> bytes:
     w = _world()
     states, frames = WC.weapon_states(), WC.overlay_frames()
     lines = []
-    for pokes, dmg in records:
-        _apply(w, pokes, dmg, TicEvents(0))
+    for r, (pokes, dmg) in enumerate(records):
+        _apply(w, pokes, dmg, TicEvents(0), _src(r))
         lines.append(_want(w.ws, states, frames))
     return ("\n".join(lines) + "\n").encode()
 
@@ -109,6 +116,9 @@ MUTANTS = {
     # (a bar reading the negative health itself would index ammobcd past its 512 rows: a run-away, not a control)
     "bardead1": ("hb_neg:\nhex.zero 3, hp_v\n", "hb_neg:\nhex.set 3, hp_v, 1\n"),
     "barnoarmor": ("hex.mov 2, hp_v, p_ar\n", ""),
+    # M7 P7: the attacker not recorded; a source left over for the next caller (which names none)
+    "noatk": ("    hex.mov 2, p_atk, dp_src\n", ""),
+    "srcstale": ("    hex.zero 2, dp_src\n", ""),
 }
 
 
@@ -141,7 +151,7 @@ def _build(tmp_path, name, mut=None):
            "p_damagecount": ("p_dc", 2), "p_dead": ("p_dead", 1), "rng_player": ("rng_pl", 2),
            "p_ready": ("wp_rdy", 1), "p_wpn_tics": ("wp_tics", 1), "p_wpn_sy": ("wp_sy", 2)}
     body = ["stl.startup_and_init_all"]
-    for pokes, dmg in records:
+    for r, (pokes, dmg) in enumerate(records):
         for f, v in pokes.items():
             if f == "p_wpn_state":
                 body += ["hex.set 2, wp_st, %d" % idx[v],
@@ -149,6 +159,7 @@ def _build(tmp_path, name, mut=None):
             else:
                 c, n = nib[f]
                 body.append("hex.set %d, %s, %d" % (n, c, v & (16 ** n - 1)))
+        body += ["hex.set 2, dp_src, %d" % _src(r)] if _src(r) else []      # 0: the caller names none
         body += ["hex.set 2, dp_dmg, %d" % dmg, "stl.fcall dp_go, dp_ret", "stl.fcall hpb_leaf, hpb_ret"]
         body += ["hex.print_as_digit %d, %s, 0" % (n, c) for c, n in CELLS]
         body += ["stl.output 10"]

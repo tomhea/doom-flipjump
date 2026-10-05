@@ -372,6 +372,7 @@ from the corpse leaf's seed (section 4, B).
   P5 restart RESTORED `pal_cur` (hurtcode.restart_lines no longer writes it).
 - `thvis` and `thnext` survive the M1 reset by being in NO restore set (`PERSIST_BY_ABSENCE`); the restart writes both,
   and the audit checks them. The drop rows ride `thpos_rt` / `thss_rt` (THING_PERSIST); their extent is the label's.
+- The dead view's turn to the killer (section 10, O1): `p_atk`, `pj_src`, `dt_turn` -- see there.
 - INTEGRATION HOOKS (B / C): `build.LOOT_PERSIST` / `BARREL_PERSIST` (empty until the modules land), their decls in
   `game_screen_persisted_decls`, and their level start into `compose_restart(p6_common=, p6_skills=)` from
   `restartcode.level_start_lines` (section 4.5's units transcribed in `p6_cell_values`; held equal to package A's
@@ -398,6 +399,8 @@ Hex cells, nibbles little-endian, read UNSIGNED unless said.
 | `lvtime` | 4 | leveltime | 16 bits, wraps |
 | `g_rs` | 1 | g_restart | 0/1 |
 | `g_skill` | 1 | skill | the SKILLS index (0 easy, 1 medium, 2 hard); the probe maps it to gd.SK_* |
+| `p_atk` (P7, hurtcode.CELLS) | 2 | p_attacker (NEW schema field, phase "P7") | player->attacker: 0 none (sector damage; a barrel's blast -- its source is the player who set it off), else 1 + the monster slot of the last hit that LANDED (hitscan, claw, bite, or the fireball's shooter). Restarted to 0. |
+| `pj_src` (P7, projcode.PJ_FIELDS) | 2 x 8 | proj_src | the fireball's shooter, 1 + its slot while the slot is live, 0 free |
 | `fx_st` (P5) | -- | fx_state | adds S_PUFF1..4 = 42..45 |
 | `aim_sid` (P4.2a) | -- | aim_sid | 1..53 a monster slot + 1; **54..75 barrel b + 54** |
 | `thpos_rt` / `thss_rt` rows nt+10 .. nt+34 | -- | (drops) | dropper k's row: the corpse's whole-unit row and leaf while `mdrop[k] == 1`, else (0, 0) and in no list. nt = 68 MEASURED, so rows <= 103 <= `things.LIST_MAX_THINGS` 254. |
@@ -1250,3 +1253,40 @@ match) -> `sync` -> `nukage` -> `weapon` -> `move` (dead: no move, no turn) -> t
 fail on a death, `b0_scenarios.py --oracle-only` (the frozen replay plus the mirror, no binary; a per-run loot-parting
 counter). m2_r4_gate (the hosted tier) and gatestate_check (a pre-P1.5 mechanics check) keep step_sim, by design
 (`tests/host/test_gates_step_the_model.py` names why).
+
+**OUTCOME (package D): the FALLBACK + THE TURN TO THE KILLER** (the coordinator took the turn into this rung the same
+day). The weapon drops (P5), the red palette fades (P5), use restarts at the skill being played (P7-d, package D:
+`restartcode.tic_lines`), the dead player neither walks nor turns by keys (P7-a/b/c, package B's dead guards) -- and
+the dead view TURNS TO THE KILLER, as P_DeathThink does. No view drop is in this rung: every exact drop is over the
+size bar and costs ops on every frame, and the one cheap drop is not provably byte-exact without a build.
+
+THE TURN, as built (package D):
+- **Model** ("full" only; "fx" keeps P5's plain fade): `World.p_attacker` (a NEW schema field: v5 needs the SCHEMA
+  GROWTH re-freeze, `--grown-from`, since v5's hurt frames now write it), set by `combat.damage_player` on every hit
+  that lands -- 1 + the monster slot for a `("mon", m)` source (hitscan, claw, bite; a fireball's impact carries its
+  shooter), 0 for sector damage (NULL) and a barrel's blast (its source is the player himself, which turns nothing).
+  `_death_think` -> `_turn_to_attacker`: angle = R_PointToAngle2 (`rm.point_to_angle`) from the player to the
+  attacker's CURRENT position; delta < ANG5 or > -ANG5 -> snap and the flash fades, else +-ANG5 the short way (minus at
+  exactly ANG180); no attacker -> the flash fades. Host: tests/host/test_death_turn_model.py.
+- **fj**: `p_atk` (hurtcode.CELLS, so it persists, restarts and reaches the restore set with the hurt cells);
+  `dp_go` writes it from `dp_src` and zeroes `dp_src` on every exit (a caller that names none = no attacker); the
+  monster slot stubs set `md_src` = 1 + slot before `md_attack`, which copies it into `dp_src` before each of its
+  `dp_go` calls; `pj_spawn` stores it in the fireball's `pj_src`, the impact hands it to `dp_go`, P_RemoveMobj zeroes
+  it. `hurtcode.turn_lines` = the leaf `dt_turn`: a two-level dispatch on `p_atk` to the attacker's thpos_rt row,
+  two 4-nibble pointer reads of its integer x / y, then the monsters' own `mon_rot_leaf` for the angle (one shared
+  `proj.point_to_angle`), then the compare / turn / snap / fade.
+- **HOOKS**: package B's death think calls `stl.fcall dt_turn, dt_tret` IN PLACE of its plain `p_dc` fade (after the
+  psprites, before the use test). Package C's barrel blast and package B's nukage call `dp_go` WITHOUT setting
+  `dp_src` (0: DOOM turns nothing for either) -- nothing to add, but nothing may set it either.
+- **Cost (MEASURED in the harness, tests/fj/test_death_turn_fj.py's program):** the leaf is +48,820 words (0.036% of
+  2^27; a first cut that read the whole 16-nibble row and carried its own point_to_angle was +145,852). A dead tic
+  costs ~14.5K ops (turning or facing), 259 with no attacker; dead frames only. Alive frames pay one 2-nibble move or
+  zero per landed hit, per attack action and per live fireball slot (the copy-in / out): tens of ops, and only when
+  something attacks (ESTIMATE). The alive-side size (dp_go's two lines, eight pool stubs' extra field, the slot stubs'
+  `hex.set`) is not measured; ESTIMATE ~10K words.
+- **Proof**: tests/fj/test_death_turn_fj.py (the leaf against `_death_think`, 55 cases x 40 tics: every octant, the
+  attacker on the viewer, delta at +-ANG5 / +-ANG5 +- 1 / ANG180 / just under, long turns, no attacker; every id
+  level of the dispatch) with R9 mutants "no turn", "the turn's direction flipped", "the turn never stops", "the flash
+  fades while turning" -- each caught; test_player_damage_fj (+ `noatk`, `srcstale`), test_monster_attack_fj
+  (+ `bulnosrc`, `meleenosrc`), test_fireball_pool_fj (+ `nosrc`, `srcfree`), test_restart_fj (p_atk / pj_src
+  restored) -- all against the model.

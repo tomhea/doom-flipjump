@@ -76,6 +76,7 @@ from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
 from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE   # STRAFE_MOVE: M7 P4.1, the ONE value
+from doomfj.reference_model import ANG180 as _ANG180                       # M7 P7: P_DeathThink's turn
 
 # 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
 # FORWARD_MOVE, rounded (plan section 2, input). world.py re-exports it.
@@ -132,6 +133,8 @@ RESTART_KEEP = ("skill", "mode", "kb_f", "kb_b", "kb_l", "kb_r", "kb_u",
 SUBRANDOM_MAX = 255                         # |P_SubRandom()| <= 255
 DROP_ITEM = {"MT_CLIP": 2007, "MT_SHOTGUN": 2001}   # the dropped thing's editor number
 RUN_STATES = ("S_PLAY_RUN1", "S_PLAY_RUN2", "S_PLAY_RUN3", "S_PLAY_RUN4")
+ANG5 = 0x40000000 // 18                     # tables.h: ANG5 = ANG90 / 18 -- P_DeathThink's turn a tic
+ANGLE_MASK32 = 0xFFFFFFFF
 # P_TouchSpecialThing's cases for every gettable thing E1M1 holds (sprite name in the comment)
 GETTABLE = frozenset({2018, 2019, 2014, 2015, 5, 2011, 2012, 2023, 2007, 2048, 2010, 2046, 2047,
                       17, 2008, 2049, 8, 2005, 2001})
@@ -422,15 +425,36 @@ class CombatMixin:
         self._player_mobj_tick()
 
     def _death_think(self, keys: dict, ev) -> None:
-        """P_DeathThink without the view drop or the turn to the killer: the weapon keeps lowering,
-        the damage flash fades, and use (held, as DOOM reads it) asks for the restart."""
+        """P_DeathThink without the view drop (docs/gp-p67-interface.md section 10, O1): the weapon keeps
+        lowering; M7 P7 ("full"): the view TURNS TO THE KILLER -- R_PointToAngle2 from the player to the attacker
+        (`p_attacker`: 1 + a monster slot; its position now, a corpse's too), and when the delta is within ANG5
+        either way the view snaps to it and the damage flash fades, else it turns ANG5 toward it (the short way);
+        with no attacker the flash fades. Use (held, as DOOM reads it) asks for the restart. Before "full" the flash
+        faded every tic and nothing turned (P5's model: no fj mirror of the death think)."""
         ws = self.ws
         self._weapon_tics(keys, ev)
-        if ws.p_damagecount:
+        if self._p_full and ws.p_attacker:
+            self._turn_to_attacker(ev)
+        elif ws.p_damagecount:
             ws.p_damagecount -= 1
         if keys["use"]:
             ws.g_restart = 1
             ev.restart_requests += 1
+
+    def _turn_to_attacker(self, ev) -> None:
+        """P_DeathThink's `player->attacker && player->attacker != player->mo` branch (p_user.c)"""
+        ws = self.ws
+        m = ws.p_attacker - 1
+        angle = self.rm.point_to_angle(ws.px, ws.py, ws.mon_x[m] << 16, ws.mon_y[m] << 16)
+        delta = (angle - ws.pangle) & ANGLE_MASK32
+        if delta < ANG5 or delta > (-ANG5 & ANGLE_MASK32):
+            ws.pangle = angle                                       # looking at the killer: the flash fades
+            if ws.p_damagecount:
+                ws.p_damagecount -= 1
+        elif delta < _ANG180:
+            ws.pangle = (ws.pangle + ANG5) & ANGLE_MASK32
+        else:
+            ws.pangle = (ws.pangle - ANG5) & ANGLE_MASK32
 
     def _special_sector(self, ev) -> None:
         """P_PlayerInSpecialSector's damaging floors, only when standing ON the sector's floor."""
@@ -882,6 +906,10 @@ class CombatMixin:
                 ws.p_armortype = 0
             ws.p_armor -= saved
             dmg -= saved
+        # M7 P7: player->attacker = source. A barrel's blast carries the barrel's target -- the player who set it
+        # off on E1M1 (no monster attack reaches a barrel) -- and "the player himself" turns nothing, like sector
+        # damage's NULL: both are 0
+        ws.p_attacker = source[1] + 1 if source[0] == "mon" else 0
         ws.p_damagecount = min(100, ws.p_damagecount + dmg)
         ws.p_health -= dmg
         ev.player_hurt.append((source, raw, dmg))

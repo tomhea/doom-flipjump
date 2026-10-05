@@ -331,6 +331,10 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("p_mobj_state", 8, group="player", phase="S3b", doc="the player thing's state")
     f("p_mobj_tics", 4, group="player", phase="S3b", doc="its tics; 15 = forever")
     f("p_dead", 1, group="player", phase="S3b", doc="playerstate == PST_DEAD")
+    # M7 P7 (owner, 2026-10-05: the dead view turns to the killer): player->attacker -- the source of the last hit
+    # that landed (P_DamageMobj), as 0 (none: sector damage, or the player himself -- a barrel he set off) or
+    # 1 + the monster slot; P_DeathThink turns the dead view toward it
+    f("p_attacker", _index_bits(lay.nmon + 1), group="player", phase="P7", doc="0 or 1 + monster slot")
     # -- doors (existing DOOR_PERSIST, plus the monster press) ------------------------------------
     f("d_state", 4, count=lay.ndoor, group="door", phase="existing", label="dstate",
       doc="door stop index; doors in ascending sector order")

@@ -8,6 +8,9 @@ the leaf, and prints the window.
 
 R9: four mutants, each caught: the radius one larger; a tie overwriting (>= instead of >); `drawn` ignored; the range
 test gone.
+
+M7 P6: the same leaf with BARRELS (`leaf_lines(barrels=True)`): radius class 2 (aimcode.RC_BARREL) reads the third
+r_eff, ids reach 76; its control reads class 2 as class 1.
 """
 import random
 import struct
@@ -25,7 +28,7 @@ from doomfj.lut_generator import generate_dispatch_table_fj
 M32 = 0xFFFFFFFF
 N = 400
 CENTERX = GAME_CFG.CENTERX
-REFF = (23, 37)                         # a fixed r_eff pair for the harness (the table is the oracle's business)
+REFF = (23, 37, 13)                     # fixed r_eff values for the harness (the table is the oracle's business)
 MUTS = {
     "r+1": ("hex.mov 2, ar_r16 + 4*dw, aim_rr\n", "hex.mov 2, ar_r16 + 4*dw, aim_rr\nhex.inc 8, ar_r16 + 4*dw\n"),
     "tie": ("hex.cmp 3, ar_tzi, aim_tz + 0*dw, aimw0, aimx0, aimx0", "hex.cmp 3, ar_tzi, aim_tz + 0*dw, aimw0, aimw0, aimx0"),
@@ -58,14 +61,14 @@ def _ref(tz, tx, xscale, sid, rc, drawn, sids, tzs):
     return sids
 
 
-def _records(seed=3):
+def _records(seed=3, barrels=False):
     rng = random.Random(seed)
     out = []
     for _ in range(N):
         tz = rng.choice([rng.randrange(16 << 16, 400 << 16), rng.randrange(16 << 16, 2200 << 16)])
         xscale = ((CENTERX << 16) << 16) // tz
         tx = rng.randrange(-(tz >> 4), (tz >> 4) + 1)          # near the centre: most boxes meet the window
-        sid, rc = rng.randrange(1, 54), rng.randrange(2)
+        sid, rc = rng.randrange(1, 77 if barrels else 54), rng.randrange(3 if barrels else 2)
         drawn = [int(rng.random() < 0.2) for _ in range(AC.NCOLS)]
         sids = [rng.choice([0, 0, rng.randrange(1, 54)]) for _ in range(AC.NCOLS)]
         tie = rng.random() < 0.35                               # equal depths: a tie must NOT overwrite
@@ -74,10 +77,14 @@ def _records(seed=3):
     return out
 
 
-def _program(mut=None):
-    leaf = "\n".join(AC.leaf_lines(CENTERX))
+BARREL_MUTS = {"rc2": ("hex.if_flags sp_rc, %d, ar_r30, ar_r10" % (1 << AC.RC_BARREL),
+                       "hex.if_flags sp_rc, %d, ar_r30, ar_r30" % (1 << AC.RC_BARREL))}
+
+
+def _program(mut=None, barrels=False):
+    leaf = "\n".join(AC.leaf_lines(CENTERX, barrels=barrels))
     if mut:
-        old, new = MUTS[mut]
+        old, new = {**MUTS, **BARREL_MUTS}[mut]
         assert leaf.count(old) == 1, (mut, leaf.count(old))
         leaf = leaf.replace(old, new)
     nib = lambda n: sum(1 for _ in range(n))                     # noqa: E731
@@ -96,23 +103,27 @@ def _program(mut=None):
             "rmagic: hex.vec 2", "rcin: hex.vec 2", "din: hex.vec 2", "tzin: hex.vec 4",
             "pth_tz: hex.vec 8", "pth_tx: hex.vec 8", "pth_xscale: hex.vec 8",
             "drawn:\n" + "\n".join(";0 * dw" for _ in range(GAME_CFG.VIEW_W)),
-            *AC.decls(),
+            *AC.decls(barrels),
             # the harness's r_eff pair, where the frame's prologue would have looked it up
             ]
-    text = "\n".join(body).replace("aim_rr: hex.vec 4", "aim_rr: hex.vec 4, %d" % (REFF[0] | REFF[1] << 8))
+    if barrels:
+        text = "\n".join(body).replace("aim_rr: hex.vec 6", "aim_rr: hex.vec 6, %d" % (REFF[0] | REFF[1] << 8
+                                                                                          | REFF[2] << 16))
+    else:
+        text = "\n".join(body).replace("aim_rr: hex.vec 4", "aim_rr: hex.vec 4, %d" % (REFF[0] | REFF[1] << 8))
     return text + "\n"
 
 
-def _run(tmp_path, name, mut=None):
+def _run(tmp_path, name, mut=None, barrels=False):
     src = tmp_path / (name + ".fj")
-    src.write_text(_program(mut), encoding="utf-8")
+    src.write_text(_program(mut, barrels), encoding="utf-8")
     out = tmp_path / (name + ".fjm")
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
     from pathlib import Path
     fjdir = Path(__file__).resolve().parents[2] / "src" / "fj"
     fj.assemble([consts.resolve(), (fjdir / "fixed_point.fj").resolve(), (fjdir / "frame_render.fj").resolve(),
                  (fjdir / "projection.fj").resolve(), src.resolve()], out, memory_width=W, print_time=False)
-    recs = _records()
+    recs = _records(barrels=barrels)
     feed = b""
     for tz, tx, xs, sid, rc, drawn, sids, tzs in recs:
         feed += bytes([1]) + struct.pack("<III", tz & M32, tx & M32, xs & M32) + bytes([sid, rc])
@@ -139,3 +150,25 @@ def test_the_leaf_is_the_box_rule(tmp_path):
 def test_the_checks_catch_a_broken_leaf(tmp_path, mut):
     got, want, _ = _run(tmp_path, mut, mut)
     assert got != want, "the mutant %s went unnoticed" % mut
+
+
+def test_the_leaf_with_barrels_is_the_box_rule(tmp_path):
+    got, want, recs = _run(tmp_path, "aimb", barrels=True)
+    bad = next((i for i, (g, w) in enumerate(zip(got, want)) if g != w), None)
+    assert len(got) == N and bad is None, "record %d: %s != %s" % (bad, got[bad], want[bad])
+    assert sum(1 for r in recs if r[4] == AC.RC_BARREL) > N // 5 and max(r[3] for r in recs) > 53
+
+
+@pytest.mark.parametrize("mut", sorted(BARREL_MUTS) + ["r+1"])
+def test_the_checks_catch_a_broken_barrel_leaf(tmp_path, mut):
+    got, want, _ = _run(tmp_path, "b" + mut, mut, barrels=True)
+    assert got != want, "the mutant %s went unnoticed" % mut
+
+
+def test_the_barrel_table_carries_the_third_radius():
+    from doomfj.combat import BARREL_R, CombatMixin
+    from doomfj.reference_model import ReferenceModel
+    rm = ReferenceModel(GAME_CFG)
+    old, new = AC.reff_values(rm), AC.reff_values(rm, barrels=True)
+    assert [v & 0xFFFF for v in new] == old
+    assert [v >> 16 for v in new] == [CombatMixin.aim_radius(rm, i << 24, BARREL_R) for i in range(256)]

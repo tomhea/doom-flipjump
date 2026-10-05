@@ -21,6 +21,15 @@ the last picture did not show.
 The first touching segment ends the walk with `sl_hit` = 1 -- after it RETURNS: `stl.fcall` xors the return
 address into its register and only the return xors it back, so a callee that jumps away leaves it armed and the
 next call lands nowhere (the first harness run died so, at its fourth record). Every operand is bounded at emit time (`_bounds`).
+
+M7 P6 (docs/gp-p67-interface.md 4.3): A BARREL'S BLAST enters the same machinery at `bl_los` (`blast_los_lines`) -- a NEW
+entry, `sl_los` is unchanged. P is the barrel (an integer spot: it goes into mm_x / mm_y, which sl_seg reads), Q the
+target in 16.16 (`bl_qx` / `bl_qy`: the player's viewx / viewy, or a monster's whole-unit position). Instead of the
+cell tree it jumps (on `bl_b`) to the barrel's STATIC list: every sight segment whose box meets the barrel's spot grown
+by `blast_margin`, the farthest a blast's target can stand (Chebyshev < 128 + the largest radius). The model calls
+`los_points(target, spot)` -- `segments_touch` is symmetric in its first two points (o1, o2 change sign together, o3
+and o4 swap), and the box reject takes min / max, so P and Q may trade places (tests/host/test_barrelcode.py holds
+it). `_bounds` is re-proven at that margin.
 """
 from typing import Dict, List, Tuple
 
@@ -83,13 +92,14 @@ def sight_segments(w) -> List[dict]:
     return out
 
 
-def _bounds(segs) -> None:
+def _bounds(segs, margin: int = None) -> None:
     """every operand of `sl_seg` fits: ends within 2^13 of each other (so a, b, d fit 16-bit cells and every
-    product and o4 stays below 2^47 in the 48-bit registers)"""
+    product and o4 stays below 2^47 in the 48-bit registers). `margin` (M7 P6: a blast's `blast_margin`): the
+    farthest |Q - P| per axis, in whole units -- NEAR_MARGIN by default"""
     xs = [v for s in segs for v in (s["a"][0], s["b"][0])]
     ys = [v for s in segs for v in (s["a"][1], s["b"][1])]
     assert max(xs) - min(xs) < 1 << 13 and max(ys) - min(ys) < 1 << 13, "the map is too wide for sl_seg's widths"
-    u = (NEAR_MARGIN << 16)                                   # |Q - P| per axis
+    u = ((NEAR_MARGIN if margin is None else margin) << 16)  # |Q - P| per axis
     e = 1 << 13
     assert 2 * u * e < 1 << 47 and 2 * e * e * (1 << 16) + 2 * e * u < 1 << 47
 
@@ -277,3 +287,58 @@ SL_DECLS = (["sl_hit: hex.vec 1", "sl_k12: hex.vec 1", "sl_k34: hex.vec 1",
             + ["%s: hex.vec 12" % r for r in ("sl_ux", "sl_uy", "sl_ax", "sl_ay", "sl_bx", "sl_by", "sl_dx", "sl_dy",
                                                "sl_m1", "sl_m2", "sl_r", "sl_o", "sl_o3", "sl_t12")]
             + ["sl_ret: hex.vec w/4", "sl_sret: hex.vec w/4", "sl_mret: hex.vec w/4"])
+
+
+# ---- M7 P6: the BLAST's entry (docs/gp-p67-interface.md 4.3) ---------------------------------------------------
+def blast_margin(max_radius: int) -> int:
+    """the farthest whole-unit offset (per axis) of a blast's target from the barrel: combat._radius_attack hits when
+    max(0, (Chebyshev - r) >> 16) < 128, i.e. Chebyshev < (128 + r) << 16 -- plus one for the box's closed edge"""
+    from doomfj.combat import BOMB_DAMAGE
+    return BOMB_DAMAGE + max_radius + 1
+
+
+def spot_lists(segs, spots, margin: int) -> List[Tuple[int, ...]]:
+    """per spot (an integer (x, y)): the indices of the segments whose box meets the spot grown by `margin` -- every
+    segment a trace from the spot to a point within `margin` can meet (sl_seg's box reject decides the rest)"""
+    return [tuple(k for k, s in enumerate(segs)
+                  if not (s["box"][1] < x - margin or s["box"][0] > x + margin
+                          or s["box"][3] < y - margin or s["box"][2] > y + margin))
+            for x, y in spots]
+
+
+BL_LOS_DECLS = ["bl_b: hex.vec 2", "bl_px: hex.vec 4", "bl_py: hex.vec 4", "bl_qx: hex.vec 8", "bl_qy: hex.vec 8",
+                "bl_lret: hex.vec w/4"]
+
+
+def blast_los_lines(w, spots, max_radius: int, lists=None) -> List[str]:
+    """`bl_los` (stl.fcall bl_los, bl_lret): sl_hit = 1 when a sight segment blocks the trace from spot `bl_b`
+    (bl_px, bl_py: its integer position, the caller's) to (bl_qx, bl_qy) in 16.16. It CALLS the segment blocks
+    `sg<k>` and `sl_seg` that `near_los_lines` emits, and writes mm_x / mm_y (the monster tic's scratch: the blast
+    runs in the barrel phase, after it). `lists` overrides the per-spot lists (the harness's control)."""
+    segs = sight_segments(w)
+    margin = blast_margin(max_radius)
+    _bounds(segs, margin)
+    if lists is None:
+        lists = spot_lists(segs, spots, margin)
+    n = len(spots)
+    assert 0 < n <= 255 and len(lists) == n
+    out = ["bl_los:", "    hex.zero 1, sl_hit", "    hex.mov 4, mm_x, bl_px", "    hex.mov 4, mm_y, bl_py"]
+    for c in ("x", "y"):                         # sl_los' prologue, with Q = (bl_qx, bl_qy)
+        p, q = "sl_p" + c, "bl_q" + c
+        out += ["    hex.zero 4, %s" % p, "    hex.mov 4, %s + 4*dw, mm_%s" % (p, c),
+                "    hex.mov 8, sl_u%s, %s" % (c, q), "    hex.sub 8, sl_u%s, %s" % (c, p),
+                "    hex.sign 8, sl_u%s, bl_%sneg, bl_%spos" % (c, c, c),
+                "  bl_%sneg:" % c, "    hex.mov 8, sl_%s0, %s" % (c, q), "    hex.mov 8, sl_%s1, %s" % (c, p),
+                "    ;bl_%sbox" % c,
+                "  bl_%spos:" % c, "    hex.mov 8, sl_%s0, %s" % (c, p), "    hex.mov 8, sl_%s1, %s" % (c, q),
+                "  bl_%sbox:" % c, "    hex.sign_extend 12, 8, sl_u%s" % c]
+    nh = (n - 1) // 16 + 1
+    out += ["    sim.jump16 bl_b + 1*dw, " + ", ".join("bl_lh%d" % h if h < nh else "bl_ldone" for h in range(16))]
+    for h in range(nh):
+        out += ["  bl_lh%d:" % h, "    sim.jump16 bl_b, " + ", ".join(
+            "bl_ls%d" % (16 * h + l) if 16 * h + l < n else "bl_ldone" for l in range(16))]
+    for b, idx in enumerate(lists):
+        out += ["  bl_ls%d:" % b] + [ln for k in idx for ln in ("    stl.fcall sg%d, sl_sret" % k,
+                                                                 "    hex.if1 1, sl_hit, bl_ldone")]
+        out += ["    ;bl_ldone"]
+    return out + ["bl_ldone:", "    stl.fret bl_lret"]

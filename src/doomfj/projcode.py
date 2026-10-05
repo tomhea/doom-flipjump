@@ -92,22 +92,24 @@ def chain(start: str) -> List[str]:
     return out
 
 
-def pool_states() -> List[str]:
+def pool_states(puffs: bool = False) -> List[str]:
     """every state a fireball or a blood splat can be in: the fireball's flight loop and death, the three blood
-    states (combat._spawn_fx's S_BLOOD1 and the two it may jump to)"""
+    states (combat._spawn_fx's S_BLOOD1 and the two it may jump to). M7 P6 (`puffs`, the player mode "full": the
+    shot on a barrel, doomfj.barrelcode): the PUFF's four states S_PUFF1..4 too, after them"""
     info = _info()
     out = []
-    for s in chain(info.spawnstate) + chain(info.deathstate) + chain("S_BLOOD1"):
+    for s in (chain(info.spawnstate) + chain(info.deathstate) + chain("S_BLOOD1")
+              + (chain("S_PUFF1") if puffs else [])):
         if s not in out:
             out.append(s)
     return out
 
 
-def pjst_values() -> List[int]:
+def pjst_values(puffs: bool = False) -> List[int]:
     """`pjst[state]`: P_SetMobjState's step in one lookup -- the next state's index (nibbles 0-1) and ITS tics
     (nibble 2); S_NULL reads 0 (the slot is freed)"""
-    vals = [0] * (max(_sidx(s) for s in pool_states()) + 1)
-    for s in pool_states():
+    vals = [0] * (max(_sidx(s) for s in pool_states(puffs)) + 1)
+    for s in pool_states(puffs):
         nxt = gd.STATES[s].next
         vals[_sidx(s)] = 0 if nxt == gd.S_NULL else _sidx(nxt) | (_tics(nxt) << 8)
     return vals
@@ -140,15 +142,17 @@ def momentum_values(rm) -> List[Tuple[int, int]]:
     return [(s32(sp * s32(rm._finecos_idx(i))), s32(sp * s32(rm._finesin_idx(i)))) for i in range(rm.cfg.TRIG_N)]
 
 
-def check_model_rules() -> None:
+def check_model_rules(puffs: bool = False) -> None:
     from doomfj.combat import FX_STEP
     info = _info()
     assert _sidx(gd.S_NULL) == 0, "pool_tic reads the next state 0 as S_NULL"
-    for s in pool_states():
+    for s in pool_states(puffs):
         assert 0 < _tics(s) < 15 and _sidx(s) < 256, (s, _tics(s))
         assert gd.STATES[s].action is None, (s, gd.STATES[s].action)      # no action runs in a pool state
-    for s in (info.spawnstate, info.deathstate, "S_BLOOD1"):               # max(1, tics - (P_Random() & 3))
-        assert _tics(s) - 3 >= 1, (s, "the clamp would bind")
+    for s in (info.spawnstate, info.deathstate, "S_BLOOD1") + (("S_PUFF1",) if puffs else ()):
+        assert _tics(s) - 3 >= 1, (s, "the clamp would bind")             # max(1, tics - (P_Random() & 3))
+    if puffs:                                                              # the fist's puff: S_PUFF1 -> S_PUFF3
+        assert chain("S_PUFF1")[2] == "S_PUFF3" and _tics("S_PUFF3") > 0
     assert info.speed >> 16 == 10 and info.speed & 0xFFFF == 0, "momentum = 10 * finesine: the x10 is shifts"
     assert all(abs(dx) < 16 and abs(dy) < 16 for dx, dy in FX_STEP)
 
@@ -227,6 +231,10 @@ MODEL_FIELD = {"pj_act": "proj_active", "pj_x": "proj_x", "pj_y": "proj_y", "pj_
 # what persists across frames (the M1 reset must not restore it): the pools and the stream
 PERSIST = tuple(f for f, _ in PJ_FIELDS + FX_FIELDS) + ("rng_fx",)
 ARG_DECLS = ["fxs_x: hex.vec 4", "fxs_y: hex.vec 4", "fxs_dmg: hex.vec 2"]
+# M7 P6 (`puffs`): what fx_spawn spawns -- 0 blood (by fxs_dmg), 1 a puff, 2 the FIST's puff (S_PUFF3: combat._spawn_fx,
+# "don't make punches spark on the wall")
+FX_KINDS = {"blood": 0, "puff": 1, "fistpuff": 2}
+PUFF_ARG_DECLS = ["fxs_kind: hex.vec 1"]
 WINDOW_DECLS = ["pw_act: hex.vec 1", "pw_x: hex.vec 8", "pw_y: hex.vec 8", "pw_mx: hex.vec 8", "pw_my: hex.vec 8",
                 "pw_st: hex.vec 2", "pw_ti: hex.vec 1", "pw_t: hex.vec w/4", "pw_leaf: hex.vec w/4",
                 "pw_nx: hex.vec 8", "pw_ny: hex.vec 8", "pw_ok: hex.vec 1", "pw_ang: hex.vec 8", "pw_idx: hex.vec 3",
@@ -237,7 +245,7 @@ RET_DECLS = ["pj_sret: hex.vec w/4", "pj_slret: hex.vec w/4", "pj_tret: hex.vec 
              "fx_lret: hex.vec w/4", "fx_pret: hex.vec w/4"]
 
 
-def pool_decls(pool: int = None, fxn: int = None, values: dict = None) -> List[str]:
+def pool_decls(pool: int = None, fxn: int = None, values: dict = None, puffs: bool = False) -> List[str]:
     """the pools' cells (`values`: field -> per-slot ints, zero by default -- an empty pool at level start), rng_fx
     at its level-start seed, the arguments, the window, the return registers and the box constant"""
     P, Q = _pool_sizes()
@@ -253,7 +261,7 @@ def pool_decls(pool: int = None, fxn: int = None, values: dict = None) -> List[s
                                                                   for s, v in enumerate(vals))))
     out.append("rng_fx: hex.vec 2, %d" % (values or {}).get("rng_fx", R.stream_seed(R.STREAM_FX)))
     out.append("pj_bd: hex.vec 8, %d" % ((FIREBALL_R + PLAYER_R) << 16))       # combat._missile_try's box
-    return out + ARG_DECLS + WINDOW_DECLS + RET_DECLS
+    return out + ARG_DECLS + (PUFF_ARG_DECLS if puffs else []) + WINDOW_DECLS + RET_DECLS
 
 
 # ---- the code --------------------------------------------------------------------------------------------------
@@ -429,9 +437,11 @@ def pool_tic_lines() -> List[str]:
             "    stl.fret pt_ret"]
 
 
-def fx_lines(*, nt: int, fxn: int = None, exit_guard: bool = True) -> List[str]:
+def fx_lines(*, nt: int, fxn: int = None, exit_guard: bool = True, puffs: bool = False) -> List[str]:
     """fx_spawn (+ its stubs), fx_spawn_leaf, fx_phase (+ its stubs); pool_tic is `pool_tic_lines`'. Blood slot s is
-    thing nt + FIREBALL_POOL + s."""
+    thing nt + FIREBALL_POOL + s. M7 P6 (`puffs`): fx_spawn reads `fxs_kind` (FX_KINDS) -- a puff is S_PUFF1 with
+    its tics roll, the fist's then jumps to S_PUFF3 (a P_SetMobjState resetting the tics just rolled); blood as
+    before, by fxs_dmg"""
     from doomfj.combat import FX_STEP
     P, Q = _pool_sizes()
     fxn = Q if fxn is None else fxn
@@ -463,8 +473,17 @@ def fx_lines(*, nt: int, fxn: int = None, exit_guard: bool = True) -> List[str]:
         out += ["    hex.add_constant 4, pw_y + 4*dw, %d" % (oy & 0xFFFF)] if oy else []
         out += ["    ;fx_on"]
     out += ["  fx_on:",
-            "    hex.set 1, pw_act, 1",
-            "    hex.set 2, pw_st, %d" % _sidx(b1), "    hex.set 1, pw_ti, %d" % _tics(b1),
+            "    hex.set 1, pw_act, 1"]
+    if puffs:                                       # M7 P6: a puff (1) or the fist's puff (2); 0 is blood, below
+        p1, p3 = "S_PUFF1", chain("S_PUFF1")[2]
+        out += ["    hex.if0 1, fxs_kind, fx_blood",
+                "    hex.set 2, pw_st, %d" % _sidx(p1), "    hex.set 1, pw_ti, %d" % _tics(p1),
+                *_roll(), "    hex.sub 1, pw_ti, pw_rr + 2*dw",           # tics -= P_Random() & 3 (no clamp)
+                "    hex.if_flags fxs_kind, %d, fx_pos, fx_p3" % (1 << FX_KINDS["fistpuff"]),
+                "  fx_p3:",
+                "    hex.set 2, pw_st, %d" % _sidx(p3), "    hex.set 1, pw_ti, %d" % _tics(p3), "    ;fx_pos",
+                "  fx_blood:"]
+    out += ["    hex.set 2, pw_st, %d" % _sidx(b1), "    hex.set 1, pw_ti, %d" % _tics(b1),
             *_roll(), "    hex.sub 1, pw_ti, pw_rr + 2*dw",               # tics -= P_Random() & 3 (no clamp)
             # blood by damage: 9..12 -> S_BLOOD2, < 9 -> S_BLOOD3, each resetting the tics just rolled
             "    hex.set 2, pw_c, 9",
@@ -502,9 +521,9 @@ def fx_lines(*, nt: int, fxn: int = None, exit_guard: bool = True) -> List[str]:
     return out
 
 
-def tables_fj() -> List[str]:
+def tables_fj(puffs: bool = False) -> List[str]:
     return [generate_dispatch_table_fj("fxrnd", fxrnd_values(), index_nibbles=2, result_nibbles=3),
-            generate_dispatch_table_fj("pjst", pjst_values(), index_nibbles=2, result_nibbles=3)]
+            generate_dispatch_table_fj("pjst", pjst_values(puffs), index_nibbles=2, result_nibbles=3)]
 
 
 def restart_lines(pool: int = None, fxn: int = None, *, nt: int) -> List[str]:
@@ -521,7 +540,7 @@ def restart_lines(pool: int = None, fxn: int = None, *, nt: int) -> List[str]:
     return out
 
 
-def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True) -> dict:
+def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs: bool = False) -> dict:
     """everything P5's pools add, for the World `w`:
       * `decls`: pool_decls() (an empty pool, rng_fx at its seed);
       * `lines`: pj_* / pool_tic / fx_* -- leaves (each ends in a fret), placed where nothing falls in;
@@ -532,8 +551,8 @@ def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True) -> dic
     state (cpx, cpy, cprad, cp_ok, ...), ptx / pty / ptss / ptloc_walk, the leaf lists (sshead, thnext, ll_*),
     thpos_rt / thss_rt (rows nt .. nt + 9), mt_dx / mt_dy / mt_ax / mt_ay and mm_octant / mm_fa (the decide
     leaves), finesine, the point_to_angle tables; and it CALLS dp_go (hurtcode)."""
-    check_model_rules()
+    check_model_rules(puffs)
     cells, root = missile_cells_fj(w, pfx)
-    return {"decls": pool_decls(), "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard) + pool_tic_lines()
-            + fx_lines(nt=nt, exit_guard=exit_guard), "cells": cells, "root": root, "tables": tables_fj(),
-            "restart": restart_lines(nt=nt), "persist": PERSIST}
+    return {"decls": pool_decls(puffs=puffs), "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard)
+            + pool_tic_lines() + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs), "cells": cells, "root": root,
+            "tables": tables_fj(puffs), "restart": restart_lines(nt=nt), "persist": PERSIST}

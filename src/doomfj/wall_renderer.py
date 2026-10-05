@@ -499,13 +499,14 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
     return common, skills
 
 
-def p5_tic_lines(hrt) -> list:
+def p5_tic_lines(hrt, barrels: bool = False) -> list:
     """M7 P5 -- the frame's tic after the monsters' (`tic_after_eye`): the fireballs, then the blood (projcode's
     `pj_phase` / `fx_phase`, each skipping itself while `lvdone`: world.tic's order monsters -> projectiles ->
     barrels -> effects), then the bar's health and armor (`hrt` is hurtcode.hurt_parts' dict: its `bar`, hp_bar)
-    from what the frame's damage left, inside the frozen-level guard -- a finished level changes neither"""
-    return ["stl.fcall pj_phase, pj_pret", "stl.fcall fx_phase, fx_pret",
-            "hex.if1 1, lvdone, p5_bar_skip", *hrt["bar"], "p5_bar_skip:"]
+    from what the frame's damage left, inside the frozen-level guard -- a finished level changes neither.
+    M7 P6 (`barrels`, doomfj.barrelcode): the barrels' phase between the two (it skips itself while `lvdone` too)"""
+    return (["stl.fcall pj_phase, pj_pret"] + (["stl.fcall bar_phase, bar_pret"] if barrels else [])
+            + ["stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip", *hrt["bar"], "p5_bar_skip:"])
 
 
 # M7 P5: the labels the P5 text READS that other parts of the program must define (projcode.proj_parts' docstring:
@@ -560,14 +561,17 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     # the pool states (docs/gp-p5-interface.md): S_BLOOD1..3 = 39..41, S_TBALL1/2 = 46/47, S_TBALLX1..3 = 48..50
     names = {"S_BLOOD1": 39, "S_BLOOD2": 40, "S_BLOOD3": 41, "S_TBALL1": 46, "S_TBALL2": 47, "S_TBALLX1": 48,
              "S_TBALLX2": 49, "S_TBALLX3": 50}
+    puffs = bool(p31.get("barrel"))              # M7 P6: the puffs share the blood's pool (projcode `puffs`)
+    if puffs:
+        names.update({"S_PUFF1": 42, "S_PUFF2": 43, "S_PUFF3": 44, "S_PUFF4": 45})
     assert {s: gd.STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
-    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states()) == sorted(names.values())
+    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs)) == sorted(names.values())
     assert (FIREBALL_INFO.spawnstate, FIREBALL_INFO.deathstate) == ("S_TBALL1", "S_TBALLX1")
     mv = p31["mob_view"]
     assert sorted(mv) == sorted(names.values()), sorted(mv)
     rows, nt = p31["view_rows"], len(p31["rt_slot"])
     by_lump = {}
-    for s in projcode.pool_states():
+    for s in projcode.pool_states(puffs):
         row = mv[gd.STATE_INDEX[s]]
         assert p31["mob_first"] <= row < nt + len(rows), (s, row)
         by_lump.setdefault(mobile_lump(s), set()).add(row)
@@ -1661,8 +1665,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _p31 = p31_parts(rm, map_wad, mapname, sprite_wad, _anim,
                          [map_wad.things(mapname)[w_] for w_ in sorted(_mt_keep)],
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
-                         cache=spr_cache, mode=MONSTER_MODE, player=PLAYER_MODE if menu else "walk")
+                         cache=spr_cache, mode=MONSTER_MODE, player=PLAYER_MODE if menu else "walk",
+                         static_bank=(spr_base, spr_ldbase, spr_dw))
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
+    # M7 P6 (doomfj.barrelcode, the player mode "full"): the barrels, their blasts, the drops and the puffs
+    _bar = _p31.get("barrel") if _p31 else None
     _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide", "full")) else 0
     # M7 P4.2a (doomfj.aimcode): the game tier's AIM WINDOW, when its player's shots resolve -- recorded by the runtime
     # monsters' projections (their seen machinery reaches xscale for every monster D3 e counts)
@@ -1671,8 +1678,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         from doomfj import aimcode as _aimcode
         from doomfj.combat import aim_window as _aim_window
         assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
-        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX)
-        _aim_decls = _aimcode.decls() + [_aimcode.table_text(rm)]
+        # M7 P6: a standing barrel records too (radius class aimcode.RC_BARREL)
+        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar))
+        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar))]
     else:
         _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
@@ -1712,7 +1720,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                              spr_base, spr_ldbase, spr_dw, spr_cls, spr_cache=spr_cache,
                              keep=_mt_keep, view_rows=_p31["view_rows"] if _p31 else (),
-                             ltw=2 if _p31 else 1, mobiles=_p31["nmob"] if _p31 else 0)
+                             ltw=2 if _p31 else 1,
+                             # M7 P6: + the drops' runtime things after the mobiles
+                             mobiles=(_p31["nmob"] + _p31.get("ndrop", 0)) if _p31 else 0)
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
     # (the hot block below), where they persist instead of being rebuilt every frame
@@ -1755,7 +1765,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P5: the mobiles are runtime things nt .. nt + nmob - 1 of THIS table -- the pools' `nt` must be its runtime
     # thing count (MonsterViews.nrt's index space: the drawables the bake leaves to the runtime path), and the lists'
     # declared `thnext` extent (2 * nt, the span the restore set carries) must hold the mobiles' links
-    _MT_NMOB = _p31["nmob"] if _p31 else 0
+    _MT_NMOB = (_p31["nmob"] + _p31.get("ndrop", 0)) if _p31 else 0      # M7 P6: + the drops
     if _MT_NMOB:
         assert _proj["nt"] == _MT_NT == len(_mt_keep), (_proj["nt"], _MT_NT, len(_mt_keep))
         assert _MT_NT + _MT_NMOB <= 2 * _MT_NT, "thnext's declared cells cannot hold the mobiles' links"
@@ -1767,10 +1777,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _baked_leaf = "thing_leaf_b" if moving_things else "thing_leaf"
     _emit_baked_leaf = bool(moving_things and things_by_ss)
 
-    def _thing_leaf_body(label, mt):
+    def _thing_leaf_body(label, mt, aim_baked=False):
         """One instantiation of frame.thing_record_body. `mt` picks where the COLD half of the
         thing's row comes from: 1 = the runtime table (read after every reject), 0 = the leaf's
-        xor_by block, where the rep expands to nothing and the table names are never referenced."""
+        xor_by block, where the rep expands to nothing and the table names are never referenced.
+        M7 P6 `aim_baked`: a BAKED body that records the aim window (the standing baked barrels'
+        `thing_leaf_bb`; every other baked thing keeps the body that never records)."""
         return [f"{label}:",
                 f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
                 f"{proj}, {cfg.CENTERX}, "
@@ -1792,7 +1804,54 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{1 if (mt and _SEEN) else 0}, {'sp_sa' if (mt and _SEEN) else 0}, "
                 f"{'trb_seenf' if (mt and _SEEN) else 0}, {'trb_one' if (mt and _SEEN) else 0}, "
                 # M7 P4.2a: the runtime monsters' body records the aim window when the player's shots resolve
-                f"{1 if (mt and _SEEN and _AIM) else 0}"]
+                f"{1 if ((mt and _SEEN and _AIM) or aim_baked) else 0}"]
+
+    def _baked_barrel_site(cid, ti, tag, t, tfields, tsec, xorby_blocks):
+        """M7 P6 (docs/gp-p67-interface.md 5) -- a BAKED barrel's call site: removed (bar_st 0) draws nothing; else a
+        jump on its state's low nibble (sim.jump16; the seven barrel states' low nibbles are distinct) into its
+        state's block: S_BAR1's xor_by block is the map barrel's own (`tfields`, today's), each other state's
+        carries its lump's row (monstercode.barrel_view_rows, the anim bank) -- art, depth bounds, bank regions and
+        light class; standing (S_BAR1 / S_BAR2) it sets its aim id 1 + nmon + b and class RC_BARREL and draws with
+        `thing_leaf_bb`, the baked body that records the aim window. sp_sid is SET (not xored): a runtime thing's
+        stub leaves its own id there."""
+        from doomfj import gamedata as _gd
+        from doomfj.aimcode import RC_BARREL
+        from doomfj.barrelcode import barrel_states
+        from doomfj.monstercode import _thing_key
+        _w = _p31["world"]
+        b = [_thing_key(x) for x in _w.barrel_things].index(_thing_key(t))
+        nt_ = len(_p31["rt_slot"])
+        sts = barrel_states()
+        assert sts[:2] == ["S_BAR1", "S_BAR2"] and len(tfields) == len({n for n, _w_, _v in tfields})
+        L = f"ss{cid}_thing{ti}"
+        head = [f"    hex.if0 1, tstop, {L}_do", f"    ;{L}_skip", f"  {L}_do:",
+                f"    hex.if0 2, bar_st + {2 * b}*dw, {L}_skip"]
+        lows, blocks = {}, []
+        for k, st in enumerate(sts):
+            idx = _gd.STATE_INDEX[st]
+            assert 0 < idx < 256 and (idx & 15) not in lows, (st, idx)
+            lows[idx & 15] = f"{L}_s{k}"
+            if k == 0:
+                fields = list(tfields)
+            else:
+                r = _p31["view_rows"][_p31["bar_view"][idx] - nt_]
+                new = {"sp_z": ((tsec.floor_h + r[3]) << 16) & 0xFFFFFFFF, "sp_left": (r[0] << 16) & 0xFFFFFFFF,
+                       "sp_w": (r[1] << 16) & 0xFFFFFFFF, "sp_hh": (r[2] << 16) & 0xFFFFFFFF, "sp_tzmax": r[4],
+                       "sp_tzmax2": r[5], "sp_mon": 0, "sp_base": r[6], "sp_base2": r[7], "sp_dw": r[9],
+                       "sp_lt": spr_cls[(rm.wall_lightnum(tsec.light, 0), max(1, r[2]))]}
+                fields = [(n, w_, new.get(n, v)) for n, w_, v in tfields]
+            label = f"thing{tag}_consts" if k == 0 else f"thing{tag}_c{k}"
+            xorby_blocks[f"T{tag}" if k == 0 else f"T{tag}_{k}"] = _seg_xorby_block(label, fields)
+            stand = k < 2
+            blocks += [f"  {L}_s{k}:"]
+            if stand:
+                blocks += [f"    hex.set 2, sp_sid, {1 + _p31['nmon'] + b}", f"    hex.set 1, sp_rc, {RC_BARREL}"]
+            blocks += [f"    stl.fcall {label}, xb_ret",
+                       f"    stl.fcall {'thing_leaf_bb' if stand else _baked_leaf}, thing_ret",
+                       f"    stl.fcall {label}, xb_ret", f"    ;{L}_skip"]
+        head.append(f"    sim.jump16 bar_st + {2 * b}*dw, " + ", ".join(lows.get(n, f"{L}_skip") for n in range(16)))
+        return head + blocks + [f"  {L}_skip:"]
+
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -2183,6 +2242,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # so once the leaf sets it no later thing can matter and none pays its SET+CLEAR.
         if _do_things and ss.numsegs:
             # M14.5: BAKED FIRST, THEN THE RUNTIME LIST -- the order both mirrors keep (§4b).
+            # (M7 P6: a baked BARREL draws its state's view -- `_baked_barrel_site` below)
             # A static build has no runtime half and this is the whole thing pre-pass, exactly
             # as before; a moving build bakes only the things whose leaf no monster shares, so
             # at spawn a leaf runs one branch or the other and the order is wad order either way.
@@ -2245,6 +2305,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     f"T4 far-reject margin broken: tzmax={_tz_map} map units is too small for the "
                     f"4.25x+2 bound. Widen the margin in projection.fj's L-inf reject or reject "
                     f"this sprite category at emit time.")
+                if _bar and _t.type == BARREL_TYPE:
+                    assert _di not in _vis_slots, "M7 P6: a baked barrel is hidden by its state, not a thvis flag"
+                    # M7 P6 (docs/gp-p67-interface.md 5): a baked BARREL draws its STATE's view -- a jump on its
+                    # state into one xor_by block per state (S_BAR1's is the block above, the map's barrel as
+                    # today; the others the anim bank's lump rows, monstercode.barrel_view_rows), removed: nothing;
+                    # standing, it records the aim window (thing_leaf_bb)
+                    out += _baked_barrel_site(cid, _ti, _tag, _t, _tfields, _tsec, xorby_blocks)
+                    continue
                 xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", _tfields)
                 out += [
                     # M14.5 §3.3: read-many, write-rarely, and the index is a COMPILE-TIME
@@ -2612,6 +2680,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # leaves (projcode), and the missile cells (which jump over themselves); behind this block's guard,
                 # where nothing falls in
                 + ((list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]]) if _hrt else [])
+                # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
+                + (list(_bar["lines"]) if _bar else [])
                 + ["mm_block_end:"]) + BSn
         else:
             _mon_move = ""
@@ -2635,7 +2705,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                  + ([f"hex.zero {2 * 17}, aim_sid"] if _AIM else [])                       # M7 P4.2a: no aim
                  # M7 P5: the player's health, armor, damage count, death and palette at the level start; the
                  # pools empty, their rows zero, rng_fx at its seed
-                 + (list(_hrt["restart"]) + list(_proj["restart"]) if _hrt else [])) if _hud else (),
+                 + (list(_hrt["restart"]) + list(_proj["restart"]) if _hrt else [])
+                 # M7 P6: the barrels' level start (the same on every skill: barrelcode.check_model_rules), no drops
+                 + (list(_bar["restart"][0]) if _bar else [])) if _hud else (),
             nmobile=_MT_NMOB)
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
@@ -2715,7 +2787,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # skips itself while `lvdone`), then the bar's health and armor from what the frame's damage left (inside the
     # same guard: a frozen level changes neither)
     if _hrt:
-        pass1 += p5_tic_lines(_hrt)
+        pass1 += p5_tic_lines(_hrt, barrels=bool(_bar))
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
     # runs before this, has already read last frame's)
     if _AIM:
@@ -2806,6 +2878,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               + (_monster_tables() if _movers_on else [])
               + ([_p31["mview"], _p31["mrot"]] if _p31 else [])            # M7 P3.1
               + ([_p31["mobview"]] if (_p31 and _p31.get("mobview")) else [])   # M7 P5: the mobiles' view rows
+              + ([_p31["barview"]] if (_p31 and _p31.get("barview")) else [])   # M7 P6: the barrels' view rows
               + (list(_p31.get("tables", ())) if _p31 else [])             # M7 P3.2a: REJECT rows, lfsec
               # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
               # which changes the shipped text and so its emit hash -- caught by
@@ -2954,7 +3027,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # read a cold row it has no index into, and the runtime one must. Same macro, same
                 # arguments but `mt`; the duplicate is program TEXT, not per-frame ops.
                 *_thing_leaf_body("thing_leaf", 1 if moving_things else 0),
-                *(_thing_leaf_body(_baked_leaf, 0) if _emit_baked_leaf else [])]
+                *(_thing_leaf_body(_baked_leaf, 0) if _emit_baked_leaf else []),
+                # M7 P6: the standing baked barrels' body, which records the aim window
+                *(_thing_leaf_body("thing_leaf_bb", 0, aim_baked=True) if (_emit_baked_leaf and _bar) else [])]
                if _do_things else []),
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",
@@ -3026,6 +3101,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # as device data), the pools' cells, window and tables (fxrnd, pjst) -- data and self-guarded tables
           *((list(_hrt["decls"]) + list(_proj["decls"]) + list(_hrt["tables"]) + list(_proj["tables"]))
             if _hrt else []),
+          *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *_collide_decls,                                  # M14-d collision state
@@ -3896,6 +3972,9 @@ def sprite_block_body(bl, n_buckets: int) -> list:
     if bl is None:
         return [0, n_buckets, 0]
     return [bl[0], bl[1], bl[2]] + [v for pr in bl[3] for v in pr]
+
+
+BARREL_TYPE = 2035                       # M7 P6: MT_BARREL's doomednum (a baked barrel draws its state's view)
 
 
 # M7 P1.6 -- the actors whose every frame and rotation the bank holds, besides the map's monsters:

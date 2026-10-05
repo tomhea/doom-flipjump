@@ -388,7 +388,11 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                        + (["    hex.set %d, msec, %d" % (2 * nmon, sum(w._mon_sector(m) << (8 * m) for m in range(nmon))),
                            "    hex.set %d, bar_solid, %d" % (max(1, len(w.barrel_things)),
                                                           sum(w.ws.bar_solid[b] << (4 * b)
-                                                              for b in range(len(w.barrel_things))))]
+                                                              for b in range(len(w.barrel_things)))),
+                           # M7 P7: the movers' last state, as the level start's movers (all 0: every lift at its
+                           # top, the switch not fired -- the boot image's zeros) -- else the first tic after a
+                           # restart sees a mover "change" (tests/fj/test_restart_fj.py found it missing)
+                           "    hex.zero %d, mh_prev" % (len(w.lift_order) + 1)]
                           if chase else [])
                        + (noise_restart_lines(w) if hear else []))           # M7 P4.2b: no node has heard a shot
     # the row select -- M7 P5: over the runtime things AND the mobiles (things nt .. nt + nmob - 1)

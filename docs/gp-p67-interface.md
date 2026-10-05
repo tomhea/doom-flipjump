@@ -358,6 +358,26 @@ from the corpse leaf's seed (section 4, B).
     that the drop rows ride `THING_PERSIST`'s `thpos_rt` / `thss_rt`;
   - re-key `m1_` / `m5_restore_set.json.gz`; `test_restore_set_shipped`.
 
+**As built (package D, branch `p67-d`):**
+- `doomfj/restartcode.py` owns `g_skill` / `g_rs` / `lvtime` (`PERSIST` = `build.GAME_PERSIST`). They are declared in
+  `wall_renderer.MENU_STATE_DECLS` (the standalone globals, like `lvdone` / `pusedn`), so m5_setfile re-attaches them
+  through `STANDALONE_SCRATCH_DECLS` -- NOT through `game_screen_persisted_decls`, which would declare them twice.
+- ONE sequence: `restartcode.call_lines` = `stl.fcall restart_common` + a dispatch on `g_skill` into fcall'd
+  `rs_skill<k>` (`routine_lines`). NEW GAME = `hex.mov 1, g_skill, menu_sel` + it (`new_game_lines`); the restart on
+  use = `if g_rs` + it (`tic_lines`, at the world frame's start, emitted when `restartcode.mortal(PLAYER_MODE)`).
+  `wall_renderer.compose_restart` is the one composition the emitter calls and tests/fj/test_restart_fj.py runs.
+- `lvtime` +1 is `p5_tic_lines`' first line inside its `lvdone` guard.
+- The audit (`test_restart_fj`, two dirty images, every nibble of every `persist_labels` cell) found TWO gaps in P1-P5
+  and they are fixed: `mh_prev` (P3.2b) was never restarted (now zeroed in monstercode's per-skill restart), and the
+  P5 restart RESTORED `pal_cur` (hurtcode.restart_lines no longer writes it).
+- `thvis` and `thnext` survive the M1 reset by being in NO restore set (`PERSIST_BY_ABSENCE`); the restart writes both,
+  and the audit checks them. The drop rows ride `thpos_rt` / `thss_rt` (THING_PERSIST); their extent is the label's.
+- INTEGRATION HOOKS (B / C): `build.LOOT_PERSIST` / `BARREL_PERSIST` (empty until the modules land), their decls in
+  `game_screen_persisted_decls`, and their level start into `compose_restart(p6_common=, p6_skills=)` from
+  `restartcode.level_start_lines` (section 4.5's units transcribed in `p6_cell_values`; held equal to package A's
+  `MonsterPhase.*_state` by `test_the_p6_units_are_package_as` once those exist). `test_every_p6_module_persist_is_wired`
+  fails while a module exists unwired.
+
 ### 4.5 The new cells and their units (what the probe reads; one definition: `MonsterPhase.loot_state` / `barrel_state` / `game_state`)
 
 Hex cells, nibbles little-endian, read UNSIGNED unless said.
@@ -731,3 +751,24 @@ report it" -- reported to the owner the same morning):** O1 OUT (a D5 simplifica
 height, the weapon down, the red palette fades); O2 NOT taken (P5's deviation stands, v5's pictures do not move); O3
 re-record the trails and report gamespeed with the route note. The rung is UNITED (section 2), the fallback "loot"
 mode kept in reserve.
+
+**O1 RE-OPENED BY THE OWNER (2026-10-05, relayed by the coordinator to package D).** The owner played blocked48 and at
+0% "it doesn't die (no dead screen, no restart, it should do something close (but cheap) to what the original doom
+does)". Package D evaluated the cheapest view drops against the coordinator's bar (<= ~0.3% of 2^27 in size, no
+visible ops on normal frames, byte-exact with the oracle). Units: `docs/gp-lift-spike.md` section 2 (MEASURED on
+blocked27: 8.0 words per band id, 44.0 per unique band body, 48 viewz classes + 5 for the lifts, 52,284 band ids
+against the 4-nibble index's 65,536) and E1M1's 48 distinct floor heights (MEASURED from the WAD).
+
+| option | what it costs | verdict |
+|---|---|---|
+| DOOM's drop, 41 -> 6 units at 1 a tic | 35 eye heights per floor: 35 x 48 viewz classes | out |
+| ONE dead eye (floor + 6) per floor, exact | +48 viewz classes (none coincides with a live one: f + 6 = f' + 41 has no pair on E1M1). Band ids x2 (~+52K x 8 words = +0.42M), the band index past 65,536 -> 5 nibbles (pad +65,536 words, and one more `hex.xor` per `vpb_walk`: <= ~12.5K ops on EVERY frame), new band bodies (est. +5-9K x 44 = +0.2-0.4M). **~+0.7-0.9M words = 0.5-0.67%**, plus the every-frame ops | out (over both bars) |
+| a few sinking steps | a multiple of the row above | out |
+| geometry-only drop: walls and sprites at floor + 6 (`viewz` is runtime), planes still coloured from the live class's band lists | ~0 words; one `if p_dead` at the eye's landing (~20 ops a frame) | NOT exact by construction and not provable here: a floor between the dead and the live eye (a step of 8-34 units) lies on the other side of the horizon from the side its live band list was built for -- the "rows the emitter never asks for" hazard (`plane_bands.fj`). Needs an oracle `plane_viewz` split and a RENDER gate at dead eyes, i.e. a build. The cheapest drop if the owner wants one: a renderer rung, not a P7 line |
+| a screen-level shift of the 84-row view | the device draws baked / computed rows: a device change (flipjump's ScreenIO, outside this repo) or an offset on every record (ops on every frame) | out |
+| the turn to the killer (P_DeathThink's ANG5 a tic) | `viewangle` is runtime, so exact by construction; ~1-2K words, ~0 ops alive. But it needs the ATTACKER: a cell written at every damage source (P5's hitscan, melee and fireballs, C's blasts; nukage has none), and the model's `_death_think` gains the turn and the damagecount fade only once facing | cheap and DOOM's, but it touches three packages' damage paths: recommended as the follow-up rung |
+
+**OUTCOME (package D): the FALLBACK** -- the weapon drops (P5), the red palette fades (P5), the view is frozen (P7-a/b/c,
+package B's dead guards), and use restarts at the skill being played (P7-d, package D: `restartcode.tic_lines`). No
+view drop is in this rung: every exact drop is over the size bar and costs ops on every frame, and the one cheap drop
+is not provably byte-exact without a build. The turn to the killer is the recommended next step.

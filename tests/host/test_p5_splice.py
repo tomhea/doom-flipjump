@@ -138,7 +138,8 @@ def test_new_game_unlinks_the_mobiles_too():
 def test_the_tic_after_the_monsters_runs_projectiles_then_blood_then_the_bar(p5):
     out = WR.p5_tic_lines(p5["hrt"])
     assert out[:3] == ["stl.fcall pj_phase, pj_pret", "stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip"]
-    assert out[3:-1] == list(p5["hrt"]["bar"]) and out[-1] == "p5_bar_skip:"
+    # M7 P7: the level time ticks first inside the same guard (restartcode.lvtime_tic_lines)
+    assert out[3:-1] == ["hex.inc 4, lvtime"] + list(p5["hrt"]["bar"]) and out[-1] == "p5_bar_skip:"
 
 
 def test_the_persist_set_carries_p5s_cells():
@@ -184,7 +185,10 @@ def test_the_hurt_tic_menu_palette_restart_and_leaves_are_spliced():
     src = _src()
     assert 'weapon=((list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))' in src
     assert 'list(_hrt["menu_palette"])' in src
-    assert 'list(_hrt["restart"]) + list(_proj["restart"])' in src and "nmobile=_MT_NMOB" in src
+    # M7 P7: through ONE composition, wall_renderer.compose_restart (tests/host/test_restart_coverage.py)
+    assert ('hrt_restart=_hrt["restart"] if _hrt else ()' in src and 'proj_restart=_proj["restart"] if _hrt else ()'
+            in src and "nmobile=_MT_NMOB" in src)
+    assert "list(hrt_restart) + list(proj_restart)" in inspect.getsource(WR.compose_restart)
     assert '(list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]])' in src
     i_leaves = src.index('(list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]])')
     assert src.index('["    ;mm_block_end", _mcells]') < i_leaves < src.index('["mm_block_end:"]) + BSn')
@@ -197,10 +201,12 @@ def test_the_barrels_phase_sits_between_the_fireballs_and_the_effects():
     """M7 P6 (docs/gp-p67-interface.md 4.7): world.tic's order projectiles -> barrels -> effects; without barrels the
     P5 tic is unchanged"""
     hrt = {"bar": ["BAR"]}
+    # M7 P7: the level time ticks inside the same guard, before the bar (restartcode.lvtime_tic_lines)
     assert WR.p5_tic_lines(hrt) == ["stl.fcall pj_phase, pj_pret", "stl.fcall fx_phase, fx_pret",
-                                    "hex.if1 1, lvdone, p5_bar_skip", "BAR", "p5_bar_skip:"]
+                                    "hex.if1 1, lvdone, p5_bar_skip", *WR._restartcode.lvtime_tic_lines(), "BAR",
+                                    "p5_bar_skip:"]
     got = WR.p5_tic_lines(hrt, barrels=True)
     assert got[:3] == ["stl.fcall pj_phase, pj_pret", "stl.fcall bar_phase, bar_pret", "stl.fcall fx_phase, fx_pret"]
     src = _src()
     assert '+ (list(_bar["lines"]) if _bar else [])' in src and 'list(_bar["decls"]) + list(_bar["tables"])' in src
-    assert 'list(_bar["restart"][0]) if _bar else []' in src
+    assert 'p6_common=list(_bar["restart"][0]) if _bar else ()' in src         # through compose_restart (P7)

@@ -56,6 +56,7 @@ MODEL_FIELD = {"bar_st": "bar_state", "bar_ti": "bar_tics", "bar_hp": "bar_healt
                "mdrop": "mon_drop"}
 BARREL_PERSIST = ("bar_st", "bar_ti", "bar_hp", "rng_wd")       # bar_solid is monstercode's (MONSTER_PERSIST)
 DROP_PERSIST = ("mdrop", "dr_live")
+PERSIST = BARREL_PERSIST + DROP_PERSIST                         # the module's whole persisted set (build wires it)
 FL_EXPLODE, FL_REMOVE = 1, 2                                    # barnext's nibble 3
 TICS_FOREVER = 15
 

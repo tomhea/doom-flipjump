@@ -171,7 +171,12 @@ def test_the_skill_count_is_one_number():
     spawn = type("Spawn", (), {"x": 0, "y": 0, "angle": 0})()
     lines = menu_state_lines(restart_lines(spawn, 0, [], [], 1, [([0], [], [])] * len(SKILLS)))
     assert f"hex.if_flags menu_sel, 1<<{last}, mn_dn_inc, mn_done" in lines, "the emitted clamp"
-    assert [ln for ln in lines if ln.startswith("mn_r")] == ["mn_r%d:" % k for k in range(len(SKILLS))]
+    # M7 P7: NEW GAME runs restartcode.call_lines -- one fcall'd routine per skill, dispatched on g_skill (which
+    # NEW GAME sets from menu_sel), then the sequence's end label
+    assert [ln for ln in lines if ln.startswith("mn_r")] == ["mn_r%d:" % k for k in range(len(SKILLS))] + ["mn_r_done:"]
+    assert [ln for ln in lines if ln.startswith("stl.fcall rs_skill")] == [
+        "stl.fcall rs_skill%d, rs_ret" % k for k in range(len(SKILLS))]
+    assert "hex.mov 1, g_skill, menu_sel" in lines
 
 
 def test_the_skill_dispatch_refuses_a_fourth_skill(monkeypatch):

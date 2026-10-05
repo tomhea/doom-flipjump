@@ -112,6 +112,24 @@ from doomfj.hurtcode import PERSIST as HURT_PERSIST                             
 # reset that restored them would empty the pools every frame. (Their runtime things' rows are thpos_rt / thss_rt's,
 # THING_PERSIST, and their links thnext's, which persists by not being restored.)
 from doomfj.projcode import PERSIST as PROJ_PERSIST                             # noqa: E402
+# M7 P7 (doomfj.restartcode; docs/gp-p67-interface.md 4.4): the game's own cells -- the level time, the restart
+# request, the skill the restart restores to. Declared with the standalone globals (wall_renderer.MENU_STATE_DECLS), so
+# scratchpad/m5_setfile.py re-attaches them through STANDALONE_SCRATCH_DECLS, as it does `lvdone` / `pusedn`; a reset
+# that restored them would forget the skill, drop a death's restart request and stop the clock.
+from doomfj.restartcode import PERSIST as GAME_PERSIST                          # noqa: E402
+# M7 P6 -- INTEGRATION HOOKS (docs/gp-p67-interface.md 4.4; package D leaves them for the integrator):
+#   LOOT_PERSIST   = package B's player cells + package C's drop cells: (p_bc, p_str, p_bp, am_misl, am_cell) +
+#                    (mdrop, dr_live) -- from their modules' PERSIST tuples (lootcode.PERSIST, C's drop module's)
+#   BARREL_PERSIST = package C's (bar_st, bar_ti, bar_hp, rng_wd) -- barrelcode.PERSIST (`bar_solid` is already in
+#                    MONSTER_PERSIST)
+# When they land: fill these two from the modules, add the modules' decls to `game_screen_persisted_decls` below
+# (its HOOK), and pass their level-start lines to wall_renderer.compose_restart (p6_common / p6_skills, from
+# restartcode.level_start_lines). tests/host/test_restart_coverage.py's
+# `test_every_p6_module_persist_is_wired` FAILS while a module exists and its names are not wired here, and
+# tests/fj/test_restart_fj.py then checks the restart writes every one of them.
+from doomfj import barrelcode as _barrelcode                                     # noqa: E402 (M7 P6, package C)
+LOOT_PERSIST: tuple = _barrelcode.DROP_PERSIST                  # + package B's lootcode.PERSIST when it lands
+BARREL_PERSIST: tuple = _barrelcode.BARREL_PERSIST
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:
@@ -124,7 +142,8 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
             + (THING_PERSIST if moving_things else ())
             + (MONSTER_PERSIST if (standalone and moving_things) else ())
             + HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST    # M7 P4.0 / P4.1 / P4.2a: the game tier's
-            + HURT_PERSIST + PROJ_PERSIST)                  # M7 P5: the player's hurt cells, the pools
+            + HURT_PERSIST + PROJ_PERSIST                   # M7 P5: the player's hurt cells, the pools
+            + GAME_PERSIST + LOOT_PERSIST + BARREL_PERSIST)  # M7 P7 / P6: the game's cells; loot, barrels (HOOKS)
 
 
 def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
@@ -136,12 +155,18 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     from doomfj import weaponcode as WC
     from doomfj.selfreset import decl_words
     from doomfj.world import World
-    names = HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST + HURT_PERSIST + PROJ_PERSIST
+    # M7 P7: GAME_PERSIST's cells are NOT here -- they are standalone globals (wall_renderer.MENU_STATE_DECLS), which
+    # m5_setfile adds through STANDALONE_SCRATCH_DECLS; listing them twice would declare them twice.
+    # M7 P6: + LOOT_PERSIST + BARREL_PERSIST, their modules' decl lists in `cand`
+    from doomfj import barrelcode
+    from doomfj.wall_renderer import BOOT_SKILL
+    names = HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST + HURT_PERSIST + PROJ_PERSIST + LOOT_PERSIST + BARREL_PERSIST
     cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START)))
             + WC.weapon_decls(WC.level_start(map_wad, mapname), WC.weapon_states(), WC.overlay_frames())
             + WC.weapon_const_decls() + aimcode.decls()
             + hurtcode.hurt_decls(hurtcode.level_start(World(map_wad, mapname)))   # M7 P5
-            + projcode.pool_decls())
+            + projcode.pool_decls()
+            + barrelcode.decls(World(map_wad, mapname), BOOT_SKILL))     # M7 P6: barrels, drops
     by = {}
     for d in cand:
         by.setdefault(decl_words(d)[0], d)

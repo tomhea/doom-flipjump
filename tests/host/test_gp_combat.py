@@ -537,5 +537,5 @@ def test_legacy_walking_is_the_oracles_step_sim():
                 + [{"back": True}] * 6 + [{"turn_right": True}] * 4 + [{"forward": True}] * 20)
         for k in keys:
             w.tic(k)
-            st = w.rm.step_sim(st, k, scene=w.scene_c)
+            st = w.rm.step_sim(st, k, scene=w.scene_c, tap=True)   # M7 P6+P7: the world turns with the tap rule
             assert (w.ws.px, w.ws.py, w.ws.pangle) == (st.x, st.y, st.angle)

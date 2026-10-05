@@ -100,6 +100,7 @@ def _program(menu_lines, scr0, frames):
         "kbstat: hex.vec 1", "kbcode: hex.vec 2", "kb_f: hex.vec 1", "kb_b: hex.vec 1",
         "kb_l: hex.vec 1", "kb_r: hex.vec 1", "kb_u: hex.vec 1",
         "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1", "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",   # M7 P4.1
+        "p_tnh: hex.vec 1",                                         # M7 P6+P7: the turn held flag the restart zeroes
         "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "thss_rt: hex.vec 16", "thpos_rt: hex.vec 16",
         "sshead:", "    ;0 * dw", "thnext:", "    ;0 * dw",

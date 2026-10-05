@@ -294,6 +294,8 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("px", 32, signed=True, group="player", phase="existing", label="viewx", doc="16.16")
     f("py", 32, signed=True, group="player", phase="existing", label="viewy", doc="16.16")
     f("pangle", 32, group="player", phase="existing", label="viewangle", doc="BAM")
+    # M7 P6+P7: the turn's slow first frame (reference_model.turn_step): a turn key held last frame
+    f("p_turnheld", 1, group="player", phase="P6", label="p_tnh", doc="a turn key was held last frame")
     f("p_health", 12, signed=True, group="player", phase="S3b", doc="health; < 0 after a kill")
     f("p_armor", 8, group="player", phase="S3b", doc="armor points, 0..200")
     f("p_armortype", 2, group="player", phase="S3b", doc="0 none, 1 green, 2 blue")

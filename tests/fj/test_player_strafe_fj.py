@@ -4,6 +4,12 @@ moves and the two strafe keys at several poses, and a 300-tic trajectory fed bac
 compound. Collision-free: the collision is the shared candidate test both moves feed (`cm_dx` / `cm_dy`).
 
 R9: the side step's sign flipped (dy += instead of -=) and the two strafe bits swapped -- each parts from the oracle.
+
+M7 P6+P7 -- THE TURN's slow first frame (reference_model.turn_step; the game tier's `tap`): the first frame of a held
+turn turns ANGLE_TURN_TAP, every later frame of the hold ANGLE_TURN_HELD, on the persisted flag `p_tnh` (fed in and
+printed back per record; fed back on itself in the trajectory). Every record runs at p_tnh 0 and 1. R9: always slow
+(the held block's constants made the tap's), always fast (the tap block's made the held's), and the flag never reset
+when the keys are released.
 """
 import random
 import struct
@@ -17,7 +23,7 @@ from pathlib import Path
 from doomfj.config import Config
 from doomfj.harness import W
 from doomfj.lut_generator import generate_trig_idioms_fj
-from doomfj.reference_model import ReferenceModel, SimState
+from doomfj.reference_model import ANGLE_TURN_HELD, ANGLE_TURN_TAP, ReferenceModel, SimState
 from doomfj.wall_renderer import _player_sim_lines
 from doomfj.wireformat import keys_byte
 
@@ -26,25 +32,31 @@ FJ = Path(__file__).resolve().parents[2] / "src" / "fj"
 RM = ReferenceModel(CFG)
 M32 = 0xFFFFFFFF
 NAMES = ("forward", "back", "turn_left", "turn_right", "strafe_left", "strafe_right")
-MUTS = {"sign": ("hex.sub 8, pmvdy, psdy", "hex.add 8, pmvdy, psdy"),
-        "swap": ("simsr_no, simsr_yes", "simsr_yes, simsr_no")}
+_C = lambda v: "hex.add_constant 8, viewangle, %#x" % (v & M32)          # noqa: E731
+MUTS = {"sign": [("hex.sub 8, pmvdy, psdy", "hex.add 8, pmvdy, psdy")],
+        "swap": [("simsr_no, simsr_yes", "simsr_yes, simsr_no")],
+        # M7 P6+P7: the turn's tap rule -- every frame slow, every frame fast, the flag never cleared
+        "always_slow": [(_C(ANGLE_TURN_HELD), _C(ANGLE_TURN_TAP)), (_C(-ANGLE_TURN_HELD), _C(-ANGLE_TURN_TAP))],
+        "always_fast": [(_C(ANGLE_TURN_TAP), _C(ANGLE_TURN_HELD)), (_C(-ANGLE_TURN_TAP), _C(-ANGLE_TURN_HELD))],
+        "never_reset": [("simth_no:\nhex.zero 1, p_tnh", "simth_no:")]}
 
 
 def _program(mut=None):
     text = "\n".join(_player_sim_lines(collide=False, strafe=True))
-    if mut:
-        old, new = MUTS[mut]
-        assert text.count(old) == 1, mut
+    for old, new in MUTS.get(mut, ()):
+        assert text.count(old) == 1, (mut, old)
         text = text.replace(old, new)
     return "\n".join([
         "stl.startup_and_init_all",
         "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
         "hex.input 4, viewx", "hex.input 4, viewy", "hex.input 4, viewangle", "hex.input 1, pkeys",
+        "hex.input 1, tnin", "hex.mov 1, p_tnh, tnin",
         text,
         "hex.print_as_digit 8, viewx, 0", "stl.output 44", "hex.print_as_digit 8, viewy, 0", "stl.output 44",
-        "hex.print_as_digit 8, viewangle, 0", "stl.output 10", ";loop",
+        "hex.print_as_digit 8, viewangle, 0", "stl.output 44", "hex.print_as_digit 1, p_tnh, 0", "stl.output 10",
+        ";loop",
         "done:", "stl.loop",
-        "rmagic: hex.vec 2", "pkeys: hex.vec 2", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+        "rmagic: hex.vec 2", "pkeys: hex.vec 2", "tnin: hex.vec 2", "p_tnh: hex.vec 1", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3", "pmvc: hex.vec 8", "pmvs: hex.vec 8",
         "pmvdx: hex.vec 8", "pmvdy: hex.vec 8", "psid: hex.vec 8", "psdx: hex.vec 8", "psdy: hex.vec 8",
         generate_trig_idioms_fj("finesine", CFG.TRIG_N, 16),
@@ -67,8 +79,9 @@ def build(tmp_path_factory):
 
 
 def _feed(records):
-    return b"".join(bytes([1]) + struct.pack("<III", x & M32, y & M32, a & M32) + bytes([keys_byte(k)])
-                    for (x, y, a), k in records) + bytes([0])
+    """records: ((x, y, angle, turnheld), keys)"""
+    return b"".join(bytes([1]) + struct.pack("<III", x & M32, y & M32, a & M32) + bytes([keys_byte(k), th])
+                    for (x, y, a, th), k in records) + bytes([0])
 
 
 def _run(fjm, records):
@@ -79,8 +92,8 @@ def _run(fjm, records):
 
 
 def _oracle(pose, k):
-    s = RM.step_sim(SimState(pose[0], pose[1], pose[2], "E1M1"), k, strafe=True)
-    return (s.x & M32, s.y & M32, s.angle & M32)
+    s = RM.step_sim(SimState(pose[0], pose[1], pose[2], "E1M1", turnheld=pose[3]), k, strafe=True)
+    return (s.x & M32, s.y & M32, s.angle & M32, s.turnheld)
 
 
 def _combos():
@@ -88,8 +101,9 @@ def _combos():
         yield {n: bool(bits >> i & 1) for i, n in enumerate(NAMES)}
 
 
-POSES = [(664 << 16, 291 << 16, 0x18000000), (-416 << 16, 256 << 16, 0), (1272 << 16, -724 << 16, 0x40000000),
-         (0, 0, 0xA5A5A5A5), (1869 << 16, 479 << 16, 0xC0000123)]
+POSES = [p + (th,) for th in (0, 1)                 # M7 P6+P7: each pose with no turn held last frame, and with one
+         for p in ((664 << 16, 291 << 16, 0x18000000), (-416 << 16, 256 << 16, 0), (1272 << 16, -724 << 16, 0x40000000),
+                   (0, 0, 0xA5A5A5A5), (1869 << 16, 479 << 16, 0xC0000123))]
 
 
 def test_every_key_combination_at_every_pose(build):
@@ -103,13 +117,30 @@ def test_every_key_combination_at_every_pose(build):
 def test_a_strafing_trajectory_tracks_the_oracle(build):
     rng = random.Random(5)
     fjm = build()
-    pose, want = (-416 << 16, 256 << 16, 0x12345678), (-416 << 16, 256 << 16, 0x12345678)
+    pose, want = (-416 << 16, 256 << 16, 0x12345678, 0), (-416 << 16, 256 << 16, 0x12345678, 0)
     for tic in range(300):
         k = {n: rng.random() < 0.3 for n in NAMES}
         (got,) = _run(fjm, [(pose, k)])
         want = _oracle(want, k)
         assert got == want, "tic %d diverged" % tic
         pose = got
+
+
+def test_the_turn_is_slow_on_a_hold_s_first_frame_only(build):
+    """M7 P6+P7, the rule in numbers on the real text: a 4-frame hold of the left arrow from rest turns TAP, HELD,
+    HELD, HELD; released for a frame, the next hold starts slow again; both arrows turn nowhere but count as held, so
+    the right arrow after them turns HELD"""
+    pose, seq = (0, 0, 0, 0), []
+    script = ([{"turn_left": True}] * 4 + [{}] + [{"turn_left": True}] + [{"turn_left": True, "turn_right": True}]
+              + [{"turn_right": True}])
+    fjm = build()
+    for k in script:
+        (got,) = _run(fjm, [(pose, k)])
+        assert got == _oracle(pose, k)
+        seq.append((got[2] - pose[2]) & M32)
+        pose = got
+    tap, held = ANGLE_TURN_TAP, ANGLE_TURN_HELD
+    assert seq == [tap, held, held, held, 0, tap, 0, -held & M32], [hex(v) for v in seq]
 
 
 @pytest.mark.parametrize("mut", sorted(MUTS))

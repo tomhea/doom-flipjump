@@ -22,7 +22,7 @@ def test_the_schema_is_well_formed(world):
     for f in world.schema:
         assert f.bits > 0 and f.count > 0 and f.nibbles == (f.bits + 3) // 4
         assert f.kind in ("persist", "derived") and f.phase in ("existing", "S3a", "S3b", "P2a.1", "P2b", "P3", "P4.2",
-                                                                  "P7")      # M7 P7: p_attacker
+                                                                  "P6", "P7")   # M7 P6+P7: p_turnheld; M7 P7: p_attacker
     derived = {f.name for f in world.schema if f.kind == "derived"}
     assert derived == {"mon_leaf", "leaf_head", "mob_next", "proj_leaf", "fx_leaf"}
     by = {f.name: f for f in world.schema}

@@ -1034,9 +1034,9 @@ At 128 and 256 units every cell is 1.000, except the r-20 refire bullet at 256 (
 **So, per the brief: no window change.**
 
 **12.1.2 With the turn.** The table gives the pistol's accurate shot and the shotgun's P(>= 1) for four step sizes:
-- ours at 640, the shipped step;
-- ours at 960, the owner's x1.5 (12.2);
-- ours at 320, the proposed slow first frame (below);
+- ours at 640, blocked48's one rate;
+- ours at 960 alone, the owner's x1.5 with no slow frame (commit 547afd2);
+- ours at 320, the SHIPPED tap: the first frame of a hold (12.2);
 - DOOM's keyboard TAP: the slow turn, 320 << 16 = 1.758 deg.
 
 | r | D | pistol: ours 640 | ours 960 | ours 320 | DOOM tap | shotgun: ours 640 | ours 960 | ours 320 | DOOM tap |
@@ -1062,19 +1062,11 @@ At 128 and 256 units every cell is 1.000, except the r-20 refire bullet at 256 (
 Strafing is a fine control the game already has. A 13-unit side step moves a target at distance D by 13 / D rad:
 0.73 deg at 1024, 0.39 deg at 1920. That is finer than DOOM's tap, so a player who strafes to line up loses nothing.
 
-**PROPOSED, NOT BUILT -- DOOM's own rule, one frame long.**
-- **The rule**: the FIRST frame a turn key is held turns 320 << 16; every later frame of the hold turns ANGLE_TURN
-  (960).
-- **What it gives**: the "ours 320" columns above. That is DOOM's tap odds exactly, since the rule is DOOM's. A held
-  turn keeps the owner's x1.5 after its first frame.
-- **What it costs**:
-  - one persisted nibble `p_tnh` (a turn key was held last frame);
-  - ~8 fj lines in `wall_renderer._player_sim_lines(strafe=True)`;
-  - in the model, a `p_turnheld` schema field read in `combat._player_move`;
-  - every gate that steps the game tier's player through `rm.step_sim(strafe=True)` must carry it.
-- **Who must do it**: the gate side is package A's switch to `MonsterPhase.move` (World._player_move). After that
-  switch, the model side is one field in one function. The change also moves v5/v6 and the restart set (package D).
-- **Why not here**: it would be a third concurrent edit of the gates' player step. The coordinator must decide.
+**BUILT (the coordinator's decision, 2026-10-05) -- DOOM's own rule, one frame long; 12.2 has the details.**
+- **The rule**: the FIRST frame a turn key is held turns ANGLE_TURN_TAP = 320 << 16 (DOOM's slow turn); every later
+  frame of the same hold turns ANGLE_TURN_HELD = 960 << 16 (the owner's x1.5).
+- **What it gives**: the "SHIPPED tap" columns above, and 12.1.4. Taps aim on DOOM's 320 lattice, so the odds are
+  DOOM's tap odds; a held turn keeps the x1.5 after its first frame.
 
 **12.1.3 The window's 1-column bias (MEASURED, harmless).**
 - Our accurate shot's hit interval is centred 0.73-0.78 deg (~1.06 columns) LEFT of the true bearing.
@@ -1086,14 +1078,63 @@ Strafing is a fine control the game already has. A 13-unit side step moves a tar
 - DOOM has the same convention at 320 wide, at half the angle. 12.1.1 centres DOOM on the true bearing, which flatters
   DOOM slightly.
 
-### 12.2 "Turning feels a bit slow during a fight, might need to x1.5 it" -- DONE
+**12.1.4 The SHIPPED rule at range** (MEASURED, table A2 of `aim_range.txt`). A tap turns ANGLE_TURN_TAP, so after
+the best taps the residual is uniform over 320 << 16, the same step as DOOM's keyboard tap. Ours / DOOM:
 
-`reference_model.ANGLE_TURN` goes from 640 << 16 to **960 << 16** (5.27 deg a frame).
-- It is the ONE definition. The model's `step_sim` and `combat._player_move` read it, and so does the fj's
-  `wall_renderer._player_sim_lines` (`hex.add_constant 8, viewangle, ...`). Every tier turns at the new rate.
-- The model has no slow turn and no run turn (DOOM's angleturn is {640, 1280, 320}). It has one rate, now x1.5. 12.1.2
-  shows what that costs at range, and proposes the slow first frame.
-- The reachable angles are now multiples of 2^22 BAM, 1024 a circle (they were multiples of 2^23).
+| r | D | pistol 1st shot | refire bullet | shotgun P(>= 1 pellet) | pellets of 7 |
+|---|---|---|---|---|---|
+| 20 | 512 | 1.000 / 1.000 | 0.772 / 0.778 | 1.000 / 1.000 | 5.40 / 5.44 |
+| 20 | 768 | 1.000 / 1.000 | 0.580 / 0.575 | 1.000 / 1.000 | 4.06 / 4.03 |
+| 20 | 1024 | 1.000 / 1.000 | 0.455 / 0.438 | 0.993 / 0.994 | 3.19 / 3.07 |
+| 20 | 1536 | 0.981 / 0.981 | 0.313 / 0.295 | 0.934 / 0.941 | 2.19 / 2.07 |
+| 20 | 1920 | 0.856 / 0.861 | 0.245 / 0.236 | 0.852 / 0.878 | 1.71 / 1.65 |
+| 30 | 1024 | 1.000 / 1.000 | 0.644 / 0.635 | 1.000 / 1.000 | 4.51 / 4.44 |
+| 30 | 1536 | 1.000 / 1.000 | 0.455 / 0.438 | 0.993 / 0.994 | 3.18 / 3.07 |
+| 30 | 1920 | 1.000 / 1.000 | 0.367 / 0.354 | 0.972 / 0.974 | 2.57 / 2.48 |
+
+At 128 and 256 units every cell is 1.000, except the r-20 refire bullet at 256 (0.984 / 0.990). Every cell is within
+0.03 of DOOM's. The first pistol shot at a zombieman 1536 away goes from 0.544 (blocked48) or 0.363 (x1.5 alone) to
+0.981. A player who holds the arrow instead of tapping gets the 960 column of 12.1.2.
+
+### 12.2 "Turning feels a bit slow during a fight, might need to x1.5 it" -- DONE, with DOOM's slow first frame
+
+**The constants** (`reference_model`, the ONE definition):
+- `ANGLE_TURN_TAP = 320 << 16` (1.76 deg): the FIRST frame of a held turn, DOOM's angleturn[2];
+- `ANGLE_TURN_HELD = 960 << 16` (5.27 deg): every later frame of the same hold, the owner's x1.5 of blocked48's 640.
+  `ANGLE_TURN` is kept as its name.
+
+**The rule** is `reference_model.turn_step(angle, keys, turnheld, tap)` -> (angle, turnheld).
+- The rate is TAP when `turnheld` is 0 and HELD when it is 1. Both keys held turn both ways (net 0), as in DOOM.
+- `turnheld` becomes "a turn key, either one, is held now". This is DOOM's G_BuildTiccmd `turnheld`, ONE counter for
+  both keys, with SLOWTURNTICS = 1 frame instead of 6 tics.
+- Who calls it: `ReferenceModel.step_sim` (its `tap` defaults to `strafe`, i.e. the game tier's player; the state
+  rides `SimState.turnheld`, a `compare=False` field defaulting to 0) and `combat._player_move` (on the schema field
+  `p_turnheld`, 1 bit, label `p_tnh`).
+- `wall_renderer._player_sim_lines(tap=)` emits the same rule. Its `tap` also defaults to `strafe`, and the game tier
+  passes `tap=True`.
+- The tiers without the state (hosted, visual: `tap` False) turn ANGLE_TURN_HELD every frame. Their text is the
+  earlier one with the new constant: byte-identical to commit 547afd2, checked.
+
+**The new cell `p_tnh`** (1 nibble, 0 or 1):
+- declared in `wall_renderer.STANDALONE_SCRATCH_DECLS`, beside the held-key flags;
+- PERSISTED through the M1 reset in `build.STANDALONE_PERSIST`, as `kb_l` / `kb_r` are (input memory);
+- zeroed by the restart, in `restart_common` (`hex.zero 1, p_tnh`), as the model's `_restart` restores
+  `p_turnheld` to the level start's 0. Package D's coverage test, which derives from `persist_labels`, will see it.
+- The fj (`simth_*`): if either arrow is held, then if `p_tnh` is 1 apply the HELD block, else set `p_tnh` and apply
+  the TAP block; with neither held, zero `p_tnh`.
+
+**Proof** (`tests/fj/test_player_strafe_fj.py`, the real emitted text against `step_sim(strafe=True)`): 8 passed.
+- Every key combination at 10 poses (5 poses x `p_tnh` 0 and 1), each record checking x, y, angle and `p_tnh`.
+- A 300-tic trajectory fed back on itself, `p_tnh` included.
+- `test_the_turn_is_slow_on_a_hold_s_first_frame_only`: a 4-frame hold from rest turns TAP, HELD, HELD, HELD; a frame
+  released, then the next hold starts TAP; both arrows turn 0 but count as held.
+- R9, each caught: `always_slow` (the held block's constants made the tap's), `always_fast` (the reverse),
+  `never_reset` (`p_tnh` not cleared on release), plus P4.1's `sign` and `swap`.
+- The restart: `tests/fj/test_skill_menu.py` runs the real restart block from a dirty `p_tnh` = 1 and expects 0, and
+  its R9 list gains "the turn's held flag is not reset" (caught; 11 of 11 restart mutants). `test_menu_screens.py`
+  declares the cell. The menu, palette, state-wire and collision harnesses: 99 passed.
+
+The reachable angles are multiples of 2^22 BAM, 1024 a circle (blocked48: 2^23).
 
 ### 12.3 "My firing speed is slow ... fire at x2 speed" -- DONE
 
@@ -1160,12 +1201,15 @@ Nothing else fits: the screen is 100 rows, and the last row's HELP now ends 1 px
   package E's v6 carries them. Nothing was re-frozen here. MEASURED (`scenarios_v2.py --validate --no-census` on this
   branch):
   - F3 is stale on all 11 runs;
-  - the criteria FAIL ">= 8 kills": **1 kill**, down from the frozen 17. With the weapon's tempo alone (the turn put
-    back to 640) it is 5 kills, also stale on all 11 runs. v5's recorded keys were aimed with 640-BAM turns and
-    timed to one weapon tic a frame, so they now point past their targets and fire at other moments. **A v6 must
-    RE-PLAN the routes' aiming and firing, not only re-record the same keys.**
-  - B0's camera check parts on 2 frames;
-  - every other criterion holds: no deaths, 9 pickups, 3 doors, the three attack kinds, the dodges.
+  - the criteria FAIL ">= 8 kills": **3 kills** with the shipped turn rule, down from the frozen 17. Before the tap
+    rule it was 1 kill (960 every frame), and 5 with the weapon's tempo alone (the turn put back to 640). v5's
+    recorded keys were aimed with 640-BAM turns and timed to one weapon tic a frame, so they now point past their
+    targets and fire at other moments. **A v6 must RE-PLAN the routes' aiming and firing, not only re-record the same
+    keys.**
+  - B0's camera check parts on 133 frames. `scenarios_v2.py` turns with its own copies of the turn (`ANGLE_TURN`
+    added or subtracted, near its lines 416 and 1220, and the planner's `ANGLE_TURN // 2` steering) and has no tap.
+    Those copies must call `reference_model.turn_step` (package E).
+  - every other criterion holds: no deaths, the pickups, the doors, the three attack kinds, the dodges.
 - 12.4 (the help) moves no world frame. It changes only the help picture (class F, as in P3.4).
 - 12.1 changes nothing.
 
@@ -1177,9 +1221,14 @@ it with one change reverted):**
     pistol's shots in frames 9, 16, 23, 30, a switch in 15 frames, with the DOOM tempo as its control.
   - `test_gp_restart` -- the weapon tempo: at x2 the imp died before it clawed, so `mon_melee` was 0 and the
     claw-table control moved nothing. The imp now stands at (60, 60), and the player wears blue armor.
-  - `test_player_modes` (hit / shoot noise) -- the turn: seed 3's walk woke no monster by sound. The seed is now 8
-    (7 sound wakes, 63 noises; "shoot" parts at tic 172).
+  - `test_player_modes` (hit / shoot noise) -- the turn: seed 3's walk woke no monster by sound. The seed is now 5
+    (with the tap rule: 8 sound wakes, 51 noises; "shoot" parts at tic 306).
+  - `test_gp_combat.test_legacy_walking_is_the_oracles_step_sim` -- the world turns with the tap rule, so the
+    comparison calls `step_sim(..., tap=True)` and threads its SimState (turnheld included).
+  - `test_gp_world.test_the_schema_is_well_formed` -- "P6" joins the phases (the `p_turnheld` field).
   - `test_reference_model.test_step_turn_left` -- the pinned angle, 0x43C00000.
+- **Left failing, for the build's restore-set re-key**: three `test_restore_set_shipped` tests that name `p_tnh`
+  (12.6).
 - **Left failing, for package E's v6 / package A's trail re-record** (they replay v5 or a recorded trail; nothing
   was re-frozen here):
   - `test_aim_window_oracle::test_window_agrees_with_geometric_aim_on_the_slice` (both changes);
@@ -1290,3 +1339,20 @@ THE TURN, as built (package D):
   fades while turning" -- each caught; test_player_damage_fj (+ `noatk`, `srcstale`), test_monster_attack_fj
   (+ `bulnosrc`, `meleenosrc`), test_fireball_pool_fj (+ `nosrc`, `srcfree`), test_restart_fj (p_atk / pj_src
   restored) -- all against the model.
+
+  moves with 12.2. A/E re-record them together with O3's re-record.
+- **The turn's tap rule and the gates (package A)**:
+  - `step_sim(strafe=True)` applies the rule from `SimState.turnheld` and returns it. A gate that threads step_sim's
+    own output keeps it; a gate that rebuilds its SimState from the binary's pose every frame starts every frame at
+    `turnheld` 0 (always the tap) and parts on held turns.
+  - A's switch to `MonsterPhase.move` (World._player_move) carries `p_turnheld` in the world: nothing more to do.
+  - The probe / gatestate should add `p_tnh` (1 nibble) to the compared cells.
+  - Every copy of the turn outside `turn_step` must call it: `scenarios_v2.py` (E), `scenarios.py`, and
+    `m2_std_gate`'s steering (which reads ANGLE_TURN as the step: it should plan with the tap too).
+- **P7 (package B)**: the dead player's skip of the move must skip the turn block too (`simth_*`), leaving `p_tnh` as
+  it was. The model's dead branch returns before `_player_move`, so `p_turnheld` is frozen while dead.
+- **The restart and the restore sets (package D)**:
+  - `restart_common` zeroes `p_tnh`, and `STANDALONE_PERSIST` holds it.
+  - The shipped restore sets must be re-keyed on the build. Until then three
+    `tests/host/test_restore_set_shipped.py` tests fail, naming `p_tnh`: the hoisted global is absent, the
+    standalone set adds it, and STANDALONE_PERSIST names it.

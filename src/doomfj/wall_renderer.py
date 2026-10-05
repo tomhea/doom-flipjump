@@ -25,7 +25,7 @@ from doomfj.lut_generator import (
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
 from doomfj.reference_model import STRAFE_MOVE                                   # M7 P4.1
-from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
+from doomfj.reference_model import (ANG90, ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
                                     apply_sector_heights, spawn_state)
 from doomfj.config import Config
@@ -267,7 +267,7 @@ def _int_part_lines(dst, src, neg, pos):
             f"{neg}:", f"hex.set 6, {dst} + 4*dw, 0xFFFFFF", f";{pos}", f"{pos}:"]
 
 
-def _player_sim_lines(collide: bool = False, strafe: bool = False) -> list:
+def _player_sim_lines(collide: bool = False, strafe: bool = False, tap=None) -> list:
     """M14-c — ONE TIC OF THE PLAYER SIM, in fj. The exact mirror of
     `ReferenceModel.step_sim`: turn first, then a collision-free move along the NEW angle.
 
@@ -284,8 +284,29 @@ def _player_sim_lines(collide: bool = False, strafe: bool = False) -> list:
     The key byte's bits are tested with `hex.if_flags`, whose mask is a set of NIBBLE VALUES: bit 0
     set is the 8 odd nibbles (0xAAAA), bit 1 is 0xCCCC, bit 2 is 0xF0F0, bit 3 is 0xFF00. Only the
     LOW nibble is read, so only key bits 0..3 exist.
+
+    M7 P6+P7 (`tap`, the game tier): the turn is `reference_model.turn_step` -- ANGLE_TURN_TAP on the first frame of a
+    held turn (the persisted flag `p_tnh` 0), ANGLE_TURN_HELD (= ANGLE_TURN) after it, and `p_tnh` becomes "a turn key
+    is held now". Default: `strafe` -- the game tier's player, as `step_sim(tap=None)`. Off, every frame turns
+    ANGLE_TURN and the text is the earlier one to the byte.
     """
-    turn = ANGLE_TURN & 0xFFFFFFFF
+    tap = strafe if tap is None else tap
+    def _turn(sfx: str, rate: int) -> list:
+        return [f"hex.if_flags pkeys, {KEY_TURN_LEFT_MASK:#06x}, simtl{sfx}_no, simtl{sfx}_yes",
+                f"simtl{sfx}_yes:", f"hex.add_constant 8, viewangle, {rate & 0xFFFFFFFF:#x}",
+                f"simtl{sfx}_no:",
+                f"hex.if_flags pkeys, {KEY_TURN_RIGHT_MASK:#06x}, simtr{sfx}_no, simtr{sfx}_yes",
+                f"simtr{sfx}_yes:", f"hex.add_constant 8, viewangle, {-rate & 0xFFFFFFFF:#x}",
+                f"simtr{sfx}_no:"]
+    # either turn key: the nibble values with bit 2 or bit 3 set
+    either = KEY_TURN_LEFT_MASK | KEY_TURN_RIGHT_MASK
+    turning = (_turn("", ANGLE_TURN) if not tap else
+               [f"hex.if_flags pkeys, {either:#06x}, simth_no, simth_yes",
+                "simth_yes:", "hex.if1 1, p_tnh, simth_held", "hex.set 1, p_tnh, 1",
+                *_turn("p", ANGLE_TURN_TAP), ";simth_done",
+                "simth_held:", *_turn("h", ANGLE_TURN), ";simth_done",
+                "simth_no:", "hex.zero 1, p_tnh",
+                "simth_done:"])
     fwd = FORWARD_MOVE & 0xFFFFFFFF
     # M7 P4.1 (the game tier, `strafe`): the side step -- `step_sim(strafe=True)` and the model's _player_move: the side
     # magnitude from the high nibble's strafe bits, then dx += FixedMul(side, sin), dy -= FixedMul(side, cos) after the
@@ -298,12 +319,7 @@ def _player_sim_lines(collide: bool = False, strafe: bool = False) -> list:
              "simsl_yes:", f"hex.add_constant 8, psid, {-STRAFE_MOVE & 0xFFFFFFFF:#x}",
              "simsl_no:"] if strafe else [])
     return [
-        f"hex.if_flags pkeys, {KEY_TURN_LEFT_MASK:#06x}, simtl_no, simtl_yes",
-        "simtl_yes:", f"hex.add_constant 8, viewangle, {turn:#x}",
-        "simtl_no:",
-        f"hex.if_flags pkeys, {KEY_TURN_RIGHT_MASK:#06x}, simtr_no, simtr_yes",
-        "simtr_yes:", f"hex.add_constant 8, viewangle, {-ANGLE_TURN & 0xFFFFFFFF:#x}",
-        "simtr_no:",
+        *turning,
         "hex.zero 8, pmove",
         f"hex.if_flags pkeys, {KEY_FORWARD_MASK:#06x}, simfw_no, simfw_yes",
         "simfw_yes:", f"hex.add_constant 8, pmove, {fwd:#x}",
@@ -443,6 +459,9 @@ STANDALONE_SCRATCH_DECLS = [
     # M7 P4.1: the new held flags -- strafe left / right, fire, the number keys 1..4 (persisted with the others)
     "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1",
     "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
+    # M7 P6+P7: a turn key was held last frame (reference_model.turn_step's `turnheld`: the turn's slow first frame).
+    # Persisted like the held flags it follows (build.STANDALONE_PERSIST); the restart zeroes it.
+    "p_tnh: hex.vec 1, 0",
     # M3: which frame producer runs. 1 = MENU, 0 = world, and it BAKES to 1 so the game boots
     # into the menu. Persisted like the key flags -- a mode that reset every frame would flicker
     # between the two pictures. It is declared even when the menu is off (two words) so both
@@ -487,6 +506,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
                  f"    hex.zero {max(nwalk, 1)}, wfired"]
                 if ndoors else []),
               "    hex.zero 1, lvdone", "    hex.set 1, pusedn, 1",     # M7 P2a.2
+              "    hex.zero 1, p_tnh",                                 # M7 P6+P7: no turn held at the level start
               # M7 P2b: every lift at its top, idle, nothing pending; the switch not fired
               *([f"    hex.zero {nlift}, lstate", f"    hex.zero {nlift}, ldir",
                  f"    hex.zero {nlift}, lsub", f"    hex.zero {WAIT_NIBBLES * nlift}, lwait",
@@ -916,7 +936,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         *(exit_lines(exit_boxes_, press_miss) if exit_boxes_ else []),
         # M7 P4.1: the weapon -- the model's player phase runs the number keys and the psprites before the move
         *weapon,
-        *_player_sim_lines(collide, strafe=True),        # M7 P4.1: the game tier strafes
+        *_player_sim_lines(collide, strafe=True, tap=True),   # M7 P4.1: the game tier strafes; P6+P7: the tap turn
         # M7 P3.1: the monsters tic after the player (the model's order: doors, player, monsters);
         # a frozen level skips them with the player
         *monster_tic,

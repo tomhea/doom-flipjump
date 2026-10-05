@@ -52,7 +52,7 @@ sys.path.insert(0, str(ROOT))
 
 from doomfj import combat as C                                    # noqa: E402
 from doomfj.combat import CombatMixin, outcome_table_k            # noqa: E402
-from doomfj.reference_model import ANGLE_TURN, ReferenceModel     # noqa: E402
+from doomfj.reference_model import ANGLE_TURN, ANGLE_TURN_HELD, ANGLE_TURN_TAP, ReferenceModel   # noqa: E402
 
 M32 = 0xFFFFFFFF
 TWO32 = 1 << 32
@@ -60,9 +60,9 @@ RANGE = 2048.0
 DISTANCES = (128, 256, 512, 768, 1024, 1536, 1920)
 RADII = {20: "zombieman / imp / sergeant", 30: "demon"}
 STEPS = {                                   # name -> BAM per step
-    "ours_640": 640 << 16,                  # the shipped turn (one frame of a held arrow)
-    "ours_960": 960 << 16,                  # the owner's x1.5
-    "ours_tap_320": 320 << 16,              # PROPOSED: DOOM's slow turn on the first frame of a held turn
+    "ours_640": 640 << 16,                  # blocked48's turn (one rate; before 2026-10-05)
+    "ours_960": ANGLE_TURN_HELD,            # the owner's x1.5: a hold's later frames (and the only rate without taps)
+    "ours_tap_320": ANGLE_TURN_TAP,         # SHIPPED on p67-f: a hold's FIRST frame (DOOM's slow turn) -- a tap
     "doom_tap_320": 320 << 16,              # DOOM's slow turn: a keyboard tap
     "doom_walk_640": 640 << 16,             # DOOM's held walk turn (same as ours_640: the rule alone)
 }
@@ -194,11 +194,20 @@ def report(res) -> str:
                  "| %4.2f / %4.2f" % (r, D, w, o["o_pis"], d["d_pis"], o["o_bul"], d["d_bul"], o["o_sg1"],
                                       d["d_sg1"], o["o_sgm"], d["d_sgm"]))
     L.append("")
-    L.append("B. WITH THE TURN -- ours at its frame step (640, and the owner's x1.5 = 960) vs DOOM's keyboard TAP")
-    L.append("   (the slow turn, 320<<16 = 1.758 deg); the residual uniform over one step, centred as in A.")
-    L.append("   'ours tap 320' is the PROPOSED slow first frame of a held turn (DOOM's SLOWTURNTICS rule).")
-    L.append("  r    D | pistol 1st: ours 640 | ours 960 | ours tap 320 | DOOM tap 320 || shotgun P>=1: ours 640 "
-             "| ours 960 | ours tap 320 | DOOM tap 320")
+    L.append("A2. THE SHIPPED RULE -- a tap turns ANGLE_TURN_TAP (the first frame of a hold; DOOM's slow turn), so the")
+    L.append("   residual after the best taps is uniform over 320<<16; DOOM's keyboard tap is the same step. ours / doom:")
+    L.append("  r    D | pistol 1st ours/doom | refire bullet ours/doom | shotgun P>=1 ours/doom | pellets of 7 ours/doom")
+    for (r, D), by in sorted(res.items()):
+        o, d = by["ours_tap_320"], by["doom_tap_320"]
+        L.append("  %2d %4d | %5.3f / %5.3f        | %5.3f / %5.3f           | %5.3f / %5.3f          "
+                 "| %4.2f / %4.2f" % (r, D, o["o_pis"], d["d_pis"], o["o_bul"], d["d_bul"], o["o_sg1"],
+                                      d["d_sg1"], o["o_sgm"], d["d_sgm"]))
+    L.append("")
+    L.append("B. WITH THE TURN -- ours at blocked48's 640, the owner's x1.5 held rate 960 alone, and the SHIPPED tap")
+    L.append("   (320, then 960 while held) vs DOOM's keyboard TAP (the slow turn, 320<<16 = 1.758 deg); the residual")
+    L.append("   uniform over one step, centred as in A.")
+    L.append("  r    D | pistol 1st: ours 640 | ours 960 | SHIPPED tap | DOOM tap 320 || shotgun P>=1: ours 640 "
+             "| ours 960 | SHIPPED tap | DOOM tap 320")
     for (r, D), by in sorted(res.items()):
         L.append("  %2d %4d |  %5.3f               |  %5.3f   |  %5.3f       |  %5.3f       ||  %5.3f              "
                  "|  %5.3f   |  %5.3f       |  %5.3f" % (
@@ -225,7 +234,7 @@ def main() -> int:
     ap.add_argument("--dstep", type=int, default=4, help="delta grid, in units of 2^16 BAM")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
-    print("ANGLE_TURN (the model's) = %d << 16 = %.3f deg; steps: %s" % (
+    print("ANGLE_TURN_TAP %d << 16, ANGLE_TURN_HELD (= ANGLE_TURN) %d << 16 = %.3f deg; steps: %s" % (ANGLE_TURN_TAP >> 16,
         ANGLE_TURN >> 16, deg(ANGLE_TURN), ", ".join("%s %.3f deg" % (k, deg(v)) for k, v in STEPS.items())))
     if a.selftest:
         base = measure(8, 8)

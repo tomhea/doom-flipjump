@@ -107,12 +107,33 @@ RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_
 # M7 P4.1: the side step a strafe key moves, per tic (the gameplay model's; DOOM's sidemove thrust at steady state)
 STRAFE_MOVE = 13 << 16
 FORWARD_MOVE = 16 << 16           # 16.16 map-units per tic ~= DOOM's steady-state run; S0 magnitude
-# BAM per frame; turn-left adds, turn-right subtracts. ONE definition: the model (step_sim, combat._player_move) and
-# the fj sim (wall_renderer._player_sim_lines) both read it. DOOM's angleturn[] is {640, 1280, 320} << 16 (walk,
-# run, and the SLOW turn of the first SLOWTURNTICS = 6 tics a key is held); the model has no slow turn and no run
-# turn: one rate. M7 P6+P7 (the owner, 2026-10-05: "turning feels a bit slow during a fight, might need to x1.5
-# it"): 640 -> 960 (x1.5). docs/gp-p67-interface.md section 12 measures what it costs the aim at range.
-ANGLE_TURN = 960 << 16
+# THE TURN, BAM per frame; turn-left adds, turn-right subtracts. ONE definition, `turn_step` below: the model
+# (step_sim, combat._player_move) and the fj sim (wall_renderer._player_sim_lines) all follow it. DOOM's angleturn[]
+# is {640, 1280, 320} << 16: walk, run, and the SLOW turn of the first SLOWTURNTICS = 6 tics a turn key is held
+# (G_BuildTiccmd's `turnheld`, ONE counter for both keys). M7 P6+P7 (the owner, 2026-10-05: "turning feels a bit
+# slow during a fight, might need to x1.5 it"; the coordinator's rule after the range measurement,
+# docs/gp-p67-interface.md section 12):
+#   * ANGLE_TURN_TAP  -- the FIRST frame of a held turn: DOOM's slow turn, so a tap aims as finely as DOOM's tap;
+#   * ANGLE_TURN_HELD -- every later frame of the same hold: the owner's x1.5 of the old 640.
+# The state is one flag, `turnheld` (a turn key -- either -- was held last frame; DOOM's counter at SLOWTURNTICS = 1
+# frame): the world's `p_turnheld`, SimState.turnheld, the fj's persisted `p_tnh`. The tiers without that state (the
+# hosted and visual ones: `tap=False`) turn ANGLE_TURN_HELD every frame. ANGLE_TURN is that rate's old name.
+ANGLE_TURN_TAP = 320 << 16
+ANGLE_TURN_HELD = 960 << 16
+ANGLE_TURN = ANGLE_TURN_HELD
+
+
+def turn_step(angle: int, keys, turnheld: int, tap: bool = True):
+    """ONE frame of the turn -> (angle, turnheld). With `tap` (the game tier): the rate is ANGLE_TURN_TAP when no turn
+    key was held last frame (`turnheld` 0), else ANGLE_TURN_HELD, and `turnheld` becomes "a turn key is held now";
+    both keys held turn both ways (net 0, DOOM's). Without `tap`: ANGLE_TURN_HELD, `turnheld` untouched."""
+    left, right = bool(keys.get("turn_left")), bool(keys.get("turn_right"))
+    rate = ANGLE_TURN_TAP if tap and not turnheld else ANGLE_TURN_HELD
+    if left:
+        angle = (angle + rate) & 0xFFFFFFFF
+    if right:
+        angle = (angle - rate) & 0xFFFFFFFF
+    return angle, (int(left or right) if tap else turnheld)
 
 # ── M14-d: line collision (P_CheckPosition / PIT_CheckLine) ───────────────────────────────────
 PLAYER_RADIUS = 16 << 16          # MT_PLAYER radius, 16.16 (the half-width of the collision box)
@@ -476,6 +497,9 @@ class SimState:
     y: int          # 16.16 signed
     angle: int      # 32-bit BAM (modular: NOT normalised, 0 and 2**32 are the same angle anyway)
     level: str      # current level lump name
+    # M7 P6+P7: a turn key was held last frame (`turn_step`; the game tier's `p_tnh`). Carried by step_sim(tap=True),
+    # 0 for every state built by hand; NOT compared -- a pose is (x, y, angle, level), as before.
+    turnheld: int = dataclasses.field(default=0, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, "x", _signed(self.x, 32))
@@ -1019,16 +1043,14 @@ class ReferenceModel:
         return x, y
 
     # ── sim ──
-    def step_sim(self, state: SimState, keys: dict, *, scene=None, touch=None, strafe: bool = False) -> SimState:
+    def step_sim(self, state: SimState, keys: dict, *, scene=None, touch=None, strafe: bool = False,
+                 tap: bool | None = None) -> SimState:
         """One tic: turn, then move -- against the level's lines when `scene` is given (M14-d), and
         freely when it is not (the M9 collision-free sim every earlier gate speaks).
         FixedMul(move, cos/sin) in 16.16 (n=8 nibbles, f=4 fraction nibbles) mirrors the fj path
-        exactly; angle wraps mod 2**32."""
-        angle = state.angle
-        if keys.get("turn_left"):
-            angle = (angle + ANGLE_TURN) & 0xFFFFFFFF
-        if keys.get("turn_right"):
-            angle = (angle - ANGLE_TURN) & 0xFFFFFFFF
+        exactly; angle wraps mod 2**32. M7 P6+P7: the turn is `turn_step`; `tap` (default: `strafe`, i.e. the game
+        tier's player) applies the slow first frame from `state.turnheld` and carries the flag on in the result."""
+        angle, turnheld = turn_step(state.angle, keys, state.turnheld, strafe if tap is None else tap)
 
         move = 0
         if keys.get("forward"):
@@ -1061,7 +1083,7 @@ class ReferenceModel:
                 x, y = self.move_with_collision(scene, _signed(x, 32), _signed(y, 32), dx, dy,
                                                 touch=touch)
                 x, y = x & 0xFFFFFFFF, y & 0xFFFFFFFF
-        return replace(state, x=x, y=y, angle=angle)
+        return replace(state, x=x, y=y, angle=angle, turnheld=turnheld)
 
     def render_textured_column(self, texels, texheight, texcol, colormap, light, *,
                                count, frac0, step, fracbits=8):

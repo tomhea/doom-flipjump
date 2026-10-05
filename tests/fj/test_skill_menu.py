@@ -78,7 +78,9 @@ HEX_TARGETS = [("viewx", 8, 1), ("viewy", 8, 1), ("viewangle", 8, 1),
                ("lwait", WAIT_NIBBLES * NLIFT, 1), ("lreq", NLIFT, 1), ("fswitch", 1, 1),
                # M7 P7 (doomfj.restartcode): the level time and the restart request back to 0; the skill the
                # restart restores to = the one NEW GAME chose
-               ("lvtime", 4, 1), ("g_rs", 1, 1), ("g_skill", 1, 1)]
+               ("lvtime", 4, 1), ("g_rs", 1, 1), ("g_skill", 1, 1),
+               # M7 P6+P7: the turn's held flag (reference_model.turn_step) -- no turn held at the level start
+               ("p_tnh", 1, 1)]
 BYTE_TARGETS = [("sshead", NSS), ("thnext", NT)]
 FIELDS = "msv " + " ".join([f"{lb}[{i}]" for lb, _n, c in HEX_TARGETS for i in range(c)]
                            + [f"{lb}[{i}]" for lb, c in BYTE_TARGETS for i in range(c)])
@@ -90,7 +92,7 @@ DIRTY = {"viewx": [0x12345678], "viewy": [0x0BADF00D], "viewangle": [0x76543210]
          "thvis": [0x5A, 0xA5], "sshead": [0xA5, 0x5A], "thnext": [0x77, 0x66, 0x55],
          "dreq": [0x11], "pcard": [1], "wfired": [1], "lvdone": [1], "pusedn": [0],
          "lstate": [0x93], "ldir": [0x21], "lsub": [0x11], "lwait": [0x1A1A], "lreq": [0x11],
-         "fswitch": [1], "lvtime": [0xBEEF], "g_rs": [1], "g_skill": [1]}
+         "fswitch": [1], "lvtime": [0xBEEF], "g_rs": [1], "g_skill": [1], "p_tnh": [1]}
 # the menu's own declarations less the exit's two cells and P7's three, which the harness declares DIRTY
 MENU_DECLS_CLEAN = [d for d in MENU_STATE_DECLS
                     if not d.startswith(("lvdone:", "pusedn:", "lvtime:", "g_rs:", "g_skill:"))]
@@ -105,7 +107,7 @@ def level_start(k) -> dict:
             "sshead": list(head), "thnext": list(nxt),
             "dreq": [0], "pcard": [0], "wfired": [0], "lvdone": [0], "pusedn": [1],
             "lstate": [0], "ldir": [0], "lsub": [0], "lwait": [0], "lreq": [0], "fswitch": [0],
-            "lvtime": [0], "g_rs": [0], "g_skill": [k]}
+            "lvtime": [0], "g_rs": [0], "g_skill": [k], "p_tnh": [0]}
 
 
 def _dump():
@@ -447,6 +449,8 @@ def _broken(name):
         return _drop(common, "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"), skills
     if name == "the level time and the restart request are not reset":       # M7 P7
         return _drop(common, "lvtime", "g_rs"), skills
+    if name == "the turn's held flag is not reset":                  # M7 P6+P7
+        return _drop(common, "p_tnh"), skills
     if name == "no skill links its things":
         return common, [_drop(s, "thnext +") for s in skills]
     assert name == "no skill sets its flags", name
@@ -457,6 +461,7 @@ BROKEN = ["the lists are not zeroed", "the doors are not shut", "the positions a
           "the bindings are not reset", "the view's y and angle are not reset",
           "the door cells of P2a.1 are not reset", "the exit's cells are not reset",
           "the movers are not reset", "the level time and the restart request are not reset",
+          "the turn's held flag is not reset",
           "no skill links its things", "no skill sets its flags"]
 
 

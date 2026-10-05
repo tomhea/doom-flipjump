@@ -75,7 +75,7 @@ from doomfj import rng as R
 from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
 from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
-from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE   # STRAFE_MOVE: M7 P4.1, the ONE value
+from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE, turn_step   # STRAFE_MOVE: M7 P4.1, the ONE value
 from doomfj.reference_model import ANG180 as _ANG180                       # M7 P7: P_DeathThink's turn
 
 # 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
@@ -1217,11 +1217,8 @@ class CombatMixin:
         `player_blocking` is off (the legacy walk-through, for regression comparison). With nothing
         in the way this IS step_sim (a test holds the two equal)."""
         rmod, ws = self.rm, self.ws
-        angle = ws.pangle
-        if keys["turn_left"]:
-            angle = (angle + ANGLE_TURN) & M32
-        if keys["turn_right"]:
-            angle = (angle - ANGLE_TURN) & M32
+        # M7 P6+P7: the turn is reference_model.turn_step -- the slow first frame of a held turn, then x1.5
+        angle, ws.p_turnheld = turn_step(ws.pangle, keys, ws.p_turnheld)
         ws.pangle = angle
         move = (FORWARD_MOVE if keys["forward"] else 0) - (FORWARD_MOVE if keys["back"] else 0)
         side = (STRAFE_MOVE if keys["strafe_right"] else 0) - (STRAFE_MOVE if keys["strafe_left"] else 0)

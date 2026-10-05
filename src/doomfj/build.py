@@ -57,7 +57,9 @@ STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
                       "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode", "menu_scr", "menu_sel",
                       "lvdone", "pusedn",   # M7 P2a.2: the level is done; use held last tic
                       # M7 P4.1: the new held flags (strafe, fire, the number keys) -- held keys, like kb_u
-                      "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4")
+                      "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4",
+                      # M7 P6+P7: a turn key held last frame (the turn's slow first frame) -- input memory, like them
+                      "p_tnh")
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it

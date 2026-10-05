@@ -167,15 +167,19 @@ def _by_ready(prefix: str, target: Dict[int, str]) -> List[str]:
 
 
 def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, noise: bool = False,
-                 hurt: bool = False) -> List[str]:
+                 hurt: bool = False, loot: bool = False) -> List[str]:
     """the frame's weapon tic: the number keys, then P_MovePsprites (the weapon, then the flash), then the bar's ammo
     and arms. Falls through at `wp_end`. Uses `pkeys` (fire: the high nibble's bit 3) and the held `kb_w1..kb_w4`.
     `shoot` (P4.2a): every shot resolves through `aim_sid` and hands a monster to `dm_go` (the module docstring);
     off, the text is P4.1's and no shot label exists. `noise` (P4.2b, the "hit" mode): P_FireWeapon's P_NoiseAlert --
     every fire point calls `nz_leaf` (doomfj.noisecode); off, the text is P4.2a's. `hurt` (M7 P5, doomfj.hurtcode:
     the player can be hurt and killed): A_WeaponReady lowers at p_hp <= 0, A_ReFire fires only at p_hp > 0, and
-    A_Lower keeps a dead player's (p_dead) weapon at the bottom; off, the text is the P4 one to the byte."""
+    A_Lower keeps a dead player's (p_dead) weapon at the bottom; off, the text is the P4 one to the byte. `loot`
+    (M7 P6 + P7, doomfj.lootcode: the "full" player): the number keys are skipped on the TIC-START death `p_dd0` (a
+    nukage death earlier in the tic still runs them, P7-a), key 1 keeps the fist up while the chainsaw is ready and
+    berserk runs (`p_str`), and the berserk fist's damage is x10 (`bk10`); off, the text is P5's."""
     assert shoot or not noise, "the noise is the hit mode's: it comes with the shot"
+    assert hurt or not loot, "the loot player is the hurt one"
     idx = {s: i for i, s in enumerate(states)}
     flash_frame = {s: (0 if s == gd.S_NULL or gd.STATES[s].tics == 0 else 1 + flash_frames().index(psprite_lump(s)))
                    for s in flash_states()}
@@ -186,11 +190,13 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
     # -- 1. P_PlayerThink's BT_CHANGE: the LOWEST held number key names the weapon; 1 is the chainsaw when owned
     #    (berserk would keep the fist up -- P6); a weapon not owned, or already up, changes nothing
     if hurt:                                                          # M7 P5: a dead player's tic skips the keys
-        out += ["hex.if1 1, p_dead, wk_end"]                          # (MonsterPhase.weapon: psprites + p_dc only)
+        out += ["hex.if1 1, %s, wk_end" % ("p_dd0" if loot else "p_dead")]   # (P7: dead at the tic's START)
     out += ["hex.if0 1, kb_w1, wk_2",
             "hex.if0 1, wp_own + %d*dw, wk_fist" % OWN[gd.WP_CHAINSAW],
-            "hex.if_flags wp_rdy, 1<<%d, wk_saw, wk_end" % gd.WP_CHAINSAW,
-            "wk_saw:", "hex.set 1, wp_pend, %d" % gd.WP_CHAINSAW, ";wk_end",
+            "hex.if_flags wp_rdy, 1<<%d, wk_saw, %s" % (gd.WP_CHAINSAW, "wk_sbk" if loot else "wk_end")]
+    if loot:                                                          # M7 P6: the saw is up and berserk runs: the fist
+        out += ["wk_sbk:", "hex.if0 4, p_str, wk_end", ";wk_fist"]
+    out += ["wk_saw:", "hex.set 1, wp_pend, %d" % gd.WP_CHAINSAW, ";wk_end",
             "wk_fist:", "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_FIST],
             "hex.if_flags wp_rdy, 1<<%d, wk_fset, wk_end" % gd.WP_FIST,
             "wk_fset:", "hex.set 1, wp_pend, %d" % gd.WP_FIST, ";wk_end",
@@ -215,7 +221,7 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
         st = gd.STATES[s]
         out += [f"{wen(s)}:", f"hex.set 2, wp_st, {idx[s]}", f"hex.set 1, wp_tics, {st.tics}",
                 f"hex.set 1, wp_frm, {frames.index(psprite_lump(s))}"]
-        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise, hurt)
+        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise, hurt, loot)
         out += [f";{wen(st.next)}" if st.tics == 0 else ";wp_flash"]
     # -- 3. P_MovePsprites, the flash
     out += ["wp_flash:",
@@ -308,7 +314,7 @@ def _hp_le0(p: str, yes: str) -> List[str]:
 
 
 def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: bool = False,
-            hurt: bool = False) -> List[str]:
+            hurt: bool = False, loot: bool = False) -> List[str]:
     """one state's action, inline; it ends by falling through (no psprite set) or by a tail jump. `shoot`: the fire
     actions resolve their shots (`_shot_*`) instead of only advancing the stream. `hurt` (M7 P5): the health and
     death reads (weapon_lines)."""
@@ -373,7 +379,7 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: b
             out += [f"hex.add_constant 2, rng_pl, {(7 * DRAWS['gunshot']) & 0xFF}"]
         return out
     if action == "A_Punch":
-        return _shot_melee(p, "punch") if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['punch']}"]
+        return _shot_melee(p, "punch", loot) if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['punch']}"]
     if action == "A_Saw":
         return _shot_melee(p, "saw") if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['saw']}"]
     raise NotImplementedError("%s on an E1M1 psprite" % action)
@@ -517,12 +523,15 @@ def _shot_shotgun(p: str) -> List[str]:
     return out
 
 
-def _shot_melee(p: str, site: str) -> List[str]:
-    """A_Punch / A_Saw: a 3-draw shot; when the window names a target, the melee damage and the weapon's reach"""
+def _shot_melee(p: str, site: str, loot: bool = False) -> List[str]:
+    """A_Punch / A_Saw: a 3-draw shot; when the window names a target, the melee damage and the weapon's reach.
+    `loot` (M7 P6): A_Punch's berserk `damage *= 10` while `p_str` runs (`bk10`)"""
     from doomfj.combat import PUNCH_REACH, SAW_REACH
     reach = {"punch": PUNCH_REACH, "saw": SAW_REACH}[site]
+    berserk = ([f"hex.if0 4, p_str, {p}nb", "bk10.lookup dm_dmg, sh_row", f"{p}nb:"]
+               if loot and site == "punch" else [])
     return ["stl.fcall sh_rd3, sh_ret", f"hex.if0 2, dm_id, {p}sx",
-            "hex.mov 2, dm_dmg, sh_row", "hex.set 1, dm_melee, 1", f"hex.set 2, dm_reach, {reach}",
+            "hex.mov 2, dm_dmg, sh_row", *berserk, "hex.set 1, dm_melee, 1", f"hex.set 2, dm_reach, {reach}",
             "stl.fcall dm_go, dm_ret",
             f"{p}sx:"]
 
@@ -556,19 +565,30 @@ def restart_lines(start: dict, states: List[str], frames: List[str]) -> List[str
     return out
 
 
-def weapon_parts(map_wad, mapname: str, shoot: bool = False, noise: bool = False, hurt: bool = False) -> dict:
+def bk10_table_fj() -> str:
+    """`bk10` (M7 P6): the berserk fist's damage, x10, by A_Punch's melee damage (lootcode.bk10_values)"""
+    from doomfj.lootcode import bk10_values
+    from doomfj.lut_generator import generate_dispatch_table_fj
+    return generate_dispatch_table_fj("bk10", bk10_values(), index_nibbles=2, result_nibbles=2)
+
+
+def weapon_parts(map_wad, mapname: str, shoot: bool = False, noise: bool = False, hurt: bool = False,
+                 loot: bool = False) -> dict:
     """everything the game tier's emitter splices in for the weapon: `decls` (the cells, the two constants, the ammo
     digit table), `tic` (the frame's weapon lines), `restart` (NEW GAME's values). `shoot` (P4.2a) adds the shot's
     cells to `decls`, the `wpo` table to `tables` and its leaves to `tic`; the program must then also hold `aim_sid`
     (the aim window) and `dm_go` / `dm_ret` (the damage machinery). `noise` (P4.2b, the "hit" mode) calls
     `nz_leaf` at every fire point: the program must then hold the noise's leaf and cells
     (monstercode.p31_parts at a player mode in noisecode.NOISE_PLAYER_MODES). `hurt` (M7 P5, a player mode in
-    hurtcode.HURT_PLAYER_MODES) reads the health and death cells: the program must then hold hurtcode's decls."""
+    hurtcode.HURT_PLAYER_MODES) reads the health and death cells: the program must then hold hurtcode's decls.
+    `loot` (M7 P6 + P7, lootcode.LOOT_PLAYER_MODES): the latch, berserk's key 1 and fist (`bk10` in `tables`); the
+    program must then hold lootcode's decls (p_dd0, p_str)."""
     from doomfj.lut_generator import generate_dispatch_table_fj
     start = level_start(map_wad, mapname)
     states, frames = weapon_states(), overlay_frames()
     tables = [generate_dispatch_table_fj("ammobcd", ammo_digit_values(), index_nibbles=3, result_nibbles=3)]
     return {"decls": weapon_decls(start, states, frames) + weapon_const_decls() + (shot_decls() if shoot else []),
-            "tables": tables + ([shot_table_fj()] if shoot else []),
-            "tic": weapon_lines(states, frames, shoot, noise, hurt), "restart": restart_lines(start, states, frames),
+            "tables": tables + ([shot_table_fj()] if shoot else []) + ([bk10_table_fj()] if loot else []),
+            "tic": weapon_lines(states, frames, shoot, noise, hurt, loot),
+            "restart": restart_lines(start, states, frames),
             "start": start}

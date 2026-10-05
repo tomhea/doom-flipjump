@@ -83,8 +83,9 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     patch, one that did not got a door that never stopped being a wall."""
     # M7 P2b: `contact`/`passes`/`radius` arm the REVERSAL (the player's box against the door's
     # rectangle, read-only) -- not the collision table; the census below runs on the armed text
+    # M7 P7: `dead` names the tic-start death cell the guards READ (lootcode's p_dd0) -- not a collision input
     assert list(inspect.signature(doorcode.door_tic_lines).parameters) == \
-        ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius", "mon_press", "mon_contact"], (
+        ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius", "mon_press", "mon_contact", "dead"], (
             "door_tic_lines takes collision inputs again")
     secs, lds, sds, verts = level
     slots = sorted(doors)

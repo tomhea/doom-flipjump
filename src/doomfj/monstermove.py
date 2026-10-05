@@ -106,13 +106,14 @@ def _add_const(n: int, cell: str, v: int) -> list:
     return ["    hex.add_constant %d, %s, %d" % (n, cell, v)] if v else []
 
 
-def things_leaf_lines(slots, solid: str = "mon_active") -> list:
+def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> list:
     """`mm_things`: mm_blk = 1 when a SOLID thing's box overlaps the candidate (world._thing_blocker's monsters and
     player; the static blockers are in the cells). `slots`: [(runtime thing, radius)] per monster slot. `solid`: the
     per-slot flag a monster blocks by -- M7 P4.2a: `mon_solid`, MF_SOLID, which A_Fall clears (a corpse stops
     blocking); `mon_active` before monsters die, where the two are equal. The mover's own flag is clear during the
     call (monstercode.p32b_move_lines, the same `solid`). The player is tested at 16.16: |px - (nx << 16)| <
-    (r + 16) << 16. (P5: a dead player stops blocking -- here the player is alive.)"""
+    (r + 16) << 16. `hurt` (M7 P5, doomfj.hurtcode): a dead player (`p_dead`) is not MF_SOLID and blocks nothing;
+    off, the player is always alive and the text is P4's to the byte."""
     out = ["mm_things:",
            "    hex.zero 1, mm_blk",
            "    hex.zero 2, mm_bd20 + 2*dw", "    hex.mov 2, mm_bd20, mm_r", "    hex.mov 4, mm_bd30, mm_bd20",
@@ -131,6 +132,7 @@ def things_leaf_lines(slots, solid: str = "mon_active") -> list:
                 "    hex.scmp 4, ct_a, %s, mm_hit, %s, %s" % (bd, nj, nj),
                 "  %s:" % nj]
     # the player, 16.16: cpx / cpy already hold the candidate << 16 (the caller sets them first)
+    out += (["    hex.if1 1, p_dead, mm_things_out"] if hurt else [])
     out += ["    hex.zero 8, mm_bdp", "    hex.mov 2, mm_bdp + 4*dw, mm_r", *_add_const(4, "mm_bdp + 4*dw", 16)]
     for ax, reg, c in (("x", "viewx", "cpx"), ("y", "viewy", "cpy")):
         out += ["    hex.mov 8, mm_c, %s" % reg, "    hex.sub 8, mm_c, %s" % c, "    hex.abs 8, mm_c",

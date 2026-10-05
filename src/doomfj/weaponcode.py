@@ -37,7 +37,8 @@ THE NOISE (M7 P4.2b, `noise=True`; off, the emission is P4.2a's to the byte): P_
 of `nz_leaf` (doomfj.noisecode) at each fire point once the ammo check passed.
 
 NOT HERE (the model's "fire" mode leaves them out too): the player thing's states, the target, every
-effect; p_health <= 0 (nothing hurts the player until P5) and berserk (P6) -- each marked where its test belongs.
+effect; p_health <= 0 (nothing hurts the player until P5: `hurt`, weapon_lines) and berserk (P6) -- each marked where
+its test belongs.
 """
 from __future__ import annotations
 
@@ -165,12 +166,15 @@ def _by_ready(prefix: str, target: Dict[int, str]) -> List[str]:
     return out + [f";{target[ws[-1]]}"]
 
 
-def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, noise: bool = False) -> List[str]:
+def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, noise: bool = False,
+                 hurt: bool = False) -> List[str]:
     """the frame's weapon tic: the number keys, then P_MovePsprites (the weapon, then the flash), then the bar's ammo
     and arms. Falls through at `wp_end`. Uses `pkeys` (fire: the high nibble's bit 3) and the held `kb_w1..kb_w4`.
     `shoot` (P4.2a): every shot resolves through `aim_sid` and hands a monster to `dm_go` (the module docstring);
     off, the text is P4.1's and no shot label exists. `noise` (P4.2b, the "hit" mode): P_FireWeapon's P_NoiseAlert --
-    every fire point calls `nz_leaf` (doomfj.noisecode); off, the text is P4.2a's."""
+    every fire point calls `nz_leaf` (doomfj.noisecode); off, the text is P4.2a's. `hurt` (M7 P5, doomfj.hurtcode:
+    the player can be hurt and killed): A_WeaponReady lowers at p_hp <= 0, A_ReFire fires only at p_hp > 0, and
+    A_Lower keeps a dead player's (p_dead) weapon at the bottom; off, the text is the P4 one to the byte."""
     assert shoot or not noise, "the noise is the hit mode's: it comes with the shot"
     idx = {s: i for i, s in enumerate(states)}
     flash_frame = {s: (0 if s == gd.S_NULL or gd.STATES[s].tics == 0 else 1 + flash_frames().index(psprite_lump(s)))
@@ -181,6 +185,8 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
     out = ["// M7 P4.1 (doomfj.weaponcode): the weapon keys, P_MovePsprites, the bar's ammo + arms"]
     # -- 1. P_PlayerThink's BT_CHANGE: the LOWEST held number key names the weapon; 1 is the chainsaw when owned
     #    (berserk would keep the fist up -- P6); a weapon not owned, or already up, changes nothing
+    if hurt:                                                          # M7 P5: a dead player's tic skips the keys
+        out += ["hex.if1 1, p_dead, wk_end"]                          # (MonsterPhase.weapon: psprites + p_dc only)
     out += ["hex.if0 1, kb_w1, wk_2",
             "hex.if0 1, wp_own + %d*dw, wk_fist" % OWN[gd.WP_CHAINSAW],
             "hex.if_flags wp_rdy, 1<<%d, wk_saw, wk_end" % gd.WP_CHAINSAW,
@@ -209,7 +215,7 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
         st = gd.STATES[s]
         out += [f"{wen(s)}:", f"hex.set 2, wp_st, {idx[s]}", f"hex.set 1, wp_tics, {st.tics}",
                 f"hex.set 1, wp_frm, {frames.index(psprite_lump(s))}"]
-        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise)
+        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise, hurt)
         out += [f";{wen(st.next)}" if st.tics == 0 else ";wp_flash"]
     # -- 3. P_MovePsprites, the flash
     out += ["wp_flash:",
@@ -296,31 +302,43 @@ def _fire_weapon(p: str, wen, noise: bool = False) -> List[str]:
             + _by_ready(f"{p}fa", {w: wen(info[w].atkstate) for w in WEAPONS}))
 
 
-def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: bool = False) -> List[str]:
+def _hp_le0(p: str, yes: str) -> List[str]:
+    """M7 P5: jump to `yes` when the 3-nibble signed p_hp <= 0 (doomfj.hurtcode's cell), else fall through"""
+    return [f"hex.sign 3, p_hp, {yes}, {p}hz", f"{p}hz:", f"hex.if0 3, p_hp, {yes}"]
+
+
+def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: bool = False,
+            hurt: bool = False) -> List[str]:
     """one state's action, inline; it ends by falling through (no psprite set) or by a tail jump. `shoot`: the fire
-    actions resolve their shots (`_shot_*`) instead of only advancing the stream."""
+    actions resolve their shots (`_shot_*`) instead of only advancing the stream. `hurt` (M7 P5): the health and
+    death reads (weapon_lines)."""
     info = gd.WEAPONINFO
     if action in (None, "A_Light0", "A_Light1", "A_Light2"):
         return []                                                        # extralight: dropped (plan section 2, C)
     if action == "A_WeaponReady":
-        # (p_health <= 0 also lowers -- P5 brings damage); the fire key; else attackdown off and the weapon at the top
+        # a pending weapon -- or (hurt, M7 P5) p_health <= 0 -- lowers; the fire key; else attackdown off and the
+        # weapon at the top
         return ([f"hex.if_flags wp_pend, 1<<{NOCHANGE}, {p}pd, {p}np", f"{p}pd:"]
                 + _by_ready(f"{p}dn", {w: wen(info[w].downstate) for w in WEAPONS})
-                + [f"{p}np:", f"hex.if_flags pkeys + dw, {KEY_FIRE_MASK:#06x}, {p}nf, {p}f",
+                + [f"{p}np:"] + (_hp_le0(p, f"{p}pd") if hurt else [])
+                + [f"hex.if_flags pkeys + dw, {KEY_FIRE_MASK:#06x}, {p}nf, {p}f",
                    # "the missile launcher and bfg do not auto fire": E1M1 has neither, so a held key always fires
                    f"{p}f:", "hex.set 1, wp_ad, 1"]
                 + _fire_weapon(p, wen, noise)
                 + [f"{p}nf:", "hex.zero 1, wp_ad", f"hex.set 2, wp_sy, {TOP}"])
     if action == "A_Lower":
-        # (the dead player keeps it down -- P7; p_health <= 0 drops it -- P5)
+        # (hurt, M7 P5) the dead player keeps it down; p_health <= 0 without death would drop it to S_NULL, which
+        # no state reaches (doomfj.hurtcode: p_hp <= 0 <=> p_dead) and is not emitted
         return ([f"hex.add_constant 2, wp_sy, {LOWER}",
-                 f"hex.cmp 2, wp_sy, wp_bottom_c, {p}lo, {p}bt, {p}bt", f"{p}bt:",
-                 "hex.mov 1, wp_rdy, wp_pend",
+                 f"hex.cmp 2, wp_sy, wp_bottom_c, {p}lo, {p}bt, {p}bt", f"{p}bt:"]
+                + ([f"hex.if1 1, p_dead, {p}dd"] if hurt else [])
+                + ["hex.mov 1, wp_rdy, wp_pend",
                  # _bring_up_weapon: (a pending of NOCHANGE raises the ready weapon again -- unreachable here,
                  # A_Lower runs only after a pending was set, and kept exact anyway)
                  f"hex.if_flags wp_pend, 1<<{NOCHANGE}, {p}bu, {p}bk", f"{p}bk:", "hex.mov 1, wp_pend, wp_rdy",
                  f"{p}bu:", f"hex.set 1, wp_pend, {NOCHANGE}", f"hex.set 2, wp_sy, {BOTTOM}"]
                 + _by_ready(f"{p}up", {w: wen(info[w].upstate) for w in WEAPONS})
+                + ([f"{p}dd:", f"hex.set 2, wp_sy, {BOTTOM}"] if hurt else [])
                 + [f"{p}lo:"])
     if action == "A_Raise":
         return ([f"hex.sub_constant 2, wp_sy, {RAISE}",
@@ -329,10 +347,12 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: b
                 + _by_ready(f"{p}rd", {w: wen(info[w].readystate) for w in WEAPONS})
                 + [f"{p}hi:"])
     if action == "A_ReFire":
-        # fire held and no pending (and p_health > 0 -- P5): refire++ (saturating) and fire; else refire 0, check ammo
+        # fire held and no pending (and, hurt -- M7 P5, p_health > 0): refire++ (saturating) and fire; else refire 0,
+        # check ammo
         return ([f"hex.if_flags pkeys + dw, {KEY_FIRE_MASK:#06x}, {p}no, {p}fh",
                  f"{p}fh:", f"hex.if_flags wp_pend, 1<<{NOCHANGE}, {p}no, {p}go",
-                 f"{p}go:", f"hex.if_flags wp_rf + dw, 1<<15, {p}inc, {p}sat", f"{p}sat:",
+                 f"{p}go:"] + (_hp_le0(p, f"{p}no") if hurt else [])
+                + [f"hex.if_flags wp_rf + dw, 1<<15, {p}inc, {p}sat", f"{p}sat:",
                  f"hex.if_flags wp_rf, 1<<15, {p}inc, {p}fire",
                  f"{p}inc:", "hex.inc 2, wp_rf",
                  f"{p}fire:"]
@@ -536,18 +556,19 @@ def restart_lines(start: dict, states: List[str], frames: List[str]) -> List[str
     return out
 
 
-def weapon_parts(map_wad, mapname: str, shoot: bool = False, noise: bool = False) -> dict:
+def weapon_parts(map_wad, mapname: str, shoot: bool = False, noise: bool = False, hurt: bool = False) -> dict:
     """everything the game tier's emitter splices in for the weapon: `decls` (the cells, the two constants, the ammo
     digit table), `tic` (the frame's weapon lines), `restart` (NEW GAME's values). `shoot` (P4.2a) adds the shot's
     cells to `decls`, the `wpo` table to `tables` and its leaves to `tic`; the program must then also hold `aim_sid`
     (the aim window) and `dm_go` / `dm_ret` (the damage machinery). `noise` (P4.2b, the "hit" mode) calls
     `nz_leaf` at every fire point: the program must then hold the noise's leaf and cells
-    (monstercode.p31_parts at a player mode in noisecode.NOISE_PLAYER_MODES)."""
+    (monstercode.p31_parts at a player mode in noisecode.NOISE_PLAYER_MODES). `hurt` (M7 P5, a player mode in
+    hurtcode.HURT_PLAYER_MODES) reads the health and death cells: the program must then hold hurtcode's decls."""
     from doomfj.lut_generator import generate_dispatch_table_fj
     start = level_start(map_wad, mapname)
     states, frames = weapon_states(), overlay_frames()
     tables = [generate_dispatch_table_fj("ammobcd", ammo_digit_values(), index_nibbles=3, result_nibbles=3)]
     return {"decls": weapon_decls(start, states, frames) + weapon_const_decls() + (shot_decls() if shoot else []),
             "tables": tables + ([shot_table_fj()] if shoot else []),
-            "tic": weapon_lines(states, frames, shoot, noise), "restart": restart_lines(start, states, frames),
+            "tic": weapon_lines(states, frames, shoot, noise, hurt), "restart": restart_lines(start, states, frames),
             "start": start}

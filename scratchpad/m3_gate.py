@@ -205,8 +205,10 @@ def main():
     from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
     mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
+    pals = []                                       # M7 P5: the palette each present showed
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
-                                            len(order), nwalk, nmon=mph.world.layout.nmon, nrt=mviews.nrt)
+                                            len(order), nwalk, nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
+                                            palettes_out=pals)
     # M7 P3.2b: the monsters step inside this gate's fixed world -- its doors shut and idle, every lift at its top;
     # a monster that pressed a door or crossed a lift line would change that world, which this gate does not model:
     # it refuses rather than draw the wrong one
@@ -259,14 +261,17 @@ def main():
             rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map), scene,
                                  thing_hidden=hidden[skill], thing_views=mviews(mph, state.x, state.y),
                                  thing_positions=mviews.positions(mph), seen_out=_seen,
-                                 aim_things=mviews.aim_things(mph), aim_out=(_aim := [0] * 17), **render_kw)
+                                 aim_things=mviews.aim_things(mph), aim_out=(_aim := [0] * 17),
+                                 mobiles=mph.mobiles(), **render_kw)          # M7 P5: the fireballs, the blood
             mph.set_seen(mviews.slots_of(_seen))
             mph.set_aim(_aim)                       # M7 P4.2a: the window this picture recorded
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
                      "ng": ng, "before": before, "pusedn": pusedn,
                      "mstate": {**mph.state(), **mviews.rt_state(mph), **mph.weapon_state()},
                      "skw": mph.screen_kw(), "views": mviews(mph, state.x, state.y),
-                     "positions": mviews.positions(mph)})
+                     "positions": mviews.positions(mph),
+                     # M7 P5: the mobiles drawn, and the palette shown (a menu frame: PLAYPAL 0)
+                     "mobiles": mph.mobiles(), "pal": mph.palette() if mode == 0 else 0})
 
     ok, menus, worlds, moved, oracle_ng, first_bad = True, 0, 0, 0, {}, None
     state_bad, state_checked = None, 0
@@ -289,7 +294,7 @@ def main():
             want = gscreen.frame(bytes(rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map),
                                               scene, thing_hidden=hidden[row["skill"]],
                                               thing_views=row["views"], thing_positions=row["positions"],
-                                              **render_kw)), **row["skw"])
+                                              mobiles=row["mobiles"], **render_kw)), **row["skw"])
             kind = "world %-7s" % SKILL_NAMES[row["skill"]]
             worlds += 1
             if row["ng"] is not None:
@@ -302,6 +307,7 @@ def main():
         if args.selftest_state and row["mode"] == 0 and f >= NEW_GAMES[0]:
             want_state["menu_scr"] ^= 1                 # THE STATE CHECK'S NEGATIVE CONTROL
         sbad = GST.diff(reads[f] if f < len(reads) else None, want_state)
+        sbad.update(GST.palette_diff(pals, f, art, row["pal"]))     # M7 P5: the palette the present showed
         state_checked += 1
         pos = (_signed(state.x, 32) / 65536, _signed(state.y, 32) / 65536)
         moved += (not is_menu) and previous is not None and pos != previous

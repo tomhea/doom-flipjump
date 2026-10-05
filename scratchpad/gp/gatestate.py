@@ -31,13 +31,18 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "mon_justattacked",                                                       # P3.2c
                "wp_rdy", "wp_pend", "wp_st", "wp_tics", "wp_sy", "fl_st", "fl_tics", "wp_rf", "wp_ad", "am_clip", "am_shell", "wp_own", "rng_pl", "wp_frm", "fl_frm", "aim_sid",   # P4.1: the weapon; P4.2a: the window
                "mon_health", "mon_shootable", "mon_solid", "mon_justhit",   # P4.2a: the damage
-               "mon_ambush", "snd_alert")                                           # P4.2b: the noise
+               "mon_ambush", "snd_alert",                                           # P4.2b: the noise
+               "p_hp", "p_ar", "p_at", "p_dc", "p_dead",                            # P5: hurtcode's player cells
+               "pj_act", "pj_x", "pj_y", "pj_mx", "pj_my", "pj_st", "pj_ti",        # P5: the fireball pool
+               "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx")                # P5: the blood pool, rng_fx
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
-                      nmon: int = 0, nrt: int = 0):
+                      nmon: int = 0, nrt: int = 0, palettes_out: list | None = None):
     """-> (the presented frames' pixel indices, the exact op total, [the STATE_NAMES cells read at
-    each present]). `labels` is the build's own label table (build_labeled.py writes it)."""
+    each present]). `labels` is the build's own label table (build_labeled.py writes it).
+    M7 P5: `palettes_out`, when given, receives the palette each present showed (probe.RunResult.palettes:
+    sha1[:12] of its bytes -- `probe.Oracle.palette_sha` is the oracle's side)"""
     cells = {n: c for n, c in P.game_cells(ndoors, nwalk, nlift, nmon, nrt).items() if n in STATE_NAMES}
     # M7 P3.1: a gate that does not pass `nmon` asks for no monster cells (a binary before P3.1)
     missing = sorted(set(STATE_NAMES) - set(cells) - (set() if nmon else MONSTER_NAMES))
@@ -51,6 +56,8 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int 
     reads = []
     probe.on_present(lambda pr, f: reads.append(pr.read_cells(kept)))
     r = gb.run(frames, events, probe)
+    if palettes_out is not None:
+        palettes_out.extend(r.palettes)
     return r.frames, r.ops, reads
 
 
@@ -94,6 +101,16 @@ def diff(got, want: dict) -> dict:
     (the binary presented fewer frames) disagrees in every cell"""
     got = got or {}
     return {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
+
+
+def palette_diff(palettes: list, f: int, wad, index: int) -> dict:
+    """M7 P5: {"palette": (the present's, the oracle's)} when present `f` did not show `wad`'s PLAYPAL[index] -- `wad`
+    the ASSET wad (freedoom1.wad: 14 palettes; the fixture map wad has palette 0 only, the same bytes)
+    (`run_reading_state(palettes_out=)`; the oracle's index is combat.palette_index on a world frame, 0 on a menu
+    frame) -- {} when it did. A present the run never made disagrees."""
+    want = P.palette_sha(wad, index)
+    got = palettes[f] if f < len(palettes) else None
+    return {} if got == want else {"palette": (got, "%s (PLAYPAL %d)" % (want, index))}
 
 
 def show(bad: dict, limit: int = 4) -> str:

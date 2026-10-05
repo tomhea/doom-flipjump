@@ -1291,3 +1291,157 @@ stop; the run's note says so; its yardstick median read 3.47G, under ship-gate s
 
 **Against the phase's budget** (`docs/handoff-gameplay.md`, P4: +0.6M): gamespeed +160,368 and v5 +291,097 -- both
 inside it.
+
+
+## P5 the monsters' attacks (class F) -- declared 2026-10-04, before the build
+
+**What**: `docs/gp-p5-interface.md` -- ONE rung, the model modes `MONSTER_MODE = "full"`, `PLAYER_MODE = "fx"`
+(`wall_renderer`; `monstercode.p31_parts` refuses a pair where the attacks land without a hurtable player or the
+reverse):
+- **The attacks land** (`doomfj.hurtcode`, agent B): the zombiemen's and sergeants' bullets (`mbul`, 3 draws folded
+  with the hitscan's reach), the imp's claw and the demon's bite (`trclaw`, `sgbite`) through ONE `dp_go` --
+  combat.damage_player: the armor's save, the damage count, health, the death moment (p_dead, the weapon's
+  downstate), one rng_pl draw per hit. A dead player is lost as a target, blocks nothing, and his weapon stays down.
+- **The imp's fireball and the blood** (`doomfj.projcode`, agent C): the 8-slot fireball pool (`pj_spawn`,
+  `pj_phase`: the momentum, the missile cells `mc6`, the player's box, the impact, the explosion) and the 2-slot blood
+  pool a hit spawns (`fx_spawn` from damagecode's reordered `dm_leaf`, `fx_phase`), one shared window, rng_fx.
+- **The mobiles drawn**: runtime things nt .. nt + 9 (`p31_parts`' `nmob`), one VIEW row per mobile lump (BAL1A0 ..
+  BAL1E0, BLUDA0 .. BLUDC0) -- the scenery class, the base minimum height in both depth bounds, the art's top +
+  MISSILE_Z, rotation 0 never mirrored -- chosen by a copy stub per slot into ONE shared tail (`thsel_mob`,
+  `mobview` by the slot's state). The rows hold the WHOLE-UNIT position (`projcode._copy_out` clears the fraction).
+- **The bar and the screen**: health and armor written every tic (`hp_bar`), the damage count's fade after the
+  weapon, and the red palette (`palidx`; `present.set_palette playpal<k>` only on a change, before the record
+  stream; a menu frame shows playpal 0). The game tier's `present.init_screen` and boot palette moved to the
+  boot-only ENTRY part: run per frame they zeroed the device's palette (and its pixels) behind `pal_cur` and the bar.
+- The frame's order: the door tic, the weapon (+ the fade), the move, the monsters, the fireballs, the blood, the bar
+  (inside the frozen-level guard), the palette, the render.
+
+**Budget** (ESTIMATES, UNVERIFIED; their basis):
+- v5 binding: **+0.05 .. +0.3M** on v5's frames, which have few fireballs in flight. A flying fireball costs a point
+  location (`ptloc_walk`) and a missile-cell test per tic: **~0.1-0.15M per fireball per tic** (agent C's estimate,
+  UNVERIFIED). A hit costs `dp_go` (~1-2K), the bar ~1K a tic, the palette test ~0.3K a frame, a mobile drawn one
+  more runtime thing (~10-20K).
+- gamespeed: the same sign; fights with imps cost the most.
+- size: **~+1.05M words** (agent C's size probe over a stub base: cells 723,068 + code/tables 329,210 = 1,050,234,
+  UNVERIFIED), plus hurtcode's tables and 9 palettes (~7K words) and the mobile rows, stubs and `mobview`.
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. Host: `tests/host/test_p5_splice.py` (the mobile rows against the oracle's draw rule, the select's stubs, the
+   emit-time asserts and the label check with their controls, the boot screen, the tic's order),
+   `test_player_modes.py` ("fx" == "full" on the monsters, streams, pools and player), `test_p5_hurt_model.py`,
+   `test_mobiles_oracle.py`, `test_hurt_tables.py`, `test_projcode.py`; the restore-set tests pass once re-keyed.
+2. fj, the real emitted text against the model, every mutant caught: `test_player_damage_fj.py`,
+   `test_monster_attack_fj.py`, `test_palette_fj.py`, `test_weapon_fj.py` (hurt), `test_fireball_pool_fj.py`,
+   `test_fx_pool_fj.py`, `test_missile_cells_fj.py`, `test_monster_damage_fj.py`, `test_mobile_rowselect_fj.py`,
+   and `test_monster_wake_fj.py`'s hurt tests (run solo: it reached 3.2 GB).
+3. Gates, byte- and state-exact with P5's cells and every present's palette: m2_std_gate, m3_gate, p2a_gate, B0 on
+   v5 (no death: a mirror that dies fails), and `scratchpad/gp/hurt_gate.py` (H1-H6, S1, deaths 0, its 10 controls
+   parting); their selftests rejected where they must; deg_gate unchanged.
+4. v5 binding <= 22M (CAP-22), the rise recorded against the P4 build; size <= 40%; msframe recorded (D8).
+5. pinreport 20 of 20 with the heat list re-keyed for any changed macro arity; the restore sets re-keyed (hurtcode's
+   cells and `pal_cur`, the pools and `rng_fx` persist -- `build.HURT_PERSIST`, `PROJ_PERSIST`).
+
+**Row** (blocked48, written at ship 2026-10-04; sha256 `69890d31f08b450b`, built at c21df5a with `heat_blocked27_p42`
+and flipjump 1.5.1 at `1cd6e0c`; `docs/ship-evidence/blocked48_*`, committed in c5977e1):
+
+| measure | blocked47 (P4) | blocked48 (P5) | delta |
+|---|---|---|---|
+| combat set binding (v5) | 15,851,173 | 16,037,431 | +186,258 |
+| ... with strafe's collision | 15,889,348 | 16,076,355 | +187,007 |
+| v5 mean / p80 run (R0-courtyard both) | 14,354,403 / 17,347,943 | 14,585,676 / 17,489,187 | +231,273 / +141,244 |
+| v5 per-frame maximum (+/- 2^18) | 25,427,968 (R0-aftermath) | 26,214,400 (R0-aftermath) | +786,432 |
+| gamespeed binding | 15,403,663 | 15,531,315 | +127,652 |
+| gamespeed mean / p80 run | 13,035,385 / 17,771,942 | 13,144,524 / 17,918,106 | +109,139 / +146,164 |
+| input phase (phases.py) | 1,141 | 1,142 | +1 |
+| size (% of 2^27) | 34.25% | 35.16% | +1,212,406 words (6,500,493 words under the 40% target; 210,394 OVER the old 35%) |
+| pool tables (build) | 483,308 in 35,102 groups | 494,084 in 36,506 groups | +10,776 tables |
+| ms/frame (msframe, one run, A = blocked47; the pictures differ, so its pixel check reads NO) | 72.9 | 73.2 | NOT SEPARATED (x0.982) |
+| hot words pinned (pinreport) | 20/20 | 20/20 (0 broken groups of 36,506) | 0 lost |
+| hurt_gate (P5's own) | -- | 7/7 scenarios STATE, PIXELS and PALETTE exact on every frame | new |
+
+**The stress case, S1** (`blocked48_hurt_gate.log`: every imp fires at once -- 8 in flight, 10 fizzles, 3 into walls,
+explosion frames 29, explosion_px 0): **651,896,774 ops over 30 frames, ~21.7M/frame** (21,729,892). Recorded, not judged:
+CAP-22 binds v5's (mean + p80) / 2, not a scenario. It is the highest run average measured on this binary (v5's
+highest is R0-west-hall's 20,712,328). The other scenarios' averages are 7.3M (H4) to 15.9M (H2) a frame.
+
+**The fireball's per-tic ESTIMATE** (~0.1-0.15M per flying fireball per tic): **UNVERIFIED**. hurt_gate logs each
+scenario's TOTAL ops only -- no per-frame ops, and no fireball-free run from the same pose -- so H2, H3 and S1 cannot
+price one fireball's tic. A per-frame A/B (the same scenario with the imp's missile refused) would.
+
+**Where the ops went** (phases.py on gamespeed's games): profx's mean frame 13,035,385 -> 13,144,524 (+109,139).
+Lines that moved >= 10,000 ops/frame: render walk, all 12,573,119 -> 12,679,902 (+106,783) -- inside it
+seg_pass1_ts_leaf +54,971, seg_pass1_leaf -37,519, seg_pass2_leaf +35,086, bspcode walk +34,862, thing_leaf_b
++13,812. phases.py has no line of its own for the monsters', fireballs', blood's or bar's tics, so this profile does
+not say which lines carry P5's new code; the walk's segment lines moving both ways is consistent with the pins having
+re-rolled (19 of 20 bases moved), not established by it.
+
+**Size**: +1,212,406 words -- below the pool 28,590,852 -> 29,402,186 (+811,334), in the pool 17,383,340 ->
+17,784,412 payload words (+401,072; +10,776 tables; demand 47,366,720 -> 47,906,560, 57.1% of the pool's capacity).
+The declaration's ESTIMATE was ~+1.05M (agent C's probe, 1,050,234) PLUS hurtcode's tables, the palettes and the
+mobile rows, stubs and `mobview`, which it did not price; the measured total is 162,172 words above the probe's
+figure. 35.16% <= 40%: held. **It is above the OLD 35% target** (by 210,394 words).
+
+**msframe NOT SEPARATED is the class-F record (D8)**: 72.9 -> 73.2 ms/frame (pairs 0.976 1.012 1.011 0.982 0.963),
+15,632,447 -> 15,844,669 ops/frame on msframe's walk, 214.6 -> 216.4 M fj/s. **Taken with `--ignore-busy`**: the
+owner's fullscan.py (pid 28924) ran beside it, logged as `python(28924) 1.0s/s`; the run's note says so; yardstick
+median 3.49G. The `shipped` baseline is still blocked44's (#115).
+
+**Found and fixed during the rung** (each before blocked48 was built):
+- 45441c4 (the pre-review's B1): a dead player's number keys changed `wp_pend` -- the model runs only the psprites and
+  the `p_dc` fade for a dead player, the fj ran the key block every tic. `weapon_lines(hurt=True)` skips it on
+  `p_dead`; `test_weapon_fj` gained the `deadkeys` script and mutant (their fj runs: criterion 2 below).
+- 35fc488: `build.game_screen_persisted_decls` carries P5's cells too (`hurtcode.hurt_decls`, `projcode.pool_decls`:
+  39 decls), so the standalone restore set has them and P5's re-key did not stop at `m5_setfile` as P4's first did.
+- bf7efc6: `projcode._copy_out` clears the 16.16 FRACTION -- a mobile's row holds its whole-unit position, as the
+  interface and the oracle draw it (`test_fireball_pool_fj` 10 passed with that expectation).
+- bf7efc6 / fc11467: `present.init_screen` and the boot palette run ONCE, in the boot-only entry part -- shared with
+  P4's 7dd242a: run per frame they zeroed the device's palette behind `pal_cur` and blanked the bar.
+- f6476c5: `scratchpad/gp/p5_mobiles_identity.py` passes `GAME_RENDER_KW` at each oracle call
+  (`test_oracle_calls_in_step` failed on it at bf7efc6; 9 passed).
+
+**Verdict P5 (its declared kill criteria): no criterion EXCEEDED; criterion 2 is OPEN -- runs owed, none failed.**
+1. Host: 1564 passed, 2 skipped, 1 deselected, 2 xfailed at c21df5a (`blocked48_host_suite.log`) -- `test_p5_splice`,
+   `test_player_modes`, `test_p5_hurt_model`, `test_mobiles_oracle`, `test_hurt_tables`, `test_projcode` and the
+   restore-set tests among them (re-keyed: `test_restore_set_shipped` 22 passed, c21df5a). Met.
+2. fj (the rung commits' runs; no fj-suite log is in `blocked48_*`): `test_player_damage_fj` 10 (8 mutants caught),
+   `test_monster_attack_fj` 8 (6 caught), `test_palette_fj` 6 (4 caught), `test_weapon_fj` 13 with the hurt scripts
+   (readyhp / refirehp / lowerdead caught) -- 47e6f04; `test_missile_cells_fj` 4, `test_fireball_pool_fj` 10,
+   `test_fx_pool_fj` 7, `test_monster_damage_fj` 10 (all 8 mutants caught) -- 971c98e; at the integration, bf7efc6,
+   those files other than `test_weapon_fj` (seven) passed again, with `test_mobile_rowselect_fj` 3 (new; mutated
+   mobview and swapped pools caught) and `test_monster_rowselect_fj` 2.
+   **OWED, not yet run:** `test_weapon_fj` after 45441c4 (the `deadkeys` script and mutant, and the whole file), and
+   `test_monster_wake_fj`'s `thrcount` (47e6f04: "NOT RUN", the process reached 3.2 GB; its hurt main, looksees and
+   nolose passed). A full `tests/fj` run was in progress in the worktree when this was written; its result belongs
+   in the P5 PR. **Open.**
+3. Gates: m2_std_gate (452 frames) and m3_gate (50 frames) byte- and state-exact; p2a_gate 13/13 (PALETTE exact on
+   every frame too); B0 on v5 state- and pixel-exact on every frame, B0 OK (a run whose mirror dies fails it, e8d3683); `hurt_gate` H1-H6 and S1
+   STATE / PIXELS / PALETTE exact on every frame, every event counter nonzero, deaths 0, its 10 controls (11 lines:
+   `armor` runs in H4 and H5) parting; the 7 gate selftests rejected where they must
+   (`blocked48_gate_selftests.log`); deg_gate BYTE-EXACT with every op count equal to blocked47's. Met.
+4. CAP-22: v5 16,037,431 <= 22,000,000 (headroom 5,962,569); the rise against blocked47 +186,258, recorded. Size
+   35.16% <= 40%. msframe recorded (NOT SEPARATED). Met.
+5. pinreport 20 of 20 with `heat_blocked27_p42` -- no re-key was needed (bf7efc6: no fj macro's positional parameter
+   count changed); the restore sets re-keyed (c21df5a), `HURT_PERSIST` / `PROJ_PERSIST` in `build.persist_labels`
+   (bf7efc6) and the standalone set through `game_screen_persisted_decls` (35fc488). Met.
+
+**Against its budget** (ESTIMATES): v5 +0.05 .. +0.3M -> **+186,258, inside**; gamespeed "the same sign" ->
+**+127,652, held**; size ~+1.05M plus unpriced terms -> **+1,212,406** (above the probe's figure, no bound was set);
+the fireball's per-tic cost UNVERIFIED (above). **Against the phase's budget** (`docs/handoff-gameplay.md`, P5: +0.3M
+plus the fight sprites): gamespeed +127,652 and v5 +186,258 -- both inside.
+
+**Follow-ups** (from the pre-review, for the P5 PR's follow-up issue; none blocks the ship -- the gates above are
+exact):
+- F1: the mobiles' drawing has no fj harness through `sim.thing_pass_depth` / `thing_record_body` (seen sa=0, the
+  scenery budget, MISSILE_Z, depth ties against a monster in the same leaf); its first evidence is hurt_gate's binary
+  run (H2's explosion, 117,626 px, byte-exact).
+- F3: a dead player (P7) still walks, uses doors, presses the exit and holds a closing door (door contact);
+  `World.door_touched` needs a live player. The mirrors agree today; the model will part once a gate reaches a death.
+- F4: the oracle's `render_wall_frame` `_lst[_nb:]` assumes a leaf list's baked things come first -- add an assert
+  (a monster that walked into a baked thing's leaf).
+- F5: `p31_parts` with player "walk" and `MONSTER_MODE` "full" trips the full-vs-hurt assert (no registry tier does
+  this).
+- F6: `pal_cur` is not in `gatestate.STATE_NAMES` or the model state (the palette check covers it) -- now said in
+  `docs/gp-p5-interface.md`'s As built (this ship commit); nothing else owed.
+- F7: `_w5.reset(BOOT_SKILL)` mutates `p31_parts`' World after the parts were built.
+- The owed fj runs of criterion 2 (`test_weapon_fj` with `deadkeys`, `test_monster_wake_fj`'s `thrcount`), if the
+  full `tests/fj` run does not settle them.

@@ -204,7 +204,7 @@ def reverse_mask(pass_at: int, stride: int, nstates: int) -> int:
 
 
 def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None, radius=16, mon_press=frozenset(),
-                   mon_contact=()) -> list:
+                   mon_contact=(), dead=None) -> list:
     """One frame of every door. `slots` is the emitter's door order (`sorted(door sectors)`),
     `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units (none for a
     walk-over door), `kinds[si]` its `doors.door_kinds` kind (all "plain" when omitted).
@@ -221,6 +221,10 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
     reversal on every door that closes -- the player touching it (`door_contact_lines`).
 
     The label prefix is `dr{slot}_`, so the emitted names say which door they belong to.
+
+    M7 P7 (doomfj.lootcode): `dead` -- the cell holding the player's death at the tic's START (`p_dd0`): set, the
+    player's use press opens no door and his box holds no closing door (World._doors_phase's `alive`,
+    World.door_touched's `player_alive`). Without it the text is P5's.
     """
     out = ["// == M2-R4: the doors, one tic each ==================================",
            "//   dr<d>_*  door <d> (index into sorted(door sectors))",
@@ -254,13 +258,17 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
             trigger += [f"    ;{p}_moved"]                  # a walk-over door has no use line
         else:
             trigger += [f"    hex.if0 1, duse, {p}_moved"]
+            if dead is not None:
+                trigger += [f"    hex.if1 1, {dead}, {p}_moved"]        # M7 P7: a dead player presses nothing
             if kind == "blue":
                 trigger += [f"    hex.if0 1, pcard, {p}_moved"]   # EV_VerticalDoor: the blue card
             trigger += _box_test(d, box, f"{p}_press", f"{p}_moved")
         rev = None
         if contact is not None and not stay:
             def _rev(yes, no, _g=contact[si], _p=p):
-                out_ = door_contact_lines(f"{_p}_ct", _g, radius, yes, f"{_p}_cm0" if mon_contact else no)
+                # M7 P7: a dead player's box holds nothing open -- on to the monsters' contact (or `no`)
+                out_ = [f"    hex.if1 1, {dead}, {_p}_cm0" if mon_contact else f"    hex.if1 1, {dead}, {no}"]                     if dead is not None else []
+                out_ += door_contact_lines(f"{_p}_ct", _g, radius, yes, f"{_p}_cm0" if mon_contact else no)
                 for j, (xr, yr, rad, act) in enumerate(mon_contact):
                     nx_ = f"{_p}_cm{j + 1}" if j + 1 < len(mon_contact) else no
                     leaf = leaves.setdefault((_p, rad), (f"{_p}_mc{rad}", _g, rad))[0]

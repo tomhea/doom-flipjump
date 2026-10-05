@@ -144,7 +144,9 @@ MONSTER_MODE = "full"
 # (damagecode.DAMAGE_PLAYER_MODES) adds the monsters' damage to p31_parts -- MONSTER_MODE must then decide ("decide" or
 # "full"); M7 P5: "fx" ("hit" + the blood a hit spawns) is the one a "full" MONSTER_MODE pairs with (hurtcode.hurt_on:
 # the player can be hurt exactly when the monsters' attacks land -- monstercode.p31_parts asserts the pair)
-PLAYER_MODE = "fx"                       # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD; P5: it BLEEDS
+# M7 P6+P7: "full" -- the player loots (pickups, blocking, nukage, berserk, barrels, drops) and is mortal (the dead
+# latch, the death think and its turn to the killer, the restart on use)
+PLAYER_MODE = "full"                     # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD; P5: it BLEEDS
 
 
 def tier_flags(tier: str) -> dict:
@@ -1823,7 +1825,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _proj = _p31.get("proj") if _p31 else None
     _hrt = None
     _P5 = _P5 and _p31 is not None                     # a map without monsters: nothing attacks
-    assert _P5 or not _LOOT, "M7 P6: the 'full' player needs the monsters' world (p31_parts, the P5 attacks)"
+    if _LOOT and not _P5:
+        # a map without monsters: nothing attacks (P5's rule above), so nothing loots either -- and the door tic,
+        # built before that was known, is rebuilt without the dead player's guard (it would read an undeclared p_dd0)
+        _LOOT = False
+        assert not _chase
+        _door_tic = _make_door_tic()
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
                         loot=_LOOT) if menu else None                # M7 P6+P7: the latch, berserk's key 1 and fist

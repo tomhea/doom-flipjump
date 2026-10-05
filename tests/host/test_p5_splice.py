@@ -34,8 +34,12 @@ def p5():
     patches = WR.anim_patches(art, WR.anim_frames(mw, "E1M1"))
     anim = {k: (0x100 + 64 * i, rm.art_of_lump(art, lump, cache)[2], mir)
             for i, (k, (lump, mir)) in enumerate(sorted(patches.items()))}
+    # M7 P6 (PLAYER_MODE "full"): the drops draw from the STATIC bank -- a synthetic one, as test_barrel_rowselect_fj's
+    _kinds = sorted({t.type for t in drawable_things(rm, mw.things("E1M1"), art, cache)[0]})
+    _static = ({k: 0x900 + i for i, k in enumerate(_kinds)}, {k: 0xA00 + i for i, k in enumerate(_kinds)},
+               {k: rm.sprite_art(art, k, cache)[2] for k in _kinds})
     p31 = MC.p31_parts(rm, mw, "E1M1", art, anim, rt, spr_near=True, boot_skill=WR.BOOT_SKILL, skills=WR.SKILLS,
-                       cache=cache, mode=WR.MONSTER_MODE, player=WR.PLAYER_MODE)
+                       cache=cache, mode=WR.MONSTER_MODE, player=WR.PLAYER_MODE, static_bank=_static)
     from doomfj.hurtcode import hurt_parts
     w = p31["world"]
     w.reset(WR.BOOT_SKILL)
@@ -46,7 +50,7 @@ def p5():
 def test_the_game_tier_runs_p5s_modes():
     from doomfj.hurtcode import hurt_on
     from doomfj.damagecode import fx_on
-    assert (WR.MONSTER_MODE, WR.PLAYER_MODE) == ("full", "fx")
+    assert (WR.MONSTER_MODE, WR.PLAYER_MODE) == ("full", "full")
     assert hurt_on(WR.PLAYER_MODE) and fx_on(WR.PLAYER_MODE)
 
 
@@ -65,7 +69,8 @@ def test_the_mobile_rows_follow_the_oracles_draw_rule(p5):
     assert p31["nmob"] == 10 == mobile_rows(SimpleNamespace(monsters=WR.MONSTER_MODE, player=WR.PLAYER_MODE))
     assert MISSILE_Z == 32                                   # a vacuity guard: the z the rows must carry is not 0
     seen_rows = set()
-    for s in PC.pool_states():
+    puffs = bool(p31.get("barrel"))                    # M7 P6 ("full"): the puffs share the blood's pool
+    for s in PC.pool_states(puffs):
         lump = mobile_lump(s)
         row = p31["mob_view"][gd.STATE_INDEX[s]]
         r = p31["view_rows"][row - nt]
@@ -75,7 +80,9 @@ def test_the_mobile_rows_follow_the_oracles_draw_rule(p5):
         assert r == (a[5], a[3], a[4], a[6] + MISSILE_Z, tz, tz, base, base + 2 * dw, int(actor), dw), (s, lump, r)
         assert not mir
         seen_rows.add(row)
-    assert len(seen_rows) == 8 and min(seen_rows) == p31["mob_first"] and max(seen_rows) == p31["nrows"] - 1
+    # one row per mobile lump, contiguous from mob_first (M7 P6: + PUFFA0..D0; the drops' view rows follow them)
+    nl = 12 if puffs else 8
+    assert len(seen_rows) == nl and min(seen_rows) == p31["mob_first"] and max(seen_rows) == p31["mob_first"] + nl - 1
     # every mobile row's height is in the light classes the emitter widens the bank with
     assert {max(1, p31["view_rows"][r - nt][2]) for r in seen_rows} <= set(p31["view_heights"])
 
@@ -85,7 +92,10 @@ def test_the_row_select_has_a_stub_for_every_mobile(p5):
     sel = "\n".join(p31["select"])
     for k in range(10):
         assert "  thsel_s%d:\n" % (nt + k) in sel
-    assert "  thsel_s%d:" % (nt + 10) not in sel
+    nd = p31.get("ndrop", 0)                             # M7 P6: the drops' stubs follow the mobiles'
+    for k in range(nd):
+        assert "  thsel_s%d:" % (nt + 10 + k) in sel
+    assert "  thsel_s%d:" % (nt + 10 + nd) not in sel
     tail = sel[sel.index("  thsel_mob:"):]
     assert "hex.zero w/4, sp_sa" in tail and "hex.zero 2, sp_sid" in tail and "mobview.lookup sp_ti, ts_mob" in tail
     assert "ts_mob: hex.vec 2" in p31["decls"]
@@ -189,7 +199,8 @@ def test_the_palette_goes_before_the_record_stream_and_the_phases_after_the_mons
 
 def test_the_hurt_tic_menu_palette_restart_and_leaves_are_spliced():
     src = _src()
-    assert 'weapon=((list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))' in src
+    assert '(list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))' in src
+    assert 'weapon=(_loot["tic"](_wpn["tic"], _hrt["tic"]) if _loot else' in src   # M7 P6+P7: lootcode.tic_lines
     assert 'list(_hrt["menu_palette"])' in src
     # M7 P7: through ONE composition, wall_renderer.compose_restart (tests/host/test_restart_coverage.py)
     assert ('hrt_restart=_hrt["restart"] if _hrt else ()' in src and 'proj_restart=_proj["restart"] if _hrt else ()'
@@ -199,7 +210,7 @@ def test_the_hurt_tic_menu_palette_restart_and_leaves_are_spliced():
     i_leaves = src.index('(list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]])')
     assert src.index('["    ;mm_block_end", _mcells]') < i_leaves < src.index('["mm_block_end:"]) + BSn')
     assert "full=bool(_chase.get(\"hurt\"))" in src and "hurt=bool(_chase.get(\"hurt\"))" in src
-    assert "hurt=_P5) if menu else None" in src and "_P5 = _P5 and _p31 is not None" in src
+    assert "hurt=_P5," in src and "loot=_LOOT) if menu else None" in src and "_P5 = _P5 and _p31 is not None" in src
     assert "_p5_assert_labels(_texts)" in src and "_p5_model_asserts(_p31, _proj, _hrt)" in src
 
 
@@ -215,4 +226,4 @@ def test_the_barrels_phase_sits_between_the_fireballs_and_the_effects():
     assert got[:3] == ["stl.fcall pj_phase, pj_pret", "stl.fcall bar_phase, bar_pret", "stl.fcall fx_phase, fx_pret"]
     src = _src()
     assert '+ (list(_bar["lines"]) if _bar else [])' in src and 'list(_bar["decls"]) + list(_bar["tables"])' in src
-    assert 'p6_common=list(_bar["restart"][0]) if _bar else ()' in src         # through compose_restart (P7)
+    assert "p6_common=_p6_restart[0], p6_skills=_p6_restart[1]" in src         # through compose_restart (P7)

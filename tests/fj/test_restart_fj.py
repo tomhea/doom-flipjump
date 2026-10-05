@@ -92,8 +92,12 @@ def _parts():
     patches = WR.anim_patches(art, WR.anim_frames(mw, "E1M1"))
     anim = {k: (0x100 + 64 * i, rm.art_of_lump(art, lump, cache)[2], mir)
             for i, (k, (lump, mir)) in enumerate(sorted(patches.items()))}
+    # M7 P6 (PLAYER_MODE "full"): the drops draw from the STATIC bank -- a synthetic one, as test_barrel_rowselect_fj's
+    _kinds = sorted({t.type for t in drawable_things(rm, mw.things("E1M1"), art, cache)[0]})
+    _static = ({k: 0x900 + i for i, k in enumerate(_kinds)}, {k: 0xA00 + i for i, k in enumerate(_kinds)},
+               {k: rm.sprite_art(art, k, cache)[2] for k in _kinds})
     p31 = MC.p31_parts(rm, mw, "E1M1", art, anim, rt, spr_near=True, boot_skill=WR.BOOT_SKILL, skills=WR.SKILLS,
-                       cache=cache, mode=WR.MONSTER_MODE, player=WR.PLAYER_MODE)
+                       cache=cache, mode=WR.MONSTER_MODE, player=WR.PLAYER_MODE, static_bank=_static)
     w5 = p31["world"]
     w5.reset(WR.BOOT_SKILL)
     hrt = hurt_parts(w5, sprite_wad=art, boot_wad=mw)

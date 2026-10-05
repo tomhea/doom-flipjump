@@ -128,7 +128,7 @@ class MonsterPhase:
     def weapon(self, keys: dict, x16: Optional[int] = None, y16: Optional[int] = None,
                angle: Optional[int] = None):
         """ONE world frame of the player's weapon: the number keys, then P_MovePsprites -- the model's own
-        (`combat._weapon_keys`, `_move_psprites`) in the world's player mode. A gate calls it on every world frame
+        (`combat._weapon_keys`, `_weapon_tics`: M7 P6+P7, world.WEAPON_TICS passes) in the world's player mode. A gate calls it on every world frame
         that tics (not a menu frame, not a finished level), with the frame's held keys. M7 P4.2a: and with the
         player's PRE-MOVE pose -- the binary's weapon runs before the player's move, so a melee reach and a shot's
         target are measured from where the player stood when the frame began. -> the tic's events"""
@@ -145,12 +145,12 @@ class MonsterPhase:
         ev = TicEvents(0)
         ws = w.ws
         if ws.p_dead:                     # M7 P5: P_DeathThink's weapon half (the restart on use is P7's)
-            w._move_psprites(k, ev)
+            w._weapon_tics(k, ev)         # M7 P6+P7: world.WEAPON_TICS passes, as the model's player phase
             if ws.p_damagecount:
                 ws.p_damagecount -= 1
             return ev
         w._weapon_keys(k)
-        w._move_psprites(k, ev)
+        w._weapon_tics(k, ev)
         # M7 P5: the flashes fade after the psprites, in the model's player-phase order (combat._player_phase)
         if ws.p_damagecount:
             ws.p_damagecount -= 1

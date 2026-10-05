@@ -110,6 +110,11 @@ K_HEAVY = 6                        # heavy monster actions per tic (plan 6.1; D5
                                    # bounds the worst case, and K=3 deferred on 195/1000 set frames)
 NEWCHASEDIR_MAX_TRIES = 6          # distinct P_TryWalk directions per P_NewChaseDir call (D5)
 DIAG_STEP = {8: 6, 10: 7}          # rounded diagonal step per monster speed (D5)
+# M7 P6+P7 (the owner, 2026-10-05: "my firing speed is slow, i think the player should be able to fire at x2 speed"):
+# the player's WEAPON runs this many DOOM tics per frame -- P_MovePsprites (the weapon, the flash, A_ReFire, the
+# raise and lower) that many times; the number keys are read once per frame. A deviation from D4 (one DOOM tic per
+# frame) for the weapon alone: combat.CombatMixin._weapon_tics, and the fj's weaponcode.weapon_lines(tics=) loop.
+WEAPON_TICS = 2
 FIREBALL_POOL = 8                  # imp fireballs alive at once; a full pool fizzles (D5, S3b)
 FX_POOL = 2                        # puffs and blood alive at once (D5, S3b)
 TICS_FOREVER = 15                  # schema encoding of DOOM's tics == -1 (one nibble)

@@ -72,8 +72,8 @@ def test_step_turn_left(rm):
     """Turn-left adds ANGLE_TURN (BAM); position unchanged when not moving."""
     st = spawn_state(WadFile.from_path(MAP_WAD), "MAP01")
     out = rm.step_sim(st, {"turn_left": True})
-    assert out.angle == (ANG90 + ANGLE_TURN) & 0xFFFFFFFF  # 0x42800000
-    assert out.angle == 0x42800000
+    assert out.angle == (ANG90 + ANGLE_TURN) & 0xFFFFFFFF  # 0x43C00000
+    assert out.angle == 0x43C00000                  # M7 P6+P7: the owner's x1.5 turn, 960 << 16 (was 0x42800000)
     assert (out.x, out.y) == (st.x, st.y)
 
 

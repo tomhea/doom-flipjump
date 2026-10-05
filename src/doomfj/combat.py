@@ -409,7 +409,7 @@ class CombatMixin:
         else:
             ws.p_usedown = 0
         if self.player != "walk":
-            self._move_psprites(keys, ev)
+            self._weapon_tics(keys, ev)
         if ws.p_strength:
             ws.p_strength = min(ws.p_strength + 1, 0xFFFF)
         if ws.p_damagecount:
@@ -425,7 +425,7 @@ class CombatMixin:
         """P_DeathThink without the view drop or the turn to the killer: the weapon keeps lowering,
         the damage flash fades, and use (held, as DOOM reads it) asks for the restart."""
         ws = self.ws
-        self._move_psprites(keys, ev)
+        self._weapon_tics(keys, ev)
         if ws.p_damagecount:
             ws.p_damagecount -= 1
         if keys["use"]:
@@ -507,6 +507,14 @@ class CombatMixin:
     def _psp_fields(which: str) -> Tuple[str, str]:
         return (("p_wpn_state", "p_wpn_tics") if which == "wpn"
                 else ("p_flash_state", "p_flash_tics"))
+
+    def _weapon_tics(self, keys: dict, ev) -> None:
+        """M7 P6+P7: the frame's weapon -- `world.WEAPON_TICS` passes of P_MovePsprites with the frame's keys (the owner's
+        x2 fire rate, 2026-10-05). The ONE place the count is applied: the player phase, the death think and the gates'
+        `monsters.MonsterPhase.weapon` all call this, and the fj loops its one P_MovePsprites block as many times
+        (weaponcode.weapon_lines(tics=))."""
+        for _pass in range(_W().WEAPON_TICS):
+            self._move_psprites(keys, ev)
 
     def _move_psprites(self, keys: dict, ev) -> None:
         """P_MovePsprites: the weapon, then the flash (a flash the weapon set this tic already

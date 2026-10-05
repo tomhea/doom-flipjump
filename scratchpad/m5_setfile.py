@@ -69,6 +69,9 @@ def standalone_globals(doors_wad=None, mapname="E1M1"):
     declarations are map-shaped (`hex.vec <ndoors>`), so the wad decides how wide they are. Reading
     them from `door_decls` rather than restating them here is the same rule the rest of this script
     follows: the set is RE-KEYED from what the emitter declares, never re-derived from a guess."""
+    # M7 P7: ...including the game's own cells `g_skill`, `g_rs`, `lvtime` (doomfj.restartcode, build.GAME_PERSIST),
+    # which are declared with the menu's (wall_renderer.MENU_STATE_DECLS) -- so they arrive HERE, not through
+    # game_screen_persisted_decls below (P6's loot and barrel cells will: build's INTEGRATION HOOKS)
     out = list(STANDALONE_SCRATCH_DECLS)
     if doors_wad is not None:
         w = WadFile.from_path(str(doors_wad))

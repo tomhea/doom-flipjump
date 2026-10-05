@@ -402,6 +402,8 @@ SKILL_MENU_FIRST = 2
 LEVEL_DONE_MENU = ["LEVEL COMPLETE", "", "PRESS ENTER"]
 LEVEL_DONE_SELECTED = 2
 
+from doomfj import restartcode as _restartcode                    # noqa: E402 (M7 P7)
+
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
 # `mode`). `menu_scr` (0 = the main menu, 1 = the skill screen; M7 P2a.2 / P3.4: 2 LEVEL COMPLETE,
@@ -420,6 +422,9 @@ MENU_STATE_DECLS = [
     # M7 P3.4: the help key's event, zeroed before the polls like the four above
     "ev_help: hex.vec 1",
     "rs_ret: hex.vec w/4",
+    # M7 P7 (doomfj.restartcode): the skill the restart restores to (NEW GAME sets it), the restart request (the
+    # death think sets it on use), the level time -- all three PERSISTED (build.GAME_PERSIST)
+    *_restartcode.game_decls(SKILLS.index(BOOT_SKILL)),
 ]
 
 # M5 — the standalone tier's own globals, in ONE place (R6): the emitter declares them and
@@ -448,7 +453,7 @@ STANDALONE_SCRATCH_DECLS = [
 
 
 def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
-                  monsters=None, nmobile=0) -> tuple:
+                  monsters=None, nmobile=0, skill_extra=None) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -464,7 +469,12 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
 
     M7 P5: `nmobile` -- the mobiles' runtime things after the WAD's (monstercode.p31_parts' `nmob`): their links
     are zeroed with the others' (a level start links no pool thing; projcode's restart lines, passed in `hud`, zero
-    their rows and empty the pools)."""
+    their rows and empty the pools).
+
+    M7 P7 (doomfj.restartcode): the routine also zeroes `lvtime` and `g_rs` (`g_skill` is kept: it is WHICH level
+    start); `skill_extra[k]` -- more lines for skill k's block (the P6 cells whose level start depends on the skill).
+    The blocks are placed and called through `restartcode.routine_lines` / `call_lines`: ONE sequence, run by NEW
+    GAME and by the restart on use after death."""
     common = ["restart_common:",
               f"    hex.set 8, viewx, {spawn.x & 0xFFFFFFFF}",
               f"    hex.set 8, viewy, {spawn.y & 0xFFFFFFFF}",
@@ -485,6 +495,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
               f"    rep({len(rt_binds) + nmobile}, i) m1.zerobyte thnext + i*dw",
               *[f"    {line}" for line in hud],                  # M7 P4.0: the bar's level-start values
+              *_restartcode.restart_lines(),                   # M7 P7: lvtime, g_rs
               "    stl.fret rs_ret"]
     skills = []
     for head, nxt, vis in per_skill:
@@ -495,17 +506,37 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
         out += [f"    hex.set 2, thvis + {j}*2*dw, {v}" for j, v in enumerate(vis)]
         # M7 P3.1: the monsters' cells at this skill's level start (monstercode.p31_parts)
         out += list(monsters[len(skills)]) if monsters else []
+        out += list(skill_extra[len(skills)]) if skill_extra else []     # M7 P7: the P6 cells by skill
         skills.append(out)
     return common, skills
+
+
+def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
+                    wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None) -> tuple:
+    """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
+    values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
+    emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
+    start, so the two cannot be composed differently. `hud_restart` None: a tier without the game screen (then none of
+    the screen's parts either)."""
+    extra = (() if hud_restart is None else
+             (list(hud_restart) + list(wpn_restart)
+              + ([f"hex.zero {2 * 17}, aim_sid"] if aim else [])                          # M7 P4.2a: no aim
+              # M7 P5: the player's health, armor, damage count and death at the level start (never pal_cur: a
+              # device shadow, restartcode.DEVICE_SHADOWS); the pools empty, their rows zero, rng_fx at its seed
+              + list(hrt_restart) + list(proj_restart) + list(p6_common)))
+    return restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=nwalk, nlift=nlift,
+                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills)
 
 
 def p5_tic_lines(hrt) -> list:
     """M7 P5 -- the frame's tic after the monsters' (`tic_after_eye`): the fireballs, then the blood (projcode's
     `pj_phase` / `fx_phase`, each skipping itself while `lvdone`: world.tic's order monsters -> projectiles ->
     barrels -> effects), then the bar's health and armor (`hrt` is hurtcode.hurt_parts' dict: its `bar`, hp_bar)
-    from what the frame's damage left, inside the frozen-level guard -- a finished level changes neither"""
+    from what the frame's damage left, inside the frozen-level guard -- a finished level changes neither.
+    M7 P7: `leveltime` +1 at the end of the non-frozen tic (World.tic; restartcode.lvtime_tic_lines), in the same
+    guard"""
     return ["stl.fcall pj_phase, pj_pret", "stl.fcall fx_phase, fx_pret",
-            "hex.if1 1, lvdone, p5_bar_skip", *hrt["bar"], "p5_bar_skip:"]
+            "hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(), *hrt["bar"], "p5_bar_skip:"]
 
 
 # M7 P5: the labels the P5 text READS that other parts of the program must define (projcode.proj_parts' docstring:
@@ -587,7 +618,7 @@ def _skill_dispatch(prefix: str) -> list:
     shape -- an `if0`, then one `if_flags` on bit 1 -- so it refuses any other number of SKILLS
     rather than send a fourth skill to the third's block (tests/host/test_menu.py holds the tie)."""
     assert len(SKILLS) == 3, "the skill dispatch is written for three skills, not %r" % (SKILLS,)
-    return [f"hex.if0 1, menu_sel, {prefix}0", f"hex.if_flags menu_sel, 1<<1, {prefix}2, {prefix}1"]
+    return _restartcode.skill_dispatch(prefix, "menu_sel", len(SKILLS))   # M7 P7: one dispatch shape
 
 
 def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) -> list:
@@ -619,7 +650,6 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
     assert MENU_HELP_ITEM in entries, "the main menu needs its %r item (M7 P3.4)" % MENU_HELP_ITEM
-    common, _skills = restart
     return [
         # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
@@ -656,7 +686,8 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
         menu_fj(cfg.W, cfg.H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours,
                 label="menu_level_done", end_marker=False),
         ";frame_end",
-        *common,                           # fcall'd only: every screen above ends in a jump
+        # fcall'd only: every screen above ends in a jump. M7 P7: restart_common and each skill's rs_skill<k>
+        *_restartcode.routine_lines(restart),
         "do_world:",
     ]
 
@@ -670,7 +701,10 @@ def menu_state_lines(restart) -> list:
 
     M7 P3.4 (docs/gp-help.md; `doomfj.menu.menu_step` is the rules' other mirror): the help screen
     and the main menu's second item. In the WORLD the only addition is one `if0` on `ev_help`,
-    reached when neither esc nor enter is down -- the one state branch a world frame pays."""
+    reached when neither esc nor enter is down -- the one state branch a world frame pays.
+
+    M7 P7: NEW GAME sets `g_skill` from `menu_sel` and runs `restartcode.call_lines` -- the routines
+    (`restartcode.routine_lines(restart)`) must be placed by the caller too, where nothing falls into them."""
     _common, skills = restart
     assert len(skills) == len(SKILLS), "one restart block per skill: %d for %d" % (len(skills),
                                                                                   len(SKILLS))
@@ -697,11 +731,9 @@ def menu_state_lines(restart) -> list:
         "mn_dn:", f"hex.if_flags menu_sel, 1<<{len(SKILLS) - 1}, mn_dn_inc, mn_done",
         "mn_dn_inc:", "hex.inc 1, menu_sel", ";mn_done",
         "mn_start:",                       # NEW GAME at the highlighted skill
-        "stl.fcall restart_common, rs_ret",
-        *_skill_dispatch("mn_r"),
-        "mn_r0:", *skills[0], ";mn_started",
-        "mn_r1:", *skills[1], ";mn_started",
-        "mn_r2:", *skills[2],
+        # M7 P7: g_skill = menu_sel, then THE restart sequence (restartcode.call_lines) -- the one the restart on
+        # use after death runs (restartcode.tic_lines), into the same fcall'd per-skill routines
+        *_restartcode.new_game_lines(len(SKILLS)),
         "mn_started:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
         # -- M7 P3.4: the help screen and the main menu with HELP highlighted
         "mn_p34:",
@@ -787,7 +819,7 @@ def exit_lines(boxes, press_miss=()) -> list:
 
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
-                            press_miss=(), monster_tic=(), weapon=()) -> list:
+                            press_miss=(), monster_tic=(), weapon=(), restart_tic=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -823,6 +855,9 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         "hex.if0 1, kb_sr, sa_nsr", "hex.xor_by pkeys + dw, 0x4", "sa_nsr:",
         "hex.if0 1, kb_fi, sa_nfi", "hex.xor_by pkeys + dw, 0x8", "sa_nfi:",
         *(menu or []),                     # M3: the menu frame + the branch past the world
+        # M7 P7: the restart on use after death (restartcode.tic_lines) -- the world frame's START, before the
+        # frozen-level guard and the door tic: the model's World.tic runs the restart, then the tic
+        *restart_tic,
         # M7 P2a.2: a finished level is FROZEN -- no door tic, no player tic (the model's frozen
         # tic); the frame draws the world where it stopped
         *(["hex.if0 1, lvdone, lv_live", ";lv_frozen", "lv_live:"] if exit_boxes_ else []),
@@ -2624,19 +2659,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     if menu:
         assert _skills, "the menu's NEW GAME needs the game tier's skills (things, moving, standalone)"
         _rt_things = [map_wad.things(mapname)[w] for w in sorted(_mt_keep)]
-        _restart = restart_lines(
+        # M7 P7: ONE composition (compose_restart), the one tests/fj/test_restart_fj.py runs against the model.
+        # INTEGRATION HOOK (P6, packages B / C): their cells' level start -- p6_common / p6_skills from
+        # restartcode.level_start_lines(_p31["world"], SKILLS, <the P6 names their decls bring>) -- and the drop rows
+        # (thpos_rt / thss_rt rows nt + 10 .., their thnext links: `nmobile` must count them)
+        _restart = compose_restart(
             _spawn, len(_dslot) if _dst_tbl else 0, _MT_BINDS,
             [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
             monsters=_p31["restart"] if _p31 else None,
-            hud=(list(_hud["restart"]) + list(_wpn["restart"])
-                 + ([f"hex.zero {2 * 17}, aim_sid"] if _AIM else [])                       # M7 P4.2a: no aim
-                 # M7 P5: the player's health, armor, damage count, death and palette at the level start; the
-                 # pools empty, their rows zero, rng_fx at its seed
-                 + (list(_hrt["restart"]) + list(_proj["restart"]) if _hrt else [])) if _hud else (),
-            nmobile=_MT_NMOB)
+            hud_restart=_hud["restart"] if _hud else None, wpn_restart=_wpn["restart"] if _hud else (),
+            aim=bool(_AIM), hrt_restart=_hrt["restart"] if _hrt else (),
+            proj_restart=_proj["restart"] if _hrt else (), nmobile=_MT_NMOB)
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
@@ -2660,7 +2696,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   weapon=((list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))
                                           if _wpn else ()),
                                   door_lines=_door_tic,
-                                  exit_boxes_=_exit, press_miss=_press_miss)
+                                  exit_boxes_=_exit, press_miss=_press_miss,
+                                  # M7 P7: the restart on use after death, when the player can die (the menu's
+                                  # tier: it holds the restart routines and g_rs)
+                                  restart_tic=(_restartcode.tic_lines(len(SKILLS))
+                                               if (menu and _hrt and _restartcode.mortal(PLAYER_MODE)) else ()))
           if standalone else
           _state_wire_lines(sim=player_sim, collide=collide,
                             door_lines=_door_tic)),

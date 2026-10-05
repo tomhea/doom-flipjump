@@ -190,9 +190,11 @@ def hurt_decls(start: Dict[str, int]) -> List[str]:
 
 
 def restart_lines(start: Dict[str, int]) -> List[str]:
-    """NEW GAME: every persistent hurt cell back to its level start (pal_cur too: the palette lines re-send)"""
-    out = [f"hex.set {nib}, {cell}, {start[cell]}" for cell, _f, nib in CELLS]
-    return out + [f"hex.set 1, pal_cur, {start['pal_cur']}"]
+    """NEW GAME and the restart on use after death (M7 P7): every persistent hurt cell back to its level start --
+    NEVER `pal_cur`, the palette the device SHOWS (restartcode.DEVICE_SHADOWS): a death restart goes world frame ->
+    world frame with no menu frame between, and zeroed while the device shows red the palette lines would never
+    re-send it (NEW GAME's menu frame has already set palette 0 and pal_cur with it, `pal_menu_lines`)"""
+    return [f"hex.set {nib}, {cell}, {start[cell]}" for cell, _f, nib in CELLS]
 
 
 # ---- the code ---------------------------------------------------------------------------------------------------

@@ -138,7 +138,8 @@ def test_new_game_unlinks_the_mobiles_too():
 def test_the_tic_after_the_monsters_runs_projectiles_then_blood_then_the_bar(p5):
     out = WR.p5_tic_lines(p5["hrt"])
     assert out[:3] == ["stl.fcall pj_phase, pj_pret", "stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip"]
-    assert out[3:-1] == list(p5["hrt"]["bar"]) and out[-1] == "p5_bar_skip:"
+    # M7 P7: the level time ticks first inside the same guard (restartcode.lvtime_tic_lines)
+    assert out[3:-1] == ["hex.inc 4, lvtime"] + list(p5["hrt"]["bar"]) and out[-1] == "p5_bar_skip:"
 
 
 def test_the_persist_set_carries_p5s_cells():
@@ -184,7 +185,10 @@ def test_the_hurt_tic_menu_palette_restart_and_leaves_are_spliced():
     src = _src()
     assert 'weapon=((list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))' in src
     assert 'list(_hrt["menu_palette"])' in src
-    assert 'list(_hrt["restart"]) + list(_proj["restart"])' in src and "nmobile=_MT_NMOB" in src
+    # M7 P7: through ONE composition, wall_renderer.compose_restart (tests/host/test_restart_coverage.py)
+    assert ('hrt_restart=_hrt["restart"] if _hrt else ()' in src and 'proj_restart=_proj["restart"] if _hrt else ()'
+            in src and "nmobile=_MT_NMOB" in src)
+    assert "list(hrt_restart) + list(proj_restart)" in inspect.getsource(WR.compose_restart)
     assert '(list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]])' in src
     i_leaves = src.index('(list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]])')
     assert src.index('["    ;mm_block_end", _mcells]') < i_leaves < src.index('["mm_block_end:"]) + BSn')

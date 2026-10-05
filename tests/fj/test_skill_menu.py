@@ -39,6 +39,7 @@ from doomfj.harness import W
 from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_SCR, MAIN_HELP_SCR, MENU_KEYS,
                          menu_step)
 from doomfj.things import spawn_leaf_lists
+from doomfj.restartcode import routine_lines
 from doomfj.wall_renderer import (BOOT_SKILL, MENU_STATE_DECLS, SKILLS, menu_state_lines,
                                   restart_lines)
 
@@ -74,7 +75,10 @@ HEX_TARGETS = [("viewx", 8, 1), ("viewy", 8, 1), ("viewangle", 8, 1),
                ("pusedn", 1, 1),
                # M7 P2b's movers (restart_lines' nlift=NLIFT)
                ("lstate", NLIFT, 1), ("ldir", NLIFT, 1), ("lsub", NLIFT, 1),
-               ("lwait", WAIT_NIBBLES * NLIFT, 1), ("lreq", NLIFT, 1), ("fswitch", 1, 1)]
+               ("lwait", WAIT_NIBBLES * NLIFT, 1), ("lreq", NLIFT, 1), ("fswitch", 1, 1),
+               # M7 P7 (doomfj.restartcode): the level time and the restart request back to 0; the skill the
+               # restart restores to = the one NEW GAME chose
+               ("lvtime", 4, 1), ("g_rs", 1, 1), ("g_skill", 1, 1)]
 BYTE_TARGETS = [("sshead", NSS), ("thnext", NT)]
 FIELDS = "msv " + " ".join([f"{lb}[{i}]" for lb, _n, c in HEX_TARGETS for i in range(c)]
                            + [f"{lb}[{i}]" for lb, c in BYTE_TARGETS for i in range(c)])
@@ -86,9 +90,10 @@ DIRTY = {"viewx": [0x12345678], "viewy": [0x0BADF00D], "viewangle": [0x76543210]
          "thvis": [0x5A, 0xA5], "sshead": [0xA5, 0x5A], "thnext": [0x77, 0x66, 0x55],
          "dreq": [0x11], "pcard": [1], "wfired": [1], "lvdone": [1], "pusedn": [0],
          "lstate": [0x93], "ldir": [0x21], "lsub": [0x11], "lwait": [0x1A1A], "lreq": [0x11],
-         "fswitch": [1]}
-# the menu's own declarations less the exit's two cells, which the harness declares DIRTY
-MENU_DECLS_CLEAN = [d for d in MENU_STATE_DECLS if not d.startswith(("lvdone:", "pusedn:"))]
+         "fswitch": [1], "lvtime": [0xBEEF], "g_rs": [1], "g_skill": [1]}
+# the menu's own declarations less the exit's two cells and P7's three, which the harness declares DIRTY
+MENU_DECLS_CLEAN = [d for d in MENU_STATE_DECLS
+                    if not d.startswith(("lvdone:", "pusedn:", "lvtime:", "g_rs:", "g_skill:"))]
 
 
 def level_start(k) -> dict:
@@ -99,7 +104,8 @@ def level_start(k) -> dict:
             "thss_rt": list(BINDS), "thpos_rt": list(POS), "thvis": list(vis),
             "sshead": list(head), "thnext": list(nxt),
             "dreq": [0], "pcard": [0], "wfired": [0], "lvdone": [0], "pusedn": [1],
-            "lstate": [0], "ldir": [0], "lsub": [0], "lwait": [0], "lreq": [0], "fswitch": [0]}
+            "lstate": [0], "ldir": [0], "lsub": [0], "lwait": [0], "lreq": [0], "fswitch": [0],
+            "lvtime": [0], "g_rs": [0], "g_skill": [k]}
 
 
 def _dump():
@@ -125,7 +131,7 @@ def _fmt(st) -> str:
                     + ["%02x" % v for label, _c in BYTE_TARGETS for v in st[label]])
 
 
-def _program(state_lines, common, scr0=0):
+def _program(state_lines, routines, scr0=0):
     cells = []
     for label, n, _count in HEX_TARGETS:
         cells += [f"{label}:"] + [f"    hex.vec {n}, {v}" for v in DIRTY[label]]
@@ -144,7 +150,7 @@ def _program(state_lines, common, scr0=0):
         "    hex.cmp 2, tm_count, tm_frames, tm_frame, tm_done, tm_done",
         "tm_done:", "    stl.loop",
         "bad:", "    stl.output_char 0x21", "    stl.loop",
-        *common,                                        # fcall'd only
+        *routines,                                      # fcall'd only (M7 P7: restartcode.routine_lines)
         "mode: hex.vec 1, 1",
         *[f"menu_scr: hex.vec 1, {scr0}" if d.startswith("menu_scr:") else d for d in MENU_DECLS_CLEAN],
         "kstat: hex.vec 1", "kcode: hex.vec 2", "kb_f: hex.vec 1", "kb_b: hex.vec 1",
@@ -156,9 +162,10 @@ def _program(state_lines, common, scr0=0):
     ]) + "\n"
 
 
-def _assemble(tmp, name, state_lines, common, scr0=0):
+def _assemble(tmp, name, state_lines, restart, scr0=0):
+    """`restart`: the (common, skills) pair whose routines the program places"""
     src = tmp / f"{name}.fj"
-    src.write_text(_program(state_lines, common, scr0), encoding="utf-8")
+    src.write_text(_program(state_lines, routine_lines(restart), scr0), encoding="utf-8")
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
     out = tmp / f"{name}.fjm"
     fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve()], out,
@@ -289,8 +296,7 @@ def _restart():
 @pytest.fixture(scope="module")
 def shipped(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("skillmenu")
-    common, _ = _restart()
-    return _assemble(tmp, "menu", menu_state_lines(_restart()), common)
+    return _assemble(tmp, "menu", menu_state_lines(_restart()), _restart())
 
 
 @pytest.mark.parametrize("name", sorted(SCRIPTS))
@@ -302,8 +308,7 @@ def test_the_menu_follows_the_rules(shipped, name):
 @pytest.fixture(scope="module")
 def shipped_done(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("leveldone")
-    common, _ = _restart()
-    return _assemble(tmp, "menu_done", menu_state_lines(_restart()), common, scr0=LEVEL_DONE_SCR)
+    return _assemble(tmp, "menu_done", menu_state_lines(_restart()), _restart(), scr0=LEVEL_DONE_SCR)
 
 
 @pytest.mark.parametrize("name", sorted(LEVEL_DONE_SCRIPTS))
@@ -365,22 +370,20 @@ HELP_MUTANTS = {
 def test_a_broken_help_is_caught(tmp_path, name):
     """R9: each mutant of the new state lines, assembled through the same harness, must disagree
     with the mirror on some help script"""
-    common, _ = _restart()
     lines = menu_state_lines(_restart())
     bad_lines = _mutate(lines, *HELP_MUTANTS[name])
-    bad = _assemble(tmp_path, "helpbad", bad_lines, common)
+    bad = _assemble(tmp_path, "helpbad", bad_lines, _restart())
     caught = [n for n in HELP_SCRIPTS if _run(bad, HELP_SCRIPTS[n]) != _expected(HELP_SCRIPTS[n])[0]]
     assert caught, "a menu where %s passed every help script" % name
 
 
 def test_a_level_complete_screen_that_ignores_enter_is_caught(tmp_path):
     """R9: the screen's enter way out dropped must show"""
-    common, _ = _restart()
     lines = menu_state_lines(_restart())
     k = lines.index("mn_lv1:")
     assert lines[k + 1] == "hex.if0 1, ev_enter, mn_done"
     bad_lines = lines[:k + 1] + [";mn_done"] + lines[k + 2:]
-    bad = _assemble(tmp_path, "lvbad", bad_lines, common, scr0=LEVEL_DONE_SCR)
+    bad = _assemble(tmp_path, "lvbad", bad_lines, _restart(), scr0=LEVEL_DONE_SCR)
     name = "level complete: enter -> the main menu -> new game at hard"
     assert _run(bad, LEVEL_DONE_SCRIPTS[name]) != _expected(LEVEL_DONE_SCRIPTS[name], LEVEL_DONE_SCR)[0]
 
@@ -409,12 +412,11 @@ def test_the_scripts_reach_every_skill_and_every_screen():
 
 def test_a_broken_menu_is_caught(tmp_path):
     """R9: the same harness must say no to swapped up / down moves"""
-    common, _ = _restart()
     lines = menu_state_lines(_restart())
     swapped = [l.replace("hex.dec 1, menu_sel", "@@").replace("hex.inc 1, menu_sel", "hex.dec 1, menu_sel")
                .replace("@@", "hex.inc 1, menu_sel") for l in lines]
     assert swapped != lines
-    bad = _assemble(tmp_path, "swapped", swapped, common)
+    bad = _assemble(tmp_path, "swapped", swapped, _restart())
     name = "down clamps at hard; up twice to easy; new game at easy"
     assert _run(bad, SCRIPTS[name]) != _expected(SCRIPTS[name])[0], "swapped moves passed"
 
@@ -443,6 +445,8 @@ def _broken(name):
         return _drop(common, "lvdone", "pusedn"), skills
     if name == "the movers are not reset":
         return _drop(common, "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"), skills
+    if name == "the level time and the restart request are not reset":       # M7 P7
+        return _drop(common, "lvtime", "g_rs"), skills
     if name == "no skill links its things":
         return common, [_drop(s, "thnext +") for s in skills]
     assert name == "no skill sets its flags", name
@@ -452,7 +456,7 @@ def _broken(name):
 BROKEN = ["the lists are not zeroed", "the doors are not shut", "the positions are not reset",
           "the bindings are not reset", "the view's y and angle are not reset",
           "the door cells of P2a.1 are not reset", "the exit's cells are not reset",
-          "the movers are not reset",
+          "the movers are not reset", "the level time and the restart request are not reset",
           "no skill links its things", "no skill sets its flags"]
 
 
@@ -462,6 +466,6 @@ def test_a_broken_restart_is_caught(tmp_path, name):
     common, skills = _broken(name)
     good_common, good_skills = _restart()
     assert (common, skills) != (good_common, good_skills), "the control removed nothing"
-    bad = _assemble(tmp_path, "broken", menu_state_lines((common, skills)), common)
+    bad = _assemble(tmp_path, "broken", menu_state_lines((common, skills)), (common, skills))
     caught = [n for n in SCRIPTS if _run(bad, SCRIPTS[n]) != _expected(SCRIPTS[n])[0]]
     assert caught, "a restart block where %s passed every script" % name

@@ -89,7 +89,7 @@ def test_the_control_palette_mutants_part():
 
 # ---------------------------------------------------------------------------------------------- the death moment
 def _world():
-    return World(skill=gd.SK_HARD, monsters="full", player="fx")
+    return World(monster_tics=1, skill=gd.SK_HARD, monsters="full", player="fx")
 
 
 @pytest.mark.parametrize("dmg, gib", [(10, False), (150, True)])
@@ -129,7 +129,9 @@ def test_a_dead_player_loses_the_chasers():
 # ---------------------------------------------------------------------------------------------- MonsterPhase in P5
 def _phase():
     from doomfj.monsters import MonsterPhase
-    return MonsterPhase(mode="full", player="fx")
+    ph = MonsterPhase(mode="full", player="fx")
+    ph.world.monster_tics = 1          # M7 P6+P7 E: these test one DOOM tic (test_monster_tempo: a frame of 2)
+    return ph
 
 
 def test_weapon_fades_the_flashes_after_the_psprites():

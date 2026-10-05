@@ -43,7 +43,7 @@ from doomfj import wall_renderer as wr
 from doomfj.config import Config
 from doomfj.harness import W
 from doomfj.lut_generator import generate_emit_dispatch_table_fj
-from doomfj.reference_model import (DEG_HD_BUDGET, DEG_SPR_LOWRES_H, DEG_SPR_NEAR_TZ,
+from doomfj.reference_model import (DEG_HD_BUDGET, DEG_SOFT_MON, DEG_SPR_LOWRES_H, DEG_SPR_NEAR_TZ, MONSTER_BUDGET,
                                     DEG_SPRB_MINH, SPRITE_HEIGHT_BUCKETS, SPRITE_RUN_CAP_HD,
                                     sprite_bucket, sprite_tier)
 from doomfj.spritebank import bank_list, rowmap_row, strip_at
@@ -407,7 +407,10 @@ def _record_program(src, cases, seen_on=False):
                 spn=1 if DEG_SPR_NEAR_TZ else 0, lowh=DEG_SPR_LOWRES_H,
                 slotstride=wr.SPR_SLOT_STRIDE, ltw=1,          # M7 P3.1: a one-byte light class ...
                 mir=0, mirf=0, miru=0,                        # ... no mirrored views ...
-                seen=0, sa=0, sflag=0, one=0)                 # ... and no seen flags (M7 P3.2a)
+                seen=0, sa=0, sflag=0, one=0,                 # ... and no seen flags (M7 P3.2a) ...
+                # ... and (M7 P6+P7 E) every tier's binding but the game's: dsoftm != monbudget, so the actors rule's
+                # lines expand to nothing (tests/fj/test_actor_record_fj.py runs them with the game tier's)
+                dsoftm=DEG_SOFT_MON, monbudget=MONSTER_BUDGET, viewh=H)
     if seen_on:
         args.update(seen=1, sa="t_sa", sflag="t_sflag", one="t_one")
     argl = {m: ", ".join(str(args[p]) for p in ps) for m, ps in pars.items()}

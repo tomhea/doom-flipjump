@@ -571,11 +571,15 @@ def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
         (sp_tzmax, and sp_tzmax2 which the graduated acceptance switches to) are the base one, so the raise binds
         nothing, as the oracle's `not mob` keeps it;
       * the near (LD) region 2*dw on, as a monster view's.
+    M7 P6+P7 E (the owner, 2026-10-05: "you must always show the fireballs"): under the game picture's ACTORS RULE
+    (reference_model.GAME_RENDER_KW `exempt_actors`) a mobile is an ACTOR -- the monster class (sp_mon 1: n_mon, no
+    B-gate in frame.thing_record_body) at the MONSTER base bound MIN_SPRITE_H_MONSTER, as the oracle's `act` draws it.
     `first`: the row index of the first one (after the runtime things and the monsters' views). M7 P6 (`puffs`): the
     puff's states too (projcode.pool_states(puffs=True)), PUFFA0 .. PUFFD0 at MISSILE_Z as blood."""
     from doomfj.monsters import mobile_lump
     from doomfj.projcode import pool_states
-    from doomfj.reference_model import MIN_SPRITE_H, MISSILE_Z
+    from doomfj.reference_model import GAME_RENDER_KW, MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, MISSILE_Z
+    actor = bool(GAME_RENDER_KW.get("exempt_actors"))
     rows, lump_row, by_state = [], {}, {}
     for s in pool_states(puffs):
         lump = mobile_lump(s)
@@ -584,9 +588,9 @@ def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
             base, dw, mir = anim_index[(lump[:4], lump[4], 0)]
             art = rm.art_of_lump(sprite_wad, lump, cache)
             assert not mir and dw == art[2] and dw < 0x80, (lump, mir, dw, art[2])
-            tzmin = rm.sprite_tz_min_size(art[4], MIN_SPRITE_H) & 0xFFFFFFFF
+            tzmin = rm.sprite_tz_min_size(art[4], MIN_SPRITE_H_MONSTER if actor else MIN_SPRITE_H) & 0xFFFFFFFF
             rows.append((art[5], art[3], art[4], art[6] + MISSILE_Z, tzmin, tzmin,
-                         base, base + 2 * dw if spr_near else 0, 0, dw))
+                         base, base + 2 * dw if spr_near else 0, 1 if actor else 0, dw))
             lump_row[lump] = first + len(rows) - 1
         by_state[gd.STATE_INDEX[s]] = lump_row[lump]
     return rows, by_state

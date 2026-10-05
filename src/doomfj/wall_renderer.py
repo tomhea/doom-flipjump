@@ -541,6 +541,42 @@ def p5_tic_lines(hrt, barrels: bool = False) -> list:
                *hrt["bar"], "p5_bar_skip:"])
 
 
+# M7 P6+P7 package E (the owner, 2026-10-05: "maybe run 2 ticks each time?"): the frame's MONSTER WORLD runs
+# world.MONSTER_TICS_PER_FRAME tics -- the monster tic and the pools, looped (never a second copy of the per-slot code).
+# `wt_rep` is the loop's one-nibble counter: set every frame, it ends every frame at 0, its declared value, so the
+# M1 reset has nothing of it to restore.
+WT_DECLS = ["wt_rep: hex.vec 1"]
+_WT_BAR = "hex.if1 1, lvdone, p5_bar_skip"
+
+
+def world_tic_lines(tic, pools, tics: int) -> list:
+    """M7 P6+P7 package E -- the frame's world tic after the eye (`tic`: monstercode's `tic_after_eye`; `pools`:
+    p5_tic_lines' text) with the MONSTERS' WORLD run `tics` times (world.World._monster_world's loop):
+
+        [P_ChangeSector]  wt_rep = tics
+      wt_loop:
+        [the monster tic: mt_tic .. mt_skip]  [the pools' fcalls: pj_phase, (bar_phase), fx_phase]
+        wt_rep -= 1; if wt_rep != 0: goto wt_loop
+        [thseen = 0]  [the bar]
+
+    P_ChangeSector stays outside (the model runs it in the door/mover phases, once a frame); the seen marks are
+    zeroed once, after both tics read them (both tics read the LAST picture's marks, as the model's do); the bar is
+    written once, from what both tics left. Each phase keeps its own `lvdone` guard. The boundaries are the
+    documented shapes of the two inputs, asserted: `tic` = [... "mt_tic:" ... "  mt_skip:", "hex.zero thseen"],
+    `pools` = [the fcalls..., _WT_BAR, the bar ...]. tics == 1 returns `tic + pools` unchanged (blocked48's text)."""
+    tic, pools = list(tic), list(pools)
+    assert 1 <= tics <= 15, ("wt_rep is one nibble", tics)
+    if tics == 1:
+        return tic + pools
+    i = tic.index("mt_tic:")
+    assert tic[-2] == "  mt_skip:" and tic[-1].startswith("    hex.zero ") and tic[-1].endswith(", thseen"), tic[-2:]
+    j = pools.index(_WT_BAR) if pools else 0
+    assert all(ln.startswith("stl.fcall ") for ln in pools[:j]), pools[:j]
+    return (tic[:i] + ["    hex.set 1, wt_rep, %d" % tics, "wt_loop:"] + tic[i:-1] + pools[:j]
+            + ["    hex.dec 1, wt_rep", "    hex.if0 1, wt_rep, wt_done", "    ;wt_loop", "wt_done:"]
+            + tic[-1:] + pools[j:])
+
+
 # M7 P5: the labels the P5 text READS that other parts of the program must define (projcode.proj_parts' docstring:
 # the decide leaves' octant and context, the point location, the leaf lists, the collision state; hurtcode's bar and
 # rng_pl; damagecode's dm_leaf calling fx_spawn) -- `_p5_assert_labels` checks each is defined in the emitted parts
@@ -608,7 +644,10 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
         assert p31["mob_first"] <= row < nt + len(rows), (s, row)
         by_lump.setdefault(mobile_lump(s), set()).add(row)
         r = rows[row - nt]
-        assert r[8] == 0 and r[4] == r[5] and r[9] < 0x80, (s, r)        # scenery, base bound twice, not mirrored
+        # the base bound twice, not mirrored; the class: an ACTOR (sp_mon 1) under the game picture's actors rule
+        # (M7 P6+P7 E, reference_model.GAME_RENDER_KW `exempt_actors`), else scenery
+        from doomfj.reference_model import GAME_RENDER_KW as _GRK5
+        assert r[8] == int(bool(_GRK5.get("exempt_actors"))) and r[4] == r[5] and r[9] < 0x80, (s, r)
     assert all(len(v) == 1 for v in by_lump.values()) and len({min(v) for v in by_lump.values()}) == len(by_lump)
     assert MISSILE_Z == 32, MISSILE_Z
     assert proj["nt"] == nt
@@ -1256,6 +1295,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P4.2b: ... and make NOISE (nz_leaf at each fire point; monstercode.p31_parts emits the leaf at the same mode)
     from doomfj.noisecode import NOISE_PLAYER_MODES
     from doomfj.world import player_resolves as _player_resolves
+    from doomfj.world import MONSTER_TICS_PER_FRAME as _WT_TICS   # M7 P6+P7 E: the monsters' tempo, ONE definition
     # M7 P5 (doomfj.hurtcode, doomfj.projcode): the monsters' attacks LAND -- the player can be hurt and die, the imps'
     # fireballs fly and a hit bleeds. ONE switch for the whole splice, from the two model modes (p31_parts asserts
     # the pair is coherent) -- and a map WITH monsters (p31_parts, below: a monster-less game tier has nobody to
@@ -1811,6 +1851,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M14.5: the baked call sites' own copy of the record body (`mt`=0). On a static build there is
     # only one body and it keeps its name, so that renderer is emission-identical to before.
     _baked_leaf = "thing_leaf_b" if moving_things else "thing_leaf"
+    # M7 P6+P7 E (the owner, 2026-10-05): the game tier's monsters are exempt from the soft raise -- its `dsoftm` is the
+    # hard MONSTER_BUDGET, the oracle's GAME_RENDER_KW `exempt_actors` (one key, read here); every other tier
+    # keeps DEG_SOFT_MON (the hosted tiers' picture and deg_gate's visual tier do not move)
+    from doomfj.reference_model import GAME_RENDER_KW as _GRK
+    _DSOFTM = MONSTER_BUDGET if (_p31 and _GRK.get("exempt_actors")) else DEG_SOFT_MON
     _emit_baked_leaf = bool(moving_things and things_by_ss)
 
     def _thing_leaf_body(label, mt, aim_baked=False):
@@ -1825,7 +1870,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
                 f"{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, "     # M7 P1.6: `hdb`
                 f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
-                f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
+                f"{_DSOFTM}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
                 f"{DEG_SPR_LOWRES_H}, "
                 f"{DEG_SPR_NEAR_TZ * 0x10000}, "
                 f"{mt}, "
@@ -2823,12 +2868,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     pass1 += [f";{_pfx(mapname)}_dsc_walk", "dsc_done:"]
     # M7 P3.2a: the monsters tic AFTER the eye's point location (the wake mode's REJECT reads the player's
     # sector) and before the render, which marks this frame's seen flags for the next tic
-    pass1 += list(_p31.get("tic_after_eye", ())) if _p31 else []
+    _wt_tic = list(_p31.get("tic_after_eye", ())) if _p31 else []
     # M7 P5: then the fireballs and the blood (world.tic's order: monsters, projectiles, barrels, effects -- each phase
     # skips itself while `lvdone`), then the bar's health and armor from what the frame's damage left (inside the
     # same guard: a frozen level changes neither)
-    if _hrt:
-        pass1 += p5_tic_lines(_hrt, barrels=bool(_bar))
+    _wt_pools = p5_tic_lines(_hrt, barrels=bool(_bar)) if _hrt else []      # M7 P6: + the barrels' phase
+    # M7 P6+P7 E: the monsters' world (the monster tic and the pools) world.MONSTER_TICS_PER_FRAME times a frame
+    pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
     # runs before this, has already read last frame's)
     if _AIM:
@@ -3145,6 +3191,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
+          *(WT_DECLS if (_p31 and _hrt and _WT_TICS > 1) else []),   # M7 P6+P7 E: the tempo loop's counter
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2

@@ -72,7 +72,7 @@ def _windows(seed):
 
 
 def _world(saw, mode="fire", aim=None):
-    w = World(skill=gd.SK_HARD, monsters="idle", player=mode, aim=aim)
+    w = World(skill=gd.SK_HARD, monsters="idle", player=mode, aim=aim, monster_tics=1)   # M7 P6+P7 E: one DOOM tic
     ws = w.ws
     ws.p_owned[gd.WP_SHOTGUN] = 1
     ws.p_owned[gd.WP_CHAINSAW] = int(saw)

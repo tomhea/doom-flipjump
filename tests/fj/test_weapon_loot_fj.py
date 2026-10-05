@@ -161,9 +161,13 @@ def _phase_run(tmp_path, name, mut=None):
     script = _phase_script()
     w = _world()
     states, frames = WC.weapon_states(), WC.overlay_frames(WC.weapon_states())
-    tic = (L.latch_lines() + L.pre_lines() + WC.weapon_lines(states, frames, hurt=True, loot=True)
-           + H.hp_tic_lines() + L.post_lines()
-           + ["hex.set 1, mvmark, 1", "simmv_done:"])                 # the move's stand-in, and its end label
+    # the emitter's own composition (lootcode.tic_lines: pre, the weapon, the fade or -- dead -- package D's dt_turn,
+    # post); dt_turn is stood in for by its no-attacker case (the damage here has no source: p_atk stays 0, and D's
+    # leaf then only fades the flash -- the leaf itself is tests/fj/test_death_turn_fj.py's)
+    tic = (L.latch_lines() + L.tic_lines(WC.weapon_lines(states, frames, hurt=True, loot=True), H.hp_tic_lines())
+           + ["hex.set 1, mvmark, 1", "simmv_done:"]                  # the move's stand-in, and its end label
+           + [";dtt_skip", "dt_turn:", "hex.if0 2, p_dc, dtt_z", "hex.dec 2, p_dc", "dtt_z:", "stl.fret dt_tret",
+              "dtt_skip:"])
     text = "\n".join(tic) + "\n"
     if mut:
         pat, new = PHASE_MUTS[mut]

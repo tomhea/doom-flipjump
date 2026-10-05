@@ -130,7 +130,8 @@ from doomfj.restartcode import PERSIST as GAME_PERSIST                          
 # `test_every_p6_module_persist_is_wired` FAILS while a module exists and its names are not wired here, and
 # tests/fj/test_restart_fj.py then checks the restart writes every one of them.
 from doomfj import barrelcode as _barrelcode                                     # noqa: E402 (M7 P6, package C)
-LOOT_PERSIST: tuple = _barrelcode.DROP_PERSIST                  # + package B's lootcode.PERSIST when it lands
+from doomfj import lootcode as _lootcode                                         # noqa: E402 (M7 P6, package B)
+LOOT_PERSIST: tuple = _lootcode.PERSIST + _barrelcode.DROP_PERSIST   # B's player cells + C's drop cells
 BARREL_PERSIST: tuple = _barrelcode.BARREL_PERSIST
 
 
@@ -160,7 +161,7 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     # M7 P7: GAME_PERSIST's cells are NOT here -- they are standalone globals (wall_renderer.MENU_STATE_DECLS), which
     # m5_setfile adds through STANDALONE_SCRATCH_DECLS; listing them twice would declare them twice.
     # M7 P6: + LOOT_PERSIST + BARREL_PERSIST, their modules' decl lists in `cand`
-    from doomfj import barrelcode
+    from doomfj import barrelcode, lootcode
     from doomfj.wall_renderer import BOOT_SKILL
     names = HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST + HURT_PERSIST + PROJ_PERSIST + LOOT_PERSIST + BARREL_PERSIST
     cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START)))
@@ -168,7 +169,8 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
             + WC.weapon_const_decls() + aimcode.decls()
             + hurtcode.hurt_decls(hurtcode.level_start(World(map_wad, mapname)))   # M7 P5
             + projcode.pool_decls()
-            + barrelcode.decls(World(map_wad, mapname), BOOT_SKILL))     # M7 P6: barrels, drops
+            + barrelcode.decls(World(map_wad, mapname), BOOT_SKILL)      # M7 P6: barrels, drops
+            + lootcode.loot_decls(lootcode.level_start(World(map_wad, mapname))))   # M7 P6: the player's loot
     by = {}
     for d in cand:
         by.setdefault(decl_words(d)[0], d)

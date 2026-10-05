@@ -209,7 +209,9 @@ def _hooks():
         return [f"    hex.set 2, rtu_mark, {t + 1}", f"    hex.set 3, rtu_lmark, {leaf}"]
 
     def take(k):
-        return [f"    hex.set 2, dt_mark, {k + 1}"]
+        # package C's drop_take<k> contract (barrelcode.drop_lines, its own fj test test_barrel_fj): the hook owns the
+        # drop's cells -- mdrop[k] = 2 and dr_live - 1 -- then unlinks the row (here: a mark)
+        return [f"    hex.set 1, mdrop + {k}*dw, 2", "    hex.dec 2, dr_live", f"    hex.set 2, dt_mark, {k + 1}"]
     return unl, take
 
 

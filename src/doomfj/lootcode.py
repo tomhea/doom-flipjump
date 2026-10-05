@@ -19,7 +19,8 @@ the floor at the tic-start position -- `collision.move_with_collision_lines(pick
     order) with `mdrop[k]` == 1 -> `pk_drop` (its monster's `thpos_rt` / `thss_rt` row read through a pointer: the
     16.16 position, and the floor of the corpse's leaf by `ms_seed_leaf` -> `cp_seedf`, mover-aware as the model's
     `_floor_at` reads `secs_c`; then `pk_box`'s test) -> `give_<type>d` (the dropped variants: half a clip, one clip with a shotgun) -> taken: bc,
-    `mdrop[k]` = 2, `dr_live` - 1, then package C's `drop_take<k>` (unlink and clear row nt + 10 + k).
+    then package C's `drop_take<k>` (barrelcode.drop_lines: `mdrop[k]` = 2, `dr_live` - 1, row nt + 10 + k unlinked
+    and cleared -- the drop's cells are C's: its `drop_link<k>` sets them, its `drop_take<k>` undoes them).
 
 THE GIVES (`give_<type>`, fcall'd, `gv_ret`, -> `gv_ok`), `_touch`'s cases with DOOM's caps; `ga<a>` is P_GiveAmmo for
 ammo a with `ga_n` rounds (the cap from ONE D4 table `amcap`[backpack << 4 | a], no runtime multiply; refused AT the
@@ -37,8 +38,11 @@ position -> `nkleaf`[leaf] (the sector's SECTOR_HURT damage, 0 none) -> `ms_seed
 `sim.check_cells` at (viewx, viewy) (the box's floorz) -> equal -> `dp_dmg` = the damage, `dp_go`.
 
 THE TIC (P7-a): `latch` (`p_dd0` = `p_dead`, at the world tic's start, after the restart block); `pre` (before the
-weapon: nukage when alive); `post` (after the weapon tic and hurtcode's damagecount fade, before the move): dead ->
-the death think's tail (use HELD -> `g_rs` = 1) and a jump past the whole move (turning included); alive ->
+weapon: nukage when alive); the weapon tic; then the damagecount fade -- hurtcode's `tic` when alive, and when dead at
+the tic's start package D's `dt_turn` in its place (hurtcode.turn_lines: P_DeathThink's turn to the killer, and the
+fade it allows: `tic_lines`); `post` (before the move): dead ->
+the death think's tail (use HELD -> `g_rs` = 1) and a jump past the whole move (turning included: the turn block
+`simth_*` and `p_tnh` are left as they were, as the model's dead branch returns before `_player_move`); alive ->
 `p_str` + 1 (saturating at 0xFFFF, only when running) and `p_bc` - 1 (to 0). Every dead-player guard reads `p_dd0`,
 the TIC-START state: `doorcode.door_tic_lines(dead=)` (the use press, the closing door's player contact), `use_guard`
 around the use lines (the exit, the SR lifts, the floor switch -- `pusedn` untouched, as `_death_think` leaves
@@ -395,8 +399,9 @@ def _default_rt_unlink(t: int, leaf: int) -> List[str]:
 
 
 def _default_drop_take(k: int) -> List[str]:
-    """package C's `drop_take<k>` (section 4.6): drop k's row nt + 10 + k out of its leaf list and cleared"""
-    return [f"    stl.fcall drop_take{k}, dt_ret"]
+    """package C's `drop_take<k>` (barrelcode.drop_lines): mdrop[k] = 2, dr_live - 1, and drop k's row nt + 10 + k out
+    of its leaf list and cleared -- the hook owns every drop cell (its `drop_link<k>` set them)"""
+    return [f"    stl.fcall drop_take{k}, drt_ret"]
 
 
 def pkxyz_values(w) -> List[int]:
@@ -500,9 +505,8 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
         out += [f"    hex.if_flags mdrop + {k}*dw, {1 << 1:#06x}, {p}_n, {p}_t", f"  {p}_t:",
                 f"    hex.set 2, pk_t, {mon_rt[m]}", "    stl.fcall pk_drop, pk_dret", f"    hex.if0 1, pk_in, {p}_n",
                 f"    stl.fcall {DROPPED[kind]}, gv_ret", f"    hex.if0 1, gv_ok, {p}_n",
-                "    stl.fcall pk_bonus, pk_nret",
-                f"    hex.set 1, mdrop + {k}*dw, 2", "    hex.dec 2, dr_live"]
-        out += drop_take(k)
+                "    stl.fcall pk_bonus, pk_nret"]
+        out += drop_take(k)                          # mdrop[k] = 2, dr_live - 1, the row unlinked (package C's)
         out += [f"  {p}_n:"]
     out += ["pk_out:", "    stl.fret pk_ret"]
     # ---- the shared leaves and the give routines ----
@@ -677,6 +681,20 @@ def post_lines(skip_move: str = "simmv_done") -> List[str]:
             "lt_bc_end:"]
 
 
+def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = True) -> List[str]:
+    """the player's tic between the use lines and the move, in the model's order (`_player_phase` / `_death_think`):
+    `pre` (nukage, alive), the weapon tic (`weaponcode.weapon_lines(loot=True)`: its keys skipped on `p_dd0`, the
+    psprites always), the damagecount fade -- hurtcode's `tic` alive; dead at the tic's start (`p_dd0`), `turn`:
+    package D's `stl.fcall dt_turn, dt_tret` IN ITS PLACE (hurtcode.turn_lines: the turn to the killer, and the fade
+    only once facing him or with no attacker) -- then `post` (the restart request and the jump past the move, or the
+    strength and bonus tic)"""
+    fade = list(hurt_tic)
+    if turn:
+        fade = (["hex.if0 1, p_dd0, lt_fade", "stl.fcall dt_turn, dt_tret", ";lt_fade_end", "lt_fade:"]
+                + fade + ["lt_fade_end:"])
+    return pre_lines() + list(weapon_tic) + fade + post_lines()
+
+
 def use_guard() -> tuple:
     """(before, after) the use lines (wall_renderer.exit_lines with movercode's SR lifts and switch): a player dead
     at the tic's start uses nothing and leaves `pusedn` alone (`_death_think` never touches p_usedown)"""
@@ -694,6 +712,8 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
       * `pre`: right before the weapon tic (nukage, alive only);
       * `post`: after the weapon tic and hurtcode's `tic`, before `_player_sim_lines` (the death think or the
         strength / bonus tic; dead jumps to `simmv_done`);
+      * `tic(weapon_tic, hurt_tic)`: `tic_lines` -- pre, the weapon, the fade or (dead) package D's `dt_turn`, post:
+        what the emitter splices between the use lines and `_player_sim_lines`;
       * `use_guard`: (before, after) wrapped around `exit_lines(...)`;
       * `pickup` / `block`: `collision.move_with_collision_lines(pickup=, block=, skip_still=True)`;
       * `cells`: `player_cell_things` -- call it with the player's line lists, pass the result and THING_TEST16 to
@@ -708,6 +728,7 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
               + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root))
     return {"decls": loot_decls(start), "tables": tables_fj(w), "leaves": leaves,
             "latch": latch_lines(), "pre": pre_lines(), "post": post_lines(), "use_guard": use_guard(),
+            "tic": tic_lines,
             "pickup": pickup_call, "block": block_lines, "cells": player_cell_things, "thing_test": THING_TEST16,
             "slots": slots,
             "extra_vis": {sk: extra_vis(w, slots, sk) for sk in (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)},

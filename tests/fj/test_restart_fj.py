@@ -98,6 +98,12 @@ def _parts():
     w5.reset(WR.BOOT_SKILL)
     hrt = hurt_parts(w5, sprite_wad=art, boot_wad=mw)
     wpn = weapon_parts(mw, "E1M1", shoot=player_resolves(WR.PLAYER_MODE), hurt=True)
+    # M7 P6: the barrels and drops (package C) and the player's loot (package B) -- through the emitter's own
+    # composition, p6_restart_parts; the runtime pickups' thvis slots follow the baked vanishable ones
+    from doomfj import lootcode
+    loot_slots = (lootcode.pickup_slots(w5, rm, mw, "E1M1", art) if lootcode.loot_on(WR.PLAYER_MODE) else None)
+    p6_common, p6_skills = WR.p6_restart_parts(w5, p31.get("barrel"), loot_slots)
+    nmobile = p31["nmob"] + p31.get("ndrop", 0)
     nd = len(door_states(secs, lds, sds, WR.DOOR_QUANT))
     nwalk = len(walkover_triggers(secs, lds, sds, mw.vertexes("E1M1")))
     nlift = len(lift_states(secs, lds, sds, WR.DOOR_QUANT))
@@ -107,9 +113,9 @@ def _parts():
         nwalk=nwalk, nlift=nlift, monsters=p31["restart"],
         hud_restart=hudcode.hud_restart_lines(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))),
         wpn_restart=wpn["restart"], aim=True, hrt_restart=hrt["restart"], proj_restart=p31["proj"]["restart"],
-        nmobile=p31["nmob"])
-    return dict(mw=mw, restart=restart, nt=len(rt), nmob=p31["nmob"], nss=nss, nvis=len(vis_slots), nd=nd,
-                nwalk=nwalk, nlift=nlift)
+        nmobile=nmobile, p6_common=p6_common, p6_skills=p6_skills)
+    return dict(mw=mw, restart=restart, nt=len(rt), nmob=nmobile, nss=nss,
+                nvis=len(vis_slots) + (loot_slots["nextra"] if loot_slots else 0), nd=nd, nwalk=nwalk, nlift=nlift)
 
 
 def _cells(P):
@@ -340,6 +346,8 @@ def test_the_harness_classifies_every_persisted_cell(P, cells):
                  "hud_v", "wp_rdy", "aim_sid", "p_hp", "pj_act", "fx_act", "rng_fx", "lvtime", "g_rs", "mh_prev",
                  "bar_solid", "thnext", "thvis"):
         assert name in written, name
+    for name in ("p_bc", "p_str", "p_bp", "am_misl", "am_cell", "mdrop", "dr_live", "bar_st", "rng_wd"):  # M7 P6
+        assert name in written, name
     assert {"pal_cur", "hud_s", "hud_full", "g_skill", "mode", "kb_u"} <= set(kept)
 
 
@@ -354,6 +362,11 @@ MUTANTS = {
     "pal_cur restored": dict(common_extra=("    hex.zero 1, pal_cur",)),
     "g_skill written": dict(common_extra=("    hex.zero 1, g_skill",)),
     "g_rs left set": dict(drop=("g_rs",)),
+    # M7 P6 (package B's cells, through p6_restart_parts): the bonus count's level start dropped (the value half:
+    # p6_cell_values maps it), and the first RUNTIME pickup's thvis slot left as it was (coverage: thvis persists by
+    # absence, slot nvis + 0 is the extra slot lootcode.extra_vis sets per skill)
+    "p_bc dropped": dict(drop=("p_bc",)),
+    "rt pickup thvis dropped": dict(drop=("thvis + 105*2*dw",), two=True),
     # the restart on use dispatching on the menu's highlight instead of the skill being played
     "dispatch on menu_sel": dict(tic=[ln.replace("g_skill", "menu_sel") if "if" in ln else ln
                                       for ln in RC.tic_lines(3)]),

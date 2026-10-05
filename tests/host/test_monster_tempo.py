@@ -94,6 +94,9 @@ def test_the_monster_phase_mirror_steps_the_world_tempo():
         a.tic()
         b.tic()
         b.tic()                                   # tempo 1, twice a frame == tempo 2 once
+        # ... but `leveltime` ticks once a FRAME (MonsterPhase.tic, package A; the monsters never read it): b's second
+        # call ticked it once more than a frame does
+        b.world.ws.leveltime = (b.world.ws.leveltime - 1) & 0xFFFF
         assert a.world.digest() == b.world.digest()
 
 

@@ -825,7 +825,7 @@ lines expand to nothing and its ops are unchanged (deg_gate). New @-locals only:
 offv_ok`.
 
 **MEASURED visibility on v5's frames** (`PYTHONPATH="src;." python scratchpad/gp/p67e_visibility_probe.py --every 2
-[--tempo 2]`: every 2nd frame of the 11 runs, 550 frames; "should show" = a live monster with an open column at its
+[--tempo 2]`, logs `scratchpad/gp/scenarios/p67e_vis_tempo1.log` / `_tempo2.log`: every 2nd frame of the 11 runs, 550 frames; "should show" = a live monster with an open column at its
 base size AND a row inside the view):
 
 | | tempo 1 (v5 as recorded) | tempo 2 (v5's keys replayed at x2) |
@@ -910,3 +910,31 @@ F4 fail: a behaviour change, a **v6**, the owner's freeze.
   `test_player_shot_fj`, `test_weapon_fj`. The tempo itself is `tests/host/test_monster_tempo.py` and
   `tests/fj/test_monster_tempo_fj.py`; the actors rule `tests/host/test_actors_rule.py` and
   `tests/fj/test_actor_record_fj.py` (and `test_sprite_bank_fj`'s record harness binds the non-game tier).
+
+### 11.6 v6, as recorded (oracle only; NOT frozen)
+
+**v6 with v5's scripts** (`PYTHONPATH="src;." python scratchpad/gp/p67e_v6_record.py` -> `combat_scenarios_v6.json`,
+keys `794fa332d21c447e` = v5's, `--check` OK; log `scratchpad/gp/scenarios/v6_record.log`, 373 s): **the criteria
+FAIL.** v5's keys were planned against tempo-1 monsters, and at tempo 2 the fixed keys aim and dodge where the monsters
+no longer are:
+- every run survives -- **FAIL**: R0-imp-court and R2-east-yard die (v5: 0 deaths);
+- >= 8 kills -- **FAIL**: 3 monsters (v5: 17 kills in the totals);
+- every run moves on >= 60% of its movement frames -- **FAIL**: R2-east-yard 39% (the dead player);
+- B0's camera reconstruction -- **FAIL**: 56 frames part (the dead runs' frames);
+- the rest PASS. Poses part from v5 at frames 12-98 (3 runs never: the player's path is the same, only the world
+  differs). Player hurt 43 times (v5: 10).
+So a v6 that keeps v5's SCRIPTS is not a valid combat set: B0 would fail it (a mirror death fails a run, e8d3683).
+
+**The alternative, measured: v6 RE-PLANNED** (`scenarios_v2.py --plan --sight seen --file
+scratchpad/gp/scenarios/combat_scenarios_v6_replan.json` -- the same 11 CHECKPOINTS, the autopilot playing the
+tempo-2 model; keys `05744a5d5167bd84`; log `v6_replan.log`, 938 s): every criterion PASSES but one -- **>= 8 kills:
+6** (and 2 barrels) -- with 0 deaths, the lowest end health 40, 69.2% of frames with an awake monster DRAWN, all
+three attack kinds (hitscan 59, melee 2, fireball 15), 20 pickups, 3 player doors, 50 of 52 fireball-threat frames
+dodged, B0's camera 0 frames apart. The faster monsters make the aggressive autopilot kill less inside 100 frames.
+
+**Recommendation (the coordinator's / owner's call):** freeze the RE-PLANNED v6, after either relaxing ">= 8 kills"
+to >= 6 for tempo 2 or tuning the autopilot's engage range; it keeps v5's checkpoints, and its keys are the autopilot's
+answer to the new tempo, which is what the set was always meant to be (a player, not a replay). B0 measures the
+binding on the built binary (`b0_scenarios.py --file <v6>`); there is no oracle op model for a whole frame, so no
+oracle binding estimate exists -- section 11.3's +0.15 .. +0.4M (T) and -0.15 .. +0.05M (V) on top of blocked48's v5
+16,037,431 is the estimate until then.

@@ -1,0 +1,17 @@
+v6 from combat_scenarios_v5.json: 11 runs, keys 794fa332d21c447e, monster tempo 2, sight seen
+  R0-west-hall         first pose moved at frame None; dead 0 (health 76); kills 0 (v5 2); player hurt 2 (v5 2)
+  R0-aftermath         first pose moved at frame 98; dead 0 (health 53); kills 0 (v5 0); player hurt 5 (v5 0)
+  R0-south-hall        first pose moved at frame None; dead 0 (health 103); kills 0 (v5 0); player hurt 0 (v5 0)
+  R0-imp-court         first pose moved at frame 26; dead 1 (health 0); kills 2 (v5 3); player hurt 6 (v5 1)
+  R0-northwest         first pose moved at frame 20; dead 0 (health 61); kills 1 (v5 1); player hurt 6 (v5 2)
+  R0-courtyard         first pose moved at frame 27; dead 0 (health 85); kills 0 (v5 0); player hurt 2 (v5 0)
+  R2-barrel-hall       first pose moved at frame 61; dead 0 (health 94); kills 1 (v5 6); player hurt 1 (v5 2)
+  R2-spectre-corridor  first pose moved at frame 43; dead 0 (health 55); kills 0 (v5 2); player hurt 4 (v5 0)
+  R2-east-yard         first pose moved at frame 12; dead 1 (health 0); kills 0 (v5 0); player hurt 7 (v5 1)
+  R3-west              first pose moved at frame 43; dead 0 (health 67); kills 0 (v5 2); player hurt 6 (v5 0)
+  R3-mid               first pose moved at frame None; dead 0 (health 58); kills 1 (v5 1); player hurt 4 (v5 1)
+wrote C:\Users\tomhe\Documents\doom-p67-e\scratchpad\gp\scenarios\combat_scenarios_v6.json (373 s): criteria FAIL; keys 794fa332d21c447e (v5's)
+  FAIL  every run survives  deaths in ['R0-imp-court', 'R2-east-yard']
+  FAIL  >= 8 kills  3 monsters killed (and 2 barrels exploded; 0 shotgun shots)
+  FAIL  every run moves on >= 60% of its movement frames  worst R2-east-yard: 36/92 = 39%
+  FAIL  B0 follows the model's camera: the injected pose lands on the model's pose  56 frames part; door states apart on 2 frames; use with strafe on 0

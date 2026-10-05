@@ -47,6 +47,7 @@ import probe as P                                                            # n
 import scenarios_v2 as S                                                     # noqa: E402
 from doomfj import reference_model as RMOD                                   # noqa: E402
 from doomfj.monsters import MonsterPhase                                     # noqa: E402
+from doomfj.reference_model import GAME_RENDER_KW                            # noqa: E402
 
 def _budget_line() -> int:
     import inspect
@@ -153,9 +154,6 @@ def render(orc, mph, exempt, deg_things=None):
     mv = orc._mv(w)
     hidden = set(orc.hidden) | {mv.mdi[m] for m in range(w.layout.nmon) if not ws.mon_active[m]}
     seen = set()
-    kw = dict(orc.RENDER_KW, exempt_actors=exempt)
-    if deg_things is not None:
-        kw["deg_things"] = deg_things
     mobs = mph.mobiles()
     att = Attribution()
     with att:
@@ -163,7 +161,8 @@ def render(orc, mph, exempt, deg_things=None):
                                  orc.scene_for(tuple(ws.d_state), w.mover_heights_now()),
                                  sprite_wad=orc.art, thing_hidden=hidden,
                                  thing_views=mv(mph, x16, y16), seen_out=seen,
-                                 thing_positions=mv.positions(mph), mobiles=mobs, **kw)
+                                 thing_positions=mv.positions(mph), mobiles=mobs,
+                                 **dict(GAME_RENDER_KW, exempt_actors=exempt, deg_things=deg_things))
         att.finish()
     # the LIVE monsters (a corpse is not what the owner asked about; its fragments still count in the cost)
     # ... and of those, the ones with a row inside the view: a monster in a pit under the view is seen (an open

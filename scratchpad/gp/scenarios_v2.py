@@ -440,9 +440,9 @@ def predict_move(w, kd: dict):
         dy -= fixed_mul(sd, rmod.read_cos(angle), 8, 4)
     for cand in (((x + dx) & M32, (y + dy) & M32), ((x + dx) & M32, y),
                  (x, (y + dy) & M32)):
-        if cand == (x, y):
-            continue
         cx, cy = _signed(cand[0], 32), _signed(cand[1], 32)
+        if (cx, cy) == (x, y):                 # M7 P6+P7: like with like, as combat._player_move now compares
+            continue
         if w.player_blocking and w._solid_thing_at(cx, cy) is not None:
             continue
         if rmod.try_move(w.scene_c, x, y, cx, cy):

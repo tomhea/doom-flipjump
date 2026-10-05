@@ -535,21 +535,18 @@ def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, heigh
 
     M7 P6 (doomfj.lootcode): `block(tag, nxt)` gives the lines that refuse a candidate on a solid THING (a monster:
     `pb_mon`) -- after its pickups, before its P_TryMove, the model's `_player_move` order; `skip_still` skips a
-    candidate the model skips (`if cand == (x, y): continue`: no touch, no try -- with pickups, a touch at the
-    tic-start position is a pickup the model never makes). ⚠ EXACTLY the model's test: its candidate coordinates
-    that MOVED are masked `& 0xFFFFFFFF` (both of the full step, x of the x-only one, y of the y-only one) while the
-    position it compares them with is signed, so a candidate equal to the position is skipped only when each of
-    those masked coordinates is non-negative (`masked` below); a still candidate with one of them negative is
-    touched and tried as any other. Without them the text is P5's."""
+    candidate the model skips (`combat._player_move`: a candidate equal to where the player stands -- no touch, no
+    try; with pickups, a touch at the tic-start position is a pickup the model never makes). The compare is of the
+    whole 8-nibble cells, so it is the model's like-for-like (signed) one at every coordinate. (The model used to
+    compare a masked candidate with the signed position, which skipped nothing at a negative coordinate; package B
+    copied that quirk until the coordinator's decision fixed the model, M7 P6+P7.) Without them the text is P5's."""
 
-    def candidate(tag, xexpr, yexpr, nxt, masked=()):
+    def candidate(tag, xexpr, yexpr, nxt):
         still = []
         if skip_still:
             still = [f"    hex.cmp 8, cpx, viewx, {tag}go, {tag}sx, {tag}go", f"  {tag}sx:",
-                     f"    hex.cmp 8, cpy, viewy, {tag}go, {tag}s0, {tag}go", f"  {tag}s0:"]
-            for k, reg in enumerate(masked):          # the model's masked coordinate equals the signed one iff >= 0
-                still += [f"    hex.sign 8, {reg}, {tag}go, {tag}s{k + 1}", f"  {tag}s{k + 1}:"]
-            still += [f"    ;{nxt}", f"  {tag}go:"]
+                     f"    hex.cmp 8, cpy, viewy, {tag}go, {tag}s0, {tag}go", f"  {tag}s0:",
+                     f"    ;{nxt}", f"  {tag}go:"]
         return [
             *xexpr, *yexpr,
             *still,
@@ -585,11 +582,11 @@ def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, heigh
         "    hex.mov 8, cm_hf, cp_floor",
     ]
     out += candidate("cma_", ["    hex.mov 8, cpx, viewx", "    hex.add 8, cpx, cm_dx"],
-                     ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_b", ("viewx", "viewy"))
+                     ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_b")
     out += candidate("cmb_", ["    hex.mov 8, cpx, viewx", "    hex.add 8, cpx, cm_dx"],
-                     ["    hex.mov 8, cpy, viewy"], "cmv_c", ("viewx",))
+                     ["    hex.mov 8, cpy, viewy"], "cmv_c")
     out += candidate("cmc_", ["    hex.mov 8, cpx, viewx"],
-                     ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_stay", ("viewy",))
+                     ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_stay")
     out += ["    ;cmv_done",
             "  cmv_accept:",
             *after_accept,

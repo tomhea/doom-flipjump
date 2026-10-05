@@ -1239,9 +1239,12 @@ class CombatMixin:
         here_z = rmod.check_position(self.scene_c, x, y)[1]
         for cand in (((x + dx) & M32, (y + dy) & M32), ((x + dx) & M32, y),
                      (x, (y + dy) & M32)):
-            if cand == (x, y):
-                continue
             cx, cy = _signed(cand[0], 32), _signed(cand[1], 32)
+            # M7 P6+P7 (the integrator, the coordinator's decision): a candidate equal to where the player stands is
+            # skipped -- compared like with like (both signed). It compared the MASKED candidate with the signed
+            # position, so at a negative coordinate the still candidate was touched and tried (package B's finding).
+            if (cx, cy) == (x, y):
+                continue
             self._touch_specials(cx, cy, here_z, ev)
             if self.player_blocking and self._solid_thing_at(cx, cy) is not None:
                 ev.player_blocked += 1

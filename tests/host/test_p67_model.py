@@ -416,3 +416,32 @@ def test_gamespeed_route_prediction():
             ends[blocking, run] = (w.ws.px >> 16, w.ws.py >> 16, blocked)
     assert ends[True, "0"] == (635, 303, 60) and ends[False, "0"] == (831, 653, 0)
     assert ends[True, "1"] == ends[False, "1"] == (-357, 430, 0)
+
+
+# ------------------------------------------------------------------- the still candidate (the coordinator's fix)
+def _touches(w, monkeypatch, pose, angle):
+    """the candidates `combat._player_move` touches for one forward tic from `pose` (whole units) at `angle`, with
+    every P_TryMove refused (so all three candidates are reached)"""
+    seen = []
+    monkeypatch.setattr(w, "_touch_specials", lambda cx, cy, z, ev: seen.append((cx, cy)))
+    monkeypatch.setattr(w.rm, "try_move", lambda *a, **k: False)
+    w.ws.px, w.ws.py, w.ws.pangle = pose[0] << 16, pose[1] << 16, angle
+    w.ws.p_turnheld = 0
+    w._player_move(keys(forward=True), TicEvents(0))
+    return seen
+
+
+@pytest.mark.parametrize("pose", [(-416, 256), (-640, -512), (416, 256)])
+def test_the_still_candidate_is_skipped_at_every_coordinate(world, monkeypatch, pose):
+    """a candidate equal to where the player stands is never touched nor tried -- compared like with like. North
+    (ANG90): the step's x is exactly 0, so the x-only candidate IS the position; at a NEGATIVE x (the player's own
+    start, x -416) the old compare (a masked candidate against the signed position) let it through. R9: that old
+    compare names exactly these negative poses as the ones it would have touched."""
+    w = fresh(world)
+    seen = _touches(w, monkeypatch, pose, 0x40000000)
+    here = (pose[0] << 16, pose[1] << 16)
+    assert here not in seen and len(seen) == 2, (seen, here)
+    # the control: the old compare, `((x + dx) & M32, y) == (x, y)`, fails for a negative x -- the quirk this fixes
+    M32 = 0xFFFFFFFF
+    old_skips = ((here[0] + 0) & M32, here[1]) == here
+    assert old_skips == (pose[0] >= 0)

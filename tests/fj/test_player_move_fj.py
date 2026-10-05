@@ -17,7 +17,8 @@ monsters' seed gives: `ptloc_walk` then `ms_seed_leaf` (the leaf's sector, doors
 R9 (MUTANTS), each must part: no `block` (the player walks through monsters), a corpse that blocks (pb_mon on
 mon_active), a removed barrel that blocks (the presence test gone), the static blockers tested on whole units
 (`sim.thing_test`), a monster box that is inclusive, the still candidate tried (no `skip_still`), and the still
-candidate skipped whatever its sign.
+candidate tried at a negative coordinate (`still_signed`: the model's old masked compare, fixed by the coordinator's
+decision in M7 P6+P7 -- a still candidate is skipped at every coordinate).
 """
 import math
 import random
@@ -136,7 +137,7 @@ def _records(c):
             rec["present"][i] = 1
         if kind == "still":
             # ON an item (30 units east / north of it), a wall of monster ahead: only the still candidate touches it --
-            # and the model skips that one only when its masked coordinate is non-negative (collision's skip_still)
+            # and the model skips that one at every coordinate, negative ones included (collision's skip_still)
             i = rnd.randrange(len(P))
             ax = rnd.choice((0, 1))
             rec["angle"] = 0 if ax == 0 else ANG90
@@ -196,8 +197,11 @@ MUTANTS = {
     "whole_units": None,
     "mon_inclusive": (r"(hex\.scmp 8, pb_c, pb_bd\d+, (pbt\d+_[yh])), (pbt\d+_n), ", r"\1, \2, "),
     "still": None,
-    # the still candidate skipped whatever the sign: the model's masked compare keeps a negative coordinate's
-    "still_signless": (r"    hex\.sign 8, view[xy], cm[abc]_go, cm[abc]_s\d\n  cm[abc]_s\d:\n", ""),
+    # the model's OLD quirk put back: the still candidate is skipped only where its moved coordinate is non-negative
+    # (the x-only candidate's x, the y-only one's y), so at a negative one it is touched and tried
+    "still_signed": (r"  (cm([bc])_)s0:\n",
+                     lambda m: "  %ss0:\n    hex.sign 8, %s, %sgo, %ssq\n  %ssq:\n"
+                     % (m.group(1), "viewx" if m.group(2) == "b" else "viewy", m.group(1), m.group(1), m.group(1))),
 }
 
 
@@ -249,7 +253,7 @@ def _program(c, mut=None):
              + point_location_decls() + MM.monster_seed_decls()
              + ["pcard: hex.vec 1", "thvis:"] + ["    hex.vec 2, %d" % v for v in vis]
              + ["mdrop: hex.vec 25", "dr_live: hex.vec 2", "rtu_t: hex.vec w/4", "rtu_leaf: hex.vec w/4",
-                "rtu_ret: hex.vec w/4", "dt_ret: hex.vec w/4", "mv_ret: hex.vec w/4",
+                "rtu_ret: hex.vec w/4", "drt_ret: hex.vec w/4", "mv_ret: hex.vec w/4",
                 "viewx: hex.vec 8", "viewy: hex.vec 8", "vx: hex.vec 10", "vy: hex.vec 10",
                 "thpos_rt: hex.vec %d, %d" % (16 * nrt, sum(v << (64 * t) for t, v in enumerate(thpos))),
                 "thss_rt: hex.vec %d" % (16 * nrt),
@@ -260,7 +264,7 @@ def _program(c, mut=None):
                 "mc_don: hex.vec %d" % max(1, len(c.var)),
                 "dstate: hex.vec %d" % nd, "lstate: hex.vec %d" % max(1, nl), "fswitch: hex.vec 1"])
     # the runtime pickups' unlink and the drops' take are never reached here (no drop, and a stub for the unlink)
-    stubs = ["rt_unlink:", "    stl.fret rtu_ret"] + ["drop_take%d:" % k for k in range(25)] + ["    stl.fret dt_ret"]
+    stubs = ["rt_unlink:", "    stl.fret rtu_ret"] + ["drop_take%d:" % k for k in range(25)] + ["    stl.fret drt_ret"]
     return decls, text + "\n" + "\n".join(seed + stubs) + "\n", L.tables_fj(w) + [generate_point_location_fj(w.cmap)]
 
 
@@ -339,9 +343,11 @@ def test_the_records_exercise_every_path():
         seen["still"] += rec["kind"] == "still" and any(
             not w.ws.pickup_taken[i] and abs((w.pickup_things[i].x << 16) - x) < L.PK_RADIUS << 16
             and abs((w.pickup_things[i].y << 16) - y) < L.PK_RADIUS << 16 for i in rec["present"])
-        # ... and the same with the masked coordinate negative: the model touches it there (and takes the item)
+        # ... and the same with the still coordinate negative: left alone there too (the model's fixed compare; the
+        # masked one touched it there and took the item -- `still_signed`)
         seen["still_neg"] += rec["kind"] == "still" and (x < 0 if rec["angle"] else y < 0) and any(
-            w.ws.pickup_taken[i] and not bt[i] for i in rec["present"])
+            not w.ws.pickup_taken[i] and abs((w.pickup_things[i].x << 16) - x) < L.PK_RADIUS << 16
+            and abs((w.pickup_things[i].y << 16) - y) < L.PK_RADIUS << 16 for i in rec["present"])
         seen["moved"] += (w.ws.px, w.ws.py) != (x, y)
     want = dict(blocked=60, bymon=20, bybar=10, bydecor=10, passed_corpse=5, slide=10, picked=10, still=8,
                 still_neg=5, moved=100)

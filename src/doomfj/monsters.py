@@ -21,6 +21,40 @@ def mobile_rows(world) -> int:
     return FIREBALL_POOL + FX_POOL if (world.monsters == "full" or player_bleeds(world.player)) else 0
 
 
+def drop_rows(world) -> int:
+    """M7 P6 (docs/gp-p67-interface.md 4.5): the runtime-thing rows the DROPS add after the mobiles' -- one per DROPPER
+    k (the monster slots `world.dropper` names, in slot order: E1M1's 12 zombiemen and 13 shotgun guys), row
+    nt + mobile_rows + k -- in a world whose player loots (world.player_loots: "full"); 0 before P6"""
+    from doomfj.world import player_loots
+    return len(droppers(world)) if player_loots(world.player) else 0
+
+
+def droppers(world) -> list:
+    """M7 P6: the DROPPER slots -- the monster slots whose kill drops an item (combat's `dropper`), in slot order;
+    dropper k is `droppers(world)[k]` (the fj's `mdrop[k]`, its row nt + 10 + k)"""
+    return [m for m in range(world.layout.nmon) if world.dropper[m] is not None]
+
+
+def loot_cells(world) -> Dict[str, object]:
+    """M7 P6: the player's loot cells of a World, in their units (`MonsterPhase.loot_state` documents them) -- one
+    definition for the gates' phase and for B0's frozen model (its per-run loot partings)"""
+    from doomfj import gamedata as gd
+    ws = world.ws
+    md = tuple(ws.mon_drop[m] for m in droppers(world))
+    return {"p_bc": ws.p_bonuscount, "p_str": ws.p_strength, "p_bp": ws.p_backpack,
+            "am_misl": ws.p_ammo[gd.AM_MISL], "am_cell": ws.p_ammo[gd.AM_CELL],
+            "mdrop": md, "dr_live": sum(1 for v in md if v == 1)}
+
+
+def drop_lump(kind: int) -> str:
+    """M7 P6: the one view a DROP of editor number `kind` is drawn with -- its thing's spawn frame at rotation 0
+    (`mobile_lump`): MT_CLIP's CLIPA0, MT_SHOTGUN's SHOTA0"""
+    from doomfj import gamedata as gd
+    from doomfj.combat import DROP_ITEM
+    name = next(n for n, k in DROP_ITEM.items() if k == kind)
+    return mobile_lump(gd.MOBJINFO[name].spawnstate)
+
+
 def mobile_lump(state_name: str) -> str:
     """M7 P5: the sprite lump a mobile (fireball, blood, puff) is drawn with in state `state_name` -- its frame's
     single-rotation `...0` lump (BAL1A0 .. BAL1E0, BLUDA0 .. BLUDC0, PUFFA0 .. PUFFD0)"""
@@ -70,7 +104,8 @@ class MonsterPhase:
         """one monster tic -- the player where the gate's world put him this frame (the wake mode looks at him).
         M7 P5: and then the rest of world.tic's order after the monsters -- the fireballs, the barrels, the effects
         (`_projectiles_phase`, `_barrels_phase`, `_fx_phase`; before P5 nothing spawns into the pools and the barrels
-        only animate). -> the tic's events (also kept as `last_tic`)"""
+        only animate). M7 P6: and `leveltime` +1, world.tic's last step (nukage reads it; the gate calls this only on
+        a frame whose level is not done -- G2). -> the tic's events (also kept as `last_tic`)"""
         from doomfj.world import TicEvents
         w = self.world
         ws = w.ws
@@ -83,6 +118,7 @@ class MonsterPhase:
         w._projectiles_phase(ev)
         w._barrels_phase(ev)
         w._fx_phase(ev)
+        ws.leveltime = (ws.leveltime + 1) & 0xFFFF
         self.last_tic = ev
         return ev
 
@@ -125,38 +161,157 @@ class MonsterPhase:
         return (ds, fired, frozenset(req) | dr, card), ((lifts, frozenset(lreq) | lr, sw) if mps is not None else None)
 
     # ---- M7 P4.1: the weapon half (docs/gp-combat.md section 1) -------------------------------------------------------
+    def _pose(self, x16: Optional[int], y16: Optional[int], angle: Optional[int]) -> None:
+        """the gate's pose into the world's player cells (16.16 as the model keeps them: signed)"""
+        if x16 is not None:
+            ws = self.world.ws
+            ws.px = x16 - (1 << 32) if x16 >> 31 & 1 else x16
+            ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
+            ws.pangle = angle & 0xFFFFFFFF
+
     def weapon(self, keys: dict, x16: Optional[int] = None, y16: Optional[int] = None,
-               angle: Optional[int] = None):
+               angle: Optional[int] = None, dead: Optional[int] = None):
         """ONE world frame of the player's weapon: the number keys, then P_MovePsprites -- the model's own
         (`combat._weapon_keys`, `_move_psprites`) in the world's player mode. A gate calls it on every world frame
         that tics (not a menu frame, not a finished level), with the frame's held keys. M7 P4.2a: and with the
         player's PRE-MOVE pose -- the binary's weapon runs before the player's move, so a melee reach and a shot's
-        target are measured from where the player stood when the frame began. -> the tic's events"""
-        from doomfj.world import KEYS, TicEvents
+        target are measured from where the player stood when the frame began. -> the tic's events.
+        M7 P7 (docs/gp-p67-interface.md P7-a): `dead` -- THE TIC-START LATCH (`dead_latch()`, read before the frame's
+        door tic): the branch is chosen ONCE, on `p_dead` as the tic found it, as `combat._player_phase` chooses it,
+        so a player whom this tic's `nukage()` killed still runs the alive branch (the keys, the psprites, the
+        fades). None reads `p_dead` now (the modes before P7, where nothing kills the player before the weapon).
+        Dead in a mortal mode (world.player_mortal): the model's own `_death_think` -- the psprites, the damage
+        fade, and a HELD use asks for the restart (`g_restart`). Alive: the keys, the psprites, then (combat's
+        order) the berserk counter, the damage and the bonus fades."""
+        from doomfj.world import KEYS, TicEvents, player_mortal
         w = self.world
         if w.player == "walk":
             return TicEvents(0)
-        if x16 is not None:
-            ws = w.ws
-            ws.px = x16 - (1 << 32) if x16 >> 31 & 1 else x16
-            ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
-            ws.pangle = angle & 0xFFFFFFFF
+        self._pose(x16, y16, angle)
         k = {n: bool(keys.get(n)) for n in KEYS}
         ev = TicEvents(0)
         ws = w.ws
-        if ws.p_dead:                     # M7 P5: P_DeathThink's weapon half (the restart on use is P7's)
-            w._move_psprites(k, ev)
+        if ws.p_dead if dead is None else dead:
+            if player_mortal(w.player):   # M7 P7: P_DeathThink -- the restart request rides it
+                w._death_think(k, ev)
+                return ev
+            w._move_psprites(k, ev)       # M7 P5: P_DeathThink's weapon half (the restart on use is P7's)
             if ws.p_damagecount:
                 ws.p_damagecount -= 1
             return ev
         w._weapon_keys(k)
         w._move_psprites(k, ev)
-        # M7 P5: the flashes fade after the psprites, in the model's player-phase order (combat._player_phase)
+        # M7 P5: the flashes fade after the psprites, in the model's player-phase order (combat._player_phase);
+        # M7 P6: the berserk counter grows before them (zero until a PSTR is taken: always zero before "full")
+        if ws.p_strength:
+            ws.p_strength = min(ws.p_strength + 1, 0xFFFF)
         if ws.p_damagecount:
             ws.p_damagecount -= 1
         if ws.p_bonuscount:
             ws.p_bonuscount -= 1
         return ev
+
+    # ---- M7 P6 / P7: the player's half in the world (docs/gp-p67-interface.md 4.1) ------------------------------------
+    def dead_latch(self) -> int:
+        """M7 P7 (P7-a): `p_dead` as THIS world frame found it -- a gate reads it at the frame's start (after a due
+        restart, before the door tic) and hands it to every guard of the frame: the door press and the closing
+        door's contact, the use lines, `nukage`, `weapon`, `move` (the binary's `p_dd0`)"""
+        return self.world.ws.p_dead
+
+    def restart_due(self) -> bool:
+        """M7 P7 (P7-d): a restart was asked (use while dead) -- the next WORLD frame starts with `restart()`"""
+        return bool(self.world.ws.g_restart)
+
+    def restart(self):
+        """M7 P7 (P7-d): THE RESTART BLOCK -- the model's own `_restart`: every schema field but RESTART_KEEP (the
+        skill, the menu mode, the held keys) back to the level start of the world's skill. The gate runs it at the
+        START of a world frame whose `restart_due()`, then that frame's tic, and puts back its own phases (doors,
+        movers, the pose, `pusedn`, `lvdone`) as NEW GAME does. -> the events (restarts 1)"""
+        from doomfj.world import TicEvents
+        ev = TicEvents(0)
+        self.world._restart(ev)
+        self.last_restart = ev
+        return ev
+
+    def nukage(self, x16: Optional[int] = None, y16: Optional[int] = None, angle: Optional[int] = None,
+               dead: Optional[int] = None):
+        """M7 P6 (P6-k): P_PlayerInSpecialSector -- the model's own `_special_sector` at the TIC-START pose, first
+        in the alive branch (combat._player_phase), on the scene `sync` put the gate's doors and movers into. Only
+        when the player loots (world.player_loots) and was alive when the tic began (`dead`, the latch). -> events"""
+        from doomfj.world import TicEvents, player_loots
+        w = self.world
+        ev = TicEvents(0)
+        if not player_loots(w.player) or (w.ws.p_dead if dead is None else dead):
+            return ev
+        self._pose(x16, y16, angle)
+        w._special_sector(ev)
+        return ev
+
+    touch = None            # M7 P6: before "full", the gate's card touch for `move`'s step_sim (DoorPhase.touch)
+
+    def move(self, keys: dict, x16: int, y16: int, angle: int, dead: Optional[int] = None, scene=None):
+        """M7 P6: THE PLAYER'S MOVE -- the model's own `World._player_move` (the turn, the FixedMul step, the three
+        candidates; at each the pickups -- map things, then drops -- then a solid thing's refusal, then the lines)
+        on the world `sync` put the gate's doors and movers into (`scene_c`: the doors at their open height with
+        the not-yet-passable doors' lines blocked, the movers at their heights). -> (x, y, angle) as
+        `ReferenceModel.step_sim` returns them (the position's 32 bits when the keys move, else the pose given);
+        its events (pickups, player_blocked) are `last_move`.
+        THE WALK-OVERS stay the gate's: `doors.DoorPhase.after_move` / `movers.MoverPhase.after_move` fire them from
+        (old, new) exactly as `World._walkover` does, so the world's own copy (`w_fired`, `d_monreq`, `l_req`) is
+        put back here -- else a control that drops a gate's walk-over (p2a's `w1`, `no_wr`) could not part.
+        A DEAD player (the tic-start latch, P7-a) does not move or turn: the pose comes back unchanged.
+        Before "full" (world.player_loots false) the move is `step_sim`'s own (strafe on) with `self.touch(cx, cy,
+        z)` -- the gate's card -- at every tried candidate, what those binaries run: on `scene` when given (the
+        gate's own collision scene, as it stepped before P6), else on `scene_c`. In "full" `scene` must be None:
+        the world's scene is the one the model's move reads."""
+        from doomfj.reference_model import SimState
+        from doomfj.world import KEYS, TicEvents, player_loots
+        w, ws = self.world, self.world.ws
+        ev = TicEvents(0)
+        self.last_move = ev
+        k = {n: bool(keys.get(n)) for n in KEYS}
+        if not player_loots(w.player):
+            st = w.rm.step_sim(SimState(x16, y16, angle, w.mapname), k, scene=w.scene_c if scene is None else scene,
+                               touch=self.touch, strafe=True)
+            return st.x, st.y, st.angle
+        assert scene is None, "the full model moves on the world's own scene (sync it), not a gate's"
+        if ws.p_dead if dead is None else dead:
+            return x16, y16, angle
+        self._pose(x16, y16, angle)
+        keep = (list(ws.w_fired), list(ws.d_monreq), list(ws.l_req))
+        w._player_move(k, ev)
+        for arr, vals in zip((ws.w_fired, ws.d_monreq, ws.l_req), keep):
+            for i, v in enumerate(vals):
+                arr[i] = v
+        if k["forward"] != k["back"] or k["strafe_left"] != k["strafe_right"]:
+            return ws.px & MASK32, ws.py & MASK32, ws.pangle
+        return x16, y16, ws.pangle
+
+    def card(self) -> int:
+        """M7 P6: the blue card as the world holds it (`p_cards[IT_BLUECARD]`) -- the gate's door phase's card
+        (`pcard`) once the player loots: the World takes it, as the binary does, as one item of `move`'s pickups"""
+        return self.world.ws.p_cards[self.gd.IT_BLUECARD]
+
+    def set_card(self, value: int) -> None:
+        """M7 P6: a scenario that POKES `pcard` pokes the world's card"""
+        self.world.ws.p_cards[self.gd.IT_BLUECARD] = int(bool(value))
+
+    def taken(self) -> Tuple[list, list]:
+        """M7 P6: what the GAME removed, in the model's indices -- (pickup indices taken, barrel indices gone), each
+        only among the things the world's skill spawned (a thing another skill spawns is `thing_hidden`'s -- the
+        skill's absent set -- not a removal)"""
+        w, ws, gd = self.world, self.world.ws, self.gd
+        bit = gd.skill_bit(ws.skill)
+        picks = [i for i, t in enumerate(w.pickup_things) if ws.pickup_taken[i] and t.flags & bit]
+        bars = [b for b, t in enumerate(w.barrel_things) if not ws.bar_state[b] and t.flags & bit]
+        return picks, bars
+
+    def barrel_lumps(self) -> Dict[int, str]:
+        """M7 P6: {barrel index: lump} of every barrel standing (bar_state != 0) -- its state's frame at rotation 0
+        (`mobile_lump`: BAR1A0 / BAR1B0 / BEXPA0 .. BEXPE0)"""
+        ws, gd = self.world.ws, self.gd
+        return {b: mobile_lump(gd.STATE_NAMES[ws.bar_state[b]]) for b in range(self.world.layout.nbarrel)
+                if ws.bar_state[b]}
 
     def weapon_state(self) -> Dict[str, int]:
         """the weapon's fj cells (doomfj.weaponcode), in the cells' own units: the psprite states as LOCAL indices"""
@@ -240,6 +395,12 @@ class MonsterPhase:
             out.update(self.proj_state())
         if self.world.monsters == "full" or player_bleeds(self.world.player):   # M7 P5: the blood pool, its stream
             out.update(self.fx_state())
+        from doomfj.world import player_loots, player_mortal
+        if player_loots(self.world.player):                       # M7 P6: the loot, the barrels, the game cells
+            out.update(self.loot_state())
+            out.update(self.barrel_state())
+        if player_loots(self.world.player) or player_mortal(self.world.player):
+            out.update(self.game_state())
         return out
 
     # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------
@@ -270,6 +431,35 @@ class MonsterPhase:
                 "fx_y": tuple(v & MASK32 for v in ws.fx_y), "fx_st": tuple(ws.fx_state),
                 "fx_ti": tuple(ws.fx_tics), "rng_fx": ws.rng_fx}
 
+    # ---- M7 P6 / P7: the new cells' ONE definition (docs/gp-p67-interface.md 4.5) ----------------------------------
+    def loot_state(self) -> Dict[str, object]:
+        """the player's loot in the fj cells' units (all unsigned, nibbles little-endian): p_bc the bonus count
+        (2 nibbles, 0..255, +6 a take, saturating -- the card SETS 6, then +6), p_str the berserk counter (4
+        nibbles, 0..0xFFFF, 1 at the take, +1 a live tic, saturating), p_bp the backpack (1 nibble, 0/1), am_misl /
+        am_cell the rockets and the cells (3 nibbles each, 0 .. 2 x maxammo: no E1M1 weapon fires them, but a full
+        count refuses the item), mdrop[k] per DROPPER k (`droppers`, slot order; 1 nibble: 0 none, 1 dropped,
+        2 taken) and dr_live the count of mdrop == 1 (2 nibbles: the binary's fast skip, checked here)"""
+        return loot_cells(self.world)
+
+    def barrel_state(self) -> Dict[str, object]:
+        """the barrels per index (22 on E1M1, WAD order), in the fj cells' units: bar_st the GAMEDATA state index
+        (2 nibbles: S_BAR1 203, S_BAR2 204, S_BEXP .. S_BEXP5 205 .. 209; 0 removed or not at this skill), bar_ti
+        its tics (1 nibble, 1..10; 0 removed), bar_hp the health's 8 bits (2 nibbles, two's complement: 20 at the
+        start, saturating at -128 = 0x80), bar_solid (1 nibble, 0/1: P3.2b's presence cell), and rng_wd the world
+        stream (2 nibbles) -- its value after the level start's 22 phase rolls, +1 a hit on a live barrel"""
+        ws = self.world.ws
+        return {"bar_st": tuple(ws.bar_state), "bar_ti": tuple(ws.bar_tics),
+                "bar_hp": tuple(v & 0xFF for v in ws.bar_health), "bar_solid": tuple(ws.bar_solid),
+                "rng_wd": ws.rng_world}
+
+    def game_state(self) -> Dict[str, int]:
+        """the game's cells: lvtime the level time (4 nibbles, 16 bits, wraps; +1 at the end of every tic that
+        ran), g_rs the restart request (1 nibble, 0/1), g_skill the world's skill as the SKILLS index (1 nibble:
+        0 easy, 1 medium, 2 hard -- wall_renderer.SKILLS, what the menu's `menu_sel` numbers)"""
+        from doomfj.wall_renderer import SKILLS
+        ws = self.world.ws
+        return {"lvtime": ws.leveltime, "g_rs": ws.g_restart, "g_skill": SKILLS.index(ws.skill)}
+
     def palette(self) -> int:
         """the PLAYPAL index this world frame is shown with (combat.palette_index: ST_doPaletteStuff)"""
         from doomfj.combat import palette_index
@@ -278,7 +468,9 @@ class MonsterPhase:
     def mobiles(self) -> list:
         """`render_wall_frame(mobiles=...)`: [(x, y, lump)] of every live mobile in ROW order -- the fireball slots,
         then the blood slots -- at its whole map units (the 16.16 position floored: its thpos_rt row carries no
-        fraction), drawn with its state's frame (`mobile_lump`)"""
+        fraction), drawn with its state's frame (`mobile_lump`).
+        M7 P6: then the DROPS lying (mdrop 1), in dropper order -- (x, y, lump, 0): at the corpse's position, ON its
+        leaf's floor (z 0, not MISSILE_Z), CLIPA0 / SHOTA0 (`drop_lump`)"""
         from doomfj.world import FIREBALL_POOL, FX_POOL
         ws, gd, out = self.world.ws, self.gd, []
         for s in range(FIREBALL_POOL):
@@ -287,6 +479,10 @@ class MonsterPhase:
         for s in range(FX_POOL):
             if ws.fx_active[s]:
                 out.append((ws.fx_x[s] >> 16, ws.fx_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])))
+        if drop_rows(self.world):
+            for m in droppers(self.world):
+                if ws.mon_drop[m] == 1:
+                    out.append((ws.mon_x[m], ws.mon_y[m], drop_lump(self.world.dropper[m]), 0))
         return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:
@@ -327,6 +523,20 @@ class MonsterViews:
         self.rt_drawable = [draw_idx.index(i) for i in keep]          # runtime thing t -> drawable index
         self.nrt = len(keep)
         self.rt = [keep.index(draw_idx[di]) for di in self.mdi]      # slot -> runtime thing
+        # M7 P6: the pickups' and the barrels' drawable indices (the same key), and the `thvis` slots: the baked
+        # vanishable things' (things.vanishable_slots, the slot order wall_renderer bakes), then ONE slot per
+        # RUNTIME pickup after them, in runtime-thing order (docs/gp-p67-interface.md 4.5: the probe reads
+        # "taken" for all 95 pickups the same way)
+        from doomfj.reference_model import VANISHABLE_TYPES
+        from doomfj.things import vanishable_slots
+        self.pdi = [key[(t.type, t.x, t.y, t.angle, t.flags)] for t in world.pickup_things]
+        self.bdi = [key[(t.type, t.x, t.y, t.angle, t.flags)] for t in world.barrel_things]
+        self.vis_slots = vanishable_slots(drawable, baked, VANISHABLE_TYPES)
+        rt_set = set(self.rt_drawable)
+        self.rt_pickups = sorted((di for di in self.pdi if di in rt_set), key=self.rt_drawable.index)
+        self.nvis = len(self.vis_slots) + len(self.rt_pickups)
+        assert all(di in self.vis_slots or di in rt_set for di in self.pdi + self.bdi), \
+            "a pickup or a barrel is baked without a thvis slot: it could never vanish"
 
     def positions(self, phase: "MonsterPhase") -> list:
         """M7 P3.2b: `render_wall_frame(thing_positions=...)` -- every drawable where it stands, the monsters where
@@ -360,17 +570,58 @@ class MonsterViews:
                     live = bool(act[s])
                     thpos.append(((((xs[s] >> 16) << 16) & M) | ((((ys[s] >> 16) << 16) & M) << 32)) if live else 0)
                     thss.append(leaf[s] if live else 0)
-        return {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss)}
+        out = {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss)}
+        if drop_rows(phase.world):
+            # M7 P6: the DROP rows nt + 10 + k, one per dropper k: while its drop lies (mdrop 1) the corpse's
+            # whole-unit row and its leaf (the monster's own), else (0, 0) -- and in no list
+            for m in droppers(phase.world):
+                live = ws.mon_drop[m] == 1
+                thpos.append((((ws.mon_x[m] << 16) & M) | (((ws.mon_y[m] << 16) & M) << 32)) if live else 0)
+                thss.append(ws.mon_leaf[m] if live else 0)
+            out = {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss), **self.vis_state(phase)}
+        return out
+
+    def vis_state(self, phase: "MonsterPhase") -> dict:
+        """M7 P6: the `thvis` cell (2 nibbles a slot: 1 drawn, 0 not -- taken, removed, or not at this skill): the
+        baked vanishable slots in `things.vanishable_slots` order (a pickup: 1 - pickup_taken; a barrel: its state
+        is not 0), then one slot per RUNTIME pickup in runtime-thing order (`rt_pickups`)"""
+        ws = phase.world.ws
+        pick = {di: i for i, di in enumerate(self.pdi)}
+        bar = {di: b for b, di in enumerate(self.bdi)}
+
+        def present(di):
+            if di in pick:
+                return 1 - ws.pickup_taken[pick[di]]
+            return int(bool(ws.bar_state[bar[di]]))
+        vals = [present(di) for di in sorted(self.vis_slots, key=self.vis_slots.get)]
+        vals += [1 - ws.pickup_taken[pick[di]] for di in self.rt_pickups]
+        return {"thvis": tuple(vals)}
 
     def nrows(self, phase: "MonsterPhase") -> int:
-        """M7 P5: the rows of thpos_rt / thss_rt the probe reads -- the runtime things, then the mobiles"""
-        return self.nrt + mobile_rows(phase.world)
+        """M7 P5: the rows of thpos_rt / thss_rt the probe reads -- the runtime things, then the mobiles.
+        M7 P6: then the drop rows"""
+        return self.nrt + mobile_rows(phase.world) + drop_rows(phase.world)
+
+    def hidden(self, phase: "MonsterPhase") -> list:
+        """M7 P6: `render_wall_frame(thing_removed=)` -- the drawable indices of what the game removed (the pickups
+        taken, the barrels gone; `MonsterPhase.taken`)"""
+        picks, bars = phase.taken()
+        return sorted([self.pdi[i] for i in picks] + [self.bdi[b] for b in bars])
+
+    def barrel_views(self, phase: "MonsterPhase") -> Dict[int, str]:
+        """M7 P6: `render_wall_frame(barrel_views=)` -- {drawable index: lump} of every standing barrel, its state's
+        frame (`MonsterPhase.barrel_lumps`)"""
+        return {self.bdi[b]: lump for b, lump in phase.barrel_lumps().items()}
 
     def aim_things(self, phase: "MonsterPhase") -> Dict[int, Tuple[int, int]]:
         """M7 P4.2a: `render_wall_frame(aim_things=...)` -- {drawable index: (sid, radius)} for every shootable living
         monster (`combat.CombatMixin.shootable_targets`' monster half): sid = 1 + slot, the radius its class (20, 30;
-        the render widens it to r_eff for the view angle). Everything else is transparent to the window."""
-        return {self.mdi[m]: (m + 1, r) for kind, m, _x, _y, r in phase.world.shootable_targets() if kind == "mon"}
+        the render widens it to r_eff for the view angle). Everything else is transparent to the window.
+        M7 P6: and every live barrel when the model aims at barrels ("full": shootable_targets' barrel half) --
+        sid 1 + nmon + b, radius 10 (`combat.window_aim` reads it back as ("bar", b))."""
+        nmon = phase.world.layout.nmon
+        return {(self.mdi[i] if kind == "mon" else self.bdi[i]): ((i + 1) if kind == "mon" else (1 + nmon + i), r)
+                for kind, i, _x, _y, r in phase.world.shootable_targets()}
 
     def slots_of(self, seen_drawables) -> set:
         """a render's `seen_out` (drawable indices) as monster slots"""

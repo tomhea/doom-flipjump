@@ -11,9 +11,10 @@ attacks (hurtcode: the hitscan, the claw, the bite on the player; projcode: the 
 and explosion, the blood pool), the palette -- and its render. At every present the probe reads every cell the
 expectation names (the doors, the monsters, the weapon, P5's p_hp p_ar p_at p_dc p_dead, the pools pj_* fx_*,
 rng_fx, the mobile rows of thpos_rt / thss_rt) and the frame is held against THE ORACLE: p2a_gate.Mirror with the
-P5 model modes (MONSTER_MODE "full", PLAYER_MODE "fx"), its picture rendered WITH the mobiles
-(`render_wall_frame(mobiles=)`), the palette the present showed against combat.palette_index's PLAYPAL.
-STATE-, PIXEL- AND PALETTE-EXACT ON EVERY FRAME. No scenario may reach a death (the death think is P7's).
+model modes (MONSTER_MODE "full"; PLAYER_MODE "full" since M7 P6/P7 -- docs/gp-p67-interface.md 6.3: P5 ran them
+at "fx"), its picture rendered WITH the mobiles (`render_wall_frame(mobiles=)`; P6: and the drops, the barrels by
+state, what the game removed), the palette the present showed against combat.palette_index's PLAYPAL.
+STATE-, PIXEL- AND PALETTE-EXACT ON EVERY FRAME. No scenario may reach a death (die_gate.py's are the deaths).
 
 THE SCENARIOS (the monsters at their spawns; nothing is teleported, so no leaf list is poked):
   H1 a zombieman's hitscan: hits and misses (the spread against HWT at the distance)
@@ -54,7 +55,8 @@ from doomfj.fixedpoint import _signed                                        # n
 from doomfj.things import drawable_things                                    # noqa: E402
 
 M32 = 0xFFFFFFFF
-MMODE, PMODE = "full", "fx"               # P5's model modes (docs/gp-p5-interface.md)
+MMODE, PMODE = "full", "full"             # the game tier's modes from P6/P7 on (docs/gp-p67-interface.md 6.3);
+                                          # a binary run asserts them against wall_renderer's
 KEYFLAG = {"forward": "kb_f", "back": "kb_b", "turn_left": "kb_l", "turn_right": "kb_r", "use": "kb_u",
            "strafe_left": "kb_sl", "strafe_right": "kb_sr", "fire": "kb_fi",
            "w1": "kb_w1", "w2": "kb_w2", "w3": "kb_w3", "w4": "kb_w4"}
@@ -116,7 +118,7 @@ def counters(tr: list) -> dict:
         st = fr["mstate"]
         c["dead_frames"] += bool(st.get("p_dead"))
         c["max_in_flight"] = max(c["max_in_flight"], sum(st.get("pj_act", ())))
-        c["explosion_frames"] += any(lump in EXPLOSION for _x, _y, lump in fr["mobiles"])
+        c["explosion_frames"] += any(mo[2] in EXPLOSION for mo in fr["mobiles"])
         at = st.get("p_at")
         c["armor_out"] += at_prev is not None and at_prev != 0 and at == 0
         at_prev = at
@@ -226,9 +228,10 @@ def control(name: str | None):
             setattr(obj, attr, val)
 
 
-def normalized(cells: dict, nrt: int) -> dict:
+def normalized(cells: dict, nrt: int, ndrop: int = 0) -> dict:
     """`pool9`'s run reads 9 fireball slots and 9 fireball rows; the comparison takes the oracle's 8 (a ninth slot is
-    not a difference in itself -- what it does to the other cells is)"""
+    not a difference in itself -- what it does to the other cells is). M7 P6: the rows after the pools (the blood,
+    then `ndrop` drop rows) keep their place: the ninth fireball row is the one taken out"""
     from doomfj.world import FIREBALL_POOL, FX_POOL
     out = dict(cells)
     for k, v in cells.items():
@@ -236,8 +239,9 @@ def normalized(cells: dict, nrt: int) -> dict:
             out[k] = v[:FIREBALL_POOL]
     for k in ("thpos_rt", "thss_rt"):
         v = cells.get(k)
-        if v is not None and len(v) > nrt + FIREBALL_POOL + FX_POOL:
-            out[k] = v[:nrt + FIREBALL_POOL] + v[-FX_POOL:]
+        extra = len(v) - (nrt + FIREBALL_POOL + FX_POOL + ndrop) if v is not None else 0
+        if extra > 0:
+            out[k] = v[:nrt + FIREBALL_POOL] + v[nrt + FIREBALL_POOL + extra:]
     return out
 
 
@@ -335,18 +339,21 @@ class Run:
         return tr, mr
 
     def picture(self, fr, mobiles=None):
+        """the oracle's picture of a frame -- M7 P6: with what the game removed, the barrels by state, and the bar's
+        card the world's (`p2a_gate.picture`'s keywords)"""
         orc, dsim = self.orc, self.dsim
         return orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
                           tuple(fr["phase"][0][si][0] for si in dsim.order), hidden_extra=(),
                           movers=fr["mheights"], views=fr["views"], positions=fr["positions"],
-                          screen_kw=fr.get("skw"), mobiles=fr["mobiles"] if mobiles is None else mobiles)
+                          screen_kw=fr.get("skw"), mobiles=fr["mobiles"] if mobiles is None else mobiles,
+                          removed=fr.get("removed"), barrel_views=fr.get("bviews"), card=fr["phase"][3])
 
     def explosion_px(self, tr) -> int:
         """the pixels an explosion drew: on the frames whose mobiles hold one, the picture with them against the
         picture without the explosion"""
         n = 0
         for fr in tr:
-            if any(lump in EXPLOSION for _x, _y, lump in fr["mobiles"]):
+            if any(mo[2] in EXPLOSION for mo in fr["mobiles"]):
                 rest = [mo for mo in fr["mobiles"] if mo[2] not in EXPLOSION]
                 n += P.px_diff(self.picture(fr), self.picture(fr, rest))
         return n
@@ -363,16 +370,19 @@ def place(run: Run, sc: dict, limit: int = 12):
     return None
 
 
-def parts(run: Run, want: list, alt: list, nrt: int):
+def parts(run: Run, want: list, alt: list, nrt: int, ndrop: int = 0):
     """the first frame the mutated oracle's run differs from the oracle's -- cells, palette, or the picture (drawn
-    only where the cells and the palette agree and the mobiles do not) -- or None"""
+    only where the cells and the palette agree and the mobiles, the removals or the barrels' frames do not) --
+    or None"""
     order, morder = run.dsim.order, run.dsim.mp.order
     for f, (x, y) in enumerate(zip(want, alt)):
-        if normalized(G.expected_cells(x, order, morder), nrt) != normalized(G.expected_cells(y, order, morder), nrt):
+        if normalized(G.expected_cells(x, order, morder), nrt, ndrop) \
+                != normalized(G.expected_cells(y, order, morder), nrt, ndrop):
             return f, "cells"
         if x["pal"] != y["pal"]:
             return f, "palette"
-        if x["mobiles"] != y["mobiles"] and run.picture(x) != run.picture(y):
+        if (x["mobiles"], x.get("removed"), x.get("bviews")) != (y["mobiles"], y.get("removed"), y.get("bviews")) \
+                and run.picture(x) != run.picture(y):
             return f, "picture"
     return None
 
@@ -400,6 +410,9 @@ def main(argv=None) -> int:
     from doomfj.wall_renderer import BOOT_SKILL
     w0 = MonsterPhase(dsim.mw, dsim.mapname, BOOT_SKILL, rm=dsim.rm, mode=MMODE, player=PMODE)
     nrt = orc._mv(w0.world).nrt
+    from doomfj.monsters import drop_rows
+    ndrop = drop_rows(w0.world)
+    orc.player_mode = PMODE
     scen = [s for s in scenario_list(dsim, w0.world) if not a.only or s["name"].startswith(a.only)]
     ok = True
     print("HURT GATE -- %d scenarios (MONSTER_MODE %s, PLAYER_MODE %s)%s"
@@ -409,7 +422,7 @@ def main(argv=None) -> int:
         assert (MONSTER_MODE, PLAYER_MODE) == (MMODE, PMODE), (
             "the binary is built at %s/%s, this gate checks P5's %s/%s" % (MONSTER_MODE, PLAYER_MODE, MMODE, PMODE))
         gb = P.GameBinary(ROOT / a.fjm)
-        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt)
+        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
         for k in KEYFLAG.values():
             cells.setdefault(k, P.Cell(k, "hex", 1))
         table = P.LabelTable.load(ROOT / a.labels, {c.label for c in cells.values()})
@@ -432,7 +445,7 @@ def main(argv=None) -> int:
             totals[k] = totals.get(k, 0) + v
         for ctl in sc["controls"]:
             alt, _mr = run(pose, sc["keys"], setup, ctl)
-            pt = parts(run, want, alt, nrt)
+            pt = parts(run, want, alt, nrt, ndrop)
             ok &= pt is not None
             print("  CONTROL %-12s the oracle without the rule parts at frame %s%s" % (
                 ctl, "%d (%s)" % pt if pt else None,

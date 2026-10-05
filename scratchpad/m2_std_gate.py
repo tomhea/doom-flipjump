@@ -517,15 +517,26 @@ def main():
     mp = MoverPhase(secs, lds, sds, mw.vertexes(args.map))
     exits = exit_boxes(lds, mw.vertexes(args.map))
 
-    def tic(dps, st, kd, used, mps=None, pusedn=1, others=()):
+    def tic(dps, st, kd, used, mps=None, pusedn=1, others=(), mph=None):
         """the binary's frame: the door tic (`used`: use held), the lifts, the use press, then the
         player's move against the doors not yet passable over the movers' floors -> (door phase
-        state, player state) -- and with `mps` given, (door, player, mover phase, pusedn)"""
+        state, player state) -- and with `mps` given, (door, player, mover phase, pusedn).
+        M7 P6 / P7: with `mph` (the mirror -- the route planner passes none and steps step_sim, no things) the
+        player is the MODEL's: the tic-start dead latch guards the door press and contact and the use lines (and
+        leaves pusedn alone); once he loots, the world takes this frame's doors and movers, nukage runs, then the
+        weapon (P4.2a: before the move, from the frame's starting pose), then `MonsterPhase.move` -- pickups (the
+        card is the world's), blocking by things; before "full", `move`'s step_sim with the card's touch"""
+        from doomfj.reference_model import SimState as _SS
+        from doomfj.world import player_loots, player_mortal
         with_movers = mps is not None
         mps = mp.initial() if mps is None else mps
-        dps = dp.tic(dps, used, st.x, st.y, others=others)     # M7 P3.2b: reversal on the monsters too
+        dead = mph.dead_latch() if (mph is not None and player_mortal(mph.world.player)) else 0
+        dps = dp.tic(dps, used and not dead, st.x, st.y, others=others,   # M7 P3.2b: reversal on the monsters too
+                     player=not dead)                                     # M7 P7: a dead player holds no door
         mps = mp.tic(mps)
-        if kd.get("use"):
+        if dead:
+            pass                                       # M7 P7: no use line; the death think leaves pusedn alone
+        elif kd.get("use"):
             if not pusedn:
                 assert not any(in_use_box_fixed(b, st.x, st.y) for b in exits), "a press at the exit"
                 mps = mp.use_press(mps, st.x, st.y)
@@ -538,8 +549,19 @@ def main():
 
         def touch(cx, cy, z):
             cur[0] = dp.touch(cur[0], cx, cy, z)
-        new = rm.step_sim(st, kd, strafe=True, scene=build_scene(mw, mw, args.map, {**open_h, **mp.heights(mps)},
-                                                    blk), touch=touch)
+        scene = build_scene(mw, mw, args.map, {**open_h, **mp.heights(mps)}, blk)
+        if mph is None:                                # the route planner's step: no phase, no things
+            new = rm.step_sim(st, kd, strafe=True, scene=scene, touch=touch)
+        elif player_loots(mph.world.player):
+            mph.sync(dps[0], mps[0], mps[2])
+            mph.nukage(st.x, st.y, st.angle, dead=dead)
+            mph.weapon(kd, st.x, st.y, st.angle, dead=dead)
+            new = _SS(*mph.move(kd, st.x, st.y, st.angle, dead=dead), st.level)
+            cur[0] = (cur[0][0], cur[0][1], cur[0][2], mph.card())
+        else:
+            mph.weapon(kd, st.x, st.y, st.angle)
+            mph.touch = touch
+            new = _SS(*mph.move(kd, st.x, st.y, st.angle, scene=scene), st.level)
         dps = dp.after_move(cur[0], (st.x, st.y), (new.x, new.y))
         mps = mp.after_move(mps, (st.x, st.y), (new.x, new.y))
         return (dps, new, mps, pusedn) if with_movers else (dps, new)
@@ -774,10 +796,13 @@ def main():
     mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     pals = []                                           # M7 P5: the palette each present showed
+    from doomfj.world import player_loots
+    deaths = 0                                          # M7 P7: the frames the mirror's player was dead
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
                                             len(order), len(dp.triggers), len(mp.order),
                                             nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
-                                            palettes_out=pals)
+                                            palettes_out=pals,
+                                            nthvis=mviews.nvis if player_loots(PLAYER_MODE) else 0)   # M7 P6
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")
@@ -847,16 +872,22 @@ def main():
         # M7 P4.1: the player's weapon, every world frame -- P4.2a: BEFORE the move, from the frame's starting pose
         # (the binary's weapon runs before its player sim: a shot's target and a melee's reach are measured there)
         _boxes = mph.boxes()                            # the door tic runs BEFORE the weapon: this frame's shots
-        mph.weapon(kd, state.x, state.y, state.angle)   # have not yet killed what a closing door reverses on
-        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=_boxes)
+        # have not yet killed what a closing door reverses on; the weapon runs inside `tic` (after the use press, before
+        # the move: M7 P6 puts nukage before it, the model's order)
+        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=_boxes, mph=mph)
         dstates = dps[0]
         # M7 P3.1: the monsters after the player; P3.2b: inside the doors and lifts (their presses -> next frame)
         dps, mps = mph.frame(dps, mps, state.x, state.y, state.angle)
+        deaths += bool(mph.world.ws.p_dead)            # M7 P7: this walk expects none (a death parts the mirrors)
+        _loot = player_loots(mph.world.player)
         rsc = build_scene(mw, mw, args.map,
                           {**heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}),
                            **mp.heights(mps)})
         want = screen.frame(bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
-                                          thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
+                                          thing_hidden=set(hidden) | (set(card_di) if dps[3] and not _loot
+                                                                      else set()),
+                                          thing_removed=mviews.hidden(mph) if _loot else None,          # M7 P6
+                                          barrel_views=mviews.barrel_views(mph) if _loot else None,
                                           thing_views=mviews(mph, state.x, state.y),
                                           thing_positions=mviews.positions(mph),
                                           seen_out=(_seen := set()), aim_things=mviews.aim_things(mph),
@@ -993,8 +1024,10 @@ def main():
           % ("yes, %d frames" % state_checked if state_bad is None and state_checked == frames
              else "!! no -- frame %s" % state_bad if state_bad is not None
              else "!! only %d of %d frames were checked" % (state_checked, frames)))
+    print("  CONTROL 8 (M7 P7): the mirror's player died on %d frames -- %s"
+          % (deaths, "none, as this walk expects" if not deaths else "!! a death: this walk expects none"))
     vac = (len(seen) < 3 or not in_box_when_pressed or not menu_same or not crossed
-           or not (ng_open and tells))
+           or not (ng_open and tells) or deaths)
     if not args.selftest_restart:
         vac = vac or not retraced
     if vac and not (args.selftest or args.selftest_restart):

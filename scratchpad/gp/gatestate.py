@@ -34,18 +34,23 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "mon_ambush", "snd_alert",                                           # P4.2b: the noise
                "p_hp", "p_ar", "p_at", "p_dc", "p_dead",                            # P5: hurtcode's player cells
                "pj_act", "pj_x", "pj_y", "pj_mx", "pj_my", "pj_st", "pj_ti",        # P5: the fireball pool
-               "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx")                # P5: the blood pool, rng_fx
+               "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx",                # P5: the blood pool, rng_fx
+               # P6 / P7 (docs/gp-p67-interface.md 4.5): the loot, the barrels, the drops, the game's cells, thvis
+               "p_bc", "p_str", "p_bp", "am_misl", "am_cell", "mdrop", "dr_live",
+               "bar_st", "bar_ti", "bar_hp", "bar_solid", "rng_wd", "lvtime", "g_rs", "g_skill", "thvis")
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
-                      nmon: int = 0, nrt: int = 0, palettes_out: list | None = None):
+                      nmon: int = 0, nrt: int = 0, palettes_out: list | None = None, nthvis: int = 0):
     """-> (the presented frames' pixel indices, the exact op total, [the STATE_NAMES cells read at
     each present]). `labels` is the build's own label table (build_labeled.py writes it).
     M7 P5: `palettes_out`, when given, receives the palette each present showed (probe.RunResult.palettes:
-    sha1[:12] of its bytes -- `probe.Oracle.palette_sha` is the oracle's side)"""
-    cells = {n: c for n, c in P.game_cells(ndoors, nwalk, nlift, nmon, nrt).items() if n in STATE_NAMES}
+    sha1[:12] of its bytes -- `probe.Oracle.palette_sha` is the oracle's side).
+    M7 P6: `nthvis` -- the `thvis` slots to read (probe.Oracle.nthvis: a player who loots), 0 reads none"""
+    cells = {n: c for n, c in P.game_cells(ndoors, nwalk, nlift, nmon, nrt, nthvis).items() if n in STATE_NAMES}
     # M7 P3.1: a gate that does not pass `nmon` asks for no monster cells (a binary before P3.1)
-    missing = sorted(set(STATE_NAMES) - set(cells) - (set() if nmon else MONSTER_NAMES))
+    missing = sorted(set(STATE_NAMES) - set(cells) - (set() if nmon else MONSTER_NAMES)
+                     - (set() if nthvis else {"thvis"}))
     assert not missing, "probe.game_cells lost %s -- the state check would skip them" % missing
     table = P.LabelTable.load(labels, {c.label for c in cells.values()})
     gb = P.GameBinary(fjm)

@@ -336,3 +336,31 @@ def test_mode_helpers_are_one_rule():
         w = World(skill=gd.SK_HARD, monsters="idle", player=m)
         assert (w._p_resolve, w._p_noise, w._p_fx, w._p_full) == (
             player_resolves(m), player_hears(m), player_bleeds(m), m == "full"), m
+
+
+def test_p67_mode_helpers_are_one_rule():
+    """M7 P6 / P7 (docs/gp-p67-interface.md 2): world.player_loots / player_mortal -- "full" alone (the fallback "loot"
+    mode would join player_loots only) -- and the game tier's target: the gates' MonsterPhase reads them, "full" is
+    the combat model's own mode (`_p_full`)"""
+    from doomfj.world import PLAYER_MODES, player_loots, player_mortal
+    assert tuple(m for m in PLAYER_MODES if player_loots(m)) == ("full",)
+    assert tuple(m for m in PLAYER_MODES if player_mortal(m)) == ("full",)
+    for m in PLAYER_MODES:
+        assert World(skill=gd.SK_HARD, monsters="idle", player=m)._p_full == player_loots(m), m
+
+
+def test_fx_gates_keep_step_sim():
+    """M7 P6: before "full" a gate's `MonsterPhase.move` IS step_sim (strafe on, the card's touch at each candidate)
+    -- the fx binaries' player; in "full" it is the model's own move (a pickup, a block)"""
+    from doomfj.monsters import MonsterPhase
+    from doomfj.reference_model import SimState
+    for mode, picks in (("fx", 0), ("full", 4)):
+        ph = MonsterPhase(mode="full", player=mode)
+        w = ph.world
+        st = (-160 << 16, 112 << 16, 0x40000000)
+        for _ in range(30):
+            ref = w.rm.step_sim(SimState(*st, w.mapname), {"forward": True}, scene=w.scene_c, strafe=True)
+            st = ph.move({"forward": True}, *st)
+            if mode == "fx":
+                assert SimState(*st, w.mapname) == ref
+        assert sum(w.ws.pickup_taken) - sum(World(monsters="idle").ws.pickup_taken) == picks, mode

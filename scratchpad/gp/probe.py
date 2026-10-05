@@ -159,7 +159,17 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # ... projcode's fireball pool ...
                    frozenset({"pj_act", "pj_x", "pj_y", "pj_mx", "pj_my", "pj_st", "pj_ti"}),
                    # ... and its blood pool with the effects' stream
-                   frozenset({"fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx"}))
+                   frozenset({"fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx"}),
+                   # M7 P6 / P7 (docs/gp-p67-interface.md 4.5; monsters.MonsterPhase.loot_state / barrel_state /
+                   # game_state): the player's loot (package B) ...
+                   frozenset({"p_bc", "p_str", "p_bp", "am_misl", "am_cell"}),
+                   # ... the barrels and the world stream, the drops (C) ...
+                   frozenset({"bar_st", "bar_ti", "bar_hp", "rng_wd"}),
+                   frozenset({"mdrop", "dr_live"}),
+                   # ... the game's cells (D) ...
+                   frozenset({"lvtime", "g_rs", "g_skill"}),
+                   # ... and P3.2b's barrel presence, which no gate read before P6 (a binary before P3.2b lacks it)
+                   frozenset({"bar_solid"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -620,7 +630,7 @@ class GameBinary:
 # the game tier's cells and known values, and the oracle side
 # ================================================================================================
 
-def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: int = 0) -> dict:
+def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: int = 0, nthvis: int = 0) -> dict:
     """the persisted world state of the standalone game tier (build.STANDALONE_PERSIST +
     DOOR_PERSIST) as probe cells. `menu_scr` / `menu_sel` are OPTIONAL_LABELS: a Probe on a binary
     built before M7 P1.5 drops them (its label table has neither); so are M7 P2a.1's `dreq`
@@ -688,7 +698,36 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     if nrt:
         cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt)
         cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt)
+    # M7 P6 / P7 (docs/gp-p67-interface.md 4.5): the loot, the barrels, the drops, the game's cells -- each group an
+    # OPTIONAL_GROUP (a binary before P6 has none of them); widths and counts are the cells' units
+    # (monsters.MonsterPhase.loot_state / barrel_state / game_state)
+    for name, width in (("p_bc", 2), ("p_str", 4), ("p_bp", 1), ("am_misl", 3), ("am_cell", 3), ("dr_live", 2),
+                        ("rng_wd", 2), ("lvtime", 4), ("g_rs", 1), ("g_skill", 1)):
+        cells[name] = Cell(name, "hex", width)
+    ndrop, nbar = _loot_counts()
+    cells["mdrop"] = Cell("mdrop", "hex", 1, count=ndrop)
+    for name, width in (("bar_st", 2), ("bar_ti", 1), ("bar_hp", 2), ("bar_solid", 1)):
+        cells[name] = Cell(name, "hex", width, count=nbar)
+    # M7 P6: `thvis` (every game binary has it -- M14.5 / P1.5 / P2a.1 write it; no gate read it): 2 nibbles a
+    # slot, the baked vanishable things' slots, then (P6) one per runtime pickup (monsters.MonsterViews.vis_state).
+    # Asked for only with its count (`nthvis`: MonsterViews.nvis), which a binary before P6 does not have
+    if nthvis:
+        cells["thvis"] = Cell("thvis", "hex", 2, count=nthvis)
     return cells
+
+
+def _loot_counts() -> tuple:
+    """M7 P6: (droppers, barrels) of E1M1 -- `mdrop`'s and the barrel cells' counts, from the model once"""
+    global _LOOT
+    if _LOOT is None:
+        from doomfj.monsters import droppers
+        from doomfj.world import World
+        w = World(monsters="idle")
+        _LOOT = (len(droppers(w)), w.layout.nbarrel)
+    return _LOOT
+
+
+_LOOT = None
 
 
 def _nsound() -> int:
@@ -818,7 +857,7 @@ class Oracle:
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
                views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
-               mobiles=None, card=None) -> bytes:
+               mobiles=None, card=None, removed=None, barrel_views=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
@@ -827,7 +866,10 @@ class Oracle:
         reads -- hudcode.VALUE_CELLS) and, when `card` is None, when the card is gone from the world (`hidden_extra`
         names the card and nothing else -- P2a.1's one use of it). The two agree in play; a gate that POKES pcard
         without taking the card (p2a S3) must pass `card`.
-        M7 P5: `mobiles` -- `monsters.MonsterPhase.mobiles()`, the fireballs and the blood"""
+        M7 P5: `mobiles` -- `monsters.MonsterPhase.mobiles()`, the fireballs and the blood (M7 P6: and the drops).
+        M7 P6: `removed` -- the drawables the game removed (`monster_removed`: the pickups taken, the barrels gone),
+        and `barrel_views` (`monster_barrel_views`: each standing barrel's frame); both opt-in (render_wall_frame's
+        `thing_removed` / `barrel_views`). A gate that passes `removed` passes `card` too (the bar's card)."""
         from doomfj.reference_model import SimState
         view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
@@ -836,6 +878,7 @@ class Oracle:
                                                thing_positions=positions,              # M7 P3.2b
                                                aim_things=aim_things, aim_out=aim_out,  # M7 P4.2a
                                                mobiles=mobiles,                         # M7 P5
+                                               thing_removed=removed, barrel_views=barrel_views,   # M7 P6
                                                **self.RENDER_KW))
         # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
         return self.screen.frame(view, card=bool(hidden_extra) if card is None else bool(card), **(screen_kw or {}))
@@ -864,16 +907,52 @@ class Oracle:
         return self._mv(phase.world).positions(phase)
 
     def monster_rt(self, phase) -> dict:
-        """M7 P3.2b: the runtime things' thpos_rt / thss_rt as the probe reads them"""
+        """M7 P3.2b: the runtime things' thpos_rt / thss_rt as the probe reads them (M7 P6: and `thvis`, once the
+        player loots -- MonsterViews.rt_state)"""
         return self._mv(phase.world).rt_state(phase)
+
+    def monster_removed(self, phase) -> list:
+        """M7 P6: `render(removed=)` -- the drawables the game removed (MonsterViews.hidden)"""
+        return self._mv(phase.world).hidden(phase)
+
+    def monster_barrel_views(self, phase) -> dict:
+        """M7 P6: `render(barrel_views=)` -- each standing barrel's frame (MonsterViews.barrel_views)"""
+        return self._mv(phase.world).barrel_views(phase)
+
+    @property
+    def player_mode(self) -> str:
+        """M7 P6: the player mode this oracle's game tier is at -- wall_renderer.PLAYER_MODE, unless a gate's
+        --oracle-only run set another (`player_mode = ...`)"""
+        if getattr(self, "_pmode", None) is None:
+            from doomfj.wall_renderer import PLAYER_MODE
+            return PLAYER_MODE
+        return self._pmode
+
+    @player_mode.setter
+    def player_mode(self, mode: str) -> None:
+        from doomfj.world import PLAYER_MODES
+        assert mode in PLAYER_MODES, mode
+        self._pmode = mode
+
+    @property
+    def nthvis(self) -> int:
+        """M7 P6: `game_cells(nthvis=)` -- the thvis slots the probe reads once the player loots (MonsterViews.nvis),
+        0 before (the cell is not read)"""
+        from doomfj.monsters import MonsterPhase
+        from doomfj.wall_renderer import MONSTER_MODE
+        from doomfj.world import player_loots
+        if not player_loots(self.player_mode):
+            return 0
+        ph = MonsterPhase(self.mw, self.mapname, mode=MONSTER_MODE, rm=self.rm, player=self.player_mode)
+        return self._mv(ph.world).nvis
 
     @property
     def nrt(self) -> int:
         """M7 P3.2b: the runtime things (the index space of thpos_rt / thss_rt).
         M7 P5: and the mobile rows after them when the game tier's modes have mobiles (monsters.mobile_rows)"""
         from doomfj.monsters import MonsterPhase
-        from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
-        ph = MonsterPhase(self.mw, self.mapname, mode=MONSTER_MODE, rm=self.rm, player=PLAYER_MODE)
+        from doomfj.wall_renderer import MONSTER_MODE
+        ph = MonsterPhase(self.mw, self.mapname, mode=MONSTER_MODE, rm=self.rm, player=self.player_mode)
         return self._mv(ph.world).nrows(ph)
 
     def palette_sha(self, index: int) -> str:

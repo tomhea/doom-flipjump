@@ -107,6 +107,12 @@ class _MonstersOnly:
         return self.w.los_points(*a)
 
 
+def _mon_aim(at: dict, w) -> dict:
+    """M7 P6: `MonsterViews.aim_things` names the live BARRELS too once the player loots (sid > nmon) -- this file
+    holds the window to the geometric aim on MONSTERS (`_MonstersOnly`), so it hands the render the monster half"""
+    return {di: v for di, v in at.items() if v[0] <= w.layout.nmon}
+
+
 def _geo(w):
     from doomfj.combat import CombatMixin
     mo = _MonstersOnly(w)
@@ -134,7 +140,7 @@ def slice_frames():
             rec = {}
 
             def rwf(*a, **k):
-                at = hook.views.aim_things(phase)
+                at = _mon_aim(hook.views.aim_things(phase), w)
                 out = [0] * 17
                 pix = orig(*a, **dict(k, aim_things=at, aim_out=out))
                 seen0 = set()                     # the window writes ONLY the window: same pixels, same seen set
@@ -256,7 +262,7 @@ def _render_hand(w, hook, placed, fn=None):
     views = [None] * hook.views.n
     for m, v in hook._mviews(w).items():
         views[hook.views.mdi[m]] = v
-    at_all = hook.views.aim_things(types.SimpleNamespace(world=w))
+    at_all = _mon_aim(hook.views.aim_things(types.SimpleNamespace(world=w)), w)
     at = {hook.views.mdi[m]: at_all[hook.views.mdi[m]] for m in placed}
     out = [0] * 17
     kw = dict(hook.kw, rt_depth_order=False)
@@ -319,10 +325,15 @@ def test_aim_things_and_set_aim(hand):
     w, hook = hand
     ws = w.ws
     phase = types.SimpleNamespace(world=w)
-    at = hook.views.aim_things(phase)
+    at_all = hook.views.aim_things(phase)
+    at = _mon_aim(at_all, w)
     live = [m for m in range(w.layout.nmon) if ws.mon_active[m] and ws.mon_shootable[m] and ws.mon_health[m] > 0]
     assert at == {hook.views.mdi[m]: (m + 1, w.mon_radius[m]) for m in live}
     assert {r for _sid, r in at.values()} == {20, 30}
+    # M7 P6: in "full" the live barrels follow the monsters' ids, radius class 10
+    assert {k: v for k, v in at_all.items() if k not in at} == {
+        hook.views.bdi[b]: (1 + w.layout.nmon + b, 10) for b in range(w.layout.nbarrel)
+        if ws.bar_state[b] and ws.bar_health[b] > 0}
     m0 = live[0]
     saved = ws.mon_health[m0]
     ws.mon_health[m0] = 0

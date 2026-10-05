@@ -227,6 +227,7 @@ VANISHABLE_TYPES = frozenset({
     5, 6, 13, 38, 39, 40,                   # the keys (none drawable on E1M1 today; harmless)
     2035,                                   # BAR1  the barrel -- destroyed, not picked up
 })
+BARREL_TYPE = 2035                          # M7 P6: the barrel (`render_wall_frame(barrel_views=)`)
 
 # ── THE 25M PACKAGE (owner goal, 2026-08-14) — A DELIBERATE PICTURE CHANGE ─────────────────────
 #
@@ -368,10 +369,12 @@ MISSILE_Z = 32                    # a mobile stands this far above its leaf's fl
 
 @dataclass(frozen=True)
 class MobileThing:
-    """a mobile as the thing walk sees it: where it is (whole map units), and no WAD type (-1: not a monster)"""
+    """a mobile as the thing walk sees it: where it is (whole map units), and no WAD type (-1: not a monster).
+    M7 P6: `z` -- how far above its leaf's floor it stands; None is MISSILE_Z (read when drawn), a DROP passes 0"""
     x: int
     y: int
     type: int = -1
+    z: int | None = None
 
 
 def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
@@ -1919,7 +1922,8 @@ class ReferenceModel:
                           thing_positions=None, thing_hidden=None, thing_views=None,
                           seen_out: set | None = None, rt_depth_order=False,
                           aim_things: dict | None = None, aim_out: list | None = None,
-                          mobiles=None, degrade: bool = False) -> bytes:
+                          mobiles=None, barrel_views: dict | None = None, thing_removed=None,
+                          degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -1975,7 +1979,18 @@ class ReferenceModel:
         counts against THING_BUDGET, never MONSTER_BUDGET), always at the BASE minimum height
         MIN_SPRITE_H (the graduated acceptance's raise does not apply), standing MISSILE_Z = 32
         units above its leaf's floor (P_SpawnMissile's `z + 4*8*FRACUNIT`), and it is never SEEN
-        (`seen_out`) nor AIMED (`aim_things`). Empty or None draws exactly what it drew before."""
+        (`seen_out`) nor AIMED (`aim_things`). Empty or None draws exactly what it drew before.
+
+        M7 P6 / P7 (docs/gp-p67-interface.md section 5), each OPT-IN -- absent, the picture is today's:
+          * a `mobiles` entry may carry a 4th element, `z` above its leaf's floor (default MISSILE_Z: P5's
+            3-tuples are unchanged) -- a DROP (`monsters.MonsterPhase.mobiles`) stands on the floor, z 0;
+          * `barrel_views` = {drawable index: lump}: a BARREL (type 2035, baked or runtime) drawn with its
+            state's frame (`monsters.MonsterPhase.barrel_lumps`: BAR1A0 / BAR1B0 / BEXPA0 .. BEXPE0) instead
+            of its type's art -- the art's size sets the projection and both depth bounds, as the fj bakes
+            them per lump; a barrel in `aim_things` (sid 1 + nmon + b, radius 10) is aimed through it;
+          * `thing_removed`: drawable indices the GAME removed -- picked up, a barrel gone to S_NULL
+            (`monsters.MonsterViews.hidden`). Each must be a VANISHABLE type (a pickup or a barrel); unlike
+            `thing_hidden`, a runtime one need not be a skill's absent set (the fj unlinks it: `rt_unlink`)."""
         # M7 P3.3: a misspelt depth order must fail here, not fall through to the "aprox" key
         assert rt_depth_order in RT_DEPTH_ORDERS, (
             f"rt_depth_order={rt_depth_order!r}: one of {RT_DEPTH_ORDERS}")
@@ -2126,6 +2141,17 @@ class ReferenceModel:
                 _vbad = [i for i, v in enumerate(thing_views) if v is not None and _baked[i]]
                 assert not _vbad, f"thing_views gives BAKED things {_vbad[:8]} a view: they are code"
             _views = list(thing_views) if thing_views is not None else [None] * len(_drawable)
+            # M7 P6: the barrels drawn by state -- baked ones too (their xor block follows the lump)
+            for _bdi, _blump in (barrel_views or {}).items():
+                assert _drawable[_bdi].type == BARREL_TYPE, (
+                    f"barrel_views names drawable {_bdi} (type {_drawable[_bdi].type}), not a barrel")
+                assert _views[_bdi] is None, f"drawable {_bdi} has a thing_views view and a barrel view"
+                _views[_bdi] = (_blump, False)
+            # M7 P6: what the game removed (a pickup taken, a barrel gone) -- checked here, joined below
+            _removed = frozenset(thing_removed or ())
+            _rbad = sorted(di for di in _removed if _drawable_spawn[di].type not in VANISHABLE_TYPES)
+            assert not _rbad, (f"thing_removed names drawables {_rbad[:8]} whose types cannot vanish "
+                               f"(VANISHABLE_TYPES: the pickups and the barrel)")
             _hidden = frozenset(thing_hidden or ())
             if _hidden:
                 _slots = vanishable_slots(_drawable_spawn, _baked, VANISHABLE_TYPES)
@@ -2145,6 +2171,11 @@ class ReferenceModel:
                         f"runtime thing out only as NEW GAME at a skill that does not spawn it "
                         f"(things.skill_absent); the skills' runtime sets have "
                         f"{sorted(len(v) for v in _by_skill.values())} things")
+            if _removed:
+                _slots_r = vanishable_slots(_drawable_spawn, _baked, VANISHABLE_TYPES)
+                _rb = sorted(di for di in _removed if _baked[di] and di not in _slots_r)
+                assert not _rb, f"thing_removed names baked things {_rb[:8]} without a visibility flag"
+                _hidden = _hidden | _removed
             # ⚠ BAKED FIRST, THEN RUNTIME, per leaf -- the ONE order fj can produce, because the
             # baked things are call sites emitted in the leaf and the runtime ones are a list walked
             # after them. It is wad order within each class, and at spawn every leaf holds only one
@@ -2159,9 +2190,11 @@ class ReferenceModel:
             # M7 P5: the MOBILES, runtime things after the WAD's (index _ndraw + k: never a drawable index, so
             # never baked, seen or aimed), each with its one view
             _ndraw = len(_drawable)
-            for _k, (_mx, _my, _mlump) in enumerate(mobiles or ()):
+            for _k, _mo in enumerate(mobiles or ()):
+                _mx, _my, _mlump = _mo[:3]
+                _mz = _mo[3] if len(_mo) > 3 else None   # M7 P6: a drop's z (0); P5's 3-tuples: MISSILE_Z
                 things_by_ss.setdefault(self.point_in_subsector(scene.cmap, _mx, _my), []).append(
-                    (MobileThing(_mx, _my), (_mlump, False), _ndraw + _k))
+                    (MobileThing(_mx, _my, z=_mz), (_mlump, False), _ndraw + _k))
             # M7 P3.3 (D3 d): a leaf's RUNTIME things nearest first -- the walk is front-to-back and a sprite
             # pixel is written once, so within a leaf the near one must be drawn before the far one
             if rt_depth_order:
@@ -2273,7 +2306,8 @@ class ReferenceModel:
                         elif not mon and n_thing >= soft_s:
                             minh_ = minh2_s
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
-                                            t.x, t.y, tsec.floor_h + (MISSILE_Z if mob else 0), art, minh_)
+                                            t.x, t.y, tsec.floor_h + (((MISSILE_Z if t.z is None else t.z)
+                                                                       if mob else 0)), art, minh_)
                     if pr is None:
                         continue
                     if mon:

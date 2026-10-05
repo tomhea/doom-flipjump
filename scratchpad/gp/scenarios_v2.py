@@ -761,11 +761,17 @@ class BinaryMirror:
         self.mstate, self.pusedn = self.mp.initial(), 1
         self._scenes = {}
 
-    def step(self, pre, kd, doors=None, movers=None, others=()):
+    def step(self, pre, kd, doors=None, movers=None, others=(), mph=None):
         """`doors`: the door tuples (state, dir, sub, wait) b0 writes at the frame start (the
         model's pre-tic doors); None keeps the mirror's own. `movers` (M7 P2b): the model's pre-tic
         mover state (`mover_state`), written the same way. `others` (M7 P3.2b): the binary's live monsters'
-        boxes at the frame start -- a closing door reverses on them"""
+        boxes at the frame start -- a closing door reverses on them.
+        M7 P6 (docs/gp-p67-interface.md 6.4): `mph` -- the binary's monsters.MonsterPhase. With it the frame is the
+        game tier's whole player half: the weapon after the use press (before the move, from the injected pose), and
+        the move the phase's (`MonsterPhase.move`): once the player loots, nukage first and the model's move on the
+        world this frame's doors and movers are synced into -- pickups (the card the world's), blocking by things;
+        before, step_sim's with the card's touch. Without it (`model_frames`' expectation of the frozen run) the
+        frame is blocked27's: step_sim, no strafe, no things"""
         w = self.w
         if doors is not None:
             self.state = ({si: tuple(doors[d]) for d, si in enumerate(w.door_order)},
@@ -790,8 +796,23 @@ class BinaryMirror:
 
         def touch(cx, cy, z):
             self.state = self.dp.touch(self.state, cx, cy, z)
-        st = w.rm.step_sim(SimState(pre[0], pre[1], pre[2], w.mapname), b0_keys(kd),
-                           scene=self._scenes[key], touch=touch)
+        if mph is None:                                  # blocked27's tic (the frozen run's expectation)
+            st = w.rm.step_sim(SimState(pre[0], pre[1], pre[2], w.mapname), b0_keys(kd),
+                               scene=self._scenes[key], touch=touch)
+        else:
+            from doomfj.world import player_loots, player_mortal
+            x16, y16 = pre[0] & M32, pre[1] & M32
+            dead = mph.dead_latch() if player_mortal(mph.world.player) else 0
+            if player_loots(mph.world.player):
+                mph.sync(self.state[0], self.mstate[0], self.mstate[2])
+                mph.nukage(x16, y16, pre[2], dead=dead)
+                mph.weapon(kd, x16, y16, pre[2], dead=dead)
+                st = SimState(*mph.move(kd, x16, y16, pre[2], dead=dead), w.mapname)
+                self.state = (*self.state[:3], mph.card())
+            else:
+                mph.weapon(kd, x16, y16, pre[2])
+                mph.touch = touch
+                st = SimState(*mph.move(b0_keys(kd), pre[0], pre[1], pre[2], scene=self._scenes[key]), w.mapname)
         self.state = self.dp.after_move(self.state, (pre[0], pre[1]), (st.x, st.y))
         self.mstate = self.mp.after_move(self.mstate, (pre[0], pre[1]), (st.x, st.y))
         return (st.x, st.y, st.angle), tuple(s[0] for s in self.ds)

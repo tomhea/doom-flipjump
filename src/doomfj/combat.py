@@ -770,9 +770,14 @@ class CombatMixin:
     def window_aim(world, col: int):
         """M7 P4.2a: the aim THE PICTURE recorded (`ws.aim_sid`, written from the render's `aim_out` -- the binary's
         `frame.aim_record`): column `col`'s nearest shootable monster, or None. The gates' worlds aim with this; the
-        model's own runs keep `aim_geometric` (v5's frozen trajectory is the geometric aim's)."""
+        model's own runs keep `aim_geometric` (v5's frozen trajectory is the geometric aim's).
+        M7 P6: the window records the live BARRELS too, after the monsters' ids -- sid 1 + nmon + b is barrel b
+        (`monsters.MonsterViews.aim_things`; docs/gp-p67-interface.md 4.5)."""
         sid = world.ws.aim_sid[col - world.aim_lo]
-        return None if sid == 0 else ("mon", sid - 1)
+        if sid == 0:
+            return None
+        nmon = world.layout.nmon
+        return ("mon", sid - 1) if sid <= nmon else ("bar", sid - 1 - nmon)
 
     @staticmethod
     def aim_geometric(world, col: int):

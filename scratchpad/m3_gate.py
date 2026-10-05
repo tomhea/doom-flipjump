@@ -206,9 +206,12 @@ def main():
     mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     pals = []                                       # M7 P5: the palette each present showed
+    from doomfj.world import player_loots
+    loot = player_loots(mph.world.player)           # M7 P6: the player lives in the world's things
+    deaths = 0                                      # M7 P7: frames the mirror's player was dead (this walk: none)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
                                             len(order), nwalk, nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
-                                            palettes_out=pals)
+                                            palettes_out=pals, nthvis=mviews.nvis if loot else 0)
     # M7 P3.2b: the monsters step inside this gate's fixed world -- its doors shut and idle, every lift at its top;
     # a monster that pressed a door or crossed a lift line would change that world, which this gate does not model:
     # it refuses rather than draw the wrong one
@@ -251,18 +254,31 @@ def main():
             pusedn = 1                              # the restart block
         if mode == 0:
             # M7 P4.1: the weapon tics with the world (no fire held here) -- P4.2a: before the move, at its pose
-            mph.weapon(held, state.x, state.y, state.angle)
-            state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene, strafe=True)
+            # M7 P6: once the player loots, the world takes this gate's fixed doors and lifts, nukage runs first, and
+            # the move is the model's (`MonsterPhase.move`: pickups, blocking by things); before, step_sim's
+            _keys = dict(held, turn_left=False, turn_right=False)
+            if loot:
+                mph.sync(phase0[0], mps0[0], mps0[2])
+                dead = mph.dead_latch()
+                mph.nukage(state.x, state.y, state.angle, dead=dead)
+                mph.weapon(held, state.x, state.y, state.angle, dead=dead)
+                state = SimState(*mph.move(_keys, state.x, state.y, state.angle, dead=dead), args.map)
+            else:
+                mph.weapon(held, state.x, state.y, state.angle)
+                state = SimState(*mph.move(_keys, state.x, state.y, state.angle, scene=scene), args.map)
             pusedn = 0                              # this script never holds use
             _dps, _mps = mph.frame(phase0, mps0, state.x, state.y, state.angle)   # M7 P3.1 / P3.2b
             assert _dps == phase0 and _mps == mps0, "frame %d: a monster pressed a door or a lift" % f
+            deaths += bool(mph.world.ws.p_dead)
             # M7 P3.2a: the frame's picture decides the next tic's seen (rendered below, per world frame)
             _seen = set()
             rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map), scene,
                                  thing_hidden=hidden[skill], thing_views=mviews(mph, state.x, state.y),
                                  thing_positions=mviews.positions(mph), seen_out=_seen,
                                  aim_things=mviews.aim_things(mph), aim_out=(_aim := [0] * 17),
-                                 mobiles=mph.mobiles(), **render_kw)          # M7 P5: the fireballs, the blood
+                                 mobiles=mph.mobiles(),                       # M7 P5: the fireballs, the blood
+                                 thing_removed=mviews.hidden(mph) if loot else None,      # M7 P6
+                                 barrel_views=mviews.barrel_views(mph) if loot else None, **render_kw)
             mph.set_seen(mviews.slots_of(_seen))
             mph.set_aim(_aim)                       # M7 P4.2a: the window this picture recorded
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
@@ -271,7 +287,10 @@ def main():
                      "skw": mph.screen_kw(), "views": mviews(mph, state.x, state.y),
                      "positions": mviews.positions(mph),
                      # M7 P5: the mobiles drawn, and the palette shown (a menu frame: PLAYPAL 0)
-                     "mobiles": mph.mobiles(), "pal": mph.palette() if mode == 0 else 0})
+                     "mobiles": mph.mobiles(), "pal": mph.palette() if mode == 0 else 0,
+                     # M7 P6: what the game removed, the barrels' frames
+                     "removed": mviews.hidden(mph) if loot else None,
+                     "bviews": mviews.barrel_views(mph) if loot else None})
 
     ok, menus, worlds, moved, oracle_ng, first_bad = True, 0, 0, 0, {}, None
     state_bad, state_checked = None, 0
@@ -294,7 +313,8 @@ def main():
             want = gscreen.frame(bytes(rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map),
                                               scene, thing_hidden=hidden[row["skill"]],
                                               thing_views=row["views"], thing_positions=row["positions"],
-                                              mobiles=row["mobiles"], **render_kw)), **row["skw"])
+                                              mobiles=row["mobiles"], thing_removed=row["removed"],
+                                              barrel_views=row["bviews"], **render_kw)), **row["skw"])
             kind = "world %-7s" % SKILL_NAMES[row["skill"]]
             worlds += 1
             if row["ng"] is not None:
@@ -375,7 +395,9 @@ def main():
     if vacuous and not (args.selftest or args.selftest_skill or args.selftest_help):
         print("  !! VACUOUS -- this script does not exercise the menu machine")
 
-    ok = ok and not vacuous and len(got) >= FRAMES
+    print("  M7 P7: the mirror's player died on %d frames -- %s"
+          % (deaths, "none, as this walk expects" if not deaths else "!! a death: this walk expects none"))
+    ok = ok and not vacuous and len(got) >= FRAMES and not deaths
     state_ok = state_bad is None and state_checked == FRAMES
     print("")
     if args.selftest_state:

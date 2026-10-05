@@ -51,6 +51,8 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import probe as P                                                            # noqa: E402
 import scenarios_v2 as S                                                     # noqa: E402
+from doomfj.monsters import loot_cells                                       # noqa: E402  (M7 P6)
+from doomfj.world import player_loots                                        # noqa: E402  (M7 P6)
 
 ROOT = P.ROOT
 M32 = 0xFFFFFFFF
@@ -111,7 +113,8 @@ def model_frames(run: dict, proxy: bool = False) -> list:
                     "strafe_only": S.has_strafe(kd) and not (kd.get("forward") or kd.get("back")),
                     # M7 P3.2b: drive re-steps the mirror with the monsters from the run's setup -- on EVERY
                     # frame, since a caller may hand drive a slice that starts mid-run (the selftest's T5)
-                    "run_setup": run["setup"], "hurt": pre_hurt})
+                    "run_setup": run["setup"], "hurt": pre_hurt,
+                    "post_loot": loot_cells(w)})             # M7 P6: the frozen model's loot after the tic
     return out
 
 
@@ -147,16 +150,24 @@ def doorsim_frames(keys: list, mirror) -> list:
     return frames
 
 
-def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) -> dict:
+class _NoBinary:
+    """M7 P6: `drive`'s stand-in for a binary run (`--oracle-only`): nothing presented, nothing measured"""
+    frames, palettes, ops, seconds = [], [], 0, 0.0
+
+
+def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, pmode=None) -> dict:
     """one run through the binary: inject and deliver per `frames`; check against the expectation
-    (`override`: a list of (pose, doors) to check against instead)"""
+    (`override`: a list of (pose, doors) to check against instead).
+    M7 P6: `gb` None (`--oracle-only`) steps the expectation alone -- the mirror, its monsters, its pictures for
+    the seen flags -- and reports its partings (camera, doors, loot) and deaths; `pmode` the player mode (default
+    wall_renderer's)"""
     gaps = missing_drive_keys(frames)
     assert not gaps, "drive reads keys these frames lack, e.g. %s" % gaps[:4]
     import gamespeed as GS
     import m2_std_gate as gate
     mf = gate.MENU_FRAMES
     cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift)
-    p = P.Probe(cells, table, gb.width)
+    p = P.Probe(cells, table, gb.width) if gb is not None else None
     per_frame = [{} for _ in range(mf)] + [fr["keys"] for fr in frames]
     events = GS.events_for(per_frame)
     readback = {}
@@ -185,28 +196,33 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
             readback[f - mf] = pr.read_cells(["viewx", "viewy", "viewangle", "dstate", "mode"])
     # M7 P5: a binary with hurtcode's cells takes the frozen model's player each frame (`hurt`); one without them
     # (a binary before P5: the probe dropped the optional group) is not injected, and neither is its mirror
-    inject_hurt = "p_hp" in p.cells
-    p.on_frame_start(start)
-    p.on_present(present)
-    r = gb.run(len(per_frame), events, p, pre_run=lambda pr: pr.verify_known(orc.known_pristine()))
-    ops_f = p.frame_ops()[mf:mf + len(frames)]
+    inject_hurt = p is None or "p_hp" in p.cells
+    if gb is not None:
+        p.on_frame_start(start)
+        p.on_present(present)
+        r = gb.run(len(per_frame), events, p, pre_run=lambda pr: pr.verify_known(orc.known_pristine()))
+        ops_f = p.frame_ops()[mf:mf + len(frames)]
+    else:
+        r, ops_f = _NoBinary(), []
     state_ok, pix_ok, pix_frames = [], [], []
     # M7 P5: the menu frames' palettes (PLAYPAL 0), then one per game frame (below); the frames whose mirror died
     pal_ok = [i < len(r.palettes) and r.palettes[i] == orc.palette_sha(0) for i in range(mf)]
     dead = []
     cam = door = 0
+    loot_part = 0               # M7 P6: frames whose loot cells differ from the frozen model's (recorded, not judged)
     # M7 P3.1: the binary's monsters live IDLE from its boot image (the model's own phase, a tic per
     # world frame after the player); B0 injects the player, doors and movers, not them, so the
     # picture it expects is the static set's world with those monsters' views (docs/gp-monsters.md 5)
     mph = None
-    if "mon_state" in table.addrs:
+    if table is None or "mon_state" in table.addrs:
         from doomfj.monsters import MonsterPhase
         from doomfj.wall_renderer import BOOT_SKILL
         from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
         # M7 P4.1: the player's weapon too. b0 delivers only `scenarios_v2.B0_KEYS` (no fire, no number keys, no
         # strafe -- the model's strafe reaches the binary through the injected pose), so the binary's weapon only
         # rises and idles, and the mirror steps the same keys
-        mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE, player=PLAYER_MODE)
+        mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE, player=pmode or PLAYER_MODE)
+    loot = mph is not None and player_loots(mph.world.player)     # M7 P6: removals, barrels by state, the card
     # M7 P3.2a: a monster that can wake reads the seen flags of the LAST picture, which the binary marks on every
     # frame -- so the model's picture (and its seen flags) is taken on every frame too, whatever `pixel_every`
     seen_every = mph is not None and mph.world.monsters != "idle"
@@ -223,10 +239,14 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         _boxes = mph.boxes() if mph is not None else ()   # the door tic precedes the weapon (and its kills)
         if mph is not None and inject_hurt and fr.get("hurt") is not None:   # M7 P5: as `start` writes them
             mph.world.ws.p_health, mph.world.ws.p_armor, mph.world.ws.p_armortype = fr["hurt"]
-        if mph is not None:
+        if mph is not None and not chase:
             mph.weapon(fr["keys"], fr["inj"][0] & M32, fr["inj"][1] & M32, fr["inj"][2])
         if chase:
-            epose, edoors = cm.step(fr["inj"], fr["keys"], fr["doors"], fr.get("movers"), others=_boxes)
+            # M7 P6: the mirror runs the weapon and the move itself (`BinaryMirror.step(mph=)`): nukage, then the
+            # weapon, then the model's move once the player loots -- the binary's order
+            epose, edoors = cm.step(fr["inj"], fr["keys"], fr["doors"], fr.get("movers"), others=_boxes, mph=mph)
+            if player_loots(mph.world.player):
+                loot_part += loot_cells(mph.world) != fr.get("post_loot", loot_cells(mph.world))
             cm.state, cm.mstate = mph.frame(cm.state, cm.mstate, epose[0] & 0xFFFFFFFF, epose[1] & 0xFFFFFFFF,
                                             epose[2])
             mheights = cm.mp.heights(cm.mstate)
@@ -264,16 +284,20 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
                               screen_kw=mph.screen_kw() if mph is not None else None,
                               aim_things=orc._mv(mph.world).aim_things(mph) if mph is not None else None,
                               aim_out=(_aim := [0] * 17),
-                              mobiles=mph.mobiles() if mph is not None else None)     # M7 P5
+                              mobiles=mph.mobiles() if mph is not None else None,     # M7 P5
+                              removed=orc.monster_removed(mph) if loot else None,    # M7 P6
+                              barrel_views=orc.monster_barrel_views(mph) if loot else None,
+                              card=(cm.state[3] if cm is not None else 0) if loot else None)
             if mph is not None:
                 mph.set_aim(_aim)                        # M7 P4.2a: the window, for the next frame's weapon
             if mph is not None:
                 mph.set_seen(orc._mviews.slots_of(_seen))
-            if check:
+            if check and gb is not None:
                 pix_ok.append(r.frames[mf + f] == want)
                 pix_frames.append(f)
     return {"ops_total": r.ops, "frame_ops": ops_f, "state_ok": state_ok, "pix_ok": pix_ok,
             "pix_frames": pix_frames, "cam_parts": cam, "door_parts": door, "pal_ok": pal_ok, "dead": dead,
+            "loot_parts": loot_part,
             "presented": len(r.frames), "seconds": r.seconds, "frames": r.frames[mf:]}
 
 
@@ -524,6 +548,32 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
     return 1 if fails else 0
 
 
+def oracle_only(doc_path: Path, pmode=None) -> int:
+    """M7 P6 (`--oracle-only`): every run REPLAYED on the frozen model (`model_frames` -- it refuses a run whose
+    poses no longer reproduce: the freeze), then its expectation stepped with no binary (`drive(None, ...)`): the
+    camera, door and loot partings it would count, and any death of the mirror (a death FAILS, as in b0)"""
+    doc = json.loads(Path(doc_path).read_text(encoding="ascii"))
+    S.use_sight_rule(doc)
+    orc = GameOracle()
+    if pmode:
+        orc.player_mode = pmode
+    from doomfj.wall_renderer import PLAYER_MODE
+    print("b0_scenarios --oracle-only: set %s (%d runs, keys %s), PLAYER_MODE %s"
+          % (Path(doc_path).name, len(doc["runs"]), S.keys_sha(doc), pmode or PLAYER_MODE), flush=True)
+    bad = []
+    for run in doc["runs"]:
+        frames = model_frames(run)                     # raises if the frozen model no longer reproduces the set
+        res = drive(None, None, orc, frames, pmode=pmode)
+        print("  %-20s %3d frames reproduce the set's poses; mirror partings: camera %d, doors %d, loot %d; "
+              "deaths %s" % (run["name"], len(frames), res["cam_parts"], res["door_parts"], res["loot_parts"],
+                             res["dead"][:3] or 0), flush=True)
+        if res["dead"]:
+            bad.append(run["name"])
+    print("B0 ORACLE-ONLY %s" % ("OK -- the frozen poses reproduce and no mirror dies" if not bad
+                                 else "FAIL: dead in %s" % bad))
+    return 1 if bad else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--file", default=str(S.SCEN_FILE))
@@ -533,7 +583,12 @@ def main():
     ap.add_argument("--json", default=None)
     ap.add_argument("--proxy", action="store_true", help="also measure the strafe undercount")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--oracle-only", action="store_true",
+                    help="M7 P6: replay the set on the frozen model and step the mirror, no binary")
+    ap.add_argument("--player-mode", help="--oracle-only: the mirror's player mode (default wall_renderer's)")
     a = ap.parse_args()
+    if a.oracle_only:
+        return oracle_only(Path(a.file), a.player_mode)
     if a.selftest:
         import gamespeed as GS
         t = time.time()

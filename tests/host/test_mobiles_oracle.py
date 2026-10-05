@@ -99,3 +99,67 @@ def test_every_mobile_state_has_its_lump():
             assert lump.endswith("0") and rm.art_of_lump(art, lump, cache) is not None, (s, lump)
             s = gd.STATES[s].next
     assert {"S_TBALL1", "S_TBALL2", "S_TBALLX3", "S_BLOOD3"} <= seen
+
+
+# ---- M7 P6 (docs/gp-p67-interface.md 4.1, 5): the drops at z 0, the barrels by state, what the game removed
+def _open_view():
+    from doomfj.config import GAME_CFG
+    from doomfj.reference_model import GAME_RENDER_KW, ReferenceModel, SimState, build_scene
+    from doomfj.wad import WadFile
+    art = WadFile.from_path(str(ART))
+    rm = ReferenceModel(GAME_CFG)
+    from doomfj.world import World
+    w = World(monsters="idle")
+    sc = build_scene(w.mw, w.mw, w.mapname)
+
+    def render(x, y, a, **kw):
+        return bytes(rm.render_wall_frame(SimState(x << 16, y << 16, a, w.mapname), sc, sprite_wad=art,
+                                          **dict(GAME_RENDER_KW, **kw)))
+    return w, rm, art, render
+
+
+def test_a_drop_stands_on_the_floor():
+    """a 4-tuple mobile's z: a drop (z 0) draws, and draws other pixels than the same lump at MISSILE_Z (R9: the
+    height is what the 4th element moves); a 3-tuple is P5's MISSILE_Z exactly"""
+    _w, _rm, _art, render = _open_view()
+    x, y = -416, 256
+    base = render(x, y, 0)
+    on_floor = render(x, y, 0, mobiles=[(x + 96, y, "SHOTA0", 0)])
+    up = render(x, y, 0, mobiles=[(x + 96, y, "SHOTA0")])
+    assert on_floor != base and up != base and on_floor != up
+    assert render(x, y, 0, mobiles=[(x + 96, y, "SHOTA0", 32)]) == up
+
+
+def test_barrel_views_and_removed_are_opt_in():
+    """`barrel_views` / `thing_removed` absent, None or empty draw today's picture; a barrel in S_BEXP draws its
+    BEXP frame (a different picture), a barrel removed is not drawn; naming a non-vanishable thing is refused"""
+    from doomfj.monsters import MonsterViews
+    w, rm, art, render = _open_view()
+    mv = MonsterViews(rm, w.mw, w.mapname, art, w)
+    import math
+    found = None                                  # a barrel in view: removing it changes the picture
+    for b, t in enumerate(w.barrel_things):
+        for k in range(8):
+            x, y = round(t.x + 96 * math.cos(k * math.pi / 4)), round(t.y + 96 * math.sin(k * math.pi / 4))
+            if not w.rm.check_position(w.scene_c, x << 16, y << 16)[0]:
+                continue
+            a = ((k * 0x20000000) + 0x80000000) & 0xFFFFFFFF
+            if render(x, y, a, thing_removed=[mv.bdi[b]]) != render(x, y, a):
+                found = (b, x, y, a)
+                break
+        if found:
+            break
+    assert found, "no barrel in view from 96 units"
+    b, x, y, a = found
+    base = render(x, y, a)
+    assert render(x, y, a, barrel_views=None, thing_removed=None) == base
+    assert render(x, y, a, barrel_views={}, thing_removed=[]) == base
+    assert render(x, y, a, barrel_views={mv.bdi[b]: "BAR1A0"}) == base       # S_BAR1's frame is the type's art
+    assert render(x, y, a, barrel_views={mv.bdi[b]: "BEXPB0"}) != base
+    assert render(x, y, a, thing_removed=[mv.bdi[b]]) != base
+    decor = next(di for di, t in enumerate(mv.drawable) if t.type == 2028)
+    with pytest.raises(AssertionError):
+        render(x, y, a, thing_removed=[decor])
+    # a RUNTIME pickup may be removed (it is not a skill's absent set): the oracle accepts and hides it
+    rt_pick = next(di for di in mv.rt_pickups)
+    render(x, y, a, thing_removed=[rt_pick])

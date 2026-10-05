@@ -71,8 +71,12 @@ READ = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "dstate", "ddir", "ds
         "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",   # M7 P3.2a
         "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt",                   # M7 P3.2b
         "mon_justattacked")                                                                       # M7 P3.2c
-MENU_CODES = {"enter": 0x0D, "esc": 0x1B}
+MENU_CODES = {"enter": 0x0D, "esc": 0x1B, "up": 0x80, "dn": 0x81}     # M7 P6: up / down (F5's NEW GAME medium)
 CARD_TYPE = 5
+# M7 P6: the player mode a Mirror steps when its caller names none -- None is the game tier's
+# (wall_renderer.PLAYER_MODE); `--player-mode` sets it for an --oracle-only run (the rung's target before the
+# tier moves to it)
+PLAYER_MODE_OVERRIDE = None
 
 
 def bam(dx: float, dy: float) -> int:
@@ -97,11 +101,23 @@ class Mirror:
         self.seenfn = None            # M7 P3.2a: (MonsterPhase, pose, door phase, movers, taken) -> seen slots
         self.posfn = None             # M7 P3.2b: MonsterPhase -> the render's thing_positions
         self.rtfn = None              # M7 P3.2b: MonsterPhase -> the runtime things' thpos_rt / thss_rt
+        self.removedfn = None         # M7 P6: MonsterPhase -> the drawables the game removed (render's `removed`)
+        self.bviewfn = None           # M7 P6: MonsterPhase -> the standing barrels' frames (render's `barrel_views`)
         # M7 P5 (hurt_gate.py drives this Mirror): the model modes (None: wall_renderer's), a setup applied to the
         # boot level start's monster phase before frame 0 (what the gate pokes into the binary), and the phase
-        self.mmode = self.pmode = None
+        self.mmode, self.pmode = None, PLAYER_MODE_OVERRIDE
         self.setup = None
+        # M7 P6 / P7 (fight_gate.py, die_gate.py): LATE setups -- {frame: fn(phase, events) -> a pose or None}, run at
+        # that frame's START (before its menu step); the cells and the pose they move are the frame's `poke` (what
+        # the gate writes into the binary at that frame's start), their events ride the frame's `ev`
+        self.late = {}
         self.mph = None
+
+    def _cells(self, mph, st) -> dict:
+        """M7 P6: the cells a late setup may move -- the world's (state, the runtime rows, the weapon) and the pose,
+        in the probe's units"""
+        return {**mph.state(), **(self.rtfn(mph) if self.rtfn else {}), **mph.weapon_state(),
+                "viewx": _signed(st.x, 32), "viewy": _signed(st.y, 32), "viewangle": st.angle & M32}
 
     @contextlib.contextmanager
     def _rules(self):
@@ -110,16 +126,42 @@ class Mirror:
             D.door_stride = lambda kind: 1
         if self.ctl == "stay":
             D.door_stay = lambda kind: False
+        # M7 P6: once the player loots, the card is the WORLD's (one item of the model's pickups), so its controls
+        # break the model's give: `no_card` -- the card is never taken; `reach` -- the card's reach test always holds
+        from doomfj import combat as C
+        orig_touch = C.CombatMixin._touch
+        if self.ctl in ("no_card", "reach"):
+            ctl = self.ctl
+
+            def touch(world, kind, dropped, item_z, z):
+                if kind == CARD_TYPE:
+                    if ctl == "no_card":
+                        return False
+                    z = item_z
+                return orig_touch(world, kind, dropped, item_z, z)
+            C.CombatMixin._touch = touch
         try:
             yield
         finally:
             D.door_stride, D.door_stay = saved
+            C.CombatMixin._touch = orig_touch
 
     def run(self, pose, keys: list, pcard: int = 0) -> list:
         """-> per frame {"pose", "phase", "taken", "mode", "scr", "sel", "lvdone", "pusedn",
         "drawn"}: the state after the frame, and what it drew ("world", or the menu screen). The
         binary's order: the menu's state machine on the frame's events, then -- on a world frame,
-        unless the level is done -- the door tic, the exit press, the player's move."""
+        unless the level is done -- the door tic, the exit press, the player's move.
+        M7 P6 / P7 (docs/gp-p67-interface.md 4.1, 4.7) -- once the player LOOTS (world.player_loots: "full"):
+        the move is the model's own (`MonsterPhase.move`: pickups, blocking by things, the card as one item), on
+        the world `sync` put this frame's doors and movers into, after `nukage` and `weapon`; the card is the
+        world's (`pcard` pokes it); a frame records what the game removed (`removed`) and the barrels' frames
+        (`bviews`). Once the player is MORTAL (world.player_mortal): a WORLD frame first runs a due restart (the
+        model's `_restart`, with this gate's doors, movers, pose, `pusedn` and `lvdone` put back as NEW GAME puts
+        them), then reads THE TIC-START DEAD LATCH -- a player dead when the frame began presses no door, holds no
+        closing door, presses no use line (and leaves `pusedn` alone: the death think does not read use's edge),
+        does not move or turn, and thinks the death think in `weapon` (a held use asks for the restart)."""
+        from doomfj.reference_model import SimState as _SS
+        from doomfj.world import player_loots, player_mortal
         sim, dp = self.sim, self.dp
         st = SimState(pose[0], pose[1], pose[2], sim.mapname)
         ph = dp.initial()
@@ -133,12 +175,27 @@ class Mirror:
         from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
         mph = MonsterPhase(sim.mw, sim.mapname, BOOT_SKILL, rm=sim.rm, mode=self.mmode or MONSTER_MODE,
                            player=self.pmode or PLAYER_MODE)
+        loots, mortal = player_loots(mph.world.player), player_mortal(mph.world.player)
+        if loots:
+            mph.set_card(pcard)                               # M7 P6: `pcard` is the world's card
         if self.setup is not None:                            # M7 P5: the scenario's poked start
             self.setup(mph)
         self.mph = mph
+        card_i = next((i for i, t in enumerate(mph.world.pickup_things) if t.type == CARD_TYPE), None)
         with self._rules():
-            for kd in keys:
+            for f, kd in enumerate(keys):
                 wev, mph.last_tic = None, None                # M7 P5: this frame's weapon and tic events
+                nev = mev = rsev = lev = None                 # M7 P6 / P7: nukage, the move, the restart, late
+                poke = {}
+                if f in self.late:                            # M7 P6 / P7: a late setup at this frame's start
+                    from doomfj.world import TicEvents
+                    lev = TicEvents(f)
+                    before = self._cells(mph, st)
+                    got = self.late[f](mph, lev)
+                    if got is not None:
+                        st = SimState(got[0], got[1], got[2], sim.mapname)
+                    after = self._cells(mph, st)
+                    poke = {k: v for k, v in after.items() if before.get(k) != v}
                 mode, scr, sel, ng = menu_step(mode, scr, sel, set(kd.get("menu", ())))
                 if ng is not None:                            # NEW GAME: the level start
                     st = SimState(sim.spawn.x, sim.spawn.y, sim.spawn.angle, sim.mapname)
@@ -149,12 +206,25 @@ class Mirror:
                         lvdone = 0
                     mph.reset(SKILLS[ng])                     # M7 P3.1: the skill's monsters
                 drawn = ("menu", scr, sel) if mode else "world"
+                if mode == 0 and mortal and mph.restart_due():
+                    # M7 P7 (P7-d): the restart block at the world frame's start, then this frame's tic
+                    rsev = mph.restart()
+                    st = SimState(sim.spawn.x, sim.spawn.y, sim.spawn.angle, sim.mapname)
+                    ph, taken, pusedn, ms, lvdone = dp.initial(), False, 1, mp.initial(), 0
                 if mode == 0 and not (lvdone and self.ctl != "frozen"):
+                    # M7 P7 (P7-a): the tic-start latch; before P7 nothing kills the player, so 0
+                    dead = mph.dead_latch() if mortal else 0
                     use = bool(kd.get("use"))
                     has_blue = {"card": True, "no_card": False}.get(self.ctl)
-                    ph = dp.tic(ph, use, st.x, st.y, has_blue=has_blue, others=mph.boxes())   # P3.2b
+                    alive = not dead or self.ctl == "dead_holds_door"
+                    ph = dp.tic(ph, use and (not dead or self.ctl == "dead_uses"), st.x, st.y, has_blue=has_blue,
+                                others=mph.boxes(), player=alive)    # P3.2b; P7-c
                     ms = mp.tic(ms)                           # M7 P2b: the lifts after the doors
-                    if use:                                   # the exit: a PRESS in its box
+                    if dead:                                  # P7-c: no use line, and the edge is not read
+                        if self.ctl == "dead_exits" and use and any(in_use_box_fixed(b, st.x, st.y)
+                                                                    for b in self.exits):
+                            lvdone, mode, scr = 1, 1, LEVEL_DONE_SCR     # die_gate's control: a dead player exits
+                    elif use:                                 # the exit: a PRESS in its box
                         if not pusedn or self.ctl == "edge":
                             pusedn = 1
                             if any(in_use_box_fixed(b, st.x, st.y) for b in self.exits):
@@ -173,11 +243,26 @@ class Mirror:
                         if self.ctl == "reach" and dp.card_at is not None:
                             z = dp.card_at[2]
                         cur[0] = dp.touch(cur[0], cx, cy, z)
-                    wev = mph.weapon(kd, st.x, st.y, st.angle)   # M7 P4.1: the weapon, after the use press (pre-move)
-                    new = sim.rm.step_sim(st, kd, scene=sim._scene(blocked, mp.heights(ms)),
-                                          touch=touch, strafe=True)
-                    ph = cur[0]
-                    taken |= ph[3] == 1 and pcard == 0
+                    if loots:
+                        # M7 P6: the world's scene is this frame's doors and movers (after the use press: the switch)
+                        mph.sync(ph[0], ms[0], ms[2])
+                        nev = mph.nukage(st.x, st.y, st.angle, dead=dead)
+                        if self.ctl == "latch":               # die_gate's control: the branch re-read after nukage
+                            dead = mph.dead_latch()
+                    wev = mph.weapon(kd, st.x, st.y, st.angle,   # M7 P4.1: the weapon, after the use press (pre-move)
+                                     dead=dead if mortal else None)
+                    if loots:
+                        nx, ny, na = mph.move(kd, st.x, st.y, st.angle, dead=dead)
+                        mev = mph.last_move
+                        new = _SS(nx, ny, na, sim.mapname)
+                        ph = (ph[0], ph[1], ph[2], mph.card())
+                        taken = card_i is not None and bool(mph.world.ws.pickup_taken[card_i])
+                    else:
+                        mph.touch = touch
+                        nx, ny, na = mph.move(kd, st.x, st.y, st.angle, scene=sim._scene(blocked, mp.heights(ms)))
+                        new = _SS(nx, ny, na, sim.mapname)
+                        ph = cur[0]
+                        taken |= ph[3] == 1 and pcard == 0
                     if self.ctl == "w1":       # every crossing presses; the bits still read fired
                         was = ph[1]
                         ph = dp.after_move((ph[0], (0,) * len(was), ph[2], ph[3]), (st.x, st.y),
@@ -195,6 +280,8 @@ class Mirror:
                 # M7 P3.2a: every frame that draws the WORLD marks the seen flags (the exit's own frame and the
                 # frozen world's too: the tic is skipped, its zero and the render are not); a menu frame skips the
                 # whole world pass and leaves them as they were
+                removed = self.removedfn(mph) if (loots and self.removedfn) else None
+                bviews = self.bviewfn(mph) if (loots and self.bviewfn) else None
                 if self.seenfn is not None and drawn == "world":
                     mph.set_seen(self.seenfn(mph, st, ph, ms, taken))
                 out.append({"pose": (st.x, st.y, st.angle), "phase": ph, "taken": taken,
@@ -206,7 +293,9 @@ class Mirror:
                             "skw": mph.screen_kw(),                                   # M7 P4.1
                             # M7 P5: the fireballs and the blood, and the palette the present shows (a menu: 0)
                             "mobiles": mph.mobiles(), "pal": mph.palette() if drawn == "world" else 0,
-                            "ev": (wev, mph.last_tic),
+                            "ev": (lev, rsev, nev, wev, mev, mph.last_tic),     # M7 P6 / P7: + late, restart, nukage, move
+                            "poke": poke,                                       # M7 P6 / P7: the late setup's cells
+                            "removed": removed, "bviews": bviews,               # M7 P6
                             "views": self.viewfn(mph, st.x, st.y) if self.viewfn else None,
                             "positions": self.posfn(mph) if self.posfn else None})
         return out
@@ -214,14 +303,20 @@ class Mirror:
 
 def seen_of(orc, dsim, card_di):
     """M7 P3.2a: (MonsterPhase, pose, door phase, movers, taken) -> the monster slots the frame's picture SEES --
-    the same render the gate compares against, with `seen_out`"""
+    the same render the gate compares against, with `seen_out`. M7 P6: once the player loots, what the game
+    removed and the barrels' frames (a barrel's lump sets its aim box's size bound)"""
+    from doomfj.world import player_loots
+
     def fn(mph, st, ph, ms, taken):
         seen, aim = set(), [0] * 17
+        loot = player_loots(mph.world.player)
         orc.render(st.x, st.y, st.angle, tuple(ph[0][si][0] for si in dsim.order),
-                   hidden_extra=(card_di,) if taken else (), movers=dsim.mp.heights(ms),
+                   hidden_extra=(card_di,) if (taken and not loot) else (), movers=dsim.mp.heights(ms),
                    views=orc.monster_views(mph, st.x, st.y), seen_out=seen,
                    positions=orc.monster_positions(mph), aim_things=orc._mviews.aim_things(mph), aim_out=aim,
-                   mobiles=mph.mobiles())                                     # M7 P5
+                   mobiles=mph.mobiles(),                                     # M7 P5
+                   removed=orc.monster_removed(mph) if loot else None,       # M7 P6
+                   barrel_views=orc.monster_barrel_views(mph) if loot else None)
         mph.set_aim(aim)                    # M7 P4.2a: this picture's window -> the next frame's shots
         return orc._mviews.slots_of(seen)
     return fn
@@ -234,7 +329,22 @@ def hooked(mirror: "Mirror", orc, dsim, card_di) -> "Mirror":
     mirror.viewfn = orc.monster_views
     mirror.seenfn = seen_of(orc, dsim, card_di)
     mirror.posfn, mirror.rtfn = orc.monster_positions, orc.monster_rt
+    mirror.removedfn, mirror.bviewfn = orc.monster_removed, orc.monster_barrel_views    # M7 P6
     return mirror
+
+
+def picture(orc, dsim, fr: dict, card_di) -> bytes:
+    """a world frame's picture as the oracle draws it: the doors, movers, monsters, mobiles -- the card hidden once
+    taken (before P6), or (M7 P6, `fr["removed"]` not None) everything the game removed and the barrels by state;
+    the bar's card is `pcard`'s (S3 pokes it)"""
+    loot = fr.get("removed") is not None
+    cd = [card_di] if isinstance(card_di, int) else list(card_di)
+    return orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2], tuple(fr["phase"][0][si][0] for si in dsim.order),
+                      hidden_extra=cd if (fr["taken"] and not loot) else (), movers=fr["mheights"],
+                      views=fr["views"], positions=fr["positions"], screen_kw=fr.get("skw"),
+                      mobiles=fr["mobiles"],                                        # M7 P5
+                      removed=fr.get("removed"), barrel_views=fr.get("bviews"),     # M7 P6
+                      card=fr["phase"][3])
 
 
 def expected_cells(fr: dict, order: list, mover_order=()) -> dict:
@@ -428,7 +538,9 @@ def scenarios(dsim, card) -> list:
         stay = D.SPEED * (n[si] - 1) + D.WAIT + 8
         out.append({"name": "S%d over tag %d's trigger: door %d opens, stays; back over: nothing"
                             % (6 if si == 77 else 7, tag, si),
-                    "pose": trigger_pose(dsim, t), "keys": [F] * 5 + [I] * stay + [B] * 5 + [I] * 3,
+                    # M7 P6: back over AT ONCE, then the wait -- once the player is blocked by things, a zombie
+                    # woken by the wait (S6's, 40 units south of the pose) stands on the way back
+                    "pose": trigger_pose(dsim, t), "keys": [F] * 5 + [B] * 5 + [I] * stay + [I] * 3,
                     "pcard": 0, "controls": ["stay", "w1"],
                     "claim": lambda tr, si=si: tr[-1]["phase"][0][si][0] == n[si] - 1
                     and sum(1 for fr in tr if si in fr["phase"][2]) == 1})
@@ -491,11 +603,20 @@ def main(argv=None) -> int:
     ap.add_argument("--fjm")
     ap.add_argument("--labels")
     ap.add_argument("--oracle-only", action="store_true", help="the scenarios and controls, no binary")
+    ap.add_argument("--player-mode", help="--oracle-only: the oracle's player mode (default wall_renderer's)")
     a = ap.parse_args(argv)
     if not a.oracle_only and not (a.fjm and a.labels):
         ap.error("--fjm and --labels (the build's label table), or --oracle-only")
+    from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+    if a.player_mode and a.player_mode != PLAYER_MODE and not a.oracle_only:
+        ap.error("--player-mode %s: the binary is the game tier's (%s); another mode is for --oracle-only"
+                 % (a.player_mode, PLAYER_MODE))
+    global PLAYER_MODE_OVERRIDE
+    PLAYER_MODE_OVERRIDE = a.player_mode or None
     t0 = time.time()
     orc = P.Oracle()
+    if a.player_mode:
+        orc.player_mode = a.player_mode
     dsim = onewalk.DoorSim()
     assert dsim.order == orc.door_order
     card = dsim.dp.card_at
@@ -505,10 +626,11 @@ def main(argv=None) -> int:
     assert len(card_di) == 1, card_di
     scen = scenarios(dsim, card)
     ok = True
-    print("P2A GATE -- %d scenarios%s" % (len(scen), "" if a.oracle_only else ", %s" % a.fjm))
+    print("P2A GATE -- %d scenarios (MONSTER_MODE %s, PLAYER_MODE %s)%s"
+          % (len(scen), MONSTER_MODE, orc.player_mode, "" if a.oracle_only else ", %s" % a.fjm))
     if not a.oracle_only:
         gb = P.GameBinary(ROOT / a.fjm)
-        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt)
+        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
         table = P.LabelTable.load(ROOT / a.labels, {c.label for c in cells.values()})
         assert not table.absent & {"dreq", "pcard", "wfired"}, (
             "the label table has no %s: a binary before P2a.1" % sorted(table.absent))
@@ -555,12 +677,7 @@ def main(argv=None) -> int:
             if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
                 s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
             if fr["drawn"] == "world":
-                pic = orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
-                                 tuple(fr["phase"][0][si][0] for si in dsim.order),
-                                 hidden_extra=card_di if fr["taken"] else (), movers=fr["mheights"],
-                                 views=fr["views"], positions=fr["positions"], screen_kw=fr.get("skw"),
-                                 mobiles=fr["mobiles"],                       # M7 P5
-                                 card=fr["phase"][3])           # the bar's card is pcard's (S3 pokes it)
+                pic = picture(orc, dsim, fr, card_di)
             else:
                 pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):

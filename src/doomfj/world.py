@@ -607,6 +607,25 @@ def player_bleeds(mode: str) -> bool:
     `_spawn_fx_at_target`, the fx pool, rng_fx) -- combat._p_fx"""
     assert mode in PLAYER_MODES, mode
     return mode in ("fx", "full")
+
+
+def player_loots(mode: str) -> bool:
+    """M7 P6 (docs/gp-p67-interface.md section 2): the ONE rule "the player in mode `mode` lives in the world's things"
+    -- pickups and their gives, drops, the bonus count and berserk, barrels in the aim and their blasts and puffs,
+    blocking by solid things, nukage, gibs, `leveltime`. "full" alone (the fallback "loot" mode, if ever taken, joins
+    here). The model's own code does not read it (its pickups and blocking were never mode-gated); the GATES do: what
+    their oracle steps (`monsters.MonsterPhase.move` / `nukage`) and which cells their state check reads"""
+    assert mode in PLAYER_MODES, mode
+    return mode == "full"
+
+
+def player_mortal(mode: str) -> bool:
+    """M7 P7: the ONE rule "a dead player in mode `mode` thinks DOOM's death think" -- the tic-start dead latch, the
+    restart request (use while dead), the dead player's guards on doors, use lines and the move. "full" alone"""
+    assert mode in PLAYER_MODES, mode
+    return mode == "full"
+
+
 AIM_COLUMNS = 17                   # the aim window's columns (combat.aim_window's 72..88; asserted at _combat_init)
 
 
@@ -905,8 +924,13 @@ class World(CombatMixin):
             self._doors_phase(keys, ev)
             self._movers_phase(ev)
             self._player_phase(keys, ev)
-            self._monster_world(ev)              # M7 P6+P7 E: `monster_tics` tics of the monsters' world
-            self.ws.leveltime = (self.ws.leveltime + 1) & 0xFFFF
+            # M7 P6/P7 (docs/gp-p67-interface.md G2): THE EXIT FRAME -- a press of the exit in this tic's player phase
+            # ends the level at once: the monsters' world (the monsters, the projectiles, the barrels, the effects --
+            # M7 P6+P7 E: `monster_tics` tics of it) and `leveltime` do not run this tic (the binary's world phases
+            # each skip themselves while `lvdone`; its frame order 4.7)
+            if not self.ws.g_leveldone:
+                self._monster_world(ev)
+                self.ws.leveltime = (self.ws.leveltime + 1) & 0xFFFF
         if self.seen_hook is not None:
             self.seen_hook(self)                 # M7 P3.2: this tic's picture -> the next tic's mon_seen
         self.tic_count += 1

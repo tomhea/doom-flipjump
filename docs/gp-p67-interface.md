@@ -1198,3 +1198,55 @@ it with one change reverted):**
 - **Gates and trails**: every gate that hard-codes a turn count and every recorded trail (`gamespeed.BINARY_ENDS`)
   moves with 12.2. A/E re-record them together with O3's re-record. (`m2_std_gate`'s steering reads ANGLE_TURN
   symbolically, so it adapts.)
+
+---
+
+## Package A as built (agent A, 2026-10-05; branch `p67-a`)
+
+The names packages B / C / D and the integrator read. Everything below is Python; no fj emitter was touched.
+
+**Model** (`world.py`, `combat.py`): G2 -- `World.tic` skips the monsters, projectiles, barrels, fx and `leveltime`
+on the tic whose player phase pressed the exit. The ONE-rule helpers `world.player_loots(mode)` and
+`world.player_mortal(mode)` exist ("full" alone; the fallback's "loot" would join `player_loots`); the model's own code
+does not read them -- the gates and `MonsterPhase` do. `combat.window_aim` maps sid > nmon to `("bar", sid - 1 - nmon)`.
+`doors.DoorPhase.tic(player=False)`: a dead player holds no closing door. The dead latch needed no model change:
+`combat._player_phase` already chooses its branch once.
+
+**`monsters.MonsterPhase`** (the gates' oracle): `dead_latch()` (the tic-start `p_dead`), `restart_due()`,
+`restart()` (the model's `_restart`), `nukage(x, y, a, dead=)`, `weapon(keys, x, y, a, dead=)` (dead in "full": the
+model's `_death_think` -- psprites, the damage fade, a HELD use sets `g_restart`; alive: keys, psprites, then
+`p_str` +1, `p_dc` -1, `p_bc` -1), `move(keys, x, y, a, dead=, scene=)` (the model's `_player_move` on `sync`'s scene;
+the world's own walk-over cells are put back -- the gates' DoorPhase / MoverPhase own the walk-overs; before "full"
+it is step_sim with `self.touch`), `card()` / `set_card()`, `taken()`, `barrel_lumps()`; `tic()` advances
+`leveltime`. `state()` adds, in "full": `loot_state()` (= `monsters.loot_cells(world)`), `barrel_state()`,
+`game_state()` -- their units are 4.5's (docstrings). `mobiles()` appends the lying drops `(x, y, lump, 0)` in
+dropper order (`monsters.droppers(world)`, `drop_lump`).
+
+**`monsters.MonsterViews`**: `aim_things` adds the live barrels `(1 + nmon + b, 10)`; `rt_state` adds the 25 drop
+rows (row `nt + 10 + k` = the corpse's whole-unit row and `mon_leaf` while `mdrop[k] == 1`, else 0) AND the `thvis`
+cell (`vis_state`); `nrows` counts them; `hidden()` (render's `thing_removed`), `barrel_views()`.
+**THE thvis LAYOUT (B and D must match):** the baked vanishable slots in `things.vanishable_slots` order (105 on
+E1M1: 85 pickups, 20 barrels; a pickup is `1 - pickup_taken`, a baked barrel `bar_state != 0`), THEN one slot per
+RUNTIME pickup (10) in runtime-thing order (`MonsterViews.rt_pickups`) -- 115 slots, 2 nibbles each.
+
+**The oracle** (`reference_model.render_wall_frame`), opt-in: `mobiles` 4-tuples (z above the floor),
+`barrel_views={drawable: lump}`, and `thing_removed=` -- a NEW keyword rather than a widened `thing_hidden` assert:
+`thing_hidden` keeps its "one skill's absent set" check for runtime things, `thing_removed` names what the game removed
+(each a VANISHABLE type; a baked one needs a thvis slot). `scratchpad/gp/p67_identity.py` holds every existing
+picture byte-identical with them absent or empty.
+
+**The probe** (`probe.game_cells(..., nthvis=)`): the cells of 4.5 in groups {p_bc p_str p_bp am_misl am_cell},
+{bar_st bar_ti bar_hp rng_wd}, {mdrop dr_live}, {lvtime g_rs g_skill}, and {bar_solid} on its own (P3.2b's label,
+read for the first time); `thvis` only with its count. `Oracle.player_mode` / `nthvis`; `gatestate.STATE_NAMES` and
+`run_reading_state(nthvis=)`.
+
+**The gates' frame order** (p2a_gate.Mirror, m2_std_gate, m3_gate, B0's BinaryMirror): [a due restart] -> the latch
+-> the door tic (press and contact need alive) -> the movers -> the use block (SKIPPED while dead: no exit, no SR
+lift, no switch, and **`pusedn` is not written** -- the model's death think leaves `p_usedown` alone; package B must
+match) -> `sync` -> `nukage` -> `weapon` -> `move` (dead: no move, no turn) -> the walk-overs -> the monsters' tic
+(not on the exit frame). The weapon now runs after the use press in every gate (it commutes with it).
+
+**Gates**: `fight_gate.py` (F1..F10, S2) and `die_gate.py` (D1..D8), hurt_gate at "full"/"full", m2_std/m3 print and
+fail on a death, `b0_scenarios.py --oracle-only` (the frozen replay plus the mirror, no binary; a per-run loot-parting
+counter). m2_r4_gate (the hosted tier) and gatestate_check (a pre-P1.5 mechanics check) keep step_sim, by design
+(`tests/host/test_gates_step_the_model.py` names why).

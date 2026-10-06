@@ -859,7 +859,7 @@ class Oracle:
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
                views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
-               mobiles=None, card=None, removed=None, barrel_views=None) -> bytes:
+               mobiles=None, card=None, removed=None, barrel_views=None, skill=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
@@ -871,11 +871,17 @@ class Oracle:
         M7 P5: `mobiles` -- `monsters.MonsterPhase.mobiles()`, the fireballs and the blood (M7 P6: and the drops).
         M7 P6: `removed` -- the drawables the game removed (`monster_removed`: the pickups taken, the barrels gone),
         and `barrel_views` (`monster_barrel_views`: each standing barrel's frame); both opt-in (render_wall_frame's
-        `thing_removed` / `barrel_views`). A gate that passes `removed` passes `card` too (the bar's card)."""
+        `thing_removed` / `barrel_views`). A gate that passes `removed` passes `card` too (the bar's card).
+        M7 P6+P7 (2026-10-07): `skill` -- the skill the game is AT (the model world's `ws.skill`): its absent set is
+        hidden instead of BOOT_SKILL's (`self.hidden`). A NEW GAME or a restart at another skill spawns other things;
+        drawn with the boot skill's set the oracle drew (and SAW) monsters the binary's skill leaf lists do not hold --
+        fight F5 / die D4s at medium (the imp, slot 23) and die D5 at easy (the hard trio 21-23, and not slot 50).
+        None keeps BOOT_SKILL's set."""
         from doomfj.reference_model import SimState
+        hidden = self.hidden if skill is None else self.hidden_at(skill)
         view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
-                                               thing_hidden=set(self.hidden) | set(hidden_extra),
+                                               thing_hidden=set(hidden) | set(hidden_extra),
                                                thing_views=views, seen_out=seen_out,
                                                thing_positions=positions,              # M7 P3.2b
                                                aim_things=aim_things, aim_out=aim_out,  # M7 P4.2a
@@ -884,6 +890,14 @@ class Oracle:
                                                **self.RENDER_KW))
         # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
         return self.screen.frame(view, card=bool(hidden_extra) if card is None else bool(card), **(screen_kw or {}))
+
+    def hidden_at(self, skill: int) -> frozenset:
+        """M7 P6+P7: the drawables a game at `skill` does not spawn (things.skill_hidden; BOOT_SKILL's is `hidden`)"""
+        from doomfj.things import skill_hidden
+        cache = self.__dict__.setdefault("_hidden_at", {})
+        if skill not in cache:
+            cache[skill] = skill_hidden(self.rm, self.mw.things(self.mapname), self.art, skill)
+        return cache[skill]
 
     @property
     def screen(self):

@@ -349,7 +349,8 @@ class Run:
                           tuple(fr["phase"][0][si][0] for si in dsim.order), hidden_extra=(),
                           movers=fr["mheights"], views=fr["views"], positions=fr["positions"],
                           screen_kw=fr.get("skw"), mobiles=fr["mobiles"] if mobiles is None else mobiles,
-                          removed=fr.get("removed"), barrel_views=fr.get("bviews"), card=fr["phase"][3])
+                          removed=fr.get("removed"), barrel_views=fr.get("bviews"), card=fr["phase"][3],
+                          skill=fr.get("skill"))                              # M7 P6+P7: the skill played
 
     def explosion_px(self, tr) -> int:
         """the pixels an explosion drew: on the frames whose mobiles hold one, the picture with them against the

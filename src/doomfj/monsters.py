@@ -257,7 +257,9 @@ class MonsterPhase:
         THE WALK-OVERS stay the gate's: `doors.DoorPhase.after_move` / `movers.MoverPhase.after_move` fire them from
         (old, new) exactly as `World._walkover` does, so the world's own copy (`w_fired`, `d_monreq`, `l_req`) is
         put back here -- else a control that drops a gate's walk-over (p2a's `w1`, `no_wr`) could not part.
-        A DEAD player (the tic-start latch, P7-a) does not move or turn: the pose comes back unchanged.
+        A DEAD player (the tic-start latch, P7-a) does not move or turn BY KEYS: the position comes back unchanged and
+        the angle is the world's -- in a mortal mode `weapon(dead=)`'s death think has just turned it to the killer
+        (P_DeathThink; die_gate D1 on blocked51 found the pose given returned here, dropping the turn).
         Before "full" (world.player_loots false) the move is `step_sim`'s own (strafe on) with `self.touch(cx, cy,
         z)` -- the gate's card -- at every tried candidate, what those binaries run: on `scene` when given (the
         gate's own collision scene, as it stepped before P6), else on `scene_c`. In "full" `scene` must be None:
@@ -274,7 +276,8 @@ class MonsterPhase:
             return st.x, st.y, st.angle
         assert scene is None, "the full model moves on the world's own scene (sync it), not a gate's"
         if ws.p_dead if dead is None else dead:
-            return x16, y16, angle
+            from doomfj.world import player_mortal
+            return x16, y16, (ws.pangle if player_mortal(w.player) else angle)
         self._pose(x16, y16, angle)
         keep = (list(ws.w_fired), list(ws.d_monreq), list(ws.l_req))
         w._player_move(k, ev)

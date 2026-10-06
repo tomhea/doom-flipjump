@@ -11,8 +11,9 @@ start -- the death moment (P5's: p_dead, the weapon's downstate, one rng_pl draw
 it moved -- where the scenario is about what follows the death, not the death.
 
 THE SCENARIOS:
-  D1  a zombieman kills the player (p_hp poked 6); then forward, a turn, fire and the number keys are held: the pose
-      and the angle stay, the weapon stays down, wp_pend does not move, the red fades
+  D1  a zombieman kills the player (p_hp poked 6); then forward, a turn, fire and the number keys are held: the
+      position stays and the angle is the turn to the killer's alone, the weapon stays down, wp_pend does not move,
+      the red fades
   D2  killed standing in door 10 as it closes: the door does NOT go back up on the dead player
   D3d dead in front of a door, use pressed: no door press -- the RESTART next frame
   D3x dead in the exit's box, use pressed: no level end -- the restart
@@ -179,7 +180,12 @@ def after_death_frozen(tr) -> bool:
     if d is None:
         return False
     rest = tr[d:]
-    return (len({fr["pose"] for fr in rest}) == 1 and len({fr["mstate"]["wp_pend"] for fr in rest}) == 1
+    # M7 P7: the POSITION stays; the angle is the death think's -- it turns to the killer from the first dead tic
+    # (d + 1) and, the killer standing, settles there: no key turns it (die_gate D1 on blocked51 found the gates'
+    # MonsterPhase.move dropping that turn, and this claim holding the whole pose frozen, which only a killer at
+    # exactly the facing angle satisfies)
+    return (len({fr["pose"][:2] for fr in rest}) == 1 and len({fr["pose"][2] for fr in rest[1:]}) == 1
+            and len({fr["mstate"]["wp_pend"] for fr in rest}) == 1
             and rest[-1]["mstate"]["wp_sy"] == gd.WEAPONBOTTOM >> 16
             and rest[-1]["mstate"]["p_dc"] < max(fr["mstate"]["p_dc"] for fr in rest))
 

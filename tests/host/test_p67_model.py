@@ -447,3 +447,60 @@ def test_the_still_candidate_is_skipped_at_every_coordinate(world, monkeypatch, 
     M32 = 0xFFFFFFFF
     old_skips = ((here[0] + 0) & M32, here[1]) == here
     assert old_skips == (pose[0] >= 0)
+
+
+def test_the_dead_players_turn_reaches_the_gates_pose():
+    """M7 P7 (die_gate D1 on blocked51, 2026-10-07): the dead player turns to the killer in the weapon half
+    (`_death_think`), and a gate's next pose is what `MonsterPhase.move` RETURNS -- called, as every gate calls it,
+    with the frame's PRE-tic angle. It returned that angle for a dead player, so the turn never reached the gate's
+    expectation: the binary turned (viewangle 0x7FFFFFFF, R_PointToAngle2 of a killer due west: ANG180 - 1), the
+    oracle stayed at 0x80000000 -- 865 px. R9: the old return (the pose given) is held to fail here."""
+    from doomfj.monsters import MonsterPhase
+    M = 0xFFFFFFFF
+    a = MonsterPhase(mode="full", player="full")
+    b = World(monsters="full", player="full")
+    m = 9
+    for w in (a.world, b):
+        w.teleport_player(480 << 16, 1392 << 16, 0x80000000)
+        ws = w.ws
+        ws.mon_x[m], ws.mon_y[m] = 352, 1392          # due west of the player
+        ws.p_health, ws.p_dead, ws.p_attacker = 0, 1, m + 1
+    b._player_phase(keys(), TicEvents(0))
+    assert b.ws.pangle == 0x7FFFFFFF, "%08x" % b.ws.pangle    # the model snaps to R_PointToAngle2's ANG180 - 1
+    ws = a.world.ws
+    x, y, a0 = ws.px & M, ws.py & M, ws.pangle
+    dead = a.dead_latch()
+    a.weapon(keys(), x, y, a0, dead=dead)
+    nx, ny, ang = a.move(keys(), x, y, a0, dead=dead)
+    assert (nx, ny) == (x, y) and ang == b.ws.pangle == ws.pangle, "%08x" % ang
+
+
+@pytest.mark.skipif(not ART.exists(), reason="needs assets/freedoom1.wad (the sprite art)")
+def test_the_gates_picture_hides_the_skill_being_played():
+    """M7 P6+P7 (fight F5 / die D4s at medium, die D5 at easy, on blocked51 -- 2026-10-07): after a NEW GAME or a
+    restart at another skill the binary's leaf lists and thvis are THAT skill's, but the p2a-family gates rendered
+    with BOOT_SKILL's absent set (probe.Oracle.hidden): the oracle drew -- and SAW -- the hard-only imp (slot 23) at
+    medium, and the hard trio (21..23) instead of easy's zombieman (slot 50) at easy. `Oracle.render(skill=)` hides
+    the played skill's set; p2a_gate (seen and picture) and hurt_gate pass the world's `ws.skill`. Here: the level
+    start at medium, seen from the player start. R9: the boot skill's set (skill None) sees slot 23."""
+    sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
+    import probe as P
+    from doomfj.monsters import MonsterPhase
+    orc = P.Oracle()
+    sk = gd.SK_MEDIUM
+    ph = MonsterPhase(orc.mw, orc.mapname, sk, rm=orc.rm, mode="full", player="full")
+    assert not ph.world.ws.mon_active[23] and ph.world.ws.mon_active[21] and ph.world.ws.mon_active[22]
+    ws = ph.world.ws
+    x, y, a = ws.px & 0xFFFFFFFF, ws.py & 0xFFFFFFFF, ws.pangle
+
+    def seen(skill):
+        out = set()
+        orc.render(x, y, a, (), views=orc.monster_views(ph, x, y), positions=orc.monster_positions(ph), seen_out=out,
+                   mobiles=ph.mobiles(), removed=orc.monster_removed(ph), barrel_views=orc.monster_barrel_views(ph),
+                   card=0, skill=skill)
+        return orc._mviews.slots_of(out)
+    assert {21, 22} <= seen(sk) and 23 not in seen(sk), sorted(seen(sk))
+    assert 23 in seen(None), "the case does not separate the boot skill's set from medium's"
+    # the gates hand the oracle the skill: every p2a-family render call names it
+    for f, n in (("p2a_gate.py", 2), ("hurt_gate.py", 1)):
+        assert (ROOT / "scratchpad" / "gp" / f).read_text(encoding="utf-8").count("skill=") >= n, f

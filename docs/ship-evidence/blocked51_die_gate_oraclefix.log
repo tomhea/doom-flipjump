@@ -1,0 +1,95 @@
+$ PYTHONPATH=src python scratchpad/gp/die_gate.py --fjm build/doom_e1m1_blocked51.fjm --labels scratchpad/12m/atlas/blocked51.labels.tsv.gz   # 2026-10-07, oracle fixes c93b869 + this commit
+DIE GATE -- 11 scenarios (MONSTER_MODE full, PLAYER_MODE full), build/doom_e1m1_blocked51.fjm
+
+D1 killed by a zombieman; every key held after: nothing moves -- 52 frames
+  from (480, 1392) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 1, player_hurt 1, deaths 1, dead_frames 52
+  frame 0 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'p_hp']
+  CONTROL dead_walks       the oracle without the rule parts at frame 1 (cells)
+  CONTROL dead_turns       the oracle without the rule parts at frame 36 (cells)
+  CONTROL dead_keys        the oracle without the rule parts at frame 36 (cells)
+  binary: 52 frames, 565,012,595 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D2 killed in door 10 as it closes: it does not go back up -- 83 frames
+  from (832, 472) angle 40000000, late setups at frames [13]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 70
+  frame 0 pokes: []
+  frame 13 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL dead_holds_door  the oracle without the rule parts at frame 49 (cells)
+  binary: 83 frames, 958,054,117 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D3d dead before door 10, use: no press, the restart -- 7 frames
+  from (832, 472) angle 40000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 4, restarts 1, restart_requests 1
+  frame 0 pokes: []
+  frame 0 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL dead_uses        the oracle without the rule parts at frame 3 (cells)
+  binary: 7 frames, 68,747,906 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D3x dead in the exit's box, use: no level end, the restart -- 7 frames
+  from (-432, 1296) angle 00000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 4, restarts 1, restart_requests 1
+  frame 0 pokes: []
+  frame 0 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL dead_exits       the oracle without the rule parts at frame 3 (cells)
+  binary: 7 frames, 149,749,801 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D4 the restart: the level start, a taken pickup and a gone barrel back -- 7 frames
+  from (-416, 256) angle 00000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 1, restarts 1, restart_requests 1
+  frame 0 pokes: []
+  frame 0 pokes: ['bar_solid', 'bar_st', 'bar_ti', 'p_dc', 'p_dead', 'p_hp', 'rng_pl', 'thvis', 'wp_st', 'wp_sy']
+  CONTROL restart_pickup   the oracle without the rule parts at frame 1 (cells)
+  CONTROL restart_barrel   the oracle without the rule parts at frame 1 (cells)
+  CONTROL use_edge         the oracle without the rule parts at frame 0 (cells)
+  binary: 7 frames, 138,300,451 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D4m the restart takes a lying drop back -- 30 frames
+  from (448, 1392) angle 80000000, late setups at frames [24]: the oracle does what the scenario claims: yes
+  counters: fx_spawns 1, player_hurt 1, deaths 1, dead_frames 1, shots_hit 1, drop_frames 9, restarts 1, restart_requests 1
+  frame 0 pokes: ['mon_health']
+  frame 24 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL restart_mdrop    the oracle without the rule parts at frame 25 (cells)
+  binary: 30 frames, 380,458,509 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D4s NEW GAME medium, dead, use: the restart is medium's -- 8 frames
+  from (-416, 256) angle 00000000, late setups at frames [4]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 2, restarts 1, restart_requests 1
+  frame 0 pokes: []
+  frame 4 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL restart_skill    the oracle without the rule parts at frame 6 (cells)
+  binary: 8 frames, 95,135,450 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D5 NEW GAME after death: easy's level start -- 10 frames
+  from (-416, 256) angle 00000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 6
+  frame 0 pokes: []
+  frame 0 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL ng_skill         the oracle without the rule parts at frame 6 (cells)
+  binary: 10 frames, 110,591,818 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D6 death by nukage: that tic still runs the keys and the move -- 7 frames
+  from (2024, 1310) angle 40000000: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 7, nukage 1
+  frame 0 pokes: ['p_hp']
+  CONTROL latch            the oracle without the rule parts at frame 0 (cells)
+  binary: 7 frames, 82,198,978 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D7 death by a barrel's blast -- 40 frames
+  from (958, 642) angle e0000000: the oracle does what the scenario claims: yes
+  counters: fx_spawns 1, player_hurt 1, deaths 1, dead_frames 17, shots_hit 3, bexp_frames 23, barrel_blasts 3, puffs 1, barrel_hurt 1, barrel_hits 3
+  frame 0 pokes: ['bar_hp', 'p_hp']
+  binary: 40 frames, 185,948,218 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D8 death during the gold flash: the bonus frozen, gold after the red -- 12 frames
+  from (-416, 256) angle 00000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 12, bonus_frames 9
+  frame 0 pokes: []
+  frame 0 pokes: ['p_bc', 'p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL dead_bonus_fade  the oracle without the rule parts at frame 0 (cells)
+  binary: 12 frames, 235,679,083 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+TOTALS: mon_hits 1, mon_misses 0, mon_melee 0, proj_spawns 0, proj_impacts 0, proj_walls 0, fizzles 0, fx_spawns 2, fx_skipped 0, player_hurt 11, armor_out 0, deaths 11, dead_frames 176, max_in_flight 0, explosion_frames 0, shots_hit 4, pickups 0, pickup_items 0, pickup_drops 0, bonus_frames 9, berserk_frames 0, gibs 0, drop_frames 9, bexp_frames 23, barrel_blasts 3, puffs 1, blast_kills 0, barrel_hurt 1, player_blocked 0, nukage 1, restarts 5, restart_requests 5, level_done 0, barrel_hits 3
+every event counter nonzero: yes; deaths 11
+
+DIE GATE PASS (109 s)

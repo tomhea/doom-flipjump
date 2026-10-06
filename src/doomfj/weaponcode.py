@@ -264,18 +264,30 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
         out += ["wp_ploop:", "hex.inc 1, wp_pass",
                 f"hex.if_flags wp_pass, 1<<{tics}, wp_ptic, wp_pdone",
                 "wp_pdone:", "hex.zero 1, wp_pass"]
-    # -- 4. the bar: the ready weapon's ammo (blank for the fist and the chainsaw) and the owned weapons 2 3 4
+    # -- 4. the bar: the ready weapon's ammo (blank for the fist and the chainsaw) and the owned weapons 2 3 4.
+    #    M7 P6+P7 (`loot`): NOT here -- a pickup in the move changes the ammo and the owned weapons AFTER the weapon
+    #    phase, so the copy runs after the move (`bar_lines`, weapon_parts' "bar"; DOOM and the oracle draw the bar
+    #    from the tic's end): copied here it lagged a frame (blocked49's m2 gate, frame 212: the shotgun picked up,
+    #    ARMS 3 still grey)
     out += ["wp_bar:"]
-    out += _by_ready("wpb", {gd.WP_FIST: "wpb_none", gd.WP_PISTOL: "wpb_clip", gd.WP_SHOTGUN: "wpb_shell",
-                             gd.WP_CHAINSAW: "wpb_none"})
+    if not loot:
+        out += bar_lines()
+    out += ["wp_end:"]
+    return out
+
+
+def bar_lines() -> List[str]:
+    """the bar's weapon slots from the weapon cells: the ready weapon's ammo digits (blank for the fist and the
+    chainsaw) and the owned weapons 2 3 4 -> hud_v. Falls through."""
+    out = _by_ready("wpb", {gd.WP_FIST: "wpb_none", gd.WP_PISTOL: "wpb_clip", gd.WP_SHOTGUN: "wpb_shell",
+                            gd.WP_CHAINSAW: "wpb_none"})
     out += ["wpb_clip:", "ammobcd.lookup wp_bcd, am_clip", ";wpb_set",
             "wpb_shell:", "ammobcd.lookup wp_bcd, am_shell", ";wpb_set",
             "wpb_none:", "hex.set 3, wp_bcd, %d" % (10 | 10 << 4 | 10 << 8),
             "wpb_set:", "hex.mov 3, hud_v, wp_bcd",
             "hex.mov 1, hud_v + 9*dw, wp_own + %d*dw" % OWN[gd.WP_PISTOL],
             "hex.mov 1, hud_v + 10*dw, wp_own + %d*dw" % OWN[gd.WP_SHOTGUN],
-            "hex.mov 1, hud_v + 11*dw, wp_own + %d*dw" % OWN[gd.WP_CHAINSAW],
-            "wp_end:"]
+            "hex.mov 1, hud_v + 11*dw, wp_own + %d*dw" % OWN[gd.WP_CHAINSAW]]
     return out
 
 
@@ -607,5 +619,7 @@ def weapon_parts(map_wad, mapname: str, shoot: bool = False, noise: bool = False
     return {"decls": weapon_decls(start, states, frames) + weapon_const_decls() + (shot_decls() if shoot else []),
             "tables": tables + ([shot_table_fj()] if shoot else []) + ([bk10_table_fj()] if loot else []),
             "tic": weapon_lines(states, frames, shoot, noise, hurt, loot=loot, tics=tics),
+            # M7 P6+P7: with `loot` the bar's weapon slots are copied AFTER the move (the pickups): the frame places it
+            "bar": bar_lines() if loot else [],
             "restart": restart_lines(start, states, frames),
             "start": start}

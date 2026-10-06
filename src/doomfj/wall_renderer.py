@@ -904,7 +904,7 @@ def exit_lines(boxes, press_miss=()) -> list:
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
                             press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
-                            use_guard=((), ())) -> list:
+                            use_guard=((), ()), weapon_bar=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -962,6 +962,9 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         # M7 P4.1: the weapon -- the model's player phase runs the number keys and the psprites before the move
         *weapon,
         *_player_sim_lines(collide, strafe=True, tap=True),   # M7 P4.1: the game tier strafes; P6+P7: the tap turn
+        # M7 P6+P7: the bar's weapon slots after the move -- its pickups change the ammo and the owned weapons
+        # (weaponcode.bar_lines; everything above lands on simmv_done, the dead player's skipped move too)
+        *weapon_bar,
         # M7 P3.1: the monsters tic after the player (the model's order: doors, player, monsters);
         # a frozen level skips them with the player
         *monster_tic,
@@ -2921,6 +2924,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   weapon=(_loot["tic"](_wpn["tic"], _hrt["tic"]) if _loot else
                                           (list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))
                                           if _wpn else ()),
+                                  weapon_bar=(_wpn.get("bar", ()) if _wpn else ()),   # M7 P6+P7: after the move
                                   latch=_loot["latch"] if _loot else (),
                                   use_guard=_loot["use_guard"] if _loot else ((), ()),
                                   door_lines=_door_tic,

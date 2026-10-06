@@ -549,8 +549,10 @@ def scenarios(dsim, card) -> list:
     k98, k103 = dsim.mp.order.index(98), dsim.mp.order.index(103)
 
     def ride(tr, k):
+        # it reaches the bottom (9) and is back at the top (0) after it -- M7 P6+P7: not "at the top on the last frame":
+        # at the monsters' tempo x2 a monster crosses lift 103's WR line at frame 48 of S10 and starts a second ride
         st = [fr["movers"][0][k][0] for fr in tr]
-        return max(st) == 9 and st[-1] == 0 and st.index(9) < len(st) - 1
+        return max(st) == 9 and 0 in st[st.index(9) + 1:]
 
     out.append({
         "name": "S9 over lift 98's WR line: it rides down, waits, comes back up",

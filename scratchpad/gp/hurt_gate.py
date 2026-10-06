@@ -286,7 +286,10 @@ def scenario_list(dsim, w) -> list:
         "controls": ["palette", "momentum", "explode_draw"],
         "cands": cands(imps, (192, 256, 160, 224), lambda m: (lambda mph, m=m: attack(mph, m, "S_TROO_ATK1"))),
         "claim": lambda c: c["proj_impacts"] >= 1 and c["explosion_px"] >= 1})
-    strafe = [I] * 18 + [{"strafe_left": True}] * 8 + [I] * 40
+    # M7 P6+P7: the monsters' tempo x2 (world.MONSTER_TICS_PER_FRAME) -- the imp throws and the fireball flies twice
+    # as many tics a frame: 33 frames are the 66 monster tics the scenario always had (at 66 frames the imp throws 5
+    # and some land), and the strafe out of the first one's path starts at frame 4
+    strafe = [I] * 4 + [{"strafe_left": True}] * 8 + [I] * 21
     out.append({
         "name": "H3 an imp's fireball into a wall (the player strafes out of its path)", "keys": strafe,
         "controls": ["relink"],

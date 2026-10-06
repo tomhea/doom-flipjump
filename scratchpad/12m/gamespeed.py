@@ -91,9 +91,16 @@ TOUR_TARGETS = 10                   # one destination per seed, spread over the 
 # requires `--validate`'s own per-frame record (pose and every door) to equal the binary's
 # (docs/ship-evidence/blocked27_gamespeed_trail.log). `--selftest` N6e requires `--validate` to
 # reproduce both, and N6f that the old doors-shut replay does NOT.
-BINARY_ENDS = ((831, 653), (-357, 430), (780, 427), (688, 208), (-176, 348), (-173, 163),
-               (-173, 413), (-490, 106), (239, 353), (189, 245))
-BINARY_DOORS = (1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+# M7 P6+P7 (O3, docs/gp-p67-interface.md section 10): the routes CHANGED -- the turn's tap rule and x1.5 (package F)
+# re-planned every script, and the player is now blocked by monsters, picks things up and is chased at the monsters'
+# tempo x2 -- so these are, until the P6+P7 binary is built, the MODEL's ends: `validate_scripts` on GameSim (the
+# whole game at the game tier's modes), PREDICTED at the integration (m7-p67) and owed their confirmation by
+# `gamespeed_trail.py --fjm <the P6+P7 build>` (TRAIL must PASS; it prints the binary's own). blocked27..48's were
+# ((831, 653), (-357, 430), (780, 427), (688, 208), (-176, 348), (-173, 163), (-173, 413), (-490, 106), (239, 353),
+# (189, 245)) with run 0 opening one door: not like-for-like (O3).
+BINARY_ENDS = ((577, 243), (-296, 120), (707, 492), (147, 214), (-128, 271), (-276, 425), (-371, 80), (-452, 373),
+               (-493, 223), (-495, 194))
+BINARY_DOORS = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 # runs 0 and 1's keys, recorded so the host test replays them without the ~75 s planner: run 0 is
 # the one that opens a door, and run 1 starts after it, which is where a stepper that is not reset
 # between runs shows. `--selftest` N6g checks them against script(0) and script(1).
@@ -444,6 +451,53 @@ def report(run_avgs, raw_avgs, size):
 # G5: are the ten games actually different games? (cheap -- the oracle, no fj)
 # ----------------------------------------------------------------------------------------------
 
+class GameSim:
+    """M7 P6+P7 (O3, docs/gp-p67-interface.md section 10) -- THE GAME the binary plays, stepped as the model: the
+    World at the game tier's modes (wall_renderer.MONSTER_MODE / PLAYER_MODE, "full" / "full"), the game picture's
+    "seen" sight rule (doomfj.sight.SeenHook: each tic's picture marks the next tic's seen monsters) and the monsters'
+    tempo (world.MONSTER_TICS_PER_FRAME), from the boot image's level start (BOOT_SKILL; gamespeed leaves the menu
+    with esc, so the world is the boot one). Since P6+P7 the player is BLOCKED by monsters, picks things up, and can
+    be hurt and die, and the monsters chase him twice a frame -- a door-only replay (DoorSim's step_sim) no longer
+    walks where the binary walks. `step` / `ds` / `order` / `doors_ever` / `reset` are DoorSim's interface, so
+    validate_scripts and gamespeed_trail.py's records read either."""
+
+    def __init__(self, wad=DEFAULT_WAD, mapname=DEFAULT_MAP):
+        from doomfj.wad import WadFile
+        self.mw = WadFile.from_path(str(ROOT / wad))
+        self.mapname = mapname
+        self.reset()
+        self.order = list(self.w.door_order)
+        self.passes = dict(self.w.door_pass)
+        self.ever = {si: 0 for si in self.order}
+
+    def reset(self):
+        from doomfj.reference_model import SimState
+        from doomfj.sight import SeenHook
+        from doomfj.wall_renderer import BOOT_SKILL, MONSTER_MODE, PLAYER_MODE
+        from doomfj.world import World
+        self.w = World(self.mw, self.mapname, skill=BOOT_SKILL, monsters=MONSTER_MODE, player=PLAYER_MODE)
+        self.w.set_sight_rule("seen", SeenHook(self.w))
+        self.ever = {si: 0 for si in getattr(self, "order", ())}
+        ws = self.w.ws
+        return SimState(ws.px, ws.py, ws.pangle, self.mapname)
+
+    @property
+    def ds(self):
+        return {si: (self.w.ws.d_state[k],) for k, si in enumerate(self.w.door_order)}
+
+    def step(self, st, kd):
+        from doomfj.reference_model import SimState
+        from doomfj.world import KEYS
+        self.w.tic({k: bool(kd.get(k)) for k in KEYS})
+        ws = self.w.ws
+        for k, si in enumerate(self.w.door_order):
+            self.ever[si] = max(self.ever[si], ws.d_state[k])
+        return SimState(ws.px, ws.py, ws.pangle, self.mapname)
+
+    def doors_ever(self):
+        return sum(1 for si in self.order if self.ever[si] >= self.passes[si])
+
+
 def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP, quiet=False,
                      doors=True, trails=None):
     """Step the ORACLE through every script and report whether each run actually PLAYS.
@@ -468,8 +522,9 @@ def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_M
     rm, scene, sp = _oracle(wad, mapname)
     dsim = None
     if doors:
-        from onewalk import DoorSim            # onewalk imports this module: import it here
-        dsim = DoorSim(wad, mapname)
+        # M7 P6+P7 (O3): the whole game the binary plays -- monsters, blocking, pickups, damage (GameSim); before
+        # P6 the binary's player met only its doors and lifts (onewalk.DoorSim, kept for the trail's controls)
+        dsim = GameSim(wad, mapname)
     out = []
     for r in range(n_runs):
         st, travelled, move_frames, moved_frames = (dsim.reset() if dsim else sp), 0, 0, 0

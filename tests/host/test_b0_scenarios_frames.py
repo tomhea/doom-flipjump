@@ -30,17 +30,23 @@ def b0s():
 
 
 @pytest.fixture()
-def v5(b0s):
-    """the v5 set with its sight rule in force (scenarios_v2's module global, restored after)"""
+def run4(b0s):
+    """a 4-frame run BUILT here (M7 P6+P7): v5's first run's setup and first keys as data, its poses the CURRENT
+    model's own -- the owner's tempo / turn / fire changes moved v5's recorded poses, and model_frames refuses a run
+    whose poses the model does not reproduce. The sight rule and the tempo are the game's (scenarios_v2's module
+    globals, restored after)."""
+    from doomfj.world import MONSTER_TICS_PER_FRAME
     doc = json.loads(SET_V5.read_text(encoding="ascii"))
-    saved = b0s.S.SIGHT_RULE
-    b0s.S.use_sight_rule(doc)
-    yield doc
-    b0s.S.SIGHT_RULE = saved
-
-
-def _short(run, n=4):
-    return dict(run, keys=run["keys"][:n], poses=run["poses"][:n])
+    saved = (b0s.S.SIGHT_RULE, b0s.S.MONSTER_TICS)
+    b0s.S.use_sight_rule({"sight_rule": doc["sight_rule"], "monster_tics": MONSTER_TICS_PER_FRAME})
+    run = dict(doc["runs"][0], keys=doc["runs"][0]["keys"][:4])
+    w = b0s.S.start_world(run["setup"])
+    run["poses"] = []
+    for k in run["keys"]:
+        w.tic(b0s.S.str_to_keys(k))
+        run["poses"].append([w.ws.px, w.ws.py, w.ws.pangle])
+    yield run
+    b0s.S.SIGHT_RULE, b0s.S.MONSTER_TICS = saved
 
 
 def test_drive_reads_only_what_drive_reads_says(b0s):
@@ -53,9 +59,9 @@ def test_drive_reads_only_what_drive_reads_says(b0s):
     assert read <= set(b0s.DRIVE_READS) | guarded, sorted(read - set(b0s.DRIVE_READS) - guarded)
 
 
-def test_model_frames_carry_everything_drive_reads_on_every_frame(b0s, v5):
-    run = v5["runs"][0]
-    frames = b0s.model_frames(_short(run))
+def test_model_frames_carry_everything_drive_reads_on_every_frame(b0s, run4):
+    run = run4
+    frames = b0s.model_frames(run)
     assert len(frames) == 4
     assert b0s.missing_drive_keys(frames) == []
     assert b0s.missing_drive_keys(frames[2:]) == [], "a slice that starts mid-run (the selftest's T5)"
@@ -72,9 +78,9 @@ def test_doorsim_frames_carry_the_new_world_and_no_movers(b0s):
     assert frames[0]["run_setup"]["pose"] == frames[0]["inj"]
 
 
-def test_a_frame_without_run_setup_is_named(b0s, v5):
+def test_a_frame_without_run_setup_is_named(b0s, run4):
     """R9: the shape that crashed -- run_setup on the first frame alone -- is refused by name, mid-run"""
-    frames = b0s.model_frames(_short(v5["runs"][0]))
+    frames = b0s.model_frames(run4)
     old = [dict(fr) for fr in frames]
     for fr in old[1:]:
         del fr["run_setup"]

@@ -403,9 +403,11 @@ def test_views_aim_vis_and_drop_rows():
 
 # ---------------------------------------------------------------------------------------------- 8.3: gamespeed
 def test_gamespeed_route_prediction():
-    """risk 3 (MEASURED in the plan): gamespeed's run 0, on the full model (the "los" sight rule), is stopped by a
-    monster -- 60 refused candidates, it ends at (635, 303), not BINARY_ENDS[0]; run 1 is not touched. R9: with
-    `player_blocking` off the model lands on the binary's recorded end (831, 653) -- O3's re-recording is owed"""
+    """risk 3 (MEASURED in the plan, re-measured at the integration on the RE-RECORDED keys -- O3: the turn's tap rule
+    re-planned every route, tests/fixtures/gamespeed_recorded_keys.json): gamespeed's run 0, on the full model (the
+    "los" sight rule), is held up by monsters -- 49 refused candidates, it ends at (763, 367); run 1 is not touched.
+    R9: with `player_blocking` off the same keys land elsewhere, (872, 494). (The binary's own ends -- the "seen"
+    rule, gamespeed.GameSim -- are gamespeed.BINARY_ENDS; test_gamespeed_validate holds those.)"""
     import json
     keys_by_run = json.loads((ROOT / "tests/fixtures/gamespeed_recorded_keys.json").read_text())
     ends = {}
@@ -414,8 +416,8 @@ def test_gamespeed_route_prediction():
             w = World(monsters="full", player="full", sight_rule="los", player_blocking=blocking)
             blocked = sum(w.tic({n: bool(k.get(n)) for n in KEYS}).player_blocked for k in keys_by_run[run])
             ends[blocking, run] = (w.ws.px >> 16, w.ws.py >> 16, blocked)
-    assert ends[True, "0"] == (635, 303, 60) and ends[False, "0"] == (831, 653, 0)
-    assert ends[True, "1"] == ends[False, "1"] == (-357, 430, 0)
+    assert ends[True, "0"] == (763, 367, 49) and ends[False, "0"] == (872, 494, 0)
+    assert ends[True, "1"] == ends[False, "1"] == (-296, 120, 0)
 
 
 # ------------------------------------------------------------------- the still candidate (the coordinator's fix)

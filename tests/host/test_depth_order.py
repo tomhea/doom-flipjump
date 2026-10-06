@@ -1,8 +1,7 @@
 """M7 P3.3 (host): the oracle's D3 d -- `render_wall_frame(rt_depth_order=)` draws a leaf's runtime things nearest
-first. On v5's R0-aftermath frame 96 (the census's worst: two monsters of one leaf overlapping on screen) the order
+first. On v5's R0-aftermath frame 96 (injected: tests/fixtures/p67_scenes.json; the census's worst: two monsters of one leaf overlapping on screen) the order
 changes the picture, the aprox-distance key and the true view depth agree there, and GAME_RENDER_KW carries the
 rule the fj implements."""
-import json
 import sys
 from pathlib import Path
 
@@ -14,14 +13,11 @@ sys.path[:0] = [str(ROOT / "scratchpad" / "gp"), str(ROOT / "scratchpad" / "12m"
 
 @pytest.fixture(scope="module")
 def frame96():
-    import scenarios_v2 as S
-    doc = json.loads((ROOT / "scratchpad/gp/scenarios/combat_scenarios_v5.json").read_text(encoding="ascii"))
-    S.use_sight_rule(doc)
-    run = next(r for r in doc["runs"] if r["name"] == "R0-aftermath")
-    w = S.start_world(run["setup"])
-    for s in run["keys"][:97]:
-        w.tic(S.str_to_keys(s))
-    return w
+    """the scene, INJECTED (M7 P6+P7): v5's R0-aftermath after 97 tics as tests/fixtures/p67_scenes.json froze it
+    (scratchpad/gp/p67_scene_dump.py, from the model v5 was recorded under) -- the owner's 2026-10-05 tempo / turn /
+    fire changes moved the replay, not the scene this test needs"""
+    import p67_scene_dump as SC
+    return SC.load_scene("aftermath96")
 
 
 def _render(w, depth):

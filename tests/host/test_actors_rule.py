@@ -16,7 +16,6 @@ The rule: no soft raise for monsters, a mobile is an actor (monster class and ba
 no slot for a sprite without a row in the view (every thing). The hosted tiers and deg_gate's picture keep the old
 rule (HOSTED_RENDER_KW; deg_gate passes neither key).
 """
-import json
 import sys
 from pathlib import Path
 
@@ -76,15 +75,15 @@ def test_a_near_fireball_still_draws_both_ways(court):
 
 
 def test_the_corpse_no_longer_hides_the_monsters_behind_it():
-    """v5 R0-aftermath frame 57 (the player on a corpse): the old rule draws neither live monster in view, the rule
+    """v5 R0-aftermath frame 57 (the player on a corpse; injected from tests/fixtures/p67_scenes.json): the old rule draws neither live monster in view, the rule
     draws both -- scratchpad/gp/p67e_visibility_probe.py's attribution, which is also its own R9 control"""
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
+    import p67_scene_dump as SC
     import p67e_visibility_probe as V
-    doc = json.loads((ROOT / "scratchpad/gp/scenarios/combat_scenarios_v5.json").read_text(encoding="ascii"))
-    V.S.use_sight_rule(doc)
-    try:
-        run = next(r for r in doc["runs"] if r["name"] == "R0-aftermath")
-        rows, _w = V.replay_run(run, V.P.Oracle(), None, 1, V.RMOD.DEG_SOFT_MON, frames={57})
-    finally:
-        V.S.use_sight_rule({})
-    assert rows[0]["miss_d"] >= 2 and rows[0]["miss_e"] == 0, rows[0]
+    # the scene, INJECTED (M7 P6+P7): frame 57 as tests/fixtures/p67_scenes.json froze it -- the owner's tempo / turn /
+    # fire changes moved v5's replay, not the scene
+    w = SC.load_scene("aftermath57")
+    mph = V.MonsterPhase.__new__(V.MonsterPhase)
+    mph.world, mph.gd = w, V.S.gd
+    row = V.frame_stats(V.P.Oracle(), mph, V.RMOD.DEG_SOFT_MON)
+    assert row["miss_d"] >= 2 and row["miss_e"] == 0, row

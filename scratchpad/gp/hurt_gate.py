@@ -468,19 +468,53 @@ def main(argv=None) -> int:
     return 0 if ok else 1
 
 
-def poke_cells(run: Run, setup) -> dict:
-    """the cells a scenario's setup moved from the boot level start -- what frame 0 writes into the binary"""
+def poke_cells(run: Run, setup, *, mmode: str = MMODE, pmode: str = PMODE, lists: bool = False) -> dict:
+    """the cells a scenario's setup moved from the boot level start -- what frame 0 writes into the binary.
+    M7 P6+P7 (B0's aftermath, which lays DROPS): `lists` adds the runtime things' leaf lists (`leaf_list_cells`:
+    sshead / thnext) -- a setup that makes a drop lie must LINK its row, as the binary's drop_link<k> does, or the
+    binary never draws it; `mmode` / `pmode` the phases' modes (default this gate's)"""
+    ca, cb = setup_cells(run, setup, mmode=mmode, pmode=pmode, lists=lists)
+    return {k: v for k, v in cb.items() if ca.get(k) != v}
+
+
+def setup_cells(run: Run, setup, *, mmode: str = MMODE, pmode: str = PMODE, lists: bool = False) -> tuple:
+    """(the boot level start's cells, the cells after `setup`) -- `poke_cells`' two sides; a caller that checks the
+    binary's cells BEFORE poking them (b0_scenarios) reads the first"""
     from doomfj.monsters import MonsterPhase
     from doomfj.wall_renderer import BOOT_SKILL
     orc, dsim = run.orc, run.dsim
 
     def cells_of(ph):
-        return {**ph.state(), **orc.monster_rt(ph), **ph.weapon_state()}
-    a = MonsterPhase(dsim.mw, dsim.mapname, BOOT_SKILL, rm=dsim.rm, mode=MMODE, player=PMODE)
-    b = MonsterPhase(dsim.mw, dsim.mapname, BOOT_SKILL, rm=dsim.rm, mode=MMODE, player=PMODE)
+        return {**ph.state(), **orc.monster_rt(ph), **ph.weapon_state(),
+                **(leaf_list_cells(orc, ph, BOOT_SKILL) if lists else {})}
+    a = MonsterPhase(dsim.mw, dsim.mapname, BOOT_SKILL, rm=dsim.rm, mode=mmode, player=pmode)
+    b = MonsterPhase(dsim.mw, dsim.mapname, BOOT_SKILL, rm=dsim.rm, mode=mmode, player=pmode)
     setup(b)
-    ca, cb = cells_of(a), cells_of(b)
-    return {k: v for k, v in cb.items() if ca.get(k) != v}
+    return cells_of(a), cells_of(b)
+
+
+def leaf_list_cells(orc, ph, skill) -> dict:
+    """the binary's per-leaf runtime-thing lists for phase `ph` as the probe reads them: {"sshead": one byte per leaf,
+    "thnext": one byte per row} -- built FROM SCRATCH (things.spawn_leaf_lists: each leaf's rows in ascending index,
+    stored t + 1), which is what the binary's incremental links keep (pw_link / leaf_link insert in index order:
+    barrelcode's "linked in that leaf's list in index order"). A row is linked when it is present: a runtime thing
+    the skill spawns and the game has not removed (`MonsterViews.hidden`), a live mobile, a lying drop (mdrop 1).
+    At the level start this is the restart block's own `things.skill_level_start` (tests/host hold the two equal)."""
+    from doomfj.monsters import drop_rows, droppers, mobile_rows
+    from doomfj.things import skill_absent, spawn_leaf_lists
+    from doomfj.world import FIREBALL_POOL, FX_POOL
+    mv, ws = orc._mv(ph.world), ph.world.ws
+    thss = orc.monster_rt(ph)["thss_rt"]
+    gone = skill_absent(mv.drawable, skill) | set(mv.hidden(ph))
+    present = [mv.rt_drawable[t] not in gone for t in range(mv.nrt)]
+    if mobile_rows(ph.world):
+        present += [bool(ws.proj_active[s]) for s in range(FIREBALL_POOL)]
+        present += [bool(ws.fx_active[s]) for s in range(FX_POOL)]
+    if drop_rows(ph.world):
+        present += [ws.mon_drop[m] == 1 for m in droppers(ph.world)]
+    assert len(present) == len(thss), (len(present), len(thss))
+    head, nxt = spawn_leaf_lists(thss, len(mv.cmap.subsectors), present)
+    return {"sshead": tuple(head), "thnext": tuple(nxt)}
 
 
 def binary_scenario(gb, cells, table, run: Run, sc, pose, setup, want) -> bool:

@@ -30,6 +30,19 @@ not move. The frame is drawn from the model's landing, but the collision the gam
 run there is missing -- B0 UNDERCOUNTS those frames. `--proxy` measures the size: a second pass
 gives every strafe-only frame a FORWARD step into the same landing (so blocked27 runs its collision
 tic and lands on the same pose, drawing the same picture) and reports the exact difference.
+  M7 P6+P7: the step is not neutral any more. It TOUCHES what lies at the landing (the normal run's strafe-only frame
+does not move, so it takes nothing there: v6's aftermath takes a health bonus on frame 28, the barrel hall a dropped
+shotgun on frame 48 -- the arms digit stays lit), and a wall, a step or a solid thing can REFUSE it (v6's spectre
+corridor, frame 0: one step behind the landing is inside a wall, 128 units below -- try_move refuses all three
+candidates and the frame is drawn from there). So a proxy run is judged against its OWN oracle, like the normal run
+(`judge`), "picture identical to the normal run" is a recorded note with its cause (`proxy_note`), and every refused
+step is listed: on those frames the delta is not the collision tic at the landing.
+
+SETUP. A run's setup beyond the pose (v6: the aftermath's three corpses and two lying clips, `setup.corpses`) is
+applied to the mirror with the set's own `inject_corpse` and POKED into the binary at the first game frame --
+hurt_gate's frame-0 mechanism (`setup_cells`) plus the leaf lists that link the lying drops; the binary's own values
+of those cells are read back first and must be the level start's. `--oracle-only` steps each such run once more
+without its setup: it must part from the set (the R9 control).
 
 WHAT B0 MEASURES: blocked27's cost of drawing the set's camera path frame by frame, with its own
 door tic, player tic and collision (not on strafe-only frames), in ITS world: monsters at their
@@ -155,19 +168,84 @@ class _NoBinary:
     frames, palettes, ops, seconds = [], [], 0, 0.0
 
 
-def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, pmode=None) -> dict:
+def setup_fn(run_setup: dict):
+    """M7 P6+P7 (v6's R0-aftermath): the part of a run's SETUP that is not the pose -- the set's CORPSES
+    (`setup.corpses`: slot, type, map position, corpse state, drop) -- as a function of a monsters.MonsterPhase, or
+    None when the setup has none. It is `scenarios_v2.inject_corpse`, the definition the set's own replay
+    (`start_world`) runs, applied to the phase's world; the set's recorded type and corpse state are checked
+    against the slot first. The pose is not here: b0 injects the pose every frame. A setup field b0 does not know
+    is refused, so a new kind of setup cannot be dropped silently."""
+    extra = sorted(set(run_setup) - {"pose", "corpses"})
+    assert not extra, "a setup field b0 does not inject: %s" % extra
+    corpses = list(run_setup.get("corpses") or ())
+    if not corpses:
+        return None
+
+    def fn(ph):
+        w = ph.world
+        for c in corpses:
+            assert w.mon_things[c["slot"]].type == c["type"], c
+            assert S.corpse_state(w, c["slot"]) == c["state"], c
+            S.inject_corpse(w, c["slot"], c["x"], c["y"], c["drop"] is not None)
+    return fn
+
+
+def setup_poke(orc, run_setup: dict, pmode=None):
+    """(before, poke): the cells the run's setup moves from the level start -- hurt_gate's frame-0 poke
+    (`setup_cells`, the ONE mechanism the gates use) with the leaf lists (a lying drop is linked in its corpse's
+    leaf, as drop_link<k> links it) -- and their level-start values, which b0 reads back from the binary before it
+    writes. ({}, {}) for a setup without corpses."""
+    fn = setup_fn(run_setup)
+    if fn is None:
+        return {}, {}
+    from types import SimpleNamespace
+    import hurt_gate as H
+    from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+    ca, cb = H.setup_cells(SimpleNamespace(orc=orc, dsim=orc), fn, mmode=MONSTER_MODE, pmode=pmode or PLAYER_MODE,
+                           lists=True)
+    poke = {k: v for k, v in cb.items() if ca.get(k) != v}
+    return {k: ca[k] for k in poke}, poke
+
+
+def setup_cell_specs(orc) -> dict:
+    """the probe cells a setup poke may name, beyond b0's own: the monsters, the runtime-thing rows, `thvis` and the
+    leaf lists (one byte per leaf / per row: the write_byte arrays sshead / thnext)"""
+    from doomfj.monsters import MonsterPhase
+    from doomfj.wall_renderer import BOOT_SKILL, MONSTER_MODE
+    cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
+    ph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE, player=orc.player_mode)
+    cells["sshead"] = P.Cell("sshead", "byte", count=len(orc._mv(ph.world).cmap.subsectors))
+    cells["thnext"] = P.Cell("thnext", "byte", count=orc.nrt)
+    return cells
+
+
+def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, pmode=None,
+          inject_setup: bool = True) -> dict:
     """one run through the binary: inject and deliver per `frames`; check against the expectation
     (`override`: a list of (pose, doors) to check against instead).
     M7 P6: `gb` None (`--oracle-only`) steps the expectation alone -- the mirror, its monsters, its pictures for
     the seen flags -- and reports its partings (camera, doors, loot) and deaths; `pmode` the player mode (default
-    wall_renderer's)"""
+    wall_renderer's).
+    M7 P6+P7: the run's SETUP beyond the pose (`setup_fn`: v6's aftermath corpses) is applied to the mirror's
+    monsters and POKED into the binary at the first game frame's start (`setup_poke`), after the binary's own
+    values of those cells are read back and checked against the level start's (`setup_pre`: the names that
+    differed -- a non-empty list FAILS the run). `inject_setup` False drops the setup on both sides (the R9
+    control: the aftermath then parts from the set)."""
     gaps = missing_drive_keys(frames)
     assert not gaps, "drive reads keys these frames lack, e.g. %s" % gaps[:4]
     import gamespeed as GS
     import m2_std_gate as gate
     mf = gate.MENU_FRAMES
+    sfn = setup_fn(frames[0]["run_setup"]) if inject_setup and frames else None
+    before, poke = setup_poke(orc, frames[0]["run_setup"], pmode) if sfn is not None and gb is not None else ({}, {})
     cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift)
+    if poke:
+        cells = {**cells, **{k: c for k, c in setup_cell_specs(orc).items() if k in poke}}
     p = P.Probe(cells, table, gb.width) if gb is not None else None
+    if p is not None:
+        missing = sorted(k for k in poke if k not in p.cells)
+        assert not missing, "the setup moves cells the probe cannot write: %s" % missing
+    setup_pre = []
     per_frame = [{} for _ in range(mf)] + [fr["keys"] for fr in frames]
     events = GS.events_for(per_frame)
     readback = {}
@@ -189,6 +267,10 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
         if inject_hurt and fr.get("hurt") is not None:   # M7 P5: the frozen model's pre-tic health / armor
             hp, ar, at = fr["hurt"]
             vals.update({"p_hp": hp & 0xFFF, "p_ar": ar, "p_at": at})
+        if f == mf and poke:                            # M7 P6+P7: the setup, once, at the first game frame
+            got = pr.read_cells(sorted(poke))
+            setup_pre.extend(k for k in sorted(poke) if got[k] != before[k])
+            vals.update(poke)
         pr.write_cells(vals)
 
     def present(pr, f):
@@ -209,6 +291,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
     pal_ok = [i < len(r.palettes) and r.palettes[i] == orc.palette_sha(0) for i in range(mf)]
     dead = []
     cam = door = 0
+    cam_frames, trace = [], []  # M7 P6+P7: the frames whose pose parts from the model; per frame what was expected
+    refusers = {}               # M7 P6+P7: frame -> what refused the move there (chase mirrors)
     loot_part = 0               # M7 P6: frames whose loot cells differ from the frozen model's (recorded, not judged)
     # M7 P3.1: the binary's monsters live IDLE from its boot image (the model's own phase, a tic per
     # world frame after the player); B0 injects the player, doors and movers, not them, so the
@@ -222,6 +306,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
         # strafe -- the model's strafe reaches the binary through the injected pose), so the binary's weapon only
         # rises and idles, and the mirror steps the same keys
         mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE, player=pmode or PLAYER_MODE)
+        if sfn is not None:
+            sfn(mph)                                     # M7 P6+P7: the set's corpses, as the binary is poked
     loot = mph is not None and player_loots(mph.world.player)     # M7 P6: removals, barrels by state, the card
     # M7 P3.2a: a monster that can wake reads the seen flags of the LAST picture, which the binary marks on every
     # frame -- so the model's picture (and its seen flags) is taken on every frame too, whatever `pixel_every`
@@ -245,6 +331,9 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
             # M7 P6: the mirror runs the weapon and the move itself (`BinaryMirror.step(mph=)`): nukage, then the
             # weapon, then the model's move once the player loots -- the binary's order
             epose, edoors = cm.step(fr["inj"], fr["keys"], fr["doors"], fr.get("movers"), others=_boxes, mph=mph)
+            if tuple(epose[:2]) != tuple(fr["post"][:2]):   # M7 P6+P7: the move fell short -- what refused it
+                refusers[f] = ("a solid thing" if mph.world._solid_thing_at(fr["post"][0], fr["post"][1]) is not None
+                               else "a wall or step (try_move)")
             if player_loots(mph.world.player):
                 loot_part += loot_cells(mph.world) != fr.get("post_loot", loot_cells(mph.world))
             cm.state, cm.mstate = mph.frame(cm.state, cm.mstate, epose[0] & 0xFFFFFFFF, epose[1] & 0xFFFFFFFF,
@@ -271,6 +360,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
         d_part = fr.get("post_doors") is not None and tuple(edoors) != tuple(fr["post_doors"])
         cam += c_part
         door += d_part
+        if c_part:
+            cam_frames.append(f)
         check = f % pixel_every == 0 or c_part or d_part or seen_every
         # M7 P3.2a: the monsters' seen flags come from EVERY picture, checked or not (and a monster that can
         # wake makes every picture a checked one: `seen_every`)
@@ -295,9 +386,19 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
             if check and gb is not None:
                 pix_ok.append(r.frames[mf + f] == want)
                 pix_frames.append(f)
+        else:
+            want = None
+        # M7 P6+P7: what this frame expected -- the proxy's note compares two runs' traces frame by frame
+        trace.append({"pose": (P_signed(epose[0]), P_signed(epose[1]), epose[2] & M32), "doors": tuple(edoors),
+                      "picture": hashlib.sha256(want).hexdigest()[:16] if want is not None else None,
+                      "bar": mph.screen_kw() if mph is not None else None,
+                      "loot": loot_cells(mph.world) if loot else None,
+                      "taken": tuple((i, mph.world.pickup_things[i].type, mph.world.pickup_things[i].x,
+                                      mph.world.pickup_things[i].y) for i in mph.taken()[0]) if loot else None})
     return {"ops_total": r.ops, "frame_ops": ops_f, "state_ok": state_ok, "pix_ok": pix_ok,
             "pix_frames": pix_frames, "cam_parts": cam, "door_parts": door, "pal_ok": pal_ok, "dead": dead,
-            "loot_parts": loot_part,
+            "loot_parts": loot_part, "cam_frames": cam_frames, "trace": trace, "refusers": refusers,
+            "setup_poked": sorted(poke), "setup_pre": setup_pre,
             "presented": len(r.frames), "seconds": r.seconds, "frames": r.frames[mf:]}
 
 
@@ -320,8 +421,11 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
           % (len(runs), time.time() - t0), flush=True)
     orc = GameOracle()
     assert list(orc.door_order) == list(S.new_world().door_order), "door order differs"
+    names = {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon).values()}
+    if any(setup_fn(run["setup"]) for run in doc["runs"]):          # M7 P6+P7: the aftermath's poke
+        names |= {c.label for c in setup_cell_specs(orc).values()}
     with P.binary_lock("S4v2-b0"):
-        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon).values()})
+        table = P.LabelTable.load(labels, names)
         gb = P.GameBinary(fjm)
         base = gb.run(gate.MENU_FRAMES).ops           # startup + the menu frames, EXACT
         print("b0_scenarios: %s sha256 %s | set %s (%d runs, keys %s) | startup+menu %s ops (exact)"
@@ -336,6 +440,7 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
                 rp = drive(gb, table, orc, pframes, pixel_every=pixel_every)
                 res["proxy"] = rp
                 res["proxy_same_picture"] = rp["frames"] == res["frames"]
+                res["proxy_note"] = proxy_note(res, rp, frames, pframes)
             results.append(res)
     print("  %-20s %12s %11s %11s %11s  %-9s %-9s %3s %3s %4s"
           % ("run", "avg (exact)", "p50 +-2^18", "p80", "max", "state", "pixels", "cam", "dr",
@@ -374,15 +479,25 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
             rp = res["proxy"]
             d = rp["ops_total"] - res["ops_total"]
             pavgs.append((rp["ops_total"] - base) / len(rp["frame_ops"]))
+            note = res["proxy_note"]
             per[res["name"]] = {"delta_total": d, "strafe_only_frames": res["strafe_only"],
                                 "per_strafe_only_frame": d / res["strafe_only"] if res["strafe_only"] else None,
-                                "state_ok": sum(rp["state_ok"]), "same_picture": res["proxy_same_picture"],
-                                "avg_exact_proxy": pavgs[-1]}
-            print("    %-20s +%s ops over %d strafe-only frames = %s per frame; state %d/%d; "
-                  "picture identical: %s"
+                                "state_ok": sum(rp["state_ok"]), "pix_ok": sum(rp["pix_ok"]),
+                                "pix_n": len(rp["pix_ok"]), "same_picture": res["proxy_same_picture"],
+                                "refused": note["refused"], "note": note["text"], "avg_exact_proxy": pavgs[-1]}
+            print("    %-20s +%s ops over %d strafe-only frames = %s per frame; against its own oracle: state "
+                  "%d/%d pixels %d/%d; picture identical to the normal run: %s%s"
                   % (res["name"], format(d, ","), res["strafe_only"],
                      format(int(round(d / res["strafe_only"])), ",") if res["strafe_only"] else "-",
-                     sum(rp["state_ok"]), len(rp["state_ok"]), res["proxy_same_picture"]))
+                     sum(rp["state_ok"]), len(rp["state_ok"]), sum(rp["pix_ok"]), len(rp["pix_ok"]),
+                     res["proxy_same_picture"], "" if res["proxy_same_picture"] else " (NOTE, not a failure)"))
+            if not res["proxy_same_picture"] or note["refused"]:
+                print("      note: %s" % note["text"])
+            if note["refused"]:
+                print("      !! %d proxy step(s) REFUSED at frames %s: there the proxy ran a refused move from one "
+                      "step short of the landing and drew that pose -- not the collision tic at the landing; this "
+                      "run's delta is not the strafe's price on those frames" % (len(note["refused"]),
+                                                                               note["refused"][:8]))
         pb = GS.binding_speed(pavgs)
         tot_d = sum(v["delta_total"] for v in per.values())
         tot_n = sum(v["strafe_only_frames"] for v in per.values())
@@ -390,21 +505,21 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
               "strafe-only frame over %d frames"
               % (format(int(round(pb)), ","), format(int(round(pb - binding)), ","),
                  format(int(round(tot_d / tot_n)), ",") if tot_n else "-", tot_n))
+        refused = sum(len(v["refused"]) for v in per.values())
+        if refused:
+            print("    !! %d strafe-only frame(s) priced by a REFUSED proxy step (listed above): the delta over them "
+                  "is not the strafe's collision tic" % refused)
         under = {"binding_proxy": pb, "mean_proxy": sum(pavgs) / len(pavgs),
                  "p80_proxy": GS.percentile_run(pavgs), "delta_binding": pb - binding,
-                 "strafe_only_frames": tot_n, "delta_total": tot_d,
+                 "strafe_only_frames": tot_n, "delta_total": tot_d, "refused_steps": refused,
                  "per_strafe_only_frame": tot_d / tot_n if tot_n else None, "per_run": per,
                  "method": "each strafe-only frame injected one FORWARD step behind the model's "
-                           "landing with forward delivered: blocked27 runs its collision tic into "
-                           "the same pose (same picture); the difference is exact"}
-    bad = [r["name"] for r in results
-           if not (all(r["state_ok"]) and all(r["pix_ok"]) and r["presented"] == len(r["state_ok"]) + 2)]
-    # M7 P5: every present's palette, and no frame whose mirror died
-    bad += [r["name"] + "(palette)" for r in results if not all(r["pal_ok"])]
-    bad += [r["name"] + "(dead at %s)" % r["dead"][:3] for r in results if r["dead"]]
-    if proxy:
-        bad += [r["name"] + "(proxy)" for r in results
-                if not (all(r["proxy"]["state_ok"]) and r["proxy_same_picture"])]
+                           "landing with forward delivered: the binary runs its collision tic into "
+                           "the same pose; the difference is exact. Since P6 the step is not neutral: "
+                           "it touches what lies at the landing (a pickup the normal run's still frame "
+                           "never takes) and a solid thing can refuse it -- so each proxy run is judged "
+                           "against its OWN oracle, and 'same picture' is a recorded note"}
+    bad = judge(results, proxy)
     if out_json:
         cmd = "python scratchpad/gp/b0_scenarios.py --file %s --pixel-every %d%s --json %s" % (
             Path(doc_path).as_posix(), pixel_every, " --proxy" if proxy else "", Path(out_json).as_posix())
@@ -421,10 +536,82 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
     return 1 if bad else 0
 
 
+def run_ok(r: dict) -> list:
+    """the reasons one drive result is WRONG (empty: right): state and pixels against its own expectation on
+    every frame, every frame presented, every palette, no mirror death, the setup's cells as the level start had
+    them before the poke"""
+    out = []
+    if not (all(r["state_ok"]) and all(r["pix_ok"]) and r["presented"] == len(r["state_ok"]) + 2):
+        out.append("")
+    if not all(r["pal_ok"]):
+        out.append("(palette)")
+    if r["dead"]:
+        out.append("(dead at %s)" % r["dead"][:3])
+    if r.get("setup_pre"):
+        out.append("(setup: %s held other values before the poke)" % r["setup_pre"][:4])
+    return out
+
+
+def judge(results: list, proxy: bool) -> list:
+    """the runs that FAIL b0, by name. M7 P6+P7 (the coordinator's decision, 2026-10-06): a --proxy run is a COST
+    measurement and is judged like the normal run -- against its OWN oracle (`run_ok`); whether it draws the
+    normal run's pictures is a recorded note (`proxy_note`), not a failure: since P6 the proxy's forward step
+    touches what lies at the landing and a solid thing can refuse it"""
+    bad = [r["name"] + why for r in results for why in run_ok(r)]
+    if proxy:
+        bad += [r["name"] + "(proxy)" + why for r in results for why in run_ok(r["proxy"])]
+    return bad
+
+
+def proxy_note(res: dict, rp: dict, frames: list, pframes: list) -> dict:
+    """why a proxy run's expectation parts from the normal run's (the two traces, frame by frame): `refused` the
+    strafe-only frames whose proxy step did not reach the model's landing (a thing or a wall refused the forward
+    step: the pose drawn is one step short), and the FIRST frame the two expectations part with its cause -- a
+    refused step, a pickup the proxy's step touched (the loot cells part: the normal run's strafe-only frame does
+    not move, so it touches nothing), the bar, or the picture alone"""
+    refused = [f for f in rp["cam_frames"] if pframes[f]["strafe_only"] and f not in res["cam_frames"]]
+    ta, tb = res["trace"], rp["trace"]
+    differ = [f for f in range(min(len(ta), len(tb))) if ta[f] != tb[f]]
+    pic = [f for f in differ if ta[f]["picture"] != tb[f]["picture"]]
+    if not differ:
+        return {"refused": refused, "first": None, "cause": None, "differ": 0,
+                "text": "the proxy expected the normal run's every frame"}
+    f = differ[0]
+    a, b = ta[f], tb[f]
+    if f in refused:
+        cause = "a REFUSED step, by %s (pose %s, the model's landing %s)" % (
+            rp.get("refusers", {}).get(f, "?"), b["pose"], a["pose"])
+    elif a["pose"] != b["pose"]:
+        cause = "the pose (%s vs %s)" % (b["pose"], a["pose"])
+    elif a["taken"] != b["taken"] or a["loot"] != b["loot"]:
+        ks = sorted(k for k in a["loot"] if a["loot"][k] != b["loot"][k])
+        va, vb = (a["bar"] or {}).get("values", {}), (b["bar"] or {}).get("values", {})
+        drops = [k for k, (x, y) in enumerate(zip(a["loot"]["mdrop"], b["loot"]["mdrop"])) if x == 1 and y == 2]
+        what = (["item %d (type %d at %d, %d)" % t for t in sorted(set(b["taken"]) - set(a["taken"]))]
+                + ["the DROP of dropper %d" % k for k in drops])
+        cause = ("a PICKUP the proxy's step touched at the landing -- %s; the normal run's strafe-only frame does "
+                 "not move, so it never takes it (%s)") % (
+                    ", ".join(what) or "nothing taken",
+                    ", ".join(["%s %s -> %s" % (k, a["loot"][k], b["loot"][k]) for k in ks if k != "mdrop"]
+                              + ["bar %s %s -> %s" % (k, va[k], vb.get(k)) for k in sorted(va) if va[k] != vb.get(k)]))
+    elif a["bar"] != b["bar"]:
+        ks = sorted(k for k in a["bar"] if a["bar"][k] != b["bar"].get(k))
+        cause = "the bar (%s)" % ", ".join("%s %s -> %s" % (k, a["bar"][k], b["bar"].get(k)) for k in ks)
+    else:
+        cause = "the picture alone (the monsters or effects part)"
+    so = "a strafe-only frame" if pframes[f]["strafe_only"] else "not a strafe-only frame"
+    return {"refused": refused, "first": f, "cause": cause, "differ": len(differ),
+            "text": "the expectations part first at frame %d (%s): %s; %d frames' expectations differ, %d pictures"
+                    % (f, so, cause, len(differ), len(pic))}
+
+
 def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
     """R9 for the driver: its composition IS gamespeed's (a recorded run reproduces to the op, with
     every door written each frame), its state and pixel checks have teeth, a door write takes
-    effect, and the strafe proxy changes the ops and not the picture."""
+    effect, and the strafe proxy changes the ops and not the picture.
+    M7 P6+P7: T7 a run's SETUP poke (v6's aftermath corpses) takes effect and a binary not poked is rejected (SKIPPED
+    on a set without a setup); T8 a proxy run is judged against its own oracle, and a broken one FAILS `judge`."""
+    global setup_poke
     import m2_std_gate as gate
     import b0 as B
     fails = []
@@ -446,6 +633,8 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
     runs = {r["name"]: r for r in doc["runs"]}
     court = model_frames(runs["R0-courtyard"])[:6]
     nw, nwp = model_frames(runs["R0-northwest"])[:30], model_frames(runs["R0-northwest"], proxy=True)[:30]
+    aft_run = next((r for r in doc["runs"] if setup_fn(r["setup"]) is not None), None)
+    aftf = model_frames(aft_run)[:6] if aft_run is not None else None
     orc = GameOracle()
     # T5's window: the first frame of the aftermath run (then the west hall's) from which opening a
     # still-shut door changes the picture, and the door
@@ -481,8 +670,11 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
             fr2["exp"] = mirror.step(fr["inj"], fr["keys"], ds, fr.get("movers"))
             fr2["post_doors"] = None
         opened.append(fr2)
+    names = {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon).values()}
+    if aftf is not None:
+        names |= {c.label for c in setup_cell_specs(orc).values()}
     with P.binary_lock("S4v2-b0-selftest"):
-        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon).values()})
+        table = P.LabelTable.load(labels, names)
         gb = P.GameBinary(fjm)
         r1 = drive(gb, table, orc, frames, pixel_every=10)
         # the recorded total and calibration belong to ONE binary (probe.RECORDED_SHA16): on any other they are
@@ -542,35 +734,107 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
         check("T6 ... and costs more ops (the collision tic it adds)",
               so > 0 and b["ops_total"] > a["ops_total"],
               "+%s ops" % format(b["ops_total"] - a["ops_total"], ","))
+        # T7 (M7 P6+P7): the aftermath's SETUP -- three corpses, two clips lying -- poked at the first game frame:
+        # the binary held the level start's values first, and then draws and steps what the mirror does
+        if aftf is None:
+            print("  T7 the setup poke: SKIPPED -- the set %s has no run with a setup (v6's R0-aftermath has)"
+                  % Path(doc_path).name, flush=True)
+        else:
+            a7 = drive(gb, table, orc, aftf, pixel_every=1)
+            check("T7 the aftermath's corpses poked: the level start's values read back, then state- and pixel-exact",
+                  not a7["setup_pre"] and all(a7["state_ok"]) and all(a7["pix_ok"]) and bool(a7["setup_poked"]),
+                  "poked %s; before-poke mismatches %s; state %d/%d pixels %d/%d" % (
+                      a7["setup_poked"], a7["setup_pre"], sum(a7["state_ok"]), len(a7["state_ok"]),
+                      sum(a7["pix_ok"]), len(a7["pix_ok"])))
+            real = setup_poke
+            setup_poke = lambda *_a, **_k: ({}, {})        # noqa: E731 -- the mirror keeps the corpses, the binary not
+            try:
+                n7 = drive(gb, table, orc, aftf, pixel_every=1)
+            finally:
+                setup_poke = real
+            check("T7 negative: the same mirror against a binary NOT poked is rejected on the first frame",
+                  not n7["pix_ok"][0] or not n7["state_ok"][0],
+                  "frame 0: state %s pixels %s" % (n7["state_ok"][0], n7["pix_ok"][0]))
+        # T8 (M7 P6+P7, GAP 1): a proxy run is judged against its OWN oracle -- the northwest proxy passes `judge`, and
+        # the same proxy run against an expectation one turn off FAILS it as "(proxy)"
+        bentp = [((q[0], q[1], (q[2] + (640 << 16)) & M32), d) for q, d in (fr["exp"] for fr in nwp)]
+        bp = drive(gb, table, orc, nwp, pixel_every=50, override=bentp)
+        check("T8 the proxy judged against its own oracle passes; a broken own oracle FAILS it",
+              judge([dict(a, name="T8", proxy=b)], True) == []
+              and judge([dict(a, name="T8", proxy=bp)], True) == ["T8(proxy)"],
+              "%s / %s" % (judge([dict(a, name="T8", proxy=b)], True), judge([dict(a, name="T8", proxy=bp)], True)))
     print("")
     print("B0_SCENARIOS SELFTEST %s%s" % ("PASS" if not fails else "FAIL",
                                           "" if not fails else ": " + ", ".join(fails)), flush=True)
     return 1 if fails else 0
 
 
-def oracle_only(doc_path: Path, pmode=None) -> int:
+def oracle_only(doc_path: Path, pmode=None, proxy: bool = False, only=None) -> int:
     """M7 P6 (`--oracle-only`): every run REPLAYED on the frozen model (`model_frames` -- it refuses a run whose
     poses no longer reproduce: the freeze), then its expectation stepped with no binary (`drive(None, ...)`): the
-    camera, door and loot partings it would count, and any death of the mirror (a death FAILS, as in b0)"""
+    camera, door and loot partings it would count, and any death of the mirror (a death FAILS, as in b0).
+    M7 P6+P7: a run with a SETUP (v6's aftermath corpses) prints the cells b0 pokes for it, and is stepped a second
+    time WITHOUT the setup -- the R9 control: that run must part from the set (camera or doors), else the setup
+    is invisible to b0 and the run FAILS as vacuous. `proxy`: each run's proxy pass too, with its own partings,
+    its refused steps and why its expectation parts from the normal run's (`proxy_note`). `only`: run names that
+    start with it"""
     doc = json.loads(Path(doc_path).read_text(encoding="ascii"))
     S.use_sight_rule(doc)
     orc = GameOracle()
     if pmode:
         orc.player_mode = pmode
     from doomfj.wall_renderer import PLAYER_MODE
-    print("b0_scenarios --oracle-only: set %s (%d runs, keys %s), PLAYER_MODE %s"
-          % (Path(doc_path).name, len(doc["runs"]), S.keys_sha(doc), pmode or PLAYER_MODE), flush=True)
-    bad = []
-    for run in doc["runs"]:
+    runs = [r for r in doc["runs"] if not only or r["name"].startswith(only)]
+    print("b0_scenarios --oracle-only: set %s (%d runs, keys %s), PLAYER_MODE %s%s"
+          % (Path(doc_path).name, len(runs), S.keys_sha(doc), pmode or PLAYER_MODE, ", --proxy" if proxy else ""),
+          flush=True)
+    bad, rows = [], []
+    for run in runs:
         frames = model_frames(run)                     # raises if the frozen model no longer reproduces the set
         res = drive(None, None, orc, frames, pmode=pmode)
+        so = sum(fr["strafe_only"] for fr in frames)
         print("  %-20s %3d frames reproduce the set's poses; mirror partings: camera %d, doors %d, loot %d; "
               "deaths %s" % (run["name"], len(frames), res["cam_parts"], res["door_parts"], res["loot_parts"],
                              res["dead"][:3] or 0), flush=True)
         if res["dead"]:
             bad.append(run["name"])
-    print("B0 ORACLE-ONLY %s" % ("OK -- the frozen poses reproduce and no mirror dies" if not bad
-                                 else "FAIL: dead in %s" % bad))
+        row = {"name": run["name"], "cam": res["cam_parts"], "dr": res["door_parts"], "loot": res["loot_parts"],
+               "dead": len(res["dead"]), "sonl": so}
+        if setup_fn(run["setup"]) is not None:
+            _before, poke = setup_poke(orc, run["setup"], pmode)
+            print("    setup: %d corpses; b0 pokes at the first game frame %s" % (len(run["setup"]["corpses"]),
+                                                                           ", ".join(sorted(poke))), flush=True)
+            ctl = drive(None, None, orc, frames, pmode=pmode, inject_setup=False)
+            seen = ctl["cam_parts"] + ctl["door_parts"] > 0
+            print("    CONTROL without the setup: camera %d, doors %d, loot %d -- %s"
+                  % (ctl["cam_parts"], ctl["door_parts"], ctl["loot_parts"],
+                     "parts from the set (the setup is visible to b0)" if seen
+                     else "NEVER parts: the setup is invisible to b0, VACUOUS, FAIL"), flush=True)
+            if not seen:
+                bad.append(run["name"] + "(control)")
+            row["control"] = (ctl["cam_parts"], ctl["door_parts"])
+        if proxy:
+            pframes = model_frames(run, proxy=True)
+            rp = drive(None, None, orc, pframes, pmode=pmode)
+            note = proxy_note(res, rp, frames, pframes)
+            print("    proxy: partings camera %d (refused steps %d at %s), doors %d, loot %d; deaths %s; %s"
+                  % (rp["cam_parts"], len(note["refused"]), note["refused"][:6], rp["door_parts"], rp["loot_parts"],
+                     rp["dead"][:3] or 0, note["text"]), flush=True)
+            if rp["dead"]:
+                bad.append(run["name"] + "(proxy)")
+            row.update({"p_cam": rp["cam_parts"], "p_dr": rp["door_parts"], "p_refused": len(note["refused"]),
+                        "p_first": note["first"]})
+        rows.append(row)
+    print("  %-20s %4s %4s %5s %4s %5s %9s%s" % ("run", "cam", "dr", "loot", "dead", "sonl", "control",
+                                                "   p_cam p_dr refused first-part" if proxy else ""))
+    for r in rows:
+        print("  %-20s %4d %4d %5d %4d %5d %9s%s" % (
+            r["name"], r["cam"], r["dr"], r["loot"], r["dead"], r["sonl"],
+            "%d/%d" % r["control"] if "control" in r else "-",
+            "   %5d %4d %7d %10s" % (r["p_cam"], r["p_dr"], r["p_refused"],
+                                     "-" if r["p_first"] is None else r["p_first"]) if proxy else ""))
+    print("B0 ORACLE-ONLY %s" % ("OK -- the frozen poses reproduce, no mirror dies, every setup is visible" if not bad
+                                 else "FAIL: %s" % bad))
     return 1 if bad else 0
 
 
@@ -586,9 +850,10 @@ def main():
     ap.add_argument("--oracle-only", action="store_true",
                     help="M7 P6: replay the set on the frozen model and step the mirror, no binary")
     ap.add_argument("--player-mode", help="--oracle-only: the mirror's player mode (default wall_renderer's)")
+    ap.add_argument("--only", help="--oracle-only: the runs whose names start with this")
     a = ap.parse_args()
     if a.oracle_only:
-        return oracle_only(Path(a.file), a.player_mode)
+        return oracle_only(Path(a.file), a.player_mode, a.proxy, a.only)
     if a.selftest:
         import gamespeed as GS
         t = time.time()

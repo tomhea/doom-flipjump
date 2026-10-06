@@ -1,6 +1,6 @@
 {
  "version": "v6",
- "status": "PLANNED -- oracle only; NOT frozen (the coordinator's / owner's call), no B0: B0 is measured on the P6+P7 build (b0_scenarios.py --file this)",
+ "status": "FROZEN",
  "derived_from": {
   "checkpoints": "scenarios_v2.CHECKPOINTS (v5's 11, unchanged)",
   "rule": "RE-PLANNED by the autopilot at the game's model (M7 P6+P7, the integrator): PLAYER_MODE 'full', MONSTER_MODE 'full', the monsters' tempo x2, the actors rule, the player's fire x2 and the turn's tap rule (the autopilot turns only when this frame's step -- tap or held -- brings the bearing nearer, and a planned run whose B0 camera reconstruction parts is refused like a death); replaces package E's 'v6 with v5's scripts' (keys 794fa332d21c447e, criteria FAIL) and its re-plan (combat_scenarios_v6_replan.json, keys 05744a5d5167bd84, 6 kills < 8)",
@@ -25000,11 +25000,11 @@
   "src/doomfj/lut_generator.py": "366a1df5160b039c",
   "src/doomfj/mapcompiler.py": "9e0b131c1b54ccd3",
   "src/doomfj/menu.py": "4d2d4b0e35d68d22",
-  "src/doomfj/monsters.py": "26c1e22c8cafc4e4",
+  "src/doomfj/monsters.py": "fe79c56d6c49e7af",
   "src/doomfj/movercode.py": "4b898f96bb45a30c",
   "src/doomfj/movers.py": "7eb6793209e57a8c",
   "src/doomfj/projcode.py": "1f95708579b49456",
-  "src/doomfj/reference_model.py": "772fc6b3b8402434",
+  "src/doomfj/reference_model.py": "74134326b5662d88",
   "src/doomfj/restartcode.py": "6c6dc8aa1f7c6a51",
   "src/doomfj/rng.py": "5a842d315933a0b0",
   "src/doomfj/sight.py": "b45e7b56a82c285c",
@@ -25013,12 +25013,312 @@
   "src/doomfj/texturecompiler.py": "6836e27f7d824674",
   "src/doomfj/things.py": "f670b48c3587f345",
   "src/doomfj/wad.py": "aced7d2f9eb1a2ba",
-  "src/doomfj/wall_renderer.py": "c38a213f16f24928",
-  "src/doomfj/weaponcode.py": "0a98952f036e1c21",
+  "src/doomfj/wall_renderer.py": "699873a46787b240",
+  "src/doomfj/weaponcode.py": "bceda318b53abb63",
   "src/doomfj/wireformat.py": "42eb6b8c812209e7",
   "src/doomfj/world.py": "3aafb4fd39ba0ac4",
   "tests/fixtures/freedoom_e1m1.wad": "944287723835997b"
  },
  "planned_at_git_head": "2561f29",
- "keys_sha": "83d49015078b6abb"
+ "keys_sha": "83d49015078b6abb",
+ "b0": {
+  "binding": 14699525.512272727,
+  "mean": 13573155.714545453,
+  "p80_run": 15825895.31,
+  "p80_run_name": "R2-east-yard",
+  "frame_max": 24117248,
+  "frame_max_run": "R0-courtyard",
+  "frame_max_note": "+/- 2^18 (probe.py)",
+  "per_run": {
+   "R0-west-hall": {
+    "avg_exact": 19999973.43,
+    "p50": 20185088,
+    "p80": 20709376,
+    "max": 21757952,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 53
+   },
+   "R0-aftermath": {
+    "avg_exact": 12049430.17,
+    "p50": 11272192,
+    "p80": 16777216,
+    "max": 20971520,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 40
+   },
+   "R0-south-hall": {
+    "avg_exact": 13201129.87,
+    "p50": 13893632,
+    "p80": 15466496,
+    "max": 17039360,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 24
+   },
+   "R0-imp-court": {
+    "avg_exact": 14459923.87,
+    "p50": 14942208,
+    "p80": 19922944,
+    "max": 22544384,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 0
+   },
+   "R0-northwest": {
+    "avg_exact": 10297550.64,
+    "p50": 10223616,
+    "p80": 11534336,
+    "max": 13369344,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 48
+   },
+   "R0-courtyard": {
+    "avg_exact": 16433732.86,
+    "p50": 16777216,
+    "p80": 19922944,
+    "max": 24117248,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 30
+   },
+   "R2-barrel-hall": {
+    "avg_exact": 12859442.8,
+    "p50": 14155776,
+    "p80": 15466496,
+    "max": 18350080,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 26
+   },
+   "R2-spectre-corridor": {
+    "avg_exact": 14286852.54,
+    "p50": 14417920,
+    "p80": 15728640,
+    "max": 18874368,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 20
+   },
+   "R2-east-yard": {
+    "avg_exact": 15825895.31,
+    "p50": 16252928,
+    "p80": 18087936,
+    "max": 20447232,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 6
+   },
+   "R3-west": {
+    "avg_exact": 9667909.43,
+    "p50": 9437184,
+    "p80": 13631488,
+    "max": 17563648,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 0,
+    "strafe_only_frames": 28
+   },
+   "R3-mid": {
+    "avg_exact": 10222871.94,
+    "p50": 10747904,
+    "p80": 11796480,
+    "max": 13107200,
+    "state": "100/100",
+    "pixels": "100/100",
+    "cam_parts": 0,
+    "door_parts": 1,
+    "strafe_only_frames": 49
+   }
+  },
+  "fjm": "build\\doom_e1m1_blocked51.fjm",
+  "fjm_sha256": "f736f73d456061ed726a37bcf1ac92d2214f61fcf2363f8334ba409b7cb3a72c",
+  "labels_sha256": "c050a45057f998c278c33071dec542e1d4735a5f11c7b479fcddf6cc7e62d839",
+  "keys_sha": "83d49015078b6abb",
+  "driver_sha16": "c04a00801d9df92e",
+  "command": "python scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v6.json --pixel-every 1 --proxy --json docs/ship-evidence/blocked51_b0_v6.json",
+  "base_ops": 216344,
+  "strafe_undercount": {
+   "binding_proxy": 14740634.790454544,
+   "mean_proxy": 13634756.69090909,
+   "p80_proxy": 15846512.89,
+   "delta_binding": 41109.27818181738,
+   "strafe_only_frames": 324,
+   "delta_total": 67761074,
+   "refused_steps": 1,
+   "per_strafe_only_frame": 209139.11728395062,
+   "per_run": {
+    "R0-west-hall": {
+     "delta_total": 16205536,
+     "strafe_only_frames": 53,
+     "per_strafe_only_frame": 305764.8301886792,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": true,
+     "refused": [],
+     "note": "the proxy expected the normal run's every frame",
+     "avg_exact_proxy": 20162028.79
+    },
+    "R0-aftermath": {
+     "delta_total": 7595347,
+     "strafe_only_frames": 40,
+     "per_strafe_only_frame": 189883.675,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": false,
+     "refused": [],
+     "note": "the expectations part first at frame 28 (a strafe-only frame): a PICKUP the proxy's step touched at the landing -- item 82 (type 2014 at 640, 256); the normal run's strafe-only frame does not move, so it never takes it (p_bc 0 -> 6, bar health 102 -> 103); 68 frames' expectations differ, 3 pictures",
+     "avg_exact_proxy": 12125383.64
+    },
+    "R0-south-hall": {
+     "delta_total": 4813902,
+     "strafe_only_frames": 24,
+     "per_strafe_only_frame": 200579.25,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": true,
+     "refused": [],
+     "note": "the proxy expected the normal run's every frame",
+     "avg_exact_proxy": 13249268.89
+    },
+    "R0-imp-court": {
+     "delta_total": 0,
+     "strafe_only_frames": 0,
+     "per_strafe_only_frame": null,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": true,
+     "refused": [],
+     "note": "the proxy expected the normal run's every frame",
+     "avg_exact_proxy": 14459923.87
+    },
+    "R0-northwest": {
+     "delta_total": 9729546,
+     "strafe_only_frames": 48,
+     "per_strafe_only_frame": 202698.875,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": true,
+     "refused": [],
+     "note": "the proxy expected the normal run's every frame",
+     "avg_exact_proxy": 10394846.1
+    },
+    "R0-courtyard": {
+     "delta_total": 6045390,
+     "strafe_only_frames": 30,
+     "per_strafe_only_frame": 201513.0,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": true,
+     "refused": [],
+     "note": "the proxy expected the normal run's every frame",
+     "avg_exact_proxy": 16494186.76
+    },
+    "R2-barrel-hall": {
+     "delta_total": 3228008,
+     "strafe_only_frames": 26,
+     "per_strafe_only_frame": 124154.15384615384,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": false,
+     "refused": [],
+     "note": "the expectations part first at frame 48 (a strafe-only frame): a PICKUP the proxy's step touched at the landing -- the DROP of dropper 14; the normal run's strafe-only frame does not move, so it never takes it (dr_live 1 -> 0, p_bc 0 -> 6, bar owned (True, False, False) -> (True, True, False)); 52 frames' expectations differ, 52 pictures",
+     "avg_exact_proxy": 12891722.88
+    },
+    "R2-spectre-corridor": {
+     "delta_total": 3798553,
+     "strafe_only_frames": 20,
+     "per_strafe_only_frame": 189927.65,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": false,
+     "refused": [
+      0
+     ],
+     "note": "the expectations part first at frame 0 (a strafe-only frame): a REFUSED step, by a wall or step (try_move) (pose (102944600, -32989488, 866982622), the model's landing (103258200, -31988912, 866982622)); 1 frames' expectations differ, 1 pictures",
+     "avg_exact_proxy": 14324838.07
+    },
+    "R2-east-yard": {
+     "delta_total": 2061758,
+     "strafe_only_frames": 6,
+     "per_strafe_only_frame": 343626.3333333333,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": true,
+     "refused": [],
+     "note": "the proxy expected the normal run's every frame",
+     "avg_exact_proxy": 15846512.89
+    },
+    "R3-west": {
+     "delta_total": 4962716,
+     "strafe_only_frames": 28,
+     "per_strafe_only_frame": 177239.85714285713,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": true,
+     "refused": [],
+     "note": "the proxy expected the normal run's every frame",
+     "avg_exact_proxy": 9717536.59
+    },
+    "R3-mid": {
+     "delta_total": 9320318,
+     "strafe_only_frames": 49,
+     "per_strafe_only_frame": 190210.57142857142,
+     "state_ok": 100,
+     "pix_ok": 100,
+     "pix_n": 100,
+     "same_picture": true,
+     "refused": [],
+     "note": "the proxy expected the normal run's every frame",
+     "avg_exact_proxy": 10316075.12
+    }
+   },
+   "method": "each strafe-only frame injected one FORWARD step behind the model's landing with forward delivered: the binary runs its collision tic into the same pose; the difference is exact. Since P6 the step is not neutral: it touches what lies at the landing (a pickup the normal run's still frame never takes) and a solid thing can refuse it -- so each proxy run is judged against its OWN oracle, and 'same picture' is a recorded note"
+  }
+ },
+ "owner_approval": {
+  "by": "the owner",
+  "on": "2026-10-07",
+  "record": "the owner, 2026-10-06 ~14:35, in the M7 session (AskUserQuestion on the v6 plan: \"Approve v6 (Recommended)\" -- freeze once blocked49's (now blocked51's) B0 on v6 passes; the 22M cap is judged on v6 from now on)"
+ },
+ "freeze": {
+  "kind": "owner freeze",
+  "approved_by": "the owner",
+  "approved_on": "2026-10-07",
+  "approval_record": "the owner, 2026-10-06 ~14:35, in the M7 session (AskUserQuestion on the v6 plan: \"Approve v6 (Recommended)\" -- freeze once blocked49's (now blocked51's) B0 on v6 passes; the 22M cap is judged on v6 from now on)",
+  "frozen_at_git_head": "3c7e381",
+  "files_not_at_head": [],
+  "rule": "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. SCHEMA GROWTH (owner, 2026-09-28): a re-freeze with --grown-from REF may record new final digests when every pose and drawn population reproduces and the witness (state_dump.py, the tree at REF against this one) holds every pre-existing cell equal after every frame -- door cells by sector, sound cells by sector -- and REF's tree reproduces the recorded digests; only added cells may differ. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
+ }
 }

@@ -1,0 +1,61 @@
+$ python scratchpad/gp/hurt_gate.py --fjm build/doom_e1m1_blocked51.fjm --labels scratchpad/12m/atlas/blocked51.labels.tsv.gz
+HURT GATE -- 7 scenarios (MONSTER_MODE full, PLAYER_MODE full), build/doom_e1m1_blocked51.fjm
+
+H1 a zombieman's hitscan: hits and misses -- 90 frames
+  from (352, 1264) angle 40000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 6, mon_misses 6, mon_melee 0, proj_spawns 0, proj_impacts 0, proj_walls 0, fizzles 0, fx_spawns 0, fx_skipped 0, player_hurt 6, armor_out 0, deaths 0, dead_frames 0, max_in_flight 0, explosion_frames 0, shots_hit 0, explosion_px 0
+  frame 0 pokes (the cells the setup moved): ['mon_reaction', 'mon_state', 'mon_target']
+  CONTROL hwt          the oracle without the rule parts at frame 28 (cells)
+  CONTROL pain_draw    the oracle without the rule parts at frame 0 (cells)
+  binary: 90 frames, 741,182,713 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+H2 an imp's fireball hits the player; the explosion is drawn -- 60 frames
+  from (656, 1056) angle 00000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 0, mon_misses 3, mon_melee 1, proj_spawns 5, proj_impacts 4, proj_walls 0, fizzles 0, fx_spawns 0, fx_skipped 0, player_hurt 5, armor_out 0, deaths 0, dead_frames 0, max_in_flight 2, explosion_frames 26, shots_hit 0, explosion_px 173572
+  frame 0 pokes (the cells the setup moved): ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics']
+  CONTROL palette      the oracle without the rule parts at frame 12 (palette)
+  CONTROL momentum     the oracle without the rule parts at frame 4 (cells)
+  CONTROL explode_draw the oracle without the rule parts at frame 12 (picture)
+  binary: 60 frames, 1,211,274,539 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+H3 an imp's fireball into a wall (the player strafes out of its path) -- 33 frames
+  from (848, 800) angle 40000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 1, mon_misses 2, mon_melee 0, proj_spawns 1, proj_impacts 0, proj_walls 1, fizzles 0, fx_spawns 0, fx_skipped 0, player_hurt 1, armor_out 0, deaths 0, dead_frames 0, max_in_flight 1, explosion_frames 4, shots_hit 0, explosion_px 0
+  frame 0 pokes (the cells the setup moved): ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics']
+  CONTROL relink       the oracle without the rule parts at frame 24 (cells)
+  binary: 33 frames, 512,294,064 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+H4 a demon's bite through blue armor -- 50 frames
+  from (2610, 2078) angle 60000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 0, mon_misses 0, mon_melee 6, proj_spawns 0, proj_impacts 0, proj_walls 0, fizzles 0, fx_spawns 0, fx_skipped 0, player_hurt 6, armor_out 0, deaths 0, dead_frames 0, max_in_flight 0, explosion_frames 0, shots_hit 0, explosion_px 0
+  frame 0 pokes (the cells the setup moved): ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'p_ar', 'p_at']
+  CONTROL armor        the oracle without the rule parts at frame 4 (cells)
+  binary: 50 frames, 370,817,833 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+H5 green armor runs out: the armor type falls to 0 -- 90 frames
+  from (261, 1301) angle 20000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 8, mon_misses 4, mon_melee 0, proj_spawns 0, proj_impacts 0, proj_walls 0, fizzles 0, fx_spawns 0, fx_skipped 0, player_hurt 8, armor_out 1, deaths 0, dead_frames 0, max_in_flight 0, explosion_frames 0, shots_hit 0, explosion_px 0
+  frame 0 pokes (the cells the setup moved): ['mon_reaction', 'mon_state', 'mon_target', 'p_ar', 'p_at']
+  CONTROL armor        the oracle without the rule parts at frame 13 (cells)
+  binary: 90 frames, 801,296,454 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+H6 the shotgun into a close monster: blood, and blood the full pool skips -- 65 frames
+  from (420, 1324) angle 60000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 4, mon_misses 1, mon_melee 0, proj_spawns 0, proj_impacts 0, proj_walls 0, fizzles 0, fx_spawns 2, fx_skipped 5, player_hurt 4, armor_out 0, deaths 0, dead_frames 0, max_in_flight 0, explosion_frames 0, shots_hit 7, explosion_px 0
+  frame 0 pokes (the cells the setup moved): ['am_shell', 'wp_own']
+  CONTROL fx_skip_draw the oracle without the rule parts at frame 42 (cells)
+  binary: 65 frames, 630,439,107 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S1 saturation: every imp fires at once -- 8 in flight, the rest fizzle -- 30 frames
+  from (-416, 256) angle 00000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 0, mon_misses 0, mon_melee 0, proj_spawns 8, proj_impacts 0, proj_walls 4, fizzles 10, fx_spawns 0, fx_skipped 0, player_hurt 0, armor_out 0, deaths 0, dead_frames 0, max_in_flight 8, explosion_frames 24, shots_hit 0, explosion_px 0
+  frame 0 pokes (the cells the setup moved): ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics']
+  CONTROL pool9        the oracle without the rule parts at frame 0 (cells)
+  CONTROL fizzle_draw  the oracle without the rule parts at frame 0 (cells)
+  binary: 30 frames, 696,858,304 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+TOTALS: mon_hits 19, mon_misses 16, mon_melee 7, proj_spawns 14, proj_impacts 4, proj_walls 5, fizzles 10, fx_spawns 2, fx_skipped 5, player_hurt 30, armor_out 1, deaths 0, dead_frames 0, max_in_flight 11, explosion_frames 54, shots_hit 7, explosion_px 173572
+every event counter nonzero: yes; deaths 0
+
+HURT GATE PASS (197 s)
+rc=0

@@ -120,10 +120,16 @@ def report(lines, ends, opened, trail_ok, pose_parts, door_rejects):
           % ("PASS (runs %s)" % pose_parts if pose_parts else
              "FAIL -- no run in this set parts, so the comparison cannot tell a door-blind replay "
              "from the binary (include run 0)"))
+    # M7 P6+P7: the player is blocked by monsters now, and on blocked50 NO tour reaches a door (BINARY_DOORS all
+    # 0) -- the door claim has no subject: the door term compares shut doors only. That is NOT a pass: it is
+    # stated as N/A, and the rc stays 0 only while no run opens a door (a run that opens one makes it bind again)
+    no_doors = not any(opened)
     print("CONTROL-DOORS the door-wrong replay is rejected where its pose is right: %s"
           % ("PASS (runs %s)" % door_rejects if door_rejects else
+             "N/A -- no run makes a door passable (BINARY_DOORS all 0: since P6 a monster blocks every tour "
+             "before a door), so this set makes no door claim to test" if no_doors else
              "FAIL -- only its pose could reject it, so the door states were never tested"))
-    return 0 if trail_ok and pose_parts and door_rejects else 1
+    return 0 if trail_ok and pose_parts and (door_rejects or no_doors) else 1
 
 
 def binary_trail(gb, table, orc, run: int, n: int = 100):

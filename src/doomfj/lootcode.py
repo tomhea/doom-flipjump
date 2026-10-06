@@ -621,8 +621,8 @@ def nukage_lines(w, cell_root: str) -> List[str]:
                 xs += [V[ld.v1][0], V[ld.v2][0]]
                 ys += [V[ld.v1][1], V[ld.v2][1]]
         return min(xs), max(xs), min(ys), max(ys)
-    hb = box(hsec)
-    for mv in w.mover_order:
+    hb = box(hsec) if hsec else None      # a map with no damaging floor (the one-room fixtures): nothing to keep apart
+    for mv in (w.mover_order if hb else ()):
         mb = box({mv})
         r = (PLAYER_RADIUS >> 16) + 1
         assert mb[1] < hb[0] - r or mb[0] > hb[1] + r or mb[3] < hb[2] - r or mb[2] > hb[3] + r, (mv, mb, hb)

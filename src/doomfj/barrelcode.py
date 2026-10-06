@@ -336,11 +336,17 @@ def blast_lines(w, *, slot_rt: Sequence[int]) -> List[str]:
     return out
 
 
-def phase_lines(w, *, barrel_rt: Dict[int, int] = None, exit_guard: bool = True, chains=None) -> List[str]:
+def phase_lines(w, *, barrel_rt: Dict[int, int] = None, exit_guard: bool = True, chains=None,
+                barrel_vis: Dict[int, int] = None) -> List[str]:
     """`bar_phase` (+ the per-barrel stubs) and `bar_next`. `barrel_rt` {barrel: runtime thing}: the barrels drawn
-    from the leaf lists (removed: unlinked). `chains` overrides `chain_pairs` (the harness's control)."""
+    from the leaf lists (removed: unlinked). `chains` overrides `chain_pairs` (the harness's control).
+    `barrel_vis` {barrel: thvis slot} (M7 P6+P7, the integration): a BAKED barrel keeps the vanishable slot every
+    tier gives its type (things.vanishable_slots), and package A's thvis layout reads it as `bar_state != 0`
+    (monsters.MonsterViews.vis_state) -- so S_NULL zeroes it too. The baked call site itself hides the barrel by
+    its state (wall_renderer's `_baked_barrel_site`)."""
     chains = chain_pairs(w) if chains is None else chains
     barrel_rt = barrel_rt or {}
+    barrel_vis = barrel_vis or {}
     out = ["bar_phase:"]
     if exit_guard:
         out.append("    hex.if1 1, lvdone, bar_ph_out")                     # a finished level: the world is frozen
@@ -364,6 +370,7 @@ def phase_lines(w, *, barrel_rt: Dict[int, int] = None, exit_guard: bool = True,
         out += ["    ;%sn" % L,
                 "  %srm:" % L,                                                # S_NULL: P_RemoveMobj
                 "    hex.zero 1, bar_solid + %d*dw" % b]
+        out += ["    hex.zero 2, thvis + %d*2*dw" % barrel_vis[b]] if b in barrel_vis else []
         out += rt_unlink_lines(barrel_rt[b]) if b in barrel_rt else []
         out += ["  %sn:" % L]
     out += ["  bar_ph_out:", "    stl.fret bar_pret",
@@ -480,7 +487,7 @@ def restart_lines(w, skill: int, *, nt: int) -> List[str]:
 
 
 def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills: Sequence[int] = (),
-                 barrel_rt: Dict[int, int] = None, exit_guard: bool = True) -> dict:
+                 barrel_rt: Dict[int, int] = None, exit_guard: bool = True, barrel_vis: Dict[int, int] = None) -> dict:
     """everything package C's sim adds, for the World `w` (the player mode "full"):
       * `decls`: the cells at `boot_skill`'s level start, the scratch, the LOS entry's registers;
       * `lines`: bar_phase / bar_next, bdm<c> / bd_leaf, bl_leaf / bl_mon / bl_dist, monstersight's bl_los, dmb<b> /
@@ -502,7 +509,8 @@ def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills:
     maxr = max([PLAYER_R] + list(w.mon_radius[:w.layout.nmon]))
     from doomfj.world import FIREBALL_POOL, FX_POOL
     return {"decls": decls(w, boot_skill),
-            "lines": (phase_lines(w, barrel_rt=barrel_rt, exit_guard=exit_guard) + damage_lines(len(spots))
+            "lines": (phase_lines(w, barrel_rt=barrel_rt, exit_guard=exit_guard, barrel_vis=barrel_vis)
+                      + damage_lines(len(spots))
                       + blast_lines(w, slot_rt=slot_rt) + blast_los_lines(w, spots, maxr) + shot_lines(w)
                       + drop_lines(w, nt=nt, slot_rt=slot_rt)),
             "tables": tables_fj(),

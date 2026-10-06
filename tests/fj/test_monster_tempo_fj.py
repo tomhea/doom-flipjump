@@ -94,7 +94,8 @@ def _run(tmp_path, name, mut=None) -> bool:
     i = code.index("    hex.zero 1, thseen")
     code = code[:i] + [_say("Z"), "    hex.print_as_digit 1, thseen, 0"] + code[i:]
     leaf = ["frame_leaf:"] + code + ["    stl.fret fr_ret"]
-    decls = WR.WT_DECLS + ["lvdone: hex.vec 1", "thseen: hex.vec 1", "pj_pret: hex.vec w/4",
+    # M7 P7 (package D): p5_tic_lines advances `lvtime` inside its lvdone guard (restartcode.lvtime_tic_lines)
+    decls = WR.WT_DECLS + ["lvdone: hex.vec 1", "thseen: hex.vec 1", "lvtime: hex.vec 4", "pj_pret: hex.vec w/4",
                            "fx_pret: hex.vec w/4", "fr_ret: hex.vec w/4"]
     p = tmp_path / ("%s.fj" % name)
     p.write_text("\n".join(body + leaf + _leaves() + decls) + "\n", encoding="utf-8")

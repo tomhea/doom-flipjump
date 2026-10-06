@@ -92,8 +92,13 @@ def _run(tmp_path, name, setup, mobview=None, swap_pools=False) -> bool:
             "sp_sa: hex.vec w/4", "sp_sid: hex.vec 2", "sp_rc: hex.vec 1",
             "thseen: hex.vec %d" % nmon, "mon_shootable: hex.vec %d" % nmon,
             "pj_st: hex.vec 16", "fx_st: hex.vec 4"]
+    # M7 P6 (PLAYER_MODE "full"): the select also holds the runtime barrels' stubs (barview, bar_st) --
+    # tests/fj/test_barrel_rowselect_fj.py checks those; here they need only assemble
+    barrels = "barview" in p31
+    if barrels:
+        data += ["bar_st: hex.vec %d" % (2 * len(p31["world"].barrel_things))]
     data += list(p31["decls"]) + sel + p31["rotation"]
-    data += [p31["mview"], p31["mrot"], mobview or p31["mobview"],
+    data += [p31["mview"], p31["mrot"], mobview or p31["mobview"], *([p31["barview"]] if barrels else []),
              generate_dispatch_table_fj("mstate", MC.state_table_values(), index_nibbles=2, result_nibbles=6),
              generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE), index_nibbles=3, result_nibbles=8),
              generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(), index_nibbles=3, result_nibbles=6),

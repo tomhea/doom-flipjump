@@ -994,9 +994,11 @@ MUTANTS = [
      "    deg_flag = 1                                # 25M-CAP: load-adaptive degradation package\n"
      "    if standalone: deg_flag = 0\n"),
     ("r6: the record body's own deg default", "write", EMITTER,
-     "    def _thing_leaf_body(label, mt):", "    def _thing_leaf_body(label, mt, deg_flag=0):"),
+     "    def _thing_leaf_body(label, mt, aim_baked=False):",
+     "    def _thing_leaf_body(label, mt, aim_baked=False, deg_flag=0):"),     # M7 P6: C's aim_baked
     ("r6: the record body's own slot-stride default", "write", EMITTER,
-     "    def _thing_leaf_body(label, mt):", "    def _thing_leaf_body(label, mt, SPR_SLOT_STRIDE=32):"),
+     "    def _thing_leaf_body(label, mt, aim_baked=False):",
+     "    def _thing_leaf_body(label, mt, aim_baked=False, SPR_SLOT_STRIDE=32):"),     # M7 P6: C's aim_baked
     # M7 P1.6: the bucket in the slot, the region, the min_b test
     ("P1.6: the light row written where the bucket goes", "write", FR,
      "hex.write_byte gps_ptr, trb_bucket", "hex.write_byte gps_ptr, trb_shade_row"),

@@ -2459,7 +2459,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     f"4.25x+2 bound. Widen the margin in projection.fj's L-inf reject or reject "
                     f"this sprite category at emit time.")
                 if _bar and _t.type == BARREL_TYPE:
-                    assert _di not in _vis_slots, "M7 P6: a baked barrel is hidden by its state, not a thvis flag"
+                    # M7 P6+P7: a baked barrel is hidden by its STATE here (bar_st 0); the vanishable slot its type
+                    # has in every tier stays, kept equal to `bar_st != 0` by the phase (barrelcode.phase_lines'
+                    # barrel_vis) -- package A's thvis layout reads it so
+                    assert _di in _vis_slots, "M7 P6: a baked barrel has its type's thvis slot (A's layout)"
                     # M7 P6 (docs/gp-p67-interface.md 5): a baked BARREL draws its STATE's view -- a jump on its
                     # state into one xor_by block per state (S_BAR1's is the block above, the map's barrel as
                     # today; the others the anim bank's lump rows, monstercode.barrel_view_rows), removed: nothing;

@@ -501,8 +501,14 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 barrel = None
                 if loot:                               # M7 P6: the barrels, the blasts, the drops (barrelcode)
                     from doomfj.barrelcode import barrel_parts
+                    # M7 P6+P7 (the integration): a baked barrel's thvis slot -- package A's layout (MonsterViews,
+                    # the one definition: things.vanishable_slots) -- is zeroed when the barrel is removed
+                    from doomfj.monsters import MonsterViews
+                    _mv = MonsterViews(rm, map_wad, mapname, sprite_wad, w)
+                    bar_vis = {b: _mv.vis_slots[di] for b, di in enumerate(_mv.bdi) if di in _mv.vis_slots}
+                    assert not set(bar_vis) & set(bar_rt) and len(bar_vis) + len(bar_rt) == len(w.barrel_things)
                     barrel = barrel_parts(w, nt=nt, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
-                                          skills=skills, barrel_rt=bar_rt)
+                                          skills=skills, barrel_rt=bar_rt, barrel_vis=bar_vis)
                     assert barrel["drop_first"] == nt + nmob and barrel["ndrop"] == ndrop
                     extra["barrel"] = barrel
                 if damage:                             # M7 P4.2a: the monsters' damage (damagecode)

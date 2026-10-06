@@ -208,7 +208,11 @@ def level_start(w) -> Dict[str, int]:
     ws = w.ws
     out = {}
     for cell, field, nib in CELLS:
-        assert cell_nibbles(w.schema, field) == nib, (field, cell_nibbles(w.schema, field), nib)
+        # p_attacker (unsigned, 1 + a monster slot) is as wide as the map's slot count asks; the fj's p_atk is always
+        # two nibbles (dt_turn's two-level dispatch) -- so on a map of < 15 monsters the cell is WIDER than the field
+        # (M7 P6+P7: the one-room maps of test_slot_layouts_fj / test_emit_every_tier); every other cell is exact
+        cn = cell_nibbles(w.schema, field)
+        assert (cn <= nib) if field == "p_attacker" else (cn == nib), (field, cn, nib)
         out[cell] = getattr(ws, field) & (16 ** nib - 1)
     out["pal_cur"] = red_palette(ws.p_damagecount)
     return out

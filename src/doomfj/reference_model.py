@@ -2321,19 +2321,40 @@ class ReferenceModel:
                             if _spr is not None and any(not drawn[x] for x in
                                                         range(max(0, _spr[0]), min(W, _spr[1] + 1))):
                                 seen_out.add(t_di)
+                    # 25M-CAP GRADUATED ACCEPTANCE: once the frame has accepted its first
+                    # (nearest -- the walk is front-to-back) SOFT things of a category, the
+                    # min-size bar rises, so far specks stop paying the record loop exactly on
+                    # the frames that are already heavy. Light frames never reach SOFT and keep
+                    # every speck. Monsters keep their own (looser) pair, per the owner's policy.
+                    # (Decided HERE, before the aim window: the aim hook runs inside the projection, so it sees
+                    # the bound the projection runs with -- below.)
+                    minh_ = MIN_SPRITE_H_MONSTER if act else MIN_SPRITE_H
+                    if deg_things is not None and not mob:   # M7 P5: a mobile keeps the BASE bound
+                        soft_s, minh2_s, soft_m, minh2_m = deg_things
+                        if act and n_mon >= soft_m:
+                            minh_ = minh2_m
+                        elif not act and n_thing >= soft_s:
+                            minh_ = minh2_s
                     # M7 P4.2a (docs/gp-aim-window.md 1.3-1.6, 2.2): THE AIM WINDOW, at the seen test's point --
-                    # after the full stop, before the budgets, so a degraded-out monster can still be shot.
-                    # The box is +-r_eff around the thing's centre through the sprite's own tz/tx/xscale
-                    # (project_thing_core), the span divide-free: P = tx*xscale, Q = r_eff*xscale (1.4)
-                    if aim_things is not None and t_di in aim_things:
+                    # after the full stop. The box is +-r_eff around the thing's centre through the sprite's own
+                    # tz/tx/xscale (project_thing_core), the span divide-free: P = tx*xscale, Q = r_eff*xscale (1.4).
+                    # M7 P6+P7 (2026-10-07): a thing is aimed only where the fj's PROJECTION runs -- the aim hook sits
+                    # in proj.project_thing after the far reject, which frame.thing_record_body reaches only within
+                    # the thing's HARD budget, and whose depth bound is the RAISED one (sp_tzmax2) once the category's
+                    # SOFT count is full (degfl): the size bound is `minh_`, not the base one. Under the actors rule a
+                    # monster's soft count is the hard budget, so a monster keeps its base bound (a degraded-out
+                    # monster can still be shot); a BARREL (scenery) past DEG_SOFT_SCENERY accepted things needs
+                    # DEG_MINH2_SCENERY rows. FOUND by p2a_gate S7 on blocked51: four far barrels the oracle aimed at
+                    # frame 0 that the binary's raised projection rejected (barrelcode's rule, package C's note).
+                    if (aim_things is not None and t_di in aim_things
+                            and not ((n_mon >= MONSTER_BUDGET) if act else (n_thing >= THING_BUDGET))):
                         _asid, _ar = aim_things[t_di]
                         _aart = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None
                                  else self.art_of_lump(sprite_wad, tview[0], spr_cache))
                         _acore = (None if _aart is None else
                                   self.project_thing_core(viewx, viewy, viewangle, t.x, t.y))
                         if (_acore is not None and _acore[0] <= aim_tzmax
-                                and self.sprite_height_px(_aart[4], _acore[2])
-                                >= (MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H)):   # the BASE bound
+                                and self.sprite_height_px(_aart[4], _acore[2]) >= minh_):   # the projection's
                             _atz, _atx, _axs = _acore
                             if _ar not in aim_reff:
                                 aim_reff[_ar] = _CM.aim_radius(self, viewangle & ANGLE_MASK, _ar)
@@ -2356,18 +2377,7 @@ class ReferenceModel:
                         continue
                     tss = scene.cmap.subsectors[ss_first[seg_i]]
                     tsec = self._seg_sector(lds, sds, secs, scene.cmap.segs[tss.firstseg])
-                    # 25M-CAP GRADUATED ACCEPTANCE: once the frame has accepted its first
-                    # (nearest -- the walk is front-to-back) SOFT things of a category, the
-                    # min-size bar rises, so far specks stop paying the record loop exactly on
-                    # the frames that are already heavy. Light frames never reach SOFT and keep
-                    # every speck. Monsters keep their own (looser) pair, per the owner's policy.
-                    minh_ = MIN_SPRITE_H_MONSTER if act else MIN_SPRITE_H
-                    if deg_things is not None and not mob:   # M7 P5: a mobile keeps the BASE bound
-                        soft_s, minh2_s, soft_m, minh2_m = deg_things
-                        if act and n_mon >= soft_m:
-                            minh_ = minh2_m
-                        elif not act and n_thing >= soft_s:
-                            minh_ = minh2_s
+                    # (minh_: the graduated acceptance's bound, decided above the aim window)
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
                                             t.x, t.y, tsec.floor_h + (((MISSILE_Z if t.z is None else t.z)
                                                                        if mob else 0)), art, minh_)

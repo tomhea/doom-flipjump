@@ -373,3 +373,40 @@ def test_span_identity():
     broke = sum(fixed_mul((tx + (r << 16) + 0x8000) & M, xs, 8, 4) != (P_ + r * xs) & M
                 for tx, xs, r in ops[:200] for P_ in [fixed_mul(tx, xs, 8, 4)])
     assert broke > 0, "a half-unit radius did not break the identity: the check is vacuous"
+
+
+# ---------------------------------------------------------------------------------------------- M7 P6+P7: barrels
+S7_POSE = (1992 << 16, -416 << 16, 0)        # p2a_gate S7's start, east over the nukage hall: 4 far barrels in view
+
+
+def _s7_window(monkeypatch=None, fn=None):
+    """the aim window the game picture records at p2a S7's start pose, the world at the level start ("full"/"full"):
+    every monster where it spawned, every barrel standing (aim ids 54..75 = 1 + nmon + b)"""
+    import probe as P
+    from doomfj.monsters import MonsterPhase
+    from doomfj.reference_model import ReferenceModel
+    from doomfj.wall_renderer import BOOT_SKILL
+    orc = P.Oracle()
+    if fn is not None:
+        monkeypatch.setattr(ReferenceModel, "render_wall_frame", fn)
+    ph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode="full", player="full")
+    x, y, a = S7_POSE
+    aim = [0] * 17
+    orc.render(x, y, a, (), views=orc.monster_views(ph, x, y), positions=orc.monster_positions(ph),
+               aim_things=orc._mv(ph.world).aim_things(ph), aim_out=aim, mobiles=ph.mobiles(),
+               removed=orc.monster_removed(ph), barrel_views=orc.monster_barrel_views(ph), card=0)
+    return tuple(aim), ph.world.layout.nmon
+
+
+def test_a_barrel_past_the_soft_count_is_aimed_only_at_the_raised_bound(monkeypatch):
+    """p2a_gate S7 on blocked51 (2026-10-07): the oracle's window held barrels 15..18 (ids 69..72) at frame 0, the
+    binary's held nothing -- pixels byte-exact. The fj's aim hook sits INSIDE proj.project_thing, after the far
+    reject, and past DEG_SOFT_SCENERY accepted scenery things that reject runs at the RAISED depth bound (sp_tzmax2,
+    DEG_MINH2_SCENERY rows); the oracle aimed at the BASE bound. A barrel is scenery: here, far and short, it is
+    not aimed. R9: the old rule (the base bound for every aimed thing) records the four barrels."""
+    win, nmon = _s7_window()
+    assert win == (0,) * 17, win
+    old = mutant([("self.sprite_height_px(_aart[4], _acore[2]) >= minh_)",
+                   "self.sprite_height_px(_aart[4], _acore[2]) >= (MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H))")])
+    win_old, _n = _s7_window(monkeypatch, old)
+    assert sorted({s for s in win_old if s}) == [nmon + 1 + b for b in (15, 16, 17, 18)], win_old

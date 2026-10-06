@@ -1,6 +1,6 @@
 # Handoff: the fully playable E1M1, under 22M ops/frame
 
-**Status (2026-10-04): phases 0-5 are DONE (phase 3 ended with blocked46, P3.3 + P3.4; P4, the player's combat, shipped as ONE build, blocked47; P5, the monsters' attacks, shipped as ONE build, blocked48); P6, pickups and barrels, is NEXT.** Everything below is the
+**Status (2026-10-07): phases 0-7 are DONE (phase 3 ended with blocked46, P3.3 + P3.4; P4, the player's combat, shipped as ONE build, blocked47; P5, the monsters' attacks, as ONE build, blocked48; P6 + P7, pickups, barrels, death and the restart with the owner's 2026-10-05 playtest requests, as ONE build, blocked51), except what the plan defers (O1 the death view drop; O2 D3 a / b for drops and barrels; D5's simplifications); P8, the ship, is NEXT.** Everything below is the
 whole plan, as the owner approved it, updated with phase 0's measurements. It replaces nothing:
 `docs/plan-gameplay.md` is the record of how the plan was made (research missions, red team,
 decision rounds); this file is what to execute. Phase 0's evidence is committed on branch `gameplay-p0`
@@ -85,7 +85,7 @@ storms), and the frozen set's heaviest run, R0-west-hall, averages 22,018,124 on
 | D1 | the cap is on (mean + p80)/2 of the combat set, not per frame; the 22M replaces the 20M target in CLAUDE.md, ship-gate.md and gamespeed's `SPEED_TARGET` when the combat game ships |
 | D2 | runs start from CHECKPOINTS across the level (injected states); the set and B0 are frozen by the owner |
 | D3 | compositor rules for gameplay: **a** drops and effects ordered before monsters; **c** corpses count as scenery; **d** runtime things inside a leaf drawn in depth order; **e** "seen" and the aim window recorded at column-open time, before the degradation budgets; **b** only for projectiles and barrels (exempt from the soft budgets) |
-| D4 | one DOOM tic per frame (fights run at ~32-38% of DOOM's real-time speed, consistently) |
+| D4 | one DOOM tic per frame (fights run at ~32-38% of DOOM's real-time speed, consistently) -- **changed by the owner's playtest (2026-10-05) for the monsters (with their pools) and the player's weapon: 2 tics a frame** (`world.MONSTER_TICS_PER_FRAME`, `WEAPON_TICS`; P6 + P7) |
 | D5 | the simplifications: no knockback; no infighting (monster shots and fireballs pass through monsters and barrels); 2D projectiles; P_NewChaseDir capped at a few tries (the owner's words; the model uses 6); rounded diagonals (8/6, 10/7); **K = 6** heavy monster actions per tic (raised from 3), deterministic deferral; monsters open plain doors when a move fails in the door's use box; a fireball pool of 8 (a full pool fizzles); puffs/blood capped at 2; nukage 5 damage every 32 tics; no sound, no spectre fuzz, no weapon bob or raise/lower animation (the timing stays), no whole-screen fire light, no status-bar face |
 | D6 | the native-list sprite bank; option A for the HUD: **the screen stays 160x100, a 16-row status bar at the bottom, a 160x84 3D view** (DOOM's layout at half resolution), with a flipjump device option so dittos do not copy the bar |
 | D7 | skills easy 17 / medium 29 / hard 46 monsters, chosen in the menu as in DOOM; the image holds the union (53); the budget is sized on hard |
@@ -379,9 +379,33 @@ reads; drops come in P6.
 
 ### P6 -- pickups and barrels. Gate `fight`. Budget +0.1M.
 ### P7 -- death, restart, exit. Gate `die`. Budget ~0.
-### P8 -- ship
+**P6 + P7 DONE 2026-10-07, one rung** (blocked51, class F; `docs/gp-p67-interface.md`, `docs/gp-ledger.md` "P6 + P7
+pickups, barrels, death and restart"): `PLAYER_MODE = "full"`, `MONSTER_MODE = "full"`, integrated on `m7-p67` from
+six packages (A the model / oracle / gates, B `lootcode`, C `barrelcode`, D `restartcode` and the death turn, E the
+monsters' tempo and the actors rule, F the owner's turn / fire / help requests). Every pickup with DOOM's caps, berserk,
+the chainsaw, the drops; barrels (the puff, the blast, gibs, the chain, the aim window); blocking by barrels, solid
+decor and live monsters; nukage; the dead latch and the dead player's guards, the dead view turning to the killer
+(O1 re-opened by the owner: no view drop), and use restarting at the skill being played, one sequence with NEW GAME.
+The owner's 2026-10-05 playtest: the monsters 2 tics a frame (D4 above), the ACTORS rule (monsters and fireballs
+always drawn), the weapon x2, the turn's tap then x1.5 (far aim measured equal to DOOM's), the help's spacing. The
+frozen set is now **v6** (v5's checkpoints re-planned at the new tempo; the owner approved it 2026-10-06, frozen at
+30f9fd1): **14,699,526 on blocked51, every frame state- and pixel-exact, 7,300,474 under CAP-22**. The gates are
+`scratchpad/gp/fight_gate.py` (F1-F10, the chain stress S2; 19/19) and `die_gate.py` (D1-D8; 11/11, 11 deaths, 5
+restarts), plus every earlier gate, all exact. gamespeed 12,528,769 PASS is NOT comparable with blocked48's (O3: the
+tours stop at monsters, take other routes and reach no door); size 36.24% against the 42% target (+1,457,356 words,
+above the rung's +0.8 .. +1.2M estimate); msframe NOT SEPARATED (x0.980, quiet box). Three builds: blocked49 (a
+pickup's bar a frame late) and blocked50 (a baked barrel's light class truncated; the oracle drew drops as actors)
+were superseded. No kill criterion exceeded; the full tests/fj run at the head was owed at ship (the ledger lists it
+with the follow-ups).
+### P8 -- ship (NEXT)
 CAP-22 on the frozen set, stress, size, every gate, the class-F rule, docs (CLAUDE.md, ship-gate.md,
 gamespeed's target -> 22M), re-frozen baselines.
+Where it starts (blocked51): CAP-22 on **v6** (14,699,526; the binding, D1); the stress cases recorded, not capped --
+hurt_gate S1 ~23.2M/frame averaged over 30 frames, B0 v6's single-frame maximum 24,117,248 (R0-courtyard), the barrel
+chain's single-frame cost still UNVERIFIED (fight_gate logs totals only); every gate re-run on the ship binary;
+`gamespeed.SPEED_TARGET` 20M -> 22M per D1 (with CLAUDE.md and `docs/ship-gate.md`), noting that the tours no longer
+reach a door; the msframe `shipped` baseline re-frozen on a quiet box (still blocked44's, #115) and B0 / gamespeed's
+trails re-recorded on the ship binary; the P6 + P7 follow-up issue.
 
 **Build time paces everything**: a game build is ~2 h, and every rung that changes a source file
 under `src/doomfj/` or `src/fj/` misses the counts cache and recounts (~34 min). ~15-20 builds in
@@ -407,6 +431,9 @@ all, strictly one at a time.
   (`docs/ship-evidence/blocked27_gamespeed_trail.log`). When the gameplay binary changes how the
   player moves (monsters that block, strafe), re-run `gamespeed_trail.py` on it and re-record
   `gamespeed.BINARY_ENDS` / `BINARY_DOORS`; `--selftest` N6e fails until then.
+  Done for P6 + P7: re-recorded from the game's model (f3acab8) and confirmed on blocked51 by
+  `gamespeed_trail.py` (TRAIL PASS, `blocked51_gamespeed_trail.log`); no run opens a door any more, so its
+  CONTROL-DOORS reads N/A (7739a72) until one does.
 - **Unit costs** from standalone probes carry a layout factor (0.79-1.06x pooled; the sprite
   pipeline's 1.70 is UNVERIFIED) -- re-measure in-game with `profx` after each build.
 

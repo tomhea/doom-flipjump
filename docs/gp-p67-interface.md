@@ -4,6 +4,10 @@
 binary). Written in the shape of `docs/gp-p5-interface.md`. The coordinator copies section 9 into
 `docs/gp-ledger.md` as the rung's declaration BEFORE its build, and appends "As built" here after the ship.
 
+**SHIPPED 2026-10-07 as blocked51** (sha256 `f736f73d456061ed`, built 2026-10-06 at 7739a72), ONE build stacked on P5
+(blocked48), after two superseded builds (blocked49, blocked50). Where the build differs from this note, "As built
+(blocked51)" at the end says so (`docs/gp-ledger.md`, "P6 + P7 pickups, barrels, death and restart", its Row).
+
 **Summary.**
 - **Recommendation: ONE united build.** The target is `PLAYER_MODE = "full"` (`MONSTER_MODE` stays "full"). It is
   split into four parallel packages:
@@ -1365,3 +1369,50 @@ THE TURN, as built (package D):
   - The shipped restore sets must be re-keyed on the build. Until then three
     `tests/host/test_restore_set_shipped.py` tests fail, naming `p_tnh`: the hoisted global is absent, the
     standalone set adds it, and STANDALONE_PERSIST names it.
+
+## As built (blocked51, 2026-10-07; `docs/ship-evidence/blocked51_*`)
+
+- **One rung, one build**, as recommended in section 2: `PLAYER_MODE = "full"`, `MONSTER_MODE = "full"`; the
+  fallback "loot" mode was never needed. Packages A-F as their sections above record; the owner's requests of sections
+  11 and 12 are in the same binary.
+- **O1, as built**: the fallback plus the turn to the killer (section 10, package D) -- no view drop.
+- **The frozen set is v6**: neither of section 11.6's two recordings but a re-plan at the game's model (f852103, keys
+  `83d49015078b6abb`, v5's 11 checkpoints: 15 kills, 0 deaths, 22 pickups, 16 barrels, 30 of 32 fireball threats
+  dodged), approved by the owner 2026-10-06 and frozen at 30f9fd1 with blocked51's B0: **14,699,526**, every frame
+  of all 11 runs state- and pixel-exact. Section 9's ESTIMATE (~16.0 .. 16.7M, v5 plus the rung's deltas) did not
+  hold for a re-planned set (the ledger's Row).
+- **B0 learned two things** (89e1b43): a run's SETUP (R0-aftermath starts among three corpses with two clips lying --
+  injected into the mirror with `scenarios_v2.inject_corpse` and poked into the binary at the first game frame
+  through hurt_gate's mechanism, the drops linked into their leaf lists), and a proxy run is judged against its OWN
+  oracle, its difference from the normal run a recorded note.
+- **Found at the integration, fixed before the build**:
+  - the model bug package B found (a1da51a): `combat._player_move` compared a MASKED candidate with the SIGNED
+    position, so at a negative coordinate the still candidate was tried; the model was fixed (the coordinator's
+    decision) and `collision.move_with_collision_lines(skip_still=True)` follows it (`test_player_move_fj`'s
+    `still_signed` mutant);
+  - drops' `dr_live` decremented twice: B's pickup and C's `drop_take` both wrote `mdrop` / `dr_live`; C's owns them
+    (bb2c516);
+  - the restart audit (package D, 0ce1cf1): `mh_prev` (P3.2b) was never restarted, and P5's restart RESTORED
+    `pal_cur`, a device shadow -- both fixed.
+- **Found by the builds**:
+  - blocked49 (at 564ff92): m2_std_gate's re-scripted walk (at easy, past the shotgun) parted at frame 212 -- the
+    bar's weapon slots were copied BEFORE the move's pickups, so a pickup showed a frame late (14 px). c66b32c copies
+    them after the move (`weaponcode.bar_lines`).
+  - blocked50 (at 15aee03): B0 v6 pixel partings, two causes -- the ORACLE drew a drop as an actor (it is scenery, as
+    section 5 and the fj have it) and the EMITTER wrote a baked barrel's explosion light class (279..426) with a
+    one-byte `hex.xor_by` (now the high byte goes to `sp_lt_hi`, and `_seg_xorby_block` asserts every constant fits;
+    `test_baked_barrel_light_fj`). 1af94b1.
+  - blocked51's first gate runs parted on the ORACLE side only, the binary right each time: p2a S7 (the oracle aimed
+    at four far barrels the projection rejects -- c93b869: the aim window at the bound the projection runs with),
+    fight F5 / die D4s / D5 (the gates hid the BOOT skill's monsters whatever skill was played) and die D1 (the dead
+    turn never reached the gates' pose) -- 3c7e381. No rebuild; `blocked51_*_gate_oraclefix.log`.
+- **m2_std_gate** plays at EASY through door 10 (15aee03): since P6's blocking a monster stands in door 10's use box
+  at hard; 406 frames, byte- and state-exact.
+- **gamespeed (O3)**: `--validate` steps the whole game (`gamespeed.GameSim`); the trails re-recorded (f3acab8) and
+  confirmed on blocked51 (TRAIL PASS); no run opens a door, so CONTROL-DOORS reads N/A (7739a72).
+- **Cost**: v6 14,699,526; gamespeed 12,528,769 (not comparable with blocked48's); size 36.24% of 2^27, +1,457,356
+  words against section 7's +0.8 .. +1.2M ESTIMATE (above it, under the +2.0M redesign trigger); hurt_gate S1
+  ~23.2M/frame averaged (section 9's ~22.5 .. 23M estimate, slightly above); the barrel chain's single-frame cost is
+  still UNVERIFIED (fight_gate logs totals: S2 ~9.7M/frame averaged over 106 frames).
+- **Open** (the P6 + P7 PR's follow-up issue, listed in the ledger): among them `p_tnh` is not among the gates'
+  compared cells (12.6 asked for it), the death turn's alive-side size is not measured, and G3 / O2 stand as recorded.

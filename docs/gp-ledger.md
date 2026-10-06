@@ -1521,3 +1521,142 @@ exact):
    --fjm <this build>` must show TRAIL PASS before the number is quoted.
 
 The phase budgets: P6 +0.1M, P7 ~0, the owner's requests on top (E +0.15 .. +0.4M, F < +0.01M).
+
+**Row** (blocked51, written at ship 2026-10-07; sha256 `f736f73d456061ed`, built 2026-10-06 at 7739a72 with
+`heat_blocked27_p42` and flipjump 1.5.1 at `1cd6e0c`; `docs/ship-evidence/blocked51_*`, committed in 557b60a). **No
+measure below is like-for-like with blocked48 except size, the pool and the pins**: v5 cannot be replayed on the new
+game (the tempo, the tap turn and fire x2 move it) and blocked48 cannot play v6; gamespeed's tours changed (O3).
+
+| measure | blocked48 (P5) | blocked51 (P6 + P7) | delta |
+|---|---|---|---|
+| combat set binding | v5 16,037,431 | **v6 14,699,526** | not comparable (different sets) |
+| ... with strafe's collision (proxy) | v5 16,076,355 | v6 14,740,635 | -- |
+| mean / p80 run | v5 14,585,676 / 17,489,187 (R0-courtyard) | v6 13,573,156 / 15,825,895 (R2-east-yard) | -- |
+| per-frame maximum (+/- 2^18) | v5 26,214,400 (R0-aftermath) | v6 24,117,248 (R0-courtyard) | -- |
+| gamespeed binding | 15,531,315 | 12,528,769 | not comparable (O3: the routes changed, no run reaches a door) |
+| gamespeed mean / p80 run | 13,144,524 / 17,918,106 | 11,616,962 / 13,440,576 | -- |
+| size (% of 2^27) | 35.16% | 36.24% | +1,457,356 words (7,727,491 under the 42% target; 5,043,137 under 40%) |
+| pool tables (build) | 494,084 in 36,506 groups | 510,924 in 38,098 groups | +16,840 tables |
+| ms/frame (msframe, one run, A = blocked48; the pictures differ, so its pixel check reads NO) | 70.0 | 71.6 | NOT SEPARATED (x0.980) |
+| hot words pinned (pinreport) | 20/20 | 20/20 (0 broken groups of 38,098) | 0 lost |
+| hurt_gate S1 (8 fireballs in flight), ops over 30 frames | 651,896,774 (~21.7M/frame) | 696,858,304 (~23.2M/frame) | +44,961,530 |
+| fight_gate / die_gate (P6 / P7's own) | -- | 19/19 / 11/11 STATE, PIXELS and PALETTE exact on every frame | new |
+
+**The stress cases** (recorded, not judged: D1 caps v6's (mean + p80) / 2, not a scenario or a frame): hurt_gate S1
+(every imp fires) ~23.2M/frame averaged over its 30 frames (23,228,610; P5's ~21.7M) -- above the declaration's
+~22.5 .. 23M ESTIMATE by ~0.23M; fight_gate S2 (the chain in view: 13 blasts, 43 explosion frames) 1,026,624,325 ops
+over 106 frames, ~9.7M/frame averaged, and F7 (the chain, 10 blasts) 464,978,570 over 46, ~10.1M. **The chain's
+single-frame cost (~+1.5M) is still UNVERIFIED**: fight_gate logs each scenario's TOTAL only. B0 v6's per-frame
+maximum, 24,117,248 in R0-courtyard, is a single frame over 22M.
+
+**Size**: +1,457,356 words -- below the pool 29,402,186 -> 30,228,564 (+826,378), in the pool 17,784,412 ->
+18,415,390 payload words (+630,978; +16,840 tables; preflight demand 47,906,560 -> 48,823,456, 58.2% of the pool's
+capacity). The declaration's ESTIMATE was +0.8 .. +1.2M words (~35.8 .. 36.1%): **the measured +1,457,356 is ABOVE
+it** (by 257,356 words over its top), under the +2.0M redesign trigger. 36.24% <= 42%: held (and <= 40%).
+
+**Where the ops went**: not measurable against blocked48 -- gamespeed's games are different tours. phases.py on
+blocked51's own games (`blocked51_phases.log`): mean frame 11,616,962; render walk 10,925,032 (94.04%), collision
+199,490, m1_reset 93,899, glue 336,744; phases.py has no line of its own for the monsters', pickups', barrels' or
+the death's tics.
+
+**msframe NOT SEPARATED is the class-F record (D8)**: 70.0 -> 71.6 ms/frame (pairs 0.973 0.992 0.985 0.980 0.976:
+every pair leans B-slower, by 0.8 .. 2.7%, none past the 3% line), 15,844,669 -> 15,784,170 ops/frame on msframe's
+walk (-60,499), 226.4 -> 220.6 M fj/s. **A quiet box**: no busy process, yardstick median 3.63G, no
+`--ignore-busy`. Fewer ops at a lower rate is consistent with the pins having re-rolled (19 of 20 bases moved), not
+established by it. 71.6 is far under the ~90 ms tripwire. The `shipped` baseline is still blocked44's (#115).
+
+**The rung's builds** (each by the 1b line; the first two superseded):
+- blocked49 (at 564ff92): m2_std_gate's re-scripted walk (at easy, past the shotgun) parted at frame 212 -- the bar's
+  weapon slots were copied BEFORE the move's pickups, so a pickup's ammo / weapon showed a frame late (14 px).
+  c66b32c copies them after the move; `test_weapon_bar_after_move` with its R9 control.
+- blocked50 (at 15aee03): B0 v6 parted on pixels, two causes. ORACLE: a drop rode the actors rule (it is scenery, as
+  the plan and the fj have it). EMITTER: a baked barrel's explosion light class (279..426) was written with a one-byte
+  `hex.xor_by`; the high byte now goes to `sp_lt_hi` and `_seg_xorby_block` asserts every constant fits
+  (`test_baked_barrel_light_fj`). 1af94b1.
+- blocked51 (at 7739a72): its first gate runs parted on the ORACLE side only, the binary right each time: p2a S7
+  (the oracle aimed at four far barrels the projection rejects -- c93b869), fight F5 / die D4s / D5 (the gates hid the
+  BOOT skill's monsters whatever skill was played) and die D1 (the dead turn never reached the gates' pose) --
+  3c7e381. No rebuild; the re-runs are `blocked51_*_gate_oraclefix.log`, and the evidence commit's own gate logs pass.
+- The gates learned on the way: B0 injects a run's setup (R0-aftermath's corpses and their drops, poked through
+  hurt_gate's frame-0 mechanism) and judges a proxy run against its own oracle (89e1b43); m2_std_gate plans its walk
+  through its own world frame and plays at easy through door 10 (at hard a monster stands in its use box; 15aee03);
+  gamespeed_trail's CONTROL-DOORS reads N/A while no run opens a door (7739a72); profx's maps start the game tier's
+  move sim at `simth_yes` (f585776).
+
+**Found and fixed before the first build:**
+- a1da51a, the model bug package B found: `combat._player_move` compared a MASKED candidate with the SIGNED position,
+  so at a negative coordinate (the player's own start is x -416) the still candidate was tried. The model was fixed
+  (the coordinator's decision), and `skip_still` follows it (`test_player_move_fj`: the `still_signed` mutant caught).
+- bb2c516, found by the integrating agent: drops' `dr_live` was decremented TWICE (B's pickup and C's `drop_take`
+  both wrote `mdrop` / `dr_live`); C's `drop_take` owns them.
+- 0ce1cf1, package D's restart audit: `mh_prev` (P3.2b) was never restarted, and P5's restart RESTORED `pal_cur`, a
+  device shadow -- both fixed.
+
+**Verdict P6 + P7 (its declared kill criteria): no criterion EXCEEDED; criterion 4's fj half is OPEN -- one run of the
+whole fj suite at the head is owed, none failed.**
+1. CAP-22: v6 14,699,526 <= 22,000,000 (headroom 7,300,474), every frame of all 11 runs state- and pixel-exact, B0 OK
+   (`blocked51_b0_v6.log`). v6 frozen by the owner (2026-10-06, 30f9fd1) on this build's B0. **Met.**
+2. Size: 36.24% (48,643,954 words) <= 42% (56,371,445). **Met.**
+3. Every gate exact: m2_std_gate 406 frames and m3_gate 50 frames byte- and state-exact (`blocked51_gates.log`; the
+   mirror's player died on 0 frames); p2a_gate 13/13, hurt_gate 7/7 (deaths 0), fight_gate 19/19 (deaths 0) and
+   die_gate 11/11 (11 deaths, 5 restarts) STATE, PIXELS and PALETTE exact on every frame, every event counter nonzero,
+   every control parting (the gate logs and their `_oraclefix` re-runs); B0 on v6 (above); the 7 gate selftests
+   rejected where they must (`blocked51_gate_selftests.log`); deg_gate BYTE-EXACT with every op count equal to
+   blocked48's (`blocked51_deg_gate.log`). **Met.**
+4. Host: 1656 passed, 2 skipped, 1 deselected, 2 xfailed (`blocked51_host_suite.log`). **Met.** fj: every harness the
+   criterion names passed with every mutant caught in the rung's commits -- at 824b7ed, one at a time:
+   test_slot_layouts_fj 82, test_nukage_fj 6, test_restart_fj 16, test_death_turn_fj 5, test_skill_menu 43,
+   test_barrel_fj 12, test_barrel_rowselect_fj 6, test_aim_record_fj 9, test_monster_tempo_fj 6,
+   test_actor_record_fj 10, test_weapon_fj 18, test_player_strafe_fj 8, test_player_damage_fj 12,
+   test_monster_attack_fj 10, test_fireball_pool_fj 12, test_fx_pool_fj 7, test_weapon_loot_fj 12,
+   test_dead_guards_fj 6, test_palette_fj 12; test_give_fj 14 and test_pickup_fj 14 (e8859ec / bb2c516);
+   test_player_move_fj 10 after a1da51a; test_weapon_fj 18 and test_weapon_loot_fj 12 again after c66b32c; the
+   barrel / actor / mobile harnesses 34 and test_baked_barrel_light_fj 3 after 1af94b1. **Not** one run at the build's
+   commit: a full `tests/fj` run was in progress in the worktree when this was written; its result belongs in the
+   P6 + P7 PR. **Open.**
+5. Housekeeping: pinreport 20 of 20 with `heat_blocked27_p42` -- no re-key needed (no hot site changed width); the
+   restore sets re-keyed (564ff92; the build's check: 0 labels moved, 0 values changed in the set, 16,232 baked cells
+   checked; the P6 / P7 cells, `p_atk`, `pj_src` and `p_tnh` among the persisted labels; `thvis` persists by absence);
+   gamespeed's trails re-recorded (f3acab8; `gamespeed.py --selftest` SELFTEST PASS there, no binary) and confirmed on
+   blocked51 (`gamespeed_trail.py`: TRAIL PASS, CONTROL-POSE PASS, CONTROL-DOORS N/A -- no run opens a door;
+   `gamespeed_trail.py` has no `--selftest` of its own, its controls are those two); v6's criteria recorded (f852103)
+   and frozen by the owner (30f9fd1); msframe recorded (NOT SEPARATED). **Met**, CONTROL-DOORS stated N/A, not passed.
+
+**Against its budget** (ESTIMATES):
+- v6 binding ~16.0 .. 16.7M -> **14,699,526: BELOW the range**, by 1.30M under its floor. The estimate added the
+  rung's deltas to v5's 16.04M; v6 is a re-planned set with its own load (its mean run 13.57M against v5's 14.59M),
+  so the estimate's basis did not hold. It is NOT a saving: no binary has run both sets.
+- P6 + P7's own code +0.0 .. +0.15M, package E's second tic +0.15 .. +0.4M, the actors rule -0.15 .. +0.05M, F
+  < +0.01M, the death turn ~0 alive: **NOT JUDGEABLE** one by one -- no like-for-like set exists between blocked48
+  and blocked51.
+- single frames: the chain's ~+1.5M UNVERIFIED (S2 logs totals); E's +1.1M worst frame UNVERIFIED on the binary; S1
+  ~22.5 .. 23M -> **~23.23M, slightly above** (recorded).
+- gamespeed: recorded, not judged (O3): 12,528,769.
+- size ~+0.8 .. +1.2M words -> **+1,457,356, ABOVE** (the +2.0M redesign trigger not reached).
+**Against the phase budgets** (P6 +0.1M, P7 ~0, the owner's requests on top): not judgeable for the same reason. The
+cap that binds, CAP-22 on the frozen set, has 7,300,474 of headroom.
+
+**Follow-ups** (for the P6 + P7 PR's follow-up issue; none blocks the ship -- the gates above are exact):
+1. The barrel chain's single-frame cost is UNVERIFIED: fight_gate (and hurt_gate) log scenario totals only. A
+   per-frame op log would price it -- and P5's fireball per-tic estimate and package E's second-tic worst frame with it.
+2. B0 v6's per-frame maximum is 24,117,248 (R0-courtyard), and hurt_gate S1 averages ~23.2M: both over 22M. D1 caps
+   only the binding; recorded for P8's stress review.
+3. gamespeed's tours no longer reach a door (`BINARY_DOORS` all 0, CONTROL-DOORS N/A): the owner's metric no longer
+   exercises the doors, and its number is not like-for-like with blocked48's (O3). Re-planning the routes (a gen 4)
+   would be a metric change -- the owner's call.
+4. B0's strafe proxy: on R2-spectre-corridor frame 0 its forward step is REFUSED by try_move (one step behind the
+   landing is inside a wall), so that frame's delta is not the strafe's collision tic (1 of 324 strafe-only frames).
+5. `p_tnh` (the turn's held flag) is not among the gates' compared cells (`gatestate.STATE_NAMES`, the probe) --
+   `docs/gp-p67-interface.md` 12.6 asked for it; it reaches the gates only through the pose.
+6. The death turn's alive-side size (dp_go's lines, the pool stubs' field, the slot stubs' `hex.set`) is not measured
+   (ESTIMATE ~10K words).
+7. The counts cache at the head: c93b869 / 3c7e381 edited `src/doomfj` after the build, so the tracked cache (the
+   build's recount) MISSES at the head and the 1b line recounts once; poolmap could not price the pads
+   (`blocked51_poolmap.log`).
+8. blocked49's and blocked50's evidence logs are not committed (1af94b1's message cites
+   `blocked50_b0_v6_dropfix.log`): commit them or drop the citation.
+9. Recorded deviations, not bugs: O1 (no view drop; a renderer rung if ever wanted), O2 (D3 a / b not taken for drops
+   and barrels), G3 (drops are not in the model's leaf lists: a gate that compares `sshead` / `thnext` must add the
+   drop rows), and `state_dump.py`'s `new_world()` without `use_sight_rule` (interface 11.4, pre-existing).
+10. P5's open items (#121) other than F3 -- which P7-c closes, with die_gate D1-D3x as its proof -- were not
+    re-checked in this rung.

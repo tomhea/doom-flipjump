@@ -1,0 +1,34 @@
+# 2026-10-06: b0 v6 on blocked50 with the ORACLE drop fix (reference_model MobileThing.drop; this run had the predicate as 'z is not None', the committed one is 'z == 0' -- identical here: monsters.MonsterPhase.mobiles gives a 4th element to the drops only, always 0). R2-barrel-hall's 70/100 is the EMITTER bug (baked barrel light class truncated; fixed in wall_renderer, needs a rebuild); the (proxy) flags are binary-vs-binary differences of the proxy method (each proxy run is pixel-exact vs its own mirror). Command:
+$ PYTHONPATH=src python scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v6.json --fjm build/doom_e1m1_blocked50.fjm --labels scratchpad/12m/atlas/blocked50.labels.tsv.gz --pixel-every 1 --proxy --json docs/ship-evidence/blocked50_b0_v6_dropfix.json
+  model replays: 11 runs reproduce the set's poses (171 s, outside the lock)
+b0_scenarios: doom_e1m1_blocked50.fjm sha256 a3e67a8b17b69d92 | set combat_scenarios_v6.json (11 runs, keys 83d49015078b6abb) | startup+menu 216,344 ops (exact)
+  run                   avg (exact)  p50 +-2^18         p80         max  state     pixels    cam  dr sonl
+  R0-west-hall           19,986,690  20,185,088  20,709,376  21,757,952  100/100   100/100     0   0   53
+  R0-aftermath           13,007,196  12,582,912  17,563,648  21,233,664  100/100   100/100    20  26   40
+  R0-south-hall          13,196,033  13,893,632  15,466,496  16,777,216  100/100   100/100     0   0   24
+  R0-imp-court           14,452,662  14,680,064  19,660,800  22,544,384  100/100   100/100     0   0    0
+  R0-northwest           10,294,743  10,223,616  11,272,192  13,369,344  100/100   100/100     0   0   48
+  R0-courtyard           16,426,462  16,777,216  19,922,944  24,117,248  100/100   100/100     0   0   30
+  R2-barrel-hall         12,855,184  13,893,632  15,466,496  18,350,080  100/100    70/100     0   0   26
+  R2-spectre-corridor    14,282,684  14,680,064  15,728,640  18,874,368  100/100   100/100     0   0   20
+  R2-east-yard           15,817,049  16,515,072  18,087,936  20,447,232  100/100   100/100     0   0    6
+  R3-west                 9,664,941   9,437,184  13,893,632  17,301,504  100/100   100/100     0   0   28
+  R3-mid                 10,220,190  10,747,904  11,796,480  13,107,200  100/100   100/100     0   1   49
+  B0 BINDING (mean + p80)/2 over 11 runs: 14,735,972 ops/frame   (mean 13,654,894, p80 run R2-east-yard = 15,817,049)
+  per-frame maximum: 24,117,248 ops (+/- 2^18) in R0-courtyard; run averages 9,664,941 .. 19,986,689; headroom to 22M: 7,264,028
+  STRAFE UNDERCOUNT (--proxy: each strafe-only frame given a forward step into the same landing):
+    R0-west-hall         +16,098,280 ops over 53 strafe-only frames = 303,741 per frame; state 100/100; picture identical: True
+    R0-aftermath         +4,536,191 ops over 40 strafe-only frames = 113,405 per frame; state 100/100; picture identical: False
+    R0-south-hall        +4,786,870 ops over 24 strafe-only frames = 199,453 per frame; state 100/100; picture identical: True
+    R0-imp-court         +0 ops over 0 strafe-only frames = - per frame; state 100/100; picture identical: True
+    R0-northwest         +9,652,688 ops over 48 strafe-only frames = 201,098 per frame; state 100/100; picture identical: True
+    R0-courtyard         +6,009,626 ops over 30 strafe-only frames = 200,321 per frame; state 100/100; picture identical: True
+    R2-barrel-hall       +3,196,330 ops over 26 strafe-only frames = 122,936 per frame; state 100/100; picture identical: False
+    R2-spectre-corridor  +3,770,743 ops over 20 strafe-only frames = 188,537 per frame; state 100/100; picture identical: False
+    R2-east-yard         +2,050,574 ops over 6 strafe-only frames = 341,762 per frame; state 100/100; picture identical: True
+    R3-west              +4,926,356 ops over 28 strafe-only frames = 175,941 per frame; state 100/100; picture identical: True
+    R3-mid               +9,246,210 ops over 49 strafe-only frames = 188,698 per frame; state 100/100; picture identical: True
+    binding with the collision tic on strafe-only frames: 14,775,440 (B0 + 39,468); 198,376 ops per strafe-only frame over 324 frames
+  !! state or pixel mismatches in ['R2-barrel-hall', 'R0-aftermath(proxy)', 'R2-barrel-hall(proxy)', 'R2-spectre-corridor(proxy)'] -- these numbers describe a wrong run
+B0 FAIL
+rc=1

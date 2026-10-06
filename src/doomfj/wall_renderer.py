@@ -209,14 +209,36 @@ def _seg_xorby_block(label, fields, ret="xb_ret"):
     """The shared per-seg constant block `label` (emitted ONCE, fcall'd twice per visible seg — SET then CLEAR). M12pp:
     replaces the per-seg baked `hex.set` (each pays an @-dispatch to zero a reg it overwrites) with `hex.xor_by`
     (no @), kept correct by xor-INVOLUTION self-zeroing. `fields` = list of (regname, width, value) PURE
-    compile-time constants. Correct ONLY on a zero register, so the zero-init seg regs self-restore each call."""
+    compile-time constants. Correct ONLY on a zero register, so the zero-init seg regs self-restore each call.
+    ⚠ Each value must FIT its width: `hex.xor_by n` xors only the low n nibbles of its constant, so a wider value is
+    silently truncated (M7 P6+P7, 2026-10-06: the baked barrels' explosion light classes 279..426 in the 2-nibble
+    `sp_lt` drew BEXPB..E with another class's shade rows -- b0 v6 R2-barrel-hall, 30 frames)."""
     lines = [f"  {label}:"]
     for reg, wdt, val in fields:
+        assert not isinstance(val, int) or 0 <= val < 16 ** wdt, (
+            f"{label}: hex.xor_by {wdt}, {reg}, {val} -- the constant does not fit {wdt} nibbles (xor_by truncates)")
         lines.append(f"    hex.xor_by {wdt}, {reg}, {val}")
     # M2-R3: a per-state block is reached through its door's switch and must return to the SWITCH's
     # register, not the call site's -- the switch is what the call site fcall'd.
     lines.append(f"    stl.fret {ret}")
     return lines
+
+
+def barrel_state_fields(tfields, row, floor_h: int, cls: int):
+    """M7 P6 (docs/gp-p67-interface.md 5): a BAKED barrel's xor_by fields for one non-S_BAR1 state -- the map barrel's
+    `tfields` (THING_XORBY_FIELDS' layout) with the art, depth bounds, bank regions and light class of the state's
+    lump row `row` (monstercode.barrel_view_rows: (left, w, h, top, tzmax, tzmax2, base, base2, sp_mon, dw)) standing
+    on a floor at `floor_h`. The light class `cls` is `ltw` = 2 BYTES in the animated game tier (frame.thing_record_body
+    reads `2*ltw` nibbles from `sp_lt`, whose second byte `sp_lt_hi` is declared right behind it): its low byte goes in
+    `sp_lt` and a non-zero high byte in `sp_lt_hi` -- zero between things (sim.thing_pass clears it; no baked thing
+    writes it), so the xor involution restores it. The explosion lumps' heights (31, 40, 50, 53) are classes past 255."""
+    assert 0 <= cls < 0x10000, cls
+    new = {"sp_z": ((floor_h + row[3]) << 16) & 0xFFFFFFFF, "sp_left": (row[0] << 16) & 0xFFFFFFFF,
+           "sp_w": (row[1] << 16) & 0xFFFFFFFF, "sp_hh": (row[2] << 16) & 0xFFFFFFFF, "sp_tzmax": row[4],
+           "sp_tzmax2": row[5], "sp_mon": 0, "sp_base": row[6], "sp_base2": row[7], "sp_dw": row[9],
+           "sp_lt": cls & 0xFF}
+    out = [(n, w_, new.get(n, v)) for n, w_, v in tfields]
+    return out + ([("sp_lt_hi", 2, cls >> 8)] if cls >> 8 else [])
 
 
 def _seg_xorby_use(label, clear=True):
@@ -1991,11 +2013,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 fields = list(tfields)
             else:
                 r = _p31["view_rows"][_p31["bar_view"][idx] - nt_]
-                new = {"sp_z": ((tsec.floor_h + r[3]) << 16) & 0xFFFFFFFF, "sp_left": (r[0] << 16) & 0xFFFFFFFF,
-                       "sp_w": (r[1] << 16) & 0xFFFFFFFF, "sp_hh": (r[2] << 16) & 0xFFFFFFFF, "sp_tzmax": r[4],
-                       "sp_tzmax2": r[5], "sp_mon": 0, "sp_base": r[6], "sp_base2": r[7], "sp_dw": r[9],
-                       "sp_lt": spr_cls[(rm.wall_lightnum(tsec.light, 0), max(1, r[2]))]}
-                fields = [(n, w_, new.get(n, v)) for n, w_, v in tfields]
+                fields = barrel_state_fields(tfields, r, tsec.floor_h,
+                                             spr_cls[(rm.wall_lightnum(tsec.light, 0), max(1, r[2]))])
             label = f"thing{tag}_consts" if k == 0 else f"thing{tag}_c{k}"
             xorby_blocks[f"T{tag}" if k == 0 else f"T{tag}_{k}"] = _seg_xorby_block(label, fields)
             stand = k < 2

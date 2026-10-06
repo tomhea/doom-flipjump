@@ -509,6 +509,11 @@ existing picture stay byte-identical. That is proven by `p67_identity.py`, as P5
     into ONE of 7 xor-constants blocks. Each block is the baked thing's `THING_XORBY_FIELDS` for that lump --
     `sp_z`, `sp_left`, `sp_w`, `sp_hh`, `sp_tzmax`, `sp_tzmax2`, `sp_base`, `sp_dw`, `sp_lt` all follow the art --
     plus, for the two live views, the aim id (`sp_sid` = 54 + b, `sp_rc` = class 10).
+    ⚠ FIXED 2026-10-06 (`wall_renderer.barrel_state_fields`): the light class is TWO bytes in the game tier and the
+    explosion lumps' classes run past 255 (279 .. 426 on E1M1) -- the block wrote them with `hex.xor_by 2, sp_lt`,
+    which keeps the low byte, so BEXPB0 .. BEXPE0 drew with another class's shade rows (b0 v6 R2-barrel-hall, frames
+    21-50). The high byte now goes in `sp_lt_hi`, and `_seg_xorby_block` refuses any constant wider than its field
+    (tests/fj/test_baked_barrel_light_fj.py).
   - The schema check that ties the xor block to `sim.thing_pass`'s clears (`THING_XORBY_FIELDS`) grows with
     `sp_sid` / `sp_rc` if the baked path is to record aim. C chooses, by a probe:
     - (i) `aim = 1` on the shared baked projection, `sp_sid` 0 for every other baked thing (~25 ops per baked
@@ -854,7 +859,11 @@ attributes every fragment slot to the thing that wrote it):
 deg_gate's keyword set keep blocked48's picture). An ACTOR is a monster (live or corpse) or a mobile:
 - (1) no soft raise for monsters: their soft count is the hard `MONSTER_BUDGET` (the hard budget stays the backstop);
 - (2) a mobile is an actor: the monster class (counted in `n_mon`) at the monster base bound
-  (`monstercode.mobile_view_rows`: `sp_mon` 1, both depth bounds at `MIN_SPRITE_H_MONSTER`);
+  (`monstercode.mobile_view_rows`: `sp_mon` 1, both depth bounds at `MIN_SPRITE_H_MONSTER`). A mobile here is a
+  fireball, blood or a puff -- NOT a DROP: a drop rides the oracle's `mobiles` list (z 0, on its floor) but stays the
+  SCENERY item of section 5 (`monstercode.drop_view_rows`: `sp_mon` 0, `MIN_SPRITE_H`, B-gated; the oracle's
+  `MobileThing.drop`). FIXED 2026-10-06 in the oracle, which had made drops actors: b0 v6 on blocked50 parted on
+  every frame a drop lay behind its corpse (slot B: the oracle drew it, the binary B-gated it);
 - (3) no B-gate for an actor: it takes slot B behind a nearer sprite at any height;
 - (4) EVERY thing: a sprite whose drawn bucket `[ytop_b, ytop_b + hb)` has no row in `[0, VIEW_H)` records nothing
   (pixel-neutral for itself; still counted; a thing with a seen flag still goes through the seen probe, because the

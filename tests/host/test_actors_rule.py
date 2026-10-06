@@ -74,6 +74,22 @@ def test_a_near_fireball_still_draws_both_ways(court):
                                                            court(exempt_actors=False)) > 0
 
 
+def test_a_drop_is_scenery_not_an_actor(court, monkeypatch):
+    """a DROP (a `mobiles` entry at z 0: the clip a zombieman left) is an ITEM on the floor -- the scenery class at
+    MIN_SPRITE_H, B-gated (docs/gp-p67-interface.md section 5), as the fj bakes its row (monstercode.drop_view_rows:
+    sp_mon 0, the base bound twice -- tests/fj/test_barrel_rowselect_fj.py). FOUND by b0 v6 on blocked50 (2026-10-06):
+    the oracle drew a drop as an ACTOR, so behind its own corpse it took slot B where the binary B-gated it -- 44 of
+    R0-northwest's 100 frames parted (1-53 px), and R0-south-hall, R0-imp-court, R2-barrel-hall, R2-spectre-corridor,
+    R3-west, R3-mid likewise. Here: a clip 500 units up the open courtyard projects under 3 rows -- not drawn."""
+    from doomfj.reference_model import MobileThing
+    drop = [(COURT[0] + 8, COURT[1] + 500, "CLIPA0", 0)]
+    assert MobileThing(0, 0, z=0).drop and not MobileThing(0, 0).drop and not MobileThing(0, 0, z=32).drop
+    assert _diff(court(mobiles=drop), court()) == 0, "a far drop is drawn: the oracle treats it as an actor"
+    # R9 control: the rule this replaced (every mobile an actor, at the monster base bound 1) draws it
+    monkeypatch.setattr(MobileThing, "drop", property(lambda self: False))
+    assert _diff(court(mobiles=drop), court()) > 0, "the case does not separate a scenery drop from an actor one"
+
+
 def test_the_corpse_no_longer_hides_the_monsters_behind_it():
     """v5 R0-aftermath frame 57 (the player on a corpse; injected from tests/fixtures/p67_scenes.json): the old rule draws neither live monster in view, the rule
     draws both -- scratchpad/gp/p67e_visibility_probe.py's attribution, which is also its own R9 control"""

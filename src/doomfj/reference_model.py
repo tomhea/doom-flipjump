@@ -406,6 +406,15 @@ class MobileThing:
     type: int = -1
     z: int | None = None
 
+    @property
+    def drop(self) -> bool:
+        """M7 P6: a DROP -- the item a monster left, standing ON its floor (`monsters.MonsterPhase.mobiles`' (x, y,
+        lump, 0)): drawn as SCENERY under every rule, never an actor (docs/gp-p67-interface.md section 5; the fj's drop
+        rows, monstercode.drop_view_rows). The fireballs, blood and puffs fly at MISSILE_Z (z None, or a 4th element
+        that says so) and are the mobiles the actors rule exempts: the 4th element moves the height, and z 0 is what
+        marks an item"""
+        return self.z == 0
+
 
 def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
     """M7 P3.3 (D3 d), `rt_depth_order="aprox"`: a runtime thing's depth key -- P_AproxDistance from the player's
@@ -2058,7 +2067,8 @@ class ReferenceModel:
         #   1. no soft raise: the monsters' soft count becomes the hard MONSTER_BUDGET (255: never reached, the union
         #      holds 53), so a monster keeps its BASE bound (MIN_SPRITE_H_MONSTER) whatever the frame's load;
         #   2. a mobile is an actor too: the monster category (n_mon) and the monster BASE bound (a far fireball
-        #      shorter than MIN_SPRITE_H no longer vanishes; monstercode.mobile_view_rows bakes the same);
+        #      shorter than MIN_SPRITE_H no longer vanishes; monstercode.mobile_view_rows bakes the same) -- but NOT a
+        #      DROP (`MobileThing.drop`): an item on the floor stays scenery (monstercode.drop_view_rows: sp_mon 0);
         #   3. no B-gate for an actor: its fragment takes slot B behind a nearer sprite at any height;
         #   4. (every thing) a sprite with NO ROW inside the view -- the drawn bucket [ytop_b, ytop_b + hb) entirely
         #      above or below it, e.g. the corpse the player stands on, whose feet-planted rows are all under the
@@ -2291,7 +2301,11 @@ class ReferenceModel:
                     mon = t.type in MONSTER_TYPES
                     mob = t_di >= _ndraw                 # M7 P5: a mobile (scenery: never seen, never aimed)
                     # M7 P6+P7 E: an ACTOR -- the monster category, base bound and B-gate exemption (exempt_actors)
-                    act = mon or (mob and exempt_actors)
+                    # A DROP is not an actor: it rides `mobiles` (z 0: `MobileThing.drop`) but is an ITEM on the floor -- the
+                    # scenery class at MIN_SPRITE_H, B-gated (docs/gp-p67-interface.md section 5; the fj's drop rows:
+                    # monstercode.drop_view_rows, sp_mon 0). b0 v6 on blocked50 (2026-10-06): an actor drop took slot B
+                    # behind its corpse here while the binary B-gated it -- 1-53 px on 44 of R0-northwest's 100 frames
+                    act = mon or (mob and exempt_actors and not t.drop)
                     # M7 P3.2 (docs/gp-monsters.md 8.2, D3 e): SEEN -- the sprite projects in front at the
                     # BASE monster size cull (MIN_SPRITE_H_MONSTER, not the soft budgets' raise) and one of
                     # its columns is still OPEN when its leaf is reached, tested BEFORE the count budgets:

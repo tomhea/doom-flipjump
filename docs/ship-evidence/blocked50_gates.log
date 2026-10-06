@@ -1,0 +1,502 @@
+$ python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_blocked50.fjm --labels scratchpad/12m/atlas/blocked50.labels.tsv.gz
+  CONTROL 5: binary and oracle agree on door geometry (quant 16, 15 doors)
+  candidate: skill 3, door 10 -- a monster on its ground at this skill: [(800, 400), (816, 448)]
+  candidate: skill 3, door 100 -- a monster on its ground at this skill: [(944, -224)]
+  candidate: skill 1, door 10 -- the mirror walk opens, crosses and keeps it open, no death: TAKEN
+  CONTROL 0: the planned route crosses no solid linedef: yes (177 frames re-simulated)
+fjm    : build/doom_e1m1_blocked50.fjm
+target : door sector 10, use box (704, 448, 960, 608), threshold state 4
+skill  : 1 (the boot skill is 3) -- picked on the skill screen: enter, 2 x up, enter (NEW GAME) on frame 5
+script : 5 menu -> NEW GAME -> 177 walk to the door -> 2 use -> 10 open -> 27 through -> enter, enter, enter (NEW GAME at skill 1) -> the 177-frame walk again -> 6 idle  (406 frames)
+doorway: line 55 ((896, 544), (768, 544)) -> approach (832, 488), then through to (832, 632)
+running: 6,537,430,651 ops -> 406 frames presented
+
+  frame  keys      door10    fj px vs oracle
+      0  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      1  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      2  enter          -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+      3  up             -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+      4  up             -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+      5  t              0   BYTE-EXACT  state ok
+      6  t              0   BYTE-EXACT  state ok
+      7  t              0   BYTE-EXACT  state ok
+      8  t              0   BYTE-EXACT  state ok
+      9  ff             0   BYTE-EXACT  state ok
+     10  ft             0   BYTE-EXACT  state ok
+     11  ft             0   BYTE-EXACT  state ok
+     12  ft             0   BYTE-EXACT  state ok
+     13  ff             0   BYTE-EXACT  state ok
+     14  ff             0   BYTE-EXACT  state ok
+     15  ft             0   BYTE-EXACT  state ok
+     16  ft             0   BYTE-EXACT  state ok
+     17  ff             0   BYTE-EXACT  state ok
+     18  ft             0   BYTE-EXACT  state ok
+     19  ff             0   BYTE-EXACT  state ok
+     20  ff             0   BYTE-EXACT  state ok
+     21  ff             0   BYTE-EXACT  state ok
+     22  ff             0   BYTE-EXACT  state ok
+     23  ff             0   BYTE-EXACT  state ok
+     24  ff             0   BYTE-EXACT  state ok
+     25  ff             0   BYTE-EXACT  state ok
+     26  ff             0   BYTE-EXACT  state ok
+     27  f              0   BYTE-EXACT  state ok
+     28  f              0   BYTE-EXACT  state ok
+     29  f              0   BYTE-EXACT  state ok
+     30  f              0   BYTE-EXACT  state ok
+     31  ff             0   BYTE-EXACT  state ok
+     32  f              0   BYTE-EXACT  state ok
+     33  f              0   BYTE-EXACT  state ok
+     34  f              0   BYTE-EXACT  state ok
+     35  fw             0   BYTE-EXACT  state ok
+     36  f              0   BYTE-EXACT  state ok
+     37  f              0   BYTE-EXACT  state ok
+     38  f              0   BYTE-EXACT  state ok
+     39  f              0   BYTE-EXACT  state ok
+     40  f              0   BYTE-EXACT  state ok
+     41  f              0   BYTE-EXACT  state ok
+     42  f              0   BYTE-EXACT  state ok
+     43  f              0   BYTE-EXACT  state ok
+     44  f              0   BYTE-EXACT  state ok
+     45  f              0   BYTE-EXACT  state ok
+     46  f              0   BYTE-EXACT  state ok
+     47  -              0   BYTE-EXACT  state ok
+     48  -              0   BYTE-EXACT  state ok
+     49  -              0   BYTE-EXACT  state ok
+     50  -              0   BYTE-EXACT  state ok
+     51  -              0   BYTE-EXACT  state ok
+     52  -              0   BYTE-EXACT  state ok
+     53  f              0   BYTE-EXACT  state ok
+     54  f              0   BYTE-EXACT  state ok
+     55  f              0   BYTE-EXACT  state ok
+     56  f              0   BYTE-EXACT  state ok
+     57  f              0   BYTE-EXACT  state ok
+     58  f              0   BYTE-EXACT  state ok
+     59  f              0   BYTE-EXACT  state ok
+     60  f              0   BYTE-EXACT  state ok
+     61  f              0   BYTE-EXACT  state ok
+     62  f              0   BYTE-EXACT  state ok
+     63  f              0   BYTE-EXACT  state ok
+     64  f              0   BYTE-EXACT  state ok
+     65  -              0   BYTE-EXACT  state ok
+     66  -              0   BYTE-EXACT  state ok
+     67  -              0   BYTE-EXACT  state ok
+     68  -              0   BYTE-EXACT  state ok
+     69  w              0   BYTE-EXACT  state ok
+     70  -              0   BYTE-EXACT  state ok
+     71  -              0   BYTE-EXACT  state ok
+     72  -              0   BYTE-EXACT  state ok
+     73  -              0   BYTE-EXACT  state ok
+     74  -              0   BYTE-EXACT  state ok
+     75  -              0   BYTE-EXACT  state ok
+     76  -              0   BYTE-EXACT  state ok
+     77  -              0   BYTE-EXACT  state ok
+     78  -              0   BYTE-EXACT  state ok
+     79  -              0   BYTE-EXACT  state ok
+     80  -              0   BYTE-EXACT  state ok
+     81  -              0   BYTE-EXACT  state ok
+     82  -              0   BYTE-EXACT  state ok
+     83  -              0   BYTE-EXACT  state ok
+     84  -              0   BYTE-EXACT  state ok
+     85  -              0   BYTE-EXACT  state ok
+     86  -              0   BYTE-EXACT  state ok
+     87  -              0   BYTE-EXACT  state ok
+     88  -              0   BYTE-EXACT  state ok
+     89  -              0   BYTE-EXACT  state ok
+     90  f              0   BYTE-EXACT  state ok
+     91  f              0   BYTE-EXACT  state ok
+     92  f              0   BYTE-EXACT  state ok
+     93  f              0   BYTE-EXACT  state ok
+     94  t              0   BYTE-EXACT  state ok
+     95  t              0   BYTE-EXACT  state ok
+     96  t              0   BYTE-EXACT  state ok
+     97  t              0   BYTE-EXACT  state ok
+     98  t              0   BYTE-EXACT  state ok
+     99  t              0   BYTE-EXACT  state ok
+    100  t              0   BYTE-EXACT  state ok
+    101  f              0   BYTE-EXACT  state ok
+    102  t              0   BYTE-EXACT  state ok
+    103  t              0   BYTE-EXACT  state ok
+    104  f              0   BYTE-EXACT  state ok
+    105  f              0   BYTE-EXACT  state ok
+    106  t              0   BYTE-EXACT  state ok
+    107  t              0   BYTE-EXACT  state ok
+    108  f              0   BYTE-EXACT  state ok
+    109  t              0   BYTE-EXACT  state ok
+    110  t              0   BYTE-EXACT  state ok
+    111  t              0   BYTE-EXACT  state ok
+    112  t              0   BYTE-EXACT  state ok
+    113  t              0   BYTE-EXACT  state ok
+    114  t              0   BYTE-EXACT  state ok
+    115  f              0   BYTE-EXACT  state ok
+    116  t              0   BYTE-EXACT  state ok
+    117  t              0   BYTE-EXACT  state ok
+    118  t              0   BYTE-EXACT  state ok
+    119  f              0   BYTE-EXACT  state ok
+    120  t              0   BYTE-EXACT  state ok
+    121  t              0   BYTE-EXACT  state ok
+    122  f              0   BYTE-EXACT  state ok
+    123  f              0   BYTE-EXACT  state ok
+    124  f              0   BYTE-EXACT  state ok
+    125  f              0   BYTE-EXACT  state ok
+    126  f              0   BYTE-EXACT  state ok
+    127  f              0   BYTE-EXACT  state ok
+    128  f              0   BYTE-EXACT  state ok
+    129  f              0   BYTE-EXACT  state ok
+    130  f              0   BYTE-EXACT  state ok
+    131  f              0   BYTE-EXACT  state ok
+    132  f              0   BYTE-EXACT  state ok
+    133  f              0   BYTE-EXACT  state ok
+    134  f              0   BYTE-EXACT  state ok
+    135  f              0   BYTE-EXACT  state ok
+    136  f              0   BYTE-EXACT  state ok
+    137  f              0   BYTE-EXACT  state ok
+    138  f              0   BYTE-EXACT  state ok
+    139  f              0   BYTE-EXACT  state ok
+    140  f              0   BYTE-EXACT  state ok
+    141  f              0   BYTE-EXACT  state ok
+    142  f              0   BYTE-EXACT  state ok
+    143  f              0   BYTE-EXACT  state ok
+    144  f              0   BYTE-EXACT  state ok
+    145  f              0   BYTE-EXACT  state ok
+    146  f              0   BYTE-EXACT  state ok
+    147  f              0   BYTE-EXACT  state ok
+    148  f              0   BYTE-EXACT  state ok
+    149  f              0   BYTE-EXACT  state ok
+    150  f              0   BYTE-EXACT  state ok
+    151  f              0   BYTE-EXACT  state ok
+    152  f              0   BYTE-EXACT  state ok
+    153  f              0   BYTE-EXACT  state ok
+    154  f              0   BYTE-EXACT  state ok
+    155  f              0   BYTE-EXACT  state ok
+    156  f              0   BYTE-EXACT  state ok
+    157  t              0   BYTE-EXACT  state ok
+    158  t              0   BYTE-EXACT  state ok
+    159  t              0   BYTE-EXACT  state ok
+    160  t              0   BYTE-EXACT  state ok
+    161  t              0   BYTE-EXACT  state ok
+    162  t              0   BYTE-EXACT  state ok
+    163  t              0   BYTE-EXACT  state ok
+    164  f              0   BYTE-EXACT  state ok
+    165  t              0   BYTE-EXACT  state ok
+    166  t              0   BYTE-EXACT  state ok
+    167  f              0   BYTE-EXACT  state ok
+    168  f              0   BYTE-EXACT  state ok
+    169  t              0   BYTE-EXACT  state ok
+    170  f              0   BYTE-EXACT  state ok
+    171  t              0   BYTE-EXACT  state ok
+    172  f              0   BYTE-EXACT  state ok
+    173  f              0   BYTE-EXACT  state ok
+    174  f              0   BYTE-EXACT  state ok
+    175  t              0   BYTE-EXACT  state ok
+    176  f              0   BYTE-EXACT  state ok
+    177  f              0   BYTE-EXACT  state ok
+    178  f              0   BYTE-EXACT  state ok
+    179  f              0   BYTE-EXACT  state ok
+    180  f              0   BYTE-EXACT  state ok
+    181  f              0   BYTE-EXACT  state ok
+    182  u              1   BYTE-EXACT  state ok
+    183  u              2   BYTE-EXACT  state ok
+    184  -              3   BYTE-EXACT  state ok
+    185  -              4   BYTE-EXACT  state ok
+    186  -              5   BYTE-EXACT  state ok
+    187  -              6   BYTE-EXACT  state ok
+    188  -              7   BYTE-EXACT  state ok
+    189  -              8   BYTE-EXACT  state ok
+    190  -              8   BYTE-EXACT  state ok
+    191  -              8   BYTE-EXACT  state ok
+    192  -              8   BYTE-EXACT  state ok
+    193  -              8   BYTE-EXACT  state ok
+    194  t              8   BYTE-EXACT  state ok
+    195  t              8   BYTE-EXACT  state ok
+    196  t              8   BYTE-EXACT  state ok
+    197  t              8   BYTE-EXACT  state ok
+    198  t              8   BYTE-EXACT  state ok
+    199  t              8   BYTE-EXACT  state ok
+    200  t              8   BYTE-EXACT  state ok
+    201  t              8   BYTE-EXACT  state ok
+    202  t              8   BYTE-EXACT  state ok
+    203  f              8   BYTE-EXACT  state ok
+    204  f              8   BYTE-EXACT  state ok
+    205  f              8   BYTE-EXACT  state ok
+    206  f              8   BYTE-EXACT  state ok
+    207  f              8   BYTE-EXACT  state ok
+    208  f              8   BYTE-EXACT  state ok
+    209  f              8   BYTE-EXACT  state ok
+    210  f              8   BYTE-EXACT  state ok
+    211  t              8   BYTE-EXACT  state ok
+    212  f              8   BYTE-EXACT  state ok
+    213  t              8   BYTE-EXACT  state ok
+    214  t              8   BYTE-EXACT  state ok
+    215  t              8   BYTE-EXACT  state ok
+    216  t              8   BYTE-EXACT  state ok
+    217  t              8   BYTE-EXACT  state ok
+    218  t              8   BYTE-EXACT  state ok
+    219  t              8   BYTE-EXACT  state ok
+    220  f              8   BYTE-EXACT  state ok
+    221  enter          -   (menu frame, the main menu -- m3_gate judges these)  state ok
+    222  enter          -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+    223  t              0   BYTE-EXACT  state ok
+    224  t              0   BYTE-EXACT  state ok
+    225  t              0   BYTE-EXACT  state ok
+    226  t              0   BYTE-EXACT  state ok
+    227  ff             0   BYTE-EXACT  state ok
+    228  ft             0   BYTE-EXACT  state ok
+    229  ft             0   BYTE-EXACT  state ok
+    230  ft             0   BYTE-EXACT  state ok
+    231  ff             0   BYTE-EXACT  state ok
+    232  ff             0   BYTE-EXACT  state ok
+    233  ft             0   BYTE-EXACT  state ok
+    234  ft             0   BYTE-EXACT  state ok
+    235  ff             0   BYTE-EXACT  state ok
+    236  ft             0   BYTE-EXACT  state ok
+    237  ff             0   BYTE-EXACT  state ok
+    238  ff             0   BYTE-EXACT  state ok
+    239  ff             0   BYTE-EXACT  state ok
+    240  ff             0   BYTE-EXACT  state ok
+    241  ff             0   BYTE-EXACT  state ok
+    242  ff             0   BYTE-EXACT  state ok
+    243  ff             0   BYTE-EXACT  state ok
+    244  ff             0   BYTE-EXACT  state ok
+    245  f              0   BYTE-EXACT  state ok
+    246  f              0   BYTE-EXACT  state ok
+    247  f              0   BYTE-EXACT  state ok
+    248  f              0   BYTE-EXACT  state ok
+    249  ff             0   BYTE-EXACT  state ok
+    250  f              0   BYTE-EXACT  state ok
+    251  f              0   BYTE-EXACT  state ok
+    252  f              0   BYTE-EXACT  state ok
+    253  fw             0   BYTE-EXACT  state ok
+    254  f              0   BYTE-EXACT  state ok
+    255  f              0   BYTE-EXACT  state ok
+    256  f              0   BYTE-EXACT  state ok
+    257  f              0   BYTE-EXACT  state ok
+    258  f              0   BYTE-EXACT  state ok
+    259  f              0   BYTE-EXACT  state ok
+    260  f              0   BYTE-EXACT  state ok
+    261  f              0   BYTE-EXACT  state ok
+    262  f              0   BYTE-EXACT  state ok
+    263  f              0   BYTE-EXACT  state ok
+    264  f              0   BYTE-EXACT  state ok
+    265  -              0   BYTE-EXACT  state ok
+    266  -              0   BYTE-EXACT  state ok
+    267  -              0   BYTE-EXACT  state ok
+    268  -              0   BYTE-EXACT  state ok
+    269  -              0   BYTE-EXACT  state ok
+    270  -              0   BYTE-EXACT  state ok
+    271  f              0   BYTE-EXACT  state ok
+    272  f              0   BYTE-EXACT  state ok
+    273  f              0   BYTE-EXACT  state ok
+    274  f              0   BYTE-EXACT  state ok
+    275  f              0   BYTE-EXACT  state ok
+    276  f              0   BYTE-EXACT  state ok
+    277  f              0   BYTE-EXACT  state ok
+    278  f              0   BYTE-EXACT  state ok
+    279  f              0   BYTE-EXACT  state ok
+    280  f              0   BYTE-EXACT  state ok
+    281  f              0   BYTE-EXACT  state ok
+    282  f              0   BYTE-EXACT  state ok
+    283  -              0   BYTE-EXACT  state ok
+    284  -              0   BYTE-EXACT  state ok
+    285  -              0   BYTE-EXACT  state ok
+    286  -              0   BYTE-EXACT  state ok
+    287  w              0   BYTE-EXACT  state ok
+    288  -              0   BYTE-EXACT  state ok
+    289  -              0   BYTE-EXACT  state ok
+    290  -              0   BYTE-EXACT  state ok
+    291  -              0   BYTE-EXACT  state ok
+    292  -              0   BYTE-EXACT  state ok
+    293  -              0   BYTE-EXACT  state ok
+    294  -              0   BYTE-EXACT  state ok
+    295  -              0   BYTE-EXACT  state ok
+    296  -              0   BYTE-EXACT  state ok
+    297  -              0   BYTE-EXACT  state ok
+    298  -              0   BYTE-EXACT  state ok
+    299  -              0   BYTE-EXACT  state ok
+    300  -              0   BYTE-EXACT  state ok
+    301  -              0   BYTE-EXACT  state ok
+    302  -              0   BYTE-EXACT  state ok
+    303  -              0   BYTE-EXACT  state ok
+    304  -              0   BYTE-EXACT  state ok
+    305  -              0   BYTE-EXACT  state ok
+    306  -              0   BYTE-EXACT  state ok
+    307  -              0   BYTE-EXACT  state ok
+    308  f              0   BYTE-EXACT  state ok
+    309  f              0   BYTE-EXACT  state ok
+    310  f              0   BYTE-EXACT  state ok
+    311  f              0   BYTE-EXACT  state ok
+    312  t              0   BYTE-EXACT  state ok
+    313  t              0   BYTE-EXACT  state ok
+    314  t              0   BYTE-EXACT  state ok
+    315  t              0   BYTE-EXACT  state ok
+    316  t              0   BYTE-EXACT  state ok
+    317  t              0   BYTE-EXACT  state ok
+    318  t              0   BYTE-EXACT  state ok
+    319  f              0   BYTE-EXACT  state ok
+    320  t              0   BYTE-EXACT  state ok
+    321  t              0   BYTE-EXACT  state ok
+    322  f              0   BYTE-EXACT  state ok
+    323  f              0   BYTE-EXACT  state ok
+    324  t              0   BYTE-EXACT  state ok
+    325  t              0   BYTE-EXACT  state ok
+    326  f              0   BYTE-EXACT  state ok
+    327  t              0   BYTE-EXACT  state ok
+    328  t              0   BYTE-EXACT  state ok
+    329  t              0   BYTE-EXACT  state ok
+    330  t              0   BYTE-EXACT  state ok
+    331  t              0   BYTE-EXACT  state ok
+    332  t              0   BYTE-EXACT  state ok
+    333  f              0   BYTE-EXACT  state ok
+    334  t              0   BYTE-EXACT  state ok
+    335  t              0   BYTE-EXACT  state ok
+    336  t              0   BYTE-EXACT  state ok
+    337  f              0   BYTE-EXACT  state ok
+    338  t              0   BYTE-EXACT  state ok
+    339  t              0   BYTE-EXACT  state ok
+    340  f              0   BYTE-EXACT  state ok
+    341  f              0   BYTE-EXACT  state ok
+    342  f              0   BYTE-EXACT  state ok
+    343  f              0   BYTE-EXACT  state ok
+    344  f              0   BYTE-EXACT  state ok
+    345  f              0   BYTE-EXACT  state ok
+    346  f              0   BYTE-EXACT  state ok
+    347  f              0   BYTE-EXACT  state ok
+    348  f              0   BYTE-EXACT  state ok
+    349  f              0   BYTE-EXACT  state ok
+    350  f              0   BYTE-EXACT  state ok
+    351  f              0   BYTE-EXACT  state ok
+    352  f              0   BYTE-EXACT  state ok
+    353  f              0   BYTE-EXACT  state ok
+    354  f              0   BYTE-EXACT  state ok
+    355  f              0   BYTE-EXACT  state ok
+    356  f              0   BYTE-EXACT  state ok
+    357  f              0   BYTE-EXACT  state ok
+    358  f              0   BYTE-EXACT  state ok
+    359  f              0   BYTE-EXACT  state ok
+    360  f              0   BYTE-EXACT  state ok
+    361  f              0   BYTE-EXACT  state ok
+    362  f              0   BYTE-EXACT  state ok
+    363  f              0   BYTE-EXACT  state ok
+    364  f              0   BYTE-EXACT  state ok
+    365  f              0   BYTE-EXACT  state ok
+    366  f              0   BYTE-EXACT  state ok
+    367  f              0   BYTE-EXACT  state ok
+    368  f              0   BYTE-EXACT  state ok
+    369  f              0   BYTE-EXACT  state ok
+    370  f              0   BYTE-EXACT  state ok
+    371  f              0   BYTE-EXACT  state ok
+    372  f              0   BYTE-EXACT  state ok
+    373  f              0   BYTE-EXACT  state ok
+    374  f              0   BYTE-EXACT  state ok
+    375  t              0   BYTE-EXACT  state ok
+    376  t              0   BYTE-EXACT  state ok
+    377  t              0   BYTE-EXACT  state ok
+    378  t              0   BYTE-EXACT  state ok
+    379  t              0   BYTE-EXACT  state ok
+    380  t              0   BYTE-EXACT  state ok
+    381  t              0   BYTE-EXACT  state ok
+    382  f              0   BYTE-EXACT  state ok
+    383  t              0   BYTE-EXACT  state ok
+    384  t              0   BYTE-EXACT  state ok
+    385  f              0   BYTE-EXACT  state ok
+    386  f              0   BYTE-EXACT  state ok
+    387  t              0   BYTE-EXACT  state ok
+    388  f              0   BYTE-EXACT  state ok
+    389  t              0   BYTE-EXACT  state ok
+    390  f              0   BYTE-EXACT  state ok
+    391  f              0   BYTE-EXACT  state ok
+    392  f              0   BYTE-EXACT  state ok
+    393  t              0   BYTE-EXACT  state ok
+    394  f              0   BYTE-EXACT  state ok
+    395  f              0   BYTE-EXACT  state ok
+    396  f              0   BYTE-EXACT  state ok
+    397  f              0   BYTE-EXACT  state ok
+    398  f              0   BYTE-EXACT  state ok
+    399  f              0   BYTE-EXACT  state ok
+    400  -              0   BYTE-EXACT  state ok
+    401  -              0   BYTE-EXACT  state ok
+    402  -              0   BYTE-EXACT  state ok
+    403  -              0   BYTE-EXACT  state ok
+    404  -              0   BYTE-EXACT  state ok
+    405  -              0   BYTE-EXACT  state ok
+
+  CONTROL 1: door 10 reached 9 distinct states [0, 1, 2, 3, 4, 5, 6, 7, 8] -- carried across the reset
+  CONTROL 2: use was pressed INSIDE the box: yes
+  CONTROL 3: the menu frames of each screen are identical to each other (5 screens): yes
+  CONTROL 4: the player's path crosses door 10's own line SEGMENT ((896, 544)-(768, 544) / (768, 512)-(896, 512)): yes -- and every frame is byte-exact, so fj walked the same path, which its blocking bit had to clear to allow
+  CONTROL 6: NEW GAME found door 10 open (yes), the 177-frame replay retraced the first walk (yes), and its last frame can tell the shut door from that one (yes)
+  CONTROL 7: every frame's STATE (view, mode, menu_scr, menu_sel, and every door's state, direction, sub-step and timer) equals the oracle's: yes, 406 frames
+  CONTROL 8 (M7 P7): the mirror's player died on 0 frames -- none, as this walk expects
+
+M2 STANDALONE GATE: PASS -- the shipped binary opens a door, KEEPS it open across the M1 reset, and NEW GAME puts it back; byte- and state-exact on all 406 frames
+rc=0
+$ python scratchpad/m3_gate.py --fjm build/doom_e1m1_blocked50.fjm --labels scratchpad/12m/atlas/blocked50.labels.tsv.gz
+fjm    : build/doom_e1m1_blocked50.fjm
+menu   : ['DOOM ON FLIPJUMP', '', 'NEW GAME', 'HELP']   colours bg=0 text=4 hi=176 credit=101
+skills : ['EASY', 'MEDIUM', 'HARD'] -- hidden [42, 41, 22]; the boot skill is hard
+script : boot in menu -> esc@2 -> walk -> enter@6 (W held) -> esc@9 -> the skill screen @13, clamp both ends, back, NEW GAME at easy@20, medium@25, hard@30 -> the help from the world @32 (W held) -> esc@34 -> the main menu, HELP @37, its help @38, h@40, h@41, esc@42, up@43, h@44, esc@45, esc@46 -> the help from the world @47, h@48
+  361,316,218 ops -> 50 frames
+  frame  0 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  1 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  2 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  3 world hard    (-400.000, 256.000)  BYTE-EXACT  state ok
+  frame  4 world hard    (-384.000, 256.000)  BYTE-EXACT  state ok
+  frame  5 world hard    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  6 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  7 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  8 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  9 world hard    (-352.000, 256.000)  BYTE-EXACT  state ok
+  frame 10 world hard    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 11 world hard    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 12 MENU  main    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 13 MENU  skill 2 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 14 MENU  skill 2 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 15 MENU  skill 1 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 16 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 17 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 18 MENU  main    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 19 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 20 world easy    (-416.000, 256.000)  NEW GAME  BYTE-EXACT  state ok
+  frame 21 world easy    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 22 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 23 MENU  skill 0 (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 24 MENU  skill 1 (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 25 world medium  (-416.000, 256.000)  NEW GAME  BYTE-EXACT  state ok
+  frame 26 world medium  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 27 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 28 MENU  skill 1 (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 29 MENU  skill 2 (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 30 world hard    (-416.000, 256.000)  NEW GAME  BYTE-EXACT  state ok
+  frame 31 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 32 MENU  help/g  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 33 MENU  help/g  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 34 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 35 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 36 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 37 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 38 MENU  help/m  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 39 MENU  help/m  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 40 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 41 MENU  help/m  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 42 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 43 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 44 MENU  help/m  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 45 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 46 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 47 MENU  help/g  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 48 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 49 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+
+  CONTROL: menu frames 32, world frames 18, frames that moved the player 6
+  CONTROL: the player did NOT move during the 3 menu frames with W held: ok
+  CONTROL: the screens shown: main menu yes, the skill screen at highlights [0, 1, 2] of 3
+  CONTROL (P3.4): the main menu on HELP yes, the help from the menu yes, from the world yes
+  CONTROL (P3.4): the player did NOT move during the 2 help frames with W held: ok
+  CONTROL (P3.4): the help closed back to the world (frame 34) and to the main menu on HELP (frame 40): yes
+  CONTROL: the first NEW GAME found the player walked away (yes), and every NEW GAME frame is the spawn view (yes)
+  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: yes
+  CONTROL: distinct pictures: 18 of 50
+  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, every door's cells) equals the oracle's: yes, 50 frames
+  M7 P7: the mirror's player died on 0 frames -- none, as this walk expects
+
+M3 GATE: PASS -- byte- and state-exact on all 50 frames
+rc=0

@@ -74,7 +74,9 @@ def build(labels_path=None, gen_dir=None):
         ("input (kb.poll x8 + key decode)", byname["__hot_end"]),
         ("menu", byname["menu_frame"]),
         ("doors (use + 13 door tics)", byname["do_world"]),
-        ("move sim (turn/move/finesine/mul)", byname["simtl_yes"]),
+        # M7 P6+P7: the game tier's tap turn (wall_renderer._player_sim_lines(tap=True)) starts at simth_yes; the
+        # other tiers keep simtl_yes
+        ("move sim (turn/move/finesine/mul)", byname["simtl_yes"] if "simtl_yes" in byname else byname["simth_yes"]),
         ("collision (4x vx/vy + dsccs fcall + try_move)", byname["simcollide"]),
         *([("sim.bind_things", byname["simcollide_skip"]),
            ("view setup (wnt, wedge_setup)", after_bind)] if bind else

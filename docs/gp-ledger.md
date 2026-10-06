@@ -1445,3 +1445,79 @@ exact):
 - F7: `_w5.reset(BOOT_SKILL)` mutates `p31_parts`' World after the parts were built.
 - The owed fj runs of criterion 2 (`test_weapon_fj` with `deadkeys`, `test_monster_wake_fj`'s `thrcount`), if the
   full `tests/fj` run does not settle them.
+
+## P6 + P7 pickups, barrels, death and restart (class F) -- declared 2026-10-05, before the build
+
+**What**: `docs/gp-p67-interface.md` -- ONE rung, the model modes `PLAYER_MODE = "full"`, `MONSTER_MODE = "full"`
+(`wall_renderer`), integrated on `m7-p67` from six packages:
+- **P6-a..m and P7-a..e** of the interface's section 1 -- the pickups and every give with DOOM's caps, the bonus and
+  berserk palettes, drops, barrels in the aim / damage / blasts / chains / puffs, blocking by things, nukage, gibs,
+  `leveltime`; the dead latch `p_dd0` and its guards (doors, use lines, weapon keys, the move), the death think, the
+  restart on use and NEW GAME after death -- in the frame order of section 4.7 and the cells of section 4.5
+  (packages A the model / oracle / gates, B `doomfj.lootcode`, C `doomfj.barrelcode`, D `doomfj.restartcode`);
+- **the owner's 2026-10-05 requests**, each a behaviour change v5 cannot carry (so the frozen set becomes v6):
+  - the monsters' TEMPO x2 (`world.MONSTER_TICS_PER_FRAME = 2`: the monster tic and the pools looped twice a frame,
+    `wall_renderer.world_tic_lines`) and the ACTORS rule (`GAME_RENDER_KW["exempt_actors"]`: monsters and mobiles
+    exempt from the soft raise and the B-gate, a sprite with no row in the view records nothing) -- package E,
+    section 11;
+  - the player's FIRE RATE x2 (`world.WEAPON_TICS = 2`, `weaponcode.weapon_lines(tics=)`), the TURN RULE (the first
+    frame of a hold turns `ANGLE_TURN_TAP` 320 << 16, later frames `ANGLE_TURN_HELD` 960 << 16, `p_tnh`) and the help
+    screen's spacing -- package F, section 12;
+  - the DEATH TURN (O1 re-opened): the dead view turns to the killer by ANG5 a tic (`p_atk`, `pj_src`, `dt_turn`),
+    the flash fading only once facing him -- package D, as built in section 10;
+- the model fix the integrator made on the coordinator's decision: `combat._player_move` skips a candidate equal to
+  the player's position at every coordinate (it compared a masked candidate with a signed position), and the fj's
+  `skip_still` follows the fixed rule.
+
+**Budget** (ESTIMATES, UNVERIFIED; their basis):
+- **ops, on the frozen set**: v5 can no longer be replayed (the tempo, the turn and fire x2 move it), so the binding is
+  measured on **v6** (`b0_scenarios.py --file combat_scenarios_v6.json`), which is a re-planned set: NOT like-for-like
+  with blocked48's v5 16,037,431. Its terms:
+  - P6 + P7's own code: **+0.0 .. +0.15M** (section 7: the barrel phase ~1.5K, pickups ~0.6K and `pb_mon` ~7.5K per
+    moving frame, nukage ~0.1K, blasts ~0.5K, drawing -10K .. +20K; placement +/- ~0.1M);
+  - package E's second monster tic: **+0.15M on the mean frame, +0.25M on the p80 frame** (MEASURED span on
+    blocked48's games, section 11.3), **v6 binding +0.15 .. +0.4M** with fights' extra fireballs; the actors rule
+    **-0.15 .. +0.05M**;
+  - package F's second weapon pass: **< +0.01M** (+0.3 .. 0.4K a frame MEASURED in the harness);
+  - package D's death turn: ~0 on alive frames (tens of ops per landed hit), ~14.5K on a dead frame (MEASURED in the
+    harness);
+  - **declared: v6 binding ~16.0 .. 16.7M**, under 22M with >= 5.3M of headroom.
+- **single frames** (recorded, not judged: D1 caps the binding): package C's barrel chain **up to ~+1.5M on one frame
+  (UNVERIFIED; fight_gate's S2 records it)**; package E's second tic up to +1.1M on the worst frame (the measured
+  span's maximum); S1 (8 fireballs in flight) ~22.5 .. 23M averaged over its 30 frames.
+- **gamespeed**: recorded, NOT judged (O3): the blocking player stops at a zombie on runs 0 and 2, the faster monsters
+  arrive sooner, and the turn moved every route -- its trails are re-recorded (`BINARY_ENDS`, the `--validate`
+  replay), and the number is reported with that note. The standing 20M target stays until P8 moves it to 22M.
+- **size**, each package's own measure (words of code and tables): B ~365K (pk_go 235K with the gives 29K, pb_mon
+  88K, THING_TEST16 16K, nk_go 8K, tables ~15K), C ~356K, D ~49K (`dt_turn`) + ~10K (the alive side, ESTIMATE),
+  E ~15K (two `thing_record_body` instantiations at +7,296 each, the loop < 0.1K), F small (one nibble, the loop
+  labels, the help stream) -- **~0.8M words**; x P5's measured-over-probe ratio (1.15) and its below-pool growth:
+  **+0.8 .. +1.2M words -> ~35.8 .. 36.1% of 2^27** (blocked48 35.16%). Redesign trigger: > +2.0M words.
+  (MEASURED at the integration, no assembly: the game tier emits 62,631,673 characters of fj in its seven parts --
+  banks 33.0M, tables 13.1M, walk 10.5M, segconsts 3.0M, main 1.9M, state 0.95M, entry 26K; words come from the build.)
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. **CAP-22**: the v6 binding (`b0_scenarios.py --file combat_scenarios_v6.json`, (mean + p80) / 2) <= 22,000,000.
+   v6 is the RE-PLANNED set (keys `83d49015078b6abb`, v5's 11 checkpoints; every criterion PASSES oracle-only:
+   15 kills, 0 deaths, B0's camera 0 frames apart) -- PLANNED, frozen only by the coordinator / owner, with B0
+   measured on this build.
+2. **Size** <= 42% of 2^27 (56,371,445 words).
+3. **Every gate exact**, byte- / state- / palette-exact on every frame: m2_std_gate, m3_gate, p2a_gate, hurt_gate
+   (H1-H6, S1), fight_gate (F1-F10, S2), die_gate (D1-D8), B0 on v6 (a run whose mirror dies fails); their
+   selftests rejected where they must; every control parting; every event counter nonzero; deaths 0 where declared;
+   deg_gate BYTE-EXACT with op counts equal to blocked48's (the visual tier takes none of this code).
+4. **Host and fj**: `python -m pytest tests/host` green (the restore-set tests after the re-key);
+   the P6 / P7 fj harnesses -- test_give_fj, test_pickup_fj, test_player_move_fj, test_nukage_fj,
+   test_weapon_loot_fj, test_dead_guards_fj, test_palette_fj, test_barrel_fj, test_barrel_rowselect_fj,
+   test_aim_record_fj, test_restart_fj, test_death_turn_fj, test_monster_tempo_fj, test_actor_record_fj,
+   test_weapon_fj, test_player_strafe_fj, test_skill_menu, test_player_damage_fj, test_monster_attack_fj,
+   test_fireball_pool_fj, test_fx_pool_fj, test_slot_layouts_fj -- every mutant caught.
+5. **Housekeeping**: pinreport 20/20 (the heat list re-keyed for any fj macro whose arity moved); the restore sets
+   re-keyed (new persisted cells: lootcode's p_bc p_str p_bp am_misl am_cell, barrelcode's bar_st bar_ti bar_hp rng_wd
+   mdrop dr_live, restartcode's lvtime g_rs g_skill, hurtcode's p_atk, projcode's pj_src, `p_tnh`; thvis grows to 115
+   slots and persists by absence); gamespeed's trails re-recorded (`gamespeed_trail.py`, `--selftest` passes);
+   v6's criteria table recorded, and v6 frozen only by the owner / coordinator. msframe recorded (D8: class F).
+   gamespeed's `BINARY_ENDS` are the MODEL's (`gamespeed.GameSim`, PREDICTED at the integration): `gamespeed_trail.py
+   --fjm <this build>` must show TRAIL PASS before the number is quoted.
+
+The phase budgets: P6 +0.1M, P7 ~0, the owner's requests on top (E +0.15 .. +0.4M, F < +0.01M).

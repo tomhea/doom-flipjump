@@ -45,7 +45,8 @@ def dump(old: Path, out: Path) -> None:
         scenes["scenes"][name] = {"run": run_name, "tics": tics, "setup": run["setup"], "skill": S.SKILL,
                                   "state": w.ws.as_dict(), "digest": w.ws.digest()}
         print("%s: %s after %d tics, player (%d, %d)" % (name, run_name, tics, w.ws.px >> 16, w.ws.py >> 16))
-    out.write_text(json.dumps(scenes, separators=(",", ":"), sort_keys=True) + "\n", encoding="ascii")
+    out.write_text(json.dumps(scenes, separators=(",", ":"), sort_keys=True) + "\n", encoding="ascii",
+                   newline="\n")
     print("wrote", out)
 
 

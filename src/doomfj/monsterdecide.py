@@ -51,8 +51,8 @@ FIGHT_DECLS = ["mm_tg: hex.vec 2", "mt_tqx: hex.vec 8", "mt_tqy: hex.vec 8", "mt
                "ia_x1: hex.vec 8", "ia_y1: hex.vec 8", "ia_x2: hex.vec 8", "ia_y2: hex.vec 8", "ia_ang: hex.vec 8",
                "ia_ret: hex.vec w/4",
                "md_at: hex.vec 8", "md_td: hex.vec 4", "md_me: hex.vec 2", "md_sp: hex.vec 4", "md_c1: hex.vec 2, 1",
-               "hs_vic: hex.vec 2", "hs_id: hex.vec 2", "hs_rc: hex.vec 1", "hs_pl: hex.vec 1",
-               "hs_bd: hex.vec 4", "hs_bxret: hex.vec w/4", "hs_d: hex.vec 4", "hs_del: hex.vec 4", "hs_t4: hex.vec 4",
+               "hs_vic: hex.vec 2", "hs_id: hex.vec 2", "hs_rc: hex.vec 1", "hs_pl: hex.vec 1", "hs_cx: hex.vec 4",
+               "hs_cy: hex.vec 4", "hs_bd: hex.vec 4", "hs_d: hex.vec 4", "hs_del: hex.vec 4", "hs_t4: hex.vec 4",
                "hs_t8: hex.vec 8", "hs_ix: hex.vec 3", "hs_hw: hex.vec 4", "hs_in: hex.vec 1",
                "hs_c2048: hex.vec 4, 2048",
                "hs_xlo: hex.vec 4", "hs_xhi: hex.vec 4", "hs_ylo: hex.vec 4", "hs_yhi: hex.vec 4",
@@ -429,77 +429,38 @@ def _fight_attack_lines(knock: bool) -> List[str]:
 
 
 def target_load_lines(slot_rt, radii) -> List[str]:
-    """`mt_load` (stl.fcall mt_load, mt_lret; in: mm_tg) -- the module docstring's target load: the player in place;
-    a monster through the shared slot fetch `mf_go` (`slot_fetch_lines`; slot = mm_tg - 2), its reach by its class"""
+    """`mt_load` (stl.fcall mt_load, mt_lret; in: mm_tg) -- the module docstring's target load. `slot_rt[m]`: slot m's
+    runtime thing (its thpos_rt row: whole units in nibbles 4-7 / 12-15), `radii[m]` its radius"""
     from doomfj.combat import PLAYER_R
     from doomfj.world import MELEE_BASE
     n = len(slot_rt)
     assert len(radii) == n and 0 < n and n + 2 <= 0x100
-    reach = {rc: MELEE_BASE + r for r, rc in RC.items()}
+    hi = (n + 2 + 15) // 16
     out = ["mt_load:",
            "    hex.zero 1, mt_al", "    hex.zero 1, mt_pl",
-           "    hex.cmp 2, mm_tg, md_c1, mtl_out, mtl_pl, mtl_mon",       # 0 none (not alive), 1 the player
-           "  mtl_pl:",                                                  # the player: alive while not dead
-           "    hex.set 1, mt_pl, 1",
-           "    hex.mov 8, mt_tqx, viewx", "    hex.mov 8, mt_tqy, viewy",
-           "    hex.set 4, mt_reach, %d" % (MELEE_BASE + PLAYER_R), "    hex.set 1, mt_rc, %d" % RC[PLAYER_R],
-           "    hex.if1 1, p_dead, mtl_out",
-           "    hex.set 1, mt_al, 1",
-           "    ;mtl_out",
-           "  mtl_mon:",                                                 # a monster: its row, alive while shootable
-           "    hex.mov 2, mf_i, mm_tg", "    hex.dec 2, mf_i", "    hex.dec 2, mf_i",
-           "    stl.fcall mf_go, mf_ret",
-           "    hex.zero 4, mt_tqx", "    hex.mov 4, mt_tqx + 4*dw, mf_x",
-           "    hex.zero 4, mt_tqy", "    hex.mov 4, mt_tqy + 4*dw, mf_y",
-           "    hex.mov 1, mt_al, mf_sh", "    hex.mov 1, mt_rc, mf_rc",
-           "    sim.jump16 mf_rc, " + ", ".join("mtl_r%d" % k if k in reach else "mtl_out" for k in range(16))]
-    for k in sorted(reach):
-        out += ["  mtl_r%d:" % k, "    hex.set 4, mt_reach, %d" % reach[k], "    ;mtl_out"]
+           "    hex.if0 2, mm_tg, mtl_out",                       # no target: not alive
+           "    sim.jump16 mm_tg + 1*dw, " + ", ".join("mtl_h%d" % h if h < hi else "mtl_out" for h in range(16))]
+    for h in range(hi):
+        tg = []
+        for k in range(16):
+            c = 16 * h + k
+            tg.append("mtl_pl" if c == 1 else "mtl_m%d" % (c - 2) if 2 <= c < n + 2 else "mtl_out")
+        out += ["  mtl_h%d:" % h, "    sim.jump16 mm_tg, " + ", ".join(tg)]
+    out += ["  mtl_pl:",                                          # the player: alive while not dead
+            "    hex.set 1, mt_pl, 1",
+            "    hex.mov 8, mt_tqx, viewx", "    hex.mov 8, mt_tqy, viewy",
+            "    hex.set 4, mt_reach, %d" % (MELEE_BASE + PLAYER_R), "    hex.set 1, mt_rc, %d" % RC[PLAYER_R],
+            "    hex.if1 1, p_dead, mtl_out",
+            "    hex.set 1, mt_al, 1",
+            "    ;mtl_out"]
+    for m, (t, r) in enumerate(zip(slot_rt, radii)):
+        out += ["  mtl_m%d:" % m,
+                "    hex.zero 4, mt_tqx", "    hex.mov 4, mt_tqx + 4*dw, thpos_rt + %d*dw" % (16 * t + 4),
+                "    hex.zero 4, mt_tqy", "    hex.mov 4, mt_tqy + 4*dw, thpos_rt + %d*dw" % (16 * t + 12),
+                "    hex.set 4, mt_reach, %d" % (MELEE_BASE + r), "    hex.set 1, mt_rc, %d" % RC[r],
+                "    hex.mov 1, mt_al, mon_shootable + %d*dw" % m,
+                "    ;mtl_out"]
     return out + ["  mtl_out:", "    stl.fret mt_lret"]
-
-
-def slot_fetch_lines(slot_rt, radii, imps) -> List[str]:
-    """`mf_go` (stl.fcall mf_go, mf_ret; in: mf_i = a monster slot): its row's whole units into mf_x / mf_y, its
-    mon_shootable / mon_solid into mf_sh / mf_so, its radius class mf_rc and species flag mf_imp (an imp) -- the ONE
-    per-slot copy-stub table the target load, the bullets' scan and the fireball's things share (each a loop or a
-    lookup over it: per-slot code once, not three times)"""
-    n = len(slot_rt)
-    hi = (n + 15) // 16
-    out = ["mf_go:", "    sim.jump16 mf_i + 1*dw, " + ", ".join("mf_h%d" % h if h < hi else "mf_none" for h in range(16))]
-    for h in range(hi):
-        out += ["  mf_h%d:" % h, "    sim.jump16 mf_i, " + ", ".join(
-            "mf_s%d" % (16 * h + k) if 16 * h + k < n else "mf_none" for k in range(16))]
-    for m, (t, r, imp) in enumerate(zip(slot_rt, radii, imps)):
-        out += ["  mf_s%d:" % m,
-                "    hex.mov 4, mf_x, thpos_rt + %d*dw" % (16 * t + 4), "    hex.mov 4, mf_y, thpos_rt + %d*dw" % (16 * t + 12),
-                "    hex.mov 1, mf_sh, mon_shootable + %d*dw" % m, "    hex.mov 1, mf_so, mon_solid + %d*dw" % m,
-                "    hex.set 1, mf_rc, %d" % RC[r], "    hex.set 1, mf_imp, %d" % imp,
-                "    stl.fret mf_ret"]
-    return out + ["  mf_none:", "    stl.fret mf_ret"]
-
-
-def barrel_fetch_lines(barrels) -> List[str]:
-    """`bf_go` (stl.fcall bf_go, bf_ret; in: mf_i = a barrel): its position into mf_x / mf_y (constants), its bar_st /
-    bar_hp / bar_solid into bf_st / bf_hp / mf_so -- the barrels' copy-stub table the two scans share"""
-    nb = len(barrels)
-    hi = (nb + 15) // 16
-    out = ["bf_go:", "    sim.jump16 mf_i + 1*dw, " + ", ".join("bf_h%d" % h if h < hi else "bf_none" for h in range(16))]
-    for h in range(hi):
-        out += ["  bf_h%d:" % h, "    sim.jump16 mf_i, " + ", ".join(
-            "bf_s%d" % (16 * h + k) if 16 * h + k < nb else "bf_none" for k in range(16))]
-    for b, (x, y) in enumerate(barrels):
-        out += ["  bf_s%d:" % b,
-                "    hex.set 4, mf_x, %d" % (x & 0xFFFF), "    hex.set 4, mf_y, %d" % (y & 0xFFFF),
-                "    hex.mov 2, bf_st, bar_st + %d*dw" % (2 * b), "    hex.mov 2, bf_hp, bar_hp + %d*dw" % (2 * b),
-                "    hex.mov 1, mf_so, bar_solid + %d*dw" % b,
-                "    stl.fret bf_ret"]
-    return out + ["  bf_none:", "    stl.fret bf_ret"]
-
-
-def fetch_decls(nmon: int, nbar: int) -> List[str]:
-    return ["mf_i: hex.vec 2", "mf_x: hex.vec 4", "mf_y: hex.vec 4", "mf_sh: hex.vec 1", "mf_so: hex.vec 1",
-            "mf_rc: hex.vec 1", "mf_imp: hex.vec 1", "mf_ret: hex.vec w/4", "mf_n: hex.vec 2, %d" % nmon,
-            "bf_st: hex.vec 2", "bf_hp: hex.vec 2", "bf_ret: hex.vec w/4", "bf_n: hex.vec 2, %d" % max(1, nbar)]
 
 
 def angle_leaf_lines() -> List[str]:
@@ -511,11 +472,10 @@ def angle_leaf_lines() -> List[str]:
 def scan_lines(slot_rt, radii, barrels) -> List[str]:
     """`hs_scan` (stl.fcall hs_scan, hs_ret): hs_vic = the code of the thing a bullet meets before its target
     (combat._bullet_victim; 0 none, 1 the player, 2 + slot, 2 + nmon + b a barrel) -- md_hs set md_at (the target's
-    angle), md_td (its distance), md_me (the shooter's code), the box hs_xlo .. hs_yhi, ia_x1 / ia_y1 (the shooter);
-    md_bul set md_sp (the spread). The candidates in the model's order -- the player (alive, not the target), the slots
-    (shootable) through the slot fetch `mf_go`, the barrels (standing: state != 0, health > 0) through `bf_go` -- each
-    in md_hs' box (`hs_box`) into `hs_cand` (at mf_x / mf_y); then `hs_wid` (hs_in = hs_d < 2048 and
-    |md_sp - hs_del| <= hwtr[hs_rc][hs_d >> 4])"""
+    angle), md_td (its distance), md_me (the shooter's code), ia_x1 / ia_y1 (the shooter); md_bul set md_sp (the
+    spread). The candidates in the model's order -- the player (alive, not the target), the slots (shootable), the
+    barrels (standing: state != 0, health > 0) -- each a copy-stub into `hs_cand`; `barrels` = [(x, y)] by index.
+    Then `hs_cand` and `hs_wid` (the width: hs_in = hs_d < 2048 and |md_sp - hs_del| <= hwtr[hs_rc][hs_d >> 4])"""
     from doomfj.combat import BARREL_R
     n = len(slot_rt)
     out = ["hs_scan:",
@@ -523,93 +483,77 @@ def scan_lines(slot_rt, radii, barrels) -> List[str]:
            "    hex.mov 4, hs_bd, md_td",                         # nearer than the target, then than the best
            "    hex.if1 1, mt_pl, hs_mons",
            "    hex.if1 1, p_dead, hs_mons",
-           "    hex.mov 4, mf_x, viewx + 4*dw", "    hex.mov 4, mf_y, viewy + 4*dw",
+           "    hex.mov 4, hs_cx, viewx + 4*dw", "    hex.mov 4, hs_cy, viewy + 4*dw",
            "    hex.set 2, hs_id, 1", "    hex.set 1, hs_rc, %d" % RC[16], "    hex.set 1, hs_pl, 1",
            "    stl.fcall hs_cand, hs_cret",
            "    hex.zero 1, hs_pl",
-           "  hs_mons:",
-           "    hex.zero 2, mf_i",
-           "  hs_ml:",
-           "    stl.fcall mf_go, mf_ret",
-           "    hex.if0 1, mf_sh, hs_mn",
-           "    stl.fcall hs_box, hs_bxret",
-           "    hex.if0 1, hs_in, hs_mn",
-           "    hex.mov 2, hs_id, mf_i", "    hex.inc 2, hs_id", "    hex.inc 2, hs_id",
-           "    hex.mov 1, hs_rc, mf_rc",
-           "    stl.fcall hs_cand, hs_cret",
-           "  hs_mn:",
-           "    hex.inc 2, mf_i",
-           "    hex.cmp 2, mf_i, mf_n, hs_ml, hs_bars, hs_bars",
-           "  hs_bars:",
-           "    hex.zero 2, mf_i",
-           "  hs_bl:",
-           "    stl.fcall bf_go, bf_ret",
-           "    hex.if0 2, bf_st, hs_bn",
-           "    hex.if_flags bf_hp + 1*dw, 0xFF00, hs_bp, hs_bn",         # health < 0
-           "  hs_bp:",
-           "    hex.if0 2, bf_hp, hs_bn",                               # health == 0
-           "    stl.fcall hs_box, hs_bxret",
-           "    hex.if0 1, hs_in, hs_bn",
-           "    hex.mov 2, hs_id, mf_i", "    hex.add_constant 2, hs_id, %d" % (2 + n),
-           "    hex.set 1, hs_rc, %d" % RC[BARREL_R],
-           "    stl.fcall hs_cand, hs_cret",
-           "  hs_bn:",
-           "    hex.inc 2, mf_i",
-           "    hex.cmp 2, mf_i, bf_n, hs_bl, hs_sout, hs_sout",
-           "  hs_sout:",
-           "    stl.fret hs_ret",
-           # md_hs' box on the fetched position (biased in place for the unsigned compares, then restored)
-           "hs_box:",
-           "    hex.zero 1, hs_in"] + _scan_box("mf_x", "mf_y", "hsx_out", True) + [
-           "    hex.set 1, hs_in, 1",
-           "  hsx_out:",
-           "    stl.fret hs_bxret",
-           # one candidate at (mf_x, mf_y) (whole units): nearer than hs_bd -- its box first (P_AproxDistance is at
-           # least either |delta|), not the shooter, then the distance -- under MISSILERANGE; then its angle
-           "hs_cand:",
-           "    hex.mov 4, mt_dx, mf_x", "    hex.sub 4, mt_dx, mm_x",
-           "    hex.mov 4, hs_t4, mt_dx", "    hex.abs 4, hs_t4",
-           "    hex.cmp 4, hs_t4, hs_bd, hsc_y, hsc_out, hsc_out",
-           "  hsc_y:",
-           "    hex.mov 4, mt_dy, mf_y", "    hex.sub 4, mt_dy, mm_y",
-           "    hex.mov 4, hs_t4, mt_dy", "    hex.abs 4, hs_t4",
-           "    hex.cmp 4, hs_t4, hs_bd, hsc_me, hsc_out, hsc_out",
-           "  hsc_me:",
-           "    hex.cmp 2, hs_id, md_me, hsc_d, hsc_out, hsc_d",
-           "  hsc_d:",
-           "    stl.fcall mt_dist_leaf, mt_ret",
-           "    hex.cmp 4, mt_d, hs_bd, hsc_r, hsc_out, hsc_out",
-           "  hsc_r:",
-           "    hex.cmp 4, mt_d, hs_c2048, hsc_a, hsc_out, hsc_out",
-           "  hsc_a:",                                           # delta = (angle - md_at) >> 20, signed
-           "    hex.if1 1, hs_pl, hsc_ap",
-           "    hex.zero 4, ia_x2", "    hex.mov 4, ia_x2 + 4*dw, mf_x",
-           "    hex.zero 4, ia_y2", "    hex.mov 4, ia_y2 + 4*dw, mf_y",
-           "    ;hsc_ag",
-           "  hsc_ap:",
-           "    hex.mov 8, ia_x2, viewx", "    hex.mov 8, ia_y2, viewy",
-           "  hsc_ag:",
-           "    stl.fcall ia_leaf, ia_ret",
-           "    hex.mov 8, hs_t8, ia_ang", "    hex.sub 8, hs_t8, md_at",
-           "    hex.mov 3, hs_del, hs_t8 + 5*dw", "    hex.sign_extend 4, 3, hs_del",
-           "    hex.mov 4, hs_d, mt_d",
-           "    stl.fcall hs_wid, hs_wret",
-           "    hex.if0 1, hs_in, hsc_out",
-           "    hex.mov 4, hs_bd, mt_d", "    hex.mov 2, hs_vic, hs_id",
-           "  hsc_out:",
-           "    stl.fret hs_cret",
-           "hs_wid:",
-           "    hex.zero 1, hs_in",
-           "    hex.cmp 4, hs_d, hs_c2048, hsw_1, hsw_out, hsw_out",
-           "  hsw_1:",
-           "    hex.mov 4, hs_t4, md_sp", "    hex.sub 4, hs_t4, hs_del", "    hex.abs 4, hs_t4",
-           "    hex.mov 2, hs_ix, hs_d + 1*dw", "    hex.mov 1, hs_ix + 2*dw, hs_rc",     # rc << 8 | d >> 4
-           "    hex.zero 4, hs_hw", "    hwtr.lookup hs_hw, hs_ix",
-           "    hex.cmp 4, hs_t4, hs_hw, hsw_in, hsw_in, hsw_out",
-           "  hsw_in:",
-           "    hex.set 1, hs_in, 1",
-           "  hsw_out:",
-           "    stl.fret hs_wret"]
+           "  hs_mons:"]
+    for m, (t, r) in enumerate(zip(slot_rt, radii)):
+        X, Y, L = "thpos_rt + %d*dw" % (16 * t + 4), "thpos_rt + %d*dw" % (16 * t + 12), "hs_m%d" % m
+        out += ["    hex.if0 1, mon_shootable + %d*dw, %s" % (m, L)]
+        out += _scan_box(X, Y, L, True)
+        out += ["    hex.mov 4, hs_cx, %s" % X, "    hex.mov 4, hs_cy, %s" % Y,
+                "    hex.set 2, hs_id, %d" % (2 + m), "    hex.set 1, hs_rc, %d" % RC[r],
+                "    stl.fcall hs_cand, hs_cret",
+                "  %s:" % L]
+    for b, (x, y) in enumerate(barrels):
+        L = "hs_b%d" % b
+        out += ["    hex.if0 2, bar_st + %d*dw, %s" % (2 * b, L),
+                "    hex.if_flags bar_hp + %d*dw, 0xFF00, %sp, %s" % (2 * b + 1, L, L),   # health < 0
+                "  %sp:" % L,
+                "    hex.if0 2, bar_hp + %d*dw, %s" % (2 * b, L)]                        # health == 0
+        out += _scan_box("hs_bar + %d*dw" % (8 * b), "hs_bar + %d*dw" % (8 * b + 4), L, False)
+        out += ["    hex.set 4, hs_cx, %d" % (x & 0xFFFF), "    hex.set 4, hs_cy, %d" % (y & 0xFFFF),
+                "    hex.set 2, hs_id, %d" % (2 + n + b), "    hex.set 1, hs_rc, %d" % RC[BARREL_R],
+                "    stl.fcall hs_cand, hs_cret",
+                "  %s:" % L]
+    out += ["    stl.fret hs_ret",
+            # one candidate at (hs_cx, hs_cy) (whole units): nearer than hs_bd -- its box first (P_AproxDistance is
+            # at least either |delta|), then the distance -- under MISSILERANGE, not the shooter; then its angle
+            "hs_cand:",
+            "    hex.mov 4, mt_dx, hs_cx", "    hex.sub 4, mt_dx, mm_x",
+            "    hex.mov 4, hs_t4, mt_dx", "    hex.abs 4, hs_t4",
+            "    hex.cmp 4, hs_t4, hs_bd, hsc_y, hsc_out, hsc_out",
+            "  hsc_y:",
+            "    hex.mov 4, mt_dy, hs_cy", "    hex.sub 4, mt_dy, mm_y",
+            "    hex.mov 4, hs_t4, mt_dy", "    hex.abs 4, hs_t4",
+            "    hex.cmp 4, hs_t4, hs_bd, hsc_me, hsc_out, hsc_out",
+            "  hsc_me:",
+            "    hex.cmp 2, hs_id, md_me, hsc_d, hsc_out, hsc_d",
+            "  hsc_d:",
+            "    stl.fcall mt_dist_leaf, mt_ret",
+            "    hex.cmp 4, mt_d, hs_bd, hsc_r, hsc_out, hsc_out",
+            "  hsc_r:",
+            "    hex.cmp 4, mt_d, hs_c2048, hsc_a, hsc_out, hsc_out",
+            "  hsc_a:",                                           # delta = (angle - md_at) >> 20, signed
+            "    hex.if1 1, hs_pl, hsc_ap",
+            "    hex.zero 4, ia_x2", "    hex.mov 4, ia_x2 + 4*dw, hs_cx",
+            "    hex.zero 4, ia_y2", "    hex.mov 4, ia_y2 + 4*dw, hs_cy",
+            "    ;hsc_ag",
+            "  hsc_ap:",
+            "    hex.mov 8, ia_x2, viewx", "    hex.mov 8, ia_y2, viewy",
+            "  hsc_ag:",
+            "    stl.fcall ia_leaf, ia_ret",
+            "    hex.mov 8, hs_t8, ia_ang", "    hex.sub 8, hs_t8, md_at",
+            "    hex.mov 3, hs_del, hs_t8 + 5*dw", "    hex.sign_extend 4, 3, hs_del",
+            "    hex.mov 4, hs_d, mt_d",
+            "    stl.fcall hs_wid, hs_wret",
+            "    hex.if0 1, hs_in, hsc_out",
+            "    hex.mov 4, hs_bd, mt_d", "    hex.mov 2, hs_vic, hs_id",
+            "  hsc_out:",
+            "    stl.fret hs_cret",
+            "hs_wid:",
+            "    hex.zero 1, hs_in",
+            "    hex.cmp 4, hs_d, hs_c2048, hsw_1, hsw_out, hsw_out",
+            "  hsw_1:",
+            "    hex.mov 4, hs_t4, md_sp", "    hex.sub 4, hs_t4, hs_del", "    hex.abs 4, hs_t4",
+            "    hex.mov 2, hs_ix, hs_d + 1*dw", "    hex.mov 1, hs_ix + 2*dw, hs_rc",     # rc << 8 | d >> 4
+            "    hex.zero 4, hs_hw", "    hwtr.lookup hs_hw, hs_ix",
+            "    hex.cmp 4, hs_t4, hs_hw, hsw_in, hsw_in, hsw_out",
+            "  hsw_in:",
+            "    hex.set 1, hs_in, 1",
+            "  hsw_out:",
+            "    stl.fret hs_wret"]
     return out
 
 
@@ -672,8 +616,9 @@ def fight_parts(w, slot_rt) -> dict:
     radii = [w.mon_radius[m] for m in range(n)]
     assert set(radii) <= set(RC), radii
     bars = [(t.x, t.y) for t in w.barrel_things]
-    imps = [int(w.mon_things[m].type == 3001) for m in range(n)]
-    return {"decls": list(FIGHT_DECLS) + fetch_decls(n, len(bars)),
-            "lines": (target_load_lines(slot_rt, radii) + angle_leaf_lines() + slot_fetch_lines(slot_rt, radii, imps)
-                      + barrel_fetch_lines(bars) + scan_lines(slot_rt, radii, bars)),
+    hs_bar = "hs_bar: hex.vec %d, %d" % (max(1, 8 * len(bars)), sum(
+        (((x & 0xFFFF) ^ 0x8000) | (((y & 0xFFFF) ^ 0x8000) << 16)) << (32 * b) for b, (x, y) in enumerate(bars)))
+    return {"decls": list(FIGHT_DECLS) + [hs_bar],
+            "lines": (target_load_lines(slot_rt, radii) + angle_leaf_lines()
+                      + scan_lines(slot_rt, radii, [(t.x, t.y) for t in w.barrel_things])),
             "tables": fight_tables_fj(w.rm.sine)}

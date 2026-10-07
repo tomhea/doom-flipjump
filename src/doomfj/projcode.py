@@ -448,7 +448,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
 
 # ---- M7 P8a I: the things a fireball meets (combat._missile_things) ------------------------------------------------
 PT_DECLS = ["pt_me: hex.vec 2", "pt_j: hex.vec 2", "pt_imp: hex.vec 1", "pt_sh: hex.vec 1", "pt_stop: hex.vec 1",
-            "pt_in: hex.vec 1", "pt_tret: hex.vec w/4", "pt_bret: hex.vec w/4"]
+            "pt_tret: hex.vec w/4"]
 
 
 def fight_things(w, slot_rt) -> dict:
@@ -466,43 +466,44 @@ def fight_things(w, slot_rt) -> dict:
 
 
 def pt_decls(ft: dict) -> List[str]:
-    """the per-class integer bounds (`pt_bounds`, BIASED: xor 0x8000, so `hex.cmp 4` -- unsigned, ~60 ops; `hex.scmp
-    4` is ~290 -- orders them as signed)"""
+    """the per-class integer bounds (`pt_bounds`, BIASED) and the barrels' positions (x at 8b, y at 8b + 4: 4 nibbles
+    each, BIASED: xor 0x8000, so `hex.cmp 4` -- unsigned, ~60 ops; `hex.scmp 4` is ~290 -- orders them as signed)"""
     out = list(PT_DECLS)
     for b_ in ft["bounds"]:
         out += ["pt_lx%d: hex.vec 4" % b_, "pt_hx%d: hex.vec 4" % b_, "pt_ly%d: hex.vec 4" % b_,
                 "pt_hy%d: hex.vec 4" % b_]
+    bars = ft["barrels"]
+    out.append("pt_bar: hex.vec %d, %d" % (max(1, 8 * len(bars)),
+                                           sum((((x & 0xFFFF) ^ 0x8000) | (((y & 0xFFFF) ^ 0x8000) << 16)) << (32 * b)
+                                               for b, (x, y) in enumerate(bars))))
     return out
 
 
-def _box_leaf(b_: int) -> List[str]:
-    """`pt_bx<B>` (stl.fcall pt_bx<B>, pt_bret): pt_in = mf_x in [pt_lx<B>, pt_hx<B>] and mf_y in [pt_ly<B>, pt_hy<B>]
-    -- the fetched position biased in place for the unsigned compares and restored on every way out"""
-    L = "pt_bx%d" % b_
-    bx, by = "    hex.xor_by mf_x + 3*dw, 8", "    hex.xor_by mf_y + 3*dw, 8"
-    return ["%s:" % L, "    hex.zero 1, pt_in", bx,
-            "    hex.cmp 4, mf_x, pt_lx%d, %s_rx, %s_1, %s_1" % (b_, L, L, L),
-            "  %s_1:" % L,
-            "    hex.cmp 4, mf_x, pt_hx%d, %s_2, %s_2, %s_rx" % (b_, L, L, L),
-            "  %s_2:" % L, bx, by,
-            "    hex.cmp 4, mf_y, pt_ly%d, %s_ry, %s_3, %s_3" % (b_, L, L, L),
-            "  %s_3:" % L,
-            "    hex.cmp 4, mf_y, pt_hy%d, %s_4, %s_4, %s_ry" % (b_, L, L, L),
-            "  %s_4:" % L, by, "    hex.set 1, pt_in, 1", "    stl.fret pt_bret",
-            "  %s_rx:" % L, bx, "    stl.fret pt_bret",
-            "  %s_ry:" % L, by, "    stl.fret pt_bret"]
+def _box(xcell: str, ycell: str, b_: int, hit: str, miss: str, tag: str, row: bool) -> List[str]:
+    """X in [pt_lx, pt_hx] and Y in [pt_ly, pt_hy] (4-nibble signed, compared biased) -> hit, else miss. `row`: X and
+    Y are a thing's row (unbiased): each is biased in place for its compares and restored on every way out"""
+    bx = ["    hex.xor_by %s + 3*dw, 8" % xcell] if row else []
+    by = ["    hex.xor_by %s + 3*dw, 8" % ycell] if row else []
+    return (bx + ["    hex.cmp 4, %s, pt_lx%d, %s_rx, %s_1, %s_1" % (xcell, b_, tag, tag, tag),
+                  "  %s_1:" % tag,
+                  "    hex.cmp 4, %s, pt_hx%d, %s_2, %s_2, %s_rx" % (xcell, b_, tag, tag, tag),
+                  "  %s_2:" % tag] + bx + by
+            + ["    hex.cmp 4, %s, pt_ly%d, %s_ry, %s_3, %s_3" % (ycell, b_, tag, tag, tag),
+               "  %s_3:" % tag,
+               "    hex.cmp 4, %s, pt_hy%d, %s_4, %s_4, %s_ry" % (ycell, b_, tag, tag, tag),
+               "  %s_4:" % tag] + by + ["    ;%s" % hit,
+                                        "  %s_rx:" % tag] + bx + ["    ;%s" % miss,
+                                                                  "  %s_ry:" % tag] + by + ["    ;%s" % miss])
 
 
 def pt_lines(ft: dict, knock: bool = False) -> List[str]:
     """`pj_tm`, pj_try's things (entered after the player's test misses; falls to `pj_tl`, the lines, when no thing
-    stops the fireball; a stop returns through pj_tret with pw_ok 0), `pt_thing` and the box leaves. The box is decided
-    exactly on the integer parts (the module docstring): per half-width B, X - floor(nx) in [1 - B, B - [frac(nx) ==
-    0]] -- the bounds once a try per B, biased. The slots and the barrels are LOOPS over monsterdecide's shared fetch
-    tables (`mf_go`, `bf_go`): per-slot code once in the program"""
-    from doomfj.combat import BARREL_R, FIREBALL_R
+    stops the fireball; a stop returns through pj_tret with pw_ok 0), and `pt_thing`. The box is decided exactly on
+    the integer parts (the module docstring): per half-width B, X - floor(nx) in [1 - B, B - [frac(nx) == 0]] -- the
+    bounds once a try per B, biased; each thing's 4-nibble compares on biased values (`_box`)"""
+    from doomfj.combat import FIREBALL_R
     from doomfj.damagecode import MONSTER
     from doomfj.knockcode import inflictor_lines
-    from doomfj.monsterdecide import RC
     out = ["  pj_tm:",
            "    hex.mov 2, pt_me, pw_src", "    hex.inc 2, pt_me"]            # the shooter's code: 2 + slot
     for c in ("x", "y"):                                                    # the bounds by half-width, biased
@@ -515,53 +516,43 @@ def pt_lines(ft: dict, knock: bool = False) -> List[str]:
         out += ["    hex.dec 4, pt_h%s%d" % (c, b_) for b_ in ft["bounds"]]
         out += ["  pt_f%s:" % c]
         out += ["    hex.xor_by pt_%s%s%d + 3*dw, 8" % (lh, c, b_) for b_ in ft["bounds"] for lh in "lh"]
-    box_of = {rc: r + FIREBALL_R for r, rc in RC.items() if r + FIREBALL_R in ft["bounds"] and r != BARREL_R}
-    assert {RC[r] for r in ft["radii"]} <= set(box_of), (ft["radii"], box_of)
     n = len(ft["slot_rt"])
-    out += ["    hex.zero 2, mf_i",
-            "  pt_ml:",                                                     # the monster slots, by slot
-            "    stl.fcall mf_go, mf_ret",
-            "    hex.if1 1, mf_so, pt_mb",                                  # solid or shootable
-            "    hex.if0 1, mf_sh, pt_mn",
-            "  pt_mb:",
-            "    sim.jump16 mf_rc, " + ", ".join("pt_mc%d" % k if k in box_of else "pt_mn" for k in range(16))]
-    for k in sorted(box_of):
-        out += ["  pt_mc%d:" % k, "    stl.fcall pt_bx%d, pt_bret" % box_of[k], "    ;pt_mh"]
-    out += ["  pt_mh:",
-            "    hex.if0 1, pt_in, pt_mn",
-            "    hex.mov 2, pt_j, mf_i", "    hex.inc 2, pt_j", "    hex.inc 2, pt_j",
-            "    hex.mov 1, pt_imp, mf_imp", "    hex.mov 1, pt_sh, mf_sh",
-            "    stl.fcall pt_thing, pt_tret",
-            "    hex.if1 1, pt_stop, pt_done",
-            "  pt_mn:",
-            "    hex.inc 2, mf_i",
-            "    hex.cmp 2, mf_i, mf_n, pt_ml, pt_bars, pt_bars",
-            "  pt_bars:",                                                   # the barrels, by index
-            "    hex.zero 2, mf_i",
-            "  pt_bl:",
-            "    stl.fcall bf_go, bf_ret",
-            "    hex.if0 1, mf_so, pt_bn",                                  # removed
-            "    stl.fcall pt_bx%d, pt_bret" % (BARREL_R + FIREBALL_R),
-            "    hex.if0 1, pt_in, pt_bn",
-            # shootable while standing: state != 0 and health > 0 (combat.shootable_targets)
-            "    hex.zero 1, pt_sh",
-            "    hex.if0 2, bf_st, pt_bs",
-            "    hex.if_flags bf_hp + 1*dw, 0xFF00, pt_bp, pt_bs",
-            "  pt_bp:",
-            "    hex.if0 2, bf_hp, pt_bs",
-            "    hex.set 1, pt_sh, 1",
-            "  pt_bs:",
-            "    hex.mov 2, pt_j, mf_i", "    hex.add_constant 2, pt_j, %d" % (2 + n), "    hex.zero 1, pt_imp",
-            "    stl.fcall pt_thing, pt_tret",
-            "    hex.if1 1, pt_stop, pt_done",
-            "  pt_bn:",
-            "    hex.inc 2, mf_i",
-            "    hex.cmp 2, mf_i, bf_n, pt_bl, pj_tl, pj_tl",
+    for m, (t, r, imp) in enumerate(zip(ft["slot_rt"], ft["radii"], ft["imp"])):
+        L = "pt_m%d" % m
+        out += ["    hex.if1 1, mon_solid + %d*dw, %s_b" % (m, L),            # solid or shootable
+                "    hex.if0 1, mon_shootable + %d*dw, %s_n" % (m, L),
+                "  %s_b:" % L]
+        out += _box("thpos_rt + %d*dw" % (16 * t + 4), "thpos_rt + %d*dw" % (16 * t + 12), r + FIREBALL_R,
+                    L + "_h", L + "_n", L, True)
+        out += ["  %s_h:" % L,
+                "    hex.set 2, pt_j, %d" % (2 + m), "    hex.set 1, pt_imp, %d" % imp,
+                "    hex.mov 1, pt_sh, mon_shootable + %d*dw" % m,
+                "    stl.fcall pt_thing, pt_tret",
+                "    hex.if1 1, pt_stop, pt_done",
+                "  %s_n:" % L]
+    from doomfj.combat import BARREL_R
+    for b, _xy in enumerate(ft["barrels"]):
+        L = "pt_b%d" % b
+        out += ["    hex.if0 1, bar_solid + %d*dw, %s_n" % (b, L)]
+        out += _box("pt_bar + %d*dw" % (8 * b), "pt_bar + %d*dw" % (8 * b + 4), BARREL_R + FIREBALL_R,
+                    L + "_h", L + "_n", L, False)
+        out += ["  %s_h:" % L,
+                # shootable while standing: state != 0 and health > 0 (combat.shootable_targets)
+                "    hex.zero 1, pt_sh",
+                "    hex.if0 2, bar_st + %d*dw, %s_s" % (2 * b, L),
+                "    hex.if_flags bar_hp + %d*dw, 0xFF00, %s_p, %s_s" % (2 * b + 1, L, L),
+                "  %s_p:" % L,
+                "    hex.if0 2, bar_hp + %d*dw, %s_s" % (2 * b, L),
+                "    hex.set 1, pt_sh, 1",
+                "  %s_s:" % L,
+                "    hex.set 2, pt_j, %d" % (2 + n + b), "    hex.zero 1, pt_imp",
+                "    stl.fcall pt_thing, pt_tret",
+                "    hex.if1 1, pt_stop, pt_done",
+                "  %s_n:" % L]
+    out += ["    ;pj_tl",
             "  pt_done:",                                                    # stopped by a thing: pw_ok 0
-            "    stl.fret pj_tret"]
-    for b_ in ft["bounds"]:
-        out += _box_leaf(b_)
-    out += [# one thing the box met: its code pt_j, pt_imp (the shooter's species), pt_sh (shootable)
+            "    stl.fret pj_tret",
+            # one thing the box met: its code pt_j, pt_imp (the shooter's species), pt_sh (shootable)
             "pt_thing:",
             "    hex.zero 1, pt_stop",
             "    hex.cmp 2, pt_j, pt_me, pt_tst, pt_tout, pt_tst",                # the shooter: passed

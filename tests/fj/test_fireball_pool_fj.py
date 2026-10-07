@@ -706,8 +706,8 @@ def _fbuild(tmp_path, name, mut=None):
         assert unit.count("    hex.if1 4, pw_nx, pt_fx\n") == 1       # B - 1 above whatever the fraction
         unit = unit.replace("    hex.if1 4, pw_nx, pt_fx\n", "")
     elif mut == "pass_barrels":
-        assert unit.count("  pt_bars:\n") == 1
-        unit = unit.replace("  pt_bars:\n", "  pt_bars:\n    ;pj_tl\n")
+        i = unit.index("    hex.if0 1, bar_solid + 0*dw, pt_b0_n\n")
+        unit = unit[:i] + "    ;pj_tl\n" + unit[i:]
     elif mut:
         old, new = FIGHT_MUTANTS[mut]
         assert unit.count(old) == 1, (mut, unit.count(old))
@@ -736,10 +736,7 @@ def _fbuild(tmp_path, name, mut=None):
              "dm_go:", "    stl.output 77", "    hex.print_as_digit 2, dm_id, 0", "    hex.print_as_digit 2, dm_dmg, 0",
              "    hex.print_as_digit 1, dm_melee, 0", "    hex.print_as_digit 2, dm_src, 0", "    stl.output 10",
              "    hex.zero 2, dm_src", "    stl.fret dm_ret"]
-    imps = [int(w.mon_things[m].type == 3001) for m in range(n)]
-    unit += "\n".join(_MD.slot_fetch_lines(list(range(n)), [w.mon_radius[m] for m in range(n)], imps)
-                      + _MD.barrel_fetch_lines([(t.x, t.y) for t in w.barrel_things])) + "\n"
-    decls = (PC.pool_decls() + PC.pt_decls(ft) + _MD.fetch_decls(n, nb)
+    decls = (PC.pool_decls() + PC.pt_decls(ft)
              + ["viewx: hex.vec 8", "viewy: hex.vec 8", "p_hp: hex.vec 3", "p_dead: hex.vec 1",
                 "dp_dmg: hex.vec 2", "dp_src: hex.vec 2", "dp_ret: hex.vec w/4",
                 "dm_id: hex.vec 2", "dm_dmg: hex.vec 2", "dm_melee: hex.vec 1", "dm_src: hex.vec 2", "dm_ret: hex.vec w/4",

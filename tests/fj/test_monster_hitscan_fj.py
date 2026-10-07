@@ -251,8 +251,7 @@ def _program(w, mut=None):
                 "sl_hit: hex.vec 1", "sl_ret: hex.vec w/4", "sf_ret: hex.vec w/4", "pj_sret: hex.vec w/4",
                 "dm_id: hex.vec 2", "dm_dmg: hex.vec 2", "dm_melee: hex.vec 1", "dm_src: hex.vec 2",
                 "dm_ret: hex.vec w/4",
-                "mon_shootable: hex.vec %d" % n, "mon_solid: hex.vec %d" % n, "thpos_rt: hex.vec %d" % (16 * n),
-                "bar_solid: hex.vec %d" % nbar,
+                "mon_shootable: hex.vec %d" % n, "thpos_rt: hex.vec %d" % (16 * n),
                 "bar_st: hex.vec %d" % (2 * nbar), "bar_hp: hex.vec %d" % (2 * nbar)])
     return decls, text + "\n".join(stubs) + "\n", tables
 

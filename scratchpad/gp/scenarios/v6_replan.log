@@ -1,0 +1,61 @@
+  nav graph R0-west-hall: 10494 cells in 91.7 s (cached nav_398e4ad3fd76_18_21.pkl)
+  R0-west-hall         sector 150 params aggressive tried [('aggressive', [])]                      33.7 s  kills 2 picks 0 doors [] hp 94 move 81% strafe 75%
+  R0-aftermath         sector  17 params aggressive tried [('aggressive', [])]                      33.3 s  kills 2 picks 6 doors [0] hp 80 move 100% strafe 75%
+  R0-south-hall        sector  57 params aggressive tried [('aggressive', [])]                      32.3 s  kills 0 picks 7 doors [] hp 103 move 98% strafe 54%
+  R0-imp-court         sector  12 params aggressive tried [('aggressive', [])]                      29.0 s  kills 0 picks 2 doors [2] hp 81 move 100% strafe 76%
+  R0-northwest         sector 135 params aggressive tried [('aggressive', [])]                      39.7 s  kills 1 picks 0 doors [] hp 79 move 79% strafe 78%
+  R0-courtyard         sector  18 params aggressive tried [('aggressive', [])]                      40.0 s  kills 0 picks 1 doors [] hp 83 move 80% strafe 44%
+  nav graph R2-barrel-hall: 12469 cells in 106.3 s (cached nav_398e4ad3fd76_134_-33.pkl)
+  R2-barrel-hall       sector 134 params aggressive tried [('aggressive', [])]                      24.7 s  kills 0 picks 0 doors [] hp 40 move 77% strafe 65%
+  R2-spectre-corridor  sector 102 params aggressive tried [('aggressive', [])]                      21.7 s  kills 1 picks 1 doors [] hp 61 move 82% strafe 74%
+  nav graph R2-east-yard: 8545 cells in 69.3 s (cached nav_398e4ad3fd76_128_42.pkl)
+  R2-east-yard         sector  15 params brawl      tried [('brawl', [])]                           28.5 s  kills 0 picks 0 doors [] hp 74 move 70% strafe 36%
+  nav graph R3-west: 1725 cells in 12.4 s (cached nav_398e4ad3fd76_-8_110.pkl)
+  R3-west              sector  86 params aggressive tried [('aggressive', [])]                      12.5 s  kills 1 picks 2 doors [8] hp 100 move 90% strafe 79%
+  R3-mid               sector  87 params steady     tried [('aggressive', ['death']), ('steady', [])]  33.1 s  kills 1 picks 1 doors [] hp 64 move 85% strafe 66%
+  run                   hp kill hits shot mele fbal pick door  mov%  str% step% dodg dAwk% gAwk% corp% cam
+  R0-west-hall          94    2    4    1    0    1    0    0   81%   75%  100%    4   55%   98%    0%   0
+  R0-aftermath          80    0    4    6    0    0    6    1  100%   75%  100%    0   41%   41%   28%   0
+  R0-south-hall        103    0    3    3    0    0    7    0   98%   54%  100%    0   74%   74%    0%   0
+  R0-imp-court          81    0    2    3    1    2    2    1  100%   76%  100%   20   63%   63%    0%   0
+  R0-northwest          79    1    4   10    0    0    0    0   79%   78%  100%    0   91%   91%    9%   0
+  R0-courtyard          83    0    1    3    0    1    1    0   80%   44%  100%    2   63%   63%    0%   0
+  R2-barrel-hall        40    0    3   15    0    5    0    0   77%   65%  100%   16   99%   99%    0%   0
+  R2-spectre-corridor   61    1    3    6    0    1    1    0   82%   74%  100%    3   99%   97%    4%   0
+  R2-east-yard          74    0    2    0    1    5    0    0   70%   36%  100%    5   67%   70%    0%   0
+  R3-west              100    1    3    6    0    0    2    1   90%   79%  100%    0   57%   57%    6%   0
+  R3-mid                64    1    2    6    0    0    1    0   85%   66%  100%    0   52%   53%    8%   0
+  POPULATION per frame over the set (1100 frames; d_ = DRAWN in the decided picture, geo_ = the geometric test):
+    awake        mean  5.66  p50  4  p80 10  p99 14  max 14
+    geo_in_view  mean  2.21  p50  2  p80  4  p99  7  max  8
+    geo_awake    mean  1.98  p50  2  p80  4  p99  6  max  6
+    geo_corpses  mean  0.19  p50  0  p80  0  p99  2  max  3
+    fireballs    mean  0.30  p50  0  p80  1  p99  2  max  2
+    deferred     mean  0.01  p50  0  p80  0  p99  0  max  2
+    heavy        mean  3.69  p50  3  p80  7  p99 10  max 12
+    d_live       mean  2.04  p50  2  p80  4  p99  7  max  8
+    d_awake      mean  1.80  p50  1  p80  4  p99  6  max  7
+    d_corpse     mean  0.05  p50  0  p80  0  p99  1  max  2
+    d_drop       mean  0.04  p50  0  p80  0  p99  1  max  1
+    d_fireball   mean  0.05  p50  0  p80  0  p99  1  max  2
+    d_fx         mean  0.09  p50  0  p80  0  p99  1  max  1
+    d_barrel     mean  0.66  p50  0  p80  1  p99  7  max 12
+  every run survives                                                             PASS  11 runs, 0 deaths, lowest end health 40
+  >= 30% of frames have an awake monster DRAWN                                   PASS  761/1100 = 69.2%
+  >= 8 kills                                                                     FAIL  6 monsters killed (and 2 barrels exploded; 0 shotgun shots)
+  all three monster attack kinds                                                 PASS  hitscan 59, melee 2, fireball 15
+  >= 6 pickups                                                                   PASS  20 pickups
+  >= 3 doors opened by the player                                                PASS  3 (R0-aftermath [0], R0-imp-court [2], R3-west [8]); by monsters 2
+  >= 50% of frames carry a movement key (forward, back, strafe)                  PASS  942/1100 = 85.6% (strafe on 722 = 65.6%)
+  every run moves on >= 60% of its movement frames                               PASS  worst R0-west-hall: 81/81 = 100%
+  >= 50% of the frames with an awake monster drawn carry a strafe key            PASS  486/761 = 63.9%
+  >= 1 fireball dodge (a strafe away from a fireball's line)                     PASS  50 dodge frames of 52 frames with a fireball threat
+  an aftermath run: >= 3 corpses within 160 units at the start, one drawn on its first frame, corpses drawn on >= 20% of its frames PASS  R0-aftermath: 3 corpses near the start, 1 drawn on frame 0, corpses drawn on 28/100 frames
+  no run uses the exit                                                           PASS  0
+  B0 follows the model's camera: the injected pose lands on the model's pose     PASS  0 frames part; door states apart on 3 frames; use with strafe on 0
+  F1 status FROZEN with the owner's approval                                     FAIL  status "PLANNED -- B0 and the owner's freeze pending (`--freeze`)", the set approved by None on None; last freeze: - by None
+  F2 every recorded file hash matches (model, census, planner: 0 files)          FAIL  0/0
+  F3 the replay reproduces every frozen pose and final digest                    PASS  11/11 runs
+  F4 the drawn and geometric population reproduces frame by frame                FAIL  differs: ['R0-west-hall', 'R0-aftermath', 'R0-south-hall', 'R0-imp-court', 'R0-northwest', 'R0-courtyard', 'R2-barrel-hall', 'R2-spectre-corridor', 'R2-east-yard', 'R3-west', 'R3-mid']
+  F5 the B0 record is present and was measured on these keys                     FAIL  binding None, keys -
+  wrote scratchpad/gp/scenarios/combat_scenarios_v6_replan.json (938 s): criteria FAIL, keys 05744a5d5167bd84

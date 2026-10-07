@@ -2,7 +2,8 @@
 2.2): per column 72..88 the nearest shootable living monster whose +-r_eff box covers the column while the column is
 still open when the walk reaches the monster's leaf.
 
-  (a) on a LIGHT slice of the frozen v5 set (60 frames: three runs' first 20, replayed with the set's own sight
+  (a) on a LIGHT slice of the combat set v6 (M7 P6+P7: re-pointed from v5, whose replays the owner's tempo / turn /
+      fire changes moved; 60 frames: three runs' first 20, replayed with the set's own sight
       rule -- the picture renders every frame anyway) the window agrees with `combat.aim_geometric` (monsters only:
       the barrels are P6's) everywhere except a FROZEN list of (run, frame, column) residuals, and every residual is
       the wall-edge class the doc names: the centre-sight shortcut of the geometric aim, in either direction;
@@ -25,10 +26,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "scratchpad" / "gp"), str(ROOT / "scratchpad" / "12m")]
-SET_V5 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v5.json"
+SET_V6 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v6.json"
 ART = ROOT / "assets/freedoom1.wad"
-pytestmark = pytest.mark.skipif(not ART.exists() or not SET_V5.exists(),
-                                reason="needs assets/freedoom1.wad and the v5 scenario set")
+pytestmark = pytest.mark.skipif(not ART.exists() or not SET_V6.exists(),
+                                reason="needs assets/freedoom1.wad and the v6 scenario set")
 
 # the LIGHT slice: three runs' first 20 frames -- 60 rendered frames, ~48 with a geometric target at column 80
 SLICE = (("R0-west-hall", 20), ("R2-spectre-corridor", 20), ("R0-imp-court", 20))
@@ -38,15 +39,10 @@ COL = 80
 # edge -- the column was already wall-drawn when the walk reached the monster's leaf. Compared as a LIST (doc 5, T1):
 # any movement is a visible diff.
 FROZEN_RESIDUALS = {
-    ("R2-spectre-corridor", 8): (82, 83, 84, 85, 86, 87, 88),
-    ("R2-spectre-corridor", 9): (81, 82, 83, 84, 85, 86, 87, 88),
-    ("R2-spectre-corridor", 10): (74, 75, 76, 77, 78),
-    ("R2-spectre-corridor", 11): (75, 76, 77, 78),
-    ("R2-spectre-corridor", 12): (75, 76, 77, 78),
-    ("R2-spectre-corridor", 13): (77, 78),
-    ("R2-spectre-corridor", 14): (77,),
-    ("R2-spectre-corridor", 16): (80, 81),
-    ("R0-imp-court", 0): (81, 82),
+    # M7 P6+P7: re-measured on v6's slice (combat_scenarios_v6.json, keys 83d49015078b6abb) -- every one "edge-closed"
+    ("R2-spectre-corridor", 6): (88,),
+    ("R2-spectre-corridor", 7): (86, 87, 88),
+    ("R0-imp-court", 0): (78, 79, 80),
 }
 
 
@@ -107,6 +103,12 @@ class _MonstersOnly:
         return self.w.los_points(*a)
 
 
+def _mon_aim(at: dict, w) -> dict:
+    """M7 P6: `MonsterViews.aim_things` names the live BARRELS too once the player loots (sid > nmon) -- this file
+    holds the window to the geometric aim on MONSTERS (`_MonstersOnly`), so it hands the render the monster half"""
+    return {di: v for di, v in at.items() if v[0] <= w.layout.nmon}
+
+
 def _geo(w):
     from doomfj.combat import CombatMixin
     mo = _MonstersOnly(w)
@@ -117,8 +119,8 @@ def _geo(w):
 @pytest.fixture(scope="module")
 def slice_frames():
     import scenarios_v2 as S
-    doc = json.loads(SET_V5.read_text(encoding="ascii"))
-    saved = S.SIGHT_RULE
+    doc = json.loads(SET_V6.read_text(encoding="ascii"))
+    saved = (S.SIGHT_RULE, S.MONSTER_TICS)              # M7 P6+P7: a set names its tempo too
     S.use_sight_rule(doc)
     muts = {k: mutant(v) for k, v in MUTANTS.items()}
     log_fn, log = logged()
@@ -128,13 +130,13 @@ def slice_frames():
             run = next(r for r in doc["runs"] if r["name"] == name)
             w = S.start_world(run["setup"])
             hook = w.seen_hook
-            assert hook is not None, "v5 is a seen-rule set: the picture renders every frame"
+            assert hook is not None, "v6 is a seen-rule set: the picture renders every frame"
             phase = types.SimpleNamespace(world=w)
             orig = w.rm.render_wall_frame
             rec = {}
 
             def rwf(*a, **k):
-                at = hook.views.aim_things(phase)
+                at = _mon_aim(hook.views.aim_things(phase), w)
                 out = [0] * 17
                 pix = orig(*a, **dict(k, aim_things=at, aim_out=out))
                 seen0 = set()                     # the window writes ONLY the window: same pixels, same seen set
@@ -165,7 +167,7 @@ def slice_frames():
             finally:
                 del w.rm.render_wall_frame
     finally:
-        S.SIGHT_RULE = saved
+        S.SIGHT_RULE, S.MONSTER_TICS = saved
     return frames
 
 
@@ -256,7 +258,7 @@ def _render_hand(w, hook, placed, fn=None):
     views = [None] * hook.views.n
     for m, v in hook._mviews(w).items():
         views[hook.views.mdi[m]] = v
-    at_all = hook.views.aim_things(types.SimpleNamespace(world=w))
+    at_all = _mon_aim(hook.views.aim_things(types.SimpleNamespace(world=w)), w)
     at = {hook.views.mdi[m]: at_all[hook.views.mdi[m]] for m in placed}
     out = [0] * 17
     kw = dict(hook.kw, rt_depth_order=False)
@@ -319,10 +321,15 @@ def test_aim_things_and_set_aim(hand):
     w, hook = hand
     ws = w.ws
     phase = types.SimpleNamespace(world=w)
-    at = hook.views.aim_things(phase)
+    at_all = hook.views.aim_things(phase)
+    at = _mon_aim(at_all, w)
     live = [m for m in range(w.layout.nmon) if ws.mon_active[m] and ws.mon_shootable[m] and ws.mon_health[m] > 0]
     assert at == {hook.views.mdi[m]: (m + 1, w.mon_radius[m]) for m in live}
     assert {r for _sid, r in at.values()} == {20, 30}
+    # M7 P6: in "full" the live barrels follow the monsters' ids, radius class 10
+    assert {k: v for k, v in at_all.items() if k not in at} == {
+        hook.views.bdi[b]: (1 + w.layout.nmon + b, 10) for b in range(w.layout.nbarrel)
+        if ws.bar_state[b] and ws.bar_health[b] > 0}
     m0 = live[0]
     saved = ws.mon_health[m0]
     ws.mon_health[m0] = 0
@@ -366,3 +373,40 @@ def test_span_identity():
     broke = sum(fixed_mul((tx + (r << 16) + 0x8000) & M, xs, 8, 4) != (P_ + r * xs) & M
                 for tx, xs, r in ops[:200] for P_ in [fixed_mul(tx, xs, 8, 4)])
     assert broke > 0, "a half-unit radius did not break the identity: the check is vacuous"
+
+
+# ---------------------------------------------------------------------------------------------- M7 P6+P7: barrels
+S7_POSE = (1992 << 16, -416 << 16, 0)        # p2a_gate S7's start, east over the nukage hall: 4 far barrels in view
+
+
+def _s7_window(monkeypatch=None, fn=None):
+    """the aim window the game picture records at p2a S7's start pose, the world at the level start ("full"/"full"):
+    every monster where it spawned, every barrel standing (aim ids 54..75 = 1 + nmon + b)"""
+    import probe as P
+    from doomfj.monsters import MonsterPhase
+    from doomfj.reference_model import ReferenceModel
+    from doomfj.wall_renderer import BOOT_SKILL
+    orc = P.Oracle()
+    if fn is not None:
+        monkeypatch.setattr(ReferenceModel, "render_wall_frame", fn)
+    ph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode="full", player="full")
+    x, y, a = S7_POSE
+    aim = [0] * 17
+    orc.render(x, y, a, (), views=orc.monster_views(ph, x, y), positions=orc.monster_positions(ph),
+               aim_things=orc._mv(ph.world).aim_things(ph), aim_out=aim, mobiles=ph.mobiles(),
+               removed=orc.monster_removed(ph), barrel_views=orc.monster_barrel_views(ph), card=0)
+    return tuple(aim), ph.world.layout.nmon
+
+
+def test_a_barrel_past_the_soft_count_is_aimed_only_at_the_raised_bound(monkeypatch):
+    """p2a_gate S7 on blocked51 (2026-10-07): the oracle's window held barrels 15..18 (ids 69..72) at frame 0, the
+    binary's held nothing -- pixels byte-exact. The fj's aim hook sits INSIDE proj.project_thing, after the far
+    reject, and past DEG_SOFT_SCENERY accepted scenery things that reject runs at the RAISED depth bound (sp_tzmax2,
+    DEG_MINH2_SCENERY rows); the oracle aimed at the BASE bound. A barrel is scenery: here, far and short, it is
+    not aimed. R9: the old rule (the base bound for every aimed thing) records the four barrels."""
+    win, nmon = _s7_window()
+    assert win == (0,) * 17, win
+    old = mutant([("self.sprite_height_px(_aart[4], _acore[2]) >= minh_)",
+                   "self.sprite_height_px(_aart[4], _acore[2]) >= (MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H))")])
+    win_old, _n = _s7_window(monkeypatch, old)
+    assert sorted({s for s in win_old if s}) == [nmon + 1 + b for b in (15, 16, 17, 18)], win_old

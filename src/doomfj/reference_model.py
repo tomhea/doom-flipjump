@@ -74,13 +74,17 @@ GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
                       # M7 P3.3 (D3 d): a leaf's runtime things nearest first by P_AproxDistance from the
                       # player -- the game tier's sim.thing_pass_depth (the emitter reads THIS key, and
                       # monstercode.depth_walk refuses a monster mode that cannot emit the walk)
-                      rt_depth_order="aprox")
+                      rt_depth_order="aprox",
+                      # M7 P6+P7 E (the owner, 2026-10-05: "make sure monsters are almost always seen", "you must
+                      # always show the fireballs", "monsters should always be shown"): THE ACTORS RULE -- see
+                      # render_wall_frame's `exempt_actors` (the emitter and monstercode read THIS key)
+                      exempt_actors=True)
 # THE HOSTED TIERS' PICTURE (M7 P3.3): the game tier's set WITHOUT D3 d. The hosted tiers (hosted, hosted-doors,
 # hosted-loop, hosted-nocollide) move runtime things too -- the host sends their positions -- but their fj walks
 # a leaf's list in INDEX order (`sim.thing_pass`); the depth walk is the GAME tier's alone. A gate that drives a
 # hosted binary (m1_gate, m2_r3_gate, m2_r4_gate, m2_pass_probe) asks for THIS set, or it compares a sorted oracle
 # with an unsorted binary on every leaf holding two moved things.
-HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False)
+HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False)   # (M7 P6+P7 E: the game's alone)
 RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_order: off, or the key
 # ⚠ DOOM's forwardmove 0x32 (=50) is a THRUST, not a displacement. `P_Thrust` adds `move*2048` to
 # momx/momy, and against FRICTION 0xE800 (0.90625) the steady state is 50*2048/65536 / 0.09375 =
@@ -103,7 +107,33 @@ RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_
 # M7 P4.1: the side step a strafe key moves, per tic (the gameplay model's; DOOM's sidemove thrust at steady state)
 STRAFE_MOVE = 13 << 16
 FORWARD_MOVE = 16 << 16           # 16.16 map-units per tic ~= DOOM's steady-state run; S0 magnitude
-ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
+# THE TURN, BAM per frame; turn-left adds, turn-right subtracts. ONE definition, `turn_step` below: the model
+# (step_sim, combat._player_move) and the fj sim (wall_renderer._player_sim_lines) all follow it. DOOM's angleturn[]
+# is {640, 1280, 320} << 16: walk, run, and the SLOW turn of the first SLOWTURNTICS = 6 tics a turn key is held
+# (G_BuildTiccmd's `turnheld`, ONE counter for both keys). M7 P6+P7 (the owner, 2026-10-05: "turning feels a bit
+# slow during a fight, might need to x1.5 it"; the coordinator's rule after the range measurement,
+# docs/gp-p67-interface.md section 12):
+#   * ANGLE_TURN_TAP  -- the FIRST frame of a held turn: DOOM's slow turn, so a tap aims as finely as DOOM's tap;
+#   * ANGLE_TURN_HELD -- every later frame of the same hold: the owner's x1.5 of the old 640.
+# The state is one flag, `turnheld` (a turn key -- either -- was held last frame; DOOM's counter at SLOWTURNTICS = 1
+# frame): the world's `p_turnheld`, SimState.turnheld, the fj's persisted `p_tnh`. The tiers without that state (the
+# hosted and visual ones: `tap=False`) turn ANGLE_TURN_HELD every frame. ANGLE_TURN is that rate's old name.
+ANGLE_TURN_TAP = 320 << 16
+ANGLE_TURN_HELD = 960 << 16
+ANGLE_TURN = ANGLE_TURN_HELD
+
+
+def turn_step(angle: int, keys, turnheld: int, tap: bool = True):
+    """ONE frame of the turn -> (angle, turnheld). With `tap` (the game tier): the rate is ANGLE_TURN_TAP when no turn
+    key was held last frame (`turnheld` 0), else ANGLE_TURN_HELD, and `turnheld` becomes "a turn key is held now";
+    both keys held turn both ways (net 0, DOOM's). Without `tap`: ANGLE_TURN_HELD, `turnheld` untouched."""
+    left, right = bool(keys.get("turn_left")), bool(keys.get("turn_right"))
+    rate = ANGLE_TURN_TAP if tap and not turnheld else ANGLE_TURN_HELD
+    if left:
+        angle = (angle + rate) & 0xFFFFFFFF
+    if right:
+        angle = (angle - rate) & 0xFFFFFFFF
+    return angle, (int(left or right) if tap else turnheld)
 
 # ── M14-d: line collision (P_CheckPosition / PIT_CheckLine) ───────────────────────────────────
 PLAYER_RADIUS = 16 << 16          # MT_PLAYER radius, 16.16 (the half-width of the collision box)
@@ -227,6 +257,7 @@ VANISHABLE_TYPES = frozenset({
     5, 6, 13, 38, 39, 40,                   # the keys (none drawable on E1M1 today; harmless)
     2035,                                   # BAR1  the barrel -- destroyed, not picked up
 })
+BARREL_TYPE = 2035                          # M7 P6: the barrel (`render_wall_frame(barrel_views=)`)
 
 # ── THE 25M PACKAGE (owner goal, 2026-08-14) — A DELIBERATE PICTURE CHANGE ─────────────────────
 #
@@ -368,10 +399,21 @@ MISSILE_Z = 32                    # a mobile stands this far above its leaf's fl
 
 @dataclass(frozen=True)
 class MobileThing:
-    """a mobile as the thing walk sees it: where it is (whole map units), and no WAD type (-1: not a monster)"""
+    """a mobile as the thing walk sees it: where it is (whole map units), and no WAD type (-1: not a monster).
+    M7 P6: `z` -- how far above its leaf's floor it stands; None is MISSILE_Z (read when drawn), a DROP passes 0"""
     x: int
     y: int
     type: int = -1
+    z: int | None = None
+
+    @property
+    def drop(self) -> bool:
+        """M7 P6: a DROP -- the item a monster left, standing ON its floor (`monsters.MonsterPhase.mobiles`' (x, y,
+        lump, 0)): drawn as SCENERY under every rule, never an actor (docs/gp-p67-interface.md section 5; the fj's drop
+        rows, monstercode.drop_view_rows). The fireballs, blood and puffs fly at MISSILE_Z (z None, or a 4th element
+        that says so) and are the mobiles the actors rule exempts: the 4th element moves the height, and z 0 is what
+        marks an item"""
+        return self.z == 0
 
 
 def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
@@ -464,6 +506,9 @@ class SimState:
     y: int          # 16.16 signed
     angle: int      # 32-bit BAM (modular: NOT normalised, 0 and 2**32 are the same angle anyway)
     level: str      # current level lump name
+    # M7 P6+P7: a turn key was held last frame (`turn_step`; the game tier's `p_tnh`). Carried by step_sim(tap=True),
+    # 0 for every state built by hand; NOT compared -- a pose is (x, y, angle, level), as before.
+    turnheld: int = dataclasses.field(default=0, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, "x", _signed(self.x, 32))
@@ -1007,16 +1052,14 @@ class ReferenceModel:
         return x, y
 
     # ── sim ──
-    def step_sim(self, state: SimState, keys: dict, *, scene=None, touch=None, strafe: bool = False) -> SimState:
+    def step_sim(self, state: SimState, keys: dict, *, scene=None, touch=None, strafe: bool = False,
+                 tap: bool | None = None) -> SimState:
         """One tic: turn, then move -- against the level's lines when `scene` is given (M14-d), and
         freely when it is not (the M9 collision-free sim every earlier gate speaks).
         FixedMul(move, cos/sin) in 16.16 (n=8 nibbles, f=4 fraction nibbles) mirrors the fj path
-        exactly; angle wraps mod 2**32."""
-        angle = state.angle
-        if keys.get("turn_left"):
-            angle = (angle + ANGLE_TURN) & 0xFFFFFFFF
-        if keys.get("turn_right"):
-            angle = (angle - ANGLE_TURN) & 0xFFFFFFFF
+        exactly; angle wraps mod 2**32. M7 P6+P7: the turn is `turn_step`; `tap` (default: `strafe`, i.e. the game
+        tier's player) applies the slow first frame from `state.turnheld` and carries the flag on in the result."""
+        angle, turnheld = turn_step(state.angle, keys, state.turnheld, strafe if tap is None else tap)
 
         move = 0
         if keys.get("forward"):
@@ -1049,7 +1092,7 @@ class ReferenceModel:
                 x, y = self.move_with_collision(scene, _signed(x, 32), _signed(y, 32), dx, dy,
                                                 touch=touch)
                 x, y = x & 0xFFFFFFFF, y & 0xFFFFFFFF
-        return replace(state, x=x, y=y, angle=angle)
+        return replace(state, x=x, y=y, angle=angle, turnheld=turnheld)
 
     def render_textured_column(self, texels, texheight, texcol, colormap, light, *,
                                count, frac0, step, fracbits=8):
@@ -1919,7 +1962,8 @@ class ReferenceModel:
                           thing_positions=None, thing_hidden=None, thing_views=None,
                           seen_out: set | None = None, rt_depth_order=False,
                           aim_things: dict | None = None, aim_out: list | None = None,
-                          mobiles=None, degrade: bool = False) -> bytes:
+                          mobiles=None, barrel_views: dict | None = None, thing_removed=None,
+                          degrade: bool = False, exempt_actors: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -1975,7 +2019,18 @@ class ReferenceModel:
         counts against THING_BUDGET, never MONSTER_BUDGET), always at the BASE minimum height
         MIN_SPRITE_H (the graduated acceptance's raise does not apply), standing MISSILE_Z = 32
         units above its leaf's floor (P_SpawnMissile's `z + 4*8*FRACUNIT`), and it is never SEEN
-        (`seen_out`) nor AIMED (`aim_things`). Empty or None draws exactly what it drew before."""
+        (`seen_out`) nor AIMED (`aim_things`). Empty or None draws exactly what it drew before.
+
+        M7 P6 / P7 (docs/gp-p67-interface.md section 5), each OPT-IN -- absent, the picture is today's:
+          * a `mobiles` entry may carry a 4th element, `z` above its leaf's floor (default MISSILE_Z: P5's
+            3-tuples are unchanged) -- a DROP (`monsters.MonsterPhase.mobiles`) stands on the floor, z 0;
+          * `barrel_views` = {drawable index: lump}: a BARREL (type 2035, baked or runtime) drawn with its
+            state's frame (`monsters.MonsterPhase.barrel_lumps`: BAR1A0 / BAR1B0 / BEXPA0 .. BEXPE0) instead
+            of its type's art -- the art's size sets the projection and both depth bounds, as the fj bakes
+            them per lump; a barrel in `aim_things` (sid 1 + nmon + b, radius 10) is aimed through it;
+          * `thing_removed`: drawable indices the GAME removed -- picked up, a barrel gone to S_NULL
+            (`monsters.MonsterViews.hidden`). Each must be a VANISHABLE type (a pickup or a barrel); unlike
+            `thing_hidden`, a runtime one need not be a skill's absent set (the fj unlinks it: `rt_unlink`)."""
         # M7 P3.3: a misspelt depth order must fail here, not fall through to the "aprox" key
         assert rt_depth_order in RT_DEPTH_ORDERS, (
             f"rt_depth_order={rt_depth_order!r}: one of {RT_DEPTH_ORDERS}")
@@ -2007,6 +2062,23 @@ class ReferenceModel:
                 deg_mark = DEG_PNEAR
             if deg_lip_scale is None:
                 deg_lip_scale = DEG_LIP_SCALE
+        # M7 P6+P7 E (the owner, 2026-10-05): `exempt_actors` -- THE ACTORS (the monsters, live or dead, and the
+        # MOBILES: fireballs, blood) are always drawn when they have a visible pixel the walls leave open:
+        #   1. no soft raise: the monsters' soft count becomes the hard MONSTER_BUDGET (255: never reached, the union
+        #      holds 53), so a monster keeps its BASE bound (MIN_SPRITE_H_MONSTER) whatever the frame's load;
+        #   2. a mobile is an actor too: the monster category (n_mon) and the monster BASE bound (a far fireball
+        #      shorter than MIN_SPRITE_H no longer vanishes; monstercode.mobile_view_rows bakes the same) -- but NOT a
+        #      DROP (`MobileThing.drop`): an item on the floor stays scenery (monstercode.drop_view_rows: sp_mon 0);
+        #   3. no B-gate for an actor: its fragment takes slot B behind a nearer sprite at any height;
+        #   4. (every thing) a sprite with NO ROW inside the view -- the drawn bucket [ytop_b, ytop_b + hb) entirely
+        #      above or below it, e.g. the corpse the player stands on, whose feet-planted rows are all under the
+        #      view -- claims no fragment slot: it drew nothing, yet it held slot A in every column of its (wide)
+        #      span and left the monsters behind it to the B-gate. Pixel-neutral for itself; counted as before.
+        # The scenery keeps its graduated acceptance and the B-gate; the hard budgets stay the backstop. The fj gets
+        # the same from its `dsoftm` operand = `monbudget` (wall_renderer: the game tier), which switches 3 and 4
+        # on in frame.thing_record_body, and from the mobile rows' sp_mon 1 and base bound (2).
+        if exempt_actors and deg_things is not None:
+            deg_things = (deg_things[0], deg_things[1], MONSTER_BUDGET, deg_things[3])
         deg_sliver = deg_sliver or 0
         deg_stack_scale = deg_stack_scale or 0
         deg_mark = deg_mark or 0
@@ -2126,6 +2198,17 @@ class ReferenceModel:
                 _vbad = [i for i, v in enumerate(thing_views) if v is not None and _baked[i]]
                 assert not _vbad, f"thing_views gives BAKED things {_vbad[:8]} a view: they are code"
             _views = list(thing_views) if thing_views is not None else [None] * len(_drawable)
+            # M7 P6: the barrels drawn by state -- baked ones too (their xor block follows the lump)
+            for _bdi, _blump in (barrel_views or {}).items():
+                assert _drawable[_bdi].type == BARREL_TYPE, (
+                    f"barrel_views names drawable {_bdi} (type {_drawable[_bdi].type}), not a barrel")
+                assert _views[_bdi] is None, f"drawable {_bdi} has a thing_views view and a barrel view"
+                _views[_bdi] = (_blump, False)
+            # M7 P6: what the game removed (a pickup taken, a barrel gone) -- checked here, joined below
+            _removed = frozenset(thing_removed or ())
+            _rbad = sorted(di for di in _removed if _drawable_spawn[di].type not in VANISHABLE_TYPES)
+            assert not _rbad, (f"thing_removed names drawables {_rbad[:8]} whose types cannot vanish "
+                               f"(VANISHABLE_TYPES: the pickups and the barrel)")
             _hidden = frozenset(thing_hidden or ())
             if _hidden:
                 _slots = vanishable_slots(_drawable_spawn, _baked, VANISHABLE_TYPES)
@@ -2145,6 +2228,11 @@ class ReferenceModel:
                         f"runtime thing out only as NEW GAME at a skill that does not spawn it "
                         f"(things.skill_absent); the skills' runtime sets have "
                         f"{sorted(len(v) for v in _by_skill.values())} things")
+            if _removed:
+                _slots_r = vanishable_slots(_drawable_spawn, _baked, VANISHABLE_TYPES)
+                _rb = sorted(di for di in _removed if _baked[di] and di not in _slots_r)
+                assert not _rb, f"thing_removed names baked things {_rb[:8]} without a visibility flag"
+                _hidden = _hidden | _removed
             # ⚠ BAKED FIRST, THEN RUNTIME, per leaf -- the ONE order fj can produce, because the
             # baked things are call sites emitted in the leaf and the runtime ones are a list walked
             # after them. It is wad order within each class, and at spawn every leaf holds only one
@@ -2159,9 +2247,11 @@ class ReferenceModel:
             # M7 P5: the MOBILES, runtime things after the WAD's (index _ndraw + k: never a drawable index, so
             # never baked, seen or aimed), each with its one view
             _ndraw = len(_drawable)
-            for _k, (_mx, _my, _mlump) in enumerate(mobiles or ()):
+            for _k, _mo in enumerate(mobiles or ()):
+                _mx, _my, _mlump = _mo[:3]
+                _mz = _mo[3] if len(_mo) > 3 else None   # M7 P6: a drop's z (0); P5's 3-tuples: MISSILE_Z
                 things_by_ss.setdefault(self.point_in_subsector(scene.cmap, _mx, _my), []).append(
-                    (MobileThing(_mx, _my), (_mlump, False), _ndraw + _k))
+                    (MobileThing(_mx, _my, z=_mz), (_mlump, False), _ndraw + _k))
             # M7 P3.3 (D3 d): a leaf's RUNTIME things nearest first -- the walk is front-to-back and a sprite
             # pixel is written once, so within a leaf the near one must be drawn before the far one
             if rt_depth_order:
@@ -2210,6 +2300,12 @@ class ReferenceModel:
                     # monotone, so fj still latches `tstop` once BOTH are spent.
                     mon = t.type in MONSTER_TYPES
                     mob = t_di >= _ndraw                 # M7 P5: a mobile (scenery: never seen, never aimed)
+                    # M7 P6+P7 E: an ACTOR -- the monster category, base bound and B-gate exemption (exempt_actors)
+                    # A DROP is not an actor: it rides `mobiles` (z 0: `MobileThing.drop`) but is an ITEM on the floor -- the
+                    # scenery class at MIN_SPRITE_H, B-gated (docs/gp-p67-interface.md section 5; the fj's drop rows:
+                    # monstercode.drop_view_rows, sp_mon 0). b0 v6 on blocked50 (2026-10-06): an actor drop took slot B
+                    # behind its corpse here while the binary B-gated it -- 1-53 px on 44 of R0-northwest's 100 frames
+                    act = mon or (mob and exempt_actors and not t.drop)
                     # M7 P3.2 (docs/gp-monsters.md 8.2, D3 e): SEEN -- the sprite projects in front at the
                     # BASE monster size cull (MIN_SPRITE_H_MONSTER, not the soft budgets' raise) and one of
                     # its columns is still OPEN when its leaf is reached, tested BEFORE the count budgets:
@@ -2225,19 +2321,40 @@ class ReferenceModel:
                             if _spr is not None and any(not drawn[x] for x in
                                                         range(max(0, _spr[0]), min(W, _spr[1] + 1))):
                                 seen_out.add(t_di)
+                    # 25M-CAP GRADUATED ACCEPTANCE: once the frame has accepted its first
+                    # (nearest -- the walk is front-to-back) SOFT things of a category, the
+                    # min-size bar rises, so far specks stop paying the record loop exactly on
+                    # the frames that are already heavy. Light frames never reach SOFT and keep
+                    # every speck. Monsters keep their own (looser) pair, per the owner's policy.
+                    # (Decided HERE, before the aim window: the aim hook runs inside the projection, so it sees
+                    # the bound the projection runs with -- below.)
+                    minh_ = MIN_SPRITE_H_MONSTER if act else MIN_SPRITE_H
+                    if deg_things is not None and not mob:   # M7 P5: a mobile keeps the BASE bound
+                        soft_s, minh2_s, soft_m, minh2_m = deg_things
+                        if act and n_mon >= soft_m:
+                            minh_ = minh2_m
+                        elif not act and n_thing >= soft_s:
+                            minh_ = minh2_s
                     # M7 P4.2a (docs/gp-aim-window.md 1.3-1.6, 2.2): THE AIM WINDOW, at the seen test's point --
-                    # after the full stop, before the budgets, so a degraded-out monster can still be shot.
-                    # The box is +-r_eff around the thing's centre through the sprite's own tz/tx/xscale
-                    # (project_thing_core), the span divide-free: P = tx*xscale, Q = r_eff*xscale (1.4)
-                    if aim_things is not None and t_di in aim_things:
+                    # after the full stop. The box is +-r_eff around the thing's centre through the sprite's own
+                    # tz/tx/xscale (project_thing_core), the span divide-free: P = tx*xscale, Q = r_eff*xscale (1.4).
+                    # M7 P6+P7 (2026-10-07): a thing is aimed only where the fj's PROJECTION runs -- the aim hook sits
+                    # in proj.project_thing after the far reject, which frame.thing_record_body reaches only within
+                    # the thing's HARD budget, and whose depth bound is the RAISED one (sp_tzmax2) once the category's
+                    # SOFT count is full (degfl): the size bound is `minh_`, not the base one. Under the actors rule a
+                    # monster's soft count is the hard budget, so a monster keeps its base bound (a degraded-out
+                    # monster can still be shot); a BARREL (scenery) past DEG_SOFT_SCENERY accepted things needs
+                    # DEG_MINH2_SCENERY rows. FOUND by p2a_gate S7 on blocked51: four far barrels the oracle aimed at
+                    # frame 0 that the binary's raised projection rejected (barrelcode's rule, package C's note).
+                    if (aim_things is not None and t_di in aim_things
+                            and not ((n_mon >= MONSTER_BUDGET) if act else (n_thing >= THING_BUDGET))):
                         _asid, _ar = aim_things[t_di]
                         _aart = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None
                                  else self.art_of_lump(sprite_wad, tview[0], spr_cache))
                         _acore = (None if _aart is None else
                                   self.project_thing_core(viewx, viewy, viewangle, t.x, t.y))
                         if (_acore is not None and _acore[0] <= aim_tzmax
-                                and self.sprite_height_px(_aart[4], _acore[2])
-                                >= (MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H)):   # the BASE bound
+                                and self.sprite_height_px(_aart[4], _acore[2]) >= minh_):   # the projection's
                             _atz, _atx, _axs = _acore
                             if _ar not in aim_reff:
                                 aim_reff[_ar] = _CM.aim_radius(self, viewangle & ANGLE_MASK, _ar)
@@ -2252,7 +2369,7 @@ class ReferenceModel:
                                 _ak = _ac - aim_lo
                                 if aim_out[_ak] == 0 or _atzi < aim_tz[_ak]:   # strictly nearer overwrites
                                     aim_out[_ak], aim_tz[_ak] = _asid, _atzi
-                    if (n_mon >= MONSTER_BUDGET) if mon else (n_thing >= THING_BUDGET):
+                    if (n_mon >= MONSTER_BUDGET) if act else (n_thing >= THING_BUDGET):
                         continue                         # ... `continue`, not `break`: a scenery
                     art = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None   # budget must not
                            else self.art_of_lump(sprite_wad, tview[0], spr_cache))       # stop the
@@ -2260,23 +2377,13 @@ class ReferenceModel:
                         continue
                     tss = scene.cmap.subsectors[ss_first[seg_i]]
                     tsec = self._seg_sector(lds, sds, secs, scene.cmap.segs[tss.firstseg])
-                    # 25M-CAP GRADUATED ACCEPTANCE: once the frame has accepted its first
-                    # (nearest -- the walk is front-to-back) SOFT things of a category, the
-                    # min-size bar rises, so far specks stop paying the record loop exactly on
-                    # the frames that are already heavy. Light frames never reach SOFT and keep
-                    # every speck. Monsters keep their own (looser) pair, per the owner's policy.
-                    minh_ = MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H
-                    if deg_things is not None and not mob:   # M7 P5: a mobile keeps the BASE bound
-                        soft_s, minh2_s, soft_m, minh2_m = deg_things
-                        if mon and n_mon >= soft_m:
-                            minh_ = minh2_m
-                        elif not mon and n_thing >= soft_s:
-                            minh_ = minh2_s
+                    # (minh_: the graduated acceptance's bound, decided above the aim window)
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
-                                            t.x, t.y, tsec.floor_h + (MISSILE_Z if mob else 0), art, minh_)
+                                            t.x, t.y, tsec.floor_h + (((MISSILE_Z if t.z is None else t.z)
+                                                                       if mob else 0)), art, minh_)
                     if pr is None:
                         continue
-                    if mon:
+                    if act:
                         n_mon += 1
                     else:
                         n_thing += 1
@@ -2298,6 +2405,8 @@ class ReferenceModel:
                     # column (fj picks it once per thing too: frame.thing_record_body)
                     tier = sprite_tier(hb, far_, hd_ok)
                     ytop_b = ytop + th_px - hb                # FEET planted: the bucket moves the top
+                    if exempt_actors and (ytop_b >= H or ytop_b + hb <= 0):
+                        continue                              # M7 P6+P7 E (4): no row in the view, no slot
                     lr = self.wall_light_row(self.wall_lightnum(tsec.light, 0), hb, art[4])
                     frac = (max(0, tx1) - tx1) * istep
                     for x in range(max(0, tx1), min(W, tx2 + 1)):
@@ -2322,7 +2431,7 @@ class ReferenceModel:
                         # its head to a potion's columns).
                         if sfrag[x] is None:
                             sfrag[x] = (ytop_b + st[0], st[1], lr)
-                        elif not b_minh or hb >= b_minh:
+                        elif not b_minh or hb >= b_minh or (act and exempt_actors):   # M7 P6+P7 E (3)
                             # 25M-CAP B-GATE: slot B only for fragments tall enough to plausibly
                             # show through slot A's gaps; a small/far B fragment is ~always
                             # occluded. The slot stays OPEN, so a later (taller) thing may claim

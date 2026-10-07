@@ -1,0 +1,76 @@
+ANGLE_TURN_TAP 320 << 16, ANGLE_TURN_HELD (= ANGLE_TURN) 960 << 16 = 5.273 deg; steps: ours_640 3.516 deg, ours_960 5.273 deg, ours_tap_320 1.758 deg, doom_tap_320 1.758 deg, doom_walk_640 3.516 deg
+views 32, delta grid 4 << 16 BAM; samples per (r, D, step): {'ours_640': 32, 'ours_960': 32, 'ours_tap_320': 32, 'doom_tap_320': 32, 'doom_walk_640': 32}
+A. THE RULE ALONE -- both rules at the SAME step (640<<16 = 3.516 deg), each player centring what he
+   sees (the middle of the rule's own accurate-shot interval). P = probability of a hit.
+  r    D | ang.width | pistol 1st ours/doom | refire bullet ours/doom | shotgun P>=1 ours/doom | pellets of 7 ours/doom
+  20  128 | 17.76 deg | 1.000 / 1.000        | 1.000 / 1.000           | 1.000 / 1.000          | 7.00 / 7.00
+  20  256 |  8.93 deg | 1.000 / 1.000        | 0.972 / 0.981           | 1.000 / 1.000          | 6.80 / 6.87
+  20  512 |  4.47 deg | 1.000 / 1.000        | 0.733 / 0.742           | 1.000 / 1.000          | 5.13 / 5.20
+  20  768 |  2.98 deg | 0.984 / 0.981        | 0.551 / 0.543           | 0.996 / 0.997          | 3.86 / 3.80
+  20 1024 |  2.24 deg | 0.816 / 0.806        | 0.430 / 0.420           | 0.983 / 0.986          | 3.01 / 2.94
+  20 1536 |  1.49 deg | 0.544 / 0.539        | 0.295 / 0.289           | 0.919 / 0.928          | 2.06 / 2.02
+  20 1920 |  1.19 deg | 0.428 / 0.432        | 0.236 / 0.234           | 0.851 / 0.869          | 1.65 / 1.64
+  30  128 | 26.38 deg | 1.000 / 1.000        | 1.000 / 1.000           | 1.000 / 1.000          | 7.00 / 7.00
+  30  256 | 13.37 deg | 1.000 / 1.000        | 1.000 / 1.000           | 1.000 / 1.000          | 7.00 / 7.00
+  30  512 |  6.71 deg | 1.000 / 1.000        | 0.897 / 0.916           | 1.000 / 1.000          | 6.28 / 6.41
+  30  768 |  4.47 deg | 1.000 / 1.000        | 0.735 / 0.743           | 1.000 / 1.000          | 5.14 / 5.20
+  30 1024 |  3.36 deg | 1.000 / 1.000        | 0.605 / 0.598           | 0.998 / 0.998          | 4.23 / 4.18
+  30 1536 |  2.24 deg | 0.813 / 0.806        | 0.430 / 0.420           | 0.983 / 0.986          | 3.01 / 2.94
+  30 1920 |  1.79 deg | 0.644 / 0.647        | 0.349 / 0.343           | 0.956 / 0.961          | 2.44 / 2.40
+
+A2. THE SHIPPED RULE -- a tap turns ANGLE_TURN_TAP (the first frame of a hold; DOOM's slow turn), so the
+   residual after the best taps is uniform over 320<<16; DOOM's keyboard tap is the same step. ours / doom:
+  r    D | pistol 1st ours/doom | refire bullet ours/doom | shotgun P>=1 ours/doom | pellets of 7 ours/doom
+  20  128 | 1.000 / 1.000        | 1.000 / 1.000           | 1.000 / 1.000          | 7.00 / 7.00
+  20  256 | 1.000 / 1.000        | 0.984 / 0.990           | 1.000 / 1.000          | 6.89 / 6.93
+  20  512 | 1.000 / 1.000        | 0.772 / 0.778           | 1.000 / 1.000          | 5.40 / 5.44
+  20  768 | 1.000 / 1.000        | 0.580 / 0.575           | 1.000 / 1.000          | 4.06 / 4.03
+  20 1024 | 1.000 / 1.000        | 0.455 / 0.438           | 0.993 / 0.994          | 3.19 / 3.07
+  20 1536 | 0.981 / 0.981        | 0.313 / 0.295           | 0.934 / 0.941          | 2.19 / 2.07
+  20 1920 | 0.856 / 0.861        | 0.245 / 0.236           | 0.852 / 0.878          | 1.71 / 1.65
+  30  128 | 1.000 / 1.000        | 1.000 / 1.000           | 1.000 / 1.000          | 7.00 / 7.00
+  30  256 | 1.000 / 1.000        | 1.000 / 1.000           | 1.000 / 1.000          | 7.00 / 7.00
+  30  512 | 1.000 / 1.000        | 0.912 / 0.937           | 1.000 / 1.000          | 6.39 / 6.56
+  30  768 | 1.000 / 1.000        | 0.774 / 0.778           | 1.000 / 1.000          | 5.42 / 5.45
+  30 1024 | 1.000 / 1.000        | 0.644 / 0.635           | 1.000 / 1.000          | 4.51 / 4.44
+  30 1536 | 1.000 / 1.000        | 0.455 / 0.438           | 0.993 / 0.994          | 3.18 / 3.07
+  30 1920 | 1.000 / 1.000        | 0.367 / 0.354           | 0.972 / 0.974          | 2.57 / 2.48
+
+B. WITH THE TURN -- ours at blocked48's 640, the owner's x1.5 held rate 960 alone, and the SHIPPED tap
+   (320, then 960 while held) vs DOOM's keyboard TAP (the slow turn, 320<<16 = 1.758 deg); the residual
+   uniform over one step, centred as in A.
+  r    D | pistol 1st: ours 640 | ours 960 | SHIPPED tap | DOOM tap 320 || shotgun P>=1: ours 640 | ours 960 | SHIPPED tap | DOOM tap 320
+  20  128 |  1.000               |  1.000   |  1.000       |  1.000       ||  1.000              |  1.000   |  1.000       |  1.000
+  20  256 |  1.000               |  1.000   |  1.000       |  1.000       ||  1.000              |  1.000   |  1.000       |  1.000
+  20  512 |  1.000               |  0.946   |  1.000       |  1.000       ||  1.000              |  0.997   |  1.000       |  1.000
+  20  768 |  0.984               |  0.723   |  1.000       |  1.000       ||  0.996              |  0.985   |  1.000       |  1.000
+  20 1024 |  0.816               |  0.544   |  1.000       |  1.000       ||  0.983              |  0.962   |  0.993       |  0.994
+  20 1536 |  0.544               |  0.363   |  0.981       |  0.981       ||  0.919              |  0.875   |  0.934       |  0.941
+  20 1920 |  0.428               |  0.285   |  0.856       |  0.861       ||  0.851              |  0.807   |  0.852       |  0.878
+  30  128 |  1.000               |  1.000   |  1.000       |  1.000       ||  1.000              |  1.000   |  1.000       |  1.000
+  30  256 |  1.000               |  1.000   |  1.000       |  1.000       ||  1.000              |  1.000   |  1.000       |  1.000
+  30  512 |  1.000               |  1.000   |  1.000       |  1.000       ||  1.000              |  1.000   |  1.000       |  1.000
+  30  768 |  1.000               |  0.961   |  1.000       |  1.000       ||  1.000              |  0.997   |  1.000       |  1.000
+  30 1024 |  1.000               |  0.810   |  1.000       |  1.000       ||  0.998              |  0.990   |  1.000       |  1.000
+  30 1536 |  0.813               |  0.542   |  1.000       |  1.000       ||  0.983              |  0.962   |  0.993       |  0.994
+  30 1920 |  0.644               |  0.429   |  1.000       |  1.000       ||  0.956              |  0.926   |  0.972       |  0.974
+
+C. THE WINDOW'S BIAS -- where our accurate-shot interval is centred, off the true bearing (- = the view
+   turned LEFT of the target: column 80 is tested at its right edge, screen x 81, one column right of the
+   view's centre -- R_ProjectSprite's x1/x2 convention, which the drawn sprite shares, so a player who
+   centres the PICTURE never sees it), and the pistol's P at 640 if the player centred the TRUE bearing
+   instead of the picture (ours / doom):
+  20  128 | bias   (wider than the grid) | pistol 1st, bearing-centred: 1.000 / 1.000
+  20  256 | bias   (wider than the grid) | pistol 1st, bearing-centred: 1.000 / 1.000
+  20  512 | bias -0.764 deg | pistol 1st, bearing-centred: 0.991 / 1.000
+  20  768 | bias -0.747 deg | pistol 1st, bearing-centred: 0.828 / 0.981
+  20 1024 | bias -0.769 deg | pistol 1st, bearing-centred: 0.688 / 0.804
+  20 1536 | bias -0.766 deg | pistol 1st, bearing-centred: 0.536 / 0.537
+  20 1920 | bias -0.755 deg | pistol 1st, bearing-centred: 0.425 / 0.432
+  30  128 | bias   (wider than the grid) | pistol 1st, bearing-centred: 1.000 / 1.000
+  30  256 | bias   (wider than the grid) | pistol 1st, bearing-centred: 1.000 / 1.000
+  30  512 | bias   (wider than the grid) | pistol 1st, bearing-centred: 1.000 / 1.000
+  30  768 | bias -0.732 deg | pistol 1st, bearing-centred: 0.992 / 1.000
+  30 1024 | bias -0.769 deg | pistol 1st, bearing-centred: 0.887 / 0.999
+  30 1536 | bias -0.777 deg | pistol 1st, bearing-centred: 0.684 / 0.804
+  30 1920 | bias -0.761 deg | pistol 1st, bearing-centred: 0.602 / 0.645

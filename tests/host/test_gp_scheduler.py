@@ -9,7 +9,7 @@ from doomfj import world as W
 
 
 def _all_awake(k, tics, policy=W.next_cursor):
-    w = W.World(skill=gd.SK_HARD, k_heavy=k, cursor_policy=policy)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD, k_heavy=k, cursor_policy=policy)
     w.wake_all()
     return w, [w.tic({}) for _ in range(tics)]
 
@@ -29,7 +29,7 @@ def test_the_bound_holds_with_monsters_awake_by_play_too():
     """Not only the wake_all stress state: every door stands open and the player fires, so the
     shot carries through the level and monsters wake by SOUND (and some by sight) the way play
     wakes them -- more of them than K, so the cap has to bind."""
-    w = W.World(skill=gd.SK_HARD)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     for d, si in enumerate(w.door_order):
         w.ws.d_state[d] = w.door_nstates[si] - 1
     w._door_phase_scene()
@@ -81,7 +81,7 @@ def test_the_fairness_check_catches_a_cursor_that_never_moves():
 def test_cheap_actions_never_take_a_slot():
     """A_Look runs in the monster's own slot: with K = 0 the monsters that hear a shot still wake,
     and none of them ever takes a heavy action."""
-    w = W.World(skill=gd.SK_HARD, k_heavy=0)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD, k_heavy=0)
     evs = w.run([{"fire": True}] * 30)
     assert sum(len(ev.wakes) for ev in evs) > 0
     assert sum(len(ev.heavy) for ev in evs) == 0

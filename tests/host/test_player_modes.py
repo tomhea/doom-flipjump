@@ -33,7 +33,7 @@ def _script(seed=4, n=400):
 
 
 def _world(player):
-    w = World(skill=gd.SK_HARD, monsters="idle", player=player)
+    w = World(monster_tics=1, skill=gd.SK_HARD, monsters="idle", player=player)
     ws = w.ws
     ws.p_owned[gd.WP_SHOTGUN] = 1                             # every E1M1 weapon reachable from the keys
     ws.p_owned[gd.WP_CHAINSAW] = 1
@@ -109,7 +109,7 @@ MON_FIELDS = ("mon_health", "mon_state", "mon_tics", "mon_rng", "mon_shootable",
 def _facing(player, kind):
     """a world whose player stands 110 units from a monster of `kind`, facing it -- the first (monster, side) whose
     centre column the geometric aim names that monster in -- with the shotgun"""
-    w = World(skill=gd.SK_HARD, monsters="idle", player=player)
+    w = World(monster_tics=1, skill=gd.SK_HARD, monsters="idle", player=player)
     ws = w.ws
     for m in (i for i in range(w.layout.nmon) if ws.mon_active[i] and w.mon_info[i].name == kind):
         for dx, dy, ang in ((-110, 0, 0), (110, 0, 0x80000000), (0, -110, 0x40000000), (0, 110, 0xC0000000)):
@@ -180,8 +180,11 @@ HIT_FIELDS = MON_FIELDS + ("mon_ambush", "mon_movedir", "mon_facing", "mon_x", "
                            "mon_justattacked", "mon_active", "snd_alert")
 
 
-def _noisy(seed=3, n=600):
-    """walk about the start, turning, the trigger held for stretches"""
+def _noisy(seed=5, n=600):
+    """walk about the start, turning, the trigger held for stretches. M7 P6+P7: the seed was 3; with the new turn
+    (reference_model.turn_step: 320 << 16 on a hold's first frame, 960 << 16 after) seeds 3 and 4 walk where their ~50
+    shots wake no monster by sound, and seed 5 is the first that does (8 sound wakes, 51 noises; "shoot" parts at tic
+    306)"""
     rng = random.Random(seed)
     out, fire = [], False
     for t in range(n):
@@ -208,8 +211,8 @@ def _full_left_hit(ev, w) -> bool:
 def _hit_run(mode, keys):
     """(the first tic `mode` parts from "full" -- on the monster cells, and for "hit" the alerts too -- or None; the
     tics compared; the full model's sound wakes and noise tics over them)"""
-    a = World(skill=gd.SK_HARD, monsters="decide", player=mode)
-    b = World(skill=gd.SK_HARD, monsters="decide", player="full")
+    a = World(monster_tics=1, skill=gd.SK_HARD, monsters="decide", player=mode)
+    b = World(monster_tics=1, skill=gd.SK_HARD, monsters="decide", player="full")
     fields = HIT_FIELDS if mode == "hit" else tuple(f for f in HIT_FIELDS if f != "snd_alert")
     wakes = noise = 0
     for t, k in enumerate(keys):
@@ -261,7 +264,7 @@ def _fx_snap(w):
 
 
 def _fx_world(mode, kind, bleed=True):
-    w = World(skill=gd.SK_HARD, monsters="full", player=mode)
+    w = World(monster_tics=1, skill=gd.SK_HARD, monsters="full", player=mode)
     if not bleed:
         w._p_fx = False                                       # the control: "fx" without the blood
     m, (x, y, ang) = FX_SETUPS[kind]
@@ -333,6 +336,34 @@ def test_mode_helpers_are_one_rule():
     assert NOISE_PLAYER_MODES == tuple(m for m in PLAYER_MODES if player_hears(m)) == ("hit", "fx", "full")
     assert tuple(m for m in PLAYER_MODES if player_bleeds(m)) == ("fx", "full")
     for m in PLAYER_MODES:
-        w = World(skill=gd.SK_HARD, monsters="idle", player=m)
+        w = World(monster_tics=1, skill=gd.SK_HARD, monsters="idle", player=m)
         assert (w._p_resolve, w._p_noise, w._p_fx, w._p_full) == (
             player_resolves(m), player_hears(m), player_bleeds(m), m == "full"), m
+
+
+def test_p67_mode_helpers_are_one_rule():
+    """M7 P6 / P7 (docs/gp-p67-interface.md 2): world.player_loots / player_mortal -- "full" alone (the fallback "loot"
+    mode would join player_loots only) -- and the game tier's target: the gates' MonsterPhase reads them, "full" is
+    the combat model's own mode (`_p_full`)"""
+    from doomfj.world import PLAYER_MODES, player_loots, player_mortal
+    assert tuple(m for m in PLAYER_MODES if player_loots(m)) == ("full",)
+    assert tuple(m for m in PLAYER_MODES if player_mortal(m)) == ("full",)
+    for m in PLAYER_MODES:
+        assert World(skill=gd.SK_HARD, monsters="idle", player=m)._p_full == player_loots(m), m
+
+
+def test_fx_gates_keep_step_sim():
+    """M7 P6: before "full" a gate's `MonsterPhase.move` IS step_sim (strafe on, the card's touch at each candidate)
+    -- the fx binaries' player; in "full" it is the model's own move (a pickup, a block)"""
+    from doomfj.monsters import MonsterPhase
+    from doomfj.reference_model import SimState
+    for mode, picks in (("fx", 0), ("full", 4)):
+        ph = MonsterPhase(mode="full", player=mode)
+        w = ph.world
+        st = (-160 << 16, 112 << 16, 0x40000000)
+        for _ in range(30):
+            ref = w.rm.step_sim(SimState(*st, w.mapname), {"forward": True}, scene=w.scene_c, strafe=True)
+            st = ph.move({"forward": True}, *st)
+            if mode == "fx":
+                assert SimState(*st, w.mapname) == ref
+        assert sum(w.ws.pickup_taken) - sum(World(monsters="idle").ws.pickup_taken) == picks, mode

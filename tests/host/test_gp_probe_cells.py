@@ -122,7 +122,14 @@ def test_only_the_skill_menu_is_optional(tmp_path):
                                  # M7 P5: hurtcode's player cells and the palette, the fireball pool, the blood pool
                                  "p_hp", "p_ar", "p_at", "p_dc", "p_dead", "pal_cur",
                                  "pj_act", "pj_x", "pj_y", "pj_mx", "pj_my", "pj_st", "pj_ti",
-                                 "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx"}
+                                 "fx_act", "fx_x", "fx_y", "fx_st", "fx_ti", "rng_fx",
+                                 # M7 P6 / P7: the loot, the barrels, the drops, the game's cells; P3.2b's bar_solid
+                                 "p_bc", "p_str", "p_bp", "am_misl", "am_cell", "bar_st", "bar_ti", "bar_hp", "rng_wd",
+                                 "mdrop", "dr_live", "lvtime", "g_rs", "g_skill", "bar_solid",
+                                 "p_atk", "pj_src"}                       # M7 P7: the killer, the shooters
+    for one in ("p_bc", "rng_wd", "dr_live", "g_skill", "p_atk"):   # M7 P6 / P7: each group whole or not at all
+        with pytest.raises(KeyError, match="come together"):
+            _table(tmp_path, drop=(one,))
     for one in ("wp_rdy", "fl_frm"):                       # M7 P4.1: the weapon's fifteen come together
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))

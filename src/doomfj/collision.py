@@ -316,7 +316,7 @@ def _xor_lines(consts) -> list:
 
 
 def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: str = "cc",
-                       lowfloor=None, things=None) -> tuple:
+                       lowfloor=None, things=None, thing_test=None) -> tuple:
     """`(fj text, root label)`: the player's cell routine for `lists` (`cell_lists`) over `rows`
     (`line_rows`) -- the tree, a stub per distinct list, a stub per listed line, and the ONE
     shared `sim.line_test`.
@@ -345,7 +345,11 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
 
     `things` (M7 P3.2b): the static blockers `[(x, y, radius, presence cell or None)]`; a list entry -(k+1) is
     thing k, whose stub xors its box into ca_tx / ca_ty / ca_tr around the shared `sim.thing_test` -- skipped while
-    its presence cell reads 0 (a barrel not on this skill, or destroyed; a decoration of another skill)."""
+    its presence cell reads 0 (a barrel not on this skill, or destroyed; a decoration of another skill).
+
+    `thing_test` (M7 P6, doomfj.lootcode.THING_TEST16): the lines of the shared static-blocker test in place of
+    `sim.thing_test` (whose whole-unit compare is exact for a monster standing on whole units only) -- the PLAYER's
+    cells test his 16.16 box. Without it the text is P3.2b's."""
     doors = doors or {}
     movers = movers or {}
     L = f"{pfx}_{tag}"
@@ -450,7 +454,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
             out += [f"    hex.if0 1, {flag}, {L}_t{k}_out"]
         out += xors + [f"    stl.fcall {L}_ttest, cc_tret"] + xors + [f"  {L}_t{k}_out:", "    stl.fret cc_lret"]
     if used_t:
-        out += [f"{L}_ttest:", "    sim.thing_test", "    stl.fret cc_tret"]
+        out += [f"{L}_ttest:", *(thing_test or ["    sim.thing_test"]), "    stl.fret cc_tret"]
     test = "sim.line_test 1, ca_lf, cp_drop" if lowfloor is not None else "sim.line_test 0, 0, 0"
     out += [f"{L}_test:", f"    {test}", "    stl.fret cc_tret", f"{L}_end:"]
     return "\n".join(out) + "\n", root
@@ -508,7 +512,8 @@ COLLISION_STATE_DECLS = [
 
 
 def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, height: int,
-                              maxstep: int, pickup=None, after_accept=()) -> list:
+                              maxstep: int, pickup=None, after_accept=(), block=None,
+                              skip_still: bool = False) -> list:
     """M14-d — the blocked-move policy, in the emitted program. `root`: the cell routine's entry
     (`collision_cells_fj`).
 
@@ -526,12 +531,27 @@ def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, heigh
     M7 P2a.1: `pickup(tag)` gives the lines that touch the pickups at a TRIED candidate (`cpx`,
     `cpy`), before its P_TryMove -- the model touches at every candidate, taken or refused; and every
     ACCEPTED candidate runs `after_accept` (the walk-over triggers) once, from one shared block, with
-    the tic's start in `cm_ox` / `cm_oy`."""
+    the tic's start in `cm_ox` / `cm_oy`.
+
+    M7 P6 (doomfj.lootcode): `block(tag, nxt)` gives the lines that refuse a candidate on a solid THING (a monster:
+    `pb_mon`) -- after its pickups, before its P_TryMove, the model's `_player_move` order; `skip_still` skips a
+    candidate the model skips (`combat._player_move`: a candidate equal to where the player stands -- no touch, no
+    try; with pickups, a touch at the tic-start position is a pickup the model never makes). The compare is of the
+    whole 8-nibble cells, so it is the model's like-for-like (signed) one at every coordinate. (The model used to
+    compare a masked candidate with the signed position, which skipped nothing at a negative coordinate; package B
+    copied that quirk until the coordinator's decision fixed the model, M7 P6+P7.) Without them the text is P5's."""
 
     def candidate(tag, xexpr, yexpr, nxt):
+        still = []
+        if skip_still:
+            still = [f"    hex.cmp 8, cpx, viewx, {tag}go, {tag}sx, {tag}go", f"  {tag}sx:",
+                     f"    hex.cmp 8, cpy, viewy, {tag}go, {tag}s0, {tag}go", f"  {tag}s0:",
+                     f"    ;{nxt}", f"  {tag}go:"]
         return [
             *xexpr, *yexpr,
+            *still,
             *(pickup(tag) if pickup else []),
+            *(block(tag, nxt) if block else []),
             # the seed: locate the candidate's subsector, then run the full P_TryMove
             *_int_part_lines("vx", "cpx", f"{tag}vxs", f"{tag}vxd"),
             *_int_part_lines("vy", "cpy", f"{tag}vys", f"{tag}vyd"),

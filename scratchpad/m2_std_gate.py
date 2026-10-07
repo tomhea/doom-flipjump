@@ -20,6 +20,12 @@ THE ROUTE IS PLANNED BY THE ORACLE, NOT BY HAND. The standalone player starts at
 spawn -- 1,070 units from the nearest door -- so the script has to WALK there. A beam search over
 the sim (`--plan` prints it) finds a key sequence that ends inside a door's use box; since the
 oracle is the same sim the program runs, a route that works in Python is a route that works in fj.
+M7 P6+P7: "the sim" is now THE WHOLE ORACLE FRAME (`world_frame`, which the comparison loop calls
+too) -- in the full player mode solid things refuse the player and monsters wake, chase, shoot and
+block, so a walls-only plan walked into a zombieman in door 10's use box and never opened it. The
+(skill, door) is the first, boot skill first, whose ground no monster of that skill stands on and
+whose mirror walk opens the door, crosses it and keeps it open into NEW GAME with the player alive;
+at another skill than the boot one the walk begins with a NEW GAME picked on the skill screen.
 
 MENU FRAMES ARE NOT JUDGED HERE. The binary boots into the menu and this gate presses enter to
 leave it; `m3_gate` is what certifies the menu picture, and duplicating it would be two mirrors of
@@ -166,8 +172,11 @@ def seg_cross(p, q, a, b):
 NAV_CELL = 16
 
 
-def walkable_cells(rm, scene, sx, sy, goal_pred=None, cell=NAV_CELL, cap=400000):
-    """BFS over grid cells; adjacency is `try_move`. Returns (path_or_None, visited_set)."""
+def walkable_cells(rm, scene, sx, sy, goal_pred=None, cell=NAV_CELL, cap=400000, blocked=None):
+    """BFS over grid cells; adjacency is `try_move`. Returns (path_or_None, visited_set).
+    `blocked(x, y)` (M7 P6+P7): a cell centre the player's box may not stand on -- the gate passes the
+    MODEL's own solid-thing refusal (`World._solid_thing_at`) for the things that never move (decor,
+    barrels), since in the full player mode those refuse the step exactly as a wall does."""
     import collections
     start = (int(sx) // cell, int(sy) // cell)
     seen = {start}
@@ -187,18 +196,24 @@ def walkable_cells(rm, scene, sx, sy, goal_pred=None, cell=NAV_CELL, cap=400000)
             n += 1
             if not rm.try_move(scene, wx << 16, wy << 16, nx << 16, ny << 16):
                 continue
+            if blocked is not None and blocked(nx, ny):
+                continue
             seen.add(nc)
             q.append((nc, path + [nc]))
     return None, seen
 
 
 def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500, step=None,
-                  hold=None):
+                  hold=None, blocked=None, fresh=None):
     """Grid-BFS a walkable path to `goal`, then steer along it. Same contract as `plan_to`.
     `step(st, kd)` (M7 P2b): the frame the steering runs -- a stateful stepper carrying doors and
     movers (a lift lowers under a route that crosses its WR line). `hold(st)`: while true the
     steerer stands still -- on a lowered lift it rides the whole cycle instead of walking off into
-    the level below. Default: the static `rm.step_sim` on `scene`."""
+    the level below. Default: the static `rm.step_sim` on `scene`.
+    `blocked(x, y)` (M7 P6+P7): `walkable_cells`' -- the BFS and the waypoint simplification keep
+    off it. `fresh()` (M7 P6+P7): a stateful stepper is CONSUMED by a drive, so a second attempt
+    (the unsimplified path, below) must not start from the first attempt's end state -- with `fresh`
+    every drive takes a new stepper (and its `.hold`) from the same starting world."""
     import math
     gx, gy = goal
     hit = accept or (lambda st: ((st.x >> 16) - gx) ** 2 + ((st.y >> 16) - gy) ** 2 <= radius ** 2)
@@ -209,12 +224,16 @@ def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500, st
     tol = max(float(radius), NAV_CELL * 1.5)
     near_goal = lambda wx, wy: (wx - gx) ** 2 + (wy - gy) ** 2 <= tol ** 2      # noqa: E731
     path, _seen = walkable_cells(rm, scene, _signed(start.x, 32) >> 16,
-                                 _signed(start.y, 32) >> 16, near_goal)
+                                 _signed(start.y, 32) >> 16, near_goal, blocked=blocked)
     if not path:
         return None
 
     def drive(waypoints):
         """Turn toward each waypoint, then walk to it. None if it runs out of tics."""
+        nonlocal step, hold
+        if fresh is not None:
+            step = fresh()
+            hold = step.hold
         st, script, turn = start, [], ANGLE_TURN
         for (wx, wy) in list(waypoints[1:]) + [(gx, gy)]:
             for _ in range(max_tics):
@@ -237,7 +256,7 @@ def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500, st
                     kd["turn_left" if diff > 0 else "turn_right"] = True
                 else:
                     kd["forward"] = True
-                st = step(st, kd) if step is not None else rm.step_sim(st, kd, scene=scene)
+                st = step(st, kd) if step is not None else rm.step_sim(st, kd, scene=scene, tap=True)
                 script.append(kd)
                 if hit(st):
                     return script
@@ -252,7 +271,7 @@ def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500, st
         for k in range(n + 1):
             mxp, myp = a[0] + (bpt[0] - a[0]) * k / n, a[1] + (bpt[1] - a[1]) * k / n
             ok, _f, _c = rm.check_position(scene, int(mxp) << 16, int(myp) << 16)
-            if not ok:
+            if not ok or (blocked is not None and blocked(int(mxp), int(myp))):
                 return False
         return True
 
@@ -296,7 +315,7 @@ def plan_to(rm, scene, start, goal, radius, maxf=40, width=24, accept=None):
         for _d, st, path in beam:
             for keys in moves:
                 kd = {k: (k in keys) for k in KEY_NAMES}
-                ns = rm.step_sim(st, kd, scene=scene)
+                ns = rm.step_sim(st, kd, scene=scene, tap=True)
                 if arrived(ns):
                     return path + [kd]
                 nxt.append((dist(ns), ns, path + [kd]))
@@ -338,7 +357,7 @@ def plan_route(rm, mw, scene, boxes, target, maxf=90, width=24):
         for _d, st, path in beam:
             for keys in moves:
                 kd = {k: (k in keys) for k in KEY_NAMES}
-                ns = rm.step_sim(st, kd, scene=scene)
+                ns = rm.step_sim(st, kd, scene=scene, tap=True)
                 if inbox(ns):
                     return path + [kd]
                 nxt.append((dist(ns), ns, path + [kd]))
@@ -517,15 +536,27 @@ def main():
     mp = MoverPhase(secs, lds, sds, mw.vertexes(args.map))
     exits = exit_boxes(lds, mw.vertexes(args.map))
 
-    def tic(dps, st, kd, used, mps=None, pusedn=1, others=()):
+    def tic(dps, st, kd, used, mps=None, pusedn=1, others=(), mph=None):
         """the binary's frame: the door tic (`used`: use held), the lifts, the use press, then the
         player's move against the doors not yet passable over the movers' floors -> (door phase
-        state, player state) -- and with `mps` given, (door, player, mover phase, pusedn)"""
+        state, player state) -- and with `mps` given, (door, player, mover phase, pusedn).
+        M7 P6 / P7: with `mph` (the mirror -- since P6+P7 the planner steps the mirror too, `world_frame`;
+        without one it steps step_sim, no things, which no caller here does any more) the
+        player is the MODEL's: the tic-start dead latch guards the door press and contact and the use lines (and
+        leaves pusedn alone); once he loots, the world takes this frame's doors and movers, nukage runs, then the
+        weapon (P4.2a: before the move, from the frame's starting pose), then `MonsterPhase.move` -- pickups (the
+        card is the world's), blocking by things; before "full", `move`'s step_sim with the card's touch"""
+        from doomfj.reference_model import SimState as _SS
+        from doomfj.world import player_loots, player_mortal
         with_movers = mps is not None
         mps = mp.initial() if mps is None else mps
-        dps = dp.tic(dps, used, st.x, st.y, others=others)     # M7 P3.2b: reversal on the monsters too
+        dead = mph.dead_latch() if (mph is not None and player_mortal(mph.world.player)) else 0
+        dps = dp.tic(dps, used and not dead, st.x, st.y, others=others,   # M7 P3.2b: reversal on the monsters too
+                     player=not dead)                                     # M7 P7: a dead player holds no door
         mps = mp.tic(mps)
-        if kd.get("use"):
+        if dead:
+            pass                                       # M7 P7: no use line; the death think leaves pusedn alone
+        elif kd.get("use"):
             if not pusedn:
                 assert not any(in_use_box_fixed(b, st.x, st.y) for b in exits), "a press at the exit"
                 mps = mp.use_press(mps, st.x, st.y)
@@ -538,119 +569,297 @@ def main():
 
         def touch(cx, cy, z):
             cur[0] = dp.touch(cur[0], cx, cy, z)
-        new = rm.step_sim(st, kd, strafe=True, scene=build_scene(mw, mw, args.map, {**open_h, **mp.heights(mps)},
-                                                    blk), touch=touch)
+        scene = build_scene(mw, mw, args.map, {**open_h, **mp.heights(mps)}, blk)
+        if mph is None:                                # no phase, no things (no caller since P6+P7)
+            new = rm.step_sim(st, kd, strafe=True, scene=scene, touch=touch)
+        elif player_loots(mph.world.player):
+            mph.sync(dps[0], mps[0], mps[2])
+            mph.nukage(st.x, st.y, st.angle, dead=dead)
+            mph.weapon(kd, st.x, st.y, st.angle, dead=dead)
+            new = _SS(*mph.move(kd, st.x, st.y, st.angle, dead=dead), st.level)
+            cur[0] = (cur[0][0], cur[0][1], cur[0][2], mph.card())
+        else:
+            mph.weapon(kd, st.x, st.y, st.angle)
+            mph.touch = touch
+            new = _SS(*mph.move(kd, st.x, st.y, st.angle, scene=scene), st.level)
         dps = dp.after_move(cur[0], (st.x, st.y), (new.x, new.y))
         mps = mp.after_move(mps, (st.x, st.y), (new.x, new.y))
         return (dps, new, mps, pusedn) if with_movers else (dps, new)
 
-    # the door to walk to: the nearest one to the spawn, by the same measure the planner minimises
+    # ── M7 P6+P7: THE PLAN IS THE MIRROR'S ─────────────────────────────────────────────────────────
+    # Before P6 the player walked through every thing and nothing in the world acted on him, so a route
+    # planned on `step_sim` (walls only) was the route the binary walked. In the "full" player mode the
+    # player is REFUSED by solid things (monsters, barrels, solid decor), monsters wake by the rendered
+    # picture's seen marks, chase, shoot and block, and the trigger laid over the walk makes noise. A
+    # step_sim route then ends wherever a monster stood in the corridor: MEASURED on blocked49, every one
+    # of its 385 frames byte- and state-exact and door 10 never touched (the use pressed 11 units from a
+    # zombieman standing in the use box, at the hard boot skill) -- a vacuous PASS-shaped FAIL.
+    #
+    # So the route is planned by stepping THE ORACLE ITSELF: `world_frame` is the main loop's whole world
+    # frame (the doors, the movers, the model's move with its pickups and its blocking, the monsters, the
+    # render whose seen marks wake them and whose window aims the shots), and the main loop below calls
+    # the same function -- a plan that opens the door here opens it there, by construction, and the
+    # byte- and state-exact comparison is still what judges the binary.
+    from doomfj.monsters import MonsterPhase, MonsterViews
+    from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+    from doomfj.world import player_loots
+    # M7 P2a.1: the blue card vanishes once taken (its visibility slot)
+    card_di = [di for di, t in enumerate(drawable_things(rm, mw.things(args.map), art)[0])
+               if t.type == 5]
+    # M7 P1.5: the oracle hides what the skill being played does not spawn -- the set the emitter baked
+    # its lists and flags from for the boot skill, the skill's own after a NEW GAME
+    _hidden = {}
+
+    def hidden_of(skill):
+        if skill not in _hidden:
+            _hidden[skill] = skill_hidden(rm, mw.things(args.map), art, skill)
+        return _hidden[skill]
+
+    def new_mirror(skill):
+        """a fresh model world at `skill`'s level start: (the monster phase, its views)"""
+        m = MonsterPhase(mw, args.map, skill, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
+        return m, MonsterViews(rm, mw, args.map, art, m.world)
+
+    def world_frame(mir, skill, dps, state, mps, pusedn, kd, used):
+        """ONE world frame of the oracle, in the binary's order -> (dps, state, mps, pusedn, picture)"""
+        mph, mviews = mir
+        # M7 P4.1: the player's weapon, every world frame -- P4.2a: BEFORE the move, from the frame's starting
+        # pose (the binary's weapon runs before its player sim: a shot's target and a melee's reach are measured
+        # there). The door tic runs BEFORE the weapon: this frame's shots have not yet killed what a closing door
+        # reverses on; the weapon runs inside `tic` (after the use press, before the move: M7 P6 puts nukage
+        # before it, the model's order)
+        _boxes = mph.boxes()
+        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=_boxes, mph=mph)
+        dstates = dps[0]
+        # M7 P3.1: the monsters after the player; P3.2b: inside the doors and lifts (their presses -> next frame)
+        dps, mps = mph.frame(dps, mps, state.x, state.y, state.angle)
+        _loot = player_loots(mph.world.player)
+        rsc = build_scene(mw, mw, args.map,
+                          {**heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}),
+                           **mp.heights(mps)})
+        want = screen.frame(bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
+                                          thing_hidden=set(hidden_of(skill)) | (set(card_di) if dps[3] and not _loot
+                                                                                else set()),
+                                          thing_removed=mviews.hidden(mph) if _loot else None,          # M7 P6
+                                          barrel_views=mviews.barrel_views(mph) if _loot else None,
+                                          thing_views=mviews(mph, state.x, state.y),
+                                          thing_positions=mviews.positions(mph),
+                                          seen_out=(_seen := set()), aim_things=mviews.aim_things(mph),
+                                          aim_out=(_aim := [0] * 17), mobiles=mph.mobiles(),   # M7 P5
+                                          **GAME_RENDER_KW)),
+                            card=bool(dps[3]), **mph.screen_kw())     # M7 P4.1: the weapon's frame, the bar
+        mph.set_aim(_aim)                               # M7 P4.2a: this picture's window -> the next frame's shots
+        mph.set_seen(mviews.slots_of(_seen))            # M7 P3.2a: this picture's seen -> the next tic
+        return dps, state, mps, pusedn, want
+
     sp = spawn_state(mw, args.map)
-    # ⚠ NEAREST REACHABLE, not nearest. Straight-line nearest picks door 48, whose use box sits
-    # 229 units beyond anything walkable from the spawn with the doors shut; the old beam only
-    # "reached" it by tunnelling through linedefs 534 and 571. Reachability is decided by the same
-    # try_move the program runs, so this cannot select an impossible target again.
-    _reach_scene = build_scene(mw, mw, args.map)
-    _, _cells = walkable_cells(rm, _reach_scene, _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16)
-    def _walkable_door(si):
-        x0, y0, x1, y1 = boxes[si]
-        return any(x0 <= wx <= x1 and y0 <= wy <= y1
-                   for wx, wy in ((cx * NAV_CELL + NAV_CELL // 2, cy * NAV_CELL + NAV_CELL // 2)
-                                  for cx, cy in _cells))
-    # M7 P2a.1: a door the player can open with no card, by use (the walk-over doors have no box)
-    _cands = [si for si in order if si in boxes and dp.kinds[si] in ("plain", "blaze")
-              and _walkable_door(si)]
-    assert _cands, ("no door's use box is reachable from the spawn -- with %d walkable cells, the "
-                    "gate cannot test a door in this tier" % len(_cells))
-    target = min(_cands, key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - (sp.x >> 16)) ** 2
-                 + ((boxes[si][1] + boxes[si][3]) // 2 - (sp.y >> 16)) ** 2)
+
+    def mirror_stepper(skill, prefix=(), trig=None):
+        """M7 P6+P7: `world_frame` as a stateful step(st, kd), from `skill`'s level start (the NEW GAME the
+        walk begins with) with `prefix` frames already played. `trig`: {route frame: key names} laid over the
+        frames as they are stepped -- the trigger is part of the walk (its noise and its shots are part of
+        what the monsters do), so the plan must hear it as the replay does. `.state`: the doors, movers,
+        pusedn, frames stepped, frames the player was dead, the pose, and the track (every pose's map units). M7 P2b `.hold(st)`: on a lift that is
+        not at its top, ride it."""
+        mir = new_mirror(skill)
+        cur = {"d": dp.initial(), "m": mp.initial(), "u": 1, "n": 0, "dead": 0, "st": sp,
+               "trk": [(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16)]}
+
+        def step(st, kd):
+            for name in (trig or {}).get(cur["n"], ()):
+                kd[name] = True
+            cur["d"], st2, cur["m"], cur["u"], _pic = world_frame(mir, skill, cur["d"], st, cur["m"], cur["u"],
+                                                                  kd, bool(kd.get("use")))
+            cur["n"] += 1
+            cur["dead"] += bool(mir[0].world.ws.p_dead)
+            cur["st"] = st2
+            cur["trk"].append((_signed(st2.x, 32) >> 16, _signed(st2.y, 32) >> 16))
+            return st2
+
+        def hold(st):
+            ss = cmap.subsectors[rm.point_in_subsector(cmap, _signed(st.x, 32) >> 16,
+                                                       _signed(st.y, 32) >> 16)]
+            ld_ = lds[cmap.segs[ss.firstseg].linedef]
+            sec_ = sds[ld_.front if cmap.segs[ss.firstseg].side == 0 else ld_.back].sector
+            return sec_ in mp.order and cur["m"][0][mp.order.index(sec_)][0] != 0
+        step.hold, step.state, step.mirror = hold, cur, mir
+        for kd in prefix:
+            step(cur["st"], dict(kd))
+        return step
+
+    # M7 P4.1: THE TRIGGER, laid over the first walk (it moves nobody): the pistol held (a shot, the flash,
+    # refire), tapped, the fist on key 1 and a punch held, the pistol back on key 2 -- the weapon's states, the
+    # flash's overlay and the bar's ammo, end to end. NEW GAME (below) must put them back at the level start.
+    # M7 P6+P7: laid DURING the plan (mirror_stepper's `trig`), since the shots are heard.
+    trig = {}
+    for f in range(4, 22):
+        trig.setdefault(f, set()).add("fire")
+    trig.setdefault(26, set()).add("fire")
+    trig.setdefault(30, set()).add("w1")
+    for f in range(48, 60):
+        trig.setdefault(f, set()).add("fire")
+    trig.setdefault(64, set()).add("w2")
 
     # ⚠ `mw, mw` -- the MAP wad as the asset wad, which is what m3_gate/m5_gate/m2_r4_gate all do
     # and what the emitter bakes from. Passing the real art wad here renders a different picture
     # and cost this gate one 2.1-billion-op run that failed on frame 2 with 400 px, nowhere near a
     # door. The sprites still come from `art`, via render_wall_frame's own `sprite_wad`.
     walk_scene = build_scene(mw, mw, args.map)           # doors shut: what the walk really sees
-
-    def stepper(dps, mps, u):
-        """M7 P2b: the binary's whole frame as a stateful step(st, kd) from a given world state --
-        the lift the route crosses (98: the only way out of the start room) goes down under the
-        player, who then walks against its rim until it is back up"""
-        cur = {"d": dps, "m": mps, "u": u}
-
-        def step(st, kd):
-            cur["d"], st2, cur["m"], cur["u"] = tic(cur["d"], st, kd, bool(kd.get("use")),
-                                                    cur["m"], cur["u"])
-            return st2
-        step.state = cur
-
-        def hold(st):
-            """on a lift that is not at its top: ride it (movers.MoverPhase's state)"""
-            ss = cmap.subsectors[rm.point_in_subsector(cmap, _signed(st.x, 32) >> 16,
-                                                       _signed(st.y, 32) >> 16)]
-            ld_ = lds[cmap.segs[ss.firstseg].linedef]
-            sec_ = sds[ld_.front if cmap.segs[ss.firstseg].side == 0 else ld_.back].sector
-            return sec_ in mp.order and cur["m"][0][mp.order.index(sec_)][0] != 0
-        step.hold = hold
-        return step
-
-    # THE DOORWAY, not the use box. The box is inflated by USE_RANGE and its south edge is 90 units
-    # clear of the opening, so "reach the box" put the player alongside the door and the walk-through
-    # leg then went AROUND it. Both legs aim at the gap between the door's own two line segments:
-    # `approach` a little short of it on the player's side, `beyond` a little past it on the other.
-    door_segs = [(cmap.vertexes[lds[li].v1], cmap.vertexes[lds[li].v2])
-                 for li in sorted(lines_of[target])]
-    (ax, ay), (bx, by) = door_segs[0]
-    mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
-    nx, ny = -(by - ay), (bx - ax)                       # the line's normal
-    nlen = (nx * nx + ny * ny) ** 0.5 or 1.0
-    nx, ny = nx / nlen, ny / nlen
-    sgn = -1.0 if ((sp.x >> 16) - mx) * nx + ((sp.y >> 16) - my) * ny > 0 else 1.0
-    approach = (mx - sgn * nx * 56, my - sgn * ny * 56)  # the player's side of the opening
-    beyond = (mx + sgn * nx * 88, my + sgn * ny * 88)    # through it, and out the far side
-
-    # ⚠ arriving near the approach POINT is not the same as standing where use works: the first
-    # version ended 27 units from it and 15 units OUTSIDE the use box, so the press did nothing and
-    # the door never moved. The acceptance test is the box itself.
-    # ⚠ IN THE USE BOX IS NOT AT THE DOORWAY. Door 10's box is 256x160 units and wraps a corner,
-    # so "first frame inside the box" ended the walk at (720,449) -- in the box, but around a wall
-    # from the opening, which made the walk-through leg detour 84 waypoints to x=168 and back.
-    # Require BOTH: the box (where `use` actually works) and the threshold (where walking through
-    # is one short straight leg, which matters because the door is only passable for WAIT frames).
-    _s0 = stepper(dp.initial(), mp.initial(), 1)
-    route = plan_walkable(rm, walk_scene, sp, approach, 40,
-                          accept=lambda st: in_use_box_fixed(boxes[target], st.x, st.y)
-                          and ((st.x >> 16) - approach[0]) ** 2
-                          + ((st.y >> 16) - approach[1]) ** 2 <= 72 ** 2,
-                          step=_s0, hold=_s0.hold)
-    assert route, "no route from the spawn to door %d's threshold at %s" % (target, approach)
-
-    # menu frames, then the walk, then the press, then stand and watch the door work
-    # use, stand while it opens, then WALK THROUGH IT. Standing still would prove the render half
-    # only -- the door's passability is a separate claim with its own bit, and the only way to test
-    # that bit in this tier is to try to walk through the doorway.
     press = [{"use": True}, {"use": True}]
-    if not args.open_wait:
-        from doomfj.doors import SPEED as _DSPEED
-        args.open_wait = _DSPEED * (nstates[target] - 1) + 2
+    # --open-wait 0 = derive it per target from doors.SPEED and its stop count (`attempt`, below)
+    from doomfj.doors import SPEED as _DSPEED
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+
+    def geometry(target):
+        """THE DOORWAY, not the use box. The box is inflated by USE_RANGE and its south edge is 90 units
+        clear of the opening, so "reach the box" put the player alongside the door and the walk-through
+        leg then went AROUND it. Both legs aim at the gap between the door's own two line segments:
+        `approach` a little short of it on the player's side, `beyond` a little past it on the other.
+        -> (door_segs, approach, beyond)"""
+        segs = [(cmap.vertexes[lds[li].v1], cmap.vertexes[lds[li].v2])
+                for li in sorted(lines_of[target])]
+        (ax, ay), (bx, by) = segs[0]
+        mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
+        nx, ny = -(by - ay), (bx - ax)                   # the line's normal
+        nlen = (nx * nx + ny * ny) ** 0.5 or 1.0
+        nx, ny = nx / nlen, ny / nlen
+        sgn = -1.0 if (spx - mx) * nx + (spy - my) * ny > 0 else 1.0
+        return (segs, (mx - sgn * nx * 56, my - sgn * ny * 56),   # the player's side of the opening
+                (mx + sgn * nx * 88, my + sgn * ny * 88))         # through it, and out the far side
+
+    # ── THE DOOR AND THE SKILL: the first whose ground is clear, tried in order ──────────────────────
+    # ⚠ NEAREST REACHABLE, not nearest. Straight-line nearest picks door 48, whose use box sits
+    # 229 units beyond anything walkable from the spawn with the doors shut; the old beam only
+    # "reached" it by tunnelling through linedefs 534 and 571. Reachability is decided by the same
+    # try_move the program runs, so this cannot select an impossible target again.
+    # M7 P6+P7: AND THE THINGS. A cell is walkable only where the MODEL's solid-thing refusal
+    # (`World._solid_thing_at`, PIT_CheckThing) lets the player's box stand -- the decor and barrels,
+    # which never move, as the BFS's `blocked`; and a (skill, door) is skipped outright when a monster that
+    # skill spawns stands in the door's use box, within CLEAR units of the approach, the doorway or the
+    # point beyond, or within CLEAR of the walked path: a monster there wakes on the first picture that
+    # shows it and the walk becomes a fight. The skills are tried boot skill first (the walk then begins
+    # with esc, as before P6), then the others in the skill screen's order (the walk begins with a NEW GAME
+    # picked on the skill screen). The plan in the mirror is the final word: a candidate whose mirror walk
+    # does not open, cross and keep the door open into NEW GAME, or in which the player dies, is skipped.
+    CLEAR = 128
+    PATH_CLEAR = 40
+
+    def ground(skill):
+        """`skill`'s level start in the model: (the static blocker test, the monsters' positions)"""
+        w0 = new_mirror(skill)[0].world
+
+        def blocked(x, y):
+            hit = w0._solid_thing_at(int(x) << 16, int(y) << 16)
+            return hit is not None and hit[0] != "mon"
+        mons = [(w0.ws.mon_x[m], w0.ws.mon_y[m]) for m in range(w0.layout.nmon)
+                if w0.ws.mon_active[m] and w0.ws.mon_solid[m]]
+        return blocked, mons
+
+    def near(pts, mons, r):
+        return [m for m in mons for p in pts if (m[0] - p[0]) ** 2 + (m[1] - p[1]) ** 2 <= r * r]
+
+    def attempt(skill, target, blocked, mons):
+        """the whole walk planned in the mirror -> (route, through, door_segs, approach, beyond, why)"""
+        door_segs, approach, beyond = geometry(target)
+        x0, y0, x1, y1 = boxes[target]
+        mid = ((door_segs[0][0][0] + door_segs[0][1][0]) / 2.0, (door_segs[0][0][1] + door_segs[0][1][1]) / 2.0)
+        inbox = [m for m in mons if x0 <= m[0] <= x1 and y0 <= m[1] <= y1]
+        made = []
+
+        def why_not():
+            """where the last mirror walk stopped -- a failed candidate says why, not just that"""
+            if not made:
+                return ""
+            c, ws_ = made[-1].state, made[-1].mirror[0].world.ws
+            return ("(the last attempt: %d frames, ended at %s, health %d, %d dead frames)"
+                    % (c["n"], c["trk"][-1], ws_.p_health, c["dead"]))
+        if inbox or near((approach, mid, beyond), mons, CLEAR):
+            return None, None, door_segs, approach, beyond, (
+                "a monster on its ground at this skill: %s" % sorted(set(inbox + near((approach, mid, beyond),
+                                                                                       mons, CLEAR))))
+        path, _ = walkable_cells(rm, walk_scene, spx, spy,
+                                 lambda wx, wy: (wx - approach[0]) ** 2 + (wy - approach[1]) ** 2 <= 40 ** 2,
+                                 blocked=blocked)
+        if not path:
+            return None, None, door_segs, approach, beyond, "no walkable path to the approach"
+        onpath = near(path, mons, PATH_CLEAR)
+        if onpath:
+            return None, None, door_segs, approach, beyond, (
+                "a monster beside the walked path at this skill: %s" % sorted(set(onpath)))
+        # ⚠ arriving near the approach POINT is not the same as standing where use works: the first
+        # version ended 27 units from it and 15 units OUTSIDE the use box, so the press did nothing and
+        # the door never moved. The acceptance test is the box itself.
+        # ⚠ IN THE USE BOX IS NOT AT THE DOORWAY. Door 10's box is 256x160 units and wraps a corner,
+        # so "first frame inside the box" ended the walk at (720,449) -- in the box, but around a wall
+        # from the opening, which made the walk-through leg detour 84 waypoints to x=168 and back.
+        # Require BOTH: the box (where `use` actually works) and the threshold (where walking through
+        # is one short straight leg, which matters because the door is only passable for WAIT frames).
+        route = plan_walkable(rm, walk_scene, sp, approach, 40,
+                              accept=lambda st: in_use_box_fixed(boxes[target], st.x, st.y)
+                              and ((st.x >> 16) - approach[0]) ** 2
+                              + ((st.y >> 16) - approach[1]) ** 2 <= 72 ** 2,
+                              max_tics=600, blocked=blocked,
+                              fresh=lambda: made.append(mirror_stepper(skill, trig=trig)) or made[-1])
+        if not route:
+            return None, None, door_segs, approach, beyond, "the mirror walk never reached the threshold " + why_not()
+        wait = args.open_wait or _DSPEED * (nstates[target] - 1) + 2
+        s1 = mirror_stepper(skill, prefix=route + press + [{} for _ in range(wait)])
+        if s1.state["d"][0][target][0] != nstates[target] - 1:
+            return route, None, door_segs, approach, beyond, (
+                "door %d is at state %d, not open, after %d frames of waiting"
+                % (target, s1.state["d"][0][target][0], wait))
+        st1, pre = s1.state["st"], route + press + [{} for _ in range(wait)]
+        through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st1, beyond, 40,
+                                max_tics=600, blocked=blocked,
+                                fresh=lambda: made.append(mirror_stepper(skill, prefix=pre)) or made[-1])
+        if not through:
+            return route, None, door_segs, approach, beyond, "no mirror walk through the opening " + why_not()
+        s2 = s1                                          # on from the door open: the through leg, stepped
+        for kd in through:
+            s2(s2.state["st"], dict(kd))
+        trk = s2.state["trk"]
+        if not any(seg_cross(trk[i], trk[i + 1], a, b) for i in range(len(trk) - 1) for a, b in door_segs):
+            return route, through, door_segs, approach, beyond, "the mirror walk never crossed the door's segment"
+        if s2.state["d"][0][target][0] < passes[target]:
+            return route, through, door_segs, approach, beyond, (
+                "the door is at %d < its pass state %d when NEW GAME would land"
+                % (s2.state["d"][0][target][0], passes[target]))
+        if s2.state["dead"]:
+            return route, through, door_segs, approach, beyond, (
+                "the mirror's player died on %d frames" % s2.state["dead"])
+        args.open_wait = wait
+        return route, through, door_segs, approach, beyond, None
+
+    _cands_tried = []
+    picked = None
+    for skill in [BOOT_SKILL] + [s for s in SKILLS if s != BOOT_SKILL]:
+        blocked, mons = ground(skill)
+        _, _cells = walkable_cells(rm, walk_scene, spx, spy, blocked=blocked)
+
+        def _walkable_door(si):
+            x0, y0, x1, y1 = boxes[si]
+            return any(x0 <= wx <= x1 and y0 <= wy <= y1
+                       for wx, wy in ((cx * NAV_CELL + NAV_CELL // 2, cy * NAV_CELL + NAV_CELL // 2)
+                                      for cx, cy in _cells))
+        # M7 P2a.1: a door the player can open with no card, by use (the walk-over doors have no box)
+        _cands = sorted((si for si in order if si in boxes and dp.kinds[si] in ("plain", "blaze")
+                         and _walkable_door(si)),
+                        key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - spx) ** 2
+                        + ((boxes[si][1] + boxes[si][3]) // 2 - spy) ** 2)
+        for target in _cands:
+            route, through, door_segs, approach, beyond, why = attempt(skill, target, blocked, mons)
+            print("  candidate: skill %d, door %d -- %s" % (skill, target, why or "the mirror walk opens, "
+                                                             "crosses and keeps it open, no death: TAKEN"))
+            _cands_tried.append((skill, target, why))
+            if why is None:
+                picked = skill
+                break
+        if picked is not None:
+            break
+    assert picked is not None, ("no (skill, door) whose ground is clear and whose mirror walk opens it: %s"
+                                % _cands_tried)
+    walk_skill = picked
     opening = [{} for _ in range(args.open_wait)]
-
-    # PHASE C, planned rather than hard-coded: eight frames of "forward" walked the player PAST the
-    # doorway rather than through it, and the first crossing control -- a signed side test on the
-    # door's infinite line -- called that a crossing. So the walk-through is now a route to a point
-    # on the FAR SIDE of the door's own line segment, planned against the scene with the door open,
-    # and the control below tests segment-against-segment.
-    st, dps, mps, u = sp, dp.initial(), mp.initial(), 1
-    for kd in route + press + opening:
-        dps, st, mps, u = tic(dps, st, kd, bool(kd.get("use")), mps, u)
-    ds = dps[0]
-    assert ds[target][0] == nstates[target] - 1, (
-        "door %d is at state %d, not open, after %d frames of waiting"
-        % (target, ds[target][0], args.open_wait))
-
-    _s1 = stepper(dps, mps, u)
-    through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st, beyond, 40,
-                            step=_s1, hold=_s1.hold)
-    assert through, "no route through door %d's opening to %s" % (target, beyond)
 
     # ⚠ CONTROL 0 -- THE ROUTE MUST BE PHYSICALLY WALKABLE. The beam this gate used until
     # 2026-09-10 reached its target by crossing one-sided linedefs 534 and 571; the gate passed
@@ -667,9 +876,9 @@ def main():
 
     _vx = cmap.vertexes
     _tun, _cs = [], sp
-    _step0 = stepper(dp.initial(), mp.initial(), 1)          # M7 P2b: the route's own frames
+    _step0 = mirror_stepper(walk_skill)                  # M7 P6+P7: the route's own frames, in the mirror
     for _kd in route:
-        _ns = _step0(_cs, _kd)
+        _ns = _step0(_cs, dict(_kd))
         _a = (_signed(_cs.x, 32) / 65536.0, _signed(_cs.y, 32) / 65536.0)
         _b = (_signed(_ns.x, 32) / 65536.0, _signed(_ns.y, 32) / 65536.0)
         if _a != _b:
@@ -688,38 +897,46 @@ def main():
     print("  CONTROL 0: the planned route crosses no solid linedef: yes (%d frames re-simulated)"
           % len(route))
 
-    # M7 P4.1: THE TRIGGER, laid over the first walk (it moves nobody): the pistol held (a shot, the flash, refire),
-    # tapped, the fist on key 1 and a punch held, the pistol back on key 2 -- the weapon's states, the flash's
-    # overlay and the bar's ammo, end to end. NEW GAME (below) must put them back at the level start.
+    # the trigger is in the route already (laid during the plan); laid again here, idempotently, so the
+    # script says what it carries whatever the planner did
     route = [dict(kd) for kd in route]
-    trig = {}
-    for f in range(4, 22):
-        trig.setdefault(f, set()).add("fire")
-    trig.setdefault(26, set()).add("fire")
-    trig.setdefault(30, set()).add("w1")
-    for f in range(48, 60):
-        trig.setdefault(f, set()).add("fire")
-    trig.setdefault(64, set()).add("w2")
     for f, names in trig.items():
         if f < len(route):
             for n in names:
                 route[f][n] = True
-    script = [{} for _ in range(MENU_FRAMES)] + route + press + opening + through
+    # M7 P6+P7: the walk BEGINS at `lead`. At the boot skill, as before: two menu frames, esc on the
+    # first route frame. At another skill: the two menu frames, enter (the skill screen, the boot skill
+    # highlighted), up or down to the walk's skill one frame each (the skill screen clamps), and enter --
+    # NEW GAME at that skill, which is itself the first route frame (the restart, then that frame's tic).
+    _boot_i, _walk_i = SKILLS.index(BOOT_SKILL), SKILLS.index(walk_skill)
+    _moves = abs(_walk_i - _boot_i)
+    _mkey = K_FWD if _walk_i < _boot_i else K_BACK      # up / down on the skill screen (m3_gate's keys)
+    lead = MENU_FRAMES if walk_skill == BOOT_SKILL else MENU_FRAMES + 1 + _moves
+    script = [{} for _ in range(lead)] + route + press + opening + through
     # M7 P1.5 -- NEW GAME PUTS THE LEVEL BACK. Walked through while the door is still OPEN -- it has
     # started to shut, and the menu frames then hold it where it is, since they tic nothing: enter
-    # opens the menu, enter the skill screen, and enter starts the highlighted skill (the boot
-    # skill, never moved off) -- and the SAME route is walked again, then the idle. The program must
-    # be back at the level start, the player at the spawn and every door shut, so the replay
-    # retraces the first walk frame for frame and ends facing a SHUT door. The replay's first frame
-    # IS the NEW GAME frame (the restart, then that frame's tic), as the first walk's first frame is
-    # the one esc lands on. (MEASURED with --dry on E1M1: door 10 reaches 8, is at 5 when NEW GAME
-    # lands -- its pass state is 4 -- and stays 0 through the replay.)
+    # opens the menu, enter the skill screen, and enter starts the highlighted skill (the walk's
+    # skill, still highlighted: `menu_sel` persists) -- and the SAME route is walked again, then the
+    # idle. The program must be back at the level start, the player at the spawn and every door shut,
+    # so the replay retraces the first walk frame for frame and ends facing a SHUT door. The replay's
+    # first frame IS the NEW GAME frame (the restart, then that frame's tic), as the first walk's first
+    # frame is the one esc (or the first NEW GAME) lands on. (MEASURED with --dry on E1M1 before P6:
+    # door 10 reaches 8, is at 5 when NEW GAME lands -- its pass state is 4 -- and stays 0 through the
+    # replay.)
     ng_frame = len(script) + 2
     script += [{}, {}] + route + [{} for _ in range(args.idle)]
     frames = len(script)
     # esc lands on the FIRST route frame: the menu's rules run before the branch reads `mode`, so
     # that frame already renders the world and no frame is spent on the transition.
-    events = to_events(script) + menu_exit_events() + [
+    if walk_skill == BOOT_SKILL:
+        _lead_events = menu_exit_events()
+    else:
+        _lead_events = [KeyEvent(f * STANDALONE_POLLS + k, k == 0, key)
+                        for f, key in ([(MENU_FRAMES, ENTER)]
+                                       + [(MENU_FRAMES + 1 + i, _mkey) for i in range(_moves)]
+                                       + [(lead, ENTER)])
+                        for k in (0, 1)]
+    events = to_events(script) + _lead_events + [
         KeyEvent(f * STANDALONE_POLLS + k, k == 0, ENTER)
         for f in (ng_frame - 2, ng_frame - 1, ng_frame) for k in (0, 1)]
     keys_by_frame, menu_events = held_per_frame(events, frames)
@@ -727,11 +944,15 @@ def main():
     print("fjm    : %s" % args.fjm)
     print("target : door sector %d, use box %s, threshold state %d"
           % (target, boxes[target], passes[target]))
-    print("script : %d menu -> esc -> %d walk to the door -> %d use -> %d open -> %d through "
-          "-> enter, enter, enter (NEW GAME at the boot skill) -> the %d-frame walk again -> %d "
+    print("skill  : %d (the boot skill is %d)%s"
+          % (walk_skill, BOOT_SKILL, "" if walk_skill == BOOT_SKILL else
+             " -- picked on the skill screen: enter, %d x %s, enter (NEW GAME) on frame %d"
+             % (_moves, "up" if _mkey == K_FWD else "down", lead)))
+    print("script : %d menu -> %s -> %d walk to the door -> %d use -> %d open -> %d through "
+          "-> enter, enter, enter (NEW GAME at skill %d) -> the %d-frame walk again -> %d "
           "idle  (%d frames)"
-          % (MENU_FRAMES, len(route), len(press), args.open_wait, len(through), len(route),
-             args.idle, frames))
+          % (lead, "esc" if walk_skill == BOOT_SKILL else "NEW GAME", len(route), len(press),
+             args.open_wait, len(through), walk_skill, len(route), args.idle, frames))
     print("doorway: line %d %s -> approach %s, then through to %s"
           % (sorted(lines_of[target])[0], door_segs[0],
              tuple(round(v) for v in approach), tuple(round(v) for v in beyond)))
@@ -743,22 +964,25 @@ def main():
         return 0
 
     if args.dry:
+        # M7 P6+P7: the ORACLE's own world frame (`world_frame`, the main loop's), not a walls-only step
         st, dps, md, scr, sel = sp, dp.initial(), 1, 0, SKILLS.index(BOOT_SKILL)
-        mps, u = mp.initial(), 1
+        mps, u, dskill = mp.initial(), 1, BOOT_SKILL
+        dmir = new_mirror(BOOT_SKILL)
         for f in range(frames):
             kd = keys_by_frame[f]
             md, scr, sel, ng = menu_step(md, scr, sel, menu_events[f])
             if ng is not None:
-                st, dps, mps, u = sp, dp.initial(), mp.initial(), 1
+                st, dps, mps, u, dskill = sp, dp.initial(), mp.initial(), 1, SKILLS[ng]
+                dmir[0].reset(dskill)
             if md == 1:
                 continue
             inb = in_use_box_fixed(boxes[target], st.x, st.y)
-            dps, st, mps, u = tic(dps, st, kd, bool(kd.get("use")), mps, u)
+            dps, st, mps, u, _pic = world_frame(dmir, dskill, dps, st, mps, u, kd, bool(kd.get("use")))
             ds = dps[0]
-            print("  %3d %-6s (%6d,%6d) door%d=%d%s"
+            print("  %3d %-6s (%6d,%6d) door%d=%d hp %d%s"
                   % (f, "".join(n[0] for n in sorted(kd) if kd[n]) or "-",
-                     st.x >> 16, st.y >> 16, target, ds[target][0],
-                     "  IN BOX" if inb else ""))
+                     _signed(st.x, 32) >> 16, _signed(st.y, 32) >> 16, target, ds[target][0],
+                     dmir[0].world.ws.p_health, "  IN BOX" if inb else ""))
         return 0
 
     if not args.labels:
@@ -768,16 +992,16 @@ def main():
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
     import gatestate as GST
     # M7 P3.1: the idle monsters -- the model's own phase (doomfj.monsters) from the boot skill's
-    # level start, a tic per world frame after the player, reset by NEW GAME; drawn, cells read
-    from doomfj.monsters import MonsterPhase, MonsterViews
-    from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
-    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
-    mviews = MonsterViews(rm, mw, args.map, art, mph.world)
+    # level start, a tic per world frame after the player, reset by NEW GAME; drawn, cells read.
+    # M7 P6+P7: a FRESH one (`new_mirror`), not the planner's
+    mph, mviews = new_mirror(BOOT_SKILL)
     pals = []                                           # M7 P5: the palette each present showed
+    deaths = 0                                          # M7 P7: the frames the mirror's player was dead
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
                                             len(order), len(dp.triggers), len(mp.order),
                                             nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
-                                            palettes_out=pals)
+                                            palettes_out=pals,
+                                            nthvis=mviews.nvis if player_loots(PLAYER_MODE) else 0)   # M7 P6
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")
@@ -795,11 +1019,10 @@ def main():
     # the binary boots into the MAIN menu with the boot skill highlighted
     mode, scr, sel = 1, 0, SKILLS.index(BOOT_SKILL)
     # M7 P1.5: the game tier boots at BOOT_SKILL's level start, so the oracle hides what that
-    # skill does not spawn -- the one set the emitter baked its lists and flags from
-    hidden = skill_hidden(rm, mw.things(args.map), art, BOOT_SKILL)
-    # M7 P2a.1: the blue card vanishes once taken (its visibility slot)
-    card_di = [di for di, t in enumerate(drawable_things(rm, mw.things(args.map), art)[0])
-               if t.type == 5]
+    # skill does not spawn -- the one set the emitter baked its lists and flags from; M7 P6+P7: a NEW
+    # GAME then plays its own skill's (`hidden_of`)
+    skill = BOOT_SKILL
+    hidden = hidden_of(skill)
     ok, menu_pics, in_box_when_pressed = True, {}, False
     seen, track, path = set(), [], {}
     first_move = None
@@ -811,17 +1034,23 @@ def main():
         mode, scr, sel, ng = menu_step(mode, scr, sel, menu_events[f])
         if ng is not None:
             # NEW GAME: the level start of the chosen skill, then this frame's tic (below)
-            assert SKILLS[ng] == BOOT_SKILL, "the script starts the boot skill; m3_gate does the rest"
-            before_ng = (state, dict(dstates))
-            if not args.selftest_restart:               # THE R9 CONTROL skips exactly this
+            assert SKILLS[ng] == walk_skill, "the script plays one skill; m3_gate does the rest"
+            # M7 P6+P7: the R9 controls skip the RESTART's NEW GAME (ng_frame) only -- a walk at another
+            # skill than the boot one begins with a NEW GAME of its own, which they leave alone
+            _ctl = f == ng_frame
+            if _ctl:
+                before_ng = (state, dict(dstates))
+            if not (args.selftest_restart and _ctl):    # THE R9 CONTROL skips exactly this
                 state = sp
-                if not args.selftest_restart_doors:     # ...and C7's control skips the doors
+                if not (args.selftest_restart_doors and _ctl):    # ...and C7's control skips the doors
                     dps = dp.initial()
                     dstates = dps[0]
                     mps = mp.initial()
                 # M7 P3.1: the monsters too -- OUTSIDE the doors control, which must part on the doors
                 # alone (the state at the NEW GAME frame with its picture exact)
-                mph.reset(BOOT_SKILL)
+                skill = SKILLS[ng]
+                hidden = hidden_of(skill)
+                mph.reset(skill)
                 pusedn, lvdone = 1, 0
         if mode == 1:                                   # a menu frame tics nothing
             menu_pics.setdefault((scr, sel), set()).add(got[f])
@@ -844,27 +1073,11 @@ def main():
         used = bool(kd.get("use")) and not args.selftest
         if kd.get("use") and in_use_box_fixed(boxes[target], state.x, state.y):
             in_box_when_pressed = True
-        # M7 P4.1: the player's weapon, every world frame -- P4.2a: BEFORE the move, from the frame's starting pose
-        # (the binary's weapon runs before its player sim: a shot's target and a melee's reach are measured there)
-        _boxes = mph.boxes()                            # the door tic runs BEFORE the weapon: this frame's shots
-        mph.weapon(kd, state.x, state.y, state.angle)   # have not yet killed what a closing door reverses on
-        dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn, others=_boxes)
+        # the whole world frame -- the door tic, the weapon, the move, the monsters, the render -- is
+        # `world_frame`, the one the planner stepped (M7 P6+P7)
+        dps, state, mps, pusedn, want = world_frame((mph, mviews), skill, dps, state, mps, pusedn, kd, used)
         dstates = dps[0]
-        # M7 P3.1: the monsters after the player; P3.2b: inside the doors and lifts (their presses -> next frame)
-        dps, mps = mph.frame(dps, mps, state.x, state.y, state.angle)
-        rsc = build_scene(mw, mw, args.map,
-                          {**heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}),
-                           **mp.heights(mps)})
-        want = screen.frame(bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
-                                          thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
-                                          thing_views=mviews(mph, state.x, state.y),
-                                          thing_positions=mviews.positions(mph),
-                                          seen_out=(_seen := set()), aim_things=mviews.aim_things(mph),
-                                          aim_out=(_aim := [0] * 17), mobiles=mph.mobiles(),   # M7 P5
-                                          **GAME_RENDER_KW)),
-                            card=bool(dps[3]), **mph.screen_kw())     # M7 P4.1: the weapon's frame, the bar
-        mph.set_aim(_aim)                               # M7 P4.2a: this picture's window -> the next frame's shots
-        mph.set_seen(mviews.slots_of(_seen))            # M7 P3.2a: this picture's seen -> the next tic
+        deaths += bool(mph.world.ws.p_dead)            # M7 P7: this walk expects none (a death parts the mirrors)
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
                                                    (dstates[si] for si in order), dps, order,
@@ -952,7 +1165,7 @@ def main():
     ng_open = before_ng is not None and before_ng[1][target][0] >= passes[target]
     n_replay = sum(1 for k in range(len(route)) if ng_frame + k in path)
     retraced = n_replay == len(route) and all(
-        path.get(ng_frame + k) == path.get(MENU_FRAMES + k) for k in range(len(route)))
+        path.get(ng_frame + k) == path.get(lead + k) for k in range(len(route)))
     tells = False
     if ng_open and retraced:
         last = ng_frame + len(route) - 1
@@ -993,8 +1206,10 @@ def main():
           % ("yes, %d frames" % state_checked if state_bad is None and state_checked == frames
              else "!! no -- frame %s" % state_bad if state_bad is not None
              else "!! only %d of %d frames were checked" % (state_checked, frames)))
+    print("  CONTROL 8 (M7 P7): the mirror's player died on %d frames -- %s"
+          % (deaths, "none, as this walk expects" if not deaths else "!! a death: this walk expects none"))
     vac = (len(seen) < 3 or not in_box_when_pressed or not menu_same or not crossed
-           or not (ng_open and tells))
+           or not (ng_open and tells) or deaths)
     if not args.selftest_restart:
         vac = vac or not retraced
     if vac and not (args.selftest or args.selftest_restart):

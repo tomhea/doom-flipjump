@@ -225,10 +225,14 @@ HELP_LEGEND_GAP = 7                      # the last cluster to its legend
 HELP_LEGEND_PITCH = GLYPH_H + 1          # one legend line to the next (M7 P4.1: three lines beside two cap rows)
 HELP_ROWS_GAP = 2                        # the clusters' bottom to the first key row
 HELP_KEY_GAP = 2                         # between an item's caps
-HELP_DESC_GAP = 6                        # an item's caps to its description
-HELP_ITEM_GAP = 8                        # an item's description to the next item in its row (M7 P4.1)
-HELP_ROW_PITCH = HELP_CAP_H + 1          # one key row to the next...
-HELP_LINE_PITCH = GLYPH_H + 2            # ...plus this per extra description line (menu pitch)
+# M7 P6+P7 (the owner, 2026-10-05: "use a bit more space between different categories"; docs/gp-p67-interface.md
+# section 12): the items of a row further apart and each description nearer its own caps (DESC 6 -> 4, ITEM 8 -> 12),
+# the key rows 2 px apart (ROW_PITCH + 1 -> + 2), paid for by the use description's second line at the legend's
+# pitch (LINE_PITCH + 2 -> + 1). The last row's HELP then ends 1 px above the credit's top: the screen is full.
+HELP_DESC_GAP = 4                        # an item's caps to its description
+HELP_ITEM_GAP = 12                       # an item's description to the next item in its row (M7 P4.1)
+HELP_ROW_PITCH = HELP_CAP_H + 2          # one key row to the next...
+HELP_LINE_PITCH = GLYPH_H + 1            # ...plus this per extra description line (the legend's pitch)
 
 
 def help_key_names() -> list:
@@ -272,8 +276,8 @@ def help_layout(width, height) -> tuple:
         for col, key in enumerate((left, down, right)):
             cap(key, x + col * (w + HELP_CAP_GAP), bottom_y, w)
         x += 3 * w + 2 * HELP_CAP_GAP
-    for row, line in enumerate(HELP_CLUSTER_LEGEND):
-        texts.append((line, x + HELP_LEGEND_GAP, HELP_CLUSTERS_Y + 1 + row * HELP_LEGEND_PITCH, "text"))
+    for row, line in enumerate(HELP_CLUSTER_LEGEND):           # M7 P6+P7: level with the caps' top (was + 1)
+        texts.append((line, x + HELP_LEGEND_GAP, HELP_CLUSTERS_Y + row * HELP_LEGEND_PITCH, "text"))
     # the key rows: each item's caps from its x, its description after them, the next item after that
     y = bottom_y + HELP_CAP_H + HELP_ROWS_GAP
     for row in HELP_ROWS:

@@ -10,14 +10,42 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked48.fjm`, sha256 `69890d31f08b450b` (first 16 hex; full `69890d31f08b450b6b29572e97529d2f30a1de84b9bf70de3015674036b843e8`), built 2026-10-04 from the command in 1b (M7 P5, ONE rung: the monsters' attacks -- the player hurt, the fireball pool, the blood pool) | class F -- the pictures differ from blocked47 by design (the bar's health and armor, the red palette, fireballs in flight and exploding, blood); built with the installed flipjump 1.5.1 at `1cd6e0c` from m7-p5 c21df5a with `--pin-heat scratchpad/12m/heat_blocked27_p42.json.gz` (`docs/ship-evidence/blocked48_build.log`) |
-| **ms/frame** | **73.2 ms/frame** (72.7-75.7), against **72.9** (71.9-73.7) for blocked47 in the same run (~215M fj/s) -- **NOT SEPARATED: median x0.982** (pairs 0.976 1.012 1.011 0.982 0.963; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames). **Run with `--ignore-busy`**: the owner's fullscan.py (pid 28924) ran beside it, logged by msframe as `python(28924) 1.0s/s`, and the run's note says so; yardstick median 3.49G; the `shipped` baseline is NOT frozen on it -- still blocked44's; re-freeze on a quiet box | `msframe.py --ignore-busy --a build/doom_e1m1_blocked47.fjm --b build/doom_e1m1_blocked48.fjm`, 200 frames x 5 reps, pinned core (`blocked48_msframe.log`) |
-| **fj ops/s** | **216.4 M** in the A/B run (blocked47 214.6 M) | ops/frame **15,844,669** on msframe's forward-walk script (blocked47 15,632,447) |
-| **binding metric** (owner spec) | (mean+p80)/2 = **15,531,315 ops/frame -- PASS** (blocked47 15,403,663: +127,652) | `gamespeed.py --fjm build/doom_e1m1_blocked48.fjm`, 2026-10-04 (`docs/ship-evidence/blocked48_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS, BINARY_ENDS / BINARY_DOORS unchanged (`blocked48_gamespeed_trail.log`) |
-| **size** | **35.16% of 2^27 -- PASS against the 40% target** (47,186,598 words; span 98,979,584; +1,212,406 words) -- 6,500,493 words under it, and 210,394 words OVER the old 35%. The size target was RAISED from 35% to 40% in P4.0 (`docs/gp-combat.md` C2, the owner 2026-09-25 + 2026-10-04; `gamespeed.SIZE_TARGET_PCT`); the 22M ops cap is unchanged | same run |
-| **combat set v5** (the CAP-22 set from P3.2a on: the seen rule; FROZEN 2026-10-01 on the owner's 2026-09-30 approval -- `p32a_v5_freeze.log`) | (mean+p80)/2 = **16,037,431** (blocked47 15,851,173: +186,258); **16,076,355** with strafe's collision; every frame pixel-exact and B0-state-exact (B0 from e8d3683 injects the player's health and armor per frame from the frozen model, compares the palettes and fails a run whose mirror dies: B0 OK) | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v5.json --pixel-every 1 --proxy` (`blocked48_b0_v5.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked51.fjm`, sha256 `f736f73d456061ed` (first 16 hex; full `f736f73d456061ed726a37bcf1ac92d2214f61fcf2363f8334ba409b7cb3a72c`), built 2026-10-06 from the command in 1b (M7 P6+P7, ONE rung: pickups, barrels, blocking, nukage, death and the restart, with the owner's 2026-10-05 playtest requests) | class F -- the pictures differ from blocked48 by design (items taken, the bonus and berserk palettes, barrels exploding, drops, puffs, gibs, the monsters at 2 tics a frame and always drawn, the dead view turning); built with the installed flipjump 1.5.1 at `1cd6e0c` from m7-p67 7739a72 with `--pin-heat scratchpad/12m/heat_blocked27_p42.json.gz` (`docs/ship-evidence/blocked51_build.log`) |
+| **ms/frame** | **71.6 ms/frame** (71.1-72.2), against **70.0** (69.7-71.6) for blocked48 in the same run -- **NOT SEPARATED: median x0.980** (pairs 0.973 0.992 0.985 0.980 0.976: all five lean B-slower, none past the 3% line; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames). **A quiet box**: msframe logged no busy process, yardstick median 3.63G, no `--ignore-busy`; the `shipped` baseline is NOT frozen on it -- still blocked44's; P8 re-freezes | `msframe.py --a build/doom_e1m1_blocked48.fjm --b build/doom_e1m1_blocked51.fjm`, 200 frames x 5 reps, pinned core (`blocked51_msframe.log`) |
+| **fj ops/s** | **220.6 M** in the A/B run (blocked48 226.4 M) | ops/frame **15,784,170** on msframe's forward-walk script (blocked48 15,844,669) |
+| **binding metric** (owner spec) | (mean+p80)/2 = **12,528,769 ops/frame -- PASS** (target <= 20,000,000 until P8 moves it to 22M, D1). **NOT comparable with blocked48's 15,531,315** (O3): since P6 a monster blocks the player, so the ten tours stop earlier and on other routes, and no run reaches a door (`BINARY_DOORS` all 0) | `gamespeed.py --fjm build/doom_e1m1_blocked51.fjm` (`docs/ship-evidence/blocked51_gamespeed.log`); `gamespeed_trail.py`: TRAIL PASS (`--validate`'s record equals the binary on every frame of every run), CONTROL-POSE PASS, CONTROL-DOORS N/A -- no run opens a door (7739a72); `BINARY_ENDS` / `BINARY_DOORS` as re-recorded in f3acab8 (`blocked51_gamespeed_trail.log`) |
+| **size** | **36.24% of 2^27 -- PASS against the 42% target** (48,643,954 words; span 100,158,624; +1,457,356 words) -- 7,727,491 words under it, 5,043,137 under the 40% it replaced. The size target: 35% -> 40% in P4.0 (`docs/gp-combat.md` C2, the owner 2026-09-25 + 2026-10-04), -> 42% after P5 ("its ok to get to 42% if things get messy or big", the owner 2026-10-04; `gamespeed.SIZE_TARGET_PCT` 42, fe754a0); the 22M ops cap is unchanged | same run |
+| **combat set v6** (the CAP-22 set from P6+P7 on: v5's 11 checkpoints RE-PLANNED at the game's model -- the monsters' tempo, the tap turn, fire x2 -- f852103; keys `83d49015078b6abb`; FROZEN 2026-10-06 on the owner's approval, 30f9fd1) | (mean+p80)/2 = **14,699,526** (mean 13,573,156, p80 run R2-east-yard 15,825,895); **14,740,635** with strafe's collision (proxy); every frame of all 11 runs state- and pixel-exact, B0 OK; per-frame maximum 24,117,248 (+/- 2^18, R0-courtyard); 7,300,474 under CAP-22. A different set from v5: not comparable with blocked48's v5 16,037,431 | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v6.json --pixel-every 1 --proxy` (`blocked51_b0_v6.log`, `.json`) |
 
-**What it is:** blocked47 with the monsters' attacks (M7 P5, `docs/gp-p5-interface.md`; the model modes
+**What it is:** blocked48 with pickups, barrels, death and the restart (M7 P6+P7, `docs/gp-p67-interface.md`; the
+model modes `PLAYER_MODE = "full"`, `MONSTER_MODE = "full"`), ONE rung stacked on P5, integrated from six packages.
+**Pickups** (`lootcode`): every give with DOOM's caps (the bonuses over 100, a medikit refused at 100 health, a clip
+at max ammo, the cards with the bonus's gold palette), berserk (the strength, the x10 punch, the red tint), the
+chainsaw, and the drops of the dead (`barrelcode`'s `mdrop`: a zombieman's clip, a sergeant's shotgun -- on hard the
+only one -- drawn on the floor as scenery). **Barrels** (`barrelcode`): shot or punched (the puff), the blast
+(Chebyshev radius, line of sight, the player hurt, gibs), the chain; baked barrels record in the aim window.
+**Blocking**: barrels, solid decor and live monsters stop the player; a corpse does not. **Nukage** hurts on DOOM's
+period. **Death** (P7): the tic-start latch `p_dd0` chooses the branch once; a dead player presses no door, use line
+or weapon key and neither walks nor turns; the dead view turns to the killer by ANG5 a tic (`p_atk`, `pj_src`,
+`dt_turn`), the red fading only once facing him; no view drop (O1); use restarts the level at the skill being played,
+one sequence with NEW GAME (`restartcode`). **The owner's 2026-10-05 requests**: the monsters and their pools run 2
+tics a frame (`world.MONSTER_TICS_PER_FRAME`), the ACTORS rule (monsters and fireballs are always drawn -- exempt from
+the soft raise and the B-gate; the corpse-slot root cause, `docs/gp-p67-interface.md` 11.2), the weapon runs 2 tics a
+frame (`world.WEAPON_TICS`), a hold's first frame turns DOOM's tap (320 << 16) and later frames the owner's x1.5
+(960 << 16; far aim measured equal to DOOM's, 12.1), and the help screen's spacing. Gates: m2_std_gate 406 frames
+(played at easy through door 10 since 15aee03: at hard a monster stands in door 10's use box once things block) and
+m3_gate 50 frames byte- and state-exact, every gate selftest rejected where it must (7,
+`blocked51_gate_selftests.log`), p2a_gate 13/13, hurt_gate 7/7, P6's `fight_gate` 19/19 (F1-F10 and the stress S2)
+and P7's `die_gate` 11/11 (D1-D8: 11 deaths, 5 restarts) STATE, PIXELS and PALETTE exact on every frame with every
+control parting, deg_gate 4 viewpoints BYTE-EXACT with every op count equal to blocked48's, pinreport 20 of 20 with 0
+broken groups of 38,098 (pool 58.2%), host suite 1656 passed. **S1** (every imp fires: 8 in flight) now costs
+696,858,304 ops over 30 frames, ~23.2M/frame (blocked48: ~21.7M); **S2** (the barrel chain in view) 1,026,624,325
+ops over 106 frames, ~9.7M/frame averaged -- both recorded, not judged (D1 caps v6's (mean + p80) / 2, not a
+scenario). Superseded in the rung: blocked49 (a pickup's bar a frame late, c66b32c) and blocked50 (a baked barrel's
+explosion light class truncated, 1af94b1); after blocked51 only the gates' oracle changed (c93b869, 3c7e381). The
+binary it replaced, blocked48 (sha256 `69890d31f08b450b`), is kept in `build/` as the comparison arm.
+
+**What blocked48 was (P5):** blocked47 with the monsters' attacks (M7 P5, `docs/gp-p5-interface.md`; the model modes
 `MONSTER_MODE = "full"`, `PLAYER_MODE = "fx"`), ONE rung stacked on P4. **The player is hurt** (`hurtcode`): the
 zombiemen's and sergeants' hitscan, the imp's claw and the demon's bite land through ONE `dp_go` (DOOM's
 P_DamageMobj on the player: green / blue armor's save, the damage count, health, one `rng_pl` draw per hit), the bar
@@ -135,9 +163,10 @@ msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
 baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is NOT frozen on this binary:
-it is still blocked44's -- blocked45, blocked46 and blocked47 were never frozen, and blocked48 must be re-frozen on a quiet box
-(`msframe.py --a build/doom_e1m1_blocked48.fjm --save-baseline shipped`, into `blocked48_msframe_freeze.log`; its
-A/B run against blocked47, like blocked47's against blocked46, was itself taken beside the owner's fullscan.py, with `--ignore-busy`)
+it is still blocked44's -- blocked45 to blocked48 were never frozen, and blocked51 must be re-frozen on a quiet box
+(`msframe.py --a build/doom_e1m1_blocked51.fjm --save-baseline shipped`, into `blocked51_msframe_freeze.log` -- P8's
+re-frozen baselines; blocked51's A/B run against blocked48 was taken on a quiet box, while blocked47's and blocked48's
+were taken beside the owner's fullscan.py, with `--ignore-busy`)
 (re-frozen 2026-10-02 on blocked44: 73.1 ms/frame [72.3 .. 76.2], yardstick 3.50G,
 204.4M fj/s -- `blocked44_msframe_freeze.log`; blocked40's 2026-09-30 read 63.7 [63.6 .. 63.8]; blocked38's the same day read 61.5 [61.3 .. 61.7];
 blocked37's the same day read 61.9 [61.4 .. 62.0];
@@ -246,6 +275,20 @@ assembler the same files and the same persist tuple at 87c2c75 and at the head
 is signed by 87c2c75's (`aab5be8f`), so on main this line MISSES the cache and recounts once (~34 min,
 the same counts) -- as after PR #87 (item 4). The next ship build re-signs it. (A first build of this rung was stopped in pass 1:
 it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
+
+**blocked51 (2026-10-06, M7 P6+P7): the line did not change** -- still `heat_blocked27_p42` (the build log reads its
+sha256 `b307cab74b45b336`; no hot site changed width, `hot_sites_width_changed 0`, so no re-key) and still flipjump
+1.5.1 at `1cd6e0c` (the build log's first line). The source changed, so the counts cache MISSED ("counts cache is for
+a DIFFERENT program -- recounting") and recounted (45,936 groups -> 38,098 after alias merging, 509,644 tables,
+1,953 s); the build, at 7739a72, took 6,812 s: sha256 `f736f73d456061ed` (`docs/ship-evidence/blocked51_build.log`;
+preflight 58.2% of the pool's capacity, 0 broken groups; the restore set's check: 0 labels moved, 0 values changed,
+16,232 baked cells value-checked). The pin report read all 20 hot words through the list's 14 renames (20 of 20, 19
+bases moved, 0 unresolved, 4 re-keyed to their one same-keyed label; `blocked51_pinreport.log`). The tracked counts
+cache is that recount (committed in 557b60a). **At the head it MISSES**: the gates' oracle fixes after the build
+(c93b869, 3c7e381) edited `src/doomfj/reference_model.py` and `monsters.py`, which the signature covers -- so poolmap,
+run at the head, refused to price the pads (`blocked51_poolmap.log`: cache `b1aea717`, tree `3c4d2edb`) and the line
+recounts once there (~33 min), as after PR #92. Its label table is `scratchpad/12m/atlas/blocked51.labels.tsv.gz`. Not
+rebuilt (class F). blocked49 and blocked50 were built by the same line and superseded (`docs/gp-ledger.md`, P6 + P7).
 
 **blocked48 (2026-10-04, M7 P5): the line did not change** -- still `heat_blocked27_p42` (the build log reads its
 sha256 `b307cab74b45b336`; no fj macro's positional parameter count changed in P5, bf7efc6, so no re-key) and still

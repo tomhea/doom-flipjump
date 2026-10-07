@@ -17,13 +17,15 @@ from doomfj import world as W
 ROOT = Path(__file__).resolve().parents[2]
 
 # A scripted fight from the player's start: four monsters put in front of him, awake; he fires in
-# bursts, walks into them, switches to the fist and turns. Deterministic by construction.
+# bursts, walks into them, switches to the fist and turns. Deterministic by construction. M7 P6+P7: at the owner's x2
+# fire rate (world.WEAPON_TICS) the imp died before it ever clawed, so it now stands at (60, 60), not (220, 40), and
+# the player wears blue armor (200) to outlive the closer fight -- every event kind the vacuity check names happens.
 SCENARIO_SRC = """
 def scenario(W, gd, skill=None):
-    w = W.World(skill=gd.SK_HARD if skill is None else skill)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD if skill is None else skill)
     ws = w.ws
     px, py = ws.px >> 16, ws.py >> 16
-    for doomednum, dx, dy in ((3004, 160, 0), (3001, 220, 40), (9, 250, -40), (3002, 300, 0)):
+    for doomednum, dx, dy in ((3004, 160, 0), (3001, 60, 60), (9, 250, -40), (3002, 300, 0)):
         ms = [i for i in range(w.layout.nmon)
               if w.mon_things[i].type == doomednum and ws.mon_active[i]]
         if not ms:
@@ -42,6 +44,7 @@ def scenario(W, gd, skill=None):
         if 220 <= t < 232:
             k["turn_left"] = True
         keys.append(k)
+    ws.p_armortype, ws.p_armor = 2, 200
     return w, keys
 """
 _ns = {}
@@ -62,9 +65,9 @@ def test_the_restart_block_equals_a_fresh_level_start(skill):
     w = _played(skill)
     tot = w.event_totals()
     assert tot["fired"] and tot["hits"] and tot["player_hurt"]          # a real game was played
-    assert w.digest() != W.World(skill=skill).digest()
+    assert w.digest() != W.World(monster_tics=1, skill=skill).digest()
     w._restart(W.TicEvents(w.tic_count))
-    assert w.digest() == W.World(skill=skill).digest()
+    assert w.digest() == W.World(monster_tics=1, skill=skill).digest()
     assert w.leaf_lists() == w.leaf_lists_from_scratch()
 
 
@@ -74,7 +77,7 @@ def test_new_game_runs_the_restart_at_the_next_tic():
     w.new_game(gd.SK_MEDIUM)
     k = {"forward": True, "fire": True}
     ev = w.tic(k)
-    fresh = W.World(skill=gd.SK_MEDIUM)
+    fresh = W.World(monster_tics=1, skill=gd.SK_MEDIUM)
     fresh.tic(k)
     assert ev.restarts == 1 and w.digest() == fresh.digest()
 
@@ -93,8 +96,8 @@ def _perturb(ws):
 def test_a_restart_that_forgets_any_one_field_is_caught():
     """R9, field by field: with one field dropped from the block, a perturbed state no longer
     restarts to the fresh level; with none dropped it does (the control)."""
-    fresh = W.World(skill=gd.SK_HARD).digest()
-    w = W.World(skill=gd.SK_HARD)
+    fresh = W.World(monster_tics=1, skill=gd.SK_HARD).digest()
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     full = w.restart_fields
     assert set(full) == {f.name for f in w.schema} - set(C.RESTART_KEEP)
     for name in full:
@@ -118,7 +121,7 @@ def test_the_restart_keeps_the_menu_mode_and_the_held_keys():
 
 # ---- player death ----------------------------------------------------------------------------
 def test_death_is_doom_shaped_and_use_asks_for_the_restart():
-    w = W.World(skill=gd.SK_HARD)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     for _ in range(20):
         w.tic({})
     ws = w.ws
@@ -137,14 +140,14 @@ def test_death_is_doom_shaped_and_use_asks_for_the_restart():
     assert ev.restart_requests == 1 and ws.g_restart and ws.p_dead
     k = {"forward": True}
     ev = w.tic(k)
-    fresh = W.World(skill=gd.SK_HARD)
+    fresh = W.World(monster_tics=1, skill=gd.SK_HARD)
     fresh.tic(k)
     assert ev.restarts == 1 and w.digest() == fresh.digest()
 
 
 def test_a_plain_death_and_the_monsters_stand_down():
     """A death at health >= -100 is S_PLAY_DIE1; a dead player is no longer solid to monsters."""
-    w = W.World(skill=gd.SK_HARD)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     ws = w.ws
     ws.p_health = 10
     w.damage_player(10, ("test", 0), W.TicEvents(0))
@@ -161,7 +164,7 @@ def _at_exit(w):
 
 
 def test_the_exit_switch_ends_the_level_on_the_use_press():
-    w = W.World(skill=gd.SK_HARD)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     assert len(w.exit_boxes) == 1
     for _ in range(3):
         w.tic({})
@@ -180,11 +183,11 @@ def test_the_exit_switch_ends_the_level_on_the_use_press():
 
 def test_the_exit_needs_a_fresh_press_and_the_box():
     """Controls: use already held (DOOM's usedown) does not trigger; nor does use outside the box."""
-    w = W.World(skill=gd.SK_HARD)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     _at_exit(w)
     assert w.ws.p_usedown == 1                                # G_PlayerReborn: held at start
     assert not w.tic({"use": True}).level_done
-    w = W.World(skill=gd.SK_HARD)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     w.tic({})
     assert not w.tic({"use": True}).level_done               # at the start: not in the box
 
@@ -195,7 +198,7 @@ NUKAGE_SPOTS = {23: (2008, 1342), 38: (1928, 914), 173: (1272, 1112)}
 
 @pytest.mark.parametrize("sector", sorted(NUKAGE_SPOTS))
 def test_nukage_hurts_5_every_32_tics_when_standing_on_it(sector):
-    w = W.World(skill=gd.SK_HARD)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     x, y = NUKAGE_SPOTS[sector]
     assert w.secs[sector].special == 7 and w.leaf_sector[
         w.rm.point_in_subsector(w.cmap, x, y)] == sector
@@ -213,7 +216,7 @@ def test_nukage_hurts_5_every_32_tics_when_standing_on_it(sector):
 
 
 def test_nukage_spares_other_floors():
-    w = W.World(skill=gd.SK_HARD)
+    w = W.World(monster_tics=1, skill=gd.SK_HARD)
     w.ws.leveltime = 64
     ev = w.tic({})                                            # the start room: special 0
     assert ev.nukage == 0 and w.ws.p_health == 100

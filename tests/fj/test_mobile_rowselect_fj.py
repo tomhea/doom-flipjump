@@ -46,8 +46,12 @@ def setup():
     # a stand-in anim index: the real widths, a DISTINCT region per view (what names a lump below)
     anim = {k: (0x100 + i, rm.art_of_lump(art, lump, cache)[2], mir) for i, (k, (lump, mir)) in
             enumerate(sorted(patches.items()))}
+    # M7 P6 (PLAYER_MODE "full"): the drops draw from the STATIC bank -- a synthetic one, as test_barrel_rowselect_fj's
+    _kinds = sorted({t.type for t in drawable_things(rm, mw.things("E1M1"), art, cache)[0]})
+    _static = ({k: 0x900 + i for i, k in enumerate(_kinds)}, {k: 0xA00 + i for i, k in enumerate(_kinds)},
+               {k: rm.sprite_art(art, k, cache)[2] for k in _kinds})
     p31 = MC.p31_parts(rm, mw, "E1M1", art, anim, rt, spr_near=True, boot_skill=BOOT_SKILL, skills=SKILLS,
-                       cache=cache, mode=MONSTER_MODE, player=PLAYER_MODE)
+                       cache=cache, mode=MONSTER_MODE, player=PLAYER_MODE, static_bank=_static)
     return rt, anim, p31
 
 
@@ -88,8 +92,13 @@ def _run(tmp_path, name, setup, mobview=None, swap_pools=False) -> bool:
             "sp_sa: hex.vec w/4", "sp_sid: hex.vec 2", "sp_rc: hex.vec 1",
             "thseen: hex.vec %d" % nmon, "mon_shootable: hex.vec %d" % nmon,
             "pj_st: hex.vec 16", "fx_st: hex.vec 4"]
+    # M7 P6 (PLAYER_MODE "full"): the select also holds the runtime barrels' stubs (barview, bar_st) --
+    # tests/fj/test_barrel_rowselect_fj.py checks those; here they need only assemble
+    barrels = "barview" in p31
+    if barrels:
+        data += ["bar_st: hex.vec %d" % (2 * len(p31["world"].barrel_things))]
     data += list(p31["decls"]) + sel + p31["rotation"]
-    data += [p31["mview"], p31["mrot"], mobview or p31["mobview"],
+    data += [p31["mview"], p31["mrot"], mobview or p31["mobview"], *([p31["barview"]] if barrels else []),
              generate_dispatch_table_fj("mstate", MC.state_table_values(), index_nibbles=2, result_nibbles=6),
              generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE), index_nibbles=3, result_nibbles=8),
              generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(), index_nibbles=3, result_nibbles=6),

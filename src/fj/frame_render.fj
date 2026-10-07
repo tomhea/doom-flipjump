@@ -554,7 +554,7 @@ ns frame {
     // M7 P4.2a: `aim` -- 1 when this body's projections record the aim window (the runtime monsters' body of a tier
     // whose player shoots); `ttwice`'s measurement copy never records
     def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic, mir, mirf, miru, ltw, seen, sa, sflag, one, aim \
-            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_hit \
+            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, bslot_gate, offv_top, offv_out, offv_ok, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_hit \
             < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, \
               gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8 {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
@@ -629,11 +629,34 @@ ns frame {
         hex.mov 8, trb_y0, trb_tytop                    // drag its neighbours in as high nibbles.
         frame.add8_chain trb_y0, trb_thpx                     // FEET planted: the trb_bucket moves the sprite's TOP
         frame.sub8_chain trb_y0, trb_bucket_h
+        // M7 P6+P7 E (the owner, 2026-10-05: "monsters should always be shown") -- THE ACTORS RULE, the game tier's
+        // alone: its `dsoftm` IS `monbudget` (wall_renderer: the monsters' soft count is the hard budget), and that
+        // one equality switches the two lines below on; every other tier expands them to nothing (deg_gate's ops).
+        // (4) a sprite with NO ROW in the view -- its drawn bucket [trb_y0, trb_y0 + hb) all below or all above it,
+        // e.g. the corpse the player stands on -- records no fragment: it would hold slot A in every column of its
+        // span and push what stands behind it to the B-gate (reference_model.render_wall_frame `exempt_actors`).
+        // A thing with a seen flag still takes the seen probe (the oracle's seen rule has no vertical test).
+        rep(dsoftm==monbudget, k) hex.set 8, trb_cbound, viewh
+        rep(dsoftm==monbudget, k) hex.scmp 8, trb_y0, trb_cbound, offv_top, offv_out, offv_out
+      offv_top:
+        rep(dsoftm==monbudget, k) hex.mov 8, trb_cbound, trb_y0
+        rep(dsoftm==monbudget, k) hex.add 8, trb_cbound, trb_bucket_h
+        rep(dsoftm==monbudget, k) hex.dec 8, trb_cbound
+        rep(dsoftm==monbudget, k) hex.sign 8, trb_cbound, offv_out, offv_ok
+      offv_out:
+        rep((dsoftm==monbudget)*seen, k) .rec_goto seen_probe
+        rep((dsoftm==monbudget)*(1-seen), k) .rec_goto ret
+      offv_ok:
         // 25M-CAP B-GATE, hoisted per thing: slot B only for fragments whose trb_bucket height
         // reaches sprbminh -- a smaller B fragment sits behind slot A and ~never shows, so the
         // per-column bank walk it would pay is invisible work. The slot stays OPEN for a later,
         // taller thing (the oracle's elif does the same).
         rep(deg, k) hex.set 1, ballow, 1
+        // M7 P6+P7 E (3): an ACTOR (sp_mon != 0: a monster, live or dead, and in the game tier a mobile) is never
+        // B-gated -- it takes slot B behind a nearer sprite at any height (the actors rule, above)
+        rep(deg*(dsoftm==monbudget), k) hex.if0 2, sp_mon, bslot_gate
+        rep(deg*(dsoftm==monbudget), k) .rec_goto bslot_done
+      bslot_gate:
         rep(deg, k) hex.set 2, trb_climit, sprbminh
         rep(deg, k) hex.cmp 2, trb_bucket_h, trb_climit, bslot_no, bslot_done, bslot_done
       bslot_no:

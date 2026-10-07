@@ -94,7 +94,8 @@ from doomfj.combat import FIREBALL_R, SECTOR_HURT, STRAFE_MOVE              # no
 from doomfj.doors import OPENING, DoorPhase, in_use_box_fixed              # noqa: E402
 from doomfj.movers import MoverPhase                                        # noqa: E402  (M7 P2b)
 from doomfj.fixedpoint import _signed, fixed_mul                            # noqa: E402
-from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, Scene, SimState  # noqa: E402
+from doomfj.reference_model import (ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_MOVE, Scene, SimState,  # noqa: E402
+                                    turn_step)
 
 SCEN_DIR = HERE / "scenarios"
 SCEN_FILE = SCEN_DIR / "combat_scenarios_v2.json"
@@ -110,9 +111,16 @@ SKILL = gd.SK_HARD
 SIGHT_RULE = "los"
 
 
+# M7 P6+P7 E (the owner, 2026-10-05): the set's MONSTER TEMPO -- the monsters' world tics per frame
+# (`world.MONSTER_TICS_PER_FRAME`). A set file names its own (`monster_tics`, absent = 1: v1 .. v5 were recorded at one
+# tic a frame); `use_sight_rule` applies it with the sight rule, so every load of a set replays the model it recorded.
+MONSTER_TICS = 1
+
+
 def use_sight_rule(doc: dict) -> None:
-    global SIGHT_RULE
+    global SIGHT_RULE, MONSTER_TICS
     SIGHT_RULE = doc.get("sight_rule", "los")
+    MONSTER_TICS = int(doc.get("monster_tics", 1))           # M7 P6+P7 E
 UNIT = 1 << 16
 M32 = 0xFFFFFFFF
 CELL = 16
@@ -332,6 +340,7 @@ def apply_sight_rule(w) -> "W.World":
         from doomfj.sight import SeenHook
         hook = SeenHook(w)                  # this tic's picture writes the next tic's mon_seen
     w.set_sight_rule(SIGHT_RULE, hook)
+    w.monster_tics = MONSTER_TICS           # M7 P6+P7 E: the set's monster tempo (absent = 1)
     return w
 
 
@@ -411,11 +420,7 @@ def predict_move(w, kd: dict):
     candidates through the same tests (a solid thing refuses a candidate, then try_move), minus the
     pickups it touches. Returns the landing (x16, y16), signed."""
     rmod, ws = w.rm, w.ws
-    angle = ws.pangle
-    if kd.get("turn_left"):
-        angle = (angle + ANGLE_TURN) & M32
-    if kd.get("turn_right"):
-        angle = (angle - ANGLE_TURN) & M32
+    angle, _held = turn_step(ws.pangle, kd, ws.p_turnheld)   # M7 P6+P7: the model's own turn (the tap rule)
     move = (FORWARD_MOVE if kd.get("forward") else 0) - (FORWARD_MOVE if kd.get("back") else 0)
     side = (STRAFE_MOVE if kd.get("strafe_right") else 0) - (STRAFE_MOVE if kd.get("strafe_left") else 0)
     x, y = ws.px, ws.py
@@ -432,9 +437,9 @@ def predict_move(w, kd: dict):
         dy -= fixed_mul(sd, rmod.read_cos(angle), 8, 4)
     for cand in (((x + dx) & M32, (y + dy) & M32), ((x + dx) & M32, y),
                  (x, (y + dy) & M32)):
-        if cand == (x, y):
-            continue
         cx, cy = _signed(cand[0], 32), _signed(cand[1], 32)
+        if (cx, cy) == (x, y):                 # M7 P6+P7: like with like, as combat._player_move now compares
+            continue
         if w.player_blocking and w._solid_thing_at(cx, cy) is not None:
             continue
         if rmod.try_move(w.scene_c, x, y, cx, cy):
@@ -760,12 +765,22 @@ class BinaryMirror:
         assert self.mp.order == list(w.lift_order)
         self.mstate, self.pusedn = self.mp.initial(), 1
         self._scenes = {}
+        # M7 P6+P7 (package F's tap rule): the binary's turn reads its persisted `p_tnh` -- "a turn key was held last
+        # frame" -- which the injection never writes: it follows the delivered keys, so the mirror carries it from its
+        # own last frame (a SimState rebuilt from the injected pose would start every frame at 0: always the tap)
+        self.turnheld = 0
 
-    def step(self, pre, kd, doors=None, movers=None, others=()):
+    def step(self, pre, kd, doors=None, movers=None, others=(), mph=None):
         """`doors`: the door tuples (state, dir, sub, wait) b0 writes at the frame start (the
         model's pre-tic doors); None keeps the mirror's own. `movers` (M7 P2b): the model's pre-tic
         mover state (`mover_state`), written the same way. `others` (M7 P3.2b): the binary's live monsters'
-        boxes at the frame start -- a closing door reverses on them"""
+        boxes at the frame start -- a closing door reverses on them.
+        M7 P6 (docs/gp-p67-interface.md 6.4): `mph` -- the binary's monsters.MonsterPhase. With it the frame is the
+        game tier's whole player half: the weapon after the use press (before the move, from the injected pose), and
+        the move the phase's (`MonsterPhase.move`): once the player loots, nukage first and the model's move on the
+        world this frame's doors and movers are synced into -- pickups (the card the world's), blocking by things;
+        before, step_sim's with the card's touch. Without it (`model_frames`' expectation of the frozen run) the
+        frame is blocked27's: step_sim, no strafe, no things"""
         w = self.w
         if doors is not None:
             self.state = ({si: tuple(doors[d]) for d, si in enumerate(w.door_order)},
@@ -790,8 +805,24 @@ class BinaryMirror:
 
         def touch(cx, cy, z):
             self.state = self.dp.touch(self.state, cx, cy, z)
-        st = w.rm.step_sim(SimState(pre[0], pre[1], pre[2], w.mapname), b0_keys(kd),
-                           scene=self._scenes[key], touch=touch)
+        if mph is None:                                  # blocked27's tic (the frozen run's expectation)
+            st = w.rm.step_sim(SimState(pre[0], pre[1], pre[2], w.mapname, turnheld=self.turnheld), b0_keys(kd),
+                               scene=self._scenes[key], touch=touch, tap=True)
+            self.turnheld = st.turnheld
+        else:
+            from doomfj.world import player_loots, player_mortal
+            x16, y16 = pre[0] & M32, pre[1] & M32
+            dead = mph.dead_latch() if player_mortal(mph.world.player) else 0
+            if player_loots(mph.world.player):
+                mph.sync(self.state[0], self.mstate[0], self.mstate[2])
+                mph.nukage(x16, y16, pre[2], dead=dead)
+                mph.weapon(kd, x16, y16, pre[2], dead=dead)
+                st = SimState(*mph.move(kd, x16, y16, pre[2], dead=dead), w.mapname)
+                self.state = (*self.state[:3], mph.card())
+            else:
+                mph.weapon(kd, x16, y16, pre[2])
+                mph.touch = touch
+                st = SimState(*mph.move(b0_keys(kd), pre[0], pre[1], pre[2], scene=self._scenes[key]), w.mapname)
         self.state = self.dp.after_move(self.state, (pre[0], pre[1]), (st.x, st.y))
         self.mstate = self.mp.after_move(self.mstate, (pre[0], pre[1]), (st.x, st.y))
         return (st.x, st.y, st.angle), tuple(s[0] for s in self.ds)
@@ -871,11 +902,15 @@ class Autopilot:
         return W.aprox_distance(x - px, y - py)
 
     def _turn_toward(self, x, y, kd):
+        """M7 P6+P7 (the tap rule, reference_model.turn_step): this frame's step is ANGLE_TURN_TAP when no turn was
+        held last frame, else ANGLE_TURN_HELD -- turn only when that step brings the bearing nearer. A held turn
+        whose remaining error is under half the held step is RELEASED for a frame, so the next one can tap"""
         ws = self.w.ws
         err = angle_err(bam(x - (ws.px / UNIT), y - (ws.py / UNIT)), ws.pangle)
-        if err > ANGLE_TURN // 2:
+        step = ANGLE_TURN if ws.p_turnheld else ANGLE_TURN_TAP
+        if err > step // 2:
             kd["turn_left"] = True
-        elif err < -(ANGLE_TURN // 2):
+        elif err < -(step // 2):
             kd["turn_right"] = True
         return err
 
@@ -1215,11 +1250,7 @@ class Autopilot:
         back+strafe +-141, back 180 -- after this tic's turn) is nearest the bearing and really
         moves; none when every direction within `max_off` of the bearing is blocked"""
         ws = self.w.ws
-        angle = ws.pangle
-        if kd.get("turn_left"):
-            angle = (angle + ANGLE_TURN) & M32
-        if kd.get("turn_right"):
-            angle = (angle - ANGLE_TURN) & M32
+        angle, _held = turn_step(ws.pangle, kd, ws.p_turnheld)   # M7 P6+P7: the model's own turn (the tap rule)
         err = angle_err(bam(x - ws.px / UNIT, y - ws.py / UNIT), angle)
         order = sorted(MOVE_DIRS, key=lambda d: (abs(angle_err(err & M32, d[0] & M32)), d[0]))
         for off, keys in order:
@@ -1274,12 +1305,23 @@ def plan_run(cp: dict, setup: dict, nav: NavGraph):
     for params in tuple(cp.get("params", ())) + PARAMS:
         w = start_world(setup)
         ap = Autopilot(w, nav, params, cp.get("style", "fight"))
+        mirror = BinaryMirror(w)
         keys, bad = [], []
         for _f in range(FRAMES):
             kd = ap.decide()
+            ws = w.ws
+            pre, pre_doors, pre_movers = (ws.px, ws.py, ws.pangle), door_tuples(w), mover_state(w)
             ev = w.tic(kd)
             keys.append(kd)
             bad += forbidden_events(ev)
+            # M7 P6+P7 (the integrator): a frame B0 cannot inject -- the binary's own tic from the injected pose
+            # does not land on the model's (a forward + strafe step whose forward-only replay meets a wall: the
+            # strafe undercount's corner) -- is refused like a death, so the planner takes the next parameter set;
+            # the criterion "B0 follows the model's camera" is unchanged
+            post = (ws.px, ws.py, ws.pangle)
+            inj, bkeys = b0_injection(w.rm, pre, post, kd)
+            if mirror.step(inj, bkeys, pre_doors, pre_movers)[0] != (post[0], post[1], post[2] & M32):
+                bad.append("b0 camera")
             if bad:
                 break
         tried.append((params["name"], bad[:1]))
@@ -1474,8 +1516,16 @@ def freeze_checks(doc: dict, ms: list) -> list:
                 bool(rec) and not bad, "changed: %s" % bad if bad else "%d/%d" % (len(rec), len(rec))))
     stale = [r["name"] for run, r in zip(doc["runs"], ms)
              if r["poses"] != run["poses"] or r["digest"] != run["model_final_digest"]]
+    # M7 P6+P7 (the integrator, investigating package A's "F2/F3/F4 FAIL on v5 at b866606"): say WHICH half parts --
+    # a run whose every pose reproduces but whose final digest does not is the SCHEMA GROWING (new fields hash in;
+    # `--freeze --grown-from` is its re-freeze) or a change off the player's path (a monster's). Verdict unchanged.
+    pose_stale = [r["name"] for run, r in zip(doc["runs"], ms) if r["poses"] != run["poses"]]
+    digest_only = [n for n in stale if n not in pose_stale]
     out.append(("F3 the replay reproduces every frozen pose and final digest", not stale and bool(ms),
-                "stale: %s" % stale if stale else "%d/%d runs" % (len(ms), len(ms))))
+                ("stale: %s -- poses part on %d run(s) %s; the digest only on %d (every pose reproduces: the schema "
+                 "grew, or the world moved where the player's pose does not show it)"
+                 % (stale, len(pose_stale), pose_stale, len(digest_only)))
+                if stale else "%d/%d runs" % (len(ms), len(ms))))
     if all(r["census"] for r in ms) and ms:
         drift = [r["name"] for run, r in zip(doc["runs"], ms) if r["pops"] != run.get("pops")]
         out.append(("F4 the drawn and geometric population reproduces frame by frame", not drift,
@@ -1838,17 +1888,20 @@ def selftest(doc: dict) -> int:
         now2 = dict(now0, **{PLANNER_FILE: "0" * 16})
         ok2, why2, _ = rehash_decision(doc, ms0, now2)
         check("R3 a CHECKER change (scenarios_v2.py's hash) is REFUSED", not ok2, why2)
-        # R4 the round-3 attack: a PICTURE-rule change (the monster degradation budget 4 -> 2) must
-        # not pass a re-freeze -- it moves the frozen drawn populations
+        # R4 the round-3 attack: a PICTURE-rule change must not pass a re-freeze -- it moves the frozen drawn
+        # populations. M7 P6+P7: the monsters' size rule, not their soft budget -- under the game picture's actors
+        # rule (GAME_RENDER_KW `exempt_actors`, package E) a monster's soft count is MONSTER_BUDGET, so DEG_SOFT_MON
+        # (4 -> 2, the control through v5) no longer reaches the picture and the control went vacuous on v6; the
+        # actors' BASE bound MIN_SPRITE_H_MONSTER (1 -> 8) does
         import doomfj.reference_model as _RMOD
-        saved = _RMOD.DEG_SOFT_MON
+        saved = _RMOD.MIN_SPRITE_H_MONSTER
         try:
-            _RMOD.DEG_SOFT_MON = 2
+            _RMOD.MIN_SPRITE_H_MONSTER = 8
             ms4 = [replay(run, census=True) for run in doc["runs"]]
         finally:
-            _RMOD.DEG_SOFT_MON = saved
+            _RMOD.MIN_SPRITE_H_MONSTER = saved
         ok4, why4, _ = freeze_decision(doc, doc["b0"], "a reviewer", "control", ms=ms4)
-        check("R4 a PICTURE-rule change (DEG_SOFT_MON 4 -> 2) is REFUSED by the re-freeze", not ok4, why4)
+        check("R4 a PICTURE-rule change (MIN_SPRITE_H_MONSTER 1 -> 8) is REFUSED by the re-freeze", not ok4, why4)
         # R5 a clean re-freeze keeps the owner's approval of the set and records its own approver
         ok5, why5, new5 = freeze_decision(doc, doc["b0"], "a reviewer", "control", ms=ms0)
         check("R5 a clean re-freeze keeps owner_approval and names its own approver",
@@ -2180,9 +2233,11 @@ def main():
             print("PLAN REFUSED: %s (nothing written)" % why, flush=True)
             return 1
         t0 = time.time()
-        use_sight_rule({"sight_rule": a.sight})
+        # M7 P6+P7 E: a NEW plan is made at the game's monster tempo, and records it
+        use_sight_rule({"sight_rule": a.sight, "monster_tics": W.MONSTER_TICS_PER_FRAME})
         doc = plan_set()
         doc["sight_rule"] = SIGHT_RULE
+        doc["monster_tics"] = MONSTER_TICS
         res = validate(doc, census=True, quiet=False)
         record_validation(doc, res)
         doc["hashes"] = code_hashes()

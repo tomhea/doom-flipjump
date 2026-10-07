@@ -25,7 +25,7 @@ from doomfj.lut_generator import (
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
 from doomfj.reference_model import STRAFE_MOVE                                   # M7 P4.1
-from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
+from doomfj.reference_model import (ANG90, ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
                                     apply_sector_heights, spawn_state)
 from doomfj.config import Config
@@ -144,7 +144,9 @@ MONSTER_MODE = "full"
 # (damagecode.DAMAGE_PLAYER_MODES) adds the monsters' damage to p31_parts -- MONSTER_MODE must then decide ("decide" or
 # "full"); M7 P5: "fx" ("hit" + the blood a hit spawns) is the one a "full" MONSTER_MODE pairs with (hurtcode.hurt_on:
 # the player can be hurt exactly when the monsters' attacks land -- monstercode.p31_parts asserts the pair)
-PLAYER_MODE = "fx"                       # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD; P5: it BLEEDS
+# M7 P6+P7: "full" -- the player loots (pickups, blocking, nukage, berserk, barrels, drops) and is mortal (the dead
+# latch, the death think and its turn to the killer, the restart on use)
+PLAYER_MODE = "full"                     # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD; P5: it BLEEDS
 
 
 def tier_flags(tier: str) -> dict:
@@ -207,14 +209,36 @@ def _seg_xorby_block(label, fields, ret="xb_ret"):
     """The shared per-seg constant block `label` (emitted ONCE, fcall'd twice per visible seg — SET then CLEAR). M12pp:
     replaces the per-seg baked `hex.set` (each pays an @-dispatch to zero a reg it overwrites) with `hex.xor_by`
     (no @), kept correct by xor-INVOLUTION self-zeroing. `fields` = list of (regname, width, value) PURE
-    compile-time constants. Correct ONLY on a zero register, so the zero-init seg regs self-restore each call."""
+    compile-time constants. Correct ONLY on a zero register, so the zero-init seg regs self-restore each call.
+    ⚠ Each value must FIT its width: `hex.xor_by n` xors only the low n nibbles of its constant, so a wider value is
+    silently truncated (M7 P6+P7, 2026-10-06: the baked barrels' explosion light classes 279..426 in the 2-nibble
+    `sp_lt` drew BEXPB..E with another class's shade rows -- b0 v6 R2-barrel-hall, 30 frames)."""
     lines = [f"  {label}:"]
     for reg, wdt, val in fields:
+        assert not isinstance(val, int) or 0 <= val < 16 ** wdt, (
+            f"{label}: hex.xor_by {wdt}, {reg}, {val} -- the constant does not fit {wdt} nibbles (xor_by truncates)")
         lines.append(f"    hex.xor_by {wdt}, {reg}, {val}")
     # M2-R3: a per-state block is reached through its door's switch and must return to the SWITCH's
     # register, not the call site's -- the switch is what the call site fcall'd.
     lines.append(f"    stl.fret {ret}")
     return lines
+
+
+def barrel_state_fields(tfields, row, floor_h: int, cls: int):
+    """M7 P6 (docs/gp-p67-interface.md 5): a BAKED barrel's xor_by fields for one non-S_BAR1 state -- the map barrel's
+    `tfields` (THING_XORBY_FIELDS' layout) with the art, depth bounds, bank regions and light class of the state's
+    lump row `row` (monstercode.barrel_view_rows: (left, w, h, top, tzmax, tzmax2, base, base2, sp_mon, dw)) standing
+    on a floor at `floor_h`. The light class `cls` is `ltw` = 2 BYTES in the animated game tier (frame.thing_record_body
+    reads `2*ltw` nibbles from `sp_lt`, whose second byte `sp_lt_hi` is declared right behind it): its low byte goes in
+    `sp_lt` and a non-zero high byte in `sp_lt_hi` -- zero between things (sim.thing_pass clears it; no baked thing
+    writes it), so the xor involution restores it. The explosion lumps' heights (31, 40, 50, 53) are classes past 255."""
+    assert 0 <= cls < 0x10000, cls
+    new = {"sp_z": ((floor_h + row[3]) << 16) & 0xFFFFFFFF, "sp_left": (row[0] << 16) & 0xFFFFFFFF,
+           "sp_w": (row[1] << 16) & 0xFFFFFFFF, "sp_hh": (row[2] << 16) & 0xFFFFFFFF, "sp_tzmax": row[4],
+           "sp_tzmax2": row[5], "sp_mon": 0, "sp_base": row[6], "sp_base2": row[7], "sp_dw": row[9],
+           "sp_lt": cls & 0xFF}
+    out = [(n, w_, new.get(n, v)) for n, w_, v in tfields]
+    return out + ([("sp_lt_hi", 2, cls >> 8)] if cls >> 8 else [])
 
 
 def _seg_xorby_use(label, clear=True):
@@ -267,7 +291,7 @@ def _int_part_lines(dst, src, neg, pos):
             f"{neg}:", f"hex.set 6, {dst} + 4*dw, 0xFFFFFF", f";{pos}", f"{pos}:"]
 
 
-def _player_sim_lines(collide: bool = False, strafe: bool = False) -> list:
+def _player_sim_lines(collide: bool = False, strafe: bool = False, tap=None) -> list:
     """M14-c — ONE TIC OF THE PLAYER SIM, in fj. The exact mirror of
     `ReferenceModel.step_sim`: turn first, then a collision-free move along the NEW angle.
 
@@ -284,8 +308,29 @@ def _player_sim_lines(collide: bool = False, strafe: bool = False) -> list:
     The key byte's bits are tested with `hex.if_flags`, whose mask is a set of NIBBLE VALUES: bit 0
     set is the 8 odd nibbles (0xAAAA), bit 1 is 0xCCCC, bit 2 is 0xF0F0, bit 3 is 0xFF00. Only the
     LOW nibble is read, so only key bits 0..3 exist.
+
+    M7 P6+P7 (`tap`, the game tier): the turn is `reference_model.turn_step` -- ANGLE_TURN_TAP on the first frame of a
+    held turn (the persisted flag `p_tnh` 0), ANGLE_TURN_HELD (= ANGLE_TURN) after it, and `p_tnh` becomes "a turn key
+    is held now". Default: `strafe` -- the game tier's player, as `step_sim(tap=None)`. Off, every frame turns
+    ANGLE_TURN and the text is the earlier one to the byte.
     """
-    turn = ANGLE_TURN & 0xFFFFFFFF
+    tap = strafe if tap is None else tap
+    def _turn(sfx: str, rate: int) -> list:
+        return [f"hex.if_flags pkeys, {KEY_TURN_LEFT_MASK:#06x}, simtl{sfx}_no, simtl{sfx}_yes",
+                f"simtl{sfx}_yes:", f"hex.add_constant 8, viewangle, {rate & 0xFFFFFFFF:#x}",
+                f"simtl{sfx}_no:",
+                f"hex.if_flags pkeys, {KEY_TURN_RIGHT_MASK:#06x}, simtr{sfx}_no, simtr{sfx}_yes",
+                f"simtr{sfx}_yes:", f"hex.add_constant 8, viewangle, {-rate & 0xFFFFFFFF:#x}",
+                f"simtr{sfx}_no:"]
+    # either turn key: the nibble values with bit 2 or bit 3 set
+    either = KEY_TURN_LEFT_MASK | KEY_TURN_RIGHT_MASK
+    turning = (_turn("", ANGLE_TURN) if not tap else
+               [f"hex.if_flags pkeys, {either:#06x}, simth_no, simth_yes",
+                "simth_yes:", "hex.if1 1, p_tnh, simth_held", "hex.set 1, p_tnh, 1",
+                *_turn("p", ANGLE_TURN_TAP), ";simth_done",
+                "simth_held:", *_turn("h", ANGLE_TURN), ";simth_done",
+                "simth_no:", "hex.zero 1, p_tnh",
+                "simth_done:"])
     fwd = FORWARD_MOVE & 0xFFFFFFFF
     # M7 P4.1 (the game tier, `strafe`): the side step -- `step_sim(strafe=True)` and the model's _player_move: the side
     # magnitude from the high nibble's strafe bits, then dx += FixedMul(side, sin), dy -= FixedMul(side, cos) after the
@@ -298,12 +343,7 @@ def _player_sim_lines(collide: bool = False, strafe: bool = False) -> list:
              "simsl_yes:", f"hex.add_constant 8, psid, {-STRAFE_MOVE & 0xFFFFFFFF:#x}",
              "simsl_no:"] if strafe else [])
     return [
-        f"hex.if_flags pkeys, {KEY_TURN_LEFT_MASK:#06x}, simtl_no, simtl_yes",
-        "simtl_yes:", f"hex.add_constant 8, viewangle, {turn:#x}",
-        "simtl_no:",
-        f"hex.if_flags pkeys, {KEY_TURN_RIGHT_MASK:#06x}, simtr_no, simtr_yes",
-        "simtr_yes:", f"hex.add_constant 8, viewangle, {-ANGLE_TURN & 0xFFFFFFFF:#x}",
-        "simtr_no:",
+        *turning,
         "hex.zero 8, pmove",
         f"hex.if_flags pkeys, {KEY_FORWARD_MASK:#06x}, simfw_no, simfw_yes",
         "simfw_yes:", f"hex.add_constant 8, pmove, {fwd:#x}",
@@ -402,6 +442,10 @@ SKILL_MENU_FIRST = 2
 LEVEL_DONE_MENU = ["LEVEL COMPLETE", "", "PRESS ENTER"]
 LEVEL_DONE_SELECTED = 2
 
+from doomfj import restartcode as _restartcode                    # noqa: E402 (M7 P7)
+from doomfj import hurtcode as _hurtcode                          # noqa: E402 (M7 P7: the death think's turn)
+from doomfj import lootcode as _lootcode                          # noqa: E402 (M7 P6+P7 package B: the player's side)
+
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
 # `mode`). `menu_scr` (0 = the main menu, 1 = the skill screen; M7 P2a.2 / P3.4: 2 LEVEL COMPLETE,
@@ -420,6 +464,9 @@ MENU_STATE_DECLS = [
     # M7 P3.4: the help key's event, zeroed before the polls like the four above
     "ev_help: hex.vec 1",
     "rs_ret: hex.vec w/4",
+    # M7 P7 (doomfj.restartcode): the skill the restart restores to (NEW GAME sets it), the restart request (the
+    # death think sets it on use), the level time -- all three PERSISTED (build.GAME_PERSIST)
+    *_restartcode.game_decls(SKILLS.index(BOOT_SKILL)),
 ]
 
 # M5 — the standalone tier's own globals, in ONE place (R6): the emitter declares them and
@@ -437,6 +484,9 @@ STANDALONE_SCRATCH_DECLS = [
     # M7 P4.1: the new held flags -- strafe left / right, fire, the number keys 1..4 (persisted with the others)
     "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1",
     "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
+    # M7 P6+P7: a turn key was held last frame (reference_model.turn_step's `turnheld`: the turn's slow first frame).
+    # Persisted like the held flags it follows (build.STANDALONE_PERSIST); the restart zeroes it.
+    "p_tnh: hex.vec 1, 0",
     # M3: which frame producer runs. 1 = MENU, 0 = world, and it BAKES to 1 so the game boots
     # into the menu. Persisted like the key flags -- a mode that reset every frame would flicker
     # between the two pictures. It is declared even when the menu is off (two words) so both
@@ -448,7 +498,7 @@ STANDALONE_SCRATCH_DECLS = [
 
 
 def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
-                  monsters=None, nmobile=0) -> tuple:
+                  monsters=None, nmobile=0, skill_extra=None) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -464,7 +514,12 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
 
     M7 P5: `nmobile` -- the mobiles' runtime things after the WAD's (monstercode.p31_parts' `nmob`): their links
     are zeroed with the others' (a level start links no pool thing; projcode's restart lines, passed in `hud`, zero
-    their rows and empty the pools)."""
+    their rows and empty the pools).
+
+    M7 P7 (doomfj.restartcode): the routine also zeroes `lvtime` and `g_rs` (`g_skill` is kept: it is WHICH level
+    start); `skill_extra[k]` -- more lines for skill k's block (the P6 cells whose level start depends on the skill).
+    The blocks are placed and called through `restartcode.routine_lines` / `call_lines`: ONE sequence, run by NEW
+    GAME and by the restart on use after death."""
     common = ["restart_common:",
               f"    hex.set 8, viewx, {spawn.x & 0xFFFFFFFF}",
               f"    hex.set 8, viewy, {spawn.y & 0xFFFFFFFF}",
@@ -476,6 +531,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
                  f"    hex.zero {max(nwalk, 1)}, wfired"]
                 if ndoors else []),
               "    hex.zero 1, lvdone", "    hex.set 1, pusedn, 1",     # M7 P2a.2
+              "    hex.zero 1, p_tnh",                                 # M7 P6+P7: no turn held at the level start
               # M7 P2b: every lift at its top, idle, nothing pending; the switch not fired
               *([f"    hex.zero {nlift}, lstate", f"    hex.zero {nlift}, ldir",
                  f"    hex.zero {nlift}, lsub", f"    hex.zero {WAIT_NIBBLES * nlift}, lwait",
@@ -485,6 +541,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
               f"    rep({len(rt_binds) + nmobile}, i) m1.zerobyte thnext + i*dw",
               *[f"    {line}" for line in hud],                  # M7 P4.0: the bar's level-start values
+              *_restartcode.restart_lines(),                   # M7 P7: lvtime, g_rs
               "    stl.fret rs_ret"]
     skills = []
     for head, nxt, vis in per_skill:
@@ -495,17 +552,91 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
         out += [f"    hex.set 2, thvis + {j}*2*dw, {v}" for j, v in enumerate(vis)]
         # M7 P3.1: the monsters' cells at this skill's level start (monstercode.p31_parts)
         out += list(monsters[len(skills)]) if monsters else []
+        out += list(skill_extra[len(skills)]) if skill_extra else []     # M7 P7: the P6 cells by skill
         skills.append(out)
     return common, skills
 
 
-def p5_tic_lines(hrt) -> list:
+def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
+                    wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None) -> tuple:
+    """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
+    values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
+    emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
+    start, so the two cannot be composed differently. `hud_restart` None: a tier without the game screen (then none of
+    the screen's parts either)."""
+    extra = (() if hud_restart is None else
+             (list(hud_restart) + list(wpn_restart)
+              + ([f"hex.zero {2 * 17}, aim_sid"] if aim else [])                          # M7 P4.2a: no aim
+              # M7 P5: the player's health, armor, damage count and death at the level start (never pal_cur: a
+              # device shadow, restartcode.DEVICE_SHADOWS); the pools empty, their rows zero, rng_fx at its seed
+              + list(hrt_restart) + list(proj_restart) + list(p6_common)))
+    return restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=nwalk, nlift=nlift,
+                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills)
+
+
+def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
+    """M7 P6 -- P6's level-start lines for `compose_restart(p6_common=, p6_skills=)`, ONE composition (the emitter and
+    tests/fj/test_restart_fj.py both call it): package C's barrels and drops (`bar`: barrelcode.barrel_parts' dict; the
+    same on every skill, check_model_rules), package B's loot cells (restartcode.level_start_lines over
+    lootcode.PERSIST -- the same on every skill: the player's start), and each skill's RUNTIME pickups' `thvis` slots
+    after the baked vanishable ones (`loot_slots`: lootcode.pickup_slots; lootcode.extra_vis per skill)."""
+    common, skills = (list(bar["restart"][0]) if bar else []), [[] for _ in SKILLS]
+    if loot_slots is not None:
+        c, per = _restartcode.level_start_lines(world, SKILLS, _lootcode.PERSIST)
+        common += c
+        for k, sk in enumerate(SKILLS):
+            skills[k] += list(per[k]) + [f"    hex.set 2, thvis + {loot_slots['nvis'] + j}*2*dw, {v}"
+                                         for j, v in enumerate(_lootcode.extra_vis(world, loot_slots, sk))]
+    return common, skills
+
+
+def p5_tic_lines(hrt, barrels: bool = False) -> list:
     """M7 P5 -- the frame's tic after the monsters' (`tic_after_eye`): the fireballs, then the blood (projcode's
     `pj_phase` / `fx_phase`, each skipping itself while `lvdone`: world.tic's order monsters -> projectiles ->
     barrels -> effects), then the bar's health and armor (`hrt` is hurtcode.hurt_parts' dict: its `bar`, hp_bar)
-    from what the frame's damage left, inside the frozen-level guard -- a finished level changes neither"""
-    return ["stl.fcall pj_phase, pj_pret", "stl.fcall fx_phase, fx_pret",
-            "hex.if1 1, lvdone, p5_bar_skip", *hrt["bar"], "p5_bar_skip:"]
+    from what the frame's damage left, inside the frozen-level guard -- a finished level changes neither.
+    M7 P6 (`barrels`, doomfj.barrelcode): the barrels' phase between the two (it skips itself while `lvdone` too).
+    M7 P7: `leveltime` +1 at the end of the non-frozen tic (World.tic; restartcode.lvtime_tic_lines), in the same
+    guard"""
+    return (["stl.fcall pj_phase, pj_pret"] + (["stl.fcall bar_phase, bar_pret"] if barrels else [])
+            + ["stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(),
+               *hrt["bar"], "p5_bar_skip:"])
+
+
+# M7 P6+P7 package E (the owner, 2026-10-05: "maybe run 2 ticks each time?"): the frame's MONSTER WORLD runs
+# world.MONSTER_TICS_PER_FRAME tics -- the monster tic and the pools, looped (never a second copy of the per-slot code).
+# `wt_rep` is the loop's one-nibble counter: set every frame, it ends every frame at 0, its declared value, so the
+# M1 reset has nothing of it to restore.
+WT_DECLS = ["wt_rep: hex.vec 1"]
+_WT_BAR = "hex.if1 1, lvdone, p5_bar_skip"
+
+
+def world_tic_lines(tic, pools, tics: int) -> list:
+    """M7 P6+P7 package E -- the frame's world tic after the eye (`tic`: monstercode's `tic_after_eye`; `pools`:
+    p5_tic_lines' text) with the MONSTERS' WORLD run `tics` times (world.World._monster_world's loop):
+
+        [P_ChangeSector]  wt_rep = tics
+      wt_loop:
+        [the monster tic: mt_tic .. mt_skip]  [the pools' fcalls: pj_phase, (bar_phase), fx_phase]
+        wt_rep -= 1; if wt_rep != 0: goto wt_loop
+        [thseen = 0]  [the bar]
+
+    P_ChangeSector stays outside (the model runs it in the door/mover phases, once a frame); the seen marks are
+    zeroed once, after both tics read them (both tics read the LAST picture's marks, as the model's do); the bar is
+    written once, from what both tics left. Each phase keeps its own `lvdone` guard. The boundaries are the
+    documented shapes of the two inputs, asserted: `tic` = [... "mt_tic:" ... "  mt_skip:", "hex.zero thseen"],
+    `pools` = [the fcalls..., _WT_BAR, the bar ...]. tics == 1 returns `tic + pools` unchanged (blocked48's text)."""
+    tic, pools = list(tic), list(pools)
+    assert 1 <= tics <= 15, ("wt_rep is one nibble", tics)
+    if tics == 1:
+        return tic + pools
+    i = tic.index("mt_tic:")
+    assert tic[-2] == "  mt_skip:" and tic[-1].startswith("    hex.zero ") and tic[-1].endswith(", thseen"), tic[-2:]
+    j = pools.index(_WT_BAR) if pools else 0
+    assert all(ln.startswith("stl.fcall ") for ln in pools[:j]), pools[:j]
+    return (tic[:i] + ["    hex.set 1, wt_rep, %d" % tics, "wt_loop:"] + tic[i:-1] + pools[:j]
+            + ["    hex.dec 1, wt_rep", "    hex.if0 1, wt_rep, wt_done", "    ;wt_loop", "wt_done:"]
+            + tic[-1:] + pools[j:])
 
 
 # M7 P5: the labels the P5 text READS that other parts of the program must define (projcode.proj_parts' docstring:
@@ -560,19 +691,25 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     # the pool states (docs/gp-p5-interface.md): S_BLOOD1..3 = 39..41, S_TBALL1/2 = 46/47, S_TBALLX1..3 = 48..50
     names = {"S_BLOOD1": 39, "S_BLOOD2": 40, "S_BLOOD3": 41, "S_TBALL1": 46, "S_TBALL2": 47, "S_TBALLX1": 48,
              "S_TBALLX2": 49, "S_TBALLX3": 50}
+    puffs = bool(p31.get("barrel"))              # M7 P6: the puffs share the blood's pool (projcode `puffs`)
+    if puffs:
+        names.update({"S_PUFF1": 42, "S_PUFF2": 43, "S_PUFF3": 44, "S_PUFF4": 45})
     assert {s: gd.STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
-    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states()) == sorted(names.values())
+    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs)) == sorted(names.values())
     assert (FIREBALL_INFO.spawnstate, FIREBALL_INFO.deathstate) == ("S_TBALL1", "S_TBALLX1")
     mv = p31["mob_view"]
     assert sorted(mv) == sorted(names.values()), sorted(mv)
     rows, nt = p31["view_rows"], len(p31["rt_slot"])
     by_lump = {}
-    for s in projcode.pool_states():
+    for s in projcode.pool_states(puffs):
         row = mv[gd.STATE_INDEX[s]]
         assert p31["mob_first"] <= row < nt + len(rows), (s, row)
         by_lump.setdefault(mobile_lump(s), set()).add(row)
         r = rows[row - nt]
-        assert r[8] == 0 and r[4] == r[5] and r[9] < 0x80, (s, r)        # scenery, base bound twice, not mirrored
+        # the base bound twice, not mirrored; the class: an ACTOR (sp_mon 1) under the game picture's actors rule
+        # (M7 P6+P7 E, reference_model.GAME_RENDER_KW `exempt_actors`), else scenery
+        from doomfj.reference_model import GAME_RENDER_KW as _GRK5
+        assert r[8] == int(bool(_GRK5.get("exempt_actors"))) and r[4] == r[5] and r[9] < 0x80, (s, r)
     assert all(len(v) == 1 for v in by_lump.values()) and len({min(v) for v in by_lump.values()}) == len(by_lump)
     assert MISSILE_Z == 32, MISSILE_Z
     assert proj["nt"] == nt
@@ -587,7 +724,7 @@ def _skill_dispatch(prefix: str) -> list:
     shape -- an `if0`, then one `if_flags` on bit 1 -- so it refuses any other number of SKILLS
     rather than send a fourth skill to the third's block (tests/host/test_menu.py holds the tie)."""
     assert len(SKILLS) == 3, "the skill dispatch is written for three skills, not %r" % (SKILLS,)
-    return [f"hex.if0 1, menu_sel, {prefix}0", f"hex.if_flags menu_sel, 1<<1, {prefix}2, {prefix}1"]
+    return _restartcode.skill_dispatch(prefix, "menu_sel", len(SKILLS))   # M7 P7: one dispatch shape
 
 
 def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) -> list:
@@ -619,7 +756,6 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
     assert MENU_HELP_ITEM in entries, "the main menu needs its %r item (M7 P3.4)" % MENU_HELP_ITEM
-    common, _skills = restart
     return [
         # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
@@ -656,7 +792,8 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
         menu_fj(cfg.W, cfg.H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours,
                 label="menu_level_done", end_marker=False),
         ";frame_end",
-        *common,                           # fcall'd only: every screen above ends in a jump
+        # fcall'd only: every screen above ends in a jump. M7 P7: restart_common and each skill's rs_skill<k>
+        *_restartcode.routine_lines(restart),
         "do_world:",
     ]
 
@@ -670,7 +807,10 @@ def menu_state_lines(restart) -> list:
 
     M7 P3.4 (docs/gp-help.md; `doomfj.menu.menu_step` is the rules' other mirror): the help screen
     and the main menu's second item. In the WORLD the only addition is one `if0` on `ev_help`,
-    reached when neither esc nor enter is down -- the one state branch a world frame pays."""
+    reached when neither esc nor enter is down -- the one state branch a world frame pays.
+
+    M7 P7: NEW GAME sets `g_skill` from `menu_sel` and runs `restartcode.call_lines` -- the routines
+    (`restartcode.routine_lines(restart)`) must be placed by the caller too, where nothing falls into them."""
     _common, skills = restart
     assert len(skills) == len(SKILLS), "one restart block per skill: %d for %d" % (len(skills),
                                                                                   len(SKILLS))
@@ -697,11 +837,9 @@ def menu_state_lines(restart) -> list:
         "mn_dn:", f"hex.if_flags menu_sel, 1<<{len(SKILLS) - 1}, mn_dn_inc, mn_done",
         "mn_dn_inc:", "hex.inc 1, menu_sel", ";mn_done",
         "mn_start:",                       # NEW GAME at the highlighted skill
-        "stl.fcall restart_common, rs_ret",
-        *_skill_dispatch("mn_r"),
-        "mn_r0:", *skills[0], ";mn_started",
-        "mn_r1:", *skills[1], ";mn_started",
-        "mn_r2:", *skills[2],
+        # M7 P7: g_skill = menu_sel, then THE restart sequence (restartcode.call_lines) -- the one the restart on
+        # use after death runs (restartcode.tic_lines), into the same fcall'd per-skill routines
+        *_restartcode.new_game_lines(len(SKILLS)),
         "mn_started:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
         # -- M7 P3.4: the help screen and the main menu with HELP highlighted
         "mn_p34:",
@@ -787,7 +925,8 @@ def exit_lines(boxes, press_miss=()) -> list:
 
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
-                            press_miss=(), monster_tic=(), weapon=()) -> list:
+                            press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
+                            use_guard=((), ()), weapon_bar=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -800,6 +939,10 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     `pkeys` comes from differs. The four `kb.*` flags are edge-driven and persistent ("this key is
     held"), and `pkeys` is rebuilt from them every frame — so `pkeys` itself is ordinary
     restore-set scratch, and only the four flags need to survive the reset.
+
+    M7 P6+P7 (doomfj.lootcode, the "full" player): `latch` -- `p_dd0` = `p_dead`, the death at the tic's START, right
+    after the restart on use (which may clear it) and before every guard that reads it (the door tic's, the use lines',
+    the weapon keys'); `use_guard` -- (before, after) the use lines: a dead player uses nothing.
     """
     return [
         # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
@@ -823,6 +966,10 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         "hex.if0 1, kb_sr, sa_nsr", "hex.xor_by pkeys + dw, 0x4", "sa_nsr:",
         "hex.if0 1, kb_fi, sa_nfi", "hex.xor_by pkeys + dw, 0x8", "sa_nfi:",
         *(menu or []),                     # M3: the menu frame + the branch past the world
+        # M7 P7: the restart on use after death (restartcode.tic_lines) -- the world frame's START, before the
+        # frozen-level guard and the door tic: the model's World.tic runs the restart, then the tic
+        *restart_tic,
+        *latch,                            # M7 P6+P7: p_dd0 = p_dead (the TIC-START death every guard reads)
         # M7 P2a.2: a finished level is FROZEN -- no door tic, no player tic (the model's frozen
         # tic); the frame draws the world where it stopped
         *(["hex.if0 1, lvdone, lv_live", ";lv_frozen", "lv_live:"] if exit_boxes_ else []),
@@ -833,10 +980,13 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
            f"hex.if_flags pkeys + dw, {KEY_USE_MASK:#06x}, duse_nos, duse_yess",
            f"duse_yess:", "hex.xor_by 1, duse, 1",
            f"duse_nos:", *door_lines] if door_lines else []),
-        *(exit_lines(exit_boxes_, press_miss) if exit_boxes_ else []),
+        *((list(use_guard[0]) + exit_lines(exit_boxes_, press_miss) + list(use_guard[1])) if exit_boxes_ else []),
         # M7 P4.1: the weapon -- the model's player phase runs the number keys and the psprites before the move
         *weapon,
-        *_player_sim_lines(collide, strafe=True),        # M7 P4.1: the game tier strafes
+        *_player_sim_lines(collide, strafe=True, tap=True),   # M7 P4.1: the game tier strafes; P6+P7: the tap turn
+        # M7 P6+P7: the bar's weapon slots after the move -- its pickups change the ammo and the owned weapons
+        # (weaponcode.bar_lines; everything above lands on simmv_done, the dead player's skipped move too)
+        *weapon_bar,
         # M7 P3.1: the monsters tic after the player (the model's order: doors, player, monsters);
         # a frozen level skips them with the player
         *monster_tic,
@@ -1216,6 +1366,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P4.2b: ... and make NOISE (nz_leaf at each fire point; monstercode.p31_parts emits the leaf at the same mode)
     from doomfj.noisecode import NOISE_PLAYER_MODES
     from doomfj.world import player_resolves as _player_resolves
+    from doomfj.world import MONSTER_TICS_PER_FRAME as _WT_TICS   # M7 P6+P7 E: the monsters' tempo, ONE definition
     # M7 P5 (doomfj.hurtcode, doomfj.projcode): the monsters' attacks LAND -- the player can be hurt and die, the imps'
     # fireballs fly and a hit bleeds. ONE switch for the whole splice, from the two model modes (p31_parts asserts
     # the pair is coherent) -- and a map WITH monsters (p31_parts, below: a monster-less game tier has nobody to
@@ -1223,6 +1374,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # is built once that is known.
     from doomfj.hurtcode import hurt_on as _hurt_on
     _P5 = bool(menu and MONSTER_MODE == "full" and _hurt_on(PLAYER_MODE))
+    # M7 P6+P7 (doomfj.lootcode, package B): the "full" player -- pickups and gives, blocking by things, nukage,
+    # berserk and bonus, and the dead player's guards on the TIC-START death `p_dd0`. ONE switch, from the model mode;
+    # the door tic reads `p_dd0` (built below, before the monster parts), so it is known here
+    _LOOT = bool(_P5 and standalone and _lootcode.loot_on(PLAYER_MODE))
     cmap = bake_bsp(map_wad, mapname)
     verts = cmap.vertexes
     lds = map_wad.linedefs(mapname); sds = map_wad.sidedefs(mapname)
@@ -1295,7 +1450,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              contact=(door_contact_geo(secs, lds, sds, verts)
                                       if (standalone and player_sim) else None),
                              passes={si: pass_state(secs, lds, sds, si) for si in _dst_tbl},
-                             mon_press=mon_press, mon_contact=mon_contact)
+                             mon_press=mon_press, mon_contact=mon_contact,
+                             # M7 P7: a player dead at the tic's start presses no door and holds none open
+                             dead="p_dd0" if _LOOT else None)
               if (_dst_tbl and player_sim) else [])
         # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
         if _movers_on and dt:
@@ -1661,8 +1818,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _p31 = p31_parts(rm, map_wad, mapname, sprite_wad, _anim,
                          [map_wad.things(mapname)[w_] for w_ in sorted(_mt_keep)],
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
-                         cache=spr_cache, mode=MONSTER_MODE, player=PLAYER_MODE if menu else "walk")
+                         cache=spr_cache, mode=MONSTER_MODE, player=PLAYER_MODE if menu else "walk",
+                         static_bank=(spr_base, spr_ldbase, spr_dw))
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
+    # M7 P6 (doomfj.barrelcode, the player mode "full"): the barrels, their blasts, the drops and the puffs
+    _bar = _p31.get("barrel") if _p31 else None
     _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide", "full")) else 0
     # M7 P4.2a (doomfj.aimcode): the game tier's AIM WINDOW, when its player's shots resolve -- recorded by the runtime
     # monsters' projections (their seen machinery reaches xscale for every monster D3 e counts)
@@ -1671,8 +1831,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         from doomfj import aimcode as _aimcode
         from doomfj.combat import aim_window as _aim_window
         assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
-        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX)
-        _aim_decls = _aimcode.decls() + [_aimcode.table_text(rm)]
+        # M7 P6: a standing barrel records too (radius class aimcode.RC_BARREL)
+        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar))
+        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar))]
     else:
         _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
@@ -1689,8 +1850,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _proj = _p31.get("proj") if _p31 else None
     _hrt = None
     _P5 = _P5 and _p31 is not None                     # a map without monsters: nothing attacks
+    if _LOOT and not _P5:
+        # a map without monsters: nothing attacks (P5's rule above), so nothing loots either -- and the door tic,
+        # built before that was known, is rebuilt without the dead player's guard (it would read an undeclared p_dd0)
+        _LOOT = False
+        assert not _chase
+        _door_tic = _make_door_tic()
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
-                        noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5) if menu else None
+                        noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
+                        loot=_LOOT) if menu else None                # M7 P6+P7: the latch, berserk's key 1 and fist
     if _P5:
         assert _proj and _p31.get("nmob"), (
             "M7 P5: MONSTER_MODE 'full' needs p31_parts' pools and mobile rows -- a map with monsters, the game tier")
@@ -1698,7 +1866,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _w5 = _p31["world"]
         _w5.reset(BOOT_SKILL)
         # boot_wad: the asset wad, whose palette 0 the boot sends as `palette` -- hurtcode asserts playpal0 equals it
-        _hrt = hurt_parts(_w5, sprite_wad=sprite_wad, boot_wad=asset_wad)
+        _hrt = hurt_parts(_w5, sprite_wad=sprite_wad, boot_wad=asset_wad,
+                          loot=_LOOT)                               # M7 P6: the berserk and bonus palettes
         _p5_model_asserts(_p31, _proj, _hrt)
     else:
         assert not _proj and not (_p31 and _p31.get("nmob")), "the pools and mobile rows are P5's (MONSTER_MODE 'full')"
@@ -1712,7 +1881,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                              spr_base, spr_ldbase, spr_dw, spr_cls, spr_cache=spr_cache,
                              keep=_mt_keep, view_rows=_p31["view_rows"] if _p31 else (),
-                             ltw=2 if _p31 else 1, mobiles=_p31["nmob"] if _p31 else 0)
+                             ltw=2 if _p31 else 1,
+                             # M7 P6: + the drops' runtime things after the mobiles
+                             mobiles=(_p31["nmob"] + _p31.get("ndrop", 0)) if _p31 else 0)
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
     # (the hot block below), where they persist instead of being rebuilt every frame
@@ -1743,19 +1914,31 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # ⚠ ZERO-init would mean "hidden", so the host sends the whole block every frame -- it is the
     # host that owns what has been picked up, and fj has no state between frames.
     _MT_NVIS = len(_vis_slots) if _do_things else 0
+    # M7 P6 (doomfj.lootcode): the RUNTIME pickups' presence slots, after the baked vanishable ones -- THE thvis LAYOUT
+    # (docs/gp-p67-interface.md, package A as built: monsters.MonsterViews' vis_slots then rt_pickups in runtime-thing
+    # order; the probe reads "taken" for every pickup from thvis alike). Boot = the boot skill's; each skill's restart
+    # half sets them (p6_restart_parts).
+    _loot_slots = _lootcode.pickup_slots(_p31["world"], rm, map_wad, mapname, sprite_wad) if _LOOT else None
+    _LOOT_EXTRA_VIS = {}
+    if _loot_slots:
+        assert _loot_slots["nvis"] == _MT_NVIS, (_loot_slots["nvis"], _MT_NVIS)
+        _rtp = [r for r in _loot_slots["rt"] if r is not None]
+        assert _rtp == sorted(_rtp), "M7 P6: the runtime pickups' thvis slots are in runtime-thing order (A's layout)"
+        _LOOT_EXTRA_VIS = {sk: _lootcode.extra_vis(_p31["world"], _loot_slots, sk) for sk in SKILLS}
     if _MT_NVIS:
         # M5: standalone has no host to say what has been picked up, and nothing picks anything up
         # yet (that is C1), so every slot bakes its BOOT value -- since M7 P1.5, whether hard spawns
         # it. Zero means "hidden" -- the reason the hosted tier has to send the whole block every
         # frame.
         _mt_decls = list(_mt_decls) + (
-            ["thvis:"] + [f"    hex.vec 2, {v}" for v in _BOOT_VIS] if standalone else
+            ["thvis:"] + [f"    hex.vec 2, {v}" for v in list(_BOOT_VIS) + _LOOT_EXTRA_VIS.get(BOOT_SKILL, [])]
+            if standalone else
             [f"thvis: hex.vec {2 * _MT_NVIS}"])
     _MT_NROWS = _p31["nrows"] if _p31 else _MT_NT         # M7 P3.1: + the view rows
     # M7 P5: the mobiles are runtime things nt .. nt + nmob - 1 of THIS table -- the pools' `nt` must be its runtime
     # thing count (MonsterViews.nrt's index space: the drawables the bake leaves to the runtime path), and the lists'
     # declared `thnext` extent (2 * nt, the span the restore set carries) must hold the mobiles' links
-    _MT_NMOB = _p31["nmob"] if _p31 else 0
+    _MT_NMOB = (_p31["nmob"] + _p31.get("ndrop", 0)) if _p31 else 0      # M7 P6: + the drops
     if _MT_NMOB:
         assert _proj["nt"] == _MT_NT == len(_mt_keep), (_proj["nt"], _MT_NT, len(_mt_keep))
         assert _MT_NT + _MT_NMOB <= 2 * _MT_NT, "thnext's declared cells cannot hold the mobiles' links"
@@ -1765,19 +1948,26 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M14.5: the baked call sites' own copy of the record body (`mt`=0). On a static build there is
     # only one body and it keeps its name, so that renderer is emission-identical to before.
     _baked_leaf = "thing_leaf_b" if moving_things else "thing_leaf"
+    # M7 P6+P7 E (the owner, 2026-10-05): the game tier's monsters are exempt from the soft raise -- its `dsoftm` is the
+    # hard MONSTER_BUDGET, the oracle's GAME_RENDER_KW `exempt_actors` (one key, read here); every other tier
+    # keeps DEG_SOFT_MON (the hosted tiers' picture and deg_gate's visual tier do not move)
+    from doomfj.reference_model import GAME_RENDER_KW as _GRK
+    _DSOFTM = MONSTER_BUDGET if (_p31 and _GRK.get("exempt_actors")) else DEG_SOFT_MON
     _emit_baked_leaf = bool(moving_things and things_by_ss)
 
-    def _thing_leaf_body(label, mt):
+    def _thing_leaf_body(label, mt, aim_baked=False):
         """One instantiation of frame.thing_record_body. `mt` picks where the COLD half of the
         thing's row comes from: 1 = the runtime table (read after every reject), 0 = the leaf's
-        xor_by block, where the rep expands to nothing and the table names are never referenced."""
+        xor_by block, where the rep expands to nothing and the table names are never referenced.
+        M7 P6 `aim_baked`: a BAKED body that records the aim window (the standing baked barrels'
+        `thing_leaf_bb`; every other baked thing keeps the body that never records)."""
         return [f"{label}:",
                 f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
                 f"{proj}, {cfg.CENTERX}, "
                 f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
                 f"{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, "     # M7 P1.6: `hdb`
                 f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
-                f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
+                f"{_DSOFTM}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
                 f"{DEG_SPR_LOWRES_H}, "
                 f"{DEG_SPR_NEAR_TZ * 0x10000}, "
                 f"{mt}, "
@@ -1792,7 +1982,51 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{1 if (mt and _SEEN) else 0}, {'sp_sa' if (mt and _SEEN) else 0}, "
                 f"{'trb_seenf' if (mt and _SEEN) else 0}, {'trb_one' if (mt and _SEEN) else 0}, "
                 # M7 P4.2a: the runtime monsters' body records the aim window when the player's shots resolve
-                f"{1 if (mt and _SEEN and _AIM) else 0}"]
+                f"{1 if ((mt and _SEEN and _AIM) or aim_baked) else 0}"]
+
+    def _baked_barrel_site(cid, ti, tag, t, tfields, tsec, xorby_blocks):
+        """M7 P6 (docs/gp-p67-interface.md 5) -- a BAKED barrel's call site: removed (bar_st 0) draws nothing; else a
+        jump on its state's low nibble (sim.jump16; the seven barrel states' low nibbles are distinct) into its
+        state's block: S_BAR1's xor_by block is the map barrel's own (`tfields`, today's), each other state's
+        carries its lump's row (monstercode.barrel_view_rows, the anim bank) -- art, depth bounds, bank regions and
+        light class; standing (S_BAR1 / S_BAR2) it sets its aim id 1 + nmon + b and class RC_BARREL and draws with
+        `thing_leaf_bb`, the baked body that records the aim window. sp_sid is SET (not xored): a runtime thing's
+        stub leaves its own id there."""
+        from doomfj import gamedata as _gd
+        from doomfj.aimcode import RC_BARREL
+        from doomfj.barrelcode import barrel_states
+        from doomfj.monstercode import _thing_key
+        _w = _p31["world"]
+        b = [_thing_key(x) for x in _w.barrel_things].index(_thing_key(t))
+        nt_ = len(_p31["rt_slot"])
+        sts = barrel_states()
+        assert sts[:2] == ["S_BAR1", "S_BAR2"] and len(tfields) == len({n for n, _w_, _v in tfields})
+        L = f"ss{cid}_thing{ti}"
+        head = [f"    hex.if0 1, tstop, {L}_do", f"    ;{L}_skip", f"  {L}_do:",
+                f"    hex.if0 2, bar_st + {2 * b}*dw, {L}_skip"]
+        lows, blocks = {}, []
+        for k, st in enumerate(sts):
+            idx = _gd.STATE_INDEX[st]
+            assert 0 < idx < 256 and (idx & 15) not in lows, (st, idx)
+            lows[idx & 15] = f"{L}_s{k}"
+            if k == 0:
+                fields = list(tfields)
+            else:
+                r = _p31["view_rows"][_p31["bar_view"][idx] - nt_]
+                fields = barrel_state_fields(tfields, r, tsec.floor_h,
+                                             spr_cls[(rm.wall_lightnum(tsec.light, 0), max(1, r[2]))])
+            label = f"thing{tag}_consts" if k == 0 else f"thing{tag}_c{k}"
+            xorby_blocks[f"T{tag}" if k == 0 else f"T{tag}_{k}"] = _seg_xorby_block(label, fields)
+            stand = k < 2
+            blocks += [f"  {L}_s{k}:"]
+            if stand:
+                blocks += [f"    hex.set 2, sp_sid, {1 + _p31['nmon'] + b}", f"    hex.set 1, sp_rc, {RC_BARREL}"]
+            blocks += [f"    stl.fcall {label}, xb_ret",
+                       f"    stl.fcall {'thing_leaf_bb' if stand else _baked_leaf}, thing_ret",
+                       f"    stl.fcall {label}, xb_ret", f"    ;{L}_skip"]
+        head.append(f"    sim.jump16 bar_st + {2 * b}*dw, " + ", ".join(lows.get(n, f"{L}_skip") for n in range(16)))
+        return head + blocks + [f"  {L}_skip:"]
+
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -2183,6 +2417,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # so once the leaf sets it no later thing can matter and none pays its SET+CLEAR.
         if _do_things and ss.numsegs:
             # M14.5: BAKED FIRST, THEN THE RUNTIME LIST -- the order both mirrors keep (§4b).
+            # (M7 P6: a baked BARREL draws its state's view -- `_baked_barrel_site` below)
             # A static build has no runtime half and this is the whole thing pre-pass, exactly
             # as before; a moving build bakes only the things whose leaf no monster shares, so
             # at spawn a leaf runs one branch or the other and the order is wad order either way.
@@ -2245,6 +2480,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     f"T4 far-reject margin broken: tzmax={_tz_map} map units is too small for the "
                     f"4.25x+2 bound. Widen the margin in projection.fj's L-inf reject or reject "
                     f"this sprite category at emit time.")
+                if _bar and _t.type == BARREL_TYPE:
+                    # M7 P6+P7: a baked barrel is hidden by its STATE here (bar_st 0); the vanishable slot its type
+                    # has in every tier stays, kept equal to `bar_st != 0` by the phase (barrelcode.phase_lines'
+                    # barrel_vis) -- package A's thvis layout reads it so
+                    assert _di in _vis_slots, "M7 P6: a baked barrel has its type's thvis slot (A's layout)"
+                    # M7 P6 (docs/gp-p67-interface.md 5): a baked BARREL draws its STATE's view -- a jump on its
+                    # state into one xor_by block per state (S_BAR1's is the block above, the map's barrel as
+                    # today; the others the anim bank's lump rows, monstercode.barrel_view_rows), removed: nothing;
+                    # standing, it records the aim window (thing_leaf_bb)
+                    out += _baked_barrel_site(cid, _ti, _tag, _t, _tfields, _tsec, xorby_blocks)
+                    continue
                 xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", _tfields)
                 out += [
                     # M14.5 §3.3: read-many, write-rarely, and the index is a COMPILE-TIME
@@ -2519,9 +2765,27 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     for li, obs in mover_line_openings(lds, sds, secs, _msecs).items()
                     for m_ in [next(x for x in (sds[lds[li].front].sector,
                                                 sds[lds[li].back].sector) if x in _msecs)]}
-        _collide_cells, _croot = collision_cells_fj(_pfx(mapname), _crows,
-                                                    cell_lists(_crows, PLAYER_RADIUS),
-                                                    doors=_cdoors, movers=_cmovers)
+        _clists, _cthings = cell_lists(_crows, PLAYER_RADIUS), None
+        if _LOOT:   # M7 P6: the static blockers (barrels by bar_solid, the solid decorations) in the PLAYER's cells
+            _clists, _cthings = _lootcode.player_cell_things(_p31["world"], _clists)
+        _collide_cells, _croot = collision_cells_fj(_pfx(mapname), _crows, _clists,
+                                                    doors=_cdoors, movers=_cmovers, things=_cthings,
+                                                    thing_test=_lootcode.THING_TEST16 if _LOOT else None)
+        # M7 P6+P7 (doomfj.lootcode, package B): the player's side -- the pickups (the card is one item of them: they
+        # replace P2a.1's card_pickup_lines), the gives, pb_mon, nukage, the tic's latch / pre / post / use guard; the
+        # hooks into package C (barrelcode): a taken runtime pickup's unlink, a taken drop's drop_take<k>
+        _loot = None
+        if _LOOT:
+            from doomfj import barrelcode as _barrelcode
+            assert _chase and _bar, "M7 P6: the 'full' player needs the chase slots' rows and package C's barrels"
+            _loot = _lootcode.loot_parts(
+                _p31["world"], rm=rm, map_wad=map_wad, mapname=mapname, sprite_wad=sprite_wad,
+                mon_rt=[t_ for t_, _r in _chase["slots_rt"]], cell_root=_croot,
+                rt_unlink=lambda t_, _leaf: _barrelcode.rt_unlink_lines(t_),
+                drop_take=lambda k_: [f"    stl.fcall drop_take{k_}, drt_ret"])
+            assert _loot["slots"] == _loot_slots and _loot["extra_vis"] == _LOOT_EXTRA_VIS
+            from doomfj.build import LOOT_PERSIST as _LOOT_PERSIST
+            assert set(_loot["persist"]) <= set(_LOOT_PERSIST), "M7 P6: build.LOOT_PERSIST lacks lootcode's cells"
         # M7 P2a.1: the blue card's pickup at every tried candidate, and the walk-over triggers
         # after an accepted one -- where there are doors (pcard, dreq, wfired) and the card has a
         # vanish slot (it is drawable and the build keeps flags)
@@ -2541,7 +2805,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                           + move_with_collision_lines(
                               _croot, _pfx(mapname), radius=PLAYER_RADIUS,
                               height=PLAYER_HEIGHT >> 16, maxstep=MAX_STEP >> 16,
-                              pickup=_card_pick,
+                              pickup=_loot["pickup"] if _loot else _card_pick,
+                              block=_loot["block"] if _loot else None,      # M7 P6: pb_mon
+                              skip_still=bool(_loot),                       # M7 P6: the model's still candidate
                               after_accept=(walkover_lines(_walk_trig, sorted(_dst_tbl),
                                                            PLAYER_RADIUS >> 16)
                                             if _walk_trig else [])
@@ -2612,31 +2878,45 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # leaves (projcode), and the missile cells (which jump over themselves); behind this block's guard,
                 # where nothing falls in
                 + ((list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]]) if _hrt else [])
+                # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
+                + (list(_bar["lines"]) if _bar else [])
+                # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
+                + (_hurtcode.turn_lines([t_ for t_, _r in _chase["slots_rt"]])
+                   if (_hrt and menu and _restartcode.mortal(PLAYER_MODE)) else [])
+                # M7 P6+P7: package B's leaves -- pk_go (the grid, the stubs, the drops, the gives), pb_mon, nk_go
+                + (list(_loot["leaves"]) if _loot else [])
                 + ["mm_block_end:"]) + BSn
         else:
             _mon_move = ""
     else:
         _collide_block = _collide_decls = []
         _collide_cells = _collide_descend = _mon_move = ""
+        _loot = None
+        assert not _LOOT, "M7 P6: the 'full' player moves through the collision cells"
 
     # M3: the menu frame + the branch past the world. Built here, where `asset_wad` is
     # resolved, so its colours come from the SAME palette the renderer bakes.
     if menu:
         assert _skills, "the menu's NEW GAME needs the game tier's skills (things, moving, standalone)"
         _rt_things = [map_wad.things(mapname)[w] for w in sorted(_mt_keep)]
-        _restart = restart_lines(
+        _p6_restart = p6_restart_parts(_p31["world"] if _p31 else None, _bar, _loot_slots)
+        # M7 P7: ONE composition (compose_restart), the one tests/fj/test_restart_fj.py runs against the model.
+        # INTEGRATION HOOK (P6, packages B / C): their cells' level start -- p6_common / p6_skills from
+        # restartcode.level_start_lines(_p31["world"], SKILLS, <the P6 names their decls bring>) -- and the drop rows
+        # (thpos_rt / thss_rt rows nt + 10 .., their thnext links: `nmobile` must count them)
+        _restart = compose_restart(
             _spawn, len(_dslot) if _dst_tbl else 0, _MT_BINDS,
             [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
             monsters=_p31["restart"] if _p31 else None,
-            hud=(list(_hud["restart"]) + list(_wpn["restart"])
-                 + ([f"hex.zero {2 * 17}, aim_sid"] if _AIM else [])                       # M7 P4.2a: no aim
-                 # M7 P5: the player's health, armor, damage count, death and palette at the level start; the
-                 # pools empty, their rows zero, rng_fx at its seed
-                 + (list(_hrt["restart"]) + list(_proj["restart"]) if _hrt else [])) if _hud else (),
-            nmobile=_MT_NMOB)
+            hud_restart=_hud["restart"] if _hud else None, wpn_restart=_wpn["restart"] if _hud else (),
+            aim=bool(_AIM), hrt_restart=_hrt["restart"] if _hrt else (),
+            proj_restart=_proj["restart"] if _hrt else (), nmobile=_MT_NMOB,
+            # M7 P6: the barrels' level start (the same on every skill: barrelcode.check_model_rules), no drops; the
+            # loot cells; each skill's runtime pickups' thvis slots (p6_restart_parts, the one composition)
+            p6_common=_p6_restart[0], p6_skills=_p6_restart[1])
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
@@ -2657,10 +2937,21 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         *(_standalone_input_lines(collide, menu=_menu_block, monster_tic=_p31["tic"] if _p31 else (),
                                   # M7 P5: the damage count fades right after the weapon tic (hurtcode's
                                   # `tic`: MonsterPhase.weapon's order, after the psprites)
-                                  weapon=((list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))
+                                  # M7 P6+P7: the "full" player's tic (lootcode.tic_lines): nukage, the weapon, the
+                                  # fade -- or, dead at the tic's start, package D's dt_turn -- and the death think's
+                                  # restart request and jump past the move, or the strength and bonus tic
+                                  weapon=(_loot["tic"](_wpn["tic"], _hrt["tic"]) if _loot else
+                                          (list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))
                                           if _wpn else ()),
+                                  weapon_bar=(_wpn.get("bar", ()) if _wpn else ()),   # M7 P6+P7: after the move
+                                  latch=_loot["latch"] if _loot else (),
+                                  use_guard=_loot["use_guard"] if _loot else ((), ()),
                                   door_lines=_door_tic,
-                                  exit_boxes_=_exit, press_miss=_press_miss)
+                                  exit_boxes_=_exit, press_miss=_press_miss,
+                                  # M7 P7: the restart on use after death, when the player can die (the menu's
+                                  # tier: it holds the restart routines and g_rs)
+                                  restart_tic=(_restartcode.tic_lines(len(SKILLS))
+                                               if (menu and _hrt and _restartcode.mortal(PLAYER_MODE)) else ()))
           if standalone else
           _state_wire_lines(sim=player_sim, collide=collide,
                             door_lines=_door_tic)),
@@ -2710,12 +3001,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     pass1 += [f";{_pfx(mapname)}_dsc_walk", "dsc_done:"]
     # M7 P3.2a: the monsters tic AFTER the eye's point location (the wake mode's REJECT reads the player's
     # sector) and before the render, which marks this frame's seen flags for the next tic
-    pass1 += list(_p31.get("tic_after_eye", ())) if _p31 else []
+    _wt_tic = list(_p31.get("tic_after_eye", ())) if _p31 else []
     # M7 P5: then the fireballs and the blood (world.tic's order: monsters, projectiles, barrels, effects -- each phase
     # skips itself while `lvdone`), then the bar's health and armor from what the frame's damage left (inside the
     # same guard: a frozen level changes neither)
-    if _hrt:
-        pass1 += p5_tic_lines(_hrt)
+    _wt_pools = p5_tic_lines(_hrt, barrels=bool(_bar)) if _hrt else []      # M7 P6: + the barrels' phase
+    # M7 P6+P7 E: the monsters' world (the monster tic and the pools) world.MONSTER_TICS_PER_FRAME times a frame
+    pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
     # runs before this, has already read last frame's)
     if _AIM:
@@ -2806,6 +3098,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               + (_monster_tables() if _movers_on else [])
               + ([_p31["mview"], _p31["mrot"]] if _p31 else [])            # M7 P3.1
               + ([_p31["mobview"]] if (_p31 and _p31.get("mobview")) else [])   # M7 P5: the mobiles' view rows
+              + ([_p31["barview"]] if (_p31 and _p31.get("barview")) else [])   # M7 P6: the barrels' view rows
               + (list(_p31.get("tables", ())) if _p31 else [])             # M7 P3.2a: REJECT rows, lfsec
               # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
               # which changes the shipped text and so its emit hash -- caught by
@@ -2954,7 +3247,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # read a cold row it has no index into, and the runtime one must. Same macro, same
                 # arguments but `mt`; the duplicate is program TEXT, not per-frame ops.
                 *_thing_leaf_body("thing_leaf", 1 if moving_things else 0),
-                *(_thing_leaf_body(_baked_leaf, 0) if _emit_baked_leaf else [])]
+                *(_thing_leaf_body(_baked_leaf, 0) if _emit_baked_leaf else []),
+                # M7 P6: the standing baked barrels' body, which records the aim window
+                *(_thing_leaf_body("thing_leaf_bb", 0, aim_baked=True) if (_emit_baked_leaf and _bar) else [])]
                if _do_things else []),
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",
@@ -3026,8 +3321,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # as device data), the pools' cells, window and tables (fxrnd, pjst) -- data and self-guarded tables
           *((list(_hrt["decls"]) + list(_proj["decls"]) + list(_hrt["tables"]) + list(_proj["tables"]))
             if _hrt else []),
+          *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
+          *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
+          *(WT_DECLS if (_p31 and _hrt and _WT_TICS > 1) else []),   # M7 P6+P7 E: the tempo loop's counter
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2
@@ -3896,6 +4194,9 @@ def sprite_block_body(bl, n_buckets: int) -> list:
     if bl is None:
         return [0, n_buckets, 0]
     return [bl[0], bl[1], bl[2]] + [v for pr in bl[3] for v in pr]
+
+
+BARREL_TYPE = 2035                       # M7 P6: MT_BARREL's doomednum (a baked barrel draws its state's view)
 
 
 # M7 P1.6 -- the actors whose every frame and rotation the bank holds, besides the map's monsters:

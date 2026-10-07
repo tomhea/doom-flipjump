@@ -2,7 +2,7 @@
 // sim.fj           the player sim: collision against real linedefs, thing binding.
 // STATUS  LIVE - the generated main
 // ENTRY   sim.check_cells, sim.try_move, sim.bind_things, sim.thing_pass, sim.leaf_link/unlink
-// SIZE    12 macros (sim.fix16 .. sim.thing_pass_depth)
+// SIZE    18 macros (sim.fix16 .. sim.rank_key; M7 P8a: thing_pass_depth has a 7- and a 9-parameter form)
 // NOTE    `@` holds control-flow labels ONLY; the scratch is named globals (`ca_*` / `cc_*` in
 //         collision.py::CELL_DECLS, `cl_side*` in CHECK_SCRATCH_DECLS). An @-local vec in a macro
 //         expanded N times is N cells the M1 restore set could only name by expansion path.
@@ -760,11 +760,25 @@ ns sim {
     // for the least (key, index) above the last one drawn, with no per-thing storage -- the scan re-reads positions
     // (pointer READS only, as thing_load's) -- so n things cost n^2 key reads, and nothing is written but registers.
     // The registers are the named globals `td_*` (monstercode.P33_DECLS): no @-local data.
-    def thing_pass_depth throw, n_th, thpos, anim, sel, selret, lthi \
+    // (The 7-parameter form, the "full" game tier's call: the walk without the P8a rules below -- rk0 = ex = 0.)
+    def thing_pass_depth throw, n_th, thpos, anim, sel, selret, lthi {
+        .thing_pass_depth throw, n_th, thpos, anim, sel, selret, lthi, 0, 0
+    }
+
+    // M7 P8a package C (docs/gp-final-plan.md 1.3), the 9-parameter form -- each rule 0 = off (no op):
+    //   rk0 (D3 a): a leaf's runtime things drawn by (RANK, key, index) -- runtime rows t >= rk0 (the fx pool and the
+    //       drops: monstercode.rank_threshold) rank 0 and are drawn FIRST, every row below it ranks 1. The rank rides
+    //       bit 15 of the key (`.rank_key`; the emitter asserts every aprox key on the map is < 0x8000), so the rounds'
+    //       compares are the 4-nibble ones they were -- the oracle's `rank_depth_key` (rt_rank). Register: td_rk
+    //       (monstercode.D3_DECLS).
+    //   ex (D3 b): `sp_ex`, the barrel flag a runtime barrel's row select SETS (monstercode.barrel_select_lines) and
+    //       frame.thing_record_body reads, is ZEROED after every runtime thing's record -- so it is 0 at every baked
+    //       call site (a baked barrel XORS it: the xor_by involution needs a zero register) and at every other thing.
+    def thing_pass_depth throw, n_th, thpos, anim, sel, selret, lthi, rk0, ex \
             @ multi, single, round, scan, cand_eq, cand, take, next, round_end, done, empty \
             < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf, viewx, viewy, mt_dx, mt_dy, mt_d, mt_ret, \
               mt_dist_leaf, td_head, td_e, td_t, td_p, td_q, td_best, td_bk, td_lk, td_lt, td_have, td_first, \
-              td_pos, td_poff, td_pbase, td_pptr, \
+              td_pos, td_poff, td_pbase, td_pptr, td_rk, sp_ex, \
               sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
               sp_mon, sp_base, sp_base2, sp_dw, sp_lt {
         hex.set w/4, td_q, sshead
@@ -784,9 +798,11 @@ ns sim {
         hex.if1 1, tstop, done
         .thing_load throw, n_th, thpos, td_t, anim, sel, selret
         stl.fcall thing_leaf, thing_ret
+        rep(ex, k) hex.sparse_zero HOT_PAD, 1, sp_ex   // M7 P8a (D3 b): the barrel flag, consumed
         ;done
       multi:
         hex.set 1, td_first, 1
+        rep(rk0>0, k) hex.set 2, td_rk, rk0     // M7 P8a (D3 a): the first rank-0 row
       round:
         hex.if1 1, tstop, done
         hex.zero 1, td_have
@@ -801,6 +817,7 @@ ns sim {
         hex.mov 4, mt_dy, sp_y + 4*dw
         hex.sub 4, mt_dy, viewy + 4*dw
         stl.fcall mt_dist_leaf, mt_ret         // mt_d = the key
+        rep(rk0>0, k) .rank_key                // M7 P8a (D3 a): rank 1 below rk0 -- bit 15 of the key
         hex.if1 1, td_first, cand
         hex.cmp 4, mt_d, td_lk, next, cand_eq, cand
       cand_eq:
@@ -825,6 +842,7 @@ ns sim {
         hex.zero 1, td_first
         .thing_load throw, n_th, thpos, td_best, anim, sel, selret
         stl.fcall thing_leaf, thing_ret
+        rep(ex, k) hex.sparse_zero HOT_PAD, 1, sp_ex   // M7 P8a (D3 b): the barrel flag, consumed
         ;round
       done:                                    // thing_pass's clear, for the same reason
         hex.sparse_zero HOT_PAD, 8, sp_x
@@ -842,5 +860,15 @@ ns sim {
         hex.sparse_zero HOT_PAD, 2, sp_lt
         rep(anim, k) hex.zero 2, lthi
       empty:
+    }
+
+    // M7 P8a (D3 a): thing td_t's RANK into its key mt_d -- a row below td_rk (a WAD runtime thing or a fireball) ranks
+    // 1: bit 15 set (one xor_by: the aprox key is < 0x8000, the emitter asserts it); a row from td_rk on (the effects,
+    // the drops) ranks 0 and keeps its key. td_t < 256 (the two-level select's bound), so two nibbles compare it.
+    def rank_key @ r1, r0 < td_t, td_rk, mt_d {
+        hex.cmp 2, td_t, td_rk, r1, r0, r0
+      r1:
+        hex.xor_by 1, mt_d + 3*dw, 8
+      r0:
     }
 }

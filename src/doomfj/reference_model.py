@@ -85,14 +85,34 @@ GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
                       # M7 P6+P7 E (the owner, 2026-10-05: "make sure monsters are almost always seen", "you must
                       # always show the fireballs", "monsters should always be shown"): THE ACTORS RULE -- see
                       # render_wall_frame's `exempt_actors` (the emitter and monstercode read THIS key)
-                      exempt_actors=True)
+                      exempt_actors=True,
+                      # M7 P8a package C (docs/gp-final-plan.md 1.3): THE COMPOSITOR RULES -- D3 a `rt_rank` (a leaf's
+                      # effects and drops drawn before its monsters and fireballs) and D3 b `exempt_barrels` (a barrel
+                      # exempt from the scenery soft budget). OFF while the game tier is at "full" (blocked51's picture,
+                      # v6's record); ON exactly when world.compositor_d3(wall_renderer.PLAYER_MODE) -- the integrator
+                      # flips BOTH (D3_RENDER_KW) in the commit that sets PLAYER_MODE "final", and the emitter ASSERTS
+                      # the two agree with its `_D3` (tests/host/test_d3_rules.py holds them together too)
+                      rt_rank=False, exempt_barrels=False)
 # THE HOSTED TIERS' PICTURE (M7 P3.3): the game tier's set WITHOUT D3 d. The hosted tiers (hosted, hosted-doors,
 # hosted-loop, hosted-nocollide) move runtime things too -- the host sends their positions -- but their fj walks
 # a leaf's list in INDEX order (`sim.thing_pass`); the depth walk is the GAME tier's alone. A gate that drives a
 # hosted binary (m1_gate, m2_r3_gate, m2_r4_gate, m2_pass_probe) asks for THIS set, or it compares a sorted oracle
 # with an unsorted binary on every leaf holding two moved things.
-HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False)   # (M7 P6+P7 E: the game's alone)
+HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False,   # (M7 P6+P7 E: the game's alone)
+                        rt_rank=False, exempt_barrels=False)                       # (M7 P8a C: the game's alone)
 RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_order: off, or the key
+# M7 P8a package C: the compositor rules' keys at their P8a values (GAME_RENDER_KW holds them OFF until the flip). R9:
+# an oracle with the rank SWAPPED (the monsters first) is `rank_depth_key` patched -- render_wall_frame calls the module
+# function, e.g. monkeypatch(reference_model, "rank_depth_key", lambda vx, vy, x, y, r: orig(vx, vy, x, y, 1 - r))
+# (tests/host/test_d3_rules.py proves that control parts); rank_off is `rt_rank=False`, barrel_soft `exempt_barrels=False`
+D3_RENDER_KW = dict(rt_rank=True, exempt_barrels=True)
+
+
+def game_render_kw(d3: bool) -> dict:
+    """the game tier's keyword set with the compositor rules set to `d3` (`world.compositor_d3(player_mode)`, the
+    emitter's `_D3`) whatever GAME_RENDER_KW holds -- for a gate or test that must draw one mode's picture explicitly
+    (a "full" replay after the flip, or a "final" one before it). A fresh dict every call."""
+    return dict(GAME_RENDER_KW, **{k: bool(d3) for k in D3_RENDER_KW})
 # ⚠ DOOM's forwardmove 0x32 (=50) is a THRUST, not a displacement. `P_Thrust` adds `move*2048` to
 # momx/momy, and against FRICTION 0xE800 (0.90625) the steady state is 50*2048/65536 / 0.09375 =
 # ~16.7 map-units per tic. This sim has no momentum -- `step_sim` applies the constant DIRECTLY as
@@ -428,6 +448,30 @@ def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
     INTEGER position (the 16.16 view position's signed integer part) to the thing at map units (tx, ty). The fj
     walk (`sim.thing_pass_depth`) keys by exactly this; its harness calls this function, not a copy."""
     return aprox_distance(tx - (_signed(viewx, 32) >> 16), ty - (_signed(viewy, 32) >> 16))
+
+
+# M7 P8a package C (D3 a, docs/gp-final-plan.md 1.3): a runtime thing's RANK in its leaf -- 0 for the EFFECTS (blood,
+# puffs: the fx pool) and the DROPS, drawn first (in front: a sprite pixel is written once), 1 for everything else
+# (the monsters, live or dead, the fireballs, the map's runtime barrels and pickups). By the POOL a mobile's lump
+# belongs to, which is what the fj's row ranges are (monstercode.rank_threshold: runtime rows < nt + FIREBALL_POOL
+# rank 1): BAL1* only ever shows in the fireball pool, BLUD* / PUFF* only in the fx pool (test_d3_rules holds it).
+MOBILE_RANK = {"BAL1": 1, "BLUD": 0, "PUFF": 0}
+
+
+def mobile_rank(lump: str, z=None) -> int:
+    """D3 a: the rank of a `mobiles` entry -- a DROP (z 0, `MobileThing.drop`) 0, else its lump's pool's"""
+    if z == 0:
+        return 0
+    assert lump[:4] in MOBILE_RANK, f"mobile lump {lump!r}: no pool rank (reference_model.MOBILE_RANK)"
+    return MOBILE_RANK[lump[:4]]
+
+
+def rank_depth_key(viewx: int, viewy: int, tx: int, ty: int, rank: int) -> tuple:
+    """M7 P8a (D3 a), `rt_rank`: a runtime thing's key -- (rank, `aprox_depth_key`), ties by the list's ascending
+    index (a stable sort). The fj walk (`sim.thing_pass_depth` with `rk0`) keys by bit 15 of the aprox key (the emitter
+    asserts every key < 0x8000); its harness calls this function."""
+    assert rank in (0, 1), rank
+    return rank, aprox_depth_key(viewx, viewy, tx, ty)
 
 
 def sprite_bucket(h: int, view_h: int) -> int:
@@ -1968,6 +2012,7 @@ class ReferenceModel:
                           deg_lip_scale: int | None = None,
                           thing_positions=None, thing_hidden=None, thing_views=None,
                           seen_out: set | None = None, rt_depth_order=False,
+                          rt_rank: bool = False, exempt_barrels: bool = False,
                           aim_things: dict | None = None, aim_out: list | None = None,
                           mobiles=None, barrel_views: dict | None = None, thing_removed=None,
                           degrade: bool = False, exempt_actors: bool = False,
@@ -2018,6 +2063,13 @@ class ReferenceModel:
         stop, before the budgets -- for a thing with `tz >= MINZ`, `|tx| <= tz << 2`, within its
         BASE size bound (the fj's `sp_tzmax`) and `tz <= MISSILERANGE << 16`. It writes only the
         window: no pixel changes.
+
+        `rt_rank` / `exempt_barrels` (M7 P8a package C, docs/gp-final-plan.md 1.3; GAME_RENDER_KW's two keys, ON at
+        the P8a player mode: D3_RENDER_KW): D3 a -- a leaf's runtime list is sorted by (rank, key, index), rank 0 (drawn first) for
+        the effects and the drops (`mobile_rank`), 1 for every other runtime thing (it needs `rt_depth_order`); D3 b --
+        a BARREL (BARREL_TYPE, baked or runtime, every state) takes no soft raise (its BASE size bound whatever the
+        scenery count) and does not count against the scenery budgets; it stays scenery (THING_BUDGET, the B-gate).
+        Neither moves `seen_out` (the seen test reads only the walls' `drawn`, before the budgets).
 
         `mobiles` (M7 P5, docs/gp-p5-interface.md): [(x, y, lump)] -- the fireballs and the blood
         (`monsters.MonsterPhase.mobiles`, in ROW order: runtime things nt, nt+1, ...) at whole map
@@ -2277,14 +2329,27 @@ class ReferenceModel:
                     (MobileThing(_mx, _my, z=_mz), (_mlump, False), _ndraw + _k))
             # M7 P3.3 (D3 d): a leaf's RUNTIME things nearest first -- the walk is front-to-back and a sprite
             # pixel is written once, so within a leaf the near one must be drawn before the far one
+            # M7 P8a (C, D3 a): `rt_rank` -- the key becomes (rank, key): the effects and the drops (rank 0) are drawn
+            # before the monsters and the fireballs of their leaf, whatever the depth (strict, O-C1); the baked list
+            # still leads (a puff on a baked barrel stays behind it: D3 a names monsters, not baked things)
+            assert not rt_rank or rt_depth_order == "aprox", (
+                "rt_rank ranks the depth walk's key: it needs rt_depth_order='aprox' (the fj's)")
             if rt_depth_order:
                 _key = ((lambda _t: self.view_depth(viewx, viewy, viewangle, _t.x, _t.y))
                         if rt_depth_order == "tz" else
                         (lambda _t: aprox_depth_key(viewx, viewy, _t.x, _t.y)))
+                # an entry is (thing, view, index): a map thing (index < _ndraw) ranks 1, a mobile by its lump / z
+                _skey = ((lambda _e: rank_depth_key(viewx, viewy, _e[0].x, _e[0].y,
+                                                    1 if _e[2] < _ndraw else mobile_rank(_e[1][0], _e[0].z)))
+                         if rt_rank else (lambda _e: _key(_e[0])))
                 for _lst in things_by_ss.values():
                     _nb = sum(1 for _e in _lst if _e[2] < _ndraw and _baked[_e[2]])
+                    # #121-3 (F4): the sort below takes `_lst[_nb:]` as the runtime part -- true only while the baked
+                    # things LEAD every leaf's list (appended first above: the `_pass` loop, then the mobiles)
+                    assert all(_e[2] < _ndraw and _baked[_e[2]] for _e in _lst[:_nb]), (
+                        "a leaf's baked things do not lead its list: the runtime sort would move a baked thing")
                     if len(_lst) - _nb > 1:
-                        _lst[_nb:] = sorted(_lst[_nb:], key=lambda _e: _key(_e[0]))
+                        _lst[_nb:] = sorted(_lst[_nb:], key=_skey)
             for _si, _ss in enumerate(scene.cmap.subsectors):
                 if _ss.numsegs and _si in things_by_ss:
                     ss_first[_ss.firstseg] = _si              # the walk's arrival point for its things
@@ -2352,7 +2417,11 @@ class ReferenceModel:
                     # (Decided HERE, before the aim window: the aim hook runs inside the projection, so it sees
                     # the bound the projection runs with -- below.)
                     minh_ = MIN_SPRITE_H_MONSTER if act else MIN_SPRITE_H
-                    if deg_things is not None and not mob:   # M7 P5: a mobile keeps the BASE bound
+                    # M7 P8a (C, D3 b): a BARREL -- baked or runtime, any state (the explosion too) -- keeps its BASE
+                    # bound whatever the scenery count, and does not count (below); still scenery: THING_BUDGET, the
+                    # B-gate. The fj: frame.thing_record_body's soft test and count read `sp_ex` (dsofts' bit 8)
+                    bar_ex = exempt_barrels and not mob and t.type == BARREL_TYPE
+                    if deg_things is not None and not mob and not bar_ex:   # M7 P5: a mobile keeps the BASE bound
                         soft_s, minh2_s, soft_m, minh2_m = deg_things
                         if act and n_mon >= soft_m:
                             minh_ = minh2_m
@@ -2408,7 +2477,7 @@ class ReferenceModel:
                         continue
                     if act:
                         n_mon += 1
-                    else:
+                    elif not bar_ex:                     # M7 P8a (C, D3 b): a barrel does not count
                         n_thing += 1
                     tx1, tx2, ytop, th_px, istep, pr_tz = pr
                     # SPR-NEAR: coarse bake only for things both SHORT and beyond the radius

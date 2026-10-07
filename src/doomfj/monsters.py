@@ -706,7 +706,11 @@ class MonsterPhase:
         then the blood slots -- at its whole map units (the 16.16 position floored: its thpos_rt row carries no
         fraction), drawn with its state's frame (`mobile_lump`).
         M7 P6: then the DROPS lying (mdrop 1), in dropper order -- (x, y, lump, 0): at the corpse's position, ON its
-        leaf's floor (z 0, not MISSILE_Z), CLIPA0 / SHOTA0 (`drop_lump`)"""
+        leaf's floor (z 0, not MISSILE_Z), CLIPA0 / SHOTA0 (`drop_lump`).
+        M7 P8a (C, D3 a): each entry's KIND is what it carries -- a drop by its z 0, a fireball (BAL1*) or an effect
+        (BLUD* / PUFF*) by its lump, which only that pool ever shows; `reference_model.mobile_rank` reads it (rank 0
+        for the effects and the drops, drawn first in their leaf; 1 for the fireballs, as the monsters), the fj by the
+        row ranges above (monstercode.rank_threshold). The tuples are unchanged, so every reader keeps its shape."""
         from doomfj.world import FIREBALL_POOL, FX_POOL
         ws, gd, out = self.world.ws, self.gd, []
         for s in range(FIREBALL_POOL):

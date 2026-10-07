@@ -243,6 +243,11 @@ CHECKPOINTS = (
          why="behind the lifts: 16 barrels (sector 134) with 3 shotgun guys, 2 imps, 2 demons and "
              "the spectre in view at 410-630 units -- barrel chains"),
     dict(name="R2-spectre-corridor", sector=102, want=(1588, -492), face=(1656, -248), region=2,
+         # M7 P8a (O-V1's infighting floor; the AUTOPILOT tuned, never the criteria): the corridor's monsters fight
+         # each other while the player keeps his distance -- "defensive" first here (the P8a integration's probe of
+         # every checkpoint x parameter set at final / final: 2 target switches, the run survives at 76 health;
+         # "aggressive" / "steady", v6's choices, give none)
+         params=tuple(p_ for p_ in PARAMS if p_["name"] == "defensive"),
          why="behind the lifts: a demon at 278 and a shotgun guy at 226 units, the sector-133 "
              "corridor (spectre, imps) beyond"),
     dict(name="R2-east-yard", sector=15, want=(2052, 680), face=(2192, 784), region=2,

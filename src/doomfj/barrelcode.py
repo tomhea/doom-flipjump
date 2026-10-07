@@ -251,7 +251,9 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False) -> List[str]:
     every damage the blast deals -- set before dp_go and before each slot's dmg<m> (each damage leaf zeroes kb_on)"""
     from doomfj.combat import BOMB_DAMAGE, PLAYER_R
     from doomfj.knockcode import inflictor_lines
-    kb = inflictor_lines("bl_px", "bl_py") if knock else []
+    # package K: the barrel's z (its floor, knockcode's `kbbz` by bl_b); the source the player who set it off (every
+    # barrel before package I's bar_src -- infighting replaces `src_player` by bar_src == 1)
+    kb = inflictor_lines("bl_px", "bl_py", z_lines=["    kbbz.lookup kb_iz, bl_b"], src_player=True) if knock else []
     from doomfj.damagecode import BLAST
     from doomfj.monstercode import cell_nibbles
     n = w.layout.nmon

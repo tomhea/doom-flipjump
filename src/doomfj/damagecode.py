@@ -292,7 +292,8 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
            # M7 P8a: the thrust -- a shot's inflictor is the player; a BLAST's, the barrel the blast named
            *(["    hex.if_flags dm_melee, %d, dm_kbp, dm_kbgo" % (1 << BLAST),
               "  dm_kbp:",
-              *inflictor_lines("viewx + 4*dw", "viewy + 4*dw"),
+              # package K: the player's z only when the reversal needs it; the source the player (the saw's rule)
+              *inflictor_lines("viewx + 4*dw", "viewy + 4*dw", z_player=True, src_player=True),
               "  dm_kbgo:",
               "    hex.mov 2, kb_dm, dm_dmg",
               "    stl.fcall kb_go, kb_ret"] if knock else []),

@@ -121,7 +121,9 @@ def _keys(t):
 def test_a_final_run_is_a_full_run_until_the_packages_land():
     """the model in "final" / "final" (and the fallback "final" / "push"), tic for tic against "full" / "full" on a
     fight from the level start: every pre-P8a cell equal, every new cell still 0 -- and the thrust hook reached
-    (only) in the P8a pairs, once per landed hit on the player or a monster"""
+    (only) in the P8a pairs, once per landed hit on the player or a monster.
+    M7 P8a package K: with the thrust stubbed nothing moves by momentum, so the pre-P8a cells still agree; K's cells
+    that record what happened without a thrust -- a drop's position at the kill, a fireball's z -- are written"""
     runs = {}
     for pair in (("full", "full"), ("final", "push"), ("final", "final")):
         w = W.World(skill=gd.SK_HARD, player=pair[0], monsters=pair[1])
@@ -139,7 +141,8 @@ def test_a_final_run_is_a_full_run_until_the_packages_land():
         "the run must fight: the player hurt and a monster killed")
     for pair in (("final", "push"), ("final", "final")):
         hist, calls, w = runs[pair]
-        new = [f.name for f in w.schema if f.phase == "P8a" and f.name != "mon_target"]
+        new = [f.name for f in w.schema if f.phase == "P8a" and f.name != "mon_target"
+               and f.name not in ("drop_x", "drop_y", "proj_z")]       # package K: written at the kill / the spawn
         for t, (a, b) in enumerate(zip(base, hist)):
             assert {k: v for k, v in b.items() if k in a} == a, (pair, t)
             assert all(not any(b[n]) if isinstance(b[n], list) else b[n] == 0 for n in new), (pair, t)
@@ -192,13 +195,12 @@ def test_friction_and_stopspeed_are_dooms():
 
 
 def test_the_hooks_are_declared_empty():
-    from doomfj import combat as C
+    """package 0's hooks, as the packages leave them: package K's are FILLED (knockcode: the cells, the thrust leaf,
+    both splices -- tests/host/test_knockback_model.py and tests/fj/test_knock_fj.py hold them), the others empty"""
     from doomfj import knockcode as KC
-    w = W.World(skill=gd.SK_HARD, monster_tics=1)
-    assert C.CombatMixin._thrust(w, ("player", -1), ("mon", 0), ("mon", 0), 10) is None
-    assert C.CombatMixin._xy_move(w, ("player", -1), W.TicEvents(0)) is None
-    assert KC.PERSIST == () and KC.player_move_lines() == [] and KC.monster_slot_lines(3) == []
-    assert KC.go_lines()[-2:] == ["kb_go:", "    stl.fret kb_ret"]
+    assert KC.PERSIST == ("p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z")
+    assert KC.player_move_lines() and KC.monster_slot_lines(3)
+    assert KC.go_lines()[1] == "kb_go:" and "    stl.fret kb_ret" in KC.go_lines()
     # (package A filled wall_renderer.landing_drop_lines: tests/host/test_view_drop_model.py, tests/fj/test_view_drop_fj.py)
 
 
@@ -274,9 +276,9 @@ def test_control_an_old_arity_caller_is_found(tmp_path):
 
 
 # ---- the fj hooks: behind their rule, in their place --------------------------------------------------------------
-def _calls_before(lines, call):
-    """the lines immediately before each `stl.fcall <call>`"""
-    return [lines[i - 3:i] for i, ln in enumerate(lines) if ln.strip() == "stl.fcall %s" % call]
+def _calls_before(lines, call, n=3):
+    """the `n` lines immediately before each `stl.fcall <call>`"""
+    return [lines[i - n:i] for i, ln in enumerate(lines) if ln.strip() == "stl.fcall %s" % call]
 
 
 def test_off_the_hooks_emit_nothing():
@@ -306,25 +308,27 @@ def test_every_site_names_its_inflictor():
     from doomfj import monsterdecide as MD
     from doomfj import projcode as PC
     from doomfj import knockcode as KC
+    # (package K: each site names the inflictor's z -- or the player's, computed when needed -- and the source)
+    kb = KC.inflictor_lines("mm_x", "mm_y", z="kb_az")
     md = MD.attack_leaf_lines(full=True, knock=True)
-    pre = _calls_before(md, "dp_go, dp_ret")
-    assert len(pre) == 3 and all(p == KC.inflictor_lines("mm_x", "mm_y") for p in pre)   # the claw, the bite, a bullet
+    pre = _calls_before(md, "dp_go, dp_ret", len(kb))
+    assert len(pre) == 3 and all(p == kb for p in pre)   # the claw, the bite, a bullet
+    kb = KC.inflictor_lines("pw_x + 4*dw", "pw_y + 4*dw", z="pw_z")
     pj = PC.pj_lines(nt=40, root="e1m1_mc", knock=True)
-    pre = _calls_before(pj, "dp_go, dp_ret")
-    assert pre == [KC.inflictor_lines("pw_x + 4*dw", "pw_y + 4*dw")]
+    pre = _calls_before(pj, "dp_go, dp_ret", len(kb))
+    assert pre == [kb]
     assert "kb_" not in "\n".join(PC.pj_lines(nt=40, root="e1m1_mc"))
     w = W.World(skill=gd.SK_HARD, monster_tics=1)
     keys, of = DC.profiles(w, gib=True)
     leaf = DC.leaf_lines(keys, fx=True, full=True, knock=True)
     i = leaf.index("    stl.fcall kb_go, kb_ret")
     j = leaf.index("  dm_kbp:")
-    assert leaf[j + 1:j + 4] == KC.inflictor_lines("viewx + 4*dw", "viewy + 4*dw") and j < i
+    kb = KC.inflictor_lines("viewx + 4*dw", "viewy + 4*dw", z_player=True, src_player=True)
+    assert leaf[j + 1:j + 1 + len(kb)] == kb and j < i
     assert leaf.index("    hex.if0 3, dm_hp, dm_out") < j and i < leaf.index("    hex.sub_shifted 3, 2, dm_hp, dm_dmg, 0")
     assert leaf[-2:] == ["    hex.zero 1, kb_on", "    stl.fret dm_lret"]
-    assert DC.leaf_lines(keys, fx=True, full=True) == [ln for ln in leaf if ln not in (
-        "    hex.zero 1, kb_on",) and not ln.startswith(("  dm_kb", "    stl.fcall kb_go", "    hex.mov 2, kb_dm",
-                                                       "    hex.set 1, kb_on", "    hex.mov 4, kb_i",
-                                                       "    hex.if_flags dm_melee, 4, dm_kbp"))]
+    assert DC.leaf_lines(keys, fx=True, full=True) == [ln for ln in leaf if "kb_" not in ln and not ln.startswith(
+        ("  dm_kb", "    hex.if_flags dm_melee, 4, dm_kbp"))]
     go = DC.go_lines(w.schema, list(range(w.layout.nmon)), of, knock=True)
     for m in range(w.layout.nmon):
         k = go.index("  dmg%d:" % m)
@@ -341,7 +345,8 @@ def test_the_blast_names_the_barrel():
     calls = [i for i, ln in enumerate(on) if ln.strip().startswith("stl.fcall dp_go") or
              ln.strip().startswith("stl.fcall dmg")]
     assert len(calls) == 1 + w.layout.nmon
-    assert all(on[i - 3:i] == KC.inflictor_lines("bl_px", "bl_py") for i in calls)
+    kb = KC.inflictor_lines("bl_px", "bl_py", z_lines=["    kbbz.lookup kb_iz, bl_b"], src_player=True)   # package K
+    assert all(on[i - len(kb):i] == kb for i in calls)
     assert [ln for ln in on if "kb_" not in ln] == BC.blast_lines(w, slot_rt=rt)
 
 
@@ -355,8 +360,8 @@ def test_the_splice_points_are_wired_behind_their_rules():
     for needle in ('_SINK = bool(_LOOT and _W8.player_sinks(PLAYER_MODE))',
                    '_KNOCK = bool(_LOOT and _W8.knockback_on(PLAYER_MODE, MONSTER_MODE))',
                    '_FIGHT = bool(_LOOT and _W8.infighting_on(MONSTER_MODE))',
-                   '+ (_knockcode.go_lines() if _KNOCK else [])',
-                   '*(_knockcode.decls() if _KNOCK else [])',
+                   '+ (_knockcode.leaf_lines(',                               # package K: kb_go and the moves
+                   '_knockcode.decls(_p31["world"].layout.nmon) + _knockcode.tables_fj(_p31["world"])) if _KNOCK',
                    'knock_move=_knockcode.player_move_lines() if _KNOCK else ()',
                    '"dsc_done:"]\n',
                    'if _SINK:\n        pass1 += landing_drop_lines()'):
@@ -369,8 +374,10 @@ def test_the_splice_points_are_wired_behind_their_rules():
     slot = dict(t=0, x=0, y=0, rj="rj0", see_idx=1, see_tics=1)
     w = W.World(skill=gd.SK_HARD, monster_tics=1)
     off = MC.p32a_slot(3, schema=w.schema, **slot)
-    assert MC.p32a_slot(3, schema=w.schema, knock=True, **slot) == off     # the splice is empty until K
     from doomfj import knockcode as KC
+    filled = MC.p32a_slot(3, schema=w.schema, knock=True, **slot)          # package K's splice: three lines
+    k = filled.index(KC.monster_slot_lines(3)[0])
+    assert filled[k:k + 3] == KC.monster_slot_lines(3) and filled[:k] + filled[k + 3:] == off
     orig = KC.monster_slot_lines
     try:
         KC.monster_slot_lines = lambda m: ["    KNOCK %d" % m]

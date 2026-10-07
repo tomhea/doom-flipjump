@@ -117,7 +117,8 @@ def _parts():
         nwalk=nwalk, nlift=nlift, monsters=p31["restart"],
         hud_restart=hudcode.hud_restart_lines(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))),
         wpn_restart=wpn["restart"], aim=True, hrt_restart=hrt["restart"], proj_restart=p31["proj"]["restart"],
-        nmobile=nmobile, p6_common=p6_common, p6_skills=p6_skills)
+        nmobile=nmobile, p6_common=p6_common, p6_skills=p6_skills,
+        p8a_common=WR.p8a_restart_parts(w5))           # M7 P8a: the final rung's cells (empty in the "full" tier)
     return dict(mw=mw, restart=restart, nt=len(rt), nmob=nmobile, nss=nss,
                 nvis=len(vis_slots) + (loot_slots["nextra"] if loot_slots else 0), nd=nd, nwalk=nwalk, nlift=nlift)
 

@@ -318,9 +318,12 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
     `pool_tic_lines`'.
     `nt`: the runtime things before the pools (fireball slot s is thing nt + s); `root`: the missile cells' entry
     (`missile_cells_fj`); `pool`: FIREBALL_POOL (the harness's control builds another). `knock` (M7 P8a,
-    world.knockback_on): the impact sets the missile as dp_go's inflictor (doomfj.knockcode)"""
+    world.knockback_on): the impact sets the missile as dp_go's inflictor (doomfj.knockcode); package K: the
+    missile's z rides in the window (`pw_z`, the slot's `pj_z`) -- its shooter's floorz + 32 at the spawn (kb_az,
+    the attack stub's), the impact's inflictor z"""
     P, _Q = _pool_sizes()
     pool = P if pool is None else pool
+    fields = PJ_FIELDS + ((("pj_z", 4),) if knock else ())                # M7 P8a (package K): proj_z
     from doomfj.combat import FIREBALL_R
     from doomfj.knockcode import inflictor_lines
     info = _info()
@@ -332,7 +335,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
         out += ["  pj_sp%d:" % s, "    hex.set w/4, pw_t, %d" % (nt + s), "    stl.fcall pj_spawn_leaf, pj_slret",
                 "    stl.fcall pj_out%d, pj_oret" % s, "    stl.fret pj_sret"]
     for s in range(pool):                                                # the window into slot s (spawn and phase)
-        out += ["pj_out%d:" % s] + _copy_out("pj", s, nt + s, PJ_FIELDS) + ["    stl.fret pj_oret"]
+        out += ["pj_out%d:" % s] + _copy_out("pj", s, nt + s, fields) + ["    stl.fret pj_oret"]
     out += ["pj_spawn_leaf:",
             # the shooter's position, 16.16, and R_PointToAngle2 from it to the player
             "    hex.zero 4, pw_x", "    hex.mov 4, pw_x + 4*dw, mm_x",
@@ -343,6 +346,8 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
             "    finesine.read_sin pw_my, pw_idx", *_times10("pw_my"),
             "    hex.set 1, pw_act, 1",
             "    hex.mov 2, pw_src, md_src",                                 # M7 P7: the shooter (md_attack's)
+            # M7 P8a (package K): the missile's z, P_SpawnMissile's z + 4*8 (combat._spawn_fireball's proj_z)
+            *(["    hex.mov 4, pw_z, kb_az", "    hex.add_constant 4, pw_z, 32"] if knock else []),
             "    hex.set 2, pw_st, %d" % _sidx(sp), "    hex.set 1, pw_ti, %d" % _tics(sp),
             *_roll(), "    hex.sub 1, pw_ti, pw_rr + 2*dw",               # tics -= P_Random() & 3 (no clamp)
             *_half_step("pw_x", "pw_mx", "pj_hx"), *_half_step("pw_y", "pw_my", "pj_hy"),
@@ -372,7 +377,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
             "    hex.mov 2, dp_dmg, pw_rr",
             "    hex.mov 2, dp_src, pw_src",                                 # M7 P7: the attacker is the shooter
             # M7 P8a (knockcode): the MISSILE inflicts, where it stands (not yet moved: P_TryMove's tmthing)
-            *(inflictor_lines("pw_x + 4*dw", "pw_y + 4*dw") if knock else []),
+            *(inflictor_lines("pw_x + 4*dw", "pw_y + 4*dw", z="pw_z") if knock else []),
             "    stl.fcall dp_go, dp_ret",
             "    stl.fret pj_tret",
             "  pj_tl:",                                                      # the lines: the missile cells
@@ -416,7 +421,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
         t = nt + s
         out += ["    hex.if0 1, pj_act + %d*dw, pj_ph%d_n" % (s, s),
                 "    hex.set 1, pw_act, 1",
-                *["    hex.mov %d, pw_%s, %s + %d*dw" % (nib, name[3:], name, nib * s) for name, nib in PJ_FIELDS[1:]],
+                *["    hex.mov %d, pw_%s, %s + %d*dw" % (nib, name[3:], name, nib * s) for name, nib in fields[1:]],
                 "    hex.zero w/4, pw_leaf", "    hex.mov 3, pw_leaf, thss_rt + %d*dw" % (16 * t),
                 "    hex.set w/4, pw_t, %d" % t,
                 "    stl.fcall pj_leaf, pj_lret",
@@ -426,11 +431,11 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
     return out
 
 
-def pool_tic_lines() -> List[str]:
+def pool_tic_lines(knock: bool = False) -> List[str]:
     """the leaves both pools share: `pw_locate` (ptloc_walk on the window's integer position), `pw_link` /
     `pw_unlink` (the window's runtime thing into / out of the leaf pw_leaf), and `pool_tic` (stl.fcall pool_tic,
     pt_ret), the state tics on the window: tics - 1, at 0 the next state (`pjst`); S_NULL -> P_RemoveMobj:
-    unlinked, the window zeroed (pw_act 0 tells the stub to free the slot)"""
+    unlinked, the window zeroed (pw_act 0 tells the stub to free the slot). `knock` (M7 P8a, package K): pw_z too"""
     return ["pw_locate:", *_ptloc_window(), "    stl.fret pw_loret",
             # ONE expansion each of the relink macros (~50K words apiece: a copy per call site cost 0.25M words)
             "pw_link:", "    sim.leaf_link pw_t, pw_leaf", "    stl.fret pw_lkret",
@@ -447,6 +452,7 @@ def pool_tic_lines() -> List[str]:
             "    hex.zero 1, pw_act", "    hex.zero 8, pw_x", "    hex.zero 8, pw_y", "    hex.zero 8, pw_mx",
             "    hex.zero 8, pw_my", "    hex.zero 2, pw_st", "    hex.zero w/4, pw_leaf",
             "    hex.zero 2, pw_src",                                        # M7 P7
+            *(["    hex.zero 4, pw_z"] if knock else []),                     # M7 P8a (package K)
             "  pt_out:",
             "    stl.fret pt_ret"]
 
@@ -570,5 +576,5 @@ def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs:
     check_model_rules(puffs)
     cells, root = missile_cells_fj(w, pfx)
     return {"decls": pool_decls(puffs=puffs), "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard, knock=knock)
-            + pool_tic_lines() + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs), "cells": cells, "root": root,
+            + pool_tic_lines(knock) + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs), "cells": cells, "root": root,
             "tables": tables_fj(puffs), "restart": restart_lines(nt=nt), "persist": PERSIST}

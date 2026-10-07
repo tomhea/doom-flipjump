@@ -43,13 +43,14 @@ def lift_tic_lines(slots, nstates) -> list:
     return out
 
 
-def lift_walk_lines(triggers, slots, radius: int) -> list:
+def lift_walk_lines(triggers, slots, radius: int, prefix: str = "lw") -> list:
     """After an ACCEPTED move from (`cm_ox`, `cm_oy`) to (`viewx`, `viewy`): each WR line the move
     crossed asks for its lift (`lreq`) -- `doors.crossed`, the walk-over doors' test
-    (`doorcode.walkover_lines`), without the W1 latch. `triggers` = `movers.lift_walk_triggers`."""
+    (`doorcode.walkover_lines`), without the W1 latch. `triggers` = `movers.lift_walk_triggers`.
+    `prefix` (M7 P8a): the labels' (a second copy -- the knock move's -- takes its own)."""
     out = ["// == M7 P2b: the WR lift lines (doors.crossed, every crossing) ======"]
     for k, (si, axis, coord, lo, hi) in enumerate(triggers):
-        out += _crossed_lines(f"lw{k}", axis, coord, lo, hi, radius,
+        out += _crossed_lines(f"{prefix}{k}", axis, coord, lo, hi, radius,
                               [f"    hex.set 1, lreq + {slots.index(si)}*dw, 1"])
     return out
 

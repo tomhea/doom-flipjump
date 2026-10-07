@@ -565,7 +565,8 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
 
 
 def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
-                    wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None) -> tuple:
+                    wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None,
+                    p8a_common=()) -> tuple:
     """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
     values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
     emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
@@ -577,7 +578,8 @@ def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, n
               + ([f"hex.zero {2 * AIM_COLUMNS}, aim_sid"] if aim else [])                 # M7 P4.2a: no aim
               # M7 P5: the player's health, armor, damage count and death at the level start (never pal_cur: a
               # device shadow, restartcode.DEVICE_SHADOWS); the pools empty, their rows zero, rng_fx at its seed
-              + list(hrt_restart) + list(proj_restart) + list(p6_common)))
+              + list(hrt_restart) + list(proj_restart) + list(p6_common)
+              + list(p8a_common)))                      # M7 P8a: the final rung's cells (p8a_restart_parts)
     return restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=nwalk, nlift=nlift,
                          monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills)
 
@@ -601,6 +603,17 @@ def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
             skills[k] += list(per[k]) + [f"    hex.set 2, thvis + {loot_slots['nvis'] + j}*2*dw, {v}"
                                          for j, v in enumerate(_lootcode.extra_vis(world, loot_slots, sk))]
     return common, skills
+
+
+def p8a_restart_parts(world) -> list:
+    """M7 P8a -- the final rung's level-start lines for `compose_restart(p8a_common=)`, ONE composition (the emitter and
+    tests/fj/test_restart_fj.py call it), each package's behind its ONE rule at the game tier's modes: package K's
+    knock cells (doomfj.knockcode.restart_lines: all 0). Empty in the "full" game tier"""
+    from doomfj import world as _w
+    out = []
+    if world is not None and _w.knockback_on(PLAYER_MODE, MONSTER_MODE):
+        out += _knockcode.restart_lines(world.layout.nmon)
+    return out
 
 
 def p5_tic_lines(hrt, barrels: bool = False) -> list:
@@ -2899,7 +2912,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 _p31["world"], rm=rm, map_wad=map_wad, mapname=mapname, sprite_wad=sprite_wad,
                 mon_rt=[t_ for t_, _r in _chase["slots_rt"]], cell_root=_croot,
                 rt_unlink=lambda t_, _leaf: _barrelcode.rt_unlink_lines(t_),
-                drop_take=lambda k_: [f"    stl.fcall drop_take{k_}, drt_ret"])
+                drop_take=lambda k_: [f"    stl.fcall drop_take{k_}, drt_ret"],
+                # M7 P8a (package K): a corpse slides away from its drop -- the pickup reads the drop's own row
+                **({"drop_rt": [_bar["drop_first"] + k_ for k_ in range(_bar["ndrop"])]} if _KNOCK else {}))
             assert _loot["slots"] == _loot_slots and _loot["extra_vis"] == _LOOT_EXTRA_VIS
             from doomfj.build import LOOT_PERSIST as _LOOT_PERSIST
             assert set(_loot["persist"]) <= set(_LOOT_PERSIST), "M7 P6: build.LOOT_PERSIST lacks lootcode's cells"
@@ -2918,6 +2933,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
             def _card_pick(tag, _ct=_ct, _cz=_cz, _cslot=_cslot):
                 return card_pickup_lines(tag, (_ct.x, _ct.y), _cslot, _cz - _RU, _cz + _RD, _IR + _PR)
+        def _after_accept(wo="wo", lw="lw"):
+            """the walk-over lines an accepted player move runs (`move_with_collision_lines(after_accept=)`); M7 P8a:
+            the knock move's copy (doomfj.knockcode.ptry_lines) with its own labels"""
+            return ((walkover_lines(_walk_trig, sorted(_dst_tbl), PLAYER_RADIUS >> 16, prefix=wo)
+                     if _walk_trig else [])
+                    + (lift_walk_lines(lift_walk_triggers(secs, lds, sds, map_wad.vertexes(mapname)),
+                                       sorted(_lift_st), PLAYER_RADIUS >> 16, prefix=lw)
+                       if _movers_on else []))
         _collide_block = ([";simcollide_skip", "simcollide:"]
                           + move_with_collision_lines(
                               _croot, _pfx(mapname), radius=PLAYER_RADIUS,
@@ -2925,13 +2948,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                               pickup=_loot["pickup"] if _loot else _card_pick,
                               block=_loot["block"] if _loot else None,      # M7 P6: pb_mon
                               skip_still=bool(_loot),                       # M7 P6: the model's still candidate
-                              after_accept=(walkover_lines(_walk_trig, sorted(_dst_tbl),
-                                                           PLAYER_RADIUS >> 16)
-                                            if _walk_trig else [])
-                              + (lift_walk_lines(lift_walk_triggers(secs, lds, sds,
-                                                                    map_wad.vertexes(mapname)),
-                                                 sorted(_lift_st), PLAYER_RADIUS >> 16)
-                                 if _movers_on else []))
+                              after_accept=_after_accept())
                           + ["    ;simmv_done", "simcollide_skip:"])
         _collide_decls = list(COLLISION_STATE_DECLS)
         # the SEED descent: the same point-location query the eye's pre-walk runs, at a CANDIDATE
@@ -2996,8 +3013,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # leaves (projcode), and the missile cells (which jump over themselves); behind this block's guard,
                 # where nothing falls in
                 + ((list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]]) if _hrt else [])
-                # M7 P8a (doomfj.knockcode): the thrust's leaf kb_go -- package 0's stub, package K's leaf
-                + (_knockcode.go_lines() if _KNOCK else [])
+                # M7 P8a (doomfj.knockcode, package K): the thrust (kb_go), the player's and the monsters' knock
+                # moves (kb_pmove, kb_mmove, the slot stubs kbs<m>) -- leaves, jumping over themselves
+                + (_knockcode.leaf_lines(
+                    _knockcode.slots_of(_p31["world"], [t_ for t_, _r in _chase["slots_rt"]]),
+                    player_root=_croot, mon_root=_mroot,
+                    lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:]) for t_ in _chase["lift_walk"]],
+                    after_accept=_after_accept("kbwo", "kblw"), solid=_chase["solid"]) if _KNOCK else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
@@ -3036,7 +3058,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             proj_restart=_proj["restart"] if _hrt else (), nmobile=_MT_NMOB,
             # M7 P6: the barrels' level start (the same on every skill: barrelcode.check_model_rules), no drops; the
             # loot cells; each skill's runtime pickups' thvis slots (p6_restart_parts, the one composition)
-            p6_common=_p6_restart[0], p6_skills=_p6_restart[1])
+            p6_common=_p6_restart[0], p6_skills=_p6_restart[1],
+            p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None))     # M7 P8a: the packages' cells
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
@@ -3452,7 +3475,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # as device data), the pools' cells, window and tables (fxrnd, pjst) -- data and self-guarded tables
           *((list(_hrt["decls"]) + list(_proj["decls"]) + list(_hrt["tables"]) + list(_proj["tables"]))
             if _hrt else []),
-          *(_knockcode.decls() if _KNOCK else []),                         # M7 P8a: the thrust's interface
+          # M7 P8a (package K): the thrust's interface, the knock cells and scratch, the barrels' z table
+          *((_knockcode.decls(_p31["world"].layout.nmon) + _knockcode.tables_fj(_p31["world"])) if _KNOCK else []),
           *((_restartcode.view_decls() + _hurtcode.sink_decls()) if _SINK else []),   # M7 P8a A: p_vd, its cap
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot

@@ -996,7 +996,8 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
         out += ["  %smv:" % L] + p32b_move_lines(m, schema=schema, **mv, dc=dict(dc, t=t, jh=dmg) if dc else None,
                                                  solid="mon_solid" if dmg else "mon_active")
     if dc:
-        out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt, hear=hear, src=bool(hurt))
+        out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt, hear=hear, src=bool(hurt),
+                               **({"knock": True} if knock else {}))
     out += ["  %s:" % nxt]
     return out
 
@@ -1058,11 +1059,12 @@ def _action_targets(L: str, nxt: str, dc, fall: bool = False) -> list:
 
 
 def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear: bool = False,
-                    src: bool = False) -> list:
+                    src: bool = False, knock: bool = False) -> list:
     """after mm_decide: a decision enters its state (A_FaceTarget's facing from the leaf); and the attack states'
     actions -- each sets its kind and runs md_attack on the slot's position, seen flag and stream. `hear` (M7 P4.2b):
     each A_FaceTarget -- the decided state's, and every attack action's, behind its target test -- clears
-    `mon_ambush`"""
+    `mon_ambush`. `knock` (M7 P8a, package K): the attacker's floorz into kb_az (doomfj.knockcode: its hits'
+    inflictor z, its fireball's spawn z)"""
     from doomfj.monsterdecide import ATTACK_KINDS
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     ST, TI, FA = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_facing + %d*dw" % (nf * m)
@@ -1088,6 +1090,7 @@ def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear
                 "    hex.mov 1, mm_seen, thseen + %d*dw" % t, "    hex.mov 2, mm_rng, %s" % RN,
                 # M7 P7 (`src`: the attacks land, hurtcode): the attacker's id for dp_go and a fireball's pj_src
                 *(["    hex.set 2, md_src, %d" % (m + 1)] if src else []),
+                *(["    hex.mov 4, kb_az, mon_floorz + %d*dw" % (4 * m)] if knock else []),   # M7 P8a (package K)
                 "    stl.fcall md_attack, md_ret",
                 "    hex.mov 1, %s, mm_fa" % FA, "    hex.mov 2, %s, mm_rng" % RN,
                 "    ;%s" % nxt]

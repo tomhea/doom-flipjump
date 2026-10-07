@@ -78,6 +78,7 @@ from doomfj.doors import exit_boxes                                # M7 P2a.2: t
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE, turn_step   # STRAFE_MOVE: M7 P4.1, the ONE value
 from doomfj.reference_model import ANG180 as _ANG180                       # M7 P7: P_DeathThink's turn
 from doomfj.reference_model import VIEW_DROP_MAX                          # M7 P8a A: P_DeathThink's view drop
+from doomfj.reference_model import PLAYER_HEIGHT                           # M7 P8a: the knock try's height
 
 # 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
 # FORWARD_MOVE, rounded (plan section 2, input). world.py re-exports it.
@@ -86,6 +87,11 @@ from doomfj.reference_model import VIEW_DROP_MAX                          # M7 P
 AIM_REFF_BITS = 8
 
 M32 = 0xFFFFFFFF
+
+
+def _c_div2(v: int) -> int:
+    """C's `v / 2` (truncates toward zero) -- P_XYMovement's `x + xmove/2`, unlike the `xmove >>= 1` after it"""
+    return -((-v) >> 1) if v < 0 else v >> 1
 
 
 def _W():
@@ -402,6 +408,8 @@ class CombatMixin:
         ws = self.ws
         if ws.p_dead:
             self._death_think(keys, ev)
+            if self._p_knock:                     # M7 P8a: the corpse slides (P_XYMovement on the knock momentum)
+                self._player_knock_move(ev)
             self._player_mobj_tick()
             return
         if self._p_full:                          # M7 P5: nukage is the full model's alone (no fj mirror before it)
@@ -426,6 +434,8 @@ class CombatMixin:
         if ws.p_bonuscount:
             ws.p_bonuscount -= 1
         self._player_move(keys, ev)
+        if self._p_knock:                         # M7 P8a: the knock momentum moves him after the walk
+            self._player_knock_move(ev)
         if not moving and gd.STATE_NAMES[ws.p_mobj_state] in RUN_STATES:
             self._set_player_mobj("S_PLAY")      # P_XYMovement: stopped in a walking frame
         self._player_mobj_tick()
@@ -894,6 +904,8 @@ class CombatMixin:
         ws.mon_tics[m] = max(1, ws.mon_tics[m] - v)
         if self.dropper[m] is not None and self._p_full:    # M7 P4.2: the drops are P6's
             ws.mon_drop[m] = 1
+            if self._p_knock:                    # M7 P8a (G-B5): the drop lies where the corpse is NOW, before the
+                ws.drop_x[m], ws.drop_y[m] = ws.mon_x[m], ws.mon_y[m]   # killing blow's thrust slides it away
         ev.kills.append(("mon", m, "gib" if gib else "death"))
 
     def damage_barrel(self, b: int, dmg: int, source, ev) -> None:
@@ -956,22 +968,225 @@ class CombatMixin:
         ws.p_mobj_tics = max(1, ws.p_mobj_tics - v)
         ev.deaths += 1
 
-    # -------------------------------------------------------------------------------- M7 P8a hooks (package K)
+    # -------------------------------------------------------------------------------- M7 P8a: KNOCKBACK (package K)
+    # docs/gp-final-plan.md 1.2.2 (O-B1 barrels are not pushed, O-B3 monsters slide at their 2 tics a frame and the
+    # player at 1, O-B4 a refused knock step stops). THE CONVENTIONS, named so the fj (doomfj.knockcode) copies them:
+    #   * a thing's POSITION for the thrust's angle: the TARGET's whole 16.16 (the player's px / py; a monster's
+    #     (mon_x << 16) + mon_fx), the INFLICTOR's WHOLE UNITS << 16 (the integer half of its 16.16: the player's,
+    #     a fireball's, a monster's and a barrel's -- what knockcode's kb_ix / kb_iy carry);
+    #   * a thing's Z (2D: a thing stands on its floor): the player's check_position floorz at his position, a
+    #     monster's mon_floorz, a barrel's sector floor (static), a fireball's proj_z (its shooter's mon_floorz + 32 at
+    #     the spawn: P_SpawnMissile's z + 4*8*FRACUNIT, no gravity);
+    #   * the reversal's coin draws on the TARGET's stream (rng_player / mon_rng[slot]), only when its three other
+    #     conditions hold (C's short circuit), before the armor and the pain or death draw;
+    #   * "the source is the player" (the chainsaw's exception): ("player", -1), or a barrel's blast whose barrel the
+    #     player set off -- every barrel before package I's `bar_src` (DOOM: the blast's source is the barrel's target);
+    #   * P_XYMovement: the player's KNOCK momentum moves him once a frame after his walk (dead or alive: the corpse
+    #     slides), a monster's (live or corpse) at the top of its slot's turn in each monster tic. A try is the walk's
+    #     try at the candidate: the player's (pickups touched while alive, then a solid thing, then try_move through
+    #     the collision cells, the walk-over lines on an accept), a monster's at the INTEGER part of the candidate
+    #     (try_move_monster; a candidate whose integer part is where it stands is accepted untested: only its
+    #     fraction moves). A refused try zeroes the momentum (DOOM's non-player rule; O-B4 for the player) and the
+    #     loop goes on with what is left of xmove / ymove, as DOOM's does. No P_SlideMove, no airborne phase;
+    #   * A CORPSE (a monster not shootable; the dead player) is DOOM's MF_CORPSE | MF_DROPOFF with height >> 2: its
+    #     try skips the drop-off refusal and fits 14 units, and its friction is skipped while |mom| > 1/4 unit on an
+    #     axis and its floorz is not its leaf's sector floor;
+    #   * the STOPSPEED stop ignores the player's walk keys (the walk is a direct step that has no momentum here) and
+    #     sets no player thing state.
+    def _source_is_player(self, source) -> bool:
+        """P_DamageMobj's `source && source->player`: the player, or a blast whose barrel the player set off -- every
+        barrel until package I's `bar_src` (then its own record: 1 = the player)"""
+        if source is None:
+            return False
+        if source[0] == "player":
+            return True
+        if source[0] == "bar":
+            if "bar_src" not in self.ws._fields:
+                return True
+            return self.ws.bar_src[source[1]] == 1
+        return False
+
+    def _knock_z(self, thing) -> int:
+        """the thing's z in map units (the conventions above)"""
+        kind, i = thing
+        ws = self.ws
+        if kind == "player":
+            return self.rm.check_position(self.scene_c, ws.px, ws.py)[1]
+        if kind == "mon":
+            return ws.mon_floorz[i]
+        if kind == "bar":
+            t = self.barrel_things[i]
+            return self._floor_at(t.x, t.y)
+        if kind == "proj":
+            return ws.proj_z[i]
+        raise ValueError(thing)
+
+    def _inflictor_xy(self, inflictor) -> Tuple[int, int]:
+        """the inflictor's WHOLE-UNIT position << 16 (knockcode's kb_ix / kb_iy)"""
+        kind, i = inflictor
+        ws = self.ws
+        if kind == "player":
+            return (ws.px >> 16) << 16, (ws.py >> 16) << 16
+        if kind == "mon":
+            return ws.mon_x[i] << 16, ws.mon_y[i] << 16
+        if kind == "bar":
+            t = self.barrel_things[i]
+            return t.x << 16, t.y << 16
+        if kind == "proj":
+            return (ws.proj_x[i] >> 16) << 16, (ws.proj_y[i] >> 16) << 16
+        raise ValueError(inflictor)
+
     def _thrust(self, target, inflictor, source, dmg: int) -> None:
-        """M7 P8a HOOK (docs/gp-final-plan.md 1.2.2, package K): P_DamageMobj's thrust -- called by damage_monster /
-        damage_player after their "not shootable / dead" return and BEFORE anything else (the armor, the health),
-        only when knockback_on (`_p_knock`). `target` ("player", -1) or ("mon", slot); `inflictor` / `source` the
-        damage tuples (None: no thrust); `dmg` the RAW damage. K fills it: the chainsaw's exception, the angle
-        inflictor -> target, dmg * (FRACUNIT >> 3) * 100 // mass, the reversal's coin on the target's stream, the
-        momentum (p_momx / mon_momx). Empty until then: no draw, no write"""
-        return None
+        """M7 P8a (package K): P_DamageMobj's thrust (p_inter.c) -- called by damage_monster / damage_player after
+        their "not shootable / dead" return and BEFORE anything else (the armor, the health), only when knockback_on
+        (`_p_knock`). `target` ("player", -1) or ("mon", slot); `inflictor` / `source` the damage tuples (None: no
+        thrust); `dmg` the RAW damage:
+
+            if (inflictor && (!source || !source->player || source->player->readyweapon != wp_chainsaw)) {
+                ang = R_PointToAngle2(inflictor->x, inflictor->y, target->x, target->y);
+                thrust = damage * (FRACUNIT >> 3) * 100 / target->info->mass;
+                if (damage < 40 && damage > target->health && target->z - inflictor->z > 64*FRACUNIT
+                    && (P_Random() & 1)) { ang += ANG180; thrust *= 4; }
+                target->momx += FixedMul(thrust, finecosine[ang >> ANGLETOFINESHIFT]);
+                target->momy += FixedMul(thrust, finesine[ang >> ANGLETOFINESHIFT]); }
+
+        with the repo's angle and trig (rm.point_to_angle, the TRIG_N tables) and the conventions above"""
+        if inflictor is None:
+            return
+        ws, rm = self.ws, self.rm
+        if self._source_is_player(source) and ws.p_ready == gd.WP_CHAINSAW:
+            return                                         # "kick away unless using the chainsaw"
+        kind, m = target
+        if kind == "player":
+            tx, ty, info, health = ws.px, ws.py, PLAYER_INFO, ws.p_health
+        else:
+            tx, ty = (ws.mon_x[m] << 16) + ws.mon_fx[m], (ws.mon_y[m] << 16) + ws.mon_fy[m]
+            info, health = self.mon_info[m], ws.mon_health[m]
+        ix, iy = self._inflictor_xy(inflictor)
+        ang = rm.point_to_angle(ix, iy, tx, ty)
+        thrust = dmg * (gd.FRACUNIT >> 3) * 100 // info.mass
+        if dmg < 40 and dmg > health and self._knock_z(target) - self._knock_z(inflictor) > 64:
+            if kind == "player":
+                v, ws.rng_player = R.p_random(ws.rng_player)
+            else:
+                v, ws.mon_rng[m] = R.p_random(ws.mon_rng[m])
+            if v & 1:
+                ang = (ang + _ANG180) & M32                  # "make fall forwards sometimes"
+                thrust *= 4
+        idx = ang >> rm.angle_shift
+        dx = _signed(fixed_mul(thrust, rm._finecos_idx(idx), 8, 4), 32)
+        dy = _signed(fixed_mul(thrust, rm._finesin_idx(idx), 8, 4), 32)
+        if kind == "player":
+            ws.p_momx += dx
+            ws.p_momy += dy
+        else:
+            ws.mon_momx[m] += dx
+            ws.mon_momy[m] += dy
 
     def _xy_move(self, thing, ev) -> None:
-        """M7 P8a HOOK (docs/gp-final-plan.md 1.2.2, package K): P_XYMovement for `thing` ("player", -1) or ("mon",
-        slot) -- the MAXMOVE clamp, the halving tries, FRICTION / STOPSPEED, the corpse rule. Declared, called by
-        nobody yet (K adds `_player_knock_move` after the walk and `world._monster_knock_move` in `_monsters_phase`,
-        both only when knockback_on)"""
-        return None
+        """M7 P8a (package K): P_XYMovement (p_mobj.c) for `thing` ("player", -1) -- his KNOCK momentum p_momx /
+        p_momy -- or ("mon", slot) -- mon_momx / mon_momy, its 16.16 position (mon_x << 16) + mon_fx:
+
+            clamp each axis to +-MAXMOVE;  xmove = momx; ymove = momy;
+            do { if (xmove > MAXMOVE/2 || ymove > MAXMOVE/2) {          // positive only, as DOOM's
+                     ptryx = x + xmove/2; ptryy = y + ymove/2;          // C's truncating division ...
+                     xmove >>= 1; ymove >>= 1; }                        // ... then an arithmetic shift
+                 else { ptryx = x + xmove; ptryy = y + ymove; xmove = ymove = 0; }
+                 if (!P_TryMove(mo, ptryx, ptryy)) momx = momy = 0;     // and the loop goes on
+            } while (xmove || ymove);
+            [the corpse rule: |mom| > FRACUNIT/4 on an axis and floorz != the leaf's sector floor -> no friction]
+            if (|momx| < STOPSPEED && |momy| < STOPSPEED) momx = momy = 0;
+            else { momx = FixedMul(momx, FRICTION); momy = FixedMul(momy, FRICTION); }
+
+        The tries and the corpse are the conventions above (`_player_knock_try` / world `_monster_knock_try`)"""
+        ws = self.ws
+        kind, m = thing
+        player = kind == "player"
+        if player:
+            mx, my = ws.p_momx, ws.p_momy
+        else:
+            mx, my = ws.mon_momx[m], ws.mon_momy[m]
+        if not mx and not my:
+            return
+        mx, my = max(-gd.MAXMOVE, min(gd.MAXMOVE, mx)), max(-gd.MAXMOVE, min(gd.MAXMOVE, my))
+        xmove, ymove = mx, my
+        half = gd.MAXMOVE // 2
+        while True:
+            if player:
+                x, y = ws.px, ws.py
+            else:
+                x, y = (ws.mon_x[m] << 16) + ws.mon_fx[m], (ws.mon_y[m] << 16) + ws.mon_fy[m]
+            if xmove > half or ymove > half:
+                px, py = x + _c_div2(xmove), y + _c_div2(ymove)
+                xmove >>= 1
+                ymove >>= 1
+            else:
+                px, py = x + xmove, y + ymove
+                xmove = ymove = 0
+            px, py = _signed(px, 32), _signed(py, 32)
+            ok = self._player_knock_try(px, py, ev) if player else self._monster_knock_try(m, px, py, ev)
+            ev.knocks.append((thing, ok))
+            if not ok:
+                mx = my = 0
+            if not (xmove or ymove):
+                break
+        if self._knock_slides(thing, mx, my):
+            pass                                           # "do not stop sliding if halfway off a step"
+        elif -gd.STOPSPEED < mx < gd.STOPSPEED and -gd.STOPSPEED < my < gd.STOPSPEED:
+            mx = my = 0
+        else:
+            mx = _signed(fixed_mul(mx, gd.FRICTION, 8, 4), 32)
+            my = _signed(fixed_mul(my, gd.FRICTION, 8, 4), 32)
+        if player:
+            ws.p_momx, ws.p_momy = mx, my
+        else:
+            ws.mon_momx[m], ws.mon_momy[m] = mx, my
+
+    def _knock_slides(self, thing, mx: int, my: int) -> bool:
+        """P_XYMovement's MF_CORPSE rule: a corpse with more than FRACUNIT/4 of momentum on an axis whose floorz is
+        not its leaf's sector floor keeps it (no friction, no stop). A corpse: a monster no longer shootable, the dead
+        player. Its floorz: the monster's mon_floorz, the player's check_position floorz; the sector floor: the leaf's
+        (the collision heights: doors open, the movers where they stand)"""
+        ws = self.ws
+        kind, m = thing
+        q = gd.FRACUNIT // 4
+        if not (mx > q or mx < -q or my > q or my < -q):
+            return False
+        if kind == "player":
+            if not ws.p_dead:
+                return False
+            floorz = self.rm.check_position(self.scene_c, ws.px, ws.py)[1]
+            leaf = self.rm.point_in_subsector(self.cmap, ws.px >> 16, ws.py >> 16)
+        else:
+            if ws.mon_shootable[m]:
+                return False
+            floorz, leaf = ws.mon_floorz[m], ws.mon_leaf[m]
+        return floorz != self.secs_c[self.leaf_sector[leaf]].floor_h
+
+    def _player_knock_try(self, cx: int, cy: int, ev) -> bool:
+        """the player's P_TryMove of a knock step to 16.16 (cx, cy): the walk's candidate (`_player_move`) -- the
+        pickups touched (alive) from the floor he stands on, a solid thing refuses, then try_move through the
+        collision scene (a dead player is a corpse: height >> 2); an accept moves him and fires the walk-over
+        lines it crossed"""
+        ws, rm = self.ws, self.rm
+        x, y = ws.px, ws.py
+        here_z = rm.check_position(self.scene_c, x, y)[1]
+        self._touch_specials(cx, cy, here_z, ev)
+        if self.player_blocking and self._solid_thing_at(cx, cy) is not None:
+            ev.player_blocked += 1
+            return False
+        height = PLAYER_HEIGHT >> 2 if ws.p_dead else PLAYER_HEIGHT
+        if not rm.try_move(self.scene_c, x, y, cx, cy, height=height):
+            return False
+        ws.px, ws.py = cx, cy
+        self._walkover(x, y, cx, cy)
+        return True
+
+    def _player_knock_move(self, ev) -> None:
+        """M7 P8a (package K): the player's P_XYMovement on his knock momentum -- after the walk, or after the death
+        think (the corpse slides); once a frame (the player's tic, O-B3)"""
+        if self.ws.p_momx or self.ws.p_momy:
+            self._xy_move(("player", -1), ev)
 
     # -------------------------------------------------------------------------------- monsters
     def _monster_attack(self, m: int, action: str, ev) -> None:
@@ -1053,6 +1268,8 @@ class CombatMixin:
         momx, momy = self.fireball_mom[an >> self.rm.angle_shift]
         ws.proj_active[slot], ws.proj_src[slot] = 1, m
         ws.proj_momx[slot], ws.proj_momy[slot] = momx, momy
+        if self._p_knock:                        # M7 P8a: the missile's z, for the thrust's reversal (z + 4*8)
+            ws.proj_z[slot] = ws.mon_floorz[m] + 32
         self._proj_set_state(slot, FIREBALL_INFO.spawnstate)
         v = self._roll("rng_fx", self.sites.tics_roll)
         ws.proj_tics[slot] = max(1, ws.proj_tics[slot] - v)
@@ -1139,7 +1356,7 @@ class CombatMixin:
                 continue
             self._list_remove(self._mobile_proj(s), ws.proj_leaf[s])      # P_RemoveMobj
             for f in ("proj_active", "proj_state", "proj_tics", "proj_x", "proj_y", "proj_momx",
-                      "proj_momy", "proj_src", "proj_leaf"):
+                      "proj_momy", "proj_src", "proj_leaf") + (("proj_z",) if self._p_knock else ()):
                 getattr(ws, f)[s] = 0
 
     # -------------------------------------------------------------------------------- effects

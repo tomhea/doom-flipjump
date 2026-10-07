@@ -184,7 +184,7 @@ def attack_leaf_lines(full: bool = False, knock: bool = False) -> List[str]:
     from doomfj.combat import BULLETS
     from doomfj.knockcode import inflictor_lines
     assert not knock or full, "M7 P8a: the thrust rides the applied attacks"
-    kb = inflictor_lines("mm_x", "mm_y") if knock else []
+    kb = inflictor_lines("mm_x", "mm_y", z="kb_az") if knock else []     # package K: the attacker's floorz (k_go)
     k = draws()
     pos = [ATTACK_KINDS[a] for a in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack")]
     tg = ["md_out"] * 16

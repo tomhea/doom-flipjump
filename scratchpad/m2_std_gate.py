@@ -582,8 +582,13 @@ def main():
             mph.weapon(kd, st.x, st.y, st.angle)
             mph.touch = touch
             new = _SS(*mph.move(kd, st.x, st.y, st.angle, scene=scene), st.level)
-        dps = dp.after_move(cur[0], (st.x, st.y), (new.x, new.y))
-        mps = mp.after_move(mps, (st.x, st.y), (new.x, new.y))
+        # M7 P8a: the walk-overs over the walk, then over the knock move (monsters.walkover_segments)
+        from doomfj.monsters import walkover_segments
+        dps = cur[0]
+        for a_, b_ in walkover_segments(mph if (mph is not None and player_loots(mph.world.player)) else None,
+                                        (st.x, st.y), (new.x, new.y)):
+            dps = dp.after_move(dps, a_, b_)
+            mps = mp.after_move(mps, a_, b_)
         return (dps, new, mps, pusedn) if with_movers else (dps, new)
 
     # ── M7 P6+P7: THE PLAN IS THE MIRROR'S ─────────────────────────────────────────────────────────
@@ -600,7 +605,7 @@ def main():
     # render whose seen marks wake them and whose window aims the shots), and the main loop below calls
     # the same function -- a plan that opens the door here opens it there, by construction, and the
     # byte- and state-exact comparison is still what judges the binary.
-    from doomfj.monsters import MonsterPhase, MonsterViews
+    from doomfj.monsters import MonsterPhase, MonsterViews, view_drop_kw
     from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
     from doomfj.world import player_loots
     # M7 P2a.1: the blue card vanishes once taken (its visibility slot)
@@ -646,6 +651,7 @@ def main():
                                           thing_positions=mviews.positions(mph),
                                           seen_out=(_seen := set()), aim_things=mviews.aim_things(mph),
                                           aim_out=(_aim := [0] * 17), mobiles=mph.mobiles(),   # M7 P5
+                                          **view_drop_kw(mph),                 # M7 P8a: the dying view's sink
                                           **GAME_RENDER_KW)),
                             card=bool(dps[3]), **mph.screen_kw())     # M7 P4.1: the weapon's frame, the bar
         mph.set_aim(_aim)                               # M7 P4.2a: this picture's window -> the next frame's shots
@@ -1117,7 +1123,8 @@ def main():
                 alt[target] = k
                 asc = build_scene(mw, mw, args.map, heights_for_states(secs, lds, sds, alt))
                 pic = screen.frame(bytes(rm.render_wall_frame(state, asc, sprite_wad=art, thing_hidden=hidden,
-                                                 mobiles=mph.mobiles(), **GAME_RENDER_KW)),
+                                                 mobiles=mph.mobiles(), **view_drop_kw(mph),   # M7 P8a
+                                                 **GAME_RENDER_KW)),
                                    card=bool(dps[3]), **mph.screen_kw())
                 nd = sum(a != b for a, b in zip(got[f], pic))
                 if nd == 0 or k <= dstates[target][0] + 1:
@@ -1176,9 +1183,10 @@ def main():
             secs, lds, sds, {si: 0 for si in order}))
         _found = build_scene(mw, mw, args.map, heights_for_states(
             secs, lds, sds, {si: before_ng[1][si][0] for si in order}))
-        tells = (bytes(rm.render_wall_frame(_st, _shut, sprite_wad=art, thing_hidden=hidden,
+        # view_drop: N/A -- CONTROL 1's door-state question at a living pose (two scenes, no monsters)
+        tells = (bytes(rm.render_wall_frame(_st, _shut, sprite_wad=art, thing_hidden=hidden,  # view_drop: N/A
                                             **GAME_RENDER_KW))
-                 != bytes(rm.render_wall_frame(_st, _found, sprite_wad=art, thing_hidden=hidden,
+                 != bytes(rm.render_wall_frame(_st, _found, sprite_wad=art, thing_hidden=hidden,  # view_drop: N/A
                                                **GAME_RENDER_KW)))
     print("  CONTROL 1: door %d reached %d distinct states %s -- %s"
           % (target, len(seen), sorted(seen),

@@ -82,13 +82,14 @@ class Meta:
 
 
 class Census:
-    def __init__(self, skill=gd.SK_HARD):
+    def __init__(self, skill=gd.SK_HARD, *, player: str = "full", monsters: str = "full"):
         self.cfg = Config()
         self.W = self.cfg.VIEW_W
         self.rm = ReferenceModel(self.cfg)                  # the DRAWING model (instrumented)
         self.mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
         self.art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
-        self.world = W.World(self.mw, skill=skill)          # its own ReferenceModel
+        # its own ReferenceModel; M7 P8a: in the set's model modes (scenarios_v2.new_census passes them)
+        self.world = W.World(self.mw, skill=skill, player=player, monsters=monsters)
         self.cmap = self.world.cmap
         self.skill = skill
         # -- today's drawable space and classification (the ORIGINAL functions, at spawn) --------
@@ -233,7 +234,8 @@ class Census:
             if ws.mon_drop[m] == 1:
                 item = wd.dropper[m]
                 dl = {2007: "CLIPA0", 2001: "SHOTA0"}[item]
-                rows.append(((wadi, 1), PThing(self.syn_type(dl, "drop"), x, y),
+                dx, dy = wd.drop_pos(m)                        # M7 P8a: the drop's own position (World.drop_pos)
+                rows.append(((wadi, 1), PThing(self.syn_type(dl, "drop"), dx, dy),
                              Meta("drop", m, False, False, wadi, dl)))
         for s in range(W.FIREBALL_POOL):
             if ws.proj_active[s]:

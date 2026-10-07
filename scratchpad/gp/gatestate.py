@@ -38,7 +38,9 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                # P6 / P7 (docs/gp-p67-interface.md 4.5): the loot, the barrels, the drops, the game's cells, thvis
                "p_bc", "p_str", "p_bp", "am_misl", "am_cell", "mdrop", "dr_live",
                "bar_st", "bar_ti", "bar_hp", "bar_solid", "rng_wd", "lvtime", "g_rs", "g_skill", "thvis",
-               "p_atk", "pj_src")                                                   # P7: the killer, the shooters
+               "p_atk", "pj_src",                                                   # P7: the killer, the shooters
+               # P8a (docs/gp-final-plan.md 4.1): P6+P7's turn flag (#123 F1), the sink, knockback's, the blast source
+               "p_tnh", "p_vd", "p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z", "bar_src")
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
@@ -70,7 +72,8 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int 
 MONSTER_NAMES = {"mon_state", "mon_tics", "mon_facing", "mon_active",
                  "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",
                  "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt", "mon_justattacked",
-                 "mon_health", "mon_shootable", "mon_solid", "mon_justhit", "mon_ambush", "snd_alert"}
+                 "mon_health", "mon_shootable", "mon_solid", "mon_justhit", "mon_ambush", "snd_alert",
+                 "mkx", "mky", "mfx", "mfy"}                    # M7 P8a: knockback's per-slot cells
 
 
 def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None,

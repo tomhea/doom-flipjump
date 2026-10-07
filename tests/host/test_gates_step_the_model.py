@@ -74,3 +74,39 @@ def test_the_control_a_mirror_back_on_step_sim_is_refused():
     mutated = src.replace(old, "new = sim.rm.step_sim(st, kd, scene=sim._scene(blocked, mp.heights(ms)))\n"
                                "                        nx, ny, na = new.x, new.y, new.angle")
     assert refused(path, mutated)
+
+
+# ---- #119-1 (M7 P8a, package V): the gates flood the noise through THIS frame's doors -----------------------------
+# In "full" (and P8a's modes after it) every game-tier mirror syncs the frame's doors and lifts into the world
+# (`MonsterPhase.sync`) BEFORE the weapon (`MonsterPhase.weapon`): a shot's noise floods through the doors as they are
+# this frame, as the binary's door tic runs before its weapon (#119-1, DONE in P6+P7). This holds the order so it stays.
+def sync_before_weapon(src: str, fn: str):
+    """(the first .sync( line, the first .weapon( line) inside function `fn` -- None where there is none"""
+    tree = ast.parse(src)
+    first = {"sync": None, "weapon": None}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == fn:
+            for ch in ast.walk(node):
+                if isinstance(ch, ast.Call) and isinstance(ch.func, ast.Attribute) and ch.func.attr in first:
+                    k = ch.func.attr
+                    first[k] = ch.lineno if first[k] is None else min(first[k], ch.lineno)
+    return first["sync"], first["weapon"]
+
+
+def test_the_mirrors_sync_the_doors_before_the_weapon():
+    for path, fn in MIRRORS.items():
+        s, w = sync_before_weapon((ROOT / path).read_text(encoding="utf-8"), fn)
+        assert s is not None and w is not None and s < w, (path, fn, s, w)
+
+
+def test_the_control_a_weapon_before_the_sync_is_refused():
+    path = "scratchpad/gp/p2a_gate.py"
+    src = (ROOT / path).read_text(encoding="utf-8")
+    old = "                        mph.sync(ph[0], ms[0], ms[2])\n"
+    assert src.count(old) == 1
+    anchor = "                    if loots:\n                        nx, ny, na = mph.move("
+    assert src.count(anchor) == 1
+    mutated = src.replace(old, "").replace(anchor, anchor.replace(
+        "if loots:\n", "if loots:\n                        mph.sync(ph[0], ms[0], ms[2])\n"), 1)
+    s, w = sync_before_weapon(mutated, "run")
+    assert not (s is not None and w is not None and s < w), (s, w)

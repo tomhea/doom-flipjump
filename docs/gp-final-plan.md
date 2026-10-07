@@ -754,3 +754,11 @@ frozen-set criterion and need the owner's words.
 ## As built
 
 (To be appended after the ship: the builds, where they differed from this plan, the numbers.)
+
+**TAKEN (coordinator, 2026-10-07, under the owner's standing "be autonomous: take the recommended option, record it,
+report it"; the owner asked for A-D + P8 on 2026-10-07):** O-A1 S0 (the geometry sinks exactly; floors and ceilings
+shaded as standing -- the model and the oracle do the same); O-B1 barrels not pushed; O-B2 exact 2D LOS at any range;
+O-B3 monsters slide at their 2 tics a frame, the player at 1; O-V1 v6's criteria kept, monster kills count, plus >= 1
+infighting episode and >= 1 knockback stopped by a wall; O-E1 stress recorded and exact, with a tripwire (any frame
+> 44M or any scenario averaging > 30M must be explained before ship); O-E2 keep gamespeed's tours. The rung is ONE
+feature build (P8a) with P8 measured on its binary, the infighting fallback mode kept in reserve.

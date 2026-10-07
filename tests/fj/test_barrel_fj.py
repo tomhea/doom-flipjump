@@ -644,7 +644,7 @@ def _fbuild(tmp_path, name, mut=None):
         text = text.replace(old, old + "    hex.if1 2, bw_sr, bd_lx\n    hex.mov 2, bw_sr, bd_src\n  bd_lx:\n")
     elif mut:
         old, new = FIGHT_MUTANTS[mut]
-        assert text.count(old) == 1, (mut, text.count(old))
+        assert text.count(old) == (n if mut == "blast_player" else 1), (mut, text.count(old))   # one per slot
         text = text.replace(old, new)
     stubs = ["bl_los:", "    hex.mov 1, sl_hit, los_poke", "    hex.xor_by sl_hit, 1", "    stl.fret bl_lret",
              "dp_go:", "    stl.output 80", "    hex.print_as_digit 2, dp_dmg, 0", "    hex.print_as_digit 2, dp_src, 0",

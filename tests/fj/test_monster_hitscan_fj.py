@@ -87,7 +87,9 @@ def _records(w):
         d = rnd.choice((rnd.randint(20, 80), rnd.randint(40, 300), rnd.randint(200, 900), rnd.randint(800, 2100),
                         MELEE_BASE + 20, MELEE_BASE + 30, MELEE_BASE + 29, MELEE_BASE + 19, 2047, 2048))
         if tp in (3001, 3002) and rnd.random() < 0.5:                 # the claw's and the bite's reach
-            d = rnd.randint(10, 70)
+            d = rnd.choice((rnd.randint(10, 56), rnd.randint(56, 78)))   # the player's reach .. a demon's
+            if rnd.random() < 0.5:                                    # on an axis: P_AproxDistance is d exactly
+                ux, uy = rnd.choice(((1, 0), (-1, 0), (0, 1), (0, -1)))
         tx, ty = int(mx + ux * d), int(my + uy * d)
         player_target = rnd.random() < 0.45
         tj = None if player_target else rnd.choice(others)
@@ -121,6 +123,16 @@ def _records(w):
         out.append(dict(tp=tp, m=m, mx=mx, my=my, rng=rnd.randrange(256), target=1 if player_target else 2 + tj,
                         tpos=(tx, ty), talive=int(rnd.random() < 0.85), crowd=crowd, px16=px16, py16=py16,
                         pdead=pdead, seen=int(rnd.random() < 0.5), hit=int(rnd.random() < 0.3), bars=bars))
+    # the claw's and the bite's reach on a MONSTER target, on an axis between the player's 60 and a demon's 74
+    for r in range(40):
+        tp = (3001, 3002)[r % 2]
+        m = sh[tp]
+        tj = rnd.choice([j for j in range(n) if j != m])
+        mx, my = rnd.randint(-600, 3000), rnd.randint(-1000, 2200)
+        ux, uy = rnd.choice(((1, 0), (-1, 0), (0, 1), (0, -1)))
+        d = rnd.randint(58, 75)
+        out.append(dict(tp=tp, m=m, mx=mx, my=my, rng=rnd.randrange(256), target=2 + tj, tpos=(mx + ux * d, my + uy * d),
+                        talive=1, crowd={}, px16=0, py16=0, pdead=1, seen=0, hit=0, bars=[(0, 0)] * len(w.barrel_things)))
     return out
 
 

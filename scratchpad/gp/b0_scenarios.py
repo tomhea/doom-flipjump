@@ -38,6 +38,13 @@ candidates and the frame is drawn from there). So a proxy run is judged against 
 (`judge`), "picture identical to the normal run" is a recorded note with its cause (`proxy_note`), and every refused
 step is listed: on those frames the delta is not the collision tic at the landing.
 
+KNOCKBACK (M7 P8a, docs/gp-final-plan.md 5.3). Under knockback a frame's landing is the WALK, then the player's knock
+move from his knock momentum (p_kmx / p_kmy), which the frame's monsters, fireballs and blasts set for the NEXT frame.
+So b0 injects, with the pose, the frozen model's knock momentum BEFORE the tic (`knock`, as P5's health and armor:
+`hurt`) and the pose from which the binary's own WALK lands where the model's walk did (`scenarios_v2.walk_landing`:
+monsters.KnockTap's record of where the knock move began) -- the binary's knock move then lands on the model's pose
+by the same rule. A binary without the cells (a "full" game tier) is given neither, and its mirror none.
+
 SETUP. A run's setup beyond the pose (v6: the aftermath's three corpses and two lying clips, `setup.corpses`) is
 applied to the mirror with the set's own `inject_corpse` and POKED into the binary at the first game frame --
 hurt_gate's frame-0 mechanism (`setup_cells`) plus the leaf lists that link the lying drops; the binary's own values
@@ -66,6 +73,7 @@ import probe as P                                                            # n
 import scenarios_v2 as S                                                     # noqa: E402
 from doomfj.monsters import loot_cells                                       # noqa: E402  (M7 P6)
 from doomfj.world import player_loots                                        # noqa: E402  (M7 P6)
+from doomfj import world as W                                                # noqa: E402  (M7 P8a)
 
 ROOT = P.ROOT
 M32 = 0xFFFFFFFF
@@ -95,6 +103,9 @@ def model_frames(run: dict, proxy: bool = False) -> list:
     the file's poses (the set's freeze)."""
     w = S.start_world(run["setup"])
     mirror = S.BinaryMirror(w)
+    from doomfj.monsters import KnockTap
+    tap = KnockTap(w)                                  # M7 P8a: where each tic's walk landed (the knock follows)
+    knock = W.knockback_on(w.player, w.monsters)
     out = []
     for i, s in enumerate(run["keys"]):
         kd = S.str_to_keys(s)
@@ -106,13 +117,18 @@ def model_frames(run: dict, proxy: bool = False) -> list:
         # binary's bar and its monsters' damage start each frame from the frozen model's player
         pre_hurt = (ws.p_health, ws.p_armor, ws.p_armortype)
         assert ws.p_health > 0 and not ws.p_dead, "%s frame %d: the frozen model's player is dead" % (run["name"], i)
+        # M7 P8a: the player's knock momentum BEFORE the tic (the thrusts of the last frame's monster world) -- injected
+        # like `hurt`, so the binary's knock move starts from the frozen model's
+        pre_knock = (ws.p_momx, ws.p_momy) if knock else None
+        k0 = len(tap.records)
         w.tic(kd)
         post = (ws.px, ws.py, ws.pangle)
         if list(post) != list(run["poses"][i]):
             raise AssertionError("%s frame %d: the model no longer reproduces the set's pose (%s vs "
                                  "%s) -- the model or the file changed" % (run["name"], i, post,
                                                                            run["poses"][i]))
-        inj, bkeys = S.b0_injection(w.rm, pre, post, kd, proxy=proxy)
+        land = S.walk_landing(tap, k0, post)           # M7 P8a: the WALK's landing (post when no knock moved)
+        inj, bkeys = S.b0_injection(w.rm, pre, land, kd, proxy=proxy)
         # M7 P4.2a: the TRIGGER is delivered too -- fire and the number keys -- so the binary shoots where the set's
         # player shoots, through its own picture's window, and every hit, pain and death is checked against the
         # mirror's (the injected pose carries the model's strafe; the weapon moves no pose)
@@ -126,7 +142,7 @@ def model_frames(run: dict, proxy: bool = False) -> list:
                     "strafe_only": S.has_strafe(kd) and not (kd.get("forward") or kd.get("back")),
                     # M7 P3.2b: drive re-steps the mirror with the monsters from the run's setup -- on EVERY
                     # frame, since a caller may hand drive a slice that starts mid-run (the selftest's T5)
-                    "run_setup": run["setup"], "hurt": pre_hurt,
+                    "run_setup": run["setup"], "hurt": pre_hurt, "knock": pre_knock,   # M7 P8a: + the knock
                     "post_loot": loot_cells(w)})             # M7 P6: the frozen model's loot after the tic
     return out
 
@@ -267,6 +283,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
         if inject_hurt and fr.get("hurt") is not None:   # M7 P5: the frozen model's pre-tic health / armor
             hp, ar, at = fr["hurt"]
             vals.update({"p_hp": hp & 0xFFF, "p_ar": ar, "p_at": at})
+        if inject_knock and fr.get("knock") is not None:   # M7 P8a: and its pre-tic knock momentum
+            vals.update({"p_kmx": fr["knock"][0] & M32, "p_kmy": fr["knock"][1] & M32})
         if f == mf and poke:                            # M7 P6+P7: the setup, once, at the first game frame
             got = pr.read_cells(sorted(poke))
             setup_pre.extend(k for k in sorted(poke) if got[k] != before[k])
@@ -279,6 +297,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
     # M7 P5: a binary with hurtcode's cells takes the frozen model's player each frame (`hurt`); one without them
     # (a binary before P5: the probe dropped the optional group) is not injected, and neither is its mirror
     inject_hurt = p is None or "p_hp" in p.cells
+    # M7 P8a: likewise the knock momentum, when the binary has the cells (a "full" game tier has none: knock None)
+    inject_knock = p is None or "p_kmx" in p.cells
     if gb is not None:
         p.on_frame_start(start)
         p.on_present(present)
@@ -325,6 +345,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
         _boxes = mph.boxes() if mph is not None else ()   # the door tic precedes the weapon (and its kills)
         if mph is not None and inject_hurt and fr.get("hurt") is not None:   # M7 P5: as `start` writes them
             mph.world.ws.p_health, mph.world.ws.p_armor, mph.world.ws.p_armortype = fr["hurt"]
+        if mph is not None and inject_knock and fr.get("knock") is not None and mph.knocks():   # M7 P8a: likewise
+            mph.world.ws.p_momx, mph.world.ws.p_momy = fr["knock"]
         if mph is not None and not chase:
             mph.weapon(fr["keys"], fr["inj"][0] & M32, fr["inj"][1] & M32, fr["inj"][2])
         if chase:
@@ -378,7 +400,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
                               mobiles=mph.mobiles() if mph is not None else None,     # M7 P5
                               removed=orc.monster_removed(mph) if loot else None,    # M7 P6
                               barrel_views=orc.monster_barrel_views(mph) if loot else None,
-                              card=(cm.state[3] if cm is not None else 0) if loot else None)
+                              card=(cm.state[3] if cm is not None else 0) if loot else None,
+                              view_drop=mph.view_drop() if mph is not None else 0)    # M7 P8a
             if mph is not None:
                 mph.set_aim(_aim)                        # M7 P4.2a: the window, for the next frame's weapon
             if mph is not None:
@@ -648,10 +671,11 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
         frs = model_frames(runs[rname])
         for k in range(2, len(frs) - 6):
             (ex, ey, ea), ed = frs[k]["exp"]
-            shut = orc.render(P_signed(ex), P_signed(ey), ea, tuple(ed))
-            if orc.render(P_signed(ex), P_signed(ey), ea, open_state(ed)) == shut:
+            # view_drop: N/A -- the selftest's T5 window search asks which door changes a living frame's walls
+            shut = orc.render(P_signed(ex), P_signed(ey), ea, tuple(ed))  # view_drop: N/A
+            if orc.render(P_signed(ex), P_signed(ey), ea, open_state(ed)) == shut:  # view_drop: N/A
                 continue
-            door = next((d for d in range(len(ed)) if not ed[d] and orc.render(
+            door = next((d for d in range(len(ed)) if not ed[d] and orc.render(  # view_drop: N/A
                 P_signed(ex), P_signed(ey), ea, open_state(ed, d)) != shut), None)
             if door is not None:
                 found = (rname, k, door, frs[k - 2:k + 6])

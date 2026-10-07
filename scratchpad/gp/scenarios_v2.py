@@ -115,12 +115,20 @@ SIGHT_RULE = "los"
 # (`world.MONSTER_TICS_PER_FRAME`). A set file names its own (`monster_tics`, absent = 1: v1 .. v5 were recorded at one
 # tic a frame); `use_sight_rule` applies it with the sight rule, so every load of a set replays the model it recorded.
 MONSTER_TICS = 1
+# M7 P8a (V, docs/gp-final-plan.md 5.3): the set's MODEL MODES -- the player's and the monsters' (world.PLAYER_MODES /
+# MONSTER_MODES). A set file names its own (`player_mode` / `monster_mode`, absent = "full" / "full": v1 .. v6 were
+# recorded at World's defaults); `use_sight_rule` applies them with the rest, so v7 ("final" / "final": the dying view,
+# knockback, infighting) replays its own model and v6 still replays the P6+P7 one.
+PLAYER_MODE = "full"
+MONSTER_MODE = "full"
 
 
 def use_sight_rule(doc: dict) -> None:
-    global SIGHT_RULE, MONSTER_TICS
+    global SIGHT_RULE, MONSTER_TICS, PLAYER_MODE, MONSTER_MODE
     SIGHT_RULE = doc.get("sight_rule", "los")
     MONSTER_TICS = int(doc.get("monster_tics", 1))           # M7 P6+P7 E
+    PLAYER_MODE = doc.get("player_mode", "full")             # M7 P8a
+    MONSTER_MODE = doc.get("monster_mode", "full")
 UNIT = 1 << 16
 M32 = 0xFFFFFFFF
 CELL = 16
@@ -181,6 +189,8 @@ MIN_MOVE_KEY = 0.50
 MIN_MOVING = 0.60
 MIN_STRAFE_FIGHT = 0.50
 MIN_DODGES = 1
+MIN_INFIGHT = 1              # M7 P8a O-V1: infighting episodes in the set
+MIN_KNOCK_WALLS = 1          # M7 P8a O-V1: knocks a wall refused in the set
 AFTER_MIN_CORPSES = 3
 AFTER_NEAR = 160             # "among corpses": this close to the player at the start
 AFTER_MIN_DRAWN = 0.20       # the decided D3 picture degrades a corpse beyond ~130 units in a
@@ -329,7 +339,7 @@ def angle_err(want: int, have: int) -> int:
 
 
 def new_world() -> "W.World":
-    return apply_sight_rule(W.World(skill=SKILL))
+    return apply_sight_rule(W.World(skill=SKILL, player=PLAYER_MODE, monsters=MONSTER_MODE))   # M7 P8a: the modes
 
 
 def apply_sight_rule(w) -> "W.World":
@@ -447,6 +457,28 @@ def predict_move(w, kd: dict):
     return x, y
 
 
+def walk_landing(tap, k0: int, post):
+    """M7 P8a (V): where this tic's WALK landed -- the pose the player's knock move began from (monsters.KnockTap's
+    first player record since record `k0`), or the tic's landing `post` when no knock move ran. B0 injects the pose
+    from which the binary's own walk lands HERE, with the frame's knock momentum: its own knock move then lands on
+    `post` by the model's rule (`b0_injection`, `b0_scenarios.model_frames`)"""
+    if tap is None or not tap.ok:
+        return post
+    recs = tap.player_calls(tap.since(k0))
+    if not recs:
+        return post
+    x, y = recs[0]["pos0"]
+    return (x, y, post[2])
+
+
+def knock_push(w):
+    """M7 P8a (V): the player's knock momentum this tic, clamped to +-MAXMOVE as P_XYMovement clamps it -- the push
+    his next knock move tries (0, 0 when the model has no knock)"""
+    mx, my = getattr(w.ws, "p_momx", 0), getattr(w.ws, "p_momy", 0)
+    c = gd.MAXMOVE
+    return max(-c, min(c, mx)), max(-c, min(c, my))
+
+
 def shot_pending(ws) -> bool:
     """the trigger is down and the weapon's next state fires (the pistol shoots 4 tics after the
     trigger, the shotgun 3): the bearing at that tic decides the hit"""
@@ -539,7 +571,7 @@ def new_census():
     """a fresh census (census_lib installs module-level hooks; the newest census owns them, as in
     census.py, which makes one per run)"""
     import census_lib as CL
-    return CL.Census(SKILL)
+    return CL.Census(SKILL, player=PLAYER_MODE, monsters=MONSTER_MODE)   # M7 P8a: the set's modes
 
 
 def drawn_population(c) -> dict:
@@ -823,8 +855,14 @@ class BinaryMirror:
                 mph.weapon(kd, x16, y16, pre[2])
                 mph.touch = touch
                 st = SimState(*mph.move(b0_keys(kd), pre[0], pre[1], pre[2], scene=self._scenes[key]), w.mapname)
-        self.state = self.dp.after_move(self.state, (pre[0], pre[1]), (st.x, st.y))
-        self.mstate = self.mp.after_move(self.mstate, (pre[0], pre[1]), (st.x, st.y))
+        # M7 P8a: the walk-overs over the walk, then over the knock move (monsters.walkover_segments; one segment
+        # without a phase or a knock move: blocked27's tic, every frame before P8a)
+        from doomfj.monsters import walkover_segments
+        from doomfj.world import player_loots as _pl
+        for a_, b_ in walkover_segments(mph if (mph is not None and _pl(mph.world.player)) else None,
+                                        (pre[0], pre[1]), (st.x, st.y)):
+            self.state = self.dp.after_move(self.state, a_, b_)
+            self.mstate = self.mp.after_move(self.mstate, a_, b_)
         return (st.x, st.y, st.angle), tuple(s[0] for s in self.ds)
 
 
@@ -928,7 +966,14 @@ class Autopilot:
         w = self.w
         lx, ly = predict_move(w, kd)
         sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, lx >> 16, ly >> 16)]
-        return w.secs[sec].special not in SECTOR_HURT
+        if w.secs[sec].special in SECTOR_HURT:
+            return False
+        # M7 P8a (V): under knockback the knock move follows the walk -- the push must not carry it onto one either
+        kx, ky = knock_push(w)
+        if kx or ky:
+            sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, (lx + kx) >> 16, (ly + ky) >> 16)]
+            return w.secs[sec].special not in SECTOR_HURT
+        return True
 
     def _target_xy(self, tgt):
         w, ws = self.w, self.w.ws
@@ -1006,7 +1051,7 @@ class Autopilot:
         for m in range(w.layout.nmon):
             if ws.mon_drop[m] == 1 and self._wanted(w.dropper[m]) \
                     and (not weapons_only or w.dropper[m] in PICKUP_WEAPON):
-                yield ("drop", m), w.dropper[m], ws.mon_x[m], ws.mon_y[m]
+                yield ("drop", m), w.dropper[m], *w.drop_pos(m)     # M7 P8a: the drop's own position
 
     def _near_pickup(self, dist, within, weapons_only=False, health_only=False):
         best = None
@@ -1100,6 +1145,12 @@ class Autopilot:
         px, py = self._pxy()
         moved = self.last_xy is not None and (ws.px, ws.py) != self.last_xy
         self.last_xy = (ws.px, ws.py)
+        # M7 P8a (V): a PUSH (the knock momentum is not zero) carried it off its path: plan the path again from where
+        # it stands (the nav graph's nearest cell), and do not count the push as progress
+        kx, ky = knock_push(w)
+        if kx or ky:
+            self.path_age = max(self.path_age, 8)
+            moved = False
         if ws.p_owned[gd.WP_SHOTGUN] and ws.p_ammo[gd.AM_SHELL] and ws.p_ready != gd.WP_SHOTGUN \
                 and ws.p_pending != gd.WP_SHOTGUN:
             kd["w3"] = True
@@ -1267,6 +1318,8 @@ class Autopilot:
         if g[0] == "pickup":
             t = w.pickup_things[g[1]]
             return t.x, t.y
+        if g[0] == "drop":
+            return w.drop_pos(g[1])                  # M7 P8a: the drop's own position (World.drop_pos)
         return ws.mon_x[g[1]], ws.mon_y[g[1]]
 
     def _goal_valid(self):
@@ -1306,11 +1359,14 @@ def plan_run(cp: dict, setup: dict, nav: NavGraph):
         w = start_world(setup)
         ap = Autopilot(w, nav, params, cp.get("style", "fight"))
         mirror = BinaryMirror(w)
+        from doomfj.monsters import KnockTap
+        tap = KnockTap(w)                                # M7 P8a: where each tic's walk landed
         keys, bad = [], []
         for _f in range(FRAMES):
             kd = ap.decide()
             ws = w.ws
             pre, pre_doors, pre_movers = (ws.px, ws.py, ws.pangle), door_tuples(w), mover_state(w)
+            k0 = len(tap.records)
             ev = w.tic(kd)
             keys.append(kd)
             bad += forbidden_events(ev)
@@ -1319,8 +1375,9 @@ def plan_run(cp: dict, setup: dict, nav: NavGraph):
             # strafe undercount's corner) -- is refused like a death, so the planner takes the next parameter set;
             # the criterion "B0 follows the model's camera" is unchanged
             post = (ws.px, ws.py, ws.pangle)
-            inj, bkeys = b0_injection(w.rm, pre, post, kd)
-            if mirror.step(inj, bkeys, pre_doors, pre_movers)[0] != (post[0], post[1], post[2] & M32):
+            land = walk_landing(tap, k0, post)           # M7 P8a: B0 lands the binary's WALK; its knock follows
+            inj, bkeys = b0_injection(w.rm, pre, land, kd)
+            if mirror.step(inj, bkeys, pre_doors, pre_movers)[0] != (land[0], land[1], land[2] & M32):
                 bad.append("b0 camera")
             if bad:
                 break
@@ -1336,10 +1393,17 @@ def replay(run: dict, census: bool = False) -> dict:
     c = new_census() if census else None
     w = start_world(run["setup"], apply_sight_rule(c.world) if c else None)
     mirror = BinaryMirror(w)
+    from doomfj.monsters import KnockTap
+    tap = KnockTap(w)                                    # M7 P8a: the knock moves (where the walk landed, refusals)
+    fight = W.infighting_on(w.monsters)
     keys = [str_to_keys(s) for s in run["keys"]]
     poses, pops = [], []
     n = {"move_key": 0, "strafe": 0, "moving": 0, "move_frames": 0, "dodges": 0, "threat_frames": 0,
-         "cam_part": 0, "door_part": 0, "use_strafe": 0, "mkills": 0, "bkills": 0, "shotgun": 0}
+         "cam_part": 0, "door_part": 0, "use_strafe": 0, "mkills": 0, "bkills": 0, "shotgun": 0,
+         # M7 P8a (O-V1): monster-on-monster target switches; knocks a wall refused (a thing's knock momentum, at
+         # least STOPSPEED in a component, zeroed by its knock move -- KnockTap.refusals -- with no solid thing at
+         # the player's push target); every knock move that ran
+         "infight": 0, "knock_walls": 0, "knock_moves": 0}
     opened_player, opened_monster = set(), set()
     fight_frames = fight_strafe = 0
     for kd in keys:
@@ -1357,8 +1421,16 @@ def replay(run: dict, census: bool = False) -> dict:
                    and si in w.door_boxes and in_use_box_fixed(w.door_boxes[si], ws.px, ws.py)
                    for si in w.door_order]
         monreq = list(ws.d_monreq)
+        tgt0 = list(ws.mon_target) if fight else None
+        k0 = len(tap.records)
         ev = w.tic(kd)
         post = (ws.px, ws.py, ws.pangle)
+        if fight:                                        # M7 P8a: a monster switched to a monster this tic
+            n["infight"] += sum(1 for m, (a, b) in enumerate(zip(tgt0, ws.mon_target)) if b >= 2 and b != a)
+        recs = tap.since(k0) if tap.ok else []
+        n["knock_moves"] += len(recs)
+        n["knock_walls"] += len(tap.wall_refusals(recs))
+        land = walk_landing(tap, k0, post)               # M7 P8a: B0 lands the binary's WALK; its knock follows
         n["mkills"] += sum(1 for k in ev.kills if k[0] == "mon")
         n["bkills"] += sum(1 for k in ev.kills if k[0] == "bar")
         n["shotgun"] += sum(1 for f_ in ev.fired if f_ == "shotgun")
@@ -1369,9 +1441,9 @@ def replay(run: dict, census: bool = False) -> dict:
                     opened_player.add(d)
                 elif monreq[d]:
                     opened_monster.add(d)
-        inj, bkeys = b0_injection(w.rm, pre, post, kd)
+        inj, bkeys = b0_injection(w.rm, pre, land, kd)
         bpose, bdoors = mirror.step(inj, bkeys, pre_doors, pre_movers)
-        n["cam_part"] += bpose != (post[0], post[1], post[2] & M32)
+        n["cam_part"] += bpose != (land[0], land[1], land[2] & M32)
         n["door_part"] += bdoors != tuple(ws.d_state)
         n["use_strafe"] += bool(kd.get("use")) and has_strafe(kd)
         if has_move(kd):
@@ -1398,7 +1470,9 @@ def replay(run: dict, census: bool = False) -> dict:
             "digest": w.digest(), "health": max(0, w.ws.p_health), "dead": w.ws.p_dead,
             "census": census, "frames": len(keys),
             "corpses_near_start": corpses_near(run["setup"]),
-            "aftermath": bool(run["setup"].get("corpses"))}
+            "aftermath": bool(run["setup"].get("corpses")),
+            # M7 P8a: which O-V1 criteria apply (the set's model has the rule) and whether K's knock moves exist
+            "fight": fight, "knock": W.knockback_on(w.player, w.monsters), "knock_model": tap.ok}
 
 
 # ================================================================================================
@@ -1426,6 +1500,8 @@ def criteria(ms: list) -> list:
     else:
         out.append((">= 30% of frames have an awake monster DRAWN", None, "census not run"))
     kills = sum(r["mkills"] for r in ms)
+    # M7 P8a (O-V1, the owner's criteria with infighting): a monster killed BY A MONSTER counts -- ev.kills holds every
+    # monster death whoever dealt it, so the floor reads the same field
     out.append((">= %d kills" % MIN_KILLS, kills >= MIN_KILLS,
                 "%d monsters killed (and %d barrels exploded; %d shotgun shots)"
                 % (kills, sum(r["bkills"] for r in ms), sum(r["shotgun"] for r in ms))))
@@ -1489,6 +1565,20 @@ def criteria(ms: list) -> list:
     else:
         out.append((aname, False if not aft else None,
                     "no aftermath run" if not aft else "census not run"))
+    # M7 P8a (O-V1, TAKEN 2026-10-07): a set at a model with infighting has >= 1 infighting episode, and one with
+    # knockback >= 1 knock a wall refused -- so the set exercises them. Absent from a set whose model lacks the rule
+    # (v1 .. v6 validate exactly as recorded)
+    if any(r.get("fight") for r in ms):
+        inf = sum(r["infight"] for r in ms)
+        out.append((">= %d infighting episode (a monster's target switched to a monster)" % MIN_INFIGHT,
+                    inf >= MIN_INFIGHT, "%d switches (%s)" % (inf, ", ".join("%s %d" % (r["name"], r["infight"])
+                                                                         for r in ms if r["infight"]) or "none")))
+    if any(r.get("knock") for r in ms):
+        kw = sum(r["knock_walls"] for r in ms)
+        model = all(r.get("knock_model") for r in ms)
+        out.append((">= %d knockback stopped by a wall" % MIN_KNOCK_WALLS, (kw >= MIN_KNOCK_WALLS) if model else None,
+                    "%d refused knocks over %d knock moves" % (kw, sum(r["knock_moves"] for r in ms)) if model
+                    else "n/a: the model has no knock move (package K not merged)"))
     exits = sum(r["totals"]["level_done"] for r in ms)
     out.append(("no run uses the exit", exits == 0, "%d" % exits))
     cp_ = sum(r["cam_part"] for r in ms)
@@ -1633,6 +1723,7 @@ def plan_set(quiet=False) -> dict:
         runs.append(run)
     doc = {"version": VERSION,
            "status": "PLANNED -- B0 and the owner's freeze pending (`--freeze`)",
+           "player_mode": PLAYER_MODE, "monster_mode": MONSTER_MODE,            # M7 P8a: the set's model
            "map": "E1M1", "skill": "hard", "frames": FRAMES, "tics_per_frame": 1,
            "start_state": "level start (monsters asleep at spawn, doors shut, nothing taken, pistol "
                           "+ 50 bullets + 100 health); injected: the player's pose, and the "
@@ -2005,6 +2096,22 @@ def selftest(doc: dict) -> int:
         fn(fake)
         ok, d = next((ok, d) for n, ok, d in criteria(fake) if n.startswith(prefix))
         check("S9 %s" % label, ok is False, d)
+    # S12 (M7 P8a, O-V1): the infighting and knock-a-wall floors -- present only at a model with the rule, and each
+    # FAILS a set without its episode (synthetic: this set's metrics with the rule claimed and the count zeroed)
+    for label, field, prefix in (("no infighting episode FAILS the infighting floor", "infight",
+                                  ">= %d infighting" % MIN_INFIGHT),
+                                 ("no knock refused by a wall FAILS the knockback floor", "knock_walls",
+                                  ">= %d knockback" % MIN_KNOCK_WALLS)):
+        fake = copy.deepcopy(base["metrics"])
+        for r in fake:
+            r.update({"fight": True, "knock": True, "knock_model": True, "infight": r.get("infight", 0),
+                      "knock_walls": r.get("knock_walls", 0), "knock_moves": r.get("knock_moves", 0)})
+            r[field] = 0
+        ok, d = next(((ok, d) for n, ok, d in criteria(fake) if n.startswith(prefix)), (None, "absent"))
+        check("S12 %s" % label, ok is False, d)
+    plain = [n for n, _ok, _d in criteria(base["metrics"])]
+    check("S12 a set whose model has neither rule carries neither floor (v1 .. v6 validate as recorded)",
+          any(r.get("fight") for r in base["metrics"]) or not any("infighting" in n or "knockback" in n for n in plain))
     # S10 determinism: re-planning checkpoint 0 gives the frozen keys
     cp = CHECKPOINTS[0]
     setup = make_setup(cp)
@@ -2209,6 +2316,7 @@ def rehash(path: Path, reason: str) -> int:
 
 
 def main():
+    global VERSION                                       # M7 P8a: --plan --version / the file's _vN
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--plan", action="store_true")
     ap.add_argument("--validate", action="store_true")
@@ -2223,6 +2331,10 @@ def main():
     ap.add_argument("--file", default=str(SCEN_FILE))
     ap.add_argument("--sight", choices=("los", "seen"), default="los",
                     help="--plan: the NEW set's sight rule (M7 P3.2; 'seen' is set v5's)")
+    ap.add_argument("--modes", metavar="PLAYER/MONSTER",
+                    help="--plan: the NEW set's model modes (M7 P8a; default the game tier's, wall_renderer's "
+                         "PLAYER_MODE / MONSTER_MODE -- v7 is 'final/final')")
+    ap.add_argument("--version", help="--plan: the NEW set's version (default from --file's '_vN', else %s)" % VERSION)
     ap.add_argument("--grown-from", metavar="REF",
                     help="--freeze: the set's digests may change by SCHEMA GROWTH only -- the witness "
                          "compares the tree at git REF (the one the set was frozen at) with this one")
@@ -2234,7 +2346,17 @@ def main():
             return 1
         t0 = time.time()
         # M7 P6+P7 E: a NEW plan is made at the game's monster tempo, and records it
-        use_sight_rule({"sight_rule": a.sight, "monster_tics": W.MONSTER_TICS_PER_FRAME})
+        # M7 P8a: and at the modes asked (default the game tier's), recorded too
+        if a.modes:
+            pm, mm = a.modes.split("/")
+        else:
+            from doomfj.wall_renderer import MONSTER_MODE as _MM, PLAYER_MODE as _PM
+            pm, mm = _PM, _MM
+        import re as _re
+        _v = _re.search(r"_(v\d+)\.json$", Path(a.file).name)
+        VERSION = a.version or (_v.group(1) if _v else VERSION)
+        use_sight_rule({"sight_rule": a.sight, "monster_tics": W.MONSTER_TICS_PER_FRAME,
+                        "player_mode": pm, "monster_mode": mm})
         doc = plan_set()
         doc["sight_rule"] = SIGHT_RULE
         doc["monster_tics"] = MONSTER_TICS

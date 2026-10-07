@@ -2,6 +2,7 @@
 
     python scratchpad/gp/hurt_gate.py --fjm build/<new>.fjm --labels <its label table>
     python scratchpad/gp/hurt_gate.py --oracle-only          # the scenarios, their counters and the controls
+    ... [--modes PLAYER/MONSTER] [--frame-ops [FILE]]        # M7 P8a: the modes (default the game tier's); per-frame ops
 
 p2a_gate's shape (it drives p2a_gate.Mirror): each scenario starts by POKING the game tier at frame 0's start -- the
 world mode, the player's pose, and every cell the scenario's SETUP moved away from the boot level start (a monster's
@@ -30,7 +31,13 @@ scenario named -- in the cells, the palette, or the picture -- else the scenario
 gate FAILS as vacuous: `armor` (damage ignores armor), `hwt` (every monster bullet hits), `pain_draw` (the player's
 pain roll draws nothing), `pool9` (a 9-slot fireball pool), `fizzle_draw` (a fizzle draws rng_fx), `fx_skip_draw` (a
 skipped blood draws rng_fx), `palette` (the red palette without DOOM's +7 rounding), `relink` (a fireball never
-changes leaf), `momentum` (the momentum table read one fine angle off), `explode_draw` (the explosion not drawn).
+changes leaf), `momentum` (the momentum table read one fine angle off), `explode_draw` (the explosion not drawn),
+`blood_draw` (M7 P8a, #121-17: the blood not drawn -- H6 proves blood is DRAWN, `blood_px`, not only spawned).
+
+M7 P8a (docs/gp-final-plan.md 5.2): the modes are the GAME TIER's (wall_renderer's; `--modes` for an --oracle-only run
+at the rung's target before the tier moves to it) -- under "final" knockback moves the poses and the scenarios re-place
+on the oracle. `--frame-ops` prints each binary scenario's per-frame op readings (max, p95, mean, frames over the 22M
+cap, the O-E1 tripwire; the probe's +-2^18), and with a FILE also writes them as JSON: S1's frames, judged per frame.
 """
 from __future__ import annotations
 
@@ -55,14 +62,19 @@ from doomfj.fixedpoint import _signed                                        # n
 from doomfj.things import drawable_things                                    # noqa: E402
 
 M32 = 0xFFFFFFFF
-MMODE, PMODE = "full", "full"             # the game tier's modes from P6/P7 on (docs/gp-p67-interface.md 6.3);
-                                          # a binary run asserts them against wall_renderer's
+# the game tier's modes (docs/gp-p67-interface.md 6.3; M7 P8a: wall_renderer's, so the gate follows the tier --
+# "full" / "full" through P6+P7, "final" / "final" from P8a; `--modes` sets another for an --oracle-only run)
+from doomfj.wall_renderer import MONSTER_MODE as MMODE, PLAYER_MODE as PMODE   # noqa: E402
+import p8a_lib as P8                                                         # noqa: E402  (M7 P8a)
+FRAME_OPS = None                          # M7 P8a: `--frame-ops`: None off, "-" print, else a JSON path (collected)
+FRAME_OPS_LOG = {}
+BLOOD = frozenset(("BLUDA0", "BLUDB0", "BLUDC0"))     # M7 P8a: the blood's lumps (S_BLOOD1..3)
 KEYFLAG = {"forward": "kb_f", "back": "kb_b", "turn_left": "kb_l", "turn_right": "kb_r", "use": "kb_u",
            "strafe_left": "kb_sl", "strafe_right": "kb_sr", "fire": "kb_fi",
            "w1": "kb_w1", "w2": "kb_w2", "w3": "kb_w3", "w4": "kb_w4"}
 EXPLOSION = frozenset(("BAL1C0", "BAL1D0", "BAL1E0"))   # S_TBALLX1..3's lumps
 CONTROLS = ("armor", "hwt", "pain_draw", "pool9", "fizzle_draw", "fx_skip_draw", "palette", "relink",
-            "momentum", "explode_draw")
+            "momentum", "explode_draw", "blood_draw")
 
 
 # ================================================================================================
@@ -219,6 +231,12 @@ def control(name: str | None):
         def mob(self):
             return [m for m in orig_mob(self) if m[2] not in EXPLOSION]
         patch(MS.MonsterPhase, "mobiles", mob)
+    elif name == "blood_draw":                   # M7 P8a (#121-17): the blood is not drawn
+        orig_mob = MS.MonsterPhase.mobiles
+
+        def mob(self):
+            return [m for m in orig_mob(self) if m[2] not in BLOOD]
+        patch(MS.MonsterPhase, "mobiles", mob)
     elif name is not None:
         raise KeyError(name)
     try:
@@ -308,10 +326,11 @@ def scenario_list(dsim, w) -> list:
     gun = [{"w3": True}] + [I] * 40 + [F] * 12 + [I] * 12
     out.append({
         "name": "H6 the shotgun into a close monster: blood, and blood the full pool skips", "keys": gun,
-        "controls": ["fx_skip_draw"],
+        "controls": ["fx_skip_draw", "blood_draw"], "blood_px": True,
         "cands": [(pose, (lambda mph: shotgun(mph))) for m in zomb for d in (96, 80, 112)
                   for pose in facing_pose(dsim, w, m, d)],
-        "claim": lambda c: c["fx_spawns"] >= 1 and c["fx_skipped"] >= 1})
+        # M7 P8a (#121-17): and the blood is DRAWN -- its pixels against the picture without it
+        "claim": lambda c: c["fx_spawns"] >= 1 and c["fx_skipped"] >= 1 and c["blood_px"] >= 1})
     out.append({
         "name": "S1 saturation: every imp fires at once -- 8 in flight, the rest fizzle", "keys": [I] * 30,
         "controls": ["pool9", "fizzle_draw"],
@@ -350,7 +369,17 @@ class Run:
                           movers=fr["mheights"], views=fr["views"], positions=fr["positions"],
                           screen_kw=fr.get("skw"), mobiles=fr["mobiles"] if mobiles is None else mobiles,
                           removed=fr.get("removed"), barrel_views=fr.get("bviews"), card=fr["phase"][3],
-                          skill=fr.get("skill"))                              # M7 P6+P7: the skill played
+                          skill=fr.get("skill"),                              # M7 P6+P7: the skill played
+                          view_drop=fr.get("vdrop", 0))                       # M7 P8a: the dying view's sink
+
+    def px_of(self, tr, pred) -> int:
+        """the pixels the mobiles `pred` names drew: on the frames holding one, the picture against it without them
+        (M7 P8a: moved here from fight_gate, which inherits it -- H6's blood_px)"""
+        n = 0
+        for fr in tr:
+            if fr["drawn"] == "world" and any(pred(mo) for mo in fr["mobiles"]):
+                n += P.px_diff(self.picture(fr), self.picture(fr, [mo for mo in fr["mobiles"] if not pred(mo)]))
+        return n
 
     def explosion_px(self, tr) -> int:
         """the pixels an explosion drew: on the frames whose mobiles hold one, the picture with them against the
@@ -369,6 +398,7 @@ def place(run: Run, sc: dict, limit: int = 12):
         tr, _mr = run(pose, sc["keys"], setup)
         c = counters(tr)
         c["explosion_px"] = run.explosion_px(tr) if c["explosion_frames"] else 0
+        c["blood_px"] = run.px_of(tr, lambda mo: mo[2] in BLOOD) if sc.get("blood_px") else 0   # M7 P8a
         if c["deaths"] == 0 and c["dead_frames"] == 0 and sc["claim"](c):
             return pose, setup, tr, c
     return None
@@ -400,9 +430,15 @@ def main(argv=None) -> int:
     ap.add_argument("--labels")
     ap.add_argument("--oracle-only", action="store_true", help="the scenarios, counters and controls, no binary")
     ap.add_argument("--only", help="run only the scenarios whose name starts with this (e.g. H2)")
+    ap.add_argument("--modes", metavar="PLAYER/MONSTER", help="M7 P8a: the model modes (default the game tier's)")
+    ap.add_argument("--frame-ops", nargs="?", const="-", metavar="FILE",
+                    help="M7 P8a: each binary scenario's per-frame ops (and, with FILE, as JSON)")
     a = ap.parse_args(argv)
     if not a.oracle_only and not (a.fjm and a.labels):
         ap.error("--fjm and --labels (the build's label table), or --oracle-only")
+    global FRAME_OPS
+    FRAME_OPS = a.frame_ops
+    P8.set_modes(*P8.parse_modes(a.modes))
     t0 = time.time()
     orc = P.Oracle()
     dsim = onewalk.DoorSim()
@@ -426,7 +462,7 @@ def main(argv=None) -> int:
         assert (MONSTER_MODE, PLAYER_MODE) == (MMODE, PMODE), (
             "the binary is built at %s/%s, this gate checks P5's %s/%s" % (MONSTER_MODE, PLAYER_MODE, MMODE, PMODE))
         gb = P.GameBinary(ROOT / a.fjm)
-        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
+        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis, modes=(PMODE, MMODE))
         for k in KEYFLAG.values():
             cells.setdefault(k, P.Cell(k, "hex", 1))
         table = P.LabelTable.load(ROOT / a.labels, {c.label for c in cells.values()})
@@ -458,31 +494,49 @@ def main(argv=None) -> int:
             continue
         ok &= binary_scenario(gb, cells, table, run, sc, pose, setup, want)
     need = ("mon_hits", "mon_misses", "mon_melee", "proj_spawns", "proj_impacts", "proj_walls", "fizzles",
-            "fx_spawns", "fx_skipped", "player_hurt", "armor_out", "explosion_frames", "explosion_px")
+            "fx_spawns", "fx_skipped", "player_hurt", "armor_out", "explosion_frames", "explosion_px", "blood_px")
     zero = [k for k in need if not totals.get(k)] if not a.only else []
     ok &= not zero and totals.get("deaths", 0) == 0 and totals.get("dead_frames", 0) == 0
     print("\nTOTALS: " + ", ".join("%s %d" % kv for kv in totals.items()))
     print("every event counter nonzero: %s; deaths %d"
           % ("yes" if not zero else "NO -- %s" % zero, totals.get("deaths", 0)))
+    write_frame_ops()
     print("\nHURT GATE %s%s (%.0f s)" % ("PASS" if ok else "FAIL", " (oracle only)" if a.oracle_only else "",
                                          time.time() - t0))
     return 0 if ok else 1
 
 
-def poke_cells(run: Run, setup, *, mmode: str = MMODE, pmode: str = PMODE, lists: bool = False) -> dict:
+def frame_ops_report(name: str, ops: list) -> None:
+    """M7 P8a (`--frame-ops`): one binary scenario's per-frame op readings -- printed, and kept for the JSON"""
+    if FRAME_OPS is None:
+        return
+    print("  " + P8.frame_ops_line(ops))
+    FRAME_OPS_LOG[name] = list(ops)
+
+
+def write_frame_ops() -> None:
+    if FRAME_OPS not in (None, "-") and FRAME_OPS_LOG:
+        import json
+        Path(FRAME_OPS).write_text(json.dumps(FRAME_OPS_LOG, indent=0), encoding="ascii")
+        print("frame ops of %d scenarios -> %s" % (len(FRAME_OPS_LOG), FRAME_OPS))
+
+
+def poke_cells(run: Run, setup, *, mmode: str = None, pmode: str = None, lists: bool = False) -> dict:
     """the cells a scenario's setup moved from the boot level start -- what frame 0 writes into the binary.
     M7 P6+P7 (B0's aftermath, which lays DROPS): `lists` adds the runtime things' leaf lists (`leaf_list_cells`:
     sshead / thnext) -- a setup that makes a drop lie must LINK its row, as the binary's drop_link<k> does, or the
-    binary never draws it; `mmode` / `pmode` the phases' modes (default this gate's)"""
+    binary never draws it; `mmode` / `pmode` the phases' modes (default this gate's, read at the call: M7 P8a's
+    `--modes` moves them)"""
     ca, cb = setup_cells(run, setup, mmode=mmode, pmode=pmode, lists=lists)
     return {k: v for k, v in cb.items() if ca.get(k) != v}
 
 
-def setup_cells(run: Run, setup, *, mmode: str = MMODE, pmode: str = PMODE, lists: bool = False) -> tuple:
+def setup_cells(run: Run, setup, *, mmode: str = None, pmode: str = None, lists: bool = False) -> tuple:
     """(the boot level start's cells, the cells after `setup`) -- `poke_cells`' two sides; a caller that checks the
     binary's cells BEFORE poking them (b0_scenarios) reads the first"""
     from doomfj.monsters import MonsterPhase
     from doomfj.wall_renderer import BOOT_SKILL
+    mmode, pmode = mmode or MMODE, pmode or PMODE
     orc, dsim = run.orc, run.dsim
 
     def cells_of(ph):
@@ -553,6 +607,7 @@ def binary_scenario(gb, cells, table, run: Run, sc, pose, setup, want) -> bool:
         "exact on every frame" if s_bad is None else "PART at frame %d: %s" % s_bad,
         "byte-exact on every frame" if x_bad is None else "PART at frame %d (%d px)" % x_bad,
         "exact on every frame" if p_bad is None else "PART at frame %d (the oracle's PLAYPAL %d)" % p_bad))
+    frame_ops_report(sc["name"], p.frame_ops())                    # M7 P8a: --frame-ops
     return s_bad is None and x_bad is None and p_bad is None
 
 

@@ -308,3 +308,32 @@ the rule above, and needs `--approver` and `--approval-record`.
    20%, not 50%.
 5. The heaviest runs in B0 are R0-west-hall (22.0M) and R0-aftermath (20.9M, worst frame 28.0M).
    Both walk the opening area of the level.
+
+## v7 (M7 P8a, docs/gp-final-plan.md 5.3): the recording command -- for the integrator, AFTER A, K, I, C merge
+
+v7 is PLANNED once, oracle-only, at the final model, from v6's 11 checkpoints (`scenarios_v2.CHECKPOINTS`, the same
+names, sectors, faces and styles v6 recorded), and FROZEN only by the owner on the P8a build's B0. Nothing below runs
+before the packages are on `m7-extras`: until then the model has no knockback and no infighting, and a plan would
+record a v6-like set under a "final" label.
+
+```
+# 1. plan (writes status PLANNED; refuses a frozen file). The set records its modes, its sight rule and tempo:
+#    player_mode / monster_mode "final", sight_rule "seen", monster_tics = world.MONSTER_TICS_PER_FRAME (2)
+PYTHONPATH="src;." python scratchpad/gp/scenarios_v2.py --plan --sight seen --modes final/final \
+    --file scratchpad/gp/scenarios/combat_scenarios_v7.json            # version "v7" from the file name
+# 2. its criteria (O-V1, TAKEN: v6's, a monster's kills count, >= 1 infighting episode, >= 1 knock a wall refused)
+PYTHONPATH="src;." python scratchpad/gp/scenarios_v2.py --validate --file scratchpad/gp/scenarios/combat_scenarios_v7.json
+PYTHONPATH="src;." python scratchpad/gp/scenarios_v2.py --selftest --file scratchpad/gp/scenarios/combat_scenarios_v7.json
+# 3. B0 on the P8a build (blocked52): the knock momentum is injected with the pose (b0_scenarios: "KNOCKBACK")
+PYTHONPATH="src;." python scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v7.json \
+    --pixel-every 1 --proxy --json scratchpad/gp/scenarios/b0_v7.json
+# 4. the owner's freeze, on that B0 (the owner's words in the record)
+PYTHONPATH="src;." python scratchpad/gp/scenarios_v2.py --freeze --file scratchpad/gp/scenarios/combat_scenarios_v7.json \
+    --b0 scratchpad/gp/scenarios/b0_v7.json --approver "the owner" --approval-record "<the owner's words, where>"
+```
+
+Under knockback the autopilot is pushed off its path: a frame with knock momentum re-plans its path from where it
+stands, and a fight or dodge step is refused when the push would carry it onto a damaging floor (`Autopilot._safe`,
+`knock_push`). If a checkpoint survives under no parameter set, `--plan` says which and why (`plan_run`): that is a
+criteria question for the owner (O-V1), not a planner bug to paper over. v6 stays as it is: its file and its B0 log
+are the record (a set without `player_mode` / `monster_mode` replays "full" / "full").

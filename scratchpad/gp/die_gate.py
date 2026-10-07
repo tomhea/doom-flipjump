@@ -31,6 +31,16 @@ THE CONTROLS (R9, each must part on its scenario): `dead_walks` / `dead_turns` (
 `restart_barrel` / `restart_mdrop` (the restart keeps `pickup_taken` / the barrels / `mon_drop`), `use_edge` (the death
 think wants a use PRESS, not a held use), `restart_skill` (the restart is hard's), `ng_skill` (NEW GAME starts hard),
 `latch` (the dead branch re-read after nukage), `dead_bonus_fade` (the bonus count fades while dead).
+
+M7 P8a (docs/gp-final-plan.md 5.2; p8a_lib.py) -- the dying view SINKS (package A) and a corpse slides (K):
+  D9   die and hold still 40 frames: p_vd 1..35 then 35, the picture exact at every step (`no_sink`, `sink_fast`,
+       `sink_floor`, `band_eye` -- the planes from the SUNK eye: a picture control on the same trace)
+  D10s / D10l / D10c  die beside a 24-unit step, in lift 98's leaf, under a low ceiling: exact
+  D11  killed by a hitscan burst at a ledge: the corpse slides while sinking, onto another floor (`dead_no_slide`)
+  D4'  the restart after the sink: p_vd 0 at the level start (`sink_restart`)
+Each names its rule and packages (p8a_lib.status): N/A at modes without the rule, AWAITING while its package is not
+in the tree (the gate ends INCOMPLETE, exit 2). `--modes`, `--frame-ops` as fight_gate's (D9's dying frames are
+O-E1's stress frames).
 """
 from __future__ import annotations
 
@@ -279,6 +289,7 @@ def scenario_list(dsim, w, card) -> list:
                 "cands": [((dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle), None, {0: gold_kill})],
                 "claim": lambda c, tr: c["deaths"] >= 1 and c["bonus_frames"] >= 1
                 and len({fr["mstate"]["p_bc"] for fr in tr}) == 1})
+    out += p8a_scenario_list(dsim, w, card)          # M7 P8a: the sink, the corpse's slide
     return out
 
 
@@ -311,6 +322,127 @@ def _level_start_after(tr, w) -> bool:
             and tr[f]["pose"][:2] == (w.ws.px & 0xFFFFFFFF, w.ws.py & 0xFFFFFFFF)[:2] or
             (st["p_hp"] == 100 and not st["p_dead"] and all(st["bar_st"])
              and FG._signed(tr[f]["pose"][0], 32) == FG._signed(w.ws.px, 32)))
+
+
+# ================================================================================================
+# M7 P8a (package V, docs/gp-final-plan.md 5.2): the dying view SINKS (package A), the corpse slides (A + K)
+# ================================================================================================
+def sinks_right(tr) -> bool:
+    """after the death the view drops 1 unit a death-think tic -- `p_vd` 1, 2, ..., 35 on consecutive frames from the
+    first dead frame (or the next: a death in the frame's tic thinks from the next), then 35"""
+    d = first_death(tr)
+    if d is None:
+        return False
+    vd = [fr["mstate"].get("p_vd", 0) for fr in tr[d:]]
+    s = next((k for k, v in enumerate(vd) if v), None)
+    if s is None or s > 1 or any(vd[:s]):
+        return False
+    want = [min(35, k + 1) for k in range(len(vd) - s)]
+    return vd[s:] == want and vd[-1] == 35
+
+
+def _sector(w, x16, y16) -> int:
+    return FG.sector_of(w, FG._signed(x16, 32) >> 16, FG._signed(y16, 32) >> 16)
+
+
+def _floor_changed_dead(w, tr) -> bool:
+    """the dead player's corpse slid onto another sector's floor"""
+    d = first_death(tr)
+    if d is None:
+        return False
+    secs = {_sector(w, fr["pose"][0], fr["pose"][1]) for fr in tr[d:]}
+    return len(secs) > 1
+
+
+def step_poses(dsim, w, rise: int = 24, limit: int = 12) -> list:
+    """standing poses 20 units off a two-sided line whose floors differ by `rise`, on its LOWER side, facing the line"""
+    import math
+    out = []
+    verts = w.cmap.vertexes
+    for ld in w.lds:
+        if not (0 <= ld.front < len(w.sds) and 0 <= ld.back < len(w.sds)):
+            continue
+        fa, fb = w.secs[w.sds[ld.front].sector].floor_h, w.secs[w.sds[ld.back].sector].floor_h
+        if abs(fa - fb) != rise:
+            continue
+        v1, v2 = verts[ld.v1], verts[ld.v2]
+        mx, my = (v1[0] + v2[0]) / 2, (v1[1] + v2[1]) / 2
+        nx, ny = -(v2[1] - v1[1]), (v2[0] - v1[0])
+        n = math.hypot(nx, ny)
+        if not n:
+            continue
+        side = -1 if fa < fb else 1                   # the front side is on the RIGHT of v1 -> v2: -normal
+        x, y = round(mx + side * nx / n * 20), round(my + side * ny / n * 20)
+        if FG.standing(dsim, x, y):
+            out.append((x << 16, y << 16, G.bam(mx - x, my - y)))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def low_ceiling_poses(dsim, w, most: int = 72, limit: int = 12) -> list:
+    """standing poses in sectors whose ceiling is at most `most` units above the floor"""
+    out = []
+    for sec, s in enumerate(w.secs):
+        if 56 <= s.ceil_h - s.floor_h <= most:
+            out += FG.poses_in_sector(dsim, w, sec, step=24)[:3]
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
+def ledge_behind(dsim, w, pose, back=(12, 16, 24)) -> bool:
+    """a LOWER floor just behind a standing pose (away from where it faces): a knock there carries the corpse off the
+    ledge onto another floor"""
+    import math
+    a = pose[2] / (1 << 32) * 2 * math.pi
+    x, y = pose[0] >> 16, pose[1] >> 16
+    fz = w.rm.check_position(w.scene_c, pose[0], pose[1])[1]
+    for d in back:
+        bx, by = round(x - d * math.cos(a)), round(y - d * math.sin(a))
+        if FG.standing(dsim, bx, by) and FG.sector_of(w, bx, by) != FG.sector_of(w, x, y)                 and w.secs[FG.sector_of(w, bx, by)].floor_h < fz:
+            return True
+    return False
+
+
+def p8a_scenario_list(dsim, w, card) -> list:
+    out = []
+    spawn = (dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle)
+    # ---- D9: die and hold still -- the view sinks 1 a tic to 35, the picture exact at every step
+    out.append({"name": "D9 the dying view sinks: p_vd 1..35 then 35, the picture exact at every step",
+                "keys": [I] * 40, "rule": "sink", "pkg": ("A",), "need": ("sink_frames",),
+                "controls": ["no_sink", "sink_fast", "sink_floor", "band_eye"],
+                "cands": [(spawn, None, {0: kill()})] + [(p, None, {0: kill()}) for p in step_poses(dsim, w)[:4]],
+                "claim": lambda c, tr: c["deaths"] >= 1 and sinks_right(tr)})
+    # ---- D10: die beside a step, in lift 98's leaf, under a low ceiling
+    for tag, cands in (("D10s die beside a 24-unit step", step_poses(dsim, w)),
+                       ("D10l die in lift 98's leaf", FG.poses_in_sector(dsim, w, 98, step=16)[:12]),
+                       ("D10c die under a low ceiling", low_ceiling_poses(dsim, w))):
+        out.append({"name": tag + ": the sink exact there", "keys": [I] * 38, "rule": "sink", "pkg": ("A",),
+                    "controls": [], "cands": [(p, None, {0: kill()}) for p in cands],
+                    "claim": lambda c, tr: c["deaths"] >= 1 and c["sink_max"] == 35})
+    # ---- D11: killed by a hitscan burst beside a ledge: the corpse slides while sinking, onto another floor
+    d11 = []
+    for m in FG.first_live(w, "MT_SHOTGUY") + FG.first_live(w, "MT_POSSESSED"):
+        st = "S_SPOS_ATK1" if w.mon_info[m].name == "MT_SHOTGUY" else "S_POSS_ATK1"
+        for p in FG.poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (96, 128, 160, 192)):
+            if ledge_behind(dsim, w, p):
+                d11.append((p, FG.both(FG.poke_hp(2), (lambda mph, m=m, st=st: _attack_st(mph, m, st)))))
+    out.append({"name": "D11 killed by a hitscan burst at a ledge: the corpse slides while sinking, onto another floor",
+                "keys": [I] * 45, "rule": ("sink", "knock"), "pkg": ("A", "K"), "need": ("dead_slides",),
+                "controls": ["dead_no_slide"], "cands": d11, "limit": 24,
+                "claim": lambda c, tr: c["deaths"] >= 1 and c["dead_slides"] >= 1 and _floor_changed_dead(w, tr)})
+    # ---- D4': the restart after D9 -- p_vd back to 0 at the level start
+    out.append({"name": "D4' the restart after the sink: p_vd 0 at the level start", "keys": [I] * 38 + [U] + [I] * 3,
+                "rule": "sink", "pkg": ("A",), "controls": ["sink_restart"], "cands": [(spawn, None, {0: kill()})],
+                "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] == 1 and c["sink_max"] == 35
+                and tr[-1]["mstate"].get("p_vd") == 0})
+    return out
+
+
+def _attack_st(mph, m, state):
+    import hurt_gate as H
+    H.attack(mph, m, state)
 
 
 NEED = ("deaths", "restarts", "restart_requests", "nukage", "barrel_hurt", "bonus_frames", "drop_frames")

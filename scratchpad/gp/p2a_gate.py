@@ -185,6 +185,7 @@ class Mirror:
         with self._rules():
             for f, kd in enumerate(keys):
                 wev, mph.last_tic = None, None                # M7 P5: this frame's weapon and tic events
+                k_tap = len(mph.tap.records)                  # M7 P8a: this frame's knock moves start here
                 nev = mev = rsev = lev = None                 # M7 P6 / P7: nukage, the move, the restart, late
                 poke = {}
                 if f in self.late:                            # M7 P6 / P7: a late setup at this frame's start
@@ -263,15 +264,19 @@ class Mirror:
                         new = _SS(nx, ny, na, sim.mapname)
                         ph = cur[0]
                         taken |= ph[3] == 1 and pcard == 0
-                    if self.ctl == "w1":       # every crossing presses; the bits still read fired
-                        was = ph[1]
-                        ph = dp.after_move((ph[0], (0,) * len(was), ph[2], ph[3]), (st.x, st.y),
-                                           (new.x, new.y))
-                        ph = (ph[0], tuple(a | b for a, b in zip(was, ph[1])), ph[2], ph[3])
-                    else:
-                        ph = dp.after_move(ph, (st.x, st.y), (new.x, new.y))
-                    if self.ctl != "no_wr":
-                        ms = mp.after_move(ms, (st.x, st.y), (new.x, new.y))
+                    # M7 P8a (V): the walk-overs over the WALK's segment, then over the KNOCK's (the player's knock
+                    # move after the walk: monsters.KNOCK_WALKOVERS, DOOM's P_TryMove) -- `walk_end` is None when no
+                    # knock move ran, and the walk's segment is then the whole move, as before P8a
+                    from doomfj.monsters import walkover_segments
+                    for a_, b_ in walkover_segments(mph if loots else None, (st.x, st.y), (new.x, new.y)):
+                        if self.ctl == "w1":       # every crossing presses; the bits still read fired
+                            was = ph[1]
+                            ph = dp.after_move((ph[0], (0,) * len(was), ph[2], ph[3]), a_, b_)
+                            ph = (ph[0], tuple(a | b for a, b in zip(was, ph[1])), ph[2], ph[3])
+                        else:
+                            ph = dp.after_move(ph, a_, b_)
+                        if self.ctl != "no_wr":
+                            ms = mp.after_move(ms, a_, b_)
                     st = new
                     # M7 P3.1: the monsters after the player -- P3.2a: unless THIS frame's press ended the level
                     # (the binary's tic runs after the player and skips on lvdone); P3.2b: inside the doors and lifts
@@ -297,6 +302,12 @@ class Mirror:
                             "poke": poke,                                       # M7 P6 / P7: the late setup's cells
                             "removed": removed, "bviews": bviews,               # M7 P6
                             "skill": mph.world.ws.skill,                        # M7 P6+P7: what the picture hides
+                            "vdrop": mph.view_drop(),                           # M7 P8a: the dying view's sink
+                            # M7 P8a: this frame's knock moves and the walls that refused them (monsters.KnockTap),
+                            # and every monster's whole-unit position (a corpse's slide)
+                            "knock": ((len(mph.tap.since(k_tap)), len(mph.tap.wall_refusals(mph.tap.since(k_tap))))
+                                      if mph.tap.ok else (0, 0)),
+                            "mxy": tuple(zip(mph.world.ws.mon_x, mph.world.ws.mon_y)),
                             "views": self.viewfn(mph, st.x, st.y) if self.viewfn else None,
                             "positions": self.posfn(mph) if self.posfn else None})
         return out
@@ -318,7 +329,8 @@ def seen_of(orc, dsim, card_di):
                    mobiles=mph.mobiles(),                                     # M7 P5
                    removed=orc.monster_removed(mph) if loot else None,       # M7 P6
                    barrel_views=orc.monster_barrel_views(mph) if loot else None,
-                   skill=mph.world.ws.skill)                                  # M7 P6+P7: the skill played
+                   skill=mph.world.ws.skill,                                  # M7 P6+P7: the skill played
+                   view_drop=mph.view_drop())                                 # M7 P8a: the dying view's sink
         mph.set_aim(aim)                    # M7 P4.2a: this picture's window -> the next frame's shots
         return orc._mviews.slots_of(seen)
     return fn
@@ -346,7 +358,8 @@ def picture(orc, dsim, fr: dict, card_di) -> bytes:
                       views=fr["views"], positions=fr["positions"], screen_kw=fr.get("skw"),
                       mobiles=fr["mobiles"],                                        # M7 P5
                       removed=fr.get("removed"), barrel_views=fr.get("bviews"),     # M7 P6
-                      card=fr["phase"][3], skill=fr.get("skill"))                  # M7 P6+P7: the skill played
+                      card=fr["phase"][3], skill=fr.get("skill"),                  # M7 P6+P7: the skill played
+                      view_drop=fr.get("vdrop", 0))                                # M7 P8a: the dying view's sink
 
 
 def expected_cells(fr: dict, order: list, mover_order=()) -> dict:

@@ -98,7 +98,7 @@ TOUR_TARGETS = 10                   # one destination per seed, spread over the 
 # `gamespeed_trail.py --fjm <the P6+P7 build>` (TRAIL must PASS; it prints the binary's own). blocked27..48's were
 # ((831, 653), (-357, 430), (780, 427), (688, 208), (-176, 348), (-173, 163), (-173, 413), (-490, 106), (239, 353),
 # (189, 245)) with run 0 opening one door: not like-for-like (O3).
-BINARY_ENDS = ((577, 243), (-296, 120), (707, 492), (147, 214), (-128, 271), (-276, 425), (-371, 80), (-452, 373),
+BINARY_ENDS = ((529, 208), (-296, 120), (707, 492), (147, 214), (-128, 271), (-276, 425), (-371, 80), (-452, 373),
                (-493, 223), (-495, 194))
 BINARY_DOORS = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 # runs 0 and 1's keys, recorded so the host test replays them without the ~75 s planner: run 0 is

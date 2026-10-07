@@ -1661,3 +1661,76 @@ cap that binds, CAP-22 on the frozen set, has 7,300,474 of headroom.
    drop rows), and `state_dump.py`'s `new_world()` without `use_sight_rule` (interface 11.4, pre-existing).
 10. P5's open items (#121) other than F3 -- which P7-c closes, with die_gate D1-D3x as its proof -- were not
     re-checked in this rung.
+
+## P8a the final gameplay: the dying view, knockback, infighting, D3 a / b, the follow-ups (class F) -- declared 2026-10-07, before the build
+
+**What**: `docs/gp-final-plan.md` -- ONE rung, `PLAYER_MODE = "final"`, `MONSTER_MODE = "final"` (`wall_renderer`,
+flipped with `GAME_RENDER_KW`'s `rt_rank` / `exempt_barrels` in 571d287), integrated on `m7-extras` from packages
+0, D, C, A, K, I, V (section 3):
+- (A) the dying view sinks (S0, O-A1 as taken): `p_vd`, the oracle's `view_drop` split;
+- (K) knockback: P_DamageMobj's thrust with its inflictor, P_XYMovement for the player's knock and every monster and
+  corpse, the drops' own positions; (I) infighting: targets, the switch and threshold, the far LOS (O-B2: exact),
+  intervening things on monster bullets (O-B5), fireballs on monsters and barrels, `bar_src`; where they meet (the
+  integration, 6efbfc8): a fireball's impact on a monster knocks with the missile's z, a blast knocks with the
+  barrel as inflictor and "the source is the player" = `bar_src == 1` (`bl_sp`);
+- (C) D3 a (drops and effects before monsters in a leaf) and D3 b (barrels exempt from the soft raise);
+- (D) the follow-ups of section 1.4 marked DO;
+- in the frame order of section 4.3 and the cells of section 4.1. The coordinator's SPEED decision: package I's shared
+  fetch tables (9f26ea6, `mf_go` / `bf_go`) are REVERTED (2425912) -- they saved ~504K words but cost `hs_scan`
+  104.8K -> 156.5K ops a scan and `pt_lines` 25.9K -> 82.1K a try; speed is never compromised and the size ceiling is
+  42% (the owner).
+
+**Measured at the integration (no assembly; words come from the build):**
+- the game tier EMITS at final / final with every emit-time assert holding (the D3 keys against `_D3`, p31's knock /
+  fight / d3 against the emitter's, `kbbz`'s barrels on no mover, `check_model_rules` of knockcode / projcode /
+  damagecode): **63,330,190 characters** in seven parts -- entry 26,479; tables 13,317,023; main 1,954,129; segconsts
+  3,054,332; walk 10,996,140; state 965,008; banks 33,017,079 -- **+698,517 (+1.1%) over blocked51's 62,631,673**;
+  263,401 top-level labels, none defined twice (the merge found and fixed one: knockcode's `kq_out`), every plain
+  jump / fcall target defined, all 125 `persist_labels` defined;
+- per package (each package's own measure): **A** < 1K words; **K** ~128K characters of text (its knock leaves
+  109,564 characters at its own emission); **I** ~440K words in the compact form, **~+504K more unrolled** (the form
+  that ships: mt_load 108,824, hs_scan + hs_cand + hs_wid 327,740 with the 43,650-word angle leaf, pt_lines 235,204,
+  each assembled alone); **C** 1-2K words (ESTIMATE); **D** ~0;
+- unit ops (the packages' harnesses): the bullets' scan **104.8K ops a scan** (unrolled; 110.7K on the harness's
+  dense crowds), the fireball's thing test **25.9K a try** (6.8K a try on the harness's records), the far LOS
+  **132-255K ops a check** (128,389 mean on I's sample, by range 76K .. 152K), the brawl's worst frames **up to
+  ~2.1M ops a frame** above the frame without infighting.
+
+**Budget** (ESTIMATES; section 6's basis, the measures above replacing its unit guesses):
+- **ops on the frozen set**: v7 binding ~14.7 .. 15.3M (a RE-PLANNED set, not comparable with v6's 14,699,526); the
+  packages' own code +0.05 .. +0.26M before placement (the far LOS and the scan run only while a monster targets a
+  monster: rare on a v6-like set), placement +/- 0.1 .. 0.3M;
+- **size**: K ~0.1-0.3M + I ~0.94M (unrolled) + A, C, D ~0.01M -> ~1.05 .. 1.25M words, x P6 + P7's
+  measured-over-estimate growth (x1.2 .. 1.8) -> **+1.3 .. +2.3M words, 37.2 .. 38.0% of 2^27** (<= 42%: 56,371,445
+  words; blocked51 48,643,954, 7,727,491 of headroom). The section 6 redesign trigger (> +2.0M) may be reached by the
+  unrolled I alone at the top of the growth range -- the reversal of 9f26ea6 is the owner's speed rule, and 42% is
+  the ceiling that binds;
+- **single frames and stress** (recorded, not capped, D1): S1 ~23.3 .. 23.5M averaged; S3 (the brawl) worst frames
+  up to ~+2.1M (measured) to ~+3M (6 far-LOS checks x 2 tics x 255K); S4 (a push storm) up to ~+2M (ESTIMATE); B0's
+  per-frame maximum may rise by a few hundred K.
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. **CAP-22**: v7's (mean + p80) / 2 <= 22,000,000, every frame of all 11 runs state- and pixel-exact; v7 frozen by
+   the owner on this build's B0.
+2. **Size** <= 42% of 2^27 (56,371,445 words).
+3. **Every gate exact**: m2_std_gate, m3_gate, p2a_gate, hurt_gate (H1-H6, S1), fight_gate (F1-F10, K1-K7, I1-I6,
+   C1-C3, S2-S4), die_gate (D1-D11), B0 on v7; their selftests rejected where they must; every control parting;
+   every event counter nonzero; deaths 0 where declared; deg_gate BYTE-EXACT with op counts EQUAL to blocked51's.
+4. **Host and fj**: `python -m pytest tests/host` green (the restore-set tests and gamespeed's validate after the
+   re-key / the trails' re-record); the P8a harnesses (`test_view_drop_fj`, `test_dead_eye_render_fj`,
+   `test_knock_fj`, `test_monster_target_fj`, `test_far_los_fj`, `test_monster_hitscan_fj`, `test_game_luts_fj`, the
+   extended `test_fireball_pool_fj`, `test_monster_damage_fj`, `test_barrel_fj` (+ the K x I section),
+   `test_thing_pass_depth_fj`, `test_actor_record_fj`, `test_restart_fj`) -- every mutant caught; and ONE full
+   `tests/fj` run at the build's commit, solo.
+5. **Attribution**: profx-attributed ops of the new code (knock, targets, far LOS, hitscan scan, fireball thing test,
+   the view, the rank, `sp_ex`) on v7 <= 0.33M (1.25 x the top of the +0.26M estimate), else REDESIGN.
+6. **The O-E1 stress tripwire**: any stress frame (S1-S4, D9's dying frames, B0 v7's maximum) over 44M (2 x the cap,
+   ~180 ms), or any scenario averaging over 30M, must be attributed by profx and explained here before the ship;
+   every stress frame exact.
+7. **Housekeeping**: pinreport 20 of 20 with `heat_blocked27_p8a` (re-keyed for `sim.thing_pass_depth` 7 -> 9, the
+   one arity change); the restore sets re-keyed (new persisted cells: `p_vd`, `p_kmx`, `p_kmy`, `mkx`, `mky`, `mfx`,
+   `mfy`, `kb_live`, `pj_z`, `bar_src`; `mon_target` widened to 2 nibbles a slot); gamespeed's trails re-recorded
+   (TRAIL PASS before the number is quoted); `emit_baseline.py --check` unchanged for "full" (package 0's hooks
+   inert); msframe recorded (class F; ~90 ms a tripwire to explain).
+
+The phase budget: P8a has none in the handoff (the owner's 2026-10-07 request); the cap that binds is CAP-22.

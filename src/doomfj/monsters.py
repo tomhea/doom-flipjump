@@ -92,6 +92,12 @@ def walkover_segments(phase, old, new) -> list:
     we = getattr(phase, "walk_end", None) if phase is not None else None
     if we is None:
         return [(tuple(old), tuple(new))]
+    # `walk_end` is 32-bit UNSIGNED (the binary's cells); the gates' poses are SimState's SIGNED 16.16 -- the segment
+    # takes the representation of its ends (the P8a integration: S7's trigger at y -416 met a walk_end at y 65120)
+    if not any(v >= 1 << 31 for v in tuple(old) + tuple(new)):
+        we = tuple(v - (1 << 32) if v >> 31 & 1 else v for v in we)
+    else:
+        we = tuple(v & MASK32 for v in we)
     return [(tuple(old), tuple(we))] + ([(tuple(we), tuple(new))] if KNOCK_WALKOVERS else [])
 
 

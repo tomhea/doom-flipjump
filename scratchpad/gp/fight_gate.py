@@ -930,14 +930,17 @@ def p8a_scenario_list(dsim, w, card) -> list:
                 "keys": idle40, "rule": "fight", "pkg": ("I",), "controls": ["species"], "cands": i2i,
                 "claim": lambda c, tr: c["proj_spawns"] >= 1 and c["explosion_frames"] >= 1 and c["player_hurt"] == 0
                 and _mon_hurt(tr) == 0})
-    # ---- I3: a monster's stray shot kills a barrel: the blast's source is that monster
+    # ---- I3: a monster's stray shot kills a barrel: the blast's source is that monster. bar_src is the source of the
+    # first NON-lethal damage (P_DamageMobj returns after P_KillMobj, before the switch: a barrel killed by its first
+    # hit blames nobody -- DOOM's, combat.damage_barrel), so the barrel starts at 16: no first bullet (3 .. 15) kills
+    # it, and the sergeants (3 pellets an attack) come first (the P8a integration: at 1 no candidate could place)
     i3 = []
     for b, t in enumerate(w.barrel_things):
-        for s in zomb + sgt:
+        for s in sgt + zomb:
             if 64 <= max(abs(w.ws.mon_x[s] - t.x), abs(w.ws.mon_y[s] - t.y)) <= 320 and \
                     w.los_points((w.ws.mon_x[s] << 16, w.ws.mon_y[s] << 16), (t.x << 16, t.y << 16)):
                 st = "S_POSS_ATK1" if s in zomb else "S_SPOS_ATK1"
-                i3 += [((p, both(att(s, st), armor(200, 2), bar_health(b, 1))), s, b)
+                i3 += [((p, both(att(s, st), armor(200, 2), bar_health(b, 16))), s, b)
                        for p in line_poses(dsim, w, s, ("bar", b), (96, 128, 160))]
     out.append({"name": "I3 a monster's stray shot kills a barrel: the blast's source is that monster",
                 "keys": idle40, "rule": "fight", "pkg": ("I",), "controls": ["bar_src_player"],

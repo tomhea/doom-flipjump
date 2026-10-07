@@ -562,3 +562,19 @@ def test_the_census_draws_its_sets_mode():
     assert CL.Census().d3_kw in ({}, {"rt_rank": False, "exempt_barrels": False})
     if hasattr(W, "compositor_d3"):
         assert CL.Census(player="final", monsters="final").d3_kw == {"rt_rank": True, "exempt_barrels": True}
+
+
+def test_the_walkover_segments_take_their_ends_representation():
+    """the P8a integration (p2a_gate S7 / S12 at final / final): `walk_end` is 32-bit UNSIGNED (the knock tap's, the
+    binary's cells) and a gate's poses are SimState's SIGNED 16.16 -- a walk_end at y -416 became y 65120, so S7's
+    trigger (door 145, y -576 .. -256) never fired and S12's restart crossed lift 98's WR line again. The segment
+    takes the representation of its ends, both ways."""
+    from types import SimpleNamespace
+    from doomfj.monsters import walkover_segments
+    M = 0xFFFFFFFF
+    old, new = (1992 << 16, -416 << 16), (2024 << 16, -416 << 16)
+    ph = SimpleNamespace(walk_end=((2008 << 16) & M, (-416 << 16) & M))
+    assert walkover_segments(ph, old, new) == [(old, (2008 << 16, -416 << 16)), ((2008 << 16, -416 << 16), new)]
+    uold, unew = tuple(v & M for v in old), tuple(v & M for v in new)
+    assert walkover_segments(ph, uold, unew) == [(uold, ph.walk_end), (ph.walk_end, unew)]
+    assert walkover_segments(SimpleNamespace(walk_end=None), old, new) == [(old, new)]

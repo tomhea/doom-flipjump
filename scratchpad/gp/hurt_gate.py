@@ -168,6 +168,8 @@ def control(name: str | None):
         def wide(self, *a, **k):
             orig_init(self, *a, **k)
             self.hwt = [1 << 30] * len(self.hwt)
+            # M7 P8a I: with infighting a bullet reads the TARGET's table, hwt_r[radius] (the player's: hwt_r[16])
+            self.hwt_r = {r: [1 << 30] * len(t) for r, t in getattr(self, "hwt_r", {}).items()}
         patch(CM, "_combat_init", wide)
     elif name == "pain_draw":                    # the player's pain roll draws nothing
         orig_roll = CM._roll

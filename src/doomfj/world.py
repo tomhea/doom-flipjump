@@ -280,6 +280,13 @@ def _index_bits(n: int) -> int:
     return max(1, (n - 1).bit_length())
 
 
+def _code_bits(nmon: int) -> int:
+    """M7 P8a I: `mon_target` / `bar_src`'s width -- a code 0 none, 1 the player, 2 + slot -- at least 5 bits: the fj
+    reads these cells as TWO nibbles (monstercode's slots, mt_load, damagecode's dm_src, barrelcode's bar_src), so a
+    map with <= 14 monsters (test_slot_layouts_fj's rooms) keeps the 2-nibble layout; E1M1's 53 slots need 6 either way"""
+    return max(5, _index_bits(nmon + 2))
+
+
 def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight: bool = False) -> Tuple[Field, ...]:
     """THE table of persistent cells. Order is the canonical order (digests, dumps, the probe).
 
@@ -398,7 +405,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("mon_reaction", 4, count=n, group="monster", doc="reactiontime")
     f("mon_threshold", 7, count=n, group="monster", doc="threshold, <= BASETHRESHOLD")
     if fight:   # M7 P8a I (docs/gp-final-plan.md 1.2.2): a target names a thing
-        f("mon_target", _index_bits(n + 2), count=n, group="monster", phase="P8a",
+        f("mon_target", _code_bits(n), count=n, group="monster", phase="P8a",
           doc="0 none, 1 the player, 2 + slot a monster")
     else:
         f("mon_target", 1, count=n, group="monster", doc="has a target (always the player)")
@@ -460,7 +467,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
       doc="health (20 at spawn)")
     f("bar_solid", 1, count=lay.nbarrel, group="barrel", phase="S3b", doc="blocks things")
     if fight:   # M7 P8a I (1.2.2, G-I7): the blast's source
-        f("bar_src", _index_bits(lay.nmon + 2), count=lay.nbarrel, group="barrel", phase="P8a",
+        f("bar_src", _code_bits(lay.nmon), count=lay.nbarrel, group="barrel", phase="P8a",
           doc="0 none, 1 the player, 2 + slot: the FIRST thing that damaged it (DOOM's barrel target)")
     names = [x.name for x in fs]
     assert len(names) == len(set(names)), "duplicate schema field"

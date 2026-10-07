@@ -99,7 +99,8 @@ def test_each_rule_adds_its_cells(worlds, pair):
     assert set(got) == want, (pair, sorted(got))
     for n, f in got.items():
         if n == "mon_target":
-            assert (f.bits, f.signed, f.count) == (W._index_bits(lay.nmon + 2), False, lay.nmon)
+            assert (f.bits, f.signed, f.count) == (W._code_bits(lay.nmon), False, lay.nmon)
+            assert W._code_bits(lay.nmon) == max(5, W._index_bits(lay.nmon + 2))
             assert 2 + lay.nmon - 1 <= f.hi
             continue
         bits, signed, ck, _rule = P8A_FIELDS[n]

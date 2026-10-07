@@ -83,6 +83,11 @@ def build(labels_path=None, gen_dir=None):
           [("view setup (wnt, wedge_setup)", byname["simcollide_skip"])]),
         ("frame glue (collines begin, bsp jump)", byname["dsc_done"]),
         ("bad/padding", byname["bad"]),
+        # M7 P4.2a: the AIM WINDOW's leaf (doomfj.aimcode.leaf_lines) is placed right after `bad: stl.loop` -- without
+        # its own object its ops read as "bad/padding" (blocked47: 82,391 ops/frame; issue #119 item 9). A build
+        # before P4.2a has no `aim_record`
+        *([("aim_record (the aim window leaf)", byname["aim_record"])]
+          if byname.get("aim_record", -1) > byname["bad"] else []),
         ("seg_pass1_leaf", byname["seg_pass1_leaf"]),
         ("seg_pass1_ts_leaf", byname["seg_pass1_ts_leaf"]),
         ("thing_leaf", byname["thing_leaf"]),

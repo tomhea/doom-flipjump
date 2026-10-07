@@ -622,6 +622,11 @@ def nukage_lines(w, cell_root: str) -> List[str]:
                 ys += [V[ld.v1][1], V[ld.v2][1]]
         return min(xs), max(xs), min(ys), max(ys)
     hb = box(hsec) if hsec else None      # a map with no damaging floor (the one-room fixtures): nothing to keep apart
+    # issue #123 R5a: cp_floor and cp_seedf are SIGNED floor heights and `hex.cmp` compares unsigned -- exact here
+    # because only EQUALITY is read ("Falling, not all the way down yet?": floorz != the sector's floor -> no damage),
+    # and equality is sign-agnostic. Asserted: the compare's lt and gt arms are the same label, so no order is ever taken
+    _nk_lt, _nk_eq, _nk_gt = "nk_out", "nk_hit", "nk_out"
+    assert _nk_lt == _nk_gt != _nk_eq, "nukage's unsigned floor compare may read equality only (issue #123 R5a)"
     for mv in (w.mover_order if hb else ()):
         mb = box({mv})
         r = (PLAYER_RADIUS >> 16) + 1
@@ -641,7 +646,8 @@ def nukage_lines(w, cell_root: str) -> List[str]:
             "    hex.mov 8, cpx, viewx", "    hex.mov 8, cpy, viewy",
             "    hex.set 8, cprad, %d" % PLAYER_RADIUS,
             "    sim.check_cells %s" % cell_root,                          # the box's floorz (cp_floor)
-            "    hex.cmp 8, cp_floor, cp_seedf, nk_out, nk_hit, nk_out",   # "Falling, not all the way down yet?"
+            "    hex.cmp 8, cp_floor, cp_seedf, %s, %s, %s" % (_nk_lt, _nk_eq, _nk_gt),   # "Falling, not all the way
+            # down yet?" -- equality only (see the assert above)
             "  nk_hit:",
             "    hex.mov 2, dp_dmg, nk_dmg",
             "    stl.fcall dp_go, dp_ret",

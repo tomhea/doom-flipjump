@@ -647,6 +647,78 @@ depends on needs pure flat.
 
 **Level packaging — *owner decision: all levels in one binary, and KEEP the baked BSP-as-code walk (NOT the BSP-as-data alternative).*** Rationale (owner, this decision): **prefer faster runtime over a smaller binary here** — the baked walk runs with no per-node dispatch/stack reads, so it is the fps-cheaper path; the larger footprint is the accepted cost. **Runtime fps is *unchanged* by level count** — the renderer walks only the *current* level's BSP; the others sit dormant (level-switch = re-point the BSP root + reset state, once per transition). Of the per-binary span, only the **BSP-as-code walk multiplies per level (~2.53M × 9 ≈ 23M, MEASURED on E1M1 — *not* the "~0.2–0.5MB" node-skeleton-only figure used pre-M12rr; the renderer's walk also bakes every one-sided seg's geometry as `xor_by` blocks)**; the **textures grow as the shared *union* (sub-linear, ~2–4×)**; and the pass-2/bg-fill/leaves/LUTs are **shared (×1)**. **All 9 shareware E1 levels** (E1M1 Hangar · E1M2 Nuclear Plant · E1M3 Toxin Refinery · E1M4 Command Control · E1M5 Phobos Lab · E1M6 Central Processing · E1M7 Computer Station · E1M8 Phobos Anomaly · E1M9 Military Base) ≈ **~45–50M words flat** (9× walk ~23M + texture union ~8–12M + the ~15M shared renderer/bg/LUTs) at the raised 2²⁶ limit. **Watch item: assemble time** (~9× BSP blocks + the full texture union — R-2). The full game (Ultimate 36 / DOOM II 32) grows both the walk-×N and the texture union → raise `--flat-max-words` accordingly.
 
+**M7 GAMEPLAY TABLES, DATA AND CELLS (P4.0 .. P6+P7), MEASURED 2026-10-07 on blocked51** (issues #119 item 3,
+#121 item 13, #123 R4: the rungs added these with no ledger line). `python scratchpad/gp/game_table_sizes.py --md`
+over `scratchpad/12m/atlas/blocked51.labels.tsv.gz` (sha256 `c050a45057f998c2...`) -- label addresses only, no model;
+its `--selftest` (PASS) checks every table's label-derived entry count and result width against the generated text's
+own header line, and every numeric cell against 2 x its declared nibbles, with three mutants caught (a moved `clean`
+label, a changed header, a widened declaration). A D4 table's words run from its `.init`'s first op to
+`<t>.init---end`: the result vector, the dispatch op, the ALIGNMENT PAD up to `switch` (its own column), the switch
+(the entry count rounded up to a power of two, one op each), the handlers ((result nibbles + 1) ops each) and the
+clean-up. Every table here sits INLINE (below the block pool's base); the pool's pads are `poolmap.py`'s.
+
+| rung | table / region | what | words | of which align pad |
+|---|---|---|---:|---:|
+| P4.1 | `ammobcd` | D4 table: 512-entry switch x 3-nibble result | 6,610 | 456 |
+| P4.2a | `aimr` | D4 table: 256-entry switch x 6-nibble result | 4,774 | 150 |
+| P4.2a | `wpo` | D4 table: 256-entry switch x 5-nibble result | 4,608 | 498 |
+| P4.2a | `dmrnd` | D4 table: 256-entry switch x 2-nibble result | 3,072 | 504 |
+| P5 | `mbul` | D4 table: 256-entry switch x 3-nibble result | 3,240 | 158 |
+| P5 | `trclaw` | D4 table: 256-entry switch x 2-nibble result | 3,072 | 504 |
+| P5 | `sgbite` | D4 table: 256-entry switch x 2-nibble result | 3,072 | 504 |
+| P5 | `dpsav` | D4 table: 1024-entry switch x 2-nibble result | 12,288 | 2,040 |
+| P5 | `palidx` | D4 table: 256-entry switch x 1-nibble result | 1,536 | 508 |
+| P5 | `fxrnd` | D4 table: 256-entry switch x 3-nibble result | 3,584 | 502 |
+| P5 | `pjst` | D4 table: 64-entry switch x 3-nibble result | 896 | 118 |
+| P5 | `mobview` | D4 table: 64-entry switch x 3-nibble result | 896 | 118 |
+| P6+P7 | `barnext` | D4 table: 256-entry switch x 4-nibble result | 4,066 | 470 |
+| P6+P7 | `bk10` | D4 table: 256-entry switch x 2-nibble result | 3,072 | 504 |
+| P6+P7 | `bonpal` | D4 table: 256-entry switch x 1-nibble result | 1,536 | 508 |
+| P6+P7 | `amcap` | D4 table: 32-entry switch x 3-nibble result | 402 | 8 |
+| P6+P7 | `nkleaf` | D4 table: 1024-entry switch x 2-nibble result | 11,840 | 1,592 |
+| P6+P7 | `pkxyz` | D4 table: 128-entry switch x 12-nibble result | 4,096 | 228 |
+| P6+P7 | `barview` | D4 table: 256-entry switch x 3-nibble result | 3,200 | 118 |
+| P5 | `playpal0` | device data: 256 RGB | 1,536 | - |
+| P5 | `playpal1` | device data: 256 RGB | 1,536 | - |
+| P5 | `playpal2` | device data: 256 RGB | 1,536 | - |
+| P5 | `playpal3` | device data: 256 RGB | 1,536 | - |
+| P5 | `playpal4` | device data: 256 RGB | 1,536 | - |
+| P5 | `playpal5` | device data: 256 RGB | 1,536 | - |
+| P5 | `playpal6` | device data: 256 RGB | 1,536 | - |
+| P5 | `playpal7` | device data: 256 RGB | 1,536 | - |
+| P5 | `playpal8` | device data: 256 RGB | 1,536 | - |
+| P6+P7 | `playpal9` | device data: 256 RGB | 1,536 | - |
+| P6+P7 | `playpal10` | device data: 256 RGB | 1,536 | - |
+| P6+P7 | `playpal11` | device data: 256 RGB | 1,536 | - |
+| P6+P7 | `playpal12` | device data: 256 RGB | 1,536 | - |
+| P5 | `e1m1_mc6_*` (the missile cell set) | code: 4198 labels, e1m1_mc6_n0 .. the label after e1m1_mc6_end | 212,004 | - |
+| P4.0 | the HUD tail (weapon and flash overlays, the bar's columns) | code: bsp_done .. frame_end | 580,496 | - |
+
+| rung | module (cells) | labels | words |
+|---|---|---:|---:|
+| P4.0 | `hudcode` | 3 | 54 |
+| P4.1 | `weaponcode` | 20 | 86 |
+| P4.2a | `weaponcode` (the shot) | 6 | 40 |
+| P4.2a | `aimcode` | 17 | 346 |
+| P4.2a | `damagecode` | 33 | 766 |
+| P4.2b | `noisecode` | 8 | 178 |
+| P5 | `hurtcode` | 30 | 228 |
+| P5 | `projcode` | 50 | 1,140 |
+| P6+P7 | `barrelcode` | 47 | 670 |
+| P6+P7 | `lootcode` | 46 | 558 |
+| P6+P7 | `restartcode` | 3 | 12 |
+
+- Sums: the D4 tables **75,860** words (of which 9,488 alignment pad), the 13 palettes **19,968**, the missile cell set
+  **212,004** inline, the HUD tail **580,496**, the cells **4,078** -- **892,406** words, 0.66% of 2^27.
+- The missile cell set's INLINE region only: its 1,115 tree nodes' `sim.jump16` switches (16 ops = 32 payload words
+  each, 35,680) and its line tests' xor tables were moved into the block pool by the blocking pass (5,350 pool labels
+  from its text); their slots and pads are priced by `poolmap.py`, not here. #121 item 7's "~723K" was the rung's
+  size DELTA attributed to the cells, not a label measure.
+- `barview` (P6, the runtime barrels' state -> view row) was in none of the issues' lists; it is a D4 table of the
+  same rung, so it has its line. `playpal1` is emitted for the interface and never sent (hurtcode's docstring).
+- P8a's tables (knockback's `kb_*`, the far LOS, `mbul` per radius, `sp_ex`'s fields) get their lines from the P8a
+  build's label table by the same command (docs/gp-final-plan.md 1.4: package E, after the build).
+
 ### 1.3 LUT inventory & total entry count
 
 Every runtime LUT with its **logical entry count** (the index range). Result-width and pow2/over-align

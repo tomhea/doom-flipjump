@@ -18,7 +18,7 @@ from doomfj import rng as R
 from doomfj.lut_generator import generate_dispatch_table_fj
 from doomfj.noisecode import ambush_decl, noise_decls, noise_leaf_lines, noise_restart_lines
 from doomfj.sight import NEAR
-from doomfj.world import K_HEAVY, LOOK_BEHIND_REACH, monster_attacks_land
+from doomfj.world import K_HEAVY, LOOK_BEHIND_REACH, MONSTER_MODES, monster_attacks_land
 
 MONSTER_TYPES = ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT", "MT_SHADOWS")
 # action ids; the sound actions (A_Pain, A_Scream, A_XScream) are no-ops (D5: no sound) and read 0
@@ -308,11 +308,15 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     # lose their target while he is dead (p32a_slot's `hurt`); the decide mode's slots carry it. The model hurts the
     # player in the monster mode "full" alone (combat: "decide" rolls and applies nothing), so the two must agree:
     # a "full" tier whose weapon cannot be hurt, or a hurtable player whose monsters never attack, is refused
-    from doomfj.hurtcode import hurt_on
+    from doomfj.hurtcode import HURT_PLAYER_MODES, hurt_on
     hurt = hurt_on(player) and decide
+    # issue #121 F5: an ad-hoc caller passing an unsupported PAIR (e.g. MONSTER_MODE "full" with the default player
+    # "walk" -- what a non-menu tier asks for) fails here, loudly and by name; no registry tier emits such a pair
     assert not decide or hurt == full, (
-        "M7 P5: monster mode %r with player mode %r -- the monsters' attacks land (\"full\") exactly when the player "
-        "can be hurt (hurtcode.HURT_PLAYER_MODES)" % (mode, player))
+        "UNSUPPORTED MODE PAIR (monster mode %r, player mode %r): M7 P5's rule is that the monsters' attacks land "
+        "(world.monster_attacks_land: %s) exactly when the player can be hurt (hurtcode.HURT_PLAYER_MODES: %s) -- "
+        "pair a landing monster mode with a hurtable player mode, or a pre-\"full\" monster mode with any other"
+        % (mode, player, tuple(m_ for m_ in MONSTER_MODES if monster_attacks_land(m_)), HURT_PLAYER_MODES))
     # M7 P5 (docs/gp-p5-interface.md, THE MOBILE ROWS): the fireball and blood pools' runtime things nt .. nt + nmob - 1,
     # by the model's ONE rule (monsters.mobile_rows), and one VIEW row per mobile lump after the monsters' views
     from types import SimpleNamespace

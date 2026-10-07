@@ -603,6 +603,8 @@ class TicEvents:
     restarts: int = 0
     level_done: bool = False
     frozen: bool = False                                    # level done: the tic did nothing
+    # M7 P8a (package K): every knock try P_XYMovement made, (("player", -1) | ("mon", slot), accepted)
+    knocks: List[tuple] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -1136,7 +1138,13 @@ class World(CombatMixin):
         start = ws.sched_cursor
         for j in range(n):
             m = (start + j) % n
-            if not ws.mon_active[m] or ws.mon_tics[m] == TICS_FOREVER:
+            if not ws.mon_active[m]:
+                continue
+            # M7 P8a (package K): P_MobjThinker's P_XYMovement before the state's tics -- a live monster's slide and
+            # a corpse's (its last state lasts forever: it still slides)
+            if self._p_knock and (ws.mon_momx[m] or ws.mon_momy[m]):
+                self._monster_knock_move(m, ev)
+            if ws.mon_tics[m] == TICS_FOREVER:
                 continue
             if ws.mon_tics[m] > 0:
                 ws.mon_tics[m] -= 1
@@ -1409,19 +1417,23 @@ class World(CombatMixin):
         return None
 
     # ---------------------------------------------------------------------------- collision
-    def try_move_monster(self, m: int, nx: int, ny: int) -> Tuple[str, Optional[int]]:
+    def try_move_monster(self, m: int, nx: int, ny: int, corpse: bool = False) -> Tuple[str, Optional[int]]:
         """P_TryMove for monster `m` to (nx, ny) in map units: (verdict, new floorz). Things first,
         then lines (P_CheckPosition's order; the verdict does not depend on it), then P_TryMove's
-        height, step and drop-off rules."""
+        height, step and drop-off rules. M7 P8a (`corpse`): a sliding corpse's (`try_move_lines`)."""
         if self._thing_blocker(m, nx, ny, self.mon_radius[m]) is not None:
             return V_THING, None
-        return self.try_move_lines(m, nx, ny)
+        return self.try_move_lines(m, nx, ny, corpse)
 
-    def try_move_lines(self, m: int, nx: int, ny: int) -> Tuple[str, Optional[int]]:
+    def try_move_lines(self, m: int, nx: int, ny: int, corpse: bool = False) -> Tuple[str, Optional[int]]:
         """try_move_monster's LINE half (M7 P3.2b: what the fj monster cells and `sim.try_move_mon` compute):
-        P_CheckPosition's lines, then the height, step and drop-off rules -- (verdict, new floorz)."""
+        P_CheckPosition's lines, then the height, step and drop-off rules -- (verdict, new floorz).
+        M7 P8a (`corpse`, package K): P_KillMobj's MF_CORPSE | MF_DROPOFF and `height >>= 2` -- a knocked corpse fits
+        a quarter of the height and is never refused by the drop-off."""
         ws = self.ws
         r, h = self.mon_radius[m], self.mon_height[m]
+        if corpse:
+            h >>= 2
         verdict, floorz, ceilz, dropoffz = self.check_lines(nx << 16, ny << 16, r << 16,
                                                             monster=True)
         if verdict != OK:
@@ -1431,7 +1443,7 @@ class World(CombatMixin):
             return V_HEIGHT, None
         if floorz - z > STEP_UP:
             return V_STEP, None
-        if not self.mon_info[m].flags & (gd.MF_DROPOFF | gd.MF_FLOAT) \
+        if not corpse and not self.mon_info[m].flags & (gd.MF_DROPOFF | gd.MF_FLOAT) \
                 and floorz - dropoffz > DROPOFF_MAX:
             return V_DROPOFF, None
         return OK, floorz
@@ -1490,7 +1502,9 @@ class World(CombatMixin):
                 return ("decor", t.type)
         return None
 
-    def _move_monster(self, m: int, nx: int, ny: int, floorz: int, ev: TicEvents) -> None:
+    def _move_monster(self, m: int, nx: int, ny: int, floorz: int, ev: TicEvents, step: bool = True) -> None:
+        """an accepted P_TryMove to (nx, ny): the position, floorz, the WR lifts crossed, the relink. `step` (M7 P8a):
+        False for a knock try, which is not one of P_Move's steps (`ev.moves`)"""
         ws = self.ws
         ox, oy = ws.mon_x[m], ws.mon_y[m]
         ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, floorz
@@ -1498,7 +1512,8 @@ class World(CombatMixin):
         for trig in self.lift_walk:
             if crossed(trig, (ox << 16, oy << 16), (nx << 16, ny << 16), self.mon_radius[m]):
                 ws.l_req[self.lift_order.index(trig[0])] = 1
-        ev.moves.append(m)
+        if step:
+            ev.moves.append(m)
         leaf = self.rm.point_in_subsector(self.cmap, nx, ny)
         old = ws.mon_leaf[m]
         if leaf != old:
@@ -1670,9 +1685,43 @@ class World(CombatMixin):
     def drop_pos(self, m: int) -> Tuple[int, int]:
         """M7 P8a (docs/gp-final-plan.md 3.0, G-B5): where slot `m`'s DROP lies, whole map units -- the ONE reader of a
         drop's position (`_touch_specials`, `monsters.MonsterPhase.mobiles`, `MonsterViews.rt_state`'s drop rows).
-        Until package K: the corpse's position, as every mode before P8a draws and touches it (K: `drop_x` / `drop_y`,
-        written at the kill, when knockback_on)"""
+        Knockback on (package K): `drop_x` / `drop_y`, written at the kill (`_kill_monster`: the corpse's position
+        then, before the killing blow's thrust slides it away -- the fj's drop row nt + 10 + k, `drop_link<k>`'s copy);
+        before it the corpse's position, as every mode before P8a draws and touches it (a corpse never moved)"""
+        if self._p_knock:
+            return self.ws.drop_x[m], self.ws.drop_y[m]
         return self.ws.mon_x[m], self.ws.mon_y[m]
+
+    def drop_leaf(self, m: int) -> int:
+        """M7 P8a (package K): the leaf slot `m`'s drop lies in -- the point location of `drop_pos` (the corpse's
+        leaf at the kill: drop_link<k> copies its thss_rt row); before knockback the corpse's own leaf"""
+        if self._p_knock:
+            return self.rm.point_in_subsector(self.cmap, *self.drop_pos(m))
+        return self.ws.mon_leaf[m]
+
+    # ---------------------------------------------------------------------------- M7 P8a: knockback (package K)
+    def _monster_knock_move(self, m: int, ev: TicEvents) -> None:
+        """M7 P8a (package K, docs/gp-final-plan.md 1.2.2): slot m's P_XYMovement -- `combat._xy_move` on its
+        momentum (mon_momx / mon_momy) and 16.16 position ((mon_x << 16) + mon_fx), at the top of its turn in each
+        monster tic (O-B3: the monsters' tempo, 2 tics a frame). Called by `_monsters_phase` only, when the slot is
+        active and its momentum is not zero"""
+        self._xy_move(("mon", m), ev)
+
+    def _monster_knock_try(self, m: int, cx16: int, cy16: int, ev: TicEvents) -> bool:
+        """a monster's P_TryMove of a knock step to 16.16 (cx16, cy16), at the candidate's INTEGER part (G-B2: the
+        walk's tests read whole units): the same integer part as where it stands -> accepted untested, only the
+        fraction moves; else try_move_monster (a corpse: not shootable -- MF_CORPSE's try) and, accepted, the walk's
+        move (`_move_monster`: floorz, the WR lifts crossed, the relink) with the candidate's fraction"""
+        ws = self.ws
+        nx, ny = cx16 >> 16, cy16 >> 16
+        if (nx, ny) != (ws.mon_x[m], ws.mon_y[m]):
+            verdict, floorz = self.try_move_monster(m, nx, ny, corpse=not ws.mon_shootable[m])
+            if verdict != OK:
+                ev.blocked[verdict] += 1
+                return False
+            self._move_monster(m, nx, ny, floorz, ev, step=False)
+        ws.mon_fx[m], ws.mon_fy[m] = cx16 & 0xFFFF, cy16 & 0xFFFF
+        return True
 
     def monster_view(self, m: int) -> dict:
         ws = self.ws

@@ -579,12 +579,13 @@ class MonsterViews:
         out = {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss)}
         if drop_rows(phase.world):
             # M7 P6: the DROP rows nt + 10 + k, one per dropper k: while its drop lies (mdrop 1) the corpse's
-            # whole-unit row and its leaf (the monster's own), else (0, 0) -- and in no list
+            # whole-unit row and its leaf (the monster's own), else (0, 0) -- and in no list. M7 P8a (package K): the
+            # drop's OWN position and leaf (World.drop_pos / drop_leaf: the corpse's at the kill, drop_link<k>'s copy)
             for m in droppers(phase.world):
                 live = ws.mon_drop[m] == 1
-                dx, dy = phase.world.drop_pos(m)        # M7 P8a: the drop's own position (K: its leaf too)
+                dx, dy = phase.world.drop_pos(m)
                 thpos.append((((dx << 16) & M) | (((dy << 16) & M) << 32)) if live else 0)
-                thss.append(ws.mon_leaf[m] if live else 0)
+                thss.append(phase.world.drop_leaf(m) if live else 0)
             out = {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss), **self.vis_state(phase)}
         return out
 

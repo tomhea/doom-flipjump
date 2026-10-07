@@ -163,9 +163,10 @@ def p8a_persist(player_mode: str = None, monster_mode: str = None) -> tuple:
 
 def p8a_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     """M7 P8a HOOK: the P8a modules' declarations of their persisted cells (widths matter to a restore set, values do
-    not) -- `game_screen_persisted_decls`' candidates for VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST. Empty until a
-    package declares cells"""
-    return []
+    not) -- `game_screen_persisted_decls`' candidates for VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST. Package K:
+    knockcode's (p_kmx .. pj_z, at the map's slot count)"""
+    from doomfj.world import World
+    return _knockcode.persisted_decls(World(map_wad, mapname).layout.nmon)
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:

@@ -240,7 +240,7 @@ def test_p8a_persist_composes_by_the_rules(monkeypatch):
     """build.p8a_persist: each hook behind its rule -- nothing at any pre-P8a pair, the view alone with a "final" player
     beside a "full" monster mode, the knock with "push" (the fallback), all three at "final" / "final" -- and
     persist_labels / game_screen_persisted_decls carry it at the game tier's modes (R9: with the hooks filled by
-    stand-ins, the "final" tier persists them and the shipped "full" one does not)"""
+    stand-ins, the "final" tier persists them and blocked51's "full" one does not)"""
     monkeypatch.setattr(B, "VIEW_PERSIST", ("p_vd",))
     monkeypatch.setattr(B, "KNOCK_PERSIST", ("p_kmx",))
     monkeypatch.setattr(B, "FIGHT_PERSIST", ("bar_src",))
@@ -248,6 +248,8 @@ def test_p8a_persist_composes_by_the_rules(monkeypatch):
     assert B.p8a_persist("final", "full") == ("p_vd",)
     assert B.p8a_persist("final", "push") == ("p_vd", "p_kmx")
     assert B.p8a_persist("final", "final") == ("p_vd", "p_kmx", "bar_src")
+    monkeypatch.setattr(WR, "PLAYER_MODE", "full")             # blocked51's modes (the game tier is "final" since
+    monkeypatch.setattr(WR, "MONSTER_MODE", "full")            # the P8a integration's flip)
     shipped = _persist()
     assert not {"p_vd", "p_kmx", "bar_src"} & set(shipped)
     monkeypatch.setattr(WR, "PLAYER_MODE", "final")
@@ -267,7 +269,7 @@ def test_the_p6_units_are_package_as():
     if not have:
         pytest.skip("HOOK: package A's MonsterPhase.loot_state / barrel_state / game_state are not on this branch")
     for sk in WR.SKILLS:
-        mp = MonsterPhase(None, "E1M1", sk, mode=WR.MONSTER_MODE, player="full")
+        mp = MonsterPhase(None, "E1M1", sk, mode=WR.MONSTER_MODE, player=WR.PLAYER_MODE)
         mine = RC.p6_cell_values(mp.world)
         for f in have:
             for k, v in getattr(mp, f)().items():

@@ -261,7 +261,7 @@ def _render_hand(w, hook, placed, fn=None):
     at_all = _mon_aim(hook.views.aim_things(types.SimpleNamespace(world=w)), w)
     at = {hook.views.mdi[m]: at_all[hook.views.mdi[m]] for m in placed}
     out = [0] * 17
-    kw = dict(hook.kw, rt_depth_order=False)
+    kw = dict(hook.kw, rt_depth_order=False, rt_rank=False)   # M7 P8a: D3 a ranks the depth walk -- off with it
     args = (SimState(ws.px, ws.py, ws.pangle, w.mapname), hook._scene(w))
     kw.update(sprite_wad=hook.art, thing_positions=pos, thing_hidden=hidden, thing_views=views,
               aim_things=at, aim_out=out)
@@ -386,7 +386,9 @@ def _s7_window(monkeypatch=None, fn=None):
     from doomfj.monsters import MonsterPhase
     from doomfj.reference_model import ReferenceModel
     from doomfj.wall_renderer import BOOT_SKILL
+    from doomfj.reference_model import game_render_kw
     orc = P.Oracle()
+    orc.RENDER_KW = game_render_kw(False)    # M7 P8a: the "full" picture (D3 b off: no barrel exemption) -- blocked51's
     if fn is not None:
         monkeypatch.setattr(ReferenceModel, "render_wall_frame", fn)
     ph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode="full", player="full")

@@ -227,7 +227,7 @@ def _model_after_death_restart(skill):
     from doomfj import wall_renderer as WR
     from doomfj.monsters import MonsterPhase
     from doomfj.world import TicEvents
-    mp = MonsterPhase(None, "E1M1", skill, mode=WR.MONSTER_MODE, player="full")
+    mp = MonsterPhase(None, "E1M1", skill, mode=WR.MONSTER_MODE, player=WR.PLAYER_MODE)
     w = mp.world
     for t in range(60):
         w.tic({"fire": t % 20 < 12, "forward": 20 <= t < 40, "turn_left": 40 <= t < 50})

@@ -50,7 +50,7 @@ def p5():
 def test_the_game_tier_runs_p5s_modes():
     from doomfj.hurtcode import hurt_on
     from doomfj.damagecode import fx_on
-    assert (WR.MONSTER_MODE, WR.PLAYER_MODE) == ("full", "full")
+    assert (WR.MONSTER_MODE, WR.PLAYER_MODE) == ("final", "final")      # M7 P8a: the final modes (P5's and more)
     assert hurt_on(WR.PLAYER_MODE) and fx_on(WR.PLAYER_MODE)
 
 

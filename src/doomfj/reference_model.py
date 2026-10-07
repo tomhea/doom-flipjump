@@ -88,11 +88,11 @@ GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
                       exempt_actors=True,
                       # M7 P8a package C (docs/gp-final-plan.md 1.3): THE COMPOSITOR RULES -- D3 a `rt_rank` (a leaf's
                       # effects and drops drawn before its monsters and fireballs) and D3 b `exempt_barrels` (a barrel
-                      # exempt from the scenery soft budget). OFF while the game tier is at "full" (blocked51's picture,
-                      # v6's record); ON exactly when world.compositor_d3(wall_renderer.PLAYER_MODE) -- the integrator
-                      # flips BOTH (D3_RENDER_KW) in the commit that sets PLAYER_MODE "final", and the emitter ASSERTS
-                      # the two agree with its `_D3` (tests/host/test_d3_rules.py holds them together too)
-                      rt_rank=False, exempt_barrels=False)
+                      # exempt from the scenery soft budget). ON exactly when world.compositor_d3(wall_renderer.
+                      # PLAYER_MODE): the P8a integration flipped BOTH (D3_RENDER_KW) in the commit that set PLAYER_MODE
+                      # "final" (blocked51's picture, v6's record, is game_render_kw(False)), and the emitter ASSERTS the
+                      # two agree with its `_D3` (tests/host/test_d3_rules.py holds them together too)
+                      rt_rank=True, exempt_barrels=True)
 # THE HOSTED TIERS' PICTURE (M7 P3.3): the game tier's set WITHOUT D3 d. The hosted tiers (hosted, hosted-doors,
 # hosted-loop, hosted-nocollide) move runtime things too -- the host sends their positions -- but their fj walks
 # a leaf's list in INDEX order (`sim.thing_pass`); the depth walk is the GAME tier's alone. A gate that drives a

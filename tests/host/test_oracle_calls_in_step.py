@@ -264,7 +264,9 @@ def test_the_hosted_set_is_the_game_set_without_depth_order():
     from doomfj.reference_model import GAME_RENDER_KW, HOSTED_RENDER_KW
     assert GAME_RENDER_KW.get("rt_depth_order") == "aprox"
     # M7 P6+P7 E: ... and in the actors rule (`exempt_actors`), which only the game tier's record emits
-    assert HOSTED_RENDER_KW == dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False)
+    # M7 P8a C: ... and in the compositor rules (D3 a / b), the game tier's alone too
+    assert HOSTED_RENDER_KW == dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False, rt_rank=False,
+                                    exempt_barrels=False)
     hosted = ("from doomfj.reference_model import HOSTED_RENDER_KW\n"
               "rm.render_wall_frame(s, scene, sprite_wad=art, **HOSTED_RENDER_KW)\n")
     assert out_of_step(hosted, gate=True) == [], "a splat of the hosted set asks for all the forced keys"

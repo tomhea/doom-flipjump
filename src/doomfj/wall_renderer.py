@@ -138,7 +138,8 @@ BOOT_SKILL = _gd.SK_HARD
 # M7 P3 (docs/gp-monsters.md): the game tier's MONSTER MODE -- the model mode its binary is exact against
 # ("idle" P3.1, "wake" P3.2a, "chase" P3.2b, "decide" P3.2c, "full" P5: the attacks land -- the bullets, the claw and
 # the bite through hurtcode's dp_go, the imp's fireball through projcode's pool)
-MONSTER_MODE = "full"
+# M7 P8a: "final" -- knockback (K) and infighting (I): docs/gp-final-plan.md
+MONSTER_MODE = "final"
 # M7 P4 (docs/gp-combat.md section 1): the game tier's PLAYER MODE -- the model mode its weapon is exact against
 # ("walk" through P4.0, "fire" P4.1: the trigger without its effects, "hit" P4.2); a mode whose shots hurt
 # (damagecode.DAMAGE_PLAYER_MODES) adds the monsters' damage to p31_parts -- MONSTER_MODE must then decide ("decide" or
@@ -146,7 +147,8 @@ MONSTER_MODE = "full"
 # the player can be hurt exactly when the monsters' attacks land -- monstercode.p31_parts asserts the pair)
 # M7 P6+P7: "full" -- the player loots (pickups, blocking, nukage, berserk, barrels, drops) and is mortal (the dead
 # latch, the death think and its turn to the killer, the restart on use)
-PLAYER_MODE = "full"                     # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD; P5: it BLEEDS
+# M7 P8a: "final" -- the dying view sinks (A), knockback (K), the compositor rules D3 a / b (C): docs/gp-final-plan.md
+PLAYER_MODE = "final"                    # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD; P5: it BLEEDS
 
 
 def tier_flags(tier: str) -> dict:

@@ -583,6 +583,11 @@ def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
     lootcode.PERSIST -- the same on every skill: the player's start), and each skill's RUNTIME pickups' `thvis` slots
     after the baked vanishable ones (`loot_slots`: lootcode.pickup_slots; lootcode.extra_vis per skill)."""
     common, skills = (list(bar["restart"][0]) if bar else []), [[] for _ in SKILLS]
+    # M7 P8a A: the dying view's p_vd -- 0 on every skill -- while the World's player sinks (its mode is the game
+    # tier's PLAYER_MODE: p31_parts builds it so), so this composition and the emitted p_vd cannot disagree
+    from doomfj.world import player_sinks as _sinks
+    if world is not None and _sinks(world.player):
+        common += _restartcode.view_restart_lines()
     if loot_slots is not None:
         c, per = _restartcode.level_start_lines(world, SKILLS, _lootcode.PERSIST)
         common += c
@@ -983,8 +988,17 @@ def exit_lines(boxes, press_miss=()) -> list:
 def landing_drop_lines() -> list:
     """M7 P8a SPLICE POINT (package A, docs/gp-final-plan.md 1.1 / 4.3 step 9): the dying view's sink at the eye's
     landing (after `dsc_done`): `viewz -= p_vd << 16` behind one `hex.if0` while alive. Spliced only when
-    world.player_sinks(PLAYER_MODE); empty until package A fills it"""
-    return []
+    world.player_sinks(PLAYER_MODE).
+
+    M7 P8a A (design S0, O-A1 taken): the descend pre-walk's landing has just set `viewz` (the standing eye, floor +
+    41, 16.16) AND `vzcbase` (the eye class's band lists); the drop lowers ONLY viewz -- every projection (the wall
+    spans, the step faces, the sprites' sp_z) reads it at run time -- while the planes keep the standing eye's band
+    lists: the oracle's `render_wall_frame(view_drop=)` split, exactly. viewz -= p_vd << 16 is the 2-nibble p_vd
+    subtracted at nibble 4 with the borrow carried through nibble 7 (viewz may go negative: two's complement, as
+    view_z's own values below floor -41). A living player (p_vd 0) pays the one `if0`."""
+    return ["hex.if0 2, p_vd, lnd_vd_end",
+            "hex.sub_shifted 8, 2, viewz, p_vd, 4",
+            "lnd_vd_end:"]
 
 
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
@@ -2970,7 +2984,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
-                + (_hurtcode.turn_lines([t_ for t_, _r in _chase["slots_rt"]])
+                + (_hurtcode.turn_lines([t_ for t_, _r in _chase["slots_rt"]], sink=_SINK)   # M7 P8a A: + the drop
                    if (_hrt and menu and _restartcode.mortal(PLAYER_MODE)) else [])
                 # M7 P6+P7: package B's leaves -- pk_go (the grid, the stubs, the drops, the gives), pb_mon, nk_go
                 + (list(_loot["leaves"]) if _loot else [])
@@ -3420,6 +3434,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_hrt["decls"]) + list(_proj["decls"]) + list(_hrt["tables"]) + list(_proj["tables"]))
             if _hrt else []),
           *(_knockcode.decls() if _KNOCK else []),                         # M7 P8a: the thrust's interface
+          *((_restartcode.view_decls() + _hurtcode.sink_decls()) if _SINK else []),   # M7 P8a A: p_vd, its cap
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *_aim_decls,                                                      # M7 P4.2a: the aim window

@@ -199,8 +199,7 @@ def test_the_hooks_are_declared_empty():
     assert C.CombatMixin._xy_move(w, ("player", -1), W.TicEvents(0)) is None
     assert KC.PERSIST == () and KC.player_move_lines() == [] and KC.monster_slot_lines(3) == []
     assert KC.go_lines()[-2:] == ["kb_go:", "    stl.fret kb_ret"]
-    from doomfj import wall_renderer as WR
-    assert WR.landing_drop_lines() == []
+    # (package A filled wall_renderer.landing_drop_lines: tests/host/test_view_drop_model.py, tests/fj/test_view_drop_fj.py)
 
 
 # ---- the damage signatures: every caller (rule 5: src/, scratchpad/, tests/) -------------------------------------

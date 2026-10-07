@@ -77,6 +77,7 @@ from doomfj.doors import crossed                                   # M7 P2a.1: w
 from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE, turn_step   # STRAFE_MOVE: M7 P4.1, the ONE value
 from doomfj.reference_model import ANG180 as _ANG180                       # M7 P7: P_DeathThink's turn
+from doomfj.reference_model import VIEW_DROP_MAX                          # M7 P8a A: P_DeathThink's view drop
 
 # 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
 # FORWARD_MOVE, rounded (plan section 2, input). world.py re-exports it.
@@ -311,6 +312,7 @@ class CombatMixin:
         # M7 P8a (docs/gp-final-plan.md 3.0): P_DamageMobj's THRUST (`_thrust`) and P_XYMovement (`_xy_move`) are
         # knockback_on's -- off in every mode before P8a, so "full" is the v6 model untouched
         self._p_knock = W.knockback_on(self.player, self.monsters)
+        self._p_sink = W.player_sinks(self.player)          # M7 P8a A: the dying view sinks (`p_vdrop`)
         self.sites = Sites(rm)
         self.aim_centre = rm.angle_to_x(0)
         self.aim_lo, self.aim_hi = aim_window(rm, self.sites)
@@ -434,9 +436,16 @@ class CombatMixin:
         (`p_attacker`: 1 + a monster slot; its position now, a corpse's too), and when the delta is within ANG5
         either way the view snaps to it and the damage flash fades, else it turns ANG5 toward it (the short way);
         with no attacker the flash fades. Use (held, as DOOM reads it) asks for the restart. Before "full" the flash
-        faded every tic and nothing turned (P5's model: no fj mirror of the death think)."""
+        faded every tic and nothing turned (P5's model: no fj mirror of the death think).
+        M7 P8a A ("final", world.player_sinks; docs/gp-final-plan.md 1.1): THE VIEW DROP, in DOOM's order -- after the
+        psprites, before the turn: `if (viewheight > 6) viewheight -= 1; if (viewheight < 6) viewheight = 6`, kept as
+        `p_vdrop` = 41 - viewheight (0..VIEW_DROP_MAX, one unit a death-think tic: O-A2); P_CalcHeight's viewz = z +
+        viewheight is the oracle's `view_drop` (the geometry sinks, the plane shading stays the standing eye's: S0).
+        The restart (and the level start) put it back to 0. The fj: hurtcode.turn_lines(sink=True), dt_turn's top."""
         ws = self.ws
         self._weapon_tics(keys, ev)
+        if self._p_sink and ws.p_vdrop < VIEW_DROP_MAX:
+            ws.p_vdrop += 1
         if self._p_full and ws.p_attacker:
             self._turn_to_attacker(ev)
         elif ws.p_damagecount:

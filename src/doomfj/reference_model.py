@@ -62,6 +62,13 @@ DBITS = 5                          # FRACBITS(16) - SLOPEBITS(11): the FixedDivâ
 SCALE_MIN = 256                    # R_ScaleFromGlobalAngle clamp floor (16.16)
 SCALE_MAX = 64 << 16               # R_ScaleFromGlobalAngle clamp ceiling = 64.0 (16.16)
 VIEWHEIGHT = 41                    # DOOM player eye height above the floor (map units)
+# M7 P8a (A): P_DeathThink lowers viewheight 1 unit a tic to 6 (p_user.c) -- the dying view's whole drop, 41 -> 6
+DEAD_VIEWHEIGHT = 6
+VIEW_DROP_MAX = VIEWHEIGHT - DEAD_VIEWHEIGHT  # 35: the model's p_vdrop cap, the oracle's view_drop range
+# M7 P8a A (S0, O-A1): render_wall_frame(view_drop=d) SPLITS the eye -- geometry from the sunk eye, the planes' band
+# lists from the standing one (what the fj's landing does). A gate's R9 control (die_gate's `band_eye`) sets this
+# False to break the split -- the bands then take the sunk eye too -- and must see the binary part from it.
+VIEW_DROP_SPLIT = True
 
 # THE GAME TIER'S PICTURE: the keyword set every E1M1 gate must ask `render_wall_frame` for -- the
 # shipped wall/floor modes, things, and the features the emitter now always draws (V2 sky, V3/V5
@@ -1963,7 +1970,8 @@ class ReferenceModel:
                           seen_out: set | None = None, rt_depth_order=False,
                           aim_things: dict | None = None, aim_out: list | None = None,
                           mobiles=None, barrel_views: dict | None = None, thing_removed=None,
-                          degrade: bool = False, exempt_actors: bool = False) -> bytes:
+                          degrade: bool = False, exempt_actors: bool = False,
+                          view_drop: int = 0) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -2030,7 +2038,15 @@ class ReferenceModel:
             them per lump; a barrel in `aim_things` (sid 1 + nmon + b, radius 10) is aimed through it;
           * `thing_removed`: drawable indices the GAME removed -- picked up, a barrel gone to S_NULL
             (`monsters.MonsterViews.hidden`). Each must be a VANISHABLE type (a pickup or a barrel); unlike
-            `thing_hidden`, a runtime one need not be a skill's absent set (the fj unlinks it: `rt_unlink`)."""
+            `thing_hidden`, a runtime one need not be a skill's absent set (the fj unlinks it: `rt_unlink`).
+
+        M7 P8a (docs/gp-final-plan.md 1.1, design S0 -- O-A1 taken): `view_drop` = d (0..VIEW_DROP_MAX, the model's
+        `p_vdrop`) -- THE DYING VIEW. The eye has TWO uses here and they split: the GEOMETRY (walls, step faces and
+        their pieces, sprites, the aim and the seen marks recorded from them) projects from the SUNK eye
+        `view_z(floor) - (d << 16)`, while the floor and ceiling SHADING (the FT1 band lists, `_flat_row_colours`' ph
+        = |plane_h - viewz|) stays on the STANDING eye `view_z(floor)` -- the band lists the fj bakes per eye class,
+        which the fj's landing keeps (`wall_renderer.landing_drop_lines` subtracts from `viewz` after `vzcbase` is
+        set). 0 (the default) is every picture before P8a, byte for byte (scratchpad/gp/p8_identity.py)."""
         # M7 P3.3: a misspelt depth order must fail here, not fall through to the "aprox" key
         assert rt_depth_order in RT_DEPTH_ORDERS, (
             f"rt_depth_order={rt_depth_order!r}: one of {RT_DEPTH_ORDERS}")
@@ -2104,6 +2120,13 @@ class ReferenceModel:
         # the eye z = the player's own sector floor + VIEWHEIGHT
         pss = scene.cmap.subsectors[self.point_in_subsector(scene.cmap, px, py)]
         viewz = self.view_z(self._seg_sector(lds, sds, secs, scene.cmap.segs[pss.firstseg]).floor_h)
+        # M7 P8a (S0): the planes' band lists keep the STANDING eye; the geometry takes the sunk one
+        assert 0 <= view_drop <= VIEW_DROP_MAX, f"view_drop={view_drop}: 0..{VIEW_DROP_MAX}"
+        assert not view_drop or floor_mode_ft1, "view_drop is the FT1 tier's split (the band lists it keeps)"
+        viewz_band = viewz
+        viewz = viewz - (view_drop << 16)                     # unmasked, as view_z returns it
+        if not VIEW_DROP_SPLIT:                               # an R9 control only: the bands take the sunk eye too
+            viewz_band = viewz
         viewz_world = _signed(viewz, 32) >> 16
         centery, ds = cfg.CENTERY, self.downscale
 
@@ -2774,7 +2797,7 @@ class ReferenceModel:
         if steps_out is not None:
             steps_out.append((ups, los))                     # V5: the per-column piece lists
         if floor_mode_ft1:
-            self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz, *planes,
+            self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz_band, *planes,
                                      ft1=True, sky=sky, viewangle=viewangle, texcache=texcache)
             if near_steps:
                 # V3 - splice the STEP FACES into the plane regions. Flat-shaded: one distance-lit
@@ -2824,8 +2847,8 @@ class ReferenceModel:
                             fb[y * cfg.VIEW_W + x] = self.sky_texel(scene.asset_wad, texcache,
                                                                     viewangle, x, y)
                         return
-                    rows = self._flat_row_colours(colormap, scene.asset_wad, flatcache, viewz,
-                                                  abs((hgt << 16) - viewz), lgt, flat,
+                    rows = self._flat_row_colours(colormap, scene.asset_wad, flatcache, viewz_band,
+                                                  abs((hgt << 16) - viewz_band), lgt, flat,
                                                   ft1=True, walk_cache=v5_cache)
                     for y in range(ra, rb + 1):
                         fb[y * cfg.VIEW_W + x] = rows[y]

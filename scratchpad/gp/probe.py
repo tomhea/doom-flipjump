@@ -703,7 +703,8 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     # M7 P4.1: the player's weapon -- one cell each, `wp_own` the four owned flags as one 4-nibble value
     for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", 4), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1)):
         cells[name] = Cell(name, "hex", width)
-    cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=17)          # M7 P4.2a: the aim window (doomfj.aimcode)
+    from doomfj.world import AIM_COLUMNS                             # issue #119 item 6: ONE definition
+    cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=AIM_COLUMNS)  # M7 P4.2a: the aim window (doomfj.aimcode)
     # M7 P5 (docs/gp-p5-interface.md, "the cells' units"; monsters.MonsterPhase.hurt_state / proj_state / fx_state):
     # the player's health (12 bits, read unsigned -- the oracle masks), armor, armor type, damage count, death, and
     # the palette the last present showed (hurtcode); the fireball pool and the blood pool (projcode), rng_fx

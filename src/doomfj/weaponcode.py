@@ -47,6 +47,7 @@ from typing import Dict, List, Optional
 
 from doomfj import gamedata as gd
 from doomfj.wireformat import KEY_FIRE_MASK
+from doomfj.world import AIM_COLUMNS
 
 # the four E1M1 weapons (WP_*), in the order of `wp_own`'s nibbles; key 4 names the chaingun, which E1M1 never gives
 WEAPONS = (gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW)
@@ -418,7 +419,7 @@ def weapon_const_decls() -> List[str]:
 
 
 # ---- M7 P4.2a: the shot (the module docstring, THE SHOT) ---------------------------------------------------------
-AIM_N = 17                                      # aim_sid's cells: the window's columns aim_lo .. aim_hi
+AIM_N = AIM_COLUMNS                             # aim_sid's cells: the window's columns aim_lo .. aim_hi (#119 item 6)
 SHOT_PELLETS = 7                                # A_FireShotgun: 7 x P_GunShot (combat._psp_action)
 SHOT_ROW_NIBBLES = 5                            # wpo's row: melee damage (0-1), gun damage (2), column index (3-4)
 DM_CELLS = (("dm_id", 2), ("dm_dmg", 2), ("dm_melee", 1), ("dm_reach", 2))   # the damage machinery's arguments

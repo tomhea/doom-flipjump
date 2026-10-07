@@ -21,10 +21,13 @@ from __future__ import annotations
 import struct
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from doomfj.config import GAME_CFG
 from doomfj.menu import _GLYPHS, _SMALL_GLYPHS, GLYPH_GAP
 
-VIEW_ROWS = 84                 # the game tier's 3D view height (D6: 168 of 200 at half resolution)
-BAR_ROWS = 16
+# issue #119 item 6: the screen's sizes are config.GAME_CFG's (the ONE definition), not restated here
+SCREEN_W = GAME_CFG.W          # 160: the game screen's width (the view's and the bar's)
+VIEW_ROWS = GAME_CFG.VIEW_ROWS  # 84: the game tier's 3D view height (D6: 168 of 200 at half resolution)
+BAR_ROWS = GAME_CFG.H - VIEW_ROWS   # 16: the bar under it
 WEAPONTOP = 32                 # DOOM's psprite sy when the weapon is up (p_pspr.c)
 NATIVE_W = 320
 BASEYCENTER = 100              # DOOM's psprite vertical anchor (r_things.c), in native rows
@@ -33,6 +36,7 @@ FRACUNIT = 1 << 16
 # ------------------------------------------------------------------------------------------------- the bar
 # the panels' column extents [x0, x1], left to right; a separator column at each x0 but the first
 PANELS = (("AMMO", 0, 30), ("HEALTH", 31, 66), ("ARMS", 67, 94), ("ARMOR", 95, 130), ("KEYS", 131, 159))
+assert PANELS[-1][2] == SCREEN_W - 1, "the bar's panels are laid out for a %d-column screen" % (PANELS[-1][2] + 1)
 NUM_Y, LABEL_Y = 2, 10         # bar rows of the 5x7 numbers and the 3x5 labels
 DIGIT_W = 5
 FIELD_DIGITS = 3
@@ -94,8 +98,8 @@ def digits(value: Optional[int]) -> Tuple[Optional[int], ...]:
 def bar_pixels(colours: Dict[str, int], *, ammo: Optional[int], health: int, armor: int,
                owned: Sequence[bool], blue: bool) -> List[List[int]]:
     """the bar's 16 x 160 palette indices for these values (`owned` = the ARMS weapons 2, 3, 4; `ammo` None = blank)"""
-    px = [[colours["bg"]] * 160 for _ in range(BAR_ROWS)]
-    for x in range(160):
+    px = [[colours["bg"]] * SCREEN_W for _ in range(BAR_ROWS)]
+    for x in range(SCREEN_W):
         px[0][x] = colours["edge"]
     for _n, x0, _x1 in PANELS[1:]:
         for y in range(2, BAR_ROWS - 1):
@@ -202,7 +206,7 @@ def _fixed_mul(a: int, b: int) -> int:
     return (a * b) >> 16
 
 
-def psprite_columns(lump: bytes, *, view_w: int = 160, view_rows: int = VIEW_ROWS, sx: int = 1,
+def psprite_columns(lump: bytes, *, view_w: int = SCREEN_W, view_rows: int = VIEW_ROWS, sx: int = 1,
                     sy: int = WEAPONTOP) -> Dict[int, List[Tuple[int, int, int]]]:
     """R_DrawPSprite + R_DrawMaskedColumn for one psprite frame: {screen x: [(y_top, y_end, texel), ...]} -- each
     entry one screen row run [y_top, y_end) of ONE texel, top to bottom; the rows no post covers are transparent"""

@@ -294,3 +294,94 @@ def test_the_chase_tic_follows_the_model(tmp_path):
 @pytest.mark.parametrize("mut", ["nocap", "nothings", "norelink", "active"])
 def test_control_a_broken_move_is_caught(tmp_path, mut):
     assert not _run(tmp_path, "mchase_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut
+
+
+# ---- M7 P8a package D (issue #121 item 16): the thing test's DEAD PLAYER -----------------------------------------
+# monstermove.things_leaf_lines(hurt=True) -- the game tier's mm_things (M7 P5): a dead player (`p_dead`) is not MF_SOLID
+# and blocks nothing (World._thing_blocker: `self.player_alive() and ...`). No gate reaches it (a monster chasing a
+# dead player drops its target before it moves), so the leaf runs here alone: per record a mover, a candidate, the
+# player's 16.16 position and p_dead, the per-slot solid flags (the mover's own cleared, as its slot code does), and
+# mm_blk against the model's _thing_blocker (a monster or the player; barrels and decor are the cells', not this leaf's).
+# R9: the leaf without its `p_dead` line must part on the dead records.
+DEAD_RECORDS = 96
+
+
+def _dead_records(w):
+    rnd = random.Random(0x121F)
+    n, ws = w.layout.nmon, w.ws
+    act = [m for m in range(n) if ws.mon_active[m]]
+    out = []
+    for k in range(DEAD_RECORDS):
+        m = rnd.choice(act)
+        r = w.mon_radius[m]
+        nx, ny = ws.mon_x[m] + rnd.randrange(-10, 11), ws.mon_y[m] + rnd.randrange(-10, 11)
+        if k % 3 == 2:                                   # a candidate on another monster's box edge
+            j = rnd.choice([j for j in act if j != m])
+            nx, ny = ws.mon_x[j] + rnd.randrange(-(r + 32), r + 33), ws.mon_y[j] + rnd.randrange(-(r + 32), r + 33)
+        lim = (r + 16) << 16                             # the player inside the box (or just outside) of the candidate
+        px = (nx << 16) + rnd.choice([rnd.randrange(-lim + 1, lim), rnd.choice([-lim, lim, lim + 1])])
+        py = (ny << 16) + rnd.randrange(-lim + 1, lim)
+        out.append((m, nx, ny, px, py, k % 2))           # p_dead alternates: every overlap is tried dead and alive
+    return out
+
+
+def _dead_expected(w, recs) -> bytes:
+    ws = w.ws
+    out = []
+    for m, nx, ny, px, py, dead in recs:
+        ws.px, ws.py, ws.p_dead, ws.p_health = px, py, dead, 0 if dead else 100
+        hit = w._thing_blocker(m, nx, ny, w.mon_radius[m])
+        out.append("%d" % int(hit is not None and hit[0] in ("monster", "player")))
+    return ("\n".join(out) + "\n").encode()
+
+
+def _dead_run(tmp_path, name, mut=False) -> bool:
+    w = _world()
+    n, ws = w.layout.nmon, w.ws
+    recs = _dead_records(w)
+    body = ["stl.startup_and_init_all"]
+    for m, nx, ny, px, py, dead in recs:
+        solid = [int(j != m and ws.mon_active[j] and ws.mon_solid[j]) for j in range(n)]
+        body += ["hex.set %d, mon_solid, %d" % (n, sum(s << (4 * j) for j, s in enumerate(solid))),
+                 "hex.set 4, mm_nx, %d" % (nx & 0xFFFF), "hex.set 4, mm_ny, %d" % (ny & 0xFFFF),
+                 "hex.set 8, cpx, %d" % ((nx << 16) & M32), "hex.set 8, cpy, %d" % ((ny << 16) & M32),
+                 "hex.set 2, mm_r, %d" % w.mon_radius[m],
+                 "hex.set 8, viewx, %d" % (px & M32), "hex.set 8, viewy, %d" % (py & M32),
+                 "hex.set 1, p_dead, %d" % dead,
+                 "stl.fcall mm_things, mm_tret", "hex.print_as_digit 1, mm_blk, 0", "stl.output 10"]
+    body.append("stl.loop")
+    leaf = "\n".join(MM.things_leaf_lines([(m, w.mon_radius[m]) for m in range(n)], solid="mon_solid", hurt=True))
+    line = "    hex.if1 1, p_dead, mm_things_out\n"
+    assert leaf.count(line.rstrip("\n")) == 1
+    if mut:
+        leaf = leaf.replace(line, "")
+    decls = ["mon_solid: hex.vec %d" % n, "p_dead: hex.vec 1", "viewx: hex.vec 8", "viewy: hex.vec 8",
+             "cpx: hex.vec 8", "cpy: hex.vec 8", "ct_a: hex.vec 4",
+             "thpos_rt: hex.vec %d, %d" % (16 * n, sum(((ws.mon_x[m] << 16) & M32 | ((ws.mon_y[m] << 16) & M32) << 32)
+                                                       << (64 * m) for m in range(n)))]
+    decls += [d for d in MM.P32B_CONTEXT if d.split(":")[0] in ("mm_nx", "mm_ny", "mm_r", "mm_blk", "mm_bd20",
+                                                                  "mm_bd30", "mm_bdp", "mm_c", "mm_tret")]
+    prog = "\n".join(body + decls) + "\n" + leaf + "\n"
+    p = tmp_path / ("%s.fj" % name)
+    p.write_text(prog, encoding="utf-8")
+    return fj.assemble_and_run_test_output([p.resolve()], b"", _dead_expected(_world(), recs), memory_width=W,
+                                           warning_as_errors=True, should_raise_assertion_error=False)
+
+
+def test_the_dead_records_decide_something():
+    """the control can only bite where a DEAD player overlaps a candidate no monster blocks: the model with the player
+    alive there must block (and the records hold both answers)"""
+    w = _world()
+    recs = _dead_records(w)
+    dead = _dead_expected(w, recs).split()
+    alive = _dead_expected(_world(), [r[:5] + (0,) for r in recs]).split()
+    assert any(d == b"0" and a == b"1" for d, a, r in zip(dead, alive, recs) if r[5]), "no dead overlap in the records"
+    assert b"1" in dead and b"0" in dead
+
+
+def test_a_dead_player_blocks_nothing_in_mm_things(tmp_path):
+    assert _dead_run(tmp_path, "mdead"), "mm_things (hurt) parted from World._thing_blocker on the p_dead records"
+
+
+def test_control_the_dead_skip_removed_is_caught(tmp_path):
+    assert not _dead_run(tmp_path, "mdead_mut", mut=True), "mm_things without its p_dead line passed: vacuous"

@@ -155,6 +155,12 @@ def check_model_rules(puffs: bool = False) -> None:
         assert chain("S_PUFF1")[2] == "S_PUFF3" and _tics("S_PUFF3") > 0
     assert info.speed >> 16 == 10 and info.speed & 0xFFFF == 0, "momentum = 10 * finesine: the x10 is shifts"
     assert all(abs(dx) < 16 and abs(dy) < 16 for dx, dy in FX_STEP)
+    # issue #121 item 12: pj_spawn_leaf's `hex.mov 3, pw_idx, pw_ang + 5*dw` takes the fine angle as angle >> 20 (five
+    # whole nibbles off, three kept) -- the model's finesine index is angle >> rm.angle_shift
+    from doomfj.config import GAME_CFG
+    from doomfj.reference_model import ReferenceModel
+    assert ReferenceModel(GAME_CFG).angle_shift == 4 * 5 and GAME_CFG.TRIG_N == 16 ** 3, (
+        "pj_spawn_leaf's fine angle (pw_ang + 5*dw, 3 nibbles) is angle >> 20 into a 4096-entry finesine")
 
 
 # ---- the missile cells -----------------------------------------------------------------------------------------

@@ -322,9 +322,10 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
         from doomfj.monsters import MonsterPhase
         from doomfj.wall_renderer import BOOT_SKILL
         from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
-        # M7 P4.1: the player's weapon too. b0 delivers only `scenarios_v2.B0_KEYS` (no fire, no number keys, no
-        # strafe -- the model's strafe reaches the binary through the injected pose), so the binary's weapon only
-        # rises and idles, and the mirror steps the same keys
+        # M7 P4.1: the player's weapon too. b0 delivers `scenarios_v2.B0_KEYS` -- since M7 P4.2a (ae16682) the
+        # TRIGGER too, fire and the number keys (model_frames' `bkeys`); never strafe: the model's strafe reaches the
+        # binary through the injected pose -- and the mirror steps the same keys (issue #119 item 8: this comment
+        # said "no fire, no number keys" after the delivery had changed)
         mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE, player=pmode or PLAYER_MODE)
         if sfn is not None:
             sfn(mph)                                     # M7 P6+P7: the set's corpses, as the binary is poked
@@ -532,6 +533,10 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
         if refused:
             print("    !! %d strafe-only frame(s) priced by a REFUSED proxy step (listed above): the delta over them "
                   "is not the strafe's collision tic" % refused)
+            # issue #123 L4 (RECORDED, not a failure): on v6 the one refusal is R2-spectre-corridor frame 0 -- 1 of
+            # 324 strafe-only frames, one step behind the landing inside a wall
+            print("    note: a RECORDED deviation of the proxy (issue #123 L4; v6: R2-spectre-corridor frame 0, 1 of 324 "
+                  "strafe-only frames) -- a refused proxy frame is priced from one step short, never judged")
         under = {"binding_proxy": pb, "mean_proxy": sum(pavgs) / len(pavgs),
                  "p80_proxy": GS.percentile_run(pavgs), "delta_binding": pb - binding,
                  "strafe_only_frames": tot_n, "delta_total": tot_d, "refused_steps": refused,

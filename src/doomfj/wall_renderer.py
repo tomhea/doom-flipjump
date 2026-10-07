@@ -565,9 +565,10 @@ def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, n
     emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
     start, so the two cannot be composed differently. `hud_restart` None: a tier without the game screen (then none of
     the screen's parts either)."""
+    from doomfj.world import AIM_COLUMNS          # issue #119 item 6: the window's width, ONE definition
     extra = (() if hud_restart is None else
              (list(hud_restart) + list(wpn_restart)
-              + ([f"hex.zero {2 * 17}, aim_sid"] if aim else [])                          # M7 P4.2a: no aim
+              + ([f"hex.zero {2 * AIM_COLUMNS}, aim_sid"] if aim else [])                 # M7 P4.2a: no aim
               # M7 P5: the player's health, armor, damage count and death at the level start (never pal_cur: a
               # device shadow, restartcode.DEVICE_SHADOWS); the pools empty, their rows zero, rng_fx at its seed
               + list(hrt_restart) + list(proj_restart) + list(p6_common)))
@@ -602,6 +603,61 @@ def p5_tic_lines(hrt, barrels: bool = False) -> list:
     return (["stl.fcall pj_phase, pj_pret"] + (["stl.fcall bar_phase, bar_pret"] if barrels else [])
             + ["stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(),
                *hrt["bar"], "p5_bar_skip:"])
+
+
+# issue #123 item 4: the thing types whose pickup moves health or armor (combat._touch_specials / lootcode's P_Give*:
+# ARM1, ARM2, BON1, BON2, STIM, MEDI, SOUL, PSTR -- berserk gives health 100)
+HEALTH_ARMOR_TYPES = frozenset({2018, 2019, 2014, 2015, 2011, 2012, 2013, 2023})
+
+
+def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
+    """issue #123 item 4 (emit time): `hp_bar` sits inside the `lvdone` guard (p5_tic_lines), but on the frame the exit
+    is pressed the player phase still runs AFTER the press -- nukage at the tic-start position, then the walk with its
+    pickups -- so a health or armor change on that frame would leave the bar stale for good. Unreachable on a map
+    where, for every exit box (`boxes`, doors.exit_boxes: where the press can happen):
+      * no damaging sector (combat.SECTOR_HURT) has its bounding box meeting the exit box (nukage reads the tic-start
+        position, which the press puts inside the box);
+      * no health / armor pickup (HEALTH_ARMOR_TYPES, any skill) lies within the exit box grown by one frame's
+        furthest reach: the walk's step (FORWARD_MOVE + STRAFE_MOVE), a knock move (MAXMOVE, M7 P8a), and the touch
+        distance (the player's radius + the item's).
+    Asserted, not handled: moving hp_bar out of the guard is M4's (a map that breaks this). Returns the margins
+    {"hurt": smallest axis gap to a hurt sector's box, "pickup": smallest axis gap to a health / armor item beyond
+    the reach} for the record (E1M1: no hurt sector near the exit; the nearest item, a stimpack, 49 units clear)."""
+    from doomfj import gamedata as gd
+    from doomfj.combat import ITEM_RADIUS, PLAYER_R, SECTOR_HURT
+    from doomfj.reference_model import FORWARD_MOVE, STRAFE_MOVE
+    lds, sds, secs, verts = (map_wad.linedefs(mapname), map_wad.sidedefs(mapname), map_wad.sectors(mapname),
+                             map_wad.vertexes(mapname))
+    hurt = {i for i, s in enumerate(secs) if s.special in SECTOR_HURT}
+    sbox = {}
+    for ld in lds:
+        ss = {sds[ld.front].sector} | ({sds[ld.back].sector} if 0 <= ld.back < len(sds) else set())
+        for si in ss & hurt:
+            for v in (verts[ld.v1], verts[ld.v2]):
+                x0, y0, x1, y1 = sbox.get(si, (v.x, v.y, v.x, v.y))
+                sbox[si] = (min(x0, v.x), min(y0, v.y), max(x1, v.x), max(y1, v.y))
+    reach = (FORWARD_MOVE >> 16) + (STRAFE_MOVE >> 16) + (gd.MAXMOVE >> 16) + PLAYER_R + ITEM_RADIUS
+    margins = {"hurt": None, "pickup": None}
+
+    def gap(box, x0, y0, x1, y1):
+        """the larger axis gap between two boxes (<= 0: they meet)"""
+        return max(x0 - box[2], box[0] - x1, y0 - box[3], box[1] - y1)
+
+    for box in boxes:
+        for si, sb in sbox.items():
+            g = gap(box, *sb)
+            assert g > 0, ("the exit box %r meets damaging sector %d (%r): nukage could hurt the player on the exit "
+                           "frame and hp_bar, inside the lvdone guard, would stay stale (issue #123 item 4)"
+                           % (box, si, sb))
+            margins["hurt"] = g if margins["hurt"] is None else min(margins["hurt"], g)
+        for t in map_wad.things(mapname):
+            if t.type in HEALTH_ARMOR_TYPES:
+                g = gap(box, t.x, t.y, t.x, t.y) - reach
+                assert g > 0, ("a health / armor pickup (type %d at %d, %d) is within one frame's reach (%d) of the "
+                               "exit box %r: hp_bar, inside the lvdone guard, would stay stale on the exit frame "
+                               "(issue #123 item 4)" % (t.type, t.x, t.y, reach, box))
+                margins["pickup"] = g if margins["pickup"] is None else min(margins["pickup"], g)
+    return margins
 
 
 # M7 P6+P7 package E (the owner, 2026-10-05: "maybe run 2 ticks each time?"): the frame's MONSTER WORLD runs
@@ -1847,7 +1903,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
         # M7 P6: a standing barrel records too (radius class aimcode.RC_BARREL)
         _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar))
-        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar))]
+        # issue #119 items 4 and 7: table_text runs the leaf's emit-time proofs (the MINZ order, every box >= 1 column;
+        # a barrel's bound needs its standing frame from the sprite wad)
+        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar), sprite_wad=sprite_wad)]
     else:
         _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
@@ -1886,7 +1944,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert _proj and _p31.get("nmob"), (
             "M7 P5: MONSTER_MODE 'full' needs p31_parts' pools and mobile rows -- a map with monsters, the game tier")
         from doomfj.hurtcode import hurt_parts
-        _w5 = _p31["world"]
+        # issue #121 F7: reset a COPY -- p31_parts' World stays as p31_parts left it (World.reset only rebinds the
+        # copy's attributes: `ws`, the tic count, the events, the door scene), so no reader of _p31["world"] sees a
+        # state the parts were not built from
+        import copy as _copy
+        _w5 = _copy.copy(_p31["world"])
         _w5.reset(BOOT_SKILL)
         # boot_wad: the asset wad, whose palette 0 the boot sends as `palette` -- hurtcode asserts playpal0 equals it
         _hrt = hurt_parts(_w5, sprite_wad=sprite_wad, boot_wad=asset_wad,
@@ -3040,6 +3102,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # skips itself while `lvdone`), then the bar's health and armor from what the frame's damage left (inside the
     # same guard: a frozen level changes neither)
     _wt_pools = p5_tic_lines(_hrt, barrels=bool(_bar)) if _hrt else []      # M7 P6: + the barrels' phase
+    if _hrt and _exit:                     # issue #123 item 4: the bar inside the lvdone guard is never stale
+        assert_exit_frame_bar(map_wad, mapname, _exit)
     # M7 P6+P7 E: the monsters' world (the monster tic and the pools) world.MONSTER_TICS_PER_FRAME times a frame
     pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which

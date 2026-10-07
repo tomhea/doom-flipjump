@@ -58,14 +58,14 @@ from typing import Dict, List, Sequence
 from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.lut_generator import generate_dispatch_table_fj
+# issue #121 item 11: the damagecount cap and the palette ranges are the MODEL's (combat: P_DamageMobj, st_stuff.c's
+# ST_doPaletteStuff), imported -- not restated (re-exported: hurtcode.DC_CAP etc. keep their readers)
+from doomfj.combat import DC_CAP, NUMBONUSPALS, NUMREDPALS, STARTBONUSPALS, STARTREDPALS  # noqa: F401
 
 # the player modes whose monsters HURT the player (world.PLAYER_MODES; "fx" arrives with agent A's model work)
 HURT_PLAYER_MODES = ("fx", "full", "final")      # M7 P8a: "final" is "full" and more
 DP_MAX = 155                        # the largest damage dp_go takes: damagecount + dmg stays one byte
-DC_CAP = 100                        # P_DamageMobj: damagecount capped at 100
-STARTREDPALS, NUMREDPALS = 1, 8     # st_stuff.c
 NPALETTES = STARTREDPALS + NUMREDPALS          # playpal0 .. playpal8: the game palette and the red ones (P5)
-STARTBONUSPALS, NUMBONUSPALS = 9, 4             # st_stuff.c: the pickup flash, palettes 9 .. 12 (M7 P6)
 NPALETTES_LOOT = STARTBONUSPALS + NUMBONUSPALS  # playpal0 .. playpal12 (lootcode: the "full" player)
 # (cell, schema field, nibbles): the player's hurt cells (world.build_schema's widths, asserted in hurt_decls)
 CELLS = (("p_hp", "p_health", 3), ("p_ar", "p_armor", 2), ("p_at", "p_armortype", 1), ("p_dc", "p_damagecount", 2),

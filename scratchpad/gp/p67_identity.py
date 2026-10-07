@@ -1,6 +1,6 @@
 """p67_identity.py -- M7 P6/P7 (agent A): the oracle's new opt-in keywords keep every existing picture.
 
-    python scratchpad/gp/p67_identity.py [--run R2-barrel-hall] [--frames 60] [--ref m7-p67]
+    python scratchpad/gp/p67_identity.py [--run R2-barrel-hall] [--frames 60] [--ref f8dc9e8]
 
 p5_mobiles_identity.py's proof for P6's keywords (docs/gp-p67-interface.md 4.1, 5): one run of the frozen set v5 is
 replayed on the FULL model (scenarios_v2: the set's own replay, its poses checked against the file) and, at the last
@@ -29,11 +29,14 @@ for _q in (ROOT / "src", HERE):
         sys.path.insert(0, str(_q))
 
 import scenarios_v2 as S                                                     # noqa: E402
-from p5_mobiles_identity import phase_of                                    # noqa: E402
+from p5_mobiles_identity import base_render_kw, phase_of                    # noqa: E402
 from doomfj.monsters import MonsterViews                                     # noqa: E402
-from doomfj.reference_model import GAME_RENDER_KW, SimState, build_scene    # noqa: E402
+from doomfj.reference_model import SimState, build_scene                    # noqa: E402
 
-BASE_REF = "m7-p67"
+# issue #121 item 15 (the same fault as p5_mobiles_identity's): the UNMODIFIED oracle is P6+P7's merge-base on main --
+# f8dc9e8, the merge of #120 (= 3fab6c1^1, the commit #122 merged onto), whose oracle has no P6 keyword. It was
+# "m7-p67", the PR's own head (the signature assert below fails there)
+BASE_REF = "f8dc9e8"
 
 
 def old_oracle_module(ref: str):
@@ -55,7 +58,8 @@ def old_oracle_module(ref: str):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--file", default=str(ROOT / "scratchpad/gp/scenarios/combat_scenarios_v5.json"))
+    # issue #121 item 15: v6, the standing frozen set (v5 no longer replays on the model: "the replay left the set")
+    ap.add_argument("--file", default=str(ROOT / "scratchpad/gp/scenarios/combat_scenarios_v6.json"))
     ap.add_argument("--run", default="R2-barrel-hall")     # barrels, a drop and a removal in view
     ap.add_argument("--frames", type=int, default=60)
     ap.add_argument("--ref", default=BASE_REF)
@@ -74,6 +78,7 @@ def main(argv=None) -> int:
     src = (ROOT / "src/doomfj/reference_model.py").read_text(encoding="utf-8")
     assert "barrel_views" in src.split("def render_wall_frame")[1].split(")")[0], "this tree has no P6 keywords"
     rm_old = old.ReferenceModel(GAME_CFG)
+    GKW = base_render_kw(rm_old)
     mv = MonsterViews(rm_new, w.mw, w.mapname, art, w)
     ph = phase_of(w)
     first = len(run["keys"]) - a.frames
@@ -93,12 +98,12 @@ def main(argv=None) -> int:
         mobs = ph.mobiles()
         p5mobs = [m for m in mobs if len(m) == 3]
         kw = dict(sprite_wad=art, thing_views=mv(ph, ws.px, ws.py), thing_positions=mv.positions(ph))
-        p_old = bytes(rm_old.render_wall_frame(st, sc, mobiles=p5mobs, **kw, **GAME_RENDER_KW))
-        p_new = bytes(rm_new.render_wall_frame(st, sc, mobiles=p5mobs, **kw, **GAME_RENDER_KW))
+        p_old = bytes(rm_old.render_wall_frame(st, sc, mobiles=p5mobs, **kw, **GKW))
+        p_new = bytes(rm_new.render_wall_frame(st, sc, mobiles=p5mobs, **kw, **GKW))
         p_empty = bytes(rm_new.render_wall_frame(st, sc, mobiles=p5mobs, barrel_views={}, thing_removed=[],
-                                                 **kw, **GAME_RENDER_KW))
+                                                 **kw, **GKW))
         p_p6 = bytes(rm_new.render_wall_frame(st, sc, mobiles=mobs, barrel_views=mv.barrel_views(ph),
-                                              thing_removed=mv.hidden(ph), **kw, **GAME_RENDER_KW))
+                                              thing_removed=mv.hidden(ph), **kw, **GKW))
         n += 1
         same += p_old == p_new == p_empty
         d = sum(x != y for x, y in zip(p_p6, p_new))

@@ -261,6 +261,7 @@ def fireball_momentum_table(rm) -> List[Tuple[int, int]]:
 # M7 P5: THE PALETTE (st_stuff.c ST_doPaletteStuff, Chocolate Doom) -- the PLAYPAL index the frame is shown with
 STARTREDPALS, NUMREDPALS = 1, 8             # the damage flash: palettes 1..8
 STARTBONUSPALS, NUMBONUSPALS = 9, 4         # the pickup flash: palettes 9..12
+DC_CAP = 100                                # P_DamageMobj: player->damagecount capped at 100 (hurtcode imports it)
 # (RADIATIONPAL 13: pw_ironfeet -- E1M1 holds no radiation suit, and the schema no powers[pw_ironfeet])
 
 
@@ -925,7 +926,7 @@ class CombatMixin:
         # off on E1M1 (no monster attack reaches a barrel) -- and "the player himself" turns nothing, like sector
         # damage's NULL: both are 0
         ws.p_attacker = source[1] + 1 if source[0] == "mon" else 0
-        ws.p_damagecount = min(100, ws.p_damagecount + dmg)
+        ws.p_damagecount = min(DC_CAP, ws.p_damagecount + dmg)
         ws.p_health -= dmg
         ev.player_hurt.append((source, raw, dmg))
         if ws.p_health <= 0:

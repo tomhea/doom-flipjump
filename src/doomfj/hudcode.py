@@ -117,7 +117,7 @@ def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_r
         out += ["hff_end:"]
     # the full redraw: the static columns, and every shadow stale
     out += ["hex.if0 1, hud_full, hud_slots"]
-    for x in range(160):
+    for x in range(hud.SCREEN_W):
         if x not in owned_cols:
             out += _bar_record(x, hud.bar_column(colours, x), view_rows)
     out += [f"hex.set {len(slots)}, hud_s, {sum(SHADOW_STALE << (4 * i) for i in range(len(slots)))}",

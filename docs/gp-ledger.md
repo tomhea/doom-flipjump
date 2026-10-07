@@ -633,7 +633,8 @@ heat_blocked27_p31 regenerated, its groups identical (the pool reads only those)
 4. CAP-22 on v4 (14,447,782); size 28.65%; msframe recorded (NOT SEPARATED).
 5. pinreport 20 of 20 with `heat_blocked27_p31`; the restore sets re-keyed (`p31_rekey.log`).
 
-**Row**: (filled after the build)
+**Row**: the table above (blocked40). This line was the declaration's placeholder, left behind when the row was
+written above it (issue #119 item 11).
 
 
 ## P3.2a wake (class F) -- declared 2026-09-30, before blocked41's build

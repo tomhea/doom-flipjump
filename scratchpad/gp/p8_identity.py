@@ -37,6 +37,23 @@ BASE_REF = "3fab6c1"                 # main, P6 + P7 merged (m7-extras' base): a
 DROPS = (1, 17, 34, 35)
 
 
+
+_BASE_KW = {}
+
+
+def _base_kw(rm_old) -> dict:
+    """GAME_RENDER_KW cut to the keywords the BASE oracle accepts (as p5_mobiles_identity.base_render_kw): keywords
+    newer than the base (P8a C's rt_rank / exempt_barrels) are dropped on BOTH sides, so the identity is "nothing
+    else moved since the base". The dropped keys are printed once."""
+    if id(rm_old) not in _BASE_KW:
+        import inspect
+        params = inspect.signature(rm_old.render_wall_frame).parameters
+        dropped = sorted(k for k in GAME_RENDER_KW if k not in params)
+        if dropped:
+            print("  GAME_RENDER_KW keywords newer than the base, dropped on both sides: %s" % dropped)
+        _BASE_KW[id(rm_old)] = {k: v for k, v in GAME_RENDER_KW.items() if k in params}
+    return _BASE_KW[id(rm_old)]
+
 def old_oracle_module(ref: str):
     """`reference_model.py` at `ref`, loaded as its own module (p67_identity's loader, without its P6 assert: the
     base here HAS P6's keywords) -- refused if it already knows `view_drop`"""
@@ -95,7 +112,7 @@ def main(argv=None) -> int:
         st = SimState(ws.px, ws.py, ws.pangle, w.mapname)
         kw = dict(sprite_wad=art, thing_views=mv(ph, ws.px, ws.py), thing_positions=mv.positions(ph),
                   mobiles=ph.mobiles(), barrel_views=mv.barrel_views(ph), thing_removed=mv.hidden(ph),
-                  **GAME_RENDER_KW)
+                  **_base_kw(rm_old))
         p_old = bytes(rm_old.render_wall_frame(st, sc, **kw))
         p_new = bytes(rm_new.render_wall_frame(st, sc, **kw))
         p_zero = bytes(rm_new.render_wall_frame(st, sc, view_drop=0, **kw))

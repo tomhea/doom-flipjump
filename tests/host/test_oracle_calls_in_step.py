@@ -67,7 +67,8 @@ CONTROL_TOOLS = frozenset({"scratchpad/gp/census_control.py"})
 # GAME_RENDER_KW cut to the keywords the old signature accepts (`base_render_kw`, which prints what it drops) -- the
 # same cut on both sides is the point, so they cannot pass the shared set itself; their claim is checked by their own
 # run (60/60 frames identical), not by this test
-IDENTITY_TOOLS = frozenset({"scratchpad/gp/p5_mobiles_identity.py", "scratchpad/gp/p67_identity.py"})
+IDENTITY_TOOLS = frozenset({"scratchpad/gp/p5_mobiles_identity.py", "scratchpad/gp/p67_identity.py",
+                            "scratchpad/gp/p8_identity.py"})
 
 
 def is_gate(rel: str, source: str) -> bool:

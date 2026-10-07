@@ -126,14 +126,14 @@ def census(drops=DEFAULT_DROPS, angles=8, per_class=2, mutate=None, quiet=False)
             for j in range(angles):
                 ang = (j * (1 << 32) // angles + 0x0123456) & 0xFFFFFFFF
                 st = SimState(x << 16, y << 16, ang, orc.mapname)
-                kw = dict(sprite_wad=orc.art, thing_hidden=set(orc.hidden), **GAME_RENDER_KW)
+                kw = dict(sprite_wad=orc.art, thing_hidden=set(orc.hidden))
                 cur.update(d=0, ang=ang)
-                base = bytes(rm.render_wall_frame(st, sc, **kw))
+                base = bytes(rm.render_wall_frame(st, sc, **kw, **GAME_RENDER_KW))
                 for d in drops:
                     cur["d"] = d
                     nframes += 1
                     try:
-                        fb = bytes(rm.render_wall_frame(st, sc, view_drop=d, **kw))
+                        fb = bytes(rm.render_wall_frame(st, sc, view_drop=d, **kw, **GAME_RENDER_KW))
                     except Exception as e:                       # noqa: BLE001 -- (1): ANY failure is the finding
                         errors.append((cls, s, d, ang, "%s: %s" % (type(e).__name__, e)))
                         continue

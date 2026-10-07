@@ -47,8 +47,9 @@ E1M1_WAD = ROOT / "tests" / "fixtures" / "freedoom_e1m1.wad"
 CFG = GAME_CFG
 DROPS = (0, 1, 17, 35)
 # the render tier's picture (tests/fj/test_lines_render.py's E1M1 keywords: the renderer's only behaviour)
-KW = dict(floor_texturing=False, wall_mode="W1R", floor_mode_ft1=True, wall_noise=True, plane_near=True, sky=True,
-          near_steps=True, stack_steps=True, bbox_cull=True, degrade=True)
+# (the forced keys -- sky, near_steps, stack_steps, bbox_cull, degrade -- are written at each call, where
+# tests/host/test_oracle_calls_in_step.py reads them)
+KW = dict(floor_texturing=False, wall_mode="W1R", floor_mode_ft1=True, wall_noise=True, plane_near=True)
 LIFT = 98
 
 
@@ -159,12 +160,15 @@ def _oracle(rig, x, y, a, d, mutate=None):
     if mutate == "bands_sunk":                     # DOOM's exact planes: the eye class itself sunk, no split
         rm.view_z = lambda f, _d=d: ReferenceModel.view_z(f) - (_d << 16)
         try:
-            return bytes(rm.render_wall_frame(st, rig["scene"], **KW))
+            return bytes(rm.render_wall_frame(st, rig["scene"], sky=True, near_steps=True, stack_steps=True, bbox_cull=True,
+                                          degrade=True, **KW))
         finally:
             del rm.view_z
     if mutate == "geo_standing":
-        return bytes(rm.render_wall_frame(st, rig["scene"], **KW))
-    return bytes(rm.render_wall_frame(st, rig["scene"], view_drop=d, **KW))
+        return bytes(rm.render_wall_frame(st, rig["scene"], sky=True, near_steps=True, stack_steps=True, bbox_cull=True,
+                                          degrade=True, **KW))
+    return bytes(rm.render_wall_frame(st, rig["scene"], view_drop=d, sky=True, near_steps=True, stack_steps=True,
+                                      bbox_cull=True, degrade=True, **KW))
 
 
 def test_the_sunk_eye_renders_as_the_oracle(rig):

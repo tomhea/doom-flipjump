@@ -203,6 +203,12 @@ def _pfx(mapname: str) -> str:
 THING_XORBY_FIELDS = (("sp_x", 8), ("sp_y", 8), ("sp_z", 8), ("sp_left", 8), ("sp_w", 8),
                       ("sp_hh", 8), ("sp_tzmax", 8), ("sp_tzmax2", 8), ("sp_mon", 2),
                       ("sp_base", 4), ("sp_base2", 4), ("sp_dw", 2), ("sp_lt", 2))
+# M7 P8a package C (D3 b, docs/gp-final-plan.md 1.3): bit 8 of frame.thing_record_body's `dsofts` -- the game tier at the
+# P8a player mode (world.compositor_d3, the emitter's `_D3`) passes DEG_SOFT_SCENERY | this, which switches on the
+# record's two `sp_ex` lines (a barrel: no soft raise, not counted); `hex.set 2` reads only the count's low byte. A
+# BAKED barrel's xor_by blocks carry ("sp_ex", 1, 1) on top of THING_XORBY_FIELDS (`_baked_barrel_site`) -- the
+# involution leaves it 0, and the runtime walk zeroes it after each record (sim.thing_pass_depth's `ex`)
+D3B_SOFT_FLAG = 0x100
 
 
 def _seg_xorby_block(label, fields, ret="xb_ret"):
@@ -1879,6 +1885,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _KNOCK = bool(_LOOT and _W8.knockback_on(PLAYER_MODE, MONSTER_MODE))      # K: P_DamageMobj's thrust, the knock
     _FIGHT = bool(_LOOT and _W8.infighting_on(MONSTER_MODE))                  # I: monsters fight monsters
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
+    _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
+    assert bool(_p31 and _p31.get("d3")) == _D3, "M7 P8a: p31_parts' compositor rules and the emitter's disagree"
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
                         loot=_LOOT) if menu else None                # M7 P6+P7: the latch, berserk's key 1 and fist
@@ -1977,6 +1985,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # keeps DEG_SOFT_MON (the hosted tiers' picture and deg_gate's visual tier do not move)
     from doomfj.reference_model import GAME_RENDER_KW as _GRK
     _DSOFTM = MONSTER_BUDGET if (_p31 and _GRK.get("exempt_actors")) else DEG_SOFT_MON
+    # M7 P8a (C, D3 b): the scenery soft count with D3B_SOFT_FLAG -- the barrels' exemption (`sp_ex`), `_D3` alone
+    _DSOFTS = DEG_SOFT_SCENERY | (D3B_SOFT_FLAG if _D3 else 0)
     _emit_baked_leaf = bool(moving_things and things_by_ss)
 
     def _thing_leaf_body(label, mt, aim_baked=False):
@@ -1990,7 +2000,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{proj}, {cfg.CENTERX}, "
                 f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
                 f"{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, "     # M7 P1.6: `hdb`
-                f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
+                f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {_DSOFTS}, "
                 f"{_DSOFTM}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
                 f"{DEG_SPR_LOWRES_H}, "
                 f"{DEG_SPR_NEAR_TZ * 0x10000}, "
@@ -2039,6 +2049,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 r = _p31["view_rows"][_p31["bar_view"][idx] - nt_]
                 fields = barrel_state_fields(tfields, r, tsec.floor_h,
                                              spr_cls[(rm.wall_lightnum(tsec.light, 0), max(1, r[2]))])
+            if _D3:                       # M7 P8a (C, D3 b): every state's block flags the barrel (D3B_SOFT_FLAG)
+                fields = list(fields) + [("sp_ex", 1, 1)]
             label = f"thing{tag}_consts" if k == 0 else f"thing{tag}_c{k}"
             xorby_blocks[f"T{tag}" if k == 0 else f"T{tag}_{k}"] = _seg_xorby_block(label, fields)
             stand = k < 2
@@ -3290,7 +3302,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # M7 P3.3 (D3 d): the game tier's walk draws a leaf's runtime things nearest first
                 f"sim.thing_pass{'_depth' if (_p31 and _p31.get('depth')) else ''} throw, {_MT_NTH}, thpos_rt, "
                 f"{_ANIM}, {_ANIM_SEL}, "
-                f"{'sp_lt_hi' if _ANIM else 0}",
+                f"{'sp_lt_hi' if _ANIM else 0}"
+                # M7 P8a (C): the 9-parameter walk -- D3 a's first rank-0 row, D3 b's barrel flag cleared per record
+                + (f", {_p31['rank0']}, 1" if _D3 else ""),
                 "stl.fret tp_ret"] if moving_things else []),
              # M7 P3.1: the row select and the rotation leaf it calls
              *((_p31["select"] + _p31["rotation"] + list(_p31.get("leaves", ()))) if _p31 else []),

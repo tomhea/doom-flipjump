@@ -330,6 +330,12 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     # and the damage leaves call kb_go; each slot's turn opens on the knock move's splice point. Off in "full"
     from doomfj.world import knockback_on
     knock = loot and knockback_on(player, mode)
+    # M7 P8a package C (docs/gp-final-plan.md 1.3; world.compositor_d3): THE COMPOSITOR RULES -- D3 a, the depth walk's
+    # RANK (rank_threshold: the effects and the drops first), and D3 b, the barrels' soft exemption (`sp_ex`, set by a
+    # runtime barrel's row select here and by a baked barrel's xor_by blocks in wall_renderer). Off in "full"
+    from doomfj.world import compositor_d3
+    d3 = loot and compositor_d3(player)
+    assert not d3 or depth, "M7 P8a: D3 a ranks the depth walk -- a mode that walks no depth cannot take it"
     mob_rows, mob_view = (mobile_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
                                            first=mob_first, puffs=loot) if nmob else ([], {}))
     rows = rows + mob_rows
@@ -447,7 +453,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     "    hex.zero w/4, sp_ti",
                     "    mview.lookup sp_ti, ts_idx"]
         if t in rt_bar:                      # M7 P6: a runtime barrel -- its state's view; aimed while it stands
-            sel += barrel_select_lines(t, rt_bar[t], nmon=nmon, shoot=shoot)
+            sel += barrel_select_lines(t, rt_bar[t], nmon=nmon, shoot=shoot, ex=d3)
         sel.append("    stl.fret thsel_ret")
     sel += mobile_select_lines(nt, nmob, wake=wake, shoot=shoot)
     sel += drop_select_lines(nt + nmob, [drop_row[w.dropper[m]] for m in drop_slots], wake=wake, shoot=shoot)
@@ -541,6 +547,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             if depth:
                 extra["decls_wake"] += P33_DECLS
                 extra["depth"] = True
+                if d3:                         # M7 P8a (C): the rank's register and the barrel flag
+                    extra["decls_wake"] += D3_DECLS
             extra["chase"] = dict(
                 static_things=things, lift_walk=list(w.lift_walk), lift_order=list(w.lift_order),
                 mon_door_boxes=[(si, w.mon_door_boxes[si]) for si in w.door_order if si in w.mon_door_boxes],
@@ -554,6 +562,18 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             assert len(set(w.mon_height[:nmon])) == 1, "one monster height: try_move_mon takes it at compile time"
     if knock:
         extra["knock"] = True          # M7 P8a: the emitter asserts its own `_KNOCK` agrees
+    if d3:
+        # M7 P8a (C): the emitter asserts its own `_D3` agrees, passes `rank0` to sim.thing_pass_depth (D3 a) and the
+        # scenery soft flag to frame.thing_record_body (D3 b). The rank rides bit 15 of the aprox key: every key the
+        # walk can form -- two points of the map -- is <= the map's width + height (P_AproxDistance <= |dx| + |dy|)
+        _vx = [v.x for v in map_wad.vertexes(mapname)]
+        _vy = [v.y for v in map_wad.vertexes(mapname)]
+        assert (max(_vx) - min(_vx)) + (max(_vy) - min(_vy)) < 0x8000, (
+            "M7 P8a (D3 a): an aprox key may reach bit 15, where sim.rank_key puts the rank")
+        from doomfj.world import FIREBALL_POOL, FX_POOL
+        assert nmob == FIREBALL_POOL + FX_POOL, (nmob, "the rank's row ranges are the P5 pools'")
+        extra["d3"] = True
+        extra["rank0"] = rank_threshold(nt)
     return {
         "mode": mode, **extra,
         "view_rows": rows, "nrows": nrows, "views": views, "rt_slot": rt_slot, "nmon": nmon, "schema": schema,
@@ -688,10 +708,12 @@ def barrel_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
     return rows, by_state
 
 
-def barrel_select_lines(t: int, b: int, *, nmon: int, shoot: bool) -> list:
+def barrel_select_lines(t: int, b: int, *, nmon: int, shoot: bool, ex: bool = False) -> list:
     """runtime thing t, barrel b: the row of its state (`barview` on bar_st); while it STANDS (S_BAR1 / S_BAR2 --
     `combat.shootable_targets`' state != 0 and health > 0: the killing blow takes S_BEXP) its aim id 1 + nmon + b and
-    the barrel's radius class. A removed barrel is in no list, so its stub never runs at state 0."""
+    the barrel's radius class. A removed barrel is in no list, so its stub never runs at state 0.
+    M7 P8a (C, D3 b) `ex`: in every state the stub SETS `sp_ex` -- the barrel flag frame.thing_record_body's soft test
+    and count read (no soft raise, not counted); sim.thing_pass_depth (its `ex`) zeroes it after the record"""
     from doomfj.aimcode import RC_BARREL
     from doomfj.barrelcode import barrel_states
     stand = [gd.STATE_INDEX[s] for s in barrel_states()[:2]]
@@ -708,7 +730,8 @@ def barrel_select_lines(t: int, b: int, *, nmon: int, shoot: bool) -> list:
                 "    hex.set 2, sp_sid, %d" % (1 + nmon + b),
                 "    hex.set 1, sp_rc, %d" % RC_BARREL,
                 "  %s_v:" % L]
-    return out + ["    hex.zero w/4, sp_ti", "    barview.lookup sp_ti, bar_st + %d*dw" % (2 * b)]
+    return out + (["    hex.set 1, sp_ex, 1"] if ex else []) + [
+        "    hex.zero w/4, sp_ti", "    barview.lookup sp_ti, bar_st + %d*dw" % (2 * b)]
 
 
 def drop_select_lines(first: int, rows: Sequence[int], *, wake: bool, shoot: bool) -> list:
@@ -1189,6 +1212,20 @@ def depth_walk(mode: str, order=None) -> bool:
 P33_DECLS = (["td_%s: hex.vec w/4" % r for r in ("head", "e", "t", "p", "q", "best", "lt", "poff", "pbase", "pptr")]
              + ["td_pos: hex.vec 16", "td_bk: hex.vec 4", "td_lk: hex.vec 4", "td_have: hex.vec 1",
                 "td_first: hex.vec 1"])
+# M7 P8a package C (docs/gp-final-plan.md 1.3): the compositor rules' cells -- `td_rk` (D3 a: sim.thing_pass_depth's
+# first rank-0 row, SET at every multi-thing leaf before its rounds read it) and `sp_ex` (D3 b: the barrel flag, 1 from a
+# barrel's xor_by block or row select to its record, 0 everywhere else -- so 0 at every frame's end). Scratch, never
+# persisted
+D3_DECLS = ("td_rk: hex.vec 2", "sp_ex: hex.vec 1")
+
+
+def rank_threshold(nt: int) -> int:
+    """M7 P8a (C, D3 a): the first runtime row of RANK 0 -- the rows run [0, nt) the map's runtime things, then the
+    fireball pool (nt + s, s < FIREBALL_POOL), the fx pool (blood and puffs), the drops (`mobile_select_lines`,
+    `drop_select_lines`): rows >= nt + FIREBALL_POOL are the effects and the drops, drawn first in their leaf; the
+    oracle's `reference_model.mobile_rank` names the same pools by their lumps"""
+    from doomfj.world import FIREBALL_POOL
+    return nt + FIREBALL_POOL
 
 
 def p32a_leaves() -> list:

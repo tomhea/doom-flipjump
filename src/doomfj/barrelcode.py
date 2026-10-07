@@ -244,10 +244,14 @@ def damage_lines(nbar: int) -> List[str]:
         "    stl.fret bd_ret"]
 
 
-def blast_lines(w, *, slot_rt: Sequence[int]) -> List[str]:
+def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False) -> List[str]:
     """`bl_leaf` (stl.fcall bl_leaf, bl_ret; bl_b, bl_px, bl_py the barrel) -- the player, then the monster slots --
-    and its shared pieces `bl_dist`, `bl_mon`. The other barrels are the caller's static chain."""
+    and its shared pieces `bl_dist`, `bl_mon`. The other barrels are the caller's static chain. `knock` (M7 P8a,
+    world.knockback_on; doomfj.knockcode): THE BARREL is the inflictor (kb_on, kb_ix / kb_iy = bl_px / bl_py) of
+    every damage the blast deals -- set before dp_go and before each slot's dmg<m> (each damage leaf zeroes kb_on)"""
     from doomfj.combat import BOMB_DAMAGE, PLAYER_R
+    from doomfj.knockcode import inflictor_lines
+    kb = inflictor_lines("bl_px", "bl_py") if knock else []
     from doomfj.damagecode import BLAST
     from doomfj.monstercode import cell_nibbles
     n = w.layout.nmon
@@ -276,6 +280,7 @@ def blast_lines(w, *, slot_rt: Sequence[int]) -> List[str]:
            "    stl.fcall bl_los, bl_lret",
            "    hex.if1 1, sl_hit, bl_mons",
            "    hex.mov 2, dp_dmg, bl_dmg",
+           *kb,                                                             # M7 P8a: the barrel inflicts
            "    stl.fcall dp_go, dp_ret",
            # 2. the monsters by slot: active, shootable, health > 0
            "  bl_mons:"]
@@ -292,6 +297,7 @@ def blast_lines(w, *, slot_rt: Sequence[int]) -> List[str]:
                 "    stl.fcall bl_mon%d, blm_ret" % r,
                 "    hex.if0 1, bl_ok, %sn" % L,
                 "    hex.mov 2, dm_dmg, bl_dmg", "    hex.set 1, dm_melee, %d" % BLAST,
+                *kb,                                                        # M7 P8a: the barrel inflicts
                 "    stl.fcall dmg%d, dm_ret" % m,
                 "  %sn:" % L]
     out += ["    stl.fret bl_ret"]
@@ -487,7 +493,8 @@ def restart_lines(w, skill: int, *, nt: int) -> List[str]:
 
 
 def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills: Sequence[int] = (),
-                 barrel_rt: Dict[int, int] = None, exit_guard: bool = True, barrel_vis: Dict[int, int] = None) -> dict:
+                 barrel_rt: Dict[int, int] = None, exit_guard: bool = True, barrel_vis: Dict[int, int] = None,
+                 knock: bool = False) -> dict:
     """everything package C's sim adds, for the World `w` (the player mode "full"):
       * `decls`: the cells at `boot_skill`'s level start, the scratch, the LOS entry's registers;
       * `lines`: bar_phase / bar_next, bdm<c> / bd_leaf, bl_leaf / bl_mon / bl_dist, monstersight's bl_los, dmb<b> /
@@ -511,7 +518,7 @@ def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills:
     return {"decls": decls(w, boot_skill),
             "lines": (phase_lines(w, barrel_rt=barrel_rt, exit_guard=exit_guard, barrel_vis=barrel_vis)
                       + damage_lines(len(spots))
-                      + blast_lines(w, slot_rt=slot_rt) + blast_los_lines(w, spots, maxr) + shot_lines(w)
+                      + blast_lines(w, slot_rt=slot_rt, knock=knock) + blast_los_lines(w, spots, maxr) + shot_lines(w)
                       + drop_lines(w, nt=nt, slot_rt=slot_rt)),
             "tables": tables_fj(),
             "restart": [restart_lines(w, sk, nt=nt) for sk in skills],

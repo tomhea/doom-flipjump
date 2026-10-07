@@ -143,10 +143,10 @@ def control(name: str | None):
     if name == "armor":                          # damage ignores the armor
         orig = CM.damage_player
 
-        def no_armor(self, dmg, source, ev):
+        def no_armor(self, dmg, source, inflictor, ev):
             at = self.ws.p_armortype
             self.ws.p_armortype = 0
-            orig(self, dmg, source, ev)
+            orig(self, dmg, source, inflictor, ev)
             if not self.ws.p_dead:
                 self.ws.p_armortype = at
         patch(CM, "damage_player", no_armor)

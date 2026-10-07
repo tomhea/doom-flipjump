@@ -231,7 +231,7 @@ def control(name: str | None):
             if self.player_alive():
                 d = dist(ws.px, ws.py, C.PLAYER_R)
                 if d < C.BOMB_DAMAGE and self.los_points((ws.px, ws.py), spot):
-                    self.damage_player(C.BOMB_DAMAGE - d, ("bar", b), ev)
+                    self.damage_player(C.BOMB_DAMAGE - d, ("bar", b), ("bar", b), ev)
             for m in range(self.layout.nmon):
                 if not (ws.mon_active[m] and ws.mon_shootable[m] and ws.mon_health[m] > 0):
                     continue
@@ -239,7 +239,7 @@ def control(name: str | None):
                 d = dist(p[0], p[1], self.mon_radius[m])
                 if d < C.BOMB_DAMAGE and self.los_points(p, spot):
                     ev.hits.append(("barrel", "mon", m, C.BOMB_DAMAGE - d))
-                    self.damage_monster(m, C.BOMB_DAMAGE - d, ("player", -1), ev)
+                    self.damage_monster(m, C.BOMB_DAMAGE - d, ("player", -1), ("bar", b), ev)
             for c_, tc in enumerate(self.barrel_things):
                 if c_ == b or not ws.bar_state[c_] or ws.bar_health[c_] <= 0:
                     continue
@@ -247,15 +247,15 @@ def control(name: str | None):
                 d = dist(p[0], p[1], C.BARREL_R)
                 if d < C.BOMB_DAMAGE and self.los_points(p, spot):
                     ev.hits.append(("barrel", "bar", c_, C.BOMB_DAMAGE - d))
-                    self.damage_barrel(c_, C.BOMB_DAMAGE - d, ev)
+                    self.damage_barrel(c_, C.BOMB_DAMAGE - d, ("player", -1), ev)
         patch(CM, "_radius_attack", ra)
     elif name == "barrel_pain_draw":             # a non-lethal hit on a barrel draws nothing
         orig_db = CM.damage_barrel
 
-        def db(self, b, dmg, ev):
+        def db(self, b, dmg, source, ev):
             r = self.ws.rng_world
             alive = self.ws.bar_state[b] and self.ws.bar_health[b] > 0
-            orig_db(self, b, dmg, ev)
+            orig_db(self, b, dmg, source, ev)
             if alive and self.ws.bar_health[b] > 0:
                 self.ws.rng_world = r
         patch(CM, "damage_barrel", db)

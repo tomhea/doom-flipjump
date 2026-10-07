@@ -306,7 +306,10 @@ class CombatMixin:
         self._p_resolve = W.player_resolves(self.player)
         self._p_noise = W.player_hears(self.player)
         self._p_fx = W.player_bleeds(self.player)
-        self._p_full = self.player == "full"
+        self._p_full = W.player_loots(self.player)            # "full", and M7 P8a's "final" after it
+        # M7 P8a (docs/gp-final-plan.md 3.0): P_DamageMobj's THRUST (`_thrust`) and P_XYMovement (`_xy_move`) are
+        # knockback_on's -- off in every mode before P8a, so "full" is the v6 model untouched
+        self._p_knock = W.knockback_on(self.player, self.monsters)
         self.sites = Sites(rm)
         self.aim_centre = rm.angle_to_x(0)
         self.aim_lo, self.aim_hi = aim_window(rm, self.sites)
@@ -467,7 +470,7 @@ class CombatMixin:
         if floorz != self.secs_c[sec].floor_h:
             return                               # "Falling, not all the way down yet?"
         ev.nukage += 1
-        self.damage_player(dmg, ("sector", sec), ev)
+        self.damage_player(dmg, ("sector", sec), None, ev)       # no inflictor: sector damage thrusts nothing
 
     def _weapon_keys(self, keys: dict) -> None:
         """P_PlayerThink's BT_CHANGE: the lowest held number key names the weapon."""
@@ -750,9 +753,9 @@ class CombatMixin:
             self._spawn_fx_at_target("puff" if kind == "bar" else "blood", x, y, dmg,
                                      weapon == "fist", ev)
         if kind == "mon":
-            self.damage_monster(i, dmg, ("player", -1), ev)
+            self.damage_monster(i, dmg, ("player", -1), ("player", -1), ev)   # the shooter is the inflictor
         else:
-            self.damage_barrel(i, dmg, ev)
+            self.damage_barrel(i, dmg, ("player", -1), ev)
         ev.hits.append((weapon, kind, i, dmg))
 
     def _target_xy(self, tgt) -> Tuple[int, int]:
@@ -840,13 +843,20 @@ class CombatMixin:
         return None if best is None else best[1]
 
     # -------------------------------------------------------------------------------- damage
-    def damage_monster(self, m: int, dmg: int, source, ev) -> None:
-        """P_DamageMobj on a monster (no knockback): health; death; the pain roll on the monster's
-        stream; reactiontime 0; and, when its threshold is 0, the target switch to the player --
-        which wakes a monster still in its spawn state (into the see state, D-WAKE: no A_Chase)."""
+    # M7 P8a (docs/gp-final-plan.md 3.0, G-B3): P_DamageMobj(target, INFLICTOR, SOURCE, damage). Both name a thing as
+    # a tuple: ("player", -1), ("mon", slot), ("bar", barrel), ("proj", fireball slot) -- the inflictor is what HIT
+    # (the shooter for hitscan and melee, the MISSILE for a fireball, the BARREL for a blast), the source who is to
+    # blame (the shooter; a fireball's shooter; a blast's -- the player until package I's `bar_src`). None: no
+    # inflictor (sector damage, a gate's or a test's poke) -- DOOM's NULL, which thrusts nothing.
+    def damage_monster(self, m: int, dmg: int, source, inflictor, ev) -> None:
+        """P_DamageMobj on a monster: (M7 P8a, knockback_on: the THRUST from the inflictor, `_thrust`) health; death;
+        the pain roll on the monster's stream; reactiontime 0; and, when its threshold is 0, the target switch to
+        the player -- which wakes a monster still in its spawn state (into the see state, D-WAKE: no A_Chase)."""
         ws = self.ws
         if not ws.mon_shootable[m] or ws.mon_health[m] <= 0:
             return
+        if self._p_knock:                         # M7 P8a: DOOM's order -- the thrust, then the health
+            self._thrust(("mon", m), inflictor, source, dmg)
         ws.mon_health[m] -= dmg
         if ws.mon_health[m] <= 0:
             self._kill_monster(m, ev)
@@ -876,9 +886,11 @@ class CombatMixin:
             ws.mon_drop[m] = 1
         ev.kills.append(("mon", m, "gib" if gib else "death"))
 
-    def damage_barrel(self, b: int, dmg: int, ev) -> None:
+    def damage_barrel(self, b: int, dmg: int, source, ev) -> None:
         """P_DamageMobj on a barrel: the killing blow starts S_BEXP with its tics roll; otherwise
-        its pain roll (painchance 0) is drawn and never fires."""
+        its pain roll (painchance 0) is drawn and never fires. M7 P8a: `source` (the damage_monster tuple) is what
+        package I's `bar_src` records -- the FIRST thing that damaged the barrel; no inflictor (barrels are not
+        pushed: O-B1)."""
         ws = self.ws
         if not ws.bar_state[b] or ws.bar_health[b] <= 0:
             return
@@ -891,13 +903,16 @@ class CombatMixin:
             return
         self._roll("rng_world", self.sites.pain[BARREL_INFO.painchance])
 
-    def damage_player(self, dmg: int, source, ev) -> None:
-        """P_DamageMobj on the player: armor (green saves 1/3, blue 1/2), the damage flash, health
-        (`p_health` is the thing's health: the killing blow can take it below 0, and the HUD shows
-        max(0, p_health) as DOOM's player->health), death, else the pain roll."""
+    def damage_player(self, dmg: int, source, inflictor, ev) -> None:
+        """P_DamageMobj on the player: (M7 P8a, knockback_on: the THRUST from the inflictor, `_thrust`, with the RAW
+        damage) armor (green saves 1/3, blue 1/2), the damage flash, health (`p_health` is the thing's health: the
+        killing blow can take it below 0, and the HUD shows max(0, p_health) as DOOM's player->health), death, else
+        the pain roll."""
         ws = self.ws
         if ws.p_dead or ws.p_health <= 0:
             return
+        if self._p_knock:                         # M7 P8a: DOOM's order -- the thrust, then the armor
+            self._thrust(("player", -1), inflictor, source, dmg)
         raw = dmg
         if ws.p_armortype:
             saved = dmg // 3 if ws.p_armortype == 1 else dmg // 2
@@ -930,6 +945,23 @@ class CombatMixin:
         v = self._roll("rng_player", self.sites.tics_roll)
         ws.p_mobj_tics = max(1, ws.p_mobj_tics - v)
         ev.deaths += 1
+
+    # -------------------------------------------------------------------------------- M7 P8a hooks (package K)
+    def _thrust(self, target, inflictor, source, dmg: int) -> None:
+        """M7 P8a HOOK (docs/gp-final-plan.md 1.2.2, package K): P_DamageMobj's thrust -- called by damage_monster /
+        damage_player after their "not shootable / dead" return and BEFORE anything else (the armor, the health),
+        only when knockback_on (`_p_knock`). `target` ("player", -1) or ("mon", slot); `inflictor` / `source` the
+        damage tuples (None: no thrust); `dmg` the RAW damage. K fills it: the chainsaw's exception, the angle
+        inflictor -> target, dmg * (FRACUNIT >> 3) * 100 // mass, the reversal's coin on the target's stream, the
+        momentum (p_momx / mon_momx). Empty until then: no draw, no write"""
+        return None
+
+    def _xy_move(self, thing, ev) -> None:
+        """M7 P8a HOOK (docs/gp-final-plan.md 1.2.2, package K): P_XYMovement for `thing` ("player", -1) or ("mon",
+        slot) -- the MAXMOVE clamp, the halving tries, FRICTION / STOPSPEED, the corpse rule. Declared, called by
+        nobody yet (K adds `_player_knock_move` after the walk and `world._monster_knock_move` in `_monsters_phase`,
+        both only when knockback_on)"""
+        return None
 
     # -------------------------------------------------------------------------------- monsters
     def _monster_attack(self, m: int, action: str, ev) -> None:
@@ -973,7 +1005,7 @@ class CombatMixin:
     def _mon_melee(self, m: int, site, ev) -> None:
         dmg = self._roll("mon_rng", site, m)
         ev.mon_melee.append((m, dmg))
-        self.damage_player(dmg, ("mon", m), ev)
+        self.damage_player(dmg, ("mon", m), ("mon", m), ev)
 
     def _mon_hitscan(self, m: int, bullets: int, ev) -> None:
         """A_PosAttack / A_SPosAttack: one aim (sight and range), then each bullet's spread against
@@ -986,7 +1018,7 @@ class CombatMixin:
             hit = seen and dist < MISSILERANGE_U and abs(spread) <= self.hwt[dist >> HWT_SHIFT]
             ev.mon_shots.append((m, spread, dmg, hit))
             if hit:
-                self.damage_player(dmg, ("mon", m), ev)
+                self.damage_player(dmg, ("mon", m), ("mon", m), ev)
 
     # -------------------------------------------------------------------------------- fireballs
     def _mobile_proj(self, s: int) -> int:
@@ -1055,7 +1087,7 @@ class CombatMixin:
             if abs(ws.px - nx) < bd and abs(ws.py - ny) < bd:
                 dmg = self._roll("rng_fx", self.sites.fireball_hit)
                 ev.proj_impacts.append((s, dmg))
-                self.damage_player(dmg, ("mon", ws.proj_src[s]), ev)
+                self.damage_player(dmg, ("mon", ws.proj_src[s]), ("proj", s), ev)   # the MISSILE inflicts
                 return False
         if self.missile_lines_block(nx, ny):
             ev.proj_walls.append(s)
@@ -1191,7 +1223,7 @@ class CombatMixin:
         if self.player_alive():
             d = dist(ws.px, ws.py, PLAYER_R)
             if d < BOMB_DAMAGE and self.los_points((ws.px, ws.py), spot):
-                self.damage_player(BOMB_DAMAGE - d, ("bar", b), ev)
+                self.damage_player(BOMB_DAMAGE - d, ("bar", b), ("bar", b), ev)
         for m in range(self.layout.nmon):
             if not (ws.mon_active[m] and ws.mon_shootable[m] and ws.mon_health[m] > 0):
                 continue
@@ -1199,7 +1231,7 @@ class CombatMixin:
             d = dist(p[0], p[1], self.mon_radius[m])
             if d < BOMB_DAMAGE and self.los_points(p, spot):
                 ev.hits.append(("barrel", "mon", m, BOMB_DAMAGE - d))
-                self.damage_monster(m, BOMB_DAMAGE - d, ("player", -1), ev)
+                self.damage_monster(m, BOMB_DAMAGE - d, ("player", -1), ("bar", b), ev)   # the BARREL inflicts
         for c, tc in enumerate(self.barrel_things):
             if c == b or not ws.bar_state[c] or ws.bar_health[c] <= 0:
                 continue
@@ -1207,7 +1239,7 @@ class CombatMixin:
             d = dist(p[0], p[1], BARREL_R)
             if d < BOMB_DAMAGE and self.los_points(p, spot):
                 ev.hits.append(("barrel", "bar", c, BOMB_DAMAGE - d))
-                self.damage_barrel(c, BOMB_DAMAGE - d, ev)
+                self.damage_barrel(c, BOMB_DAMAGE - d, ("player", -1), ev)
 
     # -------------------------------------------------------------------------------- the move
     def _player_move(self, keys: dict, ev) -> None:
@@ -1306,9 +1338,10 @@ class CombatMixin:
         for m in range(self.layout.nmon):
             if ws.mon_drop[m] != 1:
                 continue
-            if abs((ws.mon_x[m] << 16) - x16) >= bd or abs((ws.mon_y[m] << 16) - y16) >= bd:
+            dx, dy = self.drop_pos(m)            # M7 P8a: the drop's own position (World.drop_pos)
+            if abs((dx << 16) - x16) >= bd or abs((dy << 16) - y16) >= bd:
                 continue
-            if self._touch(self.dropper[m], True, self._floor_at(ws.mon_x[m], ws.mon_y[m]), z):
+            if self._touch(self.dropper[m], True, self._floor_at(dx, dy), z):
                 ws.mon_drop[m] = 2
                 ev.pickups.append(("drop", m, self.dropper[m]))
 

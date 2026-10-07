@@ -16,9 +16,10 @@ MASK32 = 0xFFFFFFFF
 def mobile_rows(world) -> int:
     """M7 P5 (docs/gp-p5-interface.md): the runtime-thing rows the MOBILES add after the WAD's runtime things -- fireball
     slot s is row nt + s (s < FIREBALL_POOL), blood slot s row nt + FIREBALL_POOL + s -- in a world whose monsters
-    spawn fireballs ("full") or whose player's shots bleed (world.player_bleeds); 0 before P5"""
-    from doomfj.world import FIREBALL_POOL, FX_POOL, player_bleeds
-    return FIREBALL_POOL + FX_POOL if (world.monsters == "full" or player_bleeds(world.player)) else 0
+    spawn fireballs ("full", and M7 P8a's modes after it: world.monster_attacks_land) or whose player's shots bleed
+    (world.player_bleeds); 0 before P5"""
+    from doomfj.world import FIREBALL_POOL, FX_POOL, monster_attacks_land, player_bleeds
+    return FIREBALL_POOL + FX_POOL if (monster_attacks_land(world.monsters) or player_bleeds(world.player)) else 0
 
 
 def drop_rows(world) -> int:
@@ -391,10 +392,11 @@ class MonsterPhase:
                         "mon_justhit": tuple(ws.mon_justhit[:n])})
         if player_hears(self.world.player):                     # M7 P4.2b: who heard, who still waits in ambush
             out.update({"mon_ambush": tuple(ws.mon_ambush[:n]), "snd_alert": tuple(ws.snd_alert)})
-        if self.world.monsters == "full":                        # M7 P5: the attacks land -- hurtcode's player cells
+        from doomfj.world import monster_attacks_land
+        if monster_attacks_land(self.world.monsters):            # M7 P5: the attacks land -- hurtcode's player cells
             out.update(self.hurt_state())                        # and projcode's fireball pool
             out.update(self.proj_state())
-        if self.world.monsters == "full" or player_bleeds(self.world.player):   # M7 P5: the blood pool, its stream
+        if monster_attacks_land(self.world.monsters) or player_bleeds(self.world.player):   # M7 P5: the blood pool
             out.update(self.fx_state())
         from doomfj.world import player_loots, player_mortal
         if player_loots(self.world.player):                       # M7 P6: the loot, the barrels, the game cells
@@ -485,8 +487,8 @@ class MonsterPhase:
                 out.append((ws.fx_x[s] >> 16, ws.fx_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])))
         if drop_rows(self.world):
             for m in droppers(self.world):
-                if ws.mon_drop[m] == 1:
-                    out.append((ws.mon_x[m], ws.mon_y[m], drop_lump(self.world.dropper[m]), 0))
+                if ws.mon_drop[m] == 1:                 # M7 P8a: at the drop's own position (World.drop_pos)
+                    out.append((*self.world.drop_pos(m), drop_lump(self.world.dropper[m]), 0))
         return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:
@@ -580,7 +582,8 @@ class MonsterViews:
             # whole-unit row and its leaf (the monster's own), else (0, 0) -- and in no list
             for m in droppers(phase.world):
                 live = ws.mon_drop[m] == 1
-                thpos.append((((ws.mon_x[m] << 16) & M) | (((ws.mon_y[m] << 16) & M) << 32)) if live else 0)
+                dx, dy = phase.world.drop_pos(m)        # M7 P8a: the drop's own position (K: its leaf too)
+                thpos.append((((dx << 16) & M) | (((dy << 16) & M) << 32)) if live else 0)
                 thss.append(ws.mon_leaf[m] if live else 0)
             out = {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss), **self.vis_state(phase)}
         return out

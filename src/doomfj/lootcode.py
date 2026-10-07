@@ -59,7 +59,7 @@ from doomfj.lut_generator import generate_dispatch_table_fj
 
 M32 = 0xFFFFFFFF
 # the player modes whose player LOOTS (world.PLAYER_MODES): P6 + P7 ship as "full"
-LOOT_PLAYER_MODES = ("full",)
+LOOT_PLAYER_MODES = ("full", "final")      # M7 P8a: "final" is "full" and more
 # (cell, schema field, nibbles, ammo index or None): the persisted loot cells (section 4.5)
 CELLS = (("p_bc", "p_bonuscount", 2, None), ("p_str", "p_strength", 4, None), ("p_bp", "p_backpack", 1, None),
          ("am_misl", "p_ammo", 3, gd.AM_MISL), ("am_cell", "p_ammo", 3, gd.AM_CELL))

@@ -278,8 +278,13 @@ def _index_bits(n: int) -> int:
     return max(1, (n - 1).bit_length())
 
 
-def build_schema(lay: Layout) -> Tuple[Field, ...]:
-    """THE table of persistent cells. Order is the canonical order (digests, dumps, the probe)."""
+def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight: bool = False) -> Tuple[Field, ...]:
+    """THE table of persistent cells. Order is the canonical order (digests, dumps, the probe).
+
+    M7 P8a (docs/gp-final-plan.md 3.0 / 4.1): `sinks` (world.player_sinks), `knock` (knockback_on) and `fight`
+    (infighting_on) add each feature's cells -- phase "P8a", declared by package 0 and written by its package (A, K,
+    I) -- and `fight` widens `mon_target`. All three off (`p8a_schema` of any pre-P8a mode pair) is the schema every
+    frozen set's digests were recorded with, field for field and width for width."""
     from doomfj.things import LIST_MAX_THINGS
     assert lay.nmobile <= LIST_MAX_THINGS, "leaf lists store mobile index + 1 in a byte"
     fs: List[Field] = []
@@ -337,6 +342,14 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     # that landed (P_DamageMobj), as 0 (none: sector damage, or the player himself -- a barrel he set off) or
     # 1 + the monster slot; P_DeathThink turns the dead view toward it
     f("p_attacker", _index_bits(lay.nmon + 1), group="player", phase="P7", doc="0 or 1 + monster slot")
+    if sinks:   # M7 P8a A (docs/gp-final-plan.md 1.1): P_DeathThink's view drop
+        f("p_vdrop", 6, group="player", phase="P8a", label="p_vd",
+          doc="0..35: viewheight = 41 - it; +1 a death-think tic after the psprites, capped at 35; 0 at the level "
+              "start and the restart")
+    if knock:   # M7 P8a K (1.2.2): the player's KNOCK momentum (the walk stays the direct step it is)
+        f("p_momx", 32, signed=True, group="player", phase="P8a", label="p_kmx",
+          doc="16.16 a tic, the knock momentum; clamped to +-MAXMOVE when moved")
+        f("p_momy", 32, signed=True, group="player", phase="P8a", label="p_kmy", doc="16.16 a tic")
     # -- doors (existing DOOR_PERSIST, plus the monster press) ------------------------------------
     f("d_state", 4, count=lay.ndoor, group="door", phase="existing", label="dstate",
       doc="door stop index; doors in ascending sector order")
@@ -382,7 +395,11 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("mon_movecount", 5, count=n, signed=True, group="monster", doc="-1..15, saturates at -1")
     f("mon_reaction", 4, count=n, group="monster", doc="reactiontime")
     f("mon_threshold", 7, count=n, group="monster", doc="threshold, <= BASETHRESHOLD")
-    f("mon_target", 1, count=n, group="monster", doc="has a target (always the player)")
+    if fight:   # M7 P8a I (docs/gp-final-plan.md 1.2.2): a target names a thing
+        f("mon_target", _index_bits(n + 2), count=n, group="monster", phase="P8a",
+          doc="0 none, 1 the player, 2 + slot a monster")
+    else:
+        f("mon_target", 1, count=n, group="monster", doc="has a target (always the player)")
     f("mon_justattacked", 1, count=n, group="monster", doc="MF_JUSTATTACKED")
     f("mon_justhit", 1, count=n, group="monster", doc="MF_JUSTHIT (set by damage, S3b)")
     f("mon_ambush", 1, count=n, group="monster", doc="MF_AMBUSH (cleared by A_FaceTarget)")
@@ -392,6 +409,15 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("mon_seen", 1, count=n, group="monster", phase="P3",
       doc="drawn last frame: sight from the picture (plan section 5), written by the renderer")
     f("mon_drop", 2, count=n, group="monster", phase="S3b", doc="0 none, 1 dropped, 2 taken")
+    if knock:   # M7 P8a K (1.2.2, G-B2 / G-B5): momentum, the position's fraction, the drop's own position
+        f("mon_momx", 32, count=n, signed=True, group="monster", phase="P8a", label="mkx", doc="16.16 a tic")
+        f("mon_momy", 32, count=n, signed=True, group="monster", phase="P8a", label="mky", doc="16.16 a tic")
+        f("mon_fx", 16, count=n, group="monster", phase="P8a", label="mfx",
+          doc="the fraction of the 16.16 x (mon_x keeps the integer part: drawing, AI and collision read it)")
+        f("mon_fy", 16, count=n, group="monster", phase="P8a", label="mfy", doc="the fraction of the 16.16 y")
+        f("drop_x", 16, count=n, signed=True, group="monster", phase="P8a", label="thpos_rt",
+          doc="the slot's drop, whole units: the corpse's position AT THE KILL (fj: drop row nt + 10 + k)")
+        f("drop_y", 16, count=n, signed=True, group="monster", phase="P8a", label="thpos_rt", doc="map units")
     f("mon_leaf", leaf_bits, count=n, kind="derived", group="monster",
       doc="point location of (mon_x, mon_y)")
     # -- leaf lists -------------------------------------------------------------------------------
@@ -409,6 +435,9 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("proj_momx", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16 per tic")
     f("proj_momy", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16 per tic")
     f("proj_src", mon_bits, count=p, group="proj", phase="S3b", doc="shooter's monster slot")
+    if knock:   # M7 P8a K (1.2.2, G-B4): the missile's z for the thrust's reversal
+        f("proj_z", 16, count=p, signed=True, group="proj", phase="P8a", label="pj_z",
+          doc="the shooter's mon_floorz + 32 at the spawn (no gravity)")
     f("proj_leaf", leaf_bits, count=p, kind="derived", group="proj", phase="S3b",
       doc="point location")
     # -- puff/blood pool (S3b) --------------------------------------------------------------------
@@ -428,6 +457,9 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("bar_health", 8, count=lay.nbarrel, signed=True, group="barrel", phase="S3b",
       doc="health (20 at spawn)")
     f("bar_solid", 1, count=lay.nbarrel, group="barrel", phase="S3b", doc="blocks things")
+    if fight:   # M7 P8a I (1.2.2, G-I7): the blast's source
+        f("bar_src", _index_bits(lay.nmon + 2), count=lay.nbarrel, group="barrel", phase="P8a",
+          doc="0 none, 1 the player, 2 + slot: the FIRST thing that damaged it (DOOM's barrel target)")
     names = [x.name for x in fs]
     assert len(names) == len(set(names)), "duplicate schema field"
     return tuple(fs)
@@ -581,8 +613,12 @@ class TicEvents:
 # attack), "chase" (P3.2b: A_Chase moves -- P_Move, P_NewChaseDir, the relink, monster doors and lifts -- but
 # decides no attack), "decide" (P3.2c: A_Chase decides melee and missile, the attack states run, and the attack
 # actions face and ROLL -- the monster's stream is the full model's -- but apply nothing: damage and the fireball
-# are P5), "full" (everything)
-MONSTER_MODES = ("idle", "wake", "chase", "decide", "full")
+# are P5), "full" (everything through P7). M7 P8a (docs/gp-final-plan.md 3.0): "push" -- "full" with KNOCKBACK
+# (knockback_on: P_DamageMobj's thrust, P_XYMovement for every monster and corpse; the infighting fallback) -- and
+# "final" -- "push" with INFIGHTING (infighting_on: monster targets, the switch, fireballs and bullets on things).
+# Each is a superset of the mode before it: every rule of "full" holds in both (monster_attacks_land and the emitters'
+# mode tuples name them beside "full"); "full" stays the v6 model, untouched
+MONSTER_MODES = ("idle", "wake", "chase", "decide", "full", "push", "final")
 # M7 P4 (docs/gp-combat.md section 1): the PLAYER's model mode a rung's binary is exact against --
 # "walk" (through P4.0): no weapon at all; "fire" (P4.1): the weapon keys, the psprite machine, ammo, refire and
 # every rng_player draw, with nothing applied (no player-thing state, no noise, no target, no effect, no damage);
@@ -590,46 +626,92 @@ MONSTER_MODES = ("idle", "wake", "chase", "decide", "full")
 # effect, no barrel, no drop; "hit" (P4.2b): the noise alert too; "fx" (P5): "hit" + the player's shot spawning BLOOD
 # on the monster it hits (`_spawn_fx_at_target`: the fx pool and the rng_fx stream); "full": everything -- what "fx"
 # still leaves out is the full model's alone: barrels (aim, damage, blasts), puffs, drops, pickups' bonuscount and
-# berserk, player blocking by things, nukage (`_special_sector`), the player thing's states, the death think (P7)
-PLAYER_MODES = ("walk", "fire", "shoot", "hit", "fx", "full")
+# berserk, player blocking by things, nukage (`_special_sector`), the player thing's states, the death think (P7).
+# M7 P8a (docs/gp-final-plan.md 3.0): "final" -- "full" with the dying view's SINK (player_sinks) and the player's side
+# of knockback (knockback_on, with a "push" / "final" monster mode); every rule of "full" holds in it
+PLAYER_MODES = ("walk", "fire", "shoot", "hit", "fx", "full", "final")
+# M7 P8a: the modes after "full" -- each a superset of it (the one-rule helpers below name them beside "full")
+P8A_PLAYER_MODES = ("final",)
+P8A_MONSTER_MODES = ("push", "final")
 
 
 def player_resolves(mode: str) -> bool:
     """M7 P5: the ONE rule "a shot in player mode `mode` resolves through the aim and hurts" (P4.2a "shoot" and every
     mode after it) -- combat._p_resolve, damagecode.DAMAGE_PLAYER_MODES, the aim window, the damage cells"""
     assert mode in PLAYER_MODES, mode
-    return mode in ("shoot", "hit", "fx", "full")
+    return mode in ("shoot", "hit", "fx", "full", "final")
 
 
 def player_hears(mode: str) -> bool:
     """M7 P5: the ONE rule "a shot in player mode `mode` is HEARD" (P4.2b "hit" and after: P_NoiseAlert) --
     combat._p_noise, noisecode.NOISE_PLAYER_MODES, the alert cells"""
     assert mode in PLAYER_MODES, mode
-    return mode in ("hit", "fx", "full")
+    return mode in ("hit", "fx", "full", "final")
 
 
 def player_bleeds(mode: str) -> bool:
     """M7 P5: the ONE rule "a shot in player mode `mode` that hits a monster spawns its BLOOD" ("fx" and "full":
     `_spawn_fx_at_target`, the fx pool, rng_fx) -- combat._p_fx"""
     assert mode in PLAYER_MODES, mode
-    return mode in ("fx", "full")
+    return mode in ("fx", "full", "final")
 
 
 def player_loots(mode: str) -> bool:
     """M7 P6 (docs/gp-p67-interface.md section 2): the ONE rule "the player in mode `mode` lives in the world's things"
     -- pickups and their gives, drops, the bonus count and berserk, barrels in the aim and their blasts and puffs,
-    blocking by solid things, nukage, gibs, `leveltime`. "full" alone (the fallback "loot" mode, if ever taken, joins
-    here). The model's own code does not read it (its pickups and blocking were never mode-gated); the GATES do: what
-    their oracle steps (`monsters.MonsterPhase.move` / `nukage`) and which cells their state check reads"""
+    blocking by solid things, nukage, gibs, `leveltime`. "full" (and M7 P8a's "final" after it; the fallback "loot"
+    mode, if ever taken, joins here). The model's own code does not read it (its pickups and blocking were never
+    mode-gated); the GATES do: what their oracle steps (`monsters.MonsterPhase.move` / `nukage`) and which cells their
+    state check reads"""
     assert mode in PLAYER_MODES, mode
-    return mode == "full"
+    return mode in ("full", "final")
 
 
 def player_mortal(mode: str) -> bool:
     """M7 P7: the ONE rule "a dead player in mode `mode` thinks DOOM's death think" -- the tic-start dead latch, the
-    restart request (use while dead), the dead player's guards on doors, use lines and the move. "full" alone"""
+    restart request (use while dead), the dead player's guards on doors, use lines and the move. "full" (and M7 P8a's
+    "final" after it)"""
     assert mode in PLAYER_MODES, mode
-    return mode == "full"
+    return mode in ("full", "final")
+
+
+# ---- M7 P8a (docs/gp-final-plan.md 3.0): the final rung's ONE-rule helpers -----------------------------------------
+def player_sinks(mode: str) -> bool:
+    """M7 P8a (A): the ONE rule "a dead player in mode `mode` SINKS" -- P_DeathThink's view drop (`p_vdrop`, 41 -> 6
+    units, one a death-think tic; the oracle's `view_drop`), the landing's `viewz -= p_vd << 16`. "final" alone"""
+    assert mode in PLAYER_MODES, mode
+    return mode == "final"
+
+
+def knockback_on(player_mode: str, monster_mode: str) -> bool:
+    """M7 P8a (K): the ONE rule "damage THRUSTS" -- P_DamageMobj's thrust with its inflictor, P_XYMovement for the
+    player's knock momentum and every monster and corpse (`p_momx` / `mon_momx` / `mon_fx` ...), the drops' own
+    positions. Both halves move, so it needs both: a P8a monster mode ("push" -- the infighting fallback -- or
+    "final") AND the "final" player"""
+    assert player_mode in PLAYER_MODES and monster_mode in MONSTER_MODES, (player_mode, monster_mode)
+    return monster_mode in P8A_MONSTER_MODES and player_mode == "final"
+
+
+def infighting_on(monster_mode: str) -> bool:
+    """M7 P8a (I): the ONE rule "monsters FIGHT each other" -- `mon_target` names a thing (0 none, 1 the player,
+    2 + slot), the target switch on any source, monster bullets and fireballs on things, `bar_src`. "final" alone
+    ("push" is knockback without it: the fallback)"""
+    assert monster_mode in MONSTER_MODES, monster_mode
+    return monster_mode == "final"
+
+
+def monster_attacks_land(mode: str) -> bool:
+    """the ONE rule "the monster mode's attacks are APPLIED" -- P5's "full" and the P8a modes after it ("push",
+    "final"): the pools, the player's hurt cells, the blood a monster's mode spawns"""
+    assert mode in MONSTER_MODES, mode
+    return mode in ("full",) + P8A_MONSTER_MODES
+
+
+def p8a_schema(player_mode: str, monster_mode: str) -> dict:
+    """`build_schema`'s P8a keywords for a World in these modes: each feature's cells exist exactly when its ONE rule
+    is on -- so a "full" World's schema, and with it every digest v6 recorded, is the one it always was"""
+    return dict(sinks=player_sinks(player_mode), knock=knockback_on(player_mode, monster_mode),
+                fight=infighting_on(monster_mode))
 
 
 AIM_COLUMNS = 17                   # the aim window's columns (combat.aim_window's 72..88; asserted at _combat_init)
@@ -676,6 +758,9 @@ class World(CombatMixin):
         self.monsters = monsters
         assert player in PLAYER_MODES, player
         self.player = player                        # M7 P4: the player's model mode
+        # M7 P8a: knockback moves the player AND the monsters -- a P8a monster mode needs the final player
+        assert monsters not in P8A_MONSTER_MODES or player == "final", (
+            "M7 P8a: the monster mode %r needs the player mode \"final\", not %r" % (monsters, player))
         self.sight = sight or World.los_to_player
         # M7 P3.2 (docs/gp-monsters.md 8.2; the owner, 2026-09-30): "seen" -- waking by the picture or
         # REJECT within 128 units, attacking by the picture or the near-trace -- else (the default,
@@ -691,7 +776,7 @@ class World(CombatMixin):
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
                              nwalk=len(self.walk_triggers), nlift=len(self.lift_order))
-        self.schema = build_schema(self.layout)
+        self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
 
@@ -1581,6 +1666,13 @@ class World(CombatMixin):
 
     def digest(self) -> str:
         return self.ws.digest()
+
+    def drop_pos(self, m: int) -> Tuple[int, int]:
+        """M7 P8a (docs/gp-final-plan.md 3.0, G-B5): where slot `m`'s DROP lies, whole map units -- the ONE reader of a
+        drop's position (`_touch_specials`, `monsters.MonsterPhase.mobiles`, `MonsterViews.rt_state`'s drop rows).
+        Until package K: the corpse's position, as every mode before P8a draws and touches it (K: `drop_x` / `drop_y`,
+        written at the kill, when knockback_on)"""
+        return self.ws.mon_x[m], self.ws.mon_y[m]
 
     def monster_view(self, m: int) -> dict:
         ws = self.ws

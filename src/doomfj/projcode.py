@@ -307,14 +307,16 @@ def _copy_out(prefix: str, s: int, t: int, fields) -> List[str]:
                   "    hex.mov 3, thss_rt + %d*dw, pw_leaf" % (16 * t)]
 
 
-def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True) -> List[str]:
+def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, knock: bool = False) -> List[str]:
     """pj_spawn (+ its slot stubs), pj_spawn_leaf, pj_try, pj_explode, pj_leaf, pj_phase (+ its stubs); pool_tic is
     `pool_tic_lines`'.
     `nt`: the runtime things before the pools (fireball slot s is thing nt + s); `root`: the missile cells' entry
-    (`missile_cells_fj`); `pool`: FIREBALL_POOL (the harness's control builds another)"""
+    (`missile_cells_fj`); `pool`: FIREBALL_POOL (the harness's control builds another). `knock` (M7 P8a,
+    world.knockback_on): the impact sets the missile as dp_go's inflictor (doomfj.knockcode)"""
     P, _Q = _pool_sizes()
     pool = P if pool is None else pool
     from doomfj.combat import FIREBALL_R
+    from doomfj.knockcode import inflictor_lines
     info = _info()
     sp, dth = info.spawnstate, info.deathstate
     out = ["pj_spawn:"]
@@ -363,6 +365,8 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True) -
             *_roll(),
             "    hex.mov 2, dp_dmg, pw_rr",
             "    hex.mov 2, dp_src, pw_src",                                 # M7 P7: the attacker is the shooter
+            # M7 P8a (knockcode): the MISSILE inflicts, where it stands (not yet moved: P_TryMove's tmthing)
+            *(inflictor_lines("pw_x + 4*dw", "pw_y + 4*dw") if knock else []),
             "    stl.fcall dp_go, dp_ret",
             "    stl.fret pj_tret",
             "  pj_tl:",                                                      # the lines: the missile cells
@@ -544,7 +548,8 @@ def restart_lines(pool: int = None, fxn: int = None, *, nt: int) -> List[str]:
     return out
 
 
-def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs: bool = False) -> dict:
+def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs: bool = False,
+               knock: bool = False) -> dict:
     """everything P5's pools add, for the World `w`:
       * `decls`: pool_decls() (an empty pool, rng_fx at its seed);
       * `lines`: pj_* / pool_tic / fx_* -- leaves (each ends in a fret), placed where nothing falls in;
@@ -554,9 +559,10 @@ def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs:
     The callers' cells this text READS: mm_x / mm_y, viewx / viewy, p_hp / p_dead (hurtcode), lvdone, the collision
     state (cpx, cpy, cprad, cp_ok, ...), ptx / pty / ptss / ptloc_walk, the leaf lists (sshead, thnext, ll_*),
     thpos_rt / thss_rt (rows nt .. nt + 9), mt_dx / mt_dy / mt_ax / mt_ay and mm_octant / mm_fa (the decide
-    leaves), finesine, the point_to_angle tables; and it CALLS dp_go (hurtcode)."""
+    leaves), finesine, the point_to_angle tables; and it CALLS dp_go (hurtcode). `knock` (M7 P8a, world.knockback_on):
+    the impact names the missile as dp_go's inflictor (doomfj.knockcode's interface, which the caller adds)."""
     check_model_rules(puffs)
     cells, root = missile_cells_fj(w, pfx)
-    return {"decls": pool_decls(puffs=puffs), "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard)
+    return {"decls": pool_decls(puffs=puffs), "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard, knock=knock)
             + pool_tic_lines() + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs), "cells": cells, "root": root,
             "tables": tables_fj(puffs), "restart": restart_lines(nt=nt), "persist": PERSIST}

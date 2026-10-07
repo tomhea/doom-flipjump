@@ -108,8 +108,10 @@ def check_drop_is_reported():
     passes any more, and a refactor could delete the live branch behind it unseen. So hand it a
     name no signature will ever have and require it back."""
     bogus = "__a_flag_that_was_retired__"
-    kept, dropped = drop_unaccepted({bogus: True, "things": True})
-    return dropped == [bogus] and "things" in kept
+    # (the accepted kwarg was `things` until the flag retirement deleted it -- which made this control FAIL on every
+    # run since; `tier` is the parameter that replaced the flags, M7 P8a package 0)
+    kept, dropped = drop_unaccepted({bogus: True, "tier": "game"})
+    return dropped == [bogus] and "tier" in kept
 
 
 def selftest_mutations():

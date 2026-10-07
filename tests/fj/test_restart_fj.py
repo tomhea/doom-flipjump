@@ -231,7 +231,7 @@ def _model_after_death_restart(skill):
     for t in range(60):
         w.tic({"fire": t % 20 < 12, "forward": 20 <= t < 40, "turn_left": 40 <= t < 50})
     ev = TicEvents(w.tic_count)
-    w.damage_player(250, ("test", 0), ev)
+    w.damage_player(250, ("test", 0), None, ev)
     assert w.ws.p_dead and ev.deaths == 1
     ev = w.tic({"use": True})
     assert ev.restart_requests == 1 and w.ws.g_restart == 1

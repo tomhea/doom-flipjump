@@ -221,7 +221,7 @@ def _model(records, nt, rt_leaf):
         return leaf
     w._leaf16 = leaf16
 
-    def hurt(dmg, source, ev):
+    def hurt(dmg, source, inflictor, ev):
         log.append("h%02x" % dmg)
     w.damage_player = hurt
     drops = BC.droppers(w)
@@ -242,7 +242,7 @@ def _model(records, nt, rt_leaf):
 
 def make_records(n=N):
     w = _world()
-    w.damage_player = lambda dmg, source, ev: None
+    w.damage_player = lambda dmg, source, inflictor, ev: None
     plan = Plan(w)
     out = []
     for _ in range(n):
@@ -469,7 +469,7 @@ def test_the_records_exercise_every_path(records):
     seen = dict(shot_kill=0, shot_hurt=0, puff=0, fistpuff=0, skipped=0, blasts=0, chain_kill=0, chain_blast=0,
                 p_hurt=0, m_hit=0, m_kill=0, gib=0, drops=0, taken=0, rt_removed=0, sat=0)
     hurt = []
-    w.damage_player = lambda dmg, src, ev: hurt.append(dmg)
+    w.damage_player = lambda dmg, src, inflictor, ev: hurt.append(dmg)
     blast_killed = set()
     for rec in records:
         ev = TicEvents(0)

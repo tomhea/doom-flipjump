@@ -60,7 +60,7 @@ from doomfj import rng as R
 from doomfj.lut_generator import generate_dispatch_table_fj
 
 # the player modes whose monsters HURT the player (world.PLAYER_MODES; "fx" arrives with agent A's model work)
-HURT_PLAYER_MODES = ("fx", "full")
+HURT_PLAYER_MODES = ("fx", "full", "final")      # M7 P8a: "final" is "full" and more
 DP_MAX = 155                        # the largest damage dp_go takes: damagecount + dmg stays one byte
 DC_CAP = 100                        # P_DamageMobj: damagecount capped at 100
 STARTREDPALS, NUMREDPALS = 1, 8     # st_stuff.c
@@ -241,8 +241,11 @@ def restart_lines(start: Dict[str, int]) -> List[str]:
 
 
 # ---- the code ---------------------------------------------------------------------------------------------------
-def dp_lines() -> List[str]:
-    """`dp_go` (stl.fcall dp_go, dp_ret): combat.damage_player -- the module docstring's order"""
+def dp_lines(knock: bool = False) -> List[str]:
+    """`dp_go` (stl.fcall dp_go, dp_ret): combat.damage_player -- the module docstring's order. `knock` (M7 P8a,
+    world.knockback_on; doomfj.knockcode's interface): after the "dead / health <= 0" returns and BEFORE the armor,
+    P_DamageMobj's thrust on the player with the RAW damage (kb_tg 0, kb_dm, `kb_go`); dp_out zeroes kb_on (the site's
+    inflictor). Off, the text is P7's to the byte"""
     from doomfj import weaponcode as WC
     states, frames = WC.weapon_states(), WC.overlay_frames()
     idx = {s: i for i, s in enumerate(states)}
@@ -252,6 +255,9 @@ def dp_lines() -> List[str]:
            "    hex.sign 3, p_hp, dp_out, dp_pos",                  # health < 0
            "  dp_pos:",
            "    hex.if0 3, p_hp, dp_out",                          # health == 0
+           *(["    hex.zero 2, kb_tg",                             # M7 P8a: the thrust's target, the player
+              "    hex.mov 2, kb_dm, dp_dmg",                      # the RAW damage (before the armor)
+              "    stl.fcall kb_go, kb_ret"] if knock else []),
            "    hex.mov 2, p_atk, dp_src",                         # M7 P7: player->attacker = source
            "    hex.mov 2, dp_d, dp_dmg",
            "    hex.if0 1, p_at, dp_dc",
@@ -291,6 +297,7 @@ def dp_lines() -> List[str]:
             "    hex.set 2, wp_sy, %d" % WC.BOTTOM,                   # the dead player's weapon stays down
             "  dp_out:",
             "    hex.zero 2, dp_src",                              # M7 P7: a caller that names none is "no attacker"
+            *(["    hex.zero 1, kb_on"] if knock else []),         # M7 P8a: ... and "no inflictor"
             "    stl.fret dp_ret"]
     return out
 
@@ -402,7 +409,7 @@ def pal_menu_lines() -> List[str]:
     return ["hex.if0 1, pal_cur, plm_out", "hex.zero 1, pal_cur", "present.set_palette playpal0", "plm_out:"]
 
 
-def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False) -> dict:
+def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool = False) -> dict:
     """everything P5's hurt code adds, for the World `w` (the level start of the player cells):
       * `decls`: the cells, interface and scratch (`hurt_decls`);
       * `tables`: mbul, trclaw, sgbite, dpsav, palidx, and playpal0..8 (device data);
@@ -412,10 +419,11 @@ def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False) -> dict:
       * `palette`: after the tic, before `present.begin_frame_collines`; `menu_palette`: in the menu block;
       * `restart`: NEW GAME's values; `persist`: the cells the M1 reset must leave alone.
     `loot` (M7 P6, lootcode.LOOT_PLAYER_MODES): the palette with berserk and the bonus (pal_bk, bonpal, playpal9..12);
-    the program must then hold lootcode's p_str and p_bc."""
+    the program must then hold lootcode's p_str and p_bc. `knock` (M7 P8a, world.knockback_on): dp_go thrusts
+    (`dp_lines(knock=True)`); the program must then hold doomfj.knockcode's interface and `kb_go`."""
     start = level_start(w)
     return {"decls": hurt_decls(start) + (["pal_bk: hex.vec 1"] if loot else []),
             "tables": tables_fj(w.hwt, loot) + palette_tables_fj(sprite_wad, boot_wad,
                                                                  NPALETTES_LOOT if loot else NPALETTES),
-            "leaves": dp_lines(), "tic": hp_tic_lines(), "bar": hp_bar_lines(), "palette": pal_lines(loot),
+            "leaves": dp_lines(knock), "tic": hp_tic_lines(), "bar": hp_bar_lines(), "palette": pal_lines(loot),
             "menu_palette": pal_menu_lines(), "restart": restart_lines(start), "persist": PERSIST, "start": start}

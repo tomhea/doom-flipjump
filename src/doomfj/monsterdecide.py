@@ -167,7 +167,7 @@ def decide_leaf_lines(justhit: bool = False) -> List[str]:
             "    stl.fret mm_dret"]
 
 
-def attack_leaf_lines(full: bool = False) -> List[str]:
+def attack_leaf_lines(full: bool = False, knock: bool = False) -> List[str]:
     """`md_attack` (stl.fcall md_attack, md_ret): mm_kind's action, its facing and its draws (combat.BULLETS
     bullets of 3 draws each for the hitscanners).
 
@@ -178,8 +178,13 @@ def attack_leaf_lines(full: bool = False) -> List[str]:
     (the reach and the attack sight as before) look their 1-draw damage up (`trclaw` / `sgbite`) -> `dp_go`; the
     imp outside melee (out of reach or out of sight: _check_melee_range false) spawns its fireball through
     `stl.fcall pj_spawn, pj_sret` (agent C, doomfj.projcode) with mm_x / mm_y as the monster's position. The
-    program must then hold hurtcode's decls (md_row, md_seen, md_bret, dp_dmg), dp_go, the tables and pj_spawn."""
+    program must then hold hurtcode's decls (md_row, md_seen, md_bret, dp_dmg), dp_go, the tables and pj_spawn.
+    `knock` (M7 P8a, world.knockback_on; doomfj.knockcode): THE ATTACKER (mm_x / mm_y) is the inflictor of each dp_go
+    -- the bullets', the claw's, the bite's (dp_go zeroes kb_on on every exit)"""
     from doomfj.combat import BULLETS
+    from doomfj.knockcode import inflictor_lines
+    assert not knock or full, "M7 P8a: the thrust rides the applied attacks"
+    kb = inflictor_lines("mm_x", "mm_y") if knock else []
     k = draws()
     pos = [ATTACK_KINDS[a] for a in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack")]
     tg = ["md_out"] * 16
@@ -217,6 +222,7 @@ def attack_leaf_lines(full: bool = False) -> List[str]:
                 "    hex.inc 2, mm_rng",
                 "    %s.lookup dp_dmg, mm_rng" % table,
                 "    hex.mov 2, dp_src, md_src",                  # M7 P7: the attacker (dp_go zeroes dp_src)
+                *kb,                                              # M7 P8a: the attacker inflicts
                 "    stl.fcall dp_go, dp_ret",
                 "    ;md_out"]
     out += ["  md_claw_f:",                                       # A_TroopAttack beyond melee: the fireball
@@ -239,15 +245,17 @@ def attack_leaf_lines(full: bool = False) -> List[str]:
             "  md_bul_hit:",
             "    hex.zero 2, dp_dmg", "    hex.mov 1, dp_dmg, md_row",
             "    hex.mov 2, dp_src, md_src",                          # M7 P7: the attacker, every bullet
+            *kb,                                                      # M7 P8a: the attacker inflicts
             "    stl.fcall dp_go, dp_ret",
             "  md_bul_out:", "    stl.fret md_bret"]
     return out
 
 
-def decide_leaves(justhit: bool = False, full: bool = False) -> List[str]:
-    """`full` (M7 P5): md_attack applies its draws (attack_leaf_lines(full=True)); off, P3.2c's text to the byte"""
+def decide_leaves(justhit: bool = False, full: bool = False, knock: bool = False) -> List[str]:
+    """`full` (M7 P5): md_attack applies its draws (attack_leaf_lines(full=True)); off, P3.2c's text to the byte.
+    `knock` (M7 P8a): the attacker is each hit's inflictor (attack_leaf_lines(knock=True))"""
     return (todist_leaf_lines() + octant_leaf_lines() + as_leaf_lines() + decide_leaf_lines(justhit)
-            + attack_leaf_lines(full))
+            + attack_leaf_lines(full, knock))
 
 
 def type_decide(info) -> dict:

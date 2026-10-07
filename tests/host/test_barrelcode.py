@@ -60,7 +60,7 @@ def _model_chain(w, b):
     for m in range(w.layout.nmon):
         w.ws.mon_active[m] = 0
     saved = w.damage_barrel
-    w.damage_barrel = lambda c, dmg, ev: out.append((c, dmg))
+    w.damage_barrel = lambda c, dmg, source, ev: out.append((c, dmg))
     try:
         w._radius_attack(b, TicEvents(0))
     finally:

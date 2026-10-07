@@ -26,18 +26,18 @@ def test_the_attacker_is_the_last_landed_hits_source(source, want):
     w = _world()
     ws = w.ws
     assert ws.p_attacker == 0                                   # the level start: none
-    w.damage_player(5, ("mon", 9), W.TicEvents(0))
+    w.damage_player(5, ("mon", 9), ("mon", 9), W.TicEvents(0))
     assert ws.p_attacker == 10
-    w.damage_player(5, source, W.TicEvents(0))
+    w.damage_player(5, source, source, W.TicEvents(0))
     assert ws.p_attacker == want
 
 
 def test_a_hit_that_does_not_land_names_no_attacker():
     w = _world()
     ws = w.ws
-    w.damage_player(200, ("mon", 3), W.TicEvents(0))           # the kill
+    w.damage_player(200, ("mon", 3), ("mon", 3), W.TicEvents(0))           # the kill
     assert ws.p_dead and ws.p_attacker == 4
-    w.damage_player(5, ("mon", 7), W.TicEvents(0))             # a dead player takes nothing
+    w.damage_player(5, ("mon", 7), ("mon", 7), W.TicEvents(0))             # a dead player takes nothing
     assert ws.p_attacker == 4
 
 
@@ -117,7 +117,7 @@ def test_before_full_the_dead_view_never_turned():
 
 def test_the_restart_forgets_the_attacker():
     w = _world()
-    w.damage_player(250, ("mon", 11), W.TicEvents(0))
+    w.damage_player(250, ("mon", 11), ("mon", 11), W.TicEvents(0))
     assert w.ws.p_attacker == 12
     w._restart(W.TicEvents(0))
     assert w.ws.p_attacker == 0 and "p_attacker" in w.restart_fields

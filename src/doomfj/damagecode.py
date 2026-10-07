@@ -210,10 +210,11 @@ WINDOW = (("dm_hp", "mon_health"), ("dm_sh", "mon_shootable"), ("dm_st", "mon_st
 
 
 def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int], *, nbar: int = 0,
-             drops: Dict[int, int] = None) -> List[str]:
+             drops: Dict[int, int] = None, knock: bool = False) -> List[str]:
     """`dm_go` and the per-slot stubs `dmg<m>`: copy the slot's cells in, `dm_leaf`, copy them back. M7 P6: ids
     n + 1 .. n + nbar jump to barrelcode's `dmb<b>`; `drops` {slot: dropper k}: a kill on slot m calls
-    `drop_link<k>` after the copy-back"""
+    `drop_link<k>` after the copy-back. `knock` (M7 P8a, world.knockback_on): each stub names its slot as the
+    thrust's target (kb_tg = 1 + m: doomfj.knockcode) -- the blast calls the stubs directly, so the stub, not dm_go"""
     from doomfj.monstercode import cell_nibbles
     n = len(slot_rt)
     nid = n + nbar
@@ -233,6 +234,7 @@ def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int], *, nba
         out += ["    hex.mov 4, dm_x, thpos_rt + %d*dw" % (16 * slot_rt[m] + 4),
                 "    hex.mov 4, dm_y, thpos_rt + %d*dw" % (16 * slot_rt[m] + 12),
                 "    hex.set 1, dm_type, %d" % slot_profile[m],
+                *(["    hex.set 2, kb_tg, %d" % (m + 1)] if knock else []),   # M7 P8a: the thrust's target
                 "    stl.fcall dm_leaf, dm_lret"]
         out += ["    hex.mov %d, %s, %s" % (nib, cell, reg) for reg, cell, nib in cells]
         if drops and m in drops:                       # M7 P6: this call's kill drops the slot's item
@@ -250,15 +252,20 @@ FX_CALL = ["    hex.mov 4, fxs_x, dm_x", "    hex.mov 4, fxs_y, dm_y", "    hex.
 FX_CALL_FULL = ["    hex.zero 1, fxs_kind"] + FX_CALL
 
 
-def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False) -> List[str]:
+def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knock: bool = False) -> List[str]:
     """`dm_leaf` (stl.fcall dm_leaf, dm_lret) on the window -- the module docstring's order. `keys`: the profiles
     (`profiles(w)[0]`); mt_dist_leaf (monstercode.dist_leaf_lines) computes P_AproxDistance. `fx` (M7 P5): a hit in
     reach spawns blood (FX_CALL) before the target's own checks. `full` (M7 P6; `keys` are then
-    `profiles(w, gib=True)[0]`): dm_melee BLAST starts at the target's checks; the kill sets dm_kd and gibs"""
+    `profiles(w, gib=True)[0]`): dm_melee BLAST starts at the target's checks; the kill sets dm_kd and gibs.
+    `knock` (M7 P8a, world.knockback_on; doomfj.knockcode's interface): after the "not shootable / dead" returns and
+    BEFORE the health, P_DamageMobj's thrust (kb_dm = dm_dmg, `kb_go`; the stub set kb_tg) -- the inflictor THE
+    PLAYER (viewx / viewy) unless dm_melee is BLAST (the blast set the barrel's); dm_out zeroes kb_on"""
     from doomfj.combat import MISSILERANGE_U
     classes = pain_classes(keys)
     assert 0 < len(keys) <= 16
     assert not full or (fx and all(len(k) == 7 for k in keys)), "M7 P6: the full leaf gibs and bleeds"
+    assert not knock or full, "M7 P8a: knockback rides the full leaf (its BLAST mode names the barrel's inflictor)"
+    from doomfj.knockcode import inflictor_lines
     out = ["dm_leaf:"]
     if full:                                     # M7 P6: a blast skips the reach and the blood
         out += ["    hex.zero 1, dm_kd",
@@ -282,6 +289,13 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False) -> L
            "    hex.if_flags dm_hp + 2*dw, 0xFF00, dm_pos, dm_out",            # health < 0
            "  dm_pos:",
            "    hex.if0 3, dm_hp, dm_out",                                    # health == 0
+           # M7 P8a: the thrust -- a shot's inflictor is the player; a BLAST's, the barrel the blast named
+           *(["    hex.if_flags dm_melee, %d, dm_kbp, dm_kbgo" % (1 << BLAST),
+              "  dm_kbp:",
+              *inflictor_lines("viewx + 4*dw", "viewy + 4*dw"),
+              "  dm_kbgo:",
+              "    hex.mov 2, kb_dm, dm_dmg",
+              "    stl.fcall kb_go, kb_ret"] if knock else []),
            "    hex.sub_shifted 3, 2, dm_hp, dm_dmg, 0",                       # health -= damage
            "    hex.inc 2, dm_rng",                                            # P_Random on the monster's stream:
            "    dmrnd.lookup dm_rr, dm_rng",                                   # v & 3, and the pain bits
@@ -332,12 +346,13 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False) -> L
             *(["  dm_ktic:"] if full else []),
             "    hex.sub 1, dm_ti, dm_rr",
             "  dm_out:",
+            *(["    hex.zero 1, kb_on"] if knock else []),             # M7 P8a: the next site names its own
             "    stl.fret dm_lret"]
     return out
 
 
 def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = DM_MAX, fx: bool = False,
-                 full: bool = False, nbar: int = 0, drops: Dict[int, int] = None) -> dict:
+                 full: bool = False, nbar: int = 0, drops: Dict[int, int] = None, knock: bool = False) -> dict:
     """everything P4.2a's damage adds, for the World `w` (any monster mode; the emitter's needs P3.2c "decide"):
       * `decls`: the P42 cells at `boot_skill`'s level start, the interface, the window and the scratch;
       * `lines`: dm_go, the per-slot stubs, dm_leaf -- leaves (each ends in a fret), placed where nothing falls in;
@@ -347,7 +362,9 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     `slot_rt[m]`: monster slot m's runtime thing (its thpos_rt row). NEW GAME restores the P42 cells through
     p31_parts' `fields` (P42_FIELDS joins them when its `damage` is on).
     `full` (M7 P6, the player mode "full"): the barrels' ids (`nbar`: barrelcode's dmb<b>), the BLAST mode, the gib
-    (max_dmg DM_MAX_FULL) and the drops (`drops` {slot: dropper k}: barrelcode's drop_link<k>)."""
+    (max_dmg DM_MAX_FULL) and the drops (`drops` {slot: dropper k}: barrelcode's drop_link<k>).
+    `knock` (M7 P8a, world.knockback_on): the stubs and the leaf thrust (doomfj.knockcode's interface and `kb_go`,
+    which the caller adds)."""
     if full:
         max_dmg = max(max_dmg, DM_MAX_FULL)
     else:
@@ -361,6 +378,7 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     return {"fields": P42_FIELDS,
             "decls": field_decls(w.schema, n, vals) + DM_INTERFACE + DM_WINDOW + DM_SCRATCH
             + (DM_FULL_SCRATCH if full else []),
-            "lines": go_lines(w.schema, slot_rt, of, nbar=nbar, drops=drops) + leaf_lines(keys, fx=fx, full=full),
+            "lines": (go_lines(w.schema, slot_rt, of, nbar=nbar, drops=drops, knock=knock)
+                      + leaf_lines(keys, fx=fx, full=full, knock=knock)),
             "tables": [generate_dispatch_table_fj("dmrnd", dmrnd_values(pain_classes(keys)),
                                                   index_nibbles=2, result_nibbles=2)]}

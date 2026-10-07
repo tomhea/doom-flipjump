@@ -126,7 +126,7 @@ def test_death_is_doom_shaped_and_use_asks_for_the_restart():
         w.tic({})
     ws = w.ws
     ev = W.TicEvents(w.tic_count)
-    w.damage_player(250, ("test", 0), ev)                     # overkill: health 100 - 250
+    w.damage_player(250, ("test", 0), None, ev)                     # overkill: health 100 - 250
     assert ev.deaths == 1 and ws.p_dead and ws.p_health == -150
     assert gd.STATE_NAMES[ws.p_mobj_state] == "S_PLAY_XDIE1"  # < -spawnhealth: the gib
     assert gd.STATE_NAMES[ws.p_wpn_state] == "S_PISTOLDOWN"   # P_DropWeapon
@@ -150,7 +150,7 @@ def test_a_plain_death_and_the_monsters_stand_down():
     w = W.World(monster_tics=1, skill=gd.SK_HARD)
     ws = w.ws
     ws.p_health = 10
-    w.damage_player(10, ("test", 0), W.TicEvents(0))
+    w.damage_player(10, ("test", 0), None, W.TicEvents(0))
     assert ws.p_dead and ws.p_health == 0
     assert gd.STATE_NAMES[ws.p_mobj_state] == "S_PLAY_DIE1"
     m = next(i for i in range(w.layout.nmon) if ws.mon_active[i])

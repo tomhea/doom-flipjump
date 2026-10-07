@@ -23,6 +23,7 @@ from doomfj import build as B
 from doomfj import gamedata as gd
 from doomfj import restartcode as RC
 from doomfj import wall_renderer as WR
+from doomfj import world as W
 from doomfj.selfreset import decl_words
 
 SPAWN = type("Spawn", (), {"x": 1 << 16, "y": 2 << 16, "angle": 0})()
@@ -199,6 +200,62 @@ def test_every_p6_module_persist_is_wired(module):
     from doomfj.wad import WadFile
     gs = {decl_words(d)[0] for d in B.game_screen_persisted_decls(WadFile.from_path("tests/fixtures/freedoom_e1m1.wad"))}
     assert names <= gs, "HOOK: %s's %s are not in build.game_screen_persisted_decls" % (module, sorted(names - gs))
+
+
+# ---- M7 P8a: the final rung's persist hooks (docs/gp-final-plan.md 3.0 / 4.1) ----------------------------------------
+# hook -> (the ONE rule its cells are emitted behind, at (player mode, monster mode); section 4.1's cells for it)
+P8A_HOOKS = {
+    "VIEW_PERSIST": (lambda pm, mm: W.player_sinks(pm), ("p_vd",)),
+    "KNOCK_PERSIST": (lambda pm, mm: W.knockback_on(pm, mm),
+                      ("p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z")),
+    "FIGHT_PERSIST": (lambda pm, mm: W.infighting_on(mm), ("bar_src",)),   # mon_tgt: MONSTER_PERSIST's mon_target
+}
+
+
+@pytest.mark.parametrize("hook", sorted(P8A_HOOKS))
+def test_every_p8a_hook_is_wired(hook):
+    """INTEGRATION HOOK (build.VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST, P6's `test_every_p6_module_persist_is_wired`
+    extended): a hook holds only its own package's cells of section 4.1, once each; it persists exactly while its ONE
+    rule is on at the game tier's modes (the cells are emitted behind the same rule) -- and then it holds ALL of its
+    section-4.1 cells, every one persists and the game screen declares it for the re-key. FAILS when integration
+    turns a rule on before its package wired its cells"""
+    rule, cells = P8A_HOOKS[hook]
+    names = getattr(B, hook)
+    assert set(names) <= set(cells), "%s holds cells that are not its package's: %s" % (hook, sorted(set(names) - set(cells)))
+    assert len(set(names)) == len(names), names
+    persist = _persist()
+    if not rule(WR.PLAYER_MODE, WR.MONSTER_MODE):
+        assert not set(names) & set(persist), "%s persists while its rule is off at %s / %s" % (
+            hook, WR.PLAYER_MODE, WR.MONSTER_MODE)
+        return
+    assert set(names) == set(cells), "HOOK: %s lacks %s (section 4.1) while its rule is on" % (
+        hook, sorted(set(cells) - set(names)))
+    assert set(names) <= set(persist), "HOOK: %s's %s are not in build.persist_labels" % (hook, sorted(set(names) - set(persist)))
+    from doomfj.wad import WadFile
+    gs = {decl_words(d)[0] for d in B.game_screen_persisted_decls(WadFile.from_path("tests/fixtures/freedoom_e1m1.wad"))}
+    assert set(names) <= gs, "HOOK: %s's %s are not in build.game_screen_persisted_decls" % (hook, sorted(set(names) - gs))
+
+
+def test_p8a_persist_composes_by_the_rules(monkeypatch):
+    """build.p8a_persist: each hook behind its rule -- nothing at any pre-P8a pair, the view alone with a "final" player
+    beside a "full" monster mode, the knock with "push" (the fallback), all three at "final" / "final" -- and
+    persist_labels / game_screen_persisted_decls carry it at the game tier's modes (R9: with the hooks filled by
+    stand-ins, the "final" tier persists them and the shipped "full" one does not)"""
+    monkeypatch.setattr(B, "VIEW_PERSIST", ("p_vd",))
+    monkeypatch.setattr(B, "KNOCK_PERSIST", ("p_kmx",))
+    monkeypatch.setattr(B, "FIGHT_PERSIST", ("bar_src",))
+    assert B.p8a_persist("full", "full") == B.p8a_persist("fx", "full") == ()
+    assert B.p8a_persist("final", "full") == ("p_vd",)
+    assert B.p8a_persist("final", "push") == ("p_vd", "p_kmx")
+    assert B.p8a_persist("final", "final") == ("p_vd", "p_kmx", "bar_src")
+    shipped = _persist()
+    assert not {"p_vd", "p_kmx", "bar_src"} & set(shipped)
+    monkeypatch.setattr(WR, "PLAYER_MODE", "final")
+    monkeypatch.setattr(WR, "MONSTER_MODE", "final")
+    final = _persist()
+    assert final == shipped + ("p_vd", "p_kmx", "bar_src")
+    src = inspect.getsource(B.game_screen_persisted_decls)
+    assert "p8a_persist()" in src and "p8a_persisted_decls(" in src
 
 
 def test_the_p6_units_are_package_as():

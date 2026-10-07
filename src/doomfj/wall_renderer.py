@@ -445,6 +445,7 @@ LEVEL_DONE_SELECTED = 2
 from doomfj import restartcode as _restartcode                    # noqa: E402 (M7 P7)
 from doomfj import hurtcode as _hurtcode                          # noqa: E402 (M7 P7: the death think's turn)
 from doomfj import lootcode as _lootcode                          # noqa: E402 (M7 P6+P7 package B: the player's side)
+from doomfj import knockcode as _knockcode                        # noqa: E402 (M7 P8a: knockback's hooks)
 
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
@@ -923,10 +924,17 @@ def exit_lines(boxes, press_miss=()) -> list:
     return out
 
 
+def landing_drop_lines() -> list:
+    """M7 P8a SPLICE POINT (package A, docs/gp-final-plan.md 1.1 / 4.3 step 9): the dying view's sink at the eye's
+    landing (after `dsc_done`): `viewz -= p_vd << 16` behind one `hex.if0` while alive. Spliced only when
+    world.player_sinks(PLAYER_MODE); empty until package A fills it"""
+    return []
+
+
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
                             press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
-                            use_guard=((), ()), weapon_bar=()) -> list:
+                            use_guard=((), ()), weapon_bar=(), knock_move=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -943,6 +951,10 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     M7 P6+P7 (doomfj.lootcode, the "full" player): `latch` -- `p_dd0` = `p_dead`, the death at the tic's START, right
     after the restart on use (which may clear it) and before every guard that reads it (the door tic's, the use lines',
     the weapon keys'); `use_guard` -- (before, after) the use lines: a dead player uses nothing.
+
+    M7 P8a (docs/gp-final-plan.md 4.3 step 6; doomfj.knockcode): `knock_move` -- the player's KNOCK move, spliced right
+    after `simmv_done` (the walk's landing, which the dead player's skipped move reaches too: the corpse slides) and
+    before the bar's weapon slots (the knock's pickups change them).
     """
     return [
         # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
@@ -984,6 +996,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         # M7 P4.1: the weapon -- the model's player phase runs the number keys and the psprites before the move
         *weapon,
         *_player_sim_lines(collide, strafe=True, tap=True),   # M7 P4.1: the game tier strafes; P6+P7: the tap turn
+        *knock_move,                       # M7 P8a: the player's knock move, after simmv_done (dead or alive)
         # M7 P6+P7: the bar's weapon slots after the move -- its pickups change the ammo and the owned weapons
         # (weaponcode.bar_lines; everything above lands on simmv_done, the dead player's skipped move too)
         *weapon_bar,
@@ -1373,7 +1386,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # hurt the player, and no pools). The weapon then reads the health and death cells (weapon_parts(hurt=)), so it
     # is built once that is known.
     from doomfj.hurtcode import hurt_on as _hurt_on
-    _P5 = bool(menu and MONSTER_MODE == "full" and _hurt_on(PLAYER_MODE))
+    from doomfj.world import monster_attacks_land as _monster_attacks_land   # M7 P8a: "full", "push", "final"
+    _P5 = bool(menu and _monster_attacks_land(MONSTER_MODE) and _hurt_on(PLAYER_MODE))
     # M7 P6+P7 (doomfj.lootcode, package B): the "full" player -- pickups and gives, blocking by things, nukage,
     # berserk and bonus, and the dead player's guards on the TIC-START death `p_dd0`. ONE switch, from the model mode;
     # the door tic reads `p_dd0` (built below, before the monster parts), so it is known here
@@ -1823,7 +1837,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
     # M7 P6 (doomfj.barrelcode, the player mode "full"): the barrels, their blasts, the drops and the puffs
     _bar = _p31.get("barrel") if _p31 else None
-    _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide", "full")) else 0
+    _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide", "full", "push", "final")) else 0
     # M7 P4.2a (doomfj.aimcode): the game tier's AIM WINDOW, when its player's shots resolve -- recorded by the runtime
     # monsters' projections (their seen machinery reaches xscale for every monster D3 e counts)
     _AIM = 1 if (_SEEN and menu and _player_resolves(PLAYER_MODE)) else 0
@@ -1856,6 +1870,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _LOOT = False
         assert not _chase
         _door_tic = _make_door_tic()
+    # M7 P8a (docs/gp-final-plan.md 3.0): the final rung's three switches, each from its ONE rule -- and so OFF in
+    # the "full" / "full" game tier, whose text is blocked51's byte for byte (scratchpad/cr/emit_baseline.py --check):
+    # every P8a hook below is emitted behind one of them (after `_LOOT`'s last word: a
+    # monster-less map loots nothing)
+    from doomfj import world as _W8
+    _SINK = bool(_LOOT and _W8.player_sinks(PLAYER_MODE))                      # A: the dying view sinks
+    _KNOCK = bool(_LOOT and _W8.knockback_on(PLAYER_MODE, MONSTER_MODE))      # K: P_DamageMobj's thrust, the knock
+    _FIGHT = bool(_LOOT and _W8.infighting_on(MONSTER_MODE))                  # I: monsters fight monsters
+    assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
                         loot=_LOOT) if menu else None                # M7 P6+P7: the latch, berserk's key 1 and fist
@@ -1867,7 +1890,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _w5.reset(BOOT_SKILL)
         # boot_wad: the asset wad, whose palette 0 the boot sends as `palette` -- hurtcode asserts playpal0 equals it
         _hrt = hurt_parts(_w5, sprite_wad=sprite_wad, boot_wad=asset_wad,
-                          loot=_LOOT)                               # M7 P6: the berserk and bonus palettes
+                          loot=_LOOT,                               # M7 P6: the berserk and bonus palettes
+                          **({"knock": True} if _KNOCK else {}))   # M7 P8a: dp_go thrusts
         _p5_model_asserts(_p31, _proj, _hrt)
     else:
         assert not _proj and not (_p31 and _p31.get("nmob")), "the pools and mobile rows are P5's (MONSTER_MODE 'full')"
@@ -2871,13 +2895,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
                 # M7 P3.2c: the decisions, the attack actions and the near LOS (monsterdecide, monstersight)
                 + ((_decide_leaves(justhit=bool(_p31.get("justhit")),
-                                   full=bool(_chase.get("hurt")))       # M7 P5: md_attack APPLIES its draws
+                                   full=bool(_chase.get("hurt")),       # M7 P5: md_attack APPLIES its draws
+                                   **({"knock": True} if _KNOCK else {}))   # M7 P8a: the attacker inflicts
                     + _p31["decide_lines"])
                    if _p31.get("decide_lines") else [])
                 # M7 P5: the leaves the attacks land through -- dp_go (hurtcode), the pools' spawns, phases and shared
                 # leaves (projcode), and the missile cells (which jump over themselves); behind this block's guard,
                 # where nothing falls in
                 + ((list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]]) if _hrt else [])
+                # M7 P8a (doomfj.knockcode): the thrust's leaf kb_go -- package 0's stub, package K's leaf
+                + (_knockcode.go_lines() if _KNOCK else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
@@ -2944,6 +2971,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                           (list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))
                                           if _wpn else ()),
                                   weapon_bar=(_wpn.get("bar", ()) if _wpn else ()),   # M7 P6+P7: after the move
+                                  # M7 P8a: the player's knock move (doomfj.knockcode's splice point, package K)
+                                  knock_move=_knockcode.player_move_lines() if _KNOCK else (),
                                   latch=_loot["latch"] if _loot else (),
                                   use_guard=_loot["use_guard"] if _loot else ((), ()),
                                   door_lines=_door_tic,
@@ -2999,6 +3028,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M13-bakedbands: lines mode has NO per-frame band state to reset (the lists are static data)
     pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
     pass1 += [f";{_pfx(mapname)}_dsc_walk", "dsc_done:"]
+    # M7 P8a (A, docs/gp-final-plan.md 4.3 step 9): the dying view's landing -- viewz -= p_vd << 16, once a frame, right
+    # after the landing set the standing eye (the descend pre-walk) -- behind world.player_sinks. Only the render
+    # reads viewz (the world tic below does not)
+    if _SINK:
+        pass1 += landing_drop_lines()
     # M7 P3.2a: the monsters tic AFTER the eye's point location (the wake mode's REJECT reads the player's
     # sector) and before the render, which marks this frame's seen flags for the next tic
     _wt_tic = list(_p31.get("tic_after_eye", ())) if _p31 else []
@@ -3321,6 +3355,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # as device data), the pools' cells, window and tables (fxrnd, pjst) -- data and self-guarded tables
           *((list(_hrt["decls"]) + list(_proj["decls"]) + list(_hrt["tables"]) + list(_proj["tables"]))
             if _hrt else []),
+          *(_knockcode.decls() if _KNOCK else []),                         # M7 P8a: the thrust's interface
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *_aim_decls,                                                      # M7 P4.2a: the aim window

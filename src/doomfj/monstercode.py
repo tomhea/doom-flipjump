@@ -18,7 +18,7 @@ from doomfj import rng as R
 from doomfj.lut_generator import generate_dispatch_table_fj
 from doomfj.noisecode import ambush_decl, noise_decls, noise_leaf_lines, noise_restart_lines
 from doomfj.sight import NEAR
-from doomfj.world import K_HEAVY, LOOK_BEHIND_REACH
+from doomfj.world import K_HEAVY, LOOK_BEHIND_REACH, monster_attacks_land
 
 MONSTER_TYPES = ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT", "MT_SHADOWS")
 # action ids; the sound actions (A_Pain, A_Scream, A_XScream) are no-ops (D5: no sound) and read 0
@@ -290,14 +290,17 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         return None                      # a map without monsters animates nothing
     assert len(THING_ROW_BYTES) == len(rows[0])
     # the monster slots, and which runtime thing each is
-    assert mode in ("idle", "wake", "chase", "decide", "full"), mode
+    assert mode in ("idle", "wake", "chase", "decide", "full", "push", "final"), mode   # M7 P8a: world.MONSTER_MODES
     # M7 P3.3 (D3 d): the leaf walk the game tier's picture asks for -- RAISES for a mode that cannot emit it.
     # `depth_order` None is GAME_RENDER_KW's; a unit fixture that builds no leaf walk passes False.
     depth = depth_walk(mode, depth_order)
-    wake = mode in ("wake", "chase", "decide", "full")   # M7 P3.2b: the chase mode is the wake mode plus the move
-    chase = mode in ("chase", "decide", "full")          # M7 P3.2c: the decide mode is the chase plus the decisions
-    decide = mode in ("decide", "full")                  # M7 P5: "full" is the decide mode with its attacks APPLIED
-    full = mode == "full"
+    # M7 P3.2b: the chase mode is the wake mode plus the move; M7 P3.2c: the decide mode is the chase plus the
+    # decisions; M7 P5: "full" is the decide mode with its attacks APPLIED; M7 P8a: "push" and "final" are "full"
+    # and more (world.MONSTER_MODES) -- every rule of "full" holds in them
+    wake = mode in ("wake", "chase", "decide", "full", "push", "final")
+    chase = mode in ("chase", "decide", "full", "push", "final")
+    decide = mode in ("decide", "full", "push", "final")
+    full = monster_attacks_land(mode)
     from doomfj.damagecode import damage_on, fx_on
     damage = damage_on(player)
     assert not damage or decide, "damage (M7 P4.2a) runs on the decide mode's slots: mode %r" % mode
@@ -323,6 +326,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     # M7 P6: barrels, drops and puffs (the player mode "full")
     from doomfj.barrelcode import barrels_on
     loot = bool(nmob) and barrels_on(player)
+    # M7 P8a (docs/gp-final-plan.md 3.0; doomfj.knockcode): KNOCKBACK's hooks -- every damage site names its inflictor
+    # and the damage leaves call kb_go; each slot's turn opens on the knock move's splice point. Off in "full"
+    from doomfj.world import knockback_on
+    knock = loot and knockback_on(player, mode)
     mob_rows, mob_view = (mobile_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
                                            first=mob_first, puffs=loot) if nmob else ([], {}))
     rows = rows + mob_rows
@@ -459,7 +466,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                       **({"dmg": True} if damage else {}),
                       **({"hear": True, "sec": w._mon_sector(m)} if hear else {}),
                       **({"hurt": dict(sp=gd.STATE_INDEX[w.mon_info[m].spawnstate],
-                                       spt=gd.STATES[w.mon_info[m].spawnstate].tics)} if hurt else {}))
+                                       spt=gd.STATES[w.mon_info[m].spawnstate].tics)} if hurt else {}),
+                      **({"knock": True} if knock else {}))                      # M7 P8a: the knock move's splice
                  for m in range(nmon)]
         nleaf = len(w.cmap.subsectors)
         extra = {
@@ -508,7 +516,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     bar_vis = {b: _mv.vis_slots[di] for b, di in enumerate(_mv.bdi) if di in _mv.vis_slots}
                     assert not set(bar_vis) & set(bar_rt) and len(bar_vis) + len(bar_rt) == len(w.barrel_things)
                     barrel = barrel_parts(w, nt=nt, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
-                                          skills=skills, barrel_rt=bar_rt, barrel_vis=bar_vis)
+                                          skills=skills, barrel_rt=bar_rt, barrel_vis=bar_vis,
+                                          **({"knock": True} if knock else {}))
                     assert barrel["drop_first"] == nt + nmob and barrel["ndrop"] == ndrop
                     extra["barrel"] = barrel
                 if damage:                             # M7 P4.2a: the monsters' damage (damagecode)
@@ -517,14 +526,15 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     # M7 P6: the barrels' ids, the blast, the gib and the drops (`full`)
                     dmp = damage_parts(w, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
                                        fx=bleed, full=loot, nbar=barrel["nbar"] if barrel else 0,
-                                       drops=barrel["drops"] if barrel else None)
+                                       drops=barrel["drops"] if barrel else None,
+                                       **({"knock": True} if knock else {}))
                     extra["decls_wake"] += dmp["decls"]
                     extra["decide_lines"] += dmp["lines"]
                     extra["tables"] += dmp["tables"]
                     extra["justhit"] = True
                 if full:                               # M7 P5: the fireball and blood pools (doomfj.projcode)
                     from doomfj.projcode import proj_parts
-                    extra["proj"] = proj_parts(w, nt=nt, puffs=loot)
+                    extra["proj"] = proj_parts(w, nt=nt, puffs=loot, **({"knock": True} if knock else {}))
                     extra["proj"]["nt"] = nt
             # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
             # render setting says so (depth_walk, above) -- the walk's registers (sim.thing_pass_depth)
@@ -542,6 +552,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 # M7 P5: the emitter's things_leaf_lines(hurt=), decide_leaves(full=) and weapon_parts(hurt=)
                 **({"hurt": True} if hurt else {}))
             assert len(set(w.mon_height[:nmon])) == 1, "one monster height: try_move_mon takes it at compile time"
+    if knock:
+        extra["knock"] = True          # M7 P8a: the emitter asserts its own `_KNOCK` agrees
     return {
         "mode": mode, **extra,
         "view_rows": rows, "nrows": nrows, "views": views, "rt_slot": rt_slot, "nmon": nmon, "schema": schema,
@@ -758,24 +770,24 @@ def persisted_monster_decls(w, mode: str, damage=None, player: str = None) -> li
     if damage is None:
         from doomfj.damagecode import damage_on
         from doomfj.wall_renderer import PLAYER_MODE
-        damage = damage_on(PLAYER_MODE) and mode in ("decide", "full")   # M7 P5: "full" decides too
+        damage = damage_on(PLAYER_MODE) and mode in ("decide", "full", "push", "final")   # M7 P5: "full" decides too
     out = monster_decls(w.schema, n)
-    if mode in ("wake", "chase", "decide", "full"):
+    if mode in ("wake", "chase", "decide", "full", "push", "final"):     # M7 P8a: "push" / "final" are "full"'s
         out += [d for d in p32a_decls(w.schema, n, {f: [0] * n for f in P32A_FIELDS}, n)
                 if d.split(":")[0] in P32A_PERSISTED]
-    if mode in ("chase", "decide", "full"):          # M7 P3.2b: the move's per-slot cells and msec, the barrels, mh_prev
+    if mode in ("chase", "decide", "full", "push", "final"):          # M7 P3.2b: the move's per-slot cells and msec, the barrels, mh_prev
         out += [d for d in p32b_decls(w.schema, n, {f: [0] * n for f in P32B_FIELDS}, [0] * n)
                 if d.split(":")[0] in P32B_FIELDS + ("msec",)]
         out += ["bar_solid: hex.vec %d" % max(1, len(w.barrel_things)),
                 "mh_prev: hex.vec %d" % (len(w.lift_order) + 1)]
-    if mode in ("decide", "full"):       # M7 P3.2c: the missile decision's flag
+    if mode in ("decide", "full", "push", "final"):       # M7 P3.2c: the missile decision's flag
         from doomfj.monsterdecide import P32C_FIELDS
         out += p32c_decls(w.schema, n, {f: [0] * n for f in P32C_FIELDS})
     if damage:                           # M7 P4.2a: health, shootable, solid, justhit
         from doomfj.damagecode import P42_FIELDS, field_decls
         out += field_decls(w.schema, n, {f: [0] * n for f in P42_FIELDS})
     from doomfj.noisecode import NOISE_PLAYER_MODES, PERSIST as NOISE_PERSIST
-    if mode in ("wake", "chase", "decide", "full") and player in NOISE_PLAYER_MODES:   # M7 P4.2b: the alerts, the ambushers
+    if mode in ("wake", "chase", "decide", "full", "push", "final") and player in NOISE_PLAYER_MODES:   # M7 P4.2b: the alerts, the ambushers
         out += [d for d in [ambush_decl(n, [0] * n)] + noise_decls(w) if d.split(":")[0] in NOISE_PERSIST]
     return out
 
@@ -812,7 +824,7 @@ def _sign_branch(cell, kind, yes, no):
 
 
 def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, mv=None,
-              dc=None, dmg: bool = False, hear: bool = False, sec: int = None, hurt=None) -> list:
+              dc=None, dmg: bool = False, hear: bool = False, sec: int = None, hurt=None, knock: bool = False) -> list:
     """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
     A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
     REJECT row of its spawn sector (indexed by the player's sector); t: its seen flag's index (`thseen`).
@@ -841,7 +853,10 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     `player_alive()` guards -- A_Look neither hears nor sees (both of its branches need a live player); A_Chase's
     threshold resets instead of counting down, and after the turn the monster returns to its spawn state (its
     A_Look runs at once in the model and changes nothing more: the threshold is already 0) instead of deciding or
-    moving."""
+    moving.
+
+    `knock` (M7 P8a, world.knockback_on): the SPLICE POINT of the slot's knock move (doomfj.knockcode
+    .monster_slot_lines: P_MobjThinker's P_XYMovement before the state's tics), right after the "not active" skip."""
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     nthr = cell_nibbles(schema, "mon_threshold")
     assert not hear or mv or sec is not None, "a hearing slot needs its sector: msec (mv) or the spawn sector"
@@ -854,6 +869,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "    hex.if0 2, mt_n, mt_end",
            "    hex.dec 2, mt_n",
            "    hex.if0 1, %s, %s" % (AC, nxt),
+           *(_knock_slot_lines(m) if knock else []),                  # M7 P8a: the knock move (package K)
            "    hex.if_flags %s, %d, %sgo, %s" % (TI, 1 << TICS_FOREVER, L, nxt),
            "  %sgo:" % L,
            "    hex.if0 1, %s, %sready" % (TI, L),              # tics 0 at entry: deferred last tic -- READY
@@ -1147,7 +1163,7 @@ def p32b_rj_leaf(sectors) -> list:
 K_SLOTS = K_HEAVY                    # world.K_HEAVY: heavy monster actions per tic (D5)
 
 # M7 P3.3: the monster modes that emit sim.thing_pass_depth -- the walk's registers come with the chase block
-DEPTH_MODES = ("chase", "decide", "full")
+DEPTH_MODES = ("chase", "decide", "full", "push", "final")   # M7 P8a: + the modes after "full"
 
 
 def depth_walk(mode: str, order=None) -> bool:
@@ -1213,6 +1229,11 @@ def dist_leaf_lines() -> list:
             "    hex.mov 4, mt_d, mt_t",
             "    stl.fret mt_ret"]
     return out
+
+
+def _knock_slot_lines(m: int) -> list:
+    from doomfj.knockcode import monster_slot_lines   # lazy: K's module reads this one's helpers
+    return monster_slot_lines(m)
 
 
 def p32a_tic_lines(schema, nmon: int, slots: list, exit_guard: bool) -> list:

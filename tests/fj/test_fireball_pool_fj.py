@@ -200,7 +200,7 @@ def _hooks(w, log, feed):
             st["spawn"] = False
     w._leaf16, w._missile_try, w._spawn_fireball = leaf16, mtry, spawn
     # M7 P7: and the attacker the hit names (1 + the shooter's slot)
-    w.damage_player = lambda dmg, source, ev: log.append("h%02x%02x" % (dmg, source[1] + 1))
+    w.damage_player = lambda dmg, source, inflictor, ev: log.append("h%02x%02x" % (dmg, source[1] + 1))
 
 
 def _model(script, nt):
@@ -464,7 +464,7 @@ def test_the_script_exercises_every_path():
     w = _world()
     script = _script(w)
     hits = []
-    w.damage_player = lambda dmg, source, ev: hits.append(dmg)
+    w.damage_player = lambda dmg, source, inflictor, ev: hits.append(dmg)
     tot = dict(spawns=0, fizzles=0, impacts=0, walls=0, early_boom=0, relinks=0, removals=0, through_dead=0,
                axis=0, full_frames=0)
     ws = w.ws
@@ -494,7 +494,7 @@ def test_the_script_exercises_every_path():
     assert all(tot[k] >= v for k, v in want.items()), (tot, want)
     # the spawn-time explosion (P_CheckMissileSpawn) and the exact-box impact, from the model's own runs
     w2 = _world()
-    w2.damage_player = lambda dmg, source, ev: None
+    w2.damage_player = lambda dmg, source, inflictor, ev: None
     ex = _open_east(w2)
     w2.ws.mon_x[0], w2.ws.mon_y[0] = ex
     w2.ws.px, w2.ws.py = (ex[0] + 107) << 16, ex[1] << 16

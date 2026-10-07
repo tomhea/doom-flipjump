@@ -37,7 +37,7 @@ LVTIME_NIBBLES = 4
 # the persisted cells the restart must NOT write: what the device shows (docs/gp-p67-interface.md 4.4)
 DEVICE_SHADOWS = ("pal_cur", "hud_s", "hud_full")
 # the player modes with a death that restarts (P7; the fallback "loot" mode of section 2 has none)
-MORTAL_PLAYER_MODES = ("full",)
+MORTAL_PLAYER_MODES = ("full", "final")    # M7 P8a: "final" is "full" and more
 
 
 def mortal(player_mode: str) -> bool:

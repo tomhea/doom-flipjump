@@ -166,7 +166,7 @@ def kill(dmg_over: int = 20, armor_off: bool = True):
         ws = mph.world.ws
         if armor_off:
             ws.p_armor = ws.p_armortype = 0
-        mph.world.damage_player(ws.p_health + dmg_over, ("gate", 0), ev)
+        mph.world.damage_player(ws.p_health + dmg_over, ("gate", 0), None, ev)   # M7 P8a: no inflictor
     return fn
 
 

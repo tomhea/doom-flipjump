@@ -133,6 +133,39 @@ from doomfj import barrelcode as _barrelcode                                    
 from doomfj import lootcode as _lootcode                                         # noqa: E402 (M7 P6, package B)
 LOOT_PERSIST: tuple = _lootcode.PERSIST + _barrelcode.DROP_PERSIST   # B's player cells + C's drop cells
 BARREL_PERSIST: tuple = _barrelcode.BARREL_PERSIST
+# M7 P8a -- INTEGRATION HOOKS (docs/gp-final-plan.md 3.0 / 4.1; package 0 places them, empty):
+#   VIEW_PERSIST  = package A's (p_vd)                                       -- world.player_sinks
+#   KNOCK_PERSIST = package K's (p_kmx, p_kmy, mkx, mky, mfx, mfy, kb_live, pj_z): doomfj.knockcode.PERSIST
+#                                                                            -- world.knockback_on
+#   FIGHT_PERSIST = package I's (bar_src; mon_tgt widens MONSTER_PERSIST's mon_target)  -- world.infighting_on
+# Each persists ONLY while its ONE rule is on at the game tier's modes (`p8a_persist`): the cells are emitted behind
+# the same rule, so a "full" tier persists exactly what blocked51 persists. A package fills its tuple, its module's
+# decls in `p8a_persisted_decls` below (for the re-key), and its level-start lines in the restart;
+# tests/host/test_restart_coverage.py's `test_every_p8a_hook_is_wired` FAILS while a cell of section 4.1 is emitted
+# and not wired, and tests/fj/test_restart_fj.py then checks the restart writes it.
+from doomfj import knockcode as _knockcode                                       # noqa: E402 (M7 P8a, package K)
+VIEW_PERSIST: tuple = ()
+KNOCK_PERSIST: tuple = _knockcode.PERSIST
+FIGHT_PERSIST: tuple = ()
+
+
+def p8a_persist(player_mode: str = None, monster_mode: str = None) -> tuple:
+    """M7 P8a: the hooks that persist at these modes (None: the game tier's, wall_renderer.PLAYER_MODE / MONSTER_MODE)
+    -- each behind the ONE rule its cells are emitted behind"""
+    from doomfj import wall_renderer as _wr
+    from doomfj import world as _w
+    pm = _wr.PLAYER_MODE if player_mode is None else player_mode
+    mm = _wr.MONSTER_MODE if monster_mode is None else monster_mode
+    return ((VIEW_PERSIST if _w.player_sinks(pm) else ())
+            + (KNOCK_PERSIST if _w.knockback_on(pm, mm) else ())
+            + (FIGHT_PERSIST if _w.infighting_on(mm) else ()))
+
+
+def p8a_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
+    """M7 P8a HOOK: the P8a modules' declarations of their persisted cells (widths matter to a restore set, values do
+    not) -- `game_screen_persisted_decls`' candidates for VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST. Empty until a
+    package declares cells"""
+    return []
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:
@@ -146,7 +179,8 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
             + (MONSTER_PERSIST if (standalone and moving_things) else ())
             + HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST    # M7 P4.0 / P4.1 / P4.2a: the game tier's
             + HURT_PERSIST + PROJ_PERSIST                   # M7 P5: the player's hurt cells, the pools
-            + GAME_PERSIST + LOOT_PERSIST + BARREL_PERSIST)  # M7 P7 / P6: the game's cells; loot, barrels (HOOKS)
+            + GAME_PERSIST + LOOT_PERSIST + BARREL_PERSIST   # M7 P7 / P6: the game's cells; loot, barrels (HOOKS)
+            + p8a_persist())                                # M7 P8a: the view, the knock, the fight (HOOKS)
 
 
 def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
@@ -163,14 +197,16 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     # M7 P6: + LOOT_PERSIST + BARREL_PERSIST, their modules' decl lists in `cand`
     from doomfj import barrelcode, lootcode
     from doomfj.wall_renderer import BOOT_SKILL
-    names = HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST + HURT_PERSIST + PROJ_PERSIST + LOOT_PERSIST + BARREL_PERSIST
+    names = (HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST + HURT_PERSIST + PROJ_PERSIST + LOOT_PERSIST + BARREL_PERSIST
+             + p8a_persist())                                         # M7 P8a: the hooks at the game tier's modes
     cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START)))
             + WC.weapon_decls(WC.level_start(map_wad, mapname), WC.weapon_states(), WC.overlay_frames())
             + WC.weapon_const_decls() + aimcode.decls()
             + hurtcode.hurt_decls(hurtcode.level_start(World(map_wad, mapname)))   # M7 P5
             + projcode.pool_decls()
             + barrelcode.decls(World(map_wad, mapname), BOOT_SKILL)      # M7 P6: barrels, drops
-            + lootcode.loot_decls(lootcode.level_start(World(map_wad, mapname))))   # M7 P6: the player's loot
+            + lootcode.loot_decls(lootcode.level_start(World(map_wad, mapname)))   # M7 P6: the player's loot
+            + p8a_persisted_decls(map_wad, mapname))                               # M7 P8a: the hooks' modules
     by = {}
     for d in cand:
         by.setdefault(decl_words(d)[0], d)

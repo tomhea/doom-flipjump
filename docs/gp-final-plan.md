@@ -415,6 +415,58 @@ package 0 BEFORE the fan-out. Merge order at integration: 0, D, C, A, K, I, V.
   `build.KNOCK_PERSIST`, `FIGHT_PERSIST`, `VIEW_PERSIST` (empty) wired into `persist_labels` and
   `game_screen_persisted_decls`, with P6 + P7's `test_every_p6_module_persist_is_wired` extended.
 
+**Package 0, as built** (the names the packages build on; `tests/host/test_p8a_interface.py` pins each):
+- **Modes**: `world.P8A_PLAYER_MODES = ("final",)`, `P8A_MONSTER_MODES = ("push", "final")`. Each is a SUPERSET of
+  "full": every pre-P8a rule names it beside "full" -- `player_resolves / hears / bleeds / loots / mortal`, the new
+  `world.monster_attacks_land(mode)` (replaces the `== "full"` monster tests in `monsters.py` and the emitter),
+  `hurtcode.HURT_PLAYER_MODES`, `lootcode.LOOT_PLAYER_MODES`, `restartcode.MORTAL_PLAYER_MODES`, every mode tuple of
+  `monstercode` (`p31_parts`, `persisted_monster_decls`, `DEPTH_MODES`) and the emitter's `_SEEN`. A "final" run equals
+  a "full" run on every pre-P8a cell, tic for tic, until a package lands. `World` refuses a P8a monster mode without
+  the "final" player. Helpers: `player_sinks(pm)` = pm "final"; `knockback_on(pm, mm)` = mm in ("push", "final") and pm
+  "final"; `infighting_on(mm)` = mm "final"; `p8a_schema(pm, mm)` -> `build_schema`'s keywords.
+- **Schema**: `build_schema(lay, *, sinks, knock, fight)`; a World passes `p8a_schema(player, monsters)`, so a "full"
+  World's schema (and v6's digests) is unchanged. `sinks`: `p_vdrop` (6 bits, label `p_vd`); `knock`: `p_momx`,
+  `p_momy` (32 s, `p_kmx` / `p_kmy`), `mon_momx`, `mon_momy` (32 s x nmon, `mkx` / `mky`), `mon_fx`, `mon_fy` (16 u x
+  nmon, `mfx` / `mfy`), `drop_x`, `drop_y` (16 s x nmon, INDEXED BY MONSTER SLOT like `mon_drop`, label `thpos_rt`),
+  `proj_z` (16 s x FIREBALL_POOL, `pj_z`); `fight`: `mon_target` widened to `_index_bits(nmon + 2)` bits (0 / 1 the
+  player / 2 + slot), `bar_src` (same width x nbarrel). All phase "P8a", all 0, written by nobody.
+  `gamedata.FRICTION = 0xE800`, `STOPSPEED = 0x1000`.
+- **Model**: `damage_monster(m, dmg, source, inflictor, ev)`, `damage_player(dmg, source, inflictor, ev)`,
+  `damage_barrel(b, dmg, source, ev)`; inflictors are the source tuples plus `("proj", s)`; None = DOOM's NULL (sector
+  damage, gate and test pokes). The model's sites: the player's shot ("player", -1); a monster's hitscan / melee
+  ("mon", m); a fireball's impact ("proj", s); a blast ("bar", b) on the player and on monsters (its SOURCE stays
+  ("player", -1) until I's `bar_src`). `CombatMixin._p_knock` = knockback_on; `_thrust(target, inflictor, source, dmg)`
+  is called (when `_p_knock`) after the dead / not-shootable return and BEFORE the armor and the health -- empty;
+  `_xy_move(thing, ev)` declared, called by nobody. `World.drop_pos(m)` (m = the monster SLOT) returns the corpse's
+  position and is now the reader in `_touch_specials`, `MonsterPhase.mobiles` and `MonsterViews.rt_state` (K: its body
+  and the drop row's LEAF, still `mon_leaf[m]` there). NOT routed (V / K): `scratchpad/gp/scenarios_v2.py`'s drop goal
+  and `census_lib.py`'s drop rows still read `mon_x` / `mon_y`.
+- **fj** (`doomfj.knockcode`, NEW -- package 0's interface, K's module): `kb_tg` (2: 0 the player, 1 + slot), `kb_dm`
+  (2, the raw damage), `kb_on` (1: an inflictor is set; the damage leaf zeroes it on every exit), `kb_ix`, `kb_iy` (4,
+  the inflictor's whole units), `kb_iz` (4, declared, K writes it), `kb_ret`; `stl.fcall kb_go, kb_ret` with the stub
+  `kb_go: stl.fret kb_ret` (`knockcode.go_lines`); `inflictor_lines(x, y)` / `inflictor_const_lines`. Sites, each
+  behind `knock=` (default off: P7's text): `hurtcode.dp_lines(knock)` (kb_tg 0, kb_dm = dp_dmg, kb_go after
+  `dp_pos`'s checks, before the armor -- FJ-PROVEN in `tests/fj/test_player_damage_fj.py`'s knock test with a
+  recording stub against the model's `_thrust`, three mutants caught); `damagecode.leaf_lines(knock)` (labels `dm_kbp`
+  / `dm_kbgo`: the player's inflictor unless BLAST, then kb_go, before the health) and `go_lines(knock)` (each stub
+  `dmg<m>` sets kb_tg = 1 + m); `barrelcode.blast_lines(knock)` (bl_px / bl_py before dp_go and each dmg<m>);
+  `projcode.pj_lines(knock)` (pw_x / pw_y + 4*dw, unmoved, before the impact's dp_go); and -- NOT in the list above --
+  `monsterdecide.attack_leaf_lines(full, knock)` / `decide_leaves(..., knock)` (mm_x / mm_y before each of md_attack's
+  three dp_go calls: the monster's hitscan and melee on the player need an inflictor too). Plumbing: `p31_parts`
+  computes `knock` (loot and knockback_on) and passes it to `damage_parts`, `barrel_parts`, `proj_parts` and the
+  slots; `hurt_parts(knock)`; the emitter's `_SINK`, `_KNOCK`, `_FIGHT` (from the rules, after `_LOOT`'s last word),
+  asserting `p31_parts`' knock agrees.
+- **Splice points** (empty functions the packages fill): `knockcode.player_move_lines()` -> `_standalone_input_lines(
+  knock_move=)`, right after `simmv_done` and before the bar's weapon slots (K); `knockcode.monster_slot_lines(m)` ->
+  `monstercode.p32a_slot(knock=True)`, right after the slot's "not active" skip (K); `wall_renderer.
+  landing_drop_lines()` right after `dsc_done:` behind `_SINK` (A; only the render reads viewz -- the monsters' world
+  tic that follows does not).
+- **Persist**: `build.VIEW_PERSIST = ()`, `KNOCK_PERSIST = knockcode.PERSIST (= ())`, `FIGHT_PERSIST = ()`;
+  `build.p8a_persist(pm=None, mm=None)` adds each behind its rule at the game tier's modes, into `persist_labels` and
+  `game_screen_persisted_decls` (whose candidates come from the hook `build.p8a_persisted_decls(map_wad, mapname)`,
+  empty). `tests/host/test_restart_coverage.py::test_every_p8a_hook_is_wired` FAILS once a rule is on and its hook
+  lacks a section-4.1 cell.
+
 ### 3.1 The packages
 
 | pkg | writes (files / functions) | tests it ships (FAIL first, each fj harness with R9 mutants) |

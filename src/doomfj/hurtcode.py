@@ -308,7 +308,14 @@ TURN_DECLS = ["dt_t: hex.vec 2", "dt_off: hex.vec w/4", "dt_base: hex.vec w/4", 
               "dt_cm5: hex.vec 8, %d" % (-ANG5 & 0xFFFFFFFF), "dt_tret: hex.vec w/4"]
 
 
-def turn_lines(slot_rows: Sequence[int]) -> List[str]:
+def sink_decls() -> List[str]:
+    """M7 P8a A: `turn_lines(sink=True)`'s constant -- the drop's cap, VIEW_DROP_MAX (41 - 6 = 35 units). The cell it
+    lowers, `p_vd`, is restartcode's (VIEW_PERSIST: declared, persisted and restarted there)"""
+    from doomfj.reference_model import VIEW_DROP_MAX
+    return ["dt_vmx: hex.vec 2, %d" % VIEW_DROP_MAX]
+
+
+def turn_lines(slot_rows: Sequence[int], sink: bool = False) -> List[str]:
     """`dt_turn` (stl.fcall dt_turn, dt_tret): the death think's turn and damage-flash fade, for a dead player.
     `slot_rows[m]` = monster slot m's runtime thing: its thpos_rt row holds the whole-unit 16.16 position (the
     model's mon_x / mon_y << 16). No attacker (p_atk 0): the flash fades. Else the attacker's row -- p_atk's two-level
@@ -317,14 +324,22 @@ def turn_lines(slot_rows: Sequence[int]) -> List[str]:
     point_to_angle exactly, into mr_ang -- one shared instance instead of a second ~46K-word expansion);
     delta = mr_ang - viewangle (mod 2^32): delta < ANG5 or delta > -ANG5 (unsigned) -> viewangle = the angle and the
     flash fades; else viewangle +- ANG5, the short way (+ while delta < ANG180). PACKAGE B'S DEATH THINK calls this in
-    place of its plain p_dc fade (HOOK). The program must hold mon_rot_leaf (P3.1's) and thpos_rt."""
+    place of its plain p_dc fade (HOOK). The program must hold mon_rot_leaf (P3.1's) and thpos_rt.
+    M7 P8a A (`sink`, world.player_sinks; docs/gp-final-plan.md 1.1): P_DeathThink's VIEW DROP first -- after the
+    psprites (the caller's weapon tic), before the turn: p_vd += 1 while p_vd < VIEW_DROP_MAX (`dt_vmx`, sink_decls):
+    viewheight 41 - p_vd lowered one unit a dead tic, never below 6 (combat.CombatMixin._death_think). The landing
+    applies it to the eye (wall_renderer.landing_drop_lines). Off: P7's text, byte for byte."""
     from doomfj.combat import ANG5 as MODEL_ANG5
     assert ANG5 == MODEL_ANG5
     n = len(slot_rows)
     assert 0 < n + 1 <= 0x80 and all(0 <= t < 0x100 for t in slot_rows), (n, max(slot_rows))
     hi = (n + 1 + 15) // 16
-    out = ["dt_turn:",
-           "    hex.if0 2, p_atk, dtt_fade",
+    out = ["dt_turn:"]
+    if sink:                                   # M7 P8a A: the view drop, 1 unit a dead tic to VIEW_DROP_MAX
+        out += ["    hex.cmp 2, p_vd, dt_vmx, dtt_vinc, dtt_vend, dtt_vend",
+                "  dtt_vinc:", "    hex.inc 2, p_vd",
+                "  dtt_vend:"]
+    out += ["    hex.if0 2, p_atk, dtt_fade",
            "    sim.jump16 p_atk + 1*dw, " + ", ".join("dtt_h%d" % h if h < hi else "dtt_fade" for h in range(16))]
     for h in range(hi):
         out += ["  dtt_h%d:" % h, "    sim.jump16 p_atk, " + ", ".join(

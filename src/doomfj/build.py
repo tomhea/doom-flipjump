@@ -144,7 +144,8 @@ BARREL_PERSIST: tuple = _barrelcode.BARREL_PERSIST
 # tests/host/test_restart_coverage.py's `test_every_p8a_hook_is_wired` FAILS while a cell of section 4.1 is emitted
 # and not wired, and tests/fj/test_restart_fj.py then checks the restart writes it.
 from doomfj import knockcode as _knockcode                                       # noqa: E402 (M7 P8a, package K)
-VIEW_PERSIST: tuple = ()
+from doomfj import restartcode as _restartcode_p8a                              # noqa: E402 (M7 P8a, package A)
+VIEW_PERSIST: tuple = _restartcode_p8a.VIEW_PERSIST                            # package A: p_vd
 KNOCK_PERSIST: tuple = _knockcode.PERSIST
 FIGHT_PERSIST: tuple = ()
 
@@ -163,9 +164,9 @@ def p8a_persist(player_mode: str = None, monster_mode: str = None) -> tuple:
 
 def p8a_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     """M7 P8a HOOK: the P8a modules' declarations of their persisted cells (widths matter to a restore set, values do
-    not) -- `game_screen_persisted_decls`' candidates for VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST. Empty until a
-    package declares cells"""
-    return []
+    not) -- `game_screen_persisted_decls`' candidates for VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST. Candidates
+    only: a name is persisted by `p8a_persist`, behind its rule"""
+    return list(_restartcode_p8a.view_decls())                                  # package A: p_vd
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:

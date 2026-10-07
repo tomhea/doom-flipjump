@@ -146,7 +146,7 @@ BARREL_PERSIST: tuple = _barrelcode.BARREL_PERSIST
 from doomfj import knockcode as _knockcode                                       # noqa: E402 (M7 P8a, package K)
 VIEW_PERSIST: tuple = ()
 KNOCK_PERSIST: tuple = _knockcode.PERSIST
-FIGHT_PERSIST: tuple = ()
+FIGHT_PERSIST: tuple = _barrelcode.FIGHT_PERSIST     # M7 P8a I: bar_src (mon_target is MONSTER_PERSIST's, widened)
 
 
 def p8a_persist(player_mode: str = None, monster_mode: str = None) -> tuple:
@@ -165,7 +165,9 @@ def p8a_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     """M7 P8a HOOK: the P8a modules' declarations of their persisted cells (widths matter to a restore set, values do
     not) -- `game_screen_persisted_decls`' candidates for VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST. Empty until a
     package declares cells"""
-    return []
+    from doomfj.world import World
+    # M7 P8a I: bar_src (barrelcode.fight_decls)
+    return [d for d in _barrelcode.fight_decls(World(map_wad, mapname)) if d.split(":")[0] in FIGHT_PERSIST]
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:

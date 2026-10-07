@@ -55,6 +55,14 @@ What the emit-time asserts hold (`check_model_rules`): no `max(1, tics - roll)` 
 lasts >= 4 tics), no pool state is forever or zero-tic, S_NULL is index 0, and the missile cells' rules
 (`missile_rows`): a lift line never shuts a missile; a door's or the floor switch's line is shut exactly below a
 pass state; no line touches two dynamic sectors.
+
+M7 P8a I (`fight`, world.infighting_on; combat._missile_things): the spawn aims at the TARGET (monsterdecide's mt_tqx /
+mt_tqy, through the shared angle leaf `ia_leaf`); pj_try meets THINGS after the player -- the monster slots, then the
+barrels (`pt_lines`): a thing whose box overlaps (|dx| < r + 6 on both axes, in 16.16 -- decided exactly on the
+integer parts: 1 - B <= X - floor(nx) <= B - [nx's fraction is 0], B = r + 6, `pt_bounds`) and that is solid or
+shootable stops it (`pt_thing`): its shooter is passed, the shooter's species (every shooter is an imp: asserted)
+explodes it with no damage, a solid corpse or an exploding barrel with none, anything else takes the impact roll
+through damagecode's dm_go (MONSTER mode, dm_src the shooter, the missile the inflictor).
 """
 from typing import Dict, List, Tuple
 
@@ -307,18 +315,21 @@ def _copy_out(prefix: str, s: int, t: int, fields) -> List[str]:
                   "    hex.mov 3, thss_rt + %d*dw, pw_leaf" % (16 * t)]
 
 
-def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, knock: bool = False) -> List[str]:
+def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, knock: bool = False,
+             fight=None) -> List[str]:
     """pj_spawn (+ its slot stubs), pj_spawn_leaf, pj_try, pj_explode, pj_leaf, pj_phase (+ its stubs); pool_tic is
     `pool_tic_lines`'.
     `nt`: the runtime things before the pools (fireball slot s is thing nt + s); `root`: the missile cells' entry
     (`missile_cells_fj`); `pool`: FIREBALL_POOL (the harness's control builds another). `knock` (M7 P8a,
-    world.knockback_on): the impact sets the missile as dp_go's inflictor (doomfj.knockcode)"""
+    world.knockback_on): the impact sets the missile as dp_go's inflictor (doomfj.knockcode). `fight` (M7 P8a I:
+    `fight_things`' dict, None off): the aim at the target, the things after the player (the module docstring)"""
     P, _Q = _pool_sizes()
     pool = P if pool is None else pool
     from doomfj.combat import FIREBALL_R
     from doomfj.knockcode import inflictor_lines
     info = _info()
     sp, dth = info.spawnstate, info.deathstate
+    pnext = "pj_tm" if fight else "pj_tl"                               # M7 P8a I: after the player, the things
     out = ["pj_spawn:"]
     out += ["    hex.if0 1, pj_act + %d*dw, pj_sp%d" % (s, s) for s in range(pool)]
     out += ["    stl.fret pj_sret"]                                       # full: the attack fizzles, no draw
@@ -331,7 +342,10 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
             # the shooter's position, 16.16, and R_PointToAngle2 from it to the player
             "    hex.zero 4, pw_x", "    hex.mov 4, pw_x + 4*dw, mm_x",
             "    hex.zero 4, pw_y", "    hex.mov 4, pw_y + 4*dw, mm_y",
-            "    proj.point_to_angle pw_ang, pw_x, pw_y, viewx, viewy, 1",
+            *(["    proj.point_to_angle pw_ang, pw_x, pw_y, viewx, viewy, 1"] if not fight else
+              ["    hex.mov 8, ia_x1, pw_x", "    hex.mov 8, ia_y1, pw_y",       # M7 P8a I: at the TARGET
+               "    hex.mov 8, ia_x2, mt_tqx", "    hex.mov 8, ia_y2, mt_tqy",
+               "    stl.fcall ia_leaf, ia_ret", "    hex.mov 8, pw_ang, ia_ang"]),
             "    hex.mov 3, pw_idx, pw_ang + 5*dw",                          # the fine angle: angle >> 20
             "    finesine.read_cos pw_mx, pw_idx", *_times10("pw_mx"),
             "    finesine.read_sin pw_my, pw_idx", *_times10("pw_my"),
@@ -352,15 +366,15 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
             # ---- P_TryMove for a missile at (pw_nx, pw_ny): pw_ok ------------------------------------------------
             "pj_try:",
             "    hex.zero 1, pw_ok",
-            "    hex.if1 1, p_dead, pj_tl",                                  # the player alive: not dead ...
-            "    hex.sign 3, p_hp, pj_tl, pj_ta",                            # ... and health > 0
+            "    hex.if1 1, p_dead, %s" % pnext,                             # the player alive: not dead ...
+            "    hex.sign 3, p_hp, %s, pj_ta" % pnext,                       # ... and health > 0
             "  pj_ta:",
-            "    hex.if0 3, p_hp, pj_tl",
+            "    hex.if0 3, p_hp, %s" % pnext,
             "    hex.mov 8, pw_c, viewx", "    hex.sub 8, pw_c, pw_nx", "    hex.abs 8, pw_c",
-            "    hex.scmp 8, pw_c, pj_bd, pj_tb, pj_tl, pj_tl",
+            "    hex.scmp 8, pw_c, pj_bd, pj_tb, %s, %s" % (pnext, pnext),
             "  pj_tb:",
             "    hex.mov 8, pw_c, viewy", "    hex.sub 8, pw_c, pw_ny", "    hex.abs 8, pw_c",
-            "    hex.scmp 8, pw_c, pj_bd, pj_hit, pj_tl, pj_tl",
+            "    hex.scmp 8, pw_c, pj_bd, pj_hit, %s, %s" % (pnext, pnext),
             "  pj_hit:",                                                     # the impact: damage, refused
             *_roll(),
             "    hex.mov 2, dp_dmg, pw_rr",
@@ -369,6 +383,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
             *(inflictor_lines("pw_x + 4*dw", "pw_y + 4*dw") if knock else []),
             "    stl.fcall dp_go, dp_ret",
             "    stl.fret pj_tret",
+            *(pt_lines(fight, knock) if fight else []),                     # M7 P8a I: monsters, then barrels
             "  pj_tl:",                                                      # the lines: the missile cells
             "    hex.mov 8, cpx, pw_nx", "    hex.mov 8, cpy, pw_ny",
             "    hex.set 8, cprad, %d" % (FIREBALL_R << 16),
@@ -417,6 +432,126 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
                 "    stl.fcall pj_out%d, pj_oret" % s,
                 "  pj_ph%d_n:" % s]
     out += ["  pj_ph_out:", "    stl.fret pj_pret"]
+    return out
+
+
+# ---- M7 P8a I: the things a fireball meets (combat._missile_things) ------------------------------------------------
+PT_DECLS = ["pt_me: hex.vec 2", "pt_j: hex.vec 2", "pt_imp: hex.vec 1", "pt_sh: hex.vec 1", "pt_stop: hex.vec 1",
+            "pt_f0: hex.vec 4", "pt_tret: hex.vec w/4"]
+
+
+def fight_things(w, slot_rt) -> dict:
+    """the facts `pt_lines` bakes from the World `w`: each slot's runtime thing, radius and species flag (an imp: the
+    only shooter -- asserted), the barrels' positions, the box half-widths B = r + FIREBALL_R by radius"""
+    from doomfj.combat import BARREL_R, FIREBALL_R
+    n = w.layout.nmon
+    from doomfj.monsterdecide import type_decide
+    shooters = {t.type for m, t in enumerate(w.mon_things) if "A_TroopAttack" in type_decide(w.mon_info[m])["acts"]}
+    assert shooters == {3001}, ("M7 P8a I: the species rule assumes every fireball's shooter is an imp", shooters)
+    radii = [w.mon_radius[m] for m in range(n)]
+    return {"slot_rt": list(slot_rt), "radii": radii, "imp": [int(w.mon_things[m].type == 3001) for m in range(n)],
+            "barrels": [(t.x, t.y) for t in w.barrel_things],
+            "bounds": sorted({r + FIREBALL_R for r in radii} | {BARREL_R + FIREBALL_R})}
+
+
+def pt_decls(ft: dict) -> List[str]:
+    """the per-class integer bounds (`pt_bounds`) and the barrels' positions (x at 8b, y at 8b + 4: 4 nibbles each)"""
+    out = list(PT_DECLS)
+    for b_ in ft["bounds"]:
+        out += ["pt_lx%d: hex.vec 4" % b_, "pt_hx%d: hex.vec 4" % b_, "pt_ly%d: hex.vec 4" % b_,
+                "pt_hy%d: hex.vec 4" % b_]
+    bars = ft["barrels"]
+    out.append("pt_bar: hex.vec %d, %d" % (max(1, 8 * len(bars)),
+                                           sum(((x & 0xFFFF) | ((y & 0xFFFF) << 16)) << (32 * b) for b, (x, y) in
+                                               enumerate(bars))))
+    return out
+
+
+def _box(xcell: str, ycell: str, b_: int, hit: str, miss: str, tag: str) -> List[str]:
+    """X in [pt_lx, pt_hx] and Y in [pt_ly, pt_hy] (4-nibble signed) -> hit, else miss"""
+    return ["    hex.scmp 4, %s, pt_lx%d, %s, %s_1, %s_1" % (xcell, b_, miss, tag, tag),
+            "  %s_1:" % tag,
+            "    hex.scmp 4, %s, pt_hx%d, %s_2, %s_2, %s" % (xcell, b_, tag, tag, miss),
+            "  %s_2:" % tag,
+            "    hex.scmp 4, %s, pt_ly%d, %s, %s_3, %s_3" % (ycell, b_, miss, tag, tag),
+            "  %s_3:" % tag,
+            "    hex.scmp 4, %s, pt_hy%d, %s, %s, %s" % (ycell, b_, hit, hit, miss)]
+
+
+def pt_lines(ft: dict, knock: bool = False) -> List[str]:
+    """`pj_tm`, pj_try's things (entered after the player's test misses; falls to `pj_tl`, the lines, when no thing
+    stops the fireball; a stop returns through pj_tret with pw_ok 0), and `pt_thing`. The box is decided exactly on
+    the integer parts (the module docstring): per half-width B, X - floor(nx) in [1 - B, B - [frac(nx) == 0]]"""
+    from doomfj.combat import FIREBALL_R
+    from doomfj.damagecode import MONSTER
+    from doomfj.knockcode import inflictor_lines
+    out = ["  pj_tm:",
+           "    hex.mov 2, pt_me, pw_src", "    hex.inc 2, pt_me",            # the shooter's code: 2 + slot
+           "    hex.zero 4, pt_f0", "    hex.if1 4, pw_nx, pt_fx", "    hex.set 1, pt_f0, 1",
+           "  pt_fx:"]
+    for b_ in ft["bounds"]:                                                 # the x bounds by half-width
+        out += ["    hex.mov 4, pt_lx%d, pw_nx + 4*dw" % b_, "    hex.add_constant 4, pt_lx%d, %d" % (b_, (1 - b_) & 0xFFFF),
+                "    hex.mov 4, pt_hx%d, pw_nx + 4*dw" % b_, "    hex.add_constant 4, pt_hx%d, %d" % (b_, b_),
+                "    hex.sub 4, pt_hx%d, pt_f0" % b_]
+    out += ["    hex.zero 4, pt_f0", "    hex.if1 4, pw_ny, pt_fy", "    hex.set 1, pt_f0, 1",
+            "  pt_fy:"]
+    for b_ in ft["bounds"]:
+        out += ["    hex.mov 4, pt_ly%d, pw_ny + 4*dw" % b_, "    hex.add_constant 4, pt_ly%d, %d" % (b_, (1 - b_) & 0xFFFF),
+                "    hex.mov 4, pt_hy%d, pw_ny + 4*dw" % b_, "    hex.add_constant 4, pt_hy%d, %d" % (b_, b_),
+                "    hex.sub 4, pt_hy%d, pt_f0" % b_]
+    n = len(ft["slot_rt"])
+    for m, (t, r, imp) in enumerate(zip(ft["slot_rt"], ft["radii"], ft["imp"])):
+        L = "pt_m%d" % m
+        out += ["    hex.if1 1, mon_solid + %d*dw, %s_b" % (m, L),            # solid or shootable
+                "    hex.if0 1, mon_shootable + %d*dw, %s_n" % (m, L),
+                "  %s_b:" % L]
+        out += _box("thpos_rt + %d*dw" % (16 * t + 4), "thpos_rt + %d*dw" % (16 * t + 12), r + FIREBALL_R,
+                    L + "_h", L + "_n", L)
+        out += ["  %s_h:" % L,
+                "    hex.set 2, pt_j, %d" % (2 + m), "    hex.set 1, pt_imp, %d" % imp,
+                "    hex.mov 1, pt_sh, mon_shootable + %d*dw" % m,
+                "    stl.fcall pt_thing, pt_tret",
+                "    hex.if1 1, pt_stop, pt_done",
+                "  %s_n:" % L]
+    from doomfj.combat import BARREL_R
+    for b, _xy in enumerate(ft["barrels"]):
+        L = "pt_b%d" % b
+        out += ["    hex.if0 1, bar_solid + %d*dw, %s_n" % (b, L)]
+        out += _box("pt_bar + %d*dw" % (8 * b), "pt_bar + %d*dw" % (8 * b + 4), BARREL_R + FIREBALL_R,
+                    L + "_h", L + "_n", L)
+        out += ["  %s_h:" % L,
+                # shootable while standing: state != 0 and health > 0 (combat.shootable_targets)
+                "    hex.zero 1, pt_sh",
+                "    hex.if0 2, bar_st + %d*dw, %s_s" % (2 * b, L),
+                "    hex.if_flags bar_hp + %d*dw, 0xFF00, %s_p, %s_s" % (2 * b + 1, L, L),
+                "  %s_p:" % L,
+                "    hex.if0 2, bar_hp + %d*dw, %s_s" % (2 * b, L),
+                "    hex.set 1, pt_sh, 1",
+                "  %s_s:" % L,
+                "    hex.set 2, pt_j, %d" % (2 + n + b), "    hex.zero 1, pt_imp",
+                "    stl.fcall pt_thing, pt_tret",
+                "    hex.if1 1, pt_stop, pt_done",
+                "  %s_n:" % L]
+    out += ["    ;pj_tl",
+            "  pt_done:",                                                    # stopped by a thing: pw_ok 0
+            "    stl.fret pj_tret",
+            # one thing the box met: its code pt_j, pt_imp (the shooter's species), pt_sh (shootable)
+            "pt_thing:",
+            "    hex.zero 1, pt_stop",
+            "    hex.cmp 2, pt_j, pt_me, pt_st, pt_out, pt_st",                # the shooter: passed
+            "  pt_st:",
+            "    hex.set 1, pt_stop, 1",
+            "    hex.if1 1, pt_imp, pt_out",                                  # its species: explode, no damage
+            "    hex.if0 1, pt_sh, pt_out",                                   # solid, not shootable: no damage
+            *_roll(),
+            "    hex.mov 2, dm_dmg, pw_rr",
+            "    hex.set 1, dm_melee, %d" % MONSTER,
+            "    hex.mov 2, dm_src, pt_me",
+            "    hex.mov 2, dm_id, pt_j", "    hex.dec 2, dm_id",
+            *(inflictor_lines("pw_x + 4*dw", "pw_y + 4*dw") if knock else []),   # M7 P8a: the missile inflicts
+            "    stl.fcall dm_go, dm_ret",
+            "  pt_out:",
+            "    stl.fret pt_tret"]
     return out
 
 
@@ -549,7 +684,7 @@ def restart_lines(pool: int = None, fxn: int = None, *, nt: int) -> List[str]:
 
 
 def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs: bool = False,
-               knock: bool = False) -> dict:
+               knock: bool = False, fight: bool = False, slot_rt=None) -> dict:
     """everything P5's pools add, for the World `w`:
       * `decls`: pool_decls() (an empty pool, rng_fx at its seed);
       * `lines`: pj_* / pool_tic / fx_* -- leaves (each ends in a fret), placed where nothing falls in;
@@ -560,9 +695,13 @@ def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs:
     state (cpx, cpy, cprad, cp_ok, ...), ptx / pty / ptss / ptloc_walk, the leaf lists (sshead, thnext, ll_*),
     thpos_rt / thss_rt (rows nt .. nt + 9), mt_dx / mt_dy / mt_ax / mt_ay and mm_octant / mm_fa (the decide
     leaves), finesine, the point_to_angle tables; and it CALLS dp_go (hurtcode). `knock` (M7 P8a, world.knockback_on):
-    the impact names the missile as dp_go's inflictor (doomfj.knockcode's interface, which the caller adds)."""
+    the impact names the missile as dp_go's inflictor (doomfj.knockcode's interface, which the caller adds).
+    `fight` (M7 P8a I; `slot_rt[m]` slot m's runtime thing): the aim at the target, the things after the player --
+    the program must hold monsterdecide's fight parts and damagecode's dm_go."""
     check_model_rules(puffs)
     cells, root = missile_cells_fj(w, pfx)
-    return {"decls": pool_decls(puffs=puffs), "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard, knock=knock)
+    ft = fight_things(w, slot_rt) if fight else None
+    return {"decls": pool_decls(puffs=puffs) + (pt_decls(ft) if fight else []),
+            "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard, knock=knock, fight=ft)
             + pool_tic_lines() + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs), "cells": cells, "root": root,
             "tables": tables_fj(puffs), "restart": restart_lines(nt=nt), "persist": PERSIST}

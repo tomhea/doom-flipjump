@@ -108,7 +108,6 @@ def test_the_union_of_the_cells_lists_is_the_los(world):
     w = world
     segs = MS.sight_segments(w)
     lists = MS.cell_lists(segs, MS.map_cells(w))
-    rng = random.Random(7)
     pairs = _pairs(w)
     blocked = far_beyond = 0
     for p, q16, seed in pairs:

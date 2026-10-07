@@ -16,7 +16,7 @@ import pytest
 
 from doomfj import gamedata as gd
 from doomfj import rng as R
-from doomfj.combat import FIREBALL_INFO, HWT_SHIFT, MISSILERANGE_U, hit_half_width, half_width_table
+from doomfj.combat import FIREBALL_INFO, HWT_SHIFT, hit_half_width, half_width_table
 from doomfj.world import (MELEE_BASE, MELEE_REACH, TicEvents, World, aprox_distance, infighting_on)
 
 C = (800, 400)            # an open spot on E1M1 (the room of slots 21-23): clear 2D sight 150 units every way
@@ -292,7 +292,7 @@ def test_the_same_species_explodes_with_no_damage(w):
     imp, imp2 = _of(w, 3001), _of(w, 3001, 1)
     _place(w, imp, *C, target=2 + imp2)
     _place(w, imp2, C[0] + 100, C[1])
-    hp, fx = ws.mon_health[imp2], ws.rng_fx
+    hp = ws.mon_health[imp2]
     ev = TicEvents(0)
     w._spawn_fireball(imp, ev)
     s = ev.proj_spawns[0][0]

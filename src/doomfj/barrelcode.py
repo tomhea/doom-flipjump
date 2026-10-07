@@ -198,7 +198,8 @@ def _vec(name: str, nib: int, vals: Sequence[int]) -> str:
 def fight_decls(w, values: dict = None) -> List[str]:
     """M7 P8a I: `bar_src` (all 0 at level start; `values` overrides: the harness) and the source registers"""
     v = (values or {}).get("bar_src", [0] * len(w.barrel_things))
-    return [_vec("bar_src", 2, v), "bd_src: hex.vec 2", "bl_src: hex.vec 2", "bw_sr: hex.vec 2"]
+    return [_vec("bar_src", 2, v), "bd_src: hex.vec 2", "bl_src: hex.vec 2", "bw_sr: hex.vec 2",
+            "dmb_sret: hex.vec w/4"]
 
 
 def decls(w, boot_skill: int, values: dict = None) -> List[str]:

@@ -538,11 +538,11 @@ def pt_lines(ft: dict, knock: bool = False) -> List[str]:
             # one thing the box met: its code pt_j, pt_imp (the shooter's species), pt_sh (shootable)
             "pt_thing:",
             "    hex.zero 1, pt_stop",
-            "    hex.cmp 2, pt_j, pt_me, pt_st, pt_out, pt_st",                # the shooter: passed
-            "  pt_st:",
+            "    hex.cmp 2, pt_j, pt_me, pt_tst, pt_tout, pt_tst",                # the shooter: passed
+            "  pt_tst:",
             "    hex.set 1, pt_stop, 1",
-            "    hex.if1 1, pt_imp, pt_out",                                  # its species: explode, no damage
-            "    hex.if0 1, pt_sh, pt_out",                                   # solid, not shootable: no damage
+            "    hex.if1 1, pt_imp, pt_tout",                                  # its species: explode, no damage
+            "    hex.if0 1, pt_sh, pt_tout",                                   # solid, not shootable: no damage
             *_roll(),
             "    hex.mov 2, dm_dmg, pw_rr",
             "    hex.set 1, dm_melee, %d" % MONSTER,
@@ -550,7 +550,7 @@ def pt_lines(ft: dict, knock: bool = False) -> List[str]:
             "    hex.mov 2, dm_id, pt_j", "    hex.dec 2, dm_id",
             *(inflictor_lines("pw_x + 4*dw", "pw_y + 4*dw") if knock else []),   # M7 P8a: the missile inflicts
             "    stl.fcall dm_go, dm_ret",
-            "  pt_out:",
+            "  pt_tout:",
             "    stl.fret pt_tret"]
     return out
 

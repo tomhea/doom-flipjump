@@ -409,21 +409,21 @@ def xy_lines() -> List[str]:
            "    hex.if1 1, kb_who, kq_crm",
            "    hex.mov 8, cpx, viewx", "    hex.mov 8, cpy, viewy",          # the player: his box's floorz ...
            "    stl.fcall kb_cell, kb_cret",
-           "    hex.cmp 8, cp_floor, cp_seedf, kq_out, kq_stop, kq_out",     # ... against his leaf's floor
+           "    hex.cmp 8, cp_floor, cp_seedf, kq_xout, kq_stop, kq_xout",     # ... against his leaf's floor
            "  kq_crm:",                                                       # a monster: its floorz ...
            "    hex.zero w/4, ptss", "    hex.mov 3, ptss, mm_leafw",
            "    stl.fcall ms_seed_leaf, ms_seed_ret",
-           "    hex.cmp 8, mm_z, cp_seedf, kq_out, kq_stop, kq_out",         # ... against its leaf's floor
+           "    hex.cmp 8, mm_z, cp_seedf, kq_xout, kq_stop, kq_xout",         # ... against its leaf's floor
            # the stop, or the friction
            "  kq_stop:",
            *_abs_cmp("kb_vx", STOPSPEED, "kq_sy", "kq_fr", "kq_fr", "kq_s1"),
            "  kq_sy:",
            *_abs_cmp("kb_vy", STOPSPEED, "kq_zero", "kq_fr", "kq_fr", "kq_s2"),
            "  kq_zero:",
-           "    hex.zero 8, kb_vx", "    hex.zero 8, kb_vy", "    ;kq_out",
+           "    hex.zero 8, kb_vx", "    hex.zero 8, kb_vy", "    ;kq_xout",
            "  kq_fr:",
            *_friction("kb_vx", "kq_frx"), *_friction("kb_vy", "kq_fry"),
-           "  kq_out:",
+           "  kq_xout:",
            "    stl.fret kb_xyret",
            "kb_try:",
            "    hex.if1 1, kb_who, kb_mtry",

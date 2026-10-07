@@ -1970,6 +1970,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _KNOCK = bool(_LOOT and _W8.knockback_on(PLAYER_MODE, MONSTER_MODE))      # K: P_DamageMobj's thrust, the knock
     _FIGHT = bool(_LOOT and _W8.infighting_on(MONSTER_MODE))                  # I: monsters fight monsters
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
+    assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
     _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
     assert bool(_p31 and _p31.get("d3")) == _D3, "M7 P8a: p31_parts' compositor rules and the emitter's disagree"
     if _LOOT:                                 # the oracle's two D3 keys (reference_model.GAME_RENDER_KW) follow the rule
@@ -3001,12 +3002,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
                                   dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"])
-                + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
+                + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES,
+                                 **({"fight": True} if _FIGHT else {}))    # M7 P8a I: toward the target
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
                 # M7 P3.2c: the decisions, the attack actions and the near LOS (monsterdecide, monstersight)
                 + ((_decide_leaves(justhit=bool(_p31.get("justhit")),
                                    full=bool(_chase.get("hurt")),       # M7 P5: md_attack APPLIES its draws
-                                   **({"knock": True} if _KNOCK else {}))   # M7 P8a: the attacker inflicts
+                                   **({"knock": True} if _KNOCK else {}),   # M7 P8a: the attacker inflicts
+                                   **({"fight": True} if _FIGHT else {}))   # M7 P8a I: the TARGET's
                     + _p31["decide_lines"])
                    if _p31.get("decide_lines") else [])
                 # M7 P5: the leaves the attacks land through -- dp_go (hurtcode), the pools' spawns, phases and shared

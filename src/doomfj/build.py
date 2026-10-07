@@ -147,7 +147,7 @@ from doomfj import knockcode as _knockcode                                      
 from doomfj import restartcode as _restartcode_p8a                              # noqa: E402 (M7 P8a, package A)
 VIEW_PERSIST: tuple = _restartcode_p8a.VIEW_PERSIST                            # package A: p_vd
 KNOCK_PERSIST: tuple = _knockcode.PERSIST
-FIGHT_PERSIST: tuple = ()
+FIGHT_PERSIST: tuple = _barrelcode.FIGHT_PERSIST     # M7 P8a I: bar_src (mon_target is MONSTER_PERSIST's, widened)
 
 
 def p8a_persist(player_mode: str = None, monster_mode: str = None) -> tuple:
@@ -166,10 +166,12 @@ def p8a_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     """M7 P8a HOOK: the P8a modules' declarations of their persisted cells (widths matter to a restore set, values do
     not) -- `game_screen_persisted_decls`' candidates for VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST. Candidates
     only: a name is persisted by `p8a_persist`, behind its rule. Package A: p_vd; package K: knockcode's (p_kmx ..
-    pj_z, at the map's slot count)"""
+    pj_z, at the map's slot count); package I: bar_src (barrelcode.fight_decls)"""
     from doomfj.world import World
+    w = World(map_wad, mapname)
     return (list(_restartcode_p8a.view_decls())                                  # package A: p_vd
-            + _knockcode.persisted_decls(World(map_wad, mapname).layout.nmon))  # package K
+            + _knockcode.persisted_decls(w.layout.nmon)                          # package K
+            + [d for d in _barrelcode.fight_decls(w) if d.split(":")[0] in FIGHT_PERSIST])   # package I
 
 
 def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:

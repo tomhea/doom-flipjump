@@ -54,7 +54,8 @@ few model conventions, all named here so nothing is silent:
   * The field of view (P_LookForPlayers, allaround = false) is the half-plane test
     dot(facing, offset) < 0, i.e. DOOM's `ANG90 < an < ANG270` without the atan.
   * No sound playback: the RNG calls that only choose a sound (see sound, active sound) are not
-    made. No `lastlook` (single player). No infighting (the target is always the player).
+    made. No `lastlook` (single player). No infighting (the target is always the player) -- M7 P8a I:
+    except in the monster mode "final" (`infighting_on`), where the target names a thing (combat).
   * Damage wakes a monster the D-WAKE way too: a hit on a monster still in its spawn state enters
     the see state without running its A_Chase (P_DamageMobj's P_SetMobjState would).
   * Monsters open plain doors (special 1, not ML_SECRET) when a move fails inside the door's use
@@ -132,7 +133,8 @@ TICS_FOREVER = 15                  # schema encoding of DOOM's tics == -1 (one n
 MOVECOUNT_FLOOR = -1               # movecount saturates here; see `_a_chase`
 OCTANT_TAN_NUM, OCTANT_TAN_DEN = 106, 256   # tan(22.5 deg) ~ 106/256: the octant classifier
 MONSTER_DOOR_SPECIALS = frozenset({1})       # P_UseSpecialLine: DR doors a monster may open
-MELEE_REACH = (gd.MELEERANGE >> 16) - 20 + (gd.PLAYERRADIUS >> 16)   # 60: P_CheckMeleeRange
+MELEE_BASE = (gd.MELEERANGE >> 16) - 20       # 44: P_CheckMeleeRange's reach before the target's radius
+MELEE_REACH = MELEE_BASE + (gd.PLAYERRADIUS >> 16)   # 60: P_CheckMeleeRange on the player (M7 P8a I: + a monster's)
 LOOK_BEHIND_REACH = gd.MELEERANGE >> 16      # 64: P_LookForPlayers sees behind within this
 CHASE_DEADZONE = 10                # P_NewChaseDir: |delta| <= 10 units picks no axis direction
 MISSILE_BIAS, MISSILE_NOMELEE_BIAS, MISSILE_CAP = 64, 128, 200      # P_CheckMissileRange
@@ -605,6 +607,10 @@ class TicEvents:
     frozen: bool = False                                    # level done: the tic did nothing
     # M7 P8a (package K): every knock try P_XYMovement made, (("player", -1) | ("mon", slot), accepted)
     knocks: List[tuple] = field(default_factory=list)
+    # -- M7 P8a I (infighting): a monster's attack that landed on a thing other than the player, and target switches
+    mon_hits: List[tuple] = field(default_factory=list)     # (shooter slot, "bullet"|"claw"|"bite"|"fireball",
+    #                                                         "mon"|"bar"|"species"|"corpse", index, damage)
+    retargets: List[tuple] = field(default_factory=list)    # (slot, new mon_target: 1 the player, 2 + slot)
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -774,6 +780,9 @@ class World(CombatMixin):
         assert monsters not in P8A_MONSTER_MODES or player == "final", (
             "M7 P8a: the monster mode %r needs the player mode \"final\", not %r" % (monsters, player))
         self.sight = sight or World.los_to_player
+        # M7 P8a I (docs/gp-final-plan.md 1.2.2): monsters FIGHT -- `mon_target` names a thing (0 none, 1 the player,
+        # 2 + slot), and every AI rule asks the TARGET (`_to_target`, `target_alive`); off, the target is the player
+        self._fight = infighting_on(monsters)
         # M7 P3.2 (docs/gp-monsters.md 8.2; the owner, 2026-09-30): "seen" -- waking by the picture or
         # REJECT within 128 units, attacking by the picture or the near-trace -- else (the default,
         # set v4's model) one exact-LOS `sight` for both. `seen_hook` writes mon_seen after each tic.
@@ -1015,6 +1024,9 @@ class World(CombatMixin):
             self.wake_sight, self.attack_sight = _S.wake_sight, _S.attack_sight
         else:
             self.wake_sight = self.attack_sight = lambda w, m: w.sight(w, m)
+            if getattr(self, "_fight", False):     # M7 P8a I: a MONSTER target's attack sight is the LOS to it (O-B2)
+                self.attack_sight = lambda w, m: (w.los_to_target(w, m) if w.ws.mon_target[m] >= 2
+                                                  else w.sight(w, m))
 
     def tic(self, keys: Optional[dict] = None) -> TicEvents:
         keys = {k: bool((keys or {}).get(k)) for k in KEYS}
@@ -1223,6 +1235,40 @@ class World(CombatMixin):
         ws = self.ws
         return (ws.px >> 16) - ws.mon_x[m], (ws.py >> 16) - ws.mon_y[m]
 
+    # ---- M7 P8a I (docs/gp-final-plan.md 1.2.2): THE TARGET -- 0 none, 1 the player, 2 + slot a monster. Without
+    # infighting `mon_target` is one bit (0 / 1), so every helper below is the player's rule, exactly as before
+    def _target_pos16(self, m: int) -> Tuple[int, int]:
+        """the target's 16.16 position: the player's (px, py), a monster's whole units << 16"""
+        ws, t = self.ws, self.ws.mon_target[m]
+        if t >= 2:
+            return ws.mon_x[t - 2] << 16, ws.mon_y[t - 2] << 16
+        return ws.px, ws.py
+
+    def _to_target(self, m: int) -> Tuple[int, int]:
+        """the target's offset in integer map units (the player's position floored: `_to_player`)"""
+        ws, t = self.ws, self.ws.mon_target[m]
+        if t >= 2:
+            return ws.mon_x[t - 2] - ws.mon_x[m], ws.mon_y[t - 2] - ws.mon_y[m]
+        return self._to_player(m)
+
+    def target_alive(self, m: int) -> bool:
+        """A_Chase's "a target, shootable" (and its threshold's "health > 0"): the player alive, or the monster active,
+        shootable and health > 0 (the three agree: damage keeps mon_shootable == active and health > 0)"""
+        ws, t = self.ws, self.ws.mon_target[m]
+        if t >= 2:
+            j = t - 2
+            return bool(ws.mon_active[j] and ws.mon_shootable[j] and ws.mon_health[j] > 0)
+        return bool(t) and self.player_alive()
+
+    def _target_radius(self, m: int) -> int:
+        t = self.ws.mon_target[m]
+        return self.mon_radius[t - 2] if t >= 2 else PLAYER_R
+
+    def _melee_reach(self, m: int) -> int:
+        """P_CheckMeleeRange: MELEERANGE - 20 + the TARGET's radius -- 60 the player (MELEE_REACH), 64 / 74 a monster"""
+        t = self.ws.mon_target[m]
+        return MELEE_BASE + self.mon_radius[t - 2] if t >= 2 else MELEE_REACH
+
     def _rand(self, m: int) -> int:
         v, self.ws.mon_rng[m] = R.p_random(self.ws.mon_rng[m])
         return v
@@ -1263,21 +1309,23 @@ class World(CombatMixin):
         if not ws.mon_target[m]:
             return
         ws.mon_ambush[m] = 0
-        ws.mon_facing[m] = octant_of(*self._to_player(m))
+        ws.mon_facing[m] = octant_of(*self._to_target(m))     # M7 P8a I: the target (the player before)
 
     def _a_chase(self, m: int, ev: TicEvents) -> None:
-        """A_Chase (p_enemy.c), single player, skill < nightmare."""
+        """A_Chase (p_enemy.c), single player, skill < nightmare. M7 P8a I: the TARGET's (`target_alive`,
+        `_to_target`) -- a dead monster target is lost as a dead player is: P_LookForPlayers all around, else the
+        spawn state (P_LookForPlayers still looks only for the player)."""
         ws, info = self.ws, self.mon_info[m]
         if ws.mon_reaction[m]:
             ws.mon_reaction[m] -= 1
         if ws.mon_threshold[m]:
-            if not ws.mon_target[m] or not self.player_alive():
+            if not self.target_alive(m):
                 ws.mon_threshold[m] = 0
             else:
                 ws.mon_threshold[m] -= 1
         if ws.mon_movedir[m] < 8:
             ws.mon_facing[m] = turn_toward(ws.mon_facing[m], ws.mon_movedir[m])
-        if not ws.mon_target[m] or not self.player_alive():
+        if not self.target_alive(m):
             if self._look_for_player(m, allaround=True):
                 return
             self._set_state(m, info.spawnstate, True, ev)
@@ -1310,7 +1358,7 @@ class World(CombatMixin):
     def _check_melee_range(self, m: int) -> bool:
         if not self.ws.mon_target[m]:
             return False
-        if aprox_distance(*self._to_player(m)) >= MELEE_REACH:
+        if aprox_distance(*self._to_target(m)) >= self._melee_reach(m):    # M7 P8a I: the target's radius
             return False
         return self.attack_sight(self, m)
 
@@ -1323,7 +1371,7 @@ class World(CombatMixin):
             return True
         if ws.mon_reaction[m]:
             return False
-        dist = aprox_distance(*self._to_player(m)) - MISSILE_BIAS
+        dist = aprox_distance(*self._to_target(m)) - MISSILE_BIAS
         if self.mon_info[m].meleestate == gd.S_NULL:
             dist -= MISSILE_NOMELEE_BIAS
         dist = min(dist, MISSILE_CAP)
@@ -1336,7 +1384,7 @@ class World(CombatMixin):
         ev.newchasedir += 1
         olddir = ws.mon_movedir[m]
         turnaround = gd.OPPOSITE[olddir]
-        dx, dy = self._to_player(m)
+        dx, dy = self._to_target(m)                       # M7 P8a I: toward the target
         d1 = (gd.DI_EAST if dx > CHASE_DEADZONE else gd.DI_WEST if dx < -CHASE_DEADZONE
               else gd.DI_NODIR)
         d2 = (gd.DI_SOUTH if dy < -CHASE_DEADZONE else gd.DI_NORTH if dy > CHASE_DEADZONE
@@ -1638,6 +1686,13 @@ class World(CombatMixin):
         closed at this tic's door heights. 2D (no eye heights) and exact on 16.16 integers."""
         ws = world.ws
         return world.los_points((ws.mon_x[m] << 16, ws.mon_y[m] << 16), (ws.px, ws.py))
+
+    @staticmethod
+    def los_to_target(world: "World", m: int) -> bool:
+        """M7 P8a I (O-B2): the attack sight of a monster whose target is a MONSTER -- the exact 2D LOS between the two
+        whole-unit centres, at any range (`los_points`; the "seen" picture is the player's, so it does not apply)"""
+        ws = world.ws
+        return world.los_points((ws.mon_x[m] << 16, ws.mon_y[m] << 16), world._target_pos16(m))
 
     def los_points(self, p: Tuple[int, int], q: Tuple[int, int]) -> bool:
         """2D line of sight between two 16.16 points, by `los_to_player`'s rule. It is also

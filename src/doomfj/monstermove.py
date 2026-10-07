@@ -238,19 +238,21 @@ def _rand_lines() -> list:
     return ["    hex.inc 2, mm_rng", "    mrnd.lookup mm_rr, mm_rng"]
 
 
-def ncd_leaf_lines(*, deadzone: int, max_tries: int) -> list:
+def ncd_leaf_lines(*, deadzone: int, max_tries: int, fight: bool = False) -> list:
     """`mm_ncd`: P_NewChaseDir (world._new_chase_dir) with the D5 cap -- DOOM's try order, a direction already
     tried skipped, at most `max_tries` distinct tries (then NODIR), each try `mm_walk` (P_TryWalk: P_Move, and on
     success movecount = P_Random & 15). The random calls in the model's order: one for the swap (always, after the
-    diagonal), one for the sweep's direction (only when reached), one per successful walk."""
+    diagonal), one for the sweep's direction (only when reached), one per successful walk. `fight` (M7 P8a I,
+    world.infighting_on): toward the TARGET -- monsterdecide's target load (mt_tqx / mt_tqy) -- not the player"""
     from doomfj import gamedata as gd
+    tx, ty = ("mt_tqx + 4*dw", "mt_tqy + 4*dw") if fight else ("viewx + 4*dw", "viewy + 4*dw")
     out = ["mm_ncd:",
            "    hex.zero 8, mm_tried", "    hex.zero 1, mm_ntr",
            "    hex.mov 1, mm_od, mm_dir",
            "    mopp.lookup mm_ta, mm_od",                      # turnaround = OPPOSITE[olddir] (NODIR -> NODIR)
            # dx, dy to the player: (px >> 16) - x, (py >> 16) - y
-           "    hex.mov 4, mm_dx, viewx + 4*dw", "    hex.sub 4, mm_dx, mm_x",
-           "    hex.mov 4, mm_dy, viewy + 4*dw", "    hex.sub 4, mm_dy, mm_y",
+           "    hex.mov 4, mm_dx, %s" % tx, "    hex.sub 4, mm_dx, mm_x",
+           "    hex.mov 4, mm_dy, %s" % ty, "    hex.sub 4, mm_dy, mm_y",
            "    hex.mov 4, mm_adx, mm_dx", "    hex.abs 4, mm_adx",
            "    hex.mov 4, mm_ady, mm_dy", "    hex.abs 4, mm_ady",
            # d1: E if dx > dz, W if dx < -dz, else NODIR; d2: S if dy < -dz, N if dy > dz

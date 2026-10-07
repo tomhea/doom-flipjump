@@ -66,6 +66,10 @@ def wake_sight(world, m: int) -> bool:
 
 def attack_sight(world, m: int) -> bool:
     ws = world.ws
+    if getattr(world, "_fight", False) and ws.mon_target[m] >= 2:
+        # M7 P8a I (O-B2, TAKEN): a MONSTER target -- the exact 2D LOS to it at any range; the seen mark is the
+        # player's picture and NEAR the player's trace, so neither applies
+        return world.los_to_target(world, m)
     if ws.mon_seen[m]:
         return True
     return _dist(world, m) <= NEAR and world.los_to_player(world, m)

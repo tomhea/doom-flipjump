@@ -340,6 +340,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     from doomfj.world import compositor_d3
     d3 = loot and compositor_d3(player)
     assert not d3 or depth, "M7 P8a: D3 a ranks the depth walk -- a mode that walks no depth cannot take it"
+    from doomfj.world import infighting_on as _fight_on
+    fight = loot and _fight_on(mode)           # M7 P8a I: monsters fight monsters (monsterdecide's fight parts)
     mob_rows, mob_view = (mobile_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
                                            first=mob_first, puffs=loot) if nmob else ([], {}))
     rows = rows + mob_rows
@@ -354,7 +356,11 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         rows = rows + bar_rows
     nrows = nt + len(rows)
     rn = max(1, ((nrows - 1).bit_length() + 3) // 4)
-    w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los")
+    # M7 P8a (package 0's note): the World in the tier's P8a modes, so its schema has their widths (infighting widens
+    # mon_target to two nibbles a slot) -- the default "full" / "full" World otherwise, as before
+    from doomfj.world import P8A_MONSTER_MODES, P8A_PLAYER_MODES
+    p8a_kw = dict(monsters=mode, player=player) if mode in P8A_MONSTER_MODES and player in P8A_PLAYER_MODES else {}
+    w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los", **p8a_kw)
     nmon, schema = w.layout.nmon, w.schema
     if nmon == 0 or not rows:
         return None                      # a map without monsters animates nothing
@@ -477,7 +483,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                       **({"hear": True, "sec": w._mon_sector(m)} if hear else {}),
                       **({"hurt": dict(sp=gd.STATE_INDEX[w.mon_info[m].spawnstate],
                                        spt=gd.STATES[w.mon_info[m].spawnstate].tics)} if hurt else {}),
-                      **({"knock": True} if knock else {}))                      # M7 P8a: the knock move's splice
+                      **({"knock": True} if knock else {}),                      # M7 P8a: the knock move's splice
+                      **({"fight": True} if fight else {}))                      # M7 P8a I: the target
                  for m in range(nmon)]
         nleaf = len(w.cmap.subsectors)
         extra = {
@@ -515,7 +522,15 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 from doomfj.monstersight import SL_DECLS, near_los_lines
                 extra["decls_wake"] += (p32c_decls(schema, nmon, {f: boot[f] for f in P32C_FIELDS})
                                         + context_decls() + SL_DECLS)
-                extra["decide_lines"] = near_los_lines(w)
+                extra["decide_lines"] = near_los_lines(w, fight=fight)
+                if fight:                              # M7 P8a I: the target load, the far LOS, the bullets' scan
+                    from doomfj.monsterdecide import fight_parts
+                    from doomfj.monstersight import SF_DECLS, far_los_lines
+                    fp = fight_parts(w, [slot_t[m] for m in range(nmon)])
+                    extra["decls_wake"] += fp["decls"] + SF_DECLS
+                    extra["decide_lines"] += far_los_lines(w) + fp["lines"]
+                    extra["tables"] += fp["tables"]
+                    extra["fight"] = True
                 barrel = None
                 if loot:                               # M7 P6: the barrels, the blasts, the drops (barrelcode)
                     from doomfj.barrelcode import barrel_parts
@@ -527,7 +542,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     assert not set(bar_vis) & set(bar_rt) and len(bar_vis) + len(bar_rt) == len(w.barrel_things)
                     barrel = barrel_parts(w, nt=nt, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
                                           skills=skills, barrel_rt=bar_rt, barrel_vis=bar_vis,
-                                          **({"knock": True} if knock else {}))
+                                          **({"knock": True} if knock else {}),
+                                          **({"fight": True} if fight else {}))      # M7 P8a I: bar_src
                     assert barrel["drop_first"] == nt + nmob and barrel["ndrop"] == ndrop
                     extra["barrel"] = barrel
                 if damage:                             # M7 P4.2a: the monsters' damage (damagecode)
@@ -537,14 +553,17 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     dmp = damage_parts(w, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
                                        fx=bleed, full=loot, nbar=barrel["nbar"] if barrel else 0,
                                        drops=barrel["drops"] if barrel else None,
-                                       **({"knock": True} if knock else {}))
+                                       **({"knock": True} if knock else {}),
+                                       **({"fight": True} if fight else {}))   # M7 P8a I: a monster's source
                     extra["decls_wake"] += dmp["decls"]
                     extra["decide_lines"] += dmp["lines"]
                     extra["tables"] += dmp["tables"]
                     extra["justhit"] = True
                 if full:                               # M7 P5: the fireball and blood pools (doomfj.projcode)
                     from doomfj.projcode import proj_parts
-                    extra["proj"] = proj_parts(w, nt=nt, puffs=loot, **({"knock": True} if knock else {}))
+                    extra["proj"] = proj_parts(w, nt=nt, puffs=loot, **({"knock": True} if knock else {}),
+                                               **({"fight": True, "slot_rt": [slot_t[m] for m in range(nmon)]}
+                                                  if fight else {}))       # M7 P8a I: things stop it
                     extra["proj"]["nt"] = nt
             # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
             # render setting says so (depth_walk, above) -- the walk's registers (sim.thing_pass_depth)
@@ -794,25 +813,29 @@ def persisted_monster_decls(w, mode: str, damage=None, player: str = None) -> li
         from doomfj.wall_renderer import PLAYER_MODE         # lazy: the emitter imports this module
         player = PLAYER_MODE
     n = w.layout.nmon
+    # M7 P8a: the cells' WIDTHS are the mode's (infighting widens mon_target) -- whatever modes the caller's World has
+    from doomfj.world import P8A_MONSTER_MODES, build_schema, p8a_schema
+    schema = (build_schema(w.layout, **p8a_schema("final", mode)) if mode in P8A_MONSTER_MODES
+              else w.schema)
     if damage is None:
         from doomfj.damagecode import damage_on
         from doomfj.wall_renderer import PLAYER_MODE
         damage = damage_on(PLAYER_MODE) and mode in ("decide", "full", "push", "final")   # M7 P5: "full" decides too
-    out = monster_decls(w.schema, n)
+    out = monster_decls(schema, n)
     if mode in ("wake", "chase", "decide", "full", "push", "final"):     # M7 P8a: "push" / "final" are "full"'s
-        out += [d for d in p32a_decls(w.schema, n, {f: [0] * n for f in P32A_FIELDS}, n)
+        out += [d for d in p32a_decls(schema, n, {f: [0] * n for f in P32A_FIELDS}, n)
                 if d.split(":")[0] in P32A_PERSISTED]
     if mode in ("chase", "decide", "full", "push", "final"):          # M7 P3.2b: the move's per-slot cells and msec, the barrels, mh_prev
-        out += [d for d in p32b_decls(w.schema, n, {f: [0] * n for f in P32B_FIELDS}, [0] * n)
+        out += [d for d in p32b_decls(schema, n, {f: [0] * n for f in P32B_FIELDS}, [0] * n)
                 if d.split(":")[0] in P32B_FIELDS + ("msec",)]
         out += ["bar_solid: hex.vec %d" % max(1, len(w.barrel_things)),
                 "mh_prev: hex.vec %d" % (len(w.lift_order) + 1)]
     if mode in ("decide", "full", "push", "final"):       # M7 P3.2c: the missile decision's flag
         from doomfj.monsterdecide import P32C_FIELDS
-        out += p32c_decls(w.schema, n, {f: [0] * n for f in P32C_FIELDS})
+        out += p32c_decls(schema, n, {f: [0] * n for f in P32C_FIELDS})
     if damage:                           # M7 P4.2a: health, shootable, solid, justhit
         from doomfj.damagecode import P42_FIELDS, field_decls
-        out += field_decls(w.schema, n, {f: [0] * n for f in P42_FIELDS})
+        out += field_decls(schema, n, {f: [0] * n for f in P42_FIELDS})
     from doomfj.noisecode import NOISE_PLAYER_MODES, PERSIST as NOISE_PERSIST
     if mode in ("wake", "chase", "decide", "full", "push", "final") and player in NOISE_PLAYER_MODES:   # M7 P4.2b: the alerts, the ambushers
         out += [d for d in [ambush_decl(n, [0] * n)] + noise_decls(w) if d.split(":")[0] in NOISE_PERSIST]
@@ -851,7 +874,8 @@ def _sign_branch(cell, kind, yes, no):
 
 
 def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, mv=None,
-              dc=None, dmg: bool = False, hear: bool = False, sec: int = None, hurt=None, knock: bool = False) -> list:
+              dc=None, dmg: bool = False, hear: bool = False, sec: int = None, hurt=None, knock: bool = False,
+              fight: bool = False) -> list:
     """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
     A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
     REJECT row of its spawn sector (indexed by the player's sector); t: its seen flag's index (`thseen`).
@@ -883,12 +907,20 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     moving.
 
     `knock` (M7 P8a, world.knockback_on): the SPLICE POINT of the slot's knock move (doomfj.knockcode
-    .monster_slot_lines: P_MobjThinker's P_XYMovement before the state's tics), right after the "not active" skip."""
+    .monster_slot_lines: P_MobjThinker's P_XYMovement before the state's tics), right after the "not active" skip.
+
+    `fight` (M7 P8a I, world.infighting_on: `mon_target` names a thing, two nibbles a slot -- its width from the
+    schema, as every cell's): A_Chase loads the TARGET (monsterdecide's `mt_load`) before its threshold, whose reset and
+    the lost-target test read `mt_al` (world.target_alive) instead of p_dead; a lost target with the player alive is
+    DOOM's P_LookForPlayers all around -- the waking sight (seen, or REJECT within NEAR) re-acquires the player, else
+    the spawn state, whose A_Look runs at once (the slot's own look: its sound branch can wake it)."""
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     nthr = cell_nibbles(schema, "mon_threshold")
+    ntg = cell_nibbles(schema, "mon_target")                     # M7 P8a I: 2 with infighting, else 1
     assert not hear or mv or sec is not None, "a hearing slot needs its sector: msec (mv) or the spawn sector"
+    assert not fight or (mv and dc and hurt and ntg == 2), "M7 P8a I: infighting rides the full slot (a wide target)"
     ST, TI, AC = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_active + %d*dw" % m
-    FA, TG = "mon_facing + %d*dw" % (nf * m), "mon_target + %d*dw" % m
+    FA, TG = "mon_facing + %d*dw" % (nf * m), "mon_target + %d*dw" % (ntg * m)
     RE, TH, MD = "mon_reaction + %d*dw" % m, "mon_threshold + %d*dw" % (nthr * m), "mon_movedir + %d*dw" % m
     L = "mw%d_" % m
     nxt = "mw%d_next" % m
@@ -930,7 +962,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
               ("    hex.mov 2, mt_ms, msec + %d*dw" % (2 * m) if mv else "    hex.set 2, mt_ms, %d" % (sec or 0)),
               "    stl.fcall nz_heard, nz_hret",
               "    hex.if0 1, nz_h, %ssee" % L,
-              "    hex.set 1, %s, 1" % TG,
+              "    hex.set %d, %s, 1" % (ntg, TG),
               "    hex.if0 1, mon_ambush + %d*dw, %swake" % (m, L),     # not an ambusher: wakes at once
               "    hex.set 1, nz_amb, 1",                                 # an ambusher: the sight decides
               "  %ssee:" % L] if hear else []),
@@ -964,7 +996,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
         out += _sign_branch(src, kind, "%sbh%d" % (L, k), "%swake" % L)
         out += ["  %sbh%d:" % (L, k), "    hex.cmp 4, mt_d, mt_c64, %swake, %swake, %s" % (L, L, nxt)]
     out += ["  %swake:" % L,
-            "    hex.set 1, %s, 1" % TG,
+            "    hex.set %d, %s, 1" % (ntg, TG),
             "    hex.set %d, %s, %d" % (ns, ST, see_idx),        # D-WAKE: the see state, no action run now
             "    hex.set %d, %s, %d" % (nt, TI, see_tics),
             "    ;%s" % nxt,
@@ -975,8 +1007,10 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    hex.if0 1, %s, %sr0" % (RE, L),
             "    hex.dec 1, %s" % RE,
             "  %sr0:" % L,
+            *(["    hex.mov 2, mm_tg, %s" % TG, "    stl.fcall mt_load, mt_lret"] if fight else []),  # M7 P8a I
             "    hex.if0 %d, %s, %st0" % (nthr, TH, L),
-            *(["    hex.if1 1, p_dead, %sthz" % L] if hurt else []),       # M7 P5: a dead target resets it
+            *((["    hex.if0 1, mt_al, %sthz" % L] if fight else              # M7 P8a I: a dead TARGET resets it
+              ["    hex.if1 1, p_dead, %sthz" % L]) if hurt else []),       # M7 P5: a dead target resets it
             "    hex.dec %d, %s" % (nthr, TH),
             *(["    ;%st0" % L, "  %sthz:" % L, "    hex.zero %d, %s" % (nthr, TH)] if hurt else []),
             "  %st0:" % L,
@@ -986,7 +1020,28 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    hex.mov 1, mt_ti, %s" % FA,
             "    hex.mov 1, mt_ti + 1*dw, %s" % MD,
             "    mturn.lookup %s, mt_ti" % FA]
-    if hurt:                                    # M7 P5: the target lost -> the spawn state (World._a_chase)
+    if hurt and fight:                          # M7 P8a I: the TARGET lost (World._a_chase, target_alive)
+        out += ["  %sal:" % L,
+                "    hex.if1 1, mt_al, %smv" % L,
+                "    hex.if1 1, p_dead, %ssp" % L,
+                # P_LookForPlayers all around: the waking sight -- seen, or REJECT-visible within NEAR
+                "    hex.mov 4, mt_dx, viewx + 4*dw", "    hex.sub 4, mt_dx, thpos_rt + %d*dw" % (16 * mv["rt"] + 4),
+                "    hex.mov 4, mt_dy, viewy + 4*dw", "    hex.sub 4, mt_dy, thpos_rt + %d*dw" % (16 * mv["rt"] + 12),
+                "    stl.fcall mt_dist_leaf, mt_ret",
+                "    hex.if1 1, thseen + %d*dw, %sacq" % (t, L),
+                "    hex.cmp 4, mt_d, mt_c128, %saan, %saan, %ssp" % (L, L, L),
+                "  %saan:" % L,
+                "    stl.fcall mt_psec_leaf, mt_ret",
+                "    hex.mov 2, mt_ms, msec + %d*dw" % (2 * m), "    stl.fcall mt_rj_leaf, mt_rjret",
+                "    hex.if0 1, mt_rj, %ssp" % L,
+                "  %sacq:" % L,                                    # the player is the target; this tic is done
+                "    hex.set %d, %s, 1" % (ntg, TG),
+                "    ;%s" % nxt,
+                "  %ssp:" % L,                                     # the spawn state, and its A_Look at once
+                "    hex.set %d, %s, %d" % (ns, ST, hurt["sp"]),
+                "    hex.set %d, %s, %d" % (nt, TI, hurt["spt"]),
+                "    ;%slook" % L]
+    elif hurt:                                  # M7 P5: the target lost -> the spawn state (World._a_chase)
         out += ["  %sal:" % L,
                 "    hex.if0 1, p_dead, %s" % (("%smv" % L) if mv else nxt),
                 "    hex.set %d, %s, %d" % (ns, ST, hurt["sp"]),
@@ -997,7 +1052,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
                                                  solid="mon_solid" if dmg else "mon_active")
     if dc:
         out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt, hear=hear, src=bool(hurt),
-                               **({"knock": True} if knock else {}))
+                               knock=knock, fight=fight)
     out += ["  %s:" % nxt]
     return out
 
@@ -1059,16 +1114,18 @@ def _action_targets(L: str, nxt: str, dc, fall: bool = False) -> list:
 
 
 def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear: bool = False,
-                    src: bool = False, knock: bool = False) -> list:
+                    src: bool = False, knock: bool = False, fight: bool = False) -> list:
     """after mm_decide: a decision enters its state (A_FaceTarget's facing from the leaf); and the attack states'
     actions -- each sets its kind and runs md_attack on the slot's position, seen flag and stream. `hear` (M7 P4.2b):
     each A_FaceTarget -- the decided state's, and every attack action's, behind its target test -- clears
     `mon_ambush`. `knock` (M7 P8a, package K): the attacker's floorz into kb_az (doomfj.knockcode: its hits'
-    inflictor z, its fireball's spawn z)"""
+    inflictor z, its fireball's spawn z). `fight` (M7 P8a I): the target is two nibbles, and an attack loads it
+    (`mt_load`) first"""
     from doomfj.monsterdecide import ATTACK_KINDS
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     ST, TI, FA = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_facing + %d*dw" % (nf * m)
-    TG, RN = "mon_target + %d*dw" % m, "mon_rng + %d*dw" % (2 * m)
+    ntg = cell_nibbles(schema, "mon_target")                     # M7 P8a I: 2 with infighting
+    TG, RN = "mon_target + %d*dw" % (ntg * m), "mon_rng + %d*dw" % (2 * m)
     L = "mw%d_" % m
     out = ["    hex.if0 1, mm_dec, %s" % nxt, "    hex.mov 1, %s, mm_fa" % FA]
     amb = ["    hex.zero 1, mon_ambush + %d*dw" % m] if hear else []       # M7 P4.2b: A_FaceTarget's MF_AMBUSH
@@ -1083,7 +1140,8 @@ def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear
         out += ["  %sk_%s:" % (L, a), "    hex.set 1, mm_kind, %d" % ATTACK_KINDS[a], "    ;%sk_go" % L]
     if dc["acts"]:
         out += ["  %sk_go:" % L,
-                "    hex.if0 1, %s, %s" % (TG, nxt),
+                "    hex.if0 %d, %s, %s" % (ntg, TG, nxt),
+                *(["    hex.mov 2, mm_tg, %s" % TG, "    stl.fcall mt_load, mt_lret"] if fight else []),  # M7 P8a I
                 *amb,
                 "    hex.mov 4, mm_x, thpos_rt + %d*dw" % (16 * rt + 4),
                 "    hex.mov 4, mm_y, thpos_rt + %d*dw" % (16 * rt + 12),

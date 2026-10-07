@@ -238,7 +238,7 @@ def test_the_records_exercise_every_path():
             assert live and ws.mon_rng[m] == (before_rng + 1) & 0xFF, "a hit draws once"
     want = dict(kill=10, kill0=2, pain=10, nopain=5, wake=3, thr0_other=3, thr_kept=10, miss=10, miss1=3, at=10,
                 unshootable=5, dead=5, none=3, bmiss=3, bhit=10)
-    assert all(seen[k] >= v for k, v in want.items()), (seen, want)
+    assert all(seen[k] >= v for k, v in want.items()), sorted((k, seen[k], v) for k, v in want.items())
 
 
 def test_the_damage_follows_the_model(tmp_path):
@@ -248,3 +248,190 @@ def test_the_damage_follows_the_model(tmp_path):
 @pytest.mark.parametrize("mut", sorted(MUTANTS))
 def test_control_a_broken_damage_is_caught(tmp_path, mut):
     assert not _run(tmp_path, "mdamage_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut
+
+
+# ---- M7 P8a I (docs/gp-final-plan.md 1.2.2; damagecode `fight`): A MONSTER'S HITS -------------------------------------
+# THE FIGHT'S RECORDS (World(monsters="final", player="final"); dm_leaf's full + fight emission): each record hits one
+# slot in one of dm_melee's five modes -- the player's bullet or melee (0 / 1: the reach from the player, the blood, the
+# switch to the player), a BLAST (2), a monster's claw / bite / fireball (MONSTER, 3: no reach, no blood) or a monster's
+# bullet (BULLET, 4: no reach, the blood first) -- with `dm_src` none, the player, another slot or the hit slot ITSELF,
+# on both sides: the model's damage_monster with the source the mode names (the blood recorded by
+# `_spawn_fx_at_target`, the fj's fx_spawn a stub that prints it). The cells now include the TWO-nibble mon_target, and
+# a source left in dm_src after the call prints "!" (dm_out zeroes it).
+# R9: the switch to the source skipped; the threshold not consulted; the slot switching to itself; a monster's bullet
+# without its blood; a monster's hit tested for the player's reach.
+FIGHT_CELLS = (("mon_health", 3), ("mon_shootable", 1), ("mon_state", 2), ("mon_tics", 1), ("mon_rng", 2),
+               ("mon_threshold", 2), ("mon_reaction", 1), ("mon_target", 2), ("mon_justhit", 1), ("mon_solid", 1))
+NF = 300
+
+
+def _fworld():
+    return World(monsters="final", player="final", sight_rule="seen")
+
+
+def _frecords(w):
+    """[(slot, pokes, (x, y), (px16, py16), dmg, mode, reach, src)]"""
+    rnd = random.Random(0x8A1D)
+    n = w.layout.nmon
+    act = [m for m in range(n) if w.ws.mon_active[m]]
+    out = []
+    for r in range(NF):
+        m = rnd.choice(act)
+        info = w.mon_info[m]
+        dmg = rnd.randint(1, 30)
+        hp = rnd.choice((dmg, dmg + 1, 1, 0, rnd.randint(1, info.spawnhealth), info.spawnhealth, dmg + 9))
+        st = rnd.choice((info.spawnstate, info.spawnstate, info.seestate, info.painstate))
+        pokes = {"mon_health": hp, "mon_shootable": int(rnd.random() < 0.92), "mon_state": gd.STATE_INDEX[st],
+                 "mon_tics": rnd.randint(1, 14), "mon_rng": rnd.randrange(256),
+                 "mon_threshold": rnd.choice((0, 0, 0, 1, rnd.randint(1, gd.BASETHRESHOLD))),
+                 "mon_reaction": rnd.randrange(16), "mon_target": rnd.choice((0, 1, 2 + rnd.randrange(n))),
+                 "mon_justhit": rnd.randrange(2)}
+        mode = rnd.choice((0, 1, 2, 3, 3, 4, 4))
+        src = rnd.choice((0, 1, 2 + rnd.randrange(n), 2 + rnd.randrange(n), 2 + m))
+        reach = rnd.choice((PUNCH_REACH, SAW_REACH)) if mode == 1 else rnd.randrange(256)
+        x, y = rnd.randint(-1500, 3000), rnd.randint(-3000, 1500)
+        lim = reach if mode == 1 else MISSILERANGE_U
+        d = rnd.choice((lim, lim - 1, lim + 1, rnd.randint(0, lim), rnd.randint(0, 3000)))
+        px16 = (((x + d) << 16) | rnd.randrange(1 << 16)) & M32
+        py16 = ((y << 16) | rnd.choice((0, rnd.randrange(1 << 16)))) & M32
+        out.append((m, pokes, (x, y), (px16, py16), dmg, mode, reach, src))
+    return out
+
+
+def _fsource(src):
+    return None if not src else ("player", -1) if src == 1 else ("mon", src - 2)
+
+
+def _fapply(w, rec, log):
+    m, pokes, (x, y), (px16, py16), dmg, mode, reach, src = rec
+    ws = w.ws
+    ws.px = px16 - (1 << 32) if px16 >> 31 else px16
+    ws.py = py16 - (1 << 32) if py16 >> 31 else py16
+    for f, v in pokes.items():
+        getattr(ws, f)[m] = v
+    ws.mon_x[m], ws.mon_y[m] = x, y
+    w._spawn_fx_at_target = lambda kind, fx, fy, fd, melee, ev: log.append(
+        "B%04x%04x%02x" % (fx & 0xFFFF, fy & 0xFFFF, fd))
+    ev = TicEvents(0)
+    if mode in (0, 1):
+        w.aim = lambda world, col, _m=m: ("mon", _m)
+        w._line_attack("fist" if mode == 1 else "pistol", w.aim_centre, dmg, reach if mode == 1 else MISSILERANGE_U,
+                       ev)
+    elif mode == 4:
+        w._spawn_fx_at_target("blood", x, y, dmg, False, ev)
+        w.damage_monster(m, dmg, _fsource(src), ("mon", 0), ev)
+    else:
+        w.damage_monster(m, dmg, _fsource(src), ("bar", 0) if mode == 2 else ("mon", 0), ev)
+    return ev
+
+
+def _fexpected(records) -> bytes:
+    w = _fworld()
+    lines = []
+    for rec in records:
+        log = []
+        _fapply(w, rec, log)
+        lines += log + ["".join("%0*x" % (nib, getattr(w.ws, f)[rec[0]] & (16 ** nib - 1)) for f, nib in FIGHT_CELLS)]
+    return ("\n".join(lines) + "\n").encode()
+
+
+FIGHT_MUTANTS = {
+    "no_switch": ("    hex.mov 2, dm_tg, dm_src\n", ""),
+    "threshold_ignored": ("    hex.if1 2, dm_th, dm_out\n", ""),
+    "self_switch": ("    hex.cmp 2, dm_src, dm_me, dm_swok, dm_out, dm_swok\n", ""),
+    "bullet_noblood": ("    hex.if_flags dm_melee, %d, dm_nmb, dm_in\n" % (1 << DC.BULLET),
+                       "    hex.if_flags dm_melee, %d, dm_nmb, dm_chk\n" % (1 << DC.BULLET)),
+    "monster_reach": ("    hex.if_flags dm_melee, %d, dm_nbl, dm_chk\n" % ((1 << DC.BLAST) | (1 << DC.MONSTER)),
+                      "    hex.if_flags dm_melee, %d, dm_nbl, dm_chk\n" % (1 << DC.BLAST)),
+}
+
+
+def _fbuild(tmp_path, name, mut=None):
+    w = _fworld()
+    n, schema, ws = w.layout.nmon, w.schema, w.ws
+    records = _frecords(w)
+    want = _fexpected(records)
+    dp = DC.damage_parts(w, slot_rt=list(range(n)), boot_skill=ws.skill, fx=True, full=True, fight=True)
+    vals = {f: list(getattr(ws, f)[:n]) for f in MC.P31_FIELDS + MC.P32A_FIELDS + MC.P32B_FIELDS}
+    decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
+             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n)
+             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, [0] * n)
+             + MC.P32A_SCRATCH + dp["decls"]
+             + ["%s: hex.vec %d" % cn for cn in DM_CELLS]
+             + ["viewx: hex.vec 8", "viewy: hex.vec 8", "thpos_rt: hex.vec %d" % (16 * n),
+                "fxs_x: hex.vec 4", "fxs_y: hex.vec 4", "fxs_dmg: hex.vec 2", "fxs_kind: hex.vec 1",
+                "fx_sret: hex.vec w/4"])
+    text = "\n".join(MC.dist_leaf_lines() + dp["lines"] + dp["tables"]
+                     + ["fx_spawn:", "    stl.output 66", "    hex.print_as_digit 4, fxs_x, 0",
+                        "    hex.print_as_digit 4, fxs_y, 0", "    hex.print_as_digit 2, fxs_dmg, 0",
+                        "    stl.output 10", "    stl.fret fx_sret"]) + "\n"
+    if mut:
+        old, new = FIGHT_MUTANTS[mut]
+        assert text.count(old) == 1, (mut, text.count(old))
+        text = text.replace(old, new)
+    nib = {f: MC.cell_nibbles(schema, f) for f, _ in FIGHT_CELLS}
+    assert all(nib[f] == k for f, k in FIGHT_CELLS), nib
+    body = ["stl.startup_and_init_all"]
+    for k, (m, pokes, (x, y), (px16, py16), dmg, mode, reach, src) in enumerate(records):
+        body += ["hex.set 8, viewx, %d" % (px16 & M32), "hex.set 8, viewy, %d" % (py16 & M32)]
+        body += ["hex.set %d, %s + %d*dw, %d" % (nib[f], f, nib[f] * m, v & (16 ** nib[f] - 1))
+                 for f, v in pokes.items()]
+        body += ["hex.set 4, thpos_rt + %d*dw, %d" % (16 * m + 4, x & 0xFFFF),
+                 "hex.set 4, thpos_rt + %d*dw, %d" % (16 * m + 12, y & 0xFFFF),
+                 "hex.set 2, dm_id, %d" % (m + 1), "hex.set 2, dm_dmg, %d" % dmg, "hex.set 1, dm_melee, %d" % mode,
+                 "hex.set 2, dm_reach, %d" % reach, "hex.set 2, dm_src, %d" % src, "stl.fcall dm_go, dm_ret",
+                 "hex.if0 2, dm_src, rec_ok%d" % k, "stl.output 33", "rec_ok%d:" % k]
+        body += ["hex.print_as_digit %d, %s + %d*dw, 0" % (kk, f, kk * m) for f, kk in FIGHT_CELLS]
+        body += ["stl.output 10"]
+    body += ["stl.loop"]
+    prog = "\n".join(body + decls + [text]) + "\n"
+    p = tmp_path / ("%s.fj" % name)
+    p.write_text(prog, encoding="utf-8")
+    consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
+    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
+
+
+def _frun(tmp_path, name, mut=None) -> bool:
+    srcs, want = _fbuild(tmp_path, name, mut)
+    return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
+                                           should_raise_assertion_error=False)
+
+
+def test_the_fight_records_exercise_every_path():
+    """switches to a monster, refused by the threshold, by no source and by the source being the slot itself; a
+    player's shot switching to the player; a monster's bullet bleeding; a monster's hit far beyond the player's reach"""
+    w = _fworld()
+    seen = dict(to_mon=0, thr_refused=0, nosrc=0, itself=0, to_player=0, bullet_blood=0, far_hit=0)
+    for rec in _frecords(w):
+        m, pokes, (x, y), (px16, py16), dmg, mode, reach, src = rec
+        log = []
+        before = pokes["mon_target"]
+        _fapply(w, rec, log)
+        if not (pokes["mon_shootable"] and pokes["mon_health"] > dmg):
+            continue
+        d = aprox_distance(x - ((px16 - (1 << 32) if px16 >> 31 else px16) >> 16),
+                           y - ((py16 - (1 << 32) if py16 >> 31 else py16) >> 16))
+        if mode >= 2:
+            seen["far_hit"] += d > MISSILERANGE_U
+            if pokes["mon_threshold"]:
+                seen["thr_refused"] += src >= 2 and src != 2 + m
+            elif not src:
+                seen["nosrc"] += 1
+            elif src == 2 + m:
+                seen["itself"] += 1
+            elif src >= 2:
+                seen["to_mon"] += w.ws.mon_target[m] == src
+            seen["bullet_blood"] += mode == 4 and bool(log)
+        elif not pokes["mon_threshold"] and d <= (reach if mode == 1 else MISSILERANGE_U):
+            seen["to_player"] += w.ws.mon_target[m] == 1 and before != 1
+    want = dict(to_mon=10, thr_refused=5, nosrc=3, itself=3, to_player=5, bullet_blood=10, far_hit=5)
+    assert all(seen[k] >= v for k, v in want.items()), sorted((k, seen[k], v) for k, v in want.items())
+
+
+def test_the_fight_damage_follows_the_model(tmp_path):
+    assert _frun(tmp_path, "mdamage_fight"), "the fj damage parted from the model's damage_monster (fight)"
+
+
+@pytest.mark.parametrize("mut", sorted(FIGHT_MUTANTS))
+def test_control_a_broken_fight_damage_is_caught(tmp_path, mut):
+    assert not _frun(tmp_path, "mdamage_fight_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut

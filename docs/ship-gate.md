@@ -187,7 +187,7 @@ the same series, with the same counts cache; blocked25's own line, 09-11 18:04, 
 and followed the renderer fix of FINDINGS CE):
 
 ```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p42.json.gz
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p8a.json.gz
 ```
 
 `build_labeled.py` wraps `build_blocked.py` with the label spy on (everything after `--` is
@@ -275,6 +275,8 @@ assembler the same files and the same persist tuple at 87c2c75 and at the head
 is signed by 87c2c75's (`aab5be8f`), so on main this line MISSES the cache and recounts once (~34 min,
 the same counts) -- as after PR #87 (item 4). The next ship build re-signs it. (A first build of this rung was stopped in pass 1:
 it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
+
+**P8a (2026-10-07, declared before blocked52's build): the line's heat list is `heat_blocked27_p8a`** -- `heat_blocked27_p42` re-keyed for package C's one arity change, `sim.thing_pass_depth` 7 -> 9 parameters (the game tier calls the 9-parameter form at "final": D3 a's `rk0`, D3 b's `ex`): `heat_rekey.py --rename "text:sim.thing_pass_depth(7)=>sim.thing_pass_depth(9)"` -- 0 group keys, 579 site paths; 20 groups, 35,894 sites, decompressed sha256 `9520cefe18ad4943`. No other package (A, K, I, D, V) changed a macro's parameter count (`git diff 7739a72 -- src/fj` shows only thing_pass_depth; the emitters' own macros unchanged). blocked51 itself was built with `heat_blocked27_p42` (below); this line is the next build's.
 
 **blocked51 (2026-10-06, M7 P6+P7): the line did not change** -- still `heat_blocked27_p42` (the build log reads its
 sha256 `b307cab74b45b336`; no hot site changed width, `hot_sites_width_changed 0`, so no re-key) and still flipjump

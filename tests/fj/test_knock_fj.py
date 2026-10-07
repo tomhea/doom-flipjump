@@ -647,7 +647,7 @@ def _lists(c):
 
 
 MOVE_MUTANTS = {
-    "no_friction": ("  kq_fr:\n", "  kq_fr:\n    ;kq_out\n"),
+    "no_friction": ("  kq_fr:\n", "  kq_fr:\n    ;kq_xout\n"),    # kb_xy's exit (kq_out is kb_go's since the merge)
     "stopspeed": ("    hex.cmp 8, kb_t, kb_c, kq_sy, kq_fr, kq_fr\n", "    hex.cmp 8, kb_t, kb_c, kq_sy, kq_sy, kq_fr\n"),
     "no_clamp": ("  kq_cx_hi:\n    hex.mov 8, kb_vx, kb_c\n", "  kq_cx_hi:\n"),
     "no_halve": ("    hex.scmp 8, kb_xm, kb_c, kq_hy, kq_hy, kq_half\n",

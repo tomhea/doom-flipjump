@@ -266,7 +266,13 @@ NF = 300
 
 
 def _fworld():
-    return World(monsters="final", player="final", sight_rule="seen")
+    w = World(monsters="final", player="final", sight_rule="seen")
+    # M7 P8a K x I (the integration): this program is dm_leaf's FIGHT emission without the knock (damage_parts(
+    # knock=False)), so the model's thrust is off too -- with K merged, "final" / "final" knocks, and the reversal's
+    # coin draws on mon_rng (a FIGHT_CELL) whenever its conditions hold. The knock on dm_leaf's window is
+    # test_knock_fj's; the knock with infighting's sources is test_barrel_fj's K x I section and test_knock_fight_model
+    w._p_knock = False
+    return w
 
 
 def _frecords(w):

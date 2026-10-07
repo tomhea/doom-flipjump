@@ -565,7 +565,7 @@ def _fsrc(code):
     return None if not code else ("player", -1) if code == 1 else ("mon", code - 2)
 
 
-def _fapply(w, rec, log):
+def _fapply(w, rec, log, knock=False):
     ws, n, nbar = w.ws, w.layout.nmon, len(w.barrel_things)
     for c in range(nbar):                                   # the rest standing, out of the way of nothing
         ws.bar_state[c], ws.bar_tics[c], ws.bar_health[c], ws.bar_solid[c] = _sidx("S_BAR1"), 5, 20, 1
@@ -583,11 +583,17 @@ def _fapply(w, rec, log):
     ws.rng_world = rec["rng"]
     spots = {(t.x << 16, t.y << 16) for t in w.barrel_things}     # the chain's pairs: statically clear (the fj's)
     w.los_points = lambda p, q, _l=rec["los"]: True if p in spots else bool(_l)
+    def kb(source, inflictor):                          # M7 P8a K x I: the thrust's interface at the damage call
+        if not knock:
+            return ""
+        ix, iy = w._inflictor_xy(inflictor)
+        return "%x%x%04x%04x%04x" % (1, int(w._source_is_player(source)), (ix >> 16) & 0xFFFF, (iy >> 16) & 0xFFFF,
+                                     w._knock_z(inflictor) & 0xFFFF)
     w.damage_player = lambda dmg, source, inflictor, ev: log.append(
-        "P%02x%02x" % (dmg, source[1] + 1 if source[0] == "mon" else 0))
+        "P%02x%02x" % (dmg, source[1] + 1 if source[0] == "mon" else 0) + kb(source, inflictor))
     mode = {"v": 2}
     w.damage_monster = lambda m, dmg, source, inflictor, ev: log.append(
-        "M%02x%02x%x%02x" % (m, dmg, mode["v"], w._source_code(source)))
+        "M%02x%02x%x%02x" % (m, dmg, mode["v"], w._source_code(source)) + kb(source, inflictor))
     w._spawn_fx_at_target = lambda kind, x, y, dmg, melee, ev: log.append("F%x" % (kind == "puff"))
     ev = TicEvents(0)
     if rec["hit"]:
@@ -750,3 +756,146 @@ def test_the_fight_barrels_follow_the_model(tmp_path):
 @pytest.mark.parametrize("mut", sorted(FIGHT_MUTANTS))
 def test_control_a_broken_source_is_caught(tmp_path, mut):
     assert not _frun(tmp_path, "barfight_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut
+
+
+# ---- M7 P8a K x I (the integration): THE BLAST KNOCKS WITH bar_src'S SOURCE ----------------------------------------------
+# blast_lines(knock=True, fight=True): before the player's dp_go and each slot's dmg<m> the barrel is the INFLICTOR
+# (kb_on 1, kb_ix / kb_iy its position, kb_iz its floor from kbbz) and "the source is the player" (kb_sp, P_DamageMobj's
+# chainsaw exception) is bar_src == 1 -- bl_sp, computed once at bl_leaf's top (combat._source_is_player: the blast's
+# SOURCE is bar_src's thing, None when 0). The stubs print the knock interface beside the damage and the source; the
+# model logs `_inflictor_xy` / `_knock_z` / `_source_is_player` of what `_radius_attack` passes. Extra records blow up a
+# barrel whose bar_src is 0, 1, a low slot (2) and the slots whose code has a low nibble of 1 (17, 33, 49).
+# R9: kb_sp the player whatever bar_src says (package K's pre-I line), never the player, the high nibble ignored.
+KF_MUTANTS = {
+    "sp_player": ("    hex.mov 1, kb_sp, bl_sp\n", "    hex.set 1, kb_sp, 1\n"),
+    "sp_none": ("    hex.mov 1, kb_sp, bl_sp\n", "    hex.zero 1, kb_sp\n"),
+    "sp_lownib": ("    hex.if_flags bl_src + 1*dw, 1, bl_sp0, bl_sph\n", "    ;bl_sph\n"),
+}
+
+
+def _krecords(w):
+    out = _frecords(w)[:120]
+    for k, code in enumerate((0, 1, 2, 17, 33, 49, 1, 17)):
+        b = (3 * k) % len(w.barrel_things)
+        t = w.barrel_things[b]
+        out.append(dict(b=b, bar=(_sidx("S_BEXP3"), 1, 0), bsrc=code,
+                        others={c: 0 for c in range(len(w.barrel_things))}, hit=None,
+                        mons={(5 * k + 3) % w.layout.nmon: (t.x + 40, t.y + 8, 1)},
+                        pl=(((t.x - 40) << 16) & M32, ((t.y - 8) << 16) & M32, 0), los=1, rng=k))
+    return out
+
+
+def _kexpected(w, records):
+    lines = []
+    for rec in records:
+        log = []
+        _fapply(w, rec, log, knock=True)
+        ws = w.ws
+        lines += log + ["".join("%02x%02x%02x" % (ws.bar_state[c], ws.bar_health[c] & 0xFF, ws.bar_src[c])
+                                for c in range(len(w.barrel_things))) + "%02x" % ws.rng_world]
+    return ("\n".join(lines) + "\n").encode(), lines
+
+
+def test_the_knock_fight_records_exercise_both_sources():
+    """blasts on the player and on slots with kb_sp 1 (bar_src the player) and 0 (a monster, none)"""
+    w = _fworld()
+    _want, lines = _kexpected(w, _krecords(w))
+    kinds = {}
+    for ln in lines:
+        if ln[0] in "PM":
+            body = ln[5:] if ln[0] == "P" else ln[8:]
+            kinds[(ln[0], body[1])] = kinds.get((ln[0], body[1]), 0) + 1
+    assert all(kinds.get(k, 0) >= 3 for k in (("P", "0"), ("P", "1"), ("M", "0"), ("M", "1"))), kinds
+
+
+def _kbuild(tmp_path, name, mut=None):
+    from doomfj import knockcode as KC
+    w = _fworld()
+    n, nbar = w.layout.nmon, len(w.barrel_things)
+    records = _krecords(w)
+    want, _lines = _kexpected(w, records)
+    text = "\n".join(BC.phase_lines(w, fight=True) + BC.damage_lines(nbar, fight=True)
+                     + BC.blast_lines(w, slot_rt=list(range(n)), knock=True, fight=True) + BC.shot_lines(w, fight=True)
+                     + MC.dist_leaf_lines()) + "\n"
+    if mut:
+        old, new = KF_MUTANTS[mut]
+        assert text.count(old) == (n + 1 if old.startswith("    hex.mov 1, kb_sp") else 1), (mut, text.count(old))
+        text = text.replace(old, new)
+    kbp = ["    hex.print_as_digit 1, kb_on, 0", "    hex.print_as_digit 1, kb_sp, 0",
+           "    hex.print_as_digit 4, kb_ix, 0", "    hex.print_as_digit 4, kb_iy, 0",
+           "    hex.print_as_digit 4, kb_iz, 0", "    hex.zero 1, kb_on", "    hex.zero 1, kb_sp"]
+    stubs = ["bl_los:", "    hex.mov 1, sl_hit, los_poke", "    hex.xor_by sl_hit, 1", "    stl.fret bl_lret",
+             "dp_go:", "    stl.output 80", "    hex.print_as_digit 2, dp_dmg, 0", "    hex.print_as_digit 2, dp_src, 0",
+             *kbp, "    stl.output 10", "    hex.zero 2, dp_src", "    stl.fret dp_ret",
+             "fx_spawn:", "    stl.output 70", "    hex.print_as_digit 1, fxs_kind, 0", "    stl.output 10",
+             "    stl.fret fx_sret"]
+    for m in range(n):
+        stubs += ["dmg%d:" % m, "    stl.output 77", "    hex.set 2, pr_m, %d" % m, "    hex.print_as_digit 2, pr_m, 0",
+                  "    hex.print_as_digit 2, dm_dmg, 0", "    hex.print_as_digit 1, dm_melee, 0",
+                  "    hex.print_as_digit 2, dm_src, 0", *kbp, "    stl.output 10", "    hex.zero 2, dm_src",
+                  "    stl.fret dm_ret"]
+    body = ["stl.startup_and_init_all"]
+    for rec in records:
+        b = rec["b"]
+        for c in range(nbar):
+            st, ti, hp, src = ((_sidx("S_BAR1"), 5, 20, rec["others"][c]) if c != b
+                               else rec["bar"] + (rec["bsrc"],))
+            body += ["hex.set 2, bar_st + %d*dw, %d" % (2 * c, st), "hex.set 1, bar_ti + %d*dw, %d" % (c, ti),
+                     "hex.set 2, bar_hp + %d*dw, %d" % (2 * c, hp & 0xFF),
+                     "hex.set 2, bar_src + %d*dw, %d" % (2 * c, src), "hex.set 1, bar_solid + %d*dw, 1" % c]
+        body += ["hex.zero %d, mon_active" % n, "hex.zero %d, mon_shootable" % n, "hex.zero %d, mon_health" % (3 * n)]
+        for m, (x, y, alive) in sorted(rec["mons"].items()):
+            body += ["hex.set 1, mon_active + %d*dw, 1" % m, "hex.set 1, mon_shootable + %d*dw, %d" % (m, alive),
+                     "hex.set 3, mon_health + %d*dw, %d" % (3 * m, 60 if alive else 0),
+                     "hex.set 4, thpos_rt + %d*dw, %d" % (16 * m + 4, x & 0xFFFF),
+                     "hex.set 4, thpos_rt + %d*dw, %d" % (16 * m + 12, y & 0xFFFF)]
+        body += ["hex.set 1, p_dead, %d" % rec["pl"][2], "hex.set 3, p_hp, %d" % (0 if rec["pl"][2] else 100),
+                 "hex.set 2, rng_wd, %d" % rec["rng"], "hex.set 1, los_poke, %d" % rec["los"]]
+        if rec["hit"]:
+            md, dmg, src = rec["hit"]
+            t = w.barrel_things[b]
+            px = ((t.x + 30) << 16) & M32 if md == 0 else rec["pl"][0]
+            py = (t.y << 16) & M32 if md == 0 else rec["pl"][1]
+            body += ["hex.set 8, viewx, %d" % px, "hex.set 8, viewy, %d" % py,
+                     "hex.set 1, dm_melee, %d" % md, "hex.set 2, dm_dmg, %d" % dmg, "hex.set 2, dm_src, %d" % src,
+                     "stl.fcall dmb%d, dm_ret" % b]
+        body += ["hex.set 8, viewx, %d" % rec["pl"][0], "hex.set 8, viewy, %d" % rec["pl"][1],
+                 "stl.fcall bar_phase, bar_pret"]
+        for c in range(nbar):
+            body += ["hex.print_as_digit 2, bar_st + %d*dw, 0" % (2 * c),
+                     "hex.print_as_digit 2, bar_hp + %d*dw, 0" % (2 * c),
+                     "hex.print_as_digit 2, bar_src + %d*dw, 0" % (2 * c)]
+        body += ["hex.print_as_digit 2, rng_wd, 0", "stl.output 10"]
+    body += ["stl.loop"]
+    decls = (BC.decls(w, gd.SK_HARD) + BC.fight_decls(w) + KC.decls()
+             + ["viewx: hex.vec 8", "viewy: hex.vec 8", "p_hp: hex.vec 3", "p_dead: hex.vec 1", "lvdone: hex.vec 1",
+                "dp_dmg: hex.vec 2", "dp_src: hex.vec 2", "dp_ret: hex.vec w/4", "sl_hit: hex.vec 1",
+                "los_poke: hex.vec 1", "pr_m: hex.vec 2",
+                "dm_dmg: hex.vec 2", "dm_melee: hex.vec 1", "dm_src: hex.vec 2", "dm_reach: hex.vec 2",
+                "dm_x: hex.vec 4", "dm_y: hex.vec 4", "dm_r4: hex.vec 4", "dm_ret: hex.vec w/4",
+                "fxs_x: hex.vec 4", "fxs_y: hex.vec 4", "fxs_dmg: hex.vec 2", "fxs_kind: hex.vec 1",
+                "fx_sret: hex.vec w/4", "mm_x: hex.vec 4", "mm_y: hex.vec 4",
+                "mt_dx: hex.vec 4", "mt_dy: hex.vec 4", "mt_ax: hex.vec 4", "mt_ay: hex.vec 4", "mt_d: hex.vec 4",
+                "mt_t: hex.vec 4", "mt_ret: hex.vec w/4",
+                "bar_solid: hex.vec %d" % nbar, "mon_active: hex.vec %d" % n, "mon_shootable: hex.vec %d" % n,
+                "mon_health: hex.vec %d" % (3 * n), "thpos_rt: hex.vec %d" % (16 * n)])
+    prog = "\n".join(body + decls + [text] + stubs + BC.tables_fj() + [PC.tables_fj()[0]] + KC.tables_fj(w)) + "\n"
+    p = tmp_path / ("%s.fj" % name)
+    p.write_text(prog, encoding="utf-8")
+    consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
+    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
+
+
+def _krun(tmp_path, name, mut=None) -> bool:
+    srcs, want = _kbuild(tmp_path, name, mut)
+    return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
+                                           should_raise_assertion_error=False)
+
+
+def test_the_blast_knocks_with_bar_srcs_source(tmp_path):
+    assert _krun(tmp_path, "barknock"), "the fj blast's inflictor / kb_sp parted from the model's"
+
+
+@pytest.mark.parametrize("mut", sorted(KF_MUTANTS))
+def test_control_a_wrong_blast_source_flag_is_caught(tmp_path, mut):
+    assert not _krun(tmp_path, "barknock_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut

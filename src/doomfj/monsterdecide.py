@@ -55,6 +55,7 @@ FIGHT_DECLS = ["mm_tg: hex.vec 2", "mt_tqx: hex.vec 8", "mt_tqy: hex.vec 8", "mt
                "hs_cy: hex.vec 4", "hs_bd: hex.vec 4", "hs_d: hex.vec 4", "hs_del: hex.vec 4", "hs_t4: hex.vec 4",
                "hs_t8: hex.vec 8", "hs_ix: hex.vec 3", "hs_hw: hex.vec 4", "hs_in: hex.vec 1",
                "hs_c2048: hex.vec 4, 2048",
+               "hs_xlo: hex.vec 4", "hs_xhi: hex.vec 4", "hs_ylo: hex.vec 4", "hs_yhi: hex.vec 4",
                "hs_ret: hex.vec w/4", "hs_cret: hex.vec w/4", "hs_wret: hex.vec w/4"]
 
 P32C_CONTEXT = [
@@ -387,6 +388,13 @@ def _fight_attack_lines(knock: bool) -> List[str]:
             "    hex.mov 8, md_at, ia_ang",
             "    hex.mov 4, md_td, mt_d",
             "    hex.mov 2, md_me, md_src", "    hex.inc 2, md_me",            # the shooter's code: 2 + slot
+            # the scan's box: a thing nearer than the target lies within d_t - 1 of the shooter on both axes
+            # (P_AproxDistance >= either |delta|) -- [mm - d_t + 1, mm + d_t - 1], BIASED for unsigned compares
+            "    hex.mov 4, hs_t4, md_td", "    hex.dec 4, hs_t4",
+            *[ln for c in ("x", "y") for ln in (
+                "    hex.mov 4, hs_%slo, mm_%s" % (c, c), "    hex.sub 4, hs_%slo, hs_t4" % c,
+                "    hex.mov 4, hs_%shi, mm_%s" % (c, c), "    hex.add 4, hs_%shi, hs_t4" % c,
+                "    hex.xor_by hs_%slo + 3*dw, 8" % c, "    hex.xor_by hs_%shi + 3*dw, 8" % c)],
             "  md_hs_out:", "    stl.fret md_bret",
             # one bullet: P_Random x 3 folded into its row (spread, damage), the things in the way, then the target
             "  md_bul:",
@@ -481,21 +489,24 @@ def scan_lines(slot_rt, radii, barrels) -> List[str]:
            "    hex.zero 1, hs_pl",
            "  hs_mons:"]
     for m, (t, r) in enumerate(zip(slot_rt, radii)):
-        out += ["    hex.if0 1, mon_shootable + %d*dw, hs_m%d" % (m, m),
-                "    hex.mov 4, hs_cx, thpos_rt + %d*dw" % (16 * t + 4),
-                "    hex.mov 4, hs_cy, thpos_rt + %d*dw" % (16 * t + 12),
+        X, Y, L = "thpos_rt + %d*dw" % (16 * t + 4), "thpos_rt + %d*dw" % (16 * t + 12), "hs_m%d" % m
+        out += ["    hex.if0 1, mon_shootable + %d*dw, %s" % (m, L)]
+        out += _scan_box(X, Y, L, True)
+        out += ["    hex.mov 4, hs_cx, %s" % X, "    hex.mov 4, hs_cy, %s" % Y,
                 "    hex.set 2, hs_id, %d" % (2 + m), "    hex.set 1, hs_rc, %d" % RC[r],
                 "    stl.fcall hs_cand, hs_cret",
-                "  hs_m%d:" % m]
+                "  %s:" % L]
     for b, (x, y) in enumerate(barrels):
-        out += ["    hex.if0 2, bar_st + %d*dw, hs_b%d" % (2 * b, b),
-                "    hex.if_flags bar_hp + %d*dw, 0xFF00, hs_b%dp, hs_b%d" % (2 * b + 1, b, b),   # health < 0
-                "  hs_b%dp:" % b,
-                "    hex.if0 2, bar_hp + %d*dw, hs_b%d" % (2 * b, b),                            # health == 0
-                "    hex.set 4, hs_cx, %d" % (x & 0xFFFF), "    hex.set 4, hs_cy, %d" % (y & 0xFFFF),
+        L = "hs_b%d" % b
+        out += ["    hex.if0 2, bar_st + %d*dw, %s" % (2 * b, L),
+                "    hex.if_flags bar_hp + %d*dw, 0xFF00, %sp, %s" % (2 * b + 1, L, L),   # health < 0
+                "  %sp:" % L,
+                "    hex.if0 2, bar_hp + %d*dw, %s" % (2 * b, L)]                        # health == 0
+        out += _scan_box("hs_bar + %d*dw" % (8 * b), "hs_bar + %d*dw" % (8 * b + 4), L, False)
+        out += ["    hex.set 4, hs_cx, %d" % (x & 0xFFFF), "    hex.set 4, hs_cy, %d" % (y & 0xFFFF),
                 "    hex.set 2, hs_id, %d" % (2 + n + b), "    hex.set 1, hs_rc, %d" % RC[BARREL_R],
                 "    stl.fcall hs_cand, hs_cret",
-                "  hs_b%d:" % b]
+                "  %s:" % L]
     out += ["    stl.fret hs_ret",
             # one candidate at (hs_cx, hs_cy) (whole units): nearer than hs_bd -- its box first (P_AproxDistance is
             # at least either |delta|), then the distance -- under MISSILERANGE, not the shooter; then its angle
@@ -506,14 +517,14 @@ def scan_lines(slot_rt, radii, barrels) -> List[str]:
             "  hsc_y:",
             "    hex.mov 4, mt_dy, hs_cy", "    hex.sub 4, mt_dy, mm_y",
             "    hex.mov 4, hs_t4, mt_dy", "    hex.abs 4, hs_t4",
-            "    hex.cmp 4, hs_t4, hs_bd, hsc_d, hsc_out, hsc_out",
+            "    hex.cmp 4, hs_t4, hs_bd, hsc_me, hsc_out, hsc_out",
+            "  hsc_me:",
+            "    hex.cmp 2, hs_id, md_me, hsc_d, hsc_out, hsc_d",
             "  hsc_d:",
             "    stl.fcall mt_dist_leaf, mt_ret",
             "    hex.cmp 4, mt_d, hs_bd, hsc_r, hsc_out, hsc_out",
             "  hsc_r:",
-            "    hex.cmp 4, mt_d, hs_c2048, hsc_me, hsc_out, hsc_out",
-            "  hsc_me:",
-            "    hex.cmp 2, hs_id, md_me, hsc_a, hsc_out, hsc_a",
+            "    hex.cmp 4, mt_d, hs_c2048, hsc_a, hsc_out, hsc_out",
             "  hsc_a:",                                           # delta = (angle - md_at) >> 20, signed
             "    hex.if1 1, hs_pl, hsc_ap",
             "    hex.zero 4, ia_x2", "    hex.mov 4, ia_x2 + 4*dw, hs_cx",
@@ -544,6 +555,26 @@ def scan_lines(slot_rt, radii, barrels) -> List[str]:
             "  hsw_out:",
             "    stl.fret hs_wret"]
     return out
+
+
+def _scan_box(xcell: str, ycell: str, miss: str, row: bool) -> List[str]:
+    """a candidate within md_hs' biased box (hs_xlo .. hs_yhi) falls through, else `miss` -- `hex.cmp 4` on biased
+    values (~60 ops; `hex.sub 4` is ~350, `hex.scmp 4` ~290: MEASURED). `row`: X and Y are a thing's row (unbiased):
+    each is biased in place for its compares and restored on every way out; else they are biased constants"""
+    t = miss + "_"
+    bx = ["    hex.xor_by %s + 3*dw, 8" % xcell] if row else []
+    by = ["    hex.xor_by %s + 3*dw, 8" % ycell] if row else []
+    return (bx + ["    hex.cmp 4, %s, hs_xlo, %srx, %s1, %s1" % (xcell, t, t, t),
+                  "  %s1:" % t,
+                  "    hex.cmp 4, %s, hs_xhi, %s2, %s2, %srx" % (xcell, t, t, t),
+                  "  %s2:" % t] + bx + by
+            + ["    hex.cmp 4, %s, hs_ylo, %sry, %s3, %s3" % (ycell, t, t, t),
+               "  %s3:" % t,
+               "    hex.cmp 4, %s, hs_yhi, %s4, %s4, %sry" % (ycell, t, t, t),
+               "  %s4:" % t] + by + ["    ;%sin" % t,
+                                     "  %srx:" % t] + bx + ["    ;%s" % miss,
+                                                            "  %sry:" % t] + by + ["    ;%s" % miss,
+                                                                                   "  %sin:" % t])
 
 
 def mbsd_row(spread: int, dmg: int) -> int:
@@ -584,7 +615,10 @@ def fight_parts(w, slot_rt) -> dict:
     n = w.layout.nmon
     radii = [w.mon_radius[m] for m in range(n)]
     assert set(radii) <= set(RC), radii
-    return {"decls": list(FIGHT_DECLS),
+    bars = [(t.x, t.y) for t in w.barrel_things]
+    hs_bar = "hs_bar: hex.vec %d, %d" % (max(1, 8 * len(bars)), sum(
+        (((x & 0xFFFF) ^ 0x8000) | (((y & 0xFFFF) ^ 0x8000) << 16)) << (32 * b) for b, (x, y) in enumerate(bars)))
+    return {"decls": list(FIGHT_DECLS) + [hs_bar],
             "lines": (target_load_lines(slot_rt, radii) + angle_leaf_lines()
                       + scan_lines(slot_rt, radii, [(t.x, t.y) for t in w.barrel_things])),
             "tables": fight_tables_fj(w.rm.sine)}

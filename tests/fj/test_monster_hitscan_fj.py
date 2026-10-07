@@ -18,7 +18,7 @@ After every record: the monster's stream and facing.
 R9 (each must part from the model): a bullet that passes through everything (the scan returns at once); the shooter
 in its own way; every thing as wide as the player (the radius class ignored); the first thing met instead of the
 nearest; the offset's sign reversed; a monster target's attack sight ignored (the far LOS never consulted); a monster
-target's melee reach the player's."""
+target's melee reach the player's; the scan box's low x bound left unbiased."""
 import random
 from pathlib import Path
 
@@ -203,7 +203,7 @@ def _expected(w, records) -> bytes:
 
 MUTANTS = {
     "pass_through": ("hs_scan:\n    hex.zero 2, hs_vic\n", "hs_scan:\n    hex.zero 2, hs_vic\n    stl.fret hs_ret\n"),
-    "hits_shooter": ("    hex.cmp 2, hs_id, md_me, hsc_a, hsc_out, hsc_a\n", ""),
+    "hits_shooter": ("    hex.cmp 2, hs_id, md_me, hsc_d, hsc_out, hsc_d\n", ""),
     "nearest": ("    hex.mov 4, hs_bd, mt_d", "    hex.mov 4, hs_d, mt_d"),
     "delta_sign": ("    hex.mov 8, hs_t8, ia_ang\n    hex.sub 8, hs_t8, md_at\n",
                    "    hex.mov 8, hs_t8, md_at\n    hex.sub 8, hs_t8, ia_ang\n"),
@@ -211,6 +211,8 @@ MUTANTS = {
     "reach_player": ("    hex.cmp 4, mt_d, mt_reach, md_claw_r, md_claw_f, md_claw_f\n",
                      "    hex.cmp 4, mt_d, mt_c60, md_claw_r, md_claw_f, md_claw_f\n"),
     "radius": None,                                          # the table: every class the player's
+    # the scan's box's low x bound left unbiased: a signed position compared unsigned
+    "box_sign": ("    hex.xor_by hs_xlo + 3*dw, 8", "    hex.zero 1, hs_in"),
 }
 
 

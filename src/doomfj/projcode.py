@@ -437,7 +437,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
 
 # ---- M7 P8a I: the things a fireball meets (combat._missile_things) ------------------------------------------------
 PT_DECLS = ["pt_me: hex.vec 2", "pt_j: hex.vec 2", "pt_imp: hex.vec 1", "pt_sh: hex.vec 1", "pt_stop: hex.vec 1",
-            "pt_f0: hex.vec 4", "pt_tret: hex.vec w/4"]
+            "pt_tret: hex.vec w/4"]
 
 
 def fight_things(w, slot_rt) -> dict:
@@ -455,50 +455,56 @@ def fight_things(w, slot_rt) -> dict:
 
 
 def pt_decls(ft: dict) -> List[str]:
-    """the per-class integer bounds (`pt_bounds`) and the barrels' positions (x at 8b, y at 8b + 4: 4 nibbles each)"""
+    """the per-class integer bounds (`pt_bounds`, BIASED) and the barrels' positions (x at 8b, y at 8b + 4: 4 nibbles
+    each, BIASED: xor 0x8000, so `hex.cmp 4` -- unsigned, ~60 ops; `hex.scmp 4` is ~290 -- orders them as signed)"""
     out = list(PT_DECLS)
     for b_ in ft["bounds"]:
         out += ["pt_lx%d: hex.vec 4" % b_, "pt_hx%d: hex.vec 4" % b_, "pt_ly%d: hex.vec 4" % b_,
                 "pt_hy%d: hex.vec 4" % b_]
     bars = ft["barrels"]
     out.append("pt_bar: hex.vec %d, %d" % (max(1, 8 * len(bars)),
-                                           sum(((x & 0xFFFF) | ((y & 0xFFFF) << 16)) << (32 * b) for b, (x, y) in
-                                               enumerate(bars))))
+                                           sum((((x & 0xFFFF) ^ 0x8000) | (((y & 0xFFFF) ^ 0x8000) << 16)) << (32 * b)
+                                               for b, (x, y) in enumerate(bars))))
     return out
 
 
-def _box(xcell: str, ycell: str, b_: int, hit: str, miss: str, tag: str) -> List[str]:
-    """X in [pt_lx, pt_hx] and Y in [pt_ly, pt_hy] (4-nibble signed) -> hit, else miss"""
-    return ["    hex.scmp 4, %s, pt_lx%d, %s, %s_1, %s_1" % (xcell, b_, miss, tag, tag),
-            "  %s_1:" % tag,
-            "    hex.scmp 4, %s, pt_hx%d, %s_2, %s_2, %s" % (xcell, b_, tag, tag, miss),
-            "  %s_2:" % tag,
-            "    hex.scmp 4, %s, pt_ly%d, %s, %s_3, %s_3" % (ycell, b_, miss, tag, tag),
-            "  %s_3:" % tag,
-            "    hex.scmp 4, %s, pt_hy%d, %s, %s, %s" % (ycell, b_, hit, hit, miss)]
+def _box(xcell: str, ycell: str, b_: int, hit: str, miss: str, tag: str, row: bool) -> List[str]:
+    """X in [pt_lx, pt_hx] and Y in [pt_ly, pt_hy] (4-nibble signed, compared biased) -> hit, else miss. `row`: X and
+    Y are a thing's row (unbiased): each is biased in place for its compares and restored on every way out"""
+    bx = ["    hex.xor_by %s + 3*dw, 8" % xcell] if row else []
+    by = ["    hex.xor_by %s + 3*dw, 8" % ycell] if row else []
+    return (bx + ["    hex.cmp 4, %s, pt_lx%d, %s_rx, %s_1, %s_1" % (xcell, b_, tag, tag, tag),
+                  "  %s_1:" % tag,
+                  "    hex.cmp 4, %s, pt_hx%d, %s_2, %s_2, %s_rx" % (xcell, b_, tag, tag, tag),
+                  "  %s_2:" % tag] + bx + by
+            + ["    hex.cmp 4, %s, pt_ly%d, %s_ry, %s_3, %s_3" % (ycell, b_, tag, tag, tag),
+               "  %s_3:" % tag,
+               "    hex.cmp 4, %s, pt_hy%d, %s_4, %s_4, %s_ry" % (ycell, b_, tag, tag, tag),
+               "  %s_4:" % tag] + by + ["    ;%s" % hit,
+                                        "  %s_rx:" % tag] + bx + ["    ;%s" % miss,
+                                                                  "  %s_ry:" % tag] + by + ["    ;%s" % miss])
 
 
 def pt_lines(ft: dict, knock: bool = False) -> List[str]:
     """`pj_tm`, pj_try's things (entered after the player's test misses; falls to `pj_tl`, the lines, when no thing
     stops the fireball; a stop returns through pj_tret with pw_ok 0), and `pt_thing`. The box is decided exactly on
-    the integer parts (the module docstring): per half-width B, X - floor(nx) in [1 - B, B - [frac(nx) == 0]]"""
+    the integer parts (the module docstring): per half-width B, X - floor(nx) in [1 - B, B - [frac(nx) == 0]] -- the
+    bounds once a try per B, biased; each thing's 4-nibble compares on biased values (`_box`)"""
     from doomfj.combat import FIREBALL_R
     from doomfj.damagecode import MONSTER
     from doomfj.knockcode import inflictor_lines
     out = ["  pj_tm:",
-           "    hex.mov 2, pt_me, pw_src", "    hex.inc 2, pt_me",            # the shooter's code: 2 + slot
-           "    hex.zero 4, pt_f0", "    hex.if1 4, pw_nx, pt_fx", "    hex.set 1, pt_f0, 1",
-           "  pt_fx:"]
-    for b_ in ft["bounds"]:                                                 # the x bounds by half-width
-        out += ["    hex.mov 4, pt_lx%d, pw_nx + 4*dw" % b_, "    hex.add_constant 4, pt_lx%d, %d" % (b_, (1 - b_) & 0xFFFF),
-                "    hex.mov 4, pt_hx%d, pw_nx + 4*dw" % b_, "    hex.add_constant 4, pt_hx%d, %d" % (b_, b_),
-                "    hex.sub 4, pt_hx%d, pt_f0" % b_]
-    out += ["    hex.zero 4, pt_f0", "    hex.if1 4, pw_ny, pt_fy", "    hex.set 1, pt_f0, 1",
-            "  pt_fy:"]
-    for b_ in ft["bounds"]:
-        out += ["    hex.mov 4, pt_ly%d, pw_ny + 4*dw" % b_, "    hex.add_constant 4, pt_ly%d, %d" % (b_, (1 - b_) & 0xFFFF),
-                "    hex.mov 4, pt_hy%d, pw_ny + 4*dw" % b_, "    hex.add_constant 4, pt_hy%d, %d" % (b_, b_),
-                "    hex.sub 4, pt_hy%d, pt_f0" % b_]
+           "    hex.mov 2, pt_me, pw_src", "    hex.inc 2, pt_me"]            # the shooter's code: 2 + slot
+    for c in ("x", "y"):                                                    # the bounds by half-width, biased
+        for b_ in ft["bounds"]:
+            out += ["    hex.mov 4, pt_l%s%d, pw_n%s + 4*dw" % (c, b_, c),
+                    "    hex.add_constant 4, pt_l%s%d, %d" % (c, b_, (1 - b_) & 0xFFFF),
+                    "    hex.mov 4, pt_h%s%d, pw_n%s + 4*dw" % (c, b_, c),
+                    "    hex.add_constant 4, pt_h%s%d, %d" % (c, b_, b_)]
+        out += ["    hex.if1 4, pw_n%s, pt_f%s" % (c, c)]                    # no fraction: B - 1 above
+        out += ["    hex.dec 4, pt_h%s%d" % (c, b_) for b_ in ft["bounds"]]
+        out += ["  pt_f%s:" % c]
+        out += ["    hex.xor_by pt_%s%s%d + 3*dw, 8" % (lh, c, b_) for b_ in ft["bounds"] for lh in "lh"]
     n = len(ft["slot_rt"])
     for m, (t, r, imp) in enumerate(zip(ft["slot_rt"], ft["radii"], ft["imp"])):
         L = "pt_m%d" % m
@@ -506,7 +512,7 @@ def pt_lines(ft: dict, knock: bool = False) -> List[str]:
                 "    hex.if0 1, mon_shootable + %d*dw, %s_n" % (m, L),
                 "  %s_b:" % L]
         out += _box("thpos_rt + %d*dw" % (16 * t + 4), "thpos_rt + %d*dw" % (16 * t + 12), r + FIREBALL_R,
-                    L + "_h", L + "_n", L)
+                    L + "_h", L + "_n", L, True)
         out += ["  %s_h:" % L,
                 "    hex.set 2, pt_j, %d" % (2 + m), "    hex.set 1, pt_imp, %d" % imp,
                 "    hex.mov 1, pt_sh, mon_shootable + %d*dw" % m,
@@ -518,7 +524,7 @@ def pt_lines(ft: dict, knock: bool = False) -> List[str]:
         L = "pt_b%d" % b
         out += ["    hex.if0 1, bar_solid + %d*dw, %s_n" % (b, L)]
         out += _box("pt_bar + %d*dw" % (8 * b), "pt_bar + %d*dw" % (8 * b + 4), BARREL_R + FIREBALL_R,
-                    L + "_h", L + "_n", L)
+                    L + "_h", L + "_n", L, False)
         out += ["  %s_h:" % L,
                 # shootable while standing: state != 0 and health > 0 (combat.shootable_targets)
                 "    hex.zero 1, pt_sh",

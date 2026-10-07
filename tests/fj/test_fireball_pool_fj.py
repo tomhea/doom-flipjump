@@ -703,8 +703,8 @@ def _fbuild(tmp_path, name, mut=None):
     assert unit.count("    sim.check_cells R\n") == 1
     unit = unit.replace("    sim.check_cells R\n", "    hex.mov 1, cp_ok, cp_poke\n")
     if mut == "box_fraction":
-        assert unit.count("    hex.sub 4, pt_hx26, pt_f0\n") == 1
-        unit = unit.replace("    hex.sub 4, pt_hx26, pt_f0\n", "    hex.dec 4, pt_hx26\n")
+        assert unit.count("    hex.if1 4, pw_nx, pt_fx\n") == 1       # B - 1 above whatever the fraction
+        unit = unit.replace("    hex.if1 4, pw_nx, pt_fx\n", "")
     elif mut == "pass_barrels":
         i = unit.index("    hex.if0 1, bar_solid + 0*dw, pt_b0_n\n")
         unit = unit[:i] + "    ;pj_tl\n" + unit[i:]

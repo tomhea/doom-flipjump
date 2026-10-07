@@ -113,9 +113,11 @@ def packages() -> dict:
                     % (b, w.ws.mon_target[a], 2 + b, ta))
     except Exception as e:                       # noqa: BLE001
         out["I"] = (False, "probe raised %r" % (e,))
-    from doomfj.reference_model import GAME_RENDER_KW
-    has = [k for k in (RANK_KEY, BARREL_KEY) if k in GAME_RENDER_KW]
-    out["C"] = (len(has) == 2, "GAME_RENDER_KW has %s of %s" % (has, [RANK_KEY, BARREL_KEY]))
+    from doomfj import reference_model as RM
+    has = [k for k in (RANK_KEY, BARREL_KEY) if k in RM.GAME_RENDER_KW]
+    kw = hasattr(RM, "game_render_kw") and hasattr(RM, "rank_depth_key")
+    out["C"] = (len(has) == 2 and kw, "GAME_RENDER_KW has %s of %s; game_render_kw / rank_depth_key: %s"
+                % (has, [RANK_KEY, BARREL_KEY], kw))
     _PKG = out
     return out
 
@@ -154,6 +156,15 @@ def set_modes(pm: str, mm: str) -> None:
     g = sys.modules.get("p2a_gate")
     if g is not None:
         g.PLAYER_MODE_OVERRIDE = pm
+    # the gates' oracle draws THESE modes' picture: package C's compositor rules follow the player mode
+    # (world.compositor_d3; GAME_RENDER_KW holds them as the game tier's mode has them, so an --oracle-only run at
+    # another mode -- "final" before the integrator's flip -- must set them, or C1-C3's controls cannot part)
+    P = sys.modules.get("probe")
+    from doomfj import reference_model as RM
+    if P is not None and hasattr(RM, "game_render_kw") and hasattr(W, "compositor_d3"):
+        kw = RM.game_render_kw(W.compositor_d3(pm))
+        P.Oracle.RENDER_KW.clear()
+        P.Oracle.RENDER_KW.update(kw)
 
 
 def parse_modes(text) -> tuple:
@@ -200,9 +211,10 @@ CONTROLS = {
     "threshold_ignored": "a monster's threshold is ignored (every source switches it)",
     # C -- the compositor
     "rank_off": "D3 a off: a leaf's runtime things by depth alone",
+    "rank_swap": "D3 a swapped: a leaf's monsters and fireballs drawn before its effects and drops",
     "barrel_soft": "D3 b off: barrels take the scenery soft budget",
 }
-PICTURE_CONTROLS = frozenset({"band_eye", "rank_off", "barrel_soft"})
+PICTURE_CONTROLS = frozenset({"band_eye", "rank_off", "rank_swap", "barrel_soft"})
 
 
 @contextlib.contextmanager
@@ -347,7 +359,7 @@ def control(name: str):
         orig = need(WD, "_monster_knock_move", "K")
 
         def mkm(self, *a, **k):
-            def accept(m, nx, ny):
+            def accept(m, nx, ny, **kw):              # (K's corpse variant passes corpse=)
                 return W.OK, self.ws.mon_floorz[m]
             self.try_move_monster = accept
             self.try_move_lines = accept
@@ -429,6 +441,10 @@ def control(name: str):
             self.__dict__.pop("los_points", None)
         around(WD, "_a_chase", b, a)
     # ---- C (the picture: the gate's oracle keywords)
+    elif name == "rank_swap":                    # package C's own R9 (reference_model's note at D3_RENDER_KW)
+        from doomfj import reference_model as RM
+        orig = need(RM, "rank_depth_key", "C")
+        patch(RM, "rank_depth_key", lambda vx, vy, x, y, r: orig(vx, vy, x, y, 1 - r))
     elif name in ("rank_off", "barrel_soft"):
         import probe as P
         key = RANK_KEY if name == "rank_off" else BARREL_KEY
@@ -469,11 +485,18 @@ def counters(tr: list) -> dict:
     frac_frames: ... a monster's position fraction not zero; knock_moves / knock_walls: the knock moves that ran and
     the ones a wall refused (monsters.KnockTap, recorded per frame by the Mirror); infight: monster -> monster target
     switches (a target newly >= 2); sink_max: the largest p_vd; sink_frames: frames with p_vd > 0; corpse_slides:
-    frames on which a dead monster's position changed; dead_slides: frames on which a dead player's pose changed"""
+    frames on which a dead monster's position changed; dead_slides: frames on which a dead player's pose changed;
+    knock_refused / mon_knock_refused: the player's / the monsters' knock tries K refused (TicEvents.knocks)"""
     c = {k: 0 for k in ("knock_frames", "mon_knock_frames", "frac_frames", "knock_moves", "knock_walls", "infight",
-                        "sink_max", "sink_frames", "corpse_slides", "dead_slides")}
+                        "sink_max", "sink_frames", "corpse_slides", "dead_slides", "knock_refused", "mon_knock_refused")}
     prev = None
     for fr in tr:
+        # package K's own record of each knock try: TicEvents.knocks [(thing, accepted)] -- every refusal, whatever
+        # the momentum (KnockTap's wall test needs a component of at least STOPSPEED going in)
+        for ev in fr["ev"]:
+            for thing, ok in getattr(ev, "knocks", ()) if ev is not None else ():
+                if not ok:
+                    c["knock_refused" if thing[0] == "player" else "mon_knock_refused"] += 1
         st = fr["mstate"]
         if st.get("p_kmx") or st.get("p_kmy"):
             c["knock_frames"] += 1

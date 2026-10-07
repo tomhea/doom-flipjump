@@ -386,6 +386,24 @@ class Run(H.Run):
 
 
 
+@contextlib.contextmanager
+def drops_keep_rank():
+    """M7 P8a (package C's D3 a, `rt_rank`): the oracle ranks a mobile by its POOL (reference_model.MOBILE_RANK:
+    fireballs 1, blood and puffs 0) and a drop by its z 0 -- so `drop_z`'s mutant picture (the drop at MISSILE_Z, a
+    3-tuple) would be refused as a mobile of no pool. While it is drawn, the drops' lumps (CLIP, SHOT) rank as the drops
+    they are: the mutant moves the drop's HEIGHT only, as it did before D3 a"""
+    from doomfj import reference_model as RM
+    old = getattr(RM, "MOBILE_RANK", None)
+    if old is None:
+        yield
+        return
+    RM.MOBILE_RANK = dict(old, CLIP=0, SHOT=0)
+    try:
+        yield
+    finally:
+        RM.MOBILE_RANK = old
+
+
 def place(run: Run, sc: dict, limit: int = 12, deaths_ok: bool = False):
     """the first candidate on which the oracle does what the scenario claims -> (cand, trace, counters). A
     candidate is (pose, setup) or (pose, setup, late). `deaths_ok` False: a candidate that kills is refused"""
@@ -398,7 +416,8 @@ def place(run: Run, sc: dict, limit: int = 12, deaths_ok: bool = False):
             c["drop_px"] = run.px_of(tr, lambda mo: len(mo) > 3)
             # the pixels its height decides: the picture against the one with the drops at MISSILE_Z (a drop hidden
             # behind its corpse, or past the scenery budget, draws the same at both: drop_z could not see it)
-            c["drop_z_px"] = sum(P.px_diff(run.picture(fr), run.picture(fr, [mo[:3] for mo in fr["mobiles"]]))
+            with drops_keep_rank():                   # M7 P8a (D3 a): the lifted drop still ranks as a drop
+                c["drop_z_px"] = sum(P.px_diff(run.picture(fr), run.picture(fr, [mo[:3] for mo in fr["mobiles"]]))
                                  for fr in tr if fr["drawn"] == "world" and any(len(mo) > 3 for mo in fr["mobiles"]))
         if not deaths_ok and (c["deaths"] or c["dead_frames"]):
             continue
@@ -418,8 +437,9 @@ def ctl_parts(run: Run, sc: dict, cand, want: list, ctl: str | None = None):
     from doomfj.monsters import drop_rows
     pose, setup = cand[0], cand[1]
     late = cand[2] if len(cand) > 2 else None
-    alt, mr = run(pose, sc["keys"], setup, ctl, late=late)
-    return H.parts(run, want, alt, run.orc._mv(mr.mph.world).nrt, drop_rows(mr.mph.world))
+    with drops_keep_rank():                           # `drop_z`'s pictures hold lifted drops (3-tuples)
+        alt, mr = run(pose, sc["keys"], setup, ctl, late=late)
+        return H.parts(run, want, alt, run.orc._mv(mr.mph.world).nrt, drop_rows(mr.mph.world))
 
 
 # ================================================================================================
@@ -815,9 +835,10 @@ def p8a_scenario_list(dsim, w, card) -> list:
     k1 = [(p, both(att(m, "S_POSS_ATK1"), armor(200, 2))) for m in zomb[:8]
           for p in H.facing_pose(dsim, w, m, 128) + H.facing_pose(dsim, w, m, 96)]
     out.append({"name": "K1 knockback: a zombieman's hits push the player away, the push decays and stops",
-                "keys": idle40, "rule": "knock", "pkg": ("K",), "need": ("knock_frames",),
+                "keys": [I] * 64, "limit": 30, "rule": "knock", "pkg": ("K",), "need": ("knock_frames",),
                 "controls": ["no_thrust", "thrust_sign", "no_friction", "stopspeed"], "cands": k1,
-                "claim": lambda c, tr: c["knock_frames"] >= 1 and _knock_stopped(tr)
+                # stopped by the STOPSPEED stop, not by a wall (K2 is the wall): `stopspeed` must decide it
+                "claim": lambda c, tr: c["knock_frames"] >= 1 and _knock_stopped(tr) and c["knock_refused"] == 0
                 and any(_moved_away(w, tr, m) for m in zomb)})
     # ---- K2: pushed into a wall: the knock momentum zeroed
     k2 = []
@@ -842,15 +863,25 @@ def p8a_scenario_list(dsim, w, card) -> list:
                 "cands": k3,
                 "claim": lambda c, tr: c["barrel_blasts"] >= 1 and c["knock_frames"] >= 1 and c["mon_knock_frames"] >= 1})
     # ---- K4: the shotgun on a sergeant (7 thrusts) and on a demon (mass 400): fractions, re-tests, a relink
-    for tag, kinds, ctls in (("K4s the shotgun on a sergeant: its fraction cells, the re-tests, a relink", sgt,
-                              ["frac_drop", "no_retest"]),
-                             ("K4d the shotgun on a demon: mass 400", demons, ["mass"])):
+    def wall_behind(m, p, ds=(32, 48, 64, 96, 128)):
+        """a wall (the player's box cannot stand) some `ds` units beyond monster m, away from pose p: its knock is
+        refused there"""
+        mx, my = w.ws.mon_x[m], w.ws.mon_y[m]
+        dx, dy = mx - (p[0] >> 16), my - (p[1] >> 16)
+        n = math.hypot(dx, dy) or 1
+        return any(not standing(dsim, round(mx + dx / n * d), round(my + dy / n * d)) for d in ds)
+    for tag, kinds, ctls, refused in (
+            ("K4s the shotgun on a sergeant: its fraction cells, a re-test refused, a relink", sgt,
+             ["frac_drop", "no_retest"], True),
+            ("K4d the shotgun on a demon: mass 400", demons, ["mass"], False)):
         cands = [(p, both(shotgun_(), armor(200, 2), mon_health(m, 600))) for m in kinds[:8]
-                 for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (80, 96, 64))]
+                 for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (80, 96, 64))
+                 if not refused or wall_behind(m, p)]
         out.append({"name": tag, "keys": gun, "rule": "knock", "pkg": ("K",), "need": ("frac_frames",),
-                    "controls": ctls, "cands": cands,
-                    "claim": lambda c, tr, kinds=kinds: c["mon_knock_frames"] >= 1 and c["frac_frames"] >= 1
-                    and any(mon_moved_(tr, m) for m in kinds)})
+                    "controls": ctls, "cands": cands, "limit": 40,
+                    "claim": lambda c, tr, kinds=kinds, refused=refused: c["mon_knock_frames"] >= 1
+                    and c["frac_frames"] >= 1 and any(mon_moved_(tr, m) for m in kinds)
+                    and (not refused or c["mon_knock_refused"] >= 1)})
     # ---- K5: a kill by the shotgun: the corpse slides, its drop stays where it died
     k5 = [(p, both(shotgun_(), armor(200, 2), mon_health(m, 10))) for m in zomb[:8]
           for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (72, 88, 64))]
@@ -946,13 +977,17 @@ def p8a_scenario_list(dsim, w, card) -> list:
                 "rule": "fight", "pkg": ("I",), "controls": ["threshold_ignored"], "cands": i6,
                 "claim": lambda c, tr: _mon_hurt(tr) >= 1 and c["infight"] == 0})
     # ---- C1 / C2 / C3: the compositor rules (each candidate must be one where the rule decides a pixel)
+    # C1: a kill whose drop shares its leaf with its corpse. Under knockback the corpse slides AWAY from the shooter,
+    # so most kills draw the drop first by depth alone -- the candidates run deep (`limit`), and `claim_ctl` keeps only
+    # one where the rank decides a pixel (MEASURED: (656, 336), rank_off and rank_swap part at frame 24)
     out.append({"name": "C1 D3 a: a drop in its corpse's leaf drawn in front of the corpse", "keys": shoot + [I] * 10,
-                "rule": "p8a", "pkg": ("C",), "controls": ["rank_off"], "claim_ctl": "rank_off", "drop_px": True,
-                "cands": [(p, mon_health(m, 1)) for m in zomb[:8] + sgt[:4]
-                          for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (96, 112, 80))],
+                "rule": "p8a", "pkg": ("C",), "controls": ["rank_off", "rank_swap"], "claim_ctl": "rank_off", "drop_px": True,
+                "limit": 48,
+                "cands": [(p, mon_health(m, 1)) for d in (96, 128, 160, 80, 192) for m in zomb[:8] + sgt[:6]
+                          for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (d,))],
                 "claim": lambda c, tr: c["drop_frames"] >= 1})
     out.append({"name": "C2 D3 a: blood on a monster drawn before it", "keys": gun,
-                "rule": "p8a", "pkg": ("C",), "controls": ["rank_off"], "claim_ctl": "rank_off",
+                "rule": "p8a", "pkg": ("C",), "controls": ["rank_off", "rank_swap"], "claim_ctl": "rank_off",
                 "cands": [(p, both(shotgun_(), armor(200, 2), mon_health(m, 600))) for m in zomb[:8]
                           for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (80, 96, 112))],
                 "claim": lambda c, tr: c["fx_spawns"] >= 1})
@@ -982,10 +1017,10 @@ def p8a_scenario_list(dsim, w, card) -> list:
     # ---- S4: a push storm -- a barrel chain inside a crowd
     col = [b for b, t in enumerate(w.barrel_things) if t.x == 2512]
     s4 = [(p, both(bar_health(b, 1), armor(200, 2))) for b in col
-          for p in poses_facing(dsim, w, w.barrel_things[b].x, w.barrel_things[b].y, (192, 224, 256))
-          if p[0] >> 16 < 2512]
+          for p in poses_facing(dsim, w, w.barrel_things[b].x, w.barrel_things[b].y, (192, 224, 160, 256))
+          if p[0] >> 16 < 2512]                      # F7's candidates (S2 places among them)
     out.append({"name": "S4 stress: a push storm -- a barrel chain inside a crowd, every knock move at once",
-                "keys": shoot + [I] * 30, "rule": "knock", "pkg": ("K",), "controls": [], "cands": s4,
+                "keys": shoot + [I] * 30, "rule": "knock", "pkg": ("K",), "controls": [], "cands": s4, "limit": 40,
                 "claim": lambda c, tr: c["barrel_blasts"] >= 3
                 and max(fr["mstate"].get("kb_live", 0) for fr in tr) >= 3})
     return out

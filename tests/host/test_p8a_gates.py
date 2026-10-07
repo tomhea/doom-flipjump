@@ -147,13 +147,46 @@ def test_the_p8a_groups_come_whole():
 
 
 # ---- a stand-in package K: the smallest P_XYMovement for the player and the monsters ---------------------------
+def real_k() -> bool:
+    """package K is in the tree: the player's knock move is CombatMixin's own"""
+    from doomfj import combat as C
+    return "_player_knock_move" in vars(C.CombatMixin)
+
+
+def real_a() -> bool:
+    """package A is in the tree: a death think sinks the view"""
+    from doomfj.world import KEYS, TicEvents, World
+    w = World(player="final", monsters="full")
+    w.damage_player(w.ws.p_health + 30, ("gate", 0), None, TicEvents(0))
+    w._death_think({k: False for k in KEYS}, TicEvents(0))
+    return w.ws.p_vdrop == 1
+
+
 def _install_k(monkeypatch, inside_walk: bool = False):
     """CombatMixin._player_knock_move / World._monster_knock_move (DOOM's shape: no halving, a refused step zeroes, else
     friction 29/32 and the STOPSPEED stop) and their calls in the model's tic: after the walk, dead or alive -- or,
-    `inside_walk`, at the end of `_player_move` (and after the death think)"""
+    `inside_walk`, at the end of `_player_move` (and after the death think).
+    Once package K is merged (its `_player_knock_move` is the class's own) the REAL K is used: only `inside_walk`'s
+    extra call is patched in -- a stand-in on top of K would knock twice in the model's tic"""
     from doomfj import combat as C
     from doomfj import gamedata as gd
     from doomfj import world as W
+    if real_k():
+        if inside_walk:
+            orig_pm, orig_dt = C.CombatMixin._player_move, C.CombatMixin._death_think
+
+            def pm_(self, keys, ev):
+                orig_pm(self, keys, ev)
+                if self._p_knock:
+                    self._player_knock_move(ev)
+
+            def dt_(self, keys, ev):
+                orig_dt(self, keys, ev)
+                if self._p_knock:
+                    self._player_knock_move(ev)
+            monkeypatch.setattr(C.CombatMixin, "_player_move", pm_)
+            monkeypatch.setattr(C.CombatMixin, "_death_think", dt_)
+        return
 
     def friction(v):
         return (v * 29) // 32
@@ -364,12 +397,13 @@ def test_a_control_breaks_its_rule_on_a_stand_in(monkeypatch):
     view standing and `sink_fast` sinks two"""
     from doomfj import combat as C
     import p8a_lib as P8
-    orig = C.CombatMixin._death_think
+    if not real_a():                                      # package A merged: its real death think
+        orig = C.CombatMixin._death_think
 
-    def dt(self, keys, ev):
-        orig(self, keys, ev)
-        self.ws.p_vdrop = min(35, self.ws.p_vdrop + 1)
-    monkeypatch.setattr(C.CombatMixin, "_death_think", dt)
+        def dt(self, keys, ev):
+            orig(self, keys, ev)
+            self.ws.p_vdrop = min(35, self.ws.p_vdrop + 1)
+        monkeypatch.setattr(C.CombatMixin, "_death_think", dt)
     from doomfj.world import KEYS, TicEvents, World
     for ctl, want in ((None, 1), ("no_sink", 0), ("sink_fast", 2)):
         w = World(player="final", monsters="full")
@@ -442,8 +476,10 @@ def test_the_census_and_the_autopilot_read_the_drops_own_position():
 
 def _install_thrust(monkeypatch):
     """a stand-in `_thrust`: dmg * (FRACUNIT >> 3) * 100 // mass along +x (the angle is K's; the controls under test
-    only scale, negate or drop what the thrust adds)"""
+    only scale, negate or drop what the thrust adds). Package K merged: its real `_thrust`"""
     from doomfj import combat as C
+    if real_k():
+        return
 
     def thrust(self, target, inflictor, source, dmg):
         if inflictor is None:
@@ -473,11 +509,16 @@ def test_the_knock_controls_break_their_rule_on_a_stand_in(monkeypatch):
         else:
             with P8.control(ctl):
                 w.damage_monster(m, 16, ("player", -1), ("player", -1), TicEvents(0))
-        return w.ws.mon_momx[m]
+        return w.ws.mon_momx[m], w.ws.mon_momy[m]
     base = hit(None, "MT_POSSESSED")
-    assert base == 16 << 13
-    assert hit("no_thrust", "MT_POSSESSED") == 0 and hit("thrust_sign", "MT_POSSESSED") == -base
-    assert hit(None, "MT_SERGEANT") == base // 4 and hit("mass", "MT_SERGEANT") == base
+    import math
+    mag = math.hypot(*base)
+    assert abs(mag - (16 << 13)) < 64, base                 # |16 * FRACUNIT/8| along the inflictor -> target angle
+    assert hit("no_thrust", "MT_POSSESSED") == (0, 0)
+    assert hit("thrust_sign", "MT_POSSESSED") == (-base[0], -base[1])
+    demon = hit(None, "MT_SERGEANT")
+    assert abs(math.hypot(*demon) - (16 << 13) / 4) < 64, demon         # mass 400: a quarter
+    assert hit("mass", "MT_SERGEANT") == (4 * demon[0], 4 * demon[1])
 
 
 def test_the_fight_controls_break_their_rule_on_a_stand_in(monkeypatch):
@@ -511,3 +552,13 @@ def test_the_fight_controls_break_their_rule_on_a_stand_in(monkeypatch):
     assert t == 2 + b
     assert hit("no_switch")[0] == 1
     assert hit(None, threshold=50)[0] == 1 and hit("threshold_ignored", threshold=50)[0] == 2 + b
+
+
+def test_the_census_draws_its_sets_mode():
+    """census_lib imports beside package C's GAME_RENDER_KW keys (its frozen copy refused them: every --validate and
+    --plan with the census raised) and draws D3 a / b exactly at a player mode with world.compositor_d3"""
+    import census_lib as CL
+    from doomfj import world as W
+    assert CL.Census().d3_kw in ({}, {"rt_rank": False, "exempt_barrels": False})
+    if hasattr(W, "compositor_d3"):
+        assert CL.Census(player="final", monsters="final").d3_kw == {"rt_rank": True, "exempt_barrels": True}

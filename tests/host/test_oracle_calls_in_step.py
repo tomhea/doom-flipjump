@@ -63,11 +63,16 @@ HISTORICAL = frozenset({"scratchpad/chk_refactor.py", "scratchpad/m14_baseline_i
 # a control tool that renders deliberate VARIANTS of the shared set (sky off, bbox_cull off) through
 # a parameter -- judging it would demand it stop being a control
 CONTROL_TOOLS = frozenset({"scratchpad/gp/census_control.py"})
+# M7 P8a (issue #121 item 15): IDENTITY tools render the NEW oracle against an OLD one pinned at a git ref, with
+# GAME_RENDER_KW cut to the keywords the old signature accepts (`base_render_kw`, which prints what it drops) -- the
+# same cut on both sides is the point, so they cannot pass the shared set itself; their claim is checked by their own
+# run (60/60 frames identical), not by this test
+IDENTITY_TOOLS = frozenset({"scratchpad/gp/p5_mobiles_identity.py", "scratchpad/gp/p67_identity.py"})
 
 
 def is_gate(rel: str, source: str) -> bool:
     """a tracked tool that compares a built binary against the oracle, without emitting"""
-    return rel.startswith("scratchpad/") and rel not in HISTORICAL | CONTROL_TOOLS and (
+    return rel.startswith("scratchpad/") and rel not in HISTORICAL | CONTROL_TOOLS | IDENTITY_TOOLS and (
         rel.startswith("scratchpad/gp/") or any(r in source for r in BINARY_RUNNERS))
 
 

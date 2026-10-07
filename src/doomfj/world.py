@@ -703,8 +703,8 @@ def infighting_on(monster_mode: str) -> bool:
 def compositor_d3(player_mode: str) -> bool:
     """M7 P8a (C, docs/gp-final-plan.md 1.3): the ONE rule "the game picture follows D3 a and D3 b" -- a leaf's effects
     and drops drawn before its monsters and fireballs (the oracle's `rt_rank`, the fj walk's rank), barrels exempt from
-    the scenery soft budget (`barrel_exempt`, the record's `sp_ex`): `reference_model.game_render_kw(compositor_d3(pm))`
-    and the emitter's `_D3`. A render rule -- no cell, no schema field. "final" alone (it ships with the infighting
+    the scenery soft budget (`exempt_barrels`, the record's `sp_ex`): reference_model.GAME_RENDER_KW's two keys (ON
+    exactly when this is, flipped with the mode; `game_render_kw(d3)` draws either) and the emitter's `_D3`. A render rule -- no cell, no schema field. "final" alone (it ships with the infighting
     fallback "push" too: the player mode decides it)"""
     assert player_mode in PLAYER_MODES, player_mode
     return player_mode == "final"

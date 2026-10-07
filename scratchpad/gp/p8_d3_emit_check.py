@@ -1,7 +1,8 @@
 """M7 P8a package C: the compositor rules' EMITTED footprint, proven against the frozen "full" text.
 
-The game tier is emitted ONCE with the compositor rule forced on (`world.compositor_d3` patched to True; the modes stay
-"full" / "full", so no other P8a hook is emitted) and every part is compared with scratchpad/cr/emit_baseline.json's
+The game tier is emitted ONCE with the compositor rule forced on (`world.compositor_d3` patched to True and
+GAME_RENDER_KW's two D3 keys flipped with it; the modes stay "full" / "full", so no other P8a hook is emitted) and
+every part is compared with scratchpad/cr/emit_baseline.json's
 `standalone` hashes (the "full" game tier, blocked51's text) after removing EXACTLY the D3 lines:
 
   * the baked barrels' xor_by blocks:     `    hex.xor_by 1, sp_ex, 1`           (every state of every baked barrel)
@@ -38,14 +39,18 @@ def emit_d3():
     from doomfj.wad import WadFile
     from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE, emit_wall_renderer
     assert (MONSTER_MODE, PLAYER_MODE) == ("full", "full"), "the check forces D3 alone on top of the 'full' tier"
-    saved = world.compositor_d3
+    from doomfj.reference_model import D3_RENDER_KW, GAME_RENDER_KW
+    saved, kw_saved = world.compositor_d3, dict(GAME_RENDER_KW)
     world.compositor_d3 = lambda pm: True
+    GAME_RENDER_KW.update(D3_RENDER_KW)       # the oracle's keys flipped with it (the emitter asserts they agree)
     try:
         mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
         aw = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
         parts = emit_wall_renderer(mw, "E1M1", Config(), asset_wad=aw, sprite_wad=aw, return_parts=True, tier="game")
     finally:
         world.compositor_d3 = saved
+        GAME_RENDER_KW.clear()
+        GAME_RENDER_KW.update(kw_saved)
     return [(n, "\n".join(ls) if isinstance(ls, list) else ls) for n, ls in parts]
 
 

@@ -146,7 +146,7 @@ def test_control_the_old_soft_count_drops_the_actors(tmp_path):
 
 
 # ---- M7 P8a package C (D3 b, docs/gp-final-plan.md 1.3): THE BARRELS' SOFT EXEMPTION ------------------------------
-# The oracle (render_wall_frame `barrel_exempt`, reference_model.D3_RENDER_KW): a BARREL keeps its BASE size bound
+# The oracle (render_wall_frame `exempt_barrels`, reference_model.D3_RENDER_KW): a BARREL keeps its BASE size bound
 # whatever the scenery count and does not count; it stays scenery (THING_BUDGET). The fj: frame.thing_record_body's
 # budget test, soft test and count, switched on by bit 8 of `dsofts` (wall_renderer.D3B_SOFT_FLAG, the game tier at the
 # P8a player mode) and read through `sp_ex`. This harness TRANSPLANTS the body from its first line to `soft_done:` and

@@ -78,26 +78,34 @@ GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
                       # M7 P6+P7 E (the owner, 2026-10-05: "make sure monsters are almost always seen", "you must
                       # always show the fireballs", "monsters should always be shown"): THE ACTORS RULE -- see
                       # render_wall_frame's `exempt_actors` (the emitter and monstercode read THIS key)
-                      exempt_actors=True)
+                      exempt_actors=True,
+                      # M7 P8a package C (docs/gp-final-plan.md 1.3): THE COMPOSITOR RULES -- D3 a `rt_rank` (a leaf's
+                      # effects and drops drawn before its monsters and fireballs) and D3 b `exempt_barrels` (a barrel
+                      # exempt from the scenery soft budget). OFF while the game tier is at "full" (blocked51's picture,
+                      # v6's record); ON exactly when world.compositor_d3(wall_renderer.PLAYER_MODE) -- the integrator
+                      # flips BOTH (D3_RENDER_KW) in the commit that sets PLAYER_MODE "final", and the emitter ASSERTS
+                      # the two agree with its `_D3` (tests/host/test_d3_rules.py holds them together too)
+                      rt_rank=False, exempt_barrels=False)
 # THE HOSTED TIERS' PICTURE (M7 P3.3): the game tier's set WITHOUT D3 d. The hosted tiers (hosted, hosted-doors,
 # hosted-loop, hosted-nocollide) move runtime things too -- the host sends their positions -- but their fj walks
 # a leaf's list in INDEX order (`sim.thing_pass`); the depth walk is the GAME tier's alone. A gate that drives a
 # hosted binary (m1_gate, m2_r3_gate, m2_r4_gate, m2_pass_probe) asks for THIS set, or it compares a sorted oracle
 # with an unsorted binary on every leaf holding two moved things.
-HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False)   # (M7 P6+P7 E: the game's alone)
+HOSTED_RENDER_KW = dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False,   # (M7 P6+P7 E: the game's alone)
+                        rt_rank=False, exempt_barrels=False)                       # (M7 P8a C: the game's alone)
 RT_DEPTH_ORDERS = (False, None, "aprox", "tz")   # render_wall_frame's rt_depth_order: off, or the key
-# M7 P8a package C (docs/gp-final-plan.md 1.3): THE COMPOSITOR RULES D3 a / D3 b -- the game picture at the P8a player
-# mode (world.compositor_d3), ON TOP of GAME_RENDER_KW, which stays blocked51's ("full": v6's record and every gate of a
-# "full" binary read it unchanged). `rt_rank`: a leaf's runtime things drawn effects and drops FIRST (D3 a);
-# `barrel_exempt`: a barrel is exempt from the scenery soft budget (D3 b). See render_wall_frame. deg_gate's visual tier
-# passes neither (tests/host/test_d3_rules.py holds it).
-D3_RENDER_KW = dict(rt_rank=True, barrel_exempt=True)
+# M7 P8a package C: the compositor rules' keys at their P8a values (GAME_RENDER_KW holds them OFF until the flip). R9:
+# an oracle with the rank SWAPPED (the monsters first) is `rank_depth_key` patched -- render_wall_frame calls the module
+# function, e.g. monkeypatch(reference_model, "rank_depth_key", lambda vx, vy, x, y, r: orig(vx, vy, x, y, 1 - r))
+# (tests/host/test_d3_rules.py proves that control parts); rank_off is `rt_rank=False`, barrel_soft `exempt_barrels=False`
+D3_RENDER_KW = dict(rt_rank=True, exempt_barrels=True)
 
 
-def game_render_kw(d3: bool = False) -> dict:
-    """the game tier's keyword set: GAME_RENDER_KW, plus D3_RENDER_KW when the compositor rules are on
-    (`world.compositor_d3(player_mode)` -- the emitter's `_D3` reads the same rule). A fresh dict every call."""
-    return dict(GAME_RENDER_KW, **(D3_RENDER_KW if d3 else {}))
+def game_render_kw(d3: bool) -> dict:
+    """the game tier's keyword set with the compositor rules set to `d3` (`world.compositor_d3(player_mode)`, the
+    emitter's `_D3`) whatever GAME_RENDER_KW holds -- for a gate or test that must draw one mode's picture explicitly
+    (a "full" replay after the flip, or a "final" one before it). A fresh dict every call."""
+    return dict(GAME_RENDER_KW, **{k: bool(d3) for k in D3_RENDER_KW})
 # ⚠ DOOM's forwardmove 0x32 (=50) is a THRUST, not a displacement. `P_Thrust` adds `move*2048` to
 # momx/momy, and against FRICTION 0xE800 (0.90625) the steady state is 50*2048/65536 / 0.09375 =
 # ~16.7 map-units per tic. This sim has no momentum -- `step_sim` applies the constant DIRECTLY as
@@ -1997,7 +2005,7 @@ class ReferenceModel:
                           deg_lip_scale: int | None = None,
                           thing_positions=None, thing_hidden=None, thing_views=None,
                           seen_out: set | None = None, rt_depth_order=False,
-                          rt_rank: bool = False, barrel_exempt: bool = False,
+                          rt_rank: bool = False, exempt_barrels: bool = False,
                           aim_things: dict | None = None, aim_out: list | None = None,
                           mobiles=None, barrel_views: dict | None = None, thing_removed=None,
                           degrade: bool = False, exempt_actors: bool = False) -> bytes:
@@ -2048,8 +2056,8 @@ class ReferenceModel:
         BASE size bound (the fj's `sp_tzmax`) and `tz <= MISSILERANGE << 16`. It writes only the
         window: no pixel changes.
 
-        `rt_rank` / `barrel_exempt` (M7 P8a package C, docs/gp-final-plan.md 1.3; `D3_RENDER_KW`, the game picture at
-        the P8a player mode): D3 a -- a leaf's runtime list is sorted by (rank, key, index), rank 0 (drawn first) for
+        `rt_rank` / `exempt_barrels` (M7 P8a package C, docs/gp-final-plan.md 1.3; GAME_RENDER_KW's two keys, ON at
+        the P8a player mode: D3_RENDER_KW): D3 a -- a leaf's runtime list is sorted by (rank, key, index), rank 0 (drawn first) for
         the effects and the drops (`mobile_rank`), 1 for every other runtime thing (it needs `rt_depth_order`); D3 b --
         a BARREL (BARREL_TYPE, baked or runtime, every state) takes no soft raise (its BASE size bound whatever the
         scenery count) and does not count against the scenery budgets; it stays scenery (THING_BUDGET, the B-gate).
@@ -2389,7 +2397,7 @@ class ReferenceModel:
                     # M7 P8a (C, D3 b): a BARREL -- baked or runtime, any state (the explosion too) -- keeps its BASE
                     # bound whatever the scenery count, and does not count (below); still scenery: THING_BUDGET, the
                     # B-gate. The fj: frame.thing_record_body's soft test and count read `sp_ex` (dsofts' bit 8)
-                    bar_ex = barrel_exempt and not mob and t.type == BARREL_TYPE
+                    bar_ex = exempt_barrels and not mob and t.type == BARREL_TYPE
                     if deg_things is not None and not mob and not bar_ex:   # M7 P5: a mobile keeps the BASE bound
                         soft_s, minh2_s, soft_m, minh2_m = deg_things
                         if act and n_mon >= soft_m:

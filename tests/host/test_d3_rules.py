@@ -6,11 +6,15 @@ clear) and tests/fj/test_actor_record_fj.py (the record's soft test and count).
     EFFECTS (blood, puffs) and the DROPS, drawn first (in front: a sprite pixel is written once), rank 1 for the monsters,
     live or dead, the fireballs and every other runtime thing. A drop TIES with its corpse on the aprox key and the row
     order used to give the corpse slot A, leaving the drop (scenery, B-gated under 32 rows) invisible in those columns.
-  * D3 b (`barrel_exempt`): a BARREL (baked or runtime, every state) keeps its BASE size bound whatever the scenery
+  * D3 b (`exempt_barrels`): a BARREL (baked or runtime, every state) keeps its BASE size bound whatever the scenery
     count and does not count; it stays scenery (THING_BUDGET, the B-gate). Projectiles were already exempt -- and more
     -- under the actors rule (`exempt_actors`: a mobile is an actor, no soft raise, no B-gate): nothing to build.
-  * Both ride `reference_model.game_render_kw(world.compositor_d3(player_mode))` -- the P8a player mode "final" alone.
-    GAME_RENDER_KW stays blocked51's (v6's record, every "full" gate) and deg_gate's visual tier passes neither key.
+  * Both are GAME_RENDER_KW keys (`rt_rank`, `exempt_barrels` -- package V's names), OFF while the game tier is at
+    "full" (blocked51's picture, v6's record) and ON exactly when world.compositor_d3(wall_renderer.PLAYER_MODE) -- the
+    P8a player mode "final": the integrator flips them with the mode (the emitter asserts they agree with its `_D3`).
+    `game_render_kw(d3)` draws either picture explicitly. deg_gate's visual tier passes neither key.
+  * R9 for the gates: rank_off is `rt_rank=False`, barrel_soft `exempt_barrels=False`, rank_swap `rank_depth_key`
+    patched to rank 1 - r (proved to part below).
 
 The scenes: v5's R0-courtyard checkpoint facing north (test_actors_rule's), things placed by hand -- a corpse with its
 clip on it, a zombieman with blood on it (one leaf, an exact aprox tie), a far runtime barrel behind three near drops.
@@ -31,20 +35,26 @@ def _diff(a, b):
 
 # ---- the keyword sets and the rule ---------------------------------------------------------------------------------
 
-def test_the_game_picture_of_full_is_unchanged():
-    """GAME_RENDER_KW (the "full" game tier, v6, every gate of blocked51) carries neither key; game_render_kw(False) IS
-    it; the P8a picture adds exactly D3_RENDER_KW; the hosted tiers' set carries neither"""
+def test_the_game_pictures_keys_follow_the_mode():
+    """GAME_RENDER_KW's two D3 keys are ON exactly when the game tier's player mode takes the rule (so at "full" the
+    picture is blocked51's); the hosted tiers' set keeps them off; game_render_kw(d3) sets both, whatever the flip"""
+    from doomfj import wall_renderer as WR
     from doomfj.reference_model import D3_RENDER_KW, GAME_RENDER_KW, HOSTED_RENDER_KW, game_render_kw
-    assert D3_RENDER_KW == {"rt_rank": True, "barrel_exempt": True}
-    assert not set(D3_RENDER_KW) & set(GAME_RENDER_KW) and not set(D3_RENDER_KW) & set(HOSTED_RENDER_KW)
-    assert game_render_kw(False) == GAME_RENDER_KW and game_render_kw(False) is not GAME_RENDER_KW
-    assert game_render_kw(True) == dict(GAME_RENDER_KW, **D3_RENDER_KW)
+    from doomfj.world import compositor_d3
+    assert D3_RENDER_KW == {"rt_rank": True, "exempt_barrels": True}
+    on = compositor_d3(WR.PLAYER_MODE)
+    assert GAME_RENDER_KW["rt_rank"] is on and GAME_RENDER_KW["exempt_barrels"] is on, (WR.PLAYER_MODE, on)
+    assert HOSTED_RENDER_KW["rt_rank"] is False and HOSTED_RENDER_KW["exempt_barrels"] is False
+    for d3 in (False, True):
+        kw = game_render_kw(d3)
+        assert kw is not GAME_RENDER_KW and kw == dict(GAME_RENDER_KW, rt_rank=d3, exempt_barrels=d3)
 
 
 def test_deg_gates_keyword_set_is_unchanged():
     """deg_gate (the visual tier: byte-exact AND op counts equal to blocked51's) names none of the P8a picture"""
     src = (ROOT / "scratchpad" / "deg_gate.py").read_text(encoding="utf-8")
-    for word in ("rt_rank", "barrel_exempt", "D3_RENDER_KW", "game_render_kw", "GAME_RENDER_KW", "compositor_d3"):
+    for word in ("rt_rank", "exempt_barrels", "D3_RENDER_KW", "game_render_kw", "GAME_RENDER_KW", "compositor_d3",
+                 "HOSTED_RENDER_KW"):
         assert word not in src, word
 
 
@@ -168,6 +178,19 @@ def test_blood_is_drawn_before_its_monster(court):
     assert plain < len(fp) // 2, (len(fp), plain)
 
 
+def test_control_the_swapped_rank_parts(court, monkeypatch):
+    """R9 for the gates (V's rank_swap): `rank_depth_key` patched to rank 1 - r -- the monsters drawn before the effects
+    -- hides the blood behind its zombieman again; a gate's oracle mutation is exactly this patch"""
+    from doomfj import reference_model as RM
+    at = (COURT[0], COURT[1] + 150)
+    blood = [(at[0], at[1], "BLUDA0")]
+    good = court(at=at, mobiles=blood)
+    orig = RM.rank_depth_key
+    monkeypatch.setattr(RM, "rank_depth_key", lambda vx, vy, x, y, r: orig(vx, vy, x, y, 1 - r))
+    swapped = court(at=at, mobiles=blood)
+    assert swapped != good and swapped == court(at=at, mobiles=blood, rt_rank=False)
+
+
 def test_a_fireball_still_sorts_with_the_monsters(court):
     """a FIREBALL is rank 1: on the zombieman the rank changes nothing (both rank 1, the aprox tie, the row order)"""
     at = (COURT[0], COURT[1] + 150)
@@ -201,12 +224,12 @@ def test_a_far_barrel_after_three_scenery_things_is_drawn(court):
     gone[b] = home
     clips = [(COURT[0] - 40 + 25 * k, COURT[1] + 90 + 10 * k, "CLIPA0", 0) for k in range(3)]
     on = _diff(court(positions=pos, mobiles=clips), court(positions=gone, mobiles=clips))
-    off = _diff(court(positions=pos, mobiles=clips, barrel_exempt=False),
-                court(positions=gone, mobiles=clips, barrel_exempt=False))
+    off = _diff(court(positions=pos, mobiles=clips, exempt_barrels=False),
+                court(positions=gone, mobiles=clips, exempt_barrels=False))
     assert len(on) >= 8 and not off, (len(on), len(off))
     soft = (255, DEG_MINH2_SCENERY, DEG_SOFT_MON, DEG_MINH2_MON)
-    ctl = _diff(court(positions=pos, mobiles=clips, barrel_exempt=False, deg_things=soft),
-                court(positions=gone, mobiles=clips, barrel_exempt=False, deg_things=soft))
+    ctl = _diff(court(positions=pos, mobiles=clips, exempt_barrels=False, deg_things=soft),
+                court(positions=gone, mobiles=clips, exempt_barrels=False, deg_things=soft))
     assert ctl == on, (len(ctl), len(on))
 
 
@@ -226,14 +249,14 @@ def test_a_barrel_does_not_count(court):
     for ex in (True, False):
         for name, p in (("in", pos), ("out", gone)):
             out = []
-            court(positions=p, things_out=out, barrel_exempt=ex, deg_things=soft)
+            court(positions=p, things_out=out, exempt_barrels=ex, deg_things=soft)
             counts[(ex, name)] = out[1]
     assert counts[(True, "in")] == counts[(True, "out")] >= 3, counts
     assert counts[(False, "in")] == counts[(False, "out")] + 1, counts
     assert court(positions=pos) != court(positions=gone), "the near barrel is not in view: the case is vacuous"
     # the court's own load: blocked51's rule hides a far scenery thing behind the counted barrel, D3 b keeps it
     barrel_px = set(_diff(court(positions=pos), court(positions=gone)))
-    rest = [i for i in _diff(court(positions=pos), court(positions=pos, barrel_exempt=False)) if i not in barrel_px]
+    rest = [i for i in _diff(court(positions=pos), court(positions=pos, exempt_barrels=False)) if i not in barrel_px]
     assert rest, "the counted barrel raised nothing in the court: the picture half is vacuous"
 
 

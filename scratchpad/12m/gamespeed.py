@@ -44,7 +44,8 @@ from fjmsize import ceiling_words, read_fjm_size                          # noqa
 import m2_std_gate as gate                                                # noqa: E402
 from m2_std_gate import MENU_FRAMES, menu_exit_events, to_events           # noqa: E402
 
-SPEED_TARGET = 20_000_000          # 80th-percentile RUN's average ops/frame
+SPEED_TARGET = 22_000_000          # (mean + p80) / 2 of the runs' ops/frame: 22M since the combat game shipped (D1,
+#                                    docs/handoff-gameplay.md; M7 P8 on blocked53), 20M before
 SIZE_TARGET_PCT = 42.0             # of the address ceiling: 42% acceptable "if things get messy or big" (the owner 2026-10-04,
 #                                    after P5 at 35.16%); 40% from M7 P4.0 (gp-combat C2), 35% before
 

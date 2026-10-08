@@ -448,7 +448,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
 
 # ---- M7 P8a I: the things a fireball meets (combat._missile_things) ------------------------------------------------
 PT_DECLS = ["pt_me: hex.vec 2", "pt_j: hex.vec 2", "pt_imp: hex.vec 1", "pt_sh: hex.vec 1", "pt_stop: hex.vec 1",
-            "pt_tret: hex.vec w/4"]
+            "pt_tret: hex.vec w/4", "pt_svt: hex.vec w/4", "pt_svl: hex.vec w/4"]
 
 
 def fight_things(w, slot_rt) -> dict:
@@ -566,7 +566,12 @@ def pt_lines(ft: dict, knock: bool = False) -> List[str]:
             "    hex.mov 2, dm_src, pt_me",
             "    hex.mov 2, dm_id, pt_j", "    hex.dec 2, dm_id",
             *(inflictor_lines("pw_x + 4*dw", "pw_y + 4*dw", z="pw_z") if knock else []),   # M7 P8a: the missile
+            # the pool WINDOW kept across dm_go: a kill of a dropper links its drop through the window (damagecode's
+            # drop_link<k> -> barrelcode.dr_link writes pw_t / pw_leaf), and pool_tic writes the window back as the
+            # fireball's thing (blocked52 fight_gate F6 frame 44: the fireball took the corpse's leaf)
+            "    hex.mov w/4, pt_svt, pw_t", "    hex.mov w/4, pt_svl, pw_leaf",
             "    stl.fcall dm_go, dm_ret",
+            "    hex.mov w/4, pw_t, pt_svt", "    hex.mov w/4, pw_leaf, pt_svl",
             "  pt_tout:",
             "    stl.fret pt_tret"]
     return out

@@ -673,11 +673,17 @@ def _fapply(w, rec, log):
 
 def _fexpected(w, records) -> bytes:
     lines = []
-    for rec in records:
+    for r, rec in enumerate(records):
         log = []
         ok = _fapply(w, rec, log)
-        lines += log + ["%x%02x" % (int(ok), w.ws.rng_fx)]
+        lines += log + ["%x%02x%02x%03x" % ((int(ok), w.ws.rng_fx) + _window(r))]
     return ("\n".join(lines) + "\n").encode()
+
+
+def _window(r):
+    """record r's pool window: its runtime thing and leaf, poked before pj_try -- they must come back unchanged
+    (the window's thing is the one pool_tic links and writes back: pj_out / _copy_out's thss_rt)"""
+    return 0x44 + r % 10, (37 * r + 5) % 0x2C0
 
 
 FIGHT_MUTANTS = {
@@ -687,6 +693,8 @@ FIGHT_MUTANTS = {
     "box_fraction": None,
     "pass_barrels": None,
     "pass_through": ("  pj_tm:\n", "  pj_tm:\n    ;pj_tl\n"),
+    # the window not put back after dm_go: the fireball written back with the drop's thing and leaf
+    "window_lost": ("    hex.mov w/4, pw_leaf, pt_svl\n", ""),
 }
 
 
@@ -713,7 +721,7 @@ def _fbuild(tmp_path, name, mut=None):
         assert unit.count(old) == 1, (mut, unit.count(old))
         unit = unit.replace(old, new)
     body = ["stl.startup_and_init_all"]
-    for rec in records:
+    for r, rec in enumerate(records):
         body += ["hex.zero %d, mon_solid" % n, "hex.zero %d, mon_shootable" % n]
         for j, (x, y, solid, alive) in sorted(rec["mons"].items()):
             body += ["hex.set 4, thpos_rt + %d*dw, %d" % (16 * j + 4, x & 0xFFFF),
@@ -728,14 +736,21 @@ def _fbuild(tmp_path, name, mut=None):
                  "hex.set 2, rng_fx, %d" % rec["rng"], "hex.set 2, pw_src, %d" % (rec["src"] + 1),
                  "hex.set 8, pw_nx, %d" % rec["nx16"], "hex.set 8, pw_ny, %d" % rec["ny16"],
                  "hex.set 1, cp_poke, %d" % rec["lines"],
+                 "hex.set w/4, pw_t, %d" % _window(r)[0], "hex.set w/4, pw_leaf, %d" % _window(r)[1],
                  "stl.fcall pj_try, pj_tret",
-                 "hex.print_as_digit 1, pw_ok, 0", "hex.print_as_digit 2, rng_fx, 0", "stl.output 10"]
+                 "hex.print_as_digit 1, pw_ok, 0", "hex.print_as_digit 2, rng_fx, 0",
+                 "hex.print_as_digit 2, pw_t, 0", "hex.print_as_digit 3, pw_leaf, 0", "stl.output 10"]
     body += ["stl.loop",
              "dp_go:", "    stl.output 80", "    hex.print_as_digit 2, dp_dmg, 0", "    hex.print_as_digit 2, dp_src, 0",
              "    stl.output 10", "    hex.zero 2, dp_src", "    stl.fret dp_ret",
              "dm_go:", "    stl.output 77", "    hex.print_as_digit 2, dm_id, 0", "    hex.print_as_digit 2, dm_dmg, 0",
              "    hex.print_as_digit 1, dm_melee, 0", "    hex.print_as_digit 2, dm_src, 0", "    stl.output 10",
-             "    hex.zero 2, dm_src", "    stl.fret dm_ret"]
+             "    hex.zero 2, dm_src",
+             # the real dm_go's kill of a dropper links the drop through the POOL WINDOW (damagecode: drop_link<k> ->
+             # barrelcode.dr_link writes pw_t / pw_leaf); the stub does the same to them (blocked52 fight_gate F6
+             # frame 44: imp 36's fireball killed shotgun guy 35 and was written back with the corpse's leaf)
+             "    hex.not w/4, pw_t", "    hex.not w/4, pw_leaf",
+             "    stl.fret dm_ret"]
     decls = (PC.pool_decls() + PC.pt_decls(ft)
              + ["viewx: hex.vec 8", "viewy: hex.vec 8", "p_hp: hex.vec 3", "p_dead: hex.vec 1",
                 "dp_dmg: hex.vec 2", "dp_src: hex.vec 2", "dp_ret: hex.vec w/4",

@@ -587,7 +587,7 @@ def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills:
     return {"decls": decls(w, boot_skill) + (fight_decls(w) if fight else []),
             "lines": (phase_lines(w, barrel_rt=barrel_rt, exit_guard=exit_guard, barrel_vis=barrel_vis, fight=fight)
                       + damage_lines(len(spots), fight=fight)
-                      + blast_lines(w, slot_rt=slot_rt, knock=knock, fight=fight) + blast_los_lines(w, spots, maxr)
+                      + blast_lines(w, slot_rt=slot_rt, knock=knock, fight=fight) + blast_los_lines(w, spots, maxr, fight=fight)
                       + shot_lines(w, fight=fight)
                       + drop_lines(w, nt=nt, slot_rt=slot_rt)),
             "tables": tables_fj(),

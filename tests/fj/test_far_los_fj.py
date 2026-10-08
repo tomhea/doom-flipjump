@@ -93,7 +93,16 @@ def _samples(w):
             if kind == NEAR and aprox_distance((q16[0] >> 16) - p[0], (q16[1] >> 16) - p[1]) > MS.NEAR_UNITS:
                 continue
         out.append((kind, p[0], p[1], q16[0], q16[1], b, doors, lifts, sw))
-    return out
+    return out + [blocked52_blast(w)]
+
+
+def blocked52_blast(w):
+    """blocked52's fight_gate S2 / S4: barrel 19's blast to imp 45 at (2464, -624), every door shut -- door 145's
+    lines (y -584 / -576) are in the way, both ends at NEGATIVE y. The game's bl_los was emitted unbiased beside the
+    fight's biased segment blocks (barrelcode.barrel_parts did not pass `fight`) and saw through them."""
+    t = w.barrel_things[19]
+    assert (t.x, t.y) == (2512, -496), (t.x, t.y)
+    return (BLAST, t.x, t.y, 2464 << 16, -624 << 16, 19, [0] * len(w.door_order), [0] * len(w.lift_order), 0)
 
 
 def _model(w, s) -> int:
@@ -190,6 +199,11 @@ def _run(tmp, w, samples, name, mut=None):
 def sample(world):
     s = _samples(world)
     return s, [_model(world, x) for x in s]
+
+
+def test_the_blocked52_blast_is_blocked_in_the_model(world):
+    """the fixed record means something: the model's blast LOS is blocked there (the binary's was clear)"""
+    assert _model(world, blocked52_blast(world)) == 1
 
 
 def test_the_sample_exercises_every_range(world, sample):

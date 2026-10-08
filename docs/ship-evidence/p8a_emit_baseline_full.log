@@ -1,0 +1,33 @@
+$ python /c/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/plan/p8b/emit_full.py
+modes: MONSTER_MODE 'full' PLAYER_MODE 'full', GAME_RENDER_KW rt_rank False exempt_barrels False
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+certified   7 parts, 46,282,150 chars, 654 s
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+standalone  7 parts, 62,614,580 chars, 603 s
+pid bake: 233 pairs baked, 255 addressable at PID_NIBBLES=2
+hosted_doors 7 parts, 50,428,784 chars, 702 s
+
+  certified   banks      SAME  30,367,160 chars
+  certified   entry      SAME  26,431 chars
+  certified   main       SAME  5,279 chars
+  certified   segconsts  SAME  1,320,772 chars
+  certified   state      SAME  9,960 chars
+  certified   tables     SAME  9,228,102 chars
+  certified   walk       SAME  5,324,446 chars
+  hosted_doors banks      SAME  33,271,338 chars
+  hosted_doors entry      SAME  26,431 chars
+  hosted_doors main       SAME  38,474 chars
+  hosted_doors segconsts  SAME  2,450,442 chars
+  hosted_doors state      SAME  10,142 chars
+  hosted_doors tables     SAME  9,228,102 chars
+  hosted_doors walk       SAME  5,403,855 chars
+  standalone  banks      SAME  32,997,860 chars
+  standalone  entry      SAME  26,479 chars
+  standalone  main       SAME  1,911,778 chars
+  standalone  segconsts  SAME  3,050,582 chars
+  standalone  state      SAME  954,987 chars
+  standalone  tables     SAME  13,143,794 chars
+  standalone  walk       SAME  10,529,100 chars
+
+EMISSION IDENTICAL -- the refactor removed only code the shipped picture never runs
+rc=0

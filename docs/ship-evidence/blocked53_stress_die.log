@@ -1,0 +1,21 @@
+$ python scratchpad/gp/die_gate.py --fjm build/doom_e1m1_blocked53.fjm --labels scratchpad/12m/atlas/blocked53.labels.tsv.gz --only D9 --frame-ops docs/ship-evidence/blocked53_stress_die.json
+DIE GATE -- 1 scenarios (MONSTER_MODE final, PLAYER_MODE final), build/doom_e1m1_blocked53.fjm
+
+D9 the dying view sinks: p_vd 1..35 then 35, the picture exact at every step -- 40 frames
+  from (-416, 256) angle 00000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 40, knock_moves 40, sink_max 35, sink_frames 40
+  frame 0 pokes: []
+  frame 0 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL no_sink          the oracle without the rule parts at frame 0 (cells)
+  CONTROL sink_fast        the oracle without the rule parts at frame 0 (cells)
+  CONTROL sink_floor       the oracle without the rule parts at frame 34 (cells)
+  CONTROL band_eye         the oracle without the rule parts at frame 0 (picture)
+  binary: 40 frames, 762,293,932 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+  frame ops: max 19,398,656 (frame 0), p95 19,398,656, mean 19,051,315, 0 of 40 frames over 22,000,000, 0 over the 44,000,000 tripwire
+
+TOTALS: mon_hits 0, mon_misses 0, mon_melee 0, proj_spawns 0, proj_impacts 0, proj_walls 0, fizzles 0, fx_spawns 0, fx_skipped 0, player_hurt 1, armor_out 0, deaths 1, dead_frames 40, max_in_flight 0, explosion_frames 0, shots_hit 0, pickups 0, pickup_items 0, pickup_drops 0, bonus_frames 0, berserk_frames 0, gibs 0, drop_frames 0, bexp_frames 0, barrel_blasts 0, puffs 0, blast_kills 0, barrel_hurt 0, player_blocked 0, nukage 0, restarts 0, restart_requests 0, level_done 0, barrel_hits 0, knock_frames 0, mon_knock_frames 0, frac_frames 0, knock_moves 40, knock_walls 0, infight 0, sink_max 35, sink_frames 40, corpse_slides 0, dead_slides 0, knock_refused 0, mon_knock_refused 0, mon_attacks 0, mkills 0
+every event counter nonzero: yes; deaths 1
+frame ops of 1 scenarios -> docs/ship-evidence/blocked53_stress_die.json
+
+DIE GATE PASS (50 s)
+rc=0

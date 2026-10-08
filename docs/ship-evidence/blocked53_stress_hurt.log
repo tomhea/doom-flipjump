@@ -1,0 +1,18 @@
+$ python scratchpad/gp/hurt_gate.py --fjm build/doom_e1m1_blocked53.fjm --labels scratchpad/12m/atlas/blocked53.labels.tsv.gz --only S1 --frame-ops docs/ship-evidence/blocked53_stress_hurt.json
+HURT GATE -- 1 scenarios (MONSTER_MODE final, PLAYER_MODE final), build/doom_e1m1_blocked53.fjm
+
+S1 saturation: every imp fires at once -- 8 in flight, the rest fizzle -- 30 frames
+  from (-416, 256) angle 00000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 0, mon_misses 0, mon_melee 0, proj_spawns 8, proj_impacts 0, proj_walls 3, fizzles 10, fx_spawns 0, fx_skipped 0, player_hurt 0, armor_out 0, deaths 0, dead_frames 0, max_in_flight 8, explosion_frames 21, shots_hit 0, explosion_px 0, blood_px 0
+  frame 0 pokes (the cells the setup moved): ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics']
+  CONTROL pool9        the oracle without the rule parts at frame 0 (cells)
+  CONTROL fizzle_draw  the oracle without the rule parts at frame 0 (cells)
+  binary: 30 frames, 695,436,247 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+  frame ops: max 25,165,824 (frame 7), p95 24,379,392, mean 23,173,529, 30 of 30 frames over 22,000,000, 0 over the 44,000,000 tripwire
+
+TOTALS: mon_hits 0, mon_misses 0, mon_melee 0, proj_spawns 8, proj_impacts 0, proj_walls 3, fizzles 10, fx_spawns 0, fx_skipped 0, player_hurt 0, armor_out 0, deaths 0, dead_frames 0, max_in_flight 8, explosion_frames 21, shots_hit 0, explosion_px 0, blood_px 0
+every event counter nonzero: yes; deaths 0
+frame ops of 1 scenarios -> docs/ship-evidence/blocked53_stress_hurt.json
+
+HURT GATE PASS (38 s)
+rc=0

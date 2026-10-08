@@ -1,0 +1,30 @@
+$ python scratchpad/gp/fight_gate.py --fjm build/doom_e1m1_blocked53.fjm --labels scratchpad/12m/atlas/blocked53.labels.tsv.gz --only S --frame-ops docs/ship-evidence/blocked53_stress_fight.json
+FIGHT GATE -- 3 scenarios (MONSTER_MODE final, PLAYER_MODE final), build/doom_e1m1_blocked53.fjm
+
+S2 stress: the chain in view -- 106 frames
+  from (2399, -47) angle e0000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 6, fx_spawns 1, player_hurt 7, shots_hit 26, bexp_frames 43, barrel_blasts 13, puffs 1, blast_kills 2, barrel_hurt 1, barrel_hits 19, knock_frames 3, mon_knock_frames 22, frac_frames 83, knock_moves 169, knock_walls 4, corpse_slides 2, knock_refused 3, mon_knock_refused 2, mon_attacks 2, mkills 2
+  frame 0 pokes: ['bar_hp', 'p_ar', 'p_at']
+  binary: 106 frames, 1,049,497,070 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+  frame ops: max 12,845,056 (frame 27), p95 11,796,480, mean 9,899,645, 0 of 106 frames over 22,000,000, 0 over the 44,000,000 tripwire
+
+S3 stress: a brawl -- the imps firing into the zombiemen, infighting saturated -- 60 frames
+  from (1424, 732) angle 40000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 29, mon_misses 40, mon_melee 3, proj_spawns 13, proj_walls 3, fizzles 8, fx_spawns 9, fx_skipped 20, max_in_flight 8, explosion_frames 44, drop_frames 32, mon_knock_frames 59, frac_frames 59, knock_moves 626, knock_walls 3, infight 5, corpse_slides 33, mon_knock_refused 4, mon_attacks 51, mkills 4
+  frame 0 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'p_ar', 'p_at']
+  binary: 60 frames, 938,936,892 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+  frame ops: max 17,039,360 (frame 7), p95 17,039,360, mean 15,645,627, 0 of 60 frames over 22,000,000, 0 over the 44,000,000 tripwire
+
+S4 stress: a push storm -- a barrel chain inside a crowd, every knock move at once -- 76 frames
+  from (2376, -376) angle 20000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 9, fx_spawns 1, player_hurt 13, shots_hit 25, bexp_frames 41, barrel_blasts 13, puffs 1, blast_kills 2, barrel_hurt 4, barrel_hits 18, knock_frames 53, mon_knock_frames 20, frac_frames 53, knock_moves 149, knock_walls 2, corpse_slides 2, mon_knock_refused 3, mon_attacks 3, mkills 2
+  frame 0 pokes: ['bar_hp', 'p_ar', 'p_at']
+  binary: 76 frames, 963,715,857 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+  frame ops: max 15,466,496 (frame 38), p95 14,942,208, mean 12,679,491, 0 of 76 frames over 22,000,000, 0 over the 44,000,000 tripwire
+
+TOTALS: mon_hits 44, mon_misses 40, mon_melee 3, proj_spawns 13, proj_impacts 0, proj_walls 3, fizzles 8, fx_spawns 11, fx_skipped 20, player_hurt 20, armor_out 0, deaths 0, dead_frames 0, max_in_flight 8, explosion_frames 44, shots_hit 51, pickups 0, pickup_items 0, pickup_drops 0, bonus_frames 0, berserk_frames 0, gibs 0, drop_frames 32, bexp_frames 84, barrel_blasts 26, puffs 2, blast_kills 4, barrel_hurt 5, player_blocked 0, nukage 0, restarts 0, restart_requests 0, level_done 0, barrel_hits 37, knock_frames 56, mon_knock_frames 101, frac_frames 195, knock_moves 944, knock_walls 9, infight 5, sink_max 0, sink_frames 0, corpse_slides 37, dead_slides 0, knock_refused 3, mon_knock_refused 9, mon_attacks 56, mkills 8
+every event counter nonzero: yes; deaths 0
+frame ops of 3 scenarios -> docs/ship-evidence/blocked53_stress_fight.json
+
+FIGHT GATE PASS (127 s)
+rc=0

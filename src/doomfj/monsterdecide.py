@@ -50,7 +50,7 @@ FIGHT_DECLS = ["mm_tg: hex.vec 2", "mt_tqx: hex.vec 8", "mt_tqy: hex.vec 8", "mt
                "mt_rc: hex.vec 1", "mt_reach: hex.vec 4", "mt_lret: hex.vec w/4",
                "ia_x1: hex.vec 8", "ia_y1: hex.vec 8", "ia_x2: hex.vec 8", "ia_y2: hex.vec 8", "ia_ang: hex.vec 8",
                "ia_ret: hex.vec w/4",
-               "md_at: hex.vec 8", "md_td: hex.vec 4", "md_me: hex.vec 2", "md_sp: hex.vec 4", "md_c1: hex.vec 2, 1",
+               "md_at: hex.vec 8", "md_td: hex.vec 4", "md_fa: hex.vec 1", "md_me: hex.vec 2", "md_sp: hex.vec 4", "md_c1: hex.vec 2, 1",
                "hs_vic: hex.vec 2", "hs_id: hex.vec 2", "hs_rc: hex.vec 1", "hs_pl: hex.vec 1", "hs_cx: hex.vec 4",
                "hs_cy: hex.vec 4", "hs_bd: hex.vec 4", "hs_d: hex.vec 4", "hs_del: hex.vec 4", "hs_t4: hex.vec 4",
                "hs_t8: hex.vec 8", "hs_ix: hex.vec 3", "hs_hw: hex.vec 4", "hs_in: hex.vec 1",
@@ -341,10 +341,14 @@ def _fight_attack_lines(knock: bool) -> List[str]:
     pos = [ATTACK_KINDS[a] for a in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack")]
     tg = ["md_out"] * 16
     tg[pos[0]], tg[pos[1]], tg[pos[2]], tg[pos[3]] = "md_pos", "md_spos", "md_claw", "md_bite"
+    # md_fa: A_FaceTarget's facing, kept across the attack -- a hit on a monster or a barrel spawns its blood or
+    # puff inside dm_go (projcode.fx_spawn_leaf), whose octant runs the SHARED mm_octant and rewrites mm_fa; the slot
+    # writes mon_facing from mm_fa after md_attack (blocked52's p2a S7: the shooter turned to face the player)
     out = ["md_attack:",
            "    hex.zero 1, mm_asok",
            "    stl.fcall mm_todist, mm_tdret",
            "    stl.fcall mm_octant, mm_ocret",
+           "    hex.mov 1, md_fa, mm_fa",
            "    sim.jump16 mm_kind, " + ", ".join(tg)]
     for lab, act in (("md_pos", "A_PosAttack"), ("md_spos", "A_SPosAttack")):
         out += ["  %s:" % lab, "    stl.fcall md_hs, md_bret"]
@@ -373,7 +377,7 @@ def _fight_attack_lines(knock: bool) -> List[str]:
             "    ;md_out",
             "  md_claw_f:",                                       # A_TroopAttack beyond melee: the fireball
             "    stl.fcall pj_spawn, pj_sret",
-            "  md_out:", "    stl.fret md_ret",
+            "  md_out:", "    hex.mov 1, mm_fa, md_fa", "    stl.fret md_ret",
             # the hitscan's aim, once an attack: the target alive and in sight, its angle and its distance
             "  md_hs:",
             "    hex.zero 1, md_seen",

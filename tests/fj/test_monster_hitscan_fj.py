@@ -18,7 +18,8 @@ After every record: the monster's stream and facing.
 R9 (each must part from the model): a bullet that passes through everything (the scan returns at once); the shooter
 in its own way; every thing as wide as the player (the radius class ignored); the first thing met instead of the
 nearest; the offset's sign reversed; a monster target's attack sight ignored (the far LOS never consulted); a monster
-target's melee reach the player's; the scan box's low x bound left unbiased."""
+target's melee reach the player's; the scan box's low x bound left unbiased; the facing not put back after
+the attack (dm_go is a stub, so it does to mm_fa and mt_dx .. mt_ay what the real one's blood does)."""
 import random
 from pathlib import Path
 
@@ -213,6 +214,8 @@ MUTANTS = {
     "radius": None,                                          # the table: every class the player's
     # the scan's box's low x bound left unbiased: a signed position compared unsigned
     "box_sign": ("    hex.xor_by hs_xlo + 3*dw, 8", "    hex.zero 1, hs_in"),
+    # the facing not put back after the attack: a hit's blood (dm_go's fx_spawn_leaf) leaves ITS octant in mm_fa
+    "facing_lost": ("  md_out:\n    hex.mov 1, mm_fa, md_fa\n", "  md_out:\n"),
 }
 
 
@@ -239,7 +242,14 @@ def _program(w, mut=None):
              "    stl.output 10", "    hex.zero 2, dp_src", "    stl.fret dp_ret",
              "dm_go:", "    stl.output 77", "    hex.print_as_digit 2, dm_id, 0", "    hex.print_as_digit 2, dm_dmg, 0",
              "    hex.print_as_digit 1, dm_melee, 0", "    hex.print_as_digit 2, dm_src, 0", "    stl.output 10",
-             "    hex.zero 2, dm_src", "    stl.fret dm_ret",
+             "    hex.zero 2, dm_src",
+             # the real dm_go spawns the victim's blood (damagecode: fx_spawn; a barrel's puff, barrelcode), whose
+             # fx_spawn_leaf runs the SHARED mm_octant on (player - blood): it writes mm_fa and mt_dx .. mt_ay. The
+             # stub does the same damage to them, so a facing read after a hit on a monster or a barrel parts
+             # (blocked52's p2a S7, frame 60: a shotgun guy's bullets on its infighting target faced the player)
+             "    hex.not 1, mm_fa", "    hex.not 4, mt_dx", "    hex.not 4, mt_dy", "    hex.not 4, mt_ax",
+             "    hex.not 4, mt_ay",
+             "    stl.fret dm_ret",
              "pj_spawn:", "    stl.output 70", "    hex.print_as_digit 4, mm_x, 0", "    hex.print_as_digit 4, mm_y, 0",
              "    hex.print_as_digit 8, mt_tqx, 0", "    hex.print_as_digit 8, mt_tqy, 0", "    stl.output 10",
              "    stl.fret pj_sret"]

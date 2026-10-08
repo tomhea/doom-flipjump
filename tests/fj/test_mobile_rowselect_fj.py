@@ -98,6 +98,11 @@ def _run(tmp_path, name, setup, mobview=None, swap_pools=False) -> bool:
     if barrels:
         data += ["bar_st: hex.vec %d" % (2 * len(p31["world"].barrel_things))]
     data += list(p31["decls"]) + sel + p31["rotation"]
+    # M7 P8a (C, D3): the select writes sp_ex (the scenery-exempt flag) -- declared with the wake decls
+    # (monstercode.D3_DECLS), which this harness does not take; here the cells need only exist
+    text = "\n".join(sel)
+    data += [d for d in MC.D3_DECLS if d.split(":")[0] in text and not any(x.startswith(d.split(":")[0] + ":")
+                                                                           for x in data)]
     data += [p31["mview"], p31["mrot"], mobview or p31["mobview"], *([p31["barview"]] if barrels else []),
              generate_dispatch_table_fj("mstate", MC.state_table_values(), index_nibbles=2, result_nibbles=6),
              generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE), index_nibbles=3, result_nibbles=8),

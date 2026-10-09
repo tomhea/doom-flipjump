@@ -805,12 +805,12 @@ frozen-set criterion and need the owner's words.
 
 ## As built
 
-**P8a + P8 as built (written at the ship, {{SHIP_DATE}}; the binary is `build/doom_e1m1_blocked53.fjm`, sha256
+**P8a + P8 as built (written at the ship, 2026-10-09; the binary is `build/doom_e1m1_blocked53.fjm`, sha256
 `324e3d2281d5c7e1`, built at 1df5f96; `docs/ship-evidence/blocked53_*`; the ledger's P8a row and P8's verdict are
 `docs/gp-ledger.md`'s).**
 
 **The rung.** As section 2 recommended: ONE feature build carrying A + K + I + C + D, P8 measured on its binary, one PR
-({{PR}}). Packages and their merges: 0 fe9c26a; I model 734d4b8, fj 4d7aabe .. 3a510f2, merged 6efbfc8; C 78de182 /
+(#124). Packages and their merges: 0 fe9c26a; I model 734d4b8, fj 4d7aabe .. 3a510f2, merged 6efbfc8; C 78de182 /
 5213f6c, merged 7626abd; V dc104b9, merged a936514; D 46f3cd4, merged 604fbcd; A 66dadc9, merged 10f30ef; K 0844cc2,
 merged 8855b09. The integration: 29cf2f2, 5fcbe1a, 23e023f, 60a4194, dedd957 (K x I), 571d287 (the game tier at
 "final" / "final", `GAME_RENDER_KW`'s `rt_rank` / `exempt_barrels` in the same commit), facb2a0 (the game tier emits:
@@ -871,7 +871,7 @@ restore sets re-keyed), 9070b02 (the pool base), then the three fixes 3c6dc06, 0
   `pw_t`, `pw_leaf`) what the real callee does; package I's `test_far_los_fj` proved `blast_los_lines(fight=True)`
   itself, never the production `*_parts` wiring that calls it; and B0 on v7 was exact on every frame because its
   infighting episodes' chance octants agreed (octant(player - blood) = octant(target - shooter)), it has no blast at
-  negative y behind a door, and no fireball kills a dropper. The lessons are `{{NEW_ISSUE}}`'s.
+  negative y behind a door, and no fireball kills a dropper. The lessons are `#125`'s.
 
 **Where the build differed from this plan.**
 - **The merge order**: V, D, A, C, K, I (section 3: 0, D, C, A, K, I, V). V merged first against package 0's interfaces,
@@ -900,14 +900,14 @@ moved in 6dea24d). Gates: m2_std_gate 406 and m3_gate 50 frames byte- and state-
 fight_gate 39/39, die_gate 17/17 STATE, PIXELS and PALETTE exact on every frame, every control parting; 7 gate selftests
 rejected where they must; deg_gate 4 viewpoints BYTE-EXACT (blocked51's op counts: 30,277,162 / 16,391,748 / 30,556,888
 / 28,556,306); pinreport 20 of 20; host suite 1878 passed, 2 skipped, 1 deselected, 2 xfailed; the full `tests/fj` at
-1df5f96, solo: {{B53_FJ_SUITE}}. Stress, per frame (max / p95 / mean / frames over 22M; O-E1's tripwire is any frame
+09eb0e0, solo, in two parts (part 1 cut by its 6 h timeout, part 2 the rest by node id; the first run, at 1df5f96, failed `test_mobile_rowselect_fj`'s 3 tests -- a stale harness, fixed in 09eb0e0): 867 of 867 passed (part 1: 542 passed; part 2: 325 passed in 2488.42s). Stress, per frame (max / p95 / mean / frames over 22M; O-E1's tripwire is any frame
 over 44M or any scenario averaging over 30M): S1 25,165,824 / 24,379,392 / 23,173,529 / 30 of 30; S2 12,845,056 /
 11,796,480 / 9,899,645 / 0 of 106; S3 17,039,360 / 17,039,360 / 15,645,627 / 0 of 60; S4 15,466,496 / 14,942,208 /
 12,679,491 / 0 of 76; D9 19,398,656 / 19,398,656 / 19,051,315 / 0 of 40. (blocked52's scenario averages, totals over
 frames: S1 23,184,772; S2 9,897,202; S3 15,654,287; S4 12,677,036; D9 19,057,511 -- every one under 30M, its B0 maximum
 27,262,976 under 44M.) msframe (class F, D8): 78.6 ms/frame against blocked51's 72.0 in the same run, B SLOWER (median
-x0.917); the `shipped` baseline re-frozen on blocked53 ({{B53_FREEZE_MS}}), leaving blocked44 at last. profx-attributed
-ops of the new code on v7: 68,876 ops/frame by B0's statistic (69,763 with every new or changed line; 112,851 at the
+x0.917); the `shipped` baseline re-frozen on blocked53 (78.1 ms/frame), leaving blocked44 at last. profx-attributed
+OWN ops of the new and changed lines on v7 (the bodies of unchanged leaves they call are booked as old code; an inclusive figure is #125 item 17): 68,876 ops/frame by B0's statistic (69,763 with every new or changed line; 112,851 at the
 worst run, R2-spectre-corridor; knockback 57,710 of the 68,876; `blocked53_profx_v7.log`) (criterion 5's line: 0.33M).
 
 **The follow-up triage (section 1.4), as it ended.** Every **DO** row landed: D's rows in 46f3cd4 (the emit-time asserts
@@ -918,12 +918,12 @@ move-policy pin; the stale comment, the profx `aim_record` object, the identity 
 (`--frame-ops`, `blood_px` / `blood_draw`, `p_tnh` compared, `state_dump`'s sight rule, the #119-1 order pinned with its
 mutant). The **DONE** rows stood. The **E** rows: the msframe baseline (#119-10 / #121-8) re-frozen; the per-frame
 costs (#121-6 / #123-L1) and the frames over 22M (#123-L2) judged by O-E1 above; gamespeed's door-less tours (#123-L3)
-kept (O-E2) and carried open; the death turn's alive-side size (#123-L6) {{B53_DEATHTURN_ALIVE}}; the counts cache at
+kept (O-E2) and carried open; the death turn's alive-side size (#123-L6) not measured -- no label-table tool covers it (#125 item 21); the counts cache at
 the head (#123-L7) is blocked53's recount, and the head has no `src/` edit after the build; the full `tests/fj` run
-{{B53_FJ_SUITE}}. DESIGN.md 1.2's P8a lines: {{B53_P8A_TABLES}}. The **RECORD** rows (#121-7 the missile cells' levers,
+867 of 867 passed (part 1: 542 passed; part 2: 325 passed in 2488.42s). DESIGN.md 1.2's P8a lines: not measured -- no label-table tool covers P8a's tables yet (#125 item 21). The **RECORD** rows (#121-7 the missile cells' levers,
 #123-5 the hosted move policy, #123-L4 the strafe proxy note) and the plan's own recorded deviations (O-A1's planes
 shaded as standing, O-B1 barrels not pushed, O-B4 a refused knock stops, O-B5's bullet convention, D5's remaining
-simplifications) stay recorded. #119, #121 and #123 are closed against this table; what stays open is `{{NEW_ISSUE}}`.
+simplifications) stay recorded. #119, #121 and #123 are closed against this table; what stays open is `#125`.
 
 **TAKEN (coordinator, 2026-10-07, under the owner's standing "be autonomous: take the recommended option, record it,
 report it"; the owner asked for A-D + P8 on 2026-10-07):** O-A1 S0 (the geometry sinks exactly; floors and ceilings

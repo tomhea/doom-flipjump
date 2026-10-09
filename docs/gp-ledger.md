@@ -1735,7 +1735,7 @@ flipped with `GAME_RENDER_KW`'s `rt_rank` / `exempt_barrels` in 571d287), integr
 
 The phase budget: P8a has none in the handoff (the owner's 2026-10-07 request); the cap that binds is CAP-22.
 
-**Row** (blocked53, written at ship {{SHIP_DATE}}; sha256 `324e3d2281d5c7e1`, built 2026-10-08 at 1df5f96 with
+**Row** (blocked53, written at ship 2026-10-09; sha256 `324e3d2281d5c7e1`, built 2026-10-08 at 1df5f96 with
 `heat_blocked27_p8a`, `--pool-base 0x80000000 --span-bits 0x7fffffe0` and flipjump 1.5.1 at `1cd6e0c`;
 `docs/ship-evidence/blocked53_*`). **No measure below is like-for-like with blocked51 except size, the pool, the pins
 and deg_gate**: v6 cannot be replayed on the final modes (knockback and infighting move it) and blocked51 cannot play
@@ -1768,10 +1768,10 @@ on state): S1 23,184,772; S2 9,897,202; S3 15,654,287; S4 12,677,036; D9 19,057,
 
 **Size**: +2,660,740 words (blocked52: +2,660,802, 51,304,756 words, 38.23%). The declaration's ESTIMATE was
 +1.3 .. +2.3M (37.2 .. 38.0%); section 6's redesign trigger is +2.0M. Preflight demand 51,264,672 words of the
-0x80000000 pool's 67,108,863 (76.4%). The death turn's alive-side size (#123-L6): {{B53_DEATHTURN_ALIVE}}.
+0x80000000 pool's 67,108,863 (76.4%). The death turn's alive-side size (#123-L6): not measured -- no label-table tool covers it (#125 item 21).
 
 **Where the ops went**: phases.py on blocked53's own games (1000 game frames, mean frame 11,598,383 ops: the render walk
-10,887,743 (93.87%), collision 200,387, m1_reset 97,396, the glue 347,449); profx-attributed ops of the new code on v7:
+10,887,743 (93.87%), collision 200,387, m1_reset 97,396, the glue 347,449); profx-attributed OWN ops of the new and changed lines on v7 (the bodies of unchanged leaves they call are booked as old code; an inclusive figure is #125 item 17):
 68,876 ops/frame by B0's statistic (69,763 with every new or changed line; 112,851 at the worst run,
 R2-spectre-corridor; knockback 57,710 of the 68,876; `blocked53_profx_v7.log`). phases.py has no line of its own for the
 monsters', the knock's or the far LOS's tics, so the attribution is by the new lines' families
@@ -1779,8 +1779,8 @@ monsters', the knock's or the far LOS's tics, so the attribution is by the new l
 
 **msframe is the class-F record (D8)**: 72.0 (71.4-72.2) -> 78.6 (78.0-79.8) ms/frame (pairs 0.924 0.917 0.918 0.908
 0.902), 15,784,170 -> 17,181,722 ops/frame on msframe's walk, 219.3 -> 218.5 M fj/s; yardstick median 3.64G. The ~90 ms
-tripwire: 78.6, under it. Then the `shipped` baseline re-frozen on blocked53 on a quiet box: {{B53_FREEZE_MS}},
-yardstick {{B53_FREEZE_YARD}} (`blocked53_msframe_freeze.log`) -- blocked44's baseline retired (#115, #119-10, #121-8).
+tripwire: 78.6, under it. Then the `shipped` baseline re-frozen on blocked53 on a quiet box: 78.1 ms/frame,
+yardstick 3.63G (`blocked53_msframe_freeze.log`) -- blocked44's baseline retired (#115, #119-10, #121-8).
 
 **The rung's builds** (each by the 1b line of its day; the first two superseded):
 - blocked52 r0: refused to assemble -- "the program reached 0x611aa840, which is inside the table pool based at
@@ -1811,7 +1811,7 @@ a walk at y -416 at y 65120 (the knock tap's `walk_end` unsigned against the pos
 fired, S12 re-crossed lift 98's line); hurt_gate's `hwt` control widened only `hwt`, not the target's `hwt_r`; fight I3
 placed no candidate (a one-shot barrel kill blames nobody: `bar_src` is set by the first NON-lethal damage).
 
-**Verdict P8a (its declared kill criteria): {{P8A_VERDICT}}.**
+**Verdict P8a (its declared kill criteria): met -- every criterion, the full tests/fj included.**
 1. CAP-22: v7 15,825,592 <= 22,000,000 (headroom 6,174,408), every frame of all 11 runs state- and
    pixel-exact, B0 OK (`blocked53_b0_v7.log`). v7 frozen by the owner (approved 2026-10-08; 06be25f) on
    this build's B0. **Met.**
@@ -1830,9 +1830,9 @@ placed no candidate (a one-shot barrel kill blames nobody: `bar_src` is set by t
    `test_monster_damage_fj` (87738ca), `test_fireball_pool_fj` (99609f3), `test_barrel_fj`'s K x I section (dedd957),
    `test_game_luts_fj` 57 (46f3cd4), `test_monster_chase_fj`'s `p_dead` records (46f3cd4), `test_thing_pass_depth_fj` 21
    and `test_actor_record_fj` 17 (78de182 / 5213f6c), `test_slot_layouts_fj` 82 and `test_restart_fj` 16 (facb2a0 /
-   571d287); and ONE full `tests/fj` run at 1df5f96, solo: {{B53_FJ_SUITE}} (`blocked53_tests_fj.log`; owed since P6 +
-   P7). **{{C4}}.**
-5. Attribution: the new code's profx-attributed ops on v7 68,876 ops/frame by B0's statistic (69,763 with every new or
+   571d287); and ONE full `tests/fj` pass at 09eb0e0, solo, in two parts (part 1 cut by its 6 h timeout, part 2 the rest by node id): 867 of 867 passed (part 1: 542 passed; part 2: 325 passed in 2488.42s) (`blocked53_tests_fj_part1.log` + `blocked53_tests_fj_part2.log`; the first run, at 1df5f96, failed `test_mobile_rowselect_fj`'s 3 tests -- a stale harness, fixed in 09eb0e0; owed since P6 +
+   P7). **Met.**
+5. Attribution: the profx-attributed OWN ops of the new and changed lines on v7 (the bodies of unchanged leaves they call are booked as old code; an inclusive figure is #125 item 17) 68,876 ops/frame by B0's statistic (69,763 with every new or
    changed line; 112,851 at the worst run, R2-spectre-corridor; knockback 57,710 of the 68,876;
    `blocked53_profx_v7.log`) against 0.33M. **Met.**
 6. The O-E1 tripwire: S1 25,165,824 / 24,379,392 / 23,173,529 / 30 of 30, S2 12,845,056 / 11,796,480 / 9,899,645 / 0 of
@@ -1860,14 +1860,14 @@ placed no candidate (a one-shot barrel kill blames nobody: `bar_src` is set by t
   / 12,679,491 / 0 of 76; B0's per-frame maximum "a few hundred K" above v6's 24.1M -> 27,000,832 (blocked52 27,262,976:
   +3.1M over v6's, a different set).
 
-**Follow-ups**: `{{NEW_ISSUE}}` (one issue; none blocks the ship -- the gates above are exact): the harness-completeness
+**Follow-ups**: `#125` (one issue; none blocks the ship -- the gates above are exact): the harness-completeness
 lessons of the three bugs (stubs that do not do to shared registers what the callee does; the production `*_parts`
 wiring unrun; B0 blind to chance-equal octants; the label-coverage report of section 9 that no tool makes), gamespeed's
 door-less tours (O-E2), the recorded levers (#121-7's missile cells, 9f26ea6's shared fetch tables), the recorded
 deviations (O-A1's S1, O-B1, O-B4, O-B5, D5's remainder, #123-5's hosted move policy), `hp_bar` inside the `lvdone`
 guard (#123-4, for M4), the span at 88.94% of 2^27 (for M4).
 
-## M7 summed (written at P8's ship, {{SHIP_DATE}})
+## M7 summed (written at P8's ship, 2026-10-09)
 
 SUMMED from the rows above, NOT re-measured: each rung's gamespeed binding as its own row recorded it (one A binary to
 the next; the rows telescope -- checked when this was written: every row's A column is the previous row's B). gamespeed
@@ -1910,27 +1910,27 @@ are not re-judged here. On gamespeed, per phase: P1 (P1.1 .. P1.6) -3,999,953; P
 (OVER its +0.3M, 5.34x: "Phase 3 summed"); P4 +160,368; P5 +127,652; P6 + P7 and P8a on other tours. CAP-22 on the
 frozen set of the day held at every rung.
 
-## P8 the ship (class F, on blocked53) -- `docs/gp-final-plan.md` 5.4, written {{SHIP_DATE}}
+## P8 the ship (class F, on blocked53) -- `docs/gp-final-plan.md` 5.4, written 2026-10-09
 
-**Verdict P8: {{P8_VERDICT}}.** The fully playable E1M1 ships as `build/doom_e1m1_blocked53.fjm`; the 22M cap replaces
-the 20M target (D1) in `gamespeed.SPEED_TARGET` (6dea24d), `docs/ship-gate.md` and CLAUDE.md ({{SHIP_COMMIT}}).
+**Verdict P8: SHIPPED.** The fully playable E1M1 ships as `build/doom_e1m1_blocked53.fjm`; the 22M cap replaces
+the 20M target (D1) in `gamespeed.SPEED_TARGET` (6dea24d), `docs/ship-gate.md` and CLAUDE.md (290cd9d).
 1. Exactness: P8a's criteria 3 and 4 above -- every gate, every selftest, deg_gate with blocked51's op counts, B0 on v7
-   state- and pixel-exact on every frame, pinreport exit 0, the host suite, the full `tests/fj` at 1df5f96 solo.
-   **{{P8_1}}.**
+   state- and pixel-exact on every frame, pinreport exit 0, the host suite, the full `tests/fj` at 09eb0e0 solo (two parts).
+   **Met.**
 2. CAP-22: v7 15,825,592 <= 22,000,000; the owner froze v7 on this B0 (06be25f). **Met.**
 3. Stress (O-E1): criterion 6 above, per frame. **Met.**
 4. Size: 38.22% <= 42% (gamespeed's size line). **Met.**
 5. gamespeed: `SPEED_TARGET` 20,000,000 -> 22,000,000 in 6dea24d (`fencecheck.py` parses no 20M literal, so nothing
-   moved there), `docs/ship-gate.md` section 1 / section 2 step 3 and CLAUDE.md in {{SHIP_COMMIT}}; binding 12,490,840
+   moved there), `docs/ship-gate.md` section 1 / section 2 step 3 and CLAUDE.md in 290cd9d; binding 12,490,840
    PASS against 22M; `gamespeed_trail.py` on blocked53 TRAIL PASS, CONTROL-POSE PASS (CONTROL-DOORS N/A, O-E2);
    `BINARY_ENDS` / `BINARY_DOORS` as 564861e recorded; `--validate` rc 0, every run ending where `BINARY_ENDS` records
    (run 0 at (529, 208)), 0 doors opened, 9/10 distinct end cells; `--selftest` SELFTEST PASS (N6e: --validate ends
    where the binary ends, 10/10). **Met.**
 6. msframe: `--a build/doom_e1m1_blocked51.fjm --b build/doom_e1m1_blocked53.fjm` 78.6 vs 72.0,
    B SLOWER (the price; ~90 ms the tripwire); the baseline re-frozen (`--a build/doom_e1m1_blocked53.fjm
-   --save-baseline shipped`, yardstick {{B53_FREEZE_YARD}}). **{{P8_6}}.**
+   --save-baseline shipped`, yardstick 3.63G). **Met.**
 7. Record: `docs/ship-gate.md` sections 1 and 1b, CLAUDE.md, `docs/handoff-gameplay.md` (P8 DONE), this file (P8a's row,
    M7 summed, this verdict), `docs/gp-final-plan.md`'s As built; #119 / #121 / #123 closed with section 1.4's table;
-   `{{NEW_ISSUE}}` for what stays open. **{{P8_7}}.**
-8. PR {{PR}}: R1 FAIL/PASS blocks (the three fixes' tests above), R2 integration evidence, the crist one-pass review,
-   CI green, merged. **{{P8_8}}.**
+   `#125` for what stays open. **Met (the three issues close on #124's merge).**
+8. PR #124: R1 FAIL/PASS blocks (the three fixes' tests above), R2 integration evidence, the crist one-pass review,
+   CI green, merged. **Met at the merge: the crist review APPROVED with nothing blocking, its follow-ups in #125.**

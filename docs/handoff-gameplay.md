@@ -1,10 +1,10 @@
 # Handoff: the fully playable E1M1, under 22M ops/frame
 
-**Status ({{SHIP_DATE}}): THE MILESTONE IS DONE -- the fully playable E1M1 SHIPPED as `build/doom_e1m1_blocked53.fjm`
-(sha256 `324e3d2281d5c7e1`; M7 P8a + P8, one build, PR {{PR}}).** Phases 0-7 shipped as before (P3.3 + P3.4 as
+**Status (2026-10-09): THE MILESTONE IS DONE -- the fully playable E1M1 SHIPPED as `build/doom_e1m1_blocked53.fjm`
+(sha256 `324e3d2281d5c7e1`; M7 P8a + P8, one build, PR #124).** Phases 0-7 shipped as before (P3.3 + P3.4 as
 blocked46, P4 as blocked47, P5 as blocked48, P6 + P7 as blocked51); P8a (the dying view sinks, knockback, infighting, D3
 a / b, the follow-ups) and P8 (the ship) as blocked53. The frozen set is **v7** (15,825,592, 6,174,408 under CAP-22);
-the 22M cap replaced the 20M target (D1). What stays open is `{{NEW_ISSUE}}`; the next milestones are M6 (ship) and M4
+the 22M cap replaced the 20M target (D1). What stays open is `#125`; the next milestones are M6 (ship) and M4
 (more levels, 1-3, deferred) -- `CLAUDE.md`. Everything below is the whole plan, as the owner approved it, updated with
 phase 0's measurements. It replaces nothing:
 `docs/plan-gameplay.md` is the record of how the plan was made (research missions, red team,
@@ -405,7 +405,7 @@ with the follow-ups).
 ### P8a -- the final gameplay (the owner's 2026-10-07 request)
 The dying view, knockback, infighting, D3 a / b and the follow-up issues #119 / #121 / #123 -- `docs/gp-final-plan.md`
 (the plan, its owner decisions as taken, its As built), `docs/gp-ledger.md` "P8a". Class F.
-**P8a DONE {{SHIP_DATE}}, one build with P8** (blocked53; the model modes `PLAYER_MODE = MONSTER_MODE = "final"`):
+**P8a DONE 2026-10-09, one build with P8** (blocked53; the model modes `PLAYER_MODE = MONSTER_MODE = "final"`):
 - **the dying view sinks** (O-A1 S0): DOOM's P_DeathThink drop, 1 unit a tic to 6 above the floor (`p_vd` 0..35); the
   walls, sprites and step faces sink exactly; floors and ceilings keep the standing eye's distance shading (the oracle's
   `view_drop` split does the same);
@@ -427,7 +427,7 @@ blocked51 (x0.917).
 
 ### P8 -- ship
 CAP-22 on the frozen set, stress, size, every gate, the class-F rule, docs (CLAUDE.md, ship-gate.md, gamespeed's target
--> 22M), re-frozen baselines. **P8 DONE {{SHIP_DATE}} on blocked53** (`docs/gp-ledger.md` "P8 the ship",
+-> 22M), re-frozen baselines. **P8 DONE 2026-10-09 on blocked53** (`docs/gp-ledger.md` "P8 the ship",
 `docs/gp-final-plan.md` 5.4): CAP-22 on v7 15,825,592, every frame of all 11 runs state- and pixel-exact; the stress
 cases per frame (max / p95 / mean / frames over 22M), recorded under O-E1's tripwire (any frame over 44M or a scenario
 averaging over 30M must be explained) -- hurt S1 25,165,824 / 24,379,392 / 23,173,529 / 30 of 30, fight S3 (the brawl)
@@ -435,7 +435,7 @@ averaging over 30M must be explained) -- hurt S1 25,165,824 / 24,379,392 / 23,17
 D9 (the sink) 19,398,656 / 19,398,656 / 19,051,315 / 0 of 40, B0 v7's maximum 27,000,832 (R0-aftermath);
 `gamespeed.SPEED_TARGET` 20M -> 22M (D1, 6dea24d) -- binding 12,490,840 PASS, `gamespeed_trail` TRAIL PASS, CONTROL-POSE
 PASS, the tours still reach no door (O-E2); the msframe `shipped` baseline re-frozen on blocked53 (blocked44's retired);
-#119 / #121 / #123 closed, `{{NEW_ISSUE}}` opened for what stays open.
+#119 / #121 / #123 closed, `#125` opened for what stays open.
 
 **For the next session** (the milestone is done; read this before touching the game):
 - **The standing binary** is `build/doom_e1m1_blocked53.fjm`; its number, provenance, build command (the 1b line now
@@ -454,7 +454,7 @@ PASS, the tours still reach no door (O-E2); the msframe `shipped` baseline re-fr
   `hurt_gate.py`, `fight_gate.py`, `die_gate.py` (each with `--frame-ops` for the stress rows), B0 on v7, deg_gate with
   blocked51's op counts (the visual tier took none of M7's code), pinreport, the host suite and `tests/fj` solo -- one
   at a time (CLAUDE.md rule 1), stopping at the first failure.
-- **Open** (`{{NEW_ISSUE}}`): the harness-completeness lessons of blocked52 (a stub must do to the shared registers what
+- **Open** (`#125`): the harness-completeness lessons of blocked52 (a stub must do to the shared registers what
   the callee does; the production `*_parts` wiring needs its own test; B0 cannot see a rule whose outcome agreed by
   chance; the label-coverage report section 9 asks for is still unbuilt); gamespeed's tours reach no door (O-E2 kept);
   the recorded levers and deviations; for M4: `hp_bar` inside the `lvdone` guard (#123-4) and the span at

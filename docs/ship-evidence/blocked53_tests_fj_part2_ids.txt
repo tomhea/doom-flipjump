@@ -1,0 +1,325 @@
+tests/fj/test_player_move_fj.py::test_control_a_broken_move_is_caught[still_signed]
+tests/fj/test_player_move_fj.py::test_control_a_broken_move_is_caught[walk_through]
+tests/fj/test_player_move_fj.py::test_control_a_broken_move_is_caught[whole_units]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[True-1-fire]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[True-1-shoot]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[True-1-hit]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[True-2-fire]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[True-2-shoot]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[True-2-hit]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[False-3-fire]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[False-3-shoot]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[False-3-hit]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[False-4-fire]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[False-4-shoot]
+tests/fj/test_player_shot_fj.py::test_the_shot_is_the_model_tic_by_tic[False-4-hit]
+tests/fj/test_player_shot_fj.py::test_the_checks_catch_a_broken_shot[acc_table_col]
+tests/fj/test_player_shot_fj.py::test_the_checks_catch_a_broken_shot[col_plus1]
+tests/fj/test_player_shot_fj.py::test_the_checks_catch_a_broken_shot[saw_not_melee]
+tests/fj/test_player_shot_fj.py::test_the_checks_catch_a_broken_shot[six_pellets]
+tests/fj/test_player_strafe_fj.py::test_every_key_combination_at_every_pose
+tests/fj/test_player_strafe_fj.py::test_a_strafing_trajectory_tracks_the_oracle
+tests/fj/test_player_strafe_fj.py::test_the_turn_is_slow_on_a_hold_s_first_frame_only
+tests/fj/test_player_strafe_fj.py::test_the_checks_catch_a_broken_strafe[always_fast]
+tests/fj/test_player_strafe_fj.py::test_the_checks_catch_a_broken_strafe[always_slow]
+tests/fj/test_player_strafe_fj.py::test_the_checks_catch_a_broken_strafe[never_reset]
+tests/fj/test_player_strafe_fj.py::test_the_checks_catch_a_broken_strafe[sign]
+tests/fj/test_player_strafe_fj.py::test_the_checks_catch_a_broken_strafe[swap]
+tests/fj/test_present.py::test_init_screen_command_bytes
+tests/fj/test_present.py::test_emit_addr_is_little_endian_w_over_8_bytes
+tests/fj/test_present.py::test_emit_addr_emits_zero_high_bytes
+tests/fj/test_present.py::test_set_palette_command
+tests/fj/test_present.py::test_update_screen_reg_command
+tests/fj/test_projection_kernels.py::test_slope_div_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_point_to_angle_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_point_to_dist_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_wall_setup_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_scale_from_global_angle_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_scale_from_global_angle_column_cases_byte_exact_vs_oracle[packed]
+tests/fj/test_projection_kernels.py::test_scale_from_global_angle_column_cases_byte_exact_vs_oracle[dispatch]
+tests/fj/test_projection_kernels.py::test_angle_to_x_byte_exact_vs_oracle[packed]
+tests/fj/test_projection_kernels.py::test_angle_to_x_byte_exact_vs_oracle[dispatch]
+tests/fj/test_projection_kernels.py::test_wall_x_range_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_wall_screen_span_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_scalestep_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_texture_u_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_column_setup_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_column_render_params_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_point_on_side_byte_exact_vs_oracle
+tests/fj/test_projection_kernels.py::test_point_on_side_leaf_byte_exact_vs_oracle
+tests/fj/test_projection_luts.py::test_tantoangle_lut_byte_exact
+tests/fj/test_projection_luts.py::test_finetangent_lut_byte_exact
+tests/fj/test_projection_luts.py::test_xtoviewangle_lut_byte_exact
+tests/fj/test_projection_luts.py::test_viewangletox_lut_byte_exact_incl_signed_sentinel
+tests/fj/test_render_macros.py::test_frame_pixel_leaf_byte_exact_vs_oracle
+tests/fj/test_restart_fj.py::test_the_restart_writes_every_persisted_cell_to_the_models_level_start[0-0]
+tests/fj/test_restart_fj.py::test_the_restart_writes_every_persisted_cell_to_the_models_level_start[0-1]
+tests/fj/test_restart_fj.py::test_the_restart_writes_every_persisted_cell_to_the_models_level_start[1-0]
+tests/fj/test_restart_fj.py::test_the_restart_writes_every_persisted_cell_to_the_models_level_start[1-1]
+tests/fj/test_restart_fj.py::test_the_restart_writes_every_persisted_cell_to_the_models_level_start[2-0]
+tests/fj/test_restart_fj.py::test_the_restart_writes_every_persisted_cell_to_the_models_level_start[2-1]
+tests/fj/test_restart_fj.py::test_the_restart_on_use_does_nothing_while_g_rs_is_0
+tests/fj/test_restart_fj.py::test_the_harness_classifies_every_persisted_cell
+tests/fj/test_restart_fj.py::test_a_broken_restart_is_caught[dispatch on menu_sel]
+tests/fj/test_restart_fj.py::test_a_broken_restart_is_caught[g_rs left set]
+tests/fj/test_restart_fj.py::test_a_broken_restart_is_caught[g_skill written]
+tests/fj/test_restart_fj.py::test_a_broken_restart_is_caught[hud_v dropped]
+tests/fj/test_restart_fj.py::test_a_broken_restart_is_caught[mon_health dropped]
+tests/fj/test_restart_fj.py::test_a_broken_restart_is_caught[p_bc dropped]
+tests/fj/test_restart_fj.py::test_a_broken_restart_is_caught[pal_cur restored]
+tests/fj/test_restart_fj.py::test_a_broken_restart_is_caught[rt pickup thvis dropped]
+tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[after a new game, esc opens the main menu, not the skill screen]
+tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[down clamps at hard; up twice to easy; new game at easy]
+tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[esc resumes the world at boot]
+tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[idle: the menu, hard highlighted, nothing reset]
+tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[in the world, enter opens the main menu; esc resumes]
+tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[in the world, esc opens the main menu]
+tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[medium, back out, in again, medium kept]
+tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[new game at hard (enter, enter)]
+tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[two events in one frame: esc wins over enter]
+tests/fj/test_skill_menu.py::test_the_level_complete_screen_follows_the_rules[level complete: enter -> the main menu -> new game at hard]
+tests/fj/test_skill_menu.py::test_the_level_complete_screen_follows_the_rules[level complete: esc -> the main menu; esc -> the world]
+tests/fj/test_skill_menu.py::test_the_level_complete_screen_follows_the_rules[level complete: nothing held stays]
+tests/fj/test_skill_menu.py::test_the_level_complete_screen_follows_the_rules[level complete: up / down do nothing]
+tests/fj/test_skill_menu.py::test_the_help_screen_follows_the_rules[help: down to HELP, enter opens it, esc back to the menu on HELP, up to NEW GAME]
+tests/fj/test_skill_menu.py::test_the_help_screen_follows_the_rules[help: esc and h in one frame: esc wins (the main menu, not the help)]
+tests/fj/test_skill_menu.py::test_the_help_screen_follows_the_rules[help: from the world, esc closes it back to the world, not the menu]
+tests/fj/test_skill_menu.py::test_the_help_screen_follows_the_rules[help: h in the world opens it; h closes it back to the world]
+tests/fj/test_skill_menu.py::test_the_help_screen_follows_the_rules[help: h on HELP opens it too; up / down / enter do nothing on the help]
+tests/fj/test_skill_menu.py::test_the_help_screen_follows_the_rules[help: h on the main menu opens it, h closes it; esc on HELP resumes the world]
+tests/fj/test_skill_menu.py::test_the_help_screen_follows_the_rules[help: new game from the help-opened menu still starts the skill]
+tests/fj/test_skill_menu.py::test_the_help_screen_follows_the_rules[help: the main menu clamps at both items]
+tests/fj/test_skill_menu.py::test_the_help_screen_follows_the_rules[help: the skill screen ignores h; esc, then the world's help]
+tests/fj/test_skill_menu.py::test_level_complete_ignores_h
+tests/fj/test_skill_menu.py::test_the_help_scripts_reach_every_new_state
+tests/fj/test_skill_menu.py::test_a_broken_help_is_caught[closing the world's help goes to the menu]
+tests/fj/test_skill_menu.py::test_a_broken_help_is_caught[enter on HELP acts as NEW GAME]
+tests/fj/test_skill_menu.py::test_a_broken_help_is_caught[the main menu's down is dropped]
+tests/fj/test_skill_menu.py::test_a_broken_help_is_caught[the world ignores h]
+tests/fj/test_skill_menu.py::test_a_level_complete_screen_that_ignores_enter_is_caught
+tests/fj/test_skill_menu.py::test_the_scripts_reach_every_skill_and_every_screen
+tests/fj/test_skill_menu.py::test_a_broken_menu_is_caught
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the lists are not zeroed]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the doors are not shut]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the positions are not reset]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the bindings are not reset]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the view's y and angle are not reset]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the door cells of P2a.1 are not reset]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the exit's cells are not reset]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the movers are not reset]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the level time and the restart request are not reset]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[the turn's held flag is not reset]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[no skill links its things]
+tests/fj/test_skill_menu.py::test_a_broken_restart_is_caught[no skill sets its flags]
+tests/fj/test_slot_layouts_fj.py::test_the_record_writes_every_byte_where_the_constants_say
+tests/fj/test_slot_layouts_fj.py::test_the_things_record_what_RECORDED_says
+tests/fj/test_slot_layouts_fj.py::test_the_load_and_the_derive_read_every_field_where_the_constants_say
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[slot B's byte]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's bias]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's fragment order]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's fragment: an increment dropped]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's fragment: a step inserted]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's slot: an increment dropped]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's slot: a step inserted]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's slot: a prearmed write]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot offset never added]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot offset bumped]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[slot A falls into slot B]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the column index one nibble wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the column index shifted back]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's column stride]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's index bound]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot id one nibble wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot index written through r + dw]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the record's first slot write prearmed]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the slot index bumped through r + dw]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: a one-nibble shift after the slot offset]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: slot A's branch taken to slot B]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the record's column shift two nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the record's block-lo write prearmed]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the seed's column shift two nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: B allowed whatever ballow says]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the right-edge clamp never fires]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the clamp one column wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the def's hdb and slotstride swapped]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the emitter passes twice the slot stride]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P4: cfg rebound to a fixed tier]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P4: cfg rebound twice]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P4: tier rebound before the rebinding]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: deg_flag computed per tier]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the baked leaf's deg 0]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the texture column one nibble wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the last texture column one nibble wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the texture column clamp one nibble wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: blk_addr places three nibbles]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: deg 0 for the standalone tier, after the literal]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the record body's own deg default]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the record body's own slot-stride default]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P1.6: the light row written where the bucket goes]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P1.6: the light row's write without its increment]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P1.6: the region added two nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P1.6: the min_b test one nibble wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P1.6: the min_b test three nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P1.6: the min_b test skips at equality]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P1.6: the min_b test inverted]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[P1.6: the derive's bucket read without the light row's increment]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the left clip's negation two nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the left clip's product five nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the left clip's negation three nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the left clip's negation four nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the left clip's negation five nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the slot stride follows the runtime thing count]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r8: the slot stride follows the subsector index width]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r8: the slot stride follows the light tables]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r8: the column index cleared three nibbles wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot stride rebound through globals()]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot stride rebound through the emitter's own module]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot stride rebound by a global statement]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load's skip to B]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load: an increment dropped]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load: a step inserted]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load: a narrow-arm read]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load's field order]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the seed's column stride]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the seed's index bound]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the seed's column one nibble wide]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the step's column stride]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive's bias]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive: an increment dropped]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive: a step inserted]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive's field order]
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive's slot id one nibble wide]
+tests/fj/test_slot_layouts_fj.py::test_an_edit_that_moves_no_byte_still_passes[the record's layout freeze deleted]
+tests/fj/test_slot_layouts_fj.py::test_an_edit_that_moves_no_byte_still_passes[the load's layout freeze deleted]
+tests/fj/test_slot_layouts_fj.py::test_an_edit_that_moves_no_byte_still_passes[the slot stride written from module constants]
+tests/fj/test_slot_layouts_fj.py::test_an_emitter_that_cannot_run_is_an_error_not_a_refusal
+tests/fj/test_sprite_bank_fj.py::test_the_shipped_walker_draws_what_strip_at_draws
+tests/fj/test_sprite_bank_fj.py::test_the_window_walker_draws_the_far_fragment_outside_the_near_one
+tests/fj/test_sprite_bank_fj.py::test_a_walker_that_skips_the_rowmap_is_caught[fast-frag_runs-fast_have]
+tests/fj/test_sprite_bank_fj.py::test_a_walker_that_skips_the_rowmap_is_caught[clipped-frag_runs-cl_have]
+tests/fj/test_sprite_bank_fj.py::test_a_walker_that_skips_the_rowmap_is_caught[window-frag_runs_win-shave]
+tests/fj/test_sprite_bank_fj.py::test_the_record_takes_the_tier_region_the_slot_and_the_min_b_columns
+tests/fj/test_sprite_bank_fj.py::test_the_record_marks_seen_and_keeps_the_arm
+tests/fj/test_sprite_bank_fj.py::test_control_a_mark_that_does_not_rearm_is_caught
+tests/fj/test_sprite_bank_fj.py::test_a_broken_record_is_caught[a column AT its min_b is dropped]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_record_is_caught[slot byte 3 holds the height]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_record_is_caught[the bucket AT hdb takes MID]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_record_is_caught[thfar read inverted]
+tests/fj/test_state_wire.py::test_wire_round_trips_and_derives_the_map_coords[664-291-402653184-0]
+tests/fj/test_state_wire.py::test_wire_round_trips_and_derives_the_map_coords[1272--724-1073741824-5]
+tests/fj/test_state_wire.py::test_wire_round_trips_and_derives_the_map_coords[1869-479-2147483648-15]
+tests/fj/test_state_wire.py::test_wire_round_trips_and_derives_the_map_coords[-416-256-0-1]
+tests/fj/test_state_wire.py::test_wire_round_trips_and_derives_the_map_coords[0-0-4294967295-0]
+tests/fj/test_state_wire.py::test_wire_round_trips_and_derives_the_map_coords[-1--1-1-8]
+tests/fj/test_state_wire.py::test_wire_round_trips_and_derives_the_map_coords[32767--32768-2147483647-0]
+tests/fj/test_state_wire.py::test_a_fractional_position_floors
+tests/fj/test_state_wire.py::test_a_bad_magic_byte_reaches_the_halt[0]
+tests/fj/test_state_wire.py::test_a_bad_magic_byte_reaches_the_halt[10]
+tests/fj/test_state_wire.py::test_a_bad_magic_byte_reaches_the_halt[113]
+tests/fj/test_state_wire.py::test_a_bad_magic_byte_reaches_the_halt[209]
+tests/fj/test_state_wire.py::test_a_bad_magic_byte_reaches_the_halt[29]
+tests/fj/test_state_wire.py::test_a_bad_magic_byte_reaches_the_halt[255]
+tests/fj/test_state_wire.py::test_the_good_magic_byte_is_the_one_the_wire_module_defines
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[0]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[1]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[2]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[3]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[4]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[5]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[6]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[7]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[8]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[9]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[10]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[11]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[12]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[13]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[14]
+tests/fj/test_state_wire.py::test_one_tic_matches_the_oracle_for_every_key_combination[15]
+tests/fj/test_state_wire.py::test_the_sim_is_off_when_no_key_is_pressed
+tests/fj/test_state_wire.py::test_sim_matches_the_oracle_over_N_tics[200-14]
+tests/fj/test_state_wire.py::test_the_angle_wraps_modularly[4294967292-4]
+tests/fj/test_state_wire.py::test_the_angle_wraps_modularly[2-8]
+tests/fj/test_state_wire.py::test_the_angle_wraps_modularly[2147483647-4]
+tests/fj/test_stream_screen.py::test_init_screen_stream_reads_the_extra_flush_mode_byte
+tests/fj/test_stream_screen.py::test_begin_frame_stream_requires_prior_init
+tests/fj/test_stream_screen.py::test_column_major_run_stream_flush_per_frame
+tests/fj/test_stream_screen.py::test_column_major_run_stream_flush_per_column
+tests/fj/test_stream_screen.py::test_stream_reverts_to_normal_command_parsing_after_the_frame_fills
+tests/fj/test_stream_screen.py::test_stdin_feed_still_works_alongside_the_stream_decode
+tests/fj/test_stream_screen.py::test_planes_frame_decodes_columns_from_shared_vp_lists
+tests/fj/test_stream_screen.py::test_planes_frame_ceiling_clips_at_fstart_and_empty_lists_are_fine
+tests/fj/test_stream_screen.py::test_planes_frame_reverts_to_command_parsing
+tests/fj/test_stream_screen.py::test_fj_emits_a_known_3run_column_flush_per_frame
+tests/fj/test_stream_screen.py::test_fj_emits_a_known_3run_column_flush_per_column
+tests/fj/test_table_reader_ptr_clear.py::test_read_table_every_entry_after_a_large_index_through_one_expansion[idx_n2]
+tests/fj/test_table_reader_ptr_clear.py::test_read_table_every_entry_after_a_large_index_through_one_expansion[idx_n3]
+tests/fj/test_table_reader_ptr_clear.py::test_read_table_packed_every_entry_after_a_large_index_through_one_expansion[idx_n2]
+tests/fj/test_table_reader_ptr_clear.py::test_read_table_packed_every_entry_after_a_large_index_through_one_expansion[idx_n3]
+tests/fj/test_table_reader_ptr_clear.py::test_read_table_byte_every_entry_after_a_large_index_through_one_expansion
+tests/fj/test_table_reader_ptr_clear.py::test_the_pointer_lands_on_the_index_alone_when_the_expansion_is_re_entered[idx_n3]
+tests/fj/test_table_reader_ptr_clear.py::test_the_pointer_lands_on_the_index_alone_when_the_expansion_is_re_entered[idx_n2]
+tests/fj/test_table_reader_ptr_clear.py::test_the_same_probe_with_the_clear_narrowed_by_one_nibble_keeps_the_previous_index[idx_n3]
+tests/fj/test_table_reader_ptr_clear.py::test_the_same_probe_with_the_clear_narrowed_by_one_nibble_keeps_the_previous_index[idx_n2]
+tests/fj/test_texture_sample.py::test_sample_texture_byte_exact
+tests/fj/test_texture_sample.py::test_sample_flat_byte_exact
+tests/fj/test_texture_sample.py::test_apply_colormap_byte_exact
+tests/fj/test_thing_pass_depth_fj.py::test_the_records_hold_ties_reorders_and_stops
+tests/fj/test_thing_pass_depth_fj.py::test_the_walk_draws_nearest_first
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_walk_is_caught[first]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_walk_is_caught[narrow]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_walk_is_caught[nody]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_walk_is_caught[nostop]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_walk_is_caught[nostop1]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_walk_is_caught[tie]
+tests/fj/test_thing_pass_depth_fj.py::test_the_rank_records_reach_every_case[4]
+tests/fj/test_thing_pass_depth_fj.py::test_the_rank_records_reach_every_case[8]
+tests/fj/test_thing_pass_depth_fj.py::test_the_ranked_walk_draws_effects_and_drops_first[4]
+tests/fj/test_thing_pass_depth_fj.py::test_the_ranked_walk_draws_effects_and_drops_first[8]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_rank_or_flag_is_caught[ex_round-4]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_rank_or_flag_is_caught[ex_round-8]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_rank_or_flag_is_caught[ex_single-4]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_rank_or_flag_is_caught[ex_single-8]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_rank_or_flag_is_caught[rank_off-4]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_rank_or_flag_is_caught[rank_off-8]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_rank_or_flag_is_caught[rank_swap-4]
+tests/fj/test_thing_pass_depth_fj.py::test_control_a_broken_rank_or_flag_is_caught[rank_swap-8]
+tests/fj/test_thing_pass_depth_fj.py::test_the_seven_parameter_form_is_the_unranked_walk
+tests/fj/test_view_drop_fj.py::test_the_view_drops_as_the_model
+tests/fj/test_view_drop_fj.py::test_a_broken_drop_is_caught[land_noborrow]
+tests/fj/test_view_drop_fj.py::test_a_broken_drop_is_caught[land_shift]
+tests/fj/test_view_drop_fj.py::test_a_broken_drop_is_caught[no_land]
+tests/fj/test_view_drop_fj.py::test_a_broken_drop_is_caught[no_sink]
+tests/fj/test_view_drop_fj.py::test_a_broken_drop_is_caught[sink_floor_5]
+tests/fj/test_view_drop_fj.py::test_a_broken_drop_is_caught[sink_floor_7]
+tests/fj/test_view_drop_fj.py::test_a_broken_drop_is_caught[sink_restart]
+tests/fj/test_weapon_fj.py::test_the_weapon_is_the_model_tic_by_tic[True]
+tests/fj/test_weapon_fj.py::test_the_weapon_is_the_model_tic_by_tic[False]
+tests/fj/test_weapon_fj.py::test_the_weapon_runs_the_model_s_tics_per_frame
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_weapon_at_the_wrong_tempo[1]
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_weapon_at_the_wrong_tempo[3]
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_broken_weapon[acc3]
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_broken_weapon[lower7]
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_broken_weapon[norefire]
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_broken_weapon[pref]
+tests/fj/test_weapon_fj.py::test_the_hurt_scripts_reach_their_paths
+tests/fj/test_weapon_fj.py::test_the_hurt_weapon_is_the_model_tic_by_tic[kill]
+tests/fj/test_weapon_fj.py::test_the_hurt_weapon_is_the_model_tic_by_tic[ready]
+tests/fj/test_weapon_fj.py::test_the_hurt_weapon_is_the_model_tic_by_tic[refire]
+tests/fj/test_weapon_fj.py::test_the_hurt_weapon_is_the_model_tic_by_tic[deadkeys]
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_broken_hurt_weapon[readyhp-ready]
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_broken_hurt_weapon[refirehp-refire]
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_broken_hurt_weapon[lowerdead-kill]
+tests/fj/test_weapon_fj.py::test_the_checks_catch_a_broken_hurt_weapon[deadkeys-deadkeys]
+tests/fj/test_weapon_loot_fj.py::test_the_phase_script_reaches_its_paths
+tests/fj/test_weapon_loot_fj.py::test_the_phase_is_the_model_tic_by_tic
+tests/fj/test_weapon_loot_fj.py::test_the_checks_catch_a_broken_phase[bc_nofade]
+tests/fj/test_weapon_loot_fj.py::test_the_checks_catch_a_broken_phase[dead_bc_fades]
+tests/fj/test_weapon_loot_fj.py::test_the_checks_catch_a_broken_phase[dead_moves]
+tests/fj/test_weapon_loot_fj.py::test_the_checks_catch_a_broken_phase[latch]
+tests/fj/test_weapon_loot_fj.py::test_the_checks_catch_a_broken_phase[no_restart]
+tests/fj/test_weapon_loot_fj.py::test_the_checks_catch_a_broken_phase[saw_berserk]
+tests/fj/test_weapon_loot_fj.py::test_the_checks_catch_a_broken_phase[str_nogrow]
+tests/fj/test_weapon_loot_fj.py::test_the_berserk_punch_script_reaches_its_paths
+tests/fj/test_weapon_loot_fj.py::test_the_berserk_punch_is_the_model
+tests/fj/test_weapon_loot_fj.py::test_the_berserk_punch_control_is_caught

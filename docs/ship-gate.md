@@ -11,7 +11,7 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 | what | value | how it was measured |
 |---|---|---|
 | **the shipped binary** | `build/doom_e1m1_blocked53.fjm`, sha256 `324e3d2281d5c7e1` (first 16 hex; full `324e3d2281d5c7e12e28e8684cd5fe58cdc6eeacac9045e2b265f330b25c5ca0`), built 2026-10-08 from the command in 1b (M7 P8a + P8, ONE rung: the dying view sinks, knockback, infighting, D3 a / b, the follow-ups of #119 / #121 / #123) | class F -- the pictures differ from blocked51 by design (the dead view sinking, things pushed, monsters fighting monsters, drops and blood in front of their monster, barrels past the scenery count); built with the installed flipjump 1.5.1 at `1cd6e0c` from m7-extras 1df5f96 with `--pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-heat scratchpad/12m/heat_blocked27_p8a.json.gz` (`docs/ship-evidence/blocked53_build.log`) |
-| **ms/frame** | **78.6 ms/frame** (78.0-79.8), against **72.0** (71.4-72.2) for blocked51 in the same run -- **B SLOWER: median x0.917** (pairs 0.924 0.917 0.918 0.908 0.902; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames); yardstick median 3.64G. The `shipped` baseline is FROZEN on this binary: {{B53_FREEZE_MS}} ({{B53_FREEZE_RANGE}}), yardstick {{B53_FREEZE_YARD}} -- blocked44's retired | `msframe.py --a build/doom_e1m1_blocked51.fjm --b build/doom_e1m1_blocked53.fjm`, 200 frames x 5 reps, pinned core (`blocked53_msframe.log`); `msframe.py --a build/doom_e1m1_blocked53.fjm --save-baseline shipped` (`blocked53_msframe_freeze.log`) |
+| **ms/frame** | **78.6 ms/frame** (78.0-79.8), against **72.0** (71.4-72.2) for blocked51 in the same run -- **B SLOWER: median x0.917** (pairs 0.924 0.917 0.918 0.908 0.902; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames); yardstick median 3.64G. The `shipped` baseline is FROZEN on this binary: 78.1 ms/frame (77.6 .. 78.5), yardstick 3.63G -- blocked44's retired | `msframe.py --a build/doom_e1m1_blocked51.fjm --b build/doom_e1m1_blocked53.fjm`, 200 frames x 5 reps, pinned core (`blocked53_msframe.log`); `msframe.py --a build/doom_e1m1_blocked53.fjm --save-baseline shipped` (`blocked53_msframe_freeze.log`) |
 | **fj ops/s** | **218.5 M** in the A/B run (blocked51 219.3 M) | ops/frame **17,181,722** on msframe's forward-walk script (blocked51 15,784,170) |
 | **binding metric** (owner spec) | (mean+p80)/2 = **12,490,840 ops/frame -- PASS** against **22,000,000** (D1: the 22M cap replaced the 20M target when the combat game shipped, M7 P8). blocked51's 12,528,769 was read against 20M; knockback moved run 0's tour (it ends (529, 208), blocked51's (577, 243)), runs 1-9 end where blocked51's did; no run reaches a door (`BINARY_DOORS` all 0, O-E2) | `gamespeed.py --fjm build/doom_e1m1_blocked53.fjm` (`docs/ship-evidence/blocked53_gamespeed.log`); `gamespeed_trail.py`: TRAIL PASS, CONTROL-POSE PASS -- CONTROL-DOORS N/A, no run opens a door; `BINARY_ENDS` / `BINARY_DOORS` as re-recorded in 564861e (`blocked53_gamespeed_trail.log`) |
 | **size** | **38.22% of 2^27 -- PASS against the 42% target** (51,304,694 words; span 119,377,056, 88.94% -- the span grew with the pool base, 0x60000000 -> 0x80000000; +2,660,740 words) -- 5,066,751 words under it. The size target: 35% -> 40% in P4.0 (`docs/gp-combat.md` C2, the owner 2026-09-25 + 2026-10-04), -> 42% after P5 ("its ok to get to 42% if things get messy or big", the owner 2026-10-04; `gamespeed.SIZE_TARGET_PCT` 42, fe754a0) | same run |
@@ -188,8 +188,8 @@ blocked25 read 99-104 ms/frame with a background video render at ~0.3-0.45 core 
 msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27 has not been timed
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe baseline `shipped`
-(`scratchpad/12m/msframe_baselines/shipped.json`) is FROZEN on this binary (M7 P8, {{SHIP_DATE}}: {{B53_FREEZE_MS}}
-[{{B53_FREEZE_RANGE}}], yardstick {{B53_FREEZE_YARD}}, {{B53_FREEZE_FJS}} fj/s -- `blocked53_msframe_freeze.log`);
+(`scratchpad/12m/msframe_baselines/shipped.json`) is FROZEN on this binary (M7 P8, 2026-10-09: 78.1 ms/frame
+[77.6 .. 78.5], yardstick 3.63G, 220.0M fj/s -- `blocked53_msframe_freeze.log`);
 blocked45 to blocked51 were never frozen, so blocked44's stood until then
 (re-frozen 2026-10-02 on blocked44: 73.1 ms/frame [72.3 .. 76.2], yardstick 3.50G,
 204.4M fj/s -- `blocked44_msframe_freeze.log`; blocked40's 2026-09-30 read 63.7 [63.6 .. 63.8]; blocked38's the same day read 61.5 [61.3 .. 61.7];
@@ -453,7 +453,7 @@ explained before shipping.
    the frozen binary (its hash). Use the explicit form only with the shipped sha256 in the record.
 3. **The owner's metric.** `python scratchpad/12m/gamespeed.py --fjm build/<new>.fjm` (both
    targets: (mean+p80)/2 <= 22,000,000 ops/frame -- 20,000,000 until the combat game shipped; D1 moved it to 22M at M7 P8 (`gamespeed.SPEED_TARGET`, 6dea24d; `fencecheck.py` parses no 20M literal) -- size <= 42% -- RAISED from 35% in M7 P4.0 (gp-combat C2, 40%) and to 42% by the owner after P5, 2026-10-04), then a separate `--validate` run
-   (it is a mode: 10/10 distinct end cells) and `--selftest` (SELFTEST PASS; its N6g is the only
+   (it is a mode: 9/10 distinct end cells on blocked53, the selftest's floor 6) and `--selftest` (SELFTEST PASS; its N6g is the only
    check that the host test's recorded keys are still what the planner plays -- CI does not run
    it). `--validate` replays the ORACLE; when the new binary moves, collides or opens doors
    differently from the shipped one, also run `scratchpad/12m/gamespeed_trail.py --fjm

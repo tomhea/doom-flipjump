@@ -59,7 +59,7 @@ from doomfj.lut_generator import generate_dispatch_table_fj
 
 M32 = 0xFFFFFFFF
 # the player modes whose player LOOTS (world.PLAYER_MODES): P6 + P7 ship as "full"
-LOOT_PLAYER_MODES = ("full",)
+LOOT_PLAYER_MODES = ("full", "final")      # M7 P8a: "final" is "full" and more
 # (cell, schema field, nibbles, ammo index or None): the persisted loot cells (section 4.5)
 CELLS = (("p_bc", "p_bonuscount", 2, None), ("p_str", "p_strength", 4, None), ("p_bp", "p_backpack", 1, None),
          ("am_misl", "p_ammo", 3, gd.AM_MISL), ("am_cell", "p_ammo", 3, gd.AM_CELL))
@@ -461,10 +461,12 @@ def _drop_leaf() -> List[str]:
 
 
 def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable = _default_rt_unlink,
-                 drop_take: Callable = _default_drop_take, lists=None) -> List[str]:
+                 drop_take: Callable = _default_drop_take, lists=None, drop_rt: Sequence[int] = None) -> List[str]:
     """`pk_go` (stl.fcall pk_go, pk_ret): `combat._touch_specials` at the candidate (`cpx`, `cpy`) with the floor
     `cm_hf` (the module docstring). `slots`: `pickup_slots`; `mon_rt[m]`: monster slot m's runtime thing (its
     thpos_rt / thss_rt row). `lists` overrides the cell lists (the host control's mutated grid). Jumps over itself.
+    M7 P8a (package K, knockback: a corpse SLIDES away from its drop, World.drop_pos): `drop_rt[k]` -- dropper k's
+    OWN row (barrelcode's nt + 10 + k, which drop_link<k> wrote at the kill) is read instead of its corpse's.
     SIZE: every test lives in ONE shared leaf (`pk_box` / `pk_boxz`, `pk_drop`, `pk_bonus`) and an item's stub only
     names its item (`pk_i`, the `pkxyz` row) -- one inline 16.16 compare is ~3K words, and 95 items x 6 of them
     were 2M (MEASURED)."""
@@ -503,7 +505,8 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
         p = f"pkd{k}"
         kind = DROP_ITEM[gd.DROPS[gd.MONSTER_DOOMEDNUMS[w.mon_things[m].type]]]
         out += [f"    hex.if_flags mdrop + {k}*dw, {1 << 1:#06x}, {p}_n, {p}_t", f"  {p}_t:",
-                f"    hex.set 2, pk_t, {mon_rt[m]}", "    stl.fcall pk_drop, pk_dret", f"    hex.if0 1, pk_in, {p}_n",
+                f"    hex.set 2, pk_t, {mon_rt[m] if drop_rt is None else drop_rt[k]}",
+                "    stl.fcall pk_drop, pk_dret", f"    hex.if0 1, pk_in, {p}_n",
                 f"    stl.fcall {DROPPED[kind]}, gv_ret", f"    hex.if0 1, gv_ok, {p}_n",
                 "    stl.fcall pk_bonus, pk_nret"]
         out += drop_take(k)                          # mdrop[k] = 2, dr_live - 1, the row unlinked (package C's)
@@ -622,6 +625,11 @@ def nukage_lines(w, cell_root: str) -> List[str]:
                 ys += [V[ld.v1][1], V[ld.v2][1]]
         return min(xs), max(xs), min(ys), max(ys)
     hb = box(hsec) if hsec else None      # a map with no damaging floor (the one-room fixtures): nothing to keep apart
+    # issue #123 R5a: cp_floor and cp_seedf are SIGNED floor heights and `hex.cmp` compares unsigned -- exact here
+    # because only EQUALITY is read ("Falling, not all the way down yet?": floorz != the sector's floor -> no damage),
+    # and equality is sign-agnostic. Asserted: the compare's lt and gt arms are the same label, so no order is ever taken
+    _nk_lt, _nk_eq, _nk_gt = "nk_out", "nk_hit", "nk_out"
+    assert _nk_lt == _nk_gt != _nk_eq, "nukage's unsigned floor compare may read equality only (issue #123 R5a)"
     for mv in (w.mover_order if hb else ()):
         mb = box({mv})
         r = (PLAYER_RADIUS >> 16) + 1
@@ -641,7 +649,8 @@ def nukage_lines(w, cell_root: str) -> List[str]:
             "    hex.mov 8, cpx, viewx", "    hex.mov 8, cpy, viewy",
             "    hex.set 8, cprad, %d" % PLAYER_RADIUS,
             "    sim.check_cells %s" % cell_root,                          # the box's floorz (cp_floor)
-            "    hex.cmp 8, cp_floor, cp_seedf, nk_out, nk_hit, nk_out",   # "Falling, not all the way down yet?"
+            "    hex.cmp 8, cp_floor, cp_seedf, %s, %s, %s" % (_nk_lt, _nk_eq, _nk_gt),   # "Falling, not all the way
+            # down yet?" -- equality only (see the assert above)
             "  nk_hit:",
             "    hex.mov 2, dp_dmg, nk_dmg",
             "    stl.fcall dp_go, dp_ret",
@@ -703,7 +712,8 @@ def use_guard() -> tuple:
 
 # ---- the splice ------------------------------------------------------------------------------------------------------
 def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int], cell_root: str,
-               rt_unlink: Callable = _default_rt_unlink, drop_take: Callable = _default_drop_take) -> dict:
+               rt_unlink: Callable = _default_rt_unlink, drop_take: Callable = _default_drop_take,
+               drop_rt: Sequence[int] = None) -> dict:
     """everything package B adds to the game tier, for the World `w` (its level start; any skill):
       * `decls`: the persisted cells (p_bc, p_str, p_bp, am_misl, am_cell), p_dd0, the interfaces and scratch;
       * `tables`: amcap, nkleaf;
@@ -721,10 +731,11 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
       * `slots`: `pickup_slots`; `extra_vis[skill]`: the runtime pickups' extra thvis slots (appended after the vis
         slots in `thvis`, boot = hard's, and each skill's restart half);
       * `restart`: NEW GAME's / the restart's loot cell values; `persist`: the cells the M1 reset must leave alone.
-    `mon_rt[m]`: monster slot m's runtime thing row (monsters.MonsterViews.rt)."""
+    `mon_rt[m]`: monster slot m's runtime thing row (monsters.MonsterViews.rt). M7 P8a (package K): `drop_rt[k]`,
+    dropper k's own row -- the pickup reads the drop there (pickup_lines(drop_rt=))."""
     start = level_start(w)
     slots = pickup_slots(w, rm, map_wad, mapname, sprite_wad)
-    leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take)
+    leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt)
               + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root))
     return {"decls": loot_decls(start), "tables": tables_fj(w), "leaves": leaves,
             "latch": latch_lines(), "pre": pre_lines(), "post": post_lines(), "use_guard": use_guard(),

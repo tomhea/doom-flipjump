@@ -97,7 +97,7 @@ def _phase_model(script):
             ws.p_bonuscount = 40
         ev = TicEvents(0)
         dead0 = ws.p_dead
-        w._special_sector = (lambda e, d=dmg: w.damage_player(d, ("sector", 0), e) if d else None)
+        w._special_sector = (lambda e, d=dmg: w.damage_player(d, ("sector", 0), None, e) if d else None)
         w._player_phase(k, ev)
         rows.append([ws.p_ready, ws.p_pending, gd.STATE_INDEX[gd.STATE_NAMES[ws.p_wpn_state]], ws.p_wpn_tics,
                      ws.p_wpn_sy, ws.p_flash_state, ws.p_refire, ws.p_attackdown, ws.rng_player, ws.p_health & 0xFFF,

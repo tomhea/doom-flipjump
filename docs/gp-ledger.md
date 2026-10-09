@@ -633,7 +633,8 @@ heat_blocked27_p31 regenerated, its groups identical (the pool reads only those)
 4. CAP-22 on v4 (14,447,782); size 28.65%; msframe recorded (NOT SEPARATED).
 5. pinreport 20 of 20 with `heat_blocked27_p31`; the restore sets re-keyed (`p31_rekey.log`).
 
-**Row**: (filled after the build)
+**Row**: the table above (blocked40). This line was the declaration's placeholder, left behind when the row was
+written above it (issue #119 item 11).
 
 
 ## P3.2a wake (class F) -- declared 2026-09-30, before blocked41's build
@@ -1660,3 +1661,276 @@ cap that binds, CAP-22 on the frozen set, has 7,300,474 of headroom.
    drop rows), and `state_dump.py`'s `new_world()` without `use_sight_rule` (interface 11.4, pre-existing).
 10. P5's open items (#121) other than F3 -- which P7-c closes, with die_gate D1-D3x as its proof -- were not
     re-checked in this rung.
+
+## P8a the final gameplay: the dying view, knockback, infighting, D3 a / b, the follow-ups (class F) -- declared 2026-10-07, before the build
+
+**What**: `docs/gp-final-plan.md` -- ONE rung, `PLAYER_MODE = "final"`, `MONSTER_MODE = "final"` (`wall_renderer`,
+flipped with `GAME_RENDER_KW`'s `rt_rank` / `exempt_barrels` in 571d287), integrated on `m7-extras` from packages
+0, D, C, A, K, I, V (section 3):
+- (A) the dying view sinks (S0, O-A1 as taken): `p_vd`, the oracle's `view_drop` split;
+- (K) knockback: P_DamageMobj's thrust with its inflictor, P_XYMovement for the player's knock and every monster and
+  corpse, the drops' own positions; (I) infighting: targets, the switch and threshold, the far LOS (O-B2: exact),
+  intervening things on monster bullets (O-B5), fireballs on monsters and barrels, `bar_src`; where they meet (the
+  integration, 6efbfc8): a fireball's impact on a monster knocks with the missile's z, a blast knocks with the
+  barrel as inflictor and "the source is the player" = `bar_src == 1` (`bl_sp`);
+- (C) D3 a (drops and effects before monsters in a leaf) and D3 b (barrels exempt from the soft raise);
+- (D) the follow-ups of section 1.4 marked DO;
+- in the frame order of section 4.3 and the cells of section 4.1. The coordinator's SPEED decision: package I's shared
+  fetch tables (9f26ea6, `mf_go` / `bf_go`) are REVERTED (2425912) -- they saved ~504K words but cost `hs_scan`
+  104.8K -> 156.5K ops a scan and `pt_lines` 25.9K -> 82.1K a try; speed is never compromised and the size ceiling is
+  42% (the owner).
+
+**Measured at the integration (no assembly; words come from the build):**
+- the game tier EMITS at final / final with every emit-time assert holding (the D3 keys against `_D3`, p31's knock /
+  fight / d3 against the emitter's, `kbbz`'s barrels on no mover, `check_model_rules` of knockcode / projcode /
+  damagecode): **63,330,190 characters** in seven parts -- entry 26,479; tables 13,317,023; main 1,954,129; segconsts
+  3,054,332; walk 10,996,140; state 965,008; banks 33,017,079 -- **+698,517 (+1.1%) over blocked51's 62,631,673**;
+  263,401 top-level labels, none defined twice (the merge found and fixed one: knockcode's `kq_out`), every plain
+  jump / fcall target defined, all 125 `persist_labels` defined;
+- per package (each package's own measure): **A** < 1K words; **K** ~128K characters of text (its knock leaves
+  109,564 characters at its own emission); **I** ~440K words in the compact form, **~+504K more unrolled** (the form
+  that ships: mt_load 108,824, hs_scan + hs_cand + hs_wid 327,740 with the 43,650-word angle leaf, pt_lines 235,204,
+  each assembled alone); **C** 1-2K words (ESTIMATE); **D** ~0;
+- unit ops (the packages' harnesses): the bullets' scan **104.8K ops a scan** (unrolled; 110.7K on the harness's
+  dense crowds), the fireball's thing test **25.9K a try** (6.8K a try on the harness's records), the far LOS
+  **132-255K ops a check** (128,389 mean on I's sample, by range 76K .. 152K), the brawl's worst frames **up to
+  ~2.1M ops a frame** above the frame without infighting.
+
+**Budget** (ESTIMATES; section 6's basis, the measures above replacing its unit guesses):
+- **ops on the frozen set**: v7 binding ~14.7 .. 15.3M (a RE-PLANNED set, not comparable with v6's 14,699,526); the
+  packages' own code +0.05 .. +0.26M before placement (the far LOS and the scan run only while a monster targets a
+  monster: rare on a v6-like set), placement +/- 0.1 .. 0.3M;
+- **size**: K ~0.1-0.3M + I ~0.94M (unrolled) + A, C, D ~0.01M -> ~1.05 .. 1.25M words, x P6 + P7's
+  measured-over-estimate growth (x1.2 .. 1.8) -> **+1.3 .. +2.3M words, 37.2 .. 38.0% of 2^27** (<= 42%: 56,371,445
+  words; blocked51 48,643,954, 7,727,491 of headroom). The section 6 redesign trigger (> +2.0M) may be reached by the
+  unrolled I alone at the top of the growth range -- the reversal of 9f26ea6 is the owner's speed rule, and 42% is
+  the ceiling that binds;
+- **single frames and stress** (recorded, not capped, D1): S1 ~23.3 .. 23.5M averaged; S3 (the brawl) worst frames
+  up to ~+2.1M (measured) to ~+3M (6 far-LOS checks x 2 tics x 255K); S4 (a push storm) up to ~+2M (ESTIMATE); B0's
+  per-frame maximum may rise by a few hundred K.
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. **CAP-22**: v7's (mean + p80) / 2 <= 22,000,000, every frame of all 11 runs state- and pixel-exact; v7 frozen by
+   the owner on this build's B0.
+2. **Size** <= 42% of 2^27 (56,371,445 words).
+3. **Every gate exact**: m2_std_gate, m3_gate, p2a_gate, hurt_gate (H1-H6, S1), fight_gate (F1-F10, K1-K7, I1-I6,
+   C1-C3, S2-S4), die_gate (D1-D11), B0 on v7; their selftests rejected where they must; every control parting;
+   every event counter nonzero; deaths 0 where declared; deg_gate BYTE-EXACT with op counts EQUAL to blocked51's.
+4. **Host and fj**: `python -m pytest tests/host` green (the restore-set tests and gamespeed's validate after the
+   re-key / the trails' re-record); the P8a harnesses (`test_view_drop_fj`, `test_dead_eye_render_fj`,
+   `test_knock_fj`, `test_monster_target_fj`, `test_far_los_fj`, `test_monster_hitscan_fj`, `test_game_luts_fj`, the
+   extended `test_fireball_pool_fj`, `test_monster_damage_fj`, `test_barrel_fj` (+ the K x I section),
+   `test_thing_pass_depth_fj`, `test_actor_record_fj`, `test_restart_fj`) -- every mutant caught; and ONE full
+   `tests/fj` run at the build's commit, solo.
+5. **Attribution**: profx-attributed ops of the new code (knock, targets, far LOS, hitscan scan, fireball thing test,
+   the view, the rank, `sp_ex`) on v7 <= 0.33M (1.25 x the top of the +0.26M estimate), else REDESIGN.
+6. **The O-E1 stress tripwire**: any stress frame (S1-S4, D9's dying frames, B0 v7's maximum) over 44M (2 x the cap,
+   ~180 ms), or any scenario averaging over 30M, must be attributed by profx and explained here before the ship;
+   every stress frame exact.
+7. **Housekeeping**: pinreport 20 of 20 with `heat_blocked27_p8a` (re-keyed for `sim.thing_pass_depth` 7 -> 9, the
+   one arity change); the restore sets re-keyed (new persisted cells: `p_vd`, `p_kmx`, `p_kmy`, `mkx`, `mky`, `mfx`,
+   `mfy`, `kb_live`, `pj_z`, `bar_src`; `mon_target` widened to 2 nibbles a slot); gamespeed's trails re-recorded
+   (TRAIL PASS before the number is quoted); `emit_baseline.py --check` unchanged for "full" (package 0's hooks
+   inert); msframe recorded (class F; ~90 ms a tripwire to explain).
+
+The phase budget: P8a has none in the handoff (the owner's 2026-10-07 request); the cap that binds is CAP-22.
+
+**Row** (blocked53, written at ship 2026-10-09; sha256 `324e3d2281d5c7e1`, built 2026-10-08 at 1df5f96 with
+`heat_blocked27_p8a`, `--pool-base 0x80000000 --span-bits 0x7fffffe0` and flipjump 1.5.1 at `1cd6e0c`;
+`docs/ship-evidence/blocked53_*`). **No measure below is like-for-like with blocked51 except size, the pool, the pins
+and deg_gate**: v6 cannot be replayed on the final modes (knockback and infighting move it) and blocked51 cannot play
+v7; gamespeed's run 0 took another tour under knockback (564861e), runs 1-9 the same tours.
+
+| measure | blocked51 (P6 + P7) | blocked53 (P8a) | delta |
+|---|---|---|---|
+| combat set binding | v6 14,699,526 | **v7 15,825,592** | not comparable (different sets) |
+| ... with strafe's collision (proxy) | v6 14,740,635 | v7 15,869,657 | -- |
+| mean / p80 run | v6 13,573,156 / 15,825,895 (R2-east-yard) | v7 14,767,719 / 16,883,465 (R2-east-yard) | -- |
+| per-frame maximum (+/- 2^18) | v6 24,117,248 (R0-courtyard) | v7 27,000,832 (R0-aftermath) | -- |
+| gamespeed binding | 12,528,769 (target 20M) | 12,490,840 (target 22M, D1) | run 0's tour changed; runs 1-9 the same tours |
+| gamespeed mean / p80 run | 11,616,962 / 13,440,576 | 11,598,383 / 13,383,297 | -- |
+| size (% of 2^27) | 36.24% | 38.22% | +2,660,740 words (5,066,751 under the 42% target) |
+| span (words, % of 2^27) | 100,158,624 (74.62%) | 119,377,056 (88.94%) | the pool base 0x60000000 -> 0x80000000 (9070b02) |
+| pool tables (build) | 510,924 in 38,098 groups (58.2% of capacity) | 555,371 in 42,100 groups (76.4% of capacity) | -- |
+| ms/frame (msframe, one run, A = blocked51; the pictures differ, so its pixel check reads NO) | 72.0 | 78.6 | B SLOWER (x0.917) |
+| hot words pinned (pinreport) | 20/20 | 20 of 20 | -- |
+| hurt_gate S1 (8 fireballs in flight) | 696,858,304 over 30 frames (~23.2M averaged) | 25,165,824 / 24,379,392 / 23,173,529 / 30 of 30 | per frame now (`--frame-ops`) |
+| p2a / hurt / fight / die | 13/13, 7/7, 19/19, 11/11 | 13/13, 7/7, 39/39, 17/17 | +20 fight rows (K1-K7, I1-I6, C1-C3, S3, S4), +6 die rows (D9, D10s/l/c, D11, D4') |
+
+**The stress cases** (O-E1 as taken: recorded and exact, with a TRIPWIRE -- any frame over 44M or any scenario averaging
+over 30M must be attributed by profx and explained here before the ship; per frame from each gate's `--frame-ops`, max /
+p95 / mean / frames over 22M): hurt_gate S1 25,165,824 / 24,379,392 / 23,173,529 / 30 of 30; fight_gate S2 (the chain in
+view) 12,845,056 / 11,796,480 / 9,899,645 / 0 of 106, S3 (the brawl) 17,039,360 / 17,039,360 / 15,645,627 / 0 of 60, S4
+(the push storm) 15,466,496 / 14,942,208 / 12,679,491 / 0 of 76; die_gate D9 (the dying frames) 19,398,656 / 19,398,656
+/ 19,051,315 / 0 of 40; B0 v7's maximum 27,000,832. blocked52 (superseded; scenario totals over frames, its gates parted
+on state): S1 23,184,772; S2 9,897,202; S3 15,654,287; S4 12,677,036; D9 19,057,511; its B0 maximum 27,262,976
+(R0-aftermath).
+
+**Size**: +2,660,740 words (blocked52: +2,660,802, 51,304,756 words, 38.23%). The declaration's ESTIMATE was
++1.3 .. +2.3M (37.2 .. 38.0%); section 6's redesign trigger is +2.0M. Preflight demand 51,264,672 words of the
+0x80000000 pool's 67,108,863 (76.4%). The death turn's alive-side size (#123-L6): not measured -- no label-table tool covers it (#125 item 21).
+
+**Where the ops went**: phases.py on blocked53's own games (1000 game frames, mean frame 11,598,383 ops: the render walk
+10,887,743 (93.87%), collision 200,387, m1_reset 97,396, the glue 347,449); profx-attributed OWN ops of the new and changed lines on v7 (the bodies of unchanged leaves they call are booked as old code; an inclusive figure is #125 item 17):
+68,876 ops/frame by B0's statistic (69,763 with every new or changed line; 112,851 at the worst run,
+R2-spectre-corridor; knockback 57,710 of the 68,876; `blocked53_profx_v7.log`). phases.py has no line of its own for the
+monsters', the knock's or the far LOS's tics, so the attribution is by the new lines' families
+(`b0_families.py` on a profiled B0 v7).
+
+**msframe is the class-F record (D8)**: 72.0 (71.4-72.2) -> 78.6 (78.0-79.8) ms/frame (pairs 0.924 0.917 0.918 0.908
+0.902), 15,784,170 -> 17,181,722 ops/frame on msframe's walk, 219.3 -> 218.5 M fj/s; yardstick median 3.64G. The ~90 ms
+tripwire: 78.6, under it. Then the `shipped` baseline re-frozen on blocked53 on a quiet box: 78.1 ms/frame,
+yardstick 3.63G (`blocked53_msframe_freeze.log`) -- blocked44's baseline retired (#115, #119-10, #121-8).
+
+**The rung's builds** (each by the 1b line of its day; the first two superseded):
+- blocked52 r0: refused to assemble -- "the program reached 0x611aa840, which is inside the table pool based at
+  0x60000000" (P8a's code with the unrolled infighting). The pool base moved to 0x80000000, span 0x7fffffe0 (popcount 1;
+  capacity 67,108,863 words), in every tool that reconstructs the pool (9070b02). r0's log is not committed.
+- blocked52 (at 21224a0, sha256 `f91abff8a04d37e0`): smoke, host (1872 passed), m2_std_gate 406 / m3_gate 50, the 7
+  selftests, pinreport 20/20 (0 broken of 42,083, pool 76.4%), gamespeed 12,489,847 PASS, size 38.23% PASS, the trail
+  PASS, B0 v7 every run state- and pixel-exact (15,823,275: mean 14,763,970, p80 run R2-east-yard 16,882,580; maximum
+  27,262,976 in R0-aftermath), die_gate 17/17 PASS. Its gates then FAILED where B0 passed: p2a 12/13 (S7), hurt 6/7
+  (H5), fight 30/39 (F6, S2, S4, K5, I2z, I4, I6, C2, S3) -- three fj bugs:
+  - 3c6dc06: a monster bullet on a monster spawned blood whose `fx_spawn_leaf` ran the shared `mm_octant` and rewrote
+    `mm_fa`, written as the shooter's facing (p2a S7, hurt H5, fight K5 / I2z / I4 / I6 / C2 / S3). `md_attack` keeps
+    `md_fa`. `test_monster_hitscan_fj` 1 failed -> 1 passed; mutant `facing_lost` caught.
+  - 0c8a93c: `barrel_parts` emitted `bl_los` without `fight=fight` -- an unbiased box against the fight's biased segment
+    blocks; a blast saw through door 145's lines at negative y (fight S2 / S4).
+    `test_barrel_parts_wires_the_blast_los_in_its_own_mode[True]` failed -> passes; `test_far_los_fj`'s fixed BLAST
+    record (fight emission sl_hit 1, blocked52's 0).
+  - 99609f3: `pt_thing` kept the pool window across `dm_go` -- a fireball's kill of a dropper linked the drop through
+    `pw_t` / `pw_leaf` (F6 frame 44). `test_fireball_pool_fj` failed -> passes, mutant `window_lost` caught;
+    `test_pool_window_kept` failed -> 3 passed.
+  Why they hid: every fj harness stubbed `dm_go` as a print; the production `*_parts` wiring was never run; B0's chance
+  octants agreed.
+- blocked53 (at 1df5f96): the three fixes; the counts cache recounted (51,884 -> 42,100 groups, 554,091 tables,
+  2,006 s); 7,126 s; the restore set's check 0 labels moved, 0 values changed, 19,074 baked cells value-checked.
+
+**Found and fixed before the first build** (8ae4459, the gates' side of the merge): `monsters.walkover_segments` split
+a walk at y -416 at y 65120 (the knock tap's `walk_end` unsigned against the poses' signed 16.16: p2a S7's trigger never
+fired, S12 re-crossed lift 98's line); hurt_gate's `hwt` control widened only `hwt`, not the target's `hwt_r`; fight I3
+placed no candidate (a one-shot barrel kill blames nobody: `bar_src` is set by the first NON-lethal damage).
+
+**Verdict P8a (its declared kill criteria): met -- every criterion, the full tests/fj included.**
+1. CAP-22: v7 15,825,592 <= 22,000,000 (headroom 6,174,408), every frame of all 11 runs state- and
+   pixel-exact, B0 OK (`blocked53_b0_v7.log`). v7 frozen by the owner (approved 2026-10-08; 06be25f) on
+   this build's B0. **Met.**
+2. Size: 38.22% (51,304,694 words) <= 42% (56,371,445). **Met.**
+3. Every gate exact: m2_std_gate 406 and m3_gate 50 frames byte- and state-exact (`blocked53_gates.log`); p2a_gate
+   13/13, hurt_gate 7/7 (deaths 0), fight_gate 39/39 (F1-F10 with F1r / F4s / F6d / F6p / F8a-d / F9l, S2, K1-K3, K4s /
+   K4d, K5-K7, I1, I2z / I2i, I3-I6, C1-C3, S3, S4; deaths 0) and die_gate 17/17 (17 deaths, 6 restarts; D1-D11 with D3d
+   / D3x / D4m / D4s / D10s / D10l / D10c / D4') STATE, PIXELS and PALETTE exact on every frame, every event counter
+   nonzero, every control parting; B0 on v7 (above); the 7 gate selftests rejected where they must
+   (`blocked53_gate_selftests.log`); deg_gate 4 viewpoints BYTE-EXACT with every op count equal to blocked51's
+   (30,277,162 / 16,391,748 / 30,556,888 / 28,556,306; `blocked53_deg_gate.log`). **Met.**
+4. Host: 1878 passed, 2 skipped, 1 deselected, 2 xfailed (`blocked53_host_suite.log`). fj: the P8a harnesses passed with
+   every mutant caught in the rung's commits -- `test_view_drop_fj` and `test_dead_eye_render_fj` (66dadc9; the dead-eye
+   pre-gate 24/24 exact), `test_knock_fj` (0844cc2: 420 thrust records, 7/7 mutants), `test_player_damage_fj -k knock`
+   4, `test_far_los_fj` (4d7aabe: 800 records; 0c8a93c), `test_monster_target_fj`, `test_monster_hitscan_fj` (3c6dc06),
+   `test_monster_damage_fj` (87738ca), `test_fireball_pool_fj` (99609f3), `test_barrel_fj`'s K x I section (dedd957),
+   `test_game_luts_fj` 57 (46f3cd4), `test_monster_chase_fj`'s `p_dead` records (46f3cd4), `test_thing_pass_depth_fj` 21
+   and `test_actor_record_fj` 17 (78de182 / 5213f6c), `test_slot_layouts_fj` 82 and `test_restart_fj` 16 (facb2a0 /
+   571d287); and ONE full `tests/fj` pass at 09eb0e0, solo, in two parts (part 1 cut by its 6 h timeout, part 2 the rest by node id): 867 of 867 passed (part 1: 542 passed; part 2: 325 passed in 2488.42s) (`blocked53_tests_fj_part1.log` + `blocked53_tests_fj_part2.log`; the first run, at 1df5f96, failed `test_mobile_rowselect_fj`'s 3 tests -- a stale harness, fixed in 09eb0e0; owed since P6 +
+   P7). **Met.**
+5. Attribution: the profx-attributed OWN ops of the new and changed lines on v7 (the bodies of unchanged leaves they call are booked as old code; an inclusive figure is #125 item 17) 68,876 ops/frame by B0's statistic (69,763 with every new or
+   changed line; 112,851 at the worst run, R2-spectre-corridor; knockback 57,710 of the 68,876;
+   `blocked53_profx_v7.log`) against 0.33M. **Met.**
+6. The O-E1 tripwire: S1 25,165,824 / 24,379,392 / 23,173,529 / 30 of 30, S2 12,845,056 / 11,796,480 / 9,899,645 / 0 of
+   106, S3 17,039,360 / 17,039,360 / 15,645,627 / 0 of 60, S4 15,466,496 / 14,942,208 / 12,679,491 / 0 of 76, D9
+   19,398,656 / 19,398,656 / 19,051,315 / 0 of 40, B0 v7's maximum 27,000,832 -- frames over 44M: none (the highest, B0
+   v7's 27,000,832); scenarios averaging over 30M: none (the highest, S1's 23,173,529); every stress frame exact.
+   **Met.**
+7. Housekeeping: pinreport 20 of 20 with `heat_blocked27_p8a` (20 bases moved, mismatch vs the counts cache 0); the
+   restore sets re-keyed (21224a0; the build's check 0 labels moved, 0 values changed, 19,074 baked cells value-checked;
+   `p_vd`, `p_kmx`, `p_kmy`, `mkx`, `mky`, `mfx`, `mfy`, `kb_live`, `pj_z`, `bar_src` among the persisted labels,
+   `mon_target` 2 nibbles a slot); gamespeed's trails re-recorded (564861e) and confirmed on blocked53 (TRAIL PASS,
+   CONTROL-POSE PASS; CONTROL-DOORS N/A, O-E2); `emit_baseline.py --check` for "full" at 1df5f96: EMISSION IDENTICAL, 21
+   of 21 parts SAME (certified, standalone, hosted_doors; `p8a_emit_baseline_full.log`); msframe recorded (B SLOWER,
+   78.6 under the ~90 ms tripwire). **Met**, CONTROL-DOORS stated N/A, not passed.
+
+**Against its budget** (ESTIMATES):
+- v7 binding ~14.7 .. 15.3M -> **15,825,592** (blocked52: 15,823,275, above the range by 0.52M). v7 is a re-planned set;
+  the estimate's basis (v6 plus the rung's deltas) is not a like-for-like measure. CAP-22 is the verdict.
+- the packages' own code +0.05 .. +0.26M, placement +/- 0.1 .. 0.3M: **NOT JUDGEABLE** one by one (no binary runs both
+  sets); the attribution of criterion 5 is the measure that stands.
+- size +1.3 .. +2.3M words -> **+2,660,740** (blocked52 +2,660,802: above the range and above section 6's +2.0M
+  redesign trigger; under the 42% ceiling, which the declaration names as the one that binds).
+- single frames and stress: S1 ~23.3 .. 23.5M averaged -> 25,165,824 / 24,379,392 / 23,173,529 / 30 of 30; S3 worst
+  frames up to ~+2.1 .. +3M -> 17,039,360 / 17,039,360 / 15,645,627 / 0 of 60; S4 up to ~+2M -> 15,466,496 / 14,942,208
+  / 12,679,491 / 0 of 76; B0's per-frame maximum "a few hundred K" above v6's 24.1M -> 27,000,832 (blocked52 27,262,976:
+  +3.1M over v6's, a different set).
+
+**Follow-ups**: `#125` (one issue; none blocks the ship -- the gates above are exact): the harness-completeness
+lessons of the three bugs (stubs that do not do to shared registers what the callee does; the production `*_parts`
+wiring unrun; B0 blind to chance-equal octants; the label-coverage report of section 9 that no tool makes), gamespeed's
+door-less tours (O-E2), the recorded levers (#121-7's missile cells, 9f26ea6's shared fetch tables), the recorded
+deviations (O-A1's S1, O-B1, O-B4, O-B5, D5's remainder, #123-5's hosted move policy), `hp_bar` inside the `lvdone`
+guard (#123-4, for M4), the span at 88.94% of 2^27 (for M4).
+
+## M7 summed (written at P8's ship, 2026-10-09)
+
+SUMMED from the rows above, NOT re-measured: each rung's gamespeed binding as its own row recorded it (one A binary to
+the next; the rows telescope -- checked when this was written: every row's A column is the previous row's B). gamespeed
+is NOT one tour across M7: from P6 + P7 a monster blocks the tours (O3) and from P8a knockback moves run 0, so the last
+two deltas are not like-for-like with the first eleven.
+
+| rung | binary | gamespeed binding | delta | size (% of 2^27) |
+|---|---|---|---|---|
+| (start) | blocked27 | 17,665,168 | -- | 32.23% (43,253,668 words) |
+| P1.1 | blocked28 | 16,357,904 | -1,307,264 | 32.21% |
+| P1.2 | blocked29 | 14,780,831 | -1,577,073 | 27.35% |
+| P1.3 | blocked30 | 14,318,431 | -462,400 | 26.98% |
+| P1.4 | blocked31 | 13,974,938 | -343,493 | 27.31% |
+| P1.5 | blocked32 | 13,560,716 | -414,222 | 27.13% |
+| P1.6 | blocked33 | 13,665,215 | +104,499 | 26.96% |
+| P2a.1 | blocked34 | 13,667,149 | +1,934 | 27.17% |
+| P2a.2 | blocked35 | 13,745,300 | +78,151 | 27.21% |
+| P2b | blocked37 | 13,642,413 | -102,887 | 28.24% |
+| P3 (summed above) | blocked38 .. blocked46 | 15,243,295 | +1,600,882 | 34.19% |
+| P4 | blocked47 | 15,403,663 | +160,368 | 34.25% |
+| P5 | blocked48 | 15,531,315 | +127,652 | 35.16% |
+| P6 + P7 | blocked51 | 12,528,769 | -3,002,546 (O3: other tours) | 36.24% |
+| P8a | blocked53 | 12,490,840 | -37,929 (run 0's tour changed) | 38.22% |
+| **M7** | **blocked27 -> blocked53** | **17,665,168 -> 12,490,840** | **-5,174,328** | **32.23% -> 38.22%** |
+
+P1.1 .. P5, the same ten tours: **-2,133,853** (17,665,168 -> 15,531,315) while the game gained the monsters, the
+player's combat and the monsters' attacks -- P1's reclaims (-4,104,452 over P1.1 .. P1.5) paid for P1.6 .. P5
+(+1,970,599). Size: the rows' word deltas sum to +5,390,286 over blocked27 at blocked51 (43,253,668 -> 48,643,954), then
+P8a +2,660,740.
+
+**The CAP-22 set, by version** (each set's binding at the binary its row names; the sets are not comparable with each
+other -- each re-plan changed the routes or the rules): v2 (frozen 2026-09-26; B0 on blocked27 17,760,774, proxy
+18,107,313) 16,448,992 (P1.1) .. 14,022,076 (P1.5); v3 14,158,345 (P1.6) .. 14,218,744 (P2a.2); v4 14,223,921 (P2b) ..
+14,447,782 (P3.1); v5 14,400,185 (P3.2a) .. 16,037,431 (P5); v6 14,699,526 (P6 + P7); **v7 15,825,592 (P8a,
+the shipped set)**. The handoff's projection before any build was ~14.3 .. ~16.4M from the proxy baseline (handoff
+section 8); the frozen set at the ship reads 15,825,592, 6,174,408 under 22M.
+
+**The phase budgets** (handoff section 10) were judged by each rung's own row, most on the combat set of its day, and
+are not re-judged here. On gamespeed, per phase: P1 (P1.1 .. P1.6) -3,999,953; P2a +80,085; P2b -102,887; P3 +1,600,882
+(OVER its +0.3M, 5.34x: "Phase 3 summed"); P4 +160,368; P5 +127,652; P6 + P7 and P8a on other tours. CAP-22 on the
+frozen set of the day held at every rung.
+
+## P8 the ship (class F, on blocked53) -- `docs/gp-final-plan.md` 5.4, written 2026-10-09
+
+**Verdict P8: SHIPPED.** The fully playable E1M1 ships as `build/doom_e1m1_blocked53.fjm`; the 22M cap replaces
+the 20M target (D1) in `gamespeed.SPEED_TARGET` (6dea24d), `docs/ship-gate.md` and CLAUDE.md (290cd9d).
+1. Exactness: P8a's criteria 3 and 4 above -- every gate, every selftest, deg_gate with blocked51's op counts, B0 on v7
+   state- and pixel-exact on every frame, pinreport exit 0, the host suite, the full `tests/fj` at 09eb0e0 solo (two parts).
+   **Met.**
+2. CAP-22: v7 15,825,592 <= 22,000,000; the owner froze v7 on this B0 (06be25f). **Met.**
+3. Stress (O-E1): criterion 6 above, per frame. **Met.**
+4. Size: 38.22% <= 42% (gamespeed's size line). **Met.**
+5. gamespeed: `SPEED_TARGET` 20,000,000 -> 22,000,000 in 6dea24d (`fencecheck.py` parses no 20M literal, so nothing
+   moved there), `docs/ship-gate.md` section 1 / section 2 step 3 and CLAUDE.md in 290cd9d; binding 12,490,840
+   PASS against 22M; `gamespeed_trail.py` on blocked53 TRAIL PASS, CONTROL-POSE PASS (CONTROL-DOORS N/A, O-E2);
+   `BINARY_ENDS` / `BINARY_DOORS` as 564861e recorded; `--validate` rc 0, every run ending where `BINARY_ENDS` records
+   (run 0 at (529, 208)), 0 doors opened, 9/10 distinct end cells; `--selftest` SELFTEST PASS (N6e: --validate ends
+   where the binary ends, 10/10). **Met.**
+6. msframe: `--a build/doom_e1m1_blocked51.fjm --b build/doom_e1m1_blocked53.fjm` 78.6 vs 72.0,
+   B SLOWER (the price; ~90 ms the tripwire); the baseline re-frozen (`--a build/doom_e1m1_blocked53.fjm
+   --save-baseline shipped`, yardstick 3.63G). **Met.**
+7. Record: `docs/ship-gate.md` sections 1 and 1b, CLAUDE.md, `docs/handoff-gameplay.md` (P8 DONE), this file (P8a's row,
+   M7 summed, this verdict), `docs/gp-final-plan.md`'s As built; #119 / #121 / #123 closed with section 1.4's table;
+   `#125` for what stays open. **Met (the three issues close on #124's merge).**
+8. PR #124: R1 FAIL/PASS blocks (the three fixes' tests above), R2 integration evidence, the crist one-pass review,
+   CI green, merged. **Met at the merge: the crist review APPROVED with nothing blocking, its follow-ups in #125.**

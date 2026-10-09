@@ -16,9 +16,10 @@ MASK32 = 0xFFFFFFFF
 def mobile_rows(world) -> int:
     """M7 P5 (docs/gp-p5-interface.md): the runtime-thing rows the MOBILES add after the WAD's runtime things -- fireball
     slot s is row nt + s (s < FIREBALL_POOL), blood slot s row nt + FIREBALL_POOL + s -- in a world whose monsters
-    spawn fireballs ("full") or whose player's shots bleed (world.player_bleeds); 0 before P5"""
-    from doomfj.world import FIREBALL_POOL, FX_POOL, player_bleeds
-    return FIREBALL_POOL + FX_POOL if (world.monsters == "full" or player_bleeds(world.player)) else 0
+    spawn fireballs ("full", and M7 P8a's modes after it: world.monster_attacks_land) or whose player's shots bleed
+    (world.player_bleeds); 0 before P5"""
+    from doomfj.world import FIREBALL_POOL, FX_POOL, monster_attacks_land, player_bleeds
+    return FIREBALL_POOL + FX_POOL if (monster_attacks_land(world.monsters) or player_bleeds(world.player)) else 0
 
 
 def drop_rows(world) -> int:
@@ -76,6 +77,147 @@ def view_of(patches: dict, sprite: str, frame: int, rot: int) -> Tuple[str, bool
     return v if v is not None else patches[(sprite, letter, rot)]
 
 
+# M7 P8a (V, docs/gp-final-plan.md 4.3 step 6): a knock move CROSSES walk-over lines as the walk does -- DOOM's
+# P_XYMovement -> P_TryMove -> P_CrossSpecialLine, for the player as for any thing. The gates' Mirror fires the door
+# and mover walk-overs over the walk's segment AND, when this holds, over the knock's (`MonsterPhase.walk_end` ->
+# the final pose); package K's fj must agree (a knock that fires no walk-over is this constant False, and a gate
+# parts on any knock that crosses one)
+KNOCK_WALKOVERS = True
+
+
+def walkover_segments(phase, old, new) -> list:
+    """M7 P8a (V): the segments a gate fires its door and mover walk-overs over this frame -- the walk's (old ->
+    `phase.walk_end`) and, while KNOCK_WALKOVERS, the knock move's (walk_end -> new); the one segment old -> new when
+    no knock move ran (every frame before P8a, and every frame of a mode without knockback)"""
+    we = getattr(phase, "walk_end", None) if phase is not None else None
+    if we is None:
+        return [(tuple(old), tuple(new))]
+    # `walk_end` is 32-bit UNSIGNED (the binary's cells); the gates' poses are SimState's SIGNED 16.16 -- the segment
+    # takes the representation of its ends (the P8a integration: S7's trigger at y -416 met a walk_end at y 65120)
+    if not any(v >= 1 << 31 for v in tuple(old) + tuple(new)):
+        we = tuple(v - (1 << 32) if v >> 31 & 1 else v for v in we)
+    else:
+        we = tuple(v & MASK32 for v in we)
+    return [(tuple(old), tuple(we))] + ([(tuple(we), tuple(new))] if KNOCK_WALKOVERS else [])
+
+
+def view_drop_kw(phase) -> dict:
+    """M7 P8a (V): `render_wall_frame`'s keyword for a world frame of `phase` (a MonsterPhase, or None): the dying
+    view's sink (`MonsterPhase.view_drop`) -- {} while it is 0, so every picture before package A lands (and every
+    living frame after it) is drawn by today's call, keyword for keyword. EVERY game-tier gate's world render passes
+    it, or `view_drop=` itself (tests/host/test_p8a_gates.py, static: rule 5)"""
+    d = phase.view_drop() if phase is not None else 0
+    return {"view_drop": d} if d else {}
+
+
+class KnockTap:
+    """M7 P8a (V): the KNOCK MOVES of one World, as they happen -- a recorder wrapped around package K's model entry
+    points (docs/gp-final-plan.md 3.1: `combat._player_knock_move`, `world._monster_knock_move`, and the shared
+    `_xy_move(thing, ev)` both may call), installed as INSTANCE attributes so the class (and every other World) is
+    untouched. Each OUTERMOST call is one record: {"name", "frame", "mom0", "mom1", "pos0", "pos1"} -- the player's
+    knock momentum (p_momx, p_momy) and every monster's (mon_momx, mon_momy) before and after, and the positions
+    (the player's 16.16, each monster's whole units + fraction) -- so a reader asks what MOVED, not how K's
+    functions are called. A model without them (any mode before P8a, or K not merged) installs nothing: `ok` False.
+
+    It answers the gates' and the v7 planner's questions about a knock move, from the cells alone (section 4.1's
+    units, DOOM's P_XYMovement): `walk_end` -- where the player stood when his knock move began this frame (B0
+    injects the pose that lands the binary's WALK there); `refused` -- a thing whose momentum had a component of
+    at least STOPSPEED going in and is zero coming out (friction keeps 29/32 of such a component and the STOPSPEED
+    stop needs both below it, so only a REFUSED step zeroes it: DOOM's non-player rule, O-B4)."""
+
+    NAMES = ("_player_knock_move", "_monster_knock_move", "_xy_move")
+
+    def __init__(self, world):
+        self.world = world
+        self.records = []
+        self.frame = 0
+        self.depth = 0
+        self.ok = False
+        from doomfj.world import knockback_on
+        if not knockback_on(world.player, world.monsters):
+            return
+        for name in self.NAMES:
+            orig = getattr(world, name, None)
+            if orig is None:
+                continue
+            setattr(world, name, self._wrap(name, orig))
+        # K's model is in when its PLAYER entry exists (package 0 declares only the empty `_xy_move` hook)
+        self.ok = hasattr(type(world), "_player_knock_move")
+
+    def _snap(self):
+        ws, n = self.world.ws, self.world.layout.nmon
+        return ((ws.p_momx, ws.p_momy), tuple((ws.mon_momx[m], ws.mon_momy[m]) for m in range(n)),
+                (ws.px, ws.py), tuple((ws.mon_x[m], ws.mon_y[m], ws.mon_fx[m], ws.mon_fy[m]) for m in range(n)))
+
+    def _wrap(self, name, orig):
+        def fn(*args, **kw):
+            outer = self.depth == 0
+            before = self._snap() if outer else None
+            self.depth += 1
+            try:
+                return orig(*args, **kw)
+            finally:
+                self.depth -= 1
+                if outer:
+                    after = self._snap()
+                    self.records.append({"name": name, "frame": self.frame, "args": args[:1],
+                                         "mom0": before[0], "mom1": after[0], "mmom0": before[1], "mmom1": after[1],
+                                         "pos0": before[2], "pos1": after[2], "mpos0": before[3], "mpos1": after[3]})
+        fn.__wrapped__ = orig
+        return fn
+
+    def detach(self) -> None:
+        for name in self.NAMES:
+            if name in self.world.__dict__:
+                delattr(self.world, name)
+
+    def since(self, k: int) -> list:
+        return self.records[k:]
+
+    @staticmethod
+    def _stopped(m0, m1) -> bool:
+        from doomfj.gamedata import STOPSPEED
+        return any(abs(v) >= STOPSPEED for v in m0) and tuple(m1) == (0, 0)
+
+    def player_calls(self, recs=None) -> list:
+        """the records whose PLAYER momentum or position changed, or that are the player's own entry"""
+        return [r for r in (self.records if recs is None else recs)
+                if r["name"] == "_player_knock_move" or r["mom0"] != r["mom1"] or r["pos0"] != r["pos1"]
+                or (r["args"] and r["args"][0] == ("player", -1))]
+
+    def wall_refusals(self, recs=None) -> list:
+        """the `refusals` that no SOLID THING refused (O-V1's "a knock stopped by a wall"): nothing solid at the push's
+        target -- the thing's position plus its momentum going in, clamped to +-MAXMOVE as P_XYMovement clamps it --
+        so a wall, a step or a drop-off stopped it"""
+        from doomfj.gamedata import MAXMOVE
+        w, out = self.world, []
+
+        def cl(v):
+            return max(-MAXMOVE, min(MAXMOVE, v))
+        for thing, r in self.refusals(recs):
+            if thing[0] == "player":
+                ok = w._solid_thing_at(r["pos0"][0] + cl(r["mom0"][0]), r["pos0"][1] + cl(r["mom0"][1])) is None
+            else:
+                m = thing[1]
+                x, y = r["mpos0"][m][:2]
+                mx, my = (cl(v) for v in r["mmom0"][m])
+                ok = w._thing_blocker(m, x + (mx >> 16), y + (my >> 16), w.mon_radius[m]) is None
+            if ok:
+                out.append((thing, r))
+        return out
+
+    def refusals(self, recs=None) -> list:
+        """[(thing, record)] of every knock REFUSED in `recs` (default all): ("player", -1) or ("mon", slot)"""
+        out = []
+        for r in (self.records if recs is None else recs):
+            if self._stopped(r["mom0"], r["mom1"]):
+                out.append((("player", -1), r))
+            for m, (a, b) in enumerate(zip(r["mmom0"], r["mmom1"])):
+                if self._stopped(a, b):
+                    out.append((("mon", m), r))
+        return out
+
+
 class MonsterPhase:
     """The gate oracles' monster frame: the MODEL's own monster phase (`World._monsters_phase`) in a model mode
     (`World(monsters=...)`), stepped once per game frame after the player, and read for drawing. Nothing here
@@ -96,9 +238,51 @@ class MonsterPhase:
         self.world = World(map_wad, mapname, gd.SK_HARD if skill is None else skill, rm=rm, monsters=mode,
                            sight_rule="los" if mode == "idle" else "seen", player=player, aim=aim)
         self.gd = gd
+        # M7 P8a (V): the knock moves as they happen (KnockTap; nothing installed before knockback_on), the walk's
+        # landing this frame (`walk_end`: B0 and the walk-overs), and the player's last knock record
+        self.tap = KnockTap(self.world)
+        self.walk_end = None
+        self.last_knock = None
 
     def reset(self, skill: int) -> None:
         self.world.reset(skill)
+
+    # ---- M7 P8a (V, docs/gp-final-plan.md 4.1 / 5): the dying view and the knock ------------------------------------
+    def view_drop(self) -> int:
+        """`render_wall_frame(view_drop=)` for this world frame: P_DeathThink's sink in map units (`p_vdrop`, 0..35:
+        viewheight = 41 - it) while the player SINKS (world.player_sinks), else 0 -- today's picture. EVERY game-tier
+        gate's render passes it (`probe.view_drop_kw`; tests/host/test_p8a_gates.py holds the call sites)"""
+        from doomfj.world import player_sinks
+        return self.world.ws.p_vdrop if player_sinks(self.world.player) else 0
+
+    def knocks(self) -> bool:
+        """the world's knockback is on (world.knockback_on) -- the player's knock move runs in `move`"""
+        from doomfj.world import knockback_on
+        return knockback_on(self.world.player, self.world.monsters)
+
+    def _knock_move(self, ev, n_before: int) -> None:
+        """THE PLAYER'S KNOCK MOVE (docs/gp-final-plan.md 4.3 step 6: after the walk, dead or alive) -- the model's own
+        (package K's `_player_knock_move(ev)`; before K, the declared hook `_xy_move(("player", -1), ev)`, empty) --
+        unless the model already ran it inside this frame's weapon or move (`n_before`: the tap's records when the
+        frame began; a K that knocks inside `_player_move` or `_death_think` is not knocked twice). The record of it
+        is `last_knock`; `walk_end` is the pose it began from"""
+        w = self.world
+
+        def player_rec(r):
+            return r["name"] == "_player_knock_move" or (r["name"] == "_xy_move" and r["args"]
+                                                         and r["args"][0] == ("player", -1))
+        mine = [r for r in self.tap.since(n_before) if player_rec(r)]
+        if not mine:
+            k = len(self.tap.records)
+            fn = getattr(w, "_player_knock_move", None)
+            if fn is not None:
+                fn(ev)
+            else:
+                w._xy_move(("player", -1), ev)
+            mine = [r for r in self.tap.since(k) if player_rec(r)]
+        if mine:
+            self.walk_end = (mine[0]["pos0"][0] & MASK32, mine[0]["pos0"][1] & MASK32)
+            self.last_knock = mine[0]
 
     def tic(self, x16: Optional[int] = None, y16: Optional[int] = None, angle: Optional[int] = None):
         """one monster FRAME (M7 P6+P7 E: `world.monster_tics` tics, World._monster_world) -- the player where the
@@ -183,6 +367,7 @@ class MonsterPhase:
         order) the berserk counter, the damage and the bonus fades."""
         from doomfj.world import KEYS, TicEvents, player_mortal
         w = self.world
+        self._tap_at = len(self.tap.records)          # M7 P8a: the frame's knock records start here (`move`)
         if w.player == "walk":
             return TicEvents(0)
         self._pose(x16, y16, angle)
@@ -275,15 +460,34 @@ class MonsterPhase:
                                touch=self.touch, strafe=True)
             return st.x, st.y, st.angle
         assert scene is None, "the full model moves on the world's own scene (sync it), not a gate's"
+        # M7 P8a (V): this frame's walk landing and the player's knock record (`walk_end` None: no knock move ran)
+        n0 = getattr(self, "_tap_at", len(self.tap.records))
+        self._tap_at = len(self.tap.records)
+        self.walk_end, self.last_knock = None, None
+        knock = self.knocks()
         if ws.p_dead if dead is None else dead:
             from doomfj.world import player_mortal
+            if knock:                     # M7 P8a: the corpse slides (4.3 step 6: dead or alive)
+                ws.px = x16 - (1 << 32) if x16 >> 31 & 1 else x16
+                ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
+                keep = (list(ws.w_fired), list(ws.d_monreq), list(ws.l_req))
+                self._knock_move(ev, n0)
+                for arr, vals in zip((ws.w_fired, ws.d_monreq, ws.l_req), keep):
+                    for i, v in enumerate(vals):
+                        arr[i] = v
+                if (ws.px & MASK32, ws.py & MASK32) != (x16 & MASK32, y16 & MASK32):
+                    return ws.px & MASK32, ws.py & MASK32, ws.pangle
             return x16, y16, (ws.pangle if player_mortal(w.player) else angle)
         self._pose(x16, y16, angle)
         keep = (list(ws.w_fired), list(ws.d_monreq), list(ws.l_req))
         w._player_move(k, ev)
+        if knock:                         # M7 P8a: the knock move after the walk (pickups at every tried position)
+            self._knock_move(ev, n0)
         for arr, vals in zip((ws.w_fired, ws.d_monreq, ws.l_req), keep):
             for i, v in enumerate(vals):
                 arr[i] = v
+        if knock and (ws.px & MASK32, ws.py & MASK32) != (x16 & MASK32, y16 & MASK32):
+            return ws.px & MASK32, ws.py & MASK32, ws.pangle   # the walk or the knock moved him
         if k["forward"] != k["back"] or k["strafe_left"] != k["strafe_right"]:
             return ws.px & MASK32, ws.py & MASK32, ws.pangle
         return x16, y16, ws.pangle
@@ -391,10 +595,11 @@ class MonsterPhase:
                         "mon_justhit": tuple(ws.mon_justhit[:n])})
         if player_hears(self.world.player):                     # M7 P4.2b: who heard, who still waits in ambush
             out.update({"mon_ambush": tuple(ws.mon_ambush[:n]), "snd_alert": tuple(ws.snd_alert)})
-        if self.world.monsters == "full":                        # M7 P5: the attacks land -- hurtcode's player cells
+        from doomfj.world import monster_attacks_land
+        if monster_attacks_land(self.world.monsters):            # M7 P5: the attacks land -- hurtcode's player cells
             out.update(self.hurt_state())                        # and projcode's fireball pool
             out.update(self.proj_state())
-        if self.world.monsters == "full" or player_bleeds(self.world.player):   # M7 P5: the blood pool, its stream
+        if monster_attacks_land(self.world.monsters) or player_bleeds(self.world.player):   # M7 P5: the blood pool
             out.update(self.fx_state())
         from doomfj.world import player_loots, player_mortal
         if player_loots(self.world.player):                       # M7 P6: the loot, the barrels, the game cells
@@ -402,6 +607,39 @@ class MonsterPhase:
             out.update(self.barrel_state())
         if player_loots(self.world.player) or player_mortal(self.world.player):
             out.update(self.game_state())
+        out.update(self.p8a_state())
+        return out
+
+    # ---- M7 P8a (V, docs/gp-final-plan.md 4.1): the final rung's cells, in the fj cells' units ----------------------
+    def p8a_state(self) -> Dict[str, object]:
+        """the cells P6's flag and P8a add, each only in the modes that emit it (the probe's OPTIONAL_GROUPS):
+          p_tnh   1 nibble   P6+P7's "a turn key was held last frame" (the player's p_turnheld) -- the F1 gap of
+                             #123: every game binary since P6 has it and no gate compared it (world.player_loots)
+          p_vd    2 nibbles  P_DeathThink's sink, 0..35 (world.player_sinks)
+          knock (world.knockback_on): p_kmx / p_kmy the player's KNOCK momentum, mkx / mky per slot, each 16.16 a
+                  tic as its 32 bits unsigned (8 nibbles); mfx / mfy per slot the position's fraction (4 nibbles);
+                  kb_live (2 nibbles) the slots whose momentum is not zero -- the monsters' fast skip, checked here;
+                  pj_z per fireball slot, the shooter's floor + 32 at the spawn, its 16 bits (4 nibbles; a free
+                  slot 0)
+          fight (world.infighting_on): bar_src per barrel (2 nibbles: 0 none, 1 the player, 2 + slot the FIRST
+                  thing that damaged it) -- `mon_target` (state(), 2 nibbles in this mode) names 0 / 1 / 2 + slot"""
+        from doomfj.world import infighting_on, knockback_on, player_loots, player_sinks
+        w, ws, n = self.world, self.world.ws, self.world.layout.nmon
+        out = {}
+        if player_loots(w.player):
+            out["p_tnh"] = ws.p_turnheld
+        if player_sinks(w.player):
+            out["p_vd"] = ws.p_vdrop
+        if knockback_on(w.player, w.monsters):
+            out.update({"p_kmx": ws.p_momx & MASK32, "p_kmy": ws.p_momy & MASK32,
+                        "mkx": tuple(v & MASK32 for v in ws.mon_momx[:n]),
+                        "mky": tuple(v & MASK32 for v in ws.mon_momy[:n]),
+                        "mfx": tuple(v & 0xFFFF for v in ws.mon_fx[:n]),
+                        "mfy": tuple(v & 0xFFFF for v in ws.mon_fy[:n]),
+                        "kb_live": sum(1 for m in range(n) if ws.mon_momx[m] or ws.mon_momy[m]),
+                        "pj_z": tuple(v & 0xFFFF for v in ws.proj_z)})
+        if infighting_on(w.monsters):
+            out["bar_src"] = tuple(ws.bar_src)
         return out
 
     # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------
@@ -474,7 +712,11 @@ class MonsterPhase:
         then the blood slots -- at its whole map units (the 16.16 position floored: its thpos_rt row carries no
         fraction), drawn with its state's frame (`mobile_lump`).
         M7 P6: then the DROPS lying (mdrop 1), in dropper order -- (x, y, lump, 0): at the corpse's position, ON its
-        leaf's floor (z 0, not MISSILE_Z), CLIPA0 / SHOTA0 (`drop_lump`)"""
+        leaf's floor (z 0, not MISSILE_Z), CLIPA0 / SHOTA0 (`drop_lump`).
+        M7 P8a (C, D3 a): each entry's KIND is what it carries -- a drop by its z 0, a fireball (BAL1*) or an effect
+        (BLUD* / PUFF*) by its lump, which only that pool ever shows; `reference_model.mobile_rank` reads it (rank 0
+        for the effects and the drops, drawn first in their leaf; 1 for the fireballs, as the monsters), the fj by the
+        row ranges above (monstercode.rank_threshold). The tuples are unchanged, so every reader keeps its shape."""
         from doomfj.world import FIREBALL_POOL, FX_POOL
         ws, gd, out = self.world.ws, self.gd, []
         for s in range(FIREBALL_POOL):
@@ -485,8 +727,8 @@ class MonsterPhase:
                 out.append((ws.fx_x[s] >> 16, ws.fx_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])))
         if drop_rows(self.world):
             for m in droppers(self.world):
-                if ws.mon_drop[m] == 1:
-                    out.append((ws.mon_x[m], ws.mon_y[m], drop_lump(self.world.dropper[m]), 0))
+                if ws.mon_drop[m] == 1:                 # M7 P8a: at the drop's own position (World.drop_pos)
+                    out.append((*self.world.drop_pos(m), drop_lump(self.world.dropper[m]), 0))
         return out
 
     def views(self, rm, patches: dict, view_x16: int, view_y16: int) -> Dict[int, Tuple[str, bool]]:
@@ -577,11 +819,13 @@ class MonsterViews:
         out = {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss)}
         if drop_rows(phase.world):
             # M7 P6: the DROP rows nt + 10 + k, one per dropper k: while its drop lies (mdrop 1) the corpse's
-            # whole-unit row and its leaf (the monster's own), else (0, 0) -- and in no list
+            # whole-unit row and its leaf (the monster's own), else (0, 0) -- and in no list. M7 P8a (package K): the
+            # drop's OWN position and leaf (World.drop_pos / drop_leaf: the corpse's at the kill, drop_link<k>'s copy)
             for m in droppers(phase.world):
                 live = ws.mon_drop[m] == 1
-                thpos.append((((ws.mon_x[m] << 16) & M) | (((ws.mon_y[m] << 16) & M) << 32)) if live else 0)
-                thss.append(ws.mon_leaf[m] if live else 0)
+                dx, dy = phase.world.drop_pos(m)
+                thpos.append((((dx << 16) & M) | (((dy << 16) & M) << 32)) if live else 0)
+                thss.append(phase.world.drop_leaf(m) if live else 0)
             out = {"thpos_rt": tuple(thpos), "thss_rt": tuple(thss), **self.vis_state(phase)}
         return out
 

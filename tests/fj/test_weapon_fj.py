@@ -267,7 +267,7 @@ def _hurt_script(kind, seed=5):
             ws.p_dead = 1
         w.tic(k)
         if dmg:
-            w.damage_player(dmg, ("mon", 0), TicEvents(0))
+            w.damage_player(dmg, ("mon", 0), ("mon", 0), TicEvents(0))
         script.append((k, pokes, dmg))
         rows.append({f: getattr(ws, f) for f in ("p_ready", "p_pending", "p_wpn_state", "p_wpn_tics", "p_wpn_sy",
                                                  "p_flash_state", "p_flash_tics", "p_refire", "p_attackdown",

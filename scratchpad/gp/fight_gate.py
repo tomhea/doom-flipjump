@@ -2,6 +2,7 @@
 
     python scratchpad/gp/fight_gate.py --fjm build/<new>.fjm --labels <its label table>
     python scratchpad/gp/fight_gate.py --oracle-only [--only F6]    # the scenarios, their counters and controls
+    ... [--modes PLAYER/MONSTER] [--frame-ops [FILE]]   # M7 P8a: the modes (default the game tier's); per-frame ops
 
 hurt_gate's shape (p2a_gate.Mirror in the game tier's "full" modes, hurt_gate's Run / place / parts): each scenario
 starts by POKING the game tier at frame 0's start -- the world mode, the player's pose, and every cell the scenario's
@@ -40,6 +41,19 @@ order of the player, the monsters and the barrels moves no cell (host: test_p67_
 F6 and F7; the plan's 96 barrel pairs all see each other), so the rule is held on the host (test_p67_model).
 `drop_z` rides F4s: a zombieman's clip lies inside its corpse's columns, past the scenery budget in every candidate
 of F4, so its height draws nothing there.
+
+M7 P8a (docs/gp-final-plan.md 5.2; p8a_lib.py): the modes are the GAME TIER's (`--modes` for an --oracle-only run at the
+rung's target), and section 5.2's rows join -- KNOCKBACK K1 (pushed away, decays, stops), K2 (into a wall: zeroed),
+K3 (a blast throws the player and a crowd), K4s / K4d (the shotgun on a sergeant: fractions, re-tests, a relink; on a
+demon: mass 400), K5 (a shotgun kill: the corpse slides, its drop stays), K6 (the chainsaw: no thrust), K7 (the
+reversal; N/A when no E1M1 position reaches it); INFIGHTING I1 (a sergeant through an imp: hit, blood, switched), I2z /
+I2i (an imp's fireball into a zombieman: switched; into an imp: the species rule), I3 (a stray shot kills a barrel:
+bar_src), I4 (the target dies), I5 (a target behind a wall: the far LOS), I6 (the threshold); THE COMPOSITOR C1 / C2
+(D3 a: a drop, blood before their monster), C3 (D3 b: a far barrel) -- each placed only where its rule decides a
+pixel (`claim_ctl`); STRESS S3 (a brawl), S4 (a push storm). Each names its `rule` and `pkg`: at modes without the
+rule it is N/A; while its package is not in the tree it AWAITS it and the gate ends INCOMPLETE (exit 2), never PASS.
+Their controls (p8a_lib.CONTROLS) break the model from outside the packages' code; a PICTURE control (D3 a / b, A's
+split) is judged on the same trace's pictures. `--frame-ops` prints each binary scenario's per-frame ops (S2-S4).
 """
 from __future__ import annotations
 
@@ -65,7 +79,10 @@ from doomfj.fixedpoint import _signed                                        # n
 from doomfj.things import drawable_things                                    # noqa: E402
 
 M32 = 0xFFFFFFFF
-MMODE, PMODE = "full", "full"             # P6/P7's model modes; a binary run asserts them against wall_renderer's
+# the game tier's modes (M7 P8a: wall_renderer's -- "full" / "full" through P6+P7, "final" / "final" from P8a; `--modes`
+# sets another for an --oracle-only run); a binary run asserts them against wall_renderer's
+from doomfj.wall_renderer import MONSTER_MODE as MMODE, PLAYER_MODE as PMODE   # noqa: E402
+import p8a_lib as P8                                                         # noqa: E402  (M7 P8a)
 NORTH, SOUTH, EAST, WEST = 0x40000000, 0xC0000000, 0, 0x80000000
 I, F, B = {}, {"forward": True}, {"back": True}
 FIRE = {"fire": True}
@@ -110,6 +127,10 @@ def counters(tr: list) -> dict:
             c["berserk_frames"] += bool(st.get("p_str")) and 1 <= fr["pal"] <= 8
         c["drop_frames"] += any(len(mo) > 3 for mo in fr["mobiles"])
         c["bexp_frames"] += any(v in BEXP_LUMPS for v in (fr.get("bviews") or {}).values())
+    # M7 P8a: the knock / infighting / sink counters (p8a_lib.counters), the monsters' attacks, the kills
+    c.update(P8.counters(tr))
+    c["mon_attacks"] = sum(len(ev.attacks) for fr in tr for ev in fr["ev"] if ev is not None)
+    c["mkills"] = sum(1 for fr in tr for ev in fr["ev"] if ev is not None for kk in ev.kills if kk[0] == "mon")
     return c
 
 
@@ -129,6 +150,10 @@ def control(name: str | None):
         setattr(obj, attr, val)
     if name is None:
         pass
+    elif name in P8.CONTROLS:                    # M7 P8a: the final rung's controls (p8a_lib)
+        with P8.control(name):
+            yield
+        return
     elif name == "bonus_cap":                    # a health bonus capped at 100, not 200
         patch(C, "MAX_HEALTH_BONUS", gd.MAXHEALTH)
     elif name == "bonus_round":                  # the gold palette without DOOM's +7 rounding
@@ -231,7 +256,7 @@ def control(name: str | None):
             if self.player_alive():
                 d = dist(ws.px, ws.py, C.PLAYER_R)
                 if d < C.BOMB_DAMAGE and self.los_points((ws.px, ws.py), spot):
-                    self.damage_player(C.BOMB_DAMAGE - d, ("bar", b), ev)
+                    self.damage_player(C.BOMB_DAMAGE - d, ("bar", b), ("bar", b), ev)
             for m in range(self.layout.nmon):
                 if not (ws.mon_active[m] and ws.mon_shootable[m] and ws.mon_health[m] > 0):
                     continue
@@ -239,7 +264,7 @@ def control(name: str | None):
                 d = dist(p[0], p[1], self.mon_radius[m])
                 if d < C.BOMB_DAMAGE and self.los_points(p, spot):
                     ev.hits.append(("barrel", "mon", m, C.BOMB_DAMAGE - d))
-                    self.damage_monster(m, C.BOMB_DAMAGE - d, ("player", -1), ev)
+                    self.damage_monster(m, C.BOMB_DAMAGE - d, ("player", -1), ("bar", b), ev)
             for c_, tc in enumerate(self.barrel_things):
                 if c_ == b or not ws.bar_state[c_] or ws.bar_health[c_] <= 0:
                     continue
@@ -247,15 +272,15 @@ def control(name: str | None):
                 d = dist(p[0], p[1], C.BARREL_R)
                 if d < C.BOMB_DAMAGE and self.los_points(p, spot):
                     ev.hits.append(("barrel", "bar", c_, C.BOMB_DAMAGE - d))
-                    self.damage_barrel(c_, C.BOMB_DAMAGE - d, ev)
+                    self.damage_barrel(c_, C.BOMB_DAMAGE - d, ("player", -1), ev)
         patch(CM, "_radius_attack", ra)
     elif name == "barrel_pain_draw":             # a non-lethal hit on a barrel draws nothing
         orig_db = CM.damage_barrel
 
-        def db(self, b, dmg, ev):
+        def db(self, b, dmg, source, ev):
             r = self.ws.rng_world
             alive = self.ws.bar_state[b] and self.ws.bar_health[b] > 0
-            orig_db(self, b, dmg, ev)
+            orig_db(self, b, dmg, source, ev)
             if alive and self.ws.bar_health[b] > 0:
                 self.ws.rng_world = r
         patch(CM, "damage_barrel", db)
@@ -359,19 +384,30 @@ class Run(H.Run):
             tr = mr.run(pose, keys, 0)
         return tr, mr
 
-    def px_of(self, tr, pred) -> int:
-        """the pixels the mobiles `pred` names drew: on the frames holding one, the picture against it without them"""
-        n = 0
-        for fr in tr:
-            if fr["drawn"] == "world" and any(pred(mo) for mo in fr["mobiles"]):
-                n += P.px_diff(self.picture(fr), self.picture(fr, [mo for mo in fr["mobiles"] if not pred(mo)]))
-        return n
+
+
+@contextlib.contextmanager
+def drops_keep_rank():
+    """M7 P8a (package C's D3 a, `rt_rank`): the oracle ranks a mobile by its POOL (reference_model.MOBILE_RANK:
+    fireballs 1, blood and puffs 0) and a drop by its z 0 -- so `drop_z`'s mutant picture (the drop at MISSILE_Z, a
+    3-tuple) would be refused as a mobile of no pool. While it is drawn, the drops' lumps (CLIP, SHOT) rank as the drops
+    they are: the mutant moves the drop's HEIGHT only, as it did before D3 a"""
+    from doomfj import reference_model as RM
+    old = getattr(RM, "MOBILE_RANK", None)
+    if old is None:
+        yield
+        return
+    RM.MOBILE_RANK = dict(old, CLIP=0, SHOT=0)
+    try:
+        yield
+    finally:
+        RM.MOBILE_RANK = old
 
 
 def place(run: Run, sc: dict, limit: int = 12, deaths_ok: bool = False):
     """the first candidate on which the oracle does what the scenario claims -> (cand, trace, counters). A
     candidate is (pose, setup) or (pose, setup, late). `deaths_ok` False: a candidate that kills is refused"""
-    for cand in sc["cands"][:limit]:
+    for cand in sc["cands"][:sc.get("limit", limit)]:       # M7 P8a: a scenario may try more (`limit`)
         pose, setup = cand[0], cand[1]
         late = cand[2] if len(cand) > 2 else None
         tr, _mr = run(pose, sc["keys"], setup, late=late)
@@ -380,14 +416,30 @@ def place(run: Run, sc: dict, limit: int = 12, deaths_ok: bool = False):
             c["drop_px"] = run.px_of(tr, lambda mo: len(mo) > 3)
             # the pixels its height decides: the picture against the one with the drops at MISSILE_Z (a drop hidden
             # behind its corpse, or past the scenery budget, draws the same at both: drop_z could not see it)
-            c["drop_z_px"] = sum(P.px_diff(run.picture(fr), run.picture(fr, [mo[:3] for mo in fr["mobiles"]]))
+            with drops_keep_rank():                   # M7 P8a (D3 a): the lifted drop still ranks as a drop
+                c["drop_z_px"] = sum(P.px_diff(run.picture(fr), run.picture(fr, [mo[:3] for mo in fr["mobiles"]]))
                                  for fr in tr if fr["drawn"] == "world" and any(len(mo) > 3 for mo in fr["mobiles"]))
         if not deaths_ok and (c["deaths"] or c["dead_frames"]):
             continue
         tr[0]["start"] = pose                         # the claim may ask where the run began
-        if sc["claim"](c, tr):
+        if sc["claim"](c, tr) and (not sc.get("claim_ctl") or ctl_parts(run, sc, cand, tr) is not None):
             return cand, tr, c
     return None
+
+
+def ctl_parts(run: Run, sc: dict, cand, want: list, ctl: str | None = None):
+    """the first frame on which control `ctl` (default the scenario's `claim_ctl`) parts from `want`, the oracle's run
+    of `cand` -> (frame, what) or None. M7 P8a: a PICTURE control (p8a_lib.PICTURE_CONTROLS: a render rule) is judged
+    on the SAME trace's pictures; a model control re-runs the candidate"""
+    ctl = ctl or sc["claim_ctl"]
+    if ctl in P8.PICTURE_CONTROLS:
+        return P8.picture_parts(run, want, ctl)
+    from doomfj.monsters import drop_rows
+    pose, setup = cand[0], cand[1]
+    late = cand[2] if len(cand) > 2 else None
+    with drops_keep_rank():                           # `drop_z`'s pictures hold lifted drops (3-tuples)
+        alt, mr = run(pose, sc["keys"], setup, ctl, late=late)
+        return H.parts(run, want, alt, run.orc._mv(mr.mph.world).nrt, drop_rows(mr.mph.world))
 
 
 # ================================================================================================
@@ -650,7 +702,348 @@ def scenario_list(dsim, w, card) -> list:
     out.append({"name": "S2 stress: the chain in view", "keys": [I] * 14 + [FIRE] * 2 + [I] * 90, "controls": [],
                 "cands": f7,
                 "claim": lambda c, tr: c["barrel_blasts"] >= 3})
+    out += p8a_scenario_list(dsim, w, card)          # M7 P8a: section 5.2's rows (each behind its rule and package)
     return out
+
+# ================================================================================================
+# M7 P8a (package V, docs/gp-final-plan.md 5.2): knockback (K), infighting (I), the compositor (C), the stress
+# ================================================================================================
+def _dist(w, fr, m) -> int:
+    from doomfj.world import aprox_distance
+    x, y = _signed(fr["pose"][0], 32) >> 16, _signed(fr["pose"][1], 32) >> 16
+    mx, my = fr["mxy"][m] if fr.get("mxy") else (w.ws.mon_x[m], w.ws.mon_y[m])
+    return aprox_distance(mx - x, my - y)
+
+
+def _moved_away(w, tr, m) -> bool:
+    """the pose moved (no key moves it: every frame is idle) and the distance to monster m grew"""
+    return any(a["pose"][:2] != b["pose"][:2] and _dist(w, b, m) > _dist(w, a, m) for a, b in zip(tr, tr[1:]))
+
+
+def _knock_stopped(tr) -> bool:
+    """the player's knock momentum went to zero after it was not"""
+    k = [bool(fr["mstate"].get("p_kmx") or fr["mstate"].get("p_kmy")) for fr in tr]
+    return any(a and not b for a, b in zip(k, k[1:]))
+
+
+def _dead_hp(h) -> bool:
+    return h == 0 or bool(h & 0x800)          # the 12-bit health read unsigned: <= 0
+
+
+def _died(tr, m):
+    return next((f for f, fr in enumerate(tr) if _dead_hp(fr["mstate"]["mon_health"][m])), None)
+
+
+def _mon_hurt(tr) -> int:
+    """frames on which some monster's health fell (the player idle: a monster's doing)"""
+    n = 0
+    for a, b in zip(tr, tr[1:]):
+        n += any(not _dead_hp(x) and (_dead_hp(y) or y < x)
+                 for x, y in zip(a["mstate"]["mon_health"], b["mstate"]["mon_health"]))
+    return n
+
+
+def chase(m: int, state: str, target: int):
+    """monster m awake in `state` with target `target` (0 none, 1 the player, 2 + slot: world.infighting_on)"""
+    def fn(mph):
+        ws = mph.world.ws
+        ws.mon_state[m], ws.mon_tics[m] = gd.STATE_INDEX[state], 1
+        ws.mon_target[m], ws.mon_reaction[m], ws.mon_movecount[m] = target, 0, 0
+    return fn
+
+
+def own_chainsaw(mph):
+    mph.world.ws.p_owned[gd.WP_CHAINSAW] = 1
+
+
+def ray_poses(dsim, w, x: int, y: int, d0: int = 48, d1: int = 320, step: int = 2, back=None) -> list:
+    """M7 P8a: along each of 16 rays from map point (x, y), the LAST standable pose before the ray leaves standable
+    ground (a wall or a ledge right behind the player), facing (x, y), with line of sight -- `back` (a function of the
+    pose and its facing unit vector) narrows them further"""
+    out = []
+    for k in range(16):
+        a = k * math.pi / 8
+        ca, sa = math.cos(a), math.sin(a)
+        last = None
+        for d in range(d0, d1, step):
+            px, py = round(x + d * ca), round(y + d * sa)
+            if standing(dsim, px, py):
+                last = (px, py)
+            elif last is not None:
+                break
+        if last is None:
+            continue
+        px, py = last
+        if not w.los_points((px << 16, py << 16), (x << 16, y << 16)):
+            continue
+        if back is not None and not back(px, py, ca, sa):
+            continue
+        out.append((px << 16, py << 16, G.bam(x - px, y - py)))
+    return out
+
+
+def line_poses(dsim, w, s: int, i: int, dists=(48, 64, 96, 128)) -> list:
+    """M7 P8a: poses on the line from monster s THROUGH thing i (a monster slot, or ("bar", b)), `dists` beyond i,
+    facing s, with line of sight to s -- what stands in s's line of fire at the player"""
+    sx, sy = w.ws.mon_x[s], w.ws.mon_y[s]
+    if isinstance(i, tuple):
+        t = w.barrel_things[i[1]]
+        ix, iy = t.x, t.y
+    else:
+        ix, iy = w.ws.mon_x[i], w.ws.mon_y[i]
+    dx, dy = ix - sx, iy - sy
+    n = math.hypot(dx, dy)
+    if not n:
+        return []
+    out = []
+    for d in dists:
+        px, py = round(ix + dx / n * d), round(iy + dy / n * d)
+        if standing(dsim, px, py) and w.los_points((px << 16, py << 16), (sx << 16, sy << 16)):
+            out.append((px << 16, py << 16, G.bam(sx - px, sy - py)))
+    return out
+
+
+def pairs(w, a_kinds, b_kinds, lo: int, hi: int, los: bool = True) -> list:
+    """(a, b) monster slot pairs `lo`..`hi` units apart, with (or, `los` False, WITHOUT) 2D line of sight"""
+    from doomfj.world import aprox_distance
+    out = []
+    for a in [m for k in a_kinds for m in first_live(w, k)]:
+        for b in [m for k in b_kinds for m in first_live(w, k)]:
+            if a == b:
+                continue
+            ws = w.ws
+            d = aprox_distance(ws.mon_x[a] - ws.mon_x[b], ws.mon_y[a] - ws.mon_y[b])
+            if lo <= d <= hi and w.los_points((ws.mon_x[a] << 16, ws.mon_y[a] << 16),
+                                              (ws.mon_x[b] << 16, ws.mon_y[b] << 16)) == los:
+                out.append((a, b))
+    return out
+
+
+def p8a_scenario_list(dsim, w, card) -> list:
+    """M7 P8a: section 5.2's fight_gate rows -- each with its `rule` (the P8a rule its game must have) and `pkg` (the
+    packages whose behaviour it tests); `p8a_lib.status` says whether it runs, is N/A, or awaits a package"""
+    out = []
+    zomb, sgt, imps = first_live(w, "MT_POSSESSED"), first_live(w, "MT_SHOTGUY"), first_live(w, "MT_TROOP")
+    demons = first_live(w, "MT_SERGEANT")
+    idle40 = [I] * 40
+    gun = [{"w3": True}] + [I] * 40 + [FIRE] * 6 + [I] * 30
+    shoot = [I] * 14 + [FIRE] * 2 + [I] * 30
+
+    def att(m, st):
+        return lambda mph, m=m: H.attack(mph, m, st)
+    # ---- K1: a zombieman's bullets push the player away; the push decays and stops
+    k1 = [(p, both(att(m, "S_POSS_ATK1"), armor(200, 2))) for m in zomb[:8]
+          for p in H.facing_pose(dsim, w, m, 128) + H.facing_pose(dsim, w, m, 96)]
+    out.append({"name": "K1 knockback: a zombieman's hits push the player away, the push decays and stops",
+                "keys": [I] * 64, "limit": 30, "rule": "knock", "pkg": ("K",), "need": ("knock_frames",),
+                "controls": ["no_thrust", "thrust_sign", "no_friction", "stopspeed"], "cands": k1,
+                # stopped by the STOPSPEED stop, not by a wall (K2 is the wall): `stopspeed` must decide it
+                "claim": lambda c, tr: c["knock_frames"] >= 1 and _knock_stopped(tr) and c["knock_refused"] == 0
+                and any(_moved_away(w, tr, m) for m in zomb)})
+    # ---- K2: pushed into a wall: the knock momentum zeroed
+    k2 = []
+    for m in zomb[:8] + sgt[:6]:
+        mx, my = w.ws.mon_x[m], w.ws.mon_y[m]
+        st = "S_POSS_ATK1" if m in zomb else "S_SPOS_ATK1"
+        for p in ray_poses(dsim, w, mx, my, back=lambda px, py, ca, sa: not standing(dsim, round(px + 4 * ca),
+                                                                                         round(py + 4 * sa))):
+            k2.append((p, both(att(m, st), armor(200, 2))))
+    out.append({"name": "K2 knockback into a wall: the knock momentum is zeroed", "keys": idle40,
+                "rule": "knock", "pkg": ("K",), "need": ("knock_walls",), "controls": ["wall_keeps"], "cands": k2,
+                "limit": 48,
+                "claim": lambda c, tr: c["knock_walls"] >= 1})
+    # ---- K3: a barrel blast throws the player and a crowd from the barrel
+    k3 = []
+    for b, t in enumerate(w.barrel_things):
+        near = [m for m in zomb + sgt + imps if max(abs(w.ws.mon_x[m] - t.x), abs(w.ws.mon_y[m] - t.y)) < 96]
+        if near:
+            k3 += [(p, both(armor(200, 2), bar_health(b, 1))) for p in poses_facing(dsim, w, t.x, t.y, (104, 112, 120))]
+    out.append({"name": "K3 a barrel blast throws the player and the monsters from the barrel", "keys": shoot,
+                "rule": "knock", "pkg": ("K",), "need": ("mon_knock_frames",), "controls": ["blast_inflictor"],
+                "cands": k3,
+                "claim": lambda c, tr: c["barrel_blasts"] >= 1 and c["knock_frames"] >= 1 and c["mon_knock_frames"] >= 1})
+    # ---- K4: the shotgun on a sergeant (7 thrusts) and on a demon (mass 400): fractions, re-tests, a relink
+    def wall_behind(m, p, ds=(32, 48, 64, 96, 128)):
+        """a wall (the player's box cannot stand) some `ds` units beyond monster m, away from pose p: its knock is
+        refused there"""
+        mx, my = w.ws.mon_x[m], w.ws.mon_y[m]
+        dx, dy = mx - (p[0] >> 16), my - (p[1] >> 16)
+        n = math.hypot(dx, dy) or 1
+        return any(not standing(dsim, round(mx + dx / n * d), round(my + dy / n * d)) for d in ds)
+    for tag, kinds, ctls, refused in (
+            ("K4s the shotgun on a sergeant: its fraction cells, a re-test refused, a relink", sgt,
+             ["frac_drop", "no_retest"], True),
+            ("K4d the shotgun on a demon: mass 400", demons, ["mass"], False)):
+        cands = [(p, both(shotgun_(), armor(200, 2), mon_health(m, 600))) for m in kinds[:8]
+                 for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (80, 96, 64))
+                 if not refused or wall_behind(m, p)]
+        out.append({"name": tag, "keys": gun, "rule": "knock", "pkg": ("K",), "need": ("frac_frames",),
+                    "controls": ctls, "cands": cands, "limit": 40,
+                    "claim": lambda c, tr, kinds=kinds, refused=refused: c["mon_knock_frames"] >= 1
+                    and c["frac_frames"] >= 1 and any(mon_moved_(tr, m) for m in kinds)
+                    and (not refused or c["mon_knock_refused"] >= 1)})
+    # ---- K5: a kill by the shotgun: the corpse slides, its drop stays where it died
+    k5 = [(p, both(shotgun_(), armor(200, 2), mon_health(m, 10))) for m in zomb[:8]
+          for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (72, 88, 64))]
+    out.append({"name": "K5 a shotgun kill: the corpse slides, its drop lies (and is drawn) where it died",
+                "keys": gun + [F] * 10, "rule": "knock", "pkg": ("K",), "need": ("corpse_slides",),
+                "controls": ["drop_follows"], "cands": k5, "drop_px": True,
+                "claim": lambda c, tr: c["drop_frames"] >= 1 and c["corpse_slides"] >= 1 and c["drop_px"] >= 1})
+    # ---- K6: the chainsaw on an imp: no thrust
+    k6 = [(p, both(own_chainsaw, armor(200, 2), mon_health(m, 600))) for m in imps[:8]
+          for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (40, 44, 48))]
+    out.append({"name": "K6 the chainsaw on an imp: no thrust", "keys": [{"w1": True}] + [I] * 34 + [FIRE] * 12,
+                "rule": "knock", "pkg": ("K",), "controls": ["saw_thrust"], "cands": k6,
+                "claim": lambda c, tr: c["shots_hit"] >= 1 and c["mon_knock_frames"] == 0
+                and tr[-1]["mstate"]["wp_rdy"] == gd.WP_CHAINSAW})
+    # ---- K7: the reversal -- a monster > 64 above the player, a killing shot under 40: the coin; reversed x4
+    k7 = []
+    for m in [m for k in ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP") for m in first_live(w, k)]:
+        for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (96, 128, 160, 192, 256)):
+            fz = w.rm.check_position(w.scene_c, p[0], p[1])[1]
+            if w.ws.mon_floorz[m] - fz > 64:
+                for k in range(4):                   # the target's stream k draws on: both coins tried
+                    k7.append((p, both(mon_health(m, 1), mon_rng_(m, k))))
+    out.append({"name": "K7 the falling-forward reversal: a kill from more than 64 below, the coin on the target's "
+                        "stream", "keys": shoot, "rule": "knock", "pkg": ("K",), "na_if_no_cands":
+                "no E1M1 position puts a shootable monster > 64 above a standing player with line of sight: "
+                "test_knock_fj carries the reversal on a forced state (docs/gp-final-plan.md 5.2)",
+                "controls": ["no_reverse", "reverse_rng"], "cands": k7, "limit": 48,
+                "claim": lambda c, tr: c["mon_knock_frames"] >= 1 and c["corpse_slides"] >= 1})
+    # ---- I1: a sergeant fires through an imp standing in its line: the imp is hit, bleeds, turns on it
+    i1 = [(p, both(att(s, "S_SPOS_ATK1"), armor(200, 2), mon_health(i, 600)))
+          for s, i in pairs(w, ("MT_SHOTGUY",), ("MT_TROOP",), 64, 400)[:10] for p in line_poses(dsim, w, s, i)]
+    out.append({"name": "I1 a sergeant fires through an imp in its line: the imp hit, blood, the imp turns on it",
+                "keys": idle40, "rule": "fight", "pkg": ("I",), "need": ("infight",),
+                "controls": ["pass_through", "no_switch", "fx_none"], "cands": i1,
+                "claim": lambda c, tr: c["infight"] >= 1 and c["fx_spawns"] >= 1})
+    # ---- I2: an imp's fireball through a zombieman (damaged, switched) / into another imp (explodes, no damage)
+    i2z = [(p, both(att(s, "S_TROO_ATK1"), armor(200, 2), mon_health(z, 600)))
+           for s, z in pairs(w, ("MT_TROOP",), ("MT_POSSESSED", "MT_SHOTGUY"), 128, 480)[:10]
+           for p in line_poses(dsim, w, s, z)]
+    out.append({"name": "I2z an imp's fireball into a zombieman: damaged and switched; the shooter passed",
+                "keys": idle40, "rule": "fight", "pkg": ("I",), "controls": ["hits_shooter"], "cands": i2z,
+                "claim": lambda c, tr: c["infight"] >= 1 and c["proj_spawns"] >= 1})
+    i2i = [(p, both(att(s, "S_TROO_ATK1"), armor(200, 2)))
+           for s, j in pairs(w, ("MT_TROOP",), ("MT_TROOP",), 128, 480)[:10] for p in line_poses(dsim, w, s, j)]
+    out.append({"name": "I2i an imp's fireball into another imp: it explodes, no damage (the species rule)",
+                "keys": idle40, "rule": "fight", "pkg": ("I",), "controls": ["species"], "cands": i2i,
+                "claim": lambda c, tr: c["proj_spawns"] >= 1 and c["explosion_frames"] >= 1 and c["player_hurt"] == 0
+                and _mon_hurt(tr) == 0})
+    # ---- I3: a monster's stray shot kills a barrel: the blast's source is that monster. bar_src is the source of the
+    # first NON-lethal damage (P_DamageMobj returns after P_KillMobj, before the switch: a barrel killed by its first
+    # hit blames nobody -- DOOM's, combat.damage_barrel), so the barrel starts at 16: no first bullet (3 .. 15) kills
+    # it, and the sergeants (3 pellets an attack) come first (the P8a integration: at 1 no candidate could place)
+    i3 = []
+    for b, t in enumerate(w.barrel_things):
+        for s in sgt + zomb:
+            if 64 <= max(abs(w.ws.mon_x[s] - t.x), abs(w.ws.mon_y[s] - t.y)) <= 320 and \
+                    w.los_points((w.ws.mon_x[s] << 16, w.ws.mon_y[s] << 16), (t.x << 16, t.y << 16)):
+                st = "S_POSS_ATK1" if s in zomb else "S_SPOS_ATK1"
+                i3 += [((p, both(att(s, st), armor(200, 2), bar_health(b, 16))), s, b)
+                       for p in line_poses(dsim, w, s, ("bar", b), (96, 128, 160))]
+    out.append({"name": "I3 a monster's stray shot kills a barrel: the blast's source is that monster",
+                "keys": idle40, "rule": "fight", "pkg": ("I",), "controls": ["bar_src_player"],
+                "cands": [c_[0] for c_ in i3[:12]],
+                "claim": lambda c, tr: c["barrel_blasts"] >= 1 and any(v >= 2 for fr in tr
+                                                                      for v in fr["mstate"].get("bar_src", ()))})
+    # ---- I4: the target dies: the monster looks for the player (allaround) or returns to its spawn state
+    i4 = []
+    for m, t in pairs(w, ("MT_TROOP", "MT_SHOTGUY"), ("MT_POSSESSED",), 96, 400)[:10]:
+        for p in poses_facing(dsim, w, w.ws.mon_x[t], w.ws.mon_y[t], (96, 128)):
+            i4.append((p, both(chase(m, w.mon_info[m].seestate, 2 + t), mon_health(t, 1), armor(200, 2))))
+    out.append({"name": "I4 the target dies: the monster looks for the player or returns to its spawn state",
+                "keys": shoot, "rule": "fight", "pkg": ("I",), "controls": ["target_stale"], "cands": i4,
+                "claim": lambda c, tr: c["mkills"] >= 1 and any(
+                    all(v < 2 for v in fr["mstate"]["mon_target"]) for fr in tr[-5:])})
+    # ---- I5: a monster target behind a wall at range: no attack (the far line of sight)
+    i5 = [(p, both(chase(m, w.mon_info[m].seestate, 2 + t), armor(200, 2)))
+          for m, t in pairs(w, ("MT_TROOP", "MT_SHOTGUY", "MT_POSSESSED"), ("MT_POSSESSED", "MT_TROOP"), 256, 900,
+                            los=False)[:10]
+          for p in [(dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle)]]
+    out.append({"name": "I5 a monster target behind a wall at range: no attack (the far LOS)", "keys": idle40,
+                "rule": "fight", "pkg": ("I",), "controls": ["los_ignored"], "cands": i5,
+                "claim": lambda c, tr: c["mon_attacks"] == 0 and c["infight"] == 0})
+    # ---- I6: the threshold -- a monster switched to A refuses B inside 100 tics
+    i6 = []
+    for m, a in pairs(w, ("MT_TROOP",), ("MT_POSSESSED", "MT_SHOTGUY"), 64, 800)[:16]:
+        for b in [z for z in zomb + sgt if z not in (m, a)][:12]:
+            if not w.los_points((w.ws.mon_x[b] << 16, w.ws.mon_y[b] << 16), (w.ws.mon_x[m] << 16, w.ws.mon_y[m] << 16)):
+                continue
+            st = "S_POSS_ATK1" if b in zomb else "S_SPOS_ATK1"
+
+            def thr(mph, m=m):
+                mph.world.ws.mon_threshold[m] = 60
+            i6.append(((dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle),
+                       both(chase(m, w.mon_info[m].seestate, 2 + a), thr, chase(b, st, 2 + m), mon_health(m, 600))))
+    out.append({"name": "I6 the threshold: a monster switched to one refuses another inside 100 tics", "keys": idle40,
+                "rule": "fight", "pkg": ("I",), "controls": ["threshold_ignored"], "cands": i6,
+                "claim": lambda c, tr: _mon_hurt(tr) >= 1 and c["infight"] == 0})
+    # ---- C1 / C2 / C3: the compositor rules (each candidate must be one where the rule decides a pixel)
+    # C1: a kill whose drop shares its leaf with its corpse. Under knockback the corpse slides AWAY from the shooter,
+    # so most kills draw the drop first by depth alone -- the candidates run deep (`limit`), and `claim_ctl` keeps only
+    # one where the rank decides a pixel (MEASURED: (656, 336), rank_off and rank_swap part at frame 24)
+    out.append({"name": "C1 D3 a: a drop in its corpse's leaf drawn in front of the corpse", "keys": shoot + [I] * 10,
+                "rule": "p8a", "pkg": ("C",), "controls": ["rank_off", "rank_swap"], "claim_ctl": "rank_off", "drop_px": True,
+                "limit": 48,
+                "cands": [(p, mon_health(m, 1)) for d in (96, 128, 160, 80, 192) for m in zomb[:8] + sgt[:6]
+                          for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (d,))],
+                "claim": lambda c, tr: c["drop_frames"] >= 1})
+    out.append({"name": "C2 D3 a: blood on a monster drawn before it", "keys": gun,
+                "rule": "p8a", "pkg": ("C",), "controls": ["rank_off", "rank_swap"], "claim_ctl": "rank_off",
+                "cands": [(p, both(shotgun_(), armor(200, 2), mon_health(m, 600))) for m in zomb[:8]
+                          for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (80, 96, 112))],
+                "claim": lambda c, tr: c["fx_spawns"] >= 1})
+    out.append({"name": "C3 D3 b: a far barrel past three scenery things is drawn", "keys": [I] * 3,
+                "rule": "p8a", "pkg": ("C",), "controls": ["barrel_soft"], "claim_ctl": "barrel_soft",
+                "cands": [(p, None) for b, t in enumerate(w.barrel_things)
+                          for p in poses_facing(dsim, w, t.x, t.y, (320, 448, 576, 704))],
+                "claim": lambda c, tr: True})
+    # ---- S3: the brawl -- every imp firing into the zombiemen, every zombieman at an imp
+    def brawl(mph):
+        from doomfj.world import aprox_distance
+        ws, wd = mph.world.ws, mph.world
+        zs = [m for m in range(wd.layout.nmon) if ws.mon_active[m] and wd.mon_info[m].name in ("MT_POSSESSED",
+                                                                                                 "MT_SHOTGUY")]
+        ts = [m for m in range(wd.layout.nmon) if ws.mon_active[m] and wd.mon_info[m].name == "MT_TROOP"]
+        for a, others, st in [(i, zs, "S_TROO_ATK1") for i in ts] + [(z, ts, None) for z in zs]:
+            if not others:
+                continue
+            t = min(others, key=lambda o: aprox_distance(ws.mon_x[o] - ws.mon_x[a], ws.mon_y[o] - ws.mon_y[a]))
+            chase(a, st or wd.mon_info[a].missilestate, 2 + t)(mph)
+        armor(200, 2)(mph)
+    court = [p for xy in ((1424, 732), (1424, 760), (1400, 732)) for p in walk_poses(dsim, xy[0], xy[1],
+                                                                                      0x40000000, (0,))]
+    out.append({"name": "S3 stress: a brawl -- the imps firing into the zombiemen, infighting saturated",
+                "keys": [I] * 60, "rule": "fight", "pkg": ("I",), "controls": [], "cands": [(p, brawl) for p in court],
+                "claim": lambda c, tr: _mon_hurt(tr) >= 1})
+    # ---- S4: a push storm -- a barrel chain inside a crowd
+    col = [b for b, t in enumerate(w.barrel_things) if t.x == 2512]
+    s4 = [(p, both(bar_health(b, 1), armor(200, 2))) for b in col
+          for p in poses_facing(dsim, w, w.barrel_things[b].x, w.barrel_things[b].y, (192, 224, 160, 256))
+          if p[0] >> 16 < 2512]                      # F7's candidates (S2 places among them)
+    out.append({"name": "S4 stress: a push storm -- a barrel chain inside a crowd, every knock move at once",
+                "keys": shoot + [I] * 30, "rule": "knock", "pkg": ("K",), "controls": [], "cands": s4, "limit": 40,
+                "claim": lambda c, tr: c["barrel_blasts"] >= 3
+                and max(fr["mstate"].get("kb_live", 0) for fr in tr) >= 3})
+    return out
+
+
+def shotgun_():
+    return lambda mph: H.shotgun(mph)
+
+
+def mon_rng_(m: int, k: int):
+    def fn(mph):
+        from doomfj import rng as R
+        ws = mph.world.ws
+        ws.mon_rng[m] = (ws.mon_rng[m] + k) & R.STATE_MASK
+    return fn
+
+
+def mon_moved_(tr, m: int) -> bool:
+    return len({fr["mxy"][m] for fr in tr if fr.get("mxy")}) > 1
+
 
 
 _WORLDS = {}
@@ -696,10 +1089,16 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
     ap.add_argument("--labels")
     ap.add_argument("--oracle-only", action="store_true", help="the scenarios, counters and controls, no binary")
     ap.add_argument("--only", help="run only the scenarios whose name starts with this (e.g. F6)")
+    ap.add_argument("--modes", metavar="PLAYER/MONSTER", help="M7 P8a: the model modes (default the game tier's)")
+    ap.add_argument("--frame-ops", nargs="?", const="-", metavar="FILE",
+                    help="M7 P8a: each binary scenario's per-frame ops (and, with FILE, as JSON)")
     a = ap.parse_args(argv)
     if not a.oracle_only and not (a.fjm and a.labels):
         ap.error("--fjm and --labels (the build's label table), or --oracle-only")
     t0 = time.time()
+    P8.set_modes(*P8.parse_modes(a.modes))
+    H.FRAME_OPS = a.frame_ops
+    MMODE, PMODE = sys.modules[__name__].MMODE, sys.modules[__name__].PMODE   # as set_modes left them
     G.PLAYER_MODE_OVERRIDE = PMODE
     orc = P.Oracle()
     orc.player_mode = PMODE
@@ -722,19 +1121,33 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
         assert (MONSTER_MODE, PLAYER_MODE) == (MMODE, PMODE), (
             "the binary is built at %s/%s, this gate checks P6/P7's %s/%s" % (MONSTER_MODE, PLAYER_MODE, MMODE, PMODE))
         gb = P.GameBinary(ROOT / a.fjm)
-        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
+        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis, modes=(PMODE, MMODE))
         for k in H.KEYFLAG.values():
             cells.setdefault(k, P.Cell(k, "hex", 1))
         table = P.LabelTable.load(ROOT / a.labels, {c.label for c in cells.values()})
         assert not table.absent & {"p_bc", "bar_st", "mdrop", "lvtime"}, (
             "the label table has no %s: a binary before P6/P7" % sorted(table.absent))
     totals = {}
+    awaiting, ran_need = [], set()                    # M7 P8a: what waits for a package; the P8a counters owed
     for sc in scen:
+        stat = P8.status(sc, PMODE, MMODE)            # M7 P8a: the scenario's rule at these modes, its packages
+        if stat != "run":
+            print("\n%s -- %s (%d candidates placed from the map)" % (
+                sc["name"], ("AWAITS " + stat[len("awaits "):]) if stat.startswith("awaits") else stat.upper(),
+                len(sc["cands"])), flush=True)
+            if stat.startswith("awaits"):
+                awaiting.append(sc["name"])
+            continue
+        if not sc["cands"] and sc.get("na_if_no_cands"):
+            print("\n%s -- N/A: %s" % (sc["name"], sc["na_if_no_cands"]), flush=True)
+            continue
+        ran_need |= set(sc.get("need", ()))
         got = place(run, sc, deaths_ok=deaths_ok)
         print("\n%s -- %d frames" % (sc["name"], len(sc["keys"])), flush=True)
         if got is None:
             ok = False
-            print("  the oracle does what the scenario claims: NO candidate of %d -- FAIL" % len(sc["cands"][:12]))
+            print("  the oracle does what the scenario claims: NO candidate of %d -- FAIL"
+                  % len(sc["cands"][:sc.get("limit", 12)]))
             continue
         cand, want, c = got
         pose, setup, late = cand[0], cand[1], (cand[2] if len(cand) > 2 else None)
@@ -749,8 +1162,12 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
         for k, v in c.items():
             totals[k] = totals.get(k, 0) + v
         for ctl in sc["controls"]:
-            alt, _mr = run(pose, sc["keys"], setup, ctl, late=late)
-            pt = H.parts(run, want, alt, nrt, ndrop)
+            try:                                      # M7 P8a: a picture control on the same trace; a control
+                pt = ctl_parts(run, sc, cand, want, ctl)   # whose package is not in the tree AWAITS it
+            except P8.Awaits as e:
+                awaiting.append("%s / %s" % (sc["name"].split()[0], ctl))
+                print("  CONTROL %-16s AWAITS %s" % (ctl, e), flush=True)
+                continue
             ok &= pt is not None
             print("  CONTROL %-16s the oracle without the rule parts at frame %s%s" % (
                 ctl, "%d (%s)" % pt if pt else None,
@@ -758,14 +1175,18 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
         if a.oracle_only:
             continue
         ok &= binary_scenario(gb, cells, table, run, sc, pose, setup or (lambda mph: None), want)
-    zero = [k for k in need if not totals.get(k)] if not a.only else []
+    zero = [k for k in tuple(need) + tuple(sorted(ran_need)) if not totals.get(k)] if not a.only else []
     deaths = totals.get("deaths", 0)
     ok &= not zero and (deaths_ok or (deaths == 0 and totals.get("dead_frames", 0) == 0))
     print("\nTOTALS: " + ", ".join("%s %d" % kv for kv in totals.items()))
     print("every event counter nonzero: %s; deaths %d" % ("yes" if not zero else "NO -- %s" % zero, deaths))
-    print("\n%s GATE %s%s (%.0f s)" % (gate, "PASS" if ok else "FAIL", " (oracle only)" if a.oracle_only else "",
-                                       time.time() - t0))
-    return 0 if ok else 1
+    H.write_frame_ops()
+    # M7 P8a: a gate with scenarios or controls AWAITING a package has not checked them: INCOMPLETE, never PASS
+    verdict = "FAIL" if not ok else ("INCOMPLETE" if awaiting else "PASS")
+    if awaiting:
+        print("AWAITING packages: %d -- %s" % (len(awaiting), "; ".join(awaiting)))
+    print("\n%s GATE %s%s (%.0f s)" % (gate, verdict, " (oracle only)" if a.oracle_only else "", time.time() - t0))
+    return {"PASS": 0, "FAIL": 1, "INCOMPLETE": 2}[verdict]
 
 
 def binary_scenario(gb, cells, table, run, sc, pose, setup, want) -> bool:
@@ -807,6 +1228,7 @@ def binary_scenario(gb, cells, table, run, sc, pose, setup, want) -> bool:
         "exact on every frame" if s_bad is None else "PART at frame %d: %s" % s_bad,
         "byte-exact on every frame" if x_bad is None else "PART at frame %d (%d px)" % x_bad,
         "exact on every frame" if p_bad is None else "PART at frame %d (the oracle's PLAYPAL %d)" % p_bad))
+    H.frame_ops_report(sc["name"], p.frame_ops())                  # M7 P8a: --frame-ops
     return s_bad is None and x_bad is None and p_bad is None
 
 

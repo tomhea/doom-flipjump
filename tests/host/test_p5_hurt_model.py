@@ -99,7 +99,7 @@ def test_the_death_moment(dmg, gib):
     ws.p_health = 5
     r0, ready = ws.rng_player, ws.p_ready
     ev = TicEvents(0)
-    w.damage_player(dmg, ("mon", 3), ev)
+    w.damage_player(dmg, ("mon", 3), ("mon", 3), ev)
     assert ws.p_dead == 1 and ev.deaths == 1 and ws.p_health == 5 - dmg
     assert ws.rng_player == R.p_random(r0)[1], "the death draws exactly one roll on the player's stream (its tics)"
     assert gd.STATE_NAMES[ws.p_wpn_state] == gd.WEAPONINFO[ready].downstate, "P_DropWeapon: the downstate"
@@ -107,7 +107,7 @@ def test_the_death_moment(dmg, gib):
     assert gd.STATE_NAMES[ws.p_mobj_state] == first
     assert not w.player_alive()
     snap = ws.copy().as_dict()
-    w.damage_player(dmg, ("mon", 3), TicEvents(0))       # a dead player is not shootable: nothing at all
+    w.damage_player(dmg, ("mon", 3), ("mon", 3), TicEvents(0))       # a dead player is not shootable: nothing at all
     assert ws.as_dict() == snap
 
 
@@ -119,7 +119,7 @@ def test_a_dead_player_loses_the_chasers():
     m = 3                                                 # an imp
     ws.mon_target[m], ws.mon_threshold[m], ws.mon_reaction[m] = 1, 50, 0
     ws.mon_state[m], ws.mon_tics[m] = gd.STATE_INDEX["S_TROO_RUN1"], 1
-    w.damage_player(500, ("mon", m), TicEvents(0))
+    w.damage_player(500, ("mon", m), ("mon", m), TicEvents(0))
     assert ws.p_dead
     w._monsters_phase(TicEvents(0))
     assert ws.mon_threshold[m] == 0

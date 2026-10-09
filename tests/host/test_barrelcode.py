@@ -60,7 +60,7 @@ def _model_chain(w, b):
     for m in range(w.layout.nmon):
         w.ws.mon_active[m] = 0
     saved = w.damage_barrel
-    w.damage_barrel = lambda c, dmg, ev: out.append((c, dmg))
+    w.damage_barrel = lambda c, dmg, source, ev: out.append((c, dmg))
     try:
         w._radius_attack(b, TicEvents(0))
     finally:
@@ -191,3 +191,35 @@ def test_barrel_parts_emit_every_stub_its_callers_name(world):
     assert len(bp["restart"]) == 3 and bp["drop_first"] == 78
     # the runtime barrels unlink at S_NULL, the baked ones do not
     assert text.count("stl.fcall pw_unlink, pw_ulret") == 2 + 1          # the runtime barrels, the shared take
+
+
+def _bl_los_block(lines) -> list:
+    """the `bl_los` leaf out of an emission: from its label to its fret"""
+    i = lines.index("bl_los:")
+    j = lines.index("    stl.fret bl_lret", i)
+    return lines[i:j + 1]
+
+
+@pytest.mark.parametrize("fight", [False, True])
+def test_barrel_parts_wires_the_blast_los_in_its_own_mode(world, fight):
+    """M7 P8a I: the PRODUCTION wiring (barrel_parts, the text the game emits) carries `blast_los_lines` in the same
+    `fight` mode as the rest of the sight machinery -- in the fight build the segment blocks compare a BIASED box
+    (near_los_lines(fight=True)), so an unbiased bl_los rejects segments wrongly at negative coordinates (blocked52:
+    fight_gate S2 / S4, barrel 19's blast reached imp 45 through door 145's closed lines). tests/fj/test_far_los_fj.py
+    proves blast_los_lines(fight=True) on the engine; this pins that barrel_parts is what it proved."""
+    n = world.layout.nmon
+    bp = BC.barrel_parts(world, nt=68, slot_rt=list(range(n)), boot_skill=3, skills=(1, 2, 3), fight=fight)
+    spots = [(t.x, t.y) for t in world.barrel_things]
+    maxr = max([PLAYER_R] + list(world.mon_radius[:n]))
+    assert _bl_los_block(bp["lines"]) == _bl_los_block(MS.blast_los_lines(world, spots, maxr, fight=fight))
+    biased = "    hex.xor_by sl_y0 + 7*dw, 8" in _bl_los_block(bp["lines"])
+    assert biased == fight
+
+
+def test_control_the_wiring_test_sees_an_unbiased_blast_los():
+    """R9: the comparison the wiring test makes must tell the two modes apart"""
+    w = World(monsters="final", player="final", sight_rule="seen")
+    spots = [(t.x, t.y) for t in w.barrel_things]
+    maxr = max([PLAYER_R] + list(w.mon_radius[:w.layout.nmon]))
+    assert (_bl_los_block(MS.blast_los_lines(w, spots, maxr, fight=False))
+            != _bl_los_block(MS.blast_los_lines(w, spots, maxr, fight=True)))

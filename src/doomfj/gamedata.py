@@ -131,6 +131,9 @@ MELEERANGE = 64 * FRACUNIT
 MISSILERANGE = 32 * 64 * FRACUNIT
 BASETHRESHOLD = 100               # a plain count, not fixed point
 MAXMOVE = 30 * FRACUNIT
+# ---- p_mobj.c (M7 P8a, docs/gp-final-plan.md 1.2.2: P_XYMovement's friction and stop) ------------------------------
+STOPSPEED = 0x1000                # 1/16 unit a tic: below it (both axes) a thing stops
+FRICTION = 0xE800                 # FixedMul(mom, FRICTION) = floor(mom * 29 / 32)
 MAX_STEP_UP = _RM.MAX_STEP        # P_TryMove's `tmfloorz - thing->z > 24*FRACUNIT` -- the oracle's
 
 # ---- p_enemy.c: movement directions ------------------------------------------------------------

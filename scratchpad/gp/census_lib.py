@@ -58,7 +58,10 @@ _OLD_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
 ORIG_MONSTER_TYPES = RMOD.MONSTER_TYPES
 from doomfj.combat import aim_window as _aim_window                          # noqa: E402
 AIM_LO, AIM_HI = _aim_window(ReferenceModel(Config()))   # the pellet window: ONE definition
-assert RENDER_KW == _OLD_RENDER_KW, "the shared keyword set must be the census's own"
+# M7 P8a (C): the compositor rules' two keys ride the game tier's PLAYER mode (world.compositor_d3) -- the census of a
+# set draws its own mode's picture (`Census.render_kw`); every other key is this frozen copy's
+_D3_KEYS = frozenset(getattr(RMOD, "D3_RENDER_KW", {}))
+assert {k: v for k, v in RENDER_KW.items() if k not in _D3_KEYS} == _OLD_RENDER_KW,     "the shared keyword set must be the census's own"
 SYN0 = 100000                               # synthetic thing types start here
 ROLES = ("live", "corpse", "drop", "fireball", "fx", "barrel")
 SMALL = ("drop", "fireball", "fx")          # the things plan section 5 worries about
@@ -82,13 +85,18 @@ class Meta:
 
 
 class Census:
-    def __init__(self, skill=gd.SK_HARD):
+    def __init__(self, skill=gd.SK_HARD, *, player: str = "full", monsters: str = "full"):
         self.cfg = Config()
         self.W = self.cfg.VIEW_W
         self.rm = ReferenceModel(self.cfg)                  # the DRAWING model (instrumented)
         self.mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
         self.art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
-        self.world = W.World(self.mw, skill=skill)          # its own ReferenceModel
+        # its own ReferenceModel; M7 P8a: in the set's model modes (scenarios_v2.new_census passes them)
+        self.world = W.World(self.mw, skill=skill, player=player, monsters=monsters)
+        # M7 P8a (C): the picture of THIS census's player mode -- D3 a / b on exactly when world.compositor_d3 (v6 at
+        # "full": off, its recorded populations; v7 at "final": on), whatever the game tier's GAME_RENDER_KW holds
+        # (only those two keys: the module's RENDER_KW stays the knob for the rest -- census_control patches it)
+        self.d3_kw = {k: bool(W.compositor_d3(player)) for k in _D3_KEYS} if hasattr(W, "compositor_d3") else {}
         self.cmap = self.world.cmap
         self.skill = skill
         # -- today's drawable space and classification (the ORIGINAL functions, at spawn) --------
@@ -233,7 +241,8 @@ class Census:
             if ws.mon_drop[m] == 1:
                 item = wd.dropper[m]
                 dl = {2007: "CLIPA0", 2001: "SHOTA0"}[item]
-                rows.append(((wadi, 1), PThing(self.syn_type(dl, "drop"), x, y),
+                dx, dy = wd.drop_pos(m)                        # M7 P8a: the drop's own position (World.drop_pos)
+                rows.append(((wadi, 1), PThing(self.syn_type(dl, "drop"), dx, dy),
                              Meta("drop", m, False, False, wadi, dl)))
         for s in range(W.FIREBALL_POOL):
             if ws.proj_active[s]:
@@ -301,7 +310,7 @@ class Census:
         RMOD.MONSTER_TYPES = mtypes
         self.probe.begin({id(t): mm for t, mm in zip(things, metas)}, exempt)
         try:
-            fb = bytes(self.rm.render_wall_frame(state, scene, sprite_wad=self.art, **RENDER_KW))
+            fb = bytes(self.rm.render_wall_frame(state, scene, sprite_wad=self.art, **dict(RENDER_KW, **self.d3_kw)))
         finally:
             self.probe.end()
             self.frame = None

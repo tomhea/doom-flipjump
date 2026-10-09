@@ -1,0 +1,5 @@
+$ python scratchpad/12m/profx/profx.py maps
+  marker 23 (ptloc done (write_hex)) not found -- skipped
+  marker 38 (thing_pass alive (thing loaded)) not found -- skipped
+maps -> C:\Users\tomhe\AppData\Local\Temp\profx: 26 objects, 2544194 label words, 29 markers, reset code ends at word 16739776
+rc=0

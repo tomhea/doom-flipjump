@@ -8,6 +8,11 @@ near the bottom, so the kill's A_Lower clamps) -- then hands dp_go a damage (mos
 some up to DP_MAX) and runs hp_bar. After every record the cells, the weapon psprite and the bar's health and armor
 digits are printed.
 
+M7 P8a (doomfj.knockcode, package 0): the same records through `dp_lines(knock=True)` against a RECORDING kb_go stub
+(the call count, the damage and the armor it saw) and the model's `_thrust` hook recording the same -- the thrust is
+called exactly when the hit lands, with the RAW damage, BEFORE the armor, and dp_go zeroes the site's kb_on; with
+the stub every P7 cell is unchanged (R9: kb_on left set, kb_go called before the dead check, after the armor).
+
 R9: the green and blue saves swapped (the table built with /2 and /3 exchanged), `<` for the armor's `<=`, no
 damagecount cap, no rng_pl draw, no dead guard, a kill that does not run A_Lower, a bar that shows a killed player's
 health as 1 instead of max(0, health) = 0, and a bar without the armor must each part.
@@ -22,6 +27,7 @@ from doomfj import gamedata as gd
 from doomfj import hud, hudcode
 from doomfj.combat import half_width_table
 from doomfj import hurtcode as H
+from doomfj import knockcode as KC
 from doomfj import weaponcode as WC
 from doomfj.config import Config
 from doomfj.harness import W
@@ -88,7 +94,31 @@ def _apply(w, pokes, dmg, ev, src=1):
     ws = w.ws
     for f, v in pokes.items():
         setattr(ws, f, v)
-    w.damage_player(dmg, ("mon", src - 1) if src else ("sector", 0), ev)
+    w.damage_player(dmg, ("mon", src - 1) if src else ("sector", 0), ("mon", src - 1) if src else None, ev)
+
+
+# M7 P8a: the recording stub's cells, printed after the record's own (kb_on must be back at 0)
+KB_CELLS = (("kb_n", 2), ("kb_dm", 2), ("kb_ar", 2), ("kb_on", 1))
+KB_STUB = ["kb_go:", "    hex.inc 2, kb_n", "    hex.mov 2, kb_ar, p_ar", "    stl.fret kb_ret"]
+KB_STUB_DECLS = ["kb_n: hex.vec 2", "kb_ar: hex.vec 2"]
+
+
+def _expected_knock(records) -> bytes:
+    """the model with its thrust hook ON (`_p_knock`) and recording: the count, the raw damage, the armor at the call"""
+    w = _world()
+    w._p_knock = True
+    seen = {"n": 0, "dm": 0, "ar": 0}
+
+    def thrust(target, inflictor, source, dmg):
+        assert target == ("player", -1)
+        seen.update(n=(seen["n"] + 1) & 0xFF, dm=dmg & 0xFF, ar=w.ws.p_armor)
+    w._thrust = thrust
+    states, frames = WC.weapon_states(), WC.overlay_frames()
+    lines = []
+    for r, (pokes, dmg) in enumerate(records):
+        _apply(w, pokes, dmg, TicEvents(0), _src(r))
+        lines.append(_want(w.ws, states, frames) + "%02x%02x%02x0" % (seen["n"], seen["dm"], seen["ar"]))
+    return ("\n".join(lines) + "\n").encode()
 
 
 def _expected(records) -> bytes:
@@ -120,30 +150,43 @@ MUTANTS = {
     "noatk": ("    hex.mov 2, p_atk, dp_src\n", ""),
     "srcstale": ("    hex.zero 2, dp_src\n", ""),
 }
+# M7 P8a: the knock hook's controls (dp_lines(knock=True)); kb_after_armor is built in `_program`
+KNOCK_MUTANTS = {
+    "kb_on_stale": ("    hex.zero 1, kb_on\n", ""),
+    "kb_before_dead": ("dp_go:\n    hex.if1 1, p_dead, dp_out\n",
+                       "dp_go:\n    stl.fcall kb_go, kb_ret\n    hex.if1 1, p_dead, dp_out\n"),
+    "kb_after_armor": ("    stl.fcall kb_go, kb_ret\n    hex.mov 2, p_atk, dp_src\n",
+                       "    hex.mov 2, p_atk, dp_src\n"),
+}
 
 
-def _program(mut=None):
+def _program(mut=None, knock=False):
     w = _world()
     start = H.level_start(w)
     rm = ReferenceModel()
     tables = H.tables_fj(half_width_table(rm.sine))
     if mut == "swap32":
         tables = [t if "ns dpsav {" not in t else _swapped_dpsav() for t in tables]
-    text = "\n".join(H.dp_lines() + ["hpb_leaf:"] + H.hp_bar_lines() + ["stl.fret hpb_ret"]) + "\n"
-    if mut and MUTANTS[mut]:
-        old, new = MUTANTS[mut]
+    text = "\n".join(H.dp_lines(knock) + ["hpb_leaf:"] + H.hp_bar_lines() + ["stl.fret hpb_ret"]
+                     + (KB_STUB if knock else [])) + "\n"
+    muts = KNOCK_MUTANTS if knock else MUTANTS
+    if mut and muts[mut]:
+        old, new = muts[mut]
         assert text.count(old) == 1, (mut, text.count(old))
         text = text.replace(old, new)
+    if mut == "kb_after_armor":                     # ... and the call moved to after the armor's save
+        assert text.count("  dp_dc:\n") == 1
+        text = text.replace("  dp_dc:\n", "  dp_dc:\n    stl.fcall kb_go, kb_ret\n")
     states, frames = WC.weapon_states(), WC.overlay_frames()
     wstart = WC.level_start(w.mw, "E1M1")
     decls = (H.hurt_decls(start) + WC.weapon_decls(wstart, states, frames) + WC.weapon_const_decls()
              + hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START)))
-             + ["hpb_ret: hex.vec w/4"])
+             + ["hpb_ret: hex.vec w/4"] + (KC.decls() + KB_STUB_DECLS if knock else []))
     return decls, text, tables + [generate_dispatch_table_fj("ammobcd", WC.ammo_digit_values(), index_nibbles=3,
                                                              result_nibbles=3)]
 
 
-def _build(tmp_path, name, mut=None):
+def _build(tmp_path, name, mut=None, knock=False):
     records = _records()
     states, frames = WC.weapon_states(), WC.overlay_frames()
     idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(states)}
@@ -160,21 +203,23 @@ def _build(tmp_path, name, mut=None):
                 c, n = nib[f]
                 body.append("hex.set %d, %s, %d" % (n, c, v & (16 ** n - 1)))
         body += ["hex.set 2, dp_src, %d" % _src(r)] if _src(r) else []      # 0: the caller names none
+        if knock and _src(r):                                              # M7 P8a: an inflictor (the attacker)
+            body += KC.inflictor_lines("dp_src", "dp_src")
         body += ["hex.set 2, dp_dmg, %d" % dmg, "stl.fcall dp_go, dp_ret", "stl.fcall hpb_leaf, hpb_ret"]
-        body += ["hex.print_as_digit %d, %s, 0" % (n, c) for c, n in CELLS]
+        body += ["hex.print_as_digit %d, %s, 0" % (n, c) for c, n in CELLS + (KB_CELLS if knock else ())]
         body += ["stl.output 10"]
     body += ["stl.loop"]
-    decls, text, tables = _program(mut)
+    decls, text, tables = _program(mut, knock)
     prog = "\n".join(body + decls + [text] + tables) + "\n"
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     srcs = [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
-    return srcs, _expected(records)
+    return srcs, (_expected_knock(records) if knock else _expected(records))
 
 
-def _run(tmp_path, name, mut=None) -> bool:
-    srcs, want = _build(tmp_path, name, mut)
+def _run(tmp_path, name, mut=None, knock=False) -> bool:
+    srcs, want = _build(tmp_path, name, mut, knock)
     return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
                                            should_raise_assertion_error=False)
 
@@ -234,3 +279,14 @@ def test_the_player_damage_follows_the_model(tmp_path):
 @pytest.mark.parametrize("mut", sorted(MUTANTS))
 def test_control_a_broken_player_damage_is_caught(tmp_path, mut):
     assert not _run(tmp_path, "pdamage_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut
+
+
+def test_the_knock_hook_thrusts_where_the_model_does(tmp_path):
+    """M7 P8a (package 0): dp_lines(knock=True) with a recording kb_go -- called exactly when the model's `_thrust` is,
+    with the raw damage, seeing the armor before the save; kb_on zeroed on every exit; every P7 cell unchanged"""
+    assert _run(tmp_path, "pdamage_knock", knock=True), "the knock hook parted from the model's _thrust"
+
+
+@pytest.mark.parametrize("mut", sorted(KNOCK_MUTANTS))
+def test_control_a_misplaced_knock_hook_is_caught(tmp_path, mut):
+    assert not _run(tmp_path, "pdamage_knock_" + mut, mut=mut, knock=True), "%s passed: the comparison is vacuous" % mut

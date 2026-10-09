@@ -37,7 +37,25 @@ LVTIME_NIBBLES = 4
 # the persisted cells the restart must NOT write: what the device shows (docs/gp-p67-interface.md 4.4)
 DEVICE_SHADOWS = ("pal_cur", "hud_s", "hud_full")
 # the player modes with a death that restarts (P7; the fallback "loot" mode of section 2 has none)
-MORTAL_PLAYER_MODES = ("full",)
+MORTAL_PLAYER_MODES = ("full", "final")    # M7 P8a: "final" is "full" and more
+
+
+# M7 P8a A (docs/gp-final-plan.md 4.1): THE DYING VIEW's cell -- `p_vd`, 2 nibbles, the model's p_vdrop (0..35:
+# viewheight = 41 - it). The death think raises it (hurtcode.turn_lines(sink=True)), the landing subtracts it from the
+# eye (wall_renderer.landing_drop_lines); 0 at the level start and the restart. Emitted, persisted (build.VIEW_PERSIST)
+# and restarted only while world.player_sinks(PLAYER_MODE)
+VIEW_PERSIST = ("p_vd",)
+VIEW_DROP_NIBBLES = 2
+
+
+def view_decls() -> List[str]:
+    """M7 P8a A: `p_vd` at its level start (0: the standing eye)"""
+    return [f"p_vd: hex.vec {VIEW_DROP_NIBBLES}, 0"]
+
+
+def view_restart_lines() -> List[str]:
+    """M7 P8a A: the restart block's line for `p_vd` -- the level start's standing eye (the same on every skill)"""
+    return [f"    hex.zero {VIEW_DROP_NIBBLES}, p_vd"]
 
 
 def mortal(player_mode: str) -> bool:

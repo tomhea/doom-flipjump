@@ -390,15 +390,16 @@ def card_pickup_lines(tag: str, card, slot_addr: str, reach_lo: int, reach_hi: i
     return out
 
 
-def walkover_lines(triggers, slots, radius: int) -> list:
+def walkover_lines(triggers, slots, radius: int, prefix: str = "wo") -> list:
     """`DoorPhase.after_move` in fj: after an ACCEPTED move from (`cm_ox`, `cm_oy`) to (`viewx`,
     `viewy`), each unfired trigger whose axis the centre crossed (`c <= L` differs) with the new
     centre strictly inside the segment's extent inflated by the radius fires: `wfired` 1 and its
-    door's `dreq` 1 -- the press lands on the next frame's door tic."""
+    door's `dreq` 1 -- the press lands on the next frame's door tic. `prefix` (M7 P8a): the labels'
+    (fj labels are global: a second copy -- the knock move's, doomfj.knockcode -- takes its own)."""
     out = ["  // M7 P2a.1: the walk-over triggers (doomfj.doors.crossed)"]
     for k, (si, axis, coord, lo, hi) in enumerate(triggers):
         d = slots.index(si)
-        p = f"wo{k}"
+        p = f"{prefix}{k}"
         out += [f"    hex.if0 1, wfired + {k}*dw, {p}_try", f"    ;{p}_no", f"  {p}_try:"]
         out += _crossed_lines(p, axis, coord, lo, hi, radius,
                               [f"    hex.set 1, wfired + {k}*dw, 1",

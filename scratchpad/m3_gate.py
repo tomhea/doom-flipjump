@@ -201,7 +201,7 @@ def main():
     import gatestate as GST
     # M7 P3.1: the idle monsters -- the model's own phase (doomfj.monsters), from the boot skill's
     # level start, a tic per world frame, reset by NEW GAME; drawn with their views, cells read
-    from doomfj.monsters import MonsterPhase, MonsterViews
+    from doomfj.monsters import MonsterPhase, MonsterViews, view_drop_kw
     from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
     mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode=MONSTER_MODE, player=PLAYER_MODE)   # M7 P4.1
     mviews = MonsterViews(rm, mw, args.map, art, mph.world)
@@ -278,7 +278,8 @@ def main():
                                  aim_things=mviews.aim_things(mph), aim_out=(_aim := [0] * 17),
                                  mobiles=mph.mobiles(),                       # M7 P5: the fireballs, the blood
                                  thing_removed=mviews.hidden(mph) if loot else None,      # M7 P6
-                                 barrel_views=mviews.barrel_views(mph) if loot else None, **render_kw)
+                                 barrel_views=mviews.barrel_views(mph) if loot else None,
+                                 **view_drop_kw(mph), **render_kw)            # M7 P8a: the dying view's sink
             mph.set_seen(mviews.slots_of(_seen))
             mph.set_aim(_aim)                       # M7 P4.2a: the window this picture recorded
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
@@ -290,7 +291,8 @@ def main():
                      "mobiles": mph.mobiles(), "pal": mph.palette() if mode == 0 else 0,
                      # M7 P6: what the game removed, the barrels' frames
                      "removed": mviews.hidden(mph) if loot else None,
-                     "bviews": mviews.barrel_views(mph) if loot else None})
+                     "bviews": mviews.barrel_views(mph) if loot else None,
+                     "view_drop_kw": view_drop_kw(mph)})            # M7 P8a: the dying view's sink
 
     ok, menus, worlds, moved, oracle_ng, first_bad = True, 0, 0, 0, {}, None
     state_bad, state_checked = None, 0
@@ -314,7 +316,8 @@ def main():
                                               scene, thing_hidden=hidden[row["skill"]],
                                               thing_views=row["views"], thing_positions=row["positions"],
                                               mobiles=row["mobiles"], thing_removed=row["removed"],
-                                              barrel_views=row["bviews"], **render_kw)), **row["skw"])
+                                              barrel_views=row["bviews"], **row["view_drop_kw"],   # M7 P8a
+                                              **render_kw)), **row["skw"])
             kind = "world %-7s" % SKILL_NAMES[row["skill"]]
             worlds += 1
             if row["ng"] is not None:

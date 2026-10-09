@@ -10,14 +10,40 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked51.fjm`, sha256 `f736f73d456061ed` (first 16 hex; full `f736f73d456061ed726a37bcf1ac92d2214f61fcf2363f8334ba409b7cb3a72c`), built 2026-10-06 from the command in 1b (M7 P6+P7, ONE rung: pickups, barrels, blocking, nukage, death and the restart, with the owner's 2026-10-05 playtest requests) | class F -- the pictures differ from blocked48 by design (items taken, the bonus and berserk palettes, barrels exploding, drops, puffs, gibs, the monsters at 2 tics a frame and always drawn, the dead view turning); built with the installed flipjump 1.5.1 at `1cd6e0c` from m7-p67 7739a72 with `--pin-heat scratchpad/12m/heat_blocked27_p42.json.gz` (`docs/ship-evidence/blocked51_build.log`) |
-| **ms/frame** | **71.6 ms/frame** (71.1-72.2), against **70.0** (69.7-71.6) for blocked48 in the same run -- **NOT SEPARATED: median x0.980** (pairs 0.973 0.992 0.985 0.980 0.976: all five lean B-slower, none past the 3% line; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames). **A quiet box**: msframe logged no busy process, yardstick median 3.63G, no `--ignore-busy`; the `shipped` baseline is NOT frozen on it -- still blocked44's; P8 re-freezes | `msframe.py --a build/doom_e1m1_blocked48.fjm --b build/doom_e1m1_blocked51.fjm`, 200 frames x 5 reps, pinned core (`blocked51_msframe.log`) |
-| **fj ops/s** | **220.6 M** in the A/B run (blocked48 226.4 M) | ops/frame **15,784,170** on msframe's forward-walk script (blocked48 15,844,669) |
-| **binding metric** (owner spec) | (mean+p80)/2 = **12,528,769 ops/frame -- PASS** (target <= 20,000,000 until P8 moves it to 22M, D1). **NOT comparable with blocked48's 15,531,315** (O3): since P6 a monster blocks the player, so the ten tours stop earlier and on other routes, and no run reaches a door (`BINARY_DOORS` all 0) | `gamespeed.py --fjm build/doom_e1m1_blocked51.fjm` (`docs/ship-evidence/blocked51_gamespeed.log`); `gamespeed_trail.py`: TRAIL PASS (`--validate`'s record equals the binary on every frame of every run), CONTROL-POSE PASS, CONTROL-DOORS N/A -- no run opens a door (7739a72); `BINARY_ENDS` / `BINARY_DOORS` as re-recorded in f3acab8 (`blocked51_gamespeed_trail.log`) |
-| **size** | **36.24% of 2^27 -- PASS against the 42% target** (48,643,954 words; span 100,158,624; +1,457,356 words) -- 7,727,491 words under it, 5,043,137 under the 40% it replaced. The size target: 35% -> 40% in P4.0 (`docs/gp-combat.md` C2, the owner 2026-09-25 + 2026-10-04), -> 42% after P5 ("its ok to get to 42% if things get messy or big", the owner 2026-10-04; `gamespeed.SIZE_TARGET_PCT` 42, fe754a0); the 22M ops cap is unchanged | same run |
-| **combat set v6** (the CAP-22 set from P6+P7 on: v5's 11 checkpoints RE-PLANNED at the game's model -- the monsters' tempo, the tap turn, fire x2 -- f852103; keys `83d49015078b6abb`; FROZEN 2026-10-06 on the owner's approval, 30f9fd1) | (mean+p80)/2 = **14,699,526** (mean 13,573,156, p80 run R2-east-yard 15,825,895); **14,740,635** with strafe's collision (proxy); every frame of all 11 runs state- and pixel-exact, B0 OK; per-frame maximum 24,117,248 (+/- 2^18, R0-courtyard); 7,300,474 under CAP-22. A different set from v5: not comparable with blocked48's v5 16,037,431 | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v6.json --pixel-every 1 --proxy` (`blocked51_b0_v6.log`, `.json`) |
+| **the shipped binary** | `build/doom_e1m1_blocked53.fjm`, sha256 `324e3d2281d5c7e1` (first 16 hex; full `324e3d2281d5c7e12e28e8684cd5fe58cdc6eeacac9045e2b265f330b25c5ca0`), built 2026-10-08 from the command in 1b (M7 P8a + P8, ONE rung: the dying view sinks, knockback, infighting, D3 a / b, the follow-ups of #119 / #121 / #123) | class F -- the pictures differ from blocked51 by design (the dead view sinking, things pushed, monsters fighting monsters, drops and blood in front of their monster, barrels past the scenery count); built with the installed flipjump 1.5.1 at `1cd6e0c` from m7-extras 1df5f96 with `--pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-heat scratchpad/12m/heat_blocked27_p8a.json.gz` (`docs/ship-evidence/blocked53_build.log`) |
+| **ms/frame** | **78.6 ms/frame** (78.0-79.8), against **72.0** (71.4-72.2) for blocked51 in the same run -- **B SLOWER: median x0.917** (pairs 0.924 0.917 0.918 0.908 0.902; class F: the pictures differ, so msframe's pixel check reads NO and the two arms render different frames); yardstick median 3.64G. The `shipped` baseline is FROZEN on this binary: 78.1 ms/frame (77.6 .. 78.5), yardstick 3.63G -- blocked44's retired | `msframe.py --a build/doom_e1m1_blocked51.fjm --b build/doom_e1m1_blocked53.fjm`, 200 frames x 5 reps, pinned core (`blocked53_msframe.log`); `msframe.py --a build/doom_e1m1_blocked53.fjm --save-baseline shipped` (`blocked53_msframe_freeze.log`) |
+| **fj ops/s** | **218.5 M** in the A/B run (blocked51 219.3 M) | ops/frame **17,181,722** on msframe's forward-walk script (blocked51 15,784,170) |
+| **binding metric** (owner spec) | (mean+p80)/2 = **12,490,840 ops/frame -- PASS** against **22,000,000** (D1: the 22M cap replaced the 20M target when the combat game shipped, M7 P8). blocked51's 12,528,769 was read against 20M; knockback moved run 0's tour (it ends (529, 208), blocked51's (577, 243)), runs 1-9 end where blocked51's did; no run reaches a door (`BINARY_DOORS` all 0, O-E2) | `gamespeed.py --fjm build/doom_e1m1_blocked53.fjm` (`docs/ship-evidence/blocked53_gamespeed.log`); `gamespeed_trail.py`: TRAIL PASS, CONTROL-POSE PASS -- CONTROL-DOORS N/A, no run opens a door; `BINARY_ENDS` / `BINARY_DOORS` as re-recorded in 564861e (`blocked53_gamespeed_trail.log`) |
+| **size** | **38.22% of 2^27 -- PASS against the 42% target** (51,304,694 words; span 119,377,056, 88.94% -- the span grew with the pool base, 0x60000000 -> 0x80000000; +2,660,740 words) -- 5,066,751 words under it. The size target: 35% -> 40% in P4.0 (`docs/gp-combat.md` C2, the owner 2026-09-25 + 2026-10-04), -> 42% after P5 ("its ok to get to 42% if things get messy or big", the owner 2026-10-04; `gamespeed.SIZE_TARGET_PCT` 42, fe754a0) | same run |
+| **combat set v7** (the CAP-22 set from P8a on: v6's 11 checkpoints RE-PLANNED at the final model -- knockback, infighting, the sink -- 631b19b; keys `33f95fdbbd684f53`; approved by the owner 2026-10-08, FROZEN on this build's B0, 06be25f) | (mean+p80)/2 = **15,825,592** (mean 14,767,719, p80 run R2-east-yard 16,883,465); **15,869,657** with strafe's collision (proxy); every frame of all 11 runs state- and pixel-exact, B0 OK; per-frame maximum 27,000,832 (+/- 2^18, R0-aftermath); 6,174,408 under CAP-22. A different set from v6: not comparable with blocked51's v6 14,699,526 | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v7.json --pixel-every 1 --proxy` (`blocked53_b0_v7.log`, `.json`) |
 
-**What it is:** blocked48 with pickups, barrels, death and the restart (M7 P6+P7, `docs/gp-p67-interface.md`; the
+**What it is:** blocked51 with the final gameplay (M7 P8a + P8, `docs/gp-final-plan.md`; the model modes `PLAYER_MODE =
+MONSTER_MODE = "final"`), ONE rung stacked on P6+P7, integrated from seven packages (0, A, K, I, C, D, V). **The dying
+view sinks** (O-A1 S0): DOOM's P_DeathThink drop, 1 unit a tic to 6 above the floor (`p_vd`); the walls, sprites and
+step faces sink exactly, the floors and ceilings keep the standing eye's band lists -- the oracle's `view_drop` split
+renders the same. **Knockback** (`knockcode`): P_DamageMobj's thrust from its inflictor (the shooter, the missile, the
+barrel; mass 100 / 400; none from the chainsaw; the falling-forward reversal), P_XYMovement for the player's knock once
+a frame and for every monster and corpse at their 2 tics (MAXMOVE, DOOM's halving, FRICTION, STOPSPEED, the corpse
+rule), a refused knock stops (O-B4), barrels are not pushed (O-B1), a drop stays where its owner died. **Infighting**:
+`mon_target` names a thing, DOOM's switch and threshold, the far line of sight at any range (O-B2: the near-LOS cell
+lists walked in 127-unit pieces), monster bullets take the nearest thing in their line (O-B5), fireballs hit monsters
+and barrels (an imp's on an imp explodes harmlessly, the shooter is passed), a blast blames the barrel's first damager
+(`bar_src`). **D3 a / b**: drops and effects before monsters in a leaf (the depth key's rank), a barrel exempt from the
+soft raise (`sp_ex`). Gates: m2_std_gate 406 and m3_gate 50 frames byte- and state-exact, every gate selftest rejected
+where it must (7, `blocked53_gate_selftests.log`), p2a_gate 13/13, hurt_gate 7/7, fight_gate 39/39 (F1-F10, K1-K7,
+I1-I6, C1-C3, the stress S2-S4) and die_gate 17/17 (D1-D11, the sink D9-D11) STATE, PIXELS and PALETTE exact on every
+frame with every control parting, deg_gate 4 viewpoints BYTE-EXACT with every op count equal to blocked51's, pinreport
+20 of 20 (pool 76.4%), host suite 1878 passed, 2 skipped, 1 deselected, 2 xfailed. **The stress cases**, per frame (max
+/ p95 / mean / frames over 22M; O-E1: recorded, exact, a tripwire at any frame over 44M or a scenario averaging over
+30M): S1 25,165,824 / 24,379,392 / 23,173,529 / 30 of 30; S2 12,845,056 / 11,796,480 / 9,899,645 / 0 of 106; S3 (the
+brawl) 17,039,360 / 17,039,360 / 15,645,627 / 0 of 60; S4 (the push storm) 15,466,496 / 14,942,208 / 12,679,491 / 0 of
+76; D9 (the sink) 19,398,656 / 19,398,656 / 19,051,315 / 0 of 40. Superseded in the rung: blocked52 r0 (refused to
+assemble -- the program reached 0x611aa840, inside the table pool at 0x60000000; the pool base moved, 9070b02) and
+blocked52 (sha256 `f91abff8a04d37e0`: B0 v7 exact, but p2a 12/13, hurt 6/7 and fight 30/39 parted on three fj bugs --
+3c6dc06 `md_fa`, 0c8a93c `bl_los`, 99609f3 the pool window; `docs/gp-ledger.md` P8a). The binary it replaced, blocked51
+(sha256 `f736f73d456061ed`), is kept in `build/` as the comparison arm.
+
+**What blocked51 was (P6+P7):** blocked48 with pickups, barrels, death and the restart (M7 P6+P7, `docs/gp-p67-interface.md`; the
 model modes `PLAYER_MODE = "full"`, `MONSTER_MODE = "full"`), ONE rung stacked on P5, integrated from six packages.
 **Pickups** (`lootcode`): every give with DOOM's caps (the bonuses over 100, a medikit refused at 100 health, a clip
 at max ammo, the cards with the bonus's gold palette), berserk (the strength, the x10 punch, the red tint), the
@@ -161,12 +187,10 @@ CAP-22 set is now v4. The binary it replaced, blocked35 (sha256 `45674256d3f168e
 blocked25 read 99-104 ms/frame with a background video render at ~0.3-0.45 core -- under
 msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27 has not been timed
 under load). **Absolute ms/frame is a number about
-the machine state; only an A/B inside one run is a number about the binary.** The msframe
-baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is NOT frozen on this binary:
-it is still blocked44's -- blocked45 to blocked48 were never frozen, and blocked51 must be re-frozen on a quiet box
-(`msframe.py --a build/doom_e1m1_blocked51.fjm --save-baseline shipped`, into `blocked51_msframe_freeze.log` -- P8's
-re-frozen baselines; blocked51's A/B run against blocked48 was taken on a quiet box, while blocked47's and blocked48's
-were taken beside the owner's fullscan.py, with `--ignore-busy`)
+the machine state; only an A/B inside one run is a number about the binary.** The msframe baseline `shipped`
+(`scratchpad/12m/msframe_baselines/shipped.json`) is FROZEN on this binary (M7 P8, 2026-10-09: 78.1 ms/frame
+[77.6 .. 78.5], yardstick 3.63G, 220.0M fj/s -- `blocked53_msframe_freeze.log`);
+blocked45 to blocked51 were never frozen, so blocked44's stood until then
 (re-frozen 2026-10-02 on blocked44: 73.1 ms/frame [72.3 .. 76.2], yardstick 3.50G,
 204.4M fj/s -- `blocked44_msframe_freeze.log`; blocked40's 2026-09-30 read 63.7 [63.6 .. 63.8]; blocked38's the same day read 61.5 [61.3 .. 61.7];
 blocked37's the same day read 61.9 [61.4 .. 62.0];
@@ -187,8 +211,12 @@ the same series, with the same counts cache; blocked25's own line, 09-11 18:04, 
 and followed the renderer fix of FINDINGS CE):
 
 ```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p42.json.gz
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p8a.json.gz
 ```
+
+Until blocked51 the line read `--pool-base 0x60000000 --span-bits 0x9fffffe0` (every build from blocked25 on);
+blocked52's first build moved it (blocked53 below). Every tool that reconstructs the pool reads the same two knobs:
+`poolmap.SHIP_GATE`, `profx/pool.KNOBS`, `profx/common.POOL_BASE_WORD` (9070b02) -- change all four places together.
 
 `build_labeled.py` wraps `build_blocked.py` with the label spy on (everything after `--` is
 `build_blocked.py`'s own arguments; `--labels` is the wrapper's). The label table it writes is
@@ -275,6 +303,29 @@ assembler the same files and the same persist tuple at 87c2c75 and at the head
 is signed by 87c2c75's (`aab5be8f`), so on main this line MISSES the cache and recounts once (~34 min,
 the same counts) -- as after PR #87 (item 4). The next ship build re-signs it. (A first build of this rung was stopped in pass 1:
 it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
+
+**blocked53 (2026-10-08, M7 P8a + P8): the line's heat list is `heat_blocked27_p8a` and its pool base is 0x80000000.**
+- The heat list: `heat_blocked27_p42` re-keyed for package C's one arity change, `sim.thing_pass_depth` 7 -> 9
+  parameters (the game tier calls the 9-parameter form at "final": D3 a's `rk0`, D3 b's `ex`): `heat_rekey.py --rename
+  "text:sim.thing_pass_depth(7)=>sim.thing_pass_depth(9)"` -- 0 group keys, 579 site paths; 20 groups, 35,894 sites,
+  decompressed sha256 `9520cefe18ad4943` (933db58; the build log reads `9520cefe18ad4943`, the same). No other package
+  changed a macro's parameter count.
+- The pool base: blocked52's first build (r0) refused to assemble -- "the program reached 0x611aa840, which is inside
+  the table pool based at 0x60000000" (P8a's code, the unrolled infighting included; the counting pass assembles the
+  program unrelocated, as P3.2b's r0 found). `--pool-base 0x80000000 --span-bits 0x7fffffe0`: popcount 1 against
+  0x60000000's 2, so every pinned table address is one bit lighter; capacity 67,108,863 words. blocked52 (at 21224a0,
+  sha256 `f91abff8a04d37e0`, 7,306 s) built by this line: 51,867 groups -> 42,083 after alias merging, 554,023 tables
+  (2,042 s recount), preflight 51,258,464 words (76.4%), 0 broken groups, pinreport 20 of 20 -- superseded by its gates
+  (`docs/gp-ledger.md` P8a).
+- blocked53, at 1df5f96 with flipjump 1.5.1 at `1cd6e0c`: the source changed after blocked52 (3c6dc06, 0c8a93c,
+  99609f3), so the counts cache MISSED and recounted (51,884 groups -> 42,100 after alias merging, 554,091 tables,
+  2,006 s); the build took 7,126 s: sha256 `324e3d2281d5c7e1` (`docs/ship-evidence/blocked53_build.log`; preflight 51,264,672
+  words, 76.4% of the pool's capacity; the restore set's check 0 labels moved, 0 values changed, 19,074 baked cells
+  value-checked). The pin report: 20 of 20 (20 bases moved; `blocked53_pinreport.log`); poolmap 42,100 of 42,100 groups
+  placed, 0 broken, the counts cache HIT; 31,376,774 words of pad inside the blocks, 1,003,520 of holes in front of
+  them, a gap of 35,692,068 words from the program's end to the pool base (`blocked53_poolmap.log`). The tracked counts
+  cache is that recount, and no `src/` file changed after the build, so the line HITs it at the head. Its label table is
+  `scratchpad/12m/atlas/blocked53.labels.tsv.gz`. Not rebuilt (class F).
 
 **blocked51 (2026-10-06, M7 P6+P7): the line did not change** -- still `heat_blocked27_p42` (the build log reads its
 sha256 `b307cab74b45b336`; no hot site changed width, `hot_sites_width_changed 0`, so no re-key) and still flipjump
@@ -366,7 +417,7 @@ table is `scratchpad/12m/atlas/blocked33.labels.tsv.gz`.
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 
 ```
-fj --run build/doom_e1m1_blocked33.fjm --io pc --flat-max-words 134217728
+fj --run build/doom_e1m1_blocked53.fjm --io pc --flat-max-words 134217728
 ```
 
 `--run` is not optional (`fj a.fjm` assembles); the flat window must be the full 2^27 words or
@@ -389,7 +440,7 @@ explained before shipping.
    NOT a gate for a menu-booting binary -- it never presses Enter and fails vacuously on every
    game-tier binary, changed or not (handoff 14.4). tests/host green. And the PIN REPORT:
    `python scratchpad/12m/pinreport.py --fjm build/<new>.fjm --labels <its label table>
-   --counts-cache scratchpad/12m/_counts_game.json.gz --heat scratchpad/12m/heat_blocked27.json.gz
+   --counts-cache scratchpad/12m/_counts_game.json.gz --heat <the line's heat list, scratchpad/12m/heat_blocked27_p8a.json.gz since blocked53>
    --build-log <its build log>` must exit 0 -- every hot word pinned (a moved base is reported, not
    a failure; `--heat` lets it re-derive a heat build's layout).
 2. **Speed, by the instrument.** `python scratchpad/12m/msframe.py --a build/<new>.fjm --against
@@ -401,8 +452,8 @@ explained before shipping.
    --b build/<new>.fjm` is the same measurement; what `--against` adds is the check that arm A IS
    the frozen binary (its hash). Use the explicit form only with the shipped sha256 in the record.
 3. **The owner's metric.** `python scratchpad/12m/gamespeed.py --fjm build/<new>.fjm` (both
-   targets: (mean+p80)/2 <= 20,000,000 ops/frame, size <= 42% -- RAISED from 35% in M7 P4.0 (gp-combat C2, 40%) and to 42% by the owner after P5, 2026-10-04), then a separate `--validate` run
-   (it is a mode: 10/10 distinct end cells) and `--selftest` (SELFTEST PASS; its N6g is the only
+   targets: (mean+p80)/2 <= 22,000,000 ops/frame -- 20,000,000 until the combat game shipped; D1 moved it to 22M at M7 P8 (`gamespeed.SPEED_TARGET`, 6dea24d; `fencecheck.py` parses no 20M literal) -- size <= 42% -- RAISED from 35% in M7 P4.0 (gp-combat C2, 40%) and to 42% by the owner after P5, 2026-10-04), then a separate `--validate` run
+   (it is a mode: 9/10 distinct end cells on blocked53, the selftest's floor 6) and `--selftest` (SELFTEST PASS; its N6g is the only
    check that the host test's recorded keys are still what the planner plays -- CI does not run
    it). `--validate` replays the ORACLE; when the new binary moves, collides or opens doors
    differently from the shipped one, also run `scratchpad/12m/gamespeed_trail.py --fjm
@@ -449,7 +500,9 @@ removing code -- re-rolls those decisions: deleting 25% of executed code cost 6 
 `m1_reset`-labelled slice -- it is the wflip-chain area, and a jump there is the signature; then
 the flipped-bit histogram of the chains (14.8's script) names the words. A good binary is one
 whose hot words came out pinned; the ladder's knobs (`--spread 2 --max-slot-ops 512 --span-bits
-0x9fffffe0 --pin-broken --width-buckets --merge-aliases`) were worth ~2 M on the experiment.
+0x9fffffe0 --pin-broken --width-buckets --merge-aliases`) were worth ~2 M on the experiment. Since blocked53 the pool
+is based at 0x80000000 with span 0x7fffffe0 (popcount 1: every pinned table address one bit lighter than at
+0x60000000); its effect on ops was not measured apart from P8a's code -- blocked52's r0 moved it for capacity, not speed.
 
 **Hot-code alignment** (14.8): `pad 2097152` before the frame's walk code puts the shared leaves at
 word 2^22 (bit 2^27), popcount 1. Measured +0.5 M ops/frame better than the same program

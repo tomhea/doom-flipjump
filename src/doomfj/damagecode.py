@@ -51,6 +51,13 @@ M7 P6 (`full`, the player mode "full": docs/gp-p67-interface.md 4.3; doomfj.barr
   * THE DROP: a kill on a DROPPER slot (World.dropper) calls barrelcode's `drop_link<k>` from the slot's stub, after
     the cells are copied back (`dm_kd`, set by the kill, zeroed at the leaf's start);
   * the blood's call sets `fxs_kind` 0 (projcode's fx_spawn spawns a puff too in this mode).
+
+M7 P8a I (`fight`, world.infighting_on; docs/gp-final-plan.md 1.2.2): A MONSTER'S HITS. dm_melee grows two modes --
+MONSTER (3: a claw, a bite, a fireball -- no reach, no blood) and BULLET (4: a monster's bullet -- no reach, the blood
+first, as a shot's) -- whose SOURCE is `dm_src` (mon_target's code: 0 none, 1 the player, 2 + slot; the caller sets
+it, dm_out zeroes it); a player's shot (modes 0, 1) names the player, as before; a BLAST names `dm_src` too (the
+barrel's bar_src: barrelcode). The switch is DOOM's (combat.damage_monster): threshold 0, a source, not the target
+itself (`dm_me`, set by the slot's stub) -> the target is the source; mon_target is two nibbles (`dm_tg`).
 """
 from typing import Dict, List, Sequence, Tuple
 
@@ -68,6 +75,8 @@ DAMAGE_PLAYER_MODES = tuple(m for m in _PLAYER_MODES if _player_resolves(m))
 # M7 P5: the player modes whose hits spawn BLOOD (combat._line_attack's _spawn_fx_at_target): dm_leaf calls fx_spawn
 FX_PLAYER_MODES = tuple(m for m in _PLAYER_MODES if _player_bleeds(m))
 DM_MAX = 20                          # the largest damage a shot deals in P4.2a (the fist and the saw: 20)
+MONSTER, BULLET = 3, 4               # M7 P8a I: dm_melee for a monster's hit (monsterdecide.DM_MONSTER / DM_BULLET)
+FIGHT_DECLS = ["dm_src: hex.vec 2", "dm_me: hex.vec 2"]     # M7 P8a I: the hit's source; the hit slot's own code
 DM_MAX_FULL = 200                    # M7 P6: the berserk fist (A_Punch x10); a barrel's blast deals <= 128
 BLAST = 2                            # M7 P6: dm_melee's value for a barrel's blast (no reach, no blood)
 TICS_FOREVER = 15
@@ -210,10 +219,13 @@ WINDOW = (("dm_hp", "mon_health"), ("dm_sh", "mon_shootable"), ("dm_st", "mon_st
 
 
 def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int], *, nbar: int = 0,
-             drops: Dict[int, int] = None) -> List[str]:
+             drops: Dict[int, int] = None, knock: bool = False, fight: bool = False) -> List[str]:
     """`dm_go` and the per-slot stubs `dmg<m>`: copy the slot's cells in, `dm_leaf`, copy them back. M7 P6: ids
     n + 1 .. n + nbar jump to barrelcode's `dmb<b>`; `drops` {slot: dropper k}: a kill on slot m calls
-    `drop_link<k>` after the copy-back"""
+    `drop_link<k>` after the copy-back. `knock` (M7 P8a, world.knockback_on): each stub names its slot as the
+    thrust's target (kb_tg = 1 + m: doomfj.knockcode) -- the blast calls the stubs directly, so the stub, not dm_go.
+    `fight` (M7 P8a I): each
+    stub names its slot's own code (dm_me = 2 + m: the switch refuses the target itself as its source)"""
     from doomfj.monstercode import cell_nibbles
     n = len(slot_rt)
     nid = n + nbar
@@ -233,6 +245,8 @@ def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int], *, nba
         out += ["    hex.mov 4, dm_x, thpos_rt + %d*dw" % (16 * slot_rt[m] + 4),
                 "    hex.mov 4, dm_y, thpos_rt + %d*dw" % (16 * slot_rt[m] + 12),
                 "    hex.set 1, dm_type, %d" % slot_profile[m],
+                *(["    hex.set 2, kb_tg, %d" % (m + 1)] if knock else []),   # M7 P8a: the thrust's target
+                *(["    hex.set 2, dm_me, %d" % (m + 2)] if fight else []),   # M7 P8a I: the slot's own code
                 "    stl.fcall dm_leaf, dm_lret"]
         out += ["    hex.mov %d, %s, %s" % (nib, cell, reg) for reg, cell, nib in cells]
         if drops and m in drops:                       # M7 P6: this call's kill drops the slot's item
@@ -250,17 +264,32 @@ FX_CALL = ["    hex.mov 4, fxs_x, dm_x", "    hex.mov 4, fxs_y, dm_y", "    hex.
 FX_CALL_FULL = ["    hex.zero 1, fxs_kind"] + FX_CALL
 
 
-def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False) -> List[str]:
+def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knock: bool = False,
+               fight: bool = False) -> List[str]:
     """`dm_leaf` (stl.fcall dm_leaf, dm_lret) on the window -- the module docstring's order. `keys`: the profiles
     (`profiles(w)[0]`); mt_dist_leaf (monstercode.dist_leaf_lines) computes P_AproxDistance. `fx` (M7 P5): a hit in
     reach spawns blood (FX_CALL) before the target's own checks. `full` (M7 P6; `keys` are then
-    `profiles(w, gib=True)[0]`): dm_melee BLAST starts at the target's checks; the kill sets dm_kd and gibs"""
+    `profiles(w, gib=True)[0]`): dm_melee BLAST starts at the target's checks; the kill sets dm_kd and gibs.
+    `knock` (M7 P8a, world.knockback_on; doomfj.knockcode's interface): after the "not shootable / dead" returns and
+    BEFORE the health, P_DamageMobj's thrust (kb_dm = dm_dmg, `kb_go`; the stub set kb_tg) -- the inflictor THE
+    PLAYER (viewx / viewy) unless dm_melee is BLAST (the blast set the barrel's); dm_out zeroes kb_on.
+    `fight` (M7 P8a I; the module docstring): the MONSTER and BULLET modes (their inflictor is the caller's, as a
+    BLAST's), the source `dm_src` and DOOM's switch on it; dm_out zeroes dm_src"""
     from doomfj.combat import MISSILERANGE_U
     classes = pain_classes(keys)
     assert 0 < len(keys) <= 16
     assert not full or (fx and all(len(k) == 7 for k in keys)), "M7 P6: the full leaf gibs and bleeds"
+    assert not knock or full, "M7 P8a: knockback rides the full leaf (its BLAST mode names the barrel's inflictor)"
+    assert not fight or full, "M7 P8a I: a monster's hits ride the full leaf"
+    from doomfj.knockcode import inflictor_lines
     out = ["dm_leaf:"]
-    if full:                                     # M7 P6: a blast skips the reach and the blood
+    if full and fight:                           # M7 P8a I: a monster's hit skips the reach, its bullet bleeds
+        out += ["    hex.zero 1, dm_kd",
+                "    hex.if_flags dm_melee, %d, dm_nbl, dm_chk" % ((1 << BLAST) | (1 << MONSTER)),
+                "  dm_nbl:",
+                "    hex.if_flags dm_melee, %d, dm_nmb, dm_in" % (1 << BULLET),
+                "  dm_nmb:"]
+    elif full:                                   # M7 P6: a blast skips the reach and the blood
         out += ["    hex.zero 1, dm_kd",
                 "    hex.if_flags dm_melee, %d, dm_nbl, dm_chk" % (1 << BLAST),
                 "  dm_nbl:"]
@@ -282,6 +311,15 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False) -> L
            "    hex.if_flags dm_hp + 2*dw, 0xFF00, dm_pos, dm_out",            # health < 0
            "  dm_pos:",
            "    hex.if0 3, dm_hp, dm_out",                                    # health == 0
+           # M7 P8a: the thrust -- a shot's inflictor is the player; a BLAST's, the barrel the blast named
+           *(["    hex.if_flags dm_melee, %d, dm_kbp, dm_kbgo"
+              % ((1 << BLAST) | ((1 << MONSTER) | (1 << BULLET) if fight else 0)),
+              "  dm_kbp:",
+              # package K: the player's z only when the reversal needs it; the source the player (the saw's rule)
+              *inflictor_lines("viewx + 4*dw", "viewy + 4*dw", z_player=True, src_player=True),
+              "  dm_kbgo:",
+              "    hex.mov 2, kb_dm, dm_dmg",
+              "    stl.fcall kb_go, kb_ret"] if knock else []),
            "    hex.sub_shifted 3, 2, dm_hp, dm_dmg, 0",                       # health -= damage
            "    hex.inc 2, dm_rng",                                            # P_Random on the monster's stream:
            "    dmrnd.lookup dm_rr, dm_rng",                                   # v & 3, and the pain bits
@@ -313,7 +351,16 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False) -> L
             "  dm_nopain:",
             "    hex.zero 1, dm_re",
             "    hex.if1 2, dm_th, dm_out",
-            "    hex.set 1, dm_tg, 1",
+            *(["    hex.if_flags dm_melee, 3, dm_swsrc, dm_swpl",          # M7 P8a I: a shot names the player
+               "  dm_swpl:",
+               "    hex.set 2, dm_tg, 1", "    ;dm_swset",
+               "  dm_swsrc:",                                                # else dm_src: none, itself -> no switch
+               "    hex.if0 2, dm_src, dm_out",
+               "    hex.cmp 2, dm_src, dm_me, dm_swok, dm_out, dm_swok",
+               "  dm_swok:",
+               "    hex.mov 2, dm_tg, dm_src",
+               "  dm_swset:"] if fight else
+              ["    hex.set 1, dm_tg, 1"]),
             "    hex.set 2, dm_th, %d" % gd.BASETHRESHOLD,
             "    hex.cmp 2, dm_st, dm_sp, dm_out, dm_see, dm_out",              # exactly the spawn state: wake
             "  dm_see:",
@@ -332,12 +379,15 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False) -> L
             *(["  dm_ktic:"] if full else []),
             "    hex.sub 1, dm_ti, dm_rr",
             "  dm_out:",
+            *(["    hex.zero 1, kb_on"] if knock else []),             # M7 P8a: the next site names its own
+            *(["    hex.zero 2, dm_src"] if fight else []),            # M7 P8a I: ... and its own source
             "    stl.fret dm_lret"]
     return out
 
 
 def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = DM_MAX, fx: bool = False,
-                 full: bool = False, nbar: int = 0, drops: Dict[int, int] = None) -> dict:
+                 full: bool = False, nbar: int = 0, drops: Dict[int, int] = None, knock: bool = False,
+                 fight: bool = False) -> dict:
     """everything P4.2a's damage adds, for the World `w` (any monster mode; the emitter's needs P3.2c "decide"):
       * `decls`: the P42 cells at `boot_skill`'s level start, the interface, the window and the scratch;
       * `lines`: dm_go, the per-slot stubs, dm_leaf -- leaves (each ends in a fret), placed where nothing falls in;
@@ -347,11 +397,16 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     `slot_rt[m]`: monster slot m's runtime thing (its thpos_rt row). NEW GAME restores the P42 cells through
     p31_parts' `fields` (P42_FIELDS joins them when its `damage` is on).
     `full` (M7 P6, the player mode "full"): the barrels' ids (`nbar`: barrelcode's dmb<b>), the BLAST mode, the gib
-    (max_dmg DM_MAX_FULL) and the drops (`drops` {slot: dropper k}: barrelcode's drop_link<k>)."""
+    (max_dmg DM_MAX_FULL) and the drops (`drops` {slot: dropper k}: barrelcode's drop_link<k>).
+    `knock` (M7 P8a, world.knockback_on): the stubs and the leaf thrust (doomfj.knockcode's interface and `kb_go`,
+    which the caller adds). `fight` (M7 P8a I): a monster's hits (the module docstring) -- `w`'s schema must have
+    the wide mon_target (a World in the "final" modes)."""
     if full:
         max_dmg = max(max_dmg, DM_MAX_FULL)
     else:
         assert not nbar and not drops, "M7 P6: barrels and drops are the full mode's"
+    from doomfj.monstercode import cell_nibbles
+    assert cell_nibbles(w.schema, "mon_target") == (2 if fight else 1), "M7 P8a I: the target's width is the fight's"
     check_model_rules(w, max_dmg=max_dmg, gib=full)
     n = w.layout.nmon
     assert len(slot_rt) == n
@@ -359,8 +414,10 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     snap = w.level_start(boot_skill)
     vals = {f: list(getattr(snap, f)[:n]) for f in P42_FIELDS}
     return {"fields": P42_FIELDS,
-            "decls": field_decls(w.schema, n, vals) + DM_INTERFACE + DM_WINDOW + DM_SCRATCH
-            + (DM_FULL_SCRATCH if full else []),
-            "lines": go_lines(w.schema, slot_rt, of, nbar=nbar, drops=drops) + leaf_lines(keys, fx=fx, full=full),
+            "decls": field_decls(w.schema, n, vals) + DM_INTERFACE
+            + [("dm_tg: hex.vec 2" if fight and d == "dm_tg: hex.vec 1" else d) for d in DM_WINDOW] + DM_SCRATCH
+            + (DM_FULL_SCRATCH if full else []) + (FIGHT_DECLS if fight else []),
+            "lines": (go_lines(w.schema, slot_rt, of, nbar=nbar, drops=drops, knock=knock, fight=fight)
+                      + leaf_lines(keys, fx=fx, full=full, knock=knock, fight=fight)),
             "tables": [generate_dispatch_table_fj("dmrnd", dmrnd_values(pain_classes(keys)),
                                                   index_nibbles=2, result_nibbles=2)]}

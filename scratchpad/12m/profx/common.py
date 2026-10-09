@@ -17,7 +17,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 W = 32                                   # memory width of the game binaries
-POOL_BASE_WORD = 0x60000000 // W         # ship-gate 1b's --pool-base, as a word address
+POOL_BASE_WORD = 0x80000000 // W         # ship-gate 1b's --pool-base, as a word address (M7 P8a: was 0x60000000)
 
 
 def work_dir():

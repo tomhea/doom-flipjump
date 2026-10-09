@@ -132,7 +132,7 @@ def _armor_cases(green_div=3):
             for dmg in (1, 2, 3, 5, 10, 15, 24, 40, 128):
                 ws = w.ws
                 ws.p_dead, ws.p_health, ws.p_armortype, ws.p_armor = 0, 1000, at, ap
-                w.damage_player(dmg, ("test", 0), _ev(w))
+                w.damage_player(dmg, ("test", 0), None, _ev(w))
                 got = (ws.p_armortype, ws.p_armor, 1000 - ws.p_health)
                 out.append((got, _doom_armor(at, ap, dmg, green_div)))
     return out
@@ -153,7 +153,7 @@ def test_a_monster_dies_at_exactly_zero_health():
         m = _slot(w, 3004)
         w.ws.mon_health[m] = hp
         ev = _ev(w)
-        w.damage_monster(m, dmg, ("player", -1), ev)
+        w.damage_monster(m, dmg, ("player", -1), ("player", -1), ev)
         assert (ev.kills == [("mon", m, "death")]) == dies
         assert w.ws.mon_shootable[m] == (0 if dies else 1)
         if dies:
@@ -171,7 +171,7 @@ def test_the_gib_threshold_is_below_minus_spawnhealth():
         w = _world()
         m = _slot(w, doomednum)
         ev = _ev(w)
-        w.damage_monster(m, dmg, ("player", -1), ev)
+        w.damage_monster(m, dmg, ("player", -1), ("player", -1), ev)
         assert ev.kills == [("mon", m, how)]
         assert gd.STATE_NAMES[w.ws.mon_state[m]] == state
         assert 1 <= w.ws.mon_tics[m] <= gd.STATES[state].tics          # tics -= P_Random()&3
@@ -183,7 +183,7 @@ def test_a_corpse_blocks_until_its_a_fall_frame():
     w = _world()
     m = _in_front(w, 3004, 64)
     ev = _ev(w)
-    w.damage_monster(m, 20, ("player", -1), ev)
+    w.damage_monster(m, 20, ("player", -1), ("player", -1), ev)
     blocked_while_solid, fall_tic, passed = 0, None, False
     for t in range(40):
         ev = w.tic({"forward": True})
@@ -205,8 +205,8 @@ def test_drops_sit_at_the_corpse_and_give_dropped_amounts():
     z = _in_front(w, 3004, 64)
     s = _in_front(w, 9, 128)
     ev = _ev(w)
-    w.damage_monster(z, 20, ("player", -1), ev)
-    w.damage_monster(s, 30, ("player", -1), ev)
+    w.damage_monster(z, 20, ("player", -1), ("player", -1), ev)
+    w.damage_monster(s, 30, ("player", -1), ("player", -1), ev)
     assert (w.ws.mon_drop[z], w.ws.mon_drop[s]) == (1, 1)
     bullets = w.ws.p_ammo[gd.AM_CLIP]
     got = []
@@ -378,7 +378,7 @@ def test_a_barrel_explodes_and_sets_off_its_neighbours():
     far = next(b for b, t in enumerate(w.barrel_things)
                if max(abs(t.x - w.barrel_things[0].x), abs(t.y - w.barrel_things[0].y)) > 400)
     ev = _ev(w)
-    w.damage_barrel(0, 20, ev)
+    w.damage_barrel(0, 20, ("player", -1), ev)
     assert ev.kills == [("bar", 0, "death")] and gd.STATE_NAMES[ws.bar_state[0]] == "S_BEXP"
     blasts, hits = [], []
     for t in range(120):

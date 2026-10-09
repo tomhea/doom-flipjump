@@ -1,7 +1,12 @@
 # Handoff: the fully playable E1M1, under 22M ops/frame
 
-**Status (2026-10-07): phases 0-7 are DONE (phase 3 ended with blocked46, P3.3 + P3.4; P4, the player's combat, shipped as ONE build, blocked47; P5, the monsters' attacks, as ONE build, blocked48; P6 + P7, pickups, barrels, death and the restart with the owner's 2026-10-05 playtest requests, as ONE build, blocked51), except what the plan defers (O1 the death view drop; O2 D3 a / b for drops and barrels; D5's simplifications); P8, the ship, is NEXT.** Everything below is the
-whole plan, as the owner approved it, updated with phase 0's measurements. It replaces nothing:
+**Status (2026-10-09): THE MILESTONE IS DONE -- the fully playable E1M1 SHIPPED as `build/doom_e1m1_blocked53.fjm`
+(sha256 `324e3d2281d5c7e1`; M7 P8a + P8, one build, PR #124).** Phases 0-7 shipped as before (P3.3 + P3.4 as
+blocked46, P4 as blocked47, P5 as blocked48, P6 + P7 as blocked51); P8a (the dying view sinks, knockback, infighting, D3
+a / b, the follow-ups) and P8 (the ship) as blocked53. The frozen set is **v7** (15,825,592, 6,174,408 under CAP-22);
+the 22M cap replaced the 20M target (D1). What stays open is `#125`; the next milestones are M6 (ship) and M4
+(more levels, 1-3, deferred) -- `CLAUDE.md`. Everything below is the whole plan, as the owner approved it, updated with
+phase 0's measurements. It replaces nothing:
 `docs/plan-gameplay.md` is the record of how the plan was made (research missions, red team,
 decision rounds); this file is what to execute. Phase 0's evidence is committed on branch `gameplay-p0`
 (merged into main by the phase-0 PR).
@@ -19,8 +24,8 @@ FlipJump-specific knowledge.
 
 | | target | how it is measured |
 |---|---|---|
-| **speed** | **(mean + p80)/2 of per-run ops/frame <= 22,000,000** | the FROZEN combat scenario set v2 (`scratchpad/gp/scenarios/combat_scenarios_v2.json`): 11 runs x 100 frames at skill hard, starting from checkpoints across the level, driven by `scratchpad/gp/b0_scenarios.py` (the binary) against the model (the oracle) |
-| **size** | <= 35% of 2^27 words (46,976,204) | `scratchpad/12m/poolmap.py` / gamespeed's size line |
+| **speed** | **(mean + p80)/2 of per-run ops/frame <= 22,000,000** | the FROZEN combat scenario set -- v2 (`scratchpad/gp/scenarios/combat_scenarios_v2.json`) at the start, re-planned through v3 .. v6 as the rules grew, **v7 at the ship** (`combat_scenarios_v7.json`, keys `33f95fdbbd684f53`, frozen by the owner on blocked53's B0, 06be25f): 11 runs x 100 frames at skill hard, starting from checkpoints across the level, driven by `scratchpad/gp/b0_scenarios.py` (the binary) against the model (the oracle) |
+| **size** | <= 42% of 2^27 words (56,371,445) -- 35% at the start, 40% from P4.0 (`docs/gp-combat.md` C2), 42% after P5 (the owner, 2026-10-04) | `scratchpad/12m/poolmap.py` / gamespeed's size line |
 | **correctness** | byte-exact AND state-exact against the oracle, on every frame of every gate | the state probe (`scratchpad/gp/probe.py`) + the gates (section 9) |
 | **scope** | the fully playable level of section 3 | the gates' event counters |
 
@@ -397,15 +402,63 @@ above the rung's +0.8 .. +1.2M estimate); msframe NOT SEPARATED (x0.980, quiet b
 pickup's bar a frame late) and blocked50 (a baked barrel's light class truncated; the oracle drew drops as actors)
 were superseded. No kill criterion exceeded; the full tests/fj run at the head was owed at ship (the ledger lists it
 with the follow-ups).
-### P8 -- ship (NEXT)
-CAP-22 on the frozen set, stress, size, every gate, the class-F rule, docs (CLAUDE.md, ship-gate.md,
-gamespeed's target -> 22M), re-frozen baselines.
-Where it starts (blocked51): CAP-22 on **v6** (14,699,526; the binding, D1); the stress cases recorded, not capped --
-hurt_gate S1 ~23.2M/frame averaged over 30 frames, B0 v6's single-frame maximum 24,117,248 (R0-courtyard), the barrel
-chain's single-frame cost still UNVERIFIED (fight_gate logs totals only); every gate re-run on the ship binary;
-`gamespeed.SPEED_TARGET` 20M -> 22M per D1 (with CLAUDE.md and `docs/ship-gate.md`), noting that the tours no longer
-reach a door; the msframe `shipped` baseline re-frozen on a quiet box (still blocked44's, #115) and B0 / gamespeed's
-trails re-recorded on the ship binary; the P6 + P7 follow-up issue.
+### P8a -- the final gameplay (the owner's 2026-10-07 request)
+The dying view, knockback, infighting, D3 a / b and the follow-up issues #119 / #121 / #123 -- `docs/gp-final-plan.md`
+(the plan, its owner decisions as taken, its As built), `docs/gp-ledger.md` "P8a". Class F.
+**P8a DONE 2026-10-09, one build with P8** (blocked53; the model modes `PLAYER_MODE = MONSTER_MODE = "final"`):
+- **the dying view sinks** (O-A1 S0): DOOM's P_DeathThink drop, 1 unit a tic to 6 above the floor (`p_vd` 0..35); the
+  walls, sprites and step faces sink exactly; floors and ceilings keep the standing eye's distance shading (the oracle's
+  `view_drop` split does the same);
+- **knockback**: P_DamageMobj's thrust with its inflictor (the shooter, the missile, the barrel), P_XYMovement for the
+  player's knock (once a frame) and every monster and corpse (twice a frame, O-B3), MAXMOVE, friction, STOPSPEED, the
+  corpse rule, the falling-forward reversal; a refused knock stops (O-B4); barrels are not pushed (O-B1); a drop stays
+  where its owner died;
+- **infighting**: targets name a thing, DOOM's switch and threshold, the far line of sight at any range (O-B2), monster
+  bullets hit the nearest thing in their line (O-B5), fireballs hit monsters and barrels (the species rule, the shooter
+  passed), a barrel's blast blames its first damager (`bar_src`);
+- **D3 a** (drops and effects drawn before monsters in a leaf) and **D3 b** (barrels exempt from the soft raise);
+- every DO row of the follow-up triage (`docs/gp-final-plan.md` 1.4).
+Three builds: blocked52 r0 overflowed the table pool at 0x60000000 (the pool base is 0x80000000 since, 9070b02);
+blocked52's gates found three fj bugs B0 missed (3c6dc06 `md_fa`, 0c8a93c `bl_los`, 99609f3 the pool window); blocked53
+ships. v7 (planned at the final model, approved by the owner 2026-10-08) 15,825,592; size 38.22%
+(+2,660,740 words); the gates p2a 13/13, hurt 7/7, fight 39/39 (K1-K7, I1-I6, C1-C3, the
+stress S2-S4), die 17/17 (D9-D11: the sink) all exact; msframe 78.6 ms/frame, B SLOWER against
+blocked51 (x0.917).
+
+### P8 -- ship
+CAP-22 on the frozen set, stress, size, every gate, the class-F rule, docs (CLAUDE.md, ship-gate.md, gamespeed's target
+-> 22M), re-frozen baselines. **P8 DONE 2026-10-09 on blocked53** (`docs/gp-ledger.md` "P8 the ship",
+`docs/gp-final-plan.md` 5.4): CAP-22 on v7 15,825,592, every frame of all 11 runs state- and pixel-exact; the stress
+cases per frame (max / p95 / mean / frames over 22M), recorded under O-E1's tripwire (any frame over 44M or a scenario
+averaging over 30M must be explained) -- hurt S1 25,165,824 / 24,379,392 / 23,173,529 / 30 of 30, fight S3 (the brawl)
+17,039,360 / 17,039,360 / 15,645,627 / 0 of 60, S4 (the push storm) 15,466,496 / 14,942,208 / 12,679,491 / 0 of 76, die
+D9 (the sink) 19,398,656 / 19,398,656 / 19,051,315 / 0 of 40, B0 v7's maximum 27,000,832 (R0-aftermath);
+`gamespeed.SPEED_TARGET` 20M -> 22M (D1, 6dea24d) -- binding 12,490,840 PASS, `gamespeed_trail` TRAIL PASS, CONTROL-POSE
+PASS, the tours still reach no door (O-E2); the msframe `shipped` baseline re-frozen on blocked53 (blocked44's retired);
+#119 / #121 / #123 closed, `#125` opened for what stays open.
+
+**For the next session** (the milestone is done; read this before touching the game):
+- **The standing binary** is `build/doom_e1m1_blocked53.fjm`; its number, provenance, build command (the 1b line now
+  carries `--pool-base 0x80000000 --span-bits 0x7fffffe0` and `heat_blocked27_p8a`) and the four-step gate a new binary
+  must pass are in `docs/ship-gate.md`. A new game binary is class F (D8) unless its pixels are identical (class S: B
+  SLOWER never ships).
+- **To play**: `fj --run build/doom_e1m1_blocked53.fjm --io pc --flat-max-words 134217728`. The menu: enter on NEW GAME
+  opens the skill screen (w / s pick easy / medium / hard, enter starts, esc backs out); the HELP item or h opens the
+  key-map help. In the game: W / S or UP / DOWN move,
+  the LEFT / RIGHT arrows turn, A / D or , / . strafe, SPACE or E use (doors, switches, lifts), CTRL fires, 1-4 pick a
+  weapon, ESC opens the menu, H the help. Dead: use (or NEW GAME) restarts the level at the skill being played; the exit
+  switch ends the level.
+- **The frozen set is v7**: a model change that moves a replay is a NEW version (section 1's freeze rule); CAP-22 is
+  judged on it with `b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v7.json --pixel-every 1 --proxy`.
+- **The gates** a game build must pass: `m2_std_gate`, `m3_gate` (and their selftests), `scratchpad/gp/p2a_gate.py`,
+  `hurt_gate.py`, `fight_gate.py`, `die_gate.py` (each with `--frame-ops` for the stress rows), B0 on v7, deg_gate with
+  blocked51's op counts (the visual tier took none of M7's code), pinreport, the host suite and `tests/fj` solo -- one
+  at a time (CLAUDE.md rule 1), stopping at the first failure.
+- **Open** (`#125`): the harness-completeness lessons of blocked52 (a stub must do to the shared registers what
+  the callee does; the production `*_parts` wiring needs its own test; B0 cannot see a rule whose outcome agreed by
+  chance; the label-coverage report section 9 asks for is still unbuilt); gamespeed's tours reach no door (O-E2 kept);
+  the recorded levers and deviations; for M4: `hp_bar` inside the `lvdone` guard (#123-4) and the span at
+  88.94% of 2^27 after the pool base moved.
 
 **Build time paces everything**: a game build is ~2 h, and every rung that changes a source file
 under `src/doomfj/` or `src/fj/` misses the counts cache and recounts (~34 min). ~15-20 builds in
@@ -416,6 +469,12 @@ all, strictly one at a time.
 ## 11. Watch items
 
 - **Placement** (section 8): read the pin report on every build before judging a rung.
+- **The pool base** is 0x80000000 (span 0x7fffffe0) since blocked52 r0 overflowed 0x60000000 (9070b02). Every tool that
+  reconstructs the pool reads it (`poolmap.SHIP_GATE`, `profx/pool.KNOBS`, `profx/common.POOL_BASE_WORD`); a new tool
+  that does must too. The span is 88.94% of 2^27.
+- **A stub in a tests/fj harness** must do to every shared register and window what the callee it replaces does
+  (blocked52: `dm_go` stubbed as a print hid `mm_fa` and `pw_t` / `pw_leaf` being rewritten), and a harness that proves
+  an emitter function does not prove the `*_parts` call that wires it (blocked52: `bl_los` without `fight=`).
 - **The counts cache** is signed from `src/doomfj/*.py` and `src/fj/*.fj` BYTES on disk: phase 0's
   model files already changed the signature, so the first P1 build recounts; a CRLF working copy
   also recounts (keep sources LF).
@@ -431,9 +490,10 @@ all, strictly one at a time.
   (`docs/ship-evidence/blocked27_gamespeed_trail.log`). When the gameplay binary changes how the
   player moves (monsters that block, strafe), re-run `gamespeed_trail.py` on it and re-record
   `gamespeed.BINARY_ENDS` / `BINARY_DOORS`; `--selftest` N6e fails until then.
-  Done for P6 + P7: re-recorded from the game's model (f3acab8) and confirmed on blocked51 by
-  `gamespeed_trail.py` (TRAIL PASS, `blocked51_gamespeed_trail.log`); no run opens a door any more, so its
-  CONTROL-DOORS reads N/A (7739a72) until one does.
+  Done for P6 + P7: re-recorded from the game's model (f3acab8) and confirmed on blocked51 by `gamespeed_trail.py`
+  (TRAIL PASS, `blocked51_gamespeed_trail.log`). Done for P8a: knockback moved run 0's end to (529, 208) (564861e, from
+  the final model), confirmed on blocked52 and blocked53 (TRAIL PASS, CONTROL-POSE PASS,
+  `blocked53_gamespeed_trail.log`). No run opens a door, so CONTROL-DOORS reads N/A (7739a72) until one does.
 - **Unit costs** from standalone probes carry a layout factor (0.79-1.06x pooled; the sprite
   pipeline's 1.70 is UNVERIFIED) -- re-measure in-game with `profx` after each build.
 
@@ -451,4 +511,5 @@ all, strictly one at a time.
 | P1.6 | plan 6.6; `scratchpad/gp/render/art_budget.py` -> `art_budget_out.txt` (the 1.96M-word bank) |
 | P2b | `docs/gp-lift-spike.md`; `scratchpad/gp/lift/` |
 | P3-P7 | `src/doomfj/world.py`, `combat.py` (the model = the oracle); `docs/gp-aim-window.md`; `docs/gp-partial-ditto.md`; `scratchpad/gp/census*.py` |
+| P8a / P8 | `docs/gp-final-plan.md` (plan, decisions, As built); `docs/gp-ledger.md` P8a / M7 summed / P8; `src/doomfj/knockcode.py`, `monsterdecide.py`, `monstersight.py`, `projcode.py`, `barrelcode.py`; `scratchpad/gp/fight_gate.py`, `die_gate.py`, `p8a_lib.py` |
 | measure | `scratchpad/12m/profx/README.md`; `scratchpad/gp/b0_scenarios.py`; `scratchpad/gp/scenarios/README.md` |

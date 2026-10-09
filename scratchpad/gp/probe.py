@@ -171,7 +171,15 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # ... and P3.2b's barrel presence, which no gate read before P6 (a binary before P3.2b lacks it)
                    frozenset({"bar_solid"}),
                    # M7 P7: the dead view turns to the killer -- the attacker (hurtcode) and each fireball's shooter
-                   frozenset({"p_atk", "pj_src"}))
+                   frozenset({"p_atk", "pj_src"}),
+                   # M7 P8a (V, docs/gp-final-plan.md 4.1): P6+P7's turn flag, which no gate read before (#123 F1) ...
+                   frozenset({"p_tnh"}),
+                   # ... the dying view's sink (package A: world.player_sinks) ...
+                   frozenset({"p_vd"}),
+                   # ... knockback's cells (package K: world.knockback_on, knockcode.PERSIST) ...
+                   frozenset({"p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z"}),
+                   # ... and infighting's barrel source (package I: world.infighting_on; `mon_target` widens in place)
+                   frozenset({"bar_src"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -632,12 +640,21 @@ class GameBinary:
 # the game tier's cells and known values, and the oracle side
 # ================================================================================================
 
-def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: int = 0, nthvis: int = 0) -> dict:
+def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: int = 0, nthvis: int = 0,
+               modes: tuple | None = None) -> dict:
     """the persisted world state of the standalone game tier (build.STANDALONE_PERSIST +
     DOOR_PERSIST) as probe cells. `menu_scr` / `menu_sel` are OPTIONAL_LABELS: a Probe on a binary
     built before M7 P1.5 drops them (its label table has neither); so are M7 P2a.1's `dreq`
-    (per door), `pcard` and `wfired` (per walk-over trigger, `nwalk`; the fj declares at least one)."""
+    (per door), `pcard` and `wfired` (per walk-over trigger, `nwalk`; the fj declares at least one).
+    M7 P8a (V): `modes` = (player mode, monster mode) of the BINARY read (None: the game tier's, wall_renderer's
+    PLAYER_MODE / MONSTER_MODE) -- infighting (world.infighting_on) widens `mon_target` to 2 nibbles, and a spec
+    wider than the binary's declaration is refused by the Probe, so the width must be the binary's"""
     from doomfj.doorcode import WAIT_NIBBLES
+    if modes is None:
+        from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+        modes = (PLAYER_MODE, MONSTER_MODE)
+    from doomfj.world import infighting_on
+    fight = infighting_on(modes[1])
     cells = {"viewx": Cell("viewx", "hex", 8, signed=True),
              "viewy": Cell("viewy", "hex", 8, signed=True),
              "viewangle": Cell("viewangle", "hex", 8),
@@ -668,6 +685,8 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         # M7 P3.2a: the wake mode's cells; `thseen` is per monster SLOT (nmon), the render's marks
         for name in ("mon_target", "mon_reaction", "mon_movedir"):
             cells[name] = Cell(name, "hex", 1, count=nmon)
+        if fight:                       # M7 P8a I: 0 none, 1 the player, 2 + slot (docs/gp-final-plan.md 4.1)
+            cells["mon_target"] = Cell("mon_target", "hex", 2, count=nmon)
         cells["mon_threshold"] = Cell("mon_threshold", "hex", 2, count=nmon)
         cells["sched_cursor"] = Cell("sched_cursor", "hex", 2)
         cells["thseen"] = Cell("thseen", "hex", 1, count=nmon)     # per SLOT, written by the render
@@ -684,7 +703,8 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     # M7 P4.1: the player's weapon -- one cell each, `wp_own` the four owned flags as one 4-nibble value
     for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", 4), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1)):
         cells[name] = Cell(name, "hex", width)
-    cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=17)          # M7 P4.2a: the aim window (doomfj.aimcode)
+    from doomfj.world import AIM_COLUMNS                             # issue #119 item 6: ONE definition
+    cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=AIM_COLUMNS)  # M7 P4.2a: the aim window (doomfj.aimcode)
     # M7 P5 (docs/gp-p5-interface.md, "the cells' units"; monsters.MonsterPhase.hurt_state / proj_state / fx_state):
     # the player's health (12 bits, read unsigned -- the oracle masks), armor, armor type, damage count, death, and
     # the palette the last present showed (hurtcode); the fireball pool and the blood pool (projcode), rng_fx
@@ -715,7 +735,20 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     # Asked for only with its count (`nthvis`: MonsterViews.nvis), which a binary before P6 does not have
     if nthvis:
         cells["thvis"] = Cell("thvis", "hex", 2, count=nthvis)
+    # M7 P8a (V, docs/gp-final-plan.md 4.1; monsters.MonsterPhase.p8a_state documents the units): P6+P7's turn flag,
+    # the sink, knockback's cells (the per-slot ones only with `nmon`), infighting's barrel source -- each group an
+    # OPTIONAL_GROUP (a binary built without the rule has none of its labels)
+    for name, width in (("p_tnh", 1), ("p_vd", 2), ("p_kmx", 8), ("p_kmy", 8), ("kb_live", 2)):
+        cells[name] = Cell(name, "hex", width)
+    if nmon:
+        for name, width in (("mkx", 8), ("mky", 8), ("mfx", 4), ("mfy", 4)):
+            cells[name] = Cell(name, "hex", width, count=nmon)
+    cells["pj_z"] = Cell("pj_z", "hex", 4, count=FIREBALL_POOL)
+    cells["bar_src"] = Cell("bar_src", "hex", 2, count=nbar)
     return cells
+
+
+from doomfj.monsters import view_drop_kw                                     # noqa: E402,F401  (M7 P8a)
 
 
 def _loot_counts() -> tuple:
@@ -859,7 +892,7 @@ class Oracle:
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
                views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
-               mobiles=None, card=None, removed=None, barrel_views=None, skill=None) -> bytes:
+               mobiles=None, card=None, removed=None, barrel_views=None, skill=None, view_drop=0) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
@@ -876,7 +909,9 @@ class Oracle:
         hidden instead of BOOT_SKILL's (`self.hidden`). A NEW GAME or a restart at another skill spawns other things;
         drawn with the boot skill's set the oracle drew (and SAW) monsters the binary's skill leaf lists do not hold --
         fight F5 / die D4s at medium (the imp, slot 23) and die D5 at easy (the hard trio 21-23, and not slot 50).
-        None keeps BOOT_SKILL's set."""
+        None keeps BOOT_SKILL's set.
+        M7 P8a (V): `view_drop` -- the dying view's sink this frame (`MonsterPhase.view_drop`, map units, package A's
+        `render_wall_frame(view_drop=)`); 0 draws today's call unchanged (the keyword is not passed)."""
         from doomfj.reference_model import SimState
         hidden = self.hidden if skill is None else self.hidden_at(skill)
         view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
@@ -887,6 +922,7 @@ class Oracle:
                                                aim_things=aim_things, aim_out=aim_out,  # M7 P4.2a
                                                mobiles=mobiles,                         # M7 P5
                                                thing_removed=removed, barrel_views=barrel_views,   # M7 P6
+                                               **({"view_drop": view_drop} if view_drop else {}),   # M7 P8a
                                                **self.RENDER_KW))
         # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
         return self.screen.frame(view, card=bool(hidden_extra) if card is None else bool(card), **(screen_kw or {}))

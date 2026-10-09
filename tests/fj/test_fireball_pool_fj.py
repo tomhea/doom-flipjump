@@ -200,7 +200,7 @@ def _hooks(w, log, feed):
             st["spawn"] = False
     w._leaf16, w._missile_try, w._spawn_fireball = leaf16, mtry, spawn
     # M7 P7: and the attacker the hit names (1 + the shooter's slot)
-    w.damage_player = lambda dmg, source, ev: log.append("h%02x%02x" % (dmg, source[1] + 1))
+    w.damage_player = lambda dmg, source, inflictor, ev: log.append("h%02x%02x" % (dmg, source[1] + 1))
 
 
 def _model(script, nt):
@@ -464,7 +464,7 @@ def test_the_script_exercises_every_path():
     w = _world()
     script = _script(w)
     hits = []
-    w.damage_player = lambda dmg, source, ev: hits.append(dmg)
+    w.damage_player = lambda dmg, source, inflictor, ev: hits.append(dmg)
     tot = dict(spawns=0, fizzles=0, impacts=0, walls=0, early_boom=0, relinks=0, removals=0, through_dead=0,
                axis=0, full_frames=0)
     ws = w.ws
@@ -494,7 +494,7 @@ def test_the_script_exercises_every_path():
     assert all(tot[k] >= v for k, v in want.items()), (tot, want)
     # the spawn-time explosion (P_CheckMissileSpawn) and the exact-box impact, from the model's own runs
     w2 = _world()
-    w2.damage_player = lambda dmg, source, ev: None
+    w2.damage_player = lambda dmg, source, inflictor, ev: None
     ex = _open_east(w2)
     w2.ws.mon_x[0], w2.ws.mon_y[0] = ex
     w2.ws.px, w2.ws.py = (ex[0] + 107) << 16, ex[1] << 16
@@ -515,3 +515,290 @@ def test_the_fireball_pool_follows_the_model(tmp_path):
 @pytest.mark.parametrize("mut", MUTANTS)
 def test_control_a_broken_pool_is_caught(tmp_path, mut):
     assert not _run(tmp_path, "pjpool_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut
+
+
+# ---- M7 P8a I (docs/gp-final-plan.md 1.2.2, G-I5; projcode `fight`): FIREBALLS ON THINGS ----------------------------
+# 1. THE AIM: the real lines of pj_spawn_leaf's fight emission (the shooter's 16.16 position, the shared angle leaf
+#    `ia_leaf` toward the TARGET's mt_tqx / mt_tqy, the fine index), against combat._spawn_fireball's
+#    R_PointToAngle2(shooter -> _target_pos16) >> 20 -- monster targets (whole units) and the player (16.16); R9: the
+#    aim at the player (viewx / viewy, poked elsewhere) instead of the target.
+# 2. THE THINGS: pj_try's fight emission (`pt_lines`: the integer box bounds, the monster slots, the barrels,
+#    `pt_thing`) driven with poked records against the model's `_missile_try` (World(monsters="final",
+#    player="final")) -- a fireball of an imp at a 16.16 spot with monsters around it at the box's edge (|dx| = r + 6
+#    - 1, r + 6, r + 6 + 1, with and without a fraction), alive, dying (solid, not shootable) or fallen (neither), of
+#    the shooter's species or not, the shooter itself; barrels standing, exploding or removed; the player alive or
+#    dead. The lines are a poke (`sim.check_cells` stubbed to the record's verdict; the model's missile_lines_block
+#    returns its negation); the damage leaves are stubs that print each call (dm_go: id, damage, mode, source), as the
+#    model's damage_monster / damage_barrel / damage_player are recorders. After each record: pw_ok and rng_fx.
+#    R9: the species rule dropped; the shooter not passed; a solid corpse taken for a shootable thing; the box's
+#    fraction rule dropped (B - 1 always); barrels passed through; monsters passed through.
+from doomfj import gamedata as gd                                                    # noqa: E402
+from doomfj import monsterdecide as _MD                                               # noqa: E402
+
+FIGHT_N = 600
+
+
+def _fworld():
+    return World(monsters="final", player="final", sight_rule="seen")
+
+
+def _imps(w):
+    return [m for m, t in enumerate(w.mon_things) if t.type == 3001 and w.ws.mon_active[m]]
+
+
+def _faim_cases(w):
+    rnd = random.Random(0xA1F)
+    out = []
+    for k in range(120):
+        x, y = rnd.randint(-600, 3000), rnd.randint(-1000, 2200)
+        d = rnd.randint(1, 1500)
+        dx, dy = rnd.choice(((d, 0), (-d, 0), (0, d), (0, -d), (d, d), (-d, -d),
+                             (rnd.randint(-d, d), rnd.randint(-d, d))))
+        frac = (rnd.randrange(1 << 16), rnd.randrange(1 << 16)) if k % 3 == 0 else (0, 0)   # the player's
+        out.append((x, y, (((x + dx) << 16) | frac[0]) & M32, (((y + dy) << 16) | frac[1]) & M32))
+    return out
+
+
+def _faim_run(tmp_path, name, mut=None) -> bool:
+    w = _fworld()
+    ft = PC.fight_things(w, list(range(w.layout.nmon)))
+    code = "\n".join(PC.pj_lines(nt=0, root="R", fight=ft)) + "\n"
+    a = code.index("pj_spawn_leaf:\n")
+    b = code.index("    hex.mov 3, pw_idx, pw_ang + 5*dw\n") + len("    hex.mov 3, pw_idx, pw_ang + 5*dw\n")
+    unit = code[a:b].replace("pj_spawn_leaf:", "angle_unit:")
+    aim = "    hex.mov 8, ia_x2, mt_tqx\n    hex.mov 8, ia_y2, mt_tqy\n"
+    assert unit.count(aim) == 1
+    if mut == "aim_player":
+        unit = unit.replace(aim, "    hex.mov 8, ia_x2, viewx\n    hex.mov 8, ia_y2, viewy\n")
+    cases = _faim_cases(w)
+    body = ["stl.startup_and_init_all"]
+    for x, y, tx16, ty16 in cases:
+        body += ["hex.set 4, mm_x, %d" % (x & 0xFFFF), "hex.set 4, mm_y, %d" % (y & 0xFFFF),
+                 "hex.set 8, mt_tqx, %d" % tx16, "hex.set 8, mt_tqy, %d" % ty16,
+                 "hex.set 8, viewx, %d" % ((tx16 + (5 << 16)) & M32), "hex.set 8, viewy, %d" % ty16,
+                 "stl.fcall angle_unit, au_ret", "hex.print_as_digit 3, pw_idx, 0"]
+    body += ["stl.output 10", "stl.loop"]
+    data = (["viewx: hex.vec 8", "viewy: hex.vec 8", "mm_x: hex.vec 4", "mm_y: hex.vec 4", "au_ret: hex.vec w/4"]
+            + PC.WINDOW_DECLS + [d for d in _MD.FIGHT_DECLS if d.split(":")[0].startswith(("ia_", "mt_tq"))]
+            + [unit + "    stl.fret au_ret"] + _MD.angle_leaf_lines()
+            + [generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE), index_nibbles=3, result_nibbles=8),
+               generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(), index_nibbles=3, result_nibbles=6),
+               generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)])
+    want = ("".join("%03x" % (w.rm.point_to_angle(x << 16, y << 16, _s32(tx16), _s32(ty16)) >> 20)
+                    for x, y, tx16, ty16 in cases) + "\n").encode()
+    p = tmp_path / ("%s.fj" % name)
+    p.write_text("\n".join(body + data) + "\n" + hoisted_scratch_fj(), encoding="utf-8")
+    consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
+    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+            (FJ / "frame_render.fj").resolve(), p.resolve()]
+    return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
+                                           should_raise_assertion_error=False)
+
+
+def test_the_fight_spawn_aims_at_the_target(tmp_path):
+    assert _faim_run(tmp_path, "pjaim_fight"), "the fight's spawn angle parted from the model's"
+
+
+def test_control_an_aim_at_the_player_is_caught(tmp_path):
+    assert not _faim_run(tmp_path, "pjaim_fight_player", mut="aim_player"), "the comparison is vacuous"
+
+
+def _frecords(w):
+    """[dict]: the fireball (its shooter, nx16, ny16), the slots' pokes, the barrels', the player's, the lines'"""
+    from doomfj.combat import BARREL_R, FIREBALL_R
+    rnd = random.Random(0x7F1)
+    n = w.layout.nmon
+    imps = _imps(w)
+    out = []
+    for r in range(FIGHT_N):
+        src = rnd.choice(imps)
+        if rnd.random() < 0.25:                                   # beside a barrel
+            bt = w.barrel_things[rnd.randrange(len(w.barrel_things))]
+            cx, cy = bt.x, bt.y
+            B = BARREL_R + FIREBALL_R
+        else:
+            cx, cy = rnd.randint(-600, 3000), rnd.randint(-1000, 2200)
+            B = rnd.choice((20, 30)) + FIREBALL_R
+        k = rnd.choice((B - 1, B, B + 1, rnd.randint(0, B + 2)))
+        fx, fy = rnd.choice((0, 0, rnd.randrange(1 << 16))), rnd.choice((0, rnd.randrange(1 << 16)))
+        nx16 = (((cx + rnd.choice((k, -k, rnd.randint(-k, k)))) << 16) | fx) & M32
+        ny16 = (((cy + rnd.choice((k, -k, rnd.randint(-k, k)))) << 16) | fy) & M32
+        mons = {}
+        pool = [j for j in range(n) if w.ws.mon_active[j]]
+        for j in rnd.sample(pool, rnd.choice((0, 1, 2, 3, 5))) + ([src] if rnd.random() < 0.3 else []):
+            r_ = w.mon_radius[j] + FIREBALL_R
+            kk = rnd.choice((r_ - 1, r_, r_ + 1, rnd.randint(0, r_ + 2)))
+            x = (nx16 >> 16) + rnd.choice((kk, -kk, rnd.randint(-kk, kk)))
+            y = (ny16 >> 16) + rnd.choice((kk, -kk, rnd.randint(-kk, kk)))
+            st = rnd.choice(("alive", "alive", "alive", "dying", "fallen"))
+            mons[j] = (x, y, int(st != "fallen"), int(st == "alive"))
+        bars = [rnd.choice(("stand", "stand", "boom", "gone")) for _ in w.barrel_things]
+        pl = (int(rnd.random() < 0.2), ((nx16 + rnd.randint(-30 << 16, 30 << 16)) & M32,
+                                        (ny16 + rnd.randint(-30 << 16, 30 << 16)) & M32))
+        out.append(dict(src=src, nx16=nx16, ny16=ny16, mons=mons, bars=bars, pdead=pl[0], p16=pl[1],
+                        lines=int(rnd.random() < 0.8), rng=rnd.randrange(256)))
+    return out
+
+
+BAR_ST = {"stand": (lambda: gd.STATE_INDEX["S_BAR1"], 20, 1), "boom": (lambda: gd.STATE_INDEX["S_BEXP"], 0, 1),
+          "gone": (lambda: 0, 0, 0)}
+
+
+def _fapply(w, rec, log):
+    ws, n = w.ws, w.layout.nmon
+    for j in range(n):
+        ws.mon_solid[j] = ws.mon_shootable[j] = ws.mon_health[j] = 0
+        ws.mon_x[j], ws.mon_y[j] = -20000, -20000
+    for j, (x, y, solid, alive) in rec["mons"].items():
+        ws.mon_x[j], ws.mon_y[j], ws.mon_solid[j], ws.mon_shootable[j] = x, y, solid, alive
+        ws.mon_health[j] = 30 if alive else -3
+    for b, kind in enumerate(rec["bars"]):
+        st, hp, solid = BAR_ST[kind]
+        ws.bar_state[b], ws.bar_health[b], ws.bar_solid[b] = st(), hp, solid
+    ws.p_dead, ws.p_health = rec["pdead"], 0 if rec["pdead"] else 100
+    ws.px, ws.py = _s32(rec["p16"][0]), _s32(rec["p16"][1])
+    ws.rng_fx = rec["rng"]
+    s = 0
+    ws.proj_src[s], ws.proj_active[s] = rec["src"], 1
+    w.missile_lines_block = lambda x16, y16, _ok=rec["lines"]: not _ok
+    w.damage_player = lambda dmg, source, inflictor, ev: log.append("P%02x%02x" % (dmg, source[1] + 1))
+    w.damage_monster = lambda j, dmg, source, inflictor, ev: log.append(
+        "M%02x%02x3%02x" % (1 + j, dmg, 2 + source[1]))
+    w.damage_barrel = lambda b, dmg, source, ev: log.append("M%02x%02x3%02x" % (1 + n + b, dmg, 2 + source[1]))
+    w._leaf16 = lambda x16, y16: 0
+    w._list_remove = w._list_insert = lambda k, leaf: None
+    ws.proj_leaf[s] = 0
+    return w._missile_try(s, _s32(rec["nx16"]), _s32(rec["ny16"]), TicEvents(0))
+
+
+def _fexpected(w, records) -> bytes:
+    lines = []
+    for r, rec in enumerate(records):
+        log = []
+        ok = _fapply(w, rec, log)
+        lines += log + ["%x%02x%02x%03x" % ((int(ok), w.ws.rng_fx) + _window(r))]
+    return ("\n".join(lines) + "\n").encode()
+
+
+def _window(r):
+    """record r's pool window: its runtime thing and leaf, poked before pj_try -- they must come back unchanged
+    (the window's thing is the one pool_tic links and writes back: pj_out / _copy_out's thss_rt)"""
+    return 0x44 + r % 10, (37 * r + 5) % 0x2C0
+
+
+FIGHT_MUTANTS = {
+    "species": ("    hex.if1 1, pt_imp, pt_tout\n", ""),
+    "hits_shooter": ("    hex.cmp 2, pt_j, pt_me, pt_tst, pt_tout, pt_tst\n", ""),
+    "corpse": ("    hex.if0 1, pt_sh, pt_tout\n", ""),
+    "box_fraction": None,
+    "pass_barrels": None,
+    "pass_through": ("  pj_tm:\n", "  pj_tm:\n    ;pj_tl\n"),
+    # the window not put back after dm_go: the fireball written back with the drop's thing and leaf
+    "window_lost": ("    hex.mov w/4, pw_leaf, pt_svl\n", ""),
+}
+
+
+def _fbuild(tmp_path, name, mut=None):
+    w = _fworld()
+    n, nb = w.layout.nmon, len(w.barrel_things)
+    records = _frecords(w)
+    want = _fexpected(w, records)
+    ft = PC.fight_things(w, list(range(n)))
+    code = "\n".join(PC.pj_lines(nt=0, root="R", fight=ft)) + "\n"
+    a = code.index("pj_try:\n")
+    b = code.index("pj_explode:\n")
+    unit = code[a:b]
+    assert unit.count("    sim.check_cells R\n") == 1
+    unit = unit.replace("    sim.check_cells R\n", "    hex.mov 1, cp_ok, cp_poke\n")
+    if mut == "box_fraction":
+        assert unit.count("    hex.if1 4, pw_nx, pt_fx\n") == 1       # B - 1 above whatever the fraction
+        unit = unit.replace("    hex.if1 4, pw_nx, pt_fx\n", "")
+    elif mut == "pass_barrels":
+        i = unit.index("    hex.if0 1, bar_solid + 0*dw, pt_b0_n\n")
+        unit = unit[:i] + "    ;pj_tl\n" + unit[i:]
+    elif mut:
+        old, new = FIGHT_MUTANTS[mut]
+        assert unit.count(old) == 1, (mut, unit.count(old))
+        unit = unit.replace(old, new)
+    body = ["stl.startup_and_init_all"]
+    for r, rec in enumerate(records):
+        body += ["hex.zero %d, mon_solid" % n, "hex.zero %d, mon_shootable" % n]
+        for j, (x, y, solid, alive) in sorted(rec["mons"].items()):
+            body += ["hex.set 4, thpos_rt + %d*dw, %d" % (16 * j + 4, x & 0xFFFF),
+                     "hex.set 4, thpos_rt + %d*dw, %d" % (16 * j + 12, y & 0xFFFF),
+                     "hex.set 1, mon_solid + %d*dw, %d" % (j, solid), "hex.set 1, mon_shootable + %d*dw, %d" % (j, alive)]
+        for bb, kind in enumerate(rec["bars"]):
+            st, hp, solid = BAR_ST[kind]
+            body += ["hex.set 2, bar_st + %d*dw, %d" % (2 * bb, st()), "hex.set 2, bar_hp + %d*dw, %d" % (2 * bb, hp),
+                     "hex.set 1, bar_solid + %d*dw, %d" % (bb, solid)]
+        body += ["hex.set 1, p_dead, %d" % rec["pdead"], "hex.set 3, p_hp, %d" % (0 if rec["pdead"] else 100),
+                 "hex.set 8, viewx, %d" % rec["p16"][0], "hex.set 8, viewy, %d" % rec["p16"][1],
+                 "hex.set 2, rng_fx, %d" % rec["rng"], "hex.set 2, pw_src, %d" % (rec["src"] + 1),
+                 "hex.set 8, pw_nx, %d" % rec["nx16"], "hex.set 8, pw_ny, %d" % rec["ny16"],
+                 "hex.set 1, cp_poke, %d" % rec["lines"],
+                 "hex.set w/4, pw_t, %d" % _window(r)[0], "hex.set w/4, pw_leaf, %d" % _window(r)[1],
+                 "stl.fcall pj_try, pj_tret",
+                 "hex.print_as_digit 1, pw_ok, 0", "hex.print_as_digit 2, rng_fx, 0",
+                 "hex.print_as_digit 2, pw_t, 0", "hex.print_as_digit 3, pw_leaf, 0", "stl.output 10"]
+    body += ["stl.loop",
+             "dp_go:", "    stl.output 80", "    hex.print_as_digit 2, dp_dmg, 0", "    hex.print_as_digit 2, dp_src, 0",
+             "    stl.output 10", "    hex.zero 2, dp_src", "    stl.fret dp_ret",
+             "dm_go:", "    stl.output 77", "    hex.print_as_digit 2, dm_id, 0", "    hex.print_as_digit 2, dm_dmg, 0",
+             "    hex.print_as_digit 1, dm_melee, 0", "    hex.print_as_digit 2, dm_src, 0", "    stl.output 10",
+             "    hex.zero 2, dm_src",
+             # the real dm_go's kill of a dropper links the drop through the POOL WINDOW (damagecode: drop_link<k> ->
+             # barrelcode.dr_link writes pw_t / pw_leaf); the stub does the same to them (blocked52 fight_gate F6
+             # frame 44: imp 36's fireball killed shotgun guy 35 and was written back with the corpse's leaf)
+             "    hex.not w/4, pw_t", "    hex.not w/4, pw_leaf",
+             "    stl.fret dm_ret"]
+    decls = (PC.pool_decls() + PC.pt_decls(ft)
+             + ["viewx: hex.vec 8", "viewy: hex.vec 8", "p_hp: hex.vec 3", "p_dead: hex.vec 1",
+                "dp_dmg: hex.vec 2", "dp_src: hex.vec 2", "dp_ret: hex.vec w/4",
+                "dm_id: hex.vec 2", "dm_dmg: hex.vec 2", "dm_melee: hex.vec 1", "dm_src: hex.vec 2", "dm_ret: hex.vec w/4",
+                "cp_ok: hex.vec 1", "cp_poke: hex.vec 1", "cpx: hex.vec 8", "cpy: hex.vec 8", "cprad: hex.vec 8",
+                "mon_solid: hex.vec %d" % n, "mon_shootable: hex.vec %d" % n, "thpos_rt: hex.vec %d" % (16 * n),
+                "bar_st: hex.vec %d" % (2 * nb), "bar_hp: hex.vec %d" % (2 * nb), "bar_solid: hex.vec %d" % nb])
+    prog = "\n".join(body + decls + [unit] + [PC.tables_fj()[0]]) + "\n"
+    p = tmp_path / ("%s.fj" % name)
+    p.write_text(prog, encoding="utf-8")
+    consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
+    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
+
+
+def _frun(tmp_path, name, mut=None) -> bool:
+    srcs, want = _fbuild(tmp_path, name, mut)
+    return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
+                                           should_raise_assertion_error=False)
+
+
+def test_the_fight_records_exercise_every_thing():
+    """the model's own outcomes: monsters hit, the species exploding, solid corpses stopping it, the shooter passed,
+    barrels hit and exploding ones stopping it, the player hit, the lines refusing, and clear passes"""
+    w = _fworld()
+    seen = {"mon": 0, "species": 0, "corpse": 0, "bar": 0, "player": 0, "pass": 0, "lines": 0, "shooter_near": 0}
+    for rec in _frecords(w):
+        log = []
+        ev_hits = []
+        orig = w._missile_things
+        w._missile_things = lambda s, nx, ny, ev, _o=orig: (_o(s, nx, ny, ev), ev_hits.extend(ev.mon_hits))[0]
+        ok = _fapply(w, rec, log)
+        w._missile_things = orig
+        kinds = [h[2] for h in ev_hits]
+        for k in kinds:
+            seen["corpse" if k == "corpse" else k] += 1
+        seen["player"] += any(ln[0] == "P" for ln in log)
+        seen["pass"] += bool(ok)
+        seen["lines"] += (not ok) and not log and not kinds
+        seen["shooter_near"] += rec["src"] in rec["mons"]
+    want = {"mon": 40, "species": 10, "corpse": 10, "bar": 8, "player": 10, "pass": 100, "lines": 20,
+            "shooter_near": 40}
+    assert all(seen[k] >= v for k, v in want.items()), sorted((k, seen[k], v) for k, v in want.items())
+
+
+def test_the_fight_things_follow_the_model(tmp_path):
+    assert _frun(tmp_path, "pjthings"), "the fj fireball's things parted from the model's _missile_try"
+
+
+@pytest.mark.parametrize("mut", sorted(FIGHT_MUTANTS))
+def test_control_a_broken_thing_test_is_caught(tmp_path, mut):
+    assert not _frun(tmp_path, "pjthings_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut

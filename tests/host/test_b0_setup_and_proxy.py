@@ -27,6 +27,17 @@ AFTER = "R0-aftermath"
 PREFIX = 24          # the aftermath's first frames: the control parts inside them (asserted below)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def v6_modes():
+    """M7 P8a: b0's mirror takes the GAME tier's modes (wall_renderer: the binary under test), "final" since the P8a
+    flip; v6 is a "full" / "full" set (its B0 ran on blocked51), so these v6 tests pin the game modes to v6's"""
+    from doomfj import wall_renderer as WR
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(WR, "PLAYER_MODE", "full")
+        mp.setattr(WR, "MONSTER_MODE", "full")
+        yield
+
+
 @pytest.fixture(scope="module")
 def b0s():
     spec = importlib.util.spec_from_file_location("gp_b0_scenarios_setup", ROOT / "scratchpad/gp/b0_scenarios.py")

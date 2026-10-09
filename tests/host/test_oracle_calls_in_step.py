@@ -63,11 +63,17 @@ HISTORICAL = frozenset({"scratchpad/chk_refactor.py", "scratchpad/m14_baseline_i
 # a control tool that renders deliberate VARIANTS of the shared set (sky off, bbox_cull off) through
 # a parameter -- judging it would demand it stop being a control
 CONTROL_TOOLS = frozenset({"scratchpad/gp/census_control.py"})
+# M7 P8a (issue #121 item 15): IDENTITY tools render the NEW oracle against an OLD one pinned at a git ref, with
+# GAME_RENDER_KW cut to the keywords the old signature accepts (`base_render_kw`, which prints what it drops) -- the
+# same cut on both sides is the point, so they cannot pass the shared set itself; their claim is checked by their own
+# run (60/60 frames identical), not by this test
+IDENTITY_TOOLS = frozenset({"scratchpad/gp/p5_mobiles_identity.py", "scratchpad/gp/p67_identity.py",
+                            "scratchpad/gp/p8_identity.py"})
 
 
 def is_gate(rel: str, source: str) -> bool:
     """a tracked tool that compares a built binary against the oracle, without emitting"""
-    return rel.startswith("scratchpad/") and rel not in HISTORICAL | CONTROL_TOOLS and (
+    return rel.startswith("scratchpad/") and rel not in HISTORICAL | CONTROL_TOOLS | IDENTITY_TOOLS and (
         rel.startswith("scratchpad/gp/") or any(r in source for r in BINARY_RUNNERS))
 
 
@@ -258,7 +264,9 @@ def test_the_hosted_set_is_the_game_set_without_depth_order():
     from doomfj.reference_model import GAME_RENDER_KW, HOSTED_RENDER_KW
     assert GAME_RENDER_KW.get("rt_depth_order") == "aprox"
     # M7 P6+P7 E: ... and in the actors rule (`exempt_actors`), which only the game tier's record emits
-    assert HOSTED_RENDER_KW == dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False)
+    # M7 P8a C: ... and in the compositor rules (D3 a / b), the game tier's alone too
+    assert HOSTED_RENDER_KW == dict(GAME_RENDER_KW, rt_depth_order=False, exempt_actors=False, rt_rank=False,
+                                    exempt_barrels=False)
     hosted = ("from doomfj.reference_model import HOSTED_RENDER_KW\n"
               "rm.render_wall_frame(s, scene, sprite_wad=art, **HOSTED_RENDER_KW)\n")
     assert out_of_step(hosted, gate=True) == [], "a splat of the hosted set asks for all the forced keys"

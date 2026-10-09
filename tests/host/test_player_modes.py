@@ -331,14 +331,15 @@ def test_mode_helpers_are_one_rule():
     from doomfj.damagecode import DAMAGE_PLAYER_MODES
     from doomfj.noisecode import NOISE_PLAYER_MODES
     from doomfj.world import PLAYER_MODES, player_bleeds, player_hears, player_resolves
-    assert PLAYER_MODES == ("walk", "fire", "shoot", "hit", "fx", "full")
-    assert DAMAGE_PLAYER_MODES == tuple(m for m in PLAYER_MODES if player_resolves(m)) == ("shoot", "hit", "fx", "full")
-    assert NOISE_PLAYER_MODES == tuple(m for m in PLAYER_MODES if player_hears(m)) == ("hit", "fx", "full")
-    assert tuple(m for m in PLAYER_MODES if player_bleeds(m)) == ("fx", "full")
+    assert PLAYER_MODES == ("walk", "fire", "shoot", "hit", "fx", "full", "final")       # M7 P8a: + "final"
+    assert DAMAGE_PLAYER_MODES == tuple(m for m in PLAYER_MODES if player_resolves(m)) == (
+        "shoot", "hit", "fx", "full", "final")
+    assert NOISE_PLAYER_MODES == tuple(m for m in PLAYER_MODES if player_hears(m)) == ("hit", "fx", "full", "final")
+    assert tuple(m for m in PLAYER_MODES if player_bleeds(m)) == ("fx", "full", "final")
     for m in PLAYER_MODES:
         w = World(monster_tics=1, skill=gd.SK_HARD, monsters="idle", player=m)
         assert (w._p_resolve, w._p_noise, w._p_fx, w._p_full) == (
-            player_resolves(m), player_hears(m), player_bleeds(m), m == "full"), m
+            player_resolves(m), player_hears(m), player_bleeds(m), m in ("full", "final")), m
 
 
 def test_p67_mode_helpers_are_one_rule():
@@ -346,8 +347,8 @@ def test_p67_mode_helpers_are_one_rule():
     mode would join player_loots only) -- and the game tier's target: the gates' MonsterPhase reads them, "full" is
     the combat model's own mode (`_p_full`)"""
     from doomfj.world import PLAYER_MODES, player_loots, player_mortal
-    assert tuple(m for m in PLAYER_MODES if player_loots(m)) == ("full",)
-    assert tuple(m for m in PLAYER_MODES if player_mortal(m)) == ("full",)
+    assert tuple(m for m in PLAYER_MODES if player_loots(m)) == ("full", "final")       # M7 P8a: "final" is "full"'s
+    assert tuple(m for m in PLAYER_MODES if player_mortal(m)) == ("full", "final")
     for m in PLAYER_MODES:
         assert World(skill=gd.SK_HARD, monsters="idle", player=m)._p_full == player_loots(m), m
 

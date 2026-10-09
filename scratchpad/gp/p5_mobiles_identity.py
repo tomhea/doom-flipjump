@@ -34,7 +34,10 @@ import scenarios_v2 as S                                                     # n
 from doomfj.monsters import MonsterPhase, MonsterViews                       # noqa: E402
 from doomfj.reference_model import GAME_RENDER_KW, SimState, build_scene    # noqa: E402
 
-BASE_REF = "m7-p5"
+# issue #121 item 15: the UNMODIFIED oracle is P5's merge-base on main -- 470e39b, the merge of #118 (= f8dc9e8^1, the
+# commit #120 merged onto). It was "m7-p5", the PR's own head, whose oracle already HAS `mobiles` (the signature assert
+# below then fails); a commit on main never moves, a merged branch name may
+BASE_REF = "470e39b"
 
 
 def old_oracle_module(ref: str):
@@ -50,6 +53,18 @@ def old_oracle_module(ref: str):
     return mod
 
 
+def base_render_kw(rm_old) -> dict:
+    """GAME_RENDER_KW cut to the keywords the BASE oracle accepts (issue #121 item 15): the picture keywords that
+    arrived after the base (P6+P7's `exempt_actors`, the actors rule, ...) are dropped on BOTH sides, so OLD and NEW
+    render the same rule set and the identity is "nothing else moved since the base". The dropped keys are printed."""
+    import inspect
+    params = inspect.signature(rm_old.render_wall_frame).parameters
+    dropped = sorted(k for k in GAME_RENDER_KW if k not in params)
+    if dropped:
+        print("  GAME_RENDER_KW keywords newer than the base, dropped on both sides: %s" % dropped)
+    return {k: v for k, v in GAME_RENDER_KW.items() if k in params}
+
+
 def phase_of(world) -> MonsterPhase:
     """a MonsterPhase view of an existing world (the replay's): views / positions / mobiles read it"""
     ph = MonsterPhase.__new__(MonsterPhase)
@@ -60,7 +75,9 @@ def phase_of(world) -> MonsterPhase:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--file", default=str(ROOT / "scratchpad/gp/scenarios/combat_scenarios_v5.json"))
+    # issue #121 item 15: v6, the standing frozen set -- v5 no longer replays on the model (the owner's tempo / turn /
+    # fire changes moved its poses: "the replay left the set" at frame 2)
+    ap.add_argument("--file", default=str(ROOT / "scratchpad/gp/scenarios/combat_scenarios_v6.json"))
     ap.add_argument("--run", default="R0-west-hall")
     ap.add_argument("--frames", type=int, default=60)
     ap.add_argument("--ref", default=BASE_REF)
@@ -77,6 +94,7 @@ def main(argv=None) -> int:
     rm_new = ReferenceModel(GAME_CFG)
     old = old_oracle_module(a.ref)
     rm_old = old.ReferenceModel(GAME_CFG)
+    GKW = base_render_kw(rm_old)
     mv = MonsterViews(rm_new, w.mw, w.mapname, art, w)
     ph = phase_of(w)
     first = len(run["keys"]) - a.frames
@@ -94,15 +112,15 @@ def main(argv=None) -> int:
         sc = scenes[key]
         st = SimState(ws.px, ws.py, ws.pangle, w.mapname)
         kw = dict(sprite_wad=art, thing_views=mv(ph, ws.px, ws.py), thing_positions=mv.positions(ph))
-        p_old = bytes(rm_old.render_wall_frame(st, sc, **kw, **GAME_RENDER_KW))
-        p_new = bytes(rm_new.render_wall_frame(st, sc, mobiles=[], **kw, **GAME_RENDER_KW))
-        p_none = bytes(rm_new.render_wall_frame(st, sc, mobiles=None, **kw, **GAME_RENDER_KW))
+        p_old = bytes(rm_old.render_wall_frame(st, sc, **kw, **GKW))
+        p_new = bytes(rm_new.render_wall_frame(st, sc, mobiles=[], **kw, **GKW))
+        p_none = bytes(rm_new.render_wall_frame(st, sc, mobiles=None, **kw, **GKW))
         mobs = ph.mobiles()
         n += 1
         same += p_old == p_new == p_none
         if mobs:
             mob_frames += 1
-            p_mob = bytes(rm_new.render_wall_frame(st, sc, mobiles=mobs, **kw, **GAME_RENDER_KW))
+            p_mob = bytes(rm_new.render_wall_frame(st, sc, mobiles=mobs, **kw, **GKW))
             d = sum(x != y for x, y in zip(p_mob, p_new))
             mob_differs += d > 0
             print("  frame %3d: %s  mobiles %s -> %d px drawn" % (

@@ -57,7 +57,7 @@ def _ends():
 
 def test_validate_replays_the_game_the_binary_plays():
     ends, shut, want = _ends()
-    assert ends[0] == want[0] == ((577, 243), "0"), "run 0 must end where BINARY_ENDS / BINARY_DOORS say"
+    assert ends[0] == want[0] == ((529, 208), "0"), "run 0 must end where BINARY_ENDS / BINARY_DOORS say"   # P8a: the final modes
     assert ends[1] == want[1] == ((-296, 120), "0"), "run 1 starts with every door shut, the world reset"
     # R9: the door-only replay (no monsters, no blocking: --validate through P5) walks elsewhere on run 0
     assert shut != ends[0], "the door-only replay ends where the game does: the comparison cannot see the monsters"

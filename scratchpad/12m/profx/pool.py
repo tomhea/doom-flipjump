@@ -16,7 +16,8 @@ from flipjump.assembler.preprocessor import BlockPool
 
 W = 32
 # ship-gate 1b's knobs (docs/ship-gate.md): the ones that enter _block_bits / _preallocate
-KNOBS = {"pool_base": 0x60000000, "span_bits": 0x9fffffe0, "spread": 2, "spread_min_count": 256,
+KNOBS = {"pool_base": 0x80000000, "span_bits": 0x7fffffe0,   # M7 P8a (was 0x60000000; poolmap.SHIP_GATE)
+          "spread": 2, "spread_min_count": 256,
          "max_slot_ops": 512, "width_buckets": True}
 
 

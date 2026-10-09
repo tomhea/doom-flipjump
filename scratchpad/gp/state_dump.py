@@ -32,6 +32,11 @@ def main(argv=None) -> int:
     for mod in (SV, doomfj):                                    # never a module from elsewhere
         assert Path(mod.__file__).resolve().is_relative_to(root), (mod.__file__, root)
     doc = json.loads(Path(a.set).read_text(encoding="ascii"))
+    # M7 P8a (V; #123 L9): the set's OWN model -- its sight rule, monster tempo and (P8a) modes, through the tree's
+    # `use_sight_rule` (a tree before P3.2 has none: its sets were "los" at one tic, World's defaults). Without it the
+    # witness replayed a "seen" / tempo-2 set (v5, v6) under exact LOS at one tic: a different model on both sides
+    if hasattr(SV, "use_sight_rule"):
+        SV.use_sight_rule(doc)
     w0 = SV.new_world()
     with gzip.open(a.out, "wt", encoding="ascii") as fh:
         fh.write(json.dumps({"root": str(root), "door_order": list(w0.door_order),

@@ -117,7 +117,8 @@ def _parts():
         nwalk=nwalk, nlift=nlift, monsters=p31["restart"],
         hud_restart=hudcode.hud_restart_lines(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))),
         wpn_restart=wpn["restart"], aim=True, hrt_restart=hrt["restart"], proj_restart=p31["proj"]["restart"],
-        nmobile=nmobile, p6_common=p6_common, p6_skills=p6_skills)
+        nmobile=nmobile, p6_common=p6_common, p6_skills=p6_skills,
+        p8a_common=WR.p8a_restart_parts(w5))           # M7 P8a: the final rung's cells (empty in the "full" tier)
     return dict(mw=mw, restart=restart, nt=len(rt), nmob=nmobile, nss=nss,
                 nvis=len(vis_slots) + (loot_slots["nextra"] if loot_slots else 0), nd=nd, nwalk=nwalk, nlift=nlift)
 
@@ -226,12 +227,12 @@ def _model_after_death_restart(skill):
     from doomfj import wall_renderer as WR
     from doomfj.monsters import MonsterPhase
     from doomfj.world import TicEvents
-    mp = MonsterPhase(None, "E1M1", skill, mode=WR.MONSTER_MODE, player="full")
+    mp = MonsterPhase(None, "E1M1", skill, mode=WR.MONSTER_MODE, player=WR.PLAYER_MODE)
     w = mp.world
     for t in range(60):
         w.tic({"fire": t % 20 < 12, "forward": 20 <= t < 40, "turn_left": 40 <= t < 50})
     ev = TicEvents(w.tic_count)
-    w.damage_player(250, ("test", 0), ev)
+    w.damage_player(250, ("test", 0), None, ev)
     assert w.ws.p_dead and ev.deaths == 1
     ev = w.tic({"use": True})
     assert ev.restart_requests == 1 and w.ws.g_restart == 1

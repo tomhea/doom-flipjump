@@ -138,7 +138,8 @@ BOOT_SKILL = _gd.SK_HARD
 # M7 P3 (docs/gp-monsters.md): the game tier's MONSTER MODE -- the model mode its binary is exact against
 # ("idle" P3.1, "wake" P3.2a, "chase" P3.2b, "decide" P3.2c, "full" P5: the attacks land -- the bullets, the claw and
 # the bite through hurtcode's dp_go, the imp's fireball through projcode's pool)
-MONSTER_MODE = "full"
+# M7 P8a: "final" -- knockback (K) and infighting (I): docs/gp-final-plan.md
+MONSTER_MODE = "final"
 # M7 P4 (docs/gp-combat.md section 1): the game tier's PLAYER MODE -- the model mode its weapon is exact against
 # ("walk" through P4.0, "fire" P4.1: the trigger without its effects, "hit" P4.2); a mode whose shots hurt
 # (damagecode.DAMAGE_PLAYER_MODES) adds the monsters' damage to p31_parts -- MONSTER_MODE must then decide ("decide" or
@@ -146,7 +147,8 @@ MONSTER_MODE = "full"
 # the player can be hurt exactly when the monsters' attacks land -- monstercode.p31_parts asserts the pair)
 # M7 P6+P7: "full" -- the player loots (pickups, blocking, nukage, berserk, barrels, drops) and is mortal (the dead
 # latch, the death think and its turn to the killer, the restart on use)
-PLAYER_MODE = "full"                     # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD; P5: it BLEEDS
+# M7 P8a: "final" -- the dying view sinks (A), knockback (K), the compositor rules D3 a / b (C): docs/gp-final-plan.md
+PLAYER_MODE = "final"                    # M7 P4.2a: the shot resolves and hurts; P4.2b: and it is HEARD; P5: it BLEEDS
 
 
 def tier_flags(tier: str) -> dict:
@@ -203,6 +205,12 @@ def _pfx(mapname: str) -> str:
 THING_XORBY_FIELDS = (("sp_x", 8), ("sp_y", 8), ("sp_z", 8), ("sp_left", 8), ("sp_w", 8),
                       ("sp_hh", 8), ("sp_tzmax", 8), ("sp_tzmax2", 8), ("sp_mon", 2),
                       ("sp_base", 4), ("sp_base2", 4), ("sp_dw", 2), ("sp_lt", 2))
+# M7 P8a package C (D3 b, docs/gp-final-plan.md 1.3): bit 8 of frame.thing_record_body's `dsofts` -- the game tier at the
+# P8a player mode (world.compositor_d3, the emitter's `_D3`) passes DEG_SOFT_SCENERY | this, which switches on the
+# record's two `sp_ex` lines (a barrel: no soft raise, not counted); `hex.set 2` reads only the count's low byte. A
+# BAKED barrel's xor_by blocks carry ("sp_ex", 1, 1) on top of THING_XORBY_FIELDS (`_baked_barrel_site`) -- the
+# involution leaves it 0, and the runtime walk zeroes it after each record (sim.thing_pass_depth's `ex`)
+D3B_SOFT_FLAG = 0x100
 
 
 def _seg_xorby_block(label, fields, ret="xb_ret"):
@@ -445,6 +453,7 @@ LEVEL_DONE_SELECTED = 2
 from doomfj import restartcode as _restartcode                    # noqa: E402 (M7 P7)
 from doomfj import hurtcode as _hurtcode                          # noqa: E402 (M7 P7: the death think's turn)
 from doomfj import lootcode as _lootcode                          # noqa: E402 (M7 P6+P7 package B: the player's side)
+from doomfj import knockcode as _knockcode                        # noqa: E402 (M7 P8a: knockback's hooks)
 
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
@@ -558,18 +567,21 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
 
 
 def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
-                    wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None) -> tuple:
+                    wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None,
+                    p8a_common=()) -> tuple:
     """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
     values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
     emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
     start, so the two cannot be composed differently. `hud_restart` None: a tier without the game screen (then none of
     the screen's parts either)."""
+    from doomfj.world import AIM_COLUMNS          # issue #119 item 6: the window's width, ONE definition
     extra = (() if hud_restart is None else
              (list(hud_restart) + list(wpn_restart)
-              + ([f"hex.zero {2 * 17}, aim_sid"] if aim else [])                          # M7 P4.2a: no aim
+              + ([f"hex.zero {2 * AIM_COLUMNS}, aim_sid"] if aim else [])                 # M7 P4.2a: no aim
               # M7 P5: the player's health, armor, damage count and death at the level start (never pal_cur: a
               # device shadow, restartcode.DEVICE_SHADOWS); the pools empty, their rows zero, rng_fx at its seed
-              + list(hrt_restart) + list(proj_restart) + list(p6_common)))
+              + list(hrt_restart) + list(proj_restart) + list(p6_common)
+              + list(p8a_common)))                      # M7 P8a: the final rung's cells (p8a_restart_parts)
     return restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=nwalk, nlift=nlift,
                          monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills)
 
@@ -581,6 +593,11 @@ def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
     lootcode.PERSIST -- the same on every skill: the player's start), and each skill's RUNTIME pickups' `thvis` slots
     after the baked vanishable ones (`loot_slots`: lootcode.pickup_slots; lootcode.extra_vis per skill)."""
     common, skills = (list(bar["restart"][0]) if bar else []), [[] for _ in SKILLS]
+    # M7 P8a A: the dying view's p_vd -- 0 on every skill -- while the World's player sinks (its mode is the game
+    # tier's PLAYER_MODE: p31_parts builds it so), so this composition and the emitted p_vd cannot disagree
+    from doomfj.world import player_sinks as _sinks
+    if world is not None and _sinks(world.player):
+        common += _restartcode.view_restart_lines()
     if loot_slots is not None:
         c, per = _restartcode.level_start_lines(world, SKILLS, _lootcode.PERSIST)
         common += c
@@ -588,6 +605,17 @@ def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
             skills[k] += list(per[k]) + [f"    hex.set 2, thvis + {loot_slots['nvis'] + j}*2*dw, {v}"
                                          for j, v in enumerate(_lootcode.extra_vis(world, loot_slots, sk))]
     return common, skills
+
+
+def p8a_restart_parts(world) -> list:
+    """M7 P8a -- the final rung's level-start lines for `compose_restart(p8a_common=)`, ONE composition (the emitter and
+    tests/fj/test_restart_fj.py call it), each package's behind its ONE rule at the game tier's modes: package K's
+    knock cells (doomfj.knockcode.restart_lines: all 0). Empty in the "full" game tier"""
+    from doomfj import world as _w
+    out = []
+    if world is not None and _w.knockback_on(PLAYER_MODE, MONSTER_MODE):
+        out += _knockcode.restart_lines(world.layout.nmon)
+    return out
 
 
 def p5_tic_lines(hrt, barrels: bool = False) -> list:
@@ -601,6 +629,61 @@ def p5_tic_lines(hrt, barrels: bool = False) -> list:
     return (["stl.fcall pj_phase, pj_pret"] + (["stl.fcall bar_phase, bar_pret"] if barrels else [])
             + ["stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(),
                *hrt["bar"], "p5_bar_skip:"])
+
+
+# issue #123 item 4: the thing types whose pickup moves health or armor (combat._touch_specials / lootcode's P_Give*:
+# ARM1, ARM2, BON1, BON2, STIM, MEDI, SOUL, PSTR -- berserk gives health 100)
+HEALTH_ARMOR_TYPES = frozenset({2018, 2019, 2014, 2015, 2011, 2012, 2013, 2023})
+
+
+def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
+    """issue #123 item 4 (emit time): `hp_bar` sits inside the `lvdone` guard (p5_tic_lines), but on the frame the exit
+    is pressed the player phase still runs AFTER the press -- nukage at the tic-start position, then the walk with its
+    pickups -- so a health or armor change on that frame would leave the bar stale for good. Unreachable on a map
+    where, for every exit box (`boxes`, doors.exit_boxes: where the press can happen):
+      * no damaging sector (combat.SECTOR_HURT) has its bounding box meeting the exit box (nukage reads the tic-start
+        position, which the press puts inside the box);
+      * no health / armor pickup (HEALTH_ARMOR_TYPES, any skill) lies within the exit box grown by one frame's
+        furthest reach: the walk's step (FORWARD_MOVE + STRAFE_MOVE), a knock move (MAXMOVE, M7 P8a), and the touch
+        distance (the player's radius + the item's).
+    Asserted, not handled: moving hp_bar out of the guard is M4's (a map that breaks this). Returns the margins
+    {"hurt": smallest axis gap to a hurt sector's box, "pickup": smallest axis gap to a health / armor item beyond
+    the reach} for the record (E1M1: no hurt sector near the exit; the nearest item, a stimpack, 49 units clear)."""
+    from doomfj import gamedata as gd
+    from doomfj.combat import ITEM_RADIUS, PLAYER_R, SECTOR_HURT
+    from doomfj.reference_model import FORWARD_MOVE, STRAFE_MOVE
+    lds, sds, secs, verts = (map_wad.linedefs(mapname), map_wad.sidedefs(mapname), map_wad.sectors(mapname),
+                             map_wad.vertexes(mapname))
+    hurt = {i for i, s in enumerate(secs) if s.special in SECTOR_HURT}
+    sbox = {}
+    for ld in lds:
+        ss = {sds[ld.front].sector} | ({sds[ld.back].sector} if 0 <= ld.back < len(sds) else set())
+        for si in ss & hurt:
+            for v in (verts[ld.v1], verts[ld.v2]):
+                x0, y0, x1, y1 = sbox.get(si, (v.x, v.y, v.x, v.y))
+                sbox[si] = (min(x0, v.x), min(y0, v.y), max(x1, v.x), max(y1, v.y))
+    reach = (FORWARD_MOVE >> 16) + (STRAFE_MOVE >> 16) + (gd.MAXMOVE >> 16) + PLAYER_R + ITEM_RADIUS
+    margins = {"hurt": None, "pickup": None}
+
+    def gap(box, x0, y0, x1, y1):
+        """the larger axis gap between two boxes (<= 0: they meet)"""
+        return max(x0 - box[2], box[0] - x1, y0 - box[3], box[1] - y1)
+
+    for box in boxes:
+        for si, sb in sbox.items():
+            g = gap(box, *sb)
+            assert g > 0, ("the exit box %r meets damaging sector %d (%r): nukage could hurt the player on the exit "
+                           "frame and hp_bar, inside the lvdone guard, would stay stale (issue #123 item 4)"
+                           % (box, si, sb))
+            margins["hurt"] = g if margins["hurt"] is None else min(margins["hurt"], g)
+        for t in map_wad.things(mapname):
+            if t.type in HEALTH_ARMOR_TYPES:
+                g = gap(box, t.x, t.y, t.x, t.y) - reach
+                assert g > 0, ("a health / armor pickup (type %d at %d, %d) is within one frame's reach (%d) of the "
+                               "exit box %r: hp_bar, inside the lvdone guard, would stay stale on the exit frame "
+                               "(issue #123 item 4)" % (t.type, t.x, t.y, reach, box))
+                margins["pickup"] = g if margins["pickup"] is None else min(margins["pickup"], g)
+    return margins
 
 
 # M7 P6+P7 package E (the owner, 2026-10-05: "maybe run 2 ticks each time?"): the frame's MONSTER WORLD runs
@@ -923,10 +1006,26 @@ def exit_lines(boxes, press_miss=()) -> list:
     return out
 
 
+def landing_drop_lines() -> list:
+    """M7 P8a SPLICE POINT (package A, docs/gp-final-plan.md 1.1 / 4.3 step 9): the dying view's sink at the eye's
+    landing (after `dsc_done`): `viewz -= p_vd << 16` behind one `hex.if0` while alive. Spliced only when
+    world.player_sinks(PLAYER_MODE).
+
+    M7 P8a A (design S0, O-A1 taken): the descend pre-walk's landing has just set `viewz` (the standing eye, floor +
+    41, 16.16) AND `vzcbase` (the eye class's band lists); the drop lowers ONLY viewz -- every projection (the wall
+    spans, the step faces, the sprites' sp_z) reads it at run time -- while the planes keep the standing eye's band
+    lists: the oracle's `render_wall_frame(view_drop=)` split, exactly. viewz -= p_vd << 16 is the 2-nibble p_vd
+    subtracted at nibble 4 with the borrow carried through nibble 7 (viewz may go negative: two's complement, as
+    view_z's own values below floor -41). A living player (p_vd 0) pays the one `if0`."""
+    return ["hex.if0 2, p_vd, lnd_vd_end",
+            "hex.sub_shifted 8, 2, viewz, p_vd, 4",
+            "lnd_vd_end:"]
+
+
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
                             press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
-                            use_guard=((), ()), weapon_bar=()) -> list:
+                            use_guard=((), ()), weapon_bar=(), knock_move=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -943,6 +1042,10 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     M7 P6+P7 (doomfj.lootcode, the "full" player): `latch` -- `p_dd0` = `p_dead`, the death at the tic's START, right
     after the restart on use (which may clear it) and before every guard that reads it (the door tic's, the use lines',
     the weapon keys'); `use_guard` -- (before, after) the use lines: a dead player uses nothing.
+
+    M7 P8a (docs/gp-final-plan.md 4.3 step 6; doomfj.knockcode): `knock_move` -- the player's KNOCK move, spliced right
+    after `simmv_done` (the walk's landing, which the dead player's skipped move reaches too: the corpse slides) and
+    before the bar's weapon slots (the knock's pickups change them).
     """
     return [
         # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
@@ -984,6 +1087,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         # M7 P4.1: the weapon -- the model's player phase runs the number keys and the psprites before the move
         *weapon,
         *_player_sim_lines(collide, strafe=True, tap=True),   # M7 P4.1: the game tier strafes; P6+P7: the tap turn
+        *knock_move,                       # M7 P8a: the player's knock move, after simmv_done (dead or alive)
         # M7 P6+P7: the bar's weapon slots after the move -- its pickups change the ammo and the owned weapons
         # (weaponcode.bar_lines; everything above lands on simmv_done, the dead player's skipped move too)
         *weapon_bar,
@@ -1373,7 +1477,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # hurt the player, and no pools). The weapon then reads the health and death cells (weapon_parts(hurt=)), so it
     # is built once that is known.
     from doomfj.hurtcode import hurt_on as _hurt_on
-    _P5 = bool(menu and MONSTER_MODE == "full" and _hurt_on(PLAYER_MODE))
+    from doomfj.world import monster_attacks_land as _monster_attacks_land   # M7 P8a: "full", "push", "final"
+    _P5 = bool(menu and _monster_attacks_land(MONSTER_MODE) and _hurt_on(PLAYER_MODE))
     # M7 P6+P7 (doomfj.lootcode, package B): the "full" player -- pickups and gives, blocking by things, nukage,
     # berserk and bonus, and the dead player's guards on the TIC-START death `p_dd0`. ONE switch, from the model mode;
     # the door tic reads `p_dd0` (built below, before the monster parts), so it is known here
@@ -1823,7 +1928,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
     # M7 P6 (doomfj.barrelcode, the player mode "full"): the barrels, their blasts, the drops and the puffs
     _bar = _p31.get("barrel") if _p31 else None
-    _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide", "full")) else 0
+    _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide", "full", "push", "final")) else 0
     # M7 P4.2a (doomfj.aimcode): the game tier's AIM WINDOW, when its player's shots resolve -- recorded by the runtime
     # monsters' projections (their seen machinery reaches xscale for every monster D3 e counts)
     _AIM = 1 if (_SEEN and menu and _player_resolves(PLAYER_MODE)) else 0
@@ -1833,7 +1938,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
         # M7 P6: a standing barrel records too (radius class aimcode.RC_BARREL)
         _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar))
-        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar))]
+        # issue #119 items 4 and 7: table_text runs the leaf's emit-time proofs (the MINZ order, every box >= 1 column;
+        # a barrel's bound needs its standing frame from the sprite wad)
+        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar), sprite_wad=sprite_wad)]
     else:
         _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
@@ -1856,6 +1963,23 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _LOOT = False
         assert not _chase
         _door_tic = _make_door_tic()
+    # M7 P8a (docs/gp-final-plan.md 3.0): the final rung's three switches, each from its ONE rule -- and so OFF in
+    # the "full" / "full" game tier, whose text is blocked51's byte for byte (scratchpad/cr/emit_baseline.py --check):
+    # every P8a hook below is emitted behind one of them (after `_LOOT`'s last word: a
+    # monster-less map loots nothing)
+    from doomfj import world as _W8
+    _SINK = bool(_LOOT and _W8.player_sinks(PLAYER_MODE))                      # A: the dying view sinks
+    _KNOCK = bool(_LOOT and _W8.knockback_on(PLAYER_MODE, MONSTER_MODE))      # K: P_DamageMobj's thrust, the knock
+    _FIGHT = bool(_LOOT and _W8.infighting_on(MONSTER_MODE))                  # I: monsters fight monsters
+    assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
+    assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
+    _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
+    assert bool(_p31 and _p31.get("d3")) == _D3, "M7 P8a: p31_parts' compositor rules and the emitter's disagree"
+    if _LOOT:                                 # the oracle's two D3 keys (reference_model.GAME_RENDER_KW) follow the rule
+        from doomfj.reference_model import GAME_RENDER_KW as _GRK8
+        assert bool(_GRK8.get("rt_rank")) == bool(_GRK8.get("exempt_barrels")) == _D3, (
+            "M7 P8a (C): GAME_RENDER_KW's rt_rank / exempt_barrels must be %s at PLAYER_MODE %r (world.compositor_d3) "
+            "-- flip them with the mode (reference_model.D3_RENDER_KW)" % (_D3, PLAYER_MODE))
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
                         loot=_LOOT) if menu else None                # M7 P6+P7: the latch, berserk's key 1 and fist
@@ -1863,11 +1987,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert _proj and _p31.get("nmob"), (
             "M7 P5: MONSTER_MODE 'full' needs p31_parts' pools and mobile rows -- a map with monsters, the game tier")
         from doomfj.hurtcode import hurt_parts
-        _w5 = _p31["world"]
+        # issue #121 F7: reset a COPY -- p31_parts' World stays as p31_parts left it (World.reset only rebinds the
+        # copy's attributes: `ws`, the tic count, the events, the door scene), so no reader of _p31["world"] sees a
+        # state the parts were not built from
+        import copy as _copy
+        _w5 = _copy.copy(_p31["world"])
         _w5.reset(BOOT_SKILL)
         # boot_wad: the asset wad, whose palette 0 the boot sends as `palette` -- hurtcode asserts playpal0 equals it
         _hrt = hurt_parts(_w5, sprite_wad=sprite_wad, boot_wad=asset_wad,
-                          loot=_LOOT)                               # M7 P6: the berserk and bonus palettes
+                          loot=_LOOT,                               # M7 P6: the berserk and bonus palettes
+                          **({"knock": True} if _KNOCK else {}))   # M7 P8a: dp_go thrusts
         _p5_model_asserts(_p31, _proj, _hrt)
     else:
         assert not _proj and not (_p31 and _p31.get("nmob")), "the pools and mobile rows are P5's (MONSTER_MODE 'full')"
@@ -1953,6 +2082,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # keeps DEG_SOFT_MON (the hosted tiers' picture and deg_gate's visual tier do not move)
     from doomfj.reference_model import GAME_RENDER_KW as _GRK
     _DSOFTM = MONSTER_BUDGET if (_p31 and _GRK.get("exempt_actors")) else DEG_SOFT_MON
+    # M7 P8a (C, D3 b): the scenery soft count with D3B_SOFT_FLAG -- the barrels' exemption (`sp_ex`), `_D3` alone
+    _DSOFTS = DEG_SOFT_SCENERY | (D3B_SOFT_FLAG if _D3 else 0)
     _emit_baked_leaf = bool(moving_things and things_by_ss)
 
     def _thing_leaf_body(label, mt, aim_baked=False):
@@ -1966,7 +2097,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{proj}, {cfg.CENTERX}, "
                 f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
                 f"{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, "     # M7 P1.6: `hdb`
-                f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
+                f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {_DSOFTS}, "
                 f"{_DSOFTM}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
                 f"{DEG_SPR_LOWRES_H}, "
                 f"{DEG_SPR_NEAR_TZ * 0x10000}, "
@@ -2015,6 +2146,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 r = _p31["view_rows"][_p31["bar_view"][idx] - nt_]
                 fields = barrel_state_fields(tfields, r, tsec.floor_h,
                                              spr_cls[(rm.wall_lightnum(tsec.light, 0), max(1, r[2]))])
+            if _D3:                       # M7 P8a (C, D3 b): every state's block flags the barrel (D3B_SOFT_FLAG)
+                fields = list(fields) + [("sp_ex", 1, 1)]
             label = f"thing{tag}_consts" if k == 0 else f"thing{tag}_c{k}"
             xorby_blocks[f"T{tag}" if k == 0 else f"T{tag}_{k}"] = _seg_xorby_block(label, fields)
             stand = k < 2
@@ -2782,7 +2915,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 _p31["world"], rm=rm, map_wad=map_wad, mapname=mapname, sprite_wad=sprite_wad,
                 mon_rt=[t_ for t_, _r in _chase["slots_rt"]], cell_root=_croot,
                 rt_unlink=lambda t_, _leaf: _barrelcode.rt_unlink_lines(t_),
-                drop_take=lambda k_: [f"    stl.fcall drop_take{k_}, drt_ret"])
+                drop_take=lambda k_: [f"    stl.fcall drop_take{k_}, drt_ret"],
+                # M7 P8a (package K): a corpse slides away from its drop -- the pickup reads the drop's own row
+                **({"drop_rt": [_bar["drop_first"] + k_ for k_ in range(_bar["ndrop"])]} if _KNOCK else {}))
             assert _loot["slots"] == _loot_slots and _loot["extra_vis"] == _LOOT_EXTRA_VIS
             from doomfj.build import LOOT_PERSIST as _LOOT_PERSIST
             assert set(_loot["persist"]) <= set(_LOOT_PERSIST), "M7 P6: build.LOOT_PERSIST lacks lootcode's cells"
@@ -2801,6 +2936,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
             def _card_pick(tag, _ct=_ct, _cz=_cz, _cslot=_cslot):
                 return card_pickup_lines(tag, (_ct.x, _ct.y), _cslot, _cz - _RU, _cz + _RD, _IR + _PR)
+        def _after_accept(wo="wo", lw="lw"):
+            """the walk-over lines an accepted player move runs (`move_with_collision_lines(after_accept=)`); M7 P8a:
+            the knock move's copy (doomfj.knockcode.ptry_lines) with its own labels"""
+            return ((walkover_lines(_walk_trig, sorted(_dst_tbl), PLAYER_RADIUS >> 16, prefix=wo)
+                     if _walk_trig else [])
+                    + (lift_walk_lines(lift_walk_triggers(secs, lds, sds, map_wad.vertexes(mapname)),
+                                       sorted(_lift_st), PLAYER_RADIUS >> 16, prefix=lw)
+                       if _movers_on else []))
         _collide_block = ([";simcollide_skip", "simcollide:"]
                           + move_with_collision_lines(
                               _croot, _pfx(mapname), radius=PLAYER_RADIUS,
@@ -2808,13 +2951,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                               pickup=_loot["pickup"] if _loot else _card_pick,
                               block=_loot["block"] if _loot else None,      # M7 P6: pb_mon
                               skip_still=bool(_loot),                       # M7 P6: the model's still candidate
-                              after_accept=(walkover_lines(_walk_trig, sorted(_dst_tbl),
-                                                           PLAYER_RADIUS >> 16)
-                                            if _walk_trig else [])
-                              + (lift_walk_lines(lift_walk_triggers(secs, lds, sds,
-                                                                    map_wad.vertexes(mapname)),
-                                                 sorted(_lift_st), PLAYER_RADIUS >> 16)
-                                 if _movers_on else []))
+                              after_accept=_after_accept())
                           + ["    ;simmv_done", "simcollide_skip:"])
         _collide_decls = list(COLLISION_STATE_DECLS)
         # the SEED descent: the same point-location query the eye's pre-walk runs, at a CANDIDATE
@@ -2867,21 +3004,31 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
                                   dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"])
-                + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
+                + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES,
+                                 **({"fight": True} if _FIGHT else {}))    # M7 P8a I: toward the target
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
                 # M7 P3.2c: the decisions, the attack actions and the near LOS (monsterdecide, monstersight)
                 + ((_decide_leaves(justhit=bool(_p31.get("justhit")),
-                                   full=bool(_chase.get("hurt")))       # M7 P5: md_attack APPLIES its draws
+                                   full=bool(_chase.get("hurt")),       # M7 P5: md_attack APPLIES its draws
+                                   **({"knock": True} if _KNOCK else {}),   # M7 P8a: the attacker inflicts
+                                   **({"fight": True} if _FIGHT else {}))   # M7 P8a I: the TARGET's
                     + _p31["decide_lines"])
                    if _p31.get("decide_lines") else [])
                 # M7 P5: the leaves the attacks land through -- dp_go (hurtcode), the pools' spawns, phases and shared
                 # leaves (projcode), and the missile cells (which jump over themselves); behind this block's guard,
                 # where nothing falls in
                 + ((list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]]) if _hrt else [])
+                # M7 P8a (doomfj.knockcode, package K): the thrust (kb_go), the player's and the monsters' knock
+                # moves (kb_pmove, kb_mmove, the slot stubs kbs<m>) -- leaves, jumping over themselves
+                + (_knockcode.leaf_lines(
+                    _knockcode.slots_of(_p31["world"], [t_ for t_, _r in _chase["slots_rt"]]),
+                    player_root=_croot, mon_root=_mroot,
+                    lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:]) for t_ in _chase["lift_walk"]],
+                    after_accept=_after_accept("kbwo", "kblw"), solid=_chase["solid"]) if _KNOCK else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
-                + (_hurtcode.turn_lines([t_ for t_, _r in _chase["slots_rt"]])
+                + (_hurtcode.turn_lines([t_ for t_, _r in _chase["slots_rt"]], sink=_SINK)   # M7 P8a A: + the drop
                    if (_hrt and menu and _restartcode.mortal(PLAYER_MODE)) else [])
                 # M7 P6+P7: package B's leaves -- pk_go (the grid, the stubs, the drops, the gives), pb_mon, nk_go
                 + (list(_loot["leaves"]) if _loot else [])
@@ -2916,7 +3063,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             proj_restart=_proj["restart"] if _hrt else (), nmobile=_MT_NMOB,
             # M7 P6: the barrels' level start (the same on every skill: barrelcode.check_model_rules), no drops; the
             # loot cells; each skill's runtime pickups' thvis slots (p6_restart_parts, the one composition)
-            p6_common=_p6_restart[0], p6_skills=_p6_restart[1])
+            p6_common=_p6_restart[0], p6_skills=_p6_restart[1],
+            p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None))     # M7 P8a: the packages' cells
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
@@ -2944,6 +3092,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                           (list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))
                                           if _wpn else ()),
                                   weapon_bar=(_wpn.get("bar", ()) if _wpn else ()),   # M7 P6+P7: after the move
+                                  # M7 P8a: the player's knock move (doomfj.knockcode's splice point, package K)
+                                  knock_move=_knockcode.player_move_lines() if _KNOCK else (),
                                   latch=_loot["latch"] if _loot else (),
                                   use_guard=_loot["use_guard"] if _loot else ((), ()),
                                   door_lines=_door_tic,
@@ -2999,6 +3149,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M13-bakedbands: lines mode has NO per-frame band state to reset (the lists are static data)
     pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
     pass1 += [f";{_pfx(mapname)}_dsc_walk", "dsc_done:"]
+    # M7 P8a (A, docs/gp-final-plan.md 4.3 step 9): the dying view's landing -- viewz -= p_vd << 16, once a frame, right
+    # after the landing set the standing eye (the descend pre-walk) -- behind world.player_sinks. Only the render
+    # reads viewz (the world tic below does not)
+    if _SINK:
+        pass1 += landing_drop_lines()
     # M7 P3.2a: the monsters tic AFTER the eye's point location (the wake mode's REJECT reads the player's
     # sector) and before the render, which marks this frame's seen flags for the next tic
     _wt_tic = list(_p31.get("tic_after_eye", ())) if _p31 else []
@@ -3006,6 +3161,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # skips itself while `lvdone`), then the bar's health and armor from what the frame's damage left (inside the
     # same guard: a frozen level changes neither)
     _wt_pools = p5_tic_lines(_hrt, barrels=bool(_bar)) if _hrt else []      # M7 P6: + the barrels' phase
+    if _hrt and _exit:                     # issue #123 item 4: the bar inside the lvdone guard is never stale
+        assert_exit_frame_bar(map_wad, mapname, _exit)
     # M7 P6+P7 E: the monsters' world (the monster tic and the pools) world.MONSTER_TICS_PER_FRAME times a frame
     pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
@@ -3256,7 +3413,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # M7 P3.3 (D3 d): the game tier's walk draws a leaf's runtime things nearest first
                 f"sim.thing_pass{'_depth' if (_p31 and _p31.get('depth')) else ''} throw, {_MT_NTH}, thpos_rt, "
                 f"{_ANIM}, {_ANIM_SEL}, "
-                f"{'sp_lt_hi' if _ANIM else 0}",
+                f"{'sp_lt_hi' if _ANIM else 0}"
+                # M7 P8a (C): the 9-parameter walk -- D3 a's first rank-0 row, D3 b's barrel flag cleared per record
+                + (f", {_p31['rank0']}, 1" if _D3 else ""),
                 "stl.fret tp_ret"] if moving_things else []),
              # M7 P3.1: the row select and the rotation leaf it calls
              *((_p31["select"] + _p31["rotation"] + list(_p31.get("leaves", ()))) if _p31 else []),
@@ -3321,6 +3480,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # as device data), the pools' cells, window and tables (fxrnd, pjst) -- data and self-guarded tables
           *((list(_hrt["decls"]) + list(_proj["decls"]) + list(_hrt["tables"]) + list(_proj["tables"]))
             if _hrt else []),
+          # M7 P8a (package K): the thrust's interface, the knock cells and scratch, the barrels' z table
+          *((_knockcode.decls(_p31["world"].layout.nmon) + _knockcode.tables_fj(_p31["world"])) if _KNOCK else []),
+          *((_restartcode.view_decls() + _hurtcode.sink_decls()) if _SINK else []),   # M7 P8a A: p_vd, its cap
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *_aim_decls,                                                      # M7 P4.2a: the aim window

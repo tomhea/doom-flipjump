@@ -1,0 +1,258 @@
+# P8a kill criterion 5 -- profx attribution of the NEW P8a code on the frozen combat set v7, blocked53
+# (2026-10-08; worktree doom-m7u, branch m7-extras at 1df5f96; NOT committed)
+#
+# Commands (from the worktree root, PYTHONPATH="src;."; PROFX_WORK = %TEMP%\profx, whose engine and maps were
+# rebuilt for blocked53 at 14:09 today -- verified here: maps.py re-run into a scratch WORK is byte-identical
+# (map.txt, objects.json, labels.u32, marks.*), engine.py --no-compile reproduces engX/_fjcore.c byte for byte):
+#   python scratchpad/12m/profx/drive_b0.py run b0v7_blocked53 --file scratchpad/gp/scenarios/combat_scenarios_v7.json \
+#       --fjm build/doom_e1m1_blocked53.fjm --labels scratchpad/12m/atlas/blocked53.labels.tsv.gz --pixel-every 1 \
+#       --lock <session scratchpad>/plan/HEAVY_LOCK
+#   python scratchpad/12m/profx/drive_b0.py check b0v7_blocked53 --b0-json docs/ship-evidence/blocked53_b0_v7.json
+#   python scratchpad/12m/profx/b0_families.py b0v7_blocked53 --old-gen ../doom-m7t/build/generated_doom_e1m1_blocked51 --top 6
+#   PROFX_FJM=build/doom_e1m1_blocked53.fjm PROFX_LABELS_TSV=scratchpad/12m/atlas/blocked53.labels.tsv.gz \
+#       python scratchpad/12m/profx/analyze.py objects b0v7_blocked53
+#
+# drive_b0 runs b0_scenarios.b0() itself (model replays, setups, pokes, oracle, every-frame state/pixel check) with
+# probe.GameBinary swapped for a subclass on the FJPROFX engine (prof_reset / run / prof_dump per binary run,
+# prof_mark per present). --proxy NOT run: B0's binding is the normal runs'. Run time: model replays 109 s, the whole
+# profiled B0 (12 binary runs + oracle) 389 s; the attribution ~2 min.
+#
+# VERDICT: P8a's new code = 68,876 ops/frame by B0's statistic (mean + p80)/2 over the 11 runs (the requested
+# families; 69,763 with every new/changed line) <= 330,000 -> PASS. Also <= 330K at its worst run (112,851, every
+# new line, R2-spectre-corridor) and with the 59,608 relocated / changed-call ops (old code) added (~129K, the two
+# statistics summed).
+
+== the profiled B0 (drive_b0 run) ==
+  binary lock taken: C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\plan\HEAVY_LOCK (profx v7 attribution)
+  model replays: 11 runs reproduce the set's poses (109 s, outside the lock)
+  [profx] calibration          223,431 ops, 2 frames, 0.0s -> b0v7_blocked53.calibration.*
+b0_scenarios: doom_e1m1_blocked53.fjm sha256 324e3d2281d5c7e1 | set combat_scenarios_v7.json (11 runs, keys 33f95fdbbd684f53) | startup+menu 223,431 ops (exact)
+  [profx] R0-west-hall         2,031,008,032 ops, 102 frames, 16.9s -> b0v7_blocked53.R0-west-hall.*
+  [profx] R0-aftermath         1,881,562,606 ops, 102 frames, 16.2s -> b0v7_blocked53.R0-aftermath.*
+  [profx] R0-south-hall        1,315,363,444 ops, 102 frames, 11.9s -> b0v7_blocked53.R0-south-hall.*
+  [profx] R0-imp-court         1,497,197,797 ops, 102 frames, 13.0s -> b0v7_blocked53.R0-imp-court.*
+  [profx] R0-northwest         1,082,220,199 ops, 102 frames, 10.1s -> b0v7_blocked53.R0-northwest.*
+  [profx] R0-courtyard         1,668,385,209 ops, 102 frames, 14.5s -> b0v7_blocked53.R0-courtyard.*
+  [profx] R2-barrel-hall       1,402,169,189 ops, 102 frames, 12.4s -> b0v7_blocked53.R2-barrel-hall.*
+  [profx] R2-spectre-corridor  1,605,850,761 ops, 102 frames, 14.2s -> b0v7_blocked53.R2-spectre-corridor.*
+  [profx] R2-east-yard         1,688,569,953 ops, 102 frames, 14.8s -> b0v7_blocked53.R2-east-yard.*
+  [profx] R3-west              1,097,614,376 ops, 102 frames, 10.0s -> b0v7_blocked53.R3-west.*
+  [profx] R3-mid               977,006,833 ops, 102 frames, 8.9s -> b0v7_blocked53.R3-mid.*
+  R0-west-hall           20,307,846  20,447,232  21,233,664  23,330,816  100/100   100/100     0   0   48
+  R0-aftermath           18,813,392  18,874,368  21,495,808  27,000,832  100/100   100/100     0   0   14
+  R0-south-hall          13,151,400  13,893,632  15,466,496  17,301,504  100/100   100/100     0   0   21
+  R0-imp-court           14,969,744  16,515,072  20,447,232  22,806,528  100/100   100/100     0   0    2
+  R0-northwest           10,819,968  11,272,192  12,058,624  13,631,488  100/100   100/100     0   1   57
+  R0-courtyard           16,681,618  17,039,360  20,447,232  24,903,680  100/100   100/100     0   0   27
+  R2-barrel-hall         14,019,458  14,155,776  16,515,072  19,136,512  100/100   100/100     0   0   12
+  R2-spectre-corridor    16,056,273  15,728,640  18,874,368  21,233,664  100/100   100/100     0   0   22
+  R2-east-yard           16,883,465  17,301,504  19,398,656  21,757,952  100/100   100/100     0   0   12
+  R3-west                10,973,909  10,485,760  12,320,768  18,350,080  100/100   100/100     0   0   38
+  R3-mid                  9,767,834  11,272,192  13,369,344  14,680,064  100/100   100/100     0   0   33
+  B0 BINDING (mean + p80)/2 over 11 runs: 15,825,592 ops/frame   (mean 14,767,719, p80 run R2-east-yard = 16,883,465)
+  per-frame maximum: 27,000,832 ops (+/- 2^18) in R0-aftermath; run averages 9,767,834 .. 20,307,846; headroom to 22M: 6,174,408
+B0 OK
+drive_b0: b0 rc 0, 12 binary runs profiled, total 389.3s
+  binary lock released
+
+== the exact-total check (drive_b0 check) ==
+startup + menu: profiled 223,431, record base_ops 223,431  EQUAL
+run                      profiled ops            -base  record avg x100  verdict
+R0-west-hall            2,031,008,032    2,030,784,601    2,030,784,601  EQUAL
+R0-aftermath            1,881,562,606    1,881,339,175    1,881,339,175  EQUAL
+R0-south-hall           1,315,363,444    1,315,140,013    1,315,140,013  EQUAL
+R0-imp-court            1,497,197,797    1,496,974,366    1,496,974,366  EQUAL
+R0-northwest            1,082,220,199    1,081,996,768    1,081,996,768  EQUAL
+R0-courtyard            1,668,385,209    1,668,161,778    1,668,161,778  EQUAL
+R2-barrel-hall          1,402,169,189    1,401,945,758    1,401,945,758  EQUAL
+R2-spectre-corridor     1,605,850,761    1,605,627,330    1,605,627,330  EQUAL
+R2-east-yard            1,688,569,953    1,688,346,522    1,688,346,522  EQUAL
+R3-west                 1,097,614,376    1,097,390,945    1,097,390,945  EQUAL
+R3-mid                    977,006,833      976,783,402      976,783,402  EQUAL
+EXACT-TOTAL CHECK: 11/11 runs equal
+
+== the P8a family attribution (b0_families.py) ==
+file map: f2=fixed_point.fj, f4=projection.fj, f5=frame_render.fj, f8=stream_render.fj, f9=input.fj, f10=sim.fj, f11=e1m1_00_entry.fj, f12=e1m1_01_tables.fj, f13=e1m1_02_main.fj, f14=e1m1_03_segconsts.fj, f15=e1m1_04_walk.fj, f16=e1m1_05_state.fj, f17=e1m1_06_banks.fj, f18=m1_reset.fj, f19=e1m1_07_reset.fj
+new lines: e1m1_01_tables.fj +5680 (ins 5680, chg 0, reloc 0), e1m1_02_main.fj +1826 (ins 338, chg 1114, reloc 374), e1m1_03_segconsts.fj +140 (ins 140, chg 0, reloc 0), e1m1_04_walk.fj +17545 (ins 9210, chg 5876, reloc 2459), e1m1_05_state.fj +384 (ins 382, chg 0, reloc 2), e1m1_07_reset.fj +73 (ins 0, chg 1, reloc 72), frame_render.fj +8 (ins 7, chg 1, reloc 0), sim.fj +31 (ins 14, chg 17, reloc 0)
+
+runs: 11; per-run ops/frame = (run - calibration) / 100; B0's p80 run (by total) = R2-east-yard
+conservation: the families + old code sum to each run's game ops: True
+
+family                                                                           (m+p80)/2        mean         p80 @R2-east-ya   inserted    changed
+knockback (kb_*, kbs*, kq_*, mkx/mky/mfx/mfy)                                       57,710      48,446      66,974      66,974     48,446          0
+infight: target load (mt_load, mtl_*)                                                2,067       1,565       2,569       1,595      1,564          1
+infight: angle leaf (ia_leaf)                                                           82          50         114          32         41          9
+infight: bullets' scan (hs_*)                                                        1,986       1,242       2,729           0      1,237          5
+infight: far LOS (sl_far, sf_*, sfw_*)                                                   9          19           0           0         19          0
+infight: fireball thing test (pt_*)                                                 11,430       7,683      15,176      26,061      7,536        147
+infight: dm_src / bar_src                                                                3           3           3           1          2          1
+dying view (p_vd, view drop)                                                            46          46          46          46         46          0
+compositor D3 (rank, sp_ex, rt_rank)                                                 3,624       3,293       3,956       2,315      3,293          0
+infight: other (decisions/attacks at the target, acquire)                            1,696       1,279       2,113       1,353        188      1,091
+sight cell lists (sl_*; near LOS rewritten in place, shared with the far LOS)          151         116         187           0          1        115
+new, unclassified                                                                       17          13          21           5         10          3
+TOTAL, the requested P8a families (rows 1-9)                                        68,876      62,347      75,405      97,023
+TOTAL, every new/changed line                                                       69,763      63,755      75,770      98,381
+(old code: unchanged lines, and non-doom code)                                  15,744,524  14,703,963  16,785,085  16,785,085
+  of which RELOCATED changed lines (numbers only) + changed library calls           59,608      59,082      60,133      59,672
+  of which changed library-macro CALL lines (old body ops)                           1,396       1,281       1,510         670
+ALL (= B0)                                                                      15,825,592  14,767,719  16,883,465  16,883,465
+
+per run, ops/frame: the requested families' total / every new line / the run's total
+  R0-west-hall             72,893     73,639   20,307,846
+  R0-aftermath             47,297     48,575   18,813,392
+  R0-south-hall            39,867     41,012   13,151,400
+  R0-imp-court             25,716     28,407   14,969,744
+  R0-northwest             75,405     75,770   10,819,968
+  R0-courtyard             28,877     30,550   16,681,618
+  R2-barrel-hall           62,793     65,584   14,019,458
+  R2-spectre-corridor     110,191    112,851   16,056,273
+  R2-east-yard             97,023     98,381   16,883,465
+  R3-west                  60,122     60,561   10,973,909
+  R3-mid                   65,634     65,980    9,767,834
+
+the heaviest new lines per family (mean ops/frame over the runs; file:line, kind, text)
+  knockback (kb_*, kbs*, kq_*, mkx/mky/mfx/mfy)
+           875  e1m1_04_walk.fj:294478 ins  hex.sub 8, kb_vy, kb_t
+           852  e1m1_04_walk.fj:294450 ins  hex.add 8, kb_t, kb_vx
+           819  e1m1_04_walk.fj:294475 ins  hex.add 8, kb_t, kb_vy
+           807  e1m1_04_walk.fj:294453 ins  hex.sub 8, kb_vx, kb_t
+           786  e1m1_04_walk.fj:294404 ins  hex.add 8, kb_cy, kb_ym
+           767  e1m1_04_walk.fj:294476 ins  hex.add 8, kb_t, kb_vy
+  infight: target load (mt_load, mtl_*)
+           523  e1m1_04_walk.fj:237354 ins  hex.mov 8, mt_tqy, viewy
+           497  e1m1_04_walk.fj:237353 ins  hex.mov 8, mt_tqx, viewx
+           111  e1m1_04_walk.fj:237355 ins  hex.set 4, mt_reach, 60
+            75  e1m1_04_walk.fj:237341 ins  hex.if0 2, mm_tg, mtl_out
+            70  e1m1_04_walk.fj:237357 ins  hex.if1 1, p_dead, mtl_out
+            66  e1m1_04_walk.fj:237356 ins  hex.set 1, mt_rc, 0
+  infight: angle leaf (ia_leaf)
+             9  e1m1_04_walk.fj:237840 ins  proj.point_to_angle ia_ang, ia_x1, ia_y1, ia_x2, ia_y2, 1
+             7  e1m1_04_walk.fj:239846 ins  hex.mov 8, hs_t8, ia_ang
+             6  e1m1_04_walk.fj:239845 ins  stl.fcall ia_leaf, ia_ret
+             6  e1m1_04_walk.fj:239839 ins  hex.mov 4, ia_y2 + 4*dw, hs_cy
+             6  e1m1_04_walk.fj:239837 ins  hex.mov 4, ia_x2 + 4*dw, hs_cx
+             3  e1m1_04_walk.fj:241753 chg  hex.mov 8, ia_y2, mt_tqy
+  infight: bullets' scan (hs_*)
+            72  e1m1_04_walk.fj:239823 ins  hex.sub 4, mt_dy, mm_y
+            66  e1m1_04_walk.fj:239817 ins  hex.sub 4, mt_dx, mm_x
+            61  e1m1_04_walk.fj:239847 ins  hex.sub 8, hs_t8, md_at
+            51  e1m1_04_walk.fj:239862 ins  hex.sub 4, hs_t4, hs_del
+            20  e1m1_04_walk.fj:239820 ins  hex.cmp 4, hs_t4, hs_bd, hsc_y, hsc_out, hsc_out
+            17  e1m1_04_walk.fj:239831 ins  hex.cmp 4, mt_d, hs_bd, hsc_r, hsc_out, hsc_out
+  infight: far LOS (sl_far, sf_*, sfw_*)
+             3  e1m1_04_walk.fj:237273 ins  hex.add 6, sf_ax + 4*dw, sf_sx + 4*dw
+             3  e1m1_04_walk.fj:237274 ins  hex.add 6, sf_ay + 4*dw, sf_sy + 4*dw
+             1  e1m1_04_walk.fj:237238 ins  hex.abs 10, sf_t
+             1  e1m1_04_walk.fj:237326 ins  hex.cmp 8, sl_y0, sf_ty0, sfw_y_lo, sfw_y_d, sfw_y_d
+             1  e1m1_04_walk.fj:237277 ins  hex.cmp 2, sf_ax + 8*dw, sf_pcx, sf_run, sf_cy, sf_run
+             1  e1m1_04_walk.fj:237218 ins  hex.sub 8, sl_uy, sl_py
+  infight: fireball thing test (pt_*)
+           140  e1m1_04_walk.fj:241835 ins  hex.add_constant 4, pt_lx16, 65521
+           133  e1m1_04_walk.fj:241843 ins  hex.add_constant 4, pt_lx36, 65501
+           127  e1m1_04_walk.fj:241866 ins  hex.add_constant 4, pt_ly36, 65501
+           127  e1m1_04_walk.fj:241839 ins  hex.add_constant 4, pt_lx26, 65511
+           124  e1m1_04_walk.fj:241862 ins  hex.add_constant 4, pt_ly26, 65511
+           121  e1m1_04_walk.fj:241858 ins  hex.add_constant 4, pt_ly16, 65521
+  infight: dm_src / bar_src
+             0  e1m1_04_walk.fj:241487 ins  hex.zero 2, dm_src
+             0  e1m1_04_walk.fj:241464 chg  hex.mov 2, dm_tg, dm_src
+             0  e1m1_04_walk.fj:241462 chg  hex.cmp 2, dm_src, dm_me, dm_swok, dm_out, dm_swok
+             0  e1m1_04_walk.fj:241461 chg  hex.if0 2, dm_src, dm_out
+             0  e1m1_04_walk.fj:297777 ins  hex.mov 2, bw_sr, bar_src + 24*dw
+             0  e1m1_04_walk.fj:297782 ins  hex.mov 2, bar_src + 24*dw, bw_sr
+  dying view (p_vd, view drop)
+            46  e1m1_02_main.fj:28978 ins  hex.if0 2, p_vd, lnd_vd_end
+  compositor D3 (rank, sp_ex, rt_rank)
+         2,220  sim.fj:869 ins  hex.cmp 2, td_t, td_rk, r1, r0, r0
+           855  frame_render.fj:594 ins  rep(deg*(dsofts>>8), k) hex.if1 1, sp_ex, soft_under
+            81  sim.fj:820 ins  rep(rk0>0, k) .rank_key                // M7 P8a (D3 a): rank 1 below rk0 -- bit 15 of the
+            79  frame_render.fj:616 ins  rep(dsofts>>8, k) hex.if1 1, sp_ex, inc_done   // M7 P8a (D3 b): a barrel does not count
+            30  sim.fj:805 ins  rep(rk0>0, k) hex.set 2, td_rk, rk0     // M7 P8a (D3 a): the first rank-0 row
+            22  sim.fj:845 ins  rep(ex, k) hex.sparse_zero HOT_PAD, 1, sp_ex   // M7 P8a (D3 b): the barrel flag, consumed
+  infight: other (decisions/attacks at the target, acquire)
+           331  e1m1_04_walk.fj:219229 chg  hex.mov 4, mt_dy, mt_tqy + 4*dw
+           324  e1m1_04_walk.fj:219227 chg  hex.mov 4, mt_dx, mt_tqx + 4*dw
+           279  e1m1_04_walk.fj:219326 chg  hex.cmp 4, mt_d, mt_reach, mm_dc_mr2, mm_dc_ms, mm_dc_ms
+            12  e1m1_04_walk.fj:218940 chg  hex.mov 4, mm_dy, mt_tqy + 4*dw
+            12  e1m1_02_main.fj:35679 ins  hex.mov 2, mm_tg, mon_target + 56*dw
+            11  e1m1_04_walk.fj:218938 chg  hex.mov 4, mm_dx, mt_tqx + 4*dw
+  sight cell lists (sl_*; near LOS rewritten in place, shared with the far LOS)
+            32  e1m1_04_walk.fj:237086 chg  hex.cmp 8, sl_x0, sl_cx1, sl_ba, sl_q, sl_q
+            20  e1m1_04_walk.fj:237088 chg  hex.cmp 8, sl_x1, sl_cx0, sl_q, sl_bb, sl_bb
+             6  e1m1_04_walk.fj:237090 chg  hex.cmp 8, sl_y0, sl_cy1, sl_bc, sl_q, sl_q
+             4  e1m1_04_walk.fj:237092 chg  hex.cmp 8, sl_y1, sl_cy0, sl_q, sl_bd, sl_bd
+             1  e1m1_04_walk.fj:232448 chg  hex.xor_by 8, sl_cx1, 2289041409
+             1  e1m1_04_walk.fj:234034 chg  hex.xor_by 8, sl_cx1, 2283798529
+  new, unclassified
+             2  e1m1_04_walk.fj:219483 chg  hex.sign_extend 4, 3, md_sp
+             2  e1m1_01_tables.fj:411337 ins  rep(2, i) hex.xor .dsp + 4*i, idx + i*dw
+             2  e1m1_04_walk.fj:241344 ins  hex.if_flags dm_melee, 16, dm_nmb, dm_in
+             1  e1m1_04_walk.fj:241370 ins  hex.if_flags dm_melee, 28, dm_kbp, dm_kbgo
+             1  e1m1_01_tables.fj:411342 ins  hex.xor_zero 4, dst, .res
+             1  e1m1_04_walk.fj:219482 chg  hex.mov 3, md_sp, md_row + 1*dw
+             1  e1m1_04_walk.fj:219458 ins  hex.mov 4, md_td, mt_d
+             1  e1m1_04_walk.fj:219449 ins  hex.if0 1, md_seen, md_hs_out
+             0  e1m1_04_walk.fj:241456 chg  hex.if_flags dm_melee, 3, dm_swsrc, dm_swpl
+             0  e1m1_04_walk.fj:219459 ins  hex.mov 2, md_me, md_src
+             0  e1m1_04_walk.fj:219460 ins  hex.inc 2, md_me
+             0  e1m1_04_walk.fj:240356 ins  hex.set 2, dm_me, 19
+             0  e1m1_04_walk.fj:240993 ins  hex.set 2, dm_me, 42
+             0  e1m1_05_state.fj:25435 ins  hex.zero 4, dst
+             0  e1m1_04_walk.fj:240683 ins  hex.set 2, dm_me, 31
+             0  e1m1_04_walk.fj:240385 ins  hex.set 2, dm_me, 20
+             0  e1m1_05_state.fj:25431 ins  rep(2, i) hex.xor .dsp + 4*i, idx + i*dw
+             0  e1m1_05_state.fj:25436 ins  hex.xor_zero 4, dst, .res
+             0  e1m1_04_walk.fj:240298 ins  hex.set 2, dm_me, 17
+             0  e1m1_04_walk.fj:240003 ins  hex.set 2, dm_me, 6
+             0  e1m1_04_walk.fj:240191 ins  hex.set 2, dm_me, 13
+             0  e1m1_04_walk.fj:297900 ins  hex.if1 2, bw_sr, bd_out
+             0  e1m1_04_walk.fj:240854 ins  hex.set 2, dm_me, 37
+             0  e1m1_04_walk.fj:240524 ins  hex.set 2, dm_me, 25
+             0  e1m1_04_walk.fj:240828 ins  hex.set 2, dm_me, 36
+
+== analyze.py objects (coarse objects; the P8a code is spread over objects named for older code -- the family table above is the measurement) ==
+game frames: 1100 (runs: 11)   ops re-attributed from far unlabelled opaque ops: 901,468,380 over the run
+mean ops/frame 14,767,698   median 14,763,354   min 2,111,702   max 27,148,094   p80(frame) 19,410,772
+output-bit ops/frame: mean 53520
+
+id  object                                            ops/frame       %   min/frame   max/frame
+15  seg_pass2_leaf                                    4,621,688  31.30%   1,502,678   8,803,413
+11  seg_pass1_ts_leaf                                 3,432,239  23.24%          36   7,195,250
+10  seg_pass1_leaf                                    1,501,611  10.17%      21,230   4,210,611
+14  thing_pass_leaf                                   1,137,908   7.71%       9,911   2,998,464
+13  thing_leaf_b                                        934,747   6.33%           0   2,676,357
+12  thing_leaf                                          920,027   6.23%           0   2,606,294
+18  bspcode walk (nodes, pos_leaf, ss code)             683,219   4.63%      73,064   1,689,093
+21  collision cells (tree, stubs, sim.line_test)        526,080   3.56%       6,019   1,793,972
+22  ptloc_walk (M14-e point location)                   325,033   2.20%           0   2,503,594
+24  vpb bands-as-code (plane bands)                     298,202   2.02%           0     683,799
+26  m1_reset code                                        97,525   0.66%      95,519      99,271
+9   aim_record (the aim window leaf)                     83,439   0.57%           0     283,624
+7   frame glue (collines begin, bsp jump)                58,842   0.40%      44,947      84,916
+17  segconsts (per-seg/thing const blocks)               56,402   0.38%       1,068     137,512
+16  bbgate_leaf                                          48,323   0.33%      11,943     108,150
+4   move sim (turn/move/finesine/mul)                    14,368   0.10%       1,171      33,707
+5   collision (4x vx/vy + dsccs fcall + try_move)         9,592   0.06%           0      16,266
+25  banks tail (vql/vqh, yslope, zlight)                  4,073   0.03%           0       8,346
+3   doors (use + 13 door tics)                            3,910   0.03%       3,148     116,684
+6   view setup (wnt, wedge_setup)                         3,648   0.02%       3,480       3,799
+20  dsccs walk (collision point-location)                 3,085   0.02%           0       8,037
+19  dsc walk (eye point-location)                         2,412   0.02%         996       4,013
+1   input (kb.poll x8 + key decode)                       1,328   0.01%       1,082       3,044
+23  banks head (vars, sprbkt tables)                          1   0.00%           0         390
+
+per run: gamespeed's (run ops - calibration)/100  vs  the mean of this run's frame intervals
+  R0-west-hall ops 2,031,008,032  -> 20,307,846 ops/frame   frame-interval mean 20,307,828   min 15,963,637  max 23,329,800
+  R0-aftermath ops 1,881,562,606  -> 18,813,391 ops/frame   frame-interval mean 18,813,356   min 5,426,078  max 27,148,094
+  R0-south-hall ops 1,315,363,444  -> 13,151,400 ops/frame   frame-interval mean 13,151,379   min 5,941,546  max 17,279,721
+  R0-imp-court ops 1,497,197,797  -> 14,969,743 ops/frame   frame-interval mean 14,969,727   min 3,152,456  max 22,815,308
+  R0-northwest ops 1,082,220,199  -> 10,819,967 ops/frame   frame-interval mean 10,819,959   min 7,167,601  max 13,466,632
+  R0-courtyard ops 1,668,385,209  -> 16,681,617 ops/frame   frame-interval mean 16,681,606   min 7,297,997  max 24,751,191
+  R2-barrel-hall ops 1,402,169,189  -> 14,019,457 ops/frame   frame-interval mean 14,019,431   min 9,632,887  max 19,129,882
+  R2-spectre-corridor ops 1,605,850,761  -> 16,056,273 ops/frame   frame-interval mean 16,056,246   min 9,159,901  max 21,226,089
+  R2-east-yard ops 1,688,569,953  -> 16,883,465 ops/frame   frame-interval mean 16,883,449   min 10,933,304  max 21,580,579
+  R3-west ops 1,097,614,376  -> 10,973,909 ops/frame   frame-interval mean 10,973,893   min 5,322,680  max 18,376,371
+  R3-mid  ops 977,006,833  -> 9,767,834 ops/frame   frame-interval mean 9,767,809   min 2,111,702  max 14,659,526
+binding (mean+p80)/2 = 15,825,592   mean 14,767,718   p80 16,883,465
+per-frame distribution: p0=2,111,702  p10=9,063,533  p25=11,444,589  p50=14,763,354  p75=18,621,683  p80=19,410,772  p90=20,695,130  p95=21,439,073  p99=23,440,331  p100=27,148,094

@@ -58,14 +58,14 @@ from typing import Dict, List, Sequence
 from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.lut_generator import generate_dispatch_table_fj
+# issue #121 item 11: the damagecount cap and the palette ranges are the MODEL's (combat: P_DamageMobj, st_stuff.c's
+# ST_doPaletteStuff), imported -- not restated (re-exported: hurtcode.DC_CAP etc. keep their readers)
+from doomfj.combat import DC_CAP, NUMBONUSPALS, NUMREDPALS, STARTBONUSPALS, STARTREDPALS  # noqa: F401
 
 # the player modes whose monsters HURT the player (world.PLAYER_MODES; "fx" arrives with agent A's model work)
-HURT_PLAYER_MODES = ("fx", "full")
+HURT_PLAYER_MODES = ("fx", "full", "final")      # M7 P8a: "final" is "full" and more
 DP_MAX = 155                        # the largest damage dp_go takes: damagecount + dmg stays one byte
-DC_CAP = 100                        # P_DamageMobj: damagecount capped at 100
-STARTREDPALS, NUMREDPALS = 1, 8     # st_stuff.c
 NPALETTES = STARTREDPALS + NUMREDPALS          # playpal0 .. playpal8: the game palette and the red ones (P5)
-STARTBONUSPALS, NUMBONUSPALS = 9, 4             # st_stuff.c: the pickup flash, palettes 9 .. 12 (M7 P6)
 NPALETTES_LOOT = STARTBONUSPALS + NUMBONUSPALS  # playpal0 .. playpal12 (lootcode: the "full" player)
 # (cell, schema field, nibbles): the player's hurt cells (world.build_schema's widths, asserted in hurt_decls)
 CELLS = (("p_hp", "p_health", 3), ("p_ar", "p_armor", 2), ("p_at", "p_armortype", 1), ("p_dc", "p_damagecount", 2),
@@ -241,8 +241,11 @@ def restart_lines(start: Dict[str, int]) -> List[str]:
 
 
 # ---- the code ---------------------------------------------------------------------------------------------------
-def dp_lines() -> List[str]:
-    """`dp_go` (stl.fcall dp_go, dp_ret): combat.damage_player -- the module docstring's order"""
+def dp_lines(knock: bool = False) -> List[str]:
+    """`dp_go` (stl.fcall dp_go, dp_ret): combat.damage_player -- the module docstring's order. `knock` (M7 P8a,
+    world.knockback_on; doomfj.knockcode's interface): after the "dead / health <= 0" returns and BEFORE the armor,
+    P_DamageMobj's thrust on the player with the RAW damage (kb_tg 0, kb_dm, `kb_go`); dp_out zeroes kb_on (the site's
+    inflictor). Off, the text is P7's to the byte"""
     from doomfj import weaponcode as WC
     states, frames = WC.weapon_states(), WC.overlay_frames()
     idx = {s: i for i, s in enumerate(states)}
@@ -252,6 +255,9 @@ def dp_lines() -> List[str]:
            "    hex.sign 3, p_hp, dp_out, dp_pos",                  # health < 0
            "  dp_pos:",
            "    hex.if0 3, p_hp, dp_out",                          # health == 0
+           *(["    hex.zero 2, kb_tg",                             # M7 P8a: the thrust's target, the player
+              "    hex.mov 2, kb_dm, dp_dmg",                      # the RAW damage (before the armor)
+              "    stl.fcall kb_go, kb_ret"] if knock else []),
            "    hex.mov 2, p_atk, dp_src",                         # M7 P7: player->attacker = source
            "    hex.mov 2, dp_d, dp_dmg",
            "    hex.if0 1, p_at, dp_dc",
@@ -291,6 +297,7 @@ def dp_lines() -> List[str]:
             "    hex.set 2, wp_sy, %d" % WC.BOTTOM,                   # the dead player's weapon stays down
             "  dp_out:",
             "    hex.zero 2, dp_src",                              # M7 P7: a caller that names none is "no attacker"
+            *(["    hex.zero 1, kb_on"] if knock else []),         # M7 P8a: ... and "no inflictor"
             "    stl.fret dp_ret"]
     return out
 
@@ -301,7 +308,14 @@ TURN_DECLS = ["dt_t: hex.vec 2", "dt_off: hex.vec w/4", "dt_base: hex.vec w/4", 
               "dt_cm5: hex.vec 8, %d" % (-ANG5 & 0xFFFFFFFF), "dt_tret: hex.vec w/4"]
 
 
-def turn_lines(slot_rows: Sequence[int]) -> List[str]:
+def sink_decls() -> List[str]:
+    """M7 P8a A: `turn_lines(sink=True)`'s constant -- the drop's cap, VIEW_DROP_MAX (41 - 6 = 35 units). The cell it
+    lowers, `p_vd`, is restartcode's (VIEW_PERSIST: declared, persisted and restarted there)"""
+    from doomfj.reference_model import VIEW_DROP_MAX
+    return ["dt_vmx: hex.vec 2, %d" % VIEW_DROP_MAX]
+
+
+def turn_lines(slot_rows: Sequence[int], sink: bool = False) -> List[str]:
     """`dt_turn` (stl.fcall dt_turn, dt_tret): the death think's turn and damage-flash fade, for a dead player.
     `slot_rows[m]` = monster slot m's runtime thing: its thpos_rt row holds the whole-unit 16.16 position (the
     model's mon_x / mon_y << 16). No attacker (p_atk 0): the flash fades. Else the attacker's row -- p_atk's two-level
@@ -310,14 +324,22 @@ def turn_lines(slot_rows: Sequence[int]) -> List[str]:
     point_to_angle exactly, into mr_ang -- one shared instance instead of a second ~46K-word expansion);
     delta = mr_ang - viewangle (mod 2^32): delta < ANG5 or delta > -ANG5 (unsigned) -> viewangle = the angle and the
     flash fades; else viewangle +- ANG5, the short way (+ while delta < ANG180). PACKAGE B'S DEATH THINK calls this in
-    place of its plain p_dc fade (HOOK). The program must hold mon_rot_leaf (P3.1's) and thpos_rt."""
+    place of its plain p_dc fade (HOOK). The program must hold mon_rot_leaf (P3.1's) and thpos_rt.
+    M7 P8a A (`sink`, world.player_sinks; docs/gp-final-plan.md 1.1): P_DeathThink's VIEW DROP first -- after the
+    psprites (the caller's weapon tic), before the turn: p_vd += 1 while p_vd < VIEW_DROP_MAX (`dt_vmx`, sink_decls):
+    viewheight 41 - p_vd lowered one unit a dead tic, never below 6 (combat.CombatMixin._death_think). The landing
+    applies it to the eye (wall_renderer.landing_drop_lines). Off: P7's text, byte for byte."""
     from doomfj.combat import ANG5 as MODEL_ANG5
     assert ANG5 == MODEL_ANG5
     n = len(slot_rows)
     assert 0 < n + 1 <= 0x80 and all(0 <= t < 0x100 for t in slot_rows), (n, max(slot_rows))
     hi = (n + 1 + 15) // 16
-    out = ["dt_turn:",
-           "    hex.if0 2, p_atk, dtt_fade",
+    out = ["dt_turn:"]
+    if sink:                                   # M7 P8a A: the view drop, 1 unit a dead tic to VIEW_DROP_MAX
+        out += ["    hex.cmp 2, p_vd, dt_vmx, dtt_vinc, dtt_vend, dtt_vend",
+                "  dtt_vinc:", "    hex.inc 2, p_vd",
+                "  dtt_vend:"]
+    out += ["    hex.if0 2, p_atk, dtt_fade",
            "    sim.jump16 p_atk + 1*dw, " + ", ".join("dtt_h%d" % h if h < hi else "dtt_fade" for h in range(16))]
     for h in range(hi):
         out += ["  dtt_h%d:" % h, "    sim.jump16 p_atk, " + ", ".join(
@@ -402,7 +424,7 @@ def pal_menu_lines() -> List[str]:
     return ["hex.if0 1, pal_cur, plm_out", "hex.zero 1, pal_cur", "present.set_palette playpal0", "plm_out:"]
 
 
-def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False) -> dict:
+def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool = False) -> dict:
     """everything P5's hurt code adds, for the World `w` (the level start of the player cells):
       * `decls`: the cells, interface and scratch (`hurt_decls`);
       * `tables`: mbul, trclaw, sgbite, dpsav, palidx, and playpal0..8 (device data);
@@ -412,10 +434,11 @@ def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False) -> dict:
       * `palette`: after the tic, before `present.begin_frame_collines`; `menu_palette`: in the menu block;
       * `restart`: NEW GAME's values; `persist`: the cells the M1 reset must leave alone.
     `loot` (M7 P6, lootcode.LOOT_PLAYER_MODES): the palette with berserk and the bonus (pal_bk, bonpal, playpal9..12);
-    the program must then hold lootcode's p_str and p_bc."""
+    the program must then hold lootcode's p_str and p_bc. `knock` (M7 P8a, world.knockback_on): dp_go thrusts
+    (`dp_lines(knock=True)`); the program must then hold doomfj.knockcode's interface and `kb_go`."""
     start = level_start(w)
     return {"decls": hurt_decls(start) + (["pal_bk: hex.vec 1"] if loot else []),
             "tables": tables_fj(w.hwt, loot) + palette_tables_fj(sprite_wad, boot_wad,
                                                                  NPALETTES_LOOT if loot else NPALETTES),
-            "leaves": dp_lines(), "tic": hp_tic_lines(), "bar": hp_bar_lines(), "palette": pal_lines(loot),
+            "leaves": dp_lines(knock), "tic": hp_tic_lines(), "bar": hp_bar_lines(), "palette": pal_lines(loot),
             "menu_palette": pal_menu_lines(), "restart": restart_lines(start), "persist": PERSIST, "start": start}

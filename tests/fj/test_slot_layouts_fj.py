@@ -979,7 +979,8 @@ MUTANTS = [
     # the review's round-5 edits
     ("r5: deg_flag computed per tier", "write", EMITTER,
      "    deg_flag = 1 ", "    deg_flag = 1 if not standalone else 0 "),
-    ("r5: the baked leaf's deg 0", "write", EMITTER, "{deg_flag}, {DEG_SOFT_SCENERY}", "{deg_flag if mt else 0}, {DEG_SOFT_SCENERY}"),
+    # (M7 P8a C: the scenery soft count is `_DSOFTS` -- DEG_SOFT_SCENERY, with D3B_SOFT_FLAG at the P8a player mode)
+    ("r5: the baked leaf's deg 0", "write", EMITTER, "{deg_flag}, {_DSOFTS}", "{deg_flag if mt else 0}, {_DSOFTS}"),
     ("r5: the texture column one nibble wide", "write", FR,
      "hex.mov 2, trb_u, trb_frac_u + 4*dw", "hex.mov 1, trb_u, trb_frac_u + 4*dw"),
     ("r5: the last texture column one nibble wide", "write", FR,

@@ -101,8 +101,9 @@ from profx.pool import load_heat                                         # noqa:
 from build_blocked import _counts_sig, _load_counts                      # noqa: E402
 
 # ship-gate 1b's build command, plus build_blocked.py's own defaults for what it does not pass
-SHIP_GATE = dict(pool_base=0x60000000, span_bits=0x9FFFFFE0, spread=2, spread_min_count=256,
-                 max_slot_ops=512, width_buckets=True, heat="scratchpad/12m/heat_blocked27_p42.json.gz",
+# M7 P8a: the program outgrew 0x60000000 (blocked52 r0: "the program reached 0x611aa840") -> base 0x80000000
+SHIP_GATE = dict(pool_base=0x80000000, span_bits=0x7FFFFFE0, spread=2, spread_min_count=256,
+                 max_slot_ops=512, width_buckets=True, heat="scratchpad/12m/heat_blocked27_p8a.json.gz",
                  tier="game", map="E1M1", wad="tests/fixtures/freedoom_e1m1.wad")
 
 

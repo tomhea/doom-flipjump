@@ -12,6 +12,12 @@ THE APPROVED SIMPLIFICATIONS (owner, D5) this file implements:
     shoots monsters and barrels. So every damage source is the player (directly or through a
     barrel he set off), a monster attacking the player, or a nukage floor; a monster's target is
     always the player.
+    M7 P8a I (docs/gp-final-plan.md 1.2.2; world.infighting_on, the monster mode "final" alone) REVERSES it:
+    a monster's target names a thing (`mon_target` 0 / 1 the player / 2 + slot) and DOOM's switch in
+    P_DamageMobj applies to every source; monster bullets meet the nearest thing in the way (O-B5's
+    convention, `_bullet_victim`); fireballs stop on monsters and barrels (`_missile_things`: the shooter
+    passed, its species exploding with no damage); a barrel blames `bar_src`, the source of the first
+    damage that did not kill it. A spectre target's MF_SHADOW aim jitter is not drawn (a convention).
   * NO KNOCKBACK. P_DamageMobj's thrust block is skipped -- with it its one conditional
     `P_Random()&1` (damage < 40, damage > health, inflictor 64+ units below the target).
   * 2D PROJECTILES. A fireball has no z: it flies level, is stopped by one-sided lines and by
@@ -77,6 +83,8 @@ from doomfj.doors import crossed                                   # M7 P2a.1: w
 from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE, turn_step   # STRAFE_MOVE: M7 P4.1, the ONE value
 from doomfj.reference_model import ANG180 as _ANG180                       # M7 P7: P_DeathThink's turn
+from doomfj.reference_model import VIEW_DROP_MAX                          # M7 P8a A: P_DeathThink's view drop
+from doomfj.reference_model import PLAYER_HEIGHT                           # M7 P8a: the knock try's height
 
 # 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
 # FORWARD_MOVE, rounded (plan section 2, input). world.py re-exports it.
@@ -85,6 +93,11 @@ from doomfj.reference_model import ANG180 as _ANG180                       # M7 
 AIM_REFF_BITS = 8
 
 M32 = 0xFFFFFFFF
+
+
+def _c_div2(v: int) -> int:
+    """C's `v / 2` (truncates toward zero) -- P_XYMovement's `x + xmove/2`, unlike the `xmove >>= 1` after it"""
+    return -((-v) >> 1) if v < 0 else v >> 1
 
 
 def _W():
@@ -235,6 +248,16 @@ def site_formulas(col: Callable[[int], int]) -> Dict[str, Tuple[int, Callable]]:
     }
 
 
+def hit_half_width(radius: int) -> int:
+    """M7 P8a I: a monster bullet's effective half-width on a thing of `radius` -- its box as the trace sees it on
+    average, radius * 4 / pi rounded (pi as 355/113): 16 -> 20 (HIT_HALF_WIDTH, the player's), 20 -> 25, 30 -> 38,
+    10 -> 13 (a barrel)"""
+    return (radius * 452 * 2 + 355) // 710
+
+
+assert hit_half_width(PLAYER_R) == HIT_HALF_WIDTH
+
+
 def half_width_table(sine: Sequence[int], half_width: int = HIT_HALF_WIDTH) -> List[int]:
     """HWT[q]: the widest |spread| (one unit = 2^20 BAM = one entry of the 4096-entry sine table)
     whose ray still passes within `half_width` of a target at distance 16q + 8 -- the largest s in
@@ -261,6 +284,7 @@ def fireball_momentum_table(rm) -> List[Tuple[int, int]]:
 # M7 P5: THE PALETTE (st_stuff.c ST_doPaletteStuff, Chocolate Doom) -- the PLAYPAL index the frame is shown with
 STARTREDPALS, NUMREDPALS = 1, 8             # the damage flash: palettes 1..8
 STARTBONUSPALS, NUMBONUSPALS = 9, 4         # the pickup flash: palettes 9..12
+DC_CAP = 100                                # P_DamageMobj: player->damagecount capped at 100 (hurtcode imports it)
 # (RADIATIONPAL 13: pw_ironfeet -- E1M1 holds no radiation suit, and the schema no powers[pw_ironfeet])
 
 
@@ -306,7 +330,11 @@ class CombatMixin:
         self._p_resolve = W.player_resolves(self.player)
         self._p_noise = W.player_hears(self.player)
         self._p_fx = W.player_bleeds(self.player)
-        self._p_full = self.player == "full"
+        self._p_full = W.player_loots(self.player)            # "full", and M7 P8a's "final" after it
+        # M7 P8a (docs/gp-final-plan.md 3.0): P_DamageMobj's THRUST (`_thrust`) and P_XYMovement (`_xy_move`) are
+        # knockback_on's -- off in every mode before P8a, so "full" is the v6 model untouched
+        self._p_knock = W.knockback_on(self.player, self.monsters)
+        self._p_sink = W.player_sinks(self.player)          # M7 P8a A: the dying view sinks (`p_vdrop`)
         self.sites = Sites(rm)
         self.aim_centre = rm.angle_to_x(0)
         self.aim_lo, self.aim_hi = aim_window(rm, self.sites)
@@ -314,6 +342,11 @@ class CombatMixin:
         from doomfj.world import AIM_COLUMNS
         assert self.aim_hi - self.aim_lo + 1 == AIM_COLUMNS, (self.aim_lo, self.aim_hi)
         self.hwt = half_width_table(rm.sine)
+        # M7 P8a I (infighting, world._fight): a monster's bullet against any thing -- HWT per radius (the player's
+        # own table is `hwt`, radius 16)
+        self.hwt_r = {r: half_width_table(rm.sine, hit_half_width(r))
+                      for r in sorted({PLAYER_R, BARREL_R} | set(self.mon_radius))}
+        assert self.hwt_r[PLAYER_R] == self.hwt
         self.fireball_mom = fireball_momentum_table(rm)
         self.restart_fields = tuple(f.name for f in self.schema if f.name not in RESTART_KEEP)
         assert set(RESTART_KEEP) <= {f.name for f in self.schema}
@@ -396,6 +429,8 @@ class CombatMixin:
         ws = self.ws
         if ws.p_dead:
             self._death_think(keys, ev)
+            if self._p_knock:                     # M7 P8a: the corpse slides (P_XYMovement on the knock momentum)
+                self._player_knock_move(ev)
             self._player_mobj_tick()
             return
         if self._p_full:                          # M7 P5: nukage is the full model's alone (no fj mirror before it)
@@ -420,6 +455,8 @@ class CombatMixin:
         if ws.p_bonuscount:
             ws.p_bonuscount -= 1
         self._player_move(keys, ev)
+        if self._p_knock:                         # M7 P8a: the knock momentum moves him after the walk
+            self._player_knock_move(ev)
         if not moving and gd.STATE_NAMES[ws.p_mobj_state] in RUN_STATES:
             self._set_player_mobj("S_PLAY")      # P_XYMovement: stopped in a walking frame
         self._player_mobj_tick()
@@ -430,9 +467,16 @@ class CombatMixin:
         (`p_attacker`: 1 + a monster slot; its position now, a corpse's too), and when the delta is within ANG5
         either way the view snaps to it and the damage flash fades, else it turns ANG5 toward it (the short way);
         with no attacker the flash fades. Use (held, as DOOM reads it) asks for the restart. Before "full" the flash
-        faded every tic and nothing turned (P5's model: no fj mirror of the death think)."""
+        faded every tic and nothing turned (P5's model: no fj mirror of the death think).
+        M7 P8a A ("final", world.player_sinks; docs/gp-final-plan.md 1.1): THE VIEW DROP, in DOOM's order -- after the
+        psprites, before the turn: `if (viewheight > 6) viewheight -= 1; if (viewheight < 6) viewheight = 6`, kept as
+        `p_vdrop` = 41 - viewheight (0..VIEW_DROP_MAX, one unit a death-think tic: O-A2); P_CalcHeight's viewz = z +
+        viewheight is the oracle's `view_drop` (the geometry sinks, the plane shading stays the standing eye's: S0).
+        The restart (and the level start) put it back to 0. The fj: hurtcode.turn_lines(sink=True), dt_turn's top."""
         ws = self.ws
         self._weapon_tics(keys, ev)
+        if self._p_sink and ws.p_vdrop < VIEW_DROP_MAX:
+            ws.p_vdrop += 1
         if self._p_full and ws.p_attacker:
             self._turn_to_attacker(ev)
         elif ws.p_damagecount:
@@ -467,7 +511,7 @@ class CombatMixin:
         if floorz != self.secs_c[sec].floor_h:
             return                               # "Falling, not all the way down yet?"
         ev.nukage += 1
-        self.damage_player(dmg, ("sector", sec), ev)
+        self.damage_player(dmg, ("sector", sec), None, ev)       # no inflictor: sector damage thrusts nothing
 
     def _weapon_keys(self, keys: dict) -> None:
         """P_PlayerThink's BT_CHANGE: the lowest held number key names the weapon."""
@@ -750,9 +794,9 @@ class CombatMixin:
             self._spawn_fx_at_target("puff" if kind == "bar" else "blood", x, y, dmg,
                                      weapon == "fist", ev)
         if kind == "mon":
-            self.damage_monster(i, dmg, ("player", -1), ev)
+            self.damage_monster(i, dmg, ("player", -1), ("player", -1), ev)   # the shooter is the inflictor
         else:
-            self.damage_barrel(i, dmg, ev)
+            self.damage_barrel(i, dmg, ("player", -1), ev)
         ev.hits.append((weapon, kind, i, dmg))
 
     def _target_xy(self, tgt) -> Tuple[int, int]:
@@ -840,13 +884,20 @@ class CombatMixin:
         return None if best is None else best[1]
 
     # -------------------------------------------------------------------------------- damage
-    def damage_monster(self, m: int, dmg: int, source, ev) -> None:
-        """P_DamageMobj on a monster (no knockback): health; death; the pain roll on the monster's
-        stream; reactiontime 0; and, when its threshold is 0, the target switch to the player --
-        which wakes a monster still in its spawn state (into the see state, D-WAKE: no A_Chase)."""
+    # M7 P8a (docs/gp-final-plan.md 3.0, G-B3): P_DamageMobj(target, INFLICTOR, SOURCE, damage). Both name a thing as
+    # a tuple: ("player", -1), ("mon", slot), ("bar", barrel), ("proj", fireball slot) -- the inflictor is what HIT
+    # (the shooter for hitscan and melee, the MISSILE for a fireball, the BARREL for a blast), the source who is to
+    # blame (the shooter; a fireball's shooter; a blast's -- the player until package I's `bar_src`). None: no
+    # inflictor (sector damage, a gate's or a test's poke) -- DOOM's NULL, which thrusts nothing.
+    def damage_monster(self, m: int, dmg: int, source, inflictor, ev) -> None:
+        """P_DamageMobj on a monster: (M7 P8a, knockback_on: the THRUST from the inflictor, `_thrust`) health; death;
+        the pain roll on the monster's stream; reactiontime 0; and, when its threshold is 0, the target switch to
+        the player -- which wakes a monster still in its spawn state (into the see state, D-WAKE: no A_Chase)."""
         ws = self.ws
         if not ws.mon_shootable[m] or ws.mon_health[m] <= 0:
             return
+        if self._p_knock:                         # M7 P8a: DOOM's order -- the thrust, then the health
+            self._thrust(("mon", m), inflictor, source, dmg)
         ws.mon_health[m] -= dmg
         if ws.mon_health[m] <= 0:
             self._kill_monster(m, ev)
@@ -856,11 +907,38 @@ class CombatMixin:
             ws.mon_justhit[m] = 1
             self._set_state(m, info.painstate, True, ev)
         ws.mon_reaction[m] = 0
-        if not ws.mon_threshold[m] and source[0] == "player":
+        if self._fight:
+            # M7 P8a I (G-I6): DOOM's switch -- `!threshold && source && source != target`: the target becomes the
+            # SOURCE (the player, a monster: its hitscan, its claw, a fireball's shooter, a barrel's bar_src)
+            code = self._source_code(source)
+            if not ws.mon_threshold[m] and code and code != 2 + m:
+                ws.mon_target[m] = code
+                ws.mon_threshold[m] = gd.BASETHRESHOLD
+                ev.retargets.append((m, code))
+                if ws.mon_state[m] == gd.STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
+                    self._set_state(m, info.seestate, False, ev)
+        elif not ws.mon_threshold[m] and source[0] == "player":
             ws.mon_target[m] = 1
             ws.mon_threshold[m] = gd.BASETHRESHOLD
             if ws.mon_state[m] == gd.STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
                 self._set_state(m, info.seestate, False, ev)
+
+    @staticmethod
+    def _source_code(source) -> int:
+        """M7 P8a I: a damage source as `mon_target` / `bar_src` code it -- 1 the player, 2 + slot a monster, 0 none
+        (None: DOOM's NULL; a sector; a barrel standing in for its own unknown source)"""
+        if source is None:
+            return 0
+        if source[0] == "player":
+            return 1
+        if source[0] == "mon":
+            return 2 + source[1]
+        return 0
+
+    def _bar_source(self, b: int):
+        """M7 P8a I (G-I7): barrel b's blast source, from `bar_src` -- None, ("player", -1) or ("mon", slot)"""
+        code = self.ws.bar_src[b]
+        return None if not code else ("player", -1) if code == 1 else ("mon", code - 2)
 
     def _kill_monster(self, m: int, ev) -> None:
         """P_KillMobj on a monster: not shootable, the death (or gib) state, `tics -= P_Random()&3`,
@@ -874,11 +952,15 @@ class CombatMixin:
         ws.mon_tics[m] = max(1, ws.mon_tics[m] - v)
         if self.dropper[m] is not None and self._p_full:    # M7 P4.2: the drops are P6's
             ws.mon_drop[m] = 1
+            if self._p_knock:                    # M7 P8a (G-B5): the drop lies where the corpse is NOW, before the
+                ws.drop_x[m], ws.drop_y[m] = ws.mon_x[m], ws.mon_y[m]   # killing blow's thrust slides it away
         ev.kills.append(("mon", m, "gib" if gib else "death"))
 
-    def damage_barrel(self, b: int, dmg: int, ev) -> None:
+    def damage_barrel(self, b: int, dmg: int, source, ev) -> None:
         """P_DamageMobj on a barrel: the killing blow starts S_BEXP with its tics roll; otherwise
-        its pain roll (painchance 0) is drawn and never fires."""
+        its pain roll (painchance 0) is drawn and never fires. M7 P8a: `source` (the damage_monster tuple) is what
+        package I's `bar_src` records -- the FIRST thing that damaged the barrel; no inflictor (barrels are not
+        pushed: O-B1)."""
         ws = self.ws
         if not ws.bar_state[b] or ws.bar_health[b] <= 0:
             return
@@ -890,14 +972,22 @@ class CombatMixin:
             ev.kills.append(("bar", b, "death"))
             return
         self._roll("rng_world", self.sites.pain[BARREL_INFO.painchance])
+        if self._fight and not ws.bar_src[b]:
+            # M7 P8a I (G-I7): P_DamageMobj's switch on a barrel -- its target (and threshold 100, which nothing ever
+            # counts down) is the source of the first damage that did NOT kill it (the killing blow returns before the
+            # switch) and named a source; A_Explode's P_RadiusAttack blames it
+            ws.bar_src[b] = self._source_code(source)
 
-    def damage_player(self, dmg: int, source, ev) -> None:
-        """P_DamageMobj on the player: armor (green saves 1/3, blue 1/2), the damage flash, health
-        (`p_health` is the thing's health: the killing blow can take it below 0, and the HUD shows
-        max(0, p_health) as DOOM's player->health), death, else the pain roll."""
+    def damage_player(self, dmg: int, source, inflictor, ev) -> None:
+        """P_DamageMobj on the player: (M7 P8a, knockback_on: the THRUST from the inflictor, `_thrust`, with the RAW
+        damage) armor (green saves 1/3, blue 1/2), the damage flash, health (`p_health` is the thing's health: the
+        killing blow can take it below 0, and the HUD shows max(0, p_health) as DOOM's player->health), death, else
+        the pain roll."""
         ws = self.ws
         if ws.p_dead or ws.p_health <= 0:
             return
+        if self._p_knock:                         # M7 P8a: DOOM's order -- the thrust, then the armor
+            self._thrust(("player", -1), inflictor, source, dmg)
         raw = dmg
         if ws.p_armortype:
             saved = dmg // 3 if ws.p_armortype == 1 else dmg // 2
@@ -910,7 +1000,7 @@ class CombatMixin:
         # off on E1M1 (no monster attack reaches a barrel) -- and "the player himself" turns nothing, like sector
         # damage's NULL: both are 0
         ws.p_attacker = source[1] + 1 if source[0] == "mon" else 0
-        ws.p_damagecount = min(100, ws.p_damagecount + dmg)
+        ws.p_damagecount = min(DC_CAP, ws.p_damagecount + dmg)
         ws.p_health -= dmg
         ev.player_hurt.append((source, raw, dmg))
         if ws.p_health <= 0:
@@ -930,6 +1020,226 @@ class CombatMixin:
         v = self._roll("rng_player", self.sites.tics_roll)
         ws.p_mobj_tics = max(1, ws.p_mobj_tics - v)
         ev.deaths += 1
+
+    # -------------------------------------------------------------------------------- M7 P8a: KNOCKBACK (package K)
+    # docs/gp-final-plan.md 1.2.2 (O-B1 barrels are not pushed, O-B3 monsters slide at their 2 tics a frame and the
+    # player at 1, O-B4 a refused knock step stops). THE CONVENTIONS, named so the fj (doomfj.knockcode) copies them:
+    #   * a thing's POSITION for the thrust's angle: the TARGET's whole 16.16 (the player's px / py; a monster's
+    #     (mon_x << 16) + mon_fx), the INFLICTOR's WHOLE UNITS << 16 (the integer half of its 16.16: the player's,
+    #     a fireball's, a monster's and a barrel's -- what knockcode's kb_ix / kb_iy carry);
+    #   * a thing's Z (2D: a thing stands on its floor): the player's check_position floorz at his position, a
+    #     monster's mon_floorz, a barrel's sector floor (static), a fireball's proj_z (its shooter's mon_floorz + 32 at
+    #     the spawn: P_SpawnMissile's z + 4*8*FRACUNIT, no gravity);
+    #   * the reversal's coin draws on the TARGET's stream (rng_player / mon_rng[slot]), only when its three other
+    #     conditions hold (C's short circuit), before the armor and the pain or death draw;
+    #   * "the source is the player" (the chainsaw's exception): ("player", -1), or a barrel's blast whose barrel the
+    #     player set off -- every barrel before package I's `bar_src` (DOOM: the blast's source is the barrel's target);
+    #   * P_XYMovement: the player's KNOCK momentum moves him once a frame after his walk (dead or alive: the corpse
+    #     slides), a monster's (live or corpse) at the top of its slot's turn in each monster tic. A try is the walk's
+    #     try at the candidate: the player's (pickups touched while alive, then a solid thing, then try_move through
+    #     the collision cells, the walk-over lines on an accept), a monster's at the INTEGER part of the candidate
+    #     (try_move_monster; a candidate whose integer part is where it stands is accepted untested: only its
+    #     fraction moves). A refused try zeroes the momentum (DOOM's non-player rule; O-B4 for the player) and the
+    #     loop goes on with what is left of xmove / ymove, as DOOM's does. No P_SlideMove, no airborne phase;
+    #   * A CORPSE (a monster not shootable; the dead player) is DOOM's MF_CORPSE | MF_DROPOFF with height >> 2: its
+    #     try skips the drop-off refusal and fits 14 units, and its friction is skipped while |mom| > 1/4 unit on an
+    #     axis and its floorz is not its leaf's sector floor;
+    #   * the STOPSPEED stop ignores the player's walk keys (the walk is a direct step that has no momentum here) and
+    #     sets no player thing state.
+    def _source_is_player(self, source) -> bool:
+        """P_DamageMobj's `source && source->player`: the player, or a blast whose barrel the player set off -- every
+        barrel until package I's `bar_src` (then its own record: 1 = the player)"""
+        if source is None:
+            return False
+        if source[0] == "player":
+            return True
+        if source[0] == "bar":
+            if "bar_src" not in self.ws._fields:
+                return True
+            return self.ws.bar_src[source[1]] == 1
+        return False
+
+    def _knock_z(self, thing) -> int:
+        """the thing's z in map units (the conventions above)"""
+        kind, i = thing
+        ws = self.ws
+        if kind == "player":
+            return self.rm.check_position(self.scene_c, ws.px, ws.py)[1]
+        if kind == "mon":
+            return ws.mon_floorz[i]
+        if kind == "bar":
+            t = self.barrel_things[i]
+            return self._floor_at(t.x, t.y)
+        if kind == "proj":
+            return ws.proj_z[i]
+        raise ValueError(thing)
+
+    def _inflictor_xy(self, inflictor) -> Tuple[int, int]:
+        """the inflictor's WHOLE-UNIT position << 16 (knockcode's kb_ix / kb_iy)"""
+        kind, i = inflictor
+        ws = self.ws
+        if kind == "player":
+            return (ws.px >> 16) << 16, (ws.py >> 16) << 16
+        if kind == "mon":
+            return ws.mon_x[i] << 16, ws.mon_y[i] << 16
+        if kind == "bar":
+            t = self.barrel_things[i]
+            return t.x << 16, t.y << 16
+        if kind == "proj":
+            return (ws.proj_x[i] >> 16) << 16, (ws.proj_y[i] >> 16) << 16
+        raise ValueError(inflictor)
+
+    def _thrust(self, target, inflictor, source, dmg: int) -> None:
+        """M7 P8a (package K): P_DamageMobj's thrust (p_inter.c) -- called by damage_monster / damage_player after
+        their "not shootable / dead" return and BEFORE anything else (the armor, the health), only when knockback_on
+        (`_p_knock`). `target` ("player", -1) or ("mon", slot); `inflictor` / `source` the damage tuples (None: no
+        thrust); `dmg` the RAW damage:
+
+            if (inflictor && (!source || !source->player || source->player->readyweapon != wp_chainsaw)) {
+                ang = R_PointToAngle2(inflictor->x, inflictor->y, target->x, target->y);
+                thrust = damage * (FRACUNIT >> 3) * 100 / target->info->mass;
+                if (damage < 40 && damage > target->health && target->z - inflictor->z > 64*FRACUNIT
+                    && (P_Random() & 1)) { ang += ANG180; thrust *= 4; }
+                target->momx += FixedMul(thrust, finecosine[ang >> ANGLETOFINESHIFT]);
+                target->momy += FixedMul(thrust, finesine[ang >> ANGLETOFINESHIFT]); }
+
+        with the repo's angle and trig (rm.point_to_angle, the TRIG_N tables) and the conventions above"""
+        if inflictor is None:
+            return
+        ws, rm = self.ws, self.rm
+        if self._source_is_player(source) and ws.p_ready == gd.WP_CHAINSAW:
+            return                                         # "kick away unless using the chainsaw"
+        kind, m = target
+        if kind == "player":
+            tx, ty, info, health = ws.px, ws.py, PLAYER_INFO, ws.p_health
+        else:
+            tx, ty = (ws.mon_x[m] << 16) + ws.mon_fx[m], (ws.mon_y[m] << 16) + ws.mon_fy[m]
+            info, health = self.mon_info[m], ws.mon_health[m]
+        ix, iy = self._inflictor_xy(inflictor)
+        ang = rm.point_to_angle(ix, iy, tx, ty)
+        thrust = dmg * (gd.FRACUNIT >> 3) * 100 // info.mass
+        if dmg < 40 and dmg > health and self._knock_z(target) - self._knock_z(inflictor) > 64:
+            if kind == "player":
+                v, ws.rng_player = R.p_random(ws.rng_player)
+            else:
+                v, ws.mon_rng[m] = R.p_random(ws.mon_rng[m])
+            if v & 1:
+                ang = (ang + _ANG180) & M32                  # "make fall forwards sometimes"
+                thrust *= 4
+        idx = ang >> rm.angle_shift
+        dx = _signed(fixed_mul(thrust, rm._finecos_idx(idx), 8, 4), 32)
+        dy = _signed(fixed_mul(thrust, rm._finesin_idx(idx), 8, 4), 32)
+        if kind == "player":
+            ws.p_momx += dx
+            ws.p_momy += dy
+        else:
+            ws.mon_momx[m] += dx
+            ws.mon_momy[m] += dy
+
+    def _xy_move(self, thing, ev) -> None:
+        """M7 P8a (package K): P_XYMovement (p_mobj.c) for `thing` ("player", -1) -- his KNOCK momentum p_momx /
+        p_momy -- or ("mon", slot) -- mon_momx / mon_momy, its 16.16 position (mon_x << 16) + mon_fx:
+
+            clamp each axis to +-MAXMOVE;  xmove = momx; ymove = momy;
+            do { if (xmove > MAXMOVE/2 || ymove > MAXMOVE/2) {          // positive only, as DOOM's
+                     ptryx = x + xmove/2; ptryy = y + ymove/2;          // C's truncating division ...
+                     xmove >>= 1; ymove >>= 1; }                        // ... then an arithmetic shift
+                 else { ptryx = x + xmove; ptryy = y + ymove; xmove = ymove = 0; }
+                 if (!P_TryMove(mo, ptryx, ptryy)) momx = momy = 0;     // and the loop goes on
+            } while (xmove || ymove);
+            [the corpse rule: |mom| > FRACUNIT/4 on an axis and floorz != the leaf's sector floor -> no friction]
+            if (|momx| < STOPSPEED && |momy| < STOPSPEED) momx = momy = 0;
+            else { momx = FixedMul(momx, FRICTION); momy = FixedMul(momy, FRICTION); }
+
+        The tries and the corpse are the conventions above (`_player_knock_try` / world `_monster_knock_try`)"""
+        ws = self.ws
+        kind, m = thing
+        player = kind == "player"
+        if player:
+            mx, my = ws.p_momx, ws.p_momy
+        else:
+            mx, my = ws.mon_momx[m], ws.mon_momy[m]
+        if not mx and not my:
+            return
+        mx, my = max(-gd.MAXMOVE, min(gd.MAXMOVE, mx)), max(-gd.MAXMOVE, min(gd.MAXMOVE, my))
+        xmove, ymove = mx, my
+        half = gd.MAXMOVE // 2
+        while True:
+            if player:
+                x, y = ws.px, ws.py
+            else:
+                x, y = (ws.mon_x[m] << 16) + ws.mon_fx[m], (ws.mon_y[m] << 16) + ws.mon_fy[m]
+            if xmove > half or ymove > half:
+                px, py = x + _c_div2(xmove), y + _c_div2(ymove)
+                xmove >>= 1
+                ymove >>= 1
+            else:
+                px, py = x + xmove, y + ymove
+                xmove = ymove = 0
+            px, py = _signed(px, 32), _signed(py, 32)
+            ok = self._player_knock_try(px, py, ev) if player else self._monster_knock_try(m, px, py, ev)
+            ev.knocks.append((thing, ok))
+            if not ok:
+                mx = my = 0
+            if not (xmove or ymove):
+                break
+        if self._knock_slides(thing, mx, my):
+            pass                                           # "do not stop sliding if halfway off a step"
+        elif -gd.STOPSPEED < mx < gd.STOPSPEED and -gd.STOPSPEED < my < gd.STOPSPEED:
+            mx = my = 0
+        else:
+            mx = _signed(fixed_mul(mx, gd.FRICTION, 8, 4), 32)
+            my = _signed(fixed_mul(my, gd.FRICTION, 8, 4), 32)
+        if player:
+            ws.p_momx, ws.p_momy = mx, my
+        else:
+            ws.mon_momx[m], ws.mon_momy[m] = mx, my
+
+    def _knock_slides(self, thing, mx: int, my: int) -> bool:
+        """P_XYMovement's MF_CORPSE rule: a corpse with more than FRACUNIT/4 of momentum on an axis whose floorz is
+        not its leaf's sector floor keeps it (no friction, no stop). A corpse: a monster no longer shootable, the dead
+        player. Its floorz: the monster's mon_floorz, the player's check_position floorz; the sector floor: the leaf's
+        (the collision heights: doors open, the movers where they stand)"""
+        ws = self.ws
+        kind, m = thing
+        q = gd.FRACUNIT // 4
+        if not (mx > q or mx < -q or my > q or my < -q):
+            return False
+        if kind == "player":
+            if not ws.p_dead:
+                return False
+            floorz = self.rm.check_position(self.scene_c, ws.px, ws.py)[1]
+            leaf = self.rm.point_in_subsector(self.cmap, ws.px >> 16, ws.py >> 16)
+        else:
+            if ws.mon_shootable[m]:
+                return False
+            floorz, leaf = ws.mon_floorz[m], ws.mon_leaf[m]
+        return floorz != self.secs_c[self.leaf_sector[leaf]].floor_h
+
+    def _player_knock_try(self, cx: int, cy: int, ev) -> bool:
+        """the player's P_TryMove of a knock step to 16.16 (cx, cy): the walk's candidate (`_player_move`) -- the
+        pickups touched (alive) from the floor he stands on, a solid thing refuses, then try_move through the
+        collision scene (a dead player is a corpse: height >> 2); an accept moves him and fires the walk-over
+        lines it crossed"""
+        ws, rm = self.ws, self.rm
+        x, y = ws.px, ws.py
+        here_z = rm.check_position(self.scene_c, x, y)[1]
+        self._touch_specials(cx, cy, here_z, ev)
+        if self.player_blocking and self._solid_thing_at(cx, cy) is not None:
+            ev.player_blocked += 1
+            return False
+        height = PLAYER_HEIGHT >> 2 if ws.p_dead else PLAYER_HEIGHT
+        if not rm.try_move(self.scene_c, x, y, cx, cy, height=height):
+            return False
+        ws.px, ws.py = cx, cy
+        self._walkover(x, y, cx, cy)
+        return True
+
+    def _player_knock_move(self, ev) -> None:
+        """M7 P8a (package K): the player's P_XYMovement on his knock momentum -- after the walk, or after the death
+        think (the corpse slides); once a frame (the player's tic, O-B3)"""
+        if self.ws.p_momx or self.ws.p_momy:
+            self._xy_move(("player", -1), ev)
 
     # -------------------------------------------------------------------------------- monsters
     def _monster_attack(self, m: int, action: str, ev) -> None:
@@ -973,20 +1283,93 @@ class CombatMixin:
     def _mon_melee(self, m: int, site, ev) -> None:
         dmg = self._roll("mon_rng", site, m)
         ev.mon_melee.append((m, dmg))
-        self.damage_player(dmg, ("mon", m), ev)
+        t = self.ws.mon_target[m]
+        if self._fight and t >= 2:               # M7 P8a I: the claw / the bite on a MONSTER target: no blood (DOOM's
+            ev.mon_hits.append((m, "claw" if site is self.sites.troop_claw else "bite", "mon", t - 2, dmg))
+            self.damage_monster(t - 2, dmg, ("mon", m), ("mon", m), ev)      # A_TroopAttack calls P_DamageMobj)
+            return
+        self.damage_player(dmg, ("mon", m), ("mon", m), ev)
 
     def _mon_hitscan(self, m: int, bullets: int, ev) -> None:
         """A_PosAttack / A_SPosAttack: one aim (sight and range), then each bullet's spread against
-        the player's width at that distance. Every bullet draws, hit or not."""
+        the player's width at that distance. Every bullet draws, hit or not.
+
+        M7 P8a I (infighting; O-B5, a recorded convention): the aim is at the TARGET -- its sight, its distance, its
+        radius's width (`hwt_r`) -- and a bullet first meets the nearest live shootable thing NEARER than the target
+        (`_bullet_victim`: the player, monsters, barrels; never the shooter or the target) within that thing's width
+        of the bullet's line; else the target by the rule above; else nothing. A target the shooter does not see is
+        missed, and so is everything in front of it (the shooter fires along the line it sees). A monster hit
+        bleeds and a barrel puffs (toward the player, as a player's shot's effect: `_spawn_fx_at_target`)."""
         W = _W()
-        seen = self.player_alive() and self.attack_sight(self, m)   # M7 P3.2
-        dist = W.aprox_distance(*self._to_player(m))
+        if not self._fight:
+            seen = self.player_alive() and self.attack_sight(self, m)   # M7 P3.2
+            dist = W.aprox_distance(*self._to_player(m))
+            for _ in range(bullets):
+                spread, dmg = self._roll("mon_rng", self.sites.mon_bullet, m)
+                hit = seen and dist < MISSILERANGE_U and abs(spread) <= self.hwt[dist >> HWT_SHIFT]
+                ev.mon_shots.append((m, spread, dmg, hit))
+                if hit:
+                    self.damage_player(dmg, ("mon", m), ("mon", m), ev)
+            return
+        ws = self.ws
+        seen = self.target_alive(m) and self.attack_sight(self, m)
+        dist = W.aprox_distance(*self._to_target(m))
+        hwt_t = self.hwt_r[self._target_radius(m)]
+        a_t = self.rm.point_to_angle(ws.mon_x[m] << 16, ws.mon_y[m] << 16, *self._target_pos16(m)) if seen else 0
+        t = ws.mon_target[m]
         for _ in range(bullets):
             spread, dmg = self._roll("mon_rng", self.sites.mon_bullet, m)
-            hit = seen and dist < MISSILERANGE_U and abs(spread) <= self.hwt[dist >> HWT_SHIFT]
-            ev.mon_shots.append((m, spread, dmg, hit))
-            if hit:
-                self.damage_player(dmg, ("mon", m), ev)
+            victim = None
+            if seen:
+                victim = self._bullet_victim(m, spread, a_t, dist)
+                if victim is None and dist < MISSILERANGE_U and abs(spread) <= hwt_t[dist >> HWT_SHIFT]:
+                    victim = ("mon", t - 2) if t >= 2 else ("player", -1)
+            ev.mon_shots.append((m, spread, dmg, victim is not None))
+            if victim is None:
+                continue
+            kind, i = victim
+            if kind == "player":
+                self.damage_player(dmg, ("mon", m), ("mon", m), ev)
+                continue
+            x, y = self._target_xy(victim)
+            ev.mon_hits.append((m, "bullet", kind, i, dmg))
+            self._spawn_fx_at_target("blood" if kind == "mon" else "puff", x, y, dmg, False, ev)
+            if kind == "mon":
+                self.damage_monster(i, dmg, ("mon", m), ("mon", m), ev)
+            else:
+                self.damage_barrel(i, dmg, ("mon", m), ev)
+
+    def stray_candidates(self, m: int) -> List[Tuple[str, int, int, int, int]]:
+        """M7 P8a I: (kind, index, x16, y16, radius) of every thing a bullet of monster m can meet before its target,
+        in the convention's order -- the player (alive), the monsters by slot (live: shootable_targets' rule), the
+        barrels by index (standing) -- never the shooter, never the target"""
+        ws, t = self.ws, self.ws.mon_target[m]
+        out = []
+        if t != 1 and self.player_alive():
+            out.append(("player", -1, ws.px, ws.py, PLAYER_R))
+        for kind, i, x, y, r in self.shootable_targets():
+            if kind == "mon" and (i == m or i == t - 2):
+                continue
+            out.append((kind, i, x << 16, y << 16, r))
+        return out
+
+    def _bullet_victim(self, m: int, spread: int, a_t: int, d_t: int):
+        """M7 P8a I (O-B5): the thing a bullet of monster m with `spread` meets before its target (at angle a_t,
+        aprox distance d_t): among `stray_candidates`, those with d = P_AproxDistance (integer units, the player's
+        position floored) < d_t and < MISSILERANGE whose angular offset delta = (R_PointToAngle2(shooter -> it) - a_t)
+        >> 20 (signed, floored: the spread's unit, 2^20 BAM) satisfies |spread - delta| <= HWT_r[d >> 4]; the
+        nearest by d, ties by the candidates' order. None: no thing in the way"""
+        ws, W = self.ws, _W()
+        sx, sy = ws.mon_x[m], ws.mon_y[m]
+        best = None
+        for kind, i, x16, y16, r in self.stray_candidates(m):
+            d = W.aprox_distance((x16 >> 16) - sx, (y16 >> 16) - sy)
+            if d >= d_t or d >= MISSILERANGE_U or (best is not None and d >= best[0]):
+                continue
+            delta = _signed((self.rm.point_to_angle(sx << 16, sy << 16, x16, y16) - a_t) & M32, 32) >> 20
+            if abs(spread - delta) <= self.hwt_r[r][d >> HWT_SHIFT]:
+                best = (d, (kind, i))
+        return None if best is None else best[1]
 
     # -------------------------------------------------------------------------------- fireballs
     def _mobile_proj(self, s: int) -> int:
@@ -1007,10 +1390,14 @@ class CombatMixin:
             ev.fizzles.append(m)
             return
         sx, sy = ws.mon_x[m] << 16, ws.mon_y[m] << 16
-        an = self.rm.point_to_angle(sx, sy, ws.px, ws.py)
+        # M7 P8a I: P_SpawnMissile aims at the TARGET (the player before infighting; `_target_pos16`). Convention: a
+        # spectre target's MF_SHADOW jitter (an += P_SubRandom() << 20) is not drawn -- nor A_FaceTarget's on it
+        an = self.rm.point_to_angle(sx, sy, *self._target_pos16(m))
         momx, momy = self.fireball_mom[an >> self.rm.angle_shift]
         ws.proj_active[slot], ws.proj_src[slot] = 1, m
         ws.proj_momx[slot], ws.proj_momy[slot] = momx, momy
+        if self._p_knock:                        # M7 P8a: the missile's z, for the thrust's reversal (z + 4*8)
+            ws.proj_z[slot] = ws.mon_floorz[m] + 32
         self._proj_set_state(slot, FIREBALL_INFO.spawnstate)
         v = self._roll("rng_fx", self.sites.tics_roll)
         ws.proj_tics[slot] = max(1, ws.proj_tics[slot] - v)
@@ -1055,8 +1442,10 @@ class CombatMixin:
             if abs(ws.px - nx) < bd and abs(ws.py - ny) < bd:
                 dmg = self._roll("rng_fx", self.sites.fireball_hit)
                 ev.proj_impacts.append((s, dmg))
-                self.damage_player(dmg, ("mon", ws.proj_src[s]), ev)
+                self.damage_player(dmg, ("mon", ws.proj_src[s]), ("proj", s), ev)   # the MISSILE inflicts
                 return False
+        if self._fight and self._missile_things(s, nx, ny, ev):   # M7 P8a I: monsters and barrels stop it too
+            return False
         if self.missile_lines_block(nx, ny):
             ev.proj_walls.append(s)
             return False
@@ -1067,6 +1456,53 @@ class CombatMixin:
             ws.proj_leaf[s] = leaf
             self._list_insert(self._mobile_proj(s), leaf)
         return True
+
+    def _missile_things(self, s: int, nx: int, ny: int, ev) -> bool:
+        """M7 P8a I (G-I5): PIT_CheckThing for fireball s at (nx, ny) after the player -- the monsters by slot, then the
+        barrels by index (convention: DOOM walks the blockmap); the FIRST thing whose box overlaps (|dx| < r + 6 on
+        both axes, 16.16) and that is solid or shootable decides: its shooter is passed; another of the shooter's
+        species stops it with no damage; a solid corpse (dying, before A_Fall) or an exploding barrel stops it with
+        no damage; anything else shootable takes ((P_Random()%8)+1)*3 on rng_fx (the inflictor the missile, the source
+        its shooter). True: it stopped (the caller explodes it). Solid decor still passes (D5: under it), and the
+        2D convention holds (no z test)."""
+        ws = self.ws
+        src = ws.proj_src[s]
+        stype = self.mon_things[src].type
+        for j in range(self.layout.nmon):
+            if not ws.mon_active[j]:
+                continue
+            shoot = bool(ws.mon_shootable[j] and ws.mon_health[j] > 0)
+            if not (ws.mon_solid[j] or shoot):
+                continue                                   # a fallen corpse: neither solid nor shootable
+            bd = (FIREBALL_R + self.mon_radius[j]) << 16
+            if abs((ws.mon_x[j] << 16) - nx) >= bd or abs((ws.mon_y[j] << 16) - ny) >= bd:
+                continue
+            if j == src:
+                continue                                   # its shooter
+            if self.mon_things[j].type == stype:
+                ev.mon_hits.append((src, "fireball", "species", j, 0))
+                return True                                # the same species: explode, no damage
+            if not shoot:
+                ev.mon_hits.append((src, "fireball", "corpse", j, 0))
+                return True                                # solid, not shootable: explode, no damage
+            dmg = self._roll("rng_fx", self.sites.fireball_hit)
+            ev.mon_hits.append((src, "fireball", "mon", j, dmg))
+            self.damage_monster(j, dmg, ("mon", src), ("proj", s), ev)
+            return True
+        for b, t in enumerate(self.barrel_things):
+            if not ws.bar_solid[b]:
+                continue                                   # removed
+            bd = (FIREBALL_R + BARREL_R) << 16
+            if abs((t.x << 16) - nx) >= bd or abs((t.y << 16) - ny) >= bd:
+                continue
+            if not (ws.bar_state[b] and ws.bar_health[b] > 0):
+                ev.mon_hits.append((src, "fireball", "corpse", -1 - b, 0))
+                return True                                # exploding: solid, not shootable
+            dmg = self._roll("rng_fx", self.sites.fireball_hit)
+            ev.mon_hits.append((src, "fireball", "bar", b, dmg))
+            self.damage_barrel(b, dmg, ("mon", src), ev)
+            return True
+        return False
 
     def _explode(self, s: int) -> None:
         """P_ExplodeMissile: stop, the death state, `tics -= P_Random()&3`."""
@@ -1097,7 +1533,7 @@ class CombatMixin:
                 continue
             self._list_remove(self._mobile_proj(s), ws.proj_leaf[s])      # P_RemoveMobj
             for f in ("proj_active", "proj_state", "proj_tics", "proj_x", "proj_y", "proj_momx",
-                      "proj_momy", "proj_src", "proj_leaf"):
+                      "proj_momy", "proj_src", "proj_leaf") + (("proj_z",) if self._p_knock else ()):
                 getattr(ws, f)[s] = 0
 
     # -------------------------------------------------------------------------------- effects
@@ -1183,6 +1619,13 @@ class CombatMixin:
         t = self.barrel_things[b]
         spot = (t.x << 16, t.y << 16)
         ev.barrel_blasts.append(b)
+        # M7 P8a I (G-I7): with infighting the blast's SOURCE is the barrel's `bar_src` (its target in DOOM: the
+        # source of the first damage that did not kill it) -- None, the player, or a monster; before, the player
+        if self._fight:
+            src = self._bar_source(b)
+            p_src, m_src = (("bar", b) if src is None else src), src     # damage_player: no source turns nothing
+        else:
+            p_src, m_src = ("bar", b), ("player", -1)
 
         def dist(x16: int, y16: int, r: int) -> int:
             d = max(abs(x16 - spot[0]), abs(y16 - spot[1]))
@@ -1191,7 +1634,7 @@ class CombatMixin:
         if self.player_alive():
             d = dist(ws.px, ws.py, PLAYER_R)
             if d < BOMB_DAMAGE and self.los_points((ws.px, ws.py), spot):
-                self.damage_player(BOMB_DAMAGE - d, ("bar", b), ev)
+                self.damage_player(BOMB_DAMAGE - d, p_src, ("bar", b), ev)
         for m in range(self.layout.nmon):
             if not (ws.mon_active[m] and ws.mon_shootable[m] and ws.mon_health[m] > 0):
                 continue
@@ -1199,7 +1642,7 @@ class CombatMixin:
             d = dist(p[0], p[1], self.mon_radius[m])
             if d < BOMB_DAMAGE and self.los_points(p, spot):
                 ev.hits.append(("barrel", "mon", m, BOMB_DAMAGE - d))
-                self.damage_monster(m, BOMB_DAMAGE - d, ("player", -1), ev)
+                self.damage_monster(m, BOMB_DAMAGE - d, m_src, ("bar", b), ev)   # the BARREL inflicts
         for c, tc in enumerate(self.barrel_things):
             if c == b or not ws.bar_state[c] or ws.bar_health[c] <= 0:
                 continue
@@ -1207,7 +1650,7 @@ class CombatMixin:
             d = dist(p[0], p[1], BARREL_R)
             if d < BOMB_DAMAGE and self.los_points(p, spot):
                 ev.hits.append(("barrel", "bar", c, BOMB_DAMAGE - d))
-                self.damage_barrel(c, BOMB_DAMAGE - d, ev)
+                self.damage_barrel(c, BOMB_DAMAGE - d, m_src, ev)
 
     # -------------------------------------------------------------------------------- the move
     def _player_move(self, keys: dict, ev) -> None:
@@ -1306,9 +1749,10 @@ class CombatMixin:
         for m in range(self.layout.nmon):
             if ws.mon_drop[m] != 1:
                 continue
-            if abs((ws.mon_x[m] << 16) - x16) >= bd or abs((ws.mon_y[m] << 16) - y16) >= bd:
+            dx, dy = self.drop_pos(m)            # M7 P8a: the drop's own position (World.drop_pos)
+            if abs((dx << 16) - x16) >= bd or abs((dy << 16) - y16) >= bd:
                 continue
-            if self._touch(self.dropper[m], True, self._floor_at(ws.mon_x[m], ws.mon_y[m]), z):
+            if self._touch(self.dropper[m], True, self._floor_at(dx, dy), z):
                 ws.mon_drop[m] = 2
                 ev.pickups.append(("drop", m, self.dropper[m]))
 

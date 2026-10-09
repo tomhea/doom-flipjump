@@ -33,7 +33,7 @@ def _render(w, depth):
     views = [None] * hook.views.n
     for m, v in hook._mviews(w).items():
         views[hook.views.mdi[m]] = v
-    kw = dict(hook.kw, rt_depth_order=depth)
+    kw = dict(hook.kw, rt_depth_order=depth, rt_rank=False)   # M7 P8a: D3 d alone (D3 a is test_d3_rules')
     return w.rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, w.mapname), hook._scene(w), sprite_wad=hook.art,
                                   thing_positions=pos, thing_hidden=hidden, thing_views=views, **kw)
 

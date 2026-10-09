@@ -1,16 +1,25 @@
 name: ci
-on: [push, pull_request]
+# One run per PR push (pull_request) and one per push to main -- not both for a PR branch: the free plan runs
+# 20 jobs at a time across the account, and a doubled run halves the shards that can run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 # GitHub's hosted runners stop a job at 6 h; the one-job suite outgrew that at M7 P8a (#124: cancelled at 6 h 00 m
-# in scripts/test.sh). The tests run as a matrix of shards (tests/conftest.py: PYTEST_SHARD=i/n keeps whole files),
-# and the build + its guards run as their own job. tests/host/test_shards.py holds the partition.
+# in scripts/test.sh). The tests run as 20 DURATION-BALANCED shards (tests/conftest.py: PYTEST_SHARD=i/n deals the
+# tests longest-first by tests/durations.json, ~28 min a shard), and the build + its guards as their own job.
+# --durations logs every test's seconds, so `python scripts/ci_durations.py <run id>` refreshes the estimates.
+# tests/host/test_shards.py holds the partition and the balance.
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
-    name: test (shard ${{ matrix.shard }}/8)
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    name: test (shard ${{ matrix.shard }}/20)
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,11 +38,12 @@ jobs:
       # against and refuses any other bytes -- the pins live there, so a local fetch is checked too.
       - name: fetch Freedoom 0.13.0 (assets/freedoom1.wad)
         run: bash scripts/fetch_freedoom.sh assets
-      - run: bash scripts/test.sh
+      - run: bash scripts/test.sh --durations=0 --durations-min=0.5
         env:
-          PYTEST_SHARD: "${{ matrix.shard }}/8"
+          PYTEST_SHARD: "${{ matrix.shard }}/20"
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

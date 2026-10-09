@@ -7,8 +7,8 @@ on:
   pull_request:
   workflow_dispatch:
 # GitHub's hosted runners stop a job at 6 h; the one-job suite outgrew that at M7 P8a (#124: cancelled at 6 h 00 m
-# in scripts/test.sh). The tests run as 20 DURATION-BALANCED shards (tests/conftest.py: PYTEST_SHARD=i/n deals the
-# tests longest-first by tests/durations.json, ~28 min a shard), and the build + its guards as their own job.
+# in scripts/test.sh). The tests run as 20 DURATION-BALANCED shards (tests/conftest.py: PYTEST_SHARD=i/n cuts the
+# topic-ordered tests by tests/durations.json, ~30 min a shard), and the build + its guards as their own job.
 # --durations logs every test's seconds, so `python scripts/ci_durations.py <run id>` refreshes the estimates.
 # tests/host/test_shards.py holds the partition and the balance.
 jobs:

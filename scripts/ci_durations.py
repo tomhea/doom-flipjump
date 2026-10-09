@@ -4,9 +4,10 @@
 
 CI runs `scripts/test.sh --durations=0 --durations-min=0.5`, so every job's log ends with pytest's "slowest durations"
 report (`12.34s call     tests/fj/x.py::test_y`, and the setup / teardown lines). This sums setup + call + teardown
-per test (the mean when several runs report it), writes them into "tests" (an exact figure wins over the file's),
-and re-derives "files" -- one test's mean seconds in that file -- for the files measured, so a NEW test in a measured
-file starts from its neighbours. Tests under the 0.5 s report floor keep their file's figure.
+per test (the mean when several runs report it) and REPLACES "tests" with them (an exact figure wins over the file's),
+and sets "files" -- the seconds of a test the report did NOT list -- to 0.05 for every collected file: with the
+0.5 s report floor, an unlisted test of a full run took under 0.5 s. Pass the run ids of a FULL CI run of this
+collection (a test the runs never ran would get 0.05 too).
 
 The first estimates (2026-10-09) came from the timestamped `pytest -q` progress lines of 16 one-job runs, solved per
 file by NNLS (scripts/ci_durations_nnls.py)."""
@@ -18,8 +19,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TABLE = ROOT / "tests" / "durations.json"
-LINE = re.compile(r"(\d+(?:\.\d+)?)s (setup|call|teardown)\s+(tests/\S+::\S+)")
+# the node id runs to the end of the line: a parametrized id may hold spaces (`test_x[the case]`) -- `\S+` cut it there
+# and merged different tests into one key
+LINE = re.compile(r"(\d+(?:\.\d+)?)s (setup|call|teardown)\s+(tests/.+?::.+?)\s*$")
 REPO = "tomhea/doom-flipjump"
+BELOW_FLOOR = 0.05                      # measured: run 37900825561's host shard (453.85 s) less its reported
+                                        # tests (366 s), over its 1,759 unreported tests -- 0.050 s each
+
+
+def collected_files() -> list:
+    """the files `pytest --collect-only` finds now -- the runs passed must be of this collection (a full CI run)"""
+    out = subprocess.run([sys.executable, "-m", "pytest", "tests", "--collect-only", "-q", "-p", "no:cacheprovider"],
+                         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+    return sorted({ln.split("::")[0] for ln in out.splitlines() if "::" in ln})
 
 
 def run_durations(run_id: str) -> dict:
@@ -47,13 +59,11 @@ def main(argv) -> int:
         print("no durations found -- did the runs use --durations?")
         return 1
     table = json.loads(TABLE.read_text(encoding="utf-8"))
-    for k, vs in seen.items():
-        table["tests"][k] = round(sum(vs) / len(vs), 2)
-    per_file = {}
-    for k, v in table["tests"].items():
-        per_file.setdefault(k.split("::")[0], []).append(v)
-    for f, vs in per_file.items():
-        table["files"][f] = round(sum(vs) / len(vs), 1)
+    table["tests"] = {k: round(sum(vs) / len(vs), 2) for k, vs in sorted(seen.items())}   # REPLACED: a full run's report
+    # a test the runs did not report ran under the report's floor (--durations-min=0.5): every collected file the
+    # runs covered gets BELOW_FLOOR for those tests -- not its reported tests' mean, which only the slow ones make
+    for f in collected_files():
+        table["files"][f] = BELOW_FLOOR
     TABLE.write_text(json.dumps(table, indent=1) + "\n", encoding="utf-8", newline="\n")
     print("tests/durations.json: %d exact tests, %d files" % (len(table["tests"]), len(table["files"])))
     return 0

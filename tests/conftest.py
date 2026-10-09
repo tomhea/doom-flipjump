@@ -134,5 +134,9 @@ def pytest_collection_modifyitems(config, items):
         i, n, len(selected), len(files), est / 60, files[0] if files else "-", files[-1] if files else "-")
 
 
-def pytest_report_collectionfinish(config, start_path, items):
-    return getattr(config, "_shard_summary", None)
+def pytest_collection_finish(session):
+    """the shard's range on the terminal, at every verbosity (`-q` hides pytest_report_collectionfinish's lines)"""
+    summary = getattr(session.config, "_shard_summary", None)
+    tr = session.config.pluginmanager.get_plugin("terminalreporter")
+    if summary and tr is not None:
+        tr.write_line(summary)

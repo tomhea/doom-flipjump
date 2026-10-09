@@ -1,8 +1,16 @@
 name: ci
 on: [push, pull_request]
+# GitHub's hosted runners stop a job at 6 h; the one-job suite outgrew that at M7 P8a (#124: cancelled at 6 h 00 m
+# in scripts/test.sh). The tests run as a matrix of shards (tests/conftest.py: PYTEST_SHARD=i/n keeps whole files),
+# and the build + its guards run as their own job. tests/host/test_shards.py holds the partition.
 jobs:
-  build-test:
+  test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    name: test (shard ${{ matrix.shard }}/8)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,6 +30,28 @@ jobs:
       - name: fetch Freedoom 0.13.0 (assets/freedoom1.wad)
         run: bash scripts/fetch_freedoom.sh assets
       - run: bash scripts/test.sh
+        env:
+          PYTEST_SHARD: "${{ matrix.shard }}/8"
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }     # pygame-supported (§H); device milestones need it
+      # flipjump 1.5.1 (the 0x06 hex.vec2 register-screen device, §2.1) is not yet on PyPI — install it
+      # editable from the flip-jump 1.5.1 branch. TEMPORARY (M11c): reverts to a pinned PyPI release once
+      # 1.5.1 is merged to flip-jump main and published.
+      - name: install flipjump 1.5.1 (0x06 device)
+        run: |
+          git clone --depth 1 --branch 1.5.1 https://github.com/tomhea/flip-jump.git "$RUNNER_TEMP/flip-jump"
+          pip install -e "$RUNNER_TEMP/flip-jump[io]"
+          python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"
+      - run: pip install -e ".[dev]"
+      # The art WAD the sprite and thing tests read. Freedoom is BSD-licensed but 28 MB, so it is not
+      # committed (.gitignore); scripts/fetch_freedoom.sh fetches the release the suite was written
+      # against and refuses any other bytes -- the pins live there, so a local fetch is checked too.
+      - name: fetch Freedoom 0.13.0 (assets/freedoom1.wad)
+        run: bash scripts/fetch_freedoom.sh assets
       - run: bash scripts/build.sh
       - name: assert R4 (flat) + R-2 (assemble ceiling)
         run: |

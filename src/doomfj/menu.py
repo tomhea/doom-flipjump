@@ -63,17 +63,31 @@ CELL_W = GLYPH_W + GLYPH_GAP            # the usual advance; the truncation budg
 
 # The CREDIT uses the small 3x5 font (the owner chose it small and quiet), its M five columns with
 # the middle stroke two rows deep, and a two-column full stop.
+# P9 (the owner's play-test, 2026-10-10: "smaller text" on the HELP page): the help's caps, legends and descriptions are
+# drawn in this font too, so it grew every character the help needs -- the digits, ',', ':', '/', '-' and the four
+# arrows (the 5x7 arrows' own shapes, cut to five rows) -- and the two letters a 3-column grid drew badly were redrawn
+# in the classic shapes: N four columns with its diagonal ("## |# #|# #|# #|#  " read as a lower-case n), W five, the
+# mirror of M ("# #|# #|###|###|# #" read as an H). The credit's own glyphs (T O M H E . A P) are untouched.
 _SMALL_GLYPHS = {
     "A": "###|# #|###|# #|# #", "B": "## |# #|## |# #|## ", "C": "###|#  |#  |#  |###",
     "D": "## |# #|# #|# #|## ", "E": "###|#  |## |#  |###", "F": "###|#  |## |#  |#  ",
     "G": "###|#  |# #|# #|###", "H": "# #|# #|###|# #|# #", "I": "###| # | # | # |###",
     "J": "  #|  #|  #|# #|###", "K": "# #|# #|## |# #|# #", "L": "#  |#  |#  |#  |###",
-    "M": "#   #|## ##|# # #|# # #|#   #", "N": "## |# #|# #|# #|#  ", "O": "###|# #|# #|# #|###",
+    "M": "#   #|## ##|# # #|# # #|#   #", "N": "#  #|## #|# ##|#  #|#  #", "O": "###|# #|# #|# #|###",
     "P": "###|# #|###|#  |#  ", "Q": "###|# #|# #|###|  #", "R": "###|# #|## |# #|# #",
     "S": "###|#  |###|  #|###", "T": "###| # | # | # | # ", "U": "# #|# #|# #|# #|###",
-    "V": "# #|# #|# #|# #| # ", "W": "# #|# #|###|###|# #", "X": "# #|# #| # |# #|# #",
+    "V": "# #|# #|# #|# #| # ", "W": "#   #|#   #|# # #|# # #| # # ", "X": "# #|# #| # |# #|# #",
     "Y": "# #|# #| # | # | # ", "Z": "###|  #| # |#  |###",
-    " ": "   |   |   |   |   ", ".": "  |  |  |  |# ",
+    "0": "###|# #|# #|# #|###", "1": " # |## | # | # |###", "2": "###|  #|###|#  |###",
+    "3": "###|  #| ##|  #|###", "4": "# #|# #|###|  #|  #", "5": "###|#  |###|  #|###",
+    "6": "###|#  |###|# #|###", "7": "###|  #|  #|  #|  #", "8": "###|# #|###|# #|###",
+    "9": "###|# #|###|  #|###",
+    " ": "   |   |   |   |   ", ".": "  |  |  |  |# ", ",": "  |  |  | #|# ", ":": " |#| |#| ",
+    "/": "  #|  #| # |#  |#  ", "-": "   |   |###|   |   ",
+    "↑": "  #  | ### |# # #|  #  |  #  ",                                 # up
+    "↓": "  #  |  #  |# # #| ### |  #  ",                                 # down
+    "←": "  #  | #   |#####| #   |  #  ",                                 # left
+    "→": "  #  |   # |#####|   # |  #  ",                                 # right
 }
 SMALL_GLYPH_H = 5
 
@@ -210,29 +224,34 @@ HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEF
                  # M7 P4.1: fire (ctrl -- pygame_window's 0x85), the number keys, the second strafe pair
                  "CTRL": 0x85, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, ",": 0x2C, ".": 0x2E}
 # THE GEOMETRY, px. A cap is a 1-px box in the credit's dim gray with 1 px of padding round its
-# legend, the legend centred; every cap of a cluster is as wide as its widest legend's cap (W/A/S/D
-# 9, the arrows 11), and each cap of a key row fits its own legend.
+# legend, the legend centred; every cap of a cluster is as wide as its widest legend's cap (all 9: W and the arrows
+# are five columns), and each cap of a key row fits its own legend.
+#
+# P9 (the owner's play-test, 2026-10-10: "smaller text and more spaces between categories"): every string but the title
+# -- the caps' legends, "OR", the clusters' legend, the descriptions -- is in the SMALL 3x5 font (`HELP_FONT`; the
+# title keeps the 5x7), so a cap is 9 rows high instead of 11, and the rows that frees go to the gaps BETWEEN the
+# categories: HELP_SECTION_GAP (6) empty rows between the clusters and the first key row and between every two key
+# rows (it was 2), HELP_TITLE_GAP (5) under the title. And every row's second item stands in ONE column with the
+# clusters' legend (`help_layout`): the page reads as two columns of categories with a gutter between them.
+HELP_FONT = _SMALL_GLYPHS                # the font of every help string but the title
+HELP_TEXT_H = SMALL_GLYPH_H              # ...and its height
 HELP_TITLE_Y = 2                         # the title's top row
+HELP_TITLE_GAP = 5                       # empty rows under the title, above the clusters
 HELP_X = 6                               # the left margin: the clusters and the key column
-HELP_CLUSTERS_Y = 11                     # the clusters' top row (M7 P4.1: one row up, for the fourth key row)
+HELP_CLUSTERS_Y = HELP_TITLE_Y + GLYPH_H + HELP_TITLE_GAP       # the clusters' top row
 HELP_CAP_BORDER = 1
 HELP_CAP_PAD = 1
 HELP_CAP_INSET = HELP_CAP_BORDER + HELP_CAP_PAD      # a cap's edge to its legend
-HELP_CAP_H = GLYPH_H + 2 * HELP_CAP_INSET           # every cap's outer height
+HELP_CAP_H = HELP_TEXT_H + 2 * HELP_CAP_INSET       # every cap's outer height
 HELP_CAP_GAP = 1                         # between a cluster's caps
 HELP_OR_GAP = 4                          # either side of HELP_OR
-HELP_LEGEND_GAP = 7                      # the last cluster to its legend
-HELP_LEGEND_PITCH = GLYPH_H + 1          # one legend line to the next (M7 P4.1: three lines beside two cap rows)
-HELP_ROWS_GAP = 2                        # the clusters' bottom to the first key row
+HELP_LEGEND_GAP = 7                      # the last cluster to its legend (the second column's least x)
+HELP_LEGEND_PITCH = HELP_TEXT_H + 2      # one legend line to the next: three lines beside the two cap rows
+HELP_SECTION_GAP = 6                     # P9: empty rows between two categories (the clusters, each key row)
 HELP_KEY_GAP = 2                         # between an item's caps
-# M7 P6+P7 (the owner, 2026-10-05: "use a bit more space between different categories"; docs/gp-p67-interface.md
-# section 12): the items of a row further apart and each description nearer its own caps (DESC 6 -> 4, ITEM 8 -> 12),
-# the key rows 2 px apart (ROW_PITCH + 1 -> + 2), paid for by the use description's second line at the legend's
-# pitch (LINE_PITCH + 2 -> + 1). The last row's HELP then ends 1 px above the credit's top: the screen is full.
 HELP_DESC_GAP = 4                        # an item's caps to its description
-HELP_ITEM_GAP = 12                       # an item's description to the next item in its row (M7 P4.1)
-HELP_ROW_PITCH = HELP_CAP_H + 2          # one key row to the next...
-HELP_LINE_PITCH = GLYPH_H + 1            # ...plus this per extra description line (the legend's pitch)
+HELP_ITEM_GAP = 12                       # the least gutter between a row's first item and the second column
+HELP_LINE_PITCH = HELP_TEXT_H + 1        # one description line to the next
 
 
 def help_key_names() -> list:
@@ -246,23 +265,45 @@ def help_cap_legend(key: str) -> str:
     return HELP_CAP_LEGENDS.get(key, key)
 
 
+def help_font(role: str):
+    """the font a help string of `role` is drawn in: the title the lines' 5x7, everything else HELP_FONT (P9)"""
+    return _GLYPHS if role == "title" else HELP_FONT
+
+
+def help_text_width(label: str, role: str = "text") -> int:
+    """the pixel width of a help string of `role`"""
+    return text_width(label, help_font(role))
+
+
 def help_cap_width(legend: str) -> int:
     """the outer width of the narrowest cap that holds `legend`"""
-    return text_width(legend) + 2 * HELP_CAP_INSET
+    return help_text_width(legend) + 2 * HELP_CAP_INSET
+
+
+def _help_item_width(keys, lines) -> int:
+    """an item's width: its caps, HELP_KEY_GAP apart, then HELP_DESC_GAP, then its widest description line"""
+    caps = sum(help_cap_width(help_cap_legend(k)) for k in keys) + HELP_KEY_GAP * (len(keys) - 1)
+    return caps + HELP_DESC_GAP + max(help_text_width(line) for line in lines)
 
 
 def help_layout(width, height) -> tuple:
     """THE help screen's layout: `(caps, texts)` -- `caps` the keycaps as `(key, x, y, w)`, each an
     outer box HELP_CAP_H high; `texts` every string drawn, as `(label, x, y, role)`, role
-    "title" (the highlight colour) or "text" (the text colour), the caps' legends among them.
+    "title" (the highlight colour, the 5x7 font) or "text" (the text colour, HELP_FONT), the caps' legends among them.
     ASSERTED inside the screen, so a longer row or a smaller screen stops the emitter instead of
-    clipping the map."""
-    caps, texts = [], [(HELP_TITLE, (width - text_width(HELP_TITLE)) // 2, HELP_TITLE_Y, "title")]
+    clipping the map.
+
+    P9: two columns. The clusters and every row's FIRST item stand at HELP_X; the clusters' legend and every row's
+    SECOND item stand at one x -- HELP_LEGEND_GAP past the clusters, or further right if some row's first item would
+    come nearer it than HELP_ITEM_GAP; a third item would follow its row's second, HELP_ITEM_GAP on. Each key row
+    stands HELP_SECTION_GAP empty rows below what the one above it DRAWS (a two-line description reaches below its
+    caps)."""
+    caps, texts = [], [(HELP_TITLE, (width - help_text_width(HELP_TITLE, "title")) // 2, HELP_TITLE_Y, "title")]
 
     def cap(key, x, y, w):
         legend = help_cap_legend(key)
         caps.append((key, x, y, w))
-        texts.append((legend, x + (w - text_width(legend)) // 2, y + HELP_CAP_INSET, "text"))
+        texts.append((legend, x + (w - help_text_width(legend)) // 2, y + HELP_CAP_INSET, "text"))
 
     # the clusters: an inverted T each -- the up cap over the middle of left, down, right
     bottom_y = HELP_CLUSTERS_Y + HELP_CAP_H + HELP_CAP_GAP
@@ -270,19 +311,24 @@ def help_layout(width, height) -> tuple:
     for i, (up, left, down, right) in enumerate(HELP_CLUSTERS):
         if i:
             texts.append((HELP_OR, x + HELP_OR_GAP, bottom_y + HELP_CAP_INSET, "text"))
-            x += HELP_OR_GAP + text_width(HELP_OR) + HELP_OR_GAP
+            x += HELP_OR_GAP + help_text_width(HELP_OR) + HELP_OR_GAP
         w = max(help_cap_width(help_cap_legend(k)) for k in (up, left, down, right))
         cap(up, x + w + HELP_CAP_GAP, HELP_CLUSTERS_Y, w)
         for col, key in enumerate((left, down, right)):
             cap(key, x + col * (w + HELP_CAP_GAP), bottom_y, w)
         x += 3 * w + 2 * HELP_CAP_GAP
-    for row, line in enumerate(HELP_CLUSTER_LEGEND):           # M7 P6+P7: level with the caps' top (was + 1)
-        texts.append((line, x + HELP_LEGEND_GAP, HELP_CLUSTERS_Y + row * HELP_LEGEND_PITCH, "text"))
-    # the key rows: each item's caps from its x, its description after them, the next item after that
-    y = bottom_y + HELP_CAP_H + HELP_ROWS_GAP
+    # the second column: the legend's x, or HELP_ITEM_GAP right of the widest first item of a two-item row
+    col2 = max([x + HELP_LEGEND_GAP] + [HELP_X + _help_item_width(*row[0]) + HELP_ITEM_GAP
+                                        for row in HELP_ROWS if len(row) > 1])
+    for row, line in enumerate(HELP_CLUSTER_LEGEND):           # level with the caps' top
+        texts.append((line, col2, HELP_CLUSTERS_Y + row * HELP_LEGEND_PITCH, "text"))
+    # the key rows: each item's caps from its x, its description after them
+    y = bottom_y + HELP_CAP_H + HELP_SECTION_GAP
     for row in HELP_ROWS:
-        x = HELP_X
-        for keys, lines in row:
+        x, drawn = HELP_X, HELP_CAP_H
+        for k, (keys, lines) in enumerate(row):
+            if k == 1:
+                x = col2
             for key in keys:
                 w = help_cap_width(help_cap_legend(key))
                 cap(key, x, y, w)
@@ -290,10 +336,11 @@ def help_layout(width, height) -> tuple:
             x += HELP_DESC_GAP - HELP_KEY_GAP
             for i, line in enumerate(lines):
                 texts.append((line, x, y + HELP_CAP_INSET + i * HELP_LINE_PITCH, "text"))
-            x += max(text_width(line) for line in lines) + HELP_ITEM_GAP
-        y += HELP_ROW_PITCH + HELP_LINE_PITCH * (max(len(lines) for _keys, lines in row) - 1)
+            drawn = max(drawn, HELP_CAP_INSET + (len(lines) - 1) * HELP_LINE_PITCH + HELP_TEXT_H)
+            x += max(help_text_width(line) for line in lines) + HELP_ITEM_GAP
+        y += drawn + HELP_SECTION_GAP
     boxes = [(x, y, w, HELP_CAP_H) for _k, x, y, w in caps] + \
-            [(x, y, text_width(label), GLYPH_H) for label, x, y, _r in texts]
+            [(x, y, help_text_width(label, r), GLYPH_H if r == "title" else HELP_TEXT_H) for label, x, y, r in texts]
     outside = [(x, y, w, h) for x, y, w, h in boxes
                if x < 0 or y < 0 or x + w > width or y + h > height]
     assert not outside, "the help layout is outside the screen: %r" % outside
@@ -320,7 +367,7 @@ def _help_bitmap(width, height, colours):
     for _key, x, y, w in caps:
         _draw_box(out, width, x, y, w, HELP_CAP_H, credit)
     for label, x, y, role in texts:
-        _draw(out, width, height, label, x, y, highlight if role == "title" else text)
+        _draw(out, width, height, label, x, y, highlight if role == "title" else text, help_font(role))
     cx, cy, cw, ch = credit_box(width, height)
     over = [(x, y) for y in range(max(0, cy), min(height, cy + ch))
             for x in range(max(0, cx), min(width, cx + cw)) if out[y * width + x] != background]

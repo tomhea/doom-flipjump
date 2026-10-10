@@ -254,22 +254,23 @@ def test_the_help_stream_paints_exactly_the_help_picture():
 # in them. Written out, not re-derived from `help_layout`: a layout change must change this table.
 # M7 P4.1: the help re-pinned for the owner's key map (approved 2026-10-02) -- three legend lines beside the clusters,
 # fire / the weapons / the second strafe pair as two-item rows (docs/gp-combat.md; the render, reviewed, in the PR)
-# M7 P6+P7 (the owner, 2026-10-05: "use a bit more space between different categories"): the items of a row further
-# apart and each description nearer its own caps (HELP_ITEM_GAP 8 -> 12, HELP_DESC_GAP 6 -> 4), the key rows 2 px apart
-# instead of 1 (HELP_ROW_PITCH), the two-line use description at the legend's 8-px pitch, the legend level with the
-# caps' top -- docs/gp-p67-interface.md section 12
-HELP_CAPS = [("W", 16, 11, 9), ("A", 6, 23, 9), ("S", 16, 23, 9), ("D", 26, 23, 9),
-             ("UP", 66, 11, 11), ("LEFT", 54, 23, 11), ("DOWN", 66, 23, 11), ("RIGHT", 78, 23, 11),
-             ("SPACE", 6, 36, 33), ("E", 41, 36, 9), ("CTRL", 6, 57, 27), ("1", 72, 57, 9), ("2", 83, 57, 9),
-             ("3", 94, 57, 9), ("4", 105, 57, 9), (",", 6, 70, 7), (".", 15, 70, 6), ("ENTER", 72, 70, 33),
-             ("ESC", 6, 83, 21), ("H", 104, 83, 9)]
-HELP_LEGENDS = [("W", 18, 13), ("A", 8, 25), ("S", 18, 25), ("D", 28, 25), ("↑", 69, 13),
-                ("←", 56, 25), ("↓", 69, 25), ("→", 80, 25), ("SPACE", 8, 38), ("E", 43, 38),
-                ("CTRL", 8, 59), ("1", 74, 59), ("2", 85, 59), ("3", 96, 59), ("4", 107, 59), (",", 8, 72),
-                (".", 17, 72), ("ENTER", 74, 72), ("ESC", 8, 85), ("H", 106, 85)]
-HELP_TEXTS = [("OR", 39, 25), ("↑ ↓ MOVE", 96, 11), ("A D STRAFE", 96, 19), ("← → TURN", 96, 27),
-              ("USE: DOORS,", 54, 38), ("SWITCHES, LIFTS", 54, 46), ("FIRE", 37, 59), ("WEAPONS", 118, 59),
-              ("STRAFE", 25, 72), ("SELECT", 109, 72), ("MENU / BACK", 31, 85), ("HELP", 117, 85)]
+# M7 P6+P7 (the owner, 2026-10-05: "use a bit more space between different categories"): docs/gp-p67-interface.md
+# section 12.
+# P9 (the owner's play-test, 2026-10-10: "smaller text and more spaces between categories"): every string but the title
+# in the 3x5 font (caps 9 high, were 11), 6 empty rows between the categories (were 2), 5 under the title, and the rows'
+# second items in one column with the clusters' legend (x 86) -- the render reviewed as scratchpad/p9_help_preview.png
+HELP_CAPS = [("W", 16, 14, 9), ("A", 6, 24, 9), ("S", 16, 24, 9), ("D", 26, 24, 9),
+             ("UP", 60, 14, 9), ("LEFT", 50, 24, 9), ("DOWN", 60, 24, 9), ("RIGHT", 70, 24, 9),
+             ("SPACE", 6, 39, 23), ("E", 31, 39, 7), ("CTRL", 6, 58, 19), ("1", 86, 58, 7), ("2", 95, 58, 7),
+             ("3", 104, 58, 7), ("4", 113, 58, 7), (",", 6, 73, 6), (".", 14, 73, 6), ("ENTER", 86, 73, 24),
+             ("ESC", 6, 88, 15), ("H", 86, 88, 7)]
+HELP_LEGENDS = [("W", 18, 16), ("A", 9, 26), ("S", 19, 26), ("D", 29, 26), ("↑", 62, 16),
+                ("←", 52, 26), ("↓", 62, 26), ("→", 72, 26), ("SPACE", 8, 41), ("E", 33, 41),
+                ("CTRL", 8, 60), ("1", 88, 60), ("2", 97, 60), ("3", 106, 60), ("4", 115, 60), (",", 8, 75),
+                (".", 16, 75), ("ENTER", 88, 75), ("ESC", 8, 90), ("H", 88, 90)]
+HELP_TEXTS = [("OR", 39, 26), ("↑ ↓ MOVE", 86, 14), ("A D STRAFE", 86, 21), ("← → TURN", 86, 28),
+              ("USE: DOORS,", 42, 41), ("SWITCHES, LIFTS", 42, 47), ("FIRE", 29, 60), ("WEAPONS", 124, 60),
+              ("STRAFE", 24, 75), ("SELECT", 114, 75), ("MENU / BACK", 25, 90), ("HELP", 97, 90)]
 
 
 def _ink(label, x0, y0, font=None):
@@ -291,12 +292,13 @@ def _outline(x0, y0, w, h):
 
 
 def _help_want():
-    """the PINNED design as pixel sets per colour: {colour: pixels}"""
+    """the PINNED design as pixel sets per colour: {colour: pixels} -- the title in the 5x7 font, every other string
+    in the SMALL 3x5 one (P9)"""
     from doomfj.menu import (CREDIT, HELP_CAP_H, HELP_TITLE, HELP_TITLE_Y, _SMALL_GLYPHS,
                              credit_box, text_width)
     cx, cy, _w, _h = credit_box(W, H)
     return {COLOURS[2]: _ink(HELP_TITLE, (W - text_width(HELP_TITLE)) // 2, HELP_TITLE_Y),
-            COLOURS[1]: set().union(*(_ink(s, x, y) for s, x, y in HELP_LEGENDS + HELP_TEXTS)),
+            COLOURS[1]: set().union(*(_ink(s, x, y, _SMALL_GLYPHS) for s, x, y in HELP_LEGENDS + HELP_TEXTS)),
             COLOURS[3]: set().union(*(_outline(x, y, w, HELP_CAP_H) for _k, x, y, w in HELP_CAPS))
             | _ink(CREDIT, cx, cy, _SMALL_GLYPHS)}
 
@@ -307,29 +309,56 @@ def _help_got(grid):
 
 def test_the_help_layout_is_the_owners_keycap_design():
     """`help_layout` is the pinned design: the caps' boxes where the owner saw them -- two inverted-T
-    clusters at HELP_CLUSTERS_Y, W/A/S/D caps 9 wide (the 5-wide letters + border + padding), the
-    arrows' 11 (the 7-wide left / right arrows), 1 px apart; the key rows' caps fitting their
-    legends, 2 px apart -- every legend centred in its cap, "OR" and the two-line legend beside the
-    clusters, each item's description after its caps, the title centred"""
-    from doomfj.menu import (GLYPH_H, HELP_CAP_H, HELP_CAP_PAD, HELP_CLUSTERS_Y, HELP_TITLE,
-                             HELP_TITLE_Y, help_cap_legend, help_layout, text_width)
+    clusters at HELP_CLUSTERS_Y, every cluster cap 9 wide (W and the arrows are the 3x5 font's five-column glyphs,
+    + border + padding), 1 px apart; the key rows' caps fitting their legends, 2 px apart -- every legend centred in
+    its cap, "OR" and the three-line legend beside the clusters, each item's description after its caps, the rows'
+    second items in the legend's column, the title centred in the 5x7 font"""
+    from doomfj.menu import (HELP_CAP_H, HELP_CAP_PAD, HELP_CLUSTERS_Y, HELP_SECTION_GAP, HELP_TEXT_H,
+                             HELP_TITLE, HELP_TITLE_Y, SMALL_GLYPH_H, _SMALL_GLYPHS, help_cap_legend,
+                             help_layout, text_width)
     caps, texts = help_layout(W, H)
     assert caps == HELP_CAPS
-    assert HELP_CAP_H == GLYPH_H + 4 and HELP_CLUSTERS_Y == 11 and HELP_TITLE_Y == 2
+    assert HELP_TEXT_H == SMALL_GLYPH_H == 5 and HELP_CAP_H == HELP_TEXT_H + 4
+    assert HELP_CLUSTERS_Y == 14 and HELP_TITLE_Y == 2 and HELP_SECTION_GAP == 6
     assert texts[0] == (HELP_TITLE, (W - text_width(HELP_TITLE)) // 2, HELP_TITLE_Y, "title")
     assert all(r == "text" for *_s, r in texts[1:])
     assert sorted((s, x, y) for s, x, y, _r in texts[1:]) == sorted(HELP_LEGENDS + HELP_TEXTS)
     for (key, cx, cy, cw), (legend, lx, ly) in zip(HELP_CAPS, HELP_LEGENDS):
         assert legend == help_cap_legend(key)
-        left, right = lx - (cx + 1), (cx + cw - 1) - (lx + text_width(legend))
+        left, right = lx - (cx + 1), (cx + cw - 1) - (lx + text_width(legend, _SMALL_GLYPHS))
         assert left >= HELP_CAP_PAD and right >= HELP_CAP_PAD and abs(left - right) <= 1, key
-        assert ly - (cy + 1) == HELP_CAP_PAD == (cy + HELP_CAP_H - 1) - (ly + GLYPH_H), key
+        assert ly - (cy + 1) == HELP_CAP_PAD == (cy + HELP_CAP_H - 1) - (ly + HELP_TEXT_H), key
+
+
+def test_the_help_categories_are_six_rows_apart():
+    """P9 (the owner: "more spaces between categories"): between the clusters and the first key row, and between every
+    two key rows, HELP_SECTION_GAP (6) EMPTY pixel rows -- measured on the PICTURE, from the last inked row of one
+    category to the first of the next (the use row's second description line counts: it reaches below its caps) --
+    and the rows' second items share one column with the clusters' legend"""
+    from doomfj.menu import HELP_SECTION_GAP, help_pixels
+    grid = help_pixels(W, H, COLOURS)
+    inked = [any(grid[y * W + x] != COLOURS[0] for x in range(W - 40)) for y in range(H)]   # left of the credit
+    bands, y = [], 0
+    while y < H:
+        if inked[y]:
+            y0 = y
+            while y < H and inked[y]:
+                y += 1
+            bands.append((y0, y - 1))
+        y += 1
+    # the title, the clusters (their two cap rows touch), the use row, three more key rows
+    assert len(bands) == 6, bands
+    gaps = [b[0] - a[1] - 1 for a, b in zip(bands, bands[1:])]
+    assert gaps[1:] == [HELP_SECTION_GAP] * 4, gaps
+    assert gaps[0] == 5, gaps                                        # under the title
+    assert {x for s, x, _y in HELP_TEXTS if s in ("↑ ↓ MOVE", "A D STRAFE", "← → TURN")} \
+        == {x for k, x, _y, _w in HELP_CAPS if k in ("1", "ENTER", "H")} == {86}
 
 
 def test_the_help_screen_draws_every_cap_and_glyph_where_the_design_says():
     """legibility, checked box by box and glyph by glyph: every cap's 1-px outline at its pinned
-    rect in the CREDIT's dim gray, every legend and description in the 5x7 font in the text colour,
-    the title in the highlight colour, the credit as on every screen -- and NOTHING else inked"""
+    rect in the CREDIT's dim gray, every legend and description in the 3x5 font in the text colour,
+    the title in the 5x7 font in the highlight colour, the credit as on every screen -- and NOTHING else inked"""
     from doomfj.menu import help_pixels
     grid = help_pixels(W, H, COLOURS)
     assert set(grid) == set(COLOURS)
@@ -340,10 +369,9 @@ def test_the_help_screen_draws_every_cap_and_glyph_where_the_design_says():
 
 
 def test_the_help_design_check_rejects_a_moved_cap_and_a_wrong_legend(monkeypatch):
-    """R9 for the check above: a cluster's caps 1 px further apart (M7 P4.1: the key rows now reach the right
-    edge, so a wider KEY gap trips the screen assert first), or the left arrow's cap drawn with '<', or (M7 P6+P7) any
-    one of the four spacings put back to its pre-2026-10-05 value, and the pinned design no longer matches the
-    picture"""
+    """R9 for the check above: a cluster's caps 1 px further apart, or the left arrow's cap drawn with '<', or (P9) the
+    pre-2026-10-10 design back -- the 5x7 text, the 2-row gaps between the categories, the clusters at row 11 -- and the
+    pinned design no longer matches the picture"""
     import doomfj.menu as menu
     want = _help_want()
     monkeypatch.setattr(menu, "HELP_CAP_GAP", menu.HELP_CAP_GAP + 1)
@@ -351,10 +379,9 @@ def test_the_help_design_check_rejects_a_moved_cap_and_a_wrong_legend(monkeypatc
     monkeypatch.undo()
     monkeypatch.setattr(menu, "HELP_CAP_LEGENDS", dict(menu.HELP_CAP_LEGENDS, LEFT="<"))
     assert _help_got(menu.help_pixels(W, H, COLOURS))[COLOURS[1]] != want[COLOURS[1]]
-    # M7 P6+P7: the pre-2026-10-05 spacing (the owner asked for more room between the categories) is rejected
+    # P9: the design before the owner asked for smaller text and more room between the categories is rejected
     monkeypatch.undo()
-    for name, old in (("HELP_ITEM_GAP", 8), ("HELP_DESC_GAP", 6), ("HELP_ROW_PITCH", menu.HELP_CAP_H + 1),
-                      ("HELP_LINE_PITCH", menu.GLYPH_H + 2)):
+    for name, old in (("HELP_FONT", menu._GLYPHS), ("HELP_SECTION_GAP", 2), ("HELP_CLUSTERS_Y", 11)):
         monkeypatch.setattr(menu, name, old)
         try:                                  # rejected: a different picture, or the screen assert (off the edge)
             assert _help_got(menu.help_pixels(W, H, COLOURS)) != {c: want[c] for c in COLOURS[1:]}, name
@@ -366,20 +393,22 @@ def test_the_help_design_check_rejects_a_moved_cap_and_a_wrong_legend(monkeypatc
 def test_the_help_says_what_the_owner_chose():
     """the words: the title, the clusters' legend, the use keys' two lines (HELP_USE_LINES, the
     owner's wording, 2026-10-02) and the other rows, in the owner's order -- and every character
-    one the font draws (a missing one would print as a blank)"""
-    from doomfj.menu import (HELP_CLUSTER_LEGEND, HELP_OR, HELP_ROWS, HELP_TITLE, HELP_USE_LINES,
-                             _GLYPHS, help_cap_legend, help_key_names)
+    one its font draws (a missing one would print as a blank): the title the 5x7 font's, the rest the 3x5's (P9)"""
+    from doomfj.menu import (HELP_CLUSTER_LEGEND, HELP_FONT, HELP_OR, HELP_ROWS, HELP_TITLE, HELP_USE_LINES,
+                             _GLYPHS, _SMALL_GLYPHS, help_cap_legend, help_key_names)
     assert HELP_TITLE == "HELP - CONTROLS" and HELP_OR == "OR"
-    assert HELP_CLUSTER_LEGEND == ("\u2191 \u2193 MOVE", "A D STRAFE", "\u2190 \u2192 TURN")    # M7 P4.1
+    assert HELP_CLUSTER_LEGEND == ("↑ ↓ MOVE", "A D STRAFE", "← → TURN")    # M7 P4.1
     assert HELP_USE_LINES == ("USE: DOORS,", "SWITCHES, LIFTS")
     assert HELP_ROWS == (((("SPACE", "E"), HELP_USE_LINES),),
                          ((("CTRL",), ("FIRE",)), (("1", "2", "3", "4"), ("WEAPONS",))),
                          (((",", "."), ("STRAFE",)), (("ENTER",), ("SELECT",))),
                          ((("ESC",), ("MENU / BACK",)), (("H",), ("HELP",))))
-    labels = [HELP_TITLE, HELP_OR, *HELP_CLUSTER_LEGEND,
+    assert HELP_FONT is _SMALL_GLYPHS
+    labels = [HELP_OR, *HELP_CLUSTER_LEGEND,
               *(help_cap_legend(k) for k in help_key_names()),
               *(line for row in HELP_ROWS for _keys, lines in row for line in lines)]
-    assert all(ch in _GLYPHS for label in labels for ch in label)
+    assert all(ch in _SMALL_GLYPHS for label in labels for ch in label)
+    assert all(ch in _GLYPHS for ch in HELP_TITLE)
 
 
 def test_the_help_shows_a_cap_for_every_key_it_names():
@@ -394,18 +423,41 @@ def test_the_help_shows_a_cap_for_every_key_it_names():
 
 
 def test_the_arrows_are_their_own_glyphs_and_the_selection_marker_is_untouched():
-    """the arrow caps' glyphs: up / down 5x7 and left / right 7x7, the owner's prototype exactly,
-    under their OWN characters -- '>' is the menu's selection marker and stays the glyph it was;
-    nothing is drawn under '<', '^' or 'v'"""
-    from doomfj.menu import GLYPH_H, _GLYPHS, glyph_width
-    assert _GLYPHS["\u2191"] == "  #  | ### |# # #|  #  |  #  |  #  |  #  "
-    assert _GLYPHS["\u2193"] == "  #  |  #  |  #  |  #  |# # #| ### |  #  "
-    assert _GLYPHS["\u2190"] == "       |  #    | #     |#######| #     |  #    |       "
-    assert _GLYPHS["\u2192"] == "       |    #  |     # |#######|     # |    #  |       "
-    assert [glyph_width(c) for c in "\u2191\u2193\u2190\u2192"] == [5, 5, 7, 7]
-    assert all(len(_GLYPHS[c].split("|")) == GLYPH_H for c in "\u2191\u2193\u2190\u2192")
+    """the arrow glyphs, under their OWN characters -- '>' is the menu's selection marker and stays the glyph it was;
+    nothing is drawn under '<', '^' or 'v'. The 5x7 ones (the owner's prototype): up / down 5x7 and left / right 7x7;
+    P9's 3x5-font ones, the help's: the same shapes cut to five rows and five columns"""
+    from doomfj.menu import GLYPH_H, SMALL_GLYPH_H, _GLYPHS, _SMALL_GLYPHS, glyph_width
+    assert _GLYPHS["↑"] == "  #  | ### |# # #|  #  |  #  |  #  |  #  "
+    assert _GLYPHS["↓"] == "  #  |  #  |  #  |  #  |# # #| ### |  #  "
+    assert _GLYPHS["←"] == "       |  #    | #     |#######| #     |  #    |       "
+    assert _GLYPHS["→"] == "       |    #  |     # |#######|     # |    #  |       "
+    assert [glyph_width(c) for c in "↑↓←→"] == [5, 5, 7, 7]
+    assert all(len(_GLYPHS[c].split("|")) == GLYPH_H for c in "↑↓←→")
+    assert _SMALL_GLYPHS["↑"] == "|".join(_GLYPHS["↑"].split("|")[:5])        # the head and the shaft
+    assert _SMALL_GLYPHS["↓"] == "|".join(_GLYPHS["↓"].split("|")[2:])
+    assert _SMALL_GLYPHS["←"] == "  #  | #   |#####| #   |  #  "
+    assert _SMALL_GLYPHS["→"] == "  #  |   # |#####|   # |  #  "
+    assert all(len(_SMALL_GLYPHS[c].split("|")) == SMALL_GLYPH_H for c in "↑↓←→")
     assert _GLYPHS[">"] == "#    | #   |  #  |   # |  #  | #   |#    "
-    assert not {"<", "^", "v"} & set(_GLYPHS)
+    assert not {"<", "^", "v"} & set(_GLYPHS) and not {"<", "^", "v"} & set(_SMALL_GLYPHS)
+
+
+def test_the_small_font_draws_classic_shapes():
+    """P9 (legibility, the owner's "smaller text"): every 3x5 glyph is five rows of one width; the two letters a
+    three-column grid drew badly have the classic shapes -- N four columns with its diagonal, W five -- and no two glyphs the help uses are the same picture (an N that read as a lower-case n, a W as an H, would)"""
+    from doomfj.menu import (HELP_CLUSTER_LEGEND, HELP_OR, HELP_ROWS, SMALL_GLYPH_H, _SMALL_GLYPHS,
+                             help_cap_legend, help_key_names)
+    for ch, g in _SMALL_GLYPHS.items():
+        rows = g.split("|")
+        assert len(rows) == SMALL_GLYPH_H and len({len(r) for r in rows}) == 1, ch
+    assert _SMALL_GLYPHS["N"] == "#  #|## #|# ##|#  #|#  #"
+    assert _SMALL_GLYPHS["W"] == "#   #|#   #|# # #|# # #| # # "
+    used = {ch for label in [HELP_OR, *HELP_CLUSTER_LEGEND, *(help_cap_legend(k) for k in help_key_names()),
+                             *(ln for row in HELP_ROWS for _k, lines in row for ln in lines)] for ch in label} - {" "}
+    shapes = {}
+    for ch in sorted(used):
+        shapes.setdefault(_SMALL_GLYPHS[ch], []).append(ch)
+    assert all(len(v) == 1 for v in shapes.values()), [v for v in shapes.values() if len(v) > 1]
 
 
 def test_the_help_screen_is_not_the_menu_and_is_not_blank():
@@ -414,7 +466,7 @@ def test_the_help_screen_is_not_the_menu_and_is_not_blank():
     grid = help_pixels(W, H, COLOURS)
     assert len(set(grid)) == 4
     assert grid != pixels(W, H, ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP"], 2, COLOURS)
-    assert sum(1 for p in grid if p == COLOURS[1]) > 1000      # 21 strings of 5x7 text
+    assert sum(1 for p in grid if p == COLOURS[1]) > 800       # 32 strings of 3x5 text (P9: was 5x7, > 1000)
     assert sum(1 for p in grid if p == COLOURS[3]) > 500       # 20 caps' outlines
 
 
@@ -429,26 +481,31 @@ def test_a_wrong_help_picture_is_caught():
     assert screen.pixel_indices == good and screen.pixel_indices != bad
 
 
-@pytest.mark.parametrize("extra", [
-    ((("SPACE", "E"), ("USE: DOORS, SWITCHES, LIFTS",)),),   # too wide: past the right edge
-    ((("H",), ("THIS HELP",)),),                              # a fifth row: past the bottom edge
+@pytest.mark.parametrize("rows, edge", [
+    # too wide: the use row's description on one line, past the right edge (P9: in the 3x5 font the old one-line
+    # "USE: DOORS, SWITCHES, LIFTS" fits, so the control's line is longer)
+    (lambda rows: (((("SPACE", "E"), ("USE: DOORS, SWITCHES, LIFTS AND MORE",)),),) + rows[1:], "right"),
+    (lambda rows: rows + (((("H",), ("THIS HELP",)),),), "bottom"),     # a fifth row: past the bottom edge
 ])
-def test_the_help_layout_refuses_a_row_outside_the_screen(monkeypatch, extra):
+def test_the_help_layout_refuses_a_row_outside_the_screen(monkeypatch, rows, edge):
     """R9 for the layout's screen assert: a row past the right or the bottom edge stops the
-    generator instead of clipping the key map"""
+    generator instead of clipping the key map -- and it is THAT edge the assert names"""
+    import ast
     import doomfj.menu as menu
-    monkeypatch.setattr(menu, "HELP_ROWS", menu.HELP_ROWS + (extra,))
-    with pytest.raises(AssertionError, match="outside the screen"):
+    monkeypatch.setattr(menu, "HELP_ROWS", rows(menu.HELP_ROWS))
+    with pytest.raises(AssertionError, match="outside the screen") as e:
         menu.help_pixels(W, H, COLOURS)
+    boxes = ast.literal_eval(str(e.value).split(": ", 1)[1])
+    assert any((x + w > W) if edge == "right" else (y + h > H) for x, y, w, h in boxes), boxes
 
 
 def test_the_help_layout_refuses_a_table_in_the_credits_corner(monkeypatch):
-    """R9 for the credit assert: the credit is bottom-RIGHT, beside the last key row, so the rule is the credit's box,
-    not its rows. Clear today (the design test draws it); a credit raised into the last row (M7 P4.1: its HELP item
-    now stands at the right) stops the generator"""
+    """R9 for the credit assert: the credit is bottom-RIGHT, level with the last key row, so the rule is the credit's
+    box, not its rows. Clear today (the design test draws it); a credit raised onto the table (P9: the second column
+    ends left of the credit on the last row, so the control raises it onto the weapons' row) stops the generator"""
     import doomfj.menu as menu
     menu.help_pixels(W, H, COLOURS)
-    monkeypatch.setattr(menu, "CREDIT_MARGIN", menu.CREDIT_MARGIN + 5)
+    monkeypatch.setattr(menu, "CREDIT_MARGIN", 30)
     with pytest.raises(AssertionError, match="credit's corner"):
         menu.help_pixels(W, H, COLOURS)
 

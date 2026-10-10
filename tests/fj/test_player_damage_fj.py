@@ -83,7 +83,7 @@ def _records():
 def _want(ws, states, frames) -> str:
     idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(states)}
     bar = hudcode.slot_codes(hud.slot_values(ammo=None, health=max(0, ws.p_health), armor=ws.p_armor,
-                                             owned=(False, False, False), blue=False))
+                                             owned=(False,) * 6, blue=False))
     vals = [ws.p_health & 0xFFF, ws.p_armor, ws.p_armortype, ws.p_damagecount, ws.p_dead, ws.rng_player,
             idx[ws.p_wpn_state], ws.p_wpn_tics, frames.index(WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state])),
             ws.p_wpn_sy, bar[3] | bar[4] << 4 | bar[5] << 8, bar[6] | bar[7] << 4 | bar[8] << 8, ws.p_attacker]

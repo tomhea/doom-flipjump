@@ -279,18 +279,33 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
     return out
 
 
+# P9 (the owner, 2026-10-10: ARMS as DOOM's): the bar's arms digit d (hud.ARMS_DIGITS, 2..7) shows weapon d - 1 --
+# the pistol, the shotgun, the chaingun, the launcher, the plasma rifle, the BFG. A digit whose weapon `wp_own` cannot
+# hold (not in WEAPONS: E1M1 gives no chaingun, plasma rifle or BFG) is never written: its hud_v nibble keeps the
+# level start's 0 (dim) -- the model's p_owned of those weapons is 0 on every reachable state (combat._give_weapon is
+# reached only for the map's gettable weapons). The chainsaw (and the fist) share DOOM's slot 1: no digit.
+def arms_sources() -> Dict[str, int]:
+    """{bar slot: the WEAPON it shows} for every arms digit whose weapon `wp_own` holds"""
+    return {"arms%d" % (w + 1): w for w in WEAPONS if w + 1 in _arms_digits()}
+
+
+def _arms_digits():
+    from doomfj.hud import ARMS_DIGITS
+    return ARMS_DIGITS
+
+
 def bar_lines() -> List[str]:
     """the bar's weapon slots from the weapon cells: the ready weapon's ammo digits (blank for the fist and the
-    chainsaw) and the owned weapons 2 3 4 -> hud_v. Falls through."""
+    chainsaw) and the owned weapons' ARMS digits (`arms_sources`) -> hud_v. Falls through."""
+    from doomfj.hudcode import slot_index
     out = _by_ready("wpb", {gd.WP_FIST: "wpb_none", gd.WP_PISTOL: "wpb_clip", gd.WP_SHOTGUN: "wpb_shell",
                             gd.WP_CHAINSAW: "wpb_none"})
     out += ["wpb_clip:", "ammobcd.lookup wp_bcd, am_clip", ";wpb_set",
             "wpb_shell:", "ammobcd.lookup wp_bcd, am_shell", ";wpb_set",
             "wpb_none:", "hex.set 3, wp_bcd, %d" % (10 | 10 << 4 | 10 << 8),
-            "wpb_set:", "hex.mov 3, hud_v, wp_bcd",
-            "hex.mov 1, hud_v + 9*dw, wp_own + %d*dw" % OWN[gd.WP_PISTOL],
-            "hex.mov 1, hud_v + 10*dw, wp_own + %d*dw" % OWN[gd.WP_SHOTGUN],
-            "hex.mov 1, hud_v + 11*dw, wp_own + %d*dw" % OWN[gd.WP_CHAINSAW]]
+            "wpb_set:", "hex.mov 3, hud_v, wp_bcd"]
+    for slot, w in sorted(arms_sources().items(), key=lambda kv: slot_index(kv[0])):
+        out.append("hex.mov 1, hud_v + %d*dw, wp_own + %d*dw" % (slot_index(slot), OWN[w]))
     return out
 
 

@@ -542,14 +542,14 @@ class MonsterPhase:
         if self.world.player == "walk":
             return {}
         from doomfj import weaponcode as WC
+        from doomfj.hud import arms_owned
         ws, gd = self.world.ws, self.gd
         fst = gd.STATE_NAMES[ws.p_flash_state]
         ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL]}.get(ws.p_ready)
         return {"weapon": WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
                 "flash": None if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
                 "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,
-                           "owned": (bool(ws.p_owned[gd.WP_PISTOL]), bool(ws.p_owned[gd.WP_SHOTGUN]),
-                                     bool(ws.p_owned[gd.WP_CHAINSAW]))}}
+                           "owned": arms_owned(ws.p_owned)}}            # P9: DOOM's six ARMS digits 2..7
 
     def boxes(self) -> list:
         """[(x16, y16, r16)] of every live monster -- a closing door reverses on them (World.door_touched)"""

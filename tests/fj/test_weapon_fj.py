@@ -38,7 +38,8 @@ from doomfj.world import KEYS, WEAPON_TICS, TicEvents, World
 N = 600
 CELLS = (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1),
          ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1),
-         ("hud_v", 3), ("hud_v + 9*dw", 3), ("wp_pass", 1))   # M7 P6+P7: the tic counter, 0 after every frame
+         ("hud_v", 3), ("hud_v + 9*dw", 6),                   # P9: the six ARMS digits 2..7
+         ("wp_pass", 1))                                      # M7 P6+P7: the tic counter, 0 after every frame
 
 
 def _script(seed=11):
@@ -130,14 +131,13 @@ def _want(row, states, frames):
     wst, fst = gd.STATE_NAMES[row["p_wpn_state"]], gd.STATE_NAMES[row["p_flash_state"]]
     ammo = {gd.WP_PISTOL: row["ammo"][gd.AM_CLIP], gd.WP_SHOTGUN: row["ammo"][gd.AM_SHELL]}.get(row["p_ready"])
     bar = hudcode.slot_codes(hud.slot_values(ammo=ammo, health=100, armor=0,
-                                             owned=(bool(row["owned"][gd.WP_PISTOL]), bool(row["owned"][gd.WP_SHOTGUN]),
-                                                    bool(row["owned"][gd.WP_CHAINSAW])), blue=False))
+                                             owned=hud.arms_owned(row["owned"]), blue=False))   # P9: DOOM's 2..7
     return [row["p_ready"], row["p_pending"], idx[row["p_wpn_state"]], row["p_wpn_tics"], row["p_wpn_sy"],
             idx[row["p_flash_state"]], row["p_flash_tics"], row["p_refire"], row["p_attackdown"],
             row["ammo"][gd.AM_CLIP], row["ammo"][gd.AM_SHELL], row["rng_player"],
             frames.index(WC.psprite_lump(wst)),
             0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else 1 + WC.flash_frames().index(WC.psprite_lump(fst)),
-            bar[0] | bar[1] << 4 | bar[2] << 8, bar[9] | bar[10] << 4 | bar[11] << 8, 0]
+            bar[0] | bar[1] << 4 | bar[2] << 8, sum(bar[9 + i] << (4 * i) for i in range(6)), 0]
 
 
 def _run(tmp_path, name, mut=None, saw=True, tics=None):

@@ -34,12 +34,13 @@ MENU_COLOUR = 77
 SCRIPT = [
     dict(hudcode.LEVEL_START),                                                             # 0: boot (hud_full)
     dict(hudcode.LEVEL_START),                                                             # 1: nothing changed
-    dict(ammo=8, health=57, armor=0, owned=(True, True, False), blue=True),               # 2: every kind changes
-    dict(ammo=0, health=100, armor=200, owned=(True, True, True), blue=True),             # 3
-    dict(ammo=None, health=5, armor=7, owned=(True, False, False), blue=False),           # 4: no ammo, card gone
-    None,                                                                                  # 5: a menu frame
-    dict(ammo=None, health=5, armor=7, owned=(True, False, False), blue=False),           # 6: the whole bar again
-    dict(ammo=123, health=0, armor=99, owned=(False, False, True), blue=True),            # 7
+    # P9: `owned` is DOOM's six ARMS digits 2..7 (hud.arms_owned)
+    dict(ammo=8, health=57, armor=0, owned=(True, True, False, True, False, False), blue=True),   # 2: every kind changes
+    dict(ammo=0, health=100, armor=200, owned=(True,) * 6, blue=True),                            # 3
+    dict(ammo=None, health=5, armor=7, owned=(True, False, False, False, False, False), blue=False),  # 4: no ammo, no card
+    None,                                                                                          # 5: a menu frame
+    dict(ammo=None, health=5, armor=7, owned=(True, False, False, False, False, False), blue=False),  # 6: the bar again
+    dict(ammo=123, health=0, armor=99, owned=(False, False, True, False, True, True), blue=True),     # 7
 ]
 
 

@@ -35,17 +35,28 @@ FRACUNIT = 1 << 16
 
 # ------------------------------------------------------------------------------------------------- the bar
 # the panels' column extents [x0, x1], left to right; a separator column at each x0 but the first
-PANELS = (("AMMO", 0, 30), ("HEALTH", 31, 66), ("ARMS", 67, 94), ("ARMOR", 95, 130), ("KEYS", 131, 159))
+# P9 (the owner, 2026-10-10: "fix ARMS to match DOOM"): ARMS holds DOOM's six digits 2..7, so it grew 4 columns and
+# ARMOR / KEYS moved right (KEYS still fits its label and the card)
+PANELS = (("AMMO", 0, 30), ("HEALTH", 31, 66), ("ARMS", 67, 98), ("ARMOR", 99, 134), ("KEYS", 135, 159))
 assert PANELS[-1][2] == SCREEN_W - 1, "the bar's panels are laid out for a %d-column screen" % (PANELS[-1][2] + 1)
 NUM_Y, LABEL_Y = 2, 10         # bar rows of the 5x7 numbers and the 3x5 labels
 DIGIT_W = 5
 FIELD_DIGITS = 3
 PERCENT = "##   |##  #|   # |  #  | #   |#  ##|   ##"
-# ARMS: the weapons 2, 3, 4 (pistol, shotgun, chainsaw -- E1M1 has no others), yellow when owned (DOOM's STYSNUM)
-ARMS_WEAPONS = (2, 3, 4)
-ARMS_X0 = 71                   # the first arms digit's column; the next ones every ARMS_PITCH
-ARMS_PITCH = 8
-CARD_BOX = (142, 2, 6, 7)      # the blue key card: x0, y0, width, height (its four corners left out)
+# ARMS (P9, the owner's play-test 2026-10-10: "ARMS digits 2-7 = pistol, shotgun, chaingun, rocket launcher, plasma
+# rifle, BFG"): DOOM's st_stuff.c arms widget -- digit d lit (yellow, DOOM's STYSNUM) when weaponowned[d - 1], else dim
+# (STGNUM's gray). The fist and the chainsaw share slot 1 and have NO digit (until P9 the bar lit a "4" for the
+# chainsaw). The digits are the SMALL 3x5 font, in one row, as DOOM's arms digits are smaller than its numbers.
+ARMS_DIGITS = (2, 3, 4, 5, 6, 7)
+ARMS_WEAPONS = ("pistol", "shotgun", "chaingun", "launcher", "plasma", "bfg")   # digit ARMS_DIGITS[i] <- weapon i
+ARMS_W = 3                     # a digit's columns (the 3x5 font)
+ARMS_PITCH = ARMS_W + 2        # two empty columns between digits
+ARMS_Y = 3                     # its top row: the 5 rows centred on the 5x7 numbers' 7
+_ARMS_SPAN = len(ARMS_DIGITS) * ARMS_PITCH - (ARMS_PITCH - ARMS_W)
+ARMS_X0 = (lambda a: a[1] + 1 + (a[2] - a[1] - _ARMS_SPAN) // 2)(next(p for p in PANELS if p[0] == "ARMS"))
+assert ARMS_X0 > next(p for p in PANELS if p[0] == "ARMS")[1] and ARMS_X0 + _ARMS_SPAN <= next(
+    p for p in PANELS if p[0] == "ARMS")[2] + 1, "the six ARMS digits do not fit their panel"
+CARD_BOX = (145, 2, 6, 7)      # the blue key card: x0, y0, width, height (its four corners left out); KEYS' middle
 
 
 def _rgb_entries(palette_rgb):
@@ -95,9 +106,20 @@ def digits(value: Optional[int]) -> Tuple[Optional[int], ...]:
     return tuple(None if ch == " " else int(ch) for ch in s)
 
 
+def arms_owned(p_owned: Sequence[int]) -> Tuple[bool, ...]:
+    """the six ARMS digits' lit flags from the model's `p_owned` (by WP_*): DOOM's `weaponowned[d - 1]` for d = 2..7 --
+    WP_PISTOL, WP_SHOTGUN, WP_CHAINGUN, WP_MISSILE, WP_PLASMA, WP_BFG (gamedata's enum order is DOOM's)"""
+    from doomfj import gamedata as gd
+    ws = (gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINGUN, gd.WP_MISSILE, gd.WP_PLASMA, gd.WP_BFG)
+    assert [w + 1 for w in ws] == list(ARMS_DIGITS), "DOOM's arms digit d is weapon d - 1"
+    return tuple(bool(p_owned[w]) for w in ws)
+
+
 def bar_pixels(colours: Dict[str, int], *, ammo: Optional[int], health: int, armor: int,
                owned: Sequence[bool], blue: bool) -> List[List[int]]:
-    """the bar's 16 x 160 palette indices for these values (`owned` = the ARMS weapons 2, 3, 4; `ammo` None = blank)"""
+    """the bar's 16 x 160 palette indices for these values (`owned` = the six ARMS digits 2..7 lit, `arms_owned`;
+    `ammo` None = blank)"""
+    assert len(owned) == len(ARMS_DIGITS), owned
     px = [[colours["bg"]] * SCREEN_W for _ in range(BAR_ROWS)]
     for x in range(SCREEN_W):
         px[0][x] = colours["edge"]
@@ -115,8 +137,8 @@ def bar_pixels(colours: Dict[str, int], *, ammo: Optional[int], health: int, arm
             x += DIGIT_W + GLYPH_GAP
         if pct:
             _ink(px, "%", x, NUM_Y, colours["num"], {"%": PERCENT, " ": "     "})
-    for i, w in enumerate(ARMS_WEAPONS):
-        _ink(px, str(w), ARMS_X0 + i * ARMS_PITCH, NUM_Y, colours["owned" if owned[i] else "unowned"], _GLYPHS)
+    for i, d in enumerate(ARMS_DIGITS):
+        _ink(px, str(d), ARMS_X0 + i * ARMS_PITCH, ARMS_Y, colours["owned" if owned[i] else "unowned"], _SMALL_GLYPHS)
     if blue:
         x0, y0, w, h = CARD_BOX
         for y in range(y0, y0 + h):
@@ -137,8 +159,8 @@ def bar_slots() -> List[Tuple[str, int, int, tuple]]:
         for k in range(FIELD_DIGITS):
             out.append(("%s%d" % (panel.lower(), k), x, DIGIT_W, (None,) + tuple(range(10))))
             x += DIGIT_W + GLYPH_GAP
-    for i, w in enumerate(ARMS_WEAPONS):
-        out.append(("arms%d" % w, ARMS_X0 + i * ARMS_PITCH, DIGIT_W, (False, True)))
+    for i, d in enumerate(ARMS_DIGITS):
+        out.append(("arms%d" % d, ARMS_X0 + i * ARMS_PITCH, ARMS_W, (False, True)))
     out.append(("card", CARD_BOX[0], CARD_BOX[2], (False, True)))
     return out
 
@@ -149,8 +171,9 @@ def slot_values(*, ammo: Optional[int], health: int, armor: int, owned: Sequence
     for panel, value in (("ammo", ammo), ("health", health), ("armor", armor)):
         for k, d in enumerate(digits(value)):
             v["%s%d" % (panel, k)] = d
-    for i, w in enumerate(ARMS_WEAPONS):
-        v["arms%d" % w] = bool(owned[i])
+    assert len(owned) == len(ARMS_DIGITS), owned
+    for i, d in enumerate(ARMS_DIGITS):
+        v["arms%d" % d] = bool(owned[i])
     v["card"] = bool(blue)
     return v
 
@@ -161,7 +184,7 @@ def bar_column(colours: Dict[str, int], x: int, slot_variant=None) -> List[int]:
     the definition."""
     slots = {name: (x0, w, variants) for name, x0, w, variants in bar_slots()}
     owner = [n for n, (x0, w, _v) in slots.items() if x0 <= x < x0 + w]
-    vals = {"ammo": None, "health": 0, "armor": 0, "owned": [False] * 3, "blue": False}
+    vals = {"ammo": None, "health": 0, "armor": 0, "owned": [False] * len(ARMS_DIGITS), "blue": False}
     if owner:
         n = owner[0]
         if n.startswith(("ammo", "health", "armor")):
@@ -176,8 +199,8 @@ def bar_column(colours: Dict[str, int], x: int, slot_variant=None) -> List[int]:
                      NUM_Y, colours["num"], _GLYPHS)
             return [px[y][x] for y in range(BAR_ROWS)]
         if n.startswith("arms"):
-            owned = [False] * 3
-            owned[ARMS_WEAPONS.index(int(n[4:]))] = bool(slot_variant)
+            owned = [False] * len(ARMS_DIGITS)
+            owned[ARMS_DIGITS.index(int(n[4:]))] = bool(slot_variant)
             px = bar_pixels(colours, **{**vals, "owned": owned})
             return [px[y][x] for y in range(BAR_ROWS)]
         px = bar_pixels(colours, **{**vals, "blue": bool(slot_variant)})

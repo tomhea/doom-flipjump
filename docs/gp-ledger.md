@@ -1934,3 +1934,42 @@ the 20M target (D1) in `gamespeed.SPEED_TARGET` (6dea24d), `docs/ship-gate.md` a
    `#125` for what stays open. **Met (the three issues close on #124's merge).**
 8. PR #124: R1 FAIL/PASS blocks (the three fixes' tests above), R2 integration evidence, the crist one-pass review,
    CI green, merged. **Met at the merge: the crist review APPROVED with nothing blocking, its follow-ups in #125.**
+
+## P9 the owner's play-test fixes + the rocket launcher (class F) -- declared 2026-10-10, before the build
+
+**What** (the owner's play-test of blocked53, 2026-10-10; ONE rung on `p9-playtest`, on top of blocked53's source):
+- the HELP page in the 3x5 font with 6 empty rows between the categories, a real comma, "1 2 3 4 5 WEAPONS" (1eb2b78,
+  f277939, 00623fe); EXIT under HELP on the main menu -- enter halts the program, `menu_scr` 6 (baed327);
+- the key latch: a key pressed during a frame's polls counts for that frame even when released before the frame
+  reads it (`kb_now`, 93971d3);
+- the status bar's ARMS is DOOM's six digits 2..7 (the chainsaw no longer lights "4"; 5fd1746);
+- the ROCKET LAUNCHER (the owner: "a cool different weapon ... not much more coding"; 08e0779, 42bdadd): E1M1's
+  multiplayer-only launcher #226 and its rockets #227-230 spawn in single player; key 5; A_FireMissile -> MT_ROCKET in
+  the fireball pool (shared 8 slots); impact damage, then A_Explode = the barrel blast at the rocket's whole-unit spot
+  (self-damage, knockback, barrels at run time, the player blamed: infighting); the simplifications are listed in
+  42bdadd's message;
+- the binary carries its run header: io mode pc, run flag flat memory (flipjump 1.5.1 at 71833c1; ec938a5) -- the play
+  command becomes `fj --run build/<name>.fjm`.
+
+**Budget** (ESTIMATES from the packages' harnesses; no assembly yet):
+- **ops**: idle +~0.9K ops/frame (the latch ~+0.35-0.5K, the launcher's idle weapon/HUD ~+0.3K, the reset ~+0.15K);
+  one rocket in flight ~+75K ops/frame; an explosion frame <= ~0.35M + the damage handlers. On the combat set: the
+  binding moves by the idle cost only, unless the set fires rockets (v7 never owns the launcher).
+- **size**: ~+0.25M words (the launcher ~240K: pool +24K, blast +23K, weapon +29K, HUD +93K, sprites +61K, pickups
+  ~10K; EXIT +28K, the smaller help -31K, the latch ~+8.5K) -> ~38.4% of 2^27 (<= 42%).
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. **CAP-22** <= 22,000,000 on the frozen combat set, every frame of every run state- and pixel-exact. v7 is replayed
+   first; the launcher's things on the map (drawn populations) and `kb_w5` most likely part it from v7 -- then a v8 is
+   planned at the final model and frozen ONLY by the owner (feedback: v4+ re-freezes are the owner's).
+2. **Size** <= 42% of 2^27.
+3. **Every gate exact**: m2_std_gate, m3_gate (+ the EXIT screens), p2a, hurt, fight, die, B0; their selftests;
+   deg_gate byte-exact with op counts EQUAL to blocked53's (the renderer did not change).
+4. **Host and fj**: tests/host green after the re-key; the P9 harnesses (`test_key_latch`, `test_rocket_fj`, the
+   extended weapon / HUD / pickup / keyboard / menu harnesses) every mutant caught; ONE full `tests/fj` run at the
+   build's commit, solo.
+5. **Stress (O-E1)**: a rocket's explosion among monsters and barrels: any frame over 44M, or a scenario averaging over
+   30M, attributed and explained before the ship.
+6. **Housekeeping**: pinreport 20/20 with `heat_blocked27_p8a` (no hot macro changed arity -- checked); the restore sets
+   re-keyed (`kb_w5`, `kb_now` 13 nibbles, `wp_frm` 2, `wp_own` 5, `hud_v`/`hud_s` 16, the rocket's scratch cells);
+   gamespeed's trails re-recorded if the tours move; msframe recorded (class F; ~90 ms a tripwire to explain).

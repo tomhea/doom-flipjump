@@ -128,7 +128,9 @@ def test_every_fight_register_is_declared(both):
     full, final = both
     ext_full, _c, _d = _undefined(full, False)
     ext_final, _c, _d = _undefined(final, True)
-    new = sorted(ext_final - ext_full)
+    # P9: the final program's rocket spawn (projcode's rk_spawn_leaf) reads the emitter's own view angle -- a standalone
+    # global like viewx / viewy, which "full"'s parts read already
+    new = sorted(ext_final - ext_full - {"viewangle"})
     assert not new, "the fight program reads identifiers nothing defines: %s" % new
 
 

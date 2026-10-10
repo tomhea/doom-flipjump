@@ -28,19 +28,19 @@ from __future__ import annotations
 from typing import Dict, FrozenSet, List, NamedTuple, Optional
 
 # the held keys, in kb.poll's parameter order and `kb_now`'s nibble order -- forward, back, turn left / right (the
-# arrows), use (space, e), strafe left / right, fire (ctrl), the number keys 1..4
-HELD_KEYS = ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4")
+# arrows), use (space, e), strafe left / right, fire (ctrl), the number keys 1..5 (P9: 5, the launcher)
+HELD_KEYS = ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5")   # P9: 5, the launcher
 KEY_NOW = "kb_now"
 NOW_DECL = f"{KEY_NOW}: hex.vec {len(HELD_KEYS)}"
 
 # keycode -> held key: src/fj/input.fj's table (the SDL codes pygame_window delivers)
 BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b", 0x82: "l", 0x83: "r", 0x20: "u", 0x65: "u",
            0x61: "sl", 0x2C: "sl", 0x64: "sr", 0x2E: "sr", 0x85: "fi",
-           0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4"}
+           0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4", 0x35: "w5"}
 # held key -> wireformat.KEY_NAMES' name (the dicts the sim and the gates use); the number keys keep theirs
 KEY_NAME = {"f": "forward", "b": "back", "l": "turn_left", "r": "turn_right", "u": "use",
             "sl": "strafe_left", "sr": "strafe_right", "fi": "fire",
-            "w1": "w1", "w2": "w2", "w3": "w3", "w4": "w4"}
+            "w1": "w1", "w2": "w2", "w3": "w3", "w4": "w4", "w5": "w5"}
 
 
 def flag(key: str) -> str:

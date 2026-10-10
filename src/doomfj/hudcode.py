@@ -80,6 +80,19 @@ def _frame_dispatch(prefix: str, cell: str, blocks: List[List[str]], end: str) -
     return out + [f";{end}"]
 
 
+def _frame_dispatch2(prefix: str, cell: str, blocks: List[List[str]], end: str) -> List[str]:
+    """P9: draw blocks[v] for the TWO-nibble v in `cell` (the launcher made the weapon's frames 17), then jump to `end`
+    -- a chain on the high nibble, then `_frame_dispatch` on the low one; a value with no block draws nothing"""
+    assert len(blocks) <= 256, len(blocks)
+    out = []
+    groups = [blocks[h * 16:(h + 1) * 16] for h in range((len(blocks) + 15) // 16)]
+    for h, grp in enumerate(groups):
+        out += [f"hex.if_flags {cell} + dw, 1<<{h}, {prefix}_hn{h}, {prefix}_h{h}", f"{prefix}_h{h}:"]
+        out += _frame_dispatch(f"{prefix}{h}", cell, grp, end)
+        out += [f"{prefix}_hn{h}:"]
+    return out + [f";{end}"]
+
+
 def hud_decls(level_start: Sequence[int]) -> List[str]:
     n = len(hud.bar_slots())
     assert len(level_start) == n
@@ -110,7 +123,7 @@ def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_r
         # M7 P4.1: one overlay per weapon frame, chosen by `wp_frm`; then the flash's, by `fl_frm` (0 = none) -- the
         # psprites in DOOM's order, the flash's records after the weapon's (the device draws a later record over)
         weapons, flashes = overlay
-        out += _frame_dispatch("hwf", "wp_frm", [weapon_record_lines(o, colormap_row) for o in weapons], "hwf_end")
+        out += _frame_dispatch2("hwf", "wp_frm", [weapon_record_lines(o, colormap_row) for o in weapons], "hwf_end")
         out += ["hwf_end:"]
         out += _frame_dispatch("hff", "fl_frm", [[]] + [weapon_record_lines(o, colormap_row) for o in flashes],
                                "hff_end")

@@ -342,8 +342,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     assert not d3 or depth, "M7 P8a: D3 a ranks the depth walk -- a mode that walks no depth cannot take it"
     from doomfj.world import infighting_on as _fight_on
     fight = loot and _fight_on(mode)           # M7 P8a I: monsters fight monsters (monsterdecide's fight parts)
+    # P9 (the owner, 2026-10-10): THE PLAYER'S ROCKET -- in the pool, meeting things (fight), carrying its z (knock)
+    rockets = fight and knock
     mob_rows, mob_view = (mobile_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
-                                           first=mob_first, puffs=loot) if nmob else ([], {}))
+                                           first=mob_first, puffs=loot, rockets=rockets) if nmob else ([], {}))
     rows = rows + mob_rows
     drop_row, bar_view, bar_rows = {}, {}, []
     if loot:
@@ -543,7 +545,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     barrel = barrel_parts(w, nt=nt, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
                                           skills=skills, barrel_rt=bar_rt, barrel_vis=bar_vis,
                                           **({"knock": True} if knock else {}),
-                                          **({"fight": True} if fight else {}))      # M7 P8a I: bar_src
+                                          **({"fight": True} if fight else {}),      # M7 P8a I: bar_src
+                                          **({"rockets": True} if rockets else {}))  # P9: the rocket's blast
                     assert barrel["drop_first"] == nt + nmob and barrel["ndrop"] == ndrop
                     extra["barrel"] = barrel
                 if damage:                             # M7 P4.2a: the monsters' damage (damagecode)
@@ -563,7 +566,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     from doomfj.projcode import proj_parts
                     extra["proj"] = proj_parts(w, nt=nt, puffs=loot, **({"knock": True} if knock else {}),
                                                **({"fight": True, "slot_rt": [slot_t[m] for m in range(nmon)]}
-                                                  if fight else {}))       # M7 P8a I: things stop it
+                                                  if fight else {}),       # M7 P8a I: things stop it
+                                               **({"rockets": True} if rockets else {}))   # P9: the rocket
                     extra["proj"]["nt"] = nt
             # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
             # render setting says so (depth_walk, above) -- the walk's registers (sim.thing_pass_depth)
@@ -585,6 +589,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             assert len(set(w.mon_height[:nmon])) == 1, "one monster height: try_move_mon takes it at compile time"
     if knock:
         extra["knock"] = True          # M7 P8a: the emitter asserts its own `_KNOCK` agrees
+    if rockets:
+        extra["rockets"] = True        # P9: the weapon's A_FireMissile calls rk_spawn (the emitter asserts it)
     if d3:
         # M7 P8a (C): the emitter asserts its own `_D3` agrees, passes `rank0` to sim.thing_pass_depth (D3 a) and the
         # scenery soft flag to frame.thing_record_body (D3 b). The rank rides bit 15 of the aprox key: every key the
@@ -621,7 +627,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
 
 
 # ---- M7 P5: the MOBILES' rows (docs/gp-p5-interface.md, THE MOBILE ROWS) ---------------------------------------
-def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict, first: int, puffs: bool = False):
+def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict, first: int, puffs: bool = False,
+                     rockets: bool = False):
     """-> (rows, {state index: row}): one thing row per distinct mobile LUMP (`monsters.mobile_lump` of every pool
     state, projcode.pool_states' order), `things.thing_rows`' layout -- how the oracle draws a mobile
     (reference_model.render_wall_frame(mobiles=)), field by field:
@@ -636,17 +643,21 @@ def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
     (reference_model.GAME_RENDER_KW `exempt_actors`) a mobile is an ACTOR -- the monster class (sp_mon 1: n_mon, no
     B-gate in frame.thing_record_body) at the MONSTER base bound MIN_SPRITE_H_MONSTER, as the oracle's `act` draws it.
     `first`: the row index of the first one (after the runtime things and the monsters' views). M7 P6 (`puffs`): the
-    puff's states too (projcode.pool_states(puffs=True)), PUFFA0 .. PUFFD0 at MISSILE_Z as blood."""
-    from doomfj.monsters import mobile_lump
+    puff's states too (projcode.pool_states(puffs=True)), PUFFA0 .. PUFFD0 at MISSILE_Z as blood. P9 (`rockets`): the
+    rocket's states -- MISLA5 in flight (monsters.MOBILE_ROTATION: one fixed rotation, never mirrored), MISLB0 .. MISLD0
+    exploding -- at MISSILE_Z as the fireball."""
+    from doomfj.monsters import mobile_lump, mobile_view
     from doomfj.projcode import pool_states
     from doomfj.reference_model import GAME_RENDER_KW, MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, MISSILE_Z
     actor = bool(GAME_RENDER_KW.get("exempt_actors"))
     rows, lump_row, by_state = [], {}, {}
-    for s in pool_states(puffs):
+    for s in pool_states(puffs, rockets):
         lump = mobile_lump(s)
         if lump not in lump_row:
-            assert len(lump) == 6 and lump[5] == "0", (s, lump, "a mobile is drawn from a single-rotation lump")
-            base, dw, mir = anim_index[(lump[:4], lump[4], 0)]
+            sprite, letter, rot = mobile_view(s)
+            assert len(lump) == 6 and lump == "%s%s%d" % (sprite, letter, rot), (s, lump)
+            assert rot == 0 or rockets, (s, lump, "a mobile is drawn from a single-rotation lump")
+            base, dw, mir = anim_index[(sprite, letter, rot)]
             art = rm.art_of_lump(sprite_wad, lump, cache)
             assert not mir and dw == art[2] and dw < 0x80, (lump, mir, dw, art[2])
             tzmin = rm.sprite_tz_min_size(art[4], MIN_SPRITE_H_MONSTER if actor else MIN_SPRITE_H) & 0xFFFFFFFF

@@ -700,8 +700,10 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         for name in ("mon_shootable", "mon_solid", "mon_justhit"):
             cells[name] = Cell(name, "hex", 1, count=nmon)
     # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
-    # M7 P4.1: the player's weapon -- one cell each, `wp_own` the four owned flags as one 4-nibble value
-    for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", 4), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1)):
+    # M7 P4.1: the player's weapon -- one cell each, `wp_own` the owned flags as one value (P9: five, the launcher's
+    # last: weaponcode.WEAPONS), `wp_frm` two nibbles (P9: the launcher's frames made 17 -- weaponcode.FRAME_NIBBLES)
+    from doomfj import weaponcode as _WC
+    for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", len(_WC.WEAPONS)), ("rng_pl", 2), ("wp_frm", _WC.FRAME_NIBBLES), ("fl_frm", 1)):
         cells[name] = Cell(name, "hex", width)
     from doomfj.world import AIM_COLUMNS                             # issue #119 item 6: ONE definition
     cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=AIM_COLUMNS)  # M7 P4.2a: the aim window (doomfj.aimcode)

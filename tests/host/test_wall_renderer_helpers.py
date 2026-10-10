@@ -511,7 +511,7 @@ def test_every_poll_is_its_own_expansion():
     # M7 P1.5: the menu's event cells are zeroed BEFORE the polls that set them (M7 P3.4: five), and so is
     # P9's press latch
     assert set(three[:at]) == {"hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up",
-                               "hex.zero 1, ev_dn", "hex.zero 1, ev_help", "hex.zero 12, kb_now"}, three[:at]
+                               "hex.zero 1, ev_dn", "hex.zero 1, ev_help", "hex.zero 13, kb_now"}, three[:at]
 
 
 def test_every_reader_of_a_held_key_reads_the_press_latch():

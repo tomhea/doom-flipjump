@@ -93,7 +93,7 @@ K_FWD, K_BACK, K_LEFT, K_RIGHT, K_USE = 0x77, 0x73, 0x82, 0x83, 0x20
 K_SL, K_SR, K_FIRE = 0x61, 0x64, 0x85
 BINDING = {K_FWD: "forward", K_BACK: "back", K_LEFT: "turn_left",
            K_RIGHT: "turn_right", K_USE: "use", K_SL: "strafe_left", K_SR: "strafe_right", K_FIRE: "fire",
-           0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4"}
+           0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4", 0x35: "w5"}      # P9: '5', the launcher
 CODE = {name: code for code, name in BINDING.items()}
 
 MENU_FRAMES = 2                 # frames 0..1 are the menu; MENU_EXIT lands on frame 2's polls

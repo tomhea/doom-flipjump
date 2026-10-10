@@ -117,7 +117,7 @@ PHASE_MUTS = {
 
 
 def _keybits(lines_pkeys=True):
-    """the harness's key byte -> pkeys (fire, use) and the number keys the frame acts on (P9: kb_now's nibbles 8..11)"""
+    """the harness's key byte -> pkeys (fire, use) and the number keys the frame acts on (P9: kb_now's nibbles 8..12)"""
     return ["hex.zero 2, pkeys",
             "hex.if_flags kin, 0xAAAA, kf_no, kf_yes", "kf_yes:", "hex.xor_by pkeys + dw, 0x8", "kf_no:",
             "hex.if_flags kin + dw, 0xCCCC, ku_no, ku_yes", "ku_yes:", "hex.xor_by pkeys + dw, 0x1", "ku_no:",
@@ -125,19 +125,23 @@ def _keybits(lines_pkeys=True):
             "hex.if_flags kin, 0xCCCC, k1_no, k1_yes", "k1_yes:", "hex.set 1, kb_now + 8*dw, 1", "k1_no:",
             "hex.if_flags kin, 0xF0F0, k2_no, k2_yes", "k2_yes:", "hex.set 1, kb_now + 9*dw, 1", "k2_no:",
             "hex.if_flags kin, 0xFF00, k3_no, k3_yes", "k3_yes:", "hex.set 1, kb_now + 10*dw, 1", "k3_no:",
-            "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_now + 11*dw, 1", "k4_no:"]
+            "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_now + 11*dw, 1", "k4_no:",
+            "hex.zero 1, kb_now + 12*dw",                                       # P9: key 5 (bit 6: 5 is use)
+            "hex.if_flags kin + dw, 0xF0F0, k5_no, k5_yes", "k5_yes:", "hex.set 1, kb_now + 12*dw, 1", "k5_no:"]
 
 
 def _kbyte(k):
     return (int(k["fire"]) | int(k["w1"]) << 1 | int(k["w2"]) << 2 | int(k["w3"]) << 3 | int(k["w4"]) << 4
-            | int(k["use"]) << 5)
+            | int(k["use"]) << 5 | int(k.get("w5", False)) << 6)
 
 
 def _common_decls(w, states, frames):
     rm = ReferenceModel()
     return (["rmagic: hex.vec 2", "kin: hex.vec 2", "kp: hex.vec 2", "kd: hex.vec 2", "pkeys: hex.vec 2",
-             "kb_now: hex.vec 12", "g_rs: hex.vec 1",       # P9: the weapon reads the keys the frame acts on (kb_now)
-             "mvmark: hex.vec 1"]
+             "kb_now: hex.vec 13", "g_rs: hex.vec 1",       # P9: the weapon reads the keys the frame acts on (kb_now)
+             "mvmark: hex.vec 1",
+             # P9: the loot weapon's A_FireMissile calls projcode's rk_spawn -- no launcher here: a stub that returns
+             "rk_sret: hex.vec w/4", "rk_spawn:", "stl.fret rk_sret"]
             + WC.weapon_decls(_start(w), states, frames) + WC.weapon_const_decls()
             + H.hurt_decls(H.level_start(w)) + L.loot_decls(L.level_start(w)) + H.dp_lines()
             + H.tables_fj(half_width_table(rm.sine))

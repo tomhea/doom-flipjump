@@ -40,7 +40,7 @@ FJ = ROOT / "src" / "fj"
 N = 400
 # (fj cell, nibbles) printed after every record
 CELLS = (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("p_dc", 2), ("p_dead", 1), ("rng_pl", 2), ("wp_st", 2),
-         ("wp_tics", 1), ("wp_frm", 1), ("wp_sy", 2), ("hud_v + 3*dw", 3), ("hud_v + 6*dw", 3),
+         ("wp_tics", 1), ("wp_frm", 2), ("wp_sy", 2), ("hud_v + 3*dw", 3), ("hud_v + 6*dw", 3),
          ("p_atk", 2))                    # M7 P7: player->attacker
 
 
@@ -198,7 +198,7 @@ def _build(tmp_path, name, mut=None, knock=False):
         for f, v in pokes.items():
             if f == "p_wpn_state":
                 body += ["hex.set 2, wp_st, %d" % idx[v],
-                         "hex.set 1, wp_frm, %d" % frames.index(WC.psprite_lump(gd.STATE_NAMES[v]))]
+                         "hex.set 2, wp_frm, %d" % frames.index(WC.psprite_lump(gd.STATE_NAMES[v]))]
             else:
                 c, n = nib[f]
                 body.append("hex.set %d, %s, %d" % (n, c, v & (16 ** n - 1)))

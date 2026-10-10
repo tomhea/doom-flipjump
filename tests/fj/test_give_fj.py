@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FJ = ROOT / "src" / "fj"
 N = 700
 CELLS = (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("am_clip", 3), ("am_shell", 3), ("am_cell", 3), ("am_misl", 3),
-         ("p_bp", 1), ("wp_own", 4), ("wp_pend", 1), ("p_str", 4), ("p_bc", 2), ("pcard", 1), ("gv_ok", 1))
+         ("p_bp", 1), ("wp_own", 5), ("wp_pend", 1), ("p_str", 4), ("p_bc", 2), ("pcard", 1), ("gv_ok", 1))
 
 
 def _world():
@@ -53,7 +53,8 @@ def _records(w):
             cap = gd.MAXAMMO[a] * (2 if bp else 1)
             ammo.append(rnd.choice((0, 0, cap, cap, cap - 1, gd.MAXAMMO[a], rnd.randint(0, cap), 1)))
         owned = {gd.WP_FIST: 1, gd.WP_PISTOL: int(rnd.random() < 0.9), gd.WP_SHOTGUN: rnd.choice((0, 1)),
-                 gd.WP_CHAINSAW: rnd.choice((0, 1))}
+                 gd.WP_CHAINSAW: rnd.choice((0, 1)),
+                 gd.WP_MISSILE: int(r % 3 == 1)}          # P9: the launcher (no draw: the script's stream is kept)
         ready = rnd.choice([x for x in WC.WEAPONS if owned[x]])
         pend = rnd.choice((gd.WP_NOCHANGE, gd.WP_NOCHANGE, gd.WP_NOCHANGE, rnd.choice(WC.WEAPONS)))
         armor = rnd.choice((0, 0, 1, 99, 100, 101, 199, 200, rnd.randint(0, 200)))
@@ -114,6 +115,12 @@ MUTANTS = {
     "bon2_notype": (r"(  give_2015_g:\n)    hex\.set 1, p_at, 1\n", r"\1"),
     "saw_nopend": (r"    hex\.set 1, wp_pend, %d\n" % gd.WP_CHAINSAW, ""),
     "pstr_nofist": (r"(  give_2023_f:\n)    hex\.set 1, wp_pend, 0\n", r"\1"),
+    # P9: the launcher -- not brought up when new; its two rockets one; the rockets' "fist -> launcher" switch gone
+    "laun_nopend": (r"(  give_2003_new:\n    hex\.set 1, wp_own \+ 4\*dw, 1\n)    hex\.set 1, wp_pend, %d\n"
+                    % gd.WP_MISSILE, r"\1"),
+    "laun_one": (r"(give_2003:\n    hex\.set 3, ga_n, )2", r"\g<1>1"),
+    "misl_noswitch": (r"(  ga3_sw:\n    hex\.if0 1, wp_own \+ 4\*dw, ga3_out\n)    hex\.set 1, wp_pend, %d\n"
+                      % gd.WP_MISSILE, r"\1"),
 }
 
 
@@ -154,7 +161,7 @@ def _build(tmp_path, name, mut=None):
             body.append("hex.set %d, %s, %d" % (n, c, pokes[f]))
         for a in range(gd.NUMAMMO):
             body.append("hex.set 3, %s, %d" % (L.AMMO_CELL[a], pokes["ammo"][a]))
-        body.append("hex.set 4, wp_own, %d" % sum(pokes["owned"][x] << (4 * WC.OWN[x]) for x in WC.WEAPONS))
+        body.append("hex.set 5, wp_own, %d" % sum(pokes["owned"][x] << (4 * WC.OWN[x]) for x in WC.WEAPONS))
         body += ["hex.set 1, gv_ok, 7",
                  "stl.fcall give_%d%s, gv_ret" % (kind, "d" if dropped else ""),
                  "stl.fcall bonus_leaf, bl_ret"]
@@ -181,7 +188,7 @@ def test_the_records_exercise_every_give():
     binding, every auto-switch, the bonus count saturating, the card's set"""
     w = _world()
     seen = {}
-    sat = switch_clip = switch_shell = bc_set = 0
+    sat = switch_clip = switch_shell = bc_set = switch_misl = 0
     for pokes, kind, dropped in _records(w):
         _apply(w, pokes)
         before = (list(w.ws.p_ammo), w.ws.p_pending)
@@ -190,12 +197,15 @@ def test_the_records_exercise_every_give():
         sat += taken and pokes["p_bonuscount"] > 249
         switch_clip += w.ws.p_pending == gd.WP_PISTOL != before[1] and before[0][gd.AM_CLIP] == 0
         switch_shell += w.ws.p_pending == gd.WP_SHOTGUN != before[1] and before[0][gd.AM_SHELL] == 0
+        switch_misl += (kind in (2010, 2046) and w.ws.p_pending == gd.WP_MISSILE != before[1]   # P9
+                        and before[0][gd.AM_MISL] == 0)
         bc_set += kind == 5 and not pokes["card"]
     always = {2014, 2015, 5, 8, 2023}
     for (kind, dropped), outs in seen.items():
         assert outs == ({True} if kind in always else {True, False}), (kind, dropped, outs)
     assert len(seen) == len(L.give_kinds(w))
     assert sat >= 10 and switch_clip >= 5 and switch_shell >= 3 and bc_set >= 5, (sat, switch_clip, switch_shell, bc_set)
+    assert (2003, False) in seen and switch_misl >= 1, switch_misl          # P9: the launcher, the rockets' switch
 
 
 def test_the_gives_follow_the_model(tmp_path):

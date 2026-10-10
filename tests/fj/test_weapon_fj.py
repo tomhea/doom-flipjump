@@ -37,9 +37,10 @@ from doomfj.world import KEYS, WEAPON_TICS, TicEvents, World
 
 N = 600
 CELLS = (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1),
-         ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1),
+         ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("rng_pl", 2), ("wp_frm", 2), ("fl_frm", 1),
          ("hud_v", 3), ("hud_v + 9*dw", 6),                   # P9: the six ARMS digits 2..7
-         ("wp_pass", 1))                                      # M7 P6+P7: the tic counter, 0 after every frame
+         ("wp_pass", 1),                                      # M7 P6+P7: the tic counter, 0 after every frame
+         ("am_misl", 3))                                      # P9: the launcher's rockets
 
 
 def _script(seed=11):
@@ -51,7 +52,7 @@ def _script(seed=11):
         k = {name: False for name in KEYS}
         k["fire"] = fire or rng.random() < 0.05
         if rng.random() < 0.012:                              # rare switches: a switch costs ~32 tics of lower+raise
-            k[rng.choice(("w1", "w2", "w3", "w4"))] = True
+            k[rng.choice(("w1", "w2", "w3", "w4", "w5"))] = True                 # P9: 5, the launcher
         keys.append(k)
     return keys
 
@@ -65,6 +66,8 @@ def _world(saw=True):
     ws.p_owned[gd.WP_CHAINSAW] = int(saw)
     ws.p_ammo[gd.AM_SHELL] = 4
     ws.p_ammo[gd.AM_CLIP] = 12
+    ws.p_owned[gd.WP_MISSILE] = 1                            # P9: the launcher, with a few rockets to run dry
+    ws.p_ammo[gd.AM_MISL] = 5
     return w
 
 
@@ -102,13 +105,15 @@ def _program(start, mut=None, tics=None):
             "hex.if_flags kin, 0xF0F0, k2_no, k2_yes", "k2_yes:", "hex.set 1, kb_now + 9*dw, 1", "k2_no:",
             "hex.if_flags kin, 0xFF00, k3_no, k3_yes", "k3_yes:", "hex.set 1, kb_now + 10*dw, 1", "k3_no:",
             "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_now + 11*dw, 1", "k4_no:",
+            "hex.zero 1, kb_now + 12*dw",                                       # P9: key 5 (bit 5)
+            "hex.if_flags kin + dw, 0xCCCC, k5_no, k5_yes", "k5_yes:", "hex.set 1, kb_now + 12*dw, 1", "k5_no:",
             text,
             *[x for c, n in CELLS for x in ("hex.print_as_digit %d, %s, 0" % (n, c), "stl.output 44")],
             "stl.output 10", ";loop",
             "bad:", "stl.loop", "done:", "stl.loop",
             "rmagic: hex.vec 2", "kin: hex.vec 2", "pkeys: hex.vec 2",
-            "kb_now: hex.vec 12",                    # P9: the weapon reads the keys the frame acts on (kb_now)
-            *WC.weapon_decls(start, states, frames), *WC.weapon_const_decls(),
+            "kb_now: hex.vec 13",                    # P9: the weapon reads the keys the frame acts on (kb_now)
+            *WC.weapon_decls(start, states, frames, misl=True), *WC.weapon_const_decls(),
             *hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))),
             generate_dispatch_table_fj("ammobcd", WC.ammo_digit_values(), index_nibbles=3, result_nibbles=3)]
     return "\n".join(body) + "\n", states, frames
@@ -129,7 +134,8 @@ def _model_rows(script, saw=True):
 def _want(row, states, frames):
     idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(states)}
     wst, fst = gd.STATE_NAMES[row["p_wpn_state"]], gd.STATE_NAMES[row["p_flash_state"]]
-    ammo = {gd.WP_PISTOL: row["ammo"][gd.AM_CLIP], gd.WP_SHOTGUN: row["ammo"][gd.AM_SHELL]}.get(row["p_ready"])
+    ammo = {gd.WP_PISTOL: row["ammo"][gd.AM_CLIP], gd.WP_SHOTGUN: row["ammo"][gd.AM_SHELL],
+            gd.WP_MISSILE: row["ammo"][gd.AM_MISL]}.get(row["p_ready"])          # P9: the rockets
     bar = hudcode.slot_codes(hud.slot_values(ammo=ammo, health=100, armor=0,
                                              owned=hud.arms_owned(row["owned"]), blue=False))   # P9: DOOM's 2..7
     return [row["p_ready"], row["p_pending"], idx[row["p_wpn_state"]], row["p_wpn_tics"], row["p_wpn_sy"],
@@ -137,7 +143,8 @@ def _want(row, states, frames):
             row["ammo"][gd.AM_CLIP], row["ammo"][gd.AM_SHELL], row["rng_player"],
             frames.index(WC.psprite_lump(wst)),
             0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else 1 + WC.flash_frames().index(WC.psprite_lump(fst)),
-            bar[0] | bar[1] << 4 | bar[2] << 8, sum(bar[9 + i] << (4 * i) for i in range(6)), 0]
+            bar[0] | bar[1] << 4 | bar[2] << 8, sum(bar[9 + i] << (4 * i) for i in range(6)), 0,
+            row["ammo"][gd.AM_MISL]]
 
 
 def _run(tmp_path, name, mut=None, saw=True, tics=None):
@@ -150,7 +157,7 @@ def _run(tmp_path, name, mut=None, saw=True, tics=None):
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
     fj.assemble([consts.resolve(), src.resolve()], out, memory_width=W, print_time=False)
     feed = b"".join(bytes([1, int(k["fire"]) | int(k["w1"]) << 1 | int(k["w2"]) << 2 | int(k["w3"]) << 3
-                           | int(k["w4"]) << 4]) for k in script) + bytes([0])
+                           | int(k["w4"]) << 4 | int(k["w5"]) << 5]) for k in script) + bytes([0])
     io = FixedIO(feed)
     fj.run(out, io_device=io, print_time=False, print_termination=False)
     got = [[int(v, 16) for v in line.split(",")[:len(CELLS)]]
@@ -172,8 +179,8 @@ def test_the_weapon_is_the_model_tic_by_tic(tmp_path, saw):
     assert bad is None, "tic %d: %s" % (bad, {names[i]: (got[bad][i], want[bad][i]) for i in range(len(names))
                                              if got[bad][i] != want[bad][i]})
     # the script covers what it claims: every weapon was up, both guns ran dry, the flash ran
-    assert {g[0] for g in got} == ({gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW} if saw else
-                                   {gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN})
+    assert {g[0] for g in got} == ({gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW, gd.WP_MISSILE} if saw else
+                                   {gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_MISSILE})
     assert any(g[9] == 0 for g in got) and any(g[10] == 0 for g in got) and any(g[5] for g in got)
 
 
@@ -206,6 +213,59 @@ def test_the_checks_catch_a_broken_weapon(tmp_path, mut):
     bad = _first_bad(got, want)
     assert bad is not None, "the mutant %s went unnoticed" % mut
     print("mutant %s caught at tic %d" % (mut, bad))
+
+
+# ---- P9 (the owner, 2026-10-10): THE ROCKET LAUNCHER in the same loop ------------------------------------------------
+# The script above owns the launcher with 5 rockets (key 5 among the switches): the fire actions A_GunFlash (the flash)
+# and A_FireMissile (one rocket; "fire" mode spawns nothing -- the pools are the loot player's), A_ReFire's refire, the
+# launcher's "no auto fire" from its READY state (fire held with attackdown set), P_CheckAmmo's run dry, and the bar's
+# rockets and ARMS 5. R9 (LAUNCHER_MUTS): each mutant of the launcher's text must part from the model.
+LAUNCHER_MUTS = {
+    "autofire": (r"(a\d+f:\n)hex\.if0 1, wp_ad, (a\d+fg)\nhex\.if_flags wp_rdy, 1<<4, a\d+fg, a\d+ty\n", r"\1;\2\n"),
+    "noflash": (r"stl\.fcall fen%d, fl_ret\n" % WC.weapon_states().index("S_MISSILEFLASH1"), ""),
+    "freerocket": (r"hex\.sub_constant 3, am_misl, 1\n", ""),
+    "mislcheck": (r"(a\d+cm:\n)hex\.if0 3, am_misl, a\d+cx\n", r"\1"),
+    "key5": (r"hex\.if0 1, kb_now \+ 12\*dw, wk_end\n", ";wk_end\n"),
+}
+
+
+def test_the_script_fires_the_launcher_every_way():
+    """the model's own run of the script: the launcher came up by key 5, fired from its ready state and by A_ReFire, its
+    ready state met fire held with attackdown set (DOOM's no-auto-fire) and did NOT fire, and it ran dry"""
+    script = _script()
+    w = _world(True)
+    ws = w.ws
+    ready, refire, held_ready, fired, dry = set(), 0, 0, 0, False
+    for k in script:
+        before = (ws.p_wpn_state, ws.p_attackdown, ws.p_ammo[gd.AM_MISL], ws.p_ready)
+        ev = w.tic(k)
+        ready.add(ws.p_ready)
+        fired += ev.fired.count("missile")
+        if (before[3] == gd.WP_MISSILE and gd.STATE_NAMES[before[0]] == "S_MISSILE" and k["fire"] and before[1]
+                and ws.p_ammo[gd.AM_MISL] == before[2]):
+            held_ready += 1
+        if before[3] == gd.WP_MISSILE and ws.p_refire and ws.p_ammo[gd.AM_MISL] < before[2]:
+            refire += 1
+        dry |= before[3] == gd.WP_MISSILE and ws.p_ammo[gd.AM_MISL] == 0
+    assert gd.WP_MISSILE in ready and fired >= 4 and held_ready >= 1 and refire >= 1 and dry, (
+        ready, fired, held_ready, refire, dry)
+
+
+@pytest.mark.parametrize("mut", sorted(LAUNCHER_MUTS))
+def test_the_checks_catch_a_broken_launcher(tmp_path, mut, monkeypatch):
+    pat, new = LAUNCHER_MUTS[mut]
+    orig = WC.weapon_lines
+
+    def broken(*a, **kw):
+        text = "\n".join(orig(*a, **kw)) + "\n"
+        text, n = re.subn(pat, new, text)
+        assert n, mut
+        return text.rstrip("\n").split("\n")
+    monkeypatch.setattr(WC, "weapon_lines", broken)
+    got, want = _run(tmp_path, "wpl_" + mut)
+    bad = _first_bad(got, want)
+    assert bad is not None, "the launcher mutant %s went unnoticed" % mut
+    print("launcher mutant %s caught at tic %d" % (mut, bad))
 
 
 # ---- M7 P5 (doomfj.hurtcode): the weapon of a player who can be hurt and killed (`weapon_lines(hurt=True)`) ----------
@@ -296,6 +356,8 @@ def _hurt_program(start, hstart, mut=None):
             "hex.if_flags kin, 0xF0F0, k2_no, k2_yes", "k2_yes:", "hex.set 1, kb_now + 9*dw, 1", "k2_no:",
             "hex.if_flags kin, 0xFF00, k3_no, k3_yes", "k3_yes:", "hex.set 1, kb_now + 10*dw, 1", "k3_no:",
             "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_now + 11*dw, 1", "k4_no:",
+            "hex.zero 1, kb_now + 12*dw",                                       # P9: key 5 (bit 5)
+            "hex.if_flags kin + dw, 0xCCCC, k5_no, k5_yes", "k5_yes:", "hex.set 1, kb_now + 12*dw, 1", "k5_no:",
             "hex.if_flags kp, 0xAAAA, kh_no, kh_yes", "kh_yes:", "hex.zero 3, p_hp", "kh_no:",
             "hex.if_flags kp, 0xCCCC, kx_no, kx_yes", "kx_yes:", "hex.set 1, p_dead, 1", "kx_no:",
             text,
@@ -305,8 +367,8 @@ def _hurt_program(start, hstart, mut=None):
             "stl.output 10", ";loop",
             "bad:", "stl.loop", "done:", "stl.loop",
             "rmagic: hex.vec 2", "kin: hex.vec 2", "kp: hex.vec 2", "kd: hex.vec 2", "pkeys: hex.vec 2",
-            "kb_now: hex.vec 12",                    # P9: the weapon reads the keys the frame acts on (kb_now)
-            *WC.weapon_decls(start, states, frames), *WC.weapon_const_decls(),
+            "kb_now: hex.vec 13",                    # P9: the weapon reads the keys the frame acts on (kb_now)
+            *WC.weapon_decls(start, states, frames, misl=True), *WC.weapon_const_decls(),
             *H.hurt_decls(hstart), *H.dp_lines(), *H.tables_fj(half_width_table(rm.sine)),
             *hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))),
             generate_dispatch_table_fj("ammobcd", WC.ammo_digit_values(), index_nibbles=3, result_nibbles=3)]
@@ -335,7 +397,7 @@ def _hurt_run(tmp_path, name, kind, mut=None):
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
     fj.assemble([consts.resolve(), src.resolve()], out, memory_width=W, print_time=False)
     feed = b"".join(bytes([1, int(k["fire"]) | int(k["w1"]) << 1 | int(k["w2"]) << 2 | int(k["w3"]) << 3
-                           | int(k["w4"]) << 4, p, d]) for k, p, d in script) + bytes([0])
+                           | int(k["w4"]) << 4 | int(k["w5"]) << 5, p, d]) for k, p, d in script) + bytes([0])
     io = FixedIO(feed)
     fj.run(out, io_device=io, print_time=False, print_termination=False)
     got = [[int(v, 16) for v in line.split(",")[:len(HURT_CELLS)]]

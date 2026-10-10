@@ -46,7 +46,7 @@ CFG = Config()
 
 POLLS = 8          # polls per "frame", the same unroll the emitter uses
 FRAMES = 6
-KEYS = ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4")   # M7 P4.1: strafe, fire, 1..4
+KEYS = ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5")   # M7 P4.1; P9: '5' 
 EVENTS = ("E", "X", "U", "D", "H")  # the menu's events: enter, esc, up (forward), down (back), help
 assert KEYS == HELD_KEYS, "the latch's nibble order is the held flags' order (doomfj.keyboard)"
 DIGITS = len(KEYS) + len(EVENTS) + len(KEYS)      # held flags, events, P9's press latch
@@ -55,7 +55,7 @@ DIGITS = len(KEYS) + len(EVENTS) + len(KEYS)      # held flags, events, P9's pre
 # key map): A / D and ',' / '.' STRAFE, only the arrows turn, ctrl fires, '1'..'4' are the weapon keys.
 BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b", 0x82: "l", 0x83: "r", 0x20: "u", 0x65: "u",
            0x61: "sl", 0x2C: "sl", 0x64: "sr", 0x2E: "sr", 0x85: "fi",
-           0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4"}
+           0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4", 0x35: "w5"}          # P9: '5', the launcher
 # keycode -> the event its DOWN edge records (enter, esc, and M7 P3.4's help)
 EVENT_KEYS = {0x0D: "E", 0x1B: "X", 0x68: "H"}
 
@@ -66,9 +66,9 @@ def _program() -> str:
         lines += [f"hex.zero 1, {e}" for e in ("kent", "kesc", "kup", "kdn", "khelp")]
         lines.append(f"hex.zero {len(KEYS)}, know")                  # P9: the press latch, zeroed like the events
         lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, kuse, "
-                     "ksl, ksr, kfi, kw1, kw2, kw3, kw4, know, kent, kesc, kup, kdn, khelp, bad")
+                     "ksl, ksr, kfi, kw1, kw2, kw3, kw4, kw5, know, kent, kesc, kup, kdn, khelp, bad")
         lines += [f"hex.print_as_digit k{name}, 0" for name in
-                  ("fwd", "back", "left", "right", "use", "sl", "sr", "fi", "w1", "w2", "w3", "w4",
+                  ("fwd", "back", "left", "right", "use", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5",
                    "ent", "esc", "up", "dn", "help")]
         lines += [f"hex.print_as_digit know + {i}*dw, 0" for i in range(len(KEYS))]
         lines.append("stl.output 10")
@@ -84,6 +84,7 @@ def _program() -> str:
               # M7 P4.1: strafe, fire, the number keys
               "ksl: hex.vec 1", "ksr: hex.vec 1", "kfi: hex.vec 1",
               "kw1: hex.vec 1", "kw2: hex.vec 1", "kw3: hex.vec 1", "kw4: hex.vec 1",
+              "kw5: hex.vec 1",                       # P9: '5', the launcher
               f"know: hex.vec {len(KEYS)}"]                 # P9
     return "\n".join(lines) + "\n"
 
@@ -157,10 +158,13 @@ SCRIPTS = {
                                         (17, False, 0x64), (18, False, 0x83), (19, True, 0x82), (25, False, 0x82)],
     "comma and period strafe like a and d": [(0, True, 0x2C), (9, False, 0x2C), (10, True, 0x2E), (20, False, 0x2E)],
     "ctrl holds fire": [(0, True, 0x85), (17, False, 0x85)],
+    # P9: '5' (0x35), the rocket launcher, is held like 1..4 -- after 4 in the 0x3_ row
+    "5 is held like the other number keys": [(0, True, 0x35), (1, True, 0x34), (9, False, 0x35), (10, True, 0x35),
+                                             (18, False, 0x34), (27, False, 0x35)],
     "the number keys are held": [(0, True, 0x31), (1, True, 0x32), (9, False, 0x31), (10, True, 0x33),
                                  (11, True, 0x34), (18, False, 0x32), (19, False, 0x33), (27, False, 0x34)],
     # the 0x3_ row's unbound digits and the 0x8_ row's shift / alt are read and discarded, in phase
-    "the unbound digits, shift and alt are discarded": [(0, True, 0x30), (1, True, 0x35), (2, True, 0x84),
+    "the unbound digits, shift and alt are discarded": [(0, True, 0x30), (1, True, 0x36), (2, True, 0x84),
                                                         (3, True, 0x86), (4, True, 0x39), (5, True, 0x2D),
                                                         (6, True, 0x31), (12, False, 0x31)],
     # THE PHASE TEST: unrecognised keycodes between real ones. If a poll ever skipped the keycode
@@ -205,7 +209,7 @@ SCRIPTS = {
     "a tap of fire inside one frame latches it": [(0, True, 0x85), (1, False, 0x85)],
     "a tap of every held key inside one frame each": [
         (POLLS * (k // 3) + (k % 3) * 2, d, c) for k, c in enumerate((0x77, 0x73, 0x82, 0x83, 0x20, 0x61, 0x64, 0x85,
-                                                                  0x31, 0x32, 0x33, 0x34))
+                                                                  0x31, 0x32, 0x33, 0x34, 0x35))
         for d in (True, False)],
     "a release with no press in its frame latches nothing": [(0, True, 0x32), (9, False, 0x32)],
     "press, release, press inside one frame: held and latched": [(0, True, 0x31), (1, False, 0x31),
@@ -339,3 +343,11 @@ def test_the_help_screen_lists_exactly_the_keys_that_work(kb_fjm):
     assert bound == set(HELP_KEYCODES.values()), sorted(bound ^ set(HELP_KEYCODES.values()))
     assert set(MENU_KEYS) <= bound, "a menu key the poll does not bind"
     assert not _does_something(kb_fjm, 0x71) and not _does_something(kb_fjm, 0x67)
+
+
+def test_negative_control_a_mirror_without_key_5_is_caught(kb_fjm):
+    """R9 (P9): '5' is the launcher's key -- a mirror that leaves it unbound (the pre-P9 table) is rejected on its
+    script, which the program passes"""
+    events = SCRIPTS["5 is held like the other number keys"]
+    assert _run(kb_fjm, events) == _expected(events)
+    assert _run(kb_fjm, events) != _expected(events, {k: v for k, v in BINDING.items() if k != 0x35})

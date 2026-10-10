@@ -559,12 +559,16 @@ BL_LOS_DECLS = ["bl_b: hex.vec 2", "bl_px: hex.vec 4", "bl_py: hex.vec 4", "bl_q
                 "bl_lret: hex.vec w/4"]
 
 
-def blast_los_lines(w, spots, max_radius: int, lists=None, fight: bool = False) -> List[str]:
+def blast_los_lines(w, spots, max_radius: int, lists=None, fight: bool = False, dyn: bool = False) -> List[str]:
     """`bl_los` (stl.fcall bl_los, bl_lret): sl_hit = 1 when a sight segment blocks the trace from spot `bl_b`
     (bl_px, bl_py: its integer position, the caller's) to (bl_qx, bl_qy) in 16.16. It CALLS the segment blocks
     `sg<k>` and `sl_seg` that `near_los_lines` emits, and writes mm_x / mm_y (the monster tic's scratch: the blast
     runs in the barrel phase, after it). `lists` overrides the per-spot lists (the harness's control). `fight` (M7 P8a
-    I): the box biased for the fight's sl_seg (`near_los_lines(fight=True)`)"""
+    I): the box biased for the fight's sl_seg (`near_los_lines(fight=True)`). `dyn` (P9, the rocket's blast; it needs
+    `fight`): while `bl_dyn` is 1 the trace is the FAR LOS's (`sl_far`, any range, exact) from the spot (bl_px, bl_py) to
+    the target FLOORED to whole units (bl_qx / bl_qy's integer halves, in mt_tqx / mt_tqy -- the monster tic's target
+    registers, scratch in the projectile phase and the weapon phase): combat._rocket_blast's whole-unit ends"""
+    assert not dyn or fight, "P9: the dynamic blast LOS is the fight's sl_far"
     segs = sight_segments(w)
     margin = blast_margin(max_radius)
     _bounds(segs, margin)
@@ -573,6 +577,13 @@ def blast_los_lines(w, spots, max_radius: int, lists=None, fight: bool = False) 
     n = len(spots)
     assert 0 < n <= 255 and len(lists) == n
     out = ["bl_los:", "    hex.zero 1, sl_hit", "    hex.mov 4, mm_x, bl_px", "    hex.mov 4, mm_y, bl_py"]
+    if dyn:                                       # P9: the rocket's spot -- the far LOS to the floored target
+        out += ["    hex.if0 1, bl_dyn, bl_lst",
+                "    hex.zero 4, mt_tqx", "    hex.mov 4, mt_tqx + 4*dw, bl_qx + 4*dw",
+                "    hex.zero 4, mt_tqy", "    hex.mov 4, mt_tqy + 4*dw, bl_qy + 4*dw",
+                "    stl.fcall sl_far, sf_ret",
+                "    ;bl_ldone",
+                "  bl_lst:"]
     for c in ("x", "y"):                         # sl_los' prologue, with Q = (bl_qx, bl_qy)
         p, q = "sl_p" + c, "bl_q" + c
         out += ["    hex.zero 4, %s" % p, "    hex.mov 4, %s + 4*dw, mm_%s" % (p, c),

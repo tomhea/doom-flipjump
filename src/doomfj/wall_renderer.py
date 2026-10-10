@@ -498,6 +498,7 @@ STANDALONE_SCRATCH_DECLS = [
     # M7 P4.1: the new held flags -- strafe left / right, fire, the number keys 1..4 (persisted with the others)
     "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1",
     "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
+    "kb_w5: hex.vec 1",                                                 # P9: '5', the rocket launcher
     # P9 (doomfj.keyboard): the press latch -- per-frame scratch, zeroed before every frame's polls, so NOT persisted
     # (the restore set carries it as ordinary residue, like the menu's ev_* events)
     _keyboard.NOW_DECL,
@@ -785,14 +786,17 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     puffs = bool(p31.get("barrel"))              # M7 P6: the puffs share the blood's pool (projcode `puffs`)
     if puffs:
         names.update({"S_PUFF1": 42, "S_PUFF2": 43, "S_PUFF3": 44, "S_PUFF4": 45})
+    rockets = bool(p31.get("rockets"))           # P9: the player's rocket shares the fireballs' pool
+    if rockets:
+        names.update({"S_ROCKET": 222, "S_EXPLODE1": 223, "S_EXPLODE2": 224, "S_EXPLODE3": 225})
     assert {s: gd.STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
-    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs)) == sorted(names.values())
+    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets)) == sorted(names.values())
     assert (FIREBALL_INFO.spawnstate, FIREBALL_INFO.deathstate) == ("S_TBALL1", "S_TBALLX1")
     mv = p31["mob_view"]
     assert sorted(mv) == sorted(names.values()), sorted(mv)
     rows, nt = p31["view_rows"], len(p31["rt_slot"])
     by_lump = {}
-    for s in projcode.pool_states(puffs):
+    for s in projcode.pool_states(puffs, rockets):
         row = mv[gd.STATE_INDEX[s]]
         assert p31["mob_first"] <= row < nt + len(rows), (s, row)
         by_lump.setdefault(mobile_lump(s), set()).add(row)
@@ -2037,6 +2041,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
                         loot=_LOOT) if menu else None                # M7 P6+P7: the latch, berserk's key 1 and fist
+    # P9: the loot weapon's A_FireMissile calls the pool's rk_spawn -- p31_parts emits the rocket with the loot player
+    assert not _LOOT or bool(_p31 and _p31.get("rockets")), (
+        "P9: the loot player's launcher fires rk_spawn, which p31_parts emits only with knockback and infighting")
     if _P5:
         assert _proj and _p31.get("nmob"), (
             "M7 P5: MONSTER_MODE 'full' needs p31_parts' pools and mobile rows -- a map with monsters, the game tier")
@@ -4417,7 +4424,8 @@ BARREL_TYPE = 2035                       # M7 P6: MT_BARREL's doomednum (a baked
 
 # M7 P1.6 -- the actors whose every frame and rotation the bank holds, besides the map's monsters:
 # the barrels (they explode) and what the monsters' attacks spawn (P3-P5 draw them)
-ANIM_ACTORS = ("MT_BARREL", "MT_TROOPSHOT", "MT_PUFF", "MT_BLOOD")
+ANIM_ACTORS = ("MT_BARREL", "MT_TROOPSHOT", "MT_PUFF", "MT_BLOOD",
+               "MT_ROCKET")                                   # P9: the player's rocket (MISLA5, MISLB0 .. D0)
 
 
 def anim_frames(map_wad, mapname) -> dict:
@@ -4461,6 +4469,12 @@ def anim_patches(sprite_wad, frames) -> dict:
                     views.setdefault(int(n[7]), (n, True))
             assert views, "no patch for %s frame %s" % (sprite, letter)
             assert 0 in views or set(views) == set(range(1, 9)), (sprite, letter, sorted(views))
+            # P9: a MOBILE frame drawn at one fixed rotation (monsters.MOBILE_ROTATION: the rocket's MISLA5) needs only
+            # that view in the bank -- the other seven are never drawn (~35K words of sprite blocks saved)
+            from doomfj.monsters import MOBILE_ROTATION
+            fixed = MOBILE_ROTATION.get((sprite, fi))
+            if fixed is not None:
+                views = {fixed: views[fixed]}
             for rot, v in views.items():
                 out[(sprite, letter, rot)] = v
     return out

@@ -39,6 +39,15 @@ of `nz_leaf` (doomfj.noisecode) at each fire point once the ammo check passed.
 NOT HERE (the model's "fire" mode leaves them out too): the player thing's states, the target, every
 effect; p_health <= 0 (nothing hurts the player until P5: `hurt`, weapon_lines) and berserk (P6) -- each marked where
 its test belongs.
+
+P9 (the owner, 2026-10-10): THE ROCKET LAUNCHER, the fifth weapon (`WEAPONS`, wp_own's nibble 4; key 5). Its states
+S_MISSILE .. S_MISSILE3 and S_MISSILEFLASH1..4 join the blocks: A_GunFlash sets the flash (S_MISSILE1), A_FireMissile
+takes one rocket (`am_misl`, lootcode's cell -- `weapon_decls(misl=True)` declares it for a program without the loot
+code) and, in the loot player (`loot`), calls projcode's `rk_spawn` (stl.fcall rk_spawn, rk_sret: P_SpawnPlayerMissile);
+A_WeaponReady keeps DOOM's "the missile launcher and bfg do not auto fire" (fire held with attackdown set does not fire
+it from the ready state: A_ReFire still refires it); P_CheckAmmo knows the launcher (the shotgun, the pistol, the
+chainsaw, the launcher with rockets, the fist); the bar shows the rockets and ARMS 5. The weapon psprite's frames grew
+past 16: `wp_frm` is two nibbles (hudcode's two-level dispatch).
 """
 from __future__ import annotations
 
@@ -50,13 +59,14 @@ from doomfj.keyboard import now_cell                                            
 from doomfj.wireformat import KEY_FIRE_MASK
 from doomfj.world import AIM_COLUMNS
 
-# the four E1M1 weapons (WP_*), in the order of `wp_own`'s nibbles; key 4 names the chaingun, which E1M1 never gives
-WEAPONS = (gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW)
+# the E1M1 weapons (WP_*), in the order of `wp_own`'s nibbles; key 4 names the chaingun, which E1M1 never gives;
+# P9: the rocket launcher last (nibble 4), key 5
+WEAPONS = (gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW, gd.WP_MISSILE)
 OWN = {w: i for i, w in enumerate(WEAPONS)}
 NOCHANGE = gd.WP_NOCHANGE                       # 10
 TOP, BOTTOM = gd.WEAPONTOP >> 16, gd.WEAPONBOTTOM >> 16
 LOWER, RAISE = gd.LOWERSPEED >> 16, gd.RAISESPEED >> 16
-AMMO_CELL = {gd.AM_CLIP: "am_clip", gd.AM_SHELL: "am_shell"}
+AMMO_CELL = {gd.AM_CLIP: "am_clip", gd.AM_SHELL: "am_shell", gd.AM_MISL: "am_misl"}   # P9: the rockets (lootcode's)
 # the stream's draws per shot ("fire" mode: advanced, not read)
 DRAWS = {"pistol_acc": 1, "gunshot": 3, "punch": 3, "saw": 3}
 
@@ -100,15 +110,19 @@ def flash_states() -> List[str]:
     return sorted(out, key=lambda n: gd.STATE_INDEX[n])
 
 
+FRAME_NIBBLES = 2                               # P9: `wp_frm`'s width -- the launcher's two frames made 17 lumps
+
+
 def overlay_frames(states=None) -> List[str]:
     """the WEAPON psprite's distinct LUMPS (sprite + frame letter + '0', DOOM's rotation-less name): `wp_frm` indexes
-    this list (<= 16, one nibble). `states` is unused -- the list is the weapon psprite's, whatever the caller holds."""
+    this list (P9: 17 with the launcher, two nibbles). `states` is unused -- the list is the weapon psprite's, whatever
+    the caller holds."""
     out = []
     for s in psprite_states():
         lump = psprite_lump(s)
         if lump not in out:
             out.append(lump)
-    assert len(out) <= 16, out
+    assert len(out) <= 16 ** FRAME_NIBBLES, out
     return out
 
 
@@ -140,8 +154,9 @@ def ammo_digit_values(n: int = 512) -> List[int]:
     return out
 
 
-def weapon_decls(start: dict, states: List[str], frames: List[str]) -> List[str]:
-    """the weapon's cells at their level-start values (`start`: the model's ws fields)"""
+def weapon_decls(start: dict, states: List[str], frames: List[str], misl: bool = False) -> List[str]:
+    """the weapon's cells at their level-start values (`start`: the model's ws fields). P9 (`misl`): `am_misl`, the
+    launcher's rockets, for a program without lootcode (which owns it in the game: loot_decls)"""
     idx = {s: i for i, s in enumerate(states)}
     own = sum(int(bool(start["owned"][w])) << (4 * OWN[w]) for w in WEAPONS)
     wst = gd.STATE_NAMES[start["p_wpn_state"]]
@@ -153,10 +168,11 @@ def weapon_decls(start: dict, states: List[str], frames: List[str]) -> List[str]
             f"wp_rf: hex.vec 2, {start['p_refire']}", f"wp_ad: hex.vec 1, {start['p_attackdown']}",
             f"am_clip: hex.vec 3, {start['ammo'][gd.AM_CLIP]}", f"am_shell: hex.vec 3, {start['ammo'][gd.AM_SHELL]}",
             f"wp_own: hex.vec {len(WEAPONS)}, {own}", f"rng_pl: hex.vec 2, {start['rng_player']}",
-            f"wp_frm: hex.vec 1, {frames.index(psprite_lump(wst))}",
+            f"wp_frm: hex.vec {FRAME_NIBBLES}, {frames.index(psprite_lump(wst))}",
             f"fl_frm: hex.vec 1, {0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else 1 + flash_frames().index(psprite_lump(fst))}",
             "fl_ret: hex.vec w/4", "wp_bcd: hex.vec 3",
-            "wp_pass: hex.vec 1"]                         # M7 P6+P7: weapon_lines' tic counter (0 between frames)
+            "wp_pass: hex.vec 1"] + (                     # M7 P6+P7: weapon_lines' tic counter (0 between frames)
+        [f"am_misl: hex.vec 3, {start['ammo'][gd.AM_MISL]}"] if misl else [])
 
 
 def _by_ready(prefix: str, target: Dict[int, str]) -> List[str]:
@@ -218,10 +234,17 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
             "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_PISTOL],
             "hex.if_flags wp_rdy, 1<<%d, wk_pset, wk_end" % gd.WP_PISTOL,
             "wk_pset:", "hex.set 1, wp_pend, %d" % gd.WP_PISTOL, ";wk_end",
-            "wk_3:", f"hex.if0 1, {now_cell('w3')}, wk_end",                    # key 4 names the chaingun: never owned
+            "wk_3:", f"hex.if0 1, {now_cell('w3')}, wk_4",
             "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_SHOTGUN],
             "hex.if_flags wp_rdy, 1<<%d, wk_sset, wk_end" % gd.WP_SHOTGUN,
-            "wk_sset:", "hex.set 1, wp_pend, %d" % gd.WP_SHOTGUN,
+            "wk_sset:", "hex.set 1, wp_pend, %d" % gd.WP_SHOTGUN, ";wk_end",
+            # key 4 names the chaingun: never owned, so it changes nothing -- but it is the LOWEST held key, so 5 waits
+            "wk_4:", f"hex.if1 1, {now_cell('w4')}, wk_end",
+            # P9: key 5, the launcher
+            f"hex.if0 1, {now_cell('w5')}, wk_end",
+            "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_MISSILE],
+            "hex.if_flags wp_rdy, 1<<%d, wk_mset, wk_end" % gd.WP_MISSILE,
+            "wk_mset:", "hex.set 1, wp_pend, %d" % gd.WP_MISSILE,
             "wk_end:"]
     # -- 2. P_MovePsprites, the weapon: tics down, and at 0 its next state's block (M7 P6+P7: `tics` passes from here)
     out += (["wp_ptic:"] if looped else [])
@@ -235,7 +258,7 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
     for s in wps:
         st = gd.STATES[s]
         out += [f"{wen(s)}:", f"hex.set 2, wp_st, {idx[s]}", f"hex.set 1, wp_tics, {st.tics}",
-                f"hex.set 1, wp_frm, {frames.index(psprite_lump(s))}"]
+                f"hex.set {FRAME_NIBBLES}, wp_frm, {frames.index(psprite_lump(s))}"]
         out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise, hurt, loot)
         out += [f";{wen(st.next)}" if st.tics == 0 else ";wp_flash"]
     # -- 3. P_MovePsprites, the flash
@@ -299,8 +322,9 @@ def bar_lines() -> List[str]:
     chainsaw) and the owned weapons' ARMS digits (`arms_sources`) -> hud_v. Falls through."""
     from doomfj.hudcode import slot_index
     out = _by_ready("wpb", {gd.WP_FIST: "wpb_none", gd.WP_PISTOL: "wpb_clip", gd.WP_SHOTGUN: "wpb_shell",
-                            gd.WP_CHAINSAW: "wpb_none"})
-    out += ["wpb_clip:", "ammobcd.lookup wp_bcd, am_clip", ";wpb_set",
+                            gd.WP_CHAINSAW: "wpb_none", gd.WP_MISSILE: "wpb_misl"})
+    out += ["wpb_misl:", "ammobcd.lookup wp_bcd, am_misl", ";wpb_set",          # P9: the rockets
+            "wpb_clip:", "ammobcd.lookup wp_bcd, am_clip", ";wpb_set",
             "wpb_shell:", "ammobcd.lookup wp_bcd, am_shell", ";wpb_set",
             "wpb_none:", "hex.set 3, wp_bcd, %d" % (10 | 10 << 4 | 10 << 8),
             "wpb_set:", "hex.mov 3, hud_v, wp_bcd"]
@@ -327,11 +351,13 @@ def _dispatch2(prefix: str, cell: str, targets: Dict[int, str]) -> List[str]:
 
 def _check_ammo(p: str, wen, ok: str) -> List[str]:
     """P_CheckAmmo: enough for one shot -> `ok`; else the next weapon by DOOM's preference and the ready weapon's
-    downstate (a tail jump). E1M1 owns no plasma, chaingun, launcher or BFG, so the preference is: the shotgun with
-    shells, the pistol with bullets, the chainsaw, the fist."""
+    downstate (a tail jump). E1M1 owns no plasma, chaingun or BFG, so the preference is: the shotgun with shells, the
+    pistol with bullets, the chainsaw, (P9) the launcher with rockets, the fist."""
     info = gd.WEAPONINFO
-    out = _by_ready(f"{p}ca", {gd.WP_FIST: ok, gd.WP_PISTOL: f"{p}cp", gd.WP_SHOTGUN: f"{p}cs", gd.WP_CHAINSAW: ok})
-    out += [f"{p}cp:", f"hex.if0 3, am_clip, {p}cx", f";{ok}",
+    out = _by_ready(f"{p}ca", {gd.WP_FIST: ok, gd.WP_PISTOL: f"{p}cp", gd.WP_SHOTGUN: f"{p}cs", gd.WP_CHAINSAW: ok,
+                               gd.WP_MISSILE: f"{p}cm"})
+    out += [f"{p}cm:", f"hex.if0 3, am_misl, {p}cx", f";{ok}",                  # P9: one rocket
+            f"{p}cp:", f"hex.if0 3, am_clip, {p}cx", f";{ok}",
             f"{p}cs:", f"hex.if0 3, am_shell, {p}cx", f";{ok}",
             f"{p}cx:",
             f"hex.if0 1, wp_own + {OWN[gd.WP_SHOTGUN]}*dw, {p}cx1", f"hex.if0 3, am_shell, {p}cx1",
@@ -339,7 +365,9 @@ def _check_ammo(p: str, wen, ok: str) -> List[str]:
             f"{p}cx1:", f"hex.if0 3, am_clip, {p}cx2", f"hex.set 1, wp_pend, {gd.WP_PISTOL}", f";{p}cdn",
             f"{p}cx2:", f"hex.if0 1, wp_own + {OWN[gd.WP_CHAINSAW]}*dw, {p}cx3",
             f"hex.set 1, wp_pend, {gd.WP_CHAINSAW}", f";{p}cdn",
-            f"{p}cx3:", f"hex.set 1, wp_pend, {gd.WP_FIST}",
+            f"{p}cx3:", f"hex.if0 1, wp_own + {OWN[gd.WP_MISSILE]}*dw, {p}cx4", f"hex.if0 3, am_misl, {p}cx4",
+            f"hex.set 1, wp_pend, {gd.WP_MISSILE}", f";{p}cdn",                    # P9: the launcher with rockets
+            f"{p}cx4:", f"hex.set 1, wp_pend, {gd.WP_FIST}",
             f"{p}cdn:"]
     return out + _by_ready(f"{p}cd", {w: wen(info[w].downstate) for w in WEAPONS})
 
@@ -374,10 +402,13 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: b
                 + _by_ready(f"{p}dn", {w: wen(info[w].downstate) for w in WEAPONS})
                 + [f"{p}np:"] + (_hp_le0(p, f"{p}pd") if hurt else [])
                 + [f"hex.if_flags pkeys + dw, {KEY_FIRE_MASK:#06x}, {p}nf, {p}f",
-                   # "the missile launcher and bfg do not auto fire": E1M1 has neither, so a held key always fires
-                   f"{p}f:", "hex.set 1, wp_ad, 1"]
+                   # "the missile launcher and bfg do not auto fire" (P9: the launcher): fire held with attackdown set
+                   # fires anything else; the launcher's ready state leaves attackdown and goes to the top
+                   f"{p}f:", f"hex.if0 1, wp_ad, {p}fg",
+                   f"hex.if_flags wp_rdy, 1<<{gd.WP_MISSILE}, {p}fg, {p}ty",
+                   f"{p}fg:", "hex.set 1, wp_ad, 1"]
                 + _fire_weapon(p, wen, noise)
-                + [f"{p}nf:", "hex.zero 1, wp_ad", f"hex.set 2, wp_sy, {TOP}"])
+                + [f"{p}nf:", "hex.zero 1, wp_ad", f"{p}ty:", f"hex.set 2, wp_sy, {TOP}"])
     if action == "A_Lower":
         # (hurt, M7 P5) the dead player keeps it down; p_health <= 0 without death would drop it to S_NULL, which
         # no state reaches (doomfj.hurtcode: p_hp <= 0 <=> p_dead) and is not emitted
@@ -424,6 +455,11 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: b
         else:
             out += [f"hex.add_constant 2, rng_pl, {(7 * DRAWS['gunshot']) & 0xFF}"]
         return out
+    if action == "A_GunFlash":                                           # P9: the launcher's flash
+        return [f"stl.fcall {fen(info[gd.WP_MISSILE].flashstate)}, fl_ret"]
+    if action == "A_FireMissile":                                        # P9: one rocket; the loot player's spawn
+        return ([f"hex.sub_constant 3, {AMMO_CELL[info[gd.WP_MISSILE].ammo]}, 1"]
+                + (["stl.fcall rk_spawn, rk_sret"] if loot else []))
     if action == "A_Punch":
         return _shot_melee(p, "punch", loot) if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['punch']}"]
     if action == "A_Saw":
@@ -634,7 +670,8 @@ def weapon_parts(map_wad, mapname: str, shoot: bool = False, noise: bool = False
     start = level_start(map_wad, mapname)
     states, frames = weapon_states(), overlay_frames()
     tables = [generate_dispatch_table_fj("ammobcd", ammo_digit_values(), index_nibbles=3, result_nibbles=3)]
-    return {"decls": weapon_decls(start, states, frames) + weapon_const_decls() + (shot_decls() if shoot else []),
+    return {"decls": (weapon_decls(start, states, frames, misl=not loot) + weapon_const_decls()   # P9: am_misl
+                      + (shot_decls() if shoot else [])),
             "tables": tables + ([shot_table_fj()] if shoot else []) + ([bk10_table_fj()] if loot else []),
             "tic": weapon_lines(states, frames, shoot, noise, hurt, loot=loot, tics=tics),
             # M7 P6+P7: with `loot` the bar's weapon slots are copied AFTER the move (the pickups): the frame places it

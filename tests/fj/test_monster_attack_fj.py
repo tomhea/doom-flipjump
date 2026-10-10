@@ -201,7 +201,7 @@ def _build(tmp_path, name, mut=None):
                  "hex.set 1, mm_kind, %d" % kinds[ACTION[tp]],
                  "hex.set 1, wp_rdy, %d" % gd.WP_PISTOL, "hex.set 2, wp_st, %d" % states.index(ready),
                  "hex.set 1, wp_tics, 1", "hex.set 2, wp_sy, 32",
-                 "hex.set 1, wp_frm, %d" % frames.index(WC.psprite_lump(ready))]
+                 "hex.set 2, wp_frm, %d" % frames.index(WC.psprite_lump(ready))]
         body += ["hex.set %d, %s, %d" % (nib[f][1], nib[f][0], v & (16 ** nib[f][1] - 1)) for f, v in pokes.items()]
         body += ["hex.set 2, md_src, %d" % (slots[tp] + 1)]       # M7 P7: the slot stub's id
         body += ["stl.fcall md_attack, md_ret"]

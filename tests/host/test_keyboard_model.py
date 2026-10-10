@@ -36,4 +36,5 @@ def test_the_menu_events_and_the_names():
     assert KB.named(fk[0].now)["forward"] is True and set(KB.named(fk[0].now)) == set(KB.KEY_NAME.values())
     assert set(KB.BINDING.values()) == set(KB.HELD_KEYS) and not set(KB.BINDING) & {0x0D, 0x1B, 0x68}
     assert set(MENU_KEYS) - set(KB.BINDING) == {0x0D, 0x1B, 0x68}     # the event-only keys: enter, esc, h
-    assert KB.now_cell("w1") == "kb_now + 8*dw" and KB.NOW_DECL == "kb_now: hex.vec 12"
+    assert KB.now_cell("w1") == "kb_now + 8*dw" and KB.NOW_DECL == "kb_now: hex.vec 13"      # P9: + w5
+    assert KB.now_cell("w5") == "kb_now + 12*dw" and KB.BINDING[0x35] == "w5"                # P9: '5', the launcher

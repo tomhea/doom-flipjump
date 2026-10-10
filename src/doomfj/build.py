@@ -407,6 +407,19 @@ DEFAULT_WAD = DEFAULT_MAP_WAD
 STANDALONE_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m5_restore_set.json.gz"
 
 
+def standalone_run_header(standalone: bool) -> dict:
+    """The .fjm header's defaults for how `fj --run` runs the binary (flipjump >= 1.5.1 at 342a3b9).
+
+    A standalone binary (the game) is played in the pc window and wants flat memory -- one array for its
+    whole span (~119M words, ~0.5 GB at w=32), the fast native path -- so both are compiled in and the
+    play command is just `fj --run build/<name>.fjm` (`--io` / `--run-flags 0` still override). A hosted
+    tier is driven over stdin by a Python host, so it keeps the defaults (standard io, no run flags)."""
+    from flipjump.fjm.fjm_consts import IO_MODE_PC, RUN_FLAG_FLAT_MEMORY
+    if not standalone:
+        return {"run_flags": 0, "io_mode": 0}
+    return {"run_flags": RUN_FLAG_FLAT_MEMORY, "io_mode": IO_MODE_PC}
+
+
 def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=None,
                         tier: str = "game", ablate: frozenset = frozenset()) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
@@ -515,7 +528,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         # M5/M2-R4: the labels the reset must leave alone -- computed ONCE and used both to build
         # the reset and to report it.
         _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things)
-        labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
+        labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
+                                                **standalone_run_header(standalone))
         r1 = FjmRunner(out, flat_max_words=limit)
         core1 = _fjcore.Memory(r1.width, flat_max_words=r1.flat_max_words)
         for _s, _n in r1._segments:
@@ -543,7 +557,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         pristine1 = _v1.get
         del core1, r1
         paths = paths + [part]
-        labels2 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
+        labels2 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
+                                                **standalone_run_header(standalone))
         moved = selfreset.verify_labels_unchanged(labels1, labels2, restore_set)
         assert not moved, ("M1 self-reset REFUSED: %d baked addresses moved between passes, e.g. %s"
                            % (len(moved), sorted(moved)[:3]))

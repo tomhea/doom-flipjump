@@ -46,6 +46,7 @@ from functools import lru_cache
 from typing import Dict, List, Optional
 
 from doomfj import gamedata as gd
+from doomfj.keyboard import now_cell                                            # P9: the keys the frame acts on
 from doomfj.wireformat import KEY_FIRE_MASK
 from doomfj.world import AIM_COLUMNS
 
@@ -171,7 +172,8 @@ def _by_ready(prefix: str, target: Dict[int, str]) -> List[str]:
 def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, noise: bool = False,
                  hurt: bool = False, loot: bool = False, tics: Optional[int] = None) -> List[str]:
     """the frame's weapon tic: the number keys, then P_MovePsprites (the weapon, then the flash), then the bar's ammo
-    and arms. Falls through at `wp_end`. Uses `pkeys` (fire: the high nibble's bit 3) and the held `kb_w1..kb_w4`.
+    and arms. Falls through at `wp_end`. Uses `pkeys` (fire: the high nibble's bit 3) and the number keys as the frame
+    acts on them -- P9: `kb_now`'s nibbles (doomfj.keyboard.now_cell: held, or pressed during this frame's polls).
     `shoot` (P4.2a): every shot resolves through `aim_sid` and hands a monster to `dm_go` (the module docstring);
     off, the text is P4.1's and no shot label exists. `noise` (P4.2b, the "hit" mode): P_FireWeapon's P_NoiseAlert --
     every fire point calls `nz_leaf` (doomfj.noisecode); off, the text is P4.2a's. `hurt` (M7 P5, doomfj.hurtcode:
@@ -203,7 +205,7 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
     #    (berserk would keep the fist up -- P6); a weapon not owned, or already up, changes nothing
     if hurt:                                                          # M7 P5: a dead player's tic skips the keys
         out += ["hex.if1 1, %s, wk_end" % ("p_dd0" if loot else "p_dead")]   # (P7: dead at the tic's START)
-    out += ["hex.if0 1, kb_w1, wk_2",
+    out += [f"hex.if0 1, {now_cell('w1')}, wk_2",
             "hex.if0 1, wp_own + %d*dw, wk_fist" % OWN[gd.WP_CHAINSAW],
             "hex.if_flags wp_rdy, 1<<%d, wk_saw, %s" % (gd.WP_CHAINSAW, "wk_sbk" if loot else "wk_end")]
     if loot:                                                          # M7 P6: the saw is up and berserk runs: the fist
@@ -212,11 +214,11 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
             "wk_fist:", "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_FIST],
             "hex.if_flags wp_rdy, 1<<%d, wk_fset, wk_end" % gd.WP_FIST,
             "wk_fset:", "hex.set 1, wp_pend, %d" % gd.WP_FIST, ";wk_end",
-            "wk_2:", "hex.if0 1, kb_w2, wk_3",
+            "wk_2:", f"hex.if0 1, {now_cell('w2')}, wk_3",
             "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_PISTOL],
             "hex.if_flags wp_rdy, 1<<%d, wk_pset, wk_end" % gd.WP_PISTOL,
             "wk_pset:", "hex.set 1, wp_pend, %d" % gd.WP_PISTOL, ";wk_end",
-            "wk_3:", "hex.if0 1, kb_w3, wk_end",                      # key 4 names the chaingun: never owned
+            "wk_3:", f"hex.if0 1, {now_cell('w3')}, wk_end",                    # key 4 names the chaingun: never owned
             "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_SHOTGUN],
             "hex.if_flags wp_rdy, 1<<%d, wk_sset, wk_end" % gd.WP_SHOTGUN,
             "wk_sset:", "hex.set 1, wp_pend, %d" % gd.WP_SHOTGUN,

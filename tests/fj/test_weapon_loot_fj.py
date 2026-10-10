@@ -117,15 +117,15 @@ PHASE_MUTS = {
 
 
 def _keybits(lines_pkeys=True):
-    """the harness's key byte -> pkeys (fire, use) and kb_w1..kb_w4"""
+    """the harness's key byte -> pkeys (fire, use) and the number keys the frame acts on (P9: kb_now's nibbles 8..11)"""
     return ["hex.zero 2, pkeys",
             "hex.if_flags kin, 0xAAAA, kf_no, kf_yes", "kf_yes:", "hex.xor_by pkeys + dw, 0x8", "kf_no:",
             "hex.if_flags kin + dw, 0xCCCC, ku_no, ku_yes", "ku_yes:", "hex.xor_by pkeys + dw, 0x1", "ku_no:",
-            "hex.zero 1, kb_w1", "hex.zero 1, kb_w2", "hex.zero 1, kb_w3", "hex.zero 1, kb_w4",
-            "hex.if_flags kin, 0xCCCC, k1_no, k1_yes", "k1_yes:", "hex.set 1, kb_w1, 1", "k1_no:",
-            "hex.if_flags kin, 0xF0F0, k2_no, k2_yes", "k2_yes:", "hex.set 1, kb_w2, 1", "k2_no:",
-            "hex.if_flags kin, 0xFF00, k3_no, k3_yes", "k3_yes:", "hex.set 1, kb_w3, 1", "k3_no:",
-            "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_w4, 1", "k4_no:"]
+            "hex.zero 1, kb_now + 8*dw", "hex.zero 1, kb_now + 9*dw", "hex.zero 1, kb_now + 10*dw", "hex.zero 1, kb_now + 11*dw",
+            "hex.if_flags kin, 0xCCCC, k1_no, k1_yes", "k1_yes:", "hex.set 1, kb_now + 8*dw, 1", "k1_no:",
+            "hex.if_flags kin, 0xF0F0, k2_no, k2_yes", "k2_yes:", "hex.set 1, kb_now + 9*dw, 1", "k2_no:",
+            "hex.if_flags kin, 0xFF00, k3_no, k3_yes", "k3_yes:", "hex.set 1, kb_now + 10*dw, 1", "k3_no:",
+            "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_now + 11*dw, 1", "k4_no:"]
 
 
 def _kbyte(k):
@@ -136,7 +136,7 @@ def _kbyte(k):
 def _common_decls(w, states, frames):
     rm = ReferenceModel()
     return (["rmagic: hex.vec 2", "kin: hex.vec 2", "kp: hex.vec 2", "kd: hex.vec 2", "pkeys: hex.vec 2",
-             "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1", "g_rs: hex.vec 1",
+             "kb_now: hex.vec 12", "g_rs: hex.vec 1",       # P9: the weapon reads the keys the frame acts on (kb_now)
              "mvmark: hex.vec 1"]
             + WC.weapon_decls(_start(w), states, frames) + WC.weapon_const_decls()
             + H.hurt_decls(H.level_start(w)) + L.loot_decls(L.level_start(w)) + H.dp_lines()

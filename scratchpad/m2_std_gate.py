@@ -391,30 +391,17 @@ def to_events(per_frame):
 
 
 def held_per_frame(events, frames):
-    """the DEVICE's delivery rule, re-implemented: one event per poll, due once the tic clock
-    reaches it. Returns (key dict, the frame's MENU EVENTS) per frame -- the set of
-    `doomfj.menu.MENU_KEYS` names whose key went DOWN during the frame's polls (kb.poll
-    edge-triggers them), which `doomfj.menu.menu_step` turns into the menu's state."""
-    pending = sorted(events, key=lambda e: e.tic)
-    held = {name: False for name in CODE}                 # M7 P4.1: every bound key
-    out, menu_events, i = [], [], 0
-    this_frame = set()
-    for tic in range(frames * STANDALONE_POLLS):
-        # ONE event per poll: the device delivers at most one per tic, which is what makes a burst
-        # of events spill into later polls (and frames) exactly as it does in the program
-        if i < len(pending) and pending[i].tic <= tic:
-            ev = pending[i]
-            i += 1
-            if ev.is_down and ev.keycode in MENU_KEYS:
-                this_frame.add(MENU_KEYS[ev.keycode])
-            name = BINDING.get(ev.keycode)
-            if name is not None:
-                held[name] = ev.is_down
-        if tic % STANDALONE_POLLS == STANDALONE_POLLS - 1:
-            out.append(dict(held))
-            menu_events.append(frozenset(this_frame))
-            this_frame = set()
-    return out, menu_events
+    """the DEVICE's delivery rule: one event per poll, due once the tic clock reaches it -- which is what makes a
+    burst of events spill into later polls (and frames) exactly as it does in the program. Returns (key dict, the
+    frame's MENU EVENTS) per frame -- the set of `doomfj.menu.MENU_KEYS` names whose key went DOWN during the frame's
+    polls (kb.poll edge-triggers them), which `doomfj.menu.menu_step` turns into the menu's state.
+
+    P9: the key dict is the keys the frame ACTS on -- held after the polls OR pressed during them (the press latch,
+    `kb_now`) -- through THE oracle of it, `doomfj.keyboard.frame_keys`. The persisted held flags (`kb_*`) are its
+    `.held`; this re-implemented the rule here until P9, when the rule grew the latch."""
+    from doomfj.keyboard import frame_keys
+    fks = frame_keys(events, frames, polls=STANDALONE_POLLS, binding=BINDING, menu_keys=MENU_KEYS)
+    return [dict(fk.now) for fk in fks], [fk.menu for fk in fks]
 
 
 def run_fj(fjm, events, frames, screen_factory=Recording):

@@ -127,11 +127,11 @@ def _program(start, mut=None):
             "hex.input %d, aim_sid" % WC.AIM_N,                        # the poked window
             "hex.zero 2, pkeys",
             "hex.if_flags kin, 0xAAAA, kf_no, kf_yes", "kf_yes:", "hex.xor_by pkeys + dw, 0x8", "kf_no:",
-            "hex.zero 1, kb_w1", "hex.zero 1, kb_w2", "hex.zero 1, kb_w3", "hex.zero 1, kb_w4",
-            "hex.if_flags kin, 0xCCCC, k1_no, k1_yes", "k1_yes:", "hex.set 1, kb_w1, 1", "k1_no:",
-            "hex.if_flags kin, 0xF0F0, k2_no, k2_yes", "k2_yes:", "hex.set 1, kb_w2, 1", "k2_no:",
-            "hex.if_flags kin, 0xFF00, k3_no, k3_yes", "k3_yes:", "hex.set 1, kb_w3, 1", "k3_no:",
-            "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_w4, 1", "k4_no:",
+            "hex.zero 1, kb_now + 8*dw", "hex.zero 1, kb_now + 9*dw", "hex.zero 1, kb_now + 10*dw", "hex.zero 1, kb_now + 11*dw",
+            "hex.if_flags kin, 0xCCCC, k1_no, k1_yes", "k1_yes:", "hex.set 1, kb_now + 8*dw, 1", "k1_no:",
+            "hex.if_flags kin, 0xF0F0, k2_no, k2_yes", "k2_yes:", "hex.set 1, kb_now + 9*dw, 1", "k2_no:",
+            "hex.if_flags kin, 0xFF00, k3_no, k3_yes", "k3_yes:", "hex.set 1, kb_now + 10*dw, 1", "k3_no:",
+            "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_now + 11*dw, 1", "k4_no:",
             text,
             "stl.output 124",                                           # '|': the calls end, the cells follow
             *[x for c, n in CELLS for x in ("hex.print_as_digit %d, %s, 0" % (n, c), "stl.output 44")],
@@ -143,7 +143,7 @@ def _program(start, mut=None):
             "stl.output 59", "stl.fret dm_ret",
             "bad:", "stl.loop", "done:", "stl.loop",
             "rmagic: hex.vec 2", "kin: hex.vec 2", "pkeys: hex.vec 2",
-            "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
+            "kb_now: hex.vec 12",                    # P9: the weapon reads the keys the frame acts on (kb_now)
             "aim_sid: hex.vec %d" % (2 * WC.AIM_N), "dm_ret: hex.vec w/4",
             *WC.weapon_decls(start, states, frames), *WC.weapon_const_decls(), *WC.shot_decls(),
             *hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))),

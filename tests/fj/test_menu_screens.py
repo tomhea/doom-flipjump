@@ -98,7 +98,7 @@ def _program(menu_lines, scr0, frames):
         "present.init_screen",
         "tm_frame:",
         *[f"    hex.zero 1, {e}" for e in ("ev_enter", "ev_esc", "ev_up", "ev_dn", "ev_help")],
-        f"    rep({POLLS}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, "
+        f"    rep({POLLS}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, kb_now, "
         "ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
         *menu_lines,                                # ends at `do_world:`
         "    stl.output_char 0x0B",
@@ -114,6 +114,7 @@ def _program(menu_lines, scr0, frames):
         "kbstat: hex.vec 1", "kbcode: hex.vec 2", "kb_f: hex.vec 1", "kb_b: hex.vec 1",
         "kb_l: hex.vec 1", "kb_r: hex.vec 1", "kb_u: hex.vec 1",
         "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1", "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",   # M7 P4.1
+        "kb_now: hex.vec 12",                                       # P9: the press latch kb.poll sets
         "p_tnh: hex.vec 1",                                         # M7 P6+P7: the turn held flag the restart zeroes
         "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "thss_rt: hex.vec 16", "thpos_rt: hex.vec 16",

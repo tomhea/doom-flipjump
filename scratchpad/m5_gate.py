@@ -114,21 +114,12 @@ def events(frames):
 
 
 def held_per_frame(frames):
-    """the DEVICE's delivery rule, re-implemented: one event per poll, due once the tic clock
-    reaches it. Returns the key dict the sim sees on each frame."""
-    pending = sorted(events(frames), key=lambda e: e.tic)
-    held = {name: False for name in KEY_NAMES}
-    out, i = [], 0
-    for tic in range(frames * STANDALONE_POLLS):
-        if i < len(pending) and pending[i].tic <= tic:
-            event = pending[i]
-            i += 1
-            name = BINDING.get(event.keycode)
-            if name is not None:
-                held[name] = event.is_down
-        if tic % STANDALONE_POLLS == STANDALONE_POLLS - 1:
-            out.append(dict(held))
-    return out
+    """the DEVICE's delivery rule: one event per poll, due once the tic clock reaches it. Returns the key dict the
+    sim sees on each frame -- P9: held after the polls OR pressed during them (`doomfj.keyboard.frame_keys`, THE
+    oracle of the press latch)."""
+    from doomfj.keyboard import frame_keys
+    fks = frame_keys(events(frames), frames, polls=STANDALONE_POLLS, binding=BINDING)
+    return [{name: fk.now.get(name, False) for name in KEY_NAMES} for fk in fks]
 
 
 def run(fjm, frames):

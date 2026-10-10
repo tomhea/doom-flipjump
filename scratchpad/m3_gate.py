@@ -226,18 +226,14 @@ def main():
     spawn = spawn_state(mw, args.map)
     state, rows = spawn, []
     pusedn = 1                                      # M7 P2a.2: baked 1; a world tic without use clears it
-    pending, i = sorted(events, key=lambda e: e.tic), 0
+    # P9: the device's delivery and the press latch through THE oracle (doomfj.keyboard.frame_keys): the keys a
+    # world frame acts on are held after its polls OR pressed during them
+    from doomfj.keyboard import frame_keys
+    fks = frame_keys(events, FRAMES, polls=STANDALONE_POLLS, binding={K_FWD: "forward", K_BACK: "back"},
+                     menu_keys=MENU_KEYS)
     for f in range(FRAMES):
-        ev = set()
-        for tic in range(f * STANDALONE_POLLS, (f + 1) * STANDALONE_POLLS):
-            if i < len(pending) and pending[i].tic <= tic:
-                e = pending[i]
-                i += 1
-                if e.is_down and e.keycode in MENU_KEYS:
-                    ev.add(MENU_KEYS[e.keycode])
-                name = {K_FWD: "forward", K_BACK: "back"}.get(e.keycode)
-                if name:
-                    held[name] = e.is_down
+        ev = set(fks[f].menu)
+        held = dict(fks[f].now)
         if (args.selftest_help and mode == 1 and scr == HELP_GAME_SCR
                 and ("esc" in ev or "help" in ev)):
             mode, scr, ng = 1, 0, None                  # THE HELP'S NEGATIVE CONTROL (M7 P3.4)

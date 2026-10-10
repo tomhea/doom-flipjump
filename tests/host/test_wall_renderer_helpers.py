@@ -471,16 +471,20 @@ def test_the_standalone_prologue_echoes_nothing():
 def test_pkeys_is_rebuilt_with_wireformats_own_bit_values():
     """M2-R4: the use key is `1 << 4`, i.e. bit 0 of the HIGH nibble, so it is xor'd into
     `pkeys + dw`. Landing it in the low nibble makes space do nothing (or a movement key open
-    doors) -- a mirror drift against `doomfj.wireformat` that only a keyboard-driven build shows."""
+    doors) -- a mirror drift against `doomfj.wireformat` that only a keyboard-driven build shows.
+    P9: the byte is built from the keys the frame ACTS on -- `kb_now`'s nibbles (held or pressed this frame) -- so the
+    key below is the nibble's key, named by its held flag."""
+    from doomfj import keyboard as KB
     lines = _standalone_input_lines()
     built = {}
     for i, ln in enumerate(lines):
-        m = re.fullmatch(r"hex\.if0 1, (kb_\w+), \w+", ln)
+        m = re.fullmatch(r"hex\.if0 1, kb_now \+ (\d+)\*dw, \w+", ln)
         if not m:
             continue
+        key = KB.flag(KB.HELD_KEYS[int(m.group(1))])
         xor = re.fullmatch(r"hex\.xor_by (pkeys(?: \+ dw)?), (0x[0-9a-f]+)", lines[i + 1])
-        assert xor, "flag %s is tested but sets nothing: %r" % (m.group(1), lines[i + 1])
-        built[m.group(1)] = (xor.group(1), int(xor.group(2), 16))
+        assert xor, "key %s is tested but sets nothing: %r" % (key, lines[i + 1])
+        built[key] = (xor.group(1), int(xor.group(2), 16))
     assert built == {
         "kb_f": ("pkeys", WF.KEY_FORWARD),
         "kb_b": ("pkeys", WF.KEY_BACK),
@@ -504,9 +508,33 @@ def test_every_poll_is_its_own_expansion():
     three = _standalone_input_lines(polls=3)
     at = next(i for i, ln in enumerate(three) if "kb.poll" in ln)
     assert three[at].startswith("rep(3, i) kb.poll ")
-    # M7 P1.5: the menu's event cells are zeroed BEFORE the polls that set them (M7 P3.4: five)
+    # M7 P1.5: the menu's event cells are zeroed BEFORE the polls that set them (M7 P3.4: five), and so is
+    # P9's press latch
     assert set(three[:at]) == {"hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up",
-                               "hex.zero 1, ev_dn", "hex.zero 1, ev_help"}, three[:at]
+                               "hex.zero 1, ev_dn", "hex.zero 1, ev_help", "hex.zero 12, kb_now"}, three[:at]
+
+
+def test_every_reader_of_a_held_key_reads_the_press_latch():
+    """P9 (the owner's play-test: "a key pressed since the last input check must count"; doomfj.keyboard): after the
+    polls, the held flags are read ONLY by the OR into `kb_now` (keyboard.now_lines) -- the key byte and the weapon's
+    number keys read `kb_now`, so a tap inside one frame's polls counts. The poll is handed the latch right after the
+    twelve flags (input.fj's parameter order), and no emitted reader outside the OR names a flag"""
+    from doomfj import keyboard as KB
+    from doomfj import weaponcode as WC
+    lines = _standalone_input_lines()
+    poll = next(ln for ln in lines if "kb.poll" in ln)
+    args = [a.strip() for a in poll.split("kb.poll", 1)[1].split(",")]
+    assert args[2:2 + len(KB.HELD_KEYS) + 1] == [KB.flag(k) for k in KB.HELD_KEYS] + [KB.KEY_NOW], args
+    flag_reads = [ln for ln in lines if re.match(r"hex\.if0 1, kb_(%s)," % "|".join(KB.HELD_KEYS), ln)]
+    assert flag_reads == [ln for ln in KB.now_lines() if ln.startswith("hex.if0")], flag_reads
+    assert len(flag_reads) == len(KB.HELD_KEYS)
+    wtext = "\n".join(WC.weapon_lines(WC.weapon_states(), WC.overlay_frames(), hurt=True, loot=True))
+    assert not re.search(r"\bkb_w[1-4]\b", wtext), "the weapon reads a held flag, not the frame's keys"
+    for k in ("w1", "w2", "w3"):
+        assert "hex.if0 1, %s, " % KB.now_cell(k) in wtext, k
+    assert KB.NOW_DECL in STANDALONE_SCRATCH_DECLS
+    from doomfj.build import STANDALONE_PERSIST
+    assert KB.KEY_NOW not in STANDALONE_PERSIST, "kb_now is per-frame scratch: zeroed before every read"
 
 
 def test_the_magic_check_precedes_every_state_input():

@@ -1392,6 +1392,10 @@ def demo(fjm: Path, labels_path: Path) -> int:
     per_frame = [{} for _ in range(gate.MENU_FRAMES)] + GS.script(0)[:n_walk]
     events = GS.events_for(per_frame)
     keys_by_frame, menu_events = gate.held_per_frame(events, len(per_frame))
+    # P9: keys_by_frame is what each frame ACTS on (the press latch); the persisted kb_* flags are the HELD keys
+    from doomfj.keyboard import frame_keys
+    held_by_frame = [fk.held for fk in frame_keys(events, len(per_frame),
+                                                  binding=gate.BINDING)]
     p = Probe(cells, table, gb.width)
     seen = []
     p.on_present(lambda pr, f: seen.append(pr.read_cells()))       # EVERY game-tier cell
@@ -1409,7 +1413,7 @@ def demo(fjm: Path, labels_path: Path) -> int:
         if mode == 0:
             st = dsim.step(st, keys_by_frame[f])
         g = seen[f]
-        kd = keys_by_frame[f]
+        kd = held_by_frame[f]
         want_s = {"viewx": st.x, "viewy": st.y, "viewangle": st.angle, "mode": mode,
                   "menu_scr": scr, "menu_sel": sel,
                   "kb_f": int(bool(kd.get("forward"))), "kb_b": int(bool(kd.get("back"))),

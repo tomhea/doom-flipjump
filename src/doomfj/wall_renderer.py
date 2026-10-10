@@ -65,6 +65,7 @@ from doomfj.doorcode import _box_test                                     # M7 P
 from doomfj.menu import LEVEL_DONE_SCR                                    # M7 P2a.2
 from doomfj.menu import HELP_GAME_SCR, HELP_MENU_SCR, MAIN_HELP_SCR      # M7 P3.4
 from doomfj.menu import MAIN_EXIT_SCR                                     # P9: the EXIT item
+from doomfj import keyboard as _keyboard                                   # P9: the press latch
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
@@ -497,6 +498,9 @@ STANDALONE_SCRATCH_DECLS = [
     # M7 P4.1: the new held flags -- strafe left / right, fire, the number keys 1..4 (persisted with the others)
     "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1",
     "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
+    # P9 (doomfj.keyboard): the press latch -- per-frame scratch, zeroed before every frame's polls, so NOT persisted
+    # (the restore set carries it as ordinary residue, like the menu's ev_* events)
+    _keyboard.NOW_DECL,
     # M7 P6+P7: a turn key was held last frame (reference_model.turn_step's `turnheld`: the turn's slow first frame).
     # Persisted like the held flags it follows (build.STANDALONE_PERSIST); the restart zeroes it.
     "p_tnh: hex.vec 1, 0",
@@ -1052,6 +1056,45 @@ def landing_drop_lines() -> list:
             "lnd_vd_end:"]
 
 
+def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
+    """M5 / M7 P1.5 / P9 -- the standalone frame's INPUT, alone: the menu's events and the press latch zeroed, the
+    `polls` keyboard polls, the latch OR-ed with the held flags, and the key byte `pkeys` built from the latch.
+    tests/fj/test_key_latch.py runs exactly these lines.
+
+    P9 (the owner's play-test, 2026-10-10: "a key pressed since the last input check must count"; doomfj.keyboard):
+    the frame acts on `kb_now` -- each held key's nibble is 1 when the key is held after the polls OR went down during
+    them -- not on the held flags, which a tap inside one frame's polls left unchanged. `pkeys` (the sim's, the doors',
+    the exit's, the restart's and the fire's) and the weapon's number keys (weaponcode) read it. The held flags still
+    carry "held" across frames (persisted), and a release with no press in the frame still takes effect."""
+    from doomfj import keyboard as KB
+    now = KB.now_cell
+    return [
+        # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
+        # state machine reads them
+        "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
+        "hex.zero 1, ev_help",                                          # M7 P3.4
+        f"hex.zero {len(KB.HELD_KEYS)}, {KB.KEY_NOW}",                  # P9: the press latch
+        f"rep({polls}, i) kb.poll kbstat, kbcode, "
+        + "".join(f"{KB.flag(k)}, " for k in KB.HELD_KEYS)            # M7 P4.1: strafe, fire, 1..4
+        + f"{KB.KEY_NOW}, "                                             # P9
+        "ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
+        *KB.now_lines(),                                                # P9: kb_now |= the held flags
+        # the frame's keys -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
+        # cell just zeroed IS a set, and is the cheapest primitive that does it.
+        "hex.zero 2, pkeys",
+        f"hex.if0 1, {now('f')}, sa_nf", "hex.xor_by pkeys, 0x1", "sa_nf:",
+        f"hex.if0 1, {now('b')}, sa_nb", "hex.xor_by pkeys, 0x2", "sa_nb:",
+        f"hex.if0 1, {now('l')}, sa_nl", "hex.xor_by pkeys, 0x4", "sa_nl:",
+        f"hex.if0 1, {now('r')}, sa_nr", "hex.xor_by pkeys, 0x8", "sa_nr:",
+        # M2-R4: the use key is bit 4, i.e. the HIGH nibble's bit 0 -- see wireformat.KEY_USE.
+        f"hex.if0 1, {now('u')}, sa_nu", "hex.xor_by pkeys + dw, 0x1", "sa_nu:",
+        # M7 P4.1: strafe left / right and fire -- bits 5, 6, 7 (wireformat.KEY_STRAFE_LEFT / _RIGHT / KEY_FIRE)
+        f"hex.if0 1, {now('sl')}, sa_nsl", "hex.xor_by pkeys + dw, 0x2", "sa_nsl:",
+        f"hex.if0 1, {now('sr')}, sa_nsr", "hex.xor_by pkeys + dw, 0x4", "sa_nsr:",
+        f"hex.if0 1, {now('fi')}, sa_nfi", "hex.xor_by pkeys + dw, 0x8", "sa_nfi:",
+    ]
+
+
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
                             press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
@@ -1078,26 +1121,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     before the bar's weapon slots (the knock's pickups change them).
     """
     return [
-        # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
-        # state machine reads them
-        "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
-        "hex.zero 1, ev_help",                                          # M7 P3.4
-        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, "
-        "kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, "                        # M7 P4.1
-        f"ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
-        # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
-        # cell just zeroed IS a set, and is the cheapest primitive that does it.
-        "hex.zero 2, pkeys",
-        "hex.if0 1, kb_f, sa_nf", "hex.xor_by pkeys, 0x1", "sa_nf:",
-        "hex.if0 1, kb_b, sa_nb", "hex.xor_by pkeys, 0x2", "sa_nb:",
-        "hex.if0 1, kb_l, sa_nl", "hex.xor_by pkeys, 0x4", "sa_nl:",
-        "hex.if0 1, kb_r, sa_nr", "hex.xor_by pkeys, 0x8", "sa_nr:",
-        # M2-R4: the use key is bit 4, i.e. the HIGH nibble's bit 0 -- see wireformat.KEY_USE.
-        "hex.if0 1, kb_u, sa_nu", "hex.xor_by pkeys + dw, 0x1", "sa_nu:",
-        # M7 P4.1: strafe left / right and fire -- bits 5, 6, 7 (wireformat.KEY_STRAFE_LEFT / _RIGHT / KEY_FIRE)
-        "hex.if0 1, kb_sl, sa_nsl", "hex.xor_by pkeys + dw, 0x2", "sa_nsl:",
-        "hex.if0 1, kb_sr, sa_nsr", "hex.xor_by pkeys + dw, 0x4", "sa_nsr:",
-        "hex.if0 1, kb_fi, sa_nfi", "hex.xor_by pkeys + dw, 0x8", "sa_nfi:",
+        *standalone_key_lines(polls),      # the polls, the press latch, the key byte (P9: factored out)
         *(menu or []),                     # M3: the menu frame + the branch past the world
         # M7 P7: the restart on use after death (restartcode.tic_lines) -- the world frame's START, before the
         # frozen-level guard and the door tic: the model's World.tic runs the restart, then the tic

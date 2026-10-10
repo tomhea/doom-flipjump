@@ -64,6 +64,7 @@ from doomfj.movercode import lift_tic_lines, lift_walk_lines, mover_decls, use_l
 from doomfj.doorcode import _box_test                                     # M7 P2a.2: the exit's box
 from doomfj.menu import LEVEL_DONE_SCR                                    # M7 P2a.2
 from doomfj.menu import HELP_GAME_SCR, HELP_MENU_SCR, MAIN_HELP_SCR      # M7 P3.4
+from doomfj.menu import MAIN_EXIT_SCR                                     # P9: the EXIT item
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
@@ -432,13 +433,16 @@ STANDALONE_POLLS = 8
 # (doomfj.menu), and the colours come from the wad's own PLAYPAL.
 # M7 P3.4 (docs/gp-help.md): two items, NEW GAME and HELP -- up / down move between them. QUIT went:
 # it never did anything (no item was selectable but NEW GAME, and the program has no quit).
-DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP"]
+# P9 (the owner's play-test, 2026-10-10): a third item, EXIT, under HELP -- enter on it halts the program (`mn_exit`).
+DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP", "EXIT"]
 # which entry is highlighted. 2 = "NEW GAME" in DEFAULT_MENU -- an index that means nothing for a
 # caller-supplied list, so `menu_entries` brings its own `menu_selected`.
 DEFAULT_MENU_SELECTED = 2
 # M7 P3.4: the main menu's HELP item -- the row `menu_scr` MAIN_HELP_SCR highlights. A caller-supplied
 # menu must have one too (`_menu_lines` finds it by name).
 MENU_HELP_ITEM = "HELP"
+# P9: the main menu's EXIT item -- the row `menu_scr` MAIN_EXIT_SCR highlights; a caller-supplied menu must have one too
+MENU_EXIT_ITEM = "EXIT"
 
 # M7 P1.5 -- the SKILL SCREEN NEW GAME opens (docs/gp-skill-menu.md): entry SKILL_MENU_FIRST + k is
 # skill SKILLS[k], and `menu_sel` holds k, baked to the boot skill's (hard).
@@ -839,6 +843,7 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
     assert MENU_HELP_ITEM in entries, "the main menu needs its %r item (M7 P3.4)" % MENU_HELP_ITEM
+    assert MENU_EXIT_ITEM in entries, "the main menu needs its %r item (P9)" % MENU_EXIT_ITEM
     return [
         # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
@@ -858,6 +863,8 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
                 label="menu_frame", end_marker=False),
         ";frame_end",
         "mf_p34:",
+        f"hex.if_flags menu_scr, 1<<{MAIN_EXIT_SCR}, mf_p34h, mf_mainx",       # P9: the main menu on EXIT
+        "mf_p34h:",
         f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mf_help, mf_mainh",
         "mf_mainh:",
         menu_fj(cfg.W, cfg.H, entries, entries.index(MENU_HELP_ITEM), colours,
@@ -865,6 +872,10 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
         ";frame_end",
         "mf_help:",
         help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False),
+        ";frame_end",
+        "mf_mainx:",                       # P9
+        menu_fj(cfg.W, cfg.H, entries, entries.index(MENU_EXIT_ITEM), colours,
+                label="menu_frame_exit", end_marker=False),
         ";frame_end",
         *[line for k in range(len(SKILLS)) for line in (
             f"mf_s{k}:",
@@ -926,6 +937,8 @@ def menu_state_lines(restart) -> list:
         "mn_started:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
         # -- M7 P3.4: the help screen and the main menu with HELP highlighted
         "mn_p34:",
+        f"hex.if_flags menu_scr, 1<<{MAIN_EXIT_SCR}, mn_p34h, mn_mainx",       # P9: the main menu on EXIT
+        "mn_p34h:",
         f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mn_help, mn_mainh",
         # the help: esc or h close it -- to the main menu (HELP highlighted) when it was opened
         # there, to the world when it was opened from the world
@@ -936,14 +949,26 @@ def menu_state_lines(restart) -> list:
         "mn_hgame:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
         "mn_hmenu:", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
         # the main menu on HELP: esc resumes the world, enter or h open the help, up goes to NEW
-        # GAME (down is clamped: HELP is the last item)
+        # GAME, down (P9) to EXIT
         "mn_mainh:",
         "hex.if0 1, ev_esc, mn_q1", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
         "mn_q1:",
         "hex.if0 1, ev_enter, mn_q2", ";mn_tohelp", "mn_q2:",
         "hex.if0 1, ev_help, mn_q3", ";mn_tohelp", "mn_q3:",
-        "hex.if0 1, ev_up, mn_done", "hex.zero 1, menu_scr", ";mn_done",
+        "hex.if0 1, ev_up, mn_q4", "hex.zero 1, menu_scr", ";mn_done", "mn_q4:",
+        "hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_EXIT_SCR}", ";mn_done",
         "mn_tohelp:", f"hex.set 1, menu_scr, {HELP_MENU_SCR}", ";mn_done",
+        # P9 -- the main menu on EXIT: esc resumes the world, ENTER HALTS THE PROGRAM, h opens the help, up goes to
+        # HELP (down is clamped: EXIT is the last item). The halt is a jump-to-self under its own label -- neither the
+        # bare frame-tail `stl.loop` nor `bad: stl.loop`, the two lines selfreset.emit_reset_part counts -- so the
+        # interpreter ends "Looping" (the window closes), on this frame, before anything of it is presented.
+        "mn_mainx:",
+        "hex.if0 1, ev_esc, mn_x1", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
+        "mn_x1:",
+        "hex.if0 1, ev_enter, mn_x2", ";mn_exit", "mn_x2:",
+        "hex.if0 1, ev_help, mn_x3", ";mn_tohelp", "mn_x3:",
+        "hex.if0 1, ev_up, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
+        "mn_exit: stl.loop",
         # -- the main menu (NEW GAME highlighted)
         "mn_main:",
         "hex.if0 1, ev_esc, mn_m1", "hex.zero 1, mode", ";mn_done", "mn_m1:",
@@ -965,19 +990,24 @@ def menu_state_lines(restart) -> list:
 
 # M7 P3.4: the `menu_scr` values the help screen and the main menu's HELP highlight own, as an
 # `if_flags` mask (`menu_scr` is a nibble: bit k of the mask is scr == k)
-_P34_SCREENS = "(1<<%d)|(1<<%d)|(1<<%d)" % (HELP_MENU_SCR, HELP_GAME_SCR, MAIN_HELP_SCR)
+# (P9: and the EXIT highlight, MAIN_EXIT_SCR)
+_P34_SCREENS = "(1<<%d)|(1<<%d)|(1<<%d)|(1<<%d)" % (HELP_MENU_SCR, HELP_GAME_SCR, MAIN_HELP_SCR, MAIN_EXIT_SCR)
 
 
 def menu_screen_pixels(cfg, colours, scr: int, sel: int) -> list:
     """M7 P3.4 -- THE ORACLE'S PICTURE of a menu frame: what `_menu_lines` bakes for `menu_scr` =
     `scr` (and, on the skill screen, `menu_sel` = `sel`) -- the main menu on either item, the skill
     screen, LEVEL COMPLETE or the help. ONE mapping from the state to the screen, for every gate
-    and test that compares a menu frame (each kept its own table until this rung)."""
-    from doomfj.menu import help_pixels, pixels
+    and test that compares a menu frame (each kept its own table until this rung).
+    P9: the main menu on EXIT too; menu.MENU_HALTED (the program halted on EXIT) has NO picture -- it is refused."""
+    from doomfj.menu import MENU_HALTED, help_pixels, pixels
+    if scr == MENU_HALTED:
+        raise ValueError("menu.MENU_HALTED: the program halted on EXIT and presents no frame")
     if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
         return help_pixels(cfg.W, cfg.H, colours)
     lines, hi = {0: (DEFAULT_MENU, DEFAULT_MENU_SELECTED),
                  MAIN_HELP_SCR: (DEFAULT_MENU, DEFAULT_MENU.index(MENU_HELP_ITEM)),
+                 MAIN_EXIT_SCR: (DEFAULT_MENU, DEFAULT_MENU.index(MENU_EXIT_ITEM)),      # P9
                  1: (SKILL_MENU, SKILL_MENU_FIRST + sel),
                  LEVEL_DONE_SCR: (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED)}[scr]
     return pixels(cfg.W, cfg.H, lines, hi, colours)

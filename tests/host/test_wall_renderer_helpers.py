@@ -552,18 +552,19 @@ def test_the_menu_omits_exactly_the_frame_end_byte():
     cfg = Config()
     asset_wad = WadFile.from_path(ASSETS)
     from doomfj.menu import help_stream
-    from doomfj.wall_renderer import (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, MENU_HELP_ITEM,
+    from doomfj.wall_renderer import (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, MENU_EXIT_ITEM, MENU_HELP_ITEM,
                                       SKILL_MENU, SKILL_MENU_FIRST)
     lines = _menu_lines(cfg, asset_wad, DEFAULT_MENU, DEFAULT_MENU_SELECTED, restart=_restart())
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     # M7 P1.5: the main menu and the skill screen once per highlighted skill; M7 P2a.2: LEVEL
-    # COMPLETE; M7 P3.4: the main menu on HELP and the help -- SEVEN screens, each a stream without
-    # its end-of-frame byte
+    # COMPLETE; M7 P3.4: the main menu on HELP and the help; P9: the main menu on EXIT -- EIGHT screens, each a stream
+    # without its end-of-frame byte
     streams = [menu_stream(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU_SELECTED, colours)] + [
         menu_stream(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours) for k in range(3)] + [
         menu_stream(cfg.VIEW_W, cfg.VIEW_H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours),
         menu_stream(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU.index(MENU_HELP_ITEM), colours),
-        help_stream(cfg.VIEW_W, cfg.VIEW_H, colours)]
+        help_stream(cfg.VIEW_W, cfg.VIEW_H, colours),
+        menu_stream(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU.index(MENU_EXIT_ITEM), colours)]
     assert all(full[-1] == 0xFF for full in streams), "doomfj.menu.stream lost its frame-end marker"
     assert "\n".join(lines).count("stl.output_char") == sum(len(full) - 1 for full in streams)
 
@@ -571,18 +572,18 @@ def test_the_menu_omits_exactly_the_frame_end_byte():
 def test_the_menu_branch_wraps_the_stream_in_the_documented_order():
     """`hex.if0 1, mode, do_world` / <the menu> / `;frame_end` / `do_world:` -- the persisted mode
     cell picks the producer, and the menu arm must jump INTO the shared tail, not past it."""
-    lines = _menu_lines(Config(), WadFile.from_path(ASSETS), ["A", "HELP"], 0, restart=_restart())
+    lines = _menu_lines(Config(), WadFile.from_path(ASSETS), ["A", "HELP", "EXIT"], 0, restart=_restart())
     # M7 P1.5: the state machine first, then the producer branch, then the screens (P2a.2: five,
     # LEVEL COMPLETE last; M7 P3.4: seven -- the main menu on HELP and the help after the main
-    # menu, behind their own dispatch) -- each jumping INTO the shared tail -- then the restart
-    # routine, where nothing falls into it
+    # menu, behind their own dispatch; P9: eight -- the main menu on EXIT after the help) -- each jumping INTO the
+    # shared tail -- then the restart routine, where nothing falls into it
     branch = lines.index("hex.if0 1, mode, do_world")
     assert lines.index("mn_done:") < branch
-    labels = ("mf_main:", "mf_mainh:", "mf_help:", "mf_s0:", "mf_s1:", "mf_s2:", "mf_lv:")
+    labels = ("mf_main:", "mf_mainh:", "mf_help:", "mf_mainx:", "mf_s0:", "mf_s1:", "mf_s2:", "mf_lv:")
     screens = [i for i, ln in enumerate(lines) if ln in labels]
-    assert len(screens) == 7 and branch < min(screens)
+    assert len(screens) == 8 and branch < min(screens)
     ends = [i for i, ln in enumerate(lines) if ln == ";frame_end"]
-    assert len(ends) == 7 and all(e + 1 in screens or lines[e + 1] in ("restart_common:", "mf_p34:")
+    assert len(ends) == 8 and all(e + 1 in screens or lines[e + 1] in ("restart_common:", "mf_p34:")
                                   for e in ends)
     assert lines[max(ends) + 1] == "restart_common:"
     assert lines[-2].strip() == "stl.fret rs_ret"

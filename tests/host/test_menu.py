@@ -515,7 +515,7 @@ def test_the_help_rules():
     to where it was opened, the main menu's two items clamped, h ignored on the skill screen and
     LEVEL COMPLETE, and esc / enter winning over h"""
     from doomfj.menu import (HELP_GAME_SCR as HG, HELP_MENU_SCR as HM, LEVEL_DONE_SCR as LD,
-                             MAIN_HELP_SCR as MH, menu_step)
+                             MAIN_EXIT_SCR, MAIN_HELP_SCR as MH, menu_step)
     assert menu_step(0, 0, 2, {"help"}) == (1, HG, 2, None)       # the world: h opens the help
     assert menu_step(1, HG, 2, {"help"}) == (0, 0, 2, None)       # ...h closes it to the world
     assert menu_step(1, HG, 2, {"esc"}) == (0, 0, 2, None)        # ...and so does esc
@@ -526,7 +526,7 @@ def test_the_help_rules():
     assert menu_step(1, MH, 2, {"enter"}) == (1, HM, 2, None)     # HELP: enter opens it
     assert menu_step(1, MH, 2, {"help"}) == (1, HM, 2, None)      # ...and so does h
     assert menu_step(1, MH, 2, {"up"}) == (1, 0, 2, None)         # ...up to NEW GAME
-    assert menu_step(1, MH, 2, {"dn"}) == (1, MH, 2, None)        # ...down is clamped
+    assert menu_step(1, MH, 2, {"dn"}) == (1, MAIN_EXIT_SCR, 2, None)   # ...down to EXIT (P9; was clamped)
     assert menu_step(1, MH, 2, {"esc"}) == (0, 0, 2, None)        # ...esc resumes the world
     assert menu_step(1, HM, 2, {"esc"}) == (1, MH, 2, None)       # the menu's help: back to HELP
     assert menu_step(1, HM, 2, {"help"}) == (1, MH, 2, None)
@@ -538,22 +538,55 @@ def test_the_help_rules():
     assert menu_step(1, 0, 2, {"help", "dn"}) == (1, HM, 2, None)  # ...and h over up / down
 
 
+def test_the_exit_rules():
+    """P9 (the owner's play-test, 2026-10-10): the main menu's third item. Down from HELP highlights EXIT, up goes back
+    to HELP, down on EXIT is clamped (as up on NEW GAME is); on EXIT esc resumes the world, h opens the help (which
+    closes, as from the other items, to HELP highlighted), and ENTER HALTS: MENU_HALTED, which nothing leaves -- and
+    the event order is the menu's (esc > enter > help > up > down)"""
+    from doomfj.menu import (HELP_MENU_SCR as HM, MAIN_EXIT_SCR as MX, MAIN_HELP_SCR as MH, MENU_HALTED, menu_step)
+    assert MX == 6 and MENU_HALTED not in range(16), "EXIT is a nibble value of menu_scr; the halt is none"
+    assert menu_step(1, MH, 2, {"dn"}) == (1, MX, 2, None)        # HELP: down to EXIT
+    assert menu_step(1, MX, 2, {"up"}) == (1, MH, 2, None)        # EXIT: up to HELP
+    assert menu_step(1, MX, 2, {"dn"}) == (1, MX, 2, None)        # ...down is clamped
+    assert menu_step(1, MX, 2, set()) == (1, MX, 2, None)
+    assert menu_step(1, MX, 2, {"esc"}) == (0, 0, 2, None)        # ...esc resumes the world
+    assert menu_step(1, MX, 2, {"help"}) == (1, HM, 2, None)      # ...h opens the help
+    assert menu_step(1, HM, 2, {"esc"}) == (1, MH, 2, None)       # ...which closes to HELP
+    assert menu_step(1, MX, 1, {"enter"}) == (1, MENU_HALTED, 1, None)   # ...enter HALTS
+    for ev in ({"esc"}, {"enter"}, {"help"}, {"up"}, {"dn"}, set()):   # ...and nothing leaves the halt
+        assert menu_step(1, MENU_HALTED, 1, ev) == (1, MENU_HALTED, 1, None), ev
+    assert menu_step(1, MX, 2, {"esc", "enter"}) == (0, 0, 2, None)    # esc wins over enter
+    assert menu_step(1, MX, 2, {"enter", "help", "up"}) == (1, MENU_HALTED, 2, None)
+    assert menu_step(1, MX, 2, {"help", "up"}) == (1, HM, 2, None)
+    # the walk from NEW GAME: down, down, enter -- and down on NEW GAME never skips HELP
+    st = (1, 0, 2, None)
+    for ev in ({"dn"}, {"dn"}, {"enter"}):
+        st = menu_step(*st[:3], ev)
+    assert st == (1, MENU_HALTED, 2, None)
+    assert menu_step(1, 0, 2, {"dn"})[1] == MH and menu_step(1, 0, 2, {"enter"})[1] == 1   # NEW GAME unchanged
+
+
 def test_the_menu_screens_are_one_mapping():
     """`wall_renderer.menu_screen_pixels` -- the oracle's picture for every menu state -- gives each
     state the picture `_menu_lines` bakes for it: the two main-menu highlights, the three skill
-    highlights, LEVEL COMPLETE and the help, the two help ids ONE picture; seven distinct pictures"""
-    from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_SCR, MAIN_HELP_SCR,
-                             help_pixels)
-    from doomfj.wall_renderer import DEFAULT_MENU, MENU_HELP_ITEM, menu_screen_pixels
+    highlights, LEVEL COMPLETE and the help, the two help ids ONE picture; P9: the main menu's three items (NEW GAME,
+    HELP, EXIT) -- eight distinct pictures -- and the halt NONE"""
+    from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_SCR, MAIN_EXIT_SCR, MAIN_HELP_SCR,
+                             MENU_HALTED, help_pixels)
+    from doomfj.wall_renderer import DEFAULT_MENU, MENU_EXIT_ITEM, MENU_HELP_ITEM, menu_screen_pixels
     cfg = CFG
-    assert DEFAULT_MENU == ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP"]
-    states = [(0, 2), (MAIN_HELP_SCR, 2), (1, 0), (1, 1), (1, 2), (LEVEL_DONE_SCR, 2),
+    assert DEFAULT_MENU == ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP", "EXIT"]          # P9: EXIT
+    states = [(0, 2), (MAIN_HELP_SCR, 2), (MAIN_EXIT_SCR, 2), (1, 0), (1, 1), (1, 2), (LEVEL_DONE_SCR, 2),
               (HELP_MENU_SCR, 2), (HELP_GAME_SCR, 2)]
     pics = {s: tuple(menu_screen_pixels(cfg, COLOURS, *s)) for s in states}
     assert pics[(HELP_MENU_SCR, 2)] == pics[(HELP_GAME_SCR, 2)] == tuple(help_pixels(W, H, COLOURS))
-    assert len(set(pics.values())) == 7
+    assert len(set(pics.values())) == 8
     assert pics[(MAIN_HELP_SCR, 2)] == tuple(pixels(W, H, DEFAULT_MENU,
                                                     DEFAULT_MENU.index(MENU_HELP_ITEM), COLOURS))
+    assert pics[(MAIN_EXIT_SCR, 2)] == tuple(pixels(W, H, DEFAULT_MENU,
+                                                    DEFAULT_MENU.index(MENU_EXIT_ITEM), COLOURS))
+    with pytest.raises(ValueError, match="HALTED"):
+        menu_screen_pixels(cfg, COLOURS, MENU_HALTED, 2)
 
 
 def test_the_main_menu_must_have_a_help_item():
@@ -564,3 +597,26 @@ def test_the_main_menu_must_have_a_help_item():
     restart = restart_lines(spawn, 0, [], [], 1, [([0], [], [])] * 3)
     with pytest.raises(AssertionError, match="HELP"):
         _menu_lines(CFG, WadFile.from_path("tests/fixtures/freedoom_assets.wad"), ["A", "QUIT"], 0, restart=restart)
+
+
+def test_the_main_menu_must_have_an_exit_item():
+    """P9: `_menu_lines` finds the EXIT item by name too; a menu with HELP but no EXIT must stop the emitter"""
+    from doomfj.wad import WadFile
+    from doomfj.wall_renderer import _menu_lines, restart_lines
+    spawn = type("Spawn", (), {"x": 0, "y": 0, "angle": 0})()
+    restart = restart_lines(spawn, 0, [], [], 1, [([0], [], [])] * 3)
+    with pytest.raises(AssertionError, match="EXIT"):
+        _menu_lines(CFG, WadFile.from_path("tests/fixtures/freedoom_assets.wad"), ["A", "HELP"], 0, restart=restart)
+
+
+def test_the_exit_halt_keeps_the_self_resets_two_loops():
+    """P9: the halt is `mn_exit: stl.loop` -- a jump-to-self under its own label -- so the main part still has exactly
+    ONE bare `stl.loop` (the frame tail selfreset.emit_reset_part patches) and ONE `bad: stl.loop`: the state machine's
+    lines add neither, and enter on EXIT reaches the halt"""
+    from doomfj.wall_renderer import menu_state_lines, restart_lines
+    spawn = type("Spawn", (), {"x": 0, "y": 0, "angle": 0})()
+    lines = menu_state_lines(restart_lines(spawn, 0, [], [], 1, [([0], [], [])] * 3))
+    assert [ln for ln in lines if "stl.loop" in ln] == ["mn_exit: stl.loop"]
+    assert not any(ln.strip() in ("stl.loop", "bad: stl.loop") for ln in lines)
+    k = lines.index("mn_x1:")
+    assert lines[k + 1:k + 3] == ["hex.if0 1, ev_enter, mn_x2", ";mn_exit"]

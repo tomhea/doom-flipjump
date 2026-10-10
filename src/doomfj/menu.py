@@ -476,6 +476,13 @@ HELP_MENU_SCR = 3
 HELP_GAME_SCR = 4
 MAIN_HELP_SCR = 5
 HELP_SCREENS = (HELP_MENU_SCR, HELP_GAME_SCR)
+# P9 (the owner's play-test, 2026-10-10): the main menu's third item, EXIT, under HELP -- menu_scr MAIN_EXIT_SCR is the
+# main menu with EXIT highlighted, and enter on it HALTS the program (wall_renderer's `mn_exit`, a jump-to-self: the
+# interpreter ends "Looping" and the window closes). MENU_HALTED is NOT a value the program's `menu_scr` ever holds:
+# it is the oracle's word for "the program has stopped" -- no frame is presented on the halting frame or after it, and
+# menu_step leaves it where it is.
+MAIN_EXIT_SCR = 6
+MENU_HALTED = -1
 
 
 def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
@@ -495,11 +502,19 @@ def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
     / down move between NEW GAME and HELP (clamped), and enter on HELP -- or h on either item --
     opens it (HELP_MENU_SCR); on the help screen, esc or h close it, back to where it was opened
     from: the main menu with HELP highlighted, or the world. The skill screen and LEVEL COMPLETE
-    ignore h."""
+    ignore h.
+
+    P9 (the owner's play-test, 2026-10-10): the main menu's third item, EXIT (MAIN_EXIT_SCR, 6). Up / down move
+    through NEW GAME, HELP, EXIT, clamped at both ends as before (down on EXIT and up on NEW GAME do nothing); on
+    EXIT, esc resumes the world, h opens the help (closing, as from either other item, to HELP highlighted), and
+    ENTER HALTS the program: `scr` becomes MENU_HALTED, which no later frame leaves (the program presents nothing
+    more)."""
     # The skills the screen offers are wall_renderer.SKILLS: ONE tuple for the emitter's screens,
     # its dispatch and these rules (R6 -- this module kept its own `MENU_SKILLS = 3` until the P1.5
     # review). Imported here, not at the top, because wall_renderer imports this module.
     from doomfj.wall_renderer import SKILLS
+    if scr == MENU_HALTED:                          # P9: the program has halted -- nothing changes again
+        return mode, scr, sel, None
     if mode == 0:                                   # the world: esc or enter opens the main menu
         if "esc" in events or "enter" in events:
             return 1, 0, sel, None
@@ -517,7 +532,19 @@ def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
             return 1, HELP_MENU_SCR, sel, None
         if "up" in events:
             return 1, 0, sel, None
+        if "dn" in events:                          # P9: down to EXIT
+            return 1, MAIN_EXIT_SCR, sel, None
         return 1, MAIN_HELP_SCR, sel, None
+    if scr == MAIN_EXIT_SCR:                        # P9: the main menu, EXIT highlighted
+        if "esc" in events:
+            return 0, 0, sel, None
+        if "enter" in events:                       # the program halts
+            return 1, MENU_HALTED, sel, None
+        if "help" in events:
+            return 1, HELP_MENU_SCR, sel, None
+        if "up" in events:
+            return 1, MAIN_HELP_SCR, sel, None
+        return 1, MAIN_EXIT_SCR, sel, None          # (down is clamped: EXIT is the last item)
     if scr == LEVEL_DONE_SCR:                       # level complete: on to the main menu
         if "esc" in events or "enter" in events:
             return 1, 0, sel, None

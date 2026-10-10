@@ -76,10 +76,10 @@ def test_the_skills_differ_and_the_check_can_fail(drawable):
     assert _ours(drawable, absent[gd.SK_EASY], tracked) != model
 
 
-def test_every_drawable_thing_is_single_player_and_hard_draws_204(drawable):
+def test_every_drawable_thing_is_single_player_and_hard_draws_209(drawable):
     assert all(single_player(t) for t in drawable)
     # E1M1, MEASURED: 203, and (M7 P2a.1) the blue card, drawn since BKEY has art
-    assert len(drawable) - len(skill_absent(drawable, gd.SK_HARD)) == 204
+    assert len(drawable) - len(skill_absent(drawable, gd.SK_HARD)) == 209    # P9: + the launcher and its 4 rockets
 
 
 def test_skill_level_start_links_and_flags_only_what_the_skill_spawns():

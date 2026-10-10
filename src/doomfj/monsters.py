@@ -56,12 +56,26 @@ def drop_lump(kind: int) -> str:
     return mobile_lump(gd.MOBJINFO[name].spawnstate)
 
 
-def mobile_lump(state_name: str) -> str:
-    """M7 P5: the sprite lump a mobile (fireball, blood, puff) is drawn with in state `state_name` -- its frame's
-    single-rotation `...0` lump (BAL1A0 .. BAL1E0, BLUDA0 .. BLUDC0, PUFFA0 .. PUFFD0)"""
+# P9: a mobile frame with NO single-rotation lump is drawn at ONE fixed rotation -- the player's rocket in flight
+# (MISLA has rotations 1..8 only): rotation 5, the rocket SEEN FROM BEHIND, as the player who fired it mostly sees it
+# (a convention: DOOM picks the rotation by the viewer's angle to the rocket's flight)
+MOBILE_ROTATION = {("MISL", 0): 5}
+
+
+def mobile_view(state_name: str) -> Tuple[str, str, int]:
+    """(sprite, frame letter, rotation) of the lump a mobile is drawn with in state `state_name` -- rotation 0 (the
+    single-rotation lump) but where MOBILE_ROTATION fixes one (P9)"""
     from doomfj import gamedata as gd
     st = gd.STATES[state_name]
-    return "%s%s0" % (st.sprite, chr(ord("A") + st.frame_index))
+    return st.sprite, chr(ord("A") + st.frame_index), MOBILE_ROTATION.get((st.sprite, st.frame_index), 0)
+
+
+def mobile_lump(state_name: str) -> str:
+    """M7 P5: the sprite lump a mobile (fireball, blood, puff) is drawn with in state `state_name` -- its frame's
+    single-rotation `...0` lump (BAL1A0 .. BAL1E0, BLUDA0 .. BLUDC0, PUFFA0 .. PUFFD0); P9: the rocket's MISLA5 (in
+    flight, MOBILE_ROTATION) and MISLB0 .. MISLD0 (its explosion)"""
+    sprite, letter, rot = mobile_view(state_name)
+    return "%s%s%d" % (sprite, letter, rot)
 
 
 def rotation(rm, view_x16: int, view_y16: int, thing_x16: int, thing_y16: int, facing: int) -> int:
@@ -545,7 +559,8 @@ class MonsterPhase:
         from doomfj.hud import arms_owned
         ws, gd = self.world.ws, self.gd
         fst = gd.STATE_NAMES[ws.p_flash_state]
-        ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL]}.get(ws.p_ready)
+        ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL],
+                gd.WP_MISSILE: ws.p_ammo[gd.AM_MISL]}.get(ws.p_ready)             # P9: the launcher's rockets
         return {"weapon": WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
                 "flash": None if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
                 "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,

@@ -31,6 +31,23 @@ THE APPROVED SIMPLIFICATIONS (owner, D5) this file implements:
   * NO WEAPON RAISE/LOWER ANIMATION, but the timing stays: `p_wpn_sy` still steps 6 units a tic,
     so a switch takes DOOM's tics. No bob, so a ready weapon sits at WEAPONTOP.
   * No sound (A_Pain, A_Scream, ...), no extralight (A_Light0/1/2 do nothing), no status face.
+  * P9 (the owner, 2026-10-10): THE ROCKET LAUNCHER -- DOOM's MT_ROCKET in the fireball pool, with these conventions
+    (`_spawn_rocket`, `_rocket_things`, `_rocket_blast`):
+      - no autoaim: the rocket flies along the view angle of the tic start (the weapon acts before the move); 2D, no
+        slope; P_SpawnPlayerMissile's spawn at the player's 16.16 position, momentum 20 * finecos / finesine;
+      - the rocket shares the FIREBALL_POOL; a full pool FIZZLES the rocket (the ammo is spent; DOOM never fizzles);
+      - ROCKET_R: the rocket meets lines AND things at the fireball's radius 6 (DOOM's rocket is 11) -- the missile cell
+        set is built at 6 and one radius keeps one box rule; its height is DOOM's 8 (= the fireball's);
+      - its shooter (the player) is passed; no species rule; a monster or a barrel it meets takes ((P_Random()%8)+1)*20
+        on rng_fx (the source the player, the inflictor the rocket), a solid corpse or an exploding barrel stops it
+        with no damage;
+      - the explosion (S_EXPLODE1's A_Explode, run inside P_ExplodeMissile's P_SetMobjState, before its tics roll) is
+        P_RadiusAttack(the rocket, the player, 128) at the rocket's WHOLE-UNIT spot (its 16.16 position floored), in
+        the barrel blast's order -- the player (self-damage: DOOM does not exempt the shooter), the monsters by slot,
+        then EVERY standing barrel by index -- its line of sight between WHOLE-UNIT points (the player's position
+        floored too: the fj's exact far LOS needs whole-unit ends);
+      - the blame: the rocket's source is the player for its hit and its blast (infighting: a monster hit turns on the
+        player; a barrel hit names the player in bar_src); a blast on the player names no attacker (himself).
 
 MODEL CONVENTIONS, named so an fj mirror can copy them:
   * THE AIM IS A CALLBACK, `aim(world, col) -> None | ("mon", slot) | ("bar", index)`: the
@@ -121,6 +138,21 @@ FX_STEP = ((10, 0), (7, 7), (0, 10), (-7, 7), (-10, 0), (-7, -7), (0, -10), (7, 
 FIREBALL_INFO = gd.MOBJINFO["MT_TROOPSHOT"]
 FIREBALL_R = FIREBALL_INFO.radius >> 16     # 6
 FIREBALL_H = FIREBALL_INFO.height >> 16     # 8
+# P9: the launcher's rocket (the module docstring's conventions)
+ROCKET_INFO = gd.MOBJINFO["MT_ROCKET"]
+ROCKET_R = FIREBALL_R                       # the 2D convention: the fireball's radius (DOOM's rocket is 11)
+assert ROCKET_INFO.height >> 16 == FIREBALL_H, "the rocket's lines are the fireball's missile cells (height 8)"
+
+
+def _state_chain(start: str) -> Tuple[str, ...]:
+    out, st = [], start
+    while st != gd.S_NULL and st not in out:
+        out.append(st)
+        st = gd.STATES[st].next
+    return tuple(out)
+
+
+ROCKET_STATES = frozenset(_state_chain(ROCKET_INFO.spawnstate) + _state_chain(ROCKET_INFO.deathstate))
 BARREL_INFO = gd.MOBJINFO["MT_BARREL"]
 BARREL_R = BARREL_INFO.radius >> 16         # 10
 BARREL_HEALTH_MIN = -128                    # bar_health saturates here (an 8-bit signed cell)
@@ -137,12 +169,12 @@ KEY_DOOR_CARDS = {26: (gd.IT_BLUECARD, gd.IT_BLUESKULL), 32: (gd.IT_BLUECARD, gd
                   27: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
                   34: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
                   28: (gd.IT_REDCARD, gd.IT_REDSKULL), 33: (gd.IT_REDCARD, gd.IT_REDSKULL)}
-WEAPON_KEYS = ("w1", "w2", "w3", "w4")      # DOOM's number keys 1..4 -> WP_FIST..WP_CHAINGUN
+WEAPON_KEYS = ("w1", "w2", "w3", "w4", "w5")   # DOOM's number keys 1..5 -> WP_FIST..WP_MISSILE (P9: 5, the launcher)
 # The restart block (plan 6.7) writes every schema field back to its level-start value EXCEPT
 # these: the skill (the menu's choice, and the block's input -- it picks WHICH level start), the
 # menu mode and the held-key flags are input state, not level state.
 RESTART_KEEP = ("skill", "mode", "kb_f", "kb_b", "kb_l", "kb_r", "kb_u",
-                "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4")      # M7 P4.1
+                "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4", "kb_w5")      # M7 P4.1; P9: 5
 SUBRANDOM_MAX = 255                         # |P_SubRandom()| <= 255
 DROP_ITEM = {"MT_CLIP": 2007, "MT_SHOTGUN": 2001}   # the dropped thing's editor number
 RUN_STATES = ("S_PLAY_RUN1", "S_PLAY_RUN2", "S_PLAY_RUN3", "S_PLAY_RUN4")
@@ -150,7 +182,7 @@ ANG5 = 0x40000000 // 18                     # tables.h: ANG5 = ANG90 / 18 -- P_D
 ANGLE_MASK32 = 0xFFFFFFFF
 # P_TouchSpecialThing's cases for every gettable thing E1M1 holds (sprite name in the comment)
 GETTABLE = frozenset({2018, 2019, 2014, 2015, 5, 2011, 2012, 2023, 2007, 2048, 2010, 2046, 2047,
-                      17, 2008, 2049, 8, 2005, 2001})
+                      17, 2008, 2049, 8, 2005, 2001, 2003})          # P9: 2003, the rocket launcher
 
 
 # ================================================================================================
@@ -213,6 +245,7 @@ class Sites:
         self.sarg_bite = (1, one(lambda v: (v % 10 + 1) * 4))
         # PIT_CheckThing, a missile hitting: damage = ((P_Random()%8)+1)*tmthing->info->damage
         self.fireball_hit = (1, one(lambda v: (v % 8 + 1) * FIREBALL_INFO.damage))
+        self.rocket_hit = (1, one(lambda v: (v % 8 + 1) * ROCKET_INFO.damage))            # P9: the rocket's 20
         # `tics -= P_Random()&3`: P_KillMobj, P_ExplodeMissile, P_CheckMissileSpawn, puff, blood
         self.tics_roll = (1, one(lambda v: v & 3))
         # P_DamageMobj: P_Random () < target->info->painchance -- one table per painchance value
@@ -243,6 +276,7 @@ def site_formulas(col: Callable[[int], int]) -> Dict[str, Tuple[int, Callable]]:
         "troop_claw": (1, lambda v: (v % 8 + 1) * 3),
         "sarg_bite": (1, lambda v: (v % 10 + 1) * 4),
         "fireball_hit": (1, lambda v: (v % 8 + 1) * 3),
+        "rocket_hit": (1, lambda v: (v % 8 + 1) * 20),                     # P9
         "tics_roll": (1, lambda v: v & 3),
         **pains,
     }
@@ -272,10 +306,11 @@ def half_width_table(sine: Sequence[int], half_width: int = HIT_HALF_WIDTH) -> L
     return out
 
 
-def fireball_momentum_table(rm) -> List[Tuple[int, int]]:
+def fireball_momentum_table(rm, info=None) -> List[Tuple[int, int]]:
     """(momx, momy) by fine angle index: FixedMul(speed, finecosine/finesine) at emit time, so a
-    spawn needs no runtime multiply. The same fixed_mul and trig table as the player's move."""
-    speed = FIREBALL_INFO.speed
+    spawn needs no runtime multiply. The same fixed_mul and trig table as the player's move. P9: `info` the missile
+    (the rocket's speed 20; the fireball's by default)"""
+    speed = (info or FIREBALL_INFO).speed
     return [(_signed(fixed_mul(speed, rm._finecos_idx(i), 8, 4), 32),
              _signed(fixed_mul(speed, rm._finesin_idx(i), 8, 4), 32))
             for i in range(rm.cfg.TRIG_N)]
@@ -348,6 +383,7 @@ class CombatMixin:
                       for r in sorted({PLAYER_R, BARREL_R} | set(self.mon_radius))}
         assert self.hwt_r[PLAYER_R] == self.hwt
         self.fireball_mom = fireball_momentum_table(rm)
+        self.rocket_mom = fireball_momentum_table(rm, ROCKET_INFO)          # P9
         self.restart_fields = tuple(f.name for f in self.schema if f.name not in RESTART_KEEP)
         assert set(RESTART_KEEP) <= {f.name for f in self.schema}
         self._level_starts: Dict[int, object] = {}
@@ -638,6 +674,10 @@ class CombatMixin:
             self._a_melee("fist", ev)
         elif action == "A_Saw":
             self._a_melee("chainsaw", ev)
+        elif action == "A_GunFlash":                 # P9: the launcher
+            self._a_gun_flash(keys, ev)
+        elif action == "A_FireMissile":
+            self._a_fire_missile(ev)
         elif action in ("A_Light0", "A_Light1", "A_Light2"):
             pass                                 # extralight: dropped (plan section 2, C)
         else:
@@ -702,8 +742,8 @@ class CombatMixin:
 
     def _check_ammo(self, keys: dict, ev) -> bool:
         """P_CheckAmmo: enough for one shot, or pick the next weapon in DOOM's preference order and
-        start lowering. (The plasma, chaingun, launcher and BFG arms are DOOM's; E1M1's single
-        player can own none of them. The super shotgun's needs a Doom 2 IWAD.)"""
+        start lowering. (The plasma, chaingun and BFG arms are DOOM's; E1M1's single player can own none
+        of them -- P9: the launcher he can. The super shotgun's needs a Doom 2 IWAD.)"""
         ws = self.ws
         ammo = gd.WEAPONINFO[ws.p_ready].ammo
         if ammo == gd.AM_NOAMMO or ws.p_ammo[ammo] >= 1:
@@ -758,6 +798,21 @@ class CombatMixin:
             else:
                 dmg, col = self._roll("rng_player", self.sites.gunshot)
             self._line_attack(weapon, col, dmg, MISSILERANGE_U, ev)
+
+    def _a_gun_flash(self, keys: dict, ev) -> None:
+        """P9 -- A_GunFlash (the launcher's S_MISSILE1): the player thing's attack frame ("full" alone, as the other
+        player-thing states) and the flash psprite"""
+        if self._p_full:
+            self._set_player_mobj("S_PLAY_ATK2")
+        self._set_psprite("flash", gd.WEAPONINFO[self.ws.p_ready].flashstate, keys, ev)
+
+    def _a_fire_missile(self, ev) -> None:
+        """P9 -- A_FireMissile: one round of the ready weapon's ammo, then P_SpawnPlayerMissile (MT_ROCKET) -- in the
+        modes that have the pools ("full", "final": `_p_full`); before them the ammo alone"""
+        ws = self.ws
+        ws.p_ammo[gd.WEAPONINFO[ws.p_ready].ammo] -= 1
+        if self._p_full:
+            self._spawn_rocket(ev)
 
     def _a_melee(self, weapon: str, ev) -> None:
         """A_Punch (berserk x10, reach 64) and A_Saw (reach 65). Neither turns the view to the
@@ -1408,7 +1463,7 @@ class CombatMixin:
         self._list_insert(self._mobile_proj(slot), leaf)
         ev.proj_spawns.append((slot, m))
         if not self._missile_try(slot, ws.proj_x[slot], ws.proj_y[slot], ev):
-            self._explode(slot)
+            self._explode(slot, ev)
 
     def _proj_set_state(self, s: int, name: str) -> None:
         ws = self.ws
@@ -1435,16 +1490,21 @@ class CombatMixin:
 
     def _missile_try(self, s: int, nx: int, ny: int, ev) -> bool:
         """P_TryMove for fireball `s`: things first (the living player's box: damage, stop), then
-        the lines; on success it moves and re-links when its leaf changes."""
+        the lines; on success it moves and re-links when its leaf changes. P9: a ROCKET passes its shooter, the player,
+        and meets the monsters and the barrels (`_rocket_things`), then the same lines."""
         ws = self.ws
-        if self.player_alive():
+        rocket = self._is_rocket(s)
+        if rocket:
+            if self._rocket_things(s, nx, ny, ev):
+                return False
+        elif self.player_alive():
             bd = (FIREBALL_R + PLAYER_R) << 16
             if abs(ws.px - nx) < bd and abs(ws.py - ny) < bd:
                 dmg = self._roll("rng_fx", self.sites.fireball_hit)
                 ev.proj_impacts.append((s, dmg))
                 self.damage_player(dmg, ("mon", ws.proj_src[s]), ("proj", s), ev)   # the MISSILE inflicts
                 return False
-        if self._fight and self._missile_things(s, nx, ny, ev):   # M7 P8a I: monsters and barrels stop it too
+        if not rocket and self._fight and self._missile_things(s, nx, ny, ev):   # M7 P8a I: things too
             return False
         if self.missile_lines_block(nx, ny):
             ev.proj_walls.append(s)
@@ -1504,13 +1564,120 @@ class CombatMixin:
             return True
         return False
 
-    def _explode(self, s: int) -> None:
-        """P_ExplodeMissile: stop, the death state, `tics -= P_Random()&3`."""
+    def _explode(self, s: int, ev) -> None:
+        """P_ExplodeMissile: stop, the death state, `tics -= P_Random()&3`. P9: a rocket's death state S_EXPLODE1 runs
+        A_Explode inside the P_SetMobjState -- the blast (`_rocket_blast`) comes BEFORE the tics roll."""
         ws = self.ws
+        rocket = self._is_rocket(s)
         ws.proj_momx[s] = ws.proj_momy[s] = 0
-        self._proj_set_state(s, FIREBALL_INFO.deathstate)
+        self._proj_set_state(s, (ROCKET_INFO if rocket else FIREBALL_INFO).deathstate)
+        if rocket:
+            self._rocket_blast(s, ev)
         v = self._roll("rng_fx", self.sites.tics_roll)
         ws.proj_tics[s] = max(1, ws.proj_tics[s] - v)
+
+    # -------------------------------------------------------------------------------- P9: the rocket
+    def _is_rocket(self, s: int) -> bool:
+        """pool slot s holds the player's rocket: its state is one of MT_ROCKET's (the pool's other missile is the imp's)"""
+        return gd.STATE_NAMES[self.ws.proj_state[s]] in ROCKET_STATES
+
+    def _spawn_rocket(self, ev) -> None:
+        """P_SpawnPlayerMissile (MT_ROCKET) + P_CheckMissileSpawn, 2D, no autoaim (the docstring's conventions), into
+        the lowest free pool slot -- a full pool fizzles. Its `proj_src` is unused (0): the shooter is the player."""
+        ws = self.ws
+        slot = next((s for s in range(_W().FIREBALL_POOL) if not ws.proj_active[s]), None)
+        if slot is None:
+            ev.rocket_spawns.append(-1)
+            return
+        momx, momy = self.rocket_mom[ws.pangle >> self.rm.angle_shift]
+        ws.proj_active[slot], ws.proj_src[slot] = 1, 0
+        ws.proj_momx[slot], ws.proj_momy[slot] = momx, momy
+        if self._p_knock:                        # the missile's z (the thrust's reversal): the player's z + 4*8
+            ws.proj_z[slot] = self._knock_z(("player", -1)) + 32
+        self._proj_set_state(slot, ROCKET_INFO.spawnstate)
+        v = self._roll("rng_fx", self.sites.tics_roll)
+        ws.proj_tics[slot] = max(1, ws.proj_tics[slot] - v)       # S_ROCKET lasts 1 tic: the clamp always holds
+        ws.proj_x[slot] = _signed(ws.px + (momx >> 1), 32)        # "move a little forward"
+        ws.proj_y[slot] = _signed(ws.py + (momy >> 1), 32)
+        leaf = self._leaf16(ws.proj_x[slot], ws.proj_y[slot])
+        ws.proj_leaf[slot] = leaf
+        self._list_insert(self._mobile_proj(slot), leaf)
+        ev.rocket_spawns.append(slot)
+        if not self._missile_try(slot, ws.proj_x[slot], ws.proj_y[slot], ev):
+            self._explode(slot, ev)
+
+    def _rocket_things(self, s: int, nx: int, ny: int, ev) -> bool:
+        """PIT_CheckThing for the rocket in slot s at (nx, ny): the monsters by slot, then the barrels by index (as
+        `_missile_things`); the FIRST thing whose box overlaps (|dx| < r + ROCKET_R on both axes, 16.16) and that is
+        solid or shootable stops it -- a solid corpse or an exploding barrel with no damage, anything else shootable
+        with ((P_Random()%8)+1)*20 on rng_fx (the source the player, the inflictor the rocket). True: it stopped."""
+        ws = self.ws
+        for j in range(self.layout.nmon):
+            if not ws.mon_active[j]:
+                continue
+            shoot = bool(ws.mon_shootable[j] and ws.mon_health[j] > 0)
+            if not (ws.mon_solid[j] or shoot):
+                continue
+            bd = (ROCKET_R + self.mon_radius[j]) << 16
+            if abs((ws.mon_x[j] << 16) - nx) >= bd or abs((ws.mon_y[j] << 16) - ny) >= bd:
+                continue
+            if not shoot:
+                ev.rocket_hits.append(("corpse", j, 0))
+                return True
+            dmg = self._roll("rng_fx", self.sites.rocket_hit)
+            ev.rocket_hits.append(("mon", j, dmg))
+            self.damage_monster(j, dmg, ("player", -1), ("proj", s), ev)
+            return True
+        for b, t in enumerate(self.barrel_things):
+            if not ws.bar_solid[b]:
+                continue
+            bd = (ROCKET_R + BARREL_R) << 16
+            if abs((t.x << 16) - nx) >= bd or abs((t.y << 16) - ny) >= bd:
+                continue
+            if not (ws.bar_state[b] and ws.bar_health[b] > 0):
+                ev.rocket_hits.append(("corpse", -1 - b, 0))
+                return True
+            dmg = self._roll("rng_fx", self.sites.rocket_hit)
+            ev.rocket_hits.append(("bar", b, dmg))
+            self.damage_barrel(b, dmg, ("player", -1), ev)
+            return True
+        return False
+
+    def _rocket_blast(self, s: int, ev) -> None:
+        """A_Explode of the rocket in slot s: P_RadiusAttack(the rocket, the player, 128) at its WHOLE-UNIT spot -- the
+        player (alive), the monsters by slot (active, shootable, health > 0), then every standing barrel by index;
+        each takes 128 - max(0, (Chebyshev - radius) >> 16) when that is under 128 and the line of sight between
+        WHOLE-UNIT points is clear (the player's position floored). The source is the player, the inflictor the
+        rocket (its knock position is the spot)."""
+        ws = self.ws
+        spot = ((ws.proj_x[s] >> 16) << 16, (ws.proj_y[s] >> 16) << 16)
+        ev.rocket_blasts.append(s)
+        src, inf = ("player", -1), ("proj", s)
+
+        def dist(x16: int, y16: int, r: int) -> int:
+            d = max(abs(x16 - spot[0]), abs(y16 - spot[1]))
+            return max(0, (d - (r << 16)) >> 16)
+
+        if self.player_alive():
+            d = dist(ws.px, ws.py, PLAYER_R)
+            if d < BOMB_DAMAGE and self.los_points(((ws.px >> 16) << 16, (ws.py >> 16) << 16), spot):
+                self.damage_player(BOMB_DAMAGE - d, src, inf, ev)
+        for m in range(self.layout.nmon):
+            if not (ws.mon_active[m] and ws.mon_shootable[m] and ws.mon_health[m] > 0):
+                continue
+            p = (ws.mon_x[m] << 16, ws.mon_y[m] << 16)
+            d = dist(p[0], p[1], self.mon_radius[m])
+            if d < BOMB_DAMAGE and self.los_points(p, spot):
+                ev.hits.append(("rocket", "mon", m, BOMB_DAMAGE - d))
+                self.damage_monster(m, BOMB_DAMAGE - d, src, inf, ev)
+        for c, tc in enumerate(self.barrel_things):
+            if not ws.bar_state[c] or ws.bar_health[c] <= 0:
+                continue
+            p = (tc.x << 16, tc.y << 16)
+            d = dist(p[0], p[1], BARREL_R)
+            if d < BOMB_DAMAGE and self.los_points(p, spot):
+                ev.hits.append(("rocket", "bar", c, BOMB_DAMAGE - d))
+                self.damage_barrel(c, BOMB_DAMAGE - d, src, ev)
 
     def _projectiles_phase(self, ev) -> None:
         """P_MobjThinker per fireball slot: the XY move (a blocked move explodes it), then the
@@ -1523,7 +1690,7 @@ class CombatMixin:
                 nx = _signed(ws.proj_x[s] + ws.proj_momx[s], 32)
                 ny = _signed(ws.proj_y[s] + ws.proj_momy[s], 32)
                 if not self._missile_try(s, nx, ny, ev):
-                    self._explode(s)
+                    self._explode(s, ev)
             ws.proj_tics[s] -= 1
             if ws.proj_tics[s]:
                 continue
@@ -1815,6 +1982,8 @@ class CombatMixin:
             taken = True
         elif kind == 2005:                                            # CSAW
             taken = self._give_weapon(gd.WP_CHAINSAW, False)
+        elif kind == 2003:                                            # LAUN (P9)
+            taken = self._give_weapon(gd.WP_MISSILE, False)
         else:                                                         # SHOT (2001)
             taken = self._give_weapon(gd.WP_SHOTGUN, dropped)
         if taken:

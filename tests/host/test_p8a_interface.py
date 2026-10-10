@@ -259,8 +259,10 @@ def test_every_damage_caller_passes_the_inflictor():
     # the model names a real inflictor at every one of its sites (None only for sector damage)
     src = inspect.getsource(CM)
     # (M7 P8a I: a fireball's impact on the player AND on a thing; the blast's source is bar_src's, its inflictor the
-    # barrel's on the player and on every monster)
-    assert src.count('("proj", s)') == 2 and src.count('("bar", b), ev)') == 2
+    # barrel's on the player and on every monster. P9: the rocket's impact on a monster -- the ROCKET inflicts -- and
+    # its blast's `inf`, the rocket too)
+    assert src.count('("proj", s)') == 4 and src.count('("bar", b), ev)') == 2
+    assert 'self.damage_monster(j, dmg, ("player", -1), ("proj", s), ev)' in src and 'src, inf = ("player", -1), ("proj", s)' in src
     assert 'self.damage_player(dmg, ("sector", sec), None, ev)' in src
 
 

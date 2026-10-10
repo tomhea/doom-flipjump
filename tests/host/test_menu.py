@@ -228,7 +228,8 @@ def test_the_lines_are_5x7_and_both_fonts_draw_an_m_with_two_stems_and_a_dip():
                              text_width)
     assert GLYPH_H == 7 and SMALL_GLYPH_H == 5
     assert all(len(g.split("|")) == GLYPH_H for g in _GLYPHS.values())
-    assert all(len(g.split("|")) == SMALL_GLYPH_H for g in _SMALL_GLYPHS.values())
+    from doomfj.menu import SMALL_DESCENDERS            # P9: the comma's tail is a sixth row
+    assert all(len(g.split("|")) == SMALL_GLYPH_H + (ch in SMALL_DESCENDERS) for ch, g in _SMALL_GLYPHS.items())
     for font, h in ((_GLYPHS, GLYPH_H), (_SMALL_GLYPHS, SMALL_GLYPH_H)):
         rows = font["M"].split("|")
         assert glyph_width("M", font) == 5 and len(rows) == h
@@ -259,18 +260,21 @@ def test_the_help_stream_paints_exactly_the_help_picture():
 # P9 (the owner's play-test, 2026-10-10: "smaller text and more spaces between categories"): every string but the title
 # in the 3x5 font (caps 9 high, were 11), 6 empty rows between the categories (were 2), 5 under the title, and the rows'
 # second items in one column with the clusters' legend (x 86) -- the render reviewed as scratchpad/p9_help_preview.png
+# P9 (the owner, 2026-10-10: the 3x5 ',' read as a '/'): the comma is a dot on the baseline with a tail one row BELOW
+# (a descender): "SWITCHES, LIFTS" draws one row lower, so every key row under it moves down one to keep its 6 empty
+# rows -- the render reviewed as scratchpad/p9_help_preview.png
 HELP_CAPS = [("W", 16, 14, 9), ("A", 6, 24, 9), ("S", 16, 24, 9), ("D", 26, 24, 9),
              ("UP", 60, 14, 9), ("LEFT", 50, 24, 9), ("DOWN", 60, 24, 9), ("RIGHT", 70, 24, 9),
-             ("SPACE", 6, 39, 23), ("E", 31, 39, 7), ("CTRL", 6, 58, 19), ("1", 86, 58, 7), ("2", 95, 58, 7),
-             ("3", 104, 58, 7), ("4", 113, 58, 7), (",", 6, 73, 6), (".", 14, 73, 6), ("ENTER", 86, 73, 24),
-             ("ESC", 6, 88, 15), ("H", 86, 88, 7)]
+             ("SPACE", 6, 39, 23), ("E", 31, 39, 7), ("CTRL", 6, 59, 19), ("1", 86, 59, 7), ("2", 95, 59, 7),
+             ("3", 104, 59, 7), ("4", 113, 59, 7), (",", 6, 74, 6), (".", 14, 74, 6), ("ENTER", 86, 74, 24),
+             ("ESC", 6, 89, 15), ("H", 86, 89, 7)]
 HELP_LEGENDS = [("W", 18, 16), ("A", 9, 26), ("S", 19, 26), ("D", 29, 26), ("↑", 62, 16),
                 ("←", 52, 26), ("↓", 62, 26), ("→", 72, 26), ("SPACE", 8, 41), ("E", 33, 41),
-                ("CTRL", 8, 60), ("1", 88, 60), ("2", 97, 60), ("3", 106, 60), ("4", 115, 60), (",", 8, 75),
-                (".", 16, 75), ("ENTER", 88, 75), ("ESC", 8, 90), ("H", 88, 90)]
+                ("CTRL", 8, 61), ("1", 88, 61), ("2", 97, 61), ("3", 106, 61), ("4", 115, 61), (",", 8, 76),
+                (".", 16, 76), ("ENTER", 88, 76), ("ESC", 8, 91), ("H", 88, 91)]
 HELP_TEXTS = [("OR", 39, 26), ("↑ ↓ MOVE", 86, 14), ("A D STRAFE", 86, 21), ("← → TURN", 86, 28),
-              ("USE: DOORS,", 42, 41), ("SWITCHES, LIFTS", 42, 47), ("FIRE", 29, 60), ("WEAPONS", 124, 60),
-              ("STRAFE", 24, 75), ("SELECT", 114, 75), ("MENU / BACK", 25, 90), ("HELP", 97, 90)]
+              ("USE: DOORS,", 42, 41), ("SWITCHES, LIFTS", 42, 47), ("FIRE", 29, 61), ("WEAPONS", 124, 61),
+              ("STRAFE", 24, 76), ("SELECT", 114, 76), ("MENU / BACK", 25, 91), ("HELP", 97, 91)]
 
 
 def _ink(label, x0, y0, font=None):
@@ -447,9 +451,10 @@ def test_the_small_font_draws_classic_shapes():
     three-column grid drew badly have the classic shapes -- N four columns with its diagonal, W five -- and no two glyphs the help uses are the same picture (an N that read as a lower-case n, a W as an H, would)"""
     from doomfj.menu import (HELP_CLUSTER_LEGEND, HELP_OR, HELP_ROWS, SMALL_GLYPH_H, _SMALL_GLYPHS,
                              help_cap_legend, help_key_names)
+    from doomfj.menu import SMALL_DESCENDERS
     for ch, g in _SMALL_GLYPHS.items():
         rows = g.split("|")
-        assert len(rows) == SMALL_GLYPH_H and len({len(r) for r in rows}) == 1, ch
+        assert len(rows) == SMALL_GLYPH_H + (ch in SMALL_DESCENDERS) and len({len(r) for r in rows}) == 1, ch
     assert _SMALL_GLYPHS["N"] == "#  #|## #|# ##|#  #|#  #"
     assert _SMALL_GLYPHS["W"] == "#   #|#   #|# # #|# # #| # # "
     used = {ch for label in [HELP_OR, *HELP_CLUSTER_LEGEND, *(help_cap_legend(k) for k in help_key_names()),
@@ -458,6 +463,59 @@ def test_the_small_font_draws_classic_shapes():
     for ch in sorted(used):
         shapes.setdefault(_SMALL_GLYPHS[ch], []).append(ch)
     assert all(len(v) == 1 for v in shapes.values()), [v for v in shapes.values() if len(v) > 1]
+
+
+def _bands(grid):
+    """the help picture's inked row bands (left of the credit), top to bottom"""
+    inked = [any(grid[y * W + x] != COLOURS[0] for x in range(W - 40)) for y in range(H)]
+    bands, y = [], 0
+    while y < H:
+        if inked[y]:
+            y0 = y
+            while y < H and inked[y]:
+                y += 1
+            bands.append((y0, y - 1))
+        y += 1
+    return bands
+
+
+def test_the_small_comma_is_a_dot_with_a_tail_below_left():
+    """P9 (the owner's play-test, 2026-10-10: the 3x5 ',' read as a '/', in the ',' cap and in "USE: DOORS, SWITCHES,
+    LIFTS"): the comma is ONE pixel on the baseline -- row 4, the full stop's row, at its right column -- and a tail ONE
+    pixel below-left of it, on a sixth (descender) row; nothing above the baseline. In the ',' cap the tail sits in the
+    cap's bottom padding (inside the outline), and under "SWITCHES, LIFTS" the next category still starts
+    HELP_SECTION_GAP empty rows below the tail"""
+    from doomfj.menu import HELP_CAP_H, HELP_SECTION_GAP, SMALL_GLYPH_H, _SMALL_GLYPHS, help_layout, help_pixels
+    rows = _SMALL_GLYPHS[","].split("|")
+    assert len(rows) == SMALL_GLYPH_H + 1
+    ink = {(x, y) for y, r in enumerate(rows) for x, c in enumerate(r) if c == "#"}
+    assert ink == {(1, SMALL_GLYPH_H - 1), (0, SMALL_GLYPH_H)}, ink           # the dot, then the tail below-left
+    assert {(x, y) for y, r in enumerate(_SMALL_GLYPHS["."].split("|")) for x, c in enumerate(r) if c == "#"}         == {(0, SMALL_GLYPH_H - 1)}                                           # the full stop: on the same baseline
+    caps, texts = help_layout(W, H)
+    (cx, cy, cw), = [(x, y, w) for k, x, y, w in caps if k == ","]
+    (lx, ly), = [(x, y) for s, x, y, _r in texts if s == ","]
+    assert cy < ly + SMALL_GLYPH_H < cy + HELP_CAP_H - 1                      # the tail inside the outline
+    grid = help_pixels(W, H, COLOURS)
+    assert grid[(ly + SMALL_GLYPH_H) * W + lx] == COLOURS[1]                  # drawn
+    gaps = [b[0] - a[1] - 1 for a, b in zip(_bands(grid), _bands(grid)[1:])]
+    assert gaps[1:] == [HELP_SECTION_GAP] * 4, gaps
+
+
+def test_the_comma_checks_reject_the_slash_comma_and_a_layout_blind_to_the_tail(monkeypatch):
+    """R9 for the test above: the pre-fix glyph (two pixels rising to the right INSIDE the five rows -- the '/' the owner
+    saw) fails the shape check, and a layout that measures text by the font's five rows (blind to the tail) leaves only
+    5 empty rows under "SWITCHES, LIFTS" -- the gap check catches it"""
+    import doomfj.menu as menu
+    monkeypatch.setitem(menu._SMALL_GLYPHS, ",", "  |  |  | #|# ")
+    import pytest as _pt
+    with _pt.raises(AssertionError):
+        test_the_small_comma_is_a_dot_with_a_tail_below_left()
+    monkeypatch.undo()
+    monkeypatch.setattr(menu, "text_height", lambda label, font=None: menu.HELP_TEXT_H if font is menu.HELP_FONT
+                        else menu.GLYPH_H)
+    grid = menu.help_pixels(W, H, COLOURS)
+    gaps = [b[0] - a[1] - 1 for a, b in zip(_bands(grid), _bands(grid)[1:])]
+    assert gaps[2] == menu.HELP_SECTION_GAP - 1, gaps
 
 
 def test_the_help_screen_is_not_the_menu_and_is_not_blank():

@@ -82,7 +82,7 @@ _SMALL_GLYPHS = {
     "3": "###|  #| ##|  #|###", "4": "# #|# #|###|  #|  #", "5": "###|#  |###|  #|###",
     "6": "###|#  |###|# #|###", "7": "###|  #|  #|  #|  #", "8": "###|# #|###|# #|###",
     "9": "###|# #|###|  #|###",
-    " ": "   |   |   |   |   ", ".": "  |  |  |  |# ", ",": "  |  |  | #|# ", ":": " |#| |#| ",
+    " ": "   |   |   |   |   ", ".": "  |  |  |  |# ", ",": "  |  |  |  | #|# ", ":": " |#| |#| ",
     "/": "  #|  #| # |#  |#  ", "-": "   |   |###|   |   ",
     "↑": "  #  | ### |# # #|  #  |  #  ",                                 # up
     "↓": "  #  |  #  |# # #| ### |  #  ",                                 # down
@@ -90,6 +90,11 @@ _SMALL_GLYPHS = {
     "→": "  #  |   # |#####|   # |  #  ",                                 # right
 }
 SMALL_GLYPH_H = 5
+# P9 (the owner's play-test, 2026-10-10: the 3x5 ',' read as a '/'): the comma is a DOT on the baseline (row 4, the full
+# stop's row) with a TAIL one pixel below-left -- a sixth, DESCENDER row under the five, the one glyph that has it.
+# Every 3x5 glyph is SMALL_GLYPH_H rows but those in SMALL_DESCENDERS, which have one more (`glyph_height`): the help
+# layout measures a line by what it draws, so the descender stays inside a cap's padding and inside the category gaps.
+SMALL_DESCENDERS = frozenset({","})
 
 # M7 P1.5 (the owner, 2026-09-27): the creator's credit, drawn on every menu screen in the corner,
 # in a dim gray (palette_colours' fourth colour). The fonts have capitals only; a domain name is
@@ -102,6 +107,17 @@ CREDIT_LUMA = 0.4                        # the credit's gray: this fraction of t
 def glyph_width(ch: str, font=None) -> int:
     font = _GLYPHS if font is None else font
     return len(font.get(ch, font[" "]).split("|")[0])
+
+
+def glyph_height(ch: str, font=None) -> int:
+    """the rows `ch` draws in `font` (the lines' by default): the font's height, one more for a descender (P9)"""
+    font = _GLYPHS if font is None else font
+    return len(font.get(ch, font[" "]).split("|"))
+
+
+def text_height(label: str, font=None) -> int:
+    """the rows a one-line `label` draws from its top: its tallest glyph's (a descender reaches one below the rest)"""
+    return max([glyph_height(ch, font) for ch in label] or [0])
 
 
 def text_width(label: str, font=None) -> int:
@@ -336,11 +352,14 @@ def help_layout(width, height) -> tuple:
             x += HELP_DESC_GAP - HELP_KEY_GAP
             for i, line in enumerate(lines):
                 texts.append((line, x, y + HELP_CAP_INSET + i * HELP_LINE_PITCH, "text"))
-            drawn = max(drawn, HELP_CAP_INSET + (len(lines) - 1) * HELP_LINE_PITCH + HELP_TEXT_H)
+            # what the item DRAWS below the row's top: every description line's rows -- a descender too (P9: the
+            # comma's tail), so the next category keeps its HELP_SECTION_GAP empty rows
+            drawn = max([drawn] + [HELP_CAP_INSET + i * HELP_LINE_PITCH + text_height(line, HELP_FONT)
+                                   for i, line in enumerate(lines)])
             x += max(help_text_width(line) for line in lines) + HELP_ITEM_GAP
         y += drawn + HELP_SECTION_GAP
     boxes = [(x, y, w, HELP_CAP_H) for _k, x, y, w in caps] + \
-            [(x, y, help_text_width(label, r), GLYPH_H if r == "title" else HELP_TEXT_H) for label, x, y, r in texts]
+            [(x, y, help_text_width(label, r), text_height(label, help_font(r))) for label, x, y, r in texts]
     outside = [(x, y, w, h) for x, y, w, h in boxes
                if x < 0 or y < 0 or x + w > width or y + h > height]
     assert not outside, "the help layout is outside the screen: %r" % outside

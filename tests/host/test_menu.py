@@ -262,19 +262,21 @@ def test_the_help_stream_paints_exactly_the_help_picture():
 # second items in one column with the clusters' legend (x 86) -- the render reviewed as scratchpad/p9_help_preview.png
 # P9 (the owner, 2026-10-10: the 3x5 ',' read as a '/'): the comma is a dot on the baseline with a tail one row BELOW
 # (a descender): "SWITCHES, LIFTS" draws one row lower, so every key row under it moves down one to keep its 6 empty
-# rows -- the render reviewed as scratchpad/p9_help_preview.png
+# rows. P9 (the owner: key 5, the launcher -- "1 2 3 4 5 WEAPONS"): five weapon caps do not fit the second column, so
+# the weapons are their row's FIRST item and FIRE its second; the second column (and the clusters' legend) stands
+# HELP_ITEM_GAP (8) past them, at x 91 -- the render reviewed as scratchpad/p9_help_preview.png
 HELP_CAPS = [("W", 16, 14, 9), ("A", 6, 24, 9), ("S", 16, 24, 9), ("D", 26, 24, 9),
              ("UP", 60, 14, 9), ("LEFT", 50, 24, 9), ("DOWN", 60, 24, 9), ("RIGHT", 70, 24, 9),
-             ("SPACE", 6, 39, 23), ("E", 31, 39, 7), ("CTRL", 6, 59, 19), ("1", 86, 59, 7), ("2", 95, 59, 7),
-             ("3", 104, 59, 7), ("4", 113, 59, 7), (",", 6, 74, 6), (".", 14, 74, 6), ("ENTER", 86, 74, 24),
-             ("ESC", 6, 89, 15), ("H", 86, 89, 7)]
+             ("SPACE", 6, 39, 23), ("E", 31, 39, 7), ("1", 6, 59, 7), ("2", 15, 59, 7), ("3", 24, 59, 7),
+             ("4", 33, 59, 7), ("5", 42, 59, 7), ("CTRL", 91, 59, 19), (",", 6, 74, 6), (".", 14, 74, 6),
+             ("ENTER", 91, 74, 24), ("ESC", 6, 89, 15), ("H", 91, 89, 7)]
 HELP_LEGENDS = [("W", 18, 16), ("A", 9, 26), ("S", 19, 26), ("D", 29, 26), ("↑", 62, 16),
                 ("←", 52, 26), ("↓", 62, 26), ("→", 72, 26), ("SPACE", 8, 41), ("E", 33, 41),
-                ("CTRL", 8, 61), ("1", 88, 61), ("2", 97, 61), ("3", 106, 61), ("4", 115, 61), (",", 8, 76),
-                (".", 16, 76), ("ENTER", 88, 76), ("ESC", 8, 91), ("H", 88, 91)]
-HELP_TEXTS = [("OR", 39, 26), ("↑ ↓ MOVE", 86, 14), ("A D STRAFE", 86, 21), ("← → TURN", 86, 28),
-              ("USE: DOORS,", 42, 41), ("SWITCHES, LIFTS", 42, 47), ("FIRE", 29, 61), ("WEAPONS", 124, 61),
-              ("STRAFE", 24, 76), ("SELECT", 114, 76), ("MENU / BACK", 25, 91), ("HELP", 97, 91)]
+                ("1", 8, 61), ("2", 17, 61), ("3", 26, 61), ("4", 35, 61), ("5", 44, 61), ("CTRL", 93, 61),
+                (",", 8, 76), (".", 16, 76), ("ENTER", 93, 76), ("ESC", 8, 91), ("H", 93, 91)]
+HELP_TEXTS = [("OR", 39, 26), ("↑ ↓ MOVE", 91, 14), ("A D STRAFE", 91, 21), ("← → TURN", 91, 28),
+              ("USE: DOORS,", 42, 41), ("SWITCHES, LIFTS", 42, 47), ("WEAPONS", 53, 61), ("FIRE", 114, 61),
+              ("STRAFE", 24, 76), ("SELECT", 119, 76), ("MENU / BACK", 25, 91), ("HELP", 102, 91)]
 
 
 def _ink(label, x0, y0, font=None):
@@ -356,7 +358,7 @@ def test_the_help_categories_are_six_rows_apart():
     assert gaps[1:] == [HELP_SECTION_GAP] * 4, gaps
     assert gaps[0] == 5, gaps                                        # under the title
     assert {x for s, x, _y in HELP_TEXTS if s in ("↑ ↓ MOVE", "A D STRAFE", "← → TURN")} \
-        == {x for k, x, _y, _w in HELP_CAPS if k in ("1", "ENTER", "H")} == {86}
+        == {x for k, x, _y, _w in HELP_CAPS if k in ("CTRL", "ENTER", "H")} == {91}
 
 
 def test_the_help_screen_draws_every_cap_and_glyph_where_the_design_says():
@@ -404,7 +406,7 @@ def test_the_help_says_what_the_owner_chose():
     assert HELP_CLUSTER_LEGEND == ("↑ ↓ MOVE", "A D STRAFE", "← → TURN")    # M7 P4.1
     assert HELP_USE_LINES == ("USE: DOORS,", "SWITCHES, LIFTS")
     assert HELP_ROWS == (((("SPACE", "E"), HELP_USE_LINES),),
-                         ((("CTRL",), ("FIRE",)), (("1", "2", "3", "4"), ("WEAPONS",))),
+                         ((("1", "2", "3", "4", "5"), ("WEAPONS",)), (("CTRL",), ("FIRE",))),
                          (((",", "."), ("STRAFE",)), (("ENTER",), ("SELECT",))),
                          ((("ESC",), ("MENU / BACK",)), (("H",), ("HELP",))))
     assert HELP_FONT is _SMALL_GLYPHS
@@ -421,7 +423,7 @@ def test_the_help_shows_a_cap_for_every_key_it_names():
     from doomfj.menu import HELP_KEYCODES, help_key_names, help_layout
     names = help_key_names()
     assert names == ["W", "A", "S", "D", "UP", "LEFT", "DOWN", "RIGHT",
-                     "SPACE", "E", "CTRL", "1", "2", "3", "4", ",", ".", "ENTER", "ESC", "H"]
+                     "SPACE", "E", "1", "2", "3", "4", "5", "CTRL", ",", ".", "ENTER", "ESC", "H"]
     assert [k for k, *_r in help_layout(W, H)[0]] == names
     assert sorted(names) == sorted(HELP_KEYCODES)
 

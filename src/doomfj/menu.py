@@ -68,6 +68,8 @@ CELL_W = GLYPH_W + GLYPH_GAP            # the usual advance; the truncation budg
 # arrows (the 5x7 arrows' own shapes, cut to five rows) -- and the two letters a 3-column grid drew badly were redrawn
 # in the classic shapes: N four columns with its diagonal ("## |# #|# #|# #|#  " read as a lower-case n), W five, the
 # mirror of M ("# #|# #|###|###|# #" read as an H). The credit's own glyphs (T O M H E . A P) are untouched.
+# P9: the help shows key 5 (the launcher) and the bar's ARMS digits are this font -- "5" was the same picture as "S", so
+# it is the classic angular five ("###|#  |## |  #|## ")
 _SMALL_GLYPHS = {
     "A": "###|# #|###|# #|# #", "B": "## |# #|## |# #|## ", "C": "###|#  |#  |#  |###",
     "D": "## |# #|# #|# #|## ", "E": "###|#  |## |#  |###", "F": "###|#  |## |#  |#  ",
@@ -79,7 +81,7 @@ _SMALL_GLYPHS = {
     "V": "# #|# #|# #|# #| # ", "W": "#   #|#   #|# # #|# # #| # # ", "X": "# #|# #| # |# #|# #",
     "Y": "# #|# #| # | # | # ", "Z": "###|  #| # |#  |###",
     "0": "###|# #|# #|# #|###", "1": " # |## | # | # |###", "2": "###|  #|###|#  |###",
-    "3": "###|  #| ##|  #|###", "4": "# #|# #|###|  #|  #", "5": "###|#  |###|  #|###",
+    "3": "###|  #| ##|  #|###", "4": "# #|# #|###|  #|  #", "5": "###|#  |## |  #|## ",
     "6": "###|#  |###|# #|###", "7": "###|  #|  #|  #|  #", "8": "###|# #|###|# #|###",
     "9": "###|# #|###|  #|###",
     " ": "   |   |   |   |   ", ".": "  |  |  |  |# ", ",": "  |  |  |  | #|# ", ":": " |#| |#| ",
@@ -224,9 +226,12 @@ HELP_CLUSTER_LEGEND = ("↑ ↓ MOVE", "A D STRAFE", "← → TURN")
 HELP_USE_LINES = ("USE: DOORS,", "SWITCHES, LIFTS")
 # below the clusters, rows of ITEMS -- (its keys, drawn as caps; its description's lines) -- laid left to right. M7
 # P4.1: fire, the weapons and the second strafe pair joined the table, so a row holds up to two items to fit 100 rows.
+# P9 (the owner, 2026-10-10: the rocket launcher on key 5 -- "1 2 3 4 5 WEAPONS"): five weapon caps no longer fit the
+# second column (86 + 77 > 160), so the weapons are the row's FIRST item and FIRE its second -- the second column moves
+# right to clear them (col2, `help_layout`)
 HELP_ROWS = (
     ((("SPACE", "E"), HELP_USE_LINES),),
-    ((("CTRL",), ("FIRE",)), (("1", "2", "3", "4"), ("WEAPONS",))),
+    ((("1", "2", "3", "4", "5"), ("WEAPONS",)), (("CTRL",), ("FIRE",))),
     (((",", "."), ("STRAFE",)), (("ENTER",), ("SELECT",))),
     ((("ESC",), ("MENU / BACK",)), (("H",), ("HELP",))),     # in the help, Esc closes it (owner 2026-10-02)
 )
@@ -238,7 +243,8 @@ HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEF
                  "D": 0x64, "RIGHT": 0x83, "SPACE": 0x20, "E": 0x65, "ENTER": 0x0D, "ESC": 0x1B,
                  "H": 0x68,
                  # M7 P4.1: fire (ctrl -- pygame_window's 0x85), the number keys, the second strafe pair
-                 "CTRL": 0x85, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, ",": 0x2C, ".": 0x2E}
+                 "CTRL": 0x85, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, ",": 0x2C, ".": 0x2E,
+                 "5": 0x35}                                  # P9: the rocket launcher
 # THE GEOMETRY, px. A cap is a 1-px box in the credit's dim gray with 1 px of padding round its
 # legend, the legend centred; every cap of a cluster is as wide as its widest legend's cap (all 9: W and the arrows
 # are five columns), and each cap of a key row fits its own legend.
@@ -266,7 +272,8 @@ HELP_LEGEND_PITCH = HELP_TEXT_H + 2      # one legend line to the next: three li
 HELP_SECTION_GAP = 6                     # P9: empty rows between two categories (the clusters, each key row)
 HELP_KEY_GAP = 2                         # between an item's caps
 HELP_DESC_GAP = 4                        # an item's caps to its description
-HELP_ITEM_GAP = 12                       # the least gutter between a row's first item and the second column
+HELP_ITEM_GAP = 8                        # the least gutter between a row's first item and the second column (P9: 12 -> 8,
+#                                          so the second column clears the five weapon caps and "HELP" the credit)
 HELP_LINE_PITCH = HELP_TEXT_H + 1        # one description line to the next
 
 

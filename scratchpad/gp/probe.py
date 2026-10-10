@@ -531,6 +531,8 @@ class RunResult:
     ops: int                    # EXACT: core.run's own count, startup included
     readings: list              # the probe's frame-start readings (+/- OPS_GRANULARITY each)
     seconds: float
+    cause: int = -1             # P9: core.run's termination cause (_fjcore.TERM_*): LOOPING = the program HALTED
+                                # (EXIT on the main menu), EOF = the scripted frames ran out
 
 
 def _lean_fjm(path):
@@ -633,7 +635,7 @@ class GameBinary:
         _c, ops, _e, _l, _p = self.core.run(io.read_bit, io.write_bit, IOReadOnEOF,
                                             last_ops_length=0)
         return RunResult(list(screen.frames), list(screen.palettes), int(ops),
-                         list(probe.readings) if probe is not None else [], time.time() - t)
+                         list(probe.readings) if probe is not None else [], time.time() - t, int(_c))
 
 
 # ================================================================================================

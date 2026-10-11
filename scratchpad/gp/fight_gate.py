@@ -413,7 +413,7 @@ def control(name: str | None):
         orig_rb = CM._rocket_blast
 
         def rb(self, s, ev):
-            self.damage_barrel = lambda *a: None
+            self.damage_barrel = lambda b, dmg, source, ev: None   # damage_barrel's own arity (test_p8a_interface)
             try:
                 orig_rb(self, s, ev)
             finally:

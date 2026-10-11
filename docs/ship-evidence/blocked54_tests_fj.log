@@ -1,0 +1,7 @@
+$ python scripts/test_parallel.py --jobs 3 --logdir docs/ship-evidence/blocked54_tests_fj_shards -- tests/fj -rf
+3 shards running; logs in docs\ship-evidence\blocked54_tests_fj_shards
+[shard 0/3: 350 tests in 27 files, ~213 min estimated -- tests/fj/test_actor_record_fj.py .. tests/fj/test_knock_fj.py] rc=0 -- 350 passed, 594 deselected in 12413.50s (3:26:53)
+[shard 1/3: 157 tests in 27 files, ~212 min estimated -- tests/fj/test_knock_fj.py .. tests/fj/test_noise_fj.py] rc=0 -- 157 passed, 787 deselected in 14877.83s (4:07:57)
+[shard 2/3: 437 tests in 28 files, ~210 min estimated -- tests/fj/test_noise_fj.py .. tests/fj/test_weapon_loot_fj.py] rc=0 -- 437 passed, 507 deselected in 11152.02s (3:05:52)
+all 3 shards done in 14881 s: PASS
+rc=0

@@ -1,0 +1,18 @@
+$ python scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v7.json --fjm build/doom_e1m1_blocked54.fjm --labels scratchpad/12m/atlas/blocked54.labels.tsv.gz --pixel-every 1 --proxy --json docs/ship-evidence/blocked54_b0_v7.json
+Traceback (most recent call last):
+  File "C:\Users\tomhe\Documents\doom-flipjump\.claude\worktrees\agent-a3e5cc733f6521e49\scratchpad\gp\b0_scenarios.py", line 897, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\.claude\worktrees\agent-a3e5cc733f6521e49\scratchpad\gp\b0_scenarios.py", line 892, in main
+    return b0(Path(a.file), Path(a.fjm), Path(a.labels), a.pixel_every,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\.claude\worktrees\agent-a3e5cc733f6521e49\scratchpad\gp\b0_scenarios.py", line 442, in b0
+    runs = [(run["name"], model_frames(run), model_frames(run, proxy=True) if proxy else None)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\.claude\worktrees\agent-a3e5cc733f6521e49\scratchpad\gp\b0_scenarios.py", line 442, in <listcomp>
+    runs = [(run["name"], model_frames(run), model_frames(run, proxy=True) if proxy else None)
+                          ^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\.claude\worktrees\agent-a3e5cc733f6521e49\scratchpad\gp\b0_scenarios.py", line 127, in model_frames
+    raise AssertionError("%s frame %d: the model no longer reproduces the set's pose (%s vs "
+AssertionError: R0-south-hall frame 92: the model no longer reproduces the set's pose ((69181656, -41760297, 2549581007) vs [69164730, -41832056, 2549581007]) -- the model or the file changed
+rc=1

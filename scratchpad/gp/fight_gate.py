@@ -54,6 +54,17 @@ pixel (`claim_ctl`); STRESS S3 (a brawl), S4 (a push storm). Each names its `rul
 rule it is N/A; while its package is not in the tree it AWAITS it and the gate ends INCOMPLETE (exit 2), never PASS.
 Their controls (p8a_lib.CONTROLS) break the model from outside the packages' code; a PICTURE control (D3 a / b, A's
 split) is judged on the same trace's pictures. `--frame-ops` prints each binary scenario's per-frame ops (S2-S4).
+
+P9 (the rocket launcher: combat's P9 conventions, 08e0779 / 42bdadd) -- `rocket_scenario_list`, run with `--only R`:
+  R1  a rocket into an AWAKE crowd by barrels: key 5 brings the launcher up (owned, 10 rockets, poked at frame 0), a
+      LATE setup takes the player to the firing pose and wakes the crowd, ONE rocket flies several frames, meets a
+      monster (((v%8)+1)*20 on rng_fx), and its blast (P_RadiusAttack at the whole-unit spot) damages two or more
+      things, sets off a barrel (the chain) and knocks things back
+  R2  point blank, no barrel near: the rocket's blast hurts its shooter (self-damage, the thrust)
+  R3  stress: a volley -- the trigger held, three rockets or more into R1's crowd (recorded)
+Their counters (`rocket_counters`) are each held nonzero by the claims; their controls break one rocket rule each:
+`rocket_dmg` (the impact rolls the fireball's 3s), `rocket_no_barrels` (the blast spares the barrels: no chain),
+`rocket_spare_shooter` (the blast spares the player).
 """
 from __future__ import annotations
 
@@ -131,6 +142,42 @@ def counters(tr: list) -> dict:
     c.update(P8.counters(tr))
     c["mon_attacks"] = sum(len(ev.attacks) for fr in tr for ev in fr["ev"] if ev is not None)
     c["mkills"] = sum(1 for fr in tr for ev in fr["ev"] if ev is not None for kk in ev.kills if kk[0] == "mon")
+    c.update(rocket_counters(tr))                    # P9
+    return c
+
+
+S_ROCKET = gd.STATE_INDEX["S_ROCKET"]
+
+
+def rocket_counters(tr: list) -> dict:
+    """P9: rockets_fired (a pool slot taken) / rocket_fizzles (a full pool); rocket_flight_frames: frames ending with
+    a rocket in flight (a pool slot in S_ROCKET); rocket_mon_hits / rocket_bar_hits / rocket_stops: what stopped one
+    (a shootable monster, a standing barrel, a corpse); rocket_blasts: A_Explode runs; blast_mon / blast_bar: the
+    things a rocket's blast damaged (`ev.hits` tagged "rocket"); blast_things_max: the most things one blast damaged;
+    rocket_self: the shooter hurt by the blast -- damage with the player as its source on a tic whose rocket blew
+    (a barrel set off by the player blames him too: a scenario that claims it must have no barrel blast)"""
+    c = {k: 0 for k in ("rockets_fired", "rocket_fizzles", "rocket_flight_frames", "rocket_mon_hits", "rocket_bar_hits",
+                        "rocket_stops", "rocket_blasts", "blast_mon", "blast_bar", "blast_things_max", "rocket_self")}
+    for fr in tr:
+        for ev in fr["ev"]:
+            if ev is None:
+                continue
+            sp = getattr(ev, "rocket_spawns", ())
+            c["rockets_fired"] += sum(1 for s in sp if s >= 0)
+            c["rocket_fizzles"] += sum(1 for s in sp if s < 0)
+            for h in getattr(ev, "rocket_hits", ()):
+                c[{"mon": "rocket_mon_hits", "bar": "rocket_bar_hits"}.get(h[0], "rocket_stops")] += 1
+            nb = len(getattr(ev, "rocket_blasts", ()))
+            c["rocket_blasts"] += nb
+            rh = [h for h in ev.hits if h[0] == "rocket"]
+            c["blast_mon"] += sum(1 for h in rh if h[1] == "mon")
+            c["blast_bar"] += sum(1 for h in rh if h[1] == "bar")
+            if nb == 1:
+                c["blast_things_max"] = max(c["blast_things_max"], len(rh))
+            if nb:
+                c["rocket_self"] += sum(1 for h in ev.player_hurt if h[0] == ("player", -1))
+        st = fr["mstate"]
+        c["rocket_flight_frames"] += any(a and s == S_ROCKET for a, s in zip(st.get("pj_act", ()), st.get("pj_st", ())))
     return c
 
 
@@ -351,6 +398,37 @@ def control(name: str | None):
                 self.ws.p_bonuscount = min(bc + gd.BONUSADD, 255)
             return out
         patch(CM, "_touch", touch)
+    elif name == "rocket_dmg":                   # P9: the rocket's impact rolls the fireball's ((v%8)+1)*3
+        orig_rt = CM._rocket_things
+
+        def rt(self, s, nx, ny, ev):
+            keep = self.sites.rocket_hit
+            self.sites.rocket_hit = self.sites.fireball_hit
+            try:
+                return orig_rt(self, s, nx, ny, ev)
+            finally:
+                self.sites.rocket_hit = keep
+        patch(CM, "_rocket_things", rt)
+    elif name == "rocket_no_barrels":            # P9: the rocket's blast spares the barrels (no chain)
+        orig_rb = CM._rocket_blast
+
+        def rb(self, s, ev):
+            self.damage_barrel = lambda *a: None
+            try:
+                orig_rb(self, s, ev)
+            finally:
+                del self.damage_barrel
+        patch(CM, "_rocket_blast", rb)
+    elif name == "rocket_spare_shooter":         # P9: the rocket's blast spares its shooter
+        orig_rb2 = CM._rocket_blast
+
+        def rb2(self, s, ev):
+            self.player_alive = lambda: False
+            try:
+                orig_rb2(self, s, ev)
+            finally:
+                del self.player_alive
+        patch(CM, "_rocket_blast", rb2)
     else:
         saved_h = H.control(name)                # hurt_gate's (armor, hwt, palette, ...)
         saved_h.__enter__()
@@ -703,6 +781,84 @@ def scenario_list(dsim, w, card) -> list:
                 "cands": f7,
                 "claim": lambda c, tr: c["barrel_blasts"] >= 3})
     out += p8a_scenario_list(dsim, w, card)          # M7 P8a: section 5.2's rows (each behind its rule and package)
+    out += rocket_scenario_list(dsim, w)             # P9: the rocket launcher
+    return out
+
+
+# ================================================================================================
+# P9: the rocket launcher (combat's P9 conventions)
+# ================================================================================================
+RAISE = 26                                           # frames from key 5 to the launcher ready (WEAPON_TICS 2 a frame)
+
+
+def launcher(rockets: int = 10):
+    """the launcher owned with `rockets` (the fist up: key 5 brings it up)"""
+    def fn(mph):
+        ws = mph.world.ws
+        ws.p_owned[gd.WP_MISSILE] = 1
+        ws.p_ammo[gd.AM_MISL] = rockets
+    return fn
+
+
+def wake_at(pose, group):
+    """a LATE setup: the player to `pose`, the monsters of `group` awake and chasing him (their see state, target the
+    player)"""
+    def fn(mph, ev):
+        for m in group:
+            chase(m, mph.world.mon_info[m].seestate, 1)(mph)
+        return pose
+    return fn
+
+
+def rocket_scenario_list(dsim, w) -> list:
+    """P9: R1 (the crowd by barrels), R2 (point blank: the shooter hurt), R3 (stress: a volley). Each waits RAISE
+    frames at the player start for key 5's launcher, then a LATE setup teleports him and wakes the monsters; the
+    rocket(s) fly from there"""
+    out = []
+    spawn = (dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle)
+    live = [m for k in ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP") for m in first_live(w, k)]
+    ws = w.ws
+    setup = both(launcher(10), armor(200, 2))
+
+    def near(m, r):
+        return [j for j in live if j != m and max(abs(ws.mon_x[j] - ws.mon_x[m]), abs(ws.mon_y[j] - ws.mon_y[m])) < r]
+
+    def barrels_near(x, y, r):
+        return [b for b, t in enumerate(w.barrel_things) if max(abs(t.x - x), abs(t.y - y)) < r]
+    # ---- R1: the crowd by barrels -- a target monster with another monster and a barrel inside its blast
+    r1 = []
+    for m in live:
+        crowd, bars = near(m, 112), barrels_near(ws.mon_x[m], ws.mon_y[m], 112)
+        if not crowd or not bars:
+            continue
+        for p in poses_facing(dsim, w, ws.mon_x[m], ws.mon_y[m], (224, 256, 192, 288, 160)):
+            r1.append((spawn, setup, {RAISE: wake_at(p, [m] + crowd)}))
+    keys1 = [{"w5": True}] + [I] * (RAISE - 1) + [FIRE] * 2 + [I] * 30
+    out.append({"name": "R1 a rocket into an awake crowd by barrels: flight, impact, the blast's many, a chain, knocks",
+                "keys": keys1, "limit": 40, "need": ("rockets_fired", "rocket_mon_hits", "rocket_blasts", "blast_mon",
+                                                     "blast_bar", "barrel_blasts", "mon_knock_frames"),
+                "controls": ["rocket_dmg", "rocket_no_barrels"], "cands": r1,
+                "claim": lambda c, tr: c["rockets_fired"] == 1 and c["rocket_flight_frames"] >= 3
+                and c["rocket_mon_hits"] >= 1 and c["rocket_blasts"] >= 1 and c["blast_things_max"] >= 2
+                and c["blast_bar"] >= 1 and c["barrel_blasts"] >= 1 and c["mon_knock_frames"] >= 1})
+    # ---- R2: point blank, no barrel within reach of the blast or the chain: the shooter hurt
+    r2 = []
+    for m in live:
+        if barrels_near(ws.mon_x[m], ws.mon_y[m], 400):
+            continue
+        for p in poses_facing(dsim, w, ws.mon_x[m], ws.mon_y[m], (64, 72, 56, 80)):
+            r2.append((spawn, setup, {RAISE: wake_at(p, [m])}))
+    keys2 = [{"w5": True}] + [I] * (RAISE - 1) + [FIRE] * 2 + [I] * 20
+    out.append({"name": "R2 point blank: the rocket's blast hurts its shooter and throws him",
+                "keys": keys2, "limit": 40, "need": ("rocket_self", "knock_frames"),
+                "controls": ["rocket_spare_shooter", "rocket_dmg"], "cands": r2,
+                "claim": lambda c, tr: c["rockets_fired"] == 1 and c["rocket_mon_hits"] >= 1 and c["rocket_self"] >= 1
+                and c["barrel_blasts"] == 0 and c["knock_frames"] >= 1})
+    # ---- R3: stress -- the trigger held into R1's crowd: a volley (recorded)
+    keys3 = [{"w5": True}] + [I] * (RAISE - 1) + [FIRE] * 34 + [I] * 30
+    out.append({"name": "R3 stress: a volley of rockets into the crowd, the trigger held", "keys": keys3, "limit": 40,
+                "controls": [], "cands": r1,
+                "claim": lambda c, tr: c["rockets_fired"] >= 3 and c["rocket_blasts"] >= 3 and c["barrel_blasts"] >= 1})
     return out
 
 # ================================================================================================
@@ -1175,7 +1331,8 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
         if a.oracle_only:
             continue
         ok &= binary_scenario(gb, cells, table, run, sc, pose, setup or (lambda mph: None), want)
-    zero = [k for k in tuple(need) + tuple(sorted(ran_need)) if not totals.get(k)] if not a.only else []
+    # --only: the scenarios that ran still owe their own `need` (P9: the R rows' counters)
+    zero = [k for k in (tuple(need) if not a.only else ()) + tuple(sorted(ran_need)) if not totals.get(k)]
     deaths = totals.get("deaths", 0)
     ok &= not zero and (deaths_ok or (deaths == 0 and totals.get("dead_frames", 0) == 0))
     print("\nTOTALS: " + ", ".join("%s %d" % kv for kv in totals.items()))

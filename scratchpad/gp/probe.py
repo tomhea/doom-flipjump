@@ -179,7 +179,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # ... knockback's cells (package K: world.knockback_on, knockcode.PERSIST) ...
                    frozenset({"p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z"}),
                    # ... and infighting's barrel source (package I: world.infighting_on; `mon_target` widens in place)
-                   frozenset({"bar_src"}))
+                   frozenset({"bar_src"}),
+                   # P9: key 5's held flag (the rocket launcher; fight_gate's R scenarios press it)
+                   frozenset({"kb_w5"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 

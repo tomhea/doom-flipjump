@@ -49,7 +49,7 @@ M32 = 0xFFFFFFFF
 # the model's RESTART_KEEP as the fj's cells (combat.RESTART_KEEP: the skill, the mode, the held keys) + the menu's
 # own two (the menu state machine sets them around NEW GAME; the model's menu is outside the World)
 KEEP = ("g_skill", "mode", "menu_scr", "menu_sel", "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "kb_sl", "kb_sr",
-        "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4")
+        "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4", "kb_w5")         # P9: 5
 # the persisted cells nothing reads unless a cell the restart DOES write says so: `aim_tz` is read only behind a
 # non-zero `aim_sid` the same render wrote (build.AIM_PERSIST) -- free either way
 FREE = ("aim_tz",)

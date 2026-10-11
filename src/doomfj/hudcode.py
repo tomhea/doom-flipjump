@@ -80,6 +80,19 @@ def _frame_dispatch(prefix: str, cell: str, blocks: List[List[str]], end: str) -
     return out + [f";{end}"]
 
 
+def _frame_dispatch2(prefix: str, cell: str, blocks: List[List[str]], end: str) -> List[str]:
+    """P9: draw blocks[v] for the TWO-nibble v in `cell` (the launcher made the weapon's frames 17), then jump to `end`
+    -- a chain on the high nibble, then `_frame_dispatch` on the low one; a value with no block draws nothing"""
+    assert len(blocks) <= 256, len(blocks)
+    out = []
+    groups = [blocks[h * 16:(h + 1) * 16] for h in range((len(blocks) + 15) // 16)]
+    for h, grp in enumerate(groups):
+        out += [f"hex.if_flags {cell} + dw, 1<<{h}, {prefix}_hn{h}, {prefix}_h{h}", f"{prefix}_h{h}:"]
+        out += _frame_dispatch(f"{prefix}{h}", cell, grp, end)
+        out += [f"{prefix}_hn{h}:"]
+    return out + [f";{end}"]
+
+
 def hud_decls(level_start: Sequence[int]) -> List[str]:
     n = len(hud.bar_slots())
     assert len(level_start) == n
@@ -110,7 +123,7 @@ def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_r
         # M7 P4.1: one overlay per weapon frame, chosen by `wp_frm`; then the flash's, by `fl_frm` (0 = none) -- the
         # psprites in DOOM's order, the flash's records after the weapon's (the device draws a later record over)
         weapons, flashes = overlay
-        out += _frame_dispatch("hwf", "wp_frm", [weapon_record_lines(o, colormap_row) for o in weapons], "hwf_end")
+        out += _frame_dispatch2("hwf", "wp_frm", [weapon_record_lines(o, colormap_row) for o in weapons], "hwf_end")
         out += ["hwf_end:"]
         out += _frame_dispatch("hff", "fl_frm", [[]] + [weapon_record_lines(o, colormap_row) for o in flashes],
                                "hff_end")
@@ -143,7 +156,14 @@ def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_r
 
 # the level start's bar (the model's `level_start`: 100 health, no armor, the pistol up with 50 bullets, the fist and
 # the pistol owned -- ARMS shows 2 lit). The card slot is `pcard`'s, so its value here is never read.
-LEVEL_START = dict(ammo=50, health=100, armor=0, owned=(True, False, False), blue=False)
+# P9: `owned` is the six ARMS digits 2..7 (hud.arms_owned): the pistol's 2 lit
+LEVEL_START = dict(ammo=50, health=100, armor=0, owned=(True, False, False, False, False, False), blue=False)
+
+
+def slot_index(name: str) -> int:
+    """the nibble of `hud_v` / `hud_s` that slot `name` (hud.bar_slots) holds -- what a writer of `hud_v` addresses
+    (weaponcode.bar_lines), so no caller restates the slot order"""
+    return [n for n, _x0, _w, _v in hud.bar_slots()].index(name)
 READY_WEAPON = "PISGA0"        # P4.0 draws the ready pistol; P4.1's weapon state machine picks the frame
 
 

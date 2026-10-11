@@ -44,7 +44,7 @@ def test_the_schema_has_room_for_combat(world):
             "mon_rng": lay.nmon, "rng_world": 1, "rng_player": 1, "rng_fx": 1, "skill": 1}
     for name, count in want.items():
         assert name in by and by[name].count == count, name
-    assert (lay.nmon, lay.nbarrel, lay.npickup) == (53, 22, 95)
+    assert (lay.nmon, lay.nbarrel, lay.npickup) == (53, 22, 100)    # P9: + the launcher and its 4 rockets
     assert by["p_health"].signed and by["mon_health"].signed and by["p_health"].bits >= 9
 
 

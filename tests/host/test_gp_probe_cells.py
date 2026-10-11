@@ -109,7 +109,8 @@ def test_only_the_skill_menu_is_optional(tmp_path):
     for one in ("mon_target", "thseen"):                   # M7 P3.2a: the wake mode's six
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))
-    assert P.OPTIONAL_LABELS == {"menu_scr", "menu_sel", "dreq", "pcard", "wfired", "lvdone", "pusedn",
+    assert P.OPTIONAL_LABELS == {"kb_w5",                     # P9: the launcher's key (binaries before P9 lack it)
+                                 "menu_scr", "menu_sel", "dreq", "pcard", "wfired", "lvdone", "pusedn",
                                  "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",
                                  "mon_state", "mon_tics", "mon_facing", "mon_active",
                                  "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor",

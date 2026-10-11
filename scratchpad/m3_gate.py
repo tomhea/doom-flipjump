@@ -59,8 +59,8 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.doors import door_states, initial_states, walkover_triggers   # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
-from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, MAIN_HELP_SCR,    # noqa: E402
-                         MENU_KEYS, menu_step, palette_colours)
+from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, MAIN_EXIT_SCR,    # noqa: E402
+                         MAIN_HELP_SCR, MENU_HALTED, MENU_KEYS, menu_step, palette_colours)
 from doomfj.reference_model import (ReferenceModel, SimState,             # noqa: E402
                                     build_scene, spawn_state)
 from doomfj.things import skill_hidden                                    # noqa: E402
@@ -122,15 +122,28 @@ SCRIPT = (
     + press(46, ESC)                           # esc: the world, where it was
     + press(47, K_HELP)                        # h: the help, from the world
     + press(48, K_HELP)                        # h: the world again
+    # P9 -- EXIT, the main menu's third item (the owner's play-test, 2026-10-10)
+    + press(50, ENTER)                         # the main menu, NEW GAME highlighted
+    + press(51, K_BACK) + press(52, K_BACK)    # down, down: HELP, then EXIT
+    + press(53, K_BACK)                        # down: clamped at EXIT
+    + press(54, K_FWD) + press(55, K_BACK)     # up: HELP; down: EXIT again
+    + press(56, K_HELP)                        # h on EXIT: the help, from the menu
+    + press(57, K_HELP)                        # h: the main menu again
+    + press(58, K_BACK)                        # down: EXIT
+    + press(59, ESC)                           # esc on EXIT: the world, where it was
+    + press(61, ENTER)                         # the main menu
+    + press(62, K_BACK) + press(63, K_BACK)    # down, down: EXIT
+    + press(64, ENTER)                         # enter on EXIT: the program HALTS -- frame 64 is never presented
 )
-FRAMES = 50
+FRAMES = 64                                    # P9: frames 0..63 are presented; the halt comes in frame 64
+HALT_FRAME = 64
 WITH_W_HELD = (6, 7, 8)                        # menu frames while W is held
 NEW_GAMES = (20, 25, 30)                       # easy, medium, hard
 WITH_W_HELD_HELP = (32, 33)                    # M7 P3.4: help frames while W is held
 HELP_CLOSED_TO_WORLD = 34                      # M7 P3.4: esc leaves the world's help
 HELP_CLOSED_TO_MENU = 40                       # M7 P3.4: h leaves the menu's help
 # M7 P3.4: every menu picture the script must show -- (menu_scr, the highlight on the skill screen)
-ALL_SCREENS = ({(0, None), (MAIN_HELP_SCR, None), (HELP_MENU_SCR, None), (HELP_GAME_SCR, None)}
+ALL_SCREENS = ({(0, None), (MAIN_HELP_SCR, None), (MAIN_EXIT_SCR, None), (HELP_MENU_SCR, None), (HELP_GAME_SCR, None)}
                | {(1, k) for k in range(len(SKILLS))})
 
 
@@ -152,6 +165,8 @@ def main():
                     help="R9 (M7 P1.5): the oracle expects the skill screen's menu_scr on the world "
                          "frames from the first NEW GAME -- invisible in a world frame; the STATE "
                          "check must reject it")
+    ap.add_argument("--selftest-exit", action="store_true",
+                    help="R9 (P9): the oracle ignores enter on EXIT (no halt); the gate must FAIL")
     ap.add_argument("--selftest-help", action="store_true",
                     help="R9 (M7 P3.4): the oracle closes the world's help to the MAIN MENU; the "
                          "gate must FAIL at frame %d" % HELP_CLOSED_TO_WORLD)
@@ -183,7 +198,8 @@ def main():
     print("script : boot in menu -> esc@2 -> walk -> enter@6 (W held) -> esc@9 -> the skill "
           "screen @13, clamp both ends, back, NEW GAME at easy@20, medium@25, hard@30 -> the help "
           "from the world @32 (W held) -> esc@34 -> the main menu, HELP @37, its help @38, h@40, "
-          "h@41, esc@42, up@43, h@44, esc@45, esc@46 -> the help from the world @47, h@48")
+          "h@41, esc@42, up@43, h@44, esc@45, esc@46 -> the help from the world @47, h@48 -> P9: EXIT @52, "
+          "clamp @53, up/down @54-55, its help @56-57, esc to the world @59, enter on EXIT @64: the HALT")
 
     if not args.labels:
         print("  NO --labels. This gate is byte- AND state-exact (M7 P1.5), and without the build's")
@@ -209,9 +225,11 @@ def main():
     from doomfj.world import player_loots
     loot = player_loots(mph.world.player)           # M7 P6: the player lives in the world's things
     deaths = 0                                      # M7 P7: frames the mirror's player was dead (this walk: none)
-    got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
+    causes = []                                     # P9: how the run ended -- the halt is LOOPING
+    got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES + 2,
                                             len(order), nwalk, nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
-                                            palettes_out=pals, nthvis=mviews.nvis if loot else 0)
+                                            palettes_out=pals, nthvis=mviews.nvis if loot else 0,
+                                            cause_out=causes)
     # M7 P3.2b: the monsters step inside this gate's fixed world -- its doors shut and idle, every lift at its top;
     # a monster that pressed a door or crossed a lift line would change that world, which this gate does not model:
     # it refuses rather than draw the wrong one
@@ -226,18 +244,14 @@ def main():
     spawn = spawn_state(mw, args.map)
     state, rows = spawn, []
     pusedn = 1                                      # M7 P2a.2: baked 1; a world tic without use clears it
-    pending, i = sorted(events, key=lambda e: e.tic), 0
+    # P9: the device's delivery and the press latch through THE oracle (doomfj.keyboard.frame_keys): the keys a
+    # world frame acts on are held after its polls OR pressed during them
+    from doomfj.keyboard import frame_keys
+    fks = frame_keys(events, FRAMES + 1, polls=STANDALONE_POLLS, binding={K_FWD: "forward", K_BACK: "back"},
+                     menu_keys=MENU_KEYS)
     for f in range(FRAMES):
-        ev = set()
-        for tic in range(f * STANDALONE_POLLS, (f + 1) * STANDALONE_POLLS):
-            if i < len(pending) and pending[i].tic <= tic:
-                e = pending[i]
-                i += 1
-                if e.is_down and e.keycode in MENU_KEYS:
-                    ev.add(MENU_KEYS[e.keycode])
-                name = {K_FWD: "forward", K_BACK: "back"}.get(e.keycode)
-                if name:
-                    held[name] = e.is_down
+        ev = set(fks[f].menu)
+        held = dict(fks[f].now)
         if (args.selftest_help and mode == 1 and scr == HELP_GAME_SCR
                 and ("esc" in ev or "help" in ev)):
             mode, scr, ng = 1, 0, None                  # THE HELP'S NEGATIVE CONTROL (M7 P3.4)
@@ -307,7 +321,8 @@ def main():
         if is_menu:
             key = (row["scr"], row["sel"] if row["scr"] == 1 else None)
             want = screens[key]
-            kind = {0: "MENU  main   ", MAIN_HELP_SCR: "MENU  main/H ", HELP_MENU_SCR: "MENU  help/m ",
+            kind = {0: "MENU  main   ", MAIN_HELP_SCR: "MENU  main/H ", MAIN_EXIT_SCR: "MENU  main/X ",
+                    HELP_MENU_SCR: "MENU  help/m ",
                     HELP_GAME_SCR: "MENU  help/g "}.get(row["scr"], "MENU  skill %d" % row["sel"])
             screens_seen.add(key)
             menus += 1
@@ -400,7 +415,19 @@ def main():
 
     print("  M7 P7: the mirror's player died on %d frames -- %s"
           % (deaths, "none, as this walk expects" if not deaths else "!! a death: this walk expects none"))
-    ok = ok and not vacuous and len(got) >= FRAMES and not deaths
+    # P9: THE HALT. The program presents exactly FRAMES frames and then ENDS by looping (enter on EXIT in frame
+    # HALT_FRAME); the oracle's menu, stepped one more frame, must say the same (MENU_HALTED). The R9 control
+    # makes the oracle ignore that enter: then it expects a frame the program never presents.
+    from flipjump.interpreter import _fjcore as _core
+    _m, _s, _sel, _ng = menu_step(mode, scr, sel, set(fks[HALT_FRAME].menu) if HALT_FRAME < len(fks) else set())
+    if args.selftest_exit and _s == MENU_HALTED:
+        _s = MAIN_EXIT_SCR                              # THE EXIT'S NEGATIVE CONTROL
+    halted = causes == [_core.TERM_LOOPING] and len(got) == FRAMES
+    oracle_halts = _s == MENU_HALTED
+    print("  P9 HALT: the program %s after %d frames (cause %s); the oracle %s at frame %d"
+          % ("HALTED" if halted else "did NOT halt", len(got), causes, "halts" if oracle_halts else "does NOT halt",
+             HALT_FRAME))
+    ok = ok and not vacuous and len(got) >= FRAMES and not deaths and halted and oracle_halts
     state_ok = state_bad is None and state_checked == FRAMES
     print("")
     if args.selftest_state:

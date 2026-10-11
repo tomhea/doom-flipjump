@@ -147,7 +147,7 @@ def slots(world):
 
 def test_every_pickup_has_its_own_slot(world, slots):
     s = slots["slot"]
-    assert len(s) == len(world.pickup_things) == 95
+    assert len(s) == len(world.pickup_things) == 100              # P9: + the launcher and its 4 rockets
     assert len(set(s)) == len(s)
     assert slots["nextra"] == sum(r is not None for r in slots["rt"]) == 10
     assert all((r is None) == (v < slots["nvis"]) for r, v in zip(slots["rt"], s))
@@ -201,7 +201,7 @@ def test_pkxyz_is_every_pickups_place_on_every_entry(world):
     def s16(v):
         return v - 0x10000 if v & 0x8000 else v
     vals = L.pkxyz_values(world)
-    assert len(vals) == len(world.pickup_things) == 95
+    assert len(vals) == len(world.pickup_things) == 100           # P9: + the launcher and its 4 rockets
     for i, (v, t, z) in enumerate(zip(vals, world.pickup_things, world.pickup_z)):
         assert (s16(v & 0xFFFF), s16(v >> 16 & 0xFFFF), s16(v >> 32 & 0xFFFF)) == (t.x, t.y, z), i
         assert v >> 48 == 0

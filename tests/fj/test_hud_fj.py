@@ -34,12 +34,13 @@ MENU_COLOUR = 77
 SCRIPT = [
     dict(hudcode.LEVEL_START),                                                             # 0: boot (hud_full)
     dict(hudcode.LEVEL_START),                                                             # 1: nothing changed
-    dict(ammo=8, health=57, armor=0, owned=(True, True, False), blue=True),               # 2: every kind changes
-    dict(ammo=0, health=100, armor=200, owned=(True, True, True), blue=True),             # 3
-    dict(ammo=None, health=5, armor=7, owned=(True, False, False), blue=False),           # 4: no ammo, card gone
-    None,                                                                                  # 5: a menu frame
-    dict(ammo=None, health=5, armor=7, owned=(True, False, False), blue=False),           # 6: the whole bar again
-    dict(ammo=123, health=0, armor=99, owned=(False, False, True), blue=True),            # 7
+    # P9: `owned` is DOOM's six ARMS digits 2..7 (hud.arms_owned)
+    dict(ammo=8, health=57, armor=0, owned=(True, True, False, True, False, False), blue=True),   # 2: every kind changes
+    dict(ammo=0, health=100, armor=200, owned=(True,) * 6, blue=True),                            # 3
+    dict(ammo=None, health=5, armor=7, owned=(True, False, False, False, False, False), blue=False),  # 4: no ammo, no card
+    None,                                                                                          # 5: a menu frame
+    dict(ammo=None, health=5, armor=7, owned=(True, False, False, False, False, False), blue=False),  # 6: the bar again
+    dict(ammo=123, health=0, armor=99, owned=(False, False, True, False, True, True), blue=True),     # 7
 ]
 
 
@@ -167,7 +168,9 @@ def test_the_checks_catch_a_broken_tail(tmp_path, name, mutate, frame):
 
 
 # ---- M7 P4.1: the overlay chosen per frame -- the weapon frame `wp_frm`, the flash frame `fl_frm` over it ----------
-PSPRITES = [(0, 0), (1, 1), (4, 0), (5, 2), (5, 3), (7, 0), (13, 0), (2, 1)]      # (wp_frm, fl_frm) per frame
+# P9: the launcher's frames 15 / 16 (MISGA0 / MISGB0: wp_frm's high nibble 1) with its flashes 4..7 (MISFA0..D0)
+PSPRITES = [(0, 0), (1, 1), (4, 0), (5, 2), (5, 3), (7, 0), (13, 0), (2, 1),
+            (15, 0), (16, 4), (16, 5), (16, 7), (15, 6), (0, 0)]                    # (wp_frm, fl_frm) per frame
 
 
 def _psprite_program(mutate=None):
@@ -182,14 +185,14 @@ def _psprite_program(mutate=None):
         text = mutate(text)
     start = hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))
     lines = ["stl.startup_and_init_all", "present.init_screen", ";frames", *hudcode.hud_decls(start),
-             "pcard: hex.vec 1", "hud_ret: hex.vec w/4", "wp_frm: hex.vec 1", "fl_frm: hex.vec 1",
+             "pcard: hex.vec 1", "hud_ret: hex.vec w/4", "wp_frm: hex.vec 2", "fl_frm: hex.vec 1",
              "hud_tail_leaf:", text, "stl.fret hud_ret", "frames:"]
     for f, (wf, ff) in enumerate(PSPRITES):
         lines.append("present.begin_frame_collines")
         for x in range(WIDTH):
             rec, _px = _view_column(f, x)
             lines += [f"stl.output_char {b}" for b in rec]
-        lines += [f"hex.set 1, wp_frm, {wf}", f"hex.set 1, fl_frm, {ff}",
+        lines += [f"hex.set 2, wp_frm, {wf}", f"hex.set 1, fl_frm, {ff}",
                   "stl.fcall hud_tail_leaf, hud_ret", "stl.output_char 0xFF"]
     lines.append("stl.loop")
     return "\n".join(lines) + "\n", colours, weapons, flashes, row
@@ -256,3 +259,13 @@ def test_the_control_a_flash_drawn_under_the_weapon(tmp_path):
     first = next(f for f, (wf, ff) in enumerate(PSPRITES)
                  if ff and any(px(weapons[wf]).get(k, c) != c for k, c in px(flashes[ff - 1]).items()))
     assert _first_bad(frames, want) == first
+
+
+def test_the_launcher_frames_are_the_two_nibble_ones():
+    """P9: the weapon psprite's frames grew to 17 with the launcher's MISGA0 / MISGB0 -- `wp_frm` is two nibbles, the
+    flash's MISFA0..D0 are fl_frm 4..7 -- and PSPRITES draws both launcher frames and every launcher flash"""
+    from doomfj import weaponcode as WC
+    fr, fl = WC.overlay_frames(), WC.flash_frames()
+    assert len(fr) == 17 and fr[15:] == ["MISGA0", "MISGB0"] and WC.FRAME_NIBBLES == 2
+    assert fl[3:] == ["MISFA0", "MISFB0", "MISFC0", "MISFD0"]
+    assert {wf for wf, _f in PSPRITES} >= {15, 16} and {ff for _w, ff in PSPRITES} >= {4, 5, 6, 7}

@@ -56,12 +56,26 @@ def drop_lump(kind: int) -> str:
     return mobile_lump(gd.MOBJINFO[name].spawnstate)
 
 
-def mobile_lump(state_name: str) -> str:
-    """M7 P5: the sprite lump a mobile (fireball, blood, puff) is drawn with in state `state_name` -- its frame's
-    single-rotation `...0` lump (BAL1A0 .. BAL1E0, BLUDA0 .. BLUDC0, PUFFA0 .. PUFFD0)"""
+# P9: a mobile frame with NO single-rotation lump is drawn at ONE fixed rotation -- the player's rocket in flight
+# (MISLA has rotations 1..8 only): rotation 5, the rocket SEEN FROM BEHIND, as the player who fired it mostly sees it
+# (a convention: DOOM picks the rotation by the viewer's angle to the rocket's flight)
+MOBILE_ROTATION = {("MISL", 0): 5}
+
+
+def mobile_view(state_name: str) -> Tuple[str, str, int]:
+    """(sprite, frame letter, rotation) of the lump a mobile is drawn with in state `state_name` -- rotation 0 (the
+    single-rotation lump) but where MOBILE_ROTATION fixes one (P9)"""
     from doomfj import gamedata as gd
     st = gd.STATES[state_name]
-    return "%s%s0" % (st.sprite, chr(ord("A") + st.frame_index))
+    return st.sprite, chr(ord("A") + st.frame_index), MOBILE_ROTATION.get((st.sprite, st.frame_index), 0)
+
+
+def mobile_lump(state_name: str) -> str:
+    """M7 P5: the sprite lump a mobile (fireball, blood, puff) is drawn with in state `state_name` -- its frame's
+    single-rotation `...0` lump (BAL1A0 .. BAL1E0, BLUDA0 .. BLUDC0, PUFFA0 .. PUFFD0); P9: the rocket's MISLA5 (in
+    flight, MOBILE_ROTATION) and MISLB0 .. MISLD0 (its explosion)"""
+    sprite, letter, rot = mobile_view(state_name)
+    return "%s%s%d" % (sprite, letter, rot)
 
 
 def rotation(rm, view_x16: int, view_y16: int, thing_x16: int, thing_y16: int, facing: int) -> int:
@@ -542,14 +556,15 @@ class MonsterPhase:
         if self.world.player == "walk":
             return {}
         from doomfj import weaponcode as WC
+        from doomfj.hud import arms_owned
         ws, gd = self.world.ws, self.gd
         fst = gd.STATE_NAMES[ws.p_flash_state]
-        ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL]}.get(ws.p_ready)
+        ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL],
+                gd.WP_MISSILE: ws.p_ammo[gd.AM_MISL]}.get(ws.p_ready)             # P9: the launcher's rockets
         return {"weapon": WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
                 "flash": None if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
                 "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,
-                           "owned": (bool(ws.p_owned[gd.WP_PISTOL]), bool(ws.p_owned[gd.WP_SHOTGUN]),
-                                     bool(ws.p_owned[gd.WP_CHAINSAW]))}}
+                           "owned": arms_owned(ws.p_owned)}}            # P9: DOOM's six ARMS digits 2..7
 
     def boxes(self) -> list:
         """[(x16, y16, r16)] of every live monster -- a closing door reverses on them (World.door_touched)"""
@@ -662,8 +677,11 @@ class MonsterPhase:
                 "pj_y": tuple(v & MASK32 for v in ws.proj_y), "pj_mx": tuple(v & MASK32 for v in ws.proj_momx),
                 "pj_my": tuple(v & MASK32 for v in ws.proj_momy), "pj_st": tuple(ws.proj_state),
                 "pj_ti": tuple(ws.proj_tics),
-                # M7 P7: the shooter, 1 + its slot while the slot is live (P_RemoveMobj zeroes proj_src too)
-                "pj_src": tuple(ws.proj_src[s] + 1 if ws.proj_active[s] else 0 for s in range(len(ws.proj_src)))}
+                # M7 P7: the shooter, 1 + its slot while the slot is live (P_RemoveMobj zeroes proj_src too).
+                # P9: a ROCKET's slot holds 0 -- the player's, which projcode stores (its state is what marks it); the
+                # model's proj_src of 0 for it is not monster slot 0 (fight_gate R1-R3 found the export saying 1)
+                "pj_src": tuple(0 if not ws.proj_active[s] or self.world._is_rocket(s) else ws.proj_src[s] + 1
+                                for s in range(len(ws.proj_src)))}
 
     def fx_state(self) -> Dict[str, object]:
         """projcode's blood pool, per slot (FX_POOL of them), in pj_*'s units (fx_x / fx_y always whole map units: the

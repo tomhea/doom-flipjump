@@ -71,7 +71,8 @@ FRAME_OPS_LOG = {}
 BLOOD = frozenset(("BLUDA0", "BLUDB0", "BLUDC0"))     # M7 P8a: the blood's lumps (S_BLOOD1..3)
 KEYFLAG = {"forward": "kb_f", "back": "kb_b", "turn_left": "kb_l", "turn_right": "kb_r", "use": "kb_u",
            "strafe_left": "kb_sl", "strafe_right": "kb_sr", "fire": "kb_fi",
-           "w1": "kb_w1", "w2": "kb_w2", "w3": "kb_w3", "w4": "kb_w4"}
+           "w1": "kb_w1", "w2": "kb_w2", "w3": "kb_w3", "w4": "kb_w4",
+           "w5": "kb_w5"}                     # P9: key 5, the rocket launcher (probe.OPTIONAL_GROUPS: a binary before P9)
 EXPLOSION = frozenset(("BAL1C0", "BAL1D0", "BAL1E0"))   # S_TBALLX1..3's lumps
 CONTROLS = ("armor", "hwt", "pain_draw", "pool9", "fizzle_draw", "fx_skip_draw", "palette", "relink",
             "momentum", "explode_draw", "blood_draw")

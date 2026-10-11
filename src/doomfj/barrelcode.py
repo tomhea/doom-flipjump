@@ -54,6 +54,12 @@ shot's mode (the player's shot: 1; a monster's bullet or fireball: dm_src), the 
 bar_src. The blast passes bar_src on as the source of all its damage: the player's attacker (dp_src = code - 1 for a
 monster, else 0) and each slot's dm_src. A monster's hit on a barrel (damagecode's MONSTER / BULLET modes) skips the
 reach; only the BULLET puffs.
+
+P9 (`rockets`, the owner's ROCKET LAUNCHER; projcode's `rk_blast` is the caller): `bl_leaf` serves the rocket's blast too.
+`bl_dyn` (scratch, 0 but inside rk_blast) = 1 makes `bl_los` the FAR LOS (monstersight's `sl_far`: P the spot, Q the
+target floored to whole units -- combat._rocket_blast's whole-unit ends) instead of the barrel's static per-spot list;
+the knock's inflictor z is `bl_z` -- the barrel's floor (`kbbz` by bl_b, at bl_leaf's top) or the rocket's z (the
+caller's); `bl_mon10` (BARREL_R) is the barrels' distance and LOS entry the rocket's barrel loop calls.
 """
 from typing import Dict, List, Sequence, Tuple
 
@@ -266,7 +272,8 @@ def damage_lines(nbar: int, fight: bool = False) -> List[str]:
         "    stl.fret bd_ret"]
 
 
-def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool = False) -> List[str]:
+def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool = False,
+                rockets: bool = False) -> List[str]:
     """`bl_leaf` (stl.fcall bl_leaf, bl_ret; bl_b, bl_px, bl_py the barrel) -- the player, then the monster slots --
     and its shared pieces `bl_dist`, `bl_mon`. The other barrels are the caller's static chain. `knock` (M7 P8a,
     world.knockback_on; doomfj.knockcode): THE BARREL is the inflictor (kb_on, kb_ix / kb_iy = bl_px / bl_py) of
@@ -278,7 +285,10 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
     # package K: the barrel's z (its floor, knockcode's `kbbz` by bl_b); the source the player who set it off (every
     # barrel before package I's bar_src). With infighting (`fight`) the source is the barrel's bar_src: kb_sp is
     # `bl_sp` = (bl_src == 1), computed once at bl_leaf's top (combat._source_is_player: bar_src[b] == 1)
-    kb = inflictor_lines("bl_px", "bl_py", z_lines=["    kbbz.lookup kb_iz, bl_b"], src_player=not fight) if knock else []
+    # P9 (`rockets`): the inflictor's z is `bl_z`, set ONCE at bl_leaf's top (the barrel's kbbz) or by the rocket's caller
+    zl = ["    hex.mov 4, kb_iz, bl_z"] if rockets else ["    kbbz.lookup kb_iz, bl_b"]
+    kb = inflictor_lines("bl_px", "bl_py", z_lines=zl, src_player=not fight) if knock else []
+    assert not rockets or (knock and fight), "P9: the rocket's blast is the final modes' (its z, its source)"
     if knock and fight:
         assert kb[-1] == "    hex.zero 1, kb_sp", kb
         kb[-1] = "    hex.mov 1, kb_sp, bl_sp"                         # M7 P8a K x I: the player set it off?
@@ -288,6 +298,7 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
     assert len(slot_rt) == n
     hn = cell_nibbles(w.schema, "mon_health")
     out = ["bl_leaf:",
+           *(["    hex.if1 1, bl_dyn, bl_zd", "    kbbz.lookup bl_z, bl_b", "  bl_zd:"] if rockets else []),
            *(["    hex.zero 1, bl_sp",                                       # M7 P8a K x I: bl_sp = bl_src == 1
               "    hex.if_flags bl_src + 1*dw, 1, bl_sp0, bl_sph",          # (the high nibble 0 ...
               "  bl_sph:",
@@ -348,7 +359,8 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
     out += ["    stl.fret bl_ret"]
     # the monster's test, entered by its radius (bl_mon<r>): the integer Chebyshev, the radius, then the LOS from the
     # barrel to its position
-    for r in sorted(set(w.mon_radius[:n])):
+    from doomfj.combat import BARREL_R
+    for r in sorted(set(w.mon_radius[:n]) | ({BARREL_R} if rockets else set())):   # P9: the rocket's barrels
         assert 0 < r < 128
         out += ["bl_mon%d:" % r, "    hex.set 2, bl_r, %d" % r, "    ;bl_mon"]
     out += ["bl_mon:",
@@ -563,7 +575,7 @@ def restart_lines(w, skill: int, *, nt: int) -> List[str]:
 
 def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills: Sequence[int] = (),
                  barrel_rt: Dict[int, int] = None, exit_guard: bool = True, barrel_vis: Dict[int, int] = None,
-                 knock: bool = False, fight: bool = False) -> dict:
+                 knock: bool = False, fight: bool = False, rockets: bool = False) -> dict:
     """everything package C's sim adds, for the World `w` (the player mode "full"):
       * `decls`: the cells at `boot_skill`'s level start, the scratch, the LOS entry's registers;
       * `lines`: bar_phase / bar_next, bdm<c> / bd_leaf, bl_leaf / bl_mon / bl_dist, monstersight's bl_los, dmb<b> /
@@ -584,10 +596,12 @@ def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills:
     spots = [(t.x, t.y) for t in w.barrel_things]
     maxr = max([PLAYER_R] + list(w.mon_radius[:w.layout.nmon]))
     from doomfj.world import FIREBALL_POOL, FX_POOL
-    return {"decls": decls(w, boot_skill) + (fight_decls(w) if fight else []),
+    return {"decls": (decls(w, boot_skill) + (fight_decls(w) if fight else [])
+                      + (["bl_dyn: hex.vec 1", "bl_z: hex.vec 4"] if rockets else [])),   # P9: the rocket's entry
             "lines": (phase_lines(w, barrel_rt=barrel_rt, exit_guard=exit_guard, barrel_vis=barrel_vis, fight=fight)
                       + damage_lines(len(spots), fight=fight)
-                      + blast_lines(w, slot_rt=slot_rt, knock=knock, fight=fight) + blast_los_lines(w, spots, maxr, fight=fight)
+                      + blast_lines(w, slot_rt=slot_rt, knock=knock, fight=fight, rockets=rockets)
+                      + blast_los_lines(w, spots, maxr, fight=fight, dyn=rockets)
                       + shot_lines(w, fight=fight)
                       + drop_lines(w, nt=nt, slot_rt=slot_rt)),
             "tables": tables_fj(),

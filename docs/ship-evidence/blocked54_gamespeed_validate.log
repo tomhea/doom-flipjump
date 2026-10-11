@@ -1,0 +1,13 @@
+$ python scratchpad/12m/gamespeed.py --validate
+  run  0: ends (   529,   208)    946 from spawn    1143 travelled  moved on  89/100 move-frames (11% blocked)  opened 0 door(s)
+  run  1: ends (  -296,   120)    181 from spawn    1619 travelled  moved on  95/ 97 move-frames (2% blocked)  opened 0 door(s)
+  run  2: ends (   707,   492)   1147 from spawn    1393 travelled  moved on  88/ 94 move-frames (6% blocked)  opened 0 door(s)
+  run  3: ends (   147,   214)    564 from spawn    1227 travelled  moved on  73/ 91 move-frames (20% blocked)  opened 0 door(s)
+  run  4: ends (  -128,   271)    288 from spawn     983 travelled  moved on  62/ 88 move-frames (30% blocked)  opened 0 door(s)
+  run  5: ends (  -276,   425)    219 from spawn    1441 travelled  moved on  81/ 85 move-frames (5% blocked)  opened 0 door(s)
+  run  6: ends (  -371,    80)    181 from spawn    1448 travelled  moved on  80/ 82 move-frames (2% blocked)  opened 0 door(s)
+  run  7: ends (  -452,   373)    122 from spawn    1314 travelled  moved on  76/ 79 move-frames (4% blocked)  opened 0 door(s)
+  run  8: ends (  -493,   223)     83 from spawn    1219 travelled  moved on  74/ 76 move-frames (3% blocked)  opened 0 door(s)
+  run  9: ends (  -495,   194)    100 from spawn    1186 travelled  moved on  73/ 73 move-frames (0% blocked)  opened 0 door(s)
+  distinct end cells: 9/10 ; widest spread 1202 units ; worst run 30% blocked
+rc=0

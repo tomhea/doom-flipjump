@@ -141,7 +141,7 @@ MISSILE_BIAS, MISSILE_NOMELEE_BIAS, MISSILE_CAP = 64, 128, 200      # P_CheckMis
 STEP_UP = gd.MAX_STEP_UP >> 16     # 24: the highest step up a thing can take
 DROPOFF_MAX = 24                   # P_TryMove: a non-DROPOFF thing may not stand over a drop > 24
 PLAYER_R = gd.PLAYERRADIUS >> 16   # 16
-# the tic's input: the four moves, use, fire, and the weapon number keys 1..4 (w1..w4)
+# the tic's input: the four moves, use, fire, and the weapon number keys 1..5 (w1..w5; P9: 5 the launcher)
 KEYS = ("forward", "back", "turn_left", "turn_right", "strafe_left", "strafe_right", "use",
         "fire") + WEAPON_KEYS
 
@@ -313,7 +313,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("g_leveldone", 1, group="game", phase="S3b", doc="the exit switch was used: world frozen")
     # -- input and mode (existing standalone persist set) ----------------------------------------
     f("mode", 1, group="input", phase="existing", label="mode", doc="1 = menu frame producer")
-    for k in ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4"):   # M7 P4.1: strafe, fire, 1..4
+    for k in ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5"):   # M7 P4.1; P9: 5
         f("kb_" + k, 1, group="input", phase="existing", label="kb_" + k, doc="held key flag")
     # -- player --------------------------------------------------------------------------------
     f("px", 32, signed=True, group="player", phase="existing", label="viewx", doc="16.16")
@@ -443,7 +443,8 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("proj_y", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16")
     f("proj_momx", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16 per tic")
     f("proj_momy", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16 per tic")
-    f("proj_src", mon_bits, count=p, group="proj", phase="S3b", doc="shooter's monster slot")
+    f("proj_src", mon_bits, count=p, group="proj", phase="S3b",
+      doc="shooter's monster slot (P9: 0 and unread for the player's rocket -- its state names it)")
     if knock:   # M7 P8a K (1.2.2, G-B4): the missile's z for the thrust's reversal
         f("proj_z", 16, count=p, signed=True, group="proj", phase="P8a", label="pj_z",
           doc="the shooter's mon_floorz + 32 at the spawn (no gravity)")
@@ -603,6 +604,10 @@ class TicEvents:
     proj_walls: List[int] = field(default_factory=list)     # pool slot stopped by a wall
     fizzles: List[int] = field(default_factory=list)        # imp whose fireball found no slot
     barrel_blasts: List[int] = field(default_factory=list)  # barrel index (A_Explode)
+    # -- P9: the player's rockets (combat._spawn_rocket / _rocket_things / _rocket_blast)
+    rocket_spawns: List[int] = field(default_factory=list)  # pool slot, or -1: a full pool fizzled it
+    rocket_hits: List[tuple] = field(default_factory=list)  # ("mon"|"bar"|"corpse", index, damage): what stopped it
+    rocket_blasts: List[int] = field(default_factory=list)  # pool slot whose S_EXPLODE1 ran A_Explode
     fx_spawns: List[tuple] = field(default_factory=list)    # (pool slot, "puff"|"blood")
     fx_skipped: int = 0                                     # effects dropped: the pool was full
     player_blocked: int = 0                                 # tried positions a solid thing refused

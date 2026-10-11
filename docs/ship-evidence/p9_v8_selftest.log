@@ -1,0 +1,17 @@
+  SG1 identical dumps: held                                                        ok
+  SG2 a grown cell, a door added, the sound nodes renumbered: held                 ok  []
+  SG3 an old cell changed on ONE frame: refused                                    ok
+  SG4 an old door's cell changed (door 7, after a door was added): refused         ok
+  SG5 an old field gone: refused                                                   ok
+  SG6 a non-door field reshaped: refused                                           ok
+  SG7 a sound alert moved to another sector: refused                               ok
+  (the set is not frozen yet: the freeze checks run on an in-memory frozen copy)
+  R1 the untouched set: the rehash would accept, with nothing to re-record         ok  F1/F3/F4/F5 held and the checker is unchanged
+  R2 a BEHAVIOUR change (strafe 13 -> 12) is REFUSED                               ok  F3 failed (stale: ['R0-west-hall', 'R0-aftermath', 'R0-south-hall', 'R0-imp-court', 'R0-northwest', 'R0-courtyard', 'R2-barrel-hall', 'R2-spectre-corridor', 'R2-east-yard', 'R3-west', 'R3-mid'] -- poses part on 11 run(s) ['R0-west-hall', 'R0-aftermath', 'R0-south-hall', 'R0-imp-court', 'R0-northwest', 'R0-courtyard', 'R2-barrel-hall', 'R2-spectre-corridor', 'R2-east-yard', 'R3-west', 'R3-mid']; the digest only on 0 (every pose reproduces: the schema grew, or the world moved where the player's pose does not show it)): the replay moved; a behaviour change needs the owner
+  R3 a CHECKER change (scenarios_v2.py's hash) is REFUSED                          ok  the checker scratchpad/gp/scenarios_v2.py changed: record it with --freeze (re-plan, identical keys) under review, never by --rehash
+  R4 a PICTURE-rule change (MIN_SPRITE_H_MONSTER 1 -> 8) is REFUSED by the re-freeze ok  F3 failed (stale: ['R0-aftermath', 'R0-south-hall', 'R0-imp-court', 'R0-courtyard', 'R2-spectre-corridor', 'R2-east-yard', 'R3-west'] -- poses part on 2 run(s) ['R0-aftermath', 'R3-west']; the digest only on 5 (every pose reproduces: the schema grew, or the world moved where the player's pose does not show it)): the replay moved -- a behaviour change needs a NEW VERSION and the owner, not a re-freeze
+  R5 a clean re-freeze keeps owner_approval and names its own approver             ok  checker re-freeze by 'a reviewer'
+  R6 a FIRST freeze with an approver other than the owner is REFUSED               ok  the FIRST freeze is the owner's approval of the set: --approver must be 'the owner'
+  R7 --plan REFUSES the frozen set's file                                          ok  C:\Users\tomhe\Documents\doom-flipjump\.claude\worktrees\agent-a3e5cc733f6521e49\scratchpad\gp\scenarios\combat_scenarios_v2.json is FROZEN: plan a new version into a new --file
+  S0 the set passes every criterion and every freeze check                         ok
+  S1 no fire key FAILS the kills floor                                             ok  2 monsters killed (and 0 barrels exploded; 0 shotgun shots)

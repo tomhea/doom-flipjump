@@ -395,6 +395,23 @@ _STATE_ROWS: Tuple[Tuple, ...] = (
     ('S_BEXP5', 'BEXP', 32772, 10, None, 'S_NULL'),
     ('S_CLIP', 'CLIP', 0, -1, None, 'S_NULL'),
     ('S_SHOT', 'SHOT', 0, -1, None, 'S_NULL'),
+    # P9 (the owner, 2026-10-10: the ROCKET LAUNCHER) -- info.c's rows, APPENDED: every index above keeps its value, so
+    # no state cell of any frozen run changes meaning (DOOM's array has them between S_SAW3 and S_PLASMA / after
+    # S_TBALLX3; only the compact index's order differs, and nothing reads it as DOOM's enum)
+    ('S_MISSILE', 'MISG', 0, 1, 'A_WeaponReady', 'S_MISSILE'),
+    ('S_MISSILEDOWN', 'MISG', 0, 1, 'A_Lower', 'S_MISSILEDOWN'),
+    ('S_MISSILEUP', 'MISG', 0, 1, 'A_Raise', 'S_MISSILEUP'),
+    ('S_MISSILE1', 'MISG', 1, 8, 'A_GunFlash', 'S_MISSILE2'),
+    ('S_MISSILE2', 'MISG', 1, 12, 'A_FireMissile', 'S_MISSILE3'),
+    ('S_MISSILE3', 'MISG', 1, 0, 'A_ReFire', 'S_MISSILE'),
+    ('S_MISSILEFLASH1', 'MISF', 32768, 3, 'A_Light1', 'S_MISSILEFLASH2'),
+    ('S_MISSILEFLASH2', 'MISF', 32769, 4, None, 'S_MISSILEFLASH3'),
+    ('S_MISSILEFLASH3', 'MISF', 32770, 4, 'A_Light2', 'S_MISSILEFLASH4'),
+    ('S_MISSILEFLASH4', 'MISF', 32771, 4, 'A_Light2', 'S_LIGHTDONE'),
+    ('S_ROCKET', 'MISL', 32768, 1, None, 'S_ROCKET'),
+    ('S_EXPLODE1', 'MISL', 32769, 8, 'A_Explode', 'S_EXPLODE2'),
+    ('S_EXPLODE2', 'MISL', 32770, 6, None, 'S_EXPLODE3'),
+    ('S_EXPLODE3', 'MISL', 32771, 4, None, 'S_NULL'),
 )
 
 
@@ -449,7 +466,7 @@ ACTIONS: Dict[str, Action] = {a.name: a for a in (
     Action("A_SPosAttack", "mobj", "heavy", "S3b", "shotgun guy: 3 hitscan pellets"),
     Action("A_TroopAttack", "mobj", "heavy", "S3b", "imp: claw in melee range, else fireball"),
     Action("A_SargAttack", "mobj", "heavy", "S3b", "demon bite"),
-    Action("A_Explode", "mobj", "heavy", "S3b", "barrel radius damage"),
+    Action("A_Explode", "mobj", "heavy", "S3b", "barrel (and, P9, rocket) radius damage"),
     Action("A_Pain", "mobj", "cheap", "sound", "pain sound"),
     Action("A_Scream", "mobj", "cheap", "sound", "death sound"),
     Action("A_XScream", "mobj", "cheap", "sound", "gib sound"),
@@ -466,6 +483,8 @@ ACTIONS: Dict[str, Action] = {a.name: a for a in (
     Action("A_Light0", "psprite", "psprite", "S3b", "extralight 0"),
     Action("A_Light1", "psprite", "psprite", "S3b", "extralight 1"),
     Action("A_Light2", "psprite", "psprite", "S3b", "extralight 2"),
+    Action("A_GunFlash", "psprite", "psprite", "P9", "the launcher: the player's attack frame, the flash"),
+    Action("A_FireMissile", "psprite", "psprite", "P9", "the launcher: one rocket, P_SpawnPlayerMissile"),
 )}
 
 
@@ -564,6 +583,10 @@ MOBJINFO: Dict[str, MobjInfo] = {m.name: m for m in (
     _mi("MT_SHOTGUN", 2001, "S_SHOT", 1000, S_NULL, "sfx_None", 8, "sfx_None", S_NULL, 0,
         "sfx_None", S_NULL, S_NULL, S_NULL, S_NULL, "sfx_None", 0, 20 * F, 16 * F, 100, 0,
         "sfx_None", MF_SPECIAL, S_NULL, source="template"),
+    # P9: the launcher's rocket (info.c MT_ROCKET)
+    _mi("MT_ROCKET", -1, "S_ROCKET", 1000, S_NULL, "sfx_rlaunc", 8, "sfx_None", S_NULL, 0,
+        "sfx_None", S_NULL, S_NULL, "S_EXPLODE1", S_NULL, "sfx_barexp", 20 * F, 11 * F, 8 * F, 100,
+        20, "sfx_None", MF_NOBLOCKMAP | MF_MISSILE | MF_DROPOFF | MF_NOGRAVITY, S_NULL),
 )}
 del F
 
@@ -617,6 +640,7 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(17, "cell charge pack", 20, MF_SPECIAL, "template"),
     ThingType(8, "backpack", 20, MF_SPECIAL, "template"),
     ThingType(2005, "chainsaw", 20, MF_SPECIAL, "template"),
+    ThingType(2003, "MT_MISC27", 20, MF_SPECIAL, "info.c"),           # P9: the rocket launcher
     # decor: radius and MF_SOLID from GZDoom (vanilla values); corpses and gore are not solid
     ThingType(43, "TorchTree", 16, MF_SOLID, "gzdoom"),
     ThingType(47, "Stalagtite", 16, MF_SOLID, "gzdoom"),
@@ -639,7 +663,7 @@ NOT_THINGS = frozenset({1, 2, 3, 4, 11})
 
 
 # ================================================================================================
-# WEAPONS -- d_items.c `weaponinfo[]` for the four weapons E1M1 offers in single player.
+# WEAPONS -- d_items.c `weaponinfo[]` for the four weapons E1M1 offers in single player, and (P9) the launcher.
 # ================================================================================================
 @dataclass(frozen=True)
 class WeaponInfo:
@@ -662,6 +686,8 @@ WEAPONINFO: Dict[int, WeaponInfo] = {w.weapon: w for w in (
                "S_SGUNFLASH1"),
     WeaponInfo(WP_CHAINSAW, "chainsaw", AM_NOAMMO, "S_SAWUP", "S_SAWDOWN", "S_SAW", "S_SAW1",
                S_NULL),
+    WeaponInfo(WP_MISSILE, "missile", AM_MISL, "S_MISSILEUP", "S_MISSILEDOWN", "S_MISSILE", "S_MISSILE1",
+               "S_MISSILEFLASH1"),                                    # P9: the rocket launcher
 )}
 
 
@@ -671,7 +697,7 @@ WEAPONINFO: Dict[int, WeaponInfo] = {w.weapon: w for w in (
 # ================================================================================================
 MAX_FINITE_TICS = 14   # the schema stores tics in one nibble with 15 meaning "forever" (DOOM's -1)
 # States that CODE sets directly, outside any mobjinfo/weaponinfo entry point:
-#   p_pspr.c A_FirePistol / A_FireShotgun: P_SetMobjState (player->mo, S_PLAY_ATK2)
+#   p_pspr.c A_FirePistol / A_FireShotgun / (P9) A_GunFlash: P_SetMobjState (player->mo, S_PLAY_ATK2)
 CODE_ENTRY_STATES: Dict[str, str] = {"S_PLAY_ATK2": "mobj"}
 
 

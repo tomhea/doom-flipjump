@@ -40,7 +40,7 @@ FJ = ROOT / "src" / "fj"
 N = 400
 # (fj cell, nibbles) printed after every record
 CELLS = (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("p_dc", 2), ("p_dead", 1), ("rng_pl", 2), ("wp_st", 2),
-         ("wp_tics", 1), ("wp_frm", 1), ("wp_sy", 2), ("hud_v + 3*dw", 3), ("hud_v + 6*dw", 3),
+         ("wp_tics", 1), ("wp_frm", 2), ("wp_sy", 2), ("hud_v + 3*dw", 3), ("hud_v + 6*dw", 3),
          ("p_atk", 2))                    # M7 P7: player->attacker
 
 
@@ -83,7 +83,7 @@ def _records():
 def _want(ws, states, frames) -> str:
     idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(states)}
     bar = hudcode.slot_codes(hud.slot_values(ammo=None, health=max(0, ws.p_health), armor=ws.p_armor,
-                                             owned=(False, False, False), blue=False))
+                                             owned=(False,) * 6, blue=False))
     vals = [ws.p_health & 0xFFF, ws.p_armor, ws.p_armortype, ws.p_damagecount, ws.p_dead, ws.rng_player,
             idx[ws.p_wpn_state], ws.p_wpn_tics, frames.index(WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state])),
             ws.p_wpn_sy, bar[3] | bar[4] << 4 | bar[5] << 8, bar[6] | bar[7] << 4 | bar[8] << 8, ws.p_attacker]
@@ -198,7 +198,7 @@ def _build(tmp_path, name, mut=None, knock=False):
         for f, v in pokes.items():
             if f == "p_wpn_state":
                 body += ["hex.set 2, wp_st, %d" % idx[v],
-                         "hex.set 1, wp_frm, %d" % frames.index(WC.psprite_lump(gd.STATE_NAMES[v]))]
+                         "hex.set 2, wp_frm, %d" % frames.index(WC.psprite_lump(gd.STATE_NAMES[v]))]
             else:
                 c, n = nib[f]
                 body.append("hex.set %d, %s, %d" % (n, c, v & (16 ** n - 1)))

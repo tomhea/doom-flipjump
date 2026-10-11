@@ -289,7 +289,7 @@ def dp_lines(knock: bool = False) -> List[str]:
         st = gd.STATES[down]
         assert st.action == "A_Lower" and 0 < st.tics < 15, (down, st.action, st.tics)
         out += ["  dpk_w%d:" % w, "    hex.set 2, wp_st, %d" % idx[down], "    hex.set 1, wp_tics, %d" % st.tics,
-                "    hex.set 1, wp_frm, %d" % frames.index(WC.psprite_lump(down)), "    ;dpk_lower"]
+                "    hex.set %d, wp_frm, %d" % (WC.FRAME_NIBBLES, frames.index(WC.psprite_lump(down))), "    ;dpk_lower"]
     out += ["  dpk_lower:",
             "    hex.add_constant 2, wp_sy, %d" % WC.LOWER,
             "    hex.cmp 2, wp_sy, wp_bottom_c, dp_out, dpk_bt, dpk_bt",

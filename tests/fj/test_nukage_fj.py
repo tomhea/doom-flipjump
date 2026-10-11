@@ -189,7 +189,7 @@ def _build(tmp_path, name, mut=None):
                  "hex.set 1, p_at, %d" % rec["at"], "hex.set 2, p_dc, %d" % rec["dc"],
                  "hex.set 2, rng_pl, %d" % rec["rng"], "hex.set 1, wp_rdy, %d" % rec["ready"],
                  "hex.set 2, wp_st, %d" % idx[up], "hex.set 1, wp_tics, 1", "hex.set 2, wp_sy, %d" % WC.TOP,
-                 "hex.set 1, wp_frm, %d" % frames.index(WC.psprite_lump(up))]
+                 "hex.set 2, wp_frm, %d" % frames.index(WC.psprite_lump(up))]
         body += ["hex.set 1, dstate + %d*dw, %d" % (d, v) for d, v in enumerate(rec["doors"])]
         body += ["hex.set 1, lstate + %d*dw, %d" % (k, v) for k, v in enumerate(rec["lifts"])]
         body += ["stl.fcall nk_go, nk_ret"]

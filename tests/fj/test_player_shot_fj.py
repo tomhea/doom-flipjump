@@ -127,11 +127,13 @@ def _program(start, mut=None):
             "hex.input %d, aim_sid" % WC.AIM_N,                        # the poked window
             "hex.zero 2, pkeys",
             "hex.if_flags kin, 0xAAAA, kf_no, kf_yes", "kf_yes:", "hex.xor_by pkeys + dw, 0x8", "kf_no:",
-            "hex.zero 1, kb_w1", "hex.zero 1, kb_w2", "hex.zero 1, kb_w3", "hex.zero 1, kb_w4",
-            "hex.if_flags kin, 0xCCCC, k1_no, k1_yes", "k1_yes:", "hex.set 1, kb_w1, 1", "k1_no:",
-            "hex.if_flags kin, 0xF0F0, k2_no, k2_yes", "k2_yes:", "hex.set 1, kb_w2, 1", "k2_no:",
-            "hex.if_flags kin, 0xFF00, k3_no, k3_yes", "k3_yes:", "hex.set 1, kb_w3, 1", "k3_no:",
-            "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_w4, 1", "k4_no:",
+            "hex.zero 1, kb_now + 8*dw", "hex.zero 1, kb_now + 9*dw", "hex.zero 1, kb_now + 10*dw", "hex.zero 1, kb_now + 11*dw",
+            "hex.if_flags kin, 0xCCCC, k1_no, k1_yes", "k1_yes:", "hex.set 1, kb_now + 8*dw, 1", "k1_no:",
+            "hex.if_flags kin, 0xF0F0, k2_no, k2_yes", "k2_yes:", "hex.set 1, kb_now + 9*dw, 1", "k2_no:",
+            "hex.if_flags kin, 0xFF00, k3_no, k3_yes", "k3_yes:", "hex.set 1, kb_now + 10*dw, 1", "k3_no:",
+            "hex.if_flags kin + dw, 0xAAAA, k4_no, k4_yes", "k4_yes:", "hex.set 1, kb_now + 11*dw, 1", "k4_no:",
+            "hex.zero 1, kb_now + 12*dw",                                       # P9: key 5 (bit 5)
+            "hex.if_flags kin + dw, 0xCCCC, k5_no, k5_yes", "k5_yes:", "hex.set 1, kb_now + 12*dw, 1", "k5_no:",
             text,
             "stl.output 124",                                           # '|': the calls end, the cells follow
             *[x for c, n in CELLS for x in ("hex.print_as_digit %d, %s, 0" % (n, c), "stl.output 44")],
@@ -143,9 +145,9 @@ def _program(start, mut=None):
             "stl.output 59", "stl.fret dm_ret",
             "bad:", "stl.loop", "done:", "stl.loop",
             "rmagic: hex.vec 2", "kin: hex.vec 2", "pkeys: hex.vec 2",
-            "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
+            "kb_now: hex.vec 13",                    # P9: the weapon reads the keys the frame acts on (kb_now)
             "aim_sid: hex.vec %d" % (2 * WC.AIM_N), "dm_ret: hex.vec w/4",
-            *WC.weapon_decls(start, states, frames), *WC.weapon_const_decls(), *WC.shot_decls(),
+            *WC.weapon_decls(start, states, frames, misl=True), *WC.weapon_const_decls(), *WC.shot_decls(),
             *hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))),
             generate_dispatch_table_fj("ammobcd", WC.ammo_digit_values(), index_nibbles=3, result_nibbles=3),
             WC.shot_table_fj()]
@@ -190,7 +192,7 @@ def _run_fj(tmp_path, name, script, windows, saw, mut=None):
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
     fj.assemble([consts.resolve(), src.resolve()], out, memory_width=W, print_time=False)
     feed = b"".join(bytes([1, int(k["fire"]) | int(k["w1"]) << 1 | int(k["w2"]) << 2 | int(k["w3"]) << 3
-                           | int(k["w4"]) << 4] + win) for k, win in zip(script, windows)) + bytes([0])
+                           | int(k["w4"]) << 4 | int(k["w5"]) << 5] + win) for k, win in zip(script, windows)) + bytes([0])
     io = FixedIO(feed)
     fj.run(out, io_device=io, print_time=False, print_termination=False)
     rows = []

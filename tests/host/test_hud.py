@@ -43,9 +43,11 @@ def test_the_slots_own_disjoint_columns_inside_the_bar():
 
 
 @pytest.mark.parametrize("vals", [hudcode.LEVEL_START,
-                                  dict(ammo=8, health=57, armor=25, owned=(True, True, False), blue=True),
-                                  dict(ammo=None, health=0, armor=200, owned=(False, False, True), blue=False),
-                                  dict(ammo=123, health=100, armor=7, owned=(True, True, True), blue=True)])
+                                  dict(ammo=8, health=57, armor=25, owned=(True, True, False, True, False, False),
+                                       blue=True),
+                                  dict(ammo=None, health=0, armor=200, owned=(False, False, True, False, True, False),
+                                       blue=False),
+                                  dict(ammo=123, health=100, armor=7, owned=(True,) * 6, blue=True)])
 def test_a_slot_column_is_the_full_bar_column(colours, vals):
     """the fj side redraws ONE slot's columns from its own variant: that must be what the whole bar shows there"""
     full = hud.bar_pixels(colours, **vals)
@@ -92,3 +94,55 @@ def test_e1m1_lights_the_weapon_with_one_row():
     rm = ReferenceModel(GAME_CFG)
     mw = WadFile.from_path(DEFAULT_MAP_WAD)
     assert len({hud.psprite_light_row(rm, s.light) for s in mw.sectors("E1M1")}) == 1
+
+
+# ---- P9 (the owner's play-test, 2026-10-10: "fix ARMS on the status bar to match DOOM") ------------------------------
+def test_arms_are_dooms_six_digits_and_the_chainsaw_has_none():
+    """DOOM's arms widget: digits 2..7, digit d lit when weaponowned[d - 1] -- the pistol, the shotgun, the chaingun, the
+    launcher, the plasma rifle, the BFG. The fist and the chainsaw share slot 1: owning the chainsaw lights NOTHING
+    (until P9 the bar lit a "4" for it); owning the launcher lights 5"""
+    from doomfj import gamedata as gd
+    assert hud.ARMS_DIGITS == (2, 3, 4, 5, 6, 7)
+    assert [n for n, *_r in hud.bar_slots() if n.startswith("arms")] == ["arms%d" % d for d in range(2, 8)]
+    owned = [0] * gd.NUMWEAPONS
+    owned[gd.WP_FIST] = owned[gd.WP_PISTOL] = owned[gd.WP_CHAINSAW] = 1
+    assert hud.arms_owned(owned) == (True, False, False, False, False, False)
+    owned[gd.WP_MISSILE] = 1
+    assert hud.arms_owned(owned) == (True, False, False, True, False, False)
+    for w, d in ((gd.WP_PISTOL, 2), (gd.WP_SHOTGUN, 3), (gd.WP_CHAINGUN, 4), (gd.WP_MISSILE, 5), (gd.WP_PLASMA, 6),
+                 (gd.WP_BFG, 7)):
+        one = [0] * gd.NUMWEAPONS
+        one[w] = 1
+        assert hud.arms_owned(one) == tuple(x == d for x in hud.ARMS_DIGITS), (w, d)
+
+
+def test_the_arms_digits_are_drawn_lit_and_dim_inside_their_panel(colours):
+    """every digit 2..7 is drawn (the 3x5 font), in the owned colour when lit and the dim one when not, inside the ARMS
+    panel and clear of its separators; ARMOR and KEYS keep their labels and the card inside their panels"""
+    from doomfj.menu import _SMALL_GLYPHS
+    _n, a0, a1 = next(p for p in hud.PANELS if p[0] == "ARMS")
+    for owned in ((True, False, False, True, False, False), (False,) * 6, (True,) * 6):
+        px = hud.bar_pixels(colours, **dict(hudcode.LEVEL_START, owned=owned))
+        for i, d in enumerate(hud.ARMS_DIGITS):
+            x0 = hud.ARMS_X0 + i * hud.ARMS_PITCH
+            assert a0 < x0 and x0 + hud.ARMS_W <= a1
+            want = {(x0 + c, hud.ARMS_Y + r) for r, row in enumerate(_SMALL_GLYPHS[str(d)].split("|"))
+                    for c, ch in enumerate(row) if ch == "#"}
+            ink = colours["owned" if owned[i] else "unowned"]
+            got = {(x, y) for y in range(hud.BAR_ROWS) for x in range(x0, x0 + hud.ARMS_W) if px[y][x] == ink}
+            assert got == want, (d, owned)
+    _n, k0, k1 = next(p for p in hud.PANELS if p[0] == "KEYS")
+    assert k0 < hud.CARD_BOX[0] and hud.CARD_BOX[0] + hud.CARD_BOX[2] <= k1
+
+
+def test_control_the_arms_check_catches_the_old_chainsaw_digit(colours, monkeypatch):
+    """R9: the pre-P9 bar -- three digits 2 3 4 with the CHAINSAW behind "4" -- fails the mapping check: owning the
+    chainsaw would light a digit"""
+    from doomfj import gamedata as gd
+    owned = [0] * gd.NUMWEAPONS
+    owned[gd.WP_PISTOL] = owned[gd.WP_CHAINSAW] = 1
+    old = (bool(owned[gd.WP_PISTOL]), bool(owned[gd.WP_SHOTGUN]), bool(owned[gd.WP_CHAINSAW]))
+    assert sum(old) == 2 != sum(hud.arms_owned(owned)) == 1
+    monkeypatch.setattr(hud, "arms_owned", lambda o: old + (False,) * 3)
+    with pytest.raises(AssertionError):
+        test_arms_are_dooms_six_digits_and_the_chainsaw_has_none()

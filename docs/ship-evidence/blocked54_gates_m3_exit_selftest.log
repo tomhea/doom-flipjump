@@ -1,0 +1,85 @@
+fjm    : build/doom_e1m1_blocked54.fjm
+menu   : ['DOOM ON FLIPJUMP', '', 'NEW GAME', 'HELP', 'EXIT']   colours bg=0 text=4 hi=176 credit=101
+skills : ['EASY', 'MEDIUM', 'HARD'] -- hidden [42, 41, 22]; the boot skill is hard
+script : boot in menu -> esc@2 -> walk -> enter@6 (W held) -> esc@9 -> the skill screen @13, clamp both ends, back, NEW GAME at easy@20, medium@25, hard@30 -> the help from the world @32 (W held) -> esc@34 -> the main menu, HELP @37, its help @38, h@40, h@41, esc@42, up@43, h@44, esc@45, esc@46 -> the help from the world @47, h@48 -> P9: EXIT @52, clamp @53, up/down @54-55, its help @56-57, esc to the world @59, enter on EXIT @64: the HALT
+  400,778,056 ops -> 64 frames
+  frame  0 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  1 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  2 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  3 world hard    (-400.000, 256.000)  BYTE-EXACT  state ok
+  frame  4 world hard    (-384.000, 256.000)  BYTE-EXACT  state ok
+  frame  5 world hard    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  6 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  7 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  8 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  9 world hard    (-352.000, 256.000)  BYTE-EXACT  state ok
+  frame 10 world hard    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 11 world hard    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 12 MENU  main    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 13 MENU  skill 2 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 14 MENU  skill 2 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 15 MENU  skill 1 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 16 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 17 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 18 MENU  main    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 19 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 20 world easy    (-416.000, 256.000)  NEW GAME  BYTE-EXACT  state ok
+  frame 21 world easy    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 22 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 23 MENU  skill 0 (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 24 MENU  skill 1 (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 25 world medium  (-416.000, 256.000)  NEW GAME  BYTE-EXACT  state ok
+  frame 26 world medium  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 27 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 28 MENU  skill 1 (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 29 MENU  skill 2 (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 30 world hard    (-416.000, 256.000)  NEW GAME  BYTE-EXACT  state ok
+  frame 31 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 32 MENU  help/g  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 33 MENU  help/g  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 34 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 35 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 36 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 37 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 38 MENU  help/m  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 39 MENU  help/m  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 40 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 41 MENU  help/m  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 42 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 43 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 44 MENU  help/m  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 45 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 46 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 47 MENU  help/g  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 48 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 49 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 50 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 51 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 52 MENU  main/X  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 53 MENU  main/X  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 54 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 55 MENU  main/X  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 56 MENU  help/m  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 57 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 58 MENU  main/X  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 59 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 60 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 61 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 62 MENU  main/H  (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame 63 MENU  main/X  (-416.000, 256.000)  BYTE-EXACT  state ok
+
+  CONTROL: menu frames 44, world frames 20, frames that moved the player 6
+  CONTROL: the player did NOT move during the 3 menu frames with W held: ok
+  CONTROL: the screens shown: main menu yes, the skill screen at highlights [0, 1, 2] of 3
+  CONTROL (P3.4): the main menu on HELP yes, the help from the menu yes, from the world yes
+  CONTROL (P3.4): the player did NOT move during the 2 help frames with W held: ok
+  CONTROL (P3.4): the help closed back to the world (frame 34) and to the main menu on HELP (frame 40): yes
+  CONTROL: the first NEW GAME found the player walked away (yes), and every NEW GAME frame is the spawn view (yes)
+  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: yes
+  CONTROL: distinct pictures: 21 of 64
+  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, every door's cells) equals the oracle's: yes, 64 frames
+  M7 P7: the mirror's player died on 0 frames -- none, as this walk expects
+  P9 HALT: the program HALTED after 64 frames (cause [0]); the oracle does NOT halt at frame 64
+
+M3 GATE: FAIL
+rc=1

@@ -36,8 +36,8 @@ from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, Scr
 from doomfj.config import Config
 from doomfj.doorcode import WAIT_NIBBLES
 from doomfj.harness import W
-from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_SCR, MAIN_HELP_SCR, MENU_KEYS,
-                         menu_step)
+from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_SCR, MAIN_EXIT_SCR, MAIN_HELP_SCR,
+                         MENU_HALTED, MENU_KEYS, menu_step)
 from doomfj.things import spawn_leaf_lists
 from doomfj.restartcode import routine_lines
 from doomfj.wall_renderer import (BOOT_SKILL, MENU_STATE_DECLS, SKILLS, menu_state_lines,
@@ -144,7 +144,7 @@ def _program(state_lines, routines, scr0=0):
         "tm_frame:",
         "    hex.zero 1, ev_enter", "    hex.zero 1, ev_esc", "    hex.zero 1, ev_up",
         "    hex.zero 1, ev_dn", "    hex.zero 1, ev_help",
-        f"    rep({POLLS}, i) kb.poll kstat, kcode, kb_f, kb_b, kb_l, kb_r, kb_u, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, "
+        f"    rep({POLLS}, i) kb.poll kstat, kcode, kb_f, kb_b, kb_l, kb_r, kb_u, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, kb_w5, kb_now, "
         "ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
         *state_lines,
         *_dump(),
@@ -157,7 +157,8 @@ def _program(state_lines, routines, scr0=0):
         *[f"menu_scr: hex.vec 1, {scr0}" if d.startswith("menu_scr:") else d for d in MENU_DECLS_CLEAN],
         "kstat: hex.vec 1", "kcode: hex.vec 2", "kb_f: hex.vec 1", "kb_b: hex.vec 1",
         "kb_l: hex.vec 1", "kb_r: hex.vec 1", "kb_u: hex.vec 1",
-        "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1", "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",   # M7 P4.1
+        "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1", "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1", "kb_w5: hex.vec 1",   # M7 P4.1
+        "kb_now: hex.vec 13",                                       # P9: the press latch kb.poll sets
         "tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {FRAMES}",
         "tm_base: hex.vec w/4", "tm_idx: hex.vec w/4", "tm_p: hex.vec w/4", "tm_v: hex.vec 2",
         *cells,
@@ -197,6 +198,10 @@ def _expected(events, scr0=0):
                 if e.is_down and e.keycode in MENU_KEYS:
                     ev.add(MENU_KEYS[e.keycode])
         st["mode"], st["scr"], st["sel"], new_game = menu_step(st["mode"], st["scr"], st["sel"], ev)
+        if st["scr"] == MENU_HALTED:                # P9: EXIT halts the program mid-frame: no dump, no later frame --
+            lines.append("")                        # the output ends with the last frame's newline
+            states.append(dict(st))
+            break
         if new_game is not None:                    # the chosen skill's level start
             st.update(level_start(new_game))
         lines.append(_fmt(st))
@@ -265,10 +270,11 @@ HELP_SCRIPTS = {
         (0, True, DOWN), (1, False, DOWN), (4, True, ENTER), (5, False, ENTER),
         (8, True, ESC), (9, False, ESC), (12, True, W_KEY), (13, False, W_KEY),
         (16, True, ENTER), (17, False, ENTER)],
-    "help: the main menu clamps at both items": [
+    "help: the main menu clamps at both ends (P9: EXIT is the last item)": [
         (0, True, UP), (1, False, UP), (4, True, S_KEY), (5, False, S_KEY),
-        (8, True, DOWN), (9, False, DOWN), (12, True, UP), (13, False, UP),
-        (16, True, W_KEY), (17, False, W_KEY)],
+        (8, True, DOWN), (9, False, DOWN), (12, True, DOWN), (13, False, DOWN),
+        (16, True, UP), (17, False, UP), (20, True, W_KEY), (21, False, W_KEY),
+        (24, True, W_KEY), (25, False, W_KEY)],
     "help: h on the main menu opens it, h closes it; esc on HELP resumes the world": [
         (0, True, H_KEY), (1, False, H_KEY), (4, True, H_KEY), (5, False, H_KEY),
         (8, True, ESC), (9, False, ESC), (12, True, H_KEY), (13, False, H_KEY)],
@@ -289,6 +295,27 @@ HELP_SCRIPTS = {
         (16, True, ENTER), (17, False, ENTER)],
 }
 LEVEL_DONE_HELP_SCRIPT = [(0, True, H_KEY), (1, False, H_KEY), (4, True, ENTER), (5, False, ENTER)]
+
+
+# P9 (the owner's play-test, 2026-10-10) -- the main menu's EXIT item: enter on it HALTS the program
+EXIT_SCRIPTS = {
+    "exit: down, down, enter halts on frame 3 (nothing printed for it or after)": [
+        (0, True, DOWN), (1, False, DOWN), (4, True, S_KEY), (5, False, S_KEY),
+        (12, True, ENTER), (13, False, ENTER), (20, True, ESC), (21, False, ESC)],
+    "exit: esc on EXIT resumes the world; esc, the menu on NEW GAME": [
+        (0, True, DOWN), (1, False, DOWN), (4, True, DOWN), (5, False, DOWN),
+        (8, True, ESC), (9, False, ESC), (12, True, ESC), (13, False, ESC)],
+    "exit: h on EXIT opens the help, which closes to HELP; up to NEW GAME": [
+        (0, True, DOWN), (1, False, DOWN), (4, True, DOWN), (5, False, DOWN),
+        (8, True, H_KEY), (9, False, H_KEY), (12, True, ESC), (13, False, ESC),
+        (16, True, UP), (17, False, UP)],
+    "exit: up from EXIT is HELP, enter there opens the help (no halt)": [
+        (0, True, DOWN), (1, False, DOWN), (4, True, DOWN), (5, False, DOWN),
+        (8, True, UP), (9, False, UP), (12, True, ENTER), (13, False, ENTER)],
+    "exit: esc and enter in one frame on EXIT: esc wins": [
+        (0, True, DOWN), (1, False, DOWN), (4, True, DOWN), (5, False, DOWN),
+        (8, True, ESC), (9, True, ENTER), (10, False, ESC), (11, False, ENTER)],
+}
 
 
 def _restart():
@@ -327,6 +354,47 @@ def test_the_help_screen_follows_the_rules(shipped, name):
     assert got == want, _first_difference(name, got, want)
 
 
+@pytest.mark.parametrize("name", sorted(EXIT_SCRIPTS))
+def test_the_exit_item_follows_the_rules(shipped, name):
+    """P9: the main menu's EXIT, the RUN lines against `menu_step` -- the halting script's output stops at the frame
+    before the halt (the program never reaches its dump, nor the frames the script still has keys for)"""
+    got, want = _run(shipped, EXIT_SCRIPTS[name]), _expected(EXIT_SCRIPTS[name])[0]
+    assert got == want, _first_difference(name, got, want)
+
+
+def test_the_exit_scripts_halt_once_and_reach_every_exit_move():
+    """R9 against a vacuous EXIT script set: one script halts (and prints 3 frames, then nothing), the others pass
+    through EXIT and leave it every way -- up to HELP, esc to the world, h to the help"""
+    runs = {n: _expected(EXIT_SCRIPTS[n])[1] for n in EXIT_SCRIPTS}
+    halted = [n for n, r in runs.items() if r[-1]["scr"] == MENU_HALTED]
+    assert halted == ["exit: down, down, enter halts on frame 3 (nothing printed for it or after)"], halted
+    want = _expected(EXIT_SCRIPTS[halted[0]])[0]
+    assert len(want) == 4 and want[3] == "" and all(want[:3]), want
+    steps = {((a["mode"], a["scr"]), (b["mode"], b["scr"])) for r in runs.values() for a, b in zip(r, r[1:])}
+    assert ((1, MAIN_EXIT_SCR), (1, MAIN_HELP_SCR)) in steps and ((1, MAIN_EXIT_SCR), (0, 0)) in steps
+    assert ((1, MAIN_EXIT_SCR), (1, HELP_MENU_SCR)) in steps and ((1, MAIN_EXIT_SCR), (1, MENU_HALTED)) in steps
+
+
+EXIT_MUTANTS = {
+    "enter on EXIT does not halt": ("mn_exit: stl.loop", "mn_exit: ;mn_done"),
+    "down from HELP stays clamped (no EXIT)": ("mn_q4:", "mn_q4: ;mn_done"),
+    "up from EXIT goes to NEW GAME": ("mn_x3:", "mn_x3: hex.if0 1, ev_up, mn_done\nhex.zero 1, menu_scr\n;mn_done"),
+    "h on EXIT halts": ("mn_x2:", "mn_x2: hex.if0 1, ev_help, mn_x3\n;mn_exit"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(EXIT_MUTANTS))
+def test_a_broken_exit_is_caught(tmp_path, name):
+    """R9: each mutant of P9's lines, assembled through the same harness, must disagree with the mirror on some
+    EXIT script"""
+    lines = menu_state_lines(_restart())
+    old, new = EXIT_MUTANTS[name]
+    bad_lines = _mutate(lines, old, new)
+    bad = _assemble(tmp_path, "exitbad", bad_lines, _restart())
+    caught = [n for n in EXIT_SCRIPTS if _run(bad, EXIT_SCRIPTS[n]) != _expected(EXIT_SCRIPTS[n])[0]]
+    assert caught, "a menu where %s passed every EXIT script" % name
+
+
 def test_level_complete_ignores_h(shipped_done):
     got, want = _run(shipped_done, LEVEL_DONE_HELP_SCRIPT), _expected(LEVEL_DONE_HELP_SCRIPT,
                                                                       LEVEL_DONE_SCR)[0]
@@ -341,7 +409,7 @@ def test_the_help_scripts_reach_every_new_state():
     runs = {n: _expected(HELP_SCRIPTS[n])[1] for n in HELP_SCRIPTS}
     seen = {(s["mode"], s["scr"]) for r in runs.values() for s in r}
     assert seen == {(0, 0), (1, 0), (1, 1), (1, MAIN_HELP_SCR), (1, HELP_MENU_SCR),
-                    (1, HELP_GAME_SCR)}, seen
+                    (1, HELP_GAME_SCR), (1, MAIN_EXIT_SCR)}, seen          # P9: the clamp script passes EXIT
     boot = {"mode": 1, "scr": 0}                    # every script starts on the main menu
     steps = {((a["mode"], a["scr"]), (b["mode"], b["scr"])) for r in runs.values()
              for a, b in zip([boot] + r, r)}

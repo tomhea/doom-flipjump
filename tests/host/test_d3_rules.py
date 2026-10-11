@@ -73,7 +73,9 @@ def test_each_mobile_ranks_by_its_pool():
     from doomfj.monsters import mobile_lump
     from doomfj.projcode import _info, chain
     from doomfj.reference_model import MOBILE_RANK, mobile_rank
+    from doomfj.combat import ROCKET_INFO
     fire = chain(_info().spawnstate) + chain(_info().deathstate)
+    fire += chain(ROCKET_INFO.spawnstate) + chain(ROCKET_INFO.deathstate)  # P9: the player's rocket, the same pool
     fx = chain("S_BLOOD1") + chain("S_PUFF1")
     assert fire and fx and not set(fire) & set(fx)
     assert {mobile_rank(mobile_lump(s)) for s in fire} == {1}

@@ -24,8 +24,9 @@ the floor at the tic-start position -- `collision.move_with_collision_lines(pick
 
 THE GIVES (`give_<type>`, fcall'd, `gv_ret`, -> `gv_ok`), `_touch`'s cases with DOOM's caps; `ga<a>` is P_GiveAmmo for
 ammo a with `ga_n` rounds (the cap from ONE D4 table `amcap`[backpack << 4 | a], no runtime multiply; refused AT the
-cap; from empty, the auto-switch -- E1M1 can own neither the chaingun, the plasma rifle nor the launcher, asserted,
-so only the clip's "fist -> pistol" and the shells' "fist or pistol, shotgun owned -> shotgun" are emitted).
+cap; from empty, the auto-switch -- E1M1 can own neither the chaingun nor the plasma rifle, asserted, so the clip's
+"fist -> pistol", the shells' "fist or pistol, shotgun owned -> shotgun" and (P9) the rockets' "fist, launcher owned ->
+the launcher" are emitted). P9: `give_2003`, the rocket launcher (P_GiveWeapon: two rockets, owned, pending).
 
 THE BLOCKING (`_solid_thing_at`): the monsters by `pb_mon` (`stl.fcall pb_mon, pb_ret` -> `pb_hit`; per slot
 `mon_solid`, then |x - cpx| < (r + 16) << 16 on both axes, 16.16, strict) -- `collision.move_with_collision_lines
@@ -72,7 +73,8 @@ PK_RADIUS = 20 + 16                   # combat.ITEM_RADIUS + PLAYER_R: the touch
 REACH_UP, REACH_DOWN = 56, 8          # combat.REACH_UP / REACH_DOWN
 # the dropped variants' give routines (DROP_ITEM's types, `dropped=True`)
 DROPPED = {2007: "give_2007d", 2001: "give_2001d"}
-WEAPON_OWN = {gd.WP_FIST: 0, gd.WP_PISTOL: 1, gd.WP_SHOTGUN: 2, gd.WP_CHAINSAW: 3}   # weaponcode.OWN
+WEAPON_OWN = {gd.WP_FIST: 0, gd.WP_PISTOL: 1, gd.WP_SHOTGUN: 2, gd.WP_CHAINSAW: 3,
+              gd.WP_MISSILE: 4}                                                            # weaponcode.OWN (P9: 4)
 
 
 def loot_on(player_mode: str) -> bool:
@@ -87,7 +89,7 @@ def _check_rules() -> None:
     assert (REACH_UP, REACH_DOWN) == (C.REACH_UP, C.REACH_DOWN)
     assert WEAPON_OWN == WC.OWN, WC.OWN
     assert {v: k for k, v in AMMO_CELL.items()}["am_clip"] == gd.AM_CLIP and WC.AMMO_CELL == {
-        gd.AM_CLIP: "am_clip", gd.AM_SHELL: "am_shell"}
+        gd.AM_CLIP: "am_clip", gd.AM_SHELL: "am_shell", gd.AM_MISL: "am_misl"}
     assert set(C.DROP_ITEM.values()) == set(DROPPED)
     assert gd.BONUSADD == 6 and gd.MAXHEALTH == 100 and C.MAX_HEALTH_BONUS == 200 == C.MAX_ARMOR_BONUS
     # every cap fits the 3-nibble ammo cells, and a give never overflows one: cap + the largest give < 4096
@@ -262,7 +264,11 @@ def give_ammo_lines(a: int) -> List[str]:
         out += _if_ready(p + "s", (gd.WP_FIST, gd.WP_PISTOL), f"{p}_sw", f"{p}_out")
         out += [f"  {p}_sw:", f"    hex.if0 1, wp_own + {WEAPON_OWN[gd.WP_SHOTGUN]}*dw, {p}_out",
                 f"    hex.set 1, wp_pend, {gd.WP_SHOTGUN}"]
-    # AM_CELL (the plasma rifle) and AM_MISL (the launcher): never owned on E1M1 -- no switch
+    elif a == gd.AM_MISL:            # P9: the fist up, the launcher owned -> the launcher
+        out += _if_ready(p + "m", (gd.WP_FIST,), f"{p}_sw", f"{p}_out")
+        out += [f"  {p}_sw:", f"    hex.if0 1, wp_own + {WEAPON_OWN[gd.WP_MISSILE]}*dw, {p}_out",
+                f"    hex.set 1, wp_pend, {gd.WP_MISSILE}"]
+    # AM_CELL (the plasma rifle): never owned on E1M1 -- no switch
     out += [f"  {p}_out:", "    stl.fret ga_ret"]
     return out
 
@@ -319,6 +325,11 @@ def give_lines(kind: int, dropped: bool = False) -> List[str]:
         own = f"wp_own + {WEAPON_OWN[gd.WP_CHAINSAW]}*dw"
         out += [f"    hex.if1 1, {own}, {no}", f"    hex.set 1, {own}, 1",
                 f"    hex.set 1, wp_pend, {gd.WP_CHAINSAW}", f"    ;{ok}"]
+    elif kind == 2003:                                                # LAUN (P9): P_GiveWeapon, 2 rockets
+        own = f"wp_own + {WEAPON_OWN[gd.WP_MISSILE]}*dw"
+        out += _ga_call(gd.AM_MISL, gd.CLIPAMMO[gd.AM_MISL] * 2)
+        out += [f"    hex.if0 1, {own}, {p}_new", "    stl.fret gv_ret",       # owned: taken iff ammo was given
+                f"  {p}_new:", f"    hex.set 1, {own}, 1", f"    hex.set 1, wp_pend, {gd.WP_MISSILE}", f"    ;{ok}"]
     elif kind == 2001:                                                # SHOT: P_GiveWeapon (2 clips, 1 dropped)
         own = f"wp_own + {WEAPON_OWN[gd.WP_SHOTGUN]}*dw"
         out += _ga_call(gd.AM_SHELL, gd.CLIPAMMO[gd.AM_SHELL] * (1 if dropped else 2))

@@ -21,7 +21,10 @@ def test_with_loot_the_weapon_tic_writes_no_bar_slot():
     assert not any("hud_v" in ln for ln in tic), "the weapon phase still copies the bar (before the move)"
     bar = WC.bar_lines()
     assert any(ln.startswith("hex.mov 3, hud_v,") for ln in bar)
-    assert sum("hud_v + " in ln for ln in bar) == 3                       # owned 2, 3, 4
+    # P9: DOOM's ARMS -- the digits whose weapon wp_own holds: 2 (the pistol) and 3 (the shotgun); the chainsaw has no
+    # digit (it shares DOOM's slot 1 with the fist)
+    assert sum("hud_v + " in ln for ln in bar) == len(WC.arms_sources())
+    assert set(WC.arms_sources()) >= {"arms2", "arms3"} and "arms4" not in WC.arms_sources()
 
 
 def test_without_loot_the_bar_stays_in_the_weapon_tic():

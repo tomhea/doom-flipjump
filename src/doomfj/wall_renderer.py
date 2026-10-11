@@ -64,6 +64,8 @@ from doomfj.movercode import lift_tic_lines, lift_walk_lines, mover_decls, use_l
 from doomfj.doorcode import _box_test                                     # M7 P2a.2: the exit's box
 from doomfj.menu import LEVEL_DONE_SCR                                    # M7 P2a.2
 from doomfj.menu import HELP_GAME_SCR, HELP_MENU_SCR, MAIN_HELP_SCR      # M7 P3.4
+from doomfj.menu import MAIN_EXIT_SCR                                     # P9: the EXIT item
+from doomfj import keyboard as _keyboard                                   # P9: the press latch
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
@@ -432,13 +434,16 @@ STANDALONE_POLLS = 8
 # (doomfj.menu), and the colours come from the wad's own PLAYPAL.
 # M7 P3.4 (docs/gp-help.md): two items, NEW GAME and HELP -- up / down move between them. QUIT went:
 # it never did anything (no item was selectable but NEW GAME, and the program has no quit).
-DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP"]
+# P9 (the owner's play-test, 2026-10-10): a third item, EXIT, under HELP -- enter on it halts the program (`mn_exit`).
+DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP", "EXIT"]
 # which entry is highlighted. 2 = "NEW GAME" in DEFAULT_MENU -- an index that means nothing for a
 # caller-supplied list, so `menu_entries` brings its own `menu_selected`.
 DEFAULT_MENU_SELECTED = 2
 # M7 P3.4: the main menu's HELP item -- the row `menu_scr` MAIN_HELP_SCR highlights. A caller-supplied
 # menu must have one too (`_menu_lines` finds it by name).
 MENU_HELP_ITEM = "HELP"
+# P9: the main menu's EXIT item -- the row `menu_scr` MAIN_EXIT_SCR highlights; a caller-supplied menu must have one too
+MENU_EXIT_ITEM = "EXIT"
 
 # M7 P1.5 -- the SKILL SCREEN NEW GAME opens (docs/gp-skill-menu.md): entry SKILL_MENU_FIRST + k is
 # skill SKILLS[k], and `menu_sel` holds k, baked to the boot skill's (hard).
@@ -493,6 +498,10 @@ STANDALONE_SCRATCH_DECLS = [
     # M7 P4.1: the new held flags -- strafe left / right, fire, the number keys 1..4 (persisted with the others)
     "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1",
     "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1",
+    "kb_w5: hex.vec 1",                                                 # P9: '5', the rocket launcher
+    # P9 (doomfj.keyboard): the press latch -- per-frame scratch, zeroed before every frame's polls, so NOT persisted
+    # (the restore set carries it as ordinary residue, like the menu's ev_* events)
+    _keyboard.NOW_DECL,
     # M7 P6+P7: a turn key was held last frame (reference_model.turn_step's `turnheld`: the turn's slow first frame).
     # Persisted like the held flags it follows (build.STANDALONE_PERSIST); the restart zeroes it.
     "p_tnh: hex.vec 1, 0",
@@ -777,14 +786,17 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     puffs = bool(p31.get("barrel"))              # M7 P6: the puffs share the blood's pool (projcode `puffs`)
     if puffs:
         names.update({"S_PUFF1": 42, "S_PUFF2": 43, "S_PUFF3": 44, "S_PUFF4": 45})
+    rockets = bool(p31.get("rockets"))           # P9: the player's rocket shares the fireballs' pool
+    if rockets:
+        names.update({"S_ROCKET": 222, "S_EXPLODE1": 223, "S_EXPLODE2": 224, "S_EXPLODE3": 225})
     assert {s: gd.STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
-    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs)) == sorted(names.values())
+    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets)) == sorted(names.values())
     assert (FIREBALL_INFO.spawnstate, FIREBALL_INFO.deathstate) == ("S_TBALL1", "S_TBALLX1")
     mv = p31["mob_view"]
     assert sorted(mv) == sorted(names.values()), sorted(mv)
     rows, nt = p31["view_rows"], len(p31["rt_slot"])
     by_lump = {}
-    for s in projcode.pool_states(puffs):
+    for s in projcode.pool_states(puffs, rockets):
         row = mv[gd.STATE_INDEX[s]]
         assert p31["mob_first"] <= row < nt + len(rows), (s, row)
         by_lump.setdefault(mobile_lump(s), set()).add(row)
@@ -839,6 +851,7 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
     assert MENU_HELP_ITEM in entries, "the main menu needs its %r item (M7 P3.4)" % MENU_HELP_ITEM
+    assert MENU_EXIT_ITEM in entries, "the main menu needs its %r item (P9)" % MENU_EXIT_ITEM
     return [
         # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
@@ -858,6 +871,8 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
                 label="menu_frame", end_marker=False),
         ";frame_end",
         "mf_p34:",
+        f"hex.if_flags menu_scr, 1<<{MAIN_EXIT_SCR}, mf_p34h, mf_mainx",       # P9: the main menu on EXIT
+        "mf_p34h:",
         f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mf_help, mf_mainh",
         "mf_mainh:",
         menu_fj(cfg.W, cfg.H, entries, entries.index(MENU_HELP_ITEM), colours,
@@ -865,6 +880,10 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
         ";frame_end",
         "mf_help:",
         help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False),
+        ";frame_end",
+        "mf_mainx:",                       # P9
+        menu_fj(cfg.W, cfg.H, entries, entries.index(MENU_EXIT_ITEM), colours,
+                label="menu_frame_exit", end_marker=False),
         ";frame_end",
         *[line for k in range(len(SKILLS)) for line in (
             f"mf_s{k}:",
@@ -926,6 +945,8 @@ def menu_state_lines(restart) -> list:
         "mn_started:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
         # -- M7 P3.4: the help screen and the main menu with HELP highlighted
         "mn_p34:",
+        f"hex.if_flags menu_scr, 1<<{MAIN_EXIT_SCR}, mn_p34h, mn_mainx",       # P9: the main menu on EXIT
+        "mn_p34h:",
         f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mn_help, mn_mainh",
         # the help: esc or h close it -- to the main menu (HELP highlighted) when it was opened
         # there, to the world when it was opened from the world
@@ -936,14 +957,26 @@ def menu_state_lines(restart) -> list:
         "mn_hgame:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
         "mn_hmenu:", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
         # the main menu on HELP: esc resumes the world, enter or h open the help, up goes to NEW
-        # GAME (down is clamped: HELP is the last item)
+        # GAME, down (P9) to EXIT
         "mn_mainh:",
         "hex.if0 1, ev_esc, mn_q1", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
         "mn_q1:",
         "hex.if0 1, ev_enter, mn_q2", ";mn_tohelp", "mn_q2:",
         "hex.if0 1, ev_help, mn_q3", ";mn_tohelp", "mn_q3:",
-        "hex.if0 1, ev_up, mn_done", "hex.zero 1, menu_scr", ";mn_done",
+        "hex.if0 1, ev_up, mn_q4", "hex.zero 1, menu_scr", ";mn_done", "mn_q4:",
+        "hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_EXIT_SCR}", ";mn_done",
         "mn_tohelp:", f"hex.set 1, menu_scr, {HELP_MENU_SCR}", ";mn_done",
+        # P9 -- the main menu on EXIT: esc resumes the world, ENTER HALTS THE PROGRAM, h opens the help, up goes to
+        # HELP (down is clamped: EXIT is the last item). The halt is a jump-to-self under its own label -- neither the
+        # bare frame-tail `stl.loop` nor `bad: stl.loop`, the two lines selfreset.emit_reset_part counts -- so the
+        # interpreter ends "Looping" (the window closes), on this frame, before anything of it is presented.
+        "mn_mainx:",
+        "hex.if0 1, ev_esc, mn_x1", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
+        "mn_x1:",
+        "hex.if0 1, ev_enter, mn_x2", ";mn_exit", "mn_x2:",
+        "hex.if0 1, ev_help, mn_x3", ";mn_tohelp", "mn_x3:",
+        "hex.if0 1, ev_up, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
+        "mn_exit: stl.loop",
         # -- the main menu (NEW GAME highlighted)
         "mn_main:",
         "hex.if0 1, ev_esc, mn_m1", "hex.zero 1, mode", ";mn_done", "mn_m1:",
@@ -965,19 +998,24 @@ def menu_state_lines(restart) -> list:
 
 # M7 P3.4: the `menu_scr` values the help screen and the main menu's HELP highlight own, as an
 # `if_flags` mask (`menu_scr` is a nibble: bit k of the mask is scr == k)
-_P34_SCREENS = "(1<<%d)|(1<<%d)|(1<<%d)" % (HELP_MENU_SCR, HELP_GAME_SCR, MAIN_HELP_SCR)
+# (P9: and the EXIT highlight, MAIN_EXIT_SCR)
+_P34_SCREENS = "(1<<%d)|(1<<%d)|(1<<%d)|(1<<%d)" % (HELP_MENU_SCR, HELP_GAME_SCR, MAIN_HELP_SCR, MAIN_EXIT_SCR)
 
 
 def menu_screen_pixels(cfg, colours, scr: int, sel: int) -> list:
     """M7 P3.4 -- THE ORACLE'S PICTURE of a menu frame: what `_menu_lines` bakes for `menu_scr` =
     `scr` (and, on the skill screen, `menu_sel` = `sel`) -- the main menu on either item, the skill
     screen, LEVEL COMPLETE or the help. ONE mapping from the state to the screen, for every gate
-    and test that compares a menu frame (each kept its own table until this rung)."""
-    from doomfj.menu import help_pixels, pixels
+    and test that compares a menu frame (each kept its own table until this rung).
+    P9: the main menu on EXIT too; menu.MENU_HALTED (the program halted on EXIT) has NO picture -- it is refused."""
+    from doomfj.menu import MENU_HALTED, help_pixels, pixels
+    if scr == MENU_HALTED:
+        raise ValueError("menu.MENU_HALTED: the program halted on EXIT and presents no frame")
     if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
         return help_pixels(cfg.W, cfg.H, colours)
     lines, hi = {0: (DEFAULT_MENU, DEFAULT_MENU_SELECTED),
                  MAIN_HELP_SCR: (DEFAULT_MENU, DEFAULT_MENU.index(MENU_HELP_ITEM)),
+                 MAIN_EXIT_SCR: (DEFAULT_MENU, DEFAULT_MENU.index(MENU_EXIT_ITEM)),      # P9
                  1: (SKILL_MENU, SKILL_MENU_FIRST + sel),
                  LEVEL_DONE_SCR: (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED)}[scr]
     return pixels(cfg.W, cfg.H, lines, hi, colours)
@@ -1022,6 +1060,45 @@ def landing_drop_lines() -> list:
             "lnd_vd_end:"]
 
 
+def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
+    """M5 / M7 P1.5 / P9 -- the standalone frame's INPUT, alone: the menu's events and the press latch zeroed, the
+    `polls` keyboard polls, the latch OR-ed with the held flags, and the key byte `pkeys` built from the latch.
+    tests/fj/test_key_latch.py runs exactly these lines.
+
+    P9 (the owner's play-test, 2026-10-10: "a key pressed since the last input check must count"; doomfj.keyboard):
+    the frame acts on `kb_now` -- each held key's nibble is 1 when the key is held after the polls OR went down during
+    them -- not on the held flags, which a tap inside one frame's polls left unchanged. `pkeys` (the sim's, the doors',
+    the exit's, the restart's and the fire's) and the weapon's number keys (weaponcode) read it. The held flags still
+    carry "held" across frames (persisted), and a release with no press in the frame still takes effect."""
+    from doomfj import keyboard as KB
+    now = KB.now_cell
+    return [
+        # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
+        # state machine reads them
+        "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
+        "hex.zero 1, ev_help",                                          # M7 P3.4
+        f"hex.zero {len(KB.HELD_KEYS)}, {KB.KEY_NOW}",                  # P9: the press latch
+        f"rep({polls}, i) kb.poll kbstat, kbcode, "
+        + "".join(f"{KB.flag(k)}, " for k in KB.HELD_KEYS)            # M7 P4.1: strafe, fire, 1..4
+        + f"{KB.KEY_NOW}, "                                             # P9
+        "ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
+        *KB.now_lines(),                                                # P9: kb_now |= the held flags
+        # the frame's keys -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
+        # cell just zeroed IS a set, and is the cheapest primitive that does it.
+        "hex.zero 2, pkeys",
+        f"hex.if0 1, {now('f')}, sa_nf", "hex.xor_by pkeys, 0x1", "sa_nf:",
+        f"hex.if0 1, {now('b')}, sa_nb", "hex.xor_by pkeys, 0x2", "sa_nb:",
+        f"hex.if0 1, {now('l')}, sa_nl", "hex.xor_by pkeys, 0x4", "sa_nl:",
+        f"hex.if0 1, {now('r')}, sa_nr", "hex.xor_by pkeys, 0x8", "sa_nr:",
+        # M2-R4: the use key is bit 4, i.e. the HIGH nibble's bit 0 -- see wireformat.KEY_USE.
+        f"hex.if0 1, {now('u')}, sa_nu", "hex.xor_by pkeys + dw, 0x1", "sa_nu:",
+        # M7 P4.1: strafe left / right and fire -- bits 5, 6, 7 (wireformat.KEY_STRAFE_LEFT / _RIGHT / KEY_FIRE)
+        f"hex.if0 1, {now('sl')}, sa_nsl", "hex.xor_by pkeys + dw, 0x2", "sa_nsl:",
+        f"hex.if0 1, {now('sr')}, sa_nsr", "hex.xor_by pkeys + dw, 0x4", "sa_nsr:",
+        f"hex.if0 1, {now('fi')}, sa_nfi", "hex.xor_by pkeys + dw, 0x8", "sa_nfi:",
+    ]
+
+
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
                             press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
@@ -1048,26 +1125,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     before the bar's weapon slots (the knock's pickups change them).
     """
     return [
-        # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
-        # state machine reads them
-        "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
-        "hex.zero 1, ev_help",                                          # M7 P3.4
-        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, "
-        "kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, "                        # M7 P4.1
-        f"ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
-        # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
-        # cell just zeroed IS a set, and is the cheapest primitive that does it.
-        "hex.zero 2, pkeys",
-        "hex.if0 1, kb_f, sa_nf", "hex.xor_by pkeys, 0x1", "sa_nf:",
-        "hex.if0 1, kb_b, sa_nb", "hex.xor_by pkeys, 0x2", "sa_nb:",
-        "hex.if0 1, kb_l, sa_nl", "hex.xor_by pkeys, 0x4", "sa_nl:",
-        "hex.if0 1, kb_r, sa_nr", "hex.xor_by pkeys, 0x8", "sa_nr:",
-        # M2-R4: the use key is bit 4, i.e. the HIGH nibble's bit 0 -- see wireformat.KEY_USE.
-        "hex.if0 1, kb_u, sa_nu", "hex.xor_by pkeys + dw, 0x1", "sa_nu:",
-        # M7 P4.1: strafe left / right and fire -- bits 5, 6, 7 (wireformat.KEY_STRAFE_LEFT / _RIGHT / KEY_FIRE)
-        "hex.if0 1, kb_sl, sa_nsl", "hex.xor_by pkeys + dw, 0x2", "sa_nsl:",
-        "hex.if0 1, kb_sr, sa_nsr", "hex.xor_by pkeys + dw, 0x4", "sa_nsr:",
-        "hex.if0 1, kb_fi, sa_nfi", "hex.xor_by pkeys + dw, 0x8", "sa_nfi:",
+        *standalone_key_lines(polls),      # the polls, the press latch, the key byte (P9: factored out)
         *(menu or []),                     # M3: the menu frame + the branch past the world
         # M7 P7: the restart on use after death (restartcode.tic_lines) -- the world frame's START, before the
         # frozen-level guard and the door tic: the model's World.tic runs the restart, then the tic
@@ -1983,6 +2041,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
                         loot=_LOOT) if menu else None                # M7 P6+P7: the latch, berserk's key 1 and fist
+    # P9: the loot weapon's A_FireMissile calls the pool's rk_spawn -- p31_parts emits the rocket with the loot player
+    assert not _LOOT or bool(_p31 and _p31.get("rockets")), (
+        "P9: the loot player's launcher fires rk_spawn, which p31_parts emits only with knockback and infighting")
     if _P5:
         assert _proj and _p31.get("nmob"), (
             "M7 P5: MONSTER_MODE 'full' needs p31_parts' pools and mobile rows -- a map with monsters, the game tier")
@@ -4363,7 +4424,8 @@ BARREL_TYPE = 2035                       # M7 P6: MT_BARREL's doomednum (a baked
 
 # M7 P1.6 -- the actors whose every frame and rotation the bank holds, besides the map's monsters:
 # the barrels (they explode) and what the monsters' attacks spawn (P3-P5 draw them)
-ANIM_ACTORS = ("MT_BARREL", "MT_TROOPSHOT", "MT_PUFF", "MT_BLOOD")
+ANIM_ACTORS = ("MT_BARREL", "MT_TROOPSHOT", "MT_PUFF", "MT_BLOOD",
+               "MT_ROCKET")                                   # P9: the player's rocket (MISLA5, MISLB0 .. D0)
 
 
 def anim_frames(map_wad, mapname) -> dict:
@@ -4407,6 +4469,12 @@ def anim_patches(sprite_wad, frames) -> dict:
                     views.setdefault(int(n[7]), (n, True))
             assert views, "no patch for %s frame %s" % (sprite, letter)
             assert 0 in views or set(views) == set(range(1, 9)), (sprite, letter, sorted(views))
+            # P9: a MOBILE frame drawn at one fixed rotation (monsters.MOBILE_ROTATION: the rocket's MISLA5) needs only
+            # that view in the bank -- the other seven are never drawn (~35K words of sprite blocks saved)
+            from doomfj.monsters import MOBILE_ROTATION
+            fixed = MOBILE_ROTATION.get((sprite, fi))
+            if fixed is not None:
+                views = {fixed: views[fixed]}
             for rot, v in views.items():
                 out[(sprite, letter, rot)] = v
     return out

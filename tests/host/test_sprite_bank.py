@@ -74,7 +74,9 @@ def test_every_animation_view_holds_its_patchs_lists(bank):
 
 def test_the_views_follow_the_wads_lump_names(bank):
     """rotation 0 or all eight, per frame; a mirrored view is its pair's lump (`TROOA2A8` is
-    rotation 2 and, mirrored, 8); and the monsters' walk frames really have eight"""
+    rotation 2 and, mirrored, 8); and the monsters' walk frames really have eight. P9: a mobile frame drawn at ONE fixed
+    rotation (monsters.MOBILE_ROTATION: the rocket's MISLA5) has that view alone -- its other seven are never drawn"""
+    from doomfj.monsters import MOBILE_ROTATION
     _rm, art, _b, _base, _dw, _ld, _anim = bank
     frames = wr.anim_frames(MW, "E1M1")
     patches = wr.anim_patches(art, frames)
@@ -82,7 +84,10 @@ def test_the_views_follow_the_wads_lump_names(bank):
         for fi in idxs:
             letter = chr(ord("A") + fi)
             rots = {r for (s, lt, r) in patches if s == sprite and lt == letter}
-            assert rots == {0} or rots == set(range(1, 9)), (sprite, letter, rots)
+            fixed = MOBILE_ROTATION.get((sprite, fi))
+            assert rots == ({fixed} if fixed is not None else rots) and (
+                fixed is not None or rots == {0} or rots == set(range(1, 9))), (sprite, letter, rots)
+    assert {r for (s, lt, r) in patches if s == "MISL" and lt == "A"} == {5}          # P9: in flight, from behind
     for (s, lt, r), (lump, mirrored) in patches.items():
         if mirrored:
             assert len(lump) == 8 and lump[6] == lt and int(lump[7]) == r, (s, lt, r, lump)
@@ -97,7 +102,8 @@ def test_the_views_follow_the_wads_lump_names(bank):
 # a change to gamedata's tables or to anim_frames' walk is a deliberate edit here
 E1M1_FRAMES = {"POSS": "ABCDEFGHIJKLMNOPQRSTU", "SPOS": "ABCDEFGHIJKLMNOPQRSTU",
                "TROO": "ABCDEFGHIJKLMNOPQRSTU", "SARG": "ABCDEFGHIJKLMN", "BAR1": "AB",
-               "BEXP": "ABCDE", "BAL1": "ABCDE", "PUFF": "ABCD", "BLUD": "ABC"}
+               "BEXP": "ABCDE", "BAL1": "ABCDE", "PUFF": "ABCD", "BLUD": "ABC",
+               "MISL": "ABCD"}                                   # P9: the player's rocket (MT_ROCKET)
 
 
 def test_the_animation_covers_every_frame_of_the_maps_actors():

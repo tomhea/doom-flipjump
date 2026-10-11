@@ -179,7 +179,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # ... knockback's cells (package K: world.knockback_on, knockcode.PERSIST) ...
                    frozenset({"p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z"}),
                    # ... and infighting's barrel source (package I: world.infighting_on; `mon_target` widens in place)
-                   frozenset({"bar_src"}))
+                   frozenset({"bar_src"}),
+                   # P9: key 5's held flag (the rocket launcher; fight_gate's R scenarios press it)
+                   frozenset({"kb_w5"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -531,6 +533,8 @@ class RunResult:
     ops: int                    # EXACT: core.run's own count, startup included
     readings: list              # the probe's frame-start readings (+/- OPS_GRANULARITY each)
     seconds: float
+    cause: int = -1             # P9: core.run's termination cause (_fjcore.TERM_*): LOOPING = the program HALTED
+                                # (EXIT on the main menu), EOF = the scripted frames ran out
 
 
 def _lean_fjm(path):
@@ -633,7 +637,7 @@ class GameBinary:
         _c, ops, _e, _l, _p = self.core.run(io.read_bit, io.write_bit, IOReadOnEOF,
                                             last_ops_length=0)
         return RunResult(list(screen.frames), list(screen.palettes), int(ops),
-                         list(probe.readings) if probe is not None else [], time.time() - t)
+                         list(probe.readings) if probe is not None else [], time.time() - t, int(_c))
 
 
 # ================================================================================================
@@ -700,8 +704,10 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         for name in ("mon_shootable", "mon_solid", "mon_justhit"):
             cells[name] = Cell(name, "hex", 1, count=nmon)
     # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
-    # M7 P4.1: the player's weapon -- one cell each, `wp_own` the four owned flags as one 4-nibble value
-    for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", 4), ("rng_pl", 2), ("wp_frm", 1), ("fl_frm", 1)):
+    # M7 P4.1: the player's weapon -- one cell each, `wp_own` the owned flags as one value (P9: five, the launcher's
+    # last: weaponcode.WEAPONS), `wp_frm` two nibbles (P9: the launcher's frames made 17 -- weaponcode.FRAME_NIBBLES)
+    from doomfj import weaponcode as _WC
+    for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", len(_WC.WEAPONS)), ("rng_pl", 2), ("wp_frm", _WC.FRAME_NIBBLES), ("fl_frm", 1)):
         cells[name] = Cell(name, "hex", width)
     from doomfj.world import AIM_COLUMNS                             # issue #119 item 6: ONE definition
     cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=AIM_COLUMNS)  # M7 P4.2a: the aim window (doomfj.aimcode)
@@ -1392,6 +1398,10 @@ def demo(fjm: Path, labels_path: Path) -> int:
     per_frame = [{} for _ in range(gate.MENU_FRAMES)] + GS.script(0)[:n_walk]
     events = GS.events_for(per_frame)
     keys_by_frame, menu_events = gate.held_per_frame(events, len(per_frame))
+    # P9: keys_by_frame is what each frame ACTS on (the press latch); the persisted kb_* flags are the HELD keys
+    from doomfj.keyboard import frame_keys
+    held_by_frame = [fk.held for fk in frame_keys(events, len(per_frame),
+                                                  binding=gate.BINDING)]
     p = Probe(cells, table, gb.width)
     seen = []
     p.on_present(lambda pr, f: seen.append(pr.read_cells()))       # EVERY game-tier cell
@@ -1409,7 +1419,7 @@ def demo(fjm: Path, labels_path: Path) -> int:
         if mode == 0:
             st = dsim.step(st, keys_by_frame[f])
         g = seen[f]
-        kd = keys_by_frame[f]
+        kd = held_by_frame[f]
         want_s = {"viewx": st.x, "viewy": st.y, "viewangle": st.angle, "mode": mode,
                   "menu_scr": scr, "menu_sel": sel,
                   "kb_f": int(bool(kd.get("forward"))), "kb_b": int(bool(kd.get("back"))),

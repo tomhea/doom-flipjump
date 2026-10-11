@@ -455,7 +455,7 @@ def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
 # (the monsters, live or dead, the fireballs, the map's runtime barrels and pickups). By the POOL a mobile's lump
 # belongs to, which is what the fj's row ranges are (monstercode.rank_threshold: runtime rows < nt + FIREBALL_POOL
 # rank 1): BAL1* only ever shows in the fireball pool, BLUD* / PUFF* only in the fx pool (test_d3_rules holds it).
-MOBILE_RANK = {"BAL1": 1, "BLUD": 0, "PUFF": 0}
+MOBILE_RANK = {"BAL1": 1, "BLUD": 0, "PUFF": 0, "MISL": 1}      # P9: the player's rocket -- a missile, as BAL1
 
 
 def mobile_rank(lump: str, z=None) -> int:

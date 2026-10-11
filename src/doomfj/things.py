@@ -68,6 +68,15 @@ def cold_row(row):
     return tuple(row[i] for i in _COLD_FIELDS)
 
 
+# P9 (the owner, 2026-10-10: the ROCKET LAUNCHER, "a cool different weapon"): E1M1's launcher and the four rockets
+# ringing it are multiplayer-only things (#226 .. #230, options 31: every skill, ambush, MTF_NOTSINGLE); THIS game spawns
+# them in single player too -- a deviation from DOOM's P_SpawnMapThing, named by (type, x, y) so it cannot reach another
+# thing. They keep their skill bits (all three), so every skill has them.
+SINGLE_PLAYER_EXTRA = frozenset({(2003, 976, -544),                                          # LAUN, #226
+                                 (2010, 1008, -544), (2010, 976, -576), (2010, 944, -544),   # ROCK, #227 .. #229
+                                 (2010, 976, -512)})                                         # ROCK, #230
+
+
 def single_player(t):
     """M7 P1.5 (D7): does the thing exist on SOME single-player skill? DOOM's P_SpawnMapThing drops a
     multiplayer-only thing (`options & MTF_NOTSINGLE` outside a netgame) and one with no skill bit.
@@ -75,8 +84,11 @@ def single_player(t):
     gate) and the gameplay model (`world.World`) both take it. E1M1: 26 of the 251 things with art
     are multiplayer-only (all pickups: 7 weapons, 18 ammo, a soulsphere --
     docs/ship-evidence/p15_skill_census.log); the image holds the other 225, the union of the three
-    skills, and which of those a game has is the skill's level-start state."""
+    skills, and which of those a game has is the skill's level-start state.
+    P9: and the SINGLE_PLAYER_EXTRA things (the launcher and its four rockets) -- 230 things."""
     from doomfj import gamedata as gd          # lazy: gamedata reads the oracle's constants at import
+    if (t.type, t.x, t.y) in SINGLE_PLAYER_EXTRA:
+        return bool(t.flags & (gd.MTF_EASY | gd.MTF_NORMAL | gd.MTF_HARD))
     return (not t.flags & gd.MTF_NOTSINGLE
             and bool(t.flags & (gd.MTF_EASY | gd.MTF_NORMAL | gd.MTF_HARD)))
 

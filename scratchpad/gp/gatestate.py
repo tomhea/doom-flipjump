@@ -44,7 +44,7 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
-                      nmon: int = 0, nrt: int = 0, palettes_out: list | None = None, nthvis: int = 0):
+                      nmon: int = 0, nrt: int = 0, palettes_out: list | None = None, nthvis: int = 0, cause_out=None):
     """-> (the presented frames' pixel indices, the exact op total, [the STATE_NAMES cells read at
     each present]). `labels` is the build's own label table (build_labeled.py writes it).
     M7 P5: `palettes_out`, when given, receives the palette each present showed (probe.RunResult.palettes:
@@ -66,6 +66,8 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int 
     r = gb.run(frames, events, probe)
     if palettes_out is not None:
         palettes_out.extend(r.palettes)
+    if cause_out is not None:
+        cause_out.append(r.cause)              # P9: how the run ended (a halt is LOOPING)
     return r.frames, r.ops, reads
 
 

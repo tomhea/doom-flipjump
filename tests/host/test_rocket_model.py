@@ -270,3 +270,23 @@ def test_control_a_shooter_spared_by_its_blast_is_caught(world, monkeypatch):
     monkeypatch.setattr(World, "player_alive", lambda self: False)
     with pytest.raises(AssertionError):
         test_a_point_blank_rocket_hurts_its_shooter(world)
+
+
+def test_the_state_export_holds_0_as_a_rockets_shooter():
+    # projcode stores pj_src 0 for the player's rocket (its STATE marks it); the oracle's export said 1 -- "monster
+    # slot 0" -- because combat stores proj_src 0 for it and the export added 1 to every live slot (fight_gate R1-R3
+    # on blocked54 found it). A fireball's slot still exports 1 + its shooter's slot.
+    from doomfj.config import GAME_CFG
+    from doomfj.monsters import MonsterPhase
+    from doomfj.wad import WadFile
+    mw = WadFile.from_path("tests/fixtures/freedoom_e1m1.wad")
+    mph = MonsterPhase(mw, "E1M1", gd.SK_HARD, rm=ReferenceModel(GAME_CFG), mode="final", player="final")
+    w = mph.world
+    ws = w.ws
+    ev = _spawn_at(w, ws.px, ws.py, 0x40000000)
+    s = ev.rocket_spawns[0]
+    assert w._is_rocket(s) and ws.proj_active[s]
+    assert mph.proj_state()["pj_src"][s] == 0
+    f = next(i for i in range(len(ws.proj_active)) if not ws.proj_active[i])   # a fireball by monster slot 3
+    ws.proj_active[f], ws.proj_src[f], ws.proj_state[f] = 1, 3, gd.STATE_INDEX["S_TBALL1"]
+    assert mph.proj_state()["pj_src"][f] == 4

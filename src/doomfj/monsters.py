@@ -677,8 +677,11 @@ class MonsterPhase:
                 "pj_y": tuple(v & MASK32 for v in ws.proj_y), "pj_mx": tuple(v & MASK32 for v in ws.proj_momx),
                 "pj_my": tuple(v & MASK32 for v in ws.proj_momy), "pj_st": tuple(ws.proj_state),
                 "pj_ti": tuple(ws.proj_tics),
-                # M7 P7: the shooter, 1 + its slot while the slot is live (P_RemoveMobj zeroes proj_src too)
-                "pj_src": tuple(ws.proj_src[s] + 1 if ws.proj_active[s] else 0 for s in range(len(ws.proj_src)))}
+                # M7 P7: the shooter, 1 + its slot while the slot is live (P_RemoveMobj zeroes proj_src too).
+                # P9: a ROCKET's slot holds 0 -- the player's, which projcode stores (its state is what marks it); the
+                # model's proj_src of 0 for it is not monster slot 0 (fight_gate R1-R3 found the export saying 1)
+                "pj_src": tuple(0 if not ws.proj_active[s] or self.world._is_rocket(s) else ws.proj_src[s] + 1
+                                for s in range(len(ws.proj_src)))}
 
     def fx_state(self) -> Dict[str, object]:
         """projcode's blood pool, per slot (FX_POOL of them), in pj_*'s units (fx_x / fx_y always whole map units: the

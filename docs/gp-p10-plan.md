@@ -70,18 +70,72 @@ below. The rung follows the full per-rung process: gates, B0 on a re-planned fro
   - Doors (door lines, shut face): tan/yellow with dark.
   - Blue doors (special 26/32 and their DOORTRAK jambs): blue.
   - All are lit by the sector light like any wall, and the pattern stays the shared masonry walker (no new fj code).
-- **G2:** a per-column, per-side BASE OVERRIDE.
-  - A lower piece wholly below the screen (or an upper piece wholly above), met while that side has no stored piece,
-    records its back plane-pair (`bpid`/`bsec`) as the side's base.
-  - The base region -- the whole floor or ceiling, or region0 in front of the nearest stored piece -- is then painted
-    from that pair instead of the claimed one.
-  - It takes no stack slot, so the door-100 lintel fix (efde61c) stands. Sky follows the claimed path's sky lookup.
-- **G1:** the record snapshots this column's nearer-boundary rows. `ctop` is the last stored upper piece's y2+1;
-  `cbot` is the last stored lower piece's y1. They go into the fragment (spslot's free bytes 3-4 / 11-12), and the
-  emit clamps the fragment's rows to `[ctop, cbot)`. A column whose fragment misses the window gets no slot (actors
-  rule (4), generalised).
-- **G3:** classify the sergeant blink (scratchpad/playtest_sergeant_blink.png, oracle-reproducible) with
-  p67e_visibility_probe before choosing a fix.
+- **G2 (built 2026-10-12):** a per-column, per-side BASE.
+  - An upper piece wholly ABOVE the screen, or a lower piece wholly BELOW it (`ts_piece_store`'s two off-screen
+    exits), records its back pid as the side's base: bit 3 of the side's count nibble in `sfflag` (the side's count
+    is 0 there: a stored piece clamps a farther one past its end, onto the screen) and the pid in `sfbase`
+    (`[VIEW_W ceilings][VIEW_W floors]`, declared right after `sfflag`, reached by a constant offset). A farther
+    off-screen boundary overwrites it: the farthest wins. `sfbase` is never reset; its pids are read only under the
+    flag, and `sfflag` is in the M1 set.
+  - Every count test in `ts_step_faces` asks for the count with or without the flag (`frame.if0_cnt`: `if0`'s own
+    expansion with mask 0xfefe; the room test is one `hex.if_flags` dispatch, {0,1,8,9}).
+  - Pass 2: `lines_steps_load2` runs FIRST, strips the flags and reads the base pids (`lines_base_split`);
+    `lines_col_plane_ids` keys its cache on (claim pid, ceiling base, floor base) and overrides the ceiling / floor
+    ids (`lines_base_ids`); the sky test asks about the EFFECTIVE ceiling pid (`lines_eff_ceil`); the bases join
+    the ditto signature. The oracle: `cbase` / `fbase` and `_region_paint` of the base region (`bases_out`).
+  - It takes no stack slot, so the door-100 lintel fix (efde61c) stands.
+- **G8 (found while building G2):** the region BEHIND a stacked upper piece whose back ceiling is F_SKY1 walked the
+  F_SKY1 FLAT's plane lists in fj, where the oracle paints sky. The shipped blocked54 disagrees with its own oracle
+  by 60 px at (-416, 128) facing north (the start room's window lips onto sector 18; P9 worktree, probe injection).
+  Fixed in fj: `lines_piece_sky` flags each upper piece whose back ceiling is sky and sets the column's sky u
+  (`soff`, the ditto signature's sky rung); `steps_splice_c` walks the column's sky pair there
+  (`lines_region_ids_c`).
+- **G1 (built 2026-10-12):** the record snapshots the column's `sfflag` byte -- the counts of the pieces stored
+  so far, all NEARER than the thing (the walk is front to back) -- into the fragment's 4th byte: 3 (A), 7 (C), 11 (B)
+  (`frame.rec_clip_read`; `SPR_FRAG_FIELDS` gains "clip counts"). The emit derives the window from the loaded
+  pieces (`stream.frag_clip`: the last nearer upper piece's end + 1 down to the last nearer lower piece's start,
+  DOOM's running ceilingclip / floorclip), clamps the fragment's rows into it (`frag_clamp`) and walks a cut
+  fragment through the window (`frag_runs_cut`); slot B's two windows are bounded by its own. The snapshots join the
+  sprite signature. The oracle: `sclip` / `sclip2`, snapshotted at the record, the paint clamped. No per-column
+  "no slot when clipped away" rule: a hidden column still holds its slot (both mirrors).
+- **G3 (built 2026-10-12): a THIRD fragment slot.** Classified on v8's 1,100 frames with the p67e attribution: a live
+  monster the player should see (an open column, a row in the view) claimed no slot 101 times -- 50 legitimately (its
+  open columns are its transparent edge: "empty"), 51 because two NEARER fragments held both slots in every open
+  column ("full"): a corpse in slot B 18 times, a crowd (two live monsters) 8, blood or a fireball 6, the rest mixed.
+  Slot C takes the third record under B's gate: `spslot` bytes 4-7 (between A's and B's; the stride stays 16),
+  `sprflag` 3, the oracle's `sfrag3` / `sclip3`, painted C, B, A. The emit composites C into the A+B path's four
+  background windows (`stream.emit_region_c`: region | C's runs | region, each guarded); C joins the ditto
+  signature. With three slots the same scan leaves 16 of the 51 (one courtyard crowd, four sprites deep) and no new
+  miss (`g3_blinks3.py`, P10 session).
+
+## The harness at P10 (2026-10-12)
+
+- **gamespeed gen 3b.** At the P10 turn rate the route planner ORBITED: holding forward (16 units a frame) while
+  turning 7.03 degrees a frame draws a circle of radius ~130 units, and a waypoint inside it on the turn's side is
+  never reached -- the run circles it, moving every frame, so the planner's `stuck` rule never fires. Measured: nine
+  of the ten runs ended within 200 units of spawn with a turn key on all 100 frames (gen 2's failure, the starting
+  room measured ten times). `_steer` now turns on the spot to such a waypoint (d < 2 r |sin err|) and counts a turn
+  on the spot as no refused step. The ten runs: 9/10 distinct end cells, spread 920 units, worst run 33% blocked,
+  every run >= 660 units travelled. `BINARY_ENDS` are GameSim's predicted ends ((578, 303) ... (97, 254), no door),
+  owed their confirmation by `gamespeed_trail.py` on the P10 build; runs 0/1's recorded keys re-recorded.
+- **Replay tests re-pointed** (the faster turn moved every recorded replay): test_aim_window_oracle's slice to v9
+  (R3-mid 25, R0-west-hall 25, R2-spectre-corridor 10 frames: 45 targets at column 80, the window agrees with the
+  geometric aim on all 60 frames and on 1017 / 1020 columns; three residuals, all "edge-closed"; the controls move 25
+  and 6 frames); test_b0_setup_and_proxy to v9 at its "final" modes (the poke moves `sshead`, not `thpos_rt`: measured
+  under both modes); test_gamespeed_validate and test_p67_model's route prediction to the re-recorded keys.
+- **fight_gate CG1** (the chaingun in the game binary, `--only CG`): key 4, a late setup at an awake crowd, the
+  trigger held -- both bursts' flashes, accurate then spread rounds, hits; controls `cgun_one_flash`, `cgun_accurate`.
+  On the model (`--oracle-only --only CG`, docs/ship-evidence/p10_fight_cg_oracle.log): placed at the first candidate,
+  8 rounds (3 accurate, 5 spread), 7 hits, 2 kills, each burst's flash on 8 frames; the controls part at frames 28
+  and 30.
+- **The re-key without P9's label table** (`scratchpad/ca_rekey_newspan.py`): `_ca_labels_p9.tsv.gz` did not survive
+  its worktree, and a re-capture cannot reproduce its recorded sha256 (gzip stamps the time). Every entry of the
+  shipped set holds a contiguous prefix of a GLOBAL label; an entry that covers its label's new span is kept, any
+  other needs a decision on the command line (`--whole` / `--keep`), each recorded in `generated_by`. Its selftest's
+  six negative controls refuse a grown or shrunk label without a decision, a `--keep` past the label, a vanished
+  label, a non-prefix entry and an old table whose fingerprint differs.
+- tests/fj/test_slot_layouts_fj: the snapshot mutant writes `trb_blk + 0*trb_clip_v` -- the record's `<` list names
+  the snapshot register, and an unused name there is an assembly error, so the mutant must keep it referenced.
 
 ## Order of work
 

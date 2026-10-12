@@ -1599,6 +1599,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # V5: stacked boundary pieces + per-boundary plane regions ride the V3 slot machinery and
     # the pnear pid bank -- both must be on.
     stack_flag = 1                              # V5: stacked boundary pieces + per-boundary plane regions
+    # P10 G2: a column's BASE pid lives in `sfbase` at a constant CELL offset from its sfflag byte
+    # (frame.ts_base_store / lines_base_split), which holds only while a pid is one byte
+    assert cfg.PID_BYTES == 1, (
+        "the V5 column bases (sfbase) assume a one-byte pid; PID_NIBBLES=%d needs a strided sfbase"
+        % cfg.PID_NIBBLES)
     # V5 slot layout: 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 -- all four
     # fit the EXISTING 16-byte stride, so the whole-nibble shift stays.
     asset_wad = asset_wad or map_wad
@@ -3369,8 +3374,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _ss_cells, _th_cells = 2 * _MT_NSS, 2 * _MT_NT
     _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw"
                                              for _ in range(cfg.VIEW_W * cfg.PID_BYTES)),
-                    f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
-                    f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))]
+                    # P10 G2: `sfbase` -- a column's ceiling / floor BASE pid ([VIEW_W ceilings][VIEW_W
+                    # floors], frame.ts_base_store) -- is reached from a column's sfflag pointer by a
+                    # CONSTANT offset (VIEW_W / 2*VIEW_W cells), so it is declared right after sfflag, in
+                    # the same string: nothing can ever land between the two. Never reset: a pid is
+                    # read only under its sfflag bit, which the M1 set's byte array clears.
+                    # P10 G1: and `sprflag` right after them, in the same string -- frame.rec_clip_read reaches a
+                    # column's sfflag byte from its sprflag pointer, 3*VIEW_W cells back
+                    f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))
+                    + f"{NLJ}sfbase:{NLJ}" + NLJ.join(";0 * dw" for _ in range(2 * cfg.VIEW_W))
+                    + f"{NLJ}sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))]
                    # T-HOTSLOTS (2026-09-03): sfslot/spslot were the LAST hot pointer-walked
                    # arrays still in the ~20M-word tail -- every one of their ~1,530 derefs a
                    # frame paid wflip chains on a dense 31-bit address, the exact cost this
@@ -3762,8 +3775,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              f"seg_bpid: hex.vec {cfg.PID_BYTES * 2}",  # V5: the boundary's baked BACK pair id
              stepcol]),
           # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (1 = slot
-          # A, 2 = A and B) so a column without a sprite costs ONE read on the emit path; `spslot[x]`
-          # holds, since M7 P1.4, [s][blk_lo][blk_hi] for A at byte 0 and for B at byte 8, at a
+          # A, 2 = A and B, P10 G3: 3 = A, B and C) so a column without a sprite costs ONE read on the
+          # emit path; `spslot[x]` holds, since M7 P1.4, [s][blk_lo][blk_hi] (P10 G1: + the clip
+          # counts) for A at byte 0, for C at byte 4 (P10 G3) and for B at byte 8, at a
           # power-of-16 stride: the thing's slot id and the bank block. The thing's constants -- its
           # top row biased by 32768 (two bytes: a near sprite's top sits far above row 0) and its
           # light row -- are in `gpslot[s]`, written once per thing. `n_thing`/`tstop` are the
@@ -3903,6 +3917,22 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "p2_wtc8: hex.vec 8",
         "p2_wtf8: hex.vec 8",
         "p2_xkey: hex.vec 4",
+        # P10 G2: the column's BASES (frame.lines_base_split), their cache key and ditto shadows, the
+        # sfbase pointer, and the effective ceiling pid the sky test reads
+        "p2_basep: hex.vec w/4",
+        f"p2_bcpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_bfpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_cbcpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_cbfpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_dbcpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_dbfpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_ecpid: hex.vec {cfg.PID_BYTES * 2}",
+        # P10 G8: a stacked piece's sky flags and the column's sky pair ids (frame.lines_piece_sky)
+        "p2_u1sk: hex.vec 2",
+        "p2_u2sk: hex.vec 2",
+        "p2_skyca: hex.vec w/4",
+        "p2_skycd: hex.vec w/4",
+        "tsf_base_p: hex.vec w/4",              # P10 G2: frame.ts_base_store's sfbase pointer
         "tsf_col_x: hex.vec 8",
         "tsf_cviewh1: hex.vec 8",
         "tsf_drawn_b: hex.vec w/4",
@@ -4140,6 +4170,43 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "gpsb_smidx: hex.vec 4",
         "gpsb_ptr0: hex.vec w/4",
         "gpsb_ridx: hex.vec 4",             # M7 P1.6: B's, kept across A's derive
+        # P10 G1: the fragments' clip windows (stream.frag_clip / frag_clamp), B's two run windows beside A, the loaded
+        # snapshots and their ditto shadows, and the record's snapshot pointer and byte (frame.rec_clip_read)
+        "gps_ct: hex.vec 2",
+        "gps_cb: hex.vec 2",
+        "gps_cut: hex.vec 1",
+        "gpsb_ct: hex.vec 2",
+        "gpsb_cb: hex.vec 2",
+        "gpsb_cut: hex.vec 1",
+        "ecl_bwlo: hex.vec 2",
+        "ecl_bwhi: hex.vec 2",
+        "p2_sc: hex.vec 2",
+        "p2_scb: hex.vec 2",
+        "p2_dsc: hex.vec 2",
+        "p2_dscb: hex.vec 2",
+        "trb_clip_p: hex.vec w/4",
+        "trb_clip_v: hex.vec 2",
+        # P10 G3: slot C -- the loaded fragment and snapshot, their ditto shadows, and the emit's derived rows, clip
+        # window, presence flag and composited window (stream.emit_region_c)
+        "p2_s3: hex.vec 2",
+        "p2_sblk3: hex.vec 4",
+        "p2_scc: hex.vec 2",
+        "p2_ds3: hex.vec 2",
+        "p2_dsblk3: hex.vec 4",
+        "p2_dscc: hex.vec 2",
+        "gpsc_has: hex.vec 1",
+        "gpsc_ybase: hex.vec 4",
+        "gpsc_top: hex.vec 4",
+        "gpsc_sy1: hex.vec 4",
+        "gpsc_sy2: hex.vec 4",
+        "gpsc_smidx: hex.vec 4",
+        "gpsc_ptr0: hex.vec w/4",
+        "gpsc_ridx: hex.vec 4",
+        "gpsc_ct: hex.vec 2",
+        "gpsc_cb: hex.vec 2",
+        "gpsc_cut: hex.vec 1",
+        "gpsc_w1: hex.vec 2",
+        "gpsc_w2: hex.vec 2",
         "srd_csh10: hex.vec 2, 10",
         "srd_csh5: hex.vec 2, 5",
         "srd_csh6: hex.vec 2, 6",
@@ -4466,13 +4533,17 @@ SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds SPR_THING_SLOT_FIELDS per id -- 
 # writes both (frame.thing_record_body), the emit reads a column's fragments (frame.lines_spr_load)
 # and the derive reads a thing's slot (stream.frag_derive); tests/host/test_sprite_column.py holds
 # every one of those literals -- offsets, field order, bias -- to these names.
-SPR_FRAG_FIELDS = ("slot id", "block lo", "block hi")   # a fragment in `spslot`, byte by byte
+# P10 G1: a fragment's 4th byte is the record's snapshot of the column's sfflag byte (frame.rec_clip_read) -- the nearer pieces'
+# counts, from which the emit clips the fragment (stream.frag_clip)
+SPR_FRAG_FIELDS = ("slot id", "block lo", "block hi", "clip counts")   # a fragment in `spslot`, byte by byte
 SPR_FRAG_BYTES = len(SPR_FRAG_FIELDS)
 SPR_SLOT_B_BYTE = 8        # fragment B's first byte in its column's slot; A's is byte 0
+SPR_SLOT_C_BYTE = 4        # P10 G3: the THIRD fragment, C, between them (frame.thing_record_body, lines_spr_load)
 SPR_THING_SLOT_FIELDS = ("y0 lo", "y0 hi", "light row", "bucket")   # `gpslot`, byte by byte
 SPR_THING_Y0_BIAS = 1 << 15   # y0 is stored biased, in two bytes: a tall NEAR sprite's top sits far
                               # above row -128, and a one-byte bias WRAPPED (M13-15M)
 assert SPR_FRAG_BYTES <= SPR_SLOT_B_BYTE <= SPR_SLOT_STRIDE - SPR_FRAG_BYTES
+assert SPR_FRAG_BYTES <= SPR_SLOT_C_BYTE <= SPR_SLOT_B_BYTE - SPR_FRAG_BYTES     # A | C | B, no overlap
 assert len(SPR_THING_SLOT_FIELDS) <= SPR_THING_SLOT_BYTES
 
 

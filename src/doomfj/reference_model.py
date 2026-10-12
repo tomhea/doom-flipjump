@@ -2080,7 +2080,7 @@ class ReferenceModel:
                           near_steps: bool = False, things: bool = False,
                           sprite_wad=None, things_out: list | None = None,
                           bbox_cull: bool = False, stack_steps: bool = False,
-                          steps_out: list | None = None,
+                          steps_out: list | None = None, bases_out: list | None = None,
                           deg_things: tuple | None = None, deg_sliver: int | None = None,
                           deg_stack_scale: int | None = None, deg_mark: int | None = None,
                           deg_lip_scale: int | None = None,
@@ -2271,6 +2271,16 @@ class ReferenceModel:
         n_stack = V5_STACK if stack_steps else 1
         ups: list = [[] for _ in range(W)]
         los: list = [[] for _ in range(W)]
+        # P10 G2 (the owner's play-test, 2026-10-12: the nukage "vanishes" near its edge) -- a column's
+        # BASES. A boundary whose near edge lies OFF the screen -- above it for a ceiling, below it for a
+        # floor -- stores no piece (it would hold a V5 slot and paint nothing: the efde61c lintel), yet
+        # every row of that surface the column shows, from the screen's edge to the next stored piece,
+        # lies BEYOND it. So the column records the boundary's BACK sector as its ceiling / floor base
+        # (a farther such boundary overwrites it: the farthest wins), and the paint gives the base region
+        # that sector's surface in place of the claiming sector's. MIRRORED in src/fj/frame_render.fj
+        # (ts_base_store writes the base; lines_steps_load2 / lines_col_plane_ids read it).
+        cbase: list = [None] * W
+        fbase: list = [None] * W
         n_face = [0]                  # V3: face-carrying boundaries used, vs STEP_SEG_BUDGET
         n_claimed = 0                                         # ... and its two STOP conditions, both of
         n_ts = 0                                              # which the fj mirrors (see below)
@@ -2288,6 +2298,21 @@ class ReferenceModel:
         # show sprites at all: DOOM draws them last, back-to-front, and this cannot.
         sfrag: list = [None] * W
         sfrag2: list = [None] * W     # V4b: the SECOND (farther) fragment, drawn under slot A
+        # P10 G1 (the owner's ledge bug, 2026-10-12): each fragment's CLIP WINDOW [ctop, cbot) -- the rows the
+        # NEARER boundaries leave open, snapshotted when the fragment records: every piece stored by then is
+        # nearer than the thing (the walk is front to back), and the pieces are stored monotone, so the last
+        # upper piece's end + 1 and the last lower piece's start are DOOM's running ceilingclip / floorclip
+        # there. A monster below a ledge is cut at the ledge's lip, an imp on high ground behind the ledge's
+        # face. V5 (`stack_steps`) only. MIRRORED in src/fj (frame.thing_record_body snapshots the column's
+        # sfflag counts; lines_spr_load / stream.frag_clip derive the window from the loaded pieces).
+        sclip: list = [None] * W
+        sclip2: list = [None] * W
+        # P10 G3 (the owner's play-test: sprites "blink out"): a THIRD write-once fragment slot, C, behind B. Over v8's
+        # 1,100 frames a live monster the player should see lost every column 51 times to two nearer fragments --
+        # most often a corpse lying in front of it in slot B (18), then a crowd (8), then blood or a fireball (6). C
+        # takes the third thing in walk-arrival order under B's gate; the paint goes C, B, A, each in its window.
+        sfrag3: list = [None] * W
+        sclip3: list = [None] * W
         n_thing = 0                   # ... against THING_BUDGET: scenery (decor + pickups)
         n_hd = 0                      # OPTION B: accepted TALL-bucket things granted the HD bake
         n_mon = 0                     # ... against MONSTER_BUDGET: monsters, counted SEPARATELY so
@@ -2581,8 +2606,8 @@ class ReferenceModel:
                         if tview is not None and tview[1]:
                             u = art[2] - 1 - u          # M7 P3.1: a mirrored view, right to left
                         frac += istep
-                        if drawn[x] or sfrag2[x] is not None:
-                            continue                     # V4b: both fragment slots spent
+                        if drawn[x] or sfrag3[x] is not None:
+                            continue                     # V4b + P10 G3: all three fragment slots spent
                         # V4-HD: tall buckets sample the full-res column with the deeper cap
                         # (unless OPTION B's HD budget already went to nearer things);
                         # 20M-RECOVERY: SHORT buckets take the coarse low-res cap instead.
@@ -2598,12 +2623,22 @@ class ReferenceModel:
                         # its head to a potion's columns).
                         if sfrag[x] is None:
                             sfrag[x] = (ytop_b + st[0], st[1], lr)
+                            if stack_steps:                # P10 G1: the nearer boundaries' window
+                                sclip[x] = (ups[x][-1][1] + 1 if ups[x] else 0, los[x][-1][0] if los[x] else H)
                         elif not b_minh or hb >= b_minh or (act and exempt_actors):   # M7 P6+P7 E (3)
                             # 25M-CAP B-GATE: slot B only for fragments tall enough to plausibly
                             # show through slot A's gaps; a small/far B fragment is ~always
                             # occluded. The slot stays OPEN, so a later (taller) thing may claim
                             # it -- fj tests the same baked bucket height before its bank walk.
-                            sfrag2[x] = (ytop_b + st[0], st[1], lr)
+                            # P10 G3: and slot C (B taken) under the same gate
+                            if sfrag2[x] is None:
+                                sfrag2[x] = (ytop_b + st[0], st[1], lr)
+                                if stack_steps:                # P10 G1
+                                    sclip2[x] = (ups[x][-1][1] + 1 if ups[x] else 0, los[x][-1][0] if los[x] else H)
+                            else:
+                                sfrag3[x] = (ytop_b + st[0], st[1], lr)
+                                if stack_steps:                # P10 G1
+                                    sclip3[x] = (ups[x][-1][1] + 1 if ups[x] else 0, los[x][-1][0] if los[x] else H)
             seg = scene.cmap.segs[seg_i]
             ld = lds[seg.linedef]
             # ⚠ A CLOSED TWO-SIDED LINE IS A SOLID WALL -- DOOM's R_ClipSolidWallSegment
@@ -2762,6 +2797,10 @@ class ReferenceModel:
                                        else (max(a, 0), min(b, Hs)))
                                 ups[x].append((st_[0], st_[1], fsec,
                                                fsec.ceil_h - bsec.ceil_h, bsec))
+                            elif stack_steps and a <= b and b < 0:
+                                # P10 G2: the near ceiling's edge is ABOVE the screen (`cbase`). Only
+                                # with the side empty: a stored piece clamps a past its end, onto it
+                                cbase[x] = bsec
                         if lm_ and (lm_ == 1 or lip2) \
                                 and len(los[x]) < n_stack and (not los[x] or stk2):
                             if DEG_DDA_FACES:
@@ -2791,6 +2830,9 @@ class ReferenceModel:
                                        else (max(a, 0), min(b, Hs)))
                                 los[x].append((st_[0], st_[1], fsec,
                                                bsec.floor_h - fsec.floor_h, bsec))
+                            elif stack_steps and a <= b and a > Hs:
+                                # P10 G2: the near floor's edge is BELOW the screen (`fbase`)
+                                fbase[x] = bsec
                     if not pclaim[x]:
                         col_ch[x], col_fh[x], col_lt[x] = fsec.ceil_h, fsec.floor_h, fsec.light
                         col_cf[x], col_ff[x] = fsec.ceil_tex, fsec.floor_tex
@@ -2942,6 +2984,8 @@ class ReferenceModel:
             planes_out.append(planes)                        # the per-column records, for the gates
         if steps_out is not None:
             steps_out.append((ups, los))                     # V5: the per-column piece lists
+        if bases_out is not None:
+            bases_out.append((cbase, fbase))                 # P10 G2: the per-column bases
         if floor_mode_ft1:
             self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz_band, *planes,
                                      ft1=True, sky=sky, viewangle=viewangle, texcache=texcache)
@@ -3007,6 +3051,15 @@ class ReferenceModel:
                         # walls and ledges no longer look cut where a sprite overlaps them.
                         continue
                     ceil_end = min(c_hi[x], cfg.VIEW_H - 1)
+                    # P10 G2: the BASE region -- the claimed ceiling above the nearest upper piece (all
+                    # of it when there is none), the claimed floor below the nearest lower one -- shows
+                    # the base's surface when the column has one (fj: the plane ids of the base pid)
+                    if cbase[x] is not None:
+                        _region_paint(x, 0, min(ups[x][0][0] - 1 if ups[x] else ceil_end, ceil_end),
+                                      cbase[x], True)
+                    if fbase[x] is not None:
+                        _region_paint(x, max(los[x][0][1] + 1 if los[x] else f_lo[x], f_lo[x], 0),
+                                      cfg.VIEW_H - 1, fbase[x], False)
                     for k, (y1, y2, fsc, units, bsec) in enumerate(ups[x]):
                         y1c, y2c = max(y1, 0), min(y2, ceil_end)
                         if y1c <= y2c:
@@ -3037,13 +3090,15 @@ class ReferenceModel:
                 for x in range(cfg.VIEW_W):
                     # V4b: far fragment first, near painted OVER it -- the fj emit produces the
                     # same pixels by windowing the far fragment to the rows the near one leaves.
-                    for frag in (sfrag2[x], sfrag[x]):
+                    for frag, clip in ((sfrag3[x], sclip3[x]), (sfrag2[x], sclip2[x]), (sfrag[x], sclip[x])):
                         if frag is None:
                             continue
                         y0, runs, lr = frag
+                        # P10 G1: and inside the rows its nearer boundaries leave open
+                        lo_c, hi_c = clip if clip is not None else (0, cfg.VIEW_H)
                         prev = 0
                         for (rel, texel) in runs:
-                            for y in range(max(0, y0 + prev), min(cfg.VIEW_H, y0 + rel)):
+                            for y in range(max(lo_c, y0 + prev), min(hi_c, y0 + rel)):
                                 fb[y * cfg.VIEW_W + x] = colormap[lr][texel]
                             prev = rel
         elif floor_texturing:

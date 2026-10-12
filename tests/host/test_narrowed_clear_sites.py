@@ -115,7 +115,9 @@ NARROWED_FILES = ("fixed_point.fj", "frame_render.fj", "plane_bands.fj", "plane_
 # `srw_whi4`/`srw_rel_w`/`srn_sidx`/`srn_rel_w` left with the old fragment reader; in came the
 # slot index `gps_sidx` (the record's slot write and the emit's slot read, one each) and the emit's
 # window nibbles `gps_wlo4`/`gps_whi4` -- the same Z3 shapes on the new registers.
-EXPECTED_SITES = {"fixed_point.fj": 3, "frame_render.fj": 21, "plane_bands.fj": 4,
+# P10 G8: frame_render.fj 21 -> 22 -- frame.lines_sky_pair_ids carries lines_sky_ceil_ids's Z3 clear (its sky path,
+# for the sky behind a stacked piece), with the same unconditional `mov 2` after it
+EXPECTED_SITES = {"fixed_point.fj": 3, "frame_render.fj": 22, "plane_bands.fj": 4,
                   "plane_render.fj": 5, "projection.fj": 9, "sim.fj": 2, "stream_render.fj": 7}
 # and the rep-guarded ones the site scan skips, pinned for the same reason and so that a NEW one
 # cannot appear unnoticed -- being skipped there, it would otherwise be checked by nothing.

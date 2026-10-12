@@ -499,7 +499,7 @@ ns stream {
     // per piece from the baked back pid via frame.lines_pid_ids into SCRATCH registers.
     def steps_splice_c ctake, rlo, rhi, w1r, gnrow, cmidx, cbufa, cbufd, ccy \
             @ ceil_only, cend_ok, cend_clamp, ceil_go, piece1_in_win, walk_region0, region0_end, bound1_at_end, bound1_at_piece2, walk_region1, region1_end, piece2_in_win, walk_region2, lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, ceil_done, end \
-            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ssc_ceil_end, ssc_rcbufa, ssc_rcbufd, ssc_rlo2, ssc_ucnt2, ssc_win_end, ssc_win_lo, ssc_zero_row {
+            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ssc_ceil_end, ssc_rcbufa, ssc_rcbufd, ssc_rlo2, ssc_ucnt2, ssc_win_end, ssc_win_lo, ssc_zero_row, p2_u1sk, p2_u2sk {
         hex.if0 2, ctake, ceil_done             // no ceiling half at all
         hex.mov 2, ssc_ceil_end, ctake              // V5-SPR: the piece window [rlo, min(ctake,rhi))
         hex.cmp 2, ssc_ceil_end, rhi, cend_ok, cend_ok, cend_clamp
@@ -538,7 +538,8 @@ ns stream {
       walk_region1:
         // M7 P1.4: the region's list ids are derived HERE, only for a region that is walked --
         // they feed nothing but this walk (they were computed before the window test)
-        frame.lines_pid_ids_c u1bp, ssc_rcbufa, ssc_rcbufd
+        // P10 G8: ... the back ceiling's lists, or the column's SKY pair when it is F_SKY1
+        frame.lines_region_ids_c u1bp, p2_u1sk, ssc_rcbufa, ssc_rcbufd
         .half_walk_code ssc_rcbufa, ssc_rcbufd, ssc_win_lo, ssc_win_end, ccy
       region1_end:
         hex.if0 1, ssc_ucnt2, ceil_done
@@ -554,7 +555,7 @@ ns stream {
         hex.mov 2, ssc_win_end, ssc_ceil_end
         hex.cmp 2, ssc_win_lo, ssc_win_end, walk_region2, ceil_done, ceil_done
       walk_region2:
-        frame.lines_pid_ids_c u2bp, ssc_rcbufa, ssc_rcbufd      // M7 P1.4: only for a walked region
+        frame.lines_region_ids_c u2bp, p2_u2sk, ssc_rcbufa, ssc_rcbufd  // M7 P1.4: only for a walked region (P10 G8: sky too)
         .half_walk_code ssc_rcbufa, ssc_rcbufd, ssc_win_lo, ssc_win_end, ccy
         ;ceil_done
       ceil_only:
@@ -1004,12 +1005,144 @@ ns stream {
       send:
     }
 
+    // P10 G1 (the owner's ledge bug, 2026-10-12): a fragment's CLIP WINDOW [ctop, cbot) -- the rows the boundaries
+    // NEARER than its thing leave open. `sc` is the record's snapshot of the column's sfflag byte (frame.rec_clip_read:
+    // nibble 0 the upper piece count then, nibble 1 the lower, each with the G2 base flag in bit 3), and the pieces it
+    // counts are this column's FIRST ones (write-once, nearest first), loaded by frame.lines_steps_load2: the last
+    // nearer upper piece's end + 1, the last nearer lower piece's start -- DOOM's running ceilingclip / floorclip, and
+    // the oracle's `sclip`.
+    def frag_clip sc, ctop, cbot, viewh @ u_some, u_one, u_two, u_inc, u_zero, u_done, l_some, l_one, l_two, l_none, l_done \
+            < u1y2, u2y2, l1y1, l2y1 {
+        hex.if_flags sc, 0x0606, u_zero, u_some         // {1, 2, 9, 10}: a nearer upper piece
+      u_some:
+        hex.if_flags sc, 0x0404, u_one, u_two           // {2, 10}: two of them
+      u_one:
+        hex.mov 2, ctop, u1y2
+        ;u_inc
+      u_two:
+        hex.mov 2, ctop, u2y2
+      u_inc:
+        hex.inc 2, ctop
+        ;u_done
+      u_zero:
+        hex.zero 2, ctop
+      u_done:
+        hex.if_flags sc + 1*dw, 0x0606, l_none, l_some
+      l_some:
+        hex.if_flags sc + 1*dw, 0x0404, l_one, l_two
+      l_one:
+        hex.mov 2, cbot, l1y1
+        ;l_done
+      l_two:
+        hex.mov 2, cbot, l2y1
+        ;l_done
+      l_none:
+        hex.set 2, cbot, viewh
+      l_done:
+    }
+
+    // P10 G1: a DERIVED fragment's rows [sy1, sy2) clamped into its clip window [ctop, cbot) -- empty (sy2 = sy1) when
+    // the window hides it all. `cut` = 1 when a bound moved: the runs must then be walked through the window
+    // (frag_runs_cut). sy1 / sy2 are frag_derive's 4-nibble rows, clamped to [0, viewh], so their high byte is 0.
+    def frag_clamp sy1, sy2, ctop, cbot, cut @ t_lo, t_ok, b_hi, b_ok, e_lo, e_ok {
+        hex.zero 1, cut
+        hex.cmp 2, sy1, ctop, t_lo, t_ok, t_ok
+      t_lo:
+        hex.mov 2, sy1, ctop
+        hex.set 1, cut, 1
+      t_ok:
+        hex.cmp 2, sy2, cbot, b_ok, b_ok, b_hi
+      b_hi:
+        hex.mov 2, sy2, cbot
+        hex.set 1, cut, 1
+      b_ok:
+        hex.cmp 2, sy2, sy1, e_lo, e_ok, e_ok
+      e_lo:
+        hex.mov 2, sy2, sy1
+      e_ok:
+    }
+
+    // P10 G1: slot A's runs -- the fast walker, or, when its window cut it (frag_clamp), the windowed one over [sy1, sy2)
+    def frag_runs_cut ybase, top, smidx, ptr, ridx, sy1, sy2, cut @ plain, end {
+        hex.if0 1, cut, plain
+        .frag_runs_win ybase, smidx, ptr, sy1, sy2, ridx
+        ;end
+      plain:
+        .frag_runs ybase, top, smidx, ptr, ridx
+      end:
+    }
+
+    // dst = min(a, b) / max(a, b), two nibbles
+    def min2 dst, a, b @ use_b, end {
+        hex.mov 2, dst, a
+        hex.cmp 2, b, dst, use_b, end, end
+      use_b:
+        hex.mov 2, dst, b
+      end:
+    }
+    def max2 dst, a, b @ use_b, end {
+        hex.mov 2, dst, a
+        hex.cmp 2, b, dst, end, end, use_b
+      use_b:
+        hex.mov 2, dst, b
+      end:
+    }
+
+    // P10 G3: a background window [lo, hi) of the A+B path with slot C composited into it -- C is behind A and B,
+    // so it shows only in the rows they leave to the background: region [lo, c1), C's runs over [c1, c2), region
+    // [c2, hi), with c1 = clamp(sy1C, lo, hi) and c2 = clamp(sy2C, c1, hi) (C's rows already in its clip window).
+    // Without C (gpsc_has 0) it is the plain region. Each piece is guarded (an empty emit_region still walks).
+    def emit_region_c lo, hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, \
+            gnrow, wstrip, wstripbase, \
+            cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret \
+            @ c1_lo, c1_hi, c1_cap, c1_ok, c2_up, c2_ok, c2_cap, c2_done, top_do, top_end, c_do, c_end, bot_do, plain, end \
+            < gpsc_has, gpsc_sy1, gpsc_sy2, gpsc_w1, gpsc_w2, gpsc_ybase, gpsc_smidx, gpsc_ptr0, gpsc_ridx {
+        hex.if0 1, gpsc_has, plain
+        hex.mov 2, gpsc_w1, gpsc_sy1            // c1 = clamp(sy1C, lo, hi)
+        hex.cmp 2, gpsc_w1, lo, c1_lo, c1_hi, c1_hi
+      c1_lo:
+        hex.mov 2, gpsc_w1, lo
+        ;c1_ok
+      c1_hi:
+        hex.cmp 2, gpsc_w1, hi, c1_ok, c1_ok, c1_cap
+      c1_cap:
+        hex.mov 2, gpsc_w1, hi
+      c1_ok:
+        hex.mov 2, gpsc_w2, gpsc_sy2            // c2 = clamp(sy2C, c1, hi)
+        hex.cmp 2, gpsc_w2, gpsc_w1, c2_up, c2_ok, c2_ok
+      c2_up:
+        hex.mov 2, gpsc_w2, gpsc_w1
+      c2_ok:
+        hex.cmp 2, gpsc_w2, hi, c2_done, c2_done, c2_cap
+      c2_cap:
+        hex.mov 2, gpsc_w2, hi
+      c2_done:
+        hex.cmp 2, lo, gpsc_w1, top_do, top_end, top_end
+      top_do:
+        .emit_region lo, gpsc_w1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+      top_end:
+        hex.cmp 2, gpsc_w1, gpsc_w2, c_do, c_end, c_end
+      c_do:
+        .frag_runs_win gpsc_ybase, gpsc_smidx, gpsc_ptr0, gpsc_w1, gpsc_w2, gpsc_ridx
+      c_end:
+        hex.cmp 2, gpsc_w2, hi, bot_do, end, end
+      bot_do:
+        .emit_region gpsc_w2, hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        ;end
+      plain:
+        .emit_region lo, hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+      end:
+    }
+
     // M7 P1.4: the sprite interface is (sprfl, s, sblk, sb, sblkb) -- slot A's (slot, block) and
     // slot B's -- where it was eleven registers of stored rows, biases and light rows.
     def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, ascode, stack, deg, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, s, sblk, sb, sblkb, wall_lit, wall_lit2, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd \
-            @ ctake_ok, ctake_clamp, no_sprite, sprite_path, sprite_one, spr_top_b, spr_top_ok, gap1_do, gap1_end, gap2_do, gap2_end, spr_bot_b, spr_bot_ok, covered1, covered, split, wall, w1r_pattern, w1r_test, floor, col_done, band_walk, bw_loop, bw_body, bw_skip, bw_test, bw_emit, bw_last, bw_clamp, bw_done, band_ret, end \
+            @ ctake_ok, ctake_clamp, no_sprite, sprite_path, sprite_one, no_c3, c_derived, spr_top_b, spr_top_ok, gap1_do, gap1_end, gap2_do, gap2_end, spr_bot_b, spr_bot_ok, covered1, covered, split, wall, w1r_pattern, w1r_test, floor, col_done, band_walk, bw_loop, bw_body, bw_skip, bw_test, bw_emit, bw_last, bw_clamp, bw_done, band_ret, end \
             < seg_w1rf, w1rslv, seg_litf, ecl_ccy, ecl_cmidx, ecl_colr, ecl_ctake, ecl_ent_i, ecl_full_hi, ecl_full_lo, ecl_n_ent, ecl_ptr, ecl_spr_bot, ecl_spr_top, ecl_whi, ecl_win_end, ecl_win_hi, ecl_win_lo, ecl_wlen, ecl_wlo, ecl_y2r, \
-              gps_cvh, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, gpsb_smidx, gpsb_ptr0, gps_ridx, gpsb_ridx {
+              gps_cvh, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, gpsb_smidx, gpsb_ptr0, gps_ridx, gpsb_ridx, \
+              p2_sc, p2_scb, gps_ct, gps_cb, gps_cut, gpsb_ct, gpsb_cb, gpsb_cut, ecl_bwlo, ecl_bwhi, \
+              p2_s3, p2_sblk3, p2_scc, gpsc_has, gpsc_ybase, gpsc_top, gpsc_sy1, gpsc_sy2, gpsc_smidx, gpsc_ptr0, gpsc_ridx, \
+              gpsc_ct, gpsc_cb, gpsc_cut {
         hex.mov 2, ecl_ctake, cexcl
         hex.cmp 2, ecl_ctake, fstart, ctake_ok, ctake_ok, ctake_clamp   // ecl_ctake = min(cexcl, fstart)
       ctake_clamp:
@@ -1075,10 +1208,16 @@ ns stream {
         rep(stack, k) .steps_splice_f fstart, viewh, ecl_full_lo, ecl_full_hi, w1r, gnrow, ecl_cmidx, fbufa, fbufd, ecl_ccy
         ;col_done
       sprite_path:                               // V4: region | sprite | region
-        // V4b: sprfl = 1 (one fragment) or 2 (A + a farther B). The dec is safe: nothing reads
+        // V4b: sprfl = 1 (one fragment) or 2 (A + a farther B; P10 G3: 3, + C). The dec is safe: nothing reads
         // sprfl after the path split.
         rep(things, k) hex.dec 2, sprfl
         rep(things, k) hex.if0 2, sprfl, sprite_one
+        // P10 G3: sprfl = 3 -- a THIRD fragment, C (behind B), composited into the path's background windows
+        rep(things, k) hex.set 1, gpsc_has, 0
+        rep(things, k) hex.dec 2, sprfl
+        rep(things, k) hex.if0 2, sprfl, no_c3
+        rep(things, k) hex.set 1, gpsc_has, 1
+      no_c3:
         // -- A+B: region | B-above | (gap) | A | (gap) | B-below | region. Every piece is
         // self-clamping (an empty emit_region window emits nothing; the windowed B walker skips
         // runs at or above its window and clamps at its end), and the near fragment A wins every
@@ -1089,34 +1228,50 @@ ns stream {
         // pieces run on the derived rows exactly as they ran on the stored ones.
         rep(things, k) hex.set 4, gps_cvh, viewh
         rep(things, k) .frag_derive sb, sblkb, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, gpsb_smidx, gpsb_ptr0, gpsb_ridx
+        rep(things, k) hex.if0 1, gpsc_has, c_derived
+        rep(things, k) .frag_derive p2_s3, p2_sblk3, gpsc_ybase, gpsc_top, gpsc_sy1, gpsc_sy2, gpsc_smidx, gpsc_ptr0, gpsc_ridx
+        rep(things, k) .frag_clip p2_scc, gpsc_ct, gpsc_cb, viewh
+        rep(things, k) .frag_clamp gpsc_sy1, gpsc_sy2, gpsc_ct, gpsc_cb, gpsc_cut
+      c_derived:
         rep(things, k) .frag_derive s, sblk, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gps_ridx
+        // P10 G1: each fragment inside its clip window. B's runs show above A in [sy1B, min(sy1A, sy2B)) and below it
+        // in [max(sy2A, sy1B), sy2B) -- with no clip those are the windows the walker reached before (its runs start
+        // at sy1B and end at sy2B), and with one they keep B's cut rows out.
+        rep(things, k) .frag_clip p2_scb, gpsb_ct, gpsb_cb, viewh
+        rep(things, k) .frag_clamp gpsb_sy1, gpsb_sy2, gpsb_ct, gpsb_cb, gpsb_cut
+        rep(things, k) .frag_clip p2_sc, gps_ct, gps_cb, viewh
+        rep(things, k) .frag_clamp gps_sy1, gps_sy2, gps_ct, gps_cb, gps_cut
+        rep(things, k) .min2 ecl_bwhi, gps_sy1, gpsb_sy2
+        rep(things, k) .max2 ecl_bwlo, gps_sy2, gpsb_sy1
         rep(things, k) hex.mov 2, ecl_spr_top, gps_sy1
         rep(things, k) hex.cmp 2, gpsb_sy1, ecl_spr_top, spr_top_b, spr_top_ok, spr_top_ok
       spr_top_b:
         rep(things, k) hex.mov 2, ecl_spr_top, gpsb_sy1
       spr_top_ok:
-        rep(things, k) .emit_region ecl_full_lo, ecl_spr_top, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
-        rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, ecl_full_lo, gps_sy1, gpsb_ridx
+        rep(things, k) .emit_region_c ecl_full_lo, ecl_spr_top, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, gpsb_sy1, ecl_bwhi, gpsb_ridx
         rep(things, k) hex.cmp 2, gpsb_sy2, gps_sy1, gap1_do, gap1_end, gap1_end
       gap1_do:
-        rep(things, k) .emit_region gpsb_sy2, gps_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .emit_region_c gpsb_sy2, gps_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
       gap1_end:
-        rep(things, k) .frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx
+        rep(things, k) .frag_runs_cut gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx, gps_sy1, gps_sy2, gps_cut
         rep(things, k) hex.cmp 2, gps_sy2, gpsb_sy1, gap2_do, gap2_end, gap2_end
       gap2_do:
-        rep(things, k) .emit_region gps_sy2, gpsb_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .emit_region_c gps_sy2, gpsb_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
       gap2_end:
-        rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, gps_sy2, ecl_full_hi, gpsb_ridx
+        rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, ecl_bwlo, gpsb_sy2, gpsb_ridx
         rep(things, k) hex.mov 2, ecl_spr_bot, gps_sy2
         rep(things, k) hex.cmp 2, ecl_spr_bot, gpsb_sy2, spr_bot_b, spr_bot_ok, spr_bot_ok
       spr_bot_b:
         rep(things, k) hex.mov 2, ecl_spr_bot, gpsb_sy2
       spr_bot_ok:
-        rep(things, k) .emit_region ecl_spr_bot, ecl_full_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .emit_region_c ecl_spr_bot, ecl_full_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
         ;col_done
       sprite_one:
         rep(things, k) hex.set 4, gps_cvh, viewh
         rep(things, k) .frag_derive s, sblk, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gps_ridx
+        rep(things, k) .frag_clip p2_sc, gps_ct, gps_cb, viewh                 // P10 G1: inside its clip window
+        rep(things, k) .frag_clamp gps_sy1, gps_sy2, gps_ct, gps_cb, gps_cut
         // M7 P1.4: NO WALL SPLIT when the fragment hides the column's whole wall window
         // [ctake, fstart) -- sy1 <= ctake and sy2 >= fstart. Then the region above it is the ceiling
         // splice over [0, sy1) and the region below it the floor splice over [sy2, viewh): the other
@@ -1127,12 +1282,12 @@ ns stream {
         rep(things, k) hex.cmp 2, gps_sy2, fstart, split, covered, covered
       covered:
         rep(things, k) .steps_splice_c ecl_ctake, ecl_full_lo, gps_sy1, w1r, gnrow, ecl_cmidx, cbufa, cbufd, ecl_ccy
-        rep(things, k) .frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx
+        rep(things, k) .frag_runs_cut gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx, gps_sy1, gps_sy2, gps_cut
         rep(things, k) .steps_splice_f fstart, viewh, gps_sy2, ecl_full_hi, w1r, gnrow, ecl_cmidx, fbufa, fbufd, ecl_ccy
         ;col_done
       split:
         rep(things, k) .emit_region ecl_full_lo, gps_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
-        rep(things, k) .frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx
+        rep(things, k) .frag_runs_cut gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx, gps_sy1, gps_sy2, gps_cut
         rep(things, k) .emit_region gps_sy2, ecl_full_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
       col_done:
         stl.output_char 0xFF                     // ends this column's pair list

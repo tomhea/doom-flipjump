@@ -51,8 +51,8 @@ negates only the low n nibbles, so a negation narrowed to n nibbles is off by a 
 16^n for every clip, and frac by that times the step: u, frac's bits 16-23, can move only if the
 step's low 24 - 4n bits are not all zero -- LEFT_CLIP_MOVES has which clips do); then
 columns across the 16, 64 and 1,024-index bounds up to 159, a first column below 0 and a last above
-159 (both clamps), slot ids 1..255 across 16, fragments A and B, B refused by `ballow`, both slots
-spent, columns a wall hides, a transparent block (its min_b past every bucket), a texture step
+159 (both clamps), slot ids 1..255 across 16, fragments A, B and C (P10 G3), B and C refused by `ballow`, all
+three slots spent, columns a wall hides, a transparent block (its min_b past every bucket), a texture step
 that moves the column and its clamp, y0 either side of zero, the record's min_b test (M7 P1.6: a
 column is taken iff the thing's bucket >= the block's min_b) either side of the bucket and at it,
 and across 16 -- and these operand ranges the shipped sprites reach (review rounds 5-6): a last
@@ -60,10 +60,15 @@ texture column past 16 (the shipped bank goes to 62), u past 15, a block past 0x
 clip of 300 columns at half a texel a column (frac past five nibbles). What each records, column by column, is RECORDED -- held to the model.
 
 The harness lays its hot block out as the build does: `pad 16384` (the block starts an arm5 window,
-16,384 ops, and all of it fits in that one window), then pclm, sfflag, sprflag, sfslot, spslot,
+16,384 ops, and all of it fits in that one window), then pclm, sfflag, sfbase, sprflag, sfslot, spslot,
 gpslot and drawn in the real order, drawn followed by a zero cell as the build's `wrej: hex.vec 1`
 follows it (a column past the right edge reads that cell as its wall) -- the real block holds more
 arrays between gpslot and drawn, so the offsets inside the window differ.
+
+P10 G1: a fragment's 4th byte is the record's SNAPSHOT of its column's sfflag byte (frame.rec_clip_read, the
+nearer pieces' counts the emit clips by). sfflag holds SFFLAG here -- every column a different byte -- so the
+write side must copy each column's own byte, from 3*VIEW_W cells before its sprflag byte (sfflag, sfbase and
+sprflag in ONE declaration, as the emitter writes them), and the read side must load it back for A and B.
 
 What it does NOT cover:
   * the shipped binary's addresses: only the window the narrow arms need is the build's;
@@ -108,14 +113,14 @@ EMITTER = "wall_renderer.py"
 # M7 P4.0: the game tier's OWN config -- the emitter rebinds `cfg = tier_cfg(cfg, tier)` (an 84-row view under the bar)
 CFG = wr.tier_cfg(Config(), "game")
 VIEW_W = CFG.VIEW_W
-STRIDE, B_BYTE = wr.SPR_SLOT_STRIDE, wr.SPR_SLOT_B_BYTE
+STRIDE, B_BYTE, C_BYTE = wr.SPR_SLOT_STRIDE, wr.SPR_SLOT_B_BYTE, wr.SPR_SLOT_C_BYTE
 SLOT_BYTES, BIAS, NSLOTS = wr.SPR_THING_SLOT_BYTES, wr.SPR_THING_Y0_BIAS, wr.SPR_THING_SLOTS
 ARM5_WINDOW = 16384                                              # ops: 16^5 bits of 2 * W-bit ops
 
 # (slot id, y0, light row, block base (the thing's region), first column, last column, texture step
 #  (16.16), bucket,
 #  ballow, sp_dw), recorded in this order: a later record into a column that holds A takes B
-#  (if ballow lets it), a third finds both slots spent
+#  (if ballow lets it), a third takes C (P10 G3, the same gate), a fourth finds all three spent
 THINGS = [# four of E1M1's left clips from the player start (x1, x2, texture step, dw, as the oracle
           # projects them -- PR #93's review, round 7); which of them a narrowed negation moves is
           # LEFT_CLIP_MOVES
@@ -155,9 +160,9 @@ TRANSPARENT = {0x0007}
 # what each record records, column by column ("B0 A1": fragment B at column 0, A at column 1; "-":
 # nothing) -- held to the model by test_the_things_record_what_RECORDED_says (review round 8: the
 # comments had drifted from THINGS)
-RECORDED = {60: "A0", 61: "B0 A1", 62: "B1", 63: "A2", 1: "-", 15: "A15-17", 16: "A62-66",
+RECORDED = {60: "A0", 61: "B0 A1", 62: "C0 B1", 63: "C1 A2", 1: "-", 15: "A15-17", 16: "A62-66",
             255: "A158-159", 17: "-", 40: "B15-16", 41: "-", 42: "A10-11", 43: "-", 44: "-", 45: "B2",
-            46: "A157 B158-159", 47: "A30-37", 48: "A40-45", 49: "A3", 50: "A110-126", 51: "A130-139",
+            46: "A157 B158-159", 47: "A30-37", 48: "A40-45", 49: "C2 A3", 50: "A110-126", 51: "A130-139",
             52: "A140-141", 53: "B3 A4-9", 54: "A50-51 A54", 55: "-"}
 # the left clips whose recorded block moves under `hex.neg n, trb_negx1`, per n: a negation narrowed
 # to n nibbles is off by a non-zero multiple of 16^n for EVERY clip, and frac by that times the step,
@@ -193,6 +198,9 @@ LOADS = [(0, 0), (1, 0), (2, 0), (3, 0), (10, 0), (12, 0), (15, 0), (16, 0), (17
          (36, 1), (44, 0), (62, 0), (63, 1), (64, 0), (157, 0), (158, 0), (159, 0), (100, 0), (13, 3),
          (110, 0), (118, 5), (126, 0), (135, 0), (140, 0), (141, 0)]
 DERIVE_BLOCK = 0x0102
+# P10 G1: the harness's sfflag bytes -- a different byte in every column (73 is odd, so x -> 73x + 41 is a
+# bijection mod 256), which the record snapshots into its fragments' byte 3
+SFFLAG = [(73 * x + 41) & 0xFF for x in range(VIEW_W)]
 
 
 def _record_all(things=THINGS):
@@ -208,13 +216,13 @@ def _record_all(things=THINGS):
         took[sid] = []
         for x, blk in _columns(x1, x2, istep, sp_dw, base):
             n = sprflag[x]
-            if x in HIDDEN or n == 2 or (n == 1 and not ballow) or bucket < HEADER[blk][1]:
+            if x in HIDDEN or n == 3 or (n >= 1 and not ballow) or bucket < HEADER[blk][1]:
                 continue
-            frag = {"slot id": sid, "block lo": blk & 0xFF, "block hi": blk >> 8}
+            frag = {"slot id": sid, "block lo": blk & 0xFF, "block hi": blk >> 8, "clip counts": SFFLAG[x]}
             for i, f in enumerate(wr.SPR_FRAG_FIELDS):
-                spslot[x * STRIDE + (B_BYTE if n else 0) + i] = frag[f]
+                spslot[x * STRIDE + (0, B_BYTE, C_BYTE)[n] + i] = frag[f]
             sprflag[x] = n + 1
-            took[sid].append((x, "AB"[n]))
+            took[sid].append((x, "ABC"[n]))
     return (sprflag, spslot, gpslot), took
 
 
@@ -235,8 +243,9 @@ def _runs(took):
 
 
 def expected_reads():
-    """what the read side must give: per LOADS column (sprfl, s, sblk lo, hi, sb, sblkb lo, hi),
-    then per thing (y0 lo, y0 hi, light row, bucket)"""
+    """what the read side must give: per LOADS column (sprfl, s, sblk lo, hi, sb, sblkb lo, hi, then P10 G1's two
+    snapshots, A's and B's, then P10 G3's slot C: s3, sblk3 lo, hi, its snapshot), then per thing (y0 lo, y0 hi,
+    light row, bucket)"""
     sprflag, spslot, _ = expected_memory()
     out = []
     for x0, k in LOADS:
@@ -244,9 +253,12 @@ def expected_reads():
         a = {f: spslot[x * STRIDE + i] for i, f in enumerate(wr.SPR_FRAG_FIELDS)}
         b = {f: spslot[x * STRIDE + B_BYTE + i] for i, f in enumerate(wr.SPR_FRAG_FIELDS)}
         n = sprflag[x]
+        c = {f: spslot[x * STRIDE + C_BYTE + i] for i, f in enumerate(wr.SPR_FRAG_FIELDS)}
         frag_a = [a["slot id"], a["block lo"], a["block hi"]] if n >= 1 else [0, 0, 0]
-        frag_b = [b["slot id"], b["block lo"], b["block hi"]] if n == 2 else [0, 0, 0]
-        out += [n] + frag_a + frag_b
+        frag_b = [b["slot id"], b["block lo"], b["block hi"]] if n >= 2 else [0, 0, 0]
+        snaps = [a["clip counts"] if n >= 1 else 0, b["clip counts"] if n >= 2 else 0]
+        frag_c = [c["slot id"], c["block lo"], c["block hi"], c["clip counts"]] if n == 3 else [0, 0, 0, 0]
+        out += [n] + frag_a + frag_b + snaps + frag_c
     for sid, y0, light, base, x1, x2, istep, bucket, *_ in THINGS:
         out += [y0 & 0xFF, (y0 >> 8) & 0xFF, light, bucket]
     return out
@@ -256,7 +268,8 @@ def block_arrays(mem):
     """the hot block's arrays in the build's order, with the contents `mem` gives sprflag, spslot and
     gpslot: [(label, cells)]"""
     sprflag, spslot, gpslot = mem
-    return [("pclm", [0] * (VIEW_W * CFG.PID_BYTES)), ("sfflag", [0] * VIEW_W), ("sprflag", list(sprflag)),
+    return [("pclm", [0] * (VIEW_W * CFG.PID_BYTES)), ("sfflag", list(SFFLAG)), ("sfbase", [0] * (2 * VIEW_W)),
+            ("sprflag", list(sprflag)),
             ("sfslot", [0] * (VIEW_W * 16 ** CFG.SLOT_SHIFT)), ("spslot", list(spslot)),
             ("gpslot", list(gpslot)), ("drawn", [1 if x in HIDDEN else 0 for x in range(VIEW_W)]),
             ("lay_wrej", [0])]
@@ -276,7 +289,7 @@ def _code(text):
 
 
 GLOBALS = ({d.split(":")[0].strip() for d in wr.hoisted_scratch_decls(CFG)}
-           | {"drawn", "pclm", "sfflag", "sprflag", "sfslot", "spslot", "gpslot", "sprbank", "sp_dw",
+           | {"drawn", "pclm", "sfflag", "sfbase", "sprflag", "sfslot", "spslot", "gpslot", "sprbank", "sp_dw",
               "ballow", "hdfl"})
 
 
@@ -802,6 +815,8 @@ def read_program():
                  "    hex.set 2, ld_sb, 0xAA", "    hex.set 4, ld_sblkb, 0xAAAA",
                  "    frame.lines_spr_load ld_sprfl, ld_s, ld_sblk, ld_sb, ld_sblkb"]
         main += emit("ld_sprfl", 1) + emit("ld_s", 1) + emit("ld_sblk", 2) + emit("ld_sb", 1) + emit("ld_sblkb", 2)
+        main += emit("p2_sc", 1) + emit("p2_scb", 1)                 # P10 G1: the two snapshots
+        main += emit("p2_s3", 1) + emit("p2_sblk3", 2) + emit("p2_scc", 1)    # P10 G3: slot C
     for sid, *_ in THINGS:
         main += ["    hex.set 2, gps_cur_s, 0",                   # a new thing: the derive fetches its slot
                  "    hex.set 2, dv_s, %d" % sid, "    hex.set 4, dv_sblk, %d" % DERIVE_BLOCK,
@@ -872,7 +887,8 @@ def test_the_record_writes_every_byte_where_the_constants_say(tmp_path):
     assert len(got) == len(want) and not bad, (len(got), len(want), bad[:10])
     # not vacuous: every kind of record happened (the expectation is what `got` just equalled)
     sprflag, spslot, _ = expected_memory()
-    assert sprflag[0] == 2 and sprflag[15] == 2 and sprflag[64] == 1 and sprflag[159] == 2
+    assert sprflag[0] == 3 and sprflag[15] == 2 and sprflag[64] == 1 and sprflag[159] == 2
+    assert [sprflag[x] for x in (0, 1, 2)] == [3, 3, 3], "P10 G3: a third record into a column takes slot C"
     assert sprflag[17] == 1, "ballow 0 must leave column 17 at A only"
     assert all(sprflag[x] == 0 for x in HIDDEN | {100, 101})
     # half a texel a column: u moves every second column, so the block does at 32, 34, 36 (clamped)
@@ -919,12 +935,26 @@ MUTANTS = [
     ("slot B's byte", "write", FR, "hex.set w/4, trb_slot_ofs, 8", "hex.set w/4, trb_slot_ofs, 9"),
     ("the record's bias", "write", FR, "hex.add_constant 8, gps_yb8, 32768", "hex.add_constant 8, gps_yb8, 32767"),
     ("the record's fragment order", "write", FR,
-     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W + "frame.write_byte5 trb_tbl_p, trb_blk + 2*dw",
-     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw" + _W + "frame.write_byte5 trb_tbl_p, trb_blk"),
+     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W + "frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw",
+     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw" + _W + "frame.write_byte_and_inc5 trb_tbl_p, trb_blk"),
+    # P10 G1: the snapshot read from the wrong cell (a column's NEIGHBOUR: SFFLAG differs in every column), and
+    # another byte written in its place
+    ("the record's snapshot: one cell off", "write", FR,
+     "hex.ptr_sub trb_clip_p, 3*VIEW_W", "hex.ptr_sub trb_clip_p, 3*VIEW_W + 1"),
+    ("the record's snapshot: the block byte written in its place", "write", FR,
+     # `0*trb_clip_v` keeps the snapshot register referenced: the record's `<` list names it, and an unused
+     # name there is an assembly error -- the mutant must RUN and write the wrong byte, not fail to build
+     "frame.write_byte5 trb_tbl_p, trb_clip_v", "frame.write_byte5 trb_tbl_p, trb_blk + 0*trb_clip_v"),
+    # P10 G3: slot C written over B's bytes, and the load reading C's block bytes swapped
+    ("the record's slot C: at B's bytes", "write", FR, "hex.set w/4, trb_slot_ofs, 4", "hex.set w/4, trb_slot_ofs, 12"),
+    ("the load's slot C: block bytes swapped", "read", FR,
+     "frame.read0_byte_and_inc p2_sblk3, spslot_p" + _W + "frame.read0_byte_and_inc p2_sblk3 + 2*dw, spslot_p",
+     "frame.read0_byte_and_inc p2_sblk3 + 2*dw, spslot_p" + _W + "frame.read0_byte_and_inc p2_sblk3, spslot_p"),
     ("the record's fragment: an increment dropped", "write", FR,
      "hex.write_byte_and_inc trb_tbl_p, gps_s_rec", "hex.write_byte trb_tbl_p, gps_s_rec"),
     ("the record's fragment: a step inserted", "write", FR,
-     "frame.write_byte5 trb_tbl_p, trb_blk + 2*dw", "hex.ptr_inc trb_tbl_p" + _W + "frame.write_byte5 trb_tbl_p, trb_blk + 2*dw"),
+     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw",
+     "hex.ptr_inc trb_tbl_p" + _W + "frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw"),
     ("the record's slot: an increment dropped", "write", FR,
      "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw", "hex.write_byte gps_ptr, gps_yb8 + 2*dw"),
     ("the record's slot: a step inserted", "write", FR,
@@ -1050,7 +1080,7 @@ MUTANTS = [
      "    _MT_NSSN = _index_nibbles(max(1, _MT_NSS))\n\n    def _rebind(n):\n        global SPR_SLOT_STRIDE\n"
      "        SPR_SLOT_STRIDE = 16 * n\n    _rebind(_MT_NSSN)\n"),
     # the read side
-    ("the load's skip to B", "read", FR, "hex.ptr_add spslot_p, 5", "hex.ptr_add spslot_p, 4"),
+    ("the load's skip to B", "read", FR, "hex.ptr_add spslot_p, 4", "hex.ptr_add spslot_p, 3"),
     ("the load: an increment dropped", "read", FR,
      "frame.read0_byte_and_inc sblk + 2*dw, spslot_p", "frame.read_byte5 sblk + 2*dw, spslot_p"),
     ("the load: a step inserted", "read", FR,

@@ -37,7 +37,7 @@ from doomfj.build import sprbank_misalignment
 from doomfj.config import Config
 from doomfj.harness import W
 from doomfj.wall_renderer import (SPR_BLOCK_STRIDE, SPR_FRAG_BYTES, SPR_FRAG_FIELDS,
-                                  SPR_SLOT_B_BYTE, SPR_THING_SLOT_BYTES, SPR_THING_SLOT_FIELDS,
+                                  SPR_SLOT_B_BYTE, SPR_SLOT_C_BYTE, SPR_THING_SLOT_BYTES, SPR_THING_SLOT_FIELDS,
                                   SPR_THING_SLOTS, SPR_THING_Y0_BIAS, check_slot_ids,
                                   hoisted_scratch_decls, sprite_bank_header)
 
@@ -129,11 +129,15 @@ def test_the_slot_stride_is_the_shift_both_fj_sides_scale_by():
 REG_FIELD = {
     # frame.thing_record_body -- the writes
     "gps_s_rec": "slot id", "trb_blk": "block lo", "trb_blk + 2*dw": "block hi",
+    "trb_clip_v": "clip counts",                                     # P10 G1: the record's snapshot
     "gps_yb8": "y0 lo", "gps_yb8 + 2*dw": "y0 hi", "trb_shade_row": "light row",
     "trb_bucket": "bucket",                                          # M7 P1.6: the rowmap's row
     # frame.lines_spr_load -- fragment A, then fragment B
     "s": "slot id", "sblk": "block lo", "sblk + 2*dw": "block hi",
     "sb": "slot id", "sblkb": "block lo", "sblkb + 2*dw": "block hi",
+    "p2_sc": "clip counts", "p2_scb": "clip counts",                 # P10 G1
+    # P10 G3: fragment C
+    "p2_s3": "slot id", "p2_sblk3": "block lo", "p2_sblk3 + 2*dw": "block hi", "p2_scc": "clip counts",
     # stream.frag_derive
     "gps_y0": "y0 lo", "gps_y0 + 2*dw": "y0 hi", "gps_lr": "light row", "gps_b": "bucket",
 }
@@ -171,15 +175,20 @@ def fj_layouts(frame_text, stream_text):
     rec = macro(frame_text, "thing_record_body")
     load = macro(frame_text, "lines_spr_load")
     derive = macro(stream_text, "frag_derive")
-    load_a, load_b = re.split(r"^\s*hex\.ptr_add spslot_p, \d+.*$", load, maxsplit=1, flags=re.M)
+    # P10 G3: the load reads A, then (sprfl 3) C, then B -- A before the B/C test, C up to `read_b:`, B after it
+    load_a = load[:load.index("hex.mov 2, has_slot_b, sprfl")]
+    load_c = load[load.index("hex.if0 2, has_slot_b, no_c"):load.index("      no_c:")]
+    load_b = load[load.index("      read_b:"):]
     fetch = derive[derive.index("fetch:"):derive.index("have:")]
     return {
         "the record's fragment": written(rec, "trb_tbl_p"),
         "fragment A's byte": one(r"^\s*slot_a:\s*\n\s*hex\.set w/4, trb_slot_ofs, (\d+)", rec),
         "fragment B's byte": one(r"^\s*slot_b:\s*\n\s*hex\.set w/4, trb_slot_ofs, (\d+)", rec),
+        "fragment C's byte": one(r"^\s*slot_c:\s*\n\s*hex\.set w/4, trb_slot_ofs, (\d+)", rec),
         "the load's fragment A": read(load_a, "spslot_p"),
         "the load's skip to B": one(r"^\s*hex\.ptr_add spslot_p, (\d+)", load),
         "the load's fragment B": read(load_b, "spslot_p"),
+        "the load's fragment C": read(load_c, "spslot_p"),
         "the record's slot": written(rec, "gps_ptr"),
         "the record's bias": one(r"^\s*hex\.add_constant \d+, gps_yb8, (\d+)", rec),
         "the derive's slot": read(fetch, "ptr"),
@@ -193,9 +202,13 @@ def stated_layouts():
         "the record's fragment": SPR_FRAG_FIELDS,
         "fragment A's byte": 0,
         "fragment B's byte": SPR_SLOT_B_BYTE,
+        "fragment C's byte": SPR_SLOT_C_BYTE,
         "the load's fragment A": SPR_FRAG_FIELDS,
         "the load's skip to B": SPR_SLOT_B_BYTE - SPR_FRAG_BYTES,
         "the load's fragment B": SPR_FRAG_FIELDS,
+        # the load reads C straight after A and B straight after C, with no skip between: C must FILL the gap
+        "the load's fragment C": SPR_FRAG_FIELDS if SPR_SLOT_C_BYTE == SPR_FRAG_BYTES
+        and SPR_SLOT_C_BYTE + SPR_FRAG_BYTES == SPR_SLOT_B_BYTE else "C does not fill the gap between A and B",
         "the record's slot": SPR_THING_SLOT_FIELDS,
         "the record's bias": SPR_THING_Y0_BIAS,
         "the derive's slot": SPR_THING_SLOT_FIELDS,
@@ -219,9 +232,13 @@ _W = "\n        "
 LAYOUT_MUTANTS = [
     (0, "hex.set w/4, trb_slot_ofs, 0", "hex.set w/4, trb_slot_ofs, 1", "fragment A's byte"),
     (0, "hex.set w/4, trb_slot_ofs, 8", "hex.set w/4, trb_slot_ofs, 9", "fragment B's byte"),
-    (0, "hex.ptr_add spslot_p, 5", "hex.ptr_add spslot_p, 4", "the load's skip to B"),
-    (0, "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W + "frame.write_byte5 trb_tbl_p, trb_blk + 2*dw",
-     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw" + _W + "frame.write_byte5 trb_tbl_p, trb_blk",
+    (0, "hex.ptr_add spslot_p, 4", "hex.ptr_add spslot_p, 3", "the load's skip to B"),
+    (0, "hex.set w/4, trb_slot_ofs, 4", "hex.set w/4, trb_slot_ofs, 5", "fragment C's byte"),
+    (0, "frame.read0_byte_and_inc p2_sblk3, spslot_p" + _W + "frame.read0_byte_and_inc p2_sblk3 + 2*dw, spslot_p",
+     "frame.read0_byte_and_inc p2_sblk3 + 2*dw, spslot_p" + _W + "frame.read0_byte_and_inc p2_sblk3, spslot_p",
+     "the load's fragment C"),
+    (0, "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W + "frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw",
+     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw" + _W + "frame.write_byte_and_inc5 trb_tbl_p, trb_blk",
      "the record's fragment"),
     (0, "frame.read0_byte_and_inc sblk, spslot_p" + _W + "frame.read0_byte_and_inc sblk + 2*dw, spslot_p",
      "frame.read0_byte_and_inc sblk + 2*dw, spslot_p" + _W + "frame.read0_byte_and_inc sblk, spslot_p",

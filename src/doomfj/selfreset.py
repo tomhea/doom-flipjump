@@ -34,7 +34,7 @@ VAL_SHIFT = (W + W.bit_length()) - W
 
 # Arrays written through hex.write_byte: 8 bits in ONE cell, so they need m1.zerobyte and a
 # nibble op on one CORRUPTS it. drawn and sprflag are deliberately absent: they are write_byte
-# arrays too, but only ever hold small values -- frame.mark_drawn writes 1, sprflag writes 1 or 2
+# arrays too, but only ever hold small values -- frame.mark_drawn writes 1, sprflag writes 1, 2 or 3 (P10 G3)
 # -- so the 19.5-op nibble clear is correct for them and 91 ops each would be waste.
 #
 # The reachable CELL COUNT of each is DERIVED, never hardcoded (R6). sshead is declared

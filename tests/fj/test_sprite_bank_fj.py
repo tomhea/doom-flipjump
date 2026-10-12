@@ -418,7 +418,11 @@ def _record_program(src, cases, seen_on=False):
             # the renderer's hot-data block, as the emitter places it: a fresh 16^5-bit window, so
             # the column loop's arm5 reads and writes (drawn -> sprflag, spslot -> sprflag) are exact
             ";t_hot_end", "pad 16384",
-            "drawn:", *[";0 * dw"] * NX, "sprflag:", *[";0 * dw"] * NX,
+            "drawn:", *[";0 * dw"] * NX,
+            # P10 G1: the record snapshots a column's sfflag byte (frame.rec_clip_read), 3*VIEW_W cells before its
+            # sprflag byte -- the emitter's hot string: sfflag, sfbase, sprflag. All zero here: no nearer piece.
+            "sfflag:", *[";0 * dw"] * CFG.VIEW_W, "sfbase:", *[";0 * dw"] * (2 * CFG.VIEW_W),
+            "sprflag:", *[";0 * dw"] * NX,
             "spslot:", *[";0 * dw"] * (NX * wr.SPR_SLOT_STRIDE),
             "gpslot:", *[";0 * dw"] * (wr.SPR_THING_SLOTS * wr.SPR_THING_SLOT_BYTES),
             "t_hot_end:",

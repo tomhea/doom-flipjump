@@ -99,8 +99,12 @@ TOUR_TARGETS = 10                   # one destination per seed, spread over the 
 # `gamespeed_trail.py --fjm <the P6+P7 build>` (TRAIL must PASS; it prints the binary's own). blocked27..48's were
 # ((831, 653), (-357, 430), (780, 427), (688, 208), (-176, 348), (-173, 163), (-173, 413), (-490, 106), (239, 353),
 # (189, 245)) with run 0 opening one door: not like-for-like (O3).
-BINARY_ENDS = ((529, 208), (-296, 120), (707, 492), (147, 214), (-128, 271), (-276, 425), (-371, 80), (-452, 373),
-               (-493, 223), (-495, 194))
+# M7 P10: the turn's held rate 960 -> 1280 a frame, and gen 3b's turns on the spot (`_steer`), re-planned every route;
+# these are GameSim's PREDICTED ends at P10 (blocked54's were ((529, 208), (-296, 120), (707, 492), (147, 214),
+# (-128, 271), (-276, 425), (-371, 80), (-452, 373), (-493, 223), (-495, 194)), owed their confirmation by
+# `gamespeed_trail.py --fjm <the P10 build>`.
+BINARY_ENDS = ((578, 303), (-108, 260), (710, 489), (450, 300), (689, 494), (399, 258), (515, 360), (419, 280),
+               (-210, 367), (97, 254))
 BINARY_DOORS = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 # runs 0 and 1's keys, recorded so the host test replays them without the ~75 s planner: run 0 is
 # the one that opens a door, and run 1 starts after it, which is where a stepper that is not reset
@@ -201,7 +205,14 @@ def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
     the 100 frames moving."""
     import math
 
-    from doomfj.reference_model import ANGLE_TURN, _signed
+    from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, _signed
+    # M7 P10 (gen 3b): the TURNING CIRCLE. Holding forward (FORWARD_MOVE a frame) while turning at the full rate
+    # (ANGLE_TURN a frame) draws a circle of radius v / w; a waypoint inside the circle on the turn's side -- every
+    # point at distance d < 2 (v / w) |sin err| -- is never reached holding forward: the run ORBITS it for the rest
+    # of its budget, moving every frame, so `stuck` never fires. MEASURED at the P10 rate (1280 a frame, radius 130
+    # units): nine of the ten runs circled within 200 units of spawn with a turn key on all 100 frames. Such a
+    # waypoint is turned to on the spot, as a player does; every other frame still holds forward.
+    radius = (FORWARD_MOVE >> 16) / (ANGLE_TURN * 2 * math.pi / (1 << 32))
     keys, wi, stuck = [], 0, 0
     while len(keys) < budget and wi < len(waypoints):
         tx, ty = waypoints[wi]
@@ -218,11 +229,13 @@ def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
             kd["turn_left"] = True              # turn_left ADDS to the angle (measured)
         elif err < -(ANGLE_TURN // 2):
             kd["turn_right"] = True
+        if len(kd) > 1 and math.hypot(tx - x, ty - y) < 2 * radius * abs(math.sin(err * 2 * math.pi / (1 << 32))):
+            del kd["forward"]                   # gen 3b: inside the turning circle -- turn on the spot
         if any(in_box(b, st.x, st.y) for b in boxes):
             kd["use"] = True                    # a player opens the door in front of them
         nxt = rm.step_sim(st, kd, scene=scene)
-        if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
-            stuck = 0
+        if "forward" not in kd or abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
+            stuck = 0                           # (gen 3b: a turn on the spot is not a refused step)
         else:
             stuck += 1
             if stuck >= 4:                      # this waypoint is not working out; aim past it
@@ -316,6 +329,8 @@ def script(seed, n_game=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP):
     gen 3 gives each seed its own destination, chosen by farthest-point sampling over everything
     reachable WITH DOORS OPEN, and steers there while holding forward. `use` is pressed inside door
     use boxes, because a run that never opens a door cannot leave the first fifth of the level.
+    gen 3b (M7 P10) turns on the spot to a waypoint inside the turning circle (`_steer`): at the P10
+    turn rate gen 3 ORBITED such a waypoint, and nine of the ten runs circled the starting room again.
 
     Deterministic (no RNG anywhere), and `--validate` reports coverage per seed."""
     key = (seed, n_game, wad, mapname)

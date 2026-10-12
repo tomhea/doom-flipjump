@@ -32,7 +32,7 @@ CONTROLS (R9). Each mutates the shipped source TEXT and must make the check fail
   M2  the record's bias off by one row             the slot write      32768 -> 32767
   M3  a run walk's FIRST read on the narrow arm    stream.frag_runs    (the prototype's caught bug:
       region 1's step face armed stepcol in between, so a 3-nibble re-arm lands in the wrong block)
-  M4  slot B read one byte early                   lines_spr_load  `ptr_add spslot_p, 5` -> 4
+  M4  slot B read one byte early                   lines_spr_load  `ptr_add spslot_p, 4` -> 3 (P10: 5 -> 4)
 And the EXPECTATION is checked on the renderer before P1.4 (`--base <rev>`): that revision's
 record, load and emit must meet it too, A and A+B -- the harness wires the macros right.
 
@@ -279,8 +279,8 @@ MUTANTS = {
                                             "      fast:\n        hex.read_byte_and_inc gps_rel, ptr",
                                             "      fast:\n        frame.read3_and_inc gps_rel, ptr",
                                             ("A",)),
-    "M4 slot B read one byte early": ("frame_render.fj", "hex.ptr_add spslot_p, 5",
-                                      "hex.ptr_add spslot_p, 4", ("A+B",)),
+    "M4 slot B read one byte early": ("frame_render.fj", "hex.ptr_add spslot_p, 4",
+                                      "hex.ptr_add spslot_p, 3", ("A+B",)),
 }
 
 

@@ -1361,7 +1361,7 @@ ns proj {
 
     def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg, spn, neartz, aim \
             @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, set_far, far_done, trig_calc, trig_have, linf_x_ok, linf_y_ok, reject, done, end, deg_far_hard \
-            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_dbound, pth_dtest, pth_c_centerxfix, pth_c_centeryfix, pth_c_viewh, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_gzt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
+            < viewx, viewy, viewangle, sp_x, sp_y, sp_left, sp_w, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_dbound, pth_dtest, pth_c_centerxfix, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
         hex.set 1, vis, 0
         hex.mov 8, pth_tr_x, sp_x
         frame.sub8_chain pth_tr_x, viewx

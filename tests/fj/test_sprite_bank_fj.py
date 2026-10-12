@@ -502,7 +502,40 @@ def _ledges(cases, seed=19):
                     slot[8] = los[0][0]
             flag = ucnt | (rng.randrange(2) << 3) | (lcnt | (rng.randrange(2) << 3)) << 4
             out[x] = (flag, slot, hid)
+    # the three boundaries the mutants move, FORCED onto columns that take a slot (else a wrong answer there would
+    # change nothing the record writes): an upper piece ending exactly at the box's end and a lower one starting
+    # exactly at its top (hidden), the last row's upper piece over a box past the view (shown -- the clamp's +2)
+    used = set()
+    for kind in ("past the view", "upper edge", "lower edge"):
+        for x in range(min(CFG.VIEW_W, N_COLS * len(cases))):
+            c = x // N_COLS
+            b, _far, tytop, thpx, _lt = cases[c]
+            yb, hb = tytop + thpx - HEIGHTS[b], HEIGHTS[b]
+            if x in used or not _takes(cases, x):
+                continue
+            slot = {o: rng.randrange(H) for o in range(16)}
+            if kind == "past the view" and yb + hb > H + 1:
+                slot[1], flag, ups, los = H - 1, 1, [(0, H - 1)], []
+            elif kind == "upper edge" and 0 <= yb + hb - 1 <= H - 1:
+                slot[1], flag, ups, los = yb + hb - 1, 1, [(0, yb + hb - 1)], []
+            elif kind == "lower edge" and 0 <= yb <= H - 1:
+                slot[8], flag, ups, los = yb, 0x10, [], [(yb, H - 1)]
+            else:
+                continue
+            out[x] = (flag, slot, ledge_hidden(ups, los, yb, hb))
+            assert out[x][2] == (kind != "past the view"), (kind, x)
+            used.add(x)
+            break
+        else:
+            raise AssertionError("no column takes a slot for the %s case" % kind)
     return out
+
+
+def _takes(cases, x):
+    """does column x take a slot when nothing hides it -- its block's min_b at or below the bucket (MIN_B_DELTA)"""
+    b, far, *_r = cases[x // N_COLS]
+    tier = sprite_tier(HEIGHTS[b], bool(far))
+    return b >= max(0, min(SPRITE_HEIGHT_BUCKETS, b + MIN_B_DELTA[tier][x % N_COLS]))
 
 
 def _shade(lt, hb):
@@ -668,6 +701,8 @@ def ledges(record_cases):
         b, _far, tytop, thpx, _lt = record_cases[x // N_COLS]
         yb, hb = tytop + thpx - HEIGHTS[b], HEIGHTS[b]
         uc, lc = f & 3, f >> 4 & 3
+        if not _takes(record_cases, x):
+            continue                                     # a wrong answer here would change nothing written
         if uc and not lc and h and slot[1 + 4 * (uc - 1)] + 1 == yb + hb:
             edges.add("upper edge")
         if lc and not uc and h and slot[8 + 4 * (lc - 1)] == yb:

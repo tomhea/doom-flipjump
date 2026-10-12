@@ -1153,7 +1153,7 @@ ns stream {
               gps_cvh, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, gpsb_smidx, gpsb_ptr0, gps_ridx, gpsb_ridx, \
               p2_sc, p2_scb, gps_ct, gps_cb, gps_cut, gpsb_ct, gpsb_cb, gpsb_cut, ecl_bwlo, ecl_bwhi, \
               p2_s3, p2_sblk3, p2_scc, gpsc_has, gpsc_ybase, gpsc_top, gpsc_sy1, gpsc_sy2, gpsc_smidx, gpsc_ptr0, gpsc_ridx, \
-              gpsc_ct, gpsc_cb, gpsc_cut {
+              gpsc_ct, gpsc_cb, gpsc_cut, erc_lo, erc_hi {
         hex.mov 2, ecl_ctake, cexcl
         hex.cmp 2, ecl_ctake, fstart, ctake_ok, ctake_ok, ctake_clamp   // ecl_ctake = min(cexcl, fstart)
       ctake_clamp:

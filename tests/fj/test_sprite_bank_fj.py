@@ -30,9 +30,15 @@ pattern differs per region, so a wrong region shows in the columns too). The exp
 ORACLE's rule (`reference_model.sprite_tier`) and the emitter's layout (HD at sp_base, MID `dw` on,
 LD at sp_base2).
 
+P11 (c)+(d): the record's LEDGE TEST (frame.ledge_box / frame.ledge_test, the model's ledge_hidden) -- columns
+whose nearer pieces (an upper and / or a lower side, one or two pieces, the G2 base bits, the last piece's row on
+the box's edge +-1, a DECOY at the other piece's offsets) hide the thing's box take no slot, and a thing hidden in
+every column is not marked seen.
+
 R9: the harnesses must reject a walker that skips the rowmap in the fast, the clipped and the window
 loop (a run's end left normalized, as a per-bucket bank would have it), the window walker without its
-empty-window guard, and a record whose HD compare, slot byte 3, min_b compare or thfar test is broken.
+empty-window guard, a record whose HD compare, slot byte 3, min_b compare or thfar test is broken, and a
+record without its ledge test or with one that reads the wrong piece, drops an offset or clamps short.
 """
 import random
 import re
@@ -425,7 +431,8 @@ def _record_macros(src):
     out, pars = [], {}
     for name, part in (("t_rec_thing", lines[s_a:e_a]), ("t_rec_cols", lines[s_b:e_b])):
         # the record's own helper macros (`.rec_...`, namespace-relative in `frame`) called by their full name
-        code = [ln.split("//")[0].rstrip().replace(" .rec_", " frame.rec_") for ln in part]
+        code = [ln.split("//")[0].rstrip().replace(" .rec_", " frame.rec_").replace(" .ledge_", " frame.ledge_")
+                for ln in part]
         code = "\n".join(ln for ln in code if ln.strip())
         labels = set(re.findall(r"^\s*(\w+):", code, re.M))
         used = set(_IDENT.findall(code))
@@ -449,12 +456,61 @@ def _record_cases():
     return out
 
 
+def _ledges(cases, seed=19):
+    """P11 (c)+(d): x -> (the column's sfflag byte, {sfslot offset: byte}, hidden). Column u0 of a case has no piece
+    (shown) unless the case is one of every fourth, which is HIDDEN in all three columns (the seen mark's test);
+    the rest draw a side and count -- the last piece's row on the box's edge -1 / 0 / +1 or anywhere, the base bit
+    (bit 3 of the count nibble: no piece) at random, and a DECOY row at every offset the test must not read (the
+    first piece of a count of 2, the absent second one of a count of 1) -- until the model's ledge_hidden says
+    what the case needs"""
+    from doomfj.reference_model import ledge_hidden
+    rng = random.Random(seed)
+    out = {}
+    for c, (b, _far, tytop, thpx, _lt) in enumerate(cases):
+        hb = HEIGHTS[b]
+        yb = tytop + thpx - hb
+        for u in range(N_COLS):
+            x = N_COLS * c + u
+            if x >= CFG.VIEW_W:                          # past the harness's sfflag / sfslot: no piece
+                out[x] = (0, {}, False)
+                continue
+            want = True if c % 4 == 3 else (False if u == 0 else None)
+            if want is False:
+                out[x] = (rng.choice((0, 0x08, 0x80, 0x88)), {}, False)
+                continue
+            for _try in range(500):
+                ucnt, lcnt = rng.choice(((1, 0), (2, 0), (0, 1), (0, 2), (1, 1), (2, 2), (1, 2), (2, 1)))
+                edge_u = rng.choice((yb + hb - 2, yb + hb - 1, yb + hb, rng.randrange(H), H - 1))
+                edge_l = rng.choice((yb - 1, yb, yb + 1, rng.randrange(H), 0))
+                uy2 = max(0, min(H - 1, edge_u))
+                ly1 = max(0, min(H - 1, edge_l))
+                ups = [(0, H - 1 - uy2 // 2), (0, uy2)][-ucnt:] if ucnt == 2 else ([(0, uy2)] if ucnt else [])
+                los = [(H - 1 - ly1 // 2, H - 1), (ly1, H - 1)][-lcnt:] if lcnt == 2 else ([(ly1, H - 1)] if lcnt else [])
+                hid = ledge_hidden(ups, los, yb, hb)
+                if want is None or hid == want:
+                    break
+            else:
+                raise AssertionError("no piece set hides case %d (yb %d, hb %d)" % (c, yb, hb))
+            slot = {o: rng.randrange(H) for o in range(16)}          # decoys everywhere ...
+            if ucnt:
+                slot[1 + 4 * (ucnt - 1)] = ups[-1][1]                # ... but the LAST upper piece's y2
+                if ucnt == 2:
+                    slot[1] = ups[0][1]
+            if lcnt:
+                slot[8 + 4 * (lcnt - 1)] = los[-1][0]                # ... and the LAST lower piece's y1
+                if lcnt == 2:
+                    slot[8] = los[0][0]
+            flag = ucnt | (rng.randrange(2) << 3) | (lcnt | (rng.randrange(2) << 3)) << 4
+            out[x] = (flag, slot, hid)
+    return out
+
+
 def _shade(lt, hb):
     """the stub `sprlight` byte at class `lt`, height `hb`"""
     return (lt * 97 + hb * 7 + 3) & 0xFF
 
 
-def _record_program(src, cases, seen_on=False):
+def _record_program(src, cases, seen_on=False, ledges=None):
     """`seen_on` (M7 P3.2a): the seen mark ON -- each case's flag `t_thseen[c]`, declared a whole 16^5 window past the
     hot block, and one more output line with every flag"""
     pars, macros = _record_macros(src)
@@ -477,10 +533,14 @@ def _record_program(src, cases, seen_on=False):
             "drawn:", *[";0 * dw"] * NX,
             # P10 G1: the record snapshots a column's sfflag byte (frame.rec_clip_read), 3*VIEW_W cells before its
             # sprflag byte -- the emitter's hot string: sfflag, sfbase, sprflag. All zero here: no nearer piece.
-            "sfflag:", *[";0 * dw"] * CFG.VIEW_W, "sfbase:", *[";0 * dw"] * (2 * CFG.VIEW_W),
+            "sfflag:", *[";%#x * dw" % ((ledges or {}).get(x, (0,))[0]) for x in range(CFG.VIEW_W)],
+            "sfbase:", *[";0 * dw"] * (2 * CFG.VIEW_W),
             "sprflag:", *[";0 * dw"] * NX,
             "spslot:", *[";0 * dw"] * (NX * wr.SPR_SLOT_STRIDE),
             "gpslot:", *[";0 * dw"] * (wr.SPR_THING_SLOTS * wr.SPR_THING_SLOT_BYTES),
+            # P11: the columns' pieces (frame.ledge_test reads the last of a side, 16 bytes a column)
+            "sfslot:", *[";%#x * dw" % ((ledges or {}).get(x, (0, {}))[1].get(o, 0))
+                         for x in range(CFG.VIEW_W) for o in range(16 ** CFG.SLOT_SHIFT)],
             "t_hot_end:",
             "    hex.set 2, gps_nslot, 0"]
     for c, (b, far, tytop, thpx, lt) in enumerate(cases):
@@ -543,8 +603,9 @@ def _record_program(src, cases, seen_on=False):
     return "\n".join(main + [""])
 
 
-def _record_faults(cases, out):
-    """[(what, case, got, want)] -- the fj record against the oracle's tier rule and the layout"""
+def _record_faults(cases, out, ledges=None):
+    """[(what, case, got, want)] -- the fj record against the oracle's tier rule and the layout (P11: a column the
+    ledges hide takes no slot)"""
     lines = out.decode("ascii").split("\n")
     slot, spslot, sprflag = (bytes.fromhex(ln) for ln in lines[len(cases):len(cases) + 3])
     bad = []
@@ -565,6 +626,7 @@ def _record_faults(cases, out):
             x = N_COLS * c + u
             blk = region + u
             take = b >= max(0, min(SPRITE_HEIGHT_BUCKETS, b + MIN_B_DELTA[tier][u]))
+            take = take and not (ledges or {}).get(x, (0, {}, False))[2]
             want_col = (bytes((s, blk & 0xFF, blk >> 8)) if take else bytes(3), int(take))
             got_col = (spslot[wr.SPR_SLOT_STRIDE * x:wr.SPR_SLOT_STRIDE * x + 3], sprflag[x])
             if got_col != want_col:
@@ -589,6 +651,82 @@ def test_the_record_takes_the_tier_region_the_slot_and_the_min_b_columns(record_
     out = _assemble_run(tmp_path, "rec", _record_program(src, record_cases), SRC)
     bad = _record_faults(record_cases, out)
     assert bad == [], "%d faults, first (what, case, got, want) %s" % (len(bad), bad[:3])
+
+
+@pytest.fixture(scope="module")
+def ledges(record_cases):
+    lg = _ledges(record_cases)
+    hid = [x for x, (_f, _s, h) in lg.items() if h]
+    sides = {(bool(f & 7), bool(f >> 4 & 7)) for x, (f, _s, h) in lg.items() if h}
+    assert len(hid) >= 30 and len(lg) - len(hid) >= 30, (len(hid), len(lg))
+    assert sides >= {(True, False), (False, True), (True, True)}, sides       # each side hides, and both together
+    # the boundaries the mutants move, really present: an upper piece ending exactly at the box's end and a lower
+    # one starting exactly at its top (hidden), and the last row's upper piece over a box that runs past the view
+    # (shown -- the clamp's +2)
+    edges = set()
+    for x, (f, slot, h) in lg.items():
+        b, _far, tytop, thpx, _lt = record_cases[x // N_COLS]
+        yb, hb = tytop + thpx - HEIGHTS[b], HEIGHTS[b]
+        uc, lc = f & 3, f >> 4 & 3
+        if uc and not lc and h and slot[1 + 4 * (uc - 1)] + 1 == yb + hb:
+            edges.add("upper edge")
+        if lc and not uc and h and slot[8 + 4 * (lc - 1)] == yb:
+            edges.add("lower edge")
+        if uc and not lc and not h and slot[1 + 4 * (uc - 1)] == H - 1 and yb + hb > H + 1:
+            edges.add("past the view")
+    assert edges == {"upper edge", "lower edge", "past the view"}, edges
+    return lg
+
+
+def _ledge_seen(cases, lg):
+    """the seen line the ledges leave: a case is marked iff one of its (open) columns is not hidden"""
+    return "".join("1" if any(not lg[N_COLS * c + u][2] for u in range(N_COLS)) else "0" for c in range(len(cases)))
+
+
+def test_the_record_skips_a_column_hidden_behind_its_nearer_pieces(record_cases, ledges, tmp_path):
+    """P11 (c)+(d): no slot in a column whose nearer pieces hide the box, and no seen mark for a thing hidden in
+    every column -- against the model's ledge_hidden, with the seen mark ON"""
+    src = (ROOT / "src/fj/frame_render.fj").read_text(encoding="utf-8")
+    out = _assemble_run(tmp_path, "recledge", _record_program(src, record_cases, seen_on=True, ledges=ledges), SRC)
+    lines = out.decode("ascii").split("\n")
+    assert lines[len(record_cases) + 3] == _ledge_seen(record_cases, ledges), lines[len(record_cases) + 3]
+    assert "0" in _ledge_seen(record_cases, ledges) and "1" in _ledge_seen(record_cases, ledges)
+    bad = _record_faults(record_cases, out, ledges)
+    assert bad == [], "%d faults, first %s" % (len(bad), bad[:3])
+
+
+LEDGE_MUTANTS = {
+    "the record without its ledge test": ("        .ledge_test trb_clip_v, trb_col_x, trb_ylo1, trb_yhi1, 1, col_next",
+                                          "        hex.zero 1, trb_vis"),
+    "the last upper piece read at u1": ("        hex.ptr_add lt_p, 5                             // u2's y2",
+                                        "        hex.ptr_add lt_p, 1                             // u2's y2"),
+    "the last lower piece read at l1": ("        hex.ptr_add lt_p, 12                            // l2's y1",
+                                        "        hex.ptr_add lt_p, 8                             // l2's y1"),
+    "an upper piece's end not + 1": ("        hex.add_constant 2, lt_y, 2", "        hex.add_constant 2, lt_y, 1"),
+    "the box's end clamped short": ("        hex.set 2, yhi1, viewh + 2", "        hex.set 2, yhi1, viewh + 1"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(LEDGE_MUTANTS))
+def test_a_broken_ledge_test_is_caught(record_cases, ledges, tmp_path, name):
+    """R9: each mutation of frame_render.fj's ledge test (the macros the record calls, and the record's call) must
+    fail the ledge check"""
+    old, new = LEDGE_MUTANTS[name]
+    src = (ROOT / "src/fj/frame_render.fj").read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert src.count(old) == 1, "re-point this mutant: %r moved" % old
+    src = src.replace(old, new)
+    fr = tmp_path / "frame_render.fj"
+    fr.write_text(src, encoding="utf-8")
+    srcs = [fr if x.name == "frame_render.fj" else x for x in SRC]
+    try:
+        out = _assemble_run(tmp_path, "ledgemut", _record_program(src, record_cases, seen_on=True, ledges=ledges),
+                            srcs)
+        lines = out.decode("ascii").split("\n")
+        ok = (lines[len(record_cases) + 3] == _ledge_seen(record_cases, ledges)
+              and not _record_faults(record_cases, out, ledges))
+    except Exception:                          # a crash, a short output: the harness said no
+        ok = False
+    assert not ok, "the mutant %r passed the ledge check" % name
 
 
 RECORD_MUTANTS = {

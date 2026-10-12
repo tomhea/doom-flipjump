@@ -58,6 +58,9 @@ def decls(barrels: bool = False) -> List[str]:
             "aim_ret: hex.vec w/4", "sp_sid: hex.vec 2", "sp_rc: hex.vec 1",
             "ar_p: hex.vec 8", "ar_q: hex.vec 8", "ar_r16: hex.vec 8", "ar_x1: hex.vec 8", "ar_x2: hex.vec 8",
             "ar_lo: hex.vec 2", "ar_n: hex.vec 2", "ar_tzi: hex.vec 3",
+            # P11 (d): the thing's bucket box (proj.thing_rows, sprbkt, frame.ledge_box) and a column's piece counts
+            "ar_ytop: hex.vec 8", "ar_hpx: hex.vec 8", "ar_bkt: hex.vec 4", "ar_hb: hex.vec 8", "ar_y0: hex.vec 8",
+            "ar_ylo1: hex.vec 2", "ar_yhi1: hex.vec 2", "ar_fp: hex.vec w/4", "ar_cv: hex.vec 2", "ar_colx: hex.vec 2",
             f"ar_maxtz: hex.vec 8, {MAXTZ}", f"ar_c72: hex.vec 8, {FIRST}", f"ar_c88: hex.vec 8, {FIRST + NCOLS - 1}"]
 
 
@@ -66,9 +69,11 @@ def prologue_lines() -> List[str]:
     return [f"hex.zero {2 * NCOLS}, aim_sid", "aimr.lookup aim_rr, viewangle + 6*dw"]
 
 
-def leaf_lines(centerx: int, barrels: bool = False) -> List[str]:
+def leaf_lines(centerx: int, barrels: bool = False, *, centery: int, viewh: int) -> List[str]:
     """`aim_record:` ... `stl.fret aim_ret` -- fcall'd from project_thing after pth_xscale, with sp_sid != 0.
-    M7 P6 (`barrels`): class RC_BARREL reads r_eff(10)"""
+    M7 P6 (`barrels`): class RC_BARREL reads r_eff(10). P11 (d): a column where the thing's bucket box is FULLY
+    behind the column's nearer pieces (frame.ledge_test, the oracle's ledge_hidden) is skipped as a wall-drawn one is
+    -- the box from project_thing's own rows (proj.thing_rows), taken once the box meets the window"""
     assert RC_BARREL == 2
     check_minz_first()
     # issue #119 item 4: `hex.cmp` is UNSIGNED on the signed pth_tz -- exact only because pth_tz is positive here:
@@ -106,7 +111,14 @@ def leaf_lines(centerx: int, barrels: bool = False) -> List[str]:
            # proves every aimed box >= 1 column at emit time
            "hex.mov 2, ar_n, ar_x2", "hex.sub 2, ar_n, ar_x1", "hex.inc 2, ar_n",
            f"hex.mov 2, ar_lo, ar_x1", f"hex.sub_constant 2, ar_lo, {FIRST}",
-           "hex.mov 3, ar_tzi, pth_tz + 4*dw"]                                 # the integer depth (<= 0x800)
+           "hex.mov 3, ar_tzi, pth_tz + 4*dw",                                 # the integer depth (<= 0x800)
+           # P11 (d): the bucket box -- project_thing's rows (its registers are set again after this hook returns;
+           # the height is >= 1 past its far reject, so the reject label is never taken), the bucket, clamped once
+           f"proj.thing_rows ar_ytop, ar_hpx, {centery}, {viewh}, ar_out",
+           "sprbkt.lookup ar_bkt, ar_hpx",
+           "hex.zero 6, ar_hb + 2*dw", "hex.mov 2, ar_hb, ar_bkt + 2*dw",
+           "hex.mov 8, ar_y0, ar_ytop", "frame.add8_chain ar_y0, ar_hpx", "frame.sub8_chain ar_y0, ar_hb",
+           f"frame.ledge_box ar_y0, ar_hb, ar_ylo1, ar_yhi1, {viewh}"]
     # the jump into the chain at block lo: the high nibble (0 or 1), then the low nibble
     out += ["hex.if_flags ar_lo + dw, 1<<1, ar_jl0, ar_jl1"]
     for h in (0, 1):
@@ -122,6 +134,10 @@ def leaf_lines(centerx: int, barrels: bool = False) -> List[str]:
         out += [f"aimb{c}:",
                 f"hex.if0 1, drawn + {x}*dw, aimo{c}", f";aimx{c}",               # a solid wall drew it: skip
                 f"aimo{c}:",
+                f"hex.set w/4, ar_fp, sfflag + {x}*dw",                            # P11 (d): its piece counts,
+                "hex.read_byte ar_cv, ar_fp",                                       # on the full arm
+                f"hex.set 2, ar_colx, {x}",
+                f"frame.ledge_test ar_cv, ar_colx, ar_ylo1, ar_yhi1, 0, aimx{c}",  # fully behind them: skip
                 f"hex.if0 2, aim_sid + {2 * c}*dw, aimw{c}",                       # empty: take it
                 f"hex.cmp 3, ar_tzi, aim_tz + {3 * c}*dw, aimw{c}, aimx{c}, aimx{c}",   # strictly nearer
                 f"aimw{c}:",

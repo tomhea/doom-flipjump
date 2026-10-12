@@ -11,6 +11,14 @@ test gone.
 
 M7 P6: the same leaf with BARRELS (`leaf_lines(barrels=True)`): radius class 2 (aimcode.RC_BARREL) reads the third
 r_eff, ids reach 76; its control reads class 2 as class 1.
+
+P11 (d): a column where the thing's bucket box is FULLY behind the column's nearer pieces is skipped as a wall-drawn
+one is -- the box from project_thing's own rows (`ReferenceModel.thing_rows`: sp_z, viewz, sp_hh and xscale; the
+SPR-NEAR clamp; the height bucket), the pieces from the column's sfflag / sfslot bytes, the rule the model's
+`ledge_hidden`. Each record carries its rows' inputs and the 17 columns' pieces (most columns none; the rest an
+upper and / or a lower side, one or two pieces, the last piece's row on the box's edge +-1, a DECOY at the other
+piece's offsets). Three more mutants: the test gone in the window's middle column, the bucket's INDEX taken for its
+height, the box from the sprite's top instead of the bucket's.
 """
 import random
 import struct
@@ -24,16 +32,25 @@ from doomfj.config import GAME_CFG
 from doomfj.fixedpoint import fixed_mul
 from doomfj.harness import W
 from doomfj.lut_generator import generate_dispatch_table_fj
+from doomfj.reference_model import ledge_hidden, sprite_bucket, sprite_bucket_height
+from doomfj import wall_renderer as wr
 
 M32 = 0xFFFFFFFF
 N = 400
 CENTERX = GAME_CFG.CENTERX
 REFF = (23, 37, 13)                     # fixed r_eff values for the harness (the table is the oracle's business)
+H, CENTERY = GAME_CFG.VIEW_H, GAME_CFG.CENTERY
+STRIDE = 16 ** GAME_CFG.SLOT_SHIFT      # sfslot's bytes per column
 MUTS = {
     "r+1": ("hex.mov 2, ar_r16 + 4*dw, aim_rr\n", "hex.mov 2, ar_r16 + 4*dw, aim_rr\nhex.inc 8, ar_r16 + 4*dw\n"),
     "tie": ("hex.cmp 3, ar_tzi, aim_tz + 0*dw, aimw0, aimx0, aimx0", "hex.cmp 3, ar_tzi, aim_tz + 0*dw, aimw0, aimw0, aimx0"),
     "drawn": ("hex.if0 1, drawn + 80*dw, aimo8", "hex.if0 0, drawn + 80*dw, aimo8"),
     "range": ("hex.cmp 8, pth_tz, ar_maxtz, ar_in, ar_in, ar_out", "hex.cmp 8, pth_tz, ar_maxtz, ar_in, ar_in, ar_in"),
+    # P11 (d)
+    "ledge8": ("frame.ledge_test ar_cv, ar_colx, ar_ylo1, ar_yhi1, 0, aimx8", "hex.zero 2, ar_cv"),
+    "bucket": ("hex.mov 2, ar_hb, ar_bkt + 2*dw", "hex.mov 2, ar_hb, ar_bkt"),
+    "top": ("hex.mov 8, ar_y0, ar_ytop\nframe.add8_chain ar_y0, ar_hpx\nframe.sub8_chain ar_y0, ar_hb",
+            "hex.mov 8, ar_y0, ar_ytop"),
 }
 
 
@@ -42,7 +59,21 @@ def _signed(v):
     return v - (1 << 32) if v >> 31 else v
 
 
-def _ref(tz, tx, xscale, sid, rc, drawn, sids, tzs):
+def _box(spz, viewz, sphh, xscale):
+    """P11: the thing's bucket box (top row, height) -- ReferenceModel.thing_rows on the leaf's registers (sp_hh is
+    the height << 16), then the bucket; None when the height is not positive (the leaf stops)"""
+    prod = _signed(fixed_mul((spz - viewz) & M32, xscale & M32, 8, 4))
+    ytop = _signed(((CENTERY << 16) - prod) & M32) >> 16
+    h = _signed(fixed_mul(sphh & M32, xscale & M32, 8, 4)) >> 16
+    if h <= 0:
+        return None
+    if h > H:
+        ytop, h = ytop + h - H, H
+    hb = sprite_bucket_height(sprite_bucket(h, H), H)
+    return ytop + h - hb, hb
+
+
+def _ref(tz, tx, xscale, sid, rc, drawn, sids, tzs, spz, viewz, sphh, ledge):
     sids, tzs = list(sids), list(tzs)
     if tz > AC.MAXTZ:
         return sids
@@ -52,10 +83,15 @@ def _ref(tz, tx, xscale, sid, rc, drawn, sids, tzs):
     x1 = _signed((CENTERX << 16) + p - q) >> 16
     x2 = (_signed((CENTERX << 16) + p + q) >> 16) - 1
     lo, hi = max(x1, AC.FIRST), min(x2, AC.FIRST + AC.NCOLS - 1)
+    box = _box(spz, viewz, sphh, xscale) if lo <= hi else None
+    if lo <= hi and box is None:
+        return sids                                             # (the leaf's rows reject: nothing recorded)
     for x in range(lo, hi + 1):
         c = x - AC.FIRST
         if drawn[c]:
             continue
+        if ledge[c][3] is not None and ledge_hidden(ledge[c][2], ledge[c][3], *box):
+            continue                                            # P11 (d): fully behind its nearer pieces
         if sids[c] == 0 or (tz >> 16) < tzs[c]:
             sids[c], tzs[c] = sid, tz >> 16
     return sids
@@ -73,8 +109,34 @@ def _records(seed=3, barrels=False):
         sids = [rng.choice([0, 0, rng.randrange(1, 54)]) for _ in range(AC.NCOLS)]
         tie = rng.random() < 0.35                               # equal depths: a tie must NOT overwrite
         tzs = [(tz >> 16 if tie else rng.randrange(0, 0x800)) if s else 0 for s in sids]
-        out.append((tz, tx, xscale, sid, rc, drawn, sids, tzs))
+        viewz = (41 + rng.randrange(-60, 120)) << 16
+        sphh = rng.randrange(16, 111) << 16
+        spz = (rng.randrange(-120, 160) + (sphh >> 16)) << 16
+        box = _box(spz, viewz, sphh, xscale)
+        out.append((tz, tx, xscale, sid, rc, drawn, sids, tzs, spz, viewz, sphh,
+                    [_ledge_col(rng, box) for _ in range(AC.NCOLS)]))
     return out
+
+
+def _ledge_col(rng, box):
+    """one window column's nearer pieces -> (sfflag byte, 16 sfslot bytes, ups, los): mostly none (the base bits at
+    random), else a side or both, one or two pieces, the LAST piece's row on the box's edge -1 / 0 / +1 or anywhere,
+    a DECOY at every offset the test must not read"""
+    slot = [rng.randrange(H) for _ in range(STRIDE)]
+    if box is None or rng.random() < 0.45:
+        return rng.choice((0, 0x08, 0x80, 0x88)), slot, [], []
+    yb, hb = box
+    ucnt, lcnt = rng.choice(((1, 0), (2, 0), (0, 1), (0, 2), (1, 1), (2, 2), (1, 2), (2, 1)))
+    uy2 = max(0, min(H - 1, rng.choice((yb + hb - 2, yb + hb - 1, yb + hb, rng.randrange(H)))))
+    ly1 = max(0, min(H - 1, rng.choice((yb - 1, yb, yb + 1, rng.randrange(H)))))
+    ups = ([(0, slot[1])] if ucnt == 2 else []) + ([(0, uy2)] if ucnt else [])
+    los = ([(slot[8], H - 1)] if lcnt == 2 else []) + ([(ly1, H - 1)] if lcnt else [])
+    if ucnt:
+        slot[1 + 4 * (ucnt - 1)] = uy2
+    if lcnt:
+        slot[8 + 4 * (lcnt - 1)] = ly1
+    flag = ucnt | (rng.randrange(2) << 3) | (lcnt | (rng.randrange(2) << 3)) << 4
+    return flag, slot, ups, los
 
 
 BARREL_MUTS = {"rc2": ("hex.if_flags sp_rc, %d, ar_r30, ar_r10" % (1 << AC.RC_BARREL),
@@ -82,7 +144,7 @@ BARREL_MUTS = {"rc2": ("hex.if_flags sp_rc, %d, ar_r30, ar_r10" % (1 << AC.RC_BA
 
 
 def _program(mut=None, barrels=False):
-    leaf = "\n".join(AC.leaf_lines(CENTERX, barrels=barrels))
+    leaf = "\n".join(AC.leaf_lines(CENTERX, barrels=barrels, centery=CENTERY, viewh=H))
     if mut:
         old, new = {**MUTS, **BARREL_MUTS}[mut]
         assert leaf.count(old) == 1, (mut, leaf.count(old))
@@ -92,6 +154,11 @@ def _program(mut=None, barrels=False):
             "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
             "hex.input 4, pth_tz", "hex.input 4, pth_tx", "hex.input 4, pth_xscale",
             "hex.input 1, sp_sid", "hex.input 1, rcin", "hex.mov 1, sp_rc, rcin",
+            "hex.input 4, sp_z", "hex.input 4, viewz", "hex.input 4, sp_hh",       # P11: the rows' inputs
+            *["hex.input 1, t_in\nhex.set w/4, t_p, sfflag + %d*dw\nhex.write_byte t_p, t_in" % (AC.FIRST + c)
+              for c in range(AC.NCOLS)],
+            *["hex.input 1, t_in\nhex.set w/4, t_p, sfslot + %d*dw\nhex.write_byte t_p, t_in"
+              % ((AC.FIRST + c) * STRIDE + o) for c in range(AC.NCOLS) for o in range(STRIDE)],
             *["hex.input 1, din\nhex.mov 1, drawn + %d*dw, din" % (AC.FIRST + c) for c in range(AC.NCOLS)],
             *["hex.input 1, aim_sid + %d*dw" % (2 * c) for c in range(AC.NCOLS)],
             *["hex.input 2, tzin\nhex.mov 3, aim_tz + %d*dw, tzin" % (3 * c) for c in range(AC.NCOLS)],
@@ -101,8 +168,13 @@ def _program(mut=None, barrels=False):
             "done:", "stl.loop",
             leaf,
             "rmagic: hex.vec 2", "rcin: hex.vec 2", "din: hex.vec 2", "tzin: hex.vec 4",
-            "pth_tz: hex.vec 8", "pth_tx: hex.vec 8", "pth_xscale: hex.vec 8",
+            "t_in: hex.vec 2", "t_p: hex.vec w/4", "sp_z: hex.vec 8", "viewz: hex.vec 8", "sp_hh: hex.vec 8",
+            wr.hoisted_scratch_fj(GAME_CFG),                       # pth_*, and P11's lb_* / lt_*
+            generate_dispatch_table_fj("sprbkt", [0] + [sprite_bucket(h, H) | (sprite_bucket_height(
+                sprite_bucket(h, H), H) << 8) for h in range(1, H + 1)], index_nibbles=2, result_nibbles=4),
             "drawn:\n" + "\n".join(";0 * dw" for _ in range(GAME_CFG.VIEW_W)),
+            "sfflag:\n" + "\n".join(";0 * dw" for _ in range(GAME_CFG.VIEW_W)),
+            "sfslot:\n" + "\n".join(";0 * dw" for _ in range(GAME_CFG.VIEW_W * STRIDE)),
             *AC.decls(barrels),
             # the harness's r_eff pair, where the frame's prologue would have looked it up
             ]
@@ -125,8 +197,10 @@ def _run(tmp_path, name, mut=None, barrels=False):
                  (fjdir / "projection.fj").resolve(), src.resolve()], out, memory_width=W, print_time=False)
     recs = _records(barrels=barrels)
     feed = b""
-    for tz, tx, xs, sid, rc, drawn, sids, tzs in recs:
+    for tz, tx, xs, sid, rc, drawn, sids, tzs, spz, viewz, sphh, ledge in recs:
         feed += bytes([1]) + struct.pack("<III", tz & M32, tx & M32, xs & M32) + bytes([sid, rc])
+        feed += struct.pack("<III", spz & M32, viewz & M32, sphh & M32)
+        feed += bytes(lc[0] for lc in ledge) + b"".join(bytes(lc[1]) for lc in ledge)
         feed += bytes(drawn) + bytes(sids) + b"".join(struct.pack("<H", t) for t in tzs)
     io = FixedIO(feed + bytes([0]))
     fj.run(out, io_device=io, print_time=False, print_termination=False)
@@ -144,6 +218,9 @@ def test_the_leaf_is_the_box_rule(tmp_path):
     changed = sum(1 for g, r in zip(got, recs) if g != r[6])
     assert changed > N // 4, changed
     assert any(r[0] > AC.MAXTZ for r in recs)
+    # P11 (d): the pieces decide records -- without them the window would come out differently
+    bare = [_ref(*r[:11], [(0, [], [], None)] * AC.NCOLS) for r in recs]
+    assert sum(1 for b, w in zip(bare, want) if b != w) > N // 10
 
 
 @pytest.mark.parametrize("mut", sorted(MUTS))

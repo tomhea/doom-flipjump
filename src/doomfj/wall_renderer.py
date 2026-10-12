@@ -46,7 +46,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
                                     DEG_LIP_SCALE, DEG_SPR_LOWRES_H,
                                     DEG_SPR_NEAR_TZ,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
-                                    MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
+                                    MONSTER_BUDGET, MONSTER_TYPES, DRAW_ACTOR_TYPES, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER, VANISHABLE_TYPES,
                                     SPRITE_MINZ, sprite_bucket, sprite_bucket_height,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
@@ -1259,7 +1259,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                                THING_ROW_HOT_LEN, cold_row, hot_row, reachable_lightnums,
                                sprite_light_table, subsector_tables, thing_pos_value, thing_rows)
     allt = map_wad.things(mapname)
-    rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, MONSTER_TYPES,
+    rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, DRAW_ACTOR_TYPES,   # P11 (a)
                            MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, DEG_MINH2_SCENERY, DEG_MINH2_MON,
                            deg=True, spr_near=bool(DEG_SPR_NEAR_TZ), cache=spr_cache,
                            keep=keep)
@@ -2103,7 +2103,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         from doomfj.combat import aim_window as _aim_window
         assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
         # M7 P6: a standing barrel records too (radius class aimcode.RC_BARREL)
-        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar))
+        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar), centery=cfg.CENTERY, viewh=cfg.VIEW_H)
         # issue #119 items 4 and 7: table_text runs the leaf's emit-time proofs (the MINZ order, every box >= 1 column;
         # a barrel's bound needs its standing frame from the sprite wad)
         _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar), sprite_wad=sprite_wad)]
@@ -2741,16 +2741,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     # by up to a map unit, so `sprite_tz_min_size` scans for it (R6: the oracle
                     # rejects the identical set at its `h < min_h` test).
                     ("sp_tzmax", 8, rm.sprite_tz_min_size(
-                        _art[4], MIN_SPRITE_H_MONSTER if _t.type in MONSTER_TYPES
+                        _art[4], MIN_SPRITE_H_MONSTER if _t.type in DRAW_ACTOR_TYPES
                         else MIN_SPRITE_H) & 0xFFFFFFFF),
                     # 25M-CAP: the RAISED bar's bound, scanned the same way; picked at
                     # runtime by degfl once the SOFT count fills (graduated acceptance)
                     *([("sp_tzmax2", 8, rm.sprite_tz_min_size(
-                        _art[4], DEG_MINH2_MON if _t.type in MONSTER_TYPES
+                        _art[4], DEG_MINH2_MON if _t.type in DRAW_ACTOR_TYPES
                         else DEG_MINH2_SCENERY) & 0xFFFFFFFF)]),
                     # which budget this thing spends -- baked, because the category is a
                     # property of the thing type and never changes at runtime
-                    ("sp_mon", 2, 1 if _t.type in MONSTER_TYPES else 0),
+                    ("sp_mon", 2, 1 if _t.type in DRAW_ACTOR_TYPES else 0),   # P11 (a): + the sign
                     ("sp_base", 4, spr_base[_t.type]),
                     # SPR-NEAR: the packed coarse-region base -- read only for SHORT
                     # buckets of FAR things (the thfar flag project_thing sets)
@@ -4210,6 +4210,17 @@ def hoisted_scratch_decls(cfg=None) -> list:
         # P11: the shared third-slot painter's window (stream.emit_region_c -> emit_col_lines' erc leaf)
         "erc_lo: hex.vec 2",
         "erc_hi: hex.vec 2",
+        # P11 (c)+(d): the ledge test (frame.ledge_box / ledge_test) -- a thing's clamped box, and the test's registers
+        "trb_ylo1: hex.vec 2",
+        "trb_yhi1: hex.vec 2",
+        "lb_t: hex.vec 8",
+        "lb_c: hex.vec 8",
+        "lt_y: hex.vec 2",
+        "lt_top: hex.vec 2",
+        "lt_bot: hex.vec 2",
+        "lt_b: hex.vec w/4",
+        "lt_p: hex.vec w/4",
+        "lt_idx: hex.vec w/4",
         "srd_csh10: hex.vec 2, 10",
         "srd_csh5: hex.vec 2, 5",
         "srd_csh6: hex.vec 2, 6",

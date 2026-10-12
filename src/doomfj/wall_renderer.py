@@ -4207,6 +4207,9 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "gpsc_cut: hex.vec 1",
         "gpsc_w1: hex.vec 2",
         "gpsc_w2: hex.vec 2",
+        # P11: the shared third-slot painter's window (stream.emit_region_c -> emit_col_lines' erc leaf)
+        "erc_lo: hex.vec 2",
+        "erc_hi: hex.vec 2",
         "srd_csh10: hex.vec 2, 10",
         "srd_csh5: hex.vec 2, 5",
         "srd_csh6: hex.vec 2, 6",

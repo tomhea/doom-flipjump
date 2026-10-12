@@ -508,10 +508,12 @@ def test_every_poll_is_its_own_expansion():
     three = _standalone_input_lines(polls=3)
     at = next(i for i, ln in enumerate(three) if "kb.poll" in ln)
     assert three[at].startswith("rep(3, i) kb.poll ")
-    # M7 P1.5: the menu's event cells are zeroed BEFORE the polls that set them (M7 P3.4: five), and so is
-    # P9's press latch
+    # M7 P1.5: the menu's event cells are zeroed BEFORE the polls that set them (M7 P3.4: five; P10: six, any key's
+    # down edge), and so is P9's press latch
     assert set(three[:at]) == {"hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up",
-                               "hex.zero 1, ev_dn", "hex.zero 1, ev_help", "hex.zero 13, kb_now"}, three[:at]
+                               "hex.zero 1, ev_dn", "hex.zero 1, ev_help", "hex.zero 1, ev_any",
+                               "hex.zero 13, kb_now"}, three[:at]
+    assert three[at].endswith("ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad"), three[at]
 
 
 def test_every_reader_of_a_held_key_reads_the_press_latch():
@@ -579,20 +581,26 @@ def test_the_menu_omits_exactly_the_frame_end_byte():
     discover. `doomfj.menu` itself is well tested; this wrapper was not tested at all."""
     cfg = Config()
     asset_wad = WadFile.from_path(ASSETS)
-    from doomfj.menu import help_stream
-    from doomfj.wall_renderer import (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, MENU_EXIT_ITEM, MENU_HELP_ITEM,
-                                      SKILL_MENU, SKILL_MENU_FIRST)
+    from doomfj.menu import help_stream, level_done_stream
+    from doomfj.wall_renderer import (MENU_EXIT_ITEM, MENU_HELP_ITEM, MENU_RESUME_ITEM, SKILL_MENU, SKILL_MENU_FIRST,
+                                      main_menu_entries)
     lines = _menu_lines(cfg, asset_wad, DEFAULT_MENU, DEFAULT_MENU_SELECTED, restart=_restart())
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     # M7 P1.5: the main menu and the skill screen once per highlighted skill; M7 P2a.2: LEVEL
-    # COMPLETE; M7 P3.4: the main menu on HELP and the help; P9: the main menu on EXIT -- EIGHT screens, each a stream
-    # without its end-of-frame byte
-    streams = [menu_stream(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU_SELECTED, colours)] + [
-        menu_stream(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours) for k in range(3)] + [
-        menu_stream(cfg.VIEW_W, cfg.VIEW_H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours),
-        menu_stream(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU.index(MENU_HELP_ITEM), colours),
-        help_stream(cfg.VIEW_W, cfg.VIEW_H, colours),
-        menu_stream(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU.index(MENU_EXIT_ITEM), colours)]
+    # COMPLETE; M7 P3.4: the main menu on HELP and the help; P9: the main menu on EXIT; P10: each main-menu highlight
+    # twice (without a game, and with RESUME), RESUME highlighted, and LEVEL COMPLETE's frame (no World here: its
+    # digit slots empty) -- TWELVE screens, each a stream without its end-of-frame byte
+    live, new_game = main_menu_entries(DEFAULT_MENU, DEFAULT_MENU_SELECTED, 1)
+    assert live.index(MENU_RESUME_ITEM) == new_game - 1 == DEFAULT_MENU_SELECTED
+    streams = ([menu_stream(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU_SELECTED, colours),
+                menu_stream(cfg.VIEW_W, cfg.VIEW_H, live, new_game, colours)]
+               + [menu_stream(cfg.VIEW_W, cfg.VIEW_H, lines_, lines_.index(item), colours)
+                  for item in (MENU_HELP_ITEM, MENU_EXIT_ITEM) for lines_ in (DEFAULT_MENU, live)]
+               + [menu_stream(cfg.VIEW_W, cfg.VIEW_H, live, live.index(MENU_RESUME_ITEM), colours),
+                  help_stream(cfg.VIEW_W, cfg.VIEW_H, colours)]
+               + [menu_stream(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours) for k in range(3)]
+               + [level_done_stream(cfg.VIEW_W, cfg.VIEW_H, colours, 0)])
+    assert len(streams) == 12
     assert all(full[-1] == 0xFF for full in streams), "doomfj.menu.stream lost its frame-end marker"
     assert "\n".join(lines).count("stl.output_char") == sum(len(full) - 1 for full in streams)
 
@@ -603,16 +611,18 @@ def test_the_menu_branch_wraps_the_stream_in_the_documented_order():
     lines = _menu_lines(Config(), WadFile.from_path(ASSETS), ["A", "HELP", "EXIT"], 0, restart=_restart())
     # M7 P1.5: the state machine first, then the producer branch, then the screens (P2a.2: five,
     # LEVEL COMPLETE last; M7 P3.4: seven -- the main menu on HELP and the help after the main
-    # menu, behind their own dispatch; P9: eight -- the main menu on EXIT after the help) -- each jumping INTO the
-    # shared tail -- then the restart routine, where nothing falls into it
+    # menu, behind their own dispatch; P9: eight -- the main menu on EXIT after the help; P10: twelve -- each main-menu
+    # highlight once more with RESUME (the `_l` labels, behind `g_live`), and RESUME highlighted) -- each jumping INTO
+    # the shared tail -- then the restart routine, where nothing falls into it
     branch = lines.index("hex.if0 1, mode, do_world")
     assert lines.index("mn_done:") < branch
-    labels = ("mf_main:", "mf_mainh:", "mf_help:", "mf_mainx:", "mf_s0:", "mf_s1:", "mf_s2:", "mf_lv:")
+    labels = ("mf_main:", "mf_main_l:", "mf_mainh:", "mf_mainh_l:", "mf_help:", "mf_mainx:", "mf_mainx_l:",
+              "mf_mainr:", "mf_s0:", "mf_s1:", "mf_s2:", "mf_lv:")
     screens = [i for i, ln in enumerate(lines) if ln in labels]
-    assert len(screens) == 8 and branch < min(screens)
+    assert len(screens) == 12 and branch < min(screens)
     ends = [i for i, ln in enumerate(lines) if ln == ";frame_end"]
-    assert len(ends) == 8 and all(e + 1 in screens or lines[e + 1] in ("restart_common:", "mf_p34:")
-                                  for e in ends)
+    assert len(ends) == 12 and all(e + 1 in screens or lines[e + 1] in ("restart_common:", "mf_p34:")
+                                   for e in ends)
     assert lines[max(ends) + 1] == "restart_common:"
     assert lines[-2].strip() == "stl.fret rs_ret"
     assert lines[-1] == "do_world:"

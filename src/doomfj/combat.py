@@ -164,12 +164,15 @@ REACH_UP, REACH_DOWN = PLAYER_INFO.height >> 16, 8   # P_TouchSpecialThing's del
 MAX_HEALTH_BONUS = 200                      # deh_max_health: health bonus cap
 MAX_ARMOR_BONUS = 200                       # deh_max_armor: armor bonus cap
 SECTOR_HURT = {5: 10, 7: 5, 16: 20, 4: 20}  # P_PlayerInSpecialSector: damage every 32 tics
+SECRET_SPECIAL = 9                          # P10: P_PlayerInSpecialSector's secret sector (every tic, once each)
 HURT_PERIOD_MASK = 0x1F
 KEY_DOOR_CARDS = {26: (gd.IT_BLUECARD, gd.IT_BLUESKULL), 32: (gd.IT_BLUECARD, gd.IT_BLUESKULL),
                   27: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
                   34: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
                   28: (gd.IT_REDCARD, gd.IT_REDSKULL), 33: (gd.IT_REDCARD, gd.IT_REDSKULL)}
 WEAPON_KEYS = ("w1", "w2", "w3", "w4", "w5")   # DOOM's number keys 1..5 -> WP_FIST..WP_MISSILE (P9: 5, the launcher)
+# P10: A_FireCGun's flash frame per burst frame (flashstate + (state - S_CHAIN1))
+CGUN_FLASH = {"S_CHAIN1": "S_CHAINFLASH1", "S_CHAIN2": "S_CHAINFLASH2"}
 # The restart block (plan 6.7) writes every schema field back to its level-start value EXCEPT
 # these: the skill (the menu's choice, and the block's input -- it picks WHICH level start), the
 # menu mode and the held-key flags are input state, not level state.
@@ -182,7 +185,7 @@ ANG5 = 0x40000000 // 18                     # tables.h: ANG5 = ANG90 / 18 -- P_D
 ANGLE_MASK32 = 0xFFFFFFFF
 # P_TouchSpecialThing's cases for every gettable thing E1M1 holds (sprite name in the comment)
 GETTABLE = frozenset({2018, 2019, 2014, 2015, 5, 2011, 2012, 2023, 2007, 2048, 2010, 2046, 2047,
-                      17, 2008, 2049, 8, 2005, 2001, 2003})          # P9: 2003, the rocket launcher
+                      17, 2008, 2049, 8, 2005, 2001, 2003, 2002})    # P9: 2003, the rocket launcher; P10: 2002
 
 
 # ================================================================================================
@@ -537,17 +540,34 @@ class CombatMixin:
             ws.pangle = (ws.pangle - ANG5) & ANGLE_MASK32
 
     def _special_sector(self, ev) -> None:
-        """P_PlayerInSpecialSector's damaging floors, only when standing ON the sector's floor."""
+        """P_PlayerInSpecialSector, only when standing ON the sector's floor: the damaging floors, every 32 tics, and
+        (P10, LEVEL COMPLETE's stats) the SECRETS, every tic -- special 9: `secretcount` + 1 and the sector's special
+        cleared, which here (the level data is static) is the sector's `p_secret` bit, so it counts once."""
         ws = self.ws
         sec = self.player_sector()
-        dmg = SECTOR_HURT.get(self.secs[sec].special)
+        special = self.secs[sec].special
+        if special == SECRET_SPECIAL:
+            k = self.secret_sectors.index(sec)
+            if ws.p_secret[k] or not self._on_sector_floor(sec):
+                return
+            ws.p_secret[k] = 1
+            ws.p_secretcount += 1
+            ev.secrets.append(sec)
+            return
+        dmg = SECTOR_HURT.get(special)
         if dmg is None or ws.leveltime & HURT_PERIOD_MASK:
             return
-        _ok, floorz, _c = self.rm.check_position(self.scene_c, ws.px, ws.py)
-        if floorz != self.secs_c[sec].floor_h:
+        if not self._on_sector_floor(sec):
             return                               # "Falling, not all the way down yet?"
         ev.nukage += 1
         self.damage_player(dmg, ("sector", sec), None, ev)       # no inflictor: sector damage thrusts nothing
+
+    def _on_sector_floor(self, sec: int) -> bool:
+        """P_PlayerInSpecialSector's "Falling, not all the way down yet?": the player box's floorz is sector `sec`'s
+        floor now"""
+        ws = self.ws
+        _ok, floorz, _c = self.rm.check_position(self.scene_c, ws.px, ws.py)
+        return floorz == self.secs_c[sec].floor_h
 
     def _weapon_keys(self, keys: dict) -> None:
         """P_PlayerThink's BT_CHANGE: the lowest held number key names the weapon."""
@@ -678,6 +698,8 @@ class CombatMixin:
             self._a_gun_flash(keys, ev)
         elif action == "A_FireMissile":
             self._a_fire_missile(ev)
+        elif action == "A_FireCGun":                 # P10: the chaingun
+            self._a_fire_cgun(keys, ev)
         elif action in ("A_Light0", "A_Light1", "A_Light2"):
             pass                                 # extralight: dropped (plan section 2, C)
         else:
@@ -742,8 +764,8 @@ class CombatMixin:
 
     def _check_ammo(self, keys: dict, ev) -> bool:
         """P_CheckAmmo: enough for one shot, or pick the next weapon in DOOM's preference order and
-        start lowering. (The plasma, chaingun and BFG arms are DOOM's; E1M1's single player can own none
-        of them -- P9: the launcher he can. The super shotgun's needs a Doom 2 IWAD.)"""
+        start lowering. (The plasma and BFG arms are DOOM's; E1M1's single player can own neither -- P9: the launcher
+        he can, P10: the chaingun too. The super shotgun's needs a Doom 2 IWAD.)"""
         ws = self.ws
         ammo = gd.WEAPONINFO[ws.p_ready].ammo
         if ammo == gd.AM_NOAMMO or ws.p_ammo[ammo] >= 1:
@@ -798,6 +820,27 @@ class CombatMixin:
             else:
                 dmg, col = self._roll("rng_player", self.sites.gunshot)
             self._line_attack(weapon, col, dmg, MISSILERANGE_U, ev)
+
+    def _a_fire_cgun(self, keys: dict, ev) -> None:
+        """P10 -- A_FireCGun: no ammo, nothing (the burst frame still runs its tics); else the player's attack frame,
+        one round, the flash frame OF THIS BURST (DOOM's flashstate + (psp->state - S_CHAIN1): S_CHAIN1 -> S_CHAINFLASH1,
+        S_CHAIN2 -> S_CHAINFLASH2), and P_GunShot accurate while `refire` is 0 -- the pistol's shot (its two rolls, its
+        column), so a trigger pull's first burst is two accurate bullets and every held burst after it spreads."""
+        ws = self.ws
+        ammo = gd.WEAPONINFO[ws.p_ready].ammo
+        if not ws.p_ammo[ammo]:
+            return
+        if self._p_full:
+            self._set_player_mobj("S_PLAY_ATK2")
+        ws.p_ammo[ammo] -= 1
+        burst = gd.STATE_NAMES[ws.p_wpn_state]
+        self._set_psprite("flash", CGUN_FLASH[burst], keys, ev)
+        if not ws.p_refire:
+            dmg = self._roll("rng_player", self.sites.pistol_acc)
+            col = self.aim_centre
+        else:
+            dmg, col = self._roll("rng_player", self.sites.gunshot)
+        self._line_attack("chaingun", col, dmg, MISSILERANGE_U, ev)
 
     def _a_gun_flash(self, keys: dict, ev) -> None:
         """P9 -- A_GunFlash (the launcher's S_MISSILE1): the player thing's attack frame ("full" alone, as the other
@@ -1009,6 +1052,8 @@ class CombatMixin:
             ws.mon_drop[m] = 1
             if self._p_knock:                    # M7 P8a (G-B5): the drop lies where the corpse is NOW, before the
                 ws.drop_x[m], ws.drop_y[m] = ws.mon_x[m], ws.mon_y[m]   # killing blow's thrust slides it away
+        if info.flags & gd.MF_COUNTKILL:         # P10: "count all monster deaths, even those caused by other monsters"
+            ws.p_killcount += 1
         ev.kills.append(("mon", m, "gib" if gib else "death"))
 
     def damage_barrel(self, b: int, dmg: int, source, ev) -> None:
@@ -1912,6 +1957,8 @@ class CombatMixin:
                 continue
             if self._touch(t.type, False, self.pickup_z[i], z):
                 ws.pickup_taken[i] = 1
+                if gd.THING_TYPES[t.type].flags & gd.MF_COUNTITEM:     # P10: P_TouchSpecialThing's itemcount
+                    ws.p_itemcount += 1
                 ev.pickups.append(("item", i, t.type))
         for m in range(self.layout.nmon):
             if ws.mon_drop[m] != 1:
@@ -1984,6 +2031,8 @@ class CombatMixin:
             taken = self._give_weapon(gd.WP_CHAINSAW, False)
         elif kind == 2003:                                            # LAUN (P9)
             taken = self._give_weapon(gd.WP_MISSILE, False)
+        elif kind == 2002:                                            # MGUN (P10): 2 clips, a dropped one 1
+            taken = self._give_weapon(gd.WP_CHAINGUN, dropped)
         else:                                                         # SHOT (2001)
             taken = self._give_weapon(gd.WP_SHOTGUN, dropped)
         if taken:

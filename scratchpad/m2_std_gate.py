@@ -72,7 +72,7 @@ from doomfj.reference_model import (ANGLE_TURN, ReferenceModel, build_scene,  # 
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.things import drawable_things, skill_hidden                   # noqa: E402
-from doomfj.wall_renderer import BOOT_SKILL, SKILLS, STANDALONE_POLLS     # noqa: E402
+from doomfj.wall_renderer import BOOT_MENU_SKILL, BOOT_SKILL, SKILLS, STANDALONE_POLLS     # noqa: E402
 from doomfj.wireformat import KEY_NAMES                                   # noqa: E402
 from flipjump.interpreter.io_devices.KeyboardIO import (KeyboardIO, KeyEvent,   # noqa: E402
                                                         ScriptedKeyEventSource)
@@ -82,11 +82,6 @@ from flipjump.interpreter.io_devices.pygame_window import PcIO                 #
 from flipjump.utils.exceptions import IOReadOnEOF                              # noqa: E402
 
 ENTER, ESC = 0x0D, 0x1B
-# M7 P1.5: the key every driver leaves the menu with, into the world at the BOOT state. The main
-# menu's esc resumes the world -- as it has since M3, when enter and esc both toggled `mode` --
-# while enter now opens the skill screen. So esc means the same on every binary, before P1.5 and
-# after, and a driver needs no switch per binary. `menu_exit_events` is the ONE composition.
-MENU_EXIT = ESC
 # M7 P4.1 (the owner's key map): only the ARROWS turn now -- A / D strafe -- so the scripts' turns are the arrows', and
 # strafe, fire and the number keys have codes of their own (input.fj's table)
 K_FWD, K_BACK, K_LEFT, K_RIGHT, K_USE = 0x77, 0x73, 0x82, 0x83, 0x20
@@ -96,13 +91,40 @@ BINDING = {K_FWD: "forward", K_BACK: "back", K_LEFT: "turn_left",
            0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4", 0x35: "w5"}      # P9: '5', the launcher
 CODE = {name: code for code, name in BINDING.items()}
 
-MENU_FRAMES = 2                 # frames 0..1 are the menu; MENU_EXIT lands on frame 2's polls
+# P10 (the owner's play-test, 2026-10-12): THE BOOT MENU HAS NO GAME -- esc on it is no rule (until P10 it resumed
+# the boot image's world, the way every driver left the menu) -- so every driver enters the world through NEW GAME:
+# enter (the skill screen, BOOT_MENU_SKILL -- medium -- highlighted), up / down one a frame to the skill, enter. The
+# drivers' world is BOOT_SKILL's (hard: the frozen sets and gamespeed measure it), the image's own boot world, so
+# NEW GAME at it restarts the pristine level start and the oracle steps from the state it always did.
+# `boot_pick` / `menu_exit_events` are the ONE composition.
+MENU_IDLE = 2                   # frames 0..1 are the boot menu; the pick's first key lands on frame 2's polls
 
 
-def menu_exit_events():
-    """the MENU_EXIT press that leaves the boot menu on the first route frame -- every driver's"""
-    return [KeyEvent(MENU_FRAMES * STANDALONE_POLLS, True, MENU_EXIT),
-            KeyEvent(MENU_FRAMES * STANDALONE_POLLS + 1, False, MENU_EXIT)]
+def boot_pick(skill=None) -> list:
+    """[(frame, keycode)]: the presses that leave the boot menu into a NEW GAME at `skill` (BOOT_SKILL by default) --
+    enter on frame MENU_IDLE, then one up / down a frame to the skill (the highlight boots at BOOT_MENU_SKILL), then
+    enter: the NEW GAME frame, which is the first world frame (the restart, then that frame's tic)"""
+    skill = BOOT_SKILL if skill is None else skill
+    b, w = SKILLS.index(BOOT_MENU_SKILL), SKILLS.index(skill)
+    key = K_FWD if w < b else K_BACK
+    out = [(MENU_IDLE, ENTER)] + [(MENU_IDLE + 1 + i, key) for i in range(abs(w - b))]
+    return out + [(MENU_IDLE + 1 + abs(w - b), ENTER)]
+
+
+MENU_FRAMES = boot_pick()[-1][0]   # the first world frame (NEW GAME at BOOT_SKILL): the frames before it are menu frames
+
+
+def menu_exit_events(skill=None):
+    """the boot pick's key events (down on the frame's first poll, up on the next) -- every driver's way into the world"""
+    return [KeyEvent(f * STANDALONE_POLLS + k, k == 0, key) for f, key in boot_pick(skill) for k in (0, 1)]
+
+
+# P10: THE PROBE DRIVERS' way in (b0_scenarios: it pokes a run's start and every frame's pose from the first game frame
+# on, and NEW GAME's restart block, on its frame, would overwrite them): the boot menu's MENU_IDLE frames, then
+# POKE_ENTER written at the next frame's start -- `mode` 0 and `g_live` 1, the boot image's own world (BOOT_SKILL's
+# level start), as every driver entered it before P10 with esc on the boot menu. No menu key is delivered.
+POKE_LEAD = MENU_IDLE
+POKE_ENTER = {"mode": 0, "g_live": 1}
 
 
 class Recording(InMemoryScreen):
@@ -897,55 +919,46 @@ def main():
         if f < len(route):
             for n in names:
                 route[f][n] = True
-    # M7 P6+P7: the walk BEGINS at `lead`. At the boot skill, as before: two menu frames, esc on the
-    # first route frame. At another skill: the two menu frames, enter (the skill screen, the boot skill
-    # highlighted), up or down to the walk's skill one frame each (the skill screen clamps), and enter --
-    # NEW GAME at that skill, which is itself the first route frame (the restart, then that frame's tic).
-    _boot_i, _walk_i = SKILLS.index(BOOT_SKILL), SKILLS.index(walk_skill)
-    _moves = abs(_walk_i - _boot_i)
-    _mkey = K_FWD if _walk_i < _boot_i else K_BACK      # up / down on the skill screen (m3_gate's keys)
-    lead = MENU_FRAMES if walk_skill == BOOT_SKILL else MENU_FRAMES + 1 + _moves
+    # M7 P6+P7: the walk BEGINS at `lead`: the boot menu's frames, enter (the skill screen), up or down to the walk's
+    # skill one frame each, and enter -- NEW GAME at that skill, which is itself the first route frame (the restart,
+    # then that frame's tic). P10: at the boot skill too (`boot_pick`; the boot menu's esc is no rule now)
+    _pick = boot_pick(walk_skill)
+    _moves = len(_pick) - 2
+    lead = _pick[-1][0]
     script = [{} for _ in range(lead)] + route + press + opening + through
     # M7 P1.5 -- NEW GAME PUTS THE LEVEL BACK. Walked through while the door is still OPEN -- it has
     # started to shut, and the menu frames then hold it where it is, since they tic nothing: enter
-    # opens the menu, enter the skill screen, and enter starts the highlighted skill (the walk's
-    # skill, still highlighted: `menu_sel` persists) -- and the SAME route is walked again, then the
-    # idle. The program must be back at the level start, the player at the spawn and every door shut,
+    # opens the menu (P10: on RESUME -- down to NEW GAME), enter the skill screen, and enter starts the highlighted
+    # skill (the walk's skill, still highlighted: `menu_sel` persists) -- and the SAME route is walked again, then
+    # the idle. The program must be back at the level start, the player at the spawn and every door shut,
     # so the replay retraces the first walk frame for frame and ends facing a SHUT door. The replay's
     # first frame IS the NEW GAME frame (the restart, then that frame's tic), as the first walk's first
     # frame is the one esc (or the first NEW GAME) lands on. (MEASURED with --dry on E1M1 before P6:
     # door 10 reaches 8, is at 5 when NEW GAME lands -- its pass state is 4 -- and stays 0 through the
     # replay.)
-    ng_frame = len(script) + 2
-    script += [{}, {}] + route + [{} for _ in range(args.idle)]
+    ng_frame = len(script) + 3                           # P10: enter, down (RESUME -> NEW GAME), enter, enter
+    script += [{}, {}, {}] + route + [{} for _ in range(args.idle)]
     frames = len(script)
     # esc lands on the FIRST route frame: the menu's rules run before the branch reads `mode`, so
     # that frame already renders the world and no frame is spent on the transition.
-    if walk_skill == BOOT_SKILL:
-        _lead_events = menu_exit_events()
-    else:
-        _lead_events = [KeyEvent(f * STANDALONE_POLLS + k, k == 0, key)
-                        for f, key in ([(MENU_FRAMES, ENTER)]
-                                       + [(MENU_FRAMES + 1 + i, _mkey) for i in range(_moves)]
-                                       + [(lead, ENTER)])
-                        for k in (0, 1)]
+    _lead_events = menu_exit_events(walk_skill)
     events = to_events(script) + _lead_events + [
-        KeyEvent(f * STANDALONE_POLLS + k, k == 0, ENTER)
-        for f in (ng_frame - 2, ng_frame - 1, ng_frame) for k in (0, 1)]
+        KeyEvent(f * STANDALONE_POLLS + k, k == 0, key)
+        for f, key in ((ng_frame - 3, ENTER), (ng_frame - 2, K_BACK), (ng_frame - 1, ENTER), (ng_frame, ENTER))
+        for k in (0, 1)]
     keys_by_frame, menu_events = held_per_frame(events, frames)
 
     print("fjm    : %s" % args.fjm)
     print("target : door sector %d, use box %s, threshold state %d"
           % (target, boxes[target], passes[target]))
-    print("skill  : %d (the boot skill is %d)%s"
-          % (walk_skill, BOOT_SKILL, "" if walk_skill == BOOT_SKILL else
-             " -- picked on the skill screen: enter, %d x %s, enter (NEW GAME) on frame %d"
-             % (_moves, "up" if _mkey == K_FWD else "down", lead)))
-    print("script : %d menu -> %s -> %d walk to the door -> %d use -> %d open -> %d through "
-          "-> enter, enter, enter (NEW GAME at skill %d) -> the %d-frame walk again -> %d "
+    print("skill  : %d (the boot skill is %d) -- picked on the skill screen: enter, %d x %s, enter (NEW GAME) on "
+          "frame %d" % (walk_skill, BOOT_SKILL, _moves,
+                        "up" if _moves and _pick[1][1] == K_FWD else "down", lead))
+    print("script : %d menu -> NEW GAME -> %d walk to the door -> %d use -> %d open -> %d through "
+          "-> enter, down, enter, enter (NEW GAME at skill %d) -> the %d-frame walk again -> %d "
           "idle  (%d frames)"
-          % (lead, "esc" if walk_skill == BOOT_SKILL else "NEW GAME", len(route), len(press),
-             args.open_wait, len(through), walk_skill, len(route), args.idle, frames))
+          % (lead, len(route), len(press), args.open_wait, len(through), walk_skill, len(route), args.idle,
+             frames))
     print("doorway: line %d %s -> approach %s, then through to %s"
           % (sorted(lines_of[target])[0], door_segs[0],
              tuple(round(v) for v in approach), tuple(round(v) for v in beyond)))
@@ -958,12 +971,12 @@ def main():
 
     if args.dry:
         # M7 P6+P7: the ORACLE's own world frame (`world_frame`, the main loop's), not a walls-only step
-        st, dps, md, scr, sel = sp, dp.initial(), 1, 0, SKILLS.index(BOOT_SKILL)
+        st, dps, md, scr, sel, live = sp, dp.initial(), 1, 0, SKILLS.index(BOOT_MENU_SKILL), 0   # P10
         mps, u, dskill = mp.initial(), 1, BOOT_SKILL
         dmir = new_mirror(BOOT_SKILL)
         for f in range(frames):
             kd = keys_by_frame[f]
-            md, scr, sel, ng = menu_step(md, scr, sel, menu_events[f])
+            md, scr, sel, ng, live = menu_step(md, scr, sel, menu_events[f], live)
             if ng is not None:
                 st, dps, mps, u, dskill = sp, dp.initial(), mp.initial(), 1, SKILLS[ng]
                 dmir[0].reset(dskill)
@@ -1009,8 +1022,8 @@ def main():
     # never reaches the exit (p2a_gate's S8 does)
     pusedn, lvdone = 1, 0
     mps = mp.initial()                                  # M7 P2b: every lift at its top
-    # the binary boots into the MAIN menu with the boot skill highlighted
-    mode, scr, sel = 1, 0, SKILLS.index(BOOT_SKILL)
+    # the binary boots into the MAIN menu without a game (P10), MEDIUM highlighted on the skill screen
+    mode, scr, sel, live = 1, 0, SKILLS.index(BOOT_MENU_SKILL), 0
     # M7 P1.5: the game tier boots at BOOT_SKILL's level start, so the oracle hides what that
     # skill does not spawn -- the one set the emitter baked its lists and flags from; M7 P6+P7: a NEW
     # GAME then plays its own skill's (`hidden_of`)
@@ -1024,7 +1037,7 @@ def main():
     print("  frame  keys      door%-4d  fj px vs oracle" % target)
     for f in range(frames):
         kd = keys_by_frame[f]
-        mode, scr, sel, ng = menu_step(mode, scr, sel, menu_events[f])
+        mode, scr, sel, ng, live = menu_step(mode, scr, sel, menu_events[f], live)
         if ng is not None:
             # NEW GAME: the level start of the chosen skill, then this frame's tic (below)
             assert SKILLS[ng] == walk_skill, "the script plays one skill; m3_gate does the rest"
@@ -1046,12 +1059,12 @@ def main():
                 mph.reset(skill)
                 pusedn, lvdone = 1, 0
         if mode == 1:                                   # a menu frame tics nothing
-            menu_pics.setdefault((scr, sel), set()).add(got[f])
+            menu_pics.setdefault((scr, sel, live), set()).add(got[f])
             sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr,
                                                        sel, (dstates[si] for si in order),
                                                        dps, order, (lvdone, pusedn),
                                                        mps, mp.order, {**mph.state(), **mviews.rt_state(mph),
-                                                                       **mph.weapon_state()}))
+                                                                       **mph.weapon_state()}, live=live))
             sbad.update(GST.palette_diff(pals, f, art, 0))     # M7 P5: a menu frame shows PLAYPAL 0
             state_checked += 1
             print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
@@ -1075,7 +1088,8 @@ def main():
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
                                                    (dstates[si] for si in order), dps, order,
                                                    (lvdone, pusedn), mps, mp.order,
-                                                   {**mph.state(), **mviews.rt_state(mph), **mph.weapon_state()}))
+                                                   {**mph.state(), **mviews.rt_state(mph), **mph.weapon_state()},
+                                                   live=live))
         sbad.update(GST.palette_diff(pals, f, art, mph.palette()))   # M7 P5: the frame's damage / pickup flash
         state_checked += 1
         path[f] = (state.x, state.y, state.angle)

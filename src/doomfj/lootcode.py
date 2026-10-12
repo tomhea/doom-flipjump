@@ -57,6 +57,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from doomfj import gamedata as gd
 from doomfj.lut_generator import generate_dispatch_table_fj
+from doomfj import statcode as _statcode                          # P10: the item counter, the secrets
 
 M32 = 0xFFFFFFFF
 # the player modes whose player LOOTS (world.PLAYER_MODES): P6 + P7 ship as "full"
@@ -74,7 +75,7 @@ REACH_UP, REACH_DOWN = 56, 8          # combat.REACH_UP / REACH_DOWN
 # the dropped variants' give routines (DROP_ITEM's types, `dropped=True`)
 DROPPED = {2007: "give_2007d", 2001: "give_2001d"}
 WEAPON_OWN = {gd.WP_FIST: 0, gd.WP_PISTOL: 1, gd.WP_SHOTGUN: 2, gd.WP_CHAINSAW: 3,
-              gd.WP_MISSILE: 4}                                                            # weaponcode.OWN (P9: 4)
+              gd.WP_MISSILE: 4, gd.WP_CHAINGUN: 5}                     # weaponcode.OWN (P9: 4; P10: the chaingun 5)
 
 
 def loot_on(player_mode: str) -> bool:
@@ -257,9 +258,11 @@ def give_ammo_lines(a: int) -> List[str]:
            f"  {p}_cp:",
            "    hex.if0 1, ga_z, %s_out" % p]
     # "We were down to zero, so select a new weapon." (the weapons E1M1 cannot own are asserted away)
-    if a == gd.AM_CLIP:              # fist -> the chaingun if owned (never on E1M1), else the pistol
+    if a == gd.AM_CLIP:              # fist -> the chaingun if owned (P10: the cave's), else the pistol
         out += _if_ready(p + "c", (gd.WP_FIST,), f"{p}_sw", f"{p}_out")
-        out += [f"  {p}_sw:", f"    hex.set 1, wp_pend, {gd.WP_PISTOL}"]
+        out += [f"  {p}_sw:", f"    hex.set 1, wp_pend, {gd.WP_PISTOL}",
+                f"    hex.if0 1, wp_own + {WEAPON_OWN[gd.WP_CHAINGUN]}*dw, {p}_out",
+                f"    hex.set 1, wp_pend, {gd.WP_CHAINGUN}"]
     elif a == gd.AM_SHELL:           # fist or pistol, the shotgun owned -> the shotgun
         out += _if_ready(p + "s", (gd.WP_FIST, gd.WP_PISTOL), f"{p}_sw", f"{p}_out")
         out += [f"  {p}_sw:", f"    hex.if0 1, wp_own + {WEAPON_OWN[gd.WP_SHOTGUN]}*dw, {p}_out",
@@ -287,9 +290,10 @@ def _give_body(p: str, n: int, done: str, refused: Optional[str]) -> List[str]:
             f"  {p}gc:", f"    hex.mov 3, p_hp, gv_c", f"    ;{done}"]
 
 
-def give_lines(kind: int, dropped: bool = False) -> List[str]:
+def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[str]:
     """`give_<kind>` (`give_<kind>d` for a dropped one): combat._touch's case for `kind` after the reach test ->
-    `gv_ok`. Leaves through `stl.fret gv_ret` on every path."""
+    `gv_ok`. Leaves through `stl.fret gv_ret` on every path. P10 (`stats`, doomfj.statcode): a COUNTITEM kind's
+    taken exit counts the item in `st_item` (combat._touch_specials' itemcount)."""
     p = "give_%d%s" % (kind, "d" if dropped else "")
     ok, no = f"{p}_ok", f"{p}_no"
     out = [f"{p}:"]
@@ -330,6 +334,11 @@ def give_lines(kind: int, dropped: bool = False) -> List[str]:
         out += _ga_call(gd.AM_MISL, gd.CLIPAMMO[gd.AM_MISL] * 2)
         out += [f"    hex.if0 1, {own}, {p}_new", "    stl.fret gv_ret",       # owned: taken iff ammo was given
                 f"  {p}_new:", f"    hex.set 1, {own}, 1", f"    hex.set 1, wp_pend, {gd.WP_MISSILE}", f"    ;{ok}"]
+    elif kind == 2002:                                                # MGUN (P10): P_GiveWeapon (2 clips, 1 dropped)
+        own = f"wp_own + {WEAPON_OWN[gd.WP_CHAINGUN]}*dw"
+        out += _ga_call(gd.AM_CLIP, gd.CLIPAMMO[gd.AM_CLIP] * (1 if dropped else 2))
+        out += [f"    hex.if0 1, {own}, {p}_new", "    stl.fret gv_ret",       # owned: taken iff ammo was given
+                f"  {p}_new:", f"    hex.set 1, {own}, 1", f"    hex.set 1, wp_pend, {gd.WP_CHAINGUN}", f"    ;{ok}"]
     elif kind == 2001:                                                # SHOT: P_GiveWeapon (2 clips, 1 dropped)
         own = f"wp_own + {WEAPON_OWN[gd.WP_SHOTGUN]}*dw"
         out += _ga_call(gd.AM_SHELL, gd.CLIPAMMO[gd.AM_SHELL] * (1 if dropped else 2))
@@ -345,7 +354,8 @@ def give_lines(kind: int, dropped: bool = False) -> List[str]:
         out += _ga_call(a, num * gd.CLIPAMMO[a] if num else gd.CLIPAMMO[a] // 2)
         out += ["    stl.fret gv_ret"]
     out += [f"  {no}:", "    hex.zero 1, gv_ok", "    stl.fret gv_ret",
-            f"  {ok}:", "    hex.set 1, gv_ok, 1", "    stl.fret gv_ret"]
+            f"  {ok}:", *(_statcode.item_lines() if stats and _statcode.counts_item(kind, dropped) else []),
+            "    hex.set 1, gv_ok, 1", "    stl.fret gv_ret"]
     return out
 
 
@@ -472,7 +482,8 @@ def _drop_leaf() -> List[str]:
 
 
 def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable = _default_rt_unlink,
-                 drop_take: Callable = _default_drop_take, lists=None, drop_rt: Sequence[int] = None) -> List[str]:
+                 drop_take: Callable = _default_drop_take, lists=None, drop_rt: Sequence[int] = None,
+                 stats: bool = False) -> List[str]:
     """`pk_go` (stl.fcall pk_go, pk_ret): `combat._touch_specials` at the candidate (`cpx`, `cpy`) with the floor
     `cm_hf` (the module docstring). `slots`: `pickup_slots`; `mon_rt[m]`: monster slot m's runtime thing (its
     thpos_rt / thss_rt row). `lists` overrides the cell lists (the host control's mutated grid). Jumps over itself.
@@ -527,7 +538,7 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
     out += _box_leaf() + _drop_leaf()
     out += ["pk_bonus:"] + _bonus_lines("pkb") + ["    stl.fret pk_nret"]
     for kind, dropped in give_kinds(w):
-        out += give_lines(kind, dropped)
+        out += give_lines(kind, dropped, stats)
     for a in range(gd.NUMAMMO):
         out += give_ammo_lines(a)
     out += ["pk_end:"]
@@ -676,9 +687,11 @@ def latch_lines() -> List[str]:
     return ["hex.mov 1, p_dd0, p_dead"]
 
 
-def pre_lines() -> List[str]:
-    """before the weapon keys: nukage, alive only (the model's first line of the alive branch)"""
-    return ["hex.if1 1, p_dd0, lt_pre_end", "stl.fcall nk_go, nk_ret", "lt_pre_end:"]
+def pre_lines(stats: bool = False) -> List[str]:
+    """before the weapon keys: nukage, alive only (the model's first line of the alive branch). P10 (`stats`): the
+    secrets first (statcode's `sc_go`, every alive tic; combat._special_sector)"""
+    return (["hex.if1 1, p_dd0, lt_pre_end"] + (_statcode.secret_call_lines() if stats else [])
+            + ["stl.fcall nk_go, nk_ret", "lt_pre_end:"])
 
 
 def post_lines(skip_move: str = "simmv_done") -> List[str]:
@@ -701,7 +714,7 @@ def post_lines(skip_move: str = "simmv_done") -> List[str]:
             "lt_bc_end:"]
 
 
-def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = True) -> List[str]:
+def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = True, stats: bool = False) -> List[str]:
     """the player's tic between the use lines and the move, in the model's order (`_player_phase` / `_death_think`):
     `pre` (nukage, alive), the weapon tic (`weaponcode.weapon_lines(loot=True)`: its keys skipped on `p_dd0`, the
     psprites always), the damagecount fade -- hurtcode's `tic` alive; dead at the tic's start (`p_dd0`), `turn`:
@@ -712,7 +725,7 @@ def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = T
     if turn:
         fade = (["hex.if0 1, p_dd0, lt_fade", "stl.fcall dt_turn, dt_tret", ";lt_fade_end", "lt_fade:"]
                 + fade + ["lt_fade_end:"])
-    return pre_lines() + list(weapon_tic) + fade + post_lines()
+    return pre_lines(stats) + list(weapon_tic) + fade + post_lines()
 
 
 def use_guard() -> tuple:
@@ -724,7 +737,7 @@ def use_guard() -> tuple:
 # ---- the splice ------------------------------------------------------------------------------------------------------
 def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int], cell_root: str,
                rt_unlink: Callable = _default_rt_unlink, drop_take: Callable = _default_drop_take,
-               drop_rt: Sequence[int] = None) -> dict:
+               drop_rt: Sequence[int] = None, stats: bool = False) -> dict:
     """everything package B adds to the game tier, for the World `w` (its level start; any skill):
       * `decls`: the persisted cells (p_bc, p_str, p_bp, am_misl, am_cell), p_dd0, the interfaces and scratch;
       * `tables`: amcap, nkleaf;
@@ -743,14 +756,17 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
         slots in `thvis`, boot = hard's, and each skill's restart half);
       * `restart`: NEW GAME's / the restart's loot cell values; `persist`: the cells the M1 reset must leave alone.
     `mon_rt[m]`: monster slot m's runtime thing row (monsters.MonsterViews.rt). M7 P8a (package K): `drop_rt[k]`,
-    dropper k's own row -- the pickup reads the drop there (pickup_lines(drop_rt=))."""
+    dropper k's own row -- the pickup reads the drop there (pickup_lines(drop_rt=)).
+    P10 (`stats`, doomfj.statcode): the COUNTITEM gives count the item, `pre` checks the secrets, and the leaves
+    carry `sc_go` (statcode declares the cells: the game tier's)."""
     start = level_start(w)
     slots = pickup_slots(w, rm, map_wad, mapname, sprite_wad)
-    leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt)
-              + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root))
+    leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt, stats=stats)
+              + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root)
+              + (_statcode.secret_lines(w, cell_root) if stats else []))
     return {"decls": loot_decls(start), "tables": tables_fj(w), "leaves": leaves,
-            "latch": latch_lines(), "pre": pre_lines(), "post": post_lines(), "use_guard": use_guard(),
-            "tic": tic_lines,
+            "latch": latch_lines(), "pre": pre_lines(stats), "post": post_lines(), "use_guard": use_guard(),
+            "tic": (lambda weapon_tic, hurt_tic, turn=True: tic_lines(weapon_tic, hurt_tic, turn, stats)),
             "pickup": pickup_call, "block": block_lines, "cells": player_cell_things, "thing_test": THING_TEST16,
             "slots": slots,
             "extra_vis": {sk: extra_vis(w, slots, sk) for sk in (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)},

@@ -21,7 +21,7 @@ from doomfj.wad import WadFile                                                # 
 from doomfj.wall_renderer import STANDALONE_POLLS                             # noqa: E402
 from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent               # noqa: E402
 
-ESC, K_FWD, FRAMES = 0x1B, 0x77, 8
+K_FWD, FRAMES = 0x77, 8
 
 
 def main():
@@ -34,9 +34,11 @@ def main():
     order = sorted(door_states(secs, lds, sds))
     init = initial_states(secs, lds, sds)
     doors0 = [init[si] for si in order]
-    events = [KeyEvent(2 * STANDALONE_POLLS, True, ESC),
-              KeyEvent(2 * STANDALONE_POLLS + 1, False, ESC),
-              KeyEvent(3 * STANDALONE_POLLS, True, K_FWD)]
+    # P10: the world through the boot pick (NEW GAME at the boot skill: m2_std_gate's ONE composition); forward
+    # from the frame after it
+    import m2_std_gate as M2
+    mf = M2.MENU_FRAMES
+    events = M2.menu_exit_events() + [KeyEvent((mf + 1) * STANDALONE_POLLS, True, K_FWD)]
     got, ops, reads = GST.run_reading_state(Path(args.fjm), Path(args.labels), events, FRAMES,
                                             len(order))
     print("ran %d frames, %s ops; cells read: %s" % (len(got), format(ops, ","), sorted(reads[0])))
@@ -46,9 +48,9 @@ def main():
     st = spawn_state(mw, "E1M1")
     wants = []
     for f in range(FRAMES):
-        mode = 1 if f < 2 else 0
+        mode = 1 if f < mf else 0
         if mode == 0:
-            st = rm.step_sim(st, {"forward": f >= 3}, scene=scene)
+            st = rm.step_sim(st, {"forward": f >= mf + 1}, scene=scene)
         w = GST.oracle_state(st.x, st.y, st.angle, mode, 0, 0, doors0)
         for k in ("menu_scr", "menu_sel"):            # a pre-P1.5 binary has neither
             w.pop(k)

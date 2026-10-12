@@ -27,6 +27,8 @@ from doomfj.menu import _GLYPHS, _SMALL_GLYPHS, GLYPH_GAP
 # issue #119 item 6: the screen's sizes are config.GAME_CFG's (the ONE definition), not restated here
 SCREEN_W = GAME_CFG.W          # 160: the game screen's width (the view's and the bar's)
 VIEW_ROWS = GAME_CFG.VIEW_ROWS  # 84: the game tier's 3D view height (D6: 168 of 200 at half resolution)
+# P10: `GameScreen.frame`'s weapon for a DEAD player -- no psprite at all (hudcode.hud_tail_lines' `dead_cell`)
+NO_PSPRITE = "-"
 BAR_ROWS = GAME_CFG.H - VIEW_ROWS   # 16: the bar under it
 WEAPONTOP = 32                 # DOOM's psprite sy when the weapon is up (p_pspr.c)
 NATIVE_W = 320
@@ -321,7 +323,7 @@ class GameScreen:
         bar = bar_pixels(self.colours, **vals)
         out = rows
         for lump in (weapon or hudcode.READY_WEAPON, flash):
-            if lump is None:
+            if lump is None or lump == NO_PSPRITE:          # P10: a dead player's empty hands
                 continue
             for x, runs in self.overlays[lump].items():
                 for y0, y1, texel in runs:

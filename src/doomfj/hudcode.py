@@ -18,7 +18,7 @@ the owned weapons write these cells (a value -> digits table).
 """
 from __future__ import annotations
 
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from doomfj import hud
 
@@ -112,11 +112,17 @@ VALUE_CELLS = {"card": "pcard"}
 
 
 def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_row: Sequence[int],
-                   view_rows: int = hud.VIEW_ROWS, value_cells: Dict[str, str] = VALUE_CELLS) -> List[str]:
-    """the world frame's tail before `frame_end`: the weapon, then the bar's changed columns"""
+                   view_rows: int = hud.VIEW_ROWS, value_cells: Dict[str, str] = VALUE_CELLS,
+                   dead_cell: Optional[str] = None) -> List[str]:
+    """the world frame's tail before `frame_end`: the weapon, then the bar's changed columns.
+    P10 (the owner's play-test, 2026-10-12): with `dead_cell` (the game tier's `p_dead`), a dead player draws no weapon
+    and no flash -- DOOM's P_DropWeapon lowers the weapon out of view; the overlays are baked at WEAPONTOP, so the
+    picture hides it at once (hud.NO_PSPRITE is the oracle's side)"""
     slots = hud.bar_slots()
     owned_cols = {x for _n, x0, w, _v in slots for x in range(x0, x0 + w)}
     out = ["// M7 P4.0 (doomfj.hudcode): the weapon overlay, then the bar's changed columns"]
+    if dead_cell is not None:
+        out.append(f"hex.if1 1, {dead_cell}, hff_end      // P10: a dead player's hands are empty")
     if isinstance(overlay, dict):
         out += weapon_record_lines(overlay, colormap_row)
     else:
@@ -185,6 +191,9 @@ def game_hud_parts(rm, asset_wad, sprite_wad, sectors) -> dict:
     def cols(lump):
         return hud.psprite_columns(sprite_wad.get_data(lump), view_w=rm.cfg.VIEW_W, view_rows=rm.cfg.VIEW_H)
     overlay = ([cols(lump) for lump in WC.overlay_frames()], [cols(lump) for lump in WC.flash_frames()])
+    from doomfj.wall_renderer import PLAYER_MODE
+    from doomfj.world import player_mortal
     return {"decls": hud_decls(start), "restart": hud_restart_lines(start), "menu": ["hex.set 1, hud_full, 1"],
-            "tail": hud_tail_lines(colours, overlay, row, view_rows=rm.cfg.VIEW_H), "colours": colours,
+            "tail": hud_tail_lines(colours, overlay, row, view_rows=rm.cfg.VIEW_H,
+                                   dead_cell="p_dead" if player_mortal(PLAYER_MODE) else None), "colours": colours,
             "overlay": overlay, "colormap_row": row}

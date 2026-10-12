@@ -147,11 +147,12 @@ def slots(world):
 
 def test_every_pickup_has_its_own_slot(world, slots):
     s = slots["slot"]
-    assert len(s) == len(world.pickup_things) == 100              # P9: + the launcher and its 4 rockets
+    assert len(s) == len(world.pickup_things) == 102              # P9: + the launcher and its 4 rockets; P10: + 2 guns
     assert len(set(s)) == len(s)
-    assert slots["nextra"] == sum(r is not None for r in slots["rt"]) == 10
+    # P10: 11 runtime pickups -- the big room's shotgun #41 shares a leaf list with monsters, so it is a RUNTIME thing
+    assert slots["nextra"] == sum(r is not None for r in slots["rt"]) == 11
     assert all((r is None) == (v < slots["nvis"]) for r, v in zip(slots["rt"], s))
-    assert sorted(v for v in s if v >= slots["nvis"]) == list(range(slots["nvis"], slots["nvis"] + 10))
+    assert sorted(v for v in s if v >= slots["nvis"]) == list(range(slots["nvis"], slots["nvis"] + 11))
     assert all(lf == world.rm.point_in_subsector(world.cmap, t.x, t.y)
                for t, r, lf in zip(world.pickup_things, slots["rt"], slots["leaf"]) if r is not None)
 
@@ -201,7 +202,7 @@ def test_pkxyz_is_every_pickups_place_on_every_entry(world):
     def s16(v):
         return v - 0x10000 if v & 0x8000 else v
     vals = L.pkxyz_values(world)
-    assert len(vals) == len(world.pickup_things) == 100           # P9: + the launcher and its 4 rockets
+    assert len(vals) == len(world.pickup_things) == 102           # P9: + the launcher and its 4 rockets; P10: + 2 guns
     for i, (v, t, z) in enumerate(zip(vals, world.pickup_things, world.pickup_z)):
         assert (s16(v & 0xFFFF), s16(v >> 16 & 0xFFFF), s16(v >> 32 & 0xFFFF)) == (t.x, t.y, z), i
         assert v >> 48 == 0

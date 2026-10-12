@@ -92,7 +92,10 @@ GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
                       # PLAYER_MODE): the P8a integration flipped BOTH (D3_RENDER_KW) in the commit that set PLAYER_MODE
                       # "final" (blocked51's picture, v6's record, is game_render_kw(False)), and the emitter ASSERTS the
                       # two agree with its `_D3` (tests/host/test_d3_rules.py holds them together too)
-                      rt_rank=True, exempt_barrels=True)
+                      rt_rank=True, exempt_barrels=True,
+                      # P10 (the owner's play-test, 2026-10-12): the exit, the switches and the doors each wear a tone
+                      # of their own -- see `wall_tone_names` (wall_renderer reads THIS key for the game tier)
+                      wall_tones=True)
 # THE HOSTED TIERS' PICTURE (M7 P3.3): the game tier's set WITHOUT D3 d. The hosted tiers (hosted, hosted-doors,
 # hosted-loop, hosted-nocollide) move runtime things too -- the host sends their positions -- but their fj walks
 # a leaf's list in INDEX order (`sim.thing_pass`); the depth walk is the GAME tier's alone. A gate that drives a
@@ -141,12 +144,13 @@ FORWARD_MOVE = 16 << 16           # 16.16 map-units per tic ~= DOOM's steady-sta
 # slow during a fight, might need to x1.5 it"; the coordinator's rule after the range measurement,
 # docs/gp-p67-interface.md section 12):
 #   * ANGLE_TURN_TAP  -- the FIRST frame of a held turn: DOOM's slow turn, so a tap aims as finely as DOOM's tap;
-#   * ANGLE_TURN_HELD -- every later frame of the same hold: the owner's x1.5 of the old 640.
+#   * ANGLE_TURN_HELD -- every later frame of the same hold: the owner's x1.5 of the old 640 (960), and P10 (the owner,
+#     2026-10-12: "you can make it a bit faster") 1280 -- DOOM's own fast turn per tic, 7.03 degrees a frame.
 # The state is one flag, `turnheld` (a turn key -- either -- was held last frame; DOOM's counter at SLOWTURNTICS = 1
 # frame): the world's `p_turnheld`, SimState.turnheld, the fj's persisted `p_tnh`. The tiers without that state (the
 # hosted and visual ones: `tap=False`) turn ANGLE_TURN_HELD every frame. ANGLE_TURN is that rate's old name.
 ANGLE_TURN_TAP = 320 << 16
-ANGLE_TURN_HELD = 960 << 16
+ANGLE_TURN_HELD = 1280 << 16
 ANGLE_TURN = ANGLE_TURN_HELD
 
 
@@ -193,6 +197,62 @@ WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may 
 # which is measured on the gate rather than assumed here.
 STEP_SEG_BUDGET = 16             # V3: boundaries allowed a step face (the NEAREST ones)
 V5_STACK = 2                      # V5: stacked boundary pieces kept per column per side
+# P10 (the owner's play-test, 2026-10-12: "distinguish them better (and also make differences between each other)") --
+# THE WALL TONES. The exit switch, the other switches, the doors a player can open and the blue doors (with their
+# jambs) each wear a tone of their own in place of their texture's two W1R texels: `wall_tone_names` is the ONE rule
+# (a linedef -> a tone name, "#..."), `wall_tone_texels` snaps each tone's two RGB targets to the PLAYPAL, and
+# `_wall_texture` hands a tone name the two-texel canvas -- so a toned wall is lit, patterned and baked exactly like any
+# wall. The game picture's alone (GAME_RENDER_KW `wall_tones`; wall_renderer reads the same key): the other tiers --
+# deg_gate's visual tier among them -- keep their textures. A secret door (ML_SECRET) and a door no player can open
+# (no use special: E1M1's remote doors 77 and 145) keep theirs too -- they are meant to look like walls.
+WALL_TONE_RGB = {"#EXIT": ((235, 35, 30), (110, 10, 10)),        # the exit switch: red
+                 "#SWITCH": ((245, 160, 30), (100, 55, 10)),     # the other switches: orange
+                 "#DOOR": ((190, 150, 95), (70, 45, 20)),        # a door a player opens: tan over dark brown
+                 "#DOORBLUE": ((60, 95, 235), (15, 25, 95))}     # a blue-key door and its jambs: blue
+WALL_TONE_EXIT_SPECIALS = frozenset({11, 51})                    # S1 exit, S1 secret exit
+WALL_TONE_DOOR_SPECIALS = frozenset({1, 26, 27, 28, 31, 32, 33, 34, 117, 118})   # DR / D1 doors a player opens
+WALL_TONE_BLUE_SPECIALS = frozenset({26, 32})                    # DR / D1 blue-key doors
+WALL_TONE_SWITCH_PREFIXES = ("SW1", "SW2")                       # DOOM's switch textures
+
+
+def wall_tone_names(lds, sds, secs) -> dict:
+    """{linedef: tone name} -- THE wall-tone rule both mirrors read (see WALL_TONE_RGB): an exit special first, then a
+    switch texture on any of the line's sides, then a door's face (a two-sided line with a door-use special, not
+    ML_SECRET, beside a door sector -- blue when a blue-key line opens that door), then a blue door's jamb (a one-sided
+    line of a blue door's sector). A face's tone shows while the door is shut, when the line draws as a solid wall"""
+    from doomfj.doors import door_states
+    from doomfj.gamedata import ML_SECRET
+    doors = set(door_states(secs, lds, sds))
+    blue = set()
+    for ld in lds:
+        if ld.special in WALL_TONE_BLUE_SPECIALS and 0 <= ld.back < len(sds):
+            blue |= {sds[ld.front].sector, sds[ld.back].sector} & doors
+    out = {}
+    for i, ld in enumerate(lds):
+        sides = [sds[ld.front]] + ([sds[ld.back]] if 0 <= ld.back < len(sds) else [])
+        texs = [(t or "").upper() for sd in sides for t in (sd.upper, sd.middle, sd.lower)]
+        two = len(sides) == 2
+        if ld.special in WALL_TONE_EXIT_SPECIALS:
+            out[i] = "#EXIT"
+        elif any(t.startswith(WALL_TONE_SWITCH_PREFIXES) for t in texs):
+            out[i] = "#SWITCH"
+        elif two and ld.special in WALL_TONE_DOOR_SPECIALS and not ld.flags & ML_SECRET:
+            ss = {sd.sector for sd in sides}
+            if ss & doors:
+                out[i] = "#DOORBLUE" if ss & blue else "#DOOR"
+        elif not two and sides[0].sector in blue:
+            out[i] = "#DOORBLUE"
+    return out
+
+
+def wall_tone_texels(pal, name: str) -> tuple:
+    """a tone's two palette indices: each RGB target's nearest PLAYPAL entry (squared distance, the lowest index on a
+    tie) -- derived from the palette, as the menu's colours are, never chosen as magic indices"""
+    out = []
+    for rgb in WALL_TONE_RGB[name]:
+        out.append(min(range(len(pal)), key=lambda i: (sum((a - b) ** 2 for a, b in zip(pal[i], rgb)), i)))
+    return tuple(out)
+
 STEP_FACE_BASE = 96               # V3: flat-shaded step-face texel. NOT WALL_BG (=4),
                                   # which is near-WHITE in DOOM's ramp and blows out
 # V2: sky-texture widths swept per full 360 turn. A LOOK knob, but not a free one -- it sets the
@@ -1318,6 +1378,15 @@ class ReferenceModel:
         rw_centerangle = (ANG90 + viewangle - rw_normalangle) & ANGLE_MASK
         return rw_offset, rw_centerangle
 
+    def _wall_tones(self, scene) -> dict:
+        """P10: `wall_tone_names` for the scene's map -- its own (pristine) level data, once per map and model"""
+        key = (id(scene.map_wad), scene.mapname)
+        cache = self.__dict__.setdefault("_tone_cache", {})
+        if key not in cache:
+            mw, m = scene.map_wad, scene.mapname
+            cache[key] = wall_tone_names(mw.linedefs(m), mw.sidedefs(m), mw.sectors(m))
+        return cache[key]
+
     def _wall_texture(self, asset_wad, name, cache, *, wall_mode="textured"):
         """Composite + downscale (the shared D5 lever) a wall texture by name → (texels, height, width),
         column-major texels (R6). Cached per frame; returns None for an empty/absent texture ('-' or a
@@ -1333,6 +1402,11 @@ class ReferenceModel:
         nm = name.upper()
         key = (nm, wall_mode)
         if key in cache:
+            return cache[key]
+        if nm.startswith("#"):                       # P10: a wall tone (`wall_tone_names`): its two snapped texels
+            assert wall_mode in ("W1R", "W1"), "a wall tone is a W1 / W1R canvas, not %r" % wall_mode
+            t1, t2 = wall_tone_texels(asset_wad.playpal(), nm)
+            cache[key] = ([t1, t2], 2, 1) if wall_mode == "W1R" else ([t1], 1, 1)
             return cache[key]
         defs = cache.get("__defs__")
         if defs is None:
@@ -2016,7 +2090,7 @@ class ReferenceModel:
                           aim_things: dict | None = None, aim_out: list | None = None,
                           mobiles=None, barrel_views: dict | None = None, thing_removed=None,
                           degrade: bool = False, exempt_actors: bool = False,
-                          view_drop: int = 0) -> bytes:
+                          view_drop: int = 0, wall_tones: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -2161,6 +2235,7 @@ class ReferenceModel:
         secs = scene_sectors(scene)
         verts = scene.cmap.vertexes
         texcache: dict = {}
+        _tones = self._wall_tones(scene) if wall_tones else {}     # P10: the wall tones, from the map's own data
 
         viewx, viewy, viewangle = state.x, state.y, state.angle
         # W1R-ANCHOR: the pattern key is (x + this) -- viewangle * 640 columns-per-turn >> 32
@@ -2754,6 +2829,8 @@ class ReferenceModel:
             _wtex = sd.middle
             if _closed2s and getattr(sd, "upper", "-") not in ("-", "", None):
                 _wtex = sd.upper
+            if wall_tones and _wtex not in ("-", "", None):   # P10: the line's tone, when it has one
+                _wtex = _tones.get(seg.linedef, _wtex)
             tex = self._wall_texture(scene.asset_wad, _wtex, texcache, wall_mode=wall_mode)
             # M13-WPXLIGHT: DOOM's per-seg fake contrast (orientation only -> a baked constant)
             wall_contrast = self.wall_fake_contrast(verts[seg.v1], verts[seg.v2])

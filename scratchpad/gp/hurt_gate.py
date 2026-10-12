@@ -586,8 +586,8 @@ def binary_scenario(gb, cells, table, run: Run, sc, pose, setup, want) -> bool:
     def start(pr, f):
         vals = {k: int(bool(keys[f].get(n))) for n, k in KEYFLAG.items() if k in pr.cells}
         if f == 0:
-            vals.update({"mode": 0, "viewx": _signed(pose[0], 32), "viewy": _signed(pose[1], 32),
-                         "viewangle": pose[2], **poke})
+            vals.update({"mode": 0, "g_live": 1, "viewx": _signed(pose[0], 32),     # P10: a game in progress
+                         "viewy": _signed(pose[1], 32), "viewangle": pose[2], **poke})
         pr.write_cells(vals)
     order, morder = run.dsim.order, run.dsim.mp.order
     names = sorted({k for fr in want for k in G.expected_cells(fr, order, morder)})

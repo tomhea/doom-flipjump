@@ -330,8 +330,8 @@ def full_script(seed, n_game):
 
 
 def events_for(per_frame):
-    """key events + the key that leaves the menu, exactly as m2_std_gate composes them (M7 P1.5:
-    esc -- enter opens the skill screen now; esc meant the world on every binary before it too)"""
+    """key events + the keys that leave the menu, exactly as m2_std_gate composes them (P10: the boot pick -- enter,
+    down, enter: NEW GAME at the boot skill; the boot menu's esc is no rule now)"""
     return to_events(per_frame) + menu_exit_events()
 
 
@@ -456,8 +456,8 @@ class GameSim:
     """M7 P6+P7 (O3, docs/gp-p67-interface.md section 10) -- THE GAME the binary plays, stepped as the model: the
     World at the game tier's modes (wall_renderer.MONSTER_MODE / PLAYER_MODE, "full" / "full"), the game picture's
     "seen" sight rule (doomfj.sight.SeenHook: each tic's picture marks the next tic's seen monsters) and the monsters'
-    tempo (world.MONSTER_TICS_PER_FRAME), from the boot image's level start (BOOT_SKILL; gamespeed leaves the menu
-    with esc, so the world is the boot one). Since P6+P7 the player is BLOCKED by monsters, picks things up, and can
+    tempo (world.MONSTER_TICS_PER_FRAME), from the boot image's level start (BOOT_SKILL; P10: gamespeed leaves the
+    menu by NEW GAME at BOOT_SKILL -- m2_std_gate's boot pick -- whose restart is that level start). Since P6+P7 the player is BLOCKED by monsters, picks things up, and can
     be hurt and die, and the monsters chase him twice a frame -- a door-only replay (DoorSim's step_sim) no longer
     walks where the binary walks. `step` / `ds` / `order` / `doors_ever` / `reset` are DoorSim's interface, so
     validate_scripts and gamespeed_trail.py's records read either."""

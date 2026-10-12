@@ -56,8 +56,9 @@ from doomfj.fixedpoint import _signed                                        # n
 from doomfj.reference_model import SimState                                  # noqa: E402
 from doomfj.things import drawable_things                                    # noqa: E402
 from doomfj.doors import exit_boxes                                          # noqa: E402
-from doomfj.menu import LEVEL_DONE_SCR, menu_step, palette_colours           # noqa: E402
-from doomfj.wall_renderer import (BOOT_SKILL, SKILLS, STANDALONE_POLLS,     # noqa: E402
+from doomfj.menu import (LEVEL_DONE_ENTER, LEVEL_DONE_SCR, LEVEL_DONE_SCREENS, menu_step,  # noqa: E402
+                         palette_colours, stats_digits)
+from doomfj.wall_renderer import (BOOT_MENU_SKILL, BOOT_SKILL, SKILLS, STANDALONE_POLLS,     # noqa: E402
                                   menu_screen_pixels)
 from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent             # noqa: E402
 
@@ -167,7 +168,8 @@ class Mirror:
         ph = dp.initial()
         ph = (ph[0], ph[1], ph[2], pcard)
         taken, out = False, []
-        mode, scr, sel = 0, 0, SKILLS.index(BOOT_SKILL)      # poked into the world; sel baked
+        # poked into the world with a game in progress (P10: `g_live` 1, poked too); sel baked (P10: medium)
+        mode, scr, sel, live = 0, 0, SKILLS.index(BOOT_MENU_SKILL), 1
         pusedn, lvdone = 1, 0                                  # baked: G_PlayerReborn's usedown
         mp, ms = self.mp, self.mp.initial()                    # M7 P2b: every lift at its top
         # M7 P3.1: the idle monsters from the boot image's level start (doomfj.monsters)
@@ -197,7 +199,9 @@ class Mirror:
                         st = SimState(got[0], got[1], got[2], sim.mapname)
                     after = self._cells(mph, st)
                     poke = {k: v for k, v in after.items() if before.get(k) != v}
-                mode, scr, sel, ng = menu_step(mode, scr, sel, set(kd.get("menu", ())))
+                # P10: a frame's menu keys are its only typed keys (the moves are poked flags), so they are its "any"
+                mev_ = set(kd.get("menu", ()))
+                mode, scr, sel, ng, live = menu_step(mode, scr, sel, mev_ | ({"any"} if mev_ else set()), live)
                 if ng is not None:                            # NEW GAME: the level start
                     st = SimState(sim.spawn.x, sim.spawn.y, sim.spawn.angle, sim.mapname)
                     ph, taken, pusedn = dp.initial(), False, 1
@@ -224,12 +228,12 @@ class Mirror:
                     if dead:                                  # P7-c: no use line, and the edge is not read
                         if self.ctl == "dead_exits" and use and any(in_use_box_fixed(b, st.x, st.y)
                                                                     for b in self.exits):
-                            lvdone, mode, scr = 1, 1, LEVEL_DONE_SCR     # die_gate's control: a dead player exits
+                            lvdone, mode, scr = 1, 1, LEVEL_DONE_ENTER   # die_gate's control: a dead player exits
                     elif use:                                 # the exit: a PRESS in its box
                         if not pusedn or self.ctl == "edge":
                             pusedn = 1
                             if any(in_use_box_fixed(b, st.x, st.y) for b in self.exits):
-                                lvdone, mode, scr = 1, 1, LEVEL_DONE_SCR
+                                lvdone, mode, scr = 1, 1, LEVEL_DONE_ENTER   # P10: LEVEL COMPLETE, its hold first
                             elif self.ctl != "no_use_lines":  # else the SR lifts and the switch
                                 ms = mp.use_press(ms, st.x, st.y)
                     else:
@@ -289,8 +293,13 @@ class Mirror:
                 bviews = self.bviewfn(mph) if (loots and self.bviewfn) else None
                 if self.seenfn is not None and drawn == "world":
                     mph.set_seen(self.seenfn(mph, st, ph, ms, taken))
+                from doomfj.statcode import stats_of as _stats_of
                 out.append({"pose": (st.x, st.y, st.angle), "phase": ph, "taken": taken,
                             "mode": mode, "scr": scr, "sel": sel, "lvdone": lvdone,
+                            "live": live,                                             # P10: g_live
+                            # P10: LEVEL COMPLETE's numbers, the oracle's (statcode.stats_of)
+                            "stats": (len(mph.world.secret_sectors), stats_digits(*_stats_of(mph.world)))
+                            if (mode and scr in LEVEL_DONE_SCREENS) else None,
                             "pusedn": pusedn, "drawn": drawn, "movers": ms,
                             "mheights": mp.heights(ms),
                             "mstate": {**mph.state(), **(self.rtfn(mph) if self.rtfn else {}),
@@ -368,7 +377,7 @@ def expected_cells(fr: dict, order: list, mover_order=()) -> dict:
     x, y, a = fr["pose"]
     doors = [ds[si] for si in order]
     return {"viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": a & M32,
-            "mode": fr["mode"], "menu_scr": fr["scr"],
+            "mode": fr["mode"], "menu_scr": fr["scr"], "g_live": fr["live"],                 # P10: g_live
             "dstate": tuple(d[0] for d in doors), "ddir": tuple(d[1] for d in doors),
             "dsub": tuple(d[2] for d in doors), "dwait": tuple(d[3] for d in doors),
             "dreq": tuple(int(si in req) for si in order), "pcard": card,
@@ -380,11 +389,12 @@ def expected_cells(fr: dict, order: list, mover_order=()) -> dict:
             **fr.get("mstate", {})}                                  # M7 P3.1
 
 
-def screen(orc, scr: int, sel: int) -> bytes:
+def screen(orc, scr: int, sel: int, live: int = 0, stats=None) -> bytes:
     """a menu screen's picture: the main menu, the skill screen at `sel`, LEVEL COMPLETE -- or (M7
-    P3.4) the main menu on HELP and the help: `wall_renderer.menu_screen_pixels`, the one mapping"""
+    P3.4) the main menu on HELP and the help: `wall_renderer.menu_screen_pixels`, the one mapping. P10: `live` picks
+    the main menu's variant, `stats` is LEVEL COMPLETE's (nsecret, digits)"""
     colours = palette_colours(bytes(b for rgb in orc.mw.playpal(0) for b in rgb))
-    return bytes(menu_screen_pixels(orc.rm.cfg, colours, scr, sel))
+    return bytes(menu_screen_pixels(orc.rm.cfg, colours, scr, sel, live, stats))
 
 
 def menu_events(keys: list) -> list:
@@ -587,7 +597,8 @@ def scenarios(dsim, card) -> list:
     out.append({
         "name": "S12 NEW GAME puts a riding lift back",
         "pose": _standing(dsim, (40, 256), 0),
-        "keys": [F_] * 3 + [I] * 4 + [{"menu": ["esc"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
+        # P10: esc opens the menu on RESUME -- down to NEW GAME, enter (the skill screen), enter
+        "keys": [F_] * 3 + [I] * 4 + [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
         + [I] * 3, "pcard": 0, "controls": ["restart_movers"],
         "claim": lambda tr: tr[6]["movers"][0][k98][0] > 0 and tr[-1]["movers"][0][k98][0] == 0})
     p10 = dsim.passes[10]
@@ -598,17 +609,24 @@ def scenarios(dsim, card) -> list:
         "claim": lambda tr: min(fr["phase"][0][10][0] for fr in tr[12:]) == p10
         and any(a["phase"][0][10][1] == D.CLOSING and b["phase"][0][10][1] == D.OPENING
                 for a, b in zip(tr, tr[1:]))})
+    # P10: LEVEL COMPLETE holds eight frames (an enter among them ignored), then any key leaves for the boot's menu
+    # (no game in progress: esc there is no rule, and the frozen world is never drawn again -- P2a.2's "frozen"
+    # control parted on the frozen world's frame, which no play reaches now), and NEW GAME starts the level over
     out.append({
-        "name": "S8 the exit: a press ends the level; LEVEL COMPLETE; the frozen world; NEW GAME",
+        "name": "S8 the exit: a press ends the level; LEVEL COMPLETE (its hold); any key: the menu; NEW GAME",
         "pose": exit_pose(dsim),
-        "keys": [U, I, U, F_, F_, dict(F_, menu=["enter"]), dict(F_, menu=["esc"]), F_,
-                 dict(F_, menu=["enter"]), {"menu": ["enter"]}, dict(F_, menu=["enter"]), F_, I],
-        "pcard": 0, "controls": ["edge", "frozen", "restart"],
+        "keys": [U, I, U, F_, F_, dict(F_, menu=["enter"]), F_, F_, F_, F_, F_,
+                 dict(F_, menu=["enter"]), dict(F_, menu=["esc"]), dict(F_, menu=["enter"]), {"menu": ["enter"]},
+                 F_, I],
+        "pcard": 0, "controls": ["edge", "restart"],
         "claim": lambda tr: (tr[1]["lvdone"], tr[2]["lvdone"]) == (0, 1)
-        and tr[2]["drawn"] == "world" and tr[3]["drawn"] == ("menu", LEVEL_DONE_SCR, tr[3]["sel"])
-        and tr[5]["drawn"][:2] == ("menu", 0) and tr[6]["drawn"] == "world"
-        and tr[7]["pose"] == tr[2]["pose"] and tr[10]["lvdone"] == 0
-        and tr[11]["pose"] != tr[10]["pose"]})
+        and tr[2]["drawn"] == "world"
+        and all(tr[k]["drawn"][:1] == ("menu",) and tr[k]["drawn"][1] in LEVEL_DONE_SCREENS for k in range(3, 11))
+        and tr[10]["drawn"][1] == LEVEL_DONE_SCR and tr[10]["stats"] is not None
+        and tr[11]["drawn"][:2] == ("menu", 0) and tr[11]["live"] == 0
+        and tr[12]["drawn"][:2] == ("menu", 0) and tr[12]["pose"] == tr[2]["pose"]
+        and tr[13]["drawn"][:2] == ("menu", 1) and tr[14]["lvdone"] == 0 and tr[14]["live"] == 1
+        and tr[15]["pose"] != tr[14]["pose"]})
     return out
 
 
@@ -677,7 +695,7 @@ def main(argv=None) -> int:
         def start(pr, f, sc=sc):
             vals = {k: int(bool(sc["keys"][f].get(n))) for n, k in KEYFLAG.items()}
             if f == 0:
-                vals.update({"mode": 0, "viewx": _signed(sc["pose"][0], 32),
+                vals.update({"mode": 0, "g_live": 1, "viewx": _signed(sc["pose"][0], 32),          # P10: g_live
                              "viewy": _signed(sc["pose"][1], 32), "viewangle": sc["pose"][2],
                              "pcard": sc["pcard"]})
             pr.write_cells(vals)
@@ -696,7 +714,7 @@ def main(argv=None) -> int:
             if fr["drawn"] == "world":
                 pic = picture(orc, dsim, fr, card_di)
             else:
-                pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
+                pic = screen(orc, fr["drawn"][1], fr["drawn"][2], fr["live"], fr["stats"])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):
                 x_bad = (f, P.px_diff(r.frames[f], pic) if f < len(r.frames) else -1)
             # M7 P5: the palette the present showed -- combat.palette_index on a world frame, 0 on a menu frame

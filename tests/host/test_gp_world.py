@@ -22,7 +22,8 @@ def test_the_schema_is_well_formed(world):
     for f in world.schema:
         assert f.bits > 0 and f.count > 0 and f.nibbles == (f.bits + 3) // 4
         assert f.kind in ("persist", "derived") and f.phase in ("existing", "S3a", "S3b", "P2a.1", "P2b", "P3", "P4.2",
-                                                                  "P6", "P7")   # M7 P6+P7: p_turnheld; M7 P7: p_attacker
+                                                                  "P6", "P7",   # M7 P6+P7: p_turnheld; M7 P7: p_attacker
+                                                                  "P10")        # P10: LEVEL COMPLETE's stats
     derived = {f.name for f in world.schema if f.kind == "derived"}
     assert derived == {"mon_leaf", "leaf_head", "mob_next", "proj_leaf", "fx_leaf"}
     by = {f.name: f for f in world.schema}
@@ -44,7 +45,7 @@ def test_the_schema_has_room_for_combat(world):
             "mon_rng": lay.nmon, "rng_world": 1, "rng_player": 1, "rng_fx": 1, "skill": 1}
     for name, count in want.items():
         assert name in by and by[name].count == count, name
-    assert (lay.nmon, lay.nbarrel, lay.npickup) == (53, 22, 100)    # P9: + the launcher and its 4 rockets
+    assert (lay.nmon, lay.nbarrel, lay.npickup) == (53, 22, 102)    # P9: + the launcher and its 4 rockets; P10: 2 guns
     assert by["p_health"].signed and by["mon_health"].signed and by["p_health"].bits >= 9
 
 

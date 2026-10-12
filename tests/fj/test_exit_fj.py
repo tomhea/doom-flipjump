@@ -14,7 +14,7 @@ from flipjump.interpreter.io_devices.FixedIO import FixedIO
 
 from doomfj import doors as D
 from doomfj.harness import W
-from doomfj.menu import LEVEL_DONE_SCR
+from doomfj.menu import LEVEL_DONE_ENTER
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import exit_lines
 
@@ -70,11 +70,11 @@ def probes(boxes) -> list:
 
 def expect(boxes, recs) -> list:
     """the model's rule: use released clears `pusedn`; a press (use, `pusedn` clear) sets it, and
-    inside a box ends the level and opens LEVEL COMPLETE"""
+    inside a box ends the level and opens LEVEL COMPLETE (P10: at its hold's first code, LEVEL_DONE_ENTER)"""
     out = []
     for use, was, x, y in recs:
         hit = use and not was and any(D.in_use_box_fixed(b, x, y) for b in boxes)
-        out += [int(bool(use)), int(hit), int(hit), LEVEL_DONE_SCR if hit else 0]
+        out += [int(bool(use)), int(hit), int(hit), LEVEL_DONE_ENTER if hit else 0]
     return out
 
 

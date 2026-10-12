@@ -59,7 +59,9 @@ STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
                       # M7 P4.1: the new held flags (strafe, fire, the number keys) -- held keys, like kb_u
                       "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4", "kb_w5",   # P9: 5
                       # M7 P6+P7: a turn key held last frame (the turn's slow first frame) -- input memory, like them
-                      "p_tnh")
+                      "p_tnh",
+                      # P10: a game is in progress (the main menu's RESUME) -- the menu's own memory, as menu_scr is
+                      "g_live")
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it
@@ -119,6 +121,9 @@ from doomfj.projcode import PERSIST as PROJ_PERSIST                             
 # scratchpad/m5_setfile.py re-attaches them through STANDALONE_SCRATCH_DECLS, as it does `lvdone` / `pusedn`; a reset
 # that restored them would forget the skill, drop a death's restart request and stop the clock.
 from doomfj.restartcode import PERSIST as GAME_PERSIST                          # noqa: E402
+# P10 (doomfj.statcode): LEVEL COMPLETE's counters -- kills, items, secrets; a reset that restored them would count
+# nothing (the game tier's alone, like the weapon)
+from doomfj.statcode import PERSIST as STAT_PERSIST                             # noqa: E402
 # M7 P6 -- INTEGRATION HOOKS (docs/gp-p67-interface.md 4.4; package D leaves them for the integrator):
 #   LOOT_PERSIST   = package B's player cells + package C's drop cells: (p_bc, p_str, p_bp, am_misl, am_cell) +
 #                    (mdrop, dr_live) -- from their modules' PERSIST tuples (lootcode.PERSIST, C's drop module's)
@@ -186,7 +191,8 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
             + HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST    # M7 P4.0 / P4.1 / P4.2a: the game tier's
             + HURT_PERSIST + PROJ_PERSIST                   # M7 P5: the player's hurt cells, the pools
             + GAME_PERSIST + LOOT_PERSIST + BARREL_PERSIST   # M7 P7 / P6: the game's cells; loot, barrels (HOOKS)
-            + p8a_persist())                                # M7 P8a: the view, the knock, the fight (HOOKS)
+            + STAT_PERSIST                                  # P10: the level's stats
+            + p8a_persist())                                # M7 P8a: the view, the knock, the fight (HOOKS) -- last
 
 
 def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
@@ -201,9 +207,10 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     # M7 P7: GAME_PERSIST's cells are NOT here -- they are standalone globals (wall_renderer.MENU_STATE_DECLS), which
     # m5_setfile adds through STANDALONE_SCRATCH_DECLS; listing them twice would declare them twice.
     # M7 P6: + LOOT_PERSIST + BARREL_PERSIST, their modules' decl lists in `cand`
-    from doomfj import barrelcode, lootcode
+    from doomfj import barrelcode, lootcode, statcode
     from doomfj.wall_renderer import BOOT_SKILL
     names = (HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST + HURT_PERSIST + PROJ_PERSIST + LOOT_PERSIST + BARREL_PERSIST
+             + STAT_PERSIST                                           # P10: the stats (statcode.decls)
              + p8a_persist())                                         # M7 P8a: the hooks at the game tier's modes
     cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START)))
             + WC.weapon_decls(WC.level_start(map_wad, mapname), WC.weapon_states(), WC.overlay_frames())
@@ -212,7 +219,8 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
             + projcode.pool_decls()
             + barrelcode.decls(World(map_wad, mapname), BOOT_SKILL)      # M7 P6: barrels, drops
             + lootcode.loot_decls(lootcode.level_start(World(map_wad, mapname)))   # M7 P6: the player's loot
-            + p8a_persisted_decls(map_wad, mapname))                               # M7 P8a: the hooks' modules
+            + p8a_persisted_decls(map_wad, mapname)                                # M7 P8a: the hooks' modules
+            + statcode.decls(World(map_wad, mapname)))                             # P10: the stats
     by = {}
     for d in cand:
         by.setdefault(decl_words(d)[0], d)

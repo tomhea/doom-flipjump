@@ -372,8 +372,9 @@ def test_both_mirrors_build_the_drawable_list_with_the_same_predicate(level):
     loose = [t for t in things if single_player(t) and THING_SPRITE.get(t.type) is not None]
     mp = [t for t in things if not single_player(t) and THING_SPRITE.get(t.type) is not None]
     # E1M1: 26 pickups (census); 226 drawable since the blue card is (M7 P2a.1); P9: the launcher and its 4 rockets are
-    # single-player too (things.SINGLE_PLAYER_EXTRA) -- 21 multiplayer-only, 231 drawable
-    assert (len(mp), len(ssot)) == (21, 231), (len(mp), len(ssot))
+    # single-player too (things.SINGLE_PLAYER_EXTRA) -- 21 multiplayer-only, 231 drawable; P10: the shotgun #41 and the
+    # chaingun #40 too -- 19 multiplayer-only, 233 drawable
+    assert (len(mp), len(ssot)) == (19, 233), (len(mp), len(ssot))
     assert [(t.x, t.y, t.type) for t in ssot] == [(t.x, t.y, t.type) for t in loose], \
         "the two predicates already disagree on the shipped art wad"
 

@@ -699,7 +699,8 @@ def scenario_list(dsim, w, card) -> list:
                 and c["drop_z_px"] >= 1})
     # ---- F5: berserk at MEDIUM
     pstr = [i for i, t in enumerate(pk) if t.type == 2023]
-    menu = [{"menu": ["esc"]}, {"menu": ["enter"]}, {"menu": ["up"]}, {"menu": ["enter"]}]
+    # P10: esc opens the menu on RESUME -- down to NEW GAME, enter (the skill screen, MEDIUM highlighted), enter
+    menu = [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
     keys5 = menu + [F] * 3 + [I] * 40 + [FIRE] * 3 + [I] * 12
     f5 = []
     wm = _world_at(gd.SK_MEDIUM)
@@ -1358,8 +1359,8 @@ def binary_scenario(gb, cells, table, run, sc, pose, setup, want) -> bool:
     def start(pr, f):
         vals = {k: int(bool(keys[f].get(n))) for n, k in H.KEYFLAG.items() if k in pr.cells}
         if f == 0:
-            vals.update({"mode": 0, "viewx": _signed(pose[0], 32), "viewy": _signed(pose[1], 32),
-                         "viewangle": pose[2], **poke})
+            vals.update({"mode": 0, "g_live": 1, "viewx": _signed(pose[0], 32),     # P10: a game in progress
+                         "viewy": _signed(pose[1], 32), "viewangle": pose[2], **poke})
         if f < len(want):
             vals.update(want[f].get("poke", {}))
         pr.write_cells(vals)
@@ -1375,7 +1376,8 @@ def binary_scenario(gb, cells, table, run, sc, pose, setup, want) -> bool:
         got = reads[f] if f < len(reads) else {}
         if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
             s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
-        pic = run.picture(fr) if fr["drawn"] == "world" else G.screen(run.orc, fr["drawn"][1], fr["drawn"][2])
+        pic = (run.picture(fr) if fr["drawn"] == "world" else
+               G.screen(run.orc, fr["drawn"][1], fr["drawn"][2], fr["live"], fr["stats"]))     # P10: live, stats
         if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):
             x_bad = (f, P.px_diff(r.frames[f], pic) if f < len(r.frames) else -1)
         if p_bad is None and (f >= len(r.palettes) or r.palettes[f] != run.orc.palette_sha(fr["pal"])):

@@ -252,14 +252,15 @@ def scenario_list(dsim, w, card) -> list:
                 "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] == 1 and c["drop_frames"] >= 1
                 and not tr[-1]["mstate"]["dr_live"]})
     # ---- D4s: NEW GAME medium, dead, use: medium's level start
-    menu_med = [{"menu": ["esc"]}, {"menu": ["enter"]}, {"menu": ["up"]}, {"menu": ["enter"]}]
+    # P10: esc opens the menu on RESUME -- down to NEW GAME, enter (the skill screen, MEDIUM highlighted), enter
+    menu_med = [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
     out.append({"name": "D4s NEW GAME medium, dead, use: the restart is medium's", "keys": menu_med + [I, U, I, I],
                 "controls": ["restart_skill"],
                 "cands": [((dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle), None, {4: kill()})],
                 "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] == 1
                 and tr[-1]["mstate"]["g_skill"] == 1})
     # ---- D5: NEW GAME after death: easy
-    menu_easy = [{"menu": ["esc"]}, {"menu": ["enter"]}, {"menu": ["up"]}, {"menu": ["up"]}, {"menu": ["enter"]}]
+    menu_easy = [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["up"]}, {"menu": ["enter"]}]
     out.append({"name": "D5 NEW GAME after death: easy's level start", "keys": [I] * 2 + menu_easy + [I] * 3,
                 "controls": ["ng_skill"],
                 "cands": [((dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle), None, {0: kill()})],

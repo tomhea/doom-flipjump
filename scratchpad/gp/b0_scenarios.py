@@ -251,7 +251,7 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
     assert not gaps, "drive reads keys these frames lack, e.g. %s" % gaps[:4]
     import gamespeed as GS
     import m2_std_gate as gate
-    mf = gate.MENU_FRAMES
+    mf = gate.POKE_LEAD                                 # P10: the probe drivers' way in (m2_std_gate.POKE_ENTER)
     sfn = setup_fn(frames[0]["run_setup"]) if inject_setup and frames else None
     before, poke = setup_poke(orc, frames[0]["run_setup"], pmode) if sfn is not None and gb is not None else ({}, {})
     cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift)
@@ -263,7 +263,7 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
         assert not missing, "the setup moves cells the probe cannot write: %s" % missing
     setup_pre = []
     per_frame = [{} for _ in range(mf)] + [fr["keys"] for fr in frames]
-    events = GS.events_for(per_frame)
+    events = gate.to_events(per_frame)                  # P10: no menu key -- the world is POKED at frame `mf`
     readback = {}
 
     def start(pr, f):
@@ -271,6 +271,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
             return
         fr = frames[f - mf]
         vals = {"viewx": fr["inj"][0], "viewy": fr["inj"][1], "viewangle": fr["inj"][2]}
+        if f == mf:
+            vals.update(gate.POKE_ENTER)                # P10: mode 0, g_live 1 -- the boot image's world
         if fr["doors"] is not None:
             d = fr["doors"]
             vals.update({"dstate": tuple(t[0] for t in d), "ddir": tuple(t[1] for t in d),
@@ -451,7 +453,7 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
     with P.binary_lock("S4v2-b0"):
         table = P.LabelTable.load(labels, names)
         gb = P.GameBinary(fjm)
-        base = gb.run(gate.MENU_FRAMES).ops           # startup + the menu frames, EXACT
+        base = gb.run(gate.POKE_LEAD).ops             # startup + the menu frames, EXACT (P10: the poke lead)
         print("b0_scenarios: %s sha256 %s | set %s (%d runs, keys %s) | startup+menu %s ops (exact)"
               % (fjm.name, gb.sha[:16], Path(doc_path).name, len(runs), S.keys_sha(doc),
                  format(base, ",")), flush=True)
@@ -725,7 +727,7 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
         r2 = drive(gb, table, orc, frames, pixel_every=50, override=bent)
         check("T2 an expectation one turn off FAILS the state check on every frame",
               not any(r2["state_ok"]), "%d/%d accepted" % (sum(r2["state_ok"]), len(r2["state_ok"])))
-        menu = gb.run(gate.MENU_FRAMES).ops
+        menu = gb.run(gate.POKE_LEAD).ops
         if recorded:
             check("T3 startup + menu measured through this driver = the recorded calibration",
                   menu == P.RECORDED_CALIBRATION, "%s" % format(menu, ","))

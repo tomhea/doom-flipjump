@@ -305,7 +305,7 @@ class MonsterPhase:
         (`_projectiles_phase`, `_barrels_phase`, `_fx_phase`; before P5 nothing spawns into the pools and the barrels
         only animate). M7 P6: and `leveltime` +1, world.tic's last step (nukage reads it; the gate calls this only on
         a frame whose level is not done -- G2). -> the tic's events (also kept as `last_tic`)"""
-        from doomfj.world import TicEvents
+        from doomfj.world import LEVELTIME_MASK, TicEvents
         w = self.world
         ws = w.ws
         if x16 is not None:
@@ -314,7 +314,7 @@ class MonsterPhase:
             ws.pangle = angle & 0xFFFFFFFF
         ev = TicEvents(0)
         w._monster_world(ev)              # M7 P6+P7 E: world.MONSTER_TICS_PER_FRAME tics, the model's own loop
-        ws.leveltime = (ws.leveltime + 1) & 0xFFFF
+        ws.leveltime = (ws.leveltime + 1) & LEVELTIME_MASK       # P10: 20 bits
         self.last_tic = ev
         return ev
 
@@ -560,9 +560,12 @@ class MonsterPhase:
         ws, gd = self.world.ws, self.gd
         fst = gd.STATE_NAMES[ws.p_flash_state]
         ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL],
-                gd.WP_MISSILE: ws.p_ammo[gd.AM_MISL]}.get(ws.p_ready)             # P9: the launcher's rockets
-        return {"weapon": WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
-                "flash": None if fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
+                gd.WP_MISSILE: ws.p_ammo[gd.AM_MISL],                             # P9: the launcher's rockets
+                gd.WP_CHAINGUN: ws.p_ammo[gd.AM_CLIP]}.get(ws.p_ready)            # P10: the chaingun's bullets
+        from doomfj.hud import NO_PSPRITE
+        dead = bool(ws.p_dead)                          # P10: a dead player draws no weapon (hudcode's `dead_cell`)
+        return {"weapon": NO_PSPRITE if dead else WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
+                "flash": None if dead or fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
                 "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,
                            "owned": arms_owned(ws.p_owned)}}            # P9: DOOM's six ARMS digits 2..7
 
@@ -712,13 +715,19 @@ class MonsterPhase:
                 "bar_hp": tuple(v & 0xFF for v in ws.bar_health), "bar_solid": tuple(ws.bar_solid),
                 "rng_wd": ws.rng_world}
 
-    def game_state(self) -> Dict[str, int]:
-        """the game's cells: lvtime the level time (4 nibbles, 16 bits, wraps; +1 at the end of every tic that
+    def game_state(self) -> Dict[str, object]:
+        """the game's cells: lvtime the level time (P10: 5 nibbles, 20 bits, wraps; +1 at the end of every tic that
         ran), g_rs the restart request (1 nibble, 0/1), g_skill the world's skill as the SKILLS index (1 nibble:
-        0 easy, 1 medium, 2 hard -- wall_renderer.SKILLS, what the menu's `menu_sel` numbers)"""
+        0 easy, 1 medium, 2 hard -- wall_renderer.SKILLS, what the menu's `menu_sel` numbers).
+        P10 (doomfj.statcode): LEVEL COMPLETE's counters -- st_kill / st_item (2 nibbles: p_killcount / p_itemcount),
+        st_secn (1: p_secretcount), st_secm (a nibble a secret sector, 0/1: p_secret; a one-sector map's reads as a
+        scalar, as every one-element probe cell does)"""
         from doomfj.wall_renderer import SKILLS
         ws = self.world.ws
-        return {"lvtime": ws.leveltime, "g_rs": ws.g_restart, "g_skill": SKILLS.index(ws.skill)}
+        secm = tuple(ws.p_secret)
+        return {"lvtime": ws.leveltime, "g_rs": ws.g_restart, "g_skill": SKILLS.index(ws.skill),
+                "st_kill": ws.p_killcount, "st_item": ws.p_itemcount, "st_secn": ws.p_secretcount,
+                "st_secm": secm if len(secm) > 1 else secm[0]}
 
     def palette(self) -> int:
         """the PLAYPAL index this world frame is shown with (combat.palette_index: ST_doPaletteStuff)"""

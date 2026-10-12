@@ -40,7 +40,9 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "bar_st", "bar_ti", "bar_hp", "bar_solid", "rng_wd", "lvtime", "g_rs", "g_skill", "thvis",
                "p_atk", "pj_src",                                                   # P7: the killer, the shooters
                # P8a (docs/gp-final-plan.md 4.1): P6+P7's turn flag (#123 F1), the sink, knockback's, the blast source
-               "p_tnh", "p_vd", "p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z", "bar_src")
+               "p_tnh", "p_vd", "p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z", "bar_src",
+               # P10 (docs/gp-p10-plan.md): a game in progress (the menu's RESUME), and LEVEL COMPLETE's counters
+               "g_live", "st_kill", "st_item", "st_secn", "st_secm")
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
@@ -79,15 +81,16 @@ MONSTER_NAMES = {"mon_state", "mon_tics", "mon_facing", "mon_active",
 
 
 def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None,
-                 movers=None, mover_order=None, monsters=None) -> dict:
+                 movers=None, mover_order=None, monsters=None, live=None) -> dict:
     """the oracle's state after a frame, in the cells' own units: the view as signed 16.16, the
     angle's 32 bits, and each door cell a tuple in door order (`doors`: the per-door
     (state, direction, sub-step, timer) tuples, sorted by sector as the binary numbers them).
     M7 P2a.1: `phase` = a doors.DoorPhase state (its req, card and fired), `order` its door order.
     M7 P2a.2: `exit_` = (lvdone, pusedn). M7 P2b: `movers` = a movers.MoverPhase state (its lifts,
-    requests and switch), `mover_order` its lift order"""
+    requests and switch), `mover_order` its lift order. P10: `live` = menu.menu_step's (`g_live`), compared when given
+    (a gate that does not step it, none)"""
     doors = list(doors)
-    extra = {}
+    extra = {} if live is None else {"g_live": live}
     if phase is not None:
         _ds, fired, req, card = phase
         extra = {"dreq": tuple(int(si in req) for si in order), "pcard": card,

@@ -12,6 +12,10 @@ A few records name no slot (dm_id 0).
 R9: no pain draw, `< 0` instead of `<= 0` for the death, the threshold reset when it is not 0, the see switch from a
 state other than the spawn state, `>=` for the reach, the death without its tics roll, bullets without their 2048
 reach (the aim window's tz alone), and bullets reading the caller's stale `dm_reach` must each part.
+
+P10 (doomfj.statcode, LEVEL COMPLETE's KILLS): dm_go is the game tier's (`stats=True`) -- a kill counts in `st_kill`,
+as combat._kill_monster counts `p_killcount`; every record pokes the count first and prints it after. R9: the count
+gone.
 """
 import random
 from pathlib import Path
@@ -106,14 +110,21 @@ def _apply(w, rec, ev):
 
 def _row(w, m) -> str:
     ws, n = w.ws, w.layout.nmon
-    return "".join("".join("%0*x" % (nib, getattr(ws, f)[s] & (16 ** nib - 1)) for f, nib in CELLS)
-                   for s in (m, (m + 1) % n))
+    return ("".join("".join("%0*x" % (nib, getattr(ws, f)[s] & (16 ** nib - 1)) for f, nib in CELLS)
+                    for s in (m, (m + 1) % n))
+            + "%02x" % ws.p_killcount)                                  # P10: st_kill
+
+
+def _kills_before(k) -> int:
+    """P10: the count each record pokes before its shot"""
+    return (7 * k) % 90
 
 
 def _expected(records) -> bytes:
     w = _world()
     lines = []
-    for rec in records:
+    for k, rec in enumerate(records):
+        w.ws.p_killcount = _kills_before(k)
         _apply(w, rec, TicEvents(0))
         lines.append(_row(w, rec[0] if rec[0] is not None else 0))
     return ("\n".join(lines) + "\n").encode()
@@ -129,19 +140,21 @@ MUTANTS = {
     "notics": ("    hex.sub 1, dm_ti, dm_rr\n", ""),                                 # the death's tics roll unapplied
     "nobulletreach": ("    hex.set 4, dm_r4, %d\n" % MISSILERANGE_U, "    hex.set 4, dm_r4, 65535\n"),   # tz only
     "stalereach": ("    hex.if0 1, dm_melee, dm_far\n", ""),                         # bullets read the stale dm_reach
+    "nokillcount": ("    hex.inc 2, st_kill\n", ""),                                    # P10: the kill not counted
 }
 
 
 def _program(w, mut=None):
     n, schema, ws = w.layout.nmon, w.schema, w.ws
-    dp = DC.damage_parts(w, slot_rt=list(range(n)), boot_skill=ws.skill)
+    dp = DC.damage_parts(w, slot_rt=list(range(n)), boot_skill=ws.skill, stats=True)    # P10: the game tier's
     vals = {f: list(getattr(ws, f)[:n]) for f in MC.P31_FIELDS + MC.P32A_FIELDS + MC.P32B_FIELDS}
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
              + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n)
              + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, [0] * n)
              + MC.P32A_SCRATCH + dp["decls"]
              + ["%s: hex.vec %d" % cn for cn in DM_CELLS]                 # the caller's (weaponcode.shot_decls)
-             + ["viewx: hex.vec 8", "viewy: hex.vec 8", "thpos_rt: hex.vec %d" % (16 * n)])
+             + ["viewx: hex.vec 8", "viewy: hex.vec 8", "thpos_rt: hex.vec %d" % (16 * n)]
+             + ["st_kill: hex.vec 2"])                                   # P10: statcode's, the game tier's
     text = "\n".join(MC.dist_leaf_lines() + dp["lines"] + dp["tables"]) + "\n"
     if mut:
         old, new = MUTANTS[mut]
@@ -157,8 +170,9 @@ def _build(tmp_path, name, mut=None):
     body = ["stl.startup_and_init_all"]
     nib = {f: MC.cell_nibbles(w.schema, f) for f, _ in CELLS}
     assert all(nib[f] == k for f, k in CELLS), nib
-    for m, pokes, (x, y), (px16, py16), dmg, melee, reach in records:
-        body += ["hex.set 8, viewx, %d" % (px16 & M32), "hex.set 8, viewy, %d" % (py16 & M32)]
+    for k, (m, pokes, (x, y), (px16, py16), dmg, melee, reach) in enumerate(records):
+        body += ["hex.set 8, viewx, %d" % (px16 & M32), "hex.set 8, viewy, %d" % (py16 & M32),
+                 "hex.set 2, st_kill, %d" % _kills_before(k)]                  # P10
         if m is None:
             body += ["hex.zero 2, dm_id"]
         else:
@@ -171,8 +185,8 @@ def _build(tmp_path, name, mut=None):
                  "stl.fcall dm_go, dm_ret"]
         mm = m if m is not None else 0
         for s in (mm, (mm + 1) % n):
-            body += ["hex.print_as_digit %d, %s + %d*dw, 0" % (k, f, k * s) for f, k in CELLS]
-        body += ["stl.output 10"]
+            body += ["hex.print_as_digit %d, %s + %d*dw, 0" % (nb, f, nb * s) for f, nb in CELLS]
+        body += ["hex.print_as_digit 2, st_kill, 0", "stl.output 10"]          # P10
     body += ["stl.loop"]
     decls, text = _program(w, mut)
     prog = "\n".join(body + decls + [text]) + "\n"

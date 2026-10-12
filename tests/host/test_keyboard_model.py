@@ -31,10 +31,23 @@ def test_one_event_a_poll_spills_a_burst_into_the_next_frame():
 
 def test_the_menu_events_and_the_names():
     fk = KB.frame_keys([(0, True, 0x0D), (1, False, 0x0D), (2, True, FWD), (3, False, FWD)], 2)
-    assert fk[0].menu == {"enter", "up"} and fk[1].menu == frozenset()
+    assert fk[0].menu == {"enter", "up", "any"} and fk[1].menu == frozenset()     # P10: "any" with every down edge
     assert fk[0].now["f"] and not fk[0].held["f"]
     assert KB.named(fk[0].now)["forward"] is True and set(KB.named(fk[0].now)) == set(KB.KEY_NAME.values())
     assert set(KB.BINDING.values()) == set(KB.HELD_KEYS) and not set(KB.BINDING) & {0x0D, 0x1B, 0x68}
     assert set(MENU_KEYS) - set(KB.BINDING) == {0x0D, 0x1B, 0x68}     # the event-only keys: enter, esc, h
     assert KB.now_cell("w1") == "kb_now + 8*dw" and KB.NOW_DECL == "kb_now: hex.vec 13"      # P9: + w5
     assert KB.now_cell("w5") == "kb_now + 12*dw" and KB.BINDING[0x35] == "w5"                # P9: '5', the launcher
+
+
+def test_any_key_is_every_down_edge_and_only_down_edges():
+    """P10 (LEVEL COMPLETE's "press any key"): "any" is in a frame's menu events whenever ANY key went down in its polls
+    -- the keys the menu hears, the held keys, and keys the poll's table discards ('q', 0x71) -- and never for an up
+    edge alone (input.fj's `ev_any`, set before the table)"""
+    for code in (0x0D, 0x1B, 0x68, FWD, FIRE, 0x71, 0x20):
+        fk = KB.frame_keys([(0, True, code), (P + 1, False, code)], 2)
+        assert "any" in fk[0].menu and "any" not in fk[1].menu, hex(code)
+    fk = KB.frame_keys([(0, True, 0x71), (1, False, 0x71)], 1)
+    assert fk[0].menu == {"any"}, "a discarded key is no menu key, but it is a key"
+    fk = KB.frame_keys([(P + 2, False, FWD)], 2)
+    assert "any" not in fk[0].menu and "any" not in fk[1].menu, "an up edge alone is not a press"

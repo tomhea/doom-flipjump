@@ -379,7 +379,8 @@ def test_views_aim_vis_and_drop_rows():
         want += [0 if di in absent else 1 for di in mv.rt_pickups]
         assert list(mv.vis_state(ph)["thvis"]) == want
     ph.reset(gd.SK_HARD)
-    assert len(mv.vis_state(ph)["thvis"]) == mv.nvis == 120 and not mv.hidden(ph)    # P9: + the launcher, 4 rockets
+    assert len(mv.vis_state(ph)["thvis"]) == mv.nvis == 122 and not mv.hidden(ph)    # P9: + the launcher, 4 rockets
+    #                                                                       P10: + the shotgun (#41), the chaingun (#40)
     # a pickup taken and a barrel gone: removed, and their slots 0
     i = next(i for i, t in enumerate(w.pickup_things) if t.flags & gd.skill_bit(gd.SK_HARD) and mv.pdi[i] in mv.vis_slots)
     w.ws.pickup_taken[i] = 1
@@ -392,7 +393,7 @@ def test_views_aim_vis_and_drop_rows():
     w.ws.mon_drop[m] = 1
     rt = mv.rt_state(ph)
     k = mv.nrt + 10
-    assert len(rt["thpos_rt"]) == mv.nrows(ph) == mv.nrt + 10 + drop_rows(w) == 103
+    assert len(rt["thpos_rt"]) == mv.nrows(ph) == mv.nrt + 10 + drop_rows(w) == 104      # P10: + a runtime pickup
     assert rt["thpos_rt"][k] == ((w.ws.mon_x[m] << 16) & 0xFFFFFFFF) | (((w.ws.mon_y[m] << 16) & 0xFFFFFFFF) << 32)
     assert rt["thss_rt"][k] == w.ws.mon_leaf[m] and rt["thpos_rt"][k + 1] == 0
     assert ph.mobiles()[-1] == (w.ws.mon_x[m], w.ws.mon_y[m], "CLIPA0", 0)

@@ -2010,3 +2010,41 @@ the 20M target (D1) in `gamespeed.SPEED_TARGET` (6dea24d), `docs/ship-gate.md` a
 
 **Builds:** blocked54 r0 died silently in its LAST pass (rc 127, no traceback) beside another 7-process workload with
 ~3 GB free (`blocked54_build_r0_died.log`); the rerun hit the counts cache (r0's recount: 5,602 s) and built in 9,993 s.
+
+## P10 the owner's second play-test round (class F) -- declared 2026-10-12, before the build
+
+**What** (the owner's answers of 2026-10-12 to the blocked54 play-test; ONE rung on `p10-playtest2`, on blocked54's
+source; `docs/gp-p10-plan.md`):
+- P0: the held turn 960 -> 1280 a frame (DOOM's fast turn); a dead player's weapon and flash hidden; the shotgun (#41)
+  and the CHAINGUN (#40, a new weapon: key 4, A_FireCGun) join the single-player things (52caa93);
+- M: RESUME on the main menu while a game is in progress (`g_live`), the skill highlight boots at MEDIUM, LEVEL
+  COMPLETE shows KILLS / ITEMS / SECRETS / TIME and any key returns to the boot menu (52caa93);
+- T: the exit switch, the other switches, the doors and the blue doors in their own tones (52caa93);
+- G2 / G8 / G1 / G3: a column's base plane past an off-screen boundary (nukage at a pool's edge), the sky behind a
+  stacked upper piece, the nearer ledges clip a sprite, a third fragment slot (1d2fd54);
+- the frame-rate cap: the program sends flipjump's 0x14 [20] at boot (tomhea/flipjump#368, merged 0a24613).
+
+**Budget** (MEASURED where a gate measured it, else estimated):
+- **ops**: the visual tier's deg viewpoints (edge gate, unpinned) +96K .. +1.44M a frame (+0.3% .. +5.7%: G1's clip
+  windows, G3's composited background windows, G2's bases); the game tier adds the wall tones' two-texel canvases and
+  the menus' idle checks (small). gamespeed's tours MOVED (the turn and the planner's gen 3b: deeper into the level), so
+  the binding is not like-for-like with blocked54's 12,498,447 -- recorded, judged only against 22M.
+- **size**: ~+0.5M words estimated (G3 inlines `emit_region` three times at each of the four background calls; the
+  chaingun's code, overlays and sprites; LEVEL COMPLETE's digits) -> ~38.8% of 2^27 (<= 42%).
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. **CAP-22** <= 22,000,000 on the frozen combat set, every frame of every run state- and pixel-exact. v8's replay PARTS
+   (F3: every run's poses -- the faster turn; `p10_v8_validate.log`), so v9 -- v8's 11 regions re-planned at the P10 model, keys `2fdfd6383a599b8e`,
+   every criterion PASS (`p10_v9_plan.log`) -- is measured by B0 on this build and frozen ONLY by the owner.
+2. **Size** <= 42% of 2^27.
+3. **Every gate exact**: m2_std_gate, m3_gate (RESUME, LEVEL COMPLETE, any key), p2a, hurt, fight (+ CG1, the chaingun),
+   die, B0 on v9 (pixels every frame); their selftests; deg_gate byte-exact, its op counts the edge gate's (31,756,151 /
+   17,625,921 / 30,913,683 / 28,696,539 -- the renderer changed: G2 / G8 / G1 / G3).
+4. **Host and fj**: tests/host green after the re-key; the P10 harnesses every mutant caught; ONE full `tests/fj` at the
+   build's commit.
+5. **Stress (O-E1)**: any frame over 44M, or a scenario averaging over 30M, attributed and explained before the ship.
+6. **Housekeeping**: pinreport with `heat_blocked27_p10` (`ts_piece_store` 13 -> 15 parameters and steps_splice_c's
+   `lines_region_ids_c` re-keyed; G3's `emit_region_c` NOT -- the four background calls' sites moved under it and lose
+   their heat order: a speed question, msframe's); the restore sets re-keyed WITHOUT P9's label table
+   (`ca_rekey_newspan.py`: P9's table did not survive its worktree); gamespeed's routes re-planned and its trail on this
+   build; msframe recorded (class F; ~90 ms a tripwire to explain).

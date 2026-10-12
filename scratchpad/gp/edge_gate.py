@@ -50,8 +50,9 @@ art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 scene = build_scene(mw, mw, "E1M1")
 sp = spawn_state(mw, "E1M1")
 spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
-KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True, near_steps=True,
-          stack_steps=True, things=True, sprite_wad=art, degrade=True, sky=True, bbox_cull=True)
+# the visual tier's picture keywords; the five every emitter forces are named AT the call (oracle() below), where
+# tests/host/test_oracle_calls_in_step.py can see them
+KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True, things=True, sprite_wad=art)
 
 
 def deg(d):
@@ -87,7 +88,8 @@ VPS = [
 
 def oracle(model, vx, vy, va, **extra):
     return model.render_wall_frame(SimState((vx << 16) & 0xFFFFFFFF, (vy << 16) & 0xFFFFFFFF, va, "E1M1"),
-                                   scene, **KW, **extra)
+                                   scene, sky=True, near_steps=True, stack_steps=True, bbox_cull=True, degrade=True,
+                                   **KW, **extra)
 
 
 def model_without(lines, name):

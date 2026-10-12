@@ -331,6 +331,14 @@ class StreamScreen(InMemoryScreen):
                     raise IODeviceException("collines PARTIAL DITTO for column 0 (no left neighbour to copy)")
                 self._cl_tok = byte                    # the row byte follows
                 return
+            # P10 (blocked55's gamespeed crash): the DEVICE refuses a run past the screen or behind the cursor
+            # (flipjump ScreenIO._handle_collines_byte), and so must this decoder: it moved the cursor BACK, so a
+            # stream the device refuses still decoded here, and the edge gate could never have seen one
+            if byte > self.height:
+                raise IODeviceException(f"collines run ends at row {byte}, past the {self.height}-row screen")
+            if byte < self._cl_y:
+                raise IODeviceException(f"collines run ends at row {byte}, behind the fill cursor at {self._cl_y}"
+                                        " (the cursor only moves forward)")
             self._cl_pend = byte                       # y2, awaiting its colour
             return
         y2, colour = self._cl_pend, byte

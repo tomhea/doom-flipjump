@@ -63,6 +63,32 @@ def test_column_major_run_stream_flush_per_column():
     assert screen.frame_count == 2
 
 
+# P10 (blocked55's gamespeed crash, 2026-10-13): a 0x0B pair whose y2 is BEHIND the column's fill cursor, or past
+# the screen, is refused by the device (flipjump ScreenIO._handle_collines_byte). This decoder moved its cursor back
+# instead, so the fj harnesses decoded a stream the device refuses -- the edge gate could never have caught the
+# window walker's backward run. A pair AT the cursor (zero rows) stays legal.
+def _collines(screen, *cols):
+    _feed(screen, _init_stream_bytes(2, 3, 8, 16, 0))
+    _feed(screen, bytes([0x0B]))
+    for x, pairs in cols:
+        _feed(screen, bytes([x, *pairs, 0xFF]))
+    _feed(screen, bytes([0xFF]))
+
+
+def test_collines_decodes_runs_and_a_zero_length_pair():
+    screen = StreamScreen()
+    _collines(screen, (0, [2, 5, 2, 6, 3, 7]), (1, [3, 9]))
+    assert screen.pixel_indices == [5, 9, 5, 9, 7, 9]
+
+
+@pytest.mark.parametrize("pairs, words", [([2, 5, 1, 6], "behind the fill cursor at 2"),
+                                          ([4, 5], "past the 3-row screen")])
+def test_collines_refuses_what_the_device_refuses(pairs, words):
+    from flipjump.utils.exceptions import IODeviceException
+    with pytest.raises(IODeviceException, match=words):
+        _collines(StreamScreen(), (0, pairs))
+
+
 def test_stream_reverts_to_normal_command_parsing_after_the_frame_fills():
     """After exactly width*height pixels stream in, the next bytes are parsed as a NORMAL command
     (e.g. another begin_frame_stream for a second frame), not more stream bytes."""

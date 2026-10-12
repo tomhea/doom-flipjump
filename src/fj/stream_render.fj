@@ -970,8 +970,15 @@ ns stream {
     // ptr, kept) on a working copy, because a column calls it twice -- above and below the near
     // fragment -- and each call starts at the block's first pair with the full arm.
     def frag_runs_win ybase, smidx, ptr0, wlo, whi, ridx \
-            @ sloop, shave, spos, semit, snext, sfin, sclamp, send \
+            @ walk, sloop, shave, spos, semit, snext, sfin, sclamp, send \
             < gps_wptr, gps_rel, gps_yabs, gps_wlo4, gps_whi4 {
+        // P10 (blocked55's gamespeed run 0, frame 31): an EMPTY window emits nothing. Since G1 a fragment's derived
+        // end is cut by its clip window (frag_clamp), so B's runs can pass sy2B, and B's window below A,
+        // [max(sy2A, sy1B), sy2B), can be empty with its low end past sy2B -- the cursor's row. The walk then clamped
+        // the first run past wlo to whi, BEHIND the cursor, which the device refuses ("collines run ends at row 56,
+        // behind the fill cursor at 58": A fully hidden at [58, 58), B cut to [55, 56) by the same ledge).
+        hex.cmp 2, wlo, whi, walk, send, send
+      walk:
         hex.mov w/4, gps_wptr, ptr0
         hex.zero 2, gps_wlo4 + 2*dw             // the window, widened: the row math is 4-nibble
         hex.mov 2, gps_wlo4, wlo

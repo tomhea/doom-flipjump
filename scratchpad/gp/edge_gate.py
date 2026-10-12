@@ -3,7 +3,9 @@ floor or ceiling edge OFF the screen (G2: the column BASES, frame.ts_base_store 
 lines_col_plane_ids), a sky region behind a stacked piece (G8: frame.lines_piece_sky / lines_region_ids_c) and a
 sprite behind a nearer ledge (G1: frame.rec_clip_read, stream.frag_clip / frag_clamp / frag_runs_cut) and three
 sprites in one column (G3: the third fragment slot, frame.thing_record_body / lines_spr_load, stream.emit_region_c),
-plus deg_gate's four viewpoints.
+P11's EXIT sign (doomfj.exitsign: a virtual thing, a built picture, the actor class), plus deg_gate's four viewpoints.
+P10 (b): the picture is decoded by tests/fj/stream_screen.StreamScreen, which now REFUSES a run behind the cursor
+as the device does (blocked55's gamespeed crash went through it unseen).
 
     python scratchpad/gp/edge_gate.py            # ~20 min: the visual tier's emission + assembly dominate
 
@@ -78,6 +80,11 @@ VPS = [
     # G3: three map things in one column (g3_find: the third slot moves 144 / 121 px here)
     (2198, -159, 0xFFD64759, "G3"),
     (639, 271, 0x20000000, "G3"),
+    # P11 (a): the EXIT sign (doomfj.exitsign) over the exit alcove, from the exit room (this tier has no actors rule:
+    # where the room's monster stands before the sign it B-gates it, as it would a monster -- these two keep it in
+    # view: the sign moves 430 / 762 px of them)
+    (-300, 1296, 0x80000000, "P11a"),
+    (-300, 1340, deg(210), "P11a"),
     # deg_gate's four
     (664, 291, 0x18000000, "deg"),
     (1272, -724, 1073741824, "deg"),
@@ -152,6 +159,17 @@ for vx, vy, va, kinds in VPS:
         plain = oracle(rm3, vx, vy, va)
         moved = sum(1 for a, b in zip(plain, want) if a != b)
         print("R9 G3 (%d,%d,%#x): %d px the third fragment slot moves  %s"
+              % (vx, vy, va, moved, "ok" if moved else "!! NOT EXERCISED"), flush=True)
+        ok &= moved > 0
+    if "P11a" in kinds:
+        from doomfj import exitsign as _ES
+        _keep, _ES.EXIT_SIGNS = _ES.EXIT_SIGNS, {}
+        try:
+            plain = oracle(ReferenceModel(cfg), vx, vy, va)
+        finally:
+            _ES.EXIT_SIGNS = _keep
+        moved = sum(1 for a, b in zip(plain, want) if a != b)
+        print("R9 P11a (%d,%d,%#x): %d px the EXIT sign moves  %s"
               % (vx, vy, va, moved, "ok" if moved else "!! NOT EXERCISED"), flush=True)
         ok &= moved > 0
     if "G8" in kinds:

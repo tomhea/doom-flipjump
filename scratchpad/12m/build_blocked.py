@@ -81,8 +81,14 @@ def _load_counts(path, a):
         print("  counts cache unreadable (%s) -- recounting" % exc, flush=True)
         return None
     if blob.get("sig") != _counts_sig(a):
-        print("  counts cache is for a DIFFERENT program -- recounting", flush=True)
-        return None
+        if not getattr(a, "counts_trust", False):
+            print("  counts cache is for a DIFFERENT program -- recounting", flush=True)
+            return None
+        # ONE PASS (2026-10-13): the signature hashes every emitter source, so a change that moves no table (the
+        # one-pass reset itself) misses the cache. --counts-trust reuses it anyway: stale counts are SAFE -- a table
+        # past its group's counted slots is declined and stays inline -- and the build reports the declines.
+        print("  counts cache is for a DIFFERENT program -- TRUSTED anyway (--counts-trust; its sig %s, ours %s)"
+              % (blob.get("sig", {}).get("src"), _counts_sig(a)["src"]), flush=True)
     frozen = {
         "counts": blob["counts"],
         "widths": {g: int(w) for g, w in blob["widths"].items()},
@@ -210,6 +216,10 @@ def main():
                     help="price the configuration and exit without assembling. With "
                          "--counts-cache populated this costs SECONDS, so a spread/slot/span grid "
                          "can be searched before spending a 31-minute build on it.")
+    ap.add_argument("--counts-trust", action="store_true",
+                    help="use --counts-cache even when its signature names a different program (the one-pass build's "
+                         "validation reuses blocked55's counts: its tables are unchanged). Stale counts are safe -- "
+                         "an uncounted table is declined and stays inline.")
     ap.add_argument("--counts-cache", default=None,
                     help="reuse the counting assembly's counts/widths/histogram from this file "
                          "(and write it when absent). The counting pass costs ~430s and depends "

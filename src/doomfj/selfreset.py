@@ -504,3 +504,254 @@ def verify_values_unchanged(restore_set_path, labels, get_word_1, get_word_2, li
         if get_word_1(x) != get_word_2(x):
             bad.append(x)
     return bad
+
+
+# ==============================================================================================
+# THE ONE-PASS RESET (the owner's design, 2026-10-10; built 2026-10-13)
+# ==============================================================================================
+# Every label of the restore set is a GLOBAL now (M1: zero @-local keys, 18/18 macros hoisted), so the
+# reset can name its cells by LABEL instead of by an address only a first assembly knows -- which is
+# all the second pass was for. Each registered cell is DECLARED ZERO (`name: hex.vec N`) and its
+# initial value moves into the reset as `hex.set N, name, V`; the reset runs once at BOOT (the entry's
+# jump to __hot_end goes through it) and after every frame. One assembly, no label capture, no re-key:
+# a label's extent is its own declaration, and the values are the declarations' own constants.
+# LUTs are out by construction: only the registered names are reset.
+_ONE_DECL = re.compile(r"^([A-Za-z_]\w*):\s*(.*)$")
+_VEC = re.compile(r"^(hex|bit)\.vec\s+(.+?)\s*$")
+_CELL = re.compile(r"^;\s*(.+?)\s*\*\s*dw$")
+
+
+def _strip_comment(s: str) -> str:
+    return s.split("//")[0].strip()
+
+
+def _int_expr(expr: str):
+    """an int literal or an expression in w / dw only; None when it needs a label (the assembler's)"""
+    e = expr.strip()
+    try:
+        return int(e, 0)
+    except ValueError:
+        pass
+    try:
+        return int(eval(e, {"__builtins__": {}}, {"w": W, "dw": DW}))
+    except Exception:
+        return None
+
+
+def _split_size_value(body: str):
+    """`N[, V]` -> (cells, value_text) with value_text "0" when absent"""
+    parts = body.split(",", 1)
+    cells = _int_expr(parts[0])
+    assert cells is not None and cells > 0, "one-pass reset: an unreadable size %r" % body
+    return cells, (parts[1].strip() if len(parts) > 1 else "0")
+
+
+def scan_declarations(files, wanted) -> dict:
+    """name -> {"file", "line", "kind", "cells", "values"} for every name of `wanted` the files declare.
+
+    kind "vec":   `name: hex.vec N[, V]` / `name: bit.vec N`  -- values = [V text] (one value over N cells)
+    kind "cells": `name:` then raw `;V * dw` lines            -- values = [V text per cell]
+    kind "rows":  `name:` then `hex.vec K, V` lines           -- values = [(K, V text) per row]
+    A name declared twice, or a declaration this scanner cannot read, is a REFUSAL (a misread extent is a
+    hole, and a hole hangs the next frame)."""
+    found = {}
+    for f in files:
+        lines = Path(f).read_text(encoding="utf-8").split("\n")
+        for i, raw in enumerate(lines):
+            m = _ONE_DECL.match(raw.strip())
+            if not m or m.group(1) not in wanted:
+                continue
+            name, rest = m.group(1), _strip_comment(m.group(2))
+            assert name not in found, ("one-pass reset: %r is declared twice (%s:%d and %s:%d)"
+                                       % (name, found[name]["file"], found[name]["line"], f, i + 1))
+            if rest:
+                v = _VEC.match(rest)
+                assert v, "one-pass reset: %s:%d declares %r as %r, not a hex/bit vec" % (f, i + 1, name, rest)
+                cells, value = _split_size_value(v.group(2))
+                assert v.group(1) == "hex" or value == "0", (
+                    "one-pass reset: %r is a bit.vec with an initial value -- not supported" % name)
+                found[name] = {"file": str(f), "line": i + 1, "kind": "vec", "vec": v.group(1),
+                               "cells": cells, "values": [value]}
+                continue
+            # a bare label: its cells follow, one per line, until a line that is not one
+            j, cells_v, rows_v = i + 1, [], []
+            while j < len(lines):
+                s = _strip_comment(lines[j])
+                c = _CELL.match(s)
+                r = _VEC.match(s) if not c else None
+                if c and not rows_v:
+                    cells_v.append(c.group(1))
+                elif r and r.group(1) == "hex" and not cells_v:
+                    k, value = _split_size_value(r.group(2))
+                    rows_v.append((k, value))
+                else:
+                    break
+                j += 1
+            assert cells_v or rows_v, "one-pass reset: %s:%d -- %r declares no cells" % (f, i + 1, name)
+            if cells_v:
+                found[name] = {"file": str(f), "line": i + 1, "kind": "cells", "cells": len(cells_v),
+                               "values": cells_v, "first": i + 2}
+            else:
+                found[name] = {"file": str(f), "line": i + 1, "kind": "rows",
+                               "cells": sum(k for k, _v in rows_v), "values": rows_v, "first": i + 2}
+    return found
+
+
+def _drop_value(text: str, value: str) -> str:
+    """`... hex.vec N, V` -> `... hex.vec N` on one declaration line (V exactly as declared)"""
+    head, sep, tail = text.partition("//")
+    m = re.match(r"^(.*?hex\.vec\s+[^,]+?)\s*,\s*" + re.escape(value) + r"\s*$", head.rstrip())
+    assert m, "one-pass reset: cannot declare %r zero in %r" % (value, text)
+    return m.group(1) + ((" " + sep + tail) if sep else "")
+
+
+def _zero_cell(text: str, value: str) -> str:
+    """`;V * dw` -> `;0 * dw` on one raw-cell line"""
+    head, sep, tail = text.partition("//")
+    m = re.match(r"^(\s*;\s*)" + re.escape(value) + r"(\s*\*\s*dw\s*)$", head.rstrip())
+    assert m, "one-pass reset: cannot declare cell %r zero in %r" % (value, text)
+    return m.group(1) + "0" + m.group(2) + ((" " + sep + tail) if sep else "")
+
+
+def _nibbles(value: str, cells: int):
+    """the per-cell values of an N-cell constant, low cell first; None for a label-valued constant"""
+    iv = _int_expr(value)
+    if iv is None:
+        return None
+    assert 0 <= iv < 16 ** cells, "one-pass reset: %s does not fit %d cells" % (value, cells)
+    return [(iv >> (4 * k)) & 15 for k in range(cells)]
+
+
+def registered_reset_names(restore_set_path, cfg, standalone: bool) -> set:
+    """THE REGISTRY the one-pass reset sets: the tier's restore-set NAMES (no offsets: a label's extent is its
+    own declaration) plus every scratch global the emitter declares -- `collision.CHECK_SCRATCH_DECLS`,
+    `wall_renderer.hoisted_scratch_decls(cfg)` and, standalone, `STANDALONE_SCRATCH_DECLS` -- which is what
+    scratchpad/m1_add_globals.py and m5_setfile.py re-attached by hand after every re-key. The standalone tier
+    has no wire, so no `wmagic` (m5_setfile's EXPECTED_GONE)."""
+    from doomfj.collision import CHECK_SCRATCH_DECLS
+    from doomfj.wall_renderer import STANDALONE_SCRATCH_DECLS, hoisted_scratch_decls
+    doc = json.load(gzip.open(restore_set_path, "rt", encoding="utf-8"))
+    names = {e[0] for e in doc["entries"]}
+    decls = list(CHECK_SCRATCH_DECLS) + list(hoisted_scratch_decls(cfg))
+    if standalone:
+        decls += list(STANDALONE_SCRATCH_DECLS)
+        names.discard("wmagic")
+    return names | {decl_words(d)[0] for d in decls}
+
+
+def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1", persist=()):
+    """THE ONE-PASS RESET: write <map>_07_reset.fj by LABEL, declare the registered cells ZERO, route the
+    boot through the reset, and patch the frame tail into the loop -- before the program's ONE assembly.
+
+    `files`: the emitted program parts (where the registered labels are declared). `reset_names`: the
+    registered labels (the tier's restore-set names); `persist` leaves program state alone (the
+    standalone tier's world), as emit_reset_part does. Byte arrays (BYTE_ARRAY_NAMES) are cleared by
+    m1.zerobyte over their REACHABLE cells (sshead nss, pclm / sfflag VIEW_W), checked against their
+    declared extent.
+
+    Returns (part_path, nibble_cells, byte_cells, plan). `plan` is the reset's whole content: (name,
+    cell_offset, value) per nibble cell -- value an int, or the label expression's text with the cell's
+    shift for a label-valued constant -- and (name, cell_offset, "byte") per byte cell. It is what the
+    one-time equivalence check compares with the two-pass reset of the same source."""
+    gen = Path(gen)
+    files = [Path(f) for f in files]
+    persist = tuple(persist)
+    names = sorted(set(reset_names) - set(persist))
+    decls = scan_declarations(files, set(names))
+    missing = sorted(set(names) - set(decls))
+    assert not missing, ("one-pass reset: %d registered labels have no declaration in the emitted program, e.g. "
+                         "%s -- a name the program lost is a refusal, never a skip" % (len(missing), missing[:5]))
+    expect_bytes = {"sshead": nss, "pclm": view_w, "sfflag": view_w}
+    texts = {f: f.read_text(encoding="utf-8").split("\n") for f in files}
+    n_lines = {f: len(t) for f, t in texts.items()}
+    body, byte_lines, plan, n_nib, n_byte = [], [], [], 0, 0
+    for name in sorted(names, key=lambda n: (decls[n]["file"], decls[n]["line"])):
+        d = decls[name]
+        f = Path(d["file"])
+        if name in BYTE_ARRAY_NAMES:
+            n = expect_bytes[name]
+            assert d["cells"] == n * _DECLARED_RATIO[name], (
+                "one-pass reset: %s declares %d cells, the geometry says %d reachable x %d"
+                % (name, d["cells"], n, _DECLARED_RATIO[name]))
+            vals = d["values"] if d["kind"] == "cells" else [d["values"][0]]
+            assert all(_int_expr(v if isinstance(v, str) else v[1]) == 0 for v in vals), (
+                "one-pass reset: byte array %s has a non-zero initial cell" % name)
+            byte_lines.append("    rep(%d, i) m1.zerobyte %s + i*dw      // %s" % (n, name, name))
+            plan += [(name, k, "byte") for k in range(n)]
+            n_byte += n
+            continue
+        if d["kind"] == "vec":
+            value, cells = d["values"][0], d["cells"]
+            nib = _nibbles(value, cells)
+            if nib is not None and not any(nib):
+                body.append("    hex.zero %d, %s" % (cells, name))
+            else:
+                body.append("    hex.set %d, %s, %s" % (cells, name, value))
+                li = d["line"] - 1
+                texts[f][li] = _drop_value(texts[f][li], value)
+            plan += [(name, k, nib[k] if nib is not None else "(%s)>>%d" % (value, 4 * k)) for k in range(cells)]
+            n_nib += cells
+        elif d["kind"] == "cells":
+            vals = [_int_expr(v) for v in d["values"]]
+            assert all(v is not None and 0 <= v < 16 for v in vals), (
+                "one-pass reset: %s holds a raw cell that is not a nibble constant -- a LUT is never registered" % name)
+            if not any(vals):
+                body.append("    hex.zero %d, %s" % (d["cells"], name))
+            else:
+                for k, v in enumerate(vals):
+                    body.append(("    hex.set 1, %s + %d*dw, %d" % (name, k, v)) if v
+                                else ("    hex.zero 1, %s + %d*dw" % (name, k)))
+                    if v:
+                        li = d["first"] - 1 + k
+                        texts[f][li] = _zero_cell(texts[f][li], d["values"][k])
+            plan += [(name, k, vals[k]) for k in range(d["cells"])]
+            n_nib += d["cells"]
+        else:                                                  # rows
+            off = 0
+            for r, (k, value) in enumerate(d["values"]):
+                nib = _nibbles(value, k)
+                if nib is not None and not any(nib):
+                    body.append("    hex.zero %d, %s + %d*dw" % (k, name, off))
+                else:
+                    body.append("    hex.set %d, %s + %d*dw, %s" % (k, name, off, value))
+                    li = d["first"] - 1 + r
+                    texts[f][li] = _drop_value(texts[f][li], value)
+                plan += [(name, off + c, nib[c] if nib is not None else "(%s)>>%d" % (value, 4 * c))
+                         for c in range(k)]
+                off += k
+            n_nib += d["cells"]
+    # declare the registered cells ZERO: line-for-line rewrites, so no line moves (nor any f<file>:l<line>
+    # label); the assembler sees the same ops at the same addresses, holding 0 until the boot reset runs
+    for f, t in texts.items():
+        assert len(t) == n_lines[f]
+        f.write_text("\n".join(t), encoding="utf-8")
+
+    hdr = ["// == M1: the self-reset prologue -- ONE PASS, by label ===========================",
+           *(["//   %d PERSISTED labels are deliberately NOT restored:" % len(persist),
+              "//     %s" % ", ".join(persist),
+              "//   they are program state (the standalone tier's world), not frame residue."]
+             if persist else []),
+           "//   Sets every registered cell to its declared value (the declarations hold 0), then enters",
+           "//   the frame at __hot_end. Runs at BOOT (the entry jumps here) and after every frame.",
+           "//   m1.zerobyte is defined in src/fj/m1_reset.fj.",
+           "// =================================================================================",
+           "m1_reset:"]
+    part = gen / ("%s_07_reset.fj" % mapname.lower())
+    part.write_text("\n".join(hdr + body + byte_lines + ["    ;__hot_end"]) + "\n", encoding="utf-8")
+
+    # the frame tail -> the reset (as emit_reset_part does), and the BOOT -> the reset (one op either way)
+    main = gen / ("%s_02_main.fj" % mapname.lower())
+    m_lines = main.read_text(encoding="utf-8").split("\n")
+    hits = [k for k, s in enumerate(m_lines) if s.strip() == "stl.loop"]
+    assert len(hits) == 1, "one-pass reset: expected exactly 1 bare stl.loop (the frame tail), found %d" % len(hits)
+    assert m_lines[hits[0] - 1].strip() == "stl.output_char 0xFF", \
+        "one-pass reset: the line before the frame tail is not the 0xFF end-of-frame marker"
+    m_lines[hits[0]] = ";m1_reset"
+    main.write_text("\n".join(m_lines), encoding="utf-8")
+    entry = gen / ("%s_00_entry.fj" % mapname.lower())
+    e_lines = entry.read_text(encoding="utf-8").split("\n")
+    boot = [k for k, s in enumerate(e_lines) if s.strip() == ";__hot_end"]
+    assert len(boot) == 1, "one-pass reset: expected exactly 1 `;__hot_end` (the boot jump) in the entry, found %d" % len(boot)
+    e_lines[boot[0]] = ";m1_reset"
+    entry.write_text("\n".join(e_lines), encoding="utf-8")
+    return part, n_nib, n_byte, plan

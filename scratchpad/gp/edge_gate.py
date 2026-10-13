@@ -14,8 +14,11 @@ R9 -- that the viewpoints EXERCISE what they are here for, decided by the oracle
   * G2: the views hold column bases (`bases_out`), and the oracle with the base paint disabled (an
     in-memory copy of reference_model, its two `if cbase/fbase[x] is not None` made False) draws a
     DIFFERENT picture at each G2 view -- so a binary without the bases fails here;
-  * G1: the oracle without the G1 snapshot (its two `if stack_steps:  # P10 G1` made False) draws a DIFFERENT
-    picture at each G1 view;
+  * G1: the oracle without the nearer pieces' two uses in the record -- the G1 snapshot (its two `if stack_steps:
+    # P10 G1` made False) and P11 (c)'s ledge skip (a fragment wholly behind its pieces takes no slot) -- draws a
+    DIFFERENT picture at each G1 view. Both, since P11: where the sprite is FULLY hidden the skip drops it before the
+    clip could, so the clip alone moves 0 px there (the pit monster from far above); the skip alone moves 0 px at all
+    three views (it is pixel-neutral there: the clip would hide the same rows), which the gate prints;
   * G3: the oracle with only TWO fragment slots (the third slot's early exit put back) draws a DIFFERENT picture
     at each G3 view;
   * G8: the G8 views hold upper pieces whose back ceiling is F_SKY1 (`steps_out`), the case the
@@ -116,7 +119,9 @@ def model_without(lines, name):
 
 # R9, decided on the oracle before any fj runs
 rm0 = model_without(("if cbase[x] is not None:", "if fbase[x] is not None:"), "doomfj.rm_nobase")
-rm1 = model_without(("if stack_steps:                # P10 G1",), "doomfj.rm_nog1")
+rm1 = model_without(("if stack_steps:                # P10 G1",
+                      "if stack_steps and ledge_hidden(ups[x], los[x], ytop_b, hb):"), "doomfj.rm_nog1")
+rm1s = model_without(("if stack_steps and ledge_hidden(ups[x], los[x], ytop_b, hb):",), "doomfj.rm_noskip")
 
 
 def two_slot_model():
@@ -152,8 +157,9 @@ for vx, vy, va, kinds in VPS:
     if "G1" in kinds:
         plain = oracle(rm1, vx, vy, va)
         moved = sum(1 for a, b in zip(plain, want) if a != b)
-        print("R9 G1 (%d,%d,%#x): %d px the ledge clip moves  %s"
-              % (vx, vy, va, moved, "ok" if moved else "!! NOT EXERCISED"), flush=True)
+        skip_only = sum(1 for a, b in zip(oracle(rm1s, vx, vy, va), want) if a != b)
+        print("R9 G1 (%d,%d,%#x): %d px the ledge clip and skip move (the skip alone: %d px)  %s"
+              % (vx, vy, va, moved, skip_only, "ok" if moved else "!! NOT EXERCISED"), flush=True)
         ok &= moved > 0
     if "G3" in kinds:
         plain = oracle(rm3, vx, vy, va)

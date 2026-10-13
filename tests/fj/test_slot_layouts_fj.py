@@ -201,11 +201,32 @@ DERIVE_BLOCK = 0x0102
 # P10 G1: the harness's sfflag bytes -- a different byte in every column (73 is odd, so x -> 73x + 41 is a
 # bijection mod 256), which the record snapshots into its fragments' byte 3
 SFFLAG = [(73 * x + 41) & 0xFF for x in range(VIEW_W)]
-# P11 (c)+(d): every column's piece rows -- u1's y2, u2's y2, l1's y1, l2's y1 at their sfslot offsets 1 / 5 / 8 / 12 --
-# so the record's ledge test (frame.ledge_test: SFFLAG's counts pick a side's LAST piece; a count nibble outside
-# {1, 2, 9, 10} is no piece) decides each column, and the model's ledge_hidden is the expectation
+
+
+def _offview_cols():
+    """P11: the columns a thing whose box is wholly past an edge of the view records into -- from the last row
+    down, or ending above row 1 (the harness's range starts past the game tier's off-view rule, so they reach the
+    column loop here): ANY nearer piece on that side hides such a box (reference_model.ledge_hidden), so these
+    columns count no piece"""
+    out = set()
+    for _sid, y0, _l, base, x1, x2, istep, bucket, _ba, dw in THINGS:
+        if y0 >= CFG.VIEW_H - 1 or y0 + 0xA0 + bucket <= 1:
+            out |= {x for x, _blk in _columns(x1, x2, istep, dw, base)}
+    return out
+
+
+_NO_PIECE = [b for b in range(256) if (b & 7) not in (1, 2) and ((b >> 4) & 7) not in (1, 2)]
+for _x in sorted(_offview_cols()):                  # each a byte no other column holds, so the snapshot stays per column
+    SFFLAG[_x] = next(b for b in _NO_PIECE if b not in SFFLAG)
+assert len(set(SFFLAG)) == VIEW_W
+# P11 (c)+(d): every column's piece rows -- u1's y2, u2's y2, l1's y1, l2's y1 at their sfslot offsets 1 / 5 / 8 / 12.
+# They leave the whole view open (an upper piece ending on row 0, a lower one starting on the last row), so the
+# record's ledge test (frame.ledge_test: SFFLAG's counts pick a side's LAST piece; a count nibble outside {1, 2, 9,
+# 10} is no piece) READS them wherever SFFLAG counts one -- the narrow arm in the hot window, the hostile entry
+# registers -- and hides nothing: this harness pins the slot LAYOUT and its scenarios column by column. The ledge
+# rule's answers are tests/fj/test_sprite_bank_fj.py's (the record's ledge cases and their mutants).
 H = CFG.VIEW_H
-PIECE_ROWS = [((7 * x) % H, (11 * x + 3) % H, (13 * x + 5) % H, (17 * x + 1) % H) for x in range(VIEW_W)]
+PIECE_ROWS = [(0, 0, H - 1, H - 1)] * VIEW_W
 SLOT_SPAN = 16 ** CFG.SLOT_SHIFT
 
 
@@ -946,6 +967,18 @@ def test_the_record_writes_every_byte_where_the_constants_say(tmp_path):
                                         (-1, 2, 0x4C8F8, 17, 0x0130, 2)):
         want_blk = dict(_columns(x1, x2, istep, dw, base))[col]
         assert block(col) == want_blk != base, "an E1M1 left clip's u at column %d" % col
+
+
+def test_the_pieces_hide_no_column_and_are_read():
+    """P11: the layout's scenarios stay whole -- no recorded column is behind its pieces -- while the ledge test still
+    reads pieces: SFFLAG counts a side in 31 of the 103 recorded columns, and each of the four piece rows (the upper
+    pieces 1 and 2, the lower 1 and 2) is the one read in 9 of them"""
+    cols = [(x, y0, _hb(bucket)) for _sid, y0, _l, base, x1, x2, istep, bucket, _ba, dw in THINGS
+            for x, _blk in _columns(x1, x2, istep, dw, base)]
+    assert not any(_ledge_hidden(x, y0, hb) for x, y0, hb in cols)
+    kinds = {k: sum(1 for x, _y0, _h in cols if (SFFLAG[x] >> sh) & 7 == n)
+             for k, sh, n in (("u1", 0, 1), ("u2", 0, 2), ("l1", 4, 1), ("l2", 4, 2))}
+    assert min(kinds.values()) >= 5, kinds
 
 
 def test_the_things_record_what_RECORDED_says():

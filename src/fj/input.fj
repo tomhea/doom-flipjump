@@ -51,6 +51,8 @@
 // menu from the skill screen. Forward and back still set their held flags as well -- the menu
 // frame skips the tic, so a held key moves nobody while the menu is up.
 // M7 P3.4: `ev_help` is the fifth event, h's down edge, zeroed and acted on the same way.
+// P10 (the owner's play-test, 2026-10-12: LEVEL COMPLETE "return to main menu ... with any key pressed"): `ev_any`, the
+// sixth -- set on EVERY key's down edge, the keys this table discards included (doomfj/keyboard.py's "any").
 //
 // P9 -- THE PRESS LATCH (the owner's play-test, 2026-10-10: "a key pressed since the last input check must
 // count"). A held flag alone cannot see a TAP: a down and an up inside one frame's polls leave it where it was, and
@@ -68,7 +70,7 @@ ns kb {
     // M7 P4.1: `sl` / `sr` (strafe), `fi` (fire), `w1`..`w4` (the number keys) -- seven more held flags, persisted
     // P9: `now` -- the press latch, one nibble per held flag in this order (see the header): a down edge sets it
     // P9: `w5` -- the number key '5' (the rocket launcher), a held flag after w4
-    def poll stat, code, f, b, l, r, u, sl, sr, fi, w1, w2, w3, w4, w5, now, ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad @ done, legal, hi1, hi2, hi3, hi6, hi7, lo0, lo1, lo2, lo2_c, lo2_e, lo3, lo3_2, lo3_3, lo3_4, lo3_5, k_enter, enter_dn, k_esc, esc_dn, hi8, k_fwd, k_back, k_left, k_right, k_use, k_sl, k_sr, k_fi, k_w1, k_w2, k_w3, k_w4, k_w5, lo6, lo6_d, lo6_e, lo6_h, k_help, help_dn, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, lo8e, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn, u_up, u_dn, sl_up, sl_dn, sr_up, sr_dn, fi_up, fi_dn, w1_up, w1_dn, w2_up, w2_dn, w3_up, w3_dn, w4_up, w4_dn, w5_up, w5_dn {
+    def poll stat, code, f, b, l, r, u, sl, sr, fi, w1, w2, w3, w4, w5, now, ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad @ done, legal, any_dn, any_key, hi1, hi2, hi3, hi6, hi7, lo0, lo1, lo2, lo2_c, lo2_e, lo3, lo3_2, lo3_3, lo3_4, lo3_5, k_enter, enter_dn, k_esc, esc_dn, hi8, k_fwd, k_back, k_left, k_right, k_use, k_sl, k_sr, k_fi, k_w1, k_w2, k_w3, k_w4, k_w5, lo6, lo6_d, lo6_e, lo6_h, k_help, help_dn, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, lo8e, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn, u_up, u_dn, sl_up, sl_dn, sr_up, sr_dn, fi_up, fi_dn, w1_up, w1_dn, w2_up, w2_dn, w3_up, w3_dn, w4_up, w4_dn, w5_up, w5_dn {
         hex.input_hex stat
         // 0x0, 0x8 and 0x9 are the ONLY statuses the keyboard device produces. Anything else means
         // this program is not reading a keyboard -- someone piped a file in, or ran it with the
@@ -79,6 +81,11 @@ ns kb {
       legal:
         hex.if0 stat, done                      // 0x0: no event this poll, and no byte follows
         hex.input 1, code
+        // P10: any key's down edge (0x9: odd) is LEVEL COMPLETE's "any key" -- before the table, which discards some
+        hex.if_flags stat, 0xAAAA, any_key, any_dn
+      any_dn:
+        hex.set 1, ev_any, 1
+      any_key:
 
         // ---- which key? two nibble tests per candidate, the wmagic idiom ----
         hex.if_flags code+dw, 1<<0x0, hi1, lo0

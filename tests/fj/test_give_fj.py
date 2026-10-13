@@ -12,6 +12,10 @@ R9 (MUTANTS): each must part from the model on some record -- the health bonus c
 above 100, the backpack not doubling the caps (amcap), no auto-switch from an empty clip, a backpack that is not
 kept, an owned shotgun always taken, a dropped clip that gives a whole one, the bonus count wrapping, a card that
 does not set the flash, an armor bonus that leaves no armor type, a chainsaw / berserk that pends nothing.
+
+P10 (doomfj.statcode, LEVEL COMPLETE's ITEMS): the routines are the game tier's, `stats=True` -- a COUNTITEM give
+(the health and armor bonuses, berserk) counts the item in `st_item` when taken, as combat._touch_specials does
+(`p_itemcount`); every record pokes the count first. R9: the count gone.
 """
 import random
 import re
@@ -33,7 +37,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FJ = ROOT / "src" / "fj"
 N = 700
 CELLS = (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("am_clip", 3), ("am_shell", 3), ("am_cell", 3), ("am_misl", 3),
-         ("p_bp", 1), ("wp_own", 5), ("wp_pend", 1), ("p_str", 4), ("p_bc", 2), ("pcard", 1), ("gv_ok", 1))
+         ("p_bp", 1), ("wp_own", 6), ("wp_pend", 1), ("p_str", 4), ("p_bc", 2), ("pcard", 1), ("gv_ok", 1),  # P10: 6
+         ("st_item", 2))                                                                  # P10: the items counted
 
 
 def _world():
@@ -54,7 +59,8 @@ def _records(w):
             ammo.append(rnd.choice((0, 0, cap, cap, cap - 1, gd.MAXAMMO[a], rnd.randint(0, cap), 1)))
         owned = {gd.WP_FIST: 1, gd.WP_PISTOL: int(rnd.random() < 0.9), gd.WP_SHOTGUN: rnd.choice((0, 1)),
                  gd.WP_CHAINSAW: rnd.choice((0, 1)),
-                 gd.WP_MISSILE: int(r % 3 == 1)}          # P9: the launcher (no draw: the script's stream is kept)
+                 gd.WP_MISSILE: int(r % 3 == 1),          # P9: the launcher (no draw: the script's stream is kept)
+                 gd.WP_CHAINGUN: int(r % 4 == 2)}         # P10: the chaingun (no draw either)
         ready = rnd.choice([x for x in WC.WEAPONS if owned[x]])
         pend = rnd.choice((gd.WP_NOCHANGE, gd.WP_NOCHANGE, gd.WP_NOCHANGE, rnd.choice(WC.WEAPONS)))
         armor = rnd.choice((0, 0, 1, 99, 100, 101, 199, 200, rnd.randint(0, 200)))
@@ -63,7 +69,8 @@ def _records(w):
                  "ammo": ammo, "p_backpack": bp, "owned": owned, "p_ready": ready, "p_pending": pend,
                  "p_strength": rnd.choice((0, 0, 1, rnd.randint(1, 0xFFFF))),
                  "p_bonuscount": rnd.choice((0, 6, 249, 250, 251, 255, rnd.randint(0, 255))),
-                 "card": rnd.choice((0, 0, 1))}
+                 "card": rnd.choice((0, 0, 1)),
+                 "items": (0, 9, 47, 98, 13)[r % 5]}     # P10: st_item before the give (not from `rnd`: the records stay)
         out.append((pokes, kind, dropped))
     return out
 
@@ -80,20 +87,22 @@ def _apply(w, pokes):
     ws.p_cards[gd.IT_BLUECARD] = pokes["card"]
 
 
-def _row(ws, taken) -> str:
+def _row(ws, taken, items) -> str:
     own = sum(ws.p_owned[x] << (4 * WC.OWN[x]) for x in WC.WEAPONS)
     vals = [ws.p_health & 0xFFF, ws.p_armor, ws.p_armortype, ws.p_ammo[gd.AM_CLIP], ws.p_ammo[gd.AM_SHELL],
             ws.p_ammo[gd.AM_CELL], ws.p_ammo[gd.AM_MISL], ws.p_backpack, own, ws.p_pending, ws.p_strength,
-            ws.p_bonuscount, ws.p_cards[gd.IT_BLUECARD], int(taken)]
+            ws.p_bonuscount, ws.p_cards[gd.IT_BLUECARD], int(taken), items]
     return "".join("%0*x" % (n, v) for (_c, n), v in zip(CELLS, vals))
 
 
 def _expected(w, records):
+    from doomfj.statcode import counts_item
     lines = []
     for pokes, kind, dropped in records:
         _apply(w, pokes)
         taken = w._touch(kind, dropped, 0, 0)
-        lines.append(_row(w.ws, taken))
+        # P10: combat._touch_specials' itemcount -- a map pickup's, and no drop is COUNTITEM
+        lines.append(_row(w.ws, taken, pokes["items"] + int(bool(taken) and counts_item(kind, dropped))))
     return ("\n".join(lines) + "\n").encode()
 
 
@@ -103,6 +112,8 @@ def _amcap_nobp():
 
 
 MUTANTS = {
+    "mgun_noammo": (r"(give_2002:\n)    hex\.set 3, ga_n, 20\n    stl\.fcall ga0, ga_ret\n", r"\1"),   # P10
+    "item_nocount": (r"    hex\.inc 2, st_item\n", ""),                                                  # P10
     "bon_cap100": (r"(    hex\.inc 3, p_hp\n    hex\.set 3, gv_c, )200", r"\g<1>100"),
     "body_ge": (r"hex\.cmp 3, p_hp, gv_c, (give_2012gb), (give_2012_no), (give_2012_no)", r"hex.cmp 3, p_hp, gv_c, \1, \1, \3"),
     "amcap_nobp": None,
@@ -127,7 +138,7 @@ MUTANTS = {
 def _program(w, mut=None):
     gives = []
     for kind, dropped in L.give_kinds(w):
-        gives += L.give_lines(kind, dropped)
+        gives += L.give_lines(kind, dropped, stats=True)          # P10: the game tier's (the items counted)
     for a in range(gd.NUMAMMO):
         gives += L.give_ammo_lines(a)
     bonus = ["hex.if0 1, gv_ok, hb_skip", *L._bonus_lines("hb"), "hb_skip:"]
@@ -145,7 +156,7 @@ def _program(w, mut=None):
     wstart = WC.level_start(w.mw, "E1M1")
     states, frames = WC.weapon_states(), WC.overlay_frames()
     decls = (L.loot_decls(L.level_start(w)) + H.hurt_decls(H.level_start(w))
-             + WC.weapon_decls(wstart, states, frames) + ["pcard: hex.vec 1"])
+             + WC.weapon_decls(wstart, states, frames) + ["pcard: hex.vec 1", "st_item: hex.vec 2"])   # P10
     return decls, text, btext, tables
 
 
@@ -161,8 +172,8 @@ def _build(tmp_path, name, mut=None):
             body.append("hex.set %d, %s, %d" % (n, c, pokes[f]))
         for a in range(gd.NUMAMMO):
             body.append("hex.set 3, %s, %d" % (L.AMMO_CELL[a], pokes["ammo"][a]))
-        body.append("hex.set 5, wp_own, %d" % sum(pokes["owned"][x] << (4 * WC.OWN[x]) for x in WC.WEAPONS))
-        body += ["hex.set 1, gv_ok, 7",
+        body.append("hex.set %d, wp_own, %d" % (len(WC.WEAPONS), sum(pokes["owned"][x] << (4 * WC.OWN[x]) for x in WC.WEAPONS)))   # P10: 6 nibbles
+        body += ["hex.set 1, gv_ok, 7", "hex.set 2, st_item, %d" % pokes["items"],          # P10
                  "stl.fcall give_%d%s, gv_ret" % (kind, "d" if dropped else ""),
                  "stl.fcall bonus_leaf, bl_ret"]
         body += ["hex.print_as_digit %d, %s, 0" % (n, c) for c, n in CELLS] + ["stl.output 10"]

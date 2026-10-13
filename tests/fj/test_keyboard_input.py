@@ -63,10 +63,10 @@ EVENT_KEYS = {0x0D: "E", 0x1B: "X", 0x68: "H"}
 def _program() -> str:
     lines = ["stl.startup_and_init_all"]
     for _ in range(FRAMES):
-        lines += [f"hex.zero 1, {e}" for e in ("kent", "kesc", "kup", "kdn", "khelp")]
+        lines += [f"hex.zero 1, {e}" for e in ("kent", "kesc", "kup", "kdn", "khelp", "kany")]   # P10: kany
         lines.append(f"hex.zero {len(KEYS)}, know")                  # P9: the press latch, zeroed like the events
         lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, kuse, "
-                     "ksl, ksr, kfi, kw1, kw2, kw3, kw4, kw5, know, kent, kesc, kup, kdn, khelp, bad")
+                     "ksl, ksr, kfi, kw1, kw2, kw3, kw4, kw5, know, kent, kesc, kup, kdn, khelp, kany, bad")
         lines += [f"hex.print_as_digit k{name}, 0" for name in
                   ("fwd", "back", "left", "right", "use", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5",
                    "ent", "esc", "up", "dn", "help")]
@@ -78,6 +78,7 @@ def _program() -> str:
               "kstat: hex.vec 1", "kcode: hex.vec 2",
               "kent: hex.vec 1", "kesc: hex.vec 1", "kup: hex.vec 1", "kdn: hex.vec 1",
               "khelp: hex.vec 1",                     # M7 P3.4
+              "kany: hex.vec 1",                      # P10: any key's down edge
               "kfwd: hex.vec 1", "kback: hex.vec 1", "kleft: hex.vec 1", "kright: hex.vec 1",
               # M2-R4: the USE key (space, 0x20) is a held flag like the four above
               "kuse: hex.vec 1",

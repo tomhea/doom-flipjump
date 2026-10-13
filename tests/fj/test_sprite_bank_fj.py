@@ -17,6 +17,9 @@ top, clipped to the screen and lit through the colormap:
     run: at the upper window's high row (an empty pair, then the walk stops) and at the lower
     window's low row (skipped). Every column is compared WHOLE: the near rows, the far fragment's
     rows outside them, the fillers.
+  * P10 (blocked55's gamespeed crash): the far walker over an EMPTY window -- wlo >= whi, the cursor at wlo,
+    and a run of the fragment ending past wlo: B's window below A once G1's clip cut B's end. It must emit
+    NOTHING; without its guard it clamped that run to whi, behind the cursor, and the device refused the frame.
 
 RECORD. The per-thing section of `frame.thing_record_body` that P1.6 rewrote -- the tier's region
 (`hdb`, and SPR-NEAR's `thfar` / `lowh`) and the slot's four bytes (byte 3 = the bucket) -- and its
@@ -28,8 +31,8 @@ ORACLE's rule (`reference_model.sprite_tier`) and the emitter's layout (HD at sp
 LD at sp_base2).
 
 R9: the harnesses must reject a walker that skips the rowmap in the fast, the clipped and the window
-loop (a run's end left normalized, as a per-bucket bank would have it), and a record whose HD compare,
-slot byte 3, min_b compare or thfar test is broken.
+loop (a run's end left normalized, as a per-bucket bank would have it), the window walker without its
+empty-window guard, and a record whose HD compare, slot byte 3, min_b compare or thfar test is broken.
 """
 import random
 import re
@@ -161,6 +164,25 @@ def _win_cases(lists, zero_first, seed=13):
     return out
 
 
+def _empty_cases(lists, seed=17):
+    """P10: (list index, bucket, y0, light row, wlo, whi) -- the far walker over an EMPTY window, whi < wlo (and
+    whi == wlo) with the cursor at wlo, and the fragment's last run ending PAST wlo, so a walk that does not
+    check its window reaches that run and clamps it to whi"""
+    rng = random.Random(seed)
+    out = []
+    for i, bl in enumerate(lists):
+        b = rng.randrange(bl[1], SPRITE_HEIGHT_BUCKETS)
+        y0 = rng.randrange(0, max(1, H - HEIGHTS[b] + 1))
+        first, end = _rows(bl, b, y0)
+        first, end = max(0, first), min(H, end)
+        if end - first < 2:
+            continue
+        wlo = rng.randrange(first + 1, end)
+        for whi in (wlo - 1, max(0, wlo - rng.randint(2, 9)), wlo):
+            out.append((i, b, y0, rng.randrange(0, 16), wlo, whi))
+    return out
+
+
 def _expected(lists, case):
     i, b, y0, lr = case
     r0, runs = strip_at(lists[i], b, HEIGHTS[b])
@@ -182,9 +204,9 @@ def _win_expected(lists, wcase):
     return col
 
 
-def _program(lists, cases, wcases):
+def _program(lists, cases, wcases, ecases=()):
     slots = ["gpslot:"] + [";0 * dw"] * 4                    # slot 0: no fragment
-    for _i, b, y0, lr, *_w in list(cases) + list(wcases):
+    for _i, b, y0, lr, *_w in list(cases) + list(wcases) + list(ecases):
         yb = (y0 + 32768) & 0xFFFF
         slots += [";%#x * dw" % v for v in (yb & 0xFF, yb >> 8, lr, b)]
     bank = wr.sprite_bank_header()
@@ -229,6 +251,17 @@ def _program(lists, cases, wcases):
                  "    hex.set 2, t_wlo, %d" % a2, "    hex.set 2, t_whi, %d" % H, win,
                  "    stl.output_char %d" % H, "    stl.output_char %d" % FILLER,
                  "    stl.output_char 0xFF"]
+    for j, (i, _b, _y0, _lr, wlo, whi) in enumerate(ecases):
+        k = len(cases) + len(wcases) + j
+        main += ["    stl.output_char %d" % k,
+                 "    hex.set 2, t_s, %d" % (k + 1),
+                 "    hex.set 4, t_blk, %d" % i,
+                 "    stream.frag_derive t_s, t_blk, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, "
+                 "gpsb_smidx, gpsb_ptr0, gpsb_ridx",
+                 "    stl.output_char %d" % wlo, "    stl.output_char %d" % FILLER,      # the cursor at wlo
+                 "    hex.set 2, t_wlo, %d" % wlo, "    hex.set 2, t_whi, %d" % whi, win,
+                 "    stl.output_char %d" % H, "    stl.output_char %d" % FILLER,
+                 "    stl.output_char 0xFF"]
     main += ["    stl.loop",
              "t_s: hex.vec 2", "t_blk: hex.vec 4", "t_wlo: hex.vec 2", "t_whi: hex.vec 2",
              wr.hoisted_scratch_fj(CFG), *slots, *bank, ""]
@@ -268,8 +301,8 @@ def _decode(stream):
 
 def _faults(world, stream):
     """{"fast" / "clipped" / "window": [faulty cases]} for one run of the walker program"""
-    lists, cases, wcases = world
-    out = {"fast": [], "clipped": [], "window": []}
+    lists, cases, wcases, ecases = world
+    out = {"fast": [], "clipped": [], "window": [], "empty": []}
     try:
         cols = _decode(stream)
     except AssertionError as e:                 # a stream the device itself would refuse
@@ -283,6 +316,10 @@ def _faults(world, stream):
         got, want = cols.get(len(cases) + j, {}), _win_expected(lists, wcase)
         if got != want:
             out["window"].append((wcase, sorted(set(got.items()) ^ set(want.items()))[:6]))
+    for j, ecase in enumerate(ecases):                       # P10: nothing but the two fillers
+        got, want = cols.get(len(cases) + len(wcases) + j, {}), {y: FILLER for y in range(H)}
+        if got != want:
+            out["empty"].append((ecase, sorted(set(got.items()) ^ set(want.items()))[:6]))
     return out
 
 
@@ -301,7 +338,10 @@ def world():
     both = [w for w in wcases if max(0, _rows(lists_all[w[0]], w[1], w[2])[0]) < w[4] < w[5]
             < min(H, _rows(lists_all[w[0]], w[1], w[2])[1])]
     assert len(both) >= 8, both
-    return lists_all, cases, wcases
+    # P10: inverted empty windows, each with a run past wlo (the walk must not reach it)
+    ecases = _empty_cases(lists)
+    assert sum(1 for e in ecases if e[5] < e[4]) >= 16, ecases
+    return lists_all, cases, wcases, ecases
 
 
 @pytest.fixture(scope="module")
@@ -318,6 +358,22 @@ def test_the_shipped_walker_draws_what_strip_at_draws(shipped):
 def test_the_window_walker_draws_the_far_fragment_outside_the_near_one(shipped):
     bad = shipped["window"]
     assert bad == [], "%d columns differ, first (case, rows) %s" % (len(bad), bad[:2])
+
+
+def test_the_window_walker_emits_nothing_for_an_empty_window(shipped):
+    """P10 (blocked55's gamespeed run 0, frame 31): an empty window -- the cursor already past whi -- emits no pair"""
+    bad = shipped["empty"]
+    assert bad == [], "%d columns differ, first (case, rows) %s" % (len(bad), bad[:2])
+
+
+def test_control_a_window_walker_without_its_guard_is_caught(world, tmp_path):
+    """R9 for the empty-window guard: the walker blocked55 shipped (no guard) must fail the empty cases"""
+    src = (ROOT / "src/fj/stream_render.fj").read_text(encoding="utf-8")
+    guard = "        hex.cmp 2, wlo, whi, walk, send, send\n"
+    assert src.count(guard) == 1, "re-point this mutant: the guard moved"
+    (tmp_path / "stream_render.fj").write_text(src.replace(guard, ""), encoding="utf-8")
+    mutated = [s if s.name != "stream_render.fj" else tmp_path / "stream_render.fj" for s in SRC]
+    assert _faults(world, _assemble_run(tmp_path, "mut", _program(*world), mutated))["empty"]
 
 
 def _skip_rowmap(src, macro, label):
@@ -418,7 +474,11 @@ def _record_program(src, cases, seen_on=False):
             # the renderer's hot-data block, as the emitter places it: a fresh 16^5-bit window, so
             # the column loop's arm5 reads and writes (drawn -> sprflag, spslot -> sprflag) are exact
             ";t_hot_end", "pad 16384",
-            "drawn:", *[";0 * dw"] * NX, "sprflag:", *[";0 * dw"] * NX,
+            "drawn:", *[";0 * dw"] * NX,
+            # P10 G1: the record snapshots a column's sfflag byte (frame.rec_clip_read), 3*VIEW_W cells before its
+            # sprflag byte -- the emitter's hot string: sfflag, sfbase, sprflag. All zero here: no nearer piece.
+            "sfflag:", *[";0 * dw"] * CFG.VIEW_W, "sfbase:", *[";0 * dw"] * (2 * CFG.VIEW_W),
+            "sprflag:", *[";0 * dw"] * NX,
             "spslot:", *[";0 * dw"] * (NX * wr.SPR_SLOT_STRIDE),
             "gpslot:", *[";0 * dw"] * (wr.SPR_THING_SLOTS * wr.SPR_THING_SLOT_BYTES),
             "t_hot_end:",

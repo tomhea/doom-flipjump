@@ -1,0 +1,56 @@
+# the restore-set re-key of p10-playtest2 1d2fd54 + its working tree (P10)
+=== 16:14:55 python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p10.tsv.gz
+$ python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p10.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 5008s: 2,055,220 labels -> scratchpad\_ca_labels_p10.tsv.gz (17.1 MB)
+code_start word: 17308
+rc=0
+=== 17:40:06 python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p10.tsv.gz
+$ python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p10.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 6139s: 2,827,391 labels -> scratchpad\_ca_labels_std_p10.tsv.gz (23.0 MB)
+code_start word: 17308
+rc=0
+=== CAPTURES DONE 19:24:14
+=== 19:24:38 python scratchpad/ca_rekey_newspan.py --selftest
+$ python scratchpad/ca_rekey_newspan.py --selftest
+PASS  S1 covered entries are kept; --whole resizes a grown and a shrunk label; --keep keeps a part  -- {'a': 'kept', 'grow': 'whole (--whole)', 'inpart': 'kept in part (--keep)', 'same': 'kept', 'shrink': 'whole (--whole)'}
+PASS  C1 (negative control) a label that GREW is refused without a decision  -- re-key REFUSED: 1 entries need a decision: grow part k=16 span=24 (needs --whole or --keep)
+PASS  C2 (negative control) a label that SHRANK is refused without a decision  -- re-key REFUSED: 1 entries need a decision: shrink past k=16 span=12 (needs --whole or --keep)
+PASS  C3 (negative control) --keep on a shrunk label is refused  -- re-key REFUSED: 1 entries need a decision: shrink past k=16 span=12 (--keep cannot hold offsets past the label)
+PASS  C4 (negative control) a label gone from the new table is refused  -- re-key REFUSED: 1 labels of the set are gone from the new table, e.g. ['same']
+PASS  C5 (negative control) an entry that is not a contiguous prefix is refused  -- re-key REFUSED: 'holey' holds 2 offsets that are not the prefix [0, k)
+PASS  S2 a fingerprinted old table decides: grow/shrink were whole -> whole, inpart kept in part  -- {'a': 'kept', 'grow': 'whole (held whole on the fingerprinted old table)', 'inpart': 'kept in part (span unchanged on the fingerprinted old table)', 'same': 'kept', 'shrink': 'whole (held whole on the fingerprinted old table)'}
+PASS  C6 (negative control) an old table whose fingerprint differs from the set's is refused  -- re-key REFUSED: the old table's fingerprint of the set's labels is b4c6e1fe28039f29, the set records 1db6bf248a7c7543 -- it is not the layout the set was keyed on
+PASS  S3 the production loader accepts the written set
+ca_rekey_newspan selftest -- C1..C6 are the negative controls: PASS
+rc=0
+=== 19:24:39 python scratchpad/ca_rekey_newspan.py --labels scratchpad/_ca_labels_p10.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz --keep sshead --whole thpos_rt --whole thss_rt
+$ python scratchpad/ca_rekey_newspan.py --labels scratchpad/_ca_labels_p10.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz --keep sshead --whole thpos_rt --whole thss_rt
+labels in the set: 436  covered 433, part 3, past 0
+   part  sshead                       k=1364  new span 2728  -> kept in part (--keep)
+   part  thpos_rt                     k=2176  new span 2208  -> whole (--whole)
+   part  thss_rt                      k=2176  new span 2208  -> whole (--whole)
+words: 11,432 -> 11,496 (delta +64)
+production loader accepts it: 11,496 words, layout fingerprint f630e070bf7263a5
+wrote src/doomfj/data/m1_restore_set.json.gz
+rc=0
+=== 19:24:48 python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p10.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+$ python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p10.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+added 280 words over 374 globals (2 check + 372 hoisted)
+src/doomfj/data/m1_restore_set.json.gz: 11496 -> 11776 words over 482 entries
+rc=0
+=== 19:24:55 python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p10.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+$ python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p10.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+dropped wmagic; added 7716 words over 137 standalone globals (incl. the per-door state)
+src/doomfj/data/m5_restore_set.json.gz: 11776 -> 19488 words over 482 -> 618 entries
+persist: viewx, viewy, viewangle, kb_f, kb_b, kb_l, kb_r, kb_u, mode, menu_scr, menu_sel, lvdone, pusedn, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, kb_w5, p_tnh, g_live, dstate, ddir, dsub, dwait, dreq, pcard, wfired, lstate, ldir, lsub, lwait, lreq, fswitch, sshead, thss_rt, thpos_rt, mon_state, mon_tics, mon_facing, mon_active, mon_target, mon_reaction, mon_threshold, mon_movedir, sched_cursor, thseen, mon_movecount, mon_rng, mon_floorz, msec, bar_solid, mh_prev, mon_justattacked, mon_health, mon_shootable, mon_solid, mon_justhit, mon_ambush, snd_alert, hud_v, hud_s, hud_full, wp_rdy, wp_pend, wp_st, wp_tics, wp_sy, fl_st, fl_tics, wp_rf, wp_ad, am_clip, am_shell, wp_own, rng_pl, wp_frm, fl_frm, aim_sid, aim_tz, p_hp, p_ar, p_at, p_dc, p_dead, p_atk, pal_cur, pj_act, pj_x, pj_y, pj_mx, pj_my, pj_st, pj_ti, pj_src, fx_act, fx_x, fx_y, fx_st, fx_ti, rng_fx, lvtime, g_rs, g_skill, p_bc, p_str, p_bp, am_misl, am_cell, mdrop, dr_live, bar_st, bar_ti, bar_hp, rng_wd, st_kill, st_item, st_secn, st_secm, p_vd, p_kmx, p_kmy, mkx, mky, mfx, mfy, kb_live, pj_z, bar_src
+rc=0
+=== 19:25:07 python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+$ python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+......................                                                   [100%]
+22 passed in 1.39s
+rc=0
+=== REKEY DONE 19:25:10

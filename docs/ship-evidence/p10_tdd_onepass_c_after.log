@@ -1,0 +1,30 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-31b [at 31bccd2 (HEAD), unmodified] && PYTHONPATH=src timeout 1800 python -m pytest tests/host/test_one_pass_reset.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_c_after
+# worktree HEAD: 31bccd2b5bed6e9aefc15581eff2481fba49b688 (ONE PASS (the CR of #129, R9): the scanner refuses cells resumed after a blank or comment line; the )
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-31b\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:33:59 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-31b
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 14 items
+
+tests/host/test_one_pass_reset.py::test_every_kind_of_declaration_is_reset_from_its_own_value PASSED [  7%]
+tests/host/test_one_pass_reset.py::test_the_registered_cells_are_declared_zero_and_no_line_moves PASSED [ 14%]
+tests/host/test_one_pass_reset.py::test_the_boot_and_the_frame_tail_both_enter_the_reset PASSED [ 21%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a registered name the program lost-names0-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-no declaration] PASSED [ 28%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a name declared twice-names1-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nws_c1: hex.vec 1\n-declared twice] PASSED [ 35%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a raw cell that is not a nibble (a LUT)-names2-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nlut_cells:\n;200 * dw\n-not a nibble] PASSED [ 42%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a byte array the geometry disagrees with-names3-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-geometry says] PASSED [ 50%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a value that does not fit its cells-names4-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nbig: hex.vec 1, 16\n-does not fit] PASSED [ 57%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[cells resumed after a comment line-names5-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n// a note\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-resume at line] PASSED [ 64%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[cells resumed after a blank line-names6-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-resume at line] PASSED [ 71%]
+tests/host/test_one_pass_reset.py::test_every_pointer_read_registered_cell_is_vetoed PASSED [ 78%]
+tests/host/test_one_pass_reset.py::test_a_persist_name_that_protects_nothing_is_refused[persist0-registry does not hold] PASSED [ 85%]
+tests/host/test_one_pass_reset.py::test_a_persist_name_that_protects_nothing_is_refused[persist1-registry does not hold] PASSED [ 92%]
+tests/host/test_one_pass_reset.py::test_a_registered_persist_name_the_program_does_not_declare_is_refused PASSED [100%]
+
+============================= 14 passed in 1.86s ==============================
+# finished 2026-10-13 04:34:02 +0300; pytest exit code: 0

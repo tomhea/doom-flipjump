@@ -551,12 +551,25 @@ ns frame {
       done:
     }
 
+    // P10 G1 (the owner's ledge bug, 2026-10-12): a recorded fragment's 4th byte (3 in A, 7 in C, 11 in B) is the
+    // column's sfflag byte AS THE THING RECORDS -- its stored-piece counts then (and the G2 base flags). The walk is
+    // front to back, so every piece stored by now is NEARER than this thing, and they are the column's first ones
+    // (write-once, nearest first): the emit derives the nearer boundaries' clip window from them (stream.frag_clip),
+    // the oracle's `sclip`. This reads it into trb_clip_v: sfflag[x] is 3*VIEW_W cells before sprflag[x]
+    // (wall_renderer declares sfflag, sfbase and sprflag in ONE string). Every pointer here is in the hot block, so
+    // the narrow arms stay exact.
+    def rec_clip_read < trb_sprflag_p, trb_clip_p, trb_clip_v {
+        hex.mov w/4, trb_clip_p, trb_sprflag_p
+        hex.ptr_sub trb_clip_p, 3*VIEW_W
+        frame.read_byte5 trb_clip_v, trb_clip_p
+    }
+
     // M7 P4.2a: `aim` -- 1 when this body's projections record the aim window (the runtime monsters' body of a tier
     // whose player shoots); `ttwice`'s measurement copy never records
     def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic, mir, mirf, miru, ltw, seen, sa, sflag, one, aim \
-            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, bslot_gate, offv_top, offv_out, offv_ok, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_hit \
+            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, bslot_gate, offv_top, offv_out, offv_ok, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_c, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_hit \
             < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, sp_ex, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, \
-              gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8 {
+              gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8, trb_clip_v {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
         // NOT distance order, so one shared counter let 1-pixel bonus dots spend the frame's slots
         // while monsters were turned away (EXP-8a). A monster now has its own, deliberately loose
@@ -760,16 +773,23 @@ ns frame {
         rep(seen, k) .rec_seen_mark sa, sflag, one, trb_sprflag_p   // M7 P3.2a: an OPEN column -- seen
         frame.read_byte5 trb_sprflag_v, trb_sprflag_p
         hex.if0 2, trb_sprflag_v, slot_a            // no fragment yet -> slot A (offset 0, flag 1)
-        // V4b: slot A taken -- take slot B (byte offset 8 of the same 16-byte slot, flag 2),
-        // else both slots are spent and this thing is hidden here. Walk-arrival order makes
-        // A the nearer fragment and B the one behind it, exactly like the oracle's sfrag2.
+        // V4b: slot A taken -- take slot B (byte offset 8 of the same 16-byte slot, flag 2); P10 G3: B taken
+        // too -- take slot C (byte offset 4, flag 3); else all three are spent and this thing is hidden here.
+        // Walk-arrival order makes A the nearest fragment, B the one behind it and C the next, exactly like the
+        // oracle's sfrag / sfrag2 / sfrag3. B and C take the same gate.
+        rep(deg, k) hex.if0 1, ballow, col_next // 25M-CAP: B (and C) only for tall-enough fragments
         hex.dec 2, trb_sprflag_v
-        hex.if1 2, trb_sprflag_v, col_next          // both slots spent -> the thing is hidden here
-        rep(deg, k) hex.if0 1, ballow, col_next // 25M-CAP: B only for tall-enough fragments
-        ;slot_b
+        hex.if0 2, trb_sprflag_v, slot_b            // A alone so far -> slot B
+        hex.dec 2, trb_sprflag_v
+        hex.if1 2, trb_sprflag_v, col_next          // all three spent -> the thing is hidden here
+        ;slot_c
       slot_a:
         hex.set w/4, trb_slot_ofs, 0
         hex.set 2, trb_slot_flag, 1
+        ;slot_done
+      slot_c:
+        hex.set w/4, trb_slot_ofs, 4
+        hex.set 2, trb_slot_flag, 3
         ;slot_done
       slot_b:
         hex.set w/4, trb_slot_ofs, 8
@@ -808,8 +828,10 @@ ns frame {
         // seven -- the rows, the bias and the light row are the slot's and the header's now.
         hex.write_byte_and_inc trb_tbl_p, gps_s_rec
         frame.write_byte_and_inc5 trb_tbl_p, trb_blk
-        frame.write_byte5 trb_tbl_p, trb_blk + 2*dw
-        frame.write_byte5 trb_sprflag_p, trb_slot_flag   // V4b: 1 = A only, 2 = A + B
+        frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw
+        .rec_clip_read                          // P10 G1: the 4th byte, the nearer pieces' counts
+        frame.write_byte5 trb_tbl_p, trb_clip_v
+        frame.write_byte5 trb_sprflag_p, trb_slot_flag   // V4b: 1 = A only, 2 = A + B, P10 G3: 3 = A + B + C
       col_next:
         hex.ptr_add trb_drawn_p, 1
         hex.ptr_add trb_sprflag_p, 1
@@ -877,12 +899,39 @@ ns frame {
     // The scale is INTERPOLATED across the seg (one setup, then `+= scalestep` per column) exactly
     // as the wall path's is -- an exact per-column scale_from_global_angle is ~40k ops per COLUMN
     // against ~93k once per SEG. The oracle interpolates identically (ReferenceModel.render_wall_frame).
+    // P10 G2: a side's count nibble carries the column's BASE flag in bit 3 (`ts_base_store`), so
+    // every "this side holds no piece" test asks for {0, 8}. hex.if_flags with that mask IS hex.if0's
+    // own expansion (stl: `if0` = `if_flags hex, 0xfffe`) -- the same ops, one table entry differing.
+    def if0_cnt cnt, l0 @ l1 {
+        hex.if_flags cnt, 0xfefe, l0, l1
+      l1:
+    }
+
+    // P10 G2 (the owner's play-test, 2026-10-12: the nukage "vanishes" near its edge) -- a column's
+    // BASE, one side. A boundary whose near edge lies OFF the screen (above it for a ceiling, below it
+    // for a floor) stores no piece (ts_piece_store: it would hold a V5 slot and paint nothing -- the
+    // efde61c lintel), yet every row of that surface the column shows, from the screen's edge to the
+    // next stored piece, lies BEYOND it. So the side's count nibble -- still 0 here: a stored piece
+    // clamps this one past its end, onto the screen -- gets bit 3, the whole byte goes back to
+    // sfflag[x], and the boundary's back pid goes to `sfbase`, `off` cells past this column's sfflag
+    // byte (sfbase = [VIEW_W ceiling pids][VIEW_W floor pids], declared right after sfflag). A
+    // farther off-screen boundary overwrites the pid: the farthest wins, as the oracle's `cbase` /
+    // `fbase` (reference_model.render_wall_frame). sfbase is never reset: a pid is read only under
+    // its flag, and sfflag is (a byte array of the M1 set). Assumes a one-byte pid (asserted at emit).
+    def ts_base_store flagnib, flagbyte, flagp, off, bpid, bp {
+        hex.set 1, flagnib, 8
+        frame.write_byte5 flagp, flagbyte
+        hex.mov w/4, bp, flagp
+        hex.ptr_add bp, off
+        frame.write_byte5 bp, bpid
+    }
+
     // V5 -- the piece-2 monotone clamp: when this side already holds a piece (count nibble
     // `cnt` nonzero), the new piece's FIRST row clips past the STORED previous piece's end
     // byte (slot byte `off`+1), sentinels included -- exactly the oracle's stored-value clamp
     // (R6), so the two sides can never disagree about a clamped piece.
     def ts_clamp2 fra, cnt, fbp, off @ doclamp, noprev, prev_y, prev_end, end {
-        hex.if0 1, cnt, noprev
+        .if0_cnt cnt, noprev                    // P10 G2: {0, 8} -- the base flag is no piece
         hex.ptr_add fbp, off+1
         frame.read_byte5 prev_y, fbp
         hex.ptr_sub fbp, off+1
@@ -902,7 +951,7 @@ ns frame {
     // V5 -- the LOWER side's mirror: the new piece's LAST row clips past the stored previous
     // piece's start byte (slot byte `off`) -- b = min(b, prev_y1 - 1), sentinels included.
     def ts_clamp2_lo frb, cnt, fbp, off @ doclamp, noprev, prev_y, prev_start, end {
-        hex.if0 1, cnt, noprev
+        .if0_cnt cnt, noprev                    // P10 G2: {0, 8} -- the base flag is no piece
         hex.ptr_add fbp, off
         frame.read_byte5 prev_y, fbp
         hex.ptr_sub fbp, off
@@ -922,7 +971,7 @@ ns frame {
     // V5 -- write one 4-byte piece [y1][y2][cls][bpid] at slot offset `off` + count*4, leaving
     // the slot pointer where it was. count (0 or 1) lives in the flag cell `cnt`.
     def ts_piece_wr cnt, fbp, off, fy1, fy2, cls, bpid @ first_piece, end {
-        hex.if0 1, cnt, first_piece
+        .if0_cnt cnt, first_piece               // P10 G2: {0, 8} -- the base flag is no piece
         hex.ptr_add fbp, off+PIECE_BYTES
         frame.write_byte_and_inc5 fbp, fy1
         frame.write_byte_and_inc5 fbp, fy2
@@ -1039,7 +1088,9 @@ ns frame {
     // farther segs (R40, the 28-column phantom face). The direction matters because the region
     // BEHIND a piece is derived from the stored bytes: off-screen ABOVE -> (1, 0), BELOW ->
     // (255, 254). Both keep y1 > y2, so lines_step_load rejects them before drawing.
-    def ts_piece_store rowa, rowb, cvh, oy1, oy2, flagv, flagbyte, flagp, slotp, slotoff, cls, bpid, skip \
+    //   ovab/ovbe  P10 G2: where an entirely off-screen piece goes -- ABOVE the screen / BELOW it.
+    //              `skip`, or the side's BASE store (ts_step_faces: up_ov above, lo_ov below)
+    def ts_piece_store rowa, rowb, cvh, oy1, oy2, flagv, flagbyte, flagp, slotp, slotoff, cls, bpid, skip, ovab, ovbe \
             @ vis_ok, onscr, store, off_above, off_below, y1_clamp0, y1_done, y2_clamp, write {
         // ts-idea 3: rows are 5-nibble sign-extended 16-bit values; every compare, sign
         // test and byte-feeding write below is value-identical at width 5. oy1/oy2 keep
@@ -1059,9 +1110,10 @@ ns frame {
         // What is given up is the REGION BEHIND the sentinel, which was derived from the stored
         // bytes. Measured cost of that: ~90 px on a near corridor view, against a whole door.
         // ⚠ MIRRORED in reference_model.py's ups/los store (`if a <= b and 0 <= b and a <= Hs`).
-        ;skip
+        // P10 G2: what IS kept is the region behind it, as the column's BASE -- see ts_base_store
+        ;ovab
       off_below:
-        ;skip
+        ;ovbe
       store:
         hex.mov 5, oy1, rowa
         hex.sign 5, rowa, y1_clamp0, y1_done
@@ -1079,8 +1131,8 @@ ns frame {
     }
 
     def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
-            @ nofaces, dofaces, budget_full, budget_ok, col_loop, col_body, col_work, col_next, up_skip, up_do, up_gates_ok, up_lip_ok, up_not_lip, up_riser_rows, lo_skip, lo_do, lo_gates_ok, lo_lip_ok, lo_not_lip, lo_riser_rows, piece_max, c_lip, c_stk, end \
-            < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, seg_bpid, tsf_col_x, tsf_cviewh1, tsf_drawn_b, tsf_drawn_p, tsf_drawn_v, tsf_face_cap, tsf_face_dist, tsf_face_norm, tsf_face_scale, tsf_face_scalestep, tsf_frac_l1, tsf_frac_l2, tsf_frac_u1, tsf_frac_u2, tsf_lip_u, tsf_lip_l, tsf_out_y1, tsf_out_y2, tsf_row_a, tsf_row_b, tsf_sfflag_b, tsf_sfflag_p, tsf_sfflag_v, tsf_sfslot_b, tsf_sfslot_p, tsf_slot_idx, tsf_step_l1, tsf_step_l2, tsf_step_u1, tsf_step_u2, tsf_wtl1, tsf_wtl2, tsf_wtu1, tsf_wtu2 {
+            @ nofaces, dofaces, budget_full, budget_ok, col_loop, col_body, col_work, col_next, up_skip, up_do, up_gates_ok, up_lip_ok, up_not_lip, up_riser_rows, up_ov, lo_skip, lo_do, lo_gates_ok, lo_lip_ok, lo_not_lip, lo_riser_rows, lo_ov, piece_max, c_lip, c_stk, end \
+            < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, seg_bpid, tsf_col_x, tsf_cviewh1, tsf_drawn_b, tsf_drawn_p, tsf_drawn_v, tsf_face_cap, tsf_face_dist, tsf_face_norm, tsf_face_scale, tsf_face_scalestep, tsf_frac_l1, tsf_frac_l2, tsf_frac_u1, tsf_frac_u2, tsf_lip_u, tsf_lip_l, tsf_out_y1, tsf_out_y2, tsf_row_a, tsf_row_b, tsf_sfflag_b, tsf_sfflag_p, tsf_sfflag_v, tsf_sfslot_b, tsf_sfslot_p, tsf_slot_idx, tsf_step_l1, tsf_step_l2, tsf_step_u1, tsf_step_u2, tsf_wtl1, tsf_wtl2, tsf_wtu1, tsf_wtu2, tsf_base_p {
         hex.if0 2, seg_fmask, nofaces           // this boundary carries no face at all (compile-time)
         hex.set 2, tsf_face_cap, budget
         hex.cmp 2, n_face, tsf_face_cap, dofaces, nofaces, nofaces
@@ -1141,7 +1193,10 @@ ns frame {
         // V5: the flag nibbles are per-side COUNTS (0..1+stack); slot layout is 4-byte pieces
         // [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 -- all inside the 16-byte stride.
         hex.if0 1, seg_fmask, up_skip           // nibble 0 = has an upper face
-        hex.cmp 1, tsf_sfflag_v, piece_max, up_do, up_skip, up_skip // upper count < 1+stack -> room
+        // P10 G2: bit 3 of the count nibble is the BASE flag, so a V5 column has room at a count
+        // of 0 or 1 with or without it -- {0, 1, 8, 9}, one hex.if_flags dispatch
+        rep(1-stack, k) hex.cmp 1, tsf_sfflag_v, piece_max, up_do, up_skip, up_skip // upper count < 1+stack -> room
+        rep(stack, k) hex.if_flags tsf_sfflag_v, 0x0303, up_skip, up_do
       up_do:
         // V5-DROP FAR GATE: a LIP farther than dlipscale projects to a sub-pixel line
         // -- skip the whole piece. Risers are never lip-gated (they ARE the stairs).
@@ -1151,7 +1206,7 @@ ns frame {
         // 25M-CAP STACK FAR GATE: a SECOND stacked piece only when the boundary is near enough
         // (scale >= dstkscale, one unsigned compare on the register the DDA already carries).
         // tsf_out_y1 is dead until up_store, so it serves as the constant cell.
-        rep(deg*stack, k) hex.if0 1, tsf_sfflag_v, up_gates_ok    // the FIRST piece is never gated
+        rep(deg*stack, k) .if0_cnt tsf_sfflag_v, up_gates_ok      // the FIRST piece is never gated
         rep(deg*stack, k) hex.cmp 6, tsf_face_scale, c_stk, up_skip, up_gates_ok, up_gates_ok    // ts-idea 1
       up_gates_ok:
         rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtu1, tsf_wtu2, centeryfix_c
@@ -1176,16 +1231,17 @@ ns frame {
         // bytes: fully ABOVE the screen -> (1, 0) (the region behind starts at ~row 0); fully
         // BELOW -> (255, 254) (the region behind is off-screen). Both keep y1 > y2, so
         // lines_step_load still rejects them before drawing.
-        .ts_piece_store tsf_row_a, tsf_row_b, tsf_cviewh1, tsf_out_y1, tsf_out_y2, tsf_sfflag_v, tsf_sfflag_v, tsf_sfflag_p, tsf_sfslot_p, 0, seg_ucls, seg_bpid, up_skip
+        .ts_piece_store tsf_row_a, tsf_row_b, tsf_cviewh1, tsf_out_y1, tsf_out_y2, tsf_sfflag_v, tsf_sfflag_v, tsf_sfflag_p, tsf_sfslot_p, 0, seg_ucls, seg_bpid, up_skip, up_ov, up_skip
       up_skip:
         // ---- the LOWER face -------------------------------------------------------------------
         hex.if0 1, seg_fmask + 1*dw, lo_skip
-        hex.cmp 1, tsf_sfflag_v + 1*dw, piece_max, lo_do, lo_skip, lo_skip   // lower count < 1+stack -> room
+        rep(1-stack, k) hex.cmp 1, tsf_sfflag_v + 1*dw, piece_max, lo_do, lo_skip, lo_skip   // lower count < 1+stack -> room
+        rep(stack, k) hex.if_flags tsf_sfflag_v + 1*dw, 0x0303, lo_skip, lo_do                 // (P10 G2: as the upper's)
       lo_do:
         rep(deg, k) hex.if0 1, tsf_lip_l, lo_lip_ok        // ts-idea 1: per-seg lip mode, lower
         rep(deg, k) hex.cmp 6, tsf_face_scale, c_lip, lo_skip, lo_lip_ok, lo_lip_ok    // vs the BAKED constant
       lo_lip_ok:
-        rep(deg*stack, k) hex.if0 1, tsf_sfflag_v + 1*dw, lo_gates_ok   // ... and the LOWER side's mirror
+        rep(deg*stack, k) .if0_cnt tsf_sfflag_v + 1*dw, lo_gates_ok     // ... and the LOWER side's mirror
         rep(deg*stack, k) hex.cmp 6, tsf_face_scale, c_stk, lo_skip, lo_gates_ok, lo_gates_ok    // ts-idea 1
       lo_gates_ok:
         rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtl1, tsf_wtl2, centeryfix_c
@@ -1200,7 +1256,7 @@ ns frame {
       lo_not_lip:
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
         rep(stack, k) .ts_clamp2_lo tsf_row_b, tsf_sfflag_v + 1*dw, tsf_sfslot_p, 2*PIECE_BYTES
-        .ts_piece_store tsf_row_a, tsf_row_b, tsf_cviewh1, tsf_out_y1, tsf_out_y2, tsf_sfflag_v + 1*dw, tsf_sfflag_v, tsf_sfflag_p, tsf_sfslot_p, 2*PIECE_BYTES, seg_lcls, seg_bpid, lo_skip
+        .ts_piece_store tsf_row_a, tsf_row_b, tsf_cviewh1, tsf_out_y1, tsf_out_y2, tsf_sfflag_v + 1*dw, tsf_sfflag_v, tsf_sfflag_p, tsf_sfslot_p, 2*PIECE_BYTES, seg_lcls, seg_bpid, lo_skip, lo_skip, lo_ov
       lo_skip:
       col_next:
         hex.ptr_add tsf_drawn_p, 1
@@ -1212,6 +1268,16 @@ ns frame {
         ;col_loop
       nofaces:
         ;end
+        // P10 G2: the off-screen exits of the two ts_piece_store calls. The CEILING base is an upper
+        // piece entirely ABOVE the screen, the FLOOR base a lower one entirely BELOW it (the other two
+        // cases hide the region behind them too). A non-V5 build never reaches either (`stack` = 0
+        // never sets the flag the reader strips), so the stores are rep-gated with it.
+      up_ov:
+        rep(stack, k) .ts_base_store tsf_sfflag_v, tsf_sfflag_v, tsf_sfflag_p, VIEW_W, seg_bpid, tsf_base_p
+        ;up_skip
+      lo_ov:
+        rep(stack, k) .ts_base_store tsf_sfflag_v + 1*dw, tsf_sfflag_v, tsf_sfflag_p, 2*VIEW_W, seg_bpid, tsf_base_p
+        ;lo_skip
       piece_max: hex.vec 1, 1+stack             // V5: pieces allowed per side per column
       // ts-idea 1: the two gate thresholds are BAKED data, like piece_max above -- the
       // per-column `hex.set 8` that used to materialize them is deleted (4 sites, 243
@@ -2095,6 +2161,89 @@ ns frame {
         .add8_chain p2_prodf, p2_stepf               //   of space, ~170 fewer executed per call
     }
 
+    // P10 G2: a count nibble of 8..15 carries the side's BASE flag (frame.ts_base_store) -- strip it,
+    // so the splices and the ditto signature see the bare count, and read the base pid from sfbase,
+    // `off` cells past this column's sfflag byte (sfbase is declared right after sfflag)
+    def lines_base_split cnt, ov, off @ has, end < p2_sffp, p2_basep {
+        hex.if_flags cnt, 0xff00, end, has
+      has:
+        hex.xor_by cnt, 8
+        hex.mov w/4, p2_basep, p2_sffp
+        hex.ptr_add p2_basep, off
+        frame.read_byte5 ov, p2_basep             // (read_byte5 zeroes `ov` first)
+      end:
+    }
+
+    // P10 G2: the BASE region of a column with a base shows the base's surface -- its ceiling (floor)
+    // lists replace the claim's, the oracle's `_region_paint` of `cbase` (`fbase`)
+    def lines_base_ids cbufa, cbufd, fbufa, fbufd @ no_c, no_f < p2_bcpid, p2_bfpid {
+        hex.if0 PID_NIBBLES, p2_bcpid, no_c
+        .lines_pid_ids_c p2_bcpid, cbufa, cbufd
+      no_c:
+        hex.if0 PID_NIBBLES, p2_bfpid, no_f
+        .lines_pid_ids_f p2_bfpid, fbufa, fbufd
+      no_f:
+    }
+
+    // P10 G2: the column's EFFECTIVE ceiling pid -- its ceiling base when it has one, else the claim's:
+    // the sky test must ask about the surface the base region really shows
+    def lines_eff_ceil dst @ end < pval8, p2_bcpid {
+        hex.mov PID_NIBBLES, dst, pval8
+        hex.if0 PID_NIBBLES, p2_bcpid, end
+        hex.mov PID_NIBBLES, dst, p2_bcpid
+      end:
+    }
+
+    // the sky pair ids of sky column `soff` -- lines_sky_ceil_ids's sky path, for any caller
+    def lines_sky_pair_ids sky_base_id, soff, cbufa, cbufd {
+        hex.zero w/4 - 2, cbufa + 2*dw          // Z3: the mov below zeroes the low 2 itself
+        hex.mov 2, cbufa, soff
+        hex.shl_bit w/4, cbufa                  // u*2: the ids interleave asc,desc
+        hex.add_constant w/4, cbufa, sky_base_id
+        hex.mov w/4, cbufd, cbufa
+        hex.add_constant w/4, cbufd, 1
+    }
+
+    // P10 G8: the SKY behind a stacked piece. A piece's region is its back sector's ceiling, and when
+    // that ceiling is F_SKY1 the oracle paints SKY there (`_region_paint`, the V2 rule) -- where the
+    // shipped binary walked the F_SKY1 FLAT's plane lists (blocked54: 60 px at (-416, 128) facing
+    // north, the start room's window lips onto sector 18). Per column with an upper piece: each
+    // piece's sky flag (p2_u1sk / p2_u2sk, read by stream.steps_splice_c through lines_region_ids_c)
+    // and, when one is set, the column's sky pair ids and its sky column in `soff` -- the ditto
+    // signature's sky rung, so two columns with a sky region ditto only on the same sky column.
+    def lines_piece_sky sky_base_id, x, skb, soff @ chk2, chk_any, have, ids, end \
+            < ucnt, u1bp, u2bp, p2_issky, p2_u1sk, p2_u2sk, p2_skyca, p2_skycd {
+        hex.zero 2, p2_u1sk
+        hex.zero 2, p2_u2sk
+        hex.if0 1, ucnt, end                    // no upper piece: no piece region
+        skypid.lookup p2_u1sk, u1bp
+        hex.if_flags ucnt, 0x0004, chk_any, chk2    // a count of 2: the second piece's too
+      chk2:
+        skypid.lookup p2_u2sk, u2bp
+      chk_any:
+        hex.if1 2, p2_u1sk, have
+        hex.if0 2, p2_u2sk, end
+      have:
+        hex.if1 2, p2_issky, ids                // the base ceiling is sky: soff is this column's already
+        skyoff.lookup soff, x
+        frame.add2_chain soff, skb
+      ids:
+        .lines_sky_pair_ids sky_base_id, soff, p2_skyca, p2_skycd
+      end:
+    }
+
+    // P10 G8: a stacked piece's REGION ids -- its back pid's ceiling lists, or this column's SKY pair
+    // when that ceiling is F_SKY1 (`sk`: lines_piece_sky's flag for the piece; 0 in a sky-less build)
+    def lines_region_ids_c pidreg, sk, cbufa, cbufd @ plane, end < p2_skyca, p2_skycd {
+        hex.if0 2, sk, plane
+        hex.mov w/4, cbufa, p2_skyca
+        hex.mov w/4, cbufd, p2_skycd
+        ;end
+      plane:
+        .lines_pid_ids_c pidreg, cbufa, cbufd
+      end:
+    }
+
     // idea 11 helpers: seed per seg, step at skipcol, loaders read the shared globals.
     def lines_steps_seed x1 @ sidx, bteam, end_seed < sfflag, sfslot, p2_sffp, p2_sfsp {
         hex.set w/4, bteam, sfflag
@@ -2134,7 +2283,7 @@ ns frame {
     def lines_steps_load2 \
             @ up_one, up_none, lo_read, lo_one, sfslot_p, flags_v, no_pieces, end \
             < p2_sffp, p2_sfsp, p2_ldirty, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
-              lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp {
+              lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, p2_bcpid, p2_bfpid {
         // idea 16: read the flags FIRST. The no-piece column is the common case, and when
         // the output registers are already all-zero (p2_ldirty == 0) the 18-call zero
         // preamble (~615 executed ops) is pure waste. The dirty flag is what keeps the V4
@@ -2162,9 +2311,15 @@ ns frame {
         hex.zero 2, l2y2
         hex.zero 2, l2cls
         hex.zero PID_NIBBLES, l2bp
+        hex.zero PID_NIBBLES, p2_bcpid            // P10 G2: the bases, zeroed when absent (the signature rule)
+        hex.zero PID_NIBBLES, p2_bfpid
         hex.set 1, p2_ldirty, 1
         hex.mov 1, ucnt, flags_v                // nibble 0 = upper count, nibble 1 = lower
         hex.mov 1, lcnt, flags_v + 1*dw
+        // P10 G2: bit 3 of a count is the side's BASE -- a column holding only bases takes this path
+        // too (its flags byte is not 0), and leaves it with bare counts and the base pids
+        .lines_base_split ucnt, p2_bcpid, VIEW_W
+        .lines_base_split lcnt, p2_bfpid, 2*VIEW_W
         hex.mov w/4, sfslot_p, p2_sfsp           // idea 11: working copy -- the and_incs mutate it
         hex.if0 1, ucnt, up_none
         frame.read0_byte_and_inc u1y1, sfslot_p
@@ -2233,6 +2388,8 @@ ns frame {
         hex.zero 2, l2y2
         hex.zero 2, l2cls
         hex.zero PID_NIBBLES, l2bp
+        hex.zero PID_NIBBLES, p2_bcpid
+        hex.zero PID_NIBBLES, p2_bfpid
         hex.zero 1, p2_ldirty                   // the rare dirty->clean transition
         ;end
         // idea 17 size-freeze: the 30 zero-eliding reads shrank this leaf by 70 ops
@@ -2242,14 +2399,14 @@ ns frame {
     }
 
     // V4 -- this column's sprite fragment(s), read back from the write-once slot the thing pre-pass
-    // filled. M7 P1.4: a fragment is THREE bytes, [s][blk lo][blk hi] -- its thing's slot and its
+    // filled. M7 P1.4: a fragment is THREE bytes (P10 G1: + the clip counts), [s][blk lo][blk hi] -- its thing's slot and its
     // bank block (stream.frag_derive derives the rows) -- where it was seven. A column WITHOUT a
     // sprite pays only the one `sprflag` read, and that is most columns. All four registers are
     // ZEROED when absent: they are the column's ditto signature too, and a stale value from an
     // earlier column would let an empty column ditto a sprite column (a real fragment's slot id is
     // never 0 -- ids start at 1 -- so presence is encoded in the values).
     def lines_spr_load sprfl, s, sblk, sb, sblkb \
-            @ spslot_p, has_slot_b, no_frags, end < p2_spfp, p2_sspp, p2_sdirty {
+            @ spslot_p, has_slot_b, no_frags, no_c, read_b, end < p2_spfp, p2_sspp, p2_sdirty, p2_sc, p2_scb, p2_s3, p2_sblk3, p2_scc {
         // idea 16, the sprite twin of load2's dirty skip. sprfl's old explicit zero was
         // REDUNDANT outright -- hex.read_byte zeroes its dst before xoring the value in.
         frame.read_byte5 sprfl, p2_spfp             // idea 11
@@ -2258,19 +2415,36 @@ ns frame {
         hex.zero 4, sblk
         hex.zero 2, sb
         hex.zero 4, sblkb
+        hex.zero 2, p2_sc                       // P10 G1: the snapshots (zero when absent: the signature rule)
+        hex.zero 2, p2_scb
+        hex.zero 2, p2_s3                       // P10 G3: slot C's fragment and snapshot
+        hex.zero 4, p2_sblk3
+        hex.zero 2, p2_scc
         hex.set 1, p2_sdirty, 1
         hex.mov w/4, spslot_p, p2_sspp           // idea 11: working copy
         frame.read0_byte_and_inc s, spslot_p
         frame.read0_byte_and_inc sblk, spslot_p
         frame.read0_byte_and_inc sblk + 2*dw, spslot_p
-        // V4b: sprfl == 2 -> the SECOND fragment at byte offset 8 of the same slot
+        frame.read0_byte_and_inc p2_sc, spslot_p    // P10 G1: byte 3, the record's snapshot (frame.rec_clip_read)
+        // V4b: sprfl >= 2 -> the SECOND fragment at byte offset 8 of the same slot; P10 G3: sprfl == 3 -> the
+        // THIRD at byte 4, between them (read first: the four fragments' bytes run A, C, B)
         hex.mov 2, has_slot_b, sprfl
         hex.dec 2, has_slot_b
         hex.if0 2, has_slot_b, end
-        hex.ptr_add spslot_p, 5                 // bytes 0-2 read -> skip 3-7 to land on 8
+        hex.dec 2, has_slot_b
+        hex.if0 2, has_slot_b, no_c
+        frame.read0_byte_and_inc p2_s3, spslot_p
+        frame.read0_byte_and_inc p2_sblk3, spslot_p
+        frame.read0_byte_and_inc p2_sblk3 + 2*dw, spslot_p
+        frame.read0_byte_and_inc p2_scc, spslot_p   // P10 G1: byte 7, C's snapshot
+        ;read_b
+      no_c:
+        hex.ptr_add spslot_p, 4                 // bytes 0-3 read -> skip 4-7 to land on 8
+      read_b:
         frame.read0_byte_and_inc sb, spslot_p
         frame.read0_byte_and_inc sblkb, spslot_p
         frame.read0_byte_and_inc sblkb + 2*dw, spslot_p
+        frame.read0_byte_and_inc p2_scb, spslot_p   // P10 G1: byte 11, B's snapshot
         ;end
       spslot_p: hex.vec w/4
       has_slot_b: hex.vec 2
@@ -2281,6 +2455,11 @@ ns frame {
         hex.zero 4, sblk
         hex.zero 2, sb
         hex.zero 4, sblkb
+        hex.zero 2, p2_sc
+        hex.zero 2, p2_scb
+        hex.zero 2, p2_s3
+        hex.zero 4, p2_sblk3
+        hex.zero 2, p2_scc
         hex.zero 1, p2_sdirty                   // the rare dirty->clean transition
         ;end
         // idea 17 size-freeze: its zero-eliding reads (14 in this leaf then, of 30) shrank it by
@@ -2292,8 +2471,8 @@ ns frame {
 
     // M13-15M: the ID twin — identical claim/cache logic, lines_pid_ids instead of addresses.
     def lines_col_plane_ids cbufa, cbufd, fbufa, fbufd \
-            @ own, have, recalc, pdone, end \
-            < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
+            @ own, have, ck_c, ck_f, recalc, pdone, end \
+            < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww, p2_bcpid, p2_bfpid, p2_cbcpid, p2_cbfpid {
         rep(2-PID_BYTES, k) frame.read_byte5 pval8, pptr
         rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, pval8, pptr
         hex.if0 PID_NIBBLES, pval8, own
@@ -2308,10 +2487,19 @@ ns frame {
         hex.set 1, tsstop, 1
       have:
         hex.ptr_add pptr, PID_BYTES
-        hex.cmp PID_NIBBLES, pval8, cpid, recalc, end, recalc
+        hex.cmp PID_NIBBLES, pval8, cpid, recalc, ck_c, recalc
+      ck_c:
+        // P10 G2: the four ids depend on the column's BASES too (lines_steps_load2 read them, before
+        // this), so they join the cache key -- a run of base columns recomputes at its two ends only
+        hex.cmp PID_NIBBLES, p2_bcpid, p2_cbcpid, recalc, ck_f, recalc
+      ck_f:
+        hex.cmp PID_NIBBLES, p2_bfpid, p2_cbfpid, recalc, end, recalc
       recalc:
         hex.mov PID_NIBBLES, cpid, pval8
+        hex.mov PID_NIBBLES, p2_cbcpid, p2_bcpid
+        hex.mov PID_NIBBLES, p2_cbfpid, p2_bfpid
         .lines_pid_ids pval8, cbufa, cbufd, fbufa, fbufd
+        .lines_base_ids cbufa, cbufd, fbufa, fbufd
       end:
     }
 
@@ -2480,8 +2668,8 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, w1r, wpxstride, pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, spremit, ascode, sky_base_id, stack, deg, dslvw \
-            @ col_loop, col_body, notdrawn, skipcol, ret, sliver_done, sliver_yes, screen_full, emit_full, ck_fstart, ck_grain, ck_sky, ck_face_uy1, ck_face_uy2, ck_face_ucol, ck_face_ly1, ck_face_ly2, ck_face_lcol, ck_spr_s, ck_spr_blk, ck_plane, emit_ditto, col_emitted, ck_sprb_s, ck_sprb_blk, ck_piece_ucnt, ck_piece_lcnt, ck_upper_pieces, ck_u1y2, ck_u1cls, ck_u1bp, ck_u2y1, ck_u2y2, ck_u2cls, ck_u2bp, ck_lower_pieces, ck_l1y2, ck_l1cls, ck_l1bp, ck_l2y1, ck_l2y2, ck_l2cls, ck_l2bp, pieces_done, ck_grain3, ck_wlen, gate_ucnt, gate_lcnt, gate_ufl, gate_lfl, ck_grain2 \
-            < viewangle, seg_segangle, sgn_aff, ceilfix, floorfix, viewz, seg_lit, seg_lit2, seg_wstrip, wstripbase, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, gnrow2, gnrow3, x1, x2, x, dbase, dptr, dval8, pval8, normalangle, rw_distance, scale, scalestep, top, bottom, seg_ret2, full, n_drawn, vieww, w1rslv, wnoff, p2_cVH, p2_cbufa, p2_cbufd, p2_cexcl, p2_cw16, p2_dbot, p2_dcexcl, p2_dfstart, p2_dgn, p2_dgn2, p2_dgn3, p2_dl1bp, p2_dl1cls, p2_dl1y1, p2_dl1y2, p2_dl2bp, p2_dl2cls, p2_dl2y1, p2_dl2y2, p2_dlcnt, p2_dlcol, p2_dly1, p2_dly2, p2_dpid, p2_ds, p2_dsb, p2_dsblk, p2_dsblkb, p2_dscale, p2_dsoff, p2_dsstep, p2_dtop, p2_du1bp, p2_du1cls, p2_du1y1, p2_du1y2, p2_du2bp, p2_du2cls, p2_du2y1, p2_du2y2, p2_ducnt, p2_ducol, p2_duy1, p2_duy2, p2_dvalid, p2_face_flags, p2_fbufa, p2_fbufd, p2_fstart, p2_gnrow, p2_issky, p2_lcol, p2_ldirty, p2_lfl, p2_ly1, p2_ly2p1, p2_one, p2_s, p2_sb, p2_sblk, p2_sblkb, p2_sdirty, p2_skb, p2_sliver_cap, p2_sliver_w, p2_soff, p2_sprfl, p2_ucol, p2_ufl, p2_uy1, p2_uy2p1, p2_wlen, p2_wtc8, p2_wtf8, p2_xkey {
+            @ col_loop, col_body, notdrawn, skipcol, ret, sliver_done, sliver_yes, screen_full, emit_full, ck_fstart, ck_grain, ck_sky, ck_face_uy1, ck_face_uy2, ck_face_ucol, ck_face_ly1, ck_face_ly2, ck_face_lcol, ck_spr_s, ck_spr_blk, ck_plane, emit_ditto, col_emitted, ck_sprb_s, ck_sprb_blk, ck_piece_ucnt, ck_piece_lcnt, ck_upper_pieces, ck_u1y2, ck_u1cls, ck_u1bp, ck_u2y1, ck_u2y2, ck_u2cls, ck_u2bp, ck_lower_pieces, ck_l1y2, ck_l1cls, ck_l1bp, ck_l2y1, ck_l2y2, ck_l2cls, ck_l2bp, pieces_done, ck_grain3, ck_wlen, gate_ucnt, gate_lcnt, gate_ufl, gate_lfl, ck_grain2, ck_ovf, ck_pid, ck_sc, ck_scb, ck_s3, ck_sblk3, ck_scc \
+            < viewangle, seg_segangle, sgn_aff, ceilfix, floorfix, viewz, seg_lit, seg_lit2, seg_wstrip, wstripbase, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, gnrow2, gnrow3, x1, x2, x, dbase, dptr, dval8, pval8, normalangle, rw_distance, scale, scalestep, top, bottom, seg_ret2, full, n_drawn, vieww, w1rslv, wnoff, p2_cVH, p2_cbufa, p2_cbufd, p2_cexcl, p2_cw16, p2_dbot, p2_dcexcl, p2_dfstart, p2_dgn, p2_dgn2, p2_dgn3, p2_dl1bp, p2_dl1cls, p2_dl1y1, p2_dl1y2, p2_dl2bp, p2_dl2cls, p2_dl2y1, p2_dl2y2, p2_dlcnt, p2_dlcol, p2_dly1, p2_dly2, p2_dpid, p2_ds, p2_dsb, p2_dsblk, p2_dsblkb, p2_dscale, p2_dsoff, p2_dsstep, p2_dtop, p2_du1bp, p2_du1cls, p2_du1y1, p2_du1y2, p2_du2bp, p2_du2cls, p2_du2y1, p2_du2y2, p2_ducnt, p2_ducol, p2_duy1, p2_duy2, p2_dvalid, p2_face_flags, p2_fbufa, p2_fbufd, p2_fstart, p2_gnrow, p2_issky, p2_lcol, p2_ldirty, p2_lfl, p2_ly1, p2_ly2p1, p2_one, p2_s, p2_sb, p2_sblk, p2_sblkb, p2_sdirty, p2_skb, p2_sliver_cap, p2_sliver_w, p2_soff, p2_sprfl, p2_ucol, p2_ufl, p2_uy1, p2_uy2p1, p2_wlen, p2_wtc8, p2_wtf8, p2_xkey, p2_ecpid, p2_bcpid, p2_bfpid, p2_dbcpid, p2_dbfpid, p2_sc, p2_scb, p2_dsc, p2_dscb, p2_s3, p2_sblk3, p2_scc, p2_ds3, p2_dsblk3, p2_dscc {
         // ==========================================================================================
         // == 1. PER-SEG SETUP (hoisted out of the column loop) ==
         // angle/scale/distance, the sliver flag, the map-unit world heights, the band bases.
@@ -2558,18 +2746,23 @@ ns frame {
         // projection's cost; see docs/handoff-m13-2s-fast.md §1).
         rep(ptwice, k) .lines_projcall centery*0x10000, viewh1, p2_dtop, p2_dbot
         .clip_rows p2_cexcl, p2_fstart, top, bottom, p2_cVH
+        // V5: the stacked load -- RAW slot bytes + per-side counts; the emit splices clip.
+        // P10 G2: it runs FIRST, because it also reads the column's BASES, and the plane ids need them
+        rep(steps*stack, k) .lines_steps_load2
         // M13-2S rung 3a: which SURFACES this column's plane regions belong to (see lines_col_plane)
         rep(pnear*(1-ascode), k) .lines_col_plane half_slots, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         rep(pnear*ascode, k) .lines_col_plane_ids p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
+        // P10 G2: the sky test asks about the EFFECTIVE ceiling -- the base's, when the column has one
+        .lines_eff_ceil p2_ecpid
         rep(sky, k) .lines_sky_base p2_skb
-        rep(sky*(1-ascode), k) .lines_sky_ceil skystride, half_slots, skyall, p2_cbufa, p2_cbufd, x, p2_skb, p2_soff, p2_issky, pval8
-        rep(sky*ascode, k) .lines_sky_ceil_ids sky_base_id, skyall, p2_cbufa, p2_cbufd, x, p2_skb, p2_soff, p2_issky, pval8
+        rep(sky*(1-ascode), k) .lines_sky_ceil skystride, half_slots, skyall, p2_cbufa, p2_cbufd, x, p2_skb, p2_soff, p2_issky, p2_ecpid
+        rep(sky*ascode, k) .lines_sky_ceil_ids sky_base_id, skyall, p2_cbufa, p2_cbufd, x, p2_skb, p2_soff, p2_issky, p2_ecpid
+        // P10 G8: ... and a stacked piece's region may be sky as well
+        rep(sky*ascode*steps*stack, k) .lines_piece_sky sky_base_id, x, p2_skb, p2_soff
         // V3: this column's step faces, clipped to the regions this wall leaves open and shaded.
         // Must run BEFORE the ditto decision -- a face changes a column's CONTENT without changing
         // its clip rows, the third feature in a row to hit that (see the ck_grain chain).
         rep(steps*(1-stack), k) .lines_step_load p2_face_flags, p2_ufl, p2_uy1, p2_uy2p1, p2_ucol, p2_lfl, p2_ly1, p2_ly2p1, p2_lcol, x, p2_cexcl, p2_fstart
-        // V5: the stacked load -- RAW slot bytes + per-side counts; the emit splices clip
-        rep(steps*stack, k) .lines_steps_load2
         // ablate "sprnoemit" (measurement only): keep the RECORD half, never read the
         // fragments back. The frame is then identical to a things=False build, so the
         // delta against p2_one prices the record half ALONE -- by subtraction from a
@@ -2670,7 +2863,20 @@ ns frame {
         // a real fragment's slot id is never 0, so presence is encoded in the values).
         rep(things, k) hex.cmp 2, p2_sb, p2_dsb, emit_full, ck_sprb_blk, emit_full
       ck_sprb_blk:
-        rep(things, k) hex.cmp 4, p2_sblkb, p2_dsblkb, emit_full, ck_piece_ucnt, emit_full
+        rep(things, k) hex.cmp 4, p2_sblkb, p2_dsblkb, emit_full, ck_sc, emit_full
+      ck_sc:
+        // P10 G1: ... and the records' SNAPSHOTS -- one thing's adjacent columns can hold different nearer
+        // pieces, so a fragment's clip window is not the slot's
+        rep(things, k) hex.cmp 2, p2_sc, p2_dsc, emit_full, ck_scb, emit_full
+      ck_scb:
+        rep(things, k) hex.cmp 2, p2_scb, p2_dscb, emit_full, ck_s3, emit_full
+      ck_s3:
+        // P10 G3: ... and slot C's fragment and snapshot (zero when absent)
+        rep(things, k) hex.cmp 2, p2_s3, p2_ds3, emit_full, ck_sblk3, emit_full
+      ck_sblk3:
+        rep(things, k) hex.cmp 4, p2_sblk3, p2_dsblk3, emit_full, ck_scc, emit_full
+      ck_scc:
+        rep(things, k) hex.cmp 2, p2_scc, p2_dscc, emit_full, ck_piece_ucnt, emit_full
       ck_piece_ucnt:
         // V5: ... and the STACKED-piece signature. Counts first; the field compares are gated
         // on the (equal) count, so pieceless columns pay two compares and two if0s only.
@@ -2713,6 +2919,11 @@ ns frame {
         rep(stack, k) hex.cmp PID_NIBBLES, l2bp, p2_dl2bp, emit_full, pieces_done, emit_full
       pieces_done:
       ck_plane:
+        // P10 G2: ... the same BASES (zero when absent, like the pieces)
+        rep(stack, k) hex.cmp PID_NIBBLES, p2_bcpid, p2_dbcpid, emit_full, ck_ovf, emit_full
+      ck_ovf:
+        rep(stack, k) hex.cmp PID_NIBBLES, p2_bfpid, p2_dbfpid, emit_full, ck_pid, emit_full
+      ck_pid:
         // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
         rep(1-pnear, k) .lines_jmp emit_ditto
         rep(pnear, k) .lines_ditto_plane pval8, p2_dpid, emit_ditto, emit_full
@@ -2747,6 +2958,11 @@ ns frame {
         hex.sparse_mov HOT_PAD, 4, p2_dsblk, p2_sblk                  //   -- (slot, block), M7 P1.4
         hex.sparse_mov HOT_PAD, 2, p2_dsb, p2_sb                      // V4b: the second fragment's signature
         hex.sparse_mov HOT_PAD, 4, p2_dsblkb, p2_sblkb
+        hex.sparse_mov HOT_PAD, 2, p2_dsc, p2_sc                      // P10 G1: the snapshots' shadows
+        hex.sparse_mov HOT_PAD, 2, p2_dscb, p2_scb
+        hex.sparse_mov HOT_PAD, 2, p2_ds3, p2_s3                      // P10 G3: slot C's shadows
+        hex.sparse_mov HOT_PAD, 4, p2_dsblk3, p2_sblk3
+        hex.sparse_mov HOT_PAD, 2, p2_dscc, p2_scc
         hex.sparse_mov HOT_PAD, 2, p2_ducnt, ucnt                  // V5: the stacked-piece signature, unconditional
         hex.sparse_mov HOT_PAD, 2, p2_du1y1, u1y1                  // (the p2_dgn rule: the cells must never be unused)
         hex.sparse_mov HOT_PAD, 2, p2_du1y2, u1y2
@@ -2765,6 +2981,8 @@ ns frame {
         hex.sparse_mov HOT_PAD, 2, p2_dl2y2, l2y2
         hex.sparse_mov HOT_PAD, 2, p2_dl2cls, l2cls
         hex.sparse_mov HOT_PAD, PID_NIBBLES, p2_dl2bp, l2bp
+        hex.sparse_mov HOT_PAD, PID_NIBBLES, p2_dbcpid, p2_bcpid          // P10 G2: the bases' shadows
+        hex.sparse_mov HOT_PAD, PID_NIBBLES, p2_dbfpid, p2_bfpid
         hex.sparse_mov HOT_PAD, 2, p2_dsoff, p2_soff                  // V2: unconditional, same reason as p2_dgn
         hex.sparse_mov HOT_PAD, 2, p2_dgn2, gnrow2                 // W1R-LOD: the two extra key shadows
         hex.sparse_mov HOT_PAD, 2, p2_dgn3, gnrow3

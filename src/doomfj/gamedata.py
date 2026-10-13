@@ -412,6 +412,17 @@ _STATE_ROWS: Tuple[Tuple, ...] = (
     ('S_EXPLODE1', 'MISL', 32769, 8, 'A_Explode', 'S_EXPLODE2'),
     ('S_EXPLODE2', 'MISL', 32770, 6, None, 'S_EXPLODE3'),
     ('S_EXPLODE3', 'MISL', 32771, 4, None, 'S_NULL'),
+    # P10 (the owner, 2026-10-12: "add them both [the shotgun and the CHAINGUN], its fun to play with") -- info.c's
+    # chaingun rows, APPENDED as P9's were (every older index keeps its value): two bursts of A_FireCGun, each with its own
+    # flash frame (A_FireCGun picks flashstate + the burst: S_CHAIN1 -> S_CHAINFLASH1, S_CHAIN2 -> S_CHAINFLASH2)
+    ('S_CHAIN', 'CHGG', 0, 1, 'A_WeaponReady', 'S_CHAIN'),
+    ('S_CHAINDOWN', 'CHGG', 0, 1, 'A_Lower', 'S_CHAINDOWN'),
+    ('S_CHAINUP', 'CHGG', 0, 1, 'A_Raise', 'S_CHAINUP'),
+    ('S_CHAIN1', 'CHGG', 0, 4, 'A_FireCGun', 'S_CHAIN2'),
+    ('S_CHAIN2', 'CHGG', 1, 4, 'A_FireCGun', 'S_CHAIN3'),
+    ('S_CHAIN3', 'CHGG', 1, 0, 'A_ReFire', 'S_CHAIN'),
+    ('S_CHAINFLASH1', 'CHGF', 32768, 5, 'A_Light1', 'S_LIGHTDONE'),
+    ('S_CHAINFLASH2', 'CHGF', 32769, 5, 'A_Light2', 'S_LIGHTDONE'),
 )
 
 
@@ -485,6 +496,7 @@ ACTIONS: Dict[str, Action] = {a.name: a for a in (
     Action("A_Light2", "psprite", "psprite", "S3b", "extralight 2"),
     Action("A_GunFlash", "psprite", "psprite", "P9", "the launcher: the player's attack frame, the flash"),
     Action("A_FireMissile", "psprite", "psprite", "P9", "the launcher: one rocket, P_SpawnPlayerMissile"),
+    Action("A_FireCGun", "psprite", "psprite", "P10", "the chaingun: one bullet a burst frame, its flash frame"),
 )}
 
 
@@ -641,6 +653,7 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(8, "backpack", 20, MF_SPECIAL, "template"),
     ThingType(2005, "chainsaw", 20, MF_SPECIAL, "template"),
     ThingType(2003, "MT_MISC27", 20, MF_SPECIAL, "info.c"),           # P9: the rocket launcher
+    ThingType(2002, "MT_CHAINGUN", 20, MF_SPECIAL, "info.c"),         # P10: the chaingun
     # decor: radius and MF_SOLID from GZDoom (vanilla values); corpses and gore are not solid
     ThingType(43, "TorchTree", 16, MF_SOLID, "gzdoom"),
     ThingType(47, "Stalagtite", 16, MF_SOLID, "gzdoom"),
@@ -688,6 +701,8 @@ WEAPONINFO: Dict[int, WeaponInfo] = {w.weapon: w for w in (
                S_NULL),
     WeaponInfo(WP_MISSILE, "missile", AM_MISL, "S_MISSILEUP", "S_MISSILEDOWN", "S_MISSILE", "S_MISSILE1",
                "S_MISSILEFLASH1"),                                    # P9: the rocket launcher
+    WeaponInfo(WP_CHAINGUN, "chaingun", AM_CLIP, "S_CHAINUP", "S_CHAINDOWN", "S_CHAIN", "S_CHAIN1",
+               "S_CHAINFLASH1"),                                      # P10: the chaingun
 )}
 
 
@@ -697,8 +712,9 @@ WEAPONINFO: Dict[int, WeaponInfo] = {w.weapon: w for w in (
 # ================================================================================================
 MAX_FINITE_TICS = 14   # the schema stores tics in one nibble with 15 meaning "forever" (DOOM's -1)
 # States that CODE sets directly, outside any mobjinfo/weaponinfo entry point:
-#   p_pspr.c A_FirePistol / A_FireShotgun / (P9) A_GunFlash: P_SetMobjState (player->mo, S_PLAY_ATK2)
-CODE_ENTRY_STATES: Dict[str, str] = {"S_PLAY_ATK2": "mobj"}
+#   p_pspr.c A_FirePistol / A_FireShotgun / (P9) A_GunFlash / (P10) A_FireCGun: P_SetMobjState (player->mo, S_PLAY_ATK2);
+#   (P10) A_FireCGun's second burst frame sets its flash as flashstate + 1: P_SetPsprite (player, ps_flash, S_CHAINFLASH2)
+CODE_ENTRY_STATES: Dict[str, str] = {"S_PLAY_ATK2": "mobj", "S_CHAINFLASH2": "psprite"}
 
 
 def check_integrity(states: Mapping[str, State] = None, infos: Mapping[str, MobjInfo] = None,

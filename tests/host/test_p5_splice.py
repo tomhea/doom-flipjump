@@ -153,7 +153,8 @@ def test_the_tic_after_the_monsters_runs_projectiles_then_blood_then_the_bar(p5)
     out = WR.p5_tic_lines(p5["hrt"])
     assert out[:3] == ["stl.fcall pj_phase, pj_pret", "stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip"]
     # M7 P7: the level time ticks first inside the same guard (restartcode.lvtime_tic_lines)
-    assert out[3:-1] == ["hex.inc 4, lvtime"] + list(p5["hrt"]["bar"]) and out[-1] == "p5_bar_skip:"
+    from doomfj.restartcode import LVTIME_NIBBLES       # P10: 5 nibbles (world.LEVELTIME_BITS 20)
+    assert out[3:-1] == ["hex.inc %d, lvtime" % LVTIME_NIBBLES] + list(p5["hrt"]["bar"]) and out[-1] == "p5_bar_skip:"
 
 
 def test_the_persist_set_carries_p5s_cells():

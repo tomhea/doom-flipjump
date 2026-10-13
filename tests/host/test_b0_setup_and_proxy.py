@@ -13,6 +13,10 @@ GAP 1, THE PROXY'S VERDICT. The strafe proxy is a COST measurement; since P6 its
 touches what lies at the landing; a wall or a thing can refuse it), so b0 judges each proxy run against ITS OWN
 oracle and records "same picture as the normal run" as a note. `judge` is that rule; the R9 control is a proxy run
 whose own comparison is broken, which must FAIL.
+
+M7 P10: re-pointed from v6 to v9 -- the faster turn moved v6's replay (the aftermath's frame 1 no longer lands on v6's
+pose); the aftermath's setup (its pose and the three corpses) is the same in v6..v9, and v9 is a "final" / "final" set,
+so the modes are pinned to the set's own.
 """
 import importlib.util
 import json
@@ -22,19 +26,20 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SET_V6 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v6.json"
+SET_V9 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v9.json"
 AFTER = "R0-aftermath"
 PREFIX = 24          # the aftermath's first frames: the control parts inside them (asserted below)
 
 
 @pytest.fixture(scope="module", autouse=True)
-def v6_modes():
+def set_modes():
     """M7 P8a: b0's mirror takes the GAME tier's modes (wall_renderer: the binary under test), "final" since the P8a
-    flip; v6 is a "full" / "full" set (its B0 ran on blocked51), so these v6 tests pin the game modes to v6's"""
+    flip; the tests pin the game modes to the set's own (M7 P10: v9 records "final" / "final"; v6 was "full")"""
     from doomfj import wall_renderer as WR
+    d = json.loads(SET_V9.read_text(encoding="ascii"))
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(WR, "PLAYER_MODE", "full")
-        mp.setattr(WR, "MONSTER_MODE", "full")
+        mp.setattr(WR, "PLAYER_MODE", d["player_mode"])
+        mp.setattr(WR, "MONSTER_MODE", d["monster_mode"])
         yield
 
 
@@ -49,7 +54,7 @@ def b0s():
 
 @pytest.fixture(scope="module")
 def doc(b0s):
-    d = json.loads(SET_V6.read_text(encoding="ascii"))
+    d = json.loads(SET_V9.read_text(encoding="ascii"))
     saved = (b0s.S.SIGHT_RULE, b0s.S.MONSTER_TICS)
     b0s.S.use_sight_rule(d)
     yield d
@@ -67,7 +72,7 @@ def _run(doc, name):
 
 # ---- GAP 2: which runs have a setup, and what it pokes -------------------------------------------------------------
 def test_only_the_aftermath_has_a_setup_beyond_the_pose(b0s, doc):
-    """every v6 setup is a pose plus corpses; the aftermath alone has corpses -- no other run's setup is dropped"""
+    """every v9 setup is a pose plus corpses; the aftermath alone has corpses -- no other run's setup is dropped"""
     with_setup = [r["name"] for r in doc["runs"] if b0s.setup_fn(r["setup"]) is not None]
     assert with_setup == [AFTER]
     assert all(set(r["setup"]) <= {"pose", "corpses"} for r in doc["runs"])
@@ -79,8 +84,11 @@ def test_the_aftermath_poke_kills_the_trio_and_lays_and_links_two_clips(b0s, doc
     from doomfj.monsters import droppers
     setup = _run(doc, AFTER)["setup"]
     before, poke = b0s.setup_poke(orc, setup)
+    # M7 P10 (v9, the "final" modes), measured: the setup moves no thpos_rt row (rows 80..103 are 0 before and after
+    # it) and one leaf head (sshead 557: 0 -> 87). Under v6's "full" modes the drop rows 86 / 87 took the corpses'
+    # positions and no head moved -- B0 held both in their binaries (v6 on blocked51, v7 / v8 on blocked53 / 54).
     assert set(poke) == {"mon_state", "mon_tics", "mon_health", "mon_shootable", "mon_solid", "mdrop", "dr_live",
-                         "thpos_rt", "thss_rt", "thnext"}, sorted(poke)
+                         "sshead", "thss_rt", "thnext"}, sorted(poke)
     slots = [c["slot"] for c in setup["corpses"]]
     for k in ("mon_health", "mon_shootable", "mon_solid"):
         assert [m for m, (a, b) in enumerate(zip(before[k], poke[k])) if a != b] == slots

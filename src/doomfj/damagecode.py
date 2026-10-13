@@ -61,6 +61,7 @@ itself (`dm_me`, set by the slot's stub) -> the target is the source; mon_target
 """
 from typing import Dict, List, Sequence, Tuple
 
+from doomfj import statcode as _statcode                          # P10: the kill counter
 from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.lut_generator import generate_dispatch_table_fj
@@ -265,7 +266,7 @@ FX_CALL_FULL = ["    hex.zero 1, fxs_kind"] + FX_CALL
 
 
 def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knock: bool = False,
-               fight: bool = False) -> List[str]:
+               fight: bool = False, stats: bool = False) -> List[str]:
     """`dm_leaf` (stl.fcall dm_leaf, dm_lret) on the window -- the module docstring's order. `keys`: the profiles
     (`profiles(w)[0]`); mt_dist_leaf (monstercode.dist_leaf_lines) computes P_AproxDistance. `fx` (M7 P5): a hit in
     reach spawns blood (FX_CALL) before the target's own checks. `full` (M7 P6; `keys` are then
@@ -368,7 +369,8 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
             "    ;dm_out",
             # ---- P_KillMobj: not shootable, the death state, tics -= P_Random() & 3 (>= 4 tics: no clamp) -----
             "  dm_kill:",
-            "    hex.zero 1, dm_sh"]
+            "    hex.zero 1, dm_sh",
+            *(_statcode.kill_lines() if stats else [])]                  # P10: LEVEL COMPLETE's KILLS
     if full:                                     # M7 P6: the drop's flag; the gib (health < -spawnhealth)
         out += ["    hex.set 1, dm_kd, 1",
                 "    hex.scmp 3, dm_hp, dm_nsh, dm_gib, dm_ngib, dm_ngib",
@@ -387,7 +389,7 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
 
 def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = DM_MAX, fx: bool = False,
                  full: bool = False, nbar: int = 0, drops: Dict[int, int] = None, knock: bool = False,
-                 fight: bool = False) -> dict:
+                 fight: bool = False, stats: bool = False) -> dict:
     """everything P4.2a's damage adds, for the World `w` (any monster mode; the emitter's needs P3.2c "decide"):
       * `decls`: the P42 cells at `boot_skill`'s level start, the interface, the window and the scratch;
       * `lines`: dm_go, the per-slot stubs, dm_leaf -- leaves (each ends in a fret), placed where nothing falls in;
@@ -400,7 +402,10 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     (max_dmg DM_MAX_FULL) and the drops (`drops` {slot: dropper k}: barrelcode's drop_link<k>).
     `knock` (M7 P8a, world.knockback_on): the stubs and the leaf thrust (doomfj.knockcode's interface and `kb_go`,
     which the caller adds). `fight` (M7 P8a I): a monster's hits (the module docstring) -- `w`'s schema must have
-    the wide mon_target (a World in the "final" modes)."""
+    the wide mon_target (a World in the "final" modes).
+    `stats` (P10, doomfj.statcode): `dm_kill` counts the kill in `st_kill` (statcode declares it: the game tier's)."""
+    if stats:
+        _statcode.check_world(w)
     if full:
         max_dmg = max(max_dmg, DM_MAX_FULL)
     else:
@@ -418,6 +423,6 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
             + [("dm_tg: hex.vec 2" if fight and d == "dm_tg: hex.vec 1" else d) for d in DM_WINDOW] + DM_SCRATCH
             + (DM_FULL_SCRATCH if full else []) + (FIGHT_DECLS if fight else []),
             "lines": (go_lines(w.schema, slot_rt, of, nbar=nbar, drops=drops, knock=knock, fight=fight)
-                      + leaf_lines(keys, fx=fx, full=full, knock=knock, fight=fight)),
+                      + leaf_lines(keys, fx=fx, full=full, knock=knock, fight=fight, stats=stats)),
             "tables": [generate_dispatch_table_fj("dmrnd", dmrnd_values(pain_classes(keys)),
                                                   index_nibbles=2, result_nibbles=2)]}

@@ -44,7 +44,7 @@ def test_the_launcher_and_its_rockets_are_single_player_things(world):
     mp = [t for t in world.mw.things("E1M1") if t.flags & gd.MTF_NOTSINGLE]
     extra = [t for t in mp if single_player(t)]
     assert sorted((t.type, t.x, t.y) for t in extra) == sorted(SINGLE_PLAYER_EXTRA)
-    assert len(extra) == 5 and all(t.flags & 7 == 7 for t in extra)                  # every skill
+    assert len(extra) == 7 and all(t.flags & 7 == 7 for t in extra)                  # every skill (P10: + 2 guns)
     assert not any(single_player(t) for t in mp if (t.type, t.x, t.y) not in SINGLE_PLAYER_EXTRA)
     picks = [(t.type, t.x, t.y) for t in world.pickup_things]
     assert (2003,) + LAUNCHER in picks and sum(1 for p in picks if p[0] == 2010) == 5   # + E1M1's own #279

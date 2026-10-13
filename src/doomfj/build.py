@@ -59,7 +59,9 @@ STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
                       # M7 P4.1: the new held flags (strafe, fire, the number keys) -- held keys, like kb_u
                       "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4", "kb_w5",   # P9: 5
                       # M7 P6+P7: a turn key held last frame (the turn's slow first frame) -- input memory, like them
-                      "p_tnh")
+                      "p_tnh",
+                      # P10: a game is in progress (the main menu's RESUME) -- the menu's own memory, as menu_scr is
+                      "g_live")
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it
@@ -119,6 +121,9 @@ from doomfj.projcode import PERSIST as PROJ_PERSIST                             
 # scratchpad/m5_setfile.py re-attaches them through STANDALONE_SCRATCH_DECLS, as it does `lvdone` / `pusedn`; a reset
 # that restored them would forget the skill, drop a death's restart request and stop the clock.
 from doomfj.restartcode import PERSIST as GAME_PERSIST                          # noqa: E402
+# P10 (doomfj.statcode): LEVEL COMPLETE's counters -- kills, items, secrets; a reset that restored them would count
+# nothing (the game tier's alone, like the weapon)
+from doomfj.statcode import PERSIST as STAT_PERSIST                             # noqa: E402
 # M7 P6 -- INTEGRATION HOOKS (docs/gp-p67-interface.md 4.4; package D leaves them for the integrator):
 #   LOOT_PERSIST   = package B's player cells + package C's drop cells: (p_bc, p_str, p_bp, am_misl, am_cell) +
 #                    (mdrop, dr_live) -- from their modules' PERSIST tuples (lootcode.PERSIST, C's drop module's)
@@ -186,7 +191,8 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
             + HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST    # M7 P4.0 / P4.1 / P4.2a: the game tier's
             + HURT_PERSIST + PROJ_PERSIST                   # M7 P5: the player's hurt cells, the pools
             + GAME_PERSIST + LOOT_PERSIST + BARREL_PERSIST   # M7 P7 / P6: the game's cells; loot, barrels (HOOKS)
-            + p8a_persist())                                # M7 P8a: the view, the knock, the fight (HOOKS)
+            + STAT_PERSIST                                  # P10: the level's stats
+            + p8a_persist())                                # M7 P8a: the view, the knock, the fight (HOOKS) -- last
 
 
 def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
@@ -201,9 +207,10 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     # M7 P7: GAME_PERSIST's cells are NOT here -- they are standalone globals (wall_renderer.MENU_STATE_DECLS), which
     # m5_setfile adds through STANDALONE_SCRATCH_DECLS; listing them twice would declare them twice.
     # M7 P6: + LOOT_PERSIST + BARREL_PERSIST, their modules' decl lists in `cand`
-    from doomfj import barrelcode, lootcode
+    from doomfj import barrelcode, lootcode, statcode
     from doomfj.wall_renderer import BOOT_SKILL
     names = (HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST + HURT_PERSIST + PROJ_PERSIST + LOOT_PERSIST + BARREL_PERSIST
+             + STAT_PERSIST                                           # P10: the stats (statcode.decls)
              + p8a_persist())                                         # M7 P8a: the hooks at the game tier's modes
     cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START)))
             + WC.weapon_decls(WC.level_start(map_wad, mapname), WC.weapon_states(), WC.overlay_frames())
@@ -212,7 +219,8 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
             + projcode.pool_decls()
             + barrelcode.decls(World(map_wad, mapname), BOOT_SKILL)      # M7 P6: barrels, drops
             + lootcode.loot_decls(lootcode.level_start(World(map_wad, mapname)))   # M7 P6: the player's loot
-            + p8a_persisted_decls(map_wad, mapname))                               # M7 P8a: the hooks' modules
+            + p8a_persisted_decls(map_wad, mapname)                                # M7 P8a: the hooks' modules
+            + statcode.decls(World(map_wad, mapname)))                             # P10: the stats
     by = {}
     for d in cand:
         by.setdefault(decl_words(d)[0], d)
@@ -405,6 +413,11 @@ DEFAULT_WAD = DEFAULT_MAP_WAD
 # scratchpad/m5_setfile.py, never re-measured. Pairing a set with the wrong program is caught by the
 # layout fingerprint, but loudly and 20 minutes in; resolving it by tier here means it cannot happen.
 STANDALONE_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m5_restore_set.json.gz"
+# THE ONE-PASS BUILD (the owner's design, 2026-10-10; built 2026-10-13): the tiers whose self-reset is generated BY
+# LABEL from the declarations (selfreset.emit_reset_part_by_label) and assembled ONCE -- no pass 2, no label capture,
+# no re-key. A tier joins only after the one-time check (scratchpad/onepass_check.py: the same cells and values as
+# its two-pass reset on the same source) has passed for it; "game" did on P10's source (557d239, blocked55).
+ONE_PASS_TIERS = frozenset({"game"})
 
 
 def standalone_run_header(standalone: bool) -> dict:
@@ -507,7 +520,26 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
     reset_info = None
-    if self_reset:
+    if self_reset and tier in ONE_PASS_TIERS:
+        # ONE PASS: the reset names its cells by LABEL (every restore-set label is a global since M1's hoist), the
+        # registered cells are declared ZERO and set by the reset at BOOT and after every frame, so nothing needs a
+        # first assembly's addresses or image. m1_reset.fj still goes after the emitted parts (it only holds a def).
+        from doomfj import selfreset
+        paths = paths + [_SRC_FJ / "m1_reset.fj"]
+        _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things)
+        nss = len(bake_bsp(wad, mapname).subsectors)
+        names = selfreset.registered_reset_names(restore_set, cfg, standalone)
+        part, n_nib, n_byte, _plan = selfreset.emit_reset_part_by_label(
+            gen, prog, names, cfg.VIEW_W, nss, mapname, persist=_persist)
+        paths = paths + [part]
+        labels = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
+                                          **standalone_run_header(standalone))
+        _misaligned = sprbank_misalignment(labels)
+        assert _misaligned is None, "build REFUSED: " + str(_misaligned)
+        reset_info = {"one_pass": True, "nibble_cells": n_nib, "byte_cells": n_byte,
+                      "persisted_labels": list(_persist), "registered_labels": len(names),
+                      "restore_set": str(restore_set), "view_w": cfg.VIEW_W, "subsectors": nss}
+    elif self_reset:
         # M1 -- the program restores itself and LOOPS, so the host never reloads the image.
         # TWO PASSES, and the second is not a re-run: pass 1 exists only to learn where every cell
         # landed. The reset bakes those addresses (it must -- most of the dirty set is macro-local

@@ -181,7 +181,11 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # ... and infighting's barrel source (package I: world.infighting_on; `mon_target` widens in place)
                    frozenset({"bar_src"}),
                    # P9: key 5's held flag (the rocket launcher; fight_gate's R scenarios press it)
-                   frozenset({"kb_w5"}))
+                   frozenset({"kb_w5"}),
+                   # P10 (docs/gp-p10-plan.md): a game in progress (the main menu's RESUME) ...
+                   frozenset({"g_live"}),
+                   # ... and LEVEL COMPLETE's counters (doomfj.statcode)
+                   frozenset({"st_kill", "st_item", "st_secn", "st_secm"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -730,8 +734,13 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     # OPTIONAL_GROUP (a binary before P6 has none of them); widths and counts are the cells' units
     # (monsters.MonsterPhase.loot_state / barrel_state / game_state)
     for name, width in (("p_bc", 2), ("p_str", 4), ("p_bp", 1), ("am_misl", 3), ("am_cell", 3), ("dr_live", 2),
-                        ("rng_wd", 2), ("lvtime", 4), ("g_rs", 1), ("g_skill", 1)):
+                        ("rng_wd", 2), ("lvtime", 5), ("g_rs", 1), ("g_skill", 1)):     # P10: lvtime 5 nibbles
         cells[name] = Cell(name, "hex", width)
+    # P10: the menu's `g_live`, and the stats (statcode.PERSIST; MonsterPhase.game_state's units)
+    cells["g_live"] = Cell("g_live", "hex", 1)
+    for name, width in (("st_kill", 2), ("st_item", 2), ("st_secn", 1)):
+        cells[name] = Cell(name, "hex", width)
+    cells["st_secm"] = Cell("st_secm", "hex", 1, count=_nsecret())
     ndrop, nbar = _loot_counts()
     cells["mdrop"] = Cell("mdrop", "hex", 1, count=ndrop)
     for name, width in (("bar_st", 2), ("bar_ti", 1), ("bar_hp", 2), ("bar_solid", 1)):
@@ -769,6 +778,18 @@ def _loot_counts() -> tuple:
 
 
 _LOOT = None
+
+
+def _nsecret() -> int:
+    """P10: E1M1's secret sectors (World.secret_sectors) -- `st_secm`'s count, from the model once"""
+    global _NSECRET
+    if _NSECRET is None:
+        from doomfj.world import World
+        _NSECRET = max(1, len(World(monsters="idle").secret_sectors))
+    return _NSECRET
+
+
+_NSECRET = None
 
 
 def _nsound() -> int:
@@ -862,9 +883,10 @@ class Oracle:
         and M7 P1.5's menu cells, which Probe.check_known skips on a binary that predates them"""
         from doomfj.doors import IDLE
         nd = self.ndoors
-        from doomfj.wall_renderer import BOOT_SKILL, SKILLS
+        from doomfj.wall_renderer import BOOT_MENU_SKILL, SKILLS
+        # P10: the skill screen's highlight boots at MEDIUM (BOOT_MENU_SKILL), and no game is in progress
         return {"viewx": self.spawn.x, "viewy": self.spawn.y, "viewangle": self.spawn.angle,
-                "mode": 1, "menu_scr": 0, "menu_sel": SKILLS.index(BOOT_SKILL), **KEYS_UP,
+                "mode": 1, "menu_scr": 0, "menu_sel": SKILLS.index(BOOT_MENU_SKILL), "g_live": 0, **KEYS_UP,
                 "dstate": (0,) * nd, "ddir": (IDLE,) * nd, "dsub": (0,) * nd, "dwait": (0,) * nd,
                 # M7 P2a.1: no press pending, no card, no trigger fired
                 "dreq": (0,) * nd, "pcard": 0, "wfired": wfired_value((0,) * self.nwalk),
@@ -1022,6 +1044,14 @@ class Oracle:
     def monster_drawable(self, world) -> list:
         from doomfj.monsters import MonsterViews
         return MonsterViews(self.rm, self.mw, self.mapname, self.art, world).mdi
+
+    def menu_picture(self, scr: int, sel: int, live: int, stats=None) -> bytes:
+        """P10: any menu state's picture -- wall_renderer.menu_screen_pixels, the one mapping (the main menu by
+        `live`'s variant; LEVEL COMPLETE's `stats` = (nsecret, digits))"""
+        from doomfj.menu import palette_colours
+        from doomfj.wall_renderer import menu_screen_pixels
+        colours = palette_colours(bytes(b for rgb in self.mw.playpal(0) for b in rgb))
+        return bytes(menu_screen_pixels(self.rm.cfg, colours, scr, sel, live, stats))
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""
@@ -1412,16 +1442,17 @@ def demo(fjm: Path, labels_path: Path) -> int:
     from doomfj.menu import menu_step
     dsim = onewalk.DoorSim()
     st, mode, n_state, n_pix = dsim.reset(), 1, 0, 0
-    scr, sel = known["menu_scr"], known["menu_sel"]
+    scr, sel, live = known["menu_scr"], known["menu_sel"], known["g_live"]
     for f in range(len(per_frame)):
-        mode, scr, sel, _ng = menu_step(mode, scr, sel, menu_events[f])
-        assert _ng is None, "the demo's walk never starts a new game"
+        mode, scr, sel, _ng, live = menu_step(mode, scr, sel, menu_events[f], live)
+        # P10: the boot pick's NEW GAME (at the boot skill: the pristine level start the DoorSim starts from)
+        assert _ng is None or f == gate.MENU_FRAMES, "the demo's walk starts no new game but the boot pick's"
         if mode == 0:
             st = dsim.step(st, keys_by_frame[f])
         g = seen[f]
         kd = held_by_frame[f]
         want_s = {"viewx": st.x, "viewy": st.y, "viewangle": st.angle, "mode": mode,
-                  "menu_scr": scr, "menu_sel": sel,
+                  "menu_scr": scr, "menu_sel": sel, "g_live": live,                  # P10
                   "kb_f": int(bool(kd.get("forward"))), "kb_b": int(bool(kd.get("back"))),
                   "kb_l": int(bool(kd.get("turn_left"))), "kb_r": int(bool(kd.get("turn_right"))),
                   "kb_u": int(bool(kd.get("use"))),
@@ -1432,7 +1463,7 @@ def demo(fjm: Path, labels_path: Path) -> int:
         diff = [k for k in want_s if k not in p.absent and g[k] != want_s[k]]
         s_ok = not diff
         pix = r.frames[f] == (orc.render(st.x, st.y, st.angle, orc.door_states_tuple(dsim.ds))
-                              if mode == 0 else menu)
+                              if mode == 0 else orc.menu_picture(scr, sel, live))       # P10: the pick's screens
         n_state += s_ok
         n_pix += pix
         if f < 4 or f % 5 == 0 or f == len(per_frame) - 1 or not (s_ok and pix):

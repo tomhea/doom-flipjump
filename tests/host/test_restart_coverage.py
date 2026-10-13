@@ -48,8 +48,8 @@ def test_p7s_cells_persist_and_are_declared_once_at_the_plans_widths():
         name, words = decl_words(d)
         assert name not in widths, "declared twice: %s" % name
         widths[name] = words // 2
-    assert {n: widths[n] for n in RC.PERSIST} == {"lvtime": 4, "g_rs": 1, "g_skill": 1}
-    assert RC.P6_NIBBLES["lvtime"] == 4 and RC.P6_NIBBLES["g_rs"] == 1
+    assert {n: widths[n] for n in RC.PERSIST} == {"lvtime": 5, "g_rs": 1, "g_skill": 1}      # P10: lvtime 20 bits
+    assert RC.P6_NIBBLES["lvtime"] == 5 and RC.P6_NIBBLES["g_rs"] == 1
     # g_skill boots at the boot skill (the image is that skill's level start)
     assert "g_skill: hex.vec 1, %d" % WR.SKILLS.index(WR.BOOT_SKILL) in WR.MENU_STATE_DECLS
     # ... and the game screen's list does not declare them a second time (m5_setfile adds both lists)
@@ -60,7 +60,7 @@ def test_p7s_cells_persist_and_are_declared_once_at_the_plans_widths():
 
 def test_the_restart_zeroes_p7s_cells_and_keeps_the_skill():
     common, skills = _restart()
-    assert "    hex.zero 4, lvtime" in common and "    hex.zero 1, g_rs" in common
+    assert "    hex.zero 5, lvtime" in common and "    hex.zero 1, g_rs" in common
     assert not any("g_skill" in ln for ln in common + [ln for s in skills for ln in s])
     assert common[0] == "restart_common:" and common[-1] == "    stl.fret rs_ret"
 
@@ -143,7 +143,7 @@ def test_the_restart_on_use_runs_at_the_world_frames_start():
 
 def test_the_level_time_ticks_inside_the_frozen_guard():
     lines = WR.p5_tic_lines({"bar": ["BAR"]})
-    g, t, bar = lines.index("hex.if1 1, lvdone, p5_bar_skip"), lines.index("hex.inc 4, lvtime"), lines.index("BAR")
+    g, t, bar = lines.index("hex.if1 1, lvdone, p5_bar_skip"), lines.index("hex.inc 5, lvtime"), lines.index("BAR")
     assert lines.index("stl.fcall fx_phase, fx_pret") < g < t < bar < lines.index("p5_bar_skip:")
 
 
@@ -164,7 +164,7 @@ def test_the_p6_level_start_splits_by_skill():
     common, per = RC.level_start_lines(w, WR.SKILLS, list(RC.P6_NIBBLES))
     assert len(per) == 3
     text = "\n".join(common)
-    assert "hex.zero 25, mdrop" in text and "hex.zero 4, lvtime" in text
+    assert "hex.zero 25, mdrop" in text and "hex.zero 5, lvtime" in text
     assert "hex.set 2, bar_hp + 0*dw, 20" in text and "hex.set 2, rng_wd + 0*dw, %d" % w.level_start(gd.SK_HARD).rng_world in text
     # every barrel's phase roll is a line (22 barrels, on every skill)
     assert sum(ln.startswith("    hex.set 1, bar_ti + ") for ln in common) == w.layout.nbarrel == 22

@@ -33,6 +33,7 @@
 //   0x0F  begin_frame_proj         —                                proj tier
 //   0x12  set_window_title         <bytes> 0x00                  window caption
 //   0x13  set_window_icon_header   w,h (+ w*h indices)           window icon
+//   0x14  set_max_fps              fps (1 byte)                  frame-rate cap (flipjump 1.5.1; P10)
 //   (0x04/0x05/0x08 are not emitted by this file. `emit_addr` is a helper, not a command.)
 //
 // ---------- Conventions that hold in this file
@@ -92,6 +93,15 @@ ns present {
         stl.output_char 0x13
         stl.output_char iw
         stl.output_char ih
+    }
+
+    // set_max_fps: [0x14][fps] -- P10 (the owner, 2026-10-12): the interactive window holds every present until 1/fps
+    // seconds have passed since the previous one (flipjump's ScreenIO 0x14; 0 = no cap; a headless screen only records
+    // it). The world advances a fixed step per frame and frames cost 2M..25M ops, so without a cap the whole game runs
+    // several times faster whenever the view is cheap. Emitted ONCE, from the entry part (wall_renderer.window_chrome_fj).
+    def set_max_fps fps {
+        stl.output_char 0x14
+        stl.output_char fps
     }
 
     // init_screen: [0x01][W:2][H:2][BPP:1][palette_entries=NCOLORS:2]

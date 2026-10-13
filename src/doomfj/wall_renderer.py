@@ -65,6 +65,9 @@ from doomfj.doorcode import _box_test                                     # M7 P
 from doomfj.menu import LEVEL_DONE_SCR                                    # M7 P2a.2
 from doomfj.menu import HELP_GAME_SCR, HELP_MENU_SCR, MAIN_HELP_SCR      # M7 P3.4
 from doomfj.menu import MAIN_EXIT_SCR                                     # P9: the EXIT item
+from doomfj.menu import MAIN_RESUME_SCR                                   # P10: the RESUME item
+from doomfj.menu import LEVEL_DONE_ENTER, LEVEL_DONE_HOLD_LAST, LEVEL_DONE_SCREENS   # P10: LEVEL COMPLETE's hold
+from doomfj import statcode as _statcode                                  # P10: LEVEL COMPLETE's stats
 from doomfj import keyboard as _keyboard                                   # P9: the press latch
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
@@ -444,16 +447,20 @@ DEFAULT_MENU_SELECTED = 2
 MENU_HELP_ITEM = "HELP"
 # P9: the main menu's EXIT item -- the row `menu_scr` MAIN_EXIT_SCR highlights; a caller-supplied menu must have one too
 MENU_EXIT_ITEM = "EXIT"
+# P10 (the owner's play-test, 2026-10-12: "Add menu resume when possible"): the RESUME item, right above NEW GAME --
+# ONLY while a game is in progress (`g_live`; `main_menu_entries` adds it); `menu_scr` MAIN_RESUME_SCR highlights it
+MENU_RESUME_ITEM = "RESUME"
 
 # M7 P1.5 -- the SKILL SCREEN NEW GAME opens (docs/gp-skill-menu.md): entry SKILL_MENU_FIRST + k is
-# skill SKILLS[k], and `menu_sel` holds k, baked to the boot skill's (hard).
+# skill SKILLS[k], and `menu_sel` holds k. P10 (the owner's play-test, 2026-10-12: "skill screen default to medium"):
+# baked to MEDIUM's (BOOT_MENU_SKILL) -- DOOM's default; the boot WORLD stays BOOT_SKILL's (hard: the frozen sets and
+# gamespeed measure it, and a driver now picks it on this screen).
 SKILL_MENU = ["CHOOSE SKILL", "", "EASY", "MEDIUM", "HARD"]
 SKILL_MENU_FIRST = 2
+BOOT_MENU_SKILL = _gd.SK_MEDIUM
 
-# M7 P2a.2 -- the LEVEL COMPLETE screen the exit switch opens (docs/gp-exit.md; menu_scr =
-# menu.LEVEL_DONE_SCR), its last line highlighted
-LEVEL_DONE_MENU = ["LEVEL COMPLETE", "", "PRESS ENTER"]
-LEVEL_DONE_SELECTED = 2
+# M7 P2a.2 -- the LEVEL COMPLETE screen the exit switch opens (docs/gp-exit.md; menu_scr = menu.LEVEL_DONE_SCR).
+# P10: its picture is menu.level_done_* -- the title, the level's stats (doomfj.statcode), "PRESS ANY KEY"
 
 from doomfj import restartcode as _restartcode                    # noqa: E402 (M7 P7)
 from doomfj import hurtcode as _hurtcode                          # noqa: E402 (M7 P7: the death think's turn)
@@ -470,13 +477,15 @@ from doomfj import knockcode as _knockcode                        # noqa: E402 (
 # `rs_ret` is the restart block's fcall return register, which `stl.fret` leaves zero: ordinary
 # residue, restored like any other.
 MENU_STATE_DECLS = [
-    "menu_scr: hex.vec 1, 0", f"menu_sel: hex.vec 1, {SKILLS.index(BOOT_SKILL)}",
+    "menu_scr: hex.vec 1, 0", f"menu_sel: hex.vec 1, {SKILLS.index(BOOT_MENU_SKILL)}",     # P10: MEDIUM
+    "g_live: hex.vec 1, 0",            # P10: a game is in progress (menu.menu_step's `live`): 0 at boot
     # M7 P2a.2 (docs/gp-exit.md): the model's g_leveldone (the world frozen) and p_usedown (use held
     # last tic; 1 at the level start, G_PlayerReborn), persisted like `mode`
     "lvdone: hex.vec 1, 0", "pusedn: hex.vec 1, 1",
     "ev_enter: hex.vec 1", "ev_esc: hex.vec 1", "ev_up: hex.vec 1", "ev_dn: hex.vec 1",
     # M7 P3.4: the help key's event, zeroed before the polls like the four above
     "ev_help: hex.vec 1",
+    "ev_any: hex.vec 1",               # P10: any key's down edge (LEVEL COMPLETE's), zeroed likewise
     "rs_ret: hex.vec w/4",
     # M7 P7 (doomfj.restartcode): the skill the restart restores to (NEW GAME sets it), the restart request (the
     # death think sets it on use), the level time -- all three PERSISTED (build.GAME_PERSIST)
@@ -577,7 +586,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
 
 def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
                     wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None,
-                    p8a_common=()) -> tuple:
+                    p8a_common=(), p10_common=()) -> tuple:
     """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
     values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
     emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
@@ -590,7 +599,8 @@ def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, n
               # M7 P5: the player's health, armor, damage count and death at the level start (never pal_cur: a
               # device shadow, restartcode.DEVICE_SHADOWS); the pools empty, their rows zero, rng_fx at its seed
               + list(hrt_restart) + list(proj_restart) + list(p6_common)
-              + list(p8a_common)))                      # M7 P8a: the final rung's cells (p8a_restart_parts)
+              + list(p8a_common)                        # M7 P8a: the final rung's cells (p8a_restart_parts)
+              + list(p10_common)))                      # P10: the level's stats (statcode.restart_lines)
     return restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=nwalk, nlift=nlift,
                          monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills)
 
@@ -822,7 +832,7 @@ def _skill_dispatch(prefix: str) -> list:
     return _restartcode.skill_dispatch(prefix, "menu_sel", len(SKILLS))   # M7 P7: one dispatch shape
 
 
-def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) -> list:
+def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), stats=None) -> list:
     """M3 — the MENU frames, and the branch that chooses them.
 
     A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
@@ -835,7 +845,7 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
     frame; jumping past the tail would break that assert. So the menu ends where the world ends.
 
     M7 P1.5 -- THE STATE MACHINE (docs/gp-skill-menu.md). The polls only record events
-    (`ev_enter`, `ev_esc`, `ev_up`, `ev_dn`; M7 P3.4: `ev_help`); here, first match wins, in the
+    (`ev_enter`, `ev_esc`, `ev_up`, `ev_dn`; M7 P3.4: `ev_help`; P10: `ev_any`); here, first match wins, in the
     order esc, enter, (help,) up, down:
       * in the world: esc or enter opens the MAIN menu (M3's toggle, kept);
       * on the main menu: esc resumes the world, enter opens the SKILL screen;
@@ -846,12 +856,33 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
     M7 P3.4 (docs/gp-help.md): the main menu once more with its HELP item highlighted, and the help
     screen -- `menu_screen_pixels` is the oracle's side of this branch.
     `restart` is `restart_lines(...)`; the game tier always passes it.
+
+    P10 (the owner's play-test, 2026-10-12): `g_live` -- a game is in progress (menu.menu_step's `live`). The main menu
+    is baked twice, without it (the boot menu) and with RESUME over NEW GAME, and each highlight once per variant;
+    RESUME highlighted is one more frame. LEVEL COMPLETE shows the level's stats: `stats` is the World (the game
+    tier's; doomfj.statcode computes the digit slots and draws them over its baked frame). Without one (a test
+    harness's menu) the frame is baked with its slots empty.
     """
-    from doomfj.menu import fj as menu_fj, help_fj, palette_colours
+    from doomfj.menu import fj as menu_fj, help_fj, level_done_fj, palette_colours
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
     assert MENU_HELP_ITEM in entries, "the main menu needs its %r item (M7 P3.4)" % MENU_HELP_ITEM
     assert MENU_EXIT_ITEM in entries, "the main menu needs its %r item (P9)" % MENU_EXIT_ITEM
+    live_entries, live_selected = main_menu_entries(entries, selected, 1)
+
+    def main(label, lines, row):
+        return [menu_fj(cfg.W, cfg.H, lines, row, colours, label=label, end_marker=False), ";frame_end"]
+
+    def by_live(p, label, item):
+        """the main menu with `item` highlighted: the boot menu's, or (g_live) the one with RESUME"""
+        return ([f"hex.if1 1, g_live, {p}_l"] + main(label, entries, entries.index(item) if item else selected)
+                + [f"{p}_l:"] + main(label + "_l", live_entries,
+                                     live_entries.index(item) if item else live_selected))
+
+    if stats is not None:
+        level_done = _statcode.digit_lines(stats, SKILLS) + _statcode.frame_lines(cfg.W, cfg.H, colours, stats)
+    else:
+        level_done = [level_done_fj(cfg.W, cfg.H, colours, 0, label="menu_level_done", end_marker=False)]
     return [
         # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
@@ -860,44 +891,51 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=()) ->
         "hex.if0 1, mode, do_world",
         *hud,                              # M7 P4.0: a menu frame covers the bar -- redraw it on the next world frame
         "hex.if0 1, menu_scr, mf_main",
-        # M7 P3.4: the help (either id) and the main menu with HELP highlighted
+        # M7 P3.4: the help (either id) and the main menu with HELP highlighted (P9: EXIT; P10: RESUME)
         f"hex.if_flags menu_scr, {_P34_SCREENS}, mf_np34, mf_p34",
         "mf_np34:",
-        f"hex.if_flags menu_scr, 1<<{LEVEL_DONE_SCR}, mf_nlv, mf_lv",     # M7 P2a.2
+        f"hex.if_flags menu_scr, {_LEVEL_DONE_MASK}, mf_nlv, mf_lv",     # M7 P2a.2; P10: and its hold
         "mf_nlv:",
         *_skill_dispatch("mf_s"),
         "mf_main:",
-        menu_fj(cfg.W, cfg.H, entries, selected, colours,
-                label="menu_frame", end_marker=False),
-        ";frame_end",
+        *by_live("mf_main", "menu_frame", None),
         "mf_p34:",
+        f"hex.if_flags menu_scr, 1<<{MAIN_RESUME_SCR}, mf_p34r, mf_mainr",     # P10: the main menu on RESUME
+        "mf_p34r:",
         f"hex.if_flags menu_scr, 1<<{MAIN_EXIT_SCR}, mf_p34h, mf_mainx",       # P9: the main menu on EXIT
         "mf_p34h:",
         f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mf_help, mf_mainh",
         "mf_mainh:",
-        menu_fj(cfg.W, cfg.H, entries, entries.index(MENU_HELP_ITEM), colours,
-                label="menu_frame_help", end_marker=False),
-        ";frame_end",
+        *by_live("mf_mainh", "menu_frame_help", MENU_HELP_ITEM),
         "mf_help:",
         help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False),
         ";frame_end",
         "mf_mainx:",                       # P9
-        menu_fj(cfg.W, cfg.H, entries, entries.index(MENU_EXIT_ITEM), colours,
-                label="menu_frame_exit", end_marker=False),
-        ";frame_end",
+        *by_live("mf_mainx", "menu_frame_exit", MENU_EXIT_ITEM),
+        "mf_mainr:",                       # P10: only while g_live -- RESUME exists only then
+        *main("menu_frame_resume", live_entries, live_entries.index(MENU_RESUME_ITEM)),
         *[line for k in range(len(SKILLS)) for line in (
             f"mf_s{k}:",
             menu_fj(cfg.W, cfg.H, SKILL_MENU, SKILL_MENU_FIRST + k, colours,
                     label=f"menu_skill{k}", end_marker=False),
             ";frame_end")],
         "mf_lv:",
-        menu_fj(cfg.W, cfg.H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours,
-                label="menu_level_done", end_marker=False),
+        *level_done,                       # P10: the stats (doomfj.statcode)
         ";frame_end",
         # fcall'd only: every screen above ends in a jump. M7 P7: restart_common and each skill's rs_skill<k>
         *_restartcode.routine_lines(restart),
+        *(_statcode.routine_lines() if stats is not None else []),     # P10: lvd_dec, and the unreachable lvd_div0
         "do_world:",
     ]
+
+
+def main_menu_entries(entries, selected: int, live: int) -> tuple:
+    """P10 -- the main menu's lines and its NEW GAME row (`selected`, the row `menu_scr` 0 highlights): `entries` as
+    they are without a game in progress, and with one (`g_live`) RESUME right above NEW GAME"""
+    entries = list(entries)
+    if not live:
+        return entries, selected
+    return entries[:selected] + [MENU_RESUME_ITEM] + entries[selected:], selected + 1
 
 
 def menu_state_lines(restart) -> list:
@@ -912,21 +950,32 @@ def menu_state_lines(restart) -> list:
     reached when neither esc nor enter is down -- the one state branch a world frame pays.
 
     M7 P7: NEW GAME sets `g_skill` from `menu_sel` and runs `restartcode.call_lines` -- the routines
-    (`restartcode.routine_lines(restart)`) must be placed by the caller too, where nothing falls into them."""
+    (`restartcode.routine_lines(restart)`) must be placed by the caller too, where nothing falls into them.
+
+    P10 (menu.menu_step's `live`): `g_live` -- NEW GAME sets it, LEVEL COMPLETE's ANY key (`ev_any`) clears it on its
+    way to the main menu. Esc on a main-menu item resumes the world only while it is set (else the next event in the
+    order is read); the world opens the menu on RESUME while it is set; up from NEW GAME reaches RESUME only then."""
     _common, skills = restart
     assert len(skills) == len(SKILLS), "one restart block per skill: %d for %d" % (len(skills),
                                                                                   len(SKILLS))
     return [
         "hex.if0 1, mode, mn_world",
         "hex.if0 1, menu_scr, mn_main",
-        # M7 P3.4: the help (HELP_MENU_SCR / HELP_GAME_SCR) and the main menu on HELP
+        # M7 P3.4: the help (HELP_MENU_SCR / HELP_GAME_SCR) and the main menu on HELP (P9: EXIT; P10: RESUME)
         f"hex.if_flags menu_scr, {_P34_SCREENS}, mn_np34, mn_p34",
         "mn_np34:",
-        # -- M7 P2a.2: the level-complete screen -- esc or enter: the main menu
+        # -- P10: LEVEL COMPLETE's hold (menu_scr LEVEL_DONE_ENTER .. LEVEL_DONE_HOLD_LAST): one down a frame, then the
+        # screen proper -- no key read
+        f"hex.if_flags menu_scr, {_HOLD_SCREENS}, mn_nhd, mn_hd",
+        "mn_hd:",
+        f"hex.if_flags menu_scr, 1<<{LEVEL_DONE_HOLD_LAST}, mn_hd1, mn_hd2",
+        "mn_hd1:", "hex.dec 1, menu_scr", ";mn_done",
+        "mn_hd2:", f"hex.set 1, menu_scr, {LEVEL_DONE_SCR}", ";mn_done",
+        "mn_nhd:",
+        # -- M7 P2a.2: the level-complete screen -- P10: ANY key, the main menu as at boot (no game in progress)
         f"hex.if_flags menu_scr, 1<<{LEVEL_DONE_SCR}, mn_nlv, mn_lv",
         "mn_lv:",
-        "hex.if0 1, ev_esc, mn_lv1", "hex.zero 1, menu_scr", ";mn_done", "mn_lv1:",
-        "hex.if0 1, ev_enter, mn_done", "hex.zero 1, menu_scr", ";mn_done",
+        "hex.if0 1, ev_any, mn_done", "hex.zero 1, menu_scr", "hex.zero 1, g_live", ";mn_done",
         "mn_nlv:",
         # -- the skill screen
         "hex.if0 1, ev_esc, mn_s1", ";mn_back", "mn_s1:",
@@ -942,9 +991,12 @@ def menu_state_lines(restart) -> list:
         # M7 P7: g_skill = menu_sel, then THE restart sequence (restartcode.call_lines) -- the one the restart on
         # use after death runs (restartcode.tic_lines), into the same fcall'd per-skill routines
         *_restartcode.new_game_lines(len(SKILLS)),
-        "mn_started:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
-        # -- M7 P3.4: the help screen and the main menu with HELP highlighted
+        "mn_started:", "hex.zero 1, mode", "hex.zero 1, menu_scr",
+        "hex.set 1, g_live, 1", ";mn_done",                         # P10: a game is in progress
+        # -- M7 P3.4: the help screen and the main menu with HELP / EXIT (P9) / RESUME (P10) highlighted
         "mn_p34:",
+        f"hex.if_flags menu_scr, 1<<{MAIN_RESUME_SCR}, mn_p34r, mn_mainr",     # P10: the main menu on RESUME
+        "mn_p34r:",
         f"hex.if_flags menu_scr, 1<<{MAIN_EXIT_SCR}, mn_p34h, mn_mainx",       # P9: the main menu on EXIT
         "mn_p34h:",
         f"hex.if_flags menu_scr, 1<<{MAIN_HELP_SCR}, mn_help, mn_mainh",
@@ -956,39 +1008,50 @@ def menu_state_lines(restart) -> list:
         "mn_hclose:", f"hex.if_flags menu_scr, 1<<{HELP_GAME_SCR}, mn_hmenu, mn_hgame",
         "mn_hgame:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
         "mn_hmenu:", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
-        # the main menu on HELP: esc resumes the world, enter or h open the help, up goes to NEW
+        # the main menu on HELP: esc resumes a game in progress (P10), enter or h open the help, up goes to NEW
         # GAME, down (P9) to EXIT
         "mn_mainh:",
-        "hex.if0 1, ev_esc, mn_q1", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
+        "hex.if0 1, ev_esc, mn_q1", "hex.if0 1, g_live, mn_q1", ";mn_cont",
         "mn_q1:",
         "hex.if0 1, ev_enter, mn_q2", ";mn_tohelp", "mn_q2:",
         "hex.if0 1, ev_help, mn_q3", ";mn_tohelp", "mn_q3:",
         "hex.if0 1, ev_up, mn_q4", "hex.zero 1, menu_scr", ";mn_done", "mn_q4:",
         "hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_EXIT_SCR}", ";mn_done",
         "mn_tohelp:", f"hex.set 1, menu_scr, {HELP_MENU_SCR}", ";mn_done",
-        # P9 -- the main menu on EXIT: esc resumes the world, ENTER HALTS THE PROGRAM, h opens the help, up goes to
-        # HELP (down is clamped: EXIT is the last item). The halt is a jump-to-self under its own label -- neither the
-        # bare frame-tail `stl.loop` nor `bad: stl.loop`, the two lines selfreset.emit_reset_part counts -- so the
-        # interpreter ends "Looping" (the window closes), on this frame, before anything of it is presented.
+        "mn_cont:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",      # P10: back to the world
+        # P9 -- the main menu on EXIT: esc resumes a game in progress (P10), ENTER HALTS THE PROGRAM, h opens the help,
+        # up goes to HELP (down is clamped: EXIT is the last item). The halt is a jump-to-self under its own label --
+        # neither the bare frame-tail `stl.loop` nor `bad: stl.loop`, the two lines selfreset.emit_reset_part counts
+        # -- so the interpreter ends "Looping" (the window closes), on this frame, before anything of it is presented.
         "mn_mainx:",
-        "hex.if0 1, ev_esc, mn_x1", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
+        "hex.if0 1, ev_esc, mn_x1", "hex.if0 1, g_live, mn_x1", ";mn_cont",
         "mn_x1:",
         "hex.if0 1, ev_enter, mn_x2", ";mn_exit", "mn_x2:",
         "hex.if0 1, ev_help, mn_x3", ";mn_tohelp", "mn_x3:",
         "hex.if0 1, ev_up, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
         "mn_exit: stl.loop",
+        # P10 -- the main menu on RESUME (only while g_live): esc or enter resume, h opens the help, down goes to NEW
+        # GAME (up is clamped: RESUME is the first item)
+        "mn_mainr:",
+        "hex.if0 1, ev_esc, mn_c1", ";mn_cont", "mn_c1:",
+        "hex.if0 1, ev_enter, mn_c2", ";mn_cont", "mn_c2:",
+        "hex.if0 1, ev_help, mn_c3", ";mn_tohelp", "mn_c3:",
+        "hex.if0 1, ev_dn, mn_done", "hex.zero 1, menu_scr", ";mn_done",
         # -- the main menu (NEW GAME highlighted)
         "mn_main:",
-        "hex.if0 1, ev_esc, mn_m1", "hex.zero 1, mode", ";mn_done", "mn_m1:",
+        "hex.if0 1, ev_esc, mn_m1", "hex.if0 1, g_live, mn_m1", ";mn_cont", "mn_m1:",
         "hex.if0 1, ev_enter, mn_m2", "hex.set 1, menu_scr, 1", ";mn_done", "mn_m2:",
-        # M7 P3.4: h opens the help; down highlights HELP (up is clamped: NEW GAME is the first)
+        # M7 P3.4: h opens the help; P10: up highlights RESUME while a game is in progress; down highlights HELP
         "hex.if0 1, ev_help, mn_m3", ";mn_tohelp", "mn_m3:",
+        "hex.if0 1, ev_up, mn_m4", "hex.if0 1, g_live, mn_m4",
+        f"hex.set 1, menu_scr, {MAIN_RESUME_SCR}", ";mn_done", "mn_m4:",
         "hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
         # -- the world
         "mn_world:",
         "hex.if0 1, ev_esc, mn_w1", ";mn_open", "mn_w1:",
         "hex.if0 1, ev_enter, mn_w2",
-        "mn_open:", "hex.set 1, mode, 1", "hex.zero 1, menu_scr", ";mn_done",
+        "mn_open:", "hex.set 1, mode, 1", "hex.zero 1, menu_scr",
+        "hex.if0 1, g_live, mn_done", f"hex.set 1, menu_scr, {MAIN_RESUME_SCR}", ";mn_done",   # P10: on RESUME
         # M7 P3.4: h opens the help, which closes back to the world
         "mn_w2:", "hex.if0 1, ev_help, mn_done",
         "hex.set 1, mode, 1", f"hex.set 1, menu_scr, {HELP_GAME_SCR}",
@@ -998,34 +1061,48 @@ def menu_state_lines(restart) -> list:
 
 # M7 P3.4: the `menu_scr` values the help screen and the main menu's HELP highlight own, as an
 # `if_flags` mask (`menu_scr` is a nibble: bit k of the mask is scr == k)
-# (P9: and the EXIT highlight, MAIN_EXIT_SCR)
-_P34_SCREENS = "(1<<%d)|(1<<%d)|(1<<%d)|(1<<%d)" % (HELP_MENU_SCR, HELP_GAME_SCR, MAIN_HELP_SCR, MAIN_EXIT_SCR)
+# (P9: and the EXIT highlight, MAIN_EXIT_SCR; P10: and the RESUME highlight, MAIN_RESUME_SCR)
+_P34_SCREENS = "(1<<%d)|(1<<%d)|(1<<%d)|(1<<%d)|(1<<%d)" % (HELP_MENU_SCR, HELP_GAME_SCR, MAIN_HELP_SCR, MAIN_EXIT_SCR,
+                                                         MAIN_RESUME_SCR)
+# P10: LEVEL COMPLETE's hold codes, and the codes that draw LEVEL COMPLETE (the screen and its hold)
+_HOLD_SCREENS = "%#06x" % sum(1 << v for v in range(LEVEL_DONE_HOLD_LAST, LEVEL_DONE_ENTER + 1))
+_LEVEL_DONE_MASK = "%#06x" % sum(1 << v for v in LEVEL_DONE_SCREENS)
 
 
-def menu_screen_pixels(cfg, colours, scr: int, sel: int) -> list:
+def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=None) -> list:
     """M7 P3.4 -- THE ORACLE'S PICTURE of a menu frame: what `_menu_lines` bakes for `menu_scr` =
     `scr` (and, on the skill screen, `menu_sel` = `sel`) -- the main menu on either item, the skill
     screen, LEVEL COMPLETE or the help. ONE mapping from the state to the screen, for every gate
     and test that compares a menu frame (each kept its own table until this rung).
-    P9: the main menu on EXIT too; menu.MENU_HALTED (the program halted on EXIT) has NO picture -- it is refused."""
-    from doomfj.menu import MENU_HALTED, help_pixels, pixels
+    P9: the main menu on EXIT too; menu.MENU_HALTED (the program halted on EXIT) has NO picture -- it is refused.
+    P10: `live` (the program's `g_live`) picks the main menu's variant -- RESUME over NEW GAME while a game is in
+    progress; MAIN_RESUME_SCR exists only then (refused otherwise). LEVEL COMPLETE's `stats` is (nsecret, the digit
+    slots: menu.stats_digits(*statcode.stats_of(world))) -- None, the frame a menu without a World bakes (its slots
+    empty, `_menu_lines(stats=None)`)."""
+    from doomfj.menu import MENU_HALTED, help_pixels, level_done_pixels, pixels
     if scr == MENU_HALTED:
         raise ValueError("menu.MENU_HALTED: the program halted on EXIT and presents no frame")
     if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
         return help_pixels(cfg.W, cfg.H, colours)
-    lines, hi = {0: (DEFAULT_MENU, DEFAULT_MENU_SELECTED),
-                 MAIN_HELP_SCR: (DEFAULT_MENU, DEFAULT_MENU.index(MENU_HELP_ITEM)),
-                 MAIN_EXIT_SCR: (DEFAULT_MENU, DEFAULT_MENU.index(MENU_EXIT_ITEM)),      # P9
-                 1: (SKILL_MENU, SKILL_MENU_FIRST + sel),
-                 LEVEL_DONE_SCR: (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED)}[scr]
-    return pixels(cfg.W, cfg.H, lines, hi, colours)
+    if scr in LEVEL_DONE_SCREENS:                  # P10: the screen and its hold
+        nsecret, digits = stats if stats is not None else (0, None)
+        return level_done_pixels(cfg.W, cfg.H, colours, nsecret, digits)
+    if scr == 1:
+        return pixels(cfg.W, cfg.H, SKILL_MENU, SKILL_MENU_FIRST + sel, colours)
+    if scr == MAIN_RESUME_SCR and not live:
+        raise ValueError("menu.MAIN_RESUME_SCR: RESUME is on the main menu only while a game is in progress")
+    entries, new_game = main_menu_entries(DEFAULT_MENU, DEFAULT_MENU_SELECTED, live)
+    item = {0: None, MAIN_HELP_SCR: MENU_HELP_ITEM, MAIN_EXIT_SCR: MENU_EXIT_ITEM,     # P9
+            MAIN_RESUME_SCR: MENU_RESUME_ITEM}[scr]                                      # P10
+    return pixels(cfg.W, cfg.H, entries, new_game if item is None else entries.index(item), colours)
 
 
 def exit_lines(boxes, press_miss=()) -> list:
     """M7 P2a.2 -- the exit switch in fj (docs/gp-exit.md; the model's P_UseLines for special 11):
     a use PRESS -- `duse` this tic, `pusedn` clear -- sets `pusedn`, and inside any exit box
     (`doors.exit_boxes`, the doors' inclusive 16.16 test) ends the level: `lvdone` 1 and the
-    LEVEL COMPLETE screen opens (`mode` 1, `menu_scr` LEVEL_DONE_SCR) -- drawn from the NEXT frame,
+    LEVEL COMPLETE screen opens (`mode` 1, `menu_scr` LEVEL_DONE_ENTER: P10's hold, then LEVEL_DONE_SCR) -- drawn from
+    the NEXT frame,
     whose menu branch comes before the tics. Use released clears `pusedn`. Runs after the door tic
     (which writes `duse`) and before the player's move, the model's order. M7 P2b: `press_miss`
     runs on a press that misses the exit -- the SR lifts and the S1 switch (`movercode.
@@ -1038,7 +1115,7 @@ def exit_lines(boxes, press_miss=()) -> list:
     out += [*press_miss,
             ";ex_done",
             "ex_hit:", "hex.set 1, lvdone, 1", "hex.set 1, mode, 1",
-            f"hex.set 1, menu_scr, {LEVEL_DONE_SCR}", ";ex_done",
+            f"hex.set 1, menu_scr, {LEVEL_DONE_ENTER}", ";ex_done",          # P10: LEVEL COMPLETE, its hold first
             "ex_up:", "hex.zero 1, pusedn",
             "ex_done:"]
     return out
@@ -1077,11 +1154,12 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
         # state machine reads them
         "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
         "hex.zero 1, ev_help",                                          # M7 P3.4
+        "hex.zero 1, ev_any",                                           # P10: any key's down edge
         f"hex.zero {len(KB.HELD_KEYS)}, {KB.KEY_NOW}",                  # P9: the press latch
         f"rep({polls}, i) kb.poll kbstat, kbcode, "
         + "".join(f"{KB.flag(k)}, " for k in KB.HELD_KEYS)            # M7 P4.1: strafe, fire, 1..4
         + f"{KB.KEY_NOW}, "                                             # P9
-        "ev_enter, ev_esc, ev_up, ev_dn, ev_help, bad",
+        "ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad",          # P10: ev_any
         *KB.now_lines(),                                                # P9: kb_now |= the held flags
         # the frame's keys -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
@@ -1249,6 +1327,11 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
 
 
 WINDOW_TITLE = "FlipJump DOOM"
+# P10 (the owner, 2026-10-12): the frame-rate cap the program sends at boot (present.set_max_fps -> flipjump's 0x14).
+# 20 (measured on gamespeed's 10 games, blocked54: frames 33..378 ms, median 125): only the cheap views wait -- the
+# world's step is per frame, so this bounds the game's real-time speed from above (the monsters' 2 tics a frame run at
+# <= 40 tics/s, DOOM's own 35 near it); a heavy frame is already slower and is never delayed.
+MAX_FPS = 20
 WINDOW_ICON_SIZE = 32
 WINDOW_ICON_INDEX = 181            # PLAYPAL's nearest to the wordmark's rgb(190,22,34)
 
@@ -1328,7 +1411,8 @@ def window_chrome_fj():
     for i, ch in enumerate(WINDOW_TITLE.encode("utf-8")):
         big |= ch << (8 * i)
     calls = ["present.set_window_title %s, %d"
-             % (hex(big), len(WINDOW_TITLE.encode("utf-8")))]
+             % (hex(big), len(WINDOW_TITLE.encode("utf-8"))),
+             "present.set_max_fps %d" % MAX_FPS]          # P10: the frame-rate cap, once at boot
 
     n = WINDOW_ICON_SIZE
     body = ["    present.set_window_icon_header %d, %d" % (n, n)]
@@ -1515,6 +1599,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # V5: stacked boundary pieces + per-boundary plane regions ride the V3 slot machinery and
     # the pnear pid bank -- both must be on.
     stack_flag = 1                              # V5: stacked boundary pieces + per-boundary plane regions
+    # P10 G2: a column's BASE pid lives in `sfbase` at a constant CELL offset from its sfflag byte
+    # (frame.ts_base_store / lines_base_split), which holds only while a pid is one byte
+    assert cfg.PID_BYTES == 1, (
+        "the V5 column bases (sfbase) assume a one-byte pid; PID_NIBBLES=%d needs a strided sfbase"
+        % cfg.PID_NIBBLES)
     # V5 slot layout: 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 -- all four
     # fit the EXISTING 16-byte stride, so the whole-nibble shift stays.
     asset_wad = asset_wad or map_wad
@@ -1541,6 +1630,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # berserk and bonus, and the dead player's guards on the TIC-START death `p_dd0`. ONE switch, from the model mode;
     # the door tic reads `p_dd0` (built below, before the monster parts), so it is known here
     _LOOT = bool(_P5 and standalone and _lootcode.loot_on(PLAYER_MODE))
+    # P10 (doomfj.statcode): LEVEL COMPLETE's stats -- the kill, item and secret counters and the digits -- in the game
+    # tier, whose menu shows them (the full player: the kills land through damagecode, the items through lootcode)
+    _STATS = _LOOT
     cmap = bake_bsp(map_wad, mapname)
     verts = cmap.vertexes
     lds = map_wad.linedefs(mapname); sds = map_wad.sidedefs(mapname)
@@ -1754,6 +1846,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 return True
         return False
 
+    # P10 (the owner's play-test, 2026-10-12): the exit, the switches and the doors each wear a tone of their own --
+    # the game picture's (GAME_RENDER_KW `wall_tones`, where the full player loots: the game tier), from the map's own
+    # level data, as the oracle's `_wall_tones` reads it
+    from doomfj.reference_model import GAME_RENDER_KW as _GRKT, wall_tone_names as _wall_tone_names
+    _wall_tones = (_wall_tone_names(lds, sds, map_wad.sectors(mapname))
+                   if (_LOOT and _GRKT.get("wall_tones")) else {})
+
     def _seg_wall_tex_name(seg):
         """The texture a seg's SOLID body wears.
 
@@ -1765,9 +1864,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         the change)."""
         ld_ = lds[seg.linedef]
         sd_ = sds[ld_.front if seg.side == 0 else ld_.back]
+        name = sd_.middle
         if ld_.back != -1 and _ts_closed_early(seg) and sd_.upper not in ("-", "", None):
-            return sd_.upper
-        return sd_.middle
+            name = sd_.upper
+        # P10: the line's WALL TONE (reference_model.wall_tone_names), the game picture's alone -- the oracle's `_wtex`
+        if name not in ("-", "", None):
+            name = _wall_tones.get(seg.linedef, name)
+        return name
 
     # the combined dispatch table over every distinct wall texture the one-sided segs use (downscaled to match
     # the oracle's _wall_texture), plus the 1x1 WALL_BG sentinel; per-seg texinfo precomputed via the oracle rule.
@@ -1788,6 +1891,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # W1R's canvas is TWO texels (t1 + the 2C alt), so the texture-less sentinel
             # matches its stride -- both texels the flat shade.
             th, tw, texels = (2, 1, [WALL_BG, WALL_BG]) if tex_mode == "W1R" else (1, 1, [WALL_BG])
+        elif nm.startswith("#"):
+            # P10: a WALL TONE (reference_model.wall_tone_names) -- its canvas is the oracle's own (`_wall_texture`)
+            texels, th, tw = rm._wall_texture(asset_wad, nm, cache, wall_mode=tex_mode)
         else:
             c = downscale_canvas(composite_texture(asset_wad, defs[nm]), rm.downscale)
             th, tw, texels = len(c), len(c[0]), texture_texels(c)
@@ -1982,8 +2088,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                          [map_wad.things(mapname)[w_] for w_ in sorted(_mt_keep)],
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
                          cache=spr_cache, mode=MONSTER_MODE, player=PLAYER_MODE if menu else "walk",
-                         static_bank=(spr_base, spr_ldbase, spr_dw))
+                         static_bank=(spr_base, spr_ldbase, spr_dw),
+                         **({"stats": True} if _STATS else {}))         # P10: dm_kill counts the kill
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
+    _STATS = bool(_STATS and _p31)            # P10: the stats count from the monster parts' World
     # M7 P6 (doomfj.barrelcode, the player mode "full"): the barrels, their blasts, the drops and the puffs
     _bar = _p31.get("barrel") if _p31 else None
     _SEEN = 1 if (_p31 and _p31.get("mode") in ("wake", "chase", "decide", "full", "push", "final")) else 0
@@ -2978,7 +3086,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 rt_unlink=lambda t_, _leaf: _barrelcode.rt_unlink_lines(t_),
                 drop_take=lambda k_: [f"    stl.fcall drop_take{k_}, drt_ret"],
                 # M7 P8a (package K): a corpse slides away from its drop -- the pickup reads the drop's own row
-                **({"drop_rt": [_bar["drop_first"] + k_ for k_ in range(_bar["ndrop"])]} if _KNOCK else {}))
+                **({"drop_rt": [_bar["drop_first"] + k_ for k_ in range(_bar["ndrop"])]} if _KNOCK else {}),
+                **({"stats": True} if _STATS else {}))      # P10: the items counted, the secrets checked
             assert _loot["slots"] == _loot_slots and _loot["extra_vis"] == _LOOT_EXTRA_VIS
             from doomfj.build import LOOT_PERSIST as _LOOT_PERSIST
             assert set(_loot["persist"]) <= set(_LOOT_PERSIST), "M7 P6: build.LOOT_PERSIST lacks lootcode's cells"
@@ -3125,10 +3234,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # M7 P6: the barrels' level start (the same on every skill: barrelcode.check_model_rules), no drops; the
             # loot cells; each skill's runtime pickups' thvis slots (p6_restart_parts, the one composition)
             p6_common=_p6_restart[0], p6_skills=_p6_restart[1],
-            p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None))     # M7 P8a: the packages' cells
+            p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None),     # M7 P8a: the packages' cells
+            p10_common=_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
+                               stats=_p31["world"] if _STATS else None,     # P10: LEVEL COMPLETE's numbers
                                # M7 P5: a menu frame shows PLAYPAL 0 (hurtcode.pal_menu_lines: sent only on a change)
                                hud=(list(_hud["menu"]) + (list(_hrt["menu_palette"]) if _hrt else []))
                                if _hud else ())
@@ -3263,8 +3374,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _ss_cells, _th_cells = 2 * _MT_NSS, 2 * _MT_NT
     _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw"
                                              for _ in range(cfg.VIEW_W * cfg.PID_BYTES)),
-                    f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
-                    f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))]
+                    # P10 G2: `sfbase` -- a column's ceiling / floor BASE pid ([VIEW_W ceilings][VIEW_W
+                    # floors], frame.ts_base_store) -- is reached from a column's sfflag pointer by a
+                    # CONSTANT offset (VIEW_W / 2*VIEW_W cells), so it is declared right after sfflag, in
+                    # the same string: nothing can ever land between the two. Never reset: a pid is
+                    # read only under its sfflag bit, which the M1 set's byte array clears.
+                    # P10 G1: and `sprflag` right after them, in the same string -- frame.rec_clip_read reaches a
+                    # column's sfflag byte from its sprflag pointer, 3*VIEW_W cells back
+                    f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))
+                    + f"{NLJ}sfbase:{NLJ}" + NLJ.join(";0 * dw" for _ in range(2 * cfg.VIEW_W))
+                    + f"{NLJ}sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))]
                    # T-HOTSLOTS (2026-09-03): sfslot/spslot were the LAST hot pointer-walked
                    # arrays still in the ~20M-word tail -- every one of their ~1,530 derefs a
                    # frame paid wflip chains on a dense 31-bit address, the exact cost this
@@ -3546,6 +3665,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((_restartcode.view_decls() + _hurtcode.sink_decls()) if _SINK else []),   # M7 P8a A: p_vd, its cap
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
+          *(_statcode.decls(_p31["world"]) if _STATS else []),           # P10: the stats' cells and scratch
           *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *(WT_DECLS if (_p31 and _hrt and _WT_TICS > 1) else []),   # M7 P6+P7 E: the tempo loop's counter
@@ -3655,8 +3775,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              f"seg_bpid: hex.vec {cfg.PID_BYTES * 2}",  # V5: the boundary's baked BACK pair id
              stepcol]),
           # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (1 = slot
-          # A, 2 = A and B) so a column without a sprite costs ONE read on the emit path; `spslot[x]`
-          # holds, since M7 P1.4, [s][blk_lo][blk_hi] for A at byte 0 and for B at byte 8, at a
+          # A, 2 = A and B, P10 G3: 3 = A, B and C) so a column without a sprite costs ONE read on the
+          # emit path; `spslot[x]` holds, since M7 P1.4, [s][blk_lo][blk_hi] (P10 G1: + the clip
+          # counts) for A at byte 0, for C at byte 4 (P10 G3) and for B at byte 8, at a
           # power-of-16 stride: the thing's slot id and the bank block. The thing's constants -- its
           # top row biased by 32768 (two bytes: a near sprite's top sits far above row 0) and its
           # light row -- are in `gpslot[s]`, written once per thing. `n_thing`/`tstop` are the
@@ -3796,6 +3917,22 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "p2_wtc8: hex.vec 8",
         "p2_wtf8: hex.vec 8",
         "p2_xkey: hex.vec 4",
+        # P10 G2: the column's BASES (frame.lines_base_split), their cache key and ditto shadows, the
+        # sfbase pointer, and the effective ceiling pid the sky test reads
+        "p2_basep: hex.vec w/4",
+        f"p2_bcpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_bfpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_cbcpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_cbfpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_dbcpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_dbfpid: hex.vec {cfg.PID_BYTES * 2}",
+        f"p2_ecpid: hex.vec {cfg.PID_BYTES * 2}",
+        # P10 G8: a stacked piece's sky flags and the column's sky pair ids (frame.lines_piece_sky)
+        "p2_u1sk: hex.vec 2",
+        "p2_u2sk: hex.vec 2",
+        "p2_skyca: hex.vec w/4",
+        "p2_skycd: hex.vec w/4",
+        "tsf_base_p: hex.vec w/4",              # P10 G2: frame.ts_base_store's sfbase pointer
         "tsf_col_x: hex.vec 8",
         "tsf_cviewh1: hex.vec 8",
         "tsf_drawn_b: hex.vec w/4",
@@ -4033,6 +4170,43 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "gpsb_smidx: hex.vec 4",
         "gpsb_ptr0: hex.vec w/4",
         "gpsb_ridx: hex.vec 4",             # M7 P1.6: B's, kept across A's derive
+        # P10 G1: the fragments' clip windows (stream.frag_clip / frag_clamp), B's two run windows beside A, the loaded
+        # snapshots and their ditto shadows, and the record's snapshot pointer and byte (frame.rec_clip_read)
+        "gps_ct: hex.vec 2",
+        "gps_cb: hex.vec 2",
+        "gps_cut: hex.vec 1",
+        "gpsb_ct: hex.vec 2",
+        "gpsb_cb: hex.vec 2",
+        "gpsb_cut: hex.vec 1",
+        "ecl_bwlo: hex.vec 2",
+        "ecl_bwhi: hex.vec 2",
+        "p2_sc: hex.vec 2",
+        "p2_scb: hex.vec 2",
+        "p2_dsc: hex.vec 2",
+        "p2_dscb: hex.vec 2",
+        "trb_clip_p: hex.vec w/4",
+        "trb_clip_v: hex.vec 2",
+        # P10 G3: slot C -- the loaded fragment and snapshot, their ditto shadows, and the emit's derived rows, clip
+        # window, presence flag and composited window (stream.emit_region_c)
+        "p2_s3: hex.vec 2",
+        "p2_sblk3: hex.vec 4",
+        "p2_scc: hex.vec 2",
+        "p2_ds3: hex.vec 2",
+        "p2_dsblk3: hex.vec 4",
+        "p2_dscc: hex.vec 2",
+        "gpsc_has: hex.vec 1",
+        "gpsc_ybase: hex.vec 4",
+        "gpsc_top: hex.vec 4",
+        "gpsc_sy1: hex.vec 4",
+        "gpsc_sy2: hex.vec 4",
+        "gpsc_smidx: hex.vec 4",
+        "gpsc_ptr0: hex.vec w/4",
+        "gpsc_ridx: hex.vec 4",
+        "gpsc_ct: hex.vec 2",
+        "gpsc_cb: hex.vec 2",
+        "gpsc_cut: hex.vec 1",
+        "gpsc_w1: hex.vec 2",
+        "gpsc_w2: hex.vec 2",
         "srd_csh10: hex.vec 2, 10",
         "srd_csh5: hex.vec 2, 5",
         "srd_csh6: hex.vec 2, 6",
@@ -4359,13 +4533,17 @@ SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds SPR_THING_SLOT_FIELDS per id -- 
 # writes both (frame.thing_record_body), the emit reads a column's fragments (frame.lines_spr_load)
 # and the derive reads a thing's slot (stream.frag_derive); tests/host/test_sprite_column.py holds
 # every one of those literals -- offsets, field order, bias -- to these names.
-SPR_FRAG_FIELDS = ("slot id", "block lo", "block hi")   # a fragment in `spslot`, byte by byte
+# P10 G1: a fragment's 4th byte is the record's snapshot of the column's sfflag byte (frame.rec_clip_read) -- the nearer pieces'
+# counts, from which the emit clips the fragment (stream.frag_clip)
+SPR_FRAG_FIELDS = ("slot id", "block lo", "block hi", "clip counts")   # a fragment in `spslot`, byte by byte
 SPR_FRAG_BYTES = len(SPR_FRAG_FIELDS)
 SPR_SLOT_B_BYTE = 8        # fragment B's first byte in its column's slot; A's is byte 0
+SPR_SLOT_C_BYTE = 4        # P10 G3: the THIRD fragment, C, between them (frame.thing_record_body, lines_spr_load)
 SPR_THING_SLOT_FIELDS = ("y0 lo", "y0 hi", "light row", "bucket")   # `gpslot`, byte by byte
 SPR_THING_Y0_BIAS = 1 << 15   # y0 is stored biased, in two bytes: a tall NEAR sprite's top sits far
                               # above row -128, and a one-byte bias WRAPPED (M13-15M)
 assert SPR_FRAG_BYTES <= SPR_SLOT_B_BYTE <= SPR_SLOT_STRIDE - SPR_FRAG_BYTES
+assert SPR_FRAG_BYTES <= SPR_SLOT_C_BYTE <= SPR_SLOT_B_BYTE - SPR_FRAG_BYTES     # A | C | B, no overlap
 assert len(SPR_THING_SLOT_FIELDS) <= SPR_THING_SLOT_BYTES
 
 

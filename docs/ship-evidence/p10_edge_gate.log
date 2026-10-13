@@ -1,0 +1,34 @@
+$ PYTHONPATH="src;." python scratchpad/gp/edge_gate.py   # M7 P10: the visual tier at 52caa93 + the G2 / G8 / G1 / G3 working tree
+R9 G2 (1688,1357,0xaf8091a2): 160 column bases, 6001 px the base paint moves  ok
+R9 G2 (1656,1283,0x2f8091a2): 233 column bases, 5020 px the base paint moves  ok
+R9 G2 (1680,1345,0xaf8091a2): 160 column bases, 5725 px the base paint moves  ok
+R9 G2 (-416,128,0x40000000): 94 column bases, 2907 px the base paint moves  ok
+R9 G8 (-416,128,0x40000000): 16 upper pieces with a sky back ceiling  ok
+R9 G8 (-384,224,0x5c71c71c): 37 upper pieces with a sky back ceiling  ok
+R9 G8 (-416,192,0x55555555): 24 upper pieces with a sky back ceiling  ok
+R9 G8 (-416,160,0x471c71c7): 21 upper pieces with a sky back ceiling  ok
+R9 G1 (2018,884,0xeabf52e4): 887 px the ledge clip moves  ok
+R9 G1 (1974,1408,0x80000000): 820 px the ledge clip moves  ok
+R9 G1 (2583,1087,0x9556f4d0): 295 px the ledge clip moves  ok
+R9 G3 (2198,-159,0xffd64759): 144 px the third fragment slot moves  ok
+R9 G3 (639,271,0x20000000): 121 px the third fragment slot moves  ok
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+assembled
+G2     (1688,1357,0xaf8091a2): 26,939,867 ops  BYTE-EXACT
+G2     (1656,1283,0x2f8091a2): 24,963,022 ops  BYTE-EXACT
+G2     (1680,1345,0xaf8091a2): 26,502,418 ops  BYTE-EXACT
+G8 G2  (-416,128,0x40000000): 14,696,630 ops  BYTE-EXACT
+G8     (-384,224,0x5c71c71c): 15,799,427 ops  BYTE-EXACT
+G8     (-416,192,0x55555555): 15,355,851 ops  BYTE-EXACT
+G8     (-416,160,0x471c71c7): 14,273,655 ops  BYTE-EXACT
+G1     (2018,884,0xeabf52e4): 23,728,007 ops  BYTE-EXACT
+G1     (1974,1408,0x80000000): 26,107,212 ops  BYTE-EXACT
+G1     (2583,1087,0x9556f4d0): 30,981,567 ops  BYTE-EXACT
+G3     (2198,-159,0xffd64759): 25,214,579 ops  BYTE-EXACT
+G3     (639,271,0x20000000): 23,865,590 ops  BYTE-EXACT
+deg    (664,291,0x18000000): 31,756,151 ops  BYTE-EXACT
+deg    (1272,-724,0x40000000): 17,625,921 ops  BYTE-EXACT
+deg    (1869,479,0x80000000): 30,913,683 ops  BYTE-EXACT
+deg    (-416,256,0x0): 28,696,539 ops  BYTE-EXACT
+PASS
+exit 0

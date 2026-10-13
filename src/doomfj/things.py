@@ -72,9 +72,15 @@ def cold_row(row):
 # ringing it are multiplayer-only things (#226 .. #230, options 31: every skill, ambush, MTF_NOTSINGLE); THIS game spawns
 # them in single player too -- a deviation from DOOM's P_SpawnMapThing, named by (type, x, y) so it cannot reach another
 # thing. They keep their skill bits (all three), so every skill has them.
+# P10 (the owner, 2026-10-12: "add them both [the shotgun and the chaingun], its fun to play with. You can make it a bit
+# weaker"): the big room's multiplayer SHOTGUN (#41, options 23) and the cave's multiplayer CHAINGUN (#40, options 23) join
+# the list -- the weapons alone; their multiplayer ammo boxes stay multiplayer, which is the "a bit weaker" (a shotgun
+# gives 8 shells, a chaingun 20 bullets, as DOOM's P_GiveWeapon).
 SINGLE_PLAYER_EXTRA = frozenset({(2003, 976, -544),                                          # LAUN, #226
                                  (2010, 1008, -544), (2010, 976, -576), (2010, 944, -544),   # ROCK, #227 .. #229
-                                 (2010, 976, -512)})                                         # ROCK, #230
+                                 (2010, 976, -512),                                          # ROCK, #230
+                                 (2001, 864, 896),                                           # SHOT, #41 (P10)
+                                 (2002, 2288, 1024)})                                        # MGUN, #40 (P10)
 
 
 def single_player(t):
@@ -85,7 +91,8 @@ def single_player(t):
     are multiplayer-only (all pickups: 7 weapons, 18 ammo, a soulsphere --
     docs/ship-evidence/p15_skill_census.log); the image holds the other 225, the union of the three
     skills, and which of those a game has is the skill's level-start state.
-    P9: and the SINGLE_PLAYER_EXTRA things (the launcher and its four rockets) -- 230 things."""
+    P9: and the SINGLE_PLAYER_EXTRA things (the launcher and its four rockets) -- 230 things. P10: and the shotgun #41
+    and the chaingun #40 -- 232."""
     from doomfj import gamedata as gd          # lazy: gamedata reads the oracle's constants at import
     if (t.type, t.x, t.y) in SINGLE_PLAYER_EXTRA:
         return bool(t.flags & (gd.MTF_EASY | gd.MTF_NORMAL | gd.MTF_HARD))

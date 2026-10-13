@@ -1,0 +1,11 @@
+$ cd <worktree at 31bccd2> && PYTHONPATH=src python -m pytest tests/fj/test_player_move_fj.py::test_the_records_exercise_every_path -q -p no:cacheprovider --tb=line   # the seeded records before the top-up (CI shard 14/20 on 6208788, 44a3919, 71a603b, 31bccd2)
+F                                                                        [100%]
+================================== FAILURES ===================================
+E   AssertionError: ({'blocked': 175, 'bybar': 9, 'bydecor': 27, 'bymon': 74, ...}, {'blocked': 60, 'bybar': 10, 'bydecor': 10, 'bymon': 20, ...})
+    assert False
+     +  where False = all(<generator object test_the_records_exercise_every_path.<locals>.<genexpr> at 0x0000016BE56BE500>)
+C:\Users\tomhe\Documents\doom-tdd2\tests\fj\test_player_move_fj.py:354: AssertionError: ({'blocked': 175, 'bybar': 9, 'bydecor': 27, 'bymon': 74, ...}, {'blocked': 60, 'bybar': 10, 'bydecor': 10, 'bymon': 20, ...})
+=========================== short test summary info ===========================
+FAILED tests/fj/test_player_move_fj.py::test_the_records_exercise_every_path
+1 failed in 2.19s
+rc=1

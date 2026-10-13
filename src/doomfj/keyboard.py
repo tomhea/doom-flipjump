@@ -79,6 +79,7 @@ def frame_keys(events, frames: int, polls: Optional[int] = None, binding=None, m
         from doomfj.wall_renderer import STANDALONE_POLLS as polls
     if menu_keys is None:
         from doomfj.menu import MENU_KEYS as menu_keys
+    from doomfj.menu import ANY_KEY_EVENT
     binding = BINDING if binding is None else binding
     names = sorted(set(binding.values()), key=lambda n: (HELD_KEYS.index(n) if n in HELD_KEYS else 99, n))
     pending = sorted((tuple(e) for e in events), key=lambda e: e[0])
@@ -92,6 +93,8 @@ def frame_keys(events, frames: int, polls: Optional[int] = None, binding=None, m
                 i += 1
                 if is_down and code in menu_keys:
                     menu.add(menu_keys[code])
+                if is_down:
+                    menu.add(ANY_KEY_EVENT)          # P10: every key's down edge (input.fj's ev_any)
                 name = binding.get(code)
                 if name is not None:
                     held[name] = bool(is_down)

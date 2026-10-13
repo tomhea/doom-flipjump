@@ -1,0 +1,18 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-985 [at 985c1d4, unmodified] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_sprite_bank_fj.py::test_the_window_walker_emits_nothing_for_an_empty_window tests/fj/test_sprite_bank_fj.py::test_control_a_window_walker_without_its_guard_is_caught -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_walker_after
+# worktree HEAD: 985c1d4e398e952d018010cd1da0e90d13ed4b6e (P10 fix: the window walker emits nothing for an EMPTY window -- blocked55's gamespeed crash)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-985\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:30:04 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-985
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 2 items
+
+tests/fj/test_sprite_bank_fj.py::test_the_window_walker_emits_nothing_for_an_empty_window PASSED [ 50%]
+tests/fj/test_sprite_bank_fj.py::test_control_a_window_walker_without_its_guard_is_caught PASSED [100%]
+
+======================== 2 passed in 89.76s (0:01:29) =========================
+# finished 2026-10-13 04:31:36 +0300; pytest exit code: 0

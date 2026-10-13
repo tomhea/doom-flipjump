@@ -224,7 +224,7 @@ def _thing_key(t):
 
 def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_near: bool, boot_skill: int,
               skills, cache: dict, mode: str = "idle", depth_order=None, player: str = "walk",
-              static_bank=None) -> dict:
+              static_bank=None, stats: bool = False) -> dict:
     """everything P3.1 adds to the game tier, from the model's own sources:
       * `view_rows`: one thing row per distinct monster VIEW (lump, mirrored) -- `things.thing_rows`' layout from the
         view's art, dw's bit 7 set for a mirrored view -- appended after the runtime things' own rows;
@@ -557,7 +557,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                                        fx=bleed, full=loot, nbar=barrel["nbar"] if barrel else 0,
                                        drops=barrel["drops"] if barrel else None,
                                        **({"knock": True} if knock else {}),
-                                       **({"fight": True} if fight else {}))   # M7 P8a I: a monster's source
+                                       **({"fight": True} if fight else {}),   # M7 P8a I: a monster's source
+                                       **({"stats": True} if stats else {}))   # P10: the kill counter
                     extra["decls_wake"] += dmp["decls"]
                     extra["decide_lines"] += dmp["lines"]
                     extra["tables"] += dmp["tables"]

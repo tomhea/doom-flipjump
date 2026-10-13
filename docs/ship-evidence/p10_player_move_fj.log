@@ -1,0 +1,4 @@
+$ PYTHONPATH=src python -m pytest tests/fj/test_player_move_fj.py -q -p no:cacheprovider   # P10 the records topped up to their floors (working tree on 31bccd2)
+..........                                                               [100%]
+10 passed in 1530.59s (0:25:30)
+rc=0

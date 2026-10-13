@@ -57,7 +57,7 @@ def _script(seed=11):
     return keys
 
 
-def _world(saw=True):
+def _world(saw=True, chaingun=True):
     """the shotgun given; the chainsaw too, or not -- key 1 is the chainsaw when it is owned, so the fist is only
     ever up in a run without it"""
     w = World(skill=gd.SK_HARD, monsters="idle", player="fire", monster_tics=1)   # M7 P6+P7 E: one DOOM tic
@@ -65,9 +65,10 @@ def _world(saw=True):
     ws.p_owned[gd.WP_SHOTGUN] = 1
     ws.p_owned[gd.WP_CHAINSAW] = int(saw)
     ws.p_ammo[gd.AM_SHELL] = 4
-    ws.p_ammo[gd.AM_CLIP] = 12
+    ws.p_ammo[gd.AM_CLIP] = 12 + int(chaingun) * 28        # P10: enough left for the chaingun to fire
     ws.p_owned[gd.WP_MISSILE] = 1                            # P9: the launcher, with a few rockets to run dry
     ws.p_ammo[gd.AM_MISL] = 5
+    ws.p_owned[gd.WP_CHAINGUN] = int(chaingun)               # P10: the chaingun (key 4), on the pistol's bullets
     return w
 
 
@@ -119,8 +120,8 @@ def _program(start, mut=None, tics=None):
     return "\n".join(body) + "\n", states, frames
 
 
-def _model_rows(script, saw=True):
-    w = _world(saw)
+def _model_rows(script, saw=True, world_fn=None):
+    w = _world(saw) if world_fn is None else world_fn()
     rows = []
     for k in script:
         w.tic(k)
@@ -135,7 +136,8 @@ def _want(row, states, frames):
     idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(states)}
     wst, fst = gd.STATE_NAMES[row["p_wpn_state"]], gd.STATE_NAMES[row["p_flash_state"]]
     ammo = {gd.WP_PISTOL: row["ammo"][gd.AM_CLIP], gd.WP_SHOTGUN: row["ammo"][gd.AM_SHELL],
-            gd.WP_MISSILE: row["ammo"][gd.AM_MISL]}.get(row["p_ready"])          # P9: the rockets
+            gd.WP_MISSILE: row["ammo"][gd.AM_MISL],                             # P9: the rockets
+            gd.WP_CHAINGUN: row["ammo"][gd.AM_CLIP]}.get(row["p_ready"])         # P10: the chaingun's bullets
     bar = hudcode.slot_codes(hud.slot_values(ammo=ammo, health=100, armor=0,
                                              owned=hud.arms_owned(row["owned"]), blue=False))   # P9: DOOM's 2..7
     return [row["p_ready"], row["p_pending"], idx[row["p_wpn_state"]], row["p_wpn_tics"], row["p_wpn_sy"],
@@ -147,9 +149,9 @@ def _want(row, states, frames):
             row["ammo"][gd.AM_MISL]]
 
 
-def _run(tmp_path, name, mut=None, saw=True, tics=None):
-    script = _script()
-    w = _world(saw)
+def _run(tmp_path, name, mut=None, saw=True, tics=None, world_fn=None, script=None):
+    script = _script() if script is None else script
+    w = _world(saw) if world_fn is None else world_fn()
     text, states, frames = _program(_start(w), mut, tics)
     src = tmp_path / (name + ".fj")
     src.write_text(text, encoding="utf-8")
@@ -160,10 +162,17 @@ def _run(tmp_path, name, mut=None, saw=True, tics=None):
                            | int(k["w4"]) << 4 | int(k["w5"]) << 5]) for k in script) + bytes([0])
     io = FixedIO(feed)
     fj.run(out, io_device=io, print_time=False, print_termination=False)
-    got = [[int(v, 16) for v in line.split(",")[:len(CELLS)]]
-           for line in io.get_output(allow_incomplete_output=True).decode().split("\n")[:N]]
-    want = [_want(r, states, frames) for r in _model_rows(script, saw)]
+    got = [_parse_row(line)                          # P10: a garbled row (a broken program) parses to None
+           for line in io.get_output(allow_incomplete_output=True).decode("latin-1").split("\n")[:len(script)]]
+    want = [_want(r, states, frames) for r in _model_rows(script, saw, world_fn)]
     return got, want
+
+
+def _parse_row(line):
+    try:
+        return [int(v, 16) for v in line.split(",")[:len(CELLS)]]
+    except ValueError:
+        return None
 
 
 def _first_bad(got, want):
@@ -179,8 +188,9 @@ def test_the_weapon_is_the_model_tic_by_tic(tmp_path, saw):
     assert bad is None, "tic %d: %s" % (bad, {names[i]: (got[bad][i], want[bad][i]) for i in range(len(names))
                                              if got[bad][i] != want[bad][i]})
     # the script covers what it claims: every weapon was up, both guns ran dry, the flash ran
-    assert {g[0] for g in got} == ({gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW, gd.WP_MISSILE} if saw else
-                                   {gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_MISSILE})
+    assert {g[0] for g in got} == ({gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW, gd.WP_MISSILE, gd.WP_CHAINGUN}
+                                   if saw else
+                                   {gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_MISSILE, gd.WP_CHAINGUN})
     assert any(g[9] == 0 for g in got) and any(g[10] == 0 for g in got) and any(g[5] for g in got)
 
 
@@ -249,6 +259,107 @@ def test_the_script_fires_the_launcher_every_way():
         dry |= before[3] == gd.WP_MISSILE and ws.p_ammo[gd.AM_MISL] == 0
     assert gd.WP_MISSILE in ready and fired >= 4 and held_ready >= 1 and refire >= 1 and dry, (
         ready, fired, held_ready, refire, dry)
+
+
+# ---- P10 (the owner, 2026-10-12: "add them both"): THE CHAINGUN in the same loop --------------------------------------
+# The script owns the chaingun too (key 4 among the switches, the pistol's 12 bullets): A_FireCGun's two burst frames
+# (one bullet each, each burst's OWN flash frame), A_ReFire, the first burst accurate (refire 0: one draw a bullet) and
+# the held ones 3-draw, running dry, P_CheckAmmo's chaingun-before-shotgun preference, the bar's bullets and ARMS 4.
+# R9 (CHAINGUN_MUTS): each mutant of the chaingun's text must part from the model.
+CHAINGUN_MUTS = {
+    "oneflash": (r"stl\.fcall fen%d, fl_ret\n" % WC.weapon_states().index("S_CHAINFLASH2"),
+                 "stl.fcall fen%d, fl_ret\n" % WC.weapon_states().index("S_CHAINFLASH1")),
+    "freebullet": (r"(hex\.if0 3, am_clip, a\d+cg0\n)hex\.sub_constant 3, am_clip, 1\n", r"\1"),
+    "nodrycheck": (r"hex\.if0 3, am_clip, (a\d+)cg0\n", ""),
+    "key4": (r"hex\.if0 1, kb_now \+ 11\*dw, wk_5\n", ";wk_5\n"),
+    "cgpref": (r"hex\.set 1, wp_pend, %d\n(;a\d+r?cdn)" % gd.WP_CHAINGUN, r"hex.set 1, wp_pend, %d\n\1" % gd.WP_SHOTGUN),
+}
+
+
+def test_the_script_fires_the_chaingun_every_way():
+    """the model's own run of the script: the chaingun came up by key 4 and fired both burst frames (both flashes),
+    accurate and held bursts, by A_ReFire, and ran the bullets dry"""
+    script = _script()
+    w = _world(True)
+    ws = w.ws
+    ready, flashes, acc, held, dry = set(), set(), 0, 0, False
+    for k in script:
+        before = (ws.p_ammo[gd.AM_CLIP], ws.p_ready, ws.p_refire)
+        ev = w.tic(k)
+        ready.add(ws.p_ready)
+        if ws.p_ready == gd.WP_CHAINGUN:
+            flashes.add(gd.STATE_NAMES[ws.p_flash_state])
+        n = sum(1 for sh in ev.shots if sh[0] == "chaingun")
+        acc += n if not before[2] else 0
+        held += n if before[2] else 0
+        dry |= before[1] == gd.WP_CHAINGUN and ws.p_ammo[gd.AM_CLIP] == 0
+    assert (gd.WP_CHAINGUN in ready and {"S_CHAINFLASH1", "S_CHAINFLASH2"} <= flashes and acc >= 2 and held >= 1
+            and dry), (ready, flashes, acc, held, dry)
+
+
+@pytest.mark.parametrize("mut", sorted(set(CHAINGUN_MUTS) - {"nodrycheck"}))   # nodrycheck: the dry-burst test's
+def test_the_checks_catch_a_broken_chaingun(tmp_path, mut, monkeypatch):
+    pat, new = CHAINGUN_MUTS[mut]
+    orig = WC.weapon_lines
+
+    def broken(*a, **kw):
+        text = "\n".join(orig(*a, **kw)) + "\n"
+        text, n = re.subn(pat, new, text)
+        assert n, mut
+        return text.rstrip("\n").split("\n")
+    monkeypatch.setattr(WC, "weapon_lines", broken)
+    got, want = _run(tmp_path, "wpc_" + mut)
+    bad = _first_bad(got, want)
+    assert bad is not None, "the chaingun mutant %s went unnoticed" % mut
+    print("chaingun mutant %s caught at tic %d" % (mut, bad))
+
+
+def _dry_world():
+    """the chaingun up and ready with ONE bullet: the first burst frame fires it, the second meets an empty clip"""
+    w = _world(True)
+    ws = w.ws
+    ws.p_ammo[gd.AM_CLIP] = 1
+    ws.p_ready, ws.p_pending = gd.WP_CHAINGUN, gd.WP_NOCHANGE
+    ws.p_wpn_state, ws.p_wpn_tics = gd.STATE_INDEX["S_CHAIN"], 1
+    return w
+
+
+def _dry_script():
+    keys = []
+    for t in range(40):
+        k = {name: False for name in KEYS}
+        k["fire"] = t < 12
+        keys.append(k)
+    return keys
+
+
+@pytest.mark.parametrize("mut", [None, "nodrycheck"])
+def test_the_chaingun_s_second_burst_on_an_empty_clip_fires_nothing(tmp_path, mut, monkeypatch):
+    """P10: A_FireCGun's `if (!player->ammo[...]) return;` -- one bullet, fire held: S_CHAIN1 fires it, S_CHAIN2 meets an
+    empty clip and does nothing (no round, no flash, no draw), then P_CheckAmmo lowers it. R9: without the check the
+    second burst frame takes a round it does not have"""
+    w = _dry_world()
+    model = []
+    for k in _dry_script():
+        ev = w.tic(k)
+        model += [sh[0] for sh in ev.shots]
+    assert model.count("chaingun") == 1 and w.ws.p_ammo[gd.AM_CLIP] == 0 and w.ws.p_ready != gd.WP_CHAINGUN
+    if mut:
+        pat, new = CHAINGUN_MUTS[mut]
+        orig = WC.weapon_lines
+
+        def broken(*a, **kw):
+            text = "\n".join(orig(*a, **kw)) + "\n"
+            text, n = re.subn(pat, new, text)
+            assert n, mut
+            return text.rstrip("\n").split("\n")
+        monkeypatch.setattr(WC, "weapon_lines", broken)
+    got, want = _run(tmp_path, "wpd_%s" % mut, world_fn=_dry_world, script=_dry_script())
+    bad = _first_bad(got, want) if len(got) == len(want) else 0
+    if mut is None:
+        assert bad is None, "the dry burst parts from the model at tic %s" % bad
+    else:
+        assert bad is not None, "the chaingun mutant %s went unnoticed" % mut
 
 
 @pytest.mark.parametrize("mut", sorted(LAUNCHER_MUTS))

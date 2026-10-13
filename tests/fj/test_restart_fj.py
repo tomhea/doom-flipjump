@@ -49,7 +49,8 @@ M32 = 0xFFFFFFFF
 # the model's RESTART_KEEP as the fj's cells (combat.RESTART_KEEP: the skill, the mode, the held keys) + the menu's
 # own two (the menu state machine sets them around NEW GAME; the model's menu is outside the World)
 KEEP = ("g_skill", "mode", "menu_scr", "menu_sel", "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "kb_sl", "kb_sr",
-        "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4", "kb_w5")         # P9: 5
+        "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4", "kb_w5",         # P9: 5
+        "g_live")                       # P10: a game in progress -- NEW GAME's menu line sets it, no restart writes it
 # the persisted cells nothing reads unless a cell the restart DOES write says so: `aim_tz` is read only behind a
 # non-zero `aim_sid` the same render wrote (build.AIM_PERSIST) -- free either way
 FREE = ("aim_tz",)
@@ -104,7 +105,7 @@ def _parts():
     wpn = weapon_parts(mw, "E1M1", shoot=player_resolves(WR.PLAYER_MODE), hurt=True)
     # M7 P6: the barrels and drops (package C) and the player's loot (package B) -- through the emitter's own
     # composition, p6_restart_parts; the runtime pickups' thvis slots follow the baked vanishable ones
-    from doomfj import lootcode
+    from doomfj import lootcode, statcode
     loot_slots = (lootcode.pickup_slots(w5, rm, mw, "E1M1", art) if lootcode.loot_on(WR.PLAYER_MODE) else None)
     p6_common, p6_skills = WR.p6_restart_parts(w5, p31.get("barrel"), loot_slots)
     nmobile = p31["nmob"] + p31.get("ndrop", 0)
@@ -118,7 +119,8 @@ def _parts():
         hud_restart=hudcode.hud_restart_lines(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))),
         wpn_restart=wpn["restart"], aim=True, hrt_restart=hrt["restart"], proj_restart=p31["proj"]["restart"],
         nmobile=nmobile, p6_common=p6_common, p6_skills=p6_skills,
-        p8a_common=WR.p8a_restart_parts(w5))           # M7 P8a: the final rung's cells (empty in the "full" tier)
+        p8a_common=WR.p8a_restart_parts(w5),           # M7 P8a: the final rung's cells (empty in the "full" tier)
+        p10_common=statcode.level_start_lines(w5))     # P10: the level's stats at 0 (the emitter's own composition)
     return dict(mw=mw, restart=restart, nt=len(rt), nmob=nmobile, nss=nss,
                 nvis=len(vis_slots) + (loot_slots["nextra"] if loot_slots else 0), nd=nd, nwalk=nwalk, nlift=nlift)
 
@@ -353,6 +355,9 @@ def test_the_harness_classifies_every_persisted_cell(P, cells):
         assert name in written, name
     for name in ("p_bc", "p_str", "p_bp", "am_misl", "am_cell", "mdrop", "dr_live", "bar_st", "rng_wd"):  # M7 P6
         assert name in written, name
+    for name in ("st_kill", "st_item", "st_secn", "st_secm"):                   # P10: the level's stats
+        assert name in written, name
+    assert "g_live" in kept                                                       # P10
     assert {"pal_cur", "hud_s", "hud_full", "g_skill", "mode", "kb_u"} <= set(kept)
 
 

@@ -1,0 +1,15 @@
+$ python scratchpad/12m/msframe.py --a build/doom_e1m1_onepass56.fjm --save-baseline shipped --note "M7 P10 onepass56: the owner's second play-test round, built ONE PASS (class F)"
+machine : power plan 'Silent'; busy processes: none
+msframe : A=doom_e1m1_onepass56.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  A         85.5 ms   206.7M fj/s  yard 3.55->3.56G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 1  A         85.1 ms   207.8M fj/s  yard 3.49->3.57G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 2  A         83.6 ms   211.3M fj/s  yard 3.49->3.56G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 3  A         87.0 ms   203.2M fj/s  yard 3.49->3.41G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 4  A        101.2 ms   174.6M fj/s  yard 3.28->3.45G   pin: cpu2 proc=ok thread=ok prio=high
+
+  A        median    85.5 ms/frame  [83.6 .. 101.2]    206.7M fj/s   17,671,775 ops/frame   cell=4 flat
+  engine A: df401f5d00a3ac5f full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.49G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+  baseline: saved as 'shipped' -> scratchpad\12m\msframe_baselines\shipped.json
+rc=0

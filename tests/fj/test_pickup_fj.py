@@ -41,7 +41,7 @@ ART = ROOT / "assets" / "freedoom1.wad"
 N = 520
 M32 = 0xFFFFFFFF
 PCELLS = (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("am_clip", 3), ("am_shell", 3), ("am_cell", 3), ("am_misl", 3),
-          ("p_bp", 1), ("wp_own", 5), ("wp_pend", 1), ("p_str", 4), ("p_bc", 2), ("pcard", 1), ("dr_live", 2),
+          ("p_bp", 1), ("wp_own", 6), ("wp_pend", 1), ("p_str", 4), ("p_bc", 2), ("pcard", 1), ("dr_live", 2),
           ("rtu_mark", 2), ("rtu_lmark", 3), ("dt_mark", 2))
 
 
@@ -132,7 +132,8 @@ def _records(c):
             cap = gd.MAXAMMO[a] * (2 if bp else 1)
             ammo.append(rnd.choice((0, 5, cap - 1, cap - 4, cap - 5, cap, rnd.randint(0, cap))))
         owned = {gd.WP_FIST: 1, gd.WP_PISTOL: 1, gd.WP_SHOTGUN: rnd.choice((0, 1)), gd.WP_CHAINSAW: rnd.choice((0, 1)),
-                 gd.WP_MISSILE: int(len(out) % 3 == 1)}   # P9: the launcher (no draw: the script's stream is kept)
+                 gd.WP_MISSILE: int(len(out) % 3 == 1),   # P9: the launcher (no draw: the script's stream is kept)
+                 gd.WP_CHAINGUN: int(len(out) % 4 == 2)}  # P10: the chaingun (no draw either)
         armor = rnd.choice((0, 99, 100, 199, rnd.randint(0, 200)))
         rec["pokes"] = {"p_health": rnd.choice((1, 60, 99, 100, 199, 200)), "p_armor": armor,
                         "p_armortype": rnd.choice((0, 1, 2)) if armor else 0, "ammo": ammo, "p_backpack": bp,
@@ -292,7 +293,8 @@ def _build(tmp_path, name, mut=None):
             body.append("hex.zero 3, p_hp")
         for a in range(gd.NUMAMMO):
             body.append("hex.set 3, %s, %d" % (L.AMMO_CELL[a], p["ammo"][a]))
-        body.append("hex.set 5, wp_own, %d" % sum(p["owned"][x] << (4 * WC.OWN[x]) for x in WC.WEAPONS))
+        body.append("hex.set %d, wp_own, %d" % (len(WC.WEAPONS),                            # P10: 6 nibbles
+                                                 sum(p["owned"][x] << (4 * WC.OWN[x]) for x in WC.WEAPONS)))
         for i, v in rec["present"].items():
             body.append("hex.set 2, thvis + %d*2*dw, %d" % (c.slots["slot"][i], v))
         for k, (x, y, st) in rec["drops"].items():

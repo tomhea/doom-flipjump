@@ -1,0 +1,37 @@
+$ python scratchpad/gp/fight_gate.py --fjm build/doom_e1m1_onepass56.fjm --labels scratchpad/12m/atlas/onepass56.labels.tsv.gz --only R --frame-ops docs/ship-evidence/onepass56_stress_rocket.json
+FIGHT GATE -- 3 scenarios (MONSTER_MODE final, PLAYER_MODE final), build/doom_e1m1_onepass56.fjm
+
+R1 a rocket into an awake crowd by barrels: flight, impact, the blast's many, a chain, knocks -- 58 frames
+  from (-416, 256) angle 00000000, late setups at frames [26]: the oracle does what the scenario claims: yes
+  counters: mon_hits 1, mon_misses 2, player_hurt 2, max_in_flight 1, shots_hit 5, drop_frames 24, bexp_frames 17, barrel_blasts 3, barrel_hurt 1, barrel_hits 3, knock_frames 25, mon_knock_frames 23, frac_frames 23, knock_moves 119, knock_walls 1, corpse_slides 16, mon_knock_refused 2, mon_attacks 1, mkills 3, rockets_fired 1, rocket_flight_frames 4, rocket_mon_hits 1, rocket_blasts 1, blast_mon 2, blast_bar 3, blast_things_max 5
+  frame 0 pokes: ['am_misl', 'p_ar', 'p_at', 'wp_own']
+  frame 26 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'viewangle', 'viewx', 'viewy']
+  CONTROL rocket_dmg       the oracle without the rule parts at frame 34 (cells)
+  CONTROL rocket_no_barrels the oracle without the rule parts at frame 34 (cells)
+  binary: 58 frames, 1,045,325,655 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+  frame ops: max 20,447,232 (frame 10), p95 20,447,232, mean 18,020,140, 0 of 58 frames over 22,000,000, 0 over the 44,000,000 tripwire
+
+R2 point blank: the rocket's blast hurts its shooter and throws him -- 48 frames
+  from (-416, 256) angle 00000000, late setups at frames [26]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, max_in_flight 1, drop_frames 18, knock_frames 8, mon_knock_frames 18, frac_frames 17, knock_moves 82, knock_walls 1, corpse_slides 15, knock_refused 1, mkills 1, rockets_fired 1, rocket_mon_hits 1, rocket_blasts 1, rocket_self 1
+  frame 0 pokes: ['am_misl', 'p_ar', 'p_at', 'wp_own']
+  frame 26 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'viewangle', 'viewx', 'viewy']
+  CONTROL rocket_spare_shooter the oracle without the rule parts at frame 30 (cells)
+  CONTROL rocket_dmg       the oracle without the rule parts at frame 30 (cells)
+  binary: 48 frames, 816,161,725 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+  frame ops: max 20,447,232 (frame 10), p95 20,447,232, mean 17,001,130, 0 of 48 frames over 22,000,000, 0 over the 44,000,000 tripwire
+
+R3 stress: a volley of rockets into the crowd, the trigger held -- 90 frames
+  from (-416, 256) angle 00000000, late setups at frames [26]: the oracle does what the scenario claims: yes
+  counters: mon_hits 1, mon_misses 2, mon_melee 1, proj_walls 3, player_hurt 3, max_in_flight 2, shots_hit 5, drop_frames 56, bexp_frames 17, barrel_blasts 3, barrel_hurt 1, barrel_hits 3, knock_frames 57, mon_knock_frames 23, frac_frames 55, knock_moves 151, knock_walls 1, corpse_slides 16, mon_knock_refused 2, mon_attacks 2, mkills 3, rockets_fired 4, rocket_flight_frames 37, rocket_mon_hits 1, rocket_blasts 4, blast_mon 2, blast_bar 3, blast_things_max 5
+  frame 0 pokes: ['am_misl', 'p_ar', 'p_at', 'wp_own']
+  frame 26 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'viewangle', 'viewx', 'viewy']
+  binary: 90 frames, 1,586,885,859 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+  frame ops: max 20,447,232 (frame 10), p95 20,447,232, mean 17,630,640, 0 of 90 frames over 22,000,000, 0 over the 44,000,000 tripwire
+
+TOTALS: mon_hits 2, mon_misses 4, mon_melee 1, proj_spawns 0, proj_impacts 0, proj_walls 3, fizzles 0, fx_spawns 0, fx_skipped 0, player_hurt 6, armor_out 0, deaths 0, dead_frames 0, max_in_flight 4, explosion_frames 0, shots_hit 10, pickups 0, pickup_items 0, pickup_drops 0, bonus_frames 0, berserk_frames 0, gibs 0, drop_frames 98, bexp_frames 34, barrel_blasts 6, puffs 0, blast_kills 0, barrel_hurt 2, player_blocked 0, nukage 0, restarts 0, restart_requests 0, level_done 0, barrel_hits 6, knock_frames 90, mon_knock_frames 64, frac_frames 95, knock_moves 352, knock_walls 3, infight 0, sink_max 0, sink_frames 0, corpse_slides 47, dead_slides 0, knock_refused 1, mon_knock_refused 4, mon_attacks 3, mkills 7, rockets_fired 6, rocket_fizzles 0, rocket_flight_frames 41, rocket_mon_hits 3, rocket_bar_hits 0, rocket_stops 0, rocket_blasts 6, blast_mon 4, blast_bar 6, blast_things_max 10, rocket_self 1, cgun_shots 0, cgun_acc 0, cgun_held 0, cgun_hits 0, cgun_flash1 0, cgun_flash2 0
+every event counter nonzero: yes; deaths 0
+frame ops of 3 scenarios -> docs/ship-evidence/onepass56_stress_rocket.json
+
+FIGHT GATE PASS (132 s)
+rc=0

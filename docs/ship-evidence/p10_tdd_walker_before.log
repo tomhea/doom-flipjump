@@ -1,0 +1,62 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-557 [at 557d239 (the walker WITHOUT the guard) + tests/fj/test_sprite_bank_fj.py, tests/fj/stream_screen.py, tests/fj/test_stream_screen.py from 985c1d4] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_sprite_bank_fj.py::test_the_window_walker_emits_nothing_for_an_empty_window tests/fj/test_sprite_bank_fj.py::test_control_a_window_walker_without_its_guard_is_caught -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_walker_before
+# worktree HEAD: 557d2399cbb76afd0e3048b27f5d8351e7f7c14d (P10: the restore sets re-keyed -- test_restore_set_shipped: 22 passed in 1.39s)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#    M tests/fj/stream_screen.py
+#    M tests/fj/test_sprite_bank_fj.py
+#    M tests/fj/test_stream_screen.py
+# copied-file hashes: tests/fj/stream_screen.py=4458d56abdc2 tests/fj/test_sprite_bank_fj.py=a771ea12e1bc tests/fj/test_stream_screen.py=e790e478bd0a 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-557\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:28:25 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-557
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 2 items
+
+tests/fj/test_sprite_bank_fj.py::test_the_window_walker_emits_nothing_for_an_empty_window FAILED [ 50%]
+tests/fj/test_sprite_bank_fj.py::test_control_a_window_walker_without_its_guard_is_caught FAILED [100%]
+
+================================== FAILURES ===================================
+__________ test_the_window_walker_emits_nothing_for_an_empty_window ___________
+
+shipped = {'clipped': ['undecodable: (98, 39, 38)\nassert 39 <= 38'], 'empty': ['undecodable: (98, 39, 38)\nassert 39 <= 38'], 'fast': ['undecodable: (98, 39, 38)\nassert 39 <= 38'], 'window': ['undecodable: (98, 39, 38)\nassert 39 <= 38']}
+
+    def test_the_window_walker_emits_nothing_for_an_empty_window(shipped):
+        """P10 (blocked55's gamespeed run 0, frame 31): an empty window -- the cursor already past whi -- emits no pair"""
+        bad = shipped["empty"]
+>       assert bad == [], "%d columns differ, first (case, rows) %s" % (len(bad), bad[:2])
+E       AssertionError: 1 columns differ, first (case, rows) ['undecodable: (98, 39, 38)\nassert 39 <= 38']
+E       assert ['undecodable...ert 39 <= 38'] == []
+E         
+E         Left contains one more item: 'undecodable: (98, 39, 38)\nassert 39 <= 38'
+E         
+E         Full diff:
+E         - []
+E         + [
+E         +     'undecodable: (98, 39, 38)\n'
+E         +     'assert 39 <= 38',
+E         + ]
+
+tests\fj\test_sprite_bank_fj.py:366: AssertionError
+__________ test_control_a_window_walker_without_its_guard_is_caught ___________
+
+world = ([(19, 0, 199, [(32, 25), (51, 55), (70, 145), (88, 102), (97, 139), (102, 175), ...]), (51, 0, 201, [(92, 117), (122,...0, 26, 12, 5, 39, 32), (0, 26, 12, 8, 39, 39), (1, 7, 3, 13, 13, 12), (1, 7, 3, 8, 13, 5), (1, 7, 3, 10, 13, 13), ...])
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_walker_before/test_control_a_window_walker_w0')
+
+    def test_control_a_window_walker_without_its_guard_is_caught(world, tmp_path):
+        """R9 for the empty-window guard: the walker blocked55 shipped (no guard) must fail the empty cases"""
+        src = (ROOT / "src/fj/stream_render.fj").read_text(encoding="utf-8")
+        guard = "        hex.cmp 2, wlo, whi, walk, send, send\n"
+>       assert src.count(guard) == 1, "re-point this mutant: the guard moved"
+E       AssertionError: re-point this mutant: the guard moved
+E       assert 0 == 1
+E        +  where 0 = <built-in method count of str object at 0x00000210B618A200>('        hex.cmp 2, wlo, whi, walk, send, send\n')
+E        +    where <built-in method count of str object at 0x00000210B618A200> = '// ==============================================================================================\n// stream_render.fj the per-column run emitter: pushes ceiling/wall/floor/sprite runs to the device.\n// STATUS  LIVE - the generated main + frame_render.fj\n// ENTRY   stream.emit_bytes4 (main); stream.emit_col_lines, stream.entry_append (frame_render)\n// SIZE    29 macros (stream.emit_bytes4 .. stream.entry_append)\n// ==============================================================================================\n// THE STREAM EMITTER — the per-column device-RUN raster. Walks a column\'s run-lists (ceiling band\n// list, wall run(s), floor band list, sprite fragments) and pushes each run out as `byte.emit` /\n// `cm.emit` through the device-emit dispatch tables (present.fj\'s `begin_frame_stream` + the tables\n// `doomfj.lut_generator.generate_emit_dispatch_table_fj` emits, named "byte"/"cm" by the includer).\n// `emit_col_lines` is the shipped per-column entry point. (`flush_frame`, the rung-3b whole-frame\n// assembler, was retired 2026-09-11 having never shipped -- docs/handoff-m13-2s.md keeps its\n// design.) (history: docs/handoff-visual-features.md, docs/m13p-procedural-pl...return (the caller may\n      // continue into the other half with the same window).\n      band_walk:\n        hex.read_byte_and_inc ecl_n_ent, ecl_ptr\n        hex.zero 2, ecl_ent_i\n      bw_loop:\n        hex.cmp 2, ecl_ent_i, ecl_n_ent, bw_body, bw_done, bw_done\n      bw_body:\n        hex.read_byte_and_inc ecl_y2r, ecl_ptr\n        hex.read_byte_and_inc ecl_colr, ecl_ptr\n        hex.cmp 2, ecl_y2r, ecl_win_lo, bw_skip, bw_skip, bw_test  // y2 <= ecl_win_lo -> above the window\n      bw_skip:\n        hex.inc 2, ecl_ent_i\n        ;bw_loop\n      bw_test:\n        hex.cmp 2, ecl_y2r, ecl_win_end, bw_emit, bw_last, bw_clamp\n      bw_emit:\n        rep(1-eabl%2, k) .pair_out ecl_y2r, ecl_colr    // eabl=1: walk but emit nothing\n        hex.inc 2, ecl_ent_i\n        ;bw_loop\n      bw_last:                                   // y2 == ecl_win_end: emit and stop\n        rep(1-eabl%2, k) .pair_out ecl_y2r, ecl_colr\n        ;bw_done\n      bw_clamp:                                  // y2 > ecl_win_end: emit the clamped pair and stop\n        rep(1-eabl%2, k) .pair_out ecl_win_end, ecl_colr\n      bw_done:\n        stl.fret band_ret\n\n      band_ret: ;0\n      end:\n    }\n}\n'.count
+
+tests\fj\test_sprite_bank_fj.py:373: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_sprite_bank_fj.py::test_the_window_walker_emits_nothing_for_an_empty_window
+FAILED tests/fj/test_sprite_bank_fj.py::test_control_a_window_walker_without_its_guard_is_caught
+============================= 2 failed in 41.89s ==============================
+# finished 2026-10-13 04:29:08 +0300; pytest exit code: 1

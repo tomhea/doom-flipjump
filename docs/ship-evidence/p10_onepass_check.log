@@ -1,0 +1,5 @@
+$ PYTHONPATH=src python scratchpad/onepass_check.py --gen build/generated_doom_e1m1_blocked55 --labels scratchpad/12m/atlas/blocked55.labels.tsv.gz --tier game    # at 2494636; blocked55 = the two-pass build of P10's source 557d239
+one-pass reset: 2691 nibble cells, 320 byte cells; 618 registered labels, 131 persisted
+cells: two-pass 3011, one-pass 3011; only two-pass 0, only one-pass 0, value differs 0
+ONE-TIME CHECK PASS
+rc=0

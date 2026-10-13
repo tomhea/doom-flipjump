@@ -1,0 +1,4 @@
+$ cd <the main checkout at dec86fc> && PYTHONPATH='src;C:/Users/tomhe/Documents/flipjump-trial' python -m pytest tests/host/test_build_blocked_one_pass.py -q -p no:cacheprovider   # flipjump e4340ee
+.......                                                                  [100%]
+7 passed in 2.11s
+rc=0

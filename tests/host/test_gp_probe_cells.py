@@ -130,8 +130,10 @@ def test_only_the_skill_menu_is_optional(tmp_path):
                                  "p_atk", "pj_src",                       # M7 P7: the killer, the shooters
                                  # M7 P8a: P6+P7's turn flag (#123 F1), the sink, knockback's cells, the blast source
                                  "p_tnh", "p_vd", "p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z",
-                                 "bar_src"}
-    for one in ("p_bc", "rng_wd", "dr_live", "g_skill", "p_atk"):   # M7 P6 / P7: each group whole or not at all
+                                 "bar_src",
+                                 # P10: a game in progress (the menu's RESUME), and LEVEL COMPLETE's counters
+                                 "g_live", "st_kill", "st_item", "st_secn", "st_secm"}
+    for one in ("p_bc", "rng_wd", "dr_live", "g_skill", "p_atk", "st_kill"):   # M7 P6 / P7 (P10: the stats): each group
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))
     for one in ("p_kmx", "mfy", "kb_live", "pj_z"):         # M7 P8a: knockback's eight come together

@@ -169,8 +169,10 @@ def test_the_checks_catch_a_broken_tail(tmp_path, name, mutate, frame):
 
 # ---- M7 P4.1: the overlay chosen per frame -- the weapon frame `wp_frm`, the flash frame `fl_frm` over it ----------
 # P9: the launcher's frames 15 / 16 (MISGA0 / MISGB0: wp_frm's high nibble 1) with its flashes 4..7 (MISFA0..D0)
+# P10: the chaingun's frames 17 / 18 (CHGGA0 / CHGGB0) with its flashes 8 / 9 (CHGFA0 / CHGFB0)
 PSPRITES = [(0, 0), (1, 1), (4, 0), (5, 2), (5, 3), (7, 0), (13, 0), (2, 1),
-            (15, 0), (16, 4), (16, 5), (16, 7), (15, 6), (0, 0)]                    # (wp_frm, fl_frm) per frame
+            (15, 0), (16, 4), (16, 5), (16, 7), (15, 6),
+            (17, 0), (17, 8), (18, 9), (0, 0)]                                       # (wp_frm, fl_frm) per frame
 
 
 def _psprite_program(mutate=None):
@@ -263,9 +265,13 @@ def test_the_control_a_flash_drawn_under_the_weapon(tmp_path):
 
 def test_the_launcher_frames_are_the_two_nibble_ones():
     """P9: the weapon psprite's frames grew to 17 with the launcher's MISGA0 / MISGB0 -- `wp_frm` is two nibbles, the
-    flash's MISFA0..D0 are fl_frm 4..7 -- and PSPRITES draws both launcher frames and every launcher flash"""
+    flash's MISFA0..D0 are fl_frm 4..7 -- and PSPRITES draws both launcher frames and every launcher flash.
+    P10: and to 19 with the chaingun's CHGGA0 / CHGGB0 (17 / 18), its flashes CHGFA0 / CHGFB0 fl_frm 8 / 9 -- drawn
+    too, each over its own weapon frame"""
     from doomfj import weaponcode as WC
     fr, fl = WC.overlay_frames(), WC.flash_frames()
-    assert len(fr) == 17 and fr[15:] == ["MISGA0", "MISGB0"] and WC.FRAME_NIBBLES == 2
-    assert fl[3:] == ["MISFA0", "MISFB0", "MISFC0", "MISFD0"]
+    assert len(fr) == 19 and fr[15:17] == ["MISGA0", "MISGB0"] and WC.FRAME_NIBBLES == 2
+    assert fl[3:7] == ["MISFA0", "MISFB0", "MISFC0", "MISFD0"]
     assert {wf for wf, _f in PSPRITES} >= {15, 16} and {ff for _w, ff in PSPRITES} >= {4, 5, 6, 7}
+    assert fr[17:] == ["CHGGA0", "CHGGB0"] and fl[7:] == ["CHGFA0", "CHGFB0"]
+    assert {(17, 8), (18, 9)} <= set(PSPRITES)

@@ -129,6 +129,11 @@ FX_POOL = 2                        # puffs and blood alive at once (D5, S3b)
 # frame tic (wall_renderer.world_tic_lines) loops this many times. A frozen set recorded before it names its own
 # (`scenarios_v2.use_tempo`: absent = 1).
 MONSTER_TICS_PER_FRAME = 2
+# P10: `leveltime`'s width -- 16 bits wrapped after 65,536 frames, under an hour at the 20 fps cap, and LEVEL COMPLETE's
+# TIME reads it now; 20 bits wrap after 14.5 hours. ONE definition: the schema, World.tic, MonsterPhase.tic,
+# restartcode.LVTIME_NIBBLES
+LEVELTIME_BITS = 20
+LEVELTIME_MASK = (1 << LEVELTIME_BITS) - 1
 TICS_FOREVER = 15                  # schema encoding of DOOM's tics == -1 (one nibble)
 MOVECOUNT_FLOOR = -1               # movecount saturates here; see `_a_chase`
 OCTANT_TAN_NUM, OCTANT_TAN_DEN = 106, 256   # tan(22.5 deg) ~ 106/256: the octant classifier
@@ -270,6 +275,7 @@ class Layout:
     nbarrel: int
     nwalk: int = 0     # M7 P2a.1: walk-over triggers (one per W1 tag)
     nlift: int = 0     # M7 P2b: lifts (doomfj.movers)
+    nsecret: int = 0   # P10: secret sectors (special 9) -- LEVEL COMPLETE's SECRETS
 
     @property
     def nmobile(self) -> int:
@@ -306,7 +312,8 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     leaf_bits, mon_bits = _index_bits(lay.nleaf), _index_bits(lay.nmon)
     # -- game ------------------------------------------------------------------------------------
     f("skill", 2, group="game", doc="DOOM gameskill: 1 easy, 2 medium, 3 hard (D7, menu)")
-    f("leveltime", 16, group="game", doc="tics since level start, wraps (nukage timing, S3b)")
+    f("leveltime", LEVELTIME_BITS, group="game",
+      doc="tics since level start, wraps (nukage timing, S3b; P10: LEVEL COMPLETE's TIME, 16 -> 20 bits)")
     f("sched_cursor", mon_bits, group="game", doc="the K-slot scheduler's first slot this tic")
     f("g_restart", 1, group="game", phase="S3b",
       doc="restart asked (use while dead, NEW GAME): the frame tail runs the restart block")
@@ -351,6 +358,16 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     # that landed (P_DamageMobj), as 0 (none: sector damage, or the player himself -- a barrel he set off) or
     # 1 + the monster slot; P_DeathThink turns the dead view toward it
     f("p_attacker", _index_bits(lay.nmon + 1), group="player", phase="P7", doc="0 or 1 + monster slot")
+    # P10 (the owner's play-test, 2026-10-12): LEVEL COMPLETE's stats -- player_t's killcount, itemcount and
+    # secretcount, and which secret sectors were entered (DOOM zeroes the sector's special; this level data is static,
+    # so the found set is the player's). All four are 0 at the level start and the restart (combat.RESTART_KEEP
+    # leaves them out). doomfj.statcode is their fj side
+    f("p_killcount", 8, group="player", phase="P10", label="st_kill",
+      doc="P_KillMobj's killcount: every COUNTKILL death (a single player counts the monsters' kills too)")
+    f("p_itemcount", 8, group="player", phase="P10", label="st_item", doc="COUNTITEM pickups taken")
+    f("p_secretcount", 4, group="player", phase="P10", label="st_secn", doc="secret sectors entered")
+    f("p_secret", 1, count=max(1, lay.nsecret), group="player", phase="P10", label="st_secm",
+      doc="secret sector k (special 9, sector order) was entered")
     if sinks:   # M7 P8a A (docs/gp-final-plan.md 1.1): P_DeathThink's view drop
         f("p_vdrop", 6, group="player", phase="P8a", label="p_vd",
           doc="0..35: viewheight = 41 - it; +1 a death-think tic after the psprites, capped at 35; 0 at the level "
@@ -612,6 +629,7 @@ class TicEvents:
     fx_skipped: int = 0                                     # effects dropped: the pool was full
     player_blocked: int = 0                                 # tried positions a solid thing refused
     nukage: int = 0                                         # damaging-floor hits
+    secrets: List[int] = field(default_factory=list)        # P10: secret sectors entered (sector index)
     deaths: int = 0
     restart_requests: int = 0
     restarts: int = 0
@@ -808,7 +826,8 @@ class World(CombatMixin):
         self.layout = Layout(nmon=len(self.mon_things), ndoor=len(self.door_order),
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
-                             nwalk=len(self.walk_triggers), nlift=len(self.lift_order))
+                             nwalk=len(self.walk_triggers), nlift=len(self.lift_order),
+                             nsecret=len(self.secret_sectors))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -819,6 +838,9 @@ class World(CombatMixin):
         from doomfj.mapcompiler import bake_bsp
         self.cmap = bake_bsp(mw, M)
         self.lds, self.sds, self.secs = mw.linedefs(M), mw.sidedefs(M), mw.sectors(M)
+        # P10: the secret sectors, in sector order -- `p_secret`'s bits, LEVEL COMPLETE's SECRETS total
+        from doomfj.combat import SECRET_SPECIAL
+        self.secret_sectors = [s for s, sec in enumerate(self.secs) if sec.special == SECRET_SPECIAL]
         lds, sds, secs, cmap = self.lds, self.sds, self.secs, self.cmap
         assert not any(ld.flags & gd.ML_SOUNDBLOCK for ld in lds), (
             "ML_SOUNDBLOCK lines need P_RecursiveSound's (sector, blocks) state; the region "
@@ -1057,7 +1079,7 @@ class World(CombatMixin):
             # each skip themselves while `lvdone`; its frame order 4.7)
             if not self.ws.g_leveldone:
                 self._monster_world(ev)
-                self.ws.leveltime = (self.ws.leveltime + 1) & 0xFFFF
+                self.ws.leveltime = (self.ws.leveltime + 1) & LEVELTIME_MASK
         if self.seen_hook is not None:
             self.seen_hook(self)                 # M7 P3.2: this tic's picture -> the next tic's mon_seen
         self.tic_count += 1

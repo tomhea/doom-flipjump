@@ -61,7 +61,10 @@ AIM_LO, AIM_HI = _aim_window(ReferenceModel(Config()))   # the pellet window: ON
 # M7 P8a (C): the compositor rules' two keys ride the game tier's PLAYER mode (world.compositor_d3) -- the census of a
 # set draws its own mode's picture (`Census.render_kw`); every other key is this frozen copy's
 _D3_KEYS = frozenset(getattr(RMOD, "D3_RENDER_KW", {}))
-assert {k: v for k, v in RENDER_KW.items() if k not in _D3_KEYS} == _OLD_RENDER_KW,     "the shared keyword set must be the census's own"
+# P10: keys that colour WALLS only -- no thing, slot, budget or walk changes -- so the census's populations ignore them
+_WALL_ONLY_KEYS = frozenset({"wall_tones"})
+assert ({k: v for k, v in RENDER_KW.items() if k not in _D3_KEYS | _WALL_ONLY_KEYS}
+        == _OLD_RENDER_KW), "the shared keyword set must be the census's own"
 SYN0 = 100000                               # synthetic thing types start here
 ROLES = ("live", "corpse", "drop", "fireball", "fx", "barrel")
 SMALL = ("drop", "fireball", "fx")          # the things plan section 5 worries about

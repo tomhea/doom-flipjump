@@ -92,7 +92,10 @@ GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
                       # PLAYER_MODE): the P8a integration flipped BOTH (D3_RENDER_KW) in the commit that set PLAYER_MODE
                       # "final" (blocked51's picture, v6's record, is game_render_kw(False)), and the emitter ASSERTS the
                       # two agree with its `_D3` (tests/host/test_d3_rules.py holds them together too)
-                      rt_rank=True, exempt_barrels=True)
+                      rt_rank=True, exempt_barrels=True,
+                      # P10 (the owner's play-test, 2026-10-12): the exit, the switches and the doors each wear a tone
+                      # of their own -- see `wall_tone_names` (wall_renderer reads THIS key for the game tier)
+                      wall_tones=True)
 # THE HOSTED TIERS' PICTURE (M7 P3.3): the game tier's set WITHOUT D3 d. The hosted tiers (hosted, hosted-doors,
 # hosted-loop, hosted-nocollide) move runtime things too -- the host sends their positions -- but their fj walks
 # a leaf's list in INDEX order (`sim.thing_pass`); the depth walk is the GAME tier's alone. A gate that drives a
@@ -141,12 +144,13 @@ FORWARD_MOVE = 16 << 16           # 16.16 map-units per tic ~= DOOM's steady-sta
 # slow during a fight, might need to x1.5 it"; the coordinator's rule after the range measurement,
 # docs/gp-p67-interface.md section 12):
 #   * ANGLE_TURN_TAP  -- the FIRST frame of a held turn: DOOM's slow turn, so a tap aims as finely as DOOM's tap;
-#   * ANGLE_TURN_HELD -- every later frame of the same hold: the owner's x1.5 of the old 640.
+#   * ANGLE_TURN_HELD -- every later frame of the same hold: the owner's x1.5 of the old 640 (960), and P10 (the owner,
+#     2026-10-12: "you can make it a bit faster") 1280 -- DOOM's own fast turn per tic, 7.03 degrees a frame.
 # The state is one flag, `turnheld` (a turn key -- either -- was held last frame; DOOM's counter at SLOWTURNTICS = 1
 # frame): the world's `p_turnheld`, SimState.turnheld, the fj's persisted `p_tnh`. The tiers without that state (the
 # hosted and visual ones: `tap=False`) turn ANGLE_TURN_HELD every frame. ANGLE_TURN is that rate's old name.
 ANGLE_TURN_TAP = 320 << 16
-ANGLE_TURN_HELD = 960 << 16
+ANGLE_TURN_HELD = 1280 << 16
 ANGLE_TURN = ANGLE_TURN_HELD
 
 
@@ -193,6 +197,62 @@ WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may 
 # which is measured on the gate rather than assumed here.
 STEP_SEG_BUDGET = 16             # V3: boundaries allowed a step face (the NEAREST ones)
 V5_STACK = 2                      # V5: stacked boundary pieces kept per column per side
+# P10 (the owner's play-test, 2026-10-12: "distinguish them better (and also make differences between each other)") --
+# THE WALL TONES. The exit switch, the other switches, the doors a player can open and the blue doors (with their
+# jambs) each wear a tone of their own in place of their texture's two W1R texels: `wall_tone_names` is the ONE rule
+# (a linedef -> a tone name, "#..."), `wall_tone_texels` snaps each tone's two RGB targets to the PLAYPAL, and
+# `_wall_texture` hands a tone name the two-texel canvas -- so a toned wall is lit, patterned and baked exactly like any
+# wall. The game picture's alone (GAME_RENDER_KW `wall_tones`; wall_renderer reads the same key): the other tiers --
+# deg_gate's visual tier among them -- keep their textures. A secret door (ML_SECRET) and a door no player can open
+# (no use special: E1M1's remote doors 77 and 145) keep theirs too -- they are meant to look like walls.
+WALL_TONE_RGB = {"#EXIT": ((235, 35, 30), (110, 10, 10)),        # the exit switch: red
+                 "#SWITCH": ((245, 160, 30), (100, 55, 10)),     # the other switches: orange
+                 "#DOOR": ((190, 150, 95), (70, 45, 20)),        # a door a player opens: tan over dark brown
+                 "#DOORBLUE": ((60, 95, 235), (15, 25, 95))}     # a blue-key door and its jambs: blue
+WALL_TONE_EXIT_SPECIALS = frozenset({11, 51})                    # S1 exit, S1 secret exit
+WALL_TONE_DOOR_SPECIALS = frozenset({1, 26, 27, 28, 31, 32, 33, 34, 117, 118})   # DR / D1 doors a player opens
+WALL_TONE_BLUE_SPECIALS = frozenset({26, 32})                    # DR / D1 blue-key doors
+WALL_TONE_SWITCH_PREFIXES = ("SW1", "SW2")                       # DOOM's switch textures
+
+
+def wall_tone_names(lds, sds, secs) -> dict:
+    """{linedef: tone name} -- THE wall-tone rule both mirrors read (see WALL_TONE_RGB): an exit special first, then a
+    switch texture on any of the line's sides, then a door's face (a two-sided line with a door-use special, not
+    ML_SECRET, beside a door sector -- blue when a blue-key line opens that door), then a blue door's jamb (a one-sided
+    line of a blue door's sector). A face's tone shows while the door is shut, when the line draws as a solid wall"""
+    from doomfj.doors import door_states
+    from doomfj.gamedata import ML_SECRET
+    doors = set(door_states(secs, lds, sds))
+    blue = set()
+    for ld in lds:
+        if ld.special in WALL_TONE_BLUE_SPECIALS and 0 <= ld.back < len(sds):
+            blue |= {sds[ld.front].sector, sds[ld.back].sector} & doors
+    out = {}
+    for i, ld in enumerate(lds):
+        sides = [sds[ld.front]] + ([sds[ld.back]] if 0 <= ld.back < len(sds) else [])
+        texs = [(t or "").upper() for sd in sides for t in (sd.upper, sd.middle, sd.lower)]
+        two = len(sides) == 2
+        if ld.special in WALL_TONE_EXIT_SPECIALS:
+            out[i] = "#EXIT"
+        elif any(t.startswith(WALL_TONE_SWITCH_PREFIXES) for t in texs):
+            out[i] = "#SWITCH"
+        elif two and ld.special in WALL_TONE_DOOR_SPECIALS and not ld.flags & ML_SECRET:
+            ss = {sd.sector for sd in sides}
+            if ss & doors:
+                out[i] = "#DOORBLUE" if ss & blue else "#DOOR"
+        elif not two and sides[0].sector in blue:
+            out[i] = "#DOORBLUE"
+    return out
+
+
+def wall_tone_texels(pal, name: str) -> tuple:
+    """a tone's two palette indices: each RGB target's nearest PLAYPAL entry (squared distance, the lowest index on a
+    tie) -- derived from the palette, as the menu's colours are, never chosen as magic indices"""
+    out = []
+    for rgb in WALL_TONE_RGB[name]:
+        out.append(min(range(len(pal)), key=lambda i: (sum((a - b) ** 2 for a, b in zip(pal[i], rgb)), i)))
+    return tuple(out)
+
 STEP_FACE_BASE = 96               # V3: flat-shaded step-face texel. NOT WALL_BG (=4),
                                   # which is near-WHITE in DOOM's ramp and blows out
 # V2: sky-texture widths swept per full 360 turn. A LOOK knob, but not a free one -- it sets the
@@ -1318,6 +1378,15 @@ class ReferenceModel:
         rw_centerangle = (ANG90 + viewangle - rw_normalangle) & ANGLE_MASK
         return rw_offset, rw_centerangle
 
+    def _wall_tones(self, scene) -> dict:
+        """P10: `wall_tone_names` for the scene's map -- its own (pristine) level data, once per map and model"""
+        key = (id(scene.map_wad), scene.mapname)
+        cache = self.__dict__.setdefault("_tone_cache", {})
+        if key not in cache:
+            mw, m = scene.map_wad, scene.mapname
+            cache[key] = wall_tone_names(mw.linedefs(m), mw.sidedefs(m), mw.sectors(m))
+        return cache[key]
+
     def _wall_texture(self, asset_wad, name, cache, *, wall_mode="textured"):
         """Composite + downscale (the shared D5 lever) a wall texture by name → (texels, height, width),
         column-major texels (R6). Cached per frame; returns None for an empty/absent texture ('-' or a
@@ -1333,6 +1402,11 @@ class ReferenceModel:
         nm = name.upper()
         key = (nm, wall_mode)
         if key in cache:
+            return cache[key]
+        if nm.startswith("#"):                       # P10: a wall tone (`wall_tone_names`): its two snapped texels
+            assert wall_mode in ("W1R", "W1"), "a wall tone is a W1 / W1R canvas, not %r" % wall_mode
+            t1, t2 = wall_tone_texels(asset_wad.playpal(), nm)
+            cache[key] = ([t1, t2], 2, 1) if wall_mode == "W1R" else ([t1], 1, 1)
             return cache[key]
         defs = cache.get("__defs__")
         if defs is None:
@@ -2006,7 +2080,7 @@ class ReferenceModel:
                           near_steps: bool = False, things: bool = False,
                           sprite_wad=None, things_out: list | None = None,
                           bbox_cull: bool = False, stack_steps: bool = False,
-                          steps_out: list | None = None,
+                          steps_out: list | None = None, bases_out: list | None = None,
                           deg_things: tuple | None = None, deg_sliver: int | None = None,
                           deg_stack_scale: int | None = None, deg_mark: int | None = None,
                           deg_lip_scale: int | None = None,
@@ -2016,7 +2090,7 @@ class ReferenceModel:
                           aim_things: dict | None = None, aim_out: list | None = None,
                           mobiles=None, barrel_views: dict | None = None, thing_removed=None,
                           degrade: bool = False, exempt_actors: bool = False,
-                          view_drop: int = 0) -> bytes:
+                          view_drop: int = 0, wall_tones: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -2161,6 +2235,7 @@ class ReferenceModel:
         secs = scene_sectors(scene)
         verts = scene.cmap.vertexes
         texcache: dict = {}
+        _tones = self._wall_tones(scene) if wall_tones else {}     # P10: the wall tones, from the map's own data
 
         viewx, viewy, viewangle = state.x, state.y, state.angle
         # W1R-ANCHOR: the pattern key is (x + this) -- viewangle * 640 columns-per-turn >> 32
@@ -2196,6 +2271,16 @@ class ReferenceModel:
         n_stack = V5_STACK if stack_steps else 1
         ups: list = [[] for _ in range(W)]
         los: list = [[] for _ in range(W)]
+        # P10 G2 (the owner's play-test, 2026-10-12: the nukage "vanishes" near its edge) -- a column's
+        # BASES. A boundary whose near edge lies OFF the screen -- above it for a ceiling, below it for a
+        # floor -- stores no piece (it would hold a V5 slot and paint nothing: the efde61c lintel), yet
+        # every row of that surface the column shows, from the screen's edge to the next stored piece,
+        # lies BEYOND it. So the column records the boundary's BACK sector as its ceiling / floor base
+        # (a farther such boundary overwrites it: the farthest wins), and the paint gives the base region
+        # that sector's surface in place of the claiming sector's. MIRRORED in src/fj/frame_render.fj
+        # (ts_base_store writes the base; lines_steps_load2 / lines_col_plane_ids read it).
+        cbase: list = [None] * W
+        fbase: list = [None] * W
         n_face = [0]                  # V3: face-carrying boundaries used, vs STEP_SEG_BUDGET
         n_claimed = 0                                         # ... and its two STOP conditions, both of
         n_ts = 0                                              # which the fj mirrors (see below)
@@ -2213,6 +2298,21 @@ class ReferenceModel:
         # show sprites at all: DOOM draws them last, back-to-front, and this cannot.
         sfrag: list = [None] * W
         sfrag2: list = [None] * W     # V4b: the SECOND (farther) fragment, drawn under slot A
+        # P10 G1 (the owner's ledge bug, 2026-10-12): each fragment's CLIP WINDOW [ctop, cbot) -- the rows the
+        # NEARER boundaries leave open, snapshotted when the fragment records: every piece stored by then is
+        # nearer than the thing (the walk is front to back), and the pieces are stored monotone, so the last
+        # upper piece's end + 1 and the last lower piece's start are DOOM's running ceilingclip / floorclip
+        # there. A monster below a ledge is cut at the ledge's lip, an imp on high ground behind the ledge's
+        # face. V5 (`stack_steps`) only. MIRRORED in src/fj (frame.thing_record_body snapshots the column's
+        # sfflag counts; lines_spr_load / stream.frag_clip derive the window from the loaded pieces).
+        sclip: list = [None] * W
+        sclip2: list = [None] * W
+        # P10 G3 (the owner's play-test: sprites "blink out"): a THIRD write-once fragment slot, C, behind B. Over v8's
+        # 1,100 frames a live monster the player should see lost every column 51 times to two nearer fragments --
+        # most often a corpse lying in front of it in slot B (18), then a crowd (8), then blood or a fireball (6). C
+        # takes the third thing in walk-arrival order under B's gate; the paint goes C, B, A, each in its window.
+        sfrag3: list = [None] * W
+        sclip3: list = [None] * W
         n_thing = 0                   # ... against THING_BUDGET: scenery (decor + pickups)
         n_hd = 0                      # OPTION B: accepted TALL-bucket things granted the HD bake
         n_mon = 0                     # ... against MONSTER_BUDGET: monsters, counted SEPARATELY so
@@ -2506,8 +2606,8 @@ class ReferenceModel:
                         if tview is not None and tview[1]:
                             u = art[2] - 1 - u          # M7 P3.1: a mirrored view, right to left
                         frac += istep
-                        if drawn[x] or sfrag2[x] is not None:
-                            continue                     # V4b: both fragment slots spent
+                        if drawn[x] or sfrag3[x] is not None:
+                            continue                     # V4b + P10 G3: all three fragment slots spent
                         # V4-HD: tall buckets sample the full-res column with the deeper cap
                         # (unless OPTION B's HD budget already went to nearer things);
                         # 20M-RECOVERY: SHORT buckets take the coarse low-res cap instead.
@@ -2523,12 +2623,22 @@ class ReferenceModel:
                         # its head to a potion's columns).
                         if sfrag[x] is None:
                             sfrag[x] = (ytop_b + st[0], st[1], lr)
+                            if stack_steps:                # P10 G1: the nearer boundaries' window
+                                sclip[x] = (ups[x][-1][1] + 1 if ups[x] else 0, los[x][-1][0] if los[x] else H)
                         elif not b_minh or hb >= b_minh or (act and exempt_actors):   # M7 P6+P7 E (3)
                             # 25M-CAP B-GATE: slot B only for fragments tall enough to plausibly
                             # show through slot A's gaps; a small/far B fragment is ~always
                             # occluded. The slot stays OPEN, so a later (taller) thing may claim
                             # it -- fj tests the same baked bucket height before its bank walk.
-                            sfrag2[x] = (ytop_b + st[0], st[1], lr)
+                            # P10 G3: and slot C (B taken) under the same gate
+                            if sfrag2[x] is None:
+                                sfrag2[x] = (ytop_b + st[0], st[1], lr)
+                                if stack_steps:                # P10 G1
+                                    sclip2[x] = (ups[x][-1][1] + 1 if ups[x] else 0, los[x][-1][0] if los[x] else H)
+                            else:
+                                sfrag3[x] = (ytop_b + st[0], st[1], lr)
+                                if stack_steps:                # P10 G1
+                                    sclip3[x] = (ups[x][-1][1] + 1 if ups[x] else 0, los[x][-1][0] if los[x] else H)
             seg = scene.cmap.segs[seg_i]
             ld = lds[seg.linedef]
             # ⚠ A CLOSED TWO-SIDED LINE IS A SOLID WALL -- DOOM's R_ClipSolidWallSegment
@@ -2687,6 +2797,10 @@ class ReferenceModel:
                                        else (max(a, 0), min(b, Hs)))
                                 ups[x].append((st_[0], st_[1], fsec,
                                                fsec.ceil_h - bsec.ceil_h, bsec))
+                            elif stack_steps and a <= b and b < 0:
+                                # P10 G2: the near ceiling's edge is ABOVE the screen (`cbase`). Only
+                                # with the side empty: a stored piece clamps a past its end, onto it
+                                cbase[x] = bsec
                         if lm_ and (lm_ == 1 or lip2) \
                                 and len(los[x]) < n_stack and (not los[x] or stk2):
                             if DEG_DDA_FACES:
@@ -2716,6 +2830,9 @@ class ReferenceModel:
                                        else (max(a, 0), min(b, Hs)))
                                 los[x].append((st_[0], st_[1], fsec,
                                                bsec.floor_h - fsec.floor_h, bsec))
+                            elif stack_steps and a <= b and a > Hs:
+                                # P10 G2: the near floor's edge is BELOW the screen (`fbase`)
+                                fbase[x] = bsec
                     if not pclaim[x]:
                         col_ch[x], col_fh[x], col_lt[x] = fsec.ceil_h, fsec.floor_h, fsec.light
                         col_cf[x], col_ff[x] = fsec.ceil_tex, fsec.floor_tex
@@ -2754,6 +2871,8 @@ class ReferenceModel:
             _wtex = sd.middle
             if _closed2s and getattr(sd, "upper", "-") not in ("-", "", None):
                 _wtex = sd.upper
+            if wall_tones and _wtex not in ("-", "", None):   # P10: the line's tone, when it has one
+                _wtex = _tones.get(seg.linedef, _wtex)
             tex = self._wall_texture(scene.asset_wad, _wtex, texcache, wall_mode=wall_mode)
             # M13-WPXLIGHT: DOOM's per-seg fake contrast (orientation only -> a baked constant)
             wall_contrast = self.wall_fake_contrast(verts[seg.v1], verts[seg.v2])
@@ -2865,6 +2984,8 @@ class ReferenceModel:
             planes_out.append(planes)                        # the per-column records, for the gates
         if steps_out is not None:
             steps_out.append((ups, los))                     # V5: the per-column piece lists
+        if bases_out is not None:
+            bases_out.append((cbase, fbase))                 # P10 G2: the per-column bases
         if floor_mode_ft1:
             self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz_band, *planes,
                                      ft1=True, sky=sky, viewangle=viewangle, texcache=texcache)
@@ -2930,6 +3051,15 @@ class ReferenceModel:
                         # walls and ledges no longer look cut where a sprite overlaps them.
                         continue
                     ceil_end = min(c_hi[x], cfg.VIEW_H - 1)
+                    # P10 G2: the BASE region -- the claimed ceiling above the nearest upper piece (all
+                    # of it when there is none), the claimed floor below the nearest lower one -- shows
+                    # the base's surface when the column has one (fj: the plane ids of the base pid)
+                    if cbase[x] is not None:
+                        _region_paint(x, 0, min(ups[x][0][0] - 1 if ups[x] else ceil_end, ceil_end),
+                                      cbase[x], True)
+                    if fbase[x] is not None:
+                        _region_paint(x, max(los[x][0][1] + 1 if los[x] else f_lo[x], f_lo[x], 0),
+                                      cfg.VIEW_H - 1, fbase[x], False)
                     for k, (y1, y2, fsc, units, bsec) in enumerate(ups[x]):
                         y1c, y2c = max(y1, 0), min(y2, ceil_end)
                         if y1c <= y2c:
@@ -2960,13 +3090,15 @@ class ReferenceModel:
                 for x in range(cfg.VIEW_W):
                     # V4b: far fragment first, near painted OVER it -- the fj emit produces the
                     # same pixels by windowing the far fragment to the rows the near one leaves.
-                    for frag in (sfrag2[x], sfrag[x]):
+                    for frag, clip in ((sfrag3[x], sclip3[x]), (sfrag2[x], sclip2[x]), (sfrag[x], sclip[x])):
                         if frag is None:
                             continue
                         y0, runs, lr = frag
+                        # P10 G1: and inside the rows its nearer boundaries leave open
+                        lo_c, hi_c = clip if clip is not None else (0, cfg.VIEW_H)
                         prev = 0
                         for (rel, texel) in runs:
-                            for y in range(max(0, y0 + prev), min(cfg.VIEW_H, y0 + rel)):
+                            for y in range(max(lo_c, y0 + prev), min(hi_c, y0 + rel)):
                                 fb[y * cfg.VIEW_W + x] = colormap[lr][texel]
                             prev = rel
         elif floor_texturing:

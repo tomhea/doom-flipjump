@@ -47,6 +47,14 @@ ROOT = Path(__file__).resolve().parents[2]
 FJ = ROOT / "src" / "fj"
 ART = ROOT / "assets" / "freedoom1.wad"
 N = 360
+# the paths the records must exercise (test_the_records_exercise_every_path): the generator appends records of the kind
+# a short floor needs (FLOOR_KIND; None = any kind) until each holds -- a seeded draw from the world's lists moves when
+# the world does (P10's medium/hard weapons moved it: the barrel-blocked moves fell to 9 of 10)
+FLOORS = dict(blocked=60, bymon=20, bybar=10, bydecor=10, passed_corpse=5, slide=10, picked=10, still=8, still_neg=5,
+              moved=100)
+FLOOR_KIND = dict(blocked="mon", bymon="mon", bybar="bar", bydecor="decor", passed_corpse="corpse", slide=None,
+                  picked="item", still="still", still_neg="still", moved=None)
+TOPUP_MAX = 120
 M32 = 0xFFFFFFFF
 ANG90 = 0x40000000
 PCELLS = (("viewx", 8), ("viewy", 8), ("p_hp", 3), ("p_ar", 2), ("am_clip", 3), ("am_shell", 3), ("p_bc", 2))
@@ -107,67 +115,86 @@ def _legal(c, x16, y16) -> bool:
 
 
 def _records(c):
-    w = c.w
+    """N records drawn from the seed, then the top-up: records of the kind a short floor needs, appended until every
+    floor of FLOORS holds (at most TOPUP_MAX of them)"""
     rnd = random.Random(0x6D)
     out = []
-    P = w.pickup_things
     while len(out) < N:
-        kind = rnd.choice(("mon", "mon", "corpse", "bar", "bar", "decor", "decor", "item", "still"))
-        rec = {"kind": kind, "mons": {}, "bars": {}, "present": {}, "hp": rnd.choice((50, 100, 150)),
-               "skill": rnd.choice((gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)),
-               "doors": [rnd.choice((0, 0, rnd.randrange(w.door_nstates[si]))) for si in w.door_order],
-               "lifts": [rnd.randrange(len(w.lift_stops[si])) for si in w.lift_order]}
-        m = rnd.randrange(w.layout.nmon)
-        if kind in ("mon", "corpse"):
-            base = w.mon_things[m] if rnd.random() < 0.6 else rnd.choice(w.things)
-            tx, ty = base.x + rnd.randint(-8, 8), base.y + rnd.randint(-8, 8)
-            rec["mons"][m] = (tx, ty, 1, int(kind == "mon"))
-            tr = w.mon_radius[m]
-        elif kind == "bar":
-            b = rnd.randrange(len(w.barrel_things))
-            rec["bars"][b] = rnd.choice((1, 1, 1, 0))
-            tx, ty, tr = w.barrel_things[b].x, w.barrel_things[b].y, 10
-        elif kind == "decor":
-            k = rnd.choice(c.var) if c.var and rnd.random() < 0.5 else rnd.randrange(len(w.decor_solid))
-            t = w.decor_solid[k]
-            tx, ty, tr = t.x, t.y, gd.THING_TYPES[t.type].radius
+        rec = _one_record(c, rnd)
+        if rec is not None:
+            out.append(rec)
+    for _ in range(TOPUP_MAX):
+        short = [k for k, v in _coverage(out).items() if v < FLOORS[k]]
+        if not short:
+            return out
+        rec = _one_record(c, rnd, FLOOR_KIND[short[0]])
+        if rec is not None:
+            out.append(rec)
+    raise AssertionError("the records cannot reach the floors %s in %d more records: %s"
+                         % (FLOORS, TOPUP_MAX, _coverage(out)))
+
+
+def _one_record(c, rnd, force=None):
+    """one record drawn from `rnd` (its kind forced to `force`, if given -- the kind is drawn either way) and applied
+    to c's world; None, leaving no trace in the world, when its spot is not legal"""
+    w = c.w
+    P = w.pickup_things
+    kind = rnd.choice(("mon", "mon", "corpse", "bar", "bar", "decor", "decor", "item", "still"))
+    kind = force or kind
+    rec = {"kind": kind, "mons": {}, "bars": {}, "present": {}, "hp": rnd.choice((50, 100, 150)),
+           "skill": rnd.choice((gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)),
+           "doors": [rnd.choice((0, 0, rnd.randrange(w.door_nstates[si]))) for si in w.door_order],
+           "lifts": [rnd.randrange(len(w.lift_stops[si])) for si in w.lift_order]}
+    m = rnd.randrange(w.layout.nmon)
+    if kind in ("mon", "corpse"):
+        base = w.mon_things[m] if rnd.random() < 0.6 else rnd.choice(w.things)
+        tx, ty = base.x + rnd.randint(-8, 8), base.y + rnd.randint(-8, 8)
+        rec["mons"][m] = (tx, ty, 1, int(kind == "mon"))
+        tr = w.mon_radius[m]
+    elif kind == "bar":
+        b = rnd.randrange(len(w.barrel_things))
+        rec["bars"][b] = rnd.choice((1, 1, 1, 0))
+        tx, ty, tr = w.barrel_things[b].x, w.barrel_things[b].y, 10
+    elif kind == "decor":
+        k = rnd.choice(c.var) if c.var and rnd.random() < 0.5 else rnd.randrange(len(w.decor_solid))
+        t = w.decor_solid[k]
+        tx, ty, tr = t.x, t.y, gd.THING_TYPES[t.type].radius
+    else:
+        i = rnd.randrange(len(P))
+        tx, ty, tr = P[i].x, P[i].y, 20
+        rec["present"][i] = 1
+    if kind == "still":
+        # ON an item (30 units east / north of it), a wall of monster ahead: only the still candidate touches it --
+        # and the model skips that one at every coordinate, negative ones included (collision's skip_still)
+        i = rnd.randrange(len(P))
+        ax = rnd.choice((0, 1))
+        rec["angle"] = 0 if ax == 0 else ANG90
+        px, py = (P[i].x + 30, P[i].y) if ax == 0 else (P[i].x, P[i].y + 30)
+        rec["pos"] = ((px << 16) + rnd.choice((0, 0x4000)), (py << 16) + rnd.choice((0, 0x4000)))
+        rec["present"][i] = 1
+        rec["hp"] = 50
+        rec["mons"][m] = ((px + 40, py, 1, 1) if ax == 0 else (px, py + 40, 1, 1))
+        rec["keys"] = _keys(fwd=True)
+    else:
+        ang = rnd.choice((0, ANG90, 2 * ANG90, 3 * ANG90, 0x20000000, 0xA0000000, rnd.randrange(1 << 32)))
+        back = ang + 2 * ANG90 & M32
+        d = tr + 16 + rnd.choice((1, 2, 5, 9, 14, 16, 16, 20))   # 16: the full step ends ON the box edge
+        fa = (back >> 20) & 4095
+        ox = int(round(d * math.cos(fa * 2 * math.pi / 4096) * 65536))
+        oy = int(round(d * math.sin(fa * 2 * math.pi / 4096) * 65536))
+        rec["pos"] = (((tx << 16) + ox) + rnd.choice((0, 0, 0x8000, 0x1)), ((ty << 16) + oy) + rnd.choice((0, 0, 0xFFFF)))
+        if rnd.random() < 0.2:
+            rec["angle"] = ang - ANG90 & M32
+            rec["keys"] = _keys(sr=True) if rnd.random() < 0.5 else _keys(fwd=True, sr=True)
         else:
-            i = rnd.randrange(len(P))
-            tx, ty, tr = P[i].x, P[i].y, 20
-            rec["present"][i] = 1
-        if kind == "still":
-            # ON an item (30 units east / north of it), a wall of monster ahead: only the still candidate touches it --
-            # and the model skips that one at every coordinate, negative ones included (collision's skip_still)
-            i = rnd.randrange(len(P))
-            ax = rnd.choice((0, 1))
-            rec["angle"] = 0 if ax == 0 else ANG90
-            px, py = (P[i].x + 30, P[i].y) if ax == 0 else (P[i].x, P[i].y + 30)
-            rec["pos"] = ((px << 16) + rnd.choice((0, 0x4000)), (py << 16) + rnd.choice((0, 0x4000)))
-            rec["present"][i] = 1
-            rec["hp"] = 50
-            rec["mons"][m] = ((px + 40, py, 1, 1) if ax == 0 else (px, py + 40, 1, 1))
+            rec["angle"] = ang
             rec["keys"] = _keys(fwd=True)
-        else:
-            ang = rnd.choice((0, ANG90, 2 * ANG90, 3 * ANG90, 0x20000000, 0xA0000000, rnd.randrange(1 << 32)))
-            back = ang + 2 * ANG90 & M32
-            d = tr + 16 + rnd.choice((1, 2, 5, 9, 14, 16, 16, 20))   # 16: the full step ends ON the box edge
-            fa = (back >> 20) & 4095
-            ox = int(round(d * math.cos(fa * 2 * math.pi / 4096) * 65536))
-            oy = int(round(d * math.sin(fa * 2 * math.pi / 4096) * 65536))
-            rec["pos"] = (((tx << 16) + ox) + rnd.choice((0, 0, 0x8000, 0x1)), ((ty << 16) + oy) + rnd.choice((0, 0, 0xFFFF)))
-            if rnd.random() < 0.2:
-                rec["angle"] = ang - ANG90 & M32
-                rec["keys"] = _keys(sr=True) if rnd.random() < 0.5 else _keys(fwd=True, sr=True)
-            else:
-                rec["angle"] = ang
-                rec["keys"] = _keys(fwd=True)
-        snap, decor = w.ws.copy(), w._decor_now
-        _apply(c, rec)
-        if not _legal(c, *rec["pos"]):
-            w.ws, w._decor_now = snap, decor               # a rejected record leaves no trace
-            continue
-        out.append(rec)
-    return out
+    snap, decor = w.ws.copy(), w._decor_now
+    _apply(c, rec)
+    if not _legal(c, *rec["pos"]):
+        w.ws, w._decor_now = snap, decor               # a rejected record leaves no trace
+        return None
+    return rec
 
 
 def _row(c) -> str:
@@ -316,14 +343,13 @@ def test_no_decoration_depends_on_the_skill():
     assert Ctx().var == []
 
 
-def test_the_records_exercise_every_path():
-    """blocked by a monster, a barrel and a decoration; a corpse, a removed barrel and another skill's decoration
-    passed; a slide (a later candidate taken); pickups through the move; the still candidate's item left alone"""
-    records = _records(Ctx())
+def _coverage(records) -> dict:
+    """how many of the records exercise each path of FLOORS, replayed on a fresh world as the fj program replays them:
+    blocked by a monster, a barrel and a decoration; a corpse passed; a slide (a later candidate taken); pickups
+    through the move; the still candidate's item left alone (at a negative coordinate too); a move at all"""
     c = Ctx()
     w = c.w
-    seen = dict(blocked=0, bymon=0, bybar=0, bydecor=0, passed_corpse=0, slide=0, picked=0, still=0, still_neg=0,
-                moved=0)
+    seen = dict.fromkeys(FLOORS, 0)
     for rec in records:
         _apply(c, rec)
         x, y = w.ws.px, w.ws.py
@@ -349,9 +375,17 @@ def test_the_records_exercise_every_path():
             not w.ws.pickup_taken[i] and abs((w.pickup_things[i].x << 16) - x) < L.PK_RADIUS << 16
             and abs((w.pickup_things[i].y << 16) - y) < L.PK_RADIUS << 16 for i in rec["present"])
         seen["moved"] += (w.ws.px, w.ws.py) != (x, y)
-    want = dict(blocked=60, bymon=20, bybar=10, bydecor=10, passed_corpse=5, slide=10, picked=10, still=8,
-                still_neg=5, moved=100)
-    assert all(seen[k] >= v for k, v in want.items()), (seen, want)
+    return seen
+
+
+def test_the_records_exercise_every_path():
+    """blocked by a monster, a barrel and a decoration; a corpse, a removed barrel and another skill's decoration
+    passed; a slide (a later candidate taken); pickups through the move; the still candidate's item left alone -- each
+    at least FLOORS times (the generator tops the records up to them: P10's world moved the seeded draw)"""
+    records = _records(Ctx())
+    seen = _coverage(records)
+    assert all(seen[k] >= v for k, v in FLOORS.items()), (seen, FLOORS)
+    assert N <= len(records) <= N + TOPUP_MAX
 
 
 def test_the_move_follows_the_model(tmp_path):

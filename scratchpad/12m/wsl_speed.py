@@ -38,8 +38,10 @@ from flipjump.utils.exceptions import IOReadOnEOF
 # scratchpad/m2_std_gate.py MENU_FRAMES / MENU_EXIT / CODE). M7 P1.5: the menu is left with esc --
 # enter opens the skill screen now; esc meant the world on every binary before it too.
 STANDALONE_POLLS = 8
-MENU_FRAMES = 2
-MENU_EXIT = 0x1B
+# P10: the boot menu has no game (esc on it is no rule) -- the world through NEW GAME at hard, m2_std_gate's boot pick:
+# enter on frame 2, down on 3 (medium -> hard), enter on 4 (NEW GAME: the first world frame)
+MENU_FRAMES = 4
+MENU_PICK = ((2, 0x0D), (3, 0x73), (4, 0x0D))
 CODE = {"forward": 0x77, "back": 0x73, "turn_left": 0x61, "turn_right": 0x64, "use": 0x20}
 KEY_NAMES = tuple(CODE)
 
@@ -77,8 +79,8 @@ def to_events(per_frame):
 
 
 def events_for(per_frame):
-    return to_events(per_frame) + [KeyEvent(MENU_FRAMES * STANDALONE_POLLS, True, MENU_EXIT),
-                                   KeyEvent(MENU_FRAMES * STANDALONE_POLLS + 1, False, MENU_EXIT)]
+    return to_events(per_frame) + [KeyEvent(f * STANDALONE_POLLS + k, k == 0, key)
+                                   for f, key in MENU_PICK for k in (0, 1)]
 
 
 def thp_state():

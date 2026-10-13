@@ -1,0 +1,36 @@
+# flipjump (the assembly): a detached worktree of one-pass-blocks at e4340ee, by PYTHONPATH; the runs: the installed 1.5.1 at 0a24613; doom m6-one-pass-blocks dec86fc
+$ python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/onepass56.labels.tsv.gz -- game --out build/doom_e1m1_onepass56.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_onepass56.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+label spy armed -> scratchpad/12m/atlas/onepass56.labels.tsv.gz
+build: build_blocked.py game --out build/doom_e1m1_onepass56.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_onepass56.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+blocking: pool base 0x80000000, span 0x7fffffe0
+pin-heat: scratchpad/12m/heat_blocked27_p10.json.gz (sha256 d6284748dbe8d404...): 20 hot groups, 35,894 hot sites
+macros allowed: hex.double_exact_xor, hex.exact_xor, hex.quadrupled_exact_xor, hex.shifts.shl_bit_once, hex.shifts.shr_bit_once, hex.sparse_double_exact_xor, hex.sparse_exact_xor, hex.triple_exact_xor, sim.jump16
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+  pin-exclude: 11,046 words -- the BYTE cells (m1.zerobyte jumps through them) and the pointer-read cells (a raw read takes base + value); the other nibble state cells ARE pinned
+  pins: 43,203 words pinned, 46,904 groups blocked
+  pin-heat: 20 of 20 hot words pinned
+labels -> scratchpad/12m/atlas/onepass56.labels.tsv.gz  (2,835,870 labels)
+  one pass: 625,014 tables deferred, 0 in the overflow region, 0 alias words unresolved, 0 groups left unblocked; the census: 46,904 groups, 625,014 tables; declines {}; 2549s
+  PREFLIGHT: demand 55,417,024 words, capacity 67,108,863 words (82.6% used); 46,904 of 46,904 groups placed
+  counts cached to scratchpad/12m/_census_onepass56.json.gz
+  pin-heat: {'hot_groups': 20, 'hot_groups_missing': 0, 'hot_groups_ambiguous': 0, 'hot_sites_listed': 35894, 'hot_sites_matched': 10038, 'hot_sites_width_changed': 0}
+Traceback (most recent call last):
+  File "C:\Users\tomhe\Documents\doom-onepass\scratchpad\12m\build_labeled.py", line 72, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Users\tomhe\Documents\doom-onepass\scratchpad\12m\build_labeled.py", line 59, in main
+    runpy.run_path(str(ROOT / "scratchpad" / "12m" / "build_blocked.py"),
+  File "<frozen runpy>", line 291, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\tomhe\Documents\doom-onepass\scratchpad\12m\build_blocked.py", line 663, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\tomhe\Documents\doom-onepass\scratchpad\12m\build_blocked.py", line 597, in main
+    info = build_wall_renderer(ROOT / a.out, wad_path=str(ROOT / a.wad), mapname=a.map,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-onepass\src\doomfj\build.py", line 681, in build_wall_renderer
+    assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
+AssertionError: R4: storage_mode 'None' != flat
+rc=1
+63869ab4be6f2ddc6ad3425f5b0bc17efe4543e39b3d839fc987a8a520746e00 *build/doom_e1m1_onepass56.fjm

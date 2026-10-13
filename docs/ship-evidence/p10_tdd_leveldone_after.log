@@ -1,0 +1,26 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-31b [at 31bccd2 (HEAD), unmodified] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_level_done_fj.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_leveldone_after
+# worktree HEAD: 31bccd2b5bed6e9aefc15581eff2481fba49b688 (ONE PASS (the CR of #129, R9): the scanner refuses cells resumed after a blank or comment line; the )
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-31b\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:35:38 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-31b
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 10 items
+
+tests/fj/test_level_done_fj.py::test_the_cases_reach_every_edge PASSED   [ 10%]
+tests/fj/test_level_done_fj.py::test_the_digits_follow_the_oracle PASSED [ 20%]
+tests/fj/test_level_done_fj.py::test_control_broken_digits_are_caught[by 35] PASSED [ 30%]
+tests/fj/test_level_done_fj.py::test_control_broken_digits_are_caught[minutes' leading zero] PASSED [ 40%]
+tests/fj/test_level_done_fj.py::test_control_broken_digits_are_caught[no cap] PASSED [ 50%]
+tests/fj/test_level_done_fj.py::test_control_broken_digits_are_caught[secrets from the kills] PASSED [ 60%]
+tests/fj/test_level_done_fj.py::test_control_broken_digits_are_caught[totals crossed] PASSED [ 70%]
+tests/fj/test_level_done_fj.py::test_the_frame_cases_reach_a_one_and_a_two_in_the_items_tens PASSED [ 80%]
+tests/fj/test_level_done_fj.py::test_every_level_complete_frame_is_the_oracles_picture PASSED [ 90%]
+tests/fj/test_level_done_fj.py::test_a_frame_with_two_digits_swapped_is_caught PASSED [100%]
+
+============================= 10 passed in 25.49s =============================
+# finished 2026-10-13 04:36:07 +0300; pytest exit code: 0

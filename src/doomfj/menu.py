@@ -131,6 +131,8 @@ def text_width(label: str, font=None) -> int:
 # (tests/fj/stream_screen.py has the lab decoder's; this file had a second. R6 is one source.)
 from flipjump.interpreter.io_devices.ScreenIO import COLLINES_DITTO as DITTO
 from flipjump.interpreter.io_devices.ScreenIO import COLLINES_END as END
+from flipjump.interpreter.io_devices.ScreenIO import COLLINES_KEEP as KEEP                    # noqa: E402 (P10)
+from flipjump.interpreter.io_devices.ScreenIO import COLLINES_TOKENS_MAX_HEIGHT               # noqa: E402 (P10)
 
 
 def palette_colours(palette_rgb) -> tuple:
@@ -177,16 +179,20 @@ def _bitmap(width, height, lines, selected, colours):
     out = [background] * (width * height)
     if not lines:
         return out
-    block_h = len(lines) * (GLYPH_H + 2) - 2
-    top = max(0, (height - block_h) // 2)
     for row, line in enumerate(lines):
         ink = highlight if row == selected else text
         label = ("> " + line) if row == selected else ("  " + line)
         label = label.upper()[:width // CELL_W]
         x0 = max(0, (width - text_width(label)) // 2)
-        _draw(out, width, height, label, x0, top + row * (GLYPH_H + 2), ink)
+        _draw(out, width, height, label, x0, _line_y(height, len(lines), row), ink)
     _draw_credit(out, width, height, credit)
     return out
+
+
+def _line_y(height, nlines: int, row: int) -> int:
+    """the top row of line `row` of `nlines`: `_bitmap`'s lines are GLYPH_H + 2 apart, the block centred"""
+    block_h = nlines * (GLYPH_H + 2) - 2
+    return max(0, (height - block_h) // 2) + row * (GLYPH_H + 2)
 
 
 def credit_box(width, height) -> tuple:
@@ -222,8 +228,11 @@ HELP_CAP_LEGENDS = {"UP": "↑", "DOWN": "↓", "LEFT": "←", "RIGHT": "→"}
 # the legend beside the clusters, top to bottom. M7 P4.1 (the owner's key map, approved 2026-10-02): W / S and the up /
 # down arrows move, A / D STRAFE, the left / right arrows turn
 HELP_CLUSTER_LEGEND = ("↑ ↓ MOVE", "A D STRAFE", "← → TURN")
-# the use keys' description, two lines -- the owner's wording (2026-10-02), ONE place to change it
-HELP_USE_LINES = ("USE: DOORS,", "SWITCHES, LIFTS")
+# the use keys' description -- the owner's wording (2026-10-02), ONE place to change it. P10 (the owner's second
+# play-test, 2026-10-12: the TOMHE.APP credit crowded the last row, "H HELP"): ONE line now (the 3x5 font fits it, 149 of
+# 160 px), which with HELP_TITLE_Y 1 and HELP_TITLE_GAP 4 lifts every key row 7 px -- the last row ends at y 90, two
+# rows clear of the credit (y 93..97), and the categories keep P9's 6 empty rows between them
+HELP_USE_LINES = ("USE: DOORS, SWITCHES, LIFTS",)
 # below the clusters, rows of ITEMS -- (its keys, drawn as caps; its description's lines) -- laid left to right. M7
 # P4.1: fire, the weapons and the second strafe pair joined the table, so a row holds up to two items to fit 100 rows.
 # P9 (the owner, 2026-10-10: the rocket launcher on key 5 -- "1 2 3 4 5 WEAPONS"): five weapon caps no longer fit the
@@ -257,8 +266,8 @@ HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEF
 # clusters' legend (`help_layout`): the page reads as two columns of categories with a gutter between them.
 HELP_FONT = _SMALL_GLYPHS                # the font of every help string but the title
 HELP_TEXT_H = SMALL_GLYPH_H              # ...and its height
-HELP_TITLE_Y = 2                         # the title's top row
-HELP_TITLE_GAP = 5                       # empty rows under the title, above the clusters
+HELP_TITLE_Y = 1                         # the title's top row (P10: 2 -> 1)
+HELP_TITLE_GAP = 4                       # empty rows under the title, above the clusters (P10: 5 -> 4)
 HELP_X = 6                               # the left margin: the clusters and the key column
 HELP_CLUSTERS_Y = HELP_TITLE_Y + GLYPH_H + HELP_TITLE_GAP       # the clusters' top row
 HELP_CAP_BORDER = 1
@@ -479,6 +488,152 @@ def _fj_text(data: bytes, label: str, end_marker: bool, what: str) -> str:
     return ("// %s -- %d bytes of 0x0B column run-lists, all constants\n"
             "%s:\n%s\n" % (what, len(data), label, body))
 
+# -------------------------------------------------------------------------------------------------
+# P10 -- LEVEL COMPLETE'S STATS (the owner's play-test, 2026-10-12: "should have some stats, and return to main menu (as
+# start of the game) with any key pressed"; docs/gp-p10-plan.md). ONE baked frame -- the title, each row's label and
+# its value's fixed glyphs, the prompt -- and DIGIT SLOTS over it: a slot's digit is the program's at run time
+# (doomfj.statcode computes them), drawn by that slot's column records for that digit AFTER the frame, the way the bar
+# draws its numbers. One layout (`level_done_layout`) places both mirrors' glyphs: `level_done_pixels` is the oracle's
+# picture, `level_done_stream` + `level_done_digit_records` the program's bytes, and tests/host/test_menu.py decodes
+# the second through the real InMemoryScreen against the first.
+LEVEL_DONE_TITLE = "LEVEL COMPLETE"
+LEVEL_DONE_PROMPT = "PRESS ANY KEY"
+# a row's VALUE TEMPLATE: "D" a digit slot, "_" a digit-wide blank, anything else a fixed glyph. The secrets' total is
+# the map's -- the same on every skill -- so it is fixed glyphs (`level_done_rows`); the kills' and items' totals are
+# the skill's, so they are slots
+STAT_LABEL_GAP = 2 * CELL_W              # the widest label to the values' column
+DIGIT_BLANK = 10                         # a slot's "no digit" (a leading zero): hudcode.BLANK's twin
+TIME_CAP = 100 * 60 - 1                  # 99:59 -- the most the four time slots show
+
+
+def level_done_rows(nsecret: int) -> list:
+    """the stats' rows, (label, value template): KILLS and ITEMS "found / total", SECRETS "found / total" (one slot:
+    a map has at most 9), TIME "mm:ss" """
+    assert 0 <= nsecret <= 9, "the secrets found are ONE digit slot: the map has %d secret sectors" % nsecret
+    return [("KILLS", "DD / DD"), ("ITEMS", "DD / DD"), ("SECRETS", "_D / _%d" % nsecret), ("TIME", "DD:DD")]
+
+
+def _template_cells(template: str, x0: int) -> list:
+    """[(x, ch)]: each template character's left x -- glyph after glyph, GLYPH_GAP apart, "D" and "_" a digit wide"""
+    assert all(glyph_width(d) == GLYPH_W for d in "0123456789"), "a digit slot is GLYPH_W wide"
+    out, x = [], x0
+    for ch in template:
+        out.append((x, ch))
+        x += (GLYPH_W if ch in "D_" else glyph_width(ch)) + GLYPH_GAP
+    return out
+
+
+def _template_width(template: str) -> int:
+    cells = _template_cells(template, 0)
+    x, ch = cells[-1]
+    return x + (GLYPH_W if ch in "D_" else glyph_width(ch))
+
+
+def level_done_layout(width, height, nsecret: int) -> tuple:
+    """-> (lines, selected, rows, slots): `_bitmap`'s lines -- the title, the prompt, and blank lines where the stats
+    go -- and its highlighted line (the prompt); each stat row as (label x, y, label, [(x, fixed glyph)]); and the
+    digit slots' top-left (x, y) in `stats_digits`' order. The rows are `_bitmap`'s own line positions; the labels
+    share a left edge, the values another (the block centred)"""
+    rows = level_done_rows(nsecret)
+    lines = [LEVEL_DONE_TITLE, ""] + [""] * len(rows) + ["", LEVEL_DONE_PROMPT]
+    label_w = max(text_width(label) for label, _t in rows)
+    value_w = max(_template_width(t) for _l, t in rows)
+    x_label = max(0, (width - (label_w + STAT_LABEL_GAP + value_w)) // 2)
+    x_value = x_label + label_w + STAT_LABEL_GAP
+    out_rows, slots = [], []
+    for k, (label, template) in enumerate(rows):
+        y = _line_y(height, len(lines), 2 + k)
+        cells = _template_cells(template, x_value)
+        out_rows.append((x_label, y, label, [(x, ch) for x, ch in cells if ch not in "D_"]))
+        slots += [(x, y) for x, ch in cells if ch == "D"]
+    return lines, len(lines) - 1, out_rows, slots
+
+
+def _two_digits(v: int, lead_blank: bool = True) -> list:
+    assert 0 <= v <= 99, v
+    tens, ones = divmod(v, 10)
+    return [DIGIT_BLANK if lead_blank and not tens else tens, ones]
+
+
+def stats_digits(kills: int, total_kills: int, items: int, total_items: int, secrets: int, seconds: int) -> list:
+    """the digit slots' codes (0..9, or DIGIT_BLANK for a leading zero) for these stats, in `level_done_layout`'s slot
+    order: kills / total, items / total, secrets, then the time as mm:ss -- the minutes without a leading zero, the
+    seconds with one, both capped at 99:59 (TIME_CAP). What doomfj.statcode's fj computes at run time"""
+    assert 0 <= secrets <= 9, secrets
+    mm, ss = divmod(min(seconds, TIME_CAP), 60)
+    return (_two_digits(kills) + _two_digits(total_kills) + _two_digits(items) + _two_digits(total_items)
+            + [secrets] + _two_digits(mm) + _two_digits(ss, lead_blank=False))
+
+
+def _level_done_bitmap(width, height, colours, nsecret: int, digits=None):
+    """LEVEL COMPLETE: `_bitmap`'s title, prompt and credit, the labels in the text colour, the values -- their fixed
+    glyphs and, with `digits`, each slot's digit -- in the highlight colour. `digits` None: the slots left empty (the
+    program's baked frame)"""
+    _background, text, highlight, _credit = colours
+    lines, selected, rows, slots = level_done_layout(width, height, nsecret)
+    out = _bitmap(width, height, lines, selected, colours)
+    for x_label, y, label, glyphs in rows:
+        _draw(out, width, height, label, x_label, y, text)
+        for x, ch in glyphs:
+            _draw(out, width, height, ch, x, y, highlight)
+    if digits is not None:
+        assert len(digits) == len(slots), (len(digits), len(slots))
+        for (x, y), d in zip(slots, digits):
+            if d != DIGIT_BLANK:
+                _draw(out, width, height, str(d), x, y, highlight)
+    return out
+
+
+def level_done_pixels(width, height, colours, nsecret: int, digits) -> list:
+    """What the ORACLE expects on LEVEL COMPLETE, the slots showing `digits` (`stats_digits`)"""
+    return _level_done_bitmap(width, height, colours, nsecret, digits)
+
+
+def level_done_stream(width, height, colours, nsecret: int) -> bytes:
+    """the program's baked LEVEL COMPLETE frame: everything but the digits (its slots empty), ending in END"""
+    return _encode(_level_done_bitmap(width, height, colours, nsecret), width, height)
+
+
+def level_done_fj(width, height, colours, nsecret: int, label: str = "menu_level_done",
+                  end_marker: bool = True) -> str:
+    """the baked LEVEL COMPLETE frame as fj, its slots EMPTY -- a menu with no World to count (a test harness's);
+    the game tier draws the digits over it (doomfj.statcode.frame_lines)"""
+    return _fj_text(level_done_stream(width, height, colours, nsecret), label, end_marker,
+                    "P10: the baked LEVEL COMPLETE frame (no digits)")
+
+
+def level_done_digit_records(width, height, colours, nsecret: int, slot: int, digit: int) -> bytes:
+    """slot `slot` showing `digit`, as column records drawn AFTER the frame (no frame END): per glyph column with ink,
+    [x] then [KEEP][y][y2][ink] per vertical run of ink, then the column's END -- KEEP over the gaps, so the frame's
+    background shows between the runs. A blank digit is no records at all"""
+    _background, _text, highlight, _credit = colours
+    assert height <= COLLINES_TOKENS_MAX_HEIGHT, "KEEP is a token only on a screen of <= 251 rows"
+    if digit == DIGIT_BLANK:
+        return b""
+    assert 0 <= digit <= 9, digit
+    _lines, _sel, _rows, slots = level_done_layout(width, height, nsecret)
+    x0, y0 = slots[slot]
+    glyph = _GLYPHS[str(digit)].split("|")
+    out = bytearray()
+    for gx in range(len(glyph[0])):
+        runs, gy = [], 0
+        while gy < len(glyph):
+            if glyph[gy][gx] != "#":
+                gy += 1
+                continue
+            e = gy + 1
+            while e < len(glyph) and glyph[e][gx] == "#":
+                e += 1
+            runs.append((y0 + gy, y0 + e))
+            gy = e
+        if not runs:
+            continue
+        out.append(x0 + gx)
+        for ys, ye in runs:
+            out += bytes([KEEP, ys, ye, highlight])
+        out.append(END)
+    return bytes(out)
+
 
 # -------------------------------------------------------------------------------------------------
 # M7 P1.5 -- THE MENU'S RULES, the oracle side (docs/gp-skill-menu.md). The program's side is the fj
@@ -489,8 +644,11 @@ def _fj_text(data: bytes, label: str, end_marker: bool, what: str) -> str:
 # the keyboard device's keycodes the menu hears (src/fj/input.fj's table): enter and esc, and the
 # forward keys (w, up arrow) as "up" and the back keys (s, down arrow) as "dn". Down edges only.
 # M7 P3.4: 'h' as "help" (the device has no F1; docs/gp-help.md).
+# P10: and "any" -- EVERY key's down edge, these and every other (the poll's `ev_any`; keyboard.frame_keys adds it) --
+# which only LEVEL COMPLETE acts on
 MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn",
              0x68: "help"}
+ANY_KEY_EVENT = "any"
 # M7 P2a.2 -- `menu_scr`'s third screen: LEVEL COMPLETE, opened by the exit switch (docs/gp-exit.md)
 LEVEL_DONE_SCR = 2
 # M7 P3.4 (docs/gp-help.md) -- the HELP screen, one picture under two ids, because closing it goes
@@ -509,88 +667,123 @@ HELP_SCREENS = (HELP_MENU_SCR, HELP_GAME_SCR)
 # menu_step leaves it where it is.
 MAIN_EXIT_SCR = 6
 MENU_HALTED = -1
+# P10 (the owner's play-test, 2026-10-12: "Add menu resume when possible") -- the main menu's RESUME item, at the top
+# and highlighted, ONLY while a game is in progress: menu_scr MAIN_RESUME_SCR is the main menu with RESUME
+# highlighted. "In progress" is the program's persisted `g_live`: 0 at boot, 1 from NEW GAME on, 0 again when LEVEL
+# COMPLETE is left -- so the boot menu and the menu after a finished level (the owner: "return to main menu (as start
+# of the game)") have no RESUME, and esc on them does nothing.
+MAIN_RESUME_SCR = 7
+# P10: LEVEL COMPLETE's HOLD -- its first frames ignore every key, so a press already on its way when the exit is used
+# (a tap of forward, of fire) cannot skip the stats before they are seen. The exit opens the screen at
+# LEVEL_DONE_ENTER, and each frame counts it down to LEVEL_DONE_HOLD_LAST and then to LEVEL_DONE_SCR, which takes any
+# key: LEVEL_DONE_ENTER - LEVEL_DONE_HOLD_LAST + 1 frames (8: 0.4 s at the 20 fps cap) with the picture and no key.
+# `menu_scr` nibble values no other screen uses, so the hold needs no cell of its own
+LEVEL_DONE_ENTER = 15
+LEVEL_DONE_HOLD_LAST = 8
+LEVEL_DONE_SCREENS = (LEVEL_DONE_SCR,) + tuple(range(LEVEL_DONE_HOLD_LAST, LEVEL_DONE_ENTER + 1))
 
 
-def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
-    """One frame of the menu -> `(mode, scr, sel, new_game)`.
+def menu_step(mode: int, scr: int, sel: int, events, live: int) -> tuple:
+    """One frame of the menu -> `(mode, scr, sel, new_game, live)`.
 
     `mode` is 1 on a menu frame and 0 in the world; `scr` 0 is the main menu (NEW GAME
-    highlighted), 1 the skill screen and LEVEL_DONE_SCR (2) the level-complete screen the exit opens
-    -- esc or enter leave it for the main menu (M7 P2a.2); M7 P3.4: MAIN_HELP_SCR (5) is the main
-    menu with HELP highlighted, HELP_MENU_SCR (3) and HELP_GAME_SCR (4) the help screen opened from
-    the main menu and from the world. `sel` is the highlighted skill, an index into
+    highlighted), 1 the skill screen and LEVEL_DONE_SCR (2) the level-complete screen the exit opens; M7 P3.4:
+    MAIN_HELP_SCR (5) is the main menu with HELP highlighted, HELP_MENU_SCR (3) and HELP_GAME_SCR (4) the help screen
+    opened from the main menu and from the world. `sel` is the highlighted skill, an index into
     wall_renderer.SKILLS. `events` is the set of this frame's events ("esc", "enter", "help", "up",
-    "dn"), and the FIRST of them in that order is the one acted on. `new_game` is the chosen skill's
+    "dn", and P10's "any"), and the FIRST of them in that order is the one acted on. `new_game` is the chosen skill's
     index on the frame NEW GAME is picked -- that frame restarts the level at the skill and then
-    runs the world's tic, as the program does -- and None on every other frame.
+    runs the world's tic, as the program does -- and None on every other frame. `live` (P10) is whether a game is in
+    progress (the program's `g_live`).
 
     M7 P3.4 (docs/gp-help.md): in the world, h opens the help (HELP_GAME_SCR); on the main menu, up
-    / down move between NEW GAME and HELP (clamped), and enter on HELP -- or h on either item --
+    / down move between the items (clamped), and enter on HELP -- or h on any item --
     opens it (HELP_MENU_SCR); on the help screen, esc or h close it, back to where it was opened
     from: the main menu with HELP highlighted, or the world. The skill screen and LEVEL COMPLETE
     ignore h.
 
-    P9 (the owner's play-test, 2026-10-10): the main menu's third item, EXIT (MAIN_EXIT_SCR, 6). Up / down move
-    through NEW GAME, HELP, EXIT, clamped at both ends as before (down on EXIT and up on NEW GAME do nothing); on
-    EXIT, esc resumes the world, h opens the help (closing, as from either other item, to HELP highlighted), and
-    ENTER HALTS the program: `scr` becomes MENU_HALTED, which no later frame leaves (the program presents nothing
-    more)."""
+    P9 (the owner's play-test, 2026-10-10): the main menu's EXIT item (MAIN_EXIT_SCR, 6), under HELP. On EXIT, h opens
+    the help (closing, as from any other item, to HELP highlighted), and ENTER HALTS the program: `scr` becomes
+    MENU_HALTED, which no later frame leaves (the program presents nothing more).
+
+    P10 (the owner's play-test, 2026-10-12): `live`.
+      * RESUME (MAIN_RESUME_SCR, 7) is the main menu's first item while `live`; esc or enter in the world open the
+        menu ON it (without `live`, on NEW GAME), and esc or enter on it resume the world. Up from NEW GAME reaches
+        it only while `live`.
+      * On every main-menu item, esc resumes the world only while `live`; without a game it is no rule, and the
+        next event in the order is acted on.
+      * NEW GAME sets `live`; LEVEL COMPLETE leaves for the main menu on ANY key's down edge ("any"), clearing it --
+        the menu as at boot, where `live` is 0 -- after its HOLD: the exit opens it at LEVEL_DONE_ENTER, and every
+        frame counts down (LEVEL_DONE_ENTER .. LEVEL_DONE_HOLD_LAST, then LEVEL_DONE_SCR) whatever is pressed."""
     # The skills the screen offers are wall_renderer.SKILLS: ONE tuple for the emitter's screens,
     # its dispatch and these rules (R6 -- this module kept its own `MENU_SKILLS = 3` until the P1.5
     # review). Imported here, not at the top, because wall_renderer imports this module.
     from doomfj.wall_renderer import SKILLS
     if scr == MENU_HALTED:                          # P9: the program has halted -- nothing changes again
-        return mode, scr, sel, None
+        return mode, scr, sel, None, live
+    esc = "esc" in events and live                  # P10: esc resumes only a game in progress
     if mode == 0:                                   # the world: esc or enter opens the main menu
         if "esc" in events or "enter" in events:
-            return 1, 0, sel, None
+            return 1, MAIN_RESUME_SCR if live else 0, sel, None, live      # P10: on RESUME
         if "help" in events:                        # M7 P3.4: h opens the help
-            return 1, HELP_GAME_SCR, sel, None
-        return 0, scr, sel, None
+            return 1, HELP_GAME_SCR, sel, None, live
+        return 0, scr, sel, None, live
     if scr in HELP_SCREENS:                         # M7 P3.4: the help -- esc or h close it
         if "esc" in events or "help" in events:
-            return (1, MAIN_HELP_SCR, sel, None) if scr == HELP_MENU_SCR else (0, 0, sel, None)
-        return 1, scr, sel, None
-    if scr == MAIN_HELP_SCR:                        # M7 P3.4: the main menu, HELP highlighted
-        if "esc" in events:
-            return 0, 0, sel, None
-        if "enter" in events or "help" in events:
-            return 1, HELP_MENU_SCR, sel, None
-        if "up" in events:
-            return 1, 0, sel, None
-        if "dn" in events:                          # P9: down to EXIT
-            return 1, MAIN_EXIT_SCR, sel, None
-        return 1, MAIN_HELP_SCR, sel, None
-    if scr == MAIN_EXIT_SCR:                        # P9: the main menu, EXIT highlighted
-        if "esc" in events:
-            return 0, 0, sel, None
-        if "enter" in events:                       # the program halts
-            return 1, MENU_HALTED, sel, None
-        if "help" in events:
-            return 1, HELP_MENU_SCR, sel, None
-        if "up" in events:
-            return 1, MAIN_HELP_SCR, sel, None
-        return 1, MAIN_EXIT_SCR, sel, None          # (down is clamped: EXIT is the last item)
-    if scr == LEVEL_DONE_SCR:                       # level complete: on to the main menu
+            return (1, MAIN_HELP_SCR, sel, None, live) if scr == HELP_MENU_SCR else (0, 0, sel, None, live)
+        return 1, scr, sel, None, live
+    if scr == MAIN_RESUME_SCR:                      # P10: the main menu, RESUME highlighted
         if "esc" in events or "enter" in events:
-            return 1, 0, sel, None
-        return 1, LEVEL_DONE_SCR, sel, None
+            return 0, 0, sel, None, live            # resume the world where it was
+        if "help" in events:
+            return 1, HELP_MENU_SCR, sel, None, live
+        if "dn" in events:                          # down to NEW GAME (up is clamped: RESUME is the first)
+            return 1, 0, sel, None, live
+        return 1, MAIN_RESUME_SCR, sel, None, live
+    if scr == MAIN_HELP_SCR:                        # M7 P3.4: the main menu, HELP highlighted
+        if esc:
+            return 0, 0, sel, None, live
+        if "enter" in events or "help" in events:
+            return 1, HELP_MENU_SCR, sel, None, live
+        if "up" in events:
+            return 1, 0, sel, None, live
+        if "dn" in events:                          # P9: down to EXIT
+            return 1, MAIN_EXIT_SCR, sel, None, live
+        return 1, MAIN_HELP_SCR, sel, None, live
+    if scr == MAIN_EXIT_SCR:                        # P9: the main menu, EXIT highlighted
+        if esc:
+            return 0, 0, sel, None, live
+        if "enter" in events:                       # the program halts
+            return 1, MENU_HALTED, sel, None, live
+        if "help" in events:
+            return 1, HELP_MENU_SCR, sel, None, live
+        if "up" in events:
+            return 1, MAIN_HELP_SCR, sel, None, live
+        return 1, MAIN_EXIT_SCR, sel, None, live    # (down is clamped: EXIT is the last item)
+    if LEVEL_DONE_HOLD_LAST <= scr <= LEVEL_DONE_ENTER:   # P10: LEVEL COMPLETE's hold -- the picture, no key
+        return 1, scr - 1 if scr > LEVEL_DONE_HOLD_LAST else LEVEL_DONE_SCR, sel, None, live
+    if scr == LEVEL_DONE_SCR:                       # level complete: ANY key, on to the menu as at boot (P10)
+        if ANY_KEY_EVENT in events:
+            return 1, 0, sel, None, 0
+        return 1, LEVEL_DONE_SCR, sel, None, live
     if scr == 0:                                    # the main menu, NEW GAME highlighted
-        if "esc" in events:
-            return 0, 0, sel, None                  # resume the world where it was
+        if esc:
+            return 0, 0, sel, None, live            # resume the world where it was
         if "enter" in events:
-            return 1, 1, sel, None                  # NEW GAME: the skill screen
+            return 1, 1, sel, None, live            # NEW GAME: the skill screen
         if "help" in events:                        # M7 P3.4: h opens the help from here too
-            return 1, HELP_MENU_SCR, sel, None
+            return 1, HELP_MENU_SCR, sel, None, live
+        if "up" in events and live:                 # P10: up to RESUME (clamped without a game)
+            return 1, MAIN_RESUME_SCR, sel, None, live
         if "dn" in events:                          # M7 P3.4: down to HELP
-            return 1, MAIN_HELP_SCR, sel, None
-        return 1, 0, sel, None
+            return 1, MAIN_HELP_SCR, sel, None, live
+        return 1, 0, sel, None, live
     if "esc" in events:                             # the skill screen: back to the main menu
-        return 1, 0, sel, None
-    if "enter" in events:                           # start the highlighted skill
-        return 0, 0, sel, sel
+        return 1, 0, sel, None, live
+    if "enter" in events:                           # start the highlighted skill: a game is in progress
+        return 0, 0, sel, sel, 1
     if "up" in events:
-        return 1, 1, max(0, sel - 1), None
+        return 1, 1, max(0, sel - 1), None, live
     if "dn" in events:
-        return 1, 1, min(len(SKILLS) - 1, sel + 1), None
-    return 1, 1, sel, None
+        return 1, 1, min(len(SKILLS) - 1, sel + 1), None, live
+    return 1, 1, sel, None, live

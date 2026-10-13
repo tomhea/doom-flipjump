@@ -1,0 +1,282 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-985 [at 985c1d4 (6208788's parent) + tests/host/test_one_pass_reset.py from 6208788] && PYTHONPATH=src timeout 1800 python -m pytest tests/host/test_one_pass_reset.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent
+# worktree HEAD: 985c1d4e398e952d018010cd1da0e90d13ed4b6e (P10 fix: the window walker emits nothing for an EMPTY window -- blocked55's gamespeed crash)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#   ?? tests/host/test_one_pass_reset.py
+# copied-file hashes: tests/host/test_one_pass_reset.py=b5a926beafd3 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-985\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:32:10 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-985
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 8 items
+
+tests/host/test_one_pass_reset.py::test_every_kind_of_declaration_is_reset_from_its_own_value FAILED [ 12%]
+tests/host/test_one_pass_reset.py::test_the_registered_cells_are_declared_zero_and_no_line_moves FAILED [ 25%]
+tests/host/test_one_pass_reset.py::test_the_boot_and_the_frame_tail_both_enter_the_reset FAILED [ 37%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a registered name the program lost-names0-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-no declaration] FAILED [ 50%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a name declared twice-names1-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nws_c1: hex.vec 1\n-declared twice] FAILED [ 62%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a raw cell that is not a nibble (a LUT)-names2-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nlut_cells:\n;200 * dw\n-not a nibble] FAILED [ 75%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a byte array the geometry disagrees with-names3-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-geometry says] FAILED [ 87%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a value that does not fit its cells-names4-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nbig: hex.vec 1, 16\n-does not fit] FAILED [100%]
+
+================================== FAILURES ===================================
+_________ test_every_kind_of_declaration_is_reset_from_its_own_value __________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_every_kind_of_declaration0')
+
+    def test_every_kind_of_declaration_is_reset_from_its_own_value(tmp_path):
+>       part, nib, byte, plan = _emit(tmp_path)
+                                ^^^^^^^^^^^^^^^
+
+tests\host\test_one_pass_reset.py:60: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_every_kind_of_declaration0')
+names = {'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', 'vq_hi', ...}
+persist = ('viewx',)
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...   hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n'
+
+    def _emit(tmp_path, names=NAMES, persist=("viewx",), state=STATE):
+        files = _parts(tmp_path, state)
+>       return selfreset.emit_reset_part_by_label(tmp_path, files, names, VIEW_W, NSS, "e1m1", persist=persist)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'doomfj.selfreset' has no attribute 'emit_reset_part_by_label'
+
+tests\host\test_one_pass_reset.py:56: AttributeError
+________ test_the_registered_cells_are_declared_zero_and_no_line_moves ________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_registered_cells_are_0')
+
+    def test_the_registered_cells_are_declared_zero_and_no_line_moves(tmp_path):
+>       _emit(tmp_path)
+
+tests\host\test_one_pass_reset.py:79: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_registered_cells_are_0')
+names = {'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', 'vq_hi', ...}
+persist = ('viewx',)
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...   hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n'
+
+    def _emit(tmp_path, names=NAMES, persist=("viewx",), state=STATE):
+        files = _parts(tmp_path, state)
+>       return selfreset.emit_reset_part_by_label(tmp_path, files, names, VIEW_W, NSS, "e1m1", persist=persist)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'doomfj.selfreset' has no attribute 'emit_reset_part_by_label'
+
+tests\host\test_one_pass_reset.py:56: AttributeError
+____________ test_the_boot_and_the_frame_tail_both_enter_the_reset ____________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_boot_and_the_frame_ta0')
+
+    def test_the_boot_and_the_frame_tail_both_enter_the_reset(tmp_path):
+>       _emit(tmp_path)
+
+tests\host\test_one_pass_reset.py:90: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_boot_and_the_frame_ta0')
+names = {'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', 'vq_hi', ...}
+persist = ('viewx',)
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...   hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n'
+
+    def _emit(tmp_path, names=NAMES, persist=("viewx",), state=STATE):
+        files = _parts(tmp_path, state)
+>       return selfreset.emit_reset_part_by_label(tmp_path, files, names, VIEW_W, NSS, "e1m1", persist=persist)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'doomfj.selfreset' has no attribute 'emit_reset_part_by_label'
+
+tests\host\test_one_pass_reset.py:56: AttributeError
+_ test_the_generator_refuses[a registered name the program lost-names0-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-no declaration] _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_r0')
+why = 'a registered name the program lost'
+names = {'drawn', 'gone_reg', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', ...}
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...   hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n'
+match = 'no declaration'
+
+    @pytest.mark.parametrize("why, names, state, match", [
+        ("a registered name the program lost", NAMES | {"gone_reg"}, STATE, "no declaration"),
+        ("a name declared twice", NAMES, STATE + "ws_c1: hex.vec 1\n", "declared twice"),
+        ("a raw cell that is not a nibble (a LUT)", NAMES | {"lut_cells"}, STATE + "lut_cells:\n;200 * dw\n",
+         "not a nibble"),
+        ("a byte array the geometry disagrees with", NAMES, STATE.replace("pclm:\n;0 * dw\n", "pclm:\n"),
+         "geometry says"),
+        ("a value that does not fit its cells", NAMES | {"big"}, STATE + "big: hex.vec 1, 16\n", "does not fit"),
+    ])
+    def test_the_generator_refuses(tmp_path, why, names, state, match):
+        with pytest.raises(AssertionError, match=match):
+>           _emit(tmp_path, names=names, state=state)
+
+tests\host\test_one_pass_reset.py:107: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_r0')
+names = {'drawn', 'gone_reg', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', ...}
+persist = ('viewx',)
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...   hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n'
+
+    def _emit(tmp_path, names=NAMES, persist=("viewx",), state=STATE):
+        files = _parts(tmp_path, state)
+>       return selfreset.emit_reset_part_by_label(tmp_path, files, names, VIEW_W, NSS, "e1m1", persist=persist)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'doomfj.selfreset' has no attribute 'emit_reset_part_by_label'
+
+tests\host\test_one_pass_reset.py:56: AttributeError
+_ test_the_generator_refuses[a name declared twice-names1-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nws_c1: hex.vec 1\n-declared twice] _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_n0')
+why = 'a name declared twice'
+names = {'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', 'vq_hi', ...}
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...34\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nws_c1: hex.vec 1\n'
+match = 'declared twice'
+
+    @pytest.mark.parametrize("why, names, state, match", [
+        ("a registered name the program lost", NAMES | {"gone_reg"}, STATE, "no declaration"),
+        ("a name declared twice", NAMES, STATE + "ws_c1: hex.vec 1\n", "declared twice"),
+        ("a raw cell that is not a nibble (a LUT)", NAMES | {"lut_cells"}, STATE + "lut_cells:\n;200 * dw\n",
+         "not a nibble"),
+        ("a byte array the geometry disagrees with", NAMES, STATE.replace("pclm:\n;0 * dw\n", "pclm:\n"),
+         "geometry says"),
+        ("a value that does not fit its cells", NAMES | {"big"}, STATE + "big: hex.vec 1, 16\n", "does not fit"),
+    ])
+    def test_the_generator_refuses(tmp_path, why, names, state, match):
+        with pytest.raises(AssertionError, match=match):
+>           _emit(tmp_path, names=names, state=state)
+
+tests\host\test_one_pass_reset.py:107: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_n0')
+names = {'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', 'vq_hi', ...}
+persist = ('viewx',)
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...34\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nws_c1: hex.vec 1\n'
+
+    def _emit(tmp_path, names=NAMES, persist=("viewx",), state=STATE):
+        files = _parts(tmp_path, state)
+>       return selfreset.emit_reset_part_by_label(tmp_path, files, names, VIEW_W, NSS, "e1m1", persist=persist)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'doomfj.selfreset' has no attribute 'emit_reset_part_by_label'
+
+tests\host\test_one_pass_reset.py:56: AttributeError
+_ test_the_generator_refuses[a raw cell that is not a nibble (a LUT)-names2-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nlut_cells:\n;200 * dw\n-not a nibble] _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_r1')
+why = 'a raw cell that is not a nibble (a LUT)'
+names = {'drawn', 'lut_cells', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', ...}
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...   hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nlut_cells:\n;200 * dw\n'
+match = 'not a nibble'
+
+    @pytest.mark.parametrize("why, names, state, match", [
+        ("a registered name the program lost", NAMES | {"gone_reg"}, STATE, "no declaration"),
+        ("a name declared twice", NAMES, STATE + "ws_c1: hex.vec 1\n", "declared twice"),
+        ("a raw cell that is not a nibble (a LUT)", NAMES | {"lut_cells"}, STATE + "lut_cells:\n;200 * dw\n",
+         "not a nibble"),
+        ("a byte array the geometry disagrees with", NAMES, STATE.replace("pclm:\n;0 * dw\n", "pclm:\n"),
+         "geometry says"),
+        ("a value that does not fit its cells", NAMES | {"big"}, STATE + "big: hex.vec 1, 16\n", "does not fit"),
+    ])
+    def test_the_generator_refuses(tmp_path, why, names, state, match):
+        with pytest.raises(AssertionError, match=match):
+>           _emit(tmp_path, names=names, state=state)
+
+tests\host\test_one_pass_reset.py:107: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_r1')
+names = {'drawn', 'lut_cells', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', ...}
+persist = ('viewx',)
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...   hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nlut_cells:\n;200 * dw\n'
+
+    def _emit(tmp_path, names=NAMES, persist=("viewx",), state=STATE):
+        files = _parts(tmp_path, state)
+>       return selfreset.emit_reset_part_by_label(tmp_path, files, names, VIEW_W, NSS, "e1m1", persist=persist)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'doomfj.selfreset' has no attribute 'emit_reset_part_by_label'
+
+tests\host\test_one_pass_reset.py:56: AttributeError
+_ test_the_generator_refuses[a byte array the geometry disagrees with-names3-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-geometry says] _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_b0')
+why = 'a byte array the geometry disagrees with'
+names = {'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', 'vq_hi', ...}
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...os_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n'
+match = 'geometry says'
+
+    @pytest.mark.parametrize("why, names, state, match", [
+        ("a registered name the program lost", NAMES | {"gone_reg"}, STATE, "no declaration"),
+        ("a name declared twice", NAMES, STATE + "ws_c1: hex.vec 1\n", "declared twice"),
+        ("a raw cell that is not a nibble (a LUT)", NAMES | {"lut_cells"}, STATE + "lut_cells:\n;200 * dw\n",
+         "not a nibble"),
+        ("a byte array the geometry disagrees with", NAMES, STATE.replace("pclm:\n;0 * dw\n", "pclm:\n"),
+         "geometry says"),
+        ("a value that does not fit its cells", NAMES | {"big"}, STATE + "big: hex.vec 1, 16\n", "does not fit"),
+    ])
+    def test_the_generator_refuses(tmp_path, why, names, state, match):
+        with pytest.raises(AssertionError, match=match):
+>           _emit(tmp_path, names=names, state=state)
+
+tests\host\test_one_pass_reset.py:107: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_b0')
+names = {'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', 'vq_hi', ...}
+persist = ('viewx',)
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...os_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n'
+
+    def _emit(tmp_path, names=NAMES, persist=("viewx",), state=STATE):
+        files = _parts(tmp_path, state)
+>       return selfreset.emit_reset_part_by_label(tmp_path, files, names, VIEW_W, NSS, "e1m1", persist=persist)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'doomfj.selfreset' has no attribute 'emit_reset_part_by_label'
+
+tests\host\test_one_pass_reset.py:56: AttributeError
+_ test_the_generator_refuses[a value that does not fit its cells-names4-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nbig: hex.vec 1, 16\n-does not fit] _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_v0')
+why = 'a value that does not fit its cells'
+names = {'big', 'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', ...}
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nbig: hex.vec 1, 16\n'
+match = 'does not fit'
+
+    @pytest.mark.parametrize("why, names, state, match", [
+        ("a registered name the program lost", NAMES | {"gone_reg"}, STATE, "no declaration"),
+        ("a name declared twice", NAMES, STATE + "ws_c1: hex.vec 1\n", "declared twice"),
+        ("a raw cell that is not a nibble (a LUT)", NAMES | {"lut_cells"}, STATE + "lut_cells:\n;200 * dw\n",
+         "not a nibble"),
+        ("a byte array the geometry disagrees with", NAMES, STATE.replace("pclm:\n;0 * dw\n", "pclm:\n"),
+         "geometry says"),
+        ("a value that does not fit its cells", NAMES | {"big"}, STATE + "big: hex.vec 1, 16\n", "does not fit"),
+    ])
+    def test_the_generator_refuses(tmp_path, why, names, state, match):
+        with pytest.raises(AssertionError, match=match):
+>           _emit(tmp_path, names=names, state=state)
+
+tests\host\test_one_pass_reset.py:107: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_a_before_parent/test_the_generator_refuses_a_v0')
+names = {'big', 'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', ...}
+persist = ('viewx',)
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d...\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nbig: hex.vec 1, 16\n'
+
+    def _emit(tmp_path, names=NAMES, persist=("viewx",), state=STATE):
+        files = _parts(tmp_path, state)
+>       return selfreset.emit_reset_part_by_label(tmp_path, files, names, VIEW_W, NSS, "e1m1", persist=persist)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'doomfj.selfreset' has no attribute 'emit_reset_part_by_label'
+
+tests\host\test_one_pass_reset.py:56: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/host/test_one_pass_reset.py::test_every_kind_of_declaration_is_reset_from_its_own_value
+FAILED tests/host/test_one_pass_reset.py::test_the_registered_cells_are_declared_zero_and_no_line_moves
+FAILED tests/host/test_one_pass_reset.py::test_the_boot_and_the_frame_tail_both_enter_the_reset
+FAILED tests/host/test_one_pass_reset.py::test_the_generator_refuses[a registered name the program lost-names0-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-no declaration]
+FAILED tests/host/test_one_pass_reset.py::test_the_generator_refuses[a name declared twice-names1-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nws_c1: hex.vec 1\n-declared twice]
+FAILED tests/host/test_one_pass_reset.py::test_the_generator_refuses[a raw cell that is not a nibble (a LUT)-names2-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nlut_cells:\n;200 * dw\n-not a nibble]
+FAILED tests/host/test_one_pass_reset.py::test_the_generator_refuses[a byte array the geometry disagrees with-names3-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-geometry says]
+FAILED tests/host/test_one_pass_reset.py::test_the_generator_refuses[a value that does not fit its cells-names4-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nbig: hex.vec 1, 16\n-does not fit]
+============================== 8 failed in 0.50s ==============================
+# finished 2026-10-13 04:32:12 +0300; pytest exit code: 1

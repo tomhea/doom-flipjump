@@ -133,28 +133,34 @@ def test_glyph_geometry_fits_the_screen():
 # -- M7 P1.5: the menu's RULES (doomfj.menu.menu_step, the oracle side of docs/gp-skill-menu.md) ----
 
 def test_the_menu_rules_move_between_the_screens():
-    from doomfj.menu import menu_step
-    assert menu_step(0, 0, 2, {"esc"}) == (1, 0, 2, None)        # the world: esc opens the menu
-    assert menu_step(0, 0, 2, {"enter"}) == (1, 0, 2, None)      # ...and so does enter
-    assert menu_step(0, 0, 2, {"up", "dn"}) == (0, 0, 2, None)   # the world ignores up / down
-    assert menu_step(1, 0, 2, {"esc"}) == (0, 0, 2, None)        # the main menu: esc resumes
-    assert menu_step(1, 0, 2, {"enter"}) == (1, 1, 2, None)      # ...enter opens the skill screen
-    assert menu_step(1, 1, 1, {"esc"}) == (1, 0, 1, None)        # the skill screen: esc goes back
-    assert menu_step(1, 1, 1, {"enter"}) == (0, 0, 1, 1)         # ...enter starts skill 1
-    assert menu_step(1, 1, 1, set()) == (1, 1, 1, None)          # nothing happens without an event
+    """P10: `live` (a game in progress) rides along -- the world opens the menu on RESUME, esc resumes only a game in
+    progress, and NEW GAME starts one"""
+    from doomfj.menu import MAIN_RESUME_SCR as MR, menu_step
+    assert menu_step(0, 0, 2, {"esc"}, 1) == (1, MR, 2, None, 1)     # the world: esc opens the menu, on RESUME
+    assert menu_step(0, 0, 2, {"enter"}, 1) == (1, MR, 2, None, 1)   # ...and so does enter
+    assert menu_step(0, 0, 2, {"up", "dn"}, 1) == (0, 0, 2, None, 1)  # the world ignores up / down
+    assert menu_step(1, 0, 2, {"esc"}, 1) == (0, 0, 2, None, 1)      # the main menu: esc resumes a game...
+    assert menu_step(1, 0, 2, {"esc"}, 0) == (1, 0, 2, None, 0)      # ...and is no rule without one (P10)
+    assert menu_step(1, 0, 2, {"enter"}, 0) == (1, 1, 2, None, 0)    # ...enter opens the skill screen
+    assert menu_step(1, 1, 1, {"esc"}, 0) == (1, 0, 1, None, 0)      # the skill screen: esc goes back
+    assert menu_step(1, 1, 1, {"enter"}, 0) == (0, 0, 1, 1, 1)       # ...enter starts skill 1: a game in progress
+    assert menu_step(1, 1, 1, {"enter"}, 1) == (0, 0, 1, 1, 1)       # (a NEW GAME over a game in progress too)
+    assert menu_step(1, 1, 1, set(), 0) == (1, 1, 1, None, 0)        # nothing happens without an event
 
 
 def test_the_highlight_clamps_and_the_first_event_wins():
     from doomfj.menu import menu_step
     from doomfj.wall_renderer import SKILLS
-    assert menu_step(1, 1, 0, {"up"})[2] == 0                    # clamped at the first skill
-    assert menu_step(1, 1, len(SKILLS) - 1, {"dn"})[2] == len(SKILLS) - 1   # ...and the last
-    assert menu_step(1, 1, 1, {"up"})[2] == 0 and menu_step(1, 1, 1, {"dn"})[2] == 2
+    assert menu_step(1, 1, 0, {"up"}, 0)[2] == 0                    # clamped at the first skill
+    assert menu_step(1, 1, len(SKILLS) - 1, {"dn"}, 0)[2] == len(SKILLS) - 1   # ...and the last
+    assert menu_step(1, 1, 1, {"up"}, 0)[2] == 0 and menu_step(1, 1, 1, {"dn"}, 0)[2] == 2
     # first match, in the order esc > enter > up > down
-    assert menu_step(1, 1, 1, {"esc", "enter", "up"}) == (1, 0, 1, None)
-    assert menu_step(1, 1, 1, {"enter", "up"}) == (0, 0, 1, 1)
-    assert menu_step(1, 1, 1, {"up", "dn"})[2] == 0
-    assert menu_step(1, 0, 2, {"esc", "enter"}) == (0, 0, 2, None)
+    assert menu_step(1, 1, 1, {"esc", "enter", "up"}, 0) == (1, 0, 1, None, 0)
+    assert menu_step(1, 1, 1, {"enter", "up"}, 0) == (0, 0, 1, 1, 1)
+    assert menu_step(1, 1, 1, {"up", "dn"}, 0)[2] == 0
+    assert menu_step(1, 0, 2, {"esc", "enter"}, 1) == (0, 0, 2, None, 1)
+    # P10: without a game esc is NO rule, so the next event in the order is the one acted on
+    assert menu_step(1, 0, 2, {"esc", "enter"}, 0) == (1, 1, 2, None, 0)
 
 
 def test_the_skill_count_is_one_number():
@@ -166,8 +172,8 @@ def test_the_skill_count_is_one_number():
                                       restart_lines)
     last = len(SKILLS) - 1
     assert len(SKILL_MENU) - SKILL_MENU_FIRST == len(SKILLS), "one screen entry per skill"
-    assert [menu_step(1, 1, s, {"dn"})[2] for s in range(len(SKILLS))] == [*range(1, last + 1), last]
-    assert [menu_step(1, 1, s, {"up"})[2] for s in range(len(SKILLS))] == [0, *range(last)]
+    assert [menu_step(1, 1, s, {"dn"}, 0)[2] for s in range(len(SKILLS))] == [*range(1, last + 1), last]
+    assert [menu_step(1, 1, s, {"up"}, 0)[2] for s in range(len(SKILLS))] == [0, *range(last)]
     spawn = type("Spawn", (), {"x": 0, "y": 0, "angle": 0})()
     lines = menu_state_lines(restart_lines(spawn, 0, [], [], 1, [([0], [], [])] * len(SKILLS)))
     assert f"hex.if_flags menu_sel, 1<<{last}, mn_dn_inc, mn_done" in lines, "the emitted clamp"
@@ -265,18 +271,22 @@ def test_the_help_stream_paints_exactly_the_help_picture():
 # rows. P9 (the owner: key 5, the launcher -- "1 2 3 4 5 WEAPONS"): five weapon caps do not fit the second column, so
 # the weapons are their row's FIRST item and FIRE its second; the second column (and the clusters' legend) stands
 # HELP_ITEM_GAP (8) past them, at x 91 -- the render reviewed as scratchpad/p9_help_preview.png
-HELP_CAPS = [("W", 16, 14, 9), ("A", 6, 24, 9), ("S", 16, 24, 9), ("D", 26, 24, 9),
-             ("UP", 60, 14, 9), ("LEFT", 50, 24, 9), ("DOWN", 60, 24, 9), ("RIGHT", 70, 24, 9),
-             ("SPACE", 6, 39, 23), ("E", 31, 39, 7), ("1", 6, 59, 7), ("2", 15, 59, 7), ("3", 24, 59, 7),
-             ("4", 33, 59, 7), ("5", 42, 59, 7), ("CTRL", 91, 59, 19), (",", 6, 74, 6), (".", 14, 74, 6),
-             ("ENTER", 91, 74, 24), ("ESC", 6, 89, 15), ("H", 91, 89, 7)]
-HELP_LEGENDS = [("W", 18, 16), ("A", 9, 26), ("S", 19, 26), ("D", 29, 26), ("↑", 62, 16),
-                ("←", 52, 26), ("↓", 62, 26), ("→", 72, 26), ("SPACE", 8, 41), ("E", 33, 41),
-                ("1", 8, 61), ("2", 17, 61), ("3", 26, 61), ("4", 35, 61), ("5", 44, 61), ("CTRL", 93, 61),
-                (",", 8, 76), (".", 16, 76), ("ENTER", 93, 76), ("ESC", 8, 91), ("H", 93, 91)]
-HELP_TEXTS = [("OR", 39, 26), ("↑ ↓ MOVE", 91, 14), ("A D STRAFE", 91, 21), ("← → TURN", 91, 28),
-              ("USE: DOORS,", 42, 41), ("SWITCHES, LIFTS", 42, 47), ("WEAPONS", 53, 61), ("FIRE", 114, 61),
-              ("STRAFE", 24, 76), ("SELECT", 119, 76), ("MENU / BACK", 25, 91), ("HELP", 102, 91)]
+# P10 (the owner's second play-test, 2026-10-12: the TOMHE.APP credit crowded "H HELP"): the use keys' description is
+# ONE line ("USE: DOORS, SWITCHES, LIFTS"), the title at y 1 with 4 empty rows under it -- every row 7 px higher, the
+# last row ending at y 90, two rows above the credit; the categories keep P9's 6 empty rows -- the render reviewed as
+# scratchpad/p10_help_preview.png
+HELP_CAPS = [("W", 16, 12, 9), ("A", 6, 22, 9), ("S", 16, 22, 9), ("D", 26, 22, 9),
+             ("UP", 60, 12, 9), ("LEFT", 50, 22, 9), ("DOWN", 60, 22, 9), ("RIGHT", 70, 22, 9),
+             ("SPACE", 6, 37, 23), ("E", 31, 37, 7), ("1", 6, 52, 7), ("2", 15, 52, 7), ("3", 24, 52, 7),
+             ("4", 33, 52, 7), ("5", 42, 52, 7), ("CTRL", 91, 52, 19), (",", 6, 67, 6), (".", 14, 67, 6),
+             ("ENTER", 91, 67, 24), ("ESC", 6, 82, 15), ("H", 91, 82, 7)]
+HELP_LEGENDS = [("W", 18, 14), ("A", 9, 24), ("S", 19, 24), ("D", 29, 24), ("↑", 62, 14),
+                ("←", 52, 24), ("↓", 62, 24), ("→", 72, 24), ("SPACE", 8, 39), ("E", 33, 39),
+                ("1", 8, 54), ("2", 17, 54), ("3", 26, 54), ("4", 35, 54), ("5", 44, 54), ("CTRL", 93, 54),
+                (",", 8, 69), (".", 16, 69), ("ENTER", 93, 69), ("ESC", 8, 84), ("H", 93, 84)]
+HELP_TEXTS = [("OR", 39, 24), ("↑ ↓ MOVE", 91, 12), ("A D STRAFE", 91, 19), ("← → TURN", 91, 26),
+              ("USE: DOORS, SWITCHES, LIFTS", 42, 39), ("WEAPONS", 53, 54), ("FIRE", 114, 54),
+              ("STRAFE", 24, 69), ("SELECT", 119, 69), ("MENU / BACK", 25, 84), ("HELP", 102, 84)]
 
 
 def _ink(label, x0, y0, font=None):
@@ -325,7 +335,7 @@ def test_the_help_layout_is_the_owners_keycap_design():
     caps, texts = help_layout(W, H)
     assert caps == HELP_CAPS
     assert HELP_TEXT_H == SMALL_GLYPH_H == 5 and HELP_CAP_H == HELP_TEXT_H + 4
-    assert HELP_CLUSTERS_Y == 14 and HELP_TITLE_Y == 2 and HELP_SECTION_GAP == 6
+    assert HELP_CLUSTERS_Y == 12 and HELP_TITLE_Y == 1 and HELP_SECTION_GAP == 6     # P10: 14, 2 -> 12, 1
     assert texts[0] == (HELP_TITLE, (W - text_width(HELP_TITLE)) // 2, HELP_TITLE_Y, "title")
     assert all(r == "text" for *_s, r in texts[1:])
     assert sorted((s, x, y) for s, x, y, _r in texts[1:]) == sorted(HELP_LEGENDS + HELP_TEXTS)
@@ -356,7 +366,7 @@ def test_the_help_categories_are_six_rows_apart():
     assert len(bands) == 6, bands
     gaps = [b[0] - a[1] - 1 for a, b in zip(bands, bands[1:])]
     assert gaps[1:] == [HELP_SECTION_GAP] * 4, gaps
-    assert gaps[0] == 5, gaps                                        # under the title
+    assert gaps[0] == 4, gaps                                        # under the title (P10: 5 -> 4)
     assert {x for s, x, _y in HELP_TEXTS if s in ("↑ ↓ MOVE", "A D STRAFE", "← → TURN")} \
         == {x for k, x, _y, _w in HELP_CAPS if k in ("CTRL", "ENTER", "H")} == {91}
 
@@ -404,7 +414,7 @@ def test_the_help_says_what_the_owner_chose():
                              _GLYPHS, _SMALL_GLYPHS, help_cap_legend, help_key_names)
     assert HELP_TITLE == "HELP - CONTROLS" and HELP_OR == "OR"
     assert HELP_CLUSTER_LEGEND == ("↑ ↓ MOVE", "A D STRAFE", "← → TURN")    # M7 P4.1
-    assert HELP_USE_LINES == ("USE: DOORS,", "SWITCHES, LIFTS")
+    assert HELP_USE_LINES == ("USE: DOORS, SWITCHES, LIFTS",)      # P10: the owner's words on one line
     assert HELP_ROWS == (((("SPACE", "E"), HELP_USE_LINES),),
                          ((("1", "2", "3", "4", "5"), ("WEAPONS",)), (("CTRL",), ("FIRE",))),
                          (((",", "."), ("STRAFE",)), (("ENTER",), ("SELECT",))),
@@ -505,19 +515,19 @@ def test_the_small_comma_is_a_dot_with_a_tail_below_left():
 
 def test_the_comma_checks_reject_the_slash_comma_and_a_layout_blind_to_the_tail(monkeypatch):
     """R9 for the test above: the pre-fix glyph (two pixels rising to the right INSIDE the five rows -- the '/' the owner
-    saw) fails the shape check, and a layout that measures text by the font's five rows (blind to the tail) leaves only
-    5 empty rows under "SWITCHES, LIFTS" -- the gap check catches it"""
+    saw) fails the shape check; and the six-rows check sees a gap change. (P9's second control -- a layout blind to the
+    comma's tail leaving 5 empty rows under "SWITCHES, LIFTS" -- has nothing left to see since P10: the use text is ONE
+    line, its commas' tails inside the caps' rows; a section gap one row short is the control now.)"""
     import doomfj.menu as menu
     monkeypatch.setitem(menu._SMALL_GLYPHS, ",", "  |  |  | #|# ")
     import pytest as _pt
     with _pt.raises(AssertionError):
         test_the_small_comma_is_a_dot_with_a_tail_below_left()
     monkeypatch.undo()
-    monkeypatch.setattr(menu, "text_height", lambda label, font=None: menu.HELP_TEXT_H if font is menu.HELP_FONT
-                        else menu.GLYPH_H)
+    monkeypatch.setattr(menu, "HELP_SECTION_GAP", menu.HELP_SECTION_GAP - 1)
     grid = menu.help_pixels(W, H, COLOURS)
     gaps = [b[0] - a[1] - 1 for a, b in zip(_bands(grid), _bands(grid)[1:])]
-    assert gaps[2] == menu.HELP_SECTION_GAP - 1, gaps
+    assert gaps[1:] == [6 - 1] * 4, gaps                             # the measured gaps follow the constant
 
 
 def test_the_help_screen_is_not_the_menu_and_is_not_blank():
@@ -572,81 +582,223 @@ def test_the_help_layout_refuses_a_table_in_the_credits_corner(monkeypatch):
 
 def test_the_help_rules():
     """menu_step's help: h in the world and on the main menu, enter on HELP, esc or h closing back
-    to where it was opened, the main menu's two items clamped, h ignored on the skill screen and
-    LEVEL COMPLETE, and esc / enter winning over h"""
+    to where it was opened, the main menu's items clamped, h ignored on the skill screen and
+    LEVEL COMPLETE, and esc / enter winning over h. (A game in progress -- `live` 1 -- unless said.)"""
     from doomfj.menu import (HELP_GAME_SCR as HG, HELP_MENU_SCR as HM, LEVEL_DONE_SCR as LD,
-                             MAIN_EXIT_SCR, MAIN_HELP_SCR as MH, menu_step)
-    assert menu_step(0, 0, 2, {"help"}) == (1, HG, 2, None)       # the world: h opens the help
-    assert menu_step(1, HG, 2, {"help"}) == (0, 0, 2, None)       # ...h closes it to the world
-    assert menu_step(1, HG, 2, {"esc"}) == (0, 0, 2, None)        # ...and so does esc
-    assert menu_step(1, HG, 2, {"enter", "up", "dn"}) == (1, HG, 2, None)
-    assert menu_step(1, 0, 2, {"help"}) == (1, HM, 2, None)       # the main menu: h opens it
-    assert menu_step(1, 0, 2, {"dn"}) == (1, MH, 2, None)         # ...down highlights HELP
-    assert menu_step(1, 0, 2, {"up"}) == (1, 0, 2, None)          # ...up is clamped
-    assert menu_step(1, MH, 2, {"enter"}) == (1, HM, 2, None)     # HELP: enter opens it
-    assert menu_step(1, MH, 2, {"help"}) == (1, HM, 2, None)      # ...and so does h
-    assert menu_step(1, MH, 2, {"up"}) == (1, 0, 2, None)         # ...up to NEW GAME
-    assert menu_step(1, MH, 2, {"dn"}) == (1, MAIN_EXIT_SCR, 2, None)   # ...down to EXIT (P9; was clamped)
-    assert menu_step(1, MH, 2, {"esc"}) == (0, 0, 2, None)        # ...esc resumes the world
-    assert menu_step(1, HM, 2, {"esc"}) == (1, MH, 2, None)       # the menu's help: back to HELP
-    assert menu_step(1, HM, 2, {"help"}) == (1, MH, 2, None)
-    assert menu_step(1, HM, 2, set()) == (1, HM, 2, None)
-    assert menu_step(1, 1, 1, {"help"}) == (1, 1, 1, None)        # the skill screen ignores h
-    assert menu_step(1, LD, 1, {"help"}) == (1, LD, 1, None)      # ...and so does LEVEL COMPLETE
-    assert menu_step(0, 0, 2, {"esc", "help"}) == (1, 0, 2, None)  # esc and enter win over h
-    assert menu_step(1, 0, 2, {"enter", "help"}) == (1, 1, 2, None)
-    assert menu_step(1, 0, 2, {"help", "dn"}) == (1, HM, 2, None)  # ...and h over up / down
+                             MAIN_EXIT_SCR, MAIN_HELP_SCR as MH, MAIN_RESUME_SCR as MR, menu_step)
+    assert menu_step(0, 0, 2, {"help"}, 1) == (1, HG, 2, None, 1)       # the world: h opens the help
+    assert menu_step(1, HG, 2, {"help"}, 1) == (0, 0, 2, None, 1)       # ...h closes it to the world
+    assert menu_step(1, HG, 2, {"esc"}, 1) == (0, 0, 2, None, 1)        # ...and so does esc
+    assert menu_step(1, HG, 2, {"enter", "up", "dn"}, 1) == (1, HG, 2, None, 1)
+    assert menu_step(1, 0, 2, {"help"}, 1) == (1, HM, 2, None, 1)       # the main menu: h opens it
+    assert menu_step(1, 0, 2, {"dn"}, 1) == (1, MH, 2, None, 1)         # ...down highlights HELP
+    assert menu_step(1, 0, 2, {"up"}, 0) == (1, 0, 2, None, 0)          # ...up is clamped without a game (P10)
+    assert menu_step(1, MH, 2, {"enter"}, 1) == (1, HM, 2, None, 1)     # HELP: enter opens it
+    assert menu_step(1, MH, 2, {"help"}, 1) == (1, HM, 2, None, 1)      # ...and so does h
+    assert menu_step(1, MH, 2, {"up"}, 1) == (1, 0, 2, None, 1)         # ...up to NEW GAME
+    assert menu_step(1, MH, 2, {"dn"}, 1) == (1, MAIN_EXIT_SCR, 2, None, 1)   # ...down to EXIT (P9; was clamped)
+    assert menu_step(1, MH, 2, {"esc"}, 1) == (0, 0, 2, None, 1)        # ...esc resumes the world
+    assert menu_step(1, MH, 2, {"esc"}, 0) == (1, MH, 2, None, 0)       # ...a game in progress only (P10)
+    assert menu_step(1, HM, 2, {"esc"}, 1) == (1, MH, 2, None, 1)       # the menu's help: back to HELP
+    assert menu_step(1, HM, 2, {"help"}, 1) == (1, MH, 2, None, 1)
+    assert menu_step(1, HM, 2, set(), 1) == (1, HM, 2, None, 1)
+    assert menu_step(1, 1, 1, {"help"}, 1) == (1, 1, 1, None, 1)        # the skill screen ignores h
+    assert menu_step(1, LD, 1, {"help"}, 1) == (1, LD, 1, None, 1)      # ...and so does LEVEL COMPLETE (h alone)
+    assert menu_step(0, 0, 2, {"esc", "help"}, 1) == (1, MR, 2, None, 1)  # esc and enter win over h
+    assert menu_step(1, 0, 2, {"enter", "help"}, 1) == (1, 1, 2, None, 1)
+    assert menu_step(1, 0, 2, {"help", "dn"}, 1) == (1, HM, 2, None, 1)  # ...and h over up / down
 
 
 def test_the_exit_rules():
     """P9 (the owner's play-test, 2026-10-10): the main menu's third item. Down from HELP highlights EXIT, up goes back
-    to HELP, down on EXIT is clamped (as up on NEW GAME is); on EXIT esc resumes the world, h opens the help (which
-    closes, as from the other items, to HELP highlighted), and ENTER HALTS: MENU_HALTED, which nothing leaves -- and
-    the event order is the menu's (esc > enter > help > up > down)"""
+    to HELP, down on EXIT is clamped (as up on NEW GAME is without a game); on EXIT esc resumes a game in progress, h
+    opens the help (which closes, as from the other items, to HELP highlighted), and ENTER HALTS: MENU_HALTED, which
+    nothing leaves -- and the event order is the menu's (esc > enter > help > up > down)"""
     from doomfj.menu import (HELP_MENU_SCR as HM, MAIN_EXIT_SCR as MX, MAIN_HELP_SCR as MH, MENU_HALTED, menu_step)
     assert MX == 6 and MENU_HALTED not in range(16), "EXIT is a nibble value of menu_scr; the halt is none"
-    assert menu_step(1, MH, 2, {"dn"}) == (1, MX, 2, None)        # HELP: down to EXIT
-    assert menu_step(1, MX, 2, {"up"}) == (1, MH, 2, None)        # EXIT: up to HELP
-    assert menu_step(1, MX, 2, {"dn"}) == (1, MX, 2, None)        # ...down is clamped
-    assert menu_step(1, MX, 2, set()) == (1, MX, 2, None)
-    assert menu_step(1, MX, 2, {"esc"}) == (0, 0, 2, None)        # ...esc resumes the world
-    assert menu_step(1, MX, 2, {"help"}) == (1, HM, 2, None)      # ...h opens the help
-    assert menu_step(1, HM, 2, {"esc"}) == (1, MH, 2, None)       # ...which closes to HELP
-    assert menu_step(1, MX, 1, {"enter"}) == (1, MENU_HALTED, 1, None)   # ...enter HALTS
-    for ev in ({"esc"}, {"enter"}, {"help"}, {"up"}, {"dn"}, set()):   # ...and nothing leaves the halt
-        assert menu_step(1, MENU_HALTED, 1, ev) == (1, MENU_HALTED, 1, None), ev
-    assert menu_step(1, MX, 2, {"esc", "enter"}) == (0, 0, 2, None)    # esc wins over enter
-    assert menu_step(1, MX, 2, {"enter", "help", "up"}) == (1, MENU_HALTED, 2, None)
-    assert menu_step(1, MX, 2, {"help", "up"}) == (1, HM, 2, None)
-    # the walk from NEW GAME: down, down, enter -- and down on NEW GAME never skips HELP
-    st = (1, 0, 2, None)
+    assert menu_step(1, MH, 2, {"dn"}, 1) == (1, MX, 2, None, 1)        # HELP: down to EXIT
+    assert menu_step(1, MX, 2, {"up"}, 1) == (1, MH, 2, None, 1)        # EXIT: up to HELP
+    assert menu_step(1, MX, 2, {"dn"}, 1) == (1, MX, 2, None, 1)        # ...down is clamped
+    assert menu_step(1, MX, 2, set(), 1) == (1, MX, 2, None, 1)
+    assert menu_step(1, MX, 2, {"esc"}, 1) == (0, 0, 2, None, 1)        # ...esc resumes the world
+    assert menu_step(1, MX, 2, {"esc"}, 0) == (1, MX, 2, None, 0)       # ...a game in progress only (P10)
+    assert menu_step(1, MX, 2, {"help"}, 1) == (1, HM, 2, None, 1)      # ...h opens the help
+    assert menu_step(1, HM, 2, {"esc"}, 1) == (1, MH, 2, None, 1)       # ...which closes to HELP
+    assert menu_step(1, MX, 1, {"enter"}, 1) == (1, MENU_HALTED, 1, None, 1)   # ...enter HALTS
+    for live in (0, 1):
+        for ev in ({"esc"}, {"enter"}, {"help"}, {"up"}, {"dn"}, {"any"}, set()):   # ...and nothing leaves the halt
+            assert menu_step(1, MENU_HALTED, 1, ev, live) == (1, MENU_HALTED, 1, None, live), ev
+    assert menu_step(1, MX, 2, {"esc", "enter"}, 1) == (0, 0, 2, None, 1)    # esc wins over enter
+    assert menu_step(1, MX, 2, {"esc", "enter"}, 0) == (1, MENU_HALTED, 2, None, 0)   # ...unless it is no rule (P10)
+    assert menu_step(1, MX, 2, {"enter", "help", "up"}, 1) == (1, MENU_HALTED, 2, None, 1)
+    assert menu_step(1, MX, 2, {"help", "up"}, 1) == (1, HM, 2, None, 1)
+    # the walk from NEW GAME at boot: down, down, enter -- and down on NEW GAME never skips HELP
+    st = (1, 0, 2, None, 0)
     for ev in ({"dn"}, {"dn"}, {"enter"}):
-        st = menu_step(*st[:3], ev)
-    assert st == (1, MENU_HALTED, 2, None)
-    assert menu_step(1, 0, 2, {"dn"})[1] == MH and menu_step(1, 0, 2, {"enter"})[1] == 1   # NEW GAME unchanged
+        st = menu_step(*st[:3], ev, st[4])
+    assert st == (1, MENU_HALTED, 2, None, 0)
+    assert menu_step(1, 0, 2, {"dn"}, 0)[1] == MH and menu_step(1, 0, 2, {"enter"}, 0)[1] == 1   # NEW GAME unchanged
+
+
+def test_the_resume_rules():
+    """P10 (the owner's play-test, 2026-10-12: "Add menu resume when possible"): RESUME is the main menu's first item
+    while a game is in progress -- the world opens the menu on it, esc or enter on it resume, down goes to NEW GAME, up
+    is clamped, h opens the help; up from NEW GAME reaches it only with a game"""
+    from doomfj.menu import (HELP_MENU_SCR as HM, MAIN_HELP_SCR as MH, MAIN_RESUME_SCR as MR, menu_step)
+    assert MR == 7, "RESUME highlighted is menu_scr 7: a nibble value no other screen uses"
+    assert menu_step(0, 0, 2, {"esc"}, 1) == (1, MR, 2, None, 1)        # the world opens the menu on RESUME
+    assert menu_step(0, 0, 2, {"esc"}, 0) == (1, 0, 2, None, 0)         # (the rule's other arm: on NEW GAME)
+    assert menu_step(1, MR, 2, {"esc"}, 1) == (0, 0, 2, None, 1)        # esc on RESUME resumes...
+    assert menu_step(1, MR, 2, {"enter"}, 1) == (0, 0, 2, None, 1)      # ...and so does enter
+    assert menu_step(1, MR, 2, {"help"}, 1) == (1, HM, 2, None, 1)
+    assert menu_step(1, MR, 2, {"dn"}, 1) == (1, 0, 2, None, 1)         # down to NEW GAME
+    assert menu_step(1, MR, 2, {"up"}, 1) == (1, MR, 2, None, 1)        # up is clamped
+    assert menu_step(1, 0, 2, {"up"}, 1) == (1, MR, 2, None, 1)         # NEW GAME: up to RESUME with a game
+    assert menu_step(1, 0, 2, {"up"}, 0) == (1, 0, 2, None, 0)          # ...clamped without one
+    assert menu_step(1, 0, 2, {"up", "dn"}, 0) == (1, MH, 2, None, 0)   # ...and then the next event acts
+    # the round from boot (no game, MEDIUM highlighted): esc is no rule, enter, enter -- NEW GAME at MEDIUM; then
+    # esc in the world opens the menu on RESUME, and enter resumes
+    st = (1, 0, 1, None, 0)
+    for ev in ({"esc"}, {"enter"}, {"enter"}):
+        st = menu_step(*st[:3], ev, st[4])
+    assert st == (0, 0, 1, 1, 1)
+    st = menu_step(*st[:3], {"esc"}, st[4])
+    assert st == (1, MR, 1, None, 1)
+    assert menu_step(*st[:3], {"enter"}, st[4]) == (0, 0, 1, None, 1)
+
+
+def test_level_complete_holds_its_first_frames():
+    """P10: the exit opens LEVEL COMPLETE at LEVEL_DONE_ENTER, and for eight frames every key is ignored -- the codes
+    count down to LEVEL_DONE_HOLD_LAST and then to LEVEL_DONE_SCR, which takes any key. Each of them is the LEVEL
+    COMPLETE picture (menu_screen_pixels), and they are nibble values no other screen uses"""
+    from doomfj.menu import (ANY_KEY_EVENT, LEVEL_DONE_ENTER, LEVEL_DONE_HOLD_LAST, LEVEL_DONE_SCR,
+                             LEVEL_DONE_SCREENS, MAIN_RESUME_SCR, menu_step)
+    from doomfj.wall_renderer import menu_screen_pixels
+    assert (LEVEL_DONE_ENTER, LEVEL_DONE_HOLD_LAST) == (15, 8) and LEVEL_DONE_ENTER < 16
+    assert MAIN_RESUME_SCR < LEVEL_DONE_HOLD_LAST, "the hold's codes are no other screen's"
+    st, seen = (1, LEVEL_DONE_ENTER, 2, None, 1), []
+    for _ in range(LEVEL_DONE_ENTER - LEVEL_DONE_HOLD_LAST + 1):
+        st = menu_step(*st[:3], {"esc", "enter", "up", ANY_KEY_EVENT}, st[4])     # every key, every frame: held off
+        seen.append(st[1])
+    assert seen == list(range(LEVEL_DONE_ENTER - 1, LEVEL_DONE_HOLD_LAST - 1, -1)) + [LEVEL_DONE_SCR], seen
+    assert st == (1, LEVEL_DONE_SCR, 2, None, 1)
+    assert menu_step(*st[:3], {ANY_KEY_EVENT}, st[4]) == (1, 0, 2, None, 0)       # then any key leaves
+    pics = {tuple(menu_screen_pixels(CFG, COLOURS, s, 2, 1, stats=(4, [0] * 13))) for s in LEVEL_DONE_SCREENS}
+    assert len(pics) == 1 and set(LEVEL_DONE_SCREENS) == {LEVEL_DONE_SCR, *range(8, 16)}
+
+
+def test_level_complete_leaves_on_any_key_for_the_boot_menu():
+    """P10 (the owner, 2026-10-12: "return to main menu (as start of the game) with any key pressed"): LEVEL COMPLETE
+    acts on "any" alone -- the device sends it with every key's down edge (keyboard.frame_keys) -- and leaves for the
+    main menu with no game in progress: no RESUME, esc no rule, as at boot"""
+    from doomfj.menu import ANY_KEY_EVENT, LEVEL_DONE_SCR as LD, menu_step
+    assert ANY_KEY_EVENT == "any"
+    assert menu_step(1, LD, 2, {ANY_KEY_EVENT}, 1) == (1, 0, 2, None, 0)
+    for keys in ({"esc"}, {"enter"}, {"up"}, {"dn"}, {"help"}, set()):
+        assert menu_step(1, LD, 2, keys | {ANY_KEY_EVENT}, 1) == (1, 0, 2, None, 0), keys
+        assert menu_step(1, LD, 2, keys, 1) == (1, LD, 2, None, 1), keys     # (without "any": nothing)
+    assert menu_step(1, 0, 2, {"esc", ANY_KEY_EVENT}, 0) == (1, 0, 2, None, 0)   # then the boot menu's rules
+    assert menu_step(1, 0, 2, {"any"}, 1) == (1, 0, 2, None, 1)         # elsewhere "any" is no rule
 
 
 def test_the_menu_screens_are_one_mapping():
     """`wall_renderer.menu_screen_pixels` -- the oracle's picture for every menu state -- gives each
-    state the picture `_menu_lines` bakes for it: the two main-menu highlights, the three skill
+    state the picture `_menu_lines` bakes for it: the main-menu highlights, the three skill
     highlights, LEVEL COMPLETE and the help, the two help ids ONE picture; P9: the main menu's three items (NEW GAME,
-    HELP, EXIT) -- eight distinct pictures -- and the halt NONE"""
+    HELP, EXIT); P10: each twice -- without a game, and with RESUME over NEW GAME -- and RESUME highlighted, which
+    exists only with a game: twelve distinct pictures -- and the halt NONE"""
     from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_SCR, MAIN_EXIT_SCR, MAIN_HELP_SCR,
-                             MENU_HALTED, help_pixels)
-    from doomfj.wall_renderer import DEFAULT_MENU, MENU_EXIT_ITEM, MENU_HELP_ITEM, menu_screen_pixels
+                             MAIN_RESUME_SCR, MENU_HALTED, help_pixels)
+    from doomfj.wall_renderer import (DEFAULT_MENU, DEFAULT_MENU_SELECTED, MENU_EXIT_ITEM, MENU_HELP_ITEM,
+                                      MENU_RESUME_ITEM, main_menu_entries, menu_screen_pixels)
     cfg = CFG
     assert DEFAULT_MENU == ["DOOM ON FLIPJUMP", "", "NEW GAME", "HELP", "EXIT"]          # P9: EXIT
-    states = [(0, 2), (MAIN_HELP_SCR, 2), (MAIN_EXIT_SCR, 2), (1, 0), (1, 1), (1, 2), (LEVEL_DONE_SCR, 2),
-              (HELP_MENU_SCR, 2), (HELP_GAME_SCR, 2)]
+    live, new_game = main_menu_entries(DEFAULT_MENU, DEFAULT_MENU_SELECTED, 1)
+    assert live == ["DOOM ON FLIPJUMP", "", "RESUME", "NEW GAME", "HELP", "EXIT"] and new_game == 3   # P10
+    states = [(0, 2, 0), (MAIN_HELP_SCR, 2, 0), (MAIN_EXIT_SCR, 2, 0),
+              (0, 2, 1), (MAIN_HELP_SCR, 2, 1), (MAIN_EXIT_SCR, 2, 1), (MAIN_RESUME_SCR, 2, 1),
+              (1, 0, 0), (1, 1, 0), (1, 2, 0), (LEVEL_DONE_SCR, 2, 0), (HELP_MENU_SCR, 2, 0), (HELP_GAME_SCR, 2, 0)]
     pics = {s: tuple(menu_screen_pixels(cfg, COLOURS, *s)) for s in states}
-    assert pics[(HELP_MENU_SCR, 2)] == pics[(HELP_GAME_SCR, 2)] == tuple(help_pixels(W, H, COLOURS))
-    assert len(set(pics.values())) == 8
-    assert pics[(MAIN_HELP_SCR, 2)] == tuple(pixels(W, H, DEFAULT_MENU,
-                                                    DEFAULT_MENU.index(MENU_HELP_ITEM), COLOURS))
-    assert pics[(MAIN_EXIT_SCR, 2)] == tuple(pixels(W, H, DEFAULT_MENU,
-                                                    DEFAULT_MENU.index(MENU_EXIT_ITEM), COLOURS))
+    assert pics[(HELP_MENU_SCR, 2, 0)] == pics[(HELP_GAME_SCR, 2, 0)] == tuple(help_pixels(W, H, COLOURS))
+    assert len(set(pics.values())) == 12
+    assert pics[(MAIN_HELP_SCR, 2, 0)] == tuple(pixels(W, H, DEFAULT_MENU,
+                                                       DEFAULT_MENU.index(MENU_HELP_ITEM), COLOURS))
+    assert pics[(MAIN_EXIT_SCR, 2, 0)] == tuple(pixels(W, H, DEFAULT_MENU,
+                                                       DEFAULT_MENU.index(MENU_EXIT_ITEM), COLOURS))
+    assert pics[(MAIN_RESUME_SCR, 2, 1)] == tuple(pixels(W, H, live, live.index(MENU_RESUME_ITEM), COLOURS))
+    assert pics[(0, 2, 1)] == tuple(pixels(W, H, live, new_game, COLOURS))
     with pytest.raises(ValueError, match="HALTED"):
         menu_screen_pixels(cfg, COLOURS, MENU_HALTED, 2)
+    with pytest.raises(ValueError, match="RESUME"):
+        menu_screen_pixels(cfg, COLOURS, MAIN_RESUME_SCR, 2, 0)
+
+
+# -- P10: LEVEL COMPLETE's stats (menu.level_done_*, menu.stats_digits) ----------------------------------------------
+def test_the_stats_digits():
+    """the slots: kills / total, items / total (a leading zero blank), the secrets, then mm:ss -- minutes without a
+    leading zero, seconds with one, capped at 99:59"""
+    from doomfj.menu import DIGIT_BLANK as B, TIME_CAP, stats_digits
+    assert stats_digits(7, 46, 12, 48, 2, 83) == [B, 7, 4, 6, 1, 2, 4, 8, 2, B, 1, 2, 3]
+    assert stats_digits(0, 17, 0, 53, 0, 0) == [B, 0, 1, 7, B, 0, 5, 3, 0, B, 0, 0, 0]
+    assert stats_digits(46, 46, 48, 48, 4, 59 * 60 + 9) == [4, 6, 4, 6, 4, 8, 4, 8, 4, 5, 9, 0, 9]
+    assert TIME_CAP == 99 * 60 + 59
+    assert stats_digits(1, 1, 1, 1, 1, TIME_CAP)[-4:] == stats_digits(1, 1, 1, 1, 1, 10 ** 6)[-4:] == [9, 9, 5, 9]
+    with pytest.raises(AssertionError):
+        stats_digits(100, 1, 1, 1, 1, 0)
+
+
+def _level_done_stream(nsecret, digits):
+    """the program's LEVEL COMPLETE: the baked frame without its END, each slot's records, then END"""
+    from doomfj.menu import level_done_digit_records, level_done_stream
+    data = bytearray(level_done_stream(W, H, COLOURS, nsecret)[:-1])
+    for slot, d in enumerate(digits):
+        data += level_done_digit_records(W, H, COLOURS, nsecret, slot, d)
+    return bytes(data) + bytes([0xFF])
+
+
+@pytest.mark.parametrize("stats", [(7, 46, 12, 48, 2, 83), (0, 17, 0, 53, 0, 0), (46, 46, 48, 48, 4, 3599),
+                                   (19, 29, 8, 49, 3, 10 ** 6), (88, 99, 90, 91, 9, 6001)])
+def test_the_level_done_stream_paints_exactly_the_oracle_picture(stats):
+    """THE LEVEL COMPLETE test: the baked frame plus every slot's digit records, decoded by the real device, is the
+    oracle's picture for those stats"""
+    from doomfj.menu import level_done_pixels, stats_digits
+    digits = stats_digits(*stats)
+    screen = _present(_level_done_stream(4, digits))
+    assert screen.frame_count == 1
+    assert screen.pixel_indices == level_done_pixels(W, H, COLOURS, 4, digits)
+
+
+def test_the_level_done_check_catches_a_wrong_digit():
+    """R9: the records of another digit in one slot, or a frame drawn without the slots' records, part from the
+    oracle's picture"""
+    from doomfj.menu import DIGIT_BLANK, level_done_pixels, stats_digits
+    digits = stats_digits(7, 46, 12, 48, 2, 83)
+    want = level_done_pixels(W, H, COLOURS, 4, digits)
+    for slot in range(len(digits)):
+        wrong = list(digits)
+        wrong[slot] = 8 if digits[slot] != 8 else 3
+        assert _present(_level_done_stream(4, wrong)).pixel_indices != want, slot
+    assert _present(_level_done_stream(4, [DIGIT_BLANK] * len(digits))).pixel_indices != want
+
+
+def test_the_level_done_layout():
+    """the title, four labelled rows and the prompt in the menu's font and lines; the labels share a left edge and
+    the values another, inside the screen; the slots do not overlap any fixed glyph; the prompt is highlighted"""
+    from doomfj.menu import (GLYPH_H, GLYPH_W, LEVEL_DONE_PROMPT, LEVEL_DONE_TITLE, level_done_layout,
+                             level_done_rows)
+    lines, selected, rows, slots = level_done_layout(W, H, 4)
+    assert lines[0] == LEVEL_DONE_TITLE and lines[selected] == LEVEL_DONE_PROMPT == "PRESS ANY KEY"
+    assert [label for _x, _y, label, _g in rows] == ["KILLS", "ITEMS", "SECRETS", "TIME"]
+    assert len({x for x, _y, _l, _g in rows}) == 1 and len(slots) == 13
+    assert level_done_rows(4)[2] == ("SECRETS", "_D / _4")
+    ys = [y for _x, y, _l, _g in rows]
+    assert all(b - a == GLYPH_H + 2 for a, b in zip(ys, ys[1:]))
+    fixed = {(x, y) for _x, y, _l, glyphs in rows for x, _ch in glyphs}
+    for x, y in slots:
+        assert 0 <= x and x + GLYPH_W <= W and 0 <= y and y + GLYPH_H <= H
+        assert (x, y) not in fixed
+    with pytest.raises(AssertionError, match="ONE digit slot"):
+        level_done_rows(10)
 
 
 def test_the_main_menu_must_have_a_help_item():

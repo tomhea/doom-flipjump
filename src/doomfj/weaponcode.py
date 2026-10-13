@@ -59,9 +59,9 @@ from doomfj.keyboard import now_cell                                            
 from doomfj.wireformat import KEY_FIRE_MASK
 from doomfj.world import AIM_COLUMNS
 
-# the E1M1 weapons (WP_*), in the order of `wp_own`'s nibbles; key 4 names the chaingun, which E1M1 never gives;
-# P9: the rocket launcher last (nibble 4), key 5
-WEAPONS = (gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW, gd.WP_MISSILE)
+# the E1M1 weapons (WP_*), in the order of `wp_own`'s nibbles; P9: the rocket launcher (nibble 4), key 5; P10 (the
+# owner, 2026-10-12): the CHAINGUN last (nibble 5), key 4 -- the cave's multiplayer chaingun spawns in single player
+WEAPONS = (gd.WP_FIST, gd.WP_PISTOL, gd.WP_SHOTGUN, gd.WP_CHAINSAW, gd.WP_MISSILE, gd.WP_CHAINGUN)
 OWN = {w: i for i, w in enumerate(WEAPONS)}
 NOCHANGE = gd.WP_NOCHANGE                       # 10
 TOP, BOTTOM = gd.WEAPONTOP >> 16, gd.WEAPONBOTTOM >> 16
@@ -71,12 +71,19 @@ AMMO_CELL = {gd.AM_CLIP: "am_clip", gd.AM_SHELL: "am_shell", gd.AM_MISL: "am_mis
 DRAWS = {"pistol_acc": 1, "gunshot": 3, "punch": 3, "saw": 3}
 
 
+def _code_flash_states() -> List[str]:
+    """P10: the flash states only CODE sets (gamedata.CODE_ENTRY_STATES' psprite entries -- A_FireCGun's second burst
+    sets flashstate + 1, S_CHAINFLASH2, which no weaponinfo field names), for the weapons in WEAPONS"""
+    from doomfj.combat import CGUN_FLASH
+    return [f for f in CGUN_FLASH.values() if gd.WP_CHAINGUN in WEAPONS]
+
+
 def weapon_states() -> List[str]:
     """the psprite states E1M1's weapons can reach, S_NULL first: the LOCAL index `wp_st` / `fl_st` hold"""
     names = set()
     todo = [s for w in WEAPONS for s in (gd.WEAPONINFO[w].upstate, gd.WEAPONINFO[w].downstate,
                                          gd.WEAPONINFO[w].readystate, gd.WEAPONINFO[w].atkstate,
-                                         gd.WEAPONINFO[w].flashstate)]
+                                         gd.WEAPONINFO[w].flashstate)] + _code_flash_states()
     while todo:
         s = todo.pop()
         if s in names or s == gd.S_NULL:
@@ -101,7 +108,7 @@ def psprite_states() -> List[str]:
 
 def flash_states() -> List[str]:
     """the states the FLASH psprite can hold: the closure of the weapons' flash states (and S_NULL)"""
-    out, todo = {gd.S_NULL}, [gd.WEAPONINFO[w].flashstate for w in WEAPONS]
+    out, todo = {gd.S_NULL}, [gd.WEAPONINFO[w].flashstate for w in WEAPONS] + _code_flash_states()
     while todo:
         s = todo.pop()
         if s not in out:
@@ -238,8 +245,12 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
             "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_SHOTGUN],
             "hex.if_flags wp_rdy, 1<<%d, wk_sset, wk_end" % gd.WP_SHOTGUN,
             "wk_sset:", "hex.set 1, wp_pend, %d" % gd.WP_SHOTGUN, ";wk_end",
-            # key 4 names the chaingun: never owned, so it changes nothing -- but it is the LOWEST held key, so 5 waits
-            "wk_4:", f"hex.if1 1, {now_cell('w4')}, wk_end",
+            # P10: key 4, the chaingun (owned or not, the LOWEST held key: 5 waits)
+            "wk_4:", f"hex.if0 1, {now_cell('w4')}, wk_5",
+            "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_CHAINGUN],
+            "hex.if_flags wp_rdy, 1<<%d, wk_cset, wk_end" % gd.WP_CHAINGUN,
+            "wk_cset:", "hex.set 1, wp_pend, %d" % gd.WP_CHAINGUN, ";wk_end",
+            "wk_5:",
             # P9: key 5, the launcher
             f"hex.if0 1, {now_cell('w5')}, wk_end",
             "hex.if0 1, wp_own + %d*dw, wk_end" % OWN[gd.WP_MISSILE],
@@ -259,7 +270,7 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
         st = gd.STATES[s]
         out += [f"{wen(s)}:", f"hex.set 2, wp_st, {idx[s]}", f"hex.set 1, wp_tics, {st.tics}",
                 f"hex.set {FRAME_NIBBLES}, wp_frm, {frames.index(psprite_lump(s))}"]
-        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise, hurt, loot)
+        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise, hurt, loot, state=s)
         out += [f";{wen(st.next)}" if st.tics == 0 else ";wp_flash"]
     # -- 3. P_MovePsprites, the flash
     out += ["wp_flash:",
@@ -322,7 +333,8 @@ def bar_lines() -> List[str]:
     chainsaw) and the owned weapons' ARMS digits (`arms_sources`) -> hud_v. Falls through."""
     from doomfj.hudcode import slot_index
     out = _by_ready("wpb", {gd.WP_FIST: "wpb_none", gd.WP_PISTOL: "wpb_clip", gd.WP_SHOTGUN: "wpb_shell",
-                            gd.WP_CHAINSAW: "wpb_none", gd.WP_MISSILE: "wpb_misl"})
+                            gd.WP_CHAINSAW: "wpb_none", gd.WP_MISSILE: "wpb_misl",
+                            gd.WP_CHAINGUN: "wpb_clip"})                     # P10: the chaingun's bullets
     out += ["wpb_misl:", "ammobcd.lookup wp_bcd, am_misl", ";wpb_set",          # P9: the rockets
             "wpb_clip:", "ammobcd.lookup wp_bcd, am_clip", ";wpb_set",
             "wpb_shell:", "ammobcd.lookup wp_bcd, am_shell", ";wpb_set",
@@ -351,15 +363,19 @@ def _dispatch2(prefix: str, cell: str, targets: Dict[int, str]) -> List[str]:
 
 def _check_ammo(p: str, wen, ok: str) -> List[str]:
     """P_CheckAmmo: enough for one shot -> `ok`; else the next weapon by DOOM's preference and the ready weapon's
-    downstate (a tail jump). E1M1 owns no plasma, chaingun or BFG, so the preference is: the shotgun with shells, the
-    pistol with bullets, the chainsaw, (P9) the launcher with rockets, the fist."""
+    downstate (a tail jump). E1M1 owns no plasma or BFG, so the preference is: (P10) the chaingun with bullets, the
+    shotgun with shells, the pistol with bullets, the chainsaw, (P9) the launcher with rockets, the fist."""
     info = gd.WEAPONINFO
     out = _by_ready(f"{p}ca", {gd.WP_FIST: ok, gd.WP_PISTOL: f"{p}cp", gd.WP_SHOTGUN: f"{p}cs", gd.WP_CHAINSAW: ok,
-                               gd.WP_MISSILE: f"{p}cm"})
+                               gd.WP_MISSILE: f"{p}cm", gd.WP_CHAINGUN: f"{p}cp"})   # P10: the chaingun's bullets
     out += [f"{p}cm:", f"hex.if0 3, am_misl, {p}cx", f";{ok}",                  # P9: one rocket
             f"{p}cp:", f"hex.if0 3, am_clip, {p}cx", f";{ok}",
             f"{p}cs:", f"hex.if0 3, am_shell, {p}cx", f";{ok}",
             f"{p}cx:",
+            # P10: DOOM's preference puts the chaingun (with bullets) before the shotgun
+            f"hex.if0 1, wp_own + {OWN[gd.WP_CHAINGUN]}*dw, {p}cxs", f"hex.if0 3, am_clip, {p}cxs",
+            f"hex.set 1, wp_pend, {gd.WP_CHAINGUN}", f";{p}cdn",
+            f"{p}cxs:",
             f"hex.if0 1, wp_own + {OWN[gd.WP_SHOTGUN]}*dw, {p}cx1", f"hex.if0 3, am_shell, {p}cx1",
             f"hex.set 1, wp_pend, {gd.WP_SHOTGUN}", f";{p}cdn",
             f"{p}cx1:", f"hex.if0 3, am_clip, {p}cx2", f"hex.set 1, wp_pend, {gd.WP_PISTOL}", f";{p}cdn",
@@ -388,7 +404,7 @@ def _hp_le0(p: str, yes: str) -> List[str]:
 
 
 def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: bool = False,
-            hurt: bool = False, loot: bool = False) -> List[str]:
+            hurt: bool = False, loot: bool = False, state: Optional[str] = None) -> List[str]:
     """one state's action, inline; it ends by falling through (no psprite set) or by a tail jump. `shoot`: the fire
     actions resolve their shots (`_shot_*`) instead of only advancing the stream. `hurt` (M7 P5): the health and
     death reads (weapon_lines)."""
@@ -455,6 +471,19 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: b
         else:
             out += [f"hex.add_constant 2, rng_pl, {(7 * DRAWS['gunshot']) & 0xFF}"]
         return out
+    if action == "A_FireCGun":                                           # P10: the chaingun's burst frame
+        # no bullets: nothing (the frame still runs its tics); else one round, THIS burst's flash frame (combat's
+        # CGUN_FLASH: flashstate + (state - S_CHAIN1)), and the pistol's P_GunShot -- accurate while wp_rf is 0
+        from doomfj.combat import CGUN_FLASH
+        out = [f"hex.if0 3, am_clip, {p}cg0",
+               "hex.sub_constant 3, am_clip, 1",
+               f"stl.fcall {fen(CGUN_FLASH[state])}, fl_ret"]
+        if shoot:
+            out += _shot_pistol(p)
+        else:
+            out += [f"hex.if0 2, wp_rf, {p}acc", f"hex.add_constant 2, rng_pl, {DRAWS['gunshot']}", f";{p}drw",
+                    f"{p}acc:", f"hex.add_constant 2, rng_pl, {DRAWS['pistol_acc']}", f"{p}drw:"]
+        return out + [f"{p}cg0:"]
     if action == "A_GunFlash":                                           # P9: the launcher's flash
         return [f"stl.fcall {fen(info[gd.WP_MISSILE].flashstate)}, fl_ret"]
     if action == "A_FireMissile":                                        # P9: one rocket; the loot player's spawn

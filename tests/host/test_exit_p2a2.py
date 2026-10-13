@@ -53,10 +53,12 @@ def test_the_model_exits_exactly_on_a_press_in_the_box(world):
 
 
 def test_the_level_complete_screen_leads_to_the_main_menu():
-    for ev in ({"enter"}, {"esc"}, {"esc", "enter"}):
-        assert menu_step(1, LEVEL_DONE_SCR, 2, ev) == (1, 0, 2, None)
-    for ev in (set(), {"up"}, {"dn"}):
-        assert menu_step(1, LEVEL_DONE_SCR, 1, ev) == (1, LEVEL_DONE_SCR, 1, None)
+    """P10: on ANY key's down edge ("any", which the device sends with every key), for the main menu as at boot --
+    no game in progress"""
+    for ev in ({"enter"}, {"esc"}, {"esc", "enter"}, {"up"}, {"help"}, set()):
+        assert menu_step(1, LEVEL_DONE_SCR, 2, ev | {"any"}, 1) == (1, 0, 2, None, 0)
+    for ev in (set(), {"up"}, {"dn"}, {"enter"}):
+        assert menu_step(1, LEVEL_DONE_SCR, 1, ev, 1) == (1, LEVEL_DONE_SCR, 1, None, 1)
 
 
 def test_new_game_resets_the_exits_cells():

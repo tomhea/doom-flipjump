@@ -2,8 +2,8 @@
 2.2): per column 72..88 the nearest shootable living monster whose +-r_eff box covers the column while the column is
 still open when the walk reaches the monster's leaf.
 
-  (a) on a LIGHT slice of the combat set v6 (M7 P6+P7: re-pointed from v5, whose replays the owner's tempo / turn /
-      fire changes moved; 60 frames: three runs' first 20, replayed with the set's own sight
+  (a) on a LIGHT slice of the combat set v9 (M7 P10: re-pointed from v6, whose replay the faster turn moved -- 32
+      frames of its slice kept a target; M7 P6+P7 had re-pointed it from v5 for the tempo / turn / fire; 60 frames: three runs' first 20, replayed with the set's own sight
       rule -- the picture renders every frame anyway) the window agrees with `combat.aim_geometric` (monsters only:
       the barrels are P6's) everywhere except a FROZEN list of (run, frame, column) residuals, and every residual is
       the wall-edge class the doc names: the centre-sight shortcut of the geometric aim, in either direction;
@@ -26,23 +26,29 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "scratchpad" / "gp"), str(ROOT / "scratchpad" / "12m")]
-SET_V6 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v6.json"
+SET_V9 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v9.json"
 ART = ROOT / "assets/freedoom1.wad"
-pytestmark = pytest.mark.skipif(not ART.exists() or not SET_V6.exists(),
-                                reason="needs assets/freedoom1.wad and the v6 scenario set")
+pytestmark = pytest.mark.skipif(not ART.exists() or not SET_V9.exists(),
+                                reason="needs assets/freedoom1.wad and the v9 scenario set")
 
 # the LIGHT slice: three runs' first 20 frames -- 60 rendered frames, ~48 with a geometric target at column 80
-SLICE = (("R0-west-hall", 20), ("R2-spectre-corridor", 20), ("R0-imp-court", 20))
+# M7 P10: on v9, two runs dense in targets (column 80 in the first 25 frames: R3-mid 21, R0-west-hall 19) and the
+# spectre corridor's first 10, where a wall edge decides the window (the no-occlusion control moves frames 1-6 there,
+# and nowhere in the dense runs' first 20 frames)
+SLICE = (("R3-mid", 25), ("R0-west-hall", 25), ("R2-spectre-corridor", 10))
 COL = 80
 # THE FROZEN RESIDUALS (run, frame, column) of the slice, measured 2026-10-04 with r_eff in both aims. Every one is
 # "edge-closed": the geometric aim's target, whose centre has 2D sight, has a box that reaches behind a solid wall
 # edge -- the column was already wall-drawn when the walk reached the monster's leaf. Compared as a LIST (doc 5, T1):
 # any movement is a visible diff.
 FROZEN_RESIDUALS = {
-    # M7 P6+P7: re-measured on v6's slice (combat_scenarios_v6.json, keys 83d49015078b6abb) -- every one "edge-closed"
-    ("R2-spectre-corridor", 6): (88,),
-    ("R2-spectre-corridor", 7): (86, 87, 88),
-    ("R0-imp-court", 0): (78, 79, 80),
+    # M7 P10: re-measured on v9's slice (combat_scenarios_v9.json, keys 2fdfd6383a599b8e) -- every one "edge-closed";
+    # 45 frames with a target at column 80 (window and geometric agree on all 60), 1017/1020 columns agree; the
+    # controls move 25 (radius + 1) and 6 (no occlusion) frames. v6's (P6+P7) were spectre 6 (88,), 7 (86, 87, 88)
+    # and imp-court 0 (78, 79, 80).
+    ("R2-spectre-corridor", 3): (87,),
+    ("R2-spectre-corridor", 4): (81,),
+    ("R2-spectre-corridor", 5): (75,),
 }
 
 
@@ -119,7 +125,7 @@ def _geo(w):
 @pytest.fixture(scope="module")
 def slice_frames():
     import scenarios_v2 as S
-    doc = json.loads(SET_V6.read_text(encoding="ascii"))
+    doc = json.loads(SET_V9.read_text(encoding="ascii"))
     saved = (S.SIGHT_RULE, S.MONSTER_TICS)              # M7 P6+P7: a set names its tempo too
     S.use_sight_rule(doc)
     muts = {k: mutant(v) for k, v in MUTANTS.items()}
@@ -130,7 +136,7 @@ def slice_frames():
             run = next(r for r in doc["runs"] if r["name"] == name)
             w = S.start_world(run["setup"])
             hook = w.seen_hook
-            assert hook is not None, "v6 is a seen-rule set: the picture renders every frame"
+            assert hook is not None, "v9 is a seen-rule set: the picture renders every frame"
             phase = types.SimpleNamespace(world=w)
             orig = w.rm.render_wall_frame
             rec = {}

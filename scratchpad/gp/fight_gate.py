@@ -65,6 +65,13 @@ P9 (the rocket launcher: combat's P9 conventions, 08e0779 / 42bdadd) -- `rocket_
 Their counters (`rocket_counters`) are each held nonzero by the claims; their controls break one rocket rule each:
 `rocket_dmg` (the impact rolls the fireball's 3s), `rocket_no_barrels` (the blast spares the barrels: no chain),
 `rocket_spare_shooter` (the blast spares the player).
+
+P10 (the chaingun, the owner 2026-10-12: "add them both") -- `cgun_scenario_list`, run with `--only CG`:
+  CG1 key 4 brings the chaingun up (owned, 100 bullets, poked at frame 0), a LATE setup takes the player to a crowd
+      and wakes it, and the trigger is HELD: A_FireCGun's two burst frames (each its own flash, S_CHAINFLASH1 / 2), the
+      first pull's accurate bullets and the held bursts' spread ones (P_GunShot's refire rule), hits and pain
+Its counters (`cgun_counters`) are held nonzero by the claim; its controls break one chaingun rule each:
+`cgun_one_flash` (both burst frames show S_CHAINFLASH1), `cgun_accurate` (the held bursts do not spread).
 """
 from __future__ import annotations
 
@@ -143,6 +150,7 @@ def counters(tr: list) -> dict:
     c["mon_attacks"] = sum(len(ev.attacks) for fr in tr for ev in fr["ev"] if ev is not None)
     c["mkills"] = sum(1 for fr in tr for ev in fr["ev"] if ev is not None for kk in ev.kills if kk[0] == "mon")
     c.update(rocket_counters(tr))                    # P9
+    c.update(cgun_counters(tr))                      # P10
     return c
 
 
@@ -181,6 +189,31 @@ def rocket_counters(tr: list) -> dict:
     return c
 
 
+def cgun_counters(tr: list) -> dict:
+    """P10: cgun_shots (P_GunShot rounds tagged "chaingun"), cgun_acc / cgun_held (on a frame that began with refire 0 /
+    above it: the first pull's accurate rounds, the held bursts' spread ones), cgun_hits (a round's hits), and the
+    frames ending on each burst's flash (cgun_flash1 / cgun_flash2: S_CHAINFLASH1 / 2, the weapon cells' fl_st)"""
+    from doomfj import weaponcode as WC
+    names = list(WC.weapon_states())
+    f1, f2 = names.index("S_CHAINFLASH1"), names.index("S_CHAINFLASH2")
+    c = {k: 0 for k in ("cgun_shots", "cgun_acc", "cgun_held", "cgun_hits", "cgun_flash1", "cgun_flash2")}
+    rf = 0
+    for fr in tr:
+        n = 0
+        for ev in fr["ev"]:
+            if ev is None:
+                continue
+            n += sum(1 for sh in ev.shots if sh[0] == "chaingun")
+            c["cgun_hits"] += sum(1 for h in ev.hits if h[0] == "chaingun")
+        c["cgun_shots"] += n
+        c["cgun_held" if rf else "cgun_acc"] += n
+        st = fr["mstate"]
+        rf = st.get("wp_rf", 0)
+        c["cgun_flash1"] += st.get("fl_st") == f1
+        c["cgun_flash2"] += st.get("fl_st") == f2
+    return c
+
+
 # ================================================================================================
 # the controls: ONE mutated rule each (R9)
 # ================================================================================================
@@ -201,6 +234,19 @@ def control(name: str | None):
         with P8.control(name):
             yield
         return
+    elif name == "cgun_one_flash":               # P10: both burst frames show S_CHAINFLASH1
+        patch(C, "CGUN_FLASH", {"S_CHAIN1": "S_CHAINFLASH1", "S_CHAIN2": "S_CHAINFLASH1"})
+    elif name == "cgun_accurate":                # P10: the held bursts do not spread (P_GunShot's refire rule)
+        orig_cg = CM._a_fire_cgun
+
+        def fire_cg(self, keys, ev):
+            rf = self.ws.p_refire
+            self.ws.p_refire = 0
+            try:
+                orig_cg(self, keys, ev)
+            finally:
+                self.ws.p_refire = rf
+        patch(CM, "_a_fire_cgun", fire_cg)
     elif name == "bonus_cap":                    # a health bonus capped at 100, not 200
         patch(C, "MAX_HEALTH_BONUS", gd.MAXHEALTH)
     elif name == "bonus_round":                  # the gold palette without DOOM's +7 rounding
@@ -699,7 +745,8 @@ def scenario_list(dsim, w, card) -> list:
                 and c["drop_z_px"] >= 1})
     # ---- F5: berserk at MEDIUM
     pstr = [i for i, t in enumerate(pk) if t.type == 2023]
-    menu = [{"menu": ["esc"]}, {"menu": ["enter"]}, {"menu": ["up"]}, {"menu": ["enter"]}]
+    # P10: esc opens the menu on RESUME -- down to NEW GAME, enter (the skill screen, MEDIUM highlighted), enter
+    menu = [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
     keys5 = menu + [F] * 3 + [I] * 40 + [FIRE] * 3 + [I] * 12
     f5 = []
     wm = _world_at(gd.SK_MEDIUM)
@@ -782,6 +829,7 @@ def scenario_list(dsim, w, card) -> list:
                 "claim": lambda c, tr: c["barrel_blasts"] >= 3})
     out += p8a_scenario_list(dsim, w, card)          # M7 P8a: section 5.2's rows (each behind its rule and package)
     out += rocket_scenario_list(dsim, w)             # P9: the rocket launcher
+    out += cgun_scenario_list(dsim, w)               # P10: the chaingun
     return out
 
 
@@ -860,6 +908,41 @@ def rocket_scenario_list(dsim, w) -> list:
                 "controls": [], "cands": r1,
                 "claim": lambda c, tr: c["rockets_fired"] >= 3 and c["rocket_blasts"] >= 3 and c["barrel_blasts"] >= 1})
     return out
+
+
+# ================================================================================================
+# P10: the chaingun (A_FireCGun)
+# ================================================================================================
+def chaingun(bullets: int = 100):
+    """the chaingun owned with `bullets` (key 4 brings it up)"""
+    def fn(mph):
+        ws = mph.world.ws
+        ws.p_owned[gd.WP_CHAINGUN] = 1
+        ws.p_ammo[gd.AM_CLIP] = bullets
+    return fn
+
+
+def cgun_scenario_list(dsim, w) -> list:
+    """P10: CG1 -- key 4, RAISE frames at the player start for the chaingun to come up, then a LATE setup takes him
+    to a pose facing a monster with another near it and wakes them; the trigger is held through several bursts"""
+    spawn = (dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle)
+    live = [m for k in ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP") for m in first_live(w, k)]
+    ws = w.ws
+    setup = both(chaingun(100), armor(200, 2))
+    cg1 = []
+    for m in live:
+        crowd = [j for j in live if j != m and max(abs(ws.mon_x[j] - ws.mon_x[m]), abs(ws.mon_y[j] - ws.mon_y[m])) < 160]
+        if not crowd:
+            continue
+        for p in poses_facing(dsim, w, ws.mon_x[m], ws.mon_y[m], (192, 224, 160, 256)):
+            cg1.append((spawn, setup, {RAISE: wake_at(p, [m] + crowd)}))
+    keys = [{"w4": True}] + [I] * (RAISE - 1) + [FIRE] * 16 + [I] * 8
+    return [{"name": "CG1 the chaingun held into an awake crowd: both bursts' flashes, accurate then spread rounds, hits",
+             "keys": keys, "limit": 40, "need": ("cgun_shots", "cgun_acc", "cgun_held", "cgun_hits", "cgun_flash1",
+                                                 "cgun_flash2"),
+             "controls": ["cgun_one_flash", "cgun_accurate"], "cands": cg1,
+             "claim": lambda c, tr: c["cgun_acc"] >= 2 and c["cgun_held"] >= 4 and c["cgun_hits"] >= 2
+             and c["cgun_flash1"] >= 1 and c["cgun_flash2"] >= 1}]
 
 # ================================================================================================
 # M7 P8a (package V, docs/gp-final-plan.md 5.2): knockback (K), infighting (I), the compositor (C), the stress
@@ -1358,8 +1441,8 @@ def binary_scenario(gb, cells, table, run, sc, pose, setup, want) -> bool:
     def start(pr, f):
         vals = {k: int(bool(keys[f].get(n))) for n, k in H.KEYFLAG.items() if k in pr.cells}
         if f == 0:
-            vals.update({"mode": 0, "viewx": _signed(pose[0], 32), "viewy": _signed(pose[1], 32),
-                         "viewangle": pose[2], **poke})
+            vals.update({"mode": 0, "g_live": 1, "viewx": _signed(pose[0], 32),     # P10: a game in progress
+                         "viewy": _signed(pose[1], 32), "viewangle": pose[2], **poke})
         if f < len(want):
             vals.update(want[f].get("poke", {}))
         pr.write_cells(vals)
@@ -1375,7 +1458,8 @@ def binary_scenario(gb, cells, table, run, sc, pose, setup, want) -> bool:
         got = reads[f] if f < len(reads) else {}
         if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
             s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
-        pic = run.picture(fr) if fr["drawn"] == "world" else G.screen(run.orc, fr["drawn"][1], fr["drawn"][2])
+        pic = (run.picture(fr) if fr["drawn"] == "world" else
+               G.screen(run.orc, fr["drawn"][1], fr["drawn"][2], fr["live"], fr["stats"]))     # P10: live, stats
         if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):
             x_bad = (f, P.px_diff(r.frames[f], pic) if f < len(r.frames) else -1)
         if p_bad is None and (f >= len(r.palettes) or r.palettes[f] != run.orc.palette_sha(fr["pal"])):

@@ -10,7 +10,7 @@ at these widths through `STANDALONE_SCRATCH_DECLS`, as it does `lvdone` / `pused
                          Boots at the boot skill's index. RESTART_KEEP's `skill`: the restart never writes it.
     g_rs      1 nibble   the model's g_restart: the death think sets it on use (package B); the next world frame's
                          start runs the restart, which zeroes it.
-    lvtime    4 nibbles  the model's leveltime (16 bits, wraps): +1 at the end of every non-frozen world tic
+    lvtime    5 nibbles  the model's leveltime (P10: 20 bits, wraps): +1 at the end of every non-frozen world tic
                          (`lvtime_tic_lines`, inside the frozen-level guard); nukage reads it (package B).
 
 All three PERSIST across the M1 reset (`build.GAME_PERSIST` = `PERSIST`).
@@ -33,7 +33,7 @@ from typing import Dict, List, Sequence
 
 # the cells this module owns, and their level-start values (`g_skill` is not restarted: RESTART_KEEP's `skill`)
 PERSIST = ("lvtime", "g_rs", "g_skill")
-LVTIME_NIBBLES = 4
+LVTIME_NIBBLES = 5                         # world.LEVELTIME_BITS // 4 (P10: 16 -> 20 bits, LEVEL COMPLETE's TIME)
 # the persisted cells the restart must NOT write: what the device shows (docs/gp-p67-interface.md 4.4)
 DEVICE_SHADOWS = ("pal_cur", "hud_s", "hud_full")
 # the player modes with a death that restarts (P7; the fallback "loot" mode of section 2 has none)
@@ -65,6 +65,8 @@ def mortal(player_mode: str) -> bool:
 
 def game_decls(boot_index: int) -> List[str]:
     """the three cells, `g_skill` at the boot skill's SKILLS index (the image boots at that skill's level start)"""
+    from doomfj.world import LEVELTIME_BITS
+    assert 4 * LVTIME_NIBBLES == LEVELTIME_BITS, (LVTIME_NIBBLES, LEVELTIME_BITS)
     return [f"g_skill: hex.vec 1, {boot_index}", "g_rs: hex.vec 1, 0", f"lvtime: hex.vec {LVTIME_NIBBLES}, 0"]
 
 
@@ -132,7 +134,7 @@ def p6_cell_values(w, ws=None) -> Dict[str, list]:
             "mdrop": mdrop, "dr_live": [sum(1 for v in mdrop if v == 1)],
             "bar_st": [ws.bar_state[b] for b in range(nb)], "bar_ti": [ws.bar_tics[b] for b in range(nb)],
             "bar_hp": [ws.bar_health[b] & 0xFF for b in range(nb)], "rng_wd": [ws.rng_world],
-            "lvtime": [ws.leveltime & 0xFFFF], "g_rs": [ws.g_restart]}
+            "lvtime": [ws.leveltime & ((1 << (4 * LVTIME_NIBBLES)) - 1)], "g_rs": [ws.g_restart]}
 
 
 P6_NIBBLES = {"p_bc": 2, "p_str": 4, "p_bp": 1, "am_misl": 3, "am_cell": 3, "mdrop": 1, "dr_live": 2,

@@ -379,7 +379,8 @@ def test_views_aim_vis_and_drop_rows():
         want += [0 if di in absent else 1 for di in mv.rt_pickups]
         assert list(mv.vis_state(ph)["thvis"]) == want
     ph.reset(gd.SK_HARD)
-    assert len(mv.vis_state(ph)["thvis"]) == mv.nvis == 120 and not mv.hidden(ph)    # P9: + the launcher, 4 rockets
+    assert len(mv.vis_state(ph)["thvis"]) == mv.nvis == 122 and not mv.hidden(ph)    # P9: + the launcher, 4 rockets
+    #                                                                       P10: + the shotgun (#41), the chaingun (#40)
     # a pickup taken and a barrel gone: removed, and their slots 0
     i = next(i for i, t in enumerate(w.pickup_things) if t.flags & gd.skill_bit(gd.SK_HARD) and mv.pdi[i] in mv.vis_slots)
     w.ws.pickup_taken[i] = 1
@@ -392,7 +393,7 @@ def test_views_aim_vis_and_drop_rows():
     w.ws.mon_drop[m] = 1
     rt = mv.rt_state(ph)
     k = mv.nrt + 10
-    assert len(rt["thpos_rt"]) == mv.nrows(ph) == mv.nrt + 10 + drop_rows(w) == 103
+    assert len(rt["thpos_rt"]) == mv.nrows(ph) == mv.nrt + 10 + drop_rows(w) == 104      # P10: + a runtime pickup
     assert rt["thpos_rt"][k] == ((w.ws.mon_x[m] << 16) & 0xFFFFFFFF) | (((w.ws.mon_y[m] << 16) & 0xFFFFFFFF) << 32)
     assert rt["thss_rt"][k] == w.ws.mon_leaf[m] and rt["thpos_rt"][k + 1] == 0
     assert ph.mobiles()[-1] == (w.ws.mon_x[m], w.ws.mon_y[m], "CLIPA0", 0)
@@ -404,9 +405,10 @@ def test_views_aim_vis_and_drop_rows():
 # ---------------------------------------------------------------------------------------------- 8.3: gamespeed
 def test_gamespeed_route_prediction():
     """risk 3 (MEASURED in the plan, re-measured at the integration on the RE-RECORDED keys -- O3: the turn's tap rule
-    re-planned every route, tests/fixtures/gamespeed_recorded_keys.json): gamespeed's run 0, on the full model (the
-    "los" sight rule), is held up by monsters -- 49 refused candidates, it ends at (763, 367); run 1 is not touched.
-    R9: with `player_blocking` off the same keys land elsewhere, (872, 494). (The binary's own ends -- the "seen"
+    re-planned every route, tests/fixtures/gamespeed_recorded_keys.json; M7 P10 re-recorded them again: the turn's
+    1280 and gamespeed's gen 3b): gamespeed's run 0, on the full model (the "los" sight rule), is held up by monsters
+    -- 28 refused candidates, it ends at (794, 375); run 1 is not touched. R9: with `player_blocking` off the same keys
+    land elsewhere, (869, 467). (The binary's own ends -- the "seen"
     rule, gamespeed.GameSim -- are gamespeed.BINARY_ENDS; test_gamespeed_validate holds those.)"""
     import json
     keys_by_run = json.loads((ROOT / "tests/fixtures/gamespeed_recorded_keys.json").read_text())
@@ -416,8 +418,8 @@ def test_gamespeed_route_prediction():
             w = World(monsters="full", player="full", sight_rule="los", player_blocking=blocking)
             blocked = sum(w.tic({n: bool(k.get(n)) for n in KEYS}).player_blocked for k in keys_by_run[run])
             ends[blocking, run] = (w.ws.px >> 16, w.ws.py >> 16, blocked)
-    assert ends[True, "0"] == (763, 367, 49) and ends[False, "0"] == (872, 494, 0)
-    assert ends[True, "1"] == ends[False, "1"] == (-296, 120, 0)
+    assert ends[True, "0"] == (794, 375, 28) and ends[False, "0"] == (869, 467, 0)
+    assert ends[True, "1"] == ends[False, "1"] == (-108, 260, 0)
 
 
 # ------------------------------------------------------------------- the still candidate (the coordinator's fix)

@@ -17,6 +17,14 @@ That determinism is not optional. FINDINGS BE: sharing a stateful pool across th
 pass 2 relocate nothing and the reset check refused the build with "434 baked addresses moved
 between passes". The build prints the per-assembly counts so a mismatch is visible here rather
 than 20 minutes later.
+
+ONE PASS (2026-10-13). The game tier is in selfreset.ONE_PASS_TIERS: its reset is emitted by LABEL from the
+declarations, so it assembles ONCE (no pass 2). `--one-pass-blocks` removes the counting assembly too: flipjump's
+BlockPool(one_pass=True) (flipjump #369) takes every table it would block out of the op stream as the expansion
+reaches it and places them all when the expansion ends, sizing the blocks from that same expansion's census. No
+counts cache is read; `--counts-cache` receives the census (pinreport reads it). Given the same counts it makes the
+two-pass binary byte for byte, except where a table gets no block -- it goes to an overflow region after the blocks
+instead of inline (see BlockPool's docstring).
 """
 import argparse
 import gzip
@@ -282,11 +290,20 @@ def main():
                          "hot group keeps its block and its pin (or the build stops), and its hottest "
                          "tables take the cheapest indices of their width. Needs flipjump with "
                          "BlockPool(heat=).")
+    ap.add_argument("--one-pass-blocks", action="store_true",
+                    help="ONE expansion, no counting assembly (flipjump #369, BlockPool(one_pass=True)): the tables wait "
+                         "out of the op stream and the blocks are sized from the same expansion's census. "
+                         "--counts-cache is written (the census), never read.")
     ap.add_argument("--no-pin", action="store_true",
                     help="relocate into blocks but do NOT pin the source words. Splits blocking's "
                          "two halves against the standalone gate, the way --no-pin split them "
                          "against deg_gate (FINDINGS BG).")
     a = ap.parse_args()
+    if a.one_pass_blocks:
+        clash = [f for f, on in (("--counts-trust", a.counts_trust), ("--preflight-only", a.preflight_only),
+                                 ("--record-sites", a.record_sites)) if on]
+        if clash:
+            ap.error("--one-pass-blocks has no counting assembly and reads no counts: %s" % ", ".join(clash))
 
     print("blocking: pool base %s, span %s"
           % (hex(a.pool_base), hex(a.span_bits) if a.span_bits else "unbounded"), flush=True)
@@ -370,6 +387,17 @@ def main():
     def _capture_resolve(pinned_exprs, labels, reserved_below=1024, exclude=None):
         out, conflicts = _real_resolve(pinned_exprs, labels, reserved_below, exclude)
         live_pins["map"] = dict(out)
+        # A COLLAPSE IS SILENT OTHERWISE (spread=4 once fell from 25,701 pinned words to 72, built fine and passed
+        # the gate). It was checked in _emit_reset_part, which the one-pass reset never calls (#130): check it here,
+        # where every assembly's pin map passes.
+        if pools:
+            groups = len(pools[-1].groups)
+            print("  pins: %s words pinned, %s groups blocked" % (format(len(out), ","), format(groups, ",")),
+                  flush=True)
+            if groups and len(out) < max(1, groups // 10):      # none at all, on a program of < 10 groups
+                print("  *** PINNING COLLAPSED: %s pinned words against %s groups. The pool is almost certainly "
+                      "exhausted -- lower --pool-base or reduce --spread." % (format(len(out), ","),
+                                                                               format(groups, ",")), flush=True)
         if heat and pools:
             # a hot word that did not end up pinned: vetoed by pin_exclude, or an alias conflict
             hot = [(g, pools[-1].groups[g][1]) for g in pools[-1].hot_sites
@@ -421,7 +449,39 @@ def main():
                 recorded.append((group, labels_prefix, table_ops, ops_alignment))
             return super().reserve(ops_alignment, table_ops, group, group_expr, labels_prefix)
 
+    def assemble_one_pass(*args, **kwargs):
+        """ONE expansion: BlockPool(one_pass=True) sizes its blocks from this expansion's own census (flipjump #369)"""
+        t0 = time.time()
+        pool = BlockPool(W, a.pool_base, one_pass=True, merge_aliases=a.merge_aliases,
+                         span_bits=a.span_bits, spread=a.spread, spread_min_count=a.spread_min_count,
+                         max_slot_ops=a.max_slot_ops, evict_by_value=a.evict_by_value,
+                         pin_broken=a.pin_broken, width_buckets=a.width_buckets, wants=wants,
+                         **({"heat": heat} if heat else {}))
+        pool.pin_exclude = _reset_owned          # NEVER PIN A WORD THE M1 SELF-RESET OWNS (see the placing pool)
+        pools.append(pool)
+        kwargs["table_pool"] = pool
+        out = real_assemble(*args, **kwargs)
+        sized = pool.sizing()
+        print("  one pass: %s tables deferred, %s in the overflow region, %s alias words unresolved, %s groups "
+              "left unblocked; the census: %s groups, %s tables; declines %s; %ds"
+              % (format(pool.deferred, ","), format(pool.overflowed, ","), format(pool.alias_unresolved, ","),
+                 format(len(sized.unblocked), ","), format(len(sized.counts), ","),
+                 format(sum(sized.counts.values()), ","),
+                 {k: v for k, v in pool.decline_report().items() if v}, int(time.time() - t0)), flush=True)
+        # priced as the two-pass preflight prices its counts, so the logs compare line for line
+        _preflight(BlockPool, W, a, {"counts": sized.counts, "widths": sized.widths,
+                                     "width_hist": sized.width_hist, "alias": sized.alias}, wants, heat)
+        if a.counts_cache:
+            census = pool.census(merge_aliases=a.merge_aliases)
+            _save_counts(a.counts_cache, a, {"counts": census.counts, "widths": census.widths,
+                                             "width_hist": census.width_hist, "alias": census.alias})
+        if heat:
+            print("  pin-heat: %s" % pool.heat_report(), flush=True)
+        return out
+
     def assemble_blocked(*args, **kwargs):
+        if a.one_pass_blocks:
+            return assemble_one_pass(*args, **kwargs)
         if not frozen and not a.record_sites:
             cached = _load_counts(a.counts_cache, a)
             if cached:

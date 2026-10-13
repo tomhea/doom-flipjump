@@ -3,6 +3,8 @@ map's wad bit for bit; the waking sight is seen, or REJECT-visible within NEAR; 
 NEAR with the exact LOS; `SeenHook` marks a monster the picture draws and not one behind the player; `set_seen` /
 `slots_of` carry a render's drawables to slots. Each claim has a control that flips its verdict."""
 import itertools
+import json
+from pathlib import Path
 
 import pytest
 
@@ -128,3 +130,42 @@ def test_set_seen_and_slots_of():
     ph.set_seen({1, 4})
     n = ph.world.layout.nmon
     assert [ph.world.ws.mon_seen[m] for m in range(n)] == [int(m in (1, 4)) for m in range(n)]
+
+
+DATA = Path(__file__).resolve().parent / "data"
+
+
+def _game_world_at(snap):
+    """GameSim's World (BOOT_SKILL, the game tier's modes) holding a snapshot's pose, sector heights and monsters --
+    everything SeenHook reads"""
+    from doomfj.wall_renderer import BOOT_SKILL, MONSTER_MODE, PLAYER_MODE
+    w = World(skill=BOOT_SKILL, monsters=MONSTER_MODE, player=PLAYER_MODE)
+    ws = w.ws
+    ws.px, ws.py, ws.pangle = snap["pose"]
+    for k, vals in snap["mon"].items():
+        cells = getattr(ws, "mon_" + k)
+        for m, v in enumerate(vals):
+            cells[m] = v
+    ws.p_vdrop = snap["p_vdrop"]
+    w.heights_now = {s: (f, c) for s, f, c in snap["heights_now"]}
+    return w
+
+
+def test_seen_hook_draws_the_game_tiers_view():
+    """P11 (d) made the seen test read ROWS -- a sprite's bucket box against the nearer ledge pieces -- so the hook
+    must draw the picture the BINARY draws: the game tier's 84-row view under the status bar (config.GAME_CFG), not
+    the World's full-screen renderer. Pinned to the binary: gamespeed run 7's frame 52 (the world the trail's GameSim
+    and blocked57 share to that frame; data/seen_run7_f52.json) and blocked57's own thseen at that present. The
+    control draws the same world through the World's renderer: it marks monster 21, the flag gamespeed_trail parted
+    on, so the fixture tells the two views apart."""
+    snap = json.loads((DATA / "seen_run7_f52.json").read_text(encoding="ascii"))
+    w = _game_world_at(snap)
+    n = w.layout.nmon
+    hook = SI.SeenHook(w)
+    hook(w)
+    assert [w.ws.mon_seen[m] for m in range(n)] == snap["thseen_binary"], "the hook's picture is not the binary's"
+    hook.rm = w.rm                                      # control: the World's full-screen renderer
+    hook(w)
+    got = [w.ws.mon_seen[m] for m in range(n)]
+    assert got == snap["seen_world_view"] and got[21] == 1 and snap["thseen_binary"][21] == 0, (
+        "the full-screen view no longer parts from the binary at monster 21: the fixture cannot tell the views apart")

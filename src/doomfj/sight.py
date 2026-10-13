@@ -77,21 +77,30 @@ def attack_sight(world, m: int) -> bool:
 
 class SeenHook:
     """after a tic: render the world as the binary draws it and write `mon_seen` -- the monsters whose sprite had an
-    open column (docs/gp-monsters.md 8.2)"""
+    open column (docs/gp-monsters.md 8.2).
 
-    _cache: dict = {}                         # per map: the art wad, the views mapping, the drawables, the scenes
+    P11: "as the binary draws it" is the GAME tier's picture -- `self.rm`, a renderer at config.GAME_CFG (the 84-row
+    view under the status bar), not the World's own full-screen `world.rm` (which only answers geometry: leaves,
+    openings), and with the dying view's sink (`view_drop`, as every game-tier gate's render). Before P11 the seen test
+    read columns alone and both views agreed; P11 (d) reads the rows too (a sprite's bucket box against the nearer
+    ledge pieces), and the full-screen picture parted from blocked57 at gamespeed run 7's frame 52
+    (tests/host/test_sight.py, test_seen_hook_draws_the_game_tiers_view)."""
+
+    _cache: dict = {}            # per map: the art wad, the views mapping, the drawables, the scenes, the game renderer
 
     def __init__(self, world, sprite_wad=None):
         from doomfj.build import DEFAULT_SPRITE_WAD, _resolve_sprite_wad
+        from doomfj.config import GAME_CFG
         from doomfj.monsters import MonsterViews
-        from doomfj.reference_model import GAME_RENDER_KW
+        from doomfj.reference_model import GAME_RENDER_KW, ReferenceModel
         from doomfj.things import drawable_things
         key = (world.mapname, id(sprite_wad))
         if key not in SeenHook._cache:
             art = sprite_wad or _resolve_sprite_wad(world.mw, DEFAULT_SPRITE_WAD)
             SeenHook._cache[key] = (art, MonsterViews(world.rm, world.mw, world.mapname, art, world),
-                                    drawable_things(world.rm, world.mw.things(world.mapname), art, {})[0], {})
-        self.art, self.views, self.drawable, self._scenes = SeenHook._cache[key]
+                                    drawable_things(world.rm, world.mw.things(world.mapname), art, {})[0], {},
+                                    ReferenceModel(GAME_CFG))
+        self.art, self.views, self.drawable, self._scenes, self.rm = SeenHook._cache[key]
         self.kw = dict(GAME_RENDER_KW)
 
     def _scene(self, world):
@@ -103,6 +112,7 @@ class SeenHook:
 
     def __call__(self, world) -> None:
         from doomfj.reference_model import SimState
+        from doomfj.world import player_sinks
         ws, n = world.ws, world.layout.nmon
         pos = [(t.x, t.y) for t in self.drawable]
         hidden = set()
@@ -120,10 +130,12 @@ class SeenHook:
         from doomfj import reference_model as RMOD, things as TH
         saved = (RMOD.drawable_things, RMOD.baked_thing_mask)
         RMOD.drawable_things, RMOD.baked_thing_mask = TH.drawable_things, TH.baked_thing_mask
+        drop = ws.p_vdrop if player_sinks(world.player) else 0      # the dying view's sink (MonsterPhase.view_drop)
         try:
-            world.rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, world.mapname), self._scene(world),
-                                       sprite_wad=self.art, thing_positions=pos, thing_hidden=hidden,
-                                       thing_views=views, seen_out=seen, **self.kw)
+            self.rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, world.mapname), self._scene(world),
+                                      sprite_wad=self.art, thing_positions=pos, thing_hidden=hidden,
+                                      thing_views=views, seen_out=seen,
+                                      **({"view_drop": drop} if drop else {}), **self.kw)
         finally:
             RMOD.drawable_things, RMOD.baked_thing_mask = saved
         for m in range(n):

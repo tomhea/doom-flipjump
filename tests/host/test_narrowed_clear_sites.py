@@ -117,11 +117,11 @@ NARROWED_FILES = ("fixed_point.fj", "frame_render.fj", "plane_bands.fj", "plane_
 # window nibbles `gps_wlo4`/`gps_whi4` -- the same Z3 shapes on the new registers.
 # P10 G8: frame_render.fj 21 -> 22 -- frame.lines_sky_pair_ids carries lines_sky_ceil_ids's Z3 clear (its sky path,
 # for the sky behind a stacked piece), with the same unconditional `mov 2` after it
-EXPECTED_SITES = {"fixed_point.fj": 3, "frame_render.fj": 22, "plane_bands.fj": 4,
+EXPECTED_SITES = {"fixed_point.fj": 3, "frame_render.fj": 24, "plane_bands.fj": 4,   # P11: + ledge_box, ledge_test
                   "plane_render.fj": 5, "projection.fj": 9, "sim.fj": 2, "stream_render.fj": 7}
 # and the rep-guarded ones the site scan skips, pinned for the same reason and so that a NEW one
 # cannot appear unnoticed -- being skipped there, it would otherwise be checked by nothing.
-EXPECTED_REPPED = {"fixed_point.fj": 0, "frame_render.fj": 1, "plane_bands.fj": 0,
+EXPECTED_REPPED = {"fixed_point.fj": 0, "frame_render.fj": 2, "plane_bands.fj": 0,   # P11: the seen probe's box
                    "plane_render.fj": 0, "projection.fj": 0, "sim.fj": 0, "stream_render.fj": 0}
 # the emitter declares the hoisted scratch registers that the fj macros only name in a `<` list, so
 # the `hex.vec` width of those lives here and in no .fj file (M1-HOIST).
@@ -452,7 +452,8 @@ def _pin_state(text, pinned):
 # claim that the new pair was checked and must stay whole, so do it deliberately, not to go green.
 LIVE_CLEARS_ACROSS_A_BRANCH = {
     "fixed_point.fj": (),
-    "frame_render.fj": (),
+    # P11: frame.ledge_box -- y0 < 0 clears ylo1 (the clamped -1, + 1), in range it takes y0's low byte + 1
+    "frame_render.fj": (((("lo_neg",), "hex.zero 2, ylo1"), "hex.mov 2, ylo1, y0", ("lo_pos", "lo_in")),),
     "plane_bands.fj": (),
     "plane_render.fj": (),
     "projection.fj": (((("no_span",), "hex.zero 8, dst"), "hex.mov 8, dst, sst_quot",
@@ -722,6 +723,7 @@ HOISTED_DECL = '''        "hz_reg: hex.vec 8",'''
 # column retired all four, and every register its new sites clear is read at a visible width
 # after them. Pinned, so a new one is SEEN (and then the control below has a real site again).
 EXPECTED_HOIST_LEANING = {name: 0 for name in NARROWED_FILES}
+EXPECTED_HOIST_LEANING["frame_render.fj"] = 1      # P11: frame.ledge_box's lb_c, `hex.vec 8` in the hoisted list
 
 
 def test_the_hoisted_scratch_declarations_are_load_bearing(monkeypatch):

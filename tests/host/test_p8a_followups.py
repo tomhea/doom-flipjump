@@ -80,7 +80,8 @@ def test_control_a_barrel_box_at_missilerange_is_refused(rm):
 
 def test_the_aim_leaf_text_is_unchanged_by_the_asserts():
     """the asserts add no text: the leaf's lines are a pure function of (centerx, barrels) as before"""
-    a, b = AC.leaf_lines(80, barrels=True), AC.leaf_lines(80, barrels=True)
+    a, b = (AC.leaf_lines(80, barrels=True, centery=42, viewh=84),     # P11 (d): the rows' constants
+            AC.leaf_lines(80, barrels=True, centery=42, viewh=84))
     assert a == b and a[1] == "hex.cmp 8, pth_tz, ar_maxtz, ar_in, ar_in, ar_out"
 
 

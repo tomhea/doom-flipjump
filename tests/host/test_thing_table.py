@@ -373,8 +373,8 @@ def test_both_mirrors_build_the_drawable_list_with_the_same_predicate(level):
     mp = [t for t in things if not single_player(t) and THING_SPRITE.get(t.type) is not None]
     # E1M1: 26 pickups (census); 226 drawable since the blue card is (M7 P2a.1); P9: the launcher and its 4 rockets are
     # single-player too (things.SINGLE_PLAYER_EXTRA) -- 21 multiplayer-only, 231 drawable; P10: the shotgun #41 and the
-    # chaingun #40 too -- 19 multiplayer-only, 233 drawable
-    assert (len(mp), len(ssot)) == (19, 233), (len(mp), len(ssot))
+    # chaingun #40 too -- 19 multiplayer-only, 233 drawable; P11: + the EXIT sign (doomfj.exitsign), 234
+    assert (len(mp), len(ssot)) == (19, 234), (len(mp), len(ssot))
     assert [(t.x, t.y, t.type) for t in ssot] == [(t.x, t.y, t.type) for t in loose], \
         "the two predicates already disagree on the shipped art wad"
 
@@ -384,6 +384,7 @@ def test_both_mirrors_build_the_drawable_list_with_the_same_predicate(level):
         def get_data(self, name):
             raise KeyError(name)
     empty, _ = drawable_things(rm, things, _NoArt(), {})
-    assert not empty and loose, (
-        "with no sprite lumps at all `drawable_things` still returned things -- the two predicates "
+    from doomfj.gamedata import EXIT_SIGN_TYPE
+    assert [t.type for t in empty] == [EXIT_SIGN_TYPE] and loose, (     # P11: the sign's picture is BUILT, no lump
+        "with no sprite lumps at all `drawable_things` still returned wad-art things -- the two predicates "
         "are the same after all, and this test has no teeth")

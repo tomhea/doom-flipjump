@@ -393,7 +393,7 @@ def test_views_aim_vis_and_drop_rows():
     w.ws.mon_drop[m] = 1
     rt = mv.rt_state(ph)
     k = mv.nrt + 10
-    assert len(rt["thpos_rt"]) == mv.nrows(ph) == mv.nrt + 10 + drop_rows(w) == 104      # P10: + a runtime pickup
+    assert len(rt["thpos_rt"]) == mv.nrows(ph) == mv.nrt + 10 + drop_rows(w) == 105      # P10: + a runtime pickup; P11: + the EXIT sign (a runtime thing: its leaf has monsters)
     assert rt["thpos_rt"][k] == ((w.ws.mon_x[m] << 16) & 0xFFFFFFFF) | (((w.ws.mon_y[m] << 16) & 0xFFFFFFFF) << 32)
     assert rt["thss_rt"][k] == w.ws.mon_leaf[m] and rt["thpos_rt"][k + 1] == 0
     assert ph.mobiles()[-1] == (w.ws.mon_x[m], w.ws.mon_y[m], "CLIPA0", 0)

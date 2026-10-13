@@ -201,6 +201,40 @@ DERIVE_BLOCK = 0x0102
 # P10 G1: the harness's sfflag bytes -- a different byte in every column (73 is odd, so x -> 73x + 41 is a
 # bijection mod 256), which the record snapshots into its fragments' byte 3
 SFFLAG = [(73 * x + 41) & 0xFF for x in range(VIEW_W)]
+# P11 (c)+(d): every column's piece rows -- u1's y2, u2's y2, l1's y1, l2's y1 at their sfslot offsets 1 / 5 / 8 / 12 --
+# so the record's ledge test (frame.ledge_test: SFFLAG's counts pick a side's LAST piece; a count nibble outside
+# {1, 2, 9, 10} is no piece) decides each column, and the model's ledge_hidden is the expectation
+H = CFG.VIEW_H
+PIECE_ROWS = [((7 * x) % H, (11 * x + 3) % H, (13 * x + 5) % H, (17 * x + 1) % H) for x in range(VIEW_W)]
+SLOT_SPAN = 16 ** CFG.SLOT_SHIFT
+
+
+def _sfslot():
+    out = [0] * (VIEW_W * SLOT_SPAN)
+    for x, (u1, u2, l1, l2) in enumerate(PIECE_ROWS):
+        for off, row in ((1, u1), (5, u2), (8, l1), (12, l2)):
+            out[x * SLOT_SPAN + off] = row
+    return out
+
+
+def _hb(bucket):
+    """the height the harness's sprbkt result names (the high byte of trb_bucket, below)"""
+    return 0xA0 + bucket
+
+
+def _ledge_hidden(x, y0, hb):
+    """the model's answer for column x and the box [y0, y0 + hb)"""
+    from doomfj.reference_model import ledge_hidden
+    uc, lc = SFFLAG[x] & 7, (SFFLAG[x] >> 4) & 7
+    u1, u2, l1, l2 = PIECE_ROWS[x]
+    ups = [(0, u1), (0, u2)][:uc] if uc in (1, 2) else []
+    los = [(l1, H - 1), (l2, H - 1)][:lc] if lc in (1, 2) else []
+    return ledge_hidden(ups, los, y0, hb)
+
+
+def _ledge_box(y0, hb):
+    """frame.ledge_box's two registers, as the build computes them before the transplanted range"""
+    return max(-1, min(H, y0)) + 1, max(0, min(H + 1, y0 + hb)) + 1
 
 
 def _record_all(things=THINGS):
@@ -218,6 +252,8 @@ def _record_all(things=THINGS):
             n = sprflag[x]
             if x in HIDDEN or n == 3 or (n >= 1 and not ballow) or bucket < HEADER[blk][1]:
                 continue
+            if _ledge_hidden(x, y0, _hb(bucket)):
+                continue                                  # P11 (c): fully behind its nearer pieces
             frag = {"slot id": sid, "block lo": blk & 0xFF, "block hi": blk >> 8, "clip counts": SFFLAG[x]}
             for i, f in enumerate(wr.SPR_FRAG_FIELDS):
                 spslot[x * STRIDE + (0, B_BYTE, C_BYTE)[n] + i] = frag[f]
@@ -270,7 +306,7 @@ def block_arrays(mem):
     sprflag, spslot, gpslot = mem
     return [("pclm", [0] * (VIEW_W * CFG.PID_BYTES)), ("sfflag", list(SFFLAG)), ("sfbase", [0] * (2 * VIEW_W)),
             ("sprflag", list(sprflag)),
-            ("sfslot", [0] * (VIEW_W * 16 ** CFG.SLOT_SHIFT)), ("spslot", list(spslot)),
+            ("sfslot", _sfslot()), ("spslot", list(spslot)),
             ("gpslot", list(gpslot)), ("drawn", [1 if x in HIDDEN else 0 for x in range(VIEW_W)]),
             ("lay_wrej", [0])]
 
@@ -714,7 +750,7 @@ def transplant(frame_text, emitter_text):
 # ---- the entry state ------------------------------------------------------------------------------------
 # the range's inputs: what the build computes before it, set per record from THINGS
 INPUTS = {"gps_nslot", "trb_y0", "trb_shade_row", "trb_tx1", "trb_tx2", "trb_tistep", "trb_blk_const",
-          "trb_bucket", "ballow", "sp_dw"}
+          "trb_bucket", "ballow", "sp_dw", "trb_ylo1", "trb_yhi1"}       # P11: frame.ledge_box's, before the range
 WIDTHS = {d.split(":")[0].strip(): d.split("hex.vec", 1)[1].strip()
           for d in wr.hoisted_scratch_decls(CFG) if "hex.vec" in d}
 
@@ -796,7 +832,9 @@ def write_program(frame_text, emitter_text):
                  "    hex.set 8, trb_tx1, %d" % (x1 & 0xFFFFFFFF), "    hex.set 8, trb_tx2, %d" % (x2 & 0xFFFFFFFF),
                  "    hex.set 8, trb_tistep, %d" % istep, "    hex.set w/4, trb_blk_const, %d" % base,
                  # the bucket as sprbkt.lookup leaves it: [its height hb][bucket] (M7 P1.6)
-                 "    hex.set 4, trb_bucket, %d" % ((0xA0 + bucket) << 8 | bucket),
+                 "    hex.set 4, trb_bucket, %d" % (_hb(bucket) << 8 | bucket),
+                 "    hex.set 2, trb_ylo1, %d" % _ledge_box(y0, _hb(bucket))[0],
+                 "    hex.set 2, trb_yhi1, %d" % _ledge_box(y0, _hb(bucket))[1],
                  "    hex.set 1, ballow, %d" % ballow,
                  "    hex.set 2, sp_dw, %d" % sp_dw, "    " + call]
     main += ["    lay_dump pclm, %d" % len(expected_block()[1]), "    stl.loop"]

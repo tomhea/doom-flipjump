@@ -49,8 +49,10 @@ def _section(src):
     lines = body.split("\n")
     s0 = next(n for n, ln in enumerate(lines) if "frame.sub8_chain trb_y0, trb_bucket_h" in ln) + 1
     s1 = lines.index("      bslot_done:") + 1
+    # P11: minus frame.ledge_box (the box the ledge test reads later -- tests/fj/test_sprite_bank_fj.py runs it; this
+    # harness assembles the section alone, without frame_render.fj)
     code = "\n".join(ln.split("//")[0].rstrip().replace(" .rec_goto ", " t_goto ")   # the record's gated jump
-                     for ln in lines[s0:s1] if ln.split("//")[0].strip())
+                     for ln in lines[s0:s1] if ln.split("//")[0].strip() and " .ledge_box " not in ln)
     labels = set(re.findall(r"^\s*(\w+):", code, re.M))
     used = set(_IDENT.findall(code))
     tail = {"seen_probe", "ret"}

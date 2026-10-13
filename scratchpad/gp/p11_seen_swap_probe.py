@@ -43,7 +43,7 @@ views = [None] * hook.views.n
 for m, v in hook._mviews(w).items():
     views[hook.views.mdi[m]] = v
 A = dict(rm=w.rm, scene=hook._scene(w), sprite_wad=hook.art, thing_positions=pos, thing_hidden=hid,
-         thing_views=views, kw=dict(GAME_RENDER_KW))
+         thing_views=views)
 
 # the mirror's keyword set, as probe.Oracle.render builds it from b0's inputs
 orc = P.Oracle()
@@ -52,8 +52,8 @@ mph.world, mph.gd = w, S.gd
 B = dict(rm=orc.rm, scene=orc.scene_for(tuple(ws.d_state), dict(w.heights_now)),
          sprite_wad=orc.art, thing_positions=orc.monster_positions(mph),
          thing_hidden=set(orc.hidden), thing_views=orc.monster_views(mph, ws.px, ws.py),
-         mobiles=mph.mobiles(), thing_removed=orc.monster_removed(mph), barrel_views=orc.monster_barrel_views(mph),
-         kw=dict(orc.RENDER_KW))
+         mobiles=mph.mobiles(), thing_removed=orc.monster_removed(mph), barrel_views=orc.monster_barrel_views(mph))
+assert orc.RENDER_KW == GAME_RENDER_KW, "the mirror's keyword set is the game tier's: both sides render with it"
 vd = mph.view_drop()
 if vd:
     B["view_drop"] = vd
@@ -61,10 +61,9 @@ if vd:
 
 def seen(d):
     d = dict(d)
-    rm, kw = d.pop("rm"), d.pop("kw")
-    scene = d.pop("scene")
+    rm, scene = d.pop("rm"), d.pop("scene")
     s = set()
-    rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, w.mapname), scene, seen_out=s, **d, **kw)
+    rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, w.mapname), scene, seen_out=s, **d, **GAME_RENDER_KW)
     return hook.views.mdi[M] in s
 
 
@@ -73,9 +72,9 @@ print("SeenHook's hidden: %d drawables; the mirror's: %d (skill-absent %d); only
       % (len(A["thing_hidden"]), len(B["thing_hidden"]), len(orc.hidden), sorted(B["thing_hidden"] - A["thing_hidden"])[:20]))
 print("positions differ at %s" % [i for i, (a, b) in enumerate(zip(A["thing_positions"], B["thing_positions"])) if a != b][:20])
 print("views differ at %s" % [i for i, (a, b) in enumerate(zip(A["thing_views"], B["thing_views"])) if a != b][:20])
-print("mobiles %d, removed %s, barrel_views %d, view_drop %s, scene same %s, kw same %s, art same %s"
+print("mobiles %d, removed %s, barrel_views %d, view_drop %s, scene same %s, art same %s"
       % (len(B["mobiles"] or ()), sorted(B["thing_removed"] or ())[:12], len(B["barrel_views"] or {}), vd,
-         A["scene"] is B["scene"], A["kw"] == B["kw"], A["sprite_wad"] is B["sprite_wad"]))
+         A["scene"] is B["scene"], A["sprite_wad"] is B["sprite_wad"]))
 for k in sorted(set(A) | set(B)):
     a2 = dict(A)
     if k in B:

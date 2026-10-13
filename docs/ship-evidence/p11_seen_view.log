@@ -6,16 +6,15 @@
 $ python scratchpad/gp/p11_trail_seen_dump.py build/doom_e1m1_blocked57.fjm scratchpad/12m/atlas/blocked57.labels.tsv.gz docs/ship-evidence/p11_trail7_blocked57.json 7 100
 dumped 100 frames of run 7 to docs/ship-evidence/p11_trail7_blocked57.json (sha256 56954405b448a6b3; run earlier this session, 1 m 37 s)
 
-## 2. which render input flips monster 21 at frame 52: SeenHook's keyword set (through the World's renderer, as before the fix) vs the gates' mirror's (probe.Oracle.render), one input swapped at a time
+## 2. which render input flips monster 21 at frame 52: SeenHook's keyword set (through the World's renderer, as before the fix) vs the gates' mirror's (probe.Oracle.render), one input swapped at a time (both with GAME_RENDER_KW)
 $ python scratchpad/gp/p11_seen_swap_probe.py 52 21
 frame 52: monster 21 seen (GameSim) = 0, at (678, 310) active 1 state 85
 SeenHook's set: True   the mirror's set: False
 SeenHook's hidden: 7 drawables; the mirror's: 22 (skill-absent 22); only in the mirror's: [0, 1, 4, 5, 49, 108, 135, 161, 170, 182, 198, 199, 200, 229, 232]
 positions differ at []
 views differ at []
-mobiles 0, removed [], barrel_views 22, view_drop 0, scene same False, kw same True, art same False
+mobiles 0, removed [], barrel_views 22, view_drop 0, scene same False, art same False
    swap barrel_views    SeenHook's set with the mirror's: True    the mirror's with SeenHook's: False
-   swap kw              SeenHook's set with the mirror's: True    the mirror's with SeenHook's: False
    swap mobiles         SeenHook's set with the mirror's: True    the mirror's with SeenHook's: False
    swap rm              SeenHook's set with the mirror's: False   the mirror's with SeenHook's: True
    swap scene           SeenHook's set with the mirror's: True    the mirror's with SeenHook's: False

@@ -22,10 +22,11 @@ on 2026-09-06 and the 12M-ops render target is SUPERSEDED.** Success is now two 
 COMBINED FULL GAME (collision + sim + reset included): the binding speed of 10x100-frame games,
 `(mean + p80) / 2` of the runs' ops/frame (the owner's 2026-09-06 refinement of the p80; the
 `gamespeed.py` docstring says why) at <= 22M ops/frame (**20M until the combat game shipped; D1 moved it to
-22M at M7 P8, `gamespeed.SPEED_TARGET`**), and the binary at <= 42% of 2^27 words (35% at first; **RAISED
+22M at M7 P8, `gamespeed.SPEED_TARGET`**), and the binary at <= 43% of 2^27 words (35% at first; **RAISED
 to <= 40% from M7 P4.0 on** -- `docs/gp-combat.md` C2, the owner 2026-09-25 + 2026-10-04 -- **and to <= 42%
-after P5: "its ok to get to 42% if things get messy or big" (the owner, 2026-10-04)**;
-`gamespeed.SIZE_TARGET_PCT` is 42 since fe754a0). The milestone's own cap, CAP-22 on the frozen combat set,
+after P5: "its ok to get to 42% if things get messy or big" (the owner, 2026-10-04)** -- **and to <= 43% at P10: "Raise
+the cap to 43%" (the owner, 2026-10-13; P10's one-pass binary at 42.06%)**;
+`gamespeed.SIZE_TARGET_PCT` is 43 since M7 P10, 42 since fe754a0 before). The milestone's own cap, CAP-22 on the frozen combat set,
 is `docs/handoff-gameplay.md` section 1.
 **Both are MET by the shipped binary -- see the ship-gate section below for the standing numbers
 and their provenance.** The 2026-09-06 baseline that first priced this goal (p80 24,723,058, 93.50%

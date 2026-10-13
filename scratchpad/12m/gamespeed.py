@@ -46,8 +46,9 @@ from m2_std_gate import MENU_FRAMES, menu_exit_events, to_events           # noq
 
 SPEED_TARGET = 22_000_000          # (mean + p80) / 2 of the runs' ops/frame: 22M since the combat game shipped (D1,
 #                                    docs/handoff-gameplay.md; M7 P8 on blocked53), 20M before
-SIZE_TARGET_PCT = 42.0             # of the address ceiling: 42% acceptable "if things get messy or big" (the owner 2026-10-04,
-#                                    after P5 at 35.16%); 40% from M7 P4.0 (gp-combat C2), 35% before
+SIZE_TARGET_PCT = 43.0             # of the address ceiling: 43% from M7 P10 (the owner 2026-10-13, "Raise the cap to 43%",
+#                                    P10's one-pass binary onepass56 at 42.06%); 42% "if things get messy or big" (the owner
+#                                    2026-10-04, after P5 at 35.16%); 40% from M7 P4.0 (gp-combat C2), 35% before
 
 
 # ----------------------------------------------------------------------------------------------

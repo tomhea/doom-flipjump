@@ -6,7 +6,10 @@ HOW IT HOOKS IN (all from scratchpad code, nothing tracked is touched):
     frame's thing list and baked mask, so the oracle's own per-leaf "baked first, then runtime, list
     order" build, its budgets, its degradation and its two write-once fragment slots run unchanged;
   * `reference_model.MONSTER_TYPES` gains the synthetic types of the model's monsters (and, unless an
-    option says otherwise, of their corpses), so the budget CATEGORY is the oracle's own test;
+    option says otherwise, of their corpses), so the budget CATEGORY is the oracle's own test -- and (M7 P11)
+    so does `reference_model.DRAW_ACTOR_TYPES`, the DRAWING class the oracle derives from it at import (the
+    monsters and the EXIT sign): unpatched, the synthetic monsters drew as scenery (census_control FAILED at
+    h42 and the courtyard; tests/host/test_census_control.py runs the control in the suite);
   * `rm.sprite_art` answers synthetic types from a real patch of assets/freedoom1.wad (the frame the
     thing would show -- the SIZE STAND-IN, see below);
   * `rm.project_thing` is wrapped: at every call it reads the caller's frame (the thing `t`, its leaf,
@@ -56,6 +59,8 @@ _OLD_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wal
                  rt_depth_order="aprox",   # M7 P3.3 (D3 d): a leaf's runtime things nearest first
                  exempt_actors=True)  # M7 P6+P7 E: the actors rule (reference_model.render_wall_frame; v6's picture)
 ORIG_MONSTER_TYPES = RMOD.MONSTER_TYPES
+ORIG_DRAW_ACTOR_TYPES = RMOD.DRAW_ACTOR_TYPES               # M7 P11 (a): MONSTER_TYPES + the EXIT sign
+DRAW_ONLY_ACTORS = ORIG_DRAW_ACTOR_TYPES - ORIG_MONSTER_TYPES   # the actors that are not monsters (the sign)
 from doomfj.combat import aim_window as _aim_window                          # noqa: E402
 AIM_LO, AIM_HI = _aim_window(ReferenceModel(Config()))   # the pellet window: ONE definition
 # M7 P8a (C): the compositor rules' two keys ride the game tier's PLAYER mode (world.compositor_d3) -- the census of a
@@ -311,6 +316,7 @@ class Census:
             scene = build_scene(self.mw, self.mw, "E1M1", self.world.heights_now)
         self.frame = (things, baked)
         RMOD.MONSTER_TYPES = mtypes
+        RMOD.DRAW_ACTOR_TYPES = frozenset(mtypes) | DRAW_ONLY_ACTORS    # M7 P11: the drawing class follows
         self.probe.begin({id(t): mm for t, mm in zip(things, metas)}, exempt)
         try:
             fb = bytes(self.rm.render_wall_frame(state, scene, sprite_wad=self.art, **dict(RENDER_KW, **self.d3_kw)))
@@ -318,6 +324,7 @@ class Census:
             self.probe.end()
             self.frame = None
             RMOD.MONSTER_TYPES = ORIG_MONSTER_TYPES
+            RMOD.DRAW_ACTOR_TYPES = ORIG_DRAW_ACTOR_TYPES
         return fb, self.probe.arrivals
 
 

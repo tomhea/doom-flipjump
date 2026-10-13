@@ -1,0 +1,80 @@
+# P11, 2026-10-13 -- the owner's question: gamespeed read a mean of 11.6M ops/frame at P9 and 18.2M at P10 (P10 re-planned
+# the tours), and the renderer-only deg table showed P11 +2.5..3.4% over P10. This puts DIFFERENT binaries on the SAME frames:
+# each route's poses are dumped once, then REPLAYED into every binary -- the menu skipped by poke (B0's POKE_LEAD /
+# POKE_ENTER), the view pose written at every frame start, no key held, the doors at the route's states, the player's
+# health held at 100 -- and each run's EXACT average ops per game frame is (total - startup) / frames.
+#
+# binaries (sha256, first 16):
+#   0e4582a0c8d52134  doom_e1m1_blocked54.fjm
+#   63869ab4be6f2ddc  doom_e1m1_onepass56.fjm
+#   05c64ee3b966d5bf  doom_e1m1_blocked57.fjm
+#   837f1abaccc7e7c7  doom_e1m1_blocked55.fjm
+#   b45aca56ce894446  doom_e1m1_onepass55.fjm
+#   blocked54 = P9's ship; onepass56 = P10's ship; blocked57 = P11; blocked55 / onepass55 = P10's source BEFORE the window-walker
+#   fix (557d239), built TWO-PASS / ONE-PASS (the walker bug crashes them on most tours: 'collines run ends ... behind the fill cursor')
+# routes (docs/ship-evidence/p11_ops_matrix_routes.json.gz):
+#   A = P9's 10 gamespeed tours as blocked54 walked them -- scratchpad/gp/p11_trail_seen_dump.py run in a detached worktree at
+#       194ed62 (P9's merge: P9's gamespeed scripts, menu and probe) on blocked54; every run ends where P9's records say
+#       ((529, 208), (-296, 120), (707, 492), (147, 214), (-128, 271), (-276, 425), (-371, 80), (-452, 373), (-493, 223), (-495, 194))
+#   B = P10's 10 gamespeed tours (today's binding metric) as blocked57 walked them -- the same dump at 6f9b419 on blocked57;
+#       every run ends at blocked57's BINARY_ENDS
+#   C = the four deg_gate viewpoints, each held 20 frames
+# replay: python scratchpad/gp/p11_pose_replay.py FJM LABELS DUMP.json ...  (PYTHONPATH="src;scratchpad/12m;scratchpad/gp;scratchpad")
+# table:  python scratchpad/gp/p11_matrix_tabulate.py <the directory of the replay logs>
+
+
+route A: P9's 10 tours (as blocked54 walked them)
+run                        P9             P10             P11  2-pass(P10src)  1-pass(P10src) 
+0               20,282,862      20,844,670      20,846,589      20,967,627      20,941,121    
+1                9,868,408      10,240,738      10,176,147        crash@51        crash@51    
+2               16,803,103      17,114,496      16,999,741        crash@41        crash@41    
+3               13,192,917      13,600,212      13,569,438        crash@81        crash@81    
+4               10,744,445      11,098,901      11,081,554      11,070,299      11,043,793    
+5               12,041,022      12,390,584      12,358,168        crash@72        crash@72    
+6                8,028,882       8,369,043       8,299,394        crash@81        crash@81    
+7                8,082,341       8,420,723       8,371,565        crash@88        crash@88    
+8                7,352,505       7,651,799       7,602,880        crash@23        crash@23    
+9                7,739,192       8,041,463       8,014,050        crash@24        crash@24    
+mean (10 runs)  11,413,568      11,777,263      11,731,953    
+   P9 -> P10 +3.19%   P10 -> P11 -0.38%   P9 -> P11 +2.79%
+   two-pass vs one-pass (same source; 2 runs both completed): 16,018,963 vs 15,992,457 = -0.17%
+
+route B: P10's 10 tours (today's binding metric; as blocked57 walked them)
+run                        P9             P10             P11  2-pass(P10src)  1-pass(P10src) 
+0               19,454,035      19,983,808      19,911,402        crash@27        crash@27    
+1               17,110,194      17,704,175      17,630,603        crash@59        crash@59    
+2               18,034,924      18,332,425      18,187,893        crash@40        crash@40    
+3               20,944,044      21,434,146      21,267,991      21,468,738      21,442,232    
+4               19,186,984      19,494,347      19,275,571        crash@38        crash@38    
+5               19,168,817      19,644,007      19,617,077        crash@45        crash@45    
+6               18,419,498      18,750,573      18,662,845        crash@47        crash@47    
+7               17,251,808      17,674,214      17,625,120        crash@18        crash@18    
+8               13,990,479      14,293,637      14,286,709        crash@18        crash@18    
+9               13,517,122      13,763,659      13,777,835        crash@18        crash@18    
+mean (10 runs)  17,707,790      18,107,499      18,024,305    
+   P9 -> P10 +2.26%   P10 -> P11 -0.46%   P9 -> P11 +1.79%
+   two-pass vs one-pass (same source; 1 runs both completed): 21,468,738 vs 21,442,232 = -0.12%
+
+route C: the four deg_gate viewpoints, each held 20 frames
+run                        P9             P10             P11  2-pass(P10src)  1-pass(P10src) 
+C0(664,291)     20,840,278      21,260,047      21,246,945      21,550,614      21,524,108    
+C2(1869,479)    19,568,656      19,823,472      19,957,489      19,798,950      19,772,444    
+C3(-416,256)    19,870,617      20,133,492      20,102,956      20,039,146      20,012,640    
+C1(1272,-724)   10,128,880      10,659,294      10,594,117      10,625,023      10,598,517    
+mean (4 runs)   17,602,108      17,969,076      17,975,377    
+   P9 -> P10 +2.08%   P10 -> P11 +0.04%   P9 -> P11 +2.12%
+   two-pass vs one-pass (same source; 4 runs both completed): 18,003,433 vs 17,976,927 = -0.15%
+
+## calibration: a binary replaying its own route, against its native gamespeed (keys driven; the replay skips the move and collision work)
+   P9 blocked54 on route A: replay mean 11,413,568 vs native 11,624,535 (docs/ship-evidence/blocked54_gamespeed.log) = -1.8%
+   P11 blocked57 on route B: replay mean 18,024,305 vs native 18,156,521 (docs/ship-evidence/blocked57_gamespeed.log) = -0.7%
+
+## R9: the negative control -- route B runs 0 and 3 on blocked57 with every frame's pose replaced by the run's FIRST pose
+doom_e1m1_blocked57.fjm: startup + 2 lead frames 183,145 ops (exact); CONTROL: a frozen camera
+  run 0: 100 frames, avg 24,770,544 ops/frame (exact); p50 24,641,536 p80 24,903,680 max 25,690,112; cells not in this binary: none
+  run 3: 100 frames, avg 23,511,760 ops/frame (exact); p50 23,592,960 p80 23,592,960 max 24,379,392; cells not in this binary: none
+doom_e1m1_blocked57.fjm over 2 runs: mean of run averages 24,141,152, 80th pct 24,770,544, (mean+p80)/2 24,455,848 ops/frame
+   -> 24,770,544 and 23,511,760 against the tour's 19,911,402 and 21,267,991: the replay measures the poses
+
+## one pass vs two passes, timed (ms/frame): docs/ship-evidence/onepass55_msframe.log -- A blocked55 (two-pass) 162.2 ms/frame,
+## B onepass55 (one-pass) 163.0 ms/frame, median ratio 1.002, NOT SEPARATED (power plan 'Silent': both arms alike)

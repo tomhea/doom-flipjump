@@ -48,10 +48,11 @@ COL = 80
 # edge -- the column was already wall-drawn when the walk reached the monster's leaf. Compared as a LIST (doc 5, T1):
 # any movement is a visible diff.
 FROZEN_RESIDUALS = {
-    # M7 P11: re-measured on v10's slice (combat_scenarios_v10.json, keys 637b7c50cdecc50d) AT THE GAME VIEW -- the
-    # window as the binary draws it, SeenHook.rm = ReferenceModel(GAME_CFG), 84 rows (first measured through the
-    # World's full-screen renderer, 100 rows: spectre 3 had 88 and 6 had 74 / 75 too, 972/1020 columns agreed): column
-    # 80 has a geometric target on 42 frames and a window target on 40, 975/1020 columns agree; the controls move 24
+    # M7 P11: re-measured on v10's slice (combat_scenarios_v10.json, keys 5bb15f59e01c36b8: re-planned at the game
+    # view; the slice's frames are the first plan's, 637b7c50cdecc50d, to the key) AT THE GAME VIEW -- the window as
+    # the binary draws it, SeenHook.rm = ReferenceModel(GAME_CFG), 84 rows (first measured through the World's
+    # full-screen renderer, 100 rows: spectre 3 had 88 and 6 had 74 / 75 too, 972/1020 columns agreed): column 80
+    # has a geometric target on 42 frames and a window target on 40, 975/1020 columns agree; the controls move 24
     # (radius + 1), 1 (no occlusion) and 6 (no ledge) frames. v9's three "edge-closed" columns stay, to the column:
     # spectre 3 (87), 4 (81) and 5 (75), the geometric aim's monster 3 each time. EVERY other column is
     # "ledge-hidden" -- the geometric aim's monster 29 (frames 2, 3, 6, 8) or 38 (frames 4, 5), the window empty there.

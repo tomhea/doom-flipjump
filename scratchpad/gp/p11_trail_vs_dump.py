@@ -1,7 +1,10 @@
 """P11: GameSim (the trail's reference, with whatever SeenHook the tree has) stepped over gamespeed run R against the
 binary's dump (trail_seen_dump.py): per frame the pose, doors, lifts, monster states and seen flags -- the first frame
-and cell that part, and the count of equal frames. Run in a doom-flipjump checkout:
-PYTHONPATH="src;scratchpad/12m;scratchpad/gp;scratchpad" python trail_vs_dump.py DUMP.json"""
+and cell that part, and the count of equal frames. Exits 0 only when every frame is equal.
+`--control` (R9): the same comparison with GameSim's SeenHook drawing through the World's full-screen renderer -- the
+picture before P11's fix (sight.SeenHook.rm) -- which MUST part; exits 0 only when it does.
+Run in a doom-flipjump checkout:
+PYTHONPATH="src;scratchpad/12m;scratchpad/gp;scratchpad" python p11_trail_vs_dump.py DUMP.json [--control]"""
 import json
 import sys
 from pathlib import Path
@@ -10,11 +13,15 @@ sys.path[:0] = ["scratchpad/12m", "scratchpad/gp", "scratchpad", "src"]
 import gamespeed as GS  # noqa: E402
 
 M32 = 0xFFFFFFFF
-dump = json.loads(Path(sys.argv[1]).read_text(encoding="ascii"))
+CONTROL = "--control" in sys.argv[1:]
+dump = json.loads(Path([a for a in sys.argv[1:] if a != "--control"][0]).read_text(encoding="ascii"))
 R, N = dump["run"], dump["frames"]
 sim = GS.GameSim()
 st = sim.reset()
 w = sim.w
+if CONTROL:
+    assert w.seen_hook.rm is not w.rm
+    w.seen_hook.rm = w.rm                     # the pre-fix picture: the World's full-screen renderer (Config())
 n = w.layout.nmon
 equal, first = 0, None
 for f, kd in enumerate(GS.script(R, N)):
@@ -39,3 +46,8 @@ for f, kd in enumerate(GS.script(R, N)):
     else:
         equal += 1
 print("run %d: %d of %d frames equal; first parted frame: %s" % (R, equal, N, first))
+if CONTROL:
+    print("CONTROL (the full-screen hook): %s" % ("PARTS -- the comparison has teeth" if first is not None
+                                                  else "FAIL -- it does not part: the comparison cannot fail"))
+    sys.exit(0 if first is not None else 1)
+sys.exit(0 if first is None else 1)

@@ -97,5 +97,5 @@ because (d) needs the same per-column test where the record marks seen, so skipp
    hurt / die / p2a gates, stress, gamespeed, msframe vs blocked56 -- class F, the D8 tripwire ~90 ms/frame -- size).
 
 **Kill criteria** (declared before the build): (K1) any gate not byte- and state-exact; (K2) the size over 42% of
-2^27; (K3) CAP-22 binding; (K4) msframe over ~90 ms/frame unexplained (D8); (K5) (b) costing more than 0.1% of
+2^27 (43% since 88c1ac1: the owner raised the cap on P10's onepass56, 2026-10-13); (K3) CAP-22 binding; (K4) msframe over ~90 ms/frame unexplained (D8); (K5) (b) costing more than 0.1% of
 msframe's time against a build without it (the owner's bound) -- measured, not estimated.

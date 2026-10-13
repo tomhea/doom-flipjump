@@ -27,3 +27,15 @@ mobiles 0, removed [], barrel_views 22, view_drop 0, scene same False, art same 
 ## 3. GameSim (the trail's reference) with the FIXED SeenHook against the binary's dump, frame by frame (pose, doors, lifts, monster states, seen flags)
 $ python scratchpad/gp/p11_trail_vs_dump.py docs/ship-evidence/p11_trail7_blocked57.json
 run 7: 100 of 100 frames equal; first parted frame: None
+
+## 4. R9: the comparison's negative control -- the same run with GameSim's SeenHook drawing through the World's full-screen renderer (the hook before the fix); it must part
+$ python scratchpad/gp/p11_trail_vs_dump.py docs/ship-evidence/p11_trail7_blocked57.json --control
+frame 52: thseen parts at [21] -- model [1], binary [0]
+run 7: 70 of 100 frames equal; first parted frame: 52
+CONTROL (the full-screen hook): PARTS -- the comparison has teeth
+rc=0
+
+## 3 again, on the tool as committed (exit status 0 only when every frame is equal)
+$ python scratchpad/gp/p11_trail_vs_dump.py docs/ship-evidence/p11_trail7_blocked57.json
+run 7: 100 of 100 frames equal; first parted frame: None
+rc=0

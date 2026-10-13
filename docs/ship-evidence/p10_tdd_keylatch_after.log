@@ -1,0 +1,34 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-cc7 [at cc7f583, unmodified] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_key_latch.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_keylatch_after
+# worktree HEAD: cc7f583354d018f8670ac57798445303a354425a (P10: test_key_latch's harness declares ev_any (the poll's any-key edge since P10) -- CI shard 2/20's)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-cc7\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:32:42 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-cc7
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 18 items
+
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[a tap pushed into the next frame by a burst latches there] PASSED [  5%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[every bound key tapped once] PASSED [ 11%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[fire and weapon 2 tapped in the same frame] PASSED [ 16%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[fire held across frames] PASSED [ 22%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[fire tapped inside one frame fires that frame] PASSED [ 27%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[fire tapped twice inside one frame: one frame] PASSED [ 33%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[forward held two frames, released in the third] PASSED [ 38%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[held from before, released and pressed again in one frame: held] PASSED [ 44%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[nothing] PASSED [ 50%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[pressed in one frame, released in the next: both frames] PASSED [ 55%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[use tapped inside one frame uses that frame] PASSED [ 61%]
+tests/fj/test_key_latch.py::test_the_frame_acts_on_held_or_pressed[weapon 2 tapped inside one frame switches that frame] PASSED [ 66%]
+tests/fj/test_key_latch.py::test_a_tap_counts_for_exactly_its_frame PASSED [ 72%]
+tests/fj/test_key_latch.py::test_the_scripts_are_not_vacuous PASSED      [ 77%]
+tests/fj/test_key_latch.py::test_negative_control_the_pre_p9_oracle_is_caught PASSED [ 83%]
+tests/fj/test_key_latch.py::test_a_broken_prologue_is_caught[the OR with the held flags dropped] PASSED [ 88%]
+tests/fj/test_key_latch.py::test_a_broken_prologue_is_caught[the key byte built from the held flags (pre-P9)] PASSED [ 94%]
+tests/fj/test_key_latch.py::test_a_broken_prologue_is_caught[the latch never re-zeroed] PASSED [100%]
+
+============================= 18 passed in 2.67s ==============================
+# finished 2026-10-13 04:32:46 +0300; pytest exit code: 0

@@ -1,0 +1,33 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-194 [at 194ed62 (main's merge base) + tests/fj/test_level_done_fj.py, tests/fj/test_secret_fj.py, tests/host/test_chaingun_model.py, tests/host/test_p10_edges.py from 31bccd2] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_level_done_fj.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_leveldone_before
+# worktree HEAD: 194ed62adf3413dca97a600e3c56bf898726898b (Merge pull request #127 from tomhea/p9-playtest)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#   ?? tests/fj/test_level_done_fj.py
+#   ?? tests/fj/test_secret_fj.py
+#   ?? tests/host/test_chaingun_model.py
+#   ?? tests/host/test_p10_edges.py
+# copied-file hashes: tests/fj/test_level_done_fj.py=0283b15fcc05 tests/fj/test_secret_fj.py=3d555a0772c1 tests/host/test_chaingun_model.py=94e11a8ce1ba tests/host/test_p10_edges.py=0810e130ed26 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-194\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:53:05 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-194
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_______________ ERROR collecting tests/fj/test_level_done_fj.py _______________
+ImportError while importing test module 'C:\Users\tomhe\Documents\doom-tdd-194\tests\fj\test_level_done_fj.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\fj\test_level_done_fj.py:22: in <module>
+    from doomfj import statcode as SC
+E   ImportError: cannot import name 'statcode' from 'doomfj' (C:\Users\tomhe\Documents\doom-tdd-194\src\doomfj\__init__.py)
+=========================== short test summary info ===========================
+ERROR tests/fj/test_level_done_fj.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 1.09s ===============================
+# finished 2026-10-13 04:53:08 +0300; pytest exit code: 2

@@ -1,0 +1,189 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-194 [at 194ed62 (main's merge base) + tests/fj/test_level_done_fj.py, tests/fj/test_secret_fj.py, tests/host/test_chaingun_model.py, tests/host/test_p10_edges.py from 31bccd2] && PYTHONPATH=src timeout 1800 python -m pytest tests/host/test_p10_edges.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_edges_before
+# worktree HEAD: 194ed62adf3413dca97a600e3c56bf898726898b (Merge pull request #127 from tomhea/p9-playtest)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#   ?? tests/fj/test_level_done_fj.py
+#   ?? tests/fj/test_secret_fj.py
+#   ?? tests/host/test_chaingun_model.py
+#   ?? tests/host/test_p10_edges.py
+# copied-file hashes: tests/fj/test_level_done_fj.py=0283b15fcc05 tests/fj/test_secret_fj.py=3d555a0772c1 tests/host/test_chaingun_model.py=94e11a8ce1ba tests/host/test_p10_edges.py=0810e130ed26 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-194\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:53:56 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-194
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 6 items
+
+tests/host/test_p10_edges.py::test_a_pool_edge_below_the_screen_paints_the_pool FAILED [ 16%]
+tests/host/test_p10_edges.py::test_a_riser_below_the_screen_shows_the_floor_beyond_it FAILED [ 33%]
+tests/host/test_p10_edges.py::test_no_base_is_recorded_without_the_stacked_pieces FAILED [ 50%]
+tests/host/test_p10_edges.py::test_a_third_sprite_shows_where_the_two_nearer_leave_rows FAILED [ 66%]
+tests/host/test_p10_edges.py::test_the_third_slot_changes_nothing_where_no_column_holds_three FAILED [ 83%]
+tests/host/test_p10_edges.py::test_a_sprite_behind_a_nearer_ledge_keeps_only_the_rows_the_ledge_leaves FAILED [100%]
+
+================================== FAILURES ===================================
+______________ test_a_pool_edge_below_the_screen_paints_the_pool ______________
+
+world = (Scene(map_wad=<doomfj.wad.WadFile object at 0x000002C0028CB450>, asset_wad=<doomfj.wad.WadFile object at 0x000002C002...2544))], root=680), sector_heights=None, blocked_lines=frozenset()), <doomfj.wad.WadFile object at 0x000002C0039AEBD0>)
+
+    def test_a_pool_edge_below_the_screen_paints_the_pool(world):
+        """On the bank, facing the pool: the edge (a LIP: the pool is 8 units lower) is below the screen, so no piece --
+        and every column's floor base is the pool. The base region is then the pool's flat, where the model without the
+        base paint draws the bank's floor all the way out to the far edge (the owner's report)."""
+        scene, art = world
+        bases = []
+>       with_ = _render(ReferenceModel(CFG), scene, art, POOL_BANK, bases_out=bases)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\host\test_p10_edges.py:87: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+model = <doomfj.reference_model.ReferenceModel object at 0x000002C00249F690>
+scene = Scene(map_wad=<doomfj.wad.WadFile object at 0x000002C0028CB450>, asset_wad=<doomfj.wad.WadFile object at 0x000002C0028..., bbr=(2336, 64, -704, 3248), bbl=(64, -1064, -128, 2544))], root=680), sector_heights=None, blocked_lines=frozenset())
+art = <doomfj.wad.WadFile object at 0x000002C0039AEBD0>
+view = (1688, 1357, 2944438690), extra = {'bases_out': []}, vx = 1688, vy = 1357
+va = 2944438690
+st = SimState(x=110624768, y=88932352, angle=2944438690, level='E1M1', turnheld=0)
+
+    def _render(model, scene, art, view, **extra):
+        vx, vy, va = view
+        st = SimState((vx << 16) & 0xFFFFFFFF, (vy << 16) & 0xFFFFFFFF, va, "E1M1")
+>       return model.render_wall_frame(st, scene, sprite_wad=art, **dict(KW, **extra))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: ReferenceModel.render_wall_frame() got an unexpected keyword argument 'bases_out'
+
+tests\host\test_p10_edges.py:78: TypeError
+___________ test_a_riser_below_the_screen_shows_the_floor_beyond_it ___________
+
+world = (Scene(map_wad=<doomfj.wad.WadFile object at 0x000002C0028CB450>, asset_wad=<doomfj.wad.WadFile object at 0x000002C002...2544))], root=680), sector_heights=None, blocked_lines=frozenset()), <doomfj.wad.WadFile object at 0x000002C0039AEBD0>)
+
+    def test_a_riser_below_the_screen_shows_the_floor_beyond_it(world):
+        """In the pool, facing the bank: the edge is a RISER (8 units up), wholly below the screen -- the floor shown is
+        the bank's beyond it, not the pool's around the player."""
+        scene, art = world
+        bases = []
+>       _render(ReferenceModel(CFG), scene, art, POOL_IN, bases_out=bases)
+
+tests\host\test_p10_edges.py:103: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+model = <doomfj.reference_model.ReferenceModel object at 0x000002C00288D3D0>
+scene = Scene(map_wad=<doomfj.wad.WadFile object at 0x000002C0028CB450>, asset_wad=<doomfj.wad.WadFile object at 0x000002C0028..., bbr=(2336, 64, -704, 3248), bbl=(64, -1064, -128, 2544))], root=680), sector_heights=None, blocked_lines=frozenset())
+art = <doomfj.wad.WadFile object at 0x000002C0039AEBD0>
+view = (1656, 1283, 796955042), extra = {'bases_out': []}, vx = 1656, vy = 1283
+va = 796955042
+st = SimState(x=108527616, y=84082688, angle=796955042, level='E1M1', turnheld=0)
+
+    def _render(model, scene, art, view, **extra):
+        vx, vy, va = view
+        st = SimState((vx << 16) & 0xFFFFFFFF, (vy << 16) & 0xFFFFFFFF, va, "E1M1")
+>       return model.render_wall_frame(st, scene, sprite_wad=art, **dict(KW, **extra))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: ReferenceModel.render_wall_frame() got an unexpected keyword argument 'bases_out'
+
+tests\host\test_p10_edges.py:78: TypeError
+_____________ test_no_base_is_recorded_without_the_stacked_pieces _____________
+
+world = (Scene(map_wad=<doomfj.wad.WadFile object at 0x000002C0028CB450>, asset_wad=<doomfj.wad.WadFile object at 0x000002C002...2544))], root=680), sector_heights=None, blocked_lines=frozenset()), <doomfj.wad.WadFile object at 0x000002C0039AEBD0>)
+
+    def test_no_base_is_recorded_without_the_stacked_pieces(world):
+        """the bases are V5's (`stack_steps`): the single-piece tier keeps its picture"""
+        scene, art = world
+        bases = []
+        kw = dict(KW, stack_steps=False)
+        vx, vy, va = POOL_BANK
+>       ReferenceModel(CFG).render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene, sprite_wad=art,
+                                              bases_out=bases, **kw)
+E       TypeError: ReferenceModel.render_wall_frame() got an unexpected keyword argument 'bases_out'
+
+tests\host\test_p10_edges.py:115: TypeError
+__________ test_a_third_sprite_shows_where_the_two_nearer_leave_rows __________
+
+world = (Scene(map_wad=<doomfj.wad.WadFile object at 0x000002C0028CB450>, asset_wad=<doomfj.wad.WadFile object at 0x000002C002...2544))], root=680), sector_heights=None, blocked_lines=frozenset()), <doomfj.wad.WadFile object at 0x000002C0039AEBD0>)
+
+    def test_a_third_sprite_shows_where_the_two_nearer_leave_rows(world):
+        """G3 (sprites "blink out"): where three things share columns, the two-slot model loses the third outright, and the
+        model draws its rows that the two nearer fragments leave to the background -- at each view, a different picture"""
+        scene, art = world
+>       two = _two_slots()
+              ^^^^^^^^^^^^
+
+tests\host\test_p10_edges.py:124: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def _two_slots():
+        """reference_model with the third fragment slot off: the two-slot early exit put back"""
+        src = Path(RM.__file__).read_text(encoding="utf-8")
+        line = "if drawn[x] or sfrag3[x] is not None:"
+>       assert src.count(line) == 1, line
+E       AssertionError: if drawn[x] or sfrag3[x] is not None:
+E       assert 0 == 1
+E        +  where 0 = <built-in method count of str object at 0x000002C006288D50>('if drawn[x] or sfrag3[x] is not None:')
+E        +    where <built-in method count of str object at 0x000002C006288D50> = '"""H5 — reference model / oracle (M9). The host-side **exact-integer** golden renderer + sim (D12):\nthe test oracle every fj-program milestone (M11+) diffs against, byte-for-byte.\n\nIt composes only the **shared** integer kernels — `tables.py` (finesine), `fixedpoint.py` (signed\nQ-format mul), `mapcompiler.py` (the built BSP + its `_point_side` geometry), `config.py` (the\nresolution SSOT), and the WAD\'s own COLORMAP — so the oracle and the program cannot drift (R6).\nNothing here re-derives a constant or a formula that already lives in one of those modules.\n\nM9 is the smallest honest cut (it grows as F5 features land, per the ladder):\n  * `step_sim`  — turn (BAM add) + collision-free move (FixedMul against the finesine table). S0\'s\n    line-based collision lands at M14; until then a step is pure turn/translate.\n  * `point_in_subsector` — R_PointInSubsector: the permanent BSP point-location primitive (signed\n    side tests, DOOM right=front convention) shared by both the sim and the renderer.\n  * `render_frame` — the spawn frame: a colormap-shaded ceiling/floor background at the sub-sector\'s\n    sector light. With no walls/visplanes yet (M12/M13) an empty view IS t... (FixedMul(distance, distscale[x1])) + the column\'s view angle;\n        then per pixel sample `flat[(yfrac>>10 & 63*64) + (xfrac>>16 & 63)]`, distance-lit, and step the\n        DDA. All coords are unsigned 32-bit modular (what the fj computes)."""\n        W = self.cfg.VIEW_W\n        planeheight = abs((height << 16) - viewz)\n        distance = fixed_mul(planeheight, self.yslope[y], 8, 4)\n        xstep = fixed_mul(distance, basexscale, 8, 4)\n        ystep = fixed_mul(distance, baseyscale, 8, 4)\n        length = fixed_mul(distance, self.distscale[x1], 8, 4)\n        idx = ((viewangle + self.xtoviewangle[x1]) & ANGLE_MASK) >> self.angle_shift\n        xfrac = (viewx32 + fixed_mul(self._finecos_idx(idx), length, 8, 4)) & 0xFFFFFFFF\n        yfrac = (-viewy32 - fixed_mul(self._finesin_idx(idx), length, 8, 4)) & 0xFFFFFFFF\n        row = colormap[self.plane_light_row(light, distance)]\n        for x in range(x1, x2 + 1):\n            spot = ((yfrac >> 10) & 4032) + ((xfrac >> 16) & 63)   # DOOM R_DrawSpan: v*64 + u, flats are 64x64\n            fb[y * W + x] = row[texels[spot]]\n            xfrac = (xfrac + xstep) & 0xFFFFFFFF\n            yfrac = (yfrac + ystep) & 0xFFFFFFFF\n'.count
+
+tests\host\test_p10_edges.py:66: AssertionError
+_______ test_the_third_slot_changes_nothing_where_no_column_holds_three _______
+
+world = (Scene(map_wad=<doomfj.wad.WadFile object at 0x000002C0028CB450>, asset_wad=<doomfj.wad.WadFile object at 0x000002C002...2544))], root=680), sector_heights=None, blocked_lines=frozenset()), <doomfj.wad.WadFile object at 0x000002C0039AEBD0>)
+
+    def test_the_third_slot_changes_nothing_where_no_column_holds_three(world):
+        """... and nothing at all where no column holds three fragments: the pool views have none"""
+        scene, art = world
+>       two = _two_slots()
+              ^^^^^^^^^^^^
+
+tests\host\test_p10_edges.py:134: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def _two_slots():
+        """reference_model with the third fragment slot off: the two-slot early exit put back"""
+        src = Path(RM.__file__).read_text(encoding="utf-8")
+        line = "if drawn[x] or sfrag3[x] is not None:"
+>       assert src.count(line) == 1, line
+E       AssertionError: if drawn[x] or sfrag3[x] is not None:
+E       assert 0 == 1
+E        +  where 0 = <built-in method count of str object at 0x000002C006329FE0>('if drawn[x] or sfrag3[x] is not None:')
+E        +    where <built-in method count of str object at 0x000002C006329FE0> = '"""H5 — reference model / oracle (M9). The host-side **exact-integer** golden renderer + sim (D12):\nthe test oracle every fj-program milestone (M11+) diffs against, byte-for-byte.\n\nIt composes only the **shared** integer kernels — `tables.py` (finesine), `fixedpoint.py` (signed\nQ-format mul), `mapcompiler.py` (the built BSP + its `_point_side` geometry), `config.py` (the\nresolution SSOT), and the WAD\'s own COLORMAP — so the oracle and the program cannot drift (R6).\nNothing here re-derives a constant or a formula that already lives in one of those modules.\n\nM9 is the smallest honest cut (it grows as F5 features land, per the ladder):\n  * `step_sim`  — turn (BAM add) + collision-free move (FixedMul against the finesine table). S0\'s\n    line-based collision lands at M14; until then a step is pure turn/translate.\n  * `point_in_subsector` — R_PointInSubsector: the permanent BSP point-location primitive (signed\n    side tests, DOOM right=front convention) shared by both the sim and the renderer.\n  * `render_frame` — the spawn frame: a colormap-shaded ceiling/floor background at the sub-sector\'s\n    sector light. With no walls/visplanes yet (M12/M13) an empty view IS t... (FixedMul(distance, distscale[x1])) + the column\'s view angle;\n        then per pixel sample `flat[(yfrac>>10 & 63*64) + (xfrac>>16 & 63)]`, distance-lit, and step the\n        DDA. All coords are unsigned 32-bit modular (what the fj computes)."""\n        W = self.cfg.VIEW_W\n        planeheight = abs((height << 16) - viewz)\n        distance = fixed_mul(planeheight, self.yslope[y], 8, 4)\n        xstep = fixed_mul(distance, basexscale, 8, 4)\n        ystep = fixed_mul(distance, baseyscale, 8, 4)\n        length = fixed_mul(distance, self.distscale[x1], 8, 4)\n        idx = ((viewangle + self.xtoviewangle[x1]) & ANGLE_MASK) >> self.angle_shift\n        xfrac = (viewx32 + fixed_mul(self._finecos_idx(idx), length, 8, 4)) & 0xFFFFFFFF\n        yfrac = (-viewy32 - fixed_mul(self._finesin_idx(idx), length, 8, 4)) & 0xFFFFFFFF\n        row = colormap[self.plane_light_row(light, distance)]\n        for x in range(x1, x2 + 1):\n            spot = ((yfrac >> 10) & 4032) + ((xfrac >> 16) & 63)   # DOOM R_DrawSpan: v*64 + u, flats are 64x64\n            fb[y * W + x] = row[texels[spot]]\n            xfrac = (xfrac + xstep) & 0xFFFFFFFF\n            yfrac = (yfrac + ystep) & 0xFFFFFFFF\n'.count
+
+tests\host\test_p10_edges.py:66: AssertionError
+__ test_a_sprite_behind_a_nearer_ledge_keeps_only_the_rows_the_ledge_leaves ___
+
+world = (Scene(map_wad=<doomfj.wad.WadFile object at 0x000002C0028CB450>, asset_wad=<doomfj.wad.WadFile object at 0x000002C002...2544))], root=680), sector_heights=None, blocked_lines=frozenset()), <doomfj.wad.WadFile object at 0x000002C0039AEBD0>)
+
+    def test_a_sprite_behind_a_nearer_ledge_keeps_only_the_rows_the_ledge_leaves(world):
+        """G1 (the owner's ledge bug): the model without the G1 snapshot draws the monster over the nearer ledge; the model
+        cuts it -- and every row it cuts shows exactly what is behind the sprite (the picture without the things), since a
+        farther fragment snapshots at least the same nearer pieces and is cut there too"""
+        scene, art = world
+>       plain_model = _without("if stack_steps:                # P10 G1")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\host\test_p10_edges.py:144: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+lines = ('if stack_steps:                # P10 G1',)
+src = '"""H5 — reference model / oracle (M9). The host-side **exact-integer** golden renderer + sim (D12):\nthe test oracle ...ow[texels[spot]]\n            xfrac = (xfrac + xstep) & 0xFFFFFFFF\n            yfrac = (yfrac + ystep) & 0xFFFFFFFF\n'
+line = 'if stack_steps:                # P10 G1'
+@py_assert1 = <built-in method count of str object at 0x000002C00621D070>
+
+    def _without(*lines):
+        """reference_model with each of `lines` (an `if` condition) made `if False:` -- a feature switched off"""
+        src = Path(RM.__file__).read_text(encoding="utf-8")
+        for line in lines:
+>           assert src.count(line) >= 1, line
+E           AssertionError: if stack_steps:                # P10 G1
+E           assert 0 >= 1
+E            +  where 0 = <built-in method count of str object at 0x000002C00621D070>('if stack_steps:                # P10 G1')
+E            +    where <built-in method count of str object at 0x000002C00621D070> = '"""H5 — reference model / oracle (M9). The host-side **exact-integer** golden renderer + sim (D12):\nthe test oracle every fj-program milestone (M11+) diffs against, byte-for-byte.\n\nIt composes only the **shared** integer kernels — `tables.py` (finesine), `fixedpoint.py` (signed\nQ-format mul), `mapcompiler.py` (the built BSP + its `_point_side` geometry), `config.py` (the\nresolution SSOT), and the WAD\'s own COLORMAP — so the oracle and the program cannot drift (R6).\nNothing here re-derives a constant or a formula that already lives in one of those modules.\n\nM9 is the smallest honest cut (it grows as F5 features land, per the ladder):\n  * `step_sim`  — turn (BAM add) + collision-free move (FixedMul against the finesine table). S0\'s\n    line-based collision lands at M14; until then a step is pure turn/translate.\n  * `point_in_subsector` — R_PointInSubsector: the permanent BSP point-location primitive (signed\n    side tests, DOOM right=front convention) shared by both the sim and the renderer.\n  * `render_frame` — the spawn frame: a colormap-shaded ceiling/floor background at the sub-sector\'s\n    sector light. With no walls/visplanes yet (M12/M13) an empty view IS t... (FixedMul(distance, distscale[x1])) + the column\'s view angle;\n        then per pixel sample `flat[(yfrac>>10 & 63*64) + (xfrac>>16 & 63)]`, distance-lit, and step the\n        DDA. All coords are unsigned 32-bit modular (what the fj computes)."""\n        W = self.cfg.VIEW_W\n        planeheight = abs((height << 16) - viewz)\n        distance = fixed_mul(planeheight, self.yslope[y], 8, 4)\n        xstep = fixed_mul(distance, basexscale, 8, 4)\n        ystep = fixed_mul(distance, baseyscale, 8, 4)\n        length = fixed_mul(distance, self.distscale[x1], 8, 4)\n        idx = ((viewangle + self.xtoviewangle[x1]) & ANGLE_MASK) >> self.angle_shift\n        xfrac = (viewx32 + fixed_mul(self._finecos_idx(idx), length, 8, 4)) & 0xFFFFFFFF\n        yfrac = (-viewy32 - fixed_mul(self._finesin_idx(idx), length, 8, 4)) & 0xFFFFFFFF\n        row = colormap[self.plane_light_row(light, distance)]\n        for x in range(x1, x2 + 1):\n            spot = ((yfrac >> 10) & 4032) + ((xfrac >> 16) & 63)   # DOOM R_DrawSpan: v*64 + u, flats are 64x64\n            fb[y * W + x] = row[texels[spot]]\n            xfrac = (xfrac + xstep) & 0xFFFFFFFF\n            yfrac = (yfrac + ystep) & 0xFFFFFFFF\n'.count
+
+tests\host\test_p10_edges.py:52: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_p10_edges.py::test_a_pool_edge_below_the_screen_paints_the_pool
+FAILED tests/host/test_p10_edges.py::test_a_riser_below_the_screen_shows_the_floor_beyond_it
+FAILED tests/host/test_p10_edges.py::test_no_base_is_recorded_without_the_stacked_pieces
+FAILED tests/host/test_p10_edges.py::test_a_third_sprite_shows_where_the_two_nearer_leave_rows
+FAILED tests/host/test_p10_edges.py::test_the_third_slot_changes_nothing_where_no_column_holds_three
+FAILED tests/host/test_p10_edges.py::test_a_sprite_behind_a_nearer_ledge_keeps_only_the_rows_the_ledge_leaves
+============================== 6 failed in 0.48s ==============================
+# finished 2026-10-13 04:54:04 +0300; pytest exit code: 1

@@ -1,0 +1,10 @@
+$ python scratchpad/deg_gate.py
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+program parts: entry=1,095, tables=339,943, main=68, segconsts=43,903, walk=72,722, state=477, banks=1,785,493
+assembled
+(664,291,0x18000000): 31,425,877 ops  BYTE-EXACT
+(1272,-724,0x40000000): 17,639,966 ops  BYTE-EXACT
+(1869,479,0x80000000): 30,893,233 ops  BYTE-EXACT
+(-416,256,0x0): 28,635,934 ops  BYTE-EXACT
+PASS
+rc=0

@@ -1,0 +1,19 @@
+$ python scratchpad/gp/fight_gate.py --fjm build/doom_e1m1_onepass56.fjm --labels scratchpad/12m/atlas/onepass56.labels.tsv.gz --only CG --frame-ops docs/ship-evidence/onepass56_stress_cgun.json
+FIGHT GATE -- 1 scenarios (MONSTER_MODE final, PLAYER_MODE final), build/doom_e1m1_onepass56.fjm
+
+CG1 the chaingun held into an awake crowd: both bursts' flashes, accurate then spread rounds, hits -- 50 frames
+  from (-416, 256) angle 00000000, late setups at frames [26]: the oracle does what the scenario claims: yes
+  counters: mon_hits 2, fx_spawns 4, fx_skipped 4, player_hurt 1, shots_hit 7, drop_frames 10, player_blocked 1, knock_frames 1, mon_knock_frames 12, frac_frames 12, knock_moves 80, corpse_slides 8, knock_refused 1, mon_knock_refused 6, mon_attacks 2, mkills 2, cgun_shots 8, cgun_acc 3, cgun_held 5, cgun_hits 7, cgun_flash1 8, cgun_flash2 8
+  frame 0 pokes: ['am_clip', 'p_ar', 'p_at', 'wp_own']
+  frame 26 pokes: ['mon_movecount', 'mon_state', 'mon_tics', 'viewangle', 'viewx', 'viewy']
+  CONTROL cgun_one_flash   the oracle without the rule parts at frame 28 (cells)
+  CONTROL cgun_accurate    the oracle without the rule parts at frame 30 (cells)
+  binary: 50 frames, 858,281,560 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+  frame ops: max 20,447,232 (frame 10), p95 20,447,232, mean 17,165,189, 0 of 50 frames over 22,000,000, 0 over the 44,000,000 tripwire
+
+TOTALS: mon_hits 2, mon_misses 0, mon_melee 0, proj_spawns 0, proj_impacts 0, proj_walls 0, fizzles 0, fx_spawns 4, fx_skipped 4, player_hurt 1, armor_out 0, deaths 0, dead_frames 0, max_in_flight 0, explosion_frames 0, shots_hit 7, pickups 0, pickup_items 0, pickup_drops 0, bonus_frames 0, berserk_frames 0, gibs 0, drop_frames 10, bexp_frames 0, barrel_blasts 0, puffs 0, blast_kills 0, barrel_hurt 0, player_blocked 1, nukage 0, restarts 0, restart_requests 0, level_done 0, barrel_hits 0, knock_frames 1, mon_knock_frames 12, frac_frames 12, knock_moves 80, knock_walls 0, infight 0, sink_max 0, sink_frames 0, corpse_slides 8, dead_slides 0, knock_refused 1, mon_knock_refused 6, mon_attacks 2, mkills 2, rockets_fired 0, rocket_fizzles 0, rocket_flight_frames 0, rocket_mon_hits 0, rocket_bar_hits 0, rocket_stops 0, rocket_blasts 0, blast_mon 0, blast_bar 0, blast_things_max 0, rocket_self 0, cgun_shots 8, cgun_acc 3, cgun_held 5, cgun_hits 7, cgun_flash1 8, cgun_flash2 8
+every event counter nonzero: yes; deaths 0
+frame ops of 1 scenarios -> docs/ship-evidence/onepass56_stress_cgun.json
+
+FIGHT GATE PASS (64 s)
+rc=0

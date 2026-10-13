@@ -1,0 +1,30 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-985 [at 985c1d4, unmodified] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_stream_screen.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_collines_after
+# worktree HEAD: 985c1d4e398e952d018010cd1da0e90d13ed4b6e (P10 fix: the window walker emits nothing for an EMPTY window -- blocked55's gamespeed crash)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-985\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:31:55 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-985
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 14 items
+
+tests/fj/test_stream_screen.py::test_init_screen_stream_reads_the_extra_flush_mode_byte PASSED [  7%]
+tests/fj/test_stream_screen.py::test_begin_frame_stream_requires_prior_init PASSED [ 14%]
+tests/fj/test_stream_screen.py::test_column_major_run_stream_flush_per_frame PASSED [ 21%]
+tests/fj/test_stream_screen.py::test_column_major_run_stream_flush_per_column PASSED [ 28%]
+tests/fj/test_stream_screen.py::test_collines_decodes_runs_and_a_zero_length_pair PASSED [ 35%]
+tests/fj/test_stream_screen.py::test_collines_refuses_what_the_device_refuses[pairs0-behind the fill cursor at 2] PASSED [ 42%]
+tests/fj/test_stream_screen.py::test_collines_refuses_what_the_device_refuses[pairs1-past the 3-row screen] PASSED [ 50%]
+tests/fj/test_stream_screen.py::test_stream_reverts_to_normal_command_parsing_after_the_frame_fills PASSED [ 57%]
+tests/fj/test_stream_screen.py::test_stdin_feed_still_works_alongside_the_stream_decode PASSED [ 64%]
+tests/fj/test_stream_screen.py::test_planes_frame_decodes_columns_from_shared_vp_lists PASSED [ 71%]
+tests/fj/test_stream_screen.py::test_planes_frame_ceiling_clips_at_fstart_and_empty_lists_are_fine PASSED [ 78%]
+tests/fj/test_stream_screen.py::test_planes_frame_reverts_to_command_parsing PASSED [ 85%]
+tests/fj/test_stream_screen.py::test_fj_emits_a_known_3run_column_flush_per_frame PASSED [ 92%]
+tests/fj/test_stream_screen.py::test_fj_emits_a_known_3run_column_flush_per_column PASSED [100%]
+
+============================= 14 passed in 1.07s ==============================
+# finished 2026-10-13 04:31:58 +0300; pytest exit code: 0

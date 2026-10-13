@@ -1,0 +1,7 @@
+$ python /c/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/plan/../p10/gs_repro.py build/doom_e1m1_onepass55.fjm /c/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/plan/../p10/gs_repro_onepass.pkl 0 1
+run 0 CRASHED at presented frame 31 (script frame 31 of 104, MENU_FRAMES 4): collines run ends at row 56, behind the fill cursor at 58 (the cursor only moves forward)
+  column 49: 09 08 1f 05 22 06 2e 6e 38 07 39 69 3c 4e 42 4d 4e ef 54 08 ff
+  column 84: 09 08 0c 05 0d 68 12 f3 23 f4 2d 02 38 07 39 68 3c 4e 42 4d 4e ef 54 08 ff
+  column 65: 09 08 1f 05 23 06 2e 02 37 07 38 2f 39 03 3a 4e 3a 02 38
+saved C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\plan\..\p10\gs_repro_onepass.pkl
+rc=0

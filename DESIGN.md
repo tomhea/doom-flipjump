@@ -719,6 +719,119 @@ clean-up. Every table here sits INLINE (below the block pool's base); the pool's
 - P8a's tables (knockback's `kb_*`, the far LOS, `mbul` per radius, `sp_ex`'s fields) get their lines from the P8a
   build's label table by the same command (docs/gp-final-plan.md 1.4: package E, after the build).
 
+**M7 P10 TABLES, DATA AND CELLS, MEASURED 2026-10-13 on onepass56** (PR #129's review, R4: the rung added these with no
+ledger line). `python scratchpad/gp/game_table_sizes.py --md --rung P10 --labels
+scratchpad/12m/atlas/onepass56.labels.tsv.gz --gen-dir build/generated_doom_e1m1_onepass56 --fjm
+build/doom_e1m1_onepass56.fjm --against scratchpad/12m/atlas/blocked54.labels.tsv.gz --against-gen
+build/generated_doom_e1m1_blocked54 --against-fjm build/doom_e1m1_blocked54.fjm --split seg_pass2_leaf` (the label
+tables and generated parts are local build artefacts, not tracked): onepass56 is P10's ship, built one pass at dec86fc (labels sha256
+`d4f4fc8d35ec1255...`, 2,835,870 of them; .fjm `63869ab4be6f2ddc...`), blocked54 P9's shipped binary (labels
+`2e8ea14690b044db...`; .fjm `0e4582a0c8d52134...`) -- label addresses and the two .fjm's segment tables only, no model.
+Its `--selftest` with the same arguments: PASS -- the block above's checks, and 140 BAKED P10 regions (the four menu
+frames, LEVEL COMPLETE's frame and its 130 digit blocks, the chaingun's four overlay blocks: 16 words a byte + 1 op, the
+bytes counted in the generated text; `sfbase` 2 words a `;0 * dw` line of its declaration) 0 mismatched; the growth's
+attribution (every pool word of both images in a region, the regions summing to the segment tables) 0 failures; the
+split summing to its region at both depths; five more mutants caught (a frame's byte count +1, a digit block's label one
+op late, a dropped pool segment, a lost call site, a split region one op short). Before this change the tool's cell
+check FAILED on both images: `dm_tg` measured 4 words against `hex.vec 1` (P8a I's `damage_parts(fight=True)` widens it;
+the P4.2a group now mirrors that rule). P10 added NO D4 table: the 227 dispatch-table headers name the same tables in
+both images, three with a new entry count inside the same padded switch -- `mstate` 226 -> 234 (gamedata's eight
+chaingun state rows), `pkxyz` 100 -> 102 (the two new pickups), `tex` 154 -> 148 (the wall tones) -- and the 229 `.init`
+tables' words moved +11,856, all of it alignment pad.
+
+| rung | table / region | what | words | of which align pad |
+|---|---|---|---:|---:|
+| P10 | `sfbase` | G2: a column's ceiling / floor BASE pid -- 2 x VIEW_W one-op cells, declared between sfflag and sprflag | 640 | - |
+| P10 | `menu_frame_l` | the main menu while a game is in progress (RESUME over NEW GAME), NEW GAME lit: a baked frame, 1,747 bytes x 8 ops, + `;frame_end` | 27,954 | - |
+| P10 | `menu_frame_help_l` | the same menu, HELP lit: a baked frame, 1,705 bytes x 8 ops, + `;frame_end` | 27,282 | - |
+| P10 | `menu_frame_exit_l` | the same menu, EXIT lit: a baked frame, 1,705 bytes x 8 ops, + `;frame_end` | 27,282 | - |
+| P10 | `menu_frame_resume` | the same menu, RESUME lit: a baked frame, 1,705 bytes x 8 ops, + `;frame_end` | 27,282 | - |
+| P10 | `mf_lv` .. `menu_level_done` | LEVEL COMPLETE's 13 digit slots from the cells (statcode.digit_lines) | 2,822 | - |
+| P10 | `menu_level_done` .. `lvd0_0` | LEVEL COMPLETE's baked frame, 2,261 bytes x 8 ops, + slot 0's `sim.jump16` (its 16 trampolines; the switch is in the pool) | 36,210 | - |
+| P10 | `lvd0_0` .. `lvd12_x` | its 130 digit blocks (column records, 8 ops a byte, + a jump each) and slots 1-12's `sim.jump16` | 105,500 | - |
+| P10 | `lvd_dec` .. `do_world` | statcode.routine_lines: the shared /10 (`hex.div`) and the unreachable `lvd_div0` | 626 | - |
+| P10 | `sc_go` .. `sc_end` | the secrets' check, fcall'd from lootcode's `pre` (statcode.secret_lines; its 1-op jump-over in front is not in the row) | 7,662 | - |
+| P10 | `wen49` .. `wen54` | the chaingun's 6 psprite states' blocks (S_CHAIN .. S_CHAIN3; weaponcode.weapon_lines), to the next block | 11,936 | - |
+| P10 | `hwf1_n0` .. `hwf1_n2` | the chaingun's weapon overlays CHGGA0, CHGGB0 (wp_frm 17, 18) in the HUD tail: each frame's test, column records and jump | 34,656 | - |
+| P10 | `hff_n7` .. `hff_n9` | the chaingun's flash overlays CHGFA0, CHGFB0 (fl_frm 8, 9) in the HUD tail: each frame's test, column records and jump | 16,800 | - |
+
+| rung | module (cells) | labels | words |
+|---|---|---:|---:|
+| P10 | `statcode` | 22 | 164 |
+| P10 | `wall_renderer (the menu: g_live, ev_any)` | 2 | 4 |
+| P10 | `wall_renderer (hoisted scratch, G2: the column bases)` | 9 | 60 |
+| P10 | `wall_renderer (hoisted scratch, G8: sky behind a stacked piece)` | 4 | 40 |
+| P10 | `wall_renderer (hoisted scratch, G1: the fragments' clip windows)` | 14 | 64 |
+| P10 | `wall_renderer (hoisted scratch, G3: the third fragment slot)` | 19 | 116 |
+
+The rows: **326,652** words of data and code, and **448** of cells. LEVEL COMPLETE alone is 145,158 inline words (its
+digit slots, frame, digit blocks and `lvd_dec`); the four menu frames 109,800; the chaingun's states and overlays
+63,392.
+
+**Where blocked54 -> onepass56's +4,909,866 data words went** (the same command; a region runs from a top-level label
+both images have to the next one, and a pool table counts in its call site's region -- the tool's docstring):
+- data: 51,539,998 -> 56,449,864 words (38.40% -> 42.06% of 2^27) = the inline segment 31,615,632 -> 34,147,622
+  (+2,531,990) + the pool's payload 19,924,366 -> 22,302,242 (+2,377,876). The inline segment is the labeled code (word
+  0 .. the last label) 16,871,616 -> 18,030,068 (+1,158,452), then the wflip-chain ops flipjump appends after a
+  segment's code, 14,744,016 -> 16,117,554 (+1,373,538) -- unlabeled (their `:wflips:N` labels exist only with a
+  debugging file), so NOT attributed.
+
+| region (its first label) | what | inline | pool | total |
+|---|---|---:|---:|---:|
+| `seg_pass2_leaf` | renderer: the pass-2 leaf body (frame.seg_pass2_leaf_body_lines): G1's clip, G2's bases, G3's slot C (stream.emit_region_c), G8's sky | +947,808 | +2,231,382 | **+3,179,190** |
+| `mf_lv` | P10 menus + stats: LEVEL COMPLETE: its digit slots, frame and 13 x 10 digit blocks (blocked54: the 3-line frame) | +122,468 | +7,552 | **+130,020** |
+| `m1_reset` | the M1 reset: the self-reset part: the restore set's cells (P10 added some) and, from onepass56 on, ONE PASS's reset by label, its tables in the pool | -152,268 | +86,112 | **-66,156** |
+| `mf_mainx` | P10 menus + stats: the main menu on EXIT, + its g_live twin and the RESUME-lit frame | +54,606 | +0 | **+54,606** |
+| `hwf1_n0` | chaingun: its weapon overlays (CHGGA0, CHGGB0) in the HUD tail | +34,656 | +0 | **+34,656** |
+| `nk_end` | P10 menus + stats: the secrets' check (statcode.secret_lines), placed after nukage | +7,664 | +26,428 | **+34,092** |
+| `mf_main` | P10 menus + stats: the boot main menu, + its g_live twin | +28,018 | +0 | **+28,018** |
+| `mf_mainh` | P10 menus + stats: the main menu on HELP, + its g_live twin | +27,346 | +0 | **+27,346** |
+| `hff_n7` | chaingun: its flash overlays (CHGFA0, CHGFB0) | +16,800 | +0 | **+16,800** |
+| `a44ok` | chaingun: its psprite states' blocks (wen49 .. wen54), after the last old state's | +11,936 | +4,196 | **+16,132** |
+| `seg_pass1_ts_leaf` | renderer: the pass-1 leaf (G2: frame.ts_base_store) | +6,368 | +5,754 | **+12,122** |
+| `rowmap.dsp` | align pad: D4 table `rowmap`: only its alignment pad moved | +11,520 | +0 | **+11,520** |
+| `sprbank` | chaingun: the sprite bank: MGUN, the chaingun pickup's art (E1M1's single-player shotguns had put SHOT in it already) | +9,600 | +0 | **+9,600** |
+| `thing_leaf` | renderer: a thing's record, frame.thing_record_body (G1: frame.rec_clip_read), its 1st instance | +3,488 | +3,482 | **+6,970** |
+| `thing_leaf_b` | renderer: the same macro's 2nd instance | +3,488 | +3,482 | **+6,970** |
+| `thing_leaf_bb` | renderer: its 3rd | +3,488 | +3,482 | **+6,970** |
+| `vpb_dsp` | align pad: the visplane bands' dispatch: its pad up to the aligned vpb_switch__ | +6,784 | +0 | **+6,784** |
+| the other 262,606 regions | | +14,682 | +6,006 | **+20,688** |
+
+- Sums, by the rows' categories: the renderer **+3,212,222 (65.4%)**, the wflip tail **+1,373,538 (28.0%), not
+  attributed**, P10's menus and stats **+274,082 (5.6%)**, the chaingun **+77,188 (1.6%)**, the M1 reset **-66,156**,
+  alignment pads **+18,304**, the other 262,606 regions **+20,688**.
+- THE NAMED P10 DATA explains **+351,270 words, 7.2% of the growth** (its menus, stats and chaingun categories): the
+  four new frames and their three `g_live` branches in `mf_main` / `mf_mainh` / `mf_mainx` (+109,970); LEVEL COMPLETE in
+  `mf_lv`, net of blocked54's 22,066-word 3-line frame (+130,020, of which 7,552 in the pool; `lvd_dec` sits in
+  `rs_skill2`'s region); the secrets' check (+34,092: 7,664 inline, 26,428 pool); the chaingun's states (+16,132),
+  overlays (+51,456) and pickup art (+9,600: 75 blocks at the bank's 64-op stride -- MGUNA0 is 50 px in
+  assets/freedoom1.wad, 25 columns downscaled, in each of the three tiers). `sfbase` (+640, in `sfflag`'s region), the
+  cells and the rung's small edits (the chaingun's key 4 and P_CheckAmmo preference, the kill and item counters, the
+  restart's zeroing of the stats, the menu's state machine) are in the other regions' +20,688, with the +/- pairs of the
+  pickups and thing selectors that the two new things renumbered.
+- THE RENDERER, BOUNDED: the pass-2 leaf alone is **+3,179,190 (64.8%)**, +947,808 inline and +2,231,382 of pool tables.
+  Its split (`--split seg_pass2_leaf`, the same command): `stream.emit_col_lines` is +3,138,528 of it; inside, G3's new
+  `stream.emit_region_c` +4,549,552 against the old `stream.emit_region` -1,484,696 (net +3,064,856), G1's
+  `stream.frag_runs_cut` +75,746 against `stream.frag_runs` -45,464, `stream.frag_derive` +27,628, `frag_clamp` and
+  `frag_clip` +8,894; beside it, `frame.lines_spr_load` +16,342 (the fragments' extra bytes: G1's clip counts, G3's slot
+  C), G2's `lines_base_ids` / `lines_base_split` +15,210, G8's `lines_piece_sky` +4,986. G3's third slot and G1's clip
+  in the column emit are the rung's size: 3.18M of the 3.54M words attributed.
+- NOT ATTRIBUTED, the wflip tail (+1,373,538): the chains flipjump emits for the inline code's wflips. The same command
+  on blocked55 (P10's two-pass build, 557d239; labels `1f47a3dd919d6b76...`, .fjm `837f1abaccc7e7c7...`) against
+  blocked54, then on onepass56 against blocked55, splits it: **+1,016,922 blocked54 -> blocked55 (P10's code, both
+  two-pass builds), +356,616 blocked55 -> onepass56 (ONE PASS: the reset by label and the one-pass placement**; the two
+  programs also differ by 985c1d4's walker fix, the other regions' +1,152 pool words). Which code the chains belong to
+  is not measured.
+- NOT P10's: the M1 reset's -66,156 is P10's +9,024 (its new cells in the two-pass reset, blocked54 -> blocked55) and
+  ONE PASS's -75,180 (blocked55 -> onepass56: -161,292 inline, its tables in the pool, +86,112). The alignment pads are
+  `rowmap`'s +11,520 and `vpb_dsp`'s +6,784 (the D4 tables' pads moved +11,856 in all).
+- Unchanged in size, or out of the rows: two cells WIDENED -- `lvtime` 16 -> 20 bits (restartcode's row: 12 words on
+  blocked54, 14 here) and `wp_own` 5 -> 6 nibbles, the chaingun's (weaponcode's: 90, 92). The skill screen's MEDIUM
+  default is `menu_sel`'s boot value, no frame. The help page lost one line of the use keys' text (`mf_help` -128 with
+  `--min-row 100`). The max-fps boot command (`present.set_max_fps`, 2 bytes) is boot code in front of the hot arrays:
+  `pclm` is at word 65,536 in both label tables and no growth row lies before it, so the pad there absorbed it. P8a's
+  and P9's additions are still not ledgered here -- they are inside the baseline, blocked54.
+
 ### 1.3 LUT inventory & total entry count
 
 Every runtime LUT with its **logical entry count** (the index range). Result-width and pow2/over-align

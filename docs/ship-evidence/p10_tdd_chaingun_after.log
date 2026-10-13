@@ -1,0 +1,26 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-31b [at 31bccd2 (HEAD), unmodified] && PYTHONPATH=src timeout 1800 python -m pytest tests/host/test_chaingun_model.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_chaingun_after
+# worktree HEAD: 31bccd2b5bed6e9aefc15581eff2481fba49b688 (ONE PASS (the CR of #129, R9): the scanner refuses cells resumed after a blank or comment line; the )
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-31b\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:34:11 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-31b
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 10 items
+
+tests/host/test_chaingun_model.py::test_the_shotgun_and_the_chaingun_are_single_player_things_on_every_skill PASSED [ 10%]
+tests/host/test_chaingun_model.py::test_the_tables_hold_the_chaingun PASSED [ 20%]
+tests/host/test_chaingun_model.py::test_the_chaingun_gives_twenty_bullets_and_comes_up PASSED [ 30%]
+tests/host/test_chaingun_model.py::test_bullets_from_empty_bring_the_chaingun_up_from_the_fist PASSED [ 40%]
+tests/host/test_chaingun_model.py::test_walking_onto_the_chaingun_takes_it PASSED [ 50%]
+tests/host/test_chaingun_model.py::test_key_4_brings_the_chaingun_up PASSED [ 60%]
+tests/host/test_chaingun_model.py::test_a_held_trigger_fires_two_bullets_every_four_frames PASSED [ 70%]
+tests/host/test_chaingun_model.py::test_the_first_burst_is_accurate_and_the_held_ones_spread PASSED [ 80%]
+tests/host/test_chaingun_model.py::test_out_of_bullets_the_next_weapon_comes_up PASSED [ 90%]
+tests/host/test_chaingun_model.py::test_control_a_chaingun_with_one_flash_is_caught PASSED [100%]
+
+============================= 10 passed in 0.59s ==============================
+# finished 2026-10-13 04:34:13 +0300; pytest exit code: 0

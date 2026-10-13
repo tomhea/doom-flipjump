@@ -1,0 +1,19 @@
+$ python scratchpad/12m/gamespeed_trail.py --fjm build/doom_e1m1_onepass56.fjm --labels scratchpad/12m/atlas/onepass56.labels.tsv.gz
+  (--validate's records made in 338 s, outside the binary lock)
+gamespeed_trail: doom_e1m1_onepass56.fjm sha256 63869ab4be6f2ddc, labels onepass56.labels.tsv.gz
+  run 0: the binary ends (578, 303) [16.16: 37928160, 19893760], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 1: the binary ends (-108, 260) [16.16: -7068704, 17072240], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 2: the binary ends (710, 489) [16.16: 46555216, 32067408], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 3: the binary ends (450, 300) [16.16: 29511872, 19708144], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 4: the binary ends (689, 494) [16.16: 45211673, 32398473], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 5: the binary ends (399, 258) [16.16: 26149364, 16948353], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 6: the binary ends (515, 360) [16.16: 33777520, 23596704], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 7: the binary ends (419, 280) [16.16: 27462835, 18366268], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 8: the binary ends (-210, 367) [16.16: -13724512, 24090656], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 9: the binary ends (97, 254) [16.16: 6418784, 16656384], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+BINARY_ENDS = ((578, 303), (-108, 260), (710, 489), (450, 300), (689, 494), (399, 258), (515, 360), (419, 280), (-210, 367), (97, 254))
+BINARY_DOORS = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+TRAIL         --validate's record equals the binary on every frame of every run: PASS
+CONTROL-POSE  the doors-shut replay parts from the binary: PASS (runs [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+CONTROL-DOORS the door-wrong replay is rejected where its pose is right: N/A -- no run makes a door passable (BINARY_DOORS all 0: since P6 a monster blocks every tour before a door), so this set makes no door claim to test
+rc=0

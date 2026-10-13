@@ -2048,3 +2048,50 @@ source; `docs/gp-p10-plan.md`):
    their heat order: a speed question, msframe's); the restore sets re-keyed WITHOUT P9's label table
    (`ca_rekey_newspan.py`: P9's table did not survive its worktree); gamespeed's routes re-planned and its trail on this
    build; msframe recorded (class F; ~90 ms a tripwire to explain).
+
+**Row** (onepass56, written at ship 2026-10-13; sha256 `63869ab4be6f2ddc`, built ONE PASS at dec86fc with
+`heat_blocked27_p10`, `--pool-base 0x80000000 --span-bits 0x7fffffe0 --one-pass-blocks` and flipjump's
+`BlockPool(one_pass=True)` at e4340ee -- tomhea/flipjump#369, merged as 6711d7a; `docs/ship-evidence/onepass56_*`).
+
+| measure | blocked54 | onepass56 | note |
+|---|---|---|---|
+| binding (mean+p80)/2, gamespeed | 12,498,447 | 18,975,792 | the tours were RE-PLANNED (the turn, gen 3b): not like-for-like; judged against 22M only, as declared |
+| size | 38.40% (51,539,998) | 42.06% (56,449,864) | +4,909,866 words -- declared ~+0.5M; DESIGN.md 1.2 attributes it (the renderer +3.21M, the wflip tail +1.37M, the named data +0.35M) |
+| CAP-22 on the frozen set | v8 15,831,163 | v9 17,343,316 | different sets (v8 parted); 4,656,684 under 22M |
+| msframe | 80.3 ms (vs 80.2 of blocked53) | 83.5 ms (vs 78.9 of blocked54 in the same run) | class F: B SLOWER x0.945, the price; class S vs blocked56 NOT SEPARATED x1.004 |
+| per-frame max on the set | 27,262,976 | 29,097,984 | |
+| chaingun stress CG (new) | - | max 20,447,232, mean 17,165,189 | 0 frames over 22M |
+| build time | 9,993 s (counts-cache hit; the recount 5,602 s) | 2,887 s, ONE PASS | no counting assembly, no pass 2 |
+
+**Verdict per criterion:**
+1. **CAP-22** -- PASS: v8 PARTED (every run's poses: the faster turn; `p10_v8_validate.log`), so v9 was planned at the P10
+   model (keys `2fdfd6383a599b8e`, criteria PASS; `p10_v9_plan.log`) and FROZEN on onepass56's B0 17,343,316, every frame
+   of all 11 runs state- and pixel-exact, with the owner's approval ("Yes you can freeze", 2026-10-12; `p10_v9_freeze.log`).
+2. **Size** -- PASS at 43%: onepass56 measured 42.06%, OVER the declared 42% (gamespeed rc 2); the owner raised the cap
+   to 43% on it (2026-10-13, "Raise the cap to 43%", over trimming P10 first or shipping it inside P11; 88c1ac1). The
+   declared ~+0.5M words was a hand estimate, off ~10x: P10's renderer alone (G3's slot C and G1's clip in the column
+   emit) is +3.18M (DESIGN.md 1.2). From now on a rung's size budget comes from a build or an emission.
+3. **Every gate exact** -- PASS: m2_std_gate (421 frames), m3_gate (75: RESUME, LEVEL COMPLETE, any key), p2a 13/13,
+   hurt 7/7, fight 43/43 (+ CG1, the chaingun), die 17/17 -- state, pixels and palette on every frame; B0 on v9 every
+   frame; the 7 gate selftests; deg_gate BYTE-EXACT, its op counts 31,425,877 / 17,639,966 / 30,893,233 / 28,635,934
+   EQUAL to the edge gate's on the same source (`blocked56_edge_gate.log`) -- the declared 31,756,151 / 17,625,921 /
+   30,913,683 / 28,696,539 were the edge gate's BEFORE the walker fix (985c1d4), which skips an empty window's walk.
+4. **Host and fj** -- PASS: tests/host green (`blocked56_host_suite.log`, and in CI); every P10 harness mutant caught
+   (the TDD evidence, `p10_tdd_*.log`); tests/fj: CI 21 of 21 checks green on dec86fc (the 20 shards; shard 14's
+   test_player_move_fj fixed in 9f11ab8 -- P10's two new pickups moved its seeded records).
+5. **Stress (O-E1)** -- PASS: S1 max 25,427,968 / mean 23,540,531; fight S 13,369,344 / 10,446,191; D9 19,922,944 /
+   19,359,334; the rocket R1-R3 20,447,232 / 18,020,140, 17,001,130, 17,630,640; the chaingun CG 20,447,232 / 17,165,189;
+   0 frames over the 44M tripwire, no scenario averages over 30M.
+6. **Housekeeping** -- pinreport PASS (20 of 20 hot words pinned, 0 lost; `onepass56_pinreport.log`); gamespeed's routes
+   re-planned before the build, its trail PASS, `--validate` and `--selftest` PASS; poolmap PASS; msframe recorded and
+   the `shipped` baseline re-frozen; profx engine / maps / games / phases PASS (soft; P9's re-anchor issue #128 did not
+   recur). The restore sets were re-keyed for the hosted tiers (557d239); the game tier's reset is by label (no re-key).
+
+**Builds:** blocked55 (two-pass, 557d239, sha256 `837f1abaccc7e7c7`) -- its gamespeed crashed at run 0 frame 31: the
+device refused "collines run ends at row 56, behind the fill cursor at 58" -- G1's clip could leave slot B's window
+below A EMPTY with its low end past the cursor; FIXED in 985c1d4 (an empty window emits nothing; the tests' screen
+refuses as the device does). blocked56 (the fix + the one-pass reset, blocked55's counts trusted, sha256
+`bee46ca039a15f91`) -- m2 / m3 and the selftests passed, its pinreport STOPPED it: the fix's 9 lines shifted every later
+line of `stream_render.fj`, a group's key carries its call sites' file:line, so 60,256 tables went inline and the wall
+walker's hot `ycur` pin was lost. onepass56 (the same source, one pass: its own census) -- try 1 wrote these bytes and
+failed only the build's storage check (no native engine in the assembling worktree); try 2 the same bytes, every gate.

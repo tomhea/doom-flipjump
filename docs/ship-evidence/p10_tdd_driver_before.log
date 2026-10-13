@@ -1,0 +1,33 @@
+$ cd <worktree at 9f11ab8 (+ dec86fc's tests/host/test_build_blocked_one_pass.py)> && PYTHONPATH='src;C:/Users/tomhe/Documents/flipjump-trial' python -m pytest tests/host/test_build_blocked_one_pass.py -q -p no:cacheprovider --tb=line   # flipjump e4340ee
+FFFFF.F                                                                  [100%]
+================================== FAILURES ===================================
+E   AssertionError: ['                        [--merge-aliases] [--pin-state-cells]', '                        [--record-sites SITES.json....ed-nosim-nocollide,hosted-static,render,visual}', 'build_blocked.py: error: unrecognized arguments: --one-pass-blocks']
+    assert 2 == 0
+C:\Users\tomhe\Documents\doom-tdd2\tests\host\test_build_blocked_one_pass.py:92: AssertionError: ['                        [--merge-aliases] [--pin-state-cells]', '                        [--record-sites SITES.json....ed-nosim-nocollide,hosted-static,render,visual}', 'build_blocked.py: error: unrecognized arguments: --one-pass-blocks']
+E   AssertionError: ['                        [--merge-aliases] [--pin-state-cells]', '                        [--record-sites SITES.json....ed-nosim-nocollide,hosted-static,render,visual}', 'build_blocked.py: error: unrecognized arguments: --one-pass-blocks']
+    assert 2 == 0
+C:\Users\tomhe\Documents\doom-tdd2\tests\host\test_build_blocked_one_pass.py:108: AssertionError: ['                        [--merge-aliases] [--pin-state-cells]', '                        [--record-sites SITES.json....ed-nosim-nocollide,hosted-static,render,visual}', 'build_blocked.py: error: unrecognized arguments: --one-pass-blocks']
+E   AssertionError: ['usage: build_blocked.py [-h] --out OUT [--wad WAD] [--map MAP]', '                        [--pool-base POOL_BASE] [-...          [--pin-broken] [--evict-by-value]', '                        [--macros [MACROS ...]] [--view-w VIEW_W]', ...]
+    assert False
+     +  where False = any(<generator object test_the_flags_that_need_a_counting_assembly_are_refused.<locals>.<genexpr> at 0x0000023FFFE1FE60>)
+C:\Users\tomhe\Documents\doom-tdd2\tests\host\test_build_blocked_one_pass.py:126: AssertionError: ['usage: build_blocked.py [-h] --out OUT [--wad WAD] [--map MAP]', '                        [--pool-base POOL_BASE] [-...          [--pin-broken] [--evict-by-value]', '                        [--macros [MACROS ...]] [--view-w VIEW_W]', ...]
+E   AssertionError: ['usage: build_blocked.py [-h] --out OUT [--wad WAD] [--map MAP]', '                        [--pool-base POOL_BASE] [-...          [--pin-broken] [--evict-by-value]', '                        [--macros [MACROS ...]] [--view-w VIEW_W]', ...]
+    assert False
+     +  where False = any(<generator object test_the_flags_that_need_a_counting_assembly_are_refused.<locals>.<genexpr> at 0x0000023FFFD649E0>)
+C:\Users\tomhe\Documents\doom-tdd2\tests\host\test_build_blocked_one_pass.py:126: AssertionError: ['usage: build_blocked.py [-h] --out OUT [--wad WAD] [--map MAP]', '                        [--pool-base POOL_BASE] [-...          [--pin-broken] [--evict-by-value]', '                        [--macros [MACROS ...]] [--view-w VIEW_W]', ...]
+E   AssertionError: ['usage: build_blocked.py [-h] --out OUT [--wad WAD] [--map MAP]', '                        [--pool-base POOL_BASE] [-...          [--pin-broken] [--evict-by-value]', '                        [--macros [MACROS ...]] [--view-w VIEW_W]', ...]
+    assert False
+     +  where False = any(<generator object test_the_flags_that_need_a_counting_assembly_are_refused.<locals>.<genexpr> at 0x0000023FFFE1EF80>)
+C:\Users\tomhe\Documents\doom-tdd2\tests\host\test_build_blocked_one_pass.py:126: AssertionError: ['usage: build_blocked.py [-h] --out OUT [--wad WAD] [--map MAP]', '                        [--pool-base POOL_BASE] [-...          [--pin-broken] [--evict-by-value]', '                        [--macros [MACROS ...]] [--view-w VIEW_W]', ...]
+E   AssertionError: ['usage: build_blocked.py [-h] --out OUT [--wad WAD] [--map MAP]', '                        [--pool-base POOL_BASE] [-...          [--pin-broken] [--evict-by-value]', '                        [--macros [MACROS ...]] [--view-w VIEW_W]', ...]
+    assert (2 == 0)
+C:\Users\tomhe\Documents\doom-tdd2\tests\host\test_build_blocked_one_pass.py:139: AssertionError: ['usage: build_blocked.py [-h] --out OUT [--wad WAD] [--map MAP]', '                        [--pool-base POOL_BASE] [-...          [--pin-broken] [--evict-by-value]', '                        [--macros [MACROS ...]] [--view-w VIEW_W]', ...]
+=========================== short test summary info ===========================
+FAILED tests/host/test_build_blocked_one_pass.py::test_one_assembly_builds_a_program_that_prints_what_the_unpooled_one_prints
+FAILED tests/host/test_build_blocked_one_pass.py::test_the_census_goes_to_the_counts_cache
+FAILED tests/host/test_build_blocked_one_pass.py::test_the_flags_that_need_a_counting_assembly_are_refused[flag0]
+FAILED tests/host/test_build_blocked_one_pass.py::test_the_flags_that_need_a_counting_assembly_are_refused[flag1]
+FAILED tests/host/test_build_blocked_one_pass.py::test_the_flags_that_need_a_counting_assembly_are_refused[flag2]
+FAILED tests/host/test_build_blocked_one_pass.py::test_the_pins_are_reported_and_a_collapse_is_called_out
+6 failed, 1 passed in 0.79s
+rc=1

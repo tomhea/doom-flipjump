@@ -1,0 +1,29 @@
+$ python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_blocked55.fjm
+SIZE: w=32  segments=622288  data=56,167,276 words (41.85% of 2^27)  span=123,752,640 words (92.20%)  file=43,716,521 bytes
+calibration: startup + 4 menu frames = 445,173 ops (subtracted from every run)
+Traceback (most recent call last):
+  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\12m\gamespeed.py", line 760, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\12m\gamespeed.py", line 754, in main
+    run_avgs, raw_avgs, _ = measure_speed(a.fjm, a.runs, a.frames, calibrate=not a.no_calibrate)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\12m\gamespeed.py", line 409, in measure_speed
+    ops, presented = runner(fjm_path, per_frame)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\12m\gamespeed.py", line 376, in one_run
+    got, ops = gate.run_fj(Path(fjm), events_for(per_frame), len(per_frame))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\m2_std_gate.py", line 450, in run_fj
+    _c, ops, _e, _l, _p = core.run(io.read_bit, io.write_bit, IOReadOnEOF, last_ops_length=0)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\io_devices\pygame_window.py", line 369, in write_bit
+    self._screen.write_bit(bit)
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\io_devices\ScreenIO.py", line 175, in write_bit
+    self._handle_byte(byte)
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\io_devices\ScreenIO.py", line 221, in _handle_byte
+    self._handle_collines_byte(byte)
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\io_devices\ScreenIO.py", line 410, in _handle_collines_byte
+    raise IODeviceException(
+flipjump.utils.exceptions.IODeviceException: collines run ends at row 56, behind the fill cursor at 58 (the cursor only moves forward)
+rc=1

@@ -1,0 +1,128 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-557 [at 557d239 + tests/fj/test_stream_screen.py from 985c1d4; tests/fj/stream_screen.py is 557d239's] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_stream_screen.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_collines_before
+# worktree HEAD: 557d2399cbb76afd0e3048b27f5d8351e7f7c14d (P10: the restore sets re-keyed -- test_restore_set_shipped: 22 passed in 1.39s)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#    M tests/fj/test_stream_screen.py
+# copied-file hashes: tests/fj/test_stream_screen.py=e790e478bd0a 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-557\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:27:43 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-557
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 14 items
+
+tests/fj/test_stream_screen.py::test_init_screen_stream_reads_the_extra_flush_mode_byte PASSED [  7%]
+tests/fj/test_stream_screen.py::test_begin_frame_stream_requires_prior_init PASSED [ 14%]
+tests/fj/test_stream_screen.py::test_column_major_run_stream_flush_per_frame PASSED [ 21%]
+tests/fj/test_stream_screen.py::test_column_major_run_stream_flush_per_column PASSED [ 28%]
+tests/fj/test_stream_screen.py::test_collines_decodes_runs_and_a_zero_length_pair PASSED [ 35%]
+tests/fj/test_stream_screen.py::test_collines_refuses_what_the_device_refuses[pairs0-behind the fill cursor at 2] FAILED [ 42%]
+tests/fj/test_stream_screen.py::test_collines_refuses_what_the_device_refuses[pairs1-past the 3-row screen] FAILED [ 50%]
+tests/fj/test_stream_screen.py::test_stream_reverts_to_normal_command_parsing_after_the_frame_fills PASSED [ 57%]
+tests/fj/test_stream_screen.py::test_stdin_feed_still_works_alongside_the_stream_decode PASSED [ 64%]
+tests/fj/test_stream_screen.py::test_planes_frame_decodes_columns_from_shared_vp_lists PASSED [ 71%]
+tests/fj/test_stream_screen.py::test_planes_frame_ceiling_clips_at_fstart_and_empty_lists_are_fine PASSED [ 78%]
+tests/fj/test_stream_screen.py::test_planes_frame_reverts_to_command_parsing PASSED [ 85%]
+tests/fj/test_stream_screen.py::test_fj_emits_a_known_3run_column_flush_per_frame PASSED [ 92%]
+tests/fj/test_stream_screen.py::test_fj_emits_a_known_3run_column_flush_per_column PASSED [100%]
+
+================================== FAILURES ===================================
+_ test_collines_refuses_what_the_device_refuses[pairs0-behind the fill cursor at 2] _
+
+pairs = [2, 5, 1, 6], words = 'behind the fill cursor at 2'
+
+    @pytest.mark.parametrize("pairs, words", [([2, 5, 1, 6], "behind the fill cursor at 2"),
+                                              ([4, 5], "past the 3-row screen")])
+    def test_collines_refuses_what_the_device_refuses(pairs, words):
+        from flipjump.utils.exceptions import IODeviceException
+>       with pytest.raises(IODeviceException, match=words):
+E       Failed: DID NOT RAISE <class 'flipjump.utils.exceptions.IODeviceException'>
+
+tests\fj\test_stream_screen.py:88: Failed
+_ test_collines_refuses_what_the_device_refuses[pairs1-past the 3-row screen] _
+
+pairs = [4, 5], words = 'past the 3-row screen'
+
+    @pytest.mark.parametrize("pairs, words", [([2, 5, 1, 6], "behind the fill cursor at 2"),
+                                              ([4, 5], "past the 3-row screen")])
+    def test_collines_refuses_what_the_device_refuses(pairs, words):
+        from flipjump.utils.exceptions import IODeviceException
+        with pytest.raises(IODeviceException, match=words):
+>           _collines(StreamScreen(), (0, pairs))
+
+tests\fj\test_stream_screen.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\fj\test_stream_screen.py:74: in _collines
+    _feed(screen, bytes([x, *pairs, 0xFF]))
+tests\fj\test_stream_screen.py:14: in _feed
+    screen.write_bit((byte >> i) & 1 == 1)
+..\flipjump-151\flipjump\interpreter\io_devices\ScreenIO.py:175: in write_bit
+    self._handle_byte(byte)
+tests\fj\stream_screen.py:246: in _handle_byte
+    self._handle_collines_byte(byte)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <tests.fj.stream_screen.StreamScreen object at 0x000001282DC21F50>
+byte = 5
+
+    def _handle_collines_byte(self, byte: int) -> None:
+        if self._cl_x is None:                         # expecting a record tag
+            if byte == 0xFF:                           # end of frame
+                self._cl_active = False
+                self._present()
+                self.flush_count += 1
+                return
+            self._cl_x = byte
+            self._cl_y = 0
+            self._cl_pend = None
+            self._cl_tok = None
+            return
+        if self._cl_tok is not None:                   # the row byte of a PARTIAL DITTO / KEEP
+            tok, self._cl_tok = self._cl_tok, None
+            name = "PARTIAL DITTO" if tok == CL_PARTIAL_DITTO else "KEEP"
+            if byte > self.height:
+                raise IODeviceException(f"collines {name} to row {byte}, past the {self.height}-row screen")
+            if byte < self._cl_y:
+                raise IODeviceException(f"collines {name} to row {byte}, behind the fill cursor at {self._cl_y}"
+                                        " (the cursor only moves forward)")
+            if tok == CL_PARTIAL_DITTO:
+                x = self._cl_x
+                for y in range(self._cl_y, byte):
+                    self.pixel_indices[y * self.width + x] = self.pixel_indices[y * self.width + x - 1]
+            self._cl_y = byte                          # KEEP writes nothing: the rows keep what they hold
+            return
+        if self._cl_pend is None:
+            if byte == 0xFF:                           # end of this column's list
+                self._cl_x = None
+                return
+            if byte == 0xFE:                           # DITTO: copy column x-1 (owner-approved
+                x = self._cl_x                         # "rectangles" -- widen the previous lines
+                # CR-2026-08: a ditto for column 0 has no left neighbour -- python's negative
+                # indexing would silently copy the row ABOVE's last pixel; fail loudly instead
+                # (the fj emitter never dittoes column 0: the signature chain starts fresh).
+                assert x > 0, "collines DITTO for column 0 (no left neighbour to copy)"
+                for y in range(self.height):           # by one column; a pure mechanical copy)
+                    self.pixel_indices[y * self.width + x] = \
+                        self.pixel_indices[y * self.width + x - 1]
+                self._cl_x = None
+                return
+            if byte in (CL_PARTIAL_DITTO, CL_KEEP) and self.height <= CL_TOKENS_MAX_HEIGHT:
+                if byte == CL_PARTIAL_DITTO and self._cl_x == 0:
+                    raise IODeviceException("collines PARTIAL DITTO for column 0 (no left neighbour to copy)")
+                self._cl_tok = byte                    # the row byte follows
+                return
+            self._cl_pend = byte                       # y2, awaiting its colour
+            return
+        y2, colour = self._cl_pend, byte
+        for y in range(self._cl_y, y2):
+>           self.pixel_indices[y * self.width + self._cl_x] = colour
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           IndexError: list assignment index out of range
+
+tests\fj\stream_screen.py:338: IndexError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_stream_screen.py::test_collines_refuses_what_the_device_refuses[pairs0-behind the fill cursor at 2]
+FAILED tests/fj/test_stream_screen.py::test_collines_refuses_what_the_device_refuses[pairs1-past the 3-row screen]
+======================== 2 failed, 12 passed in 1.47s =========================
+# finished 2026-10-13 04:27:45 +0300; pytest exit code: 1

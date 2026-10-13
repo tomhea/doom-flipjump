@@ -1,0 +1,35 @@
+$ python scratchpad/12m/profx/phases.py games_onepass56
+game frames: 1000   mean frame 18,226,477 ops (marker 1 to marker 1)
+
+phase                                         ops/frame       %    runs/fr      ops/run
+input (8 polls, key decode)                       3,477   0.02%       1.00        3,477
+doors                                             1,954   0.01%       1.00        1,954
+move / turn                                      17,106   0.09%       1.00       17,106
+collision                                       131,972   0.72%       0.70      189,343
+  of which dsccs seed walks                      56,986   0.31%       1.55       36,789
+post-move vx/vy                                   9,355   0.05%       1.00        9,355
+sim.bind_things                                       0   0.00%       0.00            -
+  of which ptloc_walk (dirty things)                  0   0.00%       0.00            -
+view setup                                        3,670   0.02%       1.00        3,670
+eye point location (dsc walk)                    34,887   0.19%       1.00       34,887
+render walk, all                             17,644,251  96.81%       1.00   17,644,251
+m1_reset                                         50,036   0.27%       1.00       50,036
+(glue between phases)                           329,765   1.81%
+
+one player move try = collision / seed walks: 85,198 ops (36,789 of it the seed walk); 1.55 tries/frame
+
+render walk split by owner object (ops/frame):
+      4,319,185  24.48%  seg_pass2_leaf
+      3,787,040  21.46%  seg_pass1_leaf
+      3,254,032  18.44%  seg_pass1_ts_leaf
+      1,971,724  11.17%  thing_pass_leaf
+      1,271,546   7.21%  bspcode walk (nodes, pos_leaf, ss code)
+      1,232,420   6.98%  thing_leaf
+      1,182,593   6.70%  thing_leaf_b
+        317,274   1.80%  vpb bands-as-code (plane bands)
+        135,692   0.77%  aim_record (the aim window leaf)
+         88,158   0.50%  bbgate_leaf
+         80,777   0.46%  segconsts (per-seg/thing const blocks)
+          3,806   0.02%  banks tail (vql/vqh, yslope, zlight)
+              0   0.00%  banks head (vars, sprbkt tables)
+rc=0

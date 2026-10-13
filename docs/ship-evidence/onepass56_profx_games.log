@@ -1,0 +1,19 @@
+$ python scratchpad/12m/profx/drive.py games games_onepass56
+engine: C:\Users\tomhe\AppData\Local\Temp\profx\engX\_fjcore.pyd
+FJPROFX map: 26 ranges, 16618582 opaque words of 124053696
+FJPROFX labels: 2820995 read, 2117925 flagged in opaque code
+FJPROFX marks: 29
+calibration: 303,159 ops, 4/4 frames, 3.0s
+game0: 2,012,896,649 ops, 104/104 frames, 20.4s
+game1: 1,783,620,194 ops, 104/104 frames, 22.4s
+game2: 1,853,156,139 ops, 104/104 frames, 18.7s
+game3: 2,150,394,686 ops, 104/104 frames, 20.9s
+game4: 1,961,317,010 ops, 104/104 frames, 18.9s
+game5: 1,972,813,809 ops, 104/104 frames, 19.1s
+game6: 1,887,445,645 ops, 104/104 frames, 18.6s
+game7: 1,773,861,663 ops, 104/104 frames, 18.0s
+game8: 1,446,687,597 ops, 104/104 frames, 15.3s
+game9: 1,387,315,920 ops, 104/104 frames, 14.5s
+prof_dump: 1044 present records -> C:\Users\tomhe\AppData\Local\Temp\profx\games_onepass56.*
+total 580.2s
+rc=0

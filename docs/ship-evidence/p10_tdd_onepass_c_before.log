@@ -1,0 +1,131 @@
+$ cd C:/Users/tomhe/Documents/doom-tdd-71a [at 71a603b + tests/host/test_one_pass_reset.py from 31bccd2] && PYTHONPATH=src timeout 1800 python -m pytest tests/host/test_one_pass_reset.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_c_before
+# worktree HEAD: 71a603b355a22614c6fc8c44bb6e535f40d4878a (ONE PASS (the CR of #129, BLOCKING): drawn and sprflag into the pin veto -- the one-pass reset's cle)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#    M tests/host/test_one_pass_reset.py
+# copied-file hashes: tests/host/test_one_pass_reset.py=e06020699159 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-71a\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 04:33:37 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-71a
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 14 items
+
+tests/host/test_one_pass_reset.py::test_every_kind_of_declaration_is_reset_from_its_own_value PASSED [  7%]
+tests/host/test_one_pass_reset.py::test_the_registered_cells_are_declared_zero_and_no_line_moves PASSED [ 14%]
+tests/host/test_one_pass_reset.py::test_the_boot_and_the_frame_tail_both_enter_the_reset PASSED [ 21%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a registered name the program lost-names0-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-no declaration] PASSED [ 28%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a name declared twice-names1-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nws_c1: hex.vec 1\n-declared twice] PASSED [ 35%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a raw cell that is not a nibble (a LUT)-names2-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nlut_cells:\n;200 * dw\n-not a nibble] PASSED [ 42%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a byte array the geometry disagrees with-names3-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-geometry says] PASSED [ 50%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[a value that does not fit its cells-names4-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\nbig: hex.vec 1, 16\n-does not fit] PASSED [ 57%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[cells resumed after a comment line-names5-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n// a note\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-resume at line] FAILED [ 64%]
+tests/host/test_one_pass_reset.py::test_the_generator_refuses[cells resumed after a blank line-names6-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-resume at line] FAILED [ 71%]
+tests/host/test_one_pass_reset.py::test_every_pointer_read_registered_cell_is_vetoed PASSED [ 78%]
+tests/host/test_one_pass_reset.py::test_a_persist_name_that_protects_nothing_is_refused[persist0-registry does not hold] FAILED [ 85%]
+tests/host/test_one_pass_reset.py::test_a_persist_name_that_protects_nothing_is_refused[persist1-registry does not hold] FAILED [ 92%]
+tests/host/test_one_pass_reset.py::test_a_registered_persist_name_the_program_does_not_declare_is_refused FAILED [100%]
+
+================================== FAILURES ===================================
+_ test_the_generator_refuses[cells resumed after a comment line-names5-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n// a note\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-resume at line] _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_c_before/test_the_generator_refuses_cel0')
+why = 'cells resumed after a comment line'
+names = {'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', 'vq_hi', ...}
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n// a n...   hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n'
+match = 'resume at line'
+
+    @pytest.mark.parametrize("why, names, state, match", [
+        ("a registered name the program lost", NAMES | {"gone_reg"}, STATE, "no declaration"),
+        ("a name declared twice", NAMES, STATE + "ws_c1: hex.vec 1\n", "declared twice"),
+        ("a raw cell that is not a nibble (a LUT)", NAMES | {"lut_cells"}, STATE + "lut_cells:\n;200 * dw\n",
+         "not a nibble"),
+        ("a byte array the geometry disagrees with", NAMES, STATE.replace("pclm:\n;0 * dw\n", "pclm:\n"),
+         "geometry says"),
+        ("a value that does not fit its cells", NAMES | {"big"}, STATE + "big: hex.vec 1, 16\n", "does not fit"),
+        # the CR of #129: cells that resume after a blank or a comment line are refused, not silently cut off
+        ("cells resumed after a comment line", NAMES, STATE.replace(";0 * dw\n;0 * dw\n;3 * dw\n",
+                                                                      ";0 * dw\n// a note\n;0 * dw\n;3 * dw\n"),
+         "resume at line"),
+        ("cells resumed after a blank line", NAMES, STATE.replace("    hex.vec 4, 0x1234\n", "    hex.vec 4, 0x1234\n\n"),
+         "resume at line"),
+    ])
+    def test_the_generator_refuses(tmp_path, why, names, state, match):
+>       with pytest.raises(AssertionError, match=match):
+E       Failed: DID NOT RAISE <class 'AssertionError'>
+
+tests\host\test_one_pass_reset.py:112: Failed
+_ test_the_generator_refuses[cells resumed after a blank line-names6-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-resume at line] _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_c_before/test_the_generator_refuses_cel1')
+why = 'cells resumed after a blank line'
+names = {'drawn', 'p2_basep', 'pclm', 'thpos_rt', 'viewx', 'vq_hi', ...}
+state = 'ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * d... hex.vec 4, 0x1234\n\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n'
+match = 'resume at line'
+
+    @pytest.mark.parametrize("why, names, state, match", [
+        ("a registered name the program lost", NAMES | {"gone_reg"}, STATE, "no declaration"),
+        ("a name declared twice", NAMES, STATE + "ws_c1: hex.vec 1\n", "declared twice"),
+        ("a raw cell that is not a nibble (a LUT)", NAMES | {"lut_cells"}, STATE + "lut_cells:\n;200 * dw\n",
+         "not a nibble"),
+        ("a byte array the geometry disagrees with", NAMES, STATE.replace("pclm:\n;0 * dw\n", "pclm:\n"),
+         "geometry says"),
+        ("a value that does not fit its cells", NAMES | {"big"}, STATE + "big: hex.vec 1, 16\n", "does not fit"),
+        # the CR of #129: cells that resume after a blank or a comment line are refused, not silently cut off
+        ("cells resumed after a comment line", NAMES, STATE.replace(";0 * dw\n;0 * dw\n;3 * dw\n",
+                                                                      ";0 * dw\n// a note\n;0 * dw\n;3 * dw\n"),
+         "resume at line"),
+        ("cells resumed after a blank line", NAMES, STATE.replace("    hex.vec 4, 0x1234\n", "    hex.vec 4, 0x1234\n\n"),
+         "resume at line"),
+    ])
+    def test_the_generator_refuses(tmp_path, why, names, state, match):
+>       with pytest.raises(AssertionError, match=match):
+E       Failed: DID NOT RAISE <class 'AssertionError'>
+
+tests\host\test_one_pass_reset.py:112: Failed
+_ test_a_persist_name_that_protects_nothing_is_refused[persist0-registry does not hold] _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_c_before/test_a_persist_name_that_prote0')
+persist = ('viewx', 'viewxx'), match = 'registry does not hold'
+
+    @pytest.mark.parametrize("persist, match", [(("viewx", "viewxx"), "registry does not hold"),
+                                                (("viewx", "lut_x"), "registry does not hold")])
+    def test_a_persist_name_that_protects_nothing_is_refused(tmp_path, persist, match):
+        """the two-pass reset's persist checks, ported (the CR of #129): a typo, or a label never registered, would leave
+        the real state reset every frame"""
+>       with pytest.raises(AssertionError, match=match):
+E       Failed: DID NOT RAISE <class 'AssertionError'>
+
+tests\host\test_one_pass_reset.py:151: Failed
+_ test_a_persist_name_that_protects_nothing_is_refused[persist1-registry does not hold] _
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_c_before/test_a_persist_name_that_prote1')
+persist = ('viewx', 'lut_x'), match = 'registry does not hold'
+
+    @pytest.mark.parametrize("persist, match", [(("viewx", "viewxx"), "registry does not hold"),
+                                                (("viewx", "lut_x"), "registry does not hold")])
+    def test_a_persist_name_that_protects_nothing_is_refused(tmp_path, persist, match):
+        """the two-pass reset's persist checks, ported (the CR of #129): a typo, or a label never registered, would leave
+        the real state reset every frame"""
+>       with pytest.raises(AssertionError, match=match):
+E       Failed: DID NOT RAISE <class 'AssertionError'>
+
+tests\host\test_one_pass_reset.py:151: Failed
+___ test_a_registered_persist_name_the_program_does_not_declare_is_refused ____
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p10/bt/p10_tdd_onepass_c_before/test_a_registered_persist_name0')
+
+    def test_a_registered_persist_name_the_program_does_not_declare_is_refused(tmp_path):
+>       with pytest.raises(AssertionError, match="does not declare"):
+E       Failed: DID NOT RAISE <class 'AssertionError'>
+
+tests\host\test_one_pass_reset.py:156: Failed
+=========================== short test summary info ===========================
+FAILED tests/host/test_one_pass_reset.py::test_the_generator_refuses[cells resumed after a comment line-names5-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n// a note\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-resume at line]
+FAILED tests/host/test_one_pass_reset.py::test_the_generator_refuses[cells resumed after a blank line-names6-ws_c1: hex.vec 1, 1\nws_cang: hex.vec 8, 0x3FFFFFFF\np2_basep: hex.vec w/4\nvq_hi: bit.vec 8\ndrawn:\n;0 * dw\n;0 * dw\n;3 * dw\nthpos_rt:\n    hex.vec 4, 0x1234\n\n    hex.vec 4, 0\npclm:\n;0 * dw\n;0 * dw\nviewx: hex.vec 8, 4267704320\nlut_x: hex.vec 2, 200\n-resume at line]
+FAILED tests/host/test_one_pass_reset.py::test_a_persist_name_that_protects_nothing_is_refused[persist0-registry does not hold]
+FAILED tests/host/test_one_pass_reset.py::test_a_persist_name_that_protects_nothing_is_refused[persist1-registry does not hold]
+FAILED tests/host/test_one_pass_reset.py::test_a_registered_persist_name_the_program_does_not_declare_is_refused
+========================= 5 failed, 9 passed in 1.19s =========================
+# finished 2026-10-13 04:33:41 +0300; pytest exit code: 1

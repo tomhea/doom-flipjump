@@ -104,7 +104,13 @@ TOUR_TARGETS = 10                   # one destination per seed, spread over the 
 # these are GameSim's PREDICTED ends at P10 (blocked54's were ((529, 208), (-296, 120), (707, 492), (147, 214),
 # (-128, 271), (-276, 425), (-371, 80), (-452, 373), (-493, 223), (-495, 194)), owed their confirmation by
 # `gamespeed_trail.py --fjm <the P10 build>`.
-BINARY_ENDS = ((578, 303), (-108, 260), (710, 489), (450, 300), (689, 494), (399, 258), (515, 360), (419, 280),
+# M7 P11: the seen rule (d) -- a monster fully behind a ledge from the player's view is not seen -- changes how the
+# monsters meet runs 3, 4 and 7; these are blocked57's ends, printed by `gamespeed_trail.py --fjm
+# build/doom_e1m1_blocked57.fjm` with TRAIL PASS (docs/ship-evidence/blocked57_gamespeed_trail.log: GameSim's record
+# equal to the binary on every frame of every run, once sight.SeenHook draws the game view). P10's (onepass56) were
+# ((578, 303), (-108, 260), (710, 489), (450, 300), (689, 494), (399, 258), (515, 360), (419, 280), (-210, 367),
+# (97, 254)).
+BINARY_ENDS = ((578, 303), (-108, 260), (710, 489), (449, 300), (693, 489), (399, 258), (515, 360), (434, 280),
                (-210, 367), (97, 254))
 BINARY_DOORS = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 # runs 0 and 1's keys, recorded so the host test replays them without the ~75 s planner: run 0 is

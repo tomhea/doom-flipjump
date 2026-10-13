@@ -46,7 +46,7 @@ def _program(key_lines) -> str:
         "kbstat: hex.vec 1", "kbcode: hex.vec 2", "pkeys: hex.vec 2",
         *[f"{KB.flag(k)}: hex.vec 1" for k in KB.HELD_KEYS],
         KB.NOW_DECL,
-        *[f"{e}: hex.vec 1" for e in ("ev_enter", "ev_esc", "ev_up", "ev_dn", "ev_help")],
+        *[f"{e}: hex.vec 1" for e in ("ev_enter", "ev_esc", "ev_up", "ev_dn", "ev_help", "ev_any")],   # P10: ev_any
         "tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {FRAMES}",
     ]) + "\n"
 

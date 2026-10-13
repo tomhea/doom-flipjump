@@ -209,14 +209,20 @@ both arms live, and the binary hash is what it checks), so `--against shipped` i
 
 ## 1b. The build command, and the play command
 
-**The build command of the shipped series** (recovered 2026-09-13 from the session transcript
-that built blocked23 and blocked24, 09-11 11:22 and 13:01 -- the two builds before blocked25 in
-the same series, with the same counts cache; blocked25's own line, 09-11 18:04, was never logged
-and followed the renderer fix of FINDINGS CE):
+**The build command of the shipped series** -- ONE PASS since onepass56 (M7 P10, 2026-10-13; below):
 
 ```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p8a.json.gz
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
 ```
+
+`--one-pass-blocks` reads no counts: it WRITES the build's census to `--counts-cache`, the tracked
+`scratchpad/12m/_census_game.json.gz` being the shipped build's (onepass56's, byte for byte its
+`_census_onepass56.json.gz`) -- the file `tests/host/test_pin_heat.py` fits the heat list against, as it fitted
+the two-pass counts cache. **Until P10 the line was the TWO-PASS one** (recovered 2026-09-13 from the session
+transcript that built blocked23 and blocked24, 09-11 11:22 and 13:01 -- the two builds before blocked25 in the same
+series, with the same counts cache; blocked25's own line, 09-11 18:04, was never logged and followed the renderer
+fix of FINDINGS CE): `python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p8a.json.gz` -- a counting assembly
+first (or a counts-cache hit), then the placing one; blocked54's heat list was `heat_blocked27_p8a`.
 
 Until blocked51 the line read `--pool-base 0x60000000 --span-bits 0x9fffffe0` (every build from blocked25 on);
 blocked52's first build moved it (blocked53 below). Every tool that reconstructs the pool reads the same two knobs:
@@ -308,11 +314,8 @@ is signed by 87c2c75's (`aab5be8f`), so on main this line MISSES the cache and r
 the same counts) -- as after PR #87 (item 4). The next ship build re-signs it. (A first build of this rung was stopped in pass 1:
 it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
 
-**onepass56 (2026-10-13, M7 P10): ONE PASS -- the line is**
-
-```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_<name>.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
-```
+**onepass56 (2026-10-13, M7 P10): ONE PASS -- the line at the top of 1b** (onepass56 itself wrote its census to
+`scratchpad/12m/_census_onepass56.json.gz`; the tracked `_census_game.json.gz` is that file).
 
 `--one-pass-blocks` (dec86fc) builds with flipjump's `BlockPool(one_pass=True)` (tomhea/flipjump#369, merged into 1.5.1
 as 6711d7a; onepass56 was assembled at the PR's e4340ee, whose output for a pool that is not short #369's round 4

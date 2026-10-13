@@ -2095,3 +2095,65 @@ refuses as the device does). blocked56 (the fix + the one-pass reset, blocked55'
 line of `stream_render.fj`, a group's key carries its call sites' file:line, so 60,256 tables went inline and the wall
 walker's hot `ycur` pin was lost. onepass56 (the same source, one pass: its own census) -- try 1 wrote these bytes and
 failed only the build's storage check (no native engine in the assembling worktree); try 2 the same bytes, every gate.
+
+## P11 the EXIT sign, the shared third-slot painter, one ledge rule (class F) -- declared 2026-10-13, before the build
+
+**What** (the owner's answers of 2026-10-12/13 to P10's play-test; ONE rung on `m7-p11`, on P10's source;
+`docs/gp-p11-plan.md`):
+- (a) a floating red EXIT sign over the exit alcove -- `doomfj.exitsign`, a virtual thing (type 9800) appended to the
+  map's things, drawn in the actor class, never seen and never aimed;
+- (b) the third fragment slot's two background windows share ONE region painter (`erc_leaf`, fcalled) instead of an
+  inline copy at each of `emit_col_lines`' four call sites;
+- (c) a sprite FULLY hidden behind the nearer ledge pieces in a column takes no record slot there (measured on the model
+  first: 0 of 16 blinks removed; kept because (d) needs the same per-column test);
+- (d) the monsters' seen test and the player's aim window follow the same ledge rule (`reference_model.ledge_hidden`).
+
+**Kill criteria** (declared in `docs/gp-p11-plan.md` before the build): K1 any gate not byte- and state-exact; K2 the
+size over 42% of 2^27 (43% since 88c1ac1); K3 CAP-22 binding; K4 msframe over ~90 ms/frame unexplained (D8); K5 (b)
+costing more than 0.1% (the owner's bound), measured.
+
+**Row** (blocked57, written 2026-10-14; sha256 `05c64ee3b966d5bf`; built ONE PASS at fecb44b -- 86341a0 after the rebase
+onto main b84bc86, whose P10 tail touched no `src/` -- with `heat_blocked27_p10`, flipjump's #369 tree at 798cec4
+assembling and the installed 1.5.1 at 0a24613 running; 2,769 s; `docs/ship-evidence/blocked57_*`).
+
+| measure | onepass56 (P10) | blocked57 (P11) | note |
+|---|---|---|---|
+| binding (mean+p80)/2, gamespeed | 18,975,792 | 18,928,872 | the same tours: -0.25% (mean 18,226,477 -> 18,156,521) |
+| size | 42.06% (56,449,864) | 39.89% (53,540,882) | -2,908,982 words: (b)'s shared painter |
+| CAP-22 on the combat set | v9 17,343,316 | v10 17,635,961 | different sets; v10 PLANNED (keys `5bb15f59e01c36b8`), frozen only with the owner's approval |
+| msframe, one A/B run | 84.2 ms | 82.5 ms | NOT SEPARATED, x1.024 (B faster on all 5 pairs, under the 3% resolution) |
+| per-frame maximum on the set | 29,097,984 (v9) | 29,622,272 (v10, R0-courtyard) | |
+| the same frames (`p11_ops_matrix.log`) | A 11,777,263 / B 18,107,499 / C 17,969,076 | 11,731,953 / 18,024,305 / 17,975,377 | -0.38% / -0.46% / +0.04% |
+| deg_gate (the visual tier: no placement pass) | 31,425,877 / 17,639,966 / 30,893,233 / 28,635,934 | 32,276,814 / 18,110,323 / 31,930,099 / 29,351,667 | +2.5 .. +3.4%: the unplaced layout; the GAME binary on the same four views +0.04% (route C) |
+| (b) the shared painter (`p11_k5_painter.log`) | - | 14,160 ops/frame, painting included; 2.22 calls/frame | 0.0795% of the frames' ops |
+| build time | 2,887 s | 2,769 s | one pass both |
+
+**Verdict per criterion:**
+1. **K1 every gate exact** -- PASS: m2_std_gate (421 frames) and m3_gate (75) byte- and state-exact, the 7 gate
+   selftests rejecting where they must; p2a 13/13, hurt 7/7, fight 43/43 (with the rocket's R1-R3 and the chaingun's
+   CG1) and die 17/17 -- state, pixels and palette on every frame; B0 on v10 every frame of all 11 runs state- and
+   pixel-exact; deg_gate BYTE-EXACT, its op counts EQUAL to the edge gate's on this source (`blocked57_edge_gate.log`);
+   gamespeed's trail PASS, `--validate` and `--selftest` PASS; pinreport 20 of 20 hot words pinned, 0 lost; the host
+   suite green; tests/fj in CI on the PR.
+2. **K2 size** -- PASS: 39.89% of 2^27, 4,172,741 words under the 43% target.
+3. **K3 CAP-22** -- PASS: B0 on v10 17,635,961 (mean 15,324,432, p80 run R0-west-hall 19,947,490), 4,364,039 under 22M.
+4. **K4 msframe** -- PASS: 82.5 ms/frame against P10's 84.2 in the same run, NOT SEPARATED; far under ~90 ms.
+5. **K5 (b)** -- PASS: the leaf's whole work is 0.0795% of the frames' ops; (b)'s price -- the calls' overhead over the
+   inline copies it replaced -- is a part of that.
+6. **Stress (O-E1)** -- PASS: S1 max 25,427,968 / mean 23,496,841; fight S2 13,631,488 / 10,557,479, S3 17,563,648 /
+   16,117,487, S4 16,252,928 / 13,245,171; D9 19,922,944 / 19,306,906; the rocket R1-R3 20,447,232 / 18,078,897,
+   17,110,357, 17,700,545; the chaingun CG1 20,447,232 / 17,159,946; 0 frames over the 44M tripwire, no scenario over 30M.
+
+**What the chain and the pre-review found** (the binary unchanged throughout: every fix is in the model, a harness or a
+scenario, and the emitters take only `sight.NEAR` from the one module that changed):
+1. gamespeed's trail parted at run 7, frame 52: `sight.SeenHook` drew the World's full-screen view (160x100), not the
+   game's 84 rows -- harmless while the seen test read columns, wrong once (d) reads rows. Fixed with a test pinned to
+   the binary's own flags (9ff90a4); v10 re-planned (651404d).
+2. The host suite at 651404d: the swap probe passed the game keywords through `**kw` (65f913b).
+3. The pre-review: the census drew the model's live monsters as SCENERY -- (a)'s `DRAW_ACTOR_TYPES` is derived from
+   `MONSTER_TYPES` at import, and the census patches only the latter (bc25935, with its control recalibrated: it had
+   compared two different compositor settings since P8a); v10's populations re-planned, the keys unchanged (1f8e0e2).
+4. The fight gate: I3 placed no candidate under (d)'s seen rule -- the poses widened to 32 .. 256 (6f9b419).
+5. gamespeed's selftest: `BINARY_ENDS` held P10's ends; re-recorded from blocked57's trail (7fc87cf).
+
+**Builds:** blocked57 only (sha256 `05c64ee3b966d5bf`).

@@ -1,0 +1,22 @@
+$ cd /c/Users/tomhe/Documents/doom-tdd-p11 [at 7fc87cf (the branch), unmodified: the hidden-column record test AND its five mutant controls] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_sprite_bank_fj.py -k hidden_behind or ledge -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/bt/p11_tdd_ledge_record_after
+# worktree HEAD: 7fc87cfb19d98ad2b08211875e7a748a1ed17d40 (P11: gamespeed's BINARY_ENDS re-recorded from blocked57's trail -- runs 3, 4 and 7 end where P11's s)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-14 00:56:00 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-p11
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 20 items / 14 deselected / 6 selected
+
+tests/fj/test_sprite_bank_fj.py::test_the_record_skips_a_column_hidden_behind_its_nearer_pieces PASSED [ 16%]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[an upper piece's end not + 1] PASSED [ 33%]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the box's end clamped short] PASSED [ 50%]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the last lower piece read at l1] PASSED [ 66%]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the last upper piece read at u1] PASSED [ 83%]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the record without its ledge test] PASSED [100%]
+
+====================== 6 passed, 14 deselected in 58.36s ======================
+# finished 2026-10-14 00:57:00 +0300; pytest exit code: 0

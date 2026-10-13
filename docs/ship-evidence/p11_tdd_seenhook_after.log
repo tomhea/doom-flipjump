@@ -1,0 +1,18 @@
+$ cd /c/Users/tomhe/Documents/doom-tdd-p11 [at 9ff90a4 (SeenHook draws the game view), unmodified] && PYTHONPATH=src timeout 1800 python -m pytest tests/host/test_sight.py tests/host/test_p8a_gates.py -k game_tiers_view or passes_view_drop -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/bt/p11_tdd_seenhook_after
+# worktree HEAD: 9ff90a4780ea25f42135123e0d5d8031a9c6fb85 (P11: SeenHook draws the GAME view (GAME_CFG, 160x84), not the World's full screen -- blocked57's tra)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 21:08:11 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-p11
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 31 items / 29 deselected / 2 selected
+
+tests/host/test_sight.py::test_seen_hook_draws_the_game_tiers_view PASSED [ 50%]
+tests/host/test_p8a_gates.py::test_every_game_tier_gate_render_passes_view_drop PASSED [100%]
+
+====================== 2 passed, 29 deselected in 1.12s =======================
+# finished 2026-10-13 21:08:13 +0300; pytest exit code: 0

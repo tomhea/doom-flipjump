@@ -1,0 +1,160 @@
+$ cd /c/Users/tomhe/Documents/doom-tdd-p11 [at 67fd6f9 (no ledge rule in the fj) + tests/fj/test_sprite_bank_fj.py from 7fc87cf] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_sprite_bank_fj.py -k ledge -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/bt/p11_tdd_ledge_record_before
+# worktree HEAD: 67fd6f91ee2b8c9adc5660be8de8202d2912dec9 (P11 (b, WIP -- not yet gated): the third slot's two background windows share ONE region painter)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#    M tests/fj/test_aim_record_fj.py
+#    M tests/fj/test_sprite_bank_fj.py
+# copied-file hashes: tests/fj/test_aim_record_fj.py=82302ad34137 tests/fj/test_sprite_bank_fj.py=356759c29ac2 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-14 00:53:58 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-p11
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 20 items / 15 deselected / 5 selected
+
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[an upper piece's end not + 1] ERROR [ 20%]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the box's end clamped short] ERROR [ 40%]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the last lower piece read at l1] ERROR [ 60%]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the last upper piece read at u1] ERROR [ 80%]
+tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the record without its ledge test] ERROR [100%]
+
+=================================== ERRORS ====================================
+_ ERROR at setup of test_a_broken_ledge_test_is_caught[an upper piece's end not + 1] _
+
+record_cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+
+    @pytest.fixture(scope="module")
+    def ledges(record_cases):
+>       lg = _ledges(record_cases)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests\fj\test_sprite_bank_fj.py:691: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+seed = 19
+
+    def _ledges(cases, seed=19):
+        """P11 (c)+(d): x -> (the column's sfflag byte, {sfslot offset: byte}, hidden). Column u0 of a case has no piece
+        (shown) unless the case is one of every fourth, which is HIDDEN in all three columns (the seen mark's test);
+        the rest draw a side and count -- the last piece's row on the box's edge -1 / 0 / +1 or anywhere, the base bit
+        (bit 3 of the count nibble: no piece) at random, and a DECOY row at every offset the test must not read (the
+        first piece of a count of 2, the absent second one of a count of 1) -- until the model's ledge_hidden says
+        what the case needs"""
+>       from doomfj.reference_model import ledge_hidden
+E       ImportError: cannot import name 'ledge_hidden' from 'doomfj.reference_model' (C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\reference_model.py)
+
+tests\fj\test_sprite_bank_fj.py:466: ImportError
+_ ERROR at setup of test_a_broken_ledge_test_is_caught[the box's end clamped short] _
+
+record_cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+
+    @pytest.fixture(scope="module")
+    def ledges(record_cases):
+>       lg = _ledges(record_cases)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests\fj\test_sprite_bank_fj.py:691: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+seed = 19
+
+    def _ledges(cases, seed=19):
+        """P11 (c)+(d): x -> (the column's sfflag byte, {sfslot offset: byte}, hidden). Column u0 of a case has no piece
+        (shown) unless the case is one of every fourth, which is HIDDEN in all three columns (the seen mark's test);
+        the rest draw a side and count -- the last piece's row on the box's edge -1 / 0 / +1 or anywhere, the base bit
+        (bit 3 of the count nibble: no piece) at random, and a DECOY row at every offset the test must not read (the
+        first piece of a count of 2, the absent second one of a count of 1) -- until the model's ledge_hidden says
+        what the case needs"""
+>       from doomfj.reference_model import ledge_hidden
+E       ImportError: cannot import name 'ledge_hidden' from 'doomfj.reference_model' (C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\reference_model.py)
+
+tests\fj\test_sprite_bank_fj.py:466: ImportError
+_ ERROR at setup of test_a_broken_ledge_test_is_caught[the last lower piece read at l1] _
+
+record_cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+
+    @pytest.fixture(scope="module")
+    def ledges(record_cases):
+>       lg = _ledges(record_cases)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests\fj\test_sprite_bank_fj.py:691: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+seed = 19
+
+    def _ledges(cases, seed=19):
+        """P11 (c)+(d): x -> (the column's sfflag byte, {sfslot offset: byte}, hidden). Column u0 of a case has no piece
+        (shown) unless the case is one of every fourth, which is HIDDEN in all three columns (the seen mark's test);
+        the rest draw a side and count -- the last piece's row on the box's edge -1 / 0 / +1 or anywhere, the base bit
+        (bit 3 of the count nibble: no piece) at random, and a DECOY row at every offset the test must not read (the
+        first piece of a count of 2, the absent second one of a count of 1) -- until the model's ledge_hidden says
+        what the case needs"""
+>       from doomfj.reference_model import ledge_hidden
+E       ImportError: cannot import name 'ledge_hidden' from 'doomfj.reference_model' (C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\reference_model.py)
+
+tests\fj\test_sprite_bank_fj.py:466: ImportError
+_ ERROR at setup of test_a_broken_ledge_test_is_caught[the last upper piece read at u1] _
+
+record_cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+
+    @pytest.fixture(scope="module")
+    def ledges(record_cases):
+>       lg = _ledges(record_cases)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests\fj\test_sprite_bank_fj.py:691: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+seed = 19
+
+    def _ledges(cases, seed=19):
+        """P11 (c)+(d): x -> (the column's sfflag byte, {sfslot offset: byte}, hidden). Column u0 of a case has no piece
+        (shown) unless the case is one of every fourth, which is HIDDEN in all three columns (the seen mark's test);
+        the rest draw a side and count -- the last piece's row on the box's edge -1 / 0 / +1 or anywhere, the base bit
+        (bit 3 of the count nibble: no piece) at random, and a DECOY row at every offset the test must not read (the
+        first piece of a count of 2, the absent second one of a count of 1) -- until the model's ledge_hidden says
+        what the case needs"""
+>       from doomfj.reference_model import ledge_hidden
+E       ImportError: cannot import name 'ledge_hidden' from 'doomfj.reference_model' (C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\reference_model.py)
+
+tests\fj\test_sprite_bank_fj.py:466: ImportError
+_ ERROR at setup of test_a_broken_ledge_test_is_caught[the record without its ledge test] _
+
+record_cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+
+    @pytest.fixture(scope="module")
+    def ledges(record_cases):
+>       lg = _ledges(record_cases)
+             ^^^^^^^^^^^^^^^^^^^^^
+
+tests\fj\test_sprite_bank_fj.py:691: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+cases = [(0, 0, -60, 1, 0), (1, 0, -5, 5, 1), (2, 0, 0, 8, 0), (3, 0, 17, 11, 1), (4, 0, 45, 14, 0), (5, 0, -60, 17, 1), ...]
+seed = 19
+
+    def _ledges(cases, seed=19):
+        """P11 (c)+(d): x -> (the column's sfflag byte, {sfslot offset: byte}, hidden). Column u0 of a case has no piece
+        (shown) unless the case is one of every fourth, which is HIDDEN in all three columns (the seen mark's test);
+        the rest draw a side and count -- the last piece's row on the box's edge -1 / 0 / +1 or anywhere, the base bit
+        (bit 3 of the count nibble: no piece) at random, and a DECOY row at every offset the test must not read (the
+        first piece of a count of 2, the absent second one of a count of 1) -- until the model's ledge_hidden says
+        what the case needs"""
+>       from doomfj.reference_model import ledge_hidden
+E       ImportError: cannot import name 'ledge_hidden' from 'doomfj.reference_model' (C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\reference_model.py)
+
+tests\fj\test_sprite_bank_fj.py:466: ImportError
+=========================== short test summary info ===========================
+ERROR tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[an upper piece's end not + 1]
+ERROR tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the box's end clamped short]
+ERROR tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the last lower piece read at l1]
+ERROR tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the last upper piece read at u1]
+ERROR tests/fj/test_sprite_bank_fj.py::test_a_broken_ledge_test_is_caught[the record without its ledge test]
+====================== 15 deselected, 5 errors in 0.85s =======================
+# finished 2026-10-14 00:54:01 +0300; pytest exit code: 1

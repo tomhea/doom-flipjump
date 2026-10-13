@@ -1,0 +1,22 @@
+$ cd /c/Users/tomhe/Documents/doom-tdd-p11 [at 6f9b419 (the branch), unmodified] && PYTHONPATH=src timeout 1800 python -m pytest tests/host/test_exit_sign.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/bt/p11_tdd_exitsign_after
+# worktree HEAD: 6f9b419be3345486fd635a4ba2d9cef7a890d2aa (P11: fight gate I3 places again -- P11's seen rule hid every near shooter behind a ledge; the poses )
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 21:08:54 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-p11
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 6 items
+
+tests/host/test_exit_sign.py::test_the_picture_is_centred_hung_and_spells_the_word PASSED [ 16%]
+tests/host/test_exit_sign.py::test_the_sign_is_appended_last_and_moves_no_wad_index PASSED [ 33%]
+tests/host/test_exit_sign.py::test_the_sign_is_bound_to_the_exit_line PASSED [ 50%]
+tests/host/test_exit_sign.py::test_the_world_ignores_it_and_the_renderers_draw_it PASSED [ 66%]
+tests/host/test_exit_sign.py::test_the_model_draws_the_sign_past_the_monster PASSED [ 83%]
+tests/host/test_exit_sign.py::test_control_drawn_as_scenery_the_monster_cuts_it PASSED [100%]
+
+============================== 6 passed in 0.72s ==============================
+# finished 2026-10-13 21:08:55 +0300; pytest exit code: 0

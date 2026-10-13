@@ -1,0 +1,28 @@
+$ cd /c/Users/tomhe/Documents/doom-tdd-p11 [at 7fc87cf (the branch), unmodified] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_aim_record_fj.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/bt/p11_tdd_aim_rows_after
+# worktree HEAD: 7fc87cfb19d98ad2b08211875e7a748a1ed17d40 (P11: gamespeed's BINARY_ENDS re-recorded from blocked57's trail -- runs 3, 4 and 7 end where P11's s)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+# copied-file hashes: 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-14 00:54:56 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-p11
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 12 items
+
+tests/fj/test_aim_record_fj.py::test_the_leaf_is_the_box_rule PASSED     [  8%]
+tests/fj/test_aim_record_fj.py::test_the_checks_catch_a_broken_leaf[bucket] PASSED [ 16%]
+tests/fj/test_aim_record_fj.py::test_the_checks_catch_a_broken_leaf[drawn] PASSED [ 25%]
+tests/fj/test_aim_record_fj.py::test_the_checks_catch_a_broken_leaf[ledge8] PASSED [ 33%]
+tests/fj/test_aim_record_fj.py::test_the_checks_catch_a_broken_leaf[r+1] PASSED [ 41%]
+tests/fj/test_aim_record_fj.py::test_the_checks_catch_a_broken_leaf[range] PASSED [ 50%]
+tests/fj/test_aim_record_fj.py::test_the_checks_catch_a_broken_leaf[tie] PASSED [ 58%]
+tests/fj/test_aim_record_fj.py::test_the_checks_catch_a_broken_leaf[top] PASSED [ 66%]
+tests/fj/test_aim_record_fj.py::test_the_leaf_with_barrels_is_the_box_rule PASSED [ 75%]
+tests/fj/test_aim_record_fj.py::test_the_checks_catch_a_broken_barrel_leaf[rc2] PASSED [ 83%]
+tests/fj/test_aim_record_fj.py::test_the_checks_catch_a_broken_barrel_leaf[r+1] PASSED [ 91%]
+tests/fj/test_aim_record_fj.py::test_the_barrel_table_carries_the_third_radius PASSED [100%]
+
+======================== 12 passed in 61.77s (0:01:01) ========================
+# finished 2026-10-14 00:55:58 +0300; pytest exit code: 0

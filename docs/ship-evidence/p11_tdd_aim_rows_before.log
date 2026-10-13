@@ -1,0 +1,31 @@
+$ cd /c/Users/tomhe/Documents/doom-tdd-p11 [at 67fd6f9 (no ledge rule in the fj) + tests/fj/test_aim_record_fj.py from 7fc87cf] && PYTHONPATH=src timeout 1800 python -m pytest tests/fj/test_aim_record_fj.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/bt/p11_tdd_aim_rows_before
+# worktree HEAD: 67fd6f91ee2b8c9adc5660be8de8202d2912dec9 (P11 (b, WIP -- not yet gated): the third slot's two background windows share ONE region painter)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#    M tests/fj/test_aim_record_fj.py
+#    M tests/fj/test_sprite_bank_fj.py
+# copied-file hashes: tests/fj/test_aim_record_fj.py=82302ad34137 tests/fj/test_sprite_bank_fj.py=356759c29ac2 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-14 00:54:02 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-p11
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_______________ ERROR collecting tests/fj/test_aim_record_fj.py _______________
+ImportError while importing test module 'C:\Users\tomhe\Documents\doom-tdd-p11\tests\fj\test_aim_record_fj.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\fj\test_aim_record_fj.py:35: in <module>
+    from doomfj.reference_model import ledge_hidden, sprite_bucket, sprite_bucket_height
+E   ImportError: cannot import name 'ledge_hidden' from 'doomfj.reference_model' (C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\reference_model.py)
+=========================== short test summary info ===========================
+ERROR tests/fj/test_aim_record_fj.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.65s ===============================
+# finished 2026-10-14 00:54:03 +0300; pytest exit code: 2

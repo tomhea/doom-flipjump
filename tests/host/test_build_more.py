@@ -315,20 +315,30 @@ def test_the_include_order_is_R54(tmp_path, monkeypatch):
 
 
 def test_the_standalone_tier_puts_input_before_sim_and_the_reset_last(tmp_path, monkeypatch):
-    """The `game` tier's path list, caught at `selfreset.capture_labels` -- the first thing the
-    self_reset branch does, and before `bake_bsp`. R54 again: `m1_reset.fj` goes AFTER the emitted
-    parts (a file that only holds a `def` emits no ops, so appending it moves no address), and
-    `input.fj` goes before `sim.fj`, which stays last of the fixed includes."""
+    """The `game` tier's path list, caught at `selfreset.capture_labels` -- the ONE assembly of the one-pass
+    build (build.ONE_PASS_TIERS), after its reset part is generated and before `bake_bsp`. R54 again:
+    `m1_reset.fj` goes AFTER the emitted parts (a file that only holds a `def` emits no ops, so appending it
+    moves no address), and the generated reset part after it, LAST (it holds `m1_reset:`, which the boot and the
+    frame tail jump to by label); `input.fj` goes before `sim.fj`, which stays last of the fixed includes. The
+    emitter is stubbed, so the reset part's generator is too (on the real program it refuses a registered name
+    with no declaration: tests/host/test_one_pass_reset.py)."""
     from doomfj import selfreset
 
+    assert "game" in B.ONE_PASS_TIERS
     _stub(monkeypatch)
+    part = tmp_path / "e1m1_07_reset.fj"
+
+    def fake_reset(gen, files, names, view_w, nss, mapname="e1m1", persist=()):
+        part.write_text("m1_reset:\n", encoding="utf-8")
+        return part, 0, 0, []
+    monkeypatch.setattr(selfreset, "emit_reset_part_by_label", fake_reset)
     monkeypatch.setattr(selfreset, "capture_labels",
                         lambda paths, out, **k: (_ for _ in ()).throw(_Stop(list(paths))))
     with pytest.raises(_Stop) as e:
         B.build_wall_renderer(tmp_path / "game.fjm", wad_path=E1M1_WAD, mapname=MAP, tier="game")
     names = [Path(p).name for p in e.value.args[0]]
     assert names[0] == "fj_consts.fj", names
-    assert names[-1] == "m1_reset.fj", names
+    assert names[-2:] == ["m1_reset.fj", part.name], names
     assert "input.fj" in names and names.index("input.fj") < names.index("sim.fj"), names
     prog = [n for n in names if n.startswith(MAP.lower() + "_")]
     assert names.index("sim.fj") < names.index(prog[0]), (

@@ -101,6 +101,12 @@ def test_the_boot_and_the_frame_tail_both_enter_the_reset(tmp_path):
     ("a byte array the geometry disagrees with", NAMES, STATE.replace("pclm:\n;0 * dw\n", "pclm:\n"),
      "geometry says"),
     ("a value that does not fit its cells", NAMES | {"big"}, STATE + "big: hex.vec 1, 16\n", "does not fit"),
+    # the CR of #129: cells that resume after a blank or a comment line are refused, not silently cut off
+    ("cells resumed after a comment line", NAMES, STATE.replace(";0 * dw\n;0 * dw\n;3 * dw\n",
+                                                                  ";0 * dw\n// a note\n;0 * dw\n;3 * dw\n"),
+     "resume at line"),
+    ("cells resumed after a blank line", NAMES, STATE.replace("    hex.vec 4, 0x1234\n", "    hex.vec 4, 0x1234\n\n"),
+     "resume at line"),
 ])
 def test_the_generator_refuses(tmp_path, why, names, state, match):
     with pytest.raises(AssertionError, match=match):
@@ -134,3 +140,18 @@ def test_every_pointer_read_registered_cell_is_vetoed():
     # R9: a source that loads one more registered label into a pointer is caught
     extra = sorted(names - veto)[0]
     assert _pointer_loaded(names, texts + ["    hex.set w/4, some_p, %s" % extra]) - veto == {extra}
+
+
+
+@pytest.mark.parametrize("persist, match", [(("viewx", "viewxx"), "registry does not hold"),
+                                            (("viewx", "lut_x"), "registry does not hold")])
+def test_a_persist_name_that_protects_nothing_is_refused(tmp_path, persist, match):
+    """the two-pass reset's persist checks, ported (the CR of #129): a typo, or a label never registered, would leave
+    the real state reset every frame"""
+    with pytest.raises(AssertionError, match=match):
+        _emit(tmp_path, persist=persist)
+
+
+def test_a_registered_persist_name_the_program_does_not_declare_is_refused(tmp_path):
+    with pytest.raises(AssertionError, match="does not declare"):
+        _emit(tmp_path, names=NAMES | {"ghost"}, persist=("viewx", "ghost"))

@@ -593,6 +593,17 @@ def scan_declarations(files, wanted) -> dict:
                     break
                 j += 1
             assert cells_v or rows_v, "one-pass reset: %s:%d -- %r declares no cells" % (f, i + 1, name)
+            # the stop must be the declaration's END: cells that resume after a blank or comment line are still this
+            # label's memory, and a scan cut there would leave them out of the reset (the CR of #129)
+            k = j
+            while k < len(lines) and not _strip_comment(lines[k]).strip():
+                k += 1
+            if k > j and k < len(lines):
+                after = _strip_comment(lines[k]).strip()
+                assert not (_CELL.match(after) or _VEC.match(after)), (
+                    "one-pass reset: %s:%d -- %r's cells resume at line %d after a blank or comment line; its "
+                    "extent is ambiguous, so the reset refuses it (keep a declaration's cells contiguous)"
+                    % (f, i + 1, name, k + 1))
             if cells_v:
                 found[name] = {"file": str(f), "line": i + 1, "kind": "cells", "cells": len(cells_v),
                                "values": cells_v, "first": i + 2}
@@ -661,6 +672,14 @@ def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1
     gen = Path(gen)
     files = [Path(f) for f in files]
     persist = tuple(persist)
+    # the two-pass reset's two persist checks (emit_reset_part): a name the registry does not hold, or the program
+    # does not declare, protects nothing -- a typo, and the real label would be reset every frame
+    unregistered = sorted(set(persist) - set(reset_names))
+    assert not unregistered, ("one-pass reset: persist names %s, which the registry does not hold -- excluding them "
+                              "changes nothing, so the state they should protect is NOT protected" % unregistered[:5])
+    undeclared = sorted(set(persist) - set(scan_declarations(files, set(persist))))
+    assert not undeclared, ("one-pass reset: persist names %s, which the emitted program does not declare"
+                            % undeclared[:5])
     names = sorted(set(reset_names) - set(persist))
     decls = scan_declarations(files, set(names))
     missing = sorted(set(names) - set(decls))

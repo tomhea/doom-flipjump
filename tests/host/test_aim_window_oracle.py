@@ -2,16 +2,20 @@
 2.2): per column 72..88 the nearest shootable living monster whose +-r_eff box covers the column while the column is
 still open when the walk reaches the monster's leaf.
 
-  (a) on a LIGHT slice of the combat set v9 (M7 P10: re-pointed from v6, whose replay the faster turn moved -- 32
-      frames of its slice kept a target; M7 P6+P7 had re-pointed it from v5 for the tempo / turn / fire; 60 frames: three runs' first 20, replayed with the set's own sight
-      rule -- the picture renders every frame anyway) the window agrees with `combat.aim_geometric` (monsters only:
-      the barrels are P6's) everywhere except a FROZEN list of (run, frame, column) residuals, and every residual is
-      the wall-edge class the doc names: the centre-sight shortcut of the geometric aim, in either direction;
+  (a) on a LIGHT slice of the combat set v10 (M7 P11: re-pointed from v9 -- P11's sight and aim follow the ledge
+      rule; M7 P10 had re-pointed it from v6, whose replay the faster turn moved; M7 P6+P7 from v5 for the tempo /
+      turn / fire; 60 frames, replayed with the set's own sight rule -- the picture renders every frame anyway) the
+      window agrees with `combat.aim_geometric` (monsters only: the barrels are P6's) everywhere except a FROZEN list
+      of (run, frame, column) residuals, and every residual is a class the docs name: the wall-edge class (the
+      centre-sight shortcut of the geometric aim, in either direction) or, from P11 on, "ledge-hidden" -- the
+      geometric target's box FULLY behind the column's nearer pieces, which the player cannot see there and so
+      cannot aim at (reference_model.ledge_hidden, docs/gp-p11-plan.md (d));
   (b) a hand-built case: one monster fills exactly the window columns its box covers; a nearer later arrival
       overwrites; an equal-depth later arrival does not;
-  (c) R9 negative controls, each a MUTANT of the real render_wall_frame source: radius + 1, `drawn[]` ignored, and
-      "first arrival wins" each change the window -- the first two on the slice, the last on the hand case (it
-      changes nothing on the slice: no farther monster arrives first there, which the test states).
+  (c) R9 negative controls, each a MUTANT of the real render_wall_frame source: radius + 1, `drawn[]` ignored, the
+      window's ledge test off (P11), and "first arrival wins" each change the window -- the first three on the
+      slice, the last on the hand case (it changes nothing on the slice: no farther monster arrives first there,
+      which the test states).
 """
 import inspect
 import json
@@ -26,30 +30,39 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "scratchpad" / "gp"), str(ROOT / "scratchpad" / "12m")]
-SET_V9 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v9.json"
+SET_V10 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v10.json"
 ART = ROOT / "assets/freedoom1.wad"
-pytestmark = pytest.mark.skipif(not ART.exists() or not SET_V9.exists(),
-                                reason="needs assets/freedoom1.wad and the v9 scenario set")
+pytestmark = pytest.mark.skipif(not ART.exists() or not SET_V10.exists(),
+                                reason="needs assets/freedoom1.wad and the v10 scenario set")
 
 # the LIGHT slice: three runs' first 20 frames -- 60 rendered frames, ~48 with a geometric target at column 80
-# M7 P10: on v9, two runs dense in targets (column 80 in the first 25 frames: R3-mid 21, R0-west-hall 19) and the
-# spectre corridor's first 10, where a wall edge decides the window (the no-occlusion control moves frames 1-6 there,
-# and nowhere in the dense runs' first 20 frames)
-SLICE = (("R3-mid", 25), ("R0-west-hall", 25), ("R2-spectre-corridor", 10))
+# M7 P11: on v10, two runs dense in targets (column 80 in the first 25 frames: R3-mid 21, R0-northwest 16, the window
+# and the geometric aim agreeing on every frame) and the spectre corridor's first 10, where a wall edge and a ledge
+# decide the window (the no-occlusion control moves its frame 1, the no-ledge control frames 2-6 and 8). v9's dense
+# R0-west-hall left: on v10 its monsters stand FULLY behind the hall's ledge -- the geometric aim names monster 23 at
+# column 80 on 15 of the first 25 frames, the window nothing (253 ledge-hidden column-frames, no other class).
+SLICE = (("R3-mid", 25), ("R0-northwest", 25), ("R2-spectre-corridor", 10))
 COL = 80
 # THE FROZEN RESIDUALS (run, frame, column) of the slice, measured 2026-10-04 with r_eff in both aims. Every one is
 # "edge-closed": the geometric aim's target, whose centre has 2D sight, has a box that reaches behind a solid wall
 # edge -- the column was already wall-drawn when the walk reached the monster's leaf. Compared as a LIST (doc 5, T1):
 # any movement is a visible diff.
 FROZEN_RESIDUALS = {
-    # M7 P10: re-measured on v9's slice (combat_scenarios_v9.json, keys 2fdfd6383a599b8e) -- every one "edge-closed";
-    # 45 frames with a target at column 80 (window and geometric agree on all 60), 1017/1020 columns agree; the
-    # controls move 25 (radius + 1) and 6 (no occlusion) frames. v6's (P6+P7) were spectre 6 (88,), 7 (86, 87, 88)
-    # and imp-court 0 (78, 79, 80).
-    ("R2-spectre-corridor", 3): (87,),
-    ("R2-spectre-corridor", 4): (81,),
-    ("R2-spectre-corridor", 5): (75,),
+    # M7 P11: re-measured on v10's slice (combat_scenarios_v10.json, keys 637b7c50cdecc50d): column 80 has a
+    # geometric target on 42 frames and a window target on 40, 972/1020 columns agree; the controls move 24 (radius
+    # + 1), 1 (no occlusion) and 6 (no ledge) frames. v9's three "edge-closed" columns stay, to the column: spectre
+    # 3 (87), 4 (81) and 5 (75), the geometric aim's monster 3 each time. EVERY other column is "ledge-hidden" --
+    # the geometric aim's monster 29 (frames 2, 3, 6, 8) or 38 (frames 3, 4, 5), the window empty there.
+    # v9's (P10) were those three alone; v6's (P6+P7) spectre 6 (88,), 7 (86, 87, 88) and imp-court 0 (78, 79, 80).
+    ("R2-spectre-corridor", 2): (72, 73, 74, 75, 76, 77, 78, 79, 80, 81),
+    ("R2-spectre-corridor", 3): (72, 73, 74, 75, 76, 87, 88),
+    ("R2-spectre-corridor", 4): (81, 82, 83, 84, 85, 86, 87, 88),
+    ("R2-spectre-corridor", 5): (75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88),
+    ("R2-spectre-corridor", 6): (72, 73, 74, 75),
+    ("R2-spectre-corridor", 8): (84, 85, 86, 87, 88),
 }
+# the columns of FROZEN_RESIDUALS that are the wall-edge class; every other one is "ledge-hidden"
+FROZEN_EDGE_CLOSED = {("R2-spectre-corridor", 3, 87), ("R2-spectre-corridor", 4, 81), ("R2-spectre-corridor", 5, 75)}
 
 
 # ---------------------------------------------------------------------------------------------- mutants (R9)
@@ -81,16 +94,21 @@ MUTANTS = {
                   "aim_reff[_ar] = _CM.aim_radius(self, viewangle & ANGLE_MASK, _ar + 1)")],
     "no-occlusion": [("if drawn[_ac]:", "if False:")],
     "first-arrival": [("if aim_out[_ak] == 0 or _atzi < aim_tz[_ak]:", "if aim_out[_ak] == 0:")],
+    # M7 P11 (d): the window's ledge test off -- a monster FULLY behind its nearer pieces is aimed at again
+    "no-ledge": [("if stack_steps and ledge_hidden(ups[_ac], los[_ac], _ayb, _ahb):", "if False:")],
 }
 
 
 def logged():
-    """render_wall_frame that also logs every boxed aim thing: (sid, x1, x2, tzi, drawn[lo..hi] at the visit)"""
+    """render_wall_frame that also logs every boxed aim thing: (sid, x1, x2, tzi, drawn[lo..hi] at the visit, and
+    M7 P11 -- the ledge test's answer for each window column: 1 = the box is FULLY behind the column's nearer pieces)"""
     src = _method_source()
-    m = re.search(r"^( *)_atzi = _atz >> 16\n", src, re.M)
+    m = re.search(r"^( *)for _ac in range\(max\(_ax1, aim_lo\), min\(_ax2, aim_hi\) \+ 1\):\n", src, re.M)
     assert m and src.count(m.group(0)) == 1
-    src = src.replace(m.group(0), m.group(0) + m.group(1) +
-                      "_AIM_LOG.append((_asid, _ax1, _ax2, _atzi, bytes(drawn[aim_lo:aim_hi + 1])))\n")
+    src = src.replace(m.group(0), m.group(1) +
+                      "_AIM_LOG.append((_asid, _ax1, _ax2, _atzi, bytes(drawn[aim_lo:aim_hi + 1]), "
+                      "bytes(int(bool(stack_steps and ledge_hidden(ups[_c], los[_c], _ayb, _ahb))) "
+                      "for _c in range(aim_lo, aim_hi + 1))))\n" + m.group(0))
     log = []
     return _compile(src, {"_AIM_LOG": log}), log
 
@@ -125,7 +143,7 @@ def _geo(w):
 @pytest.fixture(scope="module")
 def slice_frames():
     import scenarios_v2 as S
-    doc = json.loads(SET_V9.read_text(encoding="ascii"))
+    doc = json.loads(SET_V10.read_text(encoding="ascii"))
     saved = (S.SIGHT_RULE, S.MONSTER_TICS)              # M7 P6+P7: a set names its tempo too
     S.use_sight_rule(doc)
     muts = {k: mutant(v) for k, v in MUTANTS.items()}
@@ -136,7 +154,7 @@ def slice_frames():
             run = next(r for r in doc["runs"] if r["name"] == name)
             w = S.start_world(run["setup"])
             hook = w.seen_hook
-            assert hook is not None, "v9 is a seen-rule set: the picture renders every frame"
+            assert hook is not None, "v10 is a seen-rule set: the picture renders every frame"
             phase = types.SimpleNamespace(world=w)
             orig = w.rm.render_wall_frame
             rec = {}
@@ -188,14 +206,19 @@ def _residuals(frames):
 
 def _classify(fr, col):
     """why window and geometric differ at `col`: "edge-closed" (the geometric target's box reaches a column that was
-    wall-drawn when the walk reached it; its centre has sight), "edge-centre-blocked" (the window's target is in an
-    open column but 2D sight to its centre is blocked -- the doc's class), else "UNEXPLAINED"."""
+    wall-drawn when the walk reached it; its centre has sight), "ledge-hidden" (M7 P11 (d): the column is open, but
+    the geometric target's box there is FULLY behind its nearer pieces -- the player cannot see it there; its centre
+    has sight), "edge-centre-blocked" (the window's target is in an open column but 2D sight to its centre is
+    blocked -- the doc's class), else "UNEXPLAINED"."""
     i = col - fr["lo"]
     v, g = fr["win"][i], fr["geo"][i]
     if g:
-        for sid, x1, x2, _tzi, drawn in fr["log"]:
+        for sid, x1, x2, _tzi, drawn, _ledge in fr["log"]:
             if sid == g and x1 <= col <= x2 and drawn[i] and fr["los"][g]:
                 return "edge-closed"
+        for sid, x1, x2, _tzi, drawn, ledge in fr["log"]:
+            if sid == g and x1 <= col <= x2 and not drawn[i] and ledge[i] and fr["los"][g]:
+                return "ledge-hidden"
     if v and not fr["los"][v]:
         return "edge-centre-blocked"
     return "UNEXPLAINED"
@@ -223,16 +246,20 @@ def test_window_agrees_with_geometric_aim_on_the_slice(slice_frames):
         print(f"[aim window] {k}: {len(v)} column-frames {v}")
     assert "UNEXPLAINED" not in classes, classes["UNEXPLAINED"]
     assert res == FROZEN_RESIDUALS, f"the residual list moved: {res}"
+    # M7 P11: each residual's CLASS is frozen too -- the three wall-edge columns, and the ledge for every other one
+    assert {(r, f, c) for r, f, c, _v, _g in classes.get("edge-closed", [])} == FROZEN_EDGE_CLOSED
+    assert set(classes) == {"edge-closed", "ledge-hidden"}, sorted(classes)
 
 
 def test_the_controls_change_the_window_on_the_slice(slice_frames):
-    """R9: radius + 1 and occlusion off each change the window on some frame of the slice. First arrival is
-    counted and reported -- on this slice no farther monster reaches a column before a nearer one, so it changes
-    nothing here; `test_hand_built_case` constructs the case where it does."""
+    """R9: radius + 1, occlusion off and (M7 P11) the ledge test off each change the window on some frame of the
+    slice. First arrival is counted and reported -- on this slice no farther monster reaches a column before a nearer
+    one, so it changes nothing here; `test_hand_built_case` constructs the case where it does."""
     changed = {k: [(fr["run"], fr["frame"]) for fr in slice_frames if fr["mut"][k] != fr["win"]] for k in MUTANTS}
     print("\n[aim window] mutant frames changed:", {k: len(v) for k, v in changed.items()})
     assert changed["radius+1"], "radius + 1 changed no window: the box is not what the window reads"
     assert changed["no-occlusion"], "ignoring drawn[] changed no window: occlusion is not tested"
+    assert changed["no-ledge"], "the ledge test off changed no window: P11's aim rule is not tested"
     assert not changed["first-arrival"], (
         "first-arrival now changes the slice -- good news for the control; move its assert here", changed)
 

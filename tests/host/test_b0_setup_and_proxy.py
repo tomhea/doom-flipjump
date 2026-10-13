@@ -16,7 +16,8 @@ whose own comparison is broken, which must FAIL.
 
 M7 P10: re-pointed from v6 to v9 -- the faster turn moved v6's replay (the aftermath's frame 1 no longer lands on v6's
 pose); the aftermath's setup (its pose and the three corpses) is the same in v6..v9, and v9 is a "final" / "final" set,
-so the modes are pinned to the set's own.
+so the modes are pinned to the set's own. M7 P11: re-pointed to v10, P11's set -- its aftermath is v9's to the key
+(the setup, all 100 keys and their poses), and v10 is "final" / "final" too.
 """
 import importlib.util
 import json
@@ -26,7 +27,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SET_V9 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v9.json"
+SET_V10 = ROOT / "scratchpad/gp/scenarios/combat_scenarios_v10.json"
 AFTER = "R0-aftermath"
 PREFIX = 24          # the aftermath's first frames: the control parts inside them (asserted below)
 
@@ -34,9 +35,10 @@ PREFIX = 24          # the aftermath's first frames: the control parts inside th
 @pytest.fixture(scope="module", autouse=True)
 def set_modes():
     """M7 P8a: b0's mirror takes the GAME tier's modes (wall_renderer: the binary under test), "final" since the P8a
-    flip; the tests pin the game modes to the set's own (M7 P10: v9 records "final" / "final"; v6 was "full")"""
+    flip; the tests pin the game modes to the set's own (M7 P10 / P11: v9 and v10 record "final" / "final"; v6 was
+    "full")"""
     from doomfj import wall_renderer as WR
-    d = json.loads(SET_V9.read_text(encoding="ascii"))
+    d = json.loads(SET_V10.read_text(encoding="ascii"))
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(WR, "PLAYER_MODE", d["player_mode"])
         mp.setattr(WR, "MONSTER_MODE", d["monster_mode"])
@@ -54,7 +56,7 @@ def b0s():
 
 @pytest.fixture(scope="module")
 def doc(b0s):
-    d = json.loads(SET_V9.read_text(encoding="ascii"))
+    d = json.loads(SET_V10.read_text(encoding="ascii"))
     saved = (b0s.S.SIGHT_RULE, b0s.S.MONSTER_TICS)
     b0s.S.use_sight_rule(d)
     yield d
@@ -72,7 +74,7 @@ def _run(doc, name):
 
 # ---- GAP 2: which runs have a setup, and what it pokes -------------------------------------------------------------
 def test_only_the_aftermath_has_a_setup_beyond_the_pose(b0s, doc):
-    """every v9 setup is a pose plus corpses; the aftermath alone has corpses -- no other run's setup is dropped"""
+    """every v10 setup is a pose plus corpses; the aftermath alone has corpses -- no other run's setup is dropped"""
     with_setup = [r["name"] for r in doc["runs"] if b0s.setup_fn(r["setup"]) is not None]
     assert with_setup == [AFTER]
     assert all(set(r["setup"]) <= {"pose", "corpses"} for r in doc["runs"])

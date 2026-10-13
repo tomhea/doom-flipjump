@@ -105,3 +105,32 @@ def test_the_boot_and_the_frame_tail_both_enter_the_reset(tmp_path):
 def test_the_generator_refuses(tmp_path, why, names, state, match):
     with pytest.raises(AssertionError, match=match):
         _emit(tmp_path, names=names, state=state)
+
+
+# ---- the pin veto (the CR of #129, BLOCKING) ---------------------------------------------------------------------------
+_PTR_LOAD = __import__("re").compile(r"hex\.set\s+w/4\s*,\s*\w+\s*,\s*([A-Za-z_]\w*)")
+
+
+def _pointer_loaded(names, texts):
+    """the registered labels some source loads into a pointer register (`hex.set w/4, <ptr>, <label>`)"""
+    return {m.group(1) for text in texts for m in _PTR_LOAD.finditer(text) if m.group(1) in names}
+
+
+def test_every_pointer_read_registered_cell_is_vetoed():
+    """the one-pass reset clears every registered cell in the counted assembly, so each cell the program reads RAW
+    through a pointer must be in the pin veto (selfreset.POINTER_READ_CELLS / BYTE_ARRAY_NAMES): a pinned word holds
+    base + value. Derived from the sources -- the fj and the emitters' text -- not listed by hand"""
+    from doomfj.config import Config
+    from doomfj.wall_renderer import tier_cfg
+    root = Path(__file__).resolve().parents[2]
+    names = selfreset.registered_reset_names(root / "src/doomfj/data/m5_restore_set.json.gz",
+                                             tier_cfg(Config(), "game"), True)
+    texts = [q.read_text(encoding="utf-8") for q in list((root / "src/fj").glob("*.fj"))
+             + list((root / "src/doomfj").glob("*.py"))]
+    loaded = _pointer_loaded(names, texts)
+    veto = set(selfreset.POINTER_READ_CELLS) | set(selfreset.BYTE_ARRAY_NAMES)
+    assert {"drawn", "sprflag", "thpos_rt"} <= loaded, sorted(loaded)        # the scan sees the real loads
+    assert loaded <= veto, "pointer-read registered cells the pin veto misses: %s" % sorted(loaded - veto)
+    # R9: a source that loads one more registered label into a pointer is caught
+    extra = sorted(names - veto)[0]
+    assert _pointer_loaded(names, texts + ["    hex.set w/4, some_p, %s" % extra]) - veto == {extra}

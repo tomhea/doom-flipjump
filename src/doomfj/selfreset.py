@@ -58,7 +58,12 @@ BYTE_ARRAY_NAMES = ("sshead", "pclm", "sfflag")
 # M7 P3.2a: `thseen`, the seen flags the record WRITES through a pointer (frame.rec_seen_mark: `hex.write_hex sa`) --
 # a pinned word rests at its reader table's base, and a pointer read / write takes that for the value: blocked42
 # flipped a redirect bit there that never came back, and the tic's next `hex.zero` looped forever
-POINTER_READ_CELLS = ("thpos_rt", "thss_rt", "sshead", "thnext", "thseen")
+# ONE PASS (the CR of #129): `drawn` (frame.thing_record_body: `hex.read_hex` through trb_drawn_p) and `sprflag`
+# (`frame.read_byte5` through trb_sprflag_p) are read raw too. The two-pass reset was never COUNTED (pass 2 only),
+# so its clears made no pin candidate; the one-pass reset is in the one assembly a fresh counting pass counts, so
+# its `hex.zero 160, drawn` / `sprflag` would make every cell one. tests/host/test_one_pass_reset.py derives the
+# pointer-loaded registered labels from the sources and holds them all to this list.
+POINTER_READ_CELLS = ("thpos_rt", "thss_rt", "sshead", "thnext", "thseen", "drawn", "sprflag")
 # declared cells per reachable cell: sshead is over-allocated 2x, the per-column arrays are 1:1
 _DECLARED_RATIO = {"sshead": 2, "pclm": 1, "sfflag": 1}
 

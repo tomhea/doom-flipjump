@@ -372,6 +372,20 @@ ns sim {
         hex.mov 8, sp_x, pos
         hex.mov 8, sp_y, pos + 8*dw
     }
+    // P12: thing_pass_depth's scan reads only the depth key's INPUTS, the position's two INTEGER parts, straight into
+    // mt_dx / mt_dy -- a thpos row is [x:8][y:8] nibbles of 16.16, so they are nibbles 4..7 and 12..15. Eight nibble
+    // reads and one skip where thing_pos_read made sixteen and walked the pointer back; the key is the same word.
+    // (The scan used to leave the position in sp_x / sp_y too: nothing reads them before the chosen thing's
+    // thing_load writes them whole, and the pass's `done` zeroes them, so they end the pass as before.)
+    def thing_int_read thpos, ti, poff, pbase, pptr < mt_dx, mt_dy {
+        hex.mov w/4, poff, ti
+        hex.shl_hex w/4, 1, poff
+        hex.set w/4, pbase, thpos + 4*dw
+        hex.ptr_index pptr, pbase, poff
+        rep(4, i) hex.read_hex_and_inc mt_dx + i*dw, pptr
+        hex.ptr_add pptr, 4
+        rep(4, i) hex.read_hex_and_inc mt_dy + i*dw, pptr
+    }
     // M7 P3.1: the animated order -- sp_ti = ti and the position FIRST, so the row select reads both
     def thing_pos_first thpos, ti, pos, poff, pbase, pptr < sp_ti {
         hex.mov w/4, sp_ti, ti
@@ -778,7 +792,7 @@ ns sim {
             @ multi, single, round, scan, cand_eq, cand, take, next, round_end, done, empty \
             < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf, viewx, viewy, mt_dx, mt_dy, mt_d, mt_ret, \
               mt_dist_leaf, td_head, td_e, td_t, td_p, td_q, td_best, td_bk, td_lk, td_lt, td_have, td_first, \
-              td_pos, td_poff, td_pbase, td_pptr, td_rk, sp_ex, \
+              td_poff, td_pbase, td_pptr, td_rk, sp_ex, \
               sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
               sp_mon, sp_base, sp_base2, sp_dw, sp_lt {
         hex.set w/4, td_q, sshead
@@ -811,10 +825,8 @@ ns sim {
         hex.if0 w/4, td_e, round_end
         hex.mov w/4, td_t, td_e
         hex.dec w/4, td_t
-        .thing_pos_read thpos, td_t, td_pos, td_poff, td_pbase, td_pptr
-        hex.mov 4, mt_dx, sp_x + 4*dw          // the integer parts: thing - player
-        hex.sub 4, mt_dx, viewx + 4*dw
-        hex.mov 4, mt_dy, sp_y + 4*dw
+        .thing_int_read thpos, td_t, td_poff, td_pbase, td_pptr    // P12: mt_dx / mt_dy = the INTEGER parts only
+        hex.sub 4, mt_dx, viewx + 4*dw          // the integer parts: thing - player
         hex.sub 4, mt_dy, viewy + 4*dw
         stl.fcall mt_dist_leaf, mt_ret         // mt_d = the key
         rep(rk0>0, k) .rank_key                // M7 P8a (D3 a): rank 1 below rk0 -- bit 15 of the key

@@ -58,6 +58,26 @@ THING_ROW_COLD_LEN = sum(THING_ROW_COLD_BYTES)    # 5
 assert THING_ROW_HOT_LEN + THING_ROW_COLD_LEN == THING_ROW_LEN
 
 
+# P12 (T5) -- proj.project_thing's TIGHT far bound, for a body without the aim hook: a thing is tested at
+# L-inf distance tz_map + (tz_map >> 1) + SPR_REACH (config.Config.SPR_REACH), tz_map = floor(its sp_tzmax). The
+# bound must hold every thing the whole projection accepts: on screen, |tx| <= W + K*tz (W = max(left, w - left),
+# K the block-FP reciprocal's worst half-screen / (xscale * tz)), and tz <= tzmax, so
+# |tr| <= (sqrt(1 + K^2) * tzmax + W + the floors' 2^-14) / sqrt(1 - DEV), DEV the trig table's |cos^2 + sin^2 - 1|,
+# plus 1 for the floor the compare reads. TIGHT_K and TIGHT_TRIG_DEV bound the measured values (1.00557, 2.1e-5);
+# tests/host/test_tight_far_bound.py recomputes both and drives the oracle against the bound (with a control).
+TIGHT_K = 1.006
+TIGHT_TRIG_DEV = 1e-4
+
+
+def tight_far_bound_ok(tzmax_fixed: int, left: int, w: int, reach: int) -> bool:
+    """True when the tight bound holds every accepted position of a sprite (left, w) with depth bound tzmax_fixed"""
+    import math
+    t = (tzmax_fixed & 0xFFFFFFFF) >> 16
+    need = ((math.sqrt(1 + TIGHT_K * TIGHT_K) * (t + 1) + max(left, w - left, 0) + 2.0 ** -14)
+            / math.sqrt(1 - TIGHT_TRIG_DEV) + 1)
+    return t + (t >> 1) + reach >= math.ceil(need) + 1
+
+
 def hot_row(row):
     """The fields any reject can reach, in `THING_ROW_HOT_BYTES` order."""
     return tuple(row[i] for i in _HOT_FIELDS)

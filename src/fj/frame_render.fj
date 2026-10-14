@@ -1038,9 +1038,15 @@ ns frame {
     // farther off-screen boundary overwrites the pid: the farthest wins, as the oracle's `cbase` /
     // `fbase` (reference_model.render_wall_frame). sfbase is never reset: a pid is read only under
     // its flag, and sfflag is (a byte array of the M1 set). Assumes a one-byte pid (asserted at emit).
-    def ts_base_store flagnib, flagbyte, flagp, off, bpid, bp {
+    // P12: a side whose flag is ALREADY set (a nearer off-screen boundary of this column stored its base) skips the
+    // flag byte's write -- the register is the byte as memory holds it (read once per column, and every change to
+    // either nibble is written back at once: here and ts_piece_store), so the write would store the same byte.
+    def ts_base_store flagnib, flagbyte, flagp, off, bpid, bp @ fresh, have {
+        hex.if_flags flagnib, 0x0100, fresh, have       // 8: the flag is set already
+      fresh:
         hex.set 1, flagnib, 8
         frame.write_byte5 flagp, flagbyte
+      have:
         hex.mov w/4, bp, flagp
         hex.ptr_add bp, off
         frame.write_byte5 bp, bpid

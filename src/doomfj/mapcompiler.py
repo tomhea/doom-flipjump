@@ -96,6 +96,10 @@ def seg_affine_coeffs(seg: "Seg", verts: Sequence[Tuple[int, int]]) -> Tuple[int
     a = encode_fixed_point(af, 16, 32)
     b = encode_fixed_point(bf, 16, 32)
     c = encode_fixed_point(-(af * v1x + bf * v1y), 16, 32)
+    # P12: projection.fj's wxr_axis_add reads a coefficient whose low four nibbles are 0 as 0 / +1.0 / -1.0, which is
+    # exact only while every coefficient is a UNIT-NORMAL component, |a|, |b| <= 1.0
+    for k in (a, b):
+        assert -0x10000 <= (k - (1 << 32) if k & 0x80000000 else k) <= 0x10000, ("a unit-normal coefficient", hex(k))
     return a, b, c
 
 

@@ -1257,7 +1257,8 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     from doomfj.lut_generator import generate_packed_lut_fj
     from doomfj.things import (THING_ROW_COLD_BYTES, THING_ROW_COLD_LEN, THING_ROW_HOT_BYTES,
                                THING_ROW_HOT_LEN, cold_row, hot_row, reachable_lightnums,
-                               sprite_light_table, subsector_tables, thing_pos_value, thing_rows)
+                               sprite_light_table, subsector_tables, thing_pos_value, thing_rows,
+                               tight_far_bound_ok)
     allt = map_wad.things(mapname)
     rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, DRAW_ACTOR_TYPES,   # P11 (a)
                            MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, DEG_MINH2_SCENERY, DEG_MINH2_MON,
@@ -1276,6 +1277,11 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     nt, nss = len(rows), len(cmap.subsectors)
     rows = list(rows) + list(view_rows)
     sprlt = sprite_light_table(spr_cls, rows, lns)
+    # P12 (T5): every runtime row inside proj.project_thing's tight far bound -- the runtime body runs it wherever it
+    # has no aim hook (the hosted tiers) -- and its degrade bound no deeper than the base one (the bound reads sp_tzmax)
+    for r in rows:
+        assert tight_far_bound_ok(r[4], r[0], r[1], Config.SPR_REACH) and r[5] <= r[4], (
+            "P12: a runtime sprite row outside project_thing's tight far bound -- raise Config.SPR_REACH", r[:6])
 
     def _pack(vals, widths):
         out = shift = 0
@@ -2782,6 +2788,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     f"T4 far-reject margin broken: tzmax={_tz_map} map units is too small for the "
                     f"4.25x+2 bound. Widen the margin in projection.fj's L-inf reject or reject "
                     f"this sprite category at emit time.")
+                # P12 (T5): ... and inside the TIGHT far bound thing_leaf_b's body (no aim hook) rejects at, exactly
+                from doomfj.things import tight_far_bound_ok as _tfb
+                _tzmax2 = dict((n, v) for n, w, v in _tfields).get("sp_tzmax2", 0)
+                assert _tfb(_tzmax_fixed, _art[5], _art[3], cfg.SPR_REACH) and _tzmax2 <= _tzmax_fixed, (
+                    f"P12: baked thing type {_t.type} outside project_thing's tight far bound -- raise Config.SPR_REACH")
                 if _bar and _t.type == BARREL_TYPE:
                     # M7 P6+P7: a baked barrel is hidden by its STATE here (bar_st 0); the vanishable slot its type
                     # has in every tier stays, kept equal to `bar_st != 0` by the phase (barrelcode.phase_lines'

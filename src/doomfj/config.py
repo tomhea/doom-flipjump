@@ -205,7 +205,7 @@ class Config:
     HOTTER_PAD: int = 16
     # P12 (T5): proj.project_thing's TIGHT far bound for the baked things, tz_map + (tz_map >> 1) + SPR_REACH map
     # units of L-inf distance -- SPR_REACH covers the widest sprite side of its origin (max(left, w - left): 76 on
-    # E1M1, a tall tree) plus the floors' and the trig table's slop. wall_renderer.tight_far_bound_ok checks every
+    # E1M1, a tall tree) plus the floors' and the trig table's slop. doomfj.things.tight_far_bound_ok checks every
     # baked thing against it exactly, so a wider sprite on another map fails the emit, never a pixel.
     SPR_REACH: int = 80
 

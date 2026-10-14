@@ -1280,7 +1280,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     # P12 (T5): every runtime row inside proj.project_thing's tight far bound -- the runtime body runs it wherever it
     # has no aim hook (the hosted tiers) -- and its degrade bound no deeper than the base one (the bound reads sp_tzmax)
     for r in rows:
-        assert tight_far_bound_ok(r[4], r[0], r[1], Config.SPR_REACH) and r[5] <= r[4], (
+        assert tight_far_bound_ok(r[4], r[0], r[1], rm.cfg.SPR_REACH) and r[5] <= r[4], (   # the EMITTING config's reach
             "P12: a runtime sprite row outside project_thing's tight far bound -- raise Config.SPR_REACH", r[:6])
 
     def _pack(vals, widths):

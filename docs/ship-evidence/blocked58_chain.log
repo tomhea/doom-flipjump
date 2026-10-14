@@ -1,0 +1,21 @@
+Wed Oct 14 21:30:41 JDT 2026
+smoke rc=rc=0
+m2_std_gate rc=rc=0
+m3_gate rc=rc=0
+p2a_gate rc=rc=0
+hurt_gate rc=rc=0
+fight_gate rc=rc=0
+die_gate rc=rc=0
+b0_v10 rc=rc=0
+gamespeed rc=rc=0
+gamespeed_trail rc=rc=0
+pinreport rc=rc=0
+poolmap rc=rc=0
+playtest rc=rc=0
+playtest_control rc=rc=1
+replay_A rc=rc=1
+replay_B rc=rc=1
+replay_C rc=rc=1
+deg_gate rc=rc=0
+Wed Oct 14 23:36:29 JDT 2026
+ALLDONE

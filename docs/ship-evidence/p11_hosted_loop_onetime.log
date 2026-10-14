@@ -1,0 +1,25 @@
+# P11 (the CR of PR #133): the hosted-loop tier's ONE-TIME CHECK, on main b84bc86 (a detached worktree; pass 1 and the reset step in two processes, scratchpad/gp/p11_hl_split.py)
+
+$ (main b84bc86) hl_split.py pass1
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1: 2,055,436 labels -> C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\p11\hl_main.labels.tsv.gz (3165 s)
+rc=0
+
+$ (main b84bc86) hl_split.py reset
+the two-pass reset part C:\Users\tomhe\Documents\doom-tdd-p11\build\generated_hl_main\e1m1_07_reset.fj: 4886 nibble cells, 1002 byte cells (59 s)
+rc=0
+
+$ (main b84bc86) python scratchpad/onepass_check.py --gen build/generated_hl_main --labels hl_main.labels.tsv.gz --tier hosted-loop 
+one-pass reset: 4886 nibble cells, 1002 byte cells; 482 registered labels, 0 persisted
+cells: two-pass 5888, one-pass 5888; only two-pass 0, only one-pass 0, value differs 0
+ONE-TIME CHECK PASS
+rc=0
+$ (main b84bc86) python scratchpad/onepass_check.py --gen build/generated_hl_main --labels hl_main.labels.tsv.gz --tier hosted-loop --selftest
+one-pass reset: 4886 nibble cells, 1002 byte cells; 482 registered labels, 0 persisted
+cells: two-pass 5888, one-pass 5888; only two-pass 0, only one-pass 0, value differs 0
+baseline equal: True
+C1 a cell dropped from the one-pass plan is caught: True
+C2 a value changed is caught: True
+C3 a byte cell turned into a nibble cell is caught: True
+ONE-TIME CHECK PASS
+rc=0

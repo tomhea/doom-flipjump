@@ -203,6 +203,61 @@ DERIVE_BLOCK = 0x0102
 SFFLAG = [(73 * x + 41) & 0xFF for x in range(VIEW_W)]
 
 
+def _offview_cols():
+    """P11: the columns a thing whose box is wholly past an edge of the view records into -- from the last row
+    down, or ending above row 1 (the harness's range starts past the game tier's off-view rule, so they reach the
+    column loop here): ANY nearer piece on that side hides such a box (reference_model.ledge_hidden), so these
+    columns count no piece"""
+    out = set()
+    for _sid, y0, _l, base, x1, x2, istep, bucket, _ba, dw in THINGS:
+        if y0 >= CFG.VIEW_H - 1 or y0 + 0xA0 + bucket <= 1:
+            out |= {x for x, _blk in _columns(x1, x2, istep, dw, base)}
+    return out
+
+
+_NO_PIECE = [b for b in range(256) if (b & 7) not in (1, 2) and ((b >> 4) & 7) not in (1, 2)]
+for _x in sorted(_offview_cols()):                  # each a byte no other column holds, so the snapshot stays per column
+    SFFLAG[_x] = next(b for b in _NO_PIECE if b not in SFFLAG)
+assert len(set(SFFLAG)) == VIEW_W
+# P11 (c)+(d): every column's piece rows -- u1's y2, u2's y2, l1's y1, l2's y1 at their sfslot offsets 1 / 5 / 8 / 12.
+# They leave the whole view open (an upper piece ending on row 0, a lower one starting on the last row), so the
+# record's ledge test (frame.ledge_test: SFFLAG's counts pick a side's LAST piece; a count nibble outside {1, 2, 9,
+# 10} is no piece) READS them wherever SFFLAG counts one -- the narrow arm in the hot window, the hostile entry
+# registers -- and hides nothing: this harness pins the slot LAYOUT and its scenarios column by column. The ledge
+# rule's answers are tests/fj/test_sprite_bank_fj.py's (the record's ledge cases and their mutants).
+H = CFG.VIEW_H
+PIECE_ROWS = [(0, 0, H - 1, H - 1)] * VIEW_W
+SLOT_SPAN = 16 ** CFG.SLOT_SHIFT
+
+
+def _sfslot():
+    out = [0] * (VIEW_W * SLOT_SPAN)
+    for x, (u1, u2, l1, l2) in enumerate(PIECE_ROWS):
+        for off, row in ((1, u1), (5, u2), (8, l1), (12, l2)):
+            out[x * SLOT_SPAN + off] = row
+    return out
+
+
+def _hb(bucket):
+    """the height the harness's sprbkt result names (the high byte of trb_bucket, below)"""
+    return 0xA0 + bucket
+
+
+def _ledge_hidden(x, y0, hb):
+    """the model's answer for column x and the box [y0, y0 + hb)"""
+    from doomfj.reference_model import ledge_hidden
+    uc, lc = SFFLAG[x] & 7, (SFFLAG[x] >> 4) & 7
+    u1, u2, l1, l2 = PIECE_ROWS[x]
+    ups = [(0, u1), (0, u2)][:uc] if uc in (1, 2) else []
+    los = [(l1, H - 1), (l2, H - 1)][:lc] if lc in (1, 2) else []
+    return ledge_hidden(ups, los, y0, hb)
+
+
+def _ledge_box(y0, hb):
+    """frame.ledge_box's two registers, as the build computes them before the transplanted range"""
+    return max(-1, min(H, y0)) + 1, max(0, min(H + 1, y0 + hb)) + 1
+
+
 def _record_all(things=THINGS):
     """sprflag, spslot and gpslot after `things` are recorded -- the constants' layout -- and what
     each record recorded: {slot id: [(column, "A" or "B")]}"""
@@ -218,6 +273,8 @@ def _record_all(things=THINGS):
             n = sprflag[x]
             if x in HIDDEN or n == 3 or (n >= 1 and not ballow) or bucket < HEADER[blk][1]:
                 continue
+            if _ledge_hidden(x, y0, _hb(bucket)):
+                continue                                  # P11 (c): fully behind its nearer pieces
             frag = {"slot id": sid, "block lo": blk & 0xFF, "block hi": blk >> 8, "clip counts": SFFLAG[x]}
             for i, f in enumerate(wr.SPR_FRAG_FIELDS):
                 spslot[x * STRIDE + (0, B_BYTE, C_BYTE)[n] + i] = frag[f]
@@ -270,7 +327,7 @@ def block_arrays(mem):
     sprflag, spslot, gpslot = mem
     return [("pclm", [0] * (VIEW_W * CFG.PID_BYTES)), ("sfflag", list(SFFLAG)), ("sfbase", [0] * (2 * VIEW_W)),
             ("sprflag", list(sprflag)),
-            ("sfslot", [0] * (VIEW_W * 16 ** CFG.SLOT_SHIFT)), ("spslot", list(spslot)),
+            ("sfslot", _sfslot()), ("spslot", list(spslot)),
             ("gpslot", list(gpslot)), ("drawn", [1 if x in HIDDEN else 0 for x in range(VIEW_W)]),
             ("lay_wrej", [0])]
 
@@ -714,7 +771,7 @@ def transplant(frame_text, emitter_text):
 # ---- the entry state ------------------------------------------------------------------------------------
 # the range's inputs: what the build computes before it, set per record from THINGS
 INPUTS = {"gps_nslot", "trb_y0", "trb_shade_row", "trb_tx1", "trb_tx2", "trb_tistep", "trb_blk_const",
-          "trb_bucket", "ballow", "sp_dw"}
+          "trb_bucket", "ballow", "sp_dw", "trb_ylo1", "trb_yhi1"}       # P11: frame.ledge_box's, before the range
 WIDTHS = {d.split(":")[0].strip(): d.split("hex.vec", 1)[1].strip()
           for d in wr.hoisted_scratch_decls(CFG) if "hex.vec" in d}
 
@@ -796,7 +853,9 @@ def write_program(frame_text, emitter_text):
                  "    hex.set 8, trb_tx1, %d" % (x1 & 0xFFFFFFFF), "    hex.set 8, trb_tx2, %d" % (x2 & 0xFFFFFFFF),
                  "    hex.set 8, trb_tistep, %d" % istep, "    hex.set w/4, trb_blk_const, %d" % base,
                  # the bucket as sprbkt.lookup leaves it: [its height hb][bucket] (M7 P1.6)
-                 "    hex.set 4, trb_bucket, %d" % ((0xA0 + bucket) << 8 | bucket),
+                 "    hex.set 4, trb_bucket, %d" % (_hb(bucket) << 8 | bucket),
+                 "    hex.set 2, trb_ylo1, %d" % _ledge_box(y0, _hb(bucket))[0],
+                 "    hex.set 2, trb_yhi1, %d" % _ledge_box(y0, _hb(bucket))[1],
                  "    hex.set 1, ballow, %d" % ballow,
                  "    hex.set 2, sp_dw, %d" % sp_dw, "    " + call]
     main += ["    lay_dump pclm, %d" % len(expected_block()[1]), "    stl.loop"]
@@ -908,6 +967,18 @@ def test_the_record_writes_every_byte_where_the_constants_say(tmp_path):
                                         (-1, 2, 0x4C8F8, 17, 0x0130, 2)):
         want_blk = dict(_columns(x1, x2, istep, dw, base))[col]
         assert block(col) == want_blk != base, "an E1M1 left clip's u at column %d" % col
+
+
+def test_the_pieces_hide_no_column_and_are_read():
+    """P11: the layout's scenarios stay whole -- no recorded column is behind its pieces -- while the ledge test still
+    reads pieces: SFFLAG counts a side in 31 of the 103 recorded columns, and each of the four piece rows (the upper
+    pieces 1 and 2, the lower 1 and 2) is the one read in 9 of them"""
+    cols = [(x, y0, _hb(bucket)) for _sid, y0, _l, base, x1, x2, istep, bucket, _ba, dw in THINGS
+            for x, _blk in _columns(x1, x2, istep, dw, base)]
+    assert not any(_ledge_hidden(x, y0, hb) for x, y0, hb in cols)
+    kinds = {k: sum(1 for x, _y0, _h in cols if (SFFLAG[x] >> sh) & 7 == n)
+             for k, sh, n in (("u1", 0, 1), ("u2", 0, 2), ("l1", 4, 1), ("l2", 4, 2))}
+    assert min(kinds.values()) >= 5, kinds
 
 
 def test_the_things_record_what_RECORDED_says():

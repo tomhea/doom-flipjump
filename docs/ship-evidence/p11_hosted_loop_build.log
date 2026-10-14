@@ -1,0 +1,15 @@
+$ (P11 4c63b3e + hosted-loop in ONE_PASS_TIERS, uncommitted) PYTHONPATH=src python hl_build_p11.py
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+built in 4981 s
+{
+ "map": "E1M1",
+ "downscale": 2,
+ "storage_mode": "flat",
+ "span_words": 42579670,
+ "flat_limit": 134217728,
+ "headroom": 3.152,
+ "fjm_bytes": 15414421,
+ "assemble_seconds": 3802.3,
+ "tier": "lines/W1R/FT1+plane_near"
+}
+rc=0

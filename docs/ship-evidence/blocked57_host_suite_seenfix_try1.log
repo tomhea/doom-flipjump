@@ -1,0 +1,70 @@
+$ python -m pytest tests/host -q -p no:cacheprovider
+..............................................sssssss................... [  3%]
+........................................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 18%]
+........................................................................ [ 21%]
+........................................................................ [ 25%]
+........................................................................ [ 29%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 39%]
+........................................................................ [ 43%]
+........................................................................ [ 47%]
+........................................................................ [ 50%]
+........................................................................ [ 54%]
+...............................ss....................................... [ 58%]
+........................................................................ [ 61%]
+........................................................................ [ 65%]
+........................................................................ [ 68%]
+......................................F................................. [ 72%]
+........................................................................ [ 76%]
+........................................................................ [ 79%]
+........................................................................ [ 83%]
+........................................................................ [ 87%]
+........................................................................ [ 90%]
+....................xx.................................................. [ 94%]
+........................................................................ [ 98%]
+.......................................                                  [100%]
+================================== FAILURES ===================================
+______________ test_every_gate_asks_the_oracle_for_what_it_emits ______________
+
+    def test_every_gate_asks_the_oracle_for_what_it_emits():
+        files = subprocess.run(["git", "ls-files", "*.py"], cwd=ROOT,
+                               capture_output=True, text=True).stdout.split()
+        assert len(files) > 50, f"the listing looks wrong ({len(files)}) -- vacuous run"
+        bad, seen = [], 0
+        for rel in files:
+            try:
+                source = (ROOT / rel).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                found = out_of_step(source, gate=is_gate(rel, source))
+            except SyntaxError:
+                continue
+            seen += 1
+            bad += [(rel, line, miss) for line, miss in found]
+        print(f"scanned {seen} tracked files")
+>       assert not bad, "gates whose oracle call omits what the emitter always does:\n" + "\n".join(
+            f"  {rel}:{line} missing {', '.join(miss)}" for rel, line, miss in bad
+        )
+E       AssertionError: gates whose oracle call omits what the emitter always does:
+E           scratchpad/gp/p11_seen_swap_probe.py:67 missing sky, near_steps, stack_steps, bbox_cull, degrade
+E       assert not [('scratchpad/gp/p11_seen_swap_probe.py', 67, ['sky', 'near_steps', 'stack_steps', 'bbox_cull', 'degrade'])]
+
+tests\host\test_oracle_calls_in_step.py:219: AssertionError
+---------------------------- Captured stdout call -----------------------------
+scanned 745 tracked files
+============================== warnings summary ===============================
+tests/host/test_emitter_call_sites.py::test_every_tracked_caller_passes_keywords_the_emitter_has
+tests/host/test_no_decimal_wire.py::test_every_screen_is_fed_the_binary_wire
+tests/host/test_oracle_calls_in_step.py::test_every_gate_asks_the_oracle_for_what_it_emits
+  <unknown>:1: DeprecationWarning: invalid escape sequence '\_'
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/host/test_oracle_calls_in_step.py::test_every_gate_asks_the_oracle_for_what_it_emits
+1 failed, 1971 passed, 9 skipped, 1 deselected, 2 xfailed, 3 warnings in 319.67s (0:05:19)
+rc=1

@@ -631,7 +631,10 @@ def _tt_from_info(mt: str) -> ThingType:
     return ThingType(m.doomednum, mt, m.radius >> FRACBITS, m.flags, m.source)
 
 
+# P11 (a): the EXIT sign (doomfj.exitsign) -- a VIRTUAL decoration the renderers draw and the world ignores
+EXIT_SIGN_TYPE = 9800
 THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
+    ThingType(EXIT_SIGN_TYPE, "P11_EXIT_SIGN", 0, 0, "doomfj.exitsign"),   # P11 (a): not solid, not special
     *(_tt_from_info(mt) for mt in ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT",
                                    "MT_SHADOWS", "MT_BARREL", "MT_CLIP", "MT_SHOTGUN")),
     # pickups verified in info.c's visible part (MT_MISC0..MT_MISC18)
@@ -672,7 +675,7 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(24, "Gibs", 20, 0, "gzdoom"),
 )}
 # Editor numbers P_SpawnMapThing never turns into a thing (player and deathmatch starts).
-NOT_THINGS = frozenset({1, 2, 3, 4, 11})
+NOT_THINGS = frozenset({1, 2, 3, 4, 11, EXIT_SIGN_TYPE})
 
 
 # ================================================================================================

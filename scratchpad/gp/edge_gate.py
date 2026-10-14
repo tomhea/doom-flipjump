@@ -3,7 +3,9 @@ floor or ceiling edge OFF the screen (G2: the column BASES, frame.ts_base_store 
 lines_col_plane_ids), a sky region behind a stacked piece (G8: frame.lines_piece_sky / lines_region_ids_c) and a
 sprite behind a nearer ledge (G1: frame.rec_clip_read, stream.frag_clip / frag_clamp / frag_runs_cut) and three
 sprites in one column (G3: the third fragment slot, frame.thing_record_body / lines_spr_load, stream.emit_region_c),
-plus deg_gate's four viewpoints.
+P11's EXIT sign (doomfj.exitsign: a virtual thing, a built picture, the actor class), plus deg_gate's four viewpoints.
+P10 (b): the picture is decoded by tests/fj/stream_screen.StreamScreen, which now REFUSES a run behind the cursor
+as the device does (blocked55's gamespeed crash went through it unseen).
 
     python scratchpad/gp/edge_gate.py            # ~20 min: the visual tier's emission + assembly dominate
 
@@ -12,8 +14,11 @@ R9 -- that the viewpoints EXERCISE what they are here for, decided by the oracle
   * G2: the views hold column bases (`bases_out`), and the oracle with the base paint disabled (an
     in-memory copy of reference_model, its two `if cbase/fbase[x] is not None` made False) draws a
     DIFFERENT picture at each G2 view -- so a binary without the bases fails here;
-  * G1: the oracle without the G1 snapshot (its two `if stack_steps:  # P10 G1` made False) draws a DIFFERENT
-    picture at each G1 view;
+  * G1: the oracle without the nearer pieces' two uses in the record -- the G1 snapshot (its two `if stack_steps:
+    # P10 G1` made False) and P11 (c)'s ledge skip (a fragment wholly behind its pieces takes no slot) -- draws a
+    DIFFERENT picture at each G1 view. Both, since P11: where the sprite is FULLY hidden the skip drops it before the
+    clip could, so the clip alone moves 0 px there (the pit monster from far above); the skip alone moves 0 px at all
+    three views (it is pixel-neutral there: the clip would hide the same rows), which the gate prints;
   * G3: the oracle with only TWO fragment slots (the third slot's early exit put back) draws a DIFFERENT picture
     at each G3 view;
   * G8: the G8 views hold upper pieces whose back ceiling is F_SKY1 (`steps_out`), the case the
@@ -78,6 +83,11 @@ VPS = [
     # G3: three map things in one column (g3_find: the third slot moves 144 / 121 px here)
     (2198, -159, 0xFFD64759, "G3"),
     (639, 271, 0x20000000, "G3"),
+    # P11 (a): the EXIT sign (doomfj.exitsign) over the exit alcove, from the exit room (this tier has no actors rule:
+    # where the room's monster stands before the sign it B-gates it, as it would a monster -- these two keep it in
+    # view: the sign moves 430 / 762 px of them)
+    (-300, 1296, 0x80000000, "P11a"),
+    (-300, 1340, deg(210), "P11a"),
     # deg_gate's four
     (664, 291, 0x18000000, "deg"),
     (1272, -724, 1073741824, "deg"),
@@ -109,7 +119,9 @@ def model_without(lines, name):
 
 # R9, decided on the oracle before any fj runs
 rm0 = model_without(("if cbase[x] is not None:", "if fbase[x] is not None:"), "doomfj.rm_nobase")
-rm1 = model_without(("if stack_steps:                # P10 G1",), "doomfj.rm_nog1")
+rm1 = model_without(("if stack_steps:                # P10 G1",
+                      "if stack_steps and ledge_hidden(ups[x], los[x], ytop_b, hb):"), "doomfj.rm_nog1")
+rm1s = model_without(("if stack_steps and ledge_hidden(ups[x], los[x], ytop_b, hb):",), "doomfj.rm_noskip")
 
 
 def two_slot_model():
@@ -145,13 +157,25 @@ for vx, vy, va, kinds in VPS:
     if "G1" in kinds:
         plain = oracle(rm1, vx, vy, va)
         moved = sum(1 for a, b in zip(plain, want) if a != b)
-        print("R9 G1 (%d,%d,%#x): %d px the ledge clip moves  %s"
-              % (vx, vy, va, moved, "ok" if moved else "!! NOT EXERCISED"), flush=True)
+        skip_only = sum(1 for a, b in zip(oracle(rm1s, vx, vy, va), want) if a != b)
+        print("R9 G1 (%d,%d,%#x): %d px the ledge clip and skip move (the skip alone: %d px)  %s"
+              % (vx, vy, va, moved, skip_only, "ok" if moved else "!! NOT EXERCISED"), flush=True)
         ok &= moved > 0
     if "G3" in kinds:
         plain = oracle(rm3, vx, vy, va)
         moved = sum(1 for a, b in zip(plain, want) if a != b)
         print("R9 G3 (%d,%d,%#x): %d px the third fragment slot moves  %s"
+              % (vx, vy, va, moved, "ok" if moved else "!! NOT EXERCISED"), flush=True)
+        ok &= moved > 0
+    if "P11a" in kinds:
+        from doomfj import exitsign as _ES
+        _keep, _ES.EXIT_SIGNS = _ES.EXIT_SIGNS, {}
+        try:
+            plain = oracle(ReferenceModel(cfg), vx, vy, va)
+        finally:
+            _ES.EXIT_SIGNS = _keep
+        moved = sum(1 for a, b in zip(plain, want) if a != b)
+        print("R9 P11a (%d,%d,%#x): %d px the EXIT sign moves  %s"
               % (vx, vy, va, moved, "ok" if moved else "!! NOT EXERCISED"), flush=True)
         ok &= moved > 0
     if "G8" in kinds:

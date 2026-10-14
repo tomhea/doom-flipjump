@@ -1,0 +1,54 @@
+$ PYTHONPATH="src;." python scratchpad/gp/scenarios_v2.py --freeze --file scratchpad/gp/scenarios/combat_scenarios_v10.json --b0 docs/ship-evidence/blocked57_b0_v10.json --approver "the owner" --approval-record "The owner, 2026-10-14, in the session chat, answering "may I freeze v10 (keys 5bb15f59e01c36b8)?": "ok, go for it""   # M7 P11 at 41c138c, on blocked57's B0
+FREEZE scratchpad\gp\scenarios\combat_scenarios_v10.json (11 runs), B0 docs\ship-evidence\blocked57_b0_v10.json, approver 'the owner'
+  re-plan: identical keys and setups, 11 runs
+  wrote scratchpad\gp\scenarios\combat_scenarios_v10.json: FROZEN, owner freeze by 'the owner' (git head 41c138c, 40 hashed files, keys 5bb15f59e01c36b8)
+  run                   hp kill hits shot mele fbal pick door  mov%  str% step% dodg dAwk% gAwk% corp% cam
+  R0-west-hall         100    2    5    0    0    0    0    0   78%   71%  100%    0   15%   91%    0%   0
+  R0-aftermath         104    0    0    0    0    0    4    1  100%   71%  100%    0   14%   14%   31%   0
+  R0-south-hall         58    1    1    3    0    2    3    0   96%   54%  100%   11   57%   75%    4%   0
+  R0-imp-court          28    3   18    6    0    9    3    1   99%   86%  100%   13   99%   99%   23%   0
+  R0-northwest          73    2    5    6    0    0    2    0   84%   73%  100%    0   94%   94%   48%   0
+  R0-courtyard          70    2    8    3    0    7    1    0  100%   75%  100%   22   97%   97%   35%   0
+  R2-barrel-hall        44    4   16    3    0    1    1    0   84%   59%  100%    0   69%   69%   43%   0
+  R2-spectre-corridor   32    3    3    0    1    3    5    0   99%   64%  100%    2   79%   85%   22%   0
+  R2-east-yard          79    1    7    0    0    2    1    0   82%   47%  100%    1   31%   41%    3%   0
+  R3-west              100    3   10    0    0    0    2    0   92%   84%  100%    0   82%   85%   29%   0
+  R3-mid                75    2    5    6    0    0    3    1   90%   52%  100%    0   50%   51%   14%   0
+  POPULATION per frame over the set (1100 frames; d_ = DRAWN in the decided picture, geo_ = the geometric test):
+    awake        mean  5.04  p50  6  p80  8  p99 12  max 12
+    geo_in_view  mean  1.86  p50  2  p80  3  p99  7  max  8
+    geo_awake    mean  1.56  p50  1  p80  2  p99  6  max  7
+    geo_corpses  mean  0.61  p50  0  p80  1  p99  4  max  4
+    fireballs    mean  0.42  p50  0  p80  1  p99  5  max  5
+    deferred     mean  0.00  p50  0  p80  0  p99  0  max  1
+    heavy        mean  3.27  p50  3  p80  6  p99  9  max 11
+    d_live       mean  1.54  p50  1  p80  3  p99  6  max  8
+    d_awake      mean  1.36  p50  1  p80  2  p99  6  max  7
+    d_corpse     mean  0.25  p50  0  p80  1  p99  2  max  2
+    d_drop       mean  0.13  p50  0  p80  0  p99  1  max  1
+    d_fireball   mean  0.10  p50  0  p80  0  p99  1  max  3
+    d_fx         mean  0.11  p50  0  p80  0  p99  2  max  2
+    d_barrel     mean  0.62  p50  0  p80  1  p99 10  max 13
+  B0 (frozen, blocked27 05c64ee3b966d5bf): binding 17,635,961 ops/frame, mean 15,324,432, p80 run R0-west-hall 19,947,490, per-frame max 29,622,272 (R0-courtyard); strafe undercount +75,478 on the binding
+  every run survives                                                             PASS  11 runs, 0 deaths, lowest end health 28
+  >= 30% of frames have an awake monster DRAWN                                   PASS  687/1100 = 62.5%
+  >= 8 kills                                                                     PASS  23 monsters killed (and 7 barrels exploded; 11 shotgun shots)
+  all three monster attack kinds                                                 PASS  hitscan 27, melee 1, fireball 24
+  >= 6 pickups                                                                   PASS  25 pickups
+  >= 3 doors opened by the player                                                PASS  3 (R0-aftermath [0], R0-imp-court [1], R3-mid [9]); by monsters 4
+  >= 50% of frames carry a movement key (forward, back, strafe)                  PASS  1004/1100 = 91.3% (strafe on 736 = 66.9%)
+  every run moves on >= 60% of its movement frames                               PASS  worst R0-west-hall: 78/78 = 100%
+  >= 50% of the frames with an awake monster drawn carry a strafe key            PASS  469/687 = 68.3%
+  >= 1 fireball dodge (a strafe away from a fireball's line)                     PASS  49 dodge frames of 64 frames with a fireball threat
+  an aftermath run: >= 3 corpses within 160 units at the start, one drawn on its first frame, corpses drawn on >= 20% of its frames PASS  R0-aftermath: 3 corpses near the start, 1 drawn on frame 0, corpses drawn on 31/100 frames
+  >= 1 infighting episode (a monster's target switched to a monster)             PASS  2 switches (R0-imp-court 2)
+  >= 1 knockback stopped by a wall                                               PASS  6 refused knocks over 2262 knock moves
+  no run uses the exit                                                           PASS  0
+  B0 follows the model's camera: the injected pose lands on the model's pose     PASS  0 frames part; door states apart on 6 frames; use with strafe on 0
+  F1 status FROZEN with the owner's approval                                     PASS  status 'FROZEN', the set approved by 'the owner' on '2026-10-14'; last freeze: owner freeze by 'the owner'
+  F2 every recorded file hash matches (model, census, planner: 40 files)         PASS  40/40
+  F3 the replay reproduces every frozen pose and final digest                    PASS  11/11 runs
+  F4 the drawn and geometric population reproduces frame by frame                PASS  11/11 runs
+  F5 the B0 record is present and was measured on these keys                     PASS  binding 17635961.04272727, keys match
+FREEZE PASS
+exit 0

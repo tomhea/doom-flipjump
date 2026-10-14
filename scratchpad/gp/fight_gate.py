@@ -1172,7 +1172,11 @@ def p8a_scenario_list(dsim, w, card) -> list:
     # ---- I3: a monster's stray shot kills a barrel: the blast's source is that monster. bar_src is the source of the
     # first NON-lethal damage (P_DamageMobj returns after P_KillMobj, before the switch: a barrel killed by its first
     # hit blames nobody -- DOOM's, combat.damage_barrel), so the barrel starts at 16: no first bullet (3 .. 15) kills
-    # it, and the sergeants (3 pellets an attack) come first (the P8a integration: at 1 no candidate could place)
+    # it, and the sergeants (3 pellets an attack) come first (the P8a integration: at 1 no candidate could place).
+    # M7 P11: the poses run 32 .. 256 beyond the barrel, every one tried -- at P10's 96 / 128 / 160 the P11 seen rule
+    # (d) leaves every shooter FULLY behind a ledge from the player's view: it fires its forced attack and no more
+    # (blocked57's fight gate: no candidate of 12); of the 45 the 35th places -- P10's own pair (the sergeant in slot
+    # 27, barrel 13) from farther back: 4 attacks (1 at the near poses), the blast blamed on it
     i3 = []
     for b, t in enumerate(w.barrel_things):
         for s in sgt + zomb:
@@ -1180,10 +1184,10 @@ def p8a_scenario_list(dsim, w, card) -> list:
                     w.los_points((w.ws.mon_x[s] << 16, w.ws.mon_y[s] << 16), (t.x << 16, t.y << 16)):
                 st = "S_POSS_ATK1" if s in zomb else "S_SPOS_ATK1"
                 i3 += [((p, both(att(s, st), armor(200, 2), bar_health(b, 16))), s, b)
-                       for p in line_poses(dsim, w, s, ("bar", b), (96, 128, 160))]
+                       for p in line_poses(dsim, w, s, ("bar", b), (32, 48, 64, 80, 96, 112, 128, 160, 192, 224, 256))]
     out.append({"name": "I3 a monster's stray shot kills a barrel: the blast's source is that monster",
                 "keys": idle40, "rule": "fight", "pkg": ("I",), "controls": ["bar_src_player"],
-                "cands": [c_[0] for c_ in i3[:12]],
+                "cands": [c_[0] for c_ in i3], "limit": len(i3),
                 "claim": lambda c, tr: c["barrel_blasts"] >= 1 and any(v >= 2 for fr in tr
                                                                       for v in fr["mstate"].get("bar_src", ()))})
     # ---- I4: the target dies: the monster looks for the player (allaround) or returns to its spawn state

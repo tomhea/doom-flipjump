@@ -1,0 +1,104 @@
+$ cd /c/Users/tomhe/Documents/doom-tdd-p11 [at 65f913b (the census without DRAW_ACTOR_TYPES, its control at the default modes) + tests/host/test_census_control.py from bc25935] && PYTHONPATH=src timeout 1800 python -m pytest tests/host/test_census_control.py -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/bt/p11_tdd_census_before
+# worktree HEAD: 65f913b866cdc38e335c71132e2295823d5de565 (P11: the swap probe renders with **GAME_RENDER_KW itself -- test_oracle_calls_in_step flagged its **)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#   ?? tests/host/test_census_control.py
+# copied-file hashes: tests/host/test_census_control.py=62af61a10c2c 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 21:08:22 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-p11
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 2 items
+
+tests/host/test_census_control.py::test_the_census_draws_the_oracles_picture FAILED [ 50%]
+tests/host/test_census_control.py::test_the_census_draws_its_monsters_in_the_monster_class FAILED [100%]
+
+================================== FAILURES ===================================
+__________________ test_the_census_draws_the_oracles_picture __________________
+
+    @pytest.mark.skipif(not (ROOT / "assets" / "freedoom1.wad").exists(), reason="needs assets/freedoom1.wad")
+    def test_the_census_draws_the_oracles_picture():
+        r = subprocess.run([sys.executable, str(CONTROL)], cwd=ROOT, capture_output=True, text=True, timeout=900)
+        out = r.stdout + r.stderr
+>       assert "CONTROL: PASS" in out, out[-3000:]
+E       AssertionError: stock renders: 11 viewpoints x 3 keyword sets, 2.5 s
+E           spawn     arrivals 154  slotA  14 (attributed  14)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+E           gate664   arrivals 130  slotA 106 (attributed 106)  slotB  38 (attributed  38)  BYTE-IDENTICAL
+E           gate1869  arrivals 109  slotA  68 (attributed  68)  slotB   4 (attributed   4)  BYTE-IDENTICAL
+E           h57       arrivals  50  slotA  25 (attributed  25)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+E           h71       arrivals  29  slotA 104 (attributed 104)  slotB   5 (attributed   5)  BYTE-IDENTICAL
+E           h100      arrivals  56  slotA 126 (attributed 126)  slotB  78 (attributed  78)  BYTE-IDENTICAL
+E           h28       arrivals  19  slotA  23 (attributed  23)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+E           h42       arrivals  19  slotA  32 (attributed  32)  slotB   0 (attributed   0)  !! PIXELS DIFFER
+E           h85       arrivals  18  slotA   5 (attributed   5)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+E           court     arrivals  83  slotA  14 (attributed  14)  slotB   0 (attributed   0)  !! PIXELS DIFFER
+E           eastyard  arrivals  44  slotA  91 (attributed  91)  slotB   4 (attributed   4)  BYTE-IDENTICAL
+E         CONTROL: FAIL
+E         NEGATIVE CONTROL (gate664 without WAD thing 284): 1445 px differ -> the comparison has teeth
+E         KEYWORDS: px moved by sky=False | px moved by bbox_cull=False | arrivals cull on/off
+E           spawn          0 px |    0 px | 154 / 172
+E           gate664        0 px |    0 px | 130 / 165
+E           gate1869     332 px |    0 px | 109 / 142
+E           h57            0 px |    0 px |  50 /  62
+E           h71            0 px |    0 px |  29 /  61
+E           h100         864 px |    0 px |  56 /  73
+E           h28            0 px |    0 px |  19 /  69
+E           h42            0 px |    0 px |  19 /  21
+E           h85            0 px |    0 px |  18 /  80
+E           court       1864 px |    0 px |  83 / 122
+E           eastyard    1620 px |    0 px |  44 /  70
+E         SKY EXERCISED at both outdoor viewpoints: yes
+E         
+E       assert 'CONTROL: PASS' in 'stock renders: 11 viewpoints x 3 keyword sets, 2.5 s\n  spawn     arrivals 154  slotA  14 (attributed  14)  slotB   0 (attributed   0)  BYTE-IDENTICAL\n  gate664   arrivals 130  slotA 106 (attributed 106)  slotB  38 (attributed  38)  BYTE-IDENTICAL\n  gate1869  arrivals 109  slotA  68 (attributed  68)  slotB   4 (attributed   4)  BYTE-IDENTICAL\n  h57       arrivals  50  slotA  25 (attributed  25)  slotB   0 (attributed   0)  BYTE-IDENTICAL\n  h71       arrivals  29  slotA 104 (attributed 104)  slotB   5 (attributed   5)  BYTE-IDENTICAL\n  h100      arrivals  56  slotA 126 (attributed 126)  slotB  78 (attributed  78)  BYTE-IDENTICAL\n  h28       arrivals  19  slotA  23 (attributed  23)  slotB   0 (attributed   0)  BYTE-IDENTICAL\n  h42       arrivals  19  slotA  32 (attributed  32)  slotB   0 (attributed   0)  !! PIXELS DIFFER\n  h85       arrivals  18  slotA   5 (attributed   5)  slotB   0 (attributed   0)  BYTE-IDENTICAL\n  court     arrivals  83  slotA  14 (attributed  14)  slotB   0 (attributed   0)  !! PIXELS DIFFER\n  eastyard  arrivals  44  slotA  91 (attributed  91)  slotB   4 (attributed   4)  BYTE-IDENTICAL\nCONTROL: FAIL\nNEGATIVE CONTROL (gate664 without WAD thing 284): 1445 px differ -> the comparison has teeth\nKEYWORDS: px moved by sky=False | px moved by bbox_cull=False | arrivals cull on/off\n  spawn          0 px |    0 px | 154 / 172\n  gate664        0 px |    0 px | 130 / 165\n  gate1869     332 px |    0 px | 109 / 142\n  h57            0 px |    0 px |  50 /  62\n  h71            0 px |    0 px |  29 /  61\n  h100         864 px |    0 px |  56 /  73\n  h28            0 px |    0 px |  19 /  69\n  h42            0 px |    0 px |  19 /  21\n  h85            0 px |    0 px |  18 /  80\n  court       1864 px |    0 px |  83 / 122\n  eastyard    1620 px |    0 px |  44 /  70\nSKY EXERCISED at both outdoor viewpoints: yes\n'
+
+tests\host\test_census_control.py:26: AssertionError
+___________ test_the_census_draws_its_monsters_in_the_monster_class ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023638A6AB50>
+
+    @pytest.mark.skipif(not (ROOT / "assets" / "freedoom1.wad").exists(), reason="needs assets/freedoom1.wad")
+    def test_the_census_draws_its_monsters_in_the_monster_class(monkeypatch):
+        """the model's live monsters are SYNTHETIC types in the census; while the oracle draws them they must be in
+        MONSTER_TYPES (the budget category, the seen and aim tests) AND in DRAW_ACTOR_TYPES (the drawing class: P11 (a)),
+        and both sets are restored after the render"""
+        sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
+        import census_lib as CL
+        from doomfj import reference_model as RMOD
+        from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+        c = CL.Census(player=PLAYER_MODE, monsters=MONSTER_MODE)
+        th, bk, me, mt = c.game_things(corpse_as_monster=False, depth_order=True)
+        live = {t.type for t, m in zip(th, me) if m is not None and m.role == "live"}
+        assert live and not live & CL.ORIG_MONSTER_TYPES, "the level start's monsters are drawn as synthetic types"
+        seen = []
+        orig = RMOD.ReferenceModel.render_wall_frame
+    
+        def spy(self, *a, **k):
+            seen.append((RMOD.MONSTER_TYPES, RMOD.DRAW_ACTOR_TYPES))
+            return orig(self, *a, **k)
+        monkeypatch.setattr(RMOD.ReferenceModel, "render_wall_frame", spy)
+        before = (RMOD.MONSTER_TYPES, RMOD.DRAW_ACTOR_TYPES)
+        c.render(th, bk, me, mt)
+        assert len(seen) == 1
+        monster_types, actor_types = seen[0]
+        assert live <= monster_types, "a live monster is not a monster while the census draws"
+>       assert live <= actor_types, "a live monster is drawn as SCENERY: DRAW_ACTOR_TYPES lacks the census's live types"
+E       AssertionError: a live monster is drawn as SCENERY: DRAW_ACTOR_TYPES lacks the census's live types
+E       assert {100001, 1000..., 100006, ...} <= frozenset({7,... 64, 65, ...})
+E         
+E         Extra items in the left set:
+E         100001
+E         100002
+E         100003
+E         100004
+E         100005...
+E         
+E         ...Full output truncated (10 lines hidden), use '-vv' to show
+
+tests\host\test_census_control.py:55: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_census_control.py::test_the_census_draws_the_oracles_picture
+FAILED tests/host/test_census_control.py::test_the_census_draws_its_monsters_in_the_monster_class
+============================== 2 failed in 6.10s ==============================
+# finished 2026-10-13 21:08:29 +0300; pytest exit code: 1

@@ -1101,9 +1101,9 @@ ns stream {
     // Without C (gpsc_has 0) it is the plain region. Each piece is guarded (an empty emit_region still walks).
     def emit_region_c lo, hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, \
             gnrow, wstrip, wstripbase, \
-            cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret \
+            cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret, rleaf, rret \
             @ c1_lo, c1_hi, c1_cap, c1_ok, c2_up, c2_ok, c2_cap, c2_done, top_do, top_end, c_do, c_end, bot_do, plain, end \
-            < gpsc_has, gpsc_sy1, gpsc_sy2, gpsc_w1, gpsc_w2, gpsc_ybase, gpsc_smidx, gpsc_ptr0, gpsc_ridx {
+            < gpsc_has, gpsc_sy1, gpsc_sy2, gpsc_w1, gpsc_w2, gpsc_ybase, gpsc_smidx, gpsc_ptr0, gpsc_ridx, erc_lo, erc_hi {
         hex.if0 1, gpsc_has, plain
         hex.mov 2, gpsc_w1, gpsc_sy1            // c1 = clamp(sy1C, lo, hi)
         hex.cmp 2, gpsc_w1, lo, c1_lo, c1_hi, c1_hi
@@ -1125,8 +1125,10 @@ ns stream {
         hex.mov 2, gpsc_w2, hi
       c2_done:
         hex.cmp 2, lo, gpsc_w1, top_do, top_end, top_end
-      top_do:
-        .emit_region lo, gpsc_w1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+      top_do:                                // P11: the shared painter (emit_col_lines' erc leaf), not a third copy
+        hex.mov 2, erc_lo, lo
+        hex.mov 2, erc_hi, gpsc_w1
+        stl.fcall rleaf, rret
       top_end:
         hex.cmp 2, gpsc_w1, gpsc_w2, c_do, c_end, c_end
       c_do:
@@ -1134,7 +1136,9 @@ ns stream {
       c_end:
         hex.cmp 2, gpsc_w2, hi, bot_do, end, end
       bot_do:
-        .emit_region gpsc_w2, hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        hex.mov 2, erc_lo, gpsc_w2
+        hex.mov 2, erc_hi, hi
+        stl.fcall rleaf, rret
         ;end
       plain:
         .emit_region lo, hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
@@ -1144,12 +1148,12 @@ ns stream {
     // M7 P1.4: the sprite interface is (sprfl, s, sblk, sb, sblkb) -- slot A's (slot, block) and
     // slot B's -- where it was eleven registers of stored rows, biases and light rows.
     def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, ascode, stack, deg, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, s, sblk, sb, sblkb, wall_lit, wall_lit2, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd \
-            @ ctake_ok, ctake_clamp, no_sprite, sprite_path, sprite_one, no_c3, c_derived, spr_top_b, spr_top_ok, gap1_do, gap1_end, gap2_do, gap2_end, spr_bot_b, spr_bot_ok, covered1, covered, split, wall, w1r_pattern, w1r_test, floor, col_done, band_walk, bw_loop, bw_body, bw_skip, bw_test, bw_emit, bw_last, bw_clamp, bw_done, band_ret, end \
+            @ ctake_ok, ctake_clamp, no_sprite, sprite_path, sprite_one, no_c3, c_derived, erc_leaf, erc_ret, spr_top_b, spr_top_ok, gap1_do, gap1_end, gap2_do, gap2_end, spr_bot_b, spr_bot_ok, covered1, covered, split, wall, w1r_pattern, w1r_test, floor, col_done, band_walk, bw_loop, bw_body, bw_skip, bw_test, bw_emit, bw_last, bw_clamp, bw_done, band_ret, end \
             < seg_w1rf, w1rslv, seg_litf, ecl_ccy, ecl_cmidx, ecl_colr, ecl_ctake, ecl_ent_i, ecl_full_hi, ecl_full_lo, ecl_n_ent, ecl_ptr, ecl_spr_bot, ecl_spr_top, ecl_whi, ecl_win_end, ecl_win_hi, ecl_win_lo, ecl_wlen, ecl_wlo, ecl_y2r, \
               gps_cvh, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, gpsb_smidx, gpsb_ptr0, gps_ridx, gpsb_ridx, \
               p2_sc, p2_scb, gps_ct, gps_cb, gps_cut, gpsb_ct, gpsb_cb, gpsb_cut, ecl_bwlo, ecl_bwhi, \
               p2_s3, p2_sblk3, p2_scc, gpsc_has, gpsc_ybase, gpsc_top, gpsc_sy1, gpsc_sy2, gpsc_smidx, gpsc_ptr0, gpsc_ridx, \
-              gpsc_ct, gpsc_cb, gpsc_cut {
+              gpsc_ct, gpsc_cb, gpsc_cut, erc_lo, erc_hi {
         hex.mov 2, ecl_ctake, cexcl
         hex.cmp 2, ecl_ctake, fstart, ctake_ok, ctake_ok, ctake_clamp   // ecl_ctake = min(cexcl, fstart)
       ctake_clamp:
@@ -1255,16 +1259,16 @@ ns stream {
       spr_top_b:
         rep(things, k) hex.mov 2, ecl_spr_top, gpsb_sy1
       spr_top_ok:
-        rep(things, k) .emit_region_c ecl_full_lo, ecl_spr_top, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .emit_region_c ecl_full_lo, ecl_spr_top, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret, erc_leaf, erc_ret
         rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, gpsb_sy1, ecl_bwhi, gpsb_ridx
         rep(things, k) hex.cmp 2, gpsb_sy2, gps_sy1, gap1_do, gap1_end, gap1_end
       gap1_do:
-        rep(things, k) .emit_region_c gpsb_sy2, gps_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .emit_region_c gpsb_sy2, gps_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret, erc_leaf, erc_ret
       gap1_end:
         rep(things, k) .frag_runs_cut gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx, gps_sy1, gps_sy2, gps_cut
         rep(things, k) hex.cmp 2, gps_sy2, gpsb_sy1, gap2_do, gap2_end, gap2_end
       gap2_do:
-        rep(things, k) .emit_region_c gps_sy2, gpsb_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .emit_region_c gps_sy2, gpsb_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret, erc_leaf, erc_ret
       gap2_end:
         rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, ecl_bwlo, gpsb_sy2, gpsb_ridx
         rep(things, k) hex.mov 2, ecl_spr_bot, gps_sy2
@@ -1272,7 +1276,7 @@ ns stream {
       spr_bot_b:
         rep(things, k) hex.mov 2, ecl_spr_bot, gpsb_sy2
       spr_bot_ok:
-        rep(things, k) .emit_region_c ecl_spr_bot, ecl_full_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .emit_region_c ecl_spr_bot, ecl_full_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret, erc_leaf, erc_ret
         ;col_done
       sprite_one:
         rep(things, k) hex.set 4, gps_cvh, viewh
@@ -1330,7 +1334,15 @@ ns stream {
       bw_done:
         stl.fret band_ret
 
+      // P11 (the owner, 2026-10-13: share the third slot's copies): the ONE region painter the third slot's
+      // two background windows run -- stream.emit_region_c sets erc_lo / erc_hi and fcalls it -- where each of
+      // its four call sites held two more inline copies. The common path (no slot C) stays inline.
+      erc_leaf:
+        rep(things, k) .emit_region erc_lo, erc_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        stl.fret erc_ret
+
       band_ret: ;0
+      erc_ret: ;0
       end:
     }
 }

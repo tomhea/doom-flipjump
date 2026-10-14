@@ -1,0 +1,22 @@
+$ python scratchpad/12m/msframe.py --a /c/Users/tomhe/Documents/doom-onepass/build/doom_e1m1_onepass56.fjm --b build/doom_e1m1_blocked57.fjm --note M7 P11 the EXIT sign, the shared third-slot painter, the ledge rule (one pass): blocked57 vs doom_e1m1_onepass56.fjm
+machine : power plan 'Silent'; busy processes: none
+msframe : A=doom_e1m1_onepass56.fjm B=doom_e1m1_blocked57.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  A         89.3 ms   198.0M fj/s  yard 3.57->3.53G   |  B         82.3 ms   214.5M fj/s  yard 3.52->3.52G
+  rep 1  A         84.2 ms   210.0M fj/s  yard 3.51->3.56G   |  B         82.5 ms   214.0M fj/s  yard 3.48->3.57G
+  rep 2  A         83.5 ms   211.6M fj/s  yard 3.53->3.56G   |  B         81.6 ms   216.3M fj/s  yard 3.50->3.55G
+  rep 3  A         84.1 ms   210.2M fj/s  yard 3.57->3.58G   |  B         83.4 ms   211.7M fj/s  yard 3.56->3.58G
+  rep 4  A         85.5 ms   206.7M fj/s  yard 3.52->3.54G   |  B         83.4 ms   211.7M fj/s  yard 3.57->3.57G
+
+  A        median    84.2 ms/frame  [83.5 .. 89.3]    210.0M fj/s   17,671,775 ops/frame   cell=4 flat
+  B        median    82.5 ms/frame  [81.6 .. 83.4]    214.0M fj/s   17,650,328 ops/frame   cell=4 flat
+
+  pixels identical across arms and reps : YES
+  ops identical across arms             : no   (expected when the arms are different binaries; not when they are one engine A/B)
+  per-pair A/B ms ratio                 : 1.085 1.020 1.024 1.008 1.026
+  median ratio                          : 1.024  (>1 = B faster)
+  VERDICT: NOT SEPARATED   (rule: all 5 pairs agree in sign AND |median ratio - 1| > 3%)
+  engine A: df401f5d00a3ac5f full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  engine B: df401f5d00a3ac5f full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.55G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+rc=0

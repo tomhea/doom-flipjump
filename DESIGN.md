@@ -832,6 +832,40 @@ both images have to the next one, and a pool table counts in its call site's reg
   `pclm` is at word 65,536 in both label tables and no growth row lies before it, so the pad there absorbed it. P8a's
   and P9's additions are still not ledgered here -- they are inside the baseline, blocked54.
 
+**M7 P11 TABLES, DATA AND CELLS, MEASURED 2026-10-14 on blocked57** (R4). `python scratchpad/gp/game_table_sizes.py --md
+--rung P11 --labels scratchpad/12m/atlas/blocked57.labels.tsv.gz --gen-dir build/generated_doom_e1m1_blocked57 --fjm
+build/doom_e1m1_blocked57.fjm --against scratchpad/12m/atlas/onepass56.labels.tsv.gz --against-gen
+build/generated_doom_e1m1_onepass56 --against-fjm build/doom_e1m1_onepass56.fjm --split seg_pass2_leaf` (the label
+tables and generated parts are local build artefacts, not tracked): blocked57 is P11's build, one pass at fecb44b (.fjm
+`05c64ee3b966d5bf...`), onepass56 P10's shipped binary (`63869ab4be6f2ddc...`). Its `--selftest` with the same arguments:
+SELFTEST PASS, every control caught. P11 added NO table: the 229 D4 tables and the 227 dispatch-table headers are the
+same in both images (their words -376, all alignment pad). Its cells are twelve hoisted scratch globals
+(`wall_renderer.hoisted_scratch_decls`: 372 -> 384):
+
+| rung | table / region | what | words | of which align pad |
+|---|---|---|---:|---:|
+| P11 | `erc_lo`, `erc_hi` | (b) the shared third-slot painter's window: the background window's bounds, set before the fcall | 8 | - |
+| P11 | `trb_ylo1`, `trb_yhi1`, `lb_t`, `lb_c` | (c, d) a thing's ledge box (frame.ledge_box): its bucket rows, clamped and +1, and two scratch | 40 | - |
+| P11 | `lt_y`, `lt_top`, `lt_bot`, `lt_b`, `lt_p`, `lt_idx` | (c, d) the per-column ledge test (frame.ledge_test): the last pieces' rows and the verdict | 60 | - |
+
+**Where onepass56 -> blocked57's -2,908,982 data words went** (the same command):
+- data: 56,449,864 -> 53,540,882 words (42.06% -> 39.89% of 2^27) = the inline segment 34,147,622 -> 32,751,562
+  (-1,396,060) + the pool's payload 22,302,242 -> 20,789,320 (-1,512,922); the labeled code -655,144, the wflip tail
+  after it -740,916 (unlabeled, NOT attributed).
+
+| region (its first label) | what | inline | pool | total |
+|---|---|---:|---:|---:|
+| `seg_pass2_leaf` | (b): its split puts all of it in `stream.emit_col_lines` (-2,622,810): the third slot's two background windows fcall ONE region painter (`erc_leaf`) instead of an inline copy at each of the four call sites | -788,864 | -1,833,940 | **-2,622,804** |
+| `aimo0` .. `aimo16` | (d): the aim window's 17 column leaves, +16,870 each -- the box's rows against the column's last ledge pieces | +79,968 | +206,822 | **+286,790** |
+| `ar_hix` | (d): the aim leaf's shared rows (`proj.thing_rows`, project_thing's and the window's) | +19,168 | +43,840 | **+63,008** |
+| `thing_leaf`, `thing_leaf_b`, `thing_leaf_bb` | (c, d): the record loop's ledge box and test (frame.thing_record_body), its three instances: +55,880, +22,678, +22,678 | +34,080 | +67,156 | **+101,236** |
+| `sprbank` / `vpb_dsp` | (a): the EXIT sign's art in the sprite bank, +13,056 (102 blocks at the bank's 64-op stride: 34 downscaled columns in each of the three tiers); the visplane dispatch's alignment pad after it absorbs the same, -13,056 | +0 | +0 | **+0** |
+| the other 263,257 regions | | +504 | +3,200 | **+3,704** |
+
+- Sums: (b) **-2,622,804**; (d)'s aim window **+349,798**; (c, d) in the record loop **+101,236**; the wflip tail
+  **-740,916, not attributed**; the other 263,257 regions +3,704, not split further (the twelve cells' 108 words are
+  among them). (b) took 2.62M words out; (c) and (d) put 0.45M back, about a sixth of it.
+
 ### 1.3 LUT inventory & total entry count
 
 Every runtime LUT with its **logical entry count** (the index range). Result-width and pow2/over-align

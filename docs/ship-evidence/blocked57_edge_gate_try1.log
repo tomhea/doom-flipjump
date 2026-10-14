@@ -1,0 +1,38 @@
+$ python scratchpad/gp/edge_gate.py
+R9 G2 (1688,1357,0xaf8091a2): 160 column bases, 6001 px the base paint moves  ok
+R9 G2 (1656,1283,0x2f8091a2): 233 column bases, 5020 px the base paint moves  ok
+R9 G2 (1680,1345,0xaf8091a2): 160 column bases, 5725 px the base paint moves  ok
+R9 G2 (-416,128,0x40000000): 94 column bases, 2907 px the base paint moves  ok
+R9 G8 (-416,128,0x40000000): 16 upper pieces with a sky back ceiling  ok
+R9 G8 (-384,224,0x5c71c71c): 37 upper pieces with a sky back ceiling  ok
+R9 G8 (-416,192,0x55555555): 24 upper pieces with a sky back ceiling  ok
+R9 G8 (-416,160,0x471c71c7): 21 upper pieces with a sky back ceiling  ok
+R9 G1 (2018,884,0xeabf52e4): 678 px the ledge clip moves  ok
+R9 G1 (1974,1408,0x80000000): 474 px the ledge clip moves  ok
+R9 G1 (2583,1087,0x9556f4d0): 0 px the ledge clip moves  !! NOT EXERCISED
+R9 G3 (2198,-159,0xffd64759): 144 px the third fragment slot moves  ok
+R9 G3 (639,271,0x20000000): 121 px the third fragment slot moves  ok
+R9 P11a (-300,1296,0x80000000): 430 px the EXIT sign moves  ok
+R9 P11a (-300,1340,0x95555555): 762 px the EXIT sign moves  ok
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+assembled
+G2     (1688,1357,0xaf8091a2): 27,610,047 ops  BYTE-EXACT
+G2     (1656,1283,0x2f8091a2): 25,929,931 ops  BYTE-EXACT
+G2     (1680,1345,0xaf8091a2): 27,212,043 ops  BYTE-EXACT
+G8 G2  (-416,128,0x40000000): 15,348,009 ops  BYTE-EXACT
+G8     (-384,224,0x5c71c71c): 16,519,449 ops  BYTE-EXACT
+G8     (-416,192,0x55555555): 16,005,075 ops  BYTE-EXACT
+G8     (-416,160,0x471c71c7): 14,920,663 ops  BYTE-EXACT
+G1     (2018,884,0xeabf52e4): 23,695,252 ops  BYTE-EXACT
+G1     (1974,1408,0x80000000): 25,781,942 ops  BYTE-EXACT
+G1     (2583,1087,0x9556f4d0): 29,737,232 ops  BYTE-EXACT
+G3     (2198,-159,0xffd64759): 24,407,625 ops  BYTE-EXACT
+G3     (639,271,0x20000000): 24,454,730 ops  BYTE-EXACT
+P11a   (-300,1296,0x80000000): 10,141,221 ops  BYTE-EXACT
+P11a   (-300,1340,0x95555555): 10,127,954 ops  BYTE-EXACT
+deg    (664,291,0x18000000): 32,276,814 ops  BYTE-EXACT
+deg    (1272,-724,0x40000000): 18,110,323 ops  BYTE-EXACT
+deg    (1869,479,0x80000000): 31,930,099 ops  BYTE-EXACT
+deg    (-416,256,0x0): 29,351,667 ops  BYTE-EXACT
+FAIL
+rc=1

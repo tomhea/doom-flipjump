@@ -1,0 +1,66 @@
+$ cd /c/Users/tomhe/Documents/doom-tdd-p11 [at 86341a0 (SeenHook through the World's full-screen renderer) + tests/host/test_sight.py, tests/host/data/seen_run7_f52.json, tests/host/test_p8a_gates.py from 9ff90a4] && PYTHONPATH=src timeout 1800 python -m pytest tests/host/test_sight.py tests/host/test_p8a_gates.py -k game_tiers_view or passes_view_drop -v -p no:cacheprovider --basetemp=C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/bt/p11_tdd_seenhook_before
+# worktree HEAD: 86341a063950ef6a8edaf47239f412b623ddcb85 (P11: the edge gate's G1 control turns off the clip AND P11 (c)'s ledge skip -- blocked57's chain: NO)
+# worktree changes vs HEAD (the copied files; assets/ is gitignored):
+#    M tests/host/test_p8a_gates.py
+#    M tests/host/test_sight.py
+#   ?? tests/host/data/seen_run7_f52.json
+# copied-file hashes: tests/host/test_p8a_gates.py=bb34c90acd19 tests/host/test_sight.py=cf52a5146b59 tests/host/data/seen_run7_f52.json=2e7200828cd3 
+# import origin (same cwd + PYTHONPATH): doomfj C:\Users\tomhe\Documents\doom-tdd-p11\src\doomfj\__init__.py | flipjump C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py
+# started 2026-10-13 21:07:55 +0300
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\tomhe\AppData\Local\Programs\Python\Python311\python.exe
+rootdir: C:\Users\tomhe\Documents\doom-tdd-p11
+configfile: pyproject.toml
+plugins: anyio-4.13.0, cov-4.1.0, ordering-0.6, xdist-3.3.1
+collecting ... collected 31 items / 29 deselected / 2 selected
+
+tests/host/test_sight.py::test_seen_hook_draws_the_game_tiers_view FAILED [ 50%]
+tests/host/test_p8a_gates.py::test_every_game_tier_gate_render_passes_view_drop FAILED [100%]
+
+================================== FAILURES ===================================
+__________________ test_seen_hook_draws_the_game_tiers_view ___________________
+
+    def test_seen_hook_draws_the_game_tiers_view():
+        """P11 (d) made the seen test read ROWS -- a sprite's bucket box against the nearer ledge pieces -- so the hook
+        must draw the picture the BINARY draws: the game tier's 84-row view under the status bar (config.GAME_CFG), not
+        the World's full-screen renderer. Pinned to the binary: gamespeed run 7's frame 52 (the world the trail's GameSim
+        and blocked57 share to that frame; data/seen_run7_f52.json) and blocked57's own thseen at that present. The
+        control draws the same world through the World's renderer: it marks monster 21, the flag gamespeed_trail parted
+        on, so the fixture tells the two views apart."""
+        snap = json.loads((DATA / "seen_run7_f52.json").read_text(encoding="ascii"))
+        w = _game_world_at(snap)
+        n = w.layout.nmon
+        hook = SI.SeenHook(w)
+        hook(w)
+>       assert [w.ws.mon_seen[m] for m in range(n)] == snap["thseen_binary"], "the hook's picture is not the binary's"
+E       AssertionError: the hook's picture is not the binary's
+E       assert [0, 0, 0, 0, 0, 0, ...] == [0, 0, 0, 0, 0, 0, ...]
+E         
+E         At index 21 diff: 1 != 0
+E         
+E         Full diff:
+E           [
+E               0,
+E               0,...
+E         
+E         ...Full output truncated (55 lines hidden), use '-vv' to show
+
+tests\host\test_sight.py:166: AssertionError
+______________ test_every_game_tier_gate_render_passes_view_drop ______________
+
+    def test_every_game_tier_gate_render_passes_view_drop():
+        for path, n in GATE_RENDERS.items():
+            src = (ROOT / path).read_text(encoding="utf-8")
+            calls = render_calls(src)
+            assert len(calls) >= n, "%s: %d render calls found, %d expected -- the scan is vacuous" % (path, len(calls), n)
+>           assert not refused(src), (path, refused(src))
+E           AssertionError: ('src/doomfj/sight.py', [124])
+E           assert not [124]
+E            +  where [124] = refused('"""M7 P3.2 -- the monsters\' SIGHT, as the owner decided it on 2026-09-30 ("Seen rule + set v5";\ndocs/gp-monsters.md section 8.2, the handoff\'s 7.2 and D3 e):\n\n  * seen (`mon_seen`): the PREVIOUS frame\'s picture drew the monster -- its sprite projects in front and one of its\n    columns is still open when the walk reaches its leaf, before the budgets (`render_wall_frame(seen_out=)`);\n  * waking sight: seen, or REJECT-visible within 128 units (E1M1\'s REJECT lump, `assets/freedoom1.wad`);\n  * attack sight: seen, or within 128 units and the exact 2D LOS (the near-trace).\n\n`SeenHook` is the model\'s picture after a tic: `World(sight_rule="seen", seen_hook=SeenHook(...))` calls it at the end\nof every tic, and it writes `mon_seen` for the next."""\nfrom typing import Optional\n\nNEAR = 128                                    # map units: REJECT wakes, the near-trace attacks, within this\n\n\nclass Reject:\n    """REJECT-visibility between two sectors (DOOM\'s P_CheckSight\'s first test): bit s1 * nsec + s2 set = s2 NOT\n    visible from s1"""\n\n    def __init__(self, data: bytes, nsec: int):\n        assert len(data) * 8 >= nsec * nsec, (len(data), nsec)\n        self.data...things as TH\n        saved = (RMOD.drawable_things, RMOD.baked_thing_mask)\n        RMOD.drawable_things, RMOD.baked_thing_mask = TH.drawable_things, TH.baked_thing_mask\n        try:\n            world.rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, world.mapname), self._scene(world),\n                                       sprite_wad=self.art, thing_positions=pos, thing_hidden=hidden,\n                                       thing_views=views, seen_out=seen, **self.kw)\n        finally:\n            RMOD.drawable_things, RMOD.baked_thing_mask = saved\n        for m in range(n):\n            ws.mon_seen[m] = int(self.views.mdi[m] in seen)\n\n    def _mviews(self, world):\n        from doomfj.monsters import rotation, view_of\n        from doomfj import gamedata as gd\n        ws, out = world.ws, {}\n        for m in range(world.layout.nmon):\n            if not ws.mon_active[m]:\n                continue\n            st = gd.STATES[gd.STATE_NAMES[ws.mon_state[m]]]\n            rot = rotation(world.rm, ws.px, ws.py, ws.mon_x[m] << 16, ws.mon_y[m] << 16, ws.mon_facing[m])\n            out[m] = view_of(self.views.patches, st.sprite, st.frame_index, rot)\n        return out\n')
+
+tests\host\test_p8a_gates.py:78: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_sight.py::test_seen_hook_draws_the_game_tiers_view - A...
+FAILED tests/host/test_p8a_gates.py::test_every_game_tier_gate_render_passes_view_drop
+====================== 2 failed, 29 deselected in 1.79s =======================
+# finished 2026-10-13 21:07:59 +0300; pytest exit code: 1

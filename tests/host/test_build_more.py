@@ -314,6 +314,17 @@ def test_the_include_order_is_R54(tmp_path, monkeypatch):
         assert ("input.fj" in fixed) == tier_flags(tier)["standalone"], (tier, fixed)
 
 
+def test_every_self_reset_tier_resets_by_label():
+    """P11 (the CR of PR #133): a TWO-PASS reset bakes addresses through its restore set, whose layout fingerprint
+    every rung that adds a cell must re-key -- P11 added twelve, re-keyed nothing, and the hosted-loop tier stopped
+    building (the game tier, ONE PASS since P10, was untouched). So every self-reset tier resets BY LABEL: the
+    hosted-loop tier joined after its one-time check (scratchpad/onepass_check.py on main b84bc86: 5,888 cells, 0
+    differ; docs/ship-evidence/p11_hosted_loop_onetime.log)."""
+    from doomfj.wall_renderer import TIERS, tier_flags
+    two_pass = [t for t in TIERS if tier_flags(t)["self_reset"] and t not in B.ONE_PASS_TIERS]
+    assert not two_pass, "self-reset tiers still on the two-pass reset: %s" % two_pass
+
+
 def test_the_standalone_tier_puts_input_before_sim_and_the_reset_last(tmp_path, monkeypatch):
     """The `game` tier's path list, caught at `selfreset.capture_labels` -- the ONE assembly of the one-pass
     build (build.ONE_PASS_TIERS), after its reset part is generated and before `bake_bsp`. R54 again:

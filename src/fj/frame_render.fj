@@ -564,12 +564,112 @@ ns frame {
         frame.read_byte5 trb_clip_v, trb_clip_p
     }
 
+    // P11 (c) + (d) (the owner, 2026-10-13: a sprite fully hidden behind a ledge takes no slot; shoot what you see,
+    // and what you cannot see cannot target you) -- a thing's bucket box against a column's NEARER pieces: the
+    // oracle's reference_model.ledge_hidden, ONE test for the record loop (no slot, no seen mark), the seen probe and
+    // (doomfj.aimcode) the aim window. ledge_box clamps the box once per thing, ylo1 = clamp(y0, -1, H) + 1 and
+    // yhi1 = clamp(y0 + hb, 0, H + 1) + 1: two nibbles, and every compare with a piece's row (0..H-1) comes out as
+    // it would unclamped -- a box above or below the view is still hidden only by a piece, never by the view's edge.
+    def ledge_box y0, hb, ylo1, yhi1, viewh @ lo_neg, lo_pos, lo_in, lo_big, lo_done, hi_neg, hi_pos, hi_in, hi_big, hi_done \
+            < lb_t, lb_c {
+        hex.sign 8, y0, lo_neg, lo_pos
+      lo_neg:
+        hex.zero 2, ylo1                        // y0 < 0: -1, + 1
+        ;lo_done
+      lo_pos:
+        hex.set 8, lb_c, viewh
+        hex.scmp 8, y0, lb_c, lo_in, lo_in, lo_big
+      lo_in:
+        hex.mov 2, ylo1, y0
+        hex.inc 2, ylo1
+        ;lo_done
+      lo_big:
+        hex.set 2, ylo1, viewh + 1
+      lo_done:
+        hex.zero 6, lb_c + 2*dw
+        hex.mov 2, lb_c, hb
+        hex.mov 8, lb_t, y0
+        .add8_chain lb_t, lb_c                  // the box's end, y0 + hb
+        hex.sign 8, lb_t, hi_neg, hi_pos
+      hi_neg:
+        hex.set 2, yhi1, 1                      // < 0: 0, + 1
+        ;hi_done
+      hi_pos:
+        hex.set 8, lb_c, viewh + 1
+        hex.scmp 8, lb_t, lb_c, hi_in, hi_in, hi_big
+      hi_in:
+        hex.mov 2, yhi1, lb_t
+        hex.inc 2, yhi1
+        ;hi_done
+      hi_big:
+        hex.set 2, yhi1, viewh + 2
+      hi_done:
+    }
+
+    // P11: is the box [ylo1, yhi1) (ledge_box) FULLY hidden in column `col_x` -> `hidden`. `cv` is the column's sfflag
+    // byte (nibble 0 the upper piece count, nibble 1 the lower, each with the G2 base flag in bit 3, so a count of 1
+    // or 2 is {1, 2, 9, 10}); the last piece of a side is read from the column's sfslot (u1@0 u2@4 l1@8 l2@12 --
+    // [y1][y2][cls][bpid]) only when its count is not 0. `narrow` 1 reads on the narrow arm (the caller's last arm is
+    // in the hot block: the record loop's sfflag read), 0 on the full one (the aim leaf).
+    def ledge_test cv, col_x, ylo1, yhi1, narrow, hidden \
+            @ chk_l, some, u_some, u_one, u_two, u_read, u_raise, l_part, l_some, l_one, l_two, l_read, l_lower, decide, shown \
+            < lt_y, lt_top, lt_bot, lt_b, lt_p, lt_idx, sfslot {
+        hex.if_flags cv, 0x0606, chk_l, some
+      chk_l:
+        hex.if_flags cv + dw, 0x0606, shown, some       // no piece on either side: nothing bounds the box here
+      some:
+        hex.mov 2, lt_top, ylo1
+        hex.mov 2, lt_bot, yhi1
+        hex.zero w/4 - 2, lt_idx + 2*dw
+        hex.mov 2, lt_idx, col_x
+        hex.shl_hex w/4, SLOT_SHIFT, lt_idx             // the column's slot: a power-of-16 stride
+        hex.set w/4, lt_p, sfslot
+        .ptr_index5 lt_b, lt_p, lt_idx
+        hex.if_flags cv, 0x0606, l_part, u_some
+      u_some:
+        hex.mov w/4, lt_p, lt_b
+        hex.if_flags cv, 0x0404, u_one, u_two
+      u_one:
+        hex.ptr_add lt_p, 1                             // u1's y2
+        ;u_read
+      u_two:
+        hex.ptr_add lt_p, 5                             // u2's y2: the LAST upper piece
+      u_read:
+        rep(narrow, k) .read_byte5 lt_y, lt_p
+        rep(1-narrow, k) hex.read_byte lt_y, lt_p
+        hex.add_constant 2, lt_y, 2                     // its end + 1, + 1 (ledge_box's offset)
+        hex.cmp 2, lt_top, lt_y, u_raise, l_part, l_part
+      u_raise:
+        hex.mov 2, lt_top, lt_y
+      l_part:
+        hex.if_flags cv + dw, 0x0606, decide, l_some
+      l_some:
+        hex.mov w/4, lt_p, lt_b
+        hex.if_flags cv + dw, 0x0404, l_one, l_two
+      l_one:
+        hex.ptr_add lt_p, 8                             // l1's y1
+        ;l_read
+      l_two:
+        hex.ptr_add lt_p, 12                            // l2's y1: the LAST lower piece
+      l_read:
+        rep(narrow, k) .read_byte5 lt_y, lt_p
+        rep(1-narrow, k) hex.read_byte lt_y, lt_p
+        hex.inc 2, lt_y                                 // its start, + 1
+        hex.cmp 2, lt_y, lt_bot, l_lower, decide, decide
+      l_lower:
+        hex.mov 2, lt_bot, lt_y
+      decide:
+        hex.cmp 2, lt_top, lt_bot, shown, hidden, hidden    // no row of the box left open
+      shown:
+    }
+
     // M7 P4.2a: `aim` -- 1 when this body's projections record the aim window (the runtime monsters' body of a tier
     // whose player shoots); `ttwice`'s measurement copy never records
     def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic, mir, mirf, miru, ltw, seen, sa, sflag, one, aim \
-            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, bslot_gate, offv_top, offv_out, offv_ok, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_c, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_hit \
+            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, bslot_gate, offv_top, offv_out, offv_ok, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_c, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_open, seen_next, seen_hit \
             < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, sp_ex, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, \
-              gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8, trb_clip_v {
+              gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8, trb_clip_v, trb_clip_p, sfflag, \
+              trb_ylo1, trb_yhi1 {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
         // NOT distance order, so one shared counter let 1-pixel bonus dots spend the frame's slots
         // while monsters were turned away (EXP-8a). A monster now has its own, deliberately loose
@@ -667,6 +767,7 @@ ns frame {
         rep((dsoftm==monbudget)*seen, k) .rec_goto seen_probe
         rep((dsoftm==monbudget)*(1-seen), k) .rec_goto ret
       offv_ok:
+        .ledge_box trb_y0, trb_bucket_h, trb_ylo1, trb_yhi1, viewh   // P11: the box, clamped once per thing
         // 25M-CAP B-GATE, hoisted per thing: slot B only for fragments whose trb_bucket height
         // reaches sprbminh -- a smaller B fragment sits behind slot A and ~never shows, so the
         // per-column bank walk it would pay is invisible work. The slot stays OPEN for a later,
@@ -770,6 +871,10 @@ ns frame {
         hex.if0 1, trb_drawn_v, slot_check          // a nearer wall owns this column -> the thing is hidden
         ;col_next
       slot_check:
+        .rec_clip_read                          // P10 G1: the nearer pieces' counts (the slot's 4th byte) -- read
+                                                // here now, once: P11's ledge test reads them first
+        .ledge_test trb_clip_v, trb_col_x, trb_ylo1, trb_yhi1, 1, col_next   // P11 (c)+(d): FULLY behind its
+                                                // nearer pieces -> no slot, and no seen mark through it
         rep(seen, k) .rec_seen_mark sa, sflag, one, trb_sprflag_p   // M7 P3.2a: an OPEN column -- seen
         frame.read_byte5 trb_sprflag_v, trb_sprflag_p
         hex.if0 2, trb_sprflag_v, slot_a            // no fragment yet -> slot A (offset 0, flag 1)
@@ -829,8 +934,7 @@ ns frame {
         hex.write_byte_and_inc trb_tbl_p, gps_s_rec
         frame.write_byte_and_inc5 trb_tbl_p, trb_blk
         frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw
-        .rec_clip_read                          // P10 G1: the 4th byte, the nearer pieces' counts
-        frame.write_byte5 trb_tbl_p, trb_clip_v
+        frame.write_byte5 trb_tbl_p, trb_clip_v      // P10 G1: the 4th byte (read at slot_check)
         frame.write_byte5 trb_sprflag_p, trb_slot_flag   // V4b: 1 = A only, 2 = A + B, P10 G3: 3 = A + B + C
       col_next:
         hex.ptr_add trb_drawn_p, 1
@@ -865,13 +969,29 @@ ns frame {
       seen_x2c:
         rep(seen, k) hex.mov 8, trb_tx2, trb_cbound
       seen_x2ok:
+        // P11 (d): the probe's bucket box, as the record takes it (hd_base, offv_ok) -- for the ledge test below
+        rep(seen, k) sprbkt.lookup trb_bucket, trb_thpx
+        rep(seen, k) hex.zero 6, trb_bucket_h + 2*dw
+        rep(seen, k) hex.mov 2, trb_bucket_h, trb_bucket + 2*dw
+        rep(seen, k) hex.mov 8, trb_y0, trb_tytop
+        rep(seen, k) frame.add8_chain trb_y0, trb_thpx
+        rep(seen, k) frame.sub8_chain trb_y0, trb_bucket_h
+        rep(seen, k) .ledge_box trb_y0, trb_bucket_h, trb_ylo1, trb_yhi1, viewh
         rep(seen, k) hex.set w/4, trb_drawn_b, drawn
         rep(seen, k) frame.ptr_index4 trb_drawn_p, trb_drawn_b, trb_col_x
       seen_loop:
         rep(seen, k) hex.cmp 2, trb_col_x, trb_tx2, seen_col, seen_col, ret
       seen_col:
         rep(seen, k) hex.read_hex trb_drawn_v, trb_drawn_p
-        rep(seen, k) hex.if0 1, trb_drawn_v, seen_hit
+        rep(seen, k) hex.if0 1, trb_drawn_v, seen_open
+        rep(seen, k) .rec_goto seen_next
+      seen_open:                                // P11 (d): open -- and not FULLY behind its nearer pieces
+        rep(seen, k) hex.set w/4, trb_tbl_b, sfflag
+        rep(seen, k) frame.ptr_index4 trb_clip_p, trb_tbl_b, trb_col_x
+        rep(seen, k) frame.read_byte5 trb_clip_v, trb_clip_p
+        rep(seen, k) .ledge_test trb_clip_v, trb_col_x, trb_ylo1, trb_yhi1, 1, seen_next
+        rep(seen, k) .rec_goto seen_hit
+      seen_next:
         rep(seen, k) hex.ptr_add trb_drawn_p, 1
         rep(seen, k) hex.inc 2, trb_col_x
         rep(seen, k) .rec_goto seen_loop

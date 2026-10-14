@@ -1,0 +1,11 @@
+# P11 K5 (the owner: (b), sharing the third slot's drawing copies, may cost '0.1% ... try not to get more than that'):
+# blocked57's profile of gamespeed's 10 games (docs/ship-evidence/blocked57_profx_games.log; profx's owner attribution,
+# validated by profx.py --selftest). The shared region painter is the leaf erc_leaf .. erc_ret inside seg_pass2's
+# emit_col_lines; BEFORE P11 its painting ran inline at the four call sites, so (b)'s price is only the calls' overhead
+# (the copies into erc_lo / erc_hi, the fcall, the return). Upper bound: ALL the leaf's ops, painting included.
+$ PYTHONPATH="src;scratchpad/12m/profx" python  (analyze.label-range query: owner-attributed ops in [erc_leaf, next label), and erc_leaf's execution count)
+game frames: 1020 (10 games x 102); the frames' ops 18,157,745,243
+the leaf: words [5664416, 5777180) (112764 words, 23823 labels inside)
+calls: erc_leaf executed 2263 times = 2.22 per frame
+ALL the leaf's ops (painting included): 14,444,100 = 14,160 per frame = 0.0795% of the frames' ops
+K5: (b)'s price <= 0.0795% < 0.1% -- PASS (and msframe: blocked57 82.5 vs onepass56 84.2 ms/frame, NOT SEPARATED)

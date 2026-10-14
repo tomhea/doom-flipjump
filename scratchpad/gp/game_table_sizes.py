@@ -95,6 +95,11 @@ P10_MENU_FRAMES = (("menu_frame_l", "the main menu while a game is in progress (
 # wall_renderer.MENU_STATE_DECLS' P10 cells, and hoisted_scratch_decls' P10 cells by package (the declarations -- their
 # widths -- are read from those lists; a name missing there fails loudly)
 P10_MENU_CELLS = ("g_live", "ev_any")
+# P11: the renderer packages' new hoisted scratch (wall_renderer.hoisted_scratch_decls: 372 -> 384 cells against P10)
+P11_HOIST = (("(b) the shared third-slot painter's window", ("erc_lo", "erc_hi")),
+             ("(c, d) a thing's ledge box (frame.ledge_box)", ("trb_ylo1", "trb_yhi1", "lb_t", "lb_c")),
+             ("(c, d) the per-column ledge test (frame.ledge_test)",
+              ("lt_y", "lt_top", "lt_bot", "lt_b", "lt_p", "lt_idx")))
 P10_HOIST = (("G2: the column bases", ("p2_basep", "p2_bcpid", "p2_bfpid", "p2_cbcpid", "p2_cbfpid", "p2_dbcpid",
                                        "p2_dbfpid", "p2_ecpid", "tsf_base_p")),
              ("G8: sky behind a stacked piece", ("p2_u1sk", "p2_u2sk", "p2_skyca", "p2_skycd")),
@@ -258,6 +263,8 @@ def cell_groups():
         ("P10", "wall_renderer (the menu: g_live, ev_any)", [menu_state[c] for c in P10_MENU_CELLS]),
         *[("P10", "wall_renderer (hoisted scratch, %s)" % pkg, [hoisted[c] for c in names])
           for pkg, names in P10_HOIST],
+        *[("P11", "wall_renderer (hoisted scratch, %s)" % pkg, [hoisted[c] for c in names])
+          for pkg, names in P11_HOIST],
     ]
 
 

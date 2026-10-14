@@ -1,0 +1,15 @@
+$ python scratchpad/12m/msframe.py --a build/doom_e1m1_blocked57.fjm --save-baseline shipped --note "M7 P11 blocked57: the EXIT sign, the shared third-slot painter, the ledge rule for slots, sight and aim (class F)"
+machine : power plan 'Silent'; busy processes: none
+msframe : A=doom_e1m1_blocked57.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  A         87.0 ms   202.8M fj/s  yard 3.57->3.56G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 1  A         82.0 ms   215.2M fj/s  yard 3.45->3.54G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 2  A         82.1 ms   215.0M fj/s  yard 3.55->3.56G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 3  A         81.7 ms   216.1M fj/s  yard 3.56->3.57G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 4  A         82.3 ms   214.6M fj/s  yard 3.56->3.57G   pin: cpu2 proc=ok thread=ok prio=high
+
+  A        median    82.1 ms/frame  [81.7 .. 87.0]    215.0M fj/s   17,650,328 ops/frame   cell=4 flat
+  engine A: df401f5d00a3ac5f full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.56G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+  baseline: saved as 'shipped' -> scratchpad\12m\msframe_baselines\shipped.json
+rc=0

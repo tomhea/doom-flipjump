@@ -90,16 +90,25 @@ def test_a_drop_is_scenery_not_an_actor(court, monkeypatch):
     assert _diff(court(mobiles=drop), court()) > 0, "the case does not separate a scenery drop from an actor one"
 
 
-def test_the_corpse_no_longer_hides_the_monsters_behind_it():
+def test_the_corpse_no_longer_hides_the_monsters_behind_it(monkeypatch):
     """v5 R0-aftermath frame 57 (the player on a corpse; injected from tests/fixtures/p67_scenes.json): the old rule draws neither live monster in view, the rule
-    draws both -- scratchpad/gp/p67e_visibility_probe.py's attribution, which is also its own R9 control"""
+    draws both -- scratchpad/gp/p67e_visibility_probe.py's attribution, which is also its own R9 control.
+    P11: the scene's two monsters are FULLY behind a ledge (P10's clip showed nothing of the 8 columns the rule gave them),
+    so under P11's ledge rule (reference_model.ledge_hidden) they are not seen and take no slot -- stated first; the
+    actors rule's own subject, the corpse's B-gate, is then tested with the ledge rule off."""
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
     import p67_scene_dump as SC
     import p67e_visibility_probe as V
     # the scene, INJECTED (M7 P6+P7): frame 57 as tests/fixtures/p67_scenes.json froze it -- the owner's tempo / turn /
     # fire changes moved v5's replay, not the scene
-    w = SC.load_scene("aftermath57")
-    mph = V.MonsterPhase.__new__(V.MonsterPhase)
-    mph.world, mph.gd = w, V.S.gd
-    row = V.frame_stats(V.P.Oracle(), mph, V.RMOD.DEG_SOFT_MON)
+
+    def stats():
+        w = SC.load_scene("aftermath57")
+        mph = V.MonsterPhase.__new__(V.MonsterPhase)
+        mph.world, mph.gd = w, V.S.gd
+        return V.frame_stats(V.P.Oracle(), mph, V.RMOD.DEG_SOFT_MON)
+    p11 = stats()
+    assert p11["seen"] == 0 and p11["cols_e"] == 0, p11
+    monkeypatch.setattr(V.RMOD, "ledge_hidden", lambda *a: False)
+    row = stats()
     assert row["miss_d"] >= 2 and row["miss_e"] == 0, row

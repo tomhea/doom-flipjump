@@ -245,7 +245,11 @@ class WadFile:
         return out
 
     def things(self, mapname: str) -> list[Thing]:
-        return [Thing(*r) for r in _records(self._map_lump(mapname, "THINGS").data, "<5h")]
+        """The THINGS lump's things, then (P11 (a)) the map's VIRTUAL ones -- doomfj.exitsign: appended, so no wad
+        index moves, and only when the map's geometry is the one they were placed against"""
+        from doomfj.exitsign import virtual_things           # lazy: exitsign imports Picture / Thing from here
+        return ([Thing(*r) for r in _records(self._map_lump(mapname, "THINGS").data, "<5h")]
+                + virtual_things(self, mapname))
 
     # ── baked BSP lumps (SEGS/SSECTORS/NODES) — the level's precompiled node tree (H3 bake) ──
     def segs(self, mapname: str) -> list[WadSeg]:

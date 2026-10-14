@@ -57,7 +57,13 @@ print("stock renders: %d viewpoints x 3 keyword sets, %.1f s" % (len(ref), time.
 import census_lib as CL                                                     # noqa: E402
 
 assert KW == CL.RENDER_KW, "the control must check the census's own keyword set"
-c = CL.Census()
+# M7 P11: the census AT THE GAME TIER'S MODES -- its picture adds the player mode's compositor keys (Census.d3_kw:
+# D3 a / b, ON at the P8a modes as in GAME_RENDER_KW); the default Census() ("full" / "full") turns them OFF, and since
+# P8a the control compared that picture with the stock game-tier one (h42 and the courtyard parted)
+from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE                  # noqa: E402
+c = CL.Census(player=PLAYER_MODE, monsters=MONSTER_MODE)
+assert all(KW.get(k) == v for k, v in c.d3_kw.items()), (
+    "the census's compositor keys are not the game tier's", c.d3_kw)
 ok = True
 arr_on = {}
 for n, x, y, a in VPS:

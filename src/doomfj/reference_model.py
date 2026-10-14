@@ -266,6 +266,7 @@ SKY_TURN = 2
 # what the feature is for. The fj bakes a run-list per (sprite, texture column, height BUCKET), so
 # both of those bounds matter to the bank size, not just to the look.
 THING_SPRITE = {
+    9800: "EXIT",  # P11 (a): the EXIT sign -- its picture is BUILT (doomfj.exitsign; sprite_art returns before a lump)
     5: "BKEY",   # M7 P2a.1: the blue card, frame A (DOOM blinks it A/B: a stated deviation)
     2014: "BON1", 2015: "BON2", 2035: "BAR1", 47: "SMIT", 3001: "TROO", 2008: "SHEL",
     54: "TRE2", 9: "SPOS", 43: "TRE1", 3004: "POSS", 3002: "SARG", 2010: "ROCK",
@@ -327,6 +328,11 @@ MIN_SPRITE_H_MONSTER = 1          # ... but a MONSTER is never dropped for being
                                   # things that shoot back never do.
 MONSTER_TYPES = frozenset({7, 9, 16, 58, 64, 65, 66, 67, 68, 69, 71, 84, 88,
                            3001, 3002, 3003, 3004, 3005, 3006})
+# P11 (a): the baked types DRAWN in the monster class (the monsters' budget, MIN_SPRITE_H_MONSTER and, under the
+# actors rule, no B-gate) -- the monsters and the EXIT sign (doomfj.exitsign), which a corpse or a monster in front
+# of the exit alcove would otherwise cut out of slot B. Drawing only: the seen and aim rules still ask MONSTER_TYPES
+# (and the world, gamedata). ONE set for render_wall_frame's `act` and the emitter's two row builders.
+DRAW_ACTOR_TYPES = MONSTER_TYPES | {9800}             # gamedata.EXIT_SIGN_TYPE (asserted in exitsign)
 
 # ── M14.5: WHAT CAN VANISH ────────────────────────────────────────────────────────────────────
 # A thing baked into its leaf is CODE, so the only way it ever stops being drawn is a runtime flag.
@@ -548,6 +554,21 @@ def sprite_bucket_height(b: int, view_h: int) -> int:
         if sprite_bucket(h, view_h) == b:
             hi = h
     return hi
+
+
+def ledge_hidden(ups_x, los_x, yb: int, hb: int) -> bool:
+    """P11 (the owner, 2026-10-12/13: shoot what you see, and what you cannot see cannot target you) -- a sprite's
+    bucket box, rows [yb, yb + hb), is FULLY HIDDEN in a column when the nearer boundary pieces stored there by the
+    time its leaf is reached leave none of those rows open: above the last upper piece's end, from the last lower
+    piece's start down (DOOM's running ceilingclip / floorclip there -- P10 G1's clip window), or both when the two
+    meet. A side with no piece bounds nothing: the view's own edges are not a ledge, so a box above or below the
+    view keeps the rule it had. ONE test, three users in render_wall_frame (`stack_steps` only): (c) a hidden
+    fragment takes no slot, (d) the seen rule passes only through a column where the box is not hidden, and the
+    aim window skips a column where it is. MIRRORED in src/fj: frame.ledge_test (the record loop and the seen
+    probe) and doomfj.aimcode's leaf."""
+    top = ups_x[-1][1] + 1 if ups_x else yb
+    bot = los_x[-1][0] if los_x else yb + hb
+    return max(yb, top) >= min(yb + hb, bot)
 
 
 # M7 P1.6 -- the sprite bank's three TIERS (docs/gp-sprite-bank.md), in the bank's layout order: a
@@ -1735,6 +1756,10 @@ class ReferenceModel:
         cut-down test fixture — everything, which is why `sprite_wad` is a separate argument)."""
         if kind in cache:
             return cache[kind]
+        from doomfj.exitsign import EXIT_SIGN_TYPE, exit_sign_picture
+        if kind == EXIT_SIGN_TYPE:                     # P11 (a): the EXIT sign's picture is BUILT, not read
+            cache[kind] = self.art_of_picture(exit_sign_picture())
+            return cache[kind]
         pre = THING_SPRITE.get(kind)
         pic = None
         if pre is not None:
@@ -1895,14 +1920,27 @@ class ReferenceModel:
         x2 = ((cxf + _signed(fixed_mul((txl + (wpx << 16)) & ANGLE_MASK, xscale, 8, 4), 32)) >> 16) - 1
         if x2 < 0 or x1 >= cfg.VIEW_W or x2 < x1:
             return None
-        gzt = ((tz_map + top) << 16) - viewz
-        ytop = (cfg.CENTERY << 16) - _signed(fixed_mul(gzt & ANGLE_MASK, xscale, 8, 4), 32)
         h = self.sprite_height_px(wph, xscale)
         if h < (MIN_SPRITE_H if min_h is None else min_h):
             return None                               # too small to see
             # ⚠ fj does NOT reach this test for the small case: `sp_tzmin` rejects on DEPTH right
             # after tz, before the lateral multiplies and the reciprocal (EXP-7's shape). The two
             # reject the identical set -- `sprite_tz_min_size` scans for the exact boundary.
+        ytop_r, h = self.thing_rows(viewz, tz_map, art, xscale)
+        # the texture-column DDA step, through the SAME block-FP reciprocal `proj.scale_recip_div`
+        # already implements (not `_recip_div32`, which is a different normalise/shift recipe --
+        # reusing the macro that exists beats adding a second one for a sub-texel difference).
+        istep = self._scale_recip_div(1 << 16, xscale) // self.downscale
+        return x1, x2, ytop_r, h, istep, tz
+
+    def thing_rows(self, viewz, tz_map, art, xscale):
+        """project_thing's ROWS -> (ytop_r, h): the sprite's top screen row and its on-screen height at reciprocal
+        `xscale`, SPR-NEAR's clamp applied. P11: project_thing calls this, and so does the aim window's ledge test,
+        which needs the rows of a thing the column range may still reject (fj: proj.thing_rows, both places)."""
+        cfg = self.cfg
+        gzt = ((tz_map + art[6]) << 16) - viewz
+        ytop = (cfg.CENTERY << 16) - _signed(fixed_mul(gzt & ANGLE_MASK, xscale, 8, 4), 32)
+        h = self.sprite_height_px(art[4], xscale)
         ytop_r = ytop >> 16
         if h > cfg.VIEW_H:
             # SPR-NEAR (owner, 2026-08-05): a TOO-NEAR sprite CLAMPS to the tallest bucket
@@ -1911,11 +1949,7 @@ class ReferenceModel:
             # Integer-row arithmetic, exactly as fj does it after its own >>16.
             ytop_r += h - cfg.VIEW_H
             h = cfg.VIEW_H
-        # the texture-column DDA step, through the SAME block-FP reciprocal `proj.scale_recip_div`
-        # already implements (not `_recip_div32`, which is a different normalise/shift recipe --
-        # reusing the macro that exists beats adding a second one for a sub-texel difference).
-        istep = self._scale_recip_div(1 << 16, xscale) // self.downscale
-        return x1, x2, ytop_r, h, istep, tz
+        return ytop_r, h
 
     @staticmethod
     def _w1r_texel(texels, pal) -> int:
@@ -2143,7 +2177,8 @@ class ReferenceModel:
         the effects and the drops (`mobile_rank`), 1 for every other runtime thing (it needs `rt_depth_order`); D3 b --
         a BARREL (BARREL_TYPE, baked or runtime, every state) takes no soft raise (its BASE size bound whatever the
         scenery count) and does not count against the scenery budgets; it stays scenery (THING_BUDGET, the B-gate).
-        Neither moves `seen_out` (the seen test reads only the walls' `drawn`, before the budgets).
+        Neither moves `seen_out` (the seen test reads only the walls' `drawn` and -- P11 (d) -- the nearer pieces,
+        `ledge_hidden`, before the budgets).
 
         `mobiles` (M7 P5, docs/gp-p5-interface.md): [(x, y, lump)] -- the fireballs and the blood
         (`monsters.MonsterPhase.mobiles`, in ROW order: runtime things nt, nt+1, ...) at whole map
@@ -2493,7 +2528,7 @@ class ReferenceModel:
                     # scenery class at MIN_SPRITE_H, B-gated (docs/gp-p67-interface.md section 5; the fj's drop rows:
                     # monstercode.drop_view_rows, sp_mon 0). b0 v6 on blocked50 (2026-10-06): an actor drop took slot B
                     # behind its corpse here while the binary B-gated it -- 1-53 px on 44 of R0-northwest's 100 frames
-                    act = mon or (mob and exempt_actors and not t.drop)
+                    act = t.type in DRAW_ACTOR_TYPES or (mob and exempt_actors and not t.drop)   # P11 (a): + the sign
                     # M7 P3.2 (docs/gp-monsters.md 8.2, D3 e): SEEN -- the sprite projects in front at the
                     # BASE monster size cull (MIN_SPRITE_H_MONSTER, not the soft budgets' raise) and one of
                     # its columns is still OPEN when its leaf is reached, tested BEFORE the count budgets:
@@ -2506,9 +2541,13 @@ class ReferenceModel:
                             _ssec = self._seg_sector(lds, sds, secs, scene.cmap.segs[_sss.firstseg])
                             _spr = self.project_thing(viewx, viewy, viewangle, viewz, t.x, t.y,
                                                       _ssec.floor_h, _sart, MIN_SPRITE_H_MONSTER)
-                            if _spr is not None and any(not drawn[x] for x in
-                                                        range(max(0, _spr[0]), min(W, _spr[1] + 1))):
-                                seen_out.add(t_di)
+                            # P11 (d): and its bucket box is not FULLY behind that column's nearer pieces
+                            if _spr is not None:
+                                _shb = sprite_bucket_height(sprite_bucket(_spr[3], H), H)
+                                _syb = _spr[2] + _spr[3] - _shb
+                                if any(not drawn[x] and not (stack_steps and ledge_hidden(ups[x], los[x], _syb, _shb))
+                                       for x in range(max(0, _spr[0]), min(W, _spr[1] + 1))):
+                                    seen_out.add(t_di)
                     # 25M-CAP GRADUATED ACCEPTANCE: once the frame has accepted its first
                     # (nearest -- the walk is front-to-back) SOFT things of a category, the
                     # min-size bar rises, so far specks stop paying the record loop exactly on
@@ -2555,9 +2594,19 @@ class ReferenceModel:
                             _ax1 = ((cfg.CENTERX << 16) + _aP - _aQ) >> 16
                             _ax2 = (((cfg.CENTERX << 16) + _aP + _aQ) >> 16) - 1
                             _atzi = _atz >> 16
+                            if stack_steps:              # P11 (d): the thing's bucket box, for the ledge test
+                                _ass = scene.cmap.subsectors[ss_first[seg_i]]
+                                _asec = self._seg_sector(lds, sds, secs, scene.cmap.segs[_ass.firstseg])
+                                _aty, _ath = self.thing_rows(
+                                    viewz, _asec.floor_h + (((MISSILE_Z if t.z is None else t.z) if mob else 0)),
+                                    _aart, _axs)
+                                _ahb = sprite_bucket_height(sprite_bucket(_ath, H), H)
+                                _ayb = _aty + _ath - _ahb
                             for _ac in range(max(_ax1, aim_lo), min(_ax2, aim_hi) + 1):
                                 if drawn[_ac]:
                                     continue                 # a solid wall nearer: the column is closed
+                                if stack_steps and ledge_hidden(ups[_ac], los[_ac], _ayb, _ahb):
+                                    continue                 # P11 (d): FULLY behind its nearer pieces here
                                 _ak = _ac - aim_lo
                                 if aim_out[_ak] == 0 or _atzi < aim_tz[_ak]:   # strictly nearer overwrites
                                     aim_out[_ak], aim_tz[_ak] = _asid, _atzi
@@ -2621,6 +2670,8 @@ class ReferenceModel:
                         # behind it. One slot chopped the farther sprite's whole column wherever
                         # two overlapped in x (the owner's (664,291) frame: a tall zombie lost
                         # its head to a potion's columns).
+                        if stack_steps and ledge_hidden(ups[x], los[x], ytop_b, hb):
+                            continue                     # P11 (c): FULLY behind its nearer pieces -- no slot
                         if sfrag[x] is None:
                             sfrag[x] = (ytop_b + st[0], st[1], lr)
                             if stack_steps:                # P10 G1: the nearer boundaries' window

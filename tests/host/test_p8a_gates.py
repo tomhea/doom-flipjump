@@ -32,8 +32,12 @@ if str(GP) not in sys.path:
 
 # the game-tier gates whose WORLD renders must carry the sink: file -> the render calls expected (a scan that finds
 # fewer calls than this is vacuous). Not scanned: b0.py (the static B0 of blocked27: no monsters, no death),
-# probe.py's selftest renders (the pristine level start), census_lib (the drawn-population census: no run of a set dies)
+# probe.py's selftest renders (the pristine level start), census_lib (the drawn-population census: no run of a set dies).
+# P11: and the MODEL's own picture -- sight.SeenHook, whose seen marks GameSim (the trail's reference) and the set
+# planner (scenarios_v2.apply_sight_rule) step by: since P11 (d) the seen test reads the view's rows, and a sinking eye
+# moves them
 GATE_RENDERS = {
+    "src/doomfj/sight.py": 1,
     "scratchpad/gp/p2a_gate.py": 2,
     "scratchpad/gp/hurt_gate.py": 1,
     "scratchpad/gp/b0_scenarios.py": 4,

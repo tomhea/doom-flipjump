@@ -1324,9 +1324,44 @@ ns proj {
       skip:
     }
 
+    // proj.thing_rows (P11) -- project_thing's ROWS: ytopo = the sprite's top screen row and hpxo = its on-screen
+    //   height from the reciprocal pth_xscale, SPR-NEAR's clamp applied; `reject` when the height is not positive
+    //   (past project_thing's far reject it always is: sp_tzmax is the exact depth of the min size). ONE
+    //   definition, two users: project_thing, and doomfj.aimcode's leaf -- the aim window's ledge test needs the
+    //   rows of a thing whose column range is not computed yet (the oracle's ReferenceModel.thing_rows). It writes
+    //   pth_gzt / pth_tmp / pth_c_centeryfix / pth_c_viewh, which project_thing sets again after its aim hook.
+    def thing_rows ytopo, hpxo, centery, viewh, reject @ h_ok, clamp_tall, h_fits \
+            < sp_z, viewz, sp_hh, pth_xscale, pth_gzt, pth_tmp, pth_c_centeryfix, pth_c_viewh {
+        hex.mov 8, pth_gzt, sp_z                            // pth_gzt = (thing floor + sprite top) - viewz
+        frame.sub8_chain pth_gzt, viewz
+        hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, pth_gzt        // M14-perf ROW RULE: pth_gzt is integer<<16
+        hex.set 8, pth_c_centeryfix, centery*0x10000
+        hex.mov 8, ytopo, pth_c_centeryfix
+        frame.sub8_chain ytopo, pth_tmp
+        hex.shr_hex 8, 4, ytopo
+        hex.sign_extend 8, 4, ytopo
+        hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, sp_hh      // M14-perf ROW RULE: sp_hh is integer<<16
+        hex.shr_hex 8, 4, pth_tmp
+        hex.sign_extend 8, 4, pth_tmp
+        hex.mov 8, hpxo, pth_tmp
+        hex.sign 8, hpxo, reject, h_ok
+      h_ok:
+        hex.if0 8, hpxo, reject
+        hex.set 8, pth_c_viewh, viewh
+        hex.scmp 8, hpxo, pth_c_viewh, h_fits, h_fits, clamp_tall   // taller than the screen -> CLAMP
+      clamp_tall:
+        // SPR-NEAR: a too-near sprite clamps to the tallest bucket instead of VANISHING --
+        // feet planted: the top moves DOWN by the overflow so the bottom row stays true
+        hex.mov 8, pth_tmp, hpxo
+        frame.sub8_chain pth_tmp, pth_c_viewh
+        frame.add8_chain ytopo, pth_tmp
+        hex.mov 8, hpxo, pth_c_viewh
+      h_fits:
+    }
+
     def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg, spn, neartz, aim \
-            @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, h_ok, h_fits, clamp_tall, set_far, far_done, trig_calc, trig_have, linf_x_ok, linf_y_ok, reject, done, end, deg_far_hard \
-            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_dbound, pth_dtest, pth_c_centerxfix, pth_c_centeryfix, pth_c_viewh, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_gzt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
+            @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, set_far, far_done, trig_calc, trig_have, linf_x_ok, linf_y_ok, reject, done, end, deg_far_hard \
+            < viewx, viewy, viewangle, sp_x, sp_y, sp_left, sp_w, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_dbound, pth_dtest, pth_c_centerxfix, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
         hex.set 1, vis, 0
         hex.mov 8, pth_tr_x, sp_x
         frame.sub8_chain pth_tr_x, viewx
@@ -1487,31 +1522,7 @@ ns proj {
       x1_ok:
         hex.scmp 8, x2o, x1o, reject, cols_ok, cols_ok  // x2 < x1 -> sub-column
       cols_ok:
-        hex.mov 8, pth_gzt, sp_z                            // pth_gzt = (thing floor + sprite top) - viewz
-        frame.sub8_chain pth_gzt, viewz
-        hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, pth_gzt        // M14-perf ROW RULE: pth_gzt is integer<<16
-        hex.set 8, pth_c_centeryfix, centery*0x10000
-        hex.mov 8, ytopo, pth_c_centeryfix
-        frame.sub8_chain ytopo, pth_tmp
-        hex.shr_hex 8, 4, ytopo
-        hex.sign_extend 8, 4, ytopo
-        hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, sp_hh      // M14-perf ROW RULE: sp_hh is integer<<16
-        hex.shr_hex 8, 4, pth_tmp
-        hex.sign_extend 8, 4, pth_tmp
-        hex.mov 8, hpxo, pth_tmp
-        hex.sign 8, hpxo, reject, h_ok
-      h_ok:
-        hex.if0 8, hpxo, reject
-        hex.set 8, pth_c_viewh, viewh
-        hex.scmp 8, hpxo, pth_c_viewh, h_fits, h_fits, clamp_tall   // taller than the screen -> CLAMP
-      clamp_tall:
-        // SPR-NEAR: a too-near sprite clamps to the tallest bucket instead of VANISHING --
-        // feet planted: the top moves DOWN by the overflow so the bottom row stays true
-        hex.mov 8, pth_tmp, hpxo
-        frame.sub8_chain pth_tmp, pth_c_viewh
-        frame.add8_chain ytopo, pth_tmp
-        hex.mov 8, hpxo, pth_c_viewh
-      h_fits:
+        .thing_rows ytopo, hpxo, centery, viewh, reject      // P11: shared with the aim window's ledge test
         hex.set 8, pth_one16, 0x10000
         .scale_recip_div istepo, pth_one16, pth_xscale, 1       // (1<<32)/pth_xscale = texels per screen column
         // CR-2026-08: /downscale = shift by log2(ds) (#ds-1), NOT ds/2 -- the two agree only

@@ -2120,7 +2120,7 @@ assembling and the installed 1.5.1 at 0a24613 running; 2,769 s; `docs/ship-evide
 |---|---|---|---|
 | binding (mean+p80)/2, gamespeed | 18,975,792 | 18,928,872 | the same tours: -0.25% (mean 18,226,477 -> 18,156,521) |
 | size | 42.06% (56,449,864) | 39.89% (53,540,882) | -2,908,982 words: (b)'s shared painter |
-| CAP-22 on the combat set | v9 17,343,316 | v10 17,635,961 | different sets; v10 PLANNED (keys `5bb15f59e01c36b8`), frozen only with the owner's approval |
+| CAP-22 on the combat set | v9 17,343,316 | v10 17,635,961 | different sets; v10 (keys `5bb15f59e01c36b8`) FROZEN on this build's B0 with the owner's approval, 2026-10-14: "ok, go for it" (`p11_v10_freeze.log`, FREEZE PASS) |
 | msframe, one A/B run | 84.2 ms | 82.5 ms | NOT SEPARATED, x1.024 (B faster on all 5 pairs, under the 3% resolution) |
 | per-frame maximum on the set | 29,097,984 (v9) | 29,622,272 (v10, R0-courtyard) | |
 | the same frames (`p11_ops_matrix.log`) | A 11,777,263 / B 18,107,499 / C 17,969,076 | 11,731,953 / 18,024,305 / 17,975,377 | -0.38% / -0.46% / +0.04% |
@@ -2136,7 +2136,7 @@ assembling and the installed 1.5.1 at 0a24613 running; 2,769 s; `docs/ship-evide
    gamespeed's trail PASS, `--validate` and `--selftest` PASS; pinreport 20 of 20 hot words pinned, 0 lost; the host
    suite green; tests/fj in CI on the PR.
 2. **K2 size** -- PASS: 39.89% of 2^27, 4,172,741 words under the 43% target.
-3. **K3 CAP-22** -- PASS: B0 on v10 17,635,961 (mean 15,324,432, p80 run R0-west-hall 19,947,490), 4,364,039 under 22M.
+3. **K3 CAP-22** -- PASS: B0 on v10 17,635,961 (mean 15,324,432, p80 run R0-west-hall 19,947,490), 4,364,039 under 22M; v10 FROZEN on this build's B0 with the owner's approval, 2026-10-14: "ok, go for it" (`p11_v10_freeze.log`, FREEZE PASS).
 4. **K4 msframe** -- PASS: 82.5 ms/frame against P10's 84.2 in the same run, NOT SEPARATED; far under ~90 ms.
 5. **K5 (b)** -- PASS: the leaf's whole work is 0.0795% of the frames' ops; (b)'s price -- the calls' overhead over the
    inline copies it replaced -- is a part of that.

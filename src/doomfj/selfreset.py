@@ -63,7 +63,8 @@ BYTE_ARRAY_NAMES = ("sshead", "pclm", "sfflag")
 # so its clears made no pin candidate; the one-pass reset is in the one assembly a fresh counting pass counts, so
 # its `hex.zero 160, drawn` / `sprflag` would make every cell one. tests/host/test_one_pass_reset.py derives the
 # pointer-loaded registered labels from the sources and holds them all to this list.
-POINTER_READ_CELLS = ("thpos_rt", "thss_rt", "sshead", "thnext", "thseen", "drawn", "sprflag")
+# P13: `td_keys`, sim.thing_pass_depth's key cache (read and written through td_kp only)
+POINTER_READ_CELLS = ("thpos_rt", "thss_rt", "sshead", "thnext", "thseen", "drawn", "sprflag", "td_keys")
 # declared cells per reachable cell: sshead is over-allocated 2x, the per-column arrays are 1:1
 _DECLARED_RATIO = {"sshead": 2, "pclm": 1, "sfflag": 1}
 

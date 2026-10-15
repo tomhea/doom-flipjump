@@ -789,14 +789,16 @@ ns sim {
     //       frame.thing_record_body reads, is ZEROED after every runtime thing's record -- so it is 0 at every baked
     //       call site (a baked barrel XORS it: the xor_by involution needs a zero register) and at every other thing.
     def thing_pass_depth throw, n_th, thpos, anim, sel, selret, lthi, rk0, ex \
-            @ multi, single, round, scan, cand_eq, cand, take, next, round_end, done, empty \
-            < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf, viewx, viewy, mt_dx, mt_dy, mt_d, mt_ret, \
+            @ multi, single, round, scan, key_read, keyed, cand_eq, cand, take, next, round_end, done, empty \
+            < cur_ssp, thnext, tstop, thing_ret, thing_leaf, viewx, viewy, mt_dx, mt_dy, mt_d, mt_ret, \
               mt_dist_leaf, td_head, td_e, td_t, td_p, td_q, td_best, td_bk, td_lk, td_lt, td_have, td_first, \
-              td_poff, td_pbase, td_pptr, td_rk, sp_ex, \
+              td_poff, td_pbase, td_pptr, td_rk, sp_ex, td_kp, td_keys, \
               sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
               sp_mon, sp_base, sp_base2, sp_dw, sp_lt {
-        hex.set w/4, td_q, sshead
-        hex.ptr_index td_p, td_q, cur_ss
+        // P13: the leaf's list head address is the LEAF's compile-time constant (`cur_ssp` = sshead + s, set by the
+        // subsector's code beside cur_ss), not a ptr_index on cur_ss -- 313 of 324 leaf visits a frame (route B)
+        // find an empty list here, and each paid the index
+        hex.mov w/4, td_p, cur_ssp
         hex.sparse_zero HOT_PAD, w/4, td_head
         hex.read_byte td_head, td_p
         hex.if0 w/4, td_head, empty
@@ -825,11 +827,24 @@ ns sim {
         hex.if0 w/4, td_e, round_end
         hex.mov w/4, td_t, td_e
         hex.dec w/4, td_t
+        // P13: the KEY CACHE. The leaf's list, the positions and the view are fixed for the whole pass, so a thing's
+        // (rank, key) is the same in every round: the first round computes and stores each (td_keys, row t at
+        // 16 nibbles a row, the thpos stride), the later rounds read it back -- where every round recomputed it
+        hex.mov w/4, td_poff, td_t
+        hex.shl_hex w/4, 1, td_poff
+        hex.set w/4, td_pbase, td_keys
+        hex.ptr_index td_kp, td_pbase, td_poff
+        hex.if0 1, td_first, key_read
         .thing_int_read thpos, td_t, td_poff, td_pbase, td_pptr    // P12: mt_dx / mt_dy = the INTEGER parts only
         hex.sub 4, mt_dx, viewx + 4*dw          // the integer parts: thing - player
         hex.sub 4, mt_dy, viewy + 4*dw
         stl.fcall mt_dist_leaf, mt_ret         // mt_d = the key
         rep(rk0>0, k) .rank_key                // M7 P8a (D3 a): rank 1 below rk0 -- bit 15 of the key
+        rep(4, i) hex.write_hex_and_inc td_kp, mt_d + i*dw
+        ;keyed
+      key_read:
+        rep(4, i) hex.read_hex_and_inc mt_d + i*dw, td_kp
+      keyed:
         hex.if1 1, td_first, cand
         hex.cmp 4, mt_d, td_lk, next, cand_eq, cand
       cand_eq:

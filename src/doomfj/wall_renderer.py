@@ -1296,6 +1296,9 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     # (the value is `things.thing_pos_value`, which NEW GAME's restart block bakes too -- R6)
     # M7 P5: + the MOBILES' rows (monstercode.p31_parts' `nmob`: the fireball and blood pools' runtime things nt ..),
     # zero -- a free slot's row, in no leaf list (projcode writes a live slot's whole-unit position here)
+    from doomfj.monstercode import TD_KEY_ROWS
+    assert len(things) + mobiles <= TD_KEY_ROWS, ("P13: more runtime rows than sim.thing_pass_depth's key cache holds",
+                                                  len(things) + mobiles, TD_KEY_ROWS)
     thpos = (["thpos_rt:"] + [f"    hex.vec 16, {thing_pos_value(t)}" for t in things]
              + ["    hex.vec 16, 0"] * mobiles)
     text = "\n".join([
@@ -1315,7 +1318,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     from doomfj.things import LIST_MAX_THINGS
     assert nt + mobiles <= LIST_MAX_THINGS, (
         f"{mapname} has {nt} runtime things and {mobiles} mobiles; the byte lists hold {LIST_MAX_THINGS}")
-    decls = ["cur_ss: hex.vec w/4", "tp_ret: ;0",
+    decls = ["cur_ss: hex.vec w/4", "cur_ssp: hex.vec w/4", "tp_ret: ;0",
              # the leaf's baked floor height and sprlt row base (see subsector_action)
              "ss_flr: hex.vec 4", "ss_ltb: hex.vec 4",
              # ⚠ a bare hex.vec is ZERO-filled, and one run is one frame -- fj self-modifies, so
@@ -2830,6 +2833,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
             _m_fl = _leaf_mover(s)
             out += [f"    hex.set w/4, cur_ss, {s}",
+                    f"    hex.set w/4, cur_ssp, sshead + {s}*dw",     # P13: the list head's address, baked
                     *([f"    hex.set 4, ss_flr, {psec.floor_h & 0xFFFF}"] if _m_fl is None else
                       _mover_dispatch(f"sfl{cid}", _m_fl, lambda sv: [
                           f"    hex.set 4, ss_flr, "

@@ -643,11 +643,12 @@ def test_descend_code_references_only_labels_the_main_walk_emits(level):
     assert _unresolved(dsc, WALK_EXTERNALS, main_defs) == [], "the descent references labels nobody emits"
     borrowed = {r for r in _label_refs(dsc) if r in main_defs}
     # P13: an AXIS node tests its side inline (mapcompiler.axis_side_lines, the shared `_axd` scratch), so the
-    # descent borrows a partition block for every OTHER node, and `_axd` for the axis ones
+    # descent borrows a partition block for every OTHER node, and the shared axis leaves and cells for the axis ones
     general = [i for i, n in enumerate(cmap.nodes) if not is_axis_node(n)]
     assert 0 < len(general) < len(cmap.nodes)
     for needed in ("e1m1_bspcode_pos_leaf", "e1m1_bspcode_pos_ret", "e1m1_bspcode_xbret",
-                   "e1m1_bspcode_side", "e1m1_bspcode_axd", f"e1m1_bspcode_node{general[0]}_partition",
+                   "e1m1_bspcode_side", "e1m1_bspcode_axs", "e1m1_bspcode_axc", "e1m1_bspcode_axr",
+                   "e1m1_bspcode_axx_leaf", "e1m1_bspcode_axy_leaf", f"e1m1_bspcode_node{general[0]}_partition",
                    f"e1m1_bspcode_node{general[-1]}_partition"):
         assert needed in borrowed, f"{needed} is no longer shared with the main walk"
     assert {i for i in range(len(cmap.nodes)) if f"e1m1_bspcode_node{i}_partition" in borrowed} == set(general), (

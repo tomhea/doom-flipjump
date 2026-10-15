@@ -263,11 +263,10 @@ def test_bsp_code_e1m1_order_byte_exact_vs_oracle(tmp_path):
     rn = cmap.nodes[root]
     assert (rn.dx == 0) != (rn.dy == 0), "the control needs an axis root"
     src = p.read_text(encoding="utf-8")
-    pre = "hex.sign 5, e1m1_bspcode_axd, "
-    line = next(c for c in (f"{pre}e1m1_bspcode_axb{root}, e1m1_bspcode_node{root}_far",
-                            f"{pre}e1m1_bspcode_node{root}_far, e1m1_bspcode_axp{root}") if c in src)
-    a, b = line[len(pre):].split(", ")
-    bad = src.replace(line, f"{pre}{b}, {a}", 1)
+    # the root's polarity (mapcompiler.axis_side_lines: back on 2 = negative, or on 1 = positive) swapped
+    line = next(c for c in (f"hex.if_flags e1m1_bspcode_axs, {m}, e1m1_bspcode_node{root}_far, e1m1_bspcode_axb{root}"
+                            for m in ("0x0004", "0x0002")) if c in src)
+    bad = src.replace(line, line.replace("0x0004", "0xSWAP").replace("0x0002", "0x0004").replace("0xSWAP", "0x0002"), 1)
     assert bad != src
     pb = tmp_path / "e1m1_bsp_bad.fj"
     pb.write_text(bad, encoding="utf-8")
@@ -397,9 +396,8 @@ def test_bsp_descend_point_location_exact_vs_oracle(tmp_path):
                                       should_raise_assertion_error=False) for x, y in pts)
     assert run(program(main, dsc), "dsc"), "the descend walk's leaf != point_in_subsector"
     root = cmap.root
-    pre = "hex.sign 5, e1m1_bspcode_axd, "
-    line = next(c for c in (f"{pre}e1m1_dsc_axb{root}, e1m1_dsc_node{root}_far",
-                            f"{pre}e1m1_dsc_node{root}_far, e1m1_dsc_axp{root}") if c in dsc)
-    a, b = line[len(pre):].split(", ")
-    assert not run(program(main, dsc.replace(line, f"{pre}{b}, {a}", 1)), "dsc_bad"), (
+    line = next(c for c in (f"hex.if_flags e1m1_bspcode_axs, {m}, e1m1_dsc_node{root}_far, e1m1_dsc_axb{root}"
+                            for m in ("0x0004", "0x0002")) if c in dsc)
+    swapped = line.replace("0x0004", "0xSWAP").replace("0x0002", "0x0004").replace("0xSWAP", "0x0002")
+    assert not run(program(main, dsc.replace(line, swapped, 1)), "dsc_bad"), (
         "the swapped root still located every point: the check is vacuous")

@@ -498,8 +498,13 @@ class GameSim:
         from doomfj.sight import SeenHook
         from doomfj.wall_renderer import BOOT_SKILL, MONSTER_MODE, PLAYER_MODE
         from doomfj.world import World
-        self.w = World(self.mw, self.mapname, skill=BOOT_SKILL, monsters=MONSTER_MODE, player=PLAYER_MODE)
-        self.w.set_sight_rule("seen", SeenHook(self.w))
+        from doomfj.world import player_resolves
+        # #134: the player AIMS as the binary does -- with the window its picture recorded (combat.window_aim, written
+        # by the seen hook's render), not the model default `aim_geometric`, which parted from the binary at the
+        # aim window's edge (a pistol shot at game frame 69 of scratchpad/gp/p12_diverge_keys.json)
+        aim = World.window_aim if player_resolves(PLAYER_MODE) else None
+        self.w = World(self.mw, self.mapname, skill=BOOT_SKILL, monsters=MONSTER_MODE, player=PLAYER_MODE, aim=aim)
+        self.w.set_sight_rule("seen", SeenHook(self.w, aim=aim is not None))
         self.ever = {si: 0 for si in getattr(self, "order", ())}
         ws = self.w.ws
         return SimState(ws.px, ws.py, ws.pangle, self.mapname)

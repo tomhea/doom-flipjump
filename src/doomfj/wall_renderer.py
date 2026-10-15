@@ -22,7 +22,7 @@ from doomfj.lut_generator import (
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
     generate_slopediv_recip8_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
-    generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
+    generate_emit_dispatch_table_fj, generate_emit_byte_by_nibbles_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
 from doomfj.reference_model import STRAFE_MOVE                                   # M7 P4.1
 from doomfj.reference_model import (ANG90, ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_MOVE, MAX_STEP,
@@ -1943,7 +1943,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         return (rm._flat_base(asset_wad, name, flat_basecache))
     cmv = colormap_values(asset_wad, lights=COLORMAP_LIGHTS)
     cm = "\n".join([
-        generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
+        generate_emit_byte_by_nibbles_fj("byte"),     # P13: two 16-entry nibble dispatches, not one 256-entry
         generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
                                         over_align=True),
     ])
@@ -2833,13 +2833,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
             _m_fl = _leaf_mover(s)
             out += [f"    hex.set w/4, cur_ss, {s}",
-                    f"    hex.set w/4, cur_ssp, sshead + {s}*dw",     # P13: the list head's address, baked
+                    # P13: the list head's address, baked -- XORed in here and back out after the call (cur_ssp's zero
+                    # invariant, as the BSP partition blocks'), so no hex.set's cold zeroing dispatch
+                    f"    hex.xor_by w/4, cur_ssp, sshead + {s}*dw",
                     *([f"    hex.set 4, ss_flr, {psec.floor_h & 0xFFFF}"] if _m_fl is None else
                       _mover_dispatch(f"sfl{cid}", _m_fl, lambda sv: [
                           f"    hex.set 4, ss_flr, "
                           f"{rm._seg_sector(lds, sds, sv, cmap.segs[ss.firstseg]).floor_h & 0xFFFF}"])),
                     f"    hex.set 4, ss_ltb, {_MT_LTB[rm.wall_lightnum(psec.light, 0)]}",
-                    "    stl.fcall thing_pass_leaf, tp_ret"]
+                    "    stl.fcall thing_pass_leaf, tp_ret",
+                    f"    hex.xor_by w/4, cur_ssp, sshead + {s}*dw"]
         for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
             seg = cmap.segs[si]
             ld = lds[seg.linedef]

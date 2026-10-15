@@ -2245,7 +2245,7 @@ frames), m2_std_gate (421 frames) and m3_gate (75) byte- and state-exact, the m3
 gamespeed + trail, pinreport (20 of 20 hot pinned, 0 lost, 4 re-keyed, 0 broken; preflight 74.2%), deg_gate. blocked59
 ran the same chain (`blocked59_chain.log`, all PASS: binding 17,183,788, B0 v10 16,413,203, playtest -3.12% and video -2.36%
 identical, deg_gate BYTE-EXACT); blocked60 and blocked61 were built and msframe'd only (`blocked60_*`, `blocked61_*`), as
-their verdicts stopped them. The host suite: 1,987 passed at v2 and v3.
+their verdicts stopped them. The host suite: 1,987 passed at v2 and v3; at the shipped source (df9e96d) 1,988 passed, 2 skipped, 2 xfailed (`pytest tests/host -n 3`, 2026-10-16).
 
 **Not P13's number, but the game's** (context): the flipjump ENGINE change tomhea/flipjump#371 (`run(write_byte=...)`),
 MERGED ccd1ec0 and installed -- on blocked62 itself 74.4 -> 67.5 ms/frame, B FASTER x1.101 (the same binary, ops and

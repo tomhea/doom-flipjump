@@ -193,3 +193,9 @@ blocked: 550,176 tables in 44,212 groups; declined 0; ungrouped 0
 total 2620s
 done in 2621s; labels at scratchpad/12m/atlas/blocked62_rebuild.labels.tsv.gz
 exit 0
+
+$ sha256sum build/doom_e1m1_blocked62.fjm build/doom_e1m1_blocked62_rebuild.fjm
+2827291fc223a6daf3469cda2606ec45f9b145511bc0bd76c100fe7149bc030a *build/doom_e1m1_blocked62.fjm
+2827291fc223a6daf3469cda2606ec45f9b145511bc0bd76c100fe7149bc030a *build/doom_e1m1_blocked62_rebuild.fjm
+$ cmp <(gzip -dc scratchpad/12m/_census_blocked62.json.gz) <(gzip -dc scratchpad/12m/_census_blocked62_rebuild.json.gz)
+census content identical

@@ -49,7 +49,9 @@ first = None
 for f in range(n):
     b = got.get(f)
     m = model[f]
-    if b is None or tuple(b[:4]) != m[:4] or any(tuple(x) != tuple(y) for x, y in zip(b[4:], m[4:])):
+    # a cell is a fixed-width hex vector: a negative model value (a corpse's health) reads back mod 16^n
+    if b is None or tuple(b[:3]) != m[:3] or b[3] % 4096 != m[3] % 4096 or any(tuple(v % 4096 for v in x) != tuple(v % 4096 for v in y)
+                                                 for x, y in zip(b[4:], m[4:])):
         first = f
         break
 print("frames compared: %d; first divergence: %s" % (n, first))
@@ -57,7 +59,8 @@ if first is not None:
     b, m = got.get(first), model[first]
     names = ("mon_health", "mon_state", "mon_tics", "mon_rng")
     for i, nm in enumerate(names):
-        d = [(k, m[4 + i][k], b[4 + i][k]) for k in range(min(len(m[4 + i]), len(b[4 + i]))) if m[4 + i][k] != b[4 + i][k]]
+        d = [(k, m[4 + i][k], b[4 + i][k]) for k in range(min(len(m[4 + i]), len(b[4 + i])))
+             if m[4 + i][k] % 4096 != b[4 + i][k] % 4096]
         if d:
             print("  %s differs at slots (slot, model, binary): %s" % (nm, d[:8]))
     for f in range(max(0, first - 3), min(n, first + 4)):

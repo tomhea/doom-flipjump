@@ -88,7 +88,7 @@ class SeenHook:
 
     _cache: dict = {}            # per map: the art wad, the views mapping, the drawables, the scenes, the game renderer
 
-    def __init__(self, world, sprite_wad=None):
+    def __init__(self, world, sprite_wad=None, aim: bool = False):
         from doomfj.build import DEFAULT_SPRITE_WAD, _resolve_sprite_wad
         from doomfj.config import GAME_CFG
         from doomfj.monsters import MonsterViews
@@ -102,6 +102,10 @@ class SeenHook:
                                     ReferenceModel(GAME_CFG))
         self.art, self.views, self.drawable, self._scenes, self.rm = SeenHook._cache[key]
         self.kw = dict(GAME_RENDER_KW)
+        # #134: `aim` -- the same picture records the AIM WINDOW (`aim_out`) into `ws.aim_sid`, the next tic's
+        # `combat.window_aim`, as the binary's render writes it (frame.aim_record) and every gate's world takes it
+        # (`MonsterPhase.set_aim`). Without it a world aiming with the window would read a stale one.
+        self.aim = aim
 
     def _scene(self, world):
         from doomfj.reference_model import build_scene
@@ -131,13 +135,22 @@ class SeenHook:
         saved = (RMOD.drawable_things, RMOD.baked_thing_mask)
         RMOD.drawable_things, RMOD.baked_thing_mask = TH.drawable_things, TH.baked_thing_mask
         drop = ws.p_vdrop if player_sinks(world.player) else 0      # the dying view's sink (MonsterPhase.view_drop)
+        aim_kw = {}
+        if self.aim:
+            from types import SimpleNamespace
+            aim_kw = {"aim_things": self.views.aim_things(SimpleNamespace(world=world)), "aim_out": [0] * len(ws.aim_sid)}
         try:
             self.rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, world.mapname), self._scene(world),
                                       sprite_wad=self.art, thing_positions=pos, thing_hidden=hidden,
                                       thing_views=views, seen_out=seen,
-                                      **({"view_drop": drop} if drop else {}), **self.kw)
+                                      **({"view_drop": drop} if drop else {}), **aim_kw, **self.kw)
         finally:
             RMOD.drawable_things, RMOD.baked_thing_mask = saved
+        if self.aim:
+            arr = ws.aim_sid
+            assert len(aim_kw["aim_out"]) == len(arr), (len(aim_kw["aim_out"]), len(arr))
+            for i, v in enumerate(aim_kw["aim_out"]):
+                arr[i] = v
         for m in range(n):
             ws.mon_seen[m] = int(self.views.mdi[m] in seen)
 

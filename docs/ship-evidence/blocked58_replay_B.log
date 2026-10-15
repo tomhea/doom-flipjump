@@ -1,0 +1,14 @@
+$ python scratchpad/gp/p11_pose_replay.py build/doom_e1m1_blocked58.fjm scratchpad/12m/atlas/blocked58.labels.tsv.gz <session scratchpad>/p11/matrix/routeB_r*.json
+doom_e1m1_blocked58.fjm: startup + 2 lead frames 184,653 ops (exact); the tours' poses
+  run 0: 100 frames, avg 18,711,588 ops/frame (exact); p50 19,136,512 p80 20,709,376 max 23,855,104; cells not in this binary: none
+  run 1: 100 frames, avg 16,272,280 ops/frame (exact); p50 19,136,512 p80 21,757,952 max 23,592,960; cells not in this binary: none
+  run 2: 100 frames, avg 16,797,403 ops/frame (exact); p50 18,612,224 p80 20,971,520 max 24,903,680; cells not in this binary: none
+  run 3: 100 frames, avg 19,840,064 ops/frame (exact); p50 20,185,088 p80 21,233,664 max 23,330,816; cells not in this binary: none
+  run 4: 100 frames, avg 17,794,219 ops/frame (exact); p50 18,612,224 p80 20,709,376 max 24,903,680; cells not in this binary: none
+  run 5: 100 frames, avg 18,423,480 ops/frame (exact); p50 20,185,088 p80 21,495,808 max 24,117,248; cells not in this binary: none
+  run 6: 100 frames, avg 17,312,054 ops/frame (exact); p50 18,874,368 p80 20,709,376 max 25,165,824; cells not in this binary: none
+  run 7: 100 frames, avg 16,550,504 ops/frame (exact); p50 18,874,368 p80 21,495,808 max 22,806,528; cells not in this binary: none
+  run 8: 100 frames, avg 13,303,863 ops/frame (exact); p50 10,747,904 p80 21,495,808 max 24,641,536; cells not in this binary: none
+  run 9: 100 frames, avg 12,896,513 ops/frame (exact); p50 10,223,616 p80 20,971,520 max 24,903,680; cells not in this binary: none
+doom_e1m1_blocked58.fjm over 10 runs: mean of run averages 16,790,197, 80th pct 18,711,588, (mean+p80)/2 17,750,892 ops/frame
+rc=0

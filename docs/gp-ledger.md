@@ -2157,3 +2157,48 @@ scenario, and the emitters take only `sight.NEAR` from the one module that chang
 5. gamespeed's selftest: `BINARY_ENDS` held P10's ends; re-recorded from blocked57's trail (7fc87cf).
 
 **Builds:** blocked57 only (sha256 `05c64ee3b966d5bf`).
+
+## P12 the speed rung (class S) -- the owner, 2026-10-14
+
+**What** (the owner, after the P9..P11 ops matrix: "do you think you can get those 3 to 6 (and even to 10% or to 20%)
+faster, without compromising on anything? no weird sprites places, flushes, weird rendering. keep the game content, and
+playtest it yourself"; then "ok yeah, do your max"). ONE rung on `m7-p12-speed`, class S: every pixel blocked57's.
+
+**How it was found.** P9 (blocked54) and P11 (blocked57) PROFILED ON IDENTICAL FRAMES: each route's poses replayed into
+each binary on the FJPROFX engine (session `replay_prof.py`: p11_pose_replay's replay with profx's attribution, per-binary
+maps), compared by macro path. P10's overhead: +316K (A) / +316K (B) / +371K (C) ops a frame, the largest piece G2's
+`ts_base_store` (+151K .. +194K), then `lines_base_split` (+50K) and the plane-id cache's base compares (+30K). The same
+profile named the larger targets: `wall_x_range_m` 3.2M a frame on route B (two affine multiplies and two atans a seg),
+`project_thing`'s far rejects after two multiplies (thing_leaf_b: 54 of 60 calls a frame on A0), `thing_pass_depth`'s
+16-nibble position reads in every selection round.
+
+**The four stops** (each EXACT -- a condition under which the work changes no pixel -- and each with a test that runs fj
+or the oracle, and a control that must fail):
+1. `proj.wxr_axis_add`: an axis coefficient (0 / +1.0 / -1.0; 1,427 of 2,057 segs) skips fixed_mul_lo --
+   `tests/fj/test_axis_mul_fj.py` (126 cases in fj; control: the -1.0 arm adding);
+2. T5 in `proj.project_thing` for a body without the aim hook: L-inf tz_map + (tz_map >> 1) + SPR_REACH --
+   `tests/host/test_tight_far_bound.py` (K <= 1.006, trig deviation <= 1e-4, the oracle against the bound; control: 1.25x);
+3. `sim.thing_int_read`: 8 nibbles where 16 were read -- `tests/fj/test_thing_pass_depth_fj.py` (+ yfrac);
+4. `frame.ts_base_store` skips the flag write when the flag is set.
+Measured and dropped: reusing a shared vertex's atan (only 29% of a leaf's segs share v1 with the previous v2);
+point_on_side's axis case (already cheap: a zero multiplier skips its rows).
+
+**Row** (blocked58, written 2026-10-15; sha256 `c5c3d3b845f743f0`; built ONE PASS at fcfcb5d with `heat_blocked27_p10`, the
+installed flipjump-151 at 6711d7a; 3,032 s; `docs/ship-evidence/blocked58_*`).
+
+| measure | blocked57 (P11) | blocked58 (P12) | note |
+|---|---|---|---|
+| msframe, one A/B run | 82.9 ms | **78.1 ms** | **B FASTER x1.062**, all 5 pairs; 213.0 -> 214.6 M fj/s; baseline re-frozen 78.1 |
+| binding (mean+p80)/2, gamespeed | 18,928,872 | **17,713,566** | -6.42% (mean -6.79%), the same tours; TRAIL PASS |
+| CAP-22 on combat set v10 | 17,635,961 | **16,807,585** | -4.70%; every run cheaper; all 11 runs state- and pixel-exact |
+| per-frame maximum on the set | 29,622,272 | 28,311,552 | R0-courtyard both |
+| the same frames, mean ops (P9 blocked54 in brackets) | A 11,731,953 / B 18,024,305 / C 17,975,377 | 11,032,470 / 16,790,197 / 17,043,619 | -6.0 / -6.8 / -5.2%; against P9 (11,413,568 / 17,707,790 / 17,602,108) -3.3 / -5.2 / -3.2% |
+| deg_gate (visual tier, unplaced) | 32,276,814 / 18,110,323 / 31,930,099 / 29,351,667 | 31,251,785 / 17,984,353 / 30,263,769 / 27,915,355 | BYTE-EXACT; -3.2 / -0.7 / -5.2 / -4.9% |
+| size | 39.89% (53,540,882) | 39.88% (53,532,296) | -8,586 words |
+| the playtest (`p12_playtest.py`) | - | 16 sessions, 2,024 frames each, ALL identical | -6.82% ops; control (vs onepass56) DIFFERS |
+| the gameplay video's runs | - | 1,754 + 1,204 frames identical | -3.97% (bot reading the binary, easy) / -7.69% (model-planned) |
+| build time | 2,769 s | 3,032 s | one pass both |
+
+**Found on the way** (not P12's -- the same in blocked57): the model and the binary part in combat when the player fires
+while strafing; tomhea/doom-flipjump#134 (`scratchpad/gp/p12_diverge.py`, `p12_diverge_keys.json`). The model-planned
+video run is where it showed; the shipped video is driven by the binary itself (`scratchpad/gp/p12_video_live.py`).

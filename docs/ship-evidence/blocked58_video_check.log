@@ -1,0 +1,10 @@
+build/doom_e1m1_blocked57.fjm: 1204 frames presented, 19,402,646,112 ops (16,115,154 per frame), 102s
+build/doom_e1m1_blocked58.fjm: 17,909,986,102 ops (-7.69%); frames IDENTICAL, all 1204 (pixels + palette)
+
+Failed to load OpenH264 library: openh264-2.5.0-win64.dll
+	Please check environment and/or download library: https://github.com/cisco/openh264/releases
+
+[libopenh264 @ 000001c2a2777780] Unable to create encoder
+[ERROR:0@0.004] global cap_ffmpeg_impl.hpp:3568 open Could not open codec libopenh264, error: Unspecified error (-1313558101)
+[ERROR:0@0.004] global cap_ffmpeg_impl.hpp:3585 open VIDEOIO/FFMPEG: Failed to initialize VideoWriter
+video -> C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p12/video_check.mp4 (1200 frames, 100.0 s at 12.0 fps, avc1, 640x400)

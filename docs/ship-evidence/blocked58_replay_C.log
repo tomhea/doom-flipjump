@@ -1,0 +1,8 @@
+$ python scratchpad/gp/p11_pose_replay.py build/doom_e1m1_blocked58.fjm scratchpad/12m/atlas/blocked58.labels.tsv.gz <session scratchpad>/p11/matrix/routeC_r*.json
+doom_e1m1_blocked58.fjm: startup + 2 lead frames 184,653 ops (exact); the tours' poses
+  run C0(664,291): 20 frames, avg 20,289,146 ops/frame (exact); p50 20,185,088 p80 20,709,376 max 21,233,664; cells not in this binary: none
+  run C1(1272,-724): 20 frames, avg 10,312,991 ops/frame (exact); p50 10,223,616 p80 10,485,760 max 10,485,760; cells not in this binary: none
+  run C2(1869,479): 20 frames, avg 18,650,546 ops/frame (exact); p50 18,612,224 p80 18,874,368 max 18,874,368; cells not in this binary: none
+  run C3(-416,256): 20 frames, avg 18,921,793 ops/frame (exact); p50 18,874,368 p80 19,136,512 max 19,136,512; cells not in this binary: none
+doom_e1m1_blocked58.fjm over 4 runs: mean of run averages 17,043,619, 80th pct 20,289,146, (mean+p80)/2 18,666,383 ops/frame
+rc=0

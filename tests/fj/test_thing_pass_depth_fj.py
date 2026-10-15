@@ -19,8 +19,8 @@ zero -- thing_pass's own contract for the next leaf's baked xor_by.
 
 ⚠ ONE IMAGE, MANY RECORDS: a walk that leaves a register dirty corrupts the next record.
 ⚠ THE CONTROLS (R9), each STRICT -- all N records present and exactly the named symptom:
-  first / nody / tie (the first candidate taken instead of the least, the key without its dy, the tie toward the
-  later index) and nostop / nostop1 (the rounds' and the one-thing path's tstop test removed): the ORDER parts from
+  first / nody / yfrac / tie (the first candidate taken instead of the least, the key without its dy, P12: y's
+  fraction read for its integer part, the tie toward the later index) and nostop / nostop1 (the rounds' and the one-thing path's tstop test removed): the ORDER parts from
   the oracle's while every register still clears; narrow (sp_lt's clear narrowed to one nibble): the order still
   matches and sp_lt, alone, is left dirty.
 
@@ -125,7 +125,12 @@ def _dist_leaf():
 MUTS = {
     "first": ("        hex.cmp 4, mt_d, td_bk, take, next, next   // equal key, later t: not better (the scan is ascending)\n",
               "        ;next\n"),
-    "nody": ("        hex.mov 4, mt_dy, sp_y + 4*dw\n", "        hex.mov 4, mt_dy, viewy + 4*dw\n"),   # dy = 0
+    # dy = 0 (P12: the key's inputs are read by thing_int_read, straight into mt_dx / mt_dy)
+    "nody": ("        hex.sub 4, mt_dy, viewy + 4*dw\n",
+             "        hex.mov 4, mt_dy, viewy + 4*dw\n        hex.sub 4, mt_dy, viewy + 4*dw\n"),
+    # P12: thing_int_read without its skip -- y's FRACTION read as its integer part
+    "yfrac": ("        hex.ptr_add pptr, 4\n        rep(4, i) hex.read_hex_and_inc mt_dy",
+              "        rep(4, i) hex.read_hex_and_inc mt_dy"),
     "tie": ("        hex.cmp 4, mt_d, td_bk, take, next, next   //", "        hex.cmp 4, mt_d, td_bk, take, take, next   //"),
     "nostop": ("      round:\n        hex.if1 1, tstop, done\n", "      round:\n"),
     "nostop1": ("      single:                                  // one thing: as thing_pass\n"
@@ -149,8 +154,8 @@ MUTS_D3 = {
 }
 CONTROLS_D3 = {"rank_off": "order", "rank_swap": "order", "ex_round": "ex", "ex_single": "ex"}
 # what each control must break: the ORDER (registers still clear), or the CLEAR of sp_lt alone (order intact)
-CONTROLS = {"first": "order", "nody": "order", "tie": "order", "nostop": "order", "nostop1": "order",
-            "narrow": "clear"}
+CONTROLS = {"first": "order", "nody": "order", "yfrac": "order", "tie": "order", "nostop": "order",
+            "nostop1": "order", "narrow": "clear"}
 
 
 def _dirty(n):

@@ -118,11 +118,13 @@ NARROWED_FILES = ("fixed_point.fj", "frame_render.fj", "plane_bands.fj", "plane_
 # P10 G8: frame_render.fj 21 -> 22 -- frame.lines_sky_pair_ids carries lines_sky_ceil_ids's Z3 clear (its sky path,
 # for the sky behind a stacked piece), with the same unconditional `mov 2` after it
 EXPECTED_SITES = {"fixed_point.fj": 3, "frame_render.fj": 24, "plane_bands.fj": 4,   # P11: + ledge_box, ledge_test
-                  "plane_render.fj": 5, "projection.fj": 9, "sim.fj": 2, "stream_render.fj": 7}
+                  "plane_render.fj": 5, "projection.fj": 7, "sim.fj": 2, "stream_render.fj": 7}
+# P12: project_thing's two bound blocks (T5's for a body without the aim hook, T4's for one with it) are rep-guarded
+# now, so 2 of projection.fj's unguarded sites became 4 rep-guarded ones -- each mov under its clear's own guard
 # and the rep-guarded ones the site scan skips, pinned for the same reason and so that a NEW one
 # cannot appear unnoticed -- being skipped there, it would otherwise be checked by nothing.
 EXPECTED_REPPED = {"fixed_point.fj": 0, "frame_render.fj": 2, "plane_bands.fj": 0,   # P11: the seen probe's box
-                   "plane_render.fj": 0, "projection.fj": 0, "sim.fj": 0, "stream_render.fj": 0}
+                   "plane_render.fj": 0, "projection.fj": 4, "sim.fj": 0, "stream_render.fj": 0}
 # the emitter declares the hoisted scratch registers that the fj macros only name in a `<` list, so
 # the `hex.vec` width of those lives here and in no .fj file (M1-HOIST).
 HOIST_PY = Path("src/doomfj/wall_renderer.py")

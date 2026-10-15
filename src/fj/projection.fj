@@ -1384,17 +1384,36 @@ ns proj {
         // ⚠ the tr slices are FOUR nibbles then sign_extend'ed to five: a `mov 5` from
         // tr+4*dw reads past the 8-nibble register into its neighbour. The gate caught
         // exactly that as thousands of missing sprite pixels (mass over-reject), 2026-09-03.
-        hex.zero 1, pth_dbound + 4*dw   // only the HIGH 1: the mov below zeroes the low 4
-        hex.mov 4, pth_dbound, sp_tzmax + 4*dw
-        hex.shl_bit 5, pth_dbound
-        hex.shl_bit 5, pth_dbound
-        hex.zero 1, pth_dtest + 4*dw   // only the HIGH 1: the mov below zeroes the low 4
-        hex.mov 4, pth_dtest, sp_tzmax + 4*dw
-        hex.shr_bit 5, pth_dtest
-        hex.shr_bit 5, pth_dtest
-        hex.add 5, pth_dbound, pth_dtest
-        hex.inc 5, pth_dbound
-        hex.inc 5, pth_dbound
+        //
+        // P12 (T5, the TIGHT bound) -- for a body WITHOUT the aim hook (`aim` = 0, the baked things' thing_leaf_b),
+        // where the box only has to hold the things the WHOLE chain accepts, not every thing past the 90-degree test.
+        // An accepted thing is on screen: x1 < VIEW_W and x2 >= 0 bound |tx| <= W + K*tz, with W the sprite's widest
+        // side of its origin (max(left, w - left)) and K the reciprocal's worst (VIEW_W - CENTERX) / (xscale * tz)
+        // (1.0056: the block-FP xscale); and tz <= tzmax. So |tr| <= sqrt(1 + K^2) * tzmax + W, and with tz_map =
+        // floor(tzmax) the bound is tz_map + (tz_map >> 1) + SPR_REACH: 1.5 > sqrt(1 + K^2) = 1.418, and SPR_REACH
+        // (fj_consts) covers W, the +1s of both floors and the table's |cos^2 + sin^2 - 1|. wall_renderer checks every
+        // baked thing against it EXACTLY (`tight_far_bound_ok`), as it does T4's below. ~3x tighter than T4's 4.25x:
+        // on gamespeed's tours ~80% of the things T4 let through to the two multiplies were then far-rejected.
+        rep(1-aim, k) hex.zero 1, pth_dbound + 4*dw
+        rep(1-aim, k) hex.mov 4, pth_dbound, sp_tzmax + 4*dw
+        rep(1-aim, k) hex.zero 1, pth_dtest + 4*dw
+        rep(1-aim, k) hex.mov 4, pth_dtest, sp_tzmax + 4*dw
+        rep(1-aim, k) hex.shr_bit 5, pth_dtest
+        rep(1-aim, k) hex.add 5, pth_dbound, pth_dtest
+        rep(1-aim, k) hex.add_constant 5, pth_dbound, SPR_REACH
+        // T4's bound -- the body WITH the aim hook keeps it: the hook records every thing past the 90-degree test,
+        // on screen or not
+        rep(aim, k) hex.zero 1, pth_dbound + 4*dw   // only the HIGH 1: the mov below zeroes the low 4
+        rep(aim, k) hex.mov 4, pth_dbound, sp_tzmax + 4*dw
+        rep(aim, k) hex.shl_bit 5, pth_dbound
+        rep(aim, k) hex.shl_bit 5, pth_dbound
+        rep(aim, k) hex.zero 1, pth_dtest + 4*dw   // only the HIGH 1: the mov below zeroes the low 4
+        rep(aim, k) hex.mov 4, pth_dtest, sp_tzmax + 4*dw
+        rep(aim, k) hex.shr_bit 5, pth_dtest
+        rep(aim, k) hex.shr_bit 5, pth_dtest
+        rep(aim, k) hex.add 5, pth_dbound, pth_dtest
+        rep(aim, k) hex.inc 5, pth_dbound
+        rep(aim, k) hex.inc 5, pth_dbound
         hex.zero 1, pth_dtest + 4*dw   // only the HIGH 1: the mov below zeroes the low 4
         hex.mov 4, pth_dtest, pth_tr_x + 4*dw
         hex.sign_extend 5, 4, pth_dtest
@@ -1997,9 +2016,29 @@ ns proj {
         .point_to_angle_m 0, 0, dst, viewx + 4*dw, viewy + 4*dw, v2x + 4*dw, v2y + 4*dw
     }
 
+    // P12: acc += fixed_mul(v, k) for a UNIT-NORMAL coefficient k (|k| <= 1.0, 16.16). k's low four nibbles all 0
+    //   means k is 0, +1.0 or -1.0 (the only such values in [-1.0, 1.0]), and fixed_mul(v, +-1.0) = +-v exactly, so
+    //   the product is added (or subtracted, or skipped) without the multiply. Any other k takes fixed_mul_lo.
+    def wxr_axis_add acc, v, k @ axis, nz, neg, pos, end < wxr_sgn_b {
+        hex.if0 4, k, axis
+        hex.fixed_mul_lo 8, 4, wxr_sgn_b, v, k
+        frame.add8_chain acc, wxr_sgn_b
+        ;end
+      axis:
+        hex.if_flags k + 4*dw, 0x0001, nz, end          // nibble 4 = 0: k = 0, nothing to add
+      nz:
+        hex.if_flags k + 4*dw, 0x0002, neg, pos         // nibble 4 = 1: k = +1.0; else (0xF) k = -1.0
+      neg:
+        frame.sub8_chain acc, v
+        ;end
+      pos:
+        frame.add8_chain acc, v
+      end:
+    }
+
     def wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, a, b, c \
             @ frontok, notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end \
-            < wxr_adup, wxr_ang1, wxr_ang2, wxr_c2clip, wxr_cclip, wxr_cnegclip, wxr_diff, wxr_sgn_b, wxr_span, wxr_tspan, wxr_tx1, wxr_tx2 {
+            < wxr_adup, wxr_ang1, wxr_ang2, wxr_c2clip, wxr_cclip, wxr_cnegclip, wxr_diff, wxr_span, wxr_tspan, wxr_tx1, wxr_tx2 {
         hex.set 1, visible, 0
 
         // M13-mapmul WAS: viewxa = |viewx| = m<<16, so fixed_mul(a, m<<16) = (a*m<<16)>>16 = a*m
@@ -2039,10 +2078,13 @@ ns proj {
         //   because these two macros are called only from hand-written fj (frame_render.fj, 9
         //   sites) -- NO Python f-string emits them -- so rule 4's frozen-ABI concern, which is
         //   about emitter-generated calls, does not apply. Checked by grep over src/doomfj/.
-        hex.fixed_mul_lo 8, 4, sgn, viewx, a
-        hex.fixed_mul_lo 8, 4, wxr_sgn_b, viewy, b
-        frame.add8_chain sgn, wxr_sgn_b
-        frame.add8_chain sgn, c
+        // P12 (the AXIS fast path): sgn = c + viewx*a + viewy*b, summed mod 2^32 in any order -- the same word the
+        // two multiplies and two adds gave. 69% of E1M1's segs are axis-aligned (1,427 of 2,057): one coefficient 0
+        // and the other +-1.0, whose products are 0 / viewx / -viewx EXACTLY (no fraction is dropped), so they skip
+        // the multiply (wxr_axis_add). mapcompiler.seg_affine_coeffs asserts every |a|, |b| <= 1.0.
+        hex.mov 8, sgn, c
+        .wxr_axis_add sgn, viewx, a
+        .wxr_axis_add sgn, viewy, b
         hex.sign 8, sgn, end, frontok
       frontok:
         hex.if0 8, sgn, end

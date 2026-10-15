@@ -140,15 +140,16 @@ load = time.time() - t0
 screen = Rec(); kb = gate.Stopper(ScriptedKeyEventSource(events), screen, n)
 io = PcIO(screen, kb); io.attach_memory(NativeDeviceMemory(core, runner.width))
 t1 = time.time()
-# MSFRAME_WRITE_BYTE=1: the engine gathers output bits and calls the device once a byte (flipjump's
-# run(write_byte=...)); for an engine-IO arm, with that engine's flipjump on PYTHONPATH
-_wb = {"write_byte": io.write_byte} if os.environ.get("MSFRAME_WRITE_BYTE") == "1" else {}
+# the device is called once a BYTE when the engine can (flipjump#371's run(write_byte=...), what `fj --run` does since
+# ccd1ec0): an engine that predates it (an injected older pyd) runs bit by bit. MSFRAME_WRITE_BYTE=0 forces bit by bit.
+_wb_ok = "write_byte" in (_fjcore.Memory.run.__doc__ or "") and hasattr(io, "write_byte")
+_wb = {"write_byte": io.write_byte} if (_wb_ok and os.environ.get("MSFRAME_WRITE_BYTE", "1") == "1") else {}
 res = core.run(io.read_bit, io.write_bit, IOReadOnEOF, last_ops_length=0, **_wb)
 dt = time.time() - t1
 y1 = yard()
 ops = res[1]; paused = res[4]; fr = len(screen.frames)
 pix = hashlib.sha256(b"".join(screen.frames)).hexdigest()
-out = {"frames": fr, "ops": ops, "secs": dt, "io_secs": paused, "load_secs": load,
+out = {"frames": fr, "ops": ops, "secs": dt, "io_secs": paused, "load_secs": load, "write_byte": bool(_wb),
        "ms_per_frame": dt / fr * 1000.0, "fjs": ops / dt, "ops_per_frame": ops / fr,
        "pix": pix, "yard_before": y0, "yard_after": y1, "pin": pin_note,
        "cell_bytes": getattr(core, "cell_bytes", None), "storage_mode": core.storage_mode,

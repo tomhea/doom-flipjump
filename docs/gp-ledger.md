@@ -2202,3 +2202,52 @@ installed flipjump-151 at 6711d7a; 3,032 s; `docs/ship-evidence/blocked58_*`).
 **Found on the way** (not P12's -- the same in blocked57): the model and the binary part in combat when the player fires
 while strafing; tomhea/doom-flipjump#134 (`scratchpad/gp/p12_diverge.py`, `p12_diverge_keys.json`). The model-planned
 video run is where it showed; the shipped video is driven by the binary itself (`scratchpad/gp/p12_video_live.py`).
+
+## P13 the second speed rung (class S) -- 2026-10-15
+
+**What.** ONE rung on `m7-p13-speed`, class S: every pixel blocked58's. Four candidates, each built ONE PASS and each
+measured by msframe against the shipped baseline (blocked58, frozen at 78.1 ms/frame). The first three cut OPS and msframe
+could not see them; the fourth cut TIME. Every cut is exact, with a test that RUNS fj or the oracle and a control that must
+fail.
+
+| candidate | the cut | msframe's script, ops/frame (blocked58 16,745,998) | msframe against blocked58 (same run) | fj/s (blocked58 in the same run) |
+|---|---|---|---|---|
+| blocked59 (v1, ab29619) | THE AXIS BSP NODE: 418 of E1M1's 681 partitions are axis-parallel, so the side is the sign of one 5-nibble subtract (`mapcompiler.is_axis_node` / `axis_side_lines`), inline at every node of every walk (render, the eye's leaf, the collision's leaves); the other 263 keep the shared leaf. `test_mapbake`: 3 viewpoints ON axis partitions + 62 points against point_in_subsector, in fj; control: the root's axis branches swapped | 16,307,615 (-2.62%) | 78.2 vs 78.2 ms, x1.000, **NOT SEPARATED** (pairs 0.973 .. 1.008) | 208.5 M (214.1) -- +1.52M words of inline node code (size 41.01%, 55,049,188 words) |
+| blocked60 (v2, 9fe400a) | the axis node through ONE small shared classifier (`axis_leaves`: XOR -c into `<L>_axc`, fcall, one if_flags -- ~5 lines a node); the leaf list's head baked (`cur_ssp` = sshead + s; 313 of 324 leaf visits a frame on route B find an empty list); `sim.thing_pass_depth`'s KEY CACHE (`td_keys`, `selfreset.POINTER_READ_CELLS`: the first round stores each thing's (rank, key), the later rounds read it). `test_thing_pass_depth_fj` 23 passed + a no-cache control | 16,041,515 (-4.21%) | 76.8 vs 78.0 ms, x1.018, **NOT SEPARATED** (pairs 0.988 .. 1.021) | 209.0 M (214.8) |
+| blocked61 (v3, b0f35dc) | byte.emit through two 16-entry nibble dispatches (`lut_generator.generate_emit_byte_by_nibbles_fj`; the 256-entry EMIT table missed the cache on nearly every emit, 16-26 ns/op); `cur_ssp`'s per-leaf `hex.set` (10.6 ns/op) an xor in and out. `test_byte_emit_nibbles_fj`: all 256 bytes in fj; control: the nibbles swapped | 16,118,084 (-3.75%) | 76.0 vs 78.0 ms, x1.026, **NOT SEPARATED** (all five pairs B faster, 1.024 .. 1.034: under the 3% floor) | 212.2 M (214.6) |
+| **blocked62 (v4, df9e96d)** | THE LEAF REGISTERS' ZERO INVARIANT: every visited leaf (~324 a frame) set cur_ss (8 nibbles), ss_flr and ss_ltb (4 each) with `hex.set`, a zeroing dispatch per nibble in code each leaf runs once; ss_flr / ss_ltb now XORed in and back out (a mover leaf's floor cleared with hex.zero), cur_ss (read only by the index-order sim.thing_pass) not set when the depth pass walks. THE W1R ROW: set once per cycle at `entry:`, later runs xor the compile-time difference (`test_dropping_a_row_difference_breaks_the_rows`, R9; W1R host tests 106 passed) | 16,052,128 (-4.14%) | **74.1 vs 77.8 ms, x1.049, B FASTER** (all five pairs, 1.047 .. 1.064) | **216.5 M (215.1)** |
+
+**The lesson.** v2 cut MORE ops than v4 (16,041,515 against 16,052,128) and did not separate; v4 did. The ops v1..v3 removed
+were the cheap kind -- a timing profile by macro path (the rdtsc engine, timeobj / mkprof3 T) priced the BSP side test at
+3.1 ns/op against the frame's 4.1 -- and the rate fell with them (208.5 / 209.0 / 212.2 M fj/s). The same profile put the
+time in COLD code: once-per-leaf and once-per-run `hex.set` zeroing dispatches at 10-30 ns/op. v4 removed those, and the rate
+ROSE (215.1 -> 216.5 M) while the ops fell. An op count is not a time; price a cut by where its ops miss.
+
+**Row** (blocked62, written 2026-10-16; sha256 `2827291fc223a6da`; built ONE PASS at df9e96d with `heat_blocked27_p10`,
+the installed flipjump-151 at 6711d7a; 2,626 s; `docs/ship-evidence/blocked62_*`). Rebuilt BYTE-IDENTICAL from the 1b command (`blocked62_rebuild.log`: sha256 `2827291fc223a6da` both times, 2,621 s; the census `_census_blocked62_rebuild.json.gz` identical in content).
+
+| measure | blocked58 (P12) | blocked62 (P13) | note |
+|---|---|---|---|
+| msframe, one A/B run | 77.8 ms | **74.1 ms** | **B FASTER x1.049**, all 5 pairs; 215.1 -> 216.5 M fj/s; the `shipped` baseline re-frozen on it with flipjump at ccd1ec0 (#371): 67.3 ms/frame, 238.4 M fj/s (`blocked62_msframe_freeze.log`; the engine alone on blocked62 x1.101, 74.4 -> 67.5) |
+| binding (mean+p80)/2, gamespeed | 17,713,566 | **16,837,730** | -4.94% (mean -5.00%), the same tours; TRAIL PASS (BINARY_ENDS blocked58's) |
+| CAP-22 on combat set v10 | 16,807,585 | **16,203,359** | -3.59%; every run cheaper (-2.13% .. -4.07%); all 11 runs state- and pixel-exact |
+| per-frame maximum on the set | 28,311,552 | 27,787,264 | R0-courtyard both |
+| the same frames, mean ops (P9 blocked54 in brackets) | A 11,032,470 / B 16,790,197 / C 17,043,619 | 10,598,375 / 15,980,500 / 16,339,217 | -3.93 / -4.82 / -4.13%; against P9 (11,413,568 / 17,707,790 / 17,602,108) -7.14 / -9.75 / -7.17% |
+| deg_gate (visual tier, unplaced) | 31,251,785 / 17,984,353 / 30,263,769 / 27,915,355 | 29,898,712 / 17,307,125 / 29,162,215 / 26,630,673 | BYTE-EXACT; -4.3 / -3.8 / -3.6 / -4.6% |
+| size | 39.88% (53,532,296) | 38.83% (52,121,962) | -1,410,334 words; 550,176 tables blocked (578,900) |
+| the playtest (`p12_playtest.py`) | - | 16 sessions, 2,024 frames each, ALL identical | -5.06% ops; control (blocked58 vs onepass56) DIFFERS (tour4, frame 88) |
+| the gameplay video's run | - | 1,754 frames identical | -2.96% |
+| build time | 3,032 s | 2,626 s | one pass both |
+
+**Gates** (`blocked62_chain.log`, every step rc 0 but the playtest control's, whose rc 1 is its DIFFERS): the smoke (8 of 8
+frames), m2_std_gate (421 frames) and m3_gate (75) byte- and state-exact, the m3 selftest rejected at frame 0, p2a_gate
+13/13, hurt_gate 7/7, fight_gate 43/43 and die_gate 17/17 STATE, PIXELS and PALETTE exact on every frame, B0 on v10,
+gamespeed + trail, pinreport (20 of 20 hot pinned, 0 lost, 4 re-keyed, 0 broken; preflight 74.2%), deg_gate. blocked59
+ran the same chain (`blocked59_chain.log`, all PASS: binding 17,183,788, B0 v10 16,413,203, playtest -3.12% and video -2.36%
+identical, deg_gate BYTE-EXACT); blocked60 and blocked61 were built and msframe'd only (`blocked60_*`, `blocked61_*`), as
+their verdicts stopped them. The host suite: 1,987 passed at v2 and v3.
+
+**Not P13's number, but the game's** (context): the flipjump ENGINE change tomhea/flipjump#371 (`run(write_byte=...)`),
+MERGED ccd1ec0 and installed -- on blocked62 itself 74.4 -> 67.5 ms/frame, B FASTER x1.101 (the same binary, ops and
+pixels identical; on blocked58 78.0 -> 71.0, x1.098). The `shipped` baseline is re-frozen on blocked62 with it: 67.3
+ms/frame -- blocked58 on the old engine was 78.1: x1.16 for the game as `fj --run` plays it.

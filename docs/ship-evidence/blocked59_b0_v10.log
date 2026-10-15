@@ -1,0 +1,35 @@
+$ python scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v10.json --fjm build/doom_e1m1_blocked59.fjm --labels scratchpad/12m/atlas/blocked59.labels.tsv.gz --pixel-every 1 --proxy --json docs/ship-evidence/blocked59_b0_v10.json
+  model replays: 11 runs reproduce the set's poses (186 s, outside the lock)
+b0_scenarios: doom_e1m1_blocked59.fjm sha256 90d410a12bcd5fbf | set combat_scenarios_v10.json (11 runs, keys 5bb15f59e01c36b8) | startup+menu 185,595 ops (exact)
+  run                   avg (exact)  p50 +-2^18         p80         max  state     pixels    cam  dr sonl
+  R0-west-hall           18,510,607  18,612,224  19,398,656  20,709,376  100/100   100/100     0   0   35
+  R0-aftermath           12,593,327  11,272,192  17,825,792  20,185,088  100/100   100/100     0   0   32
+  R0-south-hall          14,092,229  14,155,776  15,728,640  16,515,072  100/100   100/100     0   0   26
+  R0-imp-court           20,951,327  21,495,808  23,855,104  27,525,120  100/100   100/100     0   0   41
+  R0-northwest            9,729,523   9,961,472  11,010,048  12,582,912  100/100   100/100     0   0   59
+  R0-courtyard           18,912,406  19,136,512  21,495,808  28,049,408  100/100   100/100     0   0   46
+  R2-barrel-hall         15,487,233  14,942,208  17,825,792  22,282,240  100/100   100/100     0   0   15
+  R2-spectre-corridor    12,777,908  12,845,056  14,155,776  18,350,080  100/100   100/100     0   0    8
+  R2-east-yard           14,088,435  13,631,488  15,728,640  19,398,656  100/100   100/100     0   0   11
+  R3-west                11,934,836  11,272,192  14,155,776  18,612,224  100/100   100/100     0   0   42
+  R3-mid                  8,395,952  10,485,760  12,058,624  14,155,776  100/100   100/100     0   0   21
+  B0 BINDING (mean + p80)/2 over 11 runs: 16,413,203 ops/frame   (mean 14,315,799, p80 run R0-west-hall = 18,510,607)
+  per-frame maximum: 28,049,408 ops (+/- 2^18) in R0-courtyard; run averages 8,395,952 .. 20,951,327; headroom to 22M: 5,586,797
+  STRAFE UNDERCOUNT (--proxy: each strafe-only frame given a forward step into the same landing):
+    R0-west-hall         +6,622,186 ops over 35 strafe-only frames = 189,205 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-aftermath         +4,539,881 ops over 32 strafe-only frames = 141,871 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 19 (a strafe-only frame): a PICKUP the proxy's step touched at the landing -- item 89 (type 2014 at 640, 256); the normal run's strafe-only frame does not move, so it never takes it (p_bc 0 -> 6, bar health 102 -> 103); 81 frames' expectations differ, 1 pictures
+    R0-south-hall        +4,692,635 ops over 26 strafe-only frames = 180,486 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-imp-court         +5,357,622 ops over 41 strafe-only frames = 130,674 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 76 (a strafe-only frame): the picture alone (the monsters or effects part); 3 frames' expectations differ, 3 pictures
+    R0-northwest         +8,111,904 ops over 59 strafe-only frames = 137,490 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-courtyard         +15,255,020 ops over 46 strafe-only frames = 331,631 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 59 (a strafe-only frame): the picture alone (the monsters or effects part); 41 frames' expectations differ, 41 pictures
+    R2-barrel-hall       +1,973,838 ops over 15 strafe-only frames = 131,589 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R2-spectre-corridor  +1,058,750 ops over 8 strafe-only frames = 132,344 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R2-east-yard         +4,107,863 ops over 11 strafe-only frames = 373,442 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R3-west              +5,478,293 ops over 42 strafe-only frames = 130,436 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R3-mid               +2,698,626 ops over 21 strafe-only frames = 128,506 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    binding with the collision tic on strafe-only frames: 16,473,540 (B0 + 60,337); 178,264 ops per strafe-only frame over 336 frames
+B0 OK
+rc=0

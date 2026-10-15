@@ -1,0 +1,11 @@
+$ python scratchpad/12m/poolmap.py --fjm build/doom_e1m1_blocked59.fjm --heat scratchpad/12m/heat_blocked27_p10.json.gz
+FJM    w=32  segments=605541  data=55,049,188 words (41.01% of 2^27)  span=122,477,120 words (91.25%)  file=42,913,273 bytes
+       segment table sums to the payload: yes (55,049,188 words)
+SPLIT  below word 67,108,864: 1 segment, 33,286,136 payload words, ending at word 33,286,136
+       in the pool   : 605,540 segments, 21,763,052 payload words, words 67,108,864..122,477,120
+GAP    program end -> pool base: 33,822,728 words
+POOL   base word 67,108,864, window ends word 134,217,727 (--pool-base 0x80000000 --span-bits 0x7fffffe0); 11,740,607 words of the window above the image
+  counts cache is for a DIFFERENT program -- recounting
+       cache sig src=c7e616f650d06c93, this tree hashes to src=ceed116cb79ad114
+PAD    counts cache STALE (C:\Users\tomhe\Documents\doom-p11\scratchpad\12m\_counts_game.json.gz) -- the block sizes are not priced. Re-run with --allow-stale to price it anyway, or `build_blocked.py --preflight-only` to re-count.
+rc=0

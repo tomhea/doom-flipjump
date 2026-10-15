@@ -1,0 +1,25 @@
+$ python scratchpad/gp/p12_playtest.py build/doom_e1m1_blocked58.fjm build/doom_e1m1_blocked62.fjm --clips docs/media/p13
+A build/doom_e1m1_blocked58.fjm (sha256 c5c3d3b845f743f0)
+B build/doom_e1m1_blocked62.fjm (sha256 2827291fc223a6da)
+tour0     104 frames  IDENTICAL (pixels + palette)  ops/frame A 18,149,264  B 17,269,442  (-4.85%)  70s
+tour1     104 frames  IDENTICAL (pixels + palette)  ops/frame A 15,777,753  B 14,952,460  (-5.23%)  68s
+tour2     104 frames  IDENTICAL (pixels + palette)  ops/frame A 16,348,371  B 15,470,130  (-5.37%)  68s
+tour3     104 frames  IDENTICAL (pixels + palette)  ops/frame A 19,205,218  B 18,184,562  (-5.31%)  70s
+tour4     104 frames  IDENTICAL (pixels + palette)  ops/frame A 17,260,957  B 16,324,298  (-5.43%)  69s
+   clip -> docs\media\p13\p12_tour4.gif (104 frames)
+tour5     104 frames  IDENTICAL (pixels + palette)  ops/frame A 17,795,462  B 16,924,524  (-4.89%)  68s
+tour6     104 frames  IDENTICAL (pixels + palette)  ops/frame A 16,768,127  B 15,915,837  (-5.08%)  68s
+tour7     104 frames  IDENTICAL (pixels + palette)  ops/frame A 15,969,367  B 15,194,601  (-4.85%)  67s
+tour8     104 frames  IDENTICAL (pixels + palette)  ops/frame A 12,967,352  B 12,391,813  (-4.44%)  66s
+tour9     104 frames  IDENTICAL (pixels + palette)  ops/frame A 12,508,628  B 11,987,701  (-4.16%)  65s
+fight0    164 frames  IDENTICAL (pixels + palette)  ops/frame A 14,805,249  B 14,089,212  (-4.84%)  74s
+   clip -> docs\media\p13\p12_fight0.gif (164 frames)
+fight1    164 frames  IDENTICAL (pixels + palette)  ops/frame A 12,777,508  B 12,076,296  (-5.49%)  72s
+fight2    164 frames  IDENTICAL (pixels + palette)  ops/frame A 13,218,208  B 12,588,319  (-4.77%)  72s
+fight3    164 frames  IDENTICAL (pixels + palette)  ops/frame A 14,495,985  B 13,819,836  (-4.66%)  73s
+   clip -> docs\media\p13\p12_fight3.gif (164 frames)
+fight4    164 frames  IDENTICAL (pixels + palette)  ops/frame A 13,503,536  B 12,780,061  (-5.36%)  72s
+idle      164 frames  IDENTICAL (pixels + palette)  ops/frame A 19,126,123  B 18,055,041  (-5.60%)  79s
+
+16 sessions, 2024 frames each binary: EVERY FRAME IDENTICAL; ops over all sessions A 31,346,015,814 B 29,759,035,985 (-5.06%)
+rc=0

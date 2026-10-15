@@ -1,0 +1,8 @@
+$ python scratchpad/gp/p11_pose_replay.py build/doom_e1m1_blocked59.fjm scratchpad/12m/atlas/blocked59.labels.tsv.gz /c/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/matrix/routeC_r0.json /c/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/matrix/routeC_r1.json /c/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/matrix/routeC_r2.json /c/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/p11/matrix/routeC_r3.json
+doom_e1m1_blocked59.fjm: startup + 2 lead frames 185,595 ops (exact); the tours' poses
+  run C0(664,291): 20 frames, avg 19,794,308 ops/frame (exact); p50 19,922,944 p80 20,185,088 max 20,709,376; cells not in this binary: none
+  run C1(1272,-724): 20 frames, avg 10,117,328 ops/frame (exact); p50 10,223,616 p80 10,223,616 max 10,223,616; cells not in this binary: none
+  run C2(1869,479): 20 frames, avg 18,170,782 ops/frame (exact); p50 18,087,936 p80 18,350,080 max 18,350,080; cells not in this binary: none
+  run C3(-416,256): 20 frames, avg 18,274,231 ops/frame (exact); p50 18,350,080 p80 18,350,080 max 18,612,224; cells not in this binary: none
+doom_e1m1_blocked59.fjm over 4 runs: mean of run averages 16,589,162, 80th pct 19,794,308, (mean+p80)/2 18,191,735 ops/frame
+rc=0

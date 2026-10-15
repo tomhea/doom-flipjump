@@ -1,0 +1,23 @@
+$ python scratchpad/12m/msframe.py --a build/doom_e1m1_blocked59.fjm --against shipped --note "M7 P13 blocked59: the axis BSP node (class S) vs the shipped baseline (blocked58)"
+machine : power plan 'Silent'; busy processes: none
+against : baseline 'shipped' = build\doom_e1m1_blocked58.fjm (c5c3d3b845f743f0), recorded 2026-10-15 00:41:34 at 78.1 ms/frame
+msframe : A=doom_e1m1_blocked58.fjm B=doom_e1m1_blocked59.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  base      78.2 ms   214.0M fj/s  yard 3.57->3.58G   |  change    80.4 ms   202.8M fj/s  yard 3.57->3.57G
+  rep 1  base      78.2 ms   214.1M fj/s  yard 3.57->3.58G   |  change    78.1 ms   208.9M fj/s  yard 3.58->3.57G
+  rep 2  base      78.9 ms   212.4M fj/s  yard 3.57->3.57G   |  change    78.2 ms   208.5M fj/s  yard 3.56->3.56G
+  rep 3  base      77.9 ms   214.9M fj/s  yard 3.56->3.57G   |  change    78.0 ms   209.2M fj/s  yard 3.56->3.57G
+  rep 4  base      78.2 ms   214.1M fj/s  yard 3.57->3.57G   |  change    78.3 ms   208.4M fj/s  yard 3.56->3.58G
+
+  base     median    78.2 ms/frame  [77.9 .. 78.9]    214.1M fj/s   16,745,998 ops/frame   cell=4 flat
+  change   median    78.2 ms/frame  [78.0 .. 80.4]    208.5M fj/s   16,307,615 ops/frame   cell=4 flat
+
+  pixels identical across arms and reps : YES
+  ops identical across arms             : no   (expected when the arms are different binaries; not when they are one engine A/B)
+  per-pair A/B ms ratio                 : 0.973 1.002 1.008 1.000 1.000
+  median ratio                          : 1.000  (>1 = B faster)
+  VERDICT: NOT SEPARATED   (rule: all 5 pairs agree in sign AND |median ratio - 1| > 3%)
+  engine A: df401f5d00a3ac5f full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  engine B: df401f5d00a3ac5f full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.57G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+rc=0

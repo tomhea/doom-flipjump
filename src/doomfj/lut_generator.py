@@ -935,13 +935,20 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
         colour_pass[b] = ", ".join(cargs)
         params = (f"ycur, wlo, whi, {', '.join(cargs)}, cmidx, wlast" if win
                   else f"ycur, fstart, {', '.join(cargs)}, cmidx, last")
+        # P13: the run's colormap row is set ONCE per cycle (at `entry:`, run 0's) and every later run reaches its
+        # own by xoring the compile-time difference from the previous run's -- where each run did a `hex.set 2`
+        # (two cold zeroing dispatches) before its cm.emit. The row is in place before the run's compare, so
+        # both of its arms (emit, or clamp and leave through the exit) see it as the set did.
         body = [f"    def {b} {params} @ {', '.join(labs)} {{",
                 "      entry:",
-                f"        hex.mov 2, cmidx, {'wall_lit2' if runs[0][2] else 'wall_lit'}"]
+                f"        hex.mov 2, cmidx, {'wall_lit2' if runs[0][2] else 'wall_lit'}",
+                f"        hex.set 2, cmidx + 2*dw, {runs[0][1]}"]
         for k, (ln, row, alt) in enumerate(runs):
             nxt = f"n{k}"
             if k > 0 and alt != runs[k - 1][2]:
                 body.append(f"        hex.mov 2, cmidx, {'wall_lit2' if alt else 'wall_lit'}")
+            if k > 0 and row != runs[k - 1][1]:
+                body.append(f"        hex.xor_by 2, cmidx + 2*dw, {row ^ runs[k - 1][1]}")
             body.append(f"        hex.add_constant 2, ycur, {ln}")
             if win:
                 body += [f"        hex.cmp 2, ycur, wlo, {nxt}, {nxt}, t{k}",
@@ -951,11 +958,9 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
                 body.append(f"        hex.cmp 2, ycur, fstart, e{k}, l{k}, l{k}")
             body += [f"      e{k}:",
                      "        byte.emit ycur",
-                     f"        hex.set 2, cmidx + 2*dw, {row}",
                      "        cm.emit cmidx",
                      f"        ;{nxt}",
                      f"      l{k}:",
-                     f"        hex.set 2, cmidx + 2*dw, {row}",
                      f"        ;{'wlast' if win else 'last'}",
                      f"      {nxt}:"]
         body += ["        ;entry",                      # cycle the pattern down the wall

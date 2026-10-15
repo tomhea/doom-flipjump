@@ -140,7 +140,10 @@ load = time.time() - t0
 screen = Rec(); kb = gate.Stopper(ScriptedKeyEventSource(events), screen, n)
 io = PcIO(screen, kb); io.attach_memory(NativeDeviceMemory(core, runner.width))
 t1 = time.time()
-res = core.run(io.read_bit, io.write_bit, IOReadOnEOF, last_ops_length=0)
+# MSFRAME_WRITE_BYTE=1: the engine gathers output bits and calls the device once a byte (flipjump's
+# run(write_byte=...)); for an engine-IO arm, with that engine's flipjump on PYTHONPATH
+_wb = {"write_byte": io.write_byte} if os.environ.get("MSFRAME_WRITE_BYTE") == "1" else {}
+res = core.run(io.read_bit, io.write_bit, IOReadOnEOF, last_ops_length=0, **_wb)
 dt = time.time() - t1
 y1 = yard()
 ops = res[1]; paused = res[4]; fr = len(screen.frames)

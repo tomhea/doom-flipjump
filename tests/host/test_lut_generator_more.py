@@ -509,20 +509,24 @@ def _body_lines(lines, name):
 
 
 def _replay_runs(body, cycles=1):
-    """Replay a W1R body's colour state machine and run list: one (len, row, colour) triple per
-    run per cycle, in emission order, carrying the colour ACROSS the `;entry` wrap."""
-    colour, pend, out = None, None, []
+    """Replay a W1R body's colour and colormap-row state machines and its run list: one (len, row, colour)
+    triple per run per cycle, in emission order, carrying both states ACROSS the `;entry` wrap. P13: the row is
+    set at `entry:` and xored by compile-time differences per run, and a run's row is the state at its
+    `hex.add_constant` (its compare's two arms both use it)."""
+    colour, row, out = None, None, []
     for _ in range(cycles):
         for line in body:
             s = line.strip()
             if s.startswith("hex.mov 2, cmidx, "):
                 colour = s.rsplit(", ", 1)[1]
+            elif s.startswith("hex.set 2, cmidx + 2*dw, "):
+                row = int(s.rsplit(", ", 1)[1])
+            elif s.startswith("hex.xor_by 2, cmidx + 2*dw, "):
+                assert row is not None, "a row difference applied before any row was set"
+                row ^= int(s.rsplit(", ", 1)[1])
             elif s.startswith("hex.add_constant 2, ycur, "):
-                pend = (int(s.rsplit(", ", 1)[1]), colour)
-            elif s.startswith("hex.set 2, cmidx + 2*dw, ") and pend is not None:
-                out.append((pend[0], int(s.rsplit(", ", 1)[1]), pend[1]))
-                pend = None                 # the l{k} arm repeats the same row; ignore it
-    assert pend is None, "a run was started and never given a colormap row"
+                assert row is not None, "a run was started before any colormap row was set"
+                out.append((int(s.rsplit(", ", 1)[1]), row, colour))
     return out
 
 
@@ -564,6 +568,21 @@ class TestW1RBodiesReplayThePatterns:
         got = [c for _, _, c in _replay_runs(broken, cycles=2)]
         want = ["wall_lit2" if alt else "wall_lit" for _, _, alt in pat] * 2
         assert got != want, "the colour replay is vacuous -- a dropped mov changed nothing"
+
+
+    def test_dropping_a_row_difference_breaks_the_rows(self, w1r):
+        """NEGATIVE CONTROL (R9) for P13's row differences: each run's colormap row is the previous run's
+        xored by a baked difference, so a dropped difference gives that run AND every later one in the
+        cycle the wrong row -- the replay must see it."""
+        name = next("b%d_%d" % (t, v) for t in range(4) for v in range(4)
+                    if any(s.strip().startswith("hex.xor_by 2, cmidx + 2*dw, ")
+                           for s in _body_lines(w1r, "b%d_%d" % (t, v))))
+        body = _body_lines(w1r, name)
+        i = next(n for n, s in enumerate(body) if s.strip().startswith("hex.xor_by 2, cmidx + 2*dw, "))
+        t, v = int(name[1]), int(name[3])
+        want = [(ln, row) for ln, row, _ in RM.W1R_PATTERNS[t][v]]
+        assert [(ln, row) for ln, row, _ in _replay_runs(body)] == want
+        assert [(ln, row) for ln, row, _ in _replay_runs(body[:i] + body[i + 1:])] != want
 
 
 class TestW1RBodyArity:

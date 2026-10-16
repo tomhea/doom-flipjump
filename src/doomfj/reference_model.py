@@ -268,6 +268,7 @@ SKY_TURN = 2
 THING_SPRITE = {
     9800: "EXIT",  # P11 (a): the EXIT sign -- its picture is BUILT (doomfj.exitsign; sprite_art returns before a lump)
     5: "BKEY",   # M7 P2a.1: the blue card, frame A (DOOM blinks it A/B: a stated deviation)
+    13: "RKEY", 6: "YKEY",        # M8 L0 (E1M2): the red and yellow cards, frame A as the blue
     2014: "BON1", 2015: "BON2", 2035: "BAR1", 47: "SMIT", 3001: "TROO", 2008: "SHEL",
     54: "TRE2", 9: "SPOS", 43: "TRE1", 3004: "POSS", 3002: "SARG", 2010: "ROCK",
     2028: "COLU", 2011: "STIM", 2012: "MEDI", 2018: "ARM1", 2019: "ARM2", 2001: "SHOT",

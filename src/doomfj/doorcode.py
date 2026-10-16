@@ -176,7 +176,10 @@ def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str, regs=("vie
     """`doors.touches_door` in fj for the player at (`viewx`, `viewy`), box half-width `radius`:
     the centre strictly inside the door's rectangle, or the box straddling one of its two-sided
     lines (strict, both axes) -> `yes`; else `no`. M7 P3.2b: `regs` -- a monster's 16.16 position (thpos_rt)."""
-    (x0, y0, x1, y1), lines = geo
+    area, lines = geo
+    # M8 L0: the model also handles a slanted door (a polygon, slanted lines); this fj does not yet (M8 L2)
+    assert area[0] != "poly" and all(ln[0] != "d" for ln in lines), "a non-rectangular door needs M8 L2's contact"
+    x0, y0, x1, y1 = area
     rx, ry = regs
     r = radius << 16
     out = []

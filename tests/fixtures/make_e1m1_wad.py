@@ -21,6 +21,8 @@ from doomfj.wad import WadFile
 SRC = Path("assets/freedoom1.wad")
 DEST = Path(__file__).with_name("freedoom_e1m1.wad")
 MAP = "E1M1"
+# M8 (E1M2, its own binary): the same trim for any map -- `python tests/fixtures/make_e1m1_wad.py E1M2` writes
+# tests/fixtures/freedoom_e1m2.wad. With no argument it writes E1M1's fixture exactly as before.
 # Full geometry incl. the baked BSP (M12i: we bake the WAD's precompiled node tree, not build it).
 MAP_LUMPS = ["THINGS", "LINEDEFS", "SIDEDEFS", "VERTEXES", "SEGS", "SSECTORS", "NODES", "SECTORS"]
 
@@ -39,8 +41,8 @@ def _merged_texture_defs(w: WadFile) -> dict:
     return defs
 
 
-def _e1m1_assets(w: WadFile):
-    """The distinct wall textures, flats, and patches E1M1 actually references."""
+def _e1m1_assets(w: WadFile, MAP: str = MAP):
+    """The distinct wall textures, flats, and patches the map (E1M1 unless named) actually references."""
     defs = _merged_texture_defs(w)
     walls = []
     for s in w.sidedefs(MAP):
@@ -48,6 +50,10 @@ def _e1m1_assets(w: WadFile):
             u = t.upper()
             if u and u != "-" and u in defs and u not in walls:
                 walls.append(u)
+    # M8: the SKY texture -- a sky ceiling (F_SKY1) draws SKY1, which no sidedef need name (E1M1's walls happen to, E1M2's
+    # do not: without this its 52 sky ceilings had no texture in the fixture)
+    if any(s.ceil_tex.upper() == "F_SKY1" for s in w.sectors(MAP)) and "SKY1" in defs and "SKY1" not in walls:
+        walls.append("SKY1")
     flats = []
     for s in w.sectors(MAP):
         for f in (s.floor_tex, s.ceil_tex):
@@ -80,9 +86,9 @@ def _build_texture1(defs, walls, new_pnames: list[str]) -> bytes:
     return struct.pack("<i", len(bodies)) + struct.pack(f"<{len(bodies)}i", *offsets) + b"".join(bodies)
 
 
-def build_e1m1_wad(src_path=SRC) -> bytes:
+def build_e1m1_wad(src_path=SRC, MAP: str = MAP) -> bytes:
     w = WadFile.from_path(src_path)
-    defs, walls, flats, patches = _e1m1_assets(w)
+    defs, walls, flats, patches = _e1m1_assets(w, MAP)
 
     lumps: list[tuple[str, bytes]] = [
         (MAP, b""),  # map marker
@@ -110,8 +116,12 @@ def build_e1m1_wad(src_path=SRC) -> bytes:
 
 
 if __name__ == "__main__":
-    DEST.write_bytes(build_e1m1_wad())
+    import sys
+    if len(sys.argv) > 1:
+        MAP = sys.argv[1].upper()
+        DEST = Path(__file__).with_name("freedoom_%s.wad" % MAP.lower())
+    DEST.write_bytes(build_e1m1_wad(MAP=MAP))
     _w = WadFile.from_path(DEST)
-    _defs, _walls, _flats, _patches = _e1m1_assets(WadFile.from_path(SRC))
+    _defs, _walls, _flats, _patches = _e1m1_assets(WadFile.from_path(SRC), MAP)
     print(f"wrote {DEST} ({DEST.stat().st_size} bytes; {len(_walls)} textures, "
           f"{len(_flats)} flats, {len(_patches)} patches, trimmed from {SRC})")

@@ -657,6 +657,12 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(2005, "chainsaw", 20, MF_SPECIAL, "template"),
     ThingType(2003, "MT_MISC27", 20, MF_SPECIAL, "info.c"),           # P9: the rocket launcher
     ThingType(2002, "MT_CHAINGUN", 20, MF_SPECIAL, "info.c"),         # P10: the chaingun
+    # M8 L0 (E1M2): the other two keycards, the soulsphere, the computer map (info.c MT_MISC5 / MT_MISC6 /
+    # MT_MISC12 / MT_MISC21)
+    ThingType(13, "MT_MISC5", 20, MF_SPECIAL | MF_NOTDMATCH, "info.c"),     # red keycard
+    ThingType(6, "MT_MISC6", 20, MF_SPECIAL | MF_NOTDMATCH, "info.c"),      # yellow keycard
+    ThingType(2013, "MT_MISC12", 20, MF_SPECIAL | MF_COUNTITEM, "info.c"),  # soulsphere
+    ThingType(2026, "MT_MISC21", 20, MF_SPECIAL | MF_COUNTITEM, "info.c"),  # computer area map
     # decor: radius and MF_SOLID from GZDoom (vanilla values); corpses and gore are not solid
     ThingType(43, "TorchTree", 16, MF_SOLID, "gzdoom"),
     ThingType(47, "Stalagtite", 16, MF_SOLID, "gzdoom"),
@@ -673,9 +679,14 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(20, "DeadDoomImp", 20, 0, "gzdoom"),
     ThingType(21, "DeadDemon", 20, 0, "gzdoom"),
     ThingType(24, "Gibs", 20, 0, "gzdoom"),
+    ThingType(34, "Candlestick", 20, 0, "gzdoom"),                    # M8 L0 (E1M2): not solid
+    ThingType(35, "Candelabra", 16, MF_SOLID, "gzdoom"),
 )}
-# Editor numbers P_SpawnMapThing never turns into a thing (player and deathmatch starts).
-NOT_THINGS = frozenset({1, 2, 3, 4, 11, EXIT_SIGN_TYPE})
+# Editor numbers P_SpawnMapThing never turns into a thing (player and deathmatch starts). M8 L0: the teleport
+# destination (14, MT_TELEPORTMAN: no sprite, never touched or drawn) is a position the teleporters read (L4), not a
+# thing the world keeps.
+TELEPORT_DEST_TYPE = 14
+NOT_THINGS = frozenset({1, 2, 3, 4, 11, EXIT_SIGN_TYPE, TELEPORT_DEST_TYPE})
 
 
 # ================================================================================================

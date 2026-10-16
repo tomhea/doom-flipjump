@@ -67,8 +67,11 @@ few model conventions, all named here so nothing is silent:
     last frame" (the `mon_seen` cell is reserved for that).
   * Sound: P_RecursiveSound as REGIONS -- the sectors joined by two-sided lines whose opening is
     static and positive collapse to one region; each door sector is its own node, joined to its
-    neighbours while its opening is positive. E1M1 has no ML_SOUNDBLOCK line (asserted), so this
-    is exactly DOOM's flood fill.
+    neighbours while its opening is positive. M8 L0: an ML_SOUNDBLOCK line never merges regions; it
+    is a BLOCK edge, and the flood carries DOOM's `soundblocks` (0 or 1): a block edge passes a node
+    reached with 0 on with 1, and stops one reached with 1 -- "reachable crossing at most one marked
+    line", which is the set P_RecursiveSound's (sector, soundtraversed) recursion marks. E1M1 has no
+    marked line, so its regions and its flood are exactly as before.
   * The player is blocked by solid things (monsters until their A_Fall, barrels until removed,
     solid decor), as in DOOM -- today's binary and oracle walk through them, which World keeps
     behind `player_blocking=False` for regression comparison. Monsters treat the living player as
@@ -842,9 +845,6 @@ class World(CombatMixin):
         from doomfj.combat import SECRET_SPECIAL
         self.secret_sectors = [s for s, sec in enumerate(self.secs) if sec.special == SECRET_SPECIAL]
         lds, sds, secs, cmap = self.lds, self.sds, self.secs, self.cmap
-        assert not any(ld.flags & gd.ML_SOUNDBLOCK for ld in lds), (
-            "ML_SOUNDBLOCK lines need P_RecursiveSound's (sector, blocks) state; the region "
-            "model assumes a map without them")
         # -- things: the union of every single-player skill, in WAD order ----------------------
         self.things = [t for t in mw.things(M)
                        if t.type not in gd.NOT_THINGS and single_player(t)]
@@ -945,17 +945,24 @@ class World(CombatMixin):
             return a
 
         self._sound_door_edges = []
+        # M8 L0: ML_SOUNDBLOCK edges, as sector pairs: through a door or mover sector (open while its opening is
+        # positive) and static (always open: their static opening is positive)
+        self._sound_block_door_edges, static_block = [], []
         for ld in lds:
             if not ld.flags & gd.ML_TWOSIDED or not 0 <= ld.back < len(sds):
                 continue
             a, b = sds[ld.front].sector, sds[ld.back].sector
             if a == b:
                 continue
+            block = bool(ld.flags & gd.ML_SOUNDBLOCK)
             if a in doors or b in doors:
-                self._sound_door_edges.append((a, b))
+                (self._sound_block_door_edges if block else self._sound_door_edges).append((a, b))
                 continue
             if min(secs[a].ceil_h, secs[b].ceil_h) - max(secs[a].floor_h, secs[b].floor_h) > 0:
-                parent[find(a)] = find(b)
+                if block:
+                    static_block.append((a, b))
+                else:
+                    parent[find(a)] = find(b)
         roots = sorted({find(s) for s in range(len(secs)) if s not in doors},
                        key=lambda r: min(s for s in range(len(secs)) if find(s) == r))
         node_of_root = {r: k for k, r in enumerate(roots)}
@@ -966,6 +973,10 @@ class World(CombatMixin):
         for k, si in enumerate(self.door_order + self.mover_order):
             self.sector_node[si] = len(roots) + k
         self.nsound = len(roots) + len(self.door_order) + len(self.mover_order)
+        # the static block edges between DIFFERENT nodes (a marked line inside one region is passed around it)
+        self._sound_block_static_edges = sorted({tuple(sorted((self.sector_node[a], self.sector_node[b])))
+                                                 for a, b in static_block
+                                                 if self.sector_node[a] != self.sector_node[b]})
 
     # ---------------------------------------------------------------------------- level start
     def reset(self, skill: int) -> None:
@@ -1693,22 +1704,37 @@ class World(CombatMixin):
         return self.heights_now.get(s, (self.secs[s].floor_h, self.secs[s].ceil_h))
 
     def noise_alert(self, ev: Optional[TicEvents] = None) -> None:
-        """P_NoiseAlert (player, player): every sound node reachable from the player's sector
-        through open door edges hears it. Idempotent."""
+        """P_NoiseAlert (player, player): every sound node reachable from the player's sector through
+        open edges hears it -- crossing at most one ML_SOUNDBLOCK edge (M8 L0; DOOM's `soundblocks`).
+        Idempotent."""
         ws = self.ws
-        reached = {self.sector_node[self.player_sector()]}
+        blocks = {self.sector_node[self.player_sector()]: 0}     # node -> the fewest marked lines crossed
+
+        def opening(a, b):
+            (fa, ca), (fb, cb) = self._sector_hts(a), self._sector_hts(b)
+            return min(ca, cb) - max(fa, fb) > 0
+
+        def relax(na, nb, cost):
+            """carry the flood across one open edge both ways; True when a node's count fell"""
+            moved = False
+            for x, y in ((na, nb), (nb, na)):
+                if x in blocks and blocks[x] + cost <= 1 and blocks.get(y, 2) > blocks[x] + cost:
+                    blocks[y] = blocks[x] + cost
+                    moved = True
+            return moved
+
         changed = True
         while changed:
             changed = False
             for a, b in self._sound_door_edges:
-                na, nb = self.sector_node[a], self.sector_node[b]
-                if (na in reached) == (nb in reached):
-                    continue
-                (fa, ca), (fb, cb) = self._sector_hts(a), self._sector_hts(b)
-                if min(ca, cb) - max(fa, fb) > 0:
-                    reached.add(nb if na in reached else na)
-                    changed = True
-        for k in reached:
+                if opening(a, b):
+                    changed |= relax(self.sector_node[a], self.sector_node[b], 0)
+            for a, b in self._sound_block_door_edges:
+                if opening(a, b):
+                    changed |= relax(self.sector_node[a], self.sector_node[b], 1)
+            for na, nb in self._sound_block_static_edges:
+                changed |= relax(na, nb, 1)
+        for k in blocks:
             ws.snd_alert[k] = 1
         if ev is not None:
             ev.noise = True

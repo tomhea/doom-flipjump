@@ -185,7 +185,9 @@ ANG5 = 0x40000000 // 18                     # tables.h: ANG5 = ANG90 / 18 -- P_D
 ANGLE_MASK32 = 0xFFFFFFFF
 # P_TouchSpecialThing's cases for every gettable thing E1M1 holds (sprite name in the comment)
 GETTABLE = frozenset({2018, 2019, 2014, 2015, 5, 2011, 2012, 2023, 2007, 2048, 2010, 2046, 2047,
-                      17, 2008, 2049, 8, 2005, 2001, 2003, 2002})    # P9: 2003, the rocket launcher; P10: 2002
+                      17, 2008, 2049, 8, 2005, 2001, 2003, 2002,     # P9: 2003, the rocket launcher; P10: 2002
+                      13, 6, 2013, 2026})            # M8 L0 (E1M2): the red and yellow cards, the soulsphere, the map
+SOUL_HEALTH, MAX_SOUL = 100, 200            # p_inter.c: the soulsphere's give and cap (deh_soul_health, deh_max_soul)
 
 
 # ================================================================================================
@@ -392,6 +394,8 @@ class CombatMixin:
         self._level_starts: Dict[int, object] = {}
         self.pickup_z = [self._floor_at(t.x, t.y) for t in self.pickup_things]
         assert {t.type for t in self.pickup_things} <= GETTABLE
+        # M8 L0: the computer map is always taken because no level has two (P_GivePower refuses a held power)
+        assert sum(t.type == 2026 for t in self.pickup_things) <= 1
         self.dropper = [DROP_ITEM.get(gd.DROPS.get(gd.MONSTER_DOOMEDNUMS[t.type]))
                         for t in self.mon_things]
         # the exit switch: the door-style proximity box around each exit line (plan 6.7)
@@ -1991,11 +1995,17 @@ class CombatMixin:
             if not ws.p_armortype:
                 ws.p_armortype = 1
             taken = True
-        elif kind == 5:                                               # BKEY: P_GiveCard
-            if not ws.p_cards[gd.IT_BLUECARD]:
+        elif kind in (5, 13, 6):                                      # BKEY / RKEY / YKEY: P_GiveCard
+            card = {5: gd.IT_BLUECARD, 13: gd.IT_REDCARD, 6: gd.IT_YELLOWCARD}[kind]
+            if not ws.p_cards[card]:
                 ws.p_bonuscount = gd.BONUSADD                         # ... SETS the flash
-                ws.p_cards[gd.IT_BLUECARD] = 1
+                ws.p_cards[card] = 1
             taken = True
+        elif kind == 2013:                                            # SOUL (M8 L0): +100, capped at 200
+            ws.p_health = min(ws.p_health + SOUL_HEALTH, MAX_SOUL)
+            taken = True
+        elif kind == 2026:                                            # PMAP (M8 L0): P_GivePower(pw_allmap) --
+            taken = True                                              # refused only when held (one map a level)
         elif kind == 2011:                                            # STIM
             taken = self._give_body(10)
         elif kind == 2012:                                            # MEDI

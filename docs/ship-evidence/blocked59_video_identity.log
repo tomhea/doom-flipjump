@@ -1,0 +1,5 @@
+$ python scratchpad/gp/p12_events_identity.py docs/media/p12/doom_e1m1_gameplay.events.json build/doom_e1m1_blocked58.fjm build/doom_e1m1_blocked59.fjm
+build/doom_e1m1_blocked58.fjm: 1754 frames, 22,198,796,057 ops
+build/doom_e1m1_blocked59.fjm: 1754 frames, 21,675,518,042 ops
+1754 frames: EVERY FRAME IDENTICAL (pixels + palette); ops -2.36%
+rc=0

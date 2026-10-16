@@ -1,0 +1,22 @@
+Thu Oct 15 22:57:37 JDT 2026
+m2_std_gate rc=rc=0
+m3_gate rc=rc=0
+m3_selftest rc=rc=0
+p2a_gate rc=rc=0
+hurt_gate rc=rc=0
+fight_gate rc=rc=0
+die_gate rc=rc=0
+b0_v10 rc=rc=0
+gamespeed rc=rc=0
+gamespeed_trail rc=rc=0
+pinreport rc=rc=0
+poolmap rc=rc=0
+playtest rc=rc=0
+playtest_control rc=rc=1
+replay_A rc=rc=0
+replay_B rc=rc=0
+replay_C rc=rc=0
+video_identity rc=rc=0
+deg_gate rc=rc=0
+Fri Oct 16 01:16:07 JDT 2026
+ALLDONE

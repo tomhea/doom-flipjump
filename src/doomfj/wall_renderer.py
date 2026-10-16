@@ -22,7 +22,7 @@ from doomfj.lut_generator import (
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
     generate_slopediv_recip8_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
-    generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
+    generate_emit_dispatch_table_fj, generate_emit_byte_by_nibbles_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
 from doomfj.reference_model import STRAFE_MOVE                                   # M7 P4.1
 from doomfj.reference_model import (ANG90, ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_MOVE, MAX_STEP,
@@ -1296,6 +1296,9 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     # (the value is `things.thing_pos_value`, which NEW GAME's restart block bakes too -- R6)
     # M7 P5: + the MOBILES' rows (monstercode.p31_parts' `nmob`: the fireball and blood pools' runtime things nt ..),
     # zero -- a free slot's row, in no leaf list (projcode writes a live slot's whole-unit position here)
+    from doomfj.monstercode import TD_KEY_ROWS
+    assert len(things) + mobiles <= TD_KEY_ROWS, ("P13: more runtime rows than sim.thing_pass_depth's key cache holds",
+                                                  len(things) + mobiles, TD_KEY_ROWS)
     thpos = (["thpos_rt:"] + [f"    hex.vec 16, {thing_pos_value(t)}" for t in things]
              + ["    hex.vec 16, 0"] * mobiles)
     text = "\n".join([
@@ -1315,7 +1318,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     from doomfj.things import LIST_MAX_THINGS
     assert nt + mobiles <= LIST_MAX_THINGS, (
         f"{mapname} has {nt} runtime things and {mobiles} mobiles; the byte lists hold {LIST_MAX_THINGS}")
-    decls = ["cur_ss: hex.vec w/4", "tp_ret: ;0",
+    decls = ["cur_ss: hex.vec w/4", "cur_ssp: hex.vec w/4", "tp_ret: ;0",
              # the leaf's baked floor height and sprlt row base (see subsector_action)
              "ss_flr: hex.vec 4", "ss_ltb: hex.vec 4",
              # ⚠ a bare hex.vec is ZERO-filled, and one run is one frame -- fj self-modifies, so
@@ -1940,7 +1943,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         return (rm._flat_base(asset_wad, name, flat_basecache))
     cmv = colormap_values(asset_wad, lights=COLORMAP_LIGHTS)
     cm = "\n".join([
-        generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
+        generate_emit_byte_by_nibbles_fj("byte"),     # P13: two 16-entry nibble dispatches, not one 256-entry
         generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
                                         over_align=True),
     ])
@@ -2097,6 +2100,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                          static_bank=(spr_base, spr_ldbase, spr_dw),
                          **({"stats": True} if _STATS else {}))         # P10: dm_kill counts the kill
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
+    # M7 P3.3 (D3 d): the game tier's leaf walk is sim.thing_pass_depth (nearest first), which reads `cur_ssp`
+    # and not `cur_ss` (P13: the leaf code sets cur_ss only for the index-order sim.thing_pass)
+    _depth_pass = bool(_p31 and _p31.get("depth"))
     _STATS = bool(_STATS and _p31)            # P10: the stats count from the monster parts' World
     # M7 P6 (doomfj.barrelcode, the player mode "full"): the barrels, their blasts, the drops and the puffs
     _bar = _p31.get("barrel") if _p31 else None
@@ -2829,13 +2835,25 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # inside thing_load meant three `read_table_packed`s PER THING for values constant
             # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
             _m_fl = _leaf_mover(s)
-            out += [f"    hex.set w/4, cur_ss, {s}",
-                    *([f"    hex.set 4, ss_flr, {psec.floor_h & 0xFFFF}"] if _m_fl is None else
+            _ltb = _MT_LTB[rm.wall_lightnum(psec.light, 0)]
+            # P13: the leaf's registers keep a ZERO INVARIANT between leaves -- the baked constants are XORed in
+            # here and back out after the call (as the BSP partition blocks' constants are), where each was a
+            # `hex.set`: a cold zeroing dispatch per nibble in code every visited leaf runs once (16 a leaf).
+            # `cur_ss` only the index-order pass reads (sim.thing_pass); the game tier's depth pass reads
+            # `cur_ssp`, so it sets no cur_ss at all. A mover leaf's floor comes from a runtime dispatch, so it
+            # is cleared with hex.zero after the call instead of xored out.
+            out += [*([] if _depth_pass else [f"    hex.set w/4, cur_ss, {s}"]),
+                    f"    hex.xor_by w/4, cur_ssp, sshead + {s}*dw",
+                    *([f"    hex.xor_by 4, ss_flr, {psec.floor_h & 0xFFFF}"] if _m_fl is None else
                       _mover_dispatch(f"sfl{cid}", _m_fl, lambda sv: [
-                          f"    hex.set 4, ss_flr, "
+                          f"    hex.xor_by 4, ss_flr, "
                           f"{rm._seg_sector(lds, sds, sv, cmap.segs[ss.firstseg]).floor_h & 0xFFFF}"])),
-                    f"    hex.set 4, ss_ltb, {_MT_LTB[rm.wall_lightnum(psec.light, 0)]}",
-                    "    stl.fcall thing_pass_leaf, tp_ret"]
+                    f"    hex.xor_by 4, ss_ltb, {_ltb}",
+                    "    stl.fcall thing_pass_leaf, tp_ret",
+                    f"    hex.xor_by w/4, cur_ssp, sshead + {s}*dw",
+                    *([f"    hex.xor_by 4, ss_flr, {psec.floor_h & 0xFFFF}"] if _m_fl is None else
+                      ["    hex.zero 4, ss_flr"]),
+                    f"    hex.xor_by 4, ss_ltb, {_ltb}"]
         for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
             seg = cmap.segs[si]
             ld = lds[seg.linedef]
@@ -3602,7 +3620,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",
                 # M7 P3.3 (D3 d): the game tier's walk draws a leaf's runtime things nearest first
-                f"sim.thing_pass{'_depth' if (_p31 and _p31.get('depth')) else ''} throw, {_MT_NTH}, thpos_rt, "
+                f"sim.thing_pass{'_depth' if _depth_pass else ''} throw, {_MT_NTH}, thpos_rt, "
                 f"{_ANIM}, {_ANIM_SEL}, "
                 f"{'sp_lt_hi' if _ANIM else 0}"
                 # M7 P8a (C): the 9-parameter walk -- D3 a's first rank-0 row, D3 b's barrel flag cleared per record

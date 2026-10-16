@@ -1285,10 +1285,16 @@ def depth_walk(mode: str, order=None) -> bool:
     return True
 
 
+# P13: the key cache's rows -- every runtime row (things + mobiles) a leaf list can hold; wall_renderer asserts the
+# emitted thpos rows fit
+TD_KEY_ROWS = 256
 # M7 P3.3: sim.thing_pass_depth's registers (named globals: no @-local data in a game-tier macro)
 P33_DECLS = (["td_%s: hex.vec w/4" % r for r in ("head", "e", "t", "p", "q", "best", "lt", "poff", "pbase", "pptr")]
-             + ["td_pos: hex.vec 16", "td_bk: hex.vec 4", "td_lk: hex.vec 4", "td_have: hex.vec 1",
-                "td_first: hex.vec 1"])
+             + ["td_bk: hex.vec 4", "td_lk: hex.vec 4", "td_have: hex.vec 1", "td_first: hex.vec 1",
+                # P13: the selection rounds' KEY CACHE (row t at 16 nibbles: the thpos stride) and its pointer. Read
+                # and written only through td_kp (selfreset.POINTER_READ_CELLS), never reset: every row is written by
+                # a leaf's first round before a later round reads it
+                "td_kp: hex.vec w/4", "td_keys: hex.vec %d" % (16 * TD_KEY_ROWS)])
 # M7 P8a package C (docs/gp-final-plan.md 1.3): the compositor rules' cells -- `td_rk` (D3 a: sim.thing_pass_depth's
 # first rank-0 row, SET at every multi-thing leaf before its rounds read it) and `sp_ex` (D3 b: the barrel flag, 1 from a
 # barrel's xor_by block or row select to its record, 0 everywhere else -- so 0 at every frame's end). Scratch, never

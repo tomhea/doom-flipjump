@@ -470,6 +470,46 @@ def _per_entry_emit_table(label: str, values: Sequence[int], index_nibbles: int,
     return "\n".join(lines)
 
 
+def generate_emit_byte_by_nibbles_fj(label: str = "byte", nib_label: str = "bnib") -> str:
+    """P13: `<label>.emit idx` -- the same 8 output bits, lsb first, as the 256-entry EMIT table
+    (`generate_emit_dispatch_table_fj(label, range(256), index_nibbles=2)`), through TWO dispatches of ONE 16-entry
+    nibble table: the low nibble's 4 bits, then the high nibble's. The byte table's 256 handlers (9 ops each) missed
+    the cache on nearly every emit (timeobj: 16-26 ns/op where the frame averages 4); the nibble table's 16 handlers
+    stay resident. Same macro name and parameter list (rule 4): every call site is unchanged."""
+    lines = [f"// EMIT a byte as two nibble dispatches (doomfj.lut_generator, P13): {nib_label} 16 entries x 4 bits",
+             f"ns {nib_label} {{",
+             "    def emit idx @ return < hex.tables.ret, .dsp {",
+             "        hex.xor .dsp, idx",
+             "        wflip hex.tables.ret+w, return, .dsp",
+             "      return:",
+             "        wflip hex.tables.ret+w, return",
+             "    }",
+             "    def init @ switch, handlers, clean, end < hex.tables.ret > dsp {",
+             "        ;end",
+             "      dsp: ;switch",
+             "        pad 16",
+             "      switch:"]
+    for d in range(16):
+        lines.append(f"        ;handlers + {d}*5*dw")
+    lines.append("      handlers:")
+    for d in range(16):
+        for bit in range(4):
+            lines.append(f"        stl.output_bit {(d >> bit) & 1}")
+        lines.append(f"        ;clean + {d}*dw")
+    lines += ["      clean:",
+              "        hex.tables.clean_table_entry__table 16, .dsp, hex.tables.ret",
+              "      end:",
+              "    }",
+              "}", f"{nib_label}.init",
+              f"ns {label} {{",
+              "    def emit idx {",
+              f"        {nib_label}.emit idx",
+              f"        {nib_label}.emit idx + dw",
+              "    }",
+              "}", ""]
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # D3 +4-offset packed-byte deposit
 # ---------------------------------------------------------------------------
@@ -895,13 +935,20 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
         colour_pass[b] = ", ".join(cargs)
         params = (f"ycur, wlo, whi, {', '.join(cargs)}, cmidx, wlast" if win
                   else f"ycur, fstart, {', '.join(cargs)}, cmidx, last")
+        # P13: the run's colormap row is set ONCE per cycle (at `entry:`, run 0's) and every later run reaches its
+        # own by xoring the compile-time difference from the previous run's -- where each run did a `hex.set 2`
+        # (two cold zeroing dispatches) before its cm.emit. The row is in place before the run's compare, so
+        # both of its arms (emit, or clamp and leave through the exit) see it as the set did.
         body = [f"    def {b} {params} @ {', '.join(labs)} {{",
                 "      entry:",
-                f"        hex.mov 2, cmidx, {'wall_lit2' if runs[0][2] else 'wall_lit'}"]
+                f"        hex.mov 2, cmidx, {'wall_lit2' if runs[0][2] else 'wall_lit'}",
+                f"        hex.set 2, cmidx + 2*dw, {runs[0][1]}"]
         for k, (ln, row, alt) in enumerate(runs):
             nxt = f"n{k}"
             if k > 0 and alt != runs[k - 1][2]:
                 body.append(f"        hex.mov 2, cmidx, {'wall_lit2' if alt else 'wall_lit'}")
+            if k > 0 and row != runs[k - 1][1]:
+                body.append(f"        hex.xor_by 2, cmidx + 2*dw, {row ^ runs[k - 1][1]}")
             body.append(f"        hex.add_constant 2, ycur, {ln}")
             if win:
                 body += [f"        hex.cmp 2, ycur, wlo, {nxt}, {nxt}, t{k}",
@@ -911,11 +958,9 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
                 body.append(f"        hex.cmp 2, ycur, fstart, e{k}, l{k}, l{k}")
             body += [f"      e{k}:",
                      "        byte.emit ycur",
-                     f"        hex.set 2, cmidx + 2*dw, {row}",
                      "        cm.emit cmidx",
                      f"        ;{nxt}",
                      f"      l{k}:",
-                     f"        hex.set 2, cmidx + 2*dw, {row}",
                      f"        ;{'wlast' if win else 'last'}",
                      f"      {nxt}:"]
         body += ["        ;entry",                      # cycle the pattern down the wall

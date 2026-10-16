@@ -56,7 +56,7 @@ from pathlib import Path
 import pytest
 
 from doomfj.fixedpoint import _signed, fixed_mul
-from doomfj.mapcompiler import (
+from doomfj.mapcompiler import (is_axis_node,
     ANG45_BAM, NF_SUBSECTOR, CompiledMap, Node, Seg, SubSector,
     assert_thing_live_survives_prune, bake_bsp, bbox_gate_boxes, bbox_wedge_miss,
     compile_geometry_streams, compile_map, seg_affine_coeffs, seg_sector,
@@ -642,13 +642,17 @@ def test_descend_code_references_only_labels_the_main_walk_emits(level):
     main_defs = set(_label_defs(main))
     assert _unresolved(dsc, WALK_EXTERNALS, main_defs) == [], "the descent references labels nobody emits"
     borrowed = {r for r in _label_refs(dsc) if r in main_defs}
+    # P13: an AXIS node tests its side inline (mapcompiler.axis_side_lines, the shared `_axd` scratch), so the
+    # descent borrows a partition block for every OTHER node, and the shared axis leaves and cells for the axis ones
+    general = [i for i, n in enumerate(cmap.nodes) if not is_axis_node(n)]
+    assert 0 < len(general) < len(cmap.nodes)
     for needed in ("e1m1_bspcode_pos_leaf", "e1m1_bspcode_pos_ret", "e1m1_bspcode_xbret",
-                   "e1m1_bspcode_side", "e1m1_bspcode_node0_partition",
-                   f"e1m1_bspcode_node{len(cmap.nodes) - 1}_partition"):
+                   "e1m1_bspcode_side", "e1m1_bspcode_axs", "e1m1_bspcode_axc", "e1m1_bspcode_axr",
+                   "e1m1_bspcode_axx_leaf", "e1m1_bspcode_axy_leaf", f"e1m1_bspcode_node{general[0]}_partition",
+                   f"e1m1_bspcode_node{general[-1]}_partition"):
         assert needed in borrowed, f"{needed} is no longer shared with the main walk"
-    assert sum(1 for i in range(len(cmap.nodes))
-               if f"e1m1_bspcode_node{i}_partition" in borrowed) == len(cmap.nodes), (
-        "the descent fcalls a partition block for only SOME nodes -- it fcalls one per node")
+    assert {i for i in range(len(cmap.nodes)) if f"e1m1_bspcode_node{i}_partition" in borrowed} == set(general), (
+        "the descent fcalls a partition block for a node set other than the non-axis nodes")
     # ⚠ the checker must be able to fail: break one definition and require it to notice.
     broken = main.replace("e1m1_bspcode_pos_leaf:", "e1m1_bspcode_posleaf:", 1)
     assert _unresolved(dsc, WALK_EXTERNALS, set(_label_defs(broken))) == ["e1m1_bspcode_pos_leaf"]
@@ -801,8 +805,10 @@ def test_the_label_closure_check_can_fail():
     cmap = _balanced_map(3)
     text = _bsp_as_code("bal", cmap, done_label="bsp_done")
     assert _unresolved(text, WALK_EXTERNALS) == []
-    renamed = text.replace("bal_bspcode_pos_leaf:", "bal_bspcode_typo:", 1)
-    assert _unresolved(renamed, WALK_EXTERNALS) == ["bal_bspcode_pos_leaf"]
+    # P13: the balanced map's nodes are all axis-aligned, and an axis node tests its side inline (no pos_leaf fcall),
+    # so the control renames a label the walk itself jumps to -- the root's front branch
+    renamed = text.replace("bal_bspcode_node0_far:", "bal_bspcode_typo:", 1)
+    assert _unresolved(renamed, WALK_EXTERNALS) == ["bal_bspcode_node0_far"]
     doubled = text + "\nbal_bspcode_xbret: ;0\n"
     assert [k for k, v in Counter(_label_defs(doubled)).items() if v > 1] == ["bal_bspcode_xbret"]
 
@@ -822,7 +828,12 @@ def test_inline_side_changes_only_the_node_body(level):
                    if f"e1m1_bspcode_node{i}_partition" in d) == len(cmap.nodes), (
             f"{mode}: a node lost its partition block")
         assert _unresolved(text, WALK_EXTERNALS) == []
-    assert shared.count("stl.fcall e1m1_bspcode_pos_leaf") == len(cmap.nodes)
+    # P13: an AXIS node (dx or dy 0) tests its side inline -- one 5-nibble subtract and a sign -- so the shared
+    # leaf is fcalled by the other nodes only, and every axis node carries the inline test instead
+    axis = [i for i, n in enumerate(cmap.nodes) if (n.dx == 0) != (n.dy == 0)]
+    assert len(axis) == 418, len(axis)
+    assert shared.count("stl.fcall e1m1_bspcode_pos_leaf") == len(cmap.nodes) - len(axis)
+    assert all(f"e1m1_bspcode_axb{i}:" in shared for i in axis)
     assert inline.count("stl.fcall e1m1_bspcode_pos_leaf") == 0, (
         "inline_side still fcalls the shared side-test leaf -- it is not inlining anything")
     for nm in ("idxv", "idyv", "ip1", "ip2", "is1", "is2"):

@@ -248,11 +248,35 @@ def test_bsp_code_e1m1_order_byte_exact_vs_oracle(tmp_path):
     assemble_s = time.perf_counter() - t
     assert assemble_s < 120, f"E1M1 BSP-as-code assemble {assemble_s:.0f}s exceeds the R-2 CI guard"
     rm = ReferenceModel()
-    for vx, vy in [(-416, 256), (0, 256), (256, -256), (2048, -3680)]:
+    # P13: the AXIS nodes test their side inline; a point ON an axis partition (side 0: front) is their tie, so the
+    # view also stands on the root's line and on two deeper axis nodes' start points
+    axis = [n for n in cmap.nodes if (n.dx == 0) != (n.dy == 0)]
+    ties = [(n.x, n.y) for n in (cmap.nodes[cmap.root], axis[0], axis[len(axis) // 2])]
+    views = [(-416, 256), (0, 256), (256, -256), (2048, -3680)]
+    for vx, vy in views + ties:
         expected = "".join(f"{s:04x}\n" for s in rm.bsp_render_order(cmap, vx, vy)).encode()
         ok = fj.run_test_output(out, f"{vx}\n{vy}\n".encode(), expected,
                                 should_raise_assertion_error=False)
         assert ok, f"E1M1 BSP-as-code order @ ({vx},{vy}) != bsp_render_order"
+    # CONTROL (R9): the root's axis test with its two branches swapped must part from the oracle somewhere
+    root = cmap.root
+    rn = cmap.nodes[root]
+    assert (rn.dx == 0) != (rn.dy == 0), "the control needs an axis root"
+    src = p.read_text(encoding="utf-8")
+    # the root's polarity (mapcompiler.axis_side_lines: back on 2 = negative, or on 1 = positive) swapped
+    line = next(c for c in (f"hex.if_flags e1m1_bspcode_axs, {m}, e1m1_bspcode_node{root}_far, e1m1_bspcode_axb{root}"
+                            for m in ("0x0004", "0x0002")) if c in src)
+    bad = src.replace(line, line.replace("0x0004", "0xSWAP").replace("0x0002", "0x0004").replace("0xSWAP", "0x0002"), 1)
+    assert bad != src
+    pb = tmp_path / "e1m1_bsp_bad.fj"
+    pb.write_text(bad, encoding="utf-8")
+    outb = tmp_path / "e1m1_bsp_bad.fjm"
+    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(),
+                 pb.resolve()], outb, memory_width=W, print_time=False)
+    parted = [v for v in views if not fj.run_test_output(
+        outb, f"{v[0]}\n{v[1]}\n".encode(),
+        "".join(f"{s:04x}\n" for s in rm.bsp_render_order(cmap, *v)).encode(), should_raise_assertion_error=False)]
+    assert parted, "the swapped root's walk still matched the oracle: the order check is vacuous"
 
 
 def test_bsp_code_node_consts_self_zero_after_walk(tmp_path):
@@ -333,3 +357,47 @@ def test_w1_x1_fits_two_nibbles_so_the_narrow_move_is_equivalent():
     # earlier predicate `not 0 <= v <= VIEW_W` was not a real control -- CR-2026-09-07.)
     assert any(v < 0 for v in outside), (
         "expected the -1 sentinels outside the window; got %r" % sorted(set(outside))[:5])
+
+
+def test_bsp_descend_point_location_exact_vs_oracle(tmp_path):
+    """P13: the DESCEND pre-walk (R_PointInSubsector: the eye's leaf, the collision's candidate leaves) runs the axis
+    nodes' one-subtract side test too (mapcompiler.axis_side_lines). RUN in fj on the real E1M1 tree: the leaf it lands
+    in equals reference_model.point_in_subsector at points spread over the map AND at points ON axis partitions (the
+    tie: side 0 is front). CONTROL (R9): the root's axis test with its two branches swapped must land elsewhere."""
+    import random
+    from doomfj.mapcompiler import _bsp_descend_code, is_axis_node
+    cmap = bake_bsp(WadFile.from_path(E1M1), "E1M1")
+    rm = ReferenceModel()
+
+    def program(main, dsc):
+        return "\n".join([
+            "stl.startup_and_init_all",
+            "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
+            ";e1m1_dsc_walk", "bsp_done:", "stl.loop", "bad:", "stl.loop",
+            "vx: hex.vec 10", "vy: hex.vec 10", hoisted_scratch_fj(), main, dsc,
+        ]) + "\n"
+    main = _bsp_as_code("e1m1", cmap, done_label="bsp_done")
+    dsc = _bsp_descend_code("e1m1", cmap, lambda s: [f"    hex.set 4, dscleaf, {s}", "    hex.print_as_digit 4, dscleaf, 0",
+                                                     "    stl.output 10"], done_label="bsp_done")
+    rnd = random.Random(0x13)
+    pts = [(rnd.randint(-800, 3200), rnd.randint(-3700, 2600)) for _ in range(40)]
+    axis = [n for n in cmap.nodes if is_axis_node(n)]
+    pts += [(n.x, n.y) for n in axis[::40]] + [(n.x, n.y + 7) if n.dx == 0 else (n.x + 7, n.y) for n in axis[::40]]
+    consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
+
+    def run(text, name):
+        p = tmp_path / f"{name}.fj"
+        p.write_text(text + "dscleaf: hex.vec 4\n", encoding="utf-8")
+        out = tmp_path / f"{name}.fjm"
+        fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(),
+                     p.resolve()], out, memory_width=W, print_time=False)
+        # one point a run (as the walk test above): the program stops after its walk
+        return all(fj.run_test_output(out, f"{x}\n{y}\n".encode(), f"{rm.point_in_subsector(cmap, x, y):04x}\n".encode(),
+                                      should_raise_assertion_error=False) for x, y in pts)
+    assert run(program(main, dsc), "dsc"), "the descend walk's leaf != point_in_subsector"
+    root = cmap.root
+    line = next(c for c in (f"hex.if_flags e1m1_bspcode_axs, {m}, e1m1_dsc_node{root}_far, e1m1_dsc_axb{root}"
+                            for m in ("0x0004", "0x0002")) if c in dsc)
+    swapped = line.replace("0x0004", "0xSWAP").replace("0x0002", "0x0004").replace("0xSWAP", "0x0002")
+    assert not run(program(main, dsc.replace(line, swapped, 1)), "dsc_bad"), (
+        "the swapped root still located every point: the check is vacuous")

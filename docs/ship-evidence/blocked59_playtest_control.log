@@ -1,0 +1,7 @@
+$ python scratchpad/gp/p12_playtest.py build/doom_e1m1_blocked58.fjm /c/Users/tomhe/Documents/doom-flipjump/build/doom_e1m1_onepass56.fjm --only tour4
+A build/doom_e1m1_blocked58.fjm (sha256 c5c3d3b845f743f0)
+B C:/Users/tomhe/Documents/doom-flipjump/build/doom_e1m1_onepass56.fjm (sha256 63869ab4be6f2ddc)
+tour4     104 frames  DIFFER at frame 88 (16 frames)  ops/frame A 17,260,957  B 18,858,817  (+9.26%)  68s
+
+1 sessions, 104 frames each binary: DIFFER: tour4; ops over all sessions A 1,795,139,535 B 1,961,317,010 (+9.26%)
+rc=1

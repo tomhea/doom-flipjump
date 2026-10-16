@@ -489,10 +489,13 @@ def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: st
     lines.append(f"    ;{D}_node{root}")
     for i, n in enumerate(bsp.nodes):
         lines.append(f"{D}_node{i}:")
-        lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")     # SET the shared partition consts
-        lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
-        lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")     # CLEAR (involution)
-        lines.append(f"    hex.if0 2, {L}_side, {D}_node{i}_far")
+        if is_axis_node(n):                                  # P13: the axis node's one-subtract side test
+            lines += axis_side_lines(L, D, i, n, f"{D}_node{i}_far")
+        else:
+            lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")     # SET the shared partition consts
+            lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
+            lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")     # CLEAR (involution)
+            lines.append(f"    hex.if0 2, {L}_side, {D}_node{i}_far")
         for child, tag in ((n.left, ""), (n.right, "f")):       # back -> left is near; front -> right
             if tag == "f":
                 lines.append(f"{D}_node{i}_far:")
@@ -503,6 +506,44 @@ def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: st
             else:
                 lines.append(f"    ;{D}_node{child}")
     return chr(10).join(lines) + chr(10)
+
+
+def is_axis_node(n) -> bool:
+    """P13: a partition parallel to an axis (exactly one of dx, dy zero) -- its side test is one subtract"""
+    return (n.dx == 0) != (n.dy == 0)
+
+
+def axis_side_lines(L: str, P: str, i: int, n, far: str) -> list:
+    """P13 (the AXIS node, 418 of E1M1's 681): side = dx*(vy-py) - dy*(vx-px) has ONE term, so its sign is the sign of
+    ONE subtract -- no products. A vertical partition (dx 0) is back iff dy*(vx-px) < 0, a horizontal one (dy 0) iff
+    dx*(vy-py) > 0; 0 (on the line) is front, as `proj.point_on_side_leaf`'s -- the oracle's `_point_side`, by algebra.
+    SMALL by construction (blocked59's inline subtract at every node of every walk grew the image by 1.5M words and
+    its per-op rate by as much as it saved in ops): the node XORs -c into `<L>_axc` (its zero invariant, as the
+    partition blocks' -- XORed back right after the call), fcalls ONE shared leaf (`axis_leaves`) that classifies
+    vx - c (or vy - c) into `<L>_axs` (0 on the line, 1 positive, 2 negative), and branches on it with one dispatch.
+    Jumps to `far` on front, FALLS THROUGH on back. `P` is the caller's label prefix (the main walk and each descend
+    pre-walk give the same node index their own labels)."""
+    assert is_axis_node(n), n
+    if n.dx == 0:
+        leaf, c, back_neg = "axx", n.x, n.dy > 0
+    else:
+        leaf, c, back_neg = "axy", n.y, n.dx < 0
+    k = (-c) & 0xFFFFF
+    return [f"    hex.xor_by 5, {L}_axc, {k}", f"    stl.fcall {L}_{leaf}_leaf, {L}_axr", f"    hex.xor_by 5, {L}_axc, {k}",
+            f"    hex.if_flags {L}_axs, {0x0004 if back_neg else 0x0002:#06x}, {far}, {P}_axb{i}",
+            f"{P}_axb{i}:"]                            # back: falls through
+
+
+def axis_leaves(L: str) -> list:
+    """P13: the axis nodes' shared side classifier -- vx (axx) or vy (axy) plus `<L>_axc` (the node's -c) into `<L>_axd`,
+    5 nibbles (vx / vy are whole map units sign-extended from int16: their low 5 nibbles are the exact value, and
+    |d| <= 65535 cannot wrap), then `<L>_axs` = 0 / 1 / 2 for zero / positive / negative"""
+    return [f"{L}_axx_leaf:", f"    hex.mov 5, {L}_axd, vx", f"    ;{L}_ax_tail",
+            f"{L}_axy_leaf:", f"    hex.mov 5, {L}_axd, vy",
+            f"{L}_ax_tail:", f"    hex.add 5, {L}_axd, {L}_axc", f"    hex.sign 5, {L}_axd, {L}_ax_neg, {L}_ax_nn",
+            f"{L}_ax_neg:", f"    hex.set 1, {L}_axs, 2", f"    stl.fret {L}_axr",
+            f"{L}_ax_nn:", f"    hex.if0 5, {L}_axd, {L}_ax_zero", f"    hex.set 1, {L}_axs, 1", f"    stl.fret {L}_axr",
+            f"{L}_ax_zero:", f"    hex.set 1, {L}_axs, 0", f"    stl.fret {L}_axr"]
 
 
 def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
@@ -661,6 +702,8 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             e(f"{L}_imm{i}:")                                 # (-,-): back = p2 > p1
             e(f"    hex.cmp 8, {L}_ip1, {L}_ip2, {L}_ib{i}, {L}_node{i}_far, {L}_node{i}_far")
             e(f"{L}_ib{i}:")                                  # back path falls through
+        elif is_axis_node(n):
+            lines += axis_side_lines(L, L, i, n, f"{L}_node{i}_far")
         else:
             lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")  # SET cpx/cpy/cdx/cdy (0 -> vals via xor_by)
             lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
@@ -694,6 +737,8 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
         for nm in ("sign_dx", "sign_dy"):
             lines.append(f"{L}_{nm}: hex.vec 1")           # shared per-node partition sign flags
         lines.append(f"{L}_side: hex.vec 2")
+        lines += axis_leaves(L)                          # P13: the axis nodes' shared classifier (never fallen into)
+        lines += [f"{L}_axc: hex.vec 5", f"{L}_axd: hex.vec 5", f"{L}_axs: hex.vec 1", f"{L}_axr: ;0"]
         if inline_side:                                    # M13-inlinenodes shared scratch
             for nm, wd in (("idxv", 10), ("idyv", 10), ("ip1", 8), ("ip2", 8), ("is1", 1), ("is2", 1)):
                 lines.append(f"{L}_{nm}: hex.vec {wd}")

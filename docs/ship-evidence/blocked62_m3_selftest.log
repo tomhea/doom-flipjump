@@ -1,0 +1,25 @@
+$ python scratchpad/m3_gate.py --fjm build/doom_e1m1_blocked62.fjm --labels scratchpad/12m/atlas/blocked62.labels.tsv.gz --selftest
+fjm    : build/doom_e1m1_blocked62.fjm
+menu   : ['DOOM ON FLIPJUMP', '', 'NEW GAME', 'HELP', 'EXIT']   colours bg=0 text=4 hi=176 credit=101
+skills : ['EASY', 'MEDIUM', 'HARD'] -- hidden [42, 41, 22]; the boot skill is hard
+script : boot menu (no game): esc@2 no rule, HELP/EXIT @3-4, clamp @7 -> the skill screen @8 (medium), NEW GAME at easy@10 -> walk -> enter@14 (RESUME, W held) -> esc@17 -> the skill screen @22, clamp both ends, back, RESUME @28 (clamp @29), NEW GAME at hard@32, medium@38 -> the help from the world @40 (W held) -> esc@42 -> the menu's help @47, h@49 .. esc@55 -> the world's help @56-57 -> P9: EXIT @62, clamp @63, its help @66-67, esc to the world @69, enter on EXIT @75: the HALT
+  310,571,093 ops -> 75 frames
+  frame  0 world hard    (-416.000, 256.000)  !! 15036 px DIFFER  state ok
+  -- stopping: once a frame is wrong the later ones compare nothing useful
+
+  CONTROL: menu frames 0, world frames 1, frames that moved the player 0
+  CONTROL: the player did NOT move during the 3 menu frames with W held: ok
+  CONTROL: the screens shown: main menu !! no, the skill screen at highlights [] of 3
+  CONTROL (P3.4): the main menu on HELP !! no, the help from the menu !! no, from the world !! no
+  CONTROL (P10): the main menu's pictures without a game !! no -- missing [(0, None, 0), (5, None, 0), (6, None, 0)], with one !! no -- missing [(0, None, 1), (5, None, 1), (6, None, 1)], RESUME highlighted !! no -- missing [(7, None, 1)]
+  CONTROL (P3.4): the player did NOT move during the 2 help frames with W held: ok
+  CONTROL (P3.4): the help closed back to the world (frame 42) and to the main menu on HELP (frame 49): yes
+  CONTROL: the first NEW GAME found the player walked away (yes), and every NEW GAME frame is the spawn view (yes)
+  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: !! no -- the skills cannot be told apart here
+  CONTROL: distinct pictures: 24 of 75
+  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, g_live, every door's cells) equals the oracle's: !! only 1 of 75 frames were checked
+  M7 P7: the mirror's player died on 0 frames -- none, as this walk expects
+  P9 HALT: the program HALTED after 75 frames (cause [0]); the oracle halts at frame 75
+
+SELFTEST (every frame claimed to be a world frame): PASS -- the gate rejected it at frame 0, where it must
+rc=0

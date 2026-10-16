@@ -131,6 +131,8 @@ MUTS = {
     # P12: thing_int_read without its skip -- y's FRACTION read as its integer part
     "yfrac": ("        hex.ptr_add pptr, 4\n        rep(4, i) hex.read_hex_and_inc mt_dy",
               "        rep(4, i) hex.read_hex_and_inc mt_dy"),
+    # P13: the key cache written by no round -- the later rounds read zero (or a former record's) keys
+    "nocache": ("        rep(4, i) hex.write_hex_and_inc td_kp, mt_d + i*dw\n", ""),
     "tie": ("        hex.cmp 4, mt_d, td_bk, take, next, next   //", "        hex.cmp 4, mt_d, td_bk, take, take, next   //"),
     "nostop": ("      round:\n        hex.if1 1, tstop, done\n", "      round:\n"),
     "nostop1": ("      single:                                  // one thing: as thing_pass\n"
@@ -154,7 +156,7 @@ MUTS_D3 = {
 }
 CONTROLS_D3 = {"rank_off": "order", "rank_swap": "order", "ex_round": "ex", "ex_single": "ex"}
 # what each control must break: the ORDER (registers still clear), or the CLEAR of sp_lt alone (order intact)
-CONTROLS = {"first": "order", "nody": "order", "yfrac": "order", "tie": "order", "nostop": "order",
+CONTROLS = {"first": "order", "nody": "order", "yfrac": "order", "nocache": "order", "tie": "order", "nostop": "order",
             "nostop1": "order", "narrow": "clear"}
 
 
@@ -178,7 +180,8 @@ def _program(mut=None, rk0=0):
     for t in range(NT):
         body += ["hex.input 4, thpos_rt + %d*dw" % (16 * t), "hex.input 4, thpos_rt + %d*dw" % (16 * t + 8)]
     for leaf in WALK:
-        body += ["hex.set w/4, cur_ss, %d" % leaf, "stl.fcall tpd_leaf, tp_ret", "stl.output 124",
+        body += ["hex.set w/4, cur_ss, %d" % leaf, "hex.set w/4, cur_ssp, sshead + %d*dw" % leaf,   # P13: as the leaf's code
+                 "stl.fcall tpd_leaf, tp_ret", "stl.output 124",
                  *["hex.print_as_digit %d, %s, 0" % (n, r) for r, n in regs], "stl.output 59"]
     body += ["stl.output 10", ";loop", "done:", "stl.loop",
              "tpd_leaf:", "sim.thing_pass_depth throw, 1, thpos_rt, 0, 0, 0, 0" + (", %d, 1" % rk0 if rk0 else ""),
@@ -193,7 +196,7 @@ def _program(mut=None, rk0=0):
              "throw:", *[";0"] * (17 * 16),
              byte_array_decl("sshead", head, NLEAF + 1), byte_array_decl("thnext", nxt, NT + 1),
              "thpos_rt: hex.vec %d" % (16 * NT),
-             "rmagic: hex.vec 2", "viewx: hex.vec 8", "viewy: hex.vec 8", "cur_ss: hex.vec w/4", "tpd_k: hex.vec 2",
+             "rmagic: hex.vec 2", "viewx: hex.vec 8", "viewy: hex.vec 8", "cur_ss: hex.vec w/4", "cur_ssp: hex.vec w/4", "tpd_k: hex.vec 2",
              "tp_ret: ;0", "thing_ret: ;0", "tstop: hex.vec 1", "ss_flr: hex.vec 4", "sp_ti: hex.vec w/4",
              *["%s: hex.vec %d" % (r, n) for r, n in regs],
              *MC.P33_DECLS, *(MC.D3_DECLS[:1] if rk0 else ()),        # td_rk (sp_ex is among `regs`)

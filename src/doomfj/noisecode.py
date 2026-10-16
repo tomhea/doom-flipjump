@@ -89,6 +89,11 @@ def noise_leaf_lines(w) -> List[str]:
     n = w.nsound
     node_of = list(w.sector_node)
     assert max(node_of) < n
+    # M8 L0: the model floods across ML_SOUNDBLOCK edges with DOOM's `soundblocks` state; this flood does not yet
+    # (M8 L5), so a map with any marked line must not build a binary that would hear differently
+    assert not (w._sound_block_door_edges or w._sound_block_static_edges), (
+        "ML_SOUNDBLOCK edges need the block-state flood (M8 L5)", len(w._sound_block_door_edges),
+        len(w._sound_block_static_edges))
     out = ["// M7 P4.2b (doomfj.noisecode): P_NoiseAlert -- the player's node, the flood through the open edges",
            "nz_leaf:",
            "    hex.zero 10, ptx", "    hex.mov 4, ptx, viewx + 4*dw", "    hex.sign_extend 10, 4, ptx",

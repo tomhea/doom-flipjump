@@ -549,29 +549,54 @@ def exit_boxes(lds, verts, rng: int = USE_RANGE) -> list:
 
 
 def door_contact_geo(secs, lds, sds, verts) -> dict:
-    """M7 P2b: `{door sector: (rect, lines)}` -- the door's rectangle `(x0, y0, x1, y1)` and its
-    two-sided lines as `(axis, coord, lo, hi)` ("y": y = coord, x in [lo, hi]), for `touches_door`.
-    Every E1M1 door is an axis-aligned rectangle of four axis-aligned lines (asserted)."""
+    """M7 P2b: `{door sector: (area, lines)}` for `touches_door`. `area` is the door's rectangle `(x0, y0, x1, y1)`
+    when the sector is an axis-aligned rectangle (every E1M1 door: its lines all on its bounding box), else
+    `("poly", edges)` with every boundary line as `(x1, y1, x2, y2)` (M8 L0: E1M2's doors 299 and 318 have slanted
+    sides). `lines` are its two-sided lines: `(axis, coord, lo, hi)` for an axis-aligned one ("y": y = coord, x in
+    [lo, hi]), `("d", x1, y1, x2, y2)` for a slanted one."""
     tbl = door_states(secs, lds, sds)
     out = {}
+
+    def xy(v):
+        return (verts[v].x, verts[v].y) if hasattr(verts[v], "x") else tuple(verts[v][:2])
     for si in sorted(tbl):
         mine = [ld for ld in lds if sds[ld.front].sector == si
                 or (ld.back not in (-1, 0xFFFF) and ld.back < len(sds) and sds[ld.back].sector == si)]
-        pts = [(verts[v].x, verts[v].y) if hasattr(verts[v], "x") else tuple(verts[v][:2])
-               for ld in mine for v in (ld.v1, ld.v2)]
+        pts = [xy(v) for ld in mine for v in (ld.v1, ld.v2)]
         xs, ys = [x for x, _ in pts], [y for _, y in pts]
-        lines = []
+        x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+        lines, rect = [], True
         for ld in mine:
+            (ax, ay), (bx, by) = xy(ld.v1), xy(ld.v2)
+            if not ((ax == bx and ax in (x0, x1)) or (ay == by and ay in (y0, y1))):
+                rect = False                            # a line off the bounding box: not a rectangle
             if ld.back in (-1, 0xFFFF) or ld.back >= len(sds):
                 continue                                 # a track wall: nothing stands across it
-            (ax, ay), (bx, by) = [(verts[v].x, verts[v].y) if hasattr(verts[v], "x")
-                                  else tuple(verts[v][:2]) for v in (ld.v1, ld.v2)]
-            assert ax == bx or ay == by, "door %d line is not axis-aligned" % si
-            lines.append(("y", ay, min(ax, bx), max(ax, bx)) if ay == by
-                         else ("x", ax, min(ay, by), max(ay, by)))
-        assert len(mine) == 4, "door %d is not a four-line rectangle" % si
-        out[si] = ((min(xs), min(ys), max(xs), max(ys)), lines)
+            if ay == by:
+                lines.append(("y", ay, min(ax, bx), max(ax, bx)))
+            elif ax == bx:
+                lines.append(("x", ax, min(ay, by), max(ay, by)))
+            else:
+                lines.append(("d", ax, ay, bx, by))
+        area = (x0, y0, x1, y1) if rect else ("poly", tuple(xy(ld.v1) + xy(ld.v2) for ld in mine))
+        out[si] = (area, lines)
     return out
+
+
+def _inside_poly(edges, x16: int, y16: int) -> bool:
+    """the 16.16 point STRICTLY inside the polygon of `edges` (map units): an even-odd crossing count on exact integers;
+    a point on an edge is not inside (as `touches_door`'s strict rectangle test)"""
+    inside = False
+    for ax, ay, bx, by in edges:
+        ax, ay, bx, by = ax << 16, ay << 16, bx << 16, by << 16
+        cr = (bx - ax) * (y16 - ay) - (by - ay) * (x16 - ax)
+        if cr == 0 and min(ax, bx) <= x16 <= max(ax, bx) and min(ay, by) <= y16 <= max(ay, by):
+            return False                                 # on the boundary
+        if (ay > y16) != (by > y16):
+            # the edge crosses the horizontal through the point: is the crossing to the point's right?
+            if (cr > 0) == (by > ay):
+                inside = not inside
+    return inside
 
 
 def touches_door(geo, x16: int, y16: int, r16: int) -> bool:
@@ -581,11 +606,29 @@ def touches_door(geo, x16: int, y16: int, r16: int) -> bool:
     line is `coord - r < c < coord + r` across it and the extent's `lo - r < o < hi + r` along it,
     all strict -- or its centre is strictly inside the door's rectangle (a 32-thick door holds a
     centred 32-wide box whose edges lie ON both lines). The model's `door_touched` and the fj
-    (`doorcode.door_contact_lines`) are this."""
-    (x0, y0, x1, y1), lines = geo
-    if (x0 << 16) < x16 < (x1 << 16) and (y0 << 16) < y16 < (y1 << 16):
-        return True
-    for axis, coord, lo, hi in lines:
+    (`doorcode.door_contact_lines`) are this. M8 L0: a slanted line is straddled when the bboxes overlap (strict) and
+    the box's corners lie strictly on both sides of it; a non-rectangular door's inside is its polygon's."""
+    area, lines = geo
+    if area[0] == "poly":
+        if _inside_poly(area[1], x16, y16):
+            return True
+    else:
+        x0, y0, x1, y1 = area
+        if (x0 << 16) < x16 < (x1 << 16) and (y0 << 16) < y16 < (y1 << 16):
+            return True
+    for ln in lines:
+        if ln[0] == "d":
+            _, ax, ay, bx, by = ln
+            ax, ay, bx, by = ax << 16, ay << 16, bx << 16, by << 16
+            if not (min(ax, bx) - r16 < x16 < max(ax, bx) + r16 and min(ay, by) - r16 < y16 < max(ay, by) + r16):
+                continue
+            sides = {(bx - ax) * (cy - ay) - (by - ay) * (cx - ax) > 0
+                     for cx in (x16 - r16, x16 + r16) for cy in (y16 - r16, y16 + r16)
+                     if (bx - ax) * (cy - ay) - (by - ay) * (cx - ax) != 0}
+            if len(sides) == 2:
+                return True
+            continue
+        axis, coord, lo, hi = ln
         c, o = (y16, x16) if axis == "y" else (x16, y16)
         if (coord << 16) - r16 < c < (coord << 16) + r16 and (lo << 16) - r16 < o < (hi << 16) + r16:
             return True

@@ -50,6 +50,10 @@ def _e1m1_assets(w: WadFile, MAP: str = MAP):
             u = t.upper()
             if u and u != "-" and u in defs and u not in walls:
                 walls.append(u)
+    # M8: the SKY texture -- a sky ceiling (F_SKY1) draws SKY1, which no sidedef need name (E1M1's walls happen to, E1M2's
+    # do not: without this its 52 sky ceilings had no texture in the fixture)
+    if any(s.ceil_tex.upper() == "F_SKY1" for s in w.sectors(MAP)) and "SKY1" in defs and "SKY1" not in walls:
+        walls.append("SKY1")
     flats = []
     for s in w.sectors(MAP):
         for f in (s.floor_tex, s.ceil_tex):

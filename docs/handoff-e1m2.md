@@ -77,3 +77,35 @@ B0 on its set, gamespeed, msframe, rebuild).
 - The computer map is picked up and does nothing (there is no automap).
 - Deathmatch / co-op starts and things are ignored (single player only, as E1M1).
 - The scrolling wall (48, two lines): decided in L5 -- animated if cheap, else static.
+
+## 4. The width plan for L1 (analysis 2026-10-16, read-only, at be8f2cc)
+
+**(A) Plane-pair ids: `PID_NIBBLES=3` (`PID_BYTES=2`).** Already width-generic (verified by reading): the pclm claim/step,
+pval8/cpid/p2_*pid, lines_pid_ids*/lines_pid_addrs, the V5 ditto compares, skypid, ts_piece_wr, lines_steps_load2,
+seg_pid/seg_bpid. NOT generic, to change:
+1. **sfbase**: `sfbase[x]` is read at `flagp + off` (one byte). Make it BYTE-PLANAR: keep `sfbase` as the LOW bytes and add
+   `sfbhi` (`[VIEW_W ceiling hi][VIEW_W floor hi]`) after `sprflag`, only when PID_BYTES==2 -- the high byte is always at the
+   low byte + 3*VIEW_W, so `ts_base_store` / `lines_base_split` add one `ptr_add 3*VIEW_W` + one byte under `rep(PID_BYTES-1)`
+   (zero ops on E1M1); the assert at the sfbase declaration becomes "PID_BYTES <= 2, sfbhi iff 2".
+2. `lines_steps_step`: the literal slot stride 16 -> the Config stride.
+3. `ledge_test` (P11): the piece offsets 1, 5, 8, 12 -> 1, PIECE_BYTES+1, 2*PIECE_BYTES, 3*PIECE_BYTES.
+4. **The slot stride**: SLOT_SHIFT's 16 -> 256 is unshippable (the arm5 hot block's 16^5-bit window); use a 32-byte stride
+   (`Config.SLOT_BIT`, one `shl_bit` after each shift site) -- re-measure the hot block's headroom first (~+3,040 ops).
+5. `selfreset` `expect["pclm"] = view_w` -> `view_w * pid_bytes` (fans out to build_blocked, test_selfreset, test_pin_veto,
+   test_one_pass_reset).
+6. `tests/host/test_doors.py` `PID_CEILING = 256` -> `16 ** cfg.PID_NIBBLES`.
+PROOF (M4's): an E1M1 build forced to `PID_NIBBLES=3` must be pixel-exact with only ops rising -- E1M1's own gates never
+build the wide path. Plus a `test_slot_layouts_fj` variant at PID_BYTES=2 with mutants (a wrong hi offset, the literal 16).
+
+**(B) Sector ids: `World.sec_nibbles = max(2, ceil(log16(nsec)))`** (2 for E1M1's 182 sectors, 3 for E1M2's 380), derived,
+never set; no .fj file uses it. Two helpers so definitions and call sites cannot drift: `msec_cell(m, nib)` and
+`sector_dispatch(prefix, cell, targets, miss, nib)` (an N-level sim.jump16 that emits EXACTLY today's text and labels at nib=2).
+Sites: monstercode `rj<s>` (index), `lfsec` (result), `psec`, `mt_ms`, `msec` (+ its restart set and the `<< 8*m`), the
+mt_ms/mm_sec movs, `mcf_leaf`, `mt_rj_leaf`; monstermove `mm_sec` (P32B_CONTEXT -> a function of nib); knockcode's msec movs;
+noisecode `_node_dispatch` and `nz_sec`; statcode `sc_sec` (E1M2's secret sectors 156..358 fail its `< 256` assert today);
+probe.py's `("msec", 2)`; tests/fj/test_knock_fj.py's msec. SILENT RISK: a 2-nibble register receiving a 3-nibble value on
+E1M2 only -- add tests/fj harnesses on a synthetic sector >= 256.
+
+**(C) Other counts on E1M2** fit (subsectors 1,104 in 3 nibbles; 227 thing rows <= 254; 129 monsters; 88 sound nodes; doors
+<= 16 states) except: `build_blocked.py --subsectors 682` -> 1104; COUNTITEM things vs `COUNT_NIBBLES` (count them);
+the band index (`BAND_NIBBLES` 5).

@@ -606,8 +606,9 @@ def touches_door(geo, x16: int, y16: int, r16: int) -> bool:
     line is `coord - r < c < coord + r` across it and the extent's `lo - r < o < hi + r` along it,
     all strict -- or its centre is strictly inside the door's rectangle (a 32-thick door holds a
     centred 32-wide box whose edges lie ON both lines). The model's `door_touched` and the fj
-    (`doorcode.door_contact_lines`) are this. M8 L0: a slanted line is straddled when the bboxes overlap (strict) and
-    the box's corners lie strictly on both sides of it; a non-rectangular door's inside is its polygon's."""
+    (`doorcode.door_contact_lines`) are this. M8 L0: a slanted line by check_position's own test (the boxes overlap,
+    strict, and P_BoxOnLineSide is -1, `reference_model.box_on_line_side`'s semantics); a non-rectangular door's
+    inside is its polygon's."""
     area, lines = geo
     if area[0] == "poly":
         if _inside_poly(area[1], x16, y16):
@@ -618,14 +619,20 @@ def touches_door(geo, x16: int, y16: int, r16: int) -> bool:
             return True
     for ln in lines:
         if ln[0] == "d":
+            # check_position's own test: the boxes overlap (strict) and P_BoxOnLineSide says -1 -- DOOM's two extreme
+            # corners through P_PointOnLineSide (FixedMul truncation; a point ON the line is its back side)
             _, ax, ay, bx, by = ln
             ax, ay, bx, by = ax << 16, ay << 16, bx << 16, by << 16
-            if not (min(ax, bx) - r16 < x16 < max(ax, bx) + r16 and min(ay, by) - r16 < y16 < max(ay, by) + r16):
+            top, bottom, left, right = y16 + r16, y16 - r16, x16 - r16, x16 + r16
+            if right <= min(ax, bx) or left >= max(ax, bx) or top <= min(ay, by) or bottom >= max(ay, by):
                 continue
-            sides = {(bx - ax) * (cy - ay) - (by - ay) * (cx - ax) > 0
-                     for cx in (x16 - r16, x16 + r16) for cy in (y16 - r16, y16 + r16)
-                     if (bx - ax) * (cy - ay) - (by - ay) * (cx - ax) != 0}
-            if len(sides) == 2:
+            from doomfj.reference_model import ReferenceModel
+            pol = ReferenceModel.point_on_line_side
+            if (by - ay > 0) == (bx - ax > 0):                    # ST_POSITIVE: the \ diagonal
+                p1, p2 = pol(left, top, ax, ay, bx, by), pol(right, bottom, ax, ay, bx, by)
+            else:                                                 # ST_NEGATIVE: the / diagonal
+                p1, p2 = pol(right, top, ax, ay, bx, by), pol(left, bottom, ax, ay, bx, by)
+            if p1 != p2:
                 return True
             continue
         axis, coord, lo, hi = ln

@@ -263,6 +263,15 @@ def contact_points(dp, doors, seed=2, step=3):
         for gx in range(min(xs) - 34, max(xs) + 35, step):
             for gy in range(min(ys) - 34, max(ys) + 35, step):
                 pts.append(((gx << 16) + rng.choice((0, 1, -1, 0x8000)), (gy << 16) + rng.choice((0, 1, -1))))
+        # every slanted line's inflated bbox edges EXACTLY (the strict overlap's boundary), both radii
+        for ax, ay, bx, by in e:
+            if ax == bx or ay == by:
+                continue
+            for r in (PLAYER_R, 30):
+                for gx in (min(ax, bx) - r, max(ax, bx) + r):
+                    pts += [(gx << 16, gy << 16) for gy in range(min(ay, by) - r, max(ay, by) + r + 1, 2)]
+                for gy in (min(ay, by) - r, max(ay, by) + r):
+                    pts += [(gx << 16, gy << 16) for gx in range(min(ax, bx) - r, max(ax, bx) + r + 1, 2)]
     return pts
 
 

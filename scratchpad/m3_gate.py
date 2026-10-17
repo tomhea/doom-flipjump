@@ -60,6 +60,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
+if __name__ == "__main__":          # M8 (CR of #146): `--map E1Mn` before probe / gamespeed read their defaults
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg(keep=True)         # keep: this gate's own parser takes --map too
 
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.doors import door_states, initial_states, walkover_triggers   # noqa: E402

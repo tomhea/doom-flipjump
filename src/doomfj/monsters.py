@@ -567,7 +567,9 @@ class MonsterPhase:
         return {"weapon": NO_PSPRITE if dead else WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
                 "flash": None if dead or fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
                 "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,
-                           "owned": arms_owned(ws.p_owned)}}            # P9: DOOM's six ARMS digits 2..7
+                           "owned": arms_owned(ws.p_owned),             # P9: DOOM's six ARMS digits 2..7
+                           # M8 F4: the yellow and red cards' icons (never held on E1M1: its bar is unchanged)
+                           "yellow": bool(ws.p_cards[gd.IT_YELLOWCARD]), "red": bool(ws.p_cards[gd.IT_REDCARD])}}
 
     def boxes(self) -> list:
         """[(x16, y16, r16)] of every live monster -- a closing door reverses on them (World.door_touched)"""

@@ -35,9 +35,10 @@ def _variant_code(v) -> int:
     return int(v)
 
 
-def slot_codes(values: dict) -> List[int]:
-    """`hud_v`'s nibbles for a `hud.slot_values` dict, in `hud.bar_slots` order"""
-    return [_variant_code(values[name]) for name, _x0, _w, _v in hud.bar_slots()]
+def slot_codes(values: dict, cards: Sequence[str] = ()) -> List[int]:
+    """`hud_v`'s nibbles for a `hud.slot_values` dict, in `hud.bar_slots(cards)` order (M8 F4: `cards`, the map's
+    extra key icons)"""
+    return [_variant_code(values[name]) for name, _x0, _w, _v in hud.bar_slots(cards)]
 
 
 def _bar_record(x: int, column: Sequence[int], view_rows: int) -> List[str]:
@@ -93,8 +94,8 @@ def _frame_dispatch2(prefix: str, cell: str, blocks: List[List[str]], end: str) 
     return out + [f";{end}"]
 
 
-def hud_decls(level_start: Sequence[int]) -> List[str]:
-    n = len(hud.bar_slots())
+def hud_decls(level_start: Sequence[int], cards: Sequence[str] = ()) -> List[str]:
+    n = len(hud.bar_slots(cards))
     assert len(level_start) == n
     return [f"hud_v: hex.vec {n}, {sum(v << (4 * i) for i, v in enumerate(level_start))}",
             f"hud_s: hex.vec {n}, {sum(SHADOW_STALE << (4 * i) for i in range(n))}",
@@ -107,18 +108,20 @@ def hud_restart_lines(level_start: Sequence[int]) -> List[str]:
 
 
 # a slot whose value already lives in a game cell reads THAT cell, not a copy in `hud_v` (the blue card is the doors'
-# `pcard`, P2a.1): a copy would be one more thing to keep in step
-VALUE_CELLS = {"card": "pcard"}
+# `pcard`, P2a.1): a copy would be one more thing to keep in step. M8 F4: the yellow and red cards' slots read
+# lootcode's `pcard_y` / `pcard_r` (lootcode.CARD_CELL), present only on a map that holds the card
+VALUE_CELLS = {"card": "pcard", "card_y": "pcard_y", "card_r": "pcard_r"}
 
 
 def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_row: Sequence[int],
                    view_rows: int = hud.VIEW_ROWS, value_cells: Dict[str, str] = VALUE_CELLS,
-                   dead_cell: Optional[str] = None) -> List[str]:
+                   dead_cell: Optional[str] = None, cards: Sequence[str] = ()) -> List[str]:
     """the world frame's tail before `frame_end`: the weapon, then the bar's changed columns.
     P10 (the owner's play-test, 2026-10-12): with `dead_cell` (the game tier's `p_dead`), a dead player draws no weapon
     and no flash -- DOOM's P_DropWeapon lowers the weapon out of view; the overlays are baked at WEAPONTOP, so the
-    picture hides it at once (hud.NO_PSPRITE is the oracle's side)"""
-    slots = hud.bar_slots()
+    picture hides it at once (hud.NO_PSPRITE is the oracle's side).
+    M8 F4: `cards` -- the map's extra key icons (hud.bar_slots(cards)), their slots reading `value_cells`' card cells"""
+    slots = hud.bar_slots(cards)
     owned_cols = {x for _n, x0, w, _v in slots for x in range(x0, x0 + w)}
     out = ["// M7 P4.0 (doomfj.hudcode): the weapon overlay, then the bar's changed columns"]
     if dead_cell is not None:
@@ -138,7 +141,7 @@ def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_r
     out += ["hex.if0 1, hud_full, hud_slots"]
     for x in range(hud.SCREEN_W):
         if x not in owned_cols:
-            out += _bar_record(x, hud.bar_column(colours, x), view_rows)
+            out += _bar_record(x, hud.bar_column(colours, x, cards=cards), view_rows)
     out += [f"hex.set {len(slots)}, hud_s, {sum(SHADOW_STALE << (4 * i) for i in range(len(slots)))}",
             "hex.zero 1, hud_full",
             "hud_slots:"]
@@ -151,7 +154,7 @@ def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_r
             out.append(f"hex.if_flags {v}, 1<<{code}, hud_d{i}_{k + 1}, hud_d{i}_v{k}")
             out.append(f"hud_d{i}_v{k}:")
             for x in range(x0, x0 + w):
-                out += _bar_record(x, hud.bar_column(colours, x, var), view_rows)
+                out += _bar_record(x, hud.bar_column(colours, x, var, cards=cards), view_rows)
             out += [f";hud_c{i}", f"hud_d{i}_{k + 1}:"]
         out += [f";hud_c{i}",                                 # a value no variant uses: nothing to draw
                 f"hud_c{i}:",
@@ -173,18 +176,19 @@ def slot_index(name: str) -> int:
 READY_WEAPON = "PISGA0"        # P4.0 draws the ready pistol; P4.1's weapon state machine picks the frame
 
 
-def game_hud_parts(rm, asset_wad, sprite_wad, sectors) -> dict:
+def game_hud_parts(rm, asset_wad, sprite_wad, sectors, cards: Sequence[str] = ()) -> dict:
     """everything the game tier's emitter splices in: `decls` (state cells), `restart` (NEW GAME's values), `menu` (the
     line every menu frame runs: the bar is redrawn after it) and `tail` (the world frame's weapon and bar, before
     `frame_end`). ONE colormap row lights the weapon on every sector of the map (asserted: a map with darker sectors
-    needs the row chosen at runtime, which P4.0 does not emit)."""
+    needs the row chosen at runtime, which P4.0 does not emit). M8 F4: `cards` -- the map's extra key icons
+    (lootcode.hud_cards: "yellow" / "red"; E1M1 none), slots after every other one."""
     palette = bytes(b for rgb in asset_wad.playpal(0) for b in rgb)
     colours = hud.bar_colours(palette)
     rows = {hud.psprite_light_row(rm, s.light) for s in sectors}
     assert len(rows) == 1, ("the weapon is lit by %d colormap rows on this map (%s); P4.0 bakes one -- a darker map "
                             "needs the row selected per frame" % (len(rows), sorted(rows)))
     row = asset_wad.colormap()[rows.pop()]
-    start = slot_codes(hud.slot_values(**LEVEL_START))
+    start = slot_codes(hud.slot_values(**LEVEL_START, cards=cards), cards)
     # M7 P4.1: every weapon frame (`wp_frm` indexes weaponcode.overlay_frames) and every flash frame (`fl_frm` - 1)
     from doomfj import weaponcode as WC
 
@@ -193,7 +197,8 @@ def game_hud_parts(rm, asset_wad, sprite_wad, sectors) -> dict:
     overlay = ([cols(lump) for lump in WC.overlay_frames()], [cols(lump) for lump in WC.flash_frames()])
     from doomfj.wall_renderer import PLAYER_MODE
     from doomfj.world import player_mortal
-    return {"decls": hud_decls(start), "restart": hud_restart_lines(start), "menu": ["hex.set 1, hud_full, 1"],
+    return {"decls": hud_decls(start, cards), "restart": hud_restart_lines(start), "menu": ["hex.set 1, hud_full, 1"],
             "tail": hud_tail_lines(colours, overlay, row, view_rows=rm.cfg.VIEW_H,
-                                   dead_cell="p_dead" if player_mortal(PLAYER_MODE) else None), "colours": colours,
+                                   dead_cell="p_dead" if player_mortal(PLAYER_MODE) else None, cards=cards),
+            "colours": colours,
             "overlay": overlay, "colormap_row": row}

@@ -2,6 +2,11 @@
 
     python scratchpad/gp/p2a_gate.py --fjm build/<new>.fjm --labels <its label table>
     python scratchpad/gp/p2a_gate.py --oracle-only          # the scenarios and controls, no binary
+    ... --map E1M2 (or DOOMFJ_MAP=E1M2)                       # M8: another map, its roles from gate_roles.py
+
+M8 (docs/level-pipeline.md 4): the doors, lifts, sectors and the card below are E1M1's ROLES (gate_roles.E1M1, the
+literals these scenarios always used); on another map they come from scenarios/<map>/gates.json (gate_targets.py),
+and a scenario whose role the map cannot host prints N/A with the generator's reason.
 
 Each scenario starts by POKING the game tier (the probe machinery b0_scenarios uses): at frame 0's
 start the world mode, the player's pose and -- where the scenario says -- the blue card; at every
@@ -48,8 +53,12 @@ for _q in (ROOT / "src", ROOT / "scratchpad" / "12m", ROOT / "scratchpad", HERE)
     if str(_q) not in sys.path:
         sys.path.insert(0, str(_q))
 
+if __name__ == "__main__":                       # M8: `--map E1Mn` before probe / gamespeed read their defaults
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg()
 import probe as P                                                            # noqa: E402
 import onewalk                                                               # noqa: E402
+import gate_roles                                                            # noqa: E402  (M8)
 from doomfj import doors as D                                                # noqa: E402
 from doomfj.doors import in_use_box_fixed                                    # noqa: E402
 from doomfj.fixedpoint import _signed                                        # noqa: E402
@@ -532,38 +541,68 @@ def _strides(tr, si: int, nstates: int) -> bool:
     return max(st) == nstates - 1 and st[-1] == 0 and full and len(moves) >= 2
 
 
+def na(name: str, reason: str) -> dict:
+    """M8: a scenario this map cannot host -- printed N/A with the reason, never run"""
+    return {"name": name, "na": reason}
+
+
 def scenarios(dsim, card) -> list:
+    """the scenarios, placed from the map by its ROLES (gate_roles: E1M1's literals, or the map's generated file)"""
+    R = gate_roles.roles(dsim.mapname)
     kinds = dsim.dp.kinds
-    blue = 71
-    assert kinds[blue] == "blue", kinds[blue]
-    blaze = [si for si, k in kinds.items() if k == "blaze"]
-    assert blaze == [84], blaze
     trig = {t[0]: t for t in dsim.dp.triggers}
-    assert sorted(trig) == [77, 145], trig
     n = dsim.nstates
     F, B, U, I = {"forward": True}, {"back": True}, {"use": True}, {}
-    out = [
-        {"name": "S1 blue door 71, no card: stays shut", "pose": door_front(dsim, blue),
-         "keys": [U] * 3 + [I] * 12, "pcard": 0, "controls": ["card"],
-         "claim": lambda tr: all(fr["phase"][0][blue][0] == 0 for fr in tr)},
-        {"name": "S2 onto the card: taken, gone from the picture", "pose": card_pose(dsim, card),
-         "keys": [F] * 4 + [I] * 2, "pcard": 0, "controls": ["no_card"],
-         "claim": lambda tr: tr[-1]["phase"][3] == 1 and tr[-1]["taken"]},
-        {"name": "S3 blue door 71 with the card: opens", "pose": door_front(dsim, blue),
-         "keys": [U] * 3 + [I] * (D.SPEED * n[blue] + 2), "pcard": 1, "controls": ["no_card"],
-         "claim": lambda tr: tr[-1]["phase"][0][blue][0] == n[blue] - 1},
-        {"name": "S4 from sector 124 in the card's box: out of reach", "pose": below_card_pose(dsim, card),
-         "keys": [F] * 3, "pcard": 0, "controls": ["reach"],
-         "claim": lambda tr: all(fr["phase"][3] == 0 for fr in tr)},
-        {"name": "S5 blazing door 84: opens and closes in strides", "pose": door_front(dsim, 84),
-         "keys": [U] * 2 + [I] * (D.WAIT + 10), "pcard": 0, "controls": ["stride"],
-         "claim": lambda tr: _strides(tr, 84, n[84])},
-    ]
-    for si, tag in ((77, 5), (145, 6)):
+    out = []
+    if R.na("blue_door") or card is None:
+        why = R.na("blue_door") or "the map has no blue card"
+        out += [na("S1 a blue door, no card: stays shut", why), na("S2 onto the card: taken", why),
+                na("S3 a blue door with the card: opens", why)]
+    else:
+        blue = R["blue_door"]
+        assert kinds[blue] == "blue", (blue, kinds[blue])
+        out += [
+            {"name": "S1 blue door %d, no card: stays shut" % blue, "pose": door_front(dsim, blue),
+             "keys": [U] * 3 + [I] * 12, "pcard": 0, "controls": ["card"],
+             "claim": lambda tr: all(fr["phase"][0][blue][0] == 0 for fr in tr)},
+            {"name": "S2 onto the card: taken, gone from the picture", "pose": card_pose(dsim, card),
+             "keys": [F] * 4 + [I] * 2, "pcard": 0, "controls": ["no_card"],
+             "claim": lambda tr: tr[-1]["phase"][3] == 1 and tr[-1]["taken"]},
+            {"name": "S3 blue door %d with the card: opens" % blue, "pose": door_front(dsim, blue),
+             "keys": [U] * 3 + [I] * (D.SPEED * n[blue] + 2), "pcard": 1, "controls": ["no_card"],
+             "claim": lambda tr: tr[-1]["phase"][0][blue][0] == n[blue] - 1}]
+    # M8: the other colours' doors -- the scenarios S1 / S3 once the model has their kind (M8 F2) and the gate a
+    # key-card control for them; until then N/A, named, so a map's report shows what is not checked
+    for colour in ("yellow", "red"):
+        why = R.na(colour + "_door") or ("door %s: the gate has no %s-card scenario yet (M8 F2 adds the kind)"
+                                         % (R[colour + "_door"], colour))
+        out.append(na("S1%s / S3%s a %s door" % (colour[0], colour[0], colour), why))
+    if R.na("below_card_sector") or card is None:
+        out.append(na("S4 below the card: out of reach", R.na("below_card_sector") or "the map has no blue card"))
+    else:
+        below = R["below_card_sector"]
+        out.append(
+            {"name": "S4 from sector %d in the card's box: out of reach" % below,
+             "pose": below_card_pose(dsim, card, below),
+             "keys": [F] * 3, "pcard": 0, "controls": ["reach"],
+             "claim": lambda tr: all(fr["phase"][3] == 0 for fr in tr)})
+    if R.na("blaze_door"):
+        out.append(na("S5 a blazing door: opens and closes in strides", R.na("blaze_door")))
+    else:
+        blaze_si = R["blaze_door"]
+        assert kinds[blaze_si] == "blaze", (blaze_si, kinds[blaze_si])
+        out.append(
+            {"name": "S5 blazing door %d: opens and closes in strides" % blaze_si, "pose": door_front(dsim, blaze_si),
+             "keys": [U] * 2 + [I] * (D.WAIT + 10), "pcard": 0, "controls": ["stride"],
+             "claim": lambda tr: _strides(tr, blaze_si, n[blaze_si])})
+    walk = [tuple(x) for x in R.get("walkovers") or ()]
+    if not walk:
+        out.append(na("S6 over a walk-over trigger", R.na("walkovers") or "the map has no walk-over door"))
+    for k, (si, tag) in enumerate(walk):
         t = trig[si]
         stay = D.SPEED * (n[si] - 1) + D.WAIT + 8
-        out.append({"name": "S%d over tag %d's trigger: door %d opens, stays; back over: nothing"
-                            % (6 if si == 77 else 7, tag, si),
+        out.append({"name": "S%s over tag %d's trigger: door %d opens, stays; back over: nothing"
+                            % ("6" if k == 0 else "7" if k == 1 else "7" + chr(ord("a") + k - 1), tag, si),
                     # M7 P6: back over AT ONCE, then the wait -- once the player is blocked by things, a zombie
                     # woken by the wait (S6's, 40 units south of the pose) stands on the way back
                     "pose": trigger_pose(dsim, t), "keys": [F] * 5 + [B] * 5 + [I] * stay + [I] * 3,
@@ -572,7 +611,6 @@ def scenarios(dsim, card) -> list:
                     and sum(1 for fr in tr if si in fr["phase"][2]) == 1})
     F_ = {"forward": True}
     # ---- M7 P2b: the movers --------------------------------------------------------------------------
-    k98, k103 = dsim.mp.order.index(98), dsim.mp.order.index(103)
 
     def ride(tr, k):
         # it reaches the bottom (9) and is back at the top (0) after it -- M7 P6+P7: not "at the top on the last frame":
@@ -580,36 +618,59 @@ def scenarios(dsim, card) -> list:
         st = [fr["movers"][0][k][0] for fr in tr]
         return max(st) == 9 and 0 in st[st.index(9) + 1:]
 
-    out.append({
-        "name": "S9 over lift 98's WR line: it rides down, waits, comes back up",
-        "pose": _standing(dsim, (40, 256), 0), "keys": [F_] * 3 + [I] * 50, "pcard": 0,
-        "controls": ["no_wr"], "claim": lambda tr: ride(tr, k98)})
-    sr = [b for t, b in dsim.mp.use if t == 2]
-    out.append({
-        "name": "S10 an SR press at lift 103: it rides",
-        "pose": _in_box(dsim, sr[0]), "keys": [I, U] + [I] * 50, "pcard": 0,
-        "controls": ["no_use_lines"], "claim": lambda tr: ride(tr, k103)})
-    out.append({
-        "name": "S11 the floor switch: a press lowers the pillars at once",
-        "pose": _in_box(dsim, dsim.mp.switch_boxes[0]), "keys": [I, U, I, I], "pcard": 0,
-        "controls": ["no_use_lines"],
-        "claim": lambda tr: [fr["movers"][2] for fr in tr] == [0, 1, 1, 1]
-        and tr[1]["mheights"][129][0] == 136})
-    out.append({
-        "name": "S12 NEW GAME puts a riding lift back",
-        "pose": _standing(dsim, (40, 256), 0),
-        # P10: esc opens the menu on RESUME -- down to NEW GAME, enter (the skill screen), enter
-        "keys": [F_] * 3 + [I] * 4 + [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
-        + [I] * 3, "pcard": 0, "controls": ["restart_movers"],
-        "claim": lambda tr: tr[6]["movers"][0][k98][0] > 0 and tr[-1]["movers"][0][k98][0] == 0})
-    p10 = dsim.passes[10]
-    out.append({
-        "name": "S13 standing in door 10 as it closes: it goes back up at its pass state",
-        "pose": door_front(dsim, 10), "keys": [U] * 2 + [I] * 8 + [F] * 3 + [I] * 70, "pcard": 0,
-        "controls": ["no_reversal"],
-        "claim": lambda tr: min(fr["phase"][0][10][0] for fr in tr[12:]) == p10
-        and any(a["phase"][0][10][1] == D.CLOSING and b["phase"][0][10][1] == D.OPENING
-                for a, b in zip(tr, tr[1:]))})
+    if R.na("wr_lift"):
+        out += [na("S9 over a lift's WR line: it rides", R.na("wr_lift")),
+                na("S12 NEW GAME puts a riding lift back", R.na("wr_lift"))]
+    else:
+        wr = R["wr_lift"]
+        k98 = dsim.mp.order.index(wr["sector"])
+        wr_xy, wr_a = (wr["pose"][0], wr["pose"][1]), wr["pose"][2]
+        out.append({
+            "name": "S9 over lift %d's WR line: it rides down, waits, comes back up" % wr["sector"],
+            "pose": _standing(dsim, wr_xy, wr_a), "keys": [F_] * 3 + [I] * 50, "pcard": 0,
+            "controls": ["no_wr"], "claim": lambda tr: ride(tr, k98)})
+    if R.na("sr_lift"):
+        out.append(na("S10 an SR press at a lift: it rides", R.na("sr_lift")))
+    else:
+        srl = R["sr_lift"]
+        k103 = dsim.mp.order.index(srl["sector"])
+        sr = [b for t, b in dsim.mp.use if t == srl["tag"]]
+        out.append({
+            "name": "S10 an SR press at lift %d: it rides" % srl["sector"],
+            "pose": _in_box(dsim, sr[0]), "keys": [I, U] + [I] * 50, "pcard": 0,
+            "controls": ["no_use_lines"], "claim": lambda tr: ride(tr, k103)})
+    if R.na("floor_switch"):
+        out.append(na("S11 the floor switch: a press lowers the pillars at once", R.na("floor_switch")))
+    else:
+        fs = R["floor_switch"]
+        fs_sec, fs_low = fs["sector"], fs["lowered"]
+        out.append({
+            "name": "S11 the floor switch: a press lowers the pillars at once",
+            "pose": _in_box(dsim, dsim.mp.switch_boxes[fs["box"]]), "keys": [I, U, I, I], "pcard": 0,
+            "controls": ["no_use_lines"],
+            "claim": lambda tr: [fr["movers"][2] for fr in tr] == [0, 1, 1, 1]
+            and tr[1]["mheights"][fs_sec][0] == fs_low})
+    if not R.na("wr_lift"):
+        out.append({
+            "name": "S12 NEW GAME puts a riding lift back",
+            "pose": _standing(dsim, wr_xy, wr_a),
+            # P10: esc opens the menu on RESUME -- down to NEW GAME, enter (the skill screen), enter
+            "keys": [F_] * 3 + [I] * 4 + [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]},
+                                          {"menu": ["enter"]}]
+            + [I] * 3, "pcard": 0, "controls": ["restart_movers"],
+            "claim": lambda tr: tr[6]["movers"][0][k98][0] > 0 and tr[-1]["movers"][0][k98][0] == 0})
+    if R.na("reversal_door"):
+        out.append(na("S13 standing in a door as it closes: it goes back up", R.na("reversal_door")))
+    else:
+        rev = R["reversal_door"]
+        p10 = dsim.passes[rev]
+        out.append({
+            "name": "S13 standing in door %d as it closes: it goes back up at its pass state" % rev,
+            "pose": door_front(dsim, rev), "keys": [U] * 2 + [I] * 8 + [F] * 3 + [I] * 70, "pcard": 0,
+            "controls": ["no_reversal"],
+            "claim": lambda tr: min(fr["phase"][0][rev][0] for fr in tr[12:]) == p10
+            and any(a["phase"][0][rev][1] == D.CLOSING and b["phase"][0][rev][1] == D.OPENING
+                    for a, b in zip(tr, tr[1:]))})
     # P10: LEVEL COMPLETE holds eight frames (an enter among them ignored), then any key leaves for the boot's menu
     # (no game in progress: esc there is no rule, and the frozen world is never drawn again -- P2a.2's "frozen"
     # control parted on the frozen world's frame, which no play reaches now), and NEW GAME starts the level over
@@ -656,21 +717,29 @@ def main(argv=None) -> int:
     dsim = onewalk.DoorSim()
     assert dsim.order == orc.door_order
     card = dsim.dp.card_at
-    assert card == (2192, 576, 136), card
+    R = gate_roles.roles(dsim.mapname)                   # M8: the map's roles
+    assert card == (tuple(R["cards"]["blue"]) if "blue" in (R.get("cards") or {}) else None), (card, R.get("cards"))
     card_di = [di for di, t in enumerate(drawable_things(orc.rm, orc.mw.things(orc.mapname), orc.art)[0])
                if t.type == CARD_TYPE]
-    assert len(card_di) == 1, card_di
+    assert len(card_di) == (1 if card else 0), card_di
+    card_di = card_di or [-1]
     scen = scenarios(dsim, card)
     ok = True
-    print("P2A GATE -- %d scenarios (MONSTER_MODE %s, PLAYER_MODE %s)%s"
-          % (len(scen), MONSTER_MODE, orc.player_mode, "" if a.oracle_only else ", %s" % a.fjm))
+    print("P2A GATE -- %d scenarios (MONSTER_MODE %s, PLAYER_MODE %s) on %s, roles from %s%s"
+          % (len(scen), MONSTER_MODE, orc.player_mode, dsim.mapname, R.source,
+             "" if a.oracle_only else ", %s" % a.fjm))
     if not a.oracle_only:
         gb = P.GameBinary(ROOT / a.fjm)
         cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
         table = P.LabelTable.load(ROOT / a.labels, {c.label for c in cells.values()})
         assert not table.absent & {"dreq", "pcard", "wfired"}, (
             "the label table has no %s: a binary before P2a.1" % sorted(table.absent))
+    nas = []
     for sc in scen:
+        if sc.get("na"):                                  # M8: a role this map cannot host
+            nas.append(sc["name"])
+            print("\n%s -- N/A: %s" % (sc["name"], sc["na"]))
+            continue
         mirror = hooked(Mirror(dsim, card_di[0]), orc, dsim, card_di[0])
         want = mirror.run(sc["pose"], sc["keys"], sc["pcard"])
         claim = bool(sc["claim"](want))
@@ -727,6 +796,8 @@ def main(argv=None) -> int:
             "exact on every frame" if s_bad is None else "PART at frame %d: %s" % s_bad,
             "byte-exact on every frame" if x_bad is None else "PART at frame %d (%d px)" % x_bad,
             "exact on every frame" if p_bad is None else "PART at frame %d (the oracle's PLAYPAL %d)" % p_bad))
+    if nas:
+        print("\nN/A on %s: %d -- %s" % (dsim.mapname, len(nas), "; ".join(nas)))
     print("\nP2A GATE %s (%.0f s)" % ("PASS" if ok else "FAIL", time.time() - t0))
     return 0 if ok else 1
 

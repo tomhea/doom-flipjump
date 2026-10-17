@@ -2,6 +2,7 @@
 
     python scratchpad/gp/hurt_gate.py --fjm build/<new>.fjm --labels <its label table>
     python scratchpad/gp/hurt_gate.py --oracle-only          # the scenarios, their counters and the controls
+    ... --map E1M2 (or DOOMFJ_MAP=E1M2)                      # M8: another map (the scenarios derive from monster kinds)
     ... [--modes PLAYER/MONSTER] [--frame-ops [FILE]]        # M7 P8a: the modes (default the game tier's); per-frame ops
 
 p2a_gate's shape (it drives p2a_gate.Mirror): each scenario starts by POKING the game tier at frame 0's start -- the
@@ -54,6 +55,9 @@ for _q in (ROOT / "src", ROOT / "scratchpad" / "12m", ROOT / "scratchpad", HERE)
     if str(_q) not in sys.path:
         sys.path.insert(0, str(_q))
 
+if __name__ == "__main__":                       # M8: `--map E1Mn` before probe / gamespeed read their defaults
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg()
 import probe as P                                                            # noqa: E402
 import onewalk                                                               # noqa: E402
 import p2a_gate as G                                                         # noqa: E402

@@ -23,13 +23,19 @@ THE FJ. `nz_leaf` (fcall'd through `nz_ret` at the weapon's fire point, weaponco
     pass reaches a new node, so it runs at most `nsound` times.
   * THE OR: every reached node's `snd_alert` set. The scratch is what keeps an older alert from seeding this one
     (P_NoiseAlert floods from the player alone, through today's doors).
+  * M8 L5 -- ML_SOUNDBLOCK (P_RecursiveSound's `soundblocks`: a sound crosses at most ONE marked line). The model
+    keeps the marked lines out of its regions: they are BLOCK edges (`World._sound_block_static_edges`, always open,
+    and `_sound_block_door_edges`, through a door or mover). On a map with any (`sound_block_edges`; E1M2 has 29
+    static ones), the flood is two-level (`_block_flood_lines`): a second scratch set `nz_z` holds the nodes reached
+    across no marked line, plain edges carry both sets, a block edge carries only from `nz_z` into `nz_r`. A map
+    with none (E1M1) emits the one-level flood, its text unchanged.
 `nz_heard` (fcall'd through `nz_hret`, A_Look): `nz_h` = `snd_alert` of the node of the sector in `mt_ms`.
 
 THE CELLS. Persisted (`PERSIST`): `snd_alert` (one nibble a node; level start 0) and `mon_ambush` (one nibble a slot,
-monstercode: MTF_AMBUSH at level start, cleared by A_FaceTarget). Scratch (`noise_decls`): `nz_r`, `nz_sec`,
+monstercode: MTF_AMBUSH at level start, cleared by A_FaceTarget). Scratch (`noise_decls`): `nz_r`, `nz_z` (block maps only), `nz_sec`,
 `nz_ch`, `nz_h`, `nz_amb` and the two fcall registers.
 """
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from doomfj.sectorcode import sector_dispatch
 
@@ -45,10 +51,24 @@ def sound_edges(w) -> List[Tuple[int, int, str, int, int]]:
     """the flood's edges, one per pair of nodes the model's door edges join: (static node, dynamic node, the dynamic
     sector's state cell, its number of states, the mask of the states at which an opening joins them). Edges whose
     mask is 0 (never open) are dropped. Sorted by (static node, dynamic node)."""
+    return _dyn_edges(w, w._sound_door_edges)
+
+
+def sound_block_edges(w) -> List[Tuple[int, int, Optional[str], int, int]]:
+    """M8 L5: the ML_SOUNDBLOCK edges in `sound_edges`' form -- first those through a door or mover
+    (`World._sound_block_door_edges`, grouped and masked exactly as `sound_edges` groups the plain ones; a never-open
+    one dropped), then the static ones (`World._sound_block_static_edges`: node pairs whose static opening is positive,
+    always open -- cell None, one state, the full mask). Empty on a map with no ML_SOUNDBLOCK line (E1M1)."""
+    return (_dyn_edges(w, w._sound_block_door_edges)
+            + [(a, b, None, 1, 1) for a, b in w._sound_block_static_edges])
+
+
+def _dyn_edges(w, pairs) -> List[Tuple[int, int, str, int, int]]:
+    """`sound_edges` over the sector pairs `pairs` (each with a door or mover side)"""
     from doomfj.monstersight import closed_states
     dyn = set(w.door_order) | set(w.mover_order)
     groups: Dict[Tuple[int, int], list] = {}
-    for a, b in w._sound_door_edges:
+    for a, b in pairs:
         sides = [s for s in (a, b) if s in dyn]
         if len(sides) == 2:
             # M8 L1 (E1M2: the floor-switch sectors 240 / 241 / 354 border each other): two dynamic sectors are
@@ -96,11 +116,9 @@ def noise_leaf_lines(w) -> List[str]:
     n = w.nsound
     node_of = list(w.sector_node)
     assert max(node_of) < n
-    # M8 L0: the model floods across ML_SOUNDBLOCK edges with DOOM's `soundblocks` state; this flood does not yet
-    # (M8 L5), so a map with any marked line must not build a binary that would hear differently
-    assert not (w._sound_block_door_edges or w._sound_block_static_edges), (
-        "ML_SOUNDBLOCK edges need the block-state flood (M8 L5)", len(w._sound_block_door_edges),
-        len(w._sound_block_static_edges))
+    # M8 L5: a map with ML_SOUNDBLOCK edges floods with DOOM's `soundblocks` state (`nz_z`, `_block_flood_lines`);
+    # one without (E1M1) emits the one-level flood below, its text unchanged
+    blk = sound_block_edges(w)
     out = ["// M7 P4.2b (doomfj.noisecode): P_NoiseAlert -- the player's node, the flood through the open edges",
            "nz_leaf:",
            "    hex.zero 10, ptx", "    hex.mov 4, ptx, viewx + 4*dw", "    hex.sign_extend 10, 4, ptx",
@@ -109,11 +127,16 @@ def noise_leaf_lines(w) -> List[str]:
            "    lfsec.lookup nz_sec, ptss",
            "nz_flood:",
            "    hex.zero %d, nz_r" % n]
+    if blk:
+        out += ["    hex.zero %d, nz_z" % n]
     out += _node_dispatch("nz_sd", "nz_sec", node_of, lambda k: "nz_s%d" % k, "nz_pass", w.sec_nibbles)
     for k in range(n):
-        out += ["  nz_s%d:" % k, "    hex.xor_by nz_r + %d*dw, 1" % k, "    ;nz_pass"]
+        out += ["  nz_s%d:" % k, "    hex.xor_by nz_r + %d*dw, 1" % k,
+                *(["    hex.xor_by nz_z + %d*dw, 1" % k] if blk else []), "    ;nz_pass"]
     out += ["nz_pass:", "    hex.zero 1, nz_ch"]
-    for j, (a, b, cell, ns, mask) in enumerate(sound_edges(w)):
+    if blk:
+        out += _block_flood_lines(sound_edges(w), blk)
+    for j, (a, b, cell, ns, mask) in enumerate([] if blk else sound_edges(w)):
         L = "nz_e%d" % j
         full = mask == (1 << ns) - 1
         ra, rb = "nz_r + %d*dw" % a, "nz_r + %d*dw" % b
@@ -144,10 +167,73 @@ def noise_leaf_lines(w) -> List[str]:
     return out
 
 
+def _open_test(L: str, cell: Optional[str], ns: int, mask: int):
+    """the edge's open test: a jump to `yes` when the opening is positive at the state in `cell`, else to `L`x (no
+    test when the edge is open at every state)"""
+    if mask == (1 << ns) - 1:
+        return lambda yes: ["    ;%s" % yes]
+    return lambda yes: ["    hex.if_flags %s, %#06x, %sx, %s" % (cell, mask, L, yes)]
+
+
+def _block_flood_lines(edges, blk) -> List[str]:
+    """M8 L5: one pass of the flood with DOOM's `soundblocks` (P_RecursiveSound: a sound crosses at most ONE
+    ML_SOUNDBLOCK line) -- the model's relax BFS (`World.noise_alert`, a node's count of marked lines 0 or 1) as two
+    sets: `nz_z` the nodes reached across no marked line, `nz_r` those reached at all (`nz_z` is inside `nz_r`).
+      * a PLAIN edge (`sound_edges`, label nz_e<j>), open: carries `nz_z` both ways (a node newly at 0 is reached
+        too), and when neither end is at 0, `nz_r` both ways -- the one-level flood's block, on `nz_r`;
+      * a BLOCK edge (`sound_block_edges`, label nz_b<j>), open: from an end at 0 the other end is reached (at 1);
+        nothing crosses from an end reached at 1.
+    Every change sets `nz_ch` and a nibble that never clears, so the passes stop after at most 2 * nsound."""
+    out = []
+    for j, (a, b, cell, ns, mask) in enumerate(edges):
+        L, R = "nz_e%d" % j, "nz_e%dr" % j
+        test = _open_test(L, cell, ns, mask)
+        za, zb, ra, rb = ("nz_%s + %d*dw" % (v, x) for v, x in (("z", a), ("z", b), ("r", a), ("r", b)))
+        out += ["  %s:" % L,
+                "    hex.if1 1, %s, %sza" % (za, L),
+                "    hex.if0 1, %s, %s" % (zb, R),                      # neither end at 0: the reached sets
+                *test("%szsa" % L),
+                "  %szsa:" % L, "    hex.xor_by %s, 1" % za, "    hex.set 1, %s, 1" % ra, "    ;%sc" % L,
+                "  %sza:" % L,
+                "    hex.if1 1, %s, %sx" % (zb, L),                     # both at 0, so both reached
+                *test("%szsb" % L),
+                "  %szsb:" % L, "    hex.xor_by %s, 1" % zb, "    hex.set 1, %s, 1" % rb, "    ;%sc" % L,
+                "  %s:" % R,
+                "    hex.if1 1, %s, %sa" % (ra, L),
+                "    hex.if0 1, %s, %sx" % (rb, L),                     # neither end reached
+                *test("%ssa" % L),
+                "  %ssa:" % L, "    hex.xor_by %s, 1" % ra, "    ;%sc" % L,
+                "  %sa:" % L,
+                "    hex.if1 1, %s, %sx" % (rb, L),                     # both ends reached
+                *test("%ssb" % L),
+                "  %ssb:" % L, "    hex.xor_by %s, 1" % rb,
+                "  %sc:" % L, "    hex.set 1, nz_ch, 1",
+                "  %sx:" % L]
+    for j, (a, b, cell, ns, mask) in enumerate(blk):
+        L = "nz_b%d" % j
+        test = _open_test(L, cell, ns, mask)
+        za, zb, ra, rb = ("nz_%s + %d*dw" % (v, x) for v, x in (("z", a), ("z", b), ("r", a), ("r", b)))
+        out += ["  %s:" % L,
+                "    hex.if1 1, %s, %sa" % (za, L),
+                "    hex.if0 1, %s, %sx" % (zb, L),                     # neither end at 0: nothing crosses
+                "    hex.if1 1, %s, %sx" % (ra, L),                     # b at 0, a already reached
+                *test("%ssa" % L),
+                "  %ssa:" % L, "    hex.xor_by %s, 1" % ra, "    ;%sc" % L,
+                "  %sa:" % L,
+                "    hex.if1 1, %s, %sx" % (rb, L),                     # a at 0, b already reached
+                *test("%ssb" % L),
+                "  %ssb:" % L, "    hex.xor_by %s, 1" % rb,
+                "  %sc:" % L, "    hex.set 1, nz_ch, 1",
+                "  %sx:" % L]
+    return out
+
+
 def noise_decls(w) -> List[str]:
-    """the flood's scratch and registers, and `snd_alert` at the level start (no node has heard a shot)"""
+    """the flood's scratch and registers, and `snd_alert` at the level start (no node has heard a shot); `nz_z` (the
+    nodes reached across no ML_SOUNDBLOCK line) only on a map with block edges"""
     n = w.nsound
-    return ["snd_alert: hex.vec %d, 0" % n, "nz_r: hex.vec %d" % n, "nz_sec: hex.vec %d" % w.sec_nibbles,
+    return ["snd_alert: hex.vec %d, 0" % n, "nz_r: hex.vec %d" % n,
+            *(["nz_z: hex.vec %d" % n] if sound_block_edges(w) else []), "nz_sec: hex.vec %d" % w.sec_nibbles,
             "nz_ch: hex.vec 1",
             "nz_h: hex.vec 1", "nz_amb: hex.vec 1", "nz_ret: hex.vec w/4", "nz_hret: hex.vec w/4"]
 

@@ -57,28 +57,6 @@ def _far_los():
     ms.far_margin = fm
 
 
-def _soundblock_ignored():
-    """F3: the fj noise flood without ML_SOUNDBLOCK -- the block edges read as ordinary edges (the flood's size, not its
-    rule: the model keeps them)"""
-    import doomfj.noisecode as nc
-    for name in [n for n in dir(nc) if callable(getattr(nc, n)) and not n.startswith("_")]:
-        fn = getattr(nc, name)
-        if getattr(fn, "__module__", "") != nc.__name__:
-            continue
-
-        def wrap(*a, _fn=fn, **k):
-            w = next((x for x in a if hasattr(x, "_sound_block_static_edges")), None)
-            if w is None:
-                return _fn(*a, **k)
-            saved = (w._sound_block_door_edges, w._sound_block_static_edges)
-            w._sound_block_door_edges, w._sound_block_static_edges = [], []
-            try:
-                return _fn(*a, **k)
-            finally:
-                w._sound_block_door_edges, w._sound_block_static_edges = saved
-        setattr(nc, name, wrap)
-
-
 def _barrels_one_skill():
     """F1: barrels that differ by skill -- every skill's level start read as the hard skill's (NEW GAME's lines per
     skill are F1's)"""
@@ -139,8 +117,9 @@ def _attacker_7bit():
 
 # M8 F4 RETIRED "gives" (lootcode.give_lines: the yellow / red cards, the soulsphere, the computer map), F7 RETIRED
 # "exit-bar-stale" (wall_renderer.p5_tic_lines(bar_always=): the bar runs after the lvdone guard where the exit frame
-# can move it) and F2 RETIRED "slanted-doors" (doorcode: a slanted door's contact by its own lines)
-STANDINS = {"soundblock-ignored": _soundblock_ignored, "decor-every-skill": _decor_every_skill,
+# can move it), F2 RETIRED "slanted-doors" (doorcode: a slanted door's contact by its own lines) and M8 L5 RETIRED
+# "soundblock-ignored" (noisecode floods with ML_SOUNDBLOCK: tests/fj/test_noise_block_fj.py)
+STANDINS = {"decor-every-skill": _decor_every_skill,
             "stats-digits": _stats_digits, "far-los": _far_los, "barrels-one-skill": _barrels_one_skill,
             "barrel-chains-static": _barrel_chains_static,
             "pickup-static-z": _pickup_static_z,

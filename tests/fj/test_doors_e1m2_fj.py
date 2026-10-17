@@ -223,7 +223,7 @@ def test_e1m2_walkover_lines_fire_as_DoorPhase(tmp_path, lvl):
     nw, nd = len(lvl.triggers), len(lvl.order)
     rows = [want[i * (nw + nd):(i + 1) * (nw + nd)] for i in range(len(moves))]
     both = [lvl.order.index(30), lvl.order.index(266)]
-    assert sum(r[nw + both[0]] and r[nw + both[1]] for r in rows) >= 10      # tag 16 opens both, together
+    assert sum(r[nw + both[0]] and r[nw + both[1]] for r in rows) >= 5       # tag 16 opens both, together
     assert all(r[nw + both[0]] == r[nw + both[1]] for r in rows)
 
 

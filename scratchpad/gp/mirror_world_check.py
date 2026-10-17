@@ -14,14 +14,19 @@ matches the wrong mirror passes it. THE TRUTH here is `World.tic`, stepping itse
 
 PART p2a. The scenarios of p2a, hurt, fight and die on the map -- their own lists, placed from the map's gate roles
 (the first candidate of each; N/A, AWAITS and n/a skipped as the gates skip them) -- and, on a map that has them, this
-checker's own X scenarios: every yellow and red door used with its key (poked into the world) and without it, and
-every teleport line crossed from its front and then walked through the reaction freeze. Each is run TWICE: the gate's
+checker's own X scenarios: every yellow and red door used with its key (poked into the world) and without it, every
+switch door pressed twice, every teleport line crossed from its front and then walked through the reaction freeze --
+and (M8 F1.3) EVERY FLOOR GROUP fired by its own W1 line (slanted ones too) or S1 box and run to its last state, every
+lift tag that is blazing or starts two lifts, and each TELEPORT CLOSET: the group that lowers a teleport line's pad
+fires and a closet monster walks over the line and teleports. Each is placed by a pose that does it on the WORLD (a
+probe run), from the World's geometry -- never the mirror's, so a mutated mirror cannot move a scenario. Each is run TWICE: the gate's
 Mirror (`Mirror.run`, unchanged) and a TWIN MonsterPhase whose World tics itself (`World.tic`) on the same keys, menu
 keys, setups and late setups. No picture is drawn on either side: both take the SAME stand-in for the picture's seen
 marks (every active monster within SEEN_RANGE of the player), so the monsters wake, fight, knock and press doors the same
 way on both sides exactly when the mirror is right. After EVERY world frame the two must agree on
   * the doors: each door's (state, dir, sub, wait), the fired walk-over bits, the pending presses, the blue card;
-  * the movers: each lift's (state, dir, sub, wait), the pending triggers, the floor switch;
+  * the movers: each lift's (state, dir, sub, wait), the pending triggers, the floor switch -- on E1M2 the whole
+    fswitch VECTOR (each floor group's state, then its step timer: the world's f_switch and f_sub);
   * the pose, `pusedn` (p_usedown), `lvdone` (g_leveldone);
   * EVERY OTHER CELL of the world schema (the Mirror's world against the twin's), minus OWN -- the cells the mirror
     keeps outside its world (above), and the player thing's own animation, which no gate mirrors (first person never
@@ -40,6 +45,8 @@ M8 must be REJECTED --
   no_keys        monsters.door_keys_kw returns {} (the gate's door tic does not see the yellow / red keys);
   jump_segment   monsters.walkover_segments ignores the world's recorded segments (a teleport = one walk from the start
                  to the destination, `walk_end` and all, as before L4);
+  no_floor_movers  movers.MoverPhase without F1.3's floor triggers (no W1 / S1 floor line fires a group);
+  slow_lifts     movers.MoverPhase with every lift at stride 1 (before F1.3's blazing 120 / 123);
 and one control on the comparison itself --
   blind_doors    the comparison drops the door term: no_keys must then PASS (so it is the door term that caught it).
 and, on E1M1, a walk-over-blind mirror (no_walkovers: DoorPhase.after_move a no-op) -- the comparison is not blind there.
@@ -73,7 +80,7 @@ if __name__ == "__main__":                       # `--map E1Mn` before probe / g
 
 M32 = 0xFFFFFFFF
 SEEN_RANGE = 1024                 # map units: the stand-in picture "sees" every active monster this close
-MUTATIONS = ("no_keys", "jump_segment")          # on E1M2: the mirror before M8
+MUTATIONS = ("no_keys", "jump_segment", "no_floor_movers", "slow_lifts")   # on E1M2: the mirror before M8 / F1.3
 E1M1_MUTATIONS = ("no_walkovers",)               # on E1M1: the comparison is not blind there either
 # the world cells the mirror keeps OUTSIDE its world (compared against the mirror's own phases instead), and the
 # player thing's animation (P_SetMobjState on the player: first person never draws it, no gate mirrors it)
@@ -135,7 +142,12 @@ def compare(mws: dict, tws: dict, ph, ms, pose, pusedn, lvdone, order, lift_orde
     lreq = frozenset(si for k, si in enumerate(lift_order) if tws["l_req"][k])
     if frozenset(ms[1]) != lreq:
         out.append(("lift triggers", sorted(ms[1]), sorted(lreq)))
-    if int(bool(ms[2])) != int(bool(tws["f_switch"])):
+    # M8 F1.3: the WIDE layout's fswitch vector (each floor group's state, then its step timer: f_switch, f_sub)
+    if isinstance(tws["f_switch"], list):
+        wsw, msw = tuple(tws["f_switch"]) + tuple(tws["f_sub"]), tuple(ms[2])
+        if msw != wsw:
+            out.append(("fswitch vector", msw, wsw))
+    elif int(bool(ms[2])) != int(bool(tws["f_switch"])):
         out.append(("floor switch", ms[2], tws["f_switch"]))
     mp = (pose[0] & M32, pose[1] & M32, pose[2] & M32)
     tp = (tws["px"] & M32, tws["py"] & M32, tws["pangle"] & M32)
@@ -248,6 +260,7 @@ def p2a_part(args) -> dict:
         loots = player_loots(tw.world.player)
         calls = []
         tap_walkover(tw.world, calls)
+        mtele = tap_monster_teleports(tw.world)
         if loots:
             tw.set_card(pcard)
         if setup is not None:
@@ -279,7 +292,7 @@ def p2a_part(args) -> dict:
                 if ws.g_leveldone:
                     lvdone, mode, scr = 1, 1, LEVEL_DONE_ENTER
             if drawn:
-                tsnaps.append({"ws": tw.world.ws.as_dict(), "calls": list(calls)})
+                tsnaps.append({"ws": tw.world.ws.as_dict(), "calls": list(calls), "mtele": mtele[0]})
                 calls.clear()
                 tw.set_seen(seen_standin(tw))
         n = min(len(snaps), len(tsnaps))
@@ -389,7 +402,172 @@ def x_scenarios(dsim, w0, R, G, D, gd) -> list:
         out.append(("X teleport line %d from its front (closet cleared), then walking through the freeze" % tel.line,
                     found[0], [F] * 30 + [I] * 2, found[1],
                     lambda ts: any(t["ws"]["p_reaction"] for t in ts)))
+    # ---- M8 F1.3: the movers (movers.floor_groups / floor_walk_triggers / floor_use_boxes, the blazing lifts, a lift
+    # tag on two sectors), each placed by a pose that WORKS on the World (the probe) -- then claimed on the twin. The
+    # geometry is the WORLD's (`w0`), never the mirror's: a mutated mirror must not move the scenarios
+    mp = SimpleNamespace(wide=w0.floor_wide, groups=w0.floor_groups, floor_walk=w0.floor_walk, floor_use=w0.floor_use,
+                         order=list(w0.lift_order), use=w0.lift_use, walk=w0.lift_walk,
+                         stops=w0.lift_stops, stride={si: w0.lift_stride[k] for k, si in enumerate(w0.lift_order)},
+                         lifts_of_tag={t: tuple(w0.lift_order[k] for k in ks) for t, ks in w0.lift_of_tag.items()})
+    if probe is None:
+        probe = MonsterPhase(dsim.mw, dsim.mapname, BOOT_SKILL, rm=dsim.rm, mode=MONSTER_MODE, player=PLAYER_MODE)
+    pw = probe.world
+    tele_count = tap_monster_teleports(pw)
+
+    def tries(pose, keys, test, setup=None):
+        """run the probe World from `pose` on `keys`: does `test(world)` hold at the end?"""
+        probe.reset(BOOT_SKILL)
+        if setup is not None:
+            setup(probe)
+        ws = pw.ws
+        ws.px, ws.py, ws.pangle = pose
+        if not pw.rm.check_position(pw.scene_c, ws.px, ws.py)[0]:
+            return False
+        tele_count[0] = 0
+        for kd in keys:
+            pw.tic(kd)
+            probe.set_seen(seen_standin(probe))
+        return test(pw)
+
+    def line_poses(x1, y1, x2, y2):
+        """standing poses before a line, facing across it: both sides, a few distances, three points along it"""
+        import math
+        nx, ny = -(y2 - y1), (x2 - x1)
+        n = math.hypot(nx, ny)
+        for back in (32, 24, 40, 48, 16):
+            for frac in (0.5, 0.25, 0.75):
+                mx, my = x1 + (x2 - x1) * frac, y1 + (y2 - y1) * frac
+                for side in (1, -1):
+                    x, y = int(round(mx + side * nx / n * back)), int(round(my + side * ny / n * back))
+                    yield (x << 16, y << 16, G.bam(-side * nx, -side * ny))
+
+    def shape_ends(shape):
+        if shape[0] == "d":
+            return shape[1:]
+        _a, c, lo, hi = shape
+        return (c, lo, c, hi) if shape[0] == "x" else (lo, c, hi, c)
+
+    def gstate(ws, g):
+        return ws["f_switch"][g] if isinstance(ws["f_switch"], list) else ws["f_switch"]
+
+    if mp.wide:
+        walk_of = {}
+        for g, shape in mp.floor_walk:
+            walk_of.setdefault(g, []).append(shape)
+        use_of = {}
+        for g, box in mp.floor_use:
+            use_of.setdefault(g, []).append(box)
+        for g, grp in enumerate(mp.groups):
+            travel = max(grp.sub, 1) * grp.n + 4
+            fired = (lambda w, g=g: w.floor_state(g) or w.floor_sub(g))
+            claim = (lambda ts, g=g, n=grp.n: max(gstate(t["ws"], g) for t in ts) == n - 1)
+            found = None
+            for shape in walk_of.get(g, ()):
+                for pose in line_poses(*shape_ends(shape)):
+                    if tries(pose, [F] * 10, fired):
+                        found = (pose, [F] * 10 + [I] * travel, "W1 line %s" % (shape,))
+                        break
+                if found:
+                    break
+            for box in use_of.get(g, ()) if not found else ():
+                try:
+                    pose = G._in_box(dsim, box)
+                except AssertionError:
+                    continue
+                if tries(pose, [I, U], fired):
+                    found = (pose, [I, U] + [I] * travel, "S1 box %s" % (box,))
+                    break
+            if found is None:
+                print("  (no pose fires floor group %d, tag %d)" % (g, grp.tag))
+                continue
+            out.append(("X floor group %d (tag %d, special %d, sub %d) by its %s: reaches its last state"
+                        % (g, grp.tag, grp.special, grp.sub, found[2]), found[0], found[1], None, claim))
+    # the blazing lifts and a tag that starts two lifts: one scenario per such tag
+    for tag, sis in sorted(mp.lifts_of_tag.items()):
+        if len(sis) < 2 and all(mp.stride[si] == 1 for si in sis):
+            continue
+        ks = [mp.order.index(si) for si in sis]
+        ns = [len(mp.stops[si]) for si in sis]
+        started = (lambda w, ks=ks: all(w.ws.l_state[k] for k in ks))
+        claim = (lambda ts, ks=ks, ns=ns: all(max(t["ws"]["l_state"][k] for t in ts) == n - 1 for k, n in zip(ks, ns)))
+        found = None
+        for t_, box in mp.use:
+            if t_ != tag or found:
+                continue
+            try:
+                pose = G._in_box(dsim, box)
+            except AssertionError:
+                continue
+            if tries(pose, [I, U, I, I], started):
+                found = (pose, [I, U] + [I] * 40, "SR box")
+        for trig in mp.walk if not found else ():
+            if trig[0] not in sis or found:
+                continue
+            for pose in line_poses(*shape_ends(trig[1:])):
+                if tries(pose, [F] * 6 + [I] * 2, started):
+                    found = (pose, [F] * 6 + [I] * 40, "WR line %s" % (trig[1:],))
+                    break
+        if found is None:
+            print("  (no pose starts the lifts of tag %d)" % tag)
+            continue
+        out.append(("X lifts %s (tag %d, strides %s) by the %s: each reaches its bottom"
+                    % (list(sis), tag, [mp.stride[si] for si in sis], found[2]), found[0], found[1], None, claim))
+    # the teleport closets: the floor group that lowers a teleport line's pad fires; a closet monster then walks over
+    # the line and TELEPORTS (the twin's `_teleport_monster`, counted)
+    if mp.wide:
+        done = set()
+        for tel in getattr(w0, "teleports", ()):
+            ld = w0.lds[tel.line]
+            pads = {w0.sds[s].sector for s in (ld.front, ld.back) if 0 <= s < len(w0.sds)}
+            g = next((g for g, grp in enumerate(mp.groups) if pads & set(grp.sectors)), None)
+            if g is None or g in done:
+                continue
+            done.add(g)
+            frames = 150
+            got = tele_count
+            test = (lambda w, g=g: (w.floor_state(g) or w.floor_sub(g)) and got[0] > 0)
+            found = None
+            for shape in walk_of.get(g, ()):
+                for pose in line_poses(*shape_ends(shape)):
+                    keys = [F] * 10 + [I] * frames
+                    if tries(pose, [F] * 10, lambda w, g=g: w.floor_state(g) or w.floor_sub(g)) \
+                            and tries(pose, keys, test):
+                        found = (pose, keys)
+                        break
+                if found:
+                    break
+            for box in use_of.get(g, ()) if not found else ():
+                try:
+                    pose = G._in_box(dsim, box)
+                except AssertionError:
+                    continue
+                keys = [I, U] + [I] * frames
+                if tries(pose, keys, test):
+                    found = (pose, keys)
+                    break
+            if found is None:
+                print("  (no pose lowers floor group %d and sees a closet monster teleport)" % g)
+                continue
+            out.append(("X closet of teleport line %d: floor group %d lowers its pad, a monster teleports" % (tel.line, g),
+                        found[0], found[1], None,
+                        lambda ts: ts and ts[-1].get("mtele", 0) > 0))
     return out
+
+
+def tap_monster_teleports(world) -> list:
+    """count the monster teleports a World makes (`_teleport_monster` returning another place): [count]"""
+    n = [0]
+    orig = getattr(world, "_teleport_monster", None)
+    if orig is None:
+        return n
+
+    def tm(m, ox, oy, nx, ny, _orig=orig):
+        r = _orig(m, ox, oy, nx, ny)
+        if tuple(r) != (nx, ny):
+            n[0] += 1
+        return r
+    world._teleport_monster = tm
+    return n
 
 
 # ================================================================================================
@@ -535,6 +713,22 @@ def mutate(name: str) -> None:
     from doomfj import monsters as M
     if name == "no_keys":
         M.door_keys_kw = lambda phase: {}
+    elif name == "no_floor_movers":                      # the mirror without F1.3's floor movers: no W1 / S1 floor
+        from doomfj import movers as MV                  # line fires a group (MoverPhase's triggers dropped)
+        init = MV.MoverPhase.__init__
+
+        def no_floors(self, *a, **kw):
+            init(self, *a, **kw)
+            self.floor_walk, self.floor_use = [], []
+        MV.MoverPhase.__init__ = no_floors
+    elif name == "slow_lifts":                           # the mirror before F1.3's blazing lifts: every stride 1
+        from doomfj import movers as MV
+        init = MV.MoverPhase.__init__
+
+        def slow(self, *a, **kw):
+            init(self, *a, **kw)
+            self.stride = {si: 1 for si in self.stride}
+        MV.MoverPhase.__init__ = slow
     elif name == "no_walkovers":                         # the mirror's door walk-overs never fire
         from doomfj import doors as D
         D.DoorPhase.after_move = lambda self, state, old16, new16, radius=16: state

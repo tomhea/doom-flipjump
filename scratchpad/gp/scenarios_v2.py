@@ -879,9 +879,12 @@ class BinaryMirror:
 def mover_state(w):
     """M7 P2b: the model's movers as a movers.MoverPhase state -- what b0 writes at the frame start"""
     ws = w.ws
+    # M8 F1.3: in the WIDE layout (movers.floor_wide: E1M2) the switch is the fswitch VECTOR -- each floor group's
+    # state, then each group's step timer -- as movers.MoverPhase keeps it and the binary holds it; E1M1's 1-bit f_switch
+    sw = (tuple(ws.f_switch) + tuple(ws.f_sub)) if getattr(w, "floor_wide", False) else ws.f_switch
     return (tuple((ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k])
                   for k in range(len(w.lift_order))),
-            frozenset(si for k, si in enumerate(w.lift_order) if ws.l_req[k]), ws.f_switch)
+            frozenset(si for k, si in enumerate(w.lift_order) if ws.l_req[k]), sw)
 
 
 def door_tuples(w) -> list:

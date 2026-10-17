@@ -665,12 +665,20 @@ def scenarios(dsim, card) -> list:
     else:
         fs = R["floor_switch"]
         fs_sec, fs_low = fs["sector"], fs["lowered"]
+        if dsim.mp.wide:
+            # M8 F1.3: the WIDE layout's switch is the fswitch VECTOR (movers.MoverPhase: each floor group's state, then
+            # each group's step timer) -- the claim reads the state of the switch sector's own group
+            g_fs = next(g for g, grp in enumerate(dsim.mp.groups) if fs_sec in grp.sectors)
+            s11 = lambda tr: [fr["movers"][2][g_fs] for fr in tr] == [0, 1, 1, 1] \
+                and tr[1]["mheights"][fs_sec][0] == fs_low                                          # noqa: E731
+        else:
+            s11 = lambda tr: [fr["movers"][2] for fr in tr] == [0, 1, 1, 1] \
+                and tr[1]["mheights"][fs_sec][0] == fs_low                                          # noqa: E731
         out.append({
             "name": "S11 the floor switch: a press lowers the pillars at once",
             "pose": _in_box(dsim, dsim.mp.switch_boxes[fs["box"]]), "keys": [I, U, I, I], "pcard": 0,
             "controls": ["no_use_lines"],
-            "claim": lambda tr: [fr["movers"][2] for fr in tr] == [0, 1, 1, 1]
-            and tr[1]["mheights"][fs_sec][0] == fs_low})
+            "claim": s11})
     if not R.na("wr_lift"):
         out.append({
             "name": "S12 NEW GAME puts a riding lift back",

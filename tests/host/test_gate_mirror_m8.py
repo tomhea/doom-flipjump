@@ -81,10 +81,48 @@ def test_a_teleport_records_the_walk_up_to_the_line():
         if abs(ws.mon_x[m] - 2826) <= 96 and abs(ws.mon_y[m] - 160) <= 96:
             ws.mon_active[m] = 0
     x16, y16, ang = 2826 << 16, 160 << 16, 0x80000000
-    ph.sync({si: (0, 0, 0, 0) for si in w.door_order}, tuple((0, 0, 0, 0) for _ in w.lift_order), 0)
+    ph.sync({si: (0, 0, 0, 0) for si in w.door_order}, tuple((0, 0, 0, 0) for _ in w.lift_order),
+            (0,) * (2 * len(w.floor_groups)))                # M8 F1.3: E1M2's fswitch vector, every group still
     nx, ny, na = ph.move({"forward": True}, x16, y16, ang)
     assert (nx, ny) == ((tel.dest[0] << 16) & M32, (tel.dest[1] << 16) & M32) and ws.p_reaction
     assert len(ph.walk_segs) == 1
     (a, b), = ph.walk_segs
     assert a == (x16, y16) and b[1] == y16 and b[0] < tel.coord << 16 < a[0]
     assert walkover_segments(ph, (x16, y16), (nx, ny)) == [(a, b)]
+
+
+def _movers(path, mapname):
+    from doomfj.movers import MoverPhase
+    mw = WadFile.from_path(str(path))
+    return MoverPhase(mw.sectors(mapname), mw.linedefs(mapname), mw.sidedefs(mapname), mw.vertexes(mapname))
+
+
+def test_e1m1_keeps_its_one_switch_cell():
+    """E1M1: the narrow layout -- the mirror's `switched` is one scalar, the world's f_switch a 1-bit scalar"""
+    mp = _movers(E1M1, "E1M1")
+    ph = _phase(E1M1, "E1M1")
+    assert not mp.wide and not ph.world.floor_wide and mp.initial()[2] == 0 and ph.world.ws.f_switch == 0
+
+
+@needs_e1m2
+def test_the_fswitch_vector_is_the_worlds():
+    """M8 F1.3 (E1M2's wide layout): the mirror's `switched` is the fswitch VECTOR -- each floor group's state, then
+    its step timer -- and a group fired in the mirror (MoverPhase.use_press / after_move) is the vector the World's own
+    `floor_fire` makes; `MonsterPhase.sync` writes it into the world's f_switch / f_sub as it is"""
+    mp = _movers(E1M2, "E1M2")
+    ph = _phase(E1M2, "E1M2")
+    w = ph.world
+    ng = len(mp.groups)
+    assert mp.wide and w.floor_wide and mp.initial()[2] == (0,) * (2 * ng)
+    for g, box in mp.floor_use:
+        x16, y16 = ((box[0] + box[2]) // 2) << 16, ((box[1] + box[3]) // 2) << 16
+        st = mp.use_press(mp.initial(), x16, y16)
+        w.reset(gd.SK_HARD)
+        w.floor_fire(g)
+        assert st[2] == tuple(w.ws.f_switch) + tuple(w.ws.f_sub), g
+        st = mp.tic(st)
+        w._movers_phase(None)
+        assert st[2] == tuple(w.ws.f_switch) + tuple(w.ws.f_sub), g
+        w.reset(gd.SK_HARD)
+        ph.sync({si: (0, 0, 0, 0) for si in w.door_order}, st[0], st[2])
+        assert tuple(w.ws.f_switch) + tuple(w.ws.f_sub) == st[2]

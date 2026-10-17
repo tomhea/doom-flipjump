@@ -513,8 +513,13 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             from doomfj.collision import MON_CELL_DECLS
             from doomfj.monstermove import monster_seed_decls, static_blockers
             from doomfj.things import LEAF_LINK_DECLS
+            from doomfj.monstermove import mc_don_decl, mc_don_restart
             things, var = static_blockers(w)
-            assert not var, "a decoration some skill lacks needs its mc_don flag set at NEW GAME"
+            # M8 F1.2: a decoration some skill lacks stands by its mc_don flag, set at NEW GAME per skill (E1M1: none)
+            if var:
+                extra["decls_wake"] += [mc_don_decl(w, var, boot_skill)]
+                for k, sk in enumerate(skills):
+                    restart[k] = restart[k] + mc_don_restart(w, var, sk)
             nb = max(1, len(w.barrel_things))
             extra["decls_wake"] += (
                 p32b_decls(schema, nmon, {f: boot[f] for f in P32B_FIELDS}, [w._mon_sector(m) for m in range(nmon)],

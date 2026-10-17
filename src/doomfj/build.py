@@ -179,10 +179,11 @@ def p8a_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
             + [d for d in _barrelcode.fight_decls(w) if d.split(":")[0] in FIGHT_PERSIST])   # package I
 
 
-def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tuple:
+def persist_labels(*, standalone: bool, doors: bool, moving_things: bool, extra: tuple = ()) -> tuple:
     """The labels the M1 reset leaves alone, for a tier's flags -- the ONE composition: the reset
     (build_wall_renderer) and the standalone set's check (scratchpad/m5_setfile.py) both ask it, so
-    the two cannot disagree about what persists."""
+    the two cannot disagree about what persists. M8 F1.2: `extra`, the MAP's own persisted names
+    (monstermove.map_persist: `mc_don` where a solid decoration differs by skill; none on E1M1)."""
     if not standalone:
         return ()
     return (STANDALONE_PERSIST + (DOOR_PERSIST + MOVER_PERSIST if doors else ())
@@ -192,7 +193,16 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
             + HURT_PERSIST + PROJ_PERSIST                   # M7 P5: the player's hurt cells, the pools
             + GAME_PERSIST + LOOT_PERSIST + BARREL_PERSIST   # M7 P7 / P6: the game's cells; loot, barrels (HOOKS)
             + STAT_PERSIST                                  # P10: the level's stats
-            + p8a_persist())                                # M7 P8a: the view, the knock, the fight (HOOKS) -- last
+            + p8a_persist()                                 # M7 P8a: the view, the knock, the fight (HOOKS)
+            + tuple(extra))                                 # M8 F1.2: the map's own -- last
+
+
+def _map_persist(wad, mapname: str, on: bool) -> tuple:
+    """M8 F1.2: the map-dependent persisted names for a standalone, moving-things tier (monstermove.map_persist)"""
+    if not on:
+        return ()
+    from doomfj.monstermove import map_persist
+    return map_persist(wad, mapname)
 
 
 def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
@@ -531,7 +541,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         # first assembly's addresses or image. m1_reset.fj still goes after the emitted parts (it only holds a def).
         from doomfj import selfreset
         paths = paths + [_SRC_FJ / "m1_reset.fj"]
-        _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things)
+        _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things,
+                                  extra=_map_persist(wad, mapname, standalone and moving_things))
         nss = len(bake_bsp(wad, mapname).subsectors)
         names = selfreset.registered_reset_names(restore_set, cfg, standalone, mapname)
         part, n_nib, n_byte, _plan = selfreset.emit_reset_part_by_label(
@@ -564,7 +575,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         paths = paths + [_SRC_FJ / "m1_reset.fj"]
         # M5/M2-R4: the labels the reset must leave alone -- computed ONCE and used both to build
         # the reset and to report it.
-        _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things)
+        _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things,
+                                  extra=_map_persist(wad, mapname, standalone and moving_things))
         labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
                                                 **standalone_run_header(standalone))
         r1 = FjmRunner(out, flat_max_words=limit)

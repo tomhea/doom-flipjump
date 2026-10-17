@@ -413,6 +413,26 @@ def decor_presence(w, var, skill: int) -> list:
     return [int(bool(w.decor_solid[k].flags & gd.skill_bit(skill))) for k in var]
 
 
+def mc_don_decl(w, var, skill: int) -> str:
+    """M8 F1.2 (docs/f1-big-map-widths.md 7b): the `mc_don` cell -- a nibble a skill-dependent solid decoration, at
+    `skill`'s presence (the boot skill's in the image)"""
+    return "mc_don: hex.vec %d, %d" % (len(var), sum(v << (4 * i) for i, v in enumerate(decor_presence(w, var, skill))))
+
+
+def mc_don_restart(w, var, skill: int) -> list:
+    """M8 F1.2: NEW GAME at `skill` stands that skill's decorations"""
+    return ["    hex.set %d, mc_don, %d" % (len(var), sum(v << (4 * i)
+                                                        for i, v in enumerate(decor_presence(w, var, skill))))]
+
+
+def map_persist(map_wad, mapname: str) -> tuple:
+    """M8 F1.2: the map-dependent persisted names (build.persist_labels(extra=)) -- `mc_don` on a map with a solid
+    decoration some skill lacks (E1M2, E1M9), nothing on E1M1 (whose image stays byte-identical)"""
+    from doomfj.world import World
+    _things, var = static_blockers(World(map_wad, mapname, monsters="idle"))
+    return ("mc_don",) if var else ()
+
+
 def world_cell_inputs(w, door_quant: int) -> dict:
     """the keyword arguments of `collision.monster_cells_fj` (and `monster_seed_fj`'s `secs_open` / `msecs` /
     `mcell`) built from a World the way the emitter builds the player's -- for the harnesses"""

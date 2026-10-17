@@ -12,7 +12,9 @@ the floor at the tic-start position -- `collision.move_with_collision_lines(pick
     the host proof in tests/host/test_loot_tables.py) lands on the cell's list of item stubs, in PICKUP INDEX order;
   * item stub `pk<i>` (fcall'd, `pk_iret`): present (its `thvis` slot != 0) -> `pk_box` (ONE shared leaf: the
     item's x, y, z from the D4 table `pkxyz` by `pk_i`; the box, strict, 16.16; the reach `-8 <= item_z - cm_hf <=
-    56`; `item_z` = the model's own `pickup_z`, baked: no pickup stands in a door or mover sector, asserted) -> `stl.fcall
+    56`; `item_z` = the model's own `pickup_z`, baked: no pickup stands in a door sector, asserted; M8 F1.3 -- an item
+    on a MOVER's floor (`World.pickup_on_mover`: E1M2's blue card on switch sector 45) goes through `pk_mbox` instead:
+    `ptss` = its leaf, `ms_seed_leaf` -> `cp_seedf`, its floor NOW, as the model's touch reads `secs_c`) -> `stl.fcall
     give_<type>, gv_ret` -> `gv_ok` ? (`pk_bonus`: `p_bc` = min(bc + 6, 255); the thvis slot 0; a RUNTIME pickup also
     unlinked from its leaf list);
   * then the DROPS, when `dr_live` != 0: each dropper k (the monster slots whose `dropper` is not None, in slot
@@ -148,7 +150,9 @@ def pickup_slots(w, rm, map_wad, mapname: str, sprite_wad) -> dict:
     from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
     drawable, draw_idx = drawable_things(rm, map_wad.things(mapname), sprite_wad, {})
     cmap = bake_bsp(map_wad, mapname)
-    baked = baked_thing_mask(rm, cmap, drawable, MONSTER_TYPES)
+    from doomfj.things import mover_leaves, mover_mask_kw                     # M8 F1.3
+    baked = baked_thing_mask(rm, cmap, drawable, MONSTER_TYPES,
+                             **mover_mask_kw(rm, cmap, drawable, mover_leaves(map_wad, mapname, cmap)))
     vis = vanishable_slots(drawable, baked, VANISHABLE_TYPES)
     keep = sorted(i for i, b in zip(draw_idx, baked) if not b)
     key = {(t.type, t.x, t.y, t.angle, t.flags): i for i, t in enumerate(drawable)}
@@ -464,6 +468,31 @@ def _box_leaf() -> List[str]:
             "  pkb_out:", "    stl.fret pk_bret"]
 
 
+def _mbox_leaf() -> List[str]:
+    """M8 F1.3 (docs/f1-big-map-widths.md 9): `pk_mbox` (stl.fcall pk_mbox, pk_mret) -- item `pk_i` on a MOVER's floor,
+    the caller having set `ptss` to its leaf: x, y from `pkxyz`, z the leaf's floor now (`ms_seed_leaf` -> `cp_seedf`,
+    mover-aware: the model's `secs_c`), then `pk_boxz`"""
+    return ["pk_mbox:",
+            "    pkxyz.lookup pk_r, pk_i",
+            "    hex.zero 4, pk_tx", "    hex.mov 4, pk_tx + 4*dw, pk_r",
+            "    hex.zero 4, pk_ty", "    hex.mov 4, pk_ty + 4*dw, pk_r + 4*dw",
+            "    stl.fcall ms_seed_leaf, ms_seed_ret",
+            "    hex.mov 8, pk_tz, cp_seedf",
+            "    stl.fcall pk_boxz, pk_bret",
+            "    stl.fret pk_mret"]
+
+
+def mover_pickup_leaves(w) -> dict:
+    """M8 F1.3: `{pickup index: its leaf}` for every item on a mover's floor (`World.pickup_on_mover`); E1M1: none"""
+    return {i: w.rm.point_in_subsector(w.cmap, t.x, t.y)
+            for i, t in enumerate(w.pickup_things) if w.pickup_on_mover[i]}
+
+
+def mbox_decls(w) -> List[str]:
+    """`pk_mbox`'s return register, where a map has an item on a mover (E1M1: none -- its text unchanged)"""
+    return ["pk_mret: hex.vec w/4"] if mover_pickup_leaves(w) else []
+
+
 def _drop_leaf() -> List[str]:
     """`pk_drop` (stl.fcall pk_drop, pk_dret): the drop of runtime row `pk_t` (its monster's thpos_rt / thss_rt row):
     its 16.16 position, its leaf's floor now (`ms_seed_leaf`: mover-aware, the model's `_floor_at`), then `pk_boxz`
@@ -495,9 +524,10 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
     from doomfj.combat import DROP_ITEM
     _check_rules()
     lists = pickup_cell_lists(w) if lists is None else lists
-    for i, t in enumerate(w.pickup_things):          # the item's z is static: no pickup in a door or a mover
+    mleaf = mover_pickup_leaves(w)                   # M8 F1.3: an item on a mover reads its floor now (pk_mbox)
+    for i, t in enumerate(w.pickup_things):          # every other item's z is static: none in a door
         sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, t.x, t.y)]
-        assert sec not in w.door_order and sec not in w.mover_order, (i, t.type, sec)
+        assert sec not in w.door_order and (sec in w.mover_order) == (i in mleaf), (i, t.type, sec)
     assert all(-0x8000 <= v < 0x8000 for t, z in zip(w.pickup_things, w.pickup_z) for v in (t.x, t.y, z))
     stubs = {key: f"pk_c{k}" for k, key in enumerate(sorted(set(lists.values())))}
     tree, root = _tree("pk", "cpx", "cpy", {c: stubs[key] for c, key in lists.items()}, "pk_drops")
@@ -513,8 +543,10 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
     for i, t in enumerate(w.pickup_things):
         p = f"pk{i}"
         vis = f"thvis + {slots['slot'][i]}*2*dw"
+        test = (["    stl.fcall pk_box, pk_bret"] if i not in mleaf else
+                [f"    hex.set w/4, ptss, {mleaf[i]}", "    stl.fcall pk_mbox, pk_mret"])
         out += [f"{p}:", f"    hex.if0 1, {vis}, {p}_n",
-                f"    hex.set 2, pk_i, {i}", "    stl.fcall pk_box, pk_bret", f"    hex.if0 1, pk_in, {p}_n",
+                f"    hex.set 2, pk_i, {i}", *test, f"    hex.if0 1, pk_in, {p}_n",
                 f"    stl.fcall give_{t.type}, gv_ret", f"    hex.if0 1, gv_ok, {p}_n",
                 "    stl.fcall pk_bonus, pk_nret",
                 f"    hex.zero 2, {vis}"]
@@ -535,7 +567,7 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
         out += [f"  {p}_n:"]
     out += ["pk_out:", "    stl.fret pk_ret"]
     # ---- the shared leaves and the give routines ----
-    out += _box_leaf() + _drop_leaf()
+    out += _box_leaf() + _drop_leaf() + (_mbox_leaf() if mleaf else [])
     out += ["pk_bonus:"] + _bonus_lines("pkb") + ["    stl.fret pk_nret"]
     for kind, dropped in give_kinds(w):
         out += give_lines(kind, dropped, stats)
@@ -764,7 +796,7 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
     leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt, stats=stats)
               + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root)
               + (_statcode.secret_lines(w, cell_root) if stats else []))
-    return {"decls": loot_decls(start), "tables": tables_fj(w), "leaves": leaves,
+    return {"decls": loot_decls(start) + mbox_decls(w), "tables": tables_fj(w), "leaves": leaves,   # M8 F1.3
             "latch": latch_lines(), "pre": pre_lines(stats), "post": post_lines(), "use_guard": use_guard(),
             "tic": (lambda weapon_tic, hurt_tic, turn=True: tic_lines(weapon_tic, hurt_tic, turn, stats)),
             "pickup": pickup_call, "block": block_lines, "cells": player_cell_things, "thing_test": THING_TEST16,

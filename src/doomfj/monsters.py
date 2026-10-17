@@ -806,7 +806,9 @@ class MonsterViews:
         from doomfj.things import baked_thing_mask
         self.drawable = drawable
         self.cmap = bake_bsp(map_wad, mapname)
-        baked = baked_thing_mask(rm, self.cmap, drawable, MONSTER_TYPES)
+        from doomfj.things import mover_leaves, mover_mask_kw                 # M8 F1.3
+        baked = baked_thing_mask(rm, self.cmap, drawable, MONSTER_TYPES,
+                                 **mover_mask_kw(rm, self.cmap, drawable, mover_leaves(map_wad, mapname, self.cmap)))
         keep = sorted(i for i, b in zip(draw_idx, baked) if not b)
         self.rt_drawable = [draw_idx.index(i) for i in keep]          # runtime thing t -> drawable index
         self.nrt = len(keep)

@@ -2084,7 +2084,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
         _drawable, _draw_idx = drawable_things(rm, map_wad.things(mapname), sprite_wad, spr_cache)
         check_slot_ids(len(_drawable))
-        _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES) if moving_things
+        from doomfj.things import mover_leaves as _mover_leaves, mover_mask_kw as _mover_mask_kw   # M8 F1.3
+        _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES,
+                                   **_mover_mask_kw(rm, cmap, _drawable, _mover_leaves(map_wad, mapname, cmap)))
+                  if moving_things
                   else (True,) * len(_drawable))
         _mt_keep = {i for i, b in zip(_draw_idx, _baked) if not b}
         # M14.5 §3.3: the baked things that can VANISH get a 1-nibble flag at a fixed address.

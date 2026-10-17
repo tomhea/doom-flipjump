@@ -2536,7 +2536,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
         return min(fs_.ceil_h, bs_.ceil_h) <= max(fs_.floor_h, bs_.floor_h)
 
-    def _seg_dual(seg) -> bool:
+    def _seg_dual_cell(seg):
         """A DOOR seg: CLOSED while its door is shut, open otherwise.
 
         Solid-vs-marking is a compile-time decision everywhere else, but this seg is both at
@@ -2547,7 +2547,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         """
         ld_ = lds[seg.linedef]
         if ld_.back == -1 or _seg_cell(seg) is None:          # M7 P2b: or a mover's
-            return False
+            return None
         fi_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
         bi_ = sds[ld_.back if seg.side == 0 else ld_.front].sector
 
@@ -2556,11 +2556,30 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             return min(f_.ceil_h, b_.ceil_h) <= max(f_.floor_h, b_.floor_h)
 
         st_ = [_shut(sv) for sv in _seg_secs(seg)]
-        dual_ = bool(st_) and st_[0] and not all(st_)
-        # M8 L1: the dual gate is ONE `hex.if0` on one state cell; a two-mover seg's pair of cells has none
-        assert not (dual_ and isinstance(_seg_cell(seg), tuple)), (
-            f"{mapname}: seg on linedef {seg.linedef} between two movers is shut only in some states")
-        return dual_
+        if not (st_ and st_[0] and not all(st_)):
+            return None
+        cell = _seg_cell(seg)
+        if not isinstance(cell, tuple):
+            # the gate is `hex.if0` on the cell: shut must be EXACTLY state 0 (every E1M1 door; asserted since M8)
+            assert st_ == [True] + [False] * (len(st_) - 1), (
+                f"{mapname}: seg on linedef {seg.linedef} is shut at states {[k for k, x in enumerate(st_) if x]}, "
+                f"not exactly state 0 of {cell}")
+            return cell
+        # M8 L1 + F1.3: two movers (the pairs, the first mover's state major: `_seg_secs`). The gate stays ONE
+        # `hex.if0` when the shut pairs are exactly one mover's state 0 -- E1M2's linedef 1199 (lift 47 / floor 206) is
+        # shut exactly while 206 stands at its stored floor, the lift's ceiling, whatever the lift's state
+        na_, nb_ = (len(_msecs[m_]) for m_ in _seg_movers(seg))
+        assert len(st_) == na_ * nb_
+        if st_ == [ia == 0 for ia in range(na_) for ib in range(nb_)]:
+            return cell[0]
+        if st_ == [ib == 0 for ia in range(na_) for ib in range(nb_)]:
+            return cell[1]
+        raise AssertionError(f"{mapname}: seg on linedef {seg.linedef} between two movers is shut at pairs "
+                             f"{[divmod(k, nb_) for k, x in enumerate(st_) if x]}, not one mover's state 0")
+
+    def _seg_dual(seg) -> bool:
+        """A DOOR seg (or a mover's): CLOSED while its cell is at state 0, open otherwise (`_seg_dual_cell`)"""
+        return _seg_dual_cell(seg) is not None
 
     def _seg_as_solid(seg) -> bool:
         """Does this seg go down the one-sided (wall-emitting) path?"""
@@ -3116,7 +3135,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # [gate] marking body  ;done | solid: solid body | done:
                 # `hex.if0` on the door's own state cell: state 0 IS shut, so shut takes the SOLID
                 # arm (the closed line is a wall) and every open state takes the marking arm.
-                _dc = _seg_cell(seg)                       # M7 P2b: a door's or a mover's
+                _dc = _seg_dual_cell(seg)                  # M7 P2b: a door's or a mover's (M8: one of two)
                 out.insert(_mark0, f"    hex.if0 1, {_dc}, ss{cid}_seg{si}_solid")
                 out.insert(_mark1 + 1, f"    ;ss{cid}_seg{si}_dualend")
                 out.insert(_mark1 + 2, f"  ss{cid}_seg{si}_solid:")

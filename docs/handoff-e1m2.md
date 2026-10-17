@@ -77,6 +77,11 @@ B0 on its set, gamespeed, msframe, rebuild).
 - The computer map is picked up and does nothing (there is no automap).
 - Deathmatch / co-op starts and things are ignored (single player only, as E1M1).
 - The scrolling wall (48, two lines): decided in L5 -- animated if cheap, else static.
+- M8 F1.3 (the movers): every one-shot floor moves on the doors' 16-unit grid -- a stop every 4 frames (FLOORSPEED, a
+  quarter of the lift's), turboLower (71) every frame, the S1 23 switch INSTANT as on E1M1 (D-L2); a floor's destination
+  is computed from its neighbours' STORED floors (EV_DoFloor reads them at the trigger: sector 206 borders blazing lift
+  47); the S1 switch textures do not change; a W1 crossing is tested once per tic (start to end), a slanted one by the
+  exact cross product (P_PointOnLineSide without FixedMul's truncation); a blazing lift (120 / 123) strides two stops.
 
 ## 4. The width plan for L1 (analysis 2026-10-16, read-only, at be8f2cc)
 
@@ -229,3 +234,19 @@ at the script's EOF; the frames show E1M2's start room and its monsters
 13,512,040 ops/frame, 202.8 M fj/s** on its 200-frame forward script -- E1M1's shipped baseline is 67.3 ms on its own
 (a different scene: a first reading, not a ship number; the stand-ins move ops a little). NOT certified: the six
 stand-ins' features are not built, and no E1M2 gate has run (E1M2's gates are L6's: its roles, its combat set).
+
+## 11. L3 movers (M8 F1.3, 2026-10-17, branch m8-e1m2-movers)
+
+Every moving floor E1M2 has, model and fj (`movers.py`, `movercode.py`; the readers through ONE table,
+`movers.mover_table`): the blazing lifts 120 / 123 (stride 2), a lift tag on two sectors (tag 5: 47 and 209; monsters
+trigger 88 only, P_CrossSpecialLine's list), and the one-shot floors 19 / 23 / 38 / 58 / 71 / 102 as ELEVEN GROUPS,
+one per tag, each its own state cell `movers.switch_cell(g)` in the `fswitch` vector (states, then step timers) --
+item 10: the two 23 tags fire apart. E1M1 keeps its narrow layout (`fswitch: hex.vec 1`, the 1-bit `f_switch`): its
+movercode text, sight segments, sound edges, missile rows, P_ChangeSector and monster cells were diffed identical to
+a6b5e63's. The one two-cell line (1199: lift 47 / floor 206) is read through the cell its opening depends on
+(`monstersight.line_states`, `collision.mover_line_states`; the monsters' low floor on 47's cell, a split dispatch).
+Item 9: an item on a mover's floor (seven on E1M2: the blue card on 45, the yellow card on 301, ...) touches at the
+live floor (`lootcode.pk_mbox`) and renders RUNTIME (`things.mover_leaves`, `baked_thing_mask(mover_leaves=)`; E1M1's
+mask unchanged). `pickup-static-z` is retired. Tests: tests/host/test_floor_movers.py, test_mover_things.py;
+tests/fj/test_floor_movers_fj.py, test_pickup_mover_fj.py (each with R9 mutants). NOT run here (heavy): emit_baseline
+on E1M1, emit_check E1M2, any build.

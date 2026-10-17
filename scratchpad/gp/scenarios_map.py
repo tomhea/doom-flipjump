@@ -242,6 +242,19 @@ def _standable(w, x, y):
     return w.rm.try_move(w.scene_c, x16, y16, x16, y16) and w._solid_thing_at(x16, y16) is None
 
 
+def _inside(w, x, y) -> bool:
+    """M8 (b0 on doom_e1m2_r2: R0-s0's checkpoint (464, 48) lay BEHIND one-sided linedef 274 -- in the void, where every
+    wall faces away and the two mirrors' degenerate pictures part): the point is on the front side of every seg of its own
+    BSP leaf (a leaf is convex and its segs face in) -- a void point shares its leaf, and so its sector, with the floor"""
+    ss = w.cmap.subsectors[w.rm.point_in_subsector(w.cmap, x, y)]
+    for k in range(ss.firstseg, ss.firstseg + ss.numsegs):
+        sg = w.cmap.segs[k]
+        (x1, y1), (x2, y2) = w.cmap.vertexes[sg.v1], w.cmap.vertexes[sg.v2]
+        if (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1) > 0:
+            return False
+    return True
+
+
 def _sector_points(w, sec, step=32):
     xs = [w.cmap.vertexes[v][0] for ld in w.lds for side in (ld.front, ld.back)
           if 0 <= side < len(w.sds) and w.sds[side].sector == sec for v in (ld.v1, ld.v2)]
@@ -250,7 +263,7 @@ def _sector_points(w, sec, step=32):
     if not xs:
         return []
     return [(x, y) for x in range(min(xs) + 16, max(xs) - 15, step) for y in range(min(ys) + 16, max(ys) - 15, step)
-            if w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)] == sec and _standable(w, x, y)]
+            if w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)] == sec and _inside(w, x, y) and _standable(w, x, y)]
 
 
 def suggest(n_runs: int = N_RUNS) -> dict:

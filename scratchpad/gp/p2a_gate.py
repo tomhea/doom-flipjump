@@ -229,10 +229,14 @@ class Mirror:
                     # M7 P7 (P7-a): the tic-start latch; before P7 nothing kills the player, so 0
                     dead = mph.dead_latch() if mortal else 0
                     use = bool(kd.get("use"))
-                    has_blue = {"card": True, "no_card": False}.get(self.ctl)
+                    # M8 L2: the yellow and red keys (and a blue skull) the WORLD holds -- World._doors_phase's
+                    # player_can_open (monsters.door_keys_kw: {} on E1M1, whose player holds only the blue card)
+                    from doomfj.monsters import door_keys_kw
+                    keys_kw = door_keys_kw(mph if loots else None)
+                    has_blue = {"card": True, "no_card": False}.get(self.ctl, keys_kw.pop("has_blue", None))
                     alive = not dead or self.ctl == "dead_holds_door"
                     ph = dp.tic(ph, use and (not dead or self.ctl == "dead_uses"), st.x, st.y, has_blue=has_blue,
-                                others=mph.boxes(), player=alive)    # P3.2b; P7-c
+                                others=mph.boxes(), player=alive, **keys_kw)    # P3.2b; P7-c
                     ms = mp.tic(ms)                           # M7 P2b: the lifts after the doors
                     if dead:                                  # P7-c: no use line, and the edge is not read
                         if self.ctl == "dead_exits" and use and any(in_use_box_fixed(b, st.x, st.y)
@@ -279,7 +283,9 @@ class Mirror:
                         taken |= ph[3] == 1 and pcard == 0
                     # M7 P8a (V): the walk-overs over the WALK's segment, then over the KNOCK's (the player's knock
                     # move after the walk: monsters.KNOCK_WALKOVERS, DOOM's P_TryMove) -- `walk_end` is None when no
-                    # knock move ran, and the walk's segment is then the whole move, as before P8a
+                    # knock move ran, and the walk's segment is then the whole move, as before P8a. M8 L4: on a map
+                    # with teleport lines, the segments the world's own move tested (`walk_segs`): a teleport's walk
+                    # up to its line, nothing from the jump
                     from doomfj.monsters import walkover_segments
                     for a_, b_ in walkover_segments(mph if loots else None, (st.x, st.y), (new.x, new.y)):
                         if self.ctl == "w1":       # every crossing presses; the bits still read fired

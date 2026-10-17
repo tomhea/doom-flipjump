@@ -564,8 +564,12 @@ def main():
         with_movers = mps is not None
         mps = mp.initial() if mps is None else mps
         dead = mph.dead_latch() if (mph is not None and player_mortal(mph.world.player)) else 0
+        # M8 L2: the yellow and red keys (and a blue skull) the WORLD holds -- World._doors_phase's player_can_open
+        # (monsters.door_keys_kw: {} on E1M1, whose player holds only the blue card, which rides `dps`)
+        from doomfj.monsters import door_keys_kw
         dps = dp.tic(dps, used and not dead, st.x, st.y, others=others,   # M7 P3.2b: reversal on the monsters too
-                     player=not dead)                                     # M7 P7: a dead player holds no door
+                     player=not dead,                                     # M7 P7: a dead player holds no door
+                     **door_keys_kw(mph))
         mps = mp.tic(mps)
         if dead:
             pass                                       # M7 P7: no use line; the death think leaves pusedn alone
@@ -595,7 +599,8 @@ def main():
             mph.weapon(kd, st.x, st.y, st.angle)
             mph.touch = touch
             new = _SS(*mph.move(kd, st.x, st.y, st.angle, scene=scene), st.level)
-        # M7 P8a: the walk-overs over the walk, then over the knock move (monsters.walkover_segments)
+        # M7 P8a: the walk-overs over the walk, then over the knock move (monsters.walkover_segments); M8 L4: on a map
+        # with teleport lines, the segments the world's own move tested (a teleport: the walk up to its line only)
         from doomfj.monsters import walkover_segments
         dps = cur[0]
         for a_, b_ in walkover_segments(mph if (mph is not None and player_loots(mph.world.player)) else None,

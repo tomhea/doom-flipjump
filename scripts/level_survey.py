@@ -114,6 +114,10 @@ def fj_gives(kind):
         return False
 
 
+# line specials kept as a decided SIMPLIFICATION (docs/handoff-e1m2.md 3), not a missing feature
+STATIC_SPECIALS = {48: "drawn static, no scroll (simplification, as the lights)"}
+
+
 class Survey:
     def __init__(self, wad, mapname, asset):
         self.wad, self.m, self.asset = wad, mapname, asset
@@ -183,6 +187,8 @@ class Survey:
             name = LINE_SPECIAL_NAMES.get(s, "special %d" % s)
             if s in sup:
                 self.row("OK", "line special %d %s" % (s, name), n, "", sup[s])
+            elif s in STATIC_SPECIALS:
+                self.row("INFO", "line special %d %s" % (s, name), n, "", STATIC_SPECIALS[s])
             else:
                 self.row("MISSING", "line special %d %s" % (s, name), n, "", "no implementation: INERT today")
         from doomfj.combat import SECTOR_HURT, SECRET_SPECIAL
@@ -348,8 +354,9 @@ class Survey:
                  "" if not moving else "(type, sector) %s" % moving[:8])
         from doomfj.monstermove import static_blockers
         _things, var = static_blockers(w)
-        self.row("OK" if not var else "REFUSED", "solid decorations some skill lacks (monstercode: mc_don at NEW GAME)",
-                 len(var), "0", "" if not var else "decor_solid indices %s" % var[:10])
+        # M8 F1.2: a solid decoration some skill lacks is a `mc_don` presence flag, set at NEW GAME (monstermove.mc_don_restart)
+        self.row("OK", "solid decorations some skill lacks (monstercode: mc_don at NEW GAME)",
+                 len(var), "", "" if not var else "mc_don flags for decor_solid indices %s" % var[:10])
 
     def render_caps(self):
         from doomfj import wall_renderer as WR

@@ -68,6 +68,7 @@ from doomfj.menu import MAIN_EXIT_SCR                                     # P9: 
 from doomfj.menu import MAIN_RESUME_SCR                                   # P10: the RESUME item
 from doomfj.menu import LEVEL_DONE_ENTER, LEVEL_DONE_HOLD_LAST, LEVEL_DONE_SCREENS   # P10: LEVEL COMPLETE's hold
 from doomfj import statcode as _statcode                                  # P10: LEVEL COMPLETE's stats
+from doomfj import teleportcode as _teleportcode                          # M8 L4: the WR teleports
 from doomfj import keyboard as _keyboard                                   # P9: the press latch
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
@@ -2186,6 +2187,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _SINK = bool(_LOOT and _W8.player_sinks(PLAYER_MODE))                      # A: the dying view sinks
     _KNOCK = bool(_LOOT and _W8.knockback_on(PLAYER_MODE, MONSTER_MODE))      # K: P_DamageMobj's thrust, the knock
     _FIGHT = bool(_LOOT and _W8.infighting_on(MONSTER_MODE))                  # I: monsters fight monsters
+    # M8 L4 (doomfj.teleportcode): THE WR TELEPORTS -- the game tier's player (his reactiontime persists, its gate is
+    # the standalone prologue's) and its moving monsters; [] on a map without one (E1M1: no text anywhere)
+    _TELE = list(_p31["world"].teleports) if (_LOOT and _chase) else []
+    assert bool(_p31 and _p31.get("tele")) == bool(_TELE), "M8 L4: p31_parts' teleports and the emitter's disagree"
+    if _TELE:
+        from doomfj.monstercode import cell_nibbles as _cn8
+        _teleportcode.check_barrels(_p31["world"])
+        assert _cn8(_p31["world"].schema, "mon_facing") == 1, "M8 L4: the knock stubs' facing cell is one nibble"
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
     _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
@@ -3176,14 +3185,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
             def _card_pick(tag, _ct=_ct, _cz=_cz, _cslot=_cslot):
                 return card_pickup_lines(tag, (_ct.x, _ct.y), _cslot, _cz - _RU, _cz + _RD, _IR + _PR)
-        def _after_accept(wo="wo", lw="lw"):
+        def _after_accept(wo="wo", lw="lw", tp=None):
             """the walk-over lines an accepted player move runs (`move_with_collision_lines(after_accept=)`); M7 P8a:
-            the knock move's copy (doomfj.knockcode.ptry_lines) with its own labels"""
+            the knock move's copy (doomfj.knockcode.ptry_lines) with its own labels. M8 L4: the WR teleports LAST
+            (they move him; `tp` the knock copy's prefix -- it restarts the knock loop at the destination)"""
             return ((walkover_lines(_walk_trig, sorted(_dst_tbl), PLAYER_RADIUS >> 16, prefix=wo)
                      if _walk_trig else [])
                     + (lift_walk_lines(lift_walk_triggers(secs, lds, sds, map_wad.vertexes(mapname)),
                                        sorted(_lift_st), PLAYER_RADIUS >> 16, prefix=lw)
-                       if _movers_on else []))
+                       if _movers_on else [])
+                    + (_teleportcode.player_lines(_TELE, prefix=tp or "tpw", knock_cells=_KNOCK, knock_ctx=bool(tp))
+                       if _TELE else []))
         _collide_block = ([";simcollide_skip", "simcollide:"]
                           + move_with_collision_lines(
                               _croot, _pfx(mapname), radius=PLAYER_RADIUS,
@@ -3240,10 +3252,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + monster_seed_fj(cmap, lds, sds, _dsecs_open, _msecs, _mcell)
                 + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"],   # M7 P4.2a: mon_solid
                                     hurt=bool(_chase.get("hurt")))                # M7 P5: a dead player blocks nothing
+                # M8 L4: P_TeleportMove's stomp test (tp_stomp, jumping over itself)
+                + (_teleportcode.stomp_leaf_lines(_chase["slots_rt"], hurt=bool(_chase.get("hurt"))) if _TELE else [])
                 + move_leaf_lines(root=_mroot, lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:])
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
-                                  dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"])
+                                  dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"],
+                                  **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpm")} if _TELE else {}))
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES,
                                  **({"fight": True} if _FIGHT else {}))    # M7 P8a I: toward the target
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
@@ -3264,7 +3279,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     _knockcode.slots_of(_p31["world"], [t_ for t_, _r in _chase["slots_rt"]]),
                     player_root=_croot, mon_root=_mroot, nib=_p31["world"].sec_nibbles,
                     lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:]) for t_ in _chase["lift_walk"]],
-                    after_accept=_after_accept("kbwo", "kblw"), solid=_chase["solid"]) if _KNOCK else [])
+                    after_accept=_after_accept("kbwo", "kblw", "tpk"), solid=_chase["solid"],
+                    # M8 L4: a monster's knock step teleports too; its stub writes the facing back
+                    **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpq", knock_ctx=True),
+                        "slot_back": (lambda m_: _teleportcode.slot_back_lines(
+                            m_, facing="mon_facing + %d*dw" % m_, knock=True, walk=False, tag="tpkb"))}
+                       if _TELE else {})) if _KNOCK else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
@@ -3305,7 +3325,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # loot cells; each skill's runtime pickups' thvis slots (p6_restart_parts, the one composition)
             p6_common=_p6_restart[0], p6_skills=_p6_restart[1],
             p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None),     # M7 P8a: the packages' cells
-            p10_common=_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
+            p10_common=(list(_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
+                        + (_teleportcode.level_start_lines() if _TELE else [])))             # M8 L4: no reactiontime
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
@@ -3330,7 +3351,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   # M7 P6+P7: the "full" player's tic (lootcode.tic_lines): nukage, the weapon, the
                                   # fade -- or, dead at the tic's start, package D's dt_turn -- and the death think's
                                   # restart request and jump past the move, or the strength and bonus tic
-                                  weapon=(_loot["tic"](_wpn["tic"], _hrt["tic"]) if _loot else
+                                  # M8 L4: and the reactiontime's gate, right before the move (teleportcode)
+                                  weapon=((list(_loot["tic"](_wpn["tic"], _hrt["tic"]))
+                                           + (_teleportcode.reaction_lines() if _TELE else [])) if _loot else
                                           (list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))
                                           if _wpn else ()),
                                   weapon_bar=(_wpn.get("bar", ()) if _wpn else ()),   # M7 P6+P7: after the move
@@ -3742,6 +3765,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *(_statcode.decls(_p31["world"]) if _STATS else []),           # P10: the stats' cells and scratch
+          *(_teleportcode.decls() if _TELE else []),                      # M8 L4: p_rct and the teleports' scratch
           *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *(WT_DECLS if (_p31 and _hrt and _WT_TICS > 1) else []),   # M7 P6+P7 E: the tempo loop's counter

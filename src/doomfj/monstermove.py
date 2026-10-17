@@ -144,7 +144,8 @@ def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> l
     return out
 
 
-def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: int, height: int) -> list:
+def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: int, height: int,
+                    teleport=()) -> list:
     """`mm_move`: P_Move for the context's monster (world._p_move): no direction -> mm_ok 0; else one step
     (step_delta: `speed` on an axis, 6 / 7 on both for a diagonal), P_TryMove (the things, then the seed at the
     candidate and the monster cells), and
@@ -153,7 +154,10 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
         thnext, thss_rt) with its new sector -> mm_ok 1;
       * refused: the first monster door (`door_boxes`: [(door slot, (x0, y0, x1, y1))], ascending sector) whose use
         box holds the monster's CURRENT position and that a press would move (closing, or idle and shut) gets
-        `dreq`, and movedir = NODIR -> mm_ok 1 (the move counts as made); else mm_ok 0."""
+        `dreq`, and movedir = NODIR -> mm_ok 1 (the move counts as made); else mm_ok 0.
+    M8 L4 (`teleport`: doomfj.teleportcode.monster_lines): the WR teleports, after the lifts and before the move is
+    taken -- a fire makes the destination the move (mm_nx / mm_ny, cp_floor, ptss). () on a map without one: the
+    text is unchanged."""
     from doomfj.doorcode import _box_test, _crossed_lines
     from doomfj.world import DIAG_STEP
     out = ["mm_move:",
@@ -198,6 +202,7 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
                                   regs=("mm_ox16", "mm_oy16", "cpx", "cpy"))
         out.append("    ;mm_lwdone")
     out += ["  mm_lwdone:",
+            *teleport,                                     # M8 L4: the WR teleports (teleportcode.monster_lines)
             "    hex.mov 4, mm_x, mm_nx", "    hex.mov 4, mm_y, mm_ny",
             "    hex.mov 8, mm_z, cp_floor",
             # a new leaf: out of the old list, into the new one, and the new sector

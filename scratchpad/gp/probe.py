@@ -187,7 +187,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # P10 (docs/gp-p10-plan.md): a game in progress (the main menu's RESUME) ...
                    frozenset({"g_live"}),
                    # ... and LEVEL COMPLETE's counters (doomfj.statcode)
-                   frozenset({"st_kill", "st_item", "st_secn", "st_secm"}))
+                   frozenset({"st_kill", "st_item", "st_secn", "st_secm"}),
+                   # M8 L4: the player's reactiontime after a teleport (doomfj.teleportcode; a map with a WR teleport)
+                   frozenset({"p_rct"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -762,6 +764,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
             cells[name] = Cell(name, "hex", width, count=nmon)
     cells["pj_z"] = Cell("pj_z", "hex", 4, count=FIREBALL_POOL)
     cells["bar_src"] = Cell("bar_src", "hex", 2, count=nbar)
+    cells["p_rct"] = Cell("p_rct", "hex", 2)          # M8 L4 (monsters.MonsterPhase.p8a_state: 0..18)
     return cells
 
 

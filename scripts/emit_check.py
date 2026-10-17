@@ -36,21 +36,6 @@ def _gives():
     lc.give_lines = give
 
 
-def _slanted_doors():
-    """F2: a door with slanted sides contacts as its bounding rectangle (doorcode's 'd' lines)"""
-    from doomfj import doorcode
-    orig = doorcode.door_contact_lines
-
-    def dcl(tag, geo, *a, **k):
-        area, lines = geo
-        if area[0] == "poly":
-            xs = [p for e in area[1] for p in (e[0], e[2])]
-            ys = [p for e in area[1] for p in (e[1], e[3])]
-            area = (min(xs), min(ys), max(xs), max(ys))
-        return orig(tag, (area, [ln for ln in lines if ln[0] != "d"]), *a, **k)
-    doorcode.door_contact_lines = dcl
-
-
 def _decor_every_skill():
     """F1: a solid decoration some skill lacks is treated as present on every skill (no mc_don flag)"""
     import doomfj.monstermove as mm
@@ -181,7 +166,7 @@ def _exit_bar_stale():
     wr.assert_exit_frame_bar = lambda *a, **k: None
 
 
-STANDINS = {"soundblock-ignored": _soundblock_ignored, "gives": _gives, "slanted-doors": _slanted_doors, "decor-every-skill": _decor_every_skill,
+STANDINS = {"soundblock-ignored": _soundblock_ignored, "gives": _gives, "decor-every-skill": _decor_every_skill,
             "stats-digits": _stats_digits, "far-los": _far_los, "slot-ids": _slot_ids, "barrels-one-skill": _barrels_one_skill,
             "barrel-chains-static": _barrel_chains_static,
             "pickup-static-z": _pickup_static_z,

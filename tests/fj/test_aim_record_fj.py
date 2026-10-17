@@ -40,7 +40,7 @@ N = 400
 CENTERX = GAME_CFG.CENTERX
 REFF = (23, 37, 13)                     # fixed r_eff values for the harness (the table is the oracle's business)
 H, CENTERY = GAME_CFG.VIEW_H, GAME_CFG.CENTERY
-STRIDE = 16 ** GAME_CFG.SLOT_SHIFT      # sfslot's bytes per column
+STRIDE = GAME_CFG.SLOT_STRIDE          # sfslot's bytes per column (M8 L1: 32 for a two-byte pid)
 MUTS = {
     "r+1": ("hex.mov 2, ar_r16 + 4*dw, aim_rr\n", "hex.mov 2, ar_r16 + 4*dw, aim_rr\nhex.inc 8, ar_r16 + 4*dw\n"),
     "tie": ("hex.cmp 3, ar_tzi, aim_tz + 0*dw, aimw0, aimx0, aimx0", "hex.cmp 3, ar_tzi, aim_tz + 0*dw, aimw0, aimw0, aimx0"),

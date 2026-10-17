@@ -7,16 +7,12 @@
 | MISSING: line special 103 S1 door open stay | 2 | 2 | 2 |  |  | 4 | 4 |
 | MISSING: thing 2013  (pickup) | 1 | 2 | 1 |  |  | 1 | 4 |
 | MISSING: thing type 2046 |  | 2 | 1 | 1 | 3 |  | 4 |
-| OVER: map extent, far LOS (monstersight: 32*127) | 4952 |  | 6080 | 6856 |  | 4328 | 4 |
 | WRONG: door behind special 31 D1 door open stay |  | 3 | 1 | 6 |  | 3 | 4 |
 | MISSING: line special 123 SR fast lift | 3 |  |  | 2 |  | 2 | 3 |
 | MISSING: line special 19 W1 floor down to highest neighbour | 6 |  | 4 |  | 9 |  | 3 |
 | MISSING: line special 27 DR yellow door | 2 |  | 6 |  |  | 4 | 3 |
 | MISSING: thing 13  (pickup) | 1 |  |  | 1 |  | 1 | 3 |
 | MISSING: thing 6  (pickup) | 1 |  | 1 |  |  | 1 | 3 |
-| OVER: 1 + monsters + barrels (aim_sid: 7 bits, NO fj-side guard) | 139 |  |  | 190 |  | 151 | 3 |
-| OVER: monsters on LEVEL COMPLETE (2 decimal digits) | 129 |  |  | 189 |  | 135 | 3 |
-| REFUSED: statcode.check_world | x |  |  | x |  | x | 3 |
 | WRONG: door behind special 27 DR yellow door | 2 |  | 4 |  |  | 4 | 3 |
 | MISSING: line special 126 WR monster teleport |  |  | 1 | 1 |  |  | 2 |
 | MISSING: line special 33 D1 red door stay |  |  |  | 2 |  | 2 | 2 |
@@ -27,7 +23,10 @@
 | MISSING: thing type 45 |  |  |  | 1 | 7 |  | 2 |
 | MISSING: thing type 46 |  |  |  | 1 | 2 |  | 2 |
 | REFUSED: barrels >= 1 (barrelcode asserts one) |  |  |  | 0 | 0 |  | 2 |
+| REFUSED: barrels: level start the same on every skill (barrelcode.check_model_rules) | x |  |  |  |  | x | 2 |
 | REFUSED: lift states |  | x | x |  |  |  | 2 |
+| REFUSED: marking segs < DEG_PNEAR |  | x | x |  |  |  | 2 |
+| REFUSED: runtime ids: things + pools + drops (byte lists, F1 item 12) |  | x | x |  |  |  | 2 |
 | REFUSED: solid decorations some skill lacks (monstercode: mc_don at NEW GAME) | 1 |  |  |  |  | 1 | 2 |
 | WRONG: door behind special 33 D1 red door stay |  |  |  | 2 |  | 2 | 2 |
 | WRONG: floor switches with different tags | x | x |  |  |  |  | 2 |
@@ -63,6 +62,8 @@
 | MISSING: thing type 59 |  |  |  |  |  | 5 | 1 |
 | MISSING: thing type 62 |  |  |  |  |  | 2 | 1 |
 | MISSING: thing type 63 |  |  |  |  |  | 4 | 1 |
+| OVER: runtime ids: things + pools + drops (byte lists, F1 item 12) |  |  |  | 370 |  |  | 1 |
+| REFUSED: pickups on a door or mover floor (lootcode: static z) | 2 |  |  |  |  |  | 1 |
 | REFUSED: walk-over triggers (one axis-aligned segment, one door) |  | x |  |  |  |  | 1 |
 | WARN: lines between two dynamic sectors: switch-switch | 10 |  |  |  |  |  | 1 |
 | WRONG: door behind special 103 S1 door open stay |  |  |  |  |  | 1 | 1 |

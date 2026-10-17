@@ -579,7 +579,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         nss = len(bake_bsp(wad, mapname).subsectors)
         part, n_nib, n_byte = selfreset.emit_reset_part(
             gen, labels1, core1.get_word, restore_set, cfg.VIEW_W, nss, mapname,
-            persist=_persist)
+            persist=_persist, pid_bytes=cfg.PID_BYTES)
         # Snapshot pass 1's pristine words at the baked addresses BEFORE releasing the image -- the
         # value check below needs them and re-loading an 85M-word image to get them would not.
         # check_layout=False: emit_reset_part above already resolved this set against labels1 WITH

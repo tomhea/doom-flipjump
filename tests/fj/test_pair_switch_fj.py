@@ -1,8 +1,10 @@
 """M8 L1 -- the PAIR state switch, assembled and dispatched into.
 
-E1M2's linedef 1460 lies between two movers, so its seg's constant block is baked once per PAIR of states and picked
-by `generate_pair_state_switch_fj`: the one-cell door switch on the first mover's cell, whose landings `sim.jump16` on
-the second's. The emitter calls this exact generator (`wall_renderer._door_blocks`), so what runs here is what ships.
+A seg between two movers on DIFFERENT state cells (two lifts) has its constant block baked once per PAIR of states,
+picked by `generate_pair_state_switch_fj`: the one-cell door switch on the first mover's cell, whose landings
+`sim.jump16` on the second's. The emitter calls this exact generator (`wall_renderer._door_blocks`). No current map
+reaches it -- E1M2's linedef 1460, which found the need, lies between two floor-switch sectors that move by ONE cell and
+collapse to one mover (`_seg_movers`) -- so this harness is its only proof until a map with two adjacent lifts.
 
 WHAT THE TESTS CHECK, and why each exists:
 

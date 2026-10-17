@@ -573,7 +573,7 @@ def _record_program(src, cases, seen_on=False, ledges=None):
             "gpslot:", *[";0 * dw"] * (wr.SPR_THING_SLOTS * wr.SPR_THING_SLOT_BYTES),
             # P11: the columns' pieces (frame.ledge_test reads the last of a side, 16 bytes a column)
             "sfslot:", *[";%#x * dw" % ((ledges or {}).get(x, (0, {}))[1].get(o, 0))
-                         for x in range(CFG.VIEW_W) for o in range(16 ** CFG.SLOT_SHIFT)],
+                         for x in range(CFG.VIEW_W) for o in range(CFG.SLOT_STRIDE)],
             "t_hot_end:",
             "    hex.set 2, gps_nslot, 0"]
     for c, (b, far, tytop, thpx, lt) in enumerate(cases):

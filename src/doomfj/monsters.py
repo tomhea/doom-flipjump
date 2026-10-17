@@ -859,7 +859,8 @@ class MonsterViews:
     def vis_state(self, phase: "MonsterPhase") -> dict:
         """M7 P6: the `thvis` cell (2 nibbles a slot: 1 drawn, 0 not -- taken, removed, or not at this skill): the
         baked vanishable slots in `things.vanishable_slots` order (a pickup: 1 - pickup_taken; a barrel: its state
-        is not 0), then one slot per RUNTIME pickup in runtime-thing order (`rt_pickups`)"""
+        is not 0; M8 L1: any other baked thing some skill lacks: spawned at this skill), then one slot per RUNTIME
+        pickup in runtime-thing order (`rt_pickups`)"""
         ws = phase.world.ws
         pick = {di: i for i, di in enumerate(self.pdi)}
         bar = {di: b for b, di in enumerate(self.bdi)}
@@ -867,7 +868,12 @@ class MonsterViews:
         def present(di):
             if di in pick:
                 return 1 - ws.pickup_taken[pick[di]]
-            return int(bool(ws.bar_state[bar[di]]))
+            if di in bar:
+                return int(bool(ws.bar_state[bar[di]]))
+            # M8 L1: a baked thing some skill lacks (things.vanishable_slots: E1M2's lamp 2028) -- drawn exactly on the
+            # skills that spawn it (things.skill_absent, the rule the emitter bakes each skill's thvis from)
+            from doomfj.things import skill_absent
+            return int(di not in skill_absent(self.drawable, ws.skill))
         vals = [present(di) for di in sorted(self.vis_slots, key=self.vis_slots.get)]
         vals += [1 - ws.pickup_taken[pick[di]] for di in self.rt_pickups]
         return {"thvis": tuple(vals)}

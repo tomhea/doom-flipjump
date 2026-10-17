@@ -891,8 +891,9 @@ def generate_state_switch_fj(name: str, targets, *, states: int = 16) -> str:
 
 def generate_pair_state_switch_fj(name: str, cell_b: str, targets) -> str:
     """M8 L1 -- a switch on TWO state nibbles: the target `targets[i][j]` for the first cell holding i and `cell_b`
-    holding j. E1M2's linedef 1460 lies between two movers (sectors 240 and 241), so its seg's constants are baked once
-    per PAIR of states.
+    holding j: a seg between two movers on DIFFERENT state cells (two lifts) has its constants baked once per PAIR of
+    states. (E1M2's linedef 1460, between floor-switch sectors 240 and 241, found the need -- but both move by the one
+    `fswitch` cell, so `wall_renderer._seg_movers` collapses it to one mover; no current map reaches this switch.)
 
     The outer half is `generate_state_switch_fj(name, ...)` on the first cell, verbatim -- `<name>_go cell_a` at the
     call site, `hex.tables.ret` held for the call -- and its i-th target is a landing `<name>_a<i>` that `sim.jump16`s on

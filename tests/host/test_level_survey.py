@@ -49,7 +49,7 @@ def test_e1m2_shows_its_known_blockers(ls, wad):
     # M8 F1.1 (docs/f1-big-map-widths.md 2-4): aim_sid's width, three-digit counts and the far LOS's 128 pieces made
     # these OK on E1M2 (they were OVER / REFUSED before it)
     assert ("OK", "monsters + barrels -> aim_sid") in got                # 138 <= 255, aim_sid 8 bits
-    assert ("OK", "statcode.check_world") not in got and not any(r[0] != "OK" and "check_world" in r[1] for r in rows)
+    assert not any("check_world" in r[1] for r in rows)                  # the guard adds a row only when it refuses
     assert ("OK", "map extent, far LOS") in got                          # 4,952 <= 128 * 127
     assert ("OVER", "drawable things, every skill") in got               # 305 >= 256 (F1.4's slot cap)
     assert ("REFUSED", "solid decorations some skill lacks") in got

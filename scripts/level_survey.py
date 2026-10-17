@@ -254,10 +254,14 @@ class Survey:
                 pairs[k] += 1
                 lines.append((i, a, b, k))
         for k, n in sorted(pairs.items()):
-            renderer = "renderer OK (M8 L1 pair switch)" if "door" not in k else "renderer REFUSES"
+            if k == "switch-switch":        # M8 L1: one `fswitch` cell moves them all -- read through it everywhere
+                note = "one machine (fswitch): rendered and read by collision / sight / noise / missiles"
+            elif "door" in k:
+                note = "the renderer refuses a door beside another dynamic sector"
+            else:
+                note = "renderer OK (the pair switch); collision / sight / noise / missiles refuse two cells"
             self.row("WARN", "lines between two dynamic sectors: %s" % k, n, "",
-                     "%s; collision/monstersight/noisecode refuse -- linedefs %s"
-                     % (renderer, [x[0] for x in lines if x[3] == k][:8]))
+                     "%s -- linedefs %s" % (note, [x[0] for x in lines if x[3] == k][:8]))
 
     def world(self):
         from doomfj.world import World
@@ -325,7 +329,8 @@ class Survey:
         baked = baked_thing_mask(rm, cmap, draw, WR.MONSTER_TYPES)
         nt = len({i for i, b in zip(draw_idx, baked) if not b})
         self.cap("drawable things, every skill (1-byte fragment slot id)", len(draw), 256, strict_less=True)
-        self.cap("runtime things (byte thing lists, LIST_MAX_THINGS)", nt, 254,
+        from doomfj.things import LIST_MAX_THINGS
+        self.cap("runtime things (byte thing lists, LIST_MAX_THINGS)", nt, LIST_MAX_THINGS,
                  "plus mobiles and drops: the next row")
         # F1 item 12 (docs/f1-big-map-widths.md 0.3): the lists hold the runtime things, the fireball and effect pools
         # and every monster drop -- the sum monstercode / LIST_MAX_THINGS bound
@@ -355,6 +360,14 @@ class Survey:
             for k in range(len(stops)):
                 variants.append(apply_sector_heights(self.secs, doors.heights_for_states(
                     self.secs, self.lds, self.sds, {si: k})))
+        # and every lift stop and the floor switch fired (the emitter's _msecs: a seg marks in ANY state of its mover)
+        from doomfj import movers
+        for si, stops in movers.lift_states(self.secs, self.lds, self.sds).items():
+            variants += [apply_sector_heights(self.secs, {si: (h, self.secs[si].ceil_h)}) for h in stops]
+        sw = movers.switch_sectors(self.secs, self.lds, self.sds)
+        if sw:
+            variants.append(apply_sector_heights(self.secs, {si: (low, self.secs[si].ceil_h)
+                                                             for si, (low, _h) in sw.items()}))
         marking = sum(1 for seg in cmap.segs if self.lds[seg.linedef].back != -1
                       and any(WR.seg_marks_in(self.lds, self.sds, seg, v) for v in variants))
         self.cap("marking two-sided segs (n_tsv 3 nibbles)", marking, WR.DEG_PNEAR, strict_less=True)
@@ -410,7 +423,8 @@ def main():
     wad = WadFile.from_path(a.wad)
     text = matrix(wad, wad, a.matrix) if a.matrix else "".join(Survey(wad, m, wad).run().markdown() for m in a.maps)
     if a.out:
-        Path(a.out).write_text(text, encoding="utf-8")
+        with open(a.out, "w", encoding="utf-8", newline="") as f:     # the text's own LFs on every platform
+            f.write(text)
     else:
         sys.stdout.buffer.write(text.encode("utf-8"))
 

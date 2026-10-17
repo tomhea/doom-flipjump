@@ -276,7 +276,7 @@ def _extent(words_sorted, addr_word):
 
 
 def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, nss,
-                    mapname="e1m1", persist=()):
+                    mapname="e1m1", persist=(), pid_bytes: int = 1):
     """Write <map>_07_reset.fj and patch the main part into a loop.
 
     Returns (part_path, nibble_cells, byte_cells). pristine_get_word(word) reads the FIRST
@@ -323,7 +323,7 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
         wset = set(words)
 
     byte_words, byte_bases, declared_words = set(), [], set()
-    for name, n in byte_arrays(bits, words_sorted, view_w, nss):
+    for name, n in byte_arrays(bits, words_sorted, view_w, nss, pid_bytes=pid_bytes):   # M8 L1: a 2-byte pid's pclm
         if name in persist:
             # M7 P1.3: a PERSISTED byte array (the game tier's `sshead`, build.THING_PERSIST) is
             # program state: its words left the set above, and the reset must not zero it. (The

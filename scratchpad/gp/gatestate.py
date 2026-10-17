@@ -42,7 +42,8 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                # P8a (docs/gp-final-plan.md 4.1): P6+P7's turn flag (#123 F1), the sink, knockback's, the blast source
                "p_tnh", "p_vd", "p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z", "bar_src",
                # P10 (docs/gp-p10-plan.md): a game in progress (the menu's RESUME), and LEVEL COMPLETE's counters
-               "g_live", "st_kill", "st_item", "st_secn", "st_secm")
+               "g_live", "st_kill", "st_item", "st_secn", "st_secm",
+               "p_rct")                                                             # M8 L4: the reactiontime
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int | None = None,

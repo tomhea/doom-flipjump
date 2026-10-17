@@ -77,6 +77,12 @@ B0 on its set, gamespeed, msframe, rebuild).
 - The computer map is picked up and does nothing (there is no automap).
 - Deathmatch / co-op starts and things are ignored (single player only, as E1M1).
 - The scrolling wall (48, two lines): decided in L5 -- animated if cheap, else static.
+- The teleporters (97, L4; `doomfj.teleport` holds the rules and these decisions): NO TELEPORT FOG and no sound (nothing
+  reads them); NO TELEFRAG -- DOOM's player kills every shootable thing at the destination, here his teleport is
+  refused there exactly as a monster's is (P_TeleportMove's stomp for a monster), in both mirrors; ONE TELEPORT PER MOVE
+  (asserted exact on E1M2: no destination lies within any teleport line's reach). Kept DOOM's: the front side only,
+  WR (every crossing), monsters and sliding corpses teleport, the destination's angle (a monster's facing octant),
+  floorz from the destination sector, momentum 0, the player's 18-tic reactiontime (no turn, no walk).
 
 ## 4. The width plan for L1 (analysis 2026-10-16, read-only, at be8f2cc)
 

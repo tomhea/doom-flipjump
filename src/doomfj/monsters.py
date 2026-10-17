@@ -642,7 +642,9 @@ class MonsterPhase:
                   pj_z per fireball slot, the shooter's floor + 32 at the spawn, its 16 bits (4 nibbles; a free
                   slot 0)
           fight (world.infighting_on): bar_src per barrel (2 nibbles: 0 none, 1 the player, 2 + slot the FIRST
-                  thing that damaged it) -- `mon_target` (state(), 2 nibbles in this mode) names 0 / 1 / 2 + slot"""
+                  thing that damaged it) -- `mon_target` (state(), 2 nibbles in this mode) names 0 / 1 / 2 + slot
+          p_rct   2 nibbles  M8 L4: the player's reactiontime after a teleport, 0..18 (a map with a WR teleport
+                             in a looting mode: doomfj.teleportcode)"""
         from doomfj.world import infighting_on, knockback_on, player_loots, player_sinks
         w, ws, n = self.world, self.world.ws, self.world.layout.nmon
         out = {}
@@ -660,6 +662,8 @@ class MonsterPhase:
                         "pj_z": tuple(v & 0xFFFF for v in ws.proj_z)})
         if infighting_on(w.monsters):
             out["bar_src"] = tuple(ws.bar_src)
+        if getattr(w, "teleports", None) and player_loots(w.player):
+            out["p_rct"] = ws.p_reaction
         return out
 
     # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------

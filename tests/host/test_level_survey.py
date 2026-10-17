@@ -53,7 +53,7 @@ def test_e1m2_shows_its_known_blockers(ls, wad):
     assert ("OK", "map extent, far LOS") in got                          # 4,952 <= 128 * 127
     assert ("OVER", "drawable things, every skill") in got               # 305 >= 256 (F1.4's slot cap)
     assert ("REFUSED", "solid decorations some skill lacks") in got
-    assert ("MISSING", "line special 97 WR teleport") in got
+    assert ("OK", "line special 97 WR teleport") in got                 # M8 L4: doomfj.teleport
     # M8 L2: the yellow / red doors (27 / 28) and every other E1M2 door special are implemented (doomfj.doors)
     assert not any(r[0] in ("WRONG", "MISSING") and "door" in r[1] for r in rows)
     assert ("OK", "line special 27 DR yellow door") in got and ("OK", "line special 109 W1 blaze open stay") in got

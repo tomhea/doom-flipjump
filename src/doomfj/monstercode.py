@@ -364,6 +364,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     from doomfj.world import P8A_MONSTER_MODES, P8A_PLAYER_MODES
     p8a_kw = dict(monsters=mode, player=player) if mode in P8A_MONSTER_MODES and player in P8A_PLAYER_MODES else {}
     w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los", **p8a_kw)
+    # M8 L4 (doomfj.teleportcode): the WR teleports -- on a map with one, in the game tier's modes (the player loots:
+    # his reactiontime persists there) with moving monsters; each slot's move writes a teleport's facing back. None on
+    # E1M1 (the emitter asserts its own `_TELE` agrees)
+    tele = bool(loot and chase and w.teleports)
     nmon, schema = w.layout.nmon, w.schema
     snib = w.sec_nibbles                 # M8 L1: a sector id's width (doomfj.sectorcode)
     if nmon == 0 or not rows:
@@ -482,7 +486,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         slots = [dict(t=m, x=w.ws.mon_x[m], y=w.ws.mon_y[m], rj="rj%d" % w._mon_sector(m),
                       see_idx=gd.STATE_INDEX[w.mon_info[m].seestate],
                       see_tics=gd.STATES[w.mon_info[m].seestate].tics,
-                      **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m])} if chase else {}),
+                      **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m],
+                                     **({"tp": dict(knock=knock)} if tele else {}))} if chase else {}),
                       **({"dc": type_decide(w.mon_info[m])} if decide else {}),
                       **({"dmg": True} if damage else {}),
                       **({"hear": True, "sec": w._mon_sector(m)} if hear else {}),
@@ -600,6 +605,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             assert len(set(w.mon_height[:nmon])) == 1, "one monster height: try_move_mon takes it at compile time"
     if knock:
         extra["knock"] = True          # M7 P8a: the emitter asserts its own `_KNOCK` agrees
+    if tele:
+        extra["tele"] = True           # M8 L4: the emitter asserts its own `_TELE` agrees
     if rockets:
         extra["rockets"] = True        # P9: the weapon's A_FireMissile calls rk_spawn (the emitter asserts it)
     if d3:
@@ -1088,14 +1095,16 @@ P32B_FIELDS = ("mon_movecount", "mon_rng", "mon_floorz")
 
 
 def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: int, dc=None,
-                    solid: str = "mon_active") -> list:
+                    solid: str = "mon_active", tp=None) -> list:
     """slot m's move: its cells into the context, `mm_chase` (its own `solid` flag cleared, so the thing test skips
     it), the context back -- position into thpos_rt, the leaf into thss_rt, the sector into msec. `dc` (M7 P3.2c):
     `mm_decide` instead, with the decision's inputs (justattacked, seen, the kinds, reaction) and justattacked back;
     the slot then enters a decided state (p32c_slot_lines); `dc["jh"]` (M7 P4.2a): justhit in and back too.
     `solid`: the per-slot flag `monstermove.things_leaf_lines` tests -- the same name on both sides (mon_active
     until monsters die; M7 P4.2a: mon_solid, SET again after the move: a monster that moves is alive and solid,
-    damagecode.check_model_rules). `nib`: a sector id's width (World.sec_nibbles: `msec`, `mm_sec`)"""
+    damagecode.check_model_rules). `nib`: a sector id's width (World.sec_nibbles: `msec`, `mm_sec`). M8 L4 (`tp`, a
+    map with a WR teleport: dict(knock=)): after the move, a teleport's facing (and with knockback the momentum and
+    the fraction 0) -- teleportcode.slot_back_lines; None: the text is unchanged"""
     nz, nr, nc = (cell_nibbles(schema, f) for f in ("mon_floorz", "mon_rng", "mon_movecount"))
     assert (nz, nr, nc) == (4, 2, 2), (nz, nr, nc)
     assert radius in (20, 30) and speed in (8, 10), (radius, speed)
@@ -1118,12 +1127,20 @@ def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: in
                "    stl.fcall mm_decide, mm_dret", "    hex.mov 1, mon_justattacked + %d*dw, mm_ja" % m,
                *(["    hex.mov 1, mon_justhit + %d*dw, mm_jh" % m] if dc.get("jh") else [])]
               if dc else ["    stl.fcall mm_chase, mm_cret"]),
+            *(_tele_back(m, schema, tp) if tp else []),             # M8 L4: a teleport's facing, momentum, fraction
             "    hex.set 1, %s, 1" % AC,
             "    hex.mov 4, %s, mm_x" % X, "    hex.mov 4, %s, mm_y" % Y,
             "    hex.mov 4, %s, mm_z" % FZ,
             "    hex.mov 1, %s, mm_dir" % MD, "    hex.mov 2, %s, mm_rng" % RN, "    hex.mov 2, %s, mm_mc" % MC,
             "    hex.mov 3, %s, mm_leafw" % SS,
             "    hex.mov %d, %s, mm_sec" % (nib, SC)]
+
+
+def _tele_back(m: int, schema, tp: dict) -> list:
+    """M8 L4: slot m's write-back after its move (teleportcode.slot_back_lines, the walk's)"""
+    from doomfj.teleportcode import slot_back_lines
+    return slot_back_lines(m, facing="mon_facing + %d*dw" % (cell_nibbles(schema, "mon_facing") * m),
+                           knock=bool(tp.get("knock")), walk=True, tag="tpb")
 
 
 # ---- M7 P3.2c "decide" -----------------------------------------------------------------------------------------

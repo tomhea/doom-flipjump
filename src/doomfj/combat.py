@@ -479,7 +479,7 @@ class CombatMixin:
         if self._p_full:                          # M7 P5: nukage is the full model's alone (no fj mirror before it)
             self._special_sector(ev)             # at the tic-start position, as in DOOM
         moving = keys["forward"] != keys["back"] or keys["strafe_left"] != keys["strafe_right"]
-        if moving and ws.p_mobj_state == gd.STATE_INDEX["S_PLAY"]:
+        if moving and ws.p_mobj_state == gd.STATE_INDEX["S_PLAY"] and not self._reacting():
             self._set_player_mobj("S_PLAY_RUN1")                      # P_MovePlayer
         if self.player != "walk":                 # M7 P4: "walk" (through P4.0) has no weapon
             self._weapon_keys(keys)
@@ -1281,10 +1281,14 @@ class CombatMixin:
                 px, py = x + xmove, y + ymove
                 xmove = ymove = 0
             px, py = _signed(px, 32), _signed(py, 32)
+            self._teleported = False
             ok = self._player_knock_try(px, py, ev) if player else self._monster_knock_try(m, px, py, ev)
             ev.knocks.append((thing, ok))
             if not ok:
                 mx = my = 0
+            if self._teleported:                 # M8 L4: EV_Teleport zeroed mo->momx/momy; the loop goes on from
+                mx = my = 0                      # the destination (DOOM's ptryx = mo->x + the move left)
+                self._teleported = False
             if not (xmove or ymove):
                 break
         if self._knock_slides(thing, mx, my):
@@ -1876,6 +1880,9 @@ class CombatMixin:
         `player_blocking` is off (the legacy walk-through, for regression comparison). With nothing
         in the way this IS step_sim (a test holds the two equal)."""
         rmod, ws = self.rm, self.ws
+        if self._reacting():                     # M8 L4: P_PlayerThink -- `if (reactiontime) reactiontime--;
+            ws.p_reaction -= 1                   # else P_MovePlayer`: no turn, no walk (teleportcode.reaction_lines)
+            return
         # M7 P6+P7: the turn is reference_model.turn_step -- the slow first frame of a held turn, then x1.5
         angle, ws.p_turnheld = turn_step(ws.pangle, keys, ws.p_turnheld)
         ws.pangle = angle
@@ -1925,6 +1932,32 @@ class CombatMixin:
         for trig in self.lift_walk:                   # M7 P2b: the WR lifts, every crossing
             if crossed(trig, (x, y), (cx, cy), PLAYER_R):
                 ws.l_req[self.lift_order.index(trig[0])] = 1
+        if self.teleports:                            # M8 L4: the WR teleports -- LAST (they move him)
+            self._teleport_player(x, y, cx, cy)
+
+    def _reacting(self) -> bool:
+        """M8 L4: the player's reactiontime is running (a level with a teleporter only: `p_reaction` exists there)"""
+        return bool(self.teleports) and self.ws.p_reaction > 0
+
+    def _teleport_player(self, x: int, y: int, cx: int, cy: int) -> None:
+        """M8 L4 (doomfj.teleport): EV_Teleport for the player after his accepted move (x, y) -> (cx, cy), 16.16 -- the
+        first teleport line crossed from its front (line order; one per move) and, unless a shootable thing stands at
+        the destination (NO TELEFRAG: refused as a monster's is), the destination: position, angle, knock momentum 0,
+        reactiontime 18. The fj: teleportcode.player_lines (after the walk-over lines, `after_accept`)"""
+        from doomfj.teleport import REACTION_TICS, crossed_front, stomped
+        ws = self.ws
+        for tel in self.teleports:
+            if not crossed_front(tel, (x, y), (cx, cy), PLAYER_R):
+                continue
+            if stomped(self, tel.dest, PLAYER_R):
+                return
+            ws.px, ws.py = tel.dest[0] << 16, tel.dest[1] << 16
+            ws.pangle = tel.angle
+            ws.p_reaction = REACTION_TICS
+            if self._p_knock:
+                ws.p_momx = ws.p_momy = 0
+            self._teleported = True
+            return
 
     def _solid_thing_at(self, x16: int, y16: int):
         """PIT_CheckThing's refusal for the player's box at (x16, y16): the first solid monster,

@@ -93,6 +93,9 @@ def supported_line_specials():
         out[s] = "movers (lift)"
     for s in movers.FLOOR_SWITCH_SPECIALS:
         out[s] = "movers (floor switch; ONE shared fswitch cell)"
+    from doomfj import teleport
+    for s in teleport.TELEPORT_SPECIALS:
+        out[s] = "teleport (M8 L4: player and monsters; no telefrag, no fog)"
     return out
 
 

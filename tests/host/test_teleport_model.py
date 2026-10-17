@@ -36,7 +36,10 @@ def mw2():
 def _world(mw2):
     w = World(mw2, "E1M2", skill=gd.SK_HARD, player="final", monsters="final")
     ws = w.ws
-    ws.f_switch = 1                            # the pad's sides (201, 210) down to its floor: the pad can be left
+    # the pad's sides (201, 210) down to their floor: the pad can be left -- M8 F1.3: E1M2's one-shot floors are a group
+    # per tag (`fswitch` a vector), so the group holding 201 / 210 at its last state (its destination)
+    (g,) = [k for k, gr in enumerate(w.floor_groups) if {si for si, _h in gr.heights} >= {201, 210}]
+    ws.f_switch[g] = w.floor_groups[g].n - 1
     for m in range(w.layout.nmon):              # nothing in the way (the pad's own monsters stand on it)
         if ws.mon_active[m]:
             w._list_remove(m, ws.mon_leaf[m])

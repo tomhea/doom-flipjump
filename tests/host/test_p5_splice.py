@@ -202,7 +202,8 @@ def test_the_palette_goes_before_the_record_stream_and_the_phases_after_the_mons
 def test_the_hurt_tic_menu_palette_restart_and_leaves_are_spliced():
     src = _src()
     assert '(list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))' in src
-    assert 'weapon=(_loot["tic"](_wpn["tic"], _hrt["tic"]) if _loot else' in src   # M7 P6+P7: lootcode.tic_lines
+    assert 'weapon=((list(_loot["tic"](_wpn["tic"], _hrt["tic"]))' in src   # M7 P6+P7: lootcode.tic_lines
+    assert '+ (_teleportcode.reaction_lines() if _TELE else [])) if _loot else' in src   # M8 L4: the reactiontime gate
     assert 'list(_hrt["menu_palette"])' in src
     # M7 P7: through ONE composition, wall_renderer.compose_restart (tests/host/test_restart_coverage.py)
     assert ('hrt_restart=_hrt["restart"] if _hrt else ()' in src and 'proj_restart=_proj["restart"] if _hrt else ()'

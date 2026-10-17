@@ -733,10 +733,10 @@ def test_the_record_skips_a_column_hidden_behind_its_nearer_pieces(record_cases,
 LEDGE_MUTANTS = {
     "the record without its ledge test": ("        .ledge_test trb_clip_v, trb_col_x, trb_ylo1, trb_yhi1, 1, col_next",
                                           "        hex.zero 1, trb_vis"),
-    "the last upper piece read at u1": ("        hex.ptr_add lt_p, 5                             // u2's y2",
+    "the last upper piece read at u1": ("        hex.ptr_add lt_p, PIECE_BYTES+1                 // u2's y2",
                                         "        hex.ptr_add lt_p, 1                             // u2's y2"),
-    "the last lower piece read at l1": ("        hex.ptr_add lt_p, 12                            // l2's y1",
-                                        "        hex.ptr_add lt_p, 8                             // l2's y1"),
+    "the last lower piece read at l1": ("        hex.ptr_add lt_p, 3*PIECE_BYTES                 // l2's y1",
+                                        "        hex.ptr_add lt_p, 2*PIECE_BYTES                 // l2's y1"),
     "an upper piece's end not + 1": ("        hex.add_constant 2, lt_y, 2", "        hex.add_constant 2, lt_y, 1"),
     "the box's end clamped short": ("        hex.set 2, yhi1, viewh + 2", "        hex.set 2, yhi1, viewh + 1"),
 }

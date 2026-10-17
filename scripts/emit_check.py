@@ -89,24 +89,6 @@ def _barrel_chains_static():
     bc.chain_pairs = chains
 
 
-def _pickup_static_z():
-    """F1: a pickup standing in a door or mover sector (E1M2's blue card on floor-switch sector 45) -- read at its
-    sector's stored floor: the pickup code's size, not its z on a moved floor"""
-    import doomfj.lootcode as lc
-    orig = lc.pickup_lines
-
-    def pl(w, *a, **k):
-        secs = {w.leaf_sector[w.rm.point_in_subsector(w.cmap, t.x, t.y)] for t in w.pickup_things}
-        saved = (w.door_order, w.mover_order)
-        w.door_order = [s for s in saved[0] if s not in secs]
-        w.mover_order = [s for s in saved[1] if s not in secs]
-        try:
-            return orig(w, *a, **k)
-        finally:
-            w.door_order, w.mover_order = saved
-    lc.pickup_lines = pl
-
-
 def _attacker_7bit():
     """F1: more than 126 monster slots against the 7-bit attacker ids (p_atk / aim_sid in world's schema) -- the death
     turn's dispatch over the first 126 slots: the code's size (two levels of 16), not the far killers' faces"""
@@ -122,7 +104,6 @@ def _attacker_7bit():
 STANDINS = {"decor-every-skill": _decor_every_skill,
             "stats-digits": _stats_digits, "far-los": _far_los, "barrels-one-skill": _barrels_one_skill,
             "barrel-chains-static": _barrel_chains_static,
-            "pickup-static-z": _pickup_static_z,
             "attacker-7bit": _attacker_7bit}
 
 

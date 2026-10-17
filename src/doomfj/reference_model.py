@@ -36,6 +36,7 @@ from doomfj.mapcompiler import (  # shared geometry (R6)
     thing_live_subsectors, blockmap_candidates,
 )
 from doomfj.spritebank import bank_list_of, strip_at   # M7 P1.6: the native-list bank (R6)
+from doomfj.things import mover_leaves, mover_mask_kw            # M8 F1.3: things on a mover run
 from doomfj.things import (baked_thing_mask, drawable_things,   # M14.5: the split SSOT (R6)
                            skill_absent, vanishable_slots)
 from doomfj.tables import (
@@ -2388,7 +2389,10 @@ class ReferenceModel:
                                            sprite_wad, spr_cache)
             # M14.5: the BAKED/RUNTIME split, from the SSOT both mirrors read, computed at SPAWN
             # positions -- a thing's class is a property of the thing, not of where it now stands.
-            _baked = baked_thing_mask(self, scene.cmap, _drawable, MONSTER_TYPES)
+            # M8 F1.3: a thing on a mover's floor takes the runtime path (things.mover_leaves; none on E1M1)
+            _baked = baked_thing_mask(self, scene.cmap, _drawable, MONSTER_TYPES,
+                                      **mover_mask_kw(self, scene.cmap, _drawable,
+                                                      mover_leaves(scene.map_wad, scene.mapname, scene.cmap)))
             _drawable_spawn = _drawable          # the classification's own (pre-override) list
             if thing_positions is not None:
                 assert len(thing_positions) == len(_drawable), (

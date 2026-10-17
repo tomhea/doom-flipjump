@@ -195,10 +195,20 @@ def main():
     ap.add_argument("--tier", default="game")
     ap.add_argument("--standin", nargs="*", default=[], choices=sorted(STANDINS))
     ap.add_argument("--json", help="write the parts' sizes here")
+    ap.add_argument("--then", nargs="*", metavar="SCRIPT ARGS",
+                    help="LAST on the line: after applying the stand-ins, run SCRIPT (e.g. scratchpad/12m/build_labeled.py) "
+                         "in THIS process with every argument after it, `--` included -- a blocked build's PREFLIGHT for a "
+                         "map whose features are not all built yet")
     ap.add_argument("--assemble", metavar="OUT_FJM",
                     help="build the tier into OUT_FJM (build_wall_renderer: emit + the plain one-pass assembly, asserts "
                          "ON) and print its size metrics -- a SIZE measurement when any stand-in is on")
-    a = ap.parse_args()
+    argv, then = sys.argv[1:], None
+    if "--then" in argv:                    # everything after it is the script's, `--` included (argparse would eat it)
+        k = argv.index("--then")
+        argv, then = argv[:k], argv[k + 1:]
+        assert then, "--then needs a script"
+    a = ap.parse_args(argv)
+    a.then = then
     for s in [s for s in STANDINS if s in a.standin]:     # registry order: modules that bind names at import last
         STANDINS[s]()
     from doomfj.config import Config, map_cfg
@@ -212,6 +222,15 @@ def main():
                                                                "ON" if __debug__ else "OFF -- refused"), flush=True)
     assert __debug__, "emit_check runs with asserts ON (no python -O): a skipped guard costs an assembly"
     t = time.time()
+    if a.then:
+        import runpy
+        script, *rest = a.then
+        sys.argv = [script] + rest
+        sys.path.insert(0, str((ROOT / script).parent))
+        print("THEN %s %s" % (script, " ".join(rest)), flush=True)
+        runpy.run_path(str(ROOT / script), run_name="__main__")
+        print("THEN done in %.0f s" % (time.time() - t), flush=True)
+        return
     if a.assemble:
         from doomfj.build import build_wall_renderer
         met = build_wall_renderer(a.assemble, wad_path=str(ROOT / profile(a.map).wad), mapname=a.map, tier=a.tier)

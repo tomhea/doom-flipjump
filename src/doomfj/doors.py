@@ -667,8 +667,9 @@ def exit_boxes(lds, verts, rng: int = USE_RANGE) -> list:
 def door_contact_geo(secs, lds, sds, verts) -> dict:
     """M7 P2b: `{door sector: (area, lines)}` for `touches_door`. `area` is the door's rectangle `(x0, y0, x1, y1)`
     when the sector is an axis-aligned rectangle (every E1M1 door: its lines all on its bounding box), else
-    `("poly", edges)` with every boundary line as `(x1, y1, x2, y2)` (M8 L0: E1M2's doors 299 and 318 have slanted
-    sides). `lines` are its two-sided lines: `(axis, coord, lo, hi)` for an axis-aligned one ("y": y = coord, x in
+    `("poly", edges, fits)` with every boundary line as `(x1, y1, x2, y2)` (M8 L0: E1M2's doors 299 and 318 have
+    slanted sides; M8 L2: `fits` -- a thing's box could lie wholly inside it, so its contact keeps the centre-inside
+    test). `lines` are its two-sided lines: `(axis, coord, lo, hi)` for an axis-aligned one ("y": y = coord, x in
     [lo, hi]), `("d", x1, y1, x2, y2)` for a slanted one."""
     tbl = door_states(secs, lds, sds)
     out = {}

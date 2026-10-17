@@ -307,3 +307,56 @@ def test_mover_heights_now_is_mover_phase_heights(w2):
                 st = (st[0], st[1], mp._sw(fs))
         assert mp.heights(st) == w2.mover_heights_now(), f
         assert list(st[2]) == list(w2.ws.f_switch) + list(w2.ws.f_sub)
+
+
+# ---- 10b: the one line between two cells (E1M2's 1199: blazing lift 47 / S1 floor 206) ---------------------------
+
+def _line_1199(w):
+    ld = w.lds[1199]
+    return w.sds[ld.front].sector, w.sds[ld.back].sector
+
+
+def test_the_two_cell_line_reads_the_cell_its_opening_depends_on(w2):
+    """for EVERY pair of states the model's heights give the opening line_states' cell gives (sight, sound, missiles),
+    and the collision's opening floor / low floor are 206's / 47's (mover_line_states)"""
+    from doomfj import monstersight as MS
+    from doomfj import monstermove as MM
+    from doomfj.collision import mover_line_states
+    a, b = _line_1199(w2)
+    assert {a, b} == {47, 206}
+    cell, n, pairs = MS.line_states(w2, a, b)
+    g206 = next(k for k, g in enumerate(w2.floor_groups) if 206 in g.sectors)
+    assert cell == MV.switch_cell(g206)
+    k47 = w2.lift_order.index(47)
+    ci = MM.world_cell_inputs(w2, D.DEFAULT_QUANT)
+    ob = mover_line_states(w2.lds, w2.sds, ci["msecs"], ci["mcell"], max)[1199]
+    lf = mover_line_states(w2.lds, w2.sds, ci["msecs"], ci["mcell"], min)[1199]
+    assert ob[0] == cell and lf[0] == "lstate + %d*dw" % k47
+    for i in range(len(w2.lift_stops[47])):
+        for j in range(w2.floor_groups[g206].n):
+            w2.ws.l_state[k47], w2.ws.f_switch[g206] = i, j
+            w2._door_phase_scene()
+            h = w2.heights_now
+            (fa, ca), (fb, cb) = (h.get(s, (w2.secs[s].floor_h, w2.secs[s].ceil_h)) for s in (a, b))
+            (pa, qa), (pb, qb) = pairs[j]
+            assert min(ca, cb) - max(fa, fb) == min(qa, qb) - max(pa, pb), (i, j)
+            assert max(fa, fb) == ob[1][j] and min(fa, fb) == lf[1][i], (i, j)
+
+
+def test_control_the_lifts_cell_cannot_read_line_1199(w2):
+    """R9: read through the LIFT's cell (its state, 206 at rest), the opening parts from the model's on some pair"""
+    from doomfj import monstersight as MS
+    a, b = _line_1199(w2)
+    ca, na, ha = MS.closed_states(w2, 47)
+    g206 = next(k for k, g in enumerate(w2.floor_groups) if 206 in g.sectors)
+    k47 = w2.lift_order.index(47)
+    parted = 0
+    for i in range(na):
+        for j in range(w2.floor_groups[g206].n):
+            w2.ws.l_state[k47], w2.ws.f_switch[g206] = i, j
+            w2._door_phase_scene()
+            h = w2.heights_now
+            (fa, ca_), (fb, cb_) = (h.get(s, (w2.secs[s].floor_h, w2.secs[s].ceil_h)) for s in (a, b))
+            (pa, qa), (pb, qb) = (ha[i].get(s, (w2.secs[s].floor_h, w2.secs[s].ceil_h)) for s in (a, b))
+            parted += min(ca_, cb_) - max(fa, fb) != min(qa, qb) - max(pa, pb)
+    assert parted

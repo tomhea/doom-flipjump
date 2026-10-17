@@ -43,7 +43,7 @@ an ESTIMATE; `scratchpad/m4_bands.py` measures the first three by running the em
 ## 2b. The emission check (minutes, asserts ON)
 
     python scripts/emit_check.py E1M3                                # the first refusal, in ~3-7 minutes
-    python scripts/emit_check.py E1M3 --standin gives far-los ...     # past the named ones: a SIZE measurement
+    python scripts/emit_check.py E1M3 --standin far-los ...           # past the named ones: a SIZE measurement
     python scripts/emit_check.py E1M3 --standin ... --assemble build/doom_e1m3_size.fjm   # + the assembly
 
 It refuses `python -O`. After the emission it also counts the HOT DATA BLOCK from the text against `frame.arm5`'s

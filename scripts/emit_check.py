@@ -2,7 +2,7 @@
 before any 1-2 hour assembly. Prints the parts' sizes on success, the first refusal on failure.
 
     python scripts/emit_check.py E1M2                                 # what refuses today
-    python scripts/emit_check.py E1M2 --standin gives far-los ...      # past the named refusals, for a SIZE measurement
+    python scripts/emit_check.py E1M2 --standin far-los ...            # past the named refusals, for a SIZE measurement
 
 A STAND-IN is a named, opt-in substitute for a feature that is not built yet: it supplies the missing piece AS CODE (a
 give routine of the same size, a decoration present on every skill ...), never by switching asserts off -- E1M2's
@@ -18,22 +18,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-
-
-def _gives():
-    """F4: yellow / red cards as the blue card's routine, the soulsphere as the stimpack's, the computer map as the
-    health bonus's -- give routines of about their size, renamed to the kind's labels"""
-    import re
-    import doomfj.lootcode as lc
-    orig = lc.give_lines
-
-    def give(kind, *a, **k):
-        stand = {13: 5, 6: 5, 2013: 2011, 2026: 2014}.get(kind, kind)
-        out = orig(stand, *a, **k)
-        if stand == kind:
-            return out
-        return [re.sub(r"(?<!\w)give_%d(?!\d)" % stand, "give_%d" % kind, x) for x in out]
-    lc.give_lines = give
 
 
 def _slanted_doors():
@@ -168,19 +152,14 @@ def _attacker_7bit():
     hc.turn_lines = lambda slot_rows, *a, **k: orig(list(slot_rows)[:0x7E], *a, **k)
 
 
-def _exit_bar_stale():
-    """F7: a health / armor pickup within a frame of the exit box (issue #123 item 4: the bar stale on the exit frame)
-    -- a CHECK with no code behind it, skipped: the program is unchanged, the exit frame's bar may be one frame old"""
-    import doomfj.wall_renderer as wr
-    wr.assert_exit_frame_bar = lambda *a, **k: None
-
-
-STANDINS = {"soundblock-ignored": _soundblock_ignored, "gives": _gives, "slanted-doors": _slanted_doors, "decor-every-skill": _decor_every_skill,
+# M8 F4 RETIRED "gives" (lootcode.give_lines: the yellow / red cards, the soulsphere, the computer map) and F7 RETIRED
+# "exit-bar-stale" (wall_renderer.p5_tic_lines(bar_always=): the bar runs after the lvdone guard where the exit frame
+# can move it)
+STANDINS = {"soundblock-ignored": _soundblock_ignored, "slanted-doors": _slanted_doors, "decor-every-skill": _decor_every_skill,
             "stats-digits": _stats_digits, "far-los": _far_los, "barrels-one-skill": _barrels_one_skill,
             "barrel-chains-static": _barrel_chains_static,
             "pickup-static-z": _pickup_static_z,
-            "attacker-7bit": _attacker_7bit,
-            "exit-bar-stale": _exit_bar_stale}
+            "attacker-7bit": _attacker_7bit}
 
 
 def main():

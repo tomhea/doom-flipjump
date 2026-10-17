@@ -27,6 +27,10 @@ ammo a with `ga_n` rounds (the cap from ONE D4 table `amcap`[backpack << 4 | a],
 cap; from empty, the auto-switch -- E1M1 can own neither the chaingun nor the plasma rifle, asserted, so the clip's
 "fist -> pistol", the shells' "fist or pistol, shotgun owned -> shotgun" and (P9) the rockets' "fist, launcher owned ->
 the launcher" are emitted). P9: `give_2003`, the rocket launcher (P_GiveWeapon: two rockets, owned, pending).
+M8 F4 (E1M2): `give_6` / `give_13`, the yellow and red cards (P_GiveCard on `pcard_y` / `pcard_r`, as the blue card's on
+`pcard`: a new card SETS bonuscount to BONUSADD, a held one is still taken), `give_2013`, the soulsphere (health + 100,
+capped at 200, always taken) and `give_2026`, the computer map (taken, nothing else: no automap). The card cells are
+this module's (`CARD_CELL`, `map_cards`: declared, persisted, restarted and drawn only on a map that holds the card).
 
 THE BLOCKING (`_solid_thing_at`): the monsters by `pb_mon` (`stl.fcall pb_mon, pb_ret` -> `pb_hit`; per slot
 `mon_solid`, then |x - cpx| < (r + 16) << 16 on both axes, 16.16, strict) -- `collision.move_with_collision_lines
@@ -76,6 +80,14 @@ REACH_UP, REACH_DOWN = 56, 8          # combat.REACH_UP / REACH_DOWN
 DROPPED = {2007: "give_2007d", 2001: "give_2001d"}
 WEAPON_OWN = {gd.WP_FIST: 0, gd.WP_PISTOL: 1, gd.WP_SHOTGUN: 2, gd.WP_CHAINSAW: 3,
               gd.WP_MISSILE: 4, gd.WP_CHAINGUN: 5}                     # weaponcode.OWN (P9: 4; P10: the chaingun 5)
+# M8 F4 (E1M2): THE CARD CELLS, one nibble each, 0 / 1 -- the contract with the door code, which reads them.
+# `pcard` (the blue card, doorcode.door_decls', P2a.1) is unchanged; the yellow and the red card's cells are this
+# module's: declared in the game tier only when the map has the card (`map_cards`: E1M1 has none), persisted across the
+# M1 reset (build._map_persist) and zeroed by NEW GAME / the restart (`card_restart_lines`, p6_restart_parts)
+CARD_CELL = {5: "pcard", 6: "pcard_y", 13: "pcard_r"}                  # BKEY / YKEY / RKEY -> its cell
+CARD_COLOUR = {5: "blue", 6: "yellow", 13: "red"}                      # ... and its status-bar icon (hud.KEY_ICONS)
+NEW_CARDS = (6, 13)                                                    # the cards whose cells this module declares
+SOUL_HEALTH, MAX_SOUL = 100, 200                                       # combat.SOUL_HEALTH / MAX_SOUL (asserted)
 
 
 def loot_on(player_mode: str) -> bool:
@@ -93,6 +105,9 @@ def _check_rules() -> None:
         gd.AM_CLIP: "am_clip", gd.AM_SHELL: "am_shell", gd.AM_MISL: "am_misl"}
     assert set(C.DROP_ITEM.values()) == set(DROPPED)
     assert gd.BONUSADD == 6 and gd.MAXHEALTH == 100 and C.MAX_HEALTH_BONUS == 200 == C.MAX_ARMOR_BONUS
+    assert (SOUL_HEALTH, MAX_SOUL) == (C.SOUL_HEALTH, C.MAX_SOUL)
+    assert {5: gd.IT_BLUECARD, 6: gd.IT_YELLOWCARD, 13: gd.IT_REDCARD}.keys() == CARD_CELL.keys()
+    assert MAX_SOUL + SOUL_HEALTH < 16 ** 3                                # p_hp's 3 nibbles hold the uncapped sum
     # every cap fits the 3-nibble ammo cells, and a give never overflows one: cap + the largest give < 4096
     assert max(gd.MAXAMMO) * 2 + 5 * max(gd.CLIPAMMO) < 16 ** 3
 
@@ -177,6 +192,41 @@ def extra_vis(w, slots: dict, skill: int) -> List[int]:
         if slots["rt"][i] is not None:
             out[slots["slot"][i] - slots["nvis"]] = 1 if t.flags & bit else 0
     return out
+
+
+def map_cards(things) -> tuple:
+    """M8 F4: the NEW card kinds (NEW_CARDS order) a map holds among `things` (a WAD's raw list, or a World's), the
+    single-player ones (things.single_player, the World's own filter) -- THE ONE RULE for which card cells a program
+    declares, persists, restarts and draws (E1M1: none)"""
+    from doomfj.things import single_player
+    return tuple(k for k in NEW_CARDS if any(t.type == k and single_player(t) for t in things))
+
+
+def card_cells(w) -> tuple:
+    """M8 F4: the World's new card cells (`pcard_y`, `pcard_r`, those its map holds)"""
+    return tuple(CARD_CELL[k] for k in map_cards(w.things))
+
+
+def map_persist(map_wad, mapname: str) -> tuple:
+    """M8 F4: the card cells the M1 reset leaves alone on this map (build._map_persist: the map's own names, like
+    monstermove's `mc_don`) -- nothing on E1M1"""
+    return tuple(CARD_CELL[k] for k in map_cards(map_wad.things(mapname)))
+
+
+def hud_cards(map_wad, mapname: str) -> tuple:
+    """M8 F4: the status bar's extra key icons on this map (hud.bar_slots(cards=)), "yellow" / "red"
+    in NEW_CARDS order"""
+    return tuple(CARD_COLOUR[k] for k in map_cards(map_wad.things(mapname)))
+
+
+def card_decls(w) -> List[str]:
+    """M8 F4: the map's new card cells, 0 at the level start"""
+    return [f"{c}: hex.vec 1, 0" for c in card_cells(w)]
+
+
+def card_restart_lines(w) -> List[str]:
+    """M8 F4: NEW GAME / the restart: no card held (the blue card's `pcard` is restart_common's)"""
+    return [f"    hex.zero 1, {c}" for c in card_cells(w)]
 
 
 def droppers(w) -> List[int]:
@@ -310,9 +360,15 @@ def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[st
                 f"    hex.cmp 2, p_ar, gv_c, {p}_t, {p}_t, {p}_c", f"  {p}_c:", "    hex.mov 2, p_ar, gv_c",
                 f"  {p}_t:", f"    hex.if0 1, p_at, {p}_g", f"    ;{ok}", f"  {p}_g:", "    hex.set 1, p_at, 1",
                 f"    ;{ok}"]
-    elif kind == 5:                                                   # BKEY: P_GiveCard SETS the flash
-        out += [f"    hex.if1 1, pcard, {ok}", f"    hex.set 2, p_bc, {gd.BONUSADD}", "    hex.set 1, pcard, 1",
+    elif kind in CARD_CELL:                                           # BKEY / YKEY / RKEY: P_GiveCard SETS the flash
+        cell = CARD_CELL[kind]                                        # (one already held: only pk_bonus's += 6)
+        out += [f"    hex.if1 1, {cell}, {ok}", f"    hex.set 2, p_bc, {gd.BONUSADD}", f"    hex.set 1, {cell}, 1",
                 f"    ;{ok}"]
+    elif kind == 2013:                                                # SOUL (M8 F4): health + 100, cap 200
+        out += [f"    hex.add_constant 3, p_hp, {SOUL_HEALTH}", f"    hex.set 3, gv_c, {MAX_SOUL}",
+                f"    hex.cmp 3, p_hp, gv_c, {ok}, {ok}, {p}_c", f"  {p}_c:", "    hex.mov 3, p_hp, gv_c", f"    ;{ok}"]
+    elif kind == 2026:                                                # PMAP (M8 F4): P_GivePower(pw_allmap), no
+        out += [f"    ;{ok}"]                                         # automap; taken (one map a level, combat's)
     elif kind in (2011, 2012):                                        # STIM / MEDI: P_GiveBody
         out += _give_body(p, 10 if kind == 2011 else 25, ok, no)
     elif kind == 2023:                                                # PSTR: P_GiveBody(100), strength, the fist
@@ -758,16 +814,19 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
     `mon_rt[m]`: monster slot m's runtime thing row (monsters.MonsterViews.rt). M7 P8a (package K): `drop_rt[k]`,
     dropper k's own row -- the pickup reads the drop there (pickup_lines(drop_rt=)).
     P10 (`stats`, doomfj.statcode): the COUNTITEM gives count the item, `pre` checks the secrets, and the leaves
-    carry `sc_go` (statcode declares the cells: the game tier's)."""
+    carry `sc_go` (statcode declares the cells: the game tier's).
+    M8 F4: `decls` also declares the map's new card cells (`card_decls`: pcard_y / pcard_r, E1M1 none) and `cards`
+    names them -- build._map_persist persists them, p6_restart_parts zeroes them."""
     start = level_start(w)
     slots = pickup_slots(w, rm, map_wad, mapname, sprite_wad)
     leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt, stats=stats)
               + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root)
               + (_statcode.secret_lines(w, cell_root) if stats else []))
-    return {"decls": loot_decls(start), "tables": tables_fj(w), "leaves": leaves,
+    return {"decls": loot_decls(start) + card_decls(w), "tables": tables_fj(w), "leaves": leaves,
             "latch": latch_lines(), "pre": pre_lines(stats), "post": post_lines(), "use_guard": use_guard(),
             "tic": (lambda weapon_tic, hurt_tic, turn=True: tic_lines(weapon_tic, hurt_tic, turn, stats)),
             "pickup": pickup_call, "block": block_lines, "cells": player_cell_things, "thing_test": THING_TEST16,
             "slots": slots,
             "extra_vis": {sk: extra_vis(w, slots, sk) for sk in (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)},
-            "restart": restart_lines(start), "persist": PERSIST, "start": start}
+            "restart": restart_lines(start), "persist": PERSIST, "start": start,
+            "cards": card_cells(w)}                         # M8 F4: the map's new card cells (persisted per map)

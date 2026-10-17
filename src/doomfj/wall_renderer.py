@@ -627,7 +627,7 @@ def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
         common += _restartcode.view_restart_lines()
     if loot_slots is not None:
         c, per = _restartcode.level_start_lines(world, SKILLS, _lootcode.PERSIST)
-        common += c
+        common += c + _lootcode.card_restart_lines(world)      # M8 F4: no yellow / red card (E1M1: no line)
         for k, sk in enumerate(SKILLS):
             skills[k] += list(per[k]) + [f"    hex.set 2, thvis + {loot_slots['nvis'] + j}*2*dw, {v}"
                                          for j, v in enumerate(_lootcode.extra_vis(world, loot_slots, sk))]
@@ -645,17 +645,22 @@ def p8a_restart_parts(world) -> list:
     return out
 
 
-def p5_tic_lines(hrt, barrels: bool = False) -> list:
+def p5_tic_lines(hrt, barrels: bool = False, bar_always: bool = False) -> list:
     """M7 P5 -- the frame's tic after the monsters' (`tic_after_eye`): the fireballs, then the blood (projcode's
     `pj_phase` / `fx_phase`, each skipping itself while `lvdone`: world.tic's order monsters -> projectiles ->
     barrels -> effects), then the bar's health and armor (`hrt` is hurtcode.hurt_parts' dict: its `bar`, hp_bar)
     from what the frame's damage left, inside the frozen-level guard -- a finished level changes neither.
     M7 P6 (`barrels`, doomfj.barrelcode): the barrels' phase between the two (it skips itself while `lvdone` too).
     M7 P7: `leveltime` +1 at the end of the non-frozen tic (World.tic; restartcode.lvtime_tic_lines), in the same
-    guard"""
+    guard.
+    M8 F7 (issue #123 item 4, `bar_always`): the bar AFTER the guard, every frame -- on the frame the exit is pressed
+    the player phase still runs after the press (nukage, the walk's pickups: World.tic's exit frame), so a health or
+    armor change there must reach the bar; a frozen frame changes neither, so hp_bar writes the values it found. Taken
+    on a map where such a change can happen (`exit_frame_bar_hazards`); elsewhere (E1M1) the text is blocked48's."""
+    bar = list(hrt["bar"])
     return (["stl.fcall pj_phase, pj_pret"] + (["stl.fcall bar_phase, bar_pret"] if barrels else [])
             + ["stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(),
-               *hrt["bar"], "p5_bar_skip:"])
+               *([] if bar_always else bar), "p5_bar_skip:", *(bar if bar_always else [])])
 
 
 # issue #123 item 4: the thing types whose pickup moves health or armor (combat._touch_specials / lootcode's P_Give*:
@@ -663,7 +668,7 @@ def p5_tic_lines(hrt, barrels: bool = False) -> list:
 HEALTH_ARMOR_TYPES = frozenset({2018, 2019, 2014, 2015, 2011, 2012, 2013, 2023})
 
 
-def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
+def exit_frame_bar_hazards(map_wad, mapname: str, boxes) -> dict:
     """issue #123 item 4 (emit time): `hp_bar` sits inside the `lvdone` guard (p5_tic_lines), but on the frame the exit
     is pressed the player phase still runs AFTER the press -- nukage at the tic-start position, then the walk with its
     pickups -- so a health or armor change on that frame would leave the bar stale for good. Unreachable on a map
@@ -673,9 +678,10 @@ def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
       * no health / armor pickup (HEALTH_ARMOR_TYPES, any skill) lies within the exit box grown by one frame's
         furthest reach: the walk's step (FORWARD_MOVE + STRAFE_MOVE), a knock move (MAXMOVE, M7 P8a), and the touch
         distance (the player's radius + the item's).
-    Asserted, not handled: moving hp_bar out of the guard is M4's (a map that breaks this). Returns the margins
-    {"hurt": smallest axis gap to a hurt sector's box, "pickup": smallest axis gap to a health / armor item beyond
-    the reach} for the record (E1M1: no hurt sector near the exit; the nearest item, a stimpack, 49 units clear)."""
+    M8 F7: HANDLED, no longer refused -- returns {"hazards": [why, ...] (empty: unreachable), "hurt": smallest axis gap
+    to a hurt sector's box, "pickup": smallest axis gap to a health / armor item beyond the reach}; a map with a hazard
+    (E1M2: a health bonus by its exit) runs the bar after the guard (`p5_tic_lines(bar_always=True)`), and a map with
+    none keeps the guarded text (E1M1: no hurt sector near the exit; the nearest item, a stimpack, 49 units clear)."""
     from doomfj import gamedata as gd
     from doomfj.combat import ITEM_RADIUS, PLAYER_R, SECTOR_HURT
     from doomfj.reference_model import FORWARD_MOVE, STRAFE_MOVE
@@ -690,7 +696,7 @@ def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
                 x0, y0, x1, y1 = sbox.get(si, (v.x, v.y, v.x, v.y))
                 sbox[si] = (min(x0, v.x), min(y0, v.y), max(x1, v.x), max(y1, v.y))
     reach = (FORWARD_MOVE >> 16) + (STRAFE_MOVE >> 16) + (gd.MAXMOVE >> 16) + PLAYER_R + ITEM_RADIUS
-    margins = {"hurt": None, "pickup": None}
+    margins = {"hazards": [], "hurt": None, "pickup": None}
 
     def gap(box, x0, y0, x1, y1):
         """the larger axis gap between two boxes (<= 0: they meet)"""
@@ -699,18 +705,29 @@ def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
     for box in boxes:
         for si, sb in sbox.items():
             g = gap(box, *sb)
-            assert g > 0, ("the exit box %r meets damaging sector %d (%r): nukage could hurt the player on the exit "
-                           "frame and hp_bar, inside the lvdone guard, would stay stale (issue #123 item 4)"
-                           % (box, si, sb))
+            if g <= 0:
+                margins["hazards"].append(
+                    "the exit box %r meets damaging sector %d (%r): nukage could hurt the player on the exit frame and "
+                    "hp_bar, inside the lvdone guard, would stay stale (issue #123 item 4)" % (box, si, sb))
             margins["hurt"] = g if margins["hurt"] is None else min(margins["hurt"], g)
         for t in map_wad.things(mapname):
             if t.type in HEALTH_ARMOR_TYPES:
                 g = gap(box, t.x, t.y, t.x, t.y) - reach
-                assert g > 0, ("a health / armor pickup (type %d at %d, %d) is within one frame's reach (%d) of the "
-                               "exit box %r: hp_bar, inside the lvdone guard, would stay stale on the exit frame "
-                               "(issue #123 item 4)" % (t.type, t.x, t.y, reach, box))
+                if g <= 0:
+                    margins["hazards"].append(
+                        "a health / armor pickup (type %d at %d, %d) is within one frame's reach (%d) of the exit box "
+                        "%r: hp_bar, inside the lvdone guard, would stay stale on the exit frame (issue #123 item 4)"
+                        % (t.type, t.x, t.y, reach, box))
                 margins["pickup"] = g if margins["pickup"] is None else min(margins["pickup"], g)
     return margins
+
+
+def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
+    """`exit_frame_bar_hazards`, refusing a map that has one: the guarded bar is exact there (the emitter no longer
+    asks this -- M8 F7 runs the bar after the guard on such a map -- the tests use it to prove E1M1 keeps its text)"""
+    margins = exit_frame_bar_hazards(map_wad, mapname, boxes)
+    assert not margins["hazards"], margins["hazards"][0]
+    return {"hurt": margins["hurt"], "pickup": margins["pickup"]}
 
 
 # M7 P6+P7 package E (the owner, 2026-10-05: "maybe run 2 ticks each time?"): the frame's MONSTER WORLD runs
@@ -1628,7 +1645,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     # M7 P4.0 (docs/gp-combat.md section 2): the game tier's status bar and weapon overlay (doomfj.hudcode)
     from doomfj.hudcode import game_hud_parts
-    _hud = game_hud_parts(rm, asset_wad, sprite_wad, map_wad.sectors(mapname)) if menu else None
+    # M8 F4: the map's yellow / red key icons (lootcode.hud_cards; E1M1 none) -- the loot's card cells they read
+    _hud = game_hud_parts(rm, asset_wad, sprite_wad, map_wad.sectors(mapname),
+                          cards=_lootcode.hud_cards(map_wad, mapname) if _lootcode.loot_on(PLAYER_MODE) else ()
+                          ) if menu else None
     # M7 P4.1 (doomfj.weaponcode): the player's weapon, the model's "fire" mode
     from doomfj.weaponcode import weapon_parts
     # M7 P4.2a: the shots resolve through the aim window and hurt (the player mode shoots)
@@ -3408,9 +3428,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P5: then the fireballs and the blood (world.tic's order: monsters, projectiles, barrels, effects -- each phase
     # skips itself while `lvdone`), then the bar's health and armor from what the frame's damage left (inside the
     # same guard: a frozen level changes neither)
-    _wt_pools = p5_tic_lines(_hrt, barrels=bool(_bar)) if _hrt else []      # M7 P6: + the barrels' phase
-    if _hrt and _exit:                     # issue #123 item 4: the bar inside the lvdone guard is never stale
-        assert_exit_frame_bar(map_wad, mapname, _exit)
+    # M8 F7 (issue #123 item 4): a map where the exit frame can move the health or armor runs the bar after the
+    # lvdone guard (E1M1 cannot: its text is unchanged)
+    _bar_always = bool(_hrt and _exit and exit_frame_bar_hazards(map_wad, mapname, _exit)["hazards"])
+    _wt_pools = (p5_tic_lines(_hrt, barrels=bool(_bar), bar_always=_bar_always)     # M7 P6: + the barrels' phase
+                 if _hrt else [])
     # M7 P6+P7 E: the monsters' world (the monster tic and the pools) world.MONSTER_TICS_PER_FRAME times a frame
     pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which

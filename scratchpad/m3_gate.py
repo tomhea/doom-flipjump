@@ -409,6 +409,14 @@ def main():
     # the three NEW GAME frames as the oracle drew them -- distinct only if the skills can be TOLD
     # APART at the spawn, which is what makes "each frame is byte-exact" mean "each is its skill's"
     told = len(oracle_ng) == len(NEW_GAMES) and len(set(oracle_ng.values())) == len(NEW_GAMES)
+    # M8 (E1M2: nothing that differs by skill is in view at the spawn -- every skill's NEW GAME frame is the same
+    # picture): the skills are told apart by the BINARY'S OWN skill cell instead -- `g_skill` read at each NEW GAME frame
+    # must be that frame's skill, and the three pairwise distinct. E1M1 tells them apart by the picture, as before.
+    told_by = "the picture" if told else None
+    if not told:
+        _gs = [(reads[f] or {}).get("g_skill") if f < len(reads) else None for f in NEW_GAMES]
+        if (None not in _gs and _gs == [rows[f]["skill"] for f in NEW_GAMES] and len(set(_gs)) == len(NEW_GAMES)):
+            told, told_by = True, "the binary's g_skill cell %s" % _gs
     print("")
     print("  CONTROL: menu frames %d, world frames %d, frames that moved the player %d"
           % (menus, worlds, moved))
@@ -431,8 +439,8 @@ def main():
                                   "yes" if help_both_ways else "!! no"))
     print("  CONTROL: the first NEW GAME found the player walked away (%s), and every NEW GAME "
           "frame is the spawn view (%s)" % ("yes" if walked else "!! no", "yes" if reset else "!! no"))
-    print("  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: %s"
-          % ("yes" if told else "!! no -- the skills cannot be told apart here"))
+    print("  CONTROL: the three skills' NEW GAME frames are told apart: %s"
+          % (("yes, by " + told_by) if told else "!! no -- the skills cannot be told apart here"))
     print("  CONTROL: distinct pictures: %d of %d" % (len(set(got[:FRAMES])), min(len(got), FRAMES)))
     print("  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, g_live, every door's cells) "
           "equals the oracle's: %s"

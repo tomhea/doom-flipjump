@@ -782,7 +782,7 @@ def main():
     def near(pts, mons, r):
         return [m for m in mons for p in pts if (m[0] - p[0]) ** 2 + (m[1] - p[1]) ** 2 <= r * r]
 
-    def attempt(skill, target, blocked, mons):
+    def attempt(skill, target, blocked, mons, strict=True):
         """the whole walk planned in the mirror -> (route, through, door_segs, approach, beyond, why)"""
         door_segs, approach, beyond = geometry(target)
         x0, y0, x1, y1 = boxes[target]
@@ -797,7 +797,7 @@ def main():
             c, ws_ = made[-1].state, made[-1].mirror[0].world.ws
             return ("(the last attempt: %d frames, ended at %s, health %d, %d dead frames)"
                     % (c["n"], c["trk"][-1], ws_.p_health, c["dead"]))
-        if inbox or near((approach, mid, beyond), mons, CLEAR):
+        if strict and (inbox or near((approach, mid, beyond), mons, CLEAR)):
             return None, None, door_segs, approach, beyond, (
                 "a monster on its ground at this skill: %s" % sorted(set(inbox + near((approach, mid, beyond),
                                                                                        mons, CLEAR))))
@@ -807,7 +807,7 @@ def main():
         if not path:
             return None, None, door_segs, approach, beyond, "no walkable path to the approach"
         onpath = near(path, mons, PATH_CLEAR)
-        if onpath:
+        if strict and onpath:
             return None, None, door_segs, approach, beyond, (
                 "a monster beside the walked path at this skill: %s" % sorted(set(onpath)))
         # ⚠ arriving near the approach POINT is not the same as standing where use works: the first
@@ -859,28 +859,37 @@ def main():
     from doomfj.combat import KEY_DOOR_CARDS      # M8: the key doors by their line special (the candidates skip them)
     _keyed = {sds[ld.back].sector for ld in lds
               if ld.special in KEY_DOOR_CARDS and ld.back not in (-1, 0xFFFF) and ld.back < len(sds)}
-    for skill in [BOOT_SKILL] + [s for s in SKILLS if s != BOOT_SKILL]:
-        blocked, mons = ground(skill)
-        _, _cells = walkable_cells(rm, walk_scene, spx, spy, blocked=blocked)
+    # M8 (E1M2: every door the start reaches has a monster on its ground or beside its path, at every skill): when no
+    # clear-ground candidate exists, the candidates are tried AGAIN with the monster pre-filter off -- the mirror steps
+    # the world's real monsters, so a walk it accepts (opened, crossed, kept open, no death) is still exact; the
+    # pre-filter only kept the planning simple. E1M1 picks on the first, strict pass, as before.
+    for strict in (True, False):
+        if not strict:
+            print("  no clear-ground candidate: trying again with monsters on the ground (the mirror decides)")
+        for skill in [BOOT_SKILL] + [s for s in SKILLS if s != BOOT_SKILL]:
+            blocked, mons = ground(skill)
+            _, _cells = walkable_cells(rm, walk_scene, spx, spy, blocked=blocked)
 
-        def _walkable_door(si):
-            x0, y0, x1, y1 = boxes[si]
-            return any(x0 <= wx <= x1 and y0 <= wy <= y1
-                       for wx, wy in ((cx * NAV_CELL + NAV_CELL // 2, cy * NAV_CELL + NAV_CELL // 2)
-                                      for cx, cy in _cells))
-        # M7 P2a.1: a door the player can open with no card, by use (the walk-over doors have no box). M8: and no
-        # key door by its LINE special -- until M8 F2 the model calls E1M2's yellow and red doors plain (E1M1: none)
-        _cands = sorted((si for si in order if si in boxes and dp.kinds[si] in ("plain", "blaze")
-                         and si not in _keyed and _walkable_door(si)),
-                        key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - spx) ** 2
-                        + ((boxes[si][1] + boxes[si][3]) // 2 - spy) ** 2)
-        for target in _cands:
-            route, through, door_segs, approach, beyond, why = attempt(skill, target, blocked, mons)
-            print("  candidate: skill %d, door %d -- %s" % (skill, target, why or "the mirror walk opens, "
-                                                             "crosses and keeps it open, no death: TAKEN"))
-            _cands_tried.append((skill, target, why))
-            if why is None:
-                picked = skill
+            def _walkable_door(si):
+                x0, y0, x1, y1 = boxes[si]
+                return any(x0 <= wx <= x1 and y0 <= wy <= y1
+                           for wx, wy in ((cx * NAV_CELL + NAV_CELL // 2, cy * NAV_CELL + NAV_CELL // 2)
+                                          for cx, cy in _cells))
+            # M7 P2a.1: a door the player can open with no card, by use (the walk-over doors have no box). M8: and no
+            # key door by its LINE special -- until M8 F2 the model calls E1M2's yellow and red doors plain (E1M1: none)
+            _cands = sorted((si for si in order if si in boxes and dp.kinds[si] in ("plain", "blaze")
+                             and si not in _keyed and _walkable_door(si)),
+                            key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - spx) ** 2
+                            + ((boxes[si][1] + boxes[si][3]) // 2 - spy) ** 2)
+            for target in _cands:
+                route, through, door_segs, approach, beyond, why = attempt(skill, target, blocked, mons, strict)
+                print("  candidate: skill %d, door %d -- %s" % (skill, target, why or "the mirror walk opens, "
+                                                                 "crosses and keeps it open, no death: TAKEN"))
+                _cands_tried.append((skill, target, why if strict else "(monsters allowed) " + str(why)))
+                if why is None:
+                    picked = skill
+                    break
+            if picked is not None:
                 break
         if picked is not None:
             break

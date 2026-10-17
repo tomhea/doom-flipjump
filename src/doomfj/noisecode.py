@@ -45,7 +45,7 @@ def sound_edges(w) -> List[Tuple[int, int, str, int, int]]:
     """the flood's edges, one per pair of nodes the model's door edges join: (static node, dynamic node, the dynamic
     sector's state cell, its number of states, the mask of the states at which an opening joins them). Edges whose
     mask is 0 (never open) are dropped. Sorted by (static node, dynamic node)."""
-    from doomfj.monstersight import closed_states
+    from doomfj.monstersight import line_states
     dyn = set(w.door_order) | set(w.mover_order)
     groups: Dict[Tuple[int, int], list] = {}
     for a, b in w._sound_door_edges:
@@ -53,25 +53,18 @@ def sound_edges(w) -> List[Tuple[int, int, str, int, int]]:
         if len(sides) == 2:
             # M8 L1 (E1M2: the floor-switch sectors 240 / 241 / 354 border each other): two dynamic sectors are
             # readable through ONE cell when both move by it -- every floor-switch sector moves by `fswitch`, and a
-            # state's heights (closed_states) carry all of them. Two different cells stay refused.
-            assert closed_states(w, a)[0] == closed_states(w, b)[0], (
-                "a sound edge between two dynamic sectors (%d, %d) on two state cells: its opening needs both "
-                "states, which the one-cell open test cannot read" % (a, b))
+            # state's heights carry all of them. M8 F1.3 (the movers' engineer, through the mover state-cell helper
+            # `monstersight.line_states`): two different cells read through the one the opening depends on (E1M2's
+            # lift 47 / floor 206); an opening of both stays refused there.
             s, o = sorted((a, b))
         else:
             assert len(sides) == 1, (a, b)
             s = sides[0]
             o = b if s == a else a
-        cell, n, hts = closed_states(w, s)
+        cell, n, pairs = line_states(w, a, b)
         assert n <= 16, (s, n)
         mask = 0
-        for k in range(n):
-            f1, c1 = hts[k].get(s, (w.secs[s].floor_h, w.secs[s].ceil_h))
-            if len(sides) == 2:
-                f2, c2 = hts[k].get(o, (w.secs[o].floor_h, w.secs[o].ceil_h))   # o moves by the same cell
-            else:
-                f2, c2 = w.secs[o].floor_h, w.secs[o].ceil_h             # o is static: its stored heights
-                assert o not in hts[k], (o, s, k)
+        for k, ((f1, c1), (f2, c2)) in enumerate(pairs):
             if min(c1, c2) - max(f1, f2) > 0:
                 mask |= 1 << k
         key = (w.sector_node[o], w.sector_node[s])

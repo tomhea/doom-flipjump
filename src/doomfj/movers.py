@@ -314,6 +314,11 @@ def fswitch_nibbles(groups) -> int:
     return 2 * len(groups) if floor_wide(groups) else 1
 
 
+def fswitch_states(groups) -> int:
+    """the fswitch vector's STATE cells (its first): one per group in the wide layout, else E1M1's one"""
+    return len(groups) if floor_wide(groups) else 1
+
+
 def floor_trigger(state: int, sub: int, speed: int) -> tuple:
     """a one-shot floor's line used / crossed: an untouched group (state 0, still) starts -- instant to state 1, or
     its step timer set (it steps `speed` frames later, then every `speed`); else nothing (fired once)"""

@@ -256,6 +256,37 @@ def mover_line_openings(lds, sds, secs, mover_secs: dict) -> dict:
     return out
 
 
+def mover_line_states(lds, sds, mover_secs: dict, mcell: dict, fn) -> dict:
+    """M8 F1.3 (docs/f1-big-map-widths.md 10b): `{linedef: (state cell, [fn(front floor, back floor) per state])}`
+    for every two-sided line touching a mover -- `fn` max for the opening floor (`mover_line_openings`), min for
+    the low floor (`mover_line_lowfloors`). One mover side, or two moving by one cell: that cell's states. Two
+    CELLS (E1M2's line 1199: blazing lift 47 / S1 floor 206): the value over the product of their states must
+    depend on one of them, read through it -- the opening floor on 206's, the low floor on 47's; a value of both
+    is refused. `mcell` = {mover sector: its state cell}."""
+    out = {}
+    for li, ld in enumerate(lds):
+        if ld.back == -1:
+            continue
+        f, b = sds[ld.front].sector, sds[ld.back].sector
+        mv = [m for m in (f, b) if m in mover_secs]
+        if not mv:
+            continue
+        if len(set(mv)) == 1 or mcell[mv[0]] == mcell[mv[1]]:
+            out[li] = (mcell[mv[0]], [fn(sv[f].floor_h, sv[b].floor_h) for sv in mover_secs[mv[0]]])
+            continue
+        sa, sb = mover_secs[f], mover_secs[b]
+
+        def v(i, j):
+            return fn(sa[i][f].floor_h, sb[j][b].floor_h)
+        if all(v(i, j) == v(i, 0) for i in range(len(sa)) for j in range(len(sb))):
+            out[li] = (mcell[f], [v(i, 0) for i in range(len(sa))])
+        else:
+            assert all(v(i, j) == v(0, j) for i in range(len(sa)) for j in range(len(sb))), (
+                "line %d between movers %d, %d on two cells: its %s needs both states" % (li, f, b, fn.__name__))
+            out[li] = (mcell[b], [v(0, j) for j in range(len(sb))])
+    return out
+
+
 # the line under test's argument cells and their widths in nibbles, in declaration order -- ONE
 # table: CELL_DECLS declares them from it, `_xor_lines` xors that many nibbles, and `line_constants`
 # bounds a value by it (a value wider than its cell would be cut, and the line land elsewhere)
@@ -422,8 +453,29 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
         xors = _xor_lines(consts)
         lab = f"{L}_l{li}"
         out += [f"{lab}:"] + xors
-        if mover_here:
+        if mover_here and len(movers[li]) == 4 and movers[li][3] != movers[li][0]:
+            # M8 F1.3: the opening floor on one cell and the low floor on another (mover_line_states: E1M2's line
+            # 1199) -- three dispatches in a row: xor the opening floor in (cell), the low floor in (lfcell) around
+            # the shared test, then the opening floor out (cell)
+            cell, obs, lfs, lfcell = movers[li]
+            assert lowfloor is not None, "a mover line's low floors come with the drop-off"
+
+            def disp(tag_, c_, vals, arg, body, nxt):
+                labs = [f"{lab}_{tag_}{k}" for k in range(len(vals))]
+                o = [f"    sim.jump16 {c_}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
+                for k, v_ in enumerate(vals):
+                    x_ = _xor_lines([(arg, v_ & M32)])
+                    o += [f"  {labs[k]}:", *x_, *body(x_), f"    ;{nxt}"]
+                return o
+            out += disp("a", cell, obs, "ca_ob", lambda x_: [], f"{lab}_mb")
+            out += [f"  {lab}_mb:"]
+            out += disp("b", lfcell, lfs, "ca_lf", lambda x_: [f"    stl.fcall {L}_test, cc_tret", *x_], f"{lab}_mc")
+            out += [f"  {lab}_mc:"]
+            out += disp("c", cell, obs, "ca_ob", lambda x_: [], f"{lab}_mout")
+            out += [f"  {lab}_mout:"]
+        elif mover_here:
             cell, obs, *lfs = movers[li]
+            lfs = lfs[:1]
             assert bool(lfs) == (lowfloor is not None), "a mover line's low floors come with the drop-off"
             blocks = [f"{lab}_m{k}" for k in range(len(obs))]
             out += [f"    sim.jump16 {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
@@ -481,10 +533,11 @@ def monster_cells_fj(pfx: str, lds, verts, secs, sds, *, secs_open, door_line_id
     static blockers `[(x, y, radius, presence cell or None)]`, listed in the cells their boxes reach."""
     rows = line_rows(lds, verts, secs, sds, ml_blocking | ml_blockmonsters, secs_open=secs_open,
                      door_line_ids=door_line_ids)
-    obs = mover_line_openings(lds, sds, secs, msecs)
-    lfs = mover_line_lowfloors(lds, sds, secs, msecs)
-    movers = {li: (mcell[m_], obs[li], lfs[li]) for li in obs
-              for m_ in [next(x for x in (sds[lds[li].front].sector, sds[lds[li].back].sector) if x in msecs)]}
+    # M8 F1.3: each value through the cell it depends on (mover_line_states; one cell for both on every E1M1 line)
+    obs = mover_line_states(lds, sds, msecs, mcell, max)
+    lfs = mover_line_states(lds, sds, msecs, mcell, min)
+    movers = {li: (obs[li][0], obs[li][1], lfs[li][1]) + ((lfs[li][0],) if lfs[li][0] != obs[li][0] else ())
+              for li in obs}
     lists = dict(cell_lists(rows, MONSTER_CELL_RADIUS))
     for c, ks in thing_cell_lists(things, MONSTER_CELL_RADIUS).items():
         lists[c] = lists.get(c, ()) + tuple(-k - 1 for k in ks)

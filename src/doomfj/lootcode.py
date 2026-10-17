@@ -12,7 +12,7 @@ the floor at the tic-start position -- `collision.move_with_collision_lines(pick
     the host proof in tests/host/test_loot_tables.py) lands on the cell's list of item stubs, in PICKUP INDEX order;
   * item stub `pk<i>` (fcall'd, `pk_iret`): present (its `thvis` slot != 0) -> `pk_box` (ONE shared leaf: the
     item's x, y, z from the D4 table `pkxyz` by `pk_i`; the box, strict, 16.16; the reach `-8 <= item_z - cm_hf <=
-    56`; `item_z` = the model's own `pickup_z`, baked: no pickup stands in a door sector, asserted; M8 F1.3 -- an item
+    56`; `item_z` = the model's own `pickup_z`, baked (a door's floor never moves); M8 F1.3 -- an item
     on a MOVER's floor (`World.pickup_on_mover`: E1M2's blue card on switch sector 45) goes through `pk_mbox` instead:
     `ptss` = its leaf, `ms_seed_leaf` -> `cp_seedf`, its floor NOW, as the model's touch reads `secs_c`) -> `stl.fcall
     give_<type>, gv_ret` -> `gv_ok` ? (`pk_bonus`: `p_bc` = min(bc + 6, 255); the thvis slot 0; a RUNTIME pickup also
@@ -525,9 +525,9 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
     _check_rules()
     lists = pickup_cell_lists(w) if lists is None else lists
     mleaf = mover_pickup_leaves(w)                   # M8 F1.3: an item on a mover reads its floor now (pk_mbox)
-    for i, t in enumerate(w.pickup_things):          # every other item's z is static: none in a door
+    for i, t in enumerate(w.pickup_things):          # every other item's z is static (a door moves its CEILING only)
         sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, t.x, t.y)]
-        assert sec not in w.door_order and (sec in w.mover_order) == (i in mleaf), (i, t.type, sec)
+        assert (sec in w.mover_order) == (i in mleaf), (i, t.type, sec)
     assert all(-0x8000 <= v < 0x8000 for t, z in zip(w.pickup_things, w.pickup_z) for v in (t.x, t.y, z))
     stubs = {key: f"pk_c{k}" for k, key in enumerate(sorted(set(lists.values())))}
     tree, root = _tree("pk", "cpx", "cpy", {c: stubs[key] for c, key in lists.items()}, "pk_drops")

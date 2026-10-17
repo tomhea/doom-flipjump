@@ -2556,8 +2556,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             return min(f_.ceil_h, b_.ceil_h) <= max(f_.floor_h, b_.floor_h)
 
         st_ = [_shut(sv) for sv in _seg_secs(seg)]
-        if not (st_ and st_[0] and not all(st_)):
-            return None
+        if not any(st_) or all(st_):
+            return None                    # never shut: a marking seg; shut at EVERY state: `_seg_closed_moving`
+        # M8 (CR of #146): the gate is `hex.if0` on a state cell -- a seg OPEN at state 0 and shut at a later state
+        # has no such gate and would draw open where the oracle draws a wall: refused, never silently marking
+        assert st_[0], (f"{mapname}: seg on linedef {seg.linedef} is open at state 0 and shut at states "
+                        f"{[k for k, x in enumerate(st_) if x]} of {_seg_cell(seg)}")
         cell = _seg_cell(seg)
         if not isinstance(cell, tuple):
             # the gate is `hex.if0` on the cell: shut must be EXACTLY state 0 (every E1M1 door; asserted since M8)
@@ -2577,13 +2581,27 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         raise AssertionError(f"{mapname}: seg on linedef {seg.linedef} between two movers is shut at pairs "
                              f"{[divmod(k, nb_) for k, x in enumerate(st_) if x]}, not one mover's state 0")
 
+    def _seg_closed_moving(seg) -> bool:
+        """M8 (CR of #146: E1M2 lines 2033 / 2062 (tag 10) and 2050 / 2075 (tag 41)): a DYNAMIC seg -- a door's or a
+        mover's -- that is CLOSED AT EVERY STATE (the static side floor == ceiling, the moving floor lowering onto it):
+        the oracle's `_closed2s` draws it solid at every state, so it takes the solid path at compile time like
+        `_seg_closed_static`; its constants stay per state (`_door_blocks` switches on its cell), so the moving front
+        floor still reaches the wall. `_ts_closed_early` already baked its solid texture."""
+        ld_ = lds[seg.linedef]
+        if ld_.back == -1 or _seg_cell(seg) is None:
+            return False
+        fi_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
+        bi_ = sds[ld_.back if seg.side == 0 else ld_.front].sector
+        return all(min(sv[fi_].ceil_h, sv[bi_].ceil_h) <= max(sv[fi_].floor_h, sv[bi_].floor_h)
+                   for sv in _seg_secs(seg))
+
     def _seg_dual(seg) -> bool:
         """A DOOR seg (or a mover's): CLOSED while its cell is at state 0, open otherwise (`_seg_dual_cell`)"""
         return _seg_dual_cell(seg) is not None
 
     def _seg_as_solid(seg) -> bool:
         """Does this seg go down the one-sided (wall-emitting) path?"""
-        return (lds[seg.linedef].back == -1 or _seg_closed_static(seg)
+        return (lds[seg.linedef].back == -1 or _seg_closed_static(seg) or _seg_closed_moving(seg)   # M8: CR of #146
                 or ("tsfull" in ablate and _seg_draws_wall(seg)))
 
     def _seg_as_piece(seg) -> bool:

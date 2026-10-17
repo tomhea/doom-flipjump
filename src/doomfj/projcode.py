@@ -236,7 +236,10 @@ def missile_rows(w) -> Tuple[list, Dict[int, tuple]]:
         if ld.back != -1:
             fs, bs = w.sds[ld.front].sector, w.sds[ld.back].sector
             sides = [s for s in (fs, bs) if s in dyn]
-            assert len(sides) <= 1, "line %d touches two dynamic sectors" % li
+            # M8 L1: two dynamic sectors moving by ONE cell (the floor-switch sectors) read through it (the heights
+            # below carry both); two cells stay refused
+            assert len(sides) <= 1 or closed_states(w, fs)[0] == closed_states(w, bs)[0], (
+                "line %d touches two dynamic sectors on two state cells" % li)
             if not sides:
                 if (min(w.secs[fs].ceil_h, w.secs[bs].ceil_h) - max(w.secs[fs].floor_h, w.secs[bs].floor_h)
                         < FIREBALL_H):

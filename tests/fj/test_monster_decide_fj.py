@@ -158,9 +158,9 @@ def _parts(w, mut=None):
     secs = sorted({w.leaf_sector[s] for s in range(len(w.cmap.subsectors))})
     tables = MC.p30_tables_fj()
     tables += [generate_dispatch_table_fj("rj%d" % s, [int(w.reject.visible(s, q)) for q in range(w.reject.nsec)],
-                                          index_nibbles=2, result_nibbles=1) for s in secs]
+                                          index_nibbles=w.sec_nibbles, result_nibbles=1) for s in secs]
     nleaf = len(w.cmap.subsectors)
-    tables.append(generate_dispatch_table_fj("lfsec", list(w.leaf_sector), index_nibbles=3, result_nibbles=2))
+    tables.append(generate_dispatch_table_fj("lfsec", list(w.leaf_sector), index_nibbles=3, result_nibbles=w.sec_nibbles))
     tables.append(generate_point_location_fj(w.cmap))
     fields = MC.P31_FIELDS + MC.P32A_FIELDS + MC.P32B_FIELDS + MD.P32C_FIELDS
     vals = {f: list(getattr(ws, f)[:n]) for f in fields}
@@ -168,8 +168,8 @@ def _parts(w, mut=None):
     head, nxt = spawn_leaf_lists([ws.mon_leaf[m] for m in range(n)], nleaf,
                                  present=[bool(ws.mon_active[m]) for m in range(n)])
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
-             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n)
-             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, msec)
+             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n, w.sec_nibbles)
+             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, msec, w.sec_nibbles)
              + MC.p32c_decls(schema, n, {f: vals[f] for f in MD.P32C_FIELDS})
              + DC.field_decls(schema, n, {f: list(getattr(ws, f)[:n]) for f in DC.P42_FIELDS}) + ["mm_jh: hex.vec 1"]
              + MD.context_decls() + MS.SL_DECLS
@@ -193,8 +193,8 @@ def _parts(w, mut=None):
             + MM.ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
             + MM.walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES)
             + MM.chase_leaf_lines() + MD.decide_leaves(justhit=True) + MS.near_los_lines(w))
-    code = (["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False) + ["    stl.fret mt_tret"]
-            + MC.p32a_leaves() + MC.p32b_rj_leaf(secs) + move + seed)
+    code = (["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False, nib=w.sec_nibbles) + ["    stl.fret mt_tret"]
+            + MC.p32a_leaves() + MC.p32b_rj_leaf(secs, len(w.secs), w.sec_nibbles) + move + seed)
     text = "\n".join(code + [cells] + tables) + "\n"
     muts = {"noroll": ("    hex.cmp 4, mo_t4, mo_c4, mm_dc_mv, mm_dc_yes, mm_dc_yes\n",
                        "    ;mm_dc_yes\n"),

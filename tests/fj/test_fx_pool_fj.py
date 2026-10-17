@@ -245,8 +245,8 @@ def _build(tmp_path, name, mut=None):
              "    stl.fret ptloc_ret"]
     vals = {f: list(getattr(ws, f)[:n]) for f in MC.P31_FIELDS + MC.P32A_FIELDS + MC.P32B_FIELDS}
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
-             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n)
-             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, [0] * n)
+             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n, w.sec_nibbles)
+             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, [0] * n, w.sec_nibbles)
              + MC.P32A_SCRATCH + dp["decls"] + MD.context_decls() + PC.pool_decls()
              + point_location_decls() + LEAF_LINK_DECLS
              + ["%s: hex.vec %d" % cn for cn in DM_CELLS]

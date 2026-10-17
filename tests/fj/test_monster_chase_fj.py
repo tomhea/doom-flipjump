@@ -137,17 +137,17 @@ def _parts(w, mut=None):
     secs = sorted({w.leaf_sector[s] for s in range(len(w.cmap.subsectors))})
     tables = MC.p30_tables_fj()
     tables += [generate_dispatch_table_fj("rj%d" % s, [int(w.reject.visible(s, q)) for q in range(w.reject.nsec)],
-                                          index_nibbles=2, result_nibbles=1) for s in secs]
+                                          index_nibbles=w.sec_nibbles, result_nibbles=1) for s in secs]
     nleaf = len(w.cmap.subsectors)
-    tables.append(generate_dispatch_table_fj("lfsec", list(w.leaf_sector), index_nibbles=3, result_nibbles=2))
+    tables.append(generate_dispatch_table_fj("lfsec", list(w.leaf_sector), index_nibbles=3, result_nibbles=w.sec_nibbles))
     tables.append(generate_point_location_fj(w.cmap))
     vals = {f: list(getattr(ws, f)[:n]) for f in MC.P31_FIELDS + MC.P32A_FIELDS + MC.P32B_FIELDS}
     msec = [w._mon_sector(m) for m in range(n)]
     head, nxt = spawn_leaf_lists([ws.mon_leaf[m] for m in range(n)], nleaf,
                                  present=[bool(ws.mon_active[m]) for m in range(n)])
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
-             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n)
-             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, msec)
+             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n, w.sec_nibbles)
+             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, msec, w.sec_nibbles)
              + DC.field_decls(schema, n, {f: list(getattr(ws, f)[:n]) for f in DC.P42_FIELDS})
              + MC.MT_DECLS + MC.P32A_SCRATCH + point_location_decls() + COLLISION_STATE_DECLS + MON_CELL_DECLS
              + LEAF_LINK_DECLS + MM.monster_seed_decls()
@@ -170,8 +170,8 @@ def _parts(w, mut=None):
             + MM.ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES)
             + MM.walk_leaf_lines(max_tries=99 if mut == "nocap" else NEWCHASEDIR_MAX_TRIES)
             + MM.chase_leaf_lines())
-    code = (["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False) + ["    stl.fret mt_tret"]
-            + MC.p32a_leaves() + MC.p32b_rj_leaf(secs) + move + seed)
+    code = (["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False, nib=w.sec_nibbles) + ["    stl.fret mt_tret"]
+            + MC.p32a_leaves() + MC.p32b_rj_leaf(secs, len(w.secs), w.sec_nibbles) + move + seed)
     text = "\n".join(code + [cells] + tables)
     if mut == "nothings":
         text = text.replace("    stl.fcall mm_things, mm_tret\n", "")
@@ -359,7 +359,7 @@ def _dead_run(tmp_path, name, mut=False) -> bool:
              "cpx: hex.vec 8", "cpy: hex.vec 8", "ct_a: hex.vec 4",
              "thpos_rt: hex.vec %d, %d" % (16 * n, sum(((ws.mon_x[m] << 16) & M32 | ((ws.mon_y[m] << 16) & M32) << 32)
                                                        << (64 * m) for m in range(n)))]
-    decls += [d for d in MM.P32B_CONTEXT if d.split(":")[0] in ("mm_nx", "mm_ny", "mm_r", "mm_blk", "mm_bd20",
+    decls += [d for d in MM.p32b_context(w.sec_nibbles) if d.split(":")[0] in ("mm_nx", "mm_ny", "mm_r", "mm_blk", "mm_bd20",
                                                                   "mm_bd30", "mm_bdp", "mm_c", "mm_tret")]
     prog = "\n".join(body + decls) + "\n" + leaf + "\n"
     p = tmp_path / ("%s.fj" % name)

@@ -65,7 +65,7 @@ def _program(p31, fight: bool, drop=None):
         w = p31["world"]
         knock_defs = (knockcode.decls(w.layout.nmon)
                       + knockcode.leaf_lines(knockcode.slots_of(w, [t for t, _r in p31["chase"]["slots_rt"]]),
-                                             player_root="kq_proot", mon_root="kq_mroot"))
+                                             player_root="kq_proot", mon_root="kq_mroot", nib=w.sec_nibbles))
     decls = (list(p31["decls"]) + list(p31["decls_wake"]) + list(p31["proj"]["decls"]) + list(p31["barrel"]["decls"])
              + knock_defs)
     if drop:

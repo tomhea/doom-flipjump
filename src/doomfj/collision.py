@@ -228,7 +228,9 @@ def mover_line_lowfloors(lds, sds, secs, mover_secs: dict) -> dict:
         mv = [m for m in (f, b) if m in mover_secs]
         if not mv:
             continue
-        assert len(set(mv)) == 1, "line %d touches two movers %s" % (li, mv)
+        # M8 L1: two movers with the SAME state lists are one machine (the floor-switch sectors move together)
+        assert len(set(mv)) == 1 or mover_secs[mv[0]] == mover_secs[mv[1]], (
+            "line %d touches two movers %s" % (li, mv))
         out[li] = [min(sv[f].floor_h, sv[b].floor_h) for sv in mover_secs[mv[0]]]
     return out
 
@@ -247,7 +249,9 @@ def mover_line_openings(lds, sds, secs, mover_secs: dict) -> dict:
         mv = [m for m in (f, b) if m in mover_secs]
         if not mv:
             continue
-        assert len(set(mv)) == 1, "line %d touches two movers %s" % (li, mv)
+        # M8 L1: two movers with the SAME state lists are one machine (the floor-switch sectors move together)
+        assert len(set(mv)) == 1 or mover_secs[mv[0]] == mover_secs[mv[1]], (
+            "line %d touches two movers %s" % (li, mv))
         out[li] = [max(sv[f].floor_h, sv[b].floor_h) for sv in mover_secs[mv[0]]]
     return out
 
@@ -406,16 +410,19 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
     out += [f"{none}:", "    stl.fret cc_ret"]
     for li in used:
         row = rows[li]
-        if li in movers:                  # M7 P2b: the opening floor comes from the mover's state
-            assert li not in doors and row[9] == 0, "mover line %d is a door line or blocks" % li
+        # M8 L1: a mover line that BLOCKS (E1M2's lift line 1143 carries ML_BLOCKMONSTERS: for the monsters' cells it
+        # blocks at every state -- P_CheckPosition tests the flag before any opening) is a static blocking line
+        mover_here = li in movers and row[9] == 0
+        if mover_here:                    # M7 P2b: the opening floor comes from the mover's state
+            assert li not in doors, "mover line %d is a door line" % li
             row = row[:11] + (0,)
         consts = line_constants(row)
-        if lowfloor is not None and row[9] == 0 and li not in movers:   # M7 P3.2b: the drop-off
+        if lowfloor is not None and row[9] == 0 and not mover_here:   # M7 P3.2b: the drop-off
             consts += [("ca_lf", lowfloor[li] & M32)] if lowfloor[li] & M32 else []
         xors = _xor_lines(consts)
         lab = f"{L}_l{li}"
         out += [f"{lab}:"] + xors
-        if li in movers:
+        if mover_here:
             cell, obs, *lfs = movers[li]
             assert bool(lfs) == (lowfloor is not None), "a mover line's low floors come with the drop-off"
             blocks = [f"{lab}_m{k}" for k in range(len(obs))]

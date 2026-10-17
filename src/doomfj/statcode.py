@@ -37,11 +37,21 @@ from __future__ import annotations
 from typing import List, Tuple
 
 from doomfj import gamedata as gd
+from doomfj.menu import count_slots
 
 PERSIST = ("st_kill", "st_item", "st_secn", "st_secm")
 COUNT_NIBBLES = 2                       # st_kill / st_item: p_killcount / p_itemcount, 8 bits
-DIGIT_SLOTS = 13                        # menu.stats_digits: kills 4, items 4, secrets 1, time 4
+DIGIT_SLOTS = 13                        # menu.stats_digits: kills 4, items 4, secrets 1, time 4 (two-digit counts)
+assert DIGIT_SLOTS == count_slots(2)
 TIME_NIBBLES = 5                        # lvtime's (restartcode.LVTIME_NIBBLES); the seconds and minutes fit it too
+
+
+def count_digits(w) -> int:
+    """M8 F1.1 (docs/f1-big-map-widths.md 3): LEVEL COMPLETE's digits per count -- 2, or 3 when the map's monster
+    slots or any skill's totals pass 99 (E1M2 129 monsters, E1M5 189, E1M9 135). ONE rule: the program's layout and
+    digit split and the oracle's picture (menu, through the slot count) all follow it"""
+    big = max([len(w.mon_things)] + [v for sk in (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD) for v in level_totals(w, sk)])
+    return 2 if big <= 99 else 3
 
 
 def secret_nibbles(w) -> int:
@@ -58,9 +68,9 @@ def decls(w) -> List[str]:
     return [f"st_kill: hex.vec {COUNT_NIBBLES}, 0", f"st_item: hex.vec {COUNT_NIBBLES}, 0", "st_secn: hex.vec 1, 0",
             f"st_secm: hex.vec {secret_nibbles(w)}, 0",
             # the secret check's scratch
-            "sc_bx: hex.vec 4", "sc_sec: hex.vec 2", "sc_on: hex.vec 1", "sc_ret: hex.vec w/4", "sc_fret: hex.vec w/4",
+            "sc_bx: hex.vec 4", f"sc_sec: hex.vec {w.sec_nibbles}", "sc_on: hex.vec 1", "sc_ret: hex.vec w/4", "sc_fret: hex.vec w/4",
             # LEVEL COMPLETE's: the slots, the clock's quotients and remainders, the decimal split, its constants
-            f"st_dig: hex.vec {DIGIT_SLOTS}",
+            f"st_dig: hex.vec {count_slots(count_digits(w))}",
             f"lvd_s: hex.vec {TIME_NIBBLES}", "lvd_r: hex.vec 2", f"lvd_m: hex.vec {TIME_NIBBLES}", "lvd_ss: hex.vec 2",
             f"lvd_t: hex.vec {TIME_NIBBLES}", "lvd_v: hex.vec 2", "lvd_q: hex.vec 2", "lvd_o: hex.vec 1",
             "lvd_ret: hex.vec w/4",
@@ -95,9 +105,10 @@ def check_world(w) -> None:
     (LEVEL COMPLETE's slots) and its cell, and the secrets fit one slot"""
     assert all(gd.THING_TYPES[t.type].flags & gd.MF_COUNTKILL for t in w.mon_things), (
         "kill_lines counts every monster death: a non-COUNTKILL monster type needs a test at dm_kill")
-    assert len(w.mon_things) <= 99, "the kills are two decimal digits: %d monster slots" % len(w.mon_things)
+    # M8 F1.1: 2 or 3 decimal digits a count (count_digits), in 8-bit cells (p_killcount / p_itemcount)
+    assert len(w.mon_things) <= 0xFF, "the kills are an 8-bit cell: %d monster slots" % len(w.mon_things)
     nitems = sum(1 for t in w.pickup_things if counts_item(t.type))
-    assert nitems <= 99, "the items are two decimal digits: %d COUNTITEM pickups" % nitems
+    assert nitems <= 0xFF, "the items are an 8-bit cell: %d COUNTITEM pickups" % nitems
     assert len(w.secret_sectors) <= 9, "the secrets are one decimal digit: %d" % len(w.secret_sectors)
 
 
@@ -161,12 +172,13 @@ def secret_lines(w, cell_root: str) -> List[str]:
             "    hex.zero 10, pty", "    hex.mov 4, pty, viewy + 4*dw", "    hex.sign_extend 10, 4, pty",
             "    stl.fcall ptloc_walk, ptloc_ret",
             "    lfsec.lookup sc_sec, ptss"]
+    nib = w.sec_nibbles                                                     # M8 L1: sc_sec's width
     for k, sec in enumerate(secrets):
-        assert 0 <= sec < 256, sec
+        assert 0 <= sec < 16 ** nib, (sec, nib)
         out += [f"    hex.if1 1, st_secm + {k}*dw, sc_w{k}",
-                f"    hex.xor_by 2, sc_sec, {sec}",                           # sc_sec == sec: zero
-                f"    hex.if0 2, sc_sec, sc_f{k}",
-                f"    hex.xor_by 2, sc_sec, {sec}",
+                f"    hex.xor_by {nib}, sc_sec, {sec}",                       # sc_sec == sec: zero
+                f"    hex.if0 {nib}, sc_sec, sc_f{k}",
+                f"    hex.xor_by {nib}, sc_sec, {sec}",
                 f"  sc_w{k}:"]
     out += ["    ;sc_out"]
     for k in range(len(secrets)):
@@ -197,10 +209,25 @@ def secret_call_lines() -> List[str]:
 
 
 # ---- LEVEL COMPLETE ---------------------------------------------------------------------------------------------------
-def _split_lines(src: str, slot: int, blank: bool) -> List[str]:
+def _split_lines(src: str, slot: int, blank: bool, nd: int = 2) -> List[str]:
     """st_dig[slot], st_dig[slot + 1] = the two decimal digits of the 2-nibble `src` (<= 99) through `lvd_dec` (ONE
-    shared division); the tens a DIGIT_BLANK when 0 and `blank`"""
+    shared division); the tens a DIGIT_BLANK when 0 and `blank`. M8 F1.1 (`nd` 3, a count <= 255): three slots --
+    the ones first, then the quotient (<= 25) divided again for the hundreds and the tens; with `blank` the hundreds
+    a blank when 0 and the tens too when both are (menu.count_codes)"""
     from doomfj.menu import DIGIT_BLANK
+    if nd == 3:
+        out = [f"    hex.mov 2, lvd_v, {src}", "    stl.fcall lvd_dec, lvd_ret",
+               f"    hex.mov 1, st_dig + {slot + 2}*dw, lvd_o",
+               "    hex.mov 2, lvd_v, lvd_q", "    stl.fcall lvd_dec, lvd_ret",
+               f"    hex.mov 1, st_dig + {slot}*dw, lvd_q", f"    hex.mov 1, st_dig + {slot + 1}*dw, lvd_o"]
+        if blank:
+            out += [f"    hex.if0 2, lvd_q, lvd_b{slot}", f"    ;lvd_nb{slot}",
+                    f"  lvd_b{slot}:", f"    hex.set 1, st_dig + {slot}*dw, {DIGIT_BLANK}",
+                    f"    hex.if0 1, lvd_o, lvd_bt{slot}", f"    ;lvd_nb{slot}",
+                    f"  lvd_bt{slot}:", f"    hex.set 1, st_dig + {slot + 1}*dw, {DIGIT_BLANK}",
+                    f"  lvd_nb{slot}:"]
+        return out
+    assert nd == 2, nd
     out = [f"    hex.mov 2, lvd_v, {src}", "    stl.fcall lvd_dec, lvd_ret",
            f"    hex.mov 1, st_dig + {slot}*dw, lvd_q", f"    hex.mov 1, st_dig + {slot + 1}*dw, lvd_o"]
     if blank:
@@ -210,13 +237,12 @@ def _split_lines(src: str, slot: int, blank: bool) -> List[str]:
     return out
 
 
-def _digit_set_lines(slot: int, value: int, blank: bool) -> List[str]:
-    """a constant's two digits into st_dig[slot], st_dig[slot + 1] (a skill's totals)"""
-    from doomfj.menu import DIGIT_BLANK
-    assert 0 <= value <= 99, value
-    tens, ones = divmod(value, 10)
-    return [f"    hex.set 1, st_dig + {slot}*dw, {DIGIT_BLANK if blank and not tens else tens}",
-            f"    hex.set 1, st_dig + {slot + 1}*dw, {ones}"]
+def _digit_set_lines(slot: int, value: int, blank: bool, nd: int = 2) -> List[str]:
+    """a constant's `nd` digits into st_dig[slot ..] (a skill's totals) -- menu.count_codes, the oracle's own rule
+    (at 2 digits the text of P10's tens-then-ones pair)"""
+    from doomfj.menu import count_codes
+    assert blank, "a skill's totals are blanked as the oracle's"
+    return [f"    hex.set 1, st_dig + {slot + k}*dw, {c}" for k, c in enumerate(count_codes(value, nd))]
 
 
 def digit_lines(w, skills) -> List[str]:
@@ -226,15 +252,17 @@ def digit_lines(w, skills) -> List[str]:
     from doomfj.menu import TIME_CAP
     from doomfj.restartcode import skill_dispatch
     check_world(w)
+    nd = count_digits(w)                                                         # M8 F1.1: 2 or 3 a count
     out = ["// P10 (doomfj.statcode): LEVEL COMPLETE's digit slots"]
-    out += _split_lines("st_kill", 0, True)                                      # kills
+    out += _split_lines("st_kill", 0, True, nd)                                  # kills
     out += skill_dispatch("lvt", "g_skill", len(skills))                         # the skill's totals
     for k, sk in enumerate(skills):
         tk, ti = level_totals(w, sk)
-        out += [f"lvt{k}:", *_digit_set_lines(2, tk, True), *_digit_set_lines(6, ti, True), ";lvt_done"]
+        out += [f"lvt{k}:", *_digit_set_lines(nd, tk, True, nd), *_digit_set_lines(3 * nd, ti, True, nd),
+                ";lvt_done"]
     out += ["lvt_done:"]
-    out += _split_lines("st_item", 4, True)                                      # items
-    out += ["    hex.mov 1, st_dig + 8*dw, st_secn"]                             # secrets
+    out += _split_lines("st_item", 2 * nd, True, nd)                             # items
+    out += [f"    hex.mov 1, st_dig + {4 * nd}*dw, st_secn"]                      # secrets
     # the clock: seconds = lvtime / MAX_FPS, then minutes and seconds, capped at 99:59 (menu.TIME_CAP)
     mm_cap, ss_cap = divmod(TIME_CAP, 60)
     out += [f"    hex.div {TIME_NIBBLES}, 2, lvd_s, lvd_r, lvtime, lvd_cf, lvd_div0",
@@ -243,8 +271,8 @@ def digit_lines(w, skills) -> List[str]:
             f"    hex.cmp {TIME_NIBBLES}, lvd_m, lvd_t, lvd_tok, lvd_tok, lvd_tcap",
             "  lvd_tcap:", f"    hex.set {TIME_NIBBLES}, lvd_m, {mm_cap}", f"    hex.set 2, lvd_ss, {ss_cap}",
             "  lvd_tok:"]
-    out += _split_lines("lvd_m", 9, True)                                        # minutes: no leading zero
-    out += _split_lines("lvd_ss", 11, False)                                     # seconds: a leading zero
+    out += _split_lines("lvd_m", 4 * nd + 1, True)                               # minutes: no leading zero
+    out += _split_lines("lvd_ss", 4 * nd + 3, False)                             # seconds: a leading zero
     return out
 
 
@@ -263,22 +291,24 @@ def frame_lines(width: int, height: int, colours, w, label: str = "menu_level_do
     slot's records for its digit -- a `sim.jump16` on the slot, a block per digit, nothing for a blank"""
     from doomfj.menu import DIGIT_BLANK, level_done_digit_records, level_done_layout, level_done_stream
     nsec = len(w.secret_sectors)
-    data = level_done_stream(width, height, colours, nsec)
+    nd = count_digits(w)                                                         # M8 F1.1
+    nslot = count_slots(nd)
+    data = level_done_stream(width, height, colours, nsec, nd)
     assert data[-1] == 0xFF
-    _lines, _sel, _rows, slots = level_done_layout(width, height, nsec)
-    assert len(slots) == DIGIT_SLOTS, len(slots)
+    _lines, _sel, _rows, slots = level_done_layout(width, height, nsec, nd)
+    assert len(slots) == nslot, len(slots)
     assert DIGIT_BLANK >= 10, "a blank slot jumps past the ten digits' blocks"
     out = ["// P10 (doomfj.statcode): the baked LEVEL COMPLETE frame (%d bytes), then the digit slots"
            % (len(data) - 1), f"{label}:"]
     out += ["    stl.output_char %d" % b for b in data[:-1]]
-    for i in range(DIGIT_SLOTS):
+    for i in range(nslot):
         p = f"lvd{i}"
         targets = [f"{p}_{d}" for d in range(10)] + [f"{p}_x"] * 6
         out.append(f"    sim.jump16 st_dig + {i}*dw, " + ", ".join(targets))
         for d in range(10):
             out.append(f"  {p}_{d}:")
             out += ["    stl.output_char %d" % b
-                    for b in level_done_digit_records(width, height, colours, nsec, i, d)]
+                    for b in level_done_digit_records(width, height, colours, nsec, i, d, nd)]
             out.append(f"    ;{p}_x")
         out.append(f"  {p}_x:")
     return out

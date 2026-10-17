@@ -70,9 +70,11 @@ for _q in (ROOT / "tests", ROOT / "src", ROOT / "scratchpad", ROOT / "scratchpad
 
 DEFAULT_FJM = ROOT / "build" / "doom_e1m1_blocked27.fjm"
 DEFAULT_LABELS = ROOT / "scratchpad" / "12m" / "atlas" / "blocked27.labels.tsv.gz"
-DEFAULT_WAD = "tests/fixtures/freedoom_e1m1.wad"
+# M8 (docs/level-pipeline.md 3): the map from doomfj.mapprofile (DOOMFJ_MAP; E1M1 when unset)
+from doomfj.mapprofile import profile as _map_profile                       # noqa: E402
+DEFAULT_WAD = _map_profile().wad
 DEFAULT_ASSET = "assets/freedoom1.wad"
-DEFAULT_MAP = "E1M1"
+DEFAULT_MAP = _map_profile().map
 
 OPS_GRANULARITY = 1 << 18     # _fjcore.c SIGNAL_CHECK_MASK + 1: how often last_run_op_count moves
 # what docs/ship-evidence/padB_gamespeed.log recorded for these bytes (padB.fjm == blocked27):
@@ -699,7 +701,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells["sched_cursor"] = Cell("sched_cursor", "hex", 2)
         cells["thseen"] = Cell("thseen", "hex", 1, count=nmon)     # per SLOT, written by the render
         # M7 P3.2b: the chase's per-slot cells (monstercode.p32b_decls)
-        for name, width in (("mon_movecount", 2), ("mon_rng", 2), ("mon_floorz", 4), ("msec", 2)):
+        for name, width in (("mon_movecount", 2), ("mon_rng", 2), ("mon_floorz", 4), ("msec", _sec_nibbles())):
             cells[name] = Cell(name, "hex", width, count=nmon)
         cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon)   # M7 P3.2c
         cells["mon_health"] = Cell("mon_health", "hex", 3, count=nmon)               # M7 P4.2a: the damage
@@ -766,42 +768,50 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
 from doomfj.monsters import view_drop_kw                                     # noqa: E402,F401  (M7 P8a)
 
 
-def _loot_counts() -> tuple:
-    """M7 P6: (droppers, barrels) of E1M1 -- `mdrop`'s and the barrel cells' counts, from the model once"""
-    global _LOOT
-    if _LOOT is None:
-        from doomfj.monsters import droppers
+# M8 (docs/level-pipeline.md 1): the per-map cell counts below came from `World()` with NO map -- E1M1's, whatever map
+# the gate's oracle was on. They now come from THE map the process's oracles use (`Oracle.__init__` registers it;
+# DEFAULT_MAP before any oracle), and a process whose oracles use two maps is refused rather than sized for one.
+_ORACLE_MAPS: set = set()
+_IDLE_WORLDS: dict = {}
+
+
+def _counts_map() -> tuple:
+    """(wad, mapname) the cell counts are taken from"""
+    maps = {m for _w, m in _ORACLE_MAPS}
+    assert len(maps) <= 1, "probe: oracles on several maps %s -- the game cells are sized per map" % sorted(maps)
+    return next(iter(_ORACLE_MAPS)) if _ORACLE_MAPS else (DEFAULT_WAD, DEFAULT_MAP)
+
+
+def _idle_world():
+    """the counts map's World (idle monsters), built once"""
+    wad, mapname = _counts_map()
+    if (wad, mapname) not in _IDLE_WORLDS:
+        from doomfj.wad import WadFile
         from doomfj.world import World
-        w = World(monsters="idle")
-        _LOOT = (len(droppers(w)), w.layout.nbarrel)
-    return _LOOT
+        _IDLE_WORLDS[wad, mapname] = World(WadFile.from_path(str(ROOT / wad)), mapname, monsters="idle")
+    return _IDLE_WORLDS[wad, mapname]
 
 
-_LOOT = None
+def _loot_counts() -> tuple:
+    """M7 P6: (droppers, barrels) -- `mdrop`'s and the barrel cells' counts, from the model"""
+    from doomfj.monsters import droppers
+    w = _idle_world()
+    return len(droppers(w)), w.layout.nbarrel
 
 
 def _nsecret() -> int:
-    """P10: E1M1's secret sectors (World.secret_sectors) -- `st_secm`'s count, from the model once"""
-    global _NSECRET
-    if _NSECRET is None:
-        from doomfj.world import World
-        _NSECRET = max(1, len(World(monsters="idle").secret_sectors))
-    return _NSECRET
+    """P10: the secret sectors (World.secret_sectors) -- `st_secm`'s count"""
+    return max(1, len(_idle_world().secret_sectors))
 
 
-_NSECRET = None
+def _sec_nibbles() -> int:
+    """M8 L1: the sector-id width (World.sec_nibbles) -- `msec`'s cell width"""
+    return _idle_world().sec_nibbles
 
 
 def _nsound() -> int:
-    """M7 P4.2b: E1M1's sound nodes (World.layout.nsound) -- `snd_alert`'s count, from the model once"""
-    global _NSOUND
-    if _NSOUND is None:
-        from doomfj.world import World
-        _NSOUND = World(monsters="idle").layout.nsound
-    return _NSOUND
-
-
-_NSOUND = None
+    """M7 P4.2b: the sound nodes (World.layout.nsound) -- `snd_alert`'s count"""
+    return _idle_world().layout.nsound
 
 
 def wfired_value(fired) -> object:
@@ -835,6 +845,7 @@ class Oracle:
         self.mw = WadFile.from_path(str(ROOT / wad))
         self.art = WadFile.from_path(str(ROOT / asset))
         self.mapname = mapname
+        _ORACLE_MAPS.add((wad, mapname))           # M8: game_cells' per-map counts follow the oracle's map
         # M7 P4.0: the GAME tier's config -- the 84-row view under the status bar (config.GAME_CFG)
         from doomfj.config import GAME_CFG
         self.rm = ReferenceModel(GAME_CFG)

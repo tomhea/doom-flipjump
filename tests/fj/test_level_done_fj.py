@@ -9,6 +9,10 @@ menu.level_done_pixels; statcode.level_totals).
 
 R9 (MUTANTS), each must part: the minutes' leading zero drawn, the 99:59 cap gone, the clock divided by 35, the skills'
 totals crossed, the secrets' slot read from the kills; and, for the frame, two digits' records swapped in one slot.
+
+M8 F1.1 (docs/f1-big-map-widths.md 3): the same digits and frames on E1M2, whose 129 monster slots make every count
+THREE digits (statcode.count_digits) -- 0, 9, 10, 99, 100, 109, 110 and up -- with its own mutants (the hundreds never
+blanked, the tens never blanked) and a two-digit layout on a three-digit map refused.
 """
 import random
 import re
@@ -22,7 +26,7 @@ from doomfj import gamedata as gd
 from doomfj import statcode as SC
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.menu import DIGIT_BLANK, level_done_pixels, palette_colours, stats_digits
+from doomfj.menu import DIGIT_BLANK, count_slots, level_done_pixels, palette_colours, stats_digits
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import MAX_FPS, SKILLS
 from doomfj.world import World
@@ -33,13 +37,25 @@ CFG = Config()
 ASSETS = ROOT / "tests" / "fixtures" / "freedoom_assets.wad"
 
 
-def _world():
-    return World(skill=gd.SK_HARD, monsters="idle", player="full")
+_WORLDS = {}
 
 
-def _cases():
-    """(kills, items, secrets, skill index, lvtime): every edge the slots have, then random ones"""
-    w = _world()
+def _world(mapname="E1M1"):
+    """the map's World (M8 F1.1: E1M2 for three-digit counts), built once"""
+    if mapname not in _WORLDS:
+        mw = WadFile.from_path(str(ROOT / "tests" / "fixtures" / ("freedoom_%s.wad" % mapname.lower())))
+        _WORLDS[mapname] = World(mw, mapname, skill=gd.SK_HARD, monsters="idle", player="full")
+    return _WORLDS[mapname]
+
+
+def _nd(mapname="E1M1"):
+    return SC.count_digits(_world(mapname))
+
+
+def _cases(mapname="E1M1"):
+    """(kills, items, secrets, skill index, lvtime): every edge the slots have, then random ones -- M8 F1.1: on a
+    three-digit map the counts' edges too (0, 9, 10, 99, 100, 109, 110)"""
+    w = _world(mapname)
     totals = [SC.level_totals(w, sk) for sk in SKILLS]
     nsec = len(w.secret_sectors)
     edge_t = [0, 19, 20, 1199, 1200, 12000, 20 * 599, 20 * 600, 20 * 5999, 20 * 5999 + 19, 20 * 6000,
@@ -49,6 +65,12 @@ def _cases():
         k = i % len(SKILLS)
         tk, ti = totals[k]
         out.append(((0, 1, 9, 10, tk)[i % 5], (0, 9, 10, 23, ti)[i % 5], i % (nsec + 1), k, t))
+    if _nd(mapname) == 3:
+        kmax = max(range(len(SKILLS)), key=lambda j: totals[j][0])       # the skill whose totals pass 99
+        for i, v in enumerate((0, 9, 10, 99, 100, 109, 110, 128)):
+            k = kmax if v >= 99 else i % len(SKILLS)
+            tk, ti = totals[k]
+            out.append((min(v, tk), min(v, ti), i % (nsec + 1), k, 1200 * i))
     rnd = random.Random(0x1D0)
     while len(out) < 60:
         k = rnd.randrange(len(SKILLS))
@@ -57,10 +79,10 @@ def _cases():
     return out, totals
 
 
-def _want(case, totals) -> list:
+def _want(case, totals, nd=2) -> list:
     kills, items, secrets, k, t = case
     tk, ti = totals[k]
-    return stats_digits(kills, tk, items, ti, secrets, t // MAX_FPS)
+    return stats_digits(kills, tk, items, ti, secrets, t // MAX_FPS, nd)
 
 
 def _set(case) -> list:
@@ -78,10 +100,18 @@ DIGIT_MUTANTS = {
 }
 
 
+# M8 F1.1: the three-digit split's own (E1M2: the kills' slots 0..2, the items' 6..8)
+DIGIT3_MUTANTS = {
+    "hundreds never blanked": (r"  lvd_b0:\n    hex\.set 1, st_dig \+ 0\*dw, 10\n", "  lvd_b0:\n"),
+    "tens never blanked": (r"  lvd_bt6:\n    hex\.set 1, st_dig \+ 7\*dw, 10\n", "  lvd_bt6:\n"),
+}
+
+
 def _digit_text(w, mut=None) -> str:
     text = "\n".join(SC.digit_lines(w, SKILLS)) + "\n"
-    if mut and DIGIT_MUTANTS[mut]:
-        pat, new = DIGIT_MUTANTS[mut]
+    table = {**DIGIT_MUTANTS, **DIGIT3_MUTANTS}
+    if mut and table[mut]:
+        pat, new = table[mut]
         text, n = re.subn(pat, new, text)
         assert n, mut
     return text
@@ -94,15 +124,16 @@ def _decls(w, mut=None) -> list:
     return d + ["g_skill: hex.vec 1", "lvtime: hex.vec 5", "dg_ret: hex.vec w/4", "fr_ret: hex.vec w/4"]
 
 
-def _digits_program(mut=None):
-    w = _world()
-    cases, totals = _cases()
+def _digits_program(mut=None, mapname="E1M1"):
+    w = _world(mapname)
+    cases, totals = _cases(mapname)
+    nd = _nd(mapname)
     body = ["stl.startup_and_init_all"]
     for case in cases:
         body += _set(case) + ["stl.fcall dg_go, dg_ret"]
-        body += ["hex.print_as_digit 1, st_dig + %d*dw, 0" % i for i in range(SC.DIGIT_SLOTS)] + ["stl.output 10"]
+        body += ["hex.print_as_digit 1, st_dig + %d*dw, 0" % i for i in range(count_slots(nd))] + ["stl.output 10"]
     body += ["stl.loop", "dg_go:", _digit_text(w, mut), "    stl.fret dg_ret", *SC.routine_lines(), *_decls(w, mut)]
-    want = "".join("".join("%x" % d for d in _want(c, totals)) + "\n" for c in cases).encode()
+    want = "".join("".join("%x" % d for d in _want(c, totals, nd)) + "\n" for c in cases).encode()
     return "\n".join(body) + "\n", want
 
 
@@ -116,8 +147,8 @@ def _assemble(tmp_path, name, text, extra=()):
     return out, srcs
 
 
-def _run_digits(tmp_path, name, mut=None) -> bool:
-    text, want = _digits_program(mut)
+def _run_digits(tmp_path, name, mut=None, mapname="E1M1") -> bool:
+    text, want = _digits_program(mut, mapname)
     p = tmp_path / ("%s.fj" % name)
     p.write_text(text, encoding="utf-8")
     consts = CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
@@ -150,6 +181,35 @@ def test_control_broken_digits_are_caught(tmp_path, mut):
         "%s passed: the comparison is vacuous" % mut)
 
 
+# ---- M8 F1.1: three-digit counts (E1M2) -----------------------------------------------------------------------------
+def test_e1m2_counts_are_three_digits_and_e1m1_two():
+    assert _nd("E1M1") == 2 and _nd("E1M2") == 3
+    cases, totals = _cases("E1M2")
+    digits = [_want(c, totals, 3) for c in cases]
+    assert all(len(d) == count_slots(3) == 17 for d in digits)
+    assert [DIGIT_BLANK, DIGIT_BLANK, 0] in [d[0:3] for d in digits]          # 0: the hundreds and tens blank
+    assert [DIGIT_BLANK, 1, 0] in [d[0:3] for d in digits]                    # 10: the tens shown
+    assert [1, 0, 0] in [d[0:3] for d in digits] and [1, 0, 9] in [d[0:3] for d in digits]   # 100, 109: inner zeros
+
+
+def test_the_three_digit_counts_follow_the_oracle(tmp_path):
+    assert _run_digits(tmp_path, "digits3", mapname="E1M2"), "three-digit digit_lines parted from stats_digits"
+
+
+@pytest.mark.parametrize("mut", sorted(DIGIT3_MUTANTS))
+def test_control_broken_three_digit_counts_are_caught(tmp_path, mut):
+    assert not _run_digits(tmp_path, "digits3_" + mut.replace(" ", "_"), mut, "E1M2"), (
+        "%s passed: the comparison is vacuous" % mut)
+
+
+def test_control_a_two_digit_layout_on_a_three_digit_map_is_refused():
+    """the oracle's picture takes its layout from the slot count: 13 slots of a three-digit map's counts cannot be
+    built -- count_codes refuses a count past two digits"""
+    w = _world("E1M2")
+    with pytest.raises(AssertionError):
+        stats_digits(len(w.mon_things), len(w.mon_things), 0, 0, 0, 0, 2)
+
+
 # ---- the frame ------------------------------------------------------------------------------------------------------
 FRAME_CASES = 12
 
@@ -159,10 +219,11 @@ def _colours():
     return palette_colours(bytes(b for rgb in wad.playpal(0) for b in rgb))
 
 
-def _frame_text(swap=False) -> tuple:
-    w = _world()
-    cases, totals = _cases()
-    cases = cases[:FRAME_CASES]
+def _frame_text(swap=False, mapname="E1M1") -> tuple:
+    w = _world(mapname)
+    cases, totals = _cases(mapname)
+    cases = cases[:FRAME_CASES] if mapname == "E1M1" else cases[-FRAME_CASES:]
+    nd = _nd(mapname)
     colours = _colours()
     frame = "\n".join(SC.frame_lines(CFG.W, CFG.H, colours, w)) + "\n"
     if swap:                                             # slot 4 (the items' tens) draws a 2 for a 1 and a 1 for a 2
@@ -173,7 +234,7 @@ def _frame_text(swap=False) -> tuple:
         body += _set(case) + ["stl.fcall dg_go, dg_ret", "stl.fcall fr_go, fr_ret"]
     body += ["stl.loop", "dg_go:", _digit_text(w), "    stl.fret dg_ret",
              "fr_go:", frame, "    stl.output_char 0xFF", "    stl.fret fr_ret", *SC.routine_lines(), *_decls(w)]
-    want = [level_done_pixels(CFG.W, CFG.H, colours, len(w.secret_sectors), _want(c, totals)) for c in cases]
+    want = [level_done_pixels(CFG.W, CFG.H, colours, len(w.secret_sectors), _want(c, totals, nd)) for c in cases]
     return "\n".join(body) + "\n", want, cases, totals
 
 
@@ -187,8 +248,8 @@ class _Recording(InMemoryScreen):
         self.frames.append(list(self.pixel_indices))
 
 
-def _run_frames(tmp_path, name, swap=False):
-    text, want, _cases_, _t = _frame_text(swap)
+def _run_frames(tmp_path, name, swap=False, mapname="E1M1"):
+    text, want, _cases_, _t = _frame_text(swap, mapname)
     out, _srcs = _assemble(tmp_path, name, text, extra=("present.fj", "fixed_point.fj"))
     screen = _Recording()
     fj.run(out, io_device=screen, print_time=False, print_termination=False)
@@ -211,3 +272,11 @@ def test_every_level_complete_frame_is_the_oracles_picture(tmp_path):
 def test_a_frame_with_two_digits_swapped_is_caught(tmp_path):
     frames, want = _run_frames(tmp_path, "frames_swap", swap=True)
     assert len(frames) == FRAME_CASES and any(g != w_ for g, w_ in zip(frames, want)), "the swap passed"
+
+
+def test_the_three_digit_frames_follow_the_oracle(tmp_path):
+    """M8 F1.1: E1M2's LEVEL COMPLETE -- the wider layout (three-digit counts) presented through the real screen"""
+    frames, want = _run_frames(tmp_path, "frames3", mapname="E1M2")
+    assert len(frames) == len(want) == FRAME_CASES
+    for k, (got, exp) in enumerate(zip(frames, want)):
+        assert got == exp, "E1M2 frame %d parted" % k

@@ -184,10 +184,16 @@ def vanishable_slots(drawable, baked, vanishable_types):
 
     ⚠ Only BAKED things get a slot. A runtime thing already carries a position that the host can
     move, and giving it a flag would mean an INDEXED read -- the pattern this milestone exists to
-    remove. ⚠ And only VANISHABLE types: a guard on a tree is a test that can never fire."""
+    remove. ⚠ And only VANISHABLE types: a guard on a tree is a test that can never fire.
+
+    M8 L1: ...and every baked thing some skill lacks (E1M2's lamp 2028 at (1272, -80)): it vanishes at NEW GAME on that
+    skill, so its guard CAN fire. E1M1 has none (the emitter's `_unflagged` assert held on it), so its slots are
+    unchanged; every mirror takes its slots from here."""
+    from doomfj import gamedata as gd          # lazy, as single_player
+    bits = [gd.skill_bit(sk) for sk in (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)]
     return {i: k for k, i in enumerate(
         i for i, (t, b) in enumerate(zip(drawable, baked))
-        if b and t.type in vanishable_types)}
+        if b and (t.type in vanishable_types or not all(t.flags & bit for bit in bits)))}
 
 
 def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_types,

@@ -77,7 +77,10 @@ def sight_segments(w) -> List[dict]:
     dyn = set(w.door_order) | set(w.mover_order)
     for (a, b, box), fs, bs in w._sight_doors:
         sides = [s for s in (fs, bs) if s in dyn]
-        assert len(sides) == 1, "a line between two dynamic sectors (%d, %d)" % (fs, bs)
+        # M8 L1: two dynamic sectors moving by ONE cell (the floor-switch sectors: `fswitch`) are read through it -- a
+        # state's heights carry both; two cells stay refused
+        assert len(sides) == 1 or closed_states(w, fs)[0] == closed_states(w, bs)[0], (
+            "a line between two dynamic sectors (%d, %d) on two state cells" % (fs, bs))
         s = sides[0]
         other = bs if s == fs else fs
         cell, n, hts = closed_states(w, s)
@@ -381,7 +384,10 @@ SL_DECLS = (["sl_hit: hex.vec 1", "sl_k12: hex.vec 1", "sl_k34: hex.vec 1",
 
 
 # ---- M7 P8a I: the FAR LOS (docs/gp-final-plan.md 1.2.3, O-B2 TAKEN: the exact 2D LOS at any range) --------------
-FAR_PIECES = 32                      # at most this many pieces: the map must be under FAR_PIECES * PIECE units wide
+# at most this many pieces: the map must be under FAR_PIECES * PIECE units wide. M8 F1.1 (docs/f1-big-map-widths.md 4):
+# 32 -> 128 -- the loop has no piece cap (it halves until a piece is <= PIECE); 128 is `sf_n`'s (2 nibbles, doubled
+# from 1) and covers `_bounds`' 2^13-unit maps (8191 / 127 < 65 -> N <= 128). E1M1 needs 16: no emitted text reads it
+FAR_PIECES = 128
 PIECE = NEAR_UNITS - 1               # 127: a piece's Chebyshev length -- its points stay within 128 of its start
 SF_DECLS = ["sl_jx: hex.vec 4", "sl_jy: hex.vec 4",
             "sf_ax: hex.vec 10", "sf_ay: hex.vec 10", "sf_sx: hex.vec 10", "sf_sy: hex.vec 10", "sf_t: hex.vec 10",
@@ -399,7 +405,8 @@ def far_margin(w) -> int:
     vertex box -- asserted under FAR_PIECES pieces of PIECE units"""
     vs = w.cmap.vertexes
     ext = max(max(v[0] for v in vs) - min(v[0] for v in vs), max(v[1] for v in vs) - min(v[1] for v in vs)) + 1
-    assert ext <= FAR_PIECES * PIECE, (ext, "the map is too wide for the far LOS's 32 pieces")
+    assert ext <= FAR_PIECES * PIECE and ext < 1 << 13, (ext, "the map is too wide for the far LOS's %d pieces"
+                                                         % FAR_PIECES)
     return ext
 
 
@@ -434,14 +441,16 @@ def far_los_lines(w, qx: str = "mt_tqx", qy: str = "mt_tqy") -> List[str]:
 
     THE ARITHMETIC: positions in 2^-24 units, in 10-nibble registers -- acc_0 = P << 24, the step s = ((Q - P) << 8)
     / N (the 16.16 difference scaled to 2^-24; N | 2^8, so exact), halved from N = 1 while either |s| > 127 << 24;
-    Q - P whole, N <= 32: s's low 19 bits are 0, so the walk adds nibbles 4-9 alone (acc_0's low nibbles are 0 too);
+    Q - P whole, N = 2^h: s = d << (24 - h), whose low 16 bits are 0 for N <= 256 (h <= 8), so the walk adds nibbles
+    4-9 alone (acc_0's low nibbles are 0 too);
     the floor of acc is its nibbles 6-9, its cell byte nibbles 8-9; acc_N = Q << 8 exactly. Along an axis the floors
     move one way -- the sign of Q - P (sf_xn / sf_yn) -- so a run's box is [start floor, end floor + 1] or its
     mirror, in 16.16, BIASED for the fight's sl_seg (as the trace box sf_t*0 / sf_t*1 it is clamped to). `_bounds` is
     re-proven for |Q - P| up to the map's width (`far_margin`)."""
     segs = sight_segments(w)
     _bounds(segs, far_margin(w))
-    assert FAR_PIECES <= 1 << 5, "the step's low 19 bits must be 0 for the 6-nibble walk"
+    assert FAR_PIECES <= 1 << 8, "the step's low 16 bits must be 0 for the 6-nibble walk (N <= 256)"
+    assert FAR_PIECES < 1 << 8, "sf_n is 2 nibbles, doubled from 1: N <= 128"
     out = ["sl_far:", "    hex.zero 1, sl_hit"]
     for c, q in (("x", qx), ("y", qy)):              # sl_los' prologue, with Q = the target
         p = "sl_p" + c

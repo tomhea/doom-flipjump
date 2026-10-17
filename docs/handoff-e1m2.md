@@ -109,3 +109,60 @@ E1M2 only -- add tests/fj harnesses on a synthetic sector >= 256.
 **(C) Other counts on E1M2** fit (subsectors 1,104 in 3 nibbles; 227 thing rows <= 254; 129 monsters; 88 sound nodes; doors
 <= 16 states) except: `build_blocked.py --subsectors 682` -> 1104; COUNTITEM things vs `COUNT_NIBBLES` (count them);
 the band index (`BAND_NIBBLES` 5).
+
+## 5. Found while emitting E1M2 (2026-10-16)
+
+- **A seg between TWO movers** (`wall_renderer._seg_mover`: "seg on linedef 1460 touches [241, 240] and door None -- one
+  state nibble per seg"). Each seg's baked constants switch on ONE state cell today (`_seg_cell`, `_door_blocks`'s
+  `generate_state_switch_fj`, up to 16 states). Two adjacent movers need the PAIR: `_seg_secs` as the product of both
+  movers' sector lists and a two-level switch (the first mover's state, then a per-state switch on the second's). The
+  call sites of `_seg_cell` / `_seg_secs` (registration loops, the claim/shut tests, the per-seg dispatch) follow. L1.
+  **DONE (working tree):** `_seg_movers` returns the seg's movers (0..2); `_seg_cell` returns the PAIR of cells for two;
+  `_seg_secs` is the product (the first mover's major, each mover being one sector); `_door_blocks` bakes a block per
+  pair behind `lut_generator.generate_pair_state_switch_fj` -- the door switch on the first cell, whose landings
+  `sim.jump16` on the second (its own aligned table: legal inside the switch, which holds `hex.tables.ret`). The
+  dual gate (one `hex.if0` on one cell) refuses a pair at emit time. tests/fj/test_pair_switch_fj.py: all 15 pairs twice,
+  both cells unchanged, the padding, and a control (landings on the wrong cell) -- 4 passed. One-mover and door segs
+  emit exactly as before.
+- **Done in the working tree (L1 so far):** the sector-id width (`World.sec_nibbles`, `sectorcode.py`, every site of 4 (B);
+  tests/fj/test_sector_width_fj.py 9 passed with 5 controls); the two-byte pid layout of 4 (A) (`Config.SLOT_BIT` /
+  `SLOT_STRIDE`, `sfbhi`, ledge_test's offsets, the reset's `pid_bytes`); `config.MAP_CONFIG` (E1M2: PID_NIBBLES 3,
+  BAND_NIBBLES 5, applied by build_wall_renderer); the reset registry's map prefix. ~~E1M1's emission IDENTICAL on all
+  three configs (emit_baseline vs main 5ad0ba8)~~ -- UNVERIFIED (2026-10-17): the tracked
+  `scratchpad/cr/emit_baseline.json` was last saved at P8a package 0 (fe9c26a), so a `--check` against it differs on
+  every part of every config and proves nothing; the baseline is re-frozen at main d339cfe in a clean worktree and
+  the tree checked against THAT (section 6's result). The hot block on blocked62: 10,430 ops, 5,954 ops of headroom.
+
+## 6. E1M2 EMITS (2026-10-16, asserts ON)
+
+`scripts/emit_check.py E1M2` (docs/level-pipeline.md) iterated the emission to a complete program in 13 runs of ~3-7
+minutes: 384 s, parts entry 26,502 / tables 23,034,155 / main 3,378,735 / segconsts 3,653,877 / walk 20,040,288 /
+state 1,152,756 / banks 47,280,486 chars. Fixed for real on the way (E1M1's emission must stay identical -- checked
+before commit):
+- **one machine, two sectors.** Every floor-switch sector moves by the ONE `fswitch` cell, and E1M2's border each other
+  (240 / 241 / 354 ...). `_msecs` now lowers ALL switch sectors at state 1 (each switch sector's list is the same);
+  a line between two sectors on one cell is read through it in `noisecode.sound_edges`, `monstersight.sight_segments`,
+  `projcode.missile_rows` and `collision`'s mover openings (two CELLS stay refused); the renderer's `_seg_movers`
+  collapses such a pair to one mover (no 2x2 pair switch with two unreachable blocks).
+- **a blocking mover line** (lift line 1143: ML_BLOCKMONSTERS) is a static blocking line in the monsters' cells -- the
+  flag blocks before any opening (P_CheckPosition).
+- **a baked thing some skill lacks** (lamp 2028 at (1272, -80)) gets a `thvis` slot (`things.vanishable_slots`, the
+  one rule every mirror takes; E1M1's 111 slots identical).
+Twelve STAND-INS remain (the size measurement's; each names its feature rung): soundblock-ignored (F3), gives (F4),
+slanted-doors (F2), decor-every-skill, stats-digits, far-los, slot-ids, barrels-one-skill, barrel-chains-static,
+pickup-static-z, attacker-7bit (F1), exit-bar-stale (F7).
+
+## 7. E1M2 FITS 2^27 -- as a plain build (2026-10-17, measured)
+
+`scripts/emit_check.py E1M2 --standin <the twelve> --assemble build/doom_e1m2_size1.fjm` (asserts ON): BUILT in
+5,884 s (assembly 5,320 s); span 89,724,992 words = **66.85% of 2^27** (headroom x1.496), one flat segment, .fjm
+32,645,162 bytes. Peak private memory 19.8 GB, available RAM down to 0.00 GB at the end (rule 1: an E1M2 assembly
+alone fills this 16.8 GB machine). A SIZE measurement: twelve stand-ins, pixels not certified.
+
+NOT comparable with blocked62's 38.83%: that is the BLOCKED build's stored words (52.1M of a 117.6M span, 550,177
+segments). The fast build is the blocked one, and its binding resource is the table pool: blocked62's PREFLIGHT
+"demand 49,798,976 words, capacity 67,108,863 (74.2%)". E1M2 emits 1.53x E1M1's characters (tables 1.73x, walk 1.79x,
+banks 1.42x: 98,566,799 vs 64,484,928), so its pool demand projects (UNVERIFIED) to ~75-85M words -- OVER the 67.1M
+capacity. The next measurement is one blocked E1M2 build's PREFLIGHT (it now derives `--subsectors` and the pid width,
+docs/level-pipeline.md 1); levers if it overflows: `--max-slot-ops`, `--spread`, the pool base, or declining cold
+groups (inline tables cost ops, so the decline list is chosen by heat).

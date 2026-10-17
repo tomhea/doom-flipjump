@@ -293,7 +293,17 @@ def _code_bits(nmon: int) -> int:
     """M7 P8a I: `mon_target` / `bar_src`'s width -- a code 0 none, 1 the player, 2 + slot -- at least 5 bits: the fj
     reads these cells as TWO nibbles (monstercode's slots, mt_load, damagecode's dm_src, barrelcode's bar_src), so a
     map with <= 14 monsters (test_slot_layouts_fj's rooms) keeps the 2-nibble layout; E1M1's 53 slots need 6 either way"""
+    assert nmon + 2 <= 0x100, ("a code 0 none, 1 the player, 2 + slot: %d slots past the fj cells' byte" % nmon)
     return max(5, _index_bits(nmon + 2))
+
+
+def aim_bits(lay: Layout) -> int:
+    """M8 F1.1 (docs/f1-big-map-widths.md 2): `aim_sid`'s width -- 0 none, 1 + slot for the monsters and the barrels,
+    so at most nmon + nbarrel -- at least the 7 bits every frozen digest was recorded with (E1M1: 53 + 22 < 128). The
+    fj reads the cell as TWO nibbles (aimcode), so the value is held to a byte"""
+    n = lay.nmon + lay.nbarrel
+    assert n <= 0xFF, ("aim_sid: %d monster and barrel slots past the fj cell's byte" % n)
+    return max(7, n.bit_length())
 
 
 def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight: bool = False) -> Tuple[Field, ...]:
@@ -353,7 +363,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("p_cards", 1, count=gd.NUMCARDS, group="player", phase="S3b", doc="keys; E1M1: blue card")
     # M7 P4.2a (docs/gp-aim-window.md): THE AIM WINDOW the last picture recorded -- per screen column of the pellet
     # spread (combat.aim_window: 72..88 at 160 wide), 0 or 1 + the nearest shootable monster slot whose box covers it
-    f("aim_sid", 7, count=AIM_COLUMNS, group="player", phase="P4.2", doc="the window: 0 or 1 + monster slot")
+    f("aim_sid", aim_bits(lay), count=AIM_COLUMNS, group="player", phase="P4.2", doc="the window: 0 or 1 + monster slot")
     f("p_mobj_state", 8, group="player", phase="S3b", doc="the player thing's state")
     f("p_mobj_tics", 4, group="player", phase="S3b", doc="its tics; 15 = forever")
     f("p_dead", 1, group="player", phase="S3b", doc="playerstate == PST_DEAD")
@@ -834,6 +844,16 @@ class World(CombatMixin):
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
+
+    @property
+    def sec_nibbles(self) -> int:
+        """M8 L1 (docs/handoff-e1m2.md 4 (B)): the width of a sector id in fj -- the fewest nibbles that hold every
+        sector of the map, and never fewer than 2 (E1M1's 182 sectors: 2; E1M2's 380: 3). DERIVED, never set: every
+        sector cell and dispatch reads it (doomfj.sectorcode)"""
+        nib = 2
+        while 16 ** nib < len(self.secs):
+            nib += 1
+        return nib
 
     # ---------------------------------------------------------------------------- static level
     def _build_level(self) -> None:

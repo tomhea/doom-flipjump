@@ -378,15 +378,15 @@ def test_the_splice_points_are_wired_behind_their_rules():
     assert "KNOCK" not in WR._standalone_input_lines(True, weapon_bar=["BAR"])
     slot = dict(t=0, x=0, y=0, rj="rj0", see_idx=1, see_tics=1)
     w = W.World(skill=gd.SK_HARD, monster_tics=1)
-    off = MC.p32a_slot(3, schema=w.schema, **slot)
+    off = MC.p32a_slot(3, schema=w.schema, nib=w.sec_nibbles, **slot)
     from doomfj import knockcode as KC
-    filled = MC.p32a_slot(3, schema=w.schema, knock=True, **slot)          # package K's splice: three lines
+    filled = MC.p32a_slot(3, schema=w.schema, nib=w.sec_nibbles, knock=True, **slot)          # package K's splice: three lines
     k = filled.index(KC.monster_slot_lines(3)[0])
     assert filled[k:k + 3] == KC.monster_slot_lines(3) and filled[:k] + filled[k + 3:] == off
     orig = KC.monster_slot_lines
     try:
         KC.monster_slot_lines = lambda m: ["    KNOCK %d" % m]
-        on = MC.p32a_slot(3, schema=w.schema, knock=True, **slot)
+        on = MC.p32a_slot(3, schema=w.schema, nib=w.sec_nibbles, knock=True, **slot)
     finally:
         KC.monster_slot_lines = orig
     k = on.index("    KNOCK 3")

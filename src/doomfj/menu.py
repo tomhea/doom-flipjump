@@ -506,11 +506,21 @@ DIGIT_BLANK = 10                         # a slot's "no digit" (a leading zero):
 TIME_CAP = 100 * 60 - 1                  # 99:59 -- the most the four time slots show
 
 
-def level_done_rows(nsecret: int) -> list:
+def level_done_rows(nsecret: int, count_digits: int = 2) -> list:
     """the stats' rows, (label, value template): KILLS and ITEMS "found / total", SECRETS "found / total" (one slot:
-    a map has at most 9), TIME "mm:ss" """
+    a map has at most 9), TIME "mm:ss". M8 F1.1: `count_digits` slots per count -- 2, or 3 on a map with more than
+    99 monsters or items (statcode.count_digits, the one rule)"""
     assert 0 <= nsecret <= 9, "the secrets found are ONE digit slot: the map has %d secret sectors" % nsecret
-    return [("KILLS", "DD / DD"), ("ITEMS", "DD / DD"), ("SECRETS", "_D / _%d" % nsecret), ("TIME", "DD:DD")]
+    assert count_digits in (2, 3), count_digits
+    d = "D" * count_digits
+    return [("KILLS", "%s / %s" % (d, d)), ("ITEMS", "%s / %s" % (d, d)), ("SECRETS", "_D / _%d" % nsecret),
+            ("TIME", "DD:DD")]
+
+
+def count_slots(count_digits: int) -> int:
+    """M8 F1.1: the digit slots of LEVEL COMPLETE -- kills, total kills, items, total items (`count_digits` each), the
+    secrets (1) and the time (4): 13 at 2 digits, 17 at 3"""
+    return 4 * count_digits + 5
 
 
 def _template_cells(template: str, x0: int) -> list:
@@ -529,15 +539,17 @@ def _template_width(template: str) -> int:
     return x + (GLYPH_W if ch in "D_" else glyph_width(ch))
 
 
-def level_done_layout(width, height, nsecret: int) -> tuple:
+def level_done_layout(width, height, nsecret: int, count_digits: int = 2) -> tuple:
     """-> (lines, selected, rows, slots): `_bitmap`'s lines -- the title, the prompt, and blank lines where the stats
     go -- and its highlighted line (the prompt); each stat row as (label x, y, label, [(x, fixed glyph)]); and the
     digit slots' top-left (x, y) in `stats_digits`' order. The rows are `_bitmap`'s own line positions; the labels
     share a left edge, the values another (the block centred)"""
-    rows = level_done_rows(nsecret)
+    rows = level_done_rows(nsecret, count_digits)
     lines = [LEVEL_DONE_TITLE, ""] + [""] * len(rows) + ["", LEVEL_DONE_PROMPT]
     label_w = max(text_width(label) for label, _t in rows)
     value_w = max(_template_width(t) for _l, t in rows)
+    # M8 F1.1: the block must fit -- the max(0, ...) below would clamp a wider one silently, off-centre
+    assert label_w + STAT_LABEL_GAP + value_w <= width, ("LEVEL COMPLETE's stats do not fit", width, count_digits)
     x_label = max(0, (width - (label_w + STAT_LABEL_GAP + value_w)) // 2)
     x_value = x_label + label_w + STAT_LABEL_GAP
     out_rows, slots = [], []
@@ -555,22 +567,36 @@ def _two_digits(v: int, lead_blank: bool = True) -> list:
     return [DIGIT_BLANK if lead_blank and not tens else tens, ones]
 
 
-def stats_digits(kills: int, total_kills: int, items: int, total_items: int, secrets: int, seconds: int) -> list:
+def count_codes(v: int, count_digits: int = 2) -> list:
+    """M8 F1.1: a count's slot codes, most significant first, every leading zero a DIGIT_BLANK (the ones always shown)
+    -- `_two_digits` at 2; ONE rule for both mirrors (statcode bakes a skill's totals through it)"""
+    assert 0 <= v < 10 ** count_digits, (v, count_digits)
+    ds = [int(c) for c in str(v).rjust(count_digits, "0")]
+    k = 0
+    while k < count_digits - 1 and ds[k] == 0:
+        ds[k] = DIGIT_BLANK
+        k += 1
+    return ds
+
+
+def stats_digits(kills: int, total_kills: int, items: int, total_items: int, secrets: int, seconds: int,
+                 count_digits: int = 2) -> list:
     """the digit slots' codes (0..9, or DIGIT_BLANK for a leading zero) for these stats, in `level_done_layout`'s slot
     order: kills / total, items / total, secrets, then the time as mm:ss -- the minutes without a leading zero, the
-    seconds with one, both capped at 99:59 (TIME_CAP). What doomfj.statcode's fj computes at run time"""
+    seconds with one, both capped at 99:59 (TIME_CAP). What doomfj.statcode's fj computes at run time. M8 F1.1: the
+    four counts in `count_digits` slots each (statcode.count_digits)"""
     assert 0 <= secrets <= 9, secrets
     mm, ss = divmod(min(seconds, TIME_CAP), 60)
-    return (_two_digits(kills) + _two_digits(total_kills) + _two_digits(items) + _two_digits(total_items)
-            + [secrets] + _two_digits(mm) + _two_digits(ss, lead_blank=False))
+    return (count_codes(kills, count_digits) + count_codes(total_kills, count_digits) + count_codes(items, count_digits)
+            + count_codes(total_items, count_digits) + [secrets] + _two_digits(mm) + _two_digits(ss, lead_blank=False))
 
 
-def _level_done_bitmap(width, height, colours, nsecret: int, digits=None):
+def _level_done_bitmap(width, height, colours, nsecret: int, digits=None, count_digits: int = 2):
     """LEVEL COMPLETE: `_bitmap`'s title, prompt and credit, the labels in the text colour, the values -- their fixed
     glyphs and, with `digits`, each slot's digit -- in the highlight colour. `digits` None: the slots left empty (the
     program's baked frame)"""
     _background, text, highlight, _credit = colours
-    lines, selected, rows, slots = level_done_layout(width, height, nsecret)
+    lines, selected, rows, slots = level_done_layout(width, height, nsecret, count_digits)
     out = _bitmap(width, height, lines, selected, colours)
     for x_label, y, label, glyphs in rows:
         _draw(out, width, height, label, x_label, y, text)
@@ -585,13 +611,15 @@ def _level_done_bitmap(width, height, colours, nsecret: int, digits=None):
 
 
 def level_done_pixels(width, height, colours, nsecret: int, digits) -> list:
-    """What the ORACLE expects on LEVEL COMPLETE, the slots showing `digits` (`stats_digits`)"""
-    return _level_done_bitmap(width, height, colours, nsecret, digits)
+    """What the ORACLE expects on LEVEL COMPLETE, the slots showing `digits` (`stats_digits`) -- M8 F1.1: their count
+    names the layout (count_slots: 13 two-digit counts, 17 three)"""
+    nd = 2 if digits is None else {count_slots(2): 2, count_slots(3): 3}[len(digits)]
+    return _level_done_bitmap(width, height, colours, nsecret, digits, nd)
 
 
-def level_done_stream(width, height, colours, nsecret: int) -> bytes:
+def level_done_stream(width, height, colours, nsecret: int, count_digits: int = 2) -> bytes:
     """the program's baked LEVEL COMPLETE frame: everything but the digits (its slots empty), ending in END"""
-    return _encode(_level_done_bitmap(width, height, colours, nsecret), width, height)
+    return _encode(_level_done_bitmap(width, height, colours, nsecret, None, count_digits), width, height)
 
 
 def level_done_fj(width, height, colours, nsecret: int, label: str = "menu_level_done",
@@ -602,7 +630,8 @@ def level_done_fj(width, height, colours, nsecret: int, label: str = "menu_level
                     "P10: the baked LEVEL COMPLETE frame (no digits)")
 
 
-def level_done_digit_records(width, height, colours, nsecret: int, slot: int, digit: int) -> bytes:
+def level_done_digit_records(width, height, colours, nsecret: int, slot: int, digit: int,
+                             count_digits: int = 2) -> bytes:
     """slot `slot` showing `digit`, as column records drawn AFTER the frame (no frame END): per glyph column with ink,
     [x] then [KEEP][y][y2][ink] per vertical run of ink, then the column's END -- KEEP over the gaps, so the frame's
     background shows between the runs. A blank digit is no records at all"""
@@ -611,7 +640,7 @@ def level_done_digit_records(width, height, colours, nsecret: int, slot: int, di
     if digit == DIGIT_BLANK:
         return b""
     assert 0 <= digit <= 9, digit
-    _lines, _sel, _rows, slots = level_done_layout(width, height, nsecret)
+    _lines, _sel, _rows, slots = level_done_layout(width, height, nsecret, count_digits)
     x0, y0 = slots[slot]
     glyph = _GLYPHS[str(digit)].split("|")
     out = bytearray()

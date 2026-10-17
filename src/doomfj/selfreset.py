@@ -106,7 +106,7 @@ def pointer_read_words(bits, words_sorted) -> set:
     return out
 
 
-def byte_arrays(bits, words_sorted, view_w, nss):
+def byte_arrays(bits, words_sorted, view_w, nss, pid_bytes: int = 1):
     """Reachable cell count per write_byte array, derived and cross-checked two ways.
 
     `extent // 2` is the DECLARED cell count (2 words per cell); dividing by the declared ratio
@@ -114,7 +114,8 @@ def byte_arrays(bits, words_sorted, view_w, nss):
     VIEW_W or to the map that this file does not know about fails the build instead of silently
     nibble-clearing byte cells.
     """
-    expect = {"sshead": nss, "pclm": view_w, "sfflag": view_w}
+    # M8 L1: `pclm` holds a column's pid in PID_BYTES bytes (two on E1M2)
+    expect = {"sshead": nss, "pclm": view_w * pid_bytes, "sfflag": view_w}
     out = []
     for name in BYTE_ARRAY_NAMES:
         assert name in bits, "self-reset: byte array %r is not in the label table" % name
@@ -639,7 +640,7 @@ def _nibbles(value: str, cells: int):
     return [(iv >> (4 * k)) & 15 for k in range(cells)]
 
 
-def registered_reset_names(restore_set_path, cfg, standalone: bool) -> set:
+def registered_reset_names(restore_set_path, cfg, standalone: bool, mapname: str = "E1M1") -> set:
     """THE REGISTRY the one-pass reset sets: the tier's restore-set NAMES (no offsets: a label's extent is its
     own declaration) plus every scratch global the emitter declares -- `collision.CHECK_SCRATCH_DECLS`,
     `wall_renderer.hoisted_scratch_decls(cfg)` and, standalone, `STANDALONE_SCRATCH_DECLS` -- which is what
@@ -648,7 +649,10 @@ def registered_reset_names(restore_set_path, cfg, standalone: bool) -> set:
     from doomfj.collision import CHECK_SCRATCH_DECLS
     from doomfj.wall_renderer import STANDALONE_SCRATCH_DECLS, hoisted_scratch_decls
     doc = json.load(gzip.open(restore_set_path, "rt", encoding="utf-8"))
-    names = {e[0] for e in doc["entries"]}
+    # M8 L1: the BSP walk's labels carry the map's prefix (wall_renderer._pfx); the restore sets were recorded on E1M1,
+    # so their one map-named entry (`e1m1_bspcode_side`) is that map's label on any other map
+    pfx = mapname.lower().replace("-", "_") + "_"
+    names = {(pfx + e[0][len("e1m1_"):]) if e[0].startswith("e1m1_") else e[0] for e in doc["entries"]}
     decls = list(CHECK_SCRATCH_DECLS) + list(hoisted_scratch_decls(cfg))
     if standalone:
         decls += list(STANDALONE_SCRATCH_DECLS)
@@ -656,7 +660,7 @@ def registered_reset_names(restore_set_path, cfg, standalone: bool) -> set:
     return names | {decl_words(d)[0] for d in decls}
 
 
-def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1", persist=()):
+def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1", persist=(), pid_bytes: int = 1):
     """THE ONE-PASS RESET: write <map>_07_reset.fj by LABEL, declare the registered cells ZERO, route the
     boot through the reset, and patch the frame tail into the loop -- before the program's ONE assembly.
 
@@ -686,7 +690,7 @@ def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1
     missing = sorted(set(names) - set(decls))
     assert not missing, ("one-pass reset: %d registered labels have no declaration in the emitted program, e.g. "
                          "%s -- a name the program lost is a refusal, never a skip" % (len(missing), missing[:5]))
-    expect_bytes = {"sshead": nss, "pclm": view_w, "sfflag": view_w}
+    expect_bytes = {"sshead": nss, "pclm": view_w * pid_bytes, "sfflag": view_w}     # M8 L1: pclm's PID_BYTES
     texts = {f: f.read_text(encoding="utf-8").split("\n") for f in files}
     n_lines = {f: len(t) for f, t in texts.items()}
     body, byte_lines, plan, n_nib, n_byte = [], [], [], 0, 0

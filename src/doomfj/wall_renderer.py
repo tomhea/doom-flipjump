@@ -73,7 +73,7 @@ from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list b
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
                           pass_state, use_boxes_xy)
-from doomfj.lut_generator import (generate_bands_walk_fj, generate_state_switch_fj,
+from doomfj.lut_generator import (generate_bands_walk_fj, generate_state_switch_fj, generate_pair_state_switch_fj,
                                   generate_w1r_walls_fj)
 from doomfj.tables import (sine_table, tantoangle_table, slopediv_recip8_table,
                            slopediv_recip_table, viewangletox_table, xtoviewangle_table)
@@ -1077,7 +1077,8 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
     P9: the main menu on EXIT too; menu.MENU_HALTED (the program halted on EXIT) has NO picture -- it is refused.
     P10: `live` (the program's `g_live`) picks the main menu's variant -- RESUME over NEW GAME while a game is in
     progress; MAIN_RESUME_SCR exists only then (refused otherwise). LEVEL COMPLETE's `stats` is (nsecret, the digit
-    slots: menu.stats_digits(*statcode.stats_of(world))) -- None, the frame a menu without a World bakes (its slots
+    slots: menu.stats_digits(*statcode.stats_of(world), statcode.count_digits(world))) -- None, the frame a menu
+    without a World bakes (its slots
     empty, `_menu_lines(stats=None)`)."""
     from doomfj.menu import MENU_HALTED, help_pixels, level_done_pixels, pixels
     if scr == MENU_HALTED:
@@ -1610,9 +1611,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     stack_flag = 1                              # V5: stacked boundary pieces + per-boundary plane regions
     # P10 G2: a column's BASE pid lives in `sfbase` at a constant CELL offset from its sfflag byte
     # (frame.ts_base_store / lines_base_split), which holds only while a pid is one byte
-    assert cfg.PID_BYTES == 1, (
-        "the V5 column bases (sfbase) assume a one-byte pid; PID_NIBBLES=%d needs a strided sfbase"
-        % cfg.PID_NIBBLES)
+    # M8 L1: a two-byte pid keeps sfbase's LOW bytes where they were and its HIGH bytes in `sfbhi`, byte-planar, right after
+    # sprflag (always 3*VIEW_W cells past the low byte: frame.ts_base_store / lines_base_split's rep(PID_BYTES-1))
+    assert cfg.PID_BYTES <= 2, ("a pid is at most two bytes (the rep(PID_BYTES-1) idiom, sfbhi)", cfg.PID_NIBBLES)
     # V5 slot layout: 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 -- all four
     # fit the EXISTING 16-byte stride, so the whole-nibble shift stays.
     asset_wad = asset_wad or map_wad
@@ -1694,8 +1695,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _switch = switch_sectors(secs, lds, sds) if _movers_on else {}
     _msecs = {si: [apply_sector_heights(secs, {si: (h, secs[si].ceil_h)}) for h in st]
               for si, st in _lift_st.items()}
-    _msecs.update({si: [secs, apply_sector_heights(secs, {si: (low, secs[si].ceil_h)})]
-                   for si, (low, _high) in _switch.items()})
+    # M8 L1: every switch sector moves by the ONE `fswitch` cell, so its state 1 is ALL of them lowered (E1M2's
+    # switch sectors border each other: a line between two must see both down) -- the same list for each
+    _sw_low = apply_sector_heights(secs, {si: (low, secs[si].ceil_h) for si, (low, _high) in _switch.items()})
+    _msecs.update({si: [secs, _sw_low] for si in _switch})
     _mcell = {si: f"lstate + {k}*dw" for si, k in _lift_slot.items()}
     _mcell.update({si: "fswitch" for si in _switch})
     if _switch:
@@ -1747,22 +1750,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             return f_
         return b_ if (b_ is not None and b_ in _dst_tbl) else None
 
-    def _seg_mover(seg):
-        """M7 P2b: the mover sector (lift or switch pillar) this seg's constants depend on, or None
-        -- `_seg_door`'s twin. No seg has a door or a second mover on its other side (asserted: the
-        per-seg switch is one nibble)."""
+    def _seg_movers(seg):
+        """M8 L1: the mover sectors (lifts, switch pillars) this seg's constants depend on, sorted -- none, one, or
+        (E1M2: e.g. linedef 1460 between movers 240 and 241) TWO. A door and a mover on one seg is refused."""
         if not _msecs:
-            return None
+            return ()
         ld_ = lds[seg.linedef]
         f_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
         b_ = sds[ld_.back if seg.side == 0 else ld_.front].sector if ld_.back != -1 else None
-        hit = [x for x in (f_, b_) if x is not None and x in _msecs]
-        if not hit:
-            return None
-        assert len(set(hit)) == 1 and _seg_door(seg) is None, (
-            f"{mapname}: seg on linedef {seg.linedef} touches {hit} and door "
-            f"{_seg_door(seg)} -- one state nibble per seg")
-        return hit[0]
+        hit = tuple(sorted({x for x in (f_, b_) if x is not None and x in _msecs}))
+        assert not hit or _seg_door(seg) is None, (
+            f"{mapname}: seg on linedef {seg.linedef} touches movers {hit} and door {_seg_door(seg)}")
+        if len(hit) == 2 and _mcell[hit[0]] == _mcell[hit[1]] and _msecs[hit[0]] == _msecs[hit[1]]:
+            return hit[:1]          # one machine (the floor-switch sectors: `fswitch`): its states carry both sectors
+        return hit
 
     def _leaf_mover(s_):
         """M7 P2b: the mover sector subsector `s_` lies in (its first seg's front sector), or None"""
@@ -1786,12 +1787,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
     def _seg_cell(seg):
         """the state cell a dynamic seg's per-state blocks switch on: its door's `dstate` slot or
-        (M7 P2b) its mover's cell; None for a static seg"""
+        (M7 P2b) its mover's cell; None for a static seg. M8 L1: a seg between two movers switches on BOTH: the pair of
+        their cells (first mover, second mover)."""
         d_ = _seg_door(seg)
         if d_ is not None:
             return f"dstate + {_dslot[d_]}*dw"
-        m_ = _seg_mover(seg)
-        return None if m_ is None else _mcell[m_]
+        ms_ = _seg_movers(seg)
+        if len(ms_) == 2:
+            return (_mcell[ms_[0]], _mcell[ms_[1]])
+        return _mcell[ms_[0]] if ms_ else None
 
     def _seg_secs(seg):
         """The sector lists this seg's constants must be baked against: one per state of its door
@@ -1800,8 +1804,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         d_ = _seg_door(seg)
         if d_ is not None:
             return _dsecs[:len(_dst_tbl[d_])]
-        m_ = _seg_mover(seg)
-        return [secs] if m_ is None else _msecs[m_]
+        ms_ = _seg_movers(seg)
+        if len(ms_) == 2:
+            # M8 L1: every PAIR of states, the first mover's major: its state's sector list with the second mover's
+            # sector at that one's state (each mover is one sector; the lists differ from the map only there)
+            a_, b_ = ms_
+            out_ = []
+            for sa in _msecs[a_]:
+                for sb in _msecs[b_]:
+                    sv = list(sa)
+                    sv[b_] = sb[b_]
+                    out_.append(sv)
+            return out_
+        return [secs] if not ms_ else _msecs[ms_[0]]
 
     def _door_blocks(si, seg, label, build_fields):
         """(block lines, call lines) -- the constant block, or one per state behind a switch.
@@ -1814,6 +1829,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         variants = _seg_secs(seg)
         if len(variants) == 1:
             return _seg_xorby_block(label, build_fields(secs)), [f"    stl.fcall {label}, xb_ret"]
+        cell = _seg_cell(seg)
+        if isinstance(cell, tuple):
+            # M8 L1: two movers -- a block per PAIR of states behind a switch on both cells (the first mover's
+            # state switch, whose landings sim.jump16 on the second's)
+            na_, nb_ = len(_msecs[_seg_movers(seg)[0]]), len(_msecs[_seg_movers(seg)[1]])
+            assert len(variants) == na_ * nb_
+            blk = []
+            for i in range(na_):
+                for j in range(nb_):
+                    blk += _seg_xorby_block(f"{label}_st{i}_{j}", build_fields(variants[i * nb_ + j]),
+                                            ret=f"dsw_{label}_x")
+            blk += generate_pair_state_switch_fj(
+                f"dsw_{label}", cell[1], [[f"{label}_st{i}_{j}" for j in range(nb_)] for i in range(na_)]).splitlines()
+            return blk, [f"    dsw_{label}_go {cell[0]}"]
         blk = []
         for k, sv in enumerate(variants):
             blk += _seg_xorby_block(f"{label}_st{k}", build_fields(sv), ret=f"dsw_{label}_x")
@@ -2472,7 +2501,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             return min(f_.ceil_h, b_.ceil_h) <= max(f_.floor_h, b_.floor_h)
 
         st_ = [_shut(sv) for sv in _seg_secs(seg)]
-        return bool(st_) and st_[0] and not all(st_)
+        dual_ = bool(st_) and st_[0] and not all(st_)
+        # M8 L1: the dual gate is ONE `hex.if0` on one state cell; a two-mover seg's pair of cells has none
+        assert not (dual_ and isinstance(_seg_cell(seg), tuple)), (
+            f"{mapname}: seg on linedef {seg.linedef} between two movers is shut only in some states")
+        return dual_
 
     def _seg_as_solid(seg) -> bool:
         """Does this seg go down the one-sided (wall-emitting) path?"""
@@ -3221,7 +3254,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # moves (kb_pmove, kb_mmove, the slot stubs kbs<m>) -- leaves, jumping over themselves
                 + (_knockcode.leaf_lines(
                     _knockcode.slots_of(_p31["world"], [t_ for t_, _r in _chase["slots_rt"]]),
-                    player_root=_croot, mon_root=_mroot,
+                    player_root=_croot, mon_root=_mroot, nib=_p31["world"].sec_nibbles,
                     lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:]) for t_ in _chase["lift_walk"]],
                     after_accept=_after_accept("kbwo", "kblw"), solid=_chase["solid"]) if _KNOCK else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
@@ -3412,14 +3445,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     # column's sfflag byte from its sprflag pointer, 3*VIEW_W cells back
                     f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))
                     + f"{NLJ}sfbase:{NLJ}" + NLJ.join(";0 * dw" for _ in range(2 * cfg.VIEW_W))
-                    + f"{NLJ}sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))]
+                    + f"{NLJ}sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))
+                    # M8 L1: a two-byte pid's HIGH base bytes ([VIEW_W ceilings][VIEW_W floors]), 3*VIEW_W cells past
+                    # sfbase's low bytes -- only when a pid needs them (E1M1 declares nothing new)
+                    + (f"{NLJ}sfbhi:{NLJ}" + NLJ.join(";0 * dw" for _ in range(2 * cfg.VIEW_W))
+                       if cfg.PID_BYTES == 2 else "")]
                    # T-HOTSLOTS (2026-09-03): sfslot/spslot were the LAST hot pointer-walked
                    # arrays still in the ~20M-word tail -- every one of their ~1,530 derefs a
                    # frame paid wflip chains on a dense 31-bit address, the exact cost this
                    # block exists to avoid (see the R20 note above; the same move measured
                    # 78.54M -> 76.39M once). Same decls, same labels, hot addresses.
                    + [f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
-                                        for _ in range(cfg.VIEW_W * 16 ** cfg.SLOT_SHIFT))]
+                                        for _ in range(cfg.VIEW_W * cfg.SLOT_STRIDE))]
                    + ([f"spslot:{NLJ}" + NLJ.join(";0 * dw"
                                         for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
                        # M7 P1.4: the per-THING fragment constants, [y0 + 32768 lo][hi][light]
@@ -3603,7 +3640,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 _assert_gate_scales_fit((DEG_STACK_SCALE, DEG_LIP_SCALE)),
                 f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR}, {atan_dbl}, {slope_dbl}, "
                 f"{table_dbl}, 1, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
-                f"{cfg.VIEW_H - 1}, {proj}, {16 ** cfg.SLOT_SHIFT}, {stack_flag}, {deg_flag}, "
+                f"{cfg.VIEW_H - 1}, {proj}, {cfg.SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
                 f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"]),
              # CR-2026-08: project_thing's istep/downscale is a compile-time SHIFT by
              # log2(ds) (`rep(#ds - 1, ...)`), exact only for power-of-two downscales.

@@ -536,10 +536,12 @@ def mtry_lines(mon_root: str, lift_trigs=()) -> List[str]:
     return out
 
 
-def move_lines(slots: Sequence[tuple], *, solid: str = "mon_solid") -> List[str]:
+def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid") -> List[str]:
     """`kb_pmove` (the player's: stl.fcall kb_pmove, kb_pret), `kb_mmove` (a monster's, on the context) and the slot
     stubs `kbs<m>` (stl.fcall kbs<m>, kbs_ret: the slot's momentum not 0 -> its cells into the context, its own
-    `solid` flag cleared so mm_things skips it, kb_mmove, the cells back). `slots[m]` = (runtime thing, radius, mass)"""
+    `solid` flag cleared so mm_things skips it, kb_mmove, the cells back). `slots[m]` = (runtime thing, radius, mass);
+    `nib`: a sector id's width (World.sec_nibbles: `msec`, `mm_sec`)"""
+    from doomfj.sectorcode import msec_cell
     from doomfj.reference_model import PLAYER_HEIGHT
     h, hd = PLAYER_HEIGHT >> 16, PLAYER_HEIGHT >> 18
     out = ["kb_pmove:",
@@ -578,7 +580,7 @@ def move_lines(slots: Sequence[tuple], *, solid: str = "mon_solid") -> List[str]
                 "    hex.set 2, mm_r, %d" % r, "    hex.set 1, mm_r30, %d" % int(r == 30),
                 "    hex.set w/4, mm_tw, %d" % rt,
                 "    hex.zero w/4, mm_leafw", "    hex.mov 3, mm_leafw, thss_rt + %d*dw" % (16 * rt),
-                "    hex.mov 2, mm_sec, msec + %d*dw" % (2 * m),
+                "    hex.mov %d, mm_sec, %s" % (nib, msec_cell(m, nib)),
                 "    hex.mov 1, kb_dead, mon_shootable + %d*dw" % m, "    hex.xor_by kb_dead, 1",   # a corpse
                 "    hex.mov 1, kb_sv, %s + %d*dw" % (solid, m), "    hex.zero 1, %s + %d*dw" % (solid, m),
                 "    stl.fcall kb_mmove, kb_mret",
@@ -588,23 +590,23 @@ def move_lines(slots: Sequence[tuple], *, solid: str = "mon_solid") -> List[str]
                 "    hex.mov 4, %s, mm_x" % X, "    hex.mov 4, %s, mm_y" % Y,
                 "    hex.mov 4, mon_floorz + %d*dw, mm_z" % (4 * m),
                 "    hex.mov 3, thss_rt + %d*dw, mm_leafw" % (16 * rt),
-                "    hex.mov 2, msec + %d*dw, mm_sec" % (2 * m),
+                "    hex.mov %d, %s, mm_sec" % (nib, msec_cell(m, nib)),
                 "  kbs%d_o:" % m,
                 "    stl.fret kbs_ret"]
     return out
 
 
-def leaf_lines(slots: Sequence[tuple], *, player_root: str, mon_root: str, lift_trigs=(),
+def leaf_lines(slots: Sequence[tuple], *, player_root: str, mon_root: str, nib: int, lift_trigs=(),
                after_accept: Sequence[str] = (), solid: str = "mon_solid") -> List[str]:
     """every knock leaf, jumping over itself: kb_go (+ kbt<m>, kb_gm, kb_th, kb_pz), kb_cell, kb_xy (+ kb_try),
     kb_ptry, kb_mtry, kb_pmove, kb_mmove, kbs<m>. The program must hold: the cells (`decls(nmon)`), `tables_fj`,
     mrnd, finesine, the point_to_angle tables, ptloc_walk, ms_seed_leaf, the player's and the monsters' cells (their
     roots), monstermove's context and mm_things, pk_go, pb_mon, projcode's pw_link / pw_unlink, lfsec, dm_leaf's window
     (dm_hp, dm_rng, dm_x, dm_y), p_hp / p_dead / rng_pl / wp_rdy, thpos_rt / thss_rt / msec / mon_floorz /
-    mon_shootable / `solid`, lreq"""
+    mon_shootable / `solid`, lreq. `nib`: a sector id's width (World.sec_nibbles: move_lines' msec)"""
     return (["// M7 P8a (doomfj.knockcode, package K): knockback's leaves", ";kq_end"]
             + go_lines(slots) + cell_lines(player_root) + xy_lines() + ptry_lines(after_accept)
-            + mtry_lines(mon_root, lift_trigs) + move_lines(slots, solid=solid) + ["kq_end:"])
+            + mtry_lines(mon_root, lift_trigs) + move_lines(slots, nib=nib, solid=solid) + ["kq_end:"])
 
 
 # ---- the splice points -----------------------------------------------------------------------------------------------

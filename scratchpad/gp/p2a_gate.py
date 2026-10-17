@@ -513,6 +513,113 @@ def _standing(dsim, xy, angle):
     return (x << 16, y << 16, angle)
 
 
+def two_cell_lines(dsim) -> list:
+    """M8 F1.3: [(linedef, lift sector, floor sector, floor group)] -- every two-sided line between a lift and a floor
+    group's sector (movers.MoverPhase's lifts and groups), in linedef order"""
+    mp = dsim.mp
+    lifts = set(mp.order)
+    gof = {si: g for g, grp in enumerate(mp.groups) for si in grp.sectors}
+    out = []
+    for li, ld in enumerate(dsim.lds):
+        if not (0 <= ld.front < len(dsim.sds) and 0 <= ld.back < len(dsim.sds)):
+            continue
+        a, b = dsim.sds[ld.front].sector, dsim.sds[ld.back].sector
+        for sl, sf in ((a, b), (b, a)):
+            if sl in lifts and sf in gof:
+                out.append((li, sl, sf, gof[sf]))
+    return out
+
+
+def two_cell_scenarios(dsim) -> list:
+    """M8 F1.3: per two-cell line, S14a -- the lift's trigger, then a walk toward a point 100 units off the line on the
+    lift's side (the line ahead) while the lift is down and the floor unlowered; S14b -- the floor group's own S1 box
+    (or W1 line), from its point nearest the line, facing it: the floor seen unlowered, lowering and lowered"""
+    import math
+    mp = dsim.mp
+    verts = dsim.mw.vertexes(dsim.mapname)
+    I, F, B, U = {}, {"forward": True}, {"back": True}, {"use": True}
+    out = []
+
+    def unit(dx, dy):
+        n = math.hypot(dx, dy)
+        return dx / n, dy / n
+
+    def standing(x, y, tx, ty):
+        x, y = int(round(x)), int(round(y))
+        return (x << 16, y << 16, bam(tx - x, ty - y)) if _ok(dsim, x << 16, y << 16) else None
+
+    def in_box_nearest(box, tx, ty):
+        x0, y0, x1, y1 = box
+        pts = sorted(((x, y) for x in range(x0 + 2, x1 - 1, 4) for y in range(y0 + 2, y1 - 1, 4)),
+                     key=lambda p: (p[0] - tx) ** 2 + (p[1] - ty) ** 2)
+        return next((p for p in (standing(x, y, tx, ty) for x, y in pts) if p), None)
+
+    for li, sl, sf, g in two_cell_lines(dsim):
+        ld = dsim.lds[li]
+        (ax, ay), (bx, by) = (verts[ld.v1].x, verts[ld.v1].y), (verts[ld.v2].x, verts[ld.v2].y)
+        mx, my = (ax + bx) / 2, (ay + by) / 2
+        nx, ny = unit(by - ay, -(bx - ax))                    # the FRONT side's normal (right of v1 -> v2)
+        if dsim.sds[ld.front].sector != sl:
+            nx, ny = -nx, -ny                                  # toward the lift's side
+        tx, ty = mx + 100 * nx, my + 100 * ny
+        kl, grp = mp.order.index(sl), mp.groups[g]
+        bottom, n = len(mp.stops[sl]) - 1, grp.n
+        look = {"line": li, "lift": sl, "floor": sf, "group": g}
+        # S14a: the lift down, the floor unlowered
+        got = None
+        for trig in (t for t in mp.walk if t[0] == sl):
+            _s, axis, c, lo, hi = trig
+            px, py = ((c, (lo + hi) / 2) if axis == "x" else ((lo + hi) / 2, c))
+            ux, uy = unit(tx - px, ty - py)
+            pose = standing(px + 32 * ux, py + 32 * uy, tx, ty)
+            if pose:
+                steps = max(4, round(math.hypot(tx - px, ty - py) * 0.55 / 16))
+                got = (pose, [B] * 3 + [F] * steps + [I] * 24, "no_wr")
+                break
+        for tag, box in (() if got else mp.use):
+            if tag == dsim.secs[sl].tag:
+                pose = in_box_nearest(box, tx, ty)
+                if pose:
+                    got = (pose, [I, U] + [F] * 4 + [I] * 24, "no_use_lines")
+                    break
+        if got is None:
+            out.append(na("S14a two-cell line %d: lift %d down, floor %d unlowered" % (li, sl, sf),
+                          "no trigger pose for lift %d" % sl))
+        else:
+            out.append({
+                "name": "S14a two-cell line %d (lift %d / floor %d): in view with the lift down, the floor unlowered"
+                        % (li, sl, sf),
+                "pose": got[0], "keys": got[1], "pcard": 0, "controls": [got[2]], "look": dict(look, want="down"),
+                "claim": lambda tr, kl=kl, bottom=bottom, g=g: any(
+                    fr["movers"][0][kl][0] == bottom and fr["movers"][2][g] == 0 for fr in tr)})
+        # S14b: the floor group fired -- seen unlowered, then lowered
+        got = None
+        for gg, box in mp.floor_use:
+            if gg == g:
+                pose = in_box_nearest(box, mx, my)
+                if pose:
+                    got = (pose, [I, U] + [F] * 4 + [I] * (max(grp.sub, 1) * n + 4), "no_use_lines")
+                    break
+        for gg, shape in (() if got else mp.floor_walk):
+            if gg == g and shape[0] != "d":
+                _a, c, lo, hi = shape
+                px, py = ((c, (lo + hi) / 2) if shape[0] == "x" else ((lo + hi) / 2, c))
+                ux, uy = unit(px - mx, py - my)
+                pose = standing(px + 32 * ux, py + 32 * uy, mx, my)
+                if pose:
+                    got = (pose, [F] * 4 + [I] * (max(grp.sub, 1) * n + 4), "no_wr")
+                    break
+        if got is None:
+            out.append(na("S14b two-cell line %d: floor %d lowered" % (li, sf), "no trigger pose for floor group %d" % g))
+        else:
+            out.append({
+                "name": "S14b two-cell line %d (lift %d / floor %d): in view with the floor unlowered, then lowered"
+                        % (li, sl, sf),
+                "pose": got[0], "keys": got[1], "pcard": 0, "controls": [got[2]], "look": dict(look, want="lowered"),
+                "claim": lambda tr, g=g, n=n: tr[0]["movers"][2][g] == 0 and tr[-1]["movers"][2][g] == n - 1})
+    return out
+
+
 def _in_box(dsim, box):
     """a standing pose inside a use box, nearest its centre"""
     x0, y0, x1, y1 = box
@@ -700,6 +807,13 @@ def scenarios(dsim, card) -> list:
             "claim": lambda tr: min(fr["phase"][0][rev][0] for fr in tr[12:]) == p10
             and any(a["phase"][0][rev][1] == D.CLOSING and b["phase"][0][rev][1] == D.OPENING
                     for a, b in zip(tr, tr[1:]))})
+    # M8 F1.3: a TWO-CELL LINE -- a lift on one side, a floor group's sector on the other (E1M2's linedef 1199: lift 47
+    # / floor 206) -- whose seg the renderer draws from the floor's cell (wall_renderer `_seg_dual_cell`: solid while
+    # the floor is at state 0, whatever the lift's state). The picture must SEE it with the floor unlowered and the
+    # lift down, and again with the floor lowered (each scenario's `look`: mirror_world_check.py renders those frames
+    # and proves the line's sector in view). Only a map in the wide floor layout has one (E1M1: none, its list as was)
+    if dsim.mp.wide:
+        out += two_cell_scenarios(dsim)
     # P10: LEVEL COMPLETE holds eight frames (an enter among them ignored), then any key leaves for the boot's menu
     # (no game in progress: esc there is no rule, and the frozen world is never drawn again -- P2a.2's "frozen"
     # control parted on the frozen world's frame, which no play reaches now), and NEW GAME starts the level over

@@ -199,11 +199,13 @@ def p2a_part(args) -> dict:
     order, lift_order = list(dsim.order), list(dsim.mp.order)
     assert order == list(w0.door_order) and lift_order == list(w0.lift_order)
 
-    # ---- the scenario list: (gate, name, pose, keys, pcard, setup, late)
-    runs = []
+    # ---- the scenario list: (gate, name, pose, keys, pcard, setup, late); p2a's two-cell-line `look`s (S14)
+    runs, looks, views, orc = [], {}, {}, None
     for sc in G.scenarios(dsim, card):
         if not sc.get("na"):
             runs.append(("p2a", sc["name"], sc["pose"], sc["keys"], sc["pcard"], None, None))
+            if sc.get("look"):
+                looks[sc["name"]] = sc["look"]
     lists = (("hurt", H.scenario_list(dsim, w0)), ("fight", FG.scenario_list(dsim, w0, card)),
              ("die", DG.scenario_list(dsim, w0, card)))
     skipped = 0
@@ -317,9 +319,54 @@ def p2a_part(args) -> dict:
             bad.append((gate, name, first[0], first[1]))
         if gate == "X":
             x_ok[name] = claims[name](tsnaps)
+        if name in looks:
+            if orc is None:
+                import probe as P
+                orc = P.Oracle()
+            views[name] = (view_check(orc, dsim, looks[name], out),
+                           view_check(orc, dsim, looks[name], out, flip=True))
     M.walkover_segments = orig_ws
     return {"part": "p2a", "map": mapname, "runs": len(runs), "skipped": skipped, "frames": frames,
-            "tele_frames": tele_frames, "bad": bad, "x": x_ok, "seconds": time.time() - t0}
+            "tele_frames": tele_frames, "bad": bad, "x": x_ok, "views": views, "looks": looks,
+            "seconds": time.time() - t0}
+
+
+def view_check(orc, dsim, look: dict, out: list, flip: bool = False) -> dict:
+    """M8 F1.3: does a two-cell-line scenario (p2a S14a / S14b, `look`) SEE the line? On each world frame of the gate's
+    Mirror run whose movers are in the scenario's case, the oracle's picture at the frame's pose against the same
+    picture with the floor sector toggled (its stored floor <-> its group's last stop): a frame whose pixels change
+    sees the line's floor cell. -> {case: frames that see it} -- "down" (the lift at its bottom, the floor group at
+    state 0), "unlowered" (state 0), "lowered" (its last state). `flip` (the control): the view turned 180 degrees."""
+    import probe as P
+    mp, secs = dsim.mp, dsim.secs
+    sl, sf, g = look["lift"], look["floor"], look["group"]
+    grp, kl = mp.groups[g], mp.order.index(sl)
+    bottom, stored, last = len(mp.stops[sl]) - 1, secs[sf].floor_h, grp.floor(sf, grp.n - 1)
+    seen = {"down": 0, "unlowered": 0, "lowered": 0}
+    for fr in out:
+        if fr["drawn"] != "world":
+            continue
+        gs, ls = fr["movers"][2][g], fr["movers"][0][kl][0]
+        cases = [c for c, hit in (("down", ls == bottom and gs == 0), ("unlowered", gs == 0),
+                                  ("lowered", gs == grp.n - 1)) if hit]
+        if not cases:
+            continue
+        x, y, a = fr["pose"]
+        a = (a + (0x80000000 if flip else 0)) & M32
+        h = dict(fr["mheights"])
+        cur = h.get(sf, (stored, secs[sf].ceil_h))[0]
+        alt = dict(h)
+        alt[sf] = (last if cur == stored else stored, secs[sf].ceil_h)
+        ds = tuple(fr["phase"][0][si][0] for si in dsim.order)
+        if P.px_diff(orc.render(x, y, a, ds, movers=h), orc.render(x, y, a, ds, movers=alt)):
+            for c in cases:
+                seen[c] += 1
+    return seen
+
+
+def view_ok(look: dict, seen: dict) -> bool:
+    """S14a must see the line with the lift down and the floor unlowered; S14b unlowered AND lowered"""
+    return seen["down"] > 0 if look["want"] == "down" else (seen["unlowered"] > 0 and seen["lowered"] > 0)
 
 
 def x_scenarios(dsim, w0, R, G, D, gd) -> list:
@@ -750,6 +797,13 @@ def report(res: dict) -> bool:
     if res["part"] == "p2a":
         vac = [n for n, v in res["x"].items() if not v]
         ok &= not vac
+        for name, (seen, flipped) in res.get("views", {}).items():
+            look = res["looks"][name]
+            good, ctl = view_ok(look, seen), not view_ok(look, flipped)
+            ok &= good and ctl
+            print("  VIEW  %s: frames seeing linedef %d %s -- %s; CONTROL (the view turned 180): %s %s" % (
+                name.split()[0], look["line"], seen, "IN VIEW" if good else "NOT IN VIEW, FAIL", flipped,
+                "rejected" if ctl else "NOT rejected, FAIL"))
         extra = ", %d skipped (N/A / awaits), %d X scenarios%s" % (
             res["skipped"], len(res["x"]), (" -- VACUOUS: %s" % vac) if vac else " (each did what it claims)")
     else:

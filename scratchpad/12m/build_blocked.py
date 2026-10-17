@@ -195,7 +195,7 @@ def _report_width_waste(counting):
               % (format(cost, ","), g[:44], format(n, ","), common, wmax), flush=True)
 
 
-def pin_state_veto(labels, view_w, subsectors, pid_bytes=1) -> set:
+def pin_state_veto(labels, view_w, subsectors, pid_bytes=1, ss_ratio=2) -> set:
     """The words `--pin-state-cells` must NOT pin: the BYTE cells (`m1.zerobyte c` jumps THROUGH the
     cell into the pointer read table, so a base there sends it elsewhere) and every cell the program
     reads RAW through a pointer (selfreset.POINTER_READ_CELLS: a pinned word holds base + value,
@@ -204,7 +204,7 @@ def pin_state_veto(labels, view_w, subsectors, pid_bytes=1) -> set:
     bits = {k: int(v) for k, v in labels.items()}
     words_sorted = sorted(v // W for v in bits.values())
     out = set()
-    for name, n in byte_arrays(bits, words_sorted, view_w, subsectors, pid_bytes=pid_bytes):
+    for name, n in byte_arrays(bits, words_sorted, view_w, subsectors, pid_bytes=pid_bytes, ss_ratio=ss_ratio):
         base = bits[name] // W
         for k in range(n):
             out.add(base + 2 * k)
@@ -363,8 +363,9 @@ def main():
                 from doomfj.wad import WadFile
                 nss = len(bake_bsp(WadFile.from_path(a.wad), a.map).subsectors)
                 assert a.subsectors in (None, nss), ("--subsectors %s, but %s has %d" % (a.subsectors, a.map, nss))
-                excluded["words"] = pin_state_veto(labels, a.view_w, nss,
-                                                   pid_bytes=map_cfg(Config(), a.map).PID_BYTES)
+                _mc = map_cfg(Config(), a.map)
+                excluded["words"] = pin_state_veto(labels, a.view_w, nss, pid_bytes=_mc.PID_BYTES,
+                                                   ss_ratio=_mc.SSHEAD_RATIO)
                 print("  pin-exclude: %s words -- the BYTE cells (m1.zerobyte jumps through them) "
                       "and the pointer-read cells (a raw read takes base + value); the other "
                       "nibble state cells ARE pinned" % format(len(excluded["words"]), ","),

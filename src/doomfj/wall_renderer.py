@@ -3433,7 +3433,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # jump guard (the static tables' own `;end` headers only matter on fall-through, which the
     # guard prevents). Measured: 78.54M -> 76.39M ops/frame, frame byte-identical.
     # the lists' DECLARED extents -- twice the reachable cells, the span the M1 restore set carries
-    _ss_cells, _th_cells = 2 * _MT_NSS, 2 * _MT_NT
+    # M8 L1: sshead at cfg.SSHEAD_RATIO cells a leaf (2 on E1M1: the restore set's spans; 1 on E1M2: its hot block
+    # must fit one 16^5 window -- config.Config.SSHEAD_RATIO)
+    _ss_cells, _th_cells = cfg.SSHEAD_RATIO * _MT_NSS, 2 * _MT_NT
     _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw"
                                              for _ in range(cfg.VIEW_W * cfg.PID_BYTES)),
                     # P10 G2: `sfbase` -- a column's ceiling / floor BASE pid ([VIEW_W ceilings][VIEW_W

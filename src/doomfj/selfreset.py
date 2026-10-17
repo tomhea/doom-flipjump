@@ -69,6 +69,12 @@ POINTER_READ_CELLS = ("thpos_rt", "thss_rt", "sshead", "thnext", "thseen", "draw
 _DECLARED_RATIO = {"sshead": 2, "pclm": 1, "sfflag": 1}
 
 
+def declared_ratio(name: str, ss_ratio: int = 2) -> int:
+    """M8 L1: a byte array's declared cells per reachable cell -- sshead's from Config.SSHEAD_RATIO (2 on E1M1, 1 on
+    a map that must keep its hot block in one window), the others fixed"""
+    return ss_ratio if name == "sshead" else _DECLARED_RATIO[name]
+
+
 
 def decl_words(decl):
     """`"name: hex.vec N"` -> (name, words) for a scratch DECLARATION string.
@@ -106,7 +112,7 @@ def pointer_read_words(bits, words_sorted) -> set:
     return out
 
 
-def byte_arrays(bits, words_sorted, view_w, nss, pid_bytes: int = 1):
+def byte_arrays(bits, words_sorted, view_w, nss, pid_bytes: int = 1, ss_ratio: int = 2):
     """Reachable cell count per write_byte array, derived and cross-checked two ways.
 
     `extent // 2` is the DECLARED cell count (2 words per cell); dividing by the declared ratio
@@ -121,7 +127,7 @@ def byte_arrays(bits, words_sorted, view_w, nss, pid_bytes: int = 1):
         assert name in bits, "self-reset: byte array %r is not in the label table" % name
         base = bits[name] // W
         declared_cells = (_extent(words_sorted, base) - base) // 2
-        derived = declared_cells // _DECLARED_RATIO[name]
+        derived = declared_cells // declared_ratio(name, ss_ratio)
         assert derived == expect[name], (
             "self-reset: %s spans %d declared cells -> %d reachable, but the geometry says %d. "
             "The emitter's declaration and cfg/map disagree; a hardcoded count here would "
@@ -276,7 +282,7 @@ def _extent(words_sorted, addr_word):
 
 
 def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, nss,
-                    mapname="e1m1", persist=(), pid_bytes: int = 1):
+                    mapname="e1m1", persist=(), pid_bytes: int = 1, ss_ratio: int = 2):
     """Write <map>_07_reset.fj and patch the main part into a loop.
 
     Returns (part_path, nibble_cells, byte_cells). pristine_get_word(word) reads the FIRST
@@ -323,7 +329,8 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
         wset = set(words)
 
     byte_words, byte_bases, declared_words = set(), [], set()
-    for name, n in byte_arrays(bits, words_sorted, view_w, nss, pid_bytes=pid_bytes):   # M8 L1: a 2-byte pid's pclm
+    for name, n in byte_arrays(bits, words_sorted, view_w, nss, pid_bytes=pid_bytes,   # M8 L1: a 2-byte pid's pclm
+                               ss_ratio=ss_ratio):
         if name in persist:
             # M7 P1.3: a PERSISTED byte array (the game tier's `sshead`, build.THING_PERSIST) is
             # program state: its words left the set above, and the reset must not zero it. (The
@@ -660,7 +667,8 @@ def registered_reset_names(restore_set_path, cfg, standalone: bool, mapname: str
     return names | {decl_words(d)[0] for d in decls}
 
 
-def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1", persist=(), pid_bytes: int = 1):
+def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1", persist=(), pid_bytes: int = 1,
+                             ss_ratio: int = 2):
     """THE ONE-PASS RESET: write <map>_07_reset.fj by LABEL, declare the registered cells ZERO, route the
     boot through the reset, and patch the frame tail into the loop -- before the program's ONE assembly.
 
@@ -699,9 +707,9 @@ def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1
         f = Path(d["file"])
         if name in BYTE_ARRAY_NAMES:
             n = expect_bytes[name]
-            assert d["cells"] == n * _DECLARED_RATIO[name], (
+            assert d["cells"] == n * declared_ratio(name, ss_ratio), (
                 "one-pass reset: %s declares %d cells, the geometry says %d reachable x %d"
-                % (name, d["cells"], n, _DECLARED_RATIO[name]))
+                % (name, d["cells"], n, declared_ratio(name, ss_ratio)))
             vals = d["values"] if d["kind"] == "cells" else [d["values"][0]]
             assert all(_int_expr(v if isinstance(v, str) else v[1]) == 0 for v in vals), (
                 "one-pass reset: byte array %s has a non-zero initial cell" % name)

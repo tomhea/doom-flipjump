@@ -128,6 +128,12 @@ helper `things.mover_leaves(w)` every caller uses. E1M1: a host test that its ma
 thing stands on a lift today -- a class F fix with its own record). Proof: `test_pickup_fj` on E1M2's card before
 and after the switch; control: the static z read must part after the switch; the render half under deg_gate in F1.4.
 One day. Retires `pickup-static-z`.
+**DONE (M8 F1.3, 2026-10-17, branch m8-e1m2-movers):** `World.pickup_on_mover` / `pickup_sector` (the touch at
+`secs_c`), `lootcode.pk_mbox` (+ `mover_pickup_leaves`, `mbox_decls`), `things.mover_leaves` + `mover_mask_kw` (passed
+by the oracle, the emitter, MonsterViews, pickup_slots and the survey only where a thing stands in a mover leaf: E1M1
+none, its mask asserted unchanged); seven E1M2 items ride movers, six of them become runtime. `pickup-static-z` is
+retired from scripts/emit_check.py. Proof: tests/host/test_floor_movers.py, test_mover_things.py,
+tests/fj/test_pickup_mover_fj.py.
 
 ## 10. Floor switches per tag
 
@@ -139,6 +145,14 @@ E1M2's 10 switch-switch lines join DIFFERENT groups they become two-cell lines, 
 collision (the renderer's pair switch handles them) -> sub-item 10b (a two-cell shut set over the 2x2 states, two
 nested `hex.if_flags`), +0.5..1 day. Proof: `test_movers_fj` two groups; sight/noise on E1M2 in all four
 combinations; controls: every `switch_cell` -> "fswitch"; `fs_hit<g>` wired to group 0. One day (+10b).
+
+**DONE (M8 F1.3):** one group per TAG of every one-shot floor special (`movers.floor_groups`: 19 / 23 / 38 / 58 / 71
+/ 102), the `fswitch` vector holding each group's state then its step timer in the WIDE layout (E1M1: one instant
+group, `fswitch: hex.vec 1` and the 1-bit `f_switch`, unchanged); every reader takes a mover's cell from
+`movers.mover_table`. MEASURED: E1M2's switch-switch lines all join ONE group (tag 13) -- no 10b there; the only
+two-cell line is 1199 (blazing lift 47 / S1 floor 206), read through the cell its opening depends on
+(`monstersight.line_states`, `collision.mover_line_states` with a split ob / lf dispatch). Proof:
+tests/fj/test_floor_movers_fj.py, test_two_cell_line_fj.py; tests/host/test_floor_movers.py.
 
 ## 11. A walk-over tag opening two doors
 

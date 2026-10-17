@@ -100,8 +100,10 @@ def _program(w, recs, mut=None):
         leaf, n = re.subn(r"    stl\.fcall ms_seed_leaf, ms_seed_ret\n", "", leaf)
         assert n == 1
     elif mut == "y_from_x":
-        leaf, n = re.subn(r"(pk_mbox:\n(?:.*\n){3})    hex\.mov 4, pk_ty \+ 4\*dw, pk_r \+ 4\*dw",
-                          r"\1    hex.mov 4, pk_ty + 4*dw, pk_r", leaf)
+        i0 = leaf.index("pk_mbox:")              # pk_mbox's own y read (pk_box's stays right)
+        tail, n = re.subn(r"hex\.mov 4, pk_ty \+ 4\*dw, pk_r \+ 4\*dw", "hex.mov 4, pk_ty + 4*dw, pk_r",
+                          leaf[i0:], count=1)
+        leaf = leaf[:i0] + tail
         assert n == 1
     kw = MM.world_cell_inputs(w, DOOR_QUANT)
     seed = MM.monster_seed_fj(w.cmap, w.lds, w.sds, kw["secs_open"], kw["msecs"], kw["mcell"])

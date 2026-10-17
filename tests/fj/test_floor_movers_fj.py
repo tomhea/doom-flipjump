@@ -326,9 +326,11 @@ MUTANTS = {
         tic_text(mp), lambda l: l.strip().startswith("hex.set 1, fswitch +") and "fg" not in l,
         lambda l: "")),
     "a slanted side's sign flipped": ("walk", lambda mp: _nth_slanted_sign(walk_text(mp))),
-    "the W1 fired-once guard dropped": ("walk", lambda mp: _first(
-        walk_text(mp), lambda l: l.strip().startswith("hex.if0 1, fswitch") and l.strip().endswith("_u"),
-        lambda l: "    ;" + l.strip().rsplit(", ", 1)[1])),
+    # every test of group 1's STATE in its W1 lines (the guard before the crossing and the fire's own): a group at
+    # its destination fires again
+    "the W1 fired-once guard dropped": ("walk", lambda mp: [
+        "    ;" + l.strip().rsplit(", ", 1)[1] if l.strip().startswith("hex.if0 1, fswitch + 1*dw,") else l
+        for l in walk_text(mp)]),
     "a tag's second lift not requested": ("walk", lambda mp: _first(
         walk_text(mp), lambda l: "hex.set 1, lreq + 4*dw, 1" in l, lambda l: "")),
     "every group's cell is fswitch": ("use", lambda mp: [

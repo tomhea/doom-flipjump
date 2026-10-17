@@ -95,9 +95,12 @@ def _samples(lvl):
     out = []
     for k in range(N):
         i, j = k % n47, (k // n47) % n206
-        nx, ny = lvl.mid[0] + rng.randint(-REACH, REACH), lvl.mid[1] + rng.randint(-REACH, REACH)
-        z = rng.choice((w.lift_stops[47][i], w.floor_groups[lvl.g206].floor(206, j), 240, 304, 368,
-                        rng.randint(200, 400)))
+        if rng.random() < 0.6:            # the box ON the line (horizontal, y = mid): both cells read
+            nx, ny = lvl.mid[0] + rng.randint(-40, 40), lvl.mid[1] + rng.randint(-19, 19)
+        else:
+            nx, ny = lvl.mid[0] + rng.randint(-REACH, REACH), lvl.mid[1] + rng.randint(-REACH, REACH)
+        z = rng.choice((w.lift_stops[47][i], w.lift_stops[47][i], w.floor_groups[lvl.g206].floor(206, j),
+                        w.floor_groups[lvl.g206].floor(206, j), 240, 304, rng.randint(200, 400)))
         out.append((nx, ny, z, i, j))
     return out
 
@@ -164,7 +167,14 @@ def test_the_samples_cross_the_line_in_every_pair(level):
     pairs = {(x[3], x[4]) for x in s}
     assert len(pairs) == len(w.lift_stops[47]) * w.floor_groups[level.g206].n
     res = [_model(level, x)[1] for x in s]
-    assert 0.2 < sum(r[0] for r in res) / len(res) < 0.9, "refusals and accepts"
+    assert 0.1 < sum(r[0] for r in res) / len(res) < 0.9, "refusals and accepts"
+    ld = w.lds[LINE]
+    (x1, y1), (x2, y2) = w.cmap.vertexes[ld.v1], w.cmap.vertexes[ld.v2]
+    assert y1 == y2, "line 1199 is horizontal (the samples straddle it so)"
+    on = [x for x in s if abs(x[1] - y1) < 20 and min(x1, x2) - 20 < x[0] < max(x1, x2) + 20]
+    assert len(on) > N // 3
+    on_res = [_model(level, x)[1][0] for x in on]
+    assert any(on_res) and not all(on_res), "accepts and refusals ON the line"
 
 
 def test_the_split_dispatch_is_the_model(tmp_path, level):

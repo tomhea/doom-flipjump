@@ -279,6 +279,7 @@ class Layout:
     nwalk: int = 0     # M7 P2a.1: walk-over triggers (one per W1 tag)
     nlift: int = 0     # M7 P2b: lifts (doomfj.movers)
     nsecret: int = 0   # P10: secret sectors (special 9) -- LEVEL COMPLETE's SECRETS
+    ntele: int = 0     # M8 L4: WR teleport lines (doomfj.teleport); 0 on E1M1 -- no field, no cell
 
     @property
     def nmobile(self) -> int:
@@ -341,6 +342,10 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("pangle", 32, group="player", phase="existing", label="viewangle", doc="BAM")
     # M7 P6+P7: the turn's slow first frame (reference_model.turn_step): a turn key held last frame
     f("p_turnheld", 1, group="player", phase="P6", label="p_tnh", doc="a turn key was held last frame")
+    if lay.ntele:   # M8 L4 (doomfj.teleport): EV_Teleport's player reactiontime -- only on a level with a teleporter
+        from doomfj.teleport import REACTION_BITS
+        f("p_reaction", REACTION_BITS, group="player", phase="L4", label="p_rct",
+          doc="0..18: the tics P_PlayerThink skips P_MovePlayer (turn and walk) after a teleport")
     f("p_health", 12, signed=True, group="player", phase="S3b", doc="health; < 0 after a kill")
     f("p_armor", 8, group="player", phase="S3b", doc="armor points, 0..200")
     f("p_armortype", 2, group="player", phase="S3b", doc="0 none, 1 green, 2 blue")
@@ -840,7 +845,7 @@ class World(CombatMixin):
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
                              nwalk=len(self.walk_triggers), nlift=len(self.lift_order),
-                             nsecret=len(self.secret_sectors))
+                             nsecret=len(self.secret_sectors), ntele=len(self.teleports))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -917,6 +922,14 @@ class World(CombatMixin):
         self.switch_boxes = [b for _t, b in use_line_boxes(secs, lds, cmap.vertexes,
                                                              FLOOR_SWITCH_SPECIALS)]
         self.mover_order = sorted(set(self.lift_order) | set(self.switch))
+        # M8 L4 (doomfj.teleport): the WR teleport lines and their destinations ([] on E1M1). P_TeleportMove's floorz
+        # is the destination sector's floor, baked: it must not be a door or a mover
+        from doomfj.teleport import teleporters
+        self.teleports = teleporters(mw, M, rm=self.rm, cmap=cmap)
+        self._teleported = False
+        for tel in self.teleports:
+            assert tel.dest_sector not in set(self.door_order) | set(self.mover_order), (
+                "M8 L4: teleport destination sector %d moves" % tel.dest_sector)
         self._mh_last = {}
         self.mon_door_boxes = {}
         for si in self.door_order:
@@ -1635,6 +1648,8 @@ class World(CombatMixin):
         for trig in self.lift_walk:
             if crossed(trig, (ox << 16, oy << 16), (nx << 16, ny << 16), self.mon_radius[m]):
                 ws.l_req[self.lift_order.index(trig[0])] = 1
+        if self.teleports:                            # M8 L4: 97 is on the non-player list too -- last, as the fj
+            nx, ny = self._teleport_monster(m, ox, oy, nx, ny)
         if step:
             ev.moves.append(m)
         leaf = self.rm.point_in_subsector(self.cmap, nx, ny)
@@ -1644,6 +1659,30 @@ class World(CombatMixin):
             ws.mon_leaf[m] = leaf
             self._list_insert(m, leaf)
             ev.leaf_changes.append((m, old, leaf))
+
+    def _teleport_monster(self, m: int, ox: int, oy: int, nx: int, ny: int) -> Tuple[int, int]:
+        """M8 L4 (doomfj.teleport): EV_Teleport for slot m after its accepted move (ox, oy) -> (nx, ny), map units --
+        the first teleport line crossed from its front (line order; one per move) and, unless a shootable thing stands
+        at the destination (P_TeleportMove's PIT_StompThing refuses a monster), the destination: position, floorz,
+        facing (its angle's octant), momentum and the position's fraction 0 (knockback). -> the position now (the
+        relink's). `self._teleported` says it happened (the knock move's momentum stops: combat._xy_move)"""
+        from doomfj.teleport import crossed_front, stomped
+        ws = self.ws
+        r = self.mon_radius[m]
+        for tel in self.teleports:
+            if not crossed_front(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r):
+                continue
+            if stomped(self, tel.dest, r, mover=m):
+                break
+            nx, ny = tel.dest
+            ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, tel.dest_floor
+            ws.mon_facing[m] = tel.facing
+            if self._p_knock:
+                ws.mon_momx[m] = ws.mon_momy[m] = 0
+                ws.mon_fx[m] = ws.mon_fy[m] = 0
+            self._teleported = True
+            break
+        return nx, ny
 
     # ---------------------------------------------------------------------------- leaf lists
     def _list_insert(self, k: int, leaf: int) -> None:
@@ -1864,7 +1903,10 @@ class World(CombatMixin):
             if verdict != OK:
                 ev.blocked[verdict] += 1
                 return False
+            self._teleported = False
             self._move_monster(m, nx, ny, floorz, ev, step=False)
+            if self._teleported:                     # M8 L4: x, y = the destination exactly (no fraction)
+                return True
         ws.mon_fx[m], ws.mon_fy[m] = cx16 & 0xFFFF, cy16 & 0xFFFF
         return True
 

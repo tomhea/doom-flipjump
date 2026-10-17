@@ -150,7 +150,45 @@ def drawable_things(rm, things, sprite_wad, cache=None):
     return out, idx
 
 
-def baked_thing_mask(rm, cmap, drawable, monster_types):
+_MOVER_LEAVES: dict = {}
+
+
+def mover_leaves(map_wad, mapname: str, cmap) -> frozenset:
+    """M8 F1.3 (docs/f1-big-map-widths.md 9): the subsectors whose sector is a MOVER (`movers.mover_table`: a lift or
+    a floor group's sector) -- THE one set `baked_thing_mask(mover_leaves=)` takes, in every mirror. A thing there
+    stands on a floor that moves: a BAKED thing's `sp_z` would be its stored floor while the oracle draws it at the
+    current one, so it takes the runtime path (whose leaf floor `ss_flr` follows the mover's state). A leaf's sector
+    is its first seg's (mapcompiler.seg_sector's rule). Cached per (wad, map)."""
+    key = (id(map_wad), mapname, len(cmap.subsectors))
+    hit = _MOVER_LEAVES.get(key)
+    if hit is not None and hit[0] is map_wad:
+        return hit[1]
+    from doomfj.movers import mover_table
+    lds, sds, secs = map_wad.linedefs(mapname), map_wad.sidedefs(mapname), map_wad.sectors(mapname)
+    movers = set(mover_table(secs, lds, sds))
+    out = set()
+    for s, ss in enumerate(cmap.subsectors):
+        if not ss.numsegs:
+            continue
+        sg = cmap.segs[ss.firstseg]
+        ld = lds[sg.linedef]
+        if sds[ld.front if sg.side == 0 else ld.back].sector in movers:
+            out.add(s)
+    _MOVER_LEAVES[key] = (map_wad, frozenset(out))
+    return _MOVER_LEAVES[key][1]
+
+
+def mover_mask_kw(rm, cmap, drawable, leaves: frozenset) -> dict:
+    """`baked_thing_mask`'s `mover_leaves` keyword where it changes the mask -- some drawable thing stands in a mover
+    leaf (E1M2: the blue card on switch sector 45, ...) -- else none: E1M1's mask is the one it always was (no drawable
+    thing on its lifts or pillars, tests/host/test_mover_things.py), and the E1M1 tools that swap
+    `reference_model.baked_thing_mask` for their own four-argument function keep working"""
+    if any(rm.point_in_subsector(cmap, t.x, t.y) in leaves for t in drawable):
+        return {"mover_leaves": leaves}
+    return {}
+
+
+def baked_thing_mask(rm, cmap, drawable, monster_types, mover_leaves=frozenset()):
     """M14.5 SSOT — which drawable things BAKE into their leaf, and which take the runtime path.
 
     Returns a tuple parallel to `drawable` (True = baked). ⚠ It is computed from SPAWN positions
@@ -166,10 +204,13 @@ def baked_thing_mask(rm, cmap, drawable, monster_types):
 
     ⚠ Both mirrors order a leaf BAKED-FIRST-THEN-RUNTIME (not static-first-then-dynamic). Those
     coincide at spawn because of the rule above; they stop coinciding the moment a runtime thing
-    moves into a baked leaf, and only the baked-ness key is order-preserving by construction."""
+    moves into a baked leaf, and only the baked-ness key is order-preserving by construction.
+
+    M8 F1.3: ...AND its leaf is not a MOVER's (`mover_leaves`, the helper every mirror takes them from): a baked
+    thing's z is its stored floor. The rule stays per LEAF, so every leaf is still homogeneous at spawn."""
     leaves = [rm.point_in_subsector(cmap, t.x, t.y) for t in drawable]
     mon_leaves = {ss for ss, t in zip(leaves, drawable) if t.type in monster_types}
-    return tuple(t.type not in monster_types and ss not in mon_leaves
+    return tuple(t.type not in monster_types and ss not in mon_leaves and ss not in mover_leaves
                  for t, ss in zip(drawable, leaves))
 
 

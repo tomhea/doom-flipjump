@@ -824,7 +824,11 @@ class BinaryMirror:
                           *self.state[1:])
         if movers is not None:
             self.mstate = movers
-        self.state = self.dp.tic(self.state, bool(kd.get("use")), pre[0], pre[1], others=others)
+        # M8 L2: the yellow and red keys (and a blue skull) the WORLD holds (monsters.door_keys_kw: {} without a phase,
+        # and on E1M1, whose player holds only the blue card)
+        from doomfj.monsters import door_keys_kw
+        self.state = self.dp.tic(self.state, bool(kd.get("use")), pre[0], pre[1], others=others,
+                                 **door_keys_kw(mph))
         self.ds = [self.state[0][si] for si in w.door_order]
         self.mstate = self.mp.tic(self.mstate)
         if kd.get("use"):
@@ -861,7 +865,8 @@ class BinaryMirror:
                 mph.touch = touch
                 st = SimState(*mph.move(b0_keys(kd), pre[0], pre[1], pre[2], scene=self._scenes[key]), w.mapname)
         # M7 P8a: the walk-overs over the walk, then over the knock move (monsters.walkover_segments; one segment
-        # without a phase or a knock move: blocked27's tic, every frame before P8a)
+        # without a phase or a knock move: blocked27's tic, every frame before P8a; M8 L4: on a map with teleport
+        # lines, the segments the world's own move tested -- a teleport's walk up to its line, nothing from the jump)
         from doomfj.monsters import walkover_segments
         from doomfj.world import player_loots as _pl
         for a_, b_ in walkover_segments(mph if (mph is not None and _pl(mph.world.player)) else None,
@@ -874,9 +879,12 @@ class BinaryMirror:
 def mover_state(w):
     """M7 P2b: the model's movers as a movers.MoverPhase state -- what b0 writes at the frame start"""
     ws = w.ws
+    # M8 F1.3: in the WIDE layout (movers.floor_wide: E1M2) the switch is the fswitch VECTOR -- each floor group's
+    # state, then each group's step timer -- as movers.MoverPhase keeps it and the binary holds it; E1M1's 1-bit f_switch
+    sw = (tuple(ws.f_switch) + tuple(ws.f_sub)) if getattr(w, "floor_wide", False) else ws.f_switch
     return (tuple((ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k])
                   for k in range(len(w.lift_order))),
-            frozenset(si for k, si in enumerate(w.lift_order) if ws.l_req[k]), ws.f_switch)
+            frozenset(si for k, si in enumerate(w.lift_order) if ws.l_req[k]), sw)
 
 
 def door_tuples(w) -> list:

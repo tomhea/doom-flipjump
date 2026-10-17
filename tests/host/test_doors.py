@@ -188,20 +188,22 @@ def test_door_states_works_on_every_e1_map(full):
         secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
         tbl = door_states(secs, lds, sds)                  # must not raise
         for si, st in tbl.items():
-            assert st[0] == secs[si].floor_h, (m, si, st)
+            assert st[0] == secs[si].ceil_h, (m, si, st)      # M8 L2: the stored ceiling (E1M2's 208 is stored open)
             assert st[-1] == door_sectors(secs, lds, sds)[si], (m, si, st)
             assert len(st) <= MAX_STATES, (m, si, st)
 
 
 def test_the_excluded_sectors_are_exactly_the_downward_ones(full):
     """A door is dropped for ONE reason and it is checkable: its open height is below its floor.
-    Anything else leaving the dict is a different bug wearing this fix's clothes."""
+    Anything else leaving the dict is a different bug wearing this fix's clothes. (M8 L2: a door is
+    behind a DOOR line -- `doors.MANUAL_DOOR_KINDS`; a lift's or a floor's line makes none.)"""
+    from doomfj.doors import MANUAL_DOOR_KINDS
     for m in E1:
         secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
         nb = neighbours(lds, sds)
         kept = door_sectors(secs, lds, sds)
         for ld in lds:
-            if not ld.special or ld.back == 0xFFFF or ld.back >= len(sds):
+            if ld.special not in MANUAL_DOOR_KINDS or ld.back in (0xFFFF, -1) or ld.back >= len(sds):
                 continue
             si = sds[ld.back].sector
             s = secs[si]
@@ -215,10 +217,11 @@ def test_e1m1_and_e1m2_lose_no_door(full):
     """THE byte-exactness argument. The shipped build is E1M1; if the filter removed one of its
     doors the picture would move, so this is the pin that says it cannot. E1M1: 13 DR doors and
     (M7 P2a.1) the two stored-shut sectors its walk-over lines tag, 77 and 145."""
-    for m, n in (("E1M1", 15), ("E1M2", 11)):        # E1M2: 8 DR + 3 walk-over doors
+    # E1M2 (M8 L2): 8 DR + 3 walk-over doors, the two 109 opens (30, 266), the D1 / S1 door 208, the S1 door 145
+    for m, n in (("E1M1", 15), ("E1M2", 15)):
         secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
         assert len(door_sectors(secs, lds, sds)) == n
-        assert all(door_sectors(secs, lds, sds)[si] > secs[si].floor_h
+        assert all(door_sectors(secs, lds, sds)[si] > secs[si].ceil_h
                    for si in door_sectors(secs, lds, sds))
 
 

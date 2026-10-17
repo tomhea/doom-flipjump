@@ -77,6 +77,17 @@ B0 on its set, gamespeed, msframe, rebuild).
 - The computer map is picked up and does nothing (there is no automap).
 - Deathmatch / co-op starts and things are ignored (single player only, as E1M1).
 - The scrolling wall (48, two lines): decided in L5 -- animated if cheap, else static.
+- The teleporters (97, L4; `doomfj.teleport` holds the rules and these decisions): NO TELEPORT FOG and no sound (nothing
+  reads them); NO TELEFRAG -- DOOM's player kills every shootable thing at the destination, here his teleport is
+  refused there exactly as a monster's is (P_TeleportMove's stomp for a monster), in both mirrors; ONE TELEPORT PER MOVE
+  (asserted exact on E1M2: no destination lies within any teleport line's reach). Kept DOOM's: the front side only,
+  WR (every crossing), monsters and sliding corpses teleport, the destination's angle (a monster's facing octant),
+  floorz from the destination sector, momentum 0, the player's 18-tic reactiontime (no turn, no walk).
+- M8 F1.3 (the movers): every one-shot floor moves on the doors' 16-unit grid -- a stop every 4 frames (FLOORSPEED, a
+  quarter of the lift's), turboLower (71) every frame, the S1 23 switch INSTANT as on E1M1 (D-L2); a floor's destination
+  is computed from its neighbours' STORED floors (EV_DoFloor reads them at the trigger: sector 206 borders blazing lift
+  47); the S1 switch textures do not change; a W1 crossing is tested once per tic (start to end), a slanted one by the
+  exact cross product (P_PointOnLineSide without FixedMul's truncation); a blazing lift (120 / 123) strides two stops.
 
 ## 4. The width plan for L1 (analysis 2026-10-16, read-only, at be8f2cc)
 
@@ -229,3 +240,41 @@ at the script's EOF; the frames show E1M2's start room and its monsters
 13,512,040 ops/frame, 202.8 M fj/s** on its 200-frame forward script -- E1M1's shipped baseline is 67.3 ms on its own
 (a different scene: a first reading, not a ship number; the stand-ins move ops a little). NOT certified: the six
 stand-ins' features are not built, and no E1M2 gate has run (E1M2's gates are L6's: its roles, its combat set).
+
+## 11. L2 doors: every door kind E1M2 has, both mirrors (2026-10-17, branch m8-e1m2-doors)
+
+- **Classification by special** (`doors.MANUAL_DOOR_KINDS` / `WALK_DOOR_KINDS` / `SWITCH_DOOR_KINDS`, `KIND_MOTION`):
+  only door specials make a door. E1M2: 15 doors (was 11) -- 27 yellow (100), 28 red (29, 139), 31 D1 open-stay (208,
+  stored OPEN 64/80: its stops start at the stored ceiling, `doors.shut_h`), 63 SR (258, also a DR door), 103 S1
+  (145, 208), 109 W1 blazing open-stay (30 and 266 from one line). E1M1: doors, order, kinds, boxes, walk triggers,
+  contact, stamp and every emitted door text IDENTICAL to main (`tests/host/test_doors_e1m2.py` freezes them).
+- **Keys:** the fj reads `pcard_y` / `pcard_r` (declared and written by the pickups: `lootcode.card_cells`).
+- **Switches:** a use in a switch box presses a door only at rest (`doors.switch_ready`: EV_DoDoor's
+  `sec->specialdata` skip). The S1 latch is not kept: its doors are open-stay (asserted), where it is unobservable.
+  No switch texture changes (the renderer animates no switch).
+- **Walk-over per LINE**, one entry per (line, door): a tag opens every door it names; collinear touching lines of
+  one tag fuse (exact for stay doors, asserted: E1M1's two tags stay one segment each); slanted lines cross by
+  P_PointOnLineSide + the new box in spechit (`doors.crossed`, `doorcode._crossed_d_lines`). E1M3's tag 11 ring: 12 entries.
+- **Slanted / split door contact:** straddle any boundary line (`doors.straddles_d`, `doorcode._straddle_d_lines`
+  via `sim.point_side`); the centre-inside test only where a box fits (`door_contact_geo`'s `fits`; doorcode refuses
+  such a CLOSING door -- E1M3 66, E1M4 102, E1M5 211; none on E1M2, whose four non-rectangular doors all stay open).
+- The `slanted-doors` stand-in is retired (`scripts/emit_check.py`).
+- **Known deviation kept (issue #104 F1):** `doors.neighbours` reads a one-sided line's back as `sds[-1]` (sector 309
+  on E1M2, ceiling 152), so 54, 258, 139, 30 and 266 open to 148 where DOOM opens them to 228 / 196 / 156 / 196 / 196.
+  Fixing it is a map-wide geometry change (pids, door stops) the owner decides; E1M1 keeps it for its pid byte.
+
+## 12. L3 movers (M8 F1.3, 2026-10-17, branch m8-e1m2-movers)
+
+Every moving floor E1M2 has, model and fj (`movers.py`, `movercode.py`; the readers through ONE table,
+`movers.mover_table`): the blazing lifts 120 / 123 (stride 2), a lift tag on two sectors (tag 5: 47 and 209; monsters
+trigger 88 only, P_CrossSpecialLine's list), and the one-shot floors 19 / 23 / 38 / 58 / 71 / 102 as ELEVEN GROUPS,
+one per tag, each its own state cell `movers.switch_cell(g)` in the `fswitch` vector (states, then step timers) --
+item 10: the two 23 tags fire apart. E1M1 keeps its narrow layout (`fswitch: hex.vec 1`, the 1-bit `f_switch`): its
+movercode text, sight segments, sound edges, missile rows, P_ChangeSector and monster cells were diffed identical to
+a6b5e63's. The one two-cell line (1199: lift 47 / floor 206) is read through the cell its opening depends on
+(`monstersight.line_states`, `collision.mover_line_states`; the monsters' low floor on 47's cell, a split dispatch).
+Item 9: an item on a mover's floor (seven on E1M2: the blue card on 45, the yellow card on 301, ...) touches at the
+live floor (`lootcode.pk_mbox`) and renders RUNTIME (`things.mover_leaves`, `baked_thing_mask(mover_leaves=)`; E1M1's
+mask unchanged). `pickup-static-z` is retired. Tests: tests/host/test_floor_movers.py, test_mover_things.py;
+tests/fj/test_floor_movers_fj.py, test_pickup_mover_fj.py (each with R9 mutants). NOT run here (heavy): emit_baseline
+on E1M1, emit_check E1M2, any build.

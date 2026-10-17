@@ -42,16 +42,21 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                # P8a (docs/gp-final-plan.md 4.1): P6+P7's turn flag (#123 F1), the sink, knockback's, the blast source
                "p_tnh", "p_vd", "p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z", "bar_src",
                # P10 (docs/gp-p10-plan.md): a game in progress (the menu's RESUME), and LEVEL COMPLETE's counters
-               "g_live", "st_kill", "st_item", "st_secn", "st_secm")
+               "g_live", "st_kill", "st_item", "st_secn", "st_secm",
+               "p_rct")                                                             # M8 L4: the reactiontime
 
 
-def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
+def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int | None = None,
                       nmon: int = 0, nrt: int = 0, palettes_out: list | None = None, nthvis: int = 0, cause_out=None):
     """-> (the presented frames' pixel indices, the exact op total, [the STATE_NAMES cells read at
     each present]). `labels` is the build's own label table (build_labeled.py writes it).
     M7 P5: `palettes_out`, when given, receives the palette each present showed (probe.RunResult.palettes:
     sha1[:12] of its bytes -- `probe.Oracle.palette_sha` is the oracle's side).
-    M7 P6: `nthvis` -- the `thvis` slots to read (probe.Oracle.nthvis: a player who loots), 0 reads none"""
+    M7 P6: `nthvis` -- the `thvis` slots to read (probe.Oracle.nthvis: a player who loots), 0 reads none.
+    M8: `nlift` None is the map's own lift count (probe's counts map: E1M1's 2, E1M2's 1) -- it was a default of 2,
+    which on another map read E1M1's lift cells"""
+    if nlift is None:
+        nlift = len(P._idle_world().lift_order)
     cells = {n: c for n, c in P.game_cells(ndoors, nwalk, nlift, nmon, nrt, nthvis).items() if n in STATE_NAMES}
     # M7 P3.1: a gate that does not pass `nmon` asks for no monster cells (a binary before P3.1)
     missing = sorted(set(STATE_NAMES) - set(cells) - (set() if nmon else MONSTER_NAMES)

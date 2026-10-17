@@ -56,11 +56,14 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
 from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_lines
 from doomfj.doorcode import card_pickup_lines, walkover_lines   # M7 P2a.1
 from doomfj.doors import door_kinds, walkover_triggers                    # M7 P2a.1
+from doomfj.doors import switch_boxes as door_switch_boxes                 # M8 L2
 from doomfj.doors import exit_boxes                                        # M7 P2a.2
 from doomfj.doors import door_contact_geo                                  # M7 P2b
-from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS,       # M7 P2b
-                           lift_states, lift_walk_triggers, switch_sectors, use_line_boxes)
+from doomfj.movers import (LIFT_USE_SPECIALS,                              # M7 P2b
+                           lift_states, lift_walk_triggers, use_line_boxes)
+from doomfj import movers as _movers                                       # M8 F1.3: floor groups, the table
 from doomfj.movercode import lift_tic_lines, lift_walk_lines, mover_decls, use_line_lines
+from doomfj.movercode import floor_tic_lines, floor_walk_lines            # M8 F1.3
 from doomfj.doorcode import _box_test                                     # M7 P2a.2: the exit's box
 from doomfj.menu import LEVEL_DONE_SCR                                    # M7 P2a.2
 from doomfj.menu import HELP_GAME_SCR, HELP_MENU_SCR, MAIN_HELP_SCR      # M7 P3.4
@@ -68,6 +71,7 @@ from doomfj.menu import MAIN_EXIT_SCR                                     # P9: 
 from doomfj.menu import MAIN_RESUME_SCR                                   # P10: the RESUME item
 from doomfj.menu import LEVEL_DONE_ENTER, LEVEL_DONE_HOLD_LAST, LEVEL_DONE_SCREENS   # P10: LEVEL COMPLETE's hold
 from doomfj import statcode as _statcode                                  # P10: LEVEL COMPLETE's stats
+from doomfj import teleportcode as _teleportcode                          # M8 L4: the WR teleports
 from doomfj import keyboard as _keyboard                                   # P9: the press latch
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
@@ -525,7 +529,7 @@ STANDALONE_SCRATCH_DECLS = [
 
 
 def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
-                  monsters=None, nmobile=0, skill_extra=None) -> tuple:
+                  monsters=None, nmobile=0, skill_extra=None, nfs=1) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -562,7 +566,8 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
               # M7 P2b: every lift at its top, idle, nothing pending; the switch not fired
               *([f"    hex.zero {nlift}, lstate", f"    hex.zero {nlift}, ldir",
                  f"    hex.zero {nlift}, lsub", f"    hex.zero {WAIT_NIBBLES * nlift}, lwait",
-                 f"    hex.zero {nlift}, lreq", "    hex.zero 1, fswitch"] if nlift else []),
+                 # M8 F1.3: every floor group's state and timer (`nfs`: movers.fswitch_nibbles)
+                 f"    hex.zero {nlift}, lreq", f"    hex.zero {nfs}, fswitch"] if nlift else []),
               *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
@@ -586,7 +591,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
 
 def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
                     wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None,
-                    p8a_common=(), p10_common=()) -> tuple:
+                    p8a_common=(), p10_common=(), nfs=1) -> tuple:
     """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
     values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
     emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
@@ -602,7 +607,7 @@ def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, n
               + list(p8a_common)                        # M7 P8a: the final rung's cells (p8a_restart_parts)
               + list(p10_common)))                      # P10: the level's stats (statcode.restart_lines)
     return restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=nwalk, nlift=nlift,
-                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills)
+                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills, nfs=nfs)
 
 
 def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
@@ -627,7 +632,7 @@ def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
         common += _restartcode.view_restart_lines()
     if loot_slots is not None:
         c, per = _restartcode.level_start_lines(world, SKILLS, _lootcode.PERSIST)
-        common += c
+        common += c + _lootcode.card_restart_lines(world)      # M8 F4: no yellow / red card (E1M1: no line)
         for k, sk in enumerate(SKILLS):
             skills[k] += list(per[k]) + [f"    hex.set 2, thvis + {loot_slots['nvis'] + j}*2*dw, {v}"
                                          for j, v in enumerate(_lootcode.extra_vis(world, loot_slots, sk))]
@@ -645,17 +650,22 @@ def p8a_restart_parts(world) -> list:
     return out
 
 
-def p5_tic_lines(hrt, barrels: bool = False) -> list:
+def p5_tic_lines(hrt, barrels: bool = False, bar_always: bool = False) -> list:
     """M7 P5 -- the frame's tic after the monsters' (`tic_after_eye`): the fireballs, then the blood (projcode's
     `pj_phase` / `fx_phase`, each skipping itself while `lvdone`: world.tic's order monsters -> projectiles ->
     barrels -> effects), then the bar's health and armor (`hrt` is hurtcode.hurt_parts' dict: its `bar`, hp_bar)
     from what the frame's damage left, inside the frozen-level guard -- a finished level changes neither.
     M7 P6 (`barrels`, doomfj.barrelcode): the barrels' phase between the two (it skips itself while `lvdone` too).
     M7 P7: `leveltime` +1 at the end of the non-frozen tic (World.tic; restartcode.lvtime_tic_lines), in the same
-    guard"""
+    guard.
+    M8 F7 (issue #123 item 4, `bar_always`): the bar AFTER the guard, every frame -- on the frame the exit is pressed
+    the player phase still runs after the press (nukage, the walk's pickups: World.tic's exit frame), so a health or
+    armor change there must reach the bar; a frozen frame changes neither, so hp_bar writes the values it found. Taken
+    on a map where such a change can happen (`exit_frame_bar_hazards`); elsewhere (E1M1) the text is blocked48's."""
+    bar = list(hrt["bar"])
     return (["stl.fcall pj_phase, pj_pret"] + (["stl.fcall bar_phase, bar_pret"] if barrels else [])
             + ["stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(),
-               *hrt["bar"], "p5_bar_skip:"])
+               *([] if bar_always else bar), "p5_bar_skip:", *(bar if bar_always else [])])
 
 
 # issue #123 item 4: the thing types whose pickup moves health or armor (combat._touch_specials / lootcode's P_Give*:
@@ -663,7 +673,7 @@ def p5_tic_lines(hrt, barrels: bool = False) -> list:
 HEALTH_ARMOR_TYPES = frozenset({2018, 2019, 2014, 2015, 2011, 2012, 2013, 2023})
 
 
-def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
+def exit_frame_bar_hazards(map_wad, mapname: str, boxes) -> dict:
     """issue #123 item 4 (emit time): `hp_bar` sits inside the `lvdone` guard (p5_tic_lines), but on the frame the exit
     is pressed the player phase still runs AFTER the press -- nukage at the tic-start position, then the walk with its
     pickups -- so a health or armor change on that frame would leave the bar stale for good. Unreachable on a map
@@ -673,9 +683,10 @@ def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
       * no health / armor pickup (HEALTH_ARMOR_TYPES, any skill) lies within the exit box grown by one frame's
         furthest reach: the walk's step (FORWARD_MOVE + STRAFE_MOVE), a knock move (MAXMOVE, M7 P8a), and the touch
         distance (the player's radius + the item's).
-    Asserted, not handled: moving hp_bar out of the guard is M4's (a map that breaks this). Returns the margins
-    {"hurt": smallest axis gap to a hurt sector's box, "pickup": smallest axis gap to a health / armor item beyond
-    the reach} for the record (E1M1: no hurt sector near the exit; the nearest item, a stimpack, 49 units clear)."""
+    M8 F7: HANDLED, no longer refused -- returns {"hazards": [why, ...] (empty: unreachable), "hurt": smallest axis gap
+    to a hurt sector's box, "pickup": smallest axis gap to a health / armor item beyond the reach}; a map with a hazard
+    (E1M2: a health bonus by its exit) runs the bar after the guard (`p5_tic_lines(bar_always=True)`), and a map with
+    none keeps the guarded text (E1M1: no hurt sector near the exit; the nearest item, a stimpack, 49 units clear)."""
     from doomfj import gamedata as gd
     from doomfj.combat import ITEM_RADIUS, PLAYER_R, SECTOR_HURT
     from doomfj.reference_model import FORWARD_MOVE, STRAFE_MOVE
@@ -690,7 +701,7 @@ def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
                 x0, y0, x1, y1 = sbox.get(si, (v.x, v.y, v.x, v.y))
                 sbox[si] = (min(x0, v.x), min(y0, v.y), max(x1, v.x), max(y1, v.y))
     reach = (FORWARD_MOVE >> 16) + (STRAFE_MOVE >> 16) + (gd.MAXMOVE >> 16) + PLAYER_R + ITEM_RADIUS
-    margins = {"hurt": None, "pickup": None}
+    margins = {"hazards": [], "hurt": None, "pickup": None}
 
     def gap(box, x0, y0, x1, y1):
         """the larger axis gap between two boxes (<= 0: they meet)"""
@@ -699,18 +710,29 @@ def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
     for box in boxes:
         for si, sb in sbox.items():
             g = gap(box, *sb)
-            assert g > 0, ("the exit box %r meets damaging sector %d (%r): nukage could hurt the player on the exit "
-                           "frame and hp_bar, inside the lvdone guard, would stay stale (issue #123 item 4)"
-                           % (box, si, sb))
+            if g <= 0:
+                margins["hazards"].append(
+                    "the exit box %r meets damaging sector %d (%r): nukage could hurt the player on the exit frame and "
+                    "hp_bar, inside the lvdone guard, would stay stale (issue #123 item 4)" % (box, si, sb))
             margins["hurt"] = g if margins["hurt"] is None else min(margins["hurt"], g)
         for t in map_wad.things(mapname):
             if t.type in HEALTH_ARMOR_TYPES:
                 g = gap(box, t.x, t.y, t.x, t.y) - reach
-                assert g > 0, ("a health / armor pickup (type %d at %d, %d) is within one frame's reach (%d) of the "
-                               "exit box %r: hp_bar, inside the lvdone guard, would stay stale on the exit frame "
-                               "(issue #123 item 4)" % (t.type, t.x, t.y, reach, box))
+                if g <= 0:
+                    margins["hazards"].append(
+                        "a health / armor pickup (type %d at %d, %d) is within one frame's reach (%d) of the exit box "
+                        "%r: hp_bar, inside the lvdone guard, would stay stale on the exit frame (issue #123 item 4)"
+                        % (t.type, t.x, t.y, reach, box))
                 margins["pickup"] = g if margins["pickup"] is None else min(margins["pickup"], g)
     return margins
+
+
+def assert_exit_frame_bar(map_wad, mapname: str, boxes) -> dict:
+    """`exit_frame_bar_hazards`, refusing a map that has one: the guarded bar is exact there (the emitter no longer
+    asks this -- M8 F7 runs the bar after the guard on such a map -- the tests use it to prove E1M1 keeps its text)"""
+    margins = exit_frame_bar_hazards(map_wad, mapname, boxes)
+    assert not margins["hazards"], margins["hazards"][0]
+    return {"hurt": margins["hurt"], "pickup": margins["pickup"]}
 
 
 # M7 P6+P7 package E (the owner, 2026-10-05: "maybe run 2 ticks each time?"): the frame's MONSTER WORLD runs
@@ -1628,7 +1650,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     # M7 P4.0 (docs/gp-combat.md section 2): the game tier's status bar and weapon overlay (doomfj.hudcode)
     from doomfj.hudcode import game_hud_parts
-    _hud = game_hud_parts(rm, asset_wad, sprite_wad, map_wad.sectors(mapname)) if menu else None
+    # M8 F4: the map's yellow / red key icons (lootcode.hud_cards; E1M1 none) -- the loot's card cells they read
+    _hud = game_hud_parts(rm, asset_wad, sprite_wad, map_wad.sectors(mapname),
+                          cards=_lootcode.hud_cards(map_wad, mapname) if _lootcode.loot_on(PLAYER_MODE) else ()
+                          ) if menu else None
     # M7 P4.1 (doomfj.weaponcode): the player's weapon, the model's "fire" mode
     from doomfj.weaponcode import weapon_parts
     # M7 P4.2a: the shots resolve through the aim window and hurt (the player mode shoots)
@@ -1700,18 +1725,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _movers_on = bool(standalone and _dst_tbl and player_sim)
     _lift_st = lift_states(secs, lds, sds, door_quant) if _movers_on else {}
     _lift_slot = {si: k for k, si in enumerate(sorted(_lift_st))}
-    _switch = switch_sectors(secs, lds, sds) if _movers_on else {}
-    _msecs = {si: [apply_sector_heights(secs, {si: (h, secs[si].ceil_h)}) for h in st]
-              for si, st in _lift_st.items()}
-    # M8 L1: every switch sector moves by the ONE `fswitch` cell, so its state 1 is ALL of them lowered (E1M2's
-    # switch sectors border each other: a line between two must see both down) -- the same list for each
-    _sw_low = apply_sector_heights(secs, {si: (low, secs[si].ceil_h) for si, (low, _high) in _switch.items()})
-    _msecs.update({si: [secs, _sw_low] for si in _switch})
-    _mcell = {si: f"lstate + {k}*dw" for si, k in _lift_slot.items()}
-    _mcell.update({si: "fswitch" for si in _switch})
-    if _switch:
-        _dsecs_open = apply_sector_heights(_dsecs_open, {si: (low, secs[si].ceil_h)
-                                                         for si, (low, _h) in _switch.items()})
+    # M8 F1.3: every mover from the ONE table (movers.mover_table): the lifts, and each floor group's sectors on its
+    # own cell (`movers.switch_cell(g)`; E1M1: the switch's three pillars on `fswitch`). M8 L1: a group's state list
+    # moves ALL its sectors (E1M2's switch sectors border each other: a line between two must see both down).
+    _floor_groups = _movers.floor_groups(secs, lds, sds, door_quant) if _movers_on else []
+    _mtab = _movers.mover_table(secs, lds, sds, door_quant) if _movers_on else {}
+    _msecs = _movers.mover_secs(_mtab, secs)
+    _mcell = {si: c for si, (c, _h) in _mtab.items()}
+    # the union question ("could it ever be open?") takes each floor-group sector at its LOWEST floor (a mover's
+    # ceiling never moves): E1M1's pillars lowered, as before; a raised floor (58) is at its widest stored
+    _flow = {si: (min(h), secs[si].ceil_h) for g in _floor_groups for si, h in g.heights if min(h) < secs[si].floor_h}
+    if _flow:
+        _dsecs_open = apply_sector_heights(_dsecs_open, _flow)
 
     # M2-R4: one frame of every door, and the state it walks. Empty for a doors=False build, so
     # the prologue is the line-for-line text it was before doors existed.
@@ -1727,15 +1752,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              passes={si: pass_state(secs, lds, sds, si) for si in _dst_tbl},
                              mon_press=mon_press, mon_contact=mon_contact,
                              # M7 P7: a player dead at the tic's start presses no door and holds none open
-                             dead="p_dd0" if _LOOT else None)
+                             dead="p_dd0" if _LOOT else None,
+                             # M8 L2: the door switches (SR 63 / S1 103) and the doors a walk-over line opens
+                             switches=door_switch_boxes(secs, lds, sds, verts),
+                             walked={t_[0] for t_ in _walk_trig})
               if (_dst_tbl and player_sim) else [])
         # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
         if _movers_on and dt:
-            dt = dt + lift_tic_lines(sorted(_lift_st), {si: len(v) for si, v in _lift_st.items()})
+            dt = dt + lift_tic_lines(sorted(_lift_st), {si: len(v) for si, v in _lift_st.items()},
+                                     {si: _movers.lift_stride(secs, lds, si) for si in _lift_st})
+            dt = dt + floor_tic_lines(_floor_groups)          # M8 F1.3: the moving floor groups (none on E1M1)
         return dt
-    _door_tic = _make_door_tic()
     # M7 P2a.1: the walk-over triggers (doomfj.doors), fired from the collision move
     _walk_trig = walkover_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
+    _door_tic = _make_door_tic()
 
     def _seg_door(seg):
         """The door sector whose state this seg's constants depend on, or None.
@@ -2078,8 +2108,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     if _do_things:
         from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
         _drawable, _draw_idx = drawable_things(rm, map_wad.things(mapname), sprite_wad, spr_cache)
-        check_slot_ids(len(_drawable))
-        _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES) if moving_things
+        # (M8 F1.4: the slot-id bound is checked below, once the skills and the runtime pools are known)
+        from doomfj.things import mover_leaves as _mover_leaves, mover_mask_kw as _mover_mask_kw   # M8 F1.3
+        _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES,
+                                   **_mover_mask_kw(rm, cmap, _drawable, _mover_leaves(map_wad, mapname, cmap)))
+                  if moving_things
                   else (True,) * len(_drawable))
         _mt_keep = {i for i, b in zip(_draw_idx, _baked) if not b}
         # M14.5 §3.3: the baked things that can VANISH get a 1-nibble flag at a fixed address.
@@ -2186,6 +2219,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _SINK = bool(_LOOT and _W8.player_sinks(PLAYER_MODE))                      # A: the dying view sinks
     _KNOCK = bool(_LOOT and _W8.knockback_on(PLAYER_MODE, MONSTER_MODE))      # K: P_DamageMobj's thrust, the knock
     _FIGHT = bool(_LOOT and _W8.infighting_on(MONSTER_MODE))                  # I: monsters fight monsters
+    # M8 L4 (doomfj.teleportcode): THE WR TELEPORTS -- the game tier's player (his reactiontime persists, its gate is
+    # the standalone prologue's) and its moving monsters; [] on a map without one (E1M1: no text anywhere)
+    _TELE = list(_p31["world"].teleports) if (_LOOT and _chase) else []
+    assert bool(_p31 and _p31.get("tele")) == bool(_TELE), "M8 L4: p31_parts' teleports and the emitter's disagree"
+    if _TELE:
+        from doomfj.monstercode import cell_nibbles as _cn8
+        _teleportcode.check_barrels(_p31["world"])
+        assert _cn8(_p31["world"].schema, "mon_facing") == 1, "M8 L4: the knock stubs' facing cell is one nibble"
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
     _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
@@ -2257,6 +2298,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     else:
         _MT_HEAD, _MT_NEXT = spawn_leaf_lists(_MT_BINDS, _MT_NSS) if moving_things else ([], [])
         _BOOT_VIS = [1] * len(_vis_slots) if _do_things else []   # (no things: no flags)
+    if _do_things:
+        # M8 F1.4: THE SLOT-ID BOUND -- the things one frame can hold: the drawable things a game has (one skill's, in the
+        # tier with skills: the rest are unlinked / thvis 0; every one elsewhere, where the host or the image says),
+        # the runtime pools (fireballs, puffs and blood) and the drops of the dead
+        check_slot_ids(max(len(_drawable) - len(_a) for _a in _abs) if _skills else len(_drawable),
+                       _p31["nmob"] if _p31 else 0, _p31.get("ndrop", 0) if _p31 else 0, cfg)
     # M14.5: one byte-wide slot per vanishable baked thing, filled from the wire before the walk.
     # ⚠ ZERO-init would mean "hidden", so the host sends the whole block every frame -- it is the
     # host that owns what has been picked up, and fj has no state between frames.
@@ -2489,7 +2536,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
         return min(fs_.ceil_h, bs_.ceil_h) <= max(fs_.floor_h, bs_.floor_h)
 
-    def _seg_dual(seg) -> bool:
+    def _seg_dual_cell(seg):
         """A DOOR seg: CLOSED while its door is shut, open otherwise.
 
         Solid-vs-marking is a compile-time decision everywhere else, but this seg is both at
@@ -2500,7 +2547,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         """
         ld_ = lds[seg.linedef]
         if ld_.back == -1 or _seg_cell(seg) is None:          # M7 P2b: or a mover's
-            return False
+            return None
         fi_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
         bi_ = sds[ld_.back if seg.side == 0 else ld_.front].sector
 
@@ -2509,11 +2556,30 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             return min(f_.ceil_h, b_.ceil_h) <= max(f_.floor_h, b_.floor_h)
 
         st_ = [_shut(sv) for sv in _seg_secs(seg)]
-        dual_ = bool(st_) and st_[0] and not all(st_)
-        # M8 L1: the dual gate is ONE `hex.if0` on one state cell; a two-mover seg's pair of cells has none
-        assert not (dual_ and isinstance(_seg_cell(seg), tuple)), (
-            f"{mapname}: seg on linedef {seg.linedef} between two movers is shut only in some states")
-        return dual_
+        if not (st_ and st_[0] and not all(st_)):
+            return None
+        cell = _seg_cell(seg)
+        if not isinstance(cell, tuple):
+            # the gate is `hex.if0` on the cell: shut must be EXACTLY state 0 (every E1M1 door; asserted since M8)
+            assert st_ == [True] + [False] * (len(st_) - 1), (
+                f"{mapname}: seg on linedef {seg.linedef} is shut at states {[k for k, x in enumerate(st_) if x]}, "
+                f"not exactly state 0 of {cell}")
+            return cell
+        # M8 L1 + F1.3: two movers (the pairs, the first mover's state major: `_seg_secs`). The gate stays ONE
+        # `hex.if0` when the shut pairs are exactly one mover's state 0 -- E1M2's linedef 1199 (lift 47 / floor 206) is
+        # shut exactly while 206 stands at its stored floor, the lift's ceiling, whatever the lift's state
+        na_, nb_ = (len(_msecs[m_]) for m_ in _seg_movers(seg))
+        assert len(st_) == na_ * nb_
+        if st_ == [ia == 0 for ia in range(na_) for ib in range(nb_)]:
+            return cell[0]
+        if st_ == [ib == 0 for ia in range(na_) for ib in range(nb_)]:
+            return cell[1]
+        raise AssertionError(f"{mapname}: seg on linedef {seg.linedef} between two movers is shut at pairs "
+                             f"{[divmod(k, nb_) for k, x in enumerate(st_) if x]}, not one mover's state 0")
+
+    def _seg_dual(seg) -> bool:
+        """A DOOR seg (or a mover's): CLOSED while its cell is at state 0, open otherwise (`_seg_dual_cell`)"""
+        return _seg_dual_cell(seg) is not None
 
     def _seg_as_solid(seg) -> bool:
         """Does this seg go down the one-sided (wall-emitting) path?"""
@@ -3069,7 +3135,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # [gate] marking body  ;done | solid: solid body | done:
                 # `hex.if0` on the door's own state cell: state 0 IS shut, so shut takes the SOLID
                 # arm (the closed line is a wall) and every open state takes the marking arm.
-                _dc = _seg_cell(seg)                       # M7 P2b: a door's or a mover's
+                _dc = _seg_dual_cell(seg)                  # M7 P2b: a door's or a mover's (M8: one of two)
                 out.insert(_mark0, f"    hex.if0 1, {_dc}, ss{cid}_seg{si}_solid")
                 out.insert(_mark1 + 1, f"    ;ss{cid}_seg{si}_dualend")
                 out.insert(_mark1 + 2, f"  ss{cid}_seg{si}_solid:")
@@ -3121,7 +3187,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert player_sim and lines, "collide=True rides player_sim on the lines tier"
         # local import: doomfj.collision needs wall_renderer's _int_part_lines, so importing it at
         # module level would close a cycle (the seg_affine_coeffs precedent in mapcompiler)
-        from doomfj.collision import (cell_lists, collision_cells_fj, line_rows, mover_line_openings,
+        from doomfj.collision import (cell_lists, collision_cells_fj, line_rows,
                                       move_with_collision_lines, COLLISION_STATE_DECLS)
         # M7 P1.2: the player's collision CELLS (docs/gp-collision-cells.md). M2-R4: a door's
         # lines bake their opening at the door's OPEN height, and their line stubs read the door's
@@ -3132,11 +3198,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         for si, lis in sorted(_door_lines.items()):
             for li in lis:
                 _cdoors.setdefault(li, []).append((_dslot[si], pass_state(secs, lds, sds, si)))
-        # M7 P2b: the mover lines take their opening floor from their mover's state
-        _cmovers = {li: (_mcell[m_], obs)
-                    for li, obs in mover_line_openings(lds, sds, secs, _msecs).items()
-                    for m_ in [next(x for x in (sds[lds[li].front].sector,
-                                                sds[lds[li].back].sector) if x in _msecs)]}
+        # M7 P2b: the mover lines take their opening floor from their mover's state (M8 F1.3: through the cell it
+        # depends on -- collision.mover_line_states; E1M1's lines each read their one mover)
+        from doomfj.collision import mover_line_states
+        _cmovers = dict(mover_line_states(lds, sds, _msecs, _mcell, max))
         _clists, _cthings = cell_lists(_crows, PLAYER_RADIUS), None
         if _LOOT:   # M7 P6: the static blockers (barrels by bar_solid, the solid decorations) in the PLAYER's cells
             _clists, _cthings = _lootcode.player_cell_things(_p31["world"], _clists)
@@ -3176,14 +3241,21 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
             def _card_pick(tag, _ct=_ct, _cz=_cz, _cslot=_cslot):
                 return card_pickup_lines(tag, (_ct.x, _ct.y), _cslot, _cz - _RU, _cz + _RD, _IR + _PR)
-        def _after_accept(wo="wo", lw="lw"):
+        def _after_accept(wo="wo", lw="lw", tp=None):
             """the walk-over lines an accepted player move runs (`move_with_collision_lines(after_accept=)`); M7 P8a:
-            the knock move's copy (doomfj.knockcode.ptry_lines) with its own labels"""
+            the knock move's copy (doomfj.knockcode.ptry_lines) with its own labels. M8 F1.3: then the W1 floor
+            lines (labels `<lw>f<k>`; none on E1M1). M8 L4: the WR teleports LAST (they move him; `tp` the knock
+            copy's prefix -- it restarts the knock loop at the destination)"""
             return ((walkover_lines(_walk_trig, sorted(_dst_tbl), PLAYER_RADIUS >> 16, prefix=wo)
                      if _walk_trig else [])
                     + (lift_walk_lines(lift_walk_triggers(secs, lds, sds, map_wad.vertexes(mapname)),
                                        sorted(_lift_st), PLAYER_RADIUS >> 16, prefix=lw)
-                       if _movers_on else []))
+                       if _movers_on else [])
+                    + (floor_walk_lines(_floor_groups, _movers.floor_walk_triggers(
+                        lds, map_wad.vertexes(mapname), _floor_groups), PLAYER_RADIUS >> 16, prefix=lw + "f")
+                       if _movers_on else [])
+                    + (_teleportcode.player_lines(_TELE, prefix=tp or "tpw", knock_cells=_KNOCK, knock_ctx=bool(tp))
+                       if _TELE else []))
         _collide_block = ([";simcollide_skip", "simcollide:"]
                           + move_with_collision_lines(
                               _croot, _pfx(mapname), radius=PLAYER_RADIUS,
@@ -3240,10 +3312,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + monster_seed_fj(cmap, lds, sds, _dsecs_open, _msecs, _mcell)
                 + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"],   # M7 P4.2a: mon_solid
                                     hurt=bool(_chase.get("hurt")))                # M7 P5: a dead player blocks nothing
+                # M8 L4: P_TeleportMove's stomp test (tp_stomp, jumping over itself)
+                + (_teleportcode.stomp_leaf_lines(_chase["slots_rt"], hurt=bool(_chase.get("hurt"))) if _TELE else [])
                 + move_leaf_lines(root=_mroot, lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:])
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
-                                  dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"])
+                                  dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"],
+                                  **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpm")} if _TELE else {}))
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES,
                                  **({"fight": True} if _FIGHT else {}))    # M7 P8a I: toward the target
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
@@ -3264,7 +3339,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     _knockcode.slots_of(_p31["world"], [t_ for t_, _r in _chase["slots_rt"]]),
                     player_root=_croot, mon_root=_mroot, nib=_p31["world"].sec_nibbles,
                     lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:]) for t_ in _chase["lift_walk"]],
-                    after_accept=_after_accept("kbwo", "kblw"), solid=_chase["solid"]) if _KNOCK else [])
+                    after_accept=_after_accept("kbwo", "kblw", "tpk"), solid=_chase["solid"],
+                    # M8 L4: a monster's knock step teleports too; its stub writes the facing back
+                    **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpq", knock_ctx=True),
+                        "slot_back": (lambda m_: _teleportcode.slot_back_lines(
+                            m_, facing="mon_facing + %d*dw" % m_, knock=True, walk=False, tag="tpkb"))}
+                       if _TELE else {})) if _KNOCK else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
@@ -3297,6 +3377,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
+            nfs=_movers.fswitch_nibbles(_floor_groups),                 # M8 F1.3: the fswitch vector
             monsters=_p31["restart"] if _p31 else None,
             hud_restart=_hud["restart"] if _hud else None, wpn_restart=_wpn["restart"] if _hud else (),
             aim=bool(_AIM), hrt_restart=_hrt["restart"] if _hrt else (),
@@ -3305,7 +3386,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # loot cells; each skill's runtime pickups' thvis slots (p6_restart_parts, the one composition)
             p6_common=_p6_restart[0], p6_skills=_p6_restart[1],
             p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None),     # M7 P8a: the packages' cells
-            p10_common=_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
+            p10_common=(list(_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
+                        + (_teleportcode.level_start_lines() if _TELE else [])))             # M8 L4: no reactiontime
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
@@ -3318,10 +3400,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _exit = (exit_boxes(lds, map_wad.vertexes(mapname)) if (standalone and menu and _door_tic)
              else [])
     # M7 P2b: the SR lifts and the floor switch, on a use press that misses the exit
+    # M8 F1.3: every lift of an SR line's tag, and every S1 floor group by its own lines (group 0's text is E1M1's)
     _press_miss = (use_line_lines(use_line_boxes(secs, lds, map_wad.vertexes(mapname), LIFT_USE_SPECIALS),
-                                  [b for _t, b in use_line_boxes(secs, lds, map_wad.vertexes(mapname),
-                                                                 FLOOR_SWITCH_SPECIALS)],
-                                  {secs[si].tag: k for si, k in _lift_slot.items()})
+                                  [], _movers.lift_slots_of_tag(secs, sorted(_lift_slot)), _floor_groups,
+                                  _movers.floor_use_boxes(lds, map_wad.vertexes(mapname), _floor_groups))
                    if (_movers_on and _exit) else [])
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, monster_tic=_p31["tic"] if _p31 else (),
@@ -3330,7 +3412,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   # M7 P6+P7: the "full" player's tic (lootcode.tic_lines): nukage, the weapon, the
                                   # fade -- or, dead at the tic's start, package D's dt_turn -- and the death think's
                                   # restart request and jump past the move, or the strength and bonus tic
-                                  weapon=(_loot["tic"](_wpn["tic"], _hrt["tic"]) if _loot else
+                                  # M8 L4: and the reactiontime's gate, right before the move (teleportcode)
+                                  weapon=((list(_loot["tic"](_wpn["tic"], _hrt["tic"]))
+                                           + (_teleportcode.reaction_lines() if _TELE else [])) if _loot else
                                           (list(_wpn["tic"]) + (list(_hrt["tic"]) if _hrt else []))
                                           if _wpn else ()),
                                   weapon_bar=(_wpn.get("bar", ()) if _wpn else ()),   # M7 P6+P7: after the move
@@ -3402,9 +3486,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P5: then the fireballs and the blood (world.tic's order: monsters, projectiles, barrels, effects -- each phase
     # skips itself while `lvdone`), then the bar's health and armor from what the frame's damage left (inside the
     # same guard: a frozen level changes neither)
-    _wt_pools = p5_tic_lines(_hrt, barrels=bool(_bar)) if _hrt else []      # M7 P6: + the barrels' phase
-    if _hrt and _exit:                     # issue #123 item 4: the bar inside the lvdone guard is never stale
-        assert_exit_frame_bar(map_wad, mapname, _exit)
+    # M8 F7 (issue #123 item 4): a map where the exit frame can move the health or armor runs the bar after the
+    # lvdone guard (E1M1 cannot: its text is unchanged)
+    _bar_always = bool(_hrt and _exit and exit_frame_bar_hazards(map_wad, mapname, _exit)["hazards"])
+    _wt_pools = (p5_tic_lines(_hrt, barrels=bool(_bar), bar_always=_bar_always)     # M7 P6: + the barrels' phase
+                 if _hrt else [])
     # M7 P6+P7 E: the monsters' world (the monster tic and the pools) world.MONSTER_TICS_PER_FRAME times a frame
     pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
@@ -3728,7 +3814,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # `doors.door_states`, so this declaration is the level's initial condition, exactly as
           # `viewx/viewy/viewangle` are for the player.
           *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
-          *(mover_decls(len(_lift_slot)) if _movers_on else []),          # M7 P2b
+          *(mover_decls(len(_lift_slot), _movers.fswitch_nibbles(_floor_groups)) if _movers_on else []),  # M7 P2b
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
           *(_hud["decls"] if _hud else []),                               # M7 P4.0: the bar
           *(_wpn["decls"] + _wpn["tables"] if _wpn else []),                # M7 P4.1: the weapon
@@ -3742,6 +3828,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *(_statcode.decls(_p31["world"]) if _STATS else []),           # P10: the stats' cells and scratch
+          *(_teleportcode.decls() if _TELE else []),                      # M8 L4: p_rct and the teleports' scratch
           *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *(WT_DECLS if (_p31 and _hrt and _WT_TICS > 1) else []),   # M7 P6+P7 E: the tempo loop's counter
@@ -4637,15 +4724,24 @@ assert SPR_FRAG_BYTES <= SPR_SLOT_C_BYTE <= SPR_SLOT_B_BYTE - SPR_FRAG_BYTES    
 assert len(SPR_THING_SLOT_FIELDS) <= SPR_THING_SLOT_BYTES
 
 
-def check_slot_ids(n_things):
+def check_slot_ids(n_drawable, n_pools, n_drops, cfg):
     """M7 P1.4: a fragment names its thing by a ONE-BYTE slot id, 1..255 (0 = no fragment), one per
     thing the frame accepts -- and every drawable thing is visited at most once a frame (baked or
-    listed, never both: the emitter's M14.5 control). So the bound is the drawable count. A wrapped
-    id would hand one thing's top row and light to another's columns: wrong pixels, no crash.
-    Runtime pools (projectiles, effects) must be added to the count when they land."""
-    assert n_things < SPR_THING_SLOTS, (
-        "%d drawable things: the fragment's one-byte slot id holds %d (docs/gp-sprite-column.md "
-        "risk 5)" % (n_things, SPR_THING_SLOTS - 1))
+    listed, never both: the emitter's M14.5 control). A wrapped id would hand one thing's top row and
+    light to another's columns: wrong pixels, no crash.
+    M8 F1.4 (docs/f1-big-map-widths.md section 1): the things one frame can hold are the drawable
+    things a game has (`n_drawable`: one skill's in the tier with skills), the runtime pools
+    (`n_pools`: fireballs, puffs and blood) and the drops of the dead (`n_drops`). A map whose sum
+    passes 255 takes a per-frame cap (`cfg.SPR_SLOT_CAP`, MAP_CONFIG; frame.thing_record_body and
+    the oracle's `n_slots`), which bounds the ids by construction; a cap of 0 asks the sum to fit."""
+    cap = cfg.SPR_SLOT_CAP
+    assert 0 <= cap < SPR_THING_SLOTS, (
+        "SPR_SLOT_CAP %d: the fragment's one-byte slot id holds %d" % (cap, SPR_THING_SLOTS - 1))
+    n_things = n_drawable + n_pools + n_drops
+    assert cap or n_things < SPR_THING_SLOTS, (
+        "%d things a frame can hold (%d drawable + %d pool + %d drops): the fragment's one-byte slot id "
+        "holds %d -- give the map a SPR_SLOT_CAP (config.MAP_CONFIG; docs/gp-sprite-column.md risk 5, "
+        "docs/f1-big-map-widths.md section 1)" % (n_things, n_drawable, n_pools, n_drops, SPR_THING_SLOTS - 1))
 
 
 def sprite_bank_header():

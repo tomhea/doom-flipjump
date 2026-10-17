@@ -2,7 +2,7 @@
 before any 1-2 hour assembly. Prints the parts' sizes on success, the first refusal on failure.
 
     python scripts/emit_check.py E1M2                                 # what refuses today
-    python scripts/emit_check.py E1M2 --standin gives far-los ...      # past the named refusals, for a SIZE measurement
+    python scripts/emit_check.py E1M2 --standin far-los ...            # past the named refusals, for a SIZE measurement
 
 A STAND-IN is a named, opt-in substitute for a feature that is not built yet: it supplies the missing piece AS CODE (a
 give routine of the same size, a decoration present on every skill ...), never by switching asserts off -- E1M2's
@@ -18,37 +18,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-
-
-def _gives():
-    """F4: yellow / red cards as the blue card's routine, the soulsphere as the stimpack's, the computer map as the
-    health bonus's -- give routines of about their size, renamed to the kind's labels"""
-    import re
-    import doomfj.lootcode as lc
-    orig = lc.give_lines
-
-    def give(kind, *a, **k):
-        stand = {13: 5, 6: 5, 2013: 2011, 2026: 2014}.get(kind, kind)
-        out = orig(stand, *a, **k)
-        if stand == kind:
-            return out
-        return [re.sub(r"(?<!\w)give_%d(?!\d)" % stand, "give_%d" % kind, x) for x in out]
-    lc.give_lines = give
-
-
-def _slanted_doors():
-    """F2: a door with slanted sides contacts as its bounding rectangle (doorcode's 'd' lines)"""
-    from doomfj import doorcode
-    orig = doorcode.door_contact_lines
-
-    def dcl(tag, geo, *a, **k):
-        area, lines = geo
-        if area[0] == "poly":
-            xs = [p for e in area[1] for p in (e[0], e[2])]
-            ys = [p for e in area[1] for p in (e[1], e[3])]
-            area = (min(xs), min(ys), max(xs), max(ys))
-        return orig(tag, (area, [ln for ln in lines if ln[0] != "d"]), *a, **k)
-    doorcode.door_contact_lines = dcl
 
 
 def _decor_every_skill():
@@ -88,34 +57,6 @@ def _far_los():
     ms.far_margin = fm
 
 
-def _slot_ids():
-    """F1: more than 255 drawable things -- the slot-id check skipped (ids wrap: size right, pixels not)"""
-    import doomfj.wall_renderer as wr
-    wr.check_slot_ids = lambda n: None
-
-
-def _soundblock_ignored():
-    """F3: the fj noise flood without ML_SOUNDBLOCK -- the block edges read as ordinary edges (the flood's size, not its
-    rule: the model keeps them)"""
-    import doomfj.noisecode as nc
-    for name in [n for n in dir(nc) if callable(getattr(nc, n)) and not n.startswith("_")]:
-        fn = getattr(nc, name)
-        if getattr(fn, "__module__", "") != nc.__name__:
-            continue
-
-        def wrap(*a, _fn=fn, **k):
-            w = next((x for x in a if hasattr(x, "_sound_block_static_edges")), None)
-            if w is None:
-                return _fn(*a, **k)
-            saved = (w._sound_block_door_edges, w._sound_block_static_edges)
-            w._sound_block_door_edges, w._sound_block_static_edges = [], []
-            try:
-                return _fn(*a, **k)
-            finally:
-                w._sound_block_door_edges, w._sound_block_static_edges = saved
-        setattr(nc, name, wrap)
-
-
 def _barrels_one_skill():
     """F1: barrels that differ by skill -- every skill's level start read as the hard skill's (NEW GAME's lines per
     skill are F1's)"""
@@ -148,24 +89,6 @@ def _barrel_chains_static():
     bc.chain_pairs = chains
 
 
-def _pickup_static_z():
-    """F1: a pickup standing in a door or mover sector (E1M2's blue card on floor-switch sector 45) -- read at its
-    sector's stored floor: the pickup code's size, not its z on a moved floor"""
-    import doomfj.lootcode as lc
-    orig = lc.pickup_lines
-
-    def pl(w, *a, **k):
-        secs = {w.leaf_sector[w.rm.point_in_subsector(w.cmap, t.x, t.y)] for t in w.pickup_things}
-        saved = (w.door_order, w.mover_order)
-        w.door_order = [s for s in saved[0] if s not in secs]
-        w.mover_order = [s for s in saved[1] if s not in secs]
-        try:
-            return orig(w, *a, **k)
-        finally:
-            w.door_order, w.mover_order = saved
-    lc.pickup_lines = pl
-
-
 def _attacker_7bit():
     """F1: more than 126 monster slots against the 7-bit attacker ids (p_atk / aim_sid in world's schema) -- the death
     turn's dispatch over the first 126 slots: the code's size (two levels of 16), not the far killers' faces"""
@@ -174,19 +97,14 @@ def _attacker_7bit():
     hc.turn_lines = lambda slot_rows, *a, **k: orig(list(slot_rows)[:0x7E], *a, **k)
 
 
-def _exit_bar_stale():
-    """F7: a health / armor pickup within a frame of the exit box (issue #123 item 4: the bar stale on the exit frame)
-    -- a CHECK with no code behind it, skipped: the program is unchanged, the exit frame's bar may be one frame old"""
-    import doomfj.wall_renderer as wr
-    wr.assert_exit_frame_bar = lambda *a, **k: None
-
-
-STANDINS = {"soundblock-ignored": _soundblock_ignored, "gives": _gives, "slanted-doors": _slanted_doors, "decor-every-skill": _decor_every_skill,
-            "stats-digits": _stats_digits, "far-los": _far_los, "slot-ids": _slot_ids, "barrels-one-skill": _barrels_one_skill,
+# M8 F4 RETIRED "gives" (lootcode.give_lines: the yellow / red cards, the soulsphere, the computer map), F7 RETIRED
+# "exit-bar-stale" (wall_renderer.p5_tic_lines(bar_always=): the bar runs after the lvdone guard where the exit frame
+# can move it), F2 RETIRED "slanted-doors" (doorcode: a slanted door's contact by its own lines) and M8 L5 RETIRED
+# "soundblock-ignored" (noisecode floods with ML_SOUNDBLOCK: tests/fj/test_noise_block_fj.py)
+STANDINS = {"decor-every-skill": _decor_every_skill,
+            "stats-digits": _stats_digits, "far-los": _far_los, "barrels-one-skill": _barrels_one_skill,
             "barrel-chains-static": _barrel_chains_static,
-            "pickup-static-z": _pickup_static_z,
-            "attacker-7bit": _attacker_7bit,
-            "exit-bar-stale": _exit_bar_stale}
+            "attacker-7bit": _attacker_7bit}
 
 
 def main():

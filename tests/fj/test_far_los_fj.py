@@ -70,7 +70,11 @@ def _nib_bytes(vals, n):
 def _states(w, rng):
     doors = [rng.choice((0, 0, w.door_nstates[si] - 1, rng.randrange(w.door_nstates[si]))) for si in w.door_order]
     lifts = [rng.randrange(len(w.lift_stops[si])) for si in w.lift_order]
-    return doors, lifts, rng.randrange(2)
+    # M8 F1.3: a state per floor group on a WIDE map (E1M2: `fswitch` a vector, states then timers); E1M1's one 1-bit
+    # switch draws exactly as before
+    if not w.floor_wide:
+        return doors, lifts, rng.randrange(2)
+    return doors, lifts, [rng.randrange(g.n) for g in w.floor_groups]
 
 
 def _maxr(w):
@@ -134,7 +138,8 @@ def _model(w, s) -> int:
         w.ws.d_state[d] = v
     for k, v in enumerate(lifts):
         w.ws.l_state[k] = v
-    w.ws.f_switch = sw
+    for g, v in enumerate(sw if w.floor_wide else [sw]):     # M8 F1.3: World's one accessor
+        w._set_floor(g, v, 0)
     w._mh_last = None
     w._door_phase_scene()
     if kind == BLAST:                      # combat._radius_attack: los_points(target, spot)
@@ -183,12 +188,13 @@ def _lines(w, mut=None):
 def _run(tmp, w, samples, name, mut=None):
     """-> (verdicts, op count)"""
     nd, nl = len(w.door_order), len(w.lift_order)
+    nf = len(w.floor_groups)                             # M8 F1.3: the floor groups (E1M1: the switch)
     prog = "\n".join([
         "stl.startup_and_init_all",
         "loop:", "hex.input 1, wmagic", "hex.if0 2, wmagic, done",
         "hex.input 2, mm_x", "hex.input 2, mm_y", "hex.input 4, mt_tqx", "hex.input 4, mt_tqy", "hex.input 1, bl_b",
         "hex.input %d, dstate" % ((nd + 1) // 2), "hex.input %d, lstate" % ((nl + 1) // 2),
-        "hex.input 1, rbyte", "hex.mov 1, fswitch, rbyte",
+        *(["hex.input %d, fswitch" % ((nf + 1) // 2)] if w.floor_wide else ["hex.input 1, rbyte", "hex.mov 1, fswitch, rbyte"]),
         "sim.jump16 wmagic, out, far, near, blast, out, out, out, out, out, out, out, out, out, out, out, out",
         "near:", "hex.mov 8, viewx, mt_tqx", "hex.mov 8, viewy, mt_tqy", "stl.fcall sl_los, sl_ret", ";out",
         "blast:", "hex.mov 4, bl_px, mm_x", "hex.mov 4, bl_py, mm_y", "hex.mov 8, bl_qx, mt_tqx",
@@ -201,7 +207,7 @@ def _run(tmp, w, samples, name, mut=None):
         "wmagic: hex.vec 2", "rbyte: hex.vec 2", "mm_x: hex.vec 4", "mm_y: hex.vec 4",
         "viewx: hex.vec 8", "viewy: hex.vec 8", "mt_tqx: hex.vec 8", "mt_tqy: hex.vec 8",
         "dstate: hex.vec %d" % (2 * ((nd + 1) // 2)), "lstate: hex.vec %d" % (2 * ((nl + 1) // 2)),
-        "fswitch: hex.vec 1"]) + "\n"
+        "fswitch: hex.vec %d" % (2 * nf if w.floor_wide else 1)]) + "\n"
     src = tmp / ("%s.fj" % name)
     src.write_text(prog, encoding="utf-8")
     out = tmp / ("%s.fjm" % name)
@@ -211,7 +217,7 @@ def _run(tmp, w, samples, name, mut=None):
     feed = b""
     for kind, px, py, qx16, qy16, b, doors, lifts, sw in samples:
         feed += bytes([kind]) + struct.pack("<HHIIB", px & 0xFFFF, py & 0xFFFF, qx16 & M32, qy16 & M32, b)
-        feed += _nib_bytes(doors, nd) + _nib_bytes(lifts, nl) + bytes([sw])
+        feed += _nib_bytes(doors, nd) + _nib_bytes(lifts, nl) + (_nib_bytes(sw, nf) if w.floor_wide else bytes([sw]))
     io = FixedIO(feed + bytes([0]))
     term = fj.run(out, io_device=io, print_time=False, print_termination=False)
     got = io.get_output(allow_incomplete_output=True).decode().split("\n")

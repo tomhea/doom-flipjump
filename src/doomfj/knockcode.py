@@ -462,10 +462,12 @@ def ptry_lines(after_accept: Sequence[str] = ()) -> List[str]:
             "    stl.fret kb_tyret"]
 
 
-def mtry_lines(mon_root: str, lift_trigs=()) -> List[str]:
+def mtry_lines(mon_root: str, lift_trigs=(), teleport: Sequence[str] = ()) -> List[str]:
     """`kb_mtry` (via kb_try; frets kb_tyret): a monster's knock try at (kb_cx, kb_cy) -- world._monster_knock_try --
     on monstermove's context (mm_x, mm_y, mm_z, mm_r, mm_r30, mm_tw, mm_leafw, mm_sec: the slot stub set them).
-    `mon_root`: the monster cells; `lift_trigs`: [(lift slot, axis, coord, lo, hi)] (monstermove.move_leaf_lines')"""
+    `mon_root`: the monster cells; `lift_trigs`: [(lift slot, axis, coord, lo, hi)] (monstermove.move_leaf_lines').
+    M8 L4 (`teleport`: teleportcode.monster_lines(knock_ctx=True)): the WR teleports after the lifts -- a fire makes
+    the destination the move and the candidate (kb_cx / kb_cy: no fraction) and stops the momentum"""
     from doomfj.doorcode import _crossed_lines
     from doomfj.world import DROPOFF_MAX, STEP_UP
     out = ["kb_mtry:",
@@ -516,6 +518,7 @@ def mtry_lines(mon_root: str, lift_trigs=()) -> List[str]:
                                   regs=("mm_ox16", "mm_oy16", "cpx", "cpy"))
         out.append("    ;kq_lwd")
     out += ["  kq_lwd:",
+            *teleport,                                     # M8 L4: the WR teleports (teleportcode.monster_lines)
             "    hex.mov 4, mm_x, mm_nx", "    hex.mov 4, mm_y, mm_ny",
             "    hex.mov 8, mm_z, cp_floor",
             "    hex.zero w/4, kb_lf", "    hex.mov 3, kb_lf, ptss",
@@ -536,11 +539,12 @@ def mtry_lines(mon_root: str, lift_trigs=()) -> List[str]:
     return out
 
 
-def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid") -> List[str]:
+def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid", slot_back=None) -> List[str]:
     """`kb_pmove` (the player's: stl.fcall kb_pmove, kb_pret), `kb_mmove` (a monster's, on the context) and the slot
     stubs `kbs<m>` (stl.fcall kbs<m>, kbs_ret: the slot's momentum not 0 -> its cells into the context, its own
     `solid` flag cleared so mm_things skips it, kb_mmove, the cells back). `slots[m]` = (runtime thing, radius, mass);
-    `nib`: a sector id's width (World.sec_nibbles: `msec`, `mm_sec`)"""
+    `nib`: a sector id's width (World.sec_nibbles: `msec`, `mm_sec`). M8 L4: `slot_back(m)` -- the lines after the
+    slot's kb_mmove (teleportcode.slot_back_lines: a teleport's facing); None on a map without a teleport"""
     from doomfj.sectorcode import msec_cell
     from doomfj.reference_model import PLAYER_HEIGHT
     h, hd = PLAYER_HEIGHT >> 16, PLAYER_HEIGHT >> 18
@@ -584,6 +588,7 @@ def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid") ->
                 "    hex.mov 1, kb_dead, mon_shootable + %d*dw" % m, "    hex.xor_by kb_dead, 1",   # a corpse
                 "    hex.mov 1, kb_sv, %s + %d*dw" % (solid, m), "    hex.zero 1, %s + %d*dw" % (solid, m),
                 "    stl.fcall kb_mmove, kb_mret",
+                *(slot_back(m) if slot_back else []),               # M8 L4: a teleport's facing
                 "    hex.mov 1, %s + %d*dw, kb_sv" % (solid, m),
                 "    hex.mov 8, mkx + %d*dw, kb_vx" % (8 * m), "    hex.mov 8, mky + %d*dw, kb_vy" % (8 * m),
                 "    hex.mov 4, mfx + %d*dw, kb_px" % (4 * m), "    hex.mov 4, mfy + %d*dw, kb_py" % (4 * m),
@@ -597,16 +602,19 @@ def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid") ->
 
 
 def leaf_lines(slots: Sequence[tuple], *, player_root: str, mon_root: str, nib: int, lift_trigs=(),
-               after_accept: Sequence[str] = (), solid: str = "mon_solid") -> List[str]:
+               after_accept: Sequence[str] = (), solid: str = "mon_solid", teleport: Sequence[str] = (),
+               slot_back=None) -> List[str]:
     """every knock leaf, jumping over itself: kb_go (+ kbt<m>, kb_gm, kb_th, kb_pz), kb_cell, kb_xy (+ kb_try),
     kb_ptry, kb_mtry, kb_pmove, kb_mmove, kbs<m>. The program must hold: the cells (`decls(nmon)`), `tables_fj`,
     mrnd, finesine, the point_to_angle tables, ptloc_walk, ms_seed_leaf, the player's and the monsters' cells (their
     roots), monstermove's context and mm_things, pk_go, pb_mon, projcode's pw_link / pw_unlink, lfsec, dm_leaf's window
     (dm_hp, dm_rng, dm_x, dm_y), p_hp / p_dead / rng_pl / wp_rdy, thpos_rt / thss_rt / msec / mon_floorz /
-    mon_shootable / `solid`, lreq. `nib`: a sector id's width (World.sec_nibbles: move_lines' msec)"""
+    mon_shootable / `solid`, lreq. `nib`: a sector id's width (World.sec_nibbles: move_lines' msec). M8 L4: `teleport`
+    (mtry_lines') and `slot_back` (move_lines') -- the WR teleports of a monster's knock step; none on E1M1"""
     return (["// M7 P8a (doomfj.knockcode, package K): knockback's leaves", ";kq_end"]
             + go_lines(slots) + cell_lines(player_root) + xy_lines() + ptry_lines(after_accept)
-            + mtry_lines(mon_root, lift_trigs) + move_lines(slots, nib=nib, solid=solid) + ["kq_end:"])
+            + mtry_lines(mon_root, lift_trigs, teleport) + move_lines(slots, nib=nib, solid=solid, slot_back=slot_back)
+            + ["kq_end:"])
 
 
 # ---- the splice points -----------------------------------------------------------------------------------------------

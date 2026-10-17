@@ -97,6 +97,7 @@ from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
+from doomfj.movers import crossed_shape as _crossed_shape          # M8 F1.3: the W1 floor lines (slanted too)
 from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE, turn_step   # STRAFE_MOVE: M7 P4.1, the ONE value
 from doomfj.reference_model import ANG180 as _ANG180                       # M7 P7: P_DeathThink's turn
@@ -393,6 +394,11 @@ class CombatMixin:
         assert set(RESTART_KEEP) <= {f.name for f in self.schema}
         self._level_starts: Dict[int, object] = {}
         self.pickup_z = [self._floor_at(t.x, t.y) for t in self.pickup_things]
+        # M8 F1.3 (docs/f1-big-map-widths.md 9): an item on a MOVER's floor rides it (P_ChangeSector carries it): its
+        # touch reads the floor of the moment (E1M2's blue card on switch sector 45); every other item its stored one
+        self.pickup_sector = [self.leaf_sector[self.rm.point_in_subsector(self.cmap, t.x, t.y)]
+                              for t in self.pickup_things]
+        self.pickup_on_mover = [s in self.mover_order for s in self.pickup_sector]
         assert {t.type for t in self.pickup_things} <= GETTABLE
         # M8 L0: the computer map is always taken because no level has two (P_GivePower refuses a held power)
         assert sum(t.type == 2026 for t in self.pickup_things) <= 1
@@ -479,7 +485,7 @@ class CombatMixin:
         if self._p_full:                          # M7 P5: nukage is the full model's alone (no fj mirror before it)
             self._special_sector(ev)             # at the tic-start position, as in DOOM
         moving = keys["forward"] != keys["back"] or keys["strafe_left"] != keys["strafe_right"]
-        if moving and ws.p_mobj_state == gd.STATE_INDEX["S_PLAY"]:
+        if moving and ws.p_mobj_state == gd.STATE_INDEX["S_PLAY"] and not self._reacting():
             self._set_player_mobj("S_PLAY_RUN1")                      # P_MovePlayer
         if self.player != "walk":                 # M7 P4: "walk" (through P4.0) has no weapon
             self._weapon_keys(keys)
@@ -597,13 +603,13 @@ class CombatMixin:
                 return
         for tag, box in self.lift_use:
             if W.in_use_box_fixed(box, ws.px, ws.py):
-                ws.l_req[self.lift_of_tag[tag]] = 1
-        if not ws.f_switch:
-            for box in self.switch_boxes:
-                if W.in_use_box_fixed(box, ws.px, ws.py):
-                    ws.f_switch = 1
-                    self._door_phase_scene()          # instant (D-L2): this tic's move sees it
-                    break
+                for k in self.lift_of_tag[tag]:       # M8 F1.3: every lift of the tag (EV_DoPlat)
+                    ws.l_req[k] = 1
+        # the S1 floor lines (M8 F1.3: each tag's group fires once; an instant one -- E1M1's switch, D-L2 -- moves its
+        # floors at once and this tic's move sees them, `floor_fire`)
+        for g, box in self.floor_use:
+            if W.in_use_box_fixed(box, ws.px, ws.py):
+                self.floor_fire(g)
 
     def player_can_open(self, si: int) -> bool:
         """EV_VerticalDoor's key check: a key door needs its card or skull; other doors nothing."""
@@ -1281,10 +1287,14 @@ class CombatMixin:
                 px, py = x + xmove, y + ymove
                 xmove = ymove = 0
             px, py = _signed(px, 32), _signed(py, 32)
+            self._teleported = False
             ok = self._player_knock_try(px, py, ev) if player else self._monster_knock_try(m, px, py, ev)
             ev.knocks.append((thing, ok))
             if not ok:
                 mx = my = 0
+            if self._teleported:                 # M8 L4: EV_Teleport zeroed mo->momx/momy; the loop goes on from
+                mx = my = 0                      # the destination (DOOM's ptryx = mo->x + the move left)
+                self._teleported = False
             if not (xmove or ymove):
                 break
         if self._knock_slides(thing, mx, my):
@@ -1876,6 +1886,9 @@ class CombatMixin:
         `player_blocking` is off (the legacy walk-through, for regression comparison). With nothing
         in the way this IS step_sim (a test holds the two equal)."""
         rmod, ws = self.rm, self.ws
+        if self._reacting():                     # M8 L4: P_PlayerThink -- `if (reactiontime) reactiontime--;
+            ws.p_reaction -= 1                   # else P_MovePlayer`: no turn, no walk (teleportcode.reaction_lines)
+            return
         # M7 P6+P7: the turn is reference_model.turn_step -- the slow first frame of a held turn, then x1.5
         angle, ws.p_turnheld = turn_step(ws.pangle, keys, ws.p_turnheld)
         ws.pangle = angle
@@ -1925,6 +1938,35 @@ class CombatMixin:
         for trig in self.lift_walk:                   # M7 P2b: the WR lifts, every crossing
             if crossed(trig, (x, y), (cx, cy), PLAYER_R):
                 ws.l_req[self.lift_order.index(trig[0])] = 1
+        for g, shape in self.floor_walk:              # M8 F1.3: the W1 floor lines (each group fires once)
+            if _crossed_shape(shape, (x, y), (cx, cy), PLAYER_R):
+                self.floor_fire(g)
+        if self.teleports:                            # M8 L4: the WR teleports -- LAST (they move him)
+            self._teleport_player(x, y, cx, cy)
+
+    def _reacting(self) -> bool:
+        """M8 L4: the player's reactiontime is running (a level with a teleporter only: `p_reaction` exists there)"""
+        return bool(self.teleports) and self.ws.p_reaction > 0
+
+    def _teleport_player(self, x: int, y: int, cx: int, cy: int) -> None:
+        """M8 L4 (doomfj.teleport): EV_Teleport for the player after his accepted move (x, y) -> (cx, cy), 16.16 -- the
+        first teleport line crossed from its front (line order; one per move) and, unless a shootable thing stands at
+        the destination (NO TELEFRAG: refused as a monster's is), the destination: position, angle, knock momentum 0,
+        reactiontime 18. The fj: teleportcode.player_lines (after the walk-over lines, `after_accept`)"""
+        from doomfj.teleport import REACTION_TICS, crossed_front, stomped
+        ws = self.ws
+        for tel in self.teleports:
+            if not crossed_front(tel, (x, y), (cx, cy), PLAYER_R):
+                continue
+            if stomped(self, tel.dest, PLAYER_R):
+                return
+            ws.px, ws.py = tel.dest[0] << 16, tel.dest[1] << 16
+            ws.pangle = tel.angle
+            ws.p_reaction = REACTION_TICS
+            if self._p_knock:
+                ws.p_momx = ws.p_momy = 0
+            self._teleported = True
+            return
 
     def _solid_thing_at(self, x16: int, y16: int):
         """PIT_CheckThing's refusal for the player's box at (x16, y16): the first solid monster,
@@ -1959,7 +2001,8 @@ class CombatMixin:
                 continue
             if abs((t.x << 16) - x16) >= bd or abs((t.y << 16) - y16) >= bd:
                 continue
-            if self._touch(t.type, False, self.pickup_z[i], z):
+            if self._touch(t.type, False, self.secs_c[self.pickup_sector[i]].floor_h if self.pickup_on_mover[i]
+                           else self.pickup_z[i], z):
                 ws.pickup_taken[i] = 1
                 if gd.THING_TYPES[t.type].flags & gd.MF_COUNTITEM:     # P10: P_TouchSpecialThing's itemcount
                     ws.p_itemcount += 1

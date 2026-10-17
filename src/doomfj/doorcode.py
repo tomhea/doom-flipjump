@@ -24,6 +24,9 @@ defensible door.
 from __future__ import annotations
 
 from doomfj.doors import CLOSING, OPENING, SPEED, WAIT, door_stay, door_stride
+from doomfj.doors import door_card_cell, poly_edges                     # M8 L2
+
+M32 = 0xFFFFFFFF
 
 # `dwait` counts frames and needs to hold WAIT; two nibbles is 0..255.
 WAIT_NIBBLES = 2
@@ -54,18 +57,20 @@ def door_decls(ndoors: int, nwalk: int = 0) -> list:
     ]
 
 
-def _box_test(d: int, box, hit: str, miss: str, regs=("viewx", "viewy")) -> list:
+def _box_test(d: int, box, hit: str, miss: str, regs=("viewx", "viewy"), tag=None) -> list:
     """`in_use_box` in fj: four signed compares of the 16.16 player position against baked corners (M7 P3.2b:
-    `regs` -- a monster's position, `monstermove.move_leaf_lines`' door boxes).
+    `regs` -- a monster's position, `monstermove.move_leaf_lines`' door boxes). M8 L2: `tag` -- the labels' prefix
+    (default `dub<d>`; a door's switch boxes take their own).
 
     The box is axis-aligned precisely so this needs no multiply and no line side test -- see the
     compromise noted in `doors.use_boxes`."""
     x0, y0, x1, y1 = box
     out = []
     rx, ry = regs
+    pre = f"dub{d}" if tag is None else tag
     for k, (reg, val, want_ge) in enumerate(((rx, x0, True), (rx, x1, False),
                                              (ry, y0, True), (ry, y1, False))):
-        tag = f"dub{d}_{k}"
+        tag = f"{pre}_{k}"
         out.append(f"    hex.set 8, dbox, {(val << 16) & 0xFFFFFFFF:#x}")
         if want_ge:                    # miss when reg < val
             out.append(f"    hex.scmp 8, {reg}, dbox, {miss}, {tag}, {tag}")
@@ -175,11 +180,12 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
 def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str, regs=("viewx", "viewy")) -> list:
     """`doors.touches_door` in fj for the player at (`viewx`, `viewy`), box half-width `radius`:
     the centre strictly inside the door's rectangle, or the box straddling one of its two-sided
-    lines (strict, both axes) -> `yes`; else `no`. M7 P3.2b: `regs` -- a monster's 16.16 position (thpos_rt)."""
+    lines (strict, both axes) -> `yes`; else `no`. M7 P3.2b: `regs` -- a monster's 16.16 position (thpos_rt).
+
+    M8 L2: a non-rectangular door (`poly`) -- the box straddling ANY of its boundary lines, an
+    axis-aligned one as above, a slanted one by check_position's test (`_straddle_d_lines`). Its
+    centre-inside test is not run: a door some box FITS inside (`door_contact_geo`'s flag) is refused."""
     area, lines = geo
-    # M8 L0: the model also handles a slanted door (a polygon, slanted lines); this fj does not yet (M8 L2)
-    assert area[0] != "poly" and all(ln[0] != "d" for ln in lines), "a non-rectangular door needs M8 L2's contact"
-    x0, y0, x1, y1 = area
     rx, ry = regs
     r = radius << 16
     out = []
@@ -187,8 +193,14 @@ def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str, regs=("vie
     def between(t, reg, lo16, hi16, fail):
         return (_scmp_const(reg, lo16, fail, fail, f"{t}a") + [f"  {t}a:"]
                 + _scmp_const(reg, hi16, f"{t}b", fail, fail) + [f"  {t}b:"])
-    tests = [(((rx, x0 << 16, x1 << 16), (ry, y0 << 16, y1 << 16)))]
-    for axis, coord, lo, hi in lines:
+    if area[0] == "poly":
+        assert not area[2], "a door a thing's box fits inside needs the centre-inside test, which this fj does not run"
+        tests, lines = [], poly_edges(area)
+    else:
+        assert all(ln[0] != "d" for ln in lines), "a rectangle's lines lie on its box"
+        x0, y0, x1, y1 = area
+        tests = [(((rx, x0 << 16, x1 << 16), (ry, y0 << 16, y1 << 16)))]
+    for axis, coord, lo, hi in (ln for ln in lines if ln[0] != "d"):
         across, along = (ry, rx) if axis == "y" else (rx, ry)
         tests.append(((across, (coord << 16) - r, (coord << 16) + r),
                       (along, (lo << 16) - r, (hi << 16) + r)))
@@ -197,7 +209,48 @@ def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str, regs=("vie
         for j, (reg, lo16, hi16) in enumerate(pair):
             out += between(f"{tag}_{k}{j}", reg, lo16 & 0xFFFFFFFF, hi16 & 0xFFFFFFFF, fail)
         out += [f"    ;{yes}", f"  {fail}:"]
+    for j, ln in enumerate(ln for ln in lines if ln[0] == "d"):
+        fail = f"{tag}_dn{j}"
+        out += _straddle_d_lines(f"{tag}_d{j}", ln[1:], rx, ry, r, yes, fail) + [f"  {fail}:"]
     return out + [f"    ;{no}"]
+
+
+def _line_consts(t: str, seg) -> tuple:
+    """`(lines, (v1x, v1y, dx, dy))` -- a slanted line's constants for `sim.point_side` as baked cells, jumped
+    over (never written: nothing for the reset to restore): v1 in 16.16, the deltas as signed 8-nibble integers"""
+    ax, ay, bx, by = seg
+    names = (f"{t}_v1x", f"{t}_v1y", f"{t}_dx", f"{t}_dy")
+    vals = (ax << 16, ay << 16, bx - ax, by - ay)
+    return ([f"    ;{t}_go"] + [f"  {n}: hex.vec 8, {v & M32:#x}" for n, v in zip(names, vals)]
+            + [f"  {t}_go:"]), names
+
+
+def _straddle_d_lines(t: str, seg, rx: str, ry: str, r16: int, yes: str, no: str, consts=None) -> list:
+    """`doors.straddles_d` in fj: the box of half-width `r16` at (`rx`, `ry`) (16.16 registers) against the slanted
+    line `seg` = (x1, y1, x2, y2) in map units -> `yes` / `no`. The boxes overlap, strict (`min - r < centre < max +
+    r` on both axes is `right > min`, `left < max`), then P_BoxOnLineSide's two extreme corners through
+    `sim.point_side` (P_PointOnLineSide's FixedMul case) differ. `consts`: the line's cells from `_line_consts`
+    (made here when None)."""
+    ax, ay, bx, by = seg
+    out = []
+    if consts is None:
+        data, consts = _line_consts(t, seg)
+        out += data
+    v1x, v1y, dx, dy = consts
+    out += [f"    ;{t}_g2", f"  {t}_cx: hex.vec 8", f"  {t}_cy: hex.vec 8", f"  {t}_s1: hex.vec 1",
+            f"  {t}_s2: hex.vec 1", f"  {t}_g2:"]
+    for k, (reg, lo, hi) in enumerate(((rx, min(ax, bx), max(ax, bx)), (ry, min(ay, by), max(ay, by)))):
+        out += _scmp_const(reg, (lo << 16) - r16, no, no, f"{t}_b{k}a") + [f"  {t}_b{k}a:"]
+        out += _scmp_const(reg, (hi << 16) + r16, f"{t}_b{k}b", no, no) + [f"  {t}_b{k}b:"]
+    pos = (by - ay > 0) == (bx - ax > 0)               # ST_POSITIVE: (left, top) / (right, bottom)
+    corners = ((-r16, r16), (r16, -r16)) if pos else ((r16, r16), (-r16, -r16))
+    for side, (cx, cy) in zip((f"{t}_s1", f"{t}_s2"), corners):
+        for cell, reg, c in ((f"{t}_cx", rx, cx), (f"{t}_cy", ry, cy)):
+            out += [f"    hex.mov 8, {cell}, {reg}",
+                    f"    hex.add_constant 8, {cell}, {c:#x}" if c > 0 else f"    hex.sub_constant 8, {cell}, {-c:#x}"]
+        out += [f"    sim.point_side {side}, {t}_cx, {t}_cy, {v1x}, {v1y}, {dx}, {dy}"]
+    out += [f"    hex.cmp 1, {t}_s1, {t}_s2, {yes}, {no}, {yes}"]
+    return out
 
 
 def reverse_mask(pass_at: int, stride: int, nstates: int) -> int:
@@ -207,7 +260,7 @@ def reverse_mask(pass_at: int, stride: int, nstates: int) -> int:
 
 
 def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None, radius=16, mon_press=frozenset(),
-                   mon_contact=(), dead=None) -> list:
+                   mon_contact=(), dead=None, switches=None, walked=None) -> list:
     """One frame of every door. `slots` is the emitter's door order (`sorted(door sectors)`),
     `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units (none for a
     walk-over door), `kinds[si]` its `doors.door_kinds` kind (all "plain" when omitted).
@@ -228,6 +281,13 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
     M7 P7 (doomfj.lootcode): `dead` -- the cell holding the player's death at the tic's START (`p_dd0`): set, the
     player's use press opens no door and his box holds no closing door (World._doors_phase's `alive`,
     World.door_touched's `player_alive`). Without it the text is P5's.
+
+    M8 L2 (E1M2), each the mirror of `doors.DoorPhase.tic` / World._doors_phase: a yellow / red door's
+    use press needs `pcard_y` / `pcard_r` (`doors.door_card_cell`; declared by the pickups);
+    `switches` (`doors.switch_boxes`: {door: [box]}) -- after the door's own use box misses, the
+    player's use in a switch box presses the door when it is at rest (`doors.switch_ready`: `ddir`
+    and `dwait` zero, EV_DoDoor's no-thinker test); `walked` -- the doors a walk-over line opens
+    (their `dreq`), by default the walk-over kinds. Without them the text is P8a's.
     """
     out = ["// == M2-R4: the doors, one tic each ==================================",
            "//   dr<d>_*  door <d> (index into sorted(door sectors))",
@@ -236,6 +296,9 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
     # monstermove.move_leaf_lines), taken like a walk-over request; `mon_contact` -- [(x16 cell, y16 cell, radius,
     # active cell)] per monster, a closing door reversing on a live one as on the player (World.door_touched)
     kinds = kinds or {si: "plain" for si in slots}
+    switches = switches or {}
+    walked = (set(walked) if walked is not None else
+              {si for si in slots if kinds[si] in ("walkover", "blazestay")})
     # the monsters' contact tests are SHARED: one leaf per (door, radius) on the registers dc_x / dc_y -- inline they
     # were one signed constant compare (1,808 ops) per bound, door and monster, ~14.6M ops for E1M1's 53 monsters
     leaves: dict = {}
@@ -252,20 +315,34 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
         p = f"dr{d}"
         box = boxes.get(si)
         trigger = []
-        if kind == "walkover" or si in mon_press:   # walk-over requests (P2a) and monster presses (P3.2b)
+        if si in walked or si in mon_press:         # walk-over requests (P2a) and monster presses (P3.2b)
             trigger = [f"    hex.if0 1, {rq}, {p}_use",   # so an idle plain door still costs 3 ops
                        f"    hex.zero 1, {rq}",           # ... pressed once
                        f"    ;{p}_press",
                        f"  {p}_use:"]
-        if box is None:
+        sw = switches.get(si, ())
+        if box is None and not sw:
             trigger += [f"    ;{p}_moved"]                  # a walk-over door has no use line
         else:
             trigger += [f"    hex.if0 1, duse, {p}_moved"]
             if dead is not None:
                 trigger += [f"    hex.if1 1, {dead}, {p}_moved"]        # M7 P7: a dead player presses nothing
-            if kind == "blue":
-                trigger += [f"    hex.if0 1, pcard, {p}_moved"]   # EV_VerticalDoor: the blue card
-            trigger += _box_test(d, box, f"{p}_press", f"{p}_moved")
+            miss = f"{p}_sw" if sw else f"{p}_moved"
+            if box is not None:
+                card = door_card_cell(kind)
+                if card:
+                    trigger += [f"    hex.if0 1, {card}, {miss}"]   # EV_VerticalDoor: the key door's card
+                trigger += _box_test(d, box, f"{p}_press", miss)
+            if sw:
+                # M8 L2: a switch (P_UseSpecialLine -> EV_DoDoor) presses a door at rest: no thinker (`ddir`, `dwait`)
+                trigger += [f"  {p}_sw:",
+                            f"    hex.if0 1, {dr}, {p}_swi", f"    ;{p}_moved", f"  {p}_swi:",
+                            f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_swt", f"    ;{p}_moved", f"  {p}_swt:"]
+                for j, b in enumerate(sw):
+                    nxt = f"{p}_sw{j + 1}" if j + 1 < len(sw) else f"{p}_moved"
+                    trigger += _box_test(d, b, f"{p}_press", nxt, tag=f"dsw{d}_{j}")
+                    if j + 1 < len(sw):
+                        trigger += [f"  {nxt}:"]
         rev = None
         if contact is not None and not stay:
             def _rev(yes, no, _g=contact[si], _p=p):
@@ -398,16 +475,44 @@ def walkover_lines(triggers, slots, radius: int, prefix: str = "wo") -> list:
     `viewy`), each unfired trigger whose axis the centre crossed (`c <= L` differs) with the new
     centre strictly inside the segment's extent inflated by the radius fires: `wfired` 1 and its
     door's `dreq` 1 -- the press lands on the next frame's door tic. `prefix` (M7 P8a): the labels'
-    (fj labels are global: a second copy -- the knock move's, doomfj.knockcode -- takes its own)."""
+    (fj labels are global: a second copy -- the knock move's, doomfj.knockcode -- takes its own).
+
+    M8 L2: the entries of ONE line (a tag opening several doors: `doors.walkover_triggers` gives one
+    entry per door) share one crossing test and fire together -- the first entry's `wfired` stands for
+    all (they are only ever set together); a slanted line ("d") crosses by `_crossed_d_lines`."""
     out = ["  // M7 P2a.1: the walk-over triggers (doomfj.doors.crossed)"]
-    for k, (si, axis, coord, lo, hi) in enumerate(triggers):
-        d = slots.index(si)
+    groups: dict = {}
+    for k, trig in enumerate(triggers):
+        groups.setdefault(tuple(trig[1:]), []).append(k)
+    for geo, ks in groups.items():
+        k = ks[0]
         p = f"{prefix}{k}"
+        fire = []
+        for kk in ks:
+            fire += [f"    hex.set 1, wfired + {kk}*dw, 1",
+                     f"    hex.set 1, dreq + {slots.index(triggers[kk][0])}*dw, 1"]
         out += [f"    hex.if0 1, wfired + {k}*dw, {p}_try", f"    ;{p}_no", f"  {p}_try:"]
-        out += _crossed_lines(p, axis, coord, lo, hi, radius,
-                              [f"    hex.set 1, wfired + {k}*dw, 1",
-                               f"    hex.set 1, dreq + {d}*dw, 1"])
+        if geo[0] == "d":
+            out += _crossed_d_lines(p, geo[1:], radius, fire)
+        else:
+            out += _crossed_lines(p, *geo, radius, fire)
     return out
+
+
+def _crossed_d_lines(p: str, seg, radius: int, fire, regs=("cm_ox", "cm_oy", "viewx", "viewy")) -> list:
+    """M8 L2: `doors.crossed` for a SLANTED trigger in fj, on the move (old x, old y) -> (new x, new y) (`regs`,
+    16.16): P_PointOnLineSide of the two centres differ (`sim.point_side`), and the new box is in the move's spechit
+    (`_straddle_d_lines`) -> the `fire` lines; either way on to `<p>_no`."""
+    ox, oy, nx, ny = regs
+    data, consts = _line_consts(p, seg)
+    v1x, v1y, dx, dy = consts
+    return [*data, f"    ;{p}_sg", f"  {p}_so: hex.vec 1", f"  {p}_sn: hex.vec 1", f"  {p}_sg:",
+            f"    sim.point_side {p}_so, {ox}, {oy}, {v1x}, {v1y}, {dx}, {dy}",
+            f"    sim.point_side {p}_sn, {nx}, {ny}, {v1x}, {v1y}, {dx}, {dy}",
+            f"    hex.cmp 1, {p}_so, {p}_sn, {p}_x, {p}_no, {p}_x",
+            f"  {p}_x:",
+            *_straddle_d_lines(f"{p}_b", seg, nx, ny, radius << 16, f"{p}_fire", f"{p}_no", consts=consts),
+            f"  {p}_fire:", *fire, f"  {p}_no:"]
 
 
 def _crossed_lines(p: str, axis: str, coord: int, lo: int, hi: int, radius: int, fire,

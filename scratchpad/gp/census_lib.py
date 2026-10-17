@@ -192,9 +192,9 @@ class Census:
                 return _DT(model, things, sprite_wad, cache)
             return list(rm.frame[0]), None
 
-        def baked_thing_mask(model, cmap, drawable, monster_types):
+        def baked_thing_mask(model, cmap, drawable, monster_types, **kw):     # M8 F1.3: mover_leaves=
             if rm.frame is None:
-                return _BTM(model, cmap, drawable, monster_types)
+                return _BTM(model, cmap, drawable, monster_types, **kw)
             return tuple(rm.frame[1])
         RMOD.drawable_things = drawable_things
         RMOD.baked_thing_mask = baked_thing_mask

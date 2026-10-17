@@ -35,3 +35,41 @@ def profile(mapname: str | None = None) -> MapProfile:
     return MapProfile(map=m, wad="tests/fixtures/freedoom_%s.wad" % lo, prefix="doom_%s" % lo,
                       census="scratchpad/12m/_census_game%s.json.gz" % ("" if e1 else "_" + lo),
                       baseline="shipped" if e1 else "shipped_" + lo, scenarios="scenarios/%s" % lo)
+
+
+def take_map_arg(argv=None, keep: bool = False) -> str:
+    """M8: `--map E1Mn` (or `--map=E1Mn`) on a tool's command line selects the map exactly as DOOMFJ_MAP does -- it
+    sets the environment (child processes inherit it) and `ACTIVE`. It must run BEFORE the tool imports `probe` or
+    `gamespeed`, whose DEFAULT_WAD / DEFAULT_MAP are read at import: a map asked for after one of them was imported
+    on another map is refused rather than half-applied. `keep` leaves the flag in `argv` (a tool whose own parser
+    takes `--map`). -> the active map."""
+    import sys
+    global ACTIVE
+    argv = sys.argv if argv is None else argv
+    want = None
+    for i, a in enumerate(list(argv)):
+        if a == "--map" and i + 1 < len(argv):
+            want, span = argv[i + 1], (i, i + 2)
+            break
+        if a.startswith("--map="):
+            want, span = a.split("=", 1)[1], (i, i + 1)
+            break
+    if want is None:
+        return ACTIVE
+    want = want.upper()
+    for name in ("probe", "gamespeed"):
+        mod = sys.modules.get(name)
+        if mod is not None and getattr(mod, "DEFAULT_MAP", want).upper() != want:
+            raise SystemExit("--map %s: %s was imported on %s first -- pass the map before importing it (or set "
+                             "DOOMFJ_MAP)" % (want, name, mod.DEFAULT_MAP))
+    os.environ["DOOMFJ_MAP"] = want
+    ACTIVE = want
+    if not keep:
+        del argv[span[0]:span[1]]
+    return want
+
+
+def scenario_dir(mapname: str | None = None):
+    """the map's tracked scenario directory (gate roles, gamespeed's records), absolute"""
+    from pathlib import Path
+    return Path(__file__).resolve().parents[2] / profile(mapname).scenarios

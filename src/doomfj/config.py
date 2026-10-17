@@ -226,6 +226,21 @@ class Config:
     # baked thing against it exactly, so a wider sprite on another map fails the emit, never a pixel.
     SPR_REACH: int = 80
 
+    # M8 F1.4 (docs/f1-big-map-widths.md section 1, option B -- the owner, 2026-10-17): the PER-FRAME cap on accepted
+    # things. A fragment names its thing by a ONE-BYTE slot id (`gps_nslot`, 1..255, 0 = no fragment), one per thing
+    # frame.thing_record_body accepts; a map whose frame could accept more caps it -- DOOM's own rule (r_things.c
+    # R_NewVisSprite: past MAXVISSPRITES = 128 it returns the overflow sprite, i.e. the thing is not drawn), and the
+    # walk is front to back, so only the farthest drop. 0 = no cap (E1M1: its count bound fits, the record's two cap
+    # lines expand to nothing -- SPR_SLOT_CAP_ON -- and the oracle takes the old path). wall_renderer.check_slot_ids
+    # holds it below SPR_THING_SLOTS and asks for it when the map's bound does not fit.
+    SPR_SLOT_CAP: int = 0
+
+    @property
+    def SPR_SLOT_CAP_ON(self) -> int:
+        """M8 F1.4: 1 when the record compares `gps_nslot` against SPR_SLOT_CAP (frame.thing_record_body's rep), else 0"""
+        assert 0 <= self.SPR_SLOT_CAP < 256, ("SPR_SLOT_CAP %d: the slot id is one byte" % self.SPR_SLOT_CAP)
+        return 1 if self.SPR_SLOT_CAP else 0
+
     def constants(self) -> dict:
         """The full set of fj-visible constants (the SSOT contents emitted to fj_consts.fj)."""
         return {
@@ -245,6 +260,8 @@ class Config:
             # i.e. WORSE on speed and size both (S3, FINDINGS AZ). Sweep per-site from here.
             "HOT_PAD": self.HOT_PAD, "HOTTER_PAD": self.HOTTER_PAD,
             "SPR_REACH": self.SPR_REACH,
+            # M8 F1.4: the per-frame accepted-thing cap (frame.thing_record_body; 0 = none, the lines expand to nothing)
+            "SPR_SLOT_CAP": self.SPR_SLOT_CAP, "SPR_SLOT_CAP_ON": self.SPR_SLOT_CAP_ON,
         }
 
     def span_ledger(self) -> dict:
@@ -279,7 +296,9 @@ GAME_CFG = Config(VIEW_ROWS=84)
 # (> 255: 3 nibbles, two bytes -- docs/handoff-e1m2.md section 4 (A)) and ~83k band lists (> 65,535: 5 nibbles). The
 # emitter's own asserts (the pid bake, the bands walk) refuse a width a map outgrows, so a missing entry fails loudly.
 MAP_CONFIG = {
-    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1},
+    # M8 F1.4: SPR_SLOT_CAP -- 305 drawable things over the skills, hard's 295 + 10 pool things + 54 droppers' drops
+    # (> 255 slot ids: wall_renderer.check_slot_ids)
+    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255},
 }
 
 

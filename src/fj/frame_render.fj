@@ -667,7 +667,7 @@ ns frame {
     // M7 P4.2a: `aim` -- 1 when this body's projections record the aim window (the runtime monsters' body of a tier
     // whose player shoots); `ttwice`'s measurement copy never records
     def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic, mir, mirf, miru, ltw, seen, sa, sflag, one, aim \
-            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, bslot_gate, offv_top, offv_out, offv_ok, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_c, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_open, seen_next, seen_hit \
+            @ slot_capped, slot_cap_ok, budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, bslot_gate, offv_top, offv_out, offv_ok, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_c, slot_done, col_next, do_store, end, seen_probe, seen_probe2, seen_proj, seen_scan, seen_x1neg, seen_x1ok, seen_x2c, seen_x2ok, seen_loop, seen_col, seen_open, seen_next, seen_hit \
             < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, sp_ex, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, \
               gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8, trb_clip_v, trb_clip_p, sfflag, \
               trb_ylo1, trb_yhi1 {
@@ -681,6 +681,20 @@ ns frame {
         // n_claimed==vieww instead hid every monster in a room the moment a near marking seg
         // finished the plane claim (history: docs/handoff-visual-features.md).
         rep(seen, k) hex.zero 1, sflag               // M7 P3.2a: this thing not yet marked seen
+        // M8 F1.4 (docs/f1-big-map-widths.md section 1, option B) -- THE SLOT CAP: a frame accepts at most SPR_SLOT_CAP
+        // things (`gps_nslot`, the one-byte slot id the record allocates below). Past it a thing is turned away BEFORE
+        // either budget -- one without a seen flag returns, a monster with one takes the seen probe as a budget-failed
+        // one does (sight never depends on drawing) -- DOOM's r_things.c R_NewVisSprite: past MAXVISSPRITES a thing
+        // gets the overflow sprite, never drawn; the walk is front to back, so only the farthest drop. The oracle's
+        // mirror: reference_model.render_wall_frame's `n_slots`. SPR_SLOT_CAP_ON (fj_consts) is 0 on a map whose bound
+        // fits (E1M1): the lines expand to nothing.
+        rep(SPR_SLOT_CAP_ON, k) hex.set 2, trb_climit, SPR_SLOT_CAP
+        rep(SPR_SLOT_CAP_ON, k) hex.cmp 2, gps_nslot, trb_climit, slot_cap_ok, slot_capped, slot_capped
+      slot_capped:
+        rep(SPR_SLOT_CAP_ON*seen, k) hex.if0 2, sp_mon, ret
+        rep(SPR_SLOT_CAP_ON*seen, k) .rec_goto seen_probe
+        rep(SPR_SLOT_CAP_ON*(1-seen), k) .rec_goto ret
+      slot_cap_ok:
         hex.if0 2, sp_mon, scenery_budget
         hex.set 2, trb_climit, monbudget
         rep(1-seen, k) hex.cmp 2, n_mon, trb_climit, budget_ok, ret, ret
@@ -812,7 +826,9 @@ ns frame {
         // here, where the old record biased `trb_y0 + r0` and stored it, with the row clamps and
         // the light row, in every column. Slot ids run 1..255 (0 = no fragment): at most one per
         // accepted thing, and a frame accepts no more things than the map draws -- the emitter
-        // asserts that count <= 255. gps_nslot starts every frame at 0 (the restore sets carry it).
+        // asserts that count <= 255 (wall_renderer.check_slot_ids), or caps it (SPR_SLOT_CAP, the
+        // compare at the top of this body, against the count BEFORE this increment). gps_nslot starts
+        // every frame at 0 (the restore sets carry it).
         hex.inc 2, gps_nslot
         hex.mov 2, gps_s_rec, gps_nslot
         hex.zero w/4 - 2, gps_sidx + 2*dw       // Z3: the mov below zeroes the low 2 itself

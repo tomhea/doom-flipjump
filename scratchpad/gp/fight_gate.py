@@ -2,6 +2,9 @@
 
     python scratchpad/gp/fight_gate.py --fjm build/<new>.fjm --labels <its label table>
     python scratchpad/gp/fight_gate.py --oracle-only [--only F6]    # the scenarios, their counters and controls
+    ... --map E1M2 (or DOOMFJ_MAP=E1M2)      # M8: another map -- the ROLES (gate_roles.py) place F1 F1r F7 F8a F9 S3
+                                             # S4; a scenario the map cannot host is N/A with its reason, and the
+                                             # event counters only it raises leave the "every counter nonzero" rule
     ... [--modes PLAYER/MONSTER] [--frame-ops [FILE]]   # M7 P8a: the modes (default the game tier's); per-frame ops
 
 hurt_gate's shape (p2a_gate.Mirror in the game tier's "full" modes, hurt_gate's Run / place / parts): each scenario
@@ -88,8 +91,12 @@ for _q in (ROOT / "src", ROOT / "scratchpad" / "12m", ROOT / "scratchpad", HERE)
     if str(_q) not in sys.path:
         sys.path.insert(0, str(_q))
 
+if __name__ == "__main__":                       # M8: `--map E1Mn` before probe / gamespeed read their defaults
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg()
 import probe as P                                                            # noqa: E402
 import onewalk                                                               # noqa: E402
+import gate_roles                                                            # noqa: E402  (M8)
 import p2a_gate as G                                                         # noqa: E402
 import hurt_gate as H                                                        # noqa: E402
 from doomfj import gamedata as gd                                            # noqa: E402
@@ -689,21 +696,29 @@ def scenario_list(dsim, w, card) -> list:
     out = []
     pk = w.pickup_things
     bit_h = gd.skill_bit(gd.SK_HARD)
+    R = gate_roles.roles(dsim.mapname)                # M8: the map's roles (E1M1: the literals below always were)
 
     # ---- F1: a cluster walked through at hard
     # straight walks that take four items each (found by stepping the model's move from 48 units behind every hard
     # pickup in the 8 octants): sector 91's four health bonuses; sector 135's three armor bonuses and a shell box;
-    # two health bonuses and two shells in sector 8
-    f1 = [p for xy, a in (((-160, 112), NORTH), ((32, 1440), WEST), ((174, 898), 0xE0000000))
-          for p in walk_poses(dsim, xy[0], xy[1], a, (0,))]
-    out.append({"name": "F1 pickups at hard: bonuses over 100, clips, the gold palette", "keys": [F] * 36 + [I] * 6,
-                "controls": ["bonus_cap", "bonus_round"],
-                "cands": [(p, None) for p in f1],
-                "claim": lambda c, tr: c["pickups"] >= 4 and c["bonus_frames"] >= 1})
+    # two health bonuses and two shells in sector 8 (E1M1's; M8: the role `pickup_walks`, gate_targets.py's elsewhere)
+    if R.na("pickup_walks"):
+        out.append(G.na("F1 pickups at hard: a cluster walked through", R.na("pickup_walks")))
+    else:
+        f1 = [p for x_, y_, a in R["pickup_walks"] for p in walk_poses(dsim, x_, y_, a, (0,))]
+        out.append({"name": "F1 pickups at hard: bonuses over 100, clips, the gold palette",
+                    "keys": [F] * 36 + [I] * 6, "controls": ["bonus_cap", "bonus_round"],
+                    "cands": [(p, None) for p in f1],
+                    "claim": lambda c, tr: c["pickups"] >= 4 and c["bonus_frames"] >= 1})
     # ---- F1r: the card from below (p2a's S4 pose: inside the card's box, 112 units under it)
-    out.append({"name": "F1r an item out of reach: the card from sector 124", "keys": [F] * 3, "controls": ["reach"],
-                "cands": [(G.below_card_pose(dsim, card), None)],
-                "claim": lambda c, tr: c["pickups"] == 0})
+    if R.na("below_card_sector") or card is None:
+        out.append(G.na("F1r an item out of reach: the card from below",
+                        R.na("below_card_sector") or "the map has no blue card"))
+    else:
+        below = R["below_card_sector"]
+        out.append({"name": "F1r an item out of reach: the card from sector %d" % below, "keys": [F] * 3,
+                    "controls": ["reach"], "cands": [(G.below_card_pose(dsim, card, below), None)],
+                    "claim": lambda c, tr: c["pickups"] == 0})
     # ---- F2: refused -- a medikit at 100 health; a clip at max ammo
     medi = [i for i, t in enumerate(pk) if t.type == 2012 and t.flags & bit_h]
     clip = [i for i, t in enumerate(pk) if t.type == 2007 and t.flags & bit_h]
@@ -784,21 +799,28 @@ def scenario_list(dsim, w, card) -> list:
                 "cands": [(p, armor(200, 2)) for b, t in enumerate(w.barrel_things)
                           for p in poses_facing(dsim, w, t.x, t.y, (40, 44, 36))],
                 "claim": lambda c, tr: c["puffs"] >= 1 and c["barrel_hits"] >= 1})
-    # ---- F7: the chain
-    col = [b for b, t in enumerate(w.barrel_things) if t.x == 2512]
+    # ---- F7: the chain (E1M1: the column at x 2512, shot from its west; M8: the role `chain`)
     keys7 = [I] * 14 + [FIRE] * 2 + [I] * 30
-    f7 = [(p, both(bar_health(b, 1), armor(200, 2))) for b in col
-          for p in poses_facing(dsim, w, w.barrel_things[b].x, w.barrel_things[b].y, (192, 224, 160, 256))
-          if p[0] >> 16 < 2512]
-    out.append({"name": "F7 THE CHAIN: the column of barrels set off by one shot", "keys": keys7,
-                "controls": ["chain_same_tic"], "cands": f7,
-                "claim": lambda c, tr: c["barrel_blasts"] >= 3})
+    f7 = []
+    if R.na("chain"):
+        out.append(G.na("F7 THE CHAIN: barrels set off by one shot", R.na("chain")))
+    else:
+        col = gate_roles.chain_barrels(R, w)
+        f7 = [(p, both(bar_health(b, 1), armor(200, 2))) for b in col
+              for p in poses_facing(dsim, w, w.barrel_things[b].x, w.barrel_things[b].y, (192, 224, 160, 256))
+              if gate_roles.chain_pose_ok(R, p)]
+        out.append({"name": "F7 THE CHAIN: the column of barrels set off by one shot", "keys": keys7,
+                    "controls": ["chain_same_tic"], "cands": f7,
+                    "claim": lambda c, tr: c["barrel_blasts"] >= 3})
     # ---- F8: blocking
     keys8 = [F] * 10
-    b13 = w.barrel_things[13]
-    out.append({"name": "F8a blocking: a barrel", "keys": keys8, "controls": ["walk_through"],
-                "cands": [(p, None) for p in poses_facing(dsim, w, b13.x, b13.y, (64, 56, 72))],
-                "claim": lambda c, tr: c["player_blocked"] >= 1})
+    if R.na("block_barrel"):
+        out.append(G.na("F8a blocking: a barrel", R.na("block_barrel")))
+    else:
+        b13 = w.barrel_things[R["block_barrel"]]
+        out.append({"name": "F8a blocking: a barrel", "keys": keys8, "controls": ["walk_through"],
+                    "cands": [(p, None) for p in poses_facing(dsim, w, b13.x, b13.y, (64, 56, 72))],
+                    "claim": lambda c, tr: c["player_blocked"] >= 1})
     dec = [t for t in w.decor_solid if t.flags & bit_h]
     out.append({"name": "F8b blocking: a solid decor", "keys": keys8, "controls": ["walk_through"],
                 "cands": [(p, None) for t in dec[:8] for p in poses_facing(dsim, w, t.x, t.y, (64, 72))],
@@ -811,22 +833,36 @@ def scenario_list(dsim, w, card) -> list:
                 "cands": [(p, corpse(m)) for m in first_live(w, "MT_POSSESSED")[:6]
                           for p in poses_facing(dsim, w, w.ws.mon_x[m], w.ws.mon_y[m], (64, 72, 56))],
                 "claim": lambda c, tr: c["player_blocked"] == 0 and _passed(tr)})
-    # ---- F9: nukage
-    out.append({"name": "F9 nukage: 70 frames in sector 23", "keys": [I] * 70, "controls": ["nuk_period"],
-                "cands": [(p, None) for p in poses_in_sector(dsim, w, 23, step=32, ledge=False)[:12]],
-                "claim": lambda c, tr: c["nukage"] >= 2})
-    out.append({"name": "F9l nukage's rim: the box over a higher floor", "keys": [I] * 40, "controls": ["nuk_floor"],
-                "cands": [(p, None) for p in poses_in_sector(dsim, w, 23, step=8, ledge=True)[:12]],
-                "claim": lambda c, tr: c["nukage"] == 0})
+    # ---- F9: nukage (E1M1: sector 23; M8: the role `nukage_sector`)
+    if R.na("nukage_sector"):
+        out += [dict(G.na("F9 nukage: 70 frames in a damaging sector", R.na("nukage_sector")), owns=("nukage",)),
+                G.na("F9l nukage's rim: the box over a higher floor", R.na("nukage_sector"))]
+    else:
+        nuk = R["nukage_sector"]
+        out.append({"name": "F9 nukage: 70 frames in sector %d" % nuk, "keys": [I] * 70, "controls": ["nuk_period"],
+                    "cands": [(p, None) for p in poses_in_sector(dsim, w, nuk, step=32, ledge=False)[:12]],
+                    "claim": lambda c, tr: c["nukage"] >= 2})
+        out.append({"name": "F9l nukage's rim: the box over a higher floor", "keys": [I] * 40,
+                    "controls": ["nuk_floor"],
+                    "cands": [(p, None) for p in poses_in_sector(dsim, w, nuk, step=8, ledge=True)[:12]],
+                    "claim": lambda c, tr: c["nukage"] == 0})
     # ---- F10: the card
-    out.append({"name": "F10 the blue card: pcard 1, the bonus 12, the gold palette", "keys": [F] * 4 + [I] * 6,
-                "controls": ["card_bonus"], "cands": [(G.card_pose(dsim, card), None)],
-                "claim": lambda c, tr: tr[-1]["phase"][3] == 1 and c["bonus_frames"] >= 1
-                and max(fr["mstate"]["p_bc"] for fr in tr) == 12})
+    if card is None or "card_pose" in R.na_reasons:
+        out.append(G.na("F10 the blue card: pcard 1, the bonus 12, the gold palette",
+                        R.na_reasons.get("card_pose", "the map has no blue card")))
+    else:
+        out.append({"name": "F10 the blue card: pcard 1, the bonus 12, the gold palette", "keys": [F] * 4 + [I] * 6,
+                    "controls": ["card_bonus"],
+                    "cands": [(tuple(R["card_pose"]) if "card_pose" in R else G.card_pose(dsim, card), None)],
+                    "claim": lambda c, tr: tr[-1]["phase"][3] == 1 and c["bonus_frames"] >= 1
+                    and max(fr["mstate"]["p_bc"] for fr in tr) == 12})
     # ---- S2: the stress frame (F7's chain in view), recorded
-    out.append({"name": "S2 stress: the chain in view", "keys": [I] * 14 + [FIRE] * 2 + [I] * 90, "controls": [],
-                "cands": f7,
-                "claim": lambda c, tr: c["barrel_blasts"] >= 3})
+    if R.na("chain"):
+        out.append(G.na("S2 stress: the chain in view", R.na("chain")))
+    else:
+        out.append({"name": "S2 stress: the chain in view", "keys": [I] * 14 + [FIRE] * 2 + [I] * 90,
+                    "controls": [], "cands": f7,
+                    "claim": lambda c, tr: c["barrel_blasts"] >= 3})
     out += p8a_scenario_list(dsim, w, card)          # M7 P8a: section 5.2's rows (each behind its rule and package)
     out += rocket_scenario_list(dsim, w)             # P9: the rocket launcher
     out += cgun_scenario_list(dsim, w)               # P10: the chaingun
@@ -1145,7 +1181,8 @@ def p8a_scenario_list(dsim, w, card) -> list:
                     k7.append((p, both(mon_health(m, 1), mon_rng_(m, k))))
     out.append({"name": "K7 the falling-forward reversal: a kill from more than 64 below, the coin on the target's "
                         "stream", "keys": shoot, "rule": "knock", "pkg": ("K",), "na_if_no_cands":
-                "no E1M1 position puts a shootable monster > 64 above a standing player with line of sight: "
+                "no %s position puts a shootable monster > 64 above a standing player with line of sight: " % dsim.mapname
+                + 
                 "test_knock_fj carries the reversal on a forced state (docs/gp-final-plan.md 5.2)",
                 "controls": ["no_reverse", "reverse_rng"], "cands": k7, "limit": 48,
                 "claim": lambda c, tr: c["mon_knock_frames"] >= 1 and c["corpse_slides"] >= 1})
@@ -1255,16 +1292,25 @@ def p8a_scenario_list(dsim, w, card) -> list:
             t = min(others, key=lambda o: aprox_distance(ws.mon_x[o] - ws.mon_x[a], ws.mon_y[o] - ws.mon_y[a]))
             chase(a, st or wd.mon_info[a].missilestate, 2 + t)(mph)
         armor(200, 2)(mph)
-    court = [p for xy in ((1424, 732), (1424, 760), (1400, 732)) for p in walk_poses(dsim, xy[0], xy[1],
-                                                                                      0x40000000, (0,))]
-    out.append({"name": "S3 stress: a brawl -- the imps firing into the zombiemen, infighting saturated",
-                "keys": [I] * 60, "rule": "fight", "pkg": ("I",), "controls": [], "cands": [(p, brawl) for p in court],
-                "claim": lambda c, tr: _mon_hurt(tr) >= 1})
+    R = gate_roles.roles(dsim.mapname)                # M8: the court and the chain are roles
+    if R.na("court"):
+        out.append(G.na("S3 stress: a brawl -- the imps firing into the zombiemen, infighting saturated",
+                        R.na("court")))
+    else:
+        court_a = R["court"]["angle"]
+        court = [p for xy in R["court"]["points"] for p in walk_poses(dsim, xy[0], xy[1], court_a, (0,))]
+        out.append({"name": "S3 stress: a brawl -- the imps firing into the zombiemen, infighting saturated",
+                    "keys": [I] * 60, "rule": "fight", "pkg": ("I",), "controls": [],
+                    "cands": [(p, brawl) for p in court],
+                    "claim": lambda c, tr: _mon_hurt(tr) >= 1})
     # ---- S4: a push storm -- a barrel chain inside a crowd
-    col = [b for b, t in enumerate(w.barrel_things) if t.x == 2512]
+    if R.na("chain"):
+        out.append(G.na("S4 stress: a push storm -- a barrel chain inside a crowd", R.na("chain")))
+        return out
+    col = gate_roles.chain_barrels(R, w)
     s4 = [(p, both(bar_health(b, 1), armor(200, 2))) for b in col
           for p in poses_facing(dsim, w, w.barrel_things[b].x, w.barrel_things[b].y, (192, 224, 160, 256))
-          if p[0] >> 16 < 2512]                      # F7's candidates (S2 places among them)
+          if gate_roles.chain_pose_ok(R, p)]          # F7's candidates (S2 places among them)
     out.append({"name": "S4 stress: a push storm -- a barrel chain inside a crowd, every knock move at once",
                 "keys": shoot + [I] * 30, "rule": "knock", "pkg": ("K",), "controls": [], "cands": s4, "limit": 40,
                 "claim": lambda c, tr: c["barrel_blasts"] >= 3
@@ -1324,6 +1370,9 @@ def _passed(tr) -> bool:
 NEED = ("pickups", "pickup_items", "pickup_drops", "bonus_frames", "berserk_frames", "gibs", "drop_frames",
         "bexp_frames", "barrel_blasts", "puffs", "blast_kills", "barrel_hurt", "player_blocked", "nukage",
         "barrel_hits", "fx_spawns")
+# M8: the NEED counters a scenario is the only one to raise (by its tag): when the map cannot host it (N/A) they are
+# not owed. F5's punch is the only berserk and its gib (F6's blast gibs too: gibs stays owed); F9 / D6 the nukage
+OWNS = {"F5": ("berserk_frames",), "F9": ("nukage",), "D6": ("nukage",)}
 
 
 def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_cls=None, doc=None) -> int:
@@ -1347,8 +1396,8 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
     orc.player_mode = PMODE
     dsim = onewalk.DoorSim()
     assert dsim.order == orc.door_order
-    card_di = [di for di, t in enumerate(drawable_things(orc.rm, orc.mw.things(orc.mapname), orc.art)[0])
-               if t.type == G.CARD_TYPE][0]
+    card_di = ([di for di, t in enumerate(drawable_things(orc.rm, orc.mw.things(orc.mapname), orc.art)[0])
+                if t.type == G.CARD_TYPE] or [-1])[0]           # M8: -1 on a map with no blue card
     run = (run_cls or Run)(orc, dsim, card_di)
     from doomfj.monsters import MonsterPhase, drop_rows
     from doomfj.wall_renderer import BOOT_SKILL
@@ -1357,8 +1406,10 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
     scen = [s for s in (scen_fn or scenario_list)(dsim, w0.world, dsim.dp.card_at)
             if not a.only or s["name"].startswith(a.only)]
     ok = True
-    print("%s GATE -- %d scenarios (MONSTER_MODE %s, PLAYER_MODE %s)%s"
-          % (gate, len(scen), MMODE, PMODE, "" if a.oracle_only else ", %s" % a.fjm), flush=True)
+    R = gate_roles.roles(dsim.mapname)                 # M8
+    print("%s GATE -- %d scenarios (MONSTER_MODE %s, PLAYER_MODE %s) on %s, roles from %s%s"
+          % (gate, len(scen), MMODE, PMODE, dsim.mapname, R.source, "" if a.oracle_only else ", %s" % a.fjm),
+          flush=True)
     if not a.oracle_only:
         from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
         assert (MONSTER_MODE, PLAYER_MODE) == (MMODE, PMODE), (
@@ -1372,7 +1423,23 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
             "the label table has no %s: a binary before P6/P7" % sorted(table.absent))
     totals = {}
     awaiting, ran_need = [], set()                    # M7 P8a: what waits for a package; the P8a counters owed
+    nas, na_owns = [], set()                          # M8: the scenarios this map cannot host, the counters they own
     for sc in scen:
+        why = sc.get("na")
+        if not why and dsim.mapname != "E1M1":
+            # M8: a scenario gate_targets.py found no placement for on this map (its sweep: no candidate meets the claim,
+            # or a control never parts) -- N/A by its tag, with that reason
+            why = R.na_reasons.get(sc["name"].split()[0])
+        if not why and not sc.get("cands") and "cands" in sc and dsim.mapname != "E1M1" \
+                and not sc.get("na_if_no_cands") and not sc.get("rule"):
+            # M8: a scenario whose candidates come from the map's things (a chainsaw, a berserk, a monster kind) and
+            # the map has none: N/A, named -- never on E1M1, where every scenario places (an empty list FAILS there)
+            why = R.na_reasons.get(sc["name"].split()[0], "no candidate placed from %s's things" % dsim.mapname)
+        if why:
+            nas.append(sc["name"].split()[0])
+            na_owns |= set(sc.get("owns", OWNS.get(sc["name"].split()[0], ())))
+            print("\n%s -- N/A: %s" % (sc["name"], why), flush=True)
+            continue
         stat = P8.status(sc, PMODE, MMODE)            # M7 P8a: the scenario's rule at these modes, its packages
         if stat != "run":
             print("\n%s -- %s (%d candidates placed from the map)" % (
@@ -1419,7 +1486,11 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
             continue
         ok &= binary_scenario(gb, cells, table, run, sc, pose, setup or (lambda mph: None), want)
     # --only: the scenarios that ran still owe their own `need` (P9: the R rows' counters)
-    zero = [k for k in (tuple(need) if not a.only else ()) + tuple(sorted(ran_need)) if not totals.get(k)]
+    owed = [k for k in need if k not in na_owns]     # M8: a counter only an N/A scenario raises is not owed
+    if nas:
+        print("\nN/A on %s: %d -- %s; counters no longer owed: %s"
+              % (dsim.mapname, len(nas), " ".join(nas), sorted(set(need) - set(owed)) or "none"))
+    zero = [k for k in (tuple(owed) if not a.only else ()) + tuple(sorted(ran_need)) if not totals.get(k)]
     deaths = totals.get("deaths", 0)
     ok &= not zero and (deaths_ok or (deaths == 0 and totals.get("dead_frames", 0) == 0))
     print("\nTOTALS: " + ", ".join("%s %d" % kv for kv in totals.items()))

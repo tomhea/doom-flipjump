@@ -415,8 +415,12 @@ def main():
     told_by = "the picture" if told else None
     if not told:
         _gs = [(reads[f] or {}).get("g_skill") if f < len(reads) else None for f in NEW_GAMES]
-        if (None not in _gs and _gs == [rows[f]["skill"] for f in NEW_GAMES] and len(set(_gs)) == len(NEW_GAMES)):
+        if (None not in _gs and _gs == [SKILLS.index(rows[f]["skill"]) for f in NEW_GAMES]   # the cell: SKILLS.index
+                and len(set(_gs)) == len(NEW_GAMES)):
             told, told_by = True, "the binary's g_skill cell %s" % _gs
+        else:
+            told_by = "neither: the pictures are equal and g_skill read %s at the NEW GAME frames (want %s)" % (
+                _gs, [SKILLS.index(rows[f]["skill"]) for f in NEW_GAMES])
     print("")
     print("  CONTROL: menu frames %d, world frames %d, frames that moved the player %d"
           % (menus, worlds, moved))
@@ -440,7 +444,7 @@ def main():
     print("  CONTROL: the first NEW GAME found the player walked away (%s), and every NEW GAME "
           "frame is the spawn view (%s)" % ("yes" if walked else "!! no", "yes" if reset else "!! no"))
     print("  CONTROL: the three skills' NEW GAME frames are told apart: %s"
-          % (("yes, by " + told_by) if told else "!! no -- the skills cannot be told apart here"))
+          % (("yes, by " + told_by) if told else "!! no -- the skills cannot be told apart here: %s" % told_by))
     print("  CONTROL: distinct pictures: %d of %d" % (len(set(got[:FRAMES])), min(len(got), FRAMES)))
     print("  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, g_live, every door's cells) "
           "equals the oracle's: %s"

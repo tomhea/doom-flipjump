@@ -74,16 +74,23 @@ def _lfsec(w) -> str:
                                       result_nibbles=w.sec_nibbles)
 
 
+def _fsw(w, pick):
+    """M8 F1.3: the floor switch's state -- one per floor group on a WIDE map (E1M2: `fswitch` a vector, states then
+    timers), E1M1's one 1-bit switch an int (its group's n is 2: the same draw as before)"""
+    vals = [pick(g) for g in w.floor_groups]
+    return vals if w.floor_wide else vals[0]
+
+
 def _states(w, mix):
     """(door states, lift states, switch) for a mix"""
     if mix == "shut":
-        return [0] * len(w.door_order), [0] * len(w.lift_order), 0
+        return [0] * len(w.door_order), [0] * len(w.lift_order), _fsw(w, lambda g: 0)
     if mix == "open":
         return ([w.door_nstates[si] - 1 for si in w.door_order], [len(w.lift_stops[si]) - 1 for si in w.lift_order],
-                1)
+                _fsw(w, lambda g: g.n - 1))
     rnd = random.Random(mix)
     return ([rnd.randrange(w.door_nstates[si]) for si in w.door_order],
-            [rnd.randrange(len(w.lift_stops[si])) for si in w.lift_order], rnd.randrange(2))
+            [rnd.randrange(len(w.lift_stops[si])) for si in w.lift_order], _fsw(w, lambda g: rnd.randrange(g.n)))
 
 
 def _apply(w, st):
@@ -92,7 +99,8 @@ def _apply(w, st):
         w.ws.d_state[d] = v
     for k, v in enumerate(ls):
         w.ws.l_state[k] = v
-    w.ws.f_switch = sw
+    for g, v in enumerate(sw if w.floor_wide else [sw]):     # M8 F1.3: World's one accessor
+        w._set_floor(g, v, 0)
     w._door_phase_scene()
 
 
@@ -182,11 +190,12 @@ def _flood_run(tmp_path, which, mut=None) -> bool:
     cases = _cases(w)
     want = _expected(w, cases)
     nd, nl, n = len(w.door_order), max(1, len(w.lift_order)), w.nsound
+    nf = 2 * len(w.floor_groups) if w.floor_wide else 1    # M8 F1.3: fswitch's width (states, then timers)
     body = ["stl.startup_and_init_all"]
     for (ds, ls, sw), s, xy, prior in cases:
         body += ["hex.set %d, dstate, %d" % (nd, sum(v << (4 * d) for d, v in enumerate(ds))),
                  "hex.set %d, lstate, %d" % (nl, sum(v << (4 * k) for k, v in enumerate(ls))),
-                 "hex.set 1, fswitch, %d" % sw,
+                 "hex.set %d, fswitch, %d" % (nf, sum(v << (4 * g) for g, v in enumerate(sw)) if w.floor_wide else sw),
                  "hex.set %d, snd_alert, %d" % (n, sum(v << (4 * k) for k, v in enumerate(prior)))]
         if s is None:
             body += ["hex.set 8, viewx, %d" % xy[0], "hex.set 8, viewy, %d" % xy[1], "stl.fcall nz_leaf, nz_ret"]
@@ -198,7 +207,7 @@ def _flood_run(tmp_path, which, mut=None) -> bool:
                                                                                      "stl.fret nzb_pret"]
     decls = (NZ.noise_decls(w) + point_location_decls()
              + ["viewx: hex.vec 8", "viewy: hex.vec 8", "mt_ms: hex.vec %d" % w.sec_nibbles,
-                "dstate: hex.vec %d" % nd, "lstate: hex.vec %d" % nl, "fswitch: hex.vec 1",
+                "dstate: hex.vec %d" % nd, "lstate: hex.vec %d" % nl, "fswitch: hex.vec %d" % nf,
                 "nzb_pret: hex.vec w/4"])
     prog = "\n".join(body + decls) + "\n" + _flood_text(w, mut) + "\n".join(
         [_lfsec(w), generate_point_location_fj(w.cmap)]) + "\n"

@@ -87,9 +87,56 @@ def test_the_build_check_reads_the_label_it_is_given():
 
 def test_the_slot_id_is_one_byte_and_the_emitter_holds_the_map_to_it():
     assert SPR_THING_SLOTS == 256 and SPR_THING_SLOT_BYTES == 4
-    check_slot_ids(255)                                  # ids 1..255: exactly fits
+    check_slot_ids(255, 0, 0, Config())                  # ids 1..255: exactly fits
     with pytest.raises(AssertionError, match="one-byte slot id"):
-        check_slot_ids(256)                              # R9: one more thing is refused
+        check_slot_ids(256, 0, 0, Config())              # R9: one more thing is refused
+
+
+@pytest.mark.parametrize("n_drawable, n_pools, n_drops", [(245, 10, 0), (235, 10, 10), (255, 0, 0), (0, 10, 245)])
+def test_the_slot_bound_counts_the_pools_and_the_drops(n_drawable, n_pools, n_drops):
+    """M8 F1.4: the things one frame can hold are the drawable ones, the runtime pools AND the drops -- each counts:
+    the sum at 255 fits, one more in ANY of the three is refused (R9: a check that dropped a term passes it)"""
+    check_slot_ids(n_drawable, n_pools, n_drops, Config())
+    for more in ((1, 0, 0), (0, 1, 0), (0, 0, 1)):
+        with pytest.raises(AssertionError, match="SPR_SLOT_CAP"):
+            check_slot_ids(n_drawable + more[0], n_pools + more[1], n_drops + more[2], Config())
+
+
+def test_a_capped_map_passes_and_the_cap_is_one_byte():
+    """M8 F1.4 (option B): a map past the bound takes SPR_SLOT_CAP -- E1M2 its MAP_CONFIG 255 (hard's 295 drawable
+    + 10 pool + 54 drops) -- and the cap itself must name a one-byte id: 255 fits, 256 is refused, and 0 is E1M1's"""
+    from doomfj.config import MAP_CONFIG, map_cfg
+    e1m2 = map_cfg(Config(), "E1M2")
+    assert e1m2.SPR_SLOT_CAP == 255 and e1m2.SPR_SLOT_CAP_ON == 1
+    assert map_cfg(Config(), "E1M1").SPR_SLOT_CAP == 0 == Config().SPR_SLOT_CAP_ON and "E1M1" not in MAP_CONFIG
+    check_slot_ids(295, 10, 54, e1m2)
+    with pytest.raises(AssertionError, match="SPR_SLOT_CAP"):
+        check_slot_ids(295, 10, 54, Config())            # R9: the same map without its cap is refused
+    with pytest.raises(AssertionError, match="one-byte slot id"):
+        check_slot_ids(1, 0, 0, Config(SPR_SLOT_CAP=256))
+    with pytest.raises(AssertionError, match="one byte"):
+        Config(SPR_SLOT_CAP=256).constants()             # the fj consts refuse it too
+
+
+def test_the_fj_consts_carry_the_cap_and_its_switch(tmp_path):
+    """M8 F1.4: frame.thing_record_body reads SPR_SLOT_CAP_ON (its rep count) and SPR_SLOT_CAP from fj_consts.fj"""
+    text = Config(SPR_SLOT_CAP=4).emit_fj_consts(tmp_path / "c.fj").read_text(encoding="utf-8")
+    assert "SPR_SLOT_CAP = 4" in text.splitlines() and "SPR_SLOT_CAP_ON = 1" in text.splitlines()
+    text = Config().emit_fj_consts(tmp_path / "d.fj").read_text(encoding="utf-8")
+    assert "SPR_SLOT_CAP = 0" in text.splitlines() and "SPR_SLOT_CAP_ON = 0" in text.splitlines()
+
+
+def test_every_slot_cap_line_of_the_record_is_switched_by_the_cap():
+    """M8 F1.4 -- E1M1 emits the same program: every line of frame.thing_record_body that names SPR_SLOT_CAP is a
+    rep(SPR_SLOT_CAP_ON...) line, so at cap 0 (SPR_SLOT_CAP_ON 0) each expands to nothing (labels place no op).
+    tests/fj/test_slot_cap_fj.py RUNS both settings."""
+    src = (FJ / "frame_render.fj").read_text(encoding="utf-8")
+    a = src.index("    def thing_record_body ")
+    body = src[a:src.index("\n    def ", a + 1)]
+    lines = [ln.split("//")[0].strip() for ln in body.splitlines()]
+    named = [ln for ln in lines if "SPR_SLOT_CAP" in ln]
+    assert len(named) == 5, named
+    assert all(re.match(r"rep\(SPR_SLOT_CAP_ON(\*\(?1?-?seen\)?)?, k\) ", ln) for ln in named), named
 
 
 def test_the_slot_cache_state_is_hoisted_for_the_restore_sets():

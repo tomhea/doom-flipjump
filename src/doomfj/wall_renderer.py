@@ -2078,7 +2078,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     if _do_things:
         from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
         _drawable, _draw_idx = drawable_things(rm, map_wad.things(mapname), sprite_wad, spr_cache)
-        check_slot_ids(len(_drawable))
+        # (M8 F1.4: the slot-id bound is checked below, once the skills and the runtime pools are known)
         _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES) if moving_things
                   else (True,) * len(_drawable))
         _mt_keep = {i for i, b in zip(_draw_idx, _baked) if not b}
@@ -2257,6 +2257,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     else:
         _MT_HEAD, _MT_NEXT = spawn_leaf_lists(_MT_BINDS, _MT_NSS) if moving_things else ([], [])
         _BOOT_VIS = [1] * len(_vis_slots) if _do_things else []   # (no things: no flags)
+    if _do_things:
+        # M8 F1.4: THE SLOT-ID BOUND -- the things one frame can hold: the drawable things a game has (one skill's, in the
+        # tier with skills: the rest are unlinked / thvis 0; every one elsewhere, where the host or the image says),
+        # the runtime pools (fireballs, puffs and blood) and the drops of the dead
+        check_slot_ids(max(len(_drawable) - len(_a) for _a in _abs) if _skills else len(_drawable),
+                       _p31["nmob"] if _p31 else 0, _p31.get("ndrop", 0) if _p31 else 0, cfg)
     # M14.5: one byte-wide slot per vanishable baked thing, filled from the wire before the walk.
     # ⚠ ZERO-init would mean "hidden", so the host sends the whole block every frame -- it is the
     # host that owns what has been picked up, and fj has no state between frames.
@@ -4637,15 +4643,24 @@ assert SPR_FRAG_BYTES <= SPR_SLOT_C_BYTE <= SPR_SLOT_B_BYTE - SPR_FRAG_BYTES    
 assert len(SPR_THING_SLOT_FIELDS) <= SPR_THING_SLOT_BYTES
 
 
-def check_slot_ids(n_things):
+def check_slot_ids(n_drawable, n_pools, n_drops, cfg):
     """M7 P1.4: a fragment names its thing by a ONE-BYTE slot id, 1..255 (0 = no fragment), one per
     thing the frame accepts -- and every drawable thing is visited at most once a frame (baked or
-    listed, never both: the emitter's M14.5 control). So the bound is the drawable count. A wrapped
-    id would hand one thing's top row and light to another's columns: wrong pixels, no crash.
-    Runtime pools (projectiles, effects) must be added to the count when they land."""
-    assert n_things < SPR_THING_SLOTS, (
-        "%d drawable things: the fragment's one-byte slot id holds %d (docs/gp-sprite-column.md "
-        "risk 5)" % (n_things, SPR_THING_SLOTS - 1))
+    listed, never both: the emitter's M14.5 control). A wrapped id would hand one thing's top row and
+    light to another's columns: wrong pixels, no crash.
+    M8 F1.4 (docs/f1-big-map-widths.md section 1): the things one frame can hold are the drawable
+    things a game has (`n_drawable`: one skill's in the tier with skills), the runtime pools
+    (`n_pools`: fireballs, puffs and blood) and the drops of the dead (`n_drops`). A map whose sum
+    passes 255 takes a per-frame cap (`cfg.SPR_SLOT_CAP`, MAP_CONFIG; frame.thing_record_body and
+    the oracle's `n_slots`), which bounds the ids by construction; a cap of 0 asks the sum to fit."""
+    cap = cfg.SPR_SLOT_CAP
+    assert 0 <= cap < SPR_THING_SLOTS, (
+        "SPR_SLOT_CAP %d: the fragment's one-byte slot id holds %d" % (cap, SPR_THING_SLOTS - 1))
+    n_things = n_drawable + n_pools + n_drops
+    assert cap or n_things < SPR_THING_SLOTS, (
+        "%d things a frame can hold (%d drawable + %d pool + %d drops): the fragment's one-byte slot id "
+        "holds %d -- give the map a SPR_SLOT_CAP (config.MAP_CONFIG; docs/gp-sprite-column.md risk 5, "
+        "docs/f1-big-map-widths.md section 1)" % (n_things, n_drawable, n_pools, n_drops, SPR_THING_SLOTS - 1))
 
 
 def sprite_bank_header():

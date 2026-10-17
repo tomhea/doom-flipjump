@@ -27,7 +27,7 @@ import hashlib
 import dataclasses
 from dataclasses import dataclass, replace
 
-from doomfj.config import Config, PNEAR_SEG_BUDGET
+from doomfj.config import Config, PNEAR_SEG_BUDGET, map_cfg
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
 from doomfj.fixedpoint import aprox_distance                   # P_AproxDistance, ONE definition (M7 P3.3)
 from doomfj.mapcompiler import (  # shared geometry (R6)
@@ -2125,7 +2125,8 @@ class ReferenceModel:
                           aim_things: dict | None = None, aim_out: list | None = None,
                           mobiles=None, barrel_views: dict | None = None, thing_removed=None,
                           degrade: bool = False, exempt_actors: bool = False,
-                          view_drop: int = 0, wall_tones: bool = False) -> bytes:
+                          view_drop: int = 0, wall_tones: bool = False,
+                          slot_trace: list | None = None) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -2201,6 +2202,11 @@ class ReferenceModel:
           * `thing_removed`: drawable indices the GAME removed -- picked up, a barrel gone to S_NULL
             (`monsters.MonsterViews.hidden`). Each must be a VANISHABLE type (a pickup or a barrel); unlike
             `thing_hidden`, a runtime one need not be a skill's absent set (the fj unlinks it: `rt_unlink`).
+
+        M8 F1.4 `slot_trace` (a debug output, never read by the picture): one entry per thing the walk reaches past the
+        full stop, `(drawable index, act, barrel-exempt, outcome)` -- outcome "C" turned away by the slot cap
+        (`SPR_SLOT_CAP`), "B" by its count budget, "V" by the art or the projection, "O" by the actors rule's off-view
+        test, else the slot id it took (1..) -- what tests/fj/test_slot_cap_fj.py feeds frame.thing_record_body.
 
         M7 P8a (docs/gp-final-plan.md 1.1, design S0 -- O-A1 taken): `view_drop` = d (0..VIEW_DROP_MAX, the model's
         `p_vdrop`) -- THE DYING VIEW. The eye has TWO uses here and they split: the GEOMETRY (walls, step faces and
@@ -2353,6 +2359,14 @@ class ReferenceModel:
         n_hd = 0                      # OPTION B: accepted TALL-bucket things granted the HD bake
         n_mon = 0                     # ... against MONSTER_BUDGET: monsters, counted SEPARATELY so
         spr_cache: dict = {}          #     walk order can never spend a monster's slot on a barrel
+        # M8 F1.4 (docs/f1-big-map-widths.md section 1, option B): THE SLOT CAP -- the things given a fragment slot id
+        # this frame (fj's `gps_nslot`, counted where the fj increments it: past every reject, below), and the map's cap
+        # on it (config.SPR_SLOT_CAP through MAP_CONFIG, so every oracle a gate builds takes the map's: 0 = none, E1M1's
+        # -- `slot_capped` is then never true and every frame takes the old path). DOOM's r_things.c R_NewVisSprite:
+        # past MAXVISSPRITES a thing gets the overflow sprite and is not drawn.
+        n_slots = 0
+        slot_cap = map_cfg(self.cfg, scene.mapname).SPR_SLOT_CAP
+        assert 0 <= slot_cap < 256, slot_cap
         # M7 P1.6: the bucket heights the native lists are drawn at (the rowmap's rows)
         bheights = tuple(sprite_bucket_height(b_, H) for b_ in range(SPRITE_HEIGHT_BUCKETS))
         things_by_ss: dict = {}
@@ -2578,7 +2592,14 @@ class ReferenceModel:
                     # monster can still be shot); a BARREL (scenery) past DEG_SOFT_SCENERY accepted things needs
                     # DEG_MINH2_SCENERY rows. FOUND by p2a_gate S7 on blocked51: four far barrels the oracle aimed at
                     # frame 0 that the binary's raised projection rejected (barrelcode's rule, package C's note).
+                    # M8 F1.4: the slot cap, tested (as the fj's frame.thing_record_body) before either budget
+                    slot_capped = bool(slot_cap) and n_slots >= slot_cap
+                    # ... a capped monster with a seen flag still takes the fj's seen probe, whose projection runs the
+                    # aim hook at the base bound -- this aim at minh_ (a monster's base under the actors rule); every
+                    # other capped thing is not aimed (DOOM's hitscan never depends on the vissprite cap: the closest
+                    # the fj's front-to-back record gets is the monsters the player can see)
                     if (aim_things is not None and t_di in aim_things
+                            and not (slot_capped and not (seen_out is not None and mon))
                             and not ((n_mon >= MONSTER_BUDGET) if act else (n_thing >= THING_BUDGET))):
                         _asid, _ar = aim_things[t_di]
                         _aart = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None
@@ -2611,11 +2632,15 @@ class ReferenceModel:
                                 _ak = _ac - aim_lo
                                 if aim_out[_ak] == 0 or _atzi < aim_tz[_ak]:   # strictly nearer overwrites
                                     aim_out[_ak], aim_tz[_ak] = _asid, _atzi
-                    if (n_mon >= MONSTER_BUDGET) if act else (n_thing >= THING_BUDGET):
+                    if slot_capped or ((n_mon >= MONSTER_BUDGET) if act else (n_thing >= THING_BUDGET)):
+                        if slot_trace is not None:
+                            slot_trace.append((t_di, act, bar_ex, "C" if slot_capped else "B"))
                         continue                         # ... `continue`, not `break`: a scenery
                     art = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None   # budget must not
                            else self.art_of_lump(sprite_wad, tview[0], spr_cache))       # stop the
                     if art is None:                                        # walk finding a monster
+                        if slot_trace is not None:
+                            slot_trace.append((t_di, act, bar_ex, "V"))
                         continue
                     tss = scene.cmap.subsectors[ss_first[seg_i]]
                     tsec = self._seg_sector(lds, sds, secs, scene.cmap.segs[tss.firstseg])
@@ -2624,6 +2649,8 @@ class ReferenceModel:
                                             t.x, t.y, tsec.floor_h + (((MISSILE_Z if t.z is None else t.z)
                                                                        if mob else 0)), art, minh_)
                     if pr is None:
+                        if slot_trace is not None:
+                            slot_trace.append((t_di, act, bar_ex, "V"))
                         continue
                     if act:
                         n_mon += 1
@@ -2648,7 +2675,12 @@ class ReferenceModel:
                     tier = sprite_tier(hb, far_, hd_ok)
                     ytop_b = ytop + th_px - hb                # FEET planted: the bucket moves the top
                     if exempt_actors and (ytop_b >= H or ytop_b + hb <= 0):
+                        if slot_trace is not None:
+                            slot_trace.append((t_di, act, bar_ex, "O"))
                         continue                              # M7 P6+P7 E (4): no row in the view, no slot
+                    n_slots += 1                              # M8 F1.4: the fj's `hex.inc 2, gps_nslot` -- a slot id
+                    if slot_trace is not None:
+                        slot_trace.append((t_di, act, bar_ex, n_slots))
                     lr = self.wall_light_row(self.wall_lightnum(tsec.light, 0), hb, art[4])
                     frac = (max(0, tx1) - tx1) * istep
                     for x in range(max(0, tx1), min(W, tx2 + 1)):

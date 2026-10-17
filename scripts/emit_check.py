@@ -88,12 +88,6 @@ def _far_los():
     ms.far_margin = fm
 
 
-def _slot_ids():
-    """F1: more than 255 drawable things -- the slot-id check skipped (ids wrap: size right, pixels not)"""
-    import doomfj.wall_renderer as wr
-    wr.check_slot_ids = lambda n: None
-
-
 def _soundblock_ignored():
     """F3: the fj noise flood without ML_SOUNDBLOCK -- the block edges read as ordinary edges (the flood's size, not its
     rule: the model keeps them)"""
@@ -182,7 +176,7 @@ def _exit_bar_stale():
 
 
 STANDINS = {"soundblock-ignored": _soundblock_ignored, "gives": _gives, "slanted-doors": _slanted_doors, "decor-every-skill": _decor_every_skill,
-            "stats-digits": _stats_digits, "far-los": _far_los, "slot-ids": _slot_ids, "barrels-one-skill": _barrels_one_skill,
+            "stats-digits": _stats_digits, "far-los": _far_los, "barrels-one-skill": _barrels_one_skill,
             "barrel-chains-static": _barrel_chains_static,
             "pickup-static-z": _pickup_static_z,
             "attacker-7bit": _attacker_7bit,

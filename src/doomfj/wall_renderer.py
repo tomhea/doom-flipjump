@@ -627,7 +627,7 @@ def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
         common += _restartcode.view_restart_lines()
     if loot_slots is not None:
         c, per = _restartcode.level_start_lines(world, SKILLS, _lootcode.PERSIST)
-        common += c
+        common += c + _lootcode.card_restart_lines(world)      # M8 F4: no yellow / red card (E1M1: no line)
         for k, sk in enumerate(SKILLS):
             skills[k] += list(per[k]) + [f"    hex.set 2, thvis + {loot_slots['nvis'] + j}*2*dw, {v}"
                                          for j, v in enumerate(_lootcode.extra_vis(world, loot_slots, sk))]

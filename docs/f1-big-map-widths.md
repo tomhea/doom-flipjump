@@ -51,6 +51,26 @@ point, ORed into both hard-budget tests. Proof: `test_slot_layouts_fj` with cap 
 oracle cap 5 vs fj cap 4, and the fj compare moved after the increment. Est. 40-60 ops per thing reaching the record
 body. Half a day + the sweep + the decision. Retires `slot-ids`.
 
+**BUILT (M8 F1.4, 2026-10-17; no game build or emission run -- the integrator's `emit_baseline --check` and `deg_gate`
+are owed).** As designed, with three findings:
+- `check_slot_ids(n_drawable, n_pools, n_drops, cfg)` counts ONE SKILL's drawable things in the tier with skills (the
+  rest are unlinked / `thvis` 0): with every skill's, E1M1 itself fails the pool-counting bound (234 + 10 + 25 = 269);
+  per skill it fits, hard's 212 + 10 + 25 = 247. E1M2: 295 + 10 + 54 = 359 -> `MAP_CONFIG["E1M2"]["SPR_SLOT_CAP"] = 255`.
+  The call moved below the skills / pools (`_skills`, `_p31`); it is an assert, the text does not move.
+- **the AIM rule is not "ORed into both tests"**: a capped monster in the seen body takes `seen_probe`, whose
+  `proj.project_thing ... aim` runs the aim hook at the base bound, so the fj AIMS it (DOOM's hitscan never depends
+  on the vissprite cap). The oracle mirrors that: its aim test excludes a capped thing unless it is a monster with
+  `seen_out` on (`render_wall_frame`'s `slot_capped`); the draw test takes the cap ORed in, as designed. (The same
+  holds, unreachably, for a MONSTER_BUDGET-failed monster: that budget is 255 and never binds.)
+- the oracle reads the cap through `map_cfg(self.cfg, scene.mapname)`, so every oracle a gate builds
+  (`ReferenceModel(GAME_CFG)`, `ReferenceModel()`) takes the map's cap without a gate change.
+Proof: `tests/fj/test_slot_cap_fj.py` (the record's head, counter credit and slot allocation transplanted verbatim,
+fed the oracle's `slot_trace` on the one-room map with 30 things, cap 4 and cap 0, seen body on and off; controls:
+oracle cap 5 vs fj cap 4, the compare moved after the increment, a capped monster sent to `ret`);
+`tests/host/test_slot_cap_oracle.py` (the oracle's rules + five oracle mutants); `tests/host/test_sprite_column.py`
+(the bound counts each term; every cap line is `rep(SPR_SLOT_CAP_ON...)`). The `slot-ids` stand-in is gone from
+`scripts/emit_check.py`.
+
 ## 2. Attacker / thing ids past 7 bits
 
 `world.build_schema`: `aim_sid` width `max(7, (nmon + nbarrel).bit_length())` via one helper `aim_bits(lay)` the

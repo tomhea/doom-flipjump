@@ -9,6 +9,9 @@
     python scratchpad/12m/msframe.py --a build/X.fjm --save-baseline shipped
     python scratchpad/12m/msframe.py --a build/Y.fjm --against shipped     # a change vs the frozen baseline
     python scratchpad/12m/msframe.py --selftest                            # R9: prove it can see a known effect
+    python scratchpad/12m/msframe.py --map E1M2 --a build/doom_e1m2_X.fjm --save-baseline shipped
+        # M8: a map's baseline -- "shipped" means shipped_<map> off E1M1 (doomfj.mapprofile: shipped_e1m2), the
+        # baseline records its map and --against refuses another map's
 
 WHY THIS EXISTS. The project's speed thesis is "optimise ms/frame, not ops/frame" -- and until
 this file there was no instrument for ms/frame at all. gamespeed.py counts ops. The ad-hoc runs
@@ -416,7 +419,15 @@ def main():
     ap.add_argument("--ignore-busy", action="store_true", help="measure even if the box is busy")
     ap.add_argument("--note", default="", help="free text recorded in the ledger")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--map", default=None, help="M8: the binary's map (default DOOMFJ_MAP, E1M1): names the baseline")
     a = ap.parse_args()
+    # M8: one baseline per map -- "shipped" is E1M1's; on another map it is mapprofile's shipped_<map>
+    sys.path.insert(0, str(ROOT / "src"))
+    from doomfj.mapprofile import ACTIVE, profile
+    the_map = (a.map or ACTIVE).upper()
+    for attr in ("against", "save_baseline"):
+        if getattr(a, attr) == "shipped":
+            setattr(a, attr, profile(the_map).baseline)
 
     if a.selftest:
         return selftest(min(a.frames, 60), a.cpu)
@@ -442,6 +453,9 @@ def main():
 
     if a.against:
         base = json.loads((BASELINES / (a.against + ".json")).read_text(encoding="utf-8"))
+        if base.get("map", "E1M1").upper() != the_map:
+            raise SystemExit("baseline '%s' is %s's; this binary is %s's (--map)" % (a.against, base.get("map", "E1M1"),
+                                                                                  the_map))
         # the saved baseline's binary is the control; the user's --a is the change
         b_fjm, env_b, label_b = a_fjm, env_a, "change"
         a_fjm, env_a, label_a = Path(base["binary"]), base.get("env", {}), "base"
@@ -473,7 +487,7 @@ def main():
     if a.save_baseline:
         BASELINES.mkdir(parents=True, exist_ok=True)
         out = BASELINES / (a.save_baseline + ".json")
-        out.write_text(json.dumps({"binary": str(a_fjm), "binary_sha": sha256_file(a_fjm),
+        out.write_text(json.dumps({"map": the_map, "binary": str(a_fjm), "binary_sha": sha256_file(a_fjm),
                                    "env": env_a, "when": record["when"], "frames": a.frames,
                                    "reps": a.reps, "engine_pyd_sha": record["engine_pyd_sha"],
                                    "git": record["git"], "summary": s}, indent=1),

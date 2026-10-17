@@ -372,7 +372,7 @@ def plan_route(rm, mw, scene, boxes, target, maxf=90, width=24):
     def inbox(st):
         return x0 <= (st.x >> 16) <= x1 and y0 <= (st.y >> 16) <= y1
 
-    start = spawn_state(mw, "E1M1")
+    start = spawn_state(mw, scene.mapname)          # M8: the scene's map (it was E1M1's spawn on every map)
     beam = [(dist(start), start, [])]
     for _ in range(maxf):
         nxt = []
@@ -459,8 +459,10 @@ def main():
     ap.add_argument("--labels", default=None,
                     help="the build's label table (build_labeled.py --labels) -- the state check "
                          "reads the persisted cells through it; the gate refuses to run without it")
-    ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
-    ap.add_argument("--map", default="E1M1")
+    # M8: the map from doomfj.mapprofile (DOOMFJ_MAP / --map; E1M1 when unset), its fixture wad unless --wad names one
+    from doomfj.mapprofile import ACTIVE, profile
+    ap.add_argument("--wad", default=None, help="default: the map's fixture (mapprofile)")
+    ap.add_argument("--map", default=ACTIVE)
     ap.add_argument("--asset", default="assets/freedoom1.wad")
     ap.add_argument("--open-wait", type=int, default=0,
                     help="frames to stand while the door walks up to its last state. 0 = derive "
@@ -486,6 +488,8 @@ def main():
                     help="R9 for the STATE check (M7 P1.5): the oracle's NEW GAME resets the view "
                          "but NOT the doors -- the state check must reject the NEW GAME frame")
     args = ap.parse_args()
+    args.map = args.map.upper()
+    args.wad = args.wad or profile(args.map).wad
 
     mw = WadFile.from_path(str(ROOT / args.wad))
     art = WadFile.from_path(str(ROOT / args.asset))
@@ -847,6 +851,9 @@ def main():
 
     _cands_tried = []
     picked = None
+    from doomfj.combat import KEY_DOOR_CARDS      # M8: the key doors by their line special (the candidates skip them)
+    _keyed = {sds[ld.back].sector for ld in lds
+              if ld.special in KEY_DOOR_CARDS and ld.back not in (-1, 0xFFFF) and ld.back < len(sds)}
     for skill in [BOOT_SKILL] + [s for s in SKILLS if s != BOOT_SKILL]:
         blocked, mons = ground(skill)
         _, _cells = walkable_cells(rm, walk_scene, spx, spy, blocked=blocked)
@@ -856,9 +863,10 @@ def main():
             return any(x0 <= wx <= x1 and y0 <= wy <= y1
                        for wx, wy in ((cx * NAV_CELL + NAV_CELL // 2, cy * NAV_CELL + NAV_CELL // 2)
                                       for cx, cy in _cells))
-        # M7 P2a.1: a door the player can open with no card, by use (the walk-over doors have no box)
+        # M7 P2a.1: a door the player can open with no card, by use (the walk-over doors have no box). M8: and no
+        # key door by its LINE special -- until M8 F2 the model calls E1M2's yellow and red doors plain (E1M1: none)
         _cands = sorted((si for si in order if si in boxes and dp.kinds[si] in ("plain", "blaze")
-                         and _walkable_door(si)),
+                         and si not in _keyed and _walkable_door(si)),
                         key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - spx) ** 2
                         + ((boxes[si][1] + boxes[si][3]) // 2 - spy) ** 2)
         for target in _cands:

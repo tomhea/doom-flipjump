@@ -556,8 +556,7 @@ def scenarios(dsim, card) -> list:
     out = []
     if R.na("blue_door") or card is None:
         why = R.na("blue_door") or "the map has no blue card"
-        out += [na("S1 a blue door, no card: stays shut", why), na("S2 onto the card: taken", why),
-                na("S3 a blue door with the card: opens", why)]
+        out += [na("S1 a blue door, no card: stays shut", why), na("S3 a blue door with the card: opens", why)]
     else:
         blue = R["blue_door"]
         assert kinds[blue] == "blue", (blue, kinds[blue])
@@ -565,12 +564,19 @@ def scenarios(dsim, card) -> list:
             {"name": "S1 blue door %d, no card: stays shut" % blue, "pose": door_front(dsim, blue),
              "keys": [U] * 3 + [I] * 12, "pcard": 0, "controls": ["card"],
              "claim": lambda tr: all(fr["phase"][0][blue][0] == 0 for fr in tr)},
-            {"name": "S2 onto the card: taken, gone from the picture", "pose": card_pose(dsim, card),
-             "keys": [F] * 4 + [I] * 2, "pcard": 0, "controls": ["no_card"],
-             "claim": lambda tr: tr[-1]["phase"][3] == 1 and tr[-1]["taken"]},
             {"name": "S3 blue door %d with the card: opens" % blue, "pose": door_front(dsim, blue),
              "keys": [U] * 3 + [I] * (D.SPEED * n[blue] + 2), "pcard": 1, "controls": ["no_card"],
              "claim": lambda tr: tr[-1]["phase"][0][blue][0] == n[blue] - 1}]
+    # S2: onto the card -- its platform pose (card_pose), or (M8) the map's `card_pose` role where the platform has no
+    # pose 48 units off the card
+    if card is None or R.na("card_pose") and "card_pose" in R.na_reasons:
+        out.append(na("S2 onto the card: taken", R.na_reasons.get("card_pose", "the map has no blue card")))
+    else:
+        out.append(
+            {"name": "S2 onto the card: taken, gone from the picture",
+             "pose": tuple(R["card_pose"]) if "card_pose" in R else card_pose(dsim, card),
+             "keys": [F] * 4 + [I] * 2, "pcard": 0, "controls": ["no_card"],
+             "claim": lambda tr: tr[-1]["phase"][3] == 1 and tr[-1]["taken"]})
     # M8: the other colours' doors -- the scenarios S1 / S3 once the model has their kind (M8 F2) and the gate a
     # key-card control for them; until then N/A, named, so a map's report shows what is not checked
     for colour in ("yellow", "red"):
@@ -612,11 +618,20 @@ def scenarios(dsim, card) -> list:
     F_ = {"forward": True}
     # ---- M7 P2b: the movers --------------------------------------------------------------------------
 
-    def ride(tr, k):
-        # it reaches the bottom (9) and is back at the top (0) after it -- M7 P6+P7: not "at the top on the last frame":
-        # at the monsters' tempo x2 a monster crosses lift 103's WR line at frame 48 of S10 and starts a second ride
-        st = [fr["movers"][0][k][0] for fr in tr]
-        return max(st) == 9 and 0 in st[st.index(9) + 1:]
+    bots = [len(dsim.mp.stops[si]) - 1 for si in dsim.mp.order]
+    if all(b == 9 for b in bots):                    # E1M1's lifts (10 stops each): the claim as it always read
+
+        def ride(tr, k):
+            # it reaches the bottom (9) and is back at the top (0) after it -- M7 P6+P7: not "at the top on the last
+            # frame": at the monsters' tempo x2 a monster crosses lift 103's WR line at frame 48 of S10 and starts a
+            # second ride
+            st = [fr["movers"][0][k][0] for fr in tr]
+            return max(st) == 9 and 0 in st[st.index(9) + 1:]
+    else:                                            # M8: a lift's bottom is its own last stop (E1M2's lift 44: 7)
+
+        def ride(tr, k):
+            st = [fr["movers"][0][k][0] for fr in tr]
+            return max(st) == bots[k] and 0 in st[st.index(bots[k]) + 1:]
 
     if R.na("wr_lift"):
         out += [na("S9 over a lift's WR line: it rides", R.na("wr_lift")),

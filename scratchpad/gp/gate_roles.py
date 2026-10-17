@@ -21,6 +21,8 @@ THE ROLES (a value, or N/A with a reason):
   blaze_door       p2a S5: a blazing door
   walkovers        p2a S6, S7 ...: [[door sector, tag], ...] W1 walk-over doors (one scenario each)
   cards            {"blue": [x, y, z], ...} the cards' things (z: the floor they stand on)
+  card_pose        p2a S2 / fight F10: [x, y, angle] onto the blue card, where its platform has no pose 48 units off
+                   (absent: p2a_gate.card_pose derives it, as on E1M1)
   below_card_sector  p2a S4 / fight F1r: a sector whose floor puts the card out of reach of a tried step
   wr_lift          p2a S9 / S12: {"sector", "pose": [x, y, angle]} -- forward from the pose crosses its WR line
   sr_lift          p2a S10: {"sector", "tag"} -- the SR use line of that tag
@@ -73,6 +75,8 @@ E1M1 = {
     "exit": [407, 11],
 }
 E1M1_NA: dict = {"yellow_door": "E1M1 has no yellow door", "red_door": "E1M1 has no red door"}
+# every role name (E1M1's, the other colours' doors, the card pose a map may need)
+ALL_ROLES = tuple(E1M1) + ("yellow_door", "red_door", "card_pose")
 
 
 class RoleNA(KeyError):
@@ -120,10 +124,16 @@ def _override(roles: dict) -> dict:
     return dict(roles, **json.loads(raw))
 
 
+# gate_targets.py's CANDIDATE roles while it verifies them on the gates' own scenarios (a Roles, or None)
+PINNED = None
+
+
 def roles(mapname: str | None = None) -> Roles:
     """the map's roles: E1M1's literals, or the generated scenarios/<map>/gates.json"""
     from doomfj.mapprofile import profile
     m = profile(mapname).map
+    if PINNED is not None and PINNED.map == m:
+        return PINNED
     if m == "E1M1":
         return Roles(m, _override(E1M1), E1M1_NA, "gate_roles.E1M1 (the pre-M8 literals)")
     p = roles_path(m)

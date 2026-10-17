@@ -847,11 +847,13 @@ def scenario_list(dsim, w, card) -> list:
                     "cands": [(p, None) for p in poses_in_sector(dsim, w, nuk, step=8, ledge=True)[:12]],
                     "claim": lambda c, tr: c["nukage"] == 0})
     # ---- F10: the card
-    if card is None:
-        out.append(G.na("F10 the blue card: pcard 1, the bonus 12, the gold palette", "the map has no blue card"))
+    if card is None or "card_pose" in R.na_reasons:
+        out.append(G.na("F10 the blue card: pcard 1, the bonus 12, the gold palette",
+                        R.na_reasons.get("card_pose", "the map has no blue card")))
     else:
         out.append({"name": "F10 the blue card: pcard 1, the bonus 12, the gold palette", "keys": [F] * 4 + [I] * 6,
-                    "controls": ["card_bonus"], "cands": [(G.card_pose(dsim, card), None)],
+                    "controls": ["card_bonus"],
+                    "cands": [(tuple(R["card_pose"]) if "card_pose" in R else G.card_pose(dsim, card), None)],
                     "claim": lambda c, tr: tr[-1]["phase"][3] == 1 and c["bonus_frames"] >= 1
                     and max(fr["mstate"]["p_bc"] for fr in tr) == 12})
     # ---- S2: the stress frame (F7's chain in view), recorded

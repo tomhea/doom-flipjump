@@ -174,8 +174,10 @@ def main():
     ap.add_argument("--labels", default=None,
                     help="the build's label table (build_labeled.py --labels) -- the state check "
                          "reads the persisted cells through it; the gate refuses to run without it")
-    ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
-    ap.add_argument("--map", default="E1M1")
+    # M8: the map from doomfj.mapprofile (DOOMFJ_MAP / --map; E1M1 when unset), its fixture wad unless --wad names one
+    from doomfj.mapprofile import ACTIVE, profile
+    ap.add_argument("--wad", default=None, help="default: the map's fixture (mapprofile)")
+    ap.add_argument("--map", default=ACTIVE)
     ap.add_argument("--asset", default="assets/freedoom1.wad")
     ap.add_argument("--selftest", action="store_true",
                     help="R9: claim every frame is a world frame; the gate must FAIL")
@@ -192,6 +194,8 @@ def main():
                     help="R9 (M7 P3.4): the oracle closes the world's help to the MAIN MENU; the "
                          "gate must FAIL at frame %d" % HELP_CLOSED_TO_WORLD)
     args = ap.parse_args()
+    args.map = args.map.upper()
+    args.wad = args.wad or profile(args.map).wad
 
     mw = WadFile.from_path(str(ROOT / args.wad))
     art = WadFile.from_path(str(ROOT / args.asset))
@@ -248,7 +252,8 @@ def main():
     deaths = 0                                      # M7 P7: frames the mirror's player was dead (this walk: none)
     causes = []                                     # P9: how the run ended -- the halt is LOOPING
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES + 2,
-                                            len(order), nwalk, nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
+                                            len(order), nwalk, nlift=len(mph.world.lift_order),  # M8: the map's
+                                            nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
                                             palettes_out=pals, nthvis=mviews.nvis if loot else 0,
                                             cause_out=causes)
     # M7 P3.2b: the monsters step inside this gate's fixed world -- its doors shut and idle, every lift at its top;

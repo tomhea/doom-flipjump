@@ -12,6 +12,9 @@ Two measured metrics, and nothing else is the success criterion:
     python scratchpad/12m/gamespeed.py --validate      # G5: do the 10 games go anywhere? (cheap)
     python scratchpad/12m/gamespeed.py --selftest      # R9 controls (cheap)
     python scratchpad/12m/gamespeed.py --selftest --fjm <path>    # + determinism on a real binary
+    ... --map E1M2 (or DOOMFJ_MAP=E1M2)    # M8: another map -- its tours (generated), its fixture, its records
+                                           # (BINARY_ENDS / DOORS / the recorded keys: scenarios/<map>/gamespeed.json,
+                                           # written by gamespeed_trail.py --map E1M2 --record)
 
 THE DEVICE IS NOT INVENTED HERE. An earlier draft guessed
 `flipjump.interpreter.io_devices.pc_io.PcIO` with `key_script=`/`frame_limit=` kwargs; that module
@@ -39,6 +42,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 for q in (ROOT / "tests", ROOT / "src", ROOT / "scratchpad", ROOT):
     sys.path.insert(0, str(q))
+if __name__ == "__main__":                       # M8: `--map E1Mn` before DEFAULT_WAD / DEFAULT_MAP are read below
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg()
 
 from fjmsize import ceiling_words, read_fjm_size                          # noqa: E402
 import m2_std_gate as gate                                                # noqa: E402
@@ -119,6 +125,26 @@ BINARY_DOORS = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 # the one that opens a door, and run 1 starts after it, which is where a stepper that is not reset
 # between runs shows. `--selftest` N6g checks them against script(0) and script(1).
 RECORDED_KEYS = ROOT / "tests" / "fixtures" / "gamespeed_recorded_keys.json"
+RECORD_FILE = "gamespeed.json"          # M8: another map's record, in scenarios/<map>/
+
+
+def binary_record(mapname=None):
+    """M8: (ends, doors, recorded keys {"0": .., "1": ..}, source) the binary's walk is held to on `mapname` -- E1M1's
+    BINARY_ENDS / BINARY_DOORS / RECORDED_KEYS above; another map's scenarios/<map>/gamespeed.json, which
+    gamespeed_trail.py --map <map> --record writes from the binary (TRAIL PASS only). None when the map has none."""
+    import json
+    from doomfj.mapprofile import scenario_dir
+    m = (mapname or DEFAULT_MAP).upper()
+    if m == "E1M1":
+        return (BINARY_ENDS, BINARY_DOORS, json.loads(RECORDED_KEYS.read_text(encoding="ascii")),
+                "gamespeed.BINARY_ENDS / BINARY_DOORS, %s" % RECORDED_KEYS.relative_to(ROOT).as_posix())
+    p = scenario_dir(m) / RECORD_FILE
+    if not p.exists():
+        return None
+    d = json.loads(p.read_text(encoding="ascii"))
+    assert d["map"].upper() == m, (p, d["map"])
+    return (tuple(tuple(e) for e in d["binary_ends"]), tuple(d["binary_doors"]), d["recorded_keys"],
+            "%s (%s, sha256 %s)" % (p.relative_to(ROOT).as_posix(), d["fjm"], d["sha16"]))
 
 
 def _reachable(rm, scene, sx, sy):
@@ -714,24 +740,27 @@ def selftest(fjm=None):
         #     binary's ends and open the doors the binary's opens -- BINARY_ENDS / BINARY_DOORS,
         #     read from blocked27 through the probe.
         got = [(row[0], row[4]) for row in rows]
-        want = list(zip(BINARY_ENDS, BINARY_DOORS))
+        rec = binary_record()                        # M8: the map's record (E1M1: the constants above)
+        if rec is None:
+            raise AssertionError("no binary record for %s: run gamespeed_trail.py --map %s --fjm <its game "
+                                 "binary> --labels <its table> --record" % (DEFAULT_MAP, DEFAULT_MAP))
+        ends, bdoors, rec_keys, source = rec
+        want = list(zip(ends, bdoors))
         check("N6e --validate ends where the binary ends, doors opened included (10 runs)",
               got == want, "parts on runs %s" % [r for r, (a, b) in enumerate(zip(got, want)) if a != b]
-              if got != want else "10/10")
+              if got != want else "10/10 (%s)" % source)
         # N6f ITS NEGATIVE CONTROL: the old replay, every door shut, must FAIL N6e -- run 0 holds
         #     `use` in a door's box, and the binary walks through that door.
         shut, _ = validate_scripts(n_runs=1, quiet=True, doors=False)
         check("N6f the doors-shut replay FAILS it (run 0 stops at the shut door)",
               (shut[0][0], shut[0][4]) != want[0],
               "doors shut: run 0 ends %s, %d door(s); the binary: %s, %d"
-              % (shut[0][0], shut[0][4], BINARY_ENDS[0], BINARY_DOORS[0]))
+              % (shut[0][0], shut[0][4], ends[0], bdoors[0]))
         # N6g the host test replays RECORDED keys of runs 0 and 1 (the planner costs ~75 s): they
         #     must still be script(0)'s and script(1)'s, or that test checks walks nobody plays. CI
         #     does not run this -- the ship gate's step 3 does.
-        import json
-        rec = json.loads(RECORDED_KEYS.read_text(encoding="ascii"))
         check("N6g the host test's recorded keys are script(0)'s and script(1)'s",
-              rec == {"0": script(0), "1": script(1)}, "runs %s" % sorted(rec))
+              rec_keys == {"0": script(0), "1": script(1)}, "runs %s" % sorted(rec_keys))
     except Exception as e:                                             # noqa: BLE001
         check("N6 the oracle can step the 10 scripts", False, "%s: %s" % (type(e).__name__, e))
 

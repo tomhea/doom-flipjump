@@ -27,7 +27,8 @@ v1's flood (checked by `--selftest`).
 SUGGESTED CHECKPOINTS (`suggest`): per region of the flood, the sectors with the most wakeable monsters at hard within
 ENGAGE units, at least SPREAD apart; runs per region in proportion to its monsters (each region with >= 5 gets one);
 a standable spot in the sector as far from the nearest monster as STANDOFF allows, facing the group's centroid; the
-style by what lies near (pickups: collect); one AFTERMATH run: the tightest trio of droppers / imps in region 0
+style by what lies near (pickups: collect); where fewer than three usable plain doors lie near a checkpoint (the
+doors criterion), the busiest region's weakest run gives way to an EXPLORE run beside a lonely door; one AFTERMATH run: the tightest trio of droppers / imps in region 0
 injected as corpses, the player among them (v2's R0-aftermath). A checkpoint whose run no parameter set survives is
 replaced by the region's next suggestion (`plan`). The PLAN is not frozen: the owner approves a freeze (as v5..v10).
 """
@@ -55,6 +56,7 @@ ENGAGE = 640               # a checkpoint's group: the monsters within this many
 SPREAD = 768               # checkpoints at least this far apart
 STANDOFF = 256             # the start spot's wanted distance from the nearest monster
 N_RUNS = 11                # v10's shape: 11 runs x 100 frames
+DOORS_WANTED = 3           # scenarios_v2's MIN_DOORS: usable doors a checkpoint should start near
 KEY_SPECIALS = (26, 27, 28, 32, 33, 34)
 INSTALLED = {"map": "E1M1"}
 _ORIGINALS = {}
@@ -317,13 +319,47 @@ def suggest(n_runs: int = N_RUNS) -> dict:
                     quota[r] -= k
                     quota[max(quota, key=lambda q: (by_region[q], -q))] += k
     reserve = [c for c in cand if c not in chosen and c["region"] in quota]
+    # the doors criterion (>= 3 player door openings): the autopilot opens a closed PLAIN door within DOOR_DETOUR cells
+    # of its path when calm -- where fewer than DOORS_WANTED usable doors lie near a checkpoint, the weakest run of the
+    # busiest region gives way to an EXPLORE run beside a door no checkpoint is near (facing its box)
+    door_boxes = [(si, w.door_boxes[si]) for si in w.door_order if si not in w.door_cards and si in w.door_boxes]
+    reach = S.DOOR_DETOUR * S.CELL
+
+    def near_door(c, box):
+        bx, by = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        return math.hypot(c["want"][0] - bx, c["want"][1] - by) <= reach
+    lonely = [(si, box) for si, box in door_boxes if not any(near_door(c, box) for c in chosen)]
+    near = len(door_boxes) - len(lonely)
+    for si, box in lonely[:max(0, DOORS_WANTED - near)]:
+        bx, by = (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
+        spots = []
+        for d in (160, 128, 192, 96, 224, 256):
+            for k in range(16):
+                a = k * math.pi / 8
+                x, y = round(bx + d * math.cos(a)), round(by + d * math.sin(a))
+                sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)]
+                if sec != si and reg.get(sec) in quota and _standable(w, x, y):
+                    spots.append((x, y, sec))
+        if not spots:
+            continue
+        x, y, sec = spots[0]
+        busiest = max(quota, key=lambda r: (sum(1 for o in chosen if o["region"] == r), r))
+        weakest = min((o for o in chosen if o["region"] == busiest), key=lambda o: (o["score"], -o["sector"]))
+        chosen.remove(weakest)
+        reserve.insert(0, weakest)
+        group = [m for m in mons if math.hypot(m[1] - x, m[2] - y) <= ENGAGE]
+        chosen.append({"score": len(group), "sector": sec, "region": reg[sec], "want": (x, y), "face": (bx, by),
+                       "items": 0, "kinds": dict(collections.Counter(m[4] for m in group)),
+                       "nearest": int(min((math.hypot(m[1] - x, m[2] - y) for m in mons), default=0)),
+                       "door": si})
     styles = ("fight", "collect", "fight", "explore")
     out = []
     names = collections.Counter()
     for i, c in enumerate(sorted(chosen, key=lambda c: (c["region"], -c["score"], c["sector"]))):
         names[c["region"]] += 1
-        style = "collect" if c["items"] >= 6 and i % 2 else styles[i % len(styles)]
-        out.append(_cp(c, "R%d-s%d" % (c["region"], c["sector"]), style))
+        style = "explore" if "door" in c else "collect" if c["items"] >= 6 and i % 2 else styles[i % len(styles)]
+        out.append(_cp(c, "R%d-door%d" % (c["region"], c["door"]) if "door" in c
+                       else "R%d-s%d" % (c["region"], c["sector"]), style))
     # the aftermath: the tightest trio of droppers / imps in the start region, as corpses, the player among them
     trio_kinds = ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP")
     r0 = [m for m in mons if reg.get(m[3]) == min(regions_with or [0]) and m[4] in trio_kinds]

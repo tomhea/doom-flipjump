@@ -56,6 +56,7 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
 from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_lines
 from doomfj.doorcode import card_pickup_lines, walkover_lines   # M7 P2a.1
 from doomfj.doors import door_kinds, walkover_triggers                    # M7 P2a.1
+from doomfj.doors import switch_boxes as door_switch_boxes                 # M8 L2
 from doomfj.doors import exit_boxes                                        # M7 P2a.2
 from doomfj.doors import door_contact_geo                                  # M7 P2b
 from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS,       # M7 P2b
@@ -1727,15 +1728,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              passes={si: pass_state(secs, lds, sds, si) for si in _dst_tbl},
                              mon_press=mon_press, mon_contact=mon_contact,
                              # M7 P7: a player dead at the tic's start presses no door and holds none open
-                             dead="p_dd0" if _LOOT else None)
+                             dead="p_dd0" if _LOOT else None,
+                             # M8 L2: the door switches (SR 63 / S1 103) and the doors a walk-over line opens
+                             switches=door_switch_boxes(secs, lds, sds, verts),
+                             walked={t_[0] for t_ in _walk_trig})
               if (_dst_tbl and player_sim) else [])
         # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
         if _movers_on and dt:
             dt = dt + lift_tic_lines(sorted(_lift_st), {si: len(v) for si, v in _lift_st.items()})
         return dt
-    _door_tic = _make_door_tic()
     # M7 P2a.1: the walk-over triggers (doomfj.doors), fired from the collision move
     _walk_trig = walkover_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
+    _door_tic = _make_door_tic()
 
     def _seg_door(seg):
         """The door sector whose state this seg's constants depend on, or None.

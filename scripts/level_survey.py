@@ -77,10 +77,18 @@ def supported_line_specials():
     out = {1: "doors (plain DR; monsters open it: world)", 11: "doors (S1 exit)"}
     for s in doors.BLUE_DOOR_SPECIALS:
         out[s] = "doors (blue card)"
+    for s in doors.YELLOW_DOOR_SPECIALS:
+        out[s] = "doors (yellow card: pcard_y)"
+    for s in doors.RED_DOOR_SPECIALS:
+        out[s] = "doors (red card: pcard_r)"
     for s in doors.BLAZE_DOOR_SPECIALS:
         out[s] = "doors (blaze)"
+    for s in doors.STAY_DOOR_SPECIALS:
+        out[s] = "doors (D1 open-stay)"
     for s in doors.WALKOVER_SPECIALS:
-        out[s] = "doors (walk-over, by tag)"
+        out[s] = "doors (walk-over %s, per line, by tag)" % doors.WALK_DOOR_KINDS[s]
+    for s, (_k, once) in doors.SWITCH_DOOR_KINDS.items():
+        out[s] = "doors (%s switch, by tag)" % ("S1" if once else "SR")
     for s in movers.LIFT_WALK_SPECIALS | movers.LIFT_USE_SPECIALS:
         out[s] = "movers (lift)"
     for s in movers.FLOOR_SWITCH_SPECIALS:
@@ -229,9 +237,17 @@ class Survey:
         geo = doors.door_contact_geo(secs, lds, sds, self.verts)
         slanted = [si for si, (area, _) in geo.items() if area and area[0] == "poly"]
         if slanted:
-            self.row("WARN", "doors with slanted sides", slanted, "", "model OK (M8 L0); doorcode refuses 'd' lines")
-        self.guard("walk-over triggers (one axis-aligned segment, one door)",
+            self.row("INFO", "doors with slanted or split sides", slanted, "",
+                     "contact by every boundary line (M8 L2: doorcode runs the slanted lines)")
+        # a CLOSING door some box fits inside needs the centre-inside test, which doorcode does not run
+        refused = [si for si, (area, _) in geo.items() if area and area[0] == "poly" and area[2]
+                   and not doors.door_stay(kinds[si])]
+        if refused:
+            self.row("REFUSED", "closing doors a box fits inside (doorcode: no centre-inside test)", refused, "", "")
+        self.guard("walk-over triggers (per line, every tagged door)",
                    lambda: doors.walkover_triggers(secs, lds, sds, self.verts))
+        self.guard("door switches (SR 63 / S1 103)",
+                   lambda: doors.switch_door_triggers(secs, lds, sds, self.verts))
         lifts = {}
         self.guard("lift states", lambda: lifts.update(movers.lift_states(secs, lds, sds)))
         sw = {}

@@ -19,6 +19,7 @@ quantised — see `quantise`, which is the only rounding rule.
 """
 from __future__ import annotations
 
+import functools
 import json
 from pathlib import Path
 
@@ -93,23 +94,53 @@ def neighbours(lds, sds):
     return out
 
 
+def _door_lines_of(secs, lds, sds) -> dict:
+    """M8 L2: `{sector: {"manual": {kind}, "walk": {kind}, "switch": {kind}}}` -- the door kind every DOOR line asks
+    of a sector: a MANUAL line's (DR / D1, EV_VerticalDoor: the sector behind it), a walk-over line's (W1,
+    P_CrossSpecialLine -> EV_DoDoor) and a switch line's (S1 / SR, P_UseSpecialLine -> EV_DoDoor): the sectors their
+    TAG names. Only door specials: a lift's or a floor's line behind a shut sector makes no door."""
+    out: dict = {}
+    for ld in lds:
+        if ld.special in MANUAL_DOOR_KINDS and ld.back not in NO_SIDE and ld.back < len(sds):
+            out.setdefault(sds[ld.back].sector, {}).setdefault("manual", set()).add(MANUAL_DOOR_KINDS[ld.special])
+    for src, table in (("walk", WALK_DOOR_KINDS), ("switch", {s: k for s, (k, _o) in SWITCH_DOOR_KINDS.items()})):
+        tags: dict = {}
+        for ld in lds:
+            if ld.special in table and ld.tag:
+                tags.setdefault(ld.tag, set()).add(table[ld.special])
+        for si, sec in enumerate(secs):
+            if sec.tag in tags:
+                out.setdefault(si, {}).setdefault(src, set()).update(tags[sec.tag])
+    return out
+
+
 def door_sectors(secs, lds, sds) -> dict:
-    """{sector index: fully-open ceil_h} for every REAL door on the map: a sector behind a special
-    line's back side, and (M7 P2a.1) a sector a walk-over door line TAGS -- E1M1's 77 and 145, which
-    no line has behind it (`door_kinds`)."""
+    """{sector index: fully-open ceil_h} for every REAL door on the map: a sector behind a door line's
+    back side, and (M7 P2a.1) a sector a walk-over door line TAGS -- E1M1's 77 and 145, which no line
+    has behind it (`door_kinds`).
+
+    M8 L2 (E1M2): only DOOR specials make a door (`_door_lines_of`; every special E1M1 has behind a shut
+    sector is one, so its 15 doors and their order are unchanged), a switch door line (SR 63, S1 103)
+    tags doors as a walk-over line does, and a sector stored OPEN is a door when every line that moves
+    it opens it to STAY (E1M2's 208: D1 31 and S1 103, its ceiling 80 over its floor 64) -- EV_DoDoor's
+    open rises from the ceiling the sector has and never closes, so its stops start at that ceiling
+    (`door_states`). A stored-open sector a re-closing door line moves stays out: it would close to its
+    floor, below its state 0."""
     nb = neighbours(lds, sds)
     out = {}
+    lines_of = _door_lines_of(secs, lds, sds)
     candidates = []
-    for ld in lds:
-        if not ld.special or ld.back == 0xFFFF or ld.back >= len(sds):
-            continue
-        candidates.append(sds[ld.back].sector)
-    wtags = {ld.tag for ld in lds if ld.special in WALKOVER_SPECIALS and ld.tag}
-    candidates += [si for si, sec in enumerate(secs) if sec.tag in wtags]
+    for ld in lds:                     # E1M1's order: the doors behind lines first, in linedef order
+        if ld.special in MANUAL_DOOR_KINDS and ld.back not in NO_SIDE and ld.back < len(sds):
+            candidates.append(sds[ld.back].sector)
+    candidates += [si for si in range(len(secs)) if set(lines_of.get(si, ())) - {"manual"}]
     for si in candidates:
         s = secs[si]
-        if s.ceil_h != s.floor_h:          # already open: a lift or a trigger sector, not a door
-            continue
+        if s.ceil_h != s.floor_h:
+            # already open: a lift or a trigger sector, not a door -- unless every line moving it opens it to stay
+            stay = all(KIND_MOTION[k][1] for ks in lines_of[si].values() for k in ks)
+            if not stay or not nb.get(si) or min(secs[n].ceil_h for n in nb[si]) - OPEN_GAP <= s.ceil_h:
+                continue
         if not nb.get(si):
             continue
         open_h = min(secs[n].ceil_h for n in nb[si]) - OPEN_GAP
@@ -152,6 +183,12 @@ def quantise(lo: int, open_h: int, h: float, quant: int = DEFAULT_QUANT) -> int:
     return max(lo, min(open_h, int(h // quant) * quant))
 
 
+def shut_h(secs, si: int) -> int:
+    """M8 L2: a door's state-0 ceiling -- the one the map stores: its floor for every stored-shut door (all of
+    E1M1's), the open ceiling of a stored-open stay door (`door_sectors`)"""
+    return secs[si].ceil_h
+
+
 def stops(lo: int, open_h: int, quant: int = DEFAULT_QUANT) -> list:
     """Every height this door can stop at, shut..open inclusive — one baked state each.
 
@@ -176,8 +213,8 @@ def heights_at(secs, lds, sds, frac: float, quant: int = DEFAULT_QUANT) -> dict:
     `reference_model.apply_sector_heights` takes, and the one the emitter takes."""
     out = {}
     for si, open_h in door_sectors(secs, lds, sds).items():
-        lo = secs[si].floor_h
-        out[si] = (lo, quantise(lo, open_h, lo + (open_h - lo) * frac, quant))
+        lo = shut_h(secs, si)
+        out[si] = (secs[si].floor_h, quantise(lo, open_h, lo + (open_h - lo) * frac, quant))
     return out
 
 
@@ -207,11 +244,11 @@ def door_states(secs, lds, sds, quant: int = DEFAULT_QUANT) -> dict:
     at the same height and are not meant to be — the index addresses a per-door block."""
     out = {}
     for si, open_h in door_sectors(secs, lds, sds).items():
-        st = stops(secs[si].floor_h, open_h, quant)
+        st = stops(shut_h(secs, si), open_h, quant)
         assert len(st) <= MAX_STATES, (
             "door sector %d has %d stops at quant %d, past the %d the fj state nibble addresses"
             % (si, len(st), quant, MAX_STATES))
-        assert st[0] == secs[si].floor_h and st[-1] == open_h, (
+        assert st[0] == shut_h(secs, si) and st[-1] == open_h, (
             "door sector %d: state 0 must be shut and the last state fully open, got %r"
             % (si, st))
         out[si] = st
@@ -308,13 +345,34 @@ IDLE, OPENING, CLOSING = 0, 1, 2
 # blue card (26) and one is a blazing door (117) -- and two more sectors are doors a walk-over line
 # opens once and leaves open (special 2, W1 "door open stay", matched by TAG). The model, every gate
 # oracle and the fj emitter take the kind of a door from `door_kinds` and its behaviour from here.
-BLUE_DOOR_SPECIALS = frozenset({26})       # DR, blue card (EV_VerticalDoor's key check)
-BLAZE_DOOR_SPECIALS = frozenset({117})     # DR, blazing
-WALKOVER_SPECIALS = frozenset({2})         # W1 door open-stay, by tag
 # The blazing door's speed: DOOM's VDOORSPEED * 4. A TIC IS A FRAME here and a plain door already
 # moves one stop a frame (SPEED = 1, the fastest `sub` allows), so the blazing door moves FOUR stops
 # a frame, clamped at both ends -- the same 4:1 ratio, in the only unit this machine has.
 BLAZE_STRIDE = 4
+# ---- M8 L2: every door kind E1M2 has, from DOOM's tables (p_doors.c EV_VerticalDoor / EV_DoDoor, p_spec.c
+# P_CrossSpecialLine, p_switch.c P_UseSpecialLine). A kind is a MOTION (stride, stay) and a card:
+#   plain / blue / yellow / red  DR: raise, wait VDOORWAIT, close (vld_normal); the key doors need their card
+#   blaze                        DR blazing (vld_blazeRaise): the same, VDOORSPEED*4
+#   walkover / stay              open and stay (vld_open): W1 2 by tag, D1 31 on its own line
+#   blazestay                    blazing open-stay (vld_blazeOpen): W1 109 by tag, D1 118
+# E1M1's kind names are unchanged (they name its emitted door blocks).
+KIND_MOTION = {"plain": (1, False), "blue": (1, False), "yellow": (1, False), "red": (1, False),
+               "blaze": (BLAZE_STRIDE, False), "walkover": (1, True), "stay": (1, True),
+               "blazestay": (BLAZE_STRIDE, True)}
+KIND_CARD = {"blue": "blue", "yellow": "yellow", "red": "red"}       # EV_VerticalDoor's key check
+# the use key on the door's own line (the sector behind it): DR 1 / 26 / 27 / 28 / 117, D1 31 / 118
+MANUAL_DOOR_KINDS = {1: "plain", 26: "blue", 27: "yellow", 28: "red", 117: "blaze", 31: "stay", 118: "blazestay"}
+# crossing the line (W1, once per line, by tag): 2 open-stay, 109 blazing open-stay
+WALK_DOOR_KINDS = {2: "walkover", 109: "blazestay"}
+# the use key on a switch (by tag): SR 63 EV_DoDoor(normal) -- repeatable; S1 103 EV_DoDoor(open) -- once
+SWITCH_DOOR_KINDS = {63: ("plain", False), 103: ("stay", True)}
+BLUE_DOOR_SPECIALS = frozenset(s for s, k in MANUAL_DOOR_KINDS.items() if k == "blue")      # {26}
+YELLOW_DOOR_SPECIALS = frozenset(s for s, k in MANUAL_DOOR_KINDS.items() if k == "yellow")  # {27}
+RED_DOOR_SPECIALS = frozenset(s for s, k in MANUAL_DOOR_KINDS.items() if k == "red")        # {28}
+BLAZE_DOOR_SPECIALS = frozenset({117})     # DR, blazing
+STAY_DOOR_SPECIALS = frozenset({31, 118})  # D1 open-stay (118 blazing)
+WALKOVER_SPECIALS = frozenset(WALK_DOOR_KINDS)       # W1 door open-stay, by tag: {2, 109}
+SWITCH_DOOR_SPECIALS = frozenset(SWITCH_DOOR_KINDS)  # {63, 103}
 # The blue card's touch (the model's `_touch_specials`, doomfj.combat): the boxes overlap -- item
 # radius 20 + player radius 16, strict -- and the card is within the player's reach of the floor it
 # stands on: kz - z in [-REACH_DOWN, REACH_UP] = [-8, 56]. tests/host/test_doors_p2a.py ties these
@@ -327,10 +385,12 @@ def use_boxes(secs, lds, sds, rng: int = USE_RANGE) -> dict:
 
     It is the bounding box of the door's own SPECIAL linedefs, inflated by `rng`. One box per door
     (not per line) so the fj test is four compares against baked constants no matter how many
-    lines the door has, and the box is axis-aligned so none of them needs a multiply."""
+    lines the door has, and the box is axis-aligned so none of them needs a multiply. M8 L2: the
+    MANUAL door lines only (a switch's or a walk-over line's box is not the door's; E1M1's are all
+    manual)."""
     out: dict = {}
     for ld in lds:
-        if not ld.special or ld.back == 0xFFFF or ld.back >= len(sds):
+        if ld.special not in MANUAL_DOOR_KINDS or ld.back == 0xFFFF or ld.back >= len(sds):
             continue
         si = sds[ld.back].sector
         if si not in door_sectors(secs, lds, sds):
@@ -446,7 +506,7 @@ def geometry_stamp(secs, lds, sds, quant: int = DEFAULT_QUANT) -> dict:
     return {
         "quant": quant, "speed": SPEED, "wait": WAIT, "max_states": MAX_STATES,
         "open_gap": OPEN_GAP,
-        "stops": {str(si): stops(secs[si].floor_h, open_h, quant)
+        "stops": {str(si): stops(shut_h(secs, si), open_h, quant)
                   for si, open_h in sorted(door_sectors(secs, lds, sds).items())},
     }
 
@@ -490,43 +550,99 @@ def compare_stamp(stamp: dict, secs, lds, sds) -> list:
 # ---- M7 P2a.1: the kinds, the card check, the walk-over triggers ----------------------------------------
 
 def door_kinds(secs, lds, sds) -> dict:
-    """`{door sector: "plain" | "blue" | "blaze" | "walkover"}` -- one kind per `door_sectors` entry,
-    from the special of the line behind it (or, for a walk-over door, the line that tags it)."""
+    """`{door sector: kind}` (`KIND_MOTION`) -- one kind per `door_sectors` entry: its manual line's
+    (the one behind it: it carries the card), else its walk-over line's, else its switch line's.
+    M8 L2: every line moving one door must ask the same MOTION of it (asserted: E1M2's 258 is a DR door
+    its SR 63 switch also opens, EV_DoDoor(normal) -- the same raise; 208 a D1 open-stay door its S1 103
+    switch also opens, EV_DoDoor(open)); E1M1's kinds are its old ones."""
     doors = door_sectors(secs, lds, sds)
+    lines_of = _door_lines_of(secs, lds, sds)
     out = {}
-    for ld in lds:
-        if not ld.special:
-            continue
-        if ld.special in WALKOVER_SPECIALS:
-            for si, sec in enumerate(secs):
-                if si in doors and ld.tag and sec.tag == ld.tag:
-                    out[si] = "walkover"
-            continue
-        if ld.back == 0xFFFF or ld.back >= len(sds) or sds[ld.back].sector not in doors:
-            continue
-        si = sds[ld.back].sector
-        kind = ("blue" if ld.special in BLUE_DOOR_SPECIALS else
-                "blaze" if ld.special in BLAZE_DOOR_SPECIALS else "plain")
-        assert out.get(si, kind) == kind, "door %d has two kinds: %s, %s" % (si, out[si], kind)
+    for si in sorted(doors):
+        src = lines_of[si]
+        for k in ("manual", "walk", "switch"):
+            if src.get(k):
+                assert len(src[k]) == 1, "door %d has two %s kinds: %s" % (si, k, sorted(src[k]))
+                kind = next(iter(src[k]))
+                break
+        every = {kk for ks in src.values() for kk in ks}
+        assert {KIND_MOTION[kk] for kk in every} == {KIND_MOTION[kind]}, (
+            "door %d is asked two motions: %s" % (si, sorted(every)))
         out[si] = kind
-    assert set(out) == set(doors), sorted(set(doors) - set(out))
     return out
 
 
 def door_stride(kind: str) -> int:
-    return BLAZE_STRIDE if kind == "blaze" else 1
+    return KIND_MOTION[kind][0]
 
 
 def door_stay(kind: str) -> bool:
-    return kind == "walkover"
+    return KIND_MOTION[kind][1]
 
 
-def can_open(kind: str, has_blue: bool) -> bool:
-    """May the player's USE open a door of this kind? A blue door needs the blue card
-    (EV_VerticalDoor); a walk-over door has no use line at all."""
+def can_open(kind: str, has_blue: bool, has_yellow: bool = False, has_red: bool = False) -> bool:
+    """May the player's USE on the door's own line open a door of this kind? A key door needs its
+    card (EV_VerticalDoor); a walk-over door has no use line at all. (Whether the door HAS a use
+    line is its use box: `use_boxes`.)"""
     if kind == "walkover":
         return False
-    return has_blue or kind != "blue"
+    need = KIND_CARD.get(kind)
+    return need is None or {"blue": has_blue, "yellow": has_yellow, "red": has_red}[need]
+
+
+def door_card_cell(kind: str):
+    """the fj cell holding the card a key door of this kind needs, or None: `pcard` (blue, M7 P2a.1),
+    `pcard_y` / `pcard_r` (M8 L2: one nibble each, declared and written by the pickups)"""
+    return {"blue": "pcard", "yellow": "pcard_y", "red": "pcard_r"}.get(KIND_CARD.get(kind))
+
+
+# ---- M8 L2: the switch doors (P_UseSpecialLine -> EV_DoDoor, by tag) --------------------------------------
+
+def switch_door_triggers(secs, lds, sds, verts, rng: int = USE_RANGE) -> list:
+    """`[(box, (door sector, ...), once)]`, one per switch door line (SR 63 / S1 103) in linedef order: the
+    line's extent inflated by `rng` (`use_boxes`' proximity compromise, as the exit and the floor switch),
+    and the doors its tag names.
+
+    EV_DoDoor skips a sector whose door is ACTIVE (`sec->specialdata`): a press reaches a door only while
+    it is still -- `switch_ready`. An S1 line clears itself on the first press that started a door
+    (P_ChangeSwitchTexture(line, 0) after EV_DoDoor returned 1). That latch is NOT kept, and it need not
+    be: an S1 door switch's doors are open-STAY doors (asserted), and once such a door has been
+    started it moves only up and comes to rest open, where a press changes nothing (`door_tic`) --
+    so every press after the first finds nothing to do, latched or not. (No switch texture changes:
+    the renderer animates no switch.)"""
+    def xy(v):
+        v = verts[v]
+        return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])
+    doors = door_sectors(secs, lds, sds)
+    kinds = door_kinds(secs, lds, sds)
+    out = []
+    for ld in lds:
+        if ld.special not in SWITCH_DOOR_KINDS or not ld.tag:
+            continue
+        targets = tuple(si for si, sec in enumerate(secs) if sec.tag == ld.tag and si in doors)
+        if not targets:
+            continue
+        once = SWITCH_DOOR_KINDS[ld.special][1]
+        assert not once or all(door_stay(kinds[si]) for si in targets), (
+            "S1 door switch tag %d opens a door that closes: its latch would be seen" % ld.tag)
+        (ax, ay), (bx, by) = xy(ld.v1), xy(ld.v2)
+        out.append(((min(ax, bx) - rng, min(ay, by) - rng, max(ax, bx) + rng, max(ay, by) + rng), targets, once))
+    return out
+
+
+def switch_boxes(secs, lds, sds, verts, rng: int = USE_RANGE) -> dict:
+    """`{door sector: [box, ...]}` -- the switch boxes (`switch_door_triggers`) that press each door"""
+    out: dict = {}
+    for box, targets, _once in switch_door_triggers(secs, lds, sds, verts, rng):
+        for si in targets:
+            out.setdefault(si, []).append(box)
+    return out
+
+
+def switch_ready(st: tuple) -> bool:
+    """EV_DoDoor's `if (sec->specialdata) continue`, on a door's `(state, dir, sub, wait)`: no thinker while
+    the door is neither moving nor waiting open (a door at rest shut, or an open-stay door at rest open)"""
+    return st[1] == IDLE and st[3] == 0
 
 
 # M7 P2a.2 -- the exit switch (S1 exit; E1M1: linedef 407): P_UseLines' box, the doors' trigger
@@ -578,9 +694,46 @@ def door_contact_geo(secs, lds, sds, verts) -> dict:
                 lines.append(("x", ax, min(ay, by), max(ay, by)))
             else:
                 lines.append(("d", ax, ay, bx, by))
-        area = (x0, y0, x1, y1) if rect else ("poly", tuple(xy(ld.v1) + xy(ld.v2) for ld in mine))
+        if rect:
+            area = (x0, y0, x1, y1)
+        else:
+            edges = tuple(xy(ld.v1) + xy(ld.v2) for ld in mine)
+            # M8 L2: a slanted (or split) door's contact is a box STRADDLING one of its boundary lines (`touches_door`),
+            # and its centre inside the polygon only where a thing's box could lie wholly inside it (`fits`): where
+            # none can (the player's, 32 wide, the smallest) and none can hold it (a side over 2 * 31, the widest E1
+            # monster's), a box overlapping the door straddles a line of it, and the fj needs no inside test
+            # (doorcode.door_contact_lines refuses a closing door that `fits`). E1M2's: 299 and 318 (slanted
+            # sides), 30 (two 16-thick strips: one sector, two pieces), 208 (two 32 x 32 squares: fits) -- all
+            # open-stay doors, which never close, so none asks for its contact (`door_tic`'s reversal)
+            fits = (max(x1 - x0, y1 - y0) <= 2 * MAX_DOOR_THING_R
+                    or _square_fits(edges, x0, y0, x1, y1, 32))
+            area = ("poly", edges, fits)
         out[si] = (area, lines)
     return out
+
+
+MAX_DOOR_THING_R = 31          # the widest thing a door reverses on in E1 (the cacodemon; E1M2's widest is 30)
+
+
+@functools.lru_cache(maxsize=None)
+def _square_fits(edges, x0: int, y0: int, x1: int, y1: int, side: int) -> bool:
+    """M8 L2: could an axis-aligned `side` x `side` square lie inside the polygon of `edges`? Conservative (True when
+    unsure): a fitting square covers a (side-1)^2 block of whole unit cells, each with its centre inside, so no such
+    block of inside centres proves no square fits."""
+    n = side - 1
+    run = {}                                             # (cx, cy) -> the inside run ending there, along y
+    best = 0
+    for cx in range(x0, x1):
+        col = 0
+        for cy in range(y0, y1):
+            col = col + 1 if _inside_poly(edges, (cx << 16) + 0x8000, (cy << 16) + 0x8000) else 0
+            run[cx, cy] = col
+    for cy in range(y0, y1):                             # a block of n columns each with an n-run ending at cy
+        wide = 0
+        for cx in range(x0, x1):
+            wide = wide + 1 if run[cx, cy] >= n else 0
+            best = max(best, wide)
+    return best >= n
 
 
 def _inside_poly(edges, x16: int, y16: int) -> bool:
@@ -599,6 +752,43 @@ def _inside_poly(edges, x16: int, y16: int) -> bool:
     return inside
 
 
+def straddles_d(ax: int, ay: int, bx: int, by: int, x16: int, y16: int, r16: int) -> bool:
+    """M8 L2: does the box of half-width `r16` at (`x16`, `y16`) touch the SLANTED line (`ax`, `ay`)-(`bx`, `by`)
+    (all 16.16)? check_position's own test: the boxes overlap, strict, and P_BoxOnLineSide is -1 -- DOOM's two
+    extreme corners through P_PointOnLineSide (FixedMul truncation; a point ON the line is its back side). The
+    contact (`touches_door`) and the slanted walk-over trigger (`crossed`); the fj is `doorcode._straddle_d_lines`."""
+    top, bottom, left, right = y16 + r16, y16 - r16, x16 - r16, x16 + r16
+    if right <= min(ax, bx) or left >= max(ax, bx) or top <= min(ay, by) or bottom >= max(ay, by):
+        return False
+    from doomfj.reference_model import ReferenceModel
+    pol = ReferenceModel.point_on_line_side
+    if (by - ay > 0) == (bx - ax > 0):                    # ST_POSITIVE: the \ diagonal
+        p1, p2 = pol(left, top, ax, ay, bx, by), pol(right, bottom, ax, ay, bx, by)
+    else:                                                 # ST_NEGATIVE: the / diagonal
+        p1, p2 = pol(right, top, ax, ay, bx, by), pol(left, bottom, ax, ay, bx, by)
+    return p1 != p2
+
+
+def _straddles_axis(axis: str, coord: int, lo: int, hi: int, x16: int, y16: int, r16: int) -> bool:
+    """the axis-aligned line's straddle, strict both axes (M7 P2b's rule; map-unit line, 16.16 box)"""
+    c, o = (y16, x16) if axis == "y" else (x16, y16)
+    return (coord << 16) - r16 < c < (coord << 16) + r16 and (lo << 16) - r16 < o < (hi << 16) + r16
+
+
+def poly_edges(area) -> list:
+    """M8 L2: a slanted door's boundary as `touches_door` tests it: `(axis, coord, lo, hi)` per axis-aligned line,
+    `("d", x1, y1, x2, y2)` per slanted one, in `door_contact_geo`'s line order"""
+    out = []
+    for ax, ay, bx, by in area[1]:
+        if ay == by:
+            out.append(("y", ay, min(ax, bx), max(ax, bx)))
+        elif ax == bx:
+            out.append(("x", ax, min(ay, by), max(ay, by)))
+        else:
+            out.append(("d", ax, ay, bx, by))
+    return out
+
+
 def touches_door(geo, x16: int, y16: int, r16: int) -> bool:
     """M7 P2b, the reversal's contact (docs/gp-lift-spike.md section 4): a thing at 16.16 (x16, y16)
     with half-width r16 touches the door when its box STRADDLES one of the door's two-sided lines --
@@ -607,61 +797,73 @@ def touches_door(geo, x16: int, y16: int, r16: int) -> bool:
     all strict -- or its centre is strictly inside the door's rectangle (a 32-thick door holds a
     centred 32-wide box whose edges lie ON both lines). The model's `door_touched` and the fj
     (`doorcode.door_contact_lines`) are this. M8 L0: a slanted line by check_position's own test (the boxes overlap,
-    strict, and P_BoxOnLineSide is -1, `reference_model.box_on_line_side`'s semantics); a non-rectangular door's
-    inside is its polygon's."""
+    strict, and P_BoxOnLineSide is -1, `reference_model.box_on_line_side`'s semantics). M8 L2: a non-rectangular door
+    (`poly`) is touched when the box straddles ANY of its boundary lines -- two-sided or track wall (a box on a track
+    wall is a position P_CheckPosition refuses) -- or, only where a box can fit inside it (`door_contact_geo`'s
+    `fits`), its centre is strictly inside: the rule the fj runs (for a door that does not `fit`), DOOM's for every
+    position a thing can stand at (tests/host/test_e1m2_model.py's grid)."""
     area, lines = geo
     if area[0] == "poly":
-        if _inside_poly(area[1], x16, y16):
+        if area[2] and _inside_poly(area[1], x16, y16):
             return True
+        lines = poly_edges(area)
     else:
         x0, y0, x1, y1 = area
         if (x0 << 16) < x16 < (x1 << 16) and (y0 << 16) < y16 < (y1 << 16):
             return True
     for ln in lines:
         if ln[0] == "d":
-            # check_position's own test: the boxes overlap (strict) and P_BoxOnLineSide says -1 -- DOOM's two extreme
-            # corners through P_PointOnLineSide (FixedMul truncation; a point ON the line is its back side)
             _, ax, ay, bx, by = ln
-            ax, ay, bx, by = ax << 16, ay << 16, bx << 16, by << 16
-            top, bottom, left, right = y16 + r16, y16 - r16, x16 - r16, x16 + r16
-            if right <= min(ax, bx) or left >= max(ax, bx) or top <= min(ay, by) or bottom >= max(ay, by):
-                continue
-            from doomfj.reference_model import ReferenceModel
-            pol = ReferenceModel.point_on_line_side
-            if (by - ay > 0) == (bx - ax > 0):                    # ST_POSITIVE: the \ diagonal
-                p1, p2 = pol(left, top, ax, ay, bx, by), pol(right, bottom, ax, ay, bx, by)
-            else:                                                 # ST_NEGATIVE: the / diagonal
-                p1, p2 = pol(right, top, ax, ay, bx, by), pol(left, bottom, ax, ay, bx, by)
-            if p1 != p2:
+            if straddles_d(ax << 16, ay << 16, bx << 16, by << 16, x16, y16, r16):
                 return True
-            continue
-        axis, coord, lo, hi = ln
-        c, o = (y16, x16) if axis == "y" else (x16, y16)
-        if (coord << 16) - r16 < c < (coord << 16) + r16 and (lo << 16) - r16 < o < (hi << 16) + r16:
+        elif _straddles_axis(*ln, x16, y16, r16):
             return True
     return False
 
 
 def walkover_triggers(secs, lds, sds, verts) -> list:
-    """`[(door sector, axis, coord, lo, hi)]`, one per walk-over tag, in door-sector order: the
-    tag's W1 lines are collinear and axis-aligned on E1M1 (asserted), so each tag is ONE segment --
-    `axis` "y" for a horizontal one (y = coord, x in [lo, hi]), "x" for a vertical one."""
+    """`[(door sector, axis, coord, lo, hi)]` for an axis-aligned trigger -- `axis` "y" for a horizontal
+    one (y = coord, x in [lo, hi]), "x" for a vertical one -- and `[(door sector, "d", x1, y1, x2, y2)]`
+    for a slanted one (v1 -> v2 as the line runs), sorted: one entry per (trigger, door it opens).
+
+    M8 L2: each W1 LINE is its own trigger (P_CrossSpecialLine) and opens every door its tag names
+    (EV_DoDoor) -- E1M2's 109 opens 30 and 266; E1M3's tag 11 is a ring of six lines, two slanted.
+    Collinear axis-aligned lines of one tag that touch end to end are FUSED into one segment, which is
+    exact: every W1 door line opens its doors to STAY (asserted), so a second line's press finds a
+    door already opening or open for good and changes nothing (`door_tic`), and the fused extent is
+    the union of the lines'. E1M1's two tags (three collinear lines each) are one segment each, as
+    before."""
+    def xy(v):
+        v = verts[v]
+        return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])
     doors = door_sectors(secs, lds, sds)
+    kinds = door_kinds(secs, lds, sds)
     by_tag: dict = {}
     for ld in lds:
-        if ld.special in WALKOVER_SPECIALS and ld.tag:
+        if ld.special in WALK_DOOR_KINDS and ld.tag:
             by_tag.setdefault(ld.tag, []).append(ld)
     out = []
     for tag, lines in by_tag.items():
         targets = [si for si, sec in enumerate(secs) if sec.tag == tag and si in doors]
-        assert len(targets) == 1, "walk-over tag %d opens %s" % (tag, targets)
-        pts = [(verts[v].x, verts[v].y) for ld in lines for v in (ld.v1, ld.v2)]
-        xs, ys = {x for x, _ in pts}, {y for _, y in pts}
-        if len(ys) == 1:
-            out.append((targets[0], "y", ys.pop(), min(xs), max(xs)))
-        else:
-            assert len(xs) == 1, "walk-over tag %d is not one axis-aligned segment" % tag
-            out.append((targets[0], "x", xs.pop(), min(ys), max(ys)))
+        assert targets, "walk-over tag %d opens no door" % tag
+        assert all(door_stay(kinds[si]) for si in targets), "walk-over tag %d opens a door that closes" % tag
+        segs, diag = [], []
+        for ld in lines:
+            (ax, ay), (bx, by) = xy(ld.v1), xy(ld.v2)
+            if ay == by:
+                segs.append(("y", ay, min(ax, bx), max(ax, bx)))
+            elif ax == bx:
+                segs.append(("x", ax, min(ay, by), max(ay, by)))
+            else:
+                diag.append(("d", ax, ay, bx, by))
+        fused: list = []
+        for axis, coord, lo, hi in sorted(segs):
+            if fused and fused[-1][:2] == (axis, coord) and lo <= fused[-1][3]:
+                fused[-1] = (axis, coord, fused[-1][2], max(hi, fused[-1][3]))
+            else:
+                fused.append((axis, coord, lo, hi))
+        for seg in fused + diag:
+            out += [(si,) + seg for si in targets]
     return sorted(out)
 
 
@@ -674,7 +876,19 @@ def crossed(trig: tuple, old16: tuple, new16: tuple, radius: int) -> bool:
     move of at most 16 units a side change implies the box straddles the line, so what remains is the
     new box overlapping the segment's extent on the other axis: lo - R < centre < hi + R, strict, as
     PIT_CheckLine's box test. DEVIATION: tested once per tic between the tic's start and end, not
-    per P_TryMove of a slide."""
+    per P_TryMove of a slide.
+
+    M8 L2, a SLANTED trigger ("d"): DOOM's own two tests -- P_PointOnLineSide of the old and the new
+    centre differ, and the new box is in the move's spechit (`straddles_d`: PIT_CheckLine's bbox
+    overlap and P_BoxOnLineSide -1)."""
+    if trig[1] == "d":
+        _si, _d, x1, y1, x2, y2 = trig
+        a = (x1 << 16, y1 << 16, x2 << 16, y2 << 16)
+        from doomfj.reference_model import ReferenceModel
+        pol = ReferenceModel.point_on_line_side
+        if pol(old16[0], old16[1], *a) == pol(new16[0], new16[1], *a):
+            return False
+        return straddles_d(*a, new16[0], new16[1], radius << 16)
     _si, axis, coord, lo, hi = trig
     L = coord << 16
     a, o = (1, 0) if axis == "y" else (0, 1)
@@ -709,24 +923,29 @@ class DoorPhase:
         self.contact = door_contact_geo(secs, lds, sds, verts) if reversal else None
         self.passes = {si: pass_state(secs, lds, sds, si, quant=quant) for si in self.nstates}
         self.triggers = walkover_triggers(secs, lds, sds, verts)
+        self.switches = switch_boxes(secs, lds, sds, verts)       # M8 L2: SR / S1 door switches
         self._initial = initial_states(secs, lds, sds, quant)
 
     def initial(self):
         return (dict(self._initial), (0,) * len(self.triggers), frozenset(), 0)
 
-    def tic(self, state, use: bool, x16: int, y16: int, has_blue=None, others=(), player: bool = True):
+    def tic(self, state, use: bool, x16: int, y16: int, has_blue=None, others=(), player: bool = True,
+            has_yellow: bool = False, has_red: bool = False):
         """`has_blue`: None takes the state's card. `others` (M7 P3.2b): the live monsters' boxes [(x16, y16, r16)]
         -- a closing door reverses on them as on the player (World.door_touched). `player` (M7 P7, P7-c): False for
         a player dead when the tic began -- he holds no closing door (World.door_touched asks `player_alive`; the
-        caller also drops his `use`: World._doors_phase's press needs him alive)"""
+        caller also drops his `use`: World._doors_phase's press needs him alive). M8 L2: `has_yellow` / `has_red`
+        the other cards (the model's p_cards); a switch box presses its doors that are at rest (`switch_ready`)"""
         ds, fired, req, card = state
         if has_blue is None:
             has_blue = bool(card)
         out = {}
         for si in self.order:
             kind, box = self.kinds[si], self.boxes.get(si)
-            pressed = (use and box is not None and can_open(kind, has_blue)
-                       and in_use_box_fixed(box, x16, y16)) or si in req
+            pressed = (use and box is not None and can_open(kind, has_blue, has_yellow, has_red)
+                       and in_use_box_fixed(box, x16, y16)) or si in req or (
+                use and switch_ready(ds[si])
+                and any(in_use_box_fixed(b, x16, y16) for b in self.switches.get(si, ())))
             blocked = (self.contact is not None and ds[si][1] == CLOSING
                        and ((player and touches_door(self.contact[si], x16, y16, 16 << 16))
                             or any(touches_door(self.contact[si], ox, oy, orr) for ox, oy, orr in others)))

@@ -92,7 +92,8 @@ def _grid(w, rule):
 
 def test_every_e1m2_door_is_check_positions_straddle_or_the_sector(w2):
     kinds = {si: w2._door_contact[si][0][0] == "poly" for si in w2.door_order}
-    assert sum(kinds.values()) == 2, kinds                  # doors 299 and 318
+    # doors 299 and 318 (slanted sides), M8 L2's 30 (two strips) and 208 (two squares: a box fits, the inside test kept)
+    assert {si for si, poly in kinds.items() if poly} == {30, 208, 299, 318}, kinds
     checked, touched, bad = _grid(w2, lambda si, x, y, r: Dm.touches_door(w2._door_contact[si], x, y, r))
     assert not bad, bad[:5]
     assert checked > 5000 and 0 < touched < checked

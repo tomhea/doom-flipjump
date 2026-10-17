@@ -1426,6 +1426,10 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
     nas, na_owns = [], set()                          # M8: the scenarios this map cannot host, the counters they own
     for sc in scen:
         why = sc.get("na")
+        if not why and dsim.mapname != "E1M1":
+            # M8: a scenario gate_targets.py found no placement for on this map (its sweep: no candidate meets the claim,
+            # or a control never parts) -- N/A by its tag, with that reason
+            why = R.na_reasons.get(sc["name"].split()[0])
         if not why and not sc.get("cands") and "cands" in sc and dsim.mapname != "E1M1" \
                 and not sc.get("na_if_no_cands") and not sc.get("rule"):
             # M8: a scenario whose candidates come from the map's things (a chainsaw, a berserk, a monster kind) and

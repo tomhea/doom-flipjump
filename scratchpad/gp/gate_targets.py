@@ -16,7 +16,10 @@ MoverPhase's lifts, use lines and switches, the World's things) and then VERIFIE
              own test, so a role written here passes that gate's oracle half;
   fight roles (the pickup walks, the barrel chain, the barrel F8a blocks, the nukage sector): fight_gate.place on
              the scenario as fight_gate builds it (claim met, no death);
-  the court (S3, a stress row with no rule claim beyond a hurt monster) and the lift leaf: derived, not run.
+  the court (S3, a stress row with no rule claim beyond a hurt monster) and the lift leaf: derived, not run;
+  THE SWEEP: then every fight_gate and die_gate scenario is placed with the roles (claim, deaths, every control) and a
+             scenario no candidate places is N/A BY ITS TAG with that reason (fight_gate prints it N/A off E1M1) --
+             a coverage gap made visible, to be closed by better candidates, never hidden.
 
 A role with no candidate that verifies is N/A with the reason (the candidates and what refused them are kept). The
 map's other features that are not roles yet are LISTED (key doors per colour by their line specials, cards per
@@ -311,10 +314,55 @@ def p2a_roles(ctx: Ctx, roles: dict, na: dict, tried: dict) -> None:
 # fight: candidates by the map's things, placed by fight_gate
 # ================================================================================================
 def fight_place(ctx: Ctx, sc: dict, verify: bool):
+    """fight_gate.place on `sc`, and every one of its `controls` must part (fight_gate's own test)"""
     if not verify:
         return True
     import fight_gate as FG
-    return FG.place(ctx.fight_run(), sc) is not None
+    got = FG.place(ctx.fight_run(), sc)
+    if got is None:
+        return False
+    cand, want, _c = got
+    return all(FG.ctl_parts(ctx.fight_run(), sc, cand, want, ctl) is not None for ctl in sc.get("controls", ()))
+
+
+def sweep(ctx: Ctx, roles: dict, na: dict, gate: str) -> None:
+    """M8: every scenario of fight_gate / die_gate, placed on the oracle with the generated roles as the gate places it
+    (claim, no death unless the gate allows deaths, every control parts); a scenario that cannot be placed is N/A by its
+    tag with the reason -- the gate prints it N/A on this map instead of failing to place it. Scenarios already N/A,
+    awaiting a package or N/A by rule are left to the gate."""
+    import fight_gate as FG
+    import p8a_lib as P8
+    if gate == "die":
+        import die_gate as DG
+        scen_fn, deaths_ok, run = DG.scenario_list, True, DG.Run(ctx.orc, ctx.dsim, ctx.card_di)
+    else:
+        scen_fn, deaths_ok, run = FG.scenario_list, False, ctx.fight_run()
+    gate_roles.PINNED = gate_roles.Roles(ctx.map, roles, na, "gate_targets sweep")
+    try:
+        scen = scen_fn(ctx.dsim, ctx.w, ctx.card)
+    finally:
+        gate_roles.PINNED = None
+    for sc in scen:
+        tag = sc["name"].split()[0]
+        if sc.get("na") or tag in na or not sc.get("cands") or P8.status(sc, FG.PMODE, FG.MMODE) != "run":
+            continue
+        got = FG.place(run, sc, deaths_ok=deaths_ok)
+        why = None
+        if got is None:
+            why = "no candidate of %d places on %s's oracle (gate_targets sweep: the claim is not met%s)" % (
+                len(sc["cands"][:sc.get("limit", 12)]), ctx.map, "" if deaths_ok else " without a death")
+        else:
+            cand, want, _c = got
+            for ctl in sc.get("controls", ()):
+                try:
+                    if FG.ctl_parts(run, sc, cand, want, ctl) is None:
+                        why = "placed, but control %s never parts there (gate_targets sweep)" % ctl
+                        break
+                except P8.Awaits:
+                    continue
+        print("    %-6s %-60s %s" % (gate, sc["name"][:60], "OK" if why is None else "N/A: " + why), flush=True)
+        if why:
+            na[tag] = why
 
 
 def fight_roles(ctx: Ctx, roles: dict, na: dict, tried: dict, verify: bool) -> None:
@@ -330,17 +378,19 @@ def fight_roles(ctx: Ctx, roles: dict, na: dict, tried: dict, verify: bool) -> N
             a = k * math.pi / 4
             ca, sa = math.cos(a), math.sin(a)
             x0, y0 = round(t.x - 48 * ca), round(t.y - 48 * sa)
-            n = 0
+            n = hb = 0
             for u in pk:
                 along = (u.x - x0) * ca + (u.y - y0) * sa
                 perp = abs(-(u.x - x0) * sa + (u.y - y0) * ca)
-                n += 0 <= along <= WALK_LEN and perp < TOUCH
+                on = 0 <= along <= WALK_LEN and perp < TOUCH
+                n += on
+                hb += on and u.type in (2014, 2015)       # the bonuses: the cap and rounding controls see them
             if n >= 4:
-                walks.append((-n, x0, y0, (k << 29) & 0xFFFFFFFF))
+                walks.append((-min(hb, 3), -n, x0, y0, (k << 29) & 0xFFFFFFFF))
     walks.sort()
     keep, log = [], tried.setdefault("pickup_walks", [])
     seen = set()
-    for negn, x0, y0, ang in walks:
+    for _nhb, negn, x0, y0, ang in walks:
         if len(keep) >= 3 or len(log) >= 24:
             break
         if (x0 >> 5, y0 >> 5, ang) in seen:
@@ -350,6 +400,7 @@ def fight_roles(ctx: Ctx, roles: dict, na: dict, tried: dict, verify: bool) -> N
         if not poses:
             continue
         sc = {"name": "F1", "keys": [F] * 36 + [I] * 6, "cands": [(p, None) for p in poses],
+              "controls": ["bonus_cap", "bonus_round"],
               "claim": lambda c, tr: c["pickups"] >= 4 and c["bonus_frames"] >= 1}
         ok = fight_place(ctx, sc, verify)
         log.append({"value": [x0, y0, ang], "items_on_the_ray": -negn, "refused": None if ok else "claim not met"})
@@ -501,6 +552,11 @@ def generate(mapname: str, verify_fight: bool = True) -> dict:
           flush=True)
     fight_roles(ctx, roles, na, tried, verify_fight)
     listed(ctx, roles)
+    if verify_fight:
+        print("  the sweep (every fight_gate / die_gate scenario placed with these roles; unplaceable -> N/A):",
+              flush=True)
+        for gate in ("fight", "die"):
+            sweep(ctx, roles, na, gate)
     gen = Path(__file__)
     doc = {"map": mapname,
            "what": "the gates' ROLES on %s (scratchpad/gp/gate_roles.py reads them; gate_targets.py writes them)"

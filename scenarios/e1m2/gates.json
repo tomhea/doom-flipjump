@@ -67,19 +67,19 @@
   "lift_leaf_sector": 44,
   "pickup_walks": [
    [
-    2112,
-    592,
-    0
-   ],
-   [
-    2352,
-    592,
-    2147483648
-   ],
-   [
-    672,
-    -2832,
+    1044,
+    -2176,
     1073741824
+   ],
+   [
+    1044,
+    -2136,
+    1073741824
+   ],
+   [
+    1044,
+    -1960,
+    3221225472
    ]
   ],
   "block_barrel": 0,
@@ -137,7 +137,11 @@
   "reversal_door": "no plain door of E1M2 verifies S13 (tried [258])",
   "chain": "no 3 barrels of E1M2 within one another's blast (largest group 2)",
   "nukage_sector": "no sector of E1M2 has a damaging special [4, 5, 7, 16]: F9 / F9l / D6 cannot be hosted",
-  "F5": "E1M2 has no berserk pack (2023) on any skill"
+  "F5": "E1M2 has no berserk pack (2023) on any skill",
+  "F3": "no candidate of 12 places on E1M2's oracle (gate_targets sweep: the claim is not met without a death)",
+  "F8d": "no candidate of 12 places on E1M2's oracle (gate_targets sweep: the claim is not met without a death)",
+  "I2i": "no candidate of 6 places on E1M2's oracle (gate_targets sweep: the claim is not met without a death)",
+  "I6": "no candidate of 12 places on E1M2's oracle (gate_targets sweep: the claim is not met without a death)"
  },
  "candidates": {
   "blue_door": [
@@ -363,7 +367,7 @@
      0
     ],
     "items_on_the_ray": 6,
-    "refused": null
+    "refused": "claim not met"
    },
    {
     "value": [
@@ -372,7 +376,7 @@
      2147483648
     ],
     "items_on_the_ray": 6,
-    "refused": null
+    "refused": "claim not met"
    },
    {
     "value": [
@@ -399,6 +403,69 @@
      1073741824
     ],
     "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     704,
+     -2688,
+     3221225472
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     704,
+     -2024,
+     0
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     952,
+     -2024,
+     2147483648
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     992,
+     -2024,
+     2147483648
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1044,
+     -2176,
+     1073741824
+    ],
+    "items_on_the_ray": 5,
+    "refused": null
+   },
+   {
+    "value": [
+     1044,
+     -2136,
+     1073741824
+    ],
+    "items_on_the_ray": 5,
+    "refused": null
+   },
+   {
+    "value": [
+     1044,
+     -1960,
+     3221225472
+    ],
+    "items_on_the_ray": 5,
     "refused": null
    }
   ],
@@ -413,7 +480,7 @@
  },
  "provenance": {
   "generator": "scratchpad/gp/gate_targets.py",
-  "generator_sha16": "a389916a2a81d6ab",
+  "generator_sha16": "583a55dafc6e5e84",
   "wad": "tests/fixtures/freedoom_e1m2.wad",
   "wad_sha16": "e4eb5f4ca943ba4d",
   "model_sha16": {
@@ -421,10 +488,10 @@
    "src/doomfj/movers.py": "af186565d99741d0",
    "src/doomfj/world.py": "460de12848e99c99",
    "src/doomfj/combat.py": "239e730721b47064",
-   "scratchpad/gp/p2a_gate.py": "cea7c5e5bbb236cc",
-   "scratchpad/gp/fight_gate.py": "cef31b5898ebca11"
+   "scratchpad/gp/p2a_gate.py": "371a2a800c842de5",
+   "scratchpad/gp/fight_gate.py": "fb8ecd72c37d09d5"
   },
   "fight_verified": true,
-  "seconds": 192
+  "seconds": 1754
  }
 }

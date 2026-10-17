@@ -255,8 +255,47 @@ def main():
     print("EMITTED in %.0f s: %s" % (time.time() - t, {k: v["chars"] for k, v in res.items()}), flush=True)
     if a.json:
         Path(a.json).write_text(json.dumps({"map": a.map, "standins": a.standin, "parts": res}, indent=1))
+    hot_block_check(parts)
     if a.tier in ONE_PASS_RESET_TIERS:
         reset_check(parts, mw, a.map, cfg, a.tier)
+
+
+HOT_WINDOW_OPS = 1 << 14        # frame.arm5's window: 16^5 bits = 16,384 ops (2^20 / 64)
+
+
+def hot_block_check(parts):
+    """the hot data block (pclm .. wrej) counted from the emitted TEXT -- `;v * dw` one op, `hex.vec n` n ops (w/4 = 8)
+    -- against frame.arm5's 16^5-bit window; `pad 16384` anchors pclm on a window base, so it fits iff it is <= 16,384
+    ops (build.hot_window_violation is the build's own refusal, from the labels; this is the same fact before any
+    assembly: E1M2's first fast build learned it after 97 minutes). Exact on E1M2 b3: 15,376 ops, as its labels."""
+    import re
+    text = (dict(parts) if not isinstance(parts, dict) else parts).get("tables", "")
+    lines = text.split(chr(10))
+    try:
+        s = next(i for i, ln in enumerate(lines) if ln.startswith("pclm:"))
+        e = next(i for i, ln in enumerate(lines) if ln.startswith("wrej:"))
+    except StopIteration:
+        print("HOT BLOCK: no pclm / wrej in this tier's tables part", flush=True)
+        return
+    ops, unknown = 0, []
+    for ln in lines[s:e]:
+        t = re.sub(r"^[A-Za-z_][\w.]*:\s*", "", ln.strip())
+        if not t or t.startswith("//"):
+            continue
+        if t.startswith(";"):
+            ops += 1
+            continue
+        m = re.match(r"hex\.vec\s+(\d+|w/4)", t)
+        if m:
+            ops += 8 if m.group(1) == "w/4" else int(m.group(1))
+            continue
+        unknown.append(t)
+    print("HOT BLOCK: %s ops of the %s-op window (%s ops of headroom)%s"
+          % (format(ops, ","), format(HOT_WINDOW_OPS, ","), format(HOT_WINDOW_OPS - ops, ","),
+             "" if not unknown else "; %d lines not counted: %s" % (len(unknown), unknown[:3])), flush=True)
+    assert not unknown, "the hot block has lines this count does not know -- extend hot_block_check"
+    assert ops <= HOT_WINDOW_OPS, ("the hot data block is %d ops past frame.arm5's window: every narrow pointer would go "
+                                   "wild (shrink it: docs/handoff-e1m2.md 9)" % (ops - HOT_WINDOW_OPS))
 
 
 def reset_check(parts, mw, mapname, cfg, tier):

@@ -46,7 +46,9 @@ an ESTIMATE; `scratchpad/m4_bands.py` measures the first three by running the em
     python scripts/emit_check.py E1M3 --standin gives far-los ...     # past the named ones: a SIZE measurement
     python scripts/emit_check.py E1M3 --standin ... --assemble build/doom_e1m3_size.fjm   # + the assembly
 
-It refuses `python -O`. A STAND-IN supplies a missing feature as code (a give routine of the same size, a decoration
+It refuses `python -O`. After the emission it also counts the HOT DATA BLOCK from the text against `frame.arm5`'s
+16,384-op window (E1M2's first fast build crossed it and jumped to op 0 -- 97 minutes in) and composes the one-pass
+reset (a persisted name the registry lacks surfaced 7 minutes into a build): both refusals now cost minutes. A STAND-IN supplies a missing feature as code (a give routine of the same size, a decoration
 present on every skill) and names the feature rung that removes it; a program built with any is a size measurement,
 never a certified one. E1M2 went from nothing to a complete emission in 13 runs (handoff-e1m2.md 6); with the
 survey's rows in hand first, the next map should take a few.

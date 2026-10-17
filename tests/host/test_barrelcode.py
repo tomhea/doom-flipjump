@@ -129,18 +129,41 @@ def test_the_chain_is_the_models_on_e1m2(e1m2):
         assert chains[b] == _model_chain(e1m2, b), b
 
 
+def _composed(common, skills, k):
+    """skill k's NEW GAME lines as compose_restart runs them: the common block, then the skill's own"""
+    return list(common) + list(skills[k])
+
+
 def test_e1m2_barrels_differ_by_skill_and_restart_per_skill(e1m2):
-    """M8 F1.2 (7a): the barrels' level start differs by skill on E1M2 (it was refused), and NEW GAME's lines are each
-    skill's own"""
-    skills = (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)
-    vals = [BC.level_start_values(e1m2, sk) for sk in skills]
-    assert vals[0] != vals[2], "E1M2's barrels are the same on every skill: the case is not exercised"
-    BC.check_model_rules(e1m2, skills)                                       # no refusal
-    lines = [BC.restart_lines(e1m2, sk, nt=0) for sk in skills]
-    assert lines[0] != lines[2]
-    for sk, ln in zip(skills, lines):
-        v = BC.level_start_values(e1m2, sk)
-        assert "    hex.set 2, rng_wd, %d" % v["rng_wd"] in ln
+    """M8 F1.2 (7a; the CR of #144): the barrels' level start differs by skill on E1M2 (it was refused), and NEW GAME at
+    each skill -- through `wall_renderer.p6_restart_parts`, the composition the emitter runs -- sets THAT skill's barrels
+    and world stream. CONTROL: the old composition (SKILLS[0]'s lines in the common block) restarts HARD at EASY's and
+    must be caught."""
+    from doomfj import wall_renderer as WR
+    vals = [BC.level_start_values(e1m2, sk) for sk in WR.SKILLS]
+    assert vals[0] != vals[-1], "E1M2's barrels are the same on every skill: the case is not exercised"
+    BC.check_model_rules(e1m2, WR.SKILLS)                                    # no refusal
+    per = [BC.restart_lines(e1m2, sk, nt=0) for sk in WR.SKILLS]
+    common, skills = WR.p6_restart_parts(None, {"restart": per})
+    for k, sk in enumerate(WR.SKILLS):
+        got = [ln for ln in _composed(common, skills, k) if ln in per[k] or ln in sum(per, [])]
+        assert got == per[k], (sk, "NEW GAME at this skill does not set its own barrels")
+    # CONTROL: the pre-fix composition
+    old_common, old_skills = list(per[0]), [[] for _ in WR.SKILLS]
+    k_hard = len(WR.SKILLS) - 1
+    assert [ln for ln in _composed(old_common, old_skills, k_hard) if ln in sum(per, [])] != per[k_hard], (
+        "the control does not part: SKILLS[0]'s barrel lines equal the last skill's")
+
+
+def test_e1m1_barrel_restart_stays_common():
+    """E1M1's barrels are the same on every skill: their lines stay in the COMMON block, as before (its emission is
+    unchanged)"""
+    from doomfj import wall_renderer as WR
+    w = World(monsters="full", sight_rule="seen", player="full")
+    per = [BC.restart_lines(w, sk, nt=0) for sk in WR.SKILLS]
+    assert all(r == per[0] for r in per)
+    common, skills = WR.p6_restart_parts(None, {"restart": per})
+    assert common == per[0] and skills == [[] for _ in WR.SKILLS]
 
 
 def test_control_a_moved_barrel_changes_the_chain(world, monkeypatch):

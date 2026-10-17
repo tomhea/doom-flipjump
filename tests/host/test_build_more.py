@@ -339,7 +339,7 @@ def test_the_standalone_tier_puts_input_before_sim_and_the_reset_last(tmp_path, 
     _stub(monkeypatch)
     part = tmp_path / "e1m1_07_reset.fj"
 
-    def fake_reset(gen, files, names, view_w, nss, mapname="e1m1", persist=(), pid_bytes=1):
+    def fake_reset(gen, files, names, view_w, nss, mapname="e1m1", persist=(), pid_bytes=1, ss_ratio=2):
         part.write_text("m1_reset:\n", encoding="utf-8")
         return part, 0, 0, []
     monkeypatch.setattr(selfreset, "emit_reset_part_by_label", fake_reset)

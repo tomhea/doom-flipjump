@@ -124,8 +124,13 @@ def barnext_values() -> List[int]:
 # ---- the static facts --------------------------------------------------------------------------------------------
 def chain_pairs(w) -> Dict[int, List[Tuple[int, int]]]:
     """{b: [(c, damage)]}: barrel b's blast reaches barrel c (c != b, in index order) with 128 - d -- the model's
-    `_radius_attack` third loop with both ends static. Asserted: every such pair's LOS is clear against EVERY sight
-    segment (walls, and door / lift / switch lines in any state), so the model's verdict never depends on the tic."""
+    `_radius_attack` third loop with both ends static -- for the pairs whose trace NO sight segment touches (the
+    verdict never depends on the tic: no test emitted).
+    M8 F1.2 (docs/f1-big-map-widths.md 8): a pair a STATIC sight segment touches is dropped -- always blocked, in the
+    model too (E1M2's 5 -> 7 and 7 -> 5; it was an emit-time refusal). A pair only DYNAMIC segments (door / lift /
+    switch lines) touch is still REFUSED: its LOS depends on the tic and needs `bl_los` at the blast (designed in
+    docs/f1-big-map-widths.md 8, not built -- no measured map has one: E1M1 0, E1M2 0, E1M9 0). E1M1 has neither,
+    so its chains are unchanged."""
     from doomfj.combat import BARREL_R, BOMB_DAMAGE
     from doomfj.monstersight import sight_segments
     from doomfj.world import segments_touch
@@ -140,8 +145,11 @@ def chain_pairs(w) -> Dict[int, List[Tuple[int, int]]]:
             if d >= BOMB_DAMAGE:
                 continue
             p, q = (tc.x, tc.y), (t.x, t.y)
-            assert not any(segments_touch(p, q, s["a"], s["b"]) for s in segs), (
-                "barrels %d -> %d: a sight segment touches the pair's trace -- the chain is not static" % (b, c))
+            touch = [s for s in segs if segments_touch(p, q, s["a"], s["b"])]
+            if any(s["dyn"] is None for s in touch):
+                continue                                  # a static wall in the way: never reached
+            assert not touch, ("barrels %d -> %d: only a door / lift / switch line touches the pair's trace -- the chain "
+                               "needs bl_los at the blast (docs/f1-big-map-widths.md 8)" % (b, c))
             lst.append((c, BOMB_DAMAGE - d))
         out[b] = lst
     return out
@@ -178,9 +186,9 @@ def check_model_rules(w, skills: Sequence[int] = ()) -> None:
     assert PLAYER_R < 256 and all(r < 256 for r in w.mon_radius[:w.layout.nmon])
     assert 0 < len(w.barrel_things) <= 255
     assert w.layout.nmon + len(w.barrel_things) < 255, "dm_id is two nibbles"
-    for sk in skills:
-        assert level_start_values(w, sk) == level_start_values(w, skills[0]), (
-            "the barrels' level start differs by skill: NEW GAME's lines must be per skill")
+    # M8 F1.2 (docs/f1-big-map-widths.md 7a): the barrels' level start MAY differ by skill (E1M2, E1M9) -- NEW GAME's
+    # lines are per skill (`restart_lines(w, skill)`, barrel_parts' "restart"), the leaf lists and thvis per skill
+    # (things.skill_level_start), bar_solid per skill (monstercode); the image boots at boot_skill's
     chain_pairs(w)
 
 

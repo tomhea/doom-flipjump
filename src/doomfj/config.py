@@ -98,6 +98,12 @@ class Config:
     # which needs only 4: force 5, and the picture must stay byte-exact while ops rise.
     BAND_NIBBLES: int = 4
 
+    # M8 L1 -- `sshead`'s DECLARED cells per leaf. 2 is E1M1's (the M1 restore set was recorded over twice the
+    # reachable cells, and the hosted / two-pass tiers still read those spans); a map without that history declares
+    # what a leaf reaches (1). E1M2 MUST: its hot data block (pclm .. wrej) has to fit ONE 16^5-bit window for
+    # frame.arm5, and at 2 it ran 96 ops past it (16,480 of 16,384) -- the binary jumped to op 0 on its first frame.
+    SSHEAD_RATIO: int = 2
+
     @property
     def PID_BYTES(self) -> int:
         """Bytes of `pclm[]` storage per column: ceil(PID_NIBBLES/2).
@@ -273,7 +279,7 @@ GAME_CFG = Config(VIEW_ROWS=84)
 # (> 255: 3 nibbles, two bytes -- docs/handoff-e1m2.md section 4 (A)) and ~83k band lists (> 65,535: 5 nibbles). The
 # emitter's own asserts (the pid bake, the bands walk) refuse a width a map outgrows, so a missing entry fails loudly.
 MAP_CONFIG = {
-    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5},
+    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1},
 }
 
 

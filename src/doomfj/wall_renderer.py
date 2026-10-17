@@ -607,11 +607,19 @@ def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, n
 
 def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
     """M7 P6 -- P6's level-start lines for `compose_restart(p6_common=, p6_skills=)`, ONE composition (the emitter and
-    tests/fj/test_restart_fj.py both call it): package C's barrels and drops (`bar`: barrelcode.barrel_parts' dict; the
-    same on every skill, check_model_rules), package B's loot cells (restartcode.level_start_lines over
+    tests/fj/test_restart_fj.py both call it): package C's barrels and drops (`bar`: barrelcode.barrel_parts' dict;
+    per skill when they differ: M8 F1.2), package B's loot cells (restartcode.level_start_lines over
     lootcode.PERSIST -- the same on every skill: the player's start), and each skill's RUNTIME pickups' `thvis` slots
     after the baked vanishable ones (`loot_slots`: lootcode.pickup_slots; lootcode.extra_vis per skill)."""
-    common, skills = (list(bar["restart"][0]) if bar else []), [[] for _ in SKILLS]
+    # M8 F1.2 (the CR of #144): the barrels' level start may differ by skill (E1M2, E1M9: barrelcode.check_model_rules
+    # no longer refuses it), so their lines are COMMON only when every skill's are the same (E1M1: its text unchanged)
+    # and otherwise each skill's block carries its own -- SKILLS[0]'s in the common block restarted HARD's barrels and
+    # world stream at EASY's
+    per_bar = [list(r) for r in bar["restart"]] if bar else []
+    assert not per_bar or len(per_bar) == len(SKILLS), (len(per_bar), len(SKILLS))
+    same = all(r == per_bar[0] for r in per_bar)
+    common = list(per_bar[0]) if per_bar and same else []
+    skills = [list(per_bar[k]) if per_bar and not same else [] for k in range(len(SKILLS))]
     # M7 P8a A: the dying view's p_vd -- 0 on every skill -- while the World's player sinks (its mode is the game
     # tier's PLAYER_MODE: p31_parts builds it so), so this composition and the emitted p_vd cannot disagree
     from doomfj.world import player_sinks as _sinks
@@ -3433,7 +3441,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # jump guard (the static tables' own `;end` headers only matter on fall-through, which the
     # guard prevents). Measured: 78.54M -> 76.39M ops/frame, frame byte-identical.
     # the lists' DECLARED extents -- twice the reachable cells, the span the M1 restore set carries
-    _ss_cells, _th_cells = 2 * _MT_NSS, 2 * _MT_NT
+    # M8 L1: sshead at cfg.SSHEAD_RATIO cells a leaf (2 on E1M1: the restore set's spans; 1 on E1M2: its hot block
+    # must fit one 16^5 window -- config.Config.SSHEAD_RATIO)
+    _ss_cells, _th_cells = cfg.SSHEAD_RATIO * _MT_NSS, 2 * _MT_NT
     _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw"
                                              for _ in range(cfg.VIEW_W * cfg.PID_BYTES)),
                     # P10 G2: `sfbase` -- a column's ceiling / floor BASE pid ([VIEW_W ceilings][VIEW_W

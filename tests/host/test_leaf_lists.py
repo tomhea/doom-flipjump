@@ -81,7 +81,9 @@ def test_the_declaration_spells_the_bytes_at_the_old_extent():
     assert lines[6:] == ["hex.vec 5"], "padded to the old `hex.vec 10` extent, no more, no less"
     # R9: an extent the values do not fit in is refused, not silently truncated
     with pytest.raises(AssertionError):
-        byte_array_decl("sshead", values, 5)
+        byte_array_decl("sshead", values, 4)
+    # M8 L1: a FULL array (E1M2's sshead at Config.SSHEAD_RATIO 1) is legal and declares no padding
+    assert byte_array_decl("sshead", values, 5).split(chr(10))[6:] == []
     with pytest.raises(AssertionError):
         byte_array_decl("sshead", [256], 4)
 
@@ -94,8 +96,9 @@ def test_too_many_things_for_a_byte_are_refused():
 
 def test_a_map_with_no_runtime_things_bakes_an_empty_array():
     """no entry, no cell -- the game tier emitted on a thing-less map (the one-room fixture) must
-    not trip the extent check, while a full array still must"""
+    not trip the extent check; M8 L1: a full array is legal (no padding), an over-full one is not"""
     assert byte_array_decl("thnext", [], 0) == "thnext:\nhex.vec 0"
+    assert byte_array_decl("thnext", [1, 2], 2) == "thnext:\n;1 * dw\n;2 * dw"
     with pytest.raises(AssertionError):
-        byte_array_decl("thnext", [1, 2], 2)            # no zero cell left after the entries
+        byte_array_decl("thnext", [1, 2, 3], 2)         # more entries than cells
 

@@ -166,3 +166,66 @@ banks 1.42x: 98,566,799 vs 64,484,928), so its pool demand projects (UNVERIFIED)
 capacity. The next measurement is one blocked E1M2 build's PREFLIGHT (it now derives `--subsectors` and the pid width,
 docs/level-pipeline.md 1); levers if it overflows: `--max-slot-ops`, `--spread`, the pool base, or declining cold
 groups (inline tables cost ops, so the decline list is chosen by heat).
+
+## 8. The FAST build's pool: fits at --spread 1 (2026-10-17, measured)
+
+The blocked build (ship-gate 1b's flags, E1M2's wad, 9 stand-ins, asserts ON, through `scripts/emit_check.py --then
+scratchpad/12m/build_labeled.py ...`) wrote its census (`scratchpad/12m/_census_game_e1m2.json.gz`, 55,780 groups,
+785,305 tables) and refused: "PREFLIGHT: demand 90,317,184 words, capacity 67,108,863 words (134.6% used) -- 55,624
+GROUPS GET NO BLOCK". (My projection had been 75-85M: UNVERIFIED and low.)
+
+Priced from the census with poolmap's own `probe_pool` (no assembly; calibrated: E1M1's census at the ship knobs gives
+blocked62's 49,798,976 to the word):
+
+| knobs | E1M2 demand | fit |
+|---|---|---|
+| ship (spread 2, min count 256) | 90,317,184 (134.6%) | 156 of 55,780 groups placed |
+| spread 2, min count 4,096 | 75,669,888 (112.8%) | 953 placed |
+| spread 2, min count 8,192..65,536 (only the giant group spread) | 70,427,008 (104.9%) | 8,322 placed |
+| **spread 1** | **53,649,792 (79.9%)** | **all 55,780, 0 broken** |
+
+THE CAUSE: one group of 97,647 tables (E1M1's largest is smaller): rounded to 2^17 slots and, spread, 2^18 -- ~16.8M
+words alone; spreading every other group adds ~20M more. Options: `--spread 1` (fits now; its speed against spread 2 is
+measured on the binary -- E1M2 has no baseline, its caps are CAP-22 ops and size), or a BlockPool knob that spreads
+groups below a MAX count too (spread 2 for every group but the giant one: ~58.9M, ~88% -- a flipjump change).
+
+## 9. The first fast E1M2 binary, and an L1 bug it found (2026-10-17)
+
+`build/doom_e1m2_b2.fjm` (spread 1, F1.2, six stand-ins): PREFLIGHT 53,649,920 words (79.9%; the census price was
+53,649,792), 55,781 of 55,781 groups placed, 0 broken, built in 5,815 s; **size 56.80% of 2^27** (76,236,288 stored
+words; span 121,631,232) -- it fits the address space, OVER the 43% cap held for E1M1 (my call for every level, 1:
+the owner's to keep or raise for E1M2).
+
+**It died after the menu: NullIP (a jump to op 0) on the first world frame.** The last-ops ring mapped through the
+build's label table: `rowmap.dsp` -> `rowmap.init` -> `hex.tables.ret` -> 0 -- a wild pointer.
+**THE CAUSE: the hot data block outgrew its window.** `frame.arm5`, the narrow pointer arm, rewrites only an address's
+low five hexes, so every table it reaches must lie in ONE 16^5-bit window (pclm .. wrej). E1M2's block: pclm 0x200000
+.. wrej 0x301800, **16,480 ops against 16,384 -- 96 over** (E1M1: 10,430, 5,954 of headroom). The growth: `sfslot`
++2,560 (L1's 32-byte stride), `thss_rt` +1,968 (more runtime things), `sshead` +844 (1,104 leaves at 2 cells each),
+`sfbhi` +320, `thnext` +188, `pclm` +160. I had priced `sfslot` alone (handoff 4 (A)).
+(A first diagnosis -- `thing_record_body`'s slot shift -- was WRONG: that shift indexes `spslot`, whose stride
+SPR_SLOT_STRIDE must NOT scale with the pid; reverted before any build used it. wall_renderer warns of exactly this.)
+**THE FIX:** `Config.SSHEAD_RATIO` -- `sshead`'s declared cells per leaf: 2 on E1M1 (its restore sets' spans:
+unchanged), 1 on E1M2 (`MAP_CONFIG`) -- threaded through the emitter, `selfreset.byte_arrays` /
+`emit_reset_part[_by_label]` (`declared_ratio`), the pin veto and emit_check: -1,104 ops, ~1,008 of headroom.
+**THE GUARD:** `build.hot_window_violation(labels)` -- the build REFUSES an image whose hot block straddles a window
+(beside `sprbank_misalignment`); it rejects b2 ("96 ops past it") and passes blocked62. ritual.py had the check;
+no E1M2 build ran ritual.
+**THE PROOF of L1's wide layout** (handoff 4 (A)'s "PROOF (M4's)", which L1 had not run): E1M1 built with
+`PID_NIBBLES=3 BAND_NIBBLES=5` forced (`scripts/emit_check.py E1M1 --map-config ... --then build_labeled ...`,
+`build/doom_e1m1_pid3.fjm`, 2,572 s, preflight 74.9%, 0 broken) -- **`m2_std_gate` PASS: byte- and state-exact on all
+421 frames** (walls, sprites, the door across the M1 reset, NEW GAME). sfbhi, the 32-byte stride, the ledge offsets and
+the sprite record all run end to end with no stand-in.
+
+## 10. E1M2 RUNS (2026-10-17, measured)
+
+`build/doom_e1m2_b3.fjm` -- the fast (blocked, `--spread 1`) build with F1.2, SSHEAD_RATIO 1 and six stand-ins
+(soundblock-ignored, gives, slanted-doors, slot-ids, pickup-static-z, exit-bar-stale), asserts ON: built in 5,824 s,
+PREFLIGHT 53,649,920 words (79.9%), 55,781 of 55,781 groups placed, 0 broken; the hot data block pclm 0x200000 .. wrej
+0x2F0400, **1,008 ops of headroom** (the build's new refusal passed); **size 56.80% of 2^27** (76,234,048 stored words,
+span 121,631,232). Run on msframe's script (the menu, NEW GAME, 40 frames forward): 44 frames presented, the run ending
+at the script's EOF; the frames show E1M2's start room and its monsters
+(scratchpad: e1m2_frames_b3/frame_005.png, frame_043.png). **`msframe.py --a b3 --b b3`: 66.6 ms/frame (66.5 .. 67.7),
+13,512,040 ops/frame, 202.8 M fj/s** on its 200-frame forward script -- E1M1's shipped baseline is 67.3 ms on its own
+(a different scene: a first reading, not a ship number; the stand-ins move ops a little). NOT certified: the six
+stand-ins' features are not built, and no E1M2 gate has run (E1M2's gates are L6's: its roles, its combat set).

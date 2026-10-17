@@ -195,6 +195,9 @@ def main():
     ap.add_argument("--tier", default="game")
     ap.add_argument("--standin", nargs="*", default=[], choices=sorted(STANDINS))
     ap.add_argument("--json", help="write the parts' sizes here")
+    ap.add_argument("--map-config", nargs="*", default=[], metavar="KEY=VAL",
+                    help="override the map's config.MAP_CONFIG widths (e.g. PID_NIBBLES=3 on E1M1: E1M2's wide layout "
+                         "built on a map whose gates need no stand-in) -- a MEASUREMENT build, never the shipped one")
     ap.add_argument("--then", nargs="*", metavar="SCRIPT ARGS",
                     help="LAST on the line: after applying the stand-ins, run SCRIPT (e.g. scratchpad/12m/build_labeled.py) "
                          "in THIS process with every argument after it, `--` included -- a blocked build's PREFLIGHT for a "
@@ -209,6 +212,11 @@ def main():
         assert then, "--then needs a script"
     a = ap.parse_args(argv)
     a.then = then
+    if a.map_config:                        # before anything reads config.MAP_CONFIG
+        import doomfj.config as _config
+        over = {k: int(v) for k, v in (kv.split("=", 1) for kv in a.map_config)}
+        _config.MAP_CONFIG[a.map.upper()] = dict(_config.MAP_CONFIG.get(a.map.upper(), {}), **over)
+        print("MAP_CONFIG[%s] = %s" % (a.map.upper(), _config.MAP_CONFIG[a.map.upper()]), flush=True)
     for s in [s for s in STANDINS if s in a.standin]:     # registry order: modules that bind names at import last
         STANDINS[s]()
     from doomfj.config import Config, map_cfg
@@ -247,6 +255,76 @@ def main():
     print("EMITTED in %.0f s: %s" % (time.time() - t, {k: v["chars"] for k, v in res.items()}), flush=True)
     if a.json:
         Path(a.json).write_text(json.dumps({"map": a.map, "standins": a.standin, "parts": res}, indent=1))
+    hot_block_check(parts)
+    if a.tier in ONE_PASS_RESET_TIERS:
+        reset_check(parts, mw, a.map, cfg, a.tier)
+
+
+HOT_WINDOW_OPS = 1 << 14        # frame.arm5's window: 16^5 bits = 16,384 ops (2^20 / 64)
+
+
+def hot_block_check(parts):
+    """the hot data block (pclm .. wrej) counted from the emitted TEXT -- `;v * dw` one op, `hex.vec n` n ops (w/4 = 8)
+    -- against frame.arm5's 16^5-bit window; `pad 16384` anchors pclm on a window base, so it fits iff it is <= 16,384
+    ops (build.hot_window_violation is the build's own refusal, from the labels; this is the same fact before any
+    assembly: E1M2's first fast build learned it after 97 minutes). Exact on E1M2 b3: 15,376 ops, as its labels."""
+    import re
+    text = (dict(parts) if not isinstance(parts, dict) else parts).get("tables", "")
+    lines = text.split(chr(10))
+    try:
+        s = next(i for i, ln in enumerate(lines) if ln.startswith("pclm:"))
+        e = next(i for i, ln in enumerate(lines) if ln.startswith("wrej:"))
+    except StopIteration:
+        print("HOT BLOCK: no pclm / wrej in this tier's tables part", flush=True)
+        return
+    ops, unknown = 0, []
+    for ln in lines[s:e]:
+        t = re.sub(r"^[A-Za-z_][\w.]*:\s*", "", ln.strip())
+        if not t or t.startswith("//"):
+            continue
+        if t.startswith(";"):
+            ops += 1
+            continue
+        m = re.match(r"hex\.vec\s+(\d+|w/4)", t)
+        if m:
+            ops += 8 if m.group(1) == "w/4" else int(m.group(1))
+            continue
+        unknown.append(t)
+    print("HOT BLOCK: %s ops of the %s-op window (%s ops of headroom)%s"
+          % (format(ops, ","), format(HOT_WINDOW_OPS, ","), format(HOT_WINDOW_OPS - ops, ","),
+             "" if not unknown else "; %d lines not counted: %s" % (len(unknown), unknown[:3])), flush=True)
+    assert not unknown, "the hot block has lines this count does not know -- extend hot_block_check"
+    assert ops <= HOT_WINDOW_OPS, ("the hot data block is %d ops past frame.arm5's window: every narrow pointer would go "
+                                   "wild (shrink it: docs/handoff-e1m2.md 9)" % (ops - HOT_WINDOW_OPS))
+
+
+def reset_check(parts, mw, mapname, cfg, tier):
+    """the one-pass reset's refusals (a persisted name the registry lacks, or the program does not declare; a
+    registered cell undeclared) WITHOUT an assembly: the parts written to a temporary directory and the reset composed
+    over them -- the same calls, in the same order, as `build.build_wall_renderer`'s one-pass block (keep the two in
+    step: a refusal found here is one the build would hit 7 minutes in; E1M2's `mc_don` registry miss, 2026-10-17)"""
+    import tempfile
+    from doomfj import selfreset
+    from doomfj.build import STANDALONE_RESTORE_SET, DEFAULT_RESTORE_SET, _map_persist, persist_labels
+    from doomfj.mapcompiler import bake_bsp
+    from doomfj.wall_renderer import tier_flags, write_program_files
+    t = tier_flags(tier)
+    standalone, moving_things, doors = t["standalone"], t["moving_things"], t["doors"]
+    restore_set = STANDALONE_RESTORE_SET if standalone else DEFAULT_RESTORE_SET
+    with tempfile.TemporaryDirectory() as tmp:
+        prog = write_program_files(parts, Path(tmp), mapname)
+        extra = _map_persist(mw, mapname, standalone and moving_things)
+        persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things, extra=extra)
+        nss = len(bake_bsp(mw, mapname).subsectors)
+        names = selfreset.registered_reset_names(restore_set, cfg, standalone, mapname) | set(extra)
+        _part, n_nib, n_byte, _plan = selfreset.emit_reset_part_by_label(
+            Path(tmp), prog, names, cfg.VIEW_W, nss, mapname, persist=persist, pid_bytes=cfg.PID_BYTES,
+            ss_ratio=cfg.SSHEAD_RATIO)
+    print("RESET composed: %d nibble cells, %d byte cells, %d persisted names (the map's own: %s)"
+          % (n_nib, n_byte, len(persist), list(extra) or "none"), flush=True)
+
+
+ONE_PASS_RESET_TIERS = ("game",)        # build.ONE_PASS_TIERS' standalone member (the shipped one)
 
 
 if __name__ == "__main__":

@@ -76,14 +76,94 @@ def test_the_static_chain_is_the_models(world):
         assert chains[b] == _model_chain(world, b), b
 
 
-def test_control_a_blocked_pair_is_refused(world, monkeypatch):
-    t14, t15 = world.barrel_things[14], world.barrel_things[15]
-    mx, my = (t14.x + t15.x) // 2, (t14.y + t15.y) // 2
+def _wall_between(world, b, c, dyn):
+    tb, tc = world.barrel_things[b], world.barrel_things[c]
+    mx, my = (tb.x + tc.x) // 2, (tb.y + tc.y) // 2
+    return dict(a=(mx - 40, my), b=(mx + 40, my), box=(mx - 40, mx + 40, my, my), dyn=dyn)
+
+
+def test_control_a_static_wall_drops_the_pair(world, monkeypatch):
+    """M8 F1.2: a STATIC wall across a pair drops it (always blocked) -- it was a refusal before"""
+    before = BC.chain_pairs(world)
+    assert any(c == 15 for c, _d in before[14])
     segs = MS.sight_segments(world)
-    wall = dict(a=(mx - 40, my), b=(mx + 40, my), box=(mx - 40, mx + 40, my, my), dyn=None)
+    wall = _wall_between(world, 14, 15, None)
     monkeypatch.setattr(MS, "sight_segments", lambda w: segs + [wall])
-    with pytest.raises(AssertionError):
+    after = BC.chain_pairs(world)
+    assert not any(c == 15 for c, _d in after[14]) and not any(c == 14 for c, _d in after[15])
+    # exactly the pairs whose trace the wall touches are gone (the others kept, with their damage)
+    bt = world.barrel_things
+    want = {b: [(c, d) for c, d in v
+                if not segments_touch((bt[c].x, bt[c].y), (bt[b].x, bt[b].y), wall["a"], wall["b"])]
+            for b, v in before.items()}
+    assert after == want
+
+
+def test_control_a_dynamic_wall_across_a_pair_is_refused(world, monkeypatch):
+    """a DOOR / LIFT / SWITCH line across a pair is still refused: its LOS depends on the tic (bl_los at the blast is
+    designed, not built -- no measured map needs it)"""
+    segs = MS.sight_segments(world)
+    monkeypatch.setattr(MS, "sight_segments",
+                        lambda w: segs + [_wall_between(world, 14, 15, ("dstate + 0*dw", 16, frozenset({0})))])
+    with pytest.raises(AssertionError, match="bl_los"):
         BC.chain_pairs(world)
+
+
+@pytest.fixture(scope="module")
+def e1m2():
+    from pathlib import Path
+    from doomfj.wad import WadFile
+    root = Path(__file__).resolve().parents[2]
+    return World(WadFile.from_path(str(root / "tests" / "fixtures" / "freedoom_e1m2.wad")), "E1M2",
+                 monsters="full", sight_rule="seen", player="full")
+
+
+def test_the_chain_is_the_models_on_e1m2(e1m2):
+    """M8 F1.2: E1M2's barrels 5 and 7 are within a blast of each other with a STATIC wall between -- dropped, and the
+    model's own third loop agrees for every barrel"""
+    chains = BC.chain_pairs(e1m2)
+    t5, t7 = e1m2.barrel_things[5], e1m2.barrel_things[7]
+    assert max(abs(t5.x - t7.x), abs(t5.y - t7.y)) - 10 < BOMB_DAMAGE, "5 and 7 are in range"
+    assert not any(c == 7 for c, _d in chains[5]) and not any(c == 5 for c, _d in chains[7])
+    for b in range(len(e1m2.barrel_things)):
+        assert chains[b] == _model_chain(e1m2, b), b
+
+
+def _composed(common, skills, k):
+    """skill k's NEW GAME lines as compose_restart runs them: the common block, then the skill's own"""
+    return list(common) + list(skills[k])
+
+
+def test_e1m2_barrels_differ_by_skill_and_restart_per_skill(e1m2):
+    """M8 F1.2 (7a; the CR of #144): the barrels' level start differs by skill on E1M2 (it was refused), and NEW GAME at
+    each skill -- through `wall_renderer.p6_restart_parts`, the composition the emitter runs -- sets THAT skill's barrels
+    and world stream. CONTROL: the old composition (SKILLS[0]'s lines in the common block) restarts HARD at EASY's and
+    must be caught."""
+    from doomfj import wall_renderer as WR
+    vals = [BC.level_start_values(e1m2, sk) for sk in WR.SKILLS]
+    assert vals[0] != vals[-1], "E1M2's barrels are the same on every skill: the case is not exercised"
+    BC.check_model_rules(e1m2, WR.SKILLS)                                    # no refusal
+    per = [BC.restart_lines(e1m2, sk, nt=0) for sk in WR.SKILLS]
+    common, skills = WR.p6_restart_parts(None, {"restart": per})
+    for k, sk in enumerate(WR.SKILLS):
+        got = [ln for ln in _composed(common, skills, k) if ln in per[k] or ln in sum(per, [])]
+        assert got == per[k], (sk, "NEW GAME at this skill does not set its own barrels")
+    # CONTROL: the pre-fix composition
+    old_common, old_skills = list(per[0]), [[] for _ in WR.SKILLS]
+    k_hard = len(WR.SKILLS) - 1
+    assert [ln for ln in _composed(old_common, old_skills, k_hard) if ln in sum(per, [])] != per[k_hard], (
+        "the control does not part: SKILLS[0]'s barrel lines equal the last skill's")
+
+
+def test_e1m1_barrel_restart_stays_common():
+    """E1M1's barrels are the same on every skill: their lines stay in the COMMON block, as before (its emission is
+    unchanged)"""
+    from doomfj import wall_renderer as WR
+    w = World(monsters="full", sight_rule="seen", player="full")
+    per = [BC.restart_lines(w, sk, nt=0) for sk in WR.SKILLS]
+    assert all(r == per[0] for r in per)
+    common, skills = WR.p6_restart_parts(None, {"restart": per})
+    assert common == per[0] and skills == [[] for _ in WR.SKILLS]
 
 
 def test_control_a_moved_barrel_changes_the_chain(world, monkeypatch):

@@ -292,10 +292,12 @@ def byte_array_decl(label, values, cells):
     padded with zero cells to `cells` in all -- the extent `label: hex.vec cells` had, so no label
     after it moves and the M1 restore set's span for it holds."""
     # (a map with no runtime things has an EMPTY array -- no entry, no cell: `hex.vec 0` is nothing)
-    assert (len(values) < cells or not values) and all(0 <= v < 256 for v in values), (
-        label, len(values), cells)
+    # M8 L1: a FULL array (no padding: E1M2's sshead at Config.SSHEAD_RATIO 1) is legal and declares no hex.vec;
+    # E1M1's arrays are always padded (their 2x extents), so their text is unchanged
+    assert len(values) <= cells and all(0 <= v < 256 for v in values), (label, len(values), cells)
+    pad = cells - len(values)
     return "\n".join([f"{label}:"] + [f";{v} * dw" for v in values]
-                     + [f"hex.vec {cells - len(values)}"])
+                     + ([f"hex.vec {pad}"] if pad or not values else []))
 
 
 # M7 P1.3: the named scratch of `sim.leaf_link` / `sim.leaf_unlink` -- globals, not @-locals, so a

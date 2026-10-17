@@ -192,11 +192,14 @@ def _flood_run(tmp_path, which, mut=None) -> bool:
             body += ["hex.set 8, viewx, %d" % xy[0], "hex.set 8, viewy, %d" % xy[1], "stl.fcall nz_leaf, nz_ret"]
         else:
             body += ["hex.set %d, nz_sec, %d" % (w.sec_nibbles, s), "stl.fcall nz_flood, nz_ret"]
-        body += ["hex.print_as_digit 1, snd_alert + %d*dw, 0" % k for k in range(n)] + ["stl.output 10"]
-    body.append("stl.loop")
+        body += ["stl.fcall nzb_print, nzb_pret"]
+    body += ["stl.loop", "nzb_print:"]                     # the alert printed by one shared routine
+    body += ["hex.print_as_digit 1, snd_alert + %d*dw, 0" % k for k in range(n)] + ["stl.output 10",
+                                                                                     "stl.fret nzb_pret"]
     decls = (NZ.noise_decls(w) + point_location_decls()
              + ["viewx: hex.vec 8", "viewy: hex.vec 8", "mt_ms: hex.vec %d" % w.sec_nibbles,
-                "dstate: hex.vec %d" % nd, "lstate: hex.vec %d" % nl, "fswitch: hex.vec 1"])
+                "dstate: hex.vec %d" % nd, "lstate: hex.vec %d" % nl, "fswitch: hex.vec 1",
+                "nzb_pret: hex.vec w/4"])
     prog = "\n".join(body + decls) + "\n" + _flood_text(w, mut) + "\n".join(
         [_lfsec(w), generate_point_location_fj(w.cmap)]) + "\n"
     return fj.assemble_and_run_test_output(_srcs(tmp_path, "nzb_%s_%s" % (which, mut), prog), b"", want,

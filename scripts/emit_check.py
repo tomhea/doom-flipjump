@@ -94,28 +94,6 @@ def _slot_ids():
     wr.check_slot_ids = lambda n: None
 
 
-def _soundblock_ignored():
-    """F3: the fj noise flood without ML_SOUNDBLOCK -- the block edges read as ordinary edges (the flood's size, not its
-    rule: the model keeps them)"""
-    import doomfj.noisecode as nc
-    for name in [n for n in dir(nc) if callable(getattr(nc, n)) and not n.startswith("_")]:
-        fn = getattr(nc, name)
-        if getattr(fn, "__module__", "") != nc.__name__:
-            continue
-
-        def wrap(*a, _fn=fn, **k):
-            w = next((x for x in a if hasattr(x, "_sound_block_static_edges")), None)
-            if w is None:
-                return _fn(*a, **k)
-            saved = (w._sound_block_door_edges, w._sound_block_static_edges)
-            w._sound_block_door_edges, w._sound_block_static_edges = [], []
-            try:
-                return _fn(*a, **k)
-            finally:
-                w._sound_block_door_edges, w._sound_block_static_edges = saved
-        setattr(nc, name, wrap)
-
-
 def _barrels_one_skill():
     """F1: barrels that differ by skill -- every skill's level start read as the hard skill's (NEW GAME's lines per
     skill are F1's)"""
@@ -181,7 +159,8 @@ def _exit_bar_stale():
     wr.assert_exit_frame_bar = lambda *a, **k: None
 
 
-STANDINS = {"soundblock-ignored": _soundblock_ignored, "gives": _gives, "slanted-doors": _slanted_doors, "decor-every-skill": _decor_every_skill,
+# M8 L5: "soundblock-ignored" RETIRED -- noisecode floods with ML_SOUNDBLOCK (tests/fj/test_noise_block_fj.py)
+STANDINS = {"gives": _gives, "slanted-doors": _slanted_doors, "decor-every-skill": _decor_every_skill,
             "stats-digits": _stats_digits, "far-los": _far_los, "slot-ids": _slot_ids, "barrels-one-skill": _barrels_one_skill,
             "barrel-chains-static": _barrel_chains_static,
             "pickup-static-z": _pickup_static_z,

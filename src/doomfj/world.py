@@ -105,6 +105,7 @@ from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states
 from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heights_for_states,
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
 from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers   # M7 P2a.1
+from doomfj.doors import switch_boxes as door_switch_boxes, switch_ready          # M8 L2: SR / S1 door switches
 from doomfj.reference_model import (ReferenceModel, Scene, apply_sector_heights, spawn_state)
 from doomfj.things import single_player
 
@@ -902,6 +903,8 @@ class World(CombatMixin):
         # M7 P2a.1: every door's kind (doomfj.doors) -- a walk-over door has no use box and opens
         # from its trigger; the blazing door strides; blue doors take the card (player_can_open)
         self.door_kind = door_kinds(secs, lds, sds)
+        # M8 L2: the switch boxes that press each door (SR 63 / S1 103: EV_DoDoor on the doors their tag names)
+        self.door_switches = door_switch_boxes(secs, lds, sds, cmap.vertexes)
         self.walk_triggers = walkover_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
         self.door_lines = door_line_ids(secs, lds, sds, tbl)
         self.open_h = {si: (secs[si].floor_h, tbl[si][-1]) for si in self.door_order}
@@ -1143,6 +1146,10 @@ class World(CombatMixin):
             box = self.door_boxes.get(si)             # none for a walk-over door
             pressed = (keys["use"] and alive and box is not None and self.player_can_open(si)
                        and in_use_box_fixed(box, ws.px, ws.py))
+            # M8 L2: a door switch's box (P_UseSpecialLine -> EV_DoDoor): presses a door at rest only
+            pressed = pressed or (keys["use"] and alive and self.door_switches.get(si)
+                                  and switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))
+                                  and any(in_use_box_fixed(b, ws.px, ws.py) for b in self.door_switches[si]))
             kind = self.door_kind[si]
             # M7 P2b: reversal -- asked only of a closing door at its pass step (door_tic's rule)
             blocked = (ws.d_dir[d] == CLOSING and ws.d_state[d] >= self.door_pass[si]

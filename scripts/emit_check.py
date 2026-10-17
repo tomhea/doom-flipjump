@@ -20,21 +20,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 
-def _slanted_doors():
-    """F2: a door with slanted sides contacts as its bounding rectangle (doorcode's 'd' lines)"""
-    from doomfj import doorcode
-    orig = doorcode.door_contact_lines
-
-    def dcl(tag, geo, *a, **k):
-        area, lines = geo
-        if area[0] == "poly":
-            xs = [p for e in area[1] for p in (e[0], e[2])]
-            ys = [p for e in area[1] for p in (e[1], e[3])]
-            area = (min(xs), min(ys), max(xs), max(ys))
-        return orig(tag, (area, [ln for ln in lines if ln[0] != "d"]), *a, **k)
-    doorcode.door_contact_lines = dcl
-
-
 def _decor_every_skill():
     """F1: a solid decoration some skill lacks is treated as present on every skill (no mc_don flag)"""
     import doomfj.monstermove as mm
@@ -152,10 +137,10 @@ def _attacker_7bit():
     hc.turn_lines = lambda slot_rows, *a, **k: orig(list(slot_rows)[:0x7E], *a, **k)
 
 
-# M8 F4 RETIRED "gives" (lootcode.give_lines: the yellow / red cards, the soulsphere, the computer map) and F7 RETIRED
+# M8 F4 RETIRED "gives" (lootcode.give_lines: the yellow / red cards, the soulsphere, the computer map), F7 RETIRED
 # "exit-bar-stale" (wall_renderer.p5_tic_lines(bar_always=): the bar runs after the lvdone guard where the exit frame
-# can move it)
-STANDINS = {"soundblock-ignored": _soundblock_ignored, "slanted-doors": _slanted_doors, "decor-every-skill": _decor_every_skill,
+# can move it) and F2 RETIRED "slanted-doors" (doorcode: a slanted door's contact by its own lines)
+STANDINS = {"soundblock-ignored": _soundblock_ignored, "decor-every-skill": _decor_every_skill,
             "stats-digits": _stats_digits, "far-los": _far_los, "barrels-one-skill": _barrels_one_skill,
             "barrel-chains-static": _barrel_chains_static,
             "pickup-static-z": _pickup_static_z,

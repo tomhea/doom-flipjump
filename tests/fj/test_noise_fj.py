@@ -35,7 +35,8 @@ MIXES = ("shut", "open", "mixed1", "mixed2")
 def _lfsec(w) -> str:
     nleaf = len(w.cmap.subsectors)
     return generate_dispatch_table_fj("lfsec", list(w.leaf_sector),
-                                      index_nibbles=max(1, ((nleaf - 1).bit_length() + 3) // 4), result_nibbles=2)
+                                      index_nibbles=max(1, ((nleaf - 1).bit_length() + 3) // 4),
+                                      result_nibbles=w.sec_nibbles)
 
 
 def _states(w, mix):
@@ -146,11 +147,11 @@ def _flood_run(tmp_path, name, mut=None) -> bool:
         if s is None:
             body += ["hex.set 8, viewx, %d" % xy[0], "hex.set 8, viewy, %d" % xy[1], "stl.fcall nz_leaf, nz_ret"]
         else:
-            body += ["hex.set 2, nz_sec, %d" % s, "stl.fcall nz_flood, nz_ret"]
+            body += ["hex.set %d, nz_sec, %d" % (w.sec_nibbles, s), "stl.fcall nz_flood, nz_ret"]
         body += ["hex.print_as_digit 1, snd_alert + %d*dw, 0" % k for k in range(n)] + ["stl.output 10"]
     body.append("stl.loop")
     decls = (NZ.noise_decls(w) + point_location_decls()
-             + ["viewx: hex.vec 8", "viewy: hex.vec 8", "mt_ms: hex.vec 2",
+             + ["viewx: hex.vec 8", "viewy: hex.vec 8", "mt_ms: hex.vec %d" % w.sec_nibbles,
                 "dstate: hex.vec %d" % nd, "lstate: hex.vec %d" % nl, "fswitch: hex.vec 1"])
     prog = "\n".join(body + decls) + "\n" + _flood_text(w, mut) + "\n".join(
         [_lfsec(w), generate_point_location_fj(w.cmap)]) + "\n"
@@ -301,16 +302,16 @@ def _wrun(tmp_path, name, mut=None) -> bool:
               generate_dispatch_table_fj("mturn", MC.turn_table_values(), index_nibbles=2, result_nibbles=1)]
     for s in sorted({w._mon_sector(m) for m in range(n)}):
         tables.append(generate_dispatch_table_fj("rj%d" % s, [int(w.reject.visible(s, p)) for p in range(w.reject.nsec)],
-                                                 index_nibbles=2, result_nibbles=1))
+                                                 index_nibbles=w.sec_nibbles, result_nibbles=1))
     tables += [_lfsec(w), generate_point_location_fj(w.cmap)]
     vals = {f: list(getattr(ws, f)[:n]) for f in MC.P31_FIELDS + MC.P32A_FIELDS}
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
-             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n)
+             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n, w.sec_nibbles)
              + MC.MT_DECLS + MC.P32A_SCRATCH + point_location_decls() + NZ.noise_decls(w)
-             + [NZ.ambush_decl(n, [0] * n), "mt_ms: hex.vec 2", "dstate: hex.vec %d" % len(w.door_order),
+             + [NZ.ambush_decl(n, [0] * n), "mt_ms: hex.vec %d" % w.sec_nibbles, "dstate: hex.vec %d" % len(w.door_order),
                 "lstate: hex.vec %d" % max(1, len(w.lift_order)), "fswitch: hex.vec 1",
                 "viewx: hex.vec 8", "viewy: hex.vec 8", "mt_tret: hex.vec w/4"])
-    code = "\n".join(["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False)
+    code = "\n".join(["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False, nib=w.sec_nibbles)
                      + ["    stl.fret mt_tret"] + MC.p32a_leaves() + NZ.noise_leaf_lines(w)) + "\n"
     if mut == "noambush":                             # every ambusher treated as a plain monster
         k = 0

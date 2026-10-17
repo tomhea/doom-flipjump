@@ -38,6 +38,7 @@ from doomfj.harness import W
 from doomfj.lut_generator import generate_dispatch_table_fj, generate_tantoangle_lut_fj, generate_trig_idioms_fj
 from doomfj.monstercode import rnd_values
 from doomfj.reference_model import SLOPERANGE
+from doomfj.sectorcode import msec_cell
 from doomfj.tables import slopediv_recip8_table, tantoangle_table
 from doomfj.wall_renderer import hoisted_scratch_fj
 from doomfj.world import TicEvents, World
@@ -621,9 +622,10 @@ def _apply_player(c, rec):
 
 def _mon_row(c, m):
     w, ws = c.w, c.w.ws
-    s = "%08x%08x%04x%04x%04x%04x%04x%03x%02x" % (
+    s = "%08x%08x%04x%04x%04x%04x%04x%03x" % (
         ws.mon_momx[m] & M32, ws.mon_momy[m] & M32, ws.mon_fx[m], ws.mon_fy[m], ws.mon_x[m] & 0xFFFF,
-        ws.mon_y[m] & 0xFFFF, ws.mon_floorz[m] & 0xFFFF, ws.mon_leaf[m], w._mon_sector(m))
+        ws.mon_y[m] & 0xFFFF, ws.mon_floorz[m] & 0xFFFF, ws.mon_leaf[m])
+    s += "%0*x" % (w.sec_nibbles, w._mon_sector(m))                  # M8 L1: msec's width
     s += "%02x" % sum(1 for j in range(c.n) if ws.mon_momx[j] or ws.mon_momy[j])
     return s + "".join("%x" % ws.l_req[k] for k in range(len(w.lift_order)))
 
@@ -697,7 +699,7 @@ def _move_program(c, mut=None):
     after = (walkover_lines(w.walk_triggers, list(w.door_order), 16, prefix="kbwo")
              + lift_walk_lines(w.lift_walk, list(w.lift_order), 16, prefix="kblw"))
     knock = "\n".join(KC.cell_lines(proot) + KC.xy_lines() + KC.ptry_lines(after) + KC.mtry_lines(mroot, lift_trigs)
-                      + KC.move_lines(KC.slots_of(w, list(range(n))))) + "\n"
+                      + KC.move_lines(KC.slots_of(w, list(range(n))), nib=w.sec_nibbles)) + "\n"
     if mut == "frac_drop":
         knock, k = re.subn(r"    hex\.mov 4, mf[xy] \+ \d+\*dw, kb_p[xy]\n", "", knock)
         assert k == 2 * n, k
@@ -732,7 +734,7 @@ def _move_program(c, mut=None):
                                                                   for i, v in enumerate(vals)))
     decls = (KC.decls(n) + L.loot_decls(L.level_start(w)) + H.hurt_decls(H.level_start(w))
              + WC.weapon_decls(wstart, states, frames) + COLLISION_STATE_DECLS + MON_CELL_DECLS
-             + point_location_decls() + MM.monster_seed_decls() + MM.P32B_CONTEXT + LEAF_LINK_DECLS
+             + point_location_decls() + MM.monster_seed_decls() + MM.p32b_context(w.sec_nibbles) + LEAF_LINK_DECLS
              + ["pcard: hex.vec 1", "thvis:"] + ["    hex.vec 2, %d" % v for v in vis]
              + ["mdrop: hex.vec %d" % len(c.drop), "dr_live: hex.vec 2", "rtu_t: hex.vec w/4",
                 "rtu_leaf: hex.vec w/4", "rtu_ret: hex.vec w/4", "drt_ret: hex.vec w/4",
@@ -744,7 +746,7 @@ def _move_program(c, mut=None):
                 vec("mon_active", 1, [ws.mon_active[m] for m in range(n)]),
                 vec("mon_shootable", 1, [ws.mon_shootable[m] for m in range(n)]),
                 vec("mon_floorz", 4, [ws.mon_floorz[m] for m in range(n)]),
-                vec("msec", 2, [w._mon_sector(m) for m in range(n)]),
+                vec("msec", w.sec_nibbles, [w._mon_sector(m) for m in range(n)]),
                 vec("bar_solid", 1, [ws.bar_solid[b] for b in range(len(w.barrel_things))]),
                 "mc_don: hex.vec %d" % max(1, len(c.var)),
                 "dstate: hex.vec %d" % nd, "ddir: hex.vec %d" % nd, "dreq: hex.vec %d" % nd,
@@ -754,7 +756,7 @@ def _move_program(c, mut=None):
                 "dump_ret: hex.vec w/4", "dl_leaf: hex.vec 3", "kbp_ret: hex.vec w/4", "dbox: hex.vec 8"])
     tables = (L.tables_fj(w) + [generate_point_location_fj(w.cmap),
                                 generate_dispatch_table_fj("lfsec", list(w.leaf_sector), index_nibbles=3,
-                                                           result_nibbles=2)])
+                                                           result_nibbles=w.sec_nibbles)])
     return decls, code, tables
 
 
@@ -770,7 +772,7 @@ def _place(c, m) -> list:
             "hex.set 4, thpos_rt + %d*dw, %d" % (16 * m + 12, ws.mon_y[m] & 0xFFFF),
             "hex.set 3, thss_rt + %d*dw, %d" % (16 * m, leaf), "hex.set w/4, pw_leaf, %d" % leaf,
             "stl.fcall pw_link, pw_lkret",
-            "hex.set 2, msec + %d*dw, %d" % (2 * m, w._mon_sector(m)),
+            "hex.set %d, %s, %d" % (w.sec_nibbles, msec_cell(m, w.sec_nibbles), w._mon_sector(m)),
             "hex.set 4, mon_floorz + %d*dw, %d" % (4 * m, ws.mon_floorz[m] & 0xFFFF),
             "hex.set 1, mon_solid + %d*dw, %d" % (m, ws.mon_solid[m]),
             "hex.set 1, mon_shootable + %d*dw, %d" % (m, ws.mon_shootable[m]),
@@ -817,7 +819,8 @@ def _move_build(tmp_path, name, mut=None):
                      "hex.print_as_digit 4, thpos_rt + %d*dw, 0" % (16 * m + 12),
                      "hex.print_as_digit 4, mon_floorz + %d*dw, 0" % (4 * m),
                      "hex.print_as_digit 3, thss_rt + %d*dw, 0" % (16 * m),
-                     "hex.print_as_digit 2, msec + %d*dw, 0" % (2 * m), "hex.print_as_digit 2, kb_live, 0"]
+                     "hex.print_as_digit %d, %s, 0" % (w.sec_nibbles, msec_cell(m, w.sec_nibbles)),
+                     "hex.print_as_digit 2, kb_live, 0"]
             body += ["hex.print_as_digit 1, lreq + %d*dw, 0" % k for k in range(len(w.lift_order))]
             want.append(_mon_row(c, m))
             ws.mon_momx[m] = ws.mon_momy[m] = 0              # both sides: the next record starts still

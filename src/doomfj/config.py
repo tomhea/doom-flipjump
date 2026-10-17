@@ -116,10 +116,21 @@ class Config:
         is V3-era, before the second piece and the bpid byte.) A wider pid makes a piece 5 bytes,
         so the stride must grow -- and it must stay a POWER OF 16, because the offset is
         `hex.shl_hex w/4, SLOT_SHIFT, idx` and the alternative is a mul_const priced at ~72@.
-        16 -> 256 is therefore the right jump: the SAME op count with a different constant, at
-        +VIEW_W*240 words of `sfslot` (0.05% of the span). Stride 32 would need an extra shift op
-        per column to save words that do not matter."""
-        return 1 if self.PID_BYTES == 1 else 2
+        M8 L1 (E1M2): NOT 16 -> 256. `sfslot` lives in the narrow-armed hot block, which must fit ONE 16^5-bit window
+        (frame.arm5; scratchpad/12m/ritual.py checks it): 256 bytes a column would make it 40,960 ops against 5,954 ops of
+        headroom (measured on blocked62). The shift stays ONE nibble and a two-byte pid adds one BIT (`SLOT_BIT`, a
+        `hex.shl_bit` after each shift): a 32-byte stride, 20 bytes used, +2,560 ops of `sfslot`."""
+        return 1
+
+    @property
+    def SLOT_BIT(self) -> int:
+        """M8 L1: the extra one-bit shift of the `sfslot` offset when a piece is 5 bytes (a two-byte pid): 0 or 1."""
+        return 0 if self.PID_BYTES == 1 else 1
+
+    @property
+    def SLOT_STRIDE(self) -> int:
+        """M8 L1: bytes per column in `sfslot`: 16, or 32 for a two-byte pid (SLOT_SHIFT nibbles + SLOT_BIT bits)."""
+        return (16 ** self.SLOT_SHIFT) << self.SLOT_BIT
 
     @property
     def PIECE_BYTES(self) -> int:
@@ -218,7 +229,7 @@ class Config:
             "CENTERX": self.CENTERX, "CENTERY": self.CENTERY, "PROJECTION": self.PROJECTION,
             "FB_SIZE": self.FB_SIZE, "PALETTE_SIZE": self.PALETTE_SIZE,
             "PID_NIBBLES": self.PID_NIBBLES, "PID_BYTES": self.PID_BYTES,
-            "SLOT_SHIFT": self.SLOT_SHIFT,
+            "SLOT_SHIFT": self.SLOT_SHIFT, "SLOT_BIT": self.SLOT_BIT, "SLOT_STRIDE": self.SLOT_STRIDE,
             "BAND_NIBBLES": self.BAND_NIBBLES,
             "PIECE_BYTES": self.PIECE_BYTES,
             # M6 hot-path wflip-target pads. A `wflip` costs popcount(target), so aligning the
@@ -256,3 +267,18 @@ class Config:
 # M7 P4.0 (docs/gp-combat.md section 2, D6): THE GAME TIER'S SCREEN -- 160x100 with a 16-row status bar, so a 160x84
 # view (DOOM's 168-of-200 layout at half resolution). CENTERX and PROJECTION are unchanged: only rows clip.
 GAME_CFG = Config(VIEW_ROWS=84)
+
+
+# M8 L1 (E1M2, its own binary): the widths a map needs beyond the defaults (E1M1's). E1M2 bakes ~411 plane-pair ids
+# (> 255: 3 nibbles, two bytes -- docs/handoff-e1m2.md section 4 (A)) and ~83k band lists (> 65,535: 5 nibbles). The
+# emitter's own asserts (the pid bake, the bands walk) refuse a width a map outgrows, so a missing entry fails loudly.
+MAP_CONFIG = {
+    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5},
+}
+
+
+def map_cfg(cfg: "Config", mapname: str) -> "Config":
+    """`cfg` with `mapname`'s MAP_CONFIG widths (unchanged for a map not listed, E1M1's)"""
+    from dataclasses import replace
+    over = MAP_CONFIG.get(mapname.upper(), {})
+    return replace(cfg, **over) if over else cfg

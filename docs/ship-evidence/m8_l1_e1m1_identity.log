@@ -1,0 +1,44 @@
+M8 L1 + F1.1: blocked62 rebuilt from the m8-e1m2 tree with the ship-gate 1b command (own census and label paths), flipjump-151 at ccd1ec0, 2026-10-17
+build: build_blocked.py game --out build/doom_e1m1_l1rebuild.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_l1rebuild.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+pin-heat: scratchpad/12m/heat_blocked27_p10.json.gz (sha256 d6284748dbe8d404...): 20 hot groups, 35,894 hot sites
+  pin-heat: 20 of 20 hot words pinned
+  one pass: 550,176 tables deferred, 0 in the overflow region, 0 alias words unresolved, 0 groups left unblocked; the census: 44,212 groups, 550,176 tables; declines {}; 2196s
+  PREFLIGHT: demand 49,798,976 words, capacity 67,108,863 words (74.2% used); 44,212 of 44,212 groups placed
+  pin-heat: {'hot_groups': 20, 'hot_groups_missing': 0, 'hot_groups_ambiguous': 0, 'hot_sites_listed': 35894, 'hot_sites_matched': 8798, 'hot_sites_width_changed': 0}
+broken groups: 0 of 44,212 (these lose their pin for ALL their tables); evicted 0
+pin-heat after the last assembly: {'hot_groups': 20, 'hot_groups_missing': 0, 'hot_groups_ambiguous': 0, 'hot_sites_listed': 35894, 'hot_sites_matched': 8798, 'hot_sites_width_changed': 0}
+blocked: 550,176 tables in 44,212 groups; declined 0; ungrouped 0
+total 2598s
+done in 2599s; labels at scratchpad/12m/atlas/l1rebuild.labels.tsv.gz
+exit code 0 (0x00000000) after 2609 s; peak RSS 9.80 GB; peak private 12.50 GB; min available RAM 0.13 GB
+2827291fc223a6daf3469cda2606ec45f9b145511bc0bd76c100fe7149bc030a *build/doom_e1m1_l1rebuild.fjm
+2827291fc223a6daf3469cda2606ec45f9b145511bc0bd76c100fe7149bc030a *../doom-p11/build/doom_e1m1_blocked62.fjm
+
+E1M1 emission (scratchpad/cr/emit_baseline.py --check, baseline re-frozen at main d339cfe):
+certified   7 parts, 46,836,091 chars, 655 s
+standalone  7 parts, 64,465,739 chars, 604 s
+hosted_doors 7 parts, 50,982,725 chars, 733 s
+
+  certified   banks      SAME  30,763,965 chars
+  certified   entry      SAME  26,454 chars
+  certified   main       SAME  5,279 chars
+  certified   segconsts  SAME  1,323,546 chars
+  certified   state      SAME  11,096 chars
+  certified   tables     SAME  9,166,370 chars
+  certified   walk       SAME  5,539,381 chars
+  hosted_doors banks      SAME  33,668,143 chars
+  hosted_doors entry      SAME  26,454 chars
+  hosted_doors main       SAME  38,474 chars
+  hosted_doors segconsts  SAME  2,453,216 chars
+  hosted_doors state      SAME  11,278 chars
+  hosted_doors tables     SAME  9,166,370 chars
+  hosted_doors walk       SAME  5,618,790 chars
+  standalone  banks      SAME  33,369,076 chars
+  standalone  entry      SAME  26,502 chars
+  standalone  main       SAME  2,500,314 chars
+  standalone  segconsts  SAME  3,057,359 chars
+  standalone  state      SAME  1,028,159 chars
+  standalone  tables     SAME  13,287,743 chars
+  standalone  walk       SAME  11,196,586 chars
+
+EMISSION IDENTICAL -- the refactor removed only code the shipped picture never runs

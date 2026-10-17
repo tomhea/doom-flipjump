@@ -227,7 +227,7 @@ assert len(set(SFFLAG)) == VIEW_W
 # rule's answers are tests/fj/test_sprite_bank_fj.py's (the record's ledge cases and their mutants).
 H = CFG.VIEW_H
 PIECE_ROWS = [(0, 0, H - 1, H - 1)] * VIEW_W
-SLOT_SPAN = 16 ** CFG.SLOT_SHIFT
+SLOT_SPAN = CFG.SLOT_STRIDE                # M8 L1: sfslot's bytes per column
 
 
 def _sfslot():

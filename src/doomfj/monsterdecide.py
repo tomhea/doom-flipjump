@@ -1,5 +1,5 @@
 """M7 P3.2c "decide" (docs/gp-monsters.md 8.5): the fj the attack decisions need -- shared leaves over the move's
-context (`monstermove.P32B_CONTEXT`) plus a few cells (`P32C_CONTEXT`):
+context (`monstermove.p32b_context`) plus a few cells (`P32C_CONTEXT`):
 
   * `mm_todist`: mt_dx, mt_dy = the player's integer position - (mm_x, mm_y); mt_d = P_AproxDistance (mt_dist_leaf,
     which also leaves |dx|, |dy| in mt_ax, mt_ay);

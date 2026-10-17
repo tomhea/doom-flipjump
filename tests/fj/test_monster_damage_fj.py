@@ -149,8 +149,8 @@ def _program(w, mut=None):
     dp = DC.damage_parts(w, slot_rt=list(range(n)), boot_skill=ws.skill, stats=True)    # P10: the game tier's
     vals = {f: list(getattr(ws, f)[:n]) for f in MC.P31_FIELDS + MC.P32A_FIELDS + MC.P32B_FIELDS}
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
-             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n)
-             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, [0] * n)
+             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n, w.sec_nibbles)
+             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, [0] * n, w.sec_nibbles)
              + MC.P32A_SCRATCH + dp["decls"]
              + ["%s: hex.vec %d" % cn for cn in DM_CELLS]                 # the caller's (weaponcode.shot_decls)
              + ["viewx: hex.vec 8", "viewy: hex.vec 8", "thpos_rt: hex.vec %d" % (16 * n)]
@@ -374,8 +374,8 @@ def _fbuild(tmp_path, name, mut=None):
     dp = DC.damage_parts(w, slot_rt=list(range(n)), boot_skill=ws.skill, fx=True, full=True, fight=True)
     vals = {f: list(getattr(ws, f)[:n]) for f in MC.P31_FIELDS + MC.P32A_FIELDS + MC.P32B_FIELDS}
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
-             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n)
-             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, [0] * n)
+             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n, w.sec_nibbles)
+             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, [0] * n, w.sec_nibbles)
              + MC.P32A_SCRATCH + dp["decls"]
              + ["%s: hex.vec %d" % cn for cn in DM_CELLS]
              + ["viewx: hex.vec 8", "viewy: hex.vec 8", "thpos_rt: hex.vec %d" % (16 * n),

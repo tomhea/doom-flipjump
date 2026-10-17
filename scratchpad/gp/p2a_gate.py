@@ -293,12 +293,13 @@ class Mirror:
                 bviews = self.bviewfn(mph) if (loots and self.bviewfn) else None
                 if self.seenfn is not None and drawn == "world":
                     mph.set_seen(self.seenfn(mph, st, ph, ms, taken))
-                from doomfj.statcode import stats_of as _stats_of
+                from doomfj.statcode import count_digits as _count_digits, stats_of as _stats_of
                 out.append({"pose": (st.x, st.y, st.angle), "phase": ph, "taken": taken,
                             "mode": mode, "scr": scr, "sel": sel, "lvdone": lvdone,
                             "live": live,                                             # P10: g_live
                             # P10: LEVEL COMPLETE's numbers, the oracle's (statcode.stats_of)
-                            "stats": (len(mph.world.secret_sectors), stats_digits(*_stats_of(mph.world)))
+                            "stats": (len(mph.world.secret_sectors),       # M8 F1.1: the map's digit width
+                                      stats_digits(*_stats_of(mph.world), _count_digits(mph.world)))
                             if (mode and scr in LEVEL_DONE_SCREENS) else None,
                             "pusedn": pusedn, "drawn": drawn, "movers": ms,
                             "mheights": mp.heights(ms),

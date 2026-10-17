@@ -195,7 +195,7 @@ def _report_width_waste(counting):
               % (format(cost, ","), g[:44], format(n, ","), common, wmax), flush=True)
 
 
-def pin_state_veto(labels, view_w, subsectors) -> set:
+def pin_state_veto(labels, view_w, subsectors, pid_bytes=1) -> set:
     """The words `--pin-state-cells` must NOT pin: the BYTE cells (`m1.zerobyte c` jumps THROUGH the
     cell into the pointer read table, so a base there sends it elsewhere) and every cell the program
     reads RAW through a pointer (selfreset.POINTER_READ_CELLS: a pinned word holds base + value,
@@ -204,7 +204,7 @@ def pin_state_veto(labels, view_w, subsectors) -> set:
     bits = {k: int(v) for k, v in labels.items()}
     words_sorted = sorted(v // W for v in bits.values())
     out = set()
-    for name, n in byte_arrays(bits, words_sorted, view_w, subsectors):
+    for name, n in byte_arrays(bits, words_sorted, view_w, subsectors, pid_bytes=pid_bytes):
         base = bits[name] // W
         for k in range(n):
             out.add(base + 2 * k)
@@ -256,8 +256,9 @@ def main():
                          "whose tables are verified jump-only.")
     ap.add_argument("--view-w", type=int, default=160,
                     help="cfg.VIEW_W, needed to derive the byte arrays (build metrics print it)")
-    ap.add_argument("--subsectors", type=int, default=682,
-                    help="subsector count, needed to derive the byte arrays")
+    ap.add_argument("--subsectors", type=int, default=None,
+                    help="subsector count, needed to derive the byte arrays. M8: DERIVED from --wad/--map (E1M1 "
+                         "682, E1M2 1104); a value given must equal it")
     ap.add_argument("--max-slot-ops", type=int, default=32,
                     help="widest table a block slot may hold. 10,052 tables decline as too-wide at "
                          "32, and hex.tables.* is both the hottest source word and the macro with "
@@ -355,7 +356,15 @@ def main():
         """
         if excluded["words"] is None:
             if a.pin_state_cells:
-                excluded["words"] = pin_state_veto(labels, a.view_w, a.subsectors)
+                # M8: the map's subsector count and pid width, derived -- a hard-wired E1M1 682 / one-byte pid
+                # sized E1M2's byte arrays wrong (selfreset.byte_arrays cross-checks and refuses)
+                from doomfj.config import map_cfg
+                from doomfj.mapcompiler import bake_bsp
+                from doomfj.wad import WadFile
+                nss = len(bake_bsp(WadFile.from_path(a.wad), a.map).subsectors)
+                assert a.subsectors in (None, nss), ("--subsectors %s, but %s has %d" % (a.subsectors, a.map, nss))
+                excluded["words"] = pin_state_veto(labels, a.view_w, nss,
+                                                   pid_bytes=map_cfg(Config(), a.map).PID_BYTES)
                 print("  pin-exclude: %s words -- the BYTE cells (m1.zerobyte jumps through them) "
                       "and the pointer-read cells (a raw read takes base + value); the other "
                       "nibble state cells ARE pinned" % format(len(excluded["words"]), ","),

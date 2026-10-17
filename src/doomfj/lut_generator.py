@@ -889,6 +889,27 @@ def generate_state_switch_fj(name: str, targets, *, states: int = 16) -> str:
     return chr(10).join(out)
 
 
+def generate_pair_state_switch_fj(name: str, cell_b: str, targets) -> str:
+    """M8 L1 -- a switch on TWO state nibbles: the target `targets[i][j]` for the first cell holding i and `cell_b`
+    holding j: a seg between two movers on DIFFERENT state cells (two lifts) has its constants baked once per PAIR of
+    states. (E1M2's linedef 1460, between floor-switch sectors 240 and 241, found the need -- but both move by the one
+    `fswitch` cell, so `wall_renderer._seg_movers` collapses it to one mover; no current map reaches this switch.)
+
+    The outer half is `generate_state_switch_fj(name, ...)` on the first cell, verbatim -- `<name>_go cell_a` at the
+    call site, `hex.tables.ret` held for the call -- and its i-th target is a landing `<name>_a<i>` that `sim.jump16`s on
+    `cell_b` (sim.jump16 dispatches through its OWN aligned table, xors the cell's jump field and xors it back on the way
+    out: it never touches hex.tables.ret, so it is legal inside the outer switch's handler). The landing JUMPS, it does
+    not call: each `targets[i][j]` must end with `stl.fret <name>_x`, the outer switch's return -- the same contract as
+    a one-cell switch's targets (`_seg_xorby_block(..., ret=f"dsw_{label}_x")`). Entries of `cell_b` past
+    `len(targets[i])` reuse its last target, as `_mover_dispatch` does. Needs sim.fj (`sim.jump16`)."""
+    assert targets and all(0 < len(t) <= 16 for t in targets), f"{name}: 1..16 targets per first state"
+    out = [f"// M8 L1 pair state switch {name}: {len(targets)} x {max(len(t) for t in targets)} states"]
+    for i, tg in enumerate(targets):
+        out += [f"{name}_a{i}:",
+                f"    sim.jump16 {cell_b}, " + ", ".join(list(tg) + [tg[-1]] * (16 - len(tg)))]
+    return chr(10).join(out) + chr(10) + generate_state_switch_fj(name, [f"{name}_a{i}" for i in range(len(targets))])
+
+
 def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
     """M13-W1R -- the RANDOMIZED W1 wall walkers, baked from `ReferenceModel.W1R_TIER_BOUNDS` /
     `W1R_PATTERNS` (R6: the oracle's own tables, so the two sides cannot drift).

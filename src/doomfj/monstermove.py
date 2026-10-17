@@ -76,26 +76,29 @@ def monster_seed_decls(label: str = "ms_seed") -> list:
 # `mon_active` (M7 P4.2a: `mon_solid`) around the call.
 # ================================================================================================================
 
-P32B_CONTEXT = [
-    "mm_x: hex.vec 4", "mm_y: hex.vec 4",          # the mover's integer position (int16)
-    "mm_nx: hex.vec 4", "mm_ny: hex.vec 4",        # the candidate
-    "mm_z: hex.vec 8",                             # its floorz, sign-extended to try_move_mon's width
-    "mm_r: hex.vec 2", "mm_r30: hex.vec 1",        # its radius; 1 when it is 30
-    "mm_spd: hex.vec 1",                           # 1 when its speed is 10 (else 8)
-    "mm_dir: hex.vec 1", "mm_rng: hex.vec 2", "mm_mc: hex.vec 2",   # movedir, P_Random state, movecount (2's c.)
-    "mm_tw: hex.vec w/4", "mm_leafw: hex.vec w/4",  # its runtime thing and leaf (the relink's operands)
-    "mm_sec: hex.vec 2",                           # its sector (the REJECT row; P_ChangeSector)
-    "mm_ok: hex.vec 1", "mm_blk: hex.vec 1",
-    "mm_ox16: hex.vec 8", "mm_oy16: hex.vec 8",    # the position before the step, 16.16 (the crossings, boxes)
-    "mm_bd20: hex.vec 4", "mm_bd30: hex.vec 4", "mm_bdp: hex.vec 8",   # r + 20, r + 30; (r + 16) << 16
-    "mm_rr: hex.vec 4",                            # an mrnd row
-    "mm_dx: hex.vec 4", "mm_dy: hex.vec 4", "mm_adx: hex.vec 4", "mm_ady: hex.vec 4",
-    "mm_d1: hex.vec 1", "mm_d2: hex.vec 1", "mm_ta: hex.vec 1", "mm_od: hex.vec 1",   # NewChaseDir's
-    "mm_wd: hex.vec 1", "mm_wres: hex.vec 1", "mm_tried: hex.vec 8", "mm_ntr: hex.vec 1",
-    "mm_c: hex.vec 8",                             # a constant operand
-    "mm_ret: hex.vec w/4", "mm_tret: hex.vec w/4", "mm_wret: hex.vec w/4", "mm_nret: hex.vec w/4",
-    "mm_cret: hex.vec w/4",
-]
+def p32b_context(nib: int) -> list:
+    """the move's context cells; `nib`: a sector id's width (World.sec_nibbles: `mm_sec`)"""
+    return [
+        "mm_x: hex.vec 4", "mm_y: hex.vec 4",          # the mover's integer position (int16)
+        "mm_nx: hex.vec 4", "mm_ny: hex.vec 4",        # the candidate
+        "mm_z: hex.vec 8",                             # its floorz, sign-extended to try_move_mon's width
+        "mm_r: hex.vec 2", "mm_r30: hex.vec 1",        # its radius; 1 when it is 30
+        "mm_spd: hex.vec 1",                           # 1 when its speed is 10 (else 8)
+        "mm_dir: hex.vec 1", "mm_rng: hex.vec 2", "mm_mc: hex.vec 2",   # movedir, P_Random state, movecount (2's c.)
+        "mm_tw: hex.vec w/4", "mm_leafw: hex.vec w/4",  # its runtime thing and leaf (the relink's operands)
+        "mm_sec: hex.vec %d" % nib,                    # its sector (the REJECT row; P_ChangeSector)
+        "mm_ok: hex.vec 1", "mm_blk: hex.vec 1",
+        "mm_ox16: hex.vec 8", "mm_oy16: hex.vec 8",    # the position before the step, 16.16 (the crossings, boxes)
+        "mm_bd20: hex.vec 4", "mm_bd30: hex.vec 4", "mm_bdp: hex.vec 8",   # r + 20, r + 30; (r + 16) << 16
+        "mm_rr: hex.vec 4",                            # an mrnd row
+        "mm_dx: hex.vec 4", "mm_dy: hex.vec 4", "mm_adx: hex.vec 4", "mm_ady: hex.vec 4",
+        "mm_d1: hex.vec 1", "mm_d2: hex.vec 1", "mm_ta: hex.vec 1", "mm_od: hex.vec 1",   # NewChaseDir's
+        "mm_wd: hex.vec 1", "mm_wres: hex.vec 1", "mm_tried: hex.vec 8", "mm_ntr: hex.vec 1",
+        "mm_c: hex.vec 8",                             # a constant operand
+        "mm_ret: hex.vec w/4", "mm_tret: hex.vec w/4", "mm_wret: hex.vec w/4", "mm_nret: hex.vec w/4",
+        "mm_cret: hex.vec w/4",
+    ]
+
 
 # DOOM's direction numbering (world.step_delta): E, NE, N, NW, W, SW, S, SE, NODIR
 NODIR = 8

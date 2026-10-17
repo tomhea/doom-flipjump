@@ -623,6 +623,7 @@ ns frame {
         hex.zero w/4 - 2, lt_idx + 2*dw
         hex.mov 2, lt_idx, col_x
         hex.shl_hex w/4, SLOT_SHIFT, lt_idx             // the column's slot: a power-of-16 stride
+        rep(SLOT_BIT, k) hex.shl_bit w/4, lt_idx        // M8 L1: x 2 more for a two-byte pid (SLOT_STRIDE 32)
         hex.set w/4, lt_p, sfslot
         .ptr_index5 lt_b, lt_p, lt_idx
         hex.if_flags cv, 0x0606, l_part, u_some
@@ -633,7 +634,7 @@ ns frame {
         hex.ptr_add lt_p, 1                             // u1's y2
         ;u_read
       u_two:
-        hex.ptr_add lt_p, 5                             // u2's y2: the LAST upper piece
+        hex.ptr_add lt_p, PIECE_BYTES+1                 // u2's y2: the LAST upper piece
       u_read:
         rep(narrow, k) .read_byte5 lt_y, lt_p
         rep(1-narrow, k) hex.read_byte lt_y, lt_p
@@ -647,10 +648,10 @@ ns frame {
         hex.mov w/4, lt_p, lt_b
         hex.if_flags cv + dw, 0x0404, l_one, l_two
       l_one:
-        hex.ptr_add lt_p, 8                             // l1's y1
+        hex.ptr_add lt_p, 2*PIECE_BYTES                 // l1's y1
         ;l_read
       l_two:
-        hex.ptr_add lt_p, 12                            // l2's y1: the LAST lower piece
+        hex.ptr_add lt_p, 3*PIECE_BYTES                 // l2's y1: the LAST lower piece
       l_read:
         rep(narrow, k) .read_byte5 lt_y, lt_p
         rep(1-narrow, k) hex.read_byte lt_y, lt_p
@@ -1050,6 +1051,9 @@ ns frame {
         hex.mov w/4, bp, flagp
         hex.ptr_add bp, off
         frame.write_byte5 bp, bpid
+        // M8 L1: a two-byte pid's HIGH byte lives in `sfbhi`, byte-planar: always 3*VIEW_W cells past its low byte
+        rep(PID_BYTES-1, k) hex.ptr_add bp, 3*VIEW_W
+        rep(PID_BYTES-1, k) frame.write_byte5 bp, bpid + 2*dw
     }
 
     // V5 -- the piece-2 monotone clamp: when this side already holds a piece (count nibble
@@ -1305,6 +1309,7 @@ ns frame {
         hex.zero w/4 - 2, tsf_slot_idx + 2*dw   // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, tsf_slot_idx, tsf_col_x
         hex.shl_hex w/4, SLOT_SHIFT, tsf_slot_idx            // slotstride = 16 bytes -> a whole-nibble shift
+        rep(SLOT_BIT, k) hex.shl_bit w/4, tsf_slot_idx       // M8 L1: 32 for a two-byte pid
         hex.set w/4, tsf_sfslot_b, sfslot
         frame.ptr_index5 tsf_sfslot_p, tsf_sfslot_b, tsf_slot_idx
       col_loop:
@@ -1734,6 +1739,7 @@ ns frame {
         hex.zero w/4 - 2, slot_idx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, slot_idx, x
         hex.shl_hex w/4, SLOT_SHIFT, slot_idx            // 16 bytes per column -> a whole-nibble shift
+        rep(SLOT_BIT, k) hex.shl_bit w/4, slot_idx       // M8 L1: 32 for a two-byte pid
         hex.set w/4, sfslot_b, sfslot
         frame.ptr_index5 sfslot_p, sfslot_b, slot_idx
         hex.set w/4, shade_b, stepcol
@@ -2297,6 +2303,8 @@ ns frame {
         hex.mov w/4, p2_basep, p2_sffp
         hex.ptr_add p2_basep, off
         frame.read_byte5 ov, p2_basep             // (read_byte5 zeroes `ov` first)
+        rep(PID_BYTES-1, k) hex.ptr_add p2_basep, 3*VIEW_W     // M8 L1: the high byte (sfbhi, byte-planar)
+        rep(PID_BYTES-1, k) frame.read_byte5 ov + 2*dw, p2_basep
       end:
     }
 
@@ -2377,6 +2385,7 @@ ns frame {
         hex.zero w/4 - 2, sidx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, sidx, x1
         hex.shl_hex w/4, SLOT_SHIFT, sidx
+        rep(SLOT_BIT, k) hex.shl_bit w/4, sidx           // M8 L1: 32 for a two-byte pid
         hex.set w/4, bteam, sfslot
         frame.ptr_index5 p2_sfsp, bteam, sidx
         ;end_seed
@@ -2399,7 +2408,7 @@ ns frame {
     }
     def lines_steps_step < p2_sffp, p2_sfsp {
         hex.ptr_add p2_sffp, 1
-        hex.ptr_add p2_sfsp, 16
+        hex.ptr_add p2_sfsp, SLOT_STRIDE         // M8 L1: was the literal 16
     }
     def lines_spr_step < p2_spfp, p2_sspp {
         hex.ptr_add p2_spfp, 1

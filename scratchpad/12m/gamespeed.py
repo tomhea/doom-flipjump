@@ -64,8 +64,10 @@ SIZE_TARGET_PCT = 43.0             # of the address ceiling: 43% from M7 P10 (th
 # M2 gate's frame order): the binary boots with every door shut and opens one when a run presses
 # `use` in its box, and the replay must walk where the binary walks (BINARY_ENDS below).
 
-DEFAULT_WAD = "tests/fixtures/freedoom_e1m1.wad"
-DEFAULT_MAP = "E1M1"
+# M8 (docs/level-pipeline.md 3): the map from doomfj.mapprofile (DOOMFJ_MAP; E1M1 when unset)
+from doomfj.mapprofile import profile as _map_profile                       # noqa: E402
+DEFAULT_WAD = _map_profile().wad
+DEFAULT_MAP = _map_profile().map
 UNIT = 1 << 16                      # the sim's fixed-point unit
 _ORACLE = {}
 _SCRIPTS = {}
@@ -170,6 +172,16 @@ def _tour_plan(wad, mapname):
     # walk-over doors (77, 145) open only when their line is crossed, and before P2a.1 they were
     # walls: planning through them would change the ten games and part the metric from its history
     tbl = {si: v for si, v in tbl.items() if si in boxes}
+    # M8 (docs/level-pipeline.md 1): off E1M1, plan only through the doors a player opens WITHOUT a key -- a tour
+    # planned through a key door spends its frames pressing use at a shut door (the oracle and the binary agree, so this
+    # is the tours' quality, not their correctness). Key doors by their LINE special (combat.KEY_DOOR_CARDS): until M8
+    # L2 doors.door_kinds calls E1M2's yellow and red doors plain. E1M1's tours stay as recorded (BINARY_ENDS, the
+    # standing metric's history).
+    if mapname.upper() != "E1M1":
+        from doomfj.combat import KEY_DOOR_CARDS
+        keyed = {sds[ld.back].sector for ld in lds
+                 if ld.special in KEY_DOOR_CARDS and ld.back not in (-1, 0xFFFF) and ld.back < len(sds)}
+        tbl = {si: v for si, v in tbl.items() if si not in keyed}
     # PLAN WITH THE DOORS OPEN. The routes must be allowed to cross them; the run then presses
     # `use` on the way, exactly as a player does. Planning against shut doors is what confined the
     # previous generation of scripts to the spawn side of the map -- 2,686 reachable cells instead

@@ -177,7 +177,8 @@ def _program(w, mut=None):
     seed = MM.monster_seed_fj(w.cmap, w.lds, w.sds, kw["secs_open"], kw["msecs"], kw["mcell"])
     nleaf = len(w.cmap.subsectors)
     tables = [generate_dispatch_table_fj("lfsec", list(w.leaf_sector),
-                                         index_nibbles=max(1, ((nleaf - 1).bit_length() + 3) // 4), result_nibbles=2),
+                                         index_nibbles=max(1, ((nleaf - 1).bit_length() + 3) // 4),
+                                         result_nibbles=w.sec_nibbles),
               generate_point_location_fj(w.cmap)]
     ws = w.ws
     nd, nl = len(w.door_order), len(w.lift_order)

@@ -332,7 +332,8 @@ def turn_lines(slot_rows: Sequence[int], sink: bool = False) -> List[str]:
     from doomfj.combat import ANG5 as MODEL_ANG5
     assert ANG5 == MODEL_ANG5
     n = len(slot_rows)
-    assert 0 < n + 1 <= 0x80 and all(0 <= t < 0x100 for t in slot_rows), (n, max(slot_rows))
+    # M8 F1.1: the byte p_atk holds (two nibbles, two dispatch levels of 16): was 0x80, the model's old 7-bit field
+    assert 0 < n + 1 <= 0xFF and all(0 <= t < 0x100 for t in slot_rows), (n, max(slot_rows))
     hi = (n + 1 + 15) // 16
     out = ["dt_turn:"]
     if sink:                                   # M7 P8a A: the view drop, 1 unit a dead tic to VIEW_DROP_MAX

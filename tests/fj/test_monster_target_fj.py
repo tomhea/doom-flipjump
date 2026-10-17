@@ -196,9 +196,9 @@ def _parts(w, mut=None):
     secs = sorted({w.leaf_sector[s] for s in range(len(w.cmap.subsectors))})
     tables = MC.p30_tables_fj() + H.tables_fj(w.hwt) + MD.fight_tables_fj(w.rm.sine)
     tables += [generate_dispatch_table_fj("rj%d" % s, [int(w.reject.visible(s, q)) for q in range(w.reject.nsec)],
-                                          index_nibbles=2, result_nibbles=1) for s in secs]
+                                          index_nibbles=w.sec_nibbles, result_nibbles=1) for s in secs]
     nleaf = len(w.cmap.subsectors)
-    tables.append(generate_dispatch_table_fj("lfsec", list(w.leaf_sector), index_nibbles=3, result_nibbles=2))
+    tables.append(generate_dispatch_table_fj("lfsec", list(w.leaf_sector), index_nibbles=3, result_nibbles=w.sec_nibbles))
     tables.append(generate_point_location_fj(w.cmap))
     tables += [generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE), index_nibbles=3, result_nibbles=8),
                generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(), index_nibbles=3, result_nibbles=6),
@@ -211,8 +211,8 @@ def _parts(w, mut=None):
     fp = MD.fight_parts(w, list(range(n)))
     nbar = len(w.barrel_things)
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
-             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n)
-             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, msec)
+             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n, w.sec_nibbles)
+             + MC.p32b_decls(schema, n, {f: vals[f] for f in MC.P32B_FIELDS}, msec, w.sec_nibbles)
              + MC.p32c_decls(schema, n, {f: vals[f] for f in MD.P32C_FIELDS})
              + DC.field_decls(schema, n, {f: list(getattr(ws, f)[:n]) for f in DC.P42_FIELDS}) + ["mm_jh: hex.vec 1"]
              + MD.context_decls() + MS.SL_DECLS + MS.SF_DECLS + fp["decls"] + H.hurt_decls(H.level_start(w))
@@ -248,8 +248,8 @@ def _parts(w, mut=None):
              "pj_spawn:", "    stl.output 70", "    hex.print_as_digit 4, mm_x, 0", "    hex.print_as_digit 4, mm_y, 0",
              "    hex.print_as_digit 8, mt_tqx, 0", "    hex.print_as_digit 8, mt_tqy, 0", "    stl.output 10",
              "    stl.fret pj_sret"]
-    code = (["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False) + ["    stl.fret mt_tret"]
-            + MC.p32a_leaves() + MC.p32b_rj_leaf(secs) + move + seed + stubs)
+    code = (["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False, nib=w.sec_nibbles) + ["    stl.fret mt_tret"]
+            + MC.p32a_leaves() + MC.p32b_rj_leaf(secs, len(w.secs), w.sec_nibbles) + move + seed + stubs)
     text = "\n".join(code + [cells] + tables) + "\n"
     if mut == "target_stale":
         import re

@@ -12,7 +12,12 @@ the far LOS's ops a check, printed and bounded by O-B2's fallback trigger (~0.2M
 R9 (each must part from the model): the lists without their NEAR margin; a run box that assumes x grows (a run
 moving west boxed empty); the walk stopped after the first run; the step's halving made logical (its sign lost); a
 far trace that never walks a list; the fight's box reject unbiased (a signed box compared unsigned); the segment
-constants not undone after the test."""
+constants not undone after the test.
+
+M8 F1.1 (docs/f1-big-map-widths.md 4): the same on E1M2, 4,952 units wide -- its sample plus 120 traces of more than
+32 pieces (up to 64, past the 32 `FAR_PIECES` was before; E1M1's need <= 32, MEASURED), with the walk's mutants run
+on that sample too. (A walk capped at 32 pieces is NOT a usable control: its longer pieces' runs still cover the cells
+they cross, and its verdicts did not change on E1M2's sample -- tried and dropped, 2026-10-17.)"""
 import random
 import struct
 from pathlib import Path
@@ -37,6 +42,24 @@ FAR, NEAR, BLAST = 1, 2, 3
 @pytest.fixture(scope="module")
 def world():
     return World(monsters="final", player="final", sight_rule="seen")
+
+
+@pytest.fixture(scope="module")
+def world2():
+    """M8 F1.1: E1M2, the first map wider than 32 x 127 units"""
+    from doomfj.wad import WadFile
+    mw = WadFile.from_path(str(ROOT / "tests" / "fixtures" / "freedoom_e1m2.wad"))
+    return World(mw, "E1M2", monsters="final", player="final", sight_rule="seen")
+
+
+def _pieces(s) -> int:
+    """the pieces a FAR sample's trace walks: the least power of two N with every piece <= PIECE units an axis"""
+    _kind, px, py, qx16, qy16 = s[:5]
+    d = max(abs((qx16 >> 16) - px), abs((qy16 >> 16) - py))
+    n = 1
+    while d > MS.PIECE * n:
+        n *= 2
+    return n
 
 
 def _nib_bytes(vals, n):
@@ -93,7 +116,7 @@ def _samples(w):
             if kind == NEAR and aprox_distance((q16[0] >> 16) - p[0], (q16[1] >> 16) - p[1]) > MS.NEAR_UNITS:
                 continue
         out.append((kind, p[0], p[1], q16[0], q16[1], b, doors, lifts, sw))
-    return out + [blocked52_blast(w)]
+    return out + ([blocked52_blast(w)] if w.mapname == "E1M1" else [])
 
 
 def blocked52_blast(w):
@@ -234,3 +257,56 @@ def test_control_a_broken_far_los_is_caught(tmp_path, world, sample, mut):
     s, want = sample
     got, _ops = _run(tmp_path, world, s, "sfar_" + mut, mut=mut)
     assert got != want, "%s passed: the comparison is vacuous" % mut
+
+
+# ---- M8 F1.1: E1M2, wider than the old 32 pieces ----------------------------------------------------------------------
+def _long_samples(w, n=120):
+    """FAR traces of more than 32 pieces anywhere in the map's box that at most TWO sight segments touch (any state):
+    their verdict hangs on one wall or none, so a walk that skips cells (the "cap32" control) changes it. MEASURED on
+    E1M2: ~4% of random long traces qualify (45 of 3,000 touch none, 86 touch one or two)"""
+    from doomfj.world import segments_touch
+    rng = random.Random(0x64)
+    vs = w.cmap.vertexes
+    x0, x1 = min(v[0] for v in vs), max(v[0] for v in vs)
+    y0, y1 = min(v[1] for v in vs), max(v[1] for v in vs)
+    segs = MS.sight_segments(w)
+    out = []
+    while len(out) < n:
+        p, q = (rng.randint(x0, x1), rng.randint(y0, y1)), (rng.randint(x0, x1), rng.randint(y0, y1))
+        smp = (FAR, p[0], p[1], q[0] << 16, q[1] << 16, 0) + _states(w, rng)
+        if _pieces(smp) <= 32:
+            continue
+        if sum(1 for s in segs if segments_touch(p, q, s["a"], s["b"])) <= 2:
+            out.append(smp)
+    return out
+
+
+@pytest.fixture(scope="module")
+def sample2(world2):
+    s = _samples(world2) + _long_samples(world2)
+    return s, [_model(world2, x) for x in s]
+
+
+def test_e1m2_traces_walk_past_32_pieces(world2, sample2):
+    s, want = sample2
+    far = [x for x in s if x[0] == FAR]
+    assert max(_pieces(x) for x in far) == 64, max(_pieces(x) for x in far)
+    long_ = [v for x, v in zip(s, want) if x[0] == FAR and _pieces(x) > 32]
+    assert len(long_) >= 120 and 10 <= sum(long_) <= len(long_) - 10, (len(long_), sum(long_))
+    blocked = sum(v for x, v in zip(s, want) if x[0] == FAR)
+    assert 50 <= blocked <= len(far) - 50, blocked
+
+
+def test_the_far_los_follows_the_model_on_e1m2(tmp_path, world2, sample2):
+    s, want = sample2
+    got, ops = _run(tmp_path, world2, s, "sfar2")
+    bad = [(k, s[k][:6], g, w_) for k, (g, w_) in enumerate(zip(got, want)) if g != w_]
+    assert not bad, "%d of %d parted, first %s" % (len(bad), len(s), bad[:3])
+
+
+@pytest.mark.parametrize("mut", ["first", "logical", "rundir", "notree"])
+def test_control_a_broken_far_los_is_caught_on_e1m2(tmp_path, world2, sample2, mut):
+    """the E1M2 comparison is not vacuous: the far walk's own mutants part on its sample too"""
+    s, want = sample2
+    got, _ops = _run(tmp_path, world2, s, "sfar2_" + mut, mut=mut)
+    assert got != want, "%s passed on E1M2: the comparison is vacuous" % mut

@@ -124,7 +124,7 @@ def _parts(w, mut=None):
         assert k == n, k
     decls = (MC.monster_decls(schema, n, {f: list(getattr(ws, f)[:n]) for f in MC.P31_FIELDS})
              + MC.p32b_decls(schema, n, {f: list(getattr(ws, f)[:n]) for f in MC.P32B_FIELDS},
-                             [w._mon_sector(m) for m in range(n)])
+                             [w._mon_sector(m) for m in range(n)], w.sec_nibbles)
              + ["lstate: hex.vec %d" % max(1, nl), "fswitch: hex.vec 1", "lvdone: hex.vec 1",
                 "mh_prev: hex.vec %d" % (nl + 1), "mcf_val: hex.vec 4", "mcf_hit: hex.vec 1",
                 "mcf_ret: hex.vec w/4", "cs_ret: hex.vec w/4"])

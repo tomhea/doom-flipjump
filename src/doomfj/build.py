@@ -490,6 +490,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
     """
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
     from doomfj.wall_renderer import tier_cfg
+    from doomfj.config import map_cfg
+    cfg = map_cfg(cfg or Config(), mapname)    # M8 L1: the map's widths (E1M2: two-byte pids, 5-nibble bands)
     cfg = tier_cfg(cfg, tier)          # M7 P4.0: the game tier's 84-row view, in the constants AND the emission
     wad = WadFile.from_path(wad_path)
     # ONE NAME, and everything that used to be a parameter falls out of it or out of `cfg`.
@@ -531,9 +533,9 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         paths = paths + [_SRC_FJ / "m1_reset.fj"]
         _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things)
         nss = len(bake_bsp(wad, mapname).subsectors)
-        names = selfreset.registered_reset_names(restore_set, cfg, standalone)
+        names = selfreset.registered_reset_names(restore_set, cfg, standalone, mapname)
         part, n_nib, n_byte, _plan = selfreset.emit_reset_part_by_label(
-            gen, prog, names, cfg.VIEW_W, nss, mapname, persist=_persist)
+            gen, prog, names, cfg.VIEW_W, nss, mapname, persist=_persist, pid_bytes=cfg.PID_BYTES)
         paths = paths + [part]
         labels = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
                                           **standalone_run_header(standalone))
@@ -577,7 +579,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         nss = len(bake_bsp(wad, mapname).subsectors)
         part, n_nib, n_byte = selfreset.emit_reset_part(
             gen, labels1, core1.get_word, restore_set, cfg.VIEW_W, nss, mapname,
-            persist=_persist)
+            persist=_persist, pid_bytes=cfg.PID_BYTES)
         # Snapshot pass 1's pristine words at the baked addresses BEFORE releasing the image -- the
         # value check below needs them and re-loading an 85M-word image to get them would not.
         # check_layout=False: emit_reset_part above already resolved this set against labels1 WITH

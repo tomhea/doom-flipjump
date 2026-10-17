@@ -104,18 +104,18 @@ def _parts(w, rj_mutate=False, turn_mutate=False, hurt=False):
         vals = [int(w.reject.visible(s, p)) for p in range(w.reject.nsec)]
         if rj_mutate:
             vals = [1 - v for v in vals]
-        tables.append(generate_dispatch_table_fj("rj%d" % s, vals, index_nibbles=2, result_nibbles=1))
+        tables.append(generate_dispatch_table_fj("rj%d" % s, vals, index_nibbles=w.sec_nibbles, result_nibbles=1))
     nleaf = len(w.cmap.subsectors)
     tables.append(generate_dispatch_table_fj("lfsec", list(w.leaf_sector), index_nibbles=max(1, ((nleaf - 1).bit_length() + 3) // 4),
-                                             result_nibbles=2))
+                                             result_nibbles=w.sec_nibbles))
     tables.append(generate_point_location_fj(w.cmap))
     vals = {f: list(getattr(ws, f)[:n]) for f in MC.P31_FIELDS + MC.P32A_FIELDS}
     decls = (MC.monster_decls(schema, n, {f: vals[f] for f in MC.P31_FIELDS})
-             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n)
+             + MC.p32a_decls(schema, n, {**{f: vals[f] for f in MC.P32A_FIELDS}, "sched_cursor": ws.sched_cursor}, n, w.sec_nibbles)
              + MC.MT_DECLS + MC.P32A_SCRATCH + point_location_decls()
              + ["viewx: hex.vec 8", "viewy: hex.vec 8", "mt_tret: hex.vec w/4"]
              + (["p_dead: hex.vec 1, 0"] if hurt else []))
-    code = ["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False) + ["    stl.fret mt_tret"]
+    code = ["mt_tic_leaf:"] + MC.p32a_tic_lines(schema, n, slots, exit_guard=False, nib=w.sec_nibbles) + ["    stl.fret mt_tret"]
     return decls, code + MC.p32a_leaves(), tables
 
 

@@ -92,7 +92,12 @@ def supported_line_specials():
     for s in movers.LIFT_WALK_SPECIALS | movers.LIFT_USE_SPECIALS:
         out[s] = "movers (lift)"
     for s in movers.FLOOR_SWITCH_SPECIALS:
-        out[s] = "movers (floor switch; ONE shared fswitch cell)"
+        out[s] = "movers (floor switch, instant; a group per tag)"
+    for s, (trig, rule, sub) in movers.FLOOR_SPECIALS.items():      # M8 F1.3: every one-shot floor mover
+        if s not in movers.FLOOR_SWITCH_SPECIALS:
+            out[s] = "movers (%s1 floor group per tag: %s, %s)" % (trig, rule, "a stop every %d frames" % sub)
+    for s in movers.LIFT_FAST_SPECIALS:
+        out[s] = "movers (blazing lift: stride %d)" % movers.LIFT_FAST_STRIDE
     from doomfj import teleport
     for s in teleport.TELEPORT_SPECIALS:
         out[s] = "teleport (M8 L4: player and monsters; no telefrag, no fog)"
@@ -107,6 +112,10 @@ def fj_gives(kind):
         return True
     except (KeyError, AssertionError, ValueError, NotImplementedError):
         return False
+
+
+# line specials kept as a decided SIMPLIFICATION (docs/handoff-e1m2.md 3), not a missing feature
+STATIC_SPECIALS = {48: "drawn static, no scroll (simplification, as the lights)"}
 
 
 class Survey:
@@ -178,6 +187,8 @@ class Survey:
             name = LINE_SPECIAL_NAMES.get(s, "special %d" % s)
             if s in sup:
                 self.row("OK", "line special %d %s" % (s, name), n, "", sup[s])
+            elif s in STATIC_SPECIALS:
+                self.row("INFO", "line special %d %s" % (s, name), n, "", STATIC_SPECIALS[s])
             else:
                 self.row("MISSING", "line special %d %s" % (s, name), n, "", "no implementation: INERT today")
         from doomfj.combat import SECTOR_HURT, SECRET_SPECIAL
@@ -256,12 +267,18 @@ class Survey:
         sw = {}
         self.guard("floor-switch sectors", lambda: sw.update(movers.switch_sectors(secs, lds, sds)))
         self.facts.update(lifts=len(lifts), switch_sectors=len(sw))
-        if len({ld.tag for ld in lds if ld.special in movers.FLOOR_SWITCH_SPECIALS}) > 1:
-            self.row("WRONG", "floor switches with different tags", "", "",
-                     "movercode has ONE fswitch cell: they fire together")
+        groups = []
+        self.guard("floor groups (movers.floor_groups: one per tag)",
+                   lambda: groups.extend(movers.floor_groups(secs, lds, sds)))
+        if groups:
+            self.row("INFO", "floor groups (a state cell each: movers.switch_cell)", len(groups), "",
+                     "specials %s" % sorted({g.special for g in groups}))
+        cells = {}
+        self.guard("mover table", lambda: cells.update({si: c for si, (c, _h) in
+                                                       movers.mover_table(secs, lds, sds).items()}))
         dyn = {si: "door" for si in st}
         dyn.update({si: "lift" for si in lifts})
-        dyn.update({si: "switch" for si in sw})
+        dyn.update({si: ("switch" if si in sw else "floor") for si in cells if si not in lifts})
         pairs = Counter()
         lines = []
         for i, ld in enumerate(lds):
@@ -270,15 +287,18 @@ class Survey:
             a, b = sds[ld.front].sector, sds[ld.back].sector
             if a in dyn and b in dyn and a != b:
                 k = "-".join(sorted((dyn[a], dyn[b])))
+                if "door" not in k and cells.get(a) == cells.get(b):
+                    k += " (one cell)"
                 pairs[k] += 1
                 lines.append((i, a, b, k))
         for k, n in sorted(pairs.items()):
-            if k == "switch-switch":        # M8 L1: one `fswitch` cell moves them all -- read through it everywhere
-                note = "one machine (fswitch): rendered and read by collision / sight / noise / missiles"
+            if k.endswith("(one cell)"):    # M8 L1 / F1.3: one cell moves both -- read through it everywhere
+                note = "one machine: rendered and read by collision / sight / noise / missiles"
             elif "door" in k:
                 note = "the renderer refuses a door beside another dynamic sector"
             else:
-                note = "renderer OK (the pair switch); collision / sight / noise / missiles refuse two cells"
+                note = ("renderer OK (the pair switch); collision / sight / noise / missiles read the cell the opening "
+                        "depends on (monstersight.line_states / collision.mover_line_states; both refused)")
             self.row("WARN", "lines between two dynamic sectors: %s" % k, n, "",
                      "%s -- linedefs %s" % (note, [x[0] for x in lines if x[3] == k][:8]))
 
@@ -327,25 +347,27 @@ class Survey:
         from doomfj import barrelcode
         self.guard("barrels: level start the same on every skill (barrelcode.check_model_rules)",
                    lambda: barrelcode.check_model_rules(w, (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)) if nbar else None)
-        dyn = set(w.door_order) | set(w.mover_order)
-        moving = [(t.type, sec) for t in w.pickup_things
-                  for sec in [w.leaf_sector[w.rm.point_in_subsector(w.cmap, t.x, t.y)]] if sec in dyn]
-        self.row("OK" if not moving else "REFUSED", "pickups on a door or mover floor (lootcode: static z)",
-                 len(moving), "0", "" if not moving else "(type, sector) %s" % moving[:6])
+        # M8 F1.3 (docs/f1-big-map-widths.md 9): an item on a mover's floor touches at the live floor (pk_mbox) and
+        # renders runtime (things.mover_leaves); a door's floor never moves
+        moving = [(t.type, w.pickup_sector[i]) for i, t in enumerate(w.pickup_things) if w.pickup_on_mover[i]]
+        self.row("INFO", "pickups on a mover floor (lootcode.pk_mbox: the live floor)", len(moving), "",
+                 "" if not moving else "(type, sector) %s" % moving[:8])
         from doomfj.monstermove import static_blockers
         _things, var = static_blockers(w)
-        self.row("OK" if not var else "REFUSED", "solid decorations some skill lacks (monstercode: mc_don at NEW GAME)",
-                 len(var), "0", "" if not var else "decor_solid indices %s" % var[:10])
+        # M8 F1.2: a solid decoration some skill lacks is a `mc_don` presence flag, set at NEW GAME (monstermove.mc_don_restart)
+        self.row("OK", "solid decorations some skill lacks (monstercode: mc_don at NEW GAME)",
+                 len(var), "", "" if not var else "mc_don flags for decor_solid indices %s" % var[:10])
 
     def render_caps(self):
         from doomfj import wall_renderer as WR
         from doomfj.mapcompiler import bake_bsp
         from doomfj.reference_model import ReferenceModel
-        from doomfj.things import baked_thing_mask, drawable_things
+        from doomfj.things import baked_thing_mask, drawable_things, mover_leaves, mover_mask_kw
         rm = ReferenceModel(Config())
         cmap = bake_bsp(self.wad, self.m)
         draw, draw_idx = drawable_things(rm, self.wad.things(self.m), self.asset, {})
-        baked = baked_thing_mask(rm, cmap, draw, WR.MONSTER_TYPES)
+        baked = baked_thing_mask(rm, cmap, draw, WR.MONSTER_TYPES,     # M8 F1.3: things on movers run
+                                 **mover_mask_kw(rm, cmap, draw, mover_leaves(self.wad, self.m, cmap)))
         nt = len({i for i, b in zip(draw_idx, baked) if not b})
         self.cap("drawable things, every skill (1-byte fragment slot id)", len(draw), 256, strict_less=True)
         from doomfj.things import LIST_MAX_THINGS
@@ -383,10 +405,11 @@ class Survey:
         from doomfj import movers
         for si, stops in movers.lift_states(self.secs, self.lds, self.sds).items():
             variants += [apply_sector_heights(self.secs, {si: (h, self.secs[si].ceil_h)}) for h in stops]
-        sw = movers.switch_sectors(self.secs, self.lds, self.sds)
-        if sw:
-            variants.append(apply_sector_heights(self.secs, {si: (low, self.secs[si].ceil_h)
-                                                             for si, (low, _h) in sw.items()}))
+        # M8 F1.3: every floor group at every state (E1M1: the switch fired, as before)
+        for g in movers.floor_groups(self.secs, self.lds, self.sds):
+            for k in range(1, g.n):
+                variants.append(apply_sector_heights(self.secs, {si: (h[k], self.secs[si].ceil_h)
+                                                                 for si, h in g.heights}))
         marking = sum(1 for seg in cmap.segs if self.lds[seg.linedef].back != -1
                       and any(WR.seg_marks_in(self.lds, self.sds, seg, v) for v in variants))
         self.cap("marking two-sided segs (n_tsv 3 nibbles)", marking, WR.DEG_PNEAR, strict_less=True)

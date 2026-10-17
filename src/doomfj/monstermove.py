@@ -443,7 +443,7 @@ def world_cell_inputs(w, door_quant: int) -> dict:
     `mcell`) built from a World the way the emitter builds the player's -- for the harnesses"""
     from doomfj import gamedata as gd
     from doomfj.doors import pass_state
-    from doomfj.movers import lift_states, switch_sectors
+    from doomfj.movers import lift_states, mover_secs, mover_table
     from doomfj.reference_model import ML_BLOCKING, apply_sector_heights
     secs, lds, sds = w.secs, w.lds, w.sds
     doors = {}
@@ -452,11 +452,11 @@ def world_cell_inputs(w, door_quant: int) -> dict:
             doors.setdefault(li, []).append((d, pass_state(secs, lds, sds, si)))
     ls = lift_states(secs, lds, sds, door_quant)
     assert sorted(ls) == list(w.lift_order), (sorted(ls), w.lift_order)
-    sw = switch_sectors(secs, lds, sds)
-    msecs = {si: [apply_sector_heights(secs, {si: (h, secs[si].ceil_h)}) for h in st] for si, st in ls.items()}
-    msecs.update({si: [secs, apply_sector_heights(secs, {si: (low, secs[si].ceil_h)})] for si, (low, _h) in sw.items()})
-    mcell = {si: "lstate + %d*dw" % k for k, si in enumerate(sorted(ls))}
-    mcell.update({si: "fswitch" for si in sw})
+    # M8 F1.3: every mover from the ONE table (movers.mover_table: the lifts, each floor group's sectors on its cell;
+    # a group's state list moves the whole group -- the emitter's `_msecs`, M8 L1's switch rule)
+    tab = mover_table(secs, lds, sds, door_quant)
+    msecs = mover_secs(tab, secs)
+    mcell = {si: c for si, (c, _h) in tab.items()}
     return dict(secs_open=apply_sector_heights(secs, w.open_h),
                 door_line_ids={li for v in w.door_lines.values() for li in v}, doors=doors, msecs=msecs,
                 mcell=mcell, ml_blocking=ML_BLOCKING, ml_blockmonsters=gd.ML_BLOCKMONSTERS)

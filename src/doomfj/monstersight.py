@@ -51,20 +51,47 @@ def closed_states(w, s: int) -> Tuple[str, int, frozenset]:
     """a DYNAMIC sector `s`: (its state cell, its number of states, the states at which a line between `s` and a
     static sector is shut for sight) -- `World._door_phase_scene`'s heights for that state alone"""
     from doomfj.doors import door_states, heights_for_states
-    from doomfj.movers import mover_heights
+    from doomfj.movers import cell_heights
     if s in w.door_order:
         d = w.door_order.index(s)
         n = len(door_states(w.secs, w.lds, w.sds)[s])
         hts = [heights_for_states(w.secs, w.lds, w.sds, {s: k}) for k in range(n)]
         return "dstate + %d*dw" % d, n, hts
-    if s in w.lift_order:
-        assert s not in w.switch, "a lift the floor switch also lowers"
-        k_ = list(w.lift_order).index(s)
-        n = len(w.lift_stops[s])
-        hts = [mover_heights(w.secs, w.lift_stops, {s: k}, w.switch, False) for k in range(n)]
-        return "lstate + %d*dw" % k_, n, hts
-    assert s in w.switch, s
-    return "fswitch", 2, [mover_heights(w.secs, w.lift_stops, {}, w.switch, bool(k)) for k in range(2)]
+    # M8 F1.3: a mover's cell and heights from the ONE table (movers.mover_table): a lift's own, a floor group's
+    # every sector (E1M1: the lifts' `lstate + k*dw` and the switch's `fswitch`, the same states and heights)
+    assert s in w.mover_table, s
+    cell, stops_ = w.mover_table[s]
+    n = len(stops_)
+    return cell, n, [cell_heights(w.mover_table, w.secs, cell, k) for k in range(n)]
+
+
+def line_states(w, a: int, b: int) -> Tuple[str, int, list]:
+    """M8 F1.3 (docs/f1-big-map-widths.md 10b): a two-sided line between sectors `a` and `b`, at least one DYNAMIC --
+    (the state cell its opening reads, its number of states, [((floor a, ceil a), (floor b, ceil b)) per state]).
+    One dynamic side, or two moving by one cell (a floor group's sectors): that cell (`closed_states`). Two cells
+    (E1M2's line 1199 between blazing lift 47 and S1 floor 206): the opening (min ceiling, max floor) over the
+    product of their states must depend on ONE of them -- 206's floor is never below 47's, so 206's -- read through
+    that cell (the other side at its state 0: the same opening); an opening of both is refused."""
+    dyn = set(w.door_order) | set(w.mover_order)
+    sides = [s for s in (a, b) if s in dyn]
+    assert sides, (a, b)
+
+    def at(hts, s):
+        return hts.get(s, (w.secs[s].floor_h, w.secs[s].ceil_h))
+
+    if len(sides) == 1 or closed_states(w, a)[0] == closed_states(w, b)[0]:
+        cell, n, hts = closed_states(w, sides[0])
+        return cell, n, [(at(hts[k], a), at(hts[k], b)) for k in range(n)]
+    (ca, na, ha), (cb, nb, hb) = closed_states(w, a), closed_states(w, b)
+
+    def opening(i, j):
+        (fa, ta), (fb, tb) = at(ha[i], a), at(hb[j], b)
+        return min(ta, tb), max(fa, fb)
+    if all(opening(i, j) == opening(i, 0) for i in range(na) for j in range(nb)):
+        return ca, na, [(at(ha[i], a), at(hb[0], b)) for i in range(na)]
+    assert all(opening(i, j) == opening(0, j) for i in range(na) for j in range(nb)), (
+        "a line between two dynamic sectors (%d, %d) on two state cells whose opening needs both" % (a, b))
+    return cb, nb, [(at(ha[0], a), at(hb[j], b)) for j in range(nb)]
 
 
 def sight_segments(w) -> List[dict]:
@@ -74,20 +101,12 @@ def sight_segments(w) -> List[dict]:
     for (a, b, box) in w._sight_walls:
         out.append(dict(a=(_int(a[0]), _int(a[1])), b=(_int(b[0]), _int(b[1])), box=tuple(_int(v) for v in box),
                         dyn=None))
-    dyn = set(w.door_order) | set(w.mover_order)
     for (a, b, box), fs, bs in w._sight_doors:
-        sides = [s for s in (fs, bs) if s in dyn]
         # M8 L1: two dynamic sectors moving by ONE cell (the floor-switch sectors: `fswitch`) are read through it -- a
-        # state's heights carry both; two cells stay refused
-        assert len(sides) == 1 or closed_states(w, fs)[0] == closed_states(w, bs)[0], (
-            "a line between two dynamic sectors (%d, %d) on two state cells" % (fs, bs))
-        s = sides[0]
-        other = bs if s == fs else fs
-        cell, n, hts = closed_states(w, s)
+        # state's heights carry both; M8 F1.3: two cells, through the one the opening depends on (`line_states`)
+        cell, n, pairs = line_states(w, fs, bs)
         shut = set()
-        for k in range(n):
-            (f1, c1) = hts[k].get(s, (w.secs[s].floor_h, w.secs[s].ceil_h))
-            (f2, c2) = hts[k].get(other, (w.secs[other].floor_h, w.secs[other].ceil_h))
+        for k, ((f1, c1), (f2, c2)) in enumerate(pairs):
             if min(c1, c2) - max(f1, f2) <= 0:
                 shut.add(k)
         out.append(dict(a=(_int(a[0]), _int(a[1])), b=(_int(b[0]), _int(b[1])), box=tuple(_int(v) for v in box),

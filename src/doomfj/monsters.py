@@ -388,8 +388,23 @@ class MonsterPhase:
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = doors[si]
         for k, st in enumerate(lifts):
             ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k] = st
-        ws.f_switch = int(bool(switched))
+        if w.floor_wide:                  # M8 F1.3: the fswitch vector (movers.MoverPhase), states then timers
+            ng = len(w.floor_groups)
+            for g in range(ng):
+                ws.f_switch[g], ws.f_sub[g] = switched[g], switched[ng + g]
+        else:
+            ws.f_switch = int(bool(switched))
         w._door_phase_scene()
+
+    def _walk_arrays(self) -> tuple:
+        """the world cells a walk-over writes, which the gate's own phases own (`_pose` puts them back): W1 doors, the
+        doors' requests, the lifts' -- M8 F1.3: and, in the wide layout, the floor groups' states and timers"""
+        ws = self.world.ws
+        return ((ws.w_fired, ws.d_monreq, ws.l_req)
+                + ((ws.f_switch, ws.f_sub) if self.world.floor_wide else ()))
+
+    def _walk_keep(self) -> tuple:
+        return tuple(list(a) for a in self._walk_arrays())
 
     def requests(self) -> Tuple[frozenset, frozenset]:
         """(door sectors the monsters pressed, lift sectors they triggered) this tic -- the gate's next door and
@@ -558,20 +573,20 @@ class MonsterPhase:
             if knock:                     # M7 P8a: the corpse slides (4.3 step 6: dead or alive)
                 ws.px = x16 - (1 << 32) if x16 >> 31 & 1 else x16
                 ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
-                keep = (list(ws.w_fired), list(ws.d_monreq), list(ws.l_req))
+                keep = self._walk_keep()
                 self._knock_move(ev, n0)
-                for arr, vals in zip((ws.w_fired, ws.d_monreq, ws.l_req), keep):
+                for arr, vals in zip(self._walk_arrays(), keep):
                     for i, v in enumerate(vals):
                         arr[i] = v
                 if (ws.px & MASK32, ws.py & MASK32) != (x16 & MASK32, y16 & MASK32):
                     return ws.px & MASK32, ws.py & MASK32, ws.pangle
             return x16, y16, (ws.pangle if player_mortal(w.player) else angle)
         self._pose(x16, y16, angle)
-        keep = (list(ws.w_fired), list(ws.d_monreq), list(ws.l_req))
+        keep = self._walk_keep()
         w._player_move(k, ev)
         if knock:                         # M7 P8a: the knock move after the walk (pickups at every tried position)
             self._knock_move(ev, n0)
-        for arr, vals in zip((ws.w_fired, ws.d_monreq, ws.l_req), keep):
+        for arr, vals in zip(self._walk_arrays(), keep):
             for i, v in enumerate(vals):
                 arr[i] = v
         if knock and (ws.px & MASK32, ws.py & MASK32) != (x16 & MASK32, y16 & MASK32):
@@ -871,7 +886,9 @@ class MonsterViews:
         from doomfj.things import baked_thing_mask
         self.drawable = drawable
         self.cmap = bake_bsp(map_wad, mapname)
-        baked = baked_thing_mask(rm, self.cmap, drawable, MONSTER_TYPES)
+        from doomfj.things import mover_leaves, mover_mask_kw                 # M8 F1.3
+        baked = baked_thing_mask(rm, self.cmap, drawable, MONSTER_TYPES,
+                                 **mover_mask_kw(rm, self.cmap, drawable, mover_leaves(map_wad, mapname, self.cmap)))
         keep = sorted(i for i, b in zip(draw_idx, baked) if not b)
         self.rt_drawable = [draw_idx.index(i) for i in keep]          # runtime thing t -> drawable index
         self.nrt = len(keep)

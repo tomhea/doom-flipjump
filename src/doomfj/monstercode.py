@@ -424,7 +424,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                            # M7 P7: the movers' last state, as the level start's movers (all 0: every lift at its
                            # top, the switch not fired -- the boot image's zeros) -- else the first tic after a
                            # restart sees a mover "change" (tests/fj/test_restart_fj.py found it missing)
-                           "    hex.zero %d, mh_prev" % (len(w.lift_order) + 1)]
+                           "    hex.zero %d, mh_prev" % mh_width(w)]
                           if chase else [])
                        + (noise_restart_lines(w) if hear else []))           # M7 P4.2b: no node has heard a shot
     # the row select -- M7 P5: over the runtime things AND the mobiles (things nt .. nt + nmob - 1)
@@ -532,7 +532,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 + MON_CELL_DECLS + monster_seed_decls() + LEAF_LINK_DECLS
                 + ["bar_solid: hex.vec %d, %d" % (nb, sum(w.ws.bar_solid[b] << (4 * b)
                                                           for b in range(len(w.barrel_things)))),
-                   "mh_prev: hex.vec %d" % (len(w.lift_order) + 1), "mcf_val: hex.vec 4", "mcf_hit: hex.vec 1",
+                   "mh_prev: hex.vec %d" % mh_width(w), "mcf_val: hex.vec 4", "mcf_hit: hex.vec 1",
                    "mcf_ret: hex.vec w/4"])
             if decide:                                 # M7 P3.2c: the justattacked flags, the context, the LOS
                 from doomfj.monsterdecide import context_decls
@@ -593,7 +593,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 if d3:                         # M7 P8a (C): the rank's register and the barrel flag
                     extra["decls_wake"] += D3_DECLS
             extra["chase"] = dict(
-                static_things=things, lift_walk=list(w.lift_walk), lift_order=list(w.lift_order),
+                # M8 F1.3: the WR lines a MONSTER triggers (88; not the blazing 120)
+                static_things=things, lift_walk=list(w.lift_walk_mon), lift_order=list(w.lift_order),
                 mon_door_boxes=[(si, w.mon_door_boxes[si]) for si in w.door_order if si in w.mon_door_boxes],
                 slots_rt=[(slot_t[m], w.mon_radius[m]) for m in range(nmon)],
                 mon_radius=[w.mon_radius[m] for m in range(nmon)], height=w.mon_height[0],
@@ -858,7 +859,7 @@ def persisted_monster_decls(w, mode: str, damage=None, player: str = None) -> li
         out += [d for d in p32b_decls(schema, n, {f: [0] * n for f in P32B_FIELDS}, [0] * n, w.sec_nibbles)
                 if d.split(":")[0] in P32B_FIELDS + ("msec",)]
         out += ["bar_solid: hex.vec %d" % max(1, len(w.barrel_things)),
-                "mh_prev: hex.vec %d" % (len(w.lift_order) + 1)]
+                "mh_prev: hex.vec %d" % mh_width(w)]
     if mode in ("decide", "full", "push", "final"):       # M7 P3.2c: the missile decision's flag
         from doomfj.monsterdecide import P32C_FIELDS
         out += p32c_decls(schema, n, {f: [0] * n for f in P32C_FIELDS})
@@ -1222,6 +1223,13 @@ def p32b_decls(schema, nmon: int, values: dict, msec: list, snib: int) -> list:
     return out + p32b_context(snib) + ["mt_ms: hex.vec %d" % snib, "mt_rjret: hex.vec w/4"]
 
 
+def mh_width(w) -> int:
+    """M8 F1.3: `mh_prev`'s nibbles -- each lift's state, then the floor groups' states (the fswitch vector's first
+    `movers.fswitch_states` cells: E1M1's one switch, so `nlift + 1` as ever)"""
+    from doomfj.movers import fswitch_states
+    return len(w.lift_order) + fswitch_states(w.floor_groups)
+
+
 def p32b_change_sector_lines(w, nmon: int, *, exit_guard: bool) -> list:
     """P_ChangeSector for the lifts (world._door_phase_scene): when a mover's state differs from the last frame's
     (`mh_prev` holds each lift's state and the switch) every ACTIVE monster standing in a mover's sector takes that
@@ -1232,25 +1240,23 @@ def p32b_change_sector_lines(w, nmon: int, *, exit_guard: bool) -> list:
     monster frame then (p2a_gate: `if not lvdone: mph.frame`, whose `sync` IS this), the exit-press frame too,
     where the lifts have already ticked; `mt_tic`'s own guard (p32a_tic_lines) covers only the tic after it.
     (tests/fj/test_change_sector_fj.py)"""
-    from doomfj.movers import mover_heights
     lifts = list(w.lift_order)
     for si in lifts:
         assert len(set(w.lift_stops[si])) == len(w.lift_stops[si]), (si, w.lift_stops[si])
     nl = len(lifts)
+    nf = mh_width(w) - nl                                           # M8 F1.3: the floor groups' states
     nib = w.sec_nibbles                                             # M8 L1: msec / mt_ms's width
-    movers = {si: ("lstate + %d*dw" % k, [mover_heights(w.secs, w.lift_stops, {si: st}, {}, False).get(
-        si, (w.secs[si].floor_h, 0))[0] for st in range(len(w.lift_stops[si]))]) for k, si in enumerate(lifts)}
-    for si in w.switch:
-        low_hi = mover_heights(w.secs, w.lift_stops, {}, w.switch, True)
-        movers[si] = ("fswitch", [w.secs[si].floor_h, low_hi.get(si, (w.secs[si].floor_h, 0))[0]])
+    # M8 F1.3: every mover's cell and floors from the ONE table (movers.mover_table; E1M1: the lifts' and the switch's,
+    # unchanged). A floor group's state step moves its longest sector, so a state change is a height change here too.
+    movers = {si: (cell, list(hts)) for si, (cell, hts) in w.mover_table.items()}
     out = ["  // M7 P3.2b: P_ChangeSector -- the movers moved since the last frame: their monsters take the new floor"]
     if exit_guard:
         out.append("    hex.if1 1, lvdone, mcs_skip")                   # a finished level: the world is frozen
     out += ["    hex.cmp %d, mh_prev, lstate, mcs_chg, mcs_sw, mcs_chg" % nl if nl else "    ;mcs_sw",
            "  mcs_sw:",
-           "    hex.cmp 1, mh_prev + %d*dw, fswitch, mcs_chg, mcs_skip, mcs_chg" % nl,
+           "    hex.cmp %d, mh_prev + %d*dw, fswitch, mcs_chg, mcs_skip, mcs_chg" % (nf, nl),
            "  mcs_chg:"]
-    out += (["    hex.mov %d, mh_prev, lstate" % nl] if nl else []) + ["    hex.mov 1, mh_prev + %d*dw, fswitch" % nl]
+    out += (["    hex.mov %d, mh_prev, lstate" % nl] if nl else []) + ["    hex.mov %d, mh_prev + %d*dw, fswitch" % (nf, nl)]
     for m in range(nmon):
         out += ["    hex.if0 1, mon_active + %d*dw, mcs_m%d" % (m, m),
                 "    hex.mov %d, mt_ms, %s" % (nib, msec_cell(m, nib)),

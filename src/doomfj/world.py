@@ -102,6 +102,7 @@ from doomfj.doors import door_contact_geo, touches_door            # M7 P2b: rev
 from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states,  # M7 P2b
                            lift_tic, lift_walk_triggers, mover_heights, switch_sectors,
                            use_line_boxes)
+from doomfj import movers as _MV                                   # M8 F1.3: floor groups, blazing lifts
 from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heights_for_states,
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
 from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers   # M7 P2a.1
@@ -281,6 +282,7 @@ class Layout:
     nlift: int = 0     # M7 P2b: lifts (doomfj.movers)
     nsecret: int = 0   # P10: secret sectors (special 9) -- LEVEL COMPLETE's SECRETS
     ntele: int = 0     # M8 L4: WR teleport lines (doomfj.teleport); 0 on E1M1 -- no field, no cell
+    nfloor: int = 0    # M8 F1.3: the floor groups in the WIDE layout (movers.floor_wide); 0: E1M1's one 1-bit switch
 
     @property
     def nmobile(self) -> int:
@@ -416,8 +418,15 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("l_wait", 8, count=lay.nlift, group="mover", phase="P2b", doc="bottom-wait timer")
     f("l_req", 1, count=lay.nlift, group="mover", phase="P2b",
       doc="a trigger for the next mover tic: a WR line crossed (player or monster), an SR line used")
-    f("f_switch", 1, group="mover", phase="P2b",
-      doc="the floor switch fired (S1): its sectors at the lowest surrounding floor")
+    if lay.nfloor:
+        # M8 F1.3: one state and one step timer per floor group (movers.floor_groups; the fj's fswitch vector)
+        f("f_switch", 4, count=lay.nfloor, group="mover", phase="F1.3",
+          doc="floor group g's state (0 its stored floors; movers.floor_groups' stops)")
+        f("f_sub", 4, count=lay.nfloor, group="mover", phase="F1.3",
+          doc="floor group g's step timer: frames to its next stop, 0 still (movers.floor_tic)")
+    else:
+        f("f_switch", 1, group="mover", phase="P2b",
+          doc="the floor switch fired (S1): its sectors at the lowest surrounding floor")
     # -- sound ------------------------------------------------------------------------------------
     f("snd_alert", 1, count=lay.nsound, group="sound",
       doc="node heard a shot (DOOM's sector soundtarget)")
@@ -846,7 +855,8 @@ class World(CombatMixin):
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
                              nwalk=len(self.walk_triggers), nlift=len(self.lift_order),
-                             nsecret=len(self.secret_sectors), ntele=len(self.teleports))
+                             nsecret=len(self.secret_sectors), ntele=len(self.teleports),
+                             nfloor=len(self.floor_groups) if self.floor_wide else 0)
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -919,12 +929,24 @@ class World(CombatMixin):
         self.lift_stops = lift_states(secs, lds, sds)
         self.lift_order = sorted(self.lift_stops)
         self.lift_walk = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
+        # M8 F1.3: the WR lines a MONSTER triggers (88, not the blazing 120), each lift's stride, a tag's lifts
+        self.lift_walk_mon = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname),
+                                                _MV.LIFT_MONSTER_SPECIALS)
+        self.lift_stride = [_MV.lift_stride(secs, lds, si) for si in self.lift_order]
         self.lift_use = use_line_boxes(secs, lds, cmap.vertexes, LIFT_USE_SPECIALS)
-        self.lift_of_tag = {secs[si].tag: k for k, si in enumerate(self.lift_order)}
+        self.lift_of_tag = _MV.lift_slots_of_tag(secs, self.lift_order)       # M8 F1.3: tag -> (slot, ...)
         self.switch = switch_sectors(secs, lds, sds)
         self.switch_boxes = [b for _t, b in use_line_boxes(secs, lds, cmap.vertexes,
                                                              FLOOR_SWITCH_SPECIALS)]
-        self.mover_order = sorted(set(self.lift_order) | set(self.switch))
+        # M8 F1.3: the one-shot floor groups (E1M1: the switch alone), their triggers, and the ONE mover table every
+        # reader takes a mover's state cell and floors from
+        self.floor_groups = _MV.floor_groups(secs, lds, sds)
+        self.floor_wide = _MV.floor_wide(self.floor_groups)
+        self.floor_walk = _MV.floor_walk_triggers(lds, self.mw.vertexes(self.mapname), self.floor_groups)
+        self.floor_use = _MV.floor_use_boxes(lds, cmap.vertexes, self.floor_groups)
+        self.mover_table = _MV.mover_table(secs, lds, sds)
+        assert set(self.switch) <= {si for g in self.floor_groups for si in g.sectors}
+        self.mover_order = sorted(set(self.lift_order) | {si for g in self.floor_groups for si in g.sectors})
         # M8 L4 (doomfj.teleport): the WR teleport lines and their destinations ([] on E1M1). P_TeleportMove's floorz
         # is the destination sector's floor, baked: it must not be a door or a mover
         from doomfj.teleport import teleporters
@@ -1196,17 +1218,46 @@ class World(CombatMixin):
         ws = self.ws
         for k, si in enumerate(self.lift_order):
             st = lift_tic((ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k]),
-                          len(self.lift_stops[si]), bool(ws.l_req[k]))
+                          len(self.lift_stops[si]), bool(ws.l_req[k]), self.lift_stride[k])
             ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k] = st
             ws.l_req[k] = 0
+        # M8 F1.3: then every moving floor group, in group order (movers.floor_tic)
+        for g, grp in enumerate(self.floor_groups):
+            if grp.sub:
+                self._set_floor(g, *_MV.floor_tic(self.floor_state(g), self.floor_sub(g), grp.n, grp.sub))
         self._door_phase_scene()
+
+    # -- M8 F1.3: the floor groups' cells, the ONE accessor for both layouts (E1M1: `f_switch` a 1-bit scalar)
+    def floor_state(self, g: int) -> int:
+        return self.ws.f_switch[g] if self.floor_wide else self.ws.f_switch
+
+    def floor_sub(self, g: int) -> int:
+        return self.ws.f_sub[g] if self.floor_wide else 0
+
+    def _set_floor(self, g: int, state: int, sub: int) -> None:
+        if self.floor_wide:
+            self.ws.f_switch[g], self.ws.f_sub[g] = state, sub
+        else:
+            assert not sub, sub
+            self.ws.f_switch = state
+
+    def floor_fire(self, g: int) -> None:
+        """a one-shot floor line of group g used / crossed (movers.floor_trigger); an INSTANT group's floors move at
+        once, so this tic's scene sees them (D-L2)"""
+        grp = self.floor_groups[g]
+        before = self.floor_state(g)
+        self._set_floor(g, *_MV.floor_trigger(before, self.floor_sub(g), grp.sub))
+        if self.floor_state(g) != before:
+            self._door_phase_scene()
 
     def mover_heights_now(self) -> dict:
         """M7 P2b: `{sector: (floor, ceil)}` of every mover off its stored floor, from the cells"""
         ws = self.ws
-        return mover_heights(self.secs, self.lift_stops,
-                             {si: ws.l_state[k] for k, si in enumerate(self.lift_order)},
-                             self.switch, bool(ws.f_switch))
+        out = mover_heights(self.secs, self.lift_stops,
+                            {si: ws.l_state[k] for k, si in enumerate(self.lift_order)}, {}, False)
+        out.update(_MV.floor_heights(self.secs, self.floor_groups,
+                                     [self.floor_state(g) for g in range(len(self.floor_groups))]))
+        return out
 
     def _door_phase_scene(self) -> None:
         """This tic's collision scene (doors at their OPEN height, the not-yet-passable doors'
@@ -1651,8 +1702,8 @@ class World(CombatMixin):
         ws = self.ws
         ox, oy = ws.mon_x[m], ws.mon_y[m]
         ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, floorz
-        # M7 P2b: monsters trigger the WR lifts (88 is on P_CrossSpecialLine's non-player list)
-        for trig in self.lift_walk:
+        # M7 P2b: monsters trigger the WR lifts (88 is on P_CrossSpecialLine's non-player list; M8 F1.3: 120 is not)
+        for trig in self.lift_walk_mon:
             if crossed(trig, (ox << 16, oy << 16), (nx << 16, ny << 16), self.mon_radius[m]):
                 ws.l_req[self.lift_order.index(trig[0])] = 1
         if self.teleports:                            # M8 L4: 97 is on the non-player list too -- last, as the fj

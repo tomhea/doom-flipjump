@@ -59,9 +59,11 @@ from doomfj.doors import door_kinds, walkover_triggers                    # M7 P
 from doomfj.doors import switch_boxes as door_switch_boxes                 # M8 L2
 from doomfj.doors import exit_boxes                                        # M7 P2a.2
 from doomfj.doors import door_contact_geo                                  # M7 P2b
-from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS,       # M7 P2b
-                           lift_states, lift_walk_triggers, switch_sectors, use_line_boxes)
+from doomfj.movers import (LIFT_USE_SPECIALS,                              # M7 P2b
+                           lift_states, lift_walk_triggers, use_line_boxes)
+from doomfj import movers as _movers                                       # M8 F1.3: floor groups, the table
 from doomfj.movercode import lift_tic_lines, lift_walk_lines, mover_decls, use_line_lines
+from doomfj.movercode import floor_tic_lines, floor_walk_lines            # M8 F1.3
 from doomfj.doorcode import _box_test                                     # M7 P2a.2: the exit's box
 from doomfj.menu import LEVEL_DONE_SCR                                    # M7 P2a.2
 from doomfj.menu import HELP_GAME_SCR, HELP_MENU_SCR, MAIN_HELP_SCR      # M7 P3.4
@@ -527,7 +529,7 @@ STANDALONE_SCRATCH_DECLS = [
 
 
 def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
-                  monsters=None, nmobile=0, skill_extra=None) -> tuple:
+                  monsters=None, nmobile=0, skill_extra=None, nfs=1) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -564,7 +566,8 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
               # M7 P2b: every lift at its top, idle, nothing pending; the switch not fired
               *([f"    hex.zero {nlift}, lstate", f"    hex.zero {nlift}, ldir",
                  f"    hex.zero {nlift}, lsub", f"    hex.zero {WAIT_NIBBLES * nlift}, lwait",
-                 f"    hex.zero {nlift}, lreq", "    hex.zero 1, fswitch"] if nlift else []),
+                 # M8 F1.3: every floor group's state and timer (`nfs`: movers.fswitch_nibbles)
+                 f"    hex.zero {nlift}, lreq", f"    hex.zero {nfs}, fswitch"] if nlift else []),
               *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
@@ -588,7 +591,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
 
 def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
                     wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None,
-                    p8a_common=(), p10_common=()) -> tuple:
+                    p8a_common=(), p10_common=(), nfs=1) -> tuple:
     """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
     values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
     emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
@@ -604,7 +607,7 @@ def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, n
               + list(p8a_common)                        # M7 P8a: the final rung's cells (p8a_restart_parts)
               + list(p10_common)))                      # P10: the level's stats (statcode.restart_lines)
     return restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=nwalk, nlift=nlift,
-                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills)
+                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills, nfs=nfs)
 
 
 def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
@@ -1722,18 +1725,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _movers_on = bool(standalone and _dst_tbl and player_sim)
     _lift_st = lift_states(secs, lds, sds, door_quant) if _movers_on else {}
     _lift_slot = {si: k for k, si in enumerate(sorted(_lift_st))}
-    _switch = switch_sectors(secs, lds, sds) if _movers_on else {}
-    _msecs = {si: [apply_sector_heights(secs, {si: (h, secs[si].ceil_h)}) for h in st]
-              for si, st in _lift_st.items()}
-    # M8 L1: every switch sector moves by the ONE `fswitch` cell, so its state 1 is ALL of them lowered (E1M2's
-    # switch sectors border each other: a line between two must see both down) -- the same list for each
-    _sw_low = apply_sector_heights(secs, {si: (low, secs[si].ceil_h) for si, (low, _high) in _switch.items()})
-    _msecs.update({si: [secs, _sw_low] for si in _switch})
-    _mcell = {si: f"lstate + {k}*dw" for si, k in _lift_slot.items()}
-    _mcell.update({si: "fswitch" for si in _switch})
-    if _switch:
-        _dsecs_open = apply_sector_heights(_dsecs_open, {si: (low, secs[si].ceil_h)
-                                                         for si, (low, _h) in _switch.items()})
+    # M8 F1.3: every mover from the ONE table (movers.mover_table): the lifts, and each floor group's sectors on its
+    # own cell (`movers.switch_cell(g)`; E1M1: the switch's three pillars on `fswitch`). M8 L1: a group's state list
+    # moves ALL its sectors (E1M2's switch sectors border each other: a line between two must see both down).
+    _floor_groups = _movers.floor_groups(secs, lds, sds, door_quant) if _movers_on else []
+    _mtab = _movers.mover_table(secs, lds, sds, door_quant) if _movers_on else {}
+    _msecs = _movers.mover_secs(_mtab, secs)
+    _mcell = {si: c for si, (c, _h) in _mtab.items()}
+    # the union question ("could it ever be open?") takes each floor-group sector at its LOWEST floor (a mover's
+    # ceiling never moves): E1M1's pillars lowered, as before; a raised floor (58) is at its widest stored
+    _flow = {si: (min(h), secs[si].ceil_h) for g in _floor_groups for si, h in g.heights if min(h) < secs[si].floor_h}
+    if _flow:
+        _dsecs_open = apply_sector_heights(_dsecs_open, _flow)
 
     # M2-R4: one frame of every door, and the state it walks. Empty for a doors=False build, so
     # the prologue is the line-for-line text it was before doors existed.
@@ -1756,7 +1759,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               if (_dst_tbl and player_sim) else [])
         # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
         if _movers_on and dt:
-            dt = dt + lift_tic_lines(sorted(_lift_st), {si: len(v) for si, v in _lift_st.items()})
+            dt = dt + lift_tic_lines(sorted(_lift_st), {si: len(v) for si, v in _lift_st.items()},
+                                     {si: _movers.lift_stride(secs, lds, si) for si in _lift_st})
+            dt = dt + floor_tic_lines(_floor_groups)          # M8 F1.3: the moving floor groups (none on E1M1)
         return dt
     # M7 P2a.1: the walk-over triggers (doomfj.doors), fired from the collision move
     _walk_trig = walkover_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
@@ -2104,7 +2109,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
         _drawable, _draw_idx = drawable_things(rm, map_wad.things(mapname), sprite_wad, spr_cache)
         # (M8 F1.4: the slot-id bound is checked below, once the skills and the runtime pools are known)
-        _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES) if moving_things
+        from doomfj.things import mover_leaves as _mover_leaves, mover_mask_kw as _mover_mask_kw   # M8 F1.3
+        _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES,
+                                   **_mover_mask_kw(rm, cmap, _drawable, _mover_leaves(map_wad, mapname, cmap)))
+                  if moving_things
                   else (True,) * len(_drawable))
         _mt_keep = {i for i, b in zip(_draw_idx, _baked) if not b}
         # M14.5 §3.3: the baked things that can VANISH get a 1-nibble flag at a fixed address.
@@ -3160,7 +3168,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert player_sim and lines, "collide=True rides player_sim on the lines tier"
         # local import: doomfj.collision needs wall_renderer's _int_part_lines, so importing it at
         # module level would close a cycle (the seg_affine_coeffs precedent in mapcompiler)
-        from doomfj.collision import (cell_lists, collision_cells_fj, line_rows, mover_line_openings,
+        from doomfj.collision import (cell_lists, collision_cells_fj, line_rows,
                                       move_with_collision_lines, COLLISION_STATE_DECLS)
         # M7 P1.2: the player's collision CELLS (docs/gp-collision-cells.md). M2-R4: a door's
         # lines bake their opening at the door's OPEN height, and their line stubs read the door's
@@ -3171,11 +3179,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         for si, lis in sorted(_door_lines.items()):
             for li in lis:
                 _cdoors.setdefault(li, []).append((_dslot[si], pass_state(secs, lds, sds, si)))
-        # M7 P2b: the mover lines take their opening floor from their mover's state
-        _cmovers = {li: (_mcell[m_], obs)
-                    for li, obs in mover_line_openings(lds, sds, secs, _msecs).items()
-                    for m_ in [next(x for x in (sds[lds[li].front].sector,
-                                                sds[lds[li].back].sector) if x in _msecs)]}
+        # M7 P2b: the mover lines take their opening floor from their mover's state (M8 F1.3: through the cell it
+        # depends on -- collision.mover_line_states; E1M1's lines each read their one mover)
+        from doomfj.collision import mover_line_states
+        _cmovers = dict(mover_line_states(lds, sds, _msecs, _mcell, max))
         _clists, _cthings = cell_lists(_crows, PLAYER_RADIUS), None
         if _LOOT:   # M7 P6: the static blockers (barrels by bar_solid, the solid decorations) in the PLAYER's cells
             _clists, _cthings = _lootcode.player_cell_things(_p31["world"], _clists)
@@ -3217,12 +3224,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 return card_pickup_lines(tag, (_ct.x, _ct.y), _cslot, _cz - _RU, _cz + _RD, _IR + _PR)
         def _after_accept(wo="wo", lw="lw", tp=None):
             """the walk-over lines an accepted player move runs (`move_with_collision_lines(after_accept=)`); M7 P8a:
-            the knock move's copy (doomfj.knockcode.ptry_lines) with its own labels. M8 L4: the WR teleports LAST
-            (they move him; `tp` the knock copy's prefix -- it restarts the knock loop at the destination)"""
+            the knock move's copy (doomfj.knockcode.ptry_lines) with its own labels. M8 F1.3: then the W1 floor
+            lines (labels `<lw>f<k>`; none on E1M1). M8 L4: the WR teleports LAST (they move him; `tp` the knock
+            copy's prefix -- it restarts the knock loop at the destination)"""
             return ((walkover_lines(_walk_trig, sorted(_dst_tbl), PLAYER_RADIUS >> 16, prefix=wo)
                      if _walk_trig else [])
                     + (lift_walk_lines(lift_walk_triggers(secs, lds, sds, map_wad.vertexes(mapname)),
                                        sorted(_lift_st), PLAYER_RADIUS >> 16, prefix=lw)
+                       if _movers_on else [])
+                    + (floor_walk_lines(_floor_groups, _movers.floor_walk_triggers(
+                        lds, map_wad.vertexes(mapname), _floor_groups), PLAYER_RADIUS >> 16, prefix=lw + "f")
                        if _movers_on else [])
                     + (_teleportcode.player_lines(_TELE, prefix=tp or "tpw", knock_cells=_KNOCK, knock_ctx=bool(tp))
                        if _TELE else []))
@@ -3347,6 +3358,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
+            nfs=_movers.fswitch_nibbles(_floor_groups),                 # M8 F1.3: the fswitch vector
             monsters=_p31["restart"] if _p31 else None,
             hud_restart=_hud["restart"] if _hud else None, wpn_restart=_wpn["restart"] if _hud else (),
             aim=bool(_AIM), hrt_restart=_hrt["restart"] if _hrt else (),
@@ -3369,10 +3381,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _exit = (exit_boxes(lds, map_wad.vertexes(mapname)) if (standalone and menu and _door_tic)
              else [])
     # M7 P2b: the SR lifts and the floor switch, on a use press that misses the exit
+    # M8 F1.3: every lift of an SR line's tag, and every S1 floor group by its own lines (group 0's text is E1M1's)
     _press_miss = (use_line_lines(use_line_boxes(secs, lds, map_wad.vertexes(mapname), LIFT_USE_SPECIALS),
-                                  [b for _t, b in use_line_boxes(secs, lds, map_wad.vertexes(mapname),
-                                                                 FLOOR_SWITCH_SPECIALS)],
-                                  {secs[si].tag: k for si, k in _lift_slot.items()})
+                                  [], _movers.lift_slots_of_tag(secs, sorted(_lift_slot)), _floor_groups,
+                                  _movers.floor_use_boxes(lds, map_wad.vertexes(mapname), _floor_groups))
                    if (_movers_on and _exit) else [])
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, monster_tic=_p31["tic"] if _p31 else (),
@@ -3783,7 +3795,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # `doors.door_states`, so this declaration is the level's initial condition, exactly as
           # `viewx/viewy/viewangle` are for the player.
           *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
-          *(mover_decls(len(_lift_slot)) if _movers_on else []),          # M7 P2b
+          *(mover_decls(len(_lift_slot), _movers.fswitch_nibbles(_floor_groups)) if _movers_on else []),  # M7 P2b
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
           *(_hud["decls"] if _hud else []),                               # M7 P4.0: the bar
           *(_wpn["decls"] + _wpn["tables"] if _wpn else []),                # M7 P4.1: the weapon

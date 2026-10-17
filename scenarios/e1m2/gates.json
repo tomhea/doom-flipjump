@@ -43,6 +43,14 @@
     1
    ],
    [
+    30,
+    16
+   ],
+   [
+    266,
+    16
+   ],
+   [
     318,
     7
    ]
@@ -305,6 +313,24 @@
    {
     "value": [
      [
+      30,
+      16
+     ]
+    ],
+    "refused": null
+   },
+   {
+    "value": [
+     [
+      266,
+      16
+     ]
+    ],
+    "refused": null
+   },
+   {
+    "value": [
+     [
       299,
       9
      ]
@@ -484,14 +510,14 @@
   "wad": "tests/fixtures/freedoom_e1m2.wad",
   "wad_sha16": "e4eb5f4ca943ba4d",
   "model_sha16": {
-   "src/doomfj/doors.py": "3079cc33f4022136",
-   "src/doomfj/movers.py": "af186565d99741d0",
-   "src/doomfj/world.py": "460de12848e99c99",
-   "src/doomfj/combat.py": "239e730721b47064",
-   "scratchpad/gp/p2a_gate.py": "371a2a800c842de5",
+   "src/doomfj/doors.py": "df96717fde856b75",
+   "src/doomfj/movers.py": "454bb863543e3609",
+   "src/doomfj/world.py": "4d3e5cb5d19a2c6f",
+   "src/doomfj/combat.py": "2513cb99eca51693",
+   "scratchpad/gp/p2a_gate.py": "55505eb9f2390da0",
    "scratchpad/gp/fight_gate.py": "fb8ecd72c37d09d5"
   },
   "fight_verified": true,
-  "seconds": 1754
+  "seconds": 1602
  }
 }

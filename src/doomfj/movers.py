@@ -53,12 +53,27 @@ def lift_sectors(secs, lds, sds) -> dict:
     return out
 
 
+def lift_quant(low: int, high: int, base: int = DEFAULT_QUANT) -> int:
+    """M8 F1.3 (docs/f1-big-map-widths.md 5): the least quant >= `base` whose zero-aligned grid gives the lift at most
+    MAX_STATES stops -- `base` itself for every E1M1 lift (their stops unchanged); a longer travel (E1M3's lift 84: 19
+    stops at 16, E1M4's 33: 17) a coarser one, so its 4-bit state still holds it. The lift then crosses its travel in
+    fewer frames -- the same kind of trade as the doors' quant (a simplification: docs/handoff-e1m2.md 3). Every
+    caller reads `lift_states`, so the model and the fj cannot disagree about it."""
+    q = base
+    while len(stops(low, high, q)) > MAX_STATES:
+        q += 1
+        assert q <= 4 * base, ("no quant up to %d fits the lift %d..%d in %d stops" % (q, low, high, MAX_STATES))
+    return q
+
+
 def lift_states(secs, lds, sds, quant: int = DEFAULT_QUANT) -> dict:
-    """`{sector: [top, ..., bottom]}`: every floor each lift stops at, state 0 the stored one"""
+    """`{sector: [top, ..., bottom]}`: every floor each lift stops at, state 0 the stored one -- at `quant`, or the
+    lift's own coarser `lift_quant` where `quant` would give it more than MAX_STATES stops (M8 F1.3)"""
     out = {}
     for si, (low, high) in lift_sectors(secs, lds, sds).items():
-        st = stops(low, high, quant)[::-1]
-        assert len(st) <= MAX_STATES, "lift %d has %d stops at quant %d" % (si, len(st), quant)
+        q = lift_quant(low, high, quant)
+        st = stops(low, high, q)[::-1]
+        assert len(st) <= MAX_STATES, "lift %d has %d stops at quant %d" % (si, len(st), q)
         out[si] = st
     return out
 

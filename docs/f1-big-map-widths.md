@@ -142,6 +142,13 @@ combinations; controls: every `switch_cell` -> "fswitch"; `fs_hit<g>` wired to g
 
 ## 11. A walk-over tag opening two doors
 
+**MEASURED 2026-10-17 -- larger than designed:** E1M3's tag 11 is SIX W1 lines forming a closed ring (linedefs 547,
+571, 593, 602, 1570, 1574 around (404..468, 2576..2640)), two of them SLANTED (571, 593), opening doors 82 and 83. One
+entry per door with one shared segment is not enough: each LINE is its own trigger (DOOM's W1 per line), with a
+slanted crossing test in the model (`doors.crossed`) and the fj (`doorcode.walkover_lines`) -- the same machinery F2
+builds for slanted door lines (`'d'` lines). Move item 11 to F2 (doors), with the per-line triggers.
+
+
 `doors.walkover_triggers` returns one entry per target door with the same segment (`w_fired` one bit per entry,
 everything downstream unchanged; both fire in the same call = EV_DoDoor on every tagged sector); optionally fuse
 identical segments in `doorcode.walkover_lines`. E1M1 unchanged. Proof: `test_doors_p2a_fj` on E1M3's tag 11 (or a

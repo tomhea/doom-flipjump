@@ -166,3 +166,25 @@ banks 1.42x: 98,566,799 vs 64,484,928), so its pool demand projects (UNVERIFIED)
 capacity. The next measurement is one blocked E1M2 build's PREFLIGHT (it now derives `--subsectors` and the pid width,
 docs/level-pipeline.md 1); levers if it overflows: `--max-slot-ops`, `--spread`, the pool base, or declining cold
 groups (inline tables cost ops, so the decline list is chosen by heat).
+
+## 8. The FAST build's pool: fits at --spread 1 (2026-10-17, measured)
+
+The blocked build (ship-gate 1b's flags, E1M2's wad, 9 stand-ins, asserts ON, through `scripts/emit_check.py --then
+scratchpad/12m/build_labeled.py ...`) wrote its census (`scratchpad/12m/_census_game_e1m2.json.gz`, 55,780 groups,
+785,305 tables) and refused: "PREFLIGHT: demand 90,317,184 words, capacity 67,108,863 words (134.6% used) -- 55,624
+GROUPS GET NO BLOCK". (My projection had been 75-85M: UNVERIFIED and low.)
+
+Priced from the census with poolmap's own `probe_pool` (no assembly; calibrated: E1M1's census at the ship knobs gives
+blocked62's 49,798,976 to the word):
+
+| knobs | E1M2 demand | fit |
+|---|---|---|
+| ship (spread 2, min count 256) | 90,317,184 (134.6%) | 156 of 55,780 groups placed |
+| spread 2, min count 4,096 | 75,669,888 (112.8%) | 953 placed |
+| spread 2, min count 8,192..65,536 (only the giant group spread) | 70,427,008 (104.9%) | 8,322 placed |
+| **spread 1** | **53,649,792 (79.9%)** | **all 55,780, 0 broken** |
+
+THE CAUSE: one group of 97,647 tables (E1M1's largest is smaller): rounded to 2^17 slots and, spread, 2^18 -- ~16.8M
+words alone; spreading every other group adds ~20M more. Options: `--spread 1` (fits now; its speed against spread 2 is
+measured on the binary -- E1M2 has no baseline, its caps are CAP-22 ops and size), or a BlockPool knob that spreads
+groups below a MAX count too (spread 2 for every group but the giant one: ~58.9M, ~88% -- a flipjump change).

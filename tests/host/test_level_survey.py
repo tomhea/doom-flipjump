@@ -68,3 +68,15 @@ def test_control_a_thing_type_removed_from_the_model_is_refused(ls, wad, monkeyp
     rows = _rows(ls, wad, "E1M1")
     assert any(r[0] == "REFUSED" and r[1] == "World(strict=True) builds" and "3001" in r[4] for r in rows)
     assert any(r[0] == "MISSING" and r[1] == "thing type 3001" for r in rows)
+
+
+def test_a_pickup_without_a_sprite_is_missing(ls, wad, monkeypatch):
+    """M8 (gates-ready): E1M8's cell pack (17) has a give but no sprite -- every gate's views KeyError on it; the survey
+    names it. CONTROL: on E1M1, a pickup it uses (the clip, 2007) taken out of THING_SPRITE turns MISSING too"""
+    rows = _rows(ls, wad, "E1M8")
+    assert any(r[0] == "MISSING" and r[1].startswith("thing 17 ") and "sprite NO" in r[4] for r in rows), (
+        [r for r in rows if r[1].startswith("thing 17")])
+    import doomfj.reference_model as RM
+    monkeypatch.setattr(RM, "THING_SPRITE", {k: v for k, v in RM.THING_SPRITE.items() if k != 2007})
+    bad = [r for r in _rows(ls, wad, "E1M1") if r[0] == "MISSING"]
+    assert any(r[1].startswith("thing 2007 ") and "sprite NO" in r[4] for r in bad), bad

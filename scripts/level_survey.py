@@ -224,9 +224,14 @@ class Survey:
             elif tt.flags & gd.MF_SPECIAL:
                 model = ty in GETTABLE
                 fj = fj_gives(ty)
-                st = "OK" if model and fj else "MISSING"
-                self.row(st, label + " (pickup)", n, "", "model %s, fj give %s" % ("yes" if model else "NO",
-                                                                                   "yes" if fj else "NO"))
+                # M8 (gates-ready, gen_dryrun on E1M8): a pickup must be DRAWN too -- one with no sprite
+                # (reference_model.THING_SPRITE: E1M8's cell pack 17) is no drawable, and every gate's views
+                # (monsters.MonsterViews: pickups by drawable index) KeyError on the map's first frame
+                from doomfj.reference_model import THING_SPRITE
+                drawn = ty in THING_SPRITE
+                st = "OK" if model and fj and drawn else "MISSING"
+                self.row(st, label + " (pickup)", n, "", "model %s, fj give %s, sprite %s" % (
+                    "yes" if model else "NO", "yes" if fj else "NO", "yes" if drawn else "NO"))
             else:
                 self.row("OK", label + (" (solid decor)" if tt.solid else " (decor)"), n)
 

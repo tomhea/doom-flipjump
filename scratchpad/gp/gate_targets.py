@@ -146,11 +146,14 @@ def p2a_roles(ctx: Ctx, roles: dict, na: dict, tried: dict) -> None:
     doors = D.door_sectors(secs, lds, sds)
     # ---- the key doors by their LINE special, every colour (the model's kinds lag the WAD until M8 F2)
     key_doors = {c: [] for c in ("blue", "yellow", "red")}
-    for ld in lds:
+    not_doors = {c: [] for c in ("blue", "yellow", "red")}   # M8: key LINES whose sector the model makes no door
+    for i, ld in enumerate(lds):
         c = KEY_COLOURS.get(ld.special)
         if c and ld.back not in (-1, 0xFFFF) and ld.back < len(sds) and sds[ld.back].sector in doors:
             if sds[ld.back].sector not in key_doors[c]:
                 key_doors[c].append(sds[ld.back].sector)
+        elif c:
+            not_doors[c].append((i, ld.special))
     key_doors = {c: sorted(v) for c, v in key_doors.items()}
     roles["key_doors"] = key_doors
     # ---- the cards per colour (the blue one where DoorPhase takes it: its floor)
@@ -206,6 +209,9 @@ def p2a_roles(ctx: Ctx, roles: dict, na: dict, tried: dict) -> None:
     for c in ("yellow", "red"):
         if key_doors[c]:
             roles[c + "_door"] = key_doors[c][0]
+        elif not_doors[c]:      # M8 (gen_dryrun on E1M5: its red D1 doors, special 33, are walls in the model -- C3)
+            na[c + "_door"] = ("%s's %s key lines %s make no door in the model (doors.door_sectors: the special "
+                               "is C3's)" % (M, c, not_doors[c][:4]))
         else:
             na[c + "_door"] = "%s has no %s key door" % (M, c)
     # ---- S4: a sector below the card, out of reach

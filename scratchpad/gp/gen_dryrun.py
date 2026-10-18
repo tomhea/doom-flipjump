@@ -102,6 +102,10 @@ FEATURE_REFUSALS = (
     (r"KeyError: \(\d+, -?\d+, -?\d+, \d+, \d+\).*monsters\.py", "C6 (a pickup with no sprite: THING_SPRITE)",
      "undrawn-pickups"),
     (r"door \d+ is asked two motions", "C3 (a door two lines move two ways)", "door-first-kind"),
+    (r"door switch tag \d+ opens a door that closes", "C3 (an S1 switch opening a door that closes again)", None),
+    (r"M8 L4: line \d+'s destination .* is within line \d+'s reach", "C5 (teleports: a destination inside another "
+     "teleport line's reach)", None),
+    (r"suggest: no monster of \w+ lies in a region", "C8 (its monsters: E1M8's four are Barons, 3003)", None),
     (r"leaf lists store mobile index \+ 1 in a byte", "C1/C2 (runtime ids past 254: the byte leaf lists)", None),
 )
 
@@ -224,6 +228,8 @@ def one(m: str, standins, argv) -> int:
     try:
         runpy.run_path(str(ROOT / script), run_name="__main__")
     except SystemExit as e:
+        if isinstance(e.code, str):
+            print(e.code, flush=True)                      # a tool's refusal message is the cell's detail
         return e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
     return 0
 

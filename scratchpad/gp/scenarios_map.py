@@ -310,6 +310,11 @@ def suggest(n_runs: int = N_RUNS) -> dict:
                      "nearest": int(near(spot))})
     cand.sort(key=lambda c: (-c["score"], c["sector"]))
     regions_with = sorted(r for r, n in by_region.items() if r is not None and n >= 5)
+    if not regions_with:            # M8 (gen_dryrun on E1M8): a sparse map -- every reached region with a monster
+        regions_with = sorted(r for r, n in by_region.items() if r is not None and n >= 1)
+    if not regions_with:
+        raise SystemExit("suggest: no monster of %s lies in a region the flood from the start reaches (%s)"
+                         % (INSTALLED["map"], dict(by_region)))
     total = sum(by_region[r] for r in regions_with) or 1
     quota = {r: max(1, round((n_runs - 1) * by_region[r] / total)) for r in regions_with}
     while sum(quota.values()) > n_runs - 1:

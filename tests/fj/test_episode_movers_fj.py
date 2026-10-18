@@ -686,3 +686,33 @@ def test_control_a_broken_pair_dispatch_parts(tmp_path, pair_line, mut):
         mv[1199] = ("pair", ca, cb, ob, [[lf[i][0]] * len(lf[0]) for i in range(len(lf))])
     got, want = pair_line.run(tmp_path, "pair_" + mut, mv)
     assert got != want
+
+
+# ---- 6. the renderer's dynamic-seg gate (wall_renderer.dual_gate_lines: hex.if0 on state 0, hex.if_flags on a mask) --
+def _gate_program(gates):
+    body = ["stl.startup_and_init_all", "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
+            "hex.input 1, rbyte", "hex.mov 1, gcell, rbyte"]
+    for k, lines in enumerate(gates):
+        body += [*lines, "    hex.set 1, gres, 0", f"    ;g{k}_end", f"  g{k}_solid:", "    hex.set 1, gres, 1",
+                 f"  g{k}_end:", *_pr("gres", 1)]
+    return "\n".join(body + [";loop", "done:", "stl.loop", "rmagic: hex.vec 2", "rbyte: hex.vec 2",
+                             "gcell: hex.vec 1", "gres: hex.vec 1"]) + "\n"
+
+
+def test_the_seg_gate_is_its_mask(tmp_path):
+    from doomfj.wall_renderer import dual_gate_lines, seg_shut_gate
+    pats = [[True] + [False] * 9, [True] * 5 + [False] * 5, [False, True, True, False], [True, False, True, True]]
+    gates, masks = [], []
+    for k, st in enumerate(pats):
+        m, mask = seg_shut_gate(st, [len(st)])
+        assert m == 0
+        dc = "gcell" if mask == 1 else ("gcell", mask)
+        gates.append(dual_gate_lines(dc, f"g{k}_open", f"g{k}_solid"))
+        masks.append(mask)
+    assert gates[0] == ["    hex.if0 1, gcell, g0_solid"]                 # E1M1's one-op gate, unchanged
+    want = [int(bool(mk >> s & 1)) for s in range(16) for mk in masks]
+    feed = b"".join(bytes([1, s]) for s in range(16))
+    assert _run(tmp_path, "gate", _gate_program(gates), feed) == want
+    bad = [dual_gate_lines(("gcell", mk ^ 0xFFFF) if mk != 1 else "gcell", f"g{k}_open", f"g{k}_solid")
+           for k, mk in enumerate(masks)]                                    # R9: the complement mask
+    assert _run(tmp_path, "gate_bad", _gate_program(bad), feed) != want

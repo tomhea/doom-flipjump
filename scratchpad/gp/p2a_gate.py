@@ -512,10 +512,12 @@ def below_card_pose(dsim, card, sector: int = 124, frames: int = 3):
 
 
 def exit_pose(dsim):
-    """a standing pose inside the exit box, off the exit line, facing it"""
-    (x0, y0, x1, y1), = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))
+    """a standing pose inside the exit box, off the exit line, facing it. M8 C9: a map with several exit switch lines
+    (E1M3's 11 + secret 51, E1M7's two 11s): the first PLAIN exit's (doors.secret_exits 0)"""
+    k = D.secret_exits(dsim.lds).index(0)
+    x0, y0, x1, y1 = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))[k]
     verts = dsim.mw.vertexes(dsim.mapname)
-    ld = [ld for ld in dsim.lds if ld.special in D.EXIT_SPECIALS][0]
+    ld = dsim.lds[D.exit_lines(dsim.lds)[k]]
     v1, v2 = verts[ld.v1], verts[ld.v2]
     mx, my = (v1.x + v2.x) / 2, (v1.y + v2.y) / 2
     nx, ny = -(v2.y - v1.y), (v2.x - v1.x)

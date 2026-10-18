@@ -287,6 +287,7 @@ class Layout:
     nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
     nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
     nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
+    powers: tuple = ()  # M8 C6: the timed power kinds the map holds (powers.map_powers: 2024, 2025) -- () no field
 
     @property
     def nmobile(self) -> int:
@@ -393,6 +394,12 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("p_secretcount", 4, group="player", phase="P10", label="st_secn", doc="secret sectors entered")
     f("p_secret", 1, count=max(1, lay.nsecret), group="player", phase="P10", label="st_secm",
       doc="secret sector k (special 9, sector order) was entered")
+    # M8 C6 (doomfj.powers): the timed powers' counters -- only on a map holding the power (E1M1, E1M2: none)
+    from doomfj import powers as _PW
+    for k in lay.powers:
+        f(_PW.FIELD[k], _PW.BITS, group="player", phase="C6", label=_PW.CELL[k],
+          doc="powers[pw_%s]: 0 .. %d, P_GivePower's 60 * TICRATE counted down a player tic"
+              % ("invisibility" if k == _PW.INVIS_TYPE else "ironfeet", _PW.TICS[k]))
     if sinks:   # M7 P8a A (docs/gp-final-plan.md 1.1): P_DeathThink's view drop
         f("p_vdrop", 6, group="player", phase="P8a", label="p_vd",
           doc="0..35: viewheight = 41 - it; +1 a death-think tic after the psprites, capped at 35; 0 at the level "
@@ -877,7 +884,8 @@ class World(CombatMixin):
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
                              nfloor=len(self.floor_groups) if self.floor_wide else 0,
                              nlight=len(self.light_thinkers),
-                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
+                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr),
+                             powers=self.powers)                  # M8 C6
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -926,6 +934,8 @@ class World(CombatMixin):
         self.barrel_things = [t for t in self.things if t.type == 2035]
         self.pickup_things = [t for t in self.things
                               if gd.THING_TYPES[t.type].flags & gd.MF_SPECIAL]
+        from doomfj.powers import map_powers
+        self.powers = map_powers(self.things)          # M8 C6: the timed powers the map holds (E1M1, E1M2: none)
         self.decor_solid = [t for t in self.things
                             if t.type not in gd.MONSTER_DOOMEDNUMS and t.type != 2035
                             and gd.THING_TYPES[t.type].solid]
@@ -1564,12 +1574,22 @@ class World(CombatMixin):
         self.ws.mon_target[m] = 1
         return True
 
-    def _a_face_target(self, m: int) -> None:
+    def _a_face_target(self, m: int) -> int:
+        """A_FaceTarget -> M8 C6: the turn a SHADOW target adds (doomfj.powers: `P_SubRandom() << 21` on the shooter's
+        stream, in the bullets' spread unit), 0 when none; the facing octant does not take it (powers.py)"""
         ws = self.ws
         if not ws.mon_target[m]:
-            return
+            return 0
         ws.mon_ambush[m] = 0
         ws.mon_facing[m] = octant_of(*self._to_target(m))     # M7 P8a I: the target (the player before)
+        if self.shadow_target(m):
+            return self._roll("mon_rng", self.sites.shadow_face, m)
+        return 0
+
+    def shadow_target(self, m: int) -> bool:
+        """M8 C6: monster m's target has MF_SHADOW -- the player while his invisibility counter runs (a map holding
+        2024 only; a spectre target stays undrawn, powers.py)"""
+        return self.ws.mon_target[m] == 1 and bool(getattr(self.ws, "p_invis", 0))
 
     def _a_chase(self, m: int, ev: TicEvents) -> None:
         """A_Chase (p_enemy.c), single player, skill < nightmare. M7 P8a I: the TARGET's (`target_alive`,

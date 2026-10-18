@@ -385,7 +385,7 @@ def _copy_out(prefix: str, s: int, t: int, fields) -> List[str]:
 
 
 def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, knock: bool = False,
-             fight=None, rockets: bool = False) -> List[str]:
+             fight=None, rockets: bool = False, shadow: bool = False) -> List[str]:
     """pj_spawn (+ its slot stubs), pj_spawn_leaf, pj_try, pj_explode, pj_leaf, pj_phase (+ its stubs); pool_tic is
     `pool_tic_lines`'.
     `nt`: the runtime things before the pools (fireball slot s is thing nt + s); `root`: the missile cells' entry
@@ -396,6 +396,8 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
     target, the things after the player (the module docstring). `rockets` (P9): the player's rocket (the module
     docstring) -- it needs `fight` and `knock` (the things it meets, its z)"""
     assert not rockets or (fight and knock), "P9: the rocket meets things (fight) and carries its z (knock)"
+    assert not shadow or fight, "M8 C6: P_SpawnMissile's shadow turn reads mt_pl (the fight's target)"
+    from doomfj.powercode import missile_lines as _shadow_missile          # M8 C6
     P, _Q = _pool_sizes()
     pool = P if pool is None else pool
     fields = PJ_FIELDS + ((("pj_z", 4),) if knock else ())                # M7 P8a (package K): proj_z
@@ -450,6 +452,7 @@ def pj_lines(*, nt: int, root: str, pool: int = None, exit_guard: bool = True, k
               ["    hex.mov 8, ia_x1, pw_x", "    hex.mov 8, ia_y1, pw_y",       # M7 P8a I: at the TARGET
                "    hex.mov 8, ia_x2, mt_tqx", "    hex.mov 8, ia_y2, mt_tqy",
                "    stl.fcall ia_leaf, ia_ret", "    hex.mov 8, pw_ang, ia_ang"]),
+            *(_shadow_missile() if shadow else []),                       # M8 C6: at an invisible player
             "    hex.mov 3, pw_idx, pw_ang + 5*dw",                          # the fine angle: angle >> 20
             "    finesine.read_cos pw_mx, pw_idx", *_times10("pw_mx"),
             "    finesine.read_sin pw_my, pw_idx", *_times10("pw_my"),
@@ -898,7 +901,9 @@ def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs:
     cells, root = missile_cells_fj(w, pfx)
     ft = fight_things(w, slot_rt) if fight else None
     return {"decls": pool_decls(puffs=puffs) + (pt_decls(ft) if fight else []) + (ROCKET_DECLS if rockets else []),
-            "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard, knock=knock, fight=ft, rockets=rockets)
+            "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard, knock=knock, fight=ft, rockets=rockets,
+                              # M8 C6: the fireball's turn at an invisible player (a map holding 2024; E1M1 none)
+                              **({"shadow": True} if (fight and 2024 in getattr(w, "powers", ())) else {}))
             + pool_tic_lines(knock) + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs, fog=fog)
             + (rocket_blast_lines(w) if rockets else []), "cells": cells, "root": root,
             "tables": tables_fj(puffs, rockets, fog), "restart": restart_lines(nt=nt), "persist": PERSIST}

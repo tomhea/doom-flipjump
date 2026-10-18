@@ -67,6 +67,8 @@ HURT_PLAYER_MODES = ("fx", "full", "final")      # M7 P8a: "final" is "full" and
 DP_MAX = 155                        # the largest damage dp_go takes: damagecount + dmg stays one byte
 NPALETTES = STARTREDPALS + NUMREDPALS          # playpal0 .. playpal8: the game palette and the red ones (P5)
 NPALETTES_LOOT = STARTBONUSPALS + NUMBONUSPALS  # playpal0 .. playpal12 (lootcode: the "full" player)
+NPALETTES_SUIT = NPALETTES_LOOT + 1             # M8 C6: playpal13, RADIATIONPAL (a map holding the suit)
+assert NPALETTES_SUIT == __import__("doomfj.powers", fromlist=["RADIATIONPAL"]).RADIATIONPAL + 1
 # (cell, schema field, nibbles): the player's hurt cells (world.build_schema's widths, asserted in hurt_decls)
 CELLS = (("p_hp", "p_health", 3), ("p_ar", "p_armor", 2), ("p_at", "p_armortype", 1), ("p_dc", "p_damagecount", 2),
          ("p_dead", "p_dead", 1),
@@ -387,11 +389,13 @@ def hp_bar_lines() -> List[str]:
             "ammobcd.lookup hp_bcd, hp_v", "hex.mov 3, hud_v + 6*dw, hp_bcd"]
 
 
-def pal_lines(loot: bool = False) -> List[str]:
+def pal_lines(loot: bool = False, suit: bool = False) -> List[str]:
     """the frame's palette: palidx[p_dc]; only a change sends `present.set_palette playpal<k>`. `loot` (M7 P6, the
     "full" player): ST_doPaletteStuff with berserk and the bonus -- the red one is the larger of palidx[p_dc] and
-    berserk's (`berserk_red`, by p_str's nibbles 2 and 3), else the gold bonpal[p_bc]."""
-    npal = NPALETTES_LOOT if loot else NPALETTES
+    berserk's (`berserk_red`, by p_str's nibbles 2 and 3), else the gold bonpal[p_bc]. M8 C6 (`suit`, a map holding
+    the radiation suit: doomfj.powercode.pal_lines): else RADIATIONPAL while `p_rad` shows (PLAYPAL 13)."""
+    assert not suit or loot
+    npal = NPALETTES_SUIT if suit else NPALETTES_LOOT if loot else NPALETTES
     tg = ["pl_k%d" % k if k < npal else "pl_out" for k in range(16)]
     out = ["palidx.lookup pal_new, p_dc"]
     if loot:
@@ -411,6 +415,9 @@ def pal_lines(loot: bool = False) -> List[str]:
                 "hex.if0 1, pal_new, pl_gold", ";pl_have",
                 "pl_gold:", "bonpal.lookup pal_new, p_bc",
                 "pl_have:"]
+        if suit:
+            from doomfj.powercode import pal_lines as _suit_pal
+            out += _suit_pal()
     out += ["hex.cmp 1, pal_new, pal_cur, pl_chg, pl_out, pl_chg",
            "pl_chg:",
            "hex.mov 1, pal_cur, pal_new",
@@ -425,7 +432,7 @@ def pal_menu_lines() -> List[str]:
     return ["hex.if0 1, pal_cur, plm_out", "hex.zero 1, pal_cur", "present.set_palette playpal0", "plm_out:"]
 
 
-def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool = False) -> dict:
+def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool = False, suit: bool = False) -> dict:
     """everything P5's hurt code adds, for the World `w` (the level start of the player cells):
       * `decls`: the cells, interface and scratch (`hurt_decls`);
       * `tables`: mbul, trclaw, sgbite, dpsav, palidx, and playpal0..8 (device data);
@@ -440,6 +447,8 @@ def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool 
     start = level_start(w)
     return {"decls": hurt_decls(start) + (["pal_bk: hex.vec 1"] if loot else []),
             "tables": tables_fj(w.hwt, loot) + palette_tables_fj(sprite_wad, boot_wad,
+                                                                 NPALETTES_SUIT if suit else
                                                                  NPALETTES_LOOT if loot else NPALETTES),
-            "leaves": dp_lines(knock), "tic": hp_tic_lines(), "bar": hp_bar_lines(), "palette": pal_lines(loot),
+            "leaves": dp_lines(knock), "tic": hp_tic_lines(), "bar": hp_bar_lines(),
+            "palette": pal_lines(loot, suit),                   # M8 C6: `suit` -- the radiation palette
             "menu_palette": pal_menu_lines(), "restart": restart_lines(start), "persist": PERSIST, "start": start}

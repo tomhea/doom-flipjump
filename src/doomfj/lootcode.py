@@ -64,6 +64,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 from doomfj import gamedata as gd
 from doomfj.lut_generator import generate_dispatch_table_fj
 from doomfj import statcode as _statcode                          # P10: the item counter, the secrets
+from doomfj import powercode as _powercode                        # M8 C6: the timed powers (2024, 2025)
+from doomfj.powers import POWER_TYPES as _POWER_TYPES
 
 M32 = 0xFFFFFFFF
 # the player modes whose player LOOTS (world.PLAYER_MODES): P6 + P7 ship as "full"
@@ -371,6 +373,8 @@ def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[st
     elif kind == 2013:                                                # SOUL (M8 F4): health + 100, cap 200
         out += [f"    hex.add_constant 3, p_hp, {SOUL_HEALTH}", f"    hex.set 3, gv_c, {MAX_SOUL}",
                 f"    hex.cmp 3, p_hp, gv_c, {ok}, {ok}, {p}_c", f"  {p}_c:", "    hex.mov 3, p_hp, gv_c", f"    ;{ok}"]
+    elif kind in _POWER_TYPES:                                        # PINS / SUIT (M8 C6): P_GivePower, the
+        out += _powercode.give_lines(kind, ok)                        # counter set, always taken
     elif kind == 2026:                                                # PMAP (M8 F4): P_GivePower(pw_allmap), no
         out += [f"    ;{ok}"]                                         # automap; taken (one map a level, combat's)
     elif kind in (2011, 2012):                                        # STIM / MEDI: P_GiveBody
@@ -738,7 +742,8 @@ def nukage_lines(w, cell_root: str) -> List[str]:
     # issue #123 R5a: cp_floor and cp_seedf are SIGNED floor heights and `hex.cmp` compares unsigned -- exact here
     # because only EQUALITY is read ("Falling, not all the way down yet?": floorz != the sector's floor -> no damage),
     # and equality is sign-agnostic. Asserted: the compare's lt and gt arms are the same label, so no order is ever taken
-    _nk_lt, _nk_eq, _nk_gt = "nk_out", "nk_hit", "nk_out"
+    suit = _powercode.P.SUIT_TYPE in getattr(w, "powers", ())       # M8 C6: the radiation suit (none on E1M1)
+    _nk_lt, _nk_eq, _nk_gt = "nk_out", ("nk_suit" if suit else "nk_hit"), "nk_out"
     assert _nk_lt == _nk_gt != _nk_eq, "nukage's unsigned floor compare may read equality only (issue #123 R5a)"
     for mv in (w.mover_order if hb else ()):
         mb = box({mv})
@@ -761,6 +766,7 @@ def nukage_lines(w, cell_root: str) -> List[str]:
             "    sim.check_cells %s" % cell_root,                          # the box's floorz (cp_floor)
             "    hex.cmp 8, cp_floor, cp_seedf, %s, %s, %s" % (_nk_lt, _nk_eq, _nk_gt),   # "Falling, not all the way
             # down yet?" -- equality only (see the assert above)
+            *(["  nk_suit:"] + _powercode.suit_lines("nk_hit", "nk_out") if suit else []),   # M8 C6: the suit
             "  nk_hit:",
             "    hex.mov 2, dp_dmg, nk_dmg",
             "    stl.fcall dp_go, dp_ret",
@@ -782,11 +788,12 @@ def pre_lines(stats: bool = False) -> List[str]:
             + ["stl.fcall nk_go, nk_ret", "lt_pre_end:"])
 
 
-def post_lines(skip_move: str = "simmv_done") -> List[str]:
+def post_lines(skip_move: str = "simmv_done", powers: Sequence[int] = ()) -> List[str]:
     """after the weapon tic and the damagecount fade (hurtcode's `tic`), before the move. Dead at the tic's start:
     `_death_think`'s use -> g_restart (use HELD: the key byte's use bit) and on past the move to `skip_move` (the
     label right after `wall_renderer._player_sim_lines`, turning included). Alive: the strength grows while it runs
-    (saturating), the bonus count fades."""
+    (saturating), the bonus count fades. M8 C6 (`powers`, doomfj.powercode): the timed powers count down after the
+    strength (P_PlayerThink's order; none on E1M1)."""
     from doomfj.wireformat import KEY_USE_MASK
     return ["hex.if0 1, p_dd0, lt_alive",
             f"hex.if_flags pkeys + dw, {KEY_USE_MASK:#06x}, lt_dead_out, lt_rs",
@@ -798,11 +805,13 @@ def post_lines(skip_move: str = "simmv_done") -> List[str]:
             "hex.if0 4, p_str, lt_str_sat", ";lt_str_end",
             "lt_str_sat:", f"hex.set 4, p_str, {STRENGTH_CAP}",
             "lt_str_end:",
+            *_powercode.countdown_lines(powers),
             "hex.if0 2, p_bc, lt_bc_end", "hex.dec 2, p_bc",
             "lt_bc_end:"]
 
 
-def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = True, stats: bool = False) -> List[str]:
+def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = True, stats: bool = False,
+              powers: Sequence[int] = ()) -> List[str]:
     """the player's tic between the use lines and the move, in the model's order (`_player_phase` / `_death_think`):
     `pre` (nukage, alive), the weapon tic (`weaponcode.weapon_lines(loot=True)`: its keys skipped on `p_dd0`, the
     psprites always), the damagecount fade -- hurtcode's `tic` alive; dead at the tic's start (`p_dd0`), `turn`:
@@ -813,7 +822,7 @@ def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = T
     if turn:
         fade = (["hex.if0 1, p_dd0, lt_fade", "stl.fcall dt_turn, dt_tret", ";lt_fade_end", "lt_fade:"]
                 + fade + ["lt_fade_end:"])
-    return pre_lines(stats) + list(weapon_tic) + fade + post_lines()
+    return pre_lines(stats) + list(weapon_tic) + fade + post_lines(powers=powers)
 
 
 def use_guard() -> tuple:
@@ -854,11 +863,14 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
     leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt, stats=stats)
               + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root)
               + (_statcode.secret_lines(w, cell_root) if stats else []))
-    return {"decls": loot_decls(start) + card_decls(w) + mbox_decls(w), "tables": tables_fj(w), "leaves": leaves,   # M8 F4 + F1.3
-            "latch": latch_lines(), "pre": pre_lines(stats), "post": post_lines(), "use_guard": use_guard(),
-            "tic": (lambda weapon_tic, hurt_tic, turn=True: tic_lines(weapon_tic, hurt_tic, turn, stats)),
+    pw = tuple(getattr(w, "powers", ()))                            # M8 C6: the map's timed powers (E1M1: none)
+    return {"decls": loot_decls(start) + card_decls(w) + mbox_decls(w)    # M8 F4 + F1.3
+            + _powercode.decls(pw), "tables": tables_fj(w) + _powercode.tables_fj(pw), "leaves": leaves,
+            "latch": latch_lines(), "pre": pre_lines(stats), "post": post_lines(powers=pw), "use_guard": use_guard(),
+            "tic": (lambda weapon_tic, hurt_tic, turn=True: tic_lines(weapon_tic, hurt_tic, turn, stats, pw)),
             "pickup": pickup_call, "block": block_lines, "cells": player_cell_things, "thing_test": THING_TEST16,
             "slots": slots,
             "extra_vis": {sk: extra_vis(w, slots, sk) for sk in (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)},
             "restart": restart_lines(start), "persist": PERSIST, "start": start,
-            "cards": card_cells(w)}                         # M8 F4: the map's new card cells (persisted per map)
+            "cards": card_cells(w),                         # M8 F4: the map's new card cells (persisted per map)
+            "powers": pw}                                   # M8 C6: the map's timed powers (powercode)

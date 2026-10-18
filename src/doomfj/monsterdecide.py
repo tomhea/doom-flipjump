@@ -145,13 +145,15 @@ def as_leaf_lines(fight: bool = False) -> List[str]:
                "    ;mm_as_no"] if fight else [])]
 
 
-def decide_leaf_lines(justhit: bool = False, fight: bool = False) -> List[str]:
+def decide_leaf_lines(justhit: bool = False, fight: bool = False, shadow: bool = False) -> List[str]:
     """`mm_decide` (stl.fcall mm_decide, mm_dret) -- see the module docstring; the bias and cap are
     world.MISSILE_BIAS / MISSILE_NOMELEE_BIAS / MISSILE_CAP, compared as rand + bias >= min(d, bias + cap).
     `justhit` (M7 P4.2a): the context's `mm_jh` (damagecode declares it) is read and cleared. `fight` (M7 P8a I): the
     melee reach is the TARGET's (mt_reach: MELEE_BASE + its radius) -- the rest reads the target through mm_todist
-    and mm_as"""
+    and mm_as. M8 C6 (`shadow`, a map holding partial invisibility): the attack state's A_FaceTarget draws a shadow
+    target's turn (doomfj.powercode's mm_shj; the value is unused: only the stream advances)"""
     from doomfj.world import MISSILE_BIAS, MISSILE_CAP, MISSILE_NOMELEE_BIAS
+    assert not shadow or fight, "M8 C6: the shadow turn reads mt_pl (the fight's target load)"
     reach = "mt_reach" if fight else "mt_c60"
     b1, b2 = MISSILE_BIAS, MISSILE_BIAS + MISSILE_NOMELEE_BIAS
     return ["mm_decide:",
@@ -203,13 +205,14 @@ def decide_leaf_lines(justhit: bool = False, fight: bool = False) -> List[str]:
             "    hex.set 1, mm_dec, 2", "    hex.set 1, mm_ja, 1",
             "  mm_dc_face:",
             "    stl.fcall mm_octant, mm_ocret",
+            *(["    stl.fcall mm_shj, mm_shjret"] if shadow else []),            # M8 C6: a shadow target's draws
             "    stl.fret mm_dret",
             "  mm_dc_mv:",
             "    stl.fcall mm_chase, mm_cret",
             "    stl.fret mm_dret"]
 
 
-def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = False) -> List[str]:
+def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = False, shadow: bool = False) -> List[str]:
     """`md_attack` (stl.fcall md_attack, md_ret): mm_kind's action, its facing and its draws (combat.BULLETS
     bullets of 3 draws each for the hitscanners).
 
@@ -231,8 +234,9 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
     from doomfj.knockcode import inflictor_lines
     assert not knock or full, "M7 P8a: the thrust rides the applied attacks"
     assert not fight or full, "M7 P8a I: infighting rides the applied attacks"
+    assert not shadow or fight, "M8 C6: the shadow turn is the fight emission's (mt_pl, md_sp)"
     if fight:
-        return _fight_attack_lines(knock)
+        return _fight_attack_lines(knock, shadow)
     kb = inflictor_lines("mm_x", "mm_y", z="kb_az") if knock else []     # package K: the attacker's floorz (k_go)
     k = draws()
     pos = [ATTACK_KINDS[a] for a in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack")]
@@ -300,12 +304,17 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
     return out
 
 
-def decide_leaves(justhit: bool = False, full: bool = False, knock: bool = False, fight: bool = False) -> List[str]:
+def decide_leaves(justhit: bool = False, full: bool = False, knock: bool = False, fight: bool = False,
+                  shadow: bool = False) -> List[str]:
     """`full` (M7 P5): md_attack applies its draws (attack_leaf_lines(full=True)); off, P3.2c's text to the byte.
     `knock` (M7 P8a): the attacker is each hit's inflictor (attack_leaf_lines(knock=True)). `fight` (M7 P8a I): the
-    TARGET's (the module docstring) -- the program must hold `fight_parts`' lines and monstersight's sl_far"""
-    return (todist_leaf_lines(fight) + octant_leaf_lines() + as_leaf_lines(fight) + decide_leaf_lines(justhit, fight)
-            + attack_leaf_lines(full, knock, fight))
+    TARGET's (the module docstring) -- the program must hold `fight_parts`' lines and monstersight's sl_far.
+    `shadow` (M8 C6, a map holding partial invisibility): every A_FaceTarget at an invisible player draws its turn and
+    the bullets take it (doomfj.powercode's mm_shj leaf, emitted here)"""
+    from doomfj.powercode import shj_leaf_lines
+    return (todist_leaf_lines(fight) + octant_leaf_lines() + as_leaf_lines(fight)
+            + decide_leaf_lines(justhit, fight, shadow) + attack_leaf_lines(full, knock, fight, shadow)
+            + (shj_leaf_lines() if shadow else []))
 
 
 def type_decide(info) -> dict:
@@ -331,7 +340,7 @@ def type_decide(info) -> dict:
 
 
 # ---- M7 P8a I: the target, the angle, the bullets' scan (docs/gp-final-plan.md 1.2.2 / 1.2.3) ----------------------
-def _fight_attack_lines(knock: bool) -> List[str]:
+def _fight_attack_lines(knock: bool, shadow: bool = False) -> List[str]:
     """`md_attack` with infighting (attack_leaf_lines(full=True, fight=True)) -- see attack_leaf_lines"""
     from doomfj.combat import BULLETS
     from doomfj.knockcode import inflictor_lines
@@ -348,6 +357,7 @@ def _fight_attack_lines(knock: bool) -> List[str]:
            "    hex.zero 1, mm_asok",
            "    stl.fcall mm_todist, mm_tdret",
            "    stl.fcall mm_octant, mm_ocret",
+           *(["    stl.fcall mm_shj, mm_shjret"] if shadow else []),   # M8 C6: A_FaceTarget at a shadow target
            "    hex.mov 1, md_fa, mm_fa",
            "    sim.jump16 mm_kind, " + ", ".join(tg)]
     for lab, act in (("md_pos", "A_PosAttack"), ("md_spos", "A_SPosAttack")):
@@ -407,6 +417,7 @@ def _fight_attack_lines(knock: bool) -> List[str]:
             "    hex.add_constant 2, mm_rng, 2",
             "    hex.if0 1, md_seen, md_bul_out",
             "    hex.mov 3, md_sp, md_row + 1*dw", "    hex.sign_extend 4, 3, md_sp",
+            *(["    hex.add 4, md_sp, md_jit"] if shadow else []),        # M8 C6: the facing's shadow turn
             "    stl.fcall hs_scan, hs_ret",
             "    hex.if1 2, hs_vic, md_bul_v",
             "    hex.mov 4, hs_d, md_td", "    hex.mov 1, hs_rc, mt_rc", "    hex.zero 4, hs_del",

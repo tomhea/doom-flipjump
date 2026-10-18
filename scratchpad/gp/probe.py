@@ -195,7 +195,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"ltst", "ltct", "rng_lt"}),
                    # M8: the switch textures (doomfj.switchcode; a SWITCH_TEX map: MonsterPhase.switch_state) -- two
                    # groups: a map with no SR switch line (E1M2) declares `swpr` alone
-                   frozenset({"swpr"}), frozenset({"swtm"}))
+                   frozenset({"swpr"}), frozenset({"swtm"}),
+                   # M8 C6: the timed powers' counters (doomfj.powercode; a map holding 2024 / 2025, each its own)
+                   frozenset({"p_inv"}), frozenset({"p_rad"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -786,6 +788,10 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     nsw, nsr = _nswitch()
     cells["swpr"] = Cell("swpr", "hex", 1, count=max(nsw, 1))
     cells["swtm"] = Cell("swtm", "hex", BUTTON_NIBBLES, count=max(nsr, 1))
+    # M8 C6 (MonsterPhase.p8a_state's units): the timed powers' counters, 3 nibbles each (OPTIONAL: their maps only)
+    from doomfj.powers import NIBBLES as _PWN
+    cells["p_inv"] = Cell("p_inv", "hex", _PWN)
+    cells["p_rad"] = Cell("p_rad", "hex", _PWN)
     return cells
 
 

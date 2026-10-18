@@ -84,14 +84,15 @@ def test_the_one_value_and_the_gates_keyword(phases, monkeypatch):
     for lt, want in ((0, 0), (1, 1), (0xFF, 0xFF), (0x100, 0), (0x12345, 0x45), (0xFFFFF, 0xFF)):
         ws.leveltime = lt
         assert ph.world.wall_scroll() == want == ph.wall_scroll() == SC.wall_scroll_of(lt)
-        assert view_drop_kw(ph) == ({"wall_scroll": want} if want else {})
+        kw = view_drop_kw(ph)       # (the other render keywords -- E1M2's sector lights -- ride alongside)
+        assert kw.get("wall_scroll", 0) == want and (want or "wall_scroll" not in kw)
     e1 = phases["E1M1"]
     e1.world.ws.leveltime = 0x45
     assert e1.world.wall_scroll() == 0 and view_drop_kw(e1) == {}
     # R9: E1M2 with its Config off slides nothing (a fresh world: the answer is cached per world)
     monkeypatch.setitem(C.MAP_CONFIG, "E1M2", {k: v for k, v in C.MAP_CONFIG["E1M2"].items() if k != "WALL_SCROLL"})
     ph.world.__dict__.pop("_wall_scrolls", None)          # the answer is cached per world: ask again
-    assert ph.world.wall_scroll() == 0 and view_drop_kw(ph) == {}
+    assert ph.world.wall_scroll() == 0 and "wall_scroll" not in view_drop_kw(ph)
     ph.world.__dict__.pop("_wall_scrolls", None)          # ... and leave no answer cached under the patched Config
 
 

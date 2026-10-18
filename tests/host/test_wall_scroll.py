@@ -39,7 +39,9 @@ def test_e1m1_pieces_are_unchanged():
     assert SC.wnoise_domain(g.VIEW_W, True, False) == g.VIEW_W + 1 + 640 == 801     # the old `_wn_dom`
     assert SC.wnoise_domain(g.VIEW_W, False, False) == g.VIEW_W + 1
     assert not SC.scroll_on(g, "E1M1") and not SC.scroll_on(C.Config(), "E1M1")
-    assert C.map_cfg(g, "E1M1") == g and C.Config().WALL_SCROLL == 0
+    # (M8: E1M1's MAP_CONFIG entry is the map page alone -- every other field is the default's)
+    from dataclasses import replace
+    assert replace(C.map_cfg(g, "E1M1"), AUTOMAP=0) == g and C.Config().WALL_SCROLL == 0
     assert "WALL_SCROLL" not in C.Config().constants(), "an fj constant would change every map's fj_consts"
     w = WadFile.from_path(E1M1)
     assert SC.scroll_lines(w.linedefs("E1M1")) == frozenset()

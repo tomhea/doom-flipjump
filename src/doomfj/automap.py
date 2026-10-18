@@ -8,9 +8,12 @@ Only the DOT is computed at run time, from `viewx` / `viewy`: `dot` is its oracl
 the same 32-bit arithmetic step for step (an add, a shift, a compare per band boundary, a byte add).
 
 THE SCALE AND THE BANDS. A 160 x 100 screen with a legend column on the right leaves ~116 x 98 px for the map. The
-scale is a POWER OF TWO (`1 << shift` map units a pixel), so the dot's pixel is the 16.16 position plus a constant,
-shifted: no multiply, no divide. `shift` is the finest that fits the map's WIDTH (E1M2, 2,968 x 4,952 units: 32 units
-a pixel, 93 x 155 px; 16 would be 186 px wide). A map taller than the screen is cut into BANDS -- vertical pages,
+scale (`units` map units a pixel) is the finest of 32, 40, 48, ... (steps of UNITS_STEP from UNITS_MIN) whose map
+fits the area's WIDTH: E1M2, 2,968 x 4,952 units, 32 a pixel (93 x 155 px); E1M1, 3,952 x 3,400, 40 a pixel (99 x
+86 px, one page -- at 32 it is 124 px wide, at the old power-of-two rule's 64 a 62 x 54 blob). A POWER-OF-TWO scale's
+dot is the 16.16 position plus a constant, SHIFTED (`shift`); any other's is the position's whole units times a
+fixed-point RECIPROCAL (`recip`: d * M >> 4t equals d // units for EVERY d up to the map's extent -- checked when the
+page is built, over the whole extent), one nibble-by-nibble `hex.add_mul` per nibble of M. A map taller than the screen is cut into BANDS -- vertical pages,
 each a whole screen of map rows, overlapping, spread evenly -- and the page shown is the band whose middle the
 player's row is in: band k from the row `thresholds[k-1]` (the middle of its overlap with band k-1) on. So the dot is
 never near a band's top or bottom edge. Every reachable row's dot is ASSERTED on screen (`check`), so a map whose
@@ -35,7 +38,8 @@ from doomfj.menu import MAP_KEY
 
 AUTOMAP_KEY = MAP_KEY                  # 'm': the keyboard device's SDL code -- ONE source, the menu's
 
-SHIFT_MIN = 4                          # the finest scale: 16 map units a pixel
+UNITS_MIN = 32                         # the finest scale: 32 map units a pixel
+UNITS_STEP = 8                         # ... then 40, 48, 56, 64, ...
 BANDS_MAX = 4                          # a map needing more bands than this at a scale tries the next coarser one
 MARGIN_X = 2                           # the screen's left edge to the map area
 MARGIN_Y = 1                           # every band leaves this many rows above and below the map
@@ -85,7 +89,7 @@ class Pages:
     mapname: str
     width: int                         # the screen
     height: int
-    shift: int                         # a pixel is 1 << shift map units
+    units: int                         # a pixel is this many map units (UNITS_MIN + k * UNITS_STEP)
     minx: int                          # the map's vertex bounding box
     maxx: int
     miny: int
@@ -100,12 +104,17 @@ class Pages:
         return dict(self.ink)
 
     @property
+    def shift(self) -> Optional[int]:
+        """log2(units) for a power-of-two scale (the dot SHIFTS), None for any other (the dot multiplies: `recip`)"""
+        return self.units.bit_length() - 1 if self.units & (self.units - 1) == 0 else None
+
+    @property
     def wpx(self) -> int:
-        return ((self.maxx - self.minx) >> self.shift) + 1
+        return (self.maxx - self.minx) // self.units + 1
 
     @property
     def hpx(self) -> int:
-        return ((self.maxy - self.miny) >> self.shift) + 1
+        return (self.maxy - self.miny) // self.units + 1
 
     @property
     def band_h(self) -> int:
@@ -145,18 +154,19 @@ def line_kind(ld, sides, sectors) -> Optional[str]:
 
 
 def build(map_wad, mapname: str, palette_rgb, width: int = 160, height: int = 100) -> Pages:
-    """the map page of `mapname`: the finest power-of-two scale whose map fits the map area's width in at most
-    BANDS_MAX bands, the bands spread evenly over the map's rows, the lines in full-map pixels. CHECKED (`check`)"""
+    """the map page of `mapname`: the finest scale (UNITS_MIN, + UNITS_STEP, ...) whose map fits the map area's width
+    in at most BANDS_MAX bands, the bands spread evenly over the map's rows, the lines in full-map pixels. CHECKED
+    (`check`)"""
     vs, lds = map_wad.vertexes(mapname), map_wad.linedefs(mapname)
     sides, secs = map_wad.sidedefs(mapname), map_wad.sectors(mapname)
     minx, maxx = min(v.x for v in vs), max(v.x for v in vs)
     miny, maxy = min(v.y for v in vs), max(v.y for v in vs)
     area = width - MARGIN_X - PANEL_W - PANEL_GAP - MARGIN_X       # the map area's width
     band_h = height - 2 * MARGIN_Y
-    shift = SHIFT_MIN
-    while (((maxx - minx) >> shift) + 1 > area or -(-(((maxy - miny) >> shift) + 1) // band_h) > BANDS_MAX):
-        shift += 1
-    wpx, hpx = ((maxx - minx) >> shift) + 1, ((maxy - miny) >> shift) + 1
+    units = UNITS_MIN
+    while ((maxx - minx) // units + 1 > area or -(-((maxy - miny) // units + 1) // band_h) > BANDS_MAX):
+        units += UNITS_STEP
+    wpx, hpx = (maxx - minx) // units + 1, (maxy - miny) // units + 1
     x0 = MARGIN_X + (area - wpx) // 2
     n = -(-hpx // band_h)
     if n == 1:                                       # one band: the map centred in the screen's rows
@@ -165,14 +175,14 @@ def build(map_wad, mapname: str, palette_rgb, width: int = 160, height: int = 10
         tops = tuple(round(k * (hpx - band_h) / (n - 1)) for k in range(n))
 
     def px(v):
-        return x0 + ((v.x - minx) >> shift), (maxy - v.y) >> shift
+        return x0 + (v.x - minx) // units, (maxy - v.y) // units
     drawn = []
     for ld in lds:
         kind = line_kind(ld, sides, secs)
         if kind is not None:
             drawn.append((KINDS.index(kind), kind, *px(vs[ld.v1]), *px(vs[ld.v2])))
     lines = tuple(d[1:] for d in sorted(drawn, key=lambda d: d[0]))   # stable: the wad's order within a kind
-    p = Pages(mapname.upper(), width, height, shift, minx, maxx, miny, maxy, x0, tops, lines,
+    p = Pages(mapname.upper(), width, height, units, minx, maxx, miny, maxy, x0, tops, lines,
               tuple(sorted(map_inks(palette_rgb).items())))
     check(p)
     return p
@@ -194,8 +204,40 @@ def has_page(mapname: str) -> bool:
 
 
 def shift_bits(p: Pages) -> int:
-    """the dot's pixel is the 16.16 position (plus a constant) shifted right this many bits"""
+    """a POWER-OF-TWO scale: the dot's pixel is the 16.16 position (plus a constant) shifted right this many bits"""
+    assert p.shift is not None, "a %d-unit scale has no shift: its dot multiplies (recip)" % p.units
     return 16 + p.shift
+
+
+RECIP_T_MAX = 6                        # the reciprocal's fraction is at most 4 * this many bits
+
+
+def extent(p: Pages) -> int:
+    """the largest whole-unit offset the dot divides: the bounding box's width or height, in map units"""
+    return max(p.maxx - p.minx, p.maxy - p.miny)
+
+
+def recip(units: int, dmax: int) -> Tuple[int, int]:
+    """(t, M): the fewest fraction NIBBLES t (>= 2, so the 4-nibble offset fits the t+2-nibble product register) and
+    M = ceil(16**t / units) with (d * M) >> 4t == d // units for EVERY d in 0..dmax -- checked here, d by d, so a
+    reciprocal is never used past where it is exact"""
+    for t in range(2, RECIP_T_MAX + 1):
+        m = -(-(16 ** t) // units)
+        if all((d * m) >> (4 * t) == d // units for d in range(dmax + 1)):
+            return t, m
+    raise AssertionError("no reciprocal of %d exact to %d within %d nibbles" % (units, dmax, RECIP_T_MAX))
+
+
+def recip_of(p: Pages) -> Tuple[int, int]:
+    """a NON-power-of-two scale's reciprocal, exact over the map's whole extent (`recip`)"""
+    assert p.shift is None
+    assert extent(p) < 1 << 16, "the dot's offset is the 4 integer nibbles of a 16.16 position"
+    return recip(p.units, extent(p))
+
+
+def x_base(p: Pages) -> int:
+    """a NON-power-of-two scale: added to viewx, (viewx + x_base) >> 16 is the player's whole-unit offset from minx"""
+    return (-(p.minx << 16)) & 0xFFFFFFFF
 
 
 def window(p: Pages) -> Tuple[int, int]:
@@ -226,12 +268,26 @@ def top_const(p: Pages, band: int) -> int:
     return (MARGIN_Y - p.tops[band] - (DOT // 2)) & 0xFF
 
 
+def _row(p: Pages, viewy: int) -> int:
+    """the player's full-map row, the program's way (both scales)"""
+    u = (y_const(p) - viewy) & 0xFFFFFFFF
+    if p.shift is not None:
+        return (u >> shift_bits(p)) & 0xFF
+    t, m = recip_of(p)
+    return (((u >> 16) * m) >> (4 * t)) & 0xFF
+
+
 def dot(p: Pages, viewx: int, viewy: int) -> Tuple[int, int, int]:
     """THE ORACLE's dot: (band, left column, top row) from the 16.16 view position -- `fj_lines`' arithmetic, step for
-    step (32-bit sums, the shifted byte, the band's compares, the byte add)"""
-    s = shift_bits(p)
-    col = (((viewx + x_const(p)) & 0xFFFFFFFF) >> s) & 0xFF
-    row = (((y_const(p) - viewy) & 0xFFFFFFFF) >> s) & 0xFF
+    step: a power-of-two scale's 32-bit sums and shifted bytes; any other's whole-unit offsets times the reciprocal,
+    the product's byte at nibble t, the column's constant added; then the band's compares and the byte add"""
+    if p.shift is not None:
+        col = (((viewx + x_const(p)) & 0xFFFFFFFF) >> shift_bits(p)) & 0xFF
+    else:
+        t, m = recip_of(p)
+        d = ((viewx + x_base(p)) & 0xFFFFFFFF) >> 16
+        col = ((((d * m) >> (4 * t)) & 0xFF) + p.x0 - DOT // 2) & 0xFF
+    row = _row(p, viewy)
     band = band_of_row(p, row)
     return band, col, (row + top_const(p, band)) & 0xFF
 
@@ -242,11 +298,12 @@ def check(p: Pages) -> None:
     (top >= 0, top + DOT <= height: the device refuses anything else)"""
     assert 1 <= p.x0 - DOT // 2 and p.x0 + p.wpx + DOT // 2 <= p.panel_x - 1, ("the map does not fit its area", p.x0)
     assert p.hpx <= 0xFF and p.thresholds == tuple(sorted(p.thresholds)), (p.hpx, p.thresholds)
-    s = shift_bits(p)
+    if p.shift is None:
+        recip_of(p)                    # exact over the whole extent, or refused
     for viewx in ((p.minx << 16), (p.maxx << 16) + 0xFFFF):
         _b, col, _t = dot(p, viewx, p.maxy << 16)
         assert 0 <= col and col + DOT <= p.panel_x, ("the dot leaves the map area", viewx, col)
-    assert (((y_const(p) - (p.miny << 16)) & 0xFFFFFFFF) >> s) == p.hpx - 1
+    assert _row(p, p.miny << 16) == p.hpx - 1
     for row in range(p.hpx):
         band = band_of_row(p, row)
         top = (row + top_const(p, band)) & 0xFF
@@ -333,9 +390,27 @@ def band_stream(p: Pages, band: int) -> bytes:
 
 def decls(p: Pages) -> List[str]:
     """the page's cells: the two 8-nibble sums and the dot's bottom row -- write-before-read scratch, so the M1 reset
-    need not (and does not) restore them -- and one CONSTANT per band threshold (never written)"""
-    return (["am_x: hex.vec 8", "am_y: hex.vec 8", "am_y3: hex.vec 2"]
+    need not (and does not) restore them -- and one CONSTANT per band threshold (never written). A non-power-of-two
+    scale adds the offset and the two products (t+2 nibbles, scratch) and the reciprocal M (a constant)"""
+    extra = []
+    if p.shift is None:
+        t, m = recip_of(p)
+        extra = [f"am_d: hex.vec {t + 2}", f"am_px: hex.vec {t + 2}", f"am_py: hex.vec {t + 2}",
+                 f"am_m: hex.vec {(m.bit_length() + 3) // 4}, {m}"]
+    return (["am_x: hex.vec 8", "am_y: hex.vec 8", "am_y3: hex.vec 2"] + extra
             + [f"am_t{k}: hex.vec 2, {t}" for k, t in enumerate(p.thresholds, 1)])
+
+
+def _recip_lines(p: Pages, src: str, prod: str) -> List[str]:
+    """`prod`[t+2] = (the 4 integer nibbles of `src`) * M: the offset into the zeroed am_d, then one `hex.add_mul`
+    per non-zero nibble j of M at nibble j of the product (its width t+2-j: the bits above are never read)"""
+    t, m = recip_of(p)
+    w = t + 2
+    out = [f"    hex.zero {w}, am_d", f"    hex.mov 4, am_d, {src} + 4*dw", f"    hex.zero {w}, {prod}"]
+    for j in range((m.bit_length() + 3) // 4):
+        if (m >> (4 * j)) & 15:
+            out.append(f"    hex.add_mul {w - j}, {prod} + {j}*dw, am_d, am_m + {j}*dw")
+    return out
 
 
 def fj_lines(p: Pages, prefix: str = "am") -> List[str]:
@@ -345,17 +420,28 @@ def fj_lines(p: Pages, prefix: str = "am") -> List[str]:
     plus the band's constant is the dot's top row; then the dot as DOT column records drawn OVER the frame --
     [x] [KEEP][top][top+DOT][ink] [END] -- KEEP leaving the frame's rows above it. `byte.emit` prints the run-time
     bytes. Ends falling through: the caller jumps to the frame's tail"""
-    q, b = window(p)
-    xw, yw = f"am_x + {q}*dw", f"am_y + {q}*dw"
     ink = p.inks["you"]
-    out = [f"// M8 (doomfj.automap): the map page of {p.mapname} -- {p.nbands} band(s) at {1 << p.shift} units a "
-           f"pixel, the dot from viewx / viewy",
-           "    hex.mov 8, am_x, viewx",
-           f"    hex.add_constant 8, am_x, {x_const(p)}",
-           *([f"    hex.shr_bit 3, {xw}"] * b),
-           f"    hex.set 8, am_y, {y_const(p)}",
-           "    hex.sub 8, am_y, viewy",
-           *([f"    hex.shr_bit 3, {yw}"] * b)]
+    head = [f"// M8 (doomfj.automap): the map page of {p.mapname} -- {p.nbands} band(s) at {p.units} units a "
+            f"pixel, the dot from viewx / viewy"]
+    if p.shift is not None:                    # a power-of-two scale: add, shift
+        q, b = window(p)
+        xw, yw = f"am_x + {q}*dw", f"am_y + {q}*dw"
+        out = head + ["    hex.mov 8, am_x, viewx",
+                      f"    hex.add_constant 8, am_x, {x_const(p)}",
+                      *([f"    hex.shr_bit 3, {xw}"] * b),
+                      f"    hex.set 8, am_y, {y_const(p)}",
+                      "    hex.sub 8, am_y, viewy",
+                      *([f"    hex.shr_bit 3, {yw}"] * b)]
+    else:                                      # any other: the whole-unit offsets times the reciprocal
+        t, _m = recip_of(p)
+        xw, yw = f"am_px + {t}*dw", f"am_py + {t}*dw"
+        out = head + ["    hex.mov 8, am_x, viewx",
+                      f"    hex.add_constant 8, am_x, {x_base(p)}",
+                      *_recip_lines(p, "am_x", "am_px"),
+                      f"    hex.add_constant 2, {xw}, {p.x0 - DOT // 2}",
+                      f"    hex.set 8, am_y, {y_const(p)}",
+                      "    hex.sub 8, am_y, viewy",
+                      *_recip_lines(p, "am_y", "am_py")]
     # the band: the first threshold the row is below picks the band before it
     for k in range(1, p.nbands):
         nxt = f"{prefix}_c{k + 1}" if k + 1 < p.nbands else f"{prefix}_b{k}"

@@ -1,7 +1,13 @@
 """M8 -- THE MAP PAGE's host side (doomfj.automap; the owner, 2026-10-18): the switch, the scale and the bands, the two
 mirrors of the baked page, the dot's arithmetic against a plain floor-division reference, DOOM's line rules, the
-menu's rules with the MAP item and the key M, the help's M, and E1M1 untouched. tests/fj/test_automap_fj.py RUNS the
-emitted fj against the same oracle."""
+menu's rules with the MAP item and the key M, the help's M, and a map without the page untouched. tests/fj/
+test_automap_fj.py RUNS the emitted fj against the same oracle.
+
+The owner, 2026-10-18 ("Add it to e1m1 too"): E1M1 has the page too, at 40 units a pixel -- not a power of two, so its
+dot divides by a fixed-point RECIPROCAL: `test_the_reciprocal_is_exact_over_the_whole_extent` holds it to floor
+division for every whole-unit offset the map has, with a reciprocal one too small as its control. E1M2's page and dot
+(32 units, a shift) are frozen to m8p-final's text (`test_e1m2_is_m8p_finals_page`)."""
+import hashlib
 import random
 
 import pytest
@@ -28,21 +34,91 @@ def e1m2():
     return A.pages_for(WadFile.from_path("tests/fixtures/freedoom_e1m2.wad"), "E1M2", _palette())
 
 
+@pytest.fixture(scope="module")
+def e1m1():
+    return A.pages_for(WadFile.from_path("tests/fixtures/freedoom_e1m1.wad"), "E1M1", _palette())
+
+
 def test_the_switch_is_per_map():
-    """E1M2's MAP_CONFIG turns the page on; E1M1 (no AUTOMAP) and the default Config leave it off"""
+    """E1M1's and E1M2's MAP_CONFIG turn the page on; the default Config (a map not listed) leaves it off. E1M1's
+    entry is AUTOMAP alone: every other field is the default it had with no entry"""
+    from dataclasses import fields
+    from doomfj.config import MAP_CONFIG
     assert map_cfg(Config(), "E1M2").AUTOMAP == 1 and A.has_page("E1M2")
-    assert Config().AUTOMAP == 0 and map_cfg(Config(), "E1M1").AUTOMAP == 0 and not A.has_page("E1M1")
-    assert A.pages_for(WadFile.from_path("tests/fixtures/freedoom_e1m1.wad"), "E1M1", _palette()) is None
+    assert map_cfg(Config(), "E1M1").AUTOMAP == 1 and A.has_page("E1M1") and MAP_CONFIG["E1M1"] == {"AUTOMAP": 1}
+    assert Config().AUTOMAP == 0 and not A.has_page("E1M3")
+    e1, base = map_cfg(Config(), "E1M1"), Config()
+    assert [f.name for f in fields(Config) if getattr(e1, f.name) != getattr(base, f.name)] == ["AUTOMAP"]
+    assert e1.constants() == base.constants()
 
 
 def test_e1m2_scale_and_bands(e1m2):
-    """32 units a pixel (the finest power of two whose 2,968-unit width fits the area: 16 would be 186 px), two
-    overlapping bands of 98 rows over the map's 155, switched at the middle of their overlap"""
+    """32 units a pixel (the finest scale, UNITS_MIN: a power of two, so the dot shifts), two overlapping bands of
+    98 rows over the map's 155, switched at the middle of their overlap"""
     p = e1m2
-    assert (p.shift, p.wpx, p.hpx, p.nbands, p.tops, p.thresholds) == (5, 93, 155, 2, (0, 57), (77,))
-    assert ((p.maxx - p.minx) >> (p.shift - 1)) + 1 > p.panel_x - A.PANEL_GAP - A.MARGIN_X, "16 units would not fit"
+    assert (p.units, p.shift, p.wpx, p.hpx, p.nbands, p.tops, p.thresholds) == (32, 5, 93, 155, 2, (0, 57), (77,))
+    assert p.units == A.UNITS_MIN
     assert A.window(p) == (5, 1)
     assert {"wall", "step", "blue", "yellow", "red", "exit"} == p.kinds
+
+
+def test_e1m1_scale(e1m1):
+    """40 units a pixel: 32 would be 124 px wide, over the area; 99 x 86 px, ONE page (centred in its rows); not a
+    power of two, so the dot multiplies by the reciprocal of 40"""
+    p = e1m1
+    area = p.panel_x - A.PANEL_GAP - A.MARGIN_X
+    assert (p.maxx - p.minx) // 32 + 1 > area >= p.wpx
+    assert (p.units, p.shift, p.wpx, p.hpx, p.nbands, p.thresholds) == (40, None, 99, 86, 1, ())
+    assert A.recip_of(p) == (5, 26215)
+    assert {"wall", "step", "blue", "exit"} == p.kinds
+
+
+# frozen at m8p-final (925af820): E1M2's page -- the dot's fj, the band streams, the cold block, the decls
+E1M2_FROZEN = {"fj": "8af3bbdae7ca544ed01cdc3b88e16fb7fc342af12f6b6e2bc890c14c3825d4fe",
+               "streams": "c1c42d6ed98bed8533cd6268cf3b86c0c6657a96726f1fb953958e5676b11e1f",
+               "decls": "909a7e89612060258d9148bdaabc96ec92373984f0fba09072095c30267d7289"}
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def test_e1m2_is_m8p_finals_page(e1m2):
+    """the steps-of-8 scale rule and the reciprocal leave E1M2 (32 units: the shift) as m8p-final emitted it -- the
+    dot's fj, both bands' streams and the page's decls, hash for hash"""
+    assert _sha("\n".join(A.fj_lines(e1m2))) == E1M2_FROZEN["fj"]
+    assert _sha("\n".join(A.band_stream(e1m2, k).hex() for k in range(e1m2.nbands))) == E1M2_FROZEN["streams"]
+    assert _sha("\n".join(A.decls(e1m2))) == E1M2_FROZEN["decls"]
+
+
+def test_the_reciprocal_is_exact_over_the_whole_extent(e1m1):
+    """THE PROOF: (d * M) >> 4t == d // 40 for EVERY whole-unit offset d the map has (0 .. its extent, 3,952), and
+    the dot through it equals floor division of the 16.16 position at every whole unit of the map's width and height
+    (each with a fraction); R9: M one smaller, and the fraction one nibble shorter, are each wrong somewhere in it"""
+    p = e1m1
+    t, m = A.recip_of(p)
+    dmax = A.extent(p)
+    assert dmax == 3952
+    assert all((d * m) >> (4 * t) == d // p.units for d in range(dmax + 1))
+    assert any((d * (m - 1)) >> (4 * t) != d // p.units for d in range(dmax + 1))
+    m_short = -(-(16 ** (t - 1)) // p.units)
+    assert any((d * m_short) >> (4 * (t - 1)) != d // p.units for d in range(dmax + 1))
+    rnd = random.Random(40)
+    for x in range(p.minx, p.maxx + 1):
+        vx = ((x << 16) + rnd.randrange(1 << 16)) & M32
+        assert A.dot(p, vx, p.maxy << 16)[1] == _reference_dot(p, vx, p.maxy << 16)[1], x
+    for y in range(p.miny, p.maxy + 1):
+        vy = ((y << 16) + rnd.randrange(1 << 16)) & M32 if y < p.maxy else (y << 16) & M32
+        vx = (p.minx << 16) & M32
+        assert A.dot(p, vx, vy) == _reference_dot(p, vx, vy), y
+
+
+def test_a_reciprocal_one_too_small_is_caught(e1m1, monkeypatch):
+    """R9 for the dot: recip_of returning M - 1 moves some position's dot off the floor division"""
+    t, m = A.recip_of(e1m1)
+    monkeypatch.setattr(A, "recip_of", lambda p: (t, m - 1))
+    assert any(A.dot(e1m1, vx, vy) != _reference_dot(e1m1, vx, vy)
+               for vx, vy in [(((x << 16) & M32), (e1m1.maxy << 16) & M32) for x in range(e1m1.minx, e1m1.maxx)])
 
 
 def _decode(stream, w, h):
@@ -55,19 +131,21 @@ def _decode(stream, w, h):
     return list(scr.pixel_indices)
 
 
-def test_each_band_stream_paints_its_picture(e1m2):
+@pytest.mark.parametrize("which", ["e1m1", "e1m2"])
+def test_each_band_stream_paints_its_picture(which, request):
     """ONE GENERATOR, TWO MIRRORS: each band's 0x0B stream, decoded by the REAL screen device, is its picture"""
-    for k in range(e1m2.nbands):
-        assert _decode(A.band_stream(e1m2, k), e1m2.width, e1m2.height) == A.band_pixels(e1m2, k), k
+    p = request.getfixturevalue(which)
+    for k in range(p.nbands):
+        assert _decode(A.band_stream(p, k), p.width, p.height) == A.band_pixels(p, k), k
 
 
 def _reference_dot(p, viewx, viewy):
     """the dot by plain floor division of the SIGNED 16.16 position -- not the program's arithmetic"""
     sx = viewx - (1 << 32) if viewx & 0x80000000 else viewx
     sy = viewy - (1 << 32) if viewy & 0x80000000 else viewy
-    col = p.x0 + (sx - (p.minx << 16)) // (1 << (16 + p.shift))
-    row = ((p.maxy << 16) - sy) // (1 << (16 + p.shift))
-    band = 0 if row < p.thresholds[0] else 1
+    col = p.x0 + (sx - (p.minx << 16)) // (p.units << 16)
+    row = ((p.maxy << 16) - sy) // (p.units << 16)
+    band = sum(row >= t for t in p.thresholds)
     return band, col - 1, row - p.tops[band] + A.MARGIN_Y - 1
 
 
@@ -77,10 +155,13 @@ def _random_poses(p, n=400, seed=7):
             for _ in range(n)]
 
 
-def test_the_dot_is_the_floor_division(e1m2):
-    """the 32-bit sums and shifts of `dot` (the program's steps) equal a plain floor division at 400 positions"""
-    for vx, vy in _random_poses(e1m2):
-        assert A.dot(e1m2, vx, vy) == _reference_dot(e1m2, vx, vy), (vx, vy)
+@pytest.mark.parametrize("which", ["e1m1", "e1m2"])
+def test_the_dot_is_the_floor_division(which, request):
+    """`dot`'s steps (the program's: E1M2's 32-bit sums and shifts, E1M1's reciprocal) equal a plain floor division
+    at 400 positions"""
+    p = request.getfixturevalue(which)
+    for vx, vy in _random_poses(p):
+        assert A.dot(p, vx, vy) == _reference_dot(p, vx, vy), (vx, vy)
 
 
 def test_a_dot_a_pixel_off_is_caught(e1m2, monkeypatch):

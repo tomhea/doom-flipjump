@@ -22,6 +22,7 @@ from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, Scr
 
 from doomfj import keyboard as KB
 from doomfj.harness import W
+from doomfj.automap import has_page
 from doomfj.wall_renderer import STANDALONE_POLLS, standalone_key_lines
 from doomfj.wireformat import KEY_FIRE, KEY_USE, keys_byte
 
@@ -47,6 +48,7 @@ def _program(key_lines) -> str:
         *[f"{KB.flag(k)}: hex.vec 1" for k in KB.HELD_KEYS],
         KB.NOW_DECL,
         *[f"{e}: hex.vec 1" for e in ("ev_enter", "ev_esc", "ev_up", "ev_dn", "ev_help", "ev_any")],   # P10: ev_any
+        "ev_map: hex.vec 1",                                                # M8: the map page's M (AUTOMAP)
         "tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {FRAMES}",
     ]) + "\n"
 
@@ -109,9 +111,18 @@ TAPS = ("fire tapped inside one frame fires that frame", "weapon 2 tapped inside
 HOLDS = ("forward held two frames, released in the third", "fire held across frames")
 
 
+# M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's prologue reads M after each poll (the map page) -- the
+# latch must be exactly what it was with those lines between the polls
+AUTOMAP = has_page("E1M1")
+
+
+def _shipped_lines():
+    return standalone_key_lines(POLLS, automap=AUTOMAP)
+
+
 @pytest.fixture(scope="module")
 def shipped(tmp_path_factory):
-    return _assemble(tmp_path_factory.mktemp("latch"), "latch", standalone_key_lines(POLLS))
+    return _assemble(tmp_path_factory.mktemp("latch"), "latch", _shipped_lines())
 
 
 @pytest.mark.parametrize("name", sorted(SCRIPTS))
@@ -152,7 +163,7 @@ def test_negative_control_the_pre_p9_oracle_is_caught(shipped):
 
 
 def _mutants():
-    lines = standalone_key_lines(POLLS)
+    lines = _shipped_lines()
 
     def on_flags(ln):                    # the builder's `if0 1, kb_now + i*dw` back on the held flag
         for k in KB.HELD_KEYS:
@@ -174,7 +185,7 @@ def test_a_broken_prologue_is_caught(tmp_path, name):
     """R9: each P9 part of the prologue broken, assembled through the same harness, disagrees with the oracle on some
     script of the kind it breaks"""
     lines, scripts = _mutants()[name]
-    assert lines != standalone_key_lines(POLLS), "the mutant changed nothing"
+    assert lines != _shipped_lines(), "the mutant changed nothing"
     bad = _assemble(tmp_path, "bad", lines)
     caught = [n for n in scripts if _run(bad, SCRIPTS[n]) != _expected(SCRIPTS[n])]
     assert caught, "a prologue where %s passed every script" % name

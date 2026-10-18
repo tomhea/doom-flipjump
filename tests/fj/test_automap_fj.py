@@ -1,5 +1,6 @@
-"""M8 -- THE MAP PAGE, run (doomfj.automap; the owner, 2026-10-18): the emitted fj against the oracle, on E1M2 -- the
-one map whose MAP_CONFIG turns the page on.
+"""M8 -- THE MAP PAGE, run (doomfj.automap; the owner, 2026-10-18): the emitted fj against the oracle, on E1M2 (32
+units a pixel: the dot SHIFTS) and -- the owner, 2026-10-18: "Add it to e1m1 too" -- on E1M1 (40 units a pixel: the
+dot multiplies by a fixed-point RECIPROCAL, `automap.recip`; section 4).
 
 1. THE DOT (`automap.fj_lines`, the exact lines the menu block bakes): a program that sets `viewx` / `viewy` to each of
    POSES -- the player start, the bounding box's corners, both sides of the band boundary to the map unit and to
@@ -67,9 +68,11 @@ def pages():
     return p
 
 
-def test_e1m1_has_no_page():
-    """the switch: E1M1's MAP_CONFIG leaves the page off, so its menu, help, poll and state machine are E1M1's"""
-    assert A.pages_for(WadFile.from_path("tests/fixtures/freedoom_e1m1.wad"), "E1M1", _palette()) is None
+@pytest.fixture(scope="module")
+def e1m1_pages():
+    p = A.pages_for(WadFile.from_path("tests/fixtures/freedoom_e1m1.wad"), "E1M1", _palette())
+    assert p is not None and (p.units, p.nbands, p.shift) == (40, 1, None), "E1M1: 40 units a pixel, one page"
+    return p
 
 
 class _Recording(InMemoryScreen):
@@ -195,8 +198,11 @@ def test_a_wrong_dot_is_caught(pages, tmp_path, what):
 
 # ---------------------------------------------------------------------------------------------------------------------
 # 2. THE MENU, THE KEY AND THE PAUSED WORLD
-DX, DY = 23 << 16, 260 << 16                        # the world stub's walk a frame: east a little, south a lot
-START = (608 << 16, 48 << 16)
+# each map's world stub: its player start, and its walk a frame (east, south) -- inside the bounding box for the
+# script's 13 world frames. E1M2: east a little, south a lot (into its second band)
+WALK = {"E1M2": ((608 << 16, 48 << 16), 23 << 16, 260 << 16),
+        "E1M1": (((-416 << 16) & M32, 256 << 16), 120 << 16, 85 << 16)}
+START, DX, DY = WALK["E1M2"]
 
 
 def press(f, key, at=0):
@@ -238,7 +244,8 @@ SCRIPT = (press(1, M_KEY)          # m in the world: the page (band 0), the worl
 FRAMES = 42
 
 
-def _menu_program(menu_lines, key_lines, frames, world_tic=True):
+def _menu_program(menu_lines, key_lines, frames, world_tic=True, walk=WALK["E1M2"]):
+    (start_x, start_y), dx, dy = walk
     world = []
     for x in range(CFG.VIEW_W):                     # the world STUB: one flat frame
         world += [f"    stl.output_char {x}", f"    stl.output_char {CFG.VIEW_H}",
@@ -250,7 +257,7 @@ def _menu_program(menu_lines, key_lines, frames, world_tic=True):
         *key_lines,
         *menu_lines,                                # ends at `do_world:`
         # the world STUB's tic: the player walks DX east, DY south -- only a world frame reaches here
-        *([f"    hex.add_constant 8, viewx, {DX}", f"    hex.sub_constant 8, viewy, {DY}"] if world_tic else []),
+        *([f"    hex.add_constant 8, viewx, {dx}", f"    hex.sub_constant 8, viewy, {dy}"] if world_tic else []),
         "    stl.output_char 0x0B",
         *world,
         "frame_end:",
@@ -265,7 +272,7 @@ def _menu_program(menu_lines, key_lines, frames, world_tic=True):
         "kbstat: hex.vec 1", "kbcode: hex.vec 2", "pkeys: hex.vec 2",
         *[f"{KB.flag(k)}: hex.vec 1" for k in KB.HELD_KEYS], KB.NOW_DECL,
         "p_tnh: hex.vec 1",
-        f"viewx: hex.vec 8, {START[0]}", f"viewy: hex.vec 8, {START[1]}", "viewangle: hex.vec 8",
+        f"viewx: hex.vec 8, {start_x}", f"viewy: hex.vec 8, {start_y}", "viewangle: hex.vec 8",
         "thss_rt: hex.vec 16", "thpos_rt: hex.vec 16",
         "sshead:", "    ;0 * dw", "thnext:", "    ;0 * dw",
         "tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {frames}",
@@ -278,7 +285,7 @@ def _run_menu(tmp, name, pages, events, frames=FRAMES, mutate=None, keys=None, a
     if mutate:
         menu_lines = mutate(menu_lines)
     key_lines = keys if keys is not None else standalone_key_lines(polls, automap=automap)
-    text = _menu_program(menu_lines, key_lines, frames) + "\n".join(A.decls(pages)) + "\n"
+    text = _menu_program(menu_lines, key_lines, frames, walk=WALK[pages.mapname]) + "\n".join(A.decls(pages)) + "\n"
     return _assemble_run(tmp, name, text, events)
 
 
@@ -288,12 +295,12 @@ def _expected(pages, events, frames=FRAMES, step=menu_step, paused=True):
     colours = palette_colours(_palette())
     fks = KB.frame_keys(events, frames, polls=POLLS, menu_keys=menu_keys(True))
     mode, scr, sel, live = 0, 0, SKILLS.index(BOOT_MENU_SKILL), 1
-    vx, vy = START
+    (vx, vy), dx, dy = WALK[pages.mapname]
     out, states = [], []
     for f in range(frames):
         mode, scr, sel, _ng, live = step(mode, scr, sel, set(fks[f].menu), live, automap=True)
         if mode == 0 or not paused:
-            vx, vy = (vx + DX) & M32, (vy - DY) & M32
+            vx, vy = (vx + dx) & M32, (vy - dy) & M32
         states.append((mode, scr, sel, live, vx, vy))
         out.append(menu_screen_pixels(CFG, colours, scr, sel, live, automap=pages, view=(vx, vy)) if mode
                    else [STUB] * (CFG.VIEW_W * CFG.VIEW_H))
@@ -365,6 +372,124 @@ def test_m_read_on_its_up_edge_is_caught(pages, tmp_path):
     frames, _ = _run_menu(tmp_path, "upedge", pages, SCRIPT, keys=keys)
     assert _first_bad(frames, _expected(pages, SCRIPT)[0]) == 39
 
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 4. E1M1 -- 40 units a pixel: the dot through the RECIPROCAL (automap.recip), the page in the menu
+def _poses_e1m1(p):
+    """(viewx, viewy) 16.16, unsigned -- the corners, the player start, the north, south, east and west edges, the
+    exit switch, whole-unit offsets either side of every 40th unit near both ends of the extent (d % 40 == 39 / 0:
+    where a reciprocal goes wrong first), and seeded random positions with random fractions"""
+    t, m = A.recip_of(p)
+    out = [(p.minx << 16, p.maxy << 16), ((p.maxx << 16) + 0xFFFF, p.miny << 16),
+           (p.minx << 16, p.miny << 16), ((p.maxx << 16) + 0xFFFF, p.maxy << 16),
+           (-416 << 16, 256 << 16),                                     # E1M1's player start
+           (1056 << 16, 2300 << 16), (1056 << 16, (-1040 << 16) + 0x8000), # north, south
+           (-380 << 16, 1296 << 16)]                                    # near the exit switch (-400, 1280..1312)
+    for d in (39, 40, 79, 80, 3919, 3920, 3951, 3952):                   # 40's boundaries, both ends
+        out.append((((p.minx + min(d, p.maxx - p.minx)) << 16) + 0xFFFF * (d % 40 == 39),
+                    ((p.maxy - min(d, p.maxy - p.miny)) << 16) - (d % 40 == 0)))
+    rnd = random.Random(20261019)
+    for _ in range(10):
+        out.append((rnd.randrange(p.minx << 16, (p.maxx + 1) << 16), rnd.randrange(p.miny << 16, (p.maxy << 16) + 1)))
+    lo_y, hi_x = p.miny << 16, (p.maxx << 16) + 0xFFFF                 # every pose inside the bounding box
+    return [(min(x, hi_x) & M32, max(y, lo_y) & M32) for x, y in out]
+
+
+@pytest.fixture(scope="module")
+def e1m1_dot(e1m1_pages, tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("amdot1")
+    return _assemble_run(tmp, "dot1", _dot_program(e1m1_pages, _poses_e1m1(e1m1_pages), A.fj_lines(e1m1_pages)))
+
+
+def test_e1m1_every_pose_is_the_oracles_page(e1m1_pages, e1m1_dot):
+    p, frames = e1m1_pages, e1m1_dot[0]
+    want = [A.pixels(p, vx, vy) for vx, vy in _poses_e1m1(p)]
+    assert len(frames) == len(want)
+    bad = _first_bad(frames, want)
+    assert bad is None, "pose %d %r: the program's page differs (oracle dot %r)" % (
+        bad, _poses_e1m1(p)[bad], A.dot(p, *_poses_e1m1(p)[bad]))
+
+
+def test_e1m1_the_price_of_the_dot(e1m1_pages, e1m2_free_dot_ops, tmp_path, capsys):
+    """the ops of ONE dot on a map frame (the world paused): the page's ops at one pose, less the same program's
+    with the dot's arithmetic and records cut out (the band's frame alone) -- printed, E1M2's shift beside it"""
+    p = e1m1_pages
+    full = _assemble_run(tmp_path, "one", _dot_program(p, _poses_e1m1(p)[:1], A.fj_lines(p)))[1]
+    bare = _assemble_run(tmp_path, "bare", _dot_program(p, _poses_e1m1(p)[:1], _frame_only(p)))[1]
+    with capsys.disabled():
+        print("\n[automap] the dot on a map frame: E1M1 (reciprocal) %d ops, E1M2 (shift) %d ops"
+              % (full - bare, e1m2_free_dot_ops))
+    assert 0 < full - bare < 20000
+
+
+def _frame_only(p):
+    """fj_lines with the dot's arithmetic and records dropped: the band's baked frame alone (the price test's floor)"""
+    lines = A.fj_lines(p)
+    k0 = next(i for i, ln in enumerate(lines) if ln.startswith("  am_b0:"))
+    k1 = next(i for i, ln in enumerate(lines) if ln.startswith("    ;am_dot"))
+    return [ln for ln in lines[k0:k1] if "stl.output_char" in ln or ln.startswith("  am_b")]
+
+
+@pytest.fixture(scope="module")
+def e1m2_free_dot_ops(pages, tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("amdot2")
+    pose = [(608 << 16, 48 << 16)]
+    full = _assemble_run(tmp, "one", _dot_program(pages, pose, A.fj_lines(pages)))[1]
+    bare = _assemble_run(tmp, "bare", _dot_program(pages, pose, _frame_only(pages)))[1]
+    return full - bare
+
+
+@pytest.mark.parametrize("what", ["M one smaller", "a product nibble dropped", "the column a pixel off"])
+def test_e1m1_a_wrong_reciprocal_is_caught(e1m1_pages, tmp_path, what):
+    """R9 for the reciprocal path: each part broken moves some pose's dot (or pushes it off the screen)"""
+    p = e1m1_pages
+    t, m = A.recip_of(p)
+    lines = A.fj_lines(p)
+    body = None
+    if what == "M one smaller":
+        body = _dot_program(p, _poses_e1m1(p), lines)
+        good = f"am_m: hex.vec {(m.bit_length() + 3) // 4}, {m}"
+        assert body.count(good) == 1
+        body = body.replace(good, f"am_m: hex.vec {(m.bit_length() + 3) // 4}, {m - 1}")
+    elif what == "a product nibble dropped":
+        old = f"    hex.add_mul {t + 2}, am_px + 0*dw, am_d, am_m + 0*dw"
+        lines = _mutated(lines, old, "    // mutant: the low nibble of M dropped")
+    else:
+        old = f"    hex.add_constant 2, am_px + {t}*dw, {p.x0 - 1}"
+        lines = _mutated(lines, old, f"    hex.add_constant 2, am_px + {t}*dw, {p.x0}")
+    body = body or _dot_program(p, _poses_e1m1(p), lines)
+    want = [A.pixels(p, vx, vy) for vx, vy in _poses_e1m1(p)]
+    try:
+        frames, _ = _assemble_run(tmp_path, "mut1", body)
+    except IODeviceException:
+        return
+    assert _first_bad(frames, want) is not None, "the mutant (%s) was not caught" % what
+
+
+def test_e1m1_m_one_smaller_is_wrong_on_the_poses(e1m1_pages):
+    """the control above is meaningful: the oracle with M - 1 disagrees with the true dot on some pose"""
+    p = e1m1_pages
+    t, m = A.recip_of(p)
+    off = [(x, y) for x, y in _poses_e1m1(p)
+           if ((((x + A.x_base(p)) & M32) >> 16) * (m - 1)) >> (4 * t) != (((x + A.x_base(p)) & M32) >> 16) // 40]
+    assert off, "no pose lands where M - 1 is wrong"
+
+
+@pytest.fixture(scope="module")
+def e1m1_menu_run(e1m1_pages, tmp_path_factory):
+    return _run_menu(tmp_path_factory.mktemp("ammenu1"), "menu1", e1m1_pages, SCRIPT)
+
+
+def test_e1m1_every_menu_frame_is_the_oracles_picture(e1m1_pages, e1m1_menu_run):
+    """E1M1's menu with the page: the same script (m in the world and on every item, MAP between HELP and EXIT, the
+    page closing both ways, the help listing M), E1M1's page and its walk"""
+    frames, _ops = e1m1_menu_run
+    want, states = _expected(e1m1_pages, SCRIPT)
+    assert len(frames) == FRAMES
+    assert sum(1 for s in states if s[0] == 1 and s[1] in (MAP_GAME_SCR, MAP_MENU_SCR)) >= 8
+    bad = _first_bad(frames, want)
+    assert bad is None, "frame %d: the program painted another picture (oracle state %r)" % (bad, states[bad])
 
 
 # ---------------------------------------------------------------------------------------------------------------------

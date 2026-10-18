@@ -829,14 +829,18 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     rockets = bool(p31.get("rockets"))           # P9: the player's rocket shares the fireballs' pool
     if rockets:
         names.update({"S_ROCKET": 222, "S_EXPLODE1": 223, "S_EXPLODE2": 224, "S_EXPLODE3": 225})
+    fog = bool(p31.get("tele"))                  # M8: the teleport fog shares the effects pool
+    if fog:
+        names.update({s: 234 + i for i, s in enumerate(
+            ("S_TFOG", "S_TFOG01", "S_TFOG02") + tuple("S_TFOG%d" % k for k in range(2, 11)))})
     assert {s: gd.STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
-    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets)) == sorted(names.values())
+    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets, fog)) == sorted(names.values())
     assert (FIREBALL_INFO.spawnstate, FIREBALL_INFO.deathstate) == ("S_TBALL1", "S_TBALLX1")
     mv = p31["mob_view"]
     assert sorted(mv) == sorted(names.values()), sorted(mv)
     rows, nt = p31["view_rows"], len(p31["rt_slot"])
     by_lump = {}
-    for s in projcode.pool_states(puffs, rockets):
+    for s in projcode.pool_states(puffs, rockets, fog):
         row = mv[gd.STATE_INDEX[s]]
         assert p31["mob_first"] <= row < nt + len(rows), (s, row)
         by_lump.setdefault(mobile_lump(s), set()).add(row)
@@ -2226,6 +2230,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     if _TELE:
         from doomfj.monstercode import cell_nibbles as _cn8
         _teleportcode.check_barrels(_p31["world"])
+        assert _W8.player_resolves(PLAYER_MODE), "M8: the telefrag kills through damagecode's dm_go (TELEFRAG)"
         assert _cn8(_p31["world"].schema, "mon_facing") == 1, "M8 L4: the knock stubs' facing cell is one nibble"
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
@@ -3331,7 +3336,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"],   # M7 P4.2a: mon_solid
                                     hurt=bool(_chase.get("hurt")))                # M7 P5: a dead player blocks nothing
                 # M8 L4: P_TeleportMove's stomp test (tp_stomp, jumping over itself)
-                + (_teleportcode.stomp_leaf_lines(_chase["slots_rt"], hurt=bool(_chase.get("hurt"))) if _TELE else [])
+                + (_teleportcode.stomp_leaf_lines(_chase["slots_rt"], hurt=bool(_chase.get("hurt")), knock=_KNOCK)
+                   if _TELE else [])
                 + move_leaf_lines(root=_mroot, lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:])
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
@@ -3361,7 +3367,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     # M8 L4: a monster's knock step teleports too; its stub writes the facing back
                     **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpq", knock_ctx=True),
                         "slot_back": (lambda m_: _teleportcode.slot_back_lines(
-                            m_, facing="mon_facing + %d*dw" % m_, knock=True, walk=False, tag="tpkb"))}
+                            m_, facing="mon_facing + %d*dw" % m_, knock=True, walk=False, tag="tpkb")),
+                        "telefrag": True}                        # M8: the thrust of P_TeleportMove's 10000
                        if _TELE else {})) if _KNOCK else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
@@ -4812,12 +4819,16 @@ ANIM_ACTORS = ("MT_BARREL", "MT_TROOPSHOT", "MT_PUFF", "MT_BLOOD",
 
 def anim_frames(map_wad, mapname) -> dict:
     """{sprite: sorted frame indices} for every state the map's monster types and ANIM_ACTORS can
-    reach from their entry states (gamedata's state chains, `next` followed to the end)"""
+    reach from their entry states (gamedata's state chains, `next` followed to the end). M8: + MT_TFOG's on a map
+    with a WR teleport line (the teleport fog: doomfj.teleport) -- none on E1M1"""
     from doomfj import gamedata as gd
+    from doomfj.teleport import TELEPORT_SPECIALS
     types = {t.type for t in map_wad.things(mapname) if t.type in MONSTER_TYPES}
+    actors = ANIM_ACTORS + (("MT_TFOG",) if any(ld.special in TELEPORT_SPECIALS
+                                                  for ld in map_wad.linedefs(mapname)) else ())
     out: dict = {}
     for name, mi in sorted(gd.MOBJINFO.items()):
-        if mi.doomednum not in types and name not in ANIM_ACTORS:
+        if mi.doomednum not in types and name not in actors:
             continue
         seen, todo = set(), list(mi.entry_states())
         while todo:

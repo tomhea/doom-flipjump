@@ -77,6 +77,14 @@ A rocket's slot has `pj_src` 0 (a fireball's is 1 + its shooter's slot), so `pw_
     `bl_leaf` at the rocket's whole-unit spot with `bl_dyn` 1 (the far LOS from any spot, the rocket's z), the source
     the player (bl_src 1), then every standing barrel (`rk_b<c>`: the distance and LOS by `bl_mon10`, damage_barrel
     blaming the player). The pool window's thing and leaf are kept across it (a kill's drop links through the window).
+
+M8 (`fog`, a map with a WR teleport; doomfj.teleport's TELEPORT FOG, combat._spawn_fx(kind="fog")): MT_TFOG shares
+the EFFECTS pool. `tf_spawn` (stl.fcall tf_spawn, fx_sret; fxs_x / fxs_y the whole-unit position, fxs_kind FOG) takes
+the lowest FREE slot only (full: skipped); fx_spawn_leaf's fog branch sets S_TFOG and its 6 tics at the position with
+no draw (P_SpawnMobj rolls nothing). A FOG YIELDS: fx_spawn (blood, a puff) takes the lowest slot that is free or holds
+a fog -- a fog slot is unlinked (`fx_ev<s>`: pw_unlink on its row) and re-spawned. A slot holds a fog exactly when
+fx_st's high nibble is 0xE or 0xF (MT_TFOG's states are 0xEA .. 0xF5; every other pool state is below 0xE0:
+check_model_rules). pool_tic walks S_TFOG .. S_TFOG10 through pjst like any pool state.
 """
 from typing import Dict, List, Tuple
 
@@ -119,26 +127,27 @@ def _rocket():
     return ROCKET_INFO
 
 
-def pool_states(puffs: bool = False, rockets: bool = False) -> List[str]:
+def pool_states(puffs: bool = False, rockets: bool = False, fog: bool = False) -> List[str]:
     """every state a fireball or a blood splat can be in: the fireball's flight loop and death, the three blood
     states (combat._spawn_fx's S_BLOOD1 and the two it may jump to). M7 P6 (`puffs`, the player mode "full": the
     shot on a barrel, doomfj.barrelcode): the PUFF's four states S_PUFF1..4 too, after them. P9 (`rockets`): the
-    ROCKET's flight state and its explosion, last"""
+    ROCKET's flight state and its explosion. M8 (`fog`): the TELEPORT FOG's twelve, last"""
     info = _info()
     out = []
     for s in (chain(info.spawnstate) + chain(info.deathstate) + chain("S_BLOOD1")
               + (chain("S_PUFF1") if puffs else [])
-              + ((chain(_rocket().spawnstate) + chain(_rocket().deathstate)) if rockets else [])):
+              + ((chain(_rocket().spawnstate) + chain(_rocket().deathstate)) if rockets else [])
+              + (chain(FOG_STATE) if fog else [])):
         if s not in out:
             out.append(s)
     return out
 
 
-def pjst_values(puffs: bool = False, rockets: bool = False) -> List[int]:
+def pjst_values(puffs: bool = False, rockets: bool = False, fog: bool = False) -> List[int]:
     """`pjst[state]`: P_SetMobjState's step in one lookup -- the next state's index (nibbles 0-1) and ITS tics
     (nibble 2); S_NULL reads 0 (the slot is freed)"""
-    vals = [0] * (max(_sidx(s) for s in pool_states(puffs, rockets)) + 1)
-    for s in pool_states(puffs, rockets):
+    vals = [0] * (max(_sidx(s) for s in pool_states(puffs, rockets, fog)) + 1)
+    for s in pool_states(puffs, rockets, fog):
         nxt = gd.STATES[s].next
         vals[_sidx(s)] = 0 if nxt == gd.S_NULL else _sidx(nxt) | (_tics(nxt) << 8)
     return vals
@@ -181,11 +190,19 @@ def momentum_values(rm, info=None) -> List[Tuple[int, int]]:
     return [(s32(sp * s32(rm._finecos_idx(i))), s32(sp * s32(rm._finesin_idx(i)))) for i in range(rm.cfg.TRIG_N)]
 
 
-def check_model_rules(puffs: bool = False, rockets: bool = False) -> None:
+def check_model_rules(puffs: bool = False, rockets: bool = False, fog: bool = False) -> None:
     from doomfj.combat import FX_STEP
     info = _info()
     assert _sidx(gd.S_NULL) == 0, "pool_tic reads the next state 0 as S_NULL"
-    for s in pool_states(puffs, rockets):
+    if fog:                                                                # M8: the teleport fog's own rules
+        from doomfj.combat import FOG_STATES
+        assert puffs, "M8: the fog rides the game tier's effects pool (fxs_kind: the puffs' argument)"
+        fogs = chain(FOG_STATE)
+        assert set(fogs) == FOG_STATES and all(_sidx(s) >= FOG_MIN for s in fogs), fogs
+        others = chain("S_BLOOD1") + chain("S_PUFF1")
+        assert all(_sidx(s) < FOG_MIN for s in others), "fx_spawn tells a fog slot by fx_st's high nibble"
+        assert all(gd.STATES[s].action is None and gd.STATES[s].next in fogs + [gd.S_NULL] for s in fogs)
+    for s in pool_states(puffs, rockets, fog):
         assert 0 < _tics(s) < 15 and _sidx(s) < 256, (s, _tics(s))
         # no action runs in a pool state -- but (P9) the rocket's death state's A_Explode, which pj_explode runs
         # (`rk_blast`): no pool state's NEXT is it, so pool_tic never enters it
@@ -286,7 +303,10 @@ PERSIST = tuple(f for f, _ in PJ_FIELDS + FX_FIELDS) + ("rng_fx",)
 ARG_DECLS = ["fxs_x: hex.vec 4", "fxs_y: hex.vec 4", "fxs_dmg: hex.vec 2"]
 # M7 P6 (`puffs`): what fx_spawn spawns -- 0 blood (by fxs_dmg), 1 a puff, 2 the FIST's puff (S_PUFF3: combat._spawn_fx,
 # "don't make punches spark on the wall")
-FX_KINDS = {"blood": 0, "puff": 1, "fistpuff": 2}
+FX_KINDS = {"blood": 0, "puff": 1, "fistpuff": 2, "fog": 3}          # M8: "fog", tf_spawn's (a map with a teleport)
+FOG_STATE = "S_TFOG"                       # M8: MT_TFOG's spawn state (gamedata)
+FOG_MIN = 0xE0                             # M8: every fog state's index is >= this, every other pool state's below
+FOG_FLAGS = (1 << 0xE) | (1 << 0xF)        # M8: hex.if_flags on fx_st's high nibble: a fog slot
 PUFF_ARG_DECLS = ["fxs_kind: hex.vec 1"]
 WINDOW_DECLS = ["pw_act: hex.vec 1", "pw_x: hex.vec 8", "pw_y: hex.vec 8", "pw_mx: hex.vec 8", "pw_my: hex.vec 8",
                 "pw_st: hex.vec 2", "pw_ti: hex.vec 1", "pw_t: hex.vec w/4", "pw_leaf: hex.vec w/4",
@@ -726,19 +746,34 @@ def pool_tic_lines(knock: bool = False) -> List[str]:
             "    stl.fret pt_ret"]
 
 
-def fx_lines(*, nt: int, fxn: int = None, exit_guard: bool = True, puffs: bool = False) -> List[str]:
+def fx_lines(*, nt: int, fxn: int = None, exit_guard: bool = True, puffs: bool = False,
+             fog: bool = False) -> List[str]:
     """fx_spawn (+ its stubs), fx_spawn_leaf, fx_phase (+ its stubs); pool_tic is `pool_tic_lines`'. Blood slot s is
     thing nt + FIREBALL_POOL + s. M7 P6 (`puffs`): fx_spawn reads `fxs_kind` (FX_KINDS) -- a puff is S_PUFF1 with
     its tics roll, the fist's then jumps to S_PUFF3 (a P_SetMobjState resetting the tics just rolled); blood as
-    before, by fxs_dmg"""
+    before, by fxs_dmg. M8 (`fog`; the module docstring): tf_spawn, the fog branch, and A FOG YIELDS in fx_spawn"""
     from doomfj.combat import FX_STEP
     P, Q = _pool_sizes()
     fxn = Q if fxn is None else fxn
+    assert not fog or puffs, "M8: the fog rides fxs_kind (the puffs' argument)"
     b1, b2, b3 = "S_BLOOD1", gd.STATES["S_BLOOD1"].next, gd.STATES[gd.STATES["S_BLOOD1"].next].next
     assert (b2, b3) == ("S_BLOOD2", "S_BLOOD3")
     out = ["fx_spawn:"]
-    out += ["    hex.if0 1, fx_act + %d*dw, fx_sp%d" % (s, s) for s in range(fxn)]
+    for s in range(fxn):
+        out += ["    hex.if0 1, fx_act + %d*dw, fx_sp%d" % (s, s)]
+        if fog:                                     # M8: a fog yields its slot to blood or a puff
+            out += ["    hex.if_flags fx_st + %d*dw, %d, fx_q%d, fx_ev%d" % (2 * s + 1, FOG_FLAGS, s, s),
+                    "  fx_q%d:" % s]
     out += ["  fx_skip:", "    stl.fret fx_sret"]                        # full: skipped, no draw
+    if fog:
+        # M8: the fog's spawn -- a FREE slot only; and the yield: the fog's row out of its leaf, then the spawn
+        out += ["tf_spawn:"] + ["    hex.if0 1, fx_act + %d*dw, fx_sp%d" % (s, s) for s in range(fxn)]
+        out += ["    stl.fret fx_sret"]
+        for s in range(fxn):
+            t = nt + P + s
+            out += ["  fx_ev%d:" % s, "    hex.set w/4, pw_t, %d" % t, "    hex.zero w/4, pw_leaf",
+                    "    hex.mov 3, pw_leaf, thss_rt + %d*dw" % (16 * t), "    stl.fcall pw_unlink, pw_ulret",
+                    "    ;fx_sp%d" % s]
     for s in range(fxn):
         t = nt + P + s
         out += ["  fx_sp%d:" % s, "    hex.set w/4, pw_t, %d" % t, "    stl.fcall fx_spawn_leaf, fx_lret"]
@@ -746,7 +781,17 @@ def fx_lines(*, nt: int, fxn: int = None, exit_guard: bool = True, puffs: bool =
     dirs = [gd.DI_EAST, gd.DI_NORTHEAST, gd.DI_NORTH, gd.DI_NORTHWEST, gd.DI_WEST, gd.DI_SOUTHWEST, gd.DI_SOUTH,
             gd.DI_SOUTHEAST]
     assert sorted(dirs) == list(range(8))
-    out += ["fx_spawn_leaf:",
+    out += ["fx_spawn_leaf:"]
+    if fog:                                         # M8: a fog at (fxs_x, fxs_y): S_TFOG, its tics, no draw
+        out += ["    hex.if_flags fxs_kind, %d, fx_nfog, fx_fog" % (1 << FX_KINDS["fog"]),
+                "  fx_fog:",
+                "    hex.zero 4, pw_x", "    hex.mov 4, pw_x + 4*dw, fxs_x",
+                "    hex.zero 4, pw_y", "    hex.mov 4, pw_y + 4*dw, fxs_y",
+                "    hex.set 1, pw_act, 1",
+                "    hex.set 2, pw_st, %d" % _sidx(FOG_STATE), "    hex.set 1, pw_ti, %d" % _tics(FOG_STATE),
+                "    ;fx_pos",
+                "  fx_nfog:"]
+    out += [
             # the octant of (player - target), the integer offsets mm_octant reads (world.octant_of)
             "    hex.mov 4, mt_dx, viewx + 4*dw", "    hex.sub 4, mt_dx, fxs_x",
             "    hex.mov 4, mt_dy, viewy + 4*dw", "    hex.sub 4, mt_dy, fxs_y",
@@ -810,9 +855,9 @@ def fx_lines(*, nt: int, fxn: int = None, exit_guard: bool = True, puffs: bool =
     return out
 
 
-def tables_fj(puffs: bool = False, rockets: bool = False) -> List[str]:
+def tables_fj(puffs: bool = False, rockets: bool = False, fog: bool = False) -> List[str]:
     return ([generate_dispatch_table_fj("fxrnd", fxrnd_values(), index_nibbles=2, result_nibbles=3),
-             generate_dispatch_table_fj("pjst", pjst_values(puffs, rockets), index_nibbles=2, result_nibbles=3)]
+             generate_dispatch_table_fj("pjst", pjst_values(puffs, rockets, fog), index_nibbles=2, result_nibbles=3)]
             + ([generate_dispatch_table_fj("rkdmg", rkdmg_values(), index_nibbles=2, result_nibbles=2)]
                if rockets else []))
 
@@ -832,7 +877,7 @@ def restart_lines(pool: int = None, fxn: int = None, *, nt: int) -> List[str]:
 
 
 def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs: bool = False,
-               knock: bool = False, fight: bool = False, slot_rt=None, rockets: bool = False) -> dict:
+               knock: bool = False, fight: bool = False, slot_rt=None, rockets: bool = False, fog: bool = False) -> dict:
     """everything P5's pools add, for the World `w`:
       * `decls`: pool_decls() (an empty pool, rng_fx at its seed);
       * `lines`: pj_* / pool_tic / fx_* -- leaves (each ends in a fret), placed where nothing falls in;
@@ -847,12 +892,13 @@ def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs:
     `fight` (M7 P8a I; `slot_rt[m]` slot m's runtime thing): the aim at the target, the things after the player --
     the program must hold monsterdecide's fight parts and damagecode's dm_go. `rockets` (P9): the player's rocket
     (`rk_spawn`, its things, its blast `rk_blast`) -- the program must then hold barrelcode's rocket entry
-    (barrel_parts(rockets=True): bl_leaf's bl_dyn, bl_mon10), knockcode's kb_pz and monstersight's sl_far."""
-    check_model_rules(puffs, rockets)
+    (barrel_parts(rockets=True): bl_leaf's bl_dyn, bl_mon10), knockcode's kb_pz and monstersight's sl_far. `fog` (M8,
+    a map with a WR teleport): the TELEPORT FOG in the effects pool (tf_spawn: teleportcode's fire branches call it)."""
+    check_model_rules(puffs, rockets, fog)
     cells, root = missile_cells_fj(w, pfx)
     ft = fight_things(w, slot_rt) if fight else None
     return {"decls": pool_decls(puffs=puffs) + (pt_decls(ft) if fight else []) + (ROCKET_DECLS if rockets else []),
             "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard, knock=knock, fight=ft, rockets=rockets)
-            + pool_tic_lines(knock) + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs)
+            + pool_tic_lines(knock) + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs, fog=fog)
             + (rocket_blast_lines(w) if rockets else []), "cells": cells, "root": root,
-            "tables": tables_fj(puffs, rockets), "restart": restart_lines(nt=nt), "persist": PERSIST}
+            "tables": tables_fj(puffs, rockets, fog), "restart": restart_lines(nt=nt), "persist": PERSIST}

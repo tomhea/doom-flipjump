@@ -154,9 +154,11 @@ def _state_chain(start: str) -> Tuple[str, ...]:
 
 
 ROCKET_STATES = frozenset(_state_chain(ROCKET_INFO.spawnstate) + _state_chain(ROCKET_INFO.deathstate))
+FOG_STATES = frozenset(_state_chain(gd.MOBJINFO["MT_TFOG"].spawnstate))      # M8: the teleport fog's
 BARREL_INFO = gd.MOBJINFO["MT_BARREL"]
 BARREL_R = BARREL_INFO.radius >> 16         # 10
 BARREL_HEALTH_MIN = -128                    # bar_health saturates here (an 8-bit signed cell)
+MON_HEALTH_MIN = -(1 << 11)                 # M8: mon_health saturates here (a 12-bit signed cell; the telefrag's 10000)
 BOMB_DAMAGE = 128                           # A_Explode: P_RadiusAttack (thing, target, 128)
 PLAYER_INFO = gd.MOBJINFO["MT_PLAYER"]
 PLAYER_R = gd.PLAYERRADIUS >> 16            # 16
@@ -1006,7 +1008,10 @@ class CombatMixin:
             return
         if self._p_knock:                         # M7 P8a: DOOM's order -- the thrust, then the health
             self._thrust(("mon", m), inflictor, source, dmg)
-        ws.mon_health[m] -= dmg
+        # M8 (the telefrag's 10000): the health is held at the 12-bit cell's floor, as a barrel's at BARREL_HEALTH_MIN --
+        # no other damage reaches it (every hit is <= 255 on a health <= 2047), and the floor is below every
+        # -spawnhealth, so the gib test reads what DOOM's would
+        ws.mon_health[m] = max(ws.mon_health[m] - dmg, MON_HEALTH_MIN)
         if ws.mon_health[m] <= 0:
             self._kill_monster(m, ev)
             return
@@ -1346,7 +1351,7 @@ class CombatMixin:
         if not rm.try_move(self.scene_c, x, y, cx, cy, height=height):
             return False
         ws.px, ws.py = cx, cy
-        self._walkover(x, y, cx, cy)
+        self._walkover(x, y, cx, cy, ev)
         return True
 
     def _player_knock_move(self, ev) -> None:
@@ -1769,11 +1774,31 @@ class CombatMixin:
         ox, oy = FX_STEP[W.octant_of((ws.px >> 16) - x, (ws.py >> 16) - y)]
         self._spawn_fx(kind, (x + ox) << 16, (y + oy) << 16, dmg, melee, ev)
 
+    def _fx_is_fog(self, s: int) -> bool:
+        """M8: effects slot s holds a TELEPORT FOG (its state is one of MT_TFOG's)"""
+        return bool(self.ws.fx_active[s]) and gd.STATE_NAMES[self.ws.fx_state[s]] in FOG_STATES
+
     def _spawn_fx(self, kind: str, x16: int, y16: int, dmg: int, melee: bool, ev) -> None:
+        """P_SpawnPuff / P_SpawnBlood (kind "puff" / "blood") and, M8, EV_Teleport's MT_TFOG (kind "fog": S_TFOG at
+        (x16, y16) with its 6 tics, no P_Random) into the effects pool. M8's A FOG YIELDS (doomfj.teleport): a fog
+        takes only a free slot; blood or a puff takes the first slot that is free OR holds a fog, removing the fog"""
         ws = self.ws
-        slot = next((s for s in range(_W().FX_POOL) if not ws.fx_active[s]), None)
+        fog = kind == "fog"
+        slot = next((s for s in range(_W().FX_POOL)
+                     if not ws.fx_active[s] or (not fog and self._fx_is_fog(s))), None)
         if slot is None:
             ev.fx_skipped += 1
+            return
+        if ws.fx_active[slot]:                           # M8: a fog yields its slot (P_RemoveMobj)
+            self._list_remove(self._mobile_fx(slot), ws.fx_leaf[slot])
+        if fog:
+            ws.fx_active[slot] = 1
+            ws.fx_state[slot], ws.fx_tics[slot] = gd.STATE_INDEX["S_TFOG"], gd.STATES["S_TFOG"].tics
+            ws.fx_x[slot], ws.fx_y[slot] = x16, y16
+            leaf = self._leaf16(x16, y16)
+            ws.fx_leaf[slot] = leaf
+            self._list_insert(self._mobile_fx(slot), leaf)
+            ev.fx_spawns.append((slot, kind))
             return
         first = "S_PUFF1" if kind == "puff" else "S_BLOOD1"
         ws.fx_active[slot] = 1
@@ -1923,13 +1948,14 @@ class CombatMixin:
                 continue
             if rmod.try_move(self.scene_c, x, y, cx, cy):
                 ws.px, ws.py = cx, cy
-                self._walkover(x, y, cx, cy)
+                self._walkover(x, y, cx, cy, ev)
                 return
 
-    def _walkover(self, x: int, y: int, cx: int, cy: int) -> None:
+    def _walkover(self, x: int, y: int, cx: int, cy: int, ev=None) -> None:
         """M7 P2a.1 -- P_CrossSpecialLine for the walk-over doors (W1 open-stay): an accepted move that
         crosses an unfired trigger (`doomfj.doors.crossed`) fires it, once, and asks its door for a
-        press on the next door tic (`d_monreq`, the monsters' convention)."""
+        press on the next door tic (`d_monreq`, the monsters' convention). M8: `ev` the tic's events (a teleport's
+        telefrag and fog record there; None: a throwaway record)."""
         ws = self.ws
         for k, trig in enumerate(self.walk_triggers):
             if not ws.w_fired[k] and crossed(trig, (x, y), (cx, cy), PLAYER_R):
@@ -1942,24 +1968,32 @@ class CombatMixin:
             if _crossed_shape(shape, (x, y), (cx, cy), PLAYER_R):
                 self.floor_fire(g)
         if self.teleports:                            # M8 L4: the WR teleports -- LAST (they move him)
-            self._teleport_player(x, y, cx, cy)
+            self._teleport_player(x, y, cx, cy, ev)
 
     def _reacting(self) -> bool:
         """M8 L4: the player's reactiontime is running (a level with a teleporter only: `p_reaction` exists there)"""
         return bool(self.teleports) and self.ws.p_reaction > 0
 
-    def _teleport_player(self, x: int, y: int, cx: int, cy: int) -> None:
+    def _teleport_player(self, x: int, y: int, cx: int, cy: int, ev=None) -> None:
         """M8 L4 (doomfj.teleport): EV_Teleport for the player after his accepted move (x, y) -> (cx, cy), 16.16 -- the
-        first teleport line crossed from its front (line order; one per move) and, unless a shootable thing stands at
-        the destination (NO TELEFRAG: refused as a monster's is), the destination: position, angle, knock momentum 0,
-        reactiontime 18. The fj: teleportcode.player_lines (after the walk-over lines, `after_accept`)"""
-        from doomfj.teleport import REACTION_TICS, crossed_front, stomped
+        first teleport line crossed from its front (line order; one per move): P_TeleportMove's TELEFRAG (every
+        shootable thing at the destination takes TELEFRAG_DAMAGE from him -- the inflictor and the source, where the
+        move left him -- in `stomp_victims`' order), then the destination: position, angle, knock momentum 0,
+        reactiontime 18. The fj: teleportcode.player_lines (after the walk-over lines, `after_accept`) and its stomp
+        leaf's kills"""
+        from doomfj.teleport import REACTION_TICS, TELEFRAG_DAMAGE, crossed_front, stomp_victims
         ws = self.ws
+        ev = _W().TicEvents(0) if ev is None else ev
         for tel in self.teleports:
             if not crossed_front(tel, (x, y), (cx, cy), PLAYER_R):
                 continue
-            if stomped(self, tel.dest, PLAYER_R):
-                return
+            me = ("player", -1)                       # PIT_StompThing: tmthing is the inflictor AND the source
+            for kind, i in stomp_victims(self, tel.dest, PLAYER_R):
+                if kind == "mon":
+                    self.damage_monster(i, TELEFRAG_DAMAGE, me, me, ev)
+                else:
+                    self.damage_barrel(i, TELEFRAG_DAMAGE, me, ev)
+            self._teleport_fogs(tel, cx >> 16, cy >> 16, ev)
             ws.px, ws.py = tel.dest[0] << 16, tel.dest[1] << 16
             ws.pangle = tel.angle
             ws.p_reaction = REACTION_TICS
@@ -1967,6 +2001,16 @@ class CombatMixin:
                 ws.p_momx = ws.p_momy = 0
             self._teleported = True
             return
+
+    def _teleport_fogs(self, tel, x: int, y: int, ev) -> None:
+        """M8 (doomfj.teleport, its TELEPORT FOG): EV_Teleport's two MT_TFOG after a teleport that happened -- at the
+        thing's position after its move (whole units x, y), then ahead of the destination (Teleporter.fog) -- on a
+        map and mode where `fog_on`. The fj: teleportcode's fire branches (projcode's tf_spawn)"""
+        from doomfj.teleport import fog_on
+        if not fog_on(self):
+            return
+        self._spawn_fx("fog", x << 16, y << 16, 0, False, ev)
+        self._spawn_fx("fog", tel.fog[0] << 16, tel.fog[1] << 16, 0, False, ev)
 
     def _solid_thing_at(self, x16: int, y16: int):
         """PIT_CheckThing's refusal for the player's box at (x16, y16): the first solid monster,

@@ -77,9 +77,12 @@ B0 on its set, gamespeed, msframe, rebuild).
 - The computer map is picked up and does nothing (there is no automap).
 - Deathmatch / co-op starts and things are ignored (single player only, as E1M1).
 - The scrolling wall (48, two lines): decided in L5 -- animated if cheap, else static.
-- The teleporters (97, L4; `doomfj.teleport` holds the rules and these decisions): NO TELEPORT FOG and no sound (nothing
-  reads them); NO TELEFRAG -- DOOM's player kills every shootable thing at the destination, here his teleport is
-  refused there exactly as a monster's is (P_TeleportMove's stomp for a monster), in both mirrors; ONE TELEPORT PER MOVE
+- The teleporters (97, L4; `doomfj.teleport` holds the rules and these decisions): no sound. M8 (the owner,
+  2026-10-18): the TELEFRAG is DOOM's -- the player's teleport kills every shootable monster at the destination
+  (P_DamageMobj 10000 from him: thrust, health held at the 12-bit floor -2048, gib / death, drop, kill count; a
+  monster's teleport is still refused there), and the TELEPORT FOG is in: two MT_TFOG per teleport (where the mover
+  stood, and 20 units ahead of the destination) through the two-slot EFFECTS POOL, drawn on the floor -- A FOG YIELDS
+  (blood and puffs take a fog's slot; a fog takes only a free one), so blood and puffs behave as before; ONE TELEPORT PER MOVE
   (asserted exact on E1M2: no destination lies within any teleport line's reach). Kept DOOM's: the front side only,
   WR (every crossing), monsters and sliding corpses teleport, the destination's angle (a monster's facing octant),
   floorz from the destination sector, momentum 0, the player's 18-tic reactiontime (no turn, no walk).

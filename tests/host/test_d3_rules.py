@@ -76,12 +76,13 @@ def test_each_mobile_ranks_by_its_pool():
     from doomfj.combat import ROCKET_INFO
     fire = chain(_info().spawnstate) + chain(_info().deathstate)
     fire += chain(ROCKET_INFO.spawnstate) + chain(ROCKET_INFO.deathstate)  # P9: the player's rocket, the same pool
-    fx = chain("S_BLOOD1") + chain("S_PUFF1")
+    fx = chain("S_BLOOD1") + chain("S_PUFF1") + chain("S_TFOG")             # M8: the teleport fog, the same pool
     assert fire and fx and not set(fire) & set(fx)
     assert {mobile_rank(mobile_lump(s)) for s in fire} == {1}
     assert {mobile_rank(mobile_lump(s)) for s in fx} == {0}
     assert {mobile_lump(s)[:4] for s in fire + fx} == set(MOBILE_RANK)
     assert mobile_rank("CLIPA0", 0) == 0 and mobile_rank("SHOTA0", 0) == 0 and mobile_rank("BAL1A0", None) == 1
+    assert mobile_rank("TFOGA0", 0) == 0                                      # M8: the fog stands on the floor, rank 0
     with pytest.raises(AssertionError, match="no pool rank"):
         mobile_rank("CLIPA0")                    # an item that is not a drop has no mobile pool
     assert gd.STATES["S_BLOOD1"].sprite == "BLUD"

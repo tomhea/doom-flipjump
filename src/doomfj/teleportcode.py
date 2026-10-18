@@ -17,15 +17,28 @@ THE PIECES (each spliced by the emitter where the model runs the rule):
     facing in `tp_fa` with `tp_hit` 1 for the slot's write-back.
   * `slot_back_lines(m, ...)` -- per slot, after its move (monstercode.p32b_move_lines) or its knock move (the stub
     kbs<m>): tp_hit -> the facing, and on the walk the knock momentum and the position's fraction 0, tp_hit 0.
-  * `stomp_leaf_lines(slots)` -- `tp_stomp` (stl.fcall tp_stomp, tp_sret): PIT_StompThing's refusal at (tp_dx,
-    tp_dy) for radius tp_r: a SHOOTABLE monster's box (mon_shootable: active, alive) and, with tp_pl 1, the living
-    player's -> tp_blk 1. The mover's own slot is not skipped: teleport.check_one_per_move proves it is never near a
-    destination. The barrels: none can be (asserted at emit time, `check_barrels`).
+  * `stomp_leaf_lines(slots)` -- `tp_stomp` (stl.fcall tp_stomp, tp_sret): PIT_StompThing at (tp_dx, tp_dy) for
+    radius tp_r over every SHOOTABLE monster's box (mon_shootable: active, alive) in slot order and, with tp_pl 1 (a
+    MONSTER teleporting), the living player's: a monster's teleport is REFUSED by the first (tp_blk 1); the PLAYER's
+    (tp_pl 0) TELEFRAGS each (`tp_frag`: damagecode's dm_go in its TELEFRAG mode, kb_tf 1 for the thrust) and is never
+    refused -- combat._teleport_player's `stomp_victims` loop. The mover's own slot is not skipped:
+    teleport.check_one_per_move proves it is never near a destination. The barrels: none can be (asserted at emit
+    time, `check_barrels`).
   * `decls()`, `level_start_lines()` (the restart block's), PERSIST, `map_persist`: the persisted `p_rct` (0 at the
     level start and the restart) and the scratch.
+  * M8 THE TELEPORT FOG (`_fog_lines`, in every fire branch after its stomp -- a teleport that happened): projcode's
+    `tf_spawn` twice, at the mover's whole-unit position after its move (the regs' new x / y, nibbles 4-7) and at the
+    destination's fog (Teleporter.fog) -- combat._teleport_fogs. In a monster's branch before ptss is set: the
+    spawn's point location writes ptss.
 
 The fire of one teleporter is ONE move's: the tests run in line order and the first front crossing decides -- a
-refused (stomped) teleport ends the tests too (the model's `break`).
+refused (stomped) monster teleport ends the tests too (the model's `break`).
+
+THE REGISTERS a telefrag's dm_go touches inside the move it runs in: dm_leaf's window (dm_*), the thrust's (kb_tx ..
+kb_rr, kb_vx / kb_vy -- the victim's momentum through kbt<m> / kb_gm), drop_link's (dr_*, pw_t / pw_leaf), st_kill.
+In the walk's after_accept none is live; in the knock move's (kb_ptry) kb_vx / kb_vy are, and the fire zeroes them
+after the stomp (the teleport stops the momentum), kb_px / kb_py set from the destination; kb_xm / kb_ym (the move
+left), kb_who, kb_dead and kb_ht are not touched.
 """
 from __future__ import annotations
 
@@ -43,7 +56,8 @@ def decls() -> List[str]:
     return [f"p_rct: hex.vec {REACTION_NIBBLES}, 0",
             "tp_c: hex.vec 8", "tp_dx: hex.vec 4", "tp_dy: hex.vec 4", "tp_r: hex.vec 2", "tp_pl: hex.vec 1",
             "tp_blk: hex.vec 1", "tp_hit: hex.vec 1", "tp_fa: hex.vec 1", "tp_a: hex.vec 4", "tp_b20: hex.vec 4",
-            "tp_b30: hex.vec 4", "tp_e: hex.vec 8", "tp_g: hex.vec 8", "tp_bp: hex.vec 8", "tp_sret: hex.vec w/4"]
+            "tp_b30: hex.vec 4", "tp_e: hex.vec 8", "tp_g: hex.vec 8", "tp_bp: hex.vec 8", "tp_sret: hex.vec w/4",
+            "tp_fret: hex.vec w/4", "kb_tf: hex.vec 1"]          # M8: the telefrag's return, its thrust flag
 
 
 def map_persist(map_wad, mapname: str) -> tuple:
@@ -92,19 +106,33 @@ def cross_front_lines(p: str, tel, radius: int, regs: Sequence[str], fire: str) 
 
 
 def _stomp_call(tel, radius_lines: List[str], player: int, end: str) -> List[str]:
+    """the stomp at `tel`'s destination: a monster's (`player` 1: the living player tested too) refused on a hit; the
+    player's (0) telefrags and goes on"""
     dx, dy = tel.dest
     return [f"    hex.set 4, tp_dx, {dx & 0xFFFF:#x}", f"    hex.set 4, tp_dy, {dy & 0xFFFF:#x}",
             *radius_lines, f"    hex.set 1, tp_pl, {player}",
             "    stl.fcall tp_stomp, tp_sret",
-            f"    hex.if1 1, tp_blk, {end}"]
+            *([f"    hex.if1 1, tp_blk, {end}"] if player else [])]
+
+
+def _fog_lines(x_cell: str, y_cell: str, tel) -> List[str]:
+    """M8: EV_Teleport's two fogs -- at (x_cell, y_cell) (4-nibble whole units), then at tel.fog"""
+    from doomfj.projcode import FX_KINDS
+    fx, fy = tel.fog
+    return [f"    hex.mov 4, fxs_x, {x_cell}", f"    hex.mov 4, fxs_y, {y_cell}",
+            f"    hex.set 1, fxs_kind, {FX_KINDS['fog']}",
+            "    stl.fcall tf_spawn, fx_sret",
+            f"    hex.set 4, fxs_x, {fx & 0xFFFF:#x}", f"    hex.set 4, fxs_y, {fy & 0xFFFF:#x}",
+            "    stl.fcall tf_spawn, fx_sret"]
 
 
 def player_lines(tels, *, prefix: str, knock_cells: bool, knock_ctx: bool = False,
                  regs=("cm_ox", "cm_oy", "viewx", "viewy")) -> List[str]:
     """combat._teleport_player after an accepted move (regs, 16.16): the first teleporter crossed from its front --
-    unless a monster stands at its destination (tp_stomp, the player himself untested) -- puts the player there:
-    viewx / viewy, viewangle, p_rct = 18, and (`knock_cells`: knockback is on) his knock momentum 0. `knock_ctx`: the
-    knock move's copy -- the loop's position (kb_px, kb_py) is the destination and its momentum (kb_vx, kb_vy) 0"""
+    TELEFRAGGING every shootable monster at its destination (tp_stomp with tp_pl 0: the player himself untested) --
+    puts the player there: viewx / viewy, viewangle, p_rct = 18, and (`knock_cells`: knockback is on) his knock
+    momentum 0. `knock_ctx`: the knock move's copy -- the loop's position (kb_px, kb_py) is the destination and its
+    momentum (kb_vx, kb_vy) 0 (after the stomp: a telefrag's thrust runs through kb_vx / kb_vy)"""
     from doomfj.combat import PLAYER_R
     check_one_per_move(tels)
     end = f"{prefix}_end"
@@ -116,6 +144,7 @@ def player_lines(tels, *, prefix: str, knock_cells: bool, knock_ctx: bool = Fals
         X, Y = (tel.dest[0] << 16) & M32, (tel.dest[1] << 16) & M32
         out += [f"  {prefix}_f{k}:",
                 *_stomp_call(tel, [f"    hex.set 2, tp_r, {PLAYER_R}"], 0, end),
+                *_fog_lines(f"{regs[2]} + 4*dw", f"{regs[3]} + 4*dw", tel),       # M8: the fogs
                 f"    hex.set 8, viewx, {X:#x}", f"    hex.set 8, viewy, {Y:#x}",
                 f"    hex.set 8, viewangle, {tel.angle & M32:#x}",
                 f"    hex.set {REACTION_NIBBLES}, p_rct, {REACTION_TICS}",
@@ -149,6 +178,7 @@ def monster_lines(tels, *, prefix: str, knock_ctx: bool = False,
         assert 0 <= tel.dest_leaf < 16 ** 3, tel.dest_leaf
         out += [f"  {prefix}_f{k}:",
                 *_stomp_call(tel, ["    hex.zero 2, tp_r", "    hex.mov 2, tp_r, mm_r"], 1, end),
+                *_fog_lines(f"{regs[2]} + 4*dw", f"{regs[3]} + 4*dw", tel),       # M8: the fogs (before ptss)
                 f"    hex.set 4, mm_nx, {dx & 0xFFFF:#x}", f"    hex.set 4, mm_ny, {dy & 0xFFFF:#x}",
                 f"    hex.set 8, cp_floor, {tel.dest_floor & M32:#x}",
                 "    hex.zero w/4, ptss", f"    hex.set 3, ptss, {tel.dest_leaf:#x}",
@@ -173,10 +203,14 @@ def slot_back_lines(m: int, *, facing: str, knock: bool, walk: bool, tag: str) -
             f"  {skip}:"]
 
 
-def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True) -> List[str]:
-    """`tp_stomp`, jumping over itself: tp_blk = 1 when a shootable monster's box (`slots`: [(runtime thing, radius)]
-    per slot; mon_shootable) overlaps the destination (tp_dx, tp_dy) for radius tp_r -- |thing - dest| < r + r',
-    strict, whole units -- or, with tp_pl 1, the living player's (`hurt`: p_dead is not shootable), 16.16"""
+def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True, knock: bool = True) -> List[str]:
+    """`tp_stomp`, jumping over itself: PIT_StompThing at the destination (tp_dx, tp_dy) for radius tp_r over each
+    shootable monster's box (`slots`: [(runtime thing, radius)] per slot -- slot j is dm_go's id j + 1;
+    mon_shootable) -- |thing - dest| < r + r', strict, whole units -- and, with tp_pl 1, the living player's (`hurt`:
+    p_dead is not shootable), 16.16. tp_pl 1 (a monster teleporting): the first hit sets tp_blk 1 and returns. tp_pl 0
+    (the player): each hit is a TELEFRAG -- `tp_frag` (dm_go, dm_melee TELEFRAG; `knock`: kb_tf 1 around it) -- and
+    the loop goes on; tp_blk stays 0"""
+    from doomfj.damagecode import TELEFRAG
     from doomfj.combat import PLAYER_R
     from doomfj.monstermove import _add_const
     out = [";tp_stomp_end", "tp_stomp:",
@@ -193,7 +227,11 @@ def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True) -> List[str]:
                 f"  tp_s{j}_y:",
                 f"    hex.mov 4, tp_a, thpos_rt + {16 * t + 12}*dw",
                 "    hex.sub 4, tp_a, tp_dy", "    hex.abs 4, tp_a",
-                f"    hex.scmp 4, tp_a, {bd}, tp_stk, {nj}, {nj}",
+                f"    hex.scmp 4, tp_a, {bd}, tp_s{j}_h, {nj}, {nj}",
+                f"  tp_s{j}_h:",                                             # a hit: refused, or a telefrag
+                "    hex.if1 1, tp_pl, tp_stk",
+                f"    hex.set 2, dm_id, {j + 1}",
+                "    stl.fcall tp_frag, tp_fret",
                 f"  {nj}:"]
     out += ["    hex.if0 1, tp_pl, tp_out"]
     out += (["    hex.if1 1, p_dead, tp_out"] if hurt else [])
@@ -204,6 +242,13 @@ def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True) -> List[str]:
                 f"    hex.scmp 8, tp_g, tp_bp, tp_pl{ax}, tp_out, tp_out", f"  tp_pl{ax}:"]
     out += ["  tp_stk:", "    hex.set 1, tp_blk, 1",
             "  tp_out:", "    stl.fret tp_sret",
+            # M8: the telefrag of slot dm_id - 1 -- P_DamageMobj(thing, player, player, 10000)
+            "tp_frag:",
+            f"    hex.set 1, dm_melee, {TELEFRAG}",
+            *(["    hex.set 1, kb_tf, 1"] if knock else []),
+            "    stl.fcall dm_go, dm_ret",
+            *(["    hex.zero 1, kb_tf"] if knock else []),
+            "    stl.fret tp_fret",
             "tp_stomp_end:"]
     return out
 

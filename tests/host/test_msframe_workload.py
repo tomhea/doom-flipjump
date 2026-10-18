@@ -36,9 +36,11 @@ def test_workload_file_is_used_and_tagged(monkeypatch, tmp_path):
 
 def test_plan_script_moves_where_hold_forward_is_stuck(tmp_path):
     out = tmp_path / "w.json"
-    r = subprocess.run([sys.executable, str(ROOT / "scratchpad" / "12m" / "msframe.py"), "--map", "E1M3",
-                        "--frames", "60", "--plan-script", str(out)], capture_output=True, text=True, cwd=str(ROOT),
-                       timeout=900)
+    # E1M3's World lacks two thing types until C6 lands: gen_dryrun's `unknown-things` stand-in drops them (the route is
+    # gen 4's, steered on the whole game)
+    r = subprocess.run([sys.executable, str(ROOT / "scratchpad" / "gp" / "gen_dryrun.py"), "--one", "E1M3", "--standin",
+                        "unknown-things", "--", "scratchpad/12m/msframe.py", "--map", "E1M3", "--frames", "60",
+                        "--plan-script", str(out)], capture_output=True, text=True, cwd=str(ROOT), timeout=1500)
     assert r.returncode == 0, r.stdout[-1500:] + r.stderr[-1500:]
     doc = json.loads(out.read_text(encoding="ascii"))
     assert doc["map"] == "E1M3" and len(doc["keys"]) == 60

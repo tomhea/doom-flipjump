@@ -205,12 +205,22 @@ def plan_script(the_map, frames, out):
         nx = rm.step_sim(st0, kd, scene=scene)
         moved += abs(nx.x - st0.x) + abs(nx.y - st0.y) >= 1 << 16
         st0 = nx
+    if GS.tour_gen(the_map) >= 4:                         # gen 4 routes are steered on the whole game: replay there
+        g = GS.GameSim(GS.DEFAULT_WAD, the_map)
+        st, stp = g.reset(), g.step
+    else:
+        scene0 = GS._tour_plan(GS.DEFAULT_WAD, the_map)[0]
+
+        def stp(s, kd):
+            return rm.step_sim(s, kd, scene=scene0)
     for kd in keys:
-        nx = rm.step_sim(st, kd, scene=GS._tour_plan(GS.DEFAULT_WAD, the_map)[0])
+        nx = stp(st, kd)
         fwd += abs(nx.x - st.x) + abs(nx.y - st.y) >= 1 << 16
         st = nx
     doc = {"map": the_map, "status": "DRAFT -- the timed walk msframe.py reads once promoted to %s" % WORKLOAD_FILE,
-           "frames": frames, "rule": "gamespeed._route(0, frames): steered toward the farthest reachable points",
+           "frames": frames,
+           "rule": "gamespeed._route(0, frames): steered toward the farthest reachable points (gen %d)"
+                   % GS.tour_gen(the_map),
            "moved_frames_route": fwd, "moved_frames_hold_forward": moved,
            "keys": [sorted(k for k, v in kd.items() if v) for kd in keys]}
     out = Path(out) if out else None

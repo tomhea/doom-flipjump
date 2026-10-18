@@ -241,7 +241,7 @@ def _waypoints(rm, scene, st, goal, spacing=4):
     return path[::spacing] + [path[-1]]
 
 
-def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
+def _steer(rm, scene, st, waypoints, budget, boxes, in_box, step=None):
     """Drive toward each waypoint HOLDING FORWARD, turning while moving.
 
     ⚠ THIS IS THE WHOLE POINT, and the first route-based attempt got it wrong. `ANGLE_TURN` is
@@ -281,7 +281,7 @@ def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
             del kd["forward"]                   # gen 3b: inside the turning circle -- turn on the spot
         if any(in_box(b, st.x, st.y) for b in boxes):
             kd["use"] = True                    # a player opens the door in front of them
-        nxt = rm.step_sim(st, kd, scene=scene)
+        nxt = rm.step_sim(st, kd, scene=scene) if step is None else step(st, kd)
         if "forward" not in kd or abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
             stuck = 0                           # (gen 3b: a turn on the spot is not a refused step)
         else:
@@ -296,8 +296,19 @@ def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
 
 OPENING_TURN = 3            # frames of turn per seed index, before the route starts
 
+# M8 (gates-ready, gen_dryrun on E1M5): GEN 4 steers CLOSED-LOOP on the whole game (GameSim: monsters block, chase and
+# shoot, things are taken) instead of the static doors-open scene -- what the binary plays. Gen 3b planned and steered
+# blind to the monsters: on E1M5 five of the ten runs pressed forward into one live monster for ~80 frames (63-76%
+# blocked, ending on the same spot); closed-loop, the stuck rule moves on to the next waypoint. E1M1 and E1M2 keep gen
+# 3b: their tours are RECORDED (BINARY_ENDS, scenarios/e1m2/gamespeed.json) and the standing metric's history is theirs.
+TOUR_GEN = {"E1M1": 3, "E1M2": 3}
 
-def _route(seed, n_game, wad, mapname):
+
+def tour_gen(mapname) -> int:
+    return TOUR_GEN.get(mapname.upper(), 4)
+
+
+def _route(seed, n_game, wad, mapname, flip=False):
     """One run: turn to this seed's own opening heading, then tour the destinations.
 
     ⚠ THE OPENING TURN IS WHAT MAKES THE TEN RUNS TEN SAMPLES. Every run starts at the same baked
@@ -314,11 +325,18 @@ def _route(seed, n_game, wad, mapname):
     up to 100 breadth-first searches and did not finish."""
     rm, _scene, sp = _oracle(wad, mapname)
     open_scene, targets, boxes, in_box = _tour_plan(wad, mapname)
-    turn = "turn_left" if seed % 2 else "turn_right"
+    turn = "turn_left" if (seed % 2) != flip else "turn_right"     # `flip`: the other way (a duplicate's retry)
     keys, st = [], sp
+    step = None                                 # gen 3b: the static doors-open scene
+    if tour_gen(mapname) >= 4:                  # gen 4: closed-loop on the whole game, from its level start
+        gsim = GameSim(wad, mapname)
+        st, step = gsim.reset(), gsim.step
+
+    def one(st, kd):
+        return rm.step_sim(st, kd, scene=open_scene) if step is None else step(st, kd)
     for _ in range(min(seed * OPENING_TURN, n_game // 2)):
         kd = {turn: True}
-        st = rm.step_sim(st, kd, scene=open_scene)
+        st = one(st, kd)
         keys.append(kd)
     for k in range(len(targets)):
         if len(keys) >= n_game:
@@ -327,18 +345,26 @@ def _route(seed, n_game, wad, mapname):
         wps = _waypoints(rm, open_scene, st, goal)
         if not wps:
             continue
-        st, more = _steer(rm, open_scene, st, wps, n_game - len(keys), boxes, in_box)
+        st, more = _steer(rm, open_scene, st, wps, n_game - len(keys), boxes, in_box, step)
         if not more:
             continue
         keys += more
+    stalled = False
     while len(keys) < n_game:
         kd = {"forward": True}
-        nxt = rm.step_sim(st, kd, scene=open_scene)
-        if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
+        if step is None:
+            nxt = rm.step_sim(st, kd, scene=open_scene)
+            if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
+                st = nxt
+            else:
+                kd = {turn: True}
+                st = rm.step_sim(st, kd, scene=open_scene)
+        else:                                   # gen 4: a stateful game is stepped once a frame -- forward while it
+            if keys and keys[-1] == {"forward": True} and stalled:     # moves, else turn
+                kd = {turn: True}
+            nxt = step(st, kd)
+            stalled = "forward" in kd and abs(nxt.x - st.x) + abs(nxt.y - st.y) < UNIT
             st = nxt
-        else:
-            kd = {turn: True}
-            st = rm.step_sim(st, kd, scene=open_scene)
         keys.append(kd)
     return keys[:n_game]
 
@@ -348,7 +374,15 @@ def _all_scripts(n_game, wad, mapname):
     key = (n_game, wad, mapname)
     if key in _ALL:
         return _ALL[key]
-    out = [_route(seed, n_game, wad, mapname) for seed in range(TOUR_TARGETS)]
+    out = []
+    for seed in range(TOUR_TARGETS):
+        keys = _route(seed, n_game, wad, mapname)
+        if keys in out and mapname.upper() not in TOUR_GEN:
+            # M8 (gen_dryrun on E1M8): the opening turn does NOT make the scripts distinct by construction -- seed 2's 6
+            # turn frames and steering that turns the same way 6 more equal seed 4's 12 -- so a duplicate (off the
+            # recorded maps, which never had one) retries ONCE turning the other way, a different leading key
+            keys = _route(seed, n_game, wad, mapname, flip=True)
+        out.append(keys)
     sigs = {repr(k) for k in out}
     assert len(sigs) == len(out), (
         "only %d of %d speed runs are distinct -- duplicates weight the percentile toward "

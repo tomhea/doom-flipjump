@@ -240,21 +240,43 @@ def scenario_list(dsim, w, card) -> list:
                     "controls": ["dead_uses"], "cands": [(G.door_front(dsim, rev), None, {0: kill()})],
                     "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] >= 1
                     and all(fr["phase"][0][rev][0] == 0 for fr in tr)})
-    out.append({"name": "D3x dead in the exit's box, use: no level end, the restart", "keys": keys3,
-                "controls": ["dead_exits"], "cands": [(G.exit_pose(dsim), None, {0: kill()})],
-                "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] >= 1 and not any(fr["lvdone"] for fr in tr)})
+    xwhy = G.exit_na(dsim)                           # M8: one switch exit, or N/A with why (E1M8: W1 exits only)
+    if xwhy:
+        out.append(G.na("D3x dead in the exit's box, use: no level end, the restart", xwhy))
+    else:
+        out.append({"name": "D3x dead in the exit's box, use: no level end, the restart", "keys": keys3,
+                    "controls": ["dead_exits"], "cands": [(G.exit_pose(dsim), None, {0: kill()})],
+                    "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] >= 1
+                    and not any(fr["lvdone"] for fr in tr)})
     # ---- D4: the restart -- a pickup taken and a baked barrel gone (poked), dead, use held
     pk = [i for i, t in enumerate(w.pickup_things) if t.type == 2014 and t.flags & gd.skill_bit(gd.SK_HARD)]
-
-    def messy(mph, ev):
-        ws = mph.world.ws
-        ws.pickup_taken[_baked_pickup(mph, pk)] = 1
-        b = _baked_barrel(mph)
-        ws.bar_state[b] = ws.bar_tics[b] = ws.bar_solid[b] = 0
-        kill()(mph, ev)
+    # M8 (gen_dryrun's audit): a map with no baked health bonus, or no baked barrel (E1M5, E1M8: none), restarts
+    # without that part -- its poke and its control dropped, named; E1M1 has both (its scenario as it was)
+    has_pk, has_bar = _has_baked(w, pk)
+    name4 = "D4 the restart: the level start, a taken pickup and a gone barrel back"
+    ctl4 = ["restart_pickup", "restart_barrel", "use_edge"]
+    if has_pk and has_bar:
+        def messy(mph, ev):
+            ws = mph.world.ws
+            ws.pickup_taken[_baked_pickup(mph, pk)] = 1
+            b = _baked_barrel(mph)
+            ws.bar_state[b] = ws.bar_tics[b] = ws.bar_solid[b] = 0
+            kill()(mph, ev)
+    else:
+        def messy(mph, ev):
+            ws = mph.world.ws
+            if has_pk:
+                ws.pickup_taken[_baked_pickup(mph, pk)] = 1
+            if has_bar:
+                b = _baked_barrel(mph)
+                ws.bar_state[b] = ws.bar_tics[b] = ws.bar_solid[b] = 0
+            kill()(mph, ev)
+        name4 += " (%s: no baked %s)" % (dsim.mapname, " or ".join(
+            n for n, h in (("health bonus", has_pk), ("barrel", has_bar)) if not h))
+        ctl4 = [c for c, h in zip(ctl4, (has_pk, has_bar, True)) if h]
     keys4 = [U] * 4 + [I] * 3
-    out.append({"name": "D4 the restart: the level start, a taken pickup and a gone barrel back", "keys": keys4,
-                "controls": ["restart_pickup", "restart_barrel", "use_edge"],
+    out.append({"name": name4, "keys": keys4,
+                "controls": ctl4,
                 "cands": [((dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle), None, {0: messy})],
                 "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] == 1 and _level_start_after(tr, w)})
     # ---- D4m: a drop lies; dead; use: the restart takes it back
@@ -322,6 +344,18 @@ def _baked_pickup(mph, candidates) -> int:
     mv = FG.P.Oracle()._mv(mph.world) if not hasattr(_baked_pickup, "mv") else _baked_pickup.mv
     _baked_pickup.mv = mv
     return next(i for i in candidates if mv.pdi[i] in mv.vis_slots)
+
+
+def _has_baked(w, pk) -> tuple:
+    """(a pickup of `pk` is baked with a thvis slot, a barrel is) -- D4's pokes need one of each"""
+    if hasattr(_baked_pickup, "mv"):
+        mv = _baked_pickup.mv
+    else:                                        # the world's own map (the gate's process measures one)
+        from doomfj.mapprofile import profile
+        mv = FG.P.Oracle(profile(w.mapname).wad, FG.P.DEFAULT_ASSET, w.mapname)._mv(w)
+    _baked_pickup.mv = mv
+    return (any(mv.pdi[i] in mv.vis_slots for i in pk),
+            any(mv.bdi[b] in mv.vis_slots for b in range(w.layout.nbarrel)))
 
 
 def _baked_barrel(mph) -> int:

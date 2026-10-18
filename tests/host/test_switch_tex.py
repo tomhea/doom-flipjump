@@ -175,7 +175,7 @@ def test_the_gates_hooks_are_the_worlds(m2):
     ph.switch_doors({**doors, 208: (1, OPENING, 1, 0)}, True, x16, y16)
     assert ph.switch_kw() == {}
     ph.switch_doors(doors, True, x16, y16)
-    assert ph.switch_kw() == {"switch_on": frozenset({1854})} and view_drop_kw(ph) == {"switch_on": frozenset({1854})}
+    assert ph.switch_kw() == {"switch_on": frozenset({1854})} and view_drop_kw(ph).get("switch_on") == frozenset({1854})   # (E1M2's lights ride alongside)
     s = next(s for s in w.switch_cells if s.line == 1904)
     x0, y0, x1, y1 = s.box
     x16, y16 = ((x0 + x1) // 2) << 16, ((y0 + y1) // 2) << 16

@@ -193,7 +193,7 @@ def test_every_game_tier_gate_render_passes_the_slide():
 
 def test_the_control_a_render_without_the_slide_is_refused():
     """R9: p2a_gate.picture (every hurt / fight / die frame) and sight's seen render with the keyword dropped"""
-    for path, old, new in (("scratchpad/gp/p2a_gate.py", 'wall_scroll=fr.get("wscroll", 0))', '_ws=fr.get("wscroll", 0))'),
+    for path, old, new in (("scratchpad/gp/p2a_gate.py", 'wall_scroll=fr.get("wscroll", 0),', '_ws=fr.get("wscroll", 0),'),
                            ("src/doomfj/sight.py", '{"wall_scroll": world.wall_scroll()} if world.wall_scroll() else {}',
                             "{}")):
         src = (ROOT / path).read_text(encoding="utf-8")

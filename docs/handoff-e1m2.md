@@ -99,8 +99,21 @@ B0 on its set, gamespeed, msframe, rebuild).
 - M8 F1.3 (the movers): every one-shot floor moves on the doors' 16-unit grid -- a stop every 4 frames (FLOORSPEED, a
   quarter of the lift's), turboLower (71) every frame, the S1 23 switch INSTANT as on E1M1 (D-L2); a floor's destination
   is computed from its neighbours' STORED floors (EV_DoFloor reads them at the trigger: sector 206 borders blazing lift
-  47); the S1 switch textures do not change; a W1 crossing is tested once per tic (start to end), a slanted one by the
-  exact cross product (P_PointOnLineSide without FixedMul's truncation); a blazing lift (120 / 123) strides two stops.
+  47); ~~the S1 switch textures do not change~~ (M8, 2026-10-18: IMPLEMENTED -- `doomfj.switches`, below); a W1
+  crossing is tested once per tic (start to end), a slanted one by the exact cross product (P_PointOnLineSide without
+  FixedMul's truncation); a blazing lift (120 / 123) strides two stops.
+- M8 (the owner, 2026-10-18: a recorded simplification is implemented when it costs <= +0.5% speed) -- THE SWITCH
+  TEXTURES CHANGE (`config.MAP_CONFIG` SWITCH_TEX, E1M2 only: E1M1's emission is unchanged). DOOM's
+  P_ChangeSwitchTexture in the game picture's wall tones: a switch line showing an SW1 texture wears "#SWITCH" (the
+  exit "#EXIT"), an SW2 one "#SWITCHON" (green) -- so 1544 (SW2CMT) starts green and goes orange when used. A use that
+  STARTS something swaps the line (EV_DoDoor / EV_DoFloor / EV_DoPlat returned 1: a door of its tag at rest, its floor
+  group still, a lift of its tag at rest; the exit always); S1 and the exit for good, SR for BUTTONTIME (35 frames;
+  E1M2 has no SR switch texture -- the countdown is run by tests/fj/test_switch_tex_fj.py on synthetic lines). The
+  model: `World.switch_doors` (the door phase, before the doors tic: held use) and `World.switch_uses` (a use press,
+  before the exit); the cells `sw_on` / `sw_time` (fj `swpr` / `swtm`, persisted, zeroed by NEW GAME), the exit's latch
+  `g_leveldone` / `lvdone`; the gates step them through `MonsterPhase.switch_doors` / `switch_uses` and draw them
+  through `switch_kw` (`view_drop_kw` carries it). Simplifications: a press on an SR line whose button is out changes
+  nothing; a tic is a frame; one exit switch line per map.
 
 ## 4. The width plan for L1 (analysis 2026-10-16, read-only, at be8f2cc)
 
@@ -264,7 +277,7 @@ stand-ins' features are not built, and no E1M2 gate has run (E1M2's gates are L6
 - **Keys:** the fj reads `pcard_y` / `pcard_r` (declared and written by the pickups: `lootcode.card_cells`).
 - **Switches:** a use in a switch box presses a door only at rest (`doors.switch_ready`: EV_DoDoor's
   `sec->specialdata` skip). The S1 latch is not kept: its doors are open-stay (asserted), where it is unobservable.
-  No switch texture changes (the renderer animates no switch).
+  No switch texture changes (the renderer animates no switch) -- M8 2026-10-18: they do now, `doomfj.switches`.
 - **Walk-over per LINE**, one entry per (line, door): a tag opens every door it names; collinear touching lines of
   one tag fuse (exact for stay doors, asserted: E1M1's two tags stay one segment each); slanted lines cross by
   P_PointOnLineSide + the new box in spechit (`doors.crossed`, `doorcode._crossed_d_lines`). E1M3's tag 11 ring: 12 entries.

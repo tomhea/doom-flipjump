@@ -81,8 +81,7 @@ def test_every_game_tier_gate_render_passes_view_drop():
 
 def test_the_control_a_render_without_view_drop_is_refused():
     """R9: p2a_gate.picture (every hurt / fight / die frame) and m2_std_gate's mirror frame with the keyword dropped"""
-    # (M8: p2a_gate.picture's view_drop is no longer the last keyword -- wall_scroll follows it -- so the mutant drops
-    # the keyword and its comma)
+    # M8: p2a_gate.picture's sink is no longer its last keyword (`switch_on=` follows it): the line is dropped whole
     for path, old in (("scratchpad/gp/p2a_gate.py", "                      view_drop=fr.get(\"vdrop\", 0),"),
                       ("scratchpad/m2_std_gate.py", "                                          **view_drop_kw(mph),")):
         src = (ROOT / path).read_text(encoding="utf-8")

@@ -191,7 +191,10 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # M8 L4: the player's reactiontime after a teleport (doomfj.teleportcode; a map with a WR teleport)
                    frozenset({"p_rct"}),
                    # M8: the sector light thinkers' cells (doomfj.lightcode; a map whose lights animate: E1M2)
-                   frozenset({"ltst", "ltct", "rng_lt"}))
+                   frozenset({"ltst", "ltct", "rng_lt"}),
+                   # M8: the switch textures (doomfj.switchcode; a SWITCH_TEX map: MonsterPhase.switch_state) -- two
+                   # groups: a map with no SR switch line (E1M2) declares `swpr` alone
+                   frozenset({"swpr"}), frozenset({"swtm"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -773,6 +776,11 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     cells["ltst"] = Cell("ltst", "hex", 1, count=_nlight())
     cells["ltct"] = Cell("ltct", "hex", 2, count=_nlight())
     cells["rng_lt"] = Cell("rng_lt", "hex", 2)
+    # M8: the switch textures (MonsterPhase.switch_state's units; a map without them declares neither label: OPTIONAL)
+    from doomfj.switches import BUTTON_NIBBLES
+    nsw, nsr = _nswitch()
+    cells["swpr"] = Cell("swpr", "hex", 1, count=max(nsw, 1))
+    cells["swtm"] = Cell("swtm", "hex", BUTTON_NIBBLES, count=max(nsr, 1))
     return cells
 
 
@@ -846,6 +854,12 @@ def _nsecret() -> int:
 def _sec_nibbles() -> int:
     """M8 L1: the sector-id width (World.sec_nibbles) -- `msec`'s cell width"""
     return _idle_world().sec_nibbles
+
+
+def _nswitch() -> tuple:
+    """M8: (latched switches, SR ones) on the counts map (World.switch_cells / switch_sr; (0, 0) without SWITCH_TEX)"""
+    w = _idle_world()
+    return len(w.switch_cells), len(w.switch_sr)
 
 
 def _nsound() -> int:
@@ -971,7 +985,7 @@ class Oracle:
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
                views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
                mobiles=None, card=None, removed=None, barrel_views=None, skill=None, view_drop=0,
-               sector_lights=None, wall_scroll=0) -> bytes:
+               sector_lights=None, wall_scroll=0, switch_on=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
@@ -994,7 +1008,9 @@ class Oracle:
         M8: `sector_lights` -- the world's animated sector lights (`World.lights_now`; a map whose lights animate, E1M2:
         an E1M2 scenario set passes it); None draws today's call unchanged.
         M8: `wall_scroll` -- the scrolling wall's slide this frame (`MonsterPhase.wall_scroll`, doomfj.scrollcode); 0
-        (E1M1, or a map without special 48) is not passed."""
+        (E1M1, or a map without special 48) is not passed.
+        M8: `switch_on` -- the switch lines showing their other texture (`MonsterPhase.switch_kw`'s set, doomfj.switches);
+        empty or None draws today's call unchanged."""
         from doomfj.reference_model import SimState
         hidden = self.hidden if skill is None else self.hidden_at(skill)
         view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
@@ -1008,6 +1024,7 @@ class Oracle:
                                                **({"view_drop": view_drop} if view_drop else {}),   # M7 P8a
                                                **({"sector_lights": sector_lights} if sector_lights else {}),  # M8
                                                **({"wall_scroll": wall_scroll} if wall_scroll else {}),   # M8
+                                               **({"switch_on": frozenset(switch_on)} if switch_on else {}),   # M8
                                                **self.RENDER_KW))
         # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
         return self.screen.frame(view, card=bool(hidden_extra) if card is None else bool(card), **(screen_kw or {}))

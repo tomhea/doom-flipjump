@@ -159,7 +159,9 @@ def view_drop_kw(phase) -> dict:
     it, or `view_drop=` itself (tests/host/test_p8a_gates.py, static: rule 5).
     M8 (doomfj.lights): and the world's animated sector lights (`World.light_render_kw`: `sector_lights`) -- the one
     keyword every game-tier gate's world render already spreads, so a map with light specials (E1M2) draws them in
-    every gate at once; {} on a map without (E1M1: nothing changes)"""
+    every gate at once; {} on a map without (E1M1: nothing changes).
+    M8 (doomfj.switches): and the switch lines showing their other texture (`MonsterPhase.switch_kw`, the exit's by
+    the world's g_leveldone) -- {} while none is, so a map without SWITCH_TEX (E1M1) draws by today's call"""
     d = phase.view_drop() if phase is not None else 0
     out = {"view_drop": d} if d else {}
     if phase is not None:
@@ -169,6 +171,8 @@ def view_drop_kw(phase) -> dict:
     sc = phase.wall_scroll() if phase is not None else 0
     if sc:
         out["wall_scroll"] = sc
+    if phase is not None:
+        out.update(phase.switch_kw())         # M8 (doomfj.switches): the pressed switch lines
     return out
 
 
@@ -331,6 +335,44 @@ class MonsterPhase:
 
     def reset(self, skill: int) -> None:
         self.world.reset(skill)
+
+    # ---- M8 (doomfj.switches): the switch textures, stepped by the gate's phases -------------------------------------
+    def switch_doors(self, doors: dict, used: bool, x16: int, y16: int) -> None:
+        """the door phase's switch step, called by a gate BEFORE its door tic (`doors.DoorPhase.tic`): `doors` its
+        tic-start {sector: (state, dir, sub, wait)}, `used` the use key as the door tic takes it (held, the player
+        alive) -- World.switch_doors, the SR countdown and the door switches. No-op on a map without SWITCH_TEX"""
+        from doomfj.doors import switch_ready
+        self.world.switch_doors(bool(used), x16, y16, lambda si: switch_ready(doors[si]))
+
+    def switch_uses(self, movers: tuple, x16: int, y16: int) -> None:
+        """a use PRESS's switch step, called by a gate on the press edge BEFORE its exit test and its
+        `movers.MoverPhase.use_press`: `movers` the gate's mover state (lifts, req, switched) -- World.switch_uses on
+        the lifts' states and the floor groups' timers (the wide fswitch vector's second half; E1M1's layout has none)"""
+        w = self.world
+        if not w.switch_cells:
+            return
+        lifts, _req, sw = movers
+        ng = len(w.floor_groups)
+        w.switch_uses(x16, y16, lambda k: lifts[k][0] == 0,
+                      lambda g: (sw[ng + g] if w.floor_wide else 0) == 0)
+
+    def switch_kw(self, leveldone=None) -> dict:
+        """`render_wall_frame(switch_on=)` for this world frame: {} when no switch line shows its other texture.
+        `leveldone`: the gate's own exit flag (None: the world's g_leveldone) -- the used exit swaps too"""
+        on = self.world.switch_on(leveldone)
+        return {"switch_on": on} if on else {}
+
+    def switch_state(self) -> dict:
+        """the switch cells in the fj's units (probe's OPTIONAL_GROUPS): swpr a nibble per latched switch (0/1),
+        swtm BUTTON_NIBBLES per SR one -- a one-element cell reads as a scalar; {} on a map without SWITCH_TEX"""
+        w, ws = self.world, self.world.ws
+        if not w.switch_cells:
+            return {}
+        one = (lambda t: t if len(t) > 1 else t[0])
+        out = {"swpr": one(tuple(ws.sw_on))}
+        if w.switch_sr:
+            out["swtm"] = one(tuple(ws.sw_time))
+        return out
 
     # ---- M7 P8a (V, docs/gp-final-plan.md 4.1 / 5): the dying view and the knock ------------------------------------
     def view_drop(self) -> int:
@@ -776,6 +818,7 @@ class MonsterPhase:
             one = len(w.light_thinkers) == 1         # the probe reads a count-1 cell as an int
             out.update({"ltst": ws.lt_state[0] if one else tuple(ws.lt_state),
                         "ltct": ws.lt_count[0] if one else tuple(ws.lt_count), "rng_lt": ws.rng_light})
+        out.update(self.switch_state())                      # M8: the switch textures (a SWITCH_TEX map)
         return out
 
     # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------

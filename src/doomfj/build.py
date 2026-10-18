@@ -201,15 +201,18 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
     """M8 F1.2: the map-dependent persisted names for a standalone, moving-things tier (monstermove.map_persist).
     M8 F4: + the map's new card cells (lootcode.map_persist: pcard_y / pcard_r, the game tier's loot; none on E1M1);
     M8 L4: + the player's reactiontime on a map with a WR teleport (teleportcode.map_persist: `p_rct`);
-    M8: + the sector light thinkers' cells on a map whose lights animate (lightcode.map_persist: ltst, ltct, rng_lt)"""
+    M8: + the sector light thinkers' cells on a map whose lights animate (lightcode.map_persist: ltst, ltct, rng_lt);
+    M8: + the switch textures' cells on a map that animates its switches (switchcode.map_persist: `swpr`, `swtm`)"""
     if not on:
         return ()
     from doomfj.lightcode import map_persist as _light_persist
     from doomfj.lootcode import map_persist as card_persist
     from doomfj.monstermove import map_persist
+    from doomfj.switchcode import map_persist as _switch_persist
     from doomfj.teleportcode import map_persist as _tele_persist
     return (map_persist(wad, mapname) + card_persist(wad, mapname) + _tele_persist(wad, mapname)
-            + _light_persist(wad, mapname))
+            + _light_persist(wad, mapname)
+            + _switch_persist(wad, mapname))
 
 
 def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:

@@ -827,12 +827,16 @@ class BinaryMirror:
         # M8 L2: the yellow and red keys (and a blue skull) the WORLD holds (monsters.door_keys_kw: {} without a phase,
         # and on E1M1, whose player holds only the blue card)
         from doomfj.monsters import door_keys_kw
+        if mph is not None:          # M8 (doomfj.switches): the SR countdown and the door switches, tic-start doors
+            mph.switch_doors(self.state[0], bool(kd.get("use")), pre[0], pre[1])
         self.state = self.dp.tic(self.state, bool(kd.get("use")), pre[0], pre[1], others=others,
                                  **door_keys_kw(mph))
         self.ds = [self.state[0][si] for si in w.door_order]
         self.mstate = self.mp.tic(self.mstate)
         if kd.get("use"):
             if not self.pusedn:
+                if mph is not None:  # M8: the floor / lift switches, before the press fires them
+                    mph.switch_uses(self.mstate, pre[0], pre[1])
                 self.mstate = self.mp.use_press(self.mstate, pre[0], pre[1])
             self.pusedn = 1
         else:

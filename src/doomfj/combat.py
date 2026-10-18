@@ -596,6 +596,9 @@ class CombatMixin:
         the SR lifts (a trigger for the next mover tic) and the S1 floor switch (at once)."""
         W = _W()
         ws = self.ws
+        # M8 (doomfj.switches): the S1 floor and SR lift switch lines this press changes -- their EV_* read on the
+        # machines BEFORE the press fires them, and before the exit (whose own latch is g_leveldone)
+        self.switch_uses(ws.px, ws.py, lambda k: ws.l_state[k] == 0, lambda g: self.floor_sub(g) == 0)
         for box in self.exit_boxes:
             if W.in_use_box_fixed(box, ws.px, ws.py):
                 ws.g_leveldone = 1

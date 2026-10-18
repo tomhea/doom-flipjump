@@ -245,6 +245,12 @@ class Config:
     # the low byte wraps. 0 (E1M1): nothing is emitted and the oracle takes the old path.
     WALL_SCROLL: int = 0
 
+    # M8 (the owner, 2026-10-18: a recorded simplification is implemented when it costs <= +0.5% speed) -- THE SWITCH
+    # TEXTURES CHANGE: DOOM's P_ChangeSwitchTexture, a used switch line's SW1 texture shown as its SW2 (an S1 / exit line
+    # for good, an SR line for BUTTONTIME). 1 on a map that animates them (doomfj.switches; the game picture's wall
+    # tones draw the change), 0 on E1M1, whose emission stays byte-identical. Host-side only: NOT an fj constant.
+    SWITCH_TEX: int = 0
+
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
         """M8 F1.4: 1 when the record compares `gps_nslot` against SPR_SLOT_CAP (frame.thing_record_body's rep), else 0"""
@@ -311,8 +317,9 @@ MAP_CONFIG = {
     # M8: SECTOR_LIGHTS -- its light specials animate (doomfj.lights: 9 thinkers -- 3 flashes, a strobe, a fire flicker,
     # 4 glows; its other 9 glows sit between equal lights and stay static)
     # M8: WALL_SCROLL -- lines 1254 and 1338 (COMPBLUE) are special 48, the scrolling wall (doomfj.scrollcode)
+    # M8: SWITCH_TEX -- the used switches change their texture (doomfj.switches)
     "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1,
-             "WALL_SCROLL": 1},
+             "WALL_SCROLL": 1, "SWITCH_TEX": 1},
 }
 
 

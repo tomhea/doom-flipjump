@@ -663,8 +663,52 @@ def switch_ready(st: tuple) -> bool:
 
 
 # M7 P2a.2 -- the exit switch (S1 exit; E1M1: linedef 407): P_UseLines' box, the doors' trigger
-# box around the line (`use_boxes`' compromise), one per exit line
-EXIT_SPECIALS = frozenset({11})
+# box around the line (`use_boxes`' compromise), one per exit line. M8 C9: + 51, the S1 SECRET exit (E1M3): a single
+# level's binary ends it the same way (G_SecretExitLevel has no next map here: the episode plan's G11 -- every binary
+# is its level, LEVEL COMPLETE ends it), and records that the secret exit was used (`g_secretexit`, fj `lvsec`:
+# LEVEL COMPLETE shows SECRET EXIT)
+EXIT_SPECIALS = frozenset({11, 51})
+SECRET_EXIT_SPECIALS = frozenset({51})
+# M8 C9: the W1 exit (52; E1M8's eight lines round the boss pad): P_CrossSpecialLine, the player only (52 is not on
+# its monsters' list), either side, `G_ExitLevel ()` -- the same end as the switch (`exit_walk_triggers`)
+WALK_EXIT_SPECIALS = frozenset({52})
+
+
+def exit_lines(lds) -> list:
+    """M8 C9: the exit switch lines' linedef indices in linedef order -- `exit_boxes`' order, box k is line k"""
+    return [i for i, ld in enumerate(lds) if ld.special in EXIT_SPECIALS]
+
+
+def secret_exits(lds) -> list:
+    """M8 C9: per exit box (`exit_boxes`' order), 1 when its line is a secret exit (51)"""
+    return [int(lds[i].special in SECRET_EXIT_SPECIALS) for i in exit_lines(lds)]
+
+
+def exit_walk_triggers(lds, verts) -> list:
+    """M8 C9: the W1 exit lines (52) as `crossed` triggers, `(0, axis, coord, lo, hi)` or `(0, "d", x1, y1, x2, y2)`
+    -- collinear axis-aligned lines that touch end to end FUSED into one segment, exact: any one of them ends the
+    level, and the fused extent is their union (`walkover_triggers`' rule). [] on a map without one (E1M1, E1M2)"""
+    def xy(v):
+        v = verts[v]
+        return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])
+    segs, diag = [], []
+    for ld in lds:
+        if ld.special not in WALK_EXIT_SPECIALS:
+            continue
+        (ax, ay), (bx, by) = xy(ld.v1), xy(ld.v2)
+        if ay == by:
+            segs.append(("y", ay, min(ax, bx), max(ax, bx)))
+        elif ax == bx:
+            segs.append(("x", ax, min(ay, by), max(ay, by)))
+        else:
+            diag.append(("d", ax, ay, bx, by))
+    fused: list = []
+    for axis, coord, lo, hi in sorted(segs):
+        if fused and fused[-1][:2] == (axis, coord) and lo <= fused[-1][3]:
+            fused[-1] = (axis, coord, fused[-1][2], max(hi, fused[-1][3]))
+        else:
+            fused.append((axis, coord, lo, hi))
+    return [(0,) + seg for seg in fused + diag]
 
 
 def exit_boxes(lds, verts, rng: int = USE_RANGE) -> list:

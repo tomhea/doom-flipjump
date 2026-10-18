@@ -62,3 +62,25 @@ def test_control_a_player_line_some_skill_lacks_is_refused(ls, wad, monkeypatch)
     monkeypatch.setattr(teleport, "MONSTER_ONLY_SPECIALS", frozenset())
     r = _row(_rows(ls, wad, "E1M5"), "teleport lines (teleport.teleporters")
     assert r is not None and r[0] == "REFUSED" and "every single-player skill" in r[4], r
+
+
+# ---- C9: the exits ---------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("m,special", [("E1M3", 51), ("E1M8", 52)])
+def test_the_exits_are_supported(ls, wad, m, special):
+    r = _row(_rows(ls, wad, m), "line special %d " % special)
+    assert r[0] == "OK" and r[4].startswith("exit (M8 C9"), r
+
+
+def test_two_exit_switch_lines_take_the_switch_textures(ls, wad):
+    """E1M7's two S1 exits (and E1M3's 11 + 51): the SWITCH_TEX guard no longer refuses (switches.latched)"""
+    for m in ("E1M3", "E1M7"):
+        bad = [r for r in _rows(ls, wad, m) if "switch textures" in r[1] and r[0] != "OK"]
+        assert bad == [], bad
+
+
+def test_control_an_unsupported_w1_exit_is_missing(ls, wad, monkeypatch):
+    """R9: 52 left out of the model's W1 exit set -- the survey reports it MISSING again"""
+    from doomfj import doors
+    monkeypatch.setattr(doors, "WALK_EXIT_SPECIALS", frozenset())
+    r = _row(_rows(ls, wad, "E1M8"), "line special 52 ")
+    assert r[0] == "MISSING", r

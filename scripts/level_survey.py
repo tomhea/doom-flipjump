@@ -75,6 +75,10 @@ def supported_line_specials():
     """{special: what implements it} -- read from the SSOT sets, so a special added there shows up here"""
     from doomfj import doors, movers
     out = {1: "doors (plain DR; monsters open it: world)", 11: "doors (S1 exit)"}
+    for s in doors.SECRET_EXIT_SPECIALS:          # M8 C9: the level ends there too (plan G11); LEVEL COMPLETE says so
+        out[s] = "exit (M8 C9: S1 secret exit -- LEVEL COMPLETE, SECRET EXIT; exitcode)"
+    for s in doors.WALK_EXIT_SPECIALS:
+        out[s] = "exit (M8 C9: W1, the player crossing either way; exitcode.walk_lines)"
     for s in doors.BLUE_DOOR_SPECIALS:
         out[s] = "doors (blue card)"
     for s in doors.YELLOW_DOOR_SPECIALS:

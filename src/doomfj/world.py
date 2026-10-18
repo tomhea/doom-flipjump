@@ -98,6 +98,7 @@ from doomfj.combat import CombatMixin, STRAFE_MOVE, WEAPON_KEYS  # noqa: F401 (r
 from doomfj.doorcode import door_line_ids
 from doomfj.fixedpoint import aprox_distance  # noqa: F401 -- P_AproxDistance, ONE definition (M7 P3.3); re-exported
 from doomfj.doors import crossed                                   # M7 P2b: WR lifts
+from doomfj.doors import secret_exits as _secret_exits             # M8 C9: the secret exit's field
 from doomfj.doors import door_contact_geo, touches_door            # M7 P2b: reversal
 from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states,  # M7 P2b
                            lift_tic, lift_walk_triggers, mover_heights, switch_sectors,
@@ -288,6 +289,7 @@ class Layout:
     nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
     nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
     nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
+    secexit: int = 0   # M8 C9: 1 on a map with a secret exit line (51): the g_secretexit field
 
     @property
     def nmobile(self) -> int:
@@ -340,6 +342,8 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("g_restart", 1, group="game", phase="S3b",
       doc="restart asked (use while dead, NEW GAME): the frame tail runs the restart block")
     f("g_leveldone", 1, group="game", phase="S3b", doc="the exit switch was used: world frozen")
+    if lay.secexit:  # M8 C9 (doors.SECRET_EXIT_SPECIALS): which exit ended the level (LEVEL COMPLETE shows SECRET EXIT)
+        f("g_secretexit", 1, group="game", phase="C9", label="lvsec", doc="the level ended by its secret exit (51)")
     # -- input and mode (existing standalone persist set) ----------------------------------------
     f("mode", 1, group="input", phase="existing", label="mode", doc="1 = menu frame producer")
     for k in ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5"):   # M7 P4.1; P9: 5
@@ -882,7 +886,8 @@ class World(CombatMixin):
                              ntonce=len(self.tele_once),
                              nfloor=len(self.floor_groups) if self.floor_wide else 0,
                              nlight=len(self.light_thinkers),
-                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
+                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr),
+                             secexit=int(any(_secret_exits(self.mw.linedefs(self.mapname)))))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -970,6 +975,9 @@ class World(CombatMixin):
         self.lift_stops = lift_states(secs, lds, sds)
         self.lift_order = sorted(self.lift_stops)
         self.lift_walk = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
+        # M8 C9: the W1 exit lines (52; E1M8), fused -- the player's crossing ends the level ([] on E1M1 / E1M2)
+        from doomfj.doors import exit_walk_triggers
+        self.exit_walk = exit_walk_triggers(lds, self.mw.vertexes(self.mapname))
         # M8 F1.3: the WR lines a MONSTER triggers (88, not the blazing 120), each lift's stride, a tag's lifts
         self.lift_walk_mon = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname),
                                                 _MV.LIFT_MONSTER_SPECIALS)
@@ -1311,6 +1319,13 @@ class World(CombatMixin):
         for k in _SWI.use_presses(self.switch_cells, x16, y16, lift_rest, floor_still):
             _SWI.press(on, tm, self.switch_sr, k)
         self._switch_store(on, tm)
+
+    def switch_exit(self, line: int) -> None:
+        """M8 C9: exit line `line` was pressed -- on a map with more than one exit switch line each has its own cell
+        (switches.latched), which swaps; a single exit line's latch is g_leveldone itself (nothing to do)"""
+        for k, s in enumerate(self.switch_cells):
+            if s.kind == "exit" and s.line == line:
+                self.ws.sw_on[k] = 1
 
     def _switch_store(self, on, tm) -> None:
         ws = self.ws

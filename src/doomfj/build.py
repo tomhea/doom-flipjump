@@ -214,9 +214,11 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
     from doomfj.monstermove import map_persist
     from doomfj.switchcode import map_persist as _switch_persist
     from doomfj.teleportcode import map_persist as _tele_persist
+    from doomfj.exitcode import map_persist as _exit_persist
     return (map_persist(wad, mapname) + card_persist(wad, mapname) + _tele_persist(wad, mapname)
             + _light_persist(wad, mapname)
-            + _switch_persist(wad, mapname))
+            + _switch_persist(wad, mapname)
+            + _exit_persist(wad, mapname))                  # M8 C9: lvsec on a map with a secret exit
 
 
 def automap_persist(cfg, menu: bool) -> tuple:

@@ -64,6 +64,23 @@ def test_the_cell_pack_has_art_on_e1m8(ls, wad):
     assert r[0] == "OK", r
 
 
+def test_the_plasma_sprites_are_in_a_rifle_map_s_bank_only(wad, monkeypatch):
+    """G6: the anim bank carries MT_PLASMA's lumps (PLSSA0 / PLSSB0, PLSEA0 .. E0) exactly on a map with the rifle
+    (combat.plasma_on: E1M6, E1M9) -- E1M1 .. E1M5, E1M7, E1M8 carry none of their words. R9: the rule forced on, E1M1
+    carries them"""
+    from doomfj import combat
+    from doomfj import wall_renderer as WR
+
+    def plasma_sprites(m):
+        return {s for s in WR.anim_frames(wad, m) if s in ("PLSS", "PLSE")}
+    for m in ("E1M1", "E1M2", "E1M3", "E1M5", "E1M7"):
+        assert not plasma_sprites(m), m
+    for m in ("E1M6", "E1M9"):
+        assert plasma_sprites(m) == {"PLSS", "PLSE"}, m
+    monkeypatch.setattr(combat, "plasma_on", lambda things: True)
+    assert plasma_sprites("E1M1") == {"PLSS", "PLSE"}
+
+
 def test_the_state_byte(ls, wad):
     """E1M1 / E1M2 / E1M9 need no new state; E1M6 / E1M7 (the lost soul, 16) and E1M8 (the Baron and its shot, 27)
     are OVER the 14 indices left (9 past the table, 5 raise ghosts)"""

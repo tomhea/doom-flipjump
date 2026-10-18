@@ -104,6 +104,44 @@ their namespaces for a map other than E1M1 only.
     python scratchpad/12m/gamespeed.py --map E1M2 --fjm ...  /  --validate  /  --selftest  (N6e/N6g need the record)
     python scratchpad/12m/msframe.py --map E1M2 --a build/doom_e1m2_<name>.fjm --save-baseline shipped   (-> shipped_e1m2)
 
+### 4c. Gates-ready for E1M3..E1M9 (m8-gatesready, 2026-10-19)
+
+The generators run on a map BEFORE its features land, so a tool's hard-wired assumption is found in minutes, not in
+the level's gate run:
+
+    python scratchpad/gp/gen_dryrun.py --maps E1M3 E1M4 E1M5 E1M8 E1M9 [--gens roles checkpoints plan tours]
+
+One subprocess a (map, generator) cell; a model refusal (a FEATURE: a thing type, an undrawn pickup, a door two
+lines move two ways) is retried with a named DRY-RUN STAND-IN (`unknown-things`, `undrawn-pickups`,
+`door-first-kind` -- each names the cluster that lifts it) so the generator's OWN code runs; what then fails is the
+TOOL's. A stand-in run writes only to the scratch directory; a clean run writes `scenarios/<map>/*.draft.json`
+(DRAFTS: the owner approves a frozen set per level). Every map's fixture wad is committed
+(`tests/fixtures/freedoom_e1m3.wad` .. `e1m9`, `tests/host/test_map_fixtures.py`).
+
+What made the tools map-generic (each with a host test and a control):
+- `World()` with no map wad is REFUSED while another map is active (fight_gate's F5 placed E1M2 / any map on E1M1's
+  medium world); every gate binary named `doom_<map>_*` is checked against the map (`mapprofile.check_binary`:
+  probe.GameBinary, gamespeed, msframe).
+- p2a S8 / die D3x need one switch exit (E1M8: W1 exits only -> N/A); die D4 without a baked barrel or bonus drops
+  that part; fight / die / hurt owe a counter only while some present scenario that raises it runs (no barrels: the
+  barrel counters); hurt has an N/A path (no monster kind, < 9 imps for S1); no blue card no longer crashes hurt.
+- the key doors are DOOM's twelve specials (`gate_roles.KEY_LINE_COLOURS`) in gate_targets, the checkpoint flood,
+  gamespeed's tours and m2's door walk, whatever the model knows yet (E1M7's 133).
+- `scenarios_map`: no E1M1 checkpoint leaks into another map's set; `--checkpoints PATH`.
+- msframe: E1M3..E1M9's spawns face a wall within 5-17 frames, so hold-forward would time one view:
+  `msframe.py --map M --plan-script` writes gamespeed's route 0 (DRAFT -> `scenarios/<map>/msframe.json`); the
+  baseline records its workload. E1M1 / E1M2 keep hold-forward.
+- m3_gate refuses a scripted walk across a special line (none on E1M1..E1M9).
+- the heat list per map (G13): `--map` on profx `drive.py` / `hotwords.py`, `heatsites.py`, `pinreport.py`, `poolmap.py`;
+  `mapprofile.heat_list(map)` -- the map's own list, else E1M1's (said), never another map's (`profx/README.md`).
+- `SeenHook` hides runtime non-monster things its skill does not spawn (E1M5's mover-floor things: every seen picture
+  refused).
+- gamespeed tours GEN 4 off E1M1 / E1M2 (`gamespeed.TOUR_GEN`): steered closed-loop on GameSim (gen 3b ran blind to
+  monsters: E1M5 76% -> 33% worst blocked); a duplicate script retries turning the other way (E1M8 had 9 of 10).
+- `scenarios_map.suggest` on a map with no region of five monsters (E1M8: four Barons) refuses by name; p2a's walk-over
+  pose is never on a mover / door floor (E1M3's W1 ring around the raised card platform) nor from a diagonal trigger.
+- the survey names a pickup with no sprite (`THING_SPRITE`: E1M8's cell pack 17), which every gate's views KeyError on.
+
 ## 5. Features once, in the order that unblocks the most maps
 
 The survey's matrix (section 6) lists, per map, every line special, sector special and pickup the binary does not

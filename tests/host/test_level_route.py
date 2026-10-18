@@ -40,7 +40,9 @@ def test_e1m1_route(lr):
     assert [n["id"] for n in r["needs"]] == ["door:10", "door:34", "door:64"]
     leg = r["legs"][-1]
     assert leg["to"] == "exit" and _in_box(leg["path"][-1], r["exit"]["box"])
-    assert leg["path"][0] == [lr.centre(lr.cell_of(*r["start"]))[0], lr.centre(lr.cell_of(*r["start"]))[1]]
+    assert r["legs"][0]["path"][0] == list(lr.centre(lr.cell_of(*r["start"])))
+    for g0, g1 in zip(r["legs"], r["legs"][1:]):                  # the legs chain: each starts where the last ended
+        assert g1["path"][0] == g0["path"][-1]
 
 
 def test_e1m2_route(lr):

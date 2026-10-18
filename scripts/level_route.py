@@ -380,17 +380,17 @@ class Planner:
         for si in lv.door_order:
             box = lv.dp.boxes.get(si)
             if box is not None and in_use_box(box, x, y):
-                out.append(("door:%d" % si, "use"))
+                out.append(("door:%d" % si, "use", tuple(box)))
             for b in lv.dp.switches.get(si, ()):
                 if in_use_box(b, x, y):
-                    out.append(("door:%d" % si, "switch"))
+                    out.append(("door:%d" % si, "switch", tuple(b)))
         if lv.mp is not None:
             for tag, box in lv.mp.use:
                 if in_use_box(box, x, y):
-                    out += [("lift:%d" % si, "use") for si in lv.mp.lifts_of_tag[tag]]
+                    out += [("lift:%d" % si, "use", tuple(box)) for si in lv.mp.lifts_of_tag[tag]]
             for g, box in lv.mp.floor_use:
                 if in_use_box(box, x, y):
-                    out.append(("floor:%d" % g, "use"))
+                    out.append(("floor:%d" % g, "use", tuple(box)))
         bd = ITEM_RADIUS + PLAYER_R
         for col, spots in self.keyspots.items():
             for kx, ky in spots:
@@ -444,6 +444,7 @@ class Planner:
         self.exit_hits = {}                       # exit index -> cell
         self.pending_key = {}                     # key door id -> the cell that reached its box without the key
         self.touch_at = {}                        # key id -> the position the touch was found at (map units)
+        self.use_box = {}                         # mech id -> the box its use press was found in (map units)
         failed = collections.defaultdict(list)    # unvisited cell -> [cells an edge from was refused]
         q = collections.deque([start])
         epoch, order, found = 0, 1, {}            # found: mech id -> (cell, kind)
@@ -522,8 +523,8 @@ class Planner:
 
     def _note(self, trig, cell, found):
         mid, kind = trig[:2]
-        if len(trig) > 2:
-            self.touch_at.setdefault(mid, trig[2])
+        if len(trig) > 2:                         # a key's touch point, or the use box a press is made in
+            (self.touch_at if kind == "touch" else self.use_box).setdefault(mid, trig[2])
         if kind == "exit":
             self.exit_hits.setdefault(mid, cell)
             return
@@ -633,7 +634,58 @@ class Planner:
         return None
 
 
-def legs(pl: Planner, order, ecell, exit_i) -> list:
+# PICKUPS ON THE WAY (the steering's survival, not the route's logic): an item the model gives, reachable in the world
+# of a leg, is taken first when the detour costs at most its budget in cells -- the weapons most, then armor and the
+# soulsphere, then ammo boxes a little (health is the steering's to seek, when it runs low)
+PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 2049: 14, 2048: 10}
+
+
+def pickup_things(pl) -> list:
+    from doomfj.combat import GETTABLE
+    return [{"type": t.type, "x": t.x, "y": t.y, "budget": PICKUP_BUDGET[t.type], "taken": False}
+            for t in pl.lv.things if t.type in PICKUP_BUDGET and t.type in GETTABLE]
+
+
+def take_pickups(pl, cur, pred, world, pickups, out):
+    """legs to the pickups whose detour from `cur` to the next leg's goal (`pred`) is within their budget, cheapest
+    first; -> the cell the next leg starts from"""
+    from doomfj.combat import ITEM_RADIUS, PLAYER_R, REACH_DOWN, REACH_UP
+    scenes = pl.scenes_for(world)
+    bd = ITEM_RADIUS + PLAYER_R - 8
+    while True:
+        base = pl.leg_path(cur, pred, world)
+        if base is None:
+            return cur
+        pts = [centre(c) for c in base if c[0] != "teleport"][::2]
+        best = None
+        for it in pickups:
+            if it["taken"] or min(abs(p[0] - it["x"]) + abs(p[1] - it["y"]) for p in pts) > 16 * it["budget"]:
+                continue
+            iz = pl.floor_at(scenes, cell_of(it["x"], it["y"]))
+
+            def touch(c, it=it, iz=iz):
+                x, y = centre(c)
+                return (abs(x - it["x"]) < bd and abs(y - it["y"]) < bd
+                        and -REACH_DOWN <= iz - pl.floor_at(scenes, c) <= REACH_UP)
+            tp = pl.leg_path(cur, touch, world)
+            if tp is None or any(c[0] == "teleport" for c in tp):
+                continue
+            back = pl.leg_path(tp[-1], pred, world)
+            if back is None:
+                continue
+            detour = len(tp) + len(back) - len(base)
+            if detour <= it["budget"] and (best is None or detour < best[0]):
+                best = (detour, it, tp)
+        if best is None:
+            return cur
+        detour, it, tp = best
+        it["taken"] = True
+        out.append({"to": "item:%d" % it["type"], "kind": "item", "action": "touch", "goal": [it["x"], it["y"]],
+                    "key_at": [it["x"], it["y"]], "detour_cells": detour, "path": [list(centre(c)) for c in tp]})
+        cur = tp[-1]
+
+
+def legs(pl: Planner, order, ecell, exit_i, pickups=None) -> list:
     """the walk: one leg per trigger to VISIT (keys, switches, walk-over lines, lift and floor triggers), then the
     exit. A door opened by its own use box is not a leg -- the steering opens a door its path meets. Each leg's cells
     are planned in the world as it is then: the earlier legs' mechanisms active, every manual door whose key is held"""
@@ -657,11 +709,20 @@ def legs(pl: Planner, order, ecell, exit_i) -> list:
             m = pl.mechs[mid]
             kind, goal = m.kind, (pl.touch_at.get(mid, m.pos) if m.kind == "key" else centre(m.cell))
             action = {"touch": "touch", "use": "use", "switch": "use", "walk": "cross"}[m.trigger]
-            if m.kind == "key":
-                pred = lambda c, t=m.cell: c == t                                         # noqa: E731
-            else:
-                pred = lambda c, t=m.cell: c == t                                         # noqa: E731
-        path = pl.leg_path(cur, pred, active | doors_openable())
+            pred = lambda c, t=m.cell: c == t                                             # noqa: E731
+        box = (pl.use_box.get(mid) if mid is not None else lv.exits[exit_i]["box"]) if action == "use" else None
+        if pickups is not None:
+            cur = take_pickups(pl, cur, pred, active | doors_openable(), pickups, out)
+        path = None
+        if box is not None:
+            # a press is made INSIDE the box: the first reachable cell 12 units in from its edges, so a pose near
+            # the goal is inside too (the flood's own cell sits at the box's rim)
+            x0, y0, x1, y1 = box
+            path = pl.leg_path(cur, lambda c: x0 + 12 <= centre(c)[0] <= x1 - 12 and y0 + 12 <= centre(c)[1] <= y1 - 12,
+                               active | doors_openable())
+            if path is not None:
+                goal = centre(path[-1])
+        path = path or pl.leg_path(cur, pred, active | doors_openable())
         row = {"to": mid or "exit", "kind": kind, "action": action, "goal": list(goal)}
         if path is None:
             # the closure missed a dependency (a mechanism no cell of a path stands on): plan the leg in the world the
@@ -675,6 +736,10 @@ def legs(pl: Planner, order, ecell, exit_i) -> list:
                 active |= wide
         if mid is not None and pl.mechs[mid].kind == "key":
             row["key_at"] = list(pl.mechs[mid].pos)
+        if mid is not None and action == "use" and mid in pl.use_box:
+            row["box"] = list(pl.use_box[mid])
+        if mid is None and lv.exits[exit_i]["box"] is not None:
+            row["box"] = list(lv.exits[exit_i]["box"])
         if path is None:
             row.update(path=None, error="no path in the world as it is at this leg")
             out.append(row)
@@ -705,7 +770,7 @@ def frontier_unsupported(pl: Planner) -> list:
 
 
 def plan(mapname: str, skill: str, wad: str | None = None, budget_s: float = 900.0, with_legs: bool = True,
-         drop_keys=()) -> dict:
+         drop_keys=(), pickups: bool = True) -> dict:
     """the route as a JSON-able dict. `drop_keys` (the planner's negative control): key colours removed from the map"""
     t0 = time.time()
     lv = Level(mapname, wad, skill)
@@ -753,7 +818,7 @@ def plan(mapname: str, skill: str, wad: str | None = None, budget_s: float = 900
             row["unsupported_specials"] = sp
         out["needs"].append(row)
     if with_legs:
-        out["legs"] = legs(pl, order, ecell, exit_i)
+        out["legs"] = legs(pl, order, ecell, exit_i, pickup_things(pl) if pickups else None)
         out["path_cells"] = sum(len(g["path"] or ()) for g in out["legs"])
     out["seconds"] = round(time.time() - t0, 1)
     return out

@@ -107,6 +107,16 @@ class SeenHook:
         # (`MonsterPhase.set_aim`). Without it a world aiming with the window would read a stale one.
         self.aim = aim
 
+    def _absent_rt(self, skill) -> set:
+        """the runtime NON-monster drawables `skill` does not spawn (monsters are hidden by mon_active)"""
+        cache = self.__dict__.setdefault("_absent_cache", {})
+        if skill not in cache:
+            from doomfj.things import skill_absent
+            mons = set(self.views.mdi)
+            absent = skill_absent(self.drawable, skill)
+            cache[skill] = {di for di in self.views.rt_drawable if di in absent and di not in mons}
+        return cache[skill]
+
     def _scene(self, world):
         from doomfj.reference_model import build_scene
         key = tuple(sorted(world.heights_now.items()))
@@ -125,6 +135,11 @@ class SeenHook:
             pos[di] = (ws.mon_x[m], ws.mon_y[m])
             if not ws.mon_active[m]:
                 hidden.add(di)
+        # M8 (gen_dryrun on E1M5): a RUNTIME thing that is not a monster -- a pickup or decoration on a mover's floor
+        # (M8 F1.3) -- is hidden too when this skill does not spawn it, as the game render's thing_hidden has it: the
+        # renderer requires the runtime hidden set to be exactly ONE skill's absent set (things.skill_absent), and E1M5's
+        # mover-floor things absent at hard made every seen picture refuse. Empty on E1M1 and E1M2 (no such thing).
+        hidden |= self._absent_rt(ws.skill)
         views = [None] * self.views.n
         for m, v in self._mviews(world).items():
             views[self.views.mdi[m]] = v

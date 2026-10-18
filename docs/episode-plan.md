@@ -120,3 +120,25 @@ changed. Expected wall time ~1.5-2 days for all nine on this machine.
   `heavy.py NAME -- cmd` (waits for `Documents/HEAVY.lock`, takes it exclusively, releases it). Subagents count.
 - The integrator merges features into `m8-episode`, runs the build queue, the gates and the playtests, and opens a PR
   per wave.
+
+## 11. Gaps found in this plan (2026-10-19) and their fixes
+
+| # | gap | fix |
+|---|---|---|
+| G1 | the lock only orders HEAVY jobs; a build peaks at ~17 GB on this 15.6 GB box, and 14 agents' light tests during it can kill it silently (exit 255) | `heavy.py --build` marks a build's lock; every agent runs host tests through `heavy.py NAME --light -- ...`, which waits while a BUILD holds the lock |
+| G2 | no priority: ~14 agents x one emit_baseline (~33 min) = ~8 h of lock time, and the critical path (C1) can starve behind it | `heavy.py --prio N`: the integrator's builds and gates 8, C1 (runtime ids) 9, C11's E1M7 probe 7, the rest 5; each agent runs emit_baseline ONCE, at its end |
+| G3 | 14 branches over the same core files (reference_model, wall_renderer, things, config, survey): each proves E1M1 identity alone, never together | the integrator merges into `m8-episode` in order (C1 first, then by smallest shared footprint); after each merge the touched host tests + the survey matrix; after each batch `emit_baseline --check` + E1M2's part hashes + `emit_check` on every wave map |
+| G4 | C2 (wide thing lists, E1M6 / E1M7) has no owner | assigned when C1 lands (same files); the C1 agent reports whether A1 already covers it |
+| G5 | the 22M binding-speed cap per level: E1M2 is at 20.6M, and E1M4 (0.96x), E1M6 (1.21x), E1M7 (1.90x) may exceed it | each level's first build measures it (gamespeed); the speed pass (section 4.7) runs before ship; a level that cannot reach 22M is reported to the owner with its number -- it does not silently ship over |
+| G6 | 2^27 words is the w=32 HARD limit, and every new sprite (decor, Baron, lost soul, plasma, pickups) may grow every map's bank | the decor / monster / pickup agents report added words per map; the bank must carry only the sprites a map uses (verify; fix if not); the integrator re-measures E1M2's size after each batch |
+| G7 | E1M7 may not fit 2^27 or build in this RAM | measured early (C11's emission probe, prio 7); a no-fit is raised to the owner the same day, with options |
+| G8 | DISK: C: is 96% full (39 GB free); each build writes its generated program (~0.3-0.5 GB) and the page file grows during 17 GB builds; 46 `doom-*` worktrees exist | the integrator lists the worktrees whose branches are merged and clean, and asks the owner before removing any; builds clean their generated dirs after a ship; a build refuses to start under 15 GB free (to add to heavy.py --build) |
+| G9 | CI is near GitHub's 6 h job cap (20 shards); every cluster adds tests/fj files | new fj tests stay short (seconds), heavy ones are `slow`-marked; shards re-balanced per wave |
+| G10 | each level's combat set and gate roles need the owner's approval before they freeze; 7 levels = 7 interruptions | batched: one approval request per wave, with every map's set side by side |
+| G11 | where a level starts from is undecided: DOOM carries health / ammo / weapons between levels | DECIDED (default, the owner may overrule): every binary is a PISTOL START, as DOOM's -warp; LEVEL COMPLETE ends the binary's level |
+| G12 | the playthrough gate must finish without god mode; its cost (binary ~70 ms/frame + the oracle per frame, thousands of frames) is unknown | the playthrough agent measures it on E1M1 / E1M2 and picks the skill; the final creator's 1.5-2 day estimate is re-done from those numbers |
+| G13 | "as optimized as E1M1" needs each map's own heat list, and the profiling tools are E1M1-shaped | added to the gate-tools agent's scope: profx / heat with `--map` |
+| G14 | features meet each other only at the level gates (a lost soul through a blaze door, plasma on a Baron) | the generated combat sets and gate roles include each map's new monsters / weapons; `emit_check` on every wave map after each integration batch |
+| G15 | CI and the gates need per-map fixture wads (`tests/fixtures/freedoom_e1m2.wad` exists; E1M3..E1M9 do not) | the gate-tools agent extracts them the way E1M2's was made, under the Freedoom licence |
+| G16 | PR #148 (E1M2 r4 + blocked63) is not merged; `m8-episode` is built on it | merge #148 on green CI first; every wave PR targets main after it |
+| G17 | an agent can stop mid-work (context, error) | branches are pushed in steps; the integrator re-launches from the pushed branch |

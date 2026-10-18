@@ -1,0 +1,30 @@
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+certified   7 parts, 46,836,091 chars, 669 s
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+standalone  7 parts, 64,688,066 chars, 612 s
+pid bake: 233 pairs baked, 255 addressable at PID_NIBBLES=2
+hosted_doors 7 parts, 50,982,725 chars, 717 s
+
+  certified   banks      SAME  30,763,965 chars
+  certified   entry      SAME  26,454 chars
+  certified   main       SAME  5,279 chars
+  certified   segconsts  SAME  1,323,546 chars
+  certified   state      SAME  11,096 chars
+  certified   tables     SAME  9,166,370 chars
+  certified   walk       SAME  5,539,381 chars
+  hosted_doors banks      SAME  33,668,143 chars
+  hosted_doors entry      SAME  26,454 chars
+  hosted_doors main       SAME  38,474 chars
+  hosted_doors segconsts  SAME  2,453,216 chars
+  hosted_doors state      SAME  11,278 chars
+  hosted_doors tables     SAME  9,166,370 chars
+  hosted_doors walk       SAME  5,618,790 chars
+  standalone  banks      DIFF  baseline 33,369,076 / now 33,570,461 chars
+  standalone  entry      SAME  26,502 chars
+  standalone  main       DIFF  baseline 2,500,314 / now 2,521,097 chars
+  standalone  segconsts  SAME  3,057,359 chars
+  standalone  state      DIFF  baseline 1,028,159 / now 1,028,318 chars
+  standalone  tables     SAME  13,287,743 chars
+  standalone  walk       SAME  11,196,586 chars
+
+EMISSION !! MOVED -- something live was deleted

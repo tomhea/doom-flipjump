@@ -8,6 +8,25 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 ## 1. The standing number
 
+**Since 2026-10-18 the shipped binary is `build/doom_e1m1_blocked63.fjm`** -- class F (M8): blocked62 + THE MAP PAGE
+(the owner: "Add it to e1m1 too"; `config.MAP_CONFIG["E1M1"] = {"AUTOMAP": 1}`, 17536cad: a MAP menu item and the M key
+show E1M1's lines at 40 units/px with a red dot at the player). Built ONE PASS from the 1b command at 93813efc, sha256
+`b65e5a97c42adb71` (full `b65e5a97c42adb71dcf22b17f74c74e8713dfdaa862940d29c37a0fec994120c`); REBUILT BYTE-IDENTICAL
+(`blocked63_rebuild.log`, the census identical too). What is new: the menu's MAP item, the M key and the MAP page. Its gates, each solo (`docs/ship-evidence/blocked63_*.log`):
+
+| what | value |
+|---|---|
+| m2_std_gate / m3_gate | PASS -- 421 / 88 frames byte- and state-exact; m3 opens the MAP page from the menu and from the world, closes it back to each, and the player does not move while it shows |
+| p2a / hurt / fight / die | PASS -- 13 of 15 (2 N/A: E1M1 has no yellow / red door) / 7 / 43 / 17, state, pixels and palette exact |
+| combat set v10 | (mean+p80)/2 = **16,255,310** (blocked62 16,203,359, +0.32%); every frame of all 11 runs state- and pixel-exact; per-frame maximum 27,787,264 (R0-courtyard); **5,744,690 under CAP-22** |
+| binding metric | **16,892,755 ops/frame -- PASS** against 22,000,000 (blocked62 16,837,730, +0.33%); `gamespeed_trail` PASS |
+| size | **38.98% of 2^27 -- PASS** against 43% (52,323,960 words; blocked62 52,121,962); the pool 74.2% of its window, 44,262 of 44,262 groups placed, 20 of 20 hot words pinned |
+| ms/frame | the price (D8, class F): **68.4 ms/frame** against blocked62's **68.7** in the same A/B run (`blocked63_msframe.log`; NOT SEPARATED, ratio 1.001; msframe's script passes the menu, so its pixels differ by design); 16,066,011 ops/frame on msframe's script (+13,883, +0.09%). The `shipped` baseline is re-frozen on blocked63: **69.1 ms/frame** (68.3 .. 71.0; one rep with a sagging yardstick), 232.6 M fj/s (`blocked63_msframe_freeze.log`) |
+| host / fj tests | tests/host 2,219 passed at 93813efc; test_pin_heat 3 passed on the new census; key_latch 18, keyboard_input 43, menu_screens 12, skill_menu 75 passed (`blocked63_menu_tests.log`) |
+| emit_baseline | every certified and hosted part SAME; the standalone banks / main / state DIFFER, the MAP page (`blocked63_emit_baseline.log`) |
+
+The table below is **blocked62's**, the class S binary blocked63 extends -- its comparisons against blocked58 and P9 stand.
+
 | what | value | how it was measured |
 |---|---|---|
 | **the shipped binary** | `build/doom_e1m1_blocked62.fjm`, sha256 `2827291fc223a6da` (first 16 hex; full `2827291fc223a6daf3469cda2606ec45f9b145511bc0bd76c100fe7149bc030a`), built 2026-10-15 ONE PASS from the command in 1b at df9e96d (M7 P13, the second speed rung: four exact cuts, the fourth the one msframe could see) | class S -- EVERY PIXEL blocked58's, on every gate, every B0 frame and 3,778 more frames of scripted and live play; the installed flipjump-151 at 6711d7a for the assembly and every run (msframe's ledger row; engine `df401f5d00a3ac5f`, blocked58's) (`docs/ship-evidence/blocked62_build.log`): 2,626 s for the whole build (the one-pass census 2,227 s), 0 broken groups, 20 of 20 hot groups pinned. The play command is `fj --run build/doom_e1m1_blocked62.fjm` |
@@ -222,8 +241,8 @@ python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labe
 ```
 
 `--one-pass-blocks` reads no counts: it WRITES the build's census to `--counts-cache`, the tracked
-`scratchpad/12m/_census_game.json.gz` being the shipped build's (blocked62's since P13, byte for byte its
-`_census_blocked62.json.gz`; blocked58's before) -- the file `tests/host/test_pin_heat.py` fits the heat list against, as it fitted
+`scratchpad/12m/_census_game.json.gz` being the shipped build's (blocked63's since M8, the same census its
+rebuild wrote; blocked62's at P13; blocked58's before) -- the file `tests/host/test_pin_heat.py` fits the heat list against, as it fitted
 the two-pass counts cache. **Until P10 the line was the TWO-PASS one** (recovered 2026-09-13 from the session
 transcript that built blocked23 and blocked24, 09-11 11:22 and 13:01 -- the two builds before blocked25 in the same
 series, with the same counts cache; blocked25's own line, 09-11 18:04, was never logged and followed the renderer
@@ -342,6 +361,12 @@ passed against it). Assembled AND run by the installed flipjump-151 at 6711d7a. 
 whole build (the one-pass census 2,227 s). Pinning: 20 of 20 hot words, 0 lost (4 re-keyed by their label), 44,212 groups
 placed, 0 broken, 550,176 tables blocked, the pool 74.2% of its window (`blocked62_pinreport.log`). Class S: VERIFIED by a byte-identical rebuild (`blocked62_rebuild.log`).
 **The play command is `fj --run build/doom_e1m1_blocked62.fjm`.**
+
+**blocked63 (2026-10-18, M8: the MAP page): ONE PASS -- the line at the top of 1b** with `heat_blocked27_p10` at
+93813efc (its census the tracked `_census_game.json.gz`; `tests/host/test_pin_heat.py` 3 passed against it). 2,599 s
+(the one-pass census 2,184 s; peak private 11.26 GB). Pinning: 20 of 20 hot words, 44,262 groups placed, 0 left
+unblocked, 550,497 tables blocked, the pool 74.2% of its window (`blocked63_build.log`). VERIFIED by a byte-identical
+rebuild (`blocked63_rebuild.log`, 2,561 s). **The play command is `fj --run build/doom_e1m1_blocked63.fjm`.**
 
 **blocked58 (2026-10-14, M7 P12): ONE PASS -- the line at the top of 1b** with `heat_blocked27_p10` (its census
 `scratchpad/12m/_census_blocked58.json.gz`, the tracked `_census_game.json.gz` since P12; `tests/host/test_pin_heat.py`

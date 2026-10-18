@@ -1,0 +1,21 @@
+machine : power plan 'Silent'; busy processes: none
+against : baseline 'shipped' = build\doom_e1m1_blocked62.fjm (2827291fc223a6da), recorded 2026-10-16 02:29:42 at 67.3 ms/frame
+msframe : A=doom_e1m1_blocked62.fjm B=doom_e1m1_blocked63.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  base      68.7 ms   233.7M fj/s  yard 3.56->3.58G   |  change    68.4 ms   234.9M fj/s  yard 3.58->3.56G
+  rep 1  base      68.4 ms   234.5M fj/s  yard 3.56->3.57G   |  change    68.4 ms   235.0M fj/s  yard 3.57->3.57G
+  rep 2  base      68.0 ms   236.1M fj/s  yard 3.57->3.57G   |  change    68.2 ms   235.5M fj/s  yard 3.55->3.58G
+  rep 3  base      71.1 ms   225.8M fj/s  yard 3.56->3.49G   |  change    68.9 ms   233.2M fj/s  yard 3.56->3.57G
+  rep 4  base      68.9 ms   232.9M fj/s  yard 3.49->3.58G   |  change    68.9 ms   233.3M fj/s  yard 3.57->3.58G
+
+  base     median    68.7 ms/frame  [68.0 .. 71.1]    233.7M fj/s   16,052,128 ops/frame   cell=4 flat
+  change   median    68.4 ms/frame  [68.2 .. 68.9]    234.9M fj/s   16,066,011 ops/frame   cell=4 flat
+
+  pixels identical across arms and reps : NO  <- speed below is MEANINGLESS
+  ops identical across arms             : no   (expected when the arms are different binaries; not when they are one engine A/B)
+  per-pair A/B ms ratio                 : 1.004 1.001 0.996 1.032 1.001
+  median ratio                          : 1.001  (>1 = B faster)
+  VERDICT: NOT SEPARATED   (rule: all 5 pairs agree in sign AND |median ratio - 1| > 3%)
+  engine A: 760b3372cf72a634 full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  engine B: 760b3372cf72a634 full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.57G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl

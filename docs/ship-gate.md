@@ -626,6 +626,41 @@ straight-line code once per frame. Restore fewer cells (a dirty set) is the only
 ## 5. E1M2 (M8): the second level's binary, its own numbers
 
 E1M2 is its OWN binary (`build/doom_e1m2_<id>.fjm`); E1M1's standing number (section 1) is untouched by it.
+**`build/doom_e1m2_r4.fjm`** (2026-10-18, branch `m8p-final` at 925af820; sha256 `9a112139f3d35db3`) is the
+standing E1M2 binary: r3 + THE PLAYTEST'S POLISH (`docs/playtest-e1m2.md`; the owner 2026-10-18: "if you can implement
+it at +0.5% speed penalty, go for it") -- the door heights (`doors.door_neighbours`: two-sided neighbours on every map
+but E1M1 / the legacy one; E1M2's doors 54 -> 228, 258 -> 196, 139 -> 156, 30 / 266 -> 196), the animated sector lights
+(SECTOR_LIGHTS), the scrolling wall (WALL_SCROLL), the switch textures (SWITCH_TEX), the MAP page (AUTOMAP: a menu item
+and the M key, the level's lines and a red dot where the player is), the telefrag and the teleport fog. Class F (its
+pixels differ from r3's by design). Its gates, each run solo on it:
+
+| gate | result |
+|---|---|
+| `p2a_gate` (DOOMFJ_MAP=E1M2) | PASS -- 21 scenarios (the harness now passes the world's animated lights to the oracle's picture, 25663875, and skips an OPTIONAL cell the binary lacks, a48390a6) |
+| `m2_std_gate --map E1M2` | PASS -- 258 frames byte- and state-exact |
+| `m3_gate --map E1M2` | PASS -- 88 frames byte- and state-exact (the tour now opens the MAP page; the program halts at frame 88 as the oracle does) |
+| `hurt_gate` / `fight_gate` / `die_gate` (--map E1M2) | PASS -- 7 / 43 / 17 scenarios |
+| B0, `combat_scenarios_e1m2_v1.json` (keys cfec92103602fc05; the owner: "Im ok with this set") | OK -- 11/11 runs state- and pixel-exact; binding 20,058,861 ops/frame (r3 19,909,950: +0.75%; CAP-22 headroom 1,941,139) |
+| `gamespeed_trail --map E1M2 --record` | PASS; the record re-written (`scenarios/e1m2/gamespeed.json`, 93813efc) |
+| `gamespeed --map E1M2` | SPEED binding 20,591,876 ops/frame PASS (r3 20,408,337: +0.90%); SIZE 83,467,260 words = **62.19% of 2^27** (span 92.06%; the owner: "Size is ok") |
+| `msframe --map E1M2 --a build/doom_e1m2_r4.fjm --save-baseline shipped_e1m2` | **70.2 ms/frame** [70.1 .. 70.9], 195.1M fj/s, 13,697,361 ops/frame (r3 69.8: +0.57% -- the polish's whole price; not split per feature) |
+| E1M1 identity | `emit_baseline --check` at 93813efc: every certified and hosted part SAME; only the standalone banks / main / state DIFFER -- the E1M1 MAP page (17536cad), on purpose (section 1); tests/host 2,219 passed |
+
+The build command (section 1b's, with E1M2's pool at `--spread 1`: at spread 2 one 97,647-table group overflows the
+pool, 134.6%):
+
+    python scripts/emit_check.py E1M2 --then scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m2_r4.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m2.wad --map E1M2 --out build/doom_e1m2_r4.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m2_r4.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+
+(7,181 s; peak private 17.21 GB, min available RAM 0.02 GB -- rule 1 is absolute for it.) Play: `fj --run build/doom_e1m2_r4.fjm`.
+REBUILD VERIFIED: rebuilt from this command at 93813efc (after the E1M1 MAP page merged) as `build/doom_e1m2_r4b.fjm`
+(7,090 s) -- BYTE-IDENTICAL, sha256 `9a112139f3d35db3f71a9b2c0fb57a9e383b342fd2d42e776e072b97fbb57f45` both: the build
+reproduces, and the E1M1 change left E1M2 alone.
+
+**Recorded simplifications still standing** (`docs/handoff-e1m2.md` 3): none of the playtest's list (the five doors
+that opened to 148, issue #104 F1, now open to their DOOM heights). Follow-ups: #147.
+
+<details><summary>r3, the binary r4 replaced</summary>
+
 **`build/doom_e1m2_r3.fjm`** (2026-10-18, branch `m8-e1m2-final` at 9b8ef2c0; sha256 `f18d00c66d211cab`): every M8
 rung merged -- the slot cap (F1.4), the yellow / red cards and the new gives (F4/F7), every door kind (L2), the WR
 teleports (L4), the ML_SOUNDBLOCK flood (L5), the lifts / one-shot floors / pickups on movers (L3, F1.3) -- and
@@ -654,7 +689,4 @@ pool, 134.6%; at spread 1 the pool is 82.6%):
 REBUILD VERIFIED: rebuilt from this command at 71fa53e9 as `build/doom_e1m2_r3b.fjm` (6,395 s) -- BYTE-IDENTICAL, sha256
 `f18d00c66d211cab26e69585b79ee2a45e52c546a0fbb3cf66d3c037240f574f` both.
 
-**Open for the owner:** the size (60.45% of 2^27 -- over E1M1's 43% and the provisional E1M2 60%; it FITS the 2^27
-the owner asked for); freezing the combat plan (it opens 2 doors by the player, the criterion wants 3); the recorded
-simplifications (`docs/handoff-e1m2.md` 3: no telefrag / teleport fog, the scrolling wall and the lights static, the
-S1 switch textures unchanged, five doors opening to 148 -- issue #104 F1). Follow-ups: #147.
+</details>

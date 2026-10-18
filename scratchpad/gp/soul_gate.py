@@ -69,6 +69,15 @@ def high(mph, m: int) -> None:
     w.ws.sk_z[k] = (min(w.ws.mon_floorz[m] + 100, w.ws.sk_ceil[k] - 56)) << 16
 
 
+def freeze(mph, souls, but=None) -> None:
+    """every soul but `but` held in its spawn state for ever (world.TICS_FOREVER: no A_Look, so it never wakes) --
+    the cost pair's quiet souls"""
+    from doomfj.world import TICS_FOREVER
+    for m in souls:
+        if m != but:
+            mph.world.ws.mon_tics[m] = TICS_FOREVER
+
+
 def shotgun(mph, shells: int = 30) -> None:
     ws = mph.world.ws
     ws.p_owned[gd.WP_SHOTGUN] = 1
@@ -247,6 +256,32 @@ class Run(H.Run):
         return tr, mr
 
 
+def cost_pair(gb, cells, table, run, souls, pose, m) -> bool:
+    """the op cost of ONE ACTIVE SOUL a frame: C1 (soul m awake: its chase, charge, flight, slam, float -- and its
+    sprite where it flies) minus C0 (every soul frozen in its spawn state, drawn where it spawned), frame by frame"""
+    keys = [I] * 40
+    ok, ops = True, {}
+    for name, setup in (("C1 one soul active (cost)", lambda mph: (freeze(mph, souls, m), wake(mph, m))),
+                        ("C0 every soul frozen (cost)", lambda mph: freeze(mph, souls))):
+        sc = {"name": name, "keys": keys}
+        want, _mr = run(pose, keys, setup)
+        c = counters(want, souls)
+        print("\n%s -- %d frames; counters: %s" % (name, len(keys), ", ".join("%s %d" % kv for kv in c.items() if kv[1])))
+        before = len(H.FRAME_OPS_LOG)
+        ok &= H.binary_scenario(gb, cells, table, run, sc, pose, setup, want)
+        ops[name[:2]] = H.FRAME_OPS_LOG.get(name) if len(H.FRAME_OPS_LOG) > before else None
+    if ops["C1"] and ops["C0"]:
+        d = [a - b for a, b in zip(ops["C1"], ops["C0"])]
+        ds = sorted(d)
+        print("\nCOST of one active soul (C1 - C0 ops a frame, %d frames): median %s, min %s, max %s, mean %s; "
+              "C0's median frame %s" % (len(d), format(ds[len(d) // 2], ","), format(ds[0], ","), format(ds[-1], ","),
+                                         format(sum(d) // len(d), ","), format(sorted(ops["C0"])[len(d) // 2], ",")))
+        print("  per frame: " + " ".join(str(v) for v in d))
+    else:
+        print("\nCOST: no frame ops recorded (run with --frame-ops)")
+    return ok
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--fjm")
@@ -254,6 +289,9 @@ def main(argv=None) -> int:
     ap.add_argument("--oracle-only", action="store_true")
     ap.add_argument("--only")
     ap.add_argument("--frame-ops", nargs="?", const="-", metavar="FILE")
+    ap.add_argument("--cost", action="store_true",
+                    help="after L1: THE COST PAIR -- L1's pose, 40 idle frames, (C1) L1's soul awake and every other "
+                         "soul frozen, (C0) every soul frozen; both state/pixel-exact, their per-frame ops differenced")
     a = ap.parse_args(argv)
     if not a.oracle_only and not (a.fjm and a.labels):
         ap.error("--fjm and --labels, or --oracle-only")
@@ -310,6 +348,8 @@ def main(argv=None) -> int:
         if a.oracle_only:
             continue
         ok &= H.binary_scenario(gb, cells, table, run, sc, pose, setup, want)
+        if a.cost and sc["name"].startswith("L1"):
+            ok &= cost_pair(gb, cells, table, run, souls, pose, setup.__defaults__[0])
     need = ("charges", "slam_player", "slam_mon", "player_hurt", "soul_kills", "removed", "airborne", "fly_hits",
             "flyhits", "bounces")
     zero = [k for k in need if not totals.get(k)] if not a.only else []

@@ -14,6 +14,9 @@ what the pool declined.
         [--counts-cache <that build's counts cache>] [--build-log <that build's log>]
         [--heat <the --pin-heat list it was built with>]
     python scratchpad/12m/pinreport.py --selftest
+    ... --map E1Mn (M8 G13; or DOOMFJ_MAP): the hot list defaults to the map's OWN (profx/hotwords_<map>.json) when
+        it has one, else E1M1's -- its keys are macro paths, map-free, which is how E1M2 shipped -- and says which;
+        --spread as the build (E1M2: 1) so the counts cache's layout re-derives
 
 Per hot word: PINNED (base == reference) / PINNED, BASE MOVED / LOST (the word rests at no block
 base: every dispatch through it pays the full table address) / UNRESOLVED (a label of its source
@@ -41,6 +44,9 @@ ROOT = Path(__file__).resolve().parents[2]
 PROFX = Path(__file__).resolve().parent / "profx"
 sys.path.insert(0, str(PROFX))
 sys.path.insert(0, str(ROOT / "src"))
+if __name__ == "__main__":                       # M8 G13: `--map E1Mn` before the defaults are read
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg()
 from common import W, label_dict  # noqa: E402
 from fjmimage import FjmImage  # noqa: E402
 from pool import KNOBS, _tokens, eval_key, load_heat, reconstruct  # noqa: E402
@@ -239,7 +245,8 @@ def run(a):
               % (len(renames), ", ".join(__import__("heat_rekey").rename_label(r) for r in renames)))
     image = FjmImage(a.fjm)
     lab = label_dict(a.labels)
-    recon = reconstruct(a.counts_cache, heat=load_heat(a.heat)) if a.counts_cache else None
+    knobs = {} if getattr(a, "spread", None) is None else {"spread": a.spread}
+    recon = reconstruct(a.counts_cache, knobs, heat=load_heat(a.heat)) if a.counts_cache else None
     log = parse_log(Path(a.build_log).read_text(errors="replace")) if a.build_log else None
     print("pin report: %s against the hot list of %s (%d words, profiled on %s)"
           % (Path(a.fjm).name, hot["fjm"], len(hot["words"]), hot["run"]))
@@ -372,8 +379,9 @@ def main():
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--fjm")
     ap.add_argument("--labels")
-    ap.add_argument("--hot", default=str(DEFAULT_HOT))
+    ap.add_argument("--hot", default=None, help="default: the map's own hot list, else E1M1's (printed)")
     ap.add_argument("--counts-cache", default=None)
+    ap.add_argument("--spread", type=int, default=None, help="the build's --spread (pool.KNOBS: 2; E1M2 built at 1)")
     ap.add_argument("--build-log", default=None)
     ap.add_argument("--heat", default=None,
                     help="the --pin-heat list the build was placed with (so its layout re-derives)")
@@ -382,6 +390,13 @@ def main():
         return selftest()
     if not a.fjm or not a.labels:
         ap.error("--fjm and --labels are required (or --selftest)")
+    if a.hot is None:
+        from doomfj.mapprofile import ACTIVE, heat_list
+        hot, own = heat_list(ACTIVE, "hotwords")
+        a.hot = str(ROOT / hot)
+        if not own:
+            print("hot list: %s has no profile of its own yet -- E1M1's (%s; its keys are macro paths, map-free)"
+                  % (ACTIVE, hot))
     return run(a)
 
 

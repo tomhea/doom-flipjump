@@ -96,3 +96,21 @@ The run is recorded in `an_selftest.txt`.
 - **Per-call costs carry boundary noise.** A statement's first op sits a few ops before its first
   label, so statements under about 200 ops/call carry ±10-30% (see the selftest rows).
 - **`analyze.py`'s `fN` file map is blocked27's.** It only prints call sites.
+
+## Another map's heat list (M8 G13)
+
+Each level gets its OWN pin-heat list (`docs/episode-plan.md` 4.7). Every step takes `--map E1Mn` (or
+`DOOMFJ_MAP`); off E1M1 the binary and label table must be named (the defaults are E1M1's blocked27 and are
+refused), the census defaults to the map's one-pass census (`doomfj.mapprofile`), a census of another map is
+refused, and `--spread` must be the build's (E1M2 built at 1; the layout control rejects a wrong one):
+
+    python scratchpad/12m/build_blocked.py ... --map E1Mn --record-sites <sites.json.gz>     # the sites (heavy)
+    python scratchpad/12m/profx/drive.py --map E1Mn --fjm build/doom_e1mn_<x>.fjm games e1mn_games   # the map's tours
+    python scratchpad/12m/profx/hotwords.py --map E1Mn e1mn_games --fjm ... --labels ... --spread 1  # -> hotwords_e1mn.json
+    python scratchpad/12m/heatsites.py --map E1Mn e1mn_games --sites <sites> --fjm ... --labels ... --spread 1
+                                                                                  # -> scratchpad/12m/heat_e1mn.json.gz
+    python scratchpad/12m/pinreport.py --map E1Mn --fjm ... --labels ...          # its own hot list, else E1M1's (said)
+
+`mapprofile.heat_list(map)` is the one rule for which list a build or report uses: the map's own when it exists,
+else E1M1's (map-free macro-path keys -- how E1M2 shipped), never another map's. `drive.py --poke` is E1M1-only (it
+writes E1M1's 75 thss_rt rows). Host test: `tests/host/test_profx_maps.py`.

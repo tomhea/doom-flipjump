@@ -26,6 +26,8 @@ class MapProfile:
     census: str         # the one-pass build's census (--counts-cache): E1M1 keeps its historical name
     baseline: str       # msframe.py --against / --save-baseline
     scenarios: str      # the generated per-map scenario files (gate roles, gamespeed records, viewpoints)
+    heat: str = ""      # M8 G13: the map's OWN pin-heat list (heatsites.py --map writes it; E1M1: ship-gate 1b's)
+    hotwords: str = ""  # M8 G13: the map's own hot-word list (profx/hotwords.py --map; pinreport.py --map reads it)
 
 
 def profile(mapname: str | None = None) -> MapProfile:
@@ -34,7 +36,23 @@ def profile(mapname: str | None = None) -> MapProfile:
     e1 = m == "E1M1"
     return MapProfile(map=m, wad="tests/fixtures/freedoom_%s.wad" % lo, prefix="doom_%s" % lo,
                       census="scratchpad/12m/_census_game%s.json.gz" % ("" if e1 else "_" + lo),
-                      baseline="shipped" if e1 else "shipped_" + lo, scenarios="scenarios/%s" % lo)
+                      baseline="shipped" if e1 else "shipped_" + lo, scenarios="scenarios/%s" % lo,
+                      heat="scratchpad/12m/heat_blocked27_p10.json.gz" if e1 else "scratchpad/12m/heat_%s.json.gz" % lo,
+                      hotwords="scratchpad/12m/profx/hotwords_blocked27.json" if e1
+                      else "scratchpad/12m/profx/hotwords_%s.json" % lo)
+
+
+def heat_list(mapname: str | None = None, kind: str = "heat"):
+    """M8 G13 (docs/level-pipeline.md 4): (repo-relative path, own) of the pin-heat list (`kind` "heat") or the hot
+    words (`kind` "hotwords") a build / report on the map uses: the map's OWN when its profile has made one, else E1M1's
+    -- whose keys are macro-expansion paths, map-free, which is how E1M2 shipped (`own` False says so; a tool prints
+    it). Never another map's silently: E1M1's is the only fallback."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    own = getattr(profile(mapname), kind)
+    if (root / own).exists():
+        return own, True
+    return getattr(profile("E1M1"), kind), False
 
 
 def take_map_arg(argv=None, keep: bool = False) -> str:

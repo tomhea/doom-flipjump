@@ -4,6 +4,9 @@ sites, hottest first, for `build_blocked.py --pin-heat`.
     python scratchpad/12m/heatsites.py <profx prefix> --sites <sites.json.gz> [--top 20]
         [--out scratchpad/12m/heat_blocked27.json.gz] [--counts-cache scratchpad/12m/_counts_game.json.gz]
         [--fjm build/doom_e1m1_blocked27.fjm] [--labels scratchpad/12m/atlas/blocked27.labels.tsv.gz]
+    ... --map E1Mn (M8 G13; or DOOMFJ_MAP): another map's list -- --fjm / --labels required, the census defaults to
+        the map's one-pass census and the list to scratchpad/12m/heat_<map>.json.gz (doomfj.mapprofile); pass the
+        build's --spread (E1M2 built at 1): the layout control refuses a wrong one
 
 WHAT IT JOINS.
   * the profile (`profx drive.py games`): self counts of every pool word the ten games executed;
@@ -36,9 +39,13 @@ ROOT = HERE.parents[1]
 for q in (HERE / "profx", ROOT / "src"):
     if str(q) not in sys.path:
         sys.path.insert(0, str(q))
+if __name__ == "__main__":                       # M8 G13: `--map E1Mn` before the defaults are read
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg()
 from flipjump.assembler.inner_classes.expr import Expr                     # noqa: E402
 from flipjump.assembler.preprocessor import heat_key                       # noqa: E402
-from common import W, default_fjm, default_labels, label_dict, load_sparse, work_dir  # noqa: E402
+from common import (W, active_map, check_census_map, default_counts_cache, default_fjm, default_labels,  # noqa: E402
+                    label_dict, load_sparse, work_dir)
 from fjmimage import FjmImage                                               # noqa: E402
 from pool import KNOBS, eval_key, load_heat, reconstruct                    # noqa: E402
 
@@ -59,14 +66,22 @@ def main():
     ap.add_argument("prefix")
     ap.add_argument("--sites", required=True)
     ap.add_argument("--top", type=int, default=20)
-    ap.add_argument("--out", default=str(HERE / "heat_blocked27.json.gz"),
-                    help="the list; `.gz` writes it gzipped (mtime 0, so a rerun is byte-identical)")
-    ap.add_argument("--counts-cache", default=str(HERE / "_counts_game.json.gz"))
+    ap.add_argument("--out", default=None,
+                    help="the list; `.gz` writes it gzipped (mtime 0, so a rerun is byte-identical). Default: "
+                         "E1M1 heat_blocked27.json.gz (historical), another map its profile's heat_<map>.json.gz")
+    ap.add_argument("--counts-cache", default=None, help="default: E1M1 _counts_game.json.gz, another map its census")
+    ap.add_argument("--spread", type=int, default=None, help="the build's --spread (pool.KNOBS: 2; E1M2 built at 1)")
     ap.add_argument("--fjm", default=None)
     ap.add_argument("--labels", default=None)
     ap.add_argument("--heat", default=None,
                     help="the --pin-heat list the PROFILED build was placed with (its layout), if any")
     a = ap.parse_args()
+    if a.out is None:
+        from doomfj.mapprofile import profile
+        a.out = str(HERE / "heat_blocked27.json.gz") if active_map() == "E1M1" else str(ROOT / profile().heat)
+    a.counts_cache = a.counts_cache or str(default_counts_cache())
+    check_census_map(a.counts_cache)
+    knobs = {} if a.spread is None else {"spread": a.spread}
     p = Path(a.prefix)
     prefix = str(p if p.is_absolute() else work_dir() / p)
     fjm = Path(a.fjm) if a.fjm else default_fjm()
@@ -74,7 +89,7 @@ def main():
     F = game_frames(prefix)
 
     # the layout, checked against the image (as hotwords.py)
-    pool, fr = reconstruct(a.counts_cache, heat=load_heat(a.heat))
+    pool, fr = reconstruct(a.counts_cache, knobs, heat=load_heat(a.heat))
     img = FjmImage(fjm)
     agree = n = 0
     for g, (base, _e) in pool.groups.items():
@@ -111,7 +126,7 @@ def main():
           % (Path(a.sites).name, hashlib.sha256(Path(a.sites).read_bytes()).hexdigest()[:16],
              len(sites["groups"]), sum(len(v) for v in sites["groups"].values()), sites.get("program")),
           flush=True)
-    replay, _ = reconstruct(a.counts_cache, heat=load_heat(a.heat))
+    replay, _ = reconstruct(a.counts_cache, knobs, heat=load_heat(a.heat))
     heat, report, bad = {}, [], []
     for g in ranked:
         recorded = sites["groups"].get(g)

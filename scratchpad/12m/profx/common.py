@@ -26,13 +26,53 @@ def work_dir():
     return d
 
 
+def active_map():
+    """M8 G13: the map the profile is of (DOOMFJ_MAP / --map, doomfj.mapprofile; E1M1 when unset)"""
+    return os.environ.get("DOOMFJ_MAP", "E1M1").upper()
+
+
+def _e1m1_default(what, env):
+    if active_map() != "E1M1":
+        raise SystemExit("profx on %s: pass --%s (or %s) -- the default is E1M1's blocked27, and a profile of one "
+                         "map's binary read as another's names the wrong words" % (active_map(), what, env))
+
+
 def default_fjm():
-    return Path(os.environ.get("PROFX_FJM") or (ROOT / "build" / "doom_e1m1_blocked27.fjm"))
+    if os.environ.get("PROFX_FJM"):
+        return Path(os.environ["PROFX_FJM"])
+    _e1m1_default("fjm", "PROFX_FJM")
+    return ROOT / "build" / "doom_e1m1_blocked27.fjm"
 
 
 def default_labels():
-    return Path(os.environ.get("PROFX_LABELS_TSV")
-                or (ROOT / "scratchpad" / "12m" / "atlas" / "blocked27.labels.tsv.gz"))
+    if os.environ.get("PROFX_LABELS_TSV"):
+        return Path(os.environ["PROFX_LABELS_TSV"])
+    _e1m1_default("labels", "PROFX_LABELS_TSV")
+    return ROOT / "scratchpad" / "12m" / "atlas" / "blocked27.labels.tsv.gz"
+
+
+def default_counts_cache():
+    """M8 G13: E1M1 keeps the tools' historical default; another map's one-pass census (doomfj.mapprofile)"""
+    m = active_map()
+    if m == "E1M1":
+        return ROOT / "scratchpad" / "12m" / "_counts_game.json.gz"
+    import sys
+    if str(ROOT / "src") not in sys.path:
+        sys.path.insert(0, str(ROOT / "src"))
+    from doomfj.mapprofile import profile
+    return ROOT / profile(m).census
+
+
+def check_census_map(counts_path):
+    """M8 G13: a census names the map it counted (sig.map): refuse one of another map than the active one"""
+    p = Path(counts_path)
+    with (gzip.open(p, "rt", encoding="utf-8") if p.suffix == ".gz" else open(p, encoding="utf-8")) as fh:
+        sig = json.load(fh).get("sig") or {}
+    got = str(sig.get("map", "E1M1")).upper()
+    if got != active_map():
+        raise SystemExit("%s counts %s's program, not %s's (pass --counts-cache, or --map %s)"
+                         % (p.name, got, active_map(), got))
+    return got
 
 
 # ------------------------------------------------------------------------------------ label table

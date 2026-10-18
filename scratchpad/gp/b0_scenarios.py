@@ -414,7 +414,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
                               removed=orc.monster_removed(mph) if loot else None,    # M7 P6
                               barrel_views=orc.monster_barrel_views(mph) if loot else None,
                               card=(cm.state[3] if cm is not None else 0) if loot else None,
-                              view_drop=mph.view_drop() if mph is not None else 0)    # M7 P8a
+                              view_drop=mph.view_drop() if mph is not None else 0,    # M7 P8a
+                              wall_scroll=mph.wall_scroll() if mph is not None else 0)    # M8
             if mph is not None:
                 mph.set_aim(_aim)                        # M7 P4.2a: the window, for the next frame's weapon
             if mph is not None:

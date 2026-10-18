@@ -872,6 +872,21 @@ class World(CombatMixin):
         self._combat_init(aim, player_blocking)
         self.reset(skill)
 
+    def wall_scroll(self) -> int:
+        """M8 (doomfj.scrollcode): `render_wall_frame(wall_scroll=)` for the picture of this world frame -- leveltime's low
+        byte on a map whose Config has WALL_SCROLL and which has a special-48 line (E1M2), else 0 (E1M1: the keyword is
+        not passed). THE ONE PLACE the value is made: MonsterPhase.wall_scroll and monsters.view_drop_kw read it. The
+        binary reads lvtime at its render, after the frame's tic, as every gate's picture follows the tic"""
+        on = self.__dict__.get("_wall_scrolls")
+        if on is None:
+            from doomfj import scrollcode
+            on = self._wall_scrolls = bool(scrollcode.scroll_on(self.rm.cfg, self.mapname)
+                                           and scrollcode.scroll_lines(self.lds))
+        if not on:
+            return 0
+        from doomfj.scrollcode import wall_scroll_of
+        return wall_scroll_of(self.ws.leveltime)
+
     @property
     def sec_nibbles(self) -> int:
         """M8 L1 (docs/handoff-e1m2.md 4 (B)): the width of a sector id in fj -- the fewest nibbles that hold every

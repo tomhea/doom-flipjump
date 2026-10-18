@@ -82,7 +82,14 @@ B0 on its set, gamespeed, msframe, rebuild).
   is the oracle never skipping a marking seg on an animated light (the program marks it in every state).
 - The computer map is picked up and does nothing (there is no automap).
 - Deathmatch / co-op starts and things are ignored (single player only, as E1M1).
-- The scrolling wall (48, two lines): decided in L5 -- animated if cheap, else static.
+- The scrolling wall (48, lines 1254 and 1338, COMPBLUE): ANIMATED, as a DELIBERATE APPROXIMATION (the integrator,
+  2026-10-18, under the owner's "implement it if it costs <= +0.5%"). DOOM slides the texture one texel a tic; the game
+  tier has no texture u (a W1R wall is a 1-column, 2-texel canvas keyed on the screen column: an offset moves 0 pixels,
+  `scratchpad/p48_scroll_probe.py`), so the segs of a special-48 line slide their W1R PATTERN KEY instead: x + wnoff +
+  (leveltime & 0xFF), one screen column a frame -- screen-space, not world-anchored, with a jump every 256 frames when
+  the low byte wraps. Both mirrors: `doomfj.scrollcode` (config.MAP_CONFIG `WALL_SCROLL`, E1M2 only; E1M1's text
+  unchanged), `render_wall_frame(wall_scroll=)` from `World.wall_scroll()`. Price: 539 ops per scrolling seg drawn
+  (tests/fj/test_wall_scroll_fj.py), the wnoise tables 801 -> 1,056 keys.
 - The teleporters (97, L4; `doomfj.teleport` holds the rules and these decisions): NO TELEPORT FOG and no sound (nothing
   reads them); NO TELEFRAG -- DOOM's player kills every shootable thing at the destination, here his teleport is
   refused there exactly as a monster's is (P_TeleportMove's stomp for a monster), in both mirrors; ONE TELEPORT PER MOVE

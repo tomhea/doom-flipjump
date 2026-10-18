@@ -74,6 +74,7 @@ from doomfj import statcode as _statcode                                  # P10:
 from doomfj import teleportcode as _teleportcode                          # M8 L4: the WR teleports
 from doomfj import lightcode as _lightcode                                # M8: the sector light thinkers
 from doomfj import lights as _lights                                      # M8: ... and their rules
+from doomfj import scrollcode as _scrollcode                              # M8: the scrolling wall (special 48)
 from doomfj import keyboard as _keyboard                                   # P9: the press latch
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
@@ -2513,7 +2514,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
     # W1R-ANCHOR: the pattern key is (x + wnoff) with wnoff in [0, 640), so the W1R tables
     # cover the whole shifted domain (the hash is pure, so this is just more baked entries).
-    _wn_dom = cfg.VIEW_W + 1 + (640 if w1r_flag else 0)
+    # M8 (doomfj.scrollcode): a scrolling map's game tier slides the key of its special-48 segs by lvtime's low byte,
+    # so the tables cover WALL_SCROLL_MASK more keys -- only there (lvtime is a standalone cell); E1M1: 801, as before
+    _scroll_on = bool(w1r_flag and lines and standalone and _scrollcode.scroll_on(cfg, mapname))
+    _scroll_lds = _scrollcode.scroll_lines(lds) if _scroll_on else frozenset()
+    assert not _scroll_on or _scroll_lds, ("WALL_SCROLL is set for %s, which has no special-48 line" % mapname)
+    _wn_dom = _scrollcode.wnoise_domain(cfg.VIEW_W, bool(w1r_flag), _scroll_on)
     _wn_idx = 3 if w1r_flag else 2
     wnoise = (generate_dispatch_table_fj(
         "wnoise", [rm.wall_noise(x) for x in range(_wn_dom)],
@@ -3253,7 +3259,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     "    stl.fcall seg_pass1_leaf, seg_ret",
                     f"    hex.if0 1, proceed, ss{cid}_seg{si}_unseen",
                     *_rcall,
-                    "    stl.fcall seg_pass2_leaf, seg_ret2",
+                    # M8 (doomfj.scrollcode): a scrolling line's seg slides wnoff around its pass 2
+                    *_scrollcode.pass2_lines(_scrollcode.seg_scrolls(seg, _scroll_lds)),
                     *_rcall,
                     f"  ss{cid}_seg{si}_unseen:",
                     f"    stl.fcall seg{si}_geom_consts, xb_ret"]
@@ -3976,6 +3983,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # M5: the keyboard poll's scratch, and the four PERSISTENT held-key flags. The flags are
           # the only cells besides the view state that the M1 reset must leave alone.
           *(STANDALONE_SCRATCH_DECLS if standalone else []),
+          *(_scrollcode.DECLS if _scroll_on else []),       # M8: the scrolling wall's wnoff save / slide
           # M14-c: the player tic's scratch -- the signed 16.16 move magnitude, the
           # finesine index it is projected through, and the two 16.16 deltas
           *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",

@@ -333,6 +333,7 @@ class Mirror:
                             "removed": removed, "bviews": bviews,               # M7 P6
                             "skill": mph.world.ws.skill,                        # M7 P6+P7: what the picture hides
                             "vdrop": mph.view_drop(),                           # M7 P8a: the dying view's sink
+                            "wscroll": mph.wall_scroll(),                       # M8: the scrolling wall's slide
                             # M7 P8a: this frame's knock moves and the walls that refused them (monsters.KnockTap),
                             # and every monster's whole-unit position (a corpse's slide)
                             "knock": ((len(mph.tap.since(k_tap)), len(mph.tap.wall_refusals(mph.tap.since(k_tap))))
@@ -360,7 +361,8 @@ def seen_of(orc, dsim, card_di):
                    removed=orc.monster_removed(mph) if loot else None,       # M7 P6
                    barrel_views=orc.monster_barrel_views(mph) if loot else None,
                    skill=mph.world.ws.skill,                                  # M7 P6+P7: the skill played
-                   view_drop=mph.view_drop())                                 # M7 P8a: the dying view's sink
+                   view_drop=mph.view_drop(),                                 # M7 P8a: the dying view's sink
+                   wall_scroll=mph.wall_scroll())                             # M8: the scrolling wall's slide
         mph.set_aim(aim)                    # M7 P4.2a: this picture's window -> the next frame's shots
         return orc._mviews.slots_of(seen)
     return fn
@@ -389,7 +391,8 @@ def picture(orc, dsim, fr: dict, card_di) -> bytes:
                       mobiles=fr["mobiles"],                                        # M7 P5
                       removed=fr.get("removed"), barrel_views=fr.get("bviews"),     # M7 P6
                       card=fr["phase"][3], skill=fr.get("skill"),                  # M7 P6+P7: the skill played
-                      view_drop=fr.get("vdrop", 0))                                # M7 P8a: the dying view's sink
+                      view_drop=fr.get("vdrop", 0),                                # M7 P8a: the dying view's sink
+                      wall_scroll=fr.get("wscroll", 0))                            # M8: the scrolling wall's slide
 
 
 def expected_cells(fr: dict, order: list, mover_order=()) -> dict:

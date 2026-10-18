@@ -144,6 +144,7 @@ class SeenHook:
                                       sprite_wad=self.art, thing_positions=pos, thing_hidden=hidden,
                                       thing_views=views, seen_out=seen,
                                       **({"view_drop": drop} if drop else {}), **aim_kw,
+                                      **({"wall_scroll": world.wall_scroll()} if world.wall_scroll() else {}),  # M8
                                       **world.light_render_kw(), **self.kw)    # M8: the binary's picture has them
         finally:
             RMOD.drawable_things, RMOD.baked_thing_mask = saved

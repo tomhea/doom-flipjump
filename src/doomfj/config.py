@@ -238,6 +238,12 @@ class Config:
     # thinkers) -- 1 on E1M2. 0 (E1M1, the default): its lights stay static and its emission is unchanged. Not an fj
     # constant (`constants()` leaves it out): the emitter and the model read it here.
     SECTOR_LIGHTS: int = 0
+    # M8 (the special-48 simplification, owner rule "implement it if it costs <= +0.5%"): 1 = the segs of a scrolling
+    # wall line (doomfj.scrollcode.SCROLL_SPECIALS) slide their W1R pattern key by `leveltime & WALL_SCROLL_MASK` -- the
+    # game tier's visible form of DOOM's textureoffset += FRACUNIT a tic (a 1x1 W1R canvas has no texture u to move).
+    # A DELIBERATE APPROXIMATION: screen-space, not world-anchored, and the pattern jumps once every 256 frames when
+    # the low byte wraps. 0 (E1M1): nothing is emitted and the oracle takes the old path.
+    WALL_SCROLL: int = 0
 
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
@@ -304,7 +310,9 @@ MAP_CONFIG = {
     # (> 255 slot ids: wall_renderer.check_slot_ids)
     # M8: SECTOR_LIGHTS -- its light specials animate (doomfj.lights: 9 thinkers -- 3 flashes, a strobe, a fire flicker,
     # 4 glows; its other 9 glows sit between equal lights and stay static)
-    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1},
+    # M8: WALL_SCROLL -- lines 1254 and 1338 (COMPBLUE) are special 48, the scrolling wall (doomfj.scrollcode)
+    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1,
+             "WALL_SCROLL": 1},
 }
 
 

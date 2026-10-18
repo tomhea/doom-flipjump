@@ -36,7 +36,8 @@ every 8 frames, every step one group); 53 W1 perpetual lift (`perpetual_tic`). T
 perpetual lift starts DOWN (DOOM rolls P_Random() & 1); the changed flat shows one stop (8 frames) after the trigger
 (the damage stops at the trigger, exact); a stair step or a 20 / 22 floor is assumed still at the trigger (EV_* skip a
 busy sector: none of E1M3 / E1M6's is a door or another mover -- asserted in `floor_groups`); a lift whose low equals
-its high (E1M3's 180, tag 15's second sector) stays a one-state lift, as before.
+its high (E1M3's 180, tag 15's second sector) is no lift at all (`lift_sectors`: it never moves; with SWITCH_TEX on its
+SR line would swap only while 256 is at rest, where DOOM's EV_DoPlat also counts 180's null plat).
 """
 from __future__ import annotations
 
@@ -137,7 +138,14 @@ def lift_sectors(secs, lds, sds) -> dict:
         if si in perp:
             assert highest_surrounding(secs, lds, sds, si) <= high, (
                 "perpetual lift %d starts below its highest neighbour: its state 0 would not be its stored floor" % si)
-        out[si] = (min(high, lowest_surrounding(secs, lds, sds, si)), high)
+        low = min(high, lowest_surrounding(secs, lds, sds, si))
+        if low == high and si not in perp:
+            # M8 C4: a lift with nowhere to go (E1M3's 180: its tag's other sector 256 is its only lower neighbour, and
+            # it stands at 256's top): EV_DoPlat's plat moves 0 units, waits and "returns" -- nothing anyone can see or
+            # touch. It is no machine here; a one-state door machine would WRAP in fj (its closing step decrements
+            # state 0 to 15: tests/fj/test_episode_movers_fj.py found it). E1M1 / E1M2 have none.
+            continue
+        out[si] = (low, high)
     return out
 
 

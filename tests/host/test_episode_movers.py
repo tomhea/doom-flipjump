@@ -395,3 +395,14 @@ def test_the_gates_press_the_light_switch(wad, monkeypatch):
     assert w.lights_now()[321] == 112                                         # outside the box: nothing
     MonsterPhase.switch_uses(SimpleNamespace(world=w), ((), frozenset(), ()), (box[0] + 5) << 16, box[1] << 16)
     assert w.lights_now()[321] == 255
+
+
+def test_every_lift_has_two_states(wad):
+    """a one-state lift is no machine (E1M3's 180 moves 0 units): the fj door machine would wrap its state below 0"""
+    for m in ("E1M%d" % i for i in range(1, 10)):
+        secs, lds, sds, _v = _map(wad, m)
+        st = MV.lift_states(secs, lds, sds)
+        assert all(len(v) >= 2 for v in st.values()), m
+    secs, lds, sds, _v = _map(wad, "E1M3")
+    assert 180 not in MV.lift_states(secs, lds, sds) and 256 in MV.lift_states(secs, lds, sds)
+    assert secs[180].tag == secs[256].tag == 15

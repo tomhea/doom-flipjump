@@ -740,12 +740,18 @@ def _in_box(dsim, box):
 
 
 def trigger_pose(dsim, trig, back: int = 40):
-    """`back` units before the trigger line's middle, facing across it"""
+    """`back` units before the trigger line's middle, facing across it. M8 (gen_dryrun on E1M3: tag 11's W1 lines ring
+    the blue card's platform, a floor switch's floor): never a pose ON a mover's or a door's floor -- the static check
+    takes it, the player cannot walk off it at the level start"""
     _si, axis, coord, lo, hi = trig
+    assert axis in ("x", "y"), "a diagonal trigger has no axis pose: %s" % (trig,)
     mid = (lo + hi) // 2
+    moving = set(dsim.mp.stops) | set(dsim.mp.switch) | set(dsim.order)
     for side in (-1, 1):
         a = coord + side * back
         x, y = (mid, a) if axis == "y" else (a, mid)
+        if _sector(dsim, x, y) in moving:
+            continue
         if _ok(dsim, x << 16, y << 16):
             ang = bam(0, -side) if axis == "y" else bam(-side, 0)
             return (x << 16, y << 16, ang)
@@ -771,6 +777,13 @@ def scenarios(dsim, card) -> list:
     R = gate_roles.roles(dsim.mapname)
     kinds = dsim.dp.kinds
     trig = {t[0]: t for t in dsim.dp.triggers}
+    # M8: a door's LAST trigger, as always -- unless it is diagonal (no axis pose: E1M3's ring of W1 lines): then its
+    # last axis-aligned one
+    for _si in list(trig):
+        if trig[_si][1] not in ("x", "y"):
+            ax = [t for t in dsim.dp.triggers if t[0] == _si and t[1] in ("x", "y")]
+            if ax:
+                trig[_si] = ax[-1]
     n = dsim.nstates
     F, B, U, I = {"forward": True}, {"back": True}, {"use": True}, {}
     out = []

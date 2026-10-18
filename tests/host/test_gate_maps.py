@@ -121,3 +121,17 @@ def test_m3_walk_crossing_a_special_line_is_named():
     n = (nx * nx + ny * ny) ** 0.5
     p = [SimState(int((mx + s * 8 * nx / n) * 65536), int((my + s * 8 * ny / n) * 65536), 0, "E1M1") for s in (-1, 1)]
     assert M3.special_crossings(mw, "E1M1", p) == [(i, ld.special)]
+
+
+def test_trigger_pose_never_on_a_moving_floor():
+    """E1M3: tag 11's W1 lines ring the blue card's platform, a floor switch's floor (sector 117, 61 units up until the
+    switch): the side -1 pose sat ON it. The pose is now off every mover / door floor; CONTROL: the raw rule (side -1,
+    the static check alone) is the platform"""
+    import p2a_gate as G
+    ds = _dsim("E1M3")
+    t = [t for t in ds.dp.triggers if t[0] == 82 and t[1] == "y" and t[2] == 2640][0]
+    x, y, _a = G.trigger_pose(ds, t)
+    assert G._sector(ds, x >> 16, y >> 16) not in set(ds.mp.switch) | set(ds.mp.stops) | set(ds.order)
+    _si, _axis, coord, lo, hi = t
+    raw = ((lo + hi) // 2, coord - 40)
+    assert G._ok(ds, raw[0] << 16, raw[1] << 16) and G._sector(ds, *raw) in ds.mp.switch

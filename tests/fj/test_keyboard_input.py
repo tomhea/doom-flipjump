@@ -346,6 +346,51 @@ def test_the_help_screen_lists_exactly_the_keys_that_work(kb_fjm):
     assert not _does_something(kb_fjm, 0x71) and not _does_something(kb_fjm, 0x67)
 
 
+def _map_poll_program(automap: bool) -> str:
+    """M8: the game tier's prologue (wall_renderer.standalone_key_lines -- kb.poll and, with the map page, M read after
+    each poll) printing `ev_map` per frame"""
+    from doomfj import keyboard as KB
+    from doomfj.wall_renderer import standalone_key_lines
+    body = ["stl.startup_and_init_all", "tm_frame:", *standalone_key_lines(POLLS, automap=automap),
+            "hex.print_as_digit ev_map, 0" if automap else "stl.output_char 0x30", "stl.output 10",
+            "hex.inc 2, tm_count", "hex.cmp 2, tm_count, tm_frames, tm_frame, tm_done, tm_done", "tm_done:"]
+    body += ["stl.loop", "bad:", "stl.output_char 0x21", "stl.loop", "kbstat: hex.vec 1", "kbcode: hex.vec 2",
+             "tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {FRAMES}",
+             "pkeys: hex.vec 2", *[f"{KB.flag(k)}: hex.vec 1" for k in KB.HELD_KEYS], KB.NOW_DECL,
+             *[f"{e}: hex.vec 1" for e in ("ev_enter", "ev_esc", "ev_up", "ev_dn", "ev_help", "ev_any", "ev_map")]]
+    return "\n".join(body) + "\n"
+
+
+def _map_poll_run(tmp_path, automap, events):
+    src = tmp_path / ("mp%d.fj" % automap)
+    src.write_text(_map_poll_program(automap), encoding="utf-8")
+    out = tmp_path / ("mp%d.fjm" % automap)
+    fj.assemble([*[p.resolve() for p in SRC], src.resolve()], out, memory_width=W, print_time=False)
+    return _run(out, events)
+
+
+def test_e1m1s_help_names_m_and_the_game_poll_records_it(kb_fjm, tmp_path):
+    """M8 (the owner, 2026-10-18: the map page on E1M1 too): E1M1's help names every key it did and M
+    (`help_key_names(has_page("E1M1"))`); kb.poll does something on each of the others, and the game tier's prologue
+    -- kb.poll with M read after each poll -- records M's DOWN edge as `ev_map` on exactly its frame: tapped in frame 1,
+    pressed in 3 and released in 4. R9: 'n' (0x6E), 'h' and M's release record nothing, and the prologue without the
+    map page (E1M1 before) never records M"""
+    from doomfj.automap import has_page
+    from doomfj.menu import MAP_KEY, help_keycodes
+    am = has_page("E1M1")
+    assert am, "E1M1 has the map page (config.MAP_CONFIG)"
+    named, codes = help_key_names(am), help_keycodes(am)
+    assert sorted(named) == sorted(codes) and codes["M"] == MAP_KEY == 0x6D
+    dead = [n for n in named if n != "M" and not _does_something(kb_fjm, codes[n])]
+    assert not dead, "the help screen names keys kb.poll ignores: %r" % dead
+    events = [(POLLS * 1, True, MAP_KEY), (POLLS * 1 + 1, False, MAP_KEY),       # M tapped in frame 1
+              (POLLS * 2, True, 0x6E), (POLLS * 2 + 1, False, 0x6E),             # 'n' in frame 2
+              (POLLS * 3 + 2, True, MAP_KEY), (POLLS * 4 + 1, False, MAP_KEY),   # M down in 3, up in 4
+              (POLLS * 5, True, 0x68), (POLLS * 5 + 1, False, 0x68)]             # 'h' in frame 5
+    assert _map_poll_run(tmp_path, True, events) == ["0", "1", "0", "1", "0", "0"]
+    assert _map_poll_run(tmp_path, False, events) == ["0"] * FRAMES
+
+
 def test_negative_control_a_mirror_without_key_5_is_caught(kb_fjm):
     """R9 (P9): '5' is the launcher's key -- a mirror that leaves it unbound (the pre-P9 table) is rejected on its
     script, which the program passes"""

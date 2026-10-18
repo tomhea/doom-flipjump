@@ -326,6 +326,9 @@ MAP_CONFIG = {
     # M8: AUTOMAP -- the map page (doomfj.automap)
     "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1,
              "WALL_SCROLL": 1, "SWITCH_TEX": 1, "AUTOMAP": 1},
+    # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's ONLY entry -- the map page, at 40 units a pixel (doomfj.
+    # automap). Every other field keeps its default, which is what E1M1 had with no entry at all
+    "E1M1": {"AUTOMAP": 1},
 }
 
 

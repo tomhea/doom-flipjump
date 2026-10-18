@@ -53,7 +53,7 @@ THE THINGS THIS GATE EXISTS TO CATCH, none of which a single-frame check would s
      NEW GAME (the skill screen's highlight boots at MEDIUM); from then on the menu opens on RESUME (its first item,
      W held across it), esc or enter there resume in place, and up from NEW GAME reaches it (clamped there). Every
      main-menu picture is checked in both variants, RESUME highlighted once more, and `g_live` is read each frame.
-  8. M8 -- THE MAP PAGE (doomfj.automap), on a map whose MAP_CONFIG turns it on (E1M2): the main menu's MAP item sits
+  8. M8 -- THE MAP PAGE (doomfj.automap), on a map whose MAP_CONFIG turns it on (E1M1, E1M2): the main menu's MAP item sits
      between HELP and EXIT, so the same keys visit it (the boot menu's down from HELP lands on MAP, not EXIT), and the
      script goes on (SCRIPT_MAP): enter on MAP opens the page from the menu -- the dot where the walk left the player
      -- m closes it to the main menu on MAP, esc there resumes; m in the world opens it again, W held across it moves

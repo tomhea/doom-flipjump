@@ -37,10 +37,18 @@ from doomfj.menu import (ANY_KEY_EVENT, HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE
                          LEVEL_DONE_SCREENS, MAIN_EXIT_SCR, MAIN_HELP_SCR, MAIN_RESUME_SCR, MENU_HALTED, MENU_KEYS,
                          menu_step, palette_colours)
 from doomfj.wad import WadFile
+from doomfj import automap as A                                              # M8: the map page
+from doomfj.lut_generator import generate_emit_byte_by_nibbles_fj           # M8: the page's dot prints bytes
+from doomfj.wall_renderer import AUTOMAP_STATE_DECLS                       # M8
+from doomfj.menu import MAIN_MAP_SCR                                       # M8
 from doomfj.wall_renderer import (BOOT_MENU_SKILL, MENU_STATE_DECLS, SKILLS, _menu_lines, DEFAULT_MENU,
                                   DEFAULT_MENU_SELECTED, menu_screen_pixels, restart_lines)
 
 CFG = Config()
+# M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's menu has the MAP item under HELP and the map page -- the
+# block is run as E1M1 emits it (E1M1's page; the harness's view at 0, 0 is inside its map)
+PAGES = A.pages_for(WadFile.from_path("tests/fixtures/freedoom_e1m1.wad"), "E1M1",
+                    bytes(b for rgb in WadFile.from_path("tests/fixtures/freedoom_assets.wad").playpal(0) for b in rgb))
 VW, VH = CFG.VIEW_W, CFG.VIEW_H
 ASSETS = Path("tests/fixtures/freedoom_assets.wad")
 SRC = [Path("src/fj") / "present.fj", Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
@@ -96,7 +104,7 @@ SCRIPT = (press(1, DOWN)          # the boot menu: down to HELP
           + press(36, ESC))       # esc on RESUME: the world
 FRAMES = 38
 # P9: EXIT -- down, down, enter: the program HALTS on frame 4, before presenting it (frames 0..3 are all it shows)
-HALT_SCRIPT = press(1, DOWN) + press(2, DOWN) + press(4, ENTER) + press(6, ESC)
+HALT_SCRIPT = press(1, DOWN) + press(2, DOWN) + press(3, DOWN) + press(4, ENTER) + press(6, ESC)   # M8: past MAP
 HALT_FRAMES = 8
 # from LEVEL COMPLETE (the exit's state): P10 -- h is a key: ANY key leads to the boot's main menu; enter there opens
 # the skill screen
@@ -133,6 +141,7 @@ def _program(menu_lines, scr0, frames):
         *[f"menu_scr: hex.vec 1, {scr0}" if d.startswith("menu_scr:") else
           f"g_live: hex.vec 1, {int(scr0 in LEVEL_DONE_SCREENS)}" if d.startswith("g_live:") else d    # P10
           for d in MENU_STATE_DECLS],
+        *AUTOMAP_STATE_DECLS, *A.decls(PAGES),                      # M8: the map page's cells
         "kbstat: hex.vec 1", "kbcode: hex.vec 2", "kb_f: hex.vec 1", "kb_b: hex.vec 1",
         "kb_l: hex.vec 1", "kb_r: hex.vec 1", "kb_u: hex.vec 1",
         "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1", "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1", "kb_w5: hex.vec 1",   # M7 P4.1
@@ -160,7 +169,9 @@ def _run(tmp, name, menu_lines, events, scr0=0, frames=FRAMES):
     src.write_text(_program(menu_lines, scr0, frames), encoding="utf-8")
     consts = CFG.emit_fj_consts(tmp / "fj_consts.fj")
     out = tmp / f"{name}.fjm"
-    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve()], out,
+    byte_t = tmp / "byte_emit.fj"                   # M8: the page's dot prints run-time bytes (AFTER the program:
+    byte_t.write_text(generate_emit_byte_by_nibbles_fj("byte"), encoding="utf-8")     # it runs its init at top level)
+    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve(), byte_t.resolve()], out,
                 memory_width=W, print_time=False)
     screen = _Recording()
     io = PcIO(screen, KeyboardIO(ScriptedKeyEventSource([KeyEvent(*e) for e in events])))
@@ -188,17 +199,18 @@ def _expected(events, scr0=0, frames=FRAMES, step=menu_step):
                 if pending[i].is_down:
                     ev.add(ANY_KEY_EVENT)           # P10
                 i += 1
-        mode, scr, sel, _ng, live = step(mode, scr, sel, ev, live)
+        mode, scr, sel, _ng, live = step(mode, scr, sel, ev, live, automap=True)     # M8: E1M1's MAP
         states.append((mode, scr, sel, live))
         if scr == MENU_HALTED:                      # P9: the program halts on this frame, presenting nothing more
             break
-        out.append(menu_screen_pixels(CFG, colours, scr, sel, live) if mode else [STUB] * (VW * VH))
+        out.append(menu_screen_pixels(CFG, colours, scr, sel, live, automap=PAGES, view=(0, 0)) if mode
+                   else [STUB] * (VW * VH))                         # M8: the harness's view is (0, 0)
     return out, states
 
 
 def _lines(mutate=None):
     lines = _menu_lines(CFG, WadFile.from_path(str(ASSETS)), list(DEFAULT_MENU),
-                        DEFAULT_MENU_SELECTED, restart=RESTART)
+                        DEFAULT_MENU_SELECTED, restart=RESTART, automap=PAGES)
     return mutate(lines) if mutate else lines
 
 
@@ -253,9 +265,11 @@ def test_the_script_visits_every_screen():
     there are world frames, and the help closes both ways"""
     _want, states = _expected(SCRIPT)
     # P10: a main-menu screen is a picture per (screen, g_live); the help and the skill screen do not depend on it
-    menus = {(s[1], s[2] if s[1] == 1 else None, s[3] if s[1] in (0, MAIN_HELP_SCR, MAIN_EXIT_SCR) else None)
+    menus = {(s[1], s[2] if s[1] == 1 else None,
+              s[3] if s[1] in (0, MAIN_HELP_SCR, MAIN_EXIT_SCR, MAIN_MAP_SCR) else None)
              for s in states if s[0] == 1}
-    assert menus == {(0, None, 0), (MAIN_HELP_SCR, None, 0), (MAIN_EXIT_SCR, None, 0),
+    # M8: on E1M1's menu (MAP under HELP) the boot menu's second down lands on MAP, not EXIT
+    assert menus == {(0, None, 0), (MAIN_HELP_SCR, None, 0), (MAIN_MAP_SCR, None, 0), (MAIN_MAP_SCR, None, 1),
                      (0, None, 1), (MAIN_HELP_SCR, None, 1), (MAIN_EXIT_SCR, None, 1), (MAIN_RESUME_SCR, None, None),
                      (HELP_MENU_SCR, None, None), (HELP_GAME_SCR, None, None), (1, 0, None), (1, 1, None),
                      (1, 2, None)}, menus
@@ -270,7 +284,7 @@ def test_enter_on_exit_halts_the_program(runs):
     it: the run presents frames 0..3, each the oracle's picture, and NOTHING after, though the script presses esc
     later and the harness would loop for HALT_FRAMES frames"""
     want, states = _expected(HALT_SCRIPT, frames=HALT_FRAMES)
-    assert [s[1] for s in states] == [0, MAIN_HELP_SCR, MAIN_EXIT_SCR, MAIN_EXIT_SCR, MENU_HALTED], states
+    assert [s[1] for s in states] == [0, MAIN_HELP_SCR, MAIN_MAP_SCR, MAIN_EXIT_SCR, MENU_HALTED], states
     assert len(want) == 4 and len(runs["halt"]) == 4, (len(want), len(runs["halt"]))
     assert _first_bad(runs["halt"], want) is None
 
@@ -284,8 +298,8 @@ def test_an_exit_that_does_not_halt_is_caught(tmp_path):
     got = _run(tmp_path, "nohalt", _lines(mutate), HALT_SCRIPT, frames=HALT_FRAMES)
     assert len(got) == HALT_FRAMES and _first_bad(got, _expected(HALT_SCRIPT, frames=HALT_FRAMES)[0]) == 4
 
-    def no_halt(mode, scr, sel, ev, live):
-        st = menu_step(mode, scr, sel, ev, live)
+    def no_halt(mode, scr, sel, ev, live, automap=False):
+        st = menu_step(mode, scr, sel, ev, live, automap=automap)
         return (1, scr, sel, None, live) if st[1] == MENU_HALTED else st
     real = _run(tmp_path, "halt2", _lines(), HALT_SCRIPT, frames=HALT_FRAMES)
     assert _first_bad(real, _expected(HALT_SCRIPT, frames=HALT_FRAMES, step=no_halt)[0]) == 4
@@ -293,7 +307,7 @@ def test_an_exit_that_does_not_halt_is_caught(tmp_path):
 
 def test_a_branch_that_draws_exit_as_help_is_caught(tmp_path):
     """R9 for the new branch bit: the main menu on EXIT drawn as the main menu on HELP -- a perfect picture of the main
-    menu -- must be rejected at the first frame on EXIT (P10: frame 2, the boot menu's EXIT)"""
+    menu -- must be rejected at the first frame on EXIT (P10: frame 2, the boot menu's EXIT; M8: past MAP, frame 29)"""
     line = f"hex.if_flags menu_scr, 1<<{MAIN_EXIT_SCR}, mf_p34h, mf_mainx"
     wrong = f"hex.if_flags menu_scr, 1<<{MAIN_EXIT_SCR}, mf_p34h, mf_mainh"
 
@@ -302,7 +316,8 @@ def test_a_branch_that_draws_exit_as_help_is_caught(tmp_path):
         return [wrong if ln == line else ln for ln in lines]
 
     got = _run(tmp_path, "exitashelp", _lines(mutate), SCRIPT)
-    assert _first_bad(got, _expected(SCRIPT)[0]) == 2
+    first_exit = next(f for f, st in enumerate(_expected(SCRIPT)[1]) if st[1] == MAIN_EXIT_SCR)
+    assert first_exit == 29 and _first_bad(got, _expected(SCRIPT)[0]) == first_exit
 
 
 def test_a_branch_that_swaps_two_screens_is_caught(tmp_path):
@@ -322,10 +337,10 @@ def test_a_branch_that_swaps_two_screens_is_caught(tmp_path):
 def test_an_oracle_whose_world_help_closes_to_the_menu_is_caught(runs):
     """R9 for the oracle side: the rules with HELP_GAME_SCR closing to the main menu must disagree
     with the program at frame 16 (P10), where esc leaves the world's help"""
-    def wrong(mode, scr, sel, ev, live):
+    def wrong(mode, scr, sel, ev, live, automap=False):
         if mode == 1 and scr == HELP_GAME_SCR and ("esc" in ev or "help" in ev):
             return 1, 0, sel, None, live
-        return menu_step(mode, scr, sel, ev, live)
+        return menu_step(mode, scr, sel, ev, live, automap=automap)
     assert _first_bad(runs["main"], _expected(SCRIPT, step=wrong)[0]) == 16
 
 
@@ -354,3 +369,19 @@ def test_a_main_menu_that_ignores_the_game_is_caught(tmp_path):
 
     got = _run(tmp_path, "nolive", _lines(mutate), SCRIPT)
     assert _first_bad(got, _expected(SCRIPT)[0]) == 20
+
+
+# M8 (the owner, 2026-10-18: "Add it to e1m1 too") -- E1M1's MAP item: down, down (MAP), enter opens the page from the
+# menu (the dot at the harness's view, 0, 0), esc closes it to the main menu on MAP, down reaches EXIT
+MAP_SCRIPT = press(1, DOWN) + press(2, DOWN) + press(3, ENTER) + press(5, ESC) + press(6, DOWN)
+MAP_FRAMES = 8
+
+
+def test_e1m1s_map_item_opens_the_page(tmp_path):
+    from doomfj.menu import MAP_MENU_SCR
+    want, states = _expected(MAP_SCRIPT, frames=MAP_FRAMES)
+    assert [s[1] for s in states] == [0, MAIN_HELP_SCR, MAIN_MAP_SCR, MAP_MENU_SCR, MAP_MENU_SCR, MAIN_MAP_SCR,
+                                      MAIN_EXIT_SCR, MAIN_EXIT_SCR], states
+    assert want[3] == A.pixels(PAGES, 0, 0)
+    got = _run(tmp_path, "mapitem", _lines(), MAP_SCRIPT, frames=MAP_FRAMES)
+    assert _first_bad(got, want) is None

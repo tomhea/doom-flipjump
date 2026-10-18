@@ -47,7 +47,8 @@ EXIT_SWITCH_SPECIALS = frozenset({11})    # S1 exit (doors.EXIT_SPECIALS)
 DOOR_SWITCH_SPECIALS = frozenset({63, 103, 61, 112, 114, 133})   # doors.SWITCH_DOOR_KINDS (M8 C3: 61 112 114 133)
 FLOOR_SWITCH_SPECIALS = frozenset({23, 71, 102})     # movers.FLOOR_USE_SPECIALS
 LIFT_SWITCH_SPECIALS = frozenset({62, 123})          # movers.LIFT_USE_SPECIALS
-REPEAT_SPECIALS = frozenset({62, 123, 63, 61, 114})  # SR: the texture comes back after BUTTONTIME
+REPEAT_SPECIALS = frozenset({62, 123, 63, 61, 114, 46})   # SR (and GR 46): the texture comes back after BUTTONTIME
+SHOT_SWITCH_SPECIALS = frozenset({46})               # M8 C3: GR 46 (doors.SHOOT_DOOR_KINDS) -- a shot swaps it
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,9 @@ def map_switches(secs, lds, sds, verts, rng: int = USE_RANGE) -> List[Switch]:
             kind, targets = "exit", ()
         elif sp in DOOR_SWITCH_SPECIALS and ld.tag:
             kind, targets = "door", tuple(si for si, sec in enumerate(secs) if sec.tag == ld.tag and si in doors)
+        elif sp in SHOT_SWITCH_SPECIALS and ld.tag:
+            # M8 C3: P_ShootSpecialLine's 46 changes its texture on EVERY shot that reaches it (no EV_* test)
+            kind, targets = "shot", tuple(si for si, sec in enumerate(secs) if sec.tag == ld.tag and si in doors)
         elif sp in FLOOR_SWITCH_SPECIALS and ld.tag in group_of:
             kind, targets = "floor", (group_of[ld.tag],)
         elif sp in LIFT_SWITCH_SPECIALS and ld.tag:
@@ -187,6 +191,11 @@ def use_presses(lat: Sequence[Switch], x16: int, y16: int, lift_rest: Callable[[
         if ok and in_box_fixed(s.box, x16, y16):
             out.append(k)
     return out
+
+
+def shot_presses(lat: Sequence[Switch], line: int) -> List[int]:
+    """M8 C3: the latched switches a gun's shot on GR line `line` swaps (doors.shot_lines; combat.shot_press)"""
+    return [k for k, s in enumerate(lat) if s.kind == "shot" and s.line == line]
 
 
 def pressed_lines(switches: Sequence[Switch], on: Sequence[int], leveldone: bool) -> frozenset:

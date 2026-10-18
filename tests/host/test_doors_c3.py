@@ -228,3 +228,31 @@ def test_the_c3_door_tic_writes_only_door_cells_and_its_latches(wad, m):
     written = {w_ for w_ in written if not re.match(r"dr\d+_", w_)}       # a slanted line's own scratch (L2)
     assert written <= {"dstate", "ddir", "dsub", "dwait", "duse", "dbox", "dreq", "wfired"}, sorted(written)
     assert ("wfired" in written) == bool(D.switch_latches(secs, lds, sds))
+
+
+def test_a_gun_on_a_gr_switch_swaps_its_texture(wad, monkeypatch):
+    """on a SWITCH_TEX map: P_ShootSpecialLine's 46 -> P_ChangeSwitchTexture(line, 1): the line's cell set, its
+    countdown BUTTON_FRAMES, unless the button is already out (switches.press)"""
+    from doomfj import config
+    from doomfj import switches as SW
+    from doomfj.combat import MISSILERANGE_U
+    from doomfj.world import TicEvents
+    monkeypatch.setitem(config.MAP_CONFIG, "E1M9", dict(config.MAP_CONFIG.get("E1M9", {}), SWITCH_TEX=True))
+    w = _world(wad, "E1M9")
+    assert w.switch_cells, "the map's switches are on"
+    j = SW.shot_presses(w.switch_cells, 890)
+    assert len(j) == 1 and w.switch_cells[j[0]].kind == "shot" and w.switch_cells[j[0]].repeat
+    k = [li for li, _t in w.door_shots].index(890)
+    w.aim = lambda world, col: ("shot", k)
+    w._p_resolve = True
+    w._line_attack("pistol", 80, 5, MISSILERANGE_U, TicEvents(0))
+    sr = w.switch_sr.index(j[0])
+    assert w.ws.sw_on[j[0]] == 1 and w.ws.sw_time[sr] == SW.BUTTON_FRAMES
+    w.ws.sw_time[sr] = 3
+    w._line_attack("pistol", 80, 5, MISSILERANGE_U, TicEvents(0))
+    assert w.ws.sw_time[sr] == 3                                   # out already: nothing restarts
+    # control: another shot line (no switch texture) swaps nothing
+    w.ws.sw_on[j[0]], w.ws.sw_time[sr] = 0, 0
+    w.aim = lambda world, col: ("shot", 0)
+    w._line_attack("pistol", 80, 5, MISSILERANGE_U, TicEvents(0))
+    assert w.ws.sw_on[j[0]] == 0

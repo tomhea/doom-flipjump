@@ -65,20 +65,27 @@ def leaf_lines() -> List[str]:
     return out + ["stl.fret shr_ret"]
 
 
-def press_lines(shots: Sequence[Tuple[int, Sequence[int]]], p: str, done: str) -> List[str]:
+def press_lines(shots, p: str, done: str) -> List[str]:
     """`dm_id` holds a shot id (>= the lowest, tested by the caller): EV_DoDoor(open) on its doors at rest -- each
-    door's `dreq`. `shots` [(id, (door slot, ...))]; labels `<p>`; every path on to `done`"""
+    door's `dreq` -- and, on a SWITCH_TEX map, the line's switch texture (switches.shot_presses / press: its cell
+    `swpr + k` set unless already, an SR-style countdown). `shots` [(id, (door slot, ...), switch)] with `switch`
+    None or (latched index k, the repeating list); labels `<p>`; every path on to `done`"""
+    from doomfj import switchcode as SWC
     out = []
-    for j, (sid, _slots) in enumerate(shots):
-        out += [f"hex.xor_by 2, dm_id, {sid}", f"hex.if0 2, dm_id, {p}h{j}", f"hex.xor_by 2, dm_id, {sid}"]
+    for j, spec in enumerate(shots):
+        out += [f"hex.xor_by 2, dm_id, {spec[0]}", f"hex.if0 2, dm_id, {p}h{j}", f"hex.xor_by 2, dm_id, {spec[0]}"]
     out += [f";{done}"]
-    for j, (sid, slots) in enumerate(shots):
+    for j, spec in enumerate(shots):
+        sid, slots, sw = spec[0], spec[1], (spec[2] if len(spec) > 2 else None)
         out += [f"{p}h{j}:", f"hex.xor_by 2, dm_id, {sid}"]
         for i, d in enumerate(slots):
             q = f"{p}h{j}d{i}"
             out += [f"hex.if0 1, ddir + {d}*dw, {q}a", f";{q}n", f"{q}a:",
                     f"hex.if0 {WAIT_NIBBLES}, dwait + {WAIT_NIBBLES * d}*dw, {q}b", f";{q}n", f"{q}b:",
                     f"hex.set 1, dreq + {d}*dw, 1", f"{q}n:"]
+        if sw is not None:
+            k, sr = sw
+            out += [f"hex.if1 1, {SWC.cell(k)}, {done}", *(ln.strip() for ln in SWC._press(k, sr))]
         out += [f";{done}"]
     return out
 
@@ -89,9 +96,17 @@ def is_shot_lines(shots, cell: str, yes: str, no: str, tmp: str = "sh_t") -> Lis
     return [f"hex.set 2, {tmp}, {lo}", f"hex.cmp 2, {cell}, {tmp}, {no}, {yes}, {yes}"]
 
 
-def shot_specs(secs, lds, sds) -> list:
-    """the weapon's [(id, (door slot, ...))]: doors.shot_lines with each door's slot in sorted(door sectors) (the
-    door cells' order, World.door_order). [] on a map without GR lines (E1M1, E1M2)"""
+def shot_specs(secs, lds, sds, switches=()) -> list:
+    """the weapon's [(id, (door slot, ...), switch)]: doors.shot_lines with each door's slot in sorted(door sectors)
+    (the door cells' order, World.door_order), and -- `switches` the map's switches.map_switches on a SWITCH_TEX map --
+    the line's (latched index, repeating list), else None. [] on a map without GR lines (E1M1, E1M2)"""
+    from doomfj import switches as SW
     from doomfj.doors import door_states, shot_lines
     order = sorted(door_states(secs, lds, sds))
-    return [(shot_sid(k), tuple(order.index(si) for si in ts)) for k, (_li, ts) in enumerate(shot_lines(secs, lds, sds))]
+    lat, sr = SW.latched(switches), SW.repeating(switches)
+    out = []
+    for k, (li, ts) in enumerate(shot_lines(secs, lds, sds)):
+        ks = SW.shot_presses(lat, li)
+        assert len(ks) <= 1, ks
+        out.append((shot_sid(k), tuple(order.index(si) for si in ts), (ks[0], tuple(sr)) if ks else None))
+    return out

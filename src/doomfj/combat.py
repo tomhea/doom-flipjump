@@ -936,6 +936,12 @@ class CombatMixin:
             d = self.door_order.index(si)
             if _D.switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d])):
                 ws.d_monreq[d] = 1
+        if self.switch_cells:                 # a SWITCH_TEX map: the line's texture swaps (switches.shot_presses)
+            from doomfj import switches as _SWI
+            on, tm = list(ws.sw_on), list(ws.sw_time) if self.switch_sr else []
+            for j in _SWI.shot_presses(self.switch_cells, self.door_shots[k][0]):
+                _SWI.press(on, tm, self.switch_sr, j)
+            self._switch_store(on, tm)
 
     def _target_xy(self, tgt) -> Tuple[int, int]:
         kind, i = tgt

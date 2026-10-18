@@ -166,10 +166,13 @@ def test_a_control_with_the_ylo_box_one_row_low(tmp_path):
 
 # ---- 2. the press ----------------------------------------------------------------------------------------------------
 
-def _e1m9():
+def _e1m9(switch=False):
+    """E1M9's specs; `switch`: as on a SWITCH_TEX map -- its own switch list (line 890 SW1STON2 is a GR switch)"""
+    from doomfj import switches as SW
     mw = WadFile.from_path(str(FULL))
     secs, lds, sds = mw.sectors("E1M9"), mw.linedefs("E1M9"), mw.sidedefs("E1M9")
-    return SC.shot_specs(secs, lds, sds), len(D.door_states(secs, lds, sds))
+    sw = SW.map_switches(secs, lds, sds, mw.vertexes("E1M9")) if switch else ()
+    return SC.shot_specs(secs, lds, sds, sw), len(D.door_states(secs, lds, sds))
 
 
 def _press_records(specs, nd, seed=9):
@@ -179,30 +182,41 @@ def _press_records(specs, nd, seed=9):
     for _ in range(N):
         sid = rng.choice([0, rng.randrange(1, 80), rng.randrange(lo, 0x100), rng.randrange(lo, 0x100)])
         melee = int(rng.random() < 0.3)
-        ds = {d: rng.choice([(0, 0, 0), (0, 1, 0), (0, 2, 0), (3, 0, 0), (3, 0, 5)]) for _s, sl in specs for d in sl}
-        out.append((sid, melee, ds))
+        ds = {d: rng.choice([(0, 0, 0), (0, 1, 0), (0, 2, 0), (3, 0, 0), (3, 0, 5)]) for _s, sl, _w in specs for d in sl}
+        out.append((sid, melee, ds, rng.choice([0, 0, 1])))       # the switch cell's start (on a SWITCH_TEX map)
     return out
 
 
 def _press_ref(specs, rec):
     """combat._line_attack: a gun's shot id -> shot_press (every door of the line at rest: a request); any other
     non-zero id -> the damage call; a swing: a shot id is no target"""
-    sid, melee, ds = rec
+    sid, melee, ds, on = rec
     req, called = set(), 0
+    sw = None
     if sid:
         k = D.SHOT_SID_TOP - sid
         if k < len(specs):
             if not melee:
                 req = {d for d in specs[k][1] if D.switch_ready((ds[d][0], ds[d][1], 0, ds[d][2]))}
+                sw = specs[k][2]
         else:
             called = 1
-    return req, called
+    # the switch texture (switches.press on the line's cell: set unless on, its countdown BUTTON_FRAMES)
+    from doomfj.switches import BUTTON_FRAMES
+    cells = [(on, 0)] if any(sp[2] for sp in specs) else []
+    if cells and sw is not None and not on:
+        cells = [(1, BUTTON_FRAMES)]
+    elif cells:
+        cells = [(on, 0)]
+    return req, called, cells
 
 
 def _press_program(specs, nd, gun, melee):
-    slots = sorted({d for _s, sl in specs for d in sl})
+    slots = sorted({d for _s, sl, _w in specs for d in sl})
     body = ["stl.startup_and_init_all", "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
-            "hex.input 1, dm_id", "hex.input 1, rbyte", "hex.mov 1, mel, rbyte"]
+            "hex.input 1, dm_id", "hex.input 1, rbyte", "hex.mov 1, mel, rbyte", "hex.input 1, rbyte",
+            *([f"hex.mov 1, swpr + {_swk(specs)}*dw, rbyte", f"hex.zero {2 * _swn(specs)[1]}, swtm"]
+              if any(sp[2] for sp in specs) else [])]
     for d in slots:
         body += ["hex.input 1, rbyte", f"hex.mov 1, dstate + {d}*dw, rbyte", "hex.input 1, rbyte",
                  f"hex.mov 1, ddir + {d}*dw, rbyte", "hex.input 1, rbyte",
@@ -211,13 +225,29 @@ def _press_program(specs, nd, gun, melee):
              ";pr_out", "do_mel:", *melee, "pr_out:"]
     for d in slots:
         body += [f"hex.print_as_digit 1, dreq + {d}*dw, 0"]
+    if any(sp[2] for sp in specs):
+        j = list(next(sp[2] for sp in specs if sp[2])[1]).index(_swk(specs))
+        body += [f"hex.print_as_digit 1, swpr + {_swk(specs)}*dw, 0", f"hex.print_as_digit 2, swtm + {2 * j}*dw, 0"]
     body += ["hex.print_as_digit 1, called, 0", "stl.output 10", ";loop", "done:", "stl.loop",
              *gun,
              "dm_go:", "hex.set 1, called, 1", "stl.fret dm_ret", "dm_ret: hex.vec w/4",
              "rmagic: hex.vec 2", "rbyte: hex.vec 2", "mel: hex.vec 1", "called: hex.vec 1",
              "rng_pl: hex.vec 2", f"aim_sid: hex.vec {2 * AC.NCOLS}",      # the shot leaves' stream and window
-             *WC.shot_decls(specs), *door_decls(nd, 1)]
+             *WC.shot_decls(specs), *door_decls(nd, 1),
+             *([f"swpr: hex.vec {_swn(specs)[0]}", f"swtm: hex.vec {2 * _swn(specs)[1]}"]
+               if any(sp[2] for sp in specs) else [])]
     return "\n".join(body) + "\n"
+
+
+def _swk(specs):
+    """the GR switch's latched index (one GR switch line on E1M9)"""
+    return next(sp[2] for sp in specs if sp[2])[0]
+
+
+def _swn(specs):
+    """(latched cells, repeating cells) the harness declares: enough for the switch's index and its countdown"""
+    k, sr = next(sp[2] for sp in specs if sp[2])
+    return max(k + 1, max(sr) + 1), len(sr)
 
 
 def _gun_text(specs, mut=None):
@@ -237,8 +267,8 @@ def _melee_text(specs, mut=None):
     return text.split("\n")
 
 
-def _press_run(tmp_path, gun_mut=None, mel_mut=None):
-    specs, nd = _e1m9()
+def _press_run(tmp_path, gun_mut=None, mel_mut=None, switch=False):
+    specs, nd = _e1m9(switch)
     src = tmp_path / "press.fj"
     src.write_text(_press_program(specs, nd, _gun_text(specs, gun_mut), _melee_text(specs, mel_mut)),
                    encoding="utf-8")
@@ -249,23 +279,23 @@ def _press_run(tmp_path, gun_mut=None, mel_mut=None):
     fj.assemble([consts.resolve(), (FJDIR / "fixed_point.fj").resolve(), src.resolve(), tab.resolve()], out,
                 memory_width=W, print_time=False)
     recs = _press_records(specs, nd)
-    slots = sorted({d for _s, sl in specs for d in sl})
+    slots = sorted({d for _s, sl, _w in specs for d in sl})
     feed = b""
-    for sid, melee, ds in recs:
-        feed += bytes([1, sid, melee]) + b"".join(bytes(ds[d]) for d in slots)
+    for sid, melee, ds, on in recs:
+        feed += bytes([1, sid, melee, on]) + b"".join(bytes(ds[d]) for d in slots)
     io = FixedIO(feed + bytes([0]))
     fj.run(out, io_device=io, print_time=False, print_termination=False)
     got = io.get_output(allow_incomplete_output=True).decode().split("\n")[:N]
     want = []
     for r in recs:
-        req, called = _press_ref(specs, r)
-        want.append("".join(str(int(d in req)) for d in slots) + str(called))
+        req, called, cells = _press_ref(specs, r)
+        want.append("".join(str(int(d in req)) for d in slots) + "".join("%x%02x" % c for c in cells) + str(called))
     return got, want, recs
 
 
 def test_the_press_is_the_models_rule(tmp_path):
     specs, _nd = _e1m9()
-    assert [s for s, _ in specs] == [0xFF, 0xFE, 0xFD, 0xFC] and len({d for _s, sl in specs for d in sl}) == 2
+    assert [s for s, _, _w in specs] == [0xFF, 0xFE, 0xFD, 0xFC] and len({d for _s, sl, _w in specs for d in sl}) == 2
     got, want, recs = _press_run(tmp_path)
     bad = next((i for i, (g, w) in enumerate(zip(got, want)) if g != w), None)
     assert len(got) == N and bad is None, "record %d: %s != %s (%s)" % (bad, got[bad], want[bad], recs[bad])
@@ -290,3 +320,23 @@ def test_a_mutated_press_fails(tmp_path, mut):
         g = (g[0] % d, g[1] % d)
     got, want, _ = _press_run(tmp_path, g, m)
     assert got != want, mut
+
+
+def test_the_press_swaps_the_lines_switch_texture(tmp_path):
+    """on a SWITCH_TEX map (switches.map_switches: line 890, SW1STON2, is a GR switch): a gun's shot on it sets its
+    cell and the button's countdown unless it is already out (switches.press) -- the other lines have no switch"""
+    specs, _nd = _e1m9(True)
+    assert [sp[2] is not None for sp in specs] == [False, False, True, False]
+    got, want, recs = _press_run(tmp_path, switch=True)
+    bad = next((i for i, (g, w) in enumerate(zip(got, want)) if g != w), None)
+    assert len(got) == N and bad is None, "record %d: %s != %s (%s)" % (bad, got[bad], want[bad], recs[bad])
+    from doomfj.switches import BUTTON_FRAMES
+    assert sum(("1%02x" % BUTTON_FRAMES) in w for w in want) > 5
+
+
+def test_control_the_switch_pressed_while_its_button_is_out(tmp_path):
+    specs, _nd = _e1m9(True)
+    k = specs[2][2][0]
+    got, want, _ = _press_run(tmp_path, ("hex.if1 1, swpr + %d*dw, shg_end" % k, "hex.if1 0, swpr + %d*dw, shg_end" % k),
+                              switch=True)
+    assert got != want

@@ -2528,7 +2528,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             "-- flip them with the mode (reference_model.D3_RENDER_KW)" % (_D3, PLAYER_MODE))
     # M8 C3 (doomfj.shotcode): the GR 46 shot lines -- recorded by the picture into the aim window, pressed by a gun's
     # shot. Only where the aim window is (`_AIM`) and the doors run; [] / {} on E1M1 and E1M2: no text anywhere
-    _shot_spec = (_shotcode.shot_specs(secs, lds, sds) if (_AIM and _dst_tbl and player_sim) else [])
+    _shot_spec = (_shotcode.shot_specs(secs, lds, sds, _SWI) if (_AIM and _dst_tbl and player_sim) else [])
     _shot_k = ({li_: k_ for k_, (li_, _t) in enumerate(_doors.shot_lines(secs, lds, sds))} if _shot_spec else {})
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,

@@ -12,7 +12,8 @@ from doomfj.wad import WadFile
 def test_the_state_graph_is_closed_and_every_action_is_known():
     assert gd.check_integrity() == []
     assert gd.STATE_NAMES[0] == gd.S_NULL and gd.STATE_INDEX[gd.S_NULL] == 0
-    assert len(gd.STATES) <= 255                   # a state cell is one byte
+    assert len(gd.STATE_NAMES) <= 255              # a state cell is one byte (M8 C8: the extension rows ride
+    assert set(gd.STATES) == set(gd.STATE_NAMES) | set(gd.EXT_STATE_NAMES)   # alias codes: gamedata.MON_ALIAS_POOL)
     for st in gd.STATES.values():
         assert st.action is None or st.action in gd.ACTIONS
 
@@ -57,7 +58,7 @@ def test_the_facts_the_model_leans_on():
     assert all(m[t].height == 56 * F for t in gd.MONSTER_DOOMEDNUMS.values())
     assert m["MT_TROOP"].meleestate == m["MT_TROOP"].missilestate == "S_TROO_ATK1"
     assert m["MT_POSSESSED"].meleestate == gd.S_NULL and m["MT_SERGEANT"].missilestate == gd.S_NULL
-    assert [m[t].reactiontime for t in gd.MONSTER_DOOMEDNUMS.values()] == [8] * 5
+    assert [m[t].reactiontime for t in gd.MONSTER_DOOMEDNUMS.values()] == [8] * len(gd.MONSTER_DOOMEDNUMS)
     assert m["MT_TROOPSHOT"].speed == 10 * F and m["MT_TROOPSHOT"].damage == 3
     assert m["MT_BARREL"].spawnhealth == 20 and m["MT_SHADOWS"].flags & gd.MF_SHADOW
     assert [gd.STATES["S_%s_RUN1" % p].tics for p in ("POSS", "SPOS", "TROO", "SARG")] == [4, 3, 3, 2]

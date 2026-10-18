@@ -1009,6 +1009,9 @@ class CombatMixin:
         ws = self.ws
         if not ws.mon_shootable[m] or ws.mon_health[m] <= 0:
             return
+        soul = m in self.soul_of
+        if soul:                                  # M8 C8: a charging soul stops (doomfj.lostsoul)
+            self._soul_damaged(m, ev)
         if self._p_knock:                         # M7 P8a: DOOM's order -- the thrust, then the health
             self._thrust(("mon", m), inflictor, source, dmg)
         # M8 (the telefrag's 10000): the health is held at the 12-bit cell's floor, as a barrel's at BARREL_HEALTH_MIN --
@@ -1019,7 +1022,8 @@ class CombatMixin:
             self._kill_monster(m, ev)
             return
         info = self.mon_info[m]
-        if self._roll("mon_rng", self.sites.pain[info.painchance], m):
+        # M8 C8: `P_Random() < painchance && !(flags & MF_SKULLFLY)` -- the roll is drawn, a charging soul feels no pain
+        if self._roll("mon_rng", self.sites.pain[info.painchance], m) and not (soul and ws.sk_fly[self.soul_of[m]]):
             ws.mon_justhit[m] = 1
             self._set_state(m, info.painstate, True, ev)
         ws.mon_reaction[m] = 0
@@ -1062,6 +1066,8 @@ class CombatMixin:
         ws = self.ws
         info = self.mon_info[m]
         ws.mon_shootable[m] = 0
+        if m in self.soul_of:                    # M8 C8: P_KillMobj clears MF_SKULLFLY (and MF_FLOAT: not shootable)
+            ws.sk_fly[self.soul_of[m]] = 0
         gib = ws.mon_health[m] < -info.spawnhealth and info.xdeathstate != gd.S_NULL
         self._set_state(m, info.xdeathstate if gib else info.deathstate, True, ev)
         v = self._roll("mon_rng", self.sites.tics_roll, m)
@@ -1184,6 +1190,8 @@ class CombatMixin:
         if kind == "player":
             return self.rm.check_position(self.scene_c, ws.px, ws.py)[1]
         if kind == "mon":
+            if i in self.soul_of:                  # M8 C8: a soul's own z, whole units
+                return ws.sk_z[self.soul_of[i]] >> 16
             return ws.mon_floorz[i]
         if kind == "bar":
             t = self.barrel_things[i]
@@ -1296,7 +1304,9 @@ class CombatMixin:
                 xmove = ymove = 0
             px, py = _signed(px, 32), _signed(py, 32)
             self._teleported = False
-            ok = self._player_knock_try(px, py, ev) if player else self._monster_knock_try(m, px, py, ev)
+            ok = (self._player_knock_try(px, py, ev) if player else
+                  self._soul_try(m, px, py, ev) if m in self.soul_of else      # M8 C8: doomfj.lostsoul's TRY
+                  self._monster_knock_try(m, px, py, ev))
             ev.knocks.append((thing, ok))
             if not ok:
                 mx = my = 0
@@ -1305,7 +1315,9 @@ class CombatMixin:
                 self._teleported = False
             if not (xmove or ymove):
                 break
-        if self._knock_slides(thing, mx, my):
+        if not player and m in self.soul_of and (ws.sk_fly[self.soul_of[m]] or self.soul_airborne(m)):
+            pass                                           # M8 C8: no friction for SKULLFLY, nor when airborne
+        elif self._knock_slides(thing, mx, my):
             pass                                           # "do not stop sliding if halfway off a step"
         elif -gd.STOPSPEED < mx < gd.STOPSPEED and -gd.STOPSPEED < my < gd.STOPSPEED:
             mx = my = 0

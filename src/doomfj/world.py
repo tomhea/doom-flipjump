@@ -110,6 +110,7 @@ from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers  
 from doomfj.doors import switch_boxes as door_switch_boxes, switch_ready          # M8 L2: SR / S1 door switches
 from doomfj.reference_model import (ReferenceModel, Scene, apply_sector_heights, spawn_state)
 from doomfj.things import single_player
+from doomfj.lostsoul import SKULL_TYPE, SoulMixin, soul_fields          # M8 C8: the lost soul
 
 # ================================================================================================
 # RULES -- the approved simplifications (D5) and the model's conventions. ONE definition each; the
@@ -287,6 +288,7 @@ class Layout:
     nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
     nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
     nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
+    nsoul: int = 0     # M8 C8: the lost souls among the monster slots (doomfj.lostsoul) -- 0: no soul cell
 
     @property
     def nmobile(self) -> int:
@@ -482,15 +484,19 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("mon_seen", 1, count=n, group="monster", phase="P3",
       doc="drawn last frame: sight from the picture (plan section 5), written by the renderer")
     f("mon_drop", 2, count=n, group="monster", phase="S3b", doc="0 none, 1 dropped, 2 taken")
-    if knock:   # M7 P8a K (1.2.2, G-B2 / G-B5): momentum, the position's fraction, the drop's own position
+    if knock or lay.nsoul:   # M7 P8a K (1.2.2, G-B2 / G-B5): momentum, the position's fraction, the drop's own position
+        # M8 C8: a map with a lost soul has the momentum and the fraction knockback or not (its charge flies on them)
         f("mon_momx", 32, count=n, signed=True, group="monster", phase="P8a", label="mkx", doc="16.16 a tic")
         f("mon_momy", 32, count=n, signed=True, group="monster", phase="P8a", label="mky", doc="16.16 a tic")
         f("mon_fx", 16, count=n, group="monster", phase="P8a", label="mfx",
           doc="the fraction of the 16.16 x (mon_x keeps the integer part: drawing, AI and collision read it)")
         f("mon_fy", 16, count=n, group="monster", phase="P8a", label="mfy", doc="the fraction of the 16.16 y")
+    if knock:
         f("drop_x", 16, count=n, signed=True, group="monster", phase="P8a", label="thpos_rt",
           doc="the slot's drop, whole units: the corpse's position AT THE KILL (fj: drop row nt + 10 + k)")
         f("drop_y", 16, count=n, signed=True, group="monster", phase="P8a", label="thpos_rt", doc="map units")
+    for name, bits, sg, doc in (soul_fields() if lay.nsoul else ()):   # M8 C8: the lost souls (doomfj.lostsoul)
+        f(name, bits, count=lay.nsoul, signed=sg, group="soul", phase="M8", doc=doc)
     f("mon_leaf", leaf_bits, count=n, kind="derived", group="monster",
       doc="point location of (mon_x, mon_y)")
     # -- leaf lists -------------------------------------------------------------------------------
@@ -688,6 +694,9 @@ class TicEvents:
     mon_hits: List[tuple] = field(default_factory=list)     # (shooter slot, "bullet"|"claw"|"bite"|"fireball",
     #                                                         "mon"|"bar"|"species"|"corpse", index, damage)
     retargets: List[tuple] = field(default_factory=list)    # (slot, new mon_target: 1 the player, 2 + slot)
+    # -- M8 C8: the lost souls (doomfj.lostsoul): ("charge", slot, angle, momz) | ("slam", slot, kind, index, damage)
+    #    | ("stop", slot) | ("float", slot) | ("bounce", slot) | ("flyhit", slot): a charging soul hit
+    souls: List[tuple] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -822,7 +831,7 @@ def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:
 # ================================================================================================
 # THE WORLD
 # ================================================================================================
-class World(CombatMixin):
+class World(SoulMixin, CombatMixin):
     """E1M1's game state plus the static level data it is simulated against.
 
     `World(skill=gd.SK_HARD)` spawns the level; `tic(keys)` advances one tic and returns its
@@ -870,6 +879,7 @@ class World(CombatMixin):
         self.cursor_policy = cursor_policy
         self.strict = strict
         self._build_level()
+        self._soul_init()                           # M8 C8: the lost souls among the slots (doomfj.lostsoul)
         self.layout = Layout(nmon=len(self.mon_things), ndoor=len(self.door_order),
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
@@ -877,7 +887,8 @@ class World(CombatMixin):
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
                              nfloor=len(self.floor_groups) if self.floor_wide else 0,
                              nlight=len(self.light_thinkers),
-                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
+                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr),
+                             nsoul=len(self.soul_slots))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -1135,6 +1146,8 @@ class World(CombatMixin):
             leaf = self.rm.point_in_subsector(self.cmap, t.x, t.y)
             ws.mon_leaf[m] = leaf
             ws.mon_floorz[m] = self.secs_c[self.leaf_sector[leaf]].floor_h
+            if m in self.soul_of:
+                self._soul_reset(m)                            # M8 C8: z on the floor, its ceiling
             if not t.flags & bit:
                 ws.mon_active[m] = 0
                 ws.mon_tics[m] = TICS_FOREVER
@@ -1404,6 +1417,8 @@ class World(CombatMixin):
             for m in range(self.layout.nmon):
                 sec = self.leaf_sector[ws.mon_leaf[m]]
                 if ws.mon_active[m] and sec in movers:
+                    if m in self.soul_of and ws.sk_z[self.soul_of[m]] == ws.mon_floorz[m] << 16:
+                        ws.sk_z[self.soul_of[m]] = self.secs_c[sec].floor_h << 16   # M8 C8: a soul ON the lift
                     ws.mon_floorz[m] = self.secs_c[sec].floor_h
 
     # -- 2. the player: `CombatMixin._player_phase` (doomfj.combat)
@@ -1424,7 +1439,9 @@ class World(CombatMixin):
                 continue
             # M7 P8a (package K): P_MobjThinker's P_XYMovement before the state's tics -- a live monster's slide and
             # a corpse's (its last state lasts forever: it still slides)
-            if self._p_knock and (ws.mon_momx[m] or ws.mon_momy[m]):
+            if m in self.soul_of:                  # M8 C8: the soul's P_XYMovement / P_ZMovement (doomfj.lostsoul)
+                self._soul_think(m, ev)
+            elif self._p_knock and (ws.mon_momx[m] or ws.mon_momy[m]):
                 self._monster_knock_move(m, ev)
             if ws.mon_tics[m] == TICS_FOREVER:
                 continue
@@ -1432,7 +1449,7 @@ class World(CombatMixin):
                 ws.mon_tics[m] -= 1
                 if ws.mon_tics[m] > 0:
                     continue
-            nxt = gd.STATES[gd.STATE_NAMES[ws.mon_state[m]]].next
+            nxt = gd.STATES[gd.mon_state_name(ws.mon_state[m])].next
             act = gd.STATES[nxt].action
             if act is not None and gd.ACTIONS[act].cls == "heavy":
                 if used >= self.k_heavy:
@@ -1478,6 +1495,8 @@ class World(CombatMixin):
             self._a_face_target(m)
         elif action in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack"):
             self._monster_attack(m, action, ev)          # doomfj.combat: A_FaceTarget + effect
+        elif action == "A_SkullAttack":
+            self._a_skull_attack(m, ev)                  # M8 C8: doomfj.lostsoul
         elif action == "A_Fall":
             self.ws.mon_solid[m] = 0
         elif a.phase == "sound":
@@ -1634,6 +1653,8 @@ class World(CombatMixin):
         dist = aprox_distance(*self._to_target(m)) - MISSILE_BIAS
         if self.mon_info[m].meleestate == gd.S_NULL:
             dist -= MISSILE_NOMELEE_BIAS
+        if self.mon_things[m].type == SKULL_TYPE:        # M8 C8: P_CheckMissileRange's MT_SKULL `dist >>= 1`
+            dist >>= 1
         dist = min(dist, MISSILE_CAP)
         return not self._rand(m) < dist
 
@@ -1708,9 +1729,13 @@ class World(CombatMixin):
         sx, sy = step_delta(self.mon_speed[m], d)
         nx, ny = ws.mon_x[m] + sx, ws.mon_y[m] + sy
         ev.tries += 1
-        verdict, floorz = self.try_move_monster(m, nx, ny)
+        if m in self.soul_of:                            # M8 C8: MF_FLOAT's P_TryMove and P_Move (doomfj.lostsoul)
+            verdict, floorz = (OK, None) if self._soul_p_move(m, nx, ny, ev) else ("soul", None)
+        else:
+            verdict, floorz = self.try_move_monster(m, nx, ny)
         if verdict != OK:
-            ev.blocked[verdict] += 1
+            if verdict != "soul":
+                ev.blocked[verdict] += 1
             door = self._monster_door(m)
             if door is None:
                 return False
@@ -1718,7 +1743,8 @@ class World(CombatMixin):
             ws.mon_movedir[m] = gd.DI_NODIR
             ev.door_uses.append((m, door))
             return True
-        self._move_monster(m, nx, ny, floorz, ev)
+        if m not in self.soul_of:                        # (a soul's accepted step has moved it)
+            self._move_monster(m, nx, ny, floorz, ev)
         return True
 
     def _monster_door(self, m: int) -> Optional[int]:
@@ -1861,6 +1887,8 @@ class World(CombatMixin):
             nx, ny = tel.dest
             ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, tel.dest_floor
             ws.mon_facing[m] = tel.facing
+            if m in self.soul_of:
+                self._soul_teleported(m, tel)              # M8 C8: z on the destination floor, momz 0
             if self._p_knock:
                 ws.mon_momx[m] = ws.mon_momy[m] = 0
                 ws.mon_fx[m] = ws.mon_fy[m] = 0
@@ -2037,6 +2065,8 @@ class World(CombatMixin):
         ws.mon_x[m], ws.mon_y[m] = x, y
         ws.mon_floorz[m] = self.secs_c[self.leaf_sector[leaf]].floor_h
         ws.mon_leaf[m] = leaf
+        if m in self.soul_of:                              # M8 C8: on that floor, under that ceiling
+            self._soul_reset(m)
         if ws.mon_active[m]:
             self._list_insert(m, leaf)
 
@@ -2097,7 +2127,7 @@ class World(CombatMixin):
     def monster_view(self, m: int) -> dict:
         ws = self.ws
         return {"slot": m, "type": self.mon_things[m].type, "active": ws.mon_active[m],
-                "state": gd.STATE_NAMES[ws.mon_state[m]], "tics": ws.mon_tics[m],
+                "state": gd.mon_state_name(ws.mon_state[m]), "tics": ws.mon_tics[m],
                 "x": ws.mon_x[m], "y": ws.mon_y[m], "floorz": ws.mon_floorz[m],
                 "movedir": ws.mon_movedir[m], "facing": ws.mon_facing[m],
                 "movecount": ws.mon_movecount[m], "reaction": ws.mon_reaction[m],

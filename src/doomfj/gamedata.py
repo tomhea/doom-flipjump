@@ -460,7 +460,34 @@ class State:
         return bool(self.frame & FF_FULLBRIGHT)
 
 
-STATES: Dict[str, State] = {r[0]: State(*r) for r in _STATE_ROWS}
+# M8 C8 (the lost soul, docs/episode-plan.md section 2): THE MONSTER-DOMAIN EXTENSION ROWS. The compact index below is
+# one byte and holds 246 states; a new monster's rows do not fit after them. A state cell holds the states of ONE
+# domain -- `mon_state` only ever a monster's -- so an extension row takes the code of a state no monster can be in:
+# a WEAPON (psprite) state's, in `MON_ALIAS_POOL` order (S_PUNCH 2, S_PUNCHDOWN 3, ...). `STATE_INDEX[name]` is that
+# code; `STATE_NAMES[code]` stays the weapon's name, so a MONSTER cell's code is named by `mon_state_name` (the one
+# reader every mon_state site uses). Every core row keeps its index, so no frozen digest and no E1M1 / E1M2 table moves.
+# Rows are APPENDED here, a monster's in DOOM's array order; a later monster's take the next codes of the pool.
+# info.c (Chocolate Doom at SOURCE_COMMIT, fetched raw with curl 2026-10-19): S_SKULL_STND .. S_SKULL_DIE6.
+_EXT_STATE_ROWS: Tuple[Tuple, ...] = (
+    ('S_SKULL_STND', 'SKUL', 32768, 10, 'A_Look', 'S_SKULL_STND2'),
+    ('S_SKULL_STND2', 'SKUL', 32769, 10, 'A_Look', 'S_SKULL_STND'),
+    ('S_SKULL_RUN1', 'SKUL', 32768, 6, 'A_Chase', 'S_SKULL_RUN2'),
+    ('S_SKULL_RUN2', 'SKUL', 32769, 6, 'A_Chase', 'S_SKULL_RUN1'),
+    ('S_SKULL_ATK1', 'SKUL', 32770, 10, 'A_FaceTarget', 'S_SKULL_ATK2'),
+    ('S_SKULL_ATK2', 'SKUL', 32771, 4, 'A_SkullAttack', 'S_SKULL_ATK3'),
+    ('S_SKULL_ATK3', 'SKUL', 32770, 4, None, 'S_SKULL_ATK4'),
+    ('S_SKULL_ATK4', 'SKUL', 32771, 4, None, 'S_SKULL_ATK3'),
+    ('S_SKULL_PAIN', 'SKUL', 32772, 3, None, 'S_SKULL_PAIN2'),
+    ('S_SKULL_PAIN2', 'SKUL', 32772, 3, 'A_Pain', 'S_SKULL_RUN1'),
+    ('S_SKULL_DIE1', 'SKUL', 32773, 6, None, 'S_SKULL_DIE2'),
+    ('S_SKULL_DIE2', 'SKUL', 32774, 6, 'A_Scream', 'S_SKULL_DIE3'),
+    ('S_SKULL_DIE3', 'SKUL', 32775, 6, None, 'S_SKULL_DIE4'),
+    ('S_SKULL_DIE4', 'SKUL', 32776, 6, 'A_Fall', 'S_SKULL_DIE5'),
+    ('S_SKULL_DIE5', 'SKUL', 9, 6, None, 'S_SKULL_DIE6'),
+    ('S_SKULL_DIE6', 'SKUL', 10, 6, None, 'S_NULL'),
+)
+
+STATES: Dict[str, State] = {r[0]: State(*r) for r in _STATE_ROWS + _EXT_STATE_ROWS}
 # The compact index the emitter and the schema use: position in DOOM's array order, S_NULL = 0.
 # It fits one byte (asserted), which is the width of every state cell in the schema.
 STATE_NAMES: Tuple[str, ...] = tuple(r[0] for r in _STATE_ROWS)
@@ -468,7 +495,23 @@ STATE_INDEX: Dict[str, int] = {n: i for i, n in enumerate(STATE_NAMES)}
 S_NULL = "S_NULL"
 # M8: the states before the teleport fog's -- the length monstercode's state table keeps (E1M1's text: no M8 row)
 CORE_STATE_COUNT = STATE_INDEX["S_TFOG"]
-assert STATE_NAMES[0] == S_NULL and len(STATE_NAMES) == len(STATES) <= 255
+assert STATE_NAMES[0] == S_NULL and len(STATE_NAMES) <= 255
+EXT_STATE_NAMES: Tuple[str, ...] = tuple(r[0] for r in _EXT_STATE_ROWS)
+# the codes an extension row may take: every psprite (weapon) state's -- psprite states are only ever in p_wpn_state /
+# p_flash_state, never in a monster cell (check_integrity holds the domains apart; test_lostsoul_model checks the pool)
+MON_ALIAS_POOL: Tuple[int, ...] = tuple(i for i in range(CORE_STATE_COUNT)
+                                        if _STATE_ROWS[i][1] in ("PUNG", "PISG", "PISF", "SHTG", "SHTF", "SAWG"))
+assert len(EXT_STATE_NAMES) <= len(MON_ALIAS_POOL), "more extension rows than alias codes"
+STATE_INDEX.update({n: MON_ALIAS_POOL[k] for k, n in enumerate(EXT_STATE_NAMES)})
+# a MONSTER cell's code -> its state's name (the core names, the extension rows at their alias codes)
+_EXT_OF_CODE = {MON_ALIAS_POOL[k]: n for k, n in enumerate(EXT_STATE_NAMES)}
+MON_STATE_NAMES: Tuple[str, ...] = tuple(_EXT_OF_CODE.get(i, n) for i, n in enumerate(STATE_NAMES))
+
+
+def mon_state_name(code: int) -> str:
+    """the name of the state a MONSTER cell (`mon_state`) holds -- an extension row's alias code names the extension
+    row, not the weapon state that shares the code (the extension rows' block comment)"""
+    return MON_STATE_NAMES[code]
 
 
 # ================================================================================================
@@ -515,6 +558,7 @@ ACTIONS: Dict[str, Action] = {a.name: a for a in (
     Action("A_GunFlash", "psprite", "psprite", "P9", "the launcher: the player's attack frame, the flash"),
     Action("A_FireMissile", "psprite", "psprite", "P9", "the launcher: one rocket, P_SpawnPlayerMissile"),
     Action("A_FireCGun", "psprite", "psprite", "P10", "the chaingun: one bullet a burst frame, its flash frame"),
+    Action("A_SkullAttack", "mobj", "heavy", "M8", "the lost soul: MF_SKULLFLY, the charge at SKULLSPEED, momz"),
 )}
 
 
@@ -621,12 +665,20 @@ MOBJINFO: Dict[str, MobjInfo] = {m.name: m for m in (
     _mi("MT_ROCKET", -1, "S_ROCKET", 1000, S_NULL, "sfx_rlaunc", 8, "sfx_None", S_NULL, 0,
         "sfx_None", S_NULL, S_NULL, "S_EXPLODE1", S_NULL, "sfx_barexp", 20 * F, 11 * F, 8 * F, 100,
         20, "sfx_None", MF_NOBLOCKMAP | MF_MISSILE | MF_DROPOFF | MF_NOGRAVITY, S_NULL),
+    # M8 C8: the lost soul (info.c MT_SKULL, fetched raw 2026-10-19) -- not MF_COUNTKILL; painchance 256 (always)
+    _mi("MT_SKULL", 3006, "S_SKULL_STND", 100, "S_SKULL_RUN1", "sfx_None", 8, "sfx_sklatk", "S_SKULL_PAIN", 256,
+        "sfx_dmpain", 0, "S_SKULL_ATK1", "S_SKULL_DIE1", S_NULL, "sfx_firxpl", 8, 16 * F, 56 * F, 50, 3,
+        "sfx_dmact", MF_SOLID | MF_SHOOTABLE | MF_FLOAT | MF_NOGRAVITY, S_NULL),
 )}
 del F
 
 # The five monster types E1M1 spawns, by editor number.
 MONSTER_DOOMEDNUMS: Dict[int, str] = {3004: "MT_POSSESSED", 9: "MT_SHOTGUY", 3001: "MT_TROOP",
-                                      3002: "MT_SERGEANT", 58: "MT_SHADOWS"}
+                                      3002: "MT_SERGEANT", 58: "MT_SHADOWS",
+                                      3006: "MT_SKULL"}       # M8 C8: the lost soul (E1M6, E1M7)
+# M8 C8: the monster types whose rows are EXTENSION rows (the alias codes above) -- a map without one emits no row of
+# theirs (monstercode.map_monster_types), so E1M1's and E1M2's state tables are unchanged
+EXT_MONSTER_TYPES: Tuple[str, ...] = ("MT_SKULL",)
 # What a kill drops (p_inter.c P_KillMobj: MT_POSSESSED -> MT_CLIP, MT_SHOTGUY -> MT_SHOTGUN).
 DROPS: Dict[str, str] = {"MT_POSSESSED": "MT_CLIP", "MT_SHOTGUY": "MT_SHOTGUN"}
 
@@ -658,7 +710,8 @@ EXIT_SIGN_TYPE = 9800
 THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(EXIT_SIGN_TYPE, "P11_EXIT_SIGN", 0, 0, "doomfj.exitsign"),   # P11 (a): not solid, not special
     *(_tt_from_info(mt) for mt in ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT",
-                                   "MT_SHADOWS", "MT_BARREL", "MT_CLIP", "MT_SHOTGUN")),
+                                   "MT_SHADOWS", "MT_BARREL", "MT_CLIP", "MT_SHOTGUN",
+                                   "MT_SKULL")),                     # M8 C8: the lost soul
     # pickups verified in info.c's visible part (MT_MISC0..MT_MISC18)
     ThingType(2018, "MT_MISC0", 20, MF_SPECIAL, "info.c"),
     ThingType(2019, "MT_MISC1", 20, MF_SPECIAL, "info.c"),

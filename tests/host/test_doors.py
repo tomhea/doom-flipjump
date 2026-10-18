@@ -59,7 +59,7 @@ def test_a_lift_is_not_a_door(level):
 def test_open_height_is_p_doorraise(level):
     """min(neighbouring sector ceiling) - 4, and the neighbour set is non-empty for every door."""
     secs, lds, sds = level
-    nb = door_neighbours(secs, lds, sds)        # M8: DOOM's two-sided rule off the E1M1 family
+    nb = door_neighbours(secs, lds, sds)        # the map's rule: E1M1's MAP_CONFIG DOOR_NEIGHBOURS "legacy" (#149)
     for si, open_h in door_sectors(secs, lds, sds).items():
         assert nb[si], si
         assert open_h == min(secs[n].ceil_h for n in nb[si]) - OPEN_GAP

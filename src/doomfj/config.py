@@ -256,6 +256,13 @@ class Config:
     # emission is untouched while the page is off there (0, the default: not one line differs).
     AUTOMAP: int = 0
 
+    # #149 (the CR of #148, R6): the rule a door's open height is found among (doomfj.doors.door_neighbours,
+    # P_FindLowestCeilingSurrounding's neighbours). "two_sided" (the default): DOOM's getNextSector -- only a line with a
+    # back side and ML_TWOSIDED has a next sector. "legacy": every linedef, a one-sided line's missing back read as
+    # the LAST sidedef's sector (issue #104 F1) -- E1M1's, whose door stops its one-byte pid budget froze (PR #103).
+    # A per-map flag, not the map's record counts: another wad's E1M1 is still E1M1. Host-side only: NOT an fj constant.
+    DOOR_NEIGHBOURS: str = "two_sided"
+
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
         """M8 F1.4: 1 when the record compares `gps_nslot` against SPR_SLOT_CAP (frame.thing_record_body's rep), else 0"""
@@ -326,9 +333,10 @@ MAP_CONFIG = {
     # M8: AUTOMAP -- the map page (doomfj.automap)
     "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1,
              "WALL_SCROLL": 1, "SWITCH_TEX": 1, "AUTOMAP": 1},
-    # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's ONLY entry -- the map page, at 40 units a pixel (doomfj.
-    # automap). Every other field keeps its default, which is what E1M1 had with no entry at all
-    "E1M1": {"AUTOMAP": 1},
+    # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): the map page, at 40 units a pixel (doomfj.automap).
+    # #149: DOOR_NEIGHBOURS "legacy" -- the door rule E1M1 shipped with (its stops are frozen, PR #103); it was the
+    # default before E1M2, picked by the map's record counts until #149. Every other field keeps its default
+    "E1M1": {"AUTOMAP": 1, "DOOR_NEIGHBOURS": "legacy"},
 }
 
 

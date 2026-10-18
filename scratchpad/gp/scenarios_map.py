@@ -57,6 +57,7 @@ SPREAD = 768               # checkpoints at least this far apart
 STANDOFF = 256             # the start spot's wanted distance from the nearest monster
 N_RUNS = 11                # v10's shape: 11 runs x 100 frames
 DOORS_WANTED = 3           # scenarios_v2's MIN_DOORS: usable doors a checkpoint should start near
+AFTER_FACE_MIN = 32        # the aftermath faces a corpse at least this far from its start (else the farthest)
 from gate_roles import KEY_LINE_COLOURS                                     # noqa: E402
 KEY_SPECIALS = tuple(sorted(KEY_LINE_COLOURS))   # M8: DOOM's every key door (99, 133 .. 137 too: no E1M1 / E1M2 line)
 INSTALLED = {"map": "E1M1"}
@@ -401,8 +402,14 @@ def suggest(n_runs: int = N_RUNS) -> dict:
             best = (key, near3, (int(round(cx)), int(round(cy))), sec)
     if best is not None:
         _key, trio, (cx, cy), sec = best
+        # M8 (gen_dryrun on E1M3: the first corpse lay 21 units from the start -- inside the near clip, so frame 0 drew
+        # none and the set FAILED "one drawn on its first frame"): a first corpse nearer than AFTER_FACE_MIN is not
+        # faced -- the farthest of the trio is (E1M2's first lies 48 units off: its aftermath as it was)
+        look = trio[0]
+        if math.hypot(look[1] - cx, look[2] - cy) < AFTER_FACE_MIN:
+            look = max(trio, key=lambda m: (math.hypot(m[1] - cx, m[2] - cy), -m[0]))
         out.insert(1, {"name": "R%d-aftermath" % reg[sec], "sector": sec, "want": (cx, cy),
-                       "face": (trio[0][1], trio[0][2]), "region": reg[sec], "style": "collect",
+                       "face": (look[1], look[2]), "region": reg[sec], "style": "collect",
                        "corpses": tuple(m[0] for m in trio),
                        "why": "AFTERMATH: %s (slots %s) injected as corpses at their spawns, the player among "
                               "them -- the post-kill drawing (corpses, drops)"

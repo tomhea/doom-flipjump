@@ -651,7 +651,8 @@ pool, 134.6%; at spread 1 the pool is 82.6%):
     python scripts/emit_check.py E1M2 --then scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m2_r3.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m2.wad --map E1M2 --out build/doom_e1m2_r3.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m2_r3.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
 
 (6,680 s; peak private 16.85 GB -- the box's whole RAM: rule 1 is absolute for it.) Play: `fj --run build/doom_e1m2_r3.fjm`.
-REBUILD: pending.
+REBUILD VERIFIED: rebuilt from this command at 71fa53e9 as `build/doom_e1m2_r3b.fjm` (6,395 s) -- BYTE-IDENTICAL, sha256
+`f18d00c66d211cab26e69585b79ee2a45e52c546a0fbb3cf66d3c037240f574f` both.
 
 **Open for the owner:** the size (60.45% of 2^27 -- over E1M1's 43% and the provisional E1M2 60%; it FITS the 2^27
 the owner asked for); freezing the combat plan (it opens 2 doors by the player, the criterion wants 3); the recorded

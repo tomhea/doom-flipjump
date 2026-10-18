@@ -687,17 +687,18 @@ class MonsterPhase:
         from doomfj import weaponcode as WC
         from doomfj.world import player_resolves
         ws, gd = self.world.ws, self.gd
-        idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(WC.weapon_states())}
+        pl = bool(self.world.layout.plasma)            # M8 C6: a map with the plasma rifle (its seventh weapon)
+        idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(WC.weapon_states(pl))}
         wst, fst = gd.STATE_NAMES[ws.p_wpn_state], gd.STATE_NAMES[ws.p_flash_state]
         return {"wp_rdy": ws.p_ready, "wp_pend": ws.p_pending, "wp_st": idx[ws.p_wpn_state], "wp_tics": ws.p_wpn_tics,
                 "wp_sy": ws.p_wpn_sy, "fl_st": idx[ws.p_flash_state], "fl_tics": ws.p_flash_tics,
                 "wp_rf": ws.p_refire, "wp_ad": ws.p_attackdown, "am_clip": ws.p_ammo[gd.AM_CLIP],
                 "am_shell": ws.p_ammo[gd.AM_SHELL],
-                "wp_own": sum(int(bool(ws.p_owned[w])) << (4 * i) for i, w in enumerate(WC.WEAPONS)),
+                "wp_own": sum(int(bool(ws.p_owned[w])) << (4 * i) for i, w in enumerate(WC.weapons(pl))),
                 **({"aim_sid": tuple(ws.aim_sid)} if player_resolves(self.world.player) else {}),
-                "rng_pl": ws.rng_player, "wp_frm": WC.overlay_frames().index(WC.psprite_lump(wst)),
+                "rng_pl": ws.rng_player, "wp_frm": WC.overlay_frames(plasma=pl).index(WC.psprite_lump(wst)),
                 "fl_frm": 0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0
-                else 1 + WC.flash_frames().index(WC.psprite_lump(fst))}
+                else 1 + WC.flash_frames(pl).index(WC.psprite_lump(fst))}
 
     def screen_kw(self) -> dict:
         """`hud.GameScreen.frame`'s keywords for the player's weapon and bar: the psprites' lumps and the values"""
@@ -709,7 +710,8 @@ class MonsterPhase:
         fst = gd.STATE_NAMES[ws.p_flash_state]
         ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL],
                 gd.WP_MISSILE: ws.p_ammo[gd.AM_MISL],                             # P9: the launcher's rockets
-                gd.WP_CHAINGUN: ws.p_ammo[gd.AM_CLIP]}.get(ws.p_ready)            # P10: the chaingun's bullets
+                gd.WP_CHAINGUN: ws.p_ammo[gd.AM_CLIP],                            # P10: the chaingun's bullets
+                gd.WP_PLASMA: ws.p_ammo[gd.AM_CELL]}.get(ws.p_ready)              # M8 C6: the rifle's cells
         from doomfj.hud import NO_PSPRITE
         dead = bool(ws.p_dead)                          # P10: a dead player draws no weapon (hudcode's `dead_cell`)
         return {"weapon": NO_PSPRITE if dead else WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
@@ -844,7 +846,7 @@ class MonsterPhase:
                 # M7 P7: the shooter, 1 + its slot while the slot is live (P_RemoveMobj zeroes proj_src too).
                 # P9: a ROCKET's slot holds 0 -- the player's, which projcode stores (its state is what marks it); the
                 # model's proj_src of 0 for it is not monster slot 0 (fight_gate R1-R3 found the export saying 1)
-                "pj_src": tuple(0 if not ws.proj_active[s] or self.world._is_rocket(s) else ws.proj_src[s] + 1
+                "pj_src": tuple(0 if not ws.proj_active[s] or self.world._is_player_missile(s) else ws.proj_src[s] + 1
                                 for s in range(len(ws.proj_src)))}
 
     def fx_state(self) -> Dict[str, object]:

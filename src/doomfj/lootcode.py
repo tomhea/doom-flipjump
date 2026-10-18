@@ -81,7 +81,8 @@ REACH_UP, REACH_DOWN = 56, 8          # combat.REACH_UP / REACH_DOWN
 # the dropped variants' give routines (DROP_ITEM's types, `dropped=True`)
 DROPPED = {2007: "give_2007d", 2001: "give_2001d"}
 WEAPON_OWN = {gd.WP_FIST: 0, gd.WP_PISTOL: 1, gd.WP_SHOTGUN: 2, gd.WP_CHAINSAW: 3,
-              gd.WP_MISSILE: 4, gd.WP_CHAINGUN: 5}                     # weaponcode.OWN (P9: 4; P10: the chaingun 5)
+              gd.WP_MISSILE: 4, gd.WP_CHAINGUN: 5,                     # weaponcode.OWN (P9: 4; P10: the chaingun 5)
+              gd.WP_PLASMA: 6}                                        # M8 C6: the plasma rifle (a plasma map's)
 # M8 F4 (E1M2): THE CARD CELLS, one nibble each, 0 / 1 -- the contract with the door code, which reads them.
 # `pcard` (the blue card, doorcode.door_decls', P2a.1) is unchanged; the yellow and the red card's cells are this
 # module's: declared in the game tier only when the map has the card (`map_cards`: E1M1 has none), persisted across the
@@ -292,9 +293,10 @@ def _if_ready(p: str, weapons, yes: str, no: str) -> List[str]:
 
 
 # ---- the give routines ------------------------------------------------------------------------------------------
-def give_ammo_lines(a: int) -> List[str]:
+def give_ammo_lines(a: int, plasma: bool = False) -> List[str]:
     """`ga<a>` (stl.fcall ga<a>, ga_ret): P_GiveAmmo for ammo a with `ga_n` rounds already scaled (num * clipammo,
-    or half a clip) -> `gv_ok` 1 taken, 0 refused (at the cap). From empty, DOOM's auto-switch."""
+    or half a clip) -> `gv_ok` 1 taken, 0 refused (at the cap). From empty, DOOM's auto-switch. M8 C6 (`plasma`, a map
+    with the rifle): the cells' switch -- the fist or the pistol up, the rifle owned -> the rifle."""
     cell = AMMO_CELL[a]
     p = f"ga{a}"
     out = [f"{p}:",
@@ -325,7 +327,11 @@ def give_ammo_lines(a: int) -> List[str]:
         out += _if_ready(p + "m", (gd.WP_FIST,), f"{p}_sw", f"{p}_out")
         out += [f"  {p}_sw:", f"    hex.if0 1, wp_own + {WEAPON_OWN[gd.WP_MISSILE]}*dw, {p}_out",
                 f"    hex.set 1, wp_pend, {gd.WP_MISSILE}"]
-    # AM_CELL (the plasma rifle): never owned on E1M1 -- no switch
+    elif a == gd.AM_CELL and plasma:  # M8 C6: the fist or the pistol up, the rifle owned -> the rifle
+        out += _if_ready(p + "l", (gd.WP_FIST, gd.WP_PISTOL), f"{p}_sw", f"{p}_out")
+        out += [f"  {p}_sw:", f"    hex.if0 1, wp_own + {WEAPON_OWN[gd.WP_PLASMA]}*dw, {p}_out",
+                f"    hex.set 1, wp_pend, {gd.WP_PLASMA}"]
+    # AM_CELL without the rifle (E1M1, E1M2, ...): never owned -- no switch
     out += [f"  {p}_out:", "    stl.fret ga_ret"]
     return out
 
@@ -394,6 +400,11 @@ def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[st
         out += _ga_call(gd.AM_MISL, gd.CLIPAMMO[gd.AM_MISL] * 2)
         out += [f"    hex.if0 1, {own}, {p}_new", "    stl.fret gv_ret",       # owned: taken iff ammo was given
                 f"  {p}_new:", f"    hex.set 1, {own}, 1", f"    hex.set 1, wp_pend, {gd.WP_MISSILE}", f"    ;{ok}"]
+    elif kind == 2004:                                                # PLAS (M8 C6): P_GiveWeapon, 2 x 20 cells
+        own = f"wp_own + {WEAPON_OWN[gd.WP_PLASMA]}*dw"
+        out += _ga_call(gd.AM_CELL, gd.CLIPAMMO[gd.AM_CELL] * 2)
+        out += [f"    hex.if0 1, {own}, {p}_new", "    stl.fret gv_ret",       # owned: taken iff ammo was given
+                f"  {p}_new:", f"    hex.set 1, {own}, 1", f"    hex.set 1, wp_pend, {gd.WP_PLASMA}", f"    ;{ok}"]
     elif kind == 2002:                                                # MGUN (P10): P_GiveWeapon (2 clips, 1 dropped)
         own = f"wp_own + {WEAPON_OWN[gd.WP_CHAINGUN]}*dw"
         out += _ga_call(gd.AM_CLIP, gd.CLIPAMMO[gd.AM_CLIP] * (1 if dropped else 2))
@@ -568,7 +579,7 @@ def _drop_leaf() -> List[str]:
 
 def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable = _default_rt_unlink,
                  drop_take: Callable = _default_drop_take, lists=None, drop_rt: Sequence[int] = None,
-                 stats: bool = False) -> List[str]:
+                 stats: bool = False, plasma: bool = False) -> List[str]:
     """`pk_go` (stl.fcall pk_go, pk_ret): `combat._touch_specials` at the candidate (`cpx`, `cpy`) with the floor
     `cm_hf` (the module docstring). `slots`: `pickup_slots`; `mon_rt[m]`: monster slot m's runtime thing (its
     thpos_rt / thss_rt row). `lists` overrides the cell lists (the host control's mutated grid). Jumps over itself.
@@ -625,10 +636,13 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
     # ---- the shared leaves and the give routines ----
     out += _box_leaf() + _drop_leaf() + (_mbox_leaf() if mleaf else [])
     out += ["pk_bonus:"] + _bonus_lines("pkb") + ["    stl.fret pk_nret"]
-    for kind, dropped in give_kinds(w):
+    kinds = give_kinds(w)
+    assert plasma or (2004, False) not in kinds, ("M8 C6: a plasma rifle on the map, and no rifle in the weapon code "
+                                                 "(wall_renderer.plasma_game_on: the tier's modes)")
+    for kind, dropped in kinds:
         out += give_lines(kind, dropped, stats)
     for a in range(gd.NUMAMMO):
-        out += give_ammo_lines(a)
+        out += give_ammo_lines(a, plasma)                                  # M8 C6: the cells' switch to the rifle
     out += ["pk_end:"]
     return out
 
@@ -825,7 +839,7 @@ def use_guard() -> tuple:
 # ---- the splice ------------------------------------------------------------------------------------------------------
 def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int], cell_root: str,
                rt_unlink: Callable = _default_rt_unlink, drop_take: Callable = _default_drop_take,
-               drop_rt: Sequence[int] = None, stats: bool = False) -> dict:
+               drop_rt: Sequence[int] = None, stats: bool = False, plasma: bool = False) -> dict:
     """everything package B adds to the game tier, for the World `w` (its level start; any skill):
       * `decls`: the persisted cells (p_bc, p_str, p_bp, am_misl, am_cell), p_dd0, the interfaces and scratch;
       * `tables`: amcap, nkleaf;
@@ -848,10 +862,12 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
     P10 (`stats`, doomfj.statcode): the COUNTITEM gives count the item, `pre` checks the secrets, and the leaves
     carry `sc_go` (statcode declares the cells: the game tier's).
     M8 F4: `decls` also declares the map's new card cells (`card_decls`: pcard_y / pcard_r, E1M1 none) and `cards`
-    names them -- build._map_persist persists them, p6_restart_parts zeroes them."""
+    names them -- build._map_persist persists them, p6_restart_parts zeroes them.
+    M8 C6: `plasma` -- the tier has the rifle (wall_renderer.plasma_game_on): its give and the cells' switch to it."""
     start = level_start(w)
     slots = pickup_slots(w, rm, map_wad, mapname, sprite_wad)
-    leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt, stats=stats)
+    leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt, stats=stats,
+                           plasma=plasma)
               + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root)
               + (_statcode.secret_lines(w, cell_root) if stats else []))
     return {"decls": loot_decls(start) + card_decls(w) + mbox_decls(w), "tables": tables_fj(w), "leaves": leaves,   # M8 F4 + F1.3

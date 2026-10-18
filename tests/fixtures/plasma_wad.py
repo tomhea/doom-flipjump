@@ -25,3 +25,14 @@ def plasma_e1m1(base: WadFile = None, mapname: str = "E1M1", things=PLASMA_THING
     data = old.data + b"".join(struct.pack("<hhhhh", x, y, a, ty, SKILLS_ALL) for x, y, a, ty in things)
     lumps[at] = Lump(old.name, old.offset, len(data), data)
     return WadFile(base.wad_type, lumps)
+
+
+def write_wad(wad: WadFile, path) -> None:
+    """`wad` as a WAD file at `path` (its lumps in order, then the directory) -- for a build that takes a wad PATH"""
+    from pathlib import Path
+    body, dirs, off = bytearray(), [], 12
+    for lump in wad._lumps:
+        dirs.append(struct.pack("<ii8s", off + len(body), len(lump.data), lump.name.encode("ascii")))
+        body += lump.data
+    head = struct.pack("<4sii", wad.wad_type.encode("ascii"), len(dirs), 12 + len(body))
+    Path(path).write_bytes(head + bytes(body) + b"".join(dirs))

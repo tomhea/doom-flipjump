@@ -433,6 +433,7 @@ class Survey:
                          ("barrel chains", self._barrel_chains),
                          ("the oracle's thvis mirror", self._vis_mirror),
                          ("the per-map feature flags", self._feature_flags),
+                         ("the state byte", self._state_byte),
                          ("the pool and the RAM, projected", self._projection)):
             self.guard("lesson: " + name, fn)
 
@@ -709,6 +710,29 @@ class Survey:
         pal = bytes(v for rgb in self.asset.playpal(0) for v in rgb)
         self.feature_guard("AUTOMAP", "the MAP page (automap.build + check: the map fits its page)",
                            lambda: "%d-unit scale" % automap.build(self.wad, self.m, pal, c.W, c.H).units)
+
+    # M8 C6 (the plasma rifle): DOOM's state counts of the E1 monster types gamedata does not hold yet (info.c, the raise
+    # states left out: only the Arch-vile enters them) -- the Baron with its BRUISERSHOT, the lost soul
+    DOOM_NEW_STATES = {3003: 22 + 5, 3006: 16}
+
+    def _state_byte(self):
+        """M8 C6: THE STATE BYTE IS FULL. Every state cell is one byte (the schema's 8 bits, the fj's 2 nibbles): 246 states
+        held 0..245 and the plasma rifle's 15 had no index left -- they took the unreachable RAISE states' as GHOSTS
+        (gamedata.STATE_GHOSTS). A new monster type needs its states somewhere too: the free indices past the table and
+        the raise indices no ghost holds yet, against what the map's missing types need (DOOM_NEW_STATES) -- OVER here
+        is a decision (more ghosts, a per-domain alias, or a wider cell) before any emission"""
+        from doomfj import gamedata as gd
+        from doomfj.things import single_player
+        free_tail = 255 - len(gd.STATE_NAMES)
+        free_ghosts = sum(1 for n in gd.STATE_NAMES if "_RAISE" in n)
+        need = {ty: k for ty, k in self.DOOM_NEW_STATES.items()
+                if ty not in gd.THING_TYPES
+                and any(t.type == ty and single_player(t) for t in self.wad.things(self.m))}
+        n = sum(need.values())
+        self.row("OK" if n <= free_tail + free_ghosts else "OVER", "the state byte: states the map's new types need",
+                 n, "<= %d free (%d past the table, %d raise indices)" % (free_tail + free_ghosts, free_tail,
+                                                                         free_ghosts),
+                 "types %s (DOOM_NEW_STATES)" % sorted(need) if need else "")
 
     # measured, each from a build's own record (named); projected by segs, an ESTIMATE from two maps
     POOL_CAPACITY = 67_108_863                          # words: --pool-base 0x80000000 --span-bits 0x7fffffe0

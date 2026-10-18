@@ -30,35 +30,51 @@ from typing import Dict, FrozenSet, List, NamedTuple, Optional
 # the held keys, in kb.poll's parameter order and `kb_now`'s nibble order -- forward, back, turn left / right (the
 # arrows), use (space, e), strafe left / right, fire (ctrl), the number keys 1..5 (P9: 5, the launcher)
 HELD_KEYS = ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5")   # P9: 5, the launcher
+# M8 C6: on a map with the plasma rifle (combat.plasma_on) key 6 is the fourteenth -- kb.poll's table and parameters
+# are frozen (rule 4), so it is read BESIDE the poll (wall_renderer.w6_key_lines, as the map page's M), and its nibble of
+# KEY_NOW is the 14th (the first 13 are where they were: `now_cell` is the same operand for every other key)
+HELD_KEYS_PLASMA = HELD_KEYS + ("w6",)
 KEY_NOW = "kb_now"
 NOW_DECL = f"{KEY_NOW}: hex.vec {len(HELD_KEYS)}"
+W6_CODE = 0x36                                  # '6', the SDL code pygame_window delivers
+
+
+def held_keys(plasma: bool = False) -> tuple:
+    """the map's held keys (M8 C6: + w6 on a plasma map)"""
+    return HELD_KEYS_PLASMA if plasma else HELD_KEYS
+
+
+def now_decl(plasma: bool = False) -> str:
+    """KEY_NOW's declaration: one nibble per held key (M8 C6: 14 on a plasma map)"""
+    return f"{KEY_NOW}: hex.vec {len(held_keys(plasma))}"
 
 # keycode -> held key: src/fj/input.fj's table (the SDL codes pygame_window delivers)
 BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b", 0x82: "l", 0x83: "r", 0x20: "u", 0x65: "u",
            0x61: "sl", 0x2C: "sl", 0x64: "sr", 0x2E: "sr", 0x85: "fi",
            0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4", 0x35: "w5"}
+BINDING_PLASMA = {**BINDING, W6_CODE: "w6"}     # M8 C6: a plasma map's table
 # held key -> wireformat.KEY_NAMES' name (the dicts the sim and the gates use); the number keys keep theirs
 KEY_NAME = {"f": "forward", "b": "back", "l": "turn_left", "r": "turn_right", "u": "use",
             "sl": "strafe_left", "sr": "strafe_right", "fi": "fire",
-            "w1": "w1", "w2": "w2", "w3": "w3", "w4": "w4", "w5": "w5"}
+            "w1": "w1", "w2": "w2", "w3": "w3", "w4": "w4", "w5": "w5", "w6": "w6"}
 
 
 def flag(key: str) -> str:
     """the persisted held flag's label"""
-    assert key in HELD_KEYS, key
+    assert key in HELD_KEYS_PLASMA, key
     return "kb_" + key
 
 
 def now_cell(key: str) -> str:
     """the fj operand of `key`'s nibble of KEY_NOW -- what the frame acts on"""
-    return f"{KEY_NOW} + {HELD_KEYS.index(key)}*dw"
+    return f"{KEY_NOW} + {HELD_KEYS_PLASMA.index(key)}*dw"
 
 
-def now_lines(prefix: str = "kn") -> List[str]:
+def now_lines(prefix: str = "kn", plasma: bool = False) -> List[str]:
     """after the polls: kb_now[key] |= the held flag, for every held key (both are 0 or 1, so a held key SETS it).
-    One `if0` per key, and a `set` per key held."""
+    One `if0` per key, and a `set` per key held. M8 C6 (`plasma`): w6 too, last."""
     out = []
-    for key in HELD_KEYS:
+    for key in held_keys(plasma):
         out += [f"hex.if0 1, {flag(key)}, {prefix}_{key}", f"hex.set 1, {now_cell(key)}, 1", f"{prefix}_{key}:"]
     return out
 
@@ -81,7 +97,7 @@ def frame_keys(events, frames: int, polls: Optional[int] = None, binding=None, m
         from doomfj.menu import MENU_KEYS as menu_keys
     from doomfj.menu import ANY_KEY_EVENT
     binding = BINDING if binding is None else binding
-    names = sorted(set(binding.values()), key=lambda n: (HELD_KEYS.index(n) if n in HELD_KEYS else 99, n))
+    names = sorted(set(binding.values()), key=lambda n: (HELD_KEYS_PLASMA.index(n) if n in HELD_KEYS_PLASMA else 99, n))
     pending = sorted((tuple(e) for e in events), key=lambda e: e[0])
     held = {n: False for n in names}
     out, i = [], 0

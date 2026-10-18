@@ -76,7 +76,8 @@ def pack(row: Dict[str, int]) -> int:
 
 
 def state_table_values() -> List[int]:
-    vals = [0] * len(gd.STATE_NAMES)
+    vals = [0] * gd.CORE_STATE_COUNT                   # M8: the fog's states (after these) are no monster's
+    assert all(gd.STATE_INDEX[s] < gd.CORE_STATE_COUNT for s in monster_states())
     for s in monster_states():
         vals[gd.STATE_INDEX[s]] = pack(state_row(s))
     return vals
@@ -345,8 +346,13 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     fight = loot and _fight_on(mode)           # M7 P8a I: monsters fight monsters (monsterdecide's fight parts)
     # P9 (the owner, 2026-10-10): THE PLAYER'S ROCKET -- in the pool, meeting things (fight), carrying its z (knock)
     rockets = fight and knock
+    # M8 (doomfj.teleport's TELEPORT FOG): a map with a WR teleport line draws MT_TFOG from the effects pool -- the
+    # tier's teleports' own rule (`tele`, below: loot, chase and the lines), asserted equal there
+    from doomfj.teleport import TELEPORT_SPECIALS
+    fog = bool(loot and chase and any(ld.special in TELEPORT_SPECIALS for ld in map_wad.linedefs(mapname)))
     mob_rows, mob_view = (mobile_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
-                                           first=mob_first, puffs=loot, rockets=rockets) if nmob else ([], {}))
+                                           first=mob_first, puffs=loot, rockets=rockets,
+                                           **({"fog": True} if fog else {})) if nmob else ([], {}))
     rows = rows + mob_rows
     drop_row, bar_view, bar_rows = {}, {}, []
     if loot:
@@ -368,6 +374,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     # his reactiontime persists there) with moving monsters; each slot's move writes a teleport's facing back. None on
     # E1M1 (the emitter asserts its own `_TELE` agrees)
     tele = bool(loot and chase and w.teleports)
+    assert tele == fog, "M8: the fog's rows and the teleports' rule disagree"
     nmon, schema = w.layout.nmon, w.schema
     snib = w.sec_nibbles                 # M8 L1: a sector id's width (doomfj.sectorcode)
     if nmon == 0 or not rows:
@@ -573,7 +580,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                                        drops=barrel["drops"] if barrel else None,
                                        **({"knock": True} if knock else {}),
                                        **({"fight": True} if fight else {}),   # M7 P8a I: a monster's source
-                                       **({"stats": True} if stats else {}))   # P10: the kill counter
+                                       **({"stats": True} if stats else {}),   # P10: the kill counter
+                                       **({"telefrag": True} if tele else {}))  # M8: P_TeleportMove's 10000
                     extra["decls_wake"] += dmp["decls"]
                     extra["decide_lines"] += dmp["lines"]
                     extra["tables"] += dmp["tables"]
@@ -583,7 +591,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     extra["proj"] = proj_parts(w, nt=nt, puffs=loot, **({"knock": True} if knock else {}),
                                                **({"fight": True, "slot_rt": [slot_t[m] for m in range(nmon)]}
                                                   if fight else {}),       # M7 P8a I: things stop it
-                                               **({"rockets": True} if rockets else {}))   # P9: the rocket
+                                               **({"rockets": True} if rockets else {}),   # P9: the rocket
+                                               **({"fog": True} if tele else {}))         # M8: the teleport fog
                     extra["proj"]["nt"] = nt
             # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
             # render setting says so (depth_walk, above) -- the walk's registers (sim.thing_pass_depth)
@@ -647,7 +656,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
 
 # ---- M7 P5: the MOBILES' rows (docs/gp-p5-interface.md, THE MOBILE ROWS) ---------------------------------------
 def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict, first: int, puffs: bool = False,
-                     rockets: bool = False):
+                     rockets: bool = False, fog: bool = False):
     """-> (rows, {state index: row}): one thing row per distinct mobile LUMP (`monsters.mobile_lump` of every pool
     state, projcode.pool_states' order), `things.thing_rows`' layout -- how the oracle draws a mobile
     (reference_model.render_wall_frame(mobiles=)), field by field:
@@ -664,13 +673,15 @@ def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
     `first`: the row index of the first one (after the runtime things and the monsters' views). M7 P6 (`puffs`): the
     puff's states too (projcode.pool_states(puffs=True)), PUFFA0 .. PUFFD0 at MISSILE_Z as blood. P9 (`rockets`): the
     rocket's states -- MISLA5 in flight (monsters.MOBILE_ROTATION: one fixed rotation, never mirrored), MISLB0 .. MISLD0
-    exploding -- at MISSILE_Z as the fireball."""
+    exploding -- at MISSILE_Z as the fireball. M8 (`fog`, a map with a WR teleport): the TELEPORT FOG's states,
+    TFOGA0 .. TFOGJ0, ON the floor (z 0: reference_model.FLOOR_EFFECTS -- an actor still, not a drop)."""
     from doomfj.monsters import mobile_lump, mobile_view
     from doomfj.projcode import pool_states
-    from doomfj.reference_model import GAME_RENDER_KW, MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, MISSILE_Z
+    from doomfj.reference_model import (FLOOR_EFFECTS, GAME_RENDER_KW, MIN_SPRITE_H, MIN_SPRITE_H_MONSTER,
+                                        MISSILE_Z)
     actor = bool(GAME_RENDER_KW.get("exempt_actors"))
     rows, lump_row, by_state = [], {}, {}
-    for s in pool_states(puffs, rockets):
+    for s in pool_states(puffs, rockets, fog):
         lump = mobile_lump(s)
         if lump not in lump_row:
             sprite, letter, rot = mobile_view(s)
@@ -680,7 +691,8 @@ def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
             art = rm.art_of_lump(sprite_wad, lump, cache)
             assert not mir and dw == art[2] and dw < 0x80, (lump, mir, dw, art[2])
             tzmin = rm.sprite_tz_min_size(art[4], MIN_SPRITE_H_MONSTER if actor else MIN_SPRITE_H) & 0xFFFFFFFF
-            rows.append((art[5], art[3], art[4], art[6] + MISSILE_Z, tzmin, tzmin,
+            z = 0 if sprite in FLOOR_EFFECTS else MISSILE_Z              # M8: the fog stands on the floor
+            rows.append((art[5], art[3], art[4], art[6] + z, tzmin, tzmin,
                          base, base + 2 * dw if spr_near else 0, 1 if actor else 0, dw))
             lump_row[lump] = first + len(rows) - 1
         by_state[gd.STATE_INDEX[s]] = lump_row[lump]

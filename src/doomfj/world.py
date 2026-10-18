@@ -1831,7 +1831,7 @@ class World(CombatMixin):
             if crossed(trig, (ox << 16, oy << 16), (nx << 16, ny << 16), self.mon_radius[m]):
                 ws.l_req[self.lift_order.index(trig[0])] = 1
         if self.teleports:                            # M8 L4: 97 is on the non-player list too -- last, as the fj
-            nx, ny = self._teleport_monster(m, ox, oy, nx, ny)
+            nx, ny = self._teleport_monster(m, ox, oy, nx, ny, ev)
         if step:
             ev.moves.append(m)
         leaf = self.rm.point_in_subsector(self.cmap, nx, ny)
@@ -1842,12 +1842,13 @@ class World(CombatMixin):
             self._list_insert(m, leaf)
             ev.leaf_changes.append((m, old, leaf))
 
-    def _teleport_monster(self, m: int, ox: int, oy: int, nx: int, ny: int) -> Tuple[int, int]:
+    def _teleport_monster(self, m: int, ox: int, oy: int, nx: int, ny: int, ev=None) -> Tuple[int, int]:
         """M8 L4 (doomfj.teleport): EV_Teleport for slot m after its accepted move (ox, oy) -> (nx, ny), map units --
         the first teleport line crossed from its front (line order; one per move) and, unless a shootable thing stands
-        at the destination (P_TeleportMove's PIT_StompThing refuses a monster), the destination: position, floorz,
-        facing (its angle's octant), momentum and the position's fraction 0 (knockback). -> the position now (the
-        relink's). `self._teleported` says it happened (the knock move's momentum stops: combat._xy_move)"""
+        at the destination (P_TeleportMove's PIT_StompThing refuses a monster), M8 the two fogs (at (nx, ny), then
+        ahead of the destination: combat._teleport_fogs) and the destination: position, floorz, facing (its angle's
+        octant), momentum and the position's fraction 0 (knockback). -> the position now (the relink's).
+        `self._teleported` says it happened (the knock move's momentum stops: combat._xy_move)"""
         from doomfj.teleport import crossed_front, stomped
         ws = self.ws
         r = self.mon_radius[m]
@@ -1856,6 +1857,7 @@ class World(CombatMixin):
                 continue
             if stomped(self, tel.dest, r, mover=m):
                 break
+            self._teleport_fogs(tel, nx, ny, TicEvents(0) if ev is None else ev)
             nx, ny = tel.dest
             ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, tel.dest_floor
             ws.mon_facing[m] = tel.facing

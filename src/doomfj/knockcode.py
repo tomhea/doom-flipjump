@@ -118,6 +118,10 @@ def check_model_rules(w=None) -> None:
     assert gd.MOBJINFO["MT_PLAYER"].mass == 100
     for mass, sh in MASS_SHIFT.items():
         assert all(d * (gd.FRACUNIT >> 3) * 100 // mass == d << (16 - sh) for d in range(256)), mass
+        # M8: the telefrag's damage (thrust_lines(telefrag=True)) by the same shift, its product in mul_lo's 8 nibbles
+        d = _telefrag_damage()
+        assert d * (gd.FRACUNIT >> 3) * 100 // mass == d << (16 - sh), (mass, d)
+    assert _telefrag_damage() * gd.FRACUNIT < 1 << 31, "10000 * |trig| <= 10000 << 16 must be a signed 32-bit product"
     if w is not None:
         assert w.rm.angle_shift == 20, "kb_idx is kb_ang's top 3 nibbles"
         n = w.layout.nmon
@@ -126,6 +130,11 @@ def check_model_rules(w=None) -> None:
         from doomfj.combat import PLAYER_R
         from doomfj.reference_model import PLAYER_HEIGHT
         assert PLAYER_R == 16 and PLAYER_HEIGHT >> 16 == 56
+
+
+def _telefrag_damage() -> int:
+    from doomfj.teleport import TELEFRAG_DAMAGE
+    return TELEFRAG_DAMAGE
 
 
 def persisted_decls(nmon: int, pool: int = None) -> List[str]:
@@ -237,9 +246,10 @@ def _friction(cell: str, tag: str) -> List[str]:
 
 
 # ---- kb_go and the thrust --------------------------------------------------------------------------------------------
-def go_lines(slots: Sequence[tuple] = None) -> List[str]:
+def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False) -> List[str]:
     """`kb_go` (stl.fcall kb_go, kb_ret), its slot stubs `kbt<m>`, `kb_gm` and the thrust `kb_th` (+ `kb_pz`, the
-    player's z). `slots[m]` = (runtime thing, radius, mass) per monster slot. PACKAGE 0's STUB without `slots`"""
+    player's z). `slots[m]` = (runtime thing, radius, mass) per monster slot. PACKAGE 0's STUB without `slots`.
+    M8 (`telefrag`, a map with a WR teleport: thrust_lines') -- kb_tf 1 is the telefrag's 10000"""
     if slots is None:
         return ["// M7 P8a (doomfj.knockcode): P_DamageMobj's thrust -- package 0's stub, package K's leaf",
                 "kb_go:",
@@ -301,17 +311,21 @@ def go_lines(slots: Sequence[tuple] = None) -> List[str]:
             "    hex.inc 2, kb_live",                                         # stopped -> moving
             "  kq_gr:",
             "    stl.fret kb_gmret"]
-    out += thrust_lines()
+    out += thrust_lines(telefrag)
     return out
 
 
-def thrust_lines() -> List[str]:
+def thrust_lines(telefrag: bool = False) -> List[str]:
     """`kb_th` (stl.fcall kb_th, kb_tret) on the window -- kb_tx / kb_ty (the target, 16.16), kb_i8x / kb_i8y (the
     inflictor << 16), kb_dm, kb_hp (health > 0), kb_rng (the target's stream), kb_tz / kb_tzp (its z, or the player's),
     kb_iz / kb_izp, kb_hv (mass 400) -- into kb_mx / kb_my (the momentum to add); and `kb_pz` (kb_pzv = the player's
-    check_position floorz: `kb_cell` at viewx / viewy)"""
+    check_position floorz: `kb_cell` at viewx / viewy).
+    M8 (`telefrag`): `kb_tf` 1 (teleportcode's tp_frag sets it around its dm_go) is P_TeleportMove's damage,
+    teleport.TELEFRAG_DAMAGE, which kb_dm's two nibbles cannot hold: no reversal (damage < 40 fails) and the product's
+    damage operand is the constant -- 10000 * trig fits mul_lo's 8 nibbles (check_model_rules)"""
     return ["kb_th:",
             "    hex.zero 1, kb_rev",
+            *(["    hex.if1 1, kb_tf, kq_nr"] if telefrag else []),               # M8: 10000 >= 40, no reversal
             # the reversal, C's order: damage < 40 ...
             "    hex.set 2, kb_c, %d" % REVERSE_DMG,
             "    hex.cmp 2, kb_dm, kb_c, kq_r1, kq_nr, kq_nr",
@@ -339,6 +353,9 @@ def thrust_lines() -> List[str]:
             "  kq_a:",
             "    hex.mov 3, kb_idx, kb_ang + 5*dw",                           # the fine angle: angle >> 20
             "    hex.zero 8, kb_d8", "    hex.mov 2, kb_d8, kb_dm",
+            *(["    hex.if0 1, kb_tf, kq_ntf",                                   # M8: the telefrag's damage
+               "    hex.set 8, kb_d8, %d" % _telefrag_damage(),
+               "  kq_ntf:"] if telefrag else []),
             "    finesine.read_cos kb_cs, kb_idx",
             "    hex.mul_lo 8, kb_mx, kb_cs, kb_d8",
             "    finesine.read_sin kb_cs, kb_idx",
@@ -603,16 +620,17 @@ def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid", sl
 
 def leaf_lines(slots: Sequence[tuple], *, player_root: str, mon_root: str, nib: int, lift_trigs=(),
                after_accept: Sequence[str] = (), solid: str = "mon_solid", teleport: Sequence[str] = (),
-               slot_back=None) -> List[str]:
+               slot_back=None, telefrag: bool = False) -> List[str]:
     """every knock leaf, jumping over itself: kb_go (+ kbt<m>, kb_gm, kb_th, kb_pz), kb_cell, kb_xy (+ kb_try),
     kb_ptry, kb_mtry, kb_pmove, kb_mmove, kbs<m>. The program must hold: the cells (`decls(nmon)`), `tables_fj`,
     mrnd, finesine, the point_to_angle tables, ptloc_walk, ms_seed_leaf, the player's and the monsters' cells (their
     roots), monstermove's context and mm_things, pk_go, pb_mon, projcode's pw_link / pw_unlink, lfsec, dm_leaf's window
     (dm_hp, dm_rng, dm_x, dm_y), p_hp / p_dead / rng_pl / wp_rdy, thpos_rt / thss_rt / msec / mon_floorz /
     mon_shootable / `solid`, lreq. `nib`: a sector id's width (World.sec_nibbles: move_lines' msec). M8 L4: `teleport`
-    (mtry_lines') and `slot_back` (move_lines') -- the WR teleports of a monster's knock step; none on E1M1"""
+    (mtry_lines') and `slot_back` (move_lines') -- the WR teleports of a monster's knock step; none on E1M1. M8:
+    `telefrag` (a map with a WR teleport) -- the thrust's kb_tf (thrust_lines)"""
     return (["// M7 P8a (doomfj.knockcode, package K): knockback's leaves", ";kq_end"]
-            + go_lines(slots) + cell_lines(player_root) + xy_lines() + ptry_lines(after_accept)
+            + go_lines(slots, telefrag) + cell_lines(player_root) + xy_lines() + ptry_lines(after_accept)
             + mtry_lines(mon_root, lift_trigs, teleport) + move_lines(slots, nib=nib, solid=solid, slot_back=slot_back)
             + ["kq_end:"])
 

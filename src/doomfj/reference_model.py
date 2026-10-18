@@ -514,14 +514,17 @@ class MobileThing:
     type: int = -1
     z: int | None = None
 
+    effect: bool = False
+
     @property
     def drop(self) -> bool:
         """M7 P6: a DROP -- the item a monster left, standing ON its floor (`monsters.MonsterPhase.mobiles`' (x, y,
         lump, 0)): drawn as SCENERY under every rule, never an actor (docs/gp-p67-interface.md section 5; the fj's drop
         rows, monstercode.drop_view_rows). The fireballs, blood and puffs fly at MISSILE_Z (z None, or a 4th element
         that says so) and are the mobiles the actors rule exempts: the 4th element moves the height, and z 0 is what
-        marks an item"""
-        return self.z == 0
+        marks an item -- M8: but a FLOOR EFFECT's (`effect`: the teleport fog, FLOOR_EFFECTS), an effect standing on
+        the floor, an actor as every pool effect"""
+        return self.z == 0 and not self.effect
 
 
 def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
@@ -536,7 +539,10 @@ def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
 # (the monsters, live or dead, the fireballs, the map's runtime barrels and pickups). By the POOL a mobile's lump
 # belongs to, which is what the fj's row ranges are (monstercode.rank_threshold: runtime rows < nt + FIREBALL_POOL
 # rank 1): BAL1* only ever shows in the fireball pool, BLUD* / PUFF* only in the fx pool (test_d3_rules holds it).
-MOBILE_RANK = {"BAL1": 1, "BLUD": 0, "PUFF": 0, "MISL": 1}      # P9: the player's rocket -- a missile, as BAL1
+MOBILE_RANK = {"BAL1": 1, "BLUD": 0, "PUFF": 0, "MISL": 1,      # P9: the player's rocket -- a missile, as BAL1
+               "TFOG": 0}                                       # M8: the teleport fog -- an effect (the fx pool)
+# M8: the effects that stand ON the floor (z 0 in `mobiles`) and are not drops: the teleport fog
+FLOOR_EFFECTS = frozenset({"TFOG"})
 
 
 def mobile_rank(lump: str, z=None) -> int:
@@ -2521,7 +2527,7 @@ class ReferenceModel:
                 _mx, _my, _mlump = _mo[:3]
                 _mz = _mo[3] if len(_mo) > 3 else None   # M7 P6: a drop's z (0); P5's 3-tuples: MISSILE_Z
                 things_by_ss.setdefault(self.point_in_subsector(scene.cmap, _mx, _my), []).append(
-                    (MobileThing(_mx, _my, z=_mz), (_mlump, False), _ndraw + _k))
+                    (MobileThing(_mx, _my, z=_mz, effect=_mlump[:4] in FLOOR_EFFECTS), (_mlump, False), _ndraw + _k))
             # M7 P3.3 (D3 d): a leaf's RUNTIME things nearest first -- the walk is front-to-back and a sprite
             # pixel is written once, so within a leaf the near one must be drawn before the far one
             # M7 P8a (C, D3 a): `rt_rank` -- the key becomes (rank, key): the effects and the drops (rank 0) are drawn

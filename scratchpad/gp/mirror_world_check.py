@@ -103,8 +103,8 @@ def tap_walkover(world, rec: list) -> None:
     ((x, y), (cx, cy), teleported) -- teleported: the player did not stay at the call's end"""
     orig = world._walkover
 
-    def walkover(x, y, cx, cy, _orig=orig):
-        r = _orig(x, y, cx, cy)
+    def walkover(x, y, cx, cy, ev=None, _orig=orig):
+        r = _orig(x, y, cx, cy, ev)
         rec.append(((x, y), (cx, cy), (world.ws.px, world.ws.py) != (cx, cy)))
         return r
     world._walkover = walkover

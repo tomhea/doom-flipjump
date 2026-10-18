@@ -423,6 +423,22 @@ _STATE_ROWS: Tuple[Tuple, ...] = (
     ('S_CHAIN3', 'CHGG', 1, 0, 'A_ReFire', 'S_CHAIN'),
     ('S_CHAINFLASH1', 'CHGF', 32768, 5, 'A_Light1', 'S_LIGHTDONE'),
     ('S_CHAINFLASH2', 'CHGF', 32769, 5, 'A_Light2', 'S_LIGHTDONE'),
+    # M8 (the owner, 2026-10-18: "if teleport fog is simple and cheap add it") -- info.c's MT_TFOG rows, APPENDED (every
+    # older index keeps its value; monstercode's state table stays CORE_STATE_COUNT long, so E1M1's text does not move):
+    # A B A B C .. J, fullbright, 6 tics each, then removed. Their indices are 0xEA .. 0xF5 -- projcode tells a fog
+    # slot from a blood or puff slot by fx_st's high nibble (>= 0xE), asserted there
+    ('S_TFOG', 'TFOG', 32768, 6, None, 'S_TFOG01'),
+    ('S_TFOG01', 'TFOG', 32769, 6, None, 'S_TFOG02'),
+    ('S_TFOG02', 'TFOG', 32768, 6, None, 'S_TFOG2'),
+    ('S_TFOG2', 'TFOG', 32769, 6, None, 'S_TFOG3'),
+    ('S_TFOG3', 'TFOG', 32770, 6, None, 'S_TFOG4'),
+    ('S_TFOG4', 'TFOG', 32771, 6, None, 'S_TFOG5'),
+    ('S_TFOG5', 'TFOG', 32772, 6, None, 'S_TFOG6'),
+    ('S_TFOG6', 'TFOG', 32773, 6, None, 'S_TFOG7'),
+    ('S_TFOG7', 'TFOG', 32774, 6, None, 'S_TFOG8'),
+    ('S_TFOG8', 'TFOG', 32775, 6, None, 'S_TFOG9'),
+    ('S_TFOG9', 'TFOG', 32776, 6, None, 'S_TFOG10'),
+    ('S_TFOG10', 'TFOG', 32777, 6, None, 'S_NULL'),
 )
 
 
@@ -450,6 +466,8 @@ STATES: Dict[str, State] = {r[0]: State(*r) for r in _STATE_ROWS}
 STATE_NAMES: Tuple[str, ...] = tuple(r[0] for r in _STATE_ROWS)
 STATE_INDEX: Dict[str, int] = {n: i for i, n in enumerate(STATE_NAMES)}
 S_NULL = "S_NULL"
+# M8: the states before the teleport fog's -- the length monstercode's state table keeps (E1M1's text: no M8 row)
+CORE_STATE_COUNT = STATE_INDEX["S_TFOG"]
 assert STATE_NAMES[0] == S_NULL and len(STATE_NAMES) == len(STATES) <= 255
 
 
@@ -595,6 +613,10 @@ MOBJINFO: Dict[str, MobjInfo] = {m.name: m for m in (
     _mi("MT_SHOTGUN", 2001, "S_SHOT", 1000, S_NULL, "sfx_None", 8, "sfx_None", S_NULL, 0,
         "sfx_None", S_NULL, S_NULL, S_NULL, S_NULL, "sfx_None", 0, 20 * F, 16 * F, 100, 0,
         "sfx_None", MF_SPECIAL, S_NULL, source="template"),
+    # M8: the teleport fog (info.c MT_TFOG) -- EV_Teleport spawns one at the source and one ahead of the destination
+    _mi("MT_TFOG", -1, "S_TFOG", 1000, S_NULL, "sfx_None", 8, "sfx_None", S_NULL, 0,
+        "sfx_None", S_NULL, S_NULL, S_NULL, S_NULL, "sfx_None", 0, 20 * F, 16 * F, 100, 0,
+        "sfx_None", MF_NOBLOCKMAP | MF_NOGRAVITY, S_NULL),
     # P9: the launcher's rocket (info.c MT_ROCKET)
     _mi("MT_ROCKET", -1, "S_ROCKET", 1000, S_NULL, "sfx_rlaunc", 8, "sfx_None", S_NULL, 0,
         "sfx_None", S_NULL, S_NULL, "S_EXPLODE1", S_NULL, "sfx_barexp", 20 * F, 11 * F, 8 * F, 100,

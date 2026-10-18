@@ -6,10 +6,22 @@ the REAL `_player_sim_lines`, against `combat._player_move` with the collision m
 
 The records: every line, both sides, moves that cross it and moves that stop short or start ON it (P_PointOnLineSide's
 `<=`), the extent's strict ends (lo - r, hi + r, and one ulp inside), WR crossings repeated, monsters standing at the
-destination inside and exactly at the blockdist (shootable or not), the player alive and dead (a monster's stomp).
+destination inside and exactly at the blockdist (shootable or not; one, or all three inside at once), the player alive
+and dead (a monster's stomp).
+
+M8 (the owner, 2026-10-18): THE PLAYER TELEFRAGS. His stomp kills through damagecode's dm_go -- here a STUB that counts
+the calls per harness row and flags any call not in the TELEFRAG mode with kb_tf 1 (the kill itself, dm_leaf and the
+thrust, RUNS against the model in tests/fj/test_telefrag_fj.py); the model's victims are the rows `_teleport_player`
+killed. A monster's teleport never calls it (it is refused).
+
+M8 THE TELEPORT FOG: every teleport that happens calls projcode's tf_spawn twice -- here a STUB that keeps the two
+positions (and flags a call whose fxs_kind is not FX_KINDS["fog"]); the model's are the `_spawn_fx("fog", ..)` calls
+`_teleport_player` / `_teleport_monster` make (the pool itself RUNS in tests/fj/test_fog_pool_fj.py).
 
 R9 (MUTANTS): each a real edit of the emitted text (or the rules the text is generated from) that must part from the
-model: the back side teleports (front_le flipped), no stomp, a stomp whose box is inclusive, a dead player who still
+model: the back side teleports (front_le flipped), no telefrag, the old refusal (the player's stomp refuses), a
+telefrag that ends the stomp (only the first victim dies), the telefrag without kb_tf, no fog, the source fog at the
+position before the move, a stomp whose box is inclusive, a dead player who still
 blocks, the extent inclusive, no reactiontime, the angle kept, the knock momentum kept, the knock loop not restarted
 at the destination, the monster's leaf / floor / facing not taken, the reaction gate that never counts down and one
 that never skips the move.
@@ -65,15 +77,20 @@ class Ctx:
         self.hslots = [r20[0], r30[0], r20[1]]          # the harness rows' model slots
         self.movers = {20: r20[2], 30: r30[1]}         # a teleporting monster of each radius (no harness row)
         self.rows = [(j, w.mon_radius[m]) for j, m in enumerate(self.hslots)]
+        # M8: the fogs the model spawns, logged (the pool is not this harness's: test_fog_pool_fj)
+        self.fogs = []
+        w._spawn_fx = lambda kind, x16, y16, dmg, melee, ev: self.fogs.append((kind, x16 >> 16, y16 >> 16))
 
     def place(self, mons, alive=True):
-        """the model's monsters: only the harness slots, at `mons` [(x, y, shootable)]; the player alive or dead"""
+        """the model's monsters: only the harness slots, at `mons` [(x, y, shootable)] (a live one at its spawn health:
+        a telefrag of an earlier record leaves -2048); the player alive or dead"""
         ws = self.w.ws
         for m in range(self.w.layout.nmon):
             ws.mon_active[m] = ws.mon_shootable[m] = ws.mon_solid[m] = 0
         for (x, y, sh), m in zip(mons, self.hslots):
             ws.mon_x[m], ws.mon_y[m] = x, y
             ws.mon_active[m] = ws.mon_shootable[m] = ws.mon_solid[m] = sh
+            ws.mon_health[m] = self.w.mon_info[m].spawnhealth
         for b in range(len(self.w.barrel_things)):
             ws.bar_state[b] = 0
         ws.p_dead = 0 if alive else 1
@@ -116,7 +133,52 @@ def _mons_feed(mons):
 
 def _common_decls():
     return ["rmagic: hex.vec 2", "rb: hex.vec 2", f"thpos_rt: hex.vec {16 * NH}", f"mon_shootable: hex.vec {NH}",
-            "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8", "p_dead: hex.vec 1", *T.decls()]
+            "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8", "p_dead: hex.vec 1", *T.decls(),
+            "dm_id: hex.vec 2", "dm_melee: hex.vec 1", "dm_ret: hex.vec w/4", f"kcount: hex.vec {NH}",
+            "kerr: hex.vec 1", "kc: hex.vec 2",
+            "fxs_x: hex.vec 4", "fxs_y: hex.vec 4", "fxs_kind: hex.vec 1", "fx_sret: hex.vec w/4",
+            "fogn: hex.vec 1", "fog0x: hex.vec 4", "fog0y: hex.vec 4", "fog1x: hex.vec 4", "fog1y: hex.vec 4"]
+
+
+FOG_CELLS = (("fogn", 1), ("fog0x", 4), ("fog0y", 4), ("fog1x", 4), ("fog1y", 4))
+
+
+def _tf_stub():
+    """M8: projcode's tf_spawn as the fire branches call it -- the first two positions kept, the count, and `kerr` set
+    by a call whose kind is not the fog's"""
+    from doomfj.projcode import FX_KINDS
+    return ["tf_spawn:", f"    hex.set 2, kc, {FX_KINDS['fog']}",
+            "    hex.cmp 1, fxs_kind, kc, tfk_e, tfk_ok, tfk_e",
+            "  tfk_e:", "    hex.set 1, kerr, 1",
+            "  tfk_ok:",
+            "    hex.if1 1, fogn, tfk_2",
+            "    hex.mov 4, fog0x, fxs_x", "    hex.mov 4, fog0y, fxs_y", "    ;tfk_n",
+            "  tfk_2:",
+            "    hex.mov 4, fog1x, fxs_x", "    hex.mov 4, fog1y, fxs_y",
+            "  tfk_n:", "    hex.inc 1, fogn", "    stl.fret fx_sret"]
+
+
+def _fog_want(ctx):
+    """the model's fog calls of the record just run, as FOG_CELLS (the count, then the first two positions)"""
+    f = ctx.fogs
+    assert all(k == "fog" for k, _x, _y in f) and len(f) in (0, 2), f
+    out = [len(f)] + [v & 0xFFFF for _k, x, y in f[:2] for v in (x, y)] + [0] * (4 - 2 * len(f[:2]))
+    ctx.fogs.clear()
+    return out
+
+
+def _dm_stub():
+    """M8: damagecode's dm_go as the telefrag calls it -- counts the call in harness row dm_id - 1's nibble of `kcount`,
+    and sets `kerr` unless dm_melee is TELEFRAG and kb_tf is 1 (the real kill: tests/fj/test_telefrag_fj.py)"""
+    from doomfj.damagecode import TELEFRAG
+    out = ["dm_go:", "    hex.if0 1, kb_tf, dmk_err", f"    hex.set 2, kc, {TELEFRAG}",
+           "    hex.cmp 1, dm_melee, kc, dmk_err, dmk_ok, dmk_err",
+           "  dmk_err:", "    hex.set 1, kerr, 1",
+           "  dmk_ok:"]
+    for j in range(NH):
+        out += [f"    hex.set 2, kc, {j + 1}", f"    hex.cmp 2, dm_id, kc, dmk_{j}n, dmk_{j}, dmk_{j}n",
+                f"  dmk_{j}:", f"    hex.inc 1, kcount + {j}*dw", f"  dmk_{j}n:"]
+    return out + ["    stl.fret dm_ret"]
 
 
 def _mutate(text, muts):
@@ -156,6 +218,12 @@ def _records(ctx, radius, seed, n_rand=60):
                     co, cn = (L - (4 << 16), L + (4 << 16)) if tel.front_le else (L + (4 << 16), L - (4 << 16))
                     mid = ((tel.lo + tel.hi) // 2) << 16
                     out.append((k, _pos(tel, co, mid), _pos(tel, cn, mid), mons, True))
+        # M8: all three inside at once (the telefrag kills each; a monster's teleport is refused by the first)
+        co, cn = (L - (4 << 16), L + (4 << 16)) if tel.front_le else (L + (4 << 16), L - (4 << 16))
+        mid = ((tel.lo + tel.hi) // 2) << 16
+        for sh in ((1, 1, 1), (1, 0, 1), (0, 1, 1)):
+            mons = [(dx + 3 * j - 4, dy + 5 - 2 * j, sh[j]) for j in range(NH)]
+            out.append((k, _pos(tel, co, mid), _pos(tel, cn, mid), mons, True))
         for _ in range(n_rand):
             o = rng.randint((tel.lo - radius - 8) << 16, (tel.hi + radius + 8) << 16)
             co, cn = L + rng.randint(-20 << 16, 20 << 16), L + rng.randint(-20 << 16, 20 << 16)
@@ -180,15 +248,17 @@ def player_program(ctx, *, knock_ctx=False, muts=(), tels=None):
     tels = ctx.tels if tels is None else tels
     lines = "\n".join(T.player_lines(tels, prefix="tpk" if knock_ctx else "tpw", knock_cells=True,
                                      knock_ctx=knock_ctx))
-    stomp = "\n".join(T.stomp_leaf_lines(ctx.rows))
+    stomp = "\n".join(T.stomp_leaf_lines(ctx.rows) + _dm_stub() + _tf_stub())
     body = ["stl.startup_and_init_all", "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
+            f"hex.zero {NH}, kcount", "hex.zero 1, kerr", *[f"hex.zero {n}, {c}" for c, n in FOG_CELLS],
             "hex.input 4, cm_ox", "hex.input 4, cm_oy", "hex.input 4, viewx", "hex.input 4, viewy",
             "hex.input 4, viewangle", "hex.input 1, rb", "hex.mov 2, p_rct, rb",
             "hex.input 4, p_kmx", "hex.input 4, p_kmy", "hex.input 1, rb", "hex.mov 1, p_dead, rb",
             "hex.input 4, kb_px", "hex.input 4, kb_py", "hex.input 4, kb_vx", "hex.input 4, kb_vy",
             *_mons_in(), lines]
     for reg, n in (("viewx", 8), ("viewy", 8), ("viewangle", 8), ("p_rct", 2), ("p_kmx", 8), ("p_kmy", 8),
-                   ("kb_px", 8), ("kb_py", 8), ("kb_vx", 8), ("kb_vy", 8)):
+                   ("kb_px", 8), ("kb_py", 8), ("kb_vx", 8), ("kb_vy", 8), ("kcount", NH), ("kerr", 1),
+                   *FOG_CELLS):
         body += _pr(reg, n)
     body += [";loop", "done:", "stl.loop", stomp, "cm_ox: hex.vec 8", "cm_oy: hex.vec 8", "p_kmx: hex.vec 8",
              "p_kmy: hex.vec 8", "kb_px: hex.vec 8", "kb_py: hex.vec 8", "kb_vx: hex.vec 8", "kb_vy: hex.vec 8",
@@ -210,10 +280,14 @@ def _player_case(ctx, rec, rng, knock_ctx):
     ctx.place(mons, alive)
     ws.px, ws.py, ws.pangle, ws.p_reaction, ws.p_momx, ws.p_momy = new[0], new[1], ang, rct, momx, momy
     w._teleported = False
+    live = [ws.mon_shootable[m] for m in ctx.hslots]
     w._teleport_player(old[0], old[1], new[0], new[1])
     hit = w._teleported
+    # M8: the rows the telefrag killed (each once), as kcount's nibbles (row j in nibble j)
+    killed = sum(1 << (4 * j) for j, m in enumerate(ctx.hslots) if live[j] and not ws.mon_shootable[m])
     kbx = [ws.px & M32, ws.py & M32, 0, 0] if (hit and knock_ctx) else kb     # the knock loop's own registers
-    want = [ws.px & M32, ws.py & M32, ws.pangle, ws.p_reaction, ws.p_momx & M32, ws.p_momy & M32] + kbx
+    want = ([ws.px & M32, ws.py & M32, ws.pangle, ws.p_reaction, ws.p_momx & M32, ws.p_momy & M32] + kbx
+            + [killed, 0] + _fog_want(ctx))
     return feed, want, hit
 
 
@@ -240,10 +314,14 @@ def _check(got, want, per):
 @pytest.mark.parametrize("knock_ctx", [False, True], ids=["walk", "knock"])
 def test_the_player_teleports_as_the_model(tmp_path, ctx, player_recs, knock_ctx):
     feed, want, hits = _player_expect(ctx, player_recs, knock_ctx)
-    # not vacuous: teleports and refusals (from the back, short of the line, stomped) both occur, on every line
+    # not vacuous: teleports and non-teleports (from the back, short of the line) both occur, on every line; and
+    # telefrags of one and of several rows at once
     assert 40 <= hits <= len(player_recs) - 100, (hits, len(player_recs))
+    kills = [want[i] for i in range(10, len(want), 17)]
+    assert sum(1 for k in kills if k) >= 30 and sum(1 for k in kills if bin(k).count("1") >= 2) >= 8, kills
+    assert sum(1 for i in range(12, len(want), 17) if want[i] == 2) == hits          # a fog pair per teleport
     got = _run(tmp_path, "tpp", player_program(ctx, knock_ctx=knock_ctx), feed)
-    bad = _check(got, want, 10)
+    bad = _check(got, want, 17)
     assert not bad, (len(bad), [player_recs[i] for i in bad[:3]])
 
 
@@ -267,8 +345,9 @@ def monster_program(ctx, *, knock_ctx=False, muts=(), tels=None):
     tels = ctx.tels if tels is None else tels
     lines = "\n".join(T.monster_lines(tels, prefix="tpq" if knock_ctx else "tpm", knock_ctx=knock_ctx))
     back = "\n".join(T.slot_back_lines(1, facing="mon_facing + 1*dw", knock=True, walk=not knock_ctx, tag="tpb"))
-    stomp = "\n".join(T.stomp_leaf_lines(ctx.rows))
+    stomp = "\n".join(T.stomp_leaf_lines(ctx.rows) + _dm_stub() + _tf_stub())
     body = ["stl.startup_and_init_all", "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
+            f"hex.zero {NH}, kcount", "hex.zero 1, kerr", *[f"hex.zero {n}, {c}" for c, n in FOG_CELLS],
             "hex.input 4, mm_ox16", "hex.input 4, mm_oy16", "hex.input 4, cpx", "hex.input 4, cpy",
             "hex.input 1, mm_r", "hex.input 1, rb", "hex.mov 1, mm_r30, rb",
             "hex.input 2, mm_nx", "hex.input 2, mm_ny", "hex.input 4, cp_floor", "hex.input 2, ptss",
@@ -279,7 +358,8 @@ def monster_program(ctx, *, knock_ctx=False, muts=(), tels=None):
             *_mons_in(), lines, back]
     for reg, n in (("mm_nx", 4), ("mm_ny", 4), ("cp_floor", 8), ("ptss", 3), ("mon_facing + 1*dw", 1),
                    ("mkx + 8*dw", 8), ("mky + 8*dw", 8), ("mfx + 4*dw", 4), ("mfy + 4*dw", 4),
-                   ("kb_cx", 8), ("kb_cy", 8), ("kb_vx", 8), ("kb_vy", 8), ("tp_hit", 1)):
+                   ("kb_cx", 8), ("kb_cy", 8), ("kb_vx", 8), ("kb_vy", 8), ("tp_hit", 1), ("kcount", NH),
+                   ("kerr", 1), *FOG_CELLS):
         body += _pr(reg, n)
     body += [";loop", "done:", "stl.loop", stomp,
              "mm_ox16: hex.vec 8", "mm_oy16: hex.vec 8", "cpx: hex.vec 8", "cpy: hex.vec 8", "mm_r: hex.vec 2",
@@ -326,7 +406,7 @@ def _monster_case(ctx, rec, radius, rng, knock_ctx):
              else [mom[0] & M32, mom[1] & M32, frac[0], frac[1]])     # the knock stub writes these back itself
     kbx = ([(nx << 16) & M32, (ny << 16) & M32, 0, 0] if (hit and knock_ctx) else kb)
     want = ([nx & 0xFFFF, ny & 0xFFFF, (ws.mon_floorz[m] if hit else floor) & M32, lf, ws.mon_facing[m]] + mback
-            + kbx + [0])
+            + kbx + [0, 0, 0] + _fog_want(ctx))               # M8: a monster's stomp kills nothing (kcount 0)
     return feed, want, hit
 
 
@@ -349,8 +429,9 @@ def monster_recs(ctx):
 def test_a_monster_teleports_as_the_model(tmp_path, ctx, monster_recs, knock_ctx):
     feed, want, hits = _monster_expect(ctx, monster_recs, knock_ctx)
     assert 40 <= hits <= len(monster_recs) - 100, (hits, len(monster_recs))
+    assert sum(1 for i in range(16, len(want), 21) if want[i] == 2) == hits          # a fog pair per teleport
     got = _run(tmp_path, "tpm", monster_program(ctx, knock_ctx=knock_ctx), feed)
-    bad = _check(got, want, 14)
+    bad = _check(got, want, 21)
     assert not bad, (len(bad), [monster_recs[i] for i in bad[:3]])
 
 
@@ -424,9 +505,18 @@ def _flip(ctx):
 
 P_MUTS = {
     "back_side": dict(tels=_flip),
-    "no_stomp": dict(muts=[("    stl.fcall tp_stomp, tp_sret\n    hex.if1 1, tp_blk, tpw_end", "")]),
+    "no_telefrag": dict(muts=[("    stl.fcall tp_stomp, tp_sret\n", "")]),
+    # the rule before 2026-10-18: a hit refuses the player's teleport too
+    "old_refusal": dict(muts=[("    hex.if1 1, tp_pl, tp_stk\n", "    ;tp_stk\n"),
+                              ("    stl.fcall tp_stomp, tp_sret\n",
+                               "    stl.fcall tp_stomp, tp_sret\n    hex.if1 1, tp_blk, tpw_end\n")]),
+    "first_victim_only": dict(muts=[("    stl.fcall tp_frag, tp_fret\n",
+                                     "    stl.fcall tp_frag, tp_fret\n    ;tp_out\n")]),
+    "no_kb_tf": dict(muts=[("    hex.set 1, kb_tf, 1\n", "")]),
+    "no_fog": dict(muts=[("    stl.fcall tf_spawn, fx_sret\n", "")]),
+    "fog_source_before_move": dict(muts=[("    hex.mov 4, fxs_x, viewx + 4*dw\n", "    hex.mov 4, fxs_x, cm_ox + 4*dw\n")]),
     "stomp_inclusive": dict(muts=[("tp_s0_y, tp_s0_n, tp_s0_n", "tp_s0_y, tp_s0_y, tp_s0_n"),
-                                  ("tp_stk, tp_s0_n, tp_s0_n", "tp_stk, tp_stk, tp_s0_n")]),
+                                  ("tp_s0_h, tp_s0_n, tp_s0_n", "tp_s0_h, tp_s0_h, tp_s0_n")]),
     "extent_inclusive": dict(muts=[("tpw_f0, tpw0_no, tpw0_no", "tpw_f0, tpw_f0, tpw0_no")]),
     "no_reaction": dict(muts=[(f"p_rct, {REACTION_TICS}", "p_rct, 0")]),
     "angle_kept": dict(muts=[("    hex.set 8, viewangle, 0x80000000\n", ""), ("    hex.set 8, viewangle, 0x0\n", "")]),
@@ -441,6 +531,7 @@ M_MUTS = {
     "floor_kept": dict(muts=[("    hex.set 8, cp_floor, 0xf0\n", ""), ("    hex.set 8, cp_floor, 0xffffffc8\n", "")]),
     "facing_kept": dict(muts=[("    hex.mov 1, mon_facing + 1*dw, tp_fa\n", "")]),
     "fraction_kept": dict(muts=[("    hex.zero 4, mfx + 4*dw\n", "")]),
+    "no_fog": dict(muts=[("    stl.fcall tf_spawn, fx_sret\n", "")]),
 }
 
 

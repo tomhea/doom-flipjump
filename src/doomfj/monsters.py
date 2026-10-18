@@ -327,10 +327,10 @@ class MonsterPhase:
         w = self.world
         orig = w._walkover
 
-        def walkover(x, y, cx, cy, _orig=orig):
+        def walkover(x, y, cx, cy, ev=None, _orig=orig):
             if self._segs is not None:
                 self._segs.append(((x, y), (cx, cy)))
-            return _orig(x, y, cx, cy)
+            return _orig(x, y, cx, cy, ev)
         w._walkover = walkover
 
     def reset(self, skill: int) -> None:
@@ -906,13 +906,16 @@ class MonsterPhase:
         for the effects and the drops, drawn first in their leaf; 1 for the fireballs, as the monsters), the fj by the
         row ranges above (monstercode.rank_threshold). The tuples are unchanged, so every reader keeps its shape."""
         from doomfj.world import FIREBALL_POOL, FX_POOL
+        from doomfj.reference_model import FLOOR_EFFECTS                 # M8: the teleport fog, on the floor
         ws, gd, out = self.world.ws, self.gd, []
         for s in range(FIREBALL_POOL):
             if ws.proj_active[s]:
                 out.append((ws.proj_x[s] >> 16, ws.proj_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.proj_state[s]])))
         for s in range(FX_POOL):
             if ws.fx_active[s]:
-                out.append((ws.fx_x[s] >> 16, ws.fx_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])))
+                lump = mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])
+                # M8: the teleport fog stands on the floor (reference_model.FLOOR_EFFECTS: z 0, an effect, not a drop)
+                out.append((ws.fx_x[s] >> 16, ws.fx_y[s] >> 16, lump) + ((0,) if lump[:4] in FLOOR_EFFECTS else ()))
         if drop_rows(self.world):
             for m in droppers(self.world):
                 if ws.mon_drop[m] == 1:                 # M7 P8a: at the drop's own position (World.drop_pos)

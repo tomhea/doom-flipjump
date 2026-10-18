@@ -195,7 +195,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"ltst", "ltct", "rng_lt"}),
                    # M8: the switch textures (doomfj.switchcode; a SWITCH_TEX map: MonsterPhase.switch_state) -- two
                    # groups: a map with no SR switch line (E1M2) declares `swpr` alone
-                   frozenset({"swpr"}), frozenset({"swtm"}))
+                   frozenset({"swpr"}), frozenset({"swtm"}),
+                   # M8 C8: the lost souls' cells (doomfj.soulcode; a map with a soul only)
+                   frozenset({"sk_fly", "sk_inf", "sk_z", "sk_momz", "sk_ceil"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -786,6 +788,11 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     nsw, nsr = _nswitch()
     cells["swpr"] = Cell("swpr", "hex", 1, count=max(nsw, 1))
     cells["swtm"] = Cell("swtm", "hex", BUTTON_NIBBLES, count=max(nsr, 1))
+    # M8 C8 (doomfj.soulcode.PERSIST; MonsterPhase.soul_state's units): the lost souls, one row each (OPTIONAL: a map
+    # without a soul declares none of them)
+    nsk = max(1, len(getattr(_idle_world(), "soul_slots", ())))
+    for name, width in (("sk_fly", 1), ("sk_inf", 1), ("sk_z", 8), ("sk_momz", 8), ("sk_ceil", 4)):
+        cells[name] = Cell(name, "hex", width, count=nsk)
     return cells
 
 

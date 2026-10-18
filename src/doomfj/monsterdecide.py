@@ -145,12 +145,13 @@ def as_leaf_lines(fight: bool = False) -> List[str]:
                "    ;mm_as_no"] if fight else [])]
 
 
-def decide_leaf_lines(justhit: bool = False, fight: bool = False) -> List[str]:
+def decide_leaf_lines(justhit: bool = False, fight: bool = False, soul: bool = False) -> List[str]:
     """`mm_decide` (stl.fcall mm_decide, mm_dret) -- see the module docstring; the bias and cap are
     world.MISSILE_BIAS / MISSILE_NOMELEE_BIAS / MISSILE_CAP, compared as rand + bias >= min(d, bias + cap).
     `justhit` (M7 P4.2a): the context's `mm_jh` (damagecode declares it) is read and cleared. `fight` (M7 P8a I): the
     melee reach is the TARGET's (mt_reach: MELEE_BASE + its radius) -- the rest reads the target through mm_todist
-    and mm_as"""
+    and mm_as. M8 C8 (`soul`, a map with a lost soul): a soul's roll (mm_sk) is P_CheckMissileRange's MT_SKULL rule,
+    `dist >>= 1` (soulcode.decide_range_lines)"""
     from doomfj.world import MISSILE_BIAS, MISSILE_CAP, MISSILE_NOMELEE_BIAS
     reach = "mt_reach" if fight else "mt_c60"
     b1, b2 = MISSILE_BIAS, MISSILE_BIAS + MISSILE_NOMELEE_BIAS
@@ -187,6 +188,7 @@ def decide_leaf_lines(justhit: bool = False, fight: bool = False) -> List[str]:
             "    ;mm_dc_mv",
             "  mm_dc_roll:",
             "    hex.inc 2, mm_rng", "    mrnd.lookup mm_rr, mm_rng",              # P_Random: its value, nibbles 0-1
+            *(["    hex.if1 1, mm_sk, mm_dc_sk"] if soul else []),                # M8 C8: the soul's range
             "    hex.zero 4, mo_t4", "    hex.mov 2, mo_t4, mm_rr",
             "    hex.if_flags mm_mk, 0xA, mm_dc_b2, mm_dc_b1",
             "  mm_dc_b1:",
@@ -206,7 +208,13 @@ def decide_leaf_lines(justhit: bool = False, fight: bool = False) -> List[str]:
             "    stl.fret mm_dret",
             "  mm_dc_mv:",
             "    stl.fcall mm_chase, mm_cret",
-            "    stl.fret mm_dret"]
+            "    stl.fret mm_dret",
+            *(_soul_range() if soul else [])]
+
+
+def _soul_range() -> List[str]:
+    from doomfj.soulcode import decide_range_lines
+    return decide_range_lines()
 
 
 def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = False) -> List[str]:
@@ -300,11 +308,13 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
     return out
 
 
-def decide_leaves(justhit: bool = False, full: bool = False, knock: bool = False, fight: bool = False) -> List[str]:
+def decide_leaves(justhit: bool = False, full: bool = False, knock: bool = False, fight: bool = False,
+                  soul: bool = False) -> List[str]:
     """`full` (M7 P5): md_attack applies its draws (attack_leaf_lines(full=True)); off, P3.2c's text to the byte.
     `knock` (M7 P8a): the attacker is each hit's inflictor (attack_leaf_lines(knock=True)). `fight` (M7 P8a I): the
     TARGET's (the module docstring) -- the program must hold `fight_parts`' lines and monstersight's sl_far"""
-    return (todist_leaf_lines(fight) + octant_leaf_lines() + as_leaf_lines(fight) + decide_leaf_lines(justhit, fight)
+    return (todist_leaf_lines(fight) + octant_leaf_lines() + as_leaf_lines(fight)
+            + decide_leaf_lines(justhit, fight, **({"soul": True} if soul else {}))      # M8 C8: the soul's range
             + attack_leaf_lines(full, knock, fight))
 
 
@@ -324,7 +334,7 @@ def type_decide(info) -> dict:
             seen.add(s)
             a = gd.STATES[s].action
             if a is not None:
-                assert a in ATTACK_KINDS, (s, a)
+                assert a in ATTACK_KINDS or a == "A_SkullAttack", (s, a)    # M8 C8: the soul's (soulcode)
                 out["acts"].add(a)
             s = gd.STATES[s].next
     return out
@@ -432,9 +442,11 @@ def _fight_attack_lines(knock: bool) -> List[str]:
     return out
 
 
-def target_load_lines(slot_rt, radii) -> List[str]:
+def target_load_lines(slot_rt, radii, zs=None) -> List[str]:
     """`mt_load` (stl.fcall mt_load, mt_lret; in: mm_tg) -- the module docstring's target load. `slot_rt[m]`: slot m's
-    runtime thing (its thpos_rt row: whole units in nibbles 4-7 / 12-15), `radii[m]` its radius"""
+    runtime thing (its thpos_rt row: whole units in nibbles 4-7 / 12-15), `radii[m]` its radius. M8 C8 (`zs`, a map with
+    a lost soul: per slot its z cell -- ("floor", mon_floorz cell) or ("soul", sk_z cell)): a monster target's z into
+    `mt_tz`, 16.16 (the soul's float and charge read it; the player's z is kb_pz's)"""
     from doomfj.combat import PLAYER_R
     from doomfj.world import MELEE_BASE
     n = len(slot_rt)
@@ -463,8 +475,16 @@ def target_load_lines(slot_rt, radii) -> List[str]:
                 "    hex.zero 4, mt_tqy", "    hex.mov 4, mt_tqy + 4*dw, thpos_rt + %d*dw" % (16 * t + 12),
                 "    hex.set 4, mt_reach, %d" % (MELEE_BASE + r), "    hex.set 1, mt_rc, %d" % RC[r],
                 "    hex.mov 1, mt_al, mon_shootable + %d*dw" % m,
+                *(_target_z(zs[m]) if zs else []),                      # M8 C8: its z
                 "    ;mtl_out"]
     return out + ["  mtl_out:", "    stl.fret mt_lret"]
+
+
+def _target_z(z) -> List[str]:
+    kind, cell = z
+    if kind == "soul":
+        return ["    hex.mov 8, mt_tz, %s" % cell]
+    return ["    hex.zero 4, mt_tz", "    hex.mov 4, mt_tz + 4*dw, %s" % cell]
 
 
 def angle_leaf_lines() -> List[str]:
@@ -622,7 +642,10 @@ def fight_parts(w, slot_rt) -> dict:
     bars = [(t.x, t.y) for t in w.barrel_things]
     hs_bar = "hs_bar: hex.vec %d, %d" % (max(1, 8 * len(bars)), sum(
         (((x & 0xFFFF) ^ 0x8000) | (((y & 0xFFFF) ^ 0x8000) << 16)) << (32 * b) for b, (x, y) in enumerate(bars)))
+    souls = getattr(w, "soul_of", {})             # M8 C8: each target's z (the souls' float and charge)
+    zs = ([("soul", "sk_z + %d*dw" % (8 * souls[m])) if m in souls else ("floor", "mon_floorz + %d*dw" % (4 * m))
+           for m in range(n)] if souls else None)
     return {"decls": list(FIGHT_DECLS) + [hs_bar],
-            "lines": (target_load_lines(slot_rt, radii) + angle_leaf_lines()
+            "lines": (target_load_lines(slot_rt, radii, zs) + angle_leaf_lines()
                       + scan_lines(slot_rt, radii, [(t.x, t.y) for t in w.barrel_things])),
             "tables": fight_tables_fj(w.rm.sine)}

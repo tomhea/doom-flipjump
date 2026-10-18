@@ -327,6 +327,7 @@ class Survey:
         else:
             self.row("OK", "World(strict=True) builds")
         self.facts["_world"] = w
+        self.monster_extensions(w)                          # M8 C8: the lost soul, the extension rows, the pain bits
         nmon, nbar = len(w.mon_things), len(w.barrel_things)
         self.facts.update(monsters=nmon, barrels=nbar, pickups=len(w.pickup_things), secrets=len(w.secret_sectors),
                           sound_nodes=getattr(w, "nsound", "?"))
@@ -357,6 +358,28 @@ class Survey:
         # M8 F1.2: a solid decoration some skill lacks is a `mc_don` presence flag, set at NEW GAME (monstermove.mc_don_restart)
         self.row("OK", "solid decorations some skill lacks (monstercode: mc_don at NEW GAME)",
                  len(var), "", "" if not var else "mc_don flags for decor_solid indices %s" % var[:10])
+
+    def monster_extensions(self, w):
+        """M8 C8 (doomfj.lostsoul / soulcode; the lessons of the lost soul): the monster-domain extension rows' alias
+        codes (gamedata.MON_ALIAS_POOL: a new monster's states take weapon states' codes -- a later monster can run out
+        of them), damagecode's pain classes (one nibble of dmrnd: at most 4 painchances on a map), and a map's souls --
+        their 16.16 heights (soulcode.check_model_rules) and a teleport line beside them (EV_Teleport's z: the model's,
+        not yet the fj's)"""
+        self.cap("monster-domain extension state rows (gamedata.MON_ALIAS_POOL's codes)", len(gd.EXT_STATE_NAMES),
+                 len(gd.MON_ALIAS_POOL))
+        from doomfj.damagecode import pain_classes, profiles
+        self.cap("monster pain classes (damagecode: dmrnd's pain bits, one nibble)",
+                 len(pain_classes(profiles(w, gib=True)[0])), 4)
+        souls = getattr(w, "soul_slots", ())
+        if not souls:
+            return
+        from doomfj import soulcode
+        self.row("OK", "lost souls (MT_SKULL: doomfj.lostsoul, soulcode)", len(souls))
+        self.guard("lost souls: soulcode.check_model_rules (16.16 heights, radius 16)",
+                   lambda: soulcode.check_model_rules(w))
+        tels = getattr(w, "teleports", ())
+        self.row("REFUSED" if tels else "OK", "lost souls beside teleport lines (fj: EV_Teleport's soul z unwired)",
+                 len(tels), "", "wall_renderer refuses a map with both until soulcode wires tp_hit's z" if tels else "")
 
     def render_caps(self):
         from doomfj import wall_renderer as WR

@@ -532,6 +532,13 @@ from doomfj import restartcode as _restartcode                    # noqa: E402 (
 from doomfj import hurtcode as _hurtcode                          # noqa: E402 (M7 P7: the death think's turn)
 from doomfj import lootcode as _lootcode                          # noqa: E402 (M7 P6+P7 package B: the player's side)
 from doomfj import knockcode as _knockcode                        # noqa: E402 (M7 P8a: knockback's hooks)
+from doomfj import soulcode as _soulcode                          # noqa: E402 (M8 C8: the lost soul)
+
+
+def _soul_var(w) -> list:
+    """M8 C8: the skill-dependent solid decorations' indices (monstermove.static_blockers' `var`: their mc_don flags)"""
+    from doomfj.monstermove import static_blockers
+    return static_blockers(w)[1]
 
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
@@ -1672,9 +1679,10 @@ def window_chrome_fj():
     return macro, calls
 
 
-def _monster_tables() -> list:
-    from doomfj.monstercode import p30_tables_fj      # local: monstercode imports world
-    return p30_tables_fj()
+def _monster_tables(map_wad=None, mapname=None) -> list:
+    from doomfj.monstercode import map_monster_types, p30_tables_fj      # local: monstercode imports world
+    # M8 C8: the map's monster types (the lost soul's extension rows on a map with one; E1M1's five otherwise)
+    return p30_tables_fj(map_monster_types(map_wad, mapname)) if map_wad is not None else p30_tables_fj()
 
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, sprite_wad=None,
@@ -2447,6 +2455,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                          static_bank=(spr_base, spr_ldbase, spr_dw),
                          **({"stats": True} if _STATS else {}))         # P10: dm_kill counts the kill
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
+    # M8 C8 (doomfj.soulcode): THE LOST SOULS -- p31_parts' slots, their leaves, the aim's radius-16 class, the render's
+    # z; off on a map without one (E1M1, E1M2: not one line)
+    _SOUL = bool(_p31 and _p31.get("soul"))
     # M7 P3.3 (D3 d): the game tier's leaf walk is sim.thing_pass_depth (nearest first), which reads `cur_ssp`
     # and not `cur_ss` (P13: the leaf code sets cur_ss only for the index-order sim.thing_pass)
     _depth_pass = bool(_p31 and _p31.get("depth"))
@@ -2462,10 +2473,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         from doomfj.combat import aim_window as _aim_window
         assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
         # M7 P6: a standing barrel records too (radius class aimcode.RC_BARREL)
-        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar), centery=cfg.CENTERY, viewh=cfg.VIEW_H)
+        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar), centery=cfg.CENTERY, viewh=cfg.VIEW_H,
+                                        **({"souls": True} if _SOUL else {}))       # M8 C8: the soul's class
         # issue #119 items 4 and 7: table_text runs the leaf's emit-time proofs (the MINZ order, every box >= 1 column;
         # a barrel's bound needs its standing frame from the sprite wad)
-        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar), sprite_wad=sprite_wad)]
+        _aim_decls = (_aimcode.decls(bool(_bar), **({"souls": True} if _SOUL else {}))
+                      + [_aimcode.table_text(rm, bool(_bar), sprite_wad=sprite_wad,
+                                             **({"souls": True} if _SOUL else {}))])
     else:
         _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
@@ -2508,6 +2522,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert _cn8(_p31["world"].schema, "mon_facing") == 1, "M8 L4: the knock stubs' facing cell is one nibble"
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
+    assert not _SOUL or (_KNOCK and _FIGHT), "M8 C8: the lost soul flies on the knock cells and the fight's target load"
+    assert not (_SOUL and _TELE), ("M8 C8: a lost soul's teleport (EV_Teleport's z, momz and ceilingz: lostsoul."
+                                   "_soul_teleported) is the model's only -- wire soulcode.try_lines' and mm_move's "
+                                   "teleports before a map with both ships")
     _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
     assert bool(_p31 and _p31.get("d3")) == _D3, "M7 P8a: p31_parts' compositor rules and the emitter's disagree"
     if _LOOT:                                 # the oracle's two D3 keys (reference_model.GAME_RENDER_KW) follow the rule
@@ -2639,6 +2657,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         M7 P6 `aim_baked`: a BAKED body that records the aim window (the standing baked barrels'
         `thing_leaf_bb`; every other baked thing keeps the body that never records)."""
         return [f"{label}:",
+                # M8 C8: a soul's row select swapped the leaf's floor for its z (soulcode.select_lines): back
+                *(_soulcode.leaf_restore_lines() if (_SOUL and mt and label == "thing_leaf") else []),
                 f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
                 f"{proj}, {cfg.CENTERX}, "
                 f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
@@ -3657,7 +3677,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
                                   dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"],
-                                  **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpm")} if _TELE else {}))
+                                  **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpm")} if _TELE else {}),
+                                  **({"soul": True} if _SOUL else {}))       # M8 C8: a soul's float
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES,
                                  **({"fight": True} if _FIGHT else {}))    # M7 P8a I: toward the target
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
@@ -3665,7 +3686,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + ((_decide_leaves(justhit=bool(_p31.get("justhit")),
                                    full=bool(_chase.get("hurt")),       # M7 P5: md_attack APPLIES its draws
                                    **({"knock": True} if _KNOCK else {}),   # M7 P8a: the attacker inflicts
-                                   **({"fight": True} if _FIGHT else {}))   # M7 P8a I: the TARGET's
+                                   **({"fight": True} if _FIGHT else {}),   # M7 P8a I: the TARGET's
+                                   **({"soul": True} if _SOUL else {}))     # M8 C8: the soul's range
                     + _p31["decide_lines"])
                    if _p31.get("decide_lines") else [])
                 # M7 P5: the leaves the attacks land through -- dp_go (hurtcode), the pools' spawns, phases and shared
@@ -3686,7 +3708,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                         "slot_back": (lambda m_: _teleportcode.slot_back_lines(
                             m_, facing="mon_facing + %d*dw" % m_, knock=True, walk=False, tag="tpkb")),
                         "telefrag": True}                        # M8: the thrust of P_TeleportMove's 10000
-                       if _TELE else {})) if _KNOCK else [])
+                       if _TELE else {}),
+                    **({"souls": dict(_p31["world"].soul_of)} if _SOUL else {})) if _KNOCK else [])
+                # M8 C8 (doomfj.soulcode): the lost souls' leaves -- the thinker stubs, the charge, the slam
+                + (_soulcode.leaves(_p31["world"], slot_rt=[t_ for t_, _r in _chase["slots_rt"]], mon_root=_mroot,
+                                    lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:]) for t_ in _chase["lift_walk"]],
+                                    pick_slots=_loot_slots,
+                                    drop_rt=[_bar["drop_first"] + k_ for k_ in range(_bar["ndrop"])],
+                                    var=_soul_var(_p31["world"])) if _SOUL else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
@@ -3956,7 +3985,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                  tex, cm, ttang, sdrecip, srdisp, xtadisp, vtxdisp, sinadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid]
               # M7 P3.0 (docs/gp-monsters.md): the monster phase's tables, in the game tier only and
               # called by nothing yet -- the build that carries them prices the placement tax
-              + (_monster_tables() if _movers_on else [])
+              + (_monster_tables(map_wad, mapname) if _movers_on else [])
               + ([_p31["mview"], _p31["mrot"]] if _p31 else [])            # M7 P3.1
               + ([_p31["mobview"]] if (_p31 and _p31.get("mobview")) else [])   # M7 P5: the mobiles' view rows
               + ([_p31["barview"]] if (_p31 and _p31.get("barview")) else [])   # M7 P6: the barrels' view rows
@@ -5192,7 +5221,9 @@ def anim_patches(sprite_wad, frames) -> dict:
     off the wad's own lump names: `TROOA1` is rotation 1, `TROOA2A8` is rotation 2 and, MIRRORED,
     rotation 8; a `...A0` lump is every rotation (0). A frame with no lump at all is an error: P3
     would have nothing to draw."""
-    names = [n for n in sprite_wad.names() if len(n) in (6, 8)]
+    # M8 C8: a sprite lump's 6th (and 8th) character is a ROTATION digit -- SKULFACE (the lost soul's sprite prefix, a
+    # non-sprite lump in Freedoom) is no view of frame F
+    names = [n for n in sprite_wad.names() if len(n) in (6, 8) and n[5].isdigit() and (len(n) == 6 or n[7].isdigit())]
     out = {}
     for sprite, idxs in frames.items():
         for fi in idxs:

@@ -356,6 +356,10 @@ WAIT = 37                 # frames fully open before it closes again
 USE_RANGE = 64            # map units around a door's trigger lines that count as "at the door"
 
 IDLE, OPENING, CLOSING = 0, 1, 2
+# M8 C11: an OPENING door's `wait` is 0 -- except a door an open-stay SWITCH opened though its own kind re-closes (a
+# MIXED door, `stay_switch_boxes`: E1M9's 135, DR 1 with S1 103 on its tag): STAY_MARK there, so reaching the top
+# sets no wait and it stays open, as EV_DoDoor(open)'s thinker does (`door_tic`'s `stay_used`)
+STAY_MARK = 1
 
 # ---- M7 P2a.1: E1M1's door KINDS, stated once ---------------------------------------------------------
 # The 13 doors this module was written for are plain DR doors (special 1) -- two of them need the
@@ -445,7 +449,7 @@ def in_use_box_fixed(box, x16: int, y16: int) -> bool:
 
 
 def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = False,
-             wait_frames: int = WAIT, blocked: bool = False, pass_at: int = 0) -> tuple:
+             wait_frames: int = WAIT, blocked: bool = False, pass_at: int = 0, stay_used: bool = False) -> tuple:
     """One tic of one door. `st` is `(state, dir, sub, wait)`; returns the next one.
 
     M7 P2a.1: `stride` stops a step (BLAZE_STRIDE for the blazing door, clamped at both ends) and
@@ -462,9 +466,18 @@ def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = 
     bound would cost a constant register and a `hex.cmp` per door per tic; counting `sub` and
     `wait` DOWN to zero, and counting `state` against `nstates - 1` only at the moment it steps,
     keeps an idle door at exactly one 1-nibble test.
+
+    M8 C11, THE MIXED DOOR: `stay_used` -- an open-stay switch pressed this door (its caller asks `switch_ready`: at
+    rest, no wait) and `used` did not: shut or part-open, it opens with `wait` = STAY_MARK, so the top sets no wait
+    (EV_DoDoor(open): the thinker ends at the top); at the top it changes nothing. A later DR press at the top waits
+    and closes (EV_VerticalDoor: a new raise on an idle open sector), as `used` always did. `wait` is 0 in every
+    other OPENING, so the top's rule below is the old one for every other door.
     """
     state, dr, sub, wait = st
     top_wait = 0 if stay else wait_frames
+    if stay_used and not used and dr != OPENING:
+        if state != nstates - 1:
+            dr, sub, wait = OPENING, SPEED, STAY_MARK
     if used and dr != OPENING:
         # a press always means "open", including on a door that is closing (DOOM reverses) and on
         # one that is already open and waiting (it restarts the wait).
@@ -479,7 +492,7 @@ def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = 
             sub = SPEED
             state += stride
             if state >= nstates - 1:
-                state, dr, wait = nstates - 1, IDLE, top_wait
+                state, dr, wait = nstates - 1, IDLE, (0 if wait else top_wait)     # M8 C11: wait != 0 -- STAY_MARK
     elif dr == CLOSING:
         sub -= 1
         if sub == 0:
@@ -583,7 +596,11 @@ def door_kinds(secs, lds, sds) -> dict:
                 kind = next(iter(src[k]))
                 break
         every = {kk for ks in src.values() for kk in ks}
-        assert {KIND_MOTION[kk] for kk in every} == {KIND_MOTION[kind]}, (
+        # M8 C11: ... but a SWITCH may ask the open-STAY form of the door's own motion (a mixed door: E1M9's 135, DR 1
+        # with S1 103) -- `stay_switch_boxes` presses it with door_tic's `stay_used`
+        mot = KIND_MOTION[kind]
+        assert all(KIND_MOTION[kk] == mot or (k2 == "switch" and KIND_MOTION[kk] == (mot[0], True))
+                   for k2, ks in src.items() for kk in ks), (
             "door %d is asked two motions: %s" % (si, sorted(every)))
         out[si] = kind
     return out
@@ -616,6 +633,11 @@ def door_card_cell(kind: str):
 # ---- M8 L2: the switch doors (P_UseSpecialLine -> EV_DoDoor, by tag) --------------------------------------
 
 def switch_door_triggers(secs, lds, sds, verts, rng: int = USE_RANGE) -> list:
+    """`[(box, (door sector, ...), once)]` -- `_switch_door_lines` without the line"""
+    return [(box, targets, once) for _ld, box, targets, once in _switch_door_lines(secs, lds, sds, verts, rng)]
+
+
+def _switch_door_lines(secs, lds, sds, verts, rng: int = USE_RANGE) -> list:
     """`[(box, (door sector, ...), once)]`, one per switch door line (SR 63 / S1 103) in linedef order: the
     line's extent inflated by `rng` (`use_boxes`' proximity compromise, as the exit and the floor switch),
     and the doors its tag names.
@@ -640,20 +662,41 @@ def switch_door_triggers(secs, lds, sds, verts, rng: int = USE_RANGE) -> list:
         if not targets:
             continue
         once = SWITCH_DOOR_KINDS[ld.special][1]
-        assert not once or all(door_stay(kinds[si]) for si in targets), (
+        # M8 C11: or a MIXED door (a re-closing door this open-stay switch opens to stay: `stay_switch_boxes`) -- there
+        # the latch IS seen, and it is NOT kept: a KNOWN SIMPLIFICATION (DOOM: S1 103 clears itself, so after a DR use
+        # closed the door the switch does nothing; here it opens it to stay again). level_survey lists such doors.
+        assert not once or all(door_stay(kinds[si]) or door_stay(SWITCH_DOOR_KINDS[ld.special][0])
+                               for si in targets), (
             "S1 door switch tag %d opens a door that closes: its latch would be seen" % ld.tag)
         (ax, ay), (bx, by) = xy(ld.v1), xy(ld.v2)
-        out.append(((min(ax, bx) - rng, min(ay, by) - rng, max(ax, bx) + rng, max(ay, by) + rng), targets, once))
+        out.append((ld, (min(ax, bx) - rng, min(ay, by) - rng, max(ax, bx) + rng, max(ay, by) + rng), targets, once))
     return out
 
 
 def switch_boxes(secs, lds, sds, verts, rng: int = USE_RANGE) -> dict:
-    """`{door sector: [box, ...]}` -- the switch boxes (`switch_door_triggers`) that press each door"""
-    out: dict = {}
-    for box, targets, _once in switch_door_triggers(secs, lds, sds, verts, rng):
+    """`{door sector: [box, ...]}` -- the switch boxes (`switch_door_triggers`) that press each door as its own kind
+    (M8 C11: all but the mixed ones, `stay_switch_boxes`)"""
+    return _switch_split(secs, lds, sds, verts, rng)[0]
+
+
+def stay_switch_boxes(secs, lds, sds, verts, rng: int = USE_RANGE) -> dict:
+    """M8 C11: `{door sector: [box, ...]}` -- the MIXED presses: an open-stay switch (S1 103) on a door whose own kind
+    re-closes (E1M9's 135, DR 1). A press at rest opens it to STAY (door_tic's `stay_used`); every map before E1M9 has
+    none, so its door text and model are unchanged"""
+    return _switch_split(secs, lds, sds, verts, rng)[1]
+
+
+def _switch_split(secs, lds, sds, verts, rng: int = USE_RANGE) -> tuple:
+    """(switch_boxes, stay_switch_boxes): every switch door line's box (`_switch_door_lines`, linedef order) under
+    each door it names, by the switch's motion against the door's"""
+    kinds = door_kinds(secs, lds, sds)
+    norm: dict = {}
+    mixed: dict = {}
+    for ld, box, targets, _once in _switch_door_lines(secs, lds, sds, verts, rng):
+        stays = door_stay(SWITCH_DOOR_KINDS[ld.special][0])
         for si in targets:
-            out.setdefault(si, []).append(box)
-    return out
+            (mixed if stays and not door_stay(kinds[si]) else norm).setdefault(si, []).append(box)
+    return norm, mixed
 
 
 def switch_ready(st: tuple) -> bool:
@@ -942,6 +985,7 @@ class DoorPhase:
         self.passes = {si: pass_state(secs, lds, sds, si, quant=quant) for si in self.nstates}
         self.triggers = walkover_triggers(secs, lds, sds, verts)
         self.switches = switch_boxes(secs, lds, sds, verts)       # M8 L2: SR / S1 door switches
+        self.stay_switches = stay_switch_boxes(secs, lds, sds, verts)    # M8 C11: the mixed doors' (E1M9's 135)
         self._initial = initial_states(secs, lds, sds, quant)
 
     def initial(self):
@@ -967,9 +1011,12 @@ class DoorPhase:
             blocked = (self.contact is not None and ds[si][1] == CLOSING
                        and ((player and touches_door(self.contact[si], x16, y16, 16 << 16))
                             or any(touches_door(self.contact[si], ox, oy, orr) for ox, oy, orr in others)))
+            # M8 C11: an open-stay switch on a mixed door, at rest
+            spress = (use and switch_ready(ds[si])
+                      and any(in_use_box_fixed(b, x16, y16) for b in self.stay_switches.get(si, ())))
             out[si] = door_tic(ds[si], self.nstates[si], bool(pressed),
                                stride=door_stride(kind), stay=door_stay(kind), blocked=blocked,
-                               pass_at=self.passes[si])
+                               pass_at=self.passes[si], stay_used=bool(spress))
         return (out, fired, frozenset(), card)
 
     def after_move(self, state, old16: tuple, new16: tuple, radius: int = 16):

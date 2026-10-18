@@ -23,7 +23,7 @@ defensible door.
 """
 from __future__ import annotations
 
-from doomfj.doors import CLOSING, OPENING, SPEED, WAIT, door_stay, door_stride
+from doomfj.doors import CLOSING, OPENING, SPEED, STAY_MARK, WAIT, door_stay, door_stride
 from doomfj.doors import door_card_cell, poly_edges                     # M8 L2
 
 M32 = 0xFFFFFFFF
@@ -82,7 +82,7 @@ def _box_test(d: int, box, hit: str, miss: str, regs=("viewx", "viewy"), tag=Non
 
 
 def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigger: list, *,
-                  stride: int = 1, top_wait: int = WAIT, reverse=None) -> list:
+                  stride: int = 1, top_wait: int = WAIT, reverse=None, stay_press: bool = False) -> list:
     """ONE door machine's frame, after its trigger lines (which fall into `<p>_press` to press and
     jump to `<p>_moved` not to): `doors.door_tic` in fj, on the cells `st`/`dr`/`sub`/`wt` (the
     last a WAIT_NIBBLES counter), `last` = nstates - 1. `top_wait` is the wait set on reaching the
@@ -90,7 +90,10 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
     The doors (`door_tic_lines`) and the lifts (`movercode.lift_tic_lines`) both emit from here.
     `reverse` (M7 P2b, `doors.door_tic`'s reversal): `(mask, contact)` -- on a CLOSING step from a
     state in `mask` (the states whose step leaves the pass state), `contact(yes, no)`'s lines decide
-    whether a thing touches the door; touched, the door turns to OPENING without stepping."""
+    whether a thing touches the door; touched, the door turns to OPENING without stepping.
+    M8 C11 `stay_press` (a MIXED door, `doors.stay_switch_boxes`): the trigger may jump to `<p>_spress` -- an open-stay
+    switch pressed it at rest -- which opens it with `wt` = STAY_MARK unless it is at the top; reaching the top with
+    `wt` nonzero then sets no wait (`doors.door_tic`'s `stay_used`). Without it the text is the old one."""
     set_wait = ([f"    hex.zero {WAIT_NIBBLES}, {wt}"] if not top_wait else
                 [f"    hex.set {WAIT_NIBBLES}, {wt}, {top_wait}"])
     up = []
@@ -126,6 +129,19 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
         f"    hex.zero 1, {dr}",
         *set_wait,
         f"    ;{p}_moved",
+        *([] if not stay_press else [
+            # M8 C11: the open-stay switch's press (at rest: the trigger asked) -- at the top, nothing
+            f"  {p}_spress:",
+            f"    hex.xor_by 1, {st}, {last}",
+            f"    hex.if0 1, {st}, {p}_sptop",
+            f"    hex.xor_by 1, {st}, {last}",
+            f"    hex.set 1, {dr}, {OPENING}",
+            f"    hex.set 1, {sub}, {SPEED}",
+            f"    hex.set {WAIT_NIBBLES}, {wt}, {STAY_MARK}",
+            f"    ;{p}_moved",
+            f"  {p}_sptop:",
+            f"    hex.xor_by 1, {st}, {last}",
+            f"    ;{p}_moved"]),
         f"  {p}_already:",
         f"    hex.xor_by 1, {dr}, {OPENING}",
         f"  {p}_moved:",
@@ -163,7 +179,13 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
         f"  {p}_open:",
         f"    hex.xor_by 1, {st}, {last}",
         f"    hex.zero 1, {dr}",
-        *set_wait,
+        *(set_wait if not stay_press else [
+            # M8 C11: opened by the open-stay switch (wt = STAY_MARK): no wait -- it stays
+            f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_opw",
+            f"    hex.zero {WAIT_NIBBLES}, {wt}",
+            f"    ;{p}_done",
+            f"  {p}_opw:",
+            *set_wait]),
         f"    ;{p}_done",
         # ---- idle: run the open-wait down --------------------------------------------
         f"  {p}_idle:",
@@ -260,7 +282,7 @@ def reverse_mask(pass_at: int, stride: int, nstates: int) -> int:
 
 
 def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None, radius=16, mon_press=frozenset(),
-                   mon_contact=(), dead=None, switches=None, walked=None) -> list:
+                   mon_contact=(), dead=None, switches=None, walked=None, stay_switches=None) -> list:
     """One frame of every door. `slots` is the emitter's door order (`sorted(door sectors)`),
     `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units (none for a
     walk-over door), `kinds[si]` its `doors.door_kinds` kind (all "plain" when omitted).
@@ -288,6 +310,10 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
     player's use in a switch box presses the door when it is at rest (`doors.switch_ready`: `ddir`
     and `dwait` zero, EV_DoDoor's no-thinker test); `walked` -- the doors a walk-over line opens
     (their `dreq`), by default the walk-over kinds. Without them the text is P8a's.
+
+    M8 C11: `stay_switches` (`doors.stay_switch_boxes`: {door: [box]}, E1M9's 135) -- after the door's use box and its
+    switches miss, an open-stay switch on a MIXED door presses it at rest to STAY (`machine_lines`' stay_press). None
+    or {} (every map before E1M9): the text is the old one.
     """
     out = ["// == M2-R4: the doors, one tic each ==================================",
            "//   dr<d>_*  door <d> (index into sorted(door sectors))",
@@ -297,6 +323,7 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
     # active cell)] per monster, a closing door reversing on a live one as on the player (World.door_touched)
     kinds = kinds or {si: "plain" for si in slots}
     switches = switches or {}
+    stay_switches = stay_switches or {}
     walked = (set(walked) if walked is not None else
               {si for si in slots if kinds[si] in ("walkover", "blazestay")})
     # the monsters' contact tests are SHARED: one leaf per (door, radius) on the registers dc_x / dc_y -- inline they
@@ -321,13 +348,14 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
                        f"    ;{p}_press",
                        f"  {p}_use:"]
         sw = switches.get(si, ())
-        if box is None and not sw:
+        ssw = stay_switches.get(si, ())                    # M8 C11: a mixed door's open-stay switches
+        if box is None and not sw and not ssw:
             trigger += [f"    ;{p}_moved"]                  # a walk-over door has no use line
         else:
             trigger += [f"    hex.if0 1, duse, {p}_moved"]
             if dead is not None:
                 trigger += [f"    hex.if1 1, {dead}, {p}_moved"]        # M7 P7: a dead player presses nothing
-            miss = f"{p}_sw" if sw else f"{p}_moved"
+            miss = f"{p}_sw" if sw else (f"{p}_ssw" if ssw else f"{p}_moved")
             if box is not None:
                 card = door_card_cell(kind)
                 if card:
@@ -339,9 +367,19 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
                             f"    hex.if0 1, {dr}, {p}_swi", f"    ;{p}_moved", f"  {p}_swi:",
                             f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_swt", f"    ;{p}_moved", f"  {p}_swt:"]
                 for j, b in enumerate(sw):
-                    nxt = f"{p}_sw{j + 1}" if j + 1 < len(sw) else f"{p}_moved"
+                    nxt = f"{p}_sw{j + 1}" if j + 1 < len(sw) else (f"{p}_ssw" if ssw else f"{p}_moved")
                     trigger += _box_test(d, b, f"{p}_press", nxt, tag=f"dsw{d}_{j}")
                     if j + 1 < len(sw):
+                        trigger += [f"  {nxt}:"]
+            if ssw:
+                # M8 C11: an open-stay switch on a mixed door -- at rest (`ddir`, `dwait`), as the switches above
+                trigger += [f"  {p}_ssw:",
+                            f"    hex.if0 1, {dr}, {p}_sswi", f"    ;{p}_moved", f"  {p}_sswi:",
+                            f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_sswt", f"    ;{p}_moved", f"  {p}_sswt:"]
+                for j, b in enumerate(ssw):
+                    nxt = f"{p}_ssw{j + 1}" if j + 1 < len(ssw) else f"{p}_moved"
+                    trigger += _box_test(d, b, f"{p}_spress", nxt, tag=f"dss{d}_{j}")
+                    if j + 1 < len(ssw):
                         trigger += [f"  {nxt}:"]
         rev = None
         if contact is not None and not stay:
@@ -360,7 +398,7 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
             rev = (reverse_mask(passes[si], stride, n), _rev)
         out += [f"  // ---- door {d} (sector {si}, {kind}): {n} states ----",
                 *machine_lines(p, st, dr, sub, wt, last, trigger, stride=stride,
-                               top_wait=0 if stay else WAIT, reverse=rev)]
+                               top_wait=0 if stay else WAIT, reverse=rev, stay_press=bool(ssw))]
     if leaves:                           # the contact leaves and their registers, jumped over
         out += ["    ;dc_leaves_end"]
         for lab, geo, rad in leaves.values():

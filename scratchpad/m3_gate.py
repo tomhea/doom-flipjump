@@ -5,6 +5,7 @@
     python scratchpad/m3_gate.py --selftest-skill    # R9 (M7 P1.5): the oracle starts the WRONG skill
     python scratchpad/m3_gate.py --selftest-state    # R9 (M7 P1.5): a state no picture shows is wrong
     python scratchpad/m3_gate.py --selftest-help     # R9 (M7 P3.4): the world's help closes to the MENU
+    python scratchpad/m3_gate.py --map E1M2 --selftest-map   # R9 (M8): the world's map page closes to the MENU
 
 The binary boots into the MAIN MENU (`mode` bakes to 1, `menu_scr` to 0). M7 P1.5 gave the menu a
 skill screen (docs/gp-skill-menu.md; `doomfj.menu.menu_step` is the rules' oracle side): in the
@@ -52,6 +53,14 @@ THE THINGS THIS GATE EXISTS TO CATCH, none of which a single-frame check would s
      NEW GAME (the skill screen's highlight boots at MEDIUM); from then on the menu opens on RESUME (its first item,
      W held across it), esc or enter there resume in place, and up from NEW GAME reaches it (clamped there). Every
      main-menu picture is checked in both variants, RESUME highlighted once more, and `g_live` is read each frame.
+  8. M8 -- THE MAP PAGE (doomfj.automap), on a map whose MAP_CONFIG turns it on (E1M2): the main menu's MAP item sits
+     between HELP and EXIT, so the same keys visit it (the boot menu's down from HELP lands on MAP, not EXIT), and the
+     script goes on (SCRIPT_MAP): enter on MAP opens the page from the menu -- the dot where the walk left the player
+     -- m closes it to the main menu on MAP, esc there resumes; m in the world opens it again, W held across it moves
+     nobody, esc closes it back to the world; then down to EXIT and the HALT, at frame HALT_FRAME_MAP. Every page frame
+     is compared to `menu_screen_pixels(automap=, view=)` at the oracle's pose, and the state check reads `amap`
+     (menu.program_cells: a page state is `menu_scr` 0 and its `amap`). --selftest-map (R9): the oracle closes the
+     world's page to the main menu on MAP, and the gate must reject it at the frame esc leaves it (MAP_CLOSED_TO_WORLD).
 """
 import argparse
 import sys
@@ -68,7 +77,9 @@ from doomfj.config import Config                                          # noqa
 from doomfj.doors import door_states, initial_states, walkover_triggers   # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, MAIN_EXIT_SCR,    # noqa: E402
-                         MAIN_HELP_SCR, MAIN_RESUME_SCR, MENU_HALTED, MENU_KEYS, menu_step, palette_colours)
+                         MAIN_HELP_SCR, MAIN_RESUME_SCR, MENU_HALTED, menu_step, palette_colours)
+from doomfj.menu import MAIN_MAP_SCR, MAP_GAME_SCR, MAP_MENU_SCR, MAP_SCREENS, menu_keys   # noqa: E402 (M8)
+from doomfj.automap import pages_for                                      # noqa: E402 (M8: the map page)
 from doomfj.reference_model import (ReferenceModel, SimState,             # noqa: E402
                                     build_scene, spawn_state)
 from doomfj.things import skill_hidden                                    # noqa: E402
@@ -81,6 +92,7 @@ from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent               # 
 
 ENTER, ESC, K_FWD, K_BACK = 0x0D, 0x1B, 0x77, 0x73
 K_HELP = 0x68                                  # M7 P3.4: the help key
+K_MAP = 0x6D                                   # M8: the map key (menu.MAP_KEY)
 SKILL_NAMES = {s: n for s, n in zip(SKILLS, ("easy", "medium", "hard"))}
 
 
@@ -165,10 +177,33 @@ ALL_SCREENS = ({(m, None, live) for m in _MAIN for live in (0, 1)} | {(MAIN_RESU
                | {(HELP_MENU_SCR, None, None), (HELP_GAME_SCR, None, None)}
                | {(1, k, None) for k in range(len(SKILLS))})
 
+# M8 -- on a map with the MAP PAGE (doomfj.automap): MAP sits between HELP and EXIT, so the script above visits it where
+# it visited EXIT (frames 4, 62, 68, 74; 64's up from EXIT), and its enter on frame 75 opens the page instead of
+# halting. SCRIPT_MAP goes on from there: the page both ways, W held under it, then EXIT and the halt.
+SCRIPT_MAP = SCRIPT[:-2] + (                   # (SCRIPT's last press is frame 75's enter on EXIT)
+    press(75, ENTER)                           # enter on MAP: the page, from the menu -- the dot where the walk left him
+    + press(76, K_MAP)                         # m: the main menu, on MAP
+    + press(77, ESC)                           # esc on MAP: the world, where it was
+    + press(79, K_MAP)                         # m in the world: the page, from the world
+    + [(79, 2, True, K_FWD)]                   # W pressed WHILE THE PAGE IS UP, held
+    + [(81, 0, False, K_FWD)]                  # ... released,
+    + [(81, 1, True, ESC), (81, 2, False, ESC)]   # ... and esc: the WORLD again from frame 81
+    + press(83, ENTER)                         # the main menu, on RESUME
+    + press(84, K_BACK) + press(85, K_BACK) + press(86, K_BACK) + press(87, K_BACK)   # NEW GAME, HELP, MAP, EXIT
+    + press(88, ENTER))                        # enter on EXIT: the HALT -- frame 88 is never presented
+FRAMES_MAP = HALT_FRAME_MAP = 88
+WITH_W_HELD_MAP = (79, 80)                     # the page from the world while W is held
+MAP_CLOSED_TO_MENU = 76                        # m leaves the menu's page: the main menu on MAP
+MAP_CLOSED_TO_WORLD = 81                       # esc leaves the world's page
+# the boot menu's down from HELP lands on MAP, so the boot menu's EXIT is never drawn; MAP is, with and without a game,
+# and the page under both ids (a page's picture is its pose's: keyed by its id alone, drawn per frame)
+ALL_SCREENS_MAP = ((ALL_SCREENS - {(MAIN_EXIT_SCR, None, 0)}) | {(MAIN_MAP_SCR, None, 0), (MAIN_MAP_SCR, None, 1)}
+                   | {(MAP_MENU_SCR, None, None), (MAP_GAME_SCR, None, None)})
+
 
 def _screen_key(scr, sel, live):
-    """a menu frame's picture key: the skill screen by its highlight, a main-menu screen by `g_live` (P10)"""
-    return (scr, sel if scr == 1 else None, live if scr in _MAIN + (MAIN_RESUME_SCR,) else None)
+    """a menu frame's picture key: the skill screen by its highlight, a main-menu screen by `g_live` (P10; M8: MAP too)"""
+    return (scr, sel if scr == 1 else None, live if scr in _MAIN + (MAIN_RESUME_SCR, MAIN_MAP_SCR) else None)
 
 
 def main():
@@ -196,12 +231,21 @@ def main():
     ap.add_argument("--selftest-help", action="store_true",
                     help="R9 (M7 P3.4): the oracle closes the world's help to the MAIN MENU; the "
                          "gate must FAIL at frame %d" % HELP_CLOSED_TO_WORLD)
+    ap.add_argument("--selftest-map", action="store_true",
+                    help="R9 (M8, a map with the map page): the oracle closes the world's page to the MAIN MENU on "
+                         "MAP; the gate must FAIL at frame %d" % MAP_CLOSED_TO_WORLD)
     args = ap.parse_args()
     args.map = args.map.upper()
     args.wad = args.wad or profile(args.map).wad
 
     mw = WadFile.from_path(str(ROOT / args.wad))
     art = WadFile.from_path(str(ROOT / args.asset))
+    # M8: the map page, on a map whose MAP_CONFIG turns it on -- then the script, the screens and the halt are the map's
+    global SCRIPT, FRAMES, HALT_FRAME, ALL_SCREENS
+    pages = pages_for(mw, args.map, bytes(b for rgb in mw.playpal(0) for b in rgb))
+    AM = pages is not None
+    if AM:
+        SCRIPT, FRAMES, HALT_FRAME, ALL_SCREENS = SCRIPT_MAP, FRAMES_MAP, HALT_FRAME_MAP, ALL_SCREENS_MAP
     # M7 P4.0: the GAME tier's config (the 84-row view under the status bar) and its screen (hud.GameScreen);
     # a menu frame still covers the whole W x H screen (menu_screen_pixels draws at cfg.W x cfg.H)
     from doomfj.config import GAME_CFG
@@ -212,8 +256,8 @@ def main():
     scene = build_scene(mw, mw, args.map)
     colours = palette_colours(bytes(b for rgb in mw.playpal(0) for b in rgb))
     # M7 P3.4: the menu's pictures through the ONE mapping from its state (the help joined them)
-    screens = {key: bytes(menu_screen_pixels(cfg, colours, key[0], key[1] or 0, key[2] or 0))
-               for key in ALL_SCREENS}
+    screens = {key: bytes(menu_screen_pixels(cfg, colours, key[0], key[1] or 0, key[2] or 0, automap=pages))
+               for key in ALL_SCREENS if key[0] not in MAP_SCREENS}        # M8: a page is drawn at its frame's pose
     render_kw = dict(GAME_RENDER_KW, sprite_wad=art)
     hidden = {s: skill_hidden(rm, mw.things(args.map), art, s) for s in SKILLS}
 
@@ -278,15 +322,17 @@ def main():
     # world frame acts on are held after its polls OR pressed during them
     from doomfj.keyboard import frame_keys
     fks = frame_keys(events, FRAMES + 1, polls=STANDALONE_POLLS, binding={K_FWD: "forward", K_BACK: "back"},
-                     menu_keys=MENU_KEYS)
+                     menu_keys=menu_keys(AM))                               # M8: M is "map" on a map with the page
     for f in range(FRAMES):
         ev = set(fks[f].menu)
         held = dict(fks[f].now)
         if (args.selftest_help and mode == 1 and scr == HELP_GAME_SCR
                 and ("esc" in ev or "help" in ev)):
             mode, scr, ng = 1, 0, None                  # THE HELP'S NEGATIVE CONTROL (M7 P3.4)
+        elif args.selftest_map and mode == 1 and scr == MAP_GAME_SCR and ("esc" in ev or "map" in ev):
+            mode, scr, ng = 1, MAIN_MAP_SCR, None       # THE MAP PAGE'S NEGATIVE CONTROL (M8)
         else:
-            mode, scr, sel, ng, live = menu_step(mode, scr, sel, ev, live)
+            mode, scr, sel, ng, live = menu_step(mode, scr, sel, ev, live, automap=AM)    # M8: MAP's rules
         before = state
         if ng is not None:
             # NEW GAME: the chosen skill's level start, then this frame's tic. THE R9 CONTROL
@@ -350,10 +396,15 @@ def main():
             is_menu = False                             # THE NEGATIVE CONTROL
         if is_menu:
             key = _screen_key(row["scr"], row["sel"], row["live"])
-            want = screens[key]
+            # M8: the map page is the picture at this frame's pose -- the dot is the one menu pixel the world moves
+            want = (bytes(menu_screen_pixels(cfg, colours, row["scr"], 0, row["live"], automap=pages,
+                                             view=(state.x, state.y)))
+                    if row["scr"] in MAP_SCREENS else screens[key])
             kind = {0: "MENU  main   ", MAIN_HELP_SCR: "MENU  main/H ", MAIN_EXIT_SCR: "MENU  main/X ",
                     MAIN_RESUME_SCR: "MENU  main/R ", HELP_MENU_SCR: "MENU  help/m ",
-                    HELP_GAME_SCR: "MENU  help/g "}.get(row["scr"], "MENU  skill %d" % row["sel"])
+                    HELP_GAME_SCR: "MENU  help/g ", MAIN_MAP_SCR: "MENU  main/M ",           # M8
+                    MAP_MENU_SCR: "MENU  map/m  ", MAP_GAME_SCR: "MENU  map/g  "}.get(row["scr"],
+                                                                                   "MENU  skill %d" % row["sel"])
             screens_seen.add(key)
             menus += 1
         else:
@@ -371,7 +422,8 @@ def main():
         ok &= same
         want_state = GST.oracle_state(state.x, state.y, state.angle, row["mode"], row["scr"],
                                       row["sel"], doors0, phase0, order, (0, row["pusedn"]),
-                                      monsters=row["mstate"], live=row["live"])          # P10: g_live
+                                      monsters=row["mstate"], live=row["live"],          # P10: g_live
+                                      automap=AM)                                        # M8: amap
         if args.selftest_state and row["mode"] == 0 and f >= NEW_GAMES[0]:
             want_state["menu_scr"] ^= 1                 # THE STATE CHECK'S NEGATIVE CONTROL
         sbad = GST.diff(reads[f] if f < len(reads) else None, want_state)
@@ -406,6 +458,16 @@ def main():
                       and (rows[HELP_CLOSED_TO_MENU]["mode"], rows[HELP_CLOSED_TO_MENU]["scr"])
                       == (1, MAIN_HELP_SCR)
                       and rows[HELP_CLOSED_TO_MENU - 1]["scr"] == HELP_MENU_SCR)
+    # M8: the page with W held moves nobody (the world frame before it holds the pose), and it closes both ways
+    if AM:
+        held_map = [rows[f]["state"] for f in (WITH_W_HELD_MAP[0] - 1, *WITH_W_HELD_MAP)]
+        map_frozen = len({(s.x, s.y, s.angle) for s in held_map}) == 1
+        map_both_ways = (rows[MAP_CLOSED_TO_WORLD]["mode"] == 0
+                         and rows[MAP_CLOSED_TO_WORLD - 1]["scr"] == MAP_GAME_SCR
+                         and (rows[MAP_CLOSED_TO_MENU]["mode"], rows[MAP_CLOSED_TO_MENU]["scr"]) == (1, MAIN_MAP_SCR)
+                         and rows[MAP_CLOSED_TO_MENU - 1]["scr"] == MAP_MENU_SCR)
+    else:
+        map_frozen = map_both_ways = True
     walked = (rows[WALKED_NEW_GAME]["before"].x, rows[WALKED_NEW_GAME]["before"].y) != (spawn.x, spawn.y)
     reset = all((rows[f]["state"].x, rows[f]["state"].y, rows[f]["state"].angle)
                 == (spawn.x, spawn.y, spawn.angle) for f in NEW_GAMES)
@@ -435,10 +497,20 @@ def main():
     print("  CONTROL (P3.4): the main menu on HELP %s, the help from the menu %s, from the world %s"
           % tuple("yes" if any(k[0] == s for k in screens_seen) else "!! no"
                   for s in (MAIN_HELP_SCR, HELP_MENU_SCR, HELP_GAME_SCR)))
+    _mains = _MAIN + (MAIN_MAP_SCR,)            # M8: MAP's highlight is a main-menu picture too
     print("  CONTROL (P10): the main menu's pictures without a game %s, with one %s, RESUME highlighted %s"
           % tuple("yes" if want <= screens_seen else "!! no -- missing %s" % sorted(want - screens_seen)
-                  for want in ({(m, None, 0) for m in _MAIN}, {(m, None, 1) for m in _MAIN},
+                  for want in ({k for k in ALL_SCREENS if k[0] in _mains and k[2] == 0},
+                               {k for k in ALL_SCREENS if k[0] in _mains and k[2] == 1},
                                {(MAIN_RESUME_SCR, None, 1)})))
+    if AM:
+        print("  CONTROL (M8): the map page from the menu %s, from the world %s, the main menu on MAP %s; the page "
+              "closed back to the main menu on MAP (frame %d) and to the world (frame %d): %s; the player did NOT "
+              "move during the %d page frames with W held: %s"
+              % (*("yes" if any(k[0] == s for k in screens_seen) else "!! no"
+                   for s in (MAP_MENU_SCR, MAP_GAME_SCR, MAIN_MAP_SCR)),
+                 MAP_CLOSED_TO_MENU, MAP_CLOSED_TO_WORLD, "yes" if map_both_ways else "!! no",
+                 len(WITH_W_HELD_MAP), "ok" if map_frozen else "!! IT MOVED"))
     print("  CONTROL (P3.4): the player did NOT move during the %d help frames with W held: %s"
           % (len(WITH_W_HELD_HELP), "ok" if help_frozen else "!! IT MOVED"))
     print("  CONTROL (P3.4): the help closed back to the world (frame %d) and to the main menu on "
@@ -455,8 +527,9 @@ def main():
              else "!! no -- frame %s" % state_bad if state_bad is not None
              else "!! only %d of %d frames were checked" % (state_checked, FRAMES)))
     vacuous = (menus < 2 or worlds < 2 or moved < 2 or not frozen or not walked or not reset
-               or screens_seen != ALL_SCREENS or not told or not help_frozen or not help_both_ways)
-    if vacuous and not (args.selftest or args.selftest_skill or args.selftest_help):
+               or screens_seen != ALL_SCREENS or not told or not help_frozen or not help_both_ways
+               or not map_frozen or not map_both_ways)                         # M8
+    if vacuous and not (args.selftest or args.selftest_skill or args.selftest_help or args.selftest_map):
         print("  !! VACUOUS -- this script does not exercise the menu machine")
 
     print("  M7 P7: the mirror's player died on %d frames -- %s"
@@ -466,7 +539,7 @@ def main():
     # makes the oracle ignore that enter: then it expects a frame the program never presents.
     from flipjump.interpreter import _fjcore as _core
     _m, _s, _sel, _ng, _live = menu_step(mode, scr, sel, set(fks[HALT_FRAME].menu) if HALT_FRAME < len(fks)
-                                         else set(), live)
+                                         else set(), live, automap=AM)
     if args.selftest_exit and _s == MENU_HALTED:
         _s = MAIN_EXIT_SCR                              # THE EXIT'S NEGATIVE CONTROL
     halted = causes == [_core.TERM_LOOPING] and len(got) == FRAMES
@@ -487,17 +560,21 @@ def main():
                  "FAIL -- " + ("the gate did not notice" if state_bad is None else
                                "state %s, pixels %s" % (state_bad, first_bad))))
         return 0 if caught else 1
-    if args.selftest or args.selftest_skill or args.selftest_help:
+    if args.selftest_map and not AM:
+        print("SELFTEST (the map page): REFUSED -- %s has no map page (config.MAP_CONFIG)" % args.map)
+        return 1
+    if args.selftest or args.selftest_skill or args.selftest_help or args.selftest_map:
         # rejected for the RIGHT reason: the first wrong frame is the first one the mutation moves
         # (frame 0 is a menu frame; the first NEW GAME is the first frame drawn at a wrong skill;
-        # M7 P3.4: the frame esc leaves the world's help is the first the wrong close moves)
+        # M7 P3.4: the frame esc leaves the world's help is the first the wrong close moves; M8: the page's)
         expect = (0 if args.selftest else NEW_GAMES[0] if args.selftest_skill
-                  else HELP_CLOSED_TO_WORLD)
+                  else HELP_CLOSED_TO_WORLD if args.selftest_help else MAP_CLOSED_TO_WORLD)
         caught = first_bad == expect
         print("SELFTEST (%s): " % ("every frame claimed to be a world frame" if args.selftest else
                                    "the oracle starts the next skill at every NEW GAME"
                                    if args.selftest_skill else
-                                   "the oracle closes the world's help to the main menu")
+                                   "the oracle closes the world's help to the main menu" if args.selftest_help
+                                   else "the oracle closes the world's map page to the main menu")
               + ("PASS -- the gate rejected it at frame %d, where it must" % expect if caught else
                  "FAIL -- " + ("the gate did not notice" if first_bad is None else
                                "it failed at frame %d, not %d" % (first_bad, expect))))

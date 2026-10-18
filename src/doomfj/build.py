@@ -62,6 +62,10 @@ STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
                       "p_tnh",
                       # P10: a game is in progress (the main menu's RESUME) -- the menu's own memory, as menu_scr is
                       "g_live")
+# M8 (doomfj.automap): the map page's state nibble `amap` (wall_renderer.AUTOMAP_STATE_DECLS), on a map whose page is on
+# -- the menu's own memory, persisted for the reason `menu_scr` is: a page that reset every frame could never be left.
+# Registered and persisted through the map's `extra` names (`automap_persist`), as F1.2's map cells are.
+AUTOMAP_PERSIST = ("amap",)
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it
@@ -207,6 +211,11 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
     from doomfj.monstermove import map_persist
     from doomfj.teleportcode import map_persist as _tele_persist
     return map_persist(wad, mapname) + card_persist(wad, mapname) + _tele_persist(wad, mapname)
+
+
+def automap_persist(cfg, menu: bool) -> tuple:
+    """M8: AUTOMAP_PERSIST on a tier with the menu whose map has the page (cfg.AUTOMAP, config.MAP_CONFIG), else ()"""
+    return AUTOMAP_PERSIST if (menu and getattr(cfg, "AUTOMAP", 0)) else ()
 
 
 def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
@@ -561,7 +570,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         # first assembly's addresses or image. m1_reset.fj still goes after the emitted parts (it only holds a def).
         from doomfj import selfreset
         paths = paths + [_SRC_FJ / "m1_reset.fj"]
-        _extra = _map_persist(wad, mapname, standalone and moving_things)
+        _extra = _map_persist(wad, mapname, standalone and moving_things) + automap_persist(cfg, menu)   # M8: amap
         _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things, extra=_extra)
         nss = len(bake_bsp(wad, mapname).subsectors)
         # M8 F1.2: the map's own state cells (mc_don) are registered too -- the restore sets were recorded on E1M1,
@@ -601,7 +610,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         # M5/M2-R4: the labels the reset must leave alone -- computed ONCE and used both to build
         # the reset and to report it.
         _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things,
-                                  extra=_map_persist(wad, mapname, standalone and moving_things))
+                                  extra=_map_persist(wad, mapname, standalone and moving_things)
+                                  + automap_persist(cfg, menu))                                       # M8: amap
         labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
                                                 **standalone_run_header(standalone))
         r1 = FjmRunner(out, flat_max_words=limit)

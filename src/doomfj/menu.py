@@ -254,6 +254,12 @@ HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEF
                  # M7 P4.1: fire (ctrl -- pygame_window's 0x85), the number keys, the second strafe pair
                  "CTRL": 0x85, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, ",": 0x2C, ".": 0x2E,
                  "5": 0x35}                                  # P9: the rocket launcher
+# M8 (doomfj.automap): the MAP key's item -- a third item on the last row, ONLY on a map with the map page
+# (`help_rows(automap=True)`); its keycode joins HELP_KEYCODES there only (`help_keycodes`), so a map without the page
+# lists no key that does nothing
+MAP_KEY = 0x6D                                              # 'm' (pygame_window's SDL code; automap.AUTOMAP_KEY)
+HELP_MAP_ITEM = (("M",), ("MAP",))
+HELP_MAP_KEYCODE = {"M": MAP_KEY}
 # THE GEOMETRY, px. A cap is a 1-px box in the credit's dim gray with 1 px of padding round its
 # legend, the legend centred; every cap of a cluster is as wide as its widest legend's cap (all 9: W and the arrows
 # are five columns), and each cap of a key row fits its own legend.
@@ -286,10 +292,23 @@ HELP_ITEM_GAP = 8                        # the least gutter between a row's firs
 HELP_LINE_PITCH = HELP_TEXT_H + 1        # one description line to the next
 
 
-def help_key_names() -> list:
+def help_rows(automap: bool = False) -> tuple:
+    """the help's key rows: HELP_ROWS, and M8's MAP item after the last row's (`HELP_MAP_ITEM`) on a map with the map
+    page"""
+    if not automap:
+        return HELP_ROWS
+    return HELP_ROWS[:-1] + (HELP_ROWS[-1] + (HELP_MAP_ITEM,),)
+
+
+def help_keycodes(automap: bool = False) -> dict:
+    """the keycode of every key the help shows (HELP_KEYCODES; M8: and M's on a map with the map page)"""
+    return {**HELP_KEYCODES, **(HELP_MAP_KEYCODE if automap else {})}
+
+
+def help_key_names(automap: bool = False) -> list:
     """every key name the help screen shows, in screen order: the clusters', then the rows'"""
     return ([k for cluster in HELP_CLUSTERS for k in cluster]
-            + [k for row in HELP_ROWS for keys, _lines in row for k in keys])
+            + [k for row in help_rows(automap) for keys, _lines in row for k in keys])
 
 
 def help_cap_legend(key: str) -> str:
@@ -318,7 +337,7 @@ def _help_item_width(keys, lines) -> int:
     return caps + HELP_DESC_GAP + max(help_text_width(line) for line in lines)
 
 
-def help_layout(width, height) -> tuple:
+def help_layout(width, height, automap: bool = False) -> tuple:
     """THE help screen's layout: `(caps, texts)` -- `caps` the keycaps as `(key, x, y, w)`, each an
     outer box HELP_CAP_H high; `texts` every string drawn, as `(label, x, y, role)`, role
     "title" (the highlight colour, the 5x7 font) or "text" (the text colour, HELP_FONT), the caps' legends among them.
@@ -329,7 +348,10 @@ def help_layout(width, height) -> tuple:
     SECOND item stand at one x -- HELP_LEGEND_GAP past the clusters, or further right if some row's first item would
     come nearer it than HELP_ITEM_GAP; a third item would follow its row's second, HELP_ITEM_GAP on. Each key row
     stands HELP_SECTION_GAP empty rows below what the one above it DRAWS (a two-line description reaches below its
-    caps)."""
+    caps).
+
+    M8: `automap` -- the rows are `help_rows(automap)`: on a map with the map page, the last row's third item is M MAP"""
+    rows_ = help_rows(automap)
     caps, texts = [], [(HELP_TITLE, (width - help_text_width(HELP_TITLE, "title")) // 2, HELP_TITLE_Y, "title")]
 
     def cap(key, x, y, w):
@@ -351,12 +373,12 @@ def help_layout(width, height) -> tuple:
         x += 3 * w + 2 * HELP_CAP_GAP
     # the second column: the legend's x, or HELP_ITEM_GAP right of the widest first item of a two-item row
     col2 = max([x + HELP_LEGEND_GAP] + [HELP_X + _help_item_width(*row[0]) + HELP_ITEM_GAP
-                                        for row in HELP_ROWS if len(row) > 1])
+                                        for row in rows_ if len(row) > 1])
     for row, line in enumerate(HELP_CLUSTER_LEGEND):           # level with the caps' top
         texts.append((line, col2, HELP_CLUSTERS_Y + row * HELP_LEGEND_PITCH, "text"))
     # the key rows: each item's caps from its x, its description after them
     y = bottom_y + HELP_CAP_H + HELP_SECTION_GAP
-    for row in HELP_ROWS:
+    for row in rows_:
         x, drawn = HELP_X, HELP_CAP_H
         for k, (keys, lines) in enumerate(row):
             if k == 1:
@@ -390,7 +412,7 @@ def _draw_box(out, width, x0, y0, w, h, ink):
         out[y * width + x0] = out[y * width + x0 + w - 1] = ink
 
 
-def _help_bitmap(width, height, colours):
+def _help_bitmap(width, height, colours, automap: bool = False):
     """The help screen as a width*height list of palette indices -- THE picture, for both mirrors:
     `help_layout` drawn -- the caps' boxes in the credit's dim gray, the title in the highlight
     colour, every other string (the caps' legends among them) in the text colour -- and the credit.
@@ -398,7 +420,7 @@ def _help_bitmap(width, height, colours):
     bottom-right and the H cap reaches as low on the left, so a whole-row rule would be wrong)."""
     background, text, highlight, credit = colours
     out = [background] * (width * height)
-    caps, texts = help_layout(width, height)
+    caps, texts = help_layout(width, height, automap)
     for _key, x, y, w in caps:
         _draw_box(out, width, x, y, w, HELP_CAP_H, credit)
     for label, x, y, role in texts:
@@ -411,19 +433,19 @@ def _help_bitmap(width, height, colours):
     return out
 
 
-def help_pixels(width, height, colours):
-    """What the ORACLE expects on screen while the help is up."""
-    return _help_bitmap(width, height, colours)
+def help_pixels(width, height, colours, automap: bool = False):
+    """What the ORACLE expects on screen while the help is up (M8: `automap` -- the map's M MAP item)."""
+    return _help_bitmap(width, height, colours, automap)
 
 
-def help_stream(width, height, colours) -> bytes:
+def help_stream(width, height, colours, automap: bool = False) -> bytes:
     """The 0x0B frame that paints exactly `help_pixels()` -- `stream()`'s encoder."""
-    return _encode(_help_bitmap(width, height, colours), width, height)
+    return _encode(_help_bitmap(width, height, colours, automap), width, height)
 
 
-def help_fj(width, height, colours, label: str = "menu_help", end_marker: bool = True) -> str:
+def help_fj(width, height, colours, label: str = "menu_help", end_marker: bool = True, automap: bool = False) -> str:
     """The baked help frame as fj -- `fj()`'s shape: one `stl.output_char` per stream byte."""
-    return _fj_text(help_stream(width, height, colours), label, end_marker,
+    return _fj_text(help_stream(width, height, colours, automap), label, end_marker,
                     "M7 P3.4: the baked help frame")
 
 
@@ -710,9 +732,32 @@ MAIN_RESUME_SCR = 7
 LEVEL_DONE_ENTER = 15
 LEVEL_DONE_HOLD_LAST = 8
 LEVEL_DONE_SCREENS = (LEVEL_DONE_SCR,) + tuple(range(LEVEL_DONE_HOLD_LAST, LEVEL_DONE_ENTER + 1))
+# M8 (doomfj.automap; the owner, 2026-10-18) -- THE MAP PAGE, on a map whose MAP_CONFIG turns it on: the main menu's
+# MAP item (under HELP, over EXIT) and the key M. Like the help, one picture under two ids, because closing it goes back
+# to where it was opened from: MAP_MENU_SCR from the main menu (closes to the main menu, MAP highlighted -- MAIN_MAP_SCR),
+# MAP_GAME_SCR from the world (closes to the world). `menu_scr` is a nibble whose sixteen values are all taken (LEVEL
+# COMPLETE's hold has eight), so these three are the oracle's words for a SECOND persisted nibble, the program's
+# `amap`: AMAP_CODES[scr] while one of them is up, `menu_scr` 0 then (`program_cells`); 0 everywhere else.
+MAP_GAME_SCR = 16
+MAP_MENU_SCR = 17
+MAIN_MAP_SCR = 18
+MAP_SCREENS = (MAP_GAME_SCR, MAP_MENU_SCR)
+AMAP_CODES = {MAP_GAME_SCR: 1, MAP_MENU_SCR: 2, MAIN_MAP_SCR: 3}
+MAP_EVENT = "map"
 
 
-def menu_step(mode: int, scr: int, sel: int, events, live: int) -> tuple:
+def menu_keys(automap: bool = False) -> dict:
+    """the keycodes the menu hears (MENU_KEYS) -- M8: and M as "map" on a map with the map page. The program's poll
+    sees M only there (wall_renderer.standalone_key_lines), so the oracle must not hear it elsewhere"""
+    return {**MENU_KEYS, **({MAP_KEY: MAP_EVENT} if automap else {})}
+
+
+def program_cells(scr: int) -> tuple:
+    """M8: the oracle's `scr` as the program's two persisted nibbles, (menu_scr, amap)"""
+    return (0, AMAP_CODES[scr]) if scr in AMAP_CODES else (scr, 0)
+
+
+def menu_step(mode: int, scr: int, sel: int, events, live: int, automap: bool = False) -> tuple:
     """One frame of the menu -> `(mode, scr, sel, new_game, live)`.
 
     `mode` is 1 on a menu frame and 0 in the world; `scr` 0 is the main menu (NEW GAME
@@ -743,7 +788,14 @@ def menu_step(mode: int, scr: int, sel: int, events, live: int) -> tuple:
         next event in the order is acted on.
       * NEW GAME sets `live`; LEVEL COMPLETE leaves for the main menu on ANY key's down edge ("any"), clearing it --
         the menu as at boot, where `live` is 0 -- after its HOLD: the exit opens it at LEVEL_DONE_ENTER, and every
-        frame counts down (LEVEL_DONE_ENTER .. LEVEL_DONE_HOLD_LAST, then LEVEL_DONE_SCR) whatever is pressed."""
+        frame counts down (LEVEL_DONE_ENTER .. LEVEL_DONE_HOLD_LAST, then LEVEL_DONE_SCR) whatever is pressed.
+
+    M8 (doomfj.automap): `automap` -- the map has the map page. The main menu's items are then NEW GAME, HELP, MAP,
+    EXIT (RESUME over them in a game): down from HELP and up from EXIT reach MAP (MAIN_MAP_SCR). In the world, m opens
+    the map (MAP_GAME_SCR), after esc, enter and h; on any main-menu item m opens it (MAP_MENU_SCR), after esc, enter
+    and h -- and enter on MAP does too; on the map page, esc or m close it, back to where it was opened from (the
+    main menu on MAP, or the world). The help, the skill screen and LEVEL COMPLETE (but for its ANY key) ignore m;
+    the map page ignores every other key. Without `automap` no rule reads "map"."""
     # The skills the screen offers are wall_renderer.SKILLS: ONE tuple for the emitter's screens,
     # its dispatch and these rules (R6 -- this module kept its own `MENU_SKILLS = 3` until the P1.5
     # review). Imported here, not at the top, because wall_renderer imports this module.
@@ -751,12 +803,33 @@ def menu_step(mode: int, scr: int, sel: int, events, live: int) -> tuple:
     if scr == MENU_HALTED:                          # P9: the program has halted -- nothing changes again
         return mode, scr, sel, None, live
     esc = "esc" in events and live                  # P10: esc resumes only a game in progress
+    mp = automap and MAP_EVENT in events            # M8: m, on a map with the map page
     if mode == 0:                                   # the world: esc or enter opens the main menu
         if "esc" in events or "enter" in events:
             return 1, MAIN_RESUME_SCR if live else 0, sel, None, live      # P10: on RESUME
         if "help" in events:                        # M7 P3.4: h opens the help
             return 1, HELP_GAME_SCR, sel, None, live
+        if mp:                                      # M8: m opens the map page
+            return 1, MAP_GAME_SCR, sel, None, live
         return 0, scr, sel, None, live
+    if scr in MAP_SCREENS:                          # M8: the map page -- esc or m close it
+        if "esc" in events or mp:
+            return (1, MAIN_MAP_SCR, sel, None, live) if scr == MAP_MENU_SCR else (0, 0, sel, None, live)
+        return 1, scr, sel, None, live
+    if scr == MAIN_MAP_SCR:                         # M8: the main menu, MAP highlighted
+        if esc:
+            return 0, 0, sel, None, live
+        if "enter" in events:
+            return 1, MAP_MENU_SCR, sel, None, live
+        if "help" in events:
+            return 1, HELP_MENU_SCR, sel, None, live
+        if mp:
+            return 1, MAP_MENU_SCR, sel, None, live
+        if "up" in events:
+            return 1, MAIN_HELP_SCR, sel, None, live
+        if "dn" in events:
+            return 1, MAIN_EXIT_SCR, sel, None, live
+        return 1, MAIN_MAP_SCR, sel, None, live
     if scr in HELP_SCREENS:                         # M7 P3.4: the help -- esc or h close it
         if "esc" in events or "help" in events:
             return (1, MAIN_HELP_SCR, sel, None, live) if scr == HELP_MENU_SCR else (0, 0, sel, None, live)
@@ -766,6 +839,8 @@ def menu_step(mode: int, scr: int, sel: int, events, live: int) -> tuple:
             return 0, 0, sel, None, live            # resume the world where it was
         if "help" in events:
             return 1, HELP_MENU_SCR, sel, None, live
+        if mp:                                      # M8: m opens the map page
+            return 1, MAP_MENU_SCR, sel, None, live
         if "dn" in events:                          # down to NEW GAME (up is clamped: RESUME is the first)
             return 1, 0, sel, None, live
         return 1, MAIN_RESUME_SCR, sel, None, live
@@ -774,10 +849,12 @@ def menu_step(mode: int, scr: int, sel: int, events, live: int) -> tuple:
             return 0, 0, sel, None, live
         if "enter" in events or "help" in events:
             return 1, HELP_MENU_SCR, sel, None, live
+        if mp:                                      # M8: m opens the map page
+            return 1, MAP_MENU_SCR, sel, None, live
         if "up" in events:
             return 1, 0, sel, None, live
-        if "dn" in events:                          # P9: down to EXIT
-            return 1, MAIN_EXIT_SCR, sel, None, live
+        if "dn" in events:                          # P9: down to EXIT -- M8: to MAP, on a map with the page
+            return 1, MAIN_MAP_SCR if automap else MAIN_EXIT_SCR, sel, None, live
         return 1, MAIN_HELP_SCR, sel, None, live
     if scr == MAIN_EXIT_SCR:                        # P9: the main menu, EXIT highlighted
         if esc:
@@ -786,8 +863,10 @@ def menu_step(mode: int, scr: int, sel: int, events, live: int) -> tuple:
             return 1, MENU_HALTED, sel, None, live
         if "help" in events:
             return 1, HELP_MENU_SCR, sel, None, live
-        if "up" in events:
-            return 1, MAIN_HELP_SCR, sel, None, live
+        if mp:                                      # M8: m opens the map page
+            return 1, MAP_MENU_SCR, sel, None, live
+        if "up" in events:                          # M8: up to MAP, on a map with the page
+            return 1, MAIN_MAP_SCR if automap else MAIN_HELP_SCR, sel, None, live
         return 1, MAIN_EXIT_SCR, sel, None, live    # (down is clamped: EXIT is the last item)
     if LEVEL_DONE_HOLD_LAST <= scr <= LEVEL_DONE_ENTER:   # P10: LEVEL COMPLETE's hold -- the picture, no key
         return 1, scr - 1 if scr > LEVEL_DONE_HOLD_LAST else LEVEL_DONE_SCR, sel, None, live
@@ -802,6 +881,8 @@ def menu_step(mode: int, scr: int, sel: int, events, live: int) -> tuple:
             return 1, 1, sel, None, live            # NEW GAME: the skill screen
         if "help" in events:                        # M7 P3.4: h opens the help from here too
             return 1, HELP_MENU_SCR, sel, None, live
+        if mp:                                      # M8: m opens the map page
+            return 1, MAP_MENU_SCR, sel, None, live
         if "up" in events and live:                 # P10: up to RESUME (clamped without a game)
             return 1, MAIN_RESUME_SCR, sel, None, live
         if "dn" in events:                          # M7 P3.4: down to HELP

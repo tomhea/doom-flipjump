@@ -235,6 +235,11 @@ class Config:
     # holds it below SPR_THING_SLOTS and asks for it when the map's bound does not fit.
     SPR_SLOT_CAP: int = 0
 
+    # M8 (doomfj.automap; the owner, 2026-10-18): 1 = the game tier has the MAP PAGE -- the main menu's MAP item, the key
+    # M, the level's lines baked as a frame and the player's dot computed at run time. Per map (MAP_CONFIG), so E1M1's
+    # emission is untouched while the page is off there (0, the default: not one line differs).
+    AUTOMAP: int = 0
+
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
         """M8 F1.4: 1 when the record compares `gps_nslot` against SPR_SLOT_CAP (frame.thing_record_body's rep), else 0"""
@@ -298,7 +303,8 @@ GAME_CFG = Config(VIEW_ROWS=84)
 MAP_CONFIG = {
     # M8 F1.4: SPR_SLOT_CAP -- 305 drawable things over the skills, hard's 295 + 10 pool things + 54 droppers' drops
     # (> 255 slot ids: wall_renderer.check_slot_ids)
-    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255},
+    # M8: AUTOMAP -- the map page (doomfj.automap)
+    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "AUTOMAP": 1},
 }
 
 

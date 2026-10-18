@@ -65,6 +65,7 @@ from doomfj.fixedpoint import _signed                                        # n
 from doomfj.reference_model import SimState                                  # noqa: E402
 from doomfj.things import drawable_things                                    # noqa: E402
 from doomfj.doors import exit_boxes                                          # noqa: E402
+from doomfj.automap import has_page                                       # noqa: E402 (M8: the map page)
 from doomfj.menu import (LEVEL_DONE_ENTER, LEVEL_DONE_SCR, LEVEL_DONE_SCREENS, menu_step,  # noqa: E402
                          palette_colours, stats_digits)
 from doomfj.wall_renderer import (BOOT_MENU_SKILL, BOOT_SKILL, SKILLS, STANDALONE_POLLS,     # noqa: E402
@@ -212,7 +213,8 @@ class Mirror:
                     poke = {k: v for k, v in after.items() if before.get(k) != v}
                 # P10: a frame's menu keys are its only typed keys (the moves are poked flags), so they are its "any"
                 mev_ = set(kd.get("menu", ()))
-                mode, scr, sel, ng, live = menu_step(mode, scr, sel, mev_ | ({"any"} if mev_ else set()), live)
+                mode, scr, sel, ng, live = menu_step(mode, scr, sel, mev_ | ({"any"} if mev_ else set()), live,
+                                                     automap=has_page(sim.mapname))      # M8: MAP's rules
                 if ng is not None:                            # NEW GAME: the level start
                     st = SimState(sim.spawn.x, sim.spawn.y, sim.spawn.angle, sim.mapname)
                     ph, taken, pusedn = dp.initial(), False, 1
@@ -415,7 +417,8 @@ def screen(orc, scr: int, sel: int, live: int = 0, stats=None) -> bytes:
     P3.4) the main menu on HELP and the help: `wall_renderer.menu_screen_pixels`, the one mapping. P10: `live` picks
     the main menu's variant, `stats` is LEVEL COMPLETE's (nsecret, digits)"""
     colours = palette_colours(bytes(b for rgb in orc.mw.playpal(0) for b in rgb))
-    return bytes(menu_screen_pixels(orc.rm.cfg, colours, scr, sel, live, stats))
+    return bytes(menu_screen_pixels(orc.rm.cfg, colours, scr, sel, live, stats,
+                                    automap=orc.automap))                                # M8: MAP, the help's M
 
 
 def menu_events(keys: list) -> list:

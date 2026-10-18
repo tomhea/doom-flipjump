@@ -180,10 +180,10 @@ def _apply(w, rec, log):
     w._spawn_fx_at_target = lambda *a: None
     base = type(w)._mon_hitscan
 
-    def hitscan(mm, bullets, ev):
+    def hitscan(mm, bullets, ev, *jit):                         # M8 C6: a shadow target's turn, if any
         mode["v"] = 4
         try:
-            base(w, mm, bullets, ev)
+            base(w, mm, bullets, ev, *jit)
         finally:
             mode["v"] = 3
     w._mon_hitscan = hitscan

@@ -107,9 +107,22 @@ def test_shipped_maps_restart_their_floors(e1m1, e1m2):
     assert _row(e1m2, "NEW GAME restarts the floor groups")[0] == "OK"
 
 
-def test_control_floor_groups_without_a_lift_are_wrong(ls, wad, monkeypatch):
+def test_floor_groups_without_a_lift_restart(ls, wad, monkeypatch):
+    """M8 C4 fixed #147 (lesson L36): `restart_lines(nfloor=)` zeroes `fswitch` on a map with no lift too"""
     from doomfj import movers
     monkeypatch.setattr(movers, "lift_states", lambda *a, **k: {})
+    sv = ls.Survey(wad, "E1M2", wad)
+    sv._restart_floors()
+    r = _row(sv, "NEW GAME restarts the floor groups")
+    assert r[0] == "OK" and r[2] == "11 groups, 0 lifts", r
+
+
+def test_control_floor_groups_without_a_lift_are_wrong(ls, wad, monkeypatch):
+    """R9: the restart as it was before M8 C4 (no `nfloor`: fswitch zeroed only with a lift) is WRONG again"""
+    from doomfj import movers, wall_renderer
+    monkeypatch.setattr(movers, "lift_states", lambda *a, **k: {})
+    real = wall_renderer.restart_lines
+    monkeypatch.setattr(wall_renderer, "restart_lines", lambda *a, **k: real(*a, **{**k, "nfloor": 0}))
     sv = ls.Survey(wad, "E1M2", wad)
     sv._restart_floors()
     r = _row(sv, "NEW GAME restarts the floor groups")
@@ -119,13 +132,15 @@ def test_control_floor_groups_without_a_lift_are_wrong(ls, wad, monkeypatch):
 # ---- the renderer's per-seg machines (the CR of #146, BLOCKING: lines shut at every state)
 def test_shut_gate_is_the_emitters_rule(ls):
     g = ls.Survey.shut_gate
+    from doomfj.wall_renderer import seg_shut_gate
+    assert all(g(st, d) == seg_shut_gate(st, d) for st, d in (([True, True, False], [3]), ([True] * 4, [2, 2])))
     assert g([False] * 4, [4]) == "never" and g([True] * 4, [4]) == "every"
-    assert g([True, False, False], [3]) == 0
-    assert g([False, True, True], [3]) is None              # open at state 0, shut later: no hex.if0 gate
-    assert g([True, True, False], [3]) is None              # shut past state 0 (E1M3 515's shape)
-    assert g([True, True, False, False], [2, 2]) == 0       # shut exactly while the first machine is at state 0
-    assert g([True, False, True, False], [2, 2]) == 1       # ... the second's (E1M2 line 1199's shape)
-    assert g([True, False, False, True], [2, 2]) is None
+    assert g([True, False, False], [3]) == (0, 1)           # exactly state 0: the one-op hex.if0 (E1M1's doors)
+    assert g([False, True, True], [3]) == (0, 0b110)        # M8 C4: open at state 0, shut later -- a mask gate
+    assert g([True, True, False], [3]) == (0, 0b011)        # shut past state 0 (E1M3 515's shape): a mask gate
+    assert g([True, True, False, False], [2, 2]) == (0, 1)  # shut exactly while the first machine is at state 0
+    assert g([True, False, True, False], [2, 2]) == (1, 1)  # ... the second's (E1M2 line 1199's shape)
+    assert g([True, False, False, True], [2, 2]) is None    # both machines decide it: refused
 
 
 def test_e1m2s_lines_shut_at_every_state_take_the_solid_path(e1m1, e1m2):
@@ -135,15 +150,22 @@ def test_e1m2s_lines_shut_at_every_state_take_the_solid_path(e1m1, e1m2):
     assert r[2] == "4" and "[2033, 2050, 2062, 2075]" in r[4]          # the CR of #146's four lines
 
 
-def test_control_a_door_beside_a_mover_is_refused(ls, wad, monkeypatch):
-    """a mover sector of E1M2 made a door too: its segs are on a door AND a mover (the emitter's _seg_movers assert)"""
+def test_a_door_beside_a_mover_is_a_pair(ls, wad):
+    """M8 C4: a door and a mover on one seg are the renderer's PAIR (E1M3's 519 / 1077) -- no refusal there"""
+    sv = ls.Survey(wad, "E1M3", wad)
+    assert sv._line_machines(105, 106)[0][0] == 106 and [m for m, _s in sv._line_machines(105, 106)] == [106, 105]
+    sv._seg_machines()
+    assert _row(sv, "dynamic segs the renderer can gate")[0] == "OK"
+
+
+def test_control_a_door_beside_two_movers_is_refused(ls, wad, monkeypatch):
+    """R9: E1M2's lift 47 (line 1199 to floor 206) made a door too: a door and TWO movers on one seg -- three machines"""
     sv = ls.Survey(wad, "E1M2", wad)
     dst, dsecs, msecs, mcell = sv._machines()
-    mover = sorted(msecs)[0]
-    sv.facts["_machines"] = ({**dst, mover: [0, 1]}, dsecs, msecs, mcell)
+    sv.facts["_machines"] = ({**dst, 47: [0, 1]}, dsecs, msecs, mcell)
     sv._seg_machines()
     r = _row(sv, "dynamic segs the renderer can gate")
-    assert r[0] == "REFUSED" and "a door (%d) and a mover" % mover in r[4], r
+    assert r[0] == "REFUSED" and "a door (47) and two movers" in r[4], r
 
 
 # ---- the openings of lines between dynamic sectors (the CR of #142: the row from the readers' own functions)

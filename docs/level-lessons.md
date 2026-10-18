@@ -58,7 +58,7 @@ survey rows marked **NEW**, and emit_check's stale stand-in refusal.
 | L33 | the CR of #144 wrong test: it tested `barrelcode.restart_lines`, not the restart the emitter composes | PR #144 B2 | TEST (as L32); rule: test the composition the emitter calls (`compose_restart`, `p6_restart_parts`) |
 | L34 | `bar_solid` reads `w.ws` after the per-skill loop: right only because `SKILLS[-1]` is the boot skill | #145 F6 | PROSE ONLY: a code-order fact, not a map fact (fix in code: compute at `boot_skill`) |
 | L35 | the CR of #146 BLOCKER: four E1M2 lines (2033 / 2062 tag 10, 2050 / 2075 tag 41) shut at EVERY floor state took the marking path in fj and the solid one in the oracle; no gate looked there | 9b8ef2c0; p2a S15 (fails on r2, passes on r3) | EMIT (`_seg_closed_moving`; `_seg_dual_cell` refuses open-then-shut); GATE p2a S15; SURVEY **NEW** "dynamic segs the renderer can gate" (the emitter's classification over every two-sided line; E1M2's four lines reported as the solid path) |
-| L36 | `restart_lines` zeroes `fswitch` only when the map has a lift: a map with floor groups and no lift keeps its floors moved after NEW GAME | #147 (latent) | SURVEY **NEW** "NEW GAME restarts the floor groups" (calls `restart_lines`): **WRONG on E1M8** (3 groups, 0 lifts) |
+| L36 | `restart_lines` zeroes `fswitch` only when the map has a lift: a map with floor groups and no lift keeps its floors moved after NEW GAME | #147 (latent) | SURVEY **NEW** "NEW GAME restarts the floor groups" (calls `restart_lines`): was WRONG on E1M8 (3 groups, 0 lifts); FIXED by C4 (`nfloor=`), with a control |
 | L37 | `_map_persist` persists `pcard_y` / `pcard_r` / `p_rct` for any standalone tier, declared only where loot / teleports are on | #147 (latent) | PROSE ONLY: only the game tier builds a level; a tier-matrix fact, not a map fact |
 | L38 | the soulsphere give (`hex.cmp 3, p_hp`) on a signed cell: safe only because a dead player picks nothing up | #147; CR of #146 item 4 | PROSE ONLY (code review); not map-dependent |
 | L39 | two rules for crossing a slanted walk-over line: doors by DOOM's spechit straddle, W1 floors by the grown box -- each mirror matches its own model, so no gate sees it | #147 | SURVEY **NEW** "slanted W1 floor lines": WARN with the linedefs to play-test (E1M2 1972 / 1974 / 2011; E1M7 3760; E1M8 894) |
@@ -79,6 +79,10 @@ survey rows marked **NEW**, and emit_check's stale stand-in refusal.
 | L54 | an E1M2 S1 door switch's latch is not kept: its doors must be open-stay | handoff-e1m2 11 | SURVEY guard "door switches (SR 63 / S1 103)" (`switch_door_triggers` asserts) |
 | L55 | a closing door some box fits inside needs a centre-inside test doorcode does not run | handoff-e1m2 11 | SURVEY "closing doors a box fits inside" (REFUSED: E1M4 102) |
 | L56 | one teleport per move: a destination within a teleport line's reach | handoff-e1m2 3; `teleport.check_one_per_move` | SURVEY (the filtered World refuses; now visible in the matrix: **E1M7 line 516's destination within line 52**) |
+| L57 | (C4) the movers' READERS refused only at emission: `projcode.missile_rows` ("lift line shuts a missile": E1M3 261, E1M4 1933), `lootcode.nukage_lines` (any mover inside the UNION box of every damaging sector: E1M3 mover 4, E1M4 63) -- 30 minutes into an emission each | m8-c-movers | SURVEY **NEW** (`Survey._readers`: missile cells, nukage vs the movers, sight segments, sound edges, the dynamic pairs through `line_states`); FIXED: a lift line is shut below a pass state like a door's; only an INSTANT floor group is kept apart, per damaging sector |
+| L58 | (C4) a NEW mover makes a NEW two-cell line: E1M6's 20 / 22 pool (142) beside SR lift 363 -- its collision floor needs both cells | m8-c-movers | SURVEY (`collision.mover_line_states` row: REFUSED until fixed); FIXED: `collision_cells_fj`'s PAIR dispatch, `monstersight.line_states` answers by the readers' thresholds; TEST `tests/fj/test_episode_movers_fj.py` (the pair dispatch vs the model, 2 mutants) |
+| L59 | (C4) a damaging sector can BE a mover (20 / 22 clear the special): every "a mover is never a hurt sector" assert becomes a rule (damage until the group fires) | m8-c-movers | EMIT (`lootcode.nukage_clear_lines` + `nkgrp`; asserts the S1 line's box apart from the sector); TEST tests/fj `test_the_nukage_clear_is_the_models` + 2 mutants |
+| L60 | (C4) the seg gate was `hex.if0` (shut EXACTLY at state 0): a lift shut while near its top, or a door in front of a lift, was refused | m8-c-movers | EMIT `wall_renderer.seg_shut_gate` / `dual_gate_lines` (one rule: the survey calls it); TEST `test_level_lessons.py::test_shut_gate_is_the_emitters_rule` |
 
 ## 2. E1M1's gameplay lessons (M7) a new level's features can hit again
 
@@ -141,18 +145,18 @@ survey rows marked **NEW**, and emit_check's stale stand-in refusal.
 
 | map | finding (the row) | the lesson that caught it | owner |
 |---|---|---|---|
-| E1M3 | REFUSED: 5 dynamic segs the renderer cannot gate -- 515 (shut at states 0-4 of 105), 519 (door 106 + mover 105), 827, 1077 (door 213 + mover 163), 1314 | L35 / L12 | C3 / C4 (doors and movers on E1M3) |
+| E1M3 | ~~REFUSED: 5 dynamic segs the renderer cannot gate -- 515 (shut at states 0-4 of 105), 519 (door 106 + mover 105), 827, 1077 (door 213 + mover 163), 1314~~ FIXED (C4: the mask gate, the door + mover pair) | L35 / L12 / L60 | C4 |
 | E1M3, E1M4, E1M6, E1M7, E1M9 | WARN: plane pairs 249 / 237 / 328 / 545 / 264 -- `PID_NIBBLES 3` in MAP_CONFIG likely | L08 | the level rung (MAP_CONFIG) |
 | E1M3, E1M4, E1M9 | pool at spread 2 110% / 129% / 117%: build at `--spread 1` (E1M5, E1M8: spread 2) | L19 | the level rung |
 | E1M5 | WARN (if SECTOR_LIGHTS on): a fire flicker in sector 31 with maxlight 256 -- a light state past the byte | L43 | the lights, if E1M5 gets them |
-| E1M6 | REFUSED: 2 segs (1254, 1348: shut at states 0-7 of 182); pool 100% at spread 1 (at the edge); RAM ~20.8 GB projected | L35, L19, L20 | C4; the E1M6 probe |
+| E1M6 | ~~REFUSED: 2 segs (1254, 1348: shut at states 0-7 of 182)~~ FIXED (C4); pool 100% at spread 1 (at the edge); RAM ~20.8 GB projected | L35, L19, L20 | the E1M6 probe |
 | E1M6, E1M7 | the filtered World refuses: "leaf lists store mobile index + 1 in a byte" (was hidden by the matrix) | L29 | C1 / C2 |
 | E1M7 | the filtered World refuses: line 516's teleport destination (1568, 1312) lies within line 52 (one teleport per move; was hidden) | L29, L56 | C5 (teleports) |
 | E1M7 | REFUSED: 7 segs (269, 272, 2579, 3461, 3469, 3489, ...); pool 157% at spread 1 and ~32.8 GB RAM projected (WARN both); two exit switch lines (WARN if SWITCH_TEX) | L35, L19, L20, L43 | C11's feasibility probe; C9 |
-| E1M8 | WRONG: NEW GAME keeps the floors moved -- 3 floor groups, 0 lifts (`restart_lines` zeroes `fswitch` only with a lift) | L36 | the fix belongs in `wall_renderer.restart_lines` (both mirrors' restart): E1M8's level rung or C4 |
+| E1M8 | ~~WRONG: NEW GAME keeps the floors moved -- 3 floor groups, 0 lifts~~ FIXED (C4: `restart_lines(nfloor=)`; the model's restart already reset them) | L36 | C4 |
 | E1M8 | REFUSED: the cell charge pack (17) is a World pickup with NO sprite art -- never drawn, and the oracle's thvis mirror raises KeyError (every gate on E1M8 would crash) | L17 | C6 (pickups: the plasma rifle's ammo) |
 | E1M7, E1M8 | WARN: slanted W1 floor lines 3760, 894 -- play-test their crossing | L39 | the playtests |
-| E1M9 | REFUSED: 12 segs (511, 749, 758, 924, 1856, 1857, ...) | L35 | C3 / C4 |
+| E1M9 | ~~REFUSED: 12 segs (511, 749, 758, 924, 1856, 1857, ...)~~ FIXED (C4: the mask gate) | L35, L60 | C4 |
 | E1M9 | the filtered World refuses: door 135 is asked two motions (plain, stay) | L29 | C3 |
 | E1M1..E1M9 | OK on every map: door clearance (L40), ML_TWOSIDED (L42), the neighbour rule (L41), `collision.mover_line_states` (L28); `monstersight.line_states` OK wherever the World builds (E1M6 / E1M7 / E1M9: not run) | -- | -- |
 

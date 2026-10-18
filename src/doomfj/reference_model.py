@@ -2127,7 +2127,7 @@ class ReferenceModel:
                           mobiles=None, barrel_views: dict | None = None, thing_removed=None,
                           degrade: bool = False, exempt_actors: bool = False,
                           view_drop: int = 0, wall_tones: bool = False,
-                          slot_trace: list | None = None) -> bytes:
+                          slot_trace: list | None = None, sector_lights: dict | None = None) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -2215,7 +2215,15 @@ class ReferenceModel:
         `view_z(floor) - (d << 16)`, while the floor and ceiling SHADING (the FT1 band lists, `_flat_row_colours`' ph
         = |plane_h - viewz|) stays on the STANDING eye `view_z(floor)` -- the band lists the fj bakes per eye class,
         which the fj's landing keeps (`wall_renderer.landing_drop_lines` subtracts from `viewz` after `vzcbase` is
-        set). 0 (the default) is every picture before P8a, byte for byte (scratchpad/gp/p8_identity.py)."""
+        set). 0 (the default) is every picture before P8a, byte for byte (scratchpad/gp/p8_identity.py).
+
+        M8 `sector_lights` (doomfj.lights; the world's `World.lights_now`, through `monsters.view_drop_kw` /
+        `World.light_render_kw`): {sector: light} of EVERY animated sector of the map, at its light this tic -- the
+        picture takes those lights (walls, planes, step faces, sprites). Its keys also change ONE structural rule: a
+        two-sided seg with an animated sector on either side is never skipped by the marking test (the two sides' equal
+        (height, light, flat) keys), because the binary bakes its marking decision once for every light state and an
+        animated light differs from its neighbour in at least one (wall_renderer asserts it, seg for seg). None / {}
+        (the default, every map without animated lights) is today's picture, byte for byte."""
         # M7 P3.3: a misspelt depth order must fail here, not fall through to the "aprox" key
         assert rt_depth_order in RT_DEPTH_ORDERS, (
             f"rt_depth_order={rt_depth_order!r}: one of {RT_DEPTH_ORDERS}")
@@ -2276,6 +2284,11 @@ class ReferenceModel:
         lds = scene.map_wad.linedefs(scene.mapname)
         sds = scene.map_wad.sidedefs(scene.mapname)
         secs = scene_sectors(scene)
+        # M8 (doomfj.lights): the animated lights of the moment; the KEYS are the map's animated sectors (the marking rule)
+        _lt_dyn = frozenset(sector_lights or ())
+        if sector_lights:
+            from doomfj.lights import apply_sector_lights
+            secs = apply_sector_lights(secs, sector_lights)
         verts = scene.cmap.vertexes
         texcache: dict = {}
         _tones = self._wall_tones(scene) if wall_tones else {}     # P10: the wall tones, from the map's own data
@@ -2766,10 +2779,13 @@ class ReferenceModel:
                 # attributing the plane to the back sector then renders identically.
                 fsec = self._seg_sector(lds, sds, secs, seg)
                 bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
+                # M8: ... unless an ANIMATED light is on either side (`sector_lights`' keys): the binary marks such a seg
+                # in every light state, since it marks in one (wall_renderer `_seg_marks` is the union of the states)
                 if ((fsec.ceil_h, fsec.light, fsec.ceil_tex)
                         == (bsec.ceil_h, bsec.light, bsec.ceil_tex)
                         and (fsec.floor_h, fsec.light, fsec.floor_tex)
-                        == (bsec.floor_h, bsec.light, bsec.floor_tex)):
+                        == (bsec.floor_h, bsec.light, bsec.floor_tex)
+                        and not (_lt_dyn and (_fi2 in _lt_dyn or _bi2 in _lt_dyn))):
                     continue
                 # the two STOP conditions the fj shares (one `tsstop` flag there): every column
                 # attributed, or the per-frame seg BUDGET spent. The budget is what bounds the cost

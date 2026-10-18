@@ -191,7 +191,8 @@ def test_the_palette_goes_before_the_record_stream_and_the_phases_after_the_mons
     src = _src()
     i_eye = src.index('_wt_tic = list(_p31.get("tic_after_eye", ())) if _p31 else []')
     # M7 P6: + barrels; M8 F7: the bar after the lvdone guard where the exit frame can move it
-    i_p5 = src.index("_wt_pools = (p5_tic_lines(_hrt, barrels=bool(_bar), bar_always=_bar_always)")
+    # M8: + the sector light thinkers (doomfj.lightcode; none on E1M1)
+    i_p5 = src.index("_wt_pools = (p5_tic_lines(_hrt, barrels=bool(_bar), bar_always=_bar_always, lights=bool(_lth))")
     # M7 P6+P7 E: the two composed into the monsters' world at the tempo (world_tic_lines; tests/fj/test_monster_tempo_fj)
     i_wt = src.index("pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)")
     i_pal = src.index('pass1 += list(_hrt["palette"])')

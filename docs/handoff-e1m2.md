@@ -73,7 +73,13 @@ B0 on its set, gamespeed, msframe, rebuild).
 
 ## 3. Simplifications ("you can remove some weird stuff") -- recorded as made
 
-- Sector lights stay static (E1M1 already ignores its lights).
+- Sector lights stay static (E1M1 already ignores its lights). **IMPLEMENTED (M8, the owner's <= +0.5% rule):** E1M2's
+  light specials animate -- `config.MAP_CONFIG` `SECTOR_LIGHTS` (E1M2 only; E1M1's emission unchanged), the rules in
+  `doomfj.lights` (p_lights.c: flash 1, strobes 2/3/4/12/13, glow 8, fire flicker 17; 9 animated thinkers, its 9 glows
+  between equal lights static), the fj in `doomfj.lightcode` (`lt_phase`, twice a frame in the monsters' world, its own
+  stream `rng_lt`), and every light-dependent constant per light state behind the thinker's state nibble (walls, plane
+  pair ids, step faces, a leaf's sprite light base, a baked thing's class). Nothing dropped; the one structural change
+  is the oracle never skipping a marking seg on an animated light (the program marks it in every state).
 - The computer map is picked up and does nothing (there is no automap).
 - Deathmatch / co-op starts and things are ignored (single player only, as E1M1).
 - The scrolling wall (48, two lines): decided in L5 -- animated if cheap, else static.

@@ -189,7 +189,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # ... and LEVEL COMPLETE's counters (doomfj.statcode)
                    frozenset({"st_kill", "st_item", "st_secn", "st_secm"}),
                    # M8 L4: the player's reactiontime after a teleport (doomfj.teleportcode; a map with a WR teleport)
-                   frozenset({"p_rct"}))
+                   frozenset({"p_rct"}),
+                   # M8: the sector light thinkers' cells (doomfj.lightcode; a map whose lights animate: E1M2)
+                   frozenset({"ltst", "ltct", "rng_lt"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -767,6 +769,10 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     cells["pj_z"] = Cell("pj_z", "hex", 4, count=FIREBALL_POOL)
     cells["bar_src"] = Cell("bar_src", "hex", 2, count=nbar)
     cells["p_rct"] = Cell("p_rct", "hex", 2)          # M8 L4 (monsters.MonsterPhase.p8a_state: 0..18)
+    # M8 (doomfj.lightcode; MonsterPhase.p8a_state's units): a state nibble and a 2-nibble count a thinker, the stream
+    cells["ltst"] = Cell("ltst", "hex", 1, count=_nlight())
+    cells["ltct"] = Cell("ltct", "hex", 2, count=_nlight())
+    cells["rng_lt"] = Cell("rng_lt", "hex", 2)
     return cells
 
 
@@ -824,6 +830,12 @@ def _loot_counts() -> tuple:
     from doomfj.monsters import droppers
     w = _idle_world()
     return len(droppers(w)), w.layout.nbarrel
+
+
+def _nlight() -> int:
+    """M8: the animated sector light thinkers (World.light_thinkers) -- `ltst` / `ltct`'s count (one at least: a map
+    without them has no such label, an OPTIONAL group)"""
+    return max(1, len(_idle_world().light_thinkers))
 
 
 def _nsecret() -> int:
@@ -958,7 +970,8 @@ class Oracle:
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
                views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
-               mobiles=None, card=None, removed=None, barrel_views=None, skill=None, view_drop=0) -> bytes:
+               mobiles=None, card=None, removed=None, barrel_views=None, skill=None, view_drop=0,
+               sector_lights=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
@@ -977,7 +990,9 @@ class Oracle:
         fight F5 / die D4s at medium (the imp, slot 23) and die D5 at easy (the hard trio 21-23, and not slot 50).
         None keeps BOOT_SKILL's set.
         M7 P8a (V): `view_drop` -- the dying view's sink this frame (`MonsterPhase.view_drop`, map units, package A's
-        `render_wall_frame(view_drop=)`); 0 draws today's call unchanged (the keyword is not passed)."""
+        `render_wall_frame(view_drop=)`); 0 draws today's call unchanged (the keyword is not passed).
+        M8: `sector_lights` -- the world's animated sector lights (`World.lights_now`; a map whose lights animate, E1M2:
+        an E1M2 scenario set passes it); None draws today's call unchanged."""
         from doomfj.reference_model import SimState
         hidden = self.hidden if skill is None else self.hidden_at(skill)
         view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
@@ -989,6 +1004,7 @@ class Oracle:
                                                mobiles=mobiles,                         # M7 P5
                                                thing_removed=removed, barrel_views=barrel_views,   # M7 P6
                                                **({"view_drop": view_drop} if view_drop else {}),   # M7 P8a
+                                               **({"sector_lights": sector_lights} if sector_lights else {}),  # M8
                                                **self.RENDER_KW))
         # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
         return self.screen.frame(view, card=bool(hidden_extra) if card is None else bool(card), **(screen_kw or {}))

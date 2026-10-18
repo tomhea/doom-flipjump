@@ -143,7 +143,8 @@ class SeenHook:
             self.rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, world.mapname), self._scene(world),
                                       sprite_wad=self.art, thing_positions=pos, thing_hidden=hidden,
                                       thing_views=views, seen_out=seen,
-                                      **({"view_drop": drop} if drop else {}), **aim_kw, **self.kw)
+                                      **({"view_drop": drop} if drop else {}), **aim_kw,
+                                      **world.light_render_kw(), **self.kw)    # M8: the binary's picture has them
         finally:
             RMOD.drawable_things, RMOD.baked_thing_mask = saved
         if self.aim:

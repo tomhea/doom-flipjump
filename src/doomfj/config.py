@@ -234,6 +234,10 @@ class Config:
     # lines expand to nothing -- SPR_SLOT_CAP_ON -- and the oracle takes the old path). wall_renderer.check_slot_ids
     # holds it below SPR_THING_SLOTS and asks for it when the map's bound does not fit.
     SPR_SLOT_CAP: int = 0
+    # M8 (doomfj.lights): the map's SECTOR LIGHT SPECIALS animate (flash, strobes, glow, fire flicker: DOOM's p_lights.c
+    # thinkers) -- 1 on E1M2. 0 (E1M1, the default): its lights stay static and its emission is unchanged. Not an fj
+    # constant (`constants()` leaves it out): the emitter and the model read it here.
+    SECTOR_LIGHTS: int = 0
 
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
@@ -298,7 +302,9 @@ GAME_CFG = Config(VIEW_ROWS=84)
 MAP_CONFIG = {
     # M8 F1.4: SPR_SLOT_CAP -- 305 drawable things over the skills, hard's 295 + 10 pool things + 54 droppers' drops
     # (> 255 slot ids: wall_renderer.check_slot_ids)
-    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255},
+    # M8: SECTOR_LIGHTS -- its light specials animate (doomfj.lights: 9 thinkers -- 3 flashes, a strobe, a fire flicker,
+    # 4 glows; its other 9 glows sit between equal lights and stay static)
+    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1},
 }
 
 

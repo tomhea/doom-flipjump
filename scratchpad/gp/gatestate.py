@@ -43,7 +43,8 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "p_tnh", "p_vd", "p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z", "bar_src",
                # P10 (docs/gp-p10-plan.md): a game in progress (the menu's RESUME), and LEVEL COMPLETE's counters
                "g_live", "st_kill", "st_item", "st_secn", "st_secm",
-               "p_rct")                                                             # M8 L4: the reactiontime
+               "p_rct",                                                             # M8 L4: the reactiontime
+               "ltst", "ltct", "rng_lt")                                            # M8: the light thinkers
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int | None = None,

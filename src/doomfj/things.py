@@ -403,11 +403,11 @@ def sprite_light_table(spr_cls, rows, lightnums):
     return out
 
 
-def reachable_lightnums(rm, secs):
+def reachable_lightnums(rm, secs, extra_lights=()):
     """The lightnums a thing can actually stand in -- one per distinct sector light. This is what
     keeps the widened shade-row bank at 2.8x instead of 9x: nothing can reach a lightnum no sector
-    has."""
-    return sorted({rm.wall_lightnum(s.light, 0) for s in secs})
+    has. M8 (doomfj.lights): + `extra_lights`, every light an animated sector can show (none on E1M1)."""
+    return sorted({rm.wall_lightnum(s.light, 0) for s in secs} | {rm.wall_lightnum(v, 0) for v in extra_lights})
 
 
 def check_row_equivalence(rm, cmap, lds, sds, secs, things, indices, rows, ssfloor, sslight,

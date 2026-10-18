@@ -292,11 +292,26 @@ THING_SPRITE = {
     34: "CAND", 35: "CBRA", 44: "TBLU", 45: "TGRN", 46: "TRED", 55: "SMBT", 56: "SMGT",
     57: "SMRT", 48: "ELEC", 30: "COL1", 31: "COL2", 32: "COL3", 33: "COL4", 36: "COL5",
     37: "COL6", 41: "CEYE", 42: "FSKU", 49: "GOR1", 50: "GOR2",
+    # M8 C7: the hanging bodies E1M9 adds (drawn from the ceiling down: gamedata.spawn_dz) and its dead cacodemon,
+    # whose frame is not A (THING_SPRITE_FRAME)
+    53: "GOR5", 59: "GOR2", 62: "GOR5", 63: "GOR1", 22: "HEAD",
     58: "SARG",                   # the SPECTRE. DOOM draws it as a fuzzed SARG; there is no fuzz
                                   # here, so it renders as a plain demon -- which is a great deal
                                   # better than the previous behaviour, where the one spectre in
                                   # E1M1 had no sprite mapping at all and was silently invisible.
 }
+def _GD():
+    """doomfj.gamedata, imported late: it imports this module (M8 C7's spawn_dz is read inside the frame)"""
+    from doomfj import gamedata
+    return gamedata
+
+
+# M8 C7: the frame a type is drawn with when it is not A -- its spawn state's (info.c): the dead cacodemon's
+# S_HEAD_DIE6 is HEAD frame L (K + 1). One picture a type, as every other decoration: an ANIMATED decoration (the
+# torches, the floating skull, the heart column, the twitching body) shows its first frame; nothing animates a
+# decoration in either mirror (stated deviation, as the blue card's blink); and a sprite takes its sector's light,
+# so the FF_FULLBRIGHT frames (torches, the skull, the candelabra since E1M2) are lit as the room is.
+THING_SPRITE_FRAME = {22: "L"}
 SPRITE_HEIGHT_BUCKETS = 32        # V4: on-screen heights the sprite bank bakes a run-list for.
                                   # ~700 (sprite, downscaled column) blocks x 101 EXACT heights (the
                                   # WPX wall bank's shape) would be ~17M characters against a program
@@ -1787,7 +1802,8 @@ class ReferenceModel:
         pre = THING_SPRITE.get(kind)
         pic = None
         if pre is not None:
-            for suffix in ("A0", "A1", "A2A8", "A1D1"):
+            fr = THING_SPRITE_FRAME.get(kind)                # M8 C7: a frame other than A (rotation 0 or 1)
+            for suffix in ((fr + "0", fr + "1") if fr else ("A0", "A1", "A2A8", "A1D1")):
                 try:
                     pic = decode_picture(sprite_wad.get_data(pre + suffix))
                     break
@@ -2696,9 +2712,12 @@ class ReferenceModel:
                     tss = scene.cmap.subsectors[ss_first[seg_i]]
                     tsec = self._seg_sector(lds, sds, secs, scene.cmap.segs[tss.firstseg])
                     # (minh_: the graduated acceptance's bound, decided above the aim window)
+                    # M8 C7: a map thing hung from the ceiling sits at ceiling - height (gamedata.spawn_dz; 0 for the rest)
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
                                             t.x, t.y, tsec.floor_h + (((MISSILE_Z if t.z is None else t.z)
-                                                                       if mob else 0)), art, minh_)
+                                                                       if mob else _GD().spawn_dz(t.type, tsec.floor_h,
+                                                                                                  tsec.ceil_h))),
+                                            art, minh_)
                     if pr is None:
                         if slot_trace is not None:
                             slot_trace.append((t_di, act, bar_ex, "V"))

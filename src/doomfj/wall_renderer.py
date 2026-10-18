@@ -1489,13 +1489,13 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     from doomfj.lut_generator import generate_packed_lut_fj
     from doomfj.things import (THING_ROW_COLD_BYTES, THING_ROW_COLD_LEN, THING_ROW_HOT_BYTES,
                                THING_ROW_HOT_LEN, cold_row, hot_row, reachable_lightnums,
-                               sprite_light_table, subsector_tables, thing_pos_value, thing_rows,
+                               sprite_light_table, subsector_tables, thing_dz, thing_pos_value, thing_rows,
                                tight_far_bound_ok)
     allt = map_wad.things(mapname)
     rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, DRAW_ACTOR_TYPES,   # P11 (a)
                            MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, DEG_MINH2_SCENERY, DEG_MINH2_MON,
                            deg=True, spr_near=bool(DEG_SPR_NEAR_TZ), cache=spr_cache,
-                           keep=keep)
+                           keep=keep, dz_of=lambda t: thing_dz(rm, cmap, lds, sds, secs, t))   # M8 C7: hanging
     things = [allt[i] for i in idx]
     ssflr, sslgt_raw = subsector_tables(rm, cmap, lds, sds, secs)
     lns = reachable_lightnums(rm, secs, extra_lights)        # M8: + the animated lights' states
@@ -2387,6 +2387,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _drawable, _draw_idx = drawable_things(rm, map_wad.things(mapname), sprite_wad, spr_cache)
         # (M8 F1.4: the slot-id bound is checked below, once the skills and the runtime pools are known)
         from doomfj.things import mover_leaves as _mover_leaves, mover_mask_kw as _mover_mask_kw   # M8 F1.3
+        # M8 C7: a hanging thing is drawn at its spawn sector's ceiling - height in every mirror -- REFUSED where that
+        # sector can move (things.hanging_on_movers; scripts/level_survey.py reports the same rows)
+        from doomfj.things import hanging_on_movers as _hanging_on_movers
+        _hm = _hanging_on_movers(rm, cmap, map_wad, mapname)
+        assert not _hm, "M8 C7: hanging things on a moving sector (wad index, type, sector): %s" % (_hm[:8],)
         _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES,
                                    **_mover_mask_kw(rm, cmap, _drawable, _mover_leaves(map_wad, mapname, cmap)))
                   if moving_things
@@ -3162,7 +3167,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 _tfields = [
                     ("sp_x", 8, (_t.x << 16) & 0xFFFFFFFF),
                     ("sp_y", 8, (_t.y << 16) & 0xFFFFFFFF),
-                    ("sp_z", 8, ((_tsec.floor_h + _art[6]) << 16) & 0xFFFFFFFF),
+                    ("sp_z", 8, ((_tsec.floor_h + _gd.spawn_dz(_t.type, _tsec.floor_h, _tsec.ceil_h) + _art[6]) << 16)
+                     & 0xFFFFFFFF),                          # M8 C7: + a hanging thing's height above the floor
                     ("sp_left", 8, (_art[5] << 16) & 0xFFFFFFFF),
                     ("sp_w", 8, (_art[3] << 16) & 0xFFFFFFFF),
                     ("sp_hh", 8, (_art[4] << 16) & 0xFFFFFFFF),

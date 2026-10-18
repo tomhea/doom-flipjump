@@ -398,6 +398,8 @@ class Probe:
     def read_cells(self, names=None) -> dict:
         out = {}
         for key in (self.cells if names is None else names):
+            if key not in self.cells and key in OPTIONAL_LABELS:
+                continue            # M8: an optional cell this binary lacks (E1M2 has no SR switch: no `swtm`)
             c = self.cells[key]
             vals = []
             for e in range(c.count):

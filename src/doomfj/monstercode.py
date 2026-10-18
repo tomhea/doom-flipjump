@@ -24,29 +24,39 @@ from doomfj.world import K_HEAVY, LOOK_BEHIND_REACH, MONSTER_MODES, monster_atta
 MONSTER_TYPES = ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT", "MT_SHADOWS")
 # action ids; the sound actions (A_Pain, A_Scream, A_XScream) are no-ops (D5: no sound) and read 0
 MON_ACTIONS = (None, "A_Look", "A_Chase", "A_FaceTarget", "A_Fall", "A_PosAttack", "A_SPosAttack",
-               "A_TroopAttack", "A_SargAttack")
+               "A_TroopAttack", "A_SargAttack",
+               "A_BruisAttack", "A_BossDeath")          # M8 C8: the Baron's (ids 9, 10: only a Baron's rows hold them)
 SOUND_ACTIONS = frozenset(a for a, x in gd.ACTIONS.items() if x.phase == "sound")
 TICS_FOREVER = 15
 STATE_FIELDS = (("next", 0, 2), ("tics", 2, 1), ("action", 3, 1), ("view", 4, 2))   # (name, nibble, width)
 
 
-def monster_states() -> List[str]:
-    """every state a monster type can reach from its info's state fields, in STATE_INDEX order"""
+def map_monster_types(names) -> Tuple[str, ...]:
+    """M8 C8: the monster types a map's tables carry -- MONSTER_TYPES (every map's: E1M1's and E1M2's tables are
+    exactly what they were), then each EXTENSION type (gamedata.EXT_MONSTER_TYPES: the Baron) among `names` (the map's
+    monsters' mobjtype names)"""
+    names = set(names)
+    return MONSTER_TYPES + tuple(t for t in gd.EXT_MONSTER_TYPES if t in names)
+
+
+def monster_states(types: Sequence[str] = MONSTER_TYPES) -> List[str]:
+    """every state a monster type can reach from its info's state fields, in STATE_INDEX order (M8 C8: the thing
+    domain's; `types` map_monster_types' -- the core types' states first, then an extension type's)"""
     seen = set()
-    for mt in MONSTER_TYPES:
+    for mt in types:
         info = gd.MOBJINFO[mt]
         for f, v in vars(info).items():
             s = v if f.endswith("state") and isinstance(v, str) else None
             while s and s != gd.S_NULL and s not in seen:
                 seen.add(s)
                 s = gd.STATES[s].next
-    return sorted(seen, key=gd.STATE_INDEX.__getitem__)
+    return sorted(seen, key=lambda s: (s in gd.EXT_STATE_NAMES, gd.THING_STATE_INDEX[s]))
 
 
-def view_groups() -> List[Tuple[str, int]]:
+def view_groups(types: Sequence[str] = MONSTER_TYPES) -> List[Tuple[str, int]]:
     """the distinct (sprite, frame) a monster state draws, in the order monster_states first draws them"""
     out: List[Tuple[str, int]] = []
-    for s in monster_states():
+    for s in monster_states(types):
         st = gd.STATES[s]
         g = (st.sprite, st.frame & gd.FF_FRAMEMASK)
         if g not in out:
@@ -60,11 +70,11 @@ def action_id(action) -> int:
     return MON_ACTIONS.index(action)
 
 
-def state_row(name: str) -> Dict[str, int]:
+def state_row(name: str, types: Sequence[str] = MONSTER_TYPES) -> Dict[str, int]:
     st = gd.STATES[name]
-    return {"next": gd.STATE_INDEX[st.next], "tics": TICS_FOREVER if st.tics < 0 else st.tics,
+    return {"next": gd.THING_STATE_INDEX[st.next], "tics": TICS_FOREVER if st.tics < 0 else st.tics,
             "action": action_id(st.action),
-            "view": view_groups().index((st.sprite, st.frame & gd.FF_FRAMEMASK))}
+            "view": view_groups(types).index((st.sprite, st.frame & gd.FF_FRAMEMASK))}
 
 
 def pack(row: Dict[str, int]) -> int:
@@ -75,11 +85,14 @@ def pack(row: Dict[str, int]) -> int:
     return v
 
 
-def state_table_values() -> List[int]:
+def state_table_values(types: Sequence[str] = MONSTER_TYPES) -> List[int]:
+    """`mstate` by the thing domain's index (M8 C8: a Baron's rows sit at their borrowed weapon indices -- 0 in every
+    map without one, so E1M1's table is unchanged)"""
     vals = [0] * gd.CORE_STATE_COUNT                   # M8: the fog's states (after these) are no monster's
-    assert all(gd.STATE_INDEX[s] < gd.CORE_STATE_COUNT for s in monster_states())
-    for s in monster_states():
-        vals[gd.STATE_INDEX[s]] = pack(state_row(s))
+    states = monster_states(types)
+    assert all(gd.THING_STATE_INDEX[s] < gd.CORE_STATE_COUNT for s in states)
+    for s in states:
+        vals[gd.THING_STATE_INDEX[s]] = pack(state_row(s, types))
     return vals
 
 
@@ -104,11 +117,11 @@ def rnd_values() -> List[int]:
     return R.outcome_table(rnd_row)
 
 
-def p30_tables_fj() -> List[str]:
-    """P3.0: the four tables, emitted and called by nothing"""
-    assert max(gd.STATE_INDEX.values()) < 256 and len(view_groups()) <= 256
+def p30_tables_fj(types: Sequence[str] = MONSTER_TYPES) -> List[str]:
+    """P3.0: the four tables, emitted and called by nothing. M8 C8: `types` the map's (map_monster_types)"""
+    assert max(gd.THING_STATE_INDEX.values()) < 256 and len(view_groups(types)) <= 256
     return [
-        generate_dispatch_table_fj("mstate", state_table_values(), index_nibbles=2, result_nibbles=6),
+        generate_dispatch_table_fj("mstate", state_table_values(types), index_nibbles=2, result_nibbles=6),
         generate_dispatch_table_fj("mturn", turn_table_values(), index_nibbles=2, result_nibbles=1),
         generate_dispatch_table_fj("mopp", opposite_values(), index_nibbles=1, result_nibbles=1),
         generate_dispatch_table_fj("mrnd", rnd_values(), index_nibbles=2, result_nibbles=4),
@@ -264,7 +277,11 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     from doomfj.wall_renderer import (DEG_MINH2_MON, MIN_SPRITE_H_MONSTER, anim_frames, anim_patches)
     from doomfj.world import World
     patches = anim_patches(sprite_wad, anim_frames(map_wad, mapname))
-    groups = view_groups()
+    # M8 C8: the map's monster types -- MONSTER_TYPES, and an extension type (the Baron) the map holds: its states'
+    # rows join mstate and its (sprite, frame) groups join mview after the core ones (E1M1: unchanged)
+    types = map_monster_types(gd.MONSTER_DOOMEDNUMS[t.type] for t in map_wad.things(mapname)
+                              if t.type in gd.MONSTER_DOOMEDNUMS)
+    groups = view_groups(types)
     nt = len(rt_things)
     views, keys, vidx = [], [], {}
     mview = [0] * (((len(groups) - 1) << 4) + 8)
@@ -350,9 +367,14 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     # tier's teleports' own rule (`tele`, below: loot, chase and the lines), asserted equal there
     from doomfj.teleport import TELEPORT_SPECIALS
     fog = bool(loot and chase and any(ld.special in TELEPORT_SPECIALS for ld in map_wad.linedefs(mapname)))
+    from doomfj.projcode import missile_of_types
+    from doomfj.things import single_player
+    _missile = missile_of_types(gd.MONSTER_DOOMEDNUMS[t.type] for t in map_wad.things(mapname)
+                                if t.type in gd.MONSTER_DOOMEDNUMS and single_player(t))     # M8 C8
     mob_rows, mob_view = (mobile_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
                                            first=mob_first, puffs=loot, rockets=rockets,
-                                           **({"fog": True} if fog else {})) if nmob else ([], {}))
+                                           **({"fog": True} if fog else {}),
+                                           **({"missile": _missile} if _missile else {})) if nmob else ([], {}))
     rows = rows + mob_rows
     drop_row, bar_view, bar_rows = {}, {}, []
     if loot:
@@ -387,11 +409,14 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             while s_ != gd.S_NULL:
                 st_ = gd.STATES[s_]
                 g_ = groups.index((st_.sprite, st_.frame & gd.FF_FRAMEMASK))
-                assert state_table_values()[gd.STATE_INDEX[s_]] and all(mview[(g_ << 4) | r_] for r_ in range(8)), (
+                assert state_table_values(types)[gd.THING_STATE_INDEX[s_]] and all(mview[(g_ << 4) | r_] for r_ in range(8)), (
                     "M7 P6: the gib state %s has no view row" % s_)
                 if st_.tics < 0:
                     break
                 s_ = st_.next
+    assert {mi.name for mi in w.mon_info} <= set(types), "M8 C8: a slot's type has no rows in mstate"
+    from doomfj.world import radius_classes
+    r0, _r1 = radius_classes(w.mon_radius[:nmon])          # M8 C8: radius class 0 (20; E1M8's Barons 24)
     slot_of = {_thing_key(t): m for m, t in enumerate(w.mon_things)}
     rt_slot = [slot_of.get(_thing_key(t)) for t in rt_things]
     assert sorted(m for m in rt_slot if m is not None) == list(range(nmon)), "every monster slot is a runtime thing"
@@ -464,7 +489,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         if shoot:
             sel.append("    hex.zero 2, sp_sid")
             if m is not None:
-                assert w.mon_radius[m] in (20, 30), (m, w.mon_radius[m])
+                assert w.mon_radius[m] in (r0, 30), (m, w.mon_radius[m])      # sp_rc: class 0 r0, class 1 30
                 sel += ["    hex.if0 1, mon_shootable + %d*dw, thsel_q%d" % (m, t),
                         "    hex.set 2, sp_sid, %d" % (m + 1),
                         "  thsel_q%d:" % t,
@@ -490,15 +515,19 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         # M7 P3.2b: a monster that moves can stand in any sector -- every leaf's sector gets its REJECT row
         secs = (sorted({s_ for s_ in w.leaf_sector if s_ >= 0}) if chase
                 else sorted({w._mon_sector(m) for m in range(nmon)}))
+        boss_of = boss_slots(w) if decide else {}           # M8 C8: E1M8's Barons' A_BossDeath
+        assert not boss_of or (damage and hurt), "M8 C8: A_BossDeath reads mon_health and p_dead"
         slots = [dict(t=m, x=w.ws.mon_x[m], y=w.ws.mon_y[m], rj="rj%d" % w._mon_sector(m),
-                      see_idx=gd.STATE_INDEX[w.mon_info[m].seestate],
+                      see_idx=gd.THING_STATE_INDEX[w.mon_info[m].seestate],
                       see_tics=gd.STATES[w.mon_info[m].seestate].tics,
                       **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m],
+                                     **({"r0": r0} if r0 != 20 else {}),               # M8 C8
                                      **({"tp": dict(knock=knock)} if tele else {}))} if chase else {}),
+                      **({"boss": boss_of[m]} if m in boss_of else {}),              # M8 C8
                       **({"dc": type_decide(w.mon_info[m])} if decide else {}),
                       **({"dmg": True} if damage else {}),
                       **({"hear": True, "sec": w._mon_sector(m)} if hear else {}),
-                      **({"hurt": dict(sp=gd.STATE_INDEX[w.mon_info[m].spawnstate],
+                      **({"hurt": dict(sp=gd.THING_STATE_INDEX[w.mon_info[m].spawnstate],
                                        spt=gd.STATES[w.mon_info[m].spawnstate].tics)} if hurt else {}),
                       **({"knock": True} if knock else {}),                      # M7 P8a: the knock move's splice
                       **({"fight": True} if fight else {}))                      # M7 P8a I: the target
@@ -535,7 +564,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             nb = max(1, len(w.barrel_things))
             extra["decls_wake"] += (
                 p32b_decls(schema, nmon, {f: boot[f] for f in P32B_FIELDS}, [w._mon_sector(m) for m in range(nmon)],
-                           snib)
+                           snib, r0)
                 + MON_CELL_DECLS + monster_seed_decls() + LEAF_LINK_DECLS
                 + ["bar_solid: hex.vec %d, %d" % (nb, sum(w.ws.bar_solid[b] << (4 * b)
                                                           for b in range(len(w.barrel_things)))),
@@ -605,7 +634,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 # M8 F1.3: the WR lines a MONSTER triggers (88; not the blazing 120)
                 static_things=things, lift_walk=list(w.lift_walk_mon), lift_order=list(w.lift_order),
                 mon_door_boxes=[(si, w.mon_door_boxes[si]) for si in w.door_order if si in w.mon_door_boxes],
-                slots_rt=[(slot_t[m], w.mon_radius[m]) for m in range(nmon)],
+                slots_rt=[(slot_t[m], w.mon_radius[m]) for m in range(nmon)], r0=r0,     # M8 C8: radius class 0
                 mon_radius=[w.mon_radius[m] for m in range(nmon)], height=w.mon_height[0],
                 # M7 P4.2a: what blocks a move (World._thing_blocker: MF_SOLID) and what holds a closing door
                 # (World.door_touched: alive -- mon_shootable, damagecode.check_model_rules)
@@ -632,7 +661,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         extra["d3"] = True
         extra["rank0"] = rank_threshold(nt)
     return {
-        "mode": mode, **extra,
+        "mode": mode, **extra, "types": types,                  # M8 C8: the tables' monster types (p30_tables_fj)
         "view_rows": rows, "nrows": nrows, "views": views, "rt_slot": rt_slot, "nmon": nmon, "schema": schema,
         "mview": generate_dispatch_table_fj("mview", mview, index_nibbles=3, result_nibbles=rn),
         "mrot": rot_table_fj(), "select": sel, "rotation": rotation_leaf_lines(1),
@@ -654,9 +683,24 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     }
 
 
+def boss_slots(w) -> dict:
+    """M8 C8: {slot: boss_lines' dict} for every slot whose type is its map's boss (gamedata.BOSS_MAPS; World.boss_group,
+    E1M8's Barons and tag 666): the other slots of the type, the floor group's state and timer cells (movers.switch_cell
+    / floor_sub_cell -- the wide layout: a boss group moves) and its frames a stop. {} on every other map"""
+    from doomfj import movers as _MV
+    if w.boss_group is None:
+        return {}
+    bt = gd.BOSS_MAPS[w.mapname.upper()][0]
+    g, ng = w.boss_group, len(w.floor_groups)
+    assert w.floor_wide and w.floor_groups[g].sub, "M8 C8: the boss group moves (the wide fswitch layout)"
+    mine = [m for m in range(w.layout.nmon) if w.mon_info[m].name == bt]
+    return {m: dict(others=[j for j in mine if j != m], state=_MV.switch_cell(g), timer=_MV.floor_sub_cell(g, ng),
+                    sub=w.floor_groups[g].sub) for m in mine}
+
+
 # ---- M7 P5: the MOBILES' rows (docs/gp-p5-interface.md, THE MOBILE ROWS) ---------------------------------------
 def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict, first: int, puffs: bool = False,
-                     rockets: bool = False, fog: bool = False):
+                     rockets: bool = False, fog: bool = False, missile: str = None):
     """-> (rows, {state index: row}): one thing row per distinct mobile LUMP (`monsters.mobile_lump` of every pool
     state, projcode.pool_states' order), `things.thing_rows`' layout -- how the oracle draws a mobile
     (reference_model.render_wall_frame(mobiles=)), field by field:
@@ -681,12 +725,12 @@ def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
                                         MISSILE_Z)
     actor = bool(GAME_RENDER_KW.get("exempt_actors"))
     rows, lump_row, by_state = [], {}, {}
-    for s in pool_states(puffs, rockets, fog):
+    for s in pool_states(puffs, rockets, fog, missile):         # M8 C8: the map's monster missile (projcode)
         lump = mobile_lump(s)
         if lump not in lump_row:
             sprite, letter, rot = mobile_view(s)
-            assert len(lump) == 6 and lump == "%s%s%d" % (sprite, letter, rot), (s, lump)
-            assert rot == 0 or rockets, (s, lump, "a mobile is drawn from a single-rotation lump")
+            assert lump[:6] == "%s%s%d" % (sprite, letter, rot) and len(lump) in (6, 8), (s, lump)   # M8 C8: BAL7A1A5
+            assert rot == 0 or rockets or missile, (s, lump, "a mobile is drawn from a single-rotation lump")
             base, dw, mir = anim_index[(sprite, letter, rot)]
             art = rm.art_of_lump(sprite_wad, lump, cache)
             assert not mir and dw == art[2] and dw < 0x80, (lump, mir, dw, art[2])
@@ -695,7 +739,7 @@ def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
             rows.append((art[5], art[3], art[4], art[6] + z, tzmin, tzmin,
                          base, base + 2 * dw if spr_near else 0, 1 if actor else 0, dw))
             lump_row[lump] = first + len(rows) - 1
-        by_state[gd.STATE_INDEX[s]] = lump_row[lump]
+        by_state[gd.THING_STATE_INDEX[s]] = lump_row[lump]
     return rows, by_state
 
 
@@ -822,6 +866,14 @@ NEAR_UNITS = NEAR                    # doomfj.sight.NEAR (R6: one source): REJEC
 BEHIND_REACH = LOOK_BEHIND_REACH     # world.LOOK_BEHIND_REACH: P_LookForPlayers sees behind within this
 
 
+def heavy_mask(dc) -> int:
+    """the action ids a slot takes as HEAVY (a K slot): HEAVY_IDS, and (M8 C8) A_BruisAttack's when the slot's type runs
+    it -- every core slot's mask is HEAVY_IDS' (its text unchanged)"""
+    ids = HEAVY_IDS + ((MON_ACTIONS.index("A_BruisAttack"),) if dc and "A_BruisAttack" in dc["acts"] else ())
+    assert all(gd.ACTIONS[MON_ACTIONS[h]].cls == "heavy" for h in ids)
+    return sum(1 << h for h in ids)
+
+
 def wake_reachable_actions() -> set:
     """the actions a monster runs in the WAKE mode: its spawn states' (A_Look) and its see states' (A_Chase) -- the
     wake mode decides no attack, so no attack or pain state is ever entered"""
@@ -918,7 +970,7 @@ def _sign_branch(cell, kind, yes, no):
 
 def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, nib: int, mv=None,
               dc=None, dmg: bool = False, hear: bool = False, sec: int = None, hurt=None, knock: bool = False,
-              fight: bool = False) -> list:
+              fight: bool = False, boss=None) -> list:
     """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
     A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
     REJECT row of its spawn sector (indexed by the player's sector); t: its seen flag's index (`thseen`); nib: a
@@ -957,7 +1009,10 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     schema, as every cell's): A_Chase loads the TARGET (monsterdecide's `mt_load`) before its threshold, whose reset and
     the lost-target test read `mt_al` (world.target_alive) instead of p_dead; a lost target with the player alive is
     DOOM's P_LookForPlayers all around -- the waking sight (seen, or REJECT within NEAR) re-acquires the player, else
-    the spawn state, whose A_Look runs at once (the slot's own look: its sound branch can wake it)."""
+    the spawn state, whose A_Look runs at once (the slot's own look: its sound branch can wake it).
+
+    `boss` (M8 C8, a boss map's boss slot -- E1M8's Barons: boss_lines' dict): its A_BossDeath. A slot whose type runs
+    A_BruisAttack takes that action as HEAVY too (heavy_mask: its id 9 joins HEAVY_IDS')."""
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     nthr = cell_nibbles(schema, "mon_threshold")
     ntg = cell_nibbles(schema, "mon_target")                     # M7 P8a I: 2 with infighting, else 1
@@ -983,7 +1038,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "    mstate.lookup mt_row, %s" % ST,
            "    hex.mov 2, mt_nxt, mt_row",
            "    mstate.lookup mt_row, mt_nxt",
-           "    hex.if_flags mt_row + 3*dw, %d, %slight, %sheavy" % (sum(1 << h for h in HEAVY_IDS), L, L),
+           "    hex.if_flags mt_row + 3*dw, %d, %slight, %sheavy" % (heavy_mask(dc), L, L),
            "  %sheavy:" % L,
            "    hex.if_flags mt_used, %d, %stake, %sdefer" % (1 << K_SLOTS, L, L),
            "  %sdefer:" % L,                                  # no slot: tics stay 0, served first next tic
@@ -997,7 +1052,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "  %slight:" % L,
            "    hex.mov 2, %s, mt_nxt" % ST,
            "    hex.mov 1, %s, mt_row + 2*dw" % TI,
-           "    sim.jump16 mt_row + 3*dw, %s" % ", ".join(_action_targets(L, nxt, dc, fall=dmg)),
+           "    sim.jump16 mt_row + 3*dw, %s" % ", ".join(_action_targets(L, nxt, dc, fall=dmg, boss=bool(boss))),
            # ---- A_Look: threshold 0; no sound before P4; P_LookForPlayers (not all around) -----------------
            "  %slook:" % L,
            "    hex.zero %d, %s" % (nthr, TH),
@@ -1047,6 +1102,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    ;%s" % nxt,
             # ---- M7 P4.2a: A_Fall -- the corpse stops blocking (World._run_action) ------------------------------
             *(["  %sfall:" % L, "    hex.zero 1, mon_solid + %d*dw" % m, "    ;%s" % nxt] if dmg else []),
+            *(boss_lines(L, nxt, boss) if boss else []),               # M8 C8: A_BossDeath
             # ---- A_Chase in the wake mode: the counters and the turn; the target is never lost before P5 -------
             "  %schase:" % L,
             "    hex.if0 1, %s, %sr0" % (RE, L),
@@ -1108,7 +1164,7 @@ P32B_FIELDS = ("mon_movecount", "mon_rng", "mon_floorz")
 
 
 def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: int, dc=None,
-                    solid: str = "mon_active", tp=None) -> list:
+                    solid: str = "mon_active", tp=None, r0: int = 20) -> list:
     """slot m's move: its cells into the context, `mm_chase` (its own `solid` flag cleared, so the thing test skips
     it), the context back -- position into thpos_rt, the leaf into thss_rt, the sector into msec. `dc` (M7 P3.2c):
     `mm_decide` instead, with the decision's inputs (justattacked, seen, the kinds, reaction) and justattacked back;
@@ -1120,7 +1176,7 @@ def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: in
     the fraction 0) -- teleportcode.slot_back_lines; None: the text is unchanged"""
     nz, nr, nc = (cell_nibbles(schema, f) for f in ("mon_floorz", "mon_rng", "mon_movecount"))
     assert (nz, nr, nc) == (4, 2, 2), (nz, nr, nc)
-    assert radius in (20, 30) and speed in (8, 10), (radius, speed)
+    assert radius in (r0, 30) and speed in (8, 10), (radius, speed)     # M8 C8: r0, radius class 0 (radius_classes)
     X, Y = "thpos_rt + %d*dw" % (16 * rt + 4), "thpos_rt + %d*dw" % (16 * rt + 12)
     FZ, RN, MC = "mon_floorz + %d*dw" % (4 * m), "mon_rng + %d*dw" % (2 * m), "mon_movecount + %d*dw" % (2 * m)
     MD, AC, SS = "mon_movedir + %d*dw" % m, "%s + %d*dw" % (solid, m), "thss_rt + %d*dw" % (16 * rt)
@@ -1157,17 +1213,41 @@ def _tele_back(m: int, schema, tp: dict) -> list:
 
 
 # ---- M7 P3.2c "decide" -----------------------------------------------------------------------------------------
-def _action_targets(L: str, nxt: str, dc, fall: bool = False) -> list:
+def _action_targets(L: str, nxt: str, dc, fall: bool = False, boss: bool = False) -> list:
     """the slot's action dispatch: A_Look, A_Chase, and in the decide mode the attack states' actions its type runs;
-    `fall` (M7 P4.2a): A_Fall"""
+    `fall` (M7 P4.2a): A_Fall; `boss` (M8 C8): A_BossDeath"""
     tg = [nxt] * 16
     tg[MON_ACTIONS.index("A_Look")] = "%slook" % L
     tg[MON_ACTIONS.index("A_Chase")] = "%schase" % L
     if fall:
         tg[MON_ACTIONS.index("A_Fall")] = "%sfall" % L
+    if boss:
+        tg[MON_ACTIONS.index("A_BossDeath")] = "%sboss" % L
     for a in sorted(dc["acts"]) if dc else ():
         tg[MON_ACTIONS.index(a)] = "%sk_%s" % (L, a)
     return tg
+
+
+def boss_lines(L: str, nxt: str, boss: dict) -> list:
+    """M8 C8: `<L>boss`, A_BossDeath (world._a_boss_death) for a boss slot: the player alive (p_dead 0 -- hurtcode keeps
+    p_hp <= 0 <=> p_dead), every OTHER slot of its type (`boss["others"]`) not spawned (mon_active 0) or dead (health
+    <= 0, the 3-nibble signed cell), then the floor group's trigger (movers.floor_trigger: a group still at state 0
+    with its timer 0 gets the timer `boss["sub"]`; else nothing) on the cells `boss["state"]` / `boss["timer"]`"""
+    out = ["  %sboss:" % L,
+           "    hex.if1 1, p_dead, %s" % nxt]
+    for j in boss["others"]:
+        ok = "%sbo%d" % (L, j)
+        out += ["    hex.if0 1, mon_active + %d*dw, %s" % (j, ok),
+                "    hex.sign 3, mon_health + %d*dw, %s, %s_p" % (3 * j, ok, ok),
+                "  %s_p:" % ok,
+                "    hex.if0 3, mon_health + %d*dw, %s" % (3 * j, ok),
+                "    ;%s" % nxt,                                   # another one lives
+                "  %s:" % ok]
+    out += ["    hex.if1 1, %s, %s" % (boss["state"], nxt),            # fired before (moving or done)
+            "    hex.if1 1, %s, %s" % (boss["timer"], nxt),
+            "    hex.set 1, %s, %d" % (boss["timer"], boss["sub"]),
+            "    ;%s" % nxt]
+    return out
 
 
 def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear: bool = False,
@@ -1193,13 +1273,18 @@ def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear
         if st:
             out += ["  %s%s:" % (L, lab), "    hex.set %d, %s, %d" % (ns, ST, st[0]),
                     "    hex.set %d, %s, %d" % (nt, TI, st[1]), "    ;%s" % nxt]
+    from doomfj.combat import NO_FACE_ATTACKS
     for a in sorted(dc["acts"]):
-        out += ["  %sk_%s:" % (L, a), "    hex.set 1, mm_kind, %d" % ATTACK_KINDS[a], "    ;%sk_go" % L]
-    if dc["acts"]:
-        out += ["  %sk_go:" % L,
+        # M8 C8: an attack that does not face its target (A_BruisAttack) runs the attack without the facing write
+        # and without A_FaceTarget's MF_AMBUSH clear (`k_gon`)
+        go = "%sk_gon" % L if a in NO_FACE_ATTACKS else "%sk_go" % L
+        out += ["  %sk_%s:" % (L, a), "    hex.set 1, mm_kind, %d" % ATTACK_KINDS[a], "    ;%s" % go]
+
+    def k_go(lab, face):
+        return ["  %s:" % lab,
                 "    hex.if0 %d, %s, %s" % (ntg, TG, nxt),
                 *(["    hex.mov 2, mm_tg, %s" % TG, "    stl.fcall mt_load, mt_lret"] if fight else []),  # M7 P8a I
-                *amb,
+                *(amb if face else []),
                 "    hex.mov 4, mm_x, thpos_rt + %d*dw" % (16 * rt + 4),
                 "    hex.mov 4, mm_y, thpos_rt + %d*dw" % (16 * rt + 12),
                 "    hex.mov 1, mm_seen, thseen + %d*dw" % t, "    hex.mov 2, mm_rng, %s" % RN,
@@ -1207,8 +1292,12 @@ def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear
                 *(["    hex.set 2, md_src, %d" % (m + 1)] if src else []),
                 *(["    hex.mov 4, kb_az, mon_floorz + %d*dw" % (4 * m)] if knock else []),   # M7 P8a (package K)
                 "    stl.fcall md_attack, md_ret",
-                "    hex.mov 1, %s, mm_fa" % FA, "    hex.mov 2, %s, mm_rng" % RN,
+                *(["    hex.mov 1, %s, mm_fa" % FA] if face else []), "    hex.mov 2, %s, mm_rng" % RN,
                 "    ;%s" % nxt]
+    if set(dc["acts"]) - NO_FACE_ATTACKS:
+        out += k_go("%sk_go" % L, True)
+    if set(dc["acts"]) & NO_FACE_ATTACKS:
+        out += k_go("%sk_gon" % L, False)
     return out
 
 
@@ -1222,7 +1311,7 @@ def p32c_decls(schema, nmon: int, values: dict) -> list:
     return out
 
 
-def p32b_decls(schema, nmon: int, values: dict, msec: list, snib: int) -> list:
+def p32b_decls(schema, nmon: int, values: dict, msec: list, snib: int, r0: int = 20) -> list:
     """the chase's per-slot cells (movecount, P_Random state, floorz; `msec`, each monster's sector), the move's
     context, and the REJECT leaf's operand; `snib`: a sector id's width (World.sec_nibbles)"""
     from doomfj.monstermove import p32b_context
@@ -1232,7 +1321,7 @@ def p32b_decls(schema, nmon: int, values: dict, msec: list, snib: int) -> list:
         vals = [v & (16 ** nib - 1) for v in values[name]]
         out.append("%s: hex.vec %d, %d" % (name, nib * nmon, sum(v << (4 * nib * m) for m, v in enumerate(vals))))
     out.append("msec: hex.vec %d, %d" % (snib * nmon, msec_value(msec, snib)))
-    return out + p32b_context(snib) + ["mt_ms: hex.vec %d" % snib, "mt_rjret: hex.vec w/4"]
+    return out + p32b_context(snib, r0) + ["mt_ms: hex.vec %d" % snib, "mt_rjret: hex.vec w/4"]
 
 
 def mh_width(w) -> int:

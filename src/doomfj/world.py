@@ -305,6 +305,20 @@ def _code_bits(nmon: int) -> int:
     return max(5, _index_bits(nmon + 2))
 
 
+# M8 C8: THE MONSTER RADIUS CLASSES the fj bakes a monster's box by (its move's lift crossings and thing boxes, the
+# player's blocking, the knock move, the aim window's r_eff, the bullets' widths): class 1 is radius 30 (mm_r30), class
+# 0 radius 20 -- or, on a map whose other monsters have ONE other radius (E1M8's Barons: 24), that radius. Every core
+# map's classes are (20, 30): its text is unchanged.
+def radius_classes(radii) -> Tuple[int, int]:
+    rs = set(radii) - {30}
+    if rs <= {20}:
+        return 20, 30
+    assert len(rs) == 1 and 20 not in rs, (
+        "M8 C8: monster radii %s -- the fj's two radius classes hold 30 and ONE other (level_survey's radius row)"
+        % sorted(set(radii)))
+    return rs.pop(), 30
+
+
 def aim_bits(lay: Layout) -> int:
     """M8 F1.1 (docs/f1-big-map-widths.md 2): `aim_sid`'s width -- 0 none, 1 + slot for the monsters and the barrels,
     so at most nmon + nbarrel -- at least the 7 bits every frozen digest was recorded with (E1M1: 53 + 22 < 128). The

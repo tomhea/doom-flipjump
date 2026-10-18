@@ -216,15 +216,17 @@ def fight_decls(w, values: dict = None) -> List[str]:
             "dmb_sret: hex.vec w/4", "bl_sp: hex.vec 1"]          # bl_sp: M7 P8a K x I, the blast's kb_sp
 
 
-def decls(w, boot_skill: int, values: dict = None) -> List[str]:
+def decls(w, boot_skill: int, values: dict = None, list_bits: int = 8) -> List[str]:
     """the barrels' and drops' cells at `boot_skill`'s level start (`values` overrides: the harness), the LOS entry's
-    registers, the scratch and the return registers"""
+    registers, the scratch and the return registers. M8 F1.5: `list_bits` 12 -- dr_t (a drop's runtime thing) at
+    3 nibbles (Config.LIST_NIB)"""
     from doomfj.monstersight import BL_LOS_DECLS
     v = dict(level_start_values(w, boot_skill), mdrop=[0] * len(droppers(w)), dr_live=0)
     v.update(values or {})
     out = [_vec(name, nib, v[name]) for name, nib in BAR_FIELDS]
     out += ["rng_wd: hex.vec 2, %d" % v["rng_wd"], _vec("mdrop", 1, v["mdrop"]), "dr_live: hex.vec 2, %d" % v["dr_live"]]
-    return out + BL_LOS_DECLS + SCRATCH + RET_DECLS
+    scratch = [("dr_t: hex.vec %d" % (list_bits // 4)) if d == "dr_t: hex.vec 2" else d for d in SCRATCH]
+    return out + BL_LOS_DECLS + scratch + RET_DECLS
 
 
 # ---- the code ----------------------------------------------------------------------------------------------------
@@ -520,41 +522,46 @@ def shot_lines(w, fight: bool = False) -> List[str]:
         "    stl.fret dmb_lret"]
 
 
-def drop_lines(w, *, nt: int, slot_rt: Sequence[int]) -> List[str]:
+def drop_lines(w, *, nt: int, slot_rt: Sequence[int], list_bits: int = 8) -> List[str]:
     """`drop_link<k>` (damagecode's slot stub, after a kill: dm_x / dm_y still hold the corpse's whole-unit position,
     the stub loaded them from its row) and `drop_take<k>` (the pickup): dropper k's row nt + nmob + k. A drop row is
     ZERO whenever it is not live (level start, and drop_take clears what drop_link wrote), so the link writes only
     the position's integer nibbles and the leaf, and the take clears only those. The leaf-list work is shared
-    (`dr_link` / `dr_take`: projcode's pw_link / pw_unlink on dr_t, dr_leaf)."""
+    (`dr_link` / `dr_take`: projcode's pw_link / pw_unlink on dr_t, dr_leaf).
+
+    M8 F1.5 (docs/f1-runtime-ids.md): `list_bits` -- the lists' id width (Config.LIST_ID_BITS); dr_t is that many bits
+    (3 nibbles at 12: E1M5's drops are rows 249 .. 369). `dr_live` counts the live drops in 2 nibbles."""
     from doomfj.world import FIREBALL_POOL, FX_POOL
     nmob = FIREBALL_POOL + FX_POOL
+    nib = list_bits // 4
+    assert list_bits in (8, 12) and len(droppers(w)) < 256, (list_bits, len(droppers(w)), "dr_live is two nibbles")
     out = []
     for k, m in enumerate(droppers(w)):
         d, rt = nt + nmob + k, slot_rt[m]
-        assert d < 256, "dr_t is two nibbles"
+        assert d < 16 ** nib - 1, "dr_t is %d nibbles (Config.LIST_ID_BITS)" % nib
         out += ["drop_link%d:" % k,
                 "    hex.set 1, mdrop + %d*dw, 1" % k,
                 "    hex.mov 4, thpos_rt + %d*dw, dm_x" % (16 * d + 4),
                 "    hex.mov 4, thpos_rt + %d*dw, dm_y" % (16 * d + 12),
                 "    hex.mov 3, dr_leaf, thss_rt + %d*dw" % (16 * rt),
                 "    hex.mov 3, thss_rt + %d*dw, dr_leaf" % (16 * d),
-                "    hex.set 2, dr_t, %d" % d,
+                "    hex.set %d, dr_t, %d" % (nib, d),
                 "    ;dr_link",
                 "drop_take%d:" % k,
                 "    hex.set 1, mdrop + %d*dw, 2" % k,
                 "    hex.mov 3, dr_leaf, thss_rt + %d*dw" % (16 * d),
                 "    hex.zero 4, thpos_rt + %d*dw" % (16 * d + 4), "    hex.zero 4, thpos_rt + %d*dw" % (16 * d + 12),
                 "    hex.zero 3, thss_rt + %d*dw" % (16 * d),
-                "    hex.set 2, dr_t, %d" % d,
+                "    hex.set %d, dr_t, %d" % (nib, d),
                 "    ;dr_take"]
     return out + ["dr_link:",
-                  "    hex.zero w/4, pw_t", "    hex.mov 2, pw_t, dr_t",
+                  "    hex.zero w/4, pw_t", "    hex.mov %d, pw_t, dr_t" % nib,
                   "    hex.zero w/4, pw_leaf", "    hex.mov 3, pw_leaf, dr_leaf",
                   "    stl.fcall pw_link, pw_lkret",
                   "    hex.inc 2, dr_live",
                   "    stl.fret drl_ret",
                   "dr_take:",
-                  "    hex.zero w/4, pw_t", "    hex.mov 2, pw_t, dr_t",
+                  "    hex.zero w/4, pw_t", "    hex.mov %d, pw_t, dr_t" % nib,
                   "    hex.zero w/4, pw_leaf", "    hex.mov 3, pw_leaf, dr_leaf",
                   "    stl.fcall pw_unlink, pw_ulret",
                   "    hex.dec 2, dr_live",
@@ -583,7 +590,7 @@ def restart_lines(w, skill: int, *, nt: int) -> List[str]:
 
 def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills: Sequence[int] = (),
                  barrel_rt: Dict[int, int] = None, exit_guard: bool = True, barrel_vis: Dict[int, int] = None,
-                 knock: bool = False, fight: bool = False, rockets: bool = False) -> dict:
+                 knock: bool = False, fight: bool = False, rockets: bool = False, list_bits: int = 8) -> dict:
     """everything package C's sim adds, for the World `w` (the player mode "full"):
       * `decls`: the cells at `boot_skill`'s level start, the scratch, the LOS entry's registers;
       * `lines`: bar_phase / bar_next, bdm<c> / bd_leaf, bl_leaf / bl_mon / bl_dist, monstersight's bl_los, dmb<b> /
@@ -604,14 +611,14 @@ def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills:
     spots = [(t.x, t.y) for t in w.barrel_things]
     maxr = max([PLAYER_R] + list(w.mon_radius[:w.layout.nmon]))
     from doomfj.world import FIREBALL_POOL, FX_POOL
-    return {"decls": (decls(w, boot_skill) + (fight_decls(w) if fight else [])
+    return {"decls": (decls(w, boot_skill, list_bits=list_bits) + (fight_decls(w) if fight else [])
                       + (["bl_dyn: hex.vec 1", "bl_z: hex.vec 4"] if rockets else [])),   # P9: the rocket's entry
             "lines": (phase_lines(w, barrel_rt=barrel_rt, exit_guard=exit_guard, barrel_vis=barrel_vis, fight=fight)
                       + damage_lines(len(spots), fight=fight)
                       + blast_lines(w, slot_rt=slot_rt, knock=knock, fight=fight, rockets=rockets)
                       + blast_los_lines(w, spots, maxr, fight=fight, dyn=rockets)
                       + shot_lines(w, fight=fight)
-                      + drop_lines(w, nt=nt, slot_rt=slot_rt)),
+                      + drop_lines(w, nt=nt, slot_rt=slot_rt, list_bits=list_bits)),   # M8 F1.5: dr_t
             "tables": tables_fj(),
             "restart": [restart_lines(w, sk, nt=nt) + (["    hex.zero %d, bar_src" % (2 * len(spots))] if fight else [])
                         for sk in skills],

@@ -145,7 +145,7 @@ def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> l
 
 
 def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: int, height: int,
-                    teleport=()) -> list:
+                    teleport=(), list_bits: int = 8) -> list:
     """`mm_move`: P_Move for the context's monster (world._p_move): no direction -> mm_ok 0; else one step
     (step_delta: `speed` on an axis, 6 / 7 on both for a diagonal), P_TryMove (the things, then the seed at the
     candidate and the monster cells), and
@@ -157,7 +157,9 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
         `dreq`, and movedir = NODIR -> mm_ok 1 (the move counts as made); else mm_ok 0.
     M8 L4 (`teleport`: doomfj.teleportcode.monster_lines): the WR teleports, after the lifts and before the move is
     taken -- a fire makes the destination the move (mm_nx / mm_ny, cp_floor, ptss). () on a map without one: the
-    text is unchanged."""
+    text is unchanged. M8 F1.5: `list_bits` 12 -- the relink is the wide twins (things.list_macros)."""
+    from doomfj.things import list_macros
+    mac = list_macros(list_bits)
     from doomfj.doorcode import _box_test, _crossed_lines
     from doomfj.world import DIAG_STEP
     out = ["mm_move:",
@@ -209,9 +211,9 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
             "    hex.zero w/4, mm_c", "    hex.mov 3, mm_c, ptss",
             "    hex.cmp 3, mm_c, mm_leafw, mm_relink, mm_same, mm_relink",
             "  mm_relink:",
-            "    sim.leaf_unlink mm_tw, mm_leafw",
+            "    %s mm_tw, mm_leafw" % mac["unlink"],
             "    hex.zero w/4, mm_leafw", "    hex.mov 3, mm_leafw, ptss",
-            "    sim.leaf_link mm_tw, mm_leafw",
+            "    %s mm_tw, mm_leafw" % mac["link"],
             "    lfsec.lookup mm_sec, mm_leafw",
             "  mm_same:",
             "    hex.set 1, mm_ok, 1",

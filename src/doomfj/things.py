@@ -277,7 +277,23 @@ def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_typ
 LIST_MAX_THINGS = 254
 
 
-def spawn_leaf_lists(binds, nleaves, present=None):
+def list_max(bits: int = 8) -> int:
+    """M8 F1.5 (docs/f1-runtime-ids.md): the most runtime ids a `bits`-wide list holds -- an entry stores id + 1 and 0
+    ends a list, so 2^bits - 2: 254 at 8 bits (LIST_MAX_THINGS), 4,094 at 12 (Config.LIST_ID_BITS)"""
+    assert bits in (8, 12), ("list ids are 8 or 12 bits", bits)
+    return (1 << bits) - 2
+
+
+def list_bits(n: int) -> int:
+    """M8 F1.5: the narrowest list width (Config.LIST_ID_BITS) that holds `n` runtime ids -- 8 on E1M1 / E1M2, 12 on a
+    map past 254 (E1M3 341, E1M4 345, E1M5 370 things + pools + drops)"""
+    for bits in (8, 12):
+        if n <= list_max(bits):
+            return bits
+    raise AssertionError("%d runtime ids: more than a 12-bit list holds (%d)" % (n, list_max(12)))
+
+
+def spawn_leaf_lists(binds, nleaves, present=None, max_things=LIST_MAX_THINGS):
     """`(sshead, thnext)` -- the per-leaf lists of runtime things `sim.bind_things` builds from the
     bindings `binds` (thing index -> leaf): each leaf's things in ASCENDING index order, stored as
     `t + 1` so that 0 is both the empty list and the end of one. bind_things gets the ascending order
@@ -289,8 +305,10 @@ def spawn_leaf_lists(binds, nleaves, present=None):
 
     M7 P1.5: `present` (a flag per thing, or None for all) links only the things a skill spawns; an
     absent thing is in no list and keeps `thnext = 0` -- the model's `_list_insert` of the active
-    monsters only (world.World._reset_state)."""
-    assert len(binds) <= LIST_MAX_THINGS, (
+    monsters only (world.World._reset_state).
+
+    M8 F1.5: `max_things` is the lists' bound -- `list_max(Config.LIST_ID_BITS)` on a wide-list map."""
+    assert len(binds) <= max_things, (
         "%d things: the lists store t + 1 in a byte, at most LIST_MAX_THINGS" % len(binds))
     assert present is None or len(present) == len(binds), (len(present), len(binds))
     sshead = [0] * nleaves
@@ -314,7 +332,7 @@ def thing_pos_value(t) -> int:
     return (((t.y << 16) & 0xFFFFFFFF) << 32) | ((t.x << 16) & 0xFFFFFFFF)
 
 
-def skill_level_start(drawable, rt_draw, rt_binds, nleaves, vis_slots, skill):
+def skill_level_start(drawable, rt_draw, rt_binds, nleaves, vis_slots, skill, max_things=LIST_MAX_THINGS):
     """M7 P1.5: the game tier's thing PRESENCE at `skill`'s level start -- `(sshead, thnext, thvis)`:
     the runtime things' leaf lists linking only the things the skill spawns, and each baked
     vanishable thing's flag (1 = drawn, 0 = not; slot order). `rt_draw[k]` is runtime thing k's
@@ -322,20 +340,24 @@ def skill_level_start(drawable, rt_draw, rt_binds, nleaves, vis_slots, skill):
     bakes HARD's as the boot state and every skill's into its restart block
     (docs/gp-skill-menu.md); the gates ask `skill_absent` for the oracle's half."""
     absent = skill_absent(drawable, skill)
-    head, nxt = spawn_leaf_lists(rt_binds, nleaves, present=[di not in absent for di in rt_draw])
+    head, nxt = spawn_leaf_lists(rt_binds, nleaves, present=[di not in absent for di in rt_draw], max_things=max_things)
     vis = [0 if di in absent else 1 for di in sorted(vis_slots, key=vis_slots.get)]
     return head, nxt, vis
 
 
-def byte_array_decl(label, values, cells):
+def byte_array_decl(label, values, cells, bits=8):
     """fj text for a `read_byte`/`write_byte` array baked to `values`: one cell per entry, holding its
     byte in the jump word as `b * dw` (`b << 6`, the layout scratchpad/gp/probe.py and M1a settled),
     padded with zero cells to `cells` in all -- the extent `label: hex.vec cells` had, so no label
-    after it moves and the M1 restore set's span for it holds."""
+    after it moves and the M1 restore set's span for it holds.
+
+    M8 F1.5: `bits` 12 -- a wide-list map's `read_cell`/`write_cell` array: the same cell, the same `v * dw`, the value
+    up to 12 bits (bits dbit .. dbit+11 of the jump word). The text for a value < 256 is the 8-bit text."""
     # (a map with no runtime things has an EMPTY array -- no entry, no cell: `hex.vec 0` is nothing)
     # M8 L1: a FULL array (no padding: E1M2's sshead at Config.SSHEAD_RATIO 1) is legal and declares no hex.vec;
     # E1M1's arrays are always padded (their 2x extents), so their text is unchanged
-    assert len(values) <= cells and all(0 <= v < 256 for v in values), (label, len(values), cells)
+    assert bits in (8, 12), (label, bits)
+    assert len(values) <= cells and all(0 <= v < 1 << bits for v in values), (label, len(values), cells, bits)
     pad = cells - len(values)
     return "\n".join([f"{label}:"] + [f";{v} * dw" for v in values]
                      + ([f"hex.vec {pad}"] if pad or not values else []))
@@ -345,9 +367,25 @@ def byte_array_decl(label, values, cells):
 # program that emits the relink declares them once (P3; tests/fj/test_leaf_lists_fj.py today).
 # `ll_p`/`ll_q`/`ll_base`/`ll_idx` are w/4 wide because hex.ptr_index moves w/4 nibbles out of its
 # index and into its destination.
-LEAF_LINK_DECLS = ["ll_enc: hex.vec 2", "ll_v: hex.vec 2", "ll_nxt: hex.vec 2",
-                   "ll_p: hex.vec w/4", "ll_q: hex.vec w/4", "ll_base: hex.vec w/4",
-                   "ll_idx: hex.vec w/4"]
+def leaf_link_decls(nib: int = 2) -> list:
+    """the relink's scratch at a list id width of `nib` nibbles (Config.LIST_NIB: 2, or 3 for sim.leaf_link_w /
+    leaf_unlink_w, M8 F1.5) -- LEAF_LINK_DECLS is the 2-nibble one"""
+    assert nib in (2, 3), nib
+    return ["ll_enc: hex.vec %d" % nib, "ll_v: hex.vec %d" % nib, "ll_nxt: hex.vec %d" % nib,
+            "ll_p: hex.vec w/4", "ll_q: hex.vec w/4", "ll_base: hex.vec w/4",
+            "ll_idx: hex.vec w/4"]
+
+
+LEAF_LINK_DECLS = leaf_link_decls(2)
+
+
+def list_macros(bits: int = 8) -> dict:
+    """M8 F1.5: the sim.fj list macros a `bits`-wide map calls -- the 8-bit ones (E1M1's text) or their `_w` twins,
+    which read and write a list cell through the dual decoder table (hex.read_cell / write_cell) and hold an id in
+    3 nibbles. ONE place names them, so an emitter cannot pair a wide list with a narrow walk"""
+    w = "_w" if bits == 12 else ""
+    assert bits in (8, 12), bits
+    return {"link": "sim.leaf_link" + w, "unlink": "sim.leaf_unlink" + w, "depth": "sim.thing_pass_depth" + w}
 
 
 def subsector_tables(rm, cmap, lds, sds, secs):

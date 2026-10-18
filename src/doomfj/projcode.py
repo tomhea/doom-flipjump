@@ -720,15 +720,18 @@ ROCKET_DECLS = ["rk_sret: hex.vec w/4", "rk_bret: hex.vec w/4", "rk_svt: hex.vec
                 "pt_rk: hex.vec 1"]
 
 
-def pool_tic_lines(knock: bool = False) -> List[str]:
+def pool_tic_lines(knock: bool = False, list_bits: int = 8) -> List[str]:
     """the leaves both pools share: `pw_locate` (ptloc_walk on the window's integer position), `pw_link` /
     `pw_unlink` (the window's runtime thing into / out of the leaf pw_leaf), and `pool_tic` (stl.fcall pool_tic,
     pt_ret), the state tics on the window: tics - 1, at 0 the next state (`pjst`); S_NULL -> P_RemoveMobj:
-    unlinked, the window zeroed (pw_act 0 tells the stub to free the slot). `knock` (M7 P8a, package K): pw_z too"""
+    unlinked, the window zeroed (pw_act 0 tells the stub to free the slot). `knock` (M7 P8a, package K): pw_z too.
+    M8 F1.5: `list_bits` 12 -- the relink is the wide twins (things.list_macros: sim.leaf_link_w / leaf_unlink_w)"""
+    from doomfj.things import list_macros
+    mac = list_macros(list_bits)
     return ["pw_locate:", *_ptloc_window(), "    stl.fret pw_loret",
             # ONE expansion each of the relink macros (~50K words apiece: a copy per call site cost 0.25M words)
-            "pw_link:", "    sim.leaf_link pw_t, pw_leaf", "    stl.fret pw_lkret",
-            "pw_unlink:", "    sim.leaf_unlink pw_t, pw_leaf", "    stl.fret pw_ulret",
+            "pw_link:", "    %s pw_t, pw_leaf" % mac["link"], "    stl.fret pw_lkret",
+            "pw_unlink:", "    %s pw_t, pw_leaf" % mac["unlink"], "    stl.fret pw_ulret",
             "pool_tic:",
             "    hex.dec 1, pw_ti",
             "    hex.if1 1, pw_ti, pt_out",
@@ -877,7 +880,8 @@ def restart_lines(pool: int = None, fxn: int = None, *, nt: int) -> List[str]:
 
 
 def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs: bool = False,
-               knock: bool = False, fight: bool = False, slot_rt=None, rockets: bool = False, fog: bool = False) -> dict:
+               knock: bool = False, fight: bool = False, slot_rt=None, rockets: bool = False, fog: bool = False,
+               list_bits: int = 8) -> dict:
     """everything P5's pools add, for the World `w`:
       * `decls`: pool_decls() (an empty pool, rng_fx at its seed);
       * `lines`: pj_* / pool_tic / fx_* -- leaves (each ends in a fret), placed where nothing falls in;
@@ -899,6 +903,6 @@ def proj_parts(w, *, nt: int, pfx: str = "e1m1", exit_guard: bool = True, puffs:
     ft = fight_things(w, slot_rt) if fight else None
     return {"decls": pool_decls(puffs=puffs) + (pt_decls(ft) if fight else []) + (ROCKET_DECLS if rockets else []),
             "lines": pj_lines(nt=nt, root=root, exit_guard=exit_guard, knock=knock, fight=ft, rockets=rockets)
-            + pool_tic_lines(knock) + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs, fog=fog)
+            + pool_tic_lines(knock, list_bits=list_bits) + fx_lines(nt=nt, exit_guard=exit_guard, puffs=puffs, fog=fog)
             + (rocket_blast_lines(w) if rockets else []), "cells": cells, "root": root,
             "tables": tables_fj(puffs, rockets, fog), "restart": restart_lines(nt=nt), "persist": PERSIST}

@@ -226,7 +226,7 @@ def _thing_key(t):
 
 def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_near: bool, boot_skill: int,
               skills, cache: dict, mode: str = "idle", depth_order=None, player: str = "walk",
-              static_bank=None, stats: bool = False) -> dict:
+              static_bank=None, stats: bool = False, list_bits: int = None) -> dict:
     """everything P3.1 adds to the game tier, from the model's own sources:
       * `view_rows`: one thing row per distinct monster VIEW (lump, mirrored) -- `things.thing_rows`' layout from the
         view's art, dw's bit 7 set for a mirrored view -- appended after the runtime things' own rows;
@@ -258,7 +258,12 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     a RUNTIME barrel's stub looks up -- with its aim id 1 + nmon + b and radius class aimcode.RC_BARREL while it
     stands (S_BAR1 / S_BAR2: a live barrel's health is > 0 exactly there); `barrel` is barrelcode.barrel_parts,
     `bar_rt` {barrel: runtime thing}, `bar_view` {state: row} and `bar_rows` the rows (wall_renderer bakes the
-    other barrels' views from them)."""
+    other barrels' views from them).
+
+    M8 F1.5 (docs/f1-runtime-ids.md): `list_bits` -- the map's list id width (Config.LIST_ID_BITS; None reads it from
+    `rm.cfg` at the map's MAP_CONFIG). It bounds the runtime ids (things + mobiles + drops: things.list_max), widens the
+    row select (`select_tree_lines`), the walk's key cache and rank register (`p33_decls` / `d3_decls`), the drop link's
+    dr_t (barrelcode) and names the relink macros the pools call (projcode); 8 emits the text it always did."""
     from doomfj.monsters import view_of
     from doomfj.things import THING_ROW_BYTES
     from doomfj.wall_renderer import (DEG_MINH2_MON, MIN_SPRITE_H_MONSTER, anim_frames, anim_patches)
@@ -440,13 +445,13 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     drop_slots = droppers(w) if loot else []
     ndrop = len(drop_slots)
     ntm = nt + nmob + ndrop
-    from doomfj.things import LIST_MAX_THINGS
-    assert ntm <= LIST_MAX_THINGS and ntm <= 256, (nt, nmob, "the lists and the two-level select hold 254 things")
-    sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
-        "thsel_h%d" % h if 16 * h < ntm else "thsel_none" for h in range(16))]
-    for h in range((ntm + 15) // 16):
-        sel += ["  thsel_h%d:" % h, "    sim.jump16 sp_ti, " + ", ".join(
-            "thsel_s%d" % (16 * h + l) if 16 * h + l < ntm else "thsel_none" for l in range(16))]
+    if list_bits is None:
+        from doomfj.config import map_cfg
+        list_bits = map_cfg(rm.cfg, mapname).LIST_ID_BITS
+    from doomfj.things import list_max
+    assert ntm <= list_max(list_bits), (nt, nmob, ndrop, "the %d-bit lists hold %d things (Config.LIST_ID_BITS: "
+                                                         "docs/f1-runtime-ids.md)" % (list_bits, list_max(list_bits)))
+    sel = select_tree_lines(ntm)
     # M7 P4.2a (doomfj.aimcode): a tier whose player SHOOTS gives every runtime thing its aim id -- 1 + slot while
     # the monster is shootable (a corpse is not: damage clears it), 0 for any other thing -- and its radius class
     from doomfj.world import player_resolves
@@ -566,6 +571,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     assert not set(bar_vis) & set(bar_rt) and len(bar_vis) + len(bar_rt) == len(w.barrel_things)
                     barrel = barrel_parts(w, nt=nt, slot_rt=[slot_t[m] for m in range(nmon)], boot_skill=boot_skill,
                                           skills=skills, barrel_rt=bar_rt, barrel_vis=bar_vis,
+                                          **({"list_bits": list_bits} if list_bits != 8 else {}),  # M8 F1.5: dr_t
                                           **({"knock": True} if knock else {}),
                                           **({"fight": True} if fight else {}),      # M7 P8a I: bar_src
                                           **({"rockets": True} if rockets else {}))  # P9: the rocket's blast
@@ -592,15 +598,16 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                                                **({"fight": True, "slot_rt": [slot_t[m] for m in range(nmon)]}
                                                   if fight else {}),       # M7 P8a I: things stop it
                                                **({"rockets": True} if rockets else {}),   # P9: the rocket
-                                               **({"fog": True} if tele else {}))         # M8: the teleport fog
+                                               **({"fog": True} if tele else {}),         # M8: the teleport fog
+                                               **({"list_bits": list_bits} if list_bits != 8 else {}))   # M8 F1.5
                     extra["proj"]["nt"] = nt
             # M7 P3.3 (D3 d): the game tier draws a leaf's runtime things nearest first when the ONE game-tier
             # render setting says so (depth_walk, above) -- the walk's registers (sim.thing_pass_depth)
             if depth:
-                extra["decls_wake"] += P33_DECLS
+                extra["decls_wake"] += p33_decls(td_key_rows(ntm))     # P13's 256 rows (E1M1) or every runtime row
                 extra["depth"] = True
                 if d3:                         # M7 P8a (C): the rank's register and the barrel flag
-                    extra["decls_wake"] += D3_DECLS
+                    extra["decls_wake"] += d3_decls(list_bits // 4)
             extra["chase"] = dict(
                 # M8 F1.3: the WR lines a MONSTER triggers (88; not the blazing 120)
                 static_things=things, lift_walk=list(w.lift_walk_mon), lift_order=list(w.lift_order),
@@ -649,6 +656,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                                                   index_nibbles=2, result_nibbles=rn)} if nmob else {}),
         # M7 P6: the drops' runtime things (after the mobiles), the barrels' views and the runtime barrels
         "ndrop": ndrop, "drop_row": drop_row, "bar_view": bar_view, "bar_rows": bar_rows, "bar_rt": bar_rt,
+        "list_bits": list_bits,                       # M8 F1.5: the lists' id width the parts were emitted for
         **({"barview": generate_dispatch_table_fj("barview", [bar_view.get(i, 0) for i in range(max(bar_view) + 1)],
                                                   index_nibbles=2, result_nibbles=rn)} if bar_view else {}),
     }
@@ -1332,18 +1340,59 @@ def depth_walk(mode: str, order=None) -> bool:
 # P13: the key cache's rows -- every runtime row (things + mobiles) a leaf list can hold; wall_renderer asserts the
 # emitted thpos rows fit
 TD_KEY_ROWS = 256
-# M7 P3.3: sim.thing_pass_depth's registers (named globals: no @-local data in a game-tier macro)
-P33_DECLS = (["td_%s: hex.vec w/4" % r for r in ("head", "e", "t", "p", "q", "best", "lt", "poff", "pbase", "pptr")]
-             + ["td_bk: hex.vec 4", "td_lk: hex.vec 4", "td_have: hex.vec 1", "td_first: hex.vec 1",
-                # P13: the selection rounds' KEY CACHE (row t at 16 nibbles: the thpos stride) and its pointer. Read
-                # and written only through td_kp (selfreset.POINTER_READ_CELLS), never reset: every row is written by
-                # a leaf's first round before a later round reads it
-                "td_kp: hex.vec w/4", "td_keys: hex.vec %d" % (16 * TD_KEY_ROWS)])
+
+
+def td_key_rows(n: int) -> int:
+    """M8 F1.5: the key cache's rows for `n` runtime ids -- P13's 256 while they fit (every 8-bit map: the text it
+    always had), else n itself (a wide-list map: E1M5's 370)"""
+    return max(TD_KEY_ROWS, n)
+
+
+def p33_decls(rows: int = TD_KEY_ROWS) -> list:
+    """M7 P3.3: sim.thing_pass_depth's registers (named globals: no @-local data in a game-tier macro), the key cache
+    at `rows` rows (td_key_rows)"""
+    return (["td_%s: hex.vec w/4" % r for r in ("head", "e", "t", "p", "q", "best", "lt", "poff", "pbase", "pptr")]
+            + ["td_bk: hex.vec 4", "td_lk: hex.vec 4", "td_have: hex.vec 1", "td_first: hex.vec 1",
+               # P13: the selection rounds' KEY CACHE (row t at 16 nibbles: the thpos stride) and its pointer. Read
+               # and written only through td_kp (selfreset.POINTER_READ_CELLS), never reset: every row is written by
+               # a leaf's first round before a later round reads it
+               "td_kp: hex.vec w/4", "td_keys: hex.vec %d" % (16 * rows)])
+
+
+P33_DECLS = p33_decls()
 # M7 P8a package C (docs/gp-final-plan.md 1.3): the compositor rules' cells -- `td_rk` (D3 a: sim.thing_pass_depth's
 # first rank-0 row, SET at every multi-thing leaf before its rounds read it) and `sp_ex` (D3 b: the barrel flag, 1 from a
 # barrel's xor_by block or row select to its record, 0 everywhere else -- so 0 at every frame's end). Scratch, never
 # persisted
 D3_DECLS = ("td_rk: hex.vec 2", "sp_ex: hex.vec 1")
+
+
+def d3_decls(nib: int = 2) -> tuple:
+    """M8 F1.5: D3_DECLS with td_rk at the list id width (Config.LIST_NIB: 3 for sim.rank_key_w)"""
+    assert nib in (2, 3), nib
+    return ("td_rk: hex.vec %d" % nib,) + D3_DECLS[1:]
+
+
+def select_tree_lines(ntm: int) -> list:
+    """the row select's dispatch (`thsel_leaf`, p31_parts) on the runtime thing index sp_ti into the stubs thsel_s<t>
+    for t < ntm (`thsel_none` past them): a `sim.jump16` tree on sp_ti's nibbles -- TWO levels (nibble 1, then 0) while
+    ntm <= 256, the text every 8-bit map has; M8 F1.5 (docs/f1-runtime-ids.md): a THIRD, on nibble 2, first when ntm
+    passes 256 (a wide-list map) -- thsel_g<g> picks the 256-block, its thsel_h<16g+h> the 16-block as before.
+    tests/fj/test_wide_ids_fj.py runs it at ntm = 300."""
+    if ntm <= 256:
+        sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
+            "thsel_h%d" % h if 16 * h < ntm else "thsel_none" for h in range(16))]
+    else:
+        assert ntm <= 4096, ntm
+        sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 2*dw, " + ", ".join(
+            "thsel_g%d" % g if 256 * g < ntm else "thsel_none" for g in range(16))]
+        for g in range((ntm + 255) // 256):
+            sel += ["  thsel_g%d:" % g, "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
+                "thsel_h%d" % (16 * g + h) if 16 * (16 * g + h) < ntm else "thsel_none" for h in range(16))]
+    for h in range((ntm + 15) // 16):
+        sel += ["  thsel_h%d:" % h, "    sim.jump16 sp_ti, " + ", ".join(
+            "thsel_s%d" % (16 * h + l) if 16 * h + l < ntm else "thsel_none" for l in range(16))]
+    return sel
 
 
 def rank_threshold(nt: int) -> int:

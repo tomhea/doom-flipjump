@@ -321,8 +321,11 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     (infighting_on) add each feature's cells -- phase "P8a", declared by package 0 and written by its package (A, K,
     I) -- and `fight` widens `mon_target`. All three off (`p8a_schema` of any pre-P8a mode pair) is the schema every
     frozen set's digests were recorded with, field for field and width for width."""
-    from doomfj.things import LIST_MAX_THINGS
-    assert lay.nmobile <= LIST_MAX_THINGS, "leaf lists store mobile index + 1 in a byte"
+    # M8 F1.5 (docs/f1-runtime-ids.md 1-2): the model's lists hold the MOBILE index (monsters + the pools), not the fj's
+    # runtime ids -- 8 bits on every surveyed map (E1M5: 199 mobiles), the schema every frozen set was recorded with;
+    # a map past 254 mobiles would widen them to things.list_bits' 12 (the fj's wide-list width) rather than refuse
+    from doomfj.things import list_bits
+    lbits = list_bits(lay.nmobile)
     fs: List[Field] = []
 
     def f(name, bits, count=None, signed=False, kind="persist", group="", phase="S3a", label="",
@@ -494,9 +497,9 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("mon_leaf", leaf_bits, count=n, kind="derived", group="monster",
       doc="point location of (mon_x, mon_y)")
     # -- leaf lists -------------------------------------------------------------------------------
-    f("leaf_head", 8, count=lay.nleaf, kind="derived", group="lists", label="sshead",
+    f("leaf_head", lbits, count=lay.nleaf, kind="derived", group="lists", label="sshead",
       doc="first mobile in the leaf, +1 (0 = empty), ascending order")
-    f("mob_next", 8, count=lay.nmobile, kind="derived", group="lists", label="thnext",
+    f("mob_next", lbits, count=lay.nmobile, kind="derived", group="lists", label="thnext",
       doc="next mobile in the same leaf, +1; mobiles = monsters, then fireballs, then fx")
     # -- fireball pool (S3b) ----------------------------------------------------------------------
     p = FIREBALL_POOL

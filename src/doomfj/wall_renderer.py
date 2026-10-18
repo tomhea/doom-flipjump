@@ -590,8 +590,30 @@ STANDALONE_SCRATCH_DECLS = [
 ]
 
 
+def list_restart_lines(nss: int, nthings: int, per_skill, list_bits: int = 8) -> tuple:
+    """M7 P1.5 -- the restart block's LIST fragment, as (the shared routine's lines, [each skill's lines]): the shared
+    half zeroes every list cell (`nss` heads, `nthings` links -- the runtime things and the mobiles) with the M1
+    reset's constant-address clear, each skill's half flips in its non-zero cells (bit k of a cell is
+    `cell + dbit + k`, the address the clear itself flips). `per_skill[k]` is (sshead, thnext, ...) for skill k.
+    M8 F1.5 (docs/f1-runtime-ids.md): `list_bits` 12 -- the clear is m1.zerocell12 (the wide table) and a cell has
+    12 bits to flip; 8 is the text every 8-bit map has. tests/fj/test_wide_ids_fj.py runs the 12-bit fragment."""
+    assert list_bits in (8, 12), list_bits
+    clear = "m1.zerobyte" if list_bits == 8 else "m1.zerocell12"
+    common = [f"    rep({nss}, i) {clear} sshead + i*dw",
+              f"    rep({nthings}, i) {clear} thnext + i*dw"]
+    skills = []
+    for head, nxt, *_rest in per_skill:
+        out = []
+        for label, arr in (("sshead", head), ("thnext", nxt)):
+            for i, v in enumerate(arr):
+                assert 0 <= v < 1 << list_bits, (label, i, v, list_bits)
+                out += [f"    {label} + {i}*dw + dbit + {b};" for b in range(list_bits) if v >> b & 1]
+        skills.append(out)
+    return common, skills
+
+
 def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
-                  monsters=None, nmobile=0, skill_extra=None, nfs=1) -> tuple:
+                  monsters=None, nmobile=0, skill_extra=None, nfs=1, list_bits=8) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -612,7 +634,10 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
     M7 P7 (doomfj.restartcode): the routine also zeroes `lvtime` and `g_rs` (`g_skill` is kept: it is WHICH level
     start); `skill_extra[k]` -- more lines for skill k's block (the P6 cells whose level start depends on the skill).
     The blocks are placed and called through `restartcode.routine_lines` / `call_lines`: ONE sequence, run by NEW
-    GAME and by the restart on use after death."""
+    GAME and by the restart on use after death.
+
+    M8 F1.5: `list_bits` -- the lists' id width (Config.LIST_ID_BITS): `list_restart_lines`' fragment."""
+    _lcommon, _lskills = list_restart_lines(nss, len(rt_binds) + nmobile, per_skill, list_bits)
     common = ["restart_common:",
               f"    hex.set 8, viewx, {spawn.x & 0xFFFFFFFF}",
               f"    hex.set 8, viewy, {spawn.y & 0xFFFFFFFF}",
@@ -632,17 +657,13 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
                  f"    hex.zero {nlift}, lreq", f"    hex.zero {nfs}, fswitch"] if nlift else []),
               *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
-              f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
-              f"    rep({len(rt_binds) + nmobile}, i) m1.zerobyte thnext + i*dw",
+              *_lcommon,
               *[f"    {line}" for line in hud],                  # M7 P4.0: the bar's level-start values
               *_restartcode.restart_lines(),                   # M7 P7: lvtime, g_rs
               "    stl.fret rs_ret"]
     skills = []
-    for head, nxt, vis in per_skill:
-        out = []
-        for label, arr in (("sshead", head), ("thnext", nxt)):
-            for i, v in enumerate(arr):
-                out += [f"    {label} + {i}*dw + dbit + {b};" for b in range(8) if v >> b & 1]
+    for (head, nxt, vis), lines in zip(per_skill, _lskills):
+        out = list(lines)
         out += [f"    hex.set 2, thvis + {j}*2*dw, {v}" for j, v in enumerate(vis)]
         # M7 P3.1: the monsters' cells at this skill's level start (monstercode.p31_parts)
         out += list(monsters[len(skills)]) if monsters else []
@@ -653,7 +674,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
 
 def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
                     wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None,
-                    p8a_common=(), p10_common=(), nfs=1) -> tuple:
+                    p8a_common=(), p10_common=(), nfs=1, list_bits=8) -> tuple:
     """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
     values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
     emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
@@ -669,7 +690,8 @@ def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, n
               + list(p8a_common)                        # M7 P8a: the final rung's cells (p8a_restart_parts)
               + list(p10_common)))                      # P10: the level's stats (statcode.restart_lines)
     return restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=nwalk, nlift=nlift,
-                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills, nfs=nfs)
+                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills, nfs=nfs,
+                         list_bits=list_bits)
 
 
 def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
@@ -1471,7 +1493,8 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
 
 def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                          spr_base, spr_ldbase, spr_dw, spr_cls, *, spr_cache: dict,
-                         keep=None, view_rows=(), ltw: int = 1, mobiles: int = 0, extra_lights=()):
+                         keep=None, view_rows=(), ltw: int = 1, mobiles: int = 0, extra_lights=(),
+                         list_bits: int = 8):
     """M14-e — everything the runtime thing table needs, baked ONCE by thing index.
 
     The static path bakes one xor-involution block per (subsector, thing), which is only possible
@@ -1528,9 +1551,11 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     # (the value is `things.thing_pos_value`, which NEW GAME's restart block bakes too -- R6)
     # M7 P5: + the MOBILES' rows (monstercode.p31_parts' `nmob`: the fireball and blood pools' runtime things nt ..),
     # zero -- a free slot's row, in no leaf list (projcode writes a live slot's whole-unit position here)
-    from doomfj.monstercode import TD_KEY_ROWS
-    assert len(things) + mobiles <= TD_KEY_ROWS, ("P13: more runtime rows than sim.thing_pass_depth's key cache holds",
-                                                  len(things) + mobiles, TD_KEY_ROWS)
+    from doomfj.monstercode import TD_KEY_ROWS, td_key_rows
+    # (M8 F1.5: a wide-list map's cache is sized to its runtime rows -- monstercode.td_key_rows -- by p31_parts)
+    _rows = TD_KEY_ROWS if list_bits == 8 else td_key_rows(len(things) + mobiles)
+    assert len(things) + mobiles <= _rows, ("P13: more runtime rows than sim.thing_pass_depth's key cache holds",
+                                            len(things) + mobiles, _rows)
     thpos = (["thpos_rt:"] + [f"    hex.vec 16, {thing_pos_value(t)}" for t in things]
              + ["    hex.vec 16, 0"] * mobiles)
     text = "\n".join([
@@ -1546,10 +1571,12 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
         # SUBSECTOR, so the emitter knows the answer and `subsector_action` bakes it into the leaf.
         generate_packed_lut_fj("sprlt", sprlt, ltw),        # M7 P3.1: `ltw` bytes a class
     ])
-    # the per-leaf lists hold a thing's index + 1 in a byte (things.LIST_MAX_THINGS, the one bound)
-    from doomfj.things import LIST_MAX_THINGS
-    assert nt + mobiles <= LIST_MAX_THINGS, (
-        f"{mapname} has {nt} runtime things and {mobiles} mobiles; the byte lists hold {LIST_MAX_THINGS}")
+    # the per-leaf lists hold a thing's index + 1 in a byte (things.LIST_MAX_THINGS, the one bound) -- M8 F1.5: in
+    # Config.LIST_ID_BITS bits (things.list_max: 254 at 8, 4,094 at 12)
+    from doomfj.things import list_max
+    assert nt + mobiles <= list_max(list_bits), (
+        f"{mapname} has {nt} runtime things and {mobiles} mobiles; the {list_bits}-bit lists hold "
+        f"{list_max(list_bits)} (Config.LIST_ID_BITS, docs/f1-runtime-ids.md)")
     decls = ["cur_ss: hex.vec w/4", "cur_ssp: hex.vec w/4", "tp_ret: ;0",
              # the leaf's baked floor height and sprlt row base (see subsector_action)
              "ss_flr: hex.vec 4", "ss_ltb: hex.vec 4",
@@ -2438,6 +2465,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P3.1 (docs/gp-monsters.md section 7): the game tier's IDLE monsters -- states, animation,
     # rotation. `_ANIM` is the compile-time switch every P3.1 macro argument reads.
     _p31 = None
+    # M8 F1.5 (docs/f1-runtime-ids.md, option A1): the per-leaf lists' id width -- Config.LIST_ID_BITS at the map's
+    # MAP_CONFIG (the authority, as for SWITCH_TEX): 8 on E1M1 / E1M2 (every line below emits what it always did), 12
+    # on a map whose runtime things + pools + drops pass 254 (the dual table, the `_w` list macros: things.list_macros)
+    _LIST_BITS = map_cfg(cfg, mapname).LIST_ID_BITS
     if _do_things and standalone and moving_things:
         from doomfj.monstercode import p31_parts
         _p31 = p31_parts(rm, map_wad, mapname, sprite_wad, _anim,
@@ -2445,11 +2476,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                          spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
                          cache=spr_cache, mode=MONSTER_MODE, player=PLAYER_MODE if menu else "walk",
                          static_bank=(spr_base, spr_ldbase, spr_dw),
-                         **({"stats": True} if _STATS else {}))         # P10: dm_kill counts the kill
+                         **({"stats": True} if _STATS else {}),         # P10: dm_kill counts the kill
+                         list_bits=_LIST_BITS)                          # M8 F1.5: the lists' id width
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
     # M7 P3.3 (D3 d): the game tier's leaf walk is sim.thing_pass_depth (nearest first), which reads `cur_ssp`
     # and not `cur_ss` (P13: the leaf code sets cur_ss only for the index-order sim.thing_pass)
     _depth_pass = bool(_p31 and _p31.get("depth"))
+    # M8 F1.5: wide lists have only the game tier's walk (sim.thing_pass_depth_w) and relink; the hosted tiers'
+    # bind_things and the index-order sim.thing_pass stay 8-bit (a wide map is built as the game tier)
+    assert _LIST_BITS == 8 or not moving_things or (standalone and _depth_pass), (
+        "M8 F1.5: %s's %d-bit lists need the game tier's depth walk (tier %r)" % (mapname, _LIST_BITS, tier))
     _STATS = bool(_STATS and _p31)            # P10: the stats count from the monster parts' World
     # M7 P6 (doomfj.barrelcode, the player mode "full"): the barrels, their blasts, the drops and the puffs
     _bar = _p31.get("barrel") if _p31 else None
@@ -2552,12 +2588,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              ltw=2 if _p31 else 1,
                              extra_lights=_lt_extra,       # M8: the animated lights' states reach the leaf bases
                              # M7 P6: + the drops' runtime things after the mobiles
-                             mobiles=(_p31["nmob"] + _p31.get("ndrop", 0)) if _p31 else 0)
+                             mobiles=(_p31["nmob"] + _p31.get("ndrop", 0)) if _p31 else 0,
+                             list_bits=_LIST_BITS)                     # M8 F1.5
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
     # (the hot block below), where they persist instead of being rebuilt every frame
-    from doomfj.things import (byte_array_decl, skill_absent, skill_level_start, spawn_leaf_lists,
-                               thing_pos_value)
+    from doomfj.things import (byte_array_decl, list_macros, list_max, skill_absent, skill_level_start,
+                               spawn_leaf_lists, thing_pos_value)
     # M7 P1.5: the game tier has SKILLS (docs/gp-skill-menu.md). Which things a skill spawns is
     # `skill_absent`'s answer; the runtime things are present by being LINKED, the baked vanishable
     # ones by their `thvis` flag. The image boots at HARD's level start (the skill set v2 runs at);
@@ -2575,7 +2612,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             "M7 P1.5: baked things %s change with the skill but have no thvis flag"
             % [(_drawable[di].type, _drawable[di].x, _drawable[di].y) for di in _unflagged[:6]])
         _MT_HEAD, _MT_NEXT, _BOOT_VIS = skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS,
-                                                          _vis_slots, BOOT_SKILL)
+                                                          _vis_slots, BOOT_SKILL, max_things=list_max(_LIST_BITS))
     else:
         _MT_HEAD, _MT_NEXT = spawn_leaf_lists(_MT_BINDS, _MT_NSS) if moving_things else ([], [])
         _BOOT_VIS = [1] * len(_vis_slots) if _do_things else []   # (no things: no flags)
@@ -2612,11 +2649,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _MT_NROWS = _p31["nrows"] if _p31 else _MT_NT         # M7 P3.1: + the view rows
     # M7 P5: the mobiles are runtime things nt .. nt + nmob - 1 of THIS table -- the pools' `nt` must be its runtime
     # thing count (MonsterViews.nrt's index space: the drawables the bake leaves to the runtime path), and the lists'
-    # declared `thnext` extent (2 * nt, the span the restore set carries) must hold the mobiles' links
+    # declared `thnext` extent (2 * nt, the span the restore set carries) must hold the mobiles' links -- M8 F1.5
+    # (docs/f1-runtime-ids.md 5): max(2 * nt, nt + nmob) cells, 2 * nt on every map so far (E1M5: 370 <= 478)
     _MT_NMOB = (_p31["nmob"] + _p31.get("ndrop", 0)) if _p31 else 0      # M7 P6: + the drops
     if _MT_NMOB:
         assert _proj["nt"] == _MT_NT == len(_mt_keep), (_proj["nt"], _MT_NT, len(_mt_keep))
-        assert _MT_NT + _MT_NMOB <= 2 * _MT_NT, "thnext's declared cells cannot hold the mobiles' links"
     _MT_NTH = _index_nibbles(max(1, _MT_NROWS))       # the row index's width, as check_line's is
     _MT_NSSN = _index_nibbles(max(1, _MT_NSS))
     _MT_NLTI = _index_nibbles(max(1, len(_MT_LTB) * _MT_NROWS)) if moving_things else 1
@@ -3657,7 +3694,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
                                   dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"],
-                                  **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpm")} if _TELE else {}))
+                                  **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpm")} if _TELE else {}),
+                                  list_bits=_LIST_BITS)                   # M8 F1.5: the relink's twins
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES,
                                  **({"fight": True} if _FIGHT else {}))    # M7 P8a I: toward the target
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
@@ -3721,8 +3759,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _spawn, len(_dslot) if _dst_tbl else 0, _MT_BINDS,
             [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
             _MT_NSS,
-            [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
+            [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk, max_things=list_max(_LIST_BITS))
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
+            list_bits=_LIST_BITS,                                       # M8 F1.5: the list fragment's width
             nfs=_movers.fswitch_nibbles(_floor_groups),                 # M8 F1.3: the fswitch vector
             monsters=_p31["restart"] if _p31 else None,
             hud_restart=_hud["restart"] if _hud else None, wpn_restart=_wpn["restart"] if _hud else (),
@@ -3891,7 +3930,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # the lists' DECLARED extents -- twice the reachable cells, the span the M1 restore set carries
     # M8 L1: sshead at cfg.SSHEAD_RATIO cells a leaf (2 on E1M1: the restore set's spans; 1 on E1M2: its hot block
     # must fit one 16^5 window -- config.Config.SSHEAD_RATIO)
-    _ss_cells, _th_cells = cfg.SSHEAD_RATIO * _MT_NSS, 2 * _MT_NT
+    _ss_cells, _th_cells = cfg.SSHEAD_RATIO * _MT_NSS, max(2 * _MT_NT, _MT_NT + _MT_NMOB)   # M8 F1.5: + the mobiles
     _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw"
                                              for _ in range(cfg.VIEW_W * cfg.PID_BYTES)),
                     # P10 G2: `sfbase` -- a column's ceiling / floor BASE pid ([VIEW_W ceilings][VIEW_W
@@ -3926,8 +3965,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                        f"gpslot:{NLJ}" + NLJ.join(";0 * dw"
                                         for _ in range(SPR_THING_SLOTS * SPR_THING_SLOT_BYTES))]
                       if _do_things else [])
-                   + (([byte_array_decl("sshead", _MT_HEAD, _ss_cells),
-                        byte_array_decl("thnext", _MT_NEXT, _th_cells)] if standalone else
+                   + (([byte_array_decl("sshead", _MT_HEAD, _ss_cells, bits=_LIST_BITS),
+                        byte_array_decl("thnext", _MT_NEXT, _th_cells, bits=_LIST_BITS)] if standalone else
                        [f"sshead: hex.vec {_ss_cells}", f"thnext: hex.vec {_th_cells}"])
                       # M5: the hosted tier is fed last frame's binding every frame; standalone
                       # bakes the SPAWN one -- and since M7 P1.3 the lists it implies, which
@@ -4115,7 +4154,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",
                 # M7 P3.3 (D3 d): the game tier's walk draws a leaf's runtime things nearest first
-                f"sim.thing_pass{'_depth' if _depth_pass else ''} throw, {_MT_NTH}, thpos_rt, "
+                f"{list_macros(_LIST_BITS)['depth'] if _depth_pass else 'sim.thing_pass'} throw, {_MT_NTH}, thpos_rt, "
                 f"{_ANIM}, {_ANIM_SEL}, "
                 f"{'sp_lt_hi' if _ANIM else 0}"
                 # M7 P8a (C): the 9-parameter walk -- D3 a's first rank-0 row, D3 b's barrel flag cleared per record

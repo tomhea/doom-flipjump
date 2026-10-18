@@ -558,6 +558,10 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
     parts = emit_wall_renderer(wad, mapname, cfg, sprite_wad=spr, tier=tier, ablate=ablate,
                                return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
+    # M8 F1.5 (docs/f1-runtime-ids.md): a wide-list map's -D file (PTR_WIDE_BITS = 12: the dual decoder table its list
+    # macros read through) -- passed to EVERY assembly of the program; None on an 8-bit map, whose calls are unchanged
+    _defs = cfg.emit_fj_defines(gen / "fj_defines.fj")
+    _dkw = {"defines_file": _defs.resolve()} if _defs else {}
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
     # dispatch tables, per-seg constant blocks, the BSP walk, the baked banks) no longer share a
     # file with the ~50-line program. ⚠ Order is load-bearing -- see write_program_files.
@@ -586,7 +590,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
             gen, prog, names, cfg.VIEW_W, nss, mapname, persist=_persist, pid_bytes=cfg.PID_BYTES,
             ss_ratio=cfg.SSHEAD_RATIO)
         paths = paths + [part]
-        labels = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
+        labels = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST, **_dkw,
                                           **standalone_run_header(standalone))
         _misaligned = sprbank_misalignment(labels)
         assert _misaligned is None, "build REFUSED: " + str(_misaligned)
@@ -618,7 +622,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things,
                                   extra=_map_persist(wad, mapname, standalone and moving_things)
                                   + automap_persist(cfg, menu))                                       # M8: amap
-        labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
+        labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST, **_dkw,
                                                 **standalone_run_header(standalone))
         r1 = FjmRunner(out, flat_max_words=limit)
         core1 = _fjcore.Memory(r1.width, flat_max_words=r1.flat_max_words)
@@ -647,7 +651,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         pristine1 = _v1.get
         del core1, r1
         paths = paths + [part]
-        labels2 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
+        labels2 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST, **_dkw,
                                                 **standalone_run_header(standalone))
         moved = selfreset.verify_labels_unchanged(labels1, labels2, restore_set)
         assert not moved, ("M1 self-reset REFUSED: %d baked addresses moved between passes, e.g. %s"
@@ -684,7 +688,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
                       "view_w": cfg.VIEW_W, "subsectors": nss}
     else:
         fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
-                    lzma_fast=FJM_LZMA_FAST)
+                    lzma_fast=FJM_LZMA_FAST, **_dkw)
     assemble_seconds = round(time.perf_counter() - t, 3)
     # STAMP THE DOOR GEOMETRY THIS BINARY FROZE, beside the binary. A gate that recomputes door
     # stops from doors.DEFAULT_QUANT compares against whatever that constant says TODAY, which need

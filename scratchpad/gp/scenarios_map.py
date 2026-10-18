@@ -82,7 +82,8 @@ def install(mapname: str, checkpoints=None) -> None:
         return
     wad = profile(m).wad
     INSTALLED["map"] = m
-    for mod, names in ((S, ("MODEL_FILES", "CENSUS_FILES", "new_world", "regions", "CHECKPOINTS", "plan_set")),
+    for mod, names in ((S, ("MODEL_FILES", "CENSUS_FILES", "new_world", "regions", "CHECKPOINTS", "plan_set",
+                            "REGION_NAMES")),
                        (CL, ("WadFile", "W", "SimState", "build_scene"))):
         for n in names:
             _ORIGINALS[(mod.__name__, n)] = getattr(mod, n)
@@ -94,8 +95,10 @@ def install(mapname: str, checkpoints=None) -> None:
         return S.apply_sight_rule(W.World(mw, m, skill=S.SKILL, player=S.PLAYER_MODE, monsters=S.MONSTER_MODE))
     S.new_world = new_world
     S.regions = regions_map
-    if checkpoints is not None:
-        S.CHECKPOINTS = tuple(checkpoints)
+    # M8 (the gate-tool audit): the map's checkpoints, or NONE -- never E1M1's (a set whose map has no checkpoints file
+    # kept E1M1's 11 hand-placed ones in this process); and R3 is every colour's key doors here (regions_map)
+    S.CHECKPOINTS = tuple(checkpoints) if checkpoints is not None else ()
+    S.REGION_NAMES = tuple("R3 behind the key doors" if n.startswith("R3 ") else n for n in S.REGION_NAMES)
     plan_set0 = S.plan_set
 
     def plan_set(quiet=False):
@@ -398,8 +401,9 @@ def suggest(n_runs: int = N_RUNS) -> dict:
                        "why": "AFTERMATH: %s (slots %s) injected as corpses at their spawns, the player among "
                               "them -- the post-kill drawing (corpses, drops)"
                               % (", ".join(m[4] for m in trio), [m[0] for m in trio])})
-    else:
-        out.append(_cp(reserve.pop(0), "R%d-extra" % reserve[0]["region"], "fight"))
+    elif reserve:                    # M8: the popped checkpoint's own region (it named the NEXT one's, and an
+        c = reserve.pop(0)           # IndexError with one in reserve)
+        out.append(_cp(c, "R%d-extra" % c["region"], "fight"))
     return {"map": INSTALLED["map"], "checkpoints": out,
             "reserve": [_cp(c, "R%d-s%d" % (c["region"], c["sector"]), "fight") for c in reserve[:30]],
             "regions": {"sectors_per_region": dict(collections.Counter(reg.values())),
@@ -520,6 +524,8 @@ def main(argv=None) -> int:
     ap.add_argument("--file")
     ap.add_argument("--runs", type=int, default=N_RUNS)
     ap.add_argument("--only", help="--plan: only the checkpoints whose name starts with this (a trial)")
+    ap.add_argument("--checkpoints", help="the checkpoints file --suggest-checkpoints writes and --plan reads (default "
+                                          "scenarios/<map>/checkpoints.json; gen_dryrun.py: a DRAFT path)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -543,7 +549,7 @@ def main(argv=None) -> int:
     S.use_sight_rule({"sight_rule": "seen", "monster_tics": W.MONSTER_TICS_PER_FRAME, "player_mode": PM,
                       "monster_mode": MM})
     install(m)
-    cpath = checkpoints_path(m)
+    cpath = Path(a.checkpoints) if a.checkpoints else checkpoints_path(m)
     if a.suggest_checkpoints:
         t0 = time.time()
         sug = suggest(a.runs)

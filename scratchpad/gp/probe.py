@@ -1339,6 +1339,8 @@ def selftest(fjm: Path, labels_path: Path) -> int:
     # ---- C2 PLANTED VALUES read back, sit where the layout says, and do what the program says ----
     # C2a WORD kind (an 8-nibble 16.16 number): plant a far, fractional viewpoint.
     tx, ty, ta = (1272 << 16) + 0x8000, (-724 << 16) + 0x4000, 0x2E000000   # inside E1M1
+    if orc.mapname != "E1M1":       # M8 (the gate-tool audit): another map's own spawn, fractional (E1M1's pose may be void)
+        tx, ty = (orc.spawn.x & 0xFFFF0000) + 0x8000, (orc.spawn.y & 0xFFFF0000) + 0x4000
     got = {}
 
     def plant_view(pr, f):
@@ -1483,6 +1485,9 @@ def selftest(fjm: Path, labels_path: Path) -> int:
         rr2 = gb.run(len(per_run), GS.events_for(GS.full_script(RECORDED_RUN + 1, 100)))
         check("C5 negative: a DIFFERENT run's script does not reproduce it",
               rr2.ops != RECORDED_RUN_OPS, format(rr2.ops, ","))
+    elif orc.mapname != "E1M1":     # M8: the recorded totals are E1M1 blocked27's -- another map has none to replay
+        print("  C5 SKIPPED on %s: the recorded totals are E1M1 blocked27's (sha256 %s...)"
+              % (orc.mapname, RECORDED_SHA16), flush=True)
     else:
         check("C5 recorded totals exist only for sha256 %s..." % RECORDED_SHA16, False,
               "this binary is %s" % gb.sha[:16])

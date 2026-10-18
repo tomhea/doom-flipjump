@@ -629,6 +629,23 @@ def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_M
     return out, spread
 
 
+def write_tours(path, out, spread, n_frames=100):
+    """M8 (gen_dryrun.py): the map's ten tours as a DRAFT -- their keys and where the MODEL ends them (GameSim). Not a
+    record: gamespeed_trail.py --record writes the binary's, which --validate and --selftest hold the tours to."""
+    import hashlib
+    import json
+    keys = [script(r, n_frames) for r in range(len(out))]
+    doc = {"map": DEFAULT_MAP, "status": "DRAFT -- generated tours, not a record (gamespeed_trail.py --record)",
+           "frames": n_frames, "tour_targets": [list(t) for t in _tour_plan(DEFAULT_WAD, DEFAULT_MAP)[1]],
+           "model_ends": [list(r[0]) for r in out], "model_doors": [r[4] for r in out],
+           "moved_frames": [[r[3], r[2]] for r in out], "spread": spread,
+           "keys": [[sorted(k for k, v in kd.items() if v) for kd in ks] for ks in keys],
+           "generator_sha16": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]}
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(doc, indent=1) + "\n", encoding="ascii", newline="\n")
+    print("wrote %s (%d tours)" % (path, len(keys)), flush=True)
+
+
 # ----------------------------------------------------------------------------------------------
 # R9: the negative controls
 # ----------------------------------------------------------------------------------------------
@@ -794,12 +811,17 @@ def main():
                     help="G5: step the oracle, doors included, through the 10 scripts and show "
                          "where they go")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--tours-out", help="--validate: also write the ten tours (keys, the model's ends) here as a DRAFT "
+                                        "(gen_dryrun.py) -- the record a binary's trail is held to is "
+                                        "gamespeed_trail.py --record's, never this")
     a = ap.parse_args()
 
     if a.selftest:
         return selftest(a.fjm if ("--fjm" in sys.argv and Path(a.fjm).exists()) else None)
     if a.validate:
-        validate_scripts(a.runs, a.frames)
+        out, spread = validate_scripts(a.runs, a.frames)
+        if a.tours_out:
+            write_tours(a.tours_out, out, spread, a.frames)
         return 0
 
     size = read_fjm_size(a.fjm)

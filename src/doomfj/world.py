@@ -103,6 +103,7 @@ from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states
                            lift_tic, lift_walk_triggers, mover_heights, switch_sectors,
                            use_line_boxes)
 from doomfj import movers as _MV                                   # M8 F1.3: floor groups, blazing lifts
+from doomfj import lights as _LT                                   # M8: the sector light thinkers
 from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heights_for_states,
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
 from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers   # M7 P2a.1
@@ -283,6 +284,7 @@ class Layout:
     nsecret: int = 0   # P10: secret sectors (special 9) -- LEVEL COMPLETE's SECRETS
     ntele: int = 0     # M8 L4: WR teleport lines (doomfj.teleport); 0 on E1M1 -- no field, no cell
     nfloor: int = 0    # M8 F1.3: the floor groups in the WIDE layout (movers.floor_wide); 0: E1M1's one 1-bit switch
+    nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
 
     @property
     def nmobile(self) -> int:
@@ -427,6 +429,14 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     else:
         f("f_switch", 1, group="mover", phase="P2b",
           doc="the floor switch fired (S1): its sectors at the lowest surrounding floor")
+    # -- sector lights (M8, doomfj.lights): a map whose flag is on (config.MAP_CONFIG SECTOR_LIGHTS: E1M2) ---------
+    if lay.nlight:
+        f("lt_state", 4, count=lay.nlight, group="light", phase="M8", label="ltst",
+          doc="thinker k's light state (lights.LightThinker.levels, 0 its stored light); thinkers in sector order")
+        f("lt_count", 8, count=lay.nlight, group="light", phase="M8", label="ltct",
+          doc="tics to its next change (flash, strobe, fire); a glow's direction (0 down, 1 up)")
+        f("rng_light", R.STATE_BITS, group="light", phase="M8", label="rng_lt",
+          doc="the light thinkers' stream (rng.STREAM_LIGHT): the level start's rolls, then flash and fire")
     # -- sound ------------------------------------------------------------------------------------
     f("snd_alert", 1, count=lay.nsound, group="sound",
       doc="node heard a shot (DOOM's sector soundtarget)")
@@ -856,7 +866,8 @@ class World(CombatMixin):
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
                              nwalk=len(self.walk_triggers), nlift=len(self.lift_order),
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
-                             nfloor=len(self.floor_groups) if self.floor_wide else 0)
+                             nfloor=len(self.floor_groups) if self.floor_wide else 0,
+                             nlight=len(self.light_thinkers))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -947,6 +958,11 @@ class World(CombatMixin):
         self.mover_table = _MV.mover_table(secs, lds, sds)
         assert set(self.switch) <= {si for g in self.floor_groups for si in g.sectors}
         self.mover_order = sorted(set(self.lift_order) | {si for g in self.floor_groups for si in g.sectors})
+        # M8 (doomfj.lights): the animated sector light thinkers, in sector order ([] unless the map's flag is on).
+        # A light sector that is also a door or a mover would need its states crossed with theirs: refused
+        self.light_thinkers = _LT.map_thinkers(mw, M)
+        _lsx = {th.sector for th in self.light_thinkers} & (set(self.door_order) | set(self.mover_order))
+        assert not _lsx, "M8: animated light sectors %r are doors or movers" % sorted(_lsx)
         # M8 L4 (doomfj.teleport): the WR teleport lines and their destinations ([] on E1M1). P_TeleportMove's floorz
         # is the destination sector's floor, baked: it must not be a door or a mover
         from doomfj.teleport import teleporters
@@ -1113,6 +1129,11 @@ class World(CombatMixin):
         for i, t in enumerate(self.pickup_things):
             if not t.flags & bit:
                 ws.pickup_taken[i] = 1                         # not in this skill's level
+        # M8: the light thinkers at their level start (P_SpawnSpecials' first counts, on the light stream)
+        if self.light_thinkers:
+            states, counts, ws.rng_light = _LT.level_start(self.light_thinkers)
+            for k, (s_, c_) in enumerate(zip(states, counts)):
+                ws.lt_state[k], ws.lt_count[k] = s_, c_
         self._decor_now = self._decor_for(skill)
 
     # ---------------------------------------------------------------------------- the tic
@@ -1169,6 +1190,27 @@ class World(CombatMixin):
             self._projectiles_phase(ev)
             self._barrels_phase(ev)
             self._fx_phase(ev)
+            self._lights_phase()                 # M8: the sector light thinkers (none unless the map's flag is on)
+
+    def _lights_phase(self) -> None:
+        """M8 (doomfj.lights): one DOOM tic of every animated sector light thinker, in sector order -- after the
+        effects, inside the monsters' world (so `monster_tics` tics a frame, and none on a frozen level). The binary:
+        lightcode.phase_lines (`lt_phase`, fcall'd after fx_phase in the world tic's loop)"""
+        if not self.light_thinkers:
+            return
+        ws = self.ws
+        ws.rng_light = _LT.tic_all(self.light_thinkers, ws.lt_state, ws.lt_count, ws.rng_light)
+
+    def lights_now(self) -> dict:
+        """M8: {sector: light} of every animated sector this tic ({} when none) -- the render's `sector_lights`"""
+        if not self.light_thinkers:
+            return {}
+        return _LT.lights_of(self.light_thinkers, self.ws.lt_state)
+
+    def light_render_kw(self) -> dict:
+        """M8: `render_wall_frame`'s keyword for this world's lights -- {} on a map without animated lights (E1M1:
+        every picture drawn by today's call, keyword for keyword)"""
+        return {"sector_lights": self.lights_now()} if self.light_thinkers else {}
 
     def run(self, key_script: Sequence[dict]) -> List[TicEvents]:
         return [self.tic(k) for k in key_script]

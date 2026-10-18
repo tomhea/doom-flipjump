@@ -156,9 +156,15 @@ def view_drop_kw(phase) -> dict:
     """M7 P8a (V): `render_wall_frame`'s keyword for a world frame of `phase` (a MonsterPhase, or None): the dying
     view's sink (`MonsterPhase.view_drop`) -- {} while it is 0, so every picture before package A lands (and every
     living frame after it) is drawn by today's call, keyword for keyword. EVERY game-tier gate's world render passes
-    it, or `view_drop=` itself (tests/host/test_p8a_gates.py, static: rule 5)"""
+    it, or `view_drop=` itself (tests/host/test_p8a_gates.py, static: rule 5).
+    M8 (doomfj.lights): and the world's animated sector lights (`World.light_render_kw`: `sector_lights`) -- the one
+    keyword every game-tier gate's world render already spreads, so a map with light specials (E1M2) draws them in
+    every gate at once; {} on a map without (E1M1: nothing changes)"""
     d = phase.view_drop() if phase is not None else 0
-    return {"view_drop": d} if d else {}
+    out = {"view_drop": d} if d else {}
+    if phase is not None:
+        out.update(phase.world.light_render_kw())
+    return out
 
 
 class KnockTap:
@@ -733,7 +739,9 @@ class MonsterPhase:
           fight (world.infighting_on): bar_src per barrel (2 nibbles: 0 none, 1 the player, 2 + slot the FIRST
                   thing that damaged it) -- `mon_target` (state(), 2 nibbles in this mode) names 0 / 1 / 2 + slot
           p_rct   2 nibbles  M8 L4: the player's reactiontime after a teleport, 0..18 (a map with a WR teleport
-                             in a looting mode: doomfj.teleportcode)"""
+                             in a looting mode: doomfj.teleportcode)
+          ltst    1 nibble a thinker, ltct 2 nibbles a thinker, rng_lt 2 nibbles -- M8: the sector light thinkers'
+                  states, counts (a glow's direction) and stream (a map whose flag is on: doomfj.lightcode)"""
         from doomfj.world import infighting_on, knockback_on, player_loots, player_sinks
         w, ws, n = self.world, self.world.ws, self.world.layout.nmon
         out = {}
@@ -753,6 +761,10 @@ class MonsterPhase:
             out["bar_src"] = tuple(ws.bar_src)
         if getattr(w, "teleports", None) and player_loots(w.player):
             out["p_rct"] = ws.p_reaction
+        if getattr(w, "light_thinkers", None):   # M8 (doomfj.lightcode): the light thinkers' cells
+            one = len(w.light_thinkers) == 1         # the probe reads a count-1 cell as an int
+            out.update({"ltst": ws.lt_state[0] if one else tuple(ws.lt_state),
+                        "ltct": ws.lt_count[0] if one else tuple(ws.lt_count), "rng_lt": ws.rng_light})
         return out
 
     # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------

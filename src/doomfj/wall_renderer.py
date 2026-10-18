@@ -72,6 +72,8 @@ from doomfj.menu import MAIN_RESUME_SCR                                   # P10:
 from doomfj.menu import LEVEL_DONE_ENTER, LEVEL_DONE_HOLD_LAST, LEVEL_DONE_SCREENS   # P10: LEVEL COMPLETE's hold
 from doomfj import statcode as _statcode                                  # P10: LEVEL COMPLETE's stats
 from doomfj import teleportcode as _teleportcode                          # M8 L4: the WR teleports
+from doomfj import lightcode as _lightcode                                # M8: the sector light thinkers
+from doomfj import lights as _lights                                      # M8: ... and their rules
 from doomfj import keyboard as _keyboard                                   # P9: the press latch
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
@@ -256,6 +258,43 @@ def barrel_state_fields(tfields, row, floor_h: int, cls: int):
            "sp_lt": cls & 0xFF}
     out = [(n, w_, new.get(n, v)) for n, w_, v in tfields]
     return out + ([("sp_lt_hi", 2, cls >> 8)] if cls >> 8 else [])
+
+
+def light_class_fields(tfields, cls: int):
+    """M8 (doomfj.lights): a BAKED thing's xor_by fields (THING_XORBY_FIELDS' layout) at light class `cls` -- the
+    block of one light state of a thing standing in an animated light sector. The class is `ltw` = 2 bytes in the
+    animated game tier, so `barrel_state_fields`' rule: its low byte in `sp_lt`, a non-zero high byte in `sp_lt_hi`
+    (zero between things; the involution restores it). A light state's class comes from the moving-things cross
+    product, past the spawn pairs, so it can pass 255 where the stored light's did not."""
+    assert 0 <= cls < 0x10000, cls
+    out = [(n, w_, (cls & 0xFF) if n == "sp_lt" else v) for n, w_, v in tfields]
+    return out + ([("sp_lt_hi", 2, cls >> 8)] if cls >> 8 else [])
+
+
+def state_dispatch_lines(tag: str, cell: str, blocks) -> list:
+    """`sim.jump16` on the state nibble `cell` into `blocks[k]` (a list of lines) for state k, each ending at
+    `<tag>_end`; states past the last reuse the last block. The landings' idiom: plain code, so `hex.set` is legal.
+    A mover's leaf (its floor: emit_wall_renderer's `_mover_dispatch`) and, M8, an animated light's leaf (its sprite
+    light base) -- the text is the closure's it replaced, line for line."""
+    labs = [f"{tag}_{k}" for k in range(len(blocks))]
+    assert 0 < len(labs) <= 16, (tag, len(labs))
+    out = [f"    sim.jump16 {cell}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
+    for k, b in enumerate(blocks):
+        out += [f"  {labs[k]}:", *b, f"    ;{tag}_end"]
+    return out + [f"  {tag}_end:"]
+
+
+def light_thing_blocks(label: str, cell: str, field_lists) -> tuple:
+    """M8 (doomfj.lights): a BAKED thing in an animated light sector -- its xor_by block once per light state
+    (`field_lists[k]`: `light_class_fields` at state k's class), each returning to the state switch, and the switch on
+    the thinker's state nibble `cell` -> (block lines, the call line). The call site runs the call twice (SET, CLEAR),
+    as it runs a static thing's `stl.fcall`: the state cannot change between the two (the walk reads, the world tic
+    writes)."""
+    blk = []
+    for k, fields in enumerate(field_lists):
+        blk += _seg_xorby_block(f"{label}_st{k}", fields, ret=f"dsw_{label}_x")
+    blk += generate_state_switch_fj(f"dsw_{label}", [f"{label}_st{k}" for k in range(len(field_lists))]).splitlines()
+    return blk, f"    dsw_{label}_go {cell}"
 
 
 def _seg_xorby_use(label, clear=True):
@@ -650,7 +689,7 @@ def p8a_restart_parts(world) -> list:
     return out
 
 
-def p5_tic_lines(hrt, barrels: bool = False, bar_always: bool = False) -> list:
+def p5_tic_lines(hrt, barrels: bool = False, bar_always: bool = False, lights: bool = False) -> list:
     """M7 P5 -- the frame's tic after the monsters' (`tic_after_eye`): the fireballs, then the blood (projcode's
     `pj_phase` / `fx_phase`, each skipping itself while `lvdone`: world.tic's order monsters -> projectiles ->
     barrels -> effects), then the bar's health and armor (`hrt` is hurtcode.hurt_parts' dict: its `bar`, hp_bar)
@@ -661,10 +700,13 @@ def p5_tic_lines(hrt, barrels: bool = False, bar_always: bool = False) -> list:
     M8 F7 (issue #123 item 4, `bar_always`): the bar AFTER the guard, every frame -- on the frame the exit is pressed
     the player phase still runs after the press (nukage, the walk's pickups: World.tic's exit frame), so a health or
     armor change there must reach the bar; a frozen frame changes neither, so hp_bar writes the values it found. Taken
-    on a map where such a change can happen (`exit_frame_bar_hazards`); elsewhere (E1M1) the text is blocked48's."""
+    on a map where such a change can happen (`exit_frame_bar_hazards`); elsewhere (E1M1) the text is blocked48's.
+    M8 (`lights`, doomfj.lightcode): the sector light thinkers' phase after the effects (world.World._monster_world's
+    order; it skips itself while `lvdone`) -- a map whose lights animate (E1M2); elsewhere no text."""
     bar = list(hrt["bar"])
     return (["stl.fcall pj_phase, pj_pret"] + (["stl.fcall bar_phase, bar_pret"] if barrels else [])
-            + ["stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(),
+            + ["stl.fcall fx_phase, fx_pret"] + ([_lightcode.TIC_CALL] if lights else [])
+            + ["hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(),
                *([] if bar_always else bar), "p5_bar_skip:", *(bar if bar_always else [])])
 
 
@@ -1270,7 +1312,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
 
 def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                          spr_base, spr_ldbase, spr_dw, spr_cls, *, spr_cache: dict,
-                         keep=None, view_rows=(), ltw: int = 1, mobiles: int = 0):
+                         keep=None, view_rows=(), ltw: int = 1, mobiles: int = 0, extra_lights=()):
     """M14-e — everything the runtime thing table needs, baked ONCE by thing index.
 
     The static path bakes one xor-involution block per (subsector, thing), which is only possible
@@ -1297,7 +1339,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                            keep=keep)
     things = [allt[i] for i in idx]
     ssflr, sslgt_raw = subsector_tables(rm, cmap, lds, sds, secs)
-    lns = reachable_lightnums(rm, secs)
+    lns = reachable_lightnums(rm, secs, extra_lights)        # M8: + the animated lights' states
     lnpos = {ln: k for k, ln in enumerate(lns)}
     # a seg-less leaf has no sector and gets 0 -- nothing can bind to it (point location only ever
     # returns a leaf with geometry), so which row it names never matters
@@ -1732,6 +1774,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _mtab = _movers.mover_table(secs, lds, sds, door_quant) if _movers_on else {}
     _msecs = _movers.mover_secs(_mtab, secs)
     _mcell = {si: c for si, (c, _h) in _mtab.items()}
+    # M8 (doomfj.lights): THE SECTOR LIGHTS -- a map whose flag is on (config SECTOR_LIGHTS: E1M2), in the game tier,
+    # whose world runs the thinkers (doomfj.lightcode's `lt_phase`). A light sector's constants fan out over ITS states
+    # exactly as a mover's over its stops: `_lsecs[si]` the map at each of its light states (state 0 the stored light),
+    # chosen at run time by the thinker's state nibble `_lcell[si]` (ltst + k*dw) -- the walls (seg_lit), the plane
+    # pair ids (pids carry the light), the step faces' classes, a leaf's sprite light base, a baked thing's class.
+    # Off (E1M1, and every other tier): all empty, and every predicate below is exactly what it was.
+    _lth = _lights.thinkers(secs, lds, sds) if (_movers_on and cfg.SECTOR_LIGHTS) else []
+    _lsecs = {th.sector: _lights.state_secs(secs, th) for th in _lth}
+    _lcell = {th.sector: _lightcode.state_cell(k) for k, th in enumerate(_lth)}
+    assert not set(_lsecs) & (set(_dst_tbl) | set(_msecs)), (
+        f"{mapname}: animated light sectors {sorted(set(_lsecs) & (set(_dst_tbl) | set(_msecs)))} are doors or movers "
+        "-- their states would have to be crossed with the machine's")
+    _lt_extra = sorted({v for th in _lth for v in th.levels})          # every light an animated sector can show
     # the union question ("could it ever be open?") takes each floor-group sector at its LOWEST floor (a mover's
     # ceiling never moves): E1M1's pillars lowered, as before; a raised floor (58) is at its widest stored
     _flow = {si: (min(h), secs[si].ceil_h) for g in _floor_groups for si, h in g.heights if min(h) < secs[si].floor_h}
@@ -1812,49 +1867,74 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                    else lds[cmap.segs[cmap.subsectors[s_].firstseg].linedef].back].sector
         return sec_ if sec_ in _msecs else None
 
+    def _cell_dispatch(tag, cell, svs, block):
+        """`sim.jump16` on the state nibble `cell` into one block per state -- `block(sv)` gives a state's lines from
+        its sector list `svs[k]` -- each ending at `<tag>_end` (states past the last reuse the last block). The
+        landings' idiom: plain code, so `hex.set` is legal. (M8: a mover's and a light thinker's.)"""
+        return state_dispatch_lines(tag, cell, [block(sv) for sv in svs])
+
     def _mover_dispatch(tag, m_, block):
-        """M7 P2b: `sim.jump16` on mover `m_`'s state cell into one block per state -- `block(sv)`
-        gives a state's lines from its sector list -- each ending at `<tag>_end` (states past the
-        last reuse the last block). The landings' idiom: plain code, so `hex.set` is legal."""
-        svs = _msecs[m_]
-        labs = [f"{tag}_{k}" for k in range(len(svs))]
-        out_ = [f"    sim.jump16 {_mcell[m_]}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
-        for k, sv in enumerate(svs):
-            out_ += [f"  {labs[k]}:", *block(sv), f"    ;{tag}_end"]
-        return out_ + [f"  {tag}_end:"]
+        """M7 P2b: `_cell_dispatch` on mover `m_`'s state cell, over its states"""
+        return _cell_dispatch(tag, _mcell[m_], _msecs[m_], block)
+
+    def _seg_lights(seg):
+        """M8: the ANIMATED light sectors on this seg's two sides, sorted -- none unless the map's lights animate"""
+        if not _lsecs:
+            return ()
+        ld_ = lds[seg.linedef]
+        f_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
+        b_ = sds[ld_.back if seg.side == 0 else ld_.front].sector if ld_.back != -1 else None
+        return tuple(sorted({x for x in (f_, b_) if x is not None and x in _lsecs}))
+
+    def _leaf_light(s_):
+        """M8: the animated light sector subsector `s_` lies in (its first seg's front sector), or None"""
+        if not _lsecs:
+            return None
+        sg_ = cmap.segs[cmap.subsectors[s_].firstseg]
+        sec_ = sds[lds[sg_.linedef].front if sg_.side == 0 else lds[sg_.linedef].back].sector
+        return sec_ if sec_ in _lsecs else None
+
+    def _seg_machines(seg):
+        """[(sector, state cell, its per-state sector lists)] -- the machines a dynamic seg's constants switch on:
+        its door, or (M7 P2b) its mover, or (M8 L1) its two movers; then (M8) the animated light sectors on its sides.
+        At most two, the door / mover first: two take the PAIR switch (`generate_pair_state_switch_fj`)."""
+        d_ = _seg_door(seg)
+        if d_ is not None:
+            ms_ = [(d_, f"dstate + {_dslot[d_]}*dw", _dsecs[:len(_dst_tbl[d_])])]
+        else:
+            ms_ = [(m_, _mcell[m_], _msecs[m_]) for m_ in _seg_movers(seg)]
+        ms_ += [(l_, _lcell[l_], _lsecs[l_]) for l_ in _seg_lights(seg)]
+        assert len(ms_) <= 2, f"{mapname}: seg on linedef {seg.linedef} switches on {len(ms_)} state cells"
+        return ms_
 
     def _seg_cell(seg):
         """the state cell a dynamic seg's per-state blocks switch on: its door's `dstate` slot or
-        (M7 P2b) its mover's cell; None for a static seg. M8 L1: a seg between two movers switches on BOTH: the pair of
-        their cells (first mover, second mover)."""
-        d_ = _seg_door(seg)
-        if d_ is not None:
-            return f"dstate + {_dslot[d_]}*dw"
-        ms_ = _seg_movers(seg)
+        (M7 P2b) its mover's cell -- M8: or its animated light's (`ltst + k*dw`); None for a static seg. M8 L1: a seg
+        on two machines (two movers; M8: a mover or a door and a light, two lights) switches on BOTH: the pair of their
+        cells (`_seg_machines`' order)."""
+        ms_ = _seg_machines(seg)
         if len(ms_) == 2:
-            return (_mcell[ms_[0]], _mcell[ms_[1]])
-        return _mcell[ms_[0]] if ms_ else None
+            return (ms_[0][1], ms_[1][1])
+        return ms_[0][1] if ms_ else None
 
     def _seg_secs(seg):
         """The sector lists this seg's constants must be baked against: one per state of its door
-        (M7 P2b: or mover), or just the map itself. This is the ONLY place the per-state fan-out is
-        decided, so a seg nothing can move emits exactly what it emitted before doors existed."""
-        d_ = _seg_door(seg)
-        if d_ is not None:
-            return _dsecs[:len(_dst_tbl[d_])]
-        ms_ = _seg_movers(seg)
+        (M7 P2b: or mover; M8: or animated light), or just the map itself. This is the ONLY place the per-state fan-out
+        is decided, so a seg nothing can move emits exactly what it emitted before doors existed."""
+        ms_ = _seg_machines(seg)
         if len(ms_) == 2:
-            # M8 L1: every PAIR of states, the first mover's major: its state's sector list with the second mover's
-            # sector at that one's state (each mover is one sector; the lists differ from the map only there)
-            a_, b_ = ms_
+            # M8 L1: every PAIR of states, the first machine's major: its state's sector list with the second
+            # machine's sector at that one's state (a lift and a light are one sector; the lists differ from the
+            # map only there -- the seg's constants read its two sides alone)
+            (_a, _ca, sva_), (b_, _cb, svb_) = ms_
             out_ = []
-            for sa in _msecs[a_]:
-                for sb in _msecs[b_]:
+            for sa in sva_:
+                for sb in svb_:
                     sv = list(sa)
                     sv[b_] = sb[b_]
                     out_.append(sv)
             return out_
-        return [secs] if not ms_ else _msecs[ms_[0]]
+        return [secs] if not ms_ else ms_[0][2]
 
     def _door_blocks(si, seg, label, build_fields):
         """(block lines, call lines) -- the constant block, or one per state behind a switch.
@@ -1869,9 +1949,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             return _seg_xorby_block(label, build_fields(secs)), [f"    stl.fcall {label}, xb_ret"]
         cell = _seg_cell(seg)
         if isinstance(cell, tuple):
-            # M8 L1: two movers -- a block per PAIR of states behind a switch on both cells (the first mover's
-            # state switch, whose landings sim.jump16 on the second's)
-            na_, nb_ = len(_msecs[_seg_movers(seg)[0]]), len(_msecs[_seg_movers(seg)[1]])
+            # M8 L1: two movers (M8: or a machine and a light, or two lights) -- a block per PAIR of states behind a
+            # switch on both cells (the first machine's state switch, whose landings sim.jump16 on the second's)
+            na_, nb_ = (len(m_[2]) for m_ in _seg_machines(seg))
             assert len(variants) == na_ * nb_
             blk = []
             for i in range(na_):
@@ -2087,7 +2167,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname) if _do_things
         else ("", {}, {}, {}, {}))
     sprlight, spr_cls = (_lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname,
-                                             cmap, lds, sds, secs, moving_things=moving_things)
+                                             cmap, lds, sds, secs, moving_things=moving_things,
+                                             extra_lights=_lt_extra)
                          if _do_things else ("", {}))
     # h -> [bucket_height:2][bucket:2], the one runtime step of the height quantisation
     sprbkt = (generate_dispatch_table_fj(
@@ -2263,13 +2344,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     if _ANIM:
         sprlight, spr_cls = _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds,
                                                 sds, secs, moving_things=moving_things,
-                                                extra_heights=_p31["view_heights"])
+                                                extra_heights=_p31["view_heights"],
+                                                extra_lights=_lt_extra)        # M8: every light state's
     # M14-e: the runtime half of the same data, baked by INDEX rather than by (subsector, thing).
     _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS, _MT_LTB, _MT_BINDS = (
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                              spr_base, spr_ldbase, spr_dw, spr_cls, spr_cache=spr_cache,
                              keep=_mt_keep, view_rows=_p31["view_rows"] if _p31 else (),
                              ltw=2 if _p31 else 1,
+                             extra_lights=_lt_extra,       # M8: the animated lights' states reach the leaf bases
                              # M7 P6: + the drops' runtime things after the mobiles
                              mobiles=(_p31["nmob"] + _p31.get("ndrop", 0)) if _p31 else 0)
         if moving_things else ("", "", [], 0, 0, {}, []))
@@ -2500,6 +2583,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         conditional on a runtime cell."""
         return any(_seg_marks_in(seg, sv) for sv in _seg_secs(seg))
 
+    # M8 (doomfj.lights): the oracle never skips a two-sided seg with an ANIMATED light on either side (its marking
+    # test reads `sector_lights`' keys); the program walks a seg that marks in ANY state (`_seg_marks`). The two agree
+    # because every such seg marks in some light state -- an animated light differs from a static neighbour in one of
+    # its states, and two animated neighbours differ in some pair. Checked here seg for seg, so the oracle's rule is
+    # this program's, not an argument about it.
+    for _sg_lt in (cmap.segs if _lsecs else ()):
+        assert lds[_sg_lt.linedef].back == -1 or not _seg_lights(_sg_lt) or _seg_marks(_sg_lt), (
+            f"{mapname}: seg on linedef {_sg_lt.linedef} touches an animated light and marks in no state")
+
     def _seg_draws_wall(seg) -> bool:
         """M13-2S rung 3b (ablate "tsfull", measurement only): would this two-sided seg draw an
         upper or a lower wall run? (front ceiling above back ceiling / back floor above front
@@ -2572,7 +2664,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # M8 L1 + F1.3: two movers (the pairs, the first mover's state major: `_seg_secs`). The gate stays ONE
         # `hex.if0` when the shut pairs are exactly one mover's state 0 -- E1M2's linedef 1199 (lift 47 / floor 206) is
         # shut exactly while 206 stands at its stored floor, the lift's ceiling, whatever the lift's state
-        na_, nb_ = (len(_msecs[m_]) for m_ in _seg_movers(seg))
+        na_, nb_ = (len(m_[2]) for m_ in _seg_machines(seg))      # M8: a light's states too
         assert len(st_) == na_ * nb_
         if st_ == [ia == 0 for ia in range(na_) for ib in range(nb_)]:
             return cell[0]
@@ -2924,7 +3016,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 _tzmax2 = dict((n, v) for n, w, v in _tfields).get("sp_tzmax2", 0)
                 assert _tfb(_tzmax_fixed, _art[5], _art[3], cfg.SPR_REACH) and _tzmax2 <= _tzmax_fixed, (
                     f"P12: baked thing type {_t.type} outside project_thing's tight far bound -- raise Config.SPR_REACH")
+                # M8: a baked thing standing in an animated light sector -- its block once per light state
+                _tl_ = _leaf_light(s)
+                assert _tl_ is None or _tsec == secs[_tl_], ("M8: a baked thing's sector is not its leaf's", _tag)
                 if _bar and _t.type == BARREL_TYPE:
+                    assert _tl_ is None, f"M8: baked barrel {_tag} stands in animated light sector {_tl_}"
                     # M7 P6+P7: a baked barrel is hidden by its STATE here (bar_st 0); the vanishable slot its type
                     # has in every tier stays, kept equal to `bar_st != 0` by the phase (barrelcode.phase_lines'
                     # barrel_vis) -- package A's thvis layout reads it so
@@ -2935,7 +3031,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     # standing, it records the aim window (thing_leaf_bb)
                     out += _baked_barrel_site(cid, _ti, _tag, _t, _tfields, _tsec, xorby_blocks)
                     continue
-                xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", _tfields)
+                if _tl_ is None:
+                    xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", _tfields)
+                    _tcall = f"    stl.fcall thing{_tag}_consts, xb_ret"
+                else:
+                    assert _ANIM, "M8: a light state's class needs the two-byte light class (sp_lt_hi)"
+                    _tblk, _tcall = light_thing_blocks(f"thing{_tag}_consts", _lcell[_tl_], [
+                        light_class_fields(_tfields, spr_cls[(rm.wall_lightnum(_sv[_tl_].light, 0), max(1, _art[4]))])
+                        for _sv in _lsecs[_tl_]])
+                    xorby_blocks[f"T{_tag}"] = _tblk
                 out += [
                     # M14.5 §3.3: read-many, write-rarely, and the index is a COMPILE-TIME
                     # constant here -- so this is a fixed-address 1-nibble test, not a pointer
@@ -2946,9 +3050,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     f"    hex.if0 1, tstop, ss{cid}_thing{_ti}_do",
                     f"    ;ss{cid}_thing{_ti}_skip",
                     f"  ss{cid}_thing{_ti}_do:"] + [
-                        f"    stl.fcall thing{_tag}_consts, xb_ret",
+                        _tcall,
                         f"    stl.fcall {_baked_leaf}, thing_ret",
-                        f"    stl.fcall thing{_tag}_consts, xb_ret",
+                        _tcall,
                         f"  ss{cid}_thing{_ti}_skip:"]
         if _do_things and ss.numsegs and moving_things:
             # M14-e: the leaf no longer knows which things are its own -- `bind_things` decided
@@ -2960,6 +3064,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # inside thing_load meant three `read_table_packed`s PER THING for values constant
             # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
             _m_fl = _leaf_mover(s)
+            _l_lt = _leaf_light(s)                     # M8: an animated light's leaf takes its base from the state
             _ltb = _MT_LTB[rm.wall_lightnum(psec.light, 0)]
             # P13: the leaf's registers keep a ZERO INVARIANT between leaves -- the baked constants are XORed in
             # here and back out after the call (as the BSP partition blocks' constants are), where each was a
@@ -2973,12 +3078,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                       _mover_dispatch(f"sfl{cid}", _m_fl, lambda sv: [
                           f"    hex.xor_by 4, ss_flr, "
                           f"{rm._seg_sector(lds, sds, sv, cmap.segs[ss.firstseg]).floor_h & 0xFFFF}"])),
-                    f"    hex.xor_by 4, ss_ltb, {_ltb}",
+                    *([f"    hex.xor_by 4, ss_ltb, {_ltb}"] if _l_lt is None else
+                      _cell_dispatch(f"slt{cid}", _lcell[_l_lt], _lsecs[_l_lt], lambda sv: [
+                          f"    hex.xor_by 4, ss_ltb, "
+                          f"{_MT_LTB[rm.wall_lightnum(rm._seg_sector(lds, sds, sv, cmap.segs[ss.firstseg]).light, 0)]}"])),
                     "    stl.fcall thing_pass_leaf, tp_ret",
                     f"    hex.xor_by w/4, cur_ssp, sshead + {s}*dw",
                     *([f"    hex.xor_by 4, ss_flr, {psec.floor_h & 0xFFFF}"] if _m_fl is None else
                       ["    hex.zero 4, ss_flr"]),
-                    f"    hex.xor_by 4, ss_ltb, {_ltb}"]
+                    *([f"    hex.xor_by 4, ss_ltb, {_ltb}"] if _l_lt is None else ["    hex.zero 4, ss_ltb"])]
         for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
             seg = cmap.segs[si]
             ld = lds[seg.linedef]
@@ -3351,6 +3459,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # leaves (projcode), and the missile cells (which jump over themselves); behind this block's guard,
                 # where nothing falls in
                 + ((list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]]) if _hrt else [])
+                # M8 (doomfj.lightcode): the sector light thinkers' phase, lt_phase -- a leaf
+                + (_lightcode.phase_lines(_lth) if _lth else [])
                 # M7 P8a (doomfj.knockcode, package K): the thrust (kb_go), the player's and the monsters' knock
                 # moves (kb_pmove, kb_mmove, the slot stubs kbs<m>) -- leaves, jumping over themselves
                 + (_knockcode.leaf_lines(
@@ -3405,7 +3515,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             p6_common=_p6_restart[0], p6_skills=_p6_restart[1],
             p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None),     # M7 P8a: the packages' cells
             p10_common=(list(_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
-                        + (_teleportcode.level_start_lines() if _TELE else [])))             # M8 L4: no reactiontime
+                        + (_teleportcode.level_start_lines() if _TELE else [])              # M8 L4: no reactiontime
+                        + (_lightcode.level_start_lines(_lth) if _lth else [])))           # M8: the lights' start
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
@@ -3507,8 +3618,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M8 F7 (issue #123 item 4): a map where the exit frame can move the health or armor runs the bar after the
     # lvdone guard (E1M1 cannot: its text is unchanged)
     _bar_always = bool(_hrt and _exit and exit_frame_bar_hazards(map_wad, mapname, _exit)["hazards"])
-    _wt_pools = (p5_tic_lines(_hrt, barrels=bool(_bar), bar_always=_bar_always)     # M7 P6: + the barrels' phase
+    # M7 P6: + the barrels' phase; M8: + the light thinkers (doomfj.lightcode)
+    _wt_pools = (p5_tic_lines(_hrt, barrels=bool(_bar), bar_always=_bar_always, lights=bool(_lth))
                  if _hrt else [])
+    # M8 (doomfj.lights): the lights' states are the game tier world's -- its tic runs lt_phase (above, in the loop)
+    # and its leaves hold it; and the thinkers baked here are the model World's, thinker for thinker
+    assert not _lth or (_hrt and _chase and _wt_tic and _p31["world"].light_thinkers == _lth), (
+        "M8: animated sector lights need the game tier's world tic, and the model's thinkers")
     # M7 P6+P7 E: the monsters' world (the monster tic and the pools) world.MONSTER_TICS_PER_FRAME times a frame
     pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
@@ -3847,6 +3963,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *(_statcode.decls(_p31["world"]) if _STATS else []),           # P10: the stats' cells and scratch
           *(_teleportcode.decls() if _TELE else []),                      # M8 L4: p_rct and the teleports' scratch
+          *((_lightcode.decls(_lth) + _lightcode.tables(_lth)) if _lth else []),   # M8: the light cells, their tables
           *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *(WT_DECLS if (_p31 and _hrt and _WT_TICS > 1) else []),   # M7 P6+P7 E: the tempo loop's counter
@@ -5007,7 +5124,7 @@ def _thing_sector(rm, cmap, lds, sds, secs, t):
 
 
 def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, secs,
-                        *, moving_things: bool = False, extra_heights=()):
+                        *, moving_things: bool = False, extra_heights=(), extra_lights=()):
     """V4 — the sprite SHADE-ROW bank + the (lightnum, sprite world height) class each thing bakes.
 
     A billboard takes DOOM's scalelight row for its own on-screen height, exactly as a wall column
@@ -5041,7 +5158,10 @@ def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, s
         # exactly where it was, so widening the bank cannot move a pixel by itself
         # M7 P3.1: + the monsters' view heights (a view row's light class, monstercode.p31_parts)
         heights = sorted({h for (_ln, h) in cls_of} | set(extra_heights))
-        for ln in sorted({rm.wall_lightnum(s.light, 0) for s in secs}):
+        # M8 (doomfj.lights): + every light an ANIMATED sector can show (`extra_lights`) -- a thing stands in it at
+        # each of them; none on E1M1 (the classes and their order unchanged)
+        for ln in sorted({rm.wall_lightnum(s.light, 0) for s in secs}
+                         | {rm.wall_lightnum(v, 0) for v in extra_lights}):
             for h in heights:
                 cls_of.setdefault((ln, h), len(cls_of))
     # M7 P3.1: the monsters' views take the class to TWO bytes (`ltw`, the animated game tier only)

@@ -288,6 +288,7 @@ class Layout:
     nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
     nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
     nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
+    nshot: int = 0     # M8 C3: the GR 46 shot lines (doors.shot_lines): their aim ids from the top of aim_sid's byte
 
     @property
     def nmobile(self) -> int:
@@ -312,6 +313,9 @@ def aim_bits(lay: Layout) -> int:
     fj reads the cell as TWO nibbles (aimcode), so the value is held to a byte"""
     n = lay.nmon + lay.nbarrel
     assert n <= 0xFF, ("aim_sid: %d monster and barrel slots past the fj cell's byte" % n)
+    if lay.nshot:                    # M8 C3: the shot lines' ids count down from 0xFF (doors.shot_sid): the whole byte
+        assert n < 0xFF - lay.nshot + 1, ("aim_sid: %d monster and barrel ids meet the %d shot-line ids" % (n, lay.nshot))
+        return 8
     return max(7, n.bit_length())
 
 
@@ -878,7 +882,8 @@ class World(CombatMixin):
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
                              nfloor=len(self.floor_groups) if self.floor_wide else 0,
                              nlight=len(self.light_thinkers),
-                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
+                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr),
+                             nshot=len(self.door_shots))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -965,6 +970,7 @@ class World(CombatMixin):
         self.door_keyed = _D.keyed_boxes_xy(secs, lds, sds, cmap.vertexes)
         self.door_repeats = _D.repeat_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
         self.door_close = _D.close_strides(secs, lds, sds)
+        self.door_shots = _D.shot_lines(secs, lds, sds)        # M8 C3: GR 46 -- (linedef, its doors), aim ids shot_sid
         self.door_lines = door_line_ids(secs, lds, sds, tbl)
         self.open_h = {si: (secs[si].floor_h, tbl[si][-1]) for si in self.door_order}
         self.secs_c = apply_sector_heights(secs, self.open_h)   # the collision map: doors open

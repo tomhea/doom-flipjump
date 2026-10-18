@@ -720,11 +720,12 @@ def switch_door_triggers(secs, lds, sds, verts, rng: int = USE_RANGE) -> list:
 
     EV_DoDoor skips a sector whose door is ACTIVE (`sec->specialdata`): a press reaches a door only while
     it is still -- `switch_ready`. An S1 line clears itself on the first press that started a door
-    (P_ChangeSwitchTexture(line, 0) after EV_DoDoor returned 1). That latch is NOT kept, and it need not
-    be: an S1 door switch's doors are open-STAY doors (asserted), and once such a door has been
-    started it moves only up and comes to rest open, where a press changes nothing (`door_tic`) --
-    so every press after the first finds nothing to do, latched or not. (The line's TEXTURE latch is
-    doomfj.switches' -- a map's SWITCH_TEX; E1M1 animates no switch.)"""
+    (P_ChangeSwitchTexture(line, 0) after EV_DoDoor returned 1). That latch is kept only where it can be
+    SEEN (M8 C3, `switch_latches`): where the door can come back to rest shut -- a close line moves it
+    (E1M6's 103 on door 56) or it closes by itself (E1M9's 103 on DR door 135). An S1 switch whose doors
+    only ever open to stay needs none: once started such a door moves only up and rests open, where a
+    press changes nothing (`door_tic`). (The line's TEXTURE latch is doomfj.switches' -- a map's
+    SWITCH_TEX; E1M1 animates no switch.)"""
     def xy(v):
         v = verts[v]
         return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])
@@ -853,6 +854,48 @@ def repeat_triggers(secs, lds, sds, verts) -> list:
             if sec.tag == ld.tag and si in doors:
                 out.append((si, act) + _line_geo(ld, verts))
     return sorted(out)
+
+
+def requested_doors(secs, lds, sds, verts) -> frozenset:
+    """M8 C3: every door a REQUEST (`dreq`) can press -- a W1 line's (walkover_triggers), a WR 105 line's
+    (repeat_triggers "open") and a GR 46 shot's (shot_doors) -- the doors whose door tic reads `dreq` (doorcode's
+    `walked`). E1M1 / E1M2: the W1 doors, as before"""
+    out = {t[0] for t in walkover_triggers(secs, lds, sds, verts)}
+    out |= {t[0] for t in repeat_triggers(secs, lds, sds, verts) if t[1] == "open"}
+    out |= {si for _li, ts in shot_lines(secs, lds, sds) for si in ts}
+    return frozenset(out)
+
+
+def shot_lines(secs, lds, sds) -> list:
+    """M8 C3: `[(linedef, (door sector, ...))]` in linedef order -- every GR 46 line (P_ShootSpecialLine ->
+    EV_DoDoor(open), by tag) and the doors its tag names. ONE-SIDED lines only (asserted): a shot reaching one ends
+    there, so "the shot reaches it" is "the picture's nearest target in the shot's column is that wall"
+    (`render_wall_frame(aim_out=)` records it, `shot_sid`)"""
+    doors = door_sectors(secs, lds, sds)
+    out = []
+    for li, ld in enumerate(lds):
+        if ld.special in SHOOT_DOOR_KINDS and ld.tag:
+            ts = tuple(si for si, sec in enumerate(secs) if sec.tag == ld.tag and si in doors)
+            if ts:
+                assert ld.back in NO_SIDE or ld.back >= len(sds), "GR line %d is two-sided" % li
+                out.append((li, ts))
+    if out:
+        # the press's "at rest" test (EV_DoDoor's skip) is then the door tic's own: an open-STAY door no close line
+        # moves ignores a press while it opens and once it is open -- so a gate whose world is a frame behind on the
+        # doors (MonsterPhase.weapon runs before its sync) presses exactly what the model presses
+        kinds, closing = door_kinds(secs, lds, sds), close_strides(secs, lds, sds)
+        assert all(door_stay(kinds[si]) and si not in closing for _li, ts in out for si in ts), (
+            "a GR line opens a door that closes: its at-rest test would need the door's live state in every gate")
+    return out
+
+
+SHOT_SID_TOP = 0xFF     # M8 C3: GR line k's aim-window id is SHOT_SID_TOP - k (above every monster and barrel id)
+
+
+def shot_sid(k: int) -> int:
+    """M8 C3: the aim-window id of shot line k (`shot_lines` order) -- a fixed id from the top of the byte, so the
+    renderer needs no thing count to write it and `combat.window_aim` reads it back as ("shot", k)"""
+    return SHOT_SID_TOP - k
 
 
 def repeat_shape(trig: tuple) -> tuple:

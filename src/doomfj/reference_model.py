@@ -2263,6 +2263,16 @@ class ReferenceModel:
             aim_reff: dict = {}                  # radius class -> this frame's r_eff
             from doomfj.combat import MISSILERANGE_U, CombatMixin as _CM   # lazy: combat imports this
             aim_tzmax = MISSILERANGE_U << 16
+            # M8 C3: the GR 46 shot lines record into the same window (doors.shot_sid) -- none on E1M1 / E1M2
+            from doomfj.doors import shot_lines as _shot_lines, shot_sid as _shot_sid
+            _mw, _mn = scene.map_wad, scene.mapname          # the map's STORED sectors: which sectors are doors
+            _sc = self.__dict__.setdefault("_shot_cache", {})
+            if (_mw, _mn) not in _sc:
+                _sc[_mw, _mn] = {li: _shot_sid(k) for k, (li, _ts) in enumerate(
+                    _shot_lines(_mw.sectors(_mn), _mw.linedefs(_mn), _mw.sidedefs(_mn)))}
+            aim_shot = _sc[_mw, _mn]
+        else:
+            aim_shot = {}
         # 25M-CAP: `degrade=True` turns on the whole certified adaptive-degradation package;
         # the individual deg_* kwargs stay as research overrides (any explicit value wins --
         # CR-2026-08: the sentinel is None, not falsiness, so an explicit 0 = "this lever OFF").
@@ -3115,6 +3125,11 @@ class ReferenceModel:
                         col_cf[x], col_ff[x] = sec.ceil_tex, sec.floor_tex
                         pclaim[x] = 1
                         n_claimed += 1
+                    if aim_shot and seg.linedef in aim_shot and aim_lo <= x <= aim_hi and not aim_out[x - aim_lo] \
+                            and not (stack_steps and ledge_hidden(ups[x], los[x], centery, 1)):
+                        # M8 C3: a GR 46 line claims this window column, nothing nearer recorded, its horizon row
+                        # open past the nearer pieces: the shot's nearest target here (doomfj.shotcode, the fj)
+                        aim_out[x - aim_lo] = aim_shot[seg.linedef]
                     drawn[x] = 1
                     n_wdrawn += 1                # fj's n_drawn/full mirror (M13opt-P1 counter)
                 scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed

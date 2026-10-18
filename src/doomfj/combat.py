@@ -901,6 +901,16 @@ class CombatMixin:
             ev.shots.append((weapon, col, None, dmg))
             return
         tgt = self.aim(self, col)
+        if tgt is not None and tgt[0] == "shot":
+            # M8 C3: the column's nearest target is a GR 46 line (the picture's record): a BULLET reaching it opens
+            # its doors (P_ShootSpecialLine -> EV_DoDoor(open)); a melee swing is treated as reaching nothing (the
+            # record holds no depth: the fist would otherwise open it from across the room). No puff, no damage.
+            if reach < MISSILERANGE_U:
+                tgt = None
+            else:
+                ev.shots.append((weapon, col, tgt, dmg))
+                self.shot_press(tgt[1])
+                return
         if tgt is not None:
             x, y = self._target_xy(tgt)
             if W.aprox_distance(x - (ws.px >> 16), y - (ws.py >> 16)) > reach:
@@ -917,6 +927,15 @@ class CombatMixin:
         else:
             self.damage_barrel(i, dmg, ("player", -1), ev)
         ev.hits.append((weapon, kind, i, dmg))
+
+    def shot_press(self, k: int) -> None:
+        """M8 C3: shot line k (`World.door_shots`) was hit: EV_DoDoor(open) on each door its tag names that is at rest
+        (doors.switch_ready) -- a request (`d_monreq`) its next door tic presses, as a walk-over line's"""
+        ws = self.ws
+        for si in self.door_shots[k][1]:
+            d = self.door_order.index(si)
+            if _D.switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d])):
+                ws.d_monreq[d] = 1
 
     def _target_xy(self, tgt) -> Tuple[int, int]:
         kind, i = tgt
@@ -963,6 +982,8 @@ class CombatMixin:
         sid = world.ws.aim_sid[col - world.aim_lo]
         if sid == 0:
             return None
+        if sid > _D.SHOT_SID_TOP - world.layout.nshot:          # M8 C3: a GR 46 line (doors.shot_sid)
+            return ("shot", _D.SHOT_SID_TOP - sid)
         nmon = world.layout.nmon
         return ("mon", sid - 1) if sid <= nmon else ("bar", sid - 1 - nmon)
 

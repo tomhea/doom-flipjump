@@ -86,9 +86,15 @@ def supported_line_specials():
     for s in doors.STAY_DOOR_SPECIALS:
         out[s] = "doors (D1 open-stay)"
     for s in doors.WALKOVER_SPECIALS:
-        out[s] = "doors (walk-over %s, per line, by tag)" % doors.WALK_DOOR_KINDS[s]
+        out[s] = "doors (walk-over %s, per line, by tag%s)" % (doors.WALK_DOOR_KINDS[s],
+                                                                ", WR: at rest" if s in doors.WALK_REPEAT else "")
     for s, (_k, once) in doors.SWITCH_DOOR_KINDS.items():
-        out[s] = "doors (%s switch, by tag)" % ("S1" if once else "SR")
+        out[s] = "doors (%s switch, by tag%s)" % ("S1" if once else "SR", ", locked %s" % doors.SWITCH_DOOR_CARDS[s]
+                                                  if s in doors.SWITCH_DOOR_CARDS else "")
+    for s, stride in doors.CLOSE_DOOR_KINDS.items():         # M8 C3
+        out[s] = "doors (WR close, stride %d, holds on a thing)" % stride
+    for s in doors.SHOOT_DOOR_SPECIALS:                       # M8 C3
+        out[s] = "doors (GR shot line: the picture's aim window, guns only)"
     for s in movers.LIFT_WALK_SPECIALS | movers.LIFT_USE_SPECIALS:
         out[s] = "movers (lift)"
     for s in movers.FLOOR_SWITCH_SPECIALS:
@@ -253,11 +259,39 @@ class Survey:
         if slanted:
             self.row("INFO", "doors with slanted or split sides", slanted, "",
                      "contact by every boundary line (M8 L2: doorcode runs the slanted lines)")
-        # a CLOSING door some box fits inside needs the centre-inside test, which doorcode does not run
-        refused = [si for si, (area, _) in geo.items() if area and area[0] == "poly" and area[2]
-                   and not doors.door_stay(kinds[si])]
+        # a CLOSING door some box fits inside needs the centre-inside test, which doorcode runs (M8 C3) for a CONVEX
+        # polygon only (doorcode.convex_edges); a door closes when its kind does or a close line moves it
+        from doomfj.doorcode import convex_edges
+        closing = doors.close_strides(secs, lds, sds) if st else {}
+        fit = [si for si, (area, _) in geo.items() if area and area[0] == "poly" and area[2]
+               and (not doors.door_stay(kinds[si]) or si in closing)]
+        refused = []
+        for si in fit:
+            try:
+                convex_edges(geo[si][0][1])
+            except AssertionError:
+                refused.append(si)
+        if fit:
+            self.row("INFO", "closing doors a box fits inside (doorcode: the convex centre-inside test)", fit)
         if refused:
-            self.row("REFUSED", "closing doors a box fits inside (doorcode: no centre-inside test)", refused, "", "")
+            self.row("REFUSED", "closing doors a box fits inside, not convex (doorcode.convex_edges)", refused, "", "")
+        # M8 C3: the door rules every map is checked against (each asserts in the model: a refusal names the line)
+        mixed = doors.mixed_card_doors(secs, lds, sds) if st else {}
+        if mixed:
+            self.row("INFO", "doors whose lines need different cards (front use boxes: doors.keyed_boxes_xy)",
+                     sorted(mixed))
+        self.guard("WR close lines (doors.close_strides: an open-stay door, one stride)",
+                   lambda: doors.close_strides(secs, lds, sds))
+        lat = []
+        self.guard("S1 door switches that keep a latch (doors.switch_latches: one door each)",
+                   lambda: lat.extend(doors.switch_latches(secs, lds, sds)))
+        if lat:
+            self.row("INFO", "S1 door switches with a latch (a W1 bit each)", len(lat))
+        shots = []
+        self.guard("GR shot lines (doors.shot_lines: one-sided)", lambda: shots.extend(doors.shot_lines(secs, lds, sds)))
+        if shots:
+            self.row("INFO", "GR shot lines (aim ids from 0xFF down; guns only; no monster hitscan)",
+                     [li for li, _t in shots])
         self.guard("walk-over triggers (per line, every tagged door)",
                    lambda: doors.walkover_triggers(secs, lds, sds, self.verts))
         self.guard("door switches (SR 63 / S1 103)",

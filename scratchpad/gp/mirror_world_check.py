@@ -402,7 +402,7 @@ def closed_view_check(orc, dsim, look: dict, out: list, flip: bool = False) -> d
     movers against the same view with the line opened (`OpenLineWad`: see-through) -- a changed pixel sees the line
     drawn solid. `flip` (the control): the view turned 180 degrees. -> {"lowering": frames, "lowered": frames}"""
     from doomfj.doors import heights_for_states
-    from doomfj.reference_model import SimState, build_scene
+    from doomfj.reference_model import GAME_RENDER_KW, SimState, build_scene
     g = look["group"]
     grp = dsim.mp.groups[g]
     m = orc.mapname
@@ -424,7 +424,7 @@ def closed_view_check(orc, dsim, look: dict, out: list, flip: bool = False) -> d
         if key not in scenes:
             scenes[key] = (build_scene(orc.mw, orc.mw, m, h), build_scene(proxy, proxy, m, h))
         views = [bytes(orc.rm.render_wall_frame(SimState(x, y, a, m), sc_, sprite_wad=orc.art,
-                                                thing_hidden=set(orc.hidden), **orc.RENDER_KW))
+                                                thing_hidden=set(orc.hidden), **GAME_RENDER_KW))   # the shared set (= probe's RENDER_KW)
                  for sc_ in scenes[key]]
         if views[0] != views[1]:
             seen[case] += 1

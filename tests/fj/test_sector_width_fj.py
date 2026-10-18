@@ -139,7 +139,8 @@ def _program(mut=None):
     for s in NOISE_PROBE:
         body += ["hex.set %d, nz_sec, %d" % (NIB, s), "stl.fcall nzt_go, nzt_ret", "hex.print_as_digit 3, nzt_res, 0"]
     body += ["stl.output 10", "stl.loop"]
-    fake = types.SimpleNamespace(nsound=1, sec_nibbles=NIB)
+    fake = types.SimpleNamespace(nsound=1, sec_nibbles=NIB,      # M8 L5: no ML_SOUNDBLOCK line (noise_decls asks)
+                                 _sound_block_door_edges=[], _sound_block_static_edges=[], door_order=[], mover_order=[])
     decls = (MC.p32a_decls(schema, n, {**{f: [0] * n for f in MC.P32A_FIELDS}, "sched_cursor": 0}, n, NIB)
              + MC.p32b_decls(schema, n, {f: [0] * n for f in MC.P32B_FIELDS}, MSEC, NIB)
              + NZ.noise_decls(fake) + ["nzt_res: hex.vec 3", "nzt_ret: hex.vec w/4"])

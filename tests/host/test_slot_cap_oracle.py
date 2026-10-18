@@ -130,6 +130,8 @@ def test_mutant_of_the_oracle_fails_this_file(label, old, new):
         p.write_text(text.replace(old, new), encoding="utf-8")
         r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-k", "not mutant",
                             str(Path(__file__).resolve())], capture_output=True, text=True, cwd=ROOT, timeout=600,
-                           env=dict(os.environ, PYTHONPATH=str(Path(t) / "src")))
+                           # the CI shard (PYTEST_SHARD) would deselect the inner run: 0 tests, rc 5 -- it is the WHOLE file
+                           env={k: v for k, v in dict(os.environ, PYTHONPATH=str(Path(t) / "src")).items()
+                                if k != "PYTEST_SHARD"})
     tail = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else r.stderr[-300:]
     assert r.returncode == 1 and " failed" in tail and "error" not in tail, (label, tail)

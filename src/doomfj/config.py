@@ -350,6 +350,10 @@ MAP_CONFIG = {
     "E1M7": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "TSV_NIBBLES": 4},
     # M8 C11 (E1M9): SPR_SLOT_CAP -- 293 drawable things over the skills (wall_renderer.check_slot_ids)
     "E1M9": {"SPR_SLOT_CAP": 255},
+    # M8 C11: SPR_SLOT_CAP for the wave-1 / wave-3 maps past a byte of drawable things over the skills (level_survey:
+    # E1M3 352, E1M4 340, E1M5 330, E1M6 461) -- a per-map entry their own level rungs extend with their widths
+    "E1M3": {"SPR_SLOT_CAP": 255}, "E1M4": {"SPR_SLOT_CAP": 255}, "E1M5": {"SPR_SLOT_CAP": 255},
+    "E1M6": {"SPR_SLOT_CAP": 255},
     # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's ONLY entry -- the map page, at 40 units a pixel (doomfj.
     # automap). Every other field keeps its default, which is what E1M1 had with no entry at all
     "E1M1": {"AUTOMAP": 1},

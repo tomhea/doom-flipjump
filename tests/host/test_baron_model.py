@@ -246,3 +246,14 @@ def test_control_a_boss_death_without_the_player_check_is_caught(e1m8, monkeypat
     monkeypatch.setattr(World, "_a_boss_death", broken)
     with pytest.raises(AssertionError):
         test_boss_death_needs_a_live_player(e1m8)
+
+
+def test_the_radius_classes_hold_30_and_one_other():
+    """M8 C8 (world.radius_classes): class 0 is 20 on every core map, E1M8's 24; a third radius (a lost soul's 16 beside
+    an imp's 20) is refused -- the survey's radius row reports it"""
+    from doomfj.world import radius_classes
+    assert radius_classes([20, 30, 20]) == (20, 30) == radius_classes([30]) == radius_classes([])
+    assert radius_classes([24, 24]) == (24, 30) == radius_classes([24, 30])
+    for bad in ([16, 20, 30], [16, 24], [20, 24]):
+        with pytest.raises(AssertionError):
+            radius_classes(bad)

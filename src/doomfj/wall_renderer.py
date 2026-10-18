@@ -5188,10 +5188,14 @@ def anim_frames(map_wad, mapname) -> dict:
     types = {t.type for t in map_wad.things(mapname) if t.type in MONSTER_TYPES}
     actors = ANIM_ACTORS + (("MT_TFOG",) if any(ld.special in TELEPORT_SPECIALS
                                                   for ld in map_wad.linedefs(mapname)) else ())
-    # M8 C8: a monster type's missile other than the imp's (the Baron's MT_BRUISERSHOT) -- only on a map with it
-    actors += tuple(sorted({gd.MISSILE_OF[gd.MOBJINFO[n].name] for n in gd.MOBJINFO
-                            if gd.MOBJINFO[n].doomednum in types and gd.MOBJINFO[n].name in gd.MISSILE_OF}
-                           - set(ANIM_ACTORS)))
+    # M8 C8: the map's monster missiles -- the Baron's MT_BRUISERSHOT only on a map with a Baron; and the imp's
+    # MT_TROOPSHOT (an ANIM_ACTOR) only on a map with an imp or without any other shooter (E1M8: no BAL1 frames in the
+    # bank, gap G6; every map with an imp -- E1M1, E1M2 -- unchanged)
+    missiles = {gd.MISSILE_OF[gd.MOBJINFO[n].name] for n in gd.MOBJINFO
+                if gd.MOBJINFO[n].doomednum in types and gd.MOBJINFO[n].name in gd.MISSILE_OF}
+    if missiles and "MT_TROOPSHOT" not in missiles:
+        actors = tuple(a for a in actors if a != "MT_TROOPSHOT")
+    actors += tuple(sorted(missiles - set(ANIM_ACTORS)))
     out: dict = {}
     for name, mi in sorted(gd.MOBJINFO.items()):
         if mi.doomednum not in types and name not in actors:
@@ -5213,7 +5217,9 @@ def anim_patches(sprite_wad, frames) -> dict:
     off the wad's own lump names: `TROOA1` is rotation 1, `TROOA2A8` is rotation 2 and, MIRRORED,
     rotation 8; a `...A0` lump is every rotation (0). A frame with no lump at all is an error: P3
     would have nothing to draw."""
-    names = [n for n in sprite_wad.names() if len(n) in (6, 8)]
+    # M8 C8: a sprite lump's rotation characters are digits -- BOSSBACK (Doom II's cast backdrop, in freedoom1.wad) has
+    # the Baron's prefix and an 8-character name, and is no sprite
+    names = [n for n in sprite_wad.names() if len(n) in (6, 8) and n[5].isdigit() and (len(n) == 6 or n[7].isdigit())]
     out = {}
     for sprite, idxs in frames.items():
         for fi in idxs:

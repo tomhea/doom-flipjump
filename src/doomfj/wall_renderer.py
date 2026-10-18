@@ -590,8 +590,42 @@ STANDALONE_SCRATCH_DECLS = [
 ]
 
 
+def seg_shut_gate(st, dims):
+    """M8 C4 -- THE DYNAMIC SEG'S GATE, the one rule `emit_wall_renderer._seg_dual_cell` and the survey take: a seg's
+    shut pattern `st` (one bool per state; for two machines the first one's state major) over machines of `dims` states
+    -> "never" (a marking seg), "every" (the solid path, `_seg_closed_moving`), `(machine index, shut mask)` when the
+    pattern is a function of ONE machine's state (bit k: shut at its state k -- E1M1's doors: exactly state 0, mask 1;
+    M8 C4: a lift shut while near its top, E1M3's 515, a prefix), or None: it needs both machines' states (refused)"""
+    st = list(st)
+    if not any(st):
+        return "never"
+    if all(st):
+        return "every"
+    if len(dims) == 1:
+        return 0, sum(1 << k for k, x in enumerate(st) if x)
+    na, nb = dims
+    assert len(st) == na * nb
+    for m, n in ((0, na), (1, nb)):
+        per = [st[i * nb + j] for i in range(na) for j in range(nb)]
+        key = (lambda i, j: i) if m == 0 else (lambda i, j: j)
+        val = {}
+        if all(val.setdefault(key(i, j), per[i * nb + j]) == per[i * nb + j] for i in range(na) for j in range(nb)):
+            return m, sum(1 << k for k in range(n) if val[k])
+    return None
+
+
+def dual_gate_lines(dc, open_lbl: str, solid_lbl: str) -> list:
+    """M8 C4: a dynamic seg's gate (`emit_wall_renderer._seg_dual_cell`'s value `dc`) -- on to `solid_lbl` while the
+    line is shut, falling through (`open_lbl`) while it is open: `hex.if0` on a cell shut exactly at state 0 (E1M1 /
+    E1M2's text), `hex.if_flags` on (cell, shut mask) otherwise"""
+    if isinstance(dc, tuple):
+        cell, mask = dc
+        return [f"    hex.if_flags {cell}, {mask:#06x}, {open_lbl}, {solid_lbl}", f"  {open_lbl}:"]
+    return [f"    hex.if0 1, {dc}, {solid_lbl}"]
+
+
 def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
-                  monsters=None, nmobile=0, skill_extra=None, nfs=1) -> tuple:
+                  monsters=None, nmobile=0, skill_extra=None, nfs=1, nfloor=0) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -629,7 +663,9 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
               *([f"    hex.zero {nlift}, lstate", f"    hex.zero {nlift}, ldir",
                  f"    hex.zero {nlift}, lsub", f"    hex.zero {WAIT_NIBBLES * nlift}, lwait",
                  # M8 F1.3: every floor group's state and timer (`nfs`: movers.fswitch_nibbles)
-                 f"    hex.zero {nlift}, lreq", f"    hex.zero {nfs}, fswitch"] if nlift else []),
+                 f"    hex.zero {nlift}, lreq", f"    hex.zero {nfs}, fswitch"] if nlift else
+                # M8 C4 (#147, lesson L36): a map with floor groups and NO lift (E1M8) -- its groups back too
+                [f"    hex.zero {nfs}, fswitch"] if nfloor else []),
               *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
@@ -653,7 +689,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
 
 def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
                     wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None,
-                    p8a_common=(), p10_common=(), nfs=1) -> tuple:
+                    p8a_common=(), p10_common=(), nfs=1, nfloor=0) -> tuple:
     """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
     values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
     emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
@@ -669,7 +705,8 @@ def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, n
               + list(p8a_common)                        # M7 P8a: the final rung's cells (p8a_restart_parts)
               + list(p10_common)))                      # P10: the level's stats (statcode.restart_lines)
     return restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=nwalk, nlift=nlift,
-                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills, nfs=nfs)
+                         monsters=monsters, hud=extra, nmobile=nmobile, skill_extra=p6_skills, nfs=nfs,
+                         nfloor=nfloor)
 
 
 def p6_restart_parts(world, bar=None, loot_slots=None) -> tuple:
@@ -1931,7 +1968,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # moves ALL its sectors (E1M2's switch sectors border each other: a line between two must see both down).
     _floor_groups = _movers.floor_groups(secs, lds, sds, door_quant) if _movers_on else []
     _mtab = _movers.mover_table(secs, lds, sds, door_quant) if _movers_on else {}
-    _msecs = _movers.mover_secs(_mtab, secs)
+    # M8 C4: a texture-change floor (20 / 22) wears its new flat in every state past its first (movers.apply_change_flats
+    # -- the oracle's scene_sectors applies the same); {} on E1M1 / E1M2, whose lists are then unchanged
+    _msecs = _movers.mover_secs(_mtab, secs, _movers.change_table(_floor_groups))
     _mcell = {si: c for si, (c, _h) in _mtab.items()}
     # M8 (doomfj.lights): THE SECTOR LIGHTS -- a map whose flag is on (config SECTOR_LIGHTS: E1M2), in the game tier,
     # whose world runs the thinkers (doomfj.lightcode's `lt_phase`). A light sector's constants fan out over ITS states
@@ -1939,7 +1978,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # chosen at run time by the thinker's state nibble `_lcell[si]` (ltst + k*dw) -- the walls (seg_lit), the plane
     # pair ids (pids carry the light), the step faces' classes, a leaf's sprite light base, a baked thing's class.
     # Off (E1M1, and every other tier): all empty, and every predicate below is exactly what it was.
-    _lth = _lights.thinkers(secs, lds, sds) if (_movers_on and cfg.SECTOR_LIGHTS) else []
+    # M8 C4: and the light switches' sectors (138, kind "switch") on any map that has one -- `lights.game_thinkers`, the
+    # model's own list (World.light_thinkers: asserted equal below)
+    _lth = _lights.game_thinkers(secs, lds, sds, bool(cfg.SECTOR_LIGHTS)) if _movers_on else []
     _lsecs = {th.sector: _lights.state_secs(secs, th) for th in _lth}
     _lcell = {th.sector: _lightcode.state_cell(k) for k, th in enumerate(_lth)}
     assert not set(_lsecs) & (set(_dst_tbl) | set(_msecs)), (
@@ -1983,7 +2024,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
         if _movers_on and dt:
             dt = dt + lift_tic_lines(sorted(_lift_st), {si: len(v) for si, v in _lift_st.items()},
-                                     {si: _movers.lift_stride(secs, lds, si) for si in _lift_st})
+                                     {si: _movers.lift_stride(secs, lds, si) for si in _lift_st},
+                                     # M8 C4: a perpetual lift (53) runs its own machine; None on E1M1 / E1M2
+                                     {si: True for si in _lift_st if _movers.lift_perpetual(secs, lds, si)} or None)
             dt = dt + floor_tic_lines(_floor_groups)          # M8 F1.3: the moving floor groups (none on E1M1)
         if _SWI and dt:
             # M8 (doomfj.switchcode): the door phase's FIRST lines -- the SR countdown and the door switches, on the
@@ -2017,15 +2060,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
     def _seg_movers(seg):
         """M8 L1: the mover sectors (lifts, switch pillars) this seg's constants depend on, sorted -- none, one, or
-        (E1M2: e.g. linedef 1460 between movers 240 and 241) TWO. A door and a mover on one seg is refused."""
+        (E1M2: e.g. linedef 1460 between movers 240 and 241) TWO. M8 C4: a door on the other side is allowed (E1M3's
+        DR door lines 519 / 1077, a lift in front): `_seg_machines` pairs them, the door first."""
         if not _msecs:
             return ()
         ld_ = lds[seg.linedef]
         f_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
         b_ = sds[ld_.back if seg.side == 0 else ld_.front].sector if ld_.back != -1 else None
         hit = tuple(sorted({x for x in (f_, b_) if x is not None and x in _msecs}))
-        assert not hit or _seg_door(seg) is None, (
-            f"{mapname}: seg on linedef {seg.linedef} touches movers {hit} and door {_seg_door(seg)}")
         if len(hit) == 2 and _mcell[hit[0]] == _mcell[hit[1]] and _msecs[hit[0]] == _msecs[hit[1]]:
             return hit[:1]          # one machine (the floor-switch sectors: `fswitch`): its states carry both sectors
         return hit
@@ -2069,12 +2111,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     def _seg_machines(seg):
         """[(sector, state cell, its per-state sector lists)] -- the machines a dynamic seg's constants switch on:
         its door, or (M7 P2b) its mover, or (M8 L1) its two movers; then (M8) the animated light sectors on its sides.
-        At most two, the door / mover first: two take the PAIR switch (`generate_pair_state_switch_fj`)."""
+        At most two, the door / mover first: two take the PAIR switch (`generate_pair_state_switch_fj`). M8 C4: a door
+        and a mover (E1M3's door lines in front of a lift) -- the door first, then the mover."""
         d_ = _seg_door(seg)
-        if d_ is not None:
-            ms_ = [(d_, f"dstate + {_dslot[d_]}*dw", _dsecs[:len(_dst_tbl[d_])])]
-        else:
-            ms_ = [(m_, _mcell[m_], _msecs[m_]) for m_ in _seg_movers(seg)]
+        ms_ = [(d_, f"dstate + {_dslot[d_]}*dw", _dsecs[:len(_dst_tbl[d_])])] if d_ is not None else []
+        ms_ += [(m_, _mcell[m_], _msecs[m_]) for m_ in _seg_movers(seg)]
         ms_ += [(l_, _lcell[l_], _lsecs[l_]) for l_ in _seg_lights(seg)]
         assert len(ms_) <= 2, f"{mapname}: seg on linedef {seg.linedef} switches on {len(ms_)} state cells"
         return ms_
@@ -2851,30 +2892,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             return min(f_.ceil_h, b_.ceil_h) <= max(f_.floor_h, b_.floor_h)
 
         st_ = [_shut(sv) for sv in _seg_secs(seg)]
-        if not any(st_) or all(st_):
-            return None                    # never shut: a marking seg; shut at EVERY state: `_seg_closed_moving`
-        # M8 (CR of #146): the gate is `hex.if0` on a state cell -- a seg OPEN at state 0 and shut at a later state
-        # has no such gate and would draw open where the oracle draws a wall: refused, never silently marking
-        assert st_[0], (f"{mapname}: seg on linedef {seg.linedef} is open at state 0 and shut at states "
-                        f"{[k for k, x in enumerate(st_) if x]} of {_seg_cell(seg)}")
         cell = _seg_cell(seg)
-        if not isinstance(cell, tuple):
-            # the gate is `hex.if0` on the cell: shut must be EXACTLY state 0 (every E1M1 door; asserted since M8)
-            assert st_ == [True] + [False] * (len(st_) - 1), (
-                f"{mapname}: seg on linedef {seg.linedef} is shut at states {[k for k, x in enumerate(st_) if x]}, "
-                f"not exactly state 0 of {cell}")
-            return cell
-        # M8 L1 + F1.3: two movers (the pairs, the first mover's state major: `_seg_secs`). The gate stays ONE
-        # `hex.if0` when the shut pairs are exactly one mover's state 0 -- E1M2's linedef 1199 (lift 47 / floor 206) is
-        # shut exactly while 206 stands at its stored floor, the lift's ceiling, whatever the lift's state
-        na_, nb_ = (len(m_[2]) for m_ in _seg_machines(seg))      # M8: a light's states too
-        assert len(st_) == na_ * nb_
-        if st_ == [ia == 0 for ia in range(na_) for ib in range(nb_)]:
-            return cell[0]
-        if st_ == [ib == 0 for ia in range(na_) for ib in range(nb_)]:
-            return cell[1]
-        raise AssertionError(f"{mapname}: seg on linedef {seg.linedef} between two movers is shut at pairs "
-                             f"{[divmod(k, nb_) for k, x in enumerate(st_) if x]}, not one mover's state 0")
+        cells_ = list(cell) if isinstance(cell, tuple) else [cell]
+        # M8 C4 (`seg_shut_gate`, the survey's rule too): the gate reads ONE machine's state -- `hex.if0` when shut is
+        # EXACTLY its state 0 (every E1M1 / E1M2 seg: their text unchanged), else `hex.if_flags` on its shut MASK (a
+        # lift shut while near its top: E1M3's 515, E1M7's 269 ...; M8 L1 + F1.3: of two machines, the one the shut
+        # pairs depend on -- E1M2's 1199 on floor 206's state 0). A pattern of both machines is refused
+        g_ = seg_shut_gate(st_, [len(m_[2]) for m_ in _seg_machines(seg)])
+        if g_ in ("never", "every"):
+            return None                    # never shut: a marking seg; shut at EVERY state: `_seg_closed_moving`
+        assert g_ is not None, (f"{mapname}: seg on linedef {seg.linedef} is shut at states "
+                                f"{[k for k, x in enumerate(st_) if x]} of {cell}: no one machine's state decides it")
+        m_, mask_ = g_
+        return cells_[m_] if mask_ == 1 else (cells_[m_], mask_)
 
     def _seg_closed_moving(seg) -> bool:
         """M8 (CR of #146: E1M2 lines 2033 / 2062 (tag 10) and 2050 / 2075 (tag 41)): a DYNAMIC seg -- a door's or a
@@ -3474,7 +3504,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # `hex.if0` on the door's own state cell: state 0 IS shut, so shut takes the SOLID
                 # arm (the closed line is a wall) and every open state takes the marking arm.
                 _dc = _seg_dual_cell(seg)                  # M7 P2b: a door's or a mover's (M8: one of two)
-                out.insert(_mark0, f"    hex.if0 1, {_dc}, ss{cid}_seg{si}_solid")
+                _gl = dual_gate_lines(_dc, f"ss{cid}_seg{si}_open", f"ss{cid}_seg{si}_solid")
+                out[_mark0:_mark0] = _gl
+                _mark1 += len(_gl) - 1
                 out.insert(_mark1 + 1, f"    ;ss{cid}_seg{si}_dualend")
                 out.insert(_mark1 + 2, f"  ss{cid}_seg{si}_solid:")
                 out.append(f"  ss{cid}_seg{si}_dualend:")
@@ -3724,6 +3756,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
             nfs=_movers.fswitch_nibbles(_floor_groups),                 # M8 F1.3: the fswitch vector
+            nfloor=len(_floor_groups),                                  # M8 C4 (#147): restarted without a lift
             monsters=_p31["restart"] if _p31 else None,
             hud_restart=_hud["restart"] if _hud else None, wpn_restart=_wpn["restart"] if _hud else (),
             aim=bool(_AIM), hrt_restart=_hrt["restart"] if _hrt else (),
@@ -3755,6 +3788,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _press_miss = (use_line_lines(use_line_boxes(secs, lds, map_wad.vertexes(mapname), LIFT_USE_SPECIALS),
                                   [], _movers.lift_slots_of_tag(secs, sorted(_lift_slot)), _floor_groups,
                                   _movers.floor_use_boxes(lds, map_wad.vertexes(mapname), _floor_groups))
+                   # M8 C4: and the light switches (138), after them (combat._use_lines' order); none on E1M1 / E1M2
+                   + _lightcode.switch_use_lines(_lights.light_switch_uses(secs, lds, map_wad.vertexes(mapname), _lth))
                    if (_movers_on and _exit) else [])
     # M8 (doomfj.switchcode): the switch textures' floor and lift lines, on a use press before the exit's boxes
     _press_first = (_switchcode.use_press_lines(_SWI, _floor_groups, _movers.floor_wide(_floor_groups))

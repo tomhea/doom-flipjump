@@ -347,8 +347,10 @@ class MonsterPhase:
     def switch_uses(self, movers: tuple, x16: int, y16: int) -> None:
         """a use PRESS's switch step, called by a gate on the press edge BEFORE its exit test and its
         `movers.MoverPhase.use_press`: `movers` the gate's mover state (lifts, req, switched) -- World.switch_uses on
-        the lifts' states and the floor groups' timers (the wide fswitch vector's second half; E1M1's layout has none)"""
+        the lifts' states and the floor groups' timers (the wide fswitch vector's second half; E1M1's layout has none).
+        M8 C4: and the light switches' presses (World.light_presses: none on E1M1 / E1M2)"""
         w = self.world
+        w.light_presses(x16, y16)                 # M8 C4: the light switches (138) -- the World's own cells
         if not w.switch_cells:
             return
         lifts, _req, sw = movers

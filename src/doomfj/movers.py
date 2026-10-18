@@ -27,6 +27,16 @@ KNOWN SIMPLIFICATIONS (M8 F1.3, recorded in docs/handoff-e1m2.md 3): a floor's d
 neighbours' STORED floors (EV_DoFloor reads them at the trigger: E1M2's sector 206 borders blazing lift 47, which
 could be down then); the S1 switch textures do not change (M8: they do on a SWITCH_TEX map -- doomfj.switches); the
 floors move on the doors' 16-unit grid.
+
+M8 C4 (the episode, docs/episode-plan.md 2): 36 W1 turbo lower (71's rule, walked); 20 S1 / 22 W1 raise to the next
+higher floor and change the flat (EV_DoPlat raiseToNearestAndChange: PLATSPEED/2, a stop every 8 frames; the
+special -- the nukage -- cleared at the trigger, `floor_fired`; the new flat drawn from the first stop on,
+`apply_change_flats`); 7 S1 stairs (EV_BuildStairs build8 line for line, `stair_destinations`: an 8-unit grid, a stop
+every 8 frames, every step one group); 53 W1 perpetual lift (`perpetual_tic`). Their KNOWN SIMPLIFICATIONS: the
+perpetual lift starts DOWN (DOOM rolls P_Random() & 1); the changed flat shows one stop (8 frames) after the trigger
+(the damage stops at the trigger, exact); a stair step or a 20 / 22 floor is assumed still at the trigger (EV_* skip a
+busy sector: none of E1M3 / E1M6's is a door or another mover -- asserted in `floor_groups`); a lift whose low equals
+its high (E1M3's 180, tag 15's second sector) stays a one-state lift, as before.
 """
 from __future__ import annotations
 
@@ -45,6 +55,14 @@ LIFT_FAST_STRIDE = 2
 LIFT_MONSTER_SPECIALS = frozenset({88})
 FLOOR_SWITCH_SPECIALS = frozenset({23})       # S1 Floor Lower to Lowest
 LIFT_WAIT = 26                                # frames at the bottom (D-L1: 37 x 105/150)
+# M8 C4: the PERPETUAL lift (53 W1, EV_DoPlat perpetualRaise): between the lowest surrounding floor (or its own) and the
+# highest (or its own) at PLATSPEED -- a quarter of the lift's PLATSPEED*4, a stop every PERP_SUB frames -- waiting
+# LIFT_WAIT (PLATWAIT, the lift's) at BOTH ends, for ever once started (`perpetual_tic`). Its first direction is
+# P_Random() & 1 in DOOM; here always DOWN (a recorded simplification: no roll, so no stream). A lift slot like the
+# others (`lstate` ...), so every reader takes it from `mover_table`; its line is a W1 walk-over (players only: 53 is
+# not on P_CrossSpecialLine's monster list).
+LIFT_PERPETUAL_SPECIALS = frozenset({53})
+PERP_SUB = 4
 
 # M8 F1.3 -- the ONE-SHOT FLOOR MOVERS (EV_DoFloor), each line special's (trigger, destination, frames a stop):
 #   * trigger "S" a use press in the line's box (S1), "W" an accepted player move crossing the line (W1);
@@ -60,12 +78,30 @@ LIFT_WAIT = 26                                # frames at the bottom (D-L1: 37 x
 # or at their destination (EV_DoFloor's specialdata check) -- raiseFloor24 on one line only (asserted).
 FLOOR_SUB = 4
 FLOOR_TURBO_SUB = 1
+FLOOR_PLAT_SUB = 8            # M8 C4: raiseToNearestAndChange's PLATSPEED/2 (below)
+STAIR_SUB = 8                 # M8 C4: build8's FLOORSPEED/4 on its 8-unit grid (below)
 FLOOR_SPECIALS = {23: ("S", "lowest", 0),                # S1 Floor Lower to Lowest (E1M1: instant)
                   19: ("W", "highest", FLOOR_SUB),       # W1 Floor Lower to Highest neighbour floor
                   38: ("W", "lowest", FLOOR_SUB),        # W1 Floor Lower to Lowest
                   58: ("W", "up24", FLOOR_SUB),          # W1 Floor Raise 24
                   71: ("S", "turbo", FLOOR_TURBO_SUB),   # S1 Floor Turbo Lower (8 above the highest neighbour)
-                  102: ("S", "highest", FLOOR_SUB)}      # S1 Floor Lower to Highest neighbour floor
+                  102: ("S", "highest", FLOOR_SUB),      # S1 Floor Lower to Highest neighbour floor
+                  # M8 C4 (the episode's movers, docs/episode-plan.md 2):
+                  36: ("W", "turbo", FLOOR_TURBO_SUB),   # W1 Floor Turbo Lower (71's, walked over)
+                  20: ("S", "nexthigher", FLOOR_PLAT_SUB),   # S1 Raise Plat to the next higher floor + texture
+                  22: ("W", "nexthigher", FLOOR_PLAT_SUB),   # W1 the same
+                  7: ("S", "stairs8", STAIR_SUB)}            # S1 Build Stairs, 8 a step
+# M8 C4: EV_DoPlat raiseToNearestAndChange (20 / 22) moves at PLATSPEED/2, an eighth of the lift's PLATSPEED*4: a
+# 16-unit stop every 8 frames. EV_BuildStairs build8 (7) moves at FLOORSPEED/4, one unit a frame: an 8-unit stop (its
+# stairsize, `FLOOR_QUANT`) every 8 frames -- on the 16-unit grid it would need 16, past the step timer's nibble.
+STAIR_SIZE = 8
+FLOOR_QUANT = {7: STAIR_SIZE}                 # a group's grid when it is not the doors' DEFAULT_QUANT
+# M8 C4: EV_DoPlat raiseToNearestAndChange -- at the trigger every tagged sector takes the floor flat of the line's
+# FRONT sector, and its special is cleared ("NO MORE DAMAGE, IF APPLICABLE"). Here: the damage stops AT THE TRIGGER
+# (the group fired: `floor_fired`) -- exact; the flat shows from the group's FIRST STOP on (a recorded simplification:
+# `apply_change_flats` reads it off the floor height, so every sector list the mirrors build -- the oracle's
+# `scene_sectors`, the emitter's per-state `mover_secs` -- takes it with no state of its own).
+FLOOR_CHANGE_SPECIALS = frozenset({20, 22})
 FLOOR_WALK_SPECIALS = frozenset(s for s, v in FLOOR_SPECIALS.items() if v[0] == "W")
 FLOOR_USE_SPECIALS = frozenset(s for s, v in FLOOR_SPECIALS.items() if v[0] == "S")
 
@@ -92,12 +128,27 @@ def highest_surrounding(secs, lds, sds, si: int) -> int:
 
 def lift_sectors(secs, lds, sds) -> dict:
     """`{sector: (low, high)}` for every lift: `high` its stored floor, `low` the lowest surrounding
-    floor but never above its own (EV_DoPlat's `low`)"""
+    floor but never above its own (EV_DoPlat's `low`). M8 C4: a PERPETUAL lift's (53) `high` is the highest
+    surrounding floor or its own -- asserted to be its own, so state 0 is still the stored floor (E1M7's 563)."""
     out = {}
-    for si in _tagged(secs, lds, LIFT_WALK_SPECIALS | LIFT_USE_SPECIALS):
+    perp = set(_tagged(secs, lds, LIFT_PERPETUAL_SPECIALS))
+    for si in _tagged(secs, lds, LIFT_WALK_SPECIALS | LIFT_USE_SPECIALS | LIFT_PERPETUAL_SPECIALS):
         high = secs[si].floor_h
+        if si in perp:
+            assert highest_surrounding(secs, lds, sds, si) <= high, (
+                "perpetual lift %d starts below its highest neighbour: its state 0 would not be its stored floor" % si)
         out[si] = (min(high, lowest_surrounding(secs, lds, sds, si)), high)
     return out
+
+
+def lift_perpetual(secs, lds, si: int) -> bool:
+    """M8 C4: is lift `si` a perpetual one (53)? A sector a perpetual line and another lift line both tag is refused
+    (which machine runs it would depend on which line fired first; no map has one)"""
+    kinds = {ld.special in LIFT_PERPETUAL_SPECIALS for ld in lds
+             if ld.special in (LIFT_WALK_SPECIALS | LIFT_USE_SPECIALS | LIFT_PERPETUAL_SPECIALS)
+             and ld.tag and ld.tag == secs[si].tag}
+    assert len(kinds) == 1, ("lift %d: perpetual and plain lines tag it" % si, kinds)
+    return kinds.pop()
 
 
 def lift_quant(low: int, high: int, base: int = DEFAULT_QUANT) -> int:
@@ -129,7 +180,8 @@ def lift_stride(secs, lds, si: int) -> int:
     """M8 F1.3: stops a frame for lift `si` -- LIFT_FAST_STRIDE when its tag's lift lines are blazing (120 / 123), 1
     for 88 / 62. A sector both kinds tag would take the speed of the line that fired it: refused (no map has one)."""
     kinds = {ld.special in LIFT_FAST_SPECIALS for ld in lds
-             if ld.special in (LIFT_WALK_SPECIALS | LIFT_USE_SPECIALS) and ld.tag and ld.tag == secs[si].tag}
+             if ld.special in (LIFT_WALK_SPECIALS | LIFT_USE_SPECIALS | LIFT_PERPETUAL_SPECIALS)
+             and ld.tag and ld.tag == secs[si].tag}
     assert len(kinds) == 1, ("lift %d: blazing and plain lines tag it" % si, kinds)
     return LIFT_FAST_STRIDE if kinds.pop() else 1
 
@@ -155,19 +207,60 @@ def lift_tic(st: tuple, nstates: int, triggered: bool, stride: int = 1) -> tuple
     return door_tic(st, nstates, bool(triggered and st[0] == 0), stride=stride, wait_frames=LIFT_WAIT)
 
 
+def perpetual_tic(st: tuple, nstates: int, triggered: bool) -> tuple:
+    """M8 C4: one frame of a PERPETUAL lift (53, T_PlatRaise's perpetualRaise), `st` = (state, dir, sub, wait) on the
+    lift's cells. NEVER STARTED is (0, IDLE, 0, 0): a trigger then sets it going DOWN (OPENING: state up). Moving, `sub`
+    counts PERP_SUB frames a stop; reaching an end it goes IDLE with LIFT_WAIT, its sub 0; the wait run out, it moves
+    again -- UP (CLOSING) from the bottom, DOWN from the top -- so once started it is never (0, IDLE, 0, 0) again and
+    every later trigger is ignored. Increments, decrements and zero tests only, as `doors.door_tic`."""
+    from doomfj.doors import CLOSING, OPENING
+    state, dr, sub, wait = st
+    assert nstates >= 2, nstates
+    if dr == IDLE and not wait:
+        if not triggered:
+            return st
+        dr, sub = OPENING, PERP_SUB
+    if dr == OPENING:
+        sub -= 1
+        if sub == 0:
+            state, sub = state + 1, PERP_SUB
+            if state == nstates - 1:
+                dr, sub, wait = IDLE, 0, LIFT_WAIT
+    elif dr == CLOSING:
+        sub -= 1
+        if sub == 0:
+            state, sub = state - 1, PERP_SUB
+            if state == 0:
+                dr, sub, wait = IDLE, 0, LIFT_WAIT
+    else:
+        wait -= 1
+        if wait == 0:
+            dr, sub = (CLOSING if state else OPENING), PERP_SUB
+    return (state, dr, sub, wait)
+
+
+def lift_machine_tic(st: tuple, nstates: int, triggered: bool, stride: int, perpetual: bool) -> tuple:
+    """M8 C4: one frame of a lift of either machine -- the ONE dispatch the model and the gates' MoverPhase take"""
+    if perpetual:
+        assert stride == 1
+        return perpetual_tic(st, nstates, triggered)
+    return lift_tic(st, nstates, triggered, stride)
+
+
 def _xy(v):
     return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])
 
 
-def lift_walk_triggers(secs, lds, sds, verts, specials=LIFT_WALK_SPECIALS) -> list:
+def lift_walk_triggers(secs, lds, sds, verts, specials=LIFT_WALK_SPECIALS | LIFT_PERPETUAL_SPECIALS) -> list:
     """`[(lift sector, axis, coord, lo, hi)]`, one per WR line in linedef order (the shape of
     `doors.walkover_triggers`, so `doors.crossed` tests it). M8 F1.3: one per (line, lift) when the line's tag
     lowers two lifts (E1M2's tag 5: sectors 47 and 209), in sector order -- EV_DoPlat starts every tagged sector;
-    `specials` (LIFT_MONSTER_SPECIALS: the lines a monster triggers)."""
+    `specials` (LIFT_MONSTER_SPECIALS: the lines a monster triggers). M8 C4: the perpetual lift's W1 line (53) too -- a
+    request to a running perpetual lift changes nothing (`perpetual_tic`), so W1 needs no latch."""
     lifts = lift_sectors(secs, lds, sds)
     out = []
     for ld in lds:
-        if ld.special not in LIFT_WALK_SPECIALS or ld.special not in specials:
+        if ld.special not in (LIFT_WALK_SPECIALS | LIFT_PERPETUAL_SPECIALS) or ld.special not in specials:
             continue
         (ax, ay), (bx, by) = _xy(verts[ld.v1]), _xy(verts[ld.v2])
         target = [si for si in sorted(lifts) if secs[si].tag == ld.tag]
@@ -224,6 +317,7 @@ class FloorGroup:
     use: bool
     sub: int
     heights: tuple
+    change: tuple = ()          # M8 C4: ((sector, its new floor flat), ...) -- a 20 / 22 group (FLOOR_CHANGE_SPECIALS)
 
     @property
     def n(self) -> int:
@@ -249,7 +343,69 @@ def floor_destination(secs, lds, sds, si: int, rule: str) -> int:
         return h + 8 if h != own else h
     if rule == "up24":
         return own + 24
+    if rule == "nexthigher":
+        return next_higher_floor(secs, lds, sds, si)
     raise ValueError(rule)
+
+
+def next_higher_floor(secs, lds, sds, si: int) -> int:
+    """M8 C4: P_FindNextHighestFloor(sec, its floor): the least neighbour floor above its own, or its own (none)"""
+    own = secs[si].floor_h
+    up = [secs[n].floor_h for n in two_sided_neighbours(lds, sds).get(si, ()) if secs[n].floor_h > own]
+    return min(up) if up else own
+
+
+def _sector_lines(secs, lds, sds) -> dict:
+    """{sector: [linedef, ...]} in linedef order -- P_GroupLines' `sec->lines` (a line in its front sector's list, and
+    in its back sector's when that differs)"""
+    out: dict = {}
+    for i, ld in enumerate(lds):
+        f = sds[ld.front].sector
+        out.setdefault(f, []).append(i)
+        if 0 <= ld.back < len(sds) and sds[ld.back].sector != f:
+            out.setdefault(sds[ld.back].sector, []).append(i)
+    return out
+
+
+ML_TWOSIDED = 4
+
+
+def stair_destinations(secs, lds, sds, tag: int, size: int = STAIR_SIZE) -> dict:
+    """M8 C4: EV_BuildStairs, line for line -> {sector: its destination floor} for every step the line `tag` builds:
+    each tagged sector (P_FindSectorFromLineTag's order -- which, as in DOOM, resumes after the LAST step built) rises
+    `size`; then, while one of the step's two-sided lines has the step as its FRONT and a back sector with the step's
+    floor flat, the height grows by `size` (BEFORE the busy test, DOOM's own order) and that sector, unless already
+    rising, is the next step. Every sector is assumed still at the trigger (asserted by the caller: no step is a door
+    or another mover)."""
+    lines_of = _sector_lines(secs, lds, sds)
+    out: dict = {}
+    secnum = -1
+    while True:
+        nxt = [si for si in range(secnum + 1, len(secs)) if secs[si].tag == tag]
+        if not nxt:
+            return out
+        secnum = nxt[0]
+        if secnum in out:
+            continue
+        sec, height, tex = secnum, secs[secnum].floor_h + size, secs[secnum].floor_tex
+        out[sec] = height
+        ok = True
+        while ok:
+            ok = False
+            for i in lines_of.get(sec, ()):
+                ld = lds[i]
+                if not ld.flags & ML_TWOSIDED or sds[ld.front].sector != sec or not 0 <= ld.back < len(sds):
+                    continue
+                t = sds[ld.back].sector
+                if secs[t].floor_tex != tex:
+                    continue
+                height += size
+                if t in out:
+                    continue
+                sec = secnum = t
+                out[sec] = height
+                ok = True
+                break
 
 
 def floor_groups(secs, lds, sds, quant: int = DEFAULT_QUANT) -> list:
@@ -262,25 +418,46 @@ def floor_groups(secs, lds, sds, quant: int = DEFAULT_QUANT) -> list:
         if ld.special in FLOOR_SPECIALS and ld.tag:
             by_tag.setdefault(ld.tag, []).append(ld.special)
     lifts = set(lift_sectors(secs, lds, sds))
+    from doomfj.doors import door_sectors
+    taken = set(lifts) | set(door_sectors(secs, lds, sds))    # M8 C4: a sector in one machine only
     out = []
     for tag in sorted(by_tag):
-        sp = set(by_tag[tag])
-        assert len(sp) == 1, "tag %d: floor specials %s on one tag" % (tag, sorted(sp))
-        sp = sp.pop()
+        sps = set(by_tag[tag])
+        # M8 C4: one tag, one rule -- a W1 and an S1 line of the same machine may share it (E1M6's tag 1: 22 and 20);
+        # the first to fire runs it, the other then finds its sectors busy or arrived (EV_DoPlat's specialdata)
+        assert len({FLOOR_SPECIALS[s][1:] for s in sps}) == 1, "tag %d: floor specials %s on one tag" % (tag, sorted(sps))
+        sp = min(sps)
         use, rule, sub = FLOOR_SPECIALS[sp]
         assert not (rule == "up24" and len(by_tag[tag]) > 1), "tag %d: raiseFloor24 on two lines" % tag
-        sectors = [si for si, s in enumerate(secs) if s.tag == tag]
+        if rule == "stairs8":
+            dests = stair_destinations(secs, lds, sds, tag)
+            sectors = sorted(dests)
+        else:
+            dests = None
+            sectors = [si for si, s in enumerate(secs) if s.tag == tag]
         assert sectors and not set(sectors) & lifts, (tag, sectors)
+        assert not set(sectors) & taken, ("tag %d: floor sectors %s already move by another machine"
+                                          % (tag, sorted(set(sectors) & taken)))
+        taken |= set(sectors)
         travel = {}
         for si in sectors:
             start = secs[si].floor_h
-            dest = floor_destination(secs, lds, sds, si, rule)
+            dest = dests[si] if dests is not None else floor_destination(secs, lds, sds, si, rule)
             assert dest != start, "floor mover sector %d (tag %d) would not move (%d)" % (si, tag, start)
             if sp in FLOOR_SWITCH_SPECIALS:
                 assert dest < start, (si, start, dest)            # switch_sectors' assert, the same rule
             travel[si] = (start, dest)
+        change = ()
+        if sps & FLOOR_CHANGE_SPECIALS:
+            # EV_DoPlat: `sec->floorpic = sides[line->sidenum[0]].sector->floorpic` -- the FIRING line's front sector;
+            # every line of the tag must agree, or which fired first would matter
+            assert sps <= FLOOR_CHANGE_SPECIALS, (tag, sorted(sps))
+            flats = {secs[sds[ld.front].sector].floor_tex for ld in lds if ld.tag == tag and ld.special in sps}
+            assert len(flats) == 1, ("tag %d: its texture-change lines give the flats %s" % (tag, sorted(flats)))
+            flat = flats.pop()
+            change = tuple((si, flat) for si in sorted(sectors))
         if sub:
-            q = max(lift_quant(min(a, b), max(a, b), quant) for a, b in travel.values())
+            q = max(lift_quant(min(a, b), max(a, b), FLOOR_QUANT.get(sp, quant)) for a, b in travel.values())
             seqs = {}
             for si, (a, b) in travel.items():
                 st = stops(min(a, b), max(a, b), q)
@@ -290,7 +467,7 @@ def floor_groups(secs, lds, sds, quant: int = DEFAULT_QUANT) -> list:
         n = max(len(v) for v in seqs.values())
         assert n <= MAX_STATES, (tag, n)
         heights = tuple((si, tuple(v + [v[-1]] * (n - len(v)))) for si, v in sorted(seqs.items()))
-        out.append(FloorGroup(tag, sp, use == "S", sub, heights))
+        out.append(FloorGroup(tag, sp, use == "S", sub, heights, change))
     return out
 
 
@@ -349,6 +526,55 @@ def floor_heights(secs, groups, gstates) -> dict:
                 if hts[k] != secs[si].floor_h:
                     out[si] = (hts[k], secs[si].ceil_h)
     return out
+
+
+def floor_fired(state: int, sub: int) -> bool:
+    """M8 C4: has a group's line fired -- its state off 0 or its timer running (`floor_trigger`'s converse)"""
+    return bool(state or sub)
+
+
+def change_table(groups) -> dict:
+    """M8 C4: `{sector: (its stored floor, its new flat, group index)}` for every texture-change group's sector"""
+    out = {}
+    for g, grp in enumerate(groups):
+        for si, flat in grp.change:
+            out[si] = (dict(grp.heights)[si][0], flat, g)
+    return out
+
+
+def apply_change_flats(secs_now, table: dict):
+    """M8 C4: THE flat override of the texture-change floors (FLOOR_CHANGE_SPECIALS) -- `secs_now` (a sector list with
+    the movers' heights applied) with each change sector OFF its stored floor wearing its new flat. The group's floors
+    only ever rise from the stored one, so "off its stored floor" is "past its first stop". With no table, or no such
+    sector moved, the list itself comes back (no copy): E1M1 / E1M2 draw exactly what they drew."""
+    if not table:
+        return secs_now
+    import dataclasses
+    out = None
+    for si, (h0, flat, _g) in table.items():
+        s = secs_now[si]
+        if s.floor_h != h0 and s.floor_tex != flat:
+            if out is None:
+                out = list(secs_now)
+            out[si] = dataclasses.replace(s, floor_tex=flat)
+    return secs_now if out is None else out
+
+
+_MAP_CHANGE: dict = {}
+
+
+def map_change_table(map_wad, mapname: str) -> dict:
+    """M8 C4: `change_table` of a map's floor groups, cached per (wad, map) -- {} without a texture-change line (the
+    groups are not even built then, so a map whose movers the model refuses still renders its other frames)"""
+    key = (id(map_wad), mapname)
+    hit = _MAP_CHANGE.get(key)
+    if hit is None or hit[0] is not map_wad:
+        lds = map_wad.linedefs(mapname)
+        tbl = {}
+        if any(ld.special in FLOOR_CHANGE_SPECIALS for ld in lds):
+            tbl = change_table(floor_groups(map_wad.sectors(mapname), lds, map_wad.sidedefs(mapname)))
+        hit = _MAP_CHANGE[key] = (map_wad, tbl)
+    return hit[1]
 
 
 def floor_walk_triggers(lds, verts, groups) -> list:
@@ -424,9 +650,10 @@ def cell_heights(table: dict, secs, cell: str, k: int) -> dict:
     return out
 
 
-def mover_secs(table: dict, secs) -> dict:
+def mover_secs(table: dict, secs, changes=None) -> dict:
     """`{sector: [the sector list at each of its machine's states]}` -- a lift's list moves that lift alone (P2b's
-    construction, unchanged), a floor group's moves the whole group (M8 L1's switch rule)"""
+    construction, unchanged), a floor group's moves the whole group (M8 L1's switch rule). M8 C4: `changes`
+    (`change_table`) -- the texture-change floors' flats (`apply_change_flats`); None / {} on every map without one"""
     from doomfj.reference_model import apply_sector_heights
     out = {}
     for si, (cell, hts) in table.items():
@@ -434,6 +661,8 @@ def mover_secs(table: dict, secs) -> dict:
             out[si] = [apply_sector_heights(secs, {si: (h, secs[si].ceil_h)}) for h in hts]
         else:
             out[si] = [apply_sector_heights(secs, cell_heights(table, secs, cell, k)) for k in range(len(hts))]
+    if changes:                 # M8 C4: the texture-change floors wear their new flat past their first stop
+        out = {si: [apply_change_flats(sv, changes) for sv in svs] for si, svs in out.items()}
     return out
 
 
@@ -454,6 +683,7 @@ class MoverPhase:
         self.stops = lift_states(secs, lds, sds, quant)
         self.order = sorted(self.stops)
         self.stride = {si: lift_stride(secs, lds, si) for si in self.order}
+        self.perpetual = {si: lift_perpetual(secs, lds, si) for si in self.order}      # M8 C4
         self.walk = lift_walk_triggers(secs, lds, sds, verts)
         self.use = use_line_boxes(secs, lds, verts, LIFT_USE_SPECIALS)
         self.of_tag = {secs[si].tag: si for si in self.order}
@@ -485,7 +715,7 @@ class MoverPhase:
     def tic(self, state):
         lifts, req, sw = state
         fs = [floor_tic(s, u, g.n, g.sub) for g, (s, u) in zip(self.groups, self._fs(sw))]
-        return (tuple(lift_tic(st, len(self.stops[si]), si in req, self.stride[si])
+        return (tuple(lift_machine_tic(st, len(self.stops[si]), si in req, self.stride[si], self.perpetual[si])
                       for si, st in zip(self.order, lifts)), frozenset(), self._sw(fs))
 
     def use_press(self, state, x16: int, y16: int):

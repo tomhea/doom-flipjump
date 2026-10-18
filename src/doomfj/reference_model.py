@@ -724,8 +724,13 @@ def scene_sectors(scene: Scene):
     ⚠ With no override this returns the wad's own list UNCHANGED -- we add no copy and no
     allocation, so the door-free path is exactly what it was. (It is not the identical OBJECT
     across calls: `WadFile.sectors()` builds a fresh list each time. Checked, because the first
-    version of this comment claimed identity and was wrong.)"""
-    return apply_sector_heights(scene.map_wad.sectors(scene.mapname), scene.sector_heights)
+    version of this comment claimed identity and was wrong.)
+    M8 C4: and the texture-change floors (20 / 22: `movers.apply_change_flats`) wearing their new flat once they moved
+    -- read off the heights, so every scene a gate or the world builds carries it; a map without such a line gets its
+    list back from the same call, unchanged."""
+    from doomfj.movers import apply_change_flats, map_change_table
+    secs = apply_sector_heights(scene.map_wad.sectors(scene.mapname), scene.sector_heights)
+    return apply_change_flats(secs, map_change_table(scene.map_wad, scene.mapname))
 
 
 def build_scene(map_wad: WadFile, asset_wad: WadFile, mapname: str,

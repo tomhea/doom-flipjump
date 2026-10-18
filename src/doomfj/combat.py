@@ -569,6 +569,8 @@ class CombatMixin:
         dmg = SECTOR_HURT.get(special)
         if dmg is None or ws.leveltime & HURT_PERIOD_MASK:
             return
+        if self.floor_special_cleared(sec):      # M8 C4: a texture-change floor fired (EV_DoPlat clears the special)
+            return
         if not self._on_sector_floor(sec):
             return                               # "Falling, not all the way down yet?"
         ev.nukage += 1
@@ -615,6 +617,7 @@ class CombatMixin:
         for g, box in self.floor_use:
             if W.in_use_box_fixed(box, ws.px, ws.py):
                 self.floor_fire(g)
+        self.light_presses(ws.px, ws.py)          # M8 C4: the light switches (138)
 
     def player_can_open(self, si: int) -> bool:
         """EV_VerticalDoor's key check: a key door needs its card or skull; other doors nothing."""

@@ -280,11 +280,27 @@ def mover_line_states(lds, sds, mover_secs: dict, mcell: dict, fn) -> dict:
             return fn(sa[i][f].floor_h, sb[j][b].floor_h)
         if all(v(i, j) == v(i, 0) for i in range(len(sa)) for j in range(len(sb))):
             out[li] = (mcell[f], [v(i, 0) for i in range(len(sa))])
-        else:
-            assert all(v(i, j) == v(0, j) for i in range(len(sa)) for j in range(len(sb))), (
-                "line %d between movers %d, %d on two cells: its %s needs both states" % (li, f, b, fn.__name__))
+        elif all(v(i, j) == v(0, j) for i in range(len(sa)) for j in range(len(sb))):
             out[li] = (mcell[b], [v(0, j) for j in range(len(sb))])
+        else:
+            # M8 C4 (E1M6's lines 512 / 1058 / 2574 / 2799: SR lift 363 lowering into the pool 142 its 20 / 22 raises):
+            # the value needs BOTH states -- a PAIR entry, ("pair", front cell, back cell, [[value at (i, j)]]), read
+            # by `collision_cells_fj` through a two-level dispatch
+            out[li] = ("pair", mcell[f], mcell[b], [[v(i, j) for j in range(len(sb))] for i in range(len(sa))])
     return out
+
+
+def _pair_entry(e, other_cells):
+    """M8 C4: a `mover_line_states` value as a PAIR grid over `other_cells` = (cell a, cell b, na, nb) -- a one-cell
+    value broadcast over the other cell's states"""
+    ca, cb, na, nb = other_cells
+    if e[0] == "pair":
+        return e[3]
+    cell, vals = e
+    if cell == ca:
+        return [[vals[i]] * nb for i in range(na)]
+    assert cell == cb, (cell, other_cells)
+    return [list(vals) for _i in range(na)]
 
 
 # the line under test's argument cells and their widths in nibbles, in declaration order -- ONE
@@ -444,8 +460,18 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
         # M8 L1: a mover line that BLOCKS (E1M2's lift line 1143 carries ML_BLOCKMONSTERS: for the monsters' cells it
         # blocks at every state -- P_CheckPosition tests the flag before any opening) is a static blocking line
         mover_here = li in movers and row[9] == 0
+        door_mover = mover_here and li in doors
+        if door_mover:
+            # M8 C4: a DOOR line with a mover on its other side (E1M3's 519 / 1077: a DR door in front of a lift). Its
+            # opening floor never moves with the mover there (the door's floor is the higher) -- asserted; without the
+            # drop-off (the player's cells) it is a plain door line; with it (the monsters') the low floor does move:
+            # the door's gate, and on its open arm the mover's per-state block (`_mover_dispatch`)
+            assert len(movers[li]) <= 3, "door line %d beside a two-cell mover line" % li
+            assert set(movers[li][1]) == {row[11]}, ("door line %d: its opening floor moves with the mover %s"
+                                                     % (li, movers[li][1]))
+            if lowfloor is None:
+                mover_here = door_mover = False
         if mover_here:                    # M7 P2b: the opening floor comes from the mover's state
-            assert li not in doors, "mover line %d is a door line" % li
             row = row[:11] + (0,)
         consts = line_constants(row)
         if lowfloor is not None and row[9] == 0 and not mover_here:   # M7 P3.2b: the drop-off
@@ -453,7 +479,22 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
         xors = _xor_lines(consts)
         lab = f"{L}_l{li}"
         out += [f"{lab}:"] + xors
-        if mover_here and len(movers[li]) == 4 and movers[li][3] != movers[li][0]:
+        if mover_here and movers[li][0] == "pair":
+            # M8 C4: the opening floor (and the low floor) on BOTH cells -- `sim.jump16` on the first cell, then on the
+            # second, into a block per pair of states that xors its values in around the shared test and out again
+            _p, ca, cb, obg, *lfg = movers[li]
+            assert bool(lfg) == (lowfloor is not None), "a mover line's low floors come with the drop-off"
+            na, nb = len(obg), len(obg[0])
+            rowl = [f"{lab}_p{i}" for i in range(na)]
+            out += [f"    sim.jump16 {ca}, " + ", ".join(rowl + [rowl[-1]] * (16 - na))]
+            for i in range(na):
+                bl = [f"{lab}_p{i}_{j}" for j in range(nb)]
+                out += [f"  {rowl[i]}:", f"    sim.jump16 {cb}, " + ", ".join(bl + [bl[-1]] * (16 - nb))]
+                for j in range(nb):
+                    x_ = _xor_lines([("ca_ob", obg[i][j] & M32)] + ([("ca_lf", lfg[0][i][j] & M32)] if lfg else []))
+                    out += [f"  {bl[j]}:", *x_, f"    stl.fcall {L}_test, cc_tret", *x_, f"    ;{lab}_mout"]
+            out += [f"  {lab}_mout:"]
+        elif mover_here and len(movers[li]) == 4 and movers[li][3] != movers[li][0]:
             # M8 F1.3: the opening floor on one cell and the low floor on another (mover_line_states: E1M2's line
             # 1199) -- three dispatches in a row: xor the opening floor in (cell), the low floor in (lfcell) around
             # the shared test, then the opening floor out (cell)
@@ -473,7 +514,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
             out += [f"  {lab}_mc:"]
             out += disp("c", cell, obs, "ca_ob", lambda x_: [], f"{lab}_mout")
             out += [f"  {lab}_mout:"]
-        elif mover_here:
+        elif mover_here and not door_mover:
             cell, obs, *lfs = movers[li]
             lfs = lfs[:1]
             assert bool(lfs) == (lowfloor is not None), "a mover line's low floors come with the drop-off"
@@ -485,6 +526,10 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
                         f"    ;{lab}_mout"]
             out += [f"  {lab}_mout:"]
         elif li in doors:
+            # M8 C4: the open arm's test -- a door-and-mover line's per-state block, else the shared test
+            go_test = ([f"    stl.fcall {L}_test, cc_tret"] if not door_mover
+                       else _mover_dispatch(f"{lab}_g", movers[li][0], movers[li][1], movers[li][2],
+                                            f"    stl.fcall {L}_test, cc_tret"))
             assert rows[li][9] == 0, (
                 "door line %d carries static flags %d -- xoring FLAG_BLOCKING would clear them"
                 % (li, rows[li][9]))
@@ -500,7 +545,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
                     f"    hex.xor_by ca_flags, {FLAG_BLOCKING}",
                     f"    ;{lab}_out",
                     f"  {lab}_go:",
-                    f"    stl.fcall {L}_test, cc_tret",
+                    *go_test,
                     f"  {lab}_out:"]
         else:
             out.append(f"    stl.fcall {L}_test, cc_tret")
@@ -524,6 +569,17 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
 MONSTER_CELL_RADIUS = 30 << 16
 
 
+def _mover_dispatch(lab: str, cell: str, obs, lfs, test: str) -> list:
+    """M8 C4: `sim.jump16` on a mover's state `cell` into a block per state that xors that state's opening floor and
+    low floor in around `test` and out again (the mover line's own block, for a door-and-mover line's open arm)"""
+    blocks = [f"{lab}_m{k}" for k in range(len(obs))]
+    out = [f"    sim.jump16 {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
+    for k, ob in enumerate(obs):
+        obx = _xor_lines([("ca_ob", ob & M32), ("ca_lf", lfs[k] & M32)])
+        out += [f"  {blocks[k]}:", *obx, test, *obx, f"    ;{lab}_mout"]
+    return out + [f"  {lab}_mout:"]
+
+
 def monster_cells_fj(pfx: str, lds, verts, secs, sds, *, secs_open, door_line_ids, doors, msecs: dict,
                      mcell: dict, ml_blocking: int, ml_blockmonsters: int, things=()) -> tuple:
     """M7 P3.2b: `(fj text, root label)` -- the MONSTERS' cell routine (docs/gp-monsters.md 8.4): the player's
@@ -536,8 +592,15 @@ def monster_cells_fj(pfx: str, lds, verts, secs, sds, *, secs_open, door_line_id
     # M8 F1.3: each value through the cell it depends on (mover_line_states; one cell for both on every E1M1 line)
     obs = mover_line_states(lds, sds, msecs, mcell, max)
     lfs = mover_line_states(lds, sds, msecs, mcell, min)
-    movers = {li: (obs[li][0], obs[li][1], lfs[li][1]) + ((lfs[li][0],) if lfs[li][0] != obs[li][0] else ())
-              for li in obs}
+    movers = {}
+    for li in obs:
+        pair = [e for e in (obs[li], lfs[li]) if e[0] == "pair"]
+        if pair:                # M8 C4: a value on both cells -- both values as grids over the PAIR
+            _p, ca, cb, grid = pair[0]
+            dims = (ca, cb, len(grid), len(grid[0]))
+            movers[li] = ("pair", ca, cb, _pair_entry(obs[li], dims), _pair_entry(lfs[li], dims))
+            continue
+        movers[li] = (obs[li][0], obs[li][1], lfs[li][1]) + ((lfs[li][0],) if lfs[li][0] != obs[li][0] else ())
     lists = dict(cell_lists(rows, MONSTER_CELL_RADIUS))
     for c, ks in thing_cell_lists(things, MONSTER_CELL_RADIUS).items():
         lists[c] = lists.get(c, ()) + tuple(-k - 1 for k in ks)

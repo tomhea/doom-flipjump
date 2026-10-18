@@ -96,3 +96,28 @@ def test_key_line_table_is_dooms_and_covers_the_models():
     assert all(GR.KEY_LINE_COLOURS[s] == colour[cards[0]] for s, cards in KEY_DOOR_CARDS.items())
     import scenarios_map as SM
     assert set(SM.KEY_SPECIALS) == set(GR.KEY_LINE_COLOURS)
+
+
+def test_m3_walk_crossing_a_special_line_is_named():
+    """m3_gate.special_crossings: a path straight across a special line names it (the control), the spawn's own walk on
+    every E1 map crosses none (the refusal m3_gate now makes never fires there)"""
+    import m3_gate as M3
+    from doomfj.config import Config
+    from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
+    from doomfj.wad import WadFile
+    for m in ["E1M%d" % k for k in range(1, 10)]:
+        mw = WadFile.from_path(str(ROOT / "tests" / "fixtures" / ("freedoom_%s.wad" % m.lower())))
+        rm, sc, st = ReferenceModel(Config()), build_scene(mw, mw, m), spawn_state(mw, m)
+        states = [st]
+        for _ in range(10):
+            states.append(rm.step_sim(states[-1], {"forward": True}, scene=sc))
+        assert M3.special_crossings(mw, m, states) == [], m
+    mw = WadFile.from_path(str(ROOT / "tests" / "fixtures" / "freedoom_e1m1.wad"))
+    vs = mw.vertexes("E1M1")
+    i, ld = next((i, ld) for i, ld in enumerate(mw.linedefs("E1M1")) if ld.special)
+    a, b = vs[ld.v1], vs[ld.v2]
+    mx, my = (a.x + b.x) / 2, (a.y + b.y) / 2
+    nx, ny = -(b.y - a.y), b.x - a.x
+    n = (nx * nx + ny * ny) ** 0.5
+    p = [SimState(int((mx + s * 8 * nx / n) * 65536), int((my + s * 8 * ny / n) * 65536), 0, "E1M1") for s in (-1, 1)]
+    assert M3.special_crossings(mw, "E1M1", p) == [(i, ld.special)]

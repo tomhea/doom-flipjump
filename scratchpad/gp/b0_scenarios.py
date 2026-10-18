@@ -416,6 +416,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
                               card=(cm.state[3] if cm is not None else 0) if loot else None,
                               view_drop=mph.view_drop() if mph is not None else 0,    # M7 P8a
                               wall_scroll=mph.wall_scroll() if mph is not None else 0,    # M8
+                              sector_lights=(mph.world.light_render_kw().get("sector_lights")   # M8: lights
+                                             if mph is not None else None),
                               # M8: the switch lines showing their other texture (b0's runs never exit)
                               switch_on=mph.switch_kw().get("switch_on") if mph is not None else None)
             if mph is not None:

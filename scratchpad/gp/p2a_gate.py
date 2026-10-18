@@ -339,6 +339,8 @@ class Mirror:
                             "skill": mph.world.ws.skill,                        # M7 P6+P7: what the picture hides
                             "vdrop": mph.view_drop(),                           # M7 P8a: the dying view's sink
                             "wscroll": mph.wall_scroll(),                       # M8: the scrolling wall's slide
+                            # M8: the animated sector lights this frame (World.light_render_kw; None: none)
+                            "lights": mph.world.light_render_kw().get("sector_lights"),
                             # M8: the switch lines showing their other texture (the exit's by this gate's lvdone)
                             "switches": mph.switch_kw(lvdone).get("switch_on"),
                             # M7 P8a: this frame's knock moves and the walls that refused them (monsters.KnockTap),
@@ -401,6 +403,7 @@ def picture(orc, dsim, fr: dict, card_di) -> bytes:
                       card=fr["phase"][3], skill=fr.get("skill"),                  # M7 P6+P7: the skill played
                       view_drop=fr.get("vdrop", 0),                                # M7 P8a: the dying view's sink
                       wall_scroll=fr.get("wscroll", 0),                            # M8: the scrolling wall's slide
+                      sector_lights=fr.get("lights"),                              # M8: the animated lights
                       switch_on=fr.get("switches"))                                # M8: the switch textures
 
 

@@ -379,6 +379,7 @@ class Run:
                           skill=fr.get("skill"),                              # M7 P6+P7: the skill played
                           view_drop=fr.get("vdrop", 0),                       # M7 P8a: the dying view's sink
                           wall_scroll=fr.get("wscroll", 0),                   # M8: the scrolling wall's slide
+                          sector_lights=fr.get("lights"),                     # M8: the animated lights
                           switch_on=fr.get("switches"))                       # M8: the switch textures
 
     def px_of(self, tr, pred) -> int:

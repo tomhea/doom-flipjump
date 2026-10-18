@@ -283,6 +283,7 @@ class Layout:
     nlift: int = 0     # M7 P2b: lifts (doomfj.movers)
     nsecret: int = 0   # P10: secret sectors (special 9) -- LEVEL COMPLETE's SECRETS
     ntele: int = 0     # M8 L4: WR teleport lines (doomfj.teleport); 0 on E1M1 -- no field, no cell
+    ntonce: int = 0    # M8 C5: the W1 monster teleports (125, teleport.once_lines); 0 -- no field, no cell
     nfloor: int = 0    # M8 F1.3: the floor groups in the WIDE layout (movers.floor_wide); 0: E1M1's one 1-bit switch
     nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
     nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
@@ -353,6 +354,9 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
         from doomfj.teleport import REACTION_BITS
         f("p_reaction", REACTION_BITS, group="player", phase="L4", label="p_rct",
           doc="0..18: the tics P_PlayerThink skips P_MovePlayer (turn and walk) after a teleport")
+    if lay.ntonce:  # M8 C5 (doomfj.teleport): the W1 monster teleports' latches (P_CrossSpecialLine: special = 0)
+        f("tp_fired", 1, count=lay.ntonce, group="door", phase="C5", label="tp_w1",
+          doc="W1 monster teleport j (teleport.once_lines) was crossed by a monster: its special is gone")
     f("p_health", 12, signed=True, group="player", phase="S3b", doc="health; < 0 after a kill")
     f("p_armor", 8, group="player", phase="S3b", doc="armor points, 0..200")
     f("p_armortype", 2, group="player", phase="S3b", doc="0 none, 1 green, 2 blue")
@@ -875,6 +879,7 @@ class World(CombatMixin):
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
                              nwalk=len(self.walk_triggers), nlift=len(self.lift_order),
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
+                             ntonce=len(self.tele_once),
                              nfloor=len(self.floor_groups) if self.floor_wide else 0,
                              nlight=len(self.light_thinkers),
                              nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
@@ -992,6 +997,8 @@ class World(CombatMixin):
         # is the destination sector's floor, baked: it must not be a door or a mover
         from doomfj.teleport import teleporters
         self.teleports = teleporters(mw, M, rm=self.rm, cmap=cmap)
+        from doomfj.teleport import once_lines
+        self.tele_once = once_lines(self.teleports)  # M8 C5: the W1 (125) lines, latch j = tp_fired[j]
         self._teleported = False
         # M8 (doomfj.switches, the map's SWITCH_TEX): the switch lines a use changes -- `switch_cells` the ones with a
         # `sw_on` cell (all but the exit, whose latch is g_leveldone), `switch_sr` the SR ones' indices among them
@@ -1849,11 +1856,21 @@ class World(CombatMixin):
         ahead of the destination: combat._teleport_fogs) and the destination: position, floorz, facing (its angle's
         octant), momentum and the position's fraction 0 (knockback). -> the position now (the relink's).
         `self._teleported` says it happened (the knock move's momentum stops: combat._xy_move)"""
-        from doomfj.teleport import crossed_front, stomped
+        from doomfj.teleport import crossed_side, stomped
         ws = self.ws
         r = self.mon_radius[m]
         for tel in self.teleports:
-            if not crossed_front(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r):
+            if tel.once:                             # M8 C5: W1 125 -- a crossing either way clears it for the level
+                j = [t.line for t in self.tele_once].index(tel.line)
+                if ws.tp_fired[j]:
+                    continue
+                side = crossed_side(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r)
+                if side is not None:
+                    ws.tp_fired[j] = 1
+            else:
+                side = crossed_side(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r)
+            # the front only; M8 C5: a skill whose search finds no destination (E1M5's easy / medium) teleports nothing
+            if not side or not tel.on_skill(ws.skill):
                 continue
             if stomped(self, tel.dest, r, mover=m):
                 break

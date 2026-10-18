@@ -191,6 +191,8 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"st_kill", "st_item", "st_secn", "st_secm"}),
                    # M8 L4: the player's reactiontime after a teleport (doomfj.teleportcode; a map with a WR teleport)
                    frozenset({"p_rct"}),
+                   # M8 C5: the W1 monster teleports' latches (doomfj.teleportcode; a map with a 125 line: E1M7)
+                   frozenset({"tp_w1"}),
                    # M8: the sector light thinkers' cells (doomfj.lightcode; a map whose lights animate: E1M2)
                    frozenset({"ltst", "ltct", "rng_lt"}),
                    # M8: the switch textures (doomfj.switchcode; a SWITCH_TEX map: MonsterPhase.switch_state) -- two
@@ -777,6 +779,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     cells["pj_z"] = Cell("pj_z", "hex", 4, count=FIREBALL_POOL)
     cells["bar_src"] = Cell("bar_src", "hex", 2, count=nbar)
     cells["p_rct"] = Cell("p_rct", "hex", 2)          # M8 L4 (monsters.MonsterPhase.p8a_state: 0..18)
+    cells["tp_w1"] = Cell("tp_w1", "hex", 1, count=_nonce())   # M8 C5: a W1 monster teleport's latch, 0 / 1
     # M8 (doomfj.lightcode; MonsterPhase.p8a_state's units): a state nibble and a 2-nibble count a thinker, the stream
     cells["ltst"] = Cell("ltst", "hex", 1, count=_nlight())
     cells["ltct"] = Cell("ltct", "hex", 2, count=_nlight())
@@ -849,6 +852,12 @@ def _nlight() -> int:
     """M8: the animated sector light thinkers (World.light_thinkers) -- `ltst` / `ltct`'s count (one at least: a map
     without them has no such label, an OPTIONAL group)"""
     return max(1, len(_idle_world().light_thinkers))
+
+
+def _nonce() -> int:
+    """M8 C5: the W1 monster teleports (World.tele_once) -- `tp_w1`'s count (one at least: a map without them has no
+    such label, an OPTIONAL group)"""
+    return max(1, len(_idle_world().tele_once))
 
 
 def _nsecret() -> int:

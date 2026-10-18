@@ -100,7 +100,9 @@ def supported_line_specials():
         out[s] = "movers (blazing lift: stride %d)" % movers.LIFT_FAST_STRIDE
     from doomfj import teleport
     for s in teleport.TELEPORT_SPECIALS:
-        out[s] = "teleport (M8 L4: player and monsters; no telefrag, no fog)"
+        out[s] = ("teleport (M8 C5: monsters only%s; fog, no telefrag)" % (", W1 latch" if s in teleport.ONCE_SPECIALS
+                                                                           else "")
+                  if s in teleport.MONSTER_ONLY_SPECIALS else "teleport (M8 L4: player and monsters; telefrag, fog)")
     return out
 
 
@@ -191,6 +193,8 @@ class Survey:
                 self.row("INFO", "line special %d %s" % (s, name), n, "", STATIC_SPECIALS[s])
             else:
                 self.row("MISSING", "line special %d %s" % (s, name), n, "", "no implementation: INERT today")
+        self.guard("teleport lines (teleport.teleporters: a destination per skill, one teleport per move)",
+                   self._teleports)
         from doomfj.combat import SECTOR_HURT, SECRET_SPECIAL
         sc = Counter(sec.special for sec in self.secs if sec.special)
         self.facts["sector_specials"] = dict(sc)
@@ -206,6 +210,25 @@ class Survey:
         blk = sum(1 for ld in self.lds if ld.flags & gd.ML_SOUNDBLOCK)
         self.row("INFO" if not blk else "WARN", "ML_SOUNDBLOCK lines", blk, "",
                  "the model has them (M8 L0); the fj noise flood refuses them (noisecode) until M8 L5")
+
+    def _teleports(self):
+        """M8 C5: the teleport lines as the model bakes them (its refusals are this row's REFUSED); INFO the lines whose
+        destination some skill lacks (teleportcode's g_skill test: E1M5) and the lines one move can touch together
+        (the first decides, where DOOM's spechit may teleport twice: teleport.py's KNOWN SIMPLIFICATION)"""
+        from doomfj import teleport
+        tels = teleport.teleporters(self.wad, self.m)
+        if not tels:
+            return
+        self.row("OK", "teleport lines baked (player / monster-only / W1)",
+                 "%d / %d / %d" % (len(teleport.player_teleporters(tels)), sum(t.monster_only for t in tels),
+                                   len(teleport.once_lines(tels))))
+        gated = [(t.line, t.skills) for t in tels if t.skills != teleport.ALL_SKILLS]
+        if gated:
+            self.row("INFO", "teleport destinations some skill lacks (line, MTF bits): inert there", gated)
+        touch = [(a.line, b.line) for i, a in enumerate(tels) for b in tels[i + 1:] if teleport.neighbours(a, b)]
+        if touch:
+            self.row("INFO", "teleport line pairs one move can touch (the first decides)", len(touch), "",
+                     "%s" % touch[:6])
 
     def things(self):
         from doomfj.things import single_player

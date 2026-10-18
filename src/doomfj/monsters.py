@@ -814,6 +814,8 @@ class MonsterPhase:
             out["bar_src"] = tuple(ws.bar_src)
         if getattr(w, "teleports", None) and player_loots(w.player):
             out["p_rct"] = ws.p_reaction
+            if getattr(w, "tele_once", None):        # M8 C5: the W1 monster teleports' latches (E1M7)
+                out["tp_w1"] = ws.tp_fired[0] if len(w.tele_once) == 1 else tuple(ws.tp_fired)
         if getattr(w, "light_thinkers", None):   # M8 (doomfj.lightcode): the light thinkers' cells
             one = len(w.light_thinkers) == 1         # the probe reads a count-1 cell as an int
             out.update({"ltst": ws.lt_state[0] if one else tuple(ws.lt_state),

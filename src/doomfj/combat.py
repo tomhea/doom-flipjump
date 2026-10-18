@@ -1988,7 +1988,8 @@ class CombatMixin:
         ws = self.ws
         ev = _W().TicEvents(0) if ev is None else ev
         for tel in self.teleports:
-            if not crossed_front(tel, (x, y), (cx, cy), PLAYER_R):
+            # M8 C5: the monster-only lines (125 / 126) are not his; a skill without the destination finds none
+            if tel.monster_only or not tel.on_skill(ws.skill) or not crossed_front(tel, (x, y), (cx, cy), PLAYER_R):
                 continue
             me = ("player", -1)                       # PIT_StompThing: tmthing is the inflictor AND the source
             for kind, i in stomp_victims(self, tel.dest, PLAYER_R):

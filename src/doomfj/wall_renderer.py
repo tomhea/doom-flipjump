@@ -2506,6 +2506,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _teleportcode.check_barrels(_p31["world"])
         assert _W8.player_resolves(PLAYER_MODE), "M8: the telefrag kills through damagecode's dm_go (TELEFRAG)"
         assert _cn8(_p31["world"].schema, "mon_facing") == 1, "M8 L4: the knock stubs' facing cell is one nibble"
+        # M8 C5: a destination some skill lacks (E1M5's 126) is tested on `g_skill`, a standalone cell
+        assert standalone or all(t_.skills == 7 for t_ in _TELE), "M8 C5: a skill-gated teleport needs g_skill"
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
     _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
@@ -3733,7 +3735,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             p6_common=_p6_restart[0], p6_skills=_p6_restart[1],
             p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None),     # M7 P8a: the packages' cells
             p10_common=(list(_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
-                        + (_teleportcode.level_start_lines() if _TELE else [])              # M8 L4: no reactiontime
+                        + (_teleportcode.level_start_lines(_TELE) if _TELE else [])          # M8 L4: no reactiontime; C5: W1 armed
                         + (_lightcode.level_start_lines(_lth) if _lth else [])            # M8: the lights' start
                         # M8: every switch as the map has it (switchcode)
                         + (_switchcode.level_start_lines(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else [])))
@@ -4190,7 +4192,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *(_statcode.decls(_p31["world"]) if _STATS else []),           # P10: the stats' cells and scratch
-          *(_teleportcode.decls() if _TELE else []),                      # M8 L4: p_rct and the teleports' scratch
+          *(_teleportcode.decls(_TELE) if _TELE else []),                  # M8 L4: p_rct and the scratch; C5: tp_w1
           *((_lightcode.decls(_lth) + _lightcode.tables(_lth)) if _lth else []),   # M8: the light cells, their tables
           *(_switchcode.decls(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else []),   # M8: the switch textures' cells
           *_aim_decls,                                                      # M7 P4.2a: the aim window

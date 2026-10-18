@@ -41,15 +41,33 @@ def e1m1():
 
 def test_the_switch_is_per_map():
     """E1M1's and E1M2's MAP_CONFIG turn the page on; the default Config (a map not listed) leaves it off. E1M1's
-    entry is AUTOMAP alone: every other field is the default it had with no entry"""
+    entry is AUTOMAP and (#149) DOOR_NEIGHBOURS "legacy", host-side only: every other field is the default it had with
+    no entry, and its fj constants are the default's"""
     from dataclasses import fields
     from doomfj.config import MAP_CONFIG
     assert map_cfg(Config(), "E1M2").AUTOMAP == 1 and A.has_page("E1M2")
-    assert map_cfg(Config(), "E1M1").AUTOMAP == 1 and A.has_page("E1M1") and MAP_CONFIG["E1M1"] == {"AUTOMAP": 1}
+    assert map_cfg(Config(), "E1M1").AUTOMAP == 1 and A.has_page("E1M1")
+    assert MAP_CONFIG["E1M1"] == {"AUTOMAP": 1, "DOOR_NEIGHBOURS": "legacy"}
     assert Config().AUTOMAP == 0 and not A.has_page("E1M3")
     e1, base = map_cfg(Config(), "E1M1"), Config()
-    assert [f.name for f in fields(Config) if getattr(e1, f.name) != getattr(base, f.name)] == ["AUTOMAP"]
+    assert [f.name for f in fields(Config) if getattr(e1, f.name) != getattr(base, f.name)] == ["AUTOMAP",
+                                                                                                "DOOR_NEIGHBOURS"]
     assert e1.constants() == base.constants()
+
+
+def test_build_takes_the_screen_size_from_its_caller(e1m1):
+    """#149 (R6): `build` has no 160 x 100 of its own -- width and height are required, and `pages_for` passes the
+    config's W x H. CONTROL: a different screen size gives a different page (the arguments are used)"""
+    import inspect
+    params = inspect.signature(A.build).parameters
+    assert all(params[k].default is inspect.Parameter.empty for k in ("width", "height"))
+    c = map_cfg(Config(), "E1M1")
+    assert (e1m1.width, e1m1.height) == (c.W, c.H)
+    mw = WadFile.from_path("tests/fixtures/freedoom_e1m1.wad")
+    assert A.build(mw, "E1M1", _palette(), c.W, c.H) == e1m1
+    assert A.build(mw, "E1M1", _palette(), c.W + 64, c.H) != e1m1
+    with pytest.raises(TypeError):
+        A.build(mw, "E1M1", _palette())
 
 
 def test_e1m2_scale_and_bands(e1m2):

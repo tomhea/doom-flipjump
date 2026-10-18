@@ -730,7 +730,6 @@ def switch_door_triggers(secs, lds, sds, verts, rng: int = USE_RANGE) -> list:
         v = verts[v]
         return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])
     doors = door_sectors(secs, lds, sds)
-    kinds = door_kinds(secs, lds, sds)
     out = []
     for ld in lds:
         if ld.special not in SWITCH_DOOR_KINDS or not ld.tag:

@@ -10,7 +10,6 @@
 R9: mutants of the emitted text, each caught.
 """
 import random
-import struct
 from pathlib import Path
 
 import flipjump as fj

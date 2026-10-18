@@ -22,7 +22,7 @@ switch texture does not change (doomfj.switches has no shot kind).
 """
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import List
 
 from doomfj.aimcode import FIRST, NCOLS
 from doomfj.doorcode import WAIT_NIBBLES

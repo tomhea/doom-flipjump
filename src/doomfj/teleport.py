@@ -191,14 +191,35 @@ def fog_dest(dest: Tuple[int, int], angle: int, rm) -> Tuple[int, int]:
     return x16 >> 16, y16 >> 16
 
 
+def segment_box(t: Teleporter) -> tuple:
+    """(x0, y0, x1, y1): the teleport line's segment as a box (an axis-aligned line: zero width on its axis)"""
+    return (t.coord, t.lo, t.coord, t.hi) if t.axis == "x" else (t.lo, t.coord, t.hi, t.coord)
+
+
+def segment_gap(t: Teleporter, u: Teleporter) -> int:
+    """M8 C11: the Chebyshev gap between two teleport lines' segments (0 when their boxes touch)"""
+    a, b = segment_box(t), segment_box(u)
+    return max(0, a[0] - b[2], b[0] - a[2], a[1] - b[3], b[1] - a[3])
+
+
 def check_one_per_move(tels) -> None:
     """ONE TELEPORT PER MOVE is exact, and no teleporting thing stomps ITSELF: every destination lies farther than
     SELF_MARGIN from every teleport line's segment on one axis at least -- so no second line of the same spechit loop
     can fire from it (a crossing needs the centre within REACH_MAX of the extent), and a thing that just crossed a line
     (its centre and its pre-move centre within 2 * REACH_MAX of the segment) is farther than any blockdist from the
-    destination: the fj's stomp test may skip the mover's own slot without a test"""
+    destination: the fj's stomp test may skip the mover's own slot without a test.
+
+    M8 C11 (E1M7's two-way pair 516 / 521, each destination 32 units in front of the OTHER line): a second line u can
+    fire in the move that crossed t only if u is in that move's spechit -- its segment within REACH_MAX of the new
+    centre, which is within 2 * REACH_MAX of t's segment -- so a line u whose segment lies farther than SELF_MARGIN
+    (> 3 * REACH_MAX) from t's (`segment_gap`) is never tested against t's destination: it cannot be in the loop. The
+    self-stomp half (u = t) is kept whole. Both mirrors already fire ONE teleport a move (the first front crossing in
+    line order: combat._teleport_player, world._teleport_monster, teleportcode); this is the proof's precondition only,
+    and every map it admitted before it still admits"""
     for t in tels:
         for u in tels:
+            if u is not t and segment_gap(t, u) > SELF_MARGIN:
+                continue
             c, o = (t.dest[0], t.dest[1]) if u.axis == "x" else (t.dest[1], t.dest[0])
             assert not (u.lo - SELF_MARGIN <= o <= u.hi + SELF_MARGIN and abs(c - u.coord) <= SELF_MARGIN), (
                 "M8 L4: line %d's destination %r is within line %d's reach" % (t.line, t.dest, u.line))

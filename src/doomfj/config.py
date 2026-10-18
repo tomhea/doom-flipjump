@@ -104,6 +104,22 @@ class Config:
     # frame.arm5, and at 2 it ran 96 ops past it (16,480 of 16,384) -- the binary jumped to op 0 on its first frame.
     SSHEAD_RATIO: int = 2
 
+    # M8 C11 (E1M7) -- `n_tsv`'s width in nibbles: the per-frame count of MARKING two-sided segs that reach
+    # frame.seg_pass1_leaf_body_ts, against the deg attribution budget TSV_BUDGET (16^n - 1, the counter's max). The
+    # budget must provably NEVER bind (a binding one paints the smudged columns: reference_model.DEG_PNEAR), so the
+    # emitter asserts the map's marking-seg count stays below it (wall_renderer._assert_pnear_unbound). 3 (4,095) is
+    # E1M1's and every map's up to E1M6 (2,550); E1M7 marks 4,183 -> 4. Not an fj constant: the macro derives its
+    # width from the budget it is passed (`(#budget + 3) / 4`), so the two cannot drift.
+    TSV_NIBBLES: int = 3
+
+    @property
+    def TSV_BUDGET(self) -> int:
+        """M8 C11: the deg attribution budget the fj and the oracle share -- the `n_tsv` counter's max (DEG_PNEAR = 4095
+        at the default 3 nibbles)"""
+        assert 1 <= self.TSV_NIBBLES <= 6, ("TSV_NIBBLES %d: 1 .. 6 (E1M1 3; below 3 only a test's binding budget)"
+                                            % self.TSV_NIBBLES)
+        return 16 ** self.TSV_NIBBLES - 1
+
     @property
     def PID_BYTES(self) -> int:
         """Bytes of `pclm[]` storage per column: ceil(PID_NIBBLES/2).
@@ -326,6 +342,14 @@ MAP_CONFIG = {
     # M8: AUTOMAP -- the map page (doomfj.automap)
     "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1,
              "WALL_SCROLL": 1, "SWITCH_TEX": 1, "AUTOMAP": 1},
+    # M8 C11 (E1M7, 1.9x E1M2): the WIDTHS only (its features are other clusters'): TSV_NIBBLES -- 4,183 marking
+    # two-sided segs past the 3-nibble n_tsv's 4,095 (wall_renderer._assert_pnear_unbound); PID_NIBBLES / BAND_NIBBLES
+    # -- ~545 plane pairs before directions (E1M2: 329 -> 411 baked), the band lists past E1M2's (> 65,535 there);
+    # SSHEAD_RATIO 1 -- the hot data block (pclm .. wrej) inside frame.arm5's window, as E1M2; SPR_SLOT_CAP -- 606
+    # drawable things over the skills (wall_renderer.check_slot_ids)
+    "E1M7": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "TSV_NIBBLES": 4},
+    # M8 C11 (E1M9): SPR_SLOT_CAP -- 293 drawable things over the skills (wall_renderer.check_slot_ids)
+    "E1M9": {"SPR_SLOT_CAP": 255},
     # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's ONLY entry -- the map page, at 40 units a pixel (doomfj.
     # automap). Every other field keeps its default, which is what E1M1 had with no entry at all
     "E1M1": {"AUTOMAP": 1},

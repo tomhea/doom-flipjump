@@ -51,7 +51,7 @@ def test_e1m2_shows_its_known_blockers(ls, wad):
     assert ("OK", "monsters + barrels -> aim_sid") in got                # 138 <= 255, aim_sid 8 bits
     assert not any("check_world" in r[1] for r in rows)                  # the guard adds a row only when it refuses
     assert ("OK", "map extent, far LOS") in got                          # 4,952 <= 128 * 127
-    assert ("OVER", "drawable things, every skill") in got               # 305 >= 256 (F1.4's slot cap)
+    assert ("OK", "drawable things, every skill") in got                 # 305 >= 256, capped 255 a frame (F1.4; C11)
     assert ("OK", "solid decorations some skill lacks") in got     # M8 F1.2: mc_don at NEW GAME
     assert ("INFO", "line special 48 scrolling wall") in got             # a decided simplification
     assert ("OK", "line special 97 WR teleport") in got                 # M8 L4: doomfj.teleport

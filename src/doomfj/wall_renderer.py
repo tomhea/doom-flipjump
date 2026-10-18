@@ -4087,7 +4087,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              # = the smudged-column bug) -- n_ts counts a subset of the map's segs, so total segs
              # below the baked cap is the sufficient condition. 4095 is also the 3-nibble
              # counter's max, enforced together here.
-             *([_assert_pnear_unbound(marking_seg_count(cmap, lds, _seg_marks)),
+             *([_assert_pnear_unbound(marking_seg_count(cmap, lds, _seg_marks), cfg.TSV_BUDGET),
                 # idea 19 coupled retune: 1200 ops land the ts leaf region on a cheaper base
                 # (tune_round on the narrowed-compare layout; first time this point fires).
                 "rep(1200, i) stl.fj 0, 0",
@@ -4096,7 +4096,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # the face scale is the clamped [SCALE_MIN, 0x400000] interpolant, and these
                 # two baked gate constants are asserted so a retune cannot silently break it.
                 _assert_gate_scales_fit((DEG_STACK_SCALE, DEG_LIP_SCALE)),
-                f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR}, {atan_dbl}, {slope_dbl}, "
+                f"frame.seg_pass1_leaf_body_ts {cfg.TSV_BUDGET}, {atan_dbl}, {slope_dbl}, "
                 f"{table_dbl}, 1, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
                 f"{cfg.VIEW_H - 1}, {proj}, {cfg.SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
                 f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"]),
@@ -4276,9 +4276,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
       ("banks", [
           *([             "pbase: hex.vec w/4", "pptr: hex.vec w/4",
              f"pval8: hex.vec {cfg.PID_BYTES * 2}",
-             # n_tsv is 3 nibbles: the deg attribution budget is DEG_PNEAR=4095 (its max), with
-             # never-binds ENFORCED by _assert_pnear_unbound -- see seg_pass1_leaf_body_ts
-             "n_claimed: hex.vec 2", "n_tsv: hex.vec 3", "tsstop: hex.vec 1",
+             # n_tsv is TSV_NIBBLES (3; E1M7 4): the deg attribution budget is cfg.TSV_BUDGET (its max: 4095 =
+             # DEG_PNEAR at 3), with never-binds ENFORCED by _assert_pnear_unbound -- see seg_pass1_leaf_body_ts
+             "n_claimed: hex.vec 2", f"n_tsv: hex.vec {cfg.TSV_NIBBLES}", "tsstop: hex.vec 1",
              "tsbstop: hex.vec 1",              # V5-DROP-P2b: the budget-only latch
              # SMUDGE FIX part 2: the faces-spent latch. Declared under `lines` (NOT lines+steps,
              # CR-2026-08: the piece-seg call sites reference it in every plane_near build) --
@@ -5333,17 +5333,21 @@ def _assert_gate_scales_fit(scales):
     return ""
 
 
-def _assert_pnear_unbound(total_segs: int) -> str:
+def _assert_pnear_unbound(total_segs: int, budget: int = DEG_PNEAR) -> str:
     """The deg attribution budget's never-binds proof (see DEG_PNEAR): the MARKING seg count
-    strictly below the baked cap, and the cap inside the 3-nibble fj counter. Returns an empty
-    emitted line -- so tightening this bound moves not one byte of the emitted program.
+    strictly below the baked cap, and the cap the fj counter's max (M8 C11: `budget` is the map's
+    `Config.TSV_BUDGET`, 16^TSV_NIBBLES - 1 -- DEG_PNEAR = 4095 at E1M1's 3 nibbles; E1M7 needs 4).
+    Returns an empty emitted line -- so tightening this bound moves not one byte of the emitted program.
 
     The `deg` flag that used to gate this is retired, so the proof is unconditional -- which is
     what it should always have been: a budget that can bind paints wrong columns, and the
     condition only ever said "do not check when the package is off"."""
-    assert total_segs < DEG_PNEAR <= 4095, (
-        f"DEG_PNEAR={DEG_PNEAR} can bind (map has {total_segs} MARKING segs) or overflows the "
-        "3-nibble n_tsv counter -- a binding attribution budget paints wrong columns")
+    nib = (budget.bit_length() + 3) // 4          # the width frame.seg_pass1_leaf_body_ts derives: (#budget+3)/4
+    assert budget == 16 ** nib - 1, (
+        f"budget {budget} is not a whole counter's max (16^n - 1): the macro's width would not hold it")
+    assert total_segs < budget, (
+        f"budget {budget} can bind (map has {total_segs} MARKING segs) on the {nib}-nibble n_tsv counter -- "
+        "a binding attribution budget paints wrong columns: raise the map's TSV_NIBBLES (config.MAP_CONFIG)")
     return ""
 
 

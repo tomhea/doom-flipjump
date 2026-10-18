@@ -370,19 +370,26 @@ class Survey:
                                  **mover_mask_kw(rm, cmap, draw, mover_leaves(self.wad, self.m, cmap)))
         nt = len({i for i, b in zip(draw_idx, baked) if not b})
         self.cap("drawable things, every skill (1-byte fragment slot id)", len(draw), 256, strict_less=True)
-        from doomfj.things import LIST_MAX_THINGS
-        self.cap("runtime things (byte thing lists, LIST_MAX_THINGS)", nt, LIST_MAX_THINGS,
-                 "plus mobiles and drops: the next row")
+        # M8 F1.5 (docs/f1-runtime-ids.md): the lists' id width is the map's Config.LIST_ID_BITS (MAP_CONFIG) -- 8 bits
+        # hold 254 ids, 12 hold 4,094 (things.list_max); the caps below are against the map's OWN width
+        from doomfj.things import list_bits, list_max
+        lbits = map_cfg(Config(), self.m).LIST_ID_BITS
+        self.cap("runtime things (thing lists, Config.LIST_ID_BITS)", nt, list_max(lbits),
+                 "%d-bit lists; plus mobiles and drops: the next row" % lbits)
         # F1 item 12 (docs/f1-big-map-widths.md 0.3): the lists hold the runtime things, the fireball and effect pools
-        # and every monster drop -- the sum monstercode / LIST_MAX_THINGS bound
+        # and every monster drop -- the sum monstercode.p31_parts bounds by list_max(LIST_ID_BITS)
         def ids():
             from doomfj.barrelcode import droppers
-            from doomfj.things import LIST_MAX_THINGS
             from doomfj.world import FIREBALL_POOL, FX_POOL, World
             w = self.facts.get("_world") or World(self.wad, self.m, monsters="idle")
             n = nt + FIREBALL_POOL + FX_POOL + len(droppers(w))
-            self.cap("runtime ids: things + pools + drops (byte lists, F1 item 12)", n, LIST_MAX_THINGS)
-        self.guard("runtime ids: things + pools + drops (byte lists, F1 item 12)", ids)
+            self.cap("runtime ids: things + pools + drops (list cells, Config.LIST_ID_BITS)", n, list_max(lbits),
+                     "%d-bit lists (MAP_CONFIG)" % lbits)
+            need = list_bits(n) if n <= list_max(12) else None
+            self.row("INFO", "list id bits needed (things.list_bits)", need if need else "> 12", "",
+                     "MAP_CONFIG has %d%s" % (lbits, "" if need == lbits else
+                                             ": set LIST_ID_BITS %s (F1.5)" % need if need else ": past 4,094 ids"))
+        self.guard("runtime ids: things + pools + drops (list cells, Config.LIST_ID_BITS)", ids)
         self.guard("marking segs < DEG_PNEAR", lambda: self._marking(WR, cmap))
         pid_lo = len({((s.ceil_h, s.light & 0xFF, s.ceil_tex.upper()), (s.floor_h, s.light & 0xFF, s.floor_tex.upper()))
                       for s in self.secs})

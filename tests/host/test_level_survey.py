@@ -68,3 +68,26 @@ def test_control_a_thing_type_removed_from_the_model_is_refused(ls, wad, monkeyp
     rows = _rows(ls, wad, "E1M1")
     assert any(r[0] == "REFUSED" and r[1] == "World(strict=True) builds" and "3001" in r[4] for r in rows)
     assert any(r[0] == "MISSING" and r[1] == "thing type 3001" for r in rows)
+
+
+def _ids_row(rows):
+    return next(r for r in rows if r[1].startswith("runtime ids: things + pools + drops"))
+
+
+def test_runtime_ids_are_capped_at_the_maps_list_width(ls, wad, monkeypatch):
+    """M8 F1.5 (docs/f1-runtime-ids.md): E1M5's 370 runtime ids (things + pools + drops) are OVER its default 8-bit
+    lists (254) and the INFO row asks for 12; with MAP_CONFIG's LIST_ID_BITS 12 the same count is OK against 4,094.
+    The CONTROL is the pair: a survey that ignored the map's width would report the same row both times."""
+    import doomfj.config as config
+    rows = _rows(ls, wad, "E1M5")
+    r = _ids_row(rows)
+    assert (r[0], r[2], r[3]) == ("OVER", "370", "<= 254"), r
+    info = next(x for x in rows if x[1].startswith("list id bits needed"))
+    assert info[2] == "12" and "set LIST_ID_BITS 12" in info[4], info
+    monkeypatch.setitem(config.MAP_CONFIG, "E1M5", {"LIST_ID_BITS": 12})
+    rows = _rows(ls, wad, "E1M5")
+    r = _ids_row(rows)
+    assert (r[0], r[2], r[3]) == ("OK", "370", "<= 4094"), r
+    info = next(x for x in rows if x[1].startswith("list id bits needed"))
+    assert info[2] == "12" and info[4] == "MAP_CONFIG has 12", info
+    assert not any(x[0] in BAD and ("runtime" in x[1] or "list id" in x[1]) for x in rows)

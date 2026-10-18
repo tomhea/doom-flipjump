@@ -10,7 +10,7 @@ named in your prompt. Others work on other clusters in their own worktrees at th
    `python scripts/heavy.py <your-name> --log <file> -- <cmd ...>` (waits for `C:\Users\tomhe\Documents\HEAVY.lock`,
    takes it exclusively, releases it). Heavy = any build / assembly, any full-map emission or `scripts/emit_check.py`,
    `scratchpad/cr/emit_baseline.py`, any gate script, msframe, a tests/fj file that runs over ~1 minute, any run of a
-   whole test directory. Light (run directly): a single tests/host file, a short tests/fj file, `level_survey.py`.
+   whole test directory. Light: a host test file or a short tests/fj file -- run it through `python scripts/heavy.py <name> --light -- <cmd>` (it waits while a BUILD holds the lock: a build here peaks at ~17 GB and light work beside it can kill it). Priority: `--prio 9` for C1 (runtime ids), 7 for the E1M7 probe, 5 (default) for the rest.
    Never delete a lock you did not create. Never kill a python process you did not start. Never `python -O`.
 2. **Both mirrors.** Every behaviour lands in the fj emitter AND the Python oracle (`src/doomfj/reference_model.py`
    and the model modules it uses) in the same commit; byte-exactness is the contract.

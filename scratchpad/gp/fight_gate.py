@@ -764,7 +764,7 @@ def scenario_list(dsim, w, card) -> list:
     menu = [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
     keys5 = menu + [F] * 3 + [I] * 40 + [FIRE] * 3 + [I] * 12
     f5 = []
-    wm = _world_at(gd.SK_MEDIUM)
+    wm = _world_at(gd.SK_MEDIUM, w)
     for i in pstr:
         for p in poses_facing(dsim, w, pk[i].x, pk[i].y, (40, 48, 32)):
             for m in first_live(wm, "MT_POSSESSED", near=(pk[i].x, pk[i].y))[:2]:
@@ -1338,12 +1338,14 @@ def mon_moved_(tr, m: int) -> bool:
 _WORLDS = {}
 
 
-def _world_at(skill):
-    """a World at `skill`'s level start (the placing of a scenario that starts with NEW GAME there)"""
-    if skill not in _WORLDS:
+def _world_at(skill, w):
+    """a World at `skill`'s level start on `w`'s map (the placing of a scenario that starts with NEW GAME there).
+    M8: it was World(skill=...) -- E1M1's level start whatever the map (gen_dryrun's audit)"""
+    key = (w.mapname, skill)
+    if key not in _WORLDS:
         from doomfj.world import World
-        _WORLDS[skill] = World(skill=skill, monsters="idle")
-    return _WORLDS[skill]
+        _WORLDS[key] = World(w.mw, w.mapname, skill=skill, monsters="idle")
+    return _WORLDS[key]
 
 
 def _touched_box(w, tr, items) -> bool:

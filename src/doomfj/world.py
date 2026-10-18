@@ -842,6 +842,13 @@ class World(CombatMixin):
                  seen_hook: Optional[Callable[["World"], None]] = None,
                  monster_tics: int = MONSTER_TICS_PER_FRAME):
         if map_wad is None:
+            # M8 (docs/level-pipeline.md 3): the default is E1M1's fixture -- REFUSED while the process measures another
+            # map (DOOMFJ_MAP / --map: doomfj.mapprofile.ACTIVE), so a gate cannot silently measure E1M1 (fight_gate's F5
+            # medium world did, gen_dryrun's audit). Pass the map's wad; a deliberate E1M1 world passes E1M1's.
+            from doomfj import mapprofile as _mp
+            assert _mp.ACTIVE == "E1M1", (
+                "World() with no map wad builds E1M1's, but this process measures %s (DOOMFJ_MAP): pass the map's wad"
+                % _mp.ACTIVE)
             from doomfj.config import DEFAULT_MAP_WAD
             from doomfj.wad import WadFile
             map_wad = WadFile.from_path(DEFAULT_MAP_WAD)

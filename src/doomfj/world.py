@@ -349,7 +349,10 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("skill", 2, group="game", doc="DOOM gameskill: 1 easy, 2 medium, 3 hard (D7, menu)")
     f("leveltime", LEVELTIME_BITS, group="game",
       doc="tics since level start, wraps (nukage timing, S3b; P10: LEVEL COMPLETE's TIME, 16 -> 20 bits)")
-    f("sched_cursor", mon_bits, group="game", doc="the K-slot scheduler's first slot this tic")
+    # M8 C8: at least 5 bits -- the fj's tic reads and writes the cursor (and mt_fdef, declared at its width) as TWO
+    # nibbles (monstercode.p32a_tic_lines), so a map with <= 16 monster slots (E1M8's 4 Barons) keeps the 2-nibble
+    # layout, as _code_bits keeps mon_target's; every map with more (E1M1 53, E1M2) is unchanged
+    f("sched_cursor", max(5, mon_bits), group="game", doc="the K-slot scheduler's first slot this tic")
     f("g_restart", 1, group="game", phase="S3b",
       doc="restart asked (use while dead, NEW GAME): the frame tail runs the restart block")
     f("g_leveldone", 1, group="game", phase="S3b", doc="the exit switch was used: world frozen")

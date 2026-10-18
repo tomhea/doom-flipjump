@@ -95,6 +95,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.combat import CombatMixin, STRAFE_MOVE, WEAPON_KEYS  # noqa: F401 (re-export)
+from doomfj.combat import plasma_on                               # M8 C6
 from doomfj.doorcode import door_line_ids
 from doomfj.fixedpoint import aprox_distance  # noqa: F401 -- P_AproxDistance, ONE definition (M7 P3.3); re-exported
 from doomfj.doors import crossed                                   # M7 P2b: WR lifts
@@ -152,7 +153,8 @@ MISSILE_BIAS, MISSILE_NOMELEE_BIAS, MISSILE_CAP = 64, 128, 200      # P_CheckMis
 STEP_UP = gd.MAX_STEP_UP >> 16     # 24: the highest step up a thing can take
 DROPOFF_MAX = 24                   # P_TryMove: a non-DROPOFF thing may not stand over a drop > 24
 PLAYER_R = gd.PLAYERRADIUS >> 16   # 16
-# the tic's input: the four moves, use, fire, and the weapon number keys 1..5 (w1..w5; P9: 5 the launcher)
+# the tic's input: the four moves, use, fire, and the weapon number keys 1..6 (w1..w6; P9: 5 the launcher; M8 C6: 6 the
+# plasma rifle)
 KEYS = ("forward", "back", "turn_left", "turn_right", "strafe_left", "strafe_right", "use",
         "fire") + WEAPON_KEYS
 
@@ -287,6 +289,7 @@ class Layout:
     nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
     nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
     nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
+    plasma: int = 0    # M8 C6: 1 on a map with the plasma rifle (combat.plasma_on) -- key 6's held flag `kb_w6`
 
     @property
     def nmobile(self) -> int:
@@ -343,6 +346,8 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("mode", 1, group="input", phase="existing", label="mode", doc="1 = menu frame producer")
     for k in ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5"):   # M7 P4.1; P9: 5
         f("kb_" + k, 1, group="input", phase="existing", label="kb_" + k, doc="held key flag")
+    if lay.plasma:   # M8 C6: key 6, the plasma rifle -- on a map that holds one (combat.plasma_on); E1M1: no field
+        f("kb_w6", 1, group="input", phase="C6", label="kb_w6", doc="held key flag")
     # -- player --------------------------------------------------------------------------------
     f("px", 32, signed=True, group="player", phase="existing", label="viewx", doc="16.16")
     f("py", 32, signed=True, group="player", phase="existing", label="viewy", doc="16.16")
@@ -672,6 +677,9 @@ class TicEvents:
     rocket_spawns: List[int] = field(default_factory=list)  # pool slot, or -1: a full pool fizzled it
     rocket_hits: List[tuple] = field(default_factory=list)  # ("mon"|"bar"|"corpse", index, damage): what stopped it
     rocket_blasts: List[int] = field(default_factory=list)  # pool slot whose S_EXPLODE1 ran A_Explode
+    # -- M8 C6: the player's plasma balls (combat._spawn_plasma / _rocket_things)
+    plasma_spawns: List[int] = field(default_factory=list)  # pool slot, or -1: a full pool fizzled it
+    plasma_hits: List[tuple] = field(default_factory=list)  # ("mon"|"bar"|"corpse", index, damage): what stopped it
     fx_spawns: List[tuple] = field(default_factory=list)    # (pool slot, "puff"|"blood")
     fx_skipped: int = 0                                     # effects dropped: the pool was full
     player_blocked: int = 0                                 # tried positions a solid thing refused
@@ -877,7 +885,8 @@ class World(CombatMixin):
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
                              nfloor=len(self.floor_groups) if self.floor_wide else 0,
                              nlight=len(self.light_thinkers),
-                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
+                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr),
+                             plasma=int(plasma_on(self.things)))                  # M8 C6
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)

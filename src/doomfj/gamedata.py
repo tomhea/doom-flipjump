@@ -460,15 +460,52 @@ class State:
         return bool(self.frame & FF_FULLBRIGHT)
 
 
-STATES: Dict[str, State] = {r[0]: State(*r) for r in _STATE_ROWS}
-# The compact index the emitter and the schema use: position in DOOM's array order, S_NULL = 0.
-# It fits one byte (asserted), which is the width of every state cell in the schema.
-STATE_NAMES: Tuple[str, ...] = tuple(r[0] for r in _STATE_ROWS)
+# M8 C6 (the PLASMA RIFLE, E1M6 / E1M9) -- info.c's rows. THE STATE BYTE WAS FULL: 246 states held indices 0..245 and
+# the plasma rifle needs 14 more (its psprite's five, its two flashes, the ball's two, the explosion's five), past the
+# one byte every state cell is (the schema's 8 bits, the fj's 2 nibbles). So the plasma's 15 take the indices of
+# GHOSTS: the four monsters' RAISE states (S_POSS_RAISE1 ..), which only the Arch-vile's resurrection enters (mobjinfo's
+# raisestate) -- no E1 map has one, so no state cell ever holds a raise index. A ghost keeps its index in
+# STATE_INDEX and its row in STATES, so every table built FROM A NAME (monstercode's mstate / mview reach the raise
+# states through raisestate) is what it always was -- E1M1's text does not move -- while STATE_NAMES (the DECODE: an
+# index a cell holds -> its live state) names the plasma's. The two domains never meet: a ghost is a MONSTER state
+# (entered by nothing), the plasma's are the weapon psprite's and the missile pool's (tests/host/test_plasma_model.py
+# holds every table's domain injective). Five raise indices (S_SARG_RAISE2..6) are left: ghosts-to-be.
+_PLASMA_ROWS = (
+    ('S_PLASMA', 'PLSG', 0, 1, 'A_WeaponReady', 'S_PLASMA'),
+    ('S_PLASMADOWN', 'PLSG', 0, 1, 'A_Lower', 'S_PLASMADOWN'),
+    ('S_PLASMAUP', 'PLSG', 0, 1, 'A_Raise', 'S_PLASMAUP'),
+    ('S_PLASMA1', 'PLSG', 0, 3, 'A_FirePlasma', 'S_PLASMA2'),
+    # info.c's S_PLASMA2 lasts 20 tics, past the tics nibble (MAX_FINITE_TICS 14: the schema's p_wpn_tics, the fj's
+    # wp_tics): it is SPLIT into two states of 10, the second with no action -- the same frame for the same 20 tics,
+    # and A_ReFire still runs once, on entering the first (P_SetPsprite runs a state's action only on entry)
+    ('S_PLASMA2', 'PLSG', 1, 10, 'A_ReFire', 'S_PLASMA2B'),
+    ('S_PLASMA2B', 'PLSG', 1, 10, None, 'S_PLASMA'),
+    ('S_PLASMAFLASH1', 'PLSF', 32768, 4, 'A_Light1', 'S_LIGHTDONE'),
+    ('S_PLASMAFLASH2', 'PLSF', 32769, 4, 'A_Light1', 'S_LIGHTDONE'),
+    ('S_PLASBALL', 'PLSS', 32768, 6, None, 'S_PLASBALL2'),
+    ('S_PLASBALL2', 'PLSS', 32769, 6, None, 'S_PLASBALL'),
+    ('S_PLASEXP', 'PLSE', 32768, 4, None, 'S_PLASEXP2'),
+    ('S_PLASEXP2', 'PLSE', 32769, 4, None, 'S_PLASEXP3'),
+    ('S_PLASEXP3', 'PLSE', 32770, 4, None, 'S_PLASEXP4'),
+    ('S_PLASEXP4', 'PLSE', 32771, 4, None, 'S_PLASEXP5'),
+    ('S_PLASEXP5', 'PLSE', 32772, 4, None, 'S_NULL'),
+)
+# ghost -> the live state that holds its index: _PLASMA_ROWS in order over the raise states in table order
+STATE_GHOSTS: Dict[str, str] = dict(zip([r[0] for r in _STATE_ROWS if "_RAISE" in r[0]], [r[0] for r in _PLASMA_ROWS]))
+assert len(STATE_GHOSTS) == len(_PLASMA_ROWS)
+
+STATES: Dict[str, State] = {r[0]: State(*r) for r in _STATE_ROWS + _PLASMA_ROWS}
+# The compact index the emitter and the schema use: position in DOOM's array order, S_NULL = 0 -- but a GHOST's position
+# names its live state (above). It fits one byte (asserted), which is the width of every state cell in the schema.
+STATE_NAMES: Tuple[str, ...] = tuple(STATE_GHOSTS.get(r[0], r[0]) for r in _STATE_ROWS)
 STATE_INDEX: Dict[str, int] = {n: i for i, n in enumerate(STATE_NAMES)}
+STATE_INDEX.update({g: STATE_INDEX[live] for g, live in STATE_GHOSTS.items()})       # a ghost keeps its index
 S_NULL = "S_NULL"
 # M8: the states before the teleport fog's -- the length monstercode's state table keeps (E1M1's text: no M8 row)
 CORE_STATE_COUNT = STATE_INDEX["S_TFOG"]
-assert STATE_NAMES[0] == S_NULL and len(STATE_NAMES) == len(STATES) <= 255
+assert STATE_NAMES[0] == S_NULL and len(STATE_NAMES) + len(STATE_GHOSTS) == len(STATES) and len(STATE_NAMES) <= 255
+# a ghost is never ENTERED: no state's next is a ghost but another ghost's (the raise chain itself)
+assert all(st.next not in STATE_GHOSTS or n in STATE_GHOSTS for n, st in STATES.items())
 
 
 # ================================================================================================
@@ -515,6 +552,8 @@ ACTIONS: Dict[str, Action] = {a.name: a for a in (
     Action("A_GunFlash", "psprite", "psprite", "P9", "the launcher: the player's attack frame, the flash"),
     Action("A_FireMissile", "psprite", "psprite", "P9", "the launcher: one rocket, P_SpawnPlayerMissile"),
     Action("A_FireCGun", "psprite", "psprite", "P10", "the chaingun: one bullet a burst frame, its flash frame"),
+    Action("A_FirePlasma", "psprite", "psprite", "M8",
+           "the plasma rifle: one cell, the flash flashstate + (P_Random() & 1), P_SpawnPlayerMissile (MT_PLASMA)"),
 )}
 
 
@@ -621,6 +660,10 @@ MOBJINFO: Dict[str, MobjInfo] = {m.name: m for m in (
     _mi("MT_ROCKET", -1, "S_ROCKET", 1000, S_NULL, "sfx_rlaunc", 8, "sfx_None", S_NULL, 0,
         "sfx_None", S_NULL, S_NULL, "S_EXPLODE1", S_NULL, "sfx_barexp", 20 * F, 11 * F, 8 * F, 100,
         20, "sfx_None", MF_NOBLOCKMAP | MF_MISSILE | MF_DROPOFF | MF_NOGRAVITY, S_NULL),
+    # M8 C6: the plasma rifle's ball (info.c MT_PLASMA)
+    _mi("MT_PLASMA", -1, "S_PLASBALL", 1000, S_NULL, "sfx_plasma", 8, "sfx_None", S_NULL, 0,
+        "sfx_None", S_NULL, S_NULL, "S_PLASEXP", S_NULL, "sfx_firxpl", 25 * F, 13 * F, 8 * F, 100,
+        5, "sfx_None", MF_NOBLOCKMAP | MF_MISSILE | MF_DROPOFF | MF_NOGRAVITY, S_NULL),
 )}
 del F
 
@@ -679,6 +722,7 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(2005, "chainsaw", 20, MF_SPECIAL, "template"),
     ThingType(2003, "MT_MISC27", 20, MF_SPECIAL, "info.c"),           # P9: the rocket launcher
     ThingType(2002, "MT_CHAINGUN", 20, MF_SPECIAL, "info.c"),         # P10: the chaingun
+    ThingType(2004, "MT_MISC28", 20, MF_SPECIAL, "info.c"),           # M8 C6: the plasma rifle (E1M6, E1M9)
     # M8 L0 (E1M2): the other two keycards, the soulsphere, the computer map (info.c MT_MISC5 / MT_MISC6 /
     # MT_MISC12 / MT_MISC21)
     ThingType(13, "MT_MISC5", 20, MF_SPECIAL | MF_NOTDMATCH, "info.c"),     # red keycard
@@ -739,6 +783,8 @@ WEAPONINFO: Dict[int, WeaponInfo] = {w.weapon: w for w in (
                "S_MISSILEFLASH1"),                                    # P9: the rocket launcher
     WeaponInfo(WP_CHAINGUN, "chaingun", AM_CLIP, "S_CHAINUP", "S_CHAINDOWN", "S_CHAIN", "S_CHAIN1",
                "S_CHAINFLASH1"),                                      # P10: the chaingun
+    WeaponInfo(WP_PLASMA, "plasma", AM_CELL, "S_PLASMAUP", "S_PLASMADOWN", "S_PLASMA", "S_PLASMA1",
+               "S_PLASMAFLASH1"),                                     # M8 C6: the plasma rifle
 )}
 
 
@@ -750,7 +796,8 @@ MAX_FINITE_TICS = 14   # the schema stores tics in one nibble with 15 meaning "f
 # States that CODE sets directly, outside any mobjinfo/weaponinfo entry point:
 #   p_pspr.c A_FirePistol / A_FireShotgun / (P9) A_GunFlash / (P10) A_FireCGun: P_SetMobjState (player->mo, S_PLAY_ATK2);
 #   (P10) A_FireCGun's second burst frame sets its flash as flashstate + 1: P_SetPsprite (player, ps_flash, S_CHAINFLASH2)
-CODE_ENTRY_STATES: Dict[str, str] = {"S_PLAY_ATK2": "mobj", "S_CHAINFLASH2": "psprite"}
+#   (M8 C6) A_FirePlasma's flash: flashstate + (P_Random() & 1) -- S_PLASMAFLASH2
+CODE_ENTRY_STATES: Dict[str, str] = {"S_PLAY_ATK2": "mobj", "S_CHAINFLASH2": "psprite", "S_PLASMAFLASH2": "psprite"}
 
 
 def check_integrity(states: Mapping[str, State] = None, infos: Mapping[str, MobjInfo] = None,

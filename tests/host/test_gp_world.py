@@ -27,7 +27,7 @@ def test_the_schema_is_well_formed(world):
     derived = {f.name for f in world.schema if f.kind == "derived"}
     assert derived == {"mon_leaf", "leaf_head", "mob_next", "proj_leaf", "fx_leaf"}
     by = {f.name: f for f in world.schema}
-    assert by["mon_state"].bits >= (len(gd.STATES) - 1).bit_length()
+    assert by["mon_state"].bits >= (len(gd.STATE_NAMES) - 1).bit_length()   # M8 C6: the decode table, not the ghosts
     assert by["mon_leaf"].hi >= world.layout.nleaf - 1
     assert by["sched_cursor"].hi >= world.layout.nmon - 1
     assert by["mob_next"].hi >= world.layout.nmobile           # stores index + 1

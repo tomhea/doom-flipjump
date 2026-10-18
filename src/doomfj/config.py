@@ -251,6 +251,11 @@ class Config:
     # tones draw the change), 0 on E1M1, whose emission stays byte-identical. Host-side only: NOT an fj constant.
     SWITCH_TEX: int = 0
 
+    # M8 (doomfj.automap; the owner, 2026-10-18): 1 = the game tier has the MAP PAGE -- the main menu's MAP item, the key
+    # M, the level's lines baked as a frame and the player's dot computed at run time. Per map (MAP_CONFIG), so E1M1's
+    # emission is untouched while the page is off there (0, the default: not one line differs).
+    AUTOMAP: int = 0
+
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
         """M8 F1.4: 1 when the record compares `gps_nslot` against SPR_SLOT_CAP (frame.thing_record_body's rep), else 0"""
@@ -318,8 +323,9 @@ MAP_CONFIG = {
     # 4 glows; its other 9 glows sit between equal lights and stay static)
     # M8: WALL_SCROLL -- lines 1254 and 1338 (COMPBLUE) are special 48, the scrolling wall (doomfj.scrollcode)
     # M8: SWITCH_TEX -- the used switches change their texture (doomfj.switches)
+    # M8: AUTOMAP -- the map page (doomfj.automap)
     "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1,
-             "WALL_SCROLL": 1, "SWITCH_TEX": 1},
+             "WALL_SCROLL": 1, "SWITCH_TEX": 1, "AUTOMAP": 1},
 }
 
 

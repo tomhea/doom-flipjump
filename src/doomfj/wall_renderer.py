@@ -77,6 +77,8 @@ from doomfj import lightcode as _lightcode                                # M8: 
 from doomfj import lights as _lights                                      # M8: ... and their rules
 from doomfj import scrollcode as _scrollcode                              # M8: the scrolling wall (special 48)
 from doomfj import keyboard as _keyboard                                   # P9: the press latch
+from doomfj import automap as _automap                                     # M8: the map page
+from doomfj.menu import AMAP_CODES, MAIN_MAP_SCR, MAP_GAME_SCR, MAP_MENU_SCR   # M8: the map page's states
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
@@ -506,6 +508,14 @@ MENU_EXIT_ITEM = "EXIT"
 # P10 (the owner's play-test, 2026-10-12: "Add menu resume when possible"): the RESUME item, right above NEW GAME --
 # ONLY while a game is in progress (`g_live`; `main_menu_entries` adds it); `menu_scr` MAIN_RESUME_SCR highlights it
 MENU_RESUME_ITEM = "RESUME"
+# M8 (doomfj.automap; the owner, 2026-10-18): the main menu's MAP item, under HELP -- ONLY on a map with the map page
+# (config.Config.AUTOMAP; `menu_entries_for` adds it); the oracle's menu.MAIN_MAP_SCR highlights it
+MENU_MAP_ITEM = "MAP"
+# M8: the map page's two cells, declared only on a map with the page. `amap` is the program's half of the oracle's
+# map states (menu.AMAP_CODES: 1 the page opened from the world, 2 from the main menu, 3 the main menu on MAP; 0
+# otherwise) -- `menu_scr` has no value left -- PERSISTED like `menu_scr` (build.automap_persist). `ev_map` is M's
+# down edge, zeroed before every frame's polls like the other events (`standalone_key_lines`), so it is not restored.
+AUTOMAP_STATE_DECLS = ["amap: hex.vec 1, 0", "ev_map: hex.vec 1"]
 
 # M7 P1.5 -- the SKILL SCREEN NEW GAME opens (docs/gp-skill-menu.md): entry SKILL_MENU_FIRST + k is
 # skill SKILLS[k], and `menu_sel` holds k. P10 (the owner's play-test, 2026-10-12: "skill screen default to medium"):
@@ -917,7 +927,8 @@ def _skill_dispatch(prefix: str) -> list:
     return _restartcode.skill_dispatch(prefix, "menu_sel", len(SKILLS))   # M7 P7: one dispatch shape
 
 
-def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), stats=None) -> list:
+def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), stats=None, automap=None,
+                cold=None) -> list:
     """M3 — the MENU frames, and the branch that chooses them.
 
     A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
@@ -947,12 +958,21 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
     RESUME highlighted is one more frame. LEVEL COMPLETE shows the level's stats: `stats` is the World (the game
     tier's; doomfj.statcode computes the digit slots and draws them over its baked frame). Without one (a test
     harness's menu) the frame is baked with its slots empty.
+
+    M8 (doomfj.automap): `automap` -- the map's `automap.Pages`, or None (E1M1: every line as before). The main menu
+    gains MAP under HELP (`menu_entries_for`), the help lists M, and two more producers come before the `menu_scr`
+    branch, behind one `if0` on `amap` that only a menu frame pays: the main menu on MAP (each `g_live` variant) and
+    the map page -- its band's baked frame and the dot (`automap.fj_lines`). Those producers are ~90k ops of baked
+    frames, so they are COLD: `automap_cold_lines`, reached by a jump. `cold` -- a list the caller places where
+    nothing falls in and no hot code follows (the emitter: the end of the last part, so not one op of the renderer
+    moves); None places them here, after the fcall'd routines.
     """
     from doomfj.menu import fj as menu_fj, help_fj, level_done_fj, palette_colours
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
     assert MENU_HELP_ITEM in entries, "the main menu needs its %r item (M7 P3.4)" % MENU_HELP_ITEM
     assert MENU_EXIT_ITEM in entries, "the main menu needs its %r item (P9)" % MENU_EXIT_ITEM
+    entries = menu_entries_for(entries, automap is not None)       # M8: MAP under HELP on a map with the page
     live_entries, live_selected = main_menu_entries(entries, selected, 1)
 
     def main(label, lines, row):
@@ -964,6 +984,9 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
                 + [f"{p}_l:"] + main(label + "_l", live_entries,
                                      live_entries.index(item) if item else live_selected))
 
+    _am_cold = automap_cold_lines(automap, by_live) if automap is not None else []
+    if automap is not None and cold is not None:
+        cold.extend(_am_cold)                                   # M8: the caller places them
     if stats is not None:
         level_done = _statcode.digit_lines(stats, SKILLS) + _statcode.frame_lines(cfg.W, cfg.H, colours, stats)
     else:
@@ -971,10 +994,12 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
     return [
         # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
-        *menu_state_lines(restart),
+        *menu_state_lines(restart, automap is not None),       # M8: the map page's states too
         # -- the frame: the world, or one of the baked screens
         "hex.if0 1, mode, do_world",
         *hud,                              # M7 P4.0: a menu frame covers the bar -- redraw it on the next world frame
+        # M8: the map page and the main menu on MAP -- `amap` 0 goes on to the `menu_scr` branch
+        *(["hex.if0 1, amap, mf_nam", ";mf_am", "mf_nam:"] if automap is not None else []),
         "hex.if0 1, menu_scr, mf_main",
         # M7 P3.4: the help (either id) and the main menu with HELP highlighted (P9: EXIT; P10: RESUME)
         f"hex.if_flags menu_scr, {_P34_SCREENS}, mf_np34, mf_p34",
@@ -993,7 +1018,8 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
         "mf_mainh:",
         *by_live("mf_mainh", "menu_frame_help", MENU_HELP_ITEM),
         "mf_help:",
-        help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False),
+        help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False,
+                **({"automap": True} if automap is not None else {})),      # M8: the help lists M
         ";frame_end",
         "mf_mainx:",                       # P9
         *by_live("mf_mainx", "menu_frame_exit", MENU_EXIT_ITEM),
@@ -1010,8 +1036,33 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
         # fcall'd only: every screen above ends in a jump. M7 P7: restart_common and each skill's rs_skill<k>
         *_restartcode.routine_lines(restart),
         *(_statcode.routine_lines() if stats is not None else []),     # P10: lvd_dec, and the unreachable lvd_div0
+        *(_am_cold if (automap is not None and cold is None) else []),   # M8: the page's producers, here
         "do_world:",
     ]
+
+
+def menu_entries_for(entries, automap: bool) -> list:
+    """M8: the main menu's lines on a map with the map page -- MENU_MAP_ITEM right under MENU_HELP_ITEM -- or
+    `entries` unchanged"""
+    entries = list(entries)
+    if not automap:
+        return entries
+    k = entries.index(MENU_HELP_ITEM) + 1
+    return entries[:k] + [MENU_MAP_ITEM] + entries[k:]
+
+
+def automap_cold_lines(pages, by_live) -> list:
+    """M8 -- the map page's producers, jumped to (`;mf_am`) from `_menu_lines`' branch when `amap` is not 0: 3
+    (menu.AMAP_CODES[MAIN_MAP_SCR]) is the main menu on MAP, either `g_live` variant (`by_live`); 1 and 2 are the map
+    page (`automap.fj_lines`), whichever way it was opened. Every path ends in a jump to the frame's tail, so nothing
+    falls out -- placed where nothing falls in"""
+    return ["mf_am:",
+            f"hex.if_flags amap, 1<<{AMAP_CODES[MAIN_MAP_SCR]}, mf_amap, mf_mainm",
+            "mf_mainm:",
+            *by_live("mf_mainm", "menu_frame_map", MENU_MAP_ITEM),
+            "mf_amap:",
+            *_automap.fj_lines(pages),
+            ";frame_end"]
 
 
 def main_menu_entries(entries, selected: int, live: int) -> tuple:
@@ -1023,7 +1074,7 @@ def main_menu_entries(entries, selected: int, live: int) -> tuple:
     return entries[:selected] + [MENU_RESUME_ITEM] + entries[selected:], selected + 1
 
 
-def menu_state_lines(restart) -> list:
+def menu_state_lines(restart, automap: bool = False) -> list:
     """M7 P1.5 -- the menu's STATE MACHINE (see `_menu_lines`), alone: the events in, `mode`,
     `menu_scr`, `menu_sel` and -- on a skill's NEW GAME -- the restart block out. No frame: the
     caller draws. `restart` is `restart_lines(...)`; its shared routine (`restart_common`, fcall'd
@@ -1039,12 +1090,28 @@ def menu_state_lines(restart) -> list:
 
     P10 (menu.menu_step's `live`): `g_live` -- NEW GAME sets it, LEVEL COMPLETE's ANY key (`ev_any`) clears it on its
     way to the main menu. Esc on a main-menu item resumes the world only while it is set (else the next event in the
-    order is read); the world opens the menu on RESUME while it is set; up from NEW GAME reaches RESUME only then."""
+    order is read); the world opens the menu on RESUME while it is set; up from NEW GAME reaches RESUME only then.
+
+    M8 (doomfj.automap; menu.menu_step's `automap`): the map page, on a map that has it. `amap` (menu.AMAP_CODES) is
+    read FIRST on a menu frame -- one `if0` -- and is 0 but on the page and the main menu on MAP. In the world the
+    only addition is one more `if0`, on `ev_map`, reached when neither esc, enter nor h is down. Every main-menu item
+    reads m after h (it opens the page from the menu); HELP's down and EXIT's up reach MAP; without `automap` every
+    line is as before."""
     _common, skills = restart
+    A = automap
+
+    def m_check(lbl):
+        """M8: on a main-menu item, m (after h) opens the map page from the menu"""
+        return ([f"hex.if0 1, ev_map, {lbl}", ";mn_tomap", f"{lbl}:"] if A else [])
+
+    def to_main_map():
+        """M8: the main menu on MAP: `menu_scr` 0, `amap` 3"""
+        return ["hex.zero 1, menu_scr", f"hex.set 1, amap, {AMAP_CODES[MAIN_MAP_SCR]}"]
     assert len(skills) == len(SKILLS), "one restart block per skill: %d for %d" % (len(skills),
                                                                                   len(SKILLS))
     return [
         "hex.if0 1, mode, mn_world",
+        *(automap_state_lines() if A else []),          # M8: the map page and the main menu on MAP
         "hex.if0 1, menu_scr, mn_main",
         # M7 P3.4: the help (HELP_MENU_SCR / HELP_GAME_SCR) and the main menu on HELP (P9: EXIT; P10: RESUME)
         f"hex.if_flags menu_scr, {_P34_SCREENS}, mn_np34, mn_p34",
@@ -1100,8 +1167,10 @@ def menu_state_lines(restart) -> list:
         "mn_q1:",
         "hex.if0 1, ev_enter, mn_q2", ";mn_tohelp", "mn_q2:",
         "hex.if0 1, ev_help, mn_q3", ";mn_tohelp", "mn_q3:",
+        *m_check("mn_qm"),
         "hex.if0 1, ev_up, mn_q4", "hex.zero 1, menu_scr", ";mn_done", "mn_q4:",
-        "hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_EXIT_SCR}", ";mn_done",
+        *(["hex.if0 1, ev_dn, mn_done", *to_main_map(), ";mn_done"] if A else      # M8: down to MAP
+          ["hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_EXIT_SCR}", ";mn_done"]),
         "mn_tohelp:", f"hex.set 1, menu_scr, {HELP_MENU_SCR}", ";mn_done",
         "mn_cont:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",      # P10: back to the world
         # P9 -- the main menu on EXIT: esc resumes a game in progress (P10), ENTER HALTS THE PROGRAM, h opens the help,
@@ -1113,7 +1182,9 @@ def menu_state_lines(restart) -> list:
         "mn_x1:",
         "hex.if0 1, ev_enter, mn_x2", ";mn_exit", "mn_x2:",
         "hex.if0 1, ev_help, mn_x3", ";mn_tohelp", "mn_x3:",
-        "hex.if0 1, ev_up, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
+        *m_check("mn_xm"),
+        *(["hex.if0 1, ev_up, mn_done", *to_main_map(), ";mn_done"] if A else      # M8: up to MAP
+          ["hex.if0 1, ev_up, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done"]),
         "mn_exit: stl.loop",
         # P10 -- the main menu on RESUME (only while g_live): esc or enter resume, h opens the help, down goes to NEW
         # GAME (up is clamped: RESUME is the first item)
@@ -1121,6 +1192,7 @@ def menu_state_lines(restart) -> list:
         "hex.if0 1, ev_esc, mn_c1", ";mn_cont", "mn_c1:",
         "hex.if0 1, ev_enter, mn_c2", ";mn_cont", "mn_c2:",
         "hex.if0 1, ev_help, mn_c3", ";mn_tohelp", "mn_c3:",
+        *m_check("mn_cm"),
         "hex.if0 1, ev_dn, mn_done", "hex.zero 1, menu_scr", ";mn_done",
         # -- the main menu (NEW GAME highlighted)
         "mn_main:",
@@ -1128,6 +1200,7 @@ def menu_state_lines(restart) -> list:
         "hex.if0 1, ev_enter, mn_m2", "hex.set 1, menu_scr, 1", ";mn_done", "mn_m2:",
         # M7 P3.4: h opens the help; P10: up highlights RESUME while a game is in progress; down highlights HELP
         "hex.if0 1, ev_help, mn_m3", ";mn_tohelp", "mn_m3:",
+        *m_check("mn_mm"),
         "hex.if0 1, ev_up, mn_m4", "hex.if0 1, g_live, mn_m4",
         f"hex.set 1, menu_scr, {MAIN_RESUME_SCR}", ";mn_done", "mn_m4:",
         "hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
@@ -1138,9 +1211,44 @@ def menu_state_lines(restart) -> list:
         "mn_open:", "hex.set 1, mode, 1", "hex.zero 1, menu_scr",
         "hex.if0 1, g_live, mn_done", f"hex.set 1, menu_scr, {MAIN_RESUME_SCR}", ";mn_done",   # P10: on RESUME
         # M7 P3.4: h opens the help, which closes back to the world
-        "mn_w2:", "hex.if0 1, ev_help, mn_done",
+        "mn_w2:", "hex.if0 1, ev_help, mn_w3" if A else "hex.if0 1, ev_help, mn_done",
         "hex.set 1, mode, 1", f"hex.set 1, menu_scr, {HELP_GAME_SCR}",
+        # M8: m opens the map page, which closes back to the world
+        *([";mn_done", "mn_w3:", "hex.if0 1, ev_map, mn_done",
+           "hex.set 1, mode, 1", f"hex.set 1, amap, {AMAP_CODES[MAP_GAME_SCR]}"] if A else []),
         "mn_done:",
+    ]
+
+
+def automap_state_lines() -> list:
+    """M8 -- the map page's states, read first on a menu frame (`menu_state_lines`; menu.menu_step's rules): `amap`
+    0 goes on to the `menu_scr` machine. On the page (1 from the world, 2 from the menu) esc or m close it -- to the
+    world, or to the main menu on MAP (3). On the main menu on MAP: esc resumes a game in progress, enter or m open the
+    page, h the help, up HELP, down EXIT -- leaving MAP zeroes `amap`. `mn_tomap` (here; every main-menu item's m
+    jumps to it) opens the page from the menu"""
+    g, mm, m3 = AMAP_CODES[MAP_GAME_SCR], AMAP_CODES[MAP_MENU_SCR], AMAP_CODES[MAIN_MAP_SCR]
+    return [
+        "hex.if0 1, amap, mn_nam",
+        f"hex.if_flags amap, 1<<{m3}, mn_apg, mn_mainm",
+        # the page: esc or m close it, back to where it was opened from
+        "mn_apg:",
+        "hex.if0 1, ev_esc, mn_a1", ";mn_aclose", "mn_a1:",
+        "hex.if0 1, ev_map, mn_done",
+        "mn_aclose:", f"hex.if_flags amap, 1<<{g}, mn_amenu, mn_agame",
+        "mn_agame:", "hex.zero 1, mode", "hex.zero 1, amap", ";mn_done",
+        "mn_amenu:", f"hex.set 1, amap, {m3}", ";mn_done",
+        # the main menu on MAP
+        "mn_mainm:",
+        "hex.if0 1, ev_esc, mn_mp1", "hex.if0 1, g_live, mn_mp1", "hex.zero 1, amap", ";mn_cont",
+        "mn_mp1:",
+        "hex.if0 1, ev_enter, mn_mp2", ";mn_tomap", "mn_mp2:",
+        "hex.if0 1, ev_help, mn_mp3", "hex.zero 1, amap", ";mn_tohelp", "mn_mp3:",
+        "hex.if0 1, ev_map, mn_mp4", ";mn_tomap", "mn_mp4:",
+        "hex.if0 1, ev_up, mn_mp5", "hex.zero 1, amap", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done", "mn_mp5:",
+        "hex.if0 1, ev_dn, mn_done", "hex.zero 1, amap", f"hex.set 1, menu_scr, {MAIN_EXIT_SCR}", ";mn_done",
+        # the page, opened from the menu (from any main-menu item's m, or MAP's enter)
+        "mn_tomap:", "hex.zero 1, menu_scr", f"hex.set 1, amap, {mm}", ";mn_done",
+        "mn_nam:",
     ]
 
 
@@ -1154,7 +1262,7 @@ _HOLD_SCREENS = "%#06x" % sum(1 << v for v in range(LEVEL_DONE_HOLD_LAST, LEVEL_
 _LEVEL_DONE_MASK = "%#06x" % sum(1 << v for v in LEVEL_DONE_SCREENS)
 
 
-def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=None) -> list:
+def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=None, automap=None, view=None) -> list:
     """M7 P3.4 -- THE ORACLE'S PICTURE of a menu frame: what `_menu_lines` bakes for `menu_scr` =
     `scr` (and, on the skill screen, `menu_sel` = `sel`) -- the main menu on either item, the skill
     screen, LEVEL COMPLETE or the help. ONE mapping from the state to the screen, for every gate
@@ -1164,12 +1272,20 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
     progress; MAIN_RESUME_SCR exists only then (refused otherwise). LEVEL COMPLETE's `stats` is (nsecret, the digit
     slots: menu.stats_digits(*statcode.stats_of(world), statcode.count_digits(world))) -- None, the frame a menu
     without a World bakes (its slots
-    empty, `_menu_lines(stats=None)`)."""
-    from doomfj.menu import MENU_HALTED, help_pixels, level_done_pixels, pixels
+    empty, `_menu_lines(stats=None)`).
+    M8: `automap` -- the map's `automap.Pages` (automap.pages_for), None on a map without the page: the main menu then
+    has MAP, the help lists M, and the map page (menu.MAP_SCREENS) is `automap.pixels` at `view` = (viewx, viewy),
+    16.16 -- the dot is the one picture that depends on the world; MAIN_MAP_SCR is the main menu on MAP."""
+    from doomfj.menu import MAP_SCREENS, MENU_HALTED, help_pixels, level_done_pixels, pixels
     if scr == MENU_HALTED:
         raise ValueError("menu.MENU_HALTED: the program halted on EXIT and presents no frame")
+    if scr in (MAP_SCREENS + (MAIN_MAP_SCR,)) and automap is None:
+        raise ValueError("menu.MAP_SCREENS / MAIN_MAP_SCR: the map page exists only on a map that has it (automap=)")
+    if scr in MAP_SCREENS:
+        assert view is not None, "the map page's dot is the player's: pass view=(viewx, viewy)"
+        return _automap.pixels(automap, *view)
     if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
-        return help_pixels(cfg.W, cfg.H, colours)
+        return help_pixels(cfg.W, cfg.H, colours, **({"automap": True} if automap is not None else {}))
     if scr in LEVEL_DONE_SCREENS:                  # P10: the screen and its hold
         nsecret, digits = stats if stats is not None else (0, None)
         return level_done_pixels(cfg.W, cfg.H, colours, nsecret, digits)
@@ -1177,9 +1293,10 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
         return pixels(cfg.W, cfg.H, SKILL_MENU, SKILL_MENU_FIRST + sel, colours)
     if scr == MAIN_RESUME_SCR and not live:
         raise ValueError("menu.MAIN_RESUME_SCR: RESUME is on the main menu only while a game is in progress")
-    entries, new_game = main_menu_entries(DEFAULT_MENU, DEFAULT_MENU_SELECTED, live)
+    entries, new_game = main_menu_entries(menu_entries_for(DEFAULT_MENU, automap is not None), DEFAULT_MENU_SELECTED,
+                                          live)                                         # M8: MAP on its maps
     item = {0: None, MAIN_HELP_SCR: MENU_HELP_ITEM, MAIN_EXIT_SCR: MENU_EXIT_ITEM,     # P9
-            MAIN_RESUME_SCR: MENU_RESUME_ITEM}[scr]                                      # P10
+            MAIN_RESUME_SCR: MENU_RESUME_ITEM, MAIN_MAP_SCR: MENU_MAP_ITEM}[scr]         # P10; M8
     return pixels(cfg.W, cfg.H, entries, new_game if item is None else entries.index(item), colours)
 
 
@@ -1225,7 +1342,7 @@ def landing_drop_lines() -> list:
             "lnd_vd_end:"]
 
 
-def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
+def standalone_key_lines(polls: int = STANDALONE_POLLS, automap: bool = False) -> list:
     """M5 / M7 P1.5 / P9 -- the standalone frame's INPUT, alone: the menu's events and the press latch zeroed, the
     `polls` keyboard polls, the latch OR-ed with the held flags, and the key byte `pkeys` built from the latch.
     tests/fj/test_key_latch.py runs exactly these lines.
@@ -1234,9 +1351,21 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
     the frame acts on `kb_now` -- each held key's nibble is 1 when the key is held after the polls OR went down during
     them -- not on the held flags, which a tap inside one frame's polls left unchanged. `pkeys` (the sim's, the doors',
     the exit's, the restart's and the fire's) and the weapon's number keys (weaponcode) read it. The held flags still
-    carry "held" across frames (persisted), and a release with no press in the frame still takes effect."""
+    carry "held" across frames (persisted), and a release with no press in the frame still takes effect.
+
+    M8 (doomfj.automap): `automap` -- the map has the map page, so M's DOWN edge is the menu's `ev_map`. kb.poll's
+    table and parameters are frozen (rule 4) and E1M1's poll must stay what it is, so the key is read BESIDE the poll:
+    each of the `polls` polls is written out (the same expansion `rep` makes) and followed by `map_key_lines`, which
+    reads what the poll left -- the status nibble and the keycode byte, which kb.poll consumes into `kbstat` / `kbcode`
+    on every event and discards for a key it does not know (M is one). An idle poll pays one `if_flags`."""
     from doomfj import keyboard as KB
     now = KB.now_cell
+    poll = ("kb.poll kbstat, kbcode, " + "".join(f"{KB.flag(k)}, " for k in KB.HELD_KEYS) + f"{KB.KEY_NOW}, "
+            "ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad")
+    if automap:
+        polls_ = ["hex.zero 1, ev_map"] + [ln for i in range(polls) for ln in [poll] + map_key_lines(f"kbm{i}")]
+    else:
+        polls_ = [f"rep({polls}, i) " + poll]
     return [
         # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
         # state machine reads them
@@ -1244,10 +1373,8 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
         "hex.zero 1, ev_help",                                          # M7 P3.4
         "hex.zero 1, ev_any",                                           # P10: any key's down edge
         f"hex.zero {len(KB.HELD_KEYS)}, {KB.KEY_NOW}",                  # P9: the press latch
-        f"rep({polls}, i) kb.poll kbstat, kbcode, "
-        + "".join(f"{KB.flag(k)}, " for k in KB.HELD_KEYS)            # M7 P4.1: strafe, fire, 1..4
-        + f"{KB.KEY_NOW}, "                                             # P9
-        "ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad",          # P10: ev_any
+        # the polls (M7 P4.1: strafe, fire, 1..4; P9: the latch; P10: ev_any) -- M8: each read for M after it
+        *polls_,
         *KB.now_lines(),                                                # P9: kb_now |= the held flags
         # the frame's keys -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
@@ -1265,10 +1392,20 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
     ]
 
 
+def map_key_lines(p: str) -> list:
+    """M8: after ONE kb.poll -- `ev_map` = 1 when that poll delivered M's DOWN edge (status 0x9, keycode 0x6D,
+    menu.MAP_KEY). Labels `<p>_*`. A poll with no event (status 0) or an up edge (0x8) costs the first if_flags"""
+    from doomfj.menu import MAP_KEY
+    return [f"hex.if_flags kbstat, 1<<0x9, {p}_no, {p}_dn", f"{p}_dn:",
+            f"hex.if_flags kbcode + dw, 1<<{MAP_KEY >> 4:#x}, {p}_no, {p}_hi",
+            f"{p}_hi:", f"hex.if_flags kbcode, 1<<{MAP_KEY & 15:#x}, {p}_no, {p}_m",
+            f"{p}_m:", "hex.set 1, ev_map, 1", f"{p}_no:"]
+
+
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
                             press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
-                            use_guard=((), ()), weapon_bar=(), knock_move=(), press_first=()) -> list:
+                            use_guard=((), ()), weapon_bar=(), knock_move=(), press_first=(), automap: bool = False) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -1289,9 +1426,11 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     M7 P8a (docs/gp-final-plan.md 4.3 step 6; doomfj.knockcode): `knock_move` -- the player's KNOCK move, spliced right
     after `simmv_done` (the walk's landing, which the dead player's skipped move reaches too: the corpse slides) and
     before the bar's weapon slots (the knock's pickups change them).
+
+    M8: `automap` -- the map has the map page: the polls read M too (`standalone_key_lines`).
     """
     return [
-        *standalone_key_lines(polls),      # the polls, the press latch, the key byte (P9: factored out)
+        *standalone_key_lines(polls, automap),   # the polls, the press latch, the key byte (P9: factored out)
         *(menu or []),                     # M3: the menu frame + the branch past the world
         # M7 P7: the restart on use after death (restartcode.tic_lines) -- the world frame's START, before the
         # frozen-level guard and the door tic: the model's World.tic runs the restart, then the tic
@@ -3557,6 +3696,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _loot = None
         assert not _LOOT, "M7 P6: the 'full' player moves through the collision cells"
 
+    # M8: the map page, on a map whose MAP_CONFIG turns it on (config.Config.AUTOMAP) -- the menu's tier only; its
+    # inks from the menu's palette
+    _AUTOMAP = (_automap.pages_for(map_wad, mapname, bytes(b for rgb in asset_wad.playpal(0) for b in rgb), cfg)
+                if menu else None)
     # M3: the menu frame + the branch past the world. Built here, where `asset_wad` is
     # resolved, so its colours come from the SAME palette the renderer bakes.
     if menu:
@@ -3587,10 +3730,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                         + (_lightcode.level_start_lines(_lth) if _lth else [])            # M8: the lights' start
                         # M8: every switch as the map has it (switchcode)
                         + (_switchcode.level_start_lines(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else [])))
+    _am_cold = []                          # M8: the map page's producers, placed at the end of the last part
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
                                stats=_p31["world"] if _STATS else None,     # P10: LEVEL COMPLETE's numbers
+                               automap=_AUTOMAP, cold=_am_cold,             # M8: the map page (None: E1M1)
                                # M7 P5: a menu frame shows PLAYPAL 0 (hurtcode.pal_menu_lines: sent only on a change)
                                hud=(list(_hud["menu"]) + (list(_hrt["menu_palette"]) if _hrt else []))
                                if _hud else ())
@@ -3623,6 +3768,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   weapon_bar=(_wpn.get("bar", ()) if _wpn else ()),   # M7 P6+P7: after the move
                                   # M7 P8a: the player's knock move (doomfj.knockcode's splice point, package K)
                                   knock_move=_knockcode.player_move_lines() if _KNOCK else (),
+                                  automap=_AUTOMAP is not None,              # M8: the polls read M
                                   latch=_loot["latch"] if _loot else (),
                                   use_guard=_loot["use_guard"] if _loot else ((), ()),
                                   door_lines=_door_tic,
@@ -4053,6 +4199,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # the only cells besides the view state that the M1 reset must leave alone.
           *(STANDALONE_SCRATCH_DECLS if standalone else []),
           *(_scrollcode.DECLS if _scroll_on else []),       # M8: the scrolling wall's wnoff save / slide
+          # M8: the map page's state and scratch (doomfj.automap), on a map that has it
+          *((AUTOMAP_STATE_DECLS + _automap.decls(_AUTOMAP)) if (standalone and _AUTOMAP is not None) else []),
           # M14-c: the player tic's scratch -- the signed 16.16 move magnitude, the
           # finesine index it is projected through, and the two 16.16 deltas
           *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",
@@ -4185,6 +4333,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
           palette,
           yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
+          # M8: the map page's producers (automap_cold_lines) -- LAST, after every table, so the ~90k ops of baked
+          # page move no op of the renderer; reached only by the menu's `;mf_am`, and every path leaves by a jump
+          *((["// M8 (doomfj.automap): the map page's producers, cold"] + _am_cold) if _am_cold else []),
       ]),
     ]
     _texts = [(n, chr(10).join(g)) for n, g in _parts if g]

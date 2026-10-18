@@ -144,6 +144,7 @@ def _read_quiet(p: Path) -> str:
 # card, the walk-over triggers' W1 bits) -- every binary before P2a.1 lacks all three. Each group
 # comes whole or not at all.
 OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcard", "wfired"}),
+                   frozenset({"amap"}),                   # M8: the map page's state (a map with the page only)
                    frozenset({"lvdone", "pusedn"}),       # M7 P2a.2: the exit's two cells
                    frozenset({"lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"}),  # M7 P2b
                    frozenset({"mon_state", "mon_tics", "mon_facing", "mon_active"}),  # M7 P3.1
@@ -677,7 +678,9 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
              "viewangle": Cell("viewangle", "hex", 8),
              "mode": Cell("mode", "hex", 1),
              # M7 P1.5: the skill menu's screen and highlight, persisted like `mode`
-             "menu_scr": Cell("menu_scr", "hex", 1), "menu_sel": Cell("menu_sel", "hex", 1)}
+             "menu_scr": Cell("menu_scr", "hex", 1), "menu_sel": Cell("menu_sel", "hex", 1),
+             # M8 (doomfj.automap): the map page's state nibble, on a map with the page (OPTIONAL elsewhere)
+             "amap": Cell("amap", "hex", 1)}
     for k in ("kb_f", "kb_b", "kb_l", "kb_r", "kb_u"):
         cells[k] = Cell(k, "hex", 1)
     cells["dstate"] = Cell("dstate", "hex", 1, count=ndoors)
@@ -918,6 +921,14 @@ class Oracle:
         return len(self.door_order)
 
     @property
+    def automap(self):
+        """M8: the map's page (doomfj.automap.Pages), None on a map without it -- its main menu has MAP, its help M"""
+        if not hasattr(self, "_automap"):
+            from doomfj.automap import pages_for
+            self._automap = pages_for(self.mw, self.mapname, bytes(b for rgb in self.mw.playpal(0) for b in rgb))
+        return self._automap
+
+    @property
     def lift_order(self):
         """M7 P2b: the lifts (doomfj.movers), in sector order"""
         from doomfj.movers import lift_states
@@ -1125,15 +1136,17 @@ class Oracle:
         from doomfj.menu import palette_colours
         from doomfj.wall_renderer import menu_screen_pixels
         colours = palette_colours(bytes(b for rgb in self.mw.playpal(0) for b in rgb))
-        return bytes(menu_screen_pixels(self.rm.cfg, colours, scr, sel, live, stats))
+        return bytes(menu_screen_pixels(self.rm.cfg, colours, scr, sel, live, stats,
+                                        automap=self.automap))                         # M8: MAP, the help's M
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""
         from doomfj.menu import palette_colours, pixels
-        from doomfj.wall_renderer import DEFAULT_MENU
+        from doomfj.wall_renderer import DEFAULT_MENU, menu_entries_for
         cfg = self.rm.cfg
         colours = palette_colours(bytes(b for rgb in self.mw.playpal(0) for b in rgb))
-        return bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, 2, colours))
+        return bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, menu_entries_for(DEFAULT_MENU, self.automap is not None), 2,
+                            colours))                                                  # M8: MAP on its maps
 
     def door_states_tuple(self, ds: dict) -> tuple:
         return tuple(ds[si][0] for si in self.door_order)
@@ -1518,7 +1531,8 @@ def demo(fjm: Path, labels_path: Path) -> int:
     st, mode, n_state, n_pix = dsim.reset(), 1, 0, 0
     scr, sel, live = known["menu_scr"], known["menu_sel"], known["g_live"]
     for f in range(len(per_frame)):
-        mode, scr, sel, _ng, live = menu_step(mode, scr, sel, menu_events[f], live)
+        mode, scr, sel, _ng, live = menu_step(mode, scr, sel, menu_events[f], live,
+                                              automap=orc.automap is not None)            # M8
         # P10: the boot pick's NEW GAME (at the boot skill: the pristine level start the DoorSim starts from)
         assert _ng is None or f == gate.MENU_FRAMES, "the demo's walk starts no new game but the boot pick's"
         if mode == 0:

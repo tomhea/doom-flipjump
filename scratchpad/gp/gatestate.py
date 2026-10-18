@@ -21,6 +21,7 @@ import probe as P                                                          # noq
 from doomfj.fixedpoint import _signed                                      # noqa: E402
 
 STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
+               "amap",                           # M8: the map page's state (probe.OPTIONAL_GROUPS: its maps only)
                "dstate", "ddir", "dsub", "dwait",
                "dreq", "pcard", "wfired",        # M7 P2a.1: doors.DoorPhase's (req, card, fired)
                "lvdone", "pusedn",               # M7 P2a.2: the exit's
@@ -88,14 +89,18 @@ MONSTER_NAMES = {"mon_state", "mon_tics", "mon_facing", "mon_active",
 
 
 def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None,
-                 movers=None, mover_order=None, monsters=None, live=None) -> dict:
+                 movers=None, mover_order=None, monsters=None, live=None, automap: bool = False) -> dict:
     """the oracle's state after a frame, in the cells' own units: the view as signed 16.16, the
     angle's 32 bits, and each door cell a tuple in door order (`doors`: the per-door
     (state, direction, sub-step, timer) tuples, sorted by sector as the binary numbers them).
     M7 P2a.1: `phase` = a doors.DoorPhase state (its req, card and fired), `order` its door order.
     M7 P2a.2: `exit_` = (lvdone, pusedn). M7 P2b: `movers` = a movers.MoverPhase state (its lifts,
     requests and switch), `mover_order` its lift order. P10: `live` = menu.menu_step's (`g_live`), compared when given
-    (a gate that does not step it, none)"""
+    (a gate that does not step it, none).
+    M8 (doomfj.automap): `scr` is menu.menu_step's, so a map-page state (MAP_GAME_SCR ..) is the program's `menu_scr`
+    0 and its `amap` (menu.program_cells); `automap` -- the binary has the page -- compares `amap` too"""
+    from doomfj.menu import program_cells
+    scr, amap = program_cells(scr)
     doors = list(doors)
     extra = {} if live is None else {"g_live": live}
     if phase is not None:
@@ -111,6 +116,8 @@ def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exi
                       "lreq": tuple(int(si in req) for si in mover_order), "fswitch": sw})
     if monsters is not None:                    # M7 P3.1: a monsters.MonsterPhase's state()
         extra.update(monsters)
+    if automap:
+        extra["amap"] = amap
     return {**extra, "viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": angle & 0xFFFFFFFF,
             "mode": mode, "menu_scr": scr, "menu_sel": sel,
             "dstate": tuple(d[0] for d in doors), "ddir": tuple(d[1] for d in doors),

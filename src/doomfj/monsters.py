@@ -460,7 +460,9 @@ class MonsterPhase:
         doors' requests, the lifts' -- M8 F1.3: and, in the wide layout, the floor groups' states and timers"""
         ws = self.world.ws
         return ((ws.w_fired, ws.d_monreq, ws.l_req)
-                + ((ws.f_switch, ws.f_sub) if self.world.floor_wide else ()))
+                + ((ws.f_switch, ws.f_sub) if self.world.floor_wide else ())
+                # M8 C3: a WR close line starts its door closing in the move (doors.close_state)
+                + ((ws.d_dir, ws.d_sub) if any(t[1] == "close" for t in self.world.door_repeats) else ()))
 
     def _walk_keep(self) -> tuple:
         return tuple(list(a) for a in self._walk_arrays())

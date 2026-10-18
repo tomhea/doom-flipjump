@@ -44,10 +44,10 @@ BUTTON_FRAMES = 35                        # BUTTONTIME (35 tics): a tic is a fra
 BUTTON_NIBBLES = 2                        # the countdown's cell
 assert 0 < BUTTON_FRAMES < 16 ** BUTTON_NIBBLES
 EXIT_SWITCH_SPECIALS = frozenset({11})    # S1 exit (doors.EXIT_SPECIALS)
-DOOR_SWITCH_SPECIALS = frozenset({63, 103})          # doors.SWITCH_DOOR_KINDS
+DOOR_SWITCH_SPECIALS = frozenset({63, 103, 61, 112, 114, 133})   # doors.SWITCH_DOOR_KINDS (M8 C3: 61 112 114 133)
 FLOOR_SWITCH_SPECIALS = frozenset({23, 71, 102})     # movers.FLOOR_USE_SPECIALS
 LIFT_SWITCH_SPECIALS = frozenset({62, 123})          # movers.LIFT_USE_SPECIALS
-REPEAT_SPECIALS = frozenset({62, 123, 63})           # SR: the texture comes back after BUTTONTIME
+REPEAT_SPECIALS = frozenset({62, 123, 63, 61, 114})  # SR: the texture comes back after BUTTONTIME
 
 
 @dataclass(frozen=True)
@@ -156,12 +156,17 @@ def press(on: list, time: list, sr: Sequence[int], k: int) -> None:
         time[list(sr).index(k)] = BUTTON_FRAMES
 
 
-def door_presses(lat: Sequence[Switch], used: bool, x16: int, y16: int, ready: Callable[[int], bool]) -> List[int]:
+def door_presses(lat: Sequence[Switch], used: bool, x16: int, y16: int, ready: Callable[[int], bool],
+                 has_card: Callable[[str], bool] | None = None) -> List[int]:
     """the door switches a held use presses this tic (`used`: the use key, the player alive): EV_DoDoor finds one of
-    the line's doors at rest (`ready(sector)`, the tic-start state) and the player stands in the line's box"""
+    the line's doors at rest (`ready(sector)`, the tic-start state) and the player stands in the line's box. M8 C3: a
+    LOCKED switch (doors.SWITCH_DOOR_CARDS: S1 133) also needs its card -- `has_card(colour)` (EV_DoLockedDoor returns
+    0 without it: no texture change)"""
     if not used:
         return []
+    from doomfj.doors import SWITCH_DOOR_CARDS
     return [k for k, s in enumerate(lat) if s.kind == "door"
+            and (s.special not in SWITCH_DOOR_CARDS or has_card(SWITCH_DOOR_CARDS[s.special]))
             and any(ready(si) for si in s.targets) and in_box_fixed(s.box, x16, y16)]
 
 

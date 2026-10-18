@@ -85,9 +85,12 @@ def door_phase_lines(switches, door_slot: dict, dead: str | None = None) -> List
     out += ["    hex.if0 1, duse, swd_end"]
     if dead is not None:
         out += [f"    hex.if1 1, {dead}, swd_end"]
+    from doomfj.doors import SWITCH_DOOR_CARDS, door_card_cell
     for k, s in doors:
         p = f"swd{k}"
         out += [f"    hex.if1 1, {cell(k)}, {p}_no"]
+        if s.special in SWITCH_DOOR_CARDS:            # M8 C3: a locked switch (S1 133) needs its card
+            out += [f"    hex.if0 1, {door_card_cell(SWITCH_DOOR_CARDS[s.special])}, {p}_no"]
         for t, si in enumerate(s.targets):          # EV_DoDoor: one of its doors at rest (doors.switch_ready)
             d = door_slot[si]
             nxt = f"{p}_t{t + 1}" if t + 1 < len(s.targets) else f"{p}_no"

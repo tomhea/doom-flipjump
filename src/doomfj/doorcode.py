@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from doomfj.doors import CLOSING, OPENING, SPEED, WAIT, door_stay, door_stride
 from doomfj.doors import door_card_cell, poly_edges                     # M8 L2
+from doomfj.doors import STAY_MARK                                      # M8 C3
 
 M32 = 0xFFFFFFFF
 
@@ -82,7 +83,8 @@ def _box_test(d: int, box, hit: str, miss: str, regs=("viewx", "viewy"), tag=Non
 
 
 def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigger: list, *,
-                  stride: int = 1, top_wait: int = WAIT, reverse=None) -> list:
+                  stride: int = 1, top_wait: int = WAIT, reverse=None, down_stride=None, hold: bool = False,
+                  spress: bool = False) -> list:
     """ONE door machine's frame, after its trigger lines (which fall into `<p>_press` to press and
     jump to `<p>_moved` not to): `doors.door_tic` in fj, on the cells `st`/`dr`/`sub`/`wt` (the
     last a WAIT_NIBBLES counter), `last` = nstates - 1. `top_wait` is the wait set on reaching the
@@ -90,9 +92,18 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
     The doors (`door_tic_lines`) and the lifts (`movercode.lift_tic_lines`) both emit from here.
     `reverse` (M7 P2b, `doors.door_tic`'s reversal): `(mask, contact)` -- on a CLOSING step from a
     state in `mask` (the states whose step leaves the pass state), `contact(yes, no)`'s lines decide
-    whether a thing touches the door; touched, the door turns to OPENING without stepping."""
+    whether a thing touches the door; touched, the door turns to OPENING without stepping.
+
+    M8 C3 (`doors.door_tic`'s close_stride / hold / stay_press): `down_stride` the closing step's stops (a WR close
+    line's); `hold` -- touched, a closing door stays where it is, still closing; `spress` -- the label `<p>_spress`, a
+    STAY PRESS (OPENING with STAY_MARK in the wait), and the top then sets no wait after one."""
     set_wait = ([f"    hex.zero {WAIT_NIBBLES}, {wt}"] if not top_wait else
                 [f"    hex.set {WAIT_NIBBLES}, {wt}, {top_wait}"])
+    # the top's wait: after a stay press (STAY_MARK in the wait while opening) none, else top_wait
+    top_set = set_wait if not spress else [
+        f"    hex.xor_by {WAIT_NIBBLES}, {wt}, {STAY_MARK}",
+        f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_done",
+        *set_wait]
     up = []
     for k in range(stride):                             # `state += stride`, clamped at the top
         up += [f"    hex.inc 1, {st}",
@@ -100,7 +111,7 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
                f"    hex.if0 1, {st}, {p}_open",
                f"    hex.xor_by 1, {st}, {last}"]
     down = []
-    for k in range(stride):                             # `state -= stride`, clamped at shut
+    for k in range(stride if down_stride is None else down_stride):   # `state -= stride`, clamped at shut
         down += [f"    hex.dec 1, {st}",
                  f"    hex.if0 1, {st}, {p}_shut"]
     return [
@@ -126,6 +137,13 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
         f"    hex.zero 1, {dr}",
         *set_wait,
         f"    ;{p}_moved",
+        *([] if not spress else [
+            # M8 C3: a stay press (a switch's, on a door at rest): opening, the mark in the wait
+            f"  {p}_spress:",
+            f"    hex.set 1, {dr}, {OPENING}",
+            f"    hex.set 1, {sub}, {SPEED}",
+            f"    hex.set {WAIT_NIBBLES}, {wt}, {STAY_MARK}",
+            f"    ;{p}_moved"]),
         f"  {p}_already:",
         f"    hex.xor_by 1, {dr}, {OPENING}",
         f"  {p}_moved:",
@@ -147,7 +165,7 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
             f"  {p}_rv:",
             *reverse[1](f"{p}_rev", f"{p}_dn"),
             f"  {p}_rev:",
-            f"    hex.set 1, {dr}, {OPENING}",
+            *([] if hold else [f"    hex.set 1, {dr}, {OPENING}"]),     # M8 C3: a close line's door holds
             f"    ;{p}_done",
             f"  {p}_dn:"]),
         # closing: `stride` steps down, and IDLE when it reaches shut
@@ -163,7 +181,7 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
         f"  {p}_open:",
         f"    hex.xor_by 1, {st}, {last}",
         f"    hex.zero 1, {dr}",
-        *set_wait,
+        *top_set,
         f"    ;{p}_done",
         # ---- idle: run the open-wait down --------------------------------------------
         f"  {p}_idle:",
@@ -183,8 +201,12 @@ def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str, regs=("vie
     lines (strict, both axes) -> `yes`; else `no`. M7 P3.2b: `regs` -- a monster's 16.16 position (thpos_rt).
 
     M8 L2: a non-rectangular door (`poly`) -- the box straddling ANY of its boundary lines, an
-    axis-aligned one as above, a slanted one by check_position's test (`_straddle_d_lines`). Its
-    centre-inside test is not run: a door some box FITS inside (`door_contact_geo`'s flag) is refused."""
+    axis-aligned one as above, a slanted one by check_position's test (`_straddle_d_lines`).
+    M8 C3: a door some box FITS inside (`door_contact_geo`'s flag; E1M4 102, a 45-degree square that closes) runs the
+    centre-inside test first -- for a CONVEX polygon (asserted): P_PointOnLineSide on the front side of every edge,
+    each edge oriented with the inside in front (`convex_inside_lines`). It is not `_inside_poly`'s exact crossing
+    count, and need not be: the two disagree only within 1/|edge| of a unit of an edge, where the box (radius >= 16)
+    straddles it -- the contact is the same (tests/fj/test_doors_c3_fj.py runs it against touches_door)."""
     area, lines = geo
     rx, ry = regs
     r = radius << 16
@@ -194,8 +216,9 @@ def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str, regs=("vie
         return (_scmp_const(reg, lo16, fail, fail, f"{t}a") + [f"  {t}a:"]
                 + _scmp_const(reg, hi16, f"{t}b", fail, fail) + [f"  {t}b:"])
     if area[0] == "poly":
-        assert not area[2], "a door a thing's box fits inside needs the centre-inside test, which this fj does not run"
         tests, lines = [], poly_edges(area)
+        if area[2]:                                     # M8 C3: the centre strictly inside (a convex polygon)
+            out += convex_inside_lines(f"{tag}_in", area[1], rx, ry, yes, f"{tag}_out") + [f"  {tag}_out:"]
     else:
         assert all(ln[0] != "d" for ln in lines), "a rectangle's lines lie on its box"
         x0, y0, x1, y1 = area
@@ -213,6 +236,48 @@ def door_contact_lines(tag: str, geo, radius: int, yes: str, no: str, regs=("vie
         fail = f"{tag}_dn{j}"
         out += _straddle_d_lines(f"{tag}_d{j}", ln[1:], rx, ry, r, yes, fail) + [f"  {fail}:"]
     return out + [f"    ;{no}"]
+
+
+def convex_edges(edges) -> list:
+    """M8 C3: a CONVEX polygon's edges (x1, y1, x2, y2), each oriented so the inside is in FRONT (P_PointOnLineSide 0,
+    the right of v1 -> v2): by the exact cross product of the vertices' mean. Asserts convexity: every vertex is in
+    front of or on every oriented edge."""
+    pts = sorted({(e[0], e[1]) for e in edges} | {(e[2], e[3]) for e in edges})
+    n = len(pts)
+    sx, sy = sum(p[0] for p in pts), sum(p[1] for p in pts)
+
+    def cross(ax, ay, bx, by, px, py, scale=1):      # (b - a) x (p - a), p scaled by `scale`
+        return (bx - ax) * (py - ay * scale) - (by - ay) * (px - ax * scale)
+    out = []
+    for ax, ay, bx, by in edges:
+        if cross(ax, ay, bx, by, sx, sy, n) > 0:     # the mean on the LEFT: swap the ends
+            ax, ay, bx, by = bx, by, ax, ay
+        assert cross(ax, ay, bx, by, sx, sy, n) < 0, ("a degenerate polygon", edges)
+        assert all(cross(ax, ay, bx, by, px, py) <= 0 for px, py in pts), ("the door is not convex", edges)
+        out.append((ax, ay, bx, by))
+    return out
+
+
+def convex_inside_lines(t: str, edges, rx: str, ry: str, yes: str, no: str) -> list:
+    """M8 C3: the 16.16 point (`rx`, `ry`) strictly inside the convex polygon `edges` -> `yes`, else `no`: on the
+    front side (P_PointOnLineSide 0) of every edge as `convex_edges` orients it -- a slanted edge by `sim.point_side`
+    (its FixedMul case), an axis-aligned one by DOOM's own shortcut (a vertical line: x <= v1x is side dy > 0; a
+    horizontal one: y <= v1y is side dx < 0)"""
+    out = []
+    for j, (ax, ay, bx, by) in enumerate(convex_edges(edges)):
+        e = f"{t}{j}"
+        nxt = f"{e}_ok"
+        if ax == bx:                                   # front (0): dy > 0 -> x > v1x; dy < 0 -> x <= v1x
+            out += (_scmp_const(rx, ax << 16, no, no, nxt) if by > ay else _scmp_const(rx, ax << 16, nxt, nxt, no))
+        elif ay == by:                                 # front (0): dx > 0 -> y <= v1y; dx < 0 -> y > v1y
+            out += (_scmp_const(ry, ay << 16, nxt, nxt, no) if bx > ax else _scmp_const(ry, ay << 16, no, no, nxt))
+        else:
+            data, (v1x, v1y, dx, dy) = _line_consts(e, (ax, ay, bx, by))
+            out += [*data, f"    ;{e}_g", f"  {e}_s: hex.vec 1", f"  {e}_g:",
+                    f"    sim.point_side {e}_s, {rx}, {ry}, {v1x}, {v1y}, {dx}, {dy}",
+                    f"    hex.if0 1, {e}_s, {nxt}", f"    ;{no}"]
+        out += [f"  {nxt}:"]
+    return out + [f"    ;{yes}"]
 
 
 def _line_consts(t: str, seg) -> tuple:
@@ -260,7 +325,8 @@ def reverse_mask(pass_at: int, stride: int, nstates: int) -> int:
 
 
 def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None, radius=16, mon_press=frozenset(),
-                   mon_contact=(), dead=None, switches=None, walked=None) -> list:
+                   mon_contact=(), dead=None, switches=None, walked=None, keyed=None, switch_info=None, nwalk=0,
+                   close=None) -> list:
     """One frame of every door. `slots` is the emitter's door order (`sorted(door sectors)`),
     `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units (none for a
     walk-over door), `kinds[si]` its `doors.door_kinds` kind (all "plain" when omitted).
@@ -288,6 +354,13 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
     player's use in a switch box presses the door when it is at rest (`doors.switch_ready`: `ddir`
     and `dwait` zero, EV_DoDoor's no-thinker test); `walked` -- the doors a walk-over line opens
     (their `dreq`), by default the walk-over kinds. Without them the text is P8a's.
+
+    M8 C3 (E1M3..E1M9), each the mirror of `doors.DoorPhase.tic` / World._doors_phase: `keyed` (`doors.keyed_boxes_xy`:
+    {door: [(box, card)]}) -- a mixed door's keyed front boxes, after its own box misses, each with its card;
+    `switch_info` (`doors.switch_entries` without the boxes: {door: [(card, latch, stay)]}, parallel to `switches`) --
+    a locked switch's card, a latched S1 switch's W1 bit (`wfired + (nwalk + latch)`: tested, set on its press) and a
+    stay press (`machine_lines(spress=)`); `close` (`doors.close_strides`: {door: stride}) -- a close line's door
+    closes at its stride and HOLDS on a thing (its contact armed though it stays open). Without them the text is L2's.
     """
     out = ["// == M2-R4: the doors, one tic each ==================================",
            "//   dr<d>_*  door <d> (index into sorted(door sectors))",
@@ -297,6 +370,7 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
     # active cell)] per monster, a closing door reversing on a live one as on the player (World.door_touched)
     kinds = kinds or {si: "plain" for si in slots}
     switches = switches or {}
+    keyed, switch_info, close = keyed or {}, switch_info or {}, close or {}
     walked = (set(walked) if walked is not None else
               {si for si in slots if kinds[si] in ("walkover", "blazestay")})
     # the monsters' contact tests are SHARED: one leaf per (door, radius) on the registers dc_x / dc_y -- inline they
@@ -327,24 +401,46 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
             trigger += [f"    hex.if0 1, duse, {p}_moved"]
             if dead is not None:
                 trigger += [f"    hex.if1 1, {dead}, {p}_moved"]        # M7 P7: a dead player presses nothing
-            miss = f"{p}_sw" if sw else f"{p}_moved"
+            after = f"{p}_sw" if sw else f"{p}_moved"
+            kb = keyed.get(si, ())
+            miss = f"{p}_k0" if kb else after
             if box is not None:
                 card = door_card_cell(kind)
                 if card:
                     trigger += [f"    hex.if0 1, {card}, {miss}"]   # EV_VerticalDoor: the key door's card
                 trigger += _box_test(d, box, f"{p}_press", miss)
+            for j, (b, c) in enumerate(kb):                     # M8 C3: a mixed door's keyed front boxes
+                nxt = f"{p}_k{j + 1}" if j + 1 < len(kb) else after
+                trigger += [f"  {p}_k{j}:", f"    hex.if0 1, {door_card_cell(c)}, {nxt}"]
+                trigger += _box_test(d, b, f"{p}_press", nxt, tag=f"dky{d}_{j}")
             if sw:
                 # M8 L2: a switch (P_UseSpecialLine -> EV_DoDoor) presses a door at rest: no thinker (`ddir`, `dwait`)
                 trigger += [f"  {p}_sw:",
                             f"    hex.if0 1, {dr}, {p}_swi", f"    ;{p}_moved", f"  {p}_swi:",
                             f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_swt", f"    ;{p}_moved", f"  {p}_swt:"]
+                info = switch_info.get(si, [(None, None, False)] * len(sw))
+                assert len(info) == len(sw), (si, info, sw)
+                hits = []
                 for j, b in enumerate(sw):
                     nxt = f"{p}_sw{j + 1}" if j + 1 < len(sw) else f"{p}_moved"
-                    trigger += _box_test(d, b, f"{p}_press", nxt, tag=f"dsw{d}_{j}")
+                    c, lt, sp = info[j]
+                    # M8 C3: a locked switch's card (EV_DoLockedDoor), a latched S1's W1 bit
+                    if c is not None:
+                        trigger += [f"    hex.if0 1, {door_card_cell(c)}, {nxt}"]
+                    if lt is not None:
+                        trigger += [f"    hex.if1 1, wfired + {nwalk + lt}*dw, {nxt}"]
+                    hit = f"{p}_press" if lt is None and not sp else f"{p}_sh{j}"
+                    trigger += _box_test(d, b, hit, nxt, tag=f"dsw{d}_{j}")
+                    if hit != f"{p}_press":
+                        hits += [f"  {hit}:"] + ([f"    hex.set 1, wfired + {nwalk + lt}*dw, 1"] if lt is not None
+                                                 else []) + [f"    ;{p}_spress" if sp else f"    ;{p}_press"]
                     if j + 1 < len(sw):
                         trigger += [f"  {nxt}:"]
+                if hits:                                        # the hit stubs, jumped over by `_moved`'s path
+                    trigger += [f"    ;{p}_moved"] + hits
         rev = None
-        if contact is not None and not stay:
+        down = close.get(si)
+        if contact is not None and (not stay or down is not None):
             def _rev(yes, no, _g=contact[si], _p=p):
                 # M7 P7: a dead player's box holds nothing open -- on to the monsters' contact (or `no`)
                 out_ = [f"    hex.if1 1, {dead}, {_p}_cm0" if mon_contact else f"    hex.if1 1, {dead}, {no}"]                     if dead is not None else []
@@ -357,10 +453,12 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
                              f"    stl.fcall {leaf}, dc_ret",
                              f"    hex.if1 1, dc_hit, {yes}", f"    ;{nx_}"]
                 return out_
-            rev = (reverse_mask(passes[si], stride, n), _rev)
+            rev = (reverse_mask(passes[si], stride if down is None else down, n), _rev)
+        spress = any(sp for _c, _l, sp in switch_info.get(si, ()))
         out += [f"  // ---- door {d} (sector {si}, {kind}): {n} states ----",
                 *machine_lines(p, st, dr, sub, wt, last, trigger, stride=stride,
-                               top_wait=0 if stay else WAIT, reverse=rev)]
+                               top_wait=0 if stay else WAIT, reverse=rev, down_stride=down,
+                               hold=down is not None, spress=spress)]
     if leaves:                           # the contact leaves and their registers, jumped over
         out += ["    ;dc_leaves_end"]
         for lab, geo, rad in leaves.values():
@@ -492,6 +590,31 @@ def walkover_lines(triggers, slots, radius: int, prefix: str = "wo") -> list:
             fire += [f"    hex.set 1, wfired + {kk}*dw, 1",
                      f"    hex.set 1, dreq + {slots.index(triggers[kk][0])}*dw, 1"]
         out += [f"    hex.if0 1, wfired + {k}*dw, {p}_try", f"    ;{p}_no", f"  {p}_try:"]
+        if geo[0] == "d":
+            out += _crossed_d_lines(p, geo[1:], radius, fire)
+        else:
+            out += _crossed_lines(p, *geo, radius, fire)
+    return out
+
+
+def repeat_walk_lines(repeats, slots, radius: int, prefix: str = "wor") -> list:
+    """M8 C3: the WR door lines in fj (`doors.repeat_triggers` / `repeat_act`; World._walkover after the W1 ones): after
+    an ACCEPTED move each entry whose line the centre crossed (`doors.crossed`) acts on its door when it is at rest
+    (`ddir` and `dwait` zero): "open" sets its `dreq` (a press on the next door tic), "close" -- unless shut (`dstate`
+    0) -- starts it closing (`ddir` CLOSING, `dsub` SPEED: doors.close_state). No latch. Labels `<prefix><k>_`."""
+    out = ["  // M8 C3: the WR door lines (doomfj.doors.repeat_triggers)"]
+    for k, trig in enumerate(repeats):
+        si, act, geo = trig[0], trig[1], tuple(trig[2:])
+        d = slots.index(si)
+        p = f"{prefix}{k}"
+        fire = [f"    hex.if0 1, ddir + {d}*dw, {p}_rd", f"    ;{p}_no", f"  {p}_rd:",
+                f"    hex.if0 {WAIT_NIBBLES}, dwait + {WAIT_NIBBLES * d}*dw, {p}_rw", f"    ;{p}_no", f"  {p}_rw:"]
+        if act == "open":
+            fire += [f"    hex.set 1, dreq + {d}*dw, 1"]
+        else:
+            assert act == "close", act
+            fire += [f"    hex.if0 1, dstate + {d}*dw, {p}_no",
+                     f"    hex.set 1, ddir + {d}*dw, {CLOSING}", f"    hex.set 1, dsub + {d}*dw, {SPEED}"]
         if geo[0] == "d":
             out += _crossed_d_lines(p, geo[1:], radius, fire)
         else:

@@ -120,7 +120,10 @@ def _door_lines_of(secs, lds, sds) -> dict:
     for ld in lds:
         if ld.special in MANUAL_DOOR_KINDS and ld.back not in NO_SIDE and ld.back < len(sds):
             out.setdefault(sds[ld.back].sector, {}).setdefault("manual", set()).add(MANUAL_DOOR_KINDS[ld.special])
-    for src, table in (("walk", WALK_DOOR_KINDS), ("switch", {s: k for s, (k, _o) in SWITCH_DOOR_KINDS.items()})):
+    # M8 C3: and a shot line's (GR 46, P_ShootSpecialLine -> EV_DoDoor, by tag). A CLOSE line (WR 75 / 107) makes no
+    # door: it moves a door other lines open (`close_strides`)
+    for src, table in (("walk", WALK_DOOR_KINDS), ("switch", {s: k for s, (k, _o) in SWITCH_DOOR_KINDS.items()}),
+                       ("shoot", SHOOT_DOOR_KINDS)):
         tags: dict = {}
         for ld in lds:
             if ld.special in table and ld.tag:
@@ -375,21 +378,41 @@ BLAZE_STRIDE = 4
 # E1M1's kind names are unchanged (they name its emitted door blocks).
 KIND_MOTION = {"plain": (1, False), "blue": (1, False), "yellow": (1, False), "red": (1, False),
                "blaze": (BLAZE_STRIDE, False), "walkover": (1, True), "stay": (1, True),
-               "blazestay": (BLAZE_STRIDE, True)}
-KIND_CARD = {"blue": "blue", "yellow": "yellow", "red": "red"}       # EV_VerticalDoor's key check
-# the use key on the door's own line (the sector behind it): DR 1 / 26 / 27 / 28 / 117, D1 31 / 118
-MANUAL_DOOR_KINDS = {1: "plain", 26: "blue", 27: "yellow", 28: "red", 117: "blaze", 31: "stay", 118: "blazestay"}
-# crossing the line (W1, once per line, by tag): 2 open-stay, 109 blazing open-stay
-WALK_DOOR_KINDS = {2: "walkover", 109: "blazestay"}
-# the use key on a switch (by tag): SR 63 EV_DoDoor(normal) -- repeatable; S1 103 EV_DoDoor(open) -- once
-SWITCH_DOOR_KINDS = {63: ("plain", False), 103: ("stay", True)}
-BLUE_DOOR_SPECIALS = frozenset(s for s, k in MANUAL_DOOR_KINDS.items() if k == "blue")      # {26}
-YELLOW_DOOR_SPECIALS = frozenset(s for s, k in MANUAL_DOOR_KINDS.items() if k == "yellow")  # {27}
-RED_DOOR_SPECIALS = frozenset(s for s, k in MANUAL_DOOR_KINDS.items() if k == "red")        # {28}
+               "blazestay": (BLAZE_STRIDE, True),
+               # M8 C3: the key doors that open to stay (D1 32 / 33 / 34: EV_VerticalDoor's vld_open behind a card)
+               "bluestay": (1, True), "yellowstay": (1, True), "redstay": (1, True)}
+KIND_CARD = {"blue": "blue", "yellow": "yellow", "red": "red",       # EV_VerticalDoor's key check
+             "bluestay": "blue", "yellowstay": "yellow", "redstay": "red"}
+# the use key on the door's own line (the sector behind it): DR 1 / 26 / 27 / 28 / 117, D1 31 / 118; M8 C3: D1 32 / 33 /
+# 34, the key doors that stay open (EV_VerticalDoor: vld_open, the card or skull of its colour)
+MANUAL_DOOR_KINDS = {1: "plain", 26: "blue", 27: "yellow", 28: "red", 117: "blaze", 31: "stay", 118: "blazestay",
+                     32: "bluestay", 33: "redstay", 34: "yellowstay"}
+# crossing the line (W1, once per line, by tag): 2 open-stay, 109 blazing open-stay. M8 C3: WR 105 blazing raise
+# (EV_DoDoor(blazeRaise) on EVERY crossing -- `WALK_REPEAT`: no latch, and a crossing presses only a door at rest)
+WALK_DOOR_KINDS = {2: "walkover", 109: "blazestay", 105: "blaze"}
+WALK_REPEAT = frozenset({105})
+# the use key on a switch (by tag): SR 63 EV_DoDoor(normal) -- repeatable; S1 103 EV_DoDoor(open) -- once.
+# M8 C3: SR 61 open-stay, S1 112 blazing open-stay, SR 114 blazing raise, S1 133 blazing open-stay behind the BLUE card
+# (EV_DoLockedDoor: without the card no door moves and the switch keeps its texture -- `SWITCH_DOOR_CARDS`)
+SWITCH_DOOR_KINDS = {63: ("plain", False), 103: ("stay", True), 61: ("stay", False), 112: ("blazestay", True),
+                     114: ("blaze", False), 133: ("blazestay", True)}
+SWITCH_DOOR_CARDS = {133: "blue"}
+# M8 C3: the doors a WR line CLOSES (EV_DoDoor(close) / (blazeClose), by tag, on every crossing that finds the door at
+# rest): the close's stride. A closing thinker of these types does not go back up on a thing (T_VerticalDoor's crush
+# case: `case close: case blazeClose: break`) -- it HOLDS (`door_tic(hold=)`)
+CLOSE_DOOR_KINDS = {75: 1, 107: BLAZE_STRIDE}
+# M8 C3: the doors a SHOT opens (GR 46: P_ShootSpecialLine -> EV_DoDoor(open), by tag, on every shot reaching the line
+# that finds the door at rest)
+SHOOT_DOOR_KINDS = {46: "stay"}
+BLUE_DOOR_SPECIALS = frozenset(s for s, k in MANUAL_DOOR_KINDS.items() if KIND_CARD.get(k) == "blue")      # {26, 32}
+YELLOW_DOOR_SPECIALS = frozenset(s for s, k in MANUAL_DOOR_KINDS.items() if KIND_CARD.get(k) == "yellow")  # {27, 34}
+RED_DOOR_SPECIALS = frozenset(s for s, k in MANUAL_DOOR_KINDS.items() if KIND_CARD.get(k) == "red")        # {28, 33}
 BLAZE_DOOR_SPECIALS = frozenset({117})     # DR, blazing
 STAY_DOOR_SPECIALS = frozenset({31, 118})  # D1 open-stay (118 blazing)
-WALKOVER_SPECIALS = frozenset(WALK_DOOR_KINDS)       # W1 door open-stay, by tag: {2, 109}
-SWITCH_DOOR_SPECIALS = frozenset(SWITCH_DOOR_KINDS)  # {63, 103}
+WALKOVER_SPECIALS = frozenset(WALK_DOOR_KINDS)       # W1 door open-stay, by tag: {2, 109}; WR 105
+SWITCH_DOOR_SPECIALS = frozenset(SWITCH_DOOR_KINDS)  # {63, 103, 61, 112, 114, 133}
+CLOSE_DOOR_SPECIALS = frozenset(CLOSE_DOOR_KINDS)    # {75, 107}
+SHOOT_DOOR_SPECIALS = frozenset(SHOOT_DOOR_KINDS)    # {46}
 # The blue card's touch (the model's `_touch_specials`, doomfj.combat): the boxes overlap -- item
 # radius 20 + player radius 16, strict -- and the card is within the player's reach of the floor it
 # stands on: kz - z in [-REACH_DOWN, REACH_UP] = [-8, 56]. tests/host/test_doors_p2a.py ties these
@@ -418,12 +441,65 @@ def use_boxes(secs, lds, sds, rng: int = USE_RANGE) -> dict:
 
 
 def use_boxes_xy(secs, lds, sds, verts, rng: int = USE_RANGE) -> dict:
-    """`use_boxes` resolved through a vertex table to actual coordinates."""
+    """`use_boxes` resolved through a vertex table to actual coordinates.
+
+    M8 C3: a door whose manual lines need DIFFERENT cards (`mixed_card_doors`: E1M3 150, D1 31 west and D1 32 blue
+    east, 16 apart) takes its keyless lines' FRONT boxes (`front_box`) -- the two-sided box around the keyless line
+    would reach 48 units past the door into the keyed side and open it there without the card. P_UseSpecialLine
+    refuses a use from a line's back side, so a front box is DOOM's side rule in the box compromise."""
     out = {}
+    mixed = mixed_card_doors(secs, lds, sds)
     for si, vis in use_boxes(secs, lds, sds, rng).items():
+        if si in mixed:
+            out[si] = _union([front_box(lds[li], verts, rng) for li in mixed[si][None]])
+            continue
         xs = [verts[v][0] for v in vis]
         ys = [verts[v][1] for v in vis]
         out[si] = (min(xs) - rng, min(ys) - rng, max(xs) + rng, max(ys) + rng)
+    return out
+
+
+def _xy_of(v):
+    return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])
+
+
+def front_box(ld, verts, rng: int = USE_RANGE) -> tuple:
+    """M8 C3: an axis-aligned line's use box on its FRONT side only (the right of v1 -> v2, DOOM's front): its extent
+    inflated by `rng` along the line and out to `rng` in front of it, the line itself the box's back edge"""
+    (ax, ay), (bx, by) = _xy_of(verts[ld.v1]), _xy_of(verts[ld.v2])
+    assert ax == bx or ay == by, "a front box needs an axis-aligned line, got (%d,%d)-(%d,%d)" % (ax, ay, bx, by)
+    x0, y0, x1, y1 = min(ax, bx) - rng, min(ay, by) - rng, max(ax, bx) + rng, max(ay, by) + rng
+    if ax == bx:                     # vertical: going north the front is east
+        x0, x1 = (ax, x1) if by > ay else (x0, ax)
+    else:                            # horizontal: going east the front is south
+        y0, y1 = (y0, ay) if bx > ax else (ay, y1)
+    return (x0, y0, x1, y1)
+
+
+def _union(boxes) -> tuple:
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+
+
+def mixed_card_doors(secs, lds, sds) -> dict:
+    """M8 C3: `{door sector: {card or None: [linedef index, ...]}}` for every door whose manual lines need different
+    cards (`door_kinds`' keyless kind + keyed lines) -- E1M3's 150; none on E1M1 / E1M2"""
+    doors = door_sectors(secs, lds, sds)
+    per: dict = {}
+    for li, ld in enumerate(lds):
+        if ld.special in MANUAL_DOOR_KINDS and ld.back not in NO_SIDE and ld.back < len(sds):
+            si = sds[ld.back].sector
+            if si in doors:
+                per.setdefault(si, {}).setdefault(KIND_CARD.get(MANUAL_DOOR_KINDS[ld.special]), []).append(li)
+    return {si: v for si, v in per.items() if len(v) > 1}
+
+
+def keyed_boxes_xy(secs, lds, sds, verts, rng: int = USE_RANGE) -> dict:
+    """M8 C3: `{door sector: [(front box, card), ...]}` -- a mixed door's KEYED lines (`mixed_card_doors`), one box per
+    card in card order; its keyless lines are its `use_boxes_xy` box. {} on a map without one (E1M1, E1M2)"""
+    out = {}
+    for si, per in sorted(mixed_card_doors(secs, lds, sds).items()):
+        out[si] = [(_union([front_box(lds[li], verts, rng) for li in per[c]]), c)
+                   for c in sorted(c for c in per if c is not None)]
     return out
 
 
@@ -445,7 +521,8 @@ def in_use_box_fixed(box, x16: int, y16: int) -> bool:
 
 
 def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = False,
-             wait_frames: int = WAIT, blocked: bool = False, pass_at: int = 0) -> tuple:
+             wait_frames: int = WAIT, blocked: bool = False, pass_at: int = 0, close_stride=None,
+             hold: bool = False, stay_press: bool = False) -> tuple:
     """One tic of one door. `st` is `(state, dir, sub, wait)`; returns the next one.
 
     M7 P2a.1: `stride` stops a step (BLAZE_STRIDE for the blazing door, clamped at both ends) and
@@ -462,6 +539,12 @@ def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = 
     bound would cost a constant register and a `hex.cmp` per door per tic; counting `sub` and
     `wait` DOWN to zero, and counting `state` against `nstates - 1` only at the moment it steps,
     keeps an idle door at exactly one 1-nibble test.
+
+    M8 C3: `close_stride` -- the stops a CLOSING step takes when it differs from the opening's (a WR close line's:
+    `close_strides`); `hold` -- a closing door a thing blocks stays where it is, still closing (T_VerticalDoor's
+    close / blazeClose crush case), where the others go back up. `stay_press` -- the press is an open-STAY switch's
+    on a door that otherwise closes (EV_DoDoor(open): E1M9 135's S1 103): the opening carries STAY_MARK in `wait`
+    (0 on every other opening) and reaches the top with no wait.
     """
     state, dr, sub, wait = st
     top_wait = 0 if stay else wait_frames
@@ -470,8 +553,8 @@ def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = 
         # one that is already open and waiting (it restarts the wait).
         if stay and state == nstates - 1:
             return st                            # open for good: nothing to restart
-        dr, sub, wait = OPENING, SPEED, 0
-        if state == nstates - 1:
+        dr, sub, wait = OPENING, SPEED, (STAY_MARK if stay_press else 0)
+        if state == nstates - 1 and not stay_press:
             dr, wait = IDLE, top_wait
     if dr == OPENING:
         sub -= 1
@@ -479,14 +562,15 @@ def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = 
             sub = SPEED
             state += stride
             if state >= nstates - 1:
-                state, dr, wait = nstates - 1, IDLE, top_wait
+                state, dr, wait = nstates - 1, IDLE, (0 if wait == STAY_MARK else top_wait)
     elif dr == CLOSING:
+        down = stride if close_stride is None else close_stride
         sub -= 1
         if sub == 0:
             sub = SPEED
-            if blocked and state >= pass_at > state - stride:
-                return (state, OPENING, sub, wait)      # reversed on a thing: no step this frame
-            state -= stride
+            if blocked and state >= pass_at > state - down:
+                return (state, CLOSING if hold else OPENING, sub, wait)   # reversed (held) on a thing: no step
+            state -= down
             if state <= 0:
                 state, dr = 0, IDLE
     elif wait:
@@ -577,12 +661,26 @@ def door_kinds(secs, lds, sds) -> dict:
     out = {}
     for si in sorted(doors):
         src = lines_of[si]
-        for k in ("manual", "walk", "switch"):
+        for k in ("manual", "walk", "switch", "shoot"):
             if src.get(k):
-                assert len(src[k]) == 1, "door %d has two %s kinds: %s" % (si, k, sorted(src[k]))
-                kind = next(iter(src[k]))
+                ks = src[k]
+                if k == "manual" and len(ks) > 1:
+                    # M8 C3 (E1M3 150: D1 31 on one side, D1 32 BLUE on the other): one motion, and the door's kind is
+                    # its keyless lines'; each keyed line's card is its own use box's (`keyed_boxes_xy`)
+                    free = sorted(kk for kk in ks if kk not in KIND_CARD)
+                    assert len(free) == 1 and len({KIND_MOTION[kk] for kk in ks}) == 1, (
+                        "door %d has manual kinds %s: one keyless kind and one motion are handled" % (si, sorted(ks)))
+                    kind = free[0]
+                else:
+                    assert len(ks) == 1, "door %d has two %s kinds: %s" % (si, k, sorted(ks))
+                    kind = next(iter(ks))
                 break
-        every = {kk for ks in src.values() for kk in ks}
+        # M8 C3: an open-STAY switch on a door that otherwise closes (E1M9 135: DR 1 and S1 103) is its own motion --
+        # a STAY PRESS (`switch_entries`' flag, `door_tic(stay_press=)`); the stride is the door's
+        sw_stay = {kk for kk in src.get("switch", ()) if door_stay(kk) and not door_stay(kind)}
+        assert all(door_stride(kk) == door_stride(kind) for kk in sw_stay), (
+            "door %d: a stay switch of another stride: %s" % (si, sorted(sw_stay)))
+        every = {kk for ks in src.values() for kk in ks} - sw_stay
         assert {KIND_MOTION[kk] for kk in every} == {KIND_MOTION[kind]}, (
             "door %d is asked two motions: %s" % (si, sorted(every)))
         out[si] = kind
@@ -640,8 +738,9 @@ def switch_door_triggers(secs, lds, sds, verts, rng: int = USE_RANGE) -> list:
         if not targets:
             continue
         once = SWITCH_DOOR_KINDS[ld.special][1]
-        assert not once or all(door_stay(kinds[si]) for si in targets), (
-            "S1 door switch tag %d opens a door that closes: its latch would be seen" % ld.tag)
+        # M8 C3: an S1 switch whose door can close again (a close line moves it: E1M6's 103 on door 56, which WR 107
+        # closes; or the door closes by itself: E1M9's 103 on DR door 135) keeps its latch (`switch_latches`); one
+        # whose doors only ever stay open needs none
         (ax, ay), (bx, by) = xy(ld.v1), xy(ld.v2)
         out.append(((min(ax, bx) - rng, min(ay, by) - rng, max(ax, bx) + rng, max(ay, by) + rng), targets, once))
     return out
@@ -654,6 +753,126 @@ def switch_boxes(secs, lds, sds, verts, rng: int = USE_RANGE) -> dict:
         for si in targets:
             out.setdefault(si, []).append(box)
     return out
+
+
+def _switch_lines(lds, secs, doors) -> list:
+    """the linedefs of `switch_door_triggers`, in its order"""
+    return [li for li, ld in enumerate(lds) if ld.special in SWITCH_DOOR_KINDS and ld.tag
+            and any(sec.tag == ld.tag and si in doors for si, sec in enumerate(secs))]
+
+
+def switch_latches(secs, lds, sds) -> list:
+    """M8 C3: the indices (into `switch_door_triggers`) of the S1 switches that keep their LATCH. P_UseSpecialLine
+    clears an S1 line's special once its EV_* returned 1, which is seen only where the door can come back to rest
+    shut (a close line moves it: `close_strides`) -- E1M6's 1464 (S1 103 on door 56, which WR 107 closes). Each has
+    one door (asserted: that door's press sets the latch). [] on E1M1 / E1M2"""
+    doors = door_sectors(secs, lds, sds)
+    closing = close_strides(secs, lds, sds)
+    kinds = door_kinds(secs, lds, sds) if doors else {}
+    out = []
+    for k, li in enumerate(_switch_lines(lds, secs, doors)):
+        ld = lds[li]
+        targets = [si for si, sec in enumerate(secs) if sec.tag == ld.tag and si in doors]
+        if SWITCH_DOOR_KINDS[ld.special][1] and any(si in closing or not door_stay(kinds[si]) for si in targets):
+            assert len(targets) == 1, "latched S1 door switch %d opens %d doors" % (li, len(targets))
+            out.append(k)
+    return out
+
+
+def switch_entries(secs, lds, sds, verts, rng: int = USE_RANGE) -> dict:
+    """M8 C3: `{door sector: [(box, card, latch, stay), ...]}`, parallel to `switch_boxes` -- each switch box's card
+    (None, or "blue" for S1 133: EV_DoLockedDoor), its latch (None, or its index among `switch_latches`: the W1 cell
+    `nwalk + latch`) and whether its press is a STAY PRESS (an open-stay switch on a door that otherwise closes:
+    `door_tic(stay_press=)`)"""
+    trig = switch_door_triggers(secs, lds, sds, verts, rng)
+    lines = _switch_lines(lds, secs, door_sectors(secs, lds, sds))
+    assert len(lines) == len(trig)
+    lat = switch_latches(secs, lds, sds)
+    kinds = door_kinds(secs, lds, sds) if trig else {}
+    out: dict = {}
+    for k, ((box, targets, _once), li) in enumerate(zip(trig, lines)):
+        sk = SWITCH_DOOR_KINDS[lds[li].special][0]
+        for si in targets:
+            out.setdefault(si, []).append((box, SWITCH_DOOR_CARDS.get(lds[li].special),
+                                           lat.index(k) if k in lat else None,
+                                           door_stay(sk) and not door_stay(kinds[si])))
+    return out
+
+
+def plain_switches(entries: dict) -> bool:
+    """M8 C3: every switch box has no card, no latch and no stay press (E1M1, E1M2: their text is the one it was)"""
+    return all(c is None and lt is None and not sp for v in entries.values() for _b, c, lt, sp in v)
+
+
+STAY_MARK = 1   # M8 C3: `wait` while OPENING after a stay press (it is 0 on every other opening): no wait at the top
+
+
+# ---- M8 C3: the WR lines -- a raise on every crossing (105), a close (75 / 107) --------------------------------------
+
+def close_strides(secs, lds, sds) -> dict:
+    """`{door sector: stride}` -- the doors a WR close line (`CLOSE_DOOR_KINDS`, by tag) closes, and the close's
+    stride. Only an OPEN-STAY door is closed (asserted: its machine then has one closing kind, the close line's, which
+    holds on a thing); one stride per door (asserted). E1M6: 56 (blazing, 107); E1M7: 605 (75). {} on E1M1 / E1M2"""
+    doors = door_sectors(secs, lds, sds)
+    kinds = door_kinds(secs, lds, sds) if doors else {}
+    out: dict = {}
+    for ld in lds:
+        if ld.special in CLOSE_DOOR_KINDS and ld.tag:
+            for si, sec in enumerate(secs):
+                if sec.tag == ld.tag and si in doors:
+                    assert door_stay(kinds[si]), "door %d: a close line moves a door that closes by itself" % si
+                    assert out.get(si, CLOSE_DOOR_KINDS[ld.special]) == CLOSE_DOOR_KINDS[ld.special], (
+                        "door %d: two close strides" % si)
+                    out[si] = CLOSE_DOOR_KINDS[ld.special]
+    return out
+
+
+def _line_geo(ld, verts) -> tuple:
+    """a trigger line's shape: ("y", y, x0, x1) / ("x", x, y0, y1) / ("d", x1, y1, x2, y2) (`walkover_triggers`')"""
+    (ax, ay), (bx, by) = _xy_of(verts[ld.v1]), _xy_of(verts[ld.v2])
+    if ay == by:
+        return ("y", ay, min(ax, bx), max(ax, bx))
+    if ax == bx:
+        return ("x", ax, min(ay, by), max(ay, by))
+    return ("d", ax, ay, bx, by)
+
+
+def repeat_triggers(secs, lds, sds, verts) -> list:
+    """M8 C3: `[(door sector, act, *shape)]` sorted, one per (WR door line, door its tag names): `act` "open" (WR 105:
+    EV_DoDoor raise -- a press, as a W1 line's `dreq`) or "close" (WR 75 / 107). No latch: every crossing (`crossed`
+    on the entry without its act) acts, on a door AT REST only (EV_DoDoor skips a sector with a thinker:
+    `switch_ready`); a close also skips a door at rest shut (its thinker would end the tic it starts). [] on E1M1 /
+    E1M2"""
+    doors = door_sectors(secs, lds, sds)
+    out = []
+    for ld in lds:
+        act = ("open" if ld.special in WALK_REPEAT else "close" if ld.special in CLOSE_DOOR_KINDS else None)
+        if act is None or not ld.tag:
+            continue
+        for si, sec in enumerate(secs):
+            if sec.tag == ld.tag and si in doors:
+                out.append((si, act) + _line_geo(ld, verts))
+    return sorted(out)
+
+
+def repeat_shape(trig: tuple) -> tuple:
+    """a `repeat_triggers` entry as `crossed` takes a trigger: (door sector, *shape)"""
+    return (trig[0],) + tuple(trig[2:])
+
+
+def repeat_act(trig: tuple, st: tuple):
+    """M8 C3: what a crossed `repeat_triggers` entry does to its door at `st` = (state, dir, sub, wait): "press" (its
+    request, as a W1 line's), "close" (it starts closing now: `close_state`), or None"""
+    if not switch_ready(st):
+        return None
+    if trig[1] == "open":
+        return "press"
+    return "close" if st[0] > 0 else None
+
+
+def close_state(st: tuple) -> tuple:
+    """M8 C3: EV_DoDoor(close) on a door at rest open: its thinker starts down -- the next door tic steps it"""
+    return (st[0], CLOSING, SPEED, 0)
 
 
 def switch_ready(st: tuple) -> bool:
@@ -858,7 +1077,7 @@ def walkover_triggers(secs, lds, sds, verts) -> list:
     kinds = door_kinds(secs, lds, sds)
     by_tag: dict = {}
     for ld in lds:
-        if ld.special in WALK_DOOR_KINDS and ld.tag:
+        if ld.special in WALK_DOOR_KINDS and ld.special not in WALK_REPEAT and ld.tag:   # M8 C3: WR is repeat_triggers'
             by_tag.setdefault(ld.tag, []).append(ld)
     out = []
     for tag, lines in by_tag.items():
@@ -942,10 +1161,17 @@ class DoorPhase:
         self.passes = {si: pass_state(secs, lds, sds, si, quant=quant) for si in self.nstates}
         self.triggers = walkover_triggers(secs, lds, sds, verts)
         self.switches = switch_boxes(secs, lds, sds, verts)       # M8 L2: SR / S1 door switches
+        # M8 C3: each switch box's card and latch (the latches' W1 bits follow the triggers' in `fired`), the keyed
+        # boxes of a door whose lines need different cards, the WR lines, the doors a close line closes
+        self.switch_info = switch_entries(secs, lds, sds, verts)
+        self.nlatch = len(switch_latches(secs, lds, sds))
+        self.keyed = keyed_boxes_xy(secs, lds, sds, verts)
+        self.repeats = repeat_triggers(secs, lds, sds, verts)
+        self.close = close_strides(secs, lds, sds)
         self._initial = initial_states(secs, lds, sds, quant)
 
     def initial(self):
-        return (dict(self._initial), (0,) * len(self.triggers), frozenset(), 0)
+        return (dict(self._initial), (0,) * (len(self.triggers) + self.nlatch), frozenset(), 0)
 
     def tic(self, state, use: bool, x16: int, y16: int, has_blue=None, others=(), player: bool = True,
             has_yellow: bool = False, has_red: bool = False):
@@ -957,20 +1183,34 @@ class DoorPhase:
         ds, fired, req, card = state
         if has_blue is None:
             has_blue = bool(card)
+        held = {"blue": has_blue, "yellow": has_yellow, "red": has_red}
+        fired = list(fired)
+        nw = len(self.triggers)
         out = {}
         for si in self.order:
             kind, box = self.kinds[si], self.boxes.get(si)
             pressed = (use and box is not None and can_open(kind, has_blue, has_yellow, has_red)
-                       and in_use_box_fixed(box, x16, y16)) or si in req or (
-                use and switch_ready(ds[si])
-                and any(in_use_box_fixed(b, x16, y16) for b in self.switches.get(si, ())))
+                       and in_use_box_fixed(box, x16, y16)) or si in req
+            # M8 C3: a mixed door's keyed lines, each its own front box and card
+            pressed = pressed or (use and any(held[c] and in_use_box_fixed(b, x16, y16)
+                                              for b, c in self.keyed.get(si, ())))
+            spress = False
+            if not pressed and use and switch_ready(ds[si]):
+                for b, c, lt, sp in self.switch_info.get(si, ()):
+                    # M8 C3: a locked switch needs its card (EV_DoLockedDoor); a latched S1 one fires once
+                    if (c is None or held[c]) and (lt is None or not fired[nw + lt]) and in_use_box_fixed(b, x16, y16):
+                        pressed, spress = True, sp
+                        if lt is not None:
+                            fired[nw + lt] = 1
+                        break
             blocked = (self.contact is not None and ds[si][1] == CLOSING
                        and ((player and touches_door(self.contact[si], x16, y16, 16 << 16))
                             or any(touches_door(self.contact[si], ox, oy, orr) for ox, oy, orr in others)))
             out[si] = door_tic(ds[si], self.nstates[si], bool(pressed),
                                stride=door_stride(kind), stay=door_stay(kind), blocked=blocked,
-                               pass_at=self.passes[si])
-        return (out, fired, frozenset(), card)
+                               pass_at=self.passes[si], close_stride=self.close.get(si), hold=si in self.close,
+                               stay_press=spress)
+        return (out, tuple(fired), frozenset(), card)
 
     def after_move(self, state, old16: tuple, new16: tuple, radius: int = 16):
         ds, fired, req, card = state
@@ -979,6 +1219,15 @@ class DoorPhase:
             if not fired[k] and crossed(trig, old16, new16, radius):
                 fired[k] = 1
                 req.add(trig[0])
+        if self.repeats:                              # M8 C3: the WR lines, on the doors' state after their tic
+            ds = dict(ds)
+            for trig in self.repeats:
+                if crossed(repeat_shape(trig), old16, new16, radius):
+                    act = repeat_act(trig, ds[trig[0]])
+                    if act == "press":
+                        req.add(trig[0])
+                    elif act == "close":
+                        ds[trig[0]] = close_state(ds[trig[0]])
         return (ds, tuple(fired), frozenset(req), card)
 
     def touch(self, state, cx16: int, cy16: int, here_z: int):

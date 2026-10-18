@@ -78,6 +78,7 @@ from doomfj import lights as _lights                                      # M8: 
 from doomfj import scrollcode as _scrollcode                              # M8: the scrolling wall (special 48)
 from doomfj import keyboard as _keyboard                                   # P9: the press latch
 from doomfj import automap as _automap                                     # M8: the map page
+from doomfj import doors as _doors, doorcode as _doorcode                  # M8 C3: the door kinds of E1M3..E1M9
 from doomfj.menu import AMAP_CODES, MAIN_MAP_SCR, MAP_GAME_SCR, MAP_MENU_SCR   # M8: the map page's states
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
@@ -1978,7 +1979,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              dead="p_dd0" if _LOOT else None,
                              # M8 L2: the door switches (SR 63 / S1 103) and the doors a walk-over line opens
                              switches=door_switch_boxes(secs, lds, sds, verts),
-                             walked={t_[0] for t_ in _walk_trig})
+                             walked={t_[0] for t_ in _walk_trig},
+                             # M8 C3: a mixed door's keyed boxes; the switches' cards, latches, stay presses; the
+                             # close lines' doors (all empty / plain on E1M1 and E1M2: their text as it was)
+                             keyed=_doors.keyed_boxes_xy(secs, lds, sds, verts),
+                             switch_info={si_: [e_[1:] for e_ in v_] for si_, v_ in
+                                          _doors.switch_entries(secs, lds, sds, verts).items()},
+                             nwalk=len(_walk_trig), close=_doors.close_strides(secs, lds, sds))
               if (_dst_tbl and player_sim) else [])
         # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
         if _movers_on and dt:
@@ -1992,6 +1999,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         return dt
     # M7 P2a.1: the walk-over triggers (doomfj.doors), fired from the collision move
     _walk_trig = walkover_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
+    # M8 C3: the S1 switch latches (W1 bits after the triggers': `wfired + nwalk + latch`) and the WR door lines
+    _door_nlatch = len(_doors.switch_latches(secs, lds, sds)) if _dst_tbl else 0
+    _door_repeats = _doors.repeat_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
     _door_tic = _make_door_tic()
 
     def _seg_door(seg):
@@ -3586,6 +3596,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             copy's prefix -- it restarts the knock loop at the destination)"""
             return ((walkover_lines(_walk_trig, sorted(_dst_tbl), PLAYER_RADIUS >> 16, prefix=wo)
                      if _walk_trig else [])
+                    + (_doorcode.repeat_walk_lines(_door_repeats, sorted(_dst_tbl), PLAYER_RADIUS >> 16,
+                                                   prefix=wo + "r") if _door_repeats else [])
                     + (lift_walk_lines(lift_walk_triggers(secs, lds, sds, map_wad.vertexes(mapname)),
                                        sorted(_lift_st), PLAYER_RADIUS >> 16, prefix=lw)
                        if _movers_on else [])
@@ -3722,7 +3734,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
-             for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
+             for sk in SKILLS], nwalk=len(_walk_trig) + _door_nlatch, nlift=len(_lift_slot),
             nfs=_movers.fswitch_nibbles(_floor_groups),                 # M8 F1.3: the fswitch vector
             monsters=_p31["restart"] if _p31 else None,
             hud_restart=_hud["restart"] if _hud else None, wpn_restart=_wpn["restart"] if _hud else (),
@@ -4175,7 +4187,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # state switch dispatches on. Zero is SHUT for every door by construction of
           # `doors.door_states`, so this declaration is the level's initial condition, exactly as
           # `viewx/viewy/viewangle` are for the player.
-          *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
+          *(door_decls(len(_dslot), len(_walk_trig) + _door_nlatch) if _dst_tbl else []),
           *(mover_decls(len(_lift_slot), _movers.fswitch_nibbles(_floor_groups)) if _movers_on else []),  # M7 P2b
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
           *(_hud["decls"] if _hud else []),                               # M7 P4.0: the bar

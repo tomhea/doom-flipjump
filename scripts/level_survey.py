@@ -376,12 +376,18 @@ class Survey:
         lines = self.facts.get("dyn_pairs", [])
         handled = Counter()
 
+        def check(name, fn):            # an OK row when it passes (lesson P6: a refusal-only guard proves nothing)
+            n = len(self.rows)
+            self.guard(name, fn)
+            if len(self.rows) == n:
+                self.row("OK", name)
+
         def pairs():
             for li, a, b, k in lines:
                 if k != "door-door":
                     monstersight.line_states(w, a, b)
                     handled[k] += 1
-        self.guard("lines between two dynamic sectors (monstersight.line_states: the cell the opening reads)", pairs)
+        check("lines between two dynamic sectors (monstersight.line_states: the cell the opening reads)", pairs)
         for k, n in sorted(handled.items()):
             self.row("INFO", "lines between two dynamic sectors: %s" % k, n, "",
                      "handled: the renderer's pair switch, the readers through the cell the opening depends on -- "
@@ -389,14 +395,14 @@ class Survey:
         msecs = movers.mover_secs(w.mover_table, w.secs, movers.change_table(w.floor_groups))
         mcell = {si: c for si, (c, _h) in w.mover_table.items()}
         for fn in (max, min):
-            self.guard("collision cells: mover lines' %s floor (collision.mover_line_states)"
-                       % ("opening" if fn is max else "low"),
-                       lambda fn=fn: collision.mover_line_states(w.lds, w.sds, msecs, mcell, fn))
-        self.guard("sight segments (monstersight.sight_segments)", lambda: monstersight.sight_segments(w))
-        self.guard("sound edges (noisecode.sound_edges)", lambda: noisecode.sound_edges(w))
-        self.guard("missile cells (projcode.missile_rows: a mover line shut below a pass state)",
-                   lambda: projcode.missile_rows(w))
-        self.guard("nukage vs the movers (lootcode.nukage_lines)", lambda: lootcode.nukage_lines(w, "root"))
+            check("collision cells: mover lines' %s floor (collision.mover_line_states)"
+                  % ("opening" if fn is max else "low"),
+                  lambda fn=fn: collision.mover_line_states(w.lds, w.sds, msecs, mcell, fn))
+        check("sight segments (monstersight.sight_segments)", lambda: monstersight.sight_segments(w))
+        check("sound edges (noisecode.sound_edges)", lambda: noisecode.sound_edges(w))
+        check("missile cells (projcode.missile_rows: a mover line shut below a pass state)",
+              lambda: projcode.missile_rows(w))
+        check("nukage vs the movers (lootcode.nukage_lines)", lambda: lootcode.nukage_lines(w, "root"))
 
     def render_caps(self):
         from doomfj import wall_renderer as WR

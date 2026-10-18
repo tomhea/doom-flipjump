@@ -406,3 +406,39 @@ def test_every_lift_has_two_states(wad):
     secs, lds, sds, _v = _map(wad, "E1M3")
     assert 180 not in MV.lift_states(secs, lds, sds) and 256 in MV.lift_states(secs, lds, sds)
     assert secs[180].tag == secs[256].tag == 15
+
+
+def _survey(m, wad):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("level_survey_c4", ROOT / "scripts" / "level_survey.py")
+    ls = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ls)
+    return ls.Survey(wad, m, wad)
+
+
+READERS = ("missile cells", "nukage vs the movers", "sight segments", "sound edges",
+           "lines between two dynamic sectors (monstersight", "collision cells: mover lines' opening")
+
+
+def test_the_survey_runs_the_readers(wad):
+    """the survey runs the movers' readers (each an emit-time refusal before C4) and says OK when they pass"""
+    sv = _survey("E1M3", wad).run()
+    rows = {r[1]: r[0] for r in sv.rows}
+    for name in READERS:
+        hit = [st for chk, st in rows.items() if chk.startswith(name)]
+        assert hit == ["OK"], (name, hit)
+
+
+def test_control_a_refusing_reader_is_refused(wad, monkeypatch):
+    """R9: the missile cells' old rule (a lift line that shuts a fireball refused) -- the survey says REFUSED"""
+    from doomfj import projcode
+    real = projcode.missile_rows
+
+    def old(w):
+        rows, doors = real(w)
+        assert not any(isinstance(v[0][0], str) and v[0][0].startswith("lstate") for v in doors.values()), (
+            "lift line shuts a missile")
+        return rows, doors
+    monkeypatch.setattr(projcode, "missile_rows", old)
+    sv = _survey("E1M3", wad).run()
+    assert [r[0] for r in sv.rows if r[1].startswith("missile cells")] == ["REFUSED"]

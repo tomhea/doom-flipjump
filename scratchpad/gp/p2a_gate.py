@@ -156,7 +156,7 @@ class Mirror:
             D.door_stride, D.door_stay = saved
             C.CombatMixin._touch = orig_touch
 
-    def run(self, pose, keys: list, pcard: int = 0) -> list:
+    def run(self, pose, keys: list, pcard: int = 0, fswitch=None) -> list:
         """-> per frame {"pose", "phase", "taken", "mode", "scr", "sel", "lvdone", "pusedn",
         "drawn"}: the state after the frame, and what it drew ("world", or the menu screen). The
         binary's order: the menu's state machine on the frame's events, then -- on a world frame,
@@ -181,6 +181,8 @@ class Mirror:
         mode, scr, sel, live = 0, 0, SKILLS.index(BOOT_MENU_SKILL), 1
         pusedn, lvdone = 1, 0                                  # baked: G_PlayerReborn's usedown
         mp, ms = self.mp, self.mp.initial()                    # M7 P2b: every lift at its top
+        if fswitch is not None:                                # M8 F1.3: the scenario's POKED fswitch vector (S15)
+            ms = (ms[0], ms[1], tuple(fswitch))
         # M7 P3.1: the idle monsters from the boot image's level start (doomfj.monsters)
         from doomfj.monsters import MonsterPhase
         from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
@@ -237,7 +239,10 @@ class Mirror:
                     alive = not dead or self.ctl == "dead_holds_door"
                     ph = dp.tic(ph, use and (not dead or self.ctl == "dead_uses"), st.x, st.y, has_blue=has_blue,
                                 others=mph.boxes(), player=alive, **keys_kw)    # P3.2b; P7-c
+                    before_sw = ms[2]
                     ms = mp.tic(ms)                           # M7 P2b: the lifts after the doors
+                    if self.ctl == "floors_still":            # M8 F1.3's control: the floor groups never step
+                        ms = (ms[0], ms[1], before_sw)
                     if dead:                                  # P7-c: no use line, and the edge is not read
                         if self.ctl == "dead_exits" and use and any(in_use_box_fixed(b, st.x, st.y)
                                                                     for b in self.exits):
@@ -620,6 +625,79 @@ def two_cell_scenarios(dsim) -> list:
     return out
 
 
+def closed_moving_lines(dsim) -> list:
+    """M8 F1.3 (CR of #146): [(linedef, moving sector, static sector, floor group)] -- every two-sided line between a
+    floor group's sector and a static sector whose floor equals its ceiling: SHUT AT EVERY STATE of the group (the
+    moving floor lowers onto the static side's closed height), which the renderer must draw solid at every state
+    (wall_renderer `_seg_closed_moving`; E1M2's 2033 / 2062 on tag 10 and 2050 / 2075 on tag 41)"""
+    mp = dsim.mp
+    gof = {si: g for g, grp in enumerate(mp.groups) for si in grp.sectors}
+    movers = set(gof) | set(mp.order)
+    out = []
+    for li, ld in enumerate(dsim.lds):
+        if not (0 <= ld.front < len(dsim.sds) and 0 <= ld.back < len(dsim.sds)):
+            continue
+        a, b = dsim.sds[ld.front].sector, dsim.sds[ld.back].sector
+        for sm, sc_ in ((a, b), (b, a)):
+            st = dsim.secs[sc_]
+            if sm in gof and sc_ not in movers and st.floor_h == st.ceil_h:
+                g = gof[sm]
+                grp = mp.groups[g]
+                if all(min(dsim.secs[sm].ceil_h, st.ceil_h) <= max(grp.floor(sm, k), st.floor_h) for k in range(grp.n)):
+                    out.append((li, sm, sc_, g))
+    return out
+
+
+def closed_moving_scenarios(dsim) -> list:
+    """M8 F1.3 (CR of #146): S15 per floor group with a line shut at every state -- the group FIRED BY A POKE of the
+    fswitch vector at frame 0 (its state 0, its step timer set: `movers.floor_trigger`, what its W1 / S1 line sets),
+    the player standing beyond the moving sector along the line's normal, facing the line: the moving floor seen
+    lowering (frames mid-way) and lowered, the line drawn SOLID throughout (r2 drew it see-through). The first line of
+    the group (linedef order) with a standing pose; `look` -- mirror_world_check.py toggles the line's solidity in the
+    oracle and requires the pixels to change on lowering and lowered frames."""
+    import math
+    from doomfj.movers import floor_trigger
+    mp = dsim.mp
+    verts = dsim.mw.vertexes(dsim.mapname)
+    ng = len(mp.groups)
+    out, done = [], set()
+    for li, sm, sc_, g in closed_moving_lines(dsim):
+        if g in done:
+            continue
+        ld, grp = dsim.lds[li], mp.groups[g]
+        (ax, ay), (bx, by) = (verts[ld.v1].x, verts[ld.v1].y), (verts[ld.v2].x, verts[ld.v2].y)
+        mx, my = (ax + bx) / 2, (ay + by) / 2
+        nx, ny = by - ay, -(bx - ax)                               # the FRONT side's normal (right of v1 -> v2)
+        n = math.hypot(nx, ny)
+        nx, ny = nx / n, ny / n
+        if dsim.sds[ld.front].sector != sm:
+            nx, ny = -nx, -ny                                      # toward the moving sector
+        reach = max((v.x - mx) * nx + (v.y - my) * ny for l2 in dsim.lds
+                    for s in (l2.front, l2.back) if 0 <= s < len(dsim.sds) and dsim.sds[s].sector == sm
+                    for v in (verts[l2.v1], verts[l2.v2]))
+        pose = None
+        for back in (48, 64, 96, 128, 32):
+            x, y = int(round(mx + (reach + back) * nx)), int(round(my + (reach + back) * ny))
+            if _ok(dsim, x << 16, y << 16):
+                pose = (x << 16, y << 16, bam(mx - x, my - y))
+                break
+        if pose is None:
+            continue
+        done.add(g)
+        fs = [(0, 0)] * ng
+        fs[g] = floor_trigger(0, 0, grp.sub)
+        vec = tuple(s for s, _u in fs) + tuple(u for _s, u in fs)
+        out.append({
+            "name": "S15 closed line %d (moving %d / shut %d, floor group %d tag %d): solid while the floor lowers"
+                    % (li, sm, sc_, g, grp.tag),
+            "pose": pose, "keys": [{}] * (max(grp.sub, 1) * grp.n + 8), "pcard": 0, "fswitch": vec,
+            "controls": ["floors_still"], "look": {"kind": "closed", "line": li, "moving": sm, "static": sc_,
+                                                   "group": g, "want": "lowering"},
+            "claim": lambda tr, g=g, n=grp.n: tr[0]["movers"][2][g] == 0 and tr[-1]["movers"][2][g] == n - 1
+            and any(0 < fr["movers"][2][g] < n - 1 for fr in tr)})
+    return out
+
+
 def _in_box(dsim, box):
     """a standing pose inside a use box, nearest its centre"""
     x0, y0, x1, y1 = box
@@ -814,6 +892,7 @@ def scenarios(dsim, card) -> list:
     # and proves the line's sector in view). Only a map in the wide floor layout has one (E1M1: none, its list as was)
     if dsim.mp.wide:
         out += two_cell_scenarios(dsim)
+        out += closed_moving_scenarios(dsim)
     # P10: LEVEL COMPLETE holds eight frames (an enter among them ignored), then any key leaves for the boot's menu
     # (no game in progress: esc there is no rule, and the frozen world is never drawn again -- P2a.2's "frozen"
     # control parted on the frozen world's frame, which no play reaches now), and NEW GAME starts the level over
@@ -884,7 +963,7 @@ def main(argv=None) -> int:
             print("\n%s -- N/A: %s" % (sc["name"], sc["na"]))
             continue
         mirror = hooked(Mirror(dsim, card_di[0]), orc, dsim, card_di[0])
-        want = mirror.run(sc["pose"], sc["keys"], sc["pcard"])
+        want = mirror.run(sc["pose"], sc["keys"], sc["pcard"], fswitch=sc.get("fswitch"))
         claim = bool(sc["claim"](want))
         ok &= claim
         print("\n%s -- %d frames from (%.0f, %.0f) angle %08x%s" % (
@@ -893,7 +972,7 @@ def main(argv=None) -> int:
         print("  the oracle does what the scenario claims: %s" % ("yes" if claim else "NO -- FAIL"))
         for ctl in sc["controls"]:
             alt = hooked(Mirror(dsim, card_di[0], ctl), orc, dsim, card_di[0]).run(sc["pose"], sc["keys"],
-                                                                               sc["pcard"])
+                                                                               sc["pcard"], fswitch=sc.get("fswitch"))
             part = next((f for f, (x, y) in enumerate(zip(want, alt))
                          if expected_cells(x, dsim.order, dsim.mp.order)
                          != expected_cells(y, dsim.order, dsim.mp.order)), None)
@@ -911,6 +990,8 @@ def main(argv=None) -> int:
                 vals.update({"mode": 0, "g_live": 1, "viewx": _signed(sc["pose"][0], 32),          # P10: g_live
                              "viewy": _signed(sc["pose"][1], 32), "viewangle": sc["pose"][2],
                              "pcard": sc["pcard"]})
+                if sc.get("fswitch") is not None:            # M8 F1.3 (S15): a floor group fired by a POKE
+                    vals["fswitch"] = tuple(sc["fswitch"])
             pr.write_cells(vals)
         p.on_frame_start(start)
         # every cell the probe holds (P.game_cells: each later rung's group joins there), not READ alone -- READ was

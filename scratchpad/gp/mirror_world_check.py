@@ -200,12 +200,14 @@ def p2a_part(args) -> dict:
     assert order == list(w0.door_order) and lift_order == list(w0.lift_order)
 
     # ---- the scenario list: (gate, name, pose, keys, pcard, setup, late); p2a's two-cell-line `look`s (S14)
-    runs, looks, views, orc = [], {}, {}, None
+    runs, looks, views, orc, injects = [], {}, {}, None, {}
     for sc in G.scenarios(dsim, card):
         if not sc.get("na"):
             runs.append(("p2a", sc["name"], sc["pose"], sc["keys"], sc["pcard"], None, None))
             if sc.get("look"):
                 looks[sc["name"]] = sc["look"]
+            if sc.get("fswitch") is not None:
+                injects[sc["name"]] = tuple(sc["fswitch"])      # M8 F1.3 (S15): a floor group fired by a poke
     lists = (("hurt", H.scenario_list(dsim, w0)), ("fight", FG.scenario_list(dsim, w0, card)),
              ("die", DG.scenario_list(dsim, w0, card)))
     skipped = 0
@@ -251,7 +253,7 @@ def p2a_part(args) -> dict:
         mr.seenfn = seenfn
         seg_log.clear()
         try:
-            out = mr.run(pose, keys, pcard)
+            out = mr.run(pose, keys, pcard, fswitch=injects.get(name))
         except Exception as e:                                 # noqa: BLE001 -- a mirror that crashes is a FAIL
             bad.append((gate, name, -1, [("mirror raised", repr(e), "")]))
             continue
@@ -267,6 +269,11 @@ def p2a_part(args) -> dict:
             tw.set_card(pcard)
         if setup is not None:
             setup(tw)
+        if name in injects:                                    # the poked fswitch vector: states, then timers
+            ng = len(tw.world.floor_groups)
+            for g_ in range(ng):
+                tw.world.ws.f_switch[g_], tw.world.ws.f_sub[g_] = injects[name][g_], injects[name][ng + g_]
+            tw.world._door_phase_scene()
         pending = tuple(pose)
         mode, scr, sel, live, lvdone = 0, 0, SKILLS.index(BOOT_MENU_SKILL), 1, 0
         tsnaps = []
@@ -323,8 +330,8 @@ def p2a_part(args) -> dict:
             if orc is None:
                 import probe as P
                 orc = P.Oracle()
-            views[name] = (view_check(orc, dsim, looks[name], out),
-                           view_check(orc, dsim, looks[name], out, flip=True))
+            vc = closed_view_check if looks[name].get("kind") == "closed" else view_check
+            views[name] = (vc(orc, dsim, looks[name], out), vc(orc, dsim, looks[name], out, flip=True))
     M.walkover_segments = orig_ws
     return {"part": "p2a", "map": mapname, "runs": len(runs), "skipped": skipped, "frames": frames,
             "tele_frames": tele_frames, "bad": bad, "x": x_ok, "views": views, "looks": looks,
@@ -364,8 +371,71 @@ def view_check(orc, dsim, look: dict, out: list, flip: bool = False) -> dict:
     return seen
 
 
+class OpenLineWad:
+    """M8 F1.3 (CR of #146): the map wad with ONE line opened -- its static side's sidedef points at a copy of the
+    static sector whose ceiling is the moving side's, so the line is no longer shut (the oracle's `_closed2s` false):
+    the line drawn SEE-THROUGH, as r2's binary drew E1M2's 2033 / 2062 / 2050 / 2075. Every other read is the wad's."""
+
+    def __init__(self, mw, mapname: str, line: int, static: int, ceil: int):
+        import dataclasses
+        self._mw, self._m = mw, mapname
+        secs, sds, ld = mw.sectors(mapname), list(mw.sidedefs(mapname)), mw.linedefs(mapname)[line]
+        self._extra = dataclasses.replace(secs[static], ceil_h=ceil)
+        side = ld.back if sds[ld.back].sector == static else ld.front
+        assert sds[side].sector == static, (line, static)
+        sds[side] = dataclasses.replace(sds[side], sector=len(secs))
+        self._sds = sds
+
+    def sectors(self, m):
+        return list(self._mw.sectors(m)) + [self._extra] if m == self._m else self._mw.sectors(m)
+
+    def sidedefs(self, m):
+        return list(self._sds) if m == self._m else self._mw.sidedefs(m)
+
+    def __getattr__(self, k):
+        return getattr(self._mw, k)
+
+
+def closed_view_check(orc, dsim, look: dict, out: list, flip: bool = False) -> dict:
+    """M8 F1.3 (CR of #146): does p2a S15 SEE its line shut at every state? On each world frame of the gate's Mirror
+    run whose floor group is LOWERING (state 1 .. n-2) or LOWERED (n-1): the oracle's view at the frame's pose and
+    movers against the same view with the line opened (`OpenLineWad`: see-through) -- a changed pixel sees the line
+    drawn solid. `flip` (the control): the view turned 180 degrees. -> {"lowering": frames, "lowered": frames}"""
+    from doomfj.doors import heights_for_states
+    from doomfj.reference_model import SimState, build_scene
+    g = look["group"]
+    grp = dsim.mp.groups[g]
+    m = orc.mapname
+    proxy = OpenLineWad(orc.mw, m, look["line"], look["static"], dsim.secs[look["moving"]].ceil_h)
+    seen = {"lowering": 0, "lowered": 0}
+    scenes = {}
+    for fr in out:
+        if fr["drawn"] != "world":
+            continue
+        gs = fr["movers"][2][g]
+        case = "lowered" if gs == grp.n - 1 else "lowering" if gs > 0 else None
+        if case is None:
+            continue
+        x, y, a = fr["pose"]
+        a = (a + (0x80000000 if flip else 0)) & M32
+        h = {**heights_for_states(orc.secs, orc.lds, orc.sds,
+                                  {si: fr["phase"][0][si][0] for si in dsim.order}), **fr["mheights"]}
+        key = tuple(sorted(h.items()))
+        if key not in scenes:
+            scenes[key] = (build_scene(orc.mw, orc.mw, m, h), build_scene(proxy, proxy, m, h))
+        views = [bytes(orc.rm.render_wall_frame(SimState(x, y, a, m), sc_, sprite_wad=orc.art,
+                                                thing_hidden=set(orc.hidden), **orc.RENDER_KW))
+                 for sc_ in scenes[key]]
+        if views[0] != views[1]:
+            seen[case] += 1
+    return seen
+
+
 def view_ok(look: dict, seen: dict) -> bool:
-    """S14a must see the line with the lift down and the floor unlowered; S14b unlowered AND lowered"""
+    """S14a must see the line with the lift down and the floor unlowered; S14b unlowered AND lowered; S15 its shut
+    line solid while the floor is lowering AND once lowered"""
+    if look["want"] == "lowering":
+        return seen["lowering"] > 0 and seen["lowered"] > 0
     return seen["down"] > 0 if look["want"] == "down" else (seen["unlowered"] > 0 and seen["lowered"] > 0)
 
 

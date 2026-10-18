@@ -570,6 +570,8 @@ def main():
         # M8 L2: the yellow and red keys (and a blue skull) the WORLD holds -- World._doors_phase's player_can_open
         # (monsters.door_keys_kw: {} on E1M1, whose player holds only the blue card, which rides `dps`)
         from doomfj.monsters import door_keys_kw
+        if mph is not None:            # M8 (doomfj.switches): the SR countdown and the door switches, tic-start doors
+            mph.switch_doors(dps[0], used and not dead, st.x, st.y)
         dps = dp.tic(dps, used and not dead, st.x, st.y, others=others,   # M7 P3.2b: reversal on the monsters too
                      player=not dead,                                     # M7 P7: a dead player holds no door
                      **door_keys_kw(mph))
@@ -579,6 +581,8 @@ def main():
         elif kd.get("use"):
             if not pusedn:
                 assert not any(in_use_box_fixed(b, st.x, st.y) for b in exits), "a press at the exit"
+                if mph is not None:    # M8: the floor / lift switches, before the press fires them
+                    mph.switch_uses(mps, st.x, st.y)
                 mps = mp.use_press(mps, st.x, st.y)
             pusedn = 1
         else:

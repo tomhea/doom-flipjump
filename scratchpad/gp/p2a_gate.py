@@ -237,6 +237,8 @@ class Mirror:
                     keys_kw = door_keys_kw(mph if loots else None)
                     has_blue = {"card": True, "no_card": False}.get(self.ctl, keys_kw.pop("has_blue", None))
                     alive = not dead or self.ctl == "dead_holds_door"
+                    # M8 (doomfj.switches): the SR countdown and the door switches, on the tic-start doors
+                    mph.switch_doors(ph[0], use and (not dead or self.ctl == "dead_uses"), st.x, st.y)
                     ph = dp.tic(ph, use and (not dead or self.ctl == "dead_uses"), st.x, st.y, has_blue=has_blue,
                                 others=mph.boxes(), player=alive, **keys_kw)    # P3.2b; P7-c
                     before_sw = ms[2]
@@ -250,6 +252,7 @@ class Mirror:
                     elif use:                                 # the exit: a PRESS in its box
                         if not pusedn or self.ctl == "edge":
                             pusedn = 1
+                            mph.switch_uses(ms, st.x, st.y)   # M8: the floor / lift switches, before the exit
                             if any(in_use_box_fixed(b, st.x, st.y) for b in self.exits):
                                 lvdone, mode, scr = 1, 1, LEVEL_DONE_ENTER   # P10: LEVEL COMPLETE, its hold first
                             elif self.ctl != "no_use_lines":  # else the SR lifts and the switch
@@ -333,6 +336,8 @@ class Mirror:
                             "removed": removed, "bviews": bviews,               # M7 P6
                             "skill": mph.world.ws.skill,                        # M7 P6+P7: what the picture hides
                             "vdrop": mph.view_drop(),                           # M7 P8a: the dying view's sink
+                            # M8: the switch lines showing their other texture (the exit's by this gate's lvdone)
+                            "switches": mph.switch_kw(lvdone).get("switch_on"),
                             # M7 P8a: this frame's knock moves and the walls that refused them (monsters.KnockTap),
                             # and every monster's whole-unit position (a corpse's slide)
                             "knock": ((len(mph.tap.since(k_tap)), len(mph.tap.wall_refusals(mph.tap.since(k_tap))))
@@ -360,6 +365,7 @@ def seen_of(orc, dsim, card_di):
                    removed=orc.monster_removed(mph) if loot else None,       # M7 P6
                    barrel_views=orc.monster_barrel_views(mph) if loot else None,
                    skill=mph.world.ws.skill,                                  # M7 P6+P7: the skill played
+                   # switch_on: N/A -- the seen marks and the aim window read no wall colour (M8)
                    view_drop=mph.view_drop())                                 # M7 P8a: the dying view's sink
         mph.set_aim(aim)                    # M7 P4.2a: this picture's window -> the next frame's shots
         return orc._mviews.slots_of(seen)
@@ -389,7 +395,8 @@ def picture(orc, dsim, fr: dict, card_di) -> bytes:
                       mobiles=fr["mobiles"],                                        # M7 P5
                       removed=fr.get("removed"), barrel_views=fr.get("bviews"),     # M7 P6
                       card=fr["phase"][3], skill=fr.get("skill"),                  # M7 P6+P7: the skill played
-                      view_drop=fr.get("vdrop", 0))                                # M7 P8a: the dying view's sink
+                      view_drop=fr.get("vdrop", 0),                                # M7 P8a: the dying view's sink
+                      switch_on=fr.get("switches"))                                # M8: the switch textures
 
 
 def expected_cells(fr: dict, order: list, mover_order=()) -> dict:

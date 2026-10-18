@@ -608,8 +608,8 @@ def switch_door_triggers(secs, lds, sds, verts, rng: int = USE_RANGE) -> list:
     (P_ChangeSwitchTexture(line, 0) after EV_DoDoor returned 1). That latch is NOT kept, and it need not
     be: an S1 door switch's doors are open-STAY doors (asserted), and once such a door has been
     started it moves only up and comes to rest open, where a press changes nothing (`door_tic`) --
-    so every press after the first finds nothing to do, latched or not. (No switch texture changes:
-    the renderer animates no switch.)"""
+    so every press after the first finds nothing to do, latched or not. (The line's TEXTURE latch is
+    doomfj.switches' -- a map's SWITCH_TEX; E1M1 animates no switch.)"""
     def xy(v):
         v = verts[v]
         return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])

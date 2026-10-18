@@ -209,20 +209,27 @@ V5_STACK = 2                      # V5: stacked boundary pieces kept per column 
 WALL_TONE_RGB = {"#EXIT": ((235, 35, 30), (110, 10, 10)),        # the exit switch: red
                  "#SWITCH": ((245, 160, 30), (100, 55, 10)),     # the other switches: orange
                  "#DOOR": ((190, 150, 95), (70, 45, 20)),        # a door a player opens: tan over dark brown
-                 "#DOORBLUE": ((60, 95, 235), (15, 25, 95))}     # a blue-key door and its jambs: blue
+                 "#DOORBLUE": ((60, 95, 235), (15, 25, 95)),     # a blue-key door and its jambs: blue
+                 # M8 (doomfj.switches, a map's SWITCH_TEX): a switch showing its SW2 texture -- used (SW1 -> SW2), or
+                 # an SW2 one at the level start not yet used -- and the used exit: green, DOOM's lit switch
+                 "#SWITCHON": ((60, 215, 60), (15, 85, 15))}
 WALL_TONE_EXIT_SPECIALS = frozenset({11, 51})                    # S1 exit, S1 secret exit
 WALL_TONE_DOOR_SPECIALS = frozenset({1, 26, 27, 28, 31, 32, 33, 34, 117, 118})   # DR / D1 doors a player opens
 WALL_TONE_BLUE_SPECIALS = frozenset({26, 32})                    # DR / D1 blue-key doors
 WALL_TONE_SWITCH_PREFIXES = ("SW1", "SW2")                       # DOOM's switch textures
 
 
-def wall_tone_names(lds, sds, secs) -> dict:
+def wall_tone_names(lds, sds, secs, switch_tex: bool = False, pressed=frozenset()) -> dict:
     """{linedef: tone name} -- THE wall-tone rule both mirrors read (see WALL_TONE_RGB): an exit special first, then a
     switch texture on any of the line's sides, then a door's face (a two-sided line with a door-use special, not
     ML_SECRET, beside a door sector -- blue when a blue-key line opens that door), then a blue door's jamb (a one-sided
-    line of a blue door's sector). A face's tone shows while the door is shut, when the line draws as a solid wall"""
+    line of a blue door's sector). A face's tone shows while the door is shut, when the line draws as a solid wall.
+    M8 `switch_tex` (a map's SWITCH_TEX, doomfj.switches): a switch line SHOWING an SW2 texture wears "#SWITCHON" --
+    its own texture an SW2 one, flipped for each linedef in `pressed` (P_ChangeSwitchTexture: SW1 <-> SW2); off, the
+    text and the tones are P10's"""
     from doomfj.doors import door_states
     from doomfj.gamedata import ML_SECRET
+    assert switch_tex or not pressed, "M8: a pressed switch on a map without SWITCH_TEX"
     doors = set(door_states(secs, lds, sds))
     blue = set()
     for ld in lds:
@@ -233,6 +240,11 @@ def wall_tone_names(lds, sds, secs) -> dict:
         sides = [sds[ld.front]] + ([sds[ld.back]] if 0 <= ld.back < len(sds) else [])
         texs = [(t or "").upper() for sd in sides for t in (sd.upper, sd.middle, sd.lower)]
         two = len(sides) == 2
+        if switch_tex and any(t.startswith(WALL_TONE_SWITCH_PREFIXES) for t in texs):
+            from doomfj.switches import switch_texture
+            if switch_texture(lds, sds, i).startswith("SW2") != (i in pressed):
+                out[i] = "#SWITCHON"
+                continue
         if ld.special in WALL_TONE_EXIT_SPECIALS:
             out[i] = "#EXIT"
         elif any(t.startswith(WALL_TONE_SWITCH_PREFIXES) for t in texs):
@@ -1401,13 +1413,16 @@ class ReferenceModel:
         rw_centerangle = (ANG90 + viewangle - rw_normalangle) & ANGLE_MASK
         return rw_offset, rw_centerangle
 
-    def _wall_tones(self, scene) -> dict:
-        """P10: `wall_tone_names` for the scene's map -- its own (pristine) level data, once per map and model"""
-        key = (id(scene.map_wad), scene.mapname)
+    def _wall_tones(self, scene, pressed=frozenset()) -> dict:
+        """P10: `wall_tone_names` for the scene's map -- its own (pristine) level data, once per map, model and (M8)
+        set of pressed switch lines (`render_wall_frame(switch_on=)`; the map's SWITCH_TEX through MAP_CONFIG)"""
+        pressed = frozenset(pressed)
+        key = (id(scene.map_wad), scene.mapname, pressed)
         cache = self.__dict__.setdefault("_tone_cache", {})
         if key not in cache:
             mw, m = scene.map_wad, scene.mapname
-            cache[key] = wall_tone_names(mw.linedefs(m), mw.sidedefs(m), mw.sectors(m))
+            cache[key] = wall_tone_names(mw.linedefs(m), mw.sidedefs(m), mw.sectors(m),
+                                         switch_tex=bool(map_cfg(self.cfg, m).SWITCH_TEX), pressed=pressed)
         return cache[key]
 
     def _wall_texture(self, asset_wad, name, cache, *, wall_mode="textured"):
@@ -2127,7 +2142,7 @@ class ReferenceModel:
                           mobiles=None, barrel_views: dict | None = None, thing_removed=None,
                           degrade: bool = False, exempt_actors: bool = False,
                           view_drop: int = 0, wall_tones: bool = False,
-                          slot_trace: list | None = None) -> bytes:
+                          slot_trace: list | None = None, switch_on=frozenset()) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -2278,7 +2293,10 @@ class ReferenceModel:
         secs = scene_sectors(scene)
         verts = scene.cmap.vertexes
         texcache: dict = {}
-        _tones = self._wall_tones(scene) if wall_tones else {}     # P10: the wall tones, from the map's own data
+        # P10: the wall tones, from the map's own data -- M8: the switch lines `switch_on` names (doomfj.switches:
+        # World.switch_on, the gates' MonsterPhase.switch_kw) showing their other texture
+        assert wall_tones or not switch_on, "M8: switch_on draws through the wall tones (the game picture's)"
+        _tones = self._wall_tones(scene, switch_on) if wall_tones else {}
 
         viewx, viewy, viewangle = state.x, state.y, state.angle
         # W1R-ANCHOR: the pattern key is (x + this) -- viewangle * 640 columns-per-turn >> 32

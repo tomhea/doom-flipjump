@@ -25,7 +25,8 @@ moving lift is ignored by `lift_tic` -- and the switch fires once. A W1 floor li
 
 KNOWN SIMPLIFICATIONS (M8 F1.3, recorded in docs/handoff-e1m2.md 3): a floor's destination is computed from the
 neighbours' STORED floors (EV_DoFloor reads them at the trigger: E1M2's sector 206 borders blazing lift 47, which
-could be down then); the S1 switch textures do not change; the floors move on the doors' 16-unit grid.
+could be down then); the S1 switch textures do not change (M8: they do on a SWITCH_TEX map -- doomfj.switches); the
+floors move on the doors' 16-unit grid.
 """
 from __future__ import annotations
 

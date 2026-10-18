@@ -235,6 +235,12 @@ class Config:
     # holds it below SPR_THING_SLOTS and asks for it when the map's bound does not fit.
     SPR_SLOT_CAP: int = 0
 
+    # M8 (the owner, 2026-10-18: a recorded simplification is implemented when it costs <= +0.5% speed) -- THE SWITCH
+    # TEXTURES CHANGE: DOOM's P_ChangeSwitchTexture, a used switch line's SW1 texture shown as its SW2 (an S1 / exit line
+    # for good, an SR line for BUTTONTIME). 1 on a map that animates them (doomfj.switches; the game picture's wall
+    # tones draw the change), 0 on E1M1, whose emission stays byte-identical. Host-side only: NOT an fj constant.
+    SWITCH_TEX: int = 0
+
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
         """M8 F1.4: 1 when the record compares `gps_nslot` against SPR_SLOT_CAP (frame.thing_record_body's rep), else 0"""
@@ -298,7 +304,8 @@ GAME_CFG = Config(VIEW_ROWS=84)
 MAP_CONFIG = {
     # M8 F1.4: SPR_SLOT_CAP -- 305 drawable things over the skills, hard's 295 + 10 pool things + 54 droppers' drops
     # (> 255 slot ids: wall_renderer.check_slot_ids)
-    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255},
+    # M8: SWITCH_TEX -- the used switches change their texture (doomfj.switches)
+    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SWITCH_TEX": 1},
 }
 
 

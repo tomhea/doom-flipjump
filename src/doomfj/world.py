@@ -283,6 +283,8 @@ class Layout:
     nsecret: int = 0   # P10: secret sectors (special 9) -- LEVEL COMPLETE's SECRETS
     ntele: int = 0     # M8 L4: WR teleport lines (doomfj.teleport); 0 on E1M1 -- no field, no cell
     nfloor: int = 0    # M8 F1.3: the floor groups in the WIDE layout (movers.floor_wide); 0: E1M1's one 1-bit switch
+    nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
+    nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
 
     @property
     def nmobile(self) -> int:
@@ -427,6 +429,13 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     else:
         f("f_switch", 1, group="mover", phase="P2b",
           doc="the floor switch fired (S1): its sectors at the lowest surrounding floor")
+    if lay.nswitch:   # M8 (doomfj.switches): P_ChangeSwitchTexture -- only on a map that animates its switches
+        f("sw_on", 1, count=lay.nswitch, group="mover", phase="M8", label="swpr",
+          doc="switch line k (switches.latched) shows its other texture (SW1 <-> SW2)")
+        if lay.nswsr:
+            from doomfj.switches import BUTTON_NIBBLES
+            f("sw_time", 4 * BUTTON_NIBBLES, count=lay.nswsr, group="mover", phase="M8", label="swtm",
+              doc="SR switch j (switches.repeating): frames left before its texture swaps back, 0 in")
     # -- sound ------------------------------------------------------------------------------------
     f("snd_alert", 1, count=lay.nsound, group="sound",
       doc="node heard a shot (DOOM's sector soundtarget)")
@@ -856,7 +865,8 @@ class World(CombatMixin):
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
                              nwalk=len(self.walk_triggers), nlift=len(self.lift_order),
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
-                             nfloor=len(self.floor_groups) if self.floor_wide else 0)
+                             nfloor=len(self.floor_groups) if self.floor_wide else 0,
+                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -952,6 +962,12 @@ class World(CombatMixin):
         from doomfj.teleport import teleporters
         self.teleports = teleporters(mw, M, rm=self.rm, cmap=cmap)
         self._teleported = False
+        # M8 (doomfj.switches, the map's SWITCH_TEX): the switch lines a use changes -- `switch_cells` the ones with a
+        # `sw_on` cell (all but the exit, whose latch is g_leveldone), `switch_sr` the SR ones' indices among them
+        from doomfj import switches as _SWI
+        self.switches = (_SWI.map_switches(secs, lds, sds, cmap.vertexes) if _SWI.switches_on(M) else [])
+        self.switch_cells = _SWI.latched(self.switches)
+        self.switch_sr = _SWI.repeating(self.switches)
         for tel in self.teleports:
             assert tel.dest_sector not in set(self.door_order) | set(self.mover_order), (
                 "M8 L4: teleport destination sector %d moves" % tel.dest_sector)
@@ -1177,6 +1193,10 @@ class World(CombatMixin):
     def _doors_phase(self, keys: dict, ev: TicEvents) -> None:
         ws = self.ws
         alive = self.player_alive()
+        # M8 (doomfj.switches): the SR buttons count down, then the door switches a held use presses swap -- on the
+        # doors' tic-start states, before the doors tic
+        self.switch_doors(bool(keys["use"] and alive), ws.px, ws.py,
+                          lambda si: switch_ready(self.door_state(si)))
         for d, si in enumerate(self.door_order):
             box = self.door_boxes.get(si)             # none for a walk-over door
             pressed = (keys["use"] and alive and box is not None and self.player_can_open(si)
@@ -1196,6 +1216,53 @@ class World(CombatMixin):
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = st
             ws.d_monreq[d] = 0
         self._door_phase_scene()
+
+    def door_state(self, si: int) -> tuple:
+        """door sector si's (state, dir, sub, wait)"""
+        ws, d = self.ws, self.door_order.index(si)
+        return (ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d])
+
+    # -- M8: the switch textures (doomfj.switches: the rules; the gates step them through monsters.MonsterPhase)
+    def switch_doors(self, used: bool, x16: int, y16: int, ready) -> None:
+        """the door phase's switch step: the SR buttons count down (`switches.countdown`), then each door switch a
+        held use presses (`switches.door_presses`: `used` the use key with the player alive, `ready(sector)` a door at
+        rest at the tic start) swaps (`switches.press`)"""
+        if not self.switch_cells:
+            return
+        from doomfj import switches as _SWI
+        ws = self.ws
+        on, tm = list(ws.sw_on), list(ws.sw_time) if self.switch_sr else []
+        _SWI.countdown(on, tm, self.switch_sr)
+        for k in _SWI.door_presses(self.switch_cells, used, x16, y16, ready):
+            _SWI.press(on, tm, self.switch_sr, k)
+        self._switch_store(on, tm)
+
+    def switch_uses(self, x16: int, y16: int, lift_rest, floor_still) -> None:
+        """a use PRESS's switch step, before the exit and the machines it fires (`switches.use_presses`)"""
+        if not self.switch_cells:
+            return
+        from doomfj import switches as _SWI
+        ws = self.ws
+        on, tm = list(ws.sw_on), list(ws.sw_time) if self.switch_sr else []
+        for k in _SWI.use_presses(self.switch_cells, x16, y16, lift_rest, floor_still):
+            _SWI.press(on, tm, self.switch_sr, k)
+        self._switch_store(on, tm)
+
+    def _switch_store(self, on, tm) -> None:
+        ws = self.ws
+        for k, v in enumerate(on):
+            ws.sw_on[k] = v
+        for j, v in enumerate(tm):
+            ws.sw_time[j] = v
+
+    def switch_on(self, leveldone=None) -> frozenset:
+        """the linedefs showing their other texture now (`render_wall_frame(switch_on=)`): the set cells, and the exit
+        once the level is done (`leveldone`; None: g_leveldone) -- empty on a map without SWITCH_TEX"""
+        if not self.switches:
+            return frozenset()
+        from doomfj.switches import pressed_lines
+        done = self.ws.g_leveldone if leveldone is None else leveldone
+        return pressed_lines(self.switches, list(self.ws.sw_on) if self.switch_cells else [], bool(done))
 
     def door_touched(self, si: int) -> bool:
         """M7 P2b: does a SHOOTABLE thing touch door `si` -- the player alive, a live monster (a

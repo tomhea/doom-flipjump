@@ -54,11 +54,11 @@ def walk(pairs, lo, hi):
     return bytes(out)
 
 
-def _run(tmp_path, idx, lo, hi, expected):
+def _run(tmp_path, idx, lo, hi, expected, direct=False):
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     prog = "\n".join([
         "stl.startup_and_init_all",
-        generate_bands_walk_fj(LISTS),
+        generate_bands_walk_fj(LISTS, direct=direct),
         f"    hex.set 2, tqlo, {lo}",
         f"    hex.set 2, tqhi, {hi}",
         "    vql_load tqlo",
@@ -93,8 +93,45 @@ def _run(tmp_path, idx, lo, hi, expected):
     (4, 0, 100),      # a body whose every pair-block is SHARED with another body
     (4, 0, 200),      # ... and its == arm
 ])
-def test_walk_matches_the_contract(tmp_path, idx, lo, hi):
-    _run(tmp_path, idx, lo, hi, walk(LISTS[idx], lo, hi))
+@pytest.mark.parametrize("direct", [False, True], ids=["thunk-fcall", "direct"])
+def test_walk_matches_the_contract(tmp_path, idx, lo, hi, direct):
+    _run(tmp_path, idx, lo, hi, walk(LISTS[idx], lo, hi), direct)
+
+
+def _reentrant_ok(tmp_path, src):
+    seq = [(0, 0, 25), (0, 0, 25), (3, 8, 200), (1, 0, 25), (4, 0, 200), (2, 0, 255), (0, 19, 255)]
+    consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
+    body = ["stl.startup_and_init_all", src]
+    for idx, lo, hi in seq:
+        body += [f"    hex.set 2, tqlo, {lo}", f"    hex.set 2, tqhi, {hi}",
+                 "    vql_load tqlo", "    vqh_load tqhi",
+                 f"    hex.set 4, twid, {idx}", "    vpb_walk twid"]
+    body += ["    stl.loop", "tqlo: hex.vec 2", "tqhi: hex.vec 2", "twid: hex.vec 4", ""]
+    p = tmp_path / "bands_seq.fj"
+    p.write_text(chr(10).join(body), encoding="utf-8")
+    expected = b"".join(walk(LISTS[idx], lo, hi) for (idx, lo, hi) in seq)
+    return fj.assemble_and_run_test_output(
+        [consts.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+
+
+def test_direct_walk_is_reentrant_and_its_mutant_is_not(tmp_path):
+    """M8 size (`direct`, config VPB_DIRECT): the thunk cleans its id out of `vpb_dsp` BEFORE the body, so a
+    sequence of walks -- the same entry twice, shared bodies, every arm -- is byte-exact only if every thunk
+    cleaned exactly its own id. R9: a thunk that does not clean its id (id 1 flips nothing) must drift."""
+    src = generate_bands_walk_fj(LISTS, direct=True)
+    assert "vpb_clean__" not in src and "stl.fcall vpb_body" not in src
+    assert _reentrant_ok(tmp_path, src), "the direct walk drifted across calls"
+    bad = src.replace("    wflip vpb_dsp+w, 1*dw, vpb_body0", "    wflip vpb_dsp+w, 0*dw, vpb_body0")
+    assert bad != src
+    assert not _reentrant_ok(tmp_path, bad), "the sequence passed a thunk that does not clean its id"
+
+
+def test_direct_is_off_by_default():
+    assert generate_bands_walk_fj(LISTS) == generate_bands_walk_fj(LISTS, direct=False)
+    assert "stl.fcall vpb_body" in generate_bands_walk_fj(LISTS)
+    from doomfj.config import map_cfg
+    assert not map_cfg(Config(), "E1M1").VPB_DIRECT and not map_cfg(Config(), "E1M2").VPB_DIRECT
 
 
 def test_walk_is_reentrant_call_twice_per_entry(tmp_path):

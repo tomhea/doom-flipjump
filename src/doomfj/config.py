@@ -261,6 +261,11 @@ class Config:
     # same leaf for every point, for a fcall per node visited. `ptloc_walk` was 19.5M of E1M2 r4's 83.5M words (code,
     # wflip chains and pool tables). 0, the default: the inline walk, byte for byte.
     PTLOC_SHARED: int = 0
+    # M8 size: 1 = the plane bands' per-id thunk cleans its id out of `vpb_dsp` FIRST and tail-jumps into the shared
+    # body, which returns through hex.tables.ret (`lut_generator.generate_bands_walk_fj(direct=True)`): no fcall per
+    # walk and no 2^k-entry clean table. The bands bank is 14.4M of E1M2 r4's words and grows with the band lists
+    # (viewz classes x plane pairs: E1M7 ~2.5x E1M2). 0, the default: the fcall thunks, byte for byte.
+    VPB_DIRECT: int = 0
 
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
@@ -341,7 +346,8 @@ MAP_CONFIG = {
 # M8 size: the 2^27-word cuts, per map -- kept apart from MAP_CONFIG so the feature branches' MAP_CONFIG rows merge
 # cleanly (map_cfg applies both; MAP_CONFIG wins a key in both, so `emit_check --map-config PTLOC_SHARED=0` measures a
 # map without a cut). E1M1 / E1M2 have none: their emission is untouched.
-MAP_SIZE_CONFIG = {m: {"PTLOC_SHARED": 1} for m in ("E1M3", "E1M4", "E1M5", "E1M6", "E1M7", "E1M8", "E1M9")}
+MAP_SIZE_CONFIG = {m: {"PTLOC_SHARED": 1, "VPB_DIRECT": 1}
+                   for m in ("E1M3", "E1M4", "E1M5", "E1M6", "E1M7", "E1M8", "E1M9")}
 
 
 def map_cfg(cfg: "Config", mapname: str) -> "Config":

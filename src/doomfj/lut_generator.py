@@ -707,7 +707,7 @@ def _raw_byte_out(cell: str, tag: str):
     return out
 
 
-def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
+def generate_bands_walk_fj(lists, *, index_nibbles: int = 4, direct: bool = False) -> str:
     """M13-15M BANDS AS CODE (bake-to-code, 6th application): every band half-list is compile-time
     data, and walking it costs two pointer READS per pair (~2.6k ops) plus skip logic. This bakes
     each half-list as a flat RAW-OP handler emitting its pairs as constants against the frame's
@@ -733,7 +733,15 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
     costs 379.7 words/arm inside a 90M-word program against 281.1 in a 17k-word one.)
     Pixel-neutral by construction: the same bytes, in the same order, from one copy instead of
     forty thousand.
-    Contract-tested at the kernel level by `tests/fj/test_bands_walk.py`."""
+    Contract-tested at the kernel level by `tests/fj/test_bands_walk.py`.
+
+    M8 size, `direct` (config VPB_DIRECT): the per-id thunk CLEANS FIRST and tail-jumps into the body --
+    `vpb_t<k>: wflip vpb_dsp+w, k*dw, vpb_body<owner>` (the same popcount(k) flips the clean table's
+    entry k does, in one wflip chain) -- and the body / clamp tail return straight through
+    `hex.tables.ret` (R42: nothing in them touches it). No fcall per walk, no `vpb_x`, and no
+    `vpb_clean__` table: a padding entry jumps to `vpb_pad__`, which hangs (an index past the lists is
+    a bug, and hanging is louder than drawing with a corrupted dispatch). Per id: one op and its chain
+    instead of the fcall's two return-address chains; the same bytes out, in the same order."""
     n = len(lists)
     pad = 1 << max(1, (n - 1).bit_length())
     if 4 * index_nibbles < (pad - 1).bit_length():
@@ -758,15 +766,22 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
            "vpb_switch__:"]
     for k in range(pad):
         if k >= n:
-            out.append(f"    ;vpb_clean__ + {k}*dw")
+            out.append("    ;vpb_pad__" if direct else f"    ;vpb_clean__ + {k}*dw")
         else:
             out.append(f"    ;vpb_t{k}")
     # per-id thunks: fcall the (possibly shared) body, then clean with THIS id. stl.fcall/fret
     # is raw wflip machinery (R42-safe), and its pair discipline clears vpb_x on return.
+    # (`direct`: clean with THIS id first, then tail-jump into the body, which returns through
+    # hex.tables.ret itself.)
+    ret = "    ;hex.tables.ret" if direct else "    stl.fret vpb_x"
     for k in range(n):
-        out += [f"vpb_t{k}:",
-                f"    stl.fcall vpb_body{owner[k]}, vpb_x",
-                f"    ;vpb_clean__ + {k}*dw"]
+        if direct:
+            out += [f"vpb_t{k}:",
+                    f"    wflip vpb_dsp+w, {k}*dw, vpb_body{owner[k]}"]
+        else:
+            out += [f"vpb_t{k}:",
+                    f"    stl.fcall vpb_body{owner[k]}, vpb_x",
+                    f"    ;vpb_clean__ + {k}*dw"]
     # S2 (2026-09-05): the PAIR-BLOCK is shared per DISTINCT (y2, colour), the same move M4 made
     # for the clamp tail, one level up. Census of the shipped bank: 40,567 pair instances, 5,326
     # distinct (mean reuse 7.6x), each block ~172 static ops -- two 8-level bit.if trees whose
@@ -795,7 +810,7 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
                     f"    wflip vpb_px+w, {t}_r+dw, vpb_fin{k}",        # lane 1: STOP
                     f"    wflip vpb_px+w, {t}_r+2*dw"]                  # lane 2: continue
         out += [f"vpb_fin{k}:",
-                "    stl.fret vpb_x"]
+                ret]
     # ... the shared pair-blocks. R42 holds: bit.if, output_char and raw flips only. The trees are
     # `_cmp3_tree` verbatim; the M4 clamp-tail sharing is unchanged (lane 0 jumps into it).
     for (y2, c) in sorted(pair_blocks):
@@ -825,11 +840,11 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
         out.append(f"vpb_cl_{c}:")
         out += _raw_byte_out("vq_hi", f"vpb_clt{c}")
         out += [f"    stl.output_char {c}",
-                "    stl.fret vpb_x"]
+                ret]
     out += ["vpb_x: ;0",
             "vpb_px: ;0",
-            "vpb_clean__:",
-            f"    hex.tables.clean_table_entry__table {pad}, vpb_dsp, hex.tables.ret",
+            *(["vpb_pad__:", "    ;vpb_pad__"] if direct else
+              ["vpb_clean__:", f"    hex.tables.clean_table_entry__table {pad}, vpb_dsp, hex.tables.ret"]),
             "vq_lo: bit.vec 8", "vq_hi: bit.vec 8",
             "vpb_end__:", ""]
     out += _byte2bits_loader("vql", "vq_lo")

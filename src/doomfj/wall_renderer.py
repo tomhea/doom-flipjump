@@ -1486,7 +1486,6 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     walk it mirrors, not inside the region `;__hot_end` jumps over.
     """
     from doomfj.collision import generate_point_location_fj, point_location_decls
-    from doomfj.config import map_cfg
     from doomfj.lut_generator import generate_packed_lut_fj
     # M8 size: the map's point location with its arithmetic shared (config PTLOC_SHARED, MAP_SIZE_CONFIG; off on E1M1
     # and E1M2, whose walk is the inline one byte for byte)
@@ -3035,7 +3034,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _sky_lists = _sky_pair_lists(rm, asset_wad, cfg) if _has_sky else []
         sky_base_id = len(_main_lists)
         bands_code = generate_bands_walk_fj(_main_lists + _sky_lists,
-                                            index_nibbles=cfg.BAND_NIBBLES)
+                                            index_nibbles=cfg.BAND_NIBBLES,
+                                            # M8 size: VPB_DIRECT (MAP_SIZE_CONFIG; off on E1M1 / E1M2)
+                                            direct=bool(map_cfg(cfg, mapname).VPB_DIRECT))
         skybands = ""                          # the sky DATA bank dies with the plane bank
 
     # M13-prune (lines): count one-sided segs below every subtree; zero => the subtree can be

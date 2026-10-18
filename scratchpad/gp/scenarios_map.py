@@ -57,7 +57,8 @@ SPREAD = 768               # checkpoints at least this far apart
 STANDOFF = 256             # the start spot's wanted distance from the nearest monster
 N_RUNS = 11                # v10's shape: 11 runs x 100 frames
 DOORS_WANTED = 3           # scenarios_v2's MIN_DOORS: usable doors a checkpoint should start near
-KEY_SPECIALS = (26, 27, 28, 32, 33, 34)
+from gate_roles import KEY_LINE_COLOURS                                     # noqa: E402
+KEY_SPECIALS = tuple(sorted(KEY_LINE_COLOURS))   # M8: DOOM's every key door (99, 133 .. 137 too: no E1M1 / E1M2 line)
 INSTALLED = {"map": "E1M1"}
 _ORIGINALS = {}
 

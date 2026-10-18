@@ -52,7 +52,7 @@ import gate_roles                                                            # n
 from doomfj import doors as D                                               # noqa: E402
 from doomfj import gamedata as gd                                           # noqa: E402
 
-KEY_COLOURS = {26: "blue", 32: "blue", 27: "yellow", 34: "yellow", 28: "red", 33: "red"}
+KEY_COLOURS = gate_roles.KEY_LINE_COLOURS     # M8: every key-door special (the blazing ones too), by colour
 CARD_THINGS = {"blue": (5, 40), "yellow": (6, 39), "red": (13, 38)}       # card, skull key
 TELEPORT_SPECIALS = (39, 97, 125, 126)
 EXIT_LINE_SPECIALS = (11, 51, 52, 124)

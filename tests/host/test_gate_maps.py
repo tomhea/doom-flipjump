@@ -83,3 +83,16 @@ def test_die_d4_without_a_baked_barrel(monkeypatch):
     assert not w5.barrel_things and not bar5
     if hasattr(DG._baked_pickup, "mv"):
         del DG._baked_pickup.mv
+
+
+def test_key_line_table_is_dooms_and_covers_the_models():
+    """the generators' key doors (gate_roles.KEY_LINE_COLOURS) are DOOM's twelve key specials, every one the model knows
+    among them with the same colour (the model's table may lag: E1M7's 133 is a blue key door to the generators first)"""
+    import gate_roles as GR
+    from doomfj import gamedata as gd
+    from doomfj.combat import KEY_DOOR_CARDS
+    colour = {gd.IT_BLUECARD: "blue", gd.IT_YELLOWCARD: "yellow", gd.IT_REDCARD: "red"}
+    assert set(GR.KEY_LINE_COLOURS) == {26, 27, 28, 32, 33, 34, 99, 133, 134, 135, 136, 137}
+    assert all(GR.KEY_LINE_COLOURS[s] == colour[cards[0]] for s, cards in KEY_DOOR_CARDS.items())
+    import scenarios_map as SM
+    assert set(SM.KEY_SPECIALS) == set(GR.KEY_LINE_COLOURS)

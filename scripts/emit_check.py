@@ -117,8 +117,8 @@ STANDIN_ROWS = {  # stand-in: (refusing row prefixes, witness row prefixes)
     "stats-digits": (("monsters on LEVEL COMPLETE", "COUNTITEM pickups on LEVEL COMPLETE",
                       "secret sectors on LEVEL COMPLETE"), ("monsters on LEVEL COMPLETE",)),
     "far-los": (("map extent, far LOS",), ("map extent, far LOS",)),
-    "barrels-one-skill": (("barrels: level start the same on every skill",), ("barrels >= 1",)),
-    "barrel-chains-static": (("lesson: barrel chains",), ("barrel chains", "barrels >= 1")),
+    "barrels-one-skill": (("barrels: level start the same on every skill",), ("barrels (barrelcode",)),
+    "barrel-chains-static": (("lesson: barrel chains",), ("barrel chains", "barrels (barrelcode")),
     "attacker-7bit": (("monsters + barrels -> aim_sid",), ("monsters + barrels -> aim_sid",))}
 STANDIN_BLOCKING = ("REFUSED", "OVER", "ERROR")
 

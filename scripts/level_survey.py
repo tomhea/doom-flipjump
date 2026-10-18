@@ -361,7 +361,8 @@ class Survey:
         from doomfj.world import aim_bits
         self.cap("monsters + barrels -> aim_sid (world.aim_bits: the fj byte)", nmon + nbar, 0xFF,
                  "aim_sid %d bits" % aim_bits(w.layout))
-        self.row("OK" if nbar else "REFUSED", "barrels >= 1 (barrelcode asserts one)", nbar)
+        # M8 C10: a map with no barrel is a supported case (barrelcode: no per-barrel stub, its cells one dead slot)
+        self.row("OK" if nbar else "INFO", "barrels (barrelcode: none is supported, M8 C10)", nbar)
         from doomfj.statcode import count_digits
         self.cap("monsters on LEVEL COMPLETE (an 8-bit cell; statcode.count_digits)", nmon, 0xFF,
                  "%d digits a count" % count_digits(w))
@@ -373,7 +374,7 @@ class Survey:
         self.guard("statcode.check_world", lambda: statcode.check_world(w) if hasattr(statcode, "check_world") else None)
         from doomfj import barrelcode
         self.guard("barrels: level start the same on every skill (barrelcode.check_model_rules)",
-                   lambda: barrelcode.check_model_rules(w, (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)) if nbar else None)
+                   lambda: barrelcode.check_model_rules(w, (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)))
         # M8 F1.3 (docs/f1-big-map-widths.md 9): an item on a mover's floor touches at the live floor (pk_mbox) and
         # renders runtime (things.mover_leaves); a door's floor never moves
         moving = [(t.type, w.pickup_sector[i]) for i, t in enumerate(w.pickup_things) if w.pickup_on_mover[i]]

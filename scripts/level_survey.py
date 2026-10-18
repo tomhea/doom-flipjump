@@ -718,6 +718,87 @@ class Survey:
     RAM_GB_BUILT = 17.21                                # E1M2 r4's assembly: peak private 17.21 GB (ship-gate 5)
     RAM_GB_PER_SEG = RAM_GB_BUILT / 3650
 
+    # M8 size (2026-10-19): the binary's WORDS by emitted region, measured exactly on blocked63 (E1M1) and e1m2_r4
+    # (E1M2) -- every word of each .fjm attributed to the label before it (code), the wflip chains it starts, or its
+    # table in the blocked pool -- and each region scaled by its own driver (branch m8-size; the tools: scratchpad/12m/fullattr.py). Per driver:
+    # (main stream E1M1, pool E1M1, main stream E1M2, pool E1M2) words; "main stream" = code + wflip chains (below the
+    # pool base), "pool" = the blocked tables' own words (the pool's padding comes on top: _span_estimate).
+    SIZE_DRIVERS = {"const": (9378830, 6592392, 9422976, 6407492), "linedefs": (1212316, 867648, 2387656, 1576288),
+                    "monsters": (1502636, 2342616, 3946660, 5639704), "nodes": (2417100, 224924, 3813834, 369242),
+                    "sectors": (2678856, 831936, 6946742, 2377916), "segs": (1002846, 125142, 2263916, 685162),
+                    "things": (1314594, 1633618, 1657296, 2128242), "vpb": (7807874, 0, 14380082, 0)}
+    # the baked point location, assembled ALONE per map (plain words, inline): 49,922 a diagonal node + 5,722 an axis
+    # node - 322,457 (fit over E1M1..E1M9, within 1.2%); 0.83 of it in a blocked build, 0.437 of that main stream.
+    # PTLOC_SHARED: ~250K words in all. VPB_DIRECT: 2 + 2 (popcount(id) - 1) words a band-list id instead of ~35.7.
+    PTLOC_BLOCKED, PTLOC_MAIN = 0.83, 0.437
+    VPB_LISTS_PER_EST = 1.865          # band lists / (4 x viewz classes x plane pairs): E1M1 54,616, E1M2 134,328
+
+    def _size_drivers(self):
+        from doomfj.mapcompiler import bake_bsp
+        from doomfj.reference_model import ReferenceModel
+        from doomfj.things import single_player
+        rm = ReferenceModel(Config())
+        cmap = bake_bsp(self.wad, self.m)
+        th = [t for t in self.wad.things(self.m) if single_player(t)]
+        vz = len({rm.view_z(sc.floor_h) for sc in self.secs})
+        pairs = len({(sc.ceil_h, sc.floor_h, sc.light & 0xFF, sc.ceil_tex.upper(), sc.floor_tex.upper())
+                     for sc in self.secs})
+        diag = sum(1 for n in cmap.nodes if n.dx and n.dy)
+        return cmap, {"segs": len(self.wad.segs(self.m)), "linedefs": len(self.lds), "sectors": len(self.secs),
+                      "things": len(th), "monsters": sum(1 for t in th if t.type in gd.MONSTER_DOOMEDNUMS),
+                      "nodes": len(cmap.nodes), "vpb": round(self.VPB_LISTS_PER_EST * 4 * vz * pairs),
+                      "diag": diag, "axis": len(cmap.nodes) - diag}
+
+    # the two maps the drivers were measured on (their own counts, as _size_drivers computes them)
+    SIZE_AT = {"E1M1": {"segs": 2057, "linedefs": 1175, "sectors": 182, "things": 269, "monsters": 53, "nodes": 681,
+                        "vpb": 54428},
+               "E1M2": {"segs": 3650, "linedefs": 2290, "sectors": 380, "things": 330, "monsters": 129, "nodes": 1103,
+                        "vpb": 134989}}
+
+    def size_estimate(self, cfg=None):
+        """(main stream words, pool table words) of the map's game-tier blocked build -- an ESTIMATE (two built maps,
+        one driver per region) under the map's config (PTLOC_SHARED, VPB_DIRECT)"""
+        cfg = cfg or map_cfg(Config(), self.m)
+        _cmap, d = self._size_drivers()
+        a, b = self.SIZE_AT["E1M1"], self.SIZE_AT["E1M2"]
+        main = pool = 0.0
+        for name, (m1, p1, m2, p2) in self.SIZE_DRIVERS.items():
+            f = 0.0 if name == "const" else (d[name] - a[name]) / (b[name] - a[name])
+            main += max(0.0, m1 + (m2 - m1) * f)
+            pool += max(0.0, p1 + (p2 - p1) * f)
+        if cfg.VPB_DIRECT:
+            ids = d["vpb"]
+            main -= ids * 35.7 - sum(2 + 2 * max(0, bin(k).count("1") - 1) for k in range(ids))
+            main -= 1 << max(1, (ids - 1).bit_length())            # the clean table: one op a padded id, gone
+        if cfg.PTLOC_SHARED:
+            main += 125_000
+            pool += 125_000
+        else:
+            pt = self.PTLOC_BLOCKED * max(0, 49_922 * d["diag"] + 5_722 * d["axis"] - 322_457)
+            main += pt * self.PTLOC_MAIN
+            pool += pt * (1 - self.PTLOC_MAIN)
+        return main, pool
+
+    def _span_estimate(self):
+        """the 2^27-word HARD limit (the owner, 2026-10-19). Two layouts of the same estimate: (a) the shipped knobs --
+        the pool from --pool-base 0x80000000 (word 2^26), so the main stream must stay under 2^26 and the pool's span
+        under 2^26 more; spread 1's plain pool spans ~1.87x its tables (E1M2 r4: 56.46M for 30.15M); (b) the pool base
+        right after the main stream with BlockPool(pack=True) (build_blocked --pack-blocks, flipjump block-pack):
+        ~1.11x at spread 1 (E1M2's census: 33.37M), ~2.1x at spread 2 (64.12M)"""
+        main, pool = self.size_estimate()
+        lim, half = 1 << 27, 1 << 26
+        shipped = half + 1.87 * pool if main < half else None
+        packed1, packed2 = main * 1.01 + 1.11 * pool, main * 1.01 + 2.13 * pool
+        self.row("OK" if main < half else "WARN", "main stream: code + wflip chains (ESTIMATE by region drivers)",
+                 "%.1fM words" % (main / 1e6), "< 2^26 (--pool-base 0x80000000)",
+                 "" if main < half else "past the shipped pool base: move --pool-base above it (with --pack-blocks)")
+        best = "spread 2 packed" if packed2 <= lim else "spread 1 packed" if packed1 <= lim else "none fits"
+        self.row("OK" if packed1 <= 0.9 * lim else "WARN",
+                 "address span (ESTIMATE): shipped knobs / packed at spread 1 / spread 2",
+                 "%s / %.1f%% / %.1f%%" % ("n/a" if shipped is None else "%.1f%%" % (100 * shipped / lim),
+                                          100 * packed1 / lim, 100 * packed2 / lim),
+                 "<= 100% of 2^27 (WARN past 90%)", best)
+
     def _projection(self):
         """E1M2 (handoff-e1m2 7-8): the pool overflowed at spread 2 (134.6%) -- found by a build's PREFLIGHT -- and the
         assembly filled the machine (17.21 GB, 0.02 GB left). Both scale with the segs (E1M1 -> E1M2: segs x1.77, the
@@ -729,6 +810,7 @@ class Survey:
                  "spread 2 %.0f%%, spread 1 %.0f%%" % (100.0 * p2 / cap, 100.0 * p1 / cap), "<= 100%",
                  ("--spread %d" % (2 if p2 <= cap else 1)) if p1 <= cap else
                  "over the pool even at spread 1 (E1M2's lever): size work before any build")
+        self._span_estimate()
         ram = n * self.RAM_GB_PER_SEG
         self.row("OK" if ram <= self.RAM_GB_BUILT else "WARN",
                  "assembly peak RAM (ESTIMATE by segs from E1M2's 17.21 GB)", "%.1f GB" % ram,

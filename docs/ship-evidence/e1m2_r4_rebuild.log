@@ -203,3 +203,7 @@ pin-heat after the last assembly: {'hot_groups': 20, 'hot_groups_missing': 0, 'h
 blocked: 845,951 tables in 63,278 groups; declined 0; ungrouped 0
 total 7069s
 done in 7069s; labels at scratchpad/12m/atlas/e1m2_r4b.labels.tsv.gz
+
+sha256 of the build and the rebuild:
+9a112139f3d35db3f71a9b2c0fb57a9e383b342fd2d42e776e072b97fbb57f45  build/doom_e1m2_r4.fjm
+9a112139f3d35db3f71a9b2c0fb57a9e383b342fd2d42e776e072b97fbb57f45  build/doom_e1m2_r4b.fjm

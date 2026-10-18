@@ -958,7 +958,8 @@ class Oracle:
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
                views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
-               mobiles=None, card=None, removed=None, barrel_views=None, skill=None, view_drop=0) -> bytes:
+               mobiles=None, card=None, removed=None, barrel_views=None, skill=None, view_drop=0,
+               wall_scroll=0) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
@@ -977,7 +978,9 @@ class Oracle:
         fight F5 / die D4s at medium (the imp, slot 23) and die D5 at easy (the hard trio 21-23, and not slot 50).
         None keeps BOOT_SKILL's set.
         M7 P8a (V): `view_drop` -- the dying view's sink this frame (`MonsterPhase.view_drop`, map units, package A's
-        `render_wall_frame(view_drop=)`); 0 draws today's call unchanged (the keyword is not passed)."""
+        `render_wall_frame(view_drop=)`); 0 draws today's call unchanged (the keyword is not passed).
+        M8: `wall_scroll` -- the scrolling wall's slide this frame (`MonsterPhase.wall_scroll`, doomfj.scrollcode); 0
+        (E1M1, or a map without special 48) is not passed."""
         from doomfj.reference_model import SimState
         hidden = self.hidden if skill is None else self.hidden_at(skill)
         view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
@@ -989,6 +992,7 @@ class Oracle:
                                                mobiles=mobiles,                         # M7 P5
                                                thing_removed=removed, barrel_views=barrel_views,   # M7 P6
                                                **({"view_drop": view_drop} if view_drop else {}),   # M7 P8a
+                                               **({"wall_scroll": wall_scroll} if wall_scroll else {}),   # M8
                                                **self.RENDER_KW))
         # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
         return self.screen.frame(view, card=bool(hidden_extra) if card is None else bool(card), **(screen_kw or {}))

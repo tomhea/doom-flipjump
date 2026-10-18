@@ -158,7 +158,13 @@ def view_drop_kw(phase) -> dict:
     living frame after it) is drawn by today's call, keyword for keyword. EVERY game-tier gate's world render passes
     it, or `view_drop=` itself (tests/host/test_p8a_gates.py, static: rule 5)"""
     d = phase.view_drop() if phase is not None else 0
-    return {"view_drop": d} if d else {}
+    out = {"view_drop": d} if d else {}
+    # M8 (doomfj.scrollcode): and the scrolling wall's slide this frame (World.wall_scroll) -- {} on E1M1, so its
+    # gates' calls stay keyword for keyword what they were
+    sc = phase.wall_scroll() if phase is not None else 0
+    if sc:
+        out["wall_scroll"] = sc
+    return out
 
 
 class KnockTap:
@@ -328,6 +334,12 @@ class MonsterPhase:
         gate's render passes it (`probe.view_drop_kw`; tests/host/test_p8a_gates.py holds the call sites)"""
         from doomfj.world import player_sinks
         return self.world.ws.p_vdrop if player_sinks(self.world.player) else 0
+
+    def wall_scroll(self) -> int:
+        """M8: `render_wall_frame(wall_scroll=)` for this world frame -- the world's (World.wall_scroll: leveltime's low
+        byte on a scrolling map, else 0). EVERY game-tier gate's render passes it (`view_drop_kw`, or `wall_scroll=`;
+        tests/host/test_wall_scroll.py holds the call sites)"""
+        return self.world.wall_scroll()
 
     def knocks(self) -> bool:
         """the world's knockback is on (world.knockback_on) -- the player's knock move runs in `move`"""

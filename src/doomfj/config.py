@@ -234,6 +234,12 @@ class Config:
     # lines expand to nothing -- SPR_SLOT_CAP_ON -- and the oracle takes the old path). wall_renderer.check_slot_ids
     # holds it below SPR_THING_SLOTS and asks for it when the map's bound does not fit.
     SPR_SLOT_CAP: int = 0
+    # M8 (the special-48 simplification, owner rule "implement it if it costs <= +0.5%"): 1 = the segs of a scrolling
+    # wall line (doomfj.scrollcode.SCROLL_SPECIALS) slide their W1R pattern key by `leveltime & WALL_SCROLL_MASK` -- the
+    # game tier's visible form of DOOM's textureoffset += FRACUNIT a tic (a 1x1 W1R canvas has no texture u to move).
+    # A DELIBERATE APPROXIMATION: screen-space, not world-anchored, and the pattern jumps once every 256 frames when
+    # the low byte wraps. 0 (E1M1): nothing is emitted and the oracle takes the old path.
+    WALL_SCROLL: int = 0
 
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
@@ -298,7 +304,8 @@ GAME_CFG = Config(VIEW_ROWS=84)
 MAP_CONFIG = {
     # M8 F1.4: SPR_SLOT_CAP -- 305 drawable things over the skills, hard's 295 + 10 pool things + 54 droppers' drops
     # (> 255 slot ids: wall_renderer.check_slot_ids)
-    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255},
+    # M8: WALL_SCROLL -- lines 1254 and 1338 (COMPBLUE) are special 48, the scrolling wall (doomfj.scrollcode)
+    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "WALL_SCROLL": 1},
 }
 
 

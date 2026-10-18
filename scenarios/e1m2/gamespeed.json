@@ -1,0 +1,731 @@
+{
+ "map": "E1M2",
+ "fjm": "build/doom_e1m2_r3.fjm",
+ "sha16": "f18d00c66d211cab",
+ "labels": "scratchpad/12m/atlas/e1m2_r3.labels.tsv.gz",
+ "binary_ends": [
+  [
+   878,
+   -466
+  ],
+  [
+   470,
+   -535
+  ],
+  [
+   558,
+   -758
+  ],
+  [
+   820,
+   -642
+  ],
+  [
+   897,
+   -247
+  ],
+  [
+   911,
+   -399
+  ],
+  [
+   855,
+   -569
+  ],
+  [
+   641,
+   -510
+  ],
+  [
+   575,
+   -353
+  ],
+  [
+   691,
+   -556
+  ]
+ ],
+ "binary_doors": [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0
+ ],
+ "recorded_keys": {
+  "0": [
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   }
+  ],
+  "1": [
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true,
+    "turn_right": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true,
+    "turn_left": true
+   },
+   {
+    "forward": true
+   },
+   {
+    "forward": true
+   }
+  ]
+ },
+ "rule": "gamespeed_trail.py --record: written only on TRAIL PASS over the ten runs; gamespeed.py --selftest N6e holds --validate's ends and doors to these, N6g the planner's runs 0 and 1 to these keys"
+}

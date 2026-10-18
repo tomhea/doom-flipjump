@@ -187,7 +187,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # P10 (docs/gp-p10-plan.md): a game in progress (the main menu's RESUME) ...
                    frozenset({"g_live"}),
                    # ... and LEVEL COMPLETE's counters (doomfj.statcode)
-                   frozenset({"st_kill", "st_item", "st_secn", "st_secm"}))
+                   frozenset({"st_kill", "st_item", "st_secn", "st_secm"}),
+                   # M8 L4: the player's reactiontime after a teleport (doomfj.teleportcode; a map with a WR teleport)
+                   frozenset({"p_rct"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -686,7 +688,9 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     for name in ("lstate", "ldir", "lsub", "lreq"):
         cells[name] = Cell(name, "hex", 1, count=nlift)
     cells["lwait"] = Cell("lwait", "hex", WAIT_NIBBLES, count=nlift)
-    cells["fswitch"] = Cell("fswitch", "hex", 1)
+    # M8 F1.3: the fswitch VECTOR on a map in the wide layout (movers.fswitch_nibbles: each floor group's state, then
+    # its step timer, a nibble each -- read as a tuple, movers.MoverPhase's `switched`); E1M1's one nibble, an int
+    cells["fswitch"] = Cell("fswitch", "hex", 1, count=_fswitch_count())
     # M7 P3.1: the monsters' cells, `nmon` slots (monstercode.monster_decls, the schema's widths)
     if nmon:
         cells["mon_state"] = Cell("mon_state", "hex", 2, count=nmon)
@@ -762,6 +766,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
             cells[name] = Cell(name, "hex", width, count=nmon)
     cells["pj_z"] = Cell("pj_z", "hex", 4, count=FIREBALL_POOL)
     cells["bar_src"] = Cell("bar_src", "hex", 2, count=nbar)
+    cells["p_rct"] = Cell("p_rct", "hex", 2)          # M8 L4 (monsters.MonsterPhase.p8a_state: 0..18)
     return cells
 
 
@@ -790,6 +795,28 @@ def _idle_world():
         from doomfj.world import World
         _IDLE_WORLDS[wad, mapname] = World(WadFile.from_path(str(ROOT / wad)), mapname, monsters="idle")
     return _IDLE_WORLDS[wad, mapname]
+
+
+_FSWITCH: dict = {}
+
+
+def _fswitch_count() -> int:
+    """M8 F1.3: the counts map's fswitch nibbles (movers.fswitch_nibbles: 1 on E1M1, 2 x the floor groups on E1M2)"""
+    wad, mapname = _counts_map()
+    if (wad, mapname) not in _FSWITCH:
+        from doomfj import movers as MV
+        from doomfj.wad import WadFile
+        mw = WadFile.from_path(str(ROOT / wad))
+        _FSWITCH[wad, mapname] = MV.fswitch_nibbles(MV.floor_groups(mw.sectors(mapname), mw.linedefs(mapname),
+                                                                    mw.sidedefs(mapname)))
+    return _FSWITCH[wad, mapname]
+
+
+def _fswitch_zero():
+    """M8 F1.3: the fswitch cells at the level start, as `game_cells` reads them -- E1M1's one nibble 0, the wide
+    layout's vector of zeros"""
+    n = _fswitch_count()
+    return 0 if n == 1 else (0,) * n
 
 
 def _loot_counts() -> tuple:
@@ -905,7 +932,7 @@ class Oracle:
                 "lvdone": 0, "pusedn": 1,
                 # M7 P2b: every lift at its top, idle; the switch not fired
                 "lstate": (0,) * self.nlift, "ldir": (0,) * self.nlift, "lsub": (0,) * self.nlift,
-                "lwait": (0,) * self.nlift, "lreq": (0,) * self.nlift, "fswitch": 0}
+                "lwait": (0,) * self.nlift, "lreq": (0,) * self.nlift, "fswitch": _fswitch_zero()}
 
     def door_pose(self, dstate: tuple) -> dict:
         """cells that hold every door STILL at `dstate` for a frame: idle, no timer -- door_tic

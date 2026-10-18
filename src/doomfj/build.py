@@ -198,11 +198,15 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool, extra:
 
 
 def _map_persist(wad, mapname: str, on: bool) -> tuple:
-    """M8 F1.2: the map-dependent persisted names for a standalone, moving-things tier (monstermove.map_persist)"""
+    """M8 F1.2: the map-dependent persisted names for a standalone, moving-things tier (monstermove.map_persist).
+    M8 F4: + the map's new card cells (lootcode.map_persist: pcard_y / pcard_r, the game tier's loot; none on E1M1);
+    M8 L4: + the player's reactiontime on a map with a WR teleport (teleportcode.map_persist: `p_rct`)"""
     if not on:
         return ()
+    from doomfj.lootcode import map_persist as card_persist
     from doomfj.monstermove import map_persist
-    return map_persist(wad, mapname)
+    from doomfj.teleportcode import map_persist as _tele_persist
+    return map_persist(wad, mapname) + card_persist(wad, mapname) + _tele_persist(wad, mapname)
 
 
 def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
@@ -222,7 +226,8 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     names = (HUD_PERSIST + WEAPON_PERSIST + AIM_PERSIST + HURT_PERSIST + PROJ_PERSIST + LOOT_PERSIST + BARREL_PERSIST
              + STAT_PERSIST                                           # P10: the stats (statcode.decls)
              + p8a_persist())                                         # M7 P8a: the hooks at the game tier's modes
-    cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START)))
+    _cards = lootcode.hud_cards(map_wad, mapname)                    # M8 F4: the map's extra key icons' slots
+    cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START, cards=_cards), _cards), _cards)
             + WC.weapon_decls(WC.level_start(map_wad, mapname), WC.weapon_states(), WC.overlay_frames())
             + WC.weapon_const_decls() + aimcode.decls()
             + hurtcode.hurt_decls(hurtcode.level_start(World(map_wad, mapname)))   # M7 P5

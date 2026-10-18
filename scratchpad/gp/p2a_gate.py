@@ -2,6 +2,11 @@
 
     python scratchpad/gp/p2a_gate.py --fjm build/<new>.fjm --labels <its label table>
     python scratchpad/gp/p2a_gate.py --oracle-only          # the scenarios and controls, no binary
+    ... --map E1M2 (or DOOMFJ_MAP=E1M2)                       # M8: another map, its roles from gate_roles.py
+
+M8 (docs/level-pipeline.md 4): the doors, lifts, sectors and the card below are E1M1's ROLES (gate_roles.E1M1, the
+literals these scenarios always used); on another map they come from scenarios/<map>/gates.json (gate_targets.py),
+and a scenario whose role the map cannot host prints N/A with the generator's reason.
 
 Each scenario starts by POKING the game tier (the probe machinery b0_scenarios uses): at frame 0's
 start the world mode, the player's pose and -- where the scenario says -- the blue card; at every
@@ -48,8 +53,12 @@ for _q in (ROOT / "src", ROOT / "scratchpad" / "12m", ROOT / "scratchpad", HERE)
     if str(_q) not in sys.path:
         sys.path.insert(0, str(_q))
 
+if __name__ == "__main__":                       # M8: `--map E1Mn` before probe / gamespeed read their defaults
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg()
 import probe as P                                                            # noqa: E402
 import onewalk                                                               # noqa: E402
+import gate_roles                                                            # noqa: E402  (M8)
 from doomfj import doors as D                                                # noqa: E402
 from doomfj.doors import in_use_box_fixed                                    # noqa: E402
 from doomfj.fixedpoint import _signed                                        # noqa: E402
@@ -147,7 +156,7 @@ class Mirror:
             D.door_stride, D.door_stay = saved
             C.CombatMixin._touch = orig_touch
 
-    def run(self, pose, keys: list, pcard: int = 0) -> list:
+    def run(self, pose, keys: list, pcard: int = 0, fswitch=None) -> list:
         """-> per frame {"pose", "phase", "taken", "mode", "scr", "sel", "lvdone", "pusedn",
         "drawn"}: the state after the frame, and what it drew ("world", or the menu screen). The
         binary's order: the menu's state machine on the frame's events, then -- on a world frame,
@@ -172,6 +181,8 @@ class Mirror:
         mode, scr, sel, live = 0, 0, SKILLS.index(BOOT_MENU_SKILL), 1
         pusedn, lvdone = 1, 0                                  # baked: G_PlayerReborn's usedown
         mp, ms = self.mp, self.mp.initial()                    # M7 P2b: every lift at its top
+        if fswitch is not None:                                # M8 F1.3: the scenario's POKED fswitch vector (S15)
+            ms = (ms[0], ms[1], tuple(fswitch))
         # M7 P3.1: the idle monsters from the boot image's level start (doomfj.monsters)
         from doomfj.monsters import MonsterPhase
         from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
@@ -220,11 +231,18 @@ class Mirror:
                     # M7 P7 (P7-a): the tic-start latch; before P7 nothing kills the player, so 0
                     dead = mph.dead_latch() if mortal else 0
                     use = bool(kd.get("use"))
-                    has_blue = {"card": True, "no_card": False}.get(self.ctl)
+                    # M8 L2: the yellow and red keys (and a blue skull) the WORLD holds -- World._doors_phase's
+                    # player_can_open (monsters.door_keys_kw: {} on E1M1, whose player holds only the blue card)
+                    from doomfj.monsters import door_keys_kw
+                    keys_kw = door_keys_kw(mph if loots else None)
+                    has_blue = {"card": True, "no_card": False}.get(self.ctl, keys_kw.pop("has_blue", None))
                     alive = not dead or self.ctl == "dead_holds_door"
                     ph = dp.tic(ph, use and (not dead or self.ctl == "dead_uses"), st.x, st.y, has_blue=has_blue,
-                                others=mph.boxes(), player=alive)    # P3.2b; P7-c
+                                others=mph.boxes(), player=alive, **keys_kw)    # P3.2b; P7-c
+                    before_sw = ms[2]
                     ms = mp.tic(ms)                           # M7 P2b: the lifts after the doors
+                    if self.ctl == "floors_still":            # M8 F1.3's control: the floor groups never step
+                        ms = (ms[0], ms[1], before_sw)
                     if dead:                                  # P7-c: no use line, and the edge is not read
                         if self.ctl == "dead_exits" and use and any(in_use_box_fixed(b, st.x, st.y)
                                                                     for b in self.exits):
@@ -270,7 +288,9 @@ class Mirror:
                         taken |= ph[3] == 1 and pcard == 0
                     # M7 P8a (V): the walk-overs over the WALK's segment, then over the KNOCK's (the player's knock
                     # move after the walk: monsters.KNOCK_WALKOVERS, DOOM's P_TryMove) -- `walk_end` is None when no
-                    # knock move ran, and the walk's segment is then the whole move, as before P8a
+                    # knock move ran, and the walk's segment is then the whole move, as before P8a. M8 L4: on a map
+                    # with teleport lines, the segments the world's own move tested (`walk_segs`): a teleport's walk
+                    # up to its line, nothing from the jump
                     from doomfj.monsters import walkover_segments
                     for a_, b_ in walkover_segments(mph if loots else None, (st.x, st.y), (new.x, new.y)):
                         if self.ctl == "w1":       # every crossing presses; the bits still read fired
@@ -498,6 +518,186 @@ def _standing(dsim, xy, angle):
     return (x << 16, y << 16, angle)
 
 
+def two_cell_lines(dsim) -> list:
+    """M8 F1.3: [(linedef, lift sector, floor sector, floor group)] -- every two-sided line between a lift and a floor
+    group's sector (movers.MoverPhase's lifts and groups), in linedef order"""
+    mp = dsim.mp
+    lifts = set(mp.order)
+    gof = {si: g for g, grp in enumerate(mp.groups) for si in grp.sectors}
+    out = []
+    for li, ld in enumerate(dsim.lds):
+        if not (0 <= ld.front < len(dsim.sds) and 0 <= ld.back < len(dsim.sds)):
+            continue
+        a, b = dsim.sds[ld.front].sector, dsim.sds[ld.back].sector
+        for sl, sf in ((a, b), (b, a)):
+            if sl in lifts and sf in gof:
+                out.append((li, sl, sf, gof[sf]))
+    return out
+
+
+def two_cell_scenarios(dsim) -> list:
+    """M8 F1.3: per two-cell line, S14a -- the lift's trigger, then a walk toward a point 100 units off the line on the
+    lift's side (the line ahead) while the lift is down and the floor unlowered; S14b -- the floor group's own S1 box
+    (or W1 line), from its point nearest the line, facing it: the floor seen unlowered, lowering and lowered"""
+    import math
+    mp = dsim.mp
+    verts = dsim.mw.vertexes(dsim.mapname)
+    I, F, B, U = {}, {"forward": True}, {"back": True}, {"use": True}
+    out = []
+
+    def unit(dx, dy):
+        n = math.hypot(dx, dy)
+        return dx / n, dy / n
+
+    def standing(x, y, tx, ty):
+        x, y = int(round(x)), int(round(y))
+        return (x << 16, y << 16, bam(tx - x, ty - y)) if _ok(dsim, x << 16, y << 16) else None
+
+    def in_box_nearest(box, tx, ty):
+        x0, y0, x1, y1 = box
+        pts = sorted(((x, y) for x in range(x0 + 2, x1 - 1, 4) for y in range(y0 + 2, y1 - 1, 4)),
+                     key=lambda p: (p[0] - tx) ** 2 + (p[1] - ty) ** 2)
+        return next((p for p in (standing(x, y, tx, ty) for x, y in pts) if p), None)
+
+    for li, sl, sf, g in two_cell_lines(dsim):
+        ld = dsim.lds[li]
+        (ax, ay), (bx, by) = (verts[ld.v1].x, verts[ld.v1].y), (verts[ld.v2].x, verts[ld.v2].y)
+        mx, my = (ax + bx) / 2, (ay + by) / 2
+        nx, ny = unit(by - ay, -(bx - ax))                    # the FRONT side's normal (right of v1 -> v2)
+        if dsim.sds[ld.front].sector != sl:
+            nx, ny = -nx, -ny                                  # toward the lift's side
+        tx, ty = mx + 100 * nx, my + 100 * ny
+        kl, grp = mp.order.index(sl), mp.groups[g]
+        bottom, n = len(mp.stops[sl]) - 1, grp.n
+        look = {"line": li, "lift": sl, "floor": sf, "group": g}
+        # S14a: the lift down, the floor unlowered
+        got = None
+        for trig in (t for t in mp.walk if t[0] == sl):
+            _s, axis, c, lo, hi = trig
+            px, py = ((c, (lo + hi) / 2) if axis == "x" else ((lo + hi) / 2, c))
+            ux, uy = unit(tx - px, ty - py)
+            pose = standing(px + 32 * ux, py + 32 * uy, tx, ty)
+            if pose:
+                steps = max(4, round(math.hypot(tx - px, ty - py) * 0.55 / 16))
+                got = (pose, [B] * 3 + [F] * steps + [I] * 24, "no_wr")
+                break
+        for tag, box in (() if got else mp.use):
+            if tag == dsim.secs[sl].tag:
+                pose = in_box_nearest(box, tx, ty)
+                if pose:
+                    got = (pose, [I, U] + [F] * 4 + [I] * 24, "no_use_lines")
+                    break
+        if got is None:
+            out.append(na("S14a two-cell line %d: lift %d down, floor %d unlowered" % (li, sl, sf),
+                          "no trigger pose for lift %d" % sl))
+        else:
+            out.append({
+                "name": "S14a two-cell line %d (lift %d / floor %d): in view with the lift down, the floor unlowered"
+                        % (li, sl, sf),
+                "pose": got[0], "keys": got[1], "pcard": 0, "controls": [got[2]], "look": dict(look, want="down"),
+                "claim": lambda tr, kl=kl, bottom=bottom, g=g: any(
+                    fr["movers"][0][kl][0] == bottom and fr["movers"][2][g] == 0 for fr in tr)})
+        # S14b: the floor group fired -- seen unlowered, then lowered
+        got = None
+        for gg, box in mp.floor_use:
+            if gg == g:
+                pose = in_box_nearest(box, mx, my)
+                if pose:
+                    got = (pose, [I, U] + [F] * 4 + [I] * (max(grp.sub, 1) * n + 4), "no_use_lines")
+                    break
+        for gg, shape in (() if got else mp.floor_walk):
+            if gg == g and shape[0] != "d":
+                _a, c, lo, hi = shape
+                px, py = ((c, (lo + hi) / 2) if shape[0] == "x" else ((lo + hi) / 2, c))
+                ux, uy = unit(px - mx, py - my)
+                pose = standing(px + 32 * ux, py + 32 * uy, mx, my)
+                if pose:
+                    got = (pose, [F] * 4 + [I] * (max(grp.sub, 1) * n + 4), "no_wr")
+                    break
+        if got is None:
+            out.append(na("S14b two-cell line %d: floor %d lowered" % (li, sf), "no trigger pose for floor group %d" % g))
+        else:
+            out.append({
+                "name": "S14b two-cell line %d (lift %d / floor %d): in view with the floor unlowered, then lowered"
+                        % (li, sl, sf),
+                "pose": got[0], "keys": got[1], "pcard": 0, "controls": [got[2]], "look": dict(look, want="lowered"),
+                "claim": lambda tr, g=g, n=n: tr[0]["movers"][2][g] == 0 and tr[-1]["movers"][2][g] == n - 1})
+    return out
+
+
+def closed_moving_lines(dsim) -> list:
+    """M8 F1.3 (CR of #146): [(linedef, moving sector, static sector, floor group)] -- every two-sided line between a
+    floor group's sector and a static sector whose floor equals its ceiling: SHUT AT EVERY STATE of the group (the
+    moving floor lowers onto the static side's closed height), which the renderer must draw solid at every state
+    (wall_renderer `_seg_closed_moving`; E1M2's 2033 / 2062 on tag 10 and 2050 / 2075 on tag 41)"""
+    mp = dsim.mp
+    gof = {si: g for g, grp in enumerate(mp.groups) for si in grp.sectors}
+    movers = set(gof) | set(mp.order)
+    out = []
+    for li, ld in enumerate(dsim.lds):
+        if not (0 <= ld.front < len(dsim.sds) and 0 <= ld.back < len(dsim.sds)):
+            continue
+        a, b = dsim.sds[ld.front].sector, dsim.sds[ld.back].sector
+        for sm, sc_ in ((a, b), (b, a)):
+            st = dsim.secs[sc_]
+            if sm in gof and sc_ not in movers and st.floor_h == st.ceil_h:
+                g = gof[sm]
+                grp = mp.groups[g]
+                if all(min(dsim.secs[sm].ceil_h, st.ceil_h) <= max(grp.floor(sm, k), st.floor_h) for k in range(grp.n)):
+                    out.append((li, sm, sc_, g))
+    return out
+
+
+def closed_moving_scenarios(dsim) -> list:
+    """M8 F1.3 (CR of #146): S15 per floor group with a line shut at every state -- the group FIRED BY A POKE of the
+    fswitch vector at frame 0 (its state 0, its step timer set: `movers.floor_trigger`, what its W1 / S1 line sets),
+    the player standing beyond the moving sector along the line's normal, facing the line: the moving floor seen
+    lowering (frames mid-way) and lowered, the line drawn SOLID throughout (r2 drew it see-through). The first line of
+    the group (linedef order) with a standing pose; `look` -- mirror_world_check.py toggles the line's solidity in the
+    oracle and requires the pixels to change on lowering and lowered frames."""
+    import math
+    from doomfj.movers import floor_trigger
+    mp = dsim.mp
+    verts = dsim.mw.vertexes(dsim.mapname)
+    ng = len(mp.groups)
+    out, done = [], set()
+    for li, sm, sc_, g in closed_moving_lines(dsim):
+        if g in done:
+            continue
+        ld, grp = dsim.lds[li], mp.groups[g]
+        (ax, ay), (bx, by) = (verts[ld.v1].x, verts[ld.v1].y), (verts[ld.v2].x, verts[ld.v2].y)
+        mx, my = (ax + bx) / 2, (ay + by) / 2
+        nx, ny = by - ay, -(bx - ax)                               # the FRONT side's normal (right of v1 -> v2)
+        n = math.hypot(nx, ny)
+        nx, ny = nx / n, ny / n
+        if dsim.sds[ld.front].sector != sm:
+            nx, ny = -nx, -ny                                      # toward the moving sector
+        reach = max((v.x - mx) * nx + (v.y - my) * ny for l2 in dsim.lds
+                    for s in (l2.front, l2.back) if 0 <= s < len(dsim.sds) and dsim.sds[s].sector == sm
+                    for v in (verts[l2.v1], verts[l2.v2]))
+        pose = None
+        for back in (48, 64, 96, 128, 32):
+            x, y = int(round(mx + (reach + back) * nx)), int(round(my + (reach + back) * ny))
+            if _ok(dsim, x << 16, y << 16):
+                pose = (x << 16, y << 16, bam(mx - x, my - y))
+                break
+        if pose is None:
+            continue
+        done.add(g)
+        fs = [(0, 0)] * ng
+        fs[g] = floor_trigger(0, 0, grp.sub)
+        vec = tuple(s for s, _u in fs) + tuple(u for _s, u in fs)
+        out.append({
+            "name": "S15 closed line %d (moving %d / shut %d, floor group %d tag %d): solid while the floor lowers"
+                    % (li, sm, sc_, g, grp.tag),
+            "pose": pose, "keys": [{}] * (max(grp.sub, 1) * grp.n + 8), "pcard": 0, "fswitch": vec,
+            "controls": ["floors_still"], "look": {"kind": "closed", "line": li, "moving": sm, "static": sc_,
+                                                   "group": g, "want": "lowering"},
+            "claim": lambda tr, g=g, n=grp.n: tr[0]["movers"][2][g] == 0 and tr[-1]["movers"][2][g] == n - 1
+            and any(0 < fr["movers"][2][g] < n - 1 for fr in tr)})
+    return out
+
+
 def _in_box(dsim, box):
     """a standing pose inside a use box, nearest its centre"""
     x0, y0, x1, y1 = box
@@ -532,38 +732,74 @@ def _strides(tr, si: int, nstates: int) -> bool:
     return max(st) == nstates - 1 and st[-1] == 0 and full and len(moves) >= 2
 
 
+def na(name: str, reason: str) -> dict:
+    """M8: a scenario this map cannot host -- printed N/A with the reason, never run"""
+    return {"name": name, "na": reason}
+
+
 def scenarios(dsim, card) -> list:
+    """the scenarios, placed from the map by its ROLES (gate_roles: E1M1's literals, or the map's generated file)"""
+    R = gate_roles.roles(dsim.mapname)
     kinds = dsim.dp.kinds
-    blue = 71
-    assert kinds[blue] == "blue", kinds[blue]
-    blaze = [si for si, k in kinds.items() if k == "blaze"]
-    assert blaze == [84], blaze
     trig = {t[0]: t for t in dsim.dp.triggers}
-    assert sorted(trig) == [77, 145], trig
     n = dsim.nstates
     F, B, U, I = {"forward": True}, {"back": True}, {"use": True}, {}
-    out = [
-        {"name": "S1 blue door 71, no card: stays shut", "pose": door_front(dsim, blue),
-         "keys": [U] * 3 + [I] * 12, "pcard": 0, "controls": ["card"],
-         "claim": lambda tr: all(fr["phase"][0][blue][0] == 0 for fr in tr)},
-        {"name": "S2 onto the card: taken, gone from the picture", "pose": card_pose(dsim, card),
-         "keys": [F] * 4 + [I] * 2, "pcard": 0, "controls": ["no_card"],
-         "claim": lambda tr: tr[-1]["phase"][3] == 1 and tr[-1]["taken"]},
-        {"name": "S3 blue door 71 with the card: opens", "pose": door_front(dsim, blue),
-         "keys": [U] * 3 + [I] * (D.SPEED * n[blue] + 2), "pcard": 1, "controls": ["no_card"],
-         "claim": lambda tr: tr[-1]["phase"][0][blue][0] == n[blue] - 1},
-        {"name": "S4 from sector 124 in the card's box: out of reach", "pose": below_card_pose(dsim, card),
-         "keys": [F] * 3, "pcard": 0, "controls": ["reach"],
-         "claim": lambda tr: all(fr["phase"][3] == 0 for fr in tr)},
-        {"name": "S5 blazing door 84: opens and closes in strides", "pose": door_front(dsim, 84),
-         "keys": [U] * 2 + [I] * (D.WAIT + 10), "pcard": 0, "controls": ["stride"],
-         "claim": lambda tr: _strides(tr, 84, n[84])},
-    ]
-    for si, tag in ((77, 5), (145, 6)):
+    out = []
+    if R.na("blue_door") or card is None:
+        why = R.na("blue_door") or "the map has no blue card"
+        out += [na("S1 a blue door, no card: stays shut", why), na("S3 a blue door with the card: opens", why)]
+    else:
+        blue = R["blue_door"]
+        assert kinds[blue] == "blue", (blue, kinds[blue])
+        out += [
+            {"name": "S1 blue door %d, no card: stays shut" % blue, "pose": door_front(dsim, blue),
+             "keys": [U] * 3 + [I] * 12, "pcard": 0, "controls": ["card"],
+             "claim": lambda tr: all(fr["phase"][0][blue][0] == 0 for fr in tr)},
+            {"name": "S3 blue door %d with the card: opens" % blue, "pose": door_front(dsim, blue),
+             "keys": [U] * 3 + [I] * (D.SPEED * n[blue] + 2), "pcard": 1, "controls": ["no_card"],
+             "claim": lambda tr: tr[-1]["phase"][0][blue][0] == n[blue] - 1}]
+    # S2: onto the card -- its platform pose (card_pose), or (M8) the map's `card_pose` role where the platform has no
+    # pose 48 units off the card
+    if card is None or R.na("card_pose") and "card_pose" in R.na_reasons:
+        out.append(na("S2 onto the card: taken", R.na_reasons.get("card_pose", "the map has no blue card")))
+    else:
+        out.append(
+            {"name": "S2 onto the card: taken, gone from the picture",
+             "pose": tuple(R["card_pose"]) if "card_pose" in R else card_pose(dsim, card),
+             "keys": [F] * 4 + [I] * 2, "pcard": 0, "controls": ["no_card"],
+             "claim": lambda tr: tr[-1]["phase"][3] == 1 and tr[-1]["taken"]})
+    # M8: the other colours' doors -- the scenarios S1 / S3 once the model has their kind (M8 F2) and the gate a
+    # key-card control for them; until then N/A, named, so a map's report shows what is not checked
+    for colour in ("yellow", "red"):
+        why = R.na(colour + "_door") or ("door %s: the gate has no %s-card scenario yet (M8 F2 adds the kind)"
+                                         % (R[colour + "_door"], colour))
+        out.append(na("S1%s / S3%s a %s door" % (colour[0], colour[0], colour), why))
+    if R.na("below_card_sector") or card is None:
+        out.append(na("S4 below the card: out of reach", R.na("below_card_sector") or "the map has no blue card"))
+    else:
+        below = R["below_card_sector"]
+        out.append(
+            {"name": "S4 from sector %d in the card's box: out of reach" % below,
+             "pose": below_card_pose(dsim, card, below),
+             "keys": [F] * 3, "pcard": 0, "controls": ["reach"],
+             "claim": lambda tr: all(fr["phase"][3] == 0 for fr in tr)})
+    if R.na("blaze_door"):
+        out.append(na("S5 a blazing door: opens and closes in strides", R.na("blaze_door")))
+    else:
+        blaze_si = R["blaze_door"]
+        assert kinds[blaze_si] == "blaze", (blaze_si, kinds[blaze_si])
+        out.append(
+            {"name": "S5 blazing door %d: opens and closes in strides" % blaze_si, "pose": door_front(dsim, blaze_si),
+             "keys": [U] * 2 + [I] * (D.WAIT + 10), "pcard": 0, "controls": ["stride"],
+             "claim": lambda tr: _strides(tr, blaze_si, n[blaze_si])})
+    walk = [tuple(x) for x in R.get("walkovers") or ()]
+    if not walk:
+        out.append(na("S6 over a walk-over trigger", R.na("walkovers") or "the map has no walk-over door"))
+    for k, (si, tag) in enumerate(walk):
         t = trig[si]
         stay = D.SPEED * (n[si] - 1) + D.WAIT + 8
-        out.append({"name": "S%d over tag %d's trigger: door %d opens, stays; back over: nothing"
-                            % (6 if si == 77 else 7, tag, si),
+        out.append({"name": "S%s over tag %d's trigger: door %d opens, stays; back over: nothing"
+                            % ("6" if k == 0 else "7" if k == 1 else "7" + chr(ord("a") + k - 1), tag, si),
                     # M7 P6: back over AT ONCE, then the wait -- once the player is blocked by things, a zombie
                     # woken by the wait (S6's, 40 units south of the pose) stands on the way back
                     "pose": trigger_pose(dsim, t), "keys": [F] * 5 + [B] * 5 + [I] * stay + [I] * 3,
@@ -572,44 +808,91 @@ def scenarios(dsim, card) -> list:
                     and sum(1 for fr in tr if si in fr["phase"][2]) == 1})
     F_ = {"forward": True}
     # ---- M7 P2b: the movers --------------------------------------------------------------------------
-    k98, k103 = dsim.mp.order.index(98), dsim.mp.order.index(103)
 
-    def ride(tr, k):
-        # it reaches the bottom (9) and is back at the top (0) after it -- M7 P6+P7: not "at the top on the last frame":
-        # at the monsters' tempo x2 a monster crosses lift 103's WR line at frame 48 of S10 and starts a second ride
-        st = [fr["movers"][0][k][0] for fr in tr]
-        return max(st) == 9 and 0 in st[st.index(9) + 1:]
+    bots = [len(dsim.mp.stops[si]) - 1 for si in dsim.mp.order]
+    if all(b == 9 for b in bots):                    # E1M1's lifts (10 stops each): the claim as it always read
 
-    out.append({
-        "name": "S9 over lift 98's WR line: it rides down, waits, comes back up",
-        "pose": _standing(dsim, (40, 256), 0), "keys": [F_] * 3 + [I] * 50, "pcard": 0,
-        "controls": ["no_wr"], "claim": lambda tr: ride(tr, k98)})
-    sr = [b for t, b in dsim.mp.use if t == 2]
-    out.append({
-        "name": "S10 an SR press at lift 103: it rides",
-        "pose": _in_box(dsim, sr[0]), "keys": [I, U] + [I] * 50, "pcard": 0,
-        "controls": ["no_use_lines"], "claim": lambda tr: ride(tr, k103)})
-    out.append({
-        "name": "S11 the floor switch: a press lowers the pillars at once",
-        "pose": _in_box(dsim, dsim.mp.switch_boxes[0]), "keys": [I, U, I, I], "pcard": 0,
-        "controls": ["no_use_lines"],
-        "claim": lambda tr: [fr["movers"][2] for fr in tr] == [0, 1, 1, 1]
-        and tr[1]["mheights"][129][0] == 136})
-    out.append({
-        "name": "S12 NEW GAME puts a riding lift back",
-        "pose": _standing(dsim, (40, 256), 0),
-        # P10: esc opens the menu on RESUME -- down to NEW GAME, enter (the skill screen), enter
-        "keys": [F_] * 3 + [I] * 4 + [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
-        + [I] * 3, "pcard": 0, "controls": ["restart_movers"],
-        "claim": lambda tr: tr[6]["movers"][0][k98][0] > 0 and tr[-1]["movers"][0][k98][0] == 0})
-    p10 = dsim.passes[10]
-    out.append({
-        "name": "S13 standing in door 10 as it closes: it goes back up at its pass state",
-        "pose": door_front(dsim, 10), "keys": [U] * 2 + [I] * 8 + [F] * 3 + [I] * 70, "pcard": 0,
-        "controls": ["no_reversal"],
-        "claim": lambda tr: min(fr["phase"][0][10][0] for fr in tr[12:]) == p10
-        and any(a["phase"][0][10][1] == D.CLOSING and b["phase"][0][10][1] == D.OPENING
-                for a, b in zip(tr, tr[1:]))})
+        def ride(tr, k):
+            # it reaches the bottom (9) and is back at the top (0) after it -- M7 P6+P7: not "at the top on the last
+            # frame": at the monsters' tempo x2 a monster crosses lift 103's WR line at frame 48 of S10 and starts a
+            # second ride
+            st = [fr["movers"][0][k][0] for fr in tr]
+            return max(st) == 9 and 0 in st[st.index(9) + 1:]
+    else:                                            # M8: a lift's bottom is its own last stop (E1M2's lift 44: 7)
+
+        def ride(tr, k):
+            st = [fr["movers"][0][k][0] for fr in tr]
+            return max(st) == bots[k] and 0 in st[st.index(bots[k]) + 1:]
+
+    if R.na("wr_lift"):
+        out += [na("S9 over a lift's WR line: it rides", R.na("wr_lift")),
+                na("S12 NEW GAME puts a riding lift back", R.na("wr_lift"))]
+    else:
+        wr = R["wr_lift"]
+        k98 = dsim.mp.order.index(wr["sector"])
+        wr_xy, wr_a = (wr["pose"][0], wr["pose"][1]), wr["pose"][2]
+        out.append({
+            "name": "S9 over lift %d's WR line: it rides down, waits, comes back up" % wr["sector"],
+            "pose": _standing(dsim, wr_xy, wr_a), "keys": [F_] * 3 + [I] * 50, "pcard": 0,
+            "controls": ["no_wr"], "claim": lambda tr: ride(tr, k98)})
+    if R.na("sr_lift"):
+        out.append(na("S10 an SR press at a lift: it rides", R.na("sr_lift")))
+    else:
+        srl = R["sr_lift"]
+        k103 = dsim.mp.order.index(srl["sector"])
+        sr = [b for t, b in dsim.mp.use if t == srl["tag"]]
+        out.append({
+            "name": "S10 an SR press at lift %d: it rides" % srl["sector"],
+            "pose": _in_box(dsim, sr[0]), "keys": [I, U] + [I] * 50, "pcard": 0,
+            "controls": ["no_use_lines"], "claim": lambda tr: ride(tr, k103)})
+    if R.na("floor_switch"):
+        out.append(na("S11 the floor switch: a press lowers the pillars at once", R.na("floor_switch")))
+    else:
+        fs = R["floor_switch"]
+        fs_sec, fs_low = fs["sector"], fs["lowered"]
+        if dsim.mp.wide:
+            # M8 F1.3: the WIDE layout's switch is the fswitch VECTOR (movers.MoverPhase: each floor group's state, then
+            # each group's step timer) -- the claim reads the state of the switch sector's own group
+            g_fs = next(g for g, grp in enumerate(dsim.mp.groups) if fs_sec in grp.sectors)
+            s11 = lambda tr: [fr["movers"][2][g_fs] for fr in tr] == [0, 1, 1, 1] \
+                and tr[1]["mheights"][fs_sec][0] == fs_low                                          # noqa: E731
+        else:
+            s11 = lambda tr: [fr["movers"][2] for fr in tr] == [0, 1, 1, 1] \
+                and tr[1]["mheights"][fs_sec][0] == fs_low                                          # noqa: E731
+        out.append({
+            "name": "S11 the floor switch: a press lowers the pillars at once",
+            "pose": _in_box(dsim, dsim.mp.switch_boxes[fs["box"]]), "keys": [I, U, I, I], "pcard": 0,
+            "controls": ["no_use_lines"],
+            "claim": s11})
+    if not R.na("wr_lift"):
+        out.append({
+            "name": "S12 NEW GAME puts a riding lift back",
+            "pose": _standing(dsim, wr_xy, wr_a),
+            # P10: esc opens the menu on RESUME -- down to NEW GAME, enter (the skill screen), enter
+            "keys": [F_] * 3 + [I] * 4 + [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]},
+                                          {"menu": ["enter"]}]
+            + [I] * 3, "pcard": 0, "controls": ["restart_movers"],
+            "claim": lambda tr: tr[6]["movers"][0][k98][0] > 0 and tr[-1]["movers"][0][k98][0] == 0})
+    if R.na("reversal_door"):
+        out.append(na("S13 standing in a door as it closes: it goes back up", R.na("reversal_door")))
+    else:
+        rev = R["reversal_door"]
+        p10 = dsim.passes[rev]
+        out.append({
+            "name": "S13 standing in door %d as it closes: it goes back up at its pass state" % rev,
+            "pose": door_front(dsim, rev), "keys": [U] * 2 + [I] * 8 + [F] * 3 + [I] * 70, "pcard": 0,
+            "controls": ["no_reversal"],
+            "claim": lambda tr: min(fr["phase"][0][rev][0] for fr in tr[12:]) == p10
+            and any(a["phase"][0][rev][1] == D.CLOSING and b["phase"][0][rev][1] == D.OPENING
+                    for a, b in zip(tr, tr[1:]))})
+    # M8 F1.3: a TWO-CELL LINE -- a lift on one side, a floor group's sector on the other (E1M2's linedef 1199: lift 47
+    # / floor 206) -- whose seg the renderer draws from the floor's cell (wall_renderer `_seg_dual_cell`: solid while
+    # the floor is at state 0, whatever the lift's state). The picture must SEE it with the floor unlowered and the
+    # lift down, and again with the floor lowered (each scenario's `look`: mirror_world_check.py renders those frames
+    # and proves the line's sector in view). Only a map in the wide floor layout has one (E1M1: none, its list as was)
+    if dsim.mp.wide:
+        out += two_cell_scenarios(dsim)
+        out += closed_moving_scenarios(dsim)
     # P10: LEVEL COMPLETE holds eight frames (an enter among them ignored), then any key leaves for the boot's menu
     # (no game in progress: esc there is no rule, and the frozen world is never drawn again -- P2a.2's "frozen"
     # control parted on the frozen world's frame, which no play reaches now), and NEW GAME starts the level over
@@ -656,23 +939,31 @@ def main(argv=None) -> int:
     dsim = onewalk.DoorSim()
     assert dsim.order == orc.door_order
     card = dsim.dp.card_at
-    assert card == (2192, 576, 136), card
+    R = gate_roles.roles(dsim.mapname)                   # M8: the map's roles
+    assert card == (tuple(R["cards"]["blue"]) if "blue" in (R.get("cards") or {}) else None), (card, R.get("cards"))
     card_di = [di for di, t in enumerate(drawable_things(orc.rm, orc.mw.things(orc.mapname), orc.art)[0])
                if t.type == CARD_TYPE]
-    assert len(card_di) == 1, card_di
+    assert len(card_di) == (1 if card else 0), card_di
+    card_di = card_di or [-1]
     scen = scenarios(dsim, card)
     ok = True
-    print("P2A GATE -- %d scenarios (MONSTER_MODE %s, PLAYER_MODE %s)%s"
-          % (len(scen), MONSTER_MODE, orc.player_mode, "" if a.oracle_only else ", %s" % a.fjm))
+    print("P2A GATE -- %d scenarios (MONSTER_MODE %s, PLAYER_MODE %s) on %s, roles from %s%s"
+          % (len(scen), MONSTER_MODE, orc.player_mode, dsim.mapname, R.source,
+             "" if a.oracle_only else ", %s" % a.fjm))
     if not a.oracle_only:
         gb = P.GameBinary(ROOT / a.fjm)
         cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
         table = P.LabelTable.load(ROOT / a.labels, {c.label for c in cells.values()})
         assert not table.absent & {"dreq", "pcard", "wfired"}, (
             "the label table has no %s: a binary before P2a.1" % sorted(table.absent))
+    nas = []
     for sc in scen:
+        if sc.get("na"):                                  # M8: a role this map cannot host
+            nas.append(sc["name"])
+            print("\n%s -- N/A: %s" % (sc["name"], sc["na"]))
+            continue
         mirror = hooked(Mirror(dsim, card_di[0]), orc, dsim, card_di[0])
-        want = mirror.run(sc["pose"], sc["keys"], sc["pcard"])
+        want = mirror.run(sc["pose"], sc["keys"], sc["pcard"], fswitch=sc.get("fswitch"))
         claim = bool(sc["claim"](want))
         ok &= claim
         print("\n%s -- %d frames from (%.0f, %.0f) angle %08x%s" % (
@@ -681,7 +972,7 @@ def main(argv=None) -> int:
         print("  the oracle does what the scenario claims: %s" % ("yes" if claim else "NO -- FAIL"))
         for ctl in sc["controls"]:
             alt = hooked(Mirror(dsim, card_di[0], ctl), orc, dsim, card_di[0]).run(sc["pose"], sc["keys"],
-                                                                               sc["pcard"])
+                                                                               sc["pcard"], fswitch=sc.get("fswitch"))
             part = next((f for f, (x, y) in enumerate(zip(want, alt))
                          if expected_cells(x, dsim.order, dsim.mp.order)
                          != expected_cells(y, dsim.order, dsim.mp.order)), None)
@@ -699,6 +990,8 @@ def main(argv=None) -> int:
                 vals.update({"mode": 0, "g_live": 1, "viewx": _signed(sc["pose"][0], 32),          # P10: g_live
                              "viewy": _signed(sc["pose"][1], 32), "viewangle": sc["pose"][2],
                              "pcard": sc["pcard"]})
+                if sc.get("fswitch") is not None:            # M8 F1.3 (S15): a floor group fired by a POKE
+                    vals["fswitch"] = tuple(sc["fswitch"])
             pr.write_cells(vals)
         p.on_frame_start(start)
         # every cell the probe holds (P.game_cells: each later rung's group joins there), not READ alone -- READ was
@@ -727,6 +1020,8 @@ def main(argv=None) -> int:
             "exact on every frame" if s_bad is None else "PART at frame %d: %s" % s_bad,
             "byte-exact on every frame" if x_bad is None else "PART at frame %d (%d px)" % x_bad,
             "exact on every frame" if p_bad is None else "PART at frame %d (the oracle's PLAYPAL %d)" % p_bad))
+    if nas:
+        print("\nN/A on %s: %d -- %s" % (dsim.mapname, len(nas), "; ".join(nas)))
     print("\nP2A GATE %s (%.0f s)" % ("PASS" if ok else "FAIL", time.time() - t0))
     return 0 if ok else 1
 

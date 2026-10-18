@@ -60,6 +60,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
+if __name__ == "__main__":          # M8 (CR of #146): `--map E1Mn` before probe / gamespeed read their defaults
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg(keep=True)         # keep: this gate's own parser takes --map too
 
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.doors import door_states, initial_states, walkover_triggers   # noqa: E402
@@ -174,8 +177,10 @@ def main():
     ap.add_argument("--labels", default=None,
                     help="the build's label table (build_labeled.py --labels) -- the state check "
                          "reads the persisted cells through it; the gate refuses to run without it")
-    ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
-    ap.add_argument("--map", default="E1M1")
+    # M8: the map from doomfj.mapprofile (DOOMFJ_MAP / --map; E1M1 when unset), its fixture wad unless --wad names one
+    from doomfj.mapprofile import ACTIVE, profile
+    ap.add_argument("--wad", default=None, help="default: the map's fixture (mapprofile)")
+    ap.add_argument("--map", default=ACTIVE)
     ap.add_argument("--asset", default="assets/freedoom1.wad")
     ap.add_argument("--selftest", action="store_true",
                     help="R9: claim every frame is a world frame; the gate must FAIL")
@@ -192,6 +197,8 @@ def main():
                     help="R9 (M7 P3.4): the oracle closes the world's help to the MAIN MENU; the "
                          "gate must FAIL at frame %d" % HELP_CLOSED_TO_WORLD)
     args = ap.parse_args()
+    args.map = args.map.upper()
+    args.wad = args.wad or profile(args.map).wad
 
     mw = WadFile.from_path(str(ROOT / args.wad))
     art = WadFile.from_path(str(ROOT / args.asset))
@@ -248,7 +255,8 @@ def main():
     deaths = 0                                      # M7 P7: frames the mirror's player was dead (this walk: none)
     causes = []                                     # P9: how the run ended -- the halt is LOOPING
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES + 2,
-                                            len(order), nwalk, nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
+                                            len(order), nwalk, nlift=len(mph.world.lift_order),  # M8: the map's
+                                            nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
                                             palettes_out=pals, nthvis=mviews.nvis if loot else 0,
                                             cause_out=causes)
     # M7 P3.2b: the monsters step inside this gate's fixed world -- its doors shut and idle, every lift at its top;
@@ -404,6 +412,18 @@ def main():
     # the three NEW GAME frames as the oracle drew them -- distinct only if the skills can be TOLD
     # APART at the spawn, which is what makes "each frame is byte-exact" mean "each is its skill's"
     told = len(oracle_ng) == len(NEW_GAMES) and len(set(oracle_ng.values())) == len(NEW_GAMES)
+    # M8 (E1M2: nothing that differs by skill is in view at the spawn -- every skill's NEW GAME frame is the same
+    # picture): the skills are told apart by the BINARY'S OWN skill cell instead -- `g_skill` read at each NEW GAME frame
+    # must be that frame's skill, and the three pairwise distinct. E1M1 tells them apart by the picture, as before.
+    told_by = "the picture" if told else None
+    if not told:
+        _gs = [(reads[f] or {}).get("g_skill") if f < len(reads) else None for f in NEW_GAMES]
+        if (None not in _gs and _gs == [SKILLS.index(rows[f]["skill"]) for f in NEW_GAMES]   # the cell: SKILLS.index
+                and len(set(_gs)) == len(NEW_GAMES)):
+            told, told_by = True, "the binary's g_skill cell %s" % _gs
+        else:
+            told_by = "neither: the pictures are equal and g_skill read %s at the NEW GAME frames (want %s)" % (
+                _gs, [SKILLS.index(rows[f]["skill"]) for f in NEW_GAMES])
     print("")
     print("  CONTROL: menu frames %d, world frames %d, frames that moved the player %d"
           % (menus, worlds, moved))
@@ -426,8 +446,8 @@ def main():
                                   "yes" if help_both_ways else "!! no"))
     print("  CONTROL: the first NEW GAME found the player walked away (%s), and every NEW GAME "
           "frame is the spawn view (%s)" % ("yes" if walked else "!! no", "yes" if reset else "!! no"))
-    print("  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: %s"
-          % ("yes" if told else "!! no -- the skills cannot be told apart here"))
+    print("  CONTROL: the three skills' NEW GAME frames are told apart: %s"
+          % (("yes, by " + told_by) if told else "!! no -- the skills cannot be told apart here: %s" % told_by))
     print("  CONTROL: distinct pictures: %d of %d" % (len(set(got[:FRAMES])), min(len(got), FRAMES)))
     print("  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, g_live, every door's cells) "
           "equals the oracle's: %s"

@@ -3,6 +3,7 @@
     python scratchpad/gp/b0_scenarios.py [--file scratchpad/gp/scenarios/combat_scenarios_v2.json]
                                          [--pixel-every N] [--json OUT] [--proxy]
     python scratchpad/gp/b0_scenarios.py --selftest
+    M8: the set's "map" picks the map (scenarios_map.use_doc + game_oracle): an E1M2 set runs on E1M2 with no flag
 
 WHAT IT RUNS. For each run of the set: the menu's 2 frames and enter, exactly as gamespeed composes
 them, then the run's 100 game frames. The run is first REPLAYED on the model (scenarios_v2), which
@@ -71,6 +72,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import probe as P                                                            # noqa: E402
 import scenarios_v2 as S                                                     # noqa: E402
+import scenarios_map as SM                                                   # noqa: E402  (M8: the set's map)
 from doomfj.monsters import loot_cells                                       # noqa: E402  (M7 P6)
 from doomfj.world import player_loots                                        # noqa: E402  (M7 P6)
 from doomfj import world as W                                                # noqa: E402  (M7 P8a)
@@ -86,6 +88,14 @@ class GameOracle(P.Oracle):
     2026-09-26 (S4 v1): without `sky` the oracle differs from blocked27 on every frame that shows
     sky; probe.Oracle has had `sky` since a07e8b9, and `bbox_cull` moves no pixel."""
     RENDER_KW = dict(P.Oracle.RENDER_KW)       # = reference_model.GAME_RENDER_KW (PR #87)
+
+
+def game_oracle(doc: dict) -> GameOracle:
+    """M8: the oracle on the SET's map (`doc["map"]`, E1M1 when absent) -- its fixture wad by doomfj.mapprofile, so a
+    set's B0 never draws another map's oracle whatever DOOMFJ_MAP says (E1M1: the wad probe.DEFAULT_WAD always was)"""
+    from doomfj.mapprofile import profile
+    m = doc.get("map", "E1M1").upper()
+    return GameOracle(profile(m).wad, P.DEFAULT_ASSET, m)
 
 
 def P_signed(v: int) -> int:
@@ -439,13 +449,13 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
     import gamespeed as GS
     import m2_std_gate as gate
     doc = json.loads(Path(doc_path).read_text(encoding="ascii"))
-    S.use_sight_rule(doc)          # M7 P3.2: the set names its sight rule (v5: "seen"); its replay runs under it
+    SM.use_doc(doc)                # M7 P3.2: the set names its sight rule (v5: "seen"); M8: and its map
     t0 = time.time()
     runs = [(run["name"], model_frames(run), model_frames(run, proxy=True) if proxy else None)
             for run in doc["runs"]]
     print("  model replays: %d runs reproduce the set's poses (%.0f s, outside the lock)"
           % (len(runs), time.time() - t0), flush=True)
-    orc = GameOracle()
+    orc = game_oracle(doc)
     assert list(orc.door_order) == list(S.new_world().door_order), "door order differs"
     names = {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon).values()}
     if any(setup_fn(run["setup"]) for run in doc["runs"]):          # M7 P6+P7: the aftermath's poke
@@ -659,13 +669,13 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
     keys = GS.script(B.RECORDED_TIC_RUN)
     frames = doorsim_frames(keys, mirror)
     doc = json.loads(Path(doc_path).read_text(encoding="ascii"))
-    S.use_sight_rule(doc)
+    SM.use_doc(doc)
     runs = {r["name"]: r for r in doc["runs"]}
     court = model_frames(runs["R0-courtyard"])[:6]
     nw, nwp = model_frames(runs["R0-northwest"])[:30], model_frames(runs["R0-northwest"], proxy=True)[:30]
     aft_run = next((r for r in doc["runs"] if setup_fn(r["setup"]) is not None), None)
     aftf = model_frames(aft_run)[:6] if aft_run is not None else None
-    orc = GameOracle()
+    orc = game_oracle(doc)
     # T5's window: the first frame of the aftermath run (then the west hall's) from which opening a
     # still-shut door changes the picture, and the door
     from doomfj.doors import IDLE, WAIT
@@ -810,8 +820,8 @@ def oracle_only(doc_path: Path, pmode=None, proxy: bool = False, only=None) -> i
     its refused steps and why its expectation parts from the normal run's (`proxy_note`). `only`: run names that
     start with it"""
     doc = json.loads(Path(doc_path).read_text(encoding="ascii"))
-    S.use_sight_rule(doc)
-    orc = GameOracle()
+    SM.use_doc(doc)                # M8: the set's map
+    orc = game_oracle(doc)
     if pmode:
         orc.player_mode = pmode
     from doomfj.wall_renderer import PLAYER_MODE

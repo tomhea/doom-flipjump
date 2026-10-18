@@ -192,7 +192,9 @@ def _soft_section(src):
     labels = set(re.findall(r"^\s*(\w+):", code, re.M))
     used = set(_IDENT.findall(code))
     tail = {"ret", "set_tstop", "seen_probe"}
-    glob = sorted(used - set(params) - labels - tail - _BUILTIN)
+    # M8 F1.4: the slot cap's lines open the section -- its CONSTANTS (SPR_SLOT_CAP[_ON], fj_consts: all capitals) are
+    # not cells; its counter `gps_nslot` is (declared below; SPR_SLOT_CAP_ON is 0 on GAME_CFG's E1M1: the lines vanish)
+    glob = sorted(g for g in used - set(params) - labels - tail - _BUILTIN if not g.isupper())
     pars = [p for p in params if p in used]
     macro = ("def t_soft %s @ %s, done < %s {\n%s\n"
              "        hex.print_as_digit 2, n_thing, 0\n        hex.print_as_digit 2, n_mon, 0\n        ;done\n"
@@ -206,7 +208,7 @@ def _soft_section(src):
 def _soft_program(src, dsofts):
     from doomfj.reference_model import THING_BUDGET
     pars, glob, macro = _soft_section(src)
-    assert set(glob) == {"sp_mon", "sp_ex", "n_thing", "n_mon", "trb_climit", "full", "degfl"}, glob
+    assert set(glob) == {"sp_mon", "sp_ex", "n_thing", "n_mon", "trb_climit", "full", "degfl", "gps_nslot"}, glob
     args = dict(budget=THING_BUDGET, monbudget=MONSTER_BUDGET, deg=1, dsofts=dsofts, dsoftm=MONSTER_BUDGET,
                 seen=0, sflag=0)
     main = ["stl.startup_and_init_all"]
@@ -216,7 +218,7 @@ def _soft_program(src, dsofts):
     main += ["    stl.output_char 10", "    stl.loop",
              "t_leaf:", "    t_soft %s" % ", ".join(str(args[p]) for p in pars), "    stl.fret t_ret", macro,
              "t_ret: hex.vec w/4"]
-    main += ["%s: hex.vec %d" % (g, 2 if g in ("sp_mon", "n_thing", "n_mon", "trb_climit") else 1) for g in glob]
+    main += ["%s: hex.vec %d" % (g, 2 if g in ("sp_mon", "n_thing", "n_mon", "trb_climit", "gps_nslot") else 1) for g in glob]
     return "\n".join(main) + "\n"
 
 

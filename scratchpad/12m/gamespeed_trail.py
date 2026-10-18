@@ -40,6 +40,10 @@ ROOT = HERE.parents[1]
 for q in (HERE, ROOT / "scratchpad" / "gp"):
     if str(q) not in sys.path:
         sys.path.insert(0, str(q))
+if __name__ == "__main__":                       # M8: `--map E1Mn` before gamespeed / probe read their defaults
+    sys.path.insert(0, str(ROOT / "src"))
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg()
 import gamespeed as GS                                                      # noqa: E402
 import onewalk                                                              # noqa: E402
 import probe as P                                                           # noqa: E402
@@ -156,7 +160,12 @@ def main():
     ap.add_argument("--labels", default=str(P.DEFAULT_LABELS))
     ap.add_argument("--runs", type=int, nargs="*", default=list(range(GS.TOUR_TARGETS)))
     ap.add_argument("--stream", default="gamespeed-trail")
+    ap.add_argument("--record", action="store_true",
+                    help="M8: on a TRAIL PASS over all ten runs, write the binary's ends, doors and runs 0-1's keys to "
+                         "scenarios/<map>/gamespeed.json (gamespeed.binary_record reads it: --selftest N6e / N6g)")
     a = ap.parse_args()
+    if a.record and sorted(a.runs) != list(range(GS.TOUR_TARGETS)):
+        ap.error("--record needs all %d runs" % GS.TOUR_TARGETS)
     t = time.time()
     doors, shut, wrong = records(max(a.runs) + 1)
     dsim = onewalk.DoorSim()
@@ -172,7 +181,31 @@ def main():
                                                           Path(a.labels).name), flush=True)
         for r in a.runs:
             trails[r] = binary_trail(gb, table, orc, r)
-    return report(*verdicts(trails, doors, shut, wrong, passes))
+    v = verdicts(trails, doors, shut, wrong, passes)
+    rc = report(*v)
+    if a.record:
+        record(a, gb, v, rc)
+    return rc
+
+
+def record(a, gb, v, rc) -> None:
+    """M8: the map's gamespeed record -- only from a passing trail (the binary and --validate agree on every frame)"""
+    import json
+    from doomfj.mapprofile import scenario_dir
+    _lines, ends, opened, trail_ok, _pp, _dr = v
+    if rc != 0 or not trail_ok:
+        print("RECORD REFUSED: the trail did not pass -- nothing written")
+        return
+    out = scenario_dir(GS.DEFAULT_MAP) / GS.RECORD_FILE
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({
+        "map": GS.DEFAULT_MAP, "fjm": str(a.fjm), "sha16": gb.sha[:16], "labels": str(a.labels),
+        "binary_ends": [list(e) for e in ends], "binary_doors": list(opened),
+        "recorded_keys": {"0": GS.script(0), "1": GS.script(1)},
+        "rule": "gamespeed_trail.py --record: written only on TRAIL PASS over the ten runs; gamespeed.py --selftest "
+                "N6e holds --validate's ends and doors to these, N6g the planner's runs 0 and 1 to these keys"},
+        indent=1) + chr(10), encoding="ascii", newline=chr(10))
+    print("RECORDED %s" % out)
 
 
 if __name__ == "__main__":

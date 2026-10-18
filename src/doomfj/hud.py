@@ -59,6 +59,12 @@ ARMS_X0 = (lambda a: a[1] + 1 + (a[2] - a[1] - _ARMS_SPAN) // 2)(next(p for p in
 assert ARMS_X0 > next(p for p in PANELS if p[0] == "ARMS")[1] and ARMS_X0 + _ARMS_SPAN <= next(
     p for p in PANELS if p[0] == "ARMS")[2] + 1, "the six ARMS digits do not fit their panel"
 CARD_BOX = (145, 2, 6, 7)      # the blue key card: x0, y0, width, height (its four corners left out); KEYS' middle
+# M8 F4 (E1M2's yellow and red cards): DOOM's st_stuff.c stacks the three key boxes in one column (blue, yellow, red);
+# the bar's 16 rows hold one row of icons, so the yellow card stands LEFT of the blue and the red one RIGHT of it, the
+# same shape (the blue card keeps its column: E1M1's bar is unchanged). Each is a slot only on a map that holds its card
+# (lootcode.map_cards -> `cards`): (slot name, the card, its box).
+KEY_ICONS = (("card_y", "yellow", (138, 2, 6, 7)), ("card_r", "red", (152, 2, 6, 7)))
+KEY_COLOUR = {"blue": "card", "yellow": "ycard", "red": "rcard"}        # bar_colours' key per card
 
 
 def _rgb_entries(palette_rgb):
@@ -73,7 +79,8 @@ def bar_colours(palette_rgb) -> Dict[str, int]:
         return min(range(len(entries)), key=lambda i: (sum((a - b) ** 2 for a, b in zip(entries[i], rgb)), i))
     return {"bg": nearest((36, 36, 36)), "edge": nearest((110, 110, 110)), "sep": nearest((70, 70, 70)),
             "label": nearest((190, 190, 190)), "num": nearest((220, 30, 30)), "owned": nearest((230, 200, 40)),
-            "unowned": nearest((90, 90, 90)), "card": nearest((40, 70, 255))}
+            "unowned": nearest((90, 90, 90)), "card": nearest((40, 70, 255)),
+            "ycard": nearest((250, 230, 0)), "rcard": nearest((200, 0, 0))}      # M8 F4: the yellow and red cards
 
 
 def _ink(px, s, x, y, colour, font):
@@ -117,10 +124,20 @@ def arms_owned(p_owned: Sequence[int]) -> Tuple[bool, ...]:
     return tuple(bool(p_owned[w]) for w in ws)
 
 
+def _card(px, box, colour) -> None:
+    """a key card's icon: its box filled, the four corners left out"""
+    x0, y0, w, h = box
+    for y in range(y0, y0 + h):
+        for x in range(x0, x0 + w):
+            if (y in (y0, y0 + h - 1)) and (x in (x0, x0 + w - 1)):
+                continue
+            px[y][x] = colour
+
+
 def bar_pixels(colours: Dict[str, int], *, ammo: Optional[int], health: int, armor: int,
-               owned: Sequence[bool], blue: bool) -> List[List[int]]:
+               owned: Sequence[bool], blue: bool, yellow: bool = False, red: bool = False) -> List[List[int]]:
     """the bar's 16 x 160 palette indices for these values (`owned` = the six ARMS digits 2..7 lit, `arms_owned`;
-    `ammo` None = blank)"""
+    `ammo` None = blank; M8 F4: `yellow` / `red` -- the cards' icons, KEY_ICONS)"""
     assert len(owned) == len(ARMS_DIGITS), owned
     px = [[colours["bg"]] * SCREEN_W for _ in range(BAR_ROWS)]
     for x in range(SCREEN_W):
@@ -142,19 +159,21 @@ def bar_pixels(colours: Dict[str, int], *, ammo: Optional[int], health: int, arm
     for i, d in enumerate(ARMS_DIGITS):
         _ink(px, str(d), ARMS_X0 + i * ARMS_PITCH, ARMS_Y, colours["owned" if owned[i] else "unowned"], _SMALL_GLYPHS)
     if blue:
-        x0, y0, w, h = CARD_BOX
-        for y in range(y0, y0 + h):
-            for x in range(x0, x0 + w):
-                if (y in (y0, y0 + h - 1)) and (x in (x0, x0 + w - 1)):
-                    continue
-                px[y][x] = colours["card"]
+        _card(px, CARD_BOX, colours["card"])
+    held = {"yellow": yellow, "red": red}
+    for _slot, card, box in KEY_ICONS:
+        if held[card]:
+            _card(px, box, colours[KEY_COLOUR[card]])
     return px
 
 
 # the bar's DYNAMIC slots: each owns a fixed column range and draws one of a few variants; every other column is static.
 # (name, x0, width, variants): a digit slot's variant is None or 0..9, an arms slot's owned False/True, the card's
 # present False/True. The fj side redraws a slot's columns by dispatching on its variant.
-def bar_slots() -> List[Tuple[str, int, int, tuple]]:
+# M8 F4: `cards` -- the extra key icons the map holds ("yellow" / "red", lootcode.hud_cards), each a slot AFTER every
+# E1M1 slot (so no E1M1 slot moves; E1M1 passes none)
+def bar_slots(cards: Sequence[str] = ()) -> List[Tuple[str, int, int, tuple]]:
+    assert set(cards) <= {c for _s, c, _b in KEY_ICONS}, cards
     out = []
     for panel, pct in (("AMMO", False), ("HEALTH", True), ("ARMOR", True)):
         x = field_x(panel, pct)
@@ -164,11 +183,13 @@ def bar_slots() -> List[Tuple[str, int, int, tuple]]:
     for i, d in enumerate(ARMS_DIGITS):
         out.append(("arms%d" % d, ARMS_X0 + i * ARMS_PITCH, ARMS_W, (False, True)))
     out.append(("card", CARD_BOX[0], CARD_BOX[2], (False, True)))
+    out += [(slot, box[0], box[2], (False, True)) for slot, card, box in KEY_ICONS if card in cards]
     return out
 
 
-def slot_values(*, ammo: Optional[int], health: int, armor: int, owned: Sequence[bool], blue: bool) -> dict:
-    """every dynamic slot's variant for these values (the same names as `bar_slots`)"""
+def slot_values(*, ammo: Optional[int], health: int, armor: int, owned: Sequence[bool], blue: bool,
+                yellow: bool = False, red: bool = False, cards: Sequence[str] = ()) -> dict:
+    """every dynamic slot's variant for these values (the same names as `bar_slots(cards)`)"""
     v = {}
     for panel, value in (("ammo", ammo), ("health", health), ("armor", armor)):
         for k, d in enumerate(digits(value)):
@@ -177,14 +198,18 @@ def slot_values(*, ammo: Optional[int], health: int, armor: int, owned: Sequence
     for i, d in enumerate(ARMS_DIGITS):
         v["arms%d" % d] = bool(owned[i])
     v["card"] = bool(blue)
+    held = {"yellow": yellow, "red": red}
+    for slot, card, _box in KEY_ICONS:
+        if card in cards:
+            v[slot] = bool(held[card])
     return v
 
 
-def bar_column(colours: Dict[str, int], x: int, slot_variant=None) -> List[int]:
+def bar_column(colours: Dict[str, int], x: int, slot_variant=None, cards: Sequence[str] = ()) -> List[int]:
     """column x of the bar (16 palette indices) with its slot (if any) drawn in `slot_variant`. A column belongs to at
     most one slot (asserted by `test_hud`), so drawing the whole bar with every slot at the variant and reading x is
-    the definition."""
-    slots = {name: (x0, w, variants) for name, x0, w, variants in bar_slots()}
+    the definition. M8 F4: `cards`, the map's extra key icons (bar_slots(cards))."""
+    slots = {name: (x0, w, variants) for name, x0, w, variants in bar_slots(cards)}
     owner = [n for n, (x0, w, _v) in slots.items() if x0 <= x < x0 + w]
     vals = {"ammo": None, "health": 0, "armor": 0, "owned": [False] * len(ARMS_DIGITS), "blue": False}
     if owner:
@@ -205,6 +230,11 @@ def bar_column(colours: Dict[str, int], x: int, slot_variant=None) -> List[int]:
             owned[ARMS_DIGITS.index(int(n[4:]))] = bool(slot_variant)
             px = bar_pixels(colours, **{**vals, "owned": owned})
             return [px[y][x] for y in range(BAR_ROWS)]
+        key = {slot: card for slot, card, _box in KEY_ICONS}.get(n)        # M8 F4: the yellow / red card's slot
+        if key is not None:
+            px = bar_pixels(colours, **{**vals, key: bool(slot_variant)})
+            return [px[y][x] for y in range(BAR_ROWS)]
+        assert n == "card", n
         px = bar_pixels(colours, **{**vals, "blue": bool(slot_variant)})
         return [px[y][x] for y in range(BAR_ROWS)]
     px = bar_pixels(colours, **vals)

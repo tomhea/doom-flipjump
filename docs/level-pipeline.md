@@ -43,7 +43,7 @@ an ESTIMATE; `scratchpad/m4_bands.py` measures the first three by running the em
 ## 2b. The emission check (minutes, asserts ON)
 
     python scripts/emit_check.py E1M3                                # the first refusal, in ~3-7 minutes
-    python scripts/emit_check.py E1M3 --standin gives far-los ...     # past the named ones: a SIZE measurement
+    python scripts/emit_check.py E1M3 --standin far-los ...           # past the named ones: a SIZE measurement
     python scripts/emit_check.py E1M3 --standin ... --assemble build/doom_e1m3_size.fjm   # + the assembly
 
 It refuses `python -O`. After the emission it also counts the HOT DATA BLOCK from the text against `frame.arm5`'s
@@ -77,7 +77,7 @@ only the roles are E1M1 literals. One generator per artifact, each writing a tra
 |---|---|---|
 | fixture wad | `tests/fixtures/make_e1m1_wad.py E1Mn` | none |
 | gate roles (key door per colour, blaze door, walk-over triggers, an SR and a WR lift + standing pose, the floor switch, a reversal door, cards, barrel chains, nukage sectors, a crowd court, pickup-cluster walks) | `gp/gate_targets.py --map` from `DoorPhase` / `MoverPhase` / the world's things; a scenario a map cannot host is N/A with its reason | read the N/A list |
-| combat-set checkpoints | `scenarios_v2.py --suggest-checkpoints --map`: the region flood + per region the sectors with most wakeable monsters | **the owner approves the frozen set** (as v5..v10) |
+| combat-set checkpoints | `gp/scenarios_map.py --map E1Mn --suggest-checkpoints` -> `scenarios/<map>/checkpoints.json`: the region flood + per region the sectors with most wakeable monsters; then `--plan --file gp/scenarios/combat_scenarios_<map>_v1.json` | **the owner approves the frozen set** (as v5..v10) |
 | deg_gate viewpoints + op baselines | spawn + the top op-cost poses of a pose sweep (`m14_vp_sweep.py`) | none |
 | gamespeed tours | already generated (`_tour_plan`), deterministic -- free once the map is threaded | none |
 | `BINARY_ENDS` / doors / recorded keys | `gamespeed_trail.py --map --record` -> `scenarios/<map>/gamespeed.json` | none |
@@ -85,6 +85,24 @@ only the roles are E1M1 literals. One generator per artifact, each writing a tra
 | heat list | E1M1's list first (its keys are macro paths, map-free); regenerate (profx drive + heatsites) only if `pinreport` shows hot groups unpinned | maybe |
 | msframe baseline | `msframe.py --save-baseline shipped_<map>` | none |
 | restore sets | reused (one-pass tiers use names; the map prefix is remapped); new state cells join `registered_reset_names` | none |
+
+### 4b. The gates on another map (m8-e1m2-gates, 2026-10-17)
+
+Every gate and tool takes the map from `--map E1Mn` or `DOOMFJ_MAP=E1Mn` (`mapprofile.take_map_arg`, before probe /
+gamespeed read their defaults); a combat set's B0 takes it from the set's `"map"`. E1M1 is untouched by construction:
+`gate_roles.E1M1` holds the literals the gates always had, and `gp/gate_roles_check.py --selftest` proves the four
+gates' 80 E1M1 scenarios fingerprint-identical to the pre-roles gates (with 7 controls that each move one role).
+`scenarios_v2.py` and `census_lib.py` (hashed into every frozen set) are NOT edited: `gp/scenarios_map.py` patches
+their namespaces for a map other than E1M1 only.
+
+    DOOMFJ_MAP=E1M2 python scratchpad/gp/p2a_gate.py   --fjm build/doom_e1m2_<name>.fjm --labels scratchpad/12m/atlas/e1m2_<name>.labels.tsv.gz
+    DOOMFJ_MAP=E1M2 python scratchpad/gp/hurt_gate.py  (same flags)      DOOMFJ_MAP=E1M2 python scratchpad/gp/fight_gate.py (same)
+    DOOMFJ_MAP=E1M2 python scratchpad/gp/die_gate.py   (same)            ... --oracle-only: the oracle half alone
+    python scratchpad/m2_std_gate.py --map E1M2 --fjm ... --labels ...   python scratchpad/m3_gate.py --map E1M2 --fjm ... --labels ...
+    python scratchpad/gp/b0_scenarios.py --file <an E1M2 set> --fjm ... --labels ...      (the set names its map)
+    python scratchpad/12m/gamespeed_trail.py --map E1M2 --fjm ... --labels ... --record   (-> scenarios/e1m2/gamespeed.json)
+    python scratchpad/12m/gamespeed.py --map E1M2 --fjm ...  /  --validate  /  --selftest  (N6e/N6g need the record)
+    python scratchpad/12m/msframe.py --map E1M2 --a build/doom_e1m2_<name>.fjm --save-baseline shipped   (-> shipped_e1m2)
 
 ## 5. Features once, in the order that unblocks the most maps
 

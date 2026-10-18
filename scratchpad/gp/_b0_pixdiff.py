@@ -59,6 +59,7 @@ def main():
     ap.add_argument("--save", default=None, help="dump the first mismatching frame pair + diff as json")
     a = ap.parse_args()
     doc = json.loads(Path(a.file).read_text(encoding="ascii"))
+    B.SM.use_doc(doc)              # M8: the set's map and sight rule, as b0_scenarios.b0 takes them
     S.use_sight_rule(doc)
     runs = {r["name"]: r for r in doc["runs"]}
     orc = B.GameOracle()

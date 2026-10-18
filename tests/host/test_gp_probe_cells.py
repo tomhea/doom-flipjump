@@ -132,7 +132,8 @@ def test_only_the_skill_menu_is_optional(tmp_path):
                                  "p_tnh", "p_vd", "p_kmx", "p_kmy", "mkx", "mky", "mfx", "mfy", "kb_live", "pj_z",
                                  "bar_src",
                                  # P10: a game in progress (the menu's RESUME), and LEVEL COMPLETE's counters
-                                 "g_live", "st_kill", "st_item", "st_secn", "st_secm"}
+                                 "g_live", "st_kill", "st_item", "st_secn", "st_secm",
+                                 "p_rct"}                                 # M8 L4: the teleport's reactiontime
     for one in ("p_bc", "rng_wd", "dr_live", "g_skill", "p_atk", "st_kill"):   # M7 P6 / P7 (P10: the stats): each group
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))

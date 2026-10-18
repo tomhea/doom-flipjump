@@ -60,6 +60,14 @@ rendering `reference_model` (`THING_SPRITE`, `MONSTER_TYPES`), `exitsign.EXIT_SI
 
 ## B. E1M1 hard-wiring in the ship pipeline
 
+> **Status 2026-10-17 (branch m8-e1m2-gates):** the correctness gates and the speed tools below are THREADED --
+> `--map` / `DOOMFJ_MAP` everywhere (`mapprofile.take_map_arg`), the roles in `gate_roles.py` (E1M1's literals kept,
+> `gate_roles_check.py` proves its scenarios unchanged) and `scenarios/e1m2/gates.json` (`gate_targets.py`), the combat
+> machinery through `scenarios_map.py` (no edit to the hashed scenarios_v2 / census_lib), B0 by the set's `"map"`,
+> gatestate's / m3's lift count, m2's spawn and key doors, gamespeed's records (`scenarios/<map>/gamespeed.json`,
+> `gamespeed_trail --record`), msframe's `shipped_<map>`. NOT done here: deg_gate's viewpoints, pinreport / poolmap,
+> the host tests keyed by map, probe's E1M1-only selftest. Commands: `docs/level-pipeline.md` 4b.
+
 **The pattern:** the bottom layer already takes `wad`/`mapname` (`probe.Oracle`, `onewalk.DoorSim`, gamespeed's
 `_oracle/_tour_plan/script`, `build_blocked --wad/--map`, `m2_std_gate`/`m3_gate --wad/--map`); the wiring breaks by
 (1) callers passing no map (`P.Oracle()`, `DoorSim()`, `World()`, `GS.full_script()` -> E1M1), (2) counts hard-coded

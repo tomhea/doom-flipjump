@@ -102,17 +102,54 @@ KNOCK_WALKOVERS = True
 def walkover_segments(phase, old, new) -> list:
     """M7 P8a (V): the segments a gate fires its door and mover walk-overs over this frame -- the walk's (old ->
     `phase.walk_end`) and, while KNOCK_WALKOVERS, the knock move's (walk_end -> new); the one segment old -> new when
-    no knock move ran (every frame before P8a, and every frame of a mode without knockback)"""
+    no knock move ran (every frame before P8a, and every frame of a mode without knockback).
+    M8 L4: on a map WITH TELEPORT LINES the phase records the segments the world's own `_walkover` tested during its
+    `move` (`walk_segs`: every accepted P_TryMove -- the walk's candidate, each knock step -- in the model's order), and
+    those ARE the segments: a move that teleported is the walk up to the teleport line, then nothing from the jump
+    (old -> destination was never tested by the model). E1M1 has no teleport line: no recorder, `walk_segs` None, and
+    every segment is what it always was."""
+    segs = getattr(phase, "walk_segs", None) if phase is not None else None
+    if segs is not None:
+        return [(_rep(a, old, new), _rep(b, old, new)) for a, b in segs]
     we = getattr(phase, "walk_end", None) if phase is not None else None
     if we is None:
         return [(tuple(old), tuple(new))]
-    # `walk_end` is 32-bit UNSIGNED (the binary's cells); the gates' poses are SimState's SIGNED 16.16 -- the segment
-    # takes the representation of its ends (the P8a integration: S7's trigger at y -416 met a walk_end at y 65120)
-    if not any(v >= 1 << 31 for v in tuple(old) + tuple(new)):
-        we = tuple(v - (1 << 32) if v >> 31 & 1 else v for v in we)
-    else:
-        we = tuple(v & MASK32 for v in we)
+    we = _rep(we, old, new)
     return [(tuple(old), tuple(we))] + ([(tuple(we), tuple(new))] if KNOCK_WALKOVERS else [])
+
+
+def _rep(p, old, new) -> tuple:
+    """a point in the representation of a gate's segment ends: `walk_end` is 32-bit UNSIGNED (the binary's cells), the
+    world's recorded points SIGNED 16.16; the gates' poses are SimState's SIGNED 16.16 unless an end is already
+    unsigned (the P8a integration: S7's trigger at y -416 met a walk_end at y 65120)"""
+    if not any(v >= 1 << 31 for v in tuple(old) + tuple(new)):
+        return tuple(v - (1 << 32) if v >> 31 & 1 else v for v in (u & MASK32 for u in p))
+    return tuple(v & MASK32 for v in p)
+
+
+def door_keys_kw(phase) -> dict:
+    """M8 L2: `doors.DoorPhase.tic`'s other keys as THE WORLD holds them -- what `World._doors_phase` asks through
+    `combat.player_can_open` (a key door opens on its card OR its skull, combat.KEY_DOOR_CARDS): `has_yellow` /
+    `has_red`, and `has_blue` only for a blue SKULL (the blue card rides the gate phase's own `card` -- `card()` --
+    which the gates' controls move). Only the keys held are named, so on a map whose player holds none of them (E1M1:
+    the blue card alone) the call is the one it always was. {} for no phase or a player who takes nothing
+    (world.player_loots false: no card is the world's). The gates call it at the frame's door tic, before the move:
+    the cards the world took up to the last frame, as `_doors_phase` reads them."""
+    if phase is None:
+        return {}
+    from doomfj.world import player_loots
+    w = phase.world
+    if not player_loots(w.player):
+        return {}
+    gd, c = phase.gd, w.ws.p_cards
+    out = {}
+    if c[gd.IT_BLUESKULL]:
+        out["has_blue"] = True
+    if c[gd.IT_YELLOWCARD] or c[gd.IT_YELLOWSKULL]:
+        out["has_yellow"] = True
+    if c[gd.IT_REDCARD] or c[gd.IT_REDSKULL]:
+        out["has_red"] = True
+    return out
 
 
 def view_drop_kw(phase) -> dict:
@@ -238,7 +275,7 @@ class MonsterPhase:
     re-implements a monster rule."""
 
     def __init__(self, map_wad=None, mapname: str = "E1M1", skill: Optional[int] = None, *, mode: str = "idle",
-                 rm=None, player: str = "walk"):
+                 rm=None, player: str = "walk", world=None):
         from doomfj import gamedata as gd
         from doomfj.world import World
         # M7 P3.2a: a mode that wakes sees by the picture (docs/gp-monsters.md 8.2) -- the gate hands it the
@@ -249,14 +286,37 @@ class MonsterPhase:
         # writes from each render's `aim_out` (`set_aim`), as the binary's render writes `aim_sid`
         from doomfj.world import player_resolves
         aim = World.window_aim if player_resolves(player) else None
-        self.world = World(map_wad, mapname, gd.SK_HARD if skill is None else skill, rm=rm, monsters=mode,
-                           sight_rule="los" if mode == "idle" else "seen", player=player, aim=aim)
+        # M8: `world` -- an existing World to phase (an oracle-vs-oracle checker's twin of a replayed world, built in
+        # that world's own modes); None builds the gates' world as always
+        self.world = world if world is not None else World(
+            map_wad, mapname, gd.SK_HARD if skill is None else skill, rm=rm, monsters=mode,
+            sight_rule="los" if mode == "idle" else "seen", player=player, aim=aim)
         self.gd = gd
         # M7 P8a (V): the knock moves as they happen (KnockTap; nothing installed before knockback_on), the walk's
         # landing this frame (`walk_end`: B0 and the walk-overs), and the player's last knock record
         self.tap = KnockTap(self.world)
         self.walk_end = None
         self.last_knock = None
+        # M8 L4: on a map with teleport lines, the segments the world's `_walkover` tests during `move`
+        # (`walk_segs`, walkover_segments' source there); nothing is installed on a map without one (E1M1)
+        self.walk_segs = None
+        self._segs = None
+        if getattr(self.world, "teleports", None):
+            self._install_seg_tap()
+
+    def _install_seg_tap(self) -> None:
+        """M8 L4: wrap the world's `_walkover` (an INSTANCE attribute: the class and every other World untouched) to
+        record each (old, new) it is called with, 16.16 signed -- `combat._walkover` runs the W1 doors, the WR lifts
+        and then the teleports for every accepted move of the player, so these are exactly the segments the model
+        fires its walk-over lines over"""
+        w = self.world
+        orig = w._walkover
+
+        def walkover(x, y, cx, cy, _orig=orig):
+            if self._segs is not None:
+                self._segs.append(((x, y), (cx, cy)))
+            return _orig(x, y, cx, cy)
+        w._walkover = walkover
 
     def reset(self, skill: int) -> None:
         self.world.reset(skill)
@@ -328,8 +388,23 @@ class MonsterPhase:
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = doors[si]
         for k, st in enumerate(lifts):
             ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k] = st
-        ws.f_switch = int(bool(switched))
+        if w.floor_wide:                  # M8 F1.3: the fswitch vector (movers.MoverPhase), states then timers
+            ng = len(w.floor_groups)
+            for g in range(ng):
+                ws.f_switch[g], ws.f_sub[g] = switched[g], switched[ng + g]
+        else:
+            ws.f_switch = int(bool(switched))
         w._door_phase_scene()
+
+    def _walk_arrays(self) -> tuple:
+        """the world cells a walk-over writes, which the gate's own phases own (`_pose` puts them back): W1 doors, the
+        doors' requests, the lifts' -- M8 F1.3: and, in the wide layout, the floor groups' states and timers"""
+        ws = self.world.ws
+        return ((ws.w_fired, ws.d_monreq, ws.l_req)
+                + ((ws.f_switch, ws.f_sub) if self.world.floor_wide else ()))
+
+    def _walk_keep(self) -> tuple:
+        return tuple(list(a) for a in self._walk_arrays())
 
     def requests(self) -> Tuple[frozenset, frozenset]:
         """(door sectors the monsters pressed, lift sectors they triggered) this tic -- the gate's next door and
@@ -456,6 +531,8 @@ class MonsterPhase:
         THE WALK-OVERS stay the gate's: `doors.DoorPhase.after_move` / `movers.MoverPhase.after_move` fire them from
         (old, new) exactly as `World._walkover` does, so the world's own copy (`w_fired`, `d_monreq`, `l_req`) is
         put back here -- else a control that drops a gate's walk-over (p2a's `w1`, `no_wr`) could not part.
+        M8 L4: on a map with teleport lines the segments `World._walkover` was called with are `walk_segs` (the
+        gates' `walkover_segments` reads them): a teleport is the world's, the walk-overs over the walk up to its line.
         A DEAD player (the tic-start latch, P7-a) does not move or turn BY KEYS: the position comes back unchanged and
         the angle is the world's -- in a mortal mode `weapon(dead=)`'s death think has just turned it to the killer
         (P_DeathThink; die_gate D1 on blocked51 found the pose given returned here, dropping the turn).
@@ -465,7 +542,7 @@ class MonsterPhase:
         the world's scene is the one the model's move reads."""
         from doomfj.reference_model import SimState
         from doomfj.world import KEYS, TicEvents, player_loots
-        w, ws = self.world, self.world.ws
+        w = self.world
         ev = TicEvents(0)
         self.last_move = ev
         k = {n: bool(keys.get(n)) for n in KEYS}
@@ -474,6 +551,18 @@ class MonsterPhase:
                                touch=self.touch, strafe=True)
             return st.x, st.y, st.angle
         assert scene is None, "the full model moves on the world's own scene (sync it), not a gate's"
+        # M8 L4: the segments of this move (`_install_seg_tap`); still None on a map without teleport lines
+        self.walk_segs = None
+        self._segs = [] if getattr(w, "teleports", None) else None
+        try:
+            return self._move_full(k, x16, y16, angle, dead, ev)
+        finally:
+            if self._segs is not None:
+                self.walk_segs, self._segs = self._segs, None
+
+    def _move_full(self, k: dict, x16: int, y16: int, angle: int, dead: Optional[int], ev):
+        """`move` once the player loots (the body it always had)"""
+        w, ws = self.world, self.world.ws
         # M7 P8a (V): this frame's walk landing and the player's knock record (`walk_end` None: no knock move ran)
         n0 = getattr(self, "_tap_at", len(self.tap.records))
         self._tap_at = len(self.tap.records)
@@ -484,20 +573,20 @@ class MonsterPhase:
             if knock:                     # M7 P8a: the corpse slides (4.3 step 6: dead or alive)
                 ws.px = x16 - (1 << 32) if x16 >> 31 & 1 else x16
                 ws.py = y16 - (1 << 32) if y16 >> 31 & 1 else y16
-                keep = (list(ws.w_fired), list(ws.d_monreq), list(ws.l_req))
+                keep = self._walk_keep()
                 self._knock_move(ev, n0)
-                for arr, vals in zip((ws.w_fired, ws.d_monreq, ws.l_req), keep):
+                for arr, vals in zip(self._walk_arrays(), keep):
                     for i, v in enumerate(vals):
                         arr[i] = v
                 if (ws.px & MASK32, ws.py & MASK32) != (x16 & MASK32, y16 & MASK32):
                     return ws.px & MASK32, ws.py & MASK32, ws.pangle
             return x16, y16, (ws.pangle if player_mortal(w.player) else angle)
         self._pose(x16, y16, angle)
-        keep = (list(ws.w_fired), list(ws.d_monreq), list(ws.l_req))
+        keep = self._walk_keep()
         w._player_move(k, ev)
         if knock:                         # M7 P8a: the knock move after the walk (pickups at every tried position)
             self._knock_move(ev, n0)
-        for arr, vals in zip((ws.w_fired, ws.d_monreq, ws.l_req), keep):
+        for arr, vals in zip(self._walk_arrays(), keep):
             for i, v in enumerate(vals):
                 arr[i] = v
         if knock and (ws.px & MASK32, ws.py & MASK32) != (x16 & MASK32, y16 & MASK32):
@@ -567,7 +656,9 @@ class MonsterPhase:
         return {"weapon": NO_PSPRITE if dead else WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
                 "flash": None if dead or fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
                 "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,
-                           "owned": arms_owned(ws.p_owned)}}            # P9: DOOM's six ARMS digits 2..7
+                           "owned": arms_owned(ws.p_owned),             # P9: DOOM's six ARMS digits 2..7
+                           # M8 F4: the yellow and red cards' icons (never held on E1M1: its bar is unchanged)
+                           "yellow": bool(ws.p_cards[gd.IT_YELLOWCARD]), "red": bool(ws.p_cards[gd.IT_REDCARD])}}
 
     def boxes(self) -> list:
         """[(x16, y16, r16)] of every live monster -- a closing door reverses on them (World.door_touched)"""
@@ -640,7 +731,9 @@ class MonsterPhase:
                   pj_z per fireball slot, the shooter's floor + 32 at the spawn, its 16 bits (4 nibbles; a free
                   slot 0)
           fight (world.infighting_on): bar_src per barrel (2 nibbles: 0 none, 1 the player, 2 + slot the FIRST
-                  thing that damaged it) -- `mon_target` (state(), 2 nibbles in this mode) names 0 / 1 / 2 + slot"""
+                  thing that damaged it) -- `mon_target` (state(), 2 nibbles in this mode) names 0 / 1 / 2 + slot
+          p_rct   2 nibbles  M8 L4: the player's reactiontime after a teleport, 0..18 (a map with a WR teleport
+                             in a looting mode: doomfj.teleportcode)"""
         from doomfj.world import infighting_on, knockback_on, player_loots, player_sinks
         w, ws, n = self.world, self.world.ws, self.world.layout.nmon
         out = {}
@@ -658,6 +751,8 @@ class MonsterPhase:
                         "pj_z": tuple(v & 0xFFFF for v in ws.proj_z)})
         if infighting_on(w.monsters):
             out["bar_src"] = tuple(ws.bar_src)
+        if getattr(w, "teleports", None) and player_loots(w.player):
+            out["p_rct"] = ws.p_reaction
         return out
 
     # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------
@@ -791,7 +886,9 @@ class MonsterViews:
         from doomfj.things import baked_thing_mask
         self.drawable = drawable
         self.cmap = bake_bsp(map_wad, mapname)
-        baked = baked_thing_mask(rm, self.cmap, drawable, MONSTER_TYPES)
+        from doomfj.things import mover_leaves, mover_mask_kw                 # M8 F1.3
+        baked = baked_thing_mask(rm, self.cmap, drawable, MONSTER_TYPES,
+                                 **mover_mask_kw(rm, self.cmap, drawable, mover_leaves(map_wad, mapname, self.cmap)))
         keep = sorted(i for i, b in zip(draw_idx, baked) if not b)
         self.rt_drawable = [draw_idx.index(i) for i in keep]          # runtime thing t -> drawable index
         self.nrt = len(keep)

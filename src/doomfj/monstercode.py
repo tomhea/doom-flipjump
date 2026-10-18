@@ -364,6 +364,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     from doomfj.world import P8A_MONSTER_MODES, P8A_PLAYER_MODES
     p8a_kw = dict(monsters=mode, player=player) if mode in P8A_MONSTER_MODES and player in P8A_PLAYER_MODES else {}
     w = World(map_wad, mapname, boot_skill, rm=rm, sight_rule="seen" if wake else "los", **p8a_kw)
+    # M8 L4 (doomfj.teleportcode): the WR teleports -- on a map with one, in the game tier's modes (the player loots:
+    # his reactiontime persists there) with moving monsters; each slot's move writes a teleport's facing back. None on
+    # E1M1 (the emitter asserts its own `_TELE` agrees)
+    tele = bool(loot and chase and w.teleports)
     nmon, schema = w.layout.nmon, w.schema
     snib = w.sec_nibbles                 # M8 L1: a sector id's width (doomfj.sectorcode)
     if nmon == 0 or not rows:
@@ -420,7 +424,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                            # M7 P7: the movers' last state, as the level start's movers (all 0: every lift at its
                            # top, the switch not fired -- the boot image's zeros) -- else the first tic after a
                            # restart sees a mover "change" (tests/fj/test_restart_fj.py found it missing)
-                           "    hex.zero %d, mh_prev" % (len(w.lift_order) + 1)]
+                           "    hex.zero %d, mh_prev" % mh_width(w)]
                           if chase else [])
                        + (noise_restart_lines(w) if hear else []))           # M7 P4.2b: no node has heard a shot
     # the row select -- M7 P5: over the runtime things AND the mobiles (things nt .. nt + nmob - 1)
@@ -482,7 +486,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         slots = [dict(t=m, x=w.ws.mon_x[m], y=w.ws.mon_y[m], rj="rj%d" % w._mon_sector(m),
                       see_idx=gd.STATE_INDEX[w.mon_info[m].seestate],
                       see_tics=gd.STATES[w.mon_info[m].seestate].tics,
-                      **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m])} if chase else {}),
+                      **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m],
+                                     **({"tp": dict(knock=knock)} if tele else {}))} if chase else {}),
                       **({"dc": type_decide(w.mon_info[m])} if decide else {}),
                       **({"dmg": True} if damage else {}),
                       **({"hear": True, "sec": w._mon_sector(m)} if hear else {}),
@@ -527,7 +532,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 + MON_CELL_DECLS + monster_seed_decls() + LEAF_LINK_DECLS
                 + ["bar_solid: hex.vec %d, %d" % (nb, sum(w.ws.bar_solid[b] << (4 * b)
                                                           for b in range(len(w.barrel_things)))),
-                   "mh_prev: hex.vec %d" % (len(w.lift_order) + 1), "mcf_val: hex.vec 4", "mcf_hit: hex.vec 1",
+                   "mh_prev: hex.vec %d" % mh_width(w), "mcf_val: hex.vec 4", "mcf_hit: hex.vec 1",
                    "mcf_ret: hex.vec w/4"])
             if decide:                                 # M7 P3.2c: the justattacked flags, the context, the LOS
                 from doomfj.monsterdecide import context_decls
@@ -588,7 +593,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 if d3:                         # M7 P8a (C): the rank's register and the barrel flag
                     extra["decls_wake"] += D3_DECLS
             extra["chase"] = dict(
-                static_things=things, lift_walk=list(w.lift_walk), lift_order=list(w.lift_order),
+                # M8 F1.3: the WR lines a MONSTER triggers (88; not the blazing 120)
+                static_things=things, lift_walk=list(w.lift_walk_mon), lift_order=list(w.lift_order),
                 mon_door_boxes=[(si, w.mon_door_boxes[si]) for si in w.door_order if si in w.mon_door_boxes],
                 slots_rt=[(slot_t[m], w.mon_radius[m]) for m in range(nmon)],
                 mon_radius=[w.mon_radius[m] for m in range(nmon)], height=w.mon_height[0],
@@ -600,6 +606,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             assert len(set(w.mon_height[:nmon])) == 1, "one monster height: try_move_mon takes it at compile time"
     if knock:
         extra["knock"] = True          # M7 P8a: the emitter asserts its own `_KNOCK` agrees
+    if tele:
+        extra["tele"] = True           # M8 L4: the emitter asserts its own `_TELE` agrees
     if rockets:
         extra["rockets"] = True        # P9: the weapon's A_FireMissile calls rk_spawn (the emitter asserts it)
     if d3:
@@ -851,7 +859,7 @@ def persisted_monster_decls(w, mode: str, damage=None, player: str = None) -> li
         out += [d for d in p32b_decls(schema, n, {f: [0] * n for f in P32B_FIELDS}, [0] * n, w.sec_nibbles)
                 if d.split(":")[0] in P32B_FIELDS + ("msec",)]
         out += ["bar_solid: hex.vec %d" % max(1, len(w.barrel_things)),
-                "mh_prev: hex.vec %d" % (len(w.lift_order) + 1)]
+                "mh_prev: hex.vec %d" % mh_width(w)]
     if mode in ("decide", "full", "push", "final"):       # M7 P3.2c: the missile decision's flag
         from doomfj.monsterdecide import P32C_FIELDS
         out += p32c_decls(schema, n, {f: [0] * n for f in P32C_FIELDS})
@@ -1088,14 +1096,16 @@ P32B_FIELDS = ("mon_movecount", "mon_rng", "mon_floorz")
 
 
 def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: int, dc=None,
-                    solid: str = "mon_active") -> list:
+                    solid: str = "mon_active", tp=None) -> list:
     """slot m's move: its cells into the context, `mm_chase` (its own `solid` flag cleared, so the thing test skips
     it), the context back -- position into thpos_rt, the leaf into thss_rt, the sector into msec. `dc` (M7 P3.2c):
     `mm_decide` instead, with the decision's inputs (justattacked, seen, the kinds, reaction) and justattacked back;
     the slot then enters a decided state (p32c_slot_lines); `dc["jh"]` (M7 P4.2a): justhit in and back too.
     `solid`: the per-slot flag `monstermove.things_leaf_lines` tests -- the same name on both sides (mon_active
     until monsters die; M7 P4.2a: mon_solid, SET again after the move: a monster that moves is alive and solid,
-    damagecode.check_model_rules). `nib`: a sector id's width (World.sec_nibbles: `msec`, `mm_sec`)"""
+    damagecode.check_model_rules). `nib`: a sector id's width (World.sec_nibbles: `msec`, `mm_sec`). M8 L4 (`tp`, a
+    map with a WR teleport: dict(knock=)): after the move, a teleport's facing (and with knockback the momentum and
+    the fraction 0) -- teleportcode.slot_back_lines; None: the text is unchanged"""
     nz, nr, nc = (cell_nibbles(schema, f) for f in ("mon_floorz", "mon_rng", "mon_movecount"))
     assert (nz, nr, nc) == (4, 2, 2), (nz, nr, nc)
     assert radius in (20, 30) and speed in (8, 10), (radius, speed)
@@ -1118,12 +1128,20 @@ def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: in
                "    stl.fcall mm_decide, mm_dret", "    hex.mov 1, mon_justattacked + %d*dw, mm_ja" % m,
                *(["    hex.mov 1, mon_justhit + %d*dw, mm_jh" % m] if dc.get("jh") else [])]
               if dc else ["    stl.fcall mm_chase, mm_cret"]),
+            *(_tele_back(m, schema, tp) if tp else []),             # M8 L4: a teleport's facing, momentum, fraction
             "    hex.set 1, %s, 1" % AC,
             "    hex.mov 4, %s, mm_x" % X, "    hex.mov 4, %s, mm_y" % Y,
             "    hex.mov 4, %s, mm_z" % FZ,
             "    hex.mov 1, %s, mm_dir" % MD, "    hex.mov 2, %s, mm_rng" % RN, "    hex.mov 2, %s, mm_mc" % MC,
             "    hex.mov 3, %s, mm_leafw" % SS,
             "    hex.mov %d, %s, mm_sec" % (nib, SC)]
+
+
+def _tele_back(m: int, schema, tp: dict) -> list:
+    """M8 L4: slot m's write-back after its move (teleportcode.slot_back_lines, the walk's)"""
+    from doomfj.teleportcode import slot_back_lines
+    return slot_back_lines(m, facing="mon_facing + %d*dw" % (cell_nibbles(schema, "mon_facing") * m),
+                           knock=bool(tp.get("knock")), walk=True, tag="tpb")
 
 
 # ---- M7 P3.2c "decide" -----------------------------------------------------------------------------------------
@@ -1205,6 +1223,13 @@ def p32b_decls(schema, nmon: int, values: dict, msec: list, snib: int) -> list:
     return out + p32b_context(snib) + ["mt_ms: hex.vec %d" % snib, "mt_rjret: hex.vec w/4"]
 
 
+def mh_width(w) -> int:
+    """M8 F1.3: `mh_prev`'s nibbles -- each lift's state, then the floor groups' states (the fswitch vector's first
+    `movers.fswitch_states` cells: E1M1's one switch, so `nlift + 1` as ever)"""
+    from doomfj.movers import fswitch_states
+    return len(w.lift_order) + fswitch_states(w.floor_groups)
+
+
 def p32b_change_sector_lines(w, nmon: int, *, exit_guard: bool) -> list:
     """P_ChangeSector for the lifts (world._door_phase_scene): when a mover's state differs from the last frame's
     (`mh_prev` holds each lift's state and the switch) every ACTIVE monster standing in a mover's sector takes that
@@ -1215,25 +1240,23 @@ def p32b_change_sector_lines(w, nmon: int, *, exit_guard: bool) -> list:
     monster frame then (p2a_gate: `if not lvdone: mph.frame`, whose `sync` IS this), the exit-press frame too,
     where the lifts have already ticked; `mt_tic`'s own guard (p32a_tic_lines) covers only the tic after it.
     (tests/fj/test_change_sector_fj.py)"""
-    from doomfj.movers import mover_heights
     lifts = list(w.lift_order)
     for si in lifts:
         assert len(set(w.lift_stops[si])) == len(w.lift_stops[si]), (si, w.lift_stops[si])
     nl = len(lifts)
+    nf = mh_width(w) - nl                                           # M8 F1.3: the floor groups' states
     nib = w.sec_nibbles                                             # M8 L1: msec / mt_ms's width
-    movers = {si: ("lstate + %d*dw" % k, [mover_heights(w.secs, w.lift_stops, {si: st}, {}, False).get(
-        si, (w.secs[si].floor_h, 0))[0] for st in range(len(w.lift_stops[si]))]) for k, si in enumerate(lifts)}
-    for si in w.switch:
-        low_hi = mover_heights(w.secs, w.lift_stops, {}, w.switch, True)
-        movers[si] = ("fswitch", [w.secs[si].floor_h, low_hi.get(si, (w.secs[si].floor_h, 0))[0]])
+    # M8 F1.3: every mover's cell and floors from the ONE table (movers.mover_table; E1M1: the lifts' and the switch's,
+    # unchanged). A floor group's state step moves its longest sector, so a state change is a height change here too.
+    movers = {si: (cell, list(hts)) for si, (cell, hts) in w.mover_table.items()}
     out = ["  // M7 P3.2b: P_ChangeSector -- the movers moved since the last frame: their monsters take the new floor"]
     if exit_guard:
         out.append("    hex.if1 1, lvdone, mcs_skip")                   # a finished level: the world is frozen
     out += ["    hex.cmp %d, mh_prev, lstate, mcs_chg, mcs_sw, mcs_chg" % nl if nl else "    ;mcs_sw",
            "  mcs_sw:",
-           "    hex.cmp 1, mh_prev + %d*dw, fswitch, mcs_chg, mcs_skip, mcs_chg" % nl,
+           "    hex.cmp %d, mh_prev + %d*dw, fswitch, mcs_chg, mcs_skip, mcs_chg" % (nf, nl),
            "  mcs_chg:"]
-    out += (["    hex.mov %d, mh_prev, lstate" % nl] if nl else []) + ["    hex.mov 1, mh_prev + %d*dw, fswitch" % nl]
+    out += (["    hex.mov %d, mh_prev, lstate" % nl] if nl else []) + ["    hex.mov %d, mh_prev + %d*dw, fswitch" % (nf, nl)]
     for m in range(nmon):
         out += ["    hex.if0 1, mon_active + %d*dw, mcs_m%d" % (m, m),
                 "    hex.mov %d, mt_ms, %s" % (nib, msec_cell(m, nib)),

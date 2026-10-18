@@ -85,7 +85,8 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     # rectangle, read-only) -- not the collision table; the census below runs on the armed text
     # M7 P7: `dead` names the tic-start death cell the guards READ (lootcode's p_dd0) -- not a collision input
     assert list(inspect.signature(doorcode.door_tic_lines).parameters) == \
-        ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius", "mon_press", "mon_contact", "dead"], (
+        ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius", "mon_press", "mon_contact", "dead",
+         "switches", "walked"], (  # M8 L2: switch boxes and walked doors (both READ only)
             "door_tic_lines takes collision inputs again")
     secs, lds, sds, verts = level
     slots = sorted(doors)

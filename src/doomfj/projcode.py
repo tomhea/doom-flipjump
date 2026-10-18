@@ -227,38 +227,30 @@ def missile_rows(w) -> Tuple[list, Dict[int, tuple]]:
       * a lift's line never shuts a missile (asserted)."""
     from doomfj.collision import FLAG_BLOCKING, line_rows
     from doomfj.combat import FIREBALL_H
-    from doomfj.monstersight import closed_states
+    from doomfj.monstersight import line_states
     rows = line_rows(w.lds, w.cmap.vertexes, w.secs, w.sds, 0)
-    dyn = set(w.door_order) | set(w.lift_order) | set(w.switch)
+    dyn = set(w.door_order) | set(w.mover_order)                # M8 F1.3: every mover (movers.mover_table)
     out, doors = [], {}
     for li, (row, ld) in enumerate(zip(rows, w.lds)):
         flags = row[9]
         if ld.back != -1:
             fs, bs = w.sds[ld.front].sector, w.sds[ld.back].sector
             sides = [s for s in (fs, bs) if s in dyn]
-            # M8 L1: two dynamic sectors moving by ONE cell (the floor-switch sectors) read through it (the heights
-            # below carry both); two cells stay refused
-            assert len(sides) <= 1 or closed_states(w, fs)[0] == closed_states(w, bs)[0], (
-                "line %d touches two dynamic sectors on two state cells" % li)
             if not sides:
                 if (min(w.secs[fs].ceil_h, w.secs[bs].ceil_h) - max(w.secs[fs].floor_h, w.secs[bs].floor_h)
                         < FIREBALL_H):
                     flags |= FLAG_BLOCKING
             else:
-                s = sides[0]
-                o = bs if s == fs else fs
-                cell, n, hts = closed_states(w, s)
-                shut = []
-                for k in range(n):
-                    f1, c1 = hts[k].get(s, (w.secs[s].floor_h, w.secs[s].ceil_h))
-                    f2, c2 = hts[k].get(o, (w.secs[o].floor_h, w.secs[o].ceil_h))
-                    shut.append(min(c1, c2) - max(f1, f2) < FIREBALL_H)
-                if s in w.lift_order:
+                # M8 L1: two dynamic sectors moving by ONE cell read through it; M8 F1.3: two cells through the one
+                # the opening depends on (monstersight.line_states)
+                cell, n, pairs = line_states(w, fs, bs)
+                shut = [min(c1, c2) - max(f1, f2) < FIREBALL_H for (f1, c1), (f2, c2) in pairs]
+                if cell.startswith("lstate"):
                     assert not any(shut), "lift line %d shuts a missile at a state: it needs a per-state block" % li
                 elif any(shut):
                     p = shut.index(False) if False in shut else n
                     assert shut == [True] * p + [False] * (n - p), (li, shut, "not shut exactly below a pass state")
-                    slot = w.door_order.index(s) if s in w.door_order else cell
+                    slot = int(cell.split("+")[1].split("*")[0]) if cell.startswith("dstate") else cell
                     doors[li] = ((slot, p),)
         out.append(tuple(row[:9]) + (flags, 0, 0))
     return out, doors

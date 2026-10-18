@@ -622,3 +622,39 @@ straight-line code once per frame. Restore fewer cells (a dirty set) is the only
    survive.
 2. Pins/placement of the hottest shared words, measured per build (above).
 3. The clock: 3.5-3.7 GHz under this load; a performance plan on wall power is +20-30% for free.
+
+## 5. E1M2 (M8): the second level's binary, its own numbers
+
+E1M2 is its OWN binary (`build/doom_e1m2_<id>.fjm`); E1M1's standing number (section 1) is untouched by it.
+**`build/doom_e1m2_r3.fjm`** (2026-10-18, branch `m8-e1m2-final` at 9b8ef2c0; sha256 `f18d00c66d211cab`): every M8
+rung merged -- the slot cap (F1.4), the yellow / red cards and the new gives (F4/F7), every door kind (L2), the WR
+teleports (L4), the ML_SOUNDBLOCK flood (L5), the lifts / one-shot floors / pickups on movers (L3, F1.3) -- and
+**NO stand-in** (`scripts/emit_check.py E1M2` with none: the build's preflight). r3 = r2 + the CR of #146's fix (a
+moving seg closed at EVERY state takes the solid path: E1M2 lines 2033 / 2062 / 2050 / 2075); its proof is p2a S15,
+which FAILS on r2 (pixels part at frame 0, 285 px, state exact) and PASSES on r3. Its gates, each run solo on it:
+
+| gate | result |
+|---|---|
+| `p2a_gate` (DOOMFJ_MAP=E1M2) | PASS -- 21 scenarios incl. S14a/b (linedef 1199) and S15 (lines 2033, 2075); N/A: the blue card on a mover floor, the yellow / red doors, S13 |
+| `m2_std_gate --map E1M2` | PASS -- door 172 at hard (monsters on its ground: the second, monsters-allowed pass), 258 frames byte- and state-exact |
+| `m3_gate --map E1M2` | PASS -- 75 frames byte- and state-exact; the skills told apart by the binary's `g_skill` (the spawn view is one picture at every skill) |
+| `hurt_gate` / `fight_gate` / `die_gate` (--map E1M2) | PASS -- 7 / 43 / 17 scenarios (9 roles N/A on E1M2: `scenarios/e1m2/gates.json`) |
+| B0, `combat_scenarios_e1m2_v1.json` (keys cfec92103602fc05, PLANNED, not frozen) | OK -- 11/11 runs state- and pixel-exact; binding 19,909,950 ops/frame (CAP-22 headroom 2,090,050) |
+| `gamespeed_trail --map E1M2 --record` | PASS -- the record equals the binary on every frame of every run; CONTROL-POSE parts |
+| `gamespeed --map E1M2` | SPEED binding 20,408,337 ops/frame PASS (<= 22M); SIZE 81,137,244 words = **60.45% of 2^27** (span 91.94%) |
+| `msframe --map E1M2 --a build/doom_e1m2_r3.fjm --save-baseline shipped_e1m2` | **69.8 ms/frame** [69.1 .. 71.3], 194.3M fj/s, 13,567,769 ops/frame |
+| E1M1 identity | `emit_baseline --check` EMISSION IDENTICAL on the merged tree; tests/host 2,121 passed |
+
+The build command (section 1b's, with E1M2's pool at `--spread 1`: at spread 2 one 97,647-table group overflows the
+pool, 134.6%; at spread 1 the pool is 82.6%):
+
+    python scripts/emit_check.py E1M2 --then scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m2_r3.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m2.wad --map E1M2 --out build/doom_e1m2_r3.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m2_r3.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+
+(6,680 s; peak private 16.85 GB -- the box's whole RAM: rule 1 is absolute for it.) Play: `fj --run build/doom_e1m2_r3.fjm`.
+REBUILD VERIFIED: rebuilt from this command at 71fa53e9 as `build/doom_e1m2_r3b.fjm` (6,395 s) -- BYTE-IDENTICAL, sha256
+`f18d00c66d211cab26e69585b79ee2a45e52c546a0fbb3cf66d3c037240f574f` both.
+
+**Open for the owner:** the size (60.45% of 2^27 -- over E1M1's 43% and the provisional E1M2 60%; it FITS the 2^27
+the owner asked for); freezing the combat plan (it opens 2 doors by the player, the criterion wants 3); the recorded
+simplifications (`docs/handoff-e1m2.md` 3: no telefrag / teleport fog, the scrolling wall and the lights static, the
+S1 switch textures unchanged, five doors opening to 148 -- issue #104 F1). Follow-ups: #147.

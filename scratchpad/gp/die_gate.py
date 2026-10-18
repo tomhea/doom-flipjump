@@ -2,6 +2,8 @@
 
     python scratchpad/gp/die_gate.py --fjm build/<new>.fjm --labels <its label table>
     python scratchpad/gp/die_gate.py --oracle-only [--only D4]    # the scenarios, their counters and controls
+    ... --map E1M2 (or DOOMFJ_MAP=E1M2)      # M8: another map -- door 10, sector 23 and lift 98 are ROLES there
+                                             # (gate_roles.py: reversal_door, nukage_sector, lift_leaf_sector)
 
 fight_gate's machinery (p2a_gate.Mirror in the game tier's "full" modes; frame-0 and LATE pokes; menu keys as key
 events; STATE-, PIXEL- AND PALETTE-EXACT ON EVERY FRAME), with the opposite rule on deaths: EVERY SCENARIO MUST
@@ -51,6 +53,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+if __name__ == "__main__":                       # M8: `--map E1Mn` before probe / gamespeed read their defaults
+    sys.path.insert(0, str(HERE.parents[1] / "src"))
+    from doomfj.mapprofile import take_map_arg
+    take_map_arg()
+import gate_roles                                                            # noqa: E402  (M8)
 import fight_gate as FG                                                      # noqa: E402
 import p2a_gate as G                                                         # noqa: E402
 from doomfj import gamedata as gd                                            # noqa: E402
@@ -202,6 +209,7 @@ def after_death_frozen(tr) -> bool:
 
 def scenario_list(dsim, w, card) -> list:
     out = []
+    R = gate_roles.roles(dsim.mapname)               # M8: door 10 and sector 23 are E1M1's roles
     # ---- D1: killed by a zombieman's hitscan, then every key held
     zomb = FG.first_live(w, "MT_POSSESSED")
     all_keys = {"forward": True, "turn_left": True, "fire": True, "w1": True, "w2": True, "w3": True, "w4": True}
@@ -213,19 +221,25 @@ def scenario_list(dsim, w, card) -> list:
                 "claim": lambda c, tr: c["deaths"] >= 1 and first_death(tr) is not None and first_death(tr) < 36
                 and after_death_frozen(tr)})
     # ---- D2: killed in door 10 as it closes (p2a S13's walk-in), the door closes on the corpse
-    p10 = dsim.passes[10]
-    keys2 = [U] * 2 + [I] * 8 + [F] * 3 + [I] * 70
-    out.append({"name": "D2 killed in door 10 as it closes: it does not go back up", "keys": keys2,
-                "controls": ["dead_holds_door"],
-                "cands": [(G.door_front(dsim, 10), None, {13: kill()})],
-                "claim": lambda c, tr: c["deaths"] >= 1 and tr[-1]["phase"][0][10][0] < p10
-                and not any(a["phase"][0][10][1] == 2 and b["phase"][0][10][1] == 1 for a, b in zip(tr[13:], tr[14:]))})
-    # ---- D3: dead, then use -- at a door, in the exit's box
     keys3 = [I] * 3 + [U] + [I] * 3
-    out.append({"name": "D3d dead before door 10, use: no press, the restart", "keys": keys3,
-                "controls": ["dead_uses"], "cands": [(G.door_front(dsim, 10), None, {0: kill()})],
-                "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] >= 1
-                and all(fr["phase"][0][10][0] == 0 for fr in tr)})
+    if R.na("reversal_door"):
+        out += [G.na("D2 killed in a door as it closes: it does not go back up", R.na("reversal_door")),
+                G.na("D3d dead before a door, use: no press, the restart", R.na("reversal_door"))]
+    else:
+        rev = R["reversal_door"]
+        p10 = dsim.passes[rev]
+        keys2 = [U] * 2 + [I] * 8 + [F] * 3 + [I] * 70
+        out.append({"name": "D2 killed in door %d as it closes: it does not go back up" % rev, "keys": keys2,
+                    "controls": ["dead_holds_door"],
+                    "cands": [(G.door_front(dsim, rev), None, {13: kill()})],
+                    "claim": lambda c, tr: c["deaths"] >= 1 and tr[-1]["phase"][0][rev][0] < p10
+                    and not any(a["phase"][0][rev][1] == 2 and b["phase"][0][rev][1] == 1
+                                for a, b in zip(tr[13:], tr[14:]))})
+        # ---- D3: dead, then use -- at a door, in the exit's box
+        out.append({"name": "D3d dead before door %d, use: no press, the restart" % rev, "keys": keys3,
+                    "controls": ["dead_uses"], "cands": [(G.door_front(dsim, rev), None, {0: kill()})],
+                    "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] >= 1
+                    and all(fr["phase"][0][rev][0] == 0 for fr in tr)})
     out.append({"name": "D3x dead in the exit's box, use: no level end, the restart", "keys": keys3,
                 "controls": ["dead_exits"], "cands": [(G.exit_pose(dsim), None, {0: kill()})],
                 "claim": lambda c, tr: c["deaths"] >= 1 and c["restarts"] >= 1 and not any(fr["lvdone"] for fr in tr)})
@@ -268,11 +282,14 @@ def scenario_list(dsim, w, card) -> list:
                 and not tr[-1]["mstate"]["p_dead"]})
     # ---- D6: death by nukage, the latch
     keys6 = [{"forward": True, "w1": True}] + [I] * 6
-    d6 = [(p, FG.poke_hp(5)) for p in FG.poses_in_sector(dsim, w, 23, step=32, ledge=False)[:12]]
-    out.append({"name": "D6 death by nukage: that tic still runs the keys and the move", "keys": keys6,
-                "controls": ["latch"], "cands": d6,
-                "claim": lambda c, tr: c["deaths"] >= 1 and c["nukage"] >= 1 and first_death(tr) == 0
-                and tr[0]["pose"][:2] != tr[0]["start"][:2] and tr[0]["mstate"]["wp_pend"] == gd.WP_FIST})
+    if R.na("nukage_sector"):
+        out.append(G.na("D6 death by nukage: that tic still runs the keys and the move", R.na("nukage_sector")))
+    else:
+        d6 = [(p, FG.poke_hp(5)) for p in FG.poses_in_sector(dsim, w, R["nukage_sector"], step=32, ledge=False)[:12]]
+        out.append({"name": "D6 death by nukage: that tic still runs the keys and the move", "keys": keys6,
+                    "controls": ["latch"], "cands": d6,
+                    "claim": lambda c, tr: c["deaths"] >= 1 and c["nukage"] >= 1 and first_death(tr) == 0
+                    and tr[0]["pose"][:2] != tr[0]["start"][:2] and tr[0]["mstate"]["wp_pend"] == gd.WP_FIST})
     # ---- D7: death by a barrel's blast
     keys7 = [I] * 14 + [FIRE] * 2 + [I] * 24          # S_BEXP .. S_BEXP4: ~15 tics from the shot to the blast
     d7 = [(p, FG.both(FG.poke_hp(10), FG.bar_health(b, 1))) for b, t in enumerate(w.barrel_things)
@@ -415,10 +432,17 @@ def p8a_scenario_list(dsim, w, card) -> list:
                 "controls": ["no_sink", "sink_fast", "sink_floor", "band_eye"],
                 "cands": [(spawn, None, {0: kill()})] + [(p, None, {0: kill()}) for p in step_poses(dsim, w)[:4]],
                 "claim": lambda c, tr: c["deaths"] >= 1 and sinks_right(tr)})
-    # ---- D10: die beside a step, in lift 98's leaf, under a low ceiling
+    # ---- D10: die beside a step, in lift 98's leaf, under a low ceiling (M8: the lift is the role `lift_leaf_sector`)
+    R = gate_roles.roles(dsim.mapname)
+    lift = R.get("lift_leaf_sector")
+    if lift is None:
+        out.append(G.na("D10l die in a lift's leaf: the sink exact there", R.na("lift_leaf_sector")))
     for tag, cands in (("D10s die beside a 24-unit step", step_poses(dsim, w)),
-                       ("D10l die in lift 98's leaf", FG.poses_in_sector(dsim, w, 98, step=16)[:12]),
+                       ("D10l die in lift %s's leaf" % lift,
+                        FG.poses_in_sector(dsim, w, lift, step=16)[:12] if lift is not None else None),
                        ("D10c die under a low ceiling", low_ceiling_poses(dsim, w))):
+        if cands is None:
+            continue
         out.append({"name": tag + ": the sink exact there", "keys": [I] * 38, "rule": "sink", "pkg": ("A",),
                     "controls": [], "cands": [(p, None, {0: kill()}) for p in cands],
                     "claim": lambda c, tr: c["deaths"] >= 1 and c["sink_max"] == 35})

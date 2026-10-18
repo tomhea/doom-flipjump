@@ -51,6 +51,26 @@ point, ORed into both hard-budget tests. Proof: `test_slot_layouts_fj` with cap 
 oracle cap 5 vs fj cap 4, and the fj compare moved after the increment. Est. 40-60 ops per thing reaching the record
 body. Half a day + the sweep + the decision. Retires `slot-ids`.
 
+**BUILT (M8 F1.4, 2026-10-17; no game build or emission run -- the integrator's `emit_baseline --check` and `deg_gate`
+are owed).** As designed, with three findings:
+- `check_slot_ids(n_drawable, n_pools, n_drops, cfg)` counts ONE SKILL's drawable things in the tier with skills (the
+  rest are unlinked / `thvis` 0): with every skill's, E1M1 itself fails the pool-counting bound (234 + 10 + 25 = 269);
+  per skill it fits, hard's 212 + 10 + 25 = 247. E1M2: 295 + 10 + 54 = 359 -> `MAP_CONFIG["E1M2"]["SPR_SLOT_CAP"] = 255`.
+  The call moved below the skills / pools (`_skills`, `_p31`); it is an assert, the text does not move.
+- **the AIM rule is not "ORed into both tests"**: a capped monster in the seen body takes `seen_probe`, whose
+  `proj.project_thing ... aim` runs the aim hook at the base bound, so the fj AIMS it (DOOM's hitscan never depends
+  on the vissprite cap). The oracle mirrors that: its aim test excludes a capped thing unless it is a monster with
+  `seen_out` on (`render_wall_frame`'s `slot_capped`); the draw test takes the cap ORed in, as designed. (The same
+  holds, unreachably, for a MONSTER_BUDGET-failed monster: that budget is 255 and never binds.)
+- the oracle reads the cap through `map_cfg(self.cfg, scene.mapname)`, so every oracle a gate builds
+  (`ReferenceModel(GAME_CFG)`, `ReferenceModel()`) takes the map's cap without a gate change.
+Proof: `tests/fj/test_slot_cap_fj.py` (the record's head, counter credit and slot allocation transplanted verbatim,
+fed the oracle's `slot_trace` on the one-room map with 30 things, cap 4 and cap 0, seen body on and off; controls:
+oracle cap 5 vs fj cap 4, the compare moved after the increment, a capped monster sent to `ret`);
+`tests/host/test_slot_cap_oracle.py` (the oracle's rules + five oracle mutants); `tests/host/test_sprite_column.py`
+(the bound counts each term; every cap line is `rep(SPR_SLOT_CAP_ON...)`). The `slot-ids` stand-in is gone from
+`scripts/emit_check.py`.
+
 ## 2. Attacker / thing ids past 7 bits
 
 `world.build_schema`: `aim_sid` width `max(7, (nmon + nbarrel).bit_length())` via one helper `aim_bits(lay)` the
@@ -128,6 +148,12 @@ helper `things.mover_leaves(w)` every caller uses. E1M1: a host test that its ma
 thing stands on a lift today -- a class F fix with its own record). Proof: `test_pickup_fj` on E1M2's card before
 and after the switch; control: the static z read must part after the switch; the render half under deg_gate in F1.4.
 One day. Retires `pickup-static-z`.
+**DONE (M8 F1.3, 2026-10-17, branch m8-e1m2-movers):** `World.pickup_on_mover` / `pickup_sector` (the touch at
+`secs_c`), `lootcode.pk_mbox` (+ `mover_pickup_leaves`, `mbox_decls`), `things.mover_leaves` + `mover_mask_kw` (passed
+by the oracle, the emitter, MonsterViews, pickup_slots and the survey only where a thing stands in a mover leaf: E1M1
+none, its mask asserted unchanged); seven E1M2 items ride movers, six of them become runtime. `pickup-static-z` is
+retired from scripts/emit_check.py. Proof: tests/host/test_floor_movers.py, test_mover_things.py,
+tests/fj/test_pickup_mover_fj.py.
 
 ## 10. Floor switches per tag
 
@@ -140,7 +166,22 @@ collision (the renderer's pair switch handles them) -> sub-item 10b (a two-cell 
 nested `hex.if_flags`), +0.5..1 day. Proof: `test_movers_fj` two groups; sight/noise on E1M2 in all four
 combinations; controls: every `switch_cell` -> "fswitch"; `fs_hit<g>` wired to group 0. One day (+10b).
 
+**DONE (M8 F1.3):** one group per TAG of every one-shot floor special (`movers.floor_groups`: 19 / 23 / 38 / 58 / 71
+/ 102), the `fswitch` vector holding each group's state then its step timer in the WIDE layout (E1M1: one instant
+group, `fswitch: hex.vec 1` and the 1-bit `f_switch`, unchanged); every reader takes a mover's cell from
+`movers.mover_table`. MEASURED: E1M2's switch-switch lines all join ONE group (tag 13) -- no 10b there; the only
+two-cell line is 1199 (blazing lift 47 / S1 floor 206), read through the cell its opening depends on
+(`monstersight.line_states`, `collision.mover_line_states` with a split ob / lf dispatch). Proof:
+tests/fj/test_floor_movers_fj.py, test_two_cell_line_fj.py; tests/host/test_floor_movers.py.
+
 ## 11. A walk-over tag opening two doors
+
+**MEASURED 2026-10-17 -- larger than designed:** E1M3's tag 11 is SIX W1 lines forming a closed ring (linedefs 547,
+571, 593, 602, 1570, 1574 around (404..468, 2576..2640)), two of them SLANTED (571, 593), opening doors 82 and 83. One
+entry per door with one shared segment is not enough: each LINE is its own trigger (DOOM's W1 per line), with a
+slanted crossing test in the model (`doors.crossed`) and the fj (`doorcode.walkover_lines`) -- the same machinery F2
+builds for slanted door lines (`'d'` lines). Move item 11 to F2 (doors), with the per-line triggers.
+
 
 `doors.walkover_triggers` returns one entry per target door with the same segment (`w_fired` one bit per entry,
 everything downstream unchanged; both fire in the same call = EV_DoDoor on every tagged sector); optionally fuse

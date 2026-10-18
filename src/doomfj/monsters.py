@@ -910,7 +910,7 @@ class MonsterPhase:
         ws, gd, out = self.world.ws, self.gd, []
         for s in range(FIREBALL_POOL):
             if ws.proj_active[s]:
-                out.append((ws.proj_x[s] >> 16, ws.proj_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.proj_state[s]])))
+                out.append((ws.proj_x[s] >> 16, ws.proj_y[s] >> 16, mobile_lump(gd.THING_STATE_NAMES[ws.proj_state[s]])))
         for s in range(FX_POOL):
             if ws.fx_active[s]:
                 lump = mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])
@@ -928,7 +928,7 @@ class MonsterPhase:
         for m in range(self.world.layout.nmon):
             if not ws.mon_active[m]:
                 continue
-            st = gd.STATES[gd.STATE_NAMES[ws.mon_state[m]]]
+            st = gd.STATES[gd.THING_STATE_NAMES[ws.mon_state[m]]]
             rot = rotation(rm, view_x16, view_y16, ws.mon_x[m] << 16, ws.mon_y[m] << 16, ws.mon_facing[m])
             out[m] = view_of(patches, st.sprite, st.frame_index, rot)
         return out

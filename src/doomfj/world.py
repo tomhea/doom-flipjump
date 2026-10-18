@@ -980,6 +980,10 @@ class World(CombatMixin):
         self.floor_wide = _MV.floor_wide(self.floor_groups)
         self.floor_walk = _MV.floor_walk_triggers(lds, self.mw.vertexes(self.mapname), self.floor_groups)
         self.floor_use = _MV.floor_use_boxes(lds, cmap.vertexes, self.floor_groups)
+        # M8 C8: A_BossDeath's floor group on a boss map whose boss is here (E1M8: tag 666), else None
+        self.boss_group = _MV.boss_floor_group(secs, lds, sds, self.floor_groups, M,
+                                               {gd.MONSTER_DOOMEDNUMS[t.type] for t in self.things
+                                                if t.type in gd.MONSTER_DOOMEDNUMS})
         self.mover_table = _MV.mover_table(secs, lds, sds)
         assert set(self.switch) <= {si for g in self.floor_groups for si in g.sectors}
         self.mover_order = sorted(set(self.lift_order) | {si for g in self.floor_groups for si in g.sectors})
@@ -1091,6 +1095,7 @@ class World(CombatMixin):
         self._reset_state(skill)
         self.tic_count = 0
         self.events: List[TicEvents] = []
+        self.boss_log: List[Tuple[int, int]] = []    # M8 C8: (tic, slot) of every A_BossDeath that fired
         self._door_phase_scene()
 
     def _decor_for(self, skill: int) -> list:
@@ -1128,7 +1133,7 @@ class World(CombatMixin):
             ws.mon_x[m], ws.mon_y[m] = t.x, t.y
             ws.mon_facing[m] = _c_div(t.angle, 45) & 7        # ANG45 * (angle / 45)
             ws.mon_ambush[m] = 1 if t.flags & gd.MTF_AMBUSH else 0
-            ws.mon_state[m] = gd.STATE_INDEX[info.spawnstate]
+            ws.mon_state[m] = gd.THING_STATE_INDEX[info.spawnstate]
             ws.mon_health[m] = info.spawnhealth
             ws.mon_reaction[m] = info.reactiontime             # skill != nightmare
             ws.mon_movedir[m] = gd.DI_EAST                     # P_SpawnMobj memsets the mobj
@@ -1432,7 +1437,7 @@ class World(CombatMixin):
                 ws.mon_tics[m] -= 1
                 if ws.mon_tics[m] > 0:
                     continue
-            nxt = gd.STATES[gd.STATE_NAMES[ws.mon_state[m]]].next
+            nxt = gd.STATES[gd.THING_STATE_NAMES[ws.mon_state[m]]].next
             act = gd.STATES[nxt].action
             if act is not None and gd.ACTIONS[act].cls == "heavy":
                 if used >= self.k_heavy:
@@ -1459,7 +1464,7 @@ class World(CombatMixin):
                 self._list_remove(m, ws.mon_leaf[m])
                 return False
             st = gd.STATES[name]
-            ws.mon_state[m] = gd.STATE_INDEX[name]
+            ws.mon_state[m] = gd.THING_STATE_INDEX[name]
             ws.mon_tics[m] = TICS_FOREVER if st.tics < 0 else st.tics
             if run_action and st.action is not None:
                 self._run_action(m, st.action, ev)
@@ -1476,14 +1481,34 @@ class World(CombatMixin):
             self._a_chase(m, ev)
         elif action == "A_FaceTarget":
             self._a_face_target(m)
-        elif action in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack"):
-            self._monster_attack(m, action, ev)          # doomfj.combat: A_FaceTarget + effect
+        elif action in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack", "A_BruisAttack"):
+            self._monster_attack(m, action, ev)          # doomfj.combat: A_FaceTarget (not the Baron's) + effect
         elif action == "A_Fall":
             self.ws.mon_solid[m] = 0
+        elif action == "A_BossDeath":
+            self._a_boss_death(m, ev)                    # M8 C8
         elif a.phase == "sound":
             pass
         else:
             raise NotImplementedError("%s on a monster (phase %s)" % (action, a.phase))
+
+    def _a_boss_death(self, m: int, ev: TicEvents) -> None:
+        """M8 C8: A_BossDeath (p_enemy.c, Doom 1): on a boss map (`gamedata.BOSS_MAPS`: E1M8, CheckBossEnd's
+        MT_BRUISER) with the player's health > 0 and no OTHER monster of the dead one's type alive (spawned -- a monster
+        of another skill is not a thinker -- with health > 0), EV_DoFloor(tag 666, lowerFloorToLowest): the tag's floor
+        group fires (`boss_group`, movers.boss_floor_group). Nothing else on a non-boss map or type."""
+        boss = gd.BOSS_MAPS.get(self.mapname.upper())
+        info = self.mon_info[m]
+        if boss is None or info.name != boss[0]:
+            return
+        ws = self.ws
+        if ws.p_health <= 0:
+            return                                       # "no one left alive, so do not end game"
+        for j in range(self.layout.nmon):
+            if j != m and ws.mon_active[j] and self.mon_info[j].name == info.name and ws.mon_health[j] > 0:
+                return                                   # "other boss not dead"
+        self.boss_log.append((self.tic_count, m))         # (not a TicEvents field: the frozen event logs keep theirs)
+        self.floor_fire(self.boss_group)
 
     # ---------------------------------------------------------------------------- AI
     def player_alive(self) -> bool:
@@ -2097,7 +2122,7 @@ class World(CombatMixin):
     def monster_view(self, m: int) -> dict:
         ws = self.ws
         return {"slot": m, "type": self.mon_things[m].type, "active": ws.mon_active[m],
-                "state": gd.STATE_NAMES[ws.mon_state[m]], "tics": ws.mon_tics[m],
+                "state": gd.THING_STATE_NAMES[ws.mon_state[m]], "tics": ws.mon_tics[m],
                 "x": ws.mon_x[m], "y": ws.mon_y[m], "floorz": ws.mon_floorz[m],
                 "movedir": ws.mon_movedir[m], "facing": ws.mon_facing[m],
                 "movecount": ws.mon_movecount[m], "reaction": ws.mon_reaction[m],

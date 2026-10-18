@@ -102,6 +102,7 @@ FEATURE_REFUSALS = (
     (r"KeyError: \(\d+, -?\d+, -?\d+, \d+, \d+\).*monsters\.py", "C6 (a pickup with no sprite: THING_SPRITE)",
      "undrawn-pickups"),
     (r"door \d+ is asked two motions", "C3 (a door two lines move two ways)", "door-first-kind"),
+    (r"leaf lists store mobile index \+ 1 in a byte", "C1/C2 (runtime ids past 254: the byte leaf lists)", None),
 )
 
 

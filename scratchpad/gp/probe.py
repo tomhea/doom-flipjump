@@ -757,7 +757,8 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells[name] = Cell(name, "hex", width)
     # P10: the menu's `g_live`, and the stats (statcode.PERSIST; MonsterPhase.game_state's units)
     cells["g_live"] = Cell("g_live", "hex", 1)
-    for name, width in (("st_kill", 2), ("st_item", 2), ("st_secn", 1)):
+    from doomfj.statcode import COUNT_NIBBLES      # M8 (gates-ready): the emitter's width, never a copied literal
+    for name, width in (("st_kill", COUNT_NIBBLES), ("st_item", COUNT_NIBBLES), ("st_secn", 1)):
         cells[name] = Cell(name, "hex", width)
     cells["st_secm"] = Cell("st_secm", "hex", 1, count=_nsecret())
     ndrop, nbar = _loot_counts()

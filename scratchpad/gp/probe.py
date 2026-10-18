@@ -600,6 +600,9 @@ class GameBinary:
 
     def __init__(self, fjm=DEFAULT_FJM, flat_max_words: int | None = None, loader: str = "lean"):
         from doomfj.config import RENDER_FLAT_MAX_WORDS
+        # M8 (gates-ready): a binary NAMED for another map than the one this process's oracles measure is refused
+        from doomfj.mapprofile import check_binary
+        check_binary(fjm, _counts_map()[1])
         from doomfj.fastrun import _fjcore
         t = time.time()
         self.fjm = Path(fjm)

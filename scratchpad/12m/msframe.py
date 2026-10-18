@@ -187,18 +187,6 @@ def workload(the_map):
     return p, "script %s" % hashlib.sha256(p.read_bytes()).hexdigest()[:16]
 
 
-def map_mismatch(fjm, the_map):
-    """M8: why `fjm` (named build/doom_<map>_<x>.fjm) is not `the_map`'s binary, or None (a name that names no map
-    passes: the selftest's and older binaries)"""
-    import re
-    if not fjm:
-        return None
-    m = re.match(r"doom_(e\dm\d)_", Path(fjm).name.lower())
-    if m and m.group(1).upper() != the_map:
-        return "%s is named for %s, but --map / DOOMFJ_MAP is %s" % (Path(fjm).name, m.group(1).upper(), the_map)
-    return None
-
-
 def plan_script(the_map, frames, out):
     """M8: the map's timed walk as a DRAFT -- gamespeed's steered route 0 (deterministic; doors opened on the way)"""
     os.environ["DOOMFJ_MAP"] = the_map
@@ -519,10 +507,10 @@ def main():
 
     if not a.a:
         raise SystemExit("--a is required")
+    from doomfj.mapprofile import check_binary
     for f in (a.a, a.b):                                  # M8: a binary named for another map is not this map's
-        why = map_mismatch(f, the_map)
-        if why:
-            raise SystemExit(why)
+        if f:
+            check_binary(f, the_map)
 
     # ── the machine must be quiet, or the number is about the machine
     busy = busy_processes()

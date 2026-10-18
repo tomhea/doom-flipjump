@@ -87,6 +87,24 @@ def take_map_arg(argv=None, keep: bool = False) -> str:
     return want
 
 
+def binary_map(fjm) -> str | None:
+    """M8 (gates-ready): the map a binary's NAME says it is (build/doom_<map>_<x>.fjm: profile().prefix), or None for
+    a name that names no map (the selftests' and older binaries: blocked62.fjm, padB.fjm ...)"""
+    import re
+    from pathlib import Path
+    m = re.match(r"doom_(e\dm\d)_", Path(str(fjm)).name.lower())
+    return m.group(1).upper() if m else None
+
+
+def check_binary(fjm, mapname: str | None = None) -> None:
+    """M8 (gates-ready): refuse a binary NAMED for another map than the one the tool measures (a gate run with
+    --map E1M5 and E1M1's default binary measured E1M1 and called it E1M5's)"""
+    want = (mapname or ACTIVE).upper()
+    got = binary_map(fjm)
+    if got is not None and got != want:
+        raise SystemExit("%s is named for %s, but this run measures %s (--map / DOOMFJ_MAP)" % (fjm, got, want))
+
+
 def scenario_dir(mapname: str | None = None):
     """the map's tracked scenario directory (gate roles, gamespeed's records), absolute"""
     from pathlib import Path

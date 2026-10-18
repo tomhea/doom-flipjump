@@ -46,8 +46,18 @@ def test_plan_script_moves_where_hold_forward_is_stuck(tmp_path):
     assert doc["moved_frames_route"] >= 45, doc["moved_frames_route"]
 
 
-def test_binary_of_another_map_refused():
-    import msframe as MF
-    assert MF.map_mismatch("build/doom_e1m2_r4.fjm", "E1M2") is None
-    assert MF.map_mismatch("build/blocked62.fjm", "E1M5") is None
-    assert "named for E1M1" in MF.map_mismatch("build/doom_e1m1_blocked62.fjm", "E1M5")
+def test_binary_of_another_map_refused(monkeypatch):
+    """mapprofile.check_binary (msframe, gamespeed, probe.GameBinary -- every gate's binary): a binary NAMED for another
+    map is refused before it loads; one named for the map, or naming none, passes (the control)"""
+    import pytest
+    from doomfj.mapprofile import binary_map, check_binary
+    assert binary_map("build/doom_e1m2_r4.fjm") == "E1M2" and binary_map("build/blocked62.fjm") is None
+    check_binary("build/doom_e1m2_r4.fjm", "E1M2")
+    check_binary("build/blocked62.fjm", "E1M5")
+    with pytest.raises(SystemExit, match="named for E1M1"):
+        check_binary("build/doom_e1m1_blocked62.fjm", "E1M5")
+    sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
+    import probe as P
+    monkeypatch.setattr(P, "_ORACLE_MAPS", {("tests/fixtures/freedoom_e1m5.wad", "E1M5")})
+    with pytest.raises(SystemExit, match="measures E1M5"):
+        P.GameBinary(ROOT / "build" / "doom_e1m1_blocked62.fjm")       # refused before any file is read

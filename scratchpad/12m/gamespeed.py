@@ -827,6 +827,8 @@ def main():
             write_tours(a.tours_out, out, spread, a.frames)
         return 0
 
+    from doomfj.mapprofile import check_binary
+    check_binary(a.fjm, DEFAULT_MAP)            # M8: E1M1's default binary is not another map's
     size = read_fjm_size(a.fjm)
     print("SIZE: %s" % size, flush=True)
     run_avgs, raw_avgs, _ = measure_speed(a.fjm, a.runs, a.frames, calibrate=not a.no_calibrate)

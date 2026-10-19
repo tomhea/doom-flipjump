@@ -240,8 +240,12 @@ def setup_cell_specs(orc) -> dict:
     from doomfj.wall_renderer import BOOT_SKILL, MONSTER_MODE
     cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
     ph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE, player=orc.player_mode)
-    cells["sshead"] = P.Cell("sshead", "byte", count=len(orc._mv(ph.world).cmap.subsectors))
-    cells["thnext"] = P.Cell("thnext", "byte", count=orc.nrt)
+    # M8 F1.5: at the map's list width (Config.LIST_ID_BITS: a 12-bit list cell is probe kind 'cell', 3 nibbles)
+    from doomfj.config import Config, map_cfg
+    nib = map_cfg(Config(), orc.mapname).LIST_NIB
+    kind = dict(kind="byte") if nib == 2 else dict(kind="cell", n=nib)
+    cells["sshead"] = P.Cell("sshead", count=len(orc._mv(ph.world).cmap.subsectors), **kind)
+    cells["thnext"] = P.Cell("thnext", count=orc.nrt, **kind)
     return cells
 
 

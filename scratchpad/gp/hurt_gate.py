@@ -566,7 +566,8 @@ def leaf_list_cells(orc, ph, skill) -> dict:
     the skill spawns and the game has not removed (`MonsterViews.hidden`), a live mobile, a lying drop (mdrop 1).
     At the level start this is the restart block's own `things.skill_level_start` (tests/host hold the two equal)."""
     from doomfj.monsters import drop_rows, droppers, mobile_rows
-    from doomfj.things import skill_absent, spawn_leaf_lists
+    from doomfj.config import Config, map_cfg
+    from doomfj.things import list_max, skill_absent, spawn_leaf_lists
     from doomfj.world import FIREBALL_POOL, FX_POOL
     mv, ws = orc._mv(ph.world), ph.world.ws
     thss = orc.monster_rt(ph)["thss_rt"]
@@ -578,7 +579,8 @@ def leaf_list_cells(orc, ph, skill) -> dict:
     if drop_rows(ph.world):
         present += [ws.mon_drop[m] == 1 for m in droppers(ph.world)]
     assert len(present) == len(thss), (len(present), len(thss))
-    head, nxt = spawn_leaf_lists(thss, len(mv.cmap.subsectors), present)
+    head, nxt = spawn_leaf_lists(thss, len(mv.cmap.subsectors), present,      # M8 F1.5: the map's list width
+                                 max_things=list_max(map_cfg(Config(), orc.mapname).LIST_ID_BITS))
     return {"sshead": tuple(head), "thnext": tuple(nxt)}
 
 

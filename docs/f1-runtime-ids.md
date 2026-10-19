@@ -110,3 +110,42 @@ differs); one game build at the rung's end equal to the previous binary; recomme
   (8, 16) and (12, 16) configs, not (8, 12) -- the new harness is its first run; `build_blocked` must forward the
   defines; `thnext`'s `2*nt` extent fits E1M5 (370 <= 478), but a map with small nt and many drops needs
   `max(2*nt, nt + nmob)` (identical on E1M1).
+
+## 6. As built (F1.5, branch m8-runtime-ids, 2026-10-19)
+
+A1, with one change of shape: the 8-bit macros are NOT edited. A `rep(LIST_WIDE, ...)` wrapper (3's `sim.lread`) would
+have renamed every macro path through the lists' reads -- the pin-heat list's keys (`sim.thing_pass_depth(9)---
+hex.read_byte(2)---...`) -- so E1M1's blocking would have moved with no op changed. Instead:
+
+- **`src/fj/sim.fj`**: the wide TWINS appended -- `sim.leaf_link_w` / `leaf_unlink_w`, `sim.thing_pass_depth_w` (7 and 9
+  parameters), `sim.rank_key_w`: the 8-bit bodies with `hex.read_cell` / `hex.write_cell` and 3-nibble ids, nothing
+  else. `tests/host/test_wide_list_twins.py` derives each from its narrow macro by rule and requires the file to equal
+  it (5 R9 mutants). Each opens with a guard: assembled without the wide table it is an assembly error, not an 8-bit
+  read. **`src/fj/m1_reset.fj`**: `m1.zerocell12` (same guard).
+- **`config.py`**: `LIST_ID_BITS` (8 / 12), `LIST_WIDE`, `LIST_NIB`, `emit_fj_defines` (the -D file, namespaced as the
+  CLI writes it; None at 8). Not an fj constant: fj_consts.fj is unchanged. No MAP_CONFIG entry sets it yet.
+- **`things.py`**: `list_max`, `list_bits`, `list_macros` (the ONE place naming the macros a width calls),
+  `leaf_link_decls(nib)`, `spawn_leaf_lists` / `skill_level_start(max_things=)`, `byte_array_decl(bits=)`.
+- **Emitters**: `monstercode.select_tree_lines` (the third level only past 256), `td_key_rows` / `p33_decls` /
+  `d3_decls`, `p31_parts(list_bits=)`; `barrelcode` dr_t at `list_bits // 4`; `projcode.pool_tic_lines` and
+  `monstermove.move_leaf_lines` name `list_macros`; `wall_renderer.list_restart_lines` (m1.zerocell12 + 12 flips),
+  the walk's macro, the lists' decls, `thnext` at `max(2 * nt, nt + nmob)`, and an assert that a wide map is the game
+  tier with the depth walk (bind_things and the index-order thing_pass stay 8-bit).
+- **Build**: `build_wall_renderer` writes `fj_defines.fj` for a wide config and passes `defines_file=` to all four
+  assemblies (`selfreset.capture_labels(defines_file=)`); build_blocked's wrappers forward kwargs.
+- **Model / gates**: `world.build_schema` widens the model's lists past 254 MOBILES (8 bits on every surveyed map: the
+  schema is unchanged); `probe.Cell` kind `'cell'` (n nibbles; offline selftest plants 0xABC, a 'byte' read differs);
+  `b0_scenarios.setup_cell_specs` and `hurt_gate.leaf_list_cells` at the map's width.
+- **Survey**: the two rows cap against `list_max(map_cfg(..).LIST_ID_BITS)`, plus INFO "list id bits needed".
+
+Proof: `tests/fj/test_wide_ids_fj.py` RUNS (1) the relink at NT 300 against `World._list_insert` / `_list_remove`
+(every cell, every op), (2) the depth walk on rows 250..262 at rk0 0, 0xFE, 0x102, (3) the 3-level select at ntm 300,
+(4) the restart fragment on planted 0xFFF / 0x100 / 0x0FF / 0x123 cells, (5) drop_link / drop_take on rows 260+, with
+controls nib2, narrow, rank2, rk_set2, select2, zero8, flip8, drt2 and the no-table guard.
+
+Open for the level rungs: MAP_CONFIG `LIST_ID_BITS: 12` per map (E1M3 / E1M4 / E1M5); a wide map's first build (the
+table placement risk of 5); **C2 (runtime THINGS past 254, E1M6 / E1M7)** is covered by the lists, but
+`hurtcode.turn_lines`' `dt_t` (a monster's runtime row, 2 nibbles, asserted < 256) still refuses a monster row past
+255 -- a one-register widening -- and those maps' MONSTER-SLOT ids are a separate cap: the survey refuses E1M6's
+World on `aim_sid` (298 monster and barrel slots past the fj byte; dm_id / p_atk are 2 nibbles too). The lists are
+not what limits C2.

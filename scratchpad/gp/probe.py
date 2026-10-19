@@ -269,6 +269,8 @@ class Cell:
                     viewx = Cell('viewx', 'hex', 8, signed=True); dstate = Cell('dstate', 'hex', 1,
                     count=13); dwait = Cell('dwait', 'hex', 2, count=13).
       kind 'byte' : `count` BYTE cells at a one-cell stride (the write_byte arrays).
+      kind 'cell' : `count` cells at a one-cell stride, each holding ONE number of `n` nibbles in its jump word
+                    (M8 F1.5: a wide-list map's 12-bit sshead / thnext, n = 3 -- Config.LIST_NIB; 'byte' is n = 2).
       kind 'raw'  : `count` raw memory words from word (label // w) + index.
     `index` offsets the first element: in CELLS for hex (nibble cells) and byte, in WORDS for raw.
     A count of 1 reads as an int; more reads as a tuple."""
@@ -282,7 +284,7 @@ class Cell:
     def span_cells(self) -> int:
         if self.kind == "hex":
             return self.index + self.n * self.count
-        if self.kind == "byte":
+        if self.kind in ("byte", "cell"):
             return self.index + self.count
         return 0
 
@@ -308,7 +310,7 @@ class Probe:
         self.frame = -1
         self.bases = {}               # jump-word address -> the cell's base (see _field)
         for key, c in self.cells.items():
-            if c.kind not in ("hex", "byte", "raw"):
+            if c.kind not in ("hex", "byte", "cell", "raw"):
                 raise ValueError("cell %s: unknown kind %r" % (key, c.kind))
             if c.kind != "raw":
                 need, have = c.span_cells() * self.dw, labels.extent_bits(c.label)
@@ -329,7 +331,7 @@ class Probe:
         for key, c in self.cells.items():
             if c.kind == "raw":
                 continue
-            fbits = 4 if c.kind == "hex" else 8
+            fbits = 4 if c.kind == "hex" else 8 if c.kind == "byte" else 4 * c.n
             mask = ((1 << fbits) - 1) << self.dshift
             for e in range(c.count):
                 for i in range(c.n if c.kind == "hex" else 1):
@@ -352,7 +354,7 @@ class Probe:
         base = self.labels[c.label]
         if c.kind == "hex":
             return base + (c.index + element * c.n + nib) * self.dw
-        if c.kind == "byte":
+        if c.kind in ("byte", "cell"):
             return base + (c.index + element) * self.dw
         raise ValueError("raw cells have word addresses: use word_of")
 
@@ -411,6 +413,8 @@ class Probe:
                         v -= 1 << (4 * c.n)
                 elif c.kind == "byte":
                     v = self._field(self.cell_bits(key, e), 8)
+                elif c.kind == "cell":
+                    v = self._field(self.cell_bits(key, e), 4 * c.n)
                 else:
                     v = self.read_word(self.word_of(key, e))
                 vals.append(v)
@@ -433,6 +437,8 @@ class Probe:
                         self._set_field(self.cell_bits(key, e, i), 4, (v >> (4 * i)) & 0xF)
                 elif c.kind == "byte":
                     self._set_field(self.cell_bits(key, e), 8, v & 0xFF)
+                elif c.kind == "cell":
+                    self._set_field(self.cell_bits(key, e), 4 * c.n, v & ((1 << 4 * c.n) - 1))
                 else:
                     self.write_word(self.word_of(key, e), v & ((1 << self.w) - 1))
 
@@ -1180,7 +1186,7 @@ def codec_selftest(check) -> None:
     (a nibble v at jump word `v << 6`, a byte b at `b << 6`, flip words 0)"""
     dw = 64
     img = _FakeMemory()
-    base = {"num": 100 * dw, "one": 108 * dw, "arr": 109 * dw, "byt": 112 * dw, "end": 116 * dw}
+    base = {"num": 100 * dw, "one": 108 * dw, "arr": 109 * dw, "byt": 112 * dw, "wid": 116 * dw, "end": 118 * dw}
     val = 0xFE600000
 
     def pin(i):                                           # a blocked cell's BASE (bits 16+)
@@ -1192,7 +1198,20 @@ def codec_selftest(check) -> None:
         img.words[(base["arr"] + i * dw) // 32 + 1] = v << 6
     for i, v in enumerate((0xA5, 0x00, 0xFF, 0x3C)):      # byt: four byte cells
         img.words[(base["byt"] + i * dw) // 32 + 1] = v << 6
+    for i, v in enumerate((0xABC, 0x100)):                # wid: two 12-bit list cells (M8 F1.5, kind 'cell' n=3)
+        img.words[(base["wid"] + i * dw) // 32 + 1] = v << 6
     table = LabelTable(base, array("Q", sorted(base.values())), "<synthetic>")
+    wide = Probe({"wid": Cell("wid", "cell", 3, count=2)}, table, strict=False)
+    wide.attach(img, core=None)
+    check("C-1 codec: a 12-bit cell ('cell', n=3) reads its planted 0xABC / 0x100",
+          wide.read_cells() == {"wid": (0xABC, 0x100)}, str(wide.read_cells()))
+    as_byte = Probe({"wid": Cell("wid", "byte", count=2)}, table, strict=False)
+    as_byte.attach(img, core=None)
+    check("C-1 codec negative: the same cells read as 'byte' are NOT those values (0xBC / 0x00)",
+          as_byte.read_cells() == {"wid": (0xBC, 0x00)}, str(as_byte.read_cells()))
+    wide.write_cells({"wid": (0x123, 0xFFF)})
+    check("C-1 codec: a 12-bit cell written lands at value << 6 and reads back",
+          wide.read_cells() == {"wid": (0x123, 0xFFF)} and img.words[base["wid"] // 32 + 1] == 0x123 << 6)
     cells = {"num": Cell("num", "hex", 8, signed=True), "one": Cell("one", "hex", 1),
              "arr": Cell("arr", "hex", 1, count=3), "byt": Cell("byt", "byte", count=4),
              "raw": Cell("one", "raw", index=1)}

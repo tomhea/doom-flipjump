@@ -65,6 +65,8 @@ def test_hurt_na_only_off_e1m1():
 
 def test_die_d4_without_a_baked_barrel(monkeypatch):
     import die_gate as DG
+    import probe as P
+    monkeypatch.setattr(P, "_ORACLE_MAPS", set(P._ORACLE_MAPS))    # this test's E1M5 oracle leaves with it
     from doomfj import gamedata as gd
     from doomfj.monsters import MonsterPhase
     from doomfj.wall_renderer import BOOT_SKILL, MONSTER_MODE, PLAYER_MODE

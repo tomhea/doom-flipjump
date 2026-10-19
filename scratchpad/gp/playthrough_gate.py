@@ -48,7 +48,7 @@ if __name__ == "__main__":                         # `--map E1Mn` before probe /
 # the skill and the steering seed each shipped map's playthrough PASSES at by real play (the defaults; --skill /
 # --seed override). The seed only shifts the steering's dodge rhythm: every seed is real play, none is a cheat
 DEFAULT_SKILL = {"E1M1": "medium", "E1M2": "easy"}
-DEFAULT_SEED = {("E1M1", "medium"): [(0, 0), (266, 1)]}     # found by --search (model only); easy: seed 0
+DEFAULT_SEED = {("E1M1", "medium"): 1}     # found by --search (model only); E1M1 easy: seed 0
 CONTROL_FRAMES = 40           # world frames a control runs
 CONTROL_AT = 25               # the world frame a control mutates
 

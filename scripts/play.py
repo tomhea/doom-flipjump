@@ -379,6 +379,7 @@ class Steer:
     No cheat of any kind: every key is one a player could press."""
 
     FIGHT_R = 900
+    DASH = 160                 # cells of route left under which the player stops fighting and runs for the exit
     LOOK = 3
     GIVE_UP = 45
 
@@ -593,6 +594,13 @@ class Steer:
             low_ammo = (c.get("am_clip") or 0) < 5 and not (c.get("am_shell") or 0)
             if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo"):
                 return kd
+        # ---- the DASH: when what is left of the route is short, run it -- stopping to fight a crowd on the last
+        # stretch is how a worn-down player dies (E1M2's finale); the aim window's hunters are still shot in passing
+        left = sum(len(g["path"] or ()) for g in self.legs[self.li + 1:] if g["kind"] != "item")
+        left += max(0, len(self.pieces[self.pi]) - self.wi) if self.pieces else 0
+        if left < self.DASH and (foe is None or foe[0] > 64):
+            foe = None
+            self.why = "dash"
         # ---- combat
         self.why = "nav %d/%d" % (self.wi, len(self.pieces[self.pi]) if self.pieces else 0)
         if foe is not None:

@@ -107,6 +107,47 @@ STANDINS = {"decor-every-skill": _decor_every_skill,
             "attacker-7bit": _attacker_7bit}
 
 
+# docs/level-lessons.md (the CR of #142 item 3, #145 F10): E1M2's 66.85% size measurement ran three stand-ins F1.1 had
+# made obsolete, so it measured a program unlike the map's own. Each stand-in names the survey rows (by prefix) that
+# REFUSE what it stands in for, and the WITNESS rows that show the survey ran that check at all (a World refused
+# above runs none of its rows). A stand-in is STALE -- refused before anything is emitted -- when a witness row is
+# there and no refusing row is.
+STANDIN_ROWS = {  # stand-in: (refusing row prefixes, witness row prefixes)
+    "decor-every-skill": (("solid decorations some skill lacks",), ("solid decorations some skill lacks",)),
+    "stats-digits": (("monsters on LEVEL COMPLETE", "COUNTITEM pickups on LEVEL COMPLETE",
+                      "secret sectors on LEVEL COMPLETE"), ("monsters on LEVEL COMPLETE",)),
+    "far-los": (("map extent, far LOS",), ("map extent, far LOS",)),
+    "barrels-one-skill": (("barrels: level start the same on every skill",), ("barrels >= 1",)),
+    "barrel-chains-static": (("lesson: barrel chains",), ("barrel chains", "barrels >= 1")),
+    "attacker-7bit": (("monsters + barrels -> aim_sid",), ("monsters + barrels -> aim_sid",))}
+STANDIN_BLOCKING = ("REFUSED", "OVER", "ERROR")
+
+
+def stale_standins(standins, rows):
+    """the stand-ins (in the given order) the survey `rows` ((status, check, ...) tuples) show unneeded: a witness
+    row present, no refusing row"""
+    out = []
+    for s in standins:
+        refusing, witness = STANDIN_ROWS[s]
+        if any(r[1].startswith(witness) for r in rows) and not any(
+                r[0] in STANDIN_BLOCKING and r[1].startswith(refusing) for r in rows):
+            out.append(s)
+    return out
+
+
+def survey_rows(mapname):
+    """the survey's rows for `mapname`, run in a CHILD process: the survey imports the emitter's modules, and a
+    stand-in patched after a module bound the name at import would silently not apply (the P9 census lesson)"""
+    import subprocess
+    code = ("import importlib.util, json, sys; sys.path.insert(0, %r); "
+            "spec = importlib.util.spec_from_file_location('ls', %r); ls = importlib.util.module_from_spec(spec); "
+            "spec.loader.exec_module(ls); w = ls.WadFile.from_path(str(ls.ASSET_WAD)); "
+            "print(json.dumps(ls.Survey(w, %r, w).run().rows))"
+            % (str(ROOT / "src"), str(ROOT / "scripts" / "level_survey.py"), mapname))
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
+    return [tuple(r) for r in json.loads(out.strip().splitlines()[-1])]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("map")
@@ -135,6 +176,11 @@ def main():
         over = {k: int(v) for k, v in (kv.split("=", 1) for kv in a.map_config)}
         _config.MAP_CONFIG[a.map.upper()] = dict(_config.MAP_CONFIG.get(a.map.upper(), {}), **over)
         print("MAP_CONFIG[%s] = %s" % (a.map.upper(), _config.MAP_CONFIG[a.map.upper()]), flush=True)
+    assert set(STANDIN_ROWS) == set(STANDINS), "every stand-in names its survey rows (STANDIN_ROWS)"
+    if a.standin:
+        stale = stale_standins(a.standin, survey_rows(a.map))
+        assert not stale, ("stand-ins %s are STALE on %s: none of their survey rows refuses (STANDIN_ROWS) -- drop them; "
+                           "a stale stand-in measures a program unlike the map's" % (stale, a.map))
     for s in [s for s in STANDINS if s in a.standin]:     # registry order: modules that bind names at import last
         STANDINS[s]()
     from doomfj.config import Config, map_cfg

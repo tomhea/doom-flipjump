@@ -363,6 +363,23 @@ class Survey:
         self.row("OK", "solid decorations some skill lacks (monstercode: mc_don at NEW GAME)",
                  len(var), "", "" if not var else "mc_don flags for decor_solid indices %s" % var[:10])
 
+    def weapon_light(self):
+        """M8 (gates-ready, gen_dryrun on E1M9): the weapon sprite is lit by ONE baked colormap row
+        (hudcode.game_hud_parts asserts it); a sector dark enough for another row refuses every game-tier tool"""
+        from doomfj import hud
+        from doomfj.config import GAME_CFG
+        from doomfj.reference_model import ReferenceModel
+        rm = ReferenceModel(GAME_CFG)
+        rows = {}
+        for i, sec in enumerate(self.secs):
+            rows.setdefault(hud.psprite_light_row(rm, sec.light), []).append(i)
+        if len(rows) == 1:
+            self.row("OK", "weapon light: one colormap row", 1, 1)
+        else:
+            odd = sorted((r, v[:6]) for r, v in rows.items() if len(v) < max(len(x) for x in rows.values()))
+            self.row("REFUSED", "weapon light: colormap rows", len(rows), 1,
+                     "hudcode bakes one row; sectors on the others (row, sectors): %s" % odd)
+
     def render_caps(self):
         from doomfj import wall_renderer as WR
         from doomfj.mapcompiler import bake_bsp
@@ -743,7 +760,8 @@ class Survey:
     def run(self):
         for name, fn in (("geometry", self.geometry), ("textures", self.textures), ("specials", self.specials),
                          ("things", self.things), ("doors/movers", self.doors_and_movers), ("world", self.world),
-                         ("render caps", self.render_caps), ("lessons", self.lessons)):
+                         ("render caps", self.render_caps), ("weapon light", self.weapon_light),
+                         ("lessons", self.lessons)):
             self.guard("section " + name, fn)
         return self
 

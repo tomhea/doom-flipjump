@@ -54,3 +54,16 @@ def test_p8a_packages_probe_e1m1_under_another_map(monkeypatch):
     monkeypatch.setattr(P8, "_PKG", None)
     pk = P8.packages()
     assert all(ok for ok, _why in pk.values()), pk
+
+
+def test_a_tool_refuses_another_checkouts_doomfj(tmp_path):
+    """mapprofile.check_checkout: a tool whose checkout is not its doomfj's refuses (the installed doomfj points at the
+    main repo -- a worktree tool without PYTHONPATH=src measured the main repo's model). CONTROL: this checkout's tool
+    passes"""
+    from doomfj.mapprofile import check_checkout
+    check_checkout(ROOT / "scratchpad" / "gp" / "probe.py")
+    other = tmp_path / "otherrepo"
+    (other / "src" / "doomfj").mkdir(parents=True)
+    (other / "scratchpad").mkdir()
+    with pytest.raises(SystemExit, match="PYTHONPATH"):
+        check_checkout(other / "scratchpad" / "tool.py")

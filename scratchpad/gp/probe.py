@@ -72,6 +72,8 @@ DEFAULT_FJM = ROOT / "build" / "doom_e1m1_blocked27.fjm"
 DEFAULT_LABELS = ROOT / "scratchpad" / "12m" / "atlas" / "blocked27.labels.tsv.gz"
 # M8 (docs/level-pipeline.md 3): the map from doomfj.mapprofile (DOOMFJ_MAP; E1M1 when unset)
 from doomfj.mapprofile import profile as _map_profile                       # noqa: E402
+from doomfj.mapprofile import check_checkout as _check_checkout            # noqa: E402
+_check_checkout(__file__)       # M8: this checkout's doomfj (the installed one is the main repo's)
 DEFAULT_WAD = _map_profile().wad
 DEFAULT_ASSET = "assets/freedoom1.wad"
 DEFAULT_MAP = _map_profile().map

@@ -87,6 +87,19 @@ def take_map_arg(argv=None, keep: bool = False) -> str:
     return want
 
 
+def check_checkout(tool_file) -> None:
+    """M8 (the C3 agent's trap, 2026-10-19): the installed `doomfj` points at the MAIN repo, so a tool run in a worktree
+    without PYTHONPATH=src imported the main repo's model and measured the wrong code. A tool calls this with its own
+    `__file__`: its doomfj must be THIS checkout's src (the tool's checkout), else it refuses, naming both"""
+    from pathlib import Path
+    here = Path(__file__).resolve().parents[2]            # the checkout this doomfj comes from
+    tool = Path(tool_file).resolve()
+    root = next((p for p in tool.parents if (p / "src" / "doomfj").is_dir()), None)
+    if root is not None and root != here:
+        raise SystemExit("%s is %s's tool, but its doomfj is %s's (set PYTHONPATH=%s)"
+                         % (tool.name, root, here, root / "src"))
+
+
 def binary_map(fjm) -> str | None:
     """M8 (gates-ready): the map a binary's NAME says it is (build/doom_<map>_<x>.fjm: profile().prefix), or None for
     a name that names no map (the selftests' and older binaries: blocked62.fjm, padB.fjm ...)"""

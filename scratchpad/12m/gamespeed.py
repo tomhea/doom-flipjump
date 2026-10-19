@@ -72,6 +72,8 @@ SIZE_TARGET_PCT = 43.0             # of the address ceiling: 43% from M7 P10 (th
 
 # M8 (docs/level-pipeline.md 3): the map from doomfj.mapprofile (DOOMFJ_MAP; E1M1 when unset)
 from doomfj.mapprofile import profile as _map_profile                       # noqa: E402
+from doomfj.mapprofile import check_checkout as _check_checkout            # noqa: E402
+_check_checkout(__file__)       # M8: this checkout's doomfj (the installed one is the main repo's)
 DEFAULT_WAD = _map_profile().wad
 DEFAULT_MAP = _map_profile().map
 UNIT = 1 << 16                      # the sim's fixed-point unit

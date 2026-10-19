@@ -98,8 +98,15 @@ def _door_first_kind():
             _sys.modules[name].door_kinds = door_kinds
 
 
+def _weapon_one_row():
+    """(a HUD rung, not in the plan's clusters yet): every sector lights the weapon with colormap row 0 -- hudcode bakes
+    ONE row, and E1M9's one darker sector asks a second"""
+    from doomfj import hud
+    hud.psprite_light_row = lambda rm, light: 0
+
+
 STANDINS = {"unknown-things": _unknown_things, "undrawn-pickups": _undrawn_pickups,
-            "door-first-kind": _door_first_kind}
+            "door-first-kind": _door_first_kind, "weapon-one-row": _weapon_one_row}
 
 # a refusal's text -> (the feature cluster that lifts it, the stand-in that gets past it)
 FEATURE_REFUSALS = (
@@ -112,6 +119,8 @@ FEATURE_REFUSALS = (
     (r"M8 L4: line \d+'s destination .* is within line \d+'s reach", "C5 (teleports: a destination inside another "
      "teleport line's reach)", None),
     (r"suggest: no monster of \w+ lies in a region", "C8 (its monsters: E1M8's four are Barons, 3003)", None),
+    (r"the weapon is lit by \d+ colormap rows", "HUD (the weapon's light row per frame: E1M9; no cluster yet)",
+     "weapon-one-row"),
     (r"leaf lists store mobile index \+ 1 in a byte", "C1/C2 (runtime ids past 254: the byte leaf lists)", None),
 )
 
@@ -228,6 +237,8 @@ def one(m: str, standins, argv) -> int:
     for q in (ROOT / "src", ROOT / "scratchpad" / "12m", ROOT / "scratchpad", HERE, ROOT / "tests"):
         if str(q) not in sys.path:
             sys.path.insert(0, str(q))
+    from doomfj.mapprofile import check_checkout
+    check_checkout(__file__)            # this checkout's doomfj, never the installed main repo's
     for s in [s for s in STANDINS if s in standins]:      # registry order, whatever order they were found in
         STANDINS[s]()
     if standins:

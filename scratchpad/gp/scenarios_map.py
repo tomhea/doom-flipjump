@@ -51,6 +51,8 @@ if __name__ == "__main__":
     from doomfj.mapprofile import take_map_arg
     take_map_arg()
 
+from doomfj.mapprofile import check_checkout                                    # noqa: E402
+check_checkout(__file__)            # M8: this checkout's doomfj (the installed one is the main repo's)
 E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 ENGAGE = 640               # a checkpoint's group: the monsters within this many units
 SPREAD = 768               # checkpoints at least this far apart

@@ -494,7 +494,8 @@ def main():
     a = ap.parse_args()
     # M8: one baseline per map -- "shipped" is E1M1's; on another map it is mapprofile's shipped_<map>
     sys.path.insert(0, str(ROOT / "src"))
-    from doomfj.mapprofile import ACTIVE, profile
+    from doomfj.mapprofile import ACTIVE, check_checkout, profile
+    check_checkout(__file__)            # M8: this checkout's doomfj (the installed one is the main repo's)
     the_map = (a.map or ACTIVE).upper()
     for attr in ("against", "save_baseline"):
         if getattr(a, attr) == "shipped":

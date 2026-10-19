@@ -80,3 +80,15 @@ def test_a_pickup_without_a_sprite_is_missing(ls, wad, monkeypatch):
     monkeypatch.setattr(RM, "THING_SPRITE", {k: v for k, v in RM.THING_SPRITE.items() if k != 2007})
     bad = [r for r in _rows(ls, wad, "E1M1") if r[0] == "MISSING"]
     assert any(r[1].startswith("thing 2007 ") and "sprite NO" in r[4] for r in bad), bad
+
+
+def test_weapon_light_rows(ls, wad, monkeypatch):
+    """M8 (gates-ready): the weapon is lit by ONE baked colormap row (hudcode); E1M9 has a sector dark enough for a
+    second -- REFUSED by the survey (it refused every game-tier tool at hud.GameScreen). CONTROL: E1M1 is OK, and a
+    sector of E1M1 darkened to E1M9's needs turns it REFUSED"""
+    assert any(r[0] == "REFUSED" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M9"))
+    assert any(r[0] == "OK" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M1"))
+    from doomfj import hud
+    orig = hud.psprite_light_row
+    monkeypatch.setattr(hud, "psprite_light_row", lambda rm, light: orig(rm, light) + (light == 255))
+    assert any(r[0] == "REFUSED" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M1"))

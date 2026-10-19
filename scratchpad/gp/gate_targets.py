@@ -49,6 +49,8 @@ if __name__ == "__main__":                       # `--map E1Mn` before probe / g
     take_map_arg()
 
 import gate_roles                                                            # noqa: E402
+from doomfj.mapprofile import check_checkout                                # noqa: E402
+check_checkout(__file__)        # M8: this checkout's doomfj (the installed one is the main repo's)
 from doomfj import doors as D                                               # noqa: E402
 from doomfj import gamedata as gd                                           # noqa: E402
 

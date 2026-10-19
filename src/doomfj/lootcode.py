@@ -642,7 +642,9 @@ def pb_mon_lines(w, mon_rt: Sequence[int]) -> List[str]:
     itself."""
     out = ["// M7 P6 (doomfj.lootcode): the player blocked by a solid monster", ";pb_end",
            "pb_mon:", "    hex.zero 1, pb_hit"]
-    radii = (20, 30) + ((16,) if 16 in w.mon_radius else ())      # M8 C8: the lost soul (pb_bd16: soulcode.SCRATCH)
+    from doomfj.world import radius_classes
+    r0, _r1 = radius_classes(w.mon_radius[:w.layout.nmon])         # M8 C8: radius class 0 (E1M8's Barons 24)
+    radii = (r0, 30) + ((16,) if 16 in w.mon_radius else ())      # M8 C8: the lost soul (pb_bd16: soulcode.SCRATCH)
     for m in range(w.layout.nmon):
         r = w.mon_radius[m]
         assert r in radii, r
@@ -654,6 +656,8 @@ def pb_mon_lines(w, mon_rt: Sequence[int]) -> List[str]:
                 f"    stl.fcall pb_t{r}, pb_tret", "    hex.if1 1, pb_hit, pb_out",
                 f"  {n}:"]
     out += ["  pb_out:", "    stl.fret pb_ret"]
+    if r0 != 20:                                    # M8 C8: radius class 0's bound, a constant behind the jump-over
+        out += ["pb_bd%d: hex.vec 8, %d" % (r0, (r0 + 16) << 16)]
     for r in radii:
         out += [f"pb_t{r}:",
                 "    hex.mov 8, pb_c, pb_tx", "    hex.sub 8, pb_c, cpx", "    hex.abs 8, pb_c",

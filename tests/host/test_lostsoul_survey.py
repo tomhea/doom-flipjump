@@ -1,7 +1,7 @@
 """M8 C8 part 2 (the lost soul): `scripts/level_survey.py`'s `Survey.monster_extensions` -- the rows the soul earned.
 
-Three traps the soul found, each a survey row: (1) a new monster's states take MONSTER-DOMAIN ALIAS CODES (weapon
-states' codes, gamedata.MON_ALIAS_POOL) -- a later monster can run out of them; (2) damagecode's pain classes are one
+Three traps the soul found, each a survey row: (1) a new monster's states take THING-DOMAIN indices borrowed from
+weapon-only states (gamedata.EXT_ALIAS_CODES, check_thing_aliases) -- a later monster can run out of them; (2) damagecode's pain classes are one
 nibble of dmrnd -- at most 4 painchances on a map; (3) a soul beside a teleport line (EV_Teleport's soul z is the
 model's, not yet the fj's: wall_renderer refuses the pair).
 
@@ -52,8 +52,8 @@ def _rows(ls, mw, w):
 
 def test_the_soul_map_surveys_its_rows_ok(ls, world):
     rows = _rows(ls, *world)
-    assert rows["monster-domain extension state rows"][0] == "OK"
-    assert rows["monster-domain extension state rows"][2] == str(len(gd.EXT_STATE_NAMES)) == "16"
+    assert rows["extension states' borrowed thing indices"][0] == "OK"
+    assert rows["extension states' borrowed thing indices"][2] == str(len(gd.EXT_STATE_NAMES)) == "43"   # Baron 27 + 16
     assert rows["monster pain classes"][0] == "OK"
     assert rows["lost souls"][:3] == ("OK", "lost souls (MT_SKULL: doomfj.lostsoul, soulcode)", "3")
     assert rows["lost souls beside teleport lines"][0] == "OK"
@@ -63,12 +63,13 @@ def test_the_soul_map_surveys_its_rows_ok(ls, world):
 def test_e1m1_has_no_soul_row(ls):
     mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
     rows = _rows(ls, mw, World(mw, "E1M1", monsters="idle"))
-    assert "lost souls" not in rows and rows["monster-domain extension state rows"][0] == "OK"
+    assert "lost souls" not in rows and rows["extension states' borrowed thing indices"][0] == "OK"
 
 
-def test_control_the_alias_pool_runs_out(ls, world, monkeypatch):
-    monkeypatch.setattr(ls.gd, "MON_ALIAS_POOL", ls.gd.MON_ALIAS_POOL[:len(gd.EXT_STATE_NAMES) - 1])
-    assert _rows(ls, *world)["monster-domain extension state rows"][0] == "OVER"
+def test_control_a_borrowed_index_on_a_thing_state(ls, world, monkeypatch):
+    """the soul's run one on (31 .. 39): S_BLOOD1's index -- the row turns REFUSED"""
+    monkeypatch.setattr(ls.gd, "EXT_ALIAS_CODES", tuple(range(3, 30)) + tuple(range(31, 40)) + tuple(range(212, 219)))
+    assert _rows(ls, *world)["extension states' borrowed thing indices"][0] == "REFUSED"
 
 
 def test_control_a_fifth_pain_class(ls, world, monkeypatch):

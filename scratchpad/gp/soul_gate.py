@@ -57,7 +57,7 @@ def wake(mph, m: int, target: int = 1) -> None:
     """soul m awake in its see state, its target `target` (1 the player, 2 + slot a monster)"""
     ws = mph.world.ws
     see = mph.world.mon_info[m].seestate
-    ws.mon_state[m], ws.mon_tics[m] = gd.STATE_INDEX[see], gd.STATES[see].tics
+    ws.mon_state[m], ws.mon_tics[m] = gd.THING_STATE_INDEX[see], gd.STATES[see].tics
     ws.mon_target[m], ws.mon_reaction[m], ws.mon_movecount[m] = target, 0, 0
 
 

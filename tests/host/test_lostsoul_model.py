@@ -46,7 +46,8 @@ def test_mt_skull_is_info_c():
     assert m.flags == gd.MF_SOLID | gd.MF_SHOOTABLE | gd.MF_FLOAT | gd.MF_NOGRAVITY
     assert (m.spawnstate, m.seestate, m.painstate, m.meleestate, m.missilestate, m.deathstate, m.xdeathstate) == (
         "S_SKULL_STND", "S_SKULL_RUN1", "S_SKULL_PAIN", gd.S_NULL, "S_SKULL_ATK1", "S_SKULL_DIE1", gd.S_NULL)
-    rows = [(n, s.frame, s.tics, s.action, s.next) for n, s in ((n, gd.STATES[n]) for n in gd.EXT_STATE_NAMES)]
+    rows = [(n, s.frame, s.tics, s.action, s.next) for n, s in ((n, gd.STATES[n]) for n in gd.EXT_STATE_NAMES
+                                                                 if n.startswith("S_SKULL"))]
     assert rows == [
         ("S_SKULL_STND", 32768, 10, "A_Look", "S_SKULL_STND2"), ("S_SKULL_STND2", 32769, 10, "A_Look", "S_SKULL_STND"),
         ("S_SKULL_RUN1", 32768, 6, "A_Chase", "S_SKULL_RUN2"), ("S_SKULL_RUN2", 32769, 6, "A_Chase", "S_SKULL_RUN1"),
@@ -61,20 +62,33 @@ def test_mt_skull_is_info_c():
 
 
 def test_extension_codes_are_monster_domain_free():
-    """every extension row's alias code is a psprite state's (never a monster cell's) and names it back; every core
-    monster state keeps its index; no two monster states share a code"""
+    """the lost soul's states take THING-domain indices (gamedata.THING_STATE_INDEX, the Baron's scheme): each a
+    weapon-only core state's (check_thing_aliases), DISJOINT from the Baron's (3 .. 29) -- 30 .. 38 and 212 .. 218 --
+    and named back by THING_STATE_NAMES; every core monster state keeps its index; no two monster states share one"""
     from doomfj.monstercode import monster_states
     types = tuple(gd.MONSTER_DOOMEDNUMS.values())
     core = set(monster_states())
+    assert gd.check_thing_aliases() == []
+    skull = [n for n in gd.EXT_STATE_NAMES if n.startswith("S_SKULL")]
+    boss = [n for n in gd.EXT_STATE_NAMES if not n.startswith("S_SKULL")]
+    assert [gd.THING_STATE_INDEX[n] for n in skull] == list(range(30, 39)) + list(range(212, 219))
+    assert not {gd.THING_STATE_INDEX[n] for n in skull} & {gd.THING_STATE_INDEX[n] for n in boss}
     for n in gd.EXT_STATE_NAMES:
-        code = gd.STATE_INDEX[n]
-        assert code in gd.MON_ALIAS_POOL and gd.mon_state_name(code) == n
+        code = gd.THING_STATE_INDEX[n]
+        assert gd.THING_STATE_NAMES[code] == n and n not in gd.STATE_INDEX
         assert gd.STATE_NAMES[code] not in core, (n, gd.STATE_NAMES[code])
     for s in monster_states(types):
-        assert gd.mon_state_name(gd.STATE_INDEX[s]) == s
-    codes = [gd.STATE_INDEX[s] for s in monster_states(types)]
+        assert gd.THING_STATE_NAMES[gd.THING_STATE_INDEX[s]] == s
+    codes = [gd.THING_STATE_INDEX[s] for s in monster_states(types)]
     assert len(codes) == len(set(codes))
-    assert all(gd.STATE_INDEX[s] == gd.STATE_NAMES.index(s) for s in core)
+    assert all(gd.THING_STATE_INDEX[s] == gd.STATE_INDEX[s] == gd.STATE_NAMES.index(s) for s in core)
+
+
+def test_control_a_soul_index_on_a_thing_state_is_caught(monkeypatch):
+    """R9 for the test above: the soul's run moved one on (31 .. 39) puts S_SKULL_DIE..'s index on S_BLOOD1"""
+    codes = tuple(range(3, 30)) + tuple(range(31, 40)) + tuple(range(212, 219))
+    monkeypatch.setattr(gd, "EXT_ALIAS_CODES", codes)
+    assert any("S_BLOOD1" in b for b in gd.check_thing_aliases())
 
 
 def test_e1m1_without_a_soul_is_unchanged():
@@ -301,7 +315,7 @@ def test_a_killed_soul_is_removed():
     m = w.soul_slots[1]
     ev = TicEvents(0)
     w.damage_monster(m, 200, ("player", -1), ("player", -1), ev)
-    assert gd.mon_state_name(w.ws.mon_state[m]) == "S_SKULL_DIE1" and not w.ws.mon_shootable[m]
+    assert gd.THING_STATE_NAMES[w.ws.mon_state[m]] == "S_SKULL_DIE1" and not w.ws.mon_shootable[m]
     assert w.ws.p_killcount == 0, "MT_SKULL is not MF_COUNTKILL"
     for _ in range(40):
         w.tic({})
@@ -316,7 +330,7 @@ def test_a_flying_soul_feels_no_pain_but_rolls():
     k = w.soul_of[m]
     ws = w.ws
     ws.mon_target[m] = 1
-    ws.mon_state[m], ws.mon_tics[m] = gd.STATE_INDEX["S_SKULL_ATK3"], 4     # charging
+    ws.mon_state[m], ws.mon_tics[m] = gd.THING_STATE_INDEX["S_SKULL_ATK3"], 4     # charging
     w._a_skull_attack(m, TicEvents(0))
     st = ws.mon_rng[m]
     state = ws.mon_state[m]
@@ -325,7 +339,7 @@ def test_a_flying_soul_feels_no_pain_but_rolls():
     assert ws.sk_fly[k] == 1 and ws.sk_momz[k] == 0, "SKULLFLY stays; the momentum is zeroed (then the thrust)"
     ws.sk_fly[k] = 0
     w.damage_monster(m, 5, ("player", -1), ("player", -1), TicEvents(0))
-    assert gd.mon_state_name(ws.mon_state[m]) == "S_SKULL_PAIN" and ws.mon_justhit[m]
+    assert gd.THING_STATE_NAMES[ws.mon_state[m]] == "S_SKULL_PAIN" and ws.mon_justhit[m]
 
 
 def test_a_slam_on_an_item_stops_the_soul_and_rolls():

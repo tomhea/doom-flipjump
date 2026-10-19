@@ -43,7 +43,7 @@ gameplay-model RULE -- the approved simplifications (K, the rounded diagonals, t
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from doomfj import reference_model as _RM   # the oracle's constants, where both define one
 
@@ -460,15 +460,44 @@ class State:
         return bool(self.frame & FF_FULLBRIGHT)
 
 
-# M8 C8 (the lost soul, docs/episode-plan.md section 2): THE MONSTER-DOMAIN EXTENSION ROWS. The compact index below is
-# one byte and holds 246 states; a new monster's rows do not fit after them. A state cell holds the states of ONE
-# domain -- `mon_state` only ever a monster's -- so an extension row takes the code of a state no monster can be in:
-# a WEAPON (psprite) state's, in `MON_ALIAS_POOL` order (S_PUNCH 2, S_PUNCHDOWN 3, ...). `STATE_INDEX[name]` is that
-# code; `STATE_NAMES[code]` stays the weapon's name, so a MONSTER cell's code is named by `mon_state_name` (the one
-# reader every mon_state site uses). Every core row keeps its index, so no frozen digest and no E1M1 / E1M2 table moves.
-# Rows are APPENDED here, a monster's in DOOM's array order; a later monster's take the next codes of the pool.
-# info.c (Chocolate Doom at SOURCE_COMMIT, fetched raw with curl 2026-10-19): S_SKULL_STND .. S_SKULL_DIE6.
+# M8 C8 (docs/episode-plan.md 2; E1M8's four Barons) -- info.c's MT_BRUISER and MT_BRUISERSHOT rows: THE EXTENSION
+# STATES. They are in STATES (by name) but NOT in STATE_NAMES: the one-byte compact index is nearly full (246 of 255,
+# every frozen run's state cells recorded with it), so an extension state has an index in the THING DOMAIN only -- the
+# state cells of things (mon_state, proj_state) -- borrowed from a WEAPON PSPRITE state, which no thing cell ever holds
+# (`THING_STATE_INDEX` below; `check_thing_aliases` proves the borrowed ones are reached by weapons alone). The
+# player's cells (p_wpn_state, p_flash_state, p_mobj_state) keep STATE_INDEX. The Baron's RAISE chain (S_BOSS_RAISE1..7,
+# info.c's raisestate) is NOT copied: only the Arch-vile (Doom II) raises a corpse and E1 has none -- MT_BRUISER's
+# raisestate is S_NULL here, a recorded deviation that keeps seven indices free.
 _EXT_STATE_ROWS: Tuple[Tuple, ...] = (
+    ('S_BOSS_STND', 'BOSS', 0, 10, 'A_Look', 'S_BOSS_STND2'),
+    ('S_BOSS_STND2', 'BOSS', 1, 10, 'A_Look', 'S_BOSS_STND'),
+    ('S_BOSS_RUN1', 'BOSS', 0, 3, 'A_Chase', 'S_BOSS_RUN2'),
+    ('S_BOSS_RUN2', 'BOSS', 0, 3, 'A_Chase', 'S_BOSS_RUN3'),
+    ('S_BOSS_RUN3', 'BOSS', 1, 3, 'A_Chase', 'S_BOSS_RUN4'),
+    ('S_BOSS_RUN4', 'BOSS', 1, 3, 'A_Chase', 'S_BOSS_RUN5'),
+    ('S_BOSS_RUN5', 'BOSS', 2, 3, 'A_Chase', 'S_BOSS_RUN6'),
+    ('S_BOSS_RUN6', 'BOSS', 2, 3, 'A_Chase', 'S_BOSS_RUN7'),
+    ('S_BOSS_RUN7', 'BOSS', 3, 3, 'A_Chase', 'S_BOSS_RUN8'),
+    ('S_BOSS_RUN8', 'BOSS', 3, 3, 'A_Chase', 'S_BOSS_RUN1'),
+    ('S_BOSS_ATK1', 'BOSS', 4, 8, 'A_FaceTarget', 'S_BOSS_ATK2'),
+    ('S_BOSS_ATK2', 'BOSS', 5, 8, 'A_FaceTarget', 'S_BOSS_ATK3'),
+    ('S_BOSS_ATK3', 'BOSS', 6, 8, 'A_BruisAttack', 'S_BOSS_RUN1'),
+    ('S_BOSS_PAIN', 'BOSS', 7, 2, None, 'S_BOSS_PAIN2'),
+    ('S_BOSS_PAIN2', 'BOSS', 7, 2, 'A_Pain', 'S_BOSS_RUN1'),
+    ('S_BOSS_DIE1', 'BOSS', 8, 8, None, 'S_BOSS_DIE2'),
+    ('S_BOSS_DIE2', 'BOSS', 9, 8, 'A_Scream', 'S_BOSS_DIE3'),
+    ('S_BOSS_DIE3', 'BOSS', 10, 8, None, 'S_BOSS_DIE4'),
+    ('S_BOSS_DIE4', 'BOSS', 11, 8, 'A_Fall', 'S_BOSS_DIE5'),
+    ('S_BOSS_DIE5', 'BOSS', 12, 8, None, 'S_BOSS_DIE6'),
+    ('S_BOSS_DIE6', 'BOSS', 13, 8, None, 'S_BOSS_DIE7'),
+    ('S_BOSS_DIE7', 'BOSS', 14, -1, 'A_BossDeath', 'S_NULL'),
+    ('S_BRBALL1', 'BAL7', 32768, 4, None, 'S_BRBALL2'),
+    ('S_BRBALL2', 'BAL7', 32769, 4, None, 'S_BRBALL1'),
+    ('S_BRBALLX1', 'BAL7', 32770, 6, None, 'S_BRBALLX2'),
+    ('S_BRBALLX2', 'BAL7', 32771, 6, None, 'S_BRBALLX3'),
+    ('S_BRBALLX3', 'BAL7', 32772, 6, None, 'S_NULL'),
+    # M8 C8 part 2: the lost soul (info.c S_SKULL_STND .. S_SKULL_DIE6, Chocolate Doom at SOURCE_COMMIT, fetched raw
+    # with curl 2026-10-19) -- after the Baron's, so its borrowed indices are 30 .. 45
     ('S_SKULL_STND', 'SKUL', 32768, 10, 'A_Look', 'S_SKULL_STND2'),
     ('S_SKULL_STND2', 'SKUL', 32769, 10, 'A_Look', 'S_SKULL_STND'),
     ('S_SKULL_RUN1', 'SKUL', 32768, 6, 'A_Chase', 'S_SKULL_RUN2'),
@@ -495,23 +524,24 @@ STATE_INDEX: Dict[str, int] = {n: i for i, n in enumerate(STATE_NAMES)}
 S_NULL = "S_NULL"
 # M8: the states before the teleport fog's -- the length monstercode's state table keeps (E1M1's text: no M8 row)
 CORE_STATE_COUNT = STATE_INDEX["S_TFOG"]
-assert STATE_NAMES[0] == S_NULL and len(STATE_NAMES) <= 255
+assert STATE_NAMES[0] == S_NULL and len(STATE_NAMES) + len(_EXT_STATE_ROWS) == len(STATES)
+assert len(STATE_NAMES) <= 255
+# M8 C8: THE THING DOMAIN's index -- what a THING's state cell (mon_state, proj_state) holds. Every core state keeps its
+# STATE_INDEX; extension state k takes index EXT_ALIAS_BASE + k, a weapon psprite state's (S_PUNCHDOWN ..; proved
+# weapon-only by check_thing_aliases). Read a thing cell with THING_STATE_NAMES, write it with THING_STATE_INDEX --
+# never STATE_NAMES / STATE_INDEX, which name the weapon state at a borrowed index.
 EXT_STATE_NAMES: Tuple[str, ...] = tuple(r[0] for r in _EXT_STATE_ROWS)
-# the codes an extension row may take: every psprite (weapon) state's -- psprite states are only ever in p_wpn_state /
-# p_flash_state, never in a monster cell (check_integrity holds the domains apart; test_lostsoul_model checks the pool)
-MON_ALIAS_POOL: Tuple[int, ...] = tuple(i for i in range(CORE_STATE_COUNT)
-                                        if _STATE_ROWS[i][1] in ("PUNG", "PISG", "PISF", "SHTG", "SHTF", "SAWG"))
-assert len(EXT_STATE_NAMES) <= len(MON_ALIAS_POOL), "more extension rows than alias codes"
-STATE_INDEX.update({n: MON_ALIAS_POOL[k] for k, n in enumerate(EXT_STATE_NAMES)})
-# a MONSTER cell's code -> its state's name (the core names, the extension rows at their alias codes)
-_EXT_OF_CODE = {MON_ALIAS_POOL[k]: n for k, n in enumerate(EXT_STATE_NAMES)}
-MON_STATE_NAMES: Tuple[str, ...] = tuple(_EXT_OF_CODE.get(i, n) for i, n in enumerate(STATE_NAMES))
-
-
-def mon_state_name(code: int) -> str:
-    """the name of the state a MONSTER cell (`mon_state`) holds -- an extension row's alias code names the extension
-    row, not the weapon state that shares the code (the extension rows' block comment)"""
-    return MON_STATE_NAMES[code]
+EXT_ALIAS_BASE = 3                       # S_PUNCHDOWN: the Baron's 27 borrow the run 3 .. 29
+# M8 C8 part 2: EVERY extension state's borrowed index, in EXT_STATE_NAMES order -- the Baron's run 3 .. 29, then the
+# lost soul's 16: 30 .. 38 (the rest of the run: S_SAW1 .. S_SAW3 end it, S_BLOOD1 at 39 is a thing's) and 212 .. 218
+# (the next weapon-only states). check_thing_aliases proves each one weapon-only; still free after these (2026-10-19):
+# 1, 2, 219 .. 221, 226 .. 233
+EXT_ALIAS_CODES: Tuple[int, ...] = tuple(range(EXT_ALIAS_BASE, 39)) + tuple(range(212, 219))
+assert len(EXT_ALIAS_CODES) == len(EXT_STATE_NAMES) == len(set(EXT_ALIAS_CODES)), "an extension state without an index"
+THING_STATE_INDEX: Dict[str, int] = {**STATE_INDEX, **dict(zip(EXT_STATE_NAMES, EXT_ALIAS_CODES))}
+_EXT_OF_CODE: Dict[int, str] = dict(zip(EXT_ALIAS_CODES, EXT_STATE_NAMES))
+THING_STATE_NAMES: Tuple[str, ...] = tuple(_EXT_OF_CODE.get(i, n) for i, n in enumerate(STATE_NAMES))
+assert all(THING_STATE_NAMES[THING_STATE_INDEX[n]] == n for n in EXT_STATE_NAMES)
 
 
 # ================================================================================================
@@ -558,6 +588,10 @@ ACTIONS: Dict[str, Action] = {a.name: a for a in (
     Action("A_GunFlash", "psprite", "psprite", "P9", "the launcher: the player's attack frame, the flash"),
     Action("A_FireMissile", "psprite", "psprite", "P9", "the launcher: one rocket, P_SpawnPlayerMissile"),
     Action("A_FireCGun", "psprite", "psprite", "P10", "the chaingun: one bullet a burst frame, its flash frame"),
+    # M8 C8: the Baron of Hell (p_enemy.c) -- A_BruisAttack has NO A_FaceTarget (its ATK1 / ATK2 face), A_BossDeath
+    # (E1M8: every Baron dead and the player alive -> EV_DoFloor(tag 666, lowerFloorToLowest))
+    Action("A_BruisAttack", "mobj", "heavy", "M8", "Baron: claw (P_Random()%8+1)*10 in melee range, else MT_BRUISERSHOT"),
+    Action("A_BossDeath", "mobj", "cheap", "M8", "E1M8: the last Baron's death lowers the tag-666 floor"),
     Action("A_SkullAttack", "mobj", "heavy", "M8", "the lost soul: MF_SKULLFLY, the charge at SKULLSPEED, momz"),
 )}
 
@@ -665,6 +699,14 @@ MOBJINFO: Dict[str, MobjInfo] = {m.name: m for m in (
     _mi("MT_ROCKET", -1, "S_ROCKET", 1000, S_NULL, "sfx_rlaunc", 8, "sfx_None", S_NULL, 0,
         "sfx_None", S_NULL, S_NULL, "S_EXPLODE1", S_NULL, "sfx_barexp", 20 * F, 11 * F, 8 * F, 100,
         20, "sfx_None", MF_NOBLOCKMAP | MF_MISSILE | MF_DROPOFF | MF_NOGRAVITY, S_NULL),
+    # M8 C8: the Baron of Hell and his green fireball (info.c MT_BRUISER, MT_BRUISERSHOT). raisestate S_NULL: the
+    # extension states' note (no Arch-vile in E1; info.c's is S_BOSS_RAISE1)
+    _mi("MT_BRUISER", 3003, "S_BOSS_STND", 1000, "S_BOSS_RUN1", "sfx_brssit", 8, 0, "S_BOSS_PAIN", 50,
+        "sfx_dmpain", "S_BOSS_ATK1", "S_BOSS_ATK1", "S_BOSS_DIE1", S_NULL, "sfx_brsdth", 8, 24 * F, 64 * F,
+        1000, 0, "sfx_dmact", MF_SOLID | MF_SHOOTABLE | MF_COUNTKILL, S_NULL),
+    _mi("MT_BRUISERSHOT", -1, "S_BRBALL1", 1000, S_NULL, "sfx_firsht", 8, "sfx_None", S_NULL, 0,
+        "sfx_None", S_NULL, S_NULL, "S_BRBALLX1", S_NULL, "sfx_firxpl", 15 * F, 6 * F, 8 * F, 100,
+        8, "sfx_None", MF_NOBLOCKMAP | MF_MISSILE | MF_DROPOFF | MF_NOGRAVITY, S_NULL),
     # M8 C8: the lost soul (info.c MT_SKULL, fetched raw 2026-10-19) -- not MF_COUNTKILL; painchance 256 (always)
     _mi("MT_SKULL", 3006, "S_SKULL_STND", 100, "S_SKULL_RUN1", "sfx_None", 8, "sfx_sklatk", "S_SKULL_PAIN", 256,
         "sfx_dmpain", 0, "S_SKULL_ATK1", "S_SKULL_DIE1", S_NULL, "sfx_firxpl", 8, 16 * F, 56 * F, 50, 3,
@@ -675,10 +717,17 @@ del F
 # The five monster types E1M1 spawns, by editor number.
 MONSTER_DOOMEDNUMS: Dict[int, str] = {3004: "MT_POSSESSED", 9: "MT_SHOTGUY", 3001: "MT_TROOP",
                                       3002: "MT_SERGEANT", 58: "MT_SHADOWS",
-                                      3006: "MT_SKULL"}       # M8 C8: the lost soul (E1M6, E1M7)
-# M8 C8: the monster types whose rows are EXTENSION rows (the alias codes above) -- a map without one emits no row of
-# theirs (monstercode.map_monster_types), so E1M1's and E1M2's state tables are unchanged
-EXT_MONSTER_TYPES: Tuple[str, ...] = ("MT_SKULL",)
+                                      3003: "MT_BRUISER",                   # M8 C8: E1M8's Barons
+                                      3006: "MT_SKULL"}                     # M8 C8: the lost soul (E1M6, E1M7)
+# M8 C8: the monster types whose states are EXTENSION states (THING_STATE_INDEX): a map without them emits what it
+# emitted before (monstercode.map_monster_types -- E1M1 and E1M2 have none)
+EXT_MONSTER_TYPES: Tuple[str, ...] = ("MT_BRUISER", "MT_SKULL")
+# M8 C8: A_BossDeath's maps (p_enemy.c, Doom 1: CheckBossEnd and the episode switch) -- map -> (the boss type whose last
+# death fires it, the sector tag, EV_DoFloor's rule). E1M8: every Baron dead -> tag 666 lowerFloorToLowest. (E2M8 /
+# E3M8 end the level and E4 lowers / opens other tags: not E1, not here)
+BOSS_MAPS: Dict[str, Tuple[str, int, str]] = {"E1M8": ("MT_BRUISER", 666, "lowest")}
+# M8 C8: each missile shooter's missile (P_SpawnMissile's type in its attack action)
+MISSILE_OF: Dict[str, str] = {"MT_TROOP": "MT_TROOPSHOT", "MT_BRUISER": "MT_BRUISERSHOT"}
 # What a kill drops (p_inter.c P_KillMobj: MT_POSSESSED -> MT_CLIP, MT_SHOTGUY -> MT_SHOTGUN).
 DROPS: Dict[str, str] = {"MT_POSSESSED": "MT_CLIP", "MT_SHOTGUY": "MT_SHOTGUN"}
 
@@ -710,8 +759,9 @@ EXIT_SIGN_TYPE = 9800
 THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(EXIT_SIGN_TYPE, "P11_EXIT_SIGN", 0, 0, "doomfj.exitsign"),   # P11 (a): not solid, not special
     *(_tt_from_info(mt) for mt in ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT",
-                                   "MT_SHADOWS", "MT_BARREL", "MT_CLIP", "MT_SHOTGUN",
-                                   "MT_SKULL")),                     # M8 C8: the lost soul
+                                   "MT_SHADOWS", "MT_BARREL", "MT_CLIP", "MT_SHOTGUN")),
+    _tt_from_info("MT_BRUISER"),                                      # M8 C8: radius 24, solid
+    _tt_from_info("MT_SKULL"),                                        # M8 C8: the lost soul, radius 16, solid
     # pickups verified in info.c's visible part (MT_MISC0..MT_MISC18)
     ThingType(2018, "MT_MISC0", 20, MF_SPECIAL, "info.c"),
     ThingType(2019, "MT_MISC1", 20, MF_SPECIAL, "info.c"),
@@ -877,3 +927,44 @@ def check_integrity(states: Mapping[str, State] = None, infos: Mapping[str, Mobj
 
 
 assert not check_integrity(), check_integrity()
+
+
+def _closure(roots, states) -> set:
+    seen, stack = set(), list(roots)
+    while stack:
+        s = stack.pop()
+        if s in seen or s not in states:
+            continue
+        seen.add(s)
+        stack.append(states[s].next)
+    return seen
+
+
+def check_thing_aliases(alias_base: int = None, ext_names: Sequence[str] = None) -> List[str]:
+    """M8 C8: [] when every index an extension state borrows (THING_STATE_INDEX) is a core state that ONLY a weapon
+    reaches (the weaponinfo roots and the code-set psprite states; never a mobjinfo root, never the player thing's
+    states), is not S_NULL and stays below the core count -- so no thing cell holds it in its own meaning; and every
+    extension state is a THING's (reached from a mobjinfo root). One line per defect (the host test mutates the base)."""
+    names = EXT_STATE_NAMES if ext_names is None else tuple(ext_names)
+    # M8 C8 part 2: the indices EXT_ALIAS_CODES gives; a base (the host test's mutation) makes them one run from it
+    codes = EXT_ALIAS_CODES if alias_base is None else tuple(range(alias_base, alias_base + len(names)))
+    mobj = _closure([s for mi in MOBJINFO.values() for s in mi.entry_states()]
+                    + [s for s, d in CODE_ENTRY_STATES.items() if d == "mobj"], STATES)
+    psp = _closure([s for w in WEAPONINFO.values() for s in (w.upstate, w.downstate, w.readystate, w.atkstate,
+                                                            w.flashstate) if s != S_NULL]
+                   + [s for s, d in CODE_ENTRY_STATES.items() if d == "psprite"], STATES)
+    bad = []
+    for k, n in enumerate(names):
+        i = codes[k]
+        if not 0 < i < CORE_STATE_COUNT:
+            bad.append("%s: borrowed index %d outside 1 .. %d" % (n, i, CORE_STATE_COUNT - 1))
+            continue
+        core = STATE_NAMES[i]
+        if core in mobj or core not in psp:
+            bad.append("%s: borrowed index %d is %s, not a weapon-only state" % (n, i, core))
+        if n not in mobj:
+            bad.append("%s: an extension state no thing reaches" % n)
+    return bad
+
+
+assert not check_thing_aliases(), check_thing_aliases()

@@ -143,6 +143,13 @@ FIREBALL_H = FIREBALL_INFO.height >> 16     # 8
 ROCKET_INFO = gd.MOBJINFO["MT_ROCKET"]
 ROCKET_R = FIREBALL_R                       # the 2D convention: the fireball's radius (DOOM's rocket is 11)
 assert ROCKET_INFO.height >> 16 == FIREBALL_H, "the rocket's lines are the fireball's missile cells (height 8)"
+# M8 C8: the Baron's green fireball -- a MONSTER missile as the imp's (the pool, the missile cells, the box rules), with
+# its own speed 15, damage 8 and states (BAL7). Its radius and height are the imp fireball's: every box and cell rule
+# that reads FIREBALL_R / FIREBALL_H holds for it unchanged (asserted)
+BRUISERSHOT_INFO = gd.MOBJINFO["MT_BRUISERSHOT"]
+assert (BRUISERSHOT_INFO.radius >> 16, BRUISERSHOT_INFO.height >> 16) == (FIREBALL_R, FIREBALL_H)
+# a monster's missile, by its shooter's type (gamedata.MISSILE_OF)
+MONSTER_MISSILES = {mt: gd.MOBJINFO[gd.MISSILE_OF[mt]] for mt in gd.MISSILE_OF}
 
 
 def _state_chain(start: str) -> Tuple[str, ...]:
@@ -154,6 +161,11 @@ def _state_chain(start: str) -> Tuple[str, ...]:
 
 
 ROCKET_STATES = frozenset(_state_chain(ROCKET_INFO.spawnstate) + _state_chain(ROCKET_INFO.deathstate))
+BRUISERSHOT_STATES = frozenset(_state_chain(BRUISERSHOT_INFO.spawnstate)        # M8 C8
+                               + _state_chain(BRUISERSHOT_INFO.deathstate))
+# M8 C8: the claw-or-missile attacks (A_TroopAttack, A_BruisAttack) and their claw's site (Sites' attribute)
+CLAW_SITES = {"A_TroopAttack": "troop_claw", "A_BruisAttack": "bruis_claw"}
+NO_FACE_ATTACKS = frozenset({"A_BruisAttack"})     # p_enemy.c: A_BruisAttack never calls A_FaceTarget
 FOG_STATES = frozenset(_state_chain(gd.MOBJINFO["MT_TFOG"].spawnstate))      # M8: the teleport fog's
 BARREL_INFO = gd.MOBJINFO["MT_BARREL"]
 BARREL_R = BARREL_INFO.radius >> 16         # 10
@@ -249,11 +261,14 @@ class Sites:
         self.mon_bullet = (3, outcome_table_k(lambda a, b, c: (a - b, (c % 5 + 1) * 3), 3))
         # A_TroopAttack's claw: damage = (P_Random()%8+1)*3
         self.troop_claw = (1, one(lambda v: (v % 8 + 1) * 3))
+        # M8 C8: A_BruisAttack's claw: damage = (P_Random()%8+1)*10
+        self.bruis_claw = (1, one(lambda v: (v % 8 + 1) * 10))
         # A_SargAttack: damage = ((P_Random()%10)+1)*4
         self.sarg_bite = (1, one(lambda v: (v % 10 + 1) * 4))
         # PIT_CheckThing, a missile hitting: damage = ((P_Random()%8)+1)*tmthing->info->damage
         self.fireball_hit = (1, one(lambda v: (v % 8 + 1) * FIREBALL_INFO.damage))
         self.rocket_hit = (1, one(lambda v: (v % 8 + 1) * ROCKET_INFO.damage))            # P9: the rocket's 20
+        self.bruiser_hit = (1, one(lambda v: (v % 8 + 1) * BRUISERSHOT_INFO.damage))      # M8 C8: the Baron's 8
         # `tics -= P_Random()&3`: P_KillMobj, P_ExplodeMissile, P_CheckMissileSpawn, puff, blood
         self.tics_roll = (1, one(lambda v: v & 3))
         # P_DamageMobj: P_Random () < target->info->painchance -- one table per painchance value
@@ -282,9 +297,11 @@ def site_formulas(col: Callable[[int], int]) -> Dict[str, Tuple[int, Callable]]:
         "saw": (3, lambda a, b, c: (2 * (a % 10 + 1), col(b - c))),
         "mon_bullet": (3, lambda a, b, c: (a - b, (c % 5 + 1) * 3)),
         "troop_claw": (1, lambda v: (v % 8 + 1) * 3),
+        "bruis_claw": (1, lambda v: (v % 8 + 1) * 10),                     # M8 C8
         "sarg_bite": (1, lambda v: (v % 10 + 1) * 4),
         "fireball_hit": (1, lambda v: (v % 8 + 1) * 3),
         "rocket_hit": (1, lambda v: (v % 8 + 1) * 20),                     # P9
+        "bruiser_hit": (1, lambda v: (v % 8 + 1) * 8),                     # M8 C8
         "tics_roll": (1, lambda v: v & 3),
         **pains,
     }
@@ -392,6 +409,11 @@ class CombatMixin:
         assert self.hwt_r[PLAYER_R] == self.hwt
         self.fireball_mom = fireball_momentum_table(rm)
         self.rocket_mom = fireball_momentum_table(rm, ROCKET_INFO)          # P9
+        # M8 C8: each monster missile's momentum table and impact site, by the missile's mobjtype name
+        self.missile_mom = {FIREBALL_INFO.name: self.fireball_mom}
+        self.missile_hit = {FIREBALL_INFO.name: self.sites.fireball_hit, BRUISERSHOT_INFO.name: self.sites.bruiser_hit}
+        if any(mi.name == "MT_BRUISER" for mi in self.mon_info):
+            self.missile_mom[BRUISERSHOT_INFO.name] = fireball_momentum_table(rm, BRUISERSHOT_INFO)
         self.restart_fields = tuple(f.name for f in self.schema if f.name not in RESTART_KEEP)
         assert set(RESTART_KEEP) <= {f.name for f in self.schema}
         self._level_starts: Dict[int, object] = {}
@@ -1035,12 +1057,12 @@ class CombatMixin:
                 ws.mon_target[m] = code
                 ws.mon_threshold[m] = gd.BASETHRESHOLD
                 ev.retargets.append((m, code))
-                if ws.mon_state[m] == gd.STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
+                if ws.mon_state[m] == gd.THING_STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
                     self._set_state(m, info.seestate, False, ev)
         elif not ws.mon_threshold[m] and source[0] == "player":
             ws.mon_target[m] = 1
             ws.mon_threshold[m] = gd.BASETHRESHOLD
-            if ws.mon_state[m] == gd.STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
+            if ws.mon_state[m] == gd.THING_STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
                 self._set_state(m, info.seestate, False, ev)
 
     @staticmethod
@@ -1381,15 +1403,16 @@ class CombatMixin:
         ev.attacks.append((m, action))
         if not self.ws.mon_target[m]:
             return
-        self._a_face_target(m)
+        if action not in NO_FACE_ATTACKS:                # M8 C8: A_BruisAttack does not face (its ATK1 / ATK2 did)
+            self._a_face_target(m)
         if self.monsters == "decide":                    # M7 P3.2c: the rolls without their effects (P5)
             self._attack_rolls(m, action)
             return
         if action in BULLETS:
             self._mon_hitscan(m, BULLETS[action], ev)
-        elif action == "A_TroopAttack":
+        elif action in CLAW_SITES:                       # the imp's and (M8 C8) the Baron's: claw, else the missile
             if self._check_melee_range(m):
-                self._mon_melee(m, self.sites.troop_claw, ev)
+                self._mon_melee(m, getattr(self.sites, CLAW_SITES[action]), ev)
             else:
                 self._spawn_fireball(m, ev)
         elif action == "A_SargAttack":
@@ -1405,9 +1428,9 @@ class CombatMixin:
         if action in BULLETS:
             for _ in range(BULLETS[action]):
                 self._roll("mon_rng", self.sites.mon_bullet, m)
-        elif action == "A_TroopAttack":
+        elif action in CLAW_SITES:
             if self._check_melee_range(m):
-                self._roll("mon_rng", self.sites.troop_claw, m)
+                self._roll("mon_rng", getattr(self.sites, CLAW_SITES[action]), m)
         elif action == "A_SargAttack":
             if self._check_melee_range(m):
                 self._roll("mon_rng", self.sites.sarg_bite, m)
@@ -1419,7 +1442,7 @@ class CombatMixin:
         ev.mon_melee.append((m, dmg))
         t = self.ws.mon_target[m]
         if self._fight and t >= 2:               # M7 P8a I: the claw / the bite on a MONSTER target: no blood (DOOM's
-            ev.mon_hits.append((m, "claw" if site is self.sites.troop_claw else "bite", "mon", t - 2, dmg))
+            ev.mon_hits.append((m, "bite" if site is self.sites.sarg_bite else "claw", "mon", t - 2, dmg))
             self.damage_monster(t - 2, dmg, ("mon", m), ("mon", m), ev)      # A_TroopAttack calls P_DamageMobj)
             return
         self.damage_player(dmg, ("mon", m), ("mon", m), ev)
@@ -1515,9 +1538,17 @@ class CombatMixin:
     def _leaf16(self, x16: int, y16: int) -> int:
         return self.rm.point_in_subsector(self.cmap, x16 >> 16, y16 >> 16)
 
+    def _missile_info(self, s: int):
+        """M8 C8: the missile in pool slot s -- the rocket, the Baron's fireball or the imp's -- by its state"""
+        name = gd.THING_STATE_NAMES[self.ws.proj_state[s]]
+        if name in ROCKET_STATES:
+            return ROCKET_INFO
+        return BRUISERSHOT_INFO if name in BRUISERSHOT_STATES else FIREBALL_INFO
+
     def _spawn_fireball(self, m: int, ev) -> None:
-        """P_SpawnMissile (MT_TROOPSHOT) + P_CheckMissileSpawn, 2D, into the lowest free slot; a
-        full pool fizzles."""
+        """P_SpawnMissile (the shooter's missile: MT_TROOPSHOT, M8 C8 MT_BRUISERSHOT) + P_CheckMissileSpawn, 2D, into
+        the lowest free slot; a full pool fizzles."""
+        info = MONSTER_MISSILES[self.mon_info[m].name]
         ws = self.ws
         slot = next((s for s in range(_W().FIREBALL_POOL) if not ws.proj_active[s]), None)
         if slot is None:
@@ -1527,12 +1558,12 @@ class CombatMixin:
         # M7 P8a I: P_SpawnMissile aims at the TARGET (the player before infighting; `_target_pos16`). Convention: a
         # spectre target's MF_SHADOW jitter (an += P_SubRandom() << 20) is not drawn -- nor A_FaceTarget's on it
         an = self.rm.point_to_angle(sx, sy, *self._target_pos16(m))
-        momx, momy = self.fireball_mom[an >> self.rm.angle_shift]
+        momx, momy = self.missile_mom[info.name][an >> self.rm.angle_shift]
         ws.proj_active[slot], ws.proj_src[slot] = 1, m
         ws.proj_momx[slot], ws.proj_momy[slot] = momx, momy
         if self._p_knock:                        # M7 P8a: the missile's z, for the thrust's reversal (z + 4*8)
             ws.proj_z[slot] = ws.mon_floorz[m] + 32
-        self._proj_set_state(slot, FIREBALL_INFO.spawnstate)
+        self._proj_set_state(slot, info.spawnstate)
         v = self._roll("rng_fx", self.sites.tics_roll)
         ws.proj_tics[slot] = max(1, ws.proj_tics[slot] - v)
         ws.proj_x[slot] = _signed(sx + (momx >> 1), 32)        # "move a little forward"
@@ -1546,7 +1577,7 @@ class CombatMixin:
 
     def _proj_set_state(self, s: int, name: str) -> None:
         ws = self.ws
-        ws.proj_state[s], ws.proj_tics[s] = gd.STATE_INDEX[name], gd.STATES[name].tics
+        ws.proj_state[s], ws.proj_tics[s] = gd.THING_STATE_INDEX[name], gd.STATES[name].tics
 
     def missile_lines_block(self, x16: int, y16: int) -> bool:
         """PIT_CheckLine for a 2D missile: its box straddles a one-sided line, or a two-sided line
@@ -1579,7 +1610,7 @@ class CombatMixin:
         elif self.player_alive():
             bd = (FIREBALL_R + PLAYER_R) << 16
             if abs(ws.px - nx) < bd and abs(ws.py - ny) < bd:
-                dmg = self._roll("rng_fx", self.sites.fireball_hit)
+                dmg = self._roll("rng_fx", self.missile_hit[self._missile_info(s).name])
                 ev.proj_impacts.append((s, dmg))
                 self.damage_player(dmg, ("mon", ws.proj_src[s]), ("proj", s), ev)   # the MISSILE inflicts
                 return False
@@ -1624,7 +1655,7 @@ class CombatMixin:
             if not shoot:
                 ev.mon_hits.append((src, "fireball", "corpse", j, 0))
                 return True                                # solid, not shootable: explode, no damage
-            dmg = self._roll("rng_fx", self.sites.fireball_hit)
+            dmg = self._roll("rng_fx", self.missile_hit[self._missile_info(s).name])
             ev.mon_hits.append((src, "fireball", "mon", j, dmg))
             self.damage_monster(j, dmg, ("mon", src), ("proj", s), ev)
             return True
@@ -1637,7 +1668,7 @@ class CombatMixin:
             if not (ws.bar_state[b] and ws.bar_health[b] > 0):
                 ev.mon_hits.append((src, "fireball", "corpse", -1 - b, 0))
                 return True                                # exploding: solid, not shootable
-            dmg = self._roll("rng_fx", self.sites.fireball_hit)
+            dmg = self._roll("rng_fx", self.missile_hit[self._missile_info(s).name])
             ev.mon_hits.append((src, "fireball", "bar", b, dmg))
             self.damage_barrel(b, dmg, ("mon", src), ev)
             return True
@@ -1649,7 +1680,7 @@ class CombatMixin:
         ws = self.ws
         rocket = self._is_rocket(s)
         ws.proj_momx[s] = ws.proj_momy[s] = 0
-        self._proj_set_state(s, (ROCKET_INFO if rocket else FIREBALL_INFO).deathstate)
+        self._proj_set_state(s, self._missile_info(s).deathstate)          # M8 C8: the missile's own death
         if rocket:
             self._rocket_blast(s, ev)
         v = self._roll("rng_fx", self.sites.tics_roll)
@@ -1658,7 +1689,7 @@ class CombatMixin:
     # -------------------------------------------------------------------------------- P9: the rocket
     def _is_rocket(self, s: int) -> bool:
         """pool slot s holds the player's rocket: its state is one of MT_ROCKET's (the pool's other missile is the imp's)"""
-        return gd.STATE_NAMES[self.ws.proj_state[s]] in ROCKET_STATES
+        return gd.THING_STATE_NAMES[self.ws.proj_state[s]] in ROCKET_STATES
 
     def _spawn_rocket(self, ev) -> None:
         """P_SpawnPlayerMissile (MT_ROCKET) + P_CheckMissileSpawn, 2D, no autoaim (the docstring's conventions), into
@@ -1773,7 +1804,7 @@ class CombatMixin:
             ws.proj_tics[s] -= 1
             if ws.proj_tics[s]:
                 continue
-            nxt = gd.STATES[gd.STATE_NAMES[ws.proj_state[s]]].next
+            nxt = gd.STATES[gd.THING_STATE_NAMES[ws.proj_state[s]]].next
             if nxt != gd.S_NULL:
                 self._proj_set_state(s, nxt)
                 continue

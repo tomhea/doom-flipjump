@@ -294,6 +294,30 @@ def floor_groups(secs, lds, sds, quant: int = DEFAULT_QUANT) -> list:
     return out
 
 
+def boss_floor_group(secs, lds, sds, groups, mapname: str, monster_types) -> "int | None":
+    """M8 C8: the floor group A_BossDeath fires on `mapname` (gamedata.BOSS_MAPS: E1M8 -> tag 666, lowerFloorToLowest)
+    when the map holds its boss type (`monster_types`: mobjtype names), else None. The group is the one the map's own
+    W1 / S1 lines of that tag make (`floor_groups`: E1M8's line 894, special 19), and A_BossDeath is one more trigger of
+    it -- refused unless the boss's rule reaches the same floors (E1M8's sector 3: highest == lowest == 0) and the
+    group moves at FLOORSPEED (FLOOR_SUB): a map whose boss tag has no group, or another destination, needs a group
+    with two rules (not built). `level_survey` reports the same (its boss row)."""
+    from doomfj import gamedata as gd
+    boss = gd.BOSS_MAPS.get(mapname.upper())
+    if boss is None or boss[0] not in set(monster_types):
+        return None
+    _bt, tag, rule = boss
+    g = next((k for k, grp in enumerate(groups) if grp.tag == tag), None)
+    assert g is not None, "M8 C8: %s's boss tag %d has no floor group (no W1/S1 line of the tag): not built" % (
+        mapname, tag)
+    grp = groups[g]
+    assert grp.sub == FLOOR_SUB, ("M8 C8: the boss tag's group moves at FLOORSPEED", grp.sub)
+    for si, hts in grp.heights:
+        assert hts[-1] == floor_destination(secs, lds, sds, si, rule), (
+            "M8 C8: sector %d of boss tag %d: the group's destination %d is not A_BossDeath's (%s: %d)"
+            % (si, tag, hts[-1], rule, floor_destination(secs, lds, sds, si, rule)))
+    return g
+
+
 def floor_wide(groups) -> bool:
     """the fswitch layout: E1M1's (one instant group: `fswitch: hex.vec 1`, the model's 1-bit `f_switch`) or the
     WIDE one (two or more groups, or a moving one): `fswitch: hex.vec 2*ng` -- each group's state, then its step

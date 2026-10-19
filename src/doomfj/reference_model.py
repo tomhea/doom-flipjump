@@ -285,6 +285,7 @@ THING_SPRITE = {
     13: "RKEY", 6: "YKEY",        # M8 L0 (E1M2): the red and yellow cards, frame A as the blue
     2014: "BON1", 2015: "BON2", 2035: "BAR1", 47: "SMIT", 3001: "TROO", 2008: "SHEL",
     54: "TRE2", 9: "SPOS", 43: "TRE1", 3004: "POSS", 3002: "SARG", 2010: "ROCK",
+    3003: "BOSS",                 # M8 C8: the Baron of Hell (E1M8)
     2028: "COLU", 2011: "STIM", 2012: "MEDI", 2018: "ARM1", 2019: "ARM2", 2001: "SHOT",
     2002: "MGUN", 2005: "CSAW", 2006: "BFUG", 2003: "LAUN", 2004: "PLAS", 2013: "SOUL",
     2022: "PINV", 2023: "PSTR", 2024: "PINS", 2025: "SUIT", 2026: "PMAP", 2045: "PVIS",

@@ -353,6 +353,7 @@ class Survey:
         moving = [(t.type, w.pickup_sector[i]) for i, t in enumerate(w.pickup_things) if w.pickup_on_mover[i]]
         self.row("INFO", "pickups on a mover floor (lootcode.pk_mbox: the live floor)", len(moving), "",
                  "" if not moving else "(type, sector) %s" % moving[:8])
+        self.monsters_c8(w)
         from doomfj.monstermove import static_blockers
         _things, var = static_blockers(w)
         # M8 F1.2: a solid decoration some skill lacks is a `mc_don` presence flag, set at NEW GAME (monstermove.mc_don_restart)
@@ -360,13 +361,15 @@ class Survey:
                  len(var), "", "" if not var else "mc_don flags for decor_solid indices %s" % var[:10])
 
     def monster_extensions(self, w):
-        """M8 C8 (doomfj.lostsoul / soulcode; the lessons of the lost soul): the monster-domain extension rows' alias
-        codes (gamedata.MON_ALIAS_POOL: a new monster's states take weapon states' codes -- a later monster can run out
-        of them), damagecode's pain classes (one nibble of dmrnd: at most 4 painchances on a map), and a map's souls --
-        their 16.16 heights (soulcode.check_model_rules) and a teleport line beside them (EV_Teleport's z: the model's,
-        not yet the fj's)"""
-        self.cap("monster-domain extension state rows (gamedata.MON_ALIAS_POOL's codes)", len(gd.EXT_STATE_NAMES),
-                 len(gd.MON_ALIAS_POOL))
+        """M8 C8 (doomfj.lostsoul / soulcode; the lessons of the lost soul): the extension states' borrowed thing indices
+        (gamedata.EXT_ALIAS_CODES: a new monster's states take weapon-only states' indices -- check_thing_aliases proves
+        each; a later monster can run out of them), damagecode's pain classes (one nibble of dmrnd: at most 4
+        painchances on a map), and a map's souls -- their 16.16 heights (soulcode.check_model_rules) and a teleport line
+        beside them (EV_Teleport's z: the model's, not yet the fj's)"""
+        bad = gd.check_thing_aliases()
+        self.row("OK" if not bad else "REFUSED",
+                 "extension states' borrowed thing indices (gamedata.EXT_ALIAS_CODES, check_thing_aliases)",
+                 len(gd.EXT_STATE_NAMES), "", "; ".join(bad[:3]))
         from doomfj.damagecode import pain_classes, profiles
         self.cap("monster pain classes (damagecode: dmrnd's pain bits, one nibble)",
                  len(pain_classes(profiles(w, gib=True)[0])), 4)
@@ -380,6 +383,41 @@ class Survey:
         tels = getattr(w, "teleports", ())
         self.row("REFUSED" if tels else "OK", "lost souls beside teleport lines (fj: EV_Teleport's soul z unwired)",
                  len(tels), "", "wall_renderer refuses a map with both until soulcode wires tp_hit's z" if tels else "")
+
+    def monsters_c8(self, w):
+        """M8 C8 (the Baron): what the fj bakes per map about its monsters -- A_BossDeath's floor group (E1M8's tag 666),
+        the two radius classes (world.radius_classes), the ONE monster missile (projcode.missile_of_world) -- each by
+        the emitters' own functions, so a map that trips one is caught here, not after an emission"""
+        from doomfj import gamedata as _gd
+        names = {mi.name for mi in w.mon_info}
+        boss = _gd.BOSS_MAPS.get(self.m.upper())
+        tag666 = [s for s, sec in enumerate(self.secs) if sec.tag == 666]
+        if boss and boss[0] in names:
+            def bossrow():
+                g = w.boss_group
+                grp = w.floor_groups[g]
+                self.row("OK", "A_BossDeath (%s's last death: tag %d, %s)" % (boss[0], boss[1], boss[2]),
+                         "group %d, sectors %s" % (g, list(grp.sectors)), "",
+                         "monstercode.boss_lines fires its timer; the group's lines: specials %s" % grp.special)
+            self.guard("A_BossDeath (%s's last death: tag %d)" % (boss[0], boss[1]), bossrow)
+        elif tag666:
+            self.row("INFO", "tag 666 sectors on a map without its boss", tag666, "",
+                     "A_BossDeath acts on %s only (gamedata.BOSS_MAPS): inert here" % sorted(_gd.BOSS_MAPS))
+        from doomfj.world import radius_classes
+        self.guard("monster radius classes (world.radius_classes: 30 and one other)",
+                   lambda: self.row("OK", "monster radius classes (world.radius_classes)",
+                                    radius_classes(w.mon_radius[:w.layout.nmon]), "",
+                                    "radii %s" % sorted(set(w.mon_radius[:w.layout.nmon]))))
+        from doomfj.projcode import missile_of_world
+        self.guard("one monster missile species (projcode.missile_of_world: the pool bakes one)",
+                   lambda: self.row("OK", "one monster missile species (projcode.missile_of_world)",
+                                    missile_of_world(w) or "MT_TROOPSHOT"))
+        heights = sorted(set(w.mon_height[:w.layout.nmon]))
+        self.row("OK" if len(heights) <= 1 else "REFUSED", "one monster height (try_move_mon / kb_mmove bake it)",
+                 heights)
+        ext = [n for n in _gd.EXT_MONSTER_TYPES if n in names]
+        if ext:
+            self.row("INFO", "extension monster types (gamedata.THING_STATE_INDEX: borrowed state indices)", ext)
 
     def render_caps(self):
         from doomfj import wall_renderer as WR

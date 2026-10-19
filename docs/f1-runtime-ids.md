@@ -117,11 +117,13 @@ A1, with one change of shape: the 8-bit macros are NOT edited. A `rep(LIST_WIDE,
 have renamed every macro path through the lists' reads -- the pin-heat list's keys (`sim.thing_pass_depth(9)---
 hex.read_byte(2)---...`) -- so E1M1's blocking would have moved with no op changed. Instead:
 
-- **`src/fj/sim.fj`**: the wide TWINS appended -- `sim.leaf_link_w` / `leaf_unlink_w`, `sim.thing_pass_depth_w` (7 and 9
-  parameters), `sim.rank_key_w`: the 8-bit bodies with `hex.read_cell` / `hex.write_cell` and 3-nibble ids, nothing
-  else. `tests/host/test_wide_list_twins.py` derives each from its narrow macro by rule and requires the file to equal
-  it (5 R9 mutants). Each opens with a guard: assembled without the wide table it is an assembly error, not an 8-bit
-  read. **`src/fj/m1_reset.fj`**: `m1.zerocell12` (same guard).
+- **`src/fj/sim_wide.fj`** (NEW; sim.fj and m1_reset.fj are byte-identical to before): the wide TWINS --
+  `sim.leaf_link_w` / `leaf_unlink_w`, `sim.thing_pass_depth_w` (7 and 9 parameters), `sim.rank_key_w`: the 8-bit
+  bodies with `hex.read_cell` / `hex.write_cell` and 3-nibble ids, nothing else -- and `m1.zerocell12`. Its own file
+  because ~30 tests/fj files mutate sim.fj by TEXT (appended twins made test_thing_pass_depth_fj's controls match
+  twice); build_wall_renderer includes it after sim.fj only for a LIST_WIDE config. `tests/host/test_wide_list_twins.py`
+  derives each twin from its narrow macro by rule and requires the file to equal it (5 R9 mutants). Each opens with a
+  guard: assembled without the wide table it is an assembly error, not an 8-bit read.
 - **`config.py`**: `LIST_ID_BITS` (8 / 12), `LIST_WIDE`, `LIST_NIB`, `emit_fj_defines` (the -D file, namespaced as the
   CLI writes it; None at 8). Not an fj constant: fj_consts.fj is unchanged. No MAP_CONFIG entry sets it yet.
 - **`things.py`**: `list_max`, `list_bits`, `list_macros` (the ONE place naming the macros a width calls),

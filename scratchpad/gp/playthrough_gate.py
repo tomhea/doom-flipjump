@@ -48,7 +48,7 @@ if __name__ == "__main__":                         # `--map E1Mn` before probe /
 # the skill and the steering seed each shipped map's playthrough PASSES at by real play (the defaults; --skill /
 # --seed override). The seed only shifts the steering's dodge rhythm: every seed is real play, none is a cheat
 DEFAULT_SKILL = {"E1M1": "medium", "E1M2": "easy"}
-DEFAULT_SEED = {}
+DEFAULT_SEED = {("E1M1", "medium"): [(0, 0), (172, 2)]}     # found by --search 5 (model only)
 CONTROL_FRAMES = 40           # world frames a control runs
 CONTROL_AT = 25               # the world frame a control mutates
 
@@ -123,7 +123,7 @@ def main(argv=None) -> int:
             print("\nPLAYTHROUGH GATE FAIL -- a control did not part: the comparison is vacuous")
             return 1
 
-    seed = parse_seed(a.seed) if a.seed is not None else DEFAULT_SEED.get(mapname, 0)
+    seed = parse_seed(a.seed) if a.seed is not None else DEFAULT_SEED.get((mapname, skill), 0)
     if a.search:
         if not a.model_only:
             ap.error("--search is a --model-only tool")

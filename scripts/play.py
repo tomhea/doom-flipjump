@@ -619,6 +619,13 @@ class Steer:
             if aimed:
                 self.covered[m] = 0
             self.fired = "fire" in kd
+            # THE SHOTGUN when it has shells (key 3; DOOM's own switch picks the pistol again when they run out), and
+            # with it, close in on a foe that is far (the pellets spread)
+            shotgun = (c.get("wp_own") or 0) >> 8 & 1 and (c.get("am_shell") or 0) > 0
+            if shotgun and c.get("wp_rdy") != 2 and c.get("wp_pend") in (None, 10, 2) and f % 4 == 0:
+                kd.add("w3")
+            if shotgun and c.get("wp_rdy") == 2 and foe[0] > 260 and (c.get("p_hp") or 0) > 35 and abs(d) < 20:
+                kd.add("forward")
             g = f + 7 * self.seed_at(f)              # the seed shifts the dodge's rhythm (another real play)
             if foe[0] > 160 and (g // 10) % 3 == 0:  # a side step now and then: fireballs and hitscan less often
                 kd.add("strafe_left" if (g // 30) % 2 else "strafe_right")

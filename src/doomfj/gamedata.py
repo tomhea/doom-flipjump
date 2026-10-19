@@ -506,6 +506,10 @@ CORE_STATE_COUNT = STATE_INDEX["S_TFOG"]
 assert STATE_NAMES[0] == S_NULL and len(STATE_NAMES) + len(STATE_GHOSTS) == len(STATES) and len(STATE_NAMES) <= 255
 # a ghost is never ENTERED: no state's next is a ghost but another ghost's (the raise chain itself)
 assert all(st.next not in STATE_GHOSTS or n in STATE_GHOSTS for n, st in STATES.items())
+# the indices the ghosts hold: the MONSTER tables keep their raise rows there (mstate / mview, built from raisestate), so
+# no other monster-domain state may take one -- in particular a thing-domain alias (M8 C8's THING_STATE_INDEX borrows
+# weapon-only indices: STATE_NAMES there names a plasma WEAPON state, yet the monster table's row is the ghost's)
+GHOST_INDICES = frozenset(STATE_INDEX[g] for g in STATE_GHOSTS)
 
 
 # ================================================================================================

@@ -303,3 +303,13 @@ def test_the_explosion_runs_its_five_states_and_frees_the_slot(world):
         seen.append(gd.STATE_NAMES[ws.proj_state[s]])
     assert not ws.proj_active[s] and s in ev.proj_walls
     assert [n for n in dict.fromkeys(seen) if n.startswith("S_PLASEXP")] == list(C._state_chain("S_PLASEXP"))
+
+
+def test_the_ghost_indices_are_the_plasma_s_and_no_thing_alias_may_borrow_them():
+    """GHOST_INDICES: the raise rows the monster tables keep -- exactly the plasma states' indices; a thing-domain alias
+    (M8 C8's THING_STATE_INDEX, when merged) must take none of them"""
+    assert gd.GHOST_INDICES == {gd.STATE_INDEX[n] for n in gd.STATE_GHOSTS.values()}
+    alias = getattr(gd, "THING_STATE_INDEX", None)
+    if alias is not None:
+        ext = [n for n in alias if n not in gd.STATE_INDEX]
+        assert not {alias[n] for n in ext} & gd.GHOST_INDICES

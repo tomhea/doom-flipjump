@@ -99,6 +99,10 @@ def main():
             raise SystemExit("heavy.py: unknown option %s" % o)
     assert a and a[0] == "--", "usage: heavy.py NAME [--prio N] [--build | --light] [--log FILE] -- cmd ..."
     cmd = a[1:]
+    if light and any("tests/fj" in c.replace("\\", "/") for c in cmd):
+        # an fj harness is HEAVY (one sat at 12 GB under --light, 2026-10-19): it takes the lock like one
+        print("heavy.py: --light refused for a tests/fj command -- running it as HEAVY", flush=True)
+        light = False
     if light:
         said = False
         while "BUILD" in lock_text():

@@ -123,6 +123,11 @@ def last_error(text: str) -> str:
     lines = [ln for ln in text.splitlines() if ln.strip()]
     tb = [i for i, ln in enumerate(lines) if ln.startswith("Traceback")]
     if not tb:
+        # a plan whose criteria FAIL (exit 1, no traceback): the failing criteria, not the last line (the freeze
+        # checks F1..F5 fail on every unfrozen plan by design)
+        crit = [ln.strip() for ln in lines if " FAIL " in ln and not re.match(r"\s*F\d ", ln)]
+        if crit:
+            return ("criteria FAIL: " + " | ".join(sorted(set(crit)))[:600])
         return (lines[-1] if lines else "(no output)")[:300]
     tail = lines[tb[-1]:]
     where = [ln.strip() for ln in tail if ln.strip().startswith("File ")]

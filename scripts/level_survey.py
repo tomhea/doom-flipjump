@@ -459,16 +459,23 @@ class Survey:
                  "" if not bad else "the doors' and the lights' neighbour rules part on linedefs %s" % bad[:8])
 
     def _neighbour_rule(self):
-        """CR of #148 (#149 item 1): `doors.LEGACY_NEIGHBOUR_MAPS` picks E1M1's legacy door rule by a (sectors,
-        linedefs, sidedefs) fingerprint, not by the map's name -- another map that matches it silently takes it"""
+        """CR of #148 (#149 item 1): the doors' neighbour rule is the map's config.MAP_CONFIG flag DOOR_NEIGHBOURS
+        (doors.door_rule), no longer a (sectors, linedefs, sidedefs) fingerprint. "legacy" is E1M1's frozen deviation
+        (#104 F1, its pid budget): any other map that asks for it opens its doors by the wrong rule; and
+        door_neighbours must return the rule the flag names on this map's own records"""
         from doomfj import doors
-        legacy = (len(self.secs), len(self.lds), len(self.sds)) in doors.LEGACY_NEIGHBOUR_MAPS
-        if self.m.upper() == "E1M1" or not legacy:
-            self.row("OK", "door neighbour rule (doors.door_neighbours)",
-                     "legacy (E1M1 family)" if legacy else "DOOM's two-sided")
-        else:
+        rule = doors.door_rule(self.m)
+        got = doors.door_neighbours(self.secs, self.lds, self.sds)
+        want = (doors.neighbours if rule == "legacy" else doors.two_sided_neighbours)(self.lds, self.sds)
+        if got != want:
+            self.row("WRONG", "door neighbour rule (doors.door_neighbours)", rule, "the flag's rule",
+                     "door_neighbours does not follow MAP_CONFIG DOOR_NEIGHBOURS on %s" % self.m)
+        elif rule == "legacy" and self.m.upper() != "E1M1":
             self.row("WRONG", "door neighbour rule (doors.door_neighbours)", "legacy", "two-sided",
-                     "%s matches E1M1's size fingerprint: its doors open by the legacy rule" % self.m)
+                     "%s's MAP_CONFIG asks for E1M1's legacy rule: its doors open by it" % self.m)
+        else:
+            self.row("OK", "door neighbour rule (doors.door_neighbours)",
+                     "legacy (E1M1, MAP_CONFIG DOOR_NEIGHBOURS)" if rule == "legacy" else "DOOM's two-sided")
 
     def _restart_floors(self):
         """CR of #146 (#147): `wall_renderer.restart_lines` zeroes `fswitch` only when the map has a lift -- a map with

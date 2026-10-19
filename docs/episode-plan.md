@@ -102,16 +102,59 @@ or F) and the owner is told.
 
 ## 8. The final creator
 
-`scripts/build_episode.py`: for E1M1..E1M9, ONE AT A TIME (rule 1): emit_check, the build (each map's recorded
-command and spread), its gates, its playthrough gate, msframe against its baseline; then one report (pass / fail per
-level per gate, sizes, ms/frame, hashes). Resumable: a level that passed is skipped on a re-run unless its source
-changed. Expected wall time ~1.5-2 days for all nine on this machine.
+`scripts/build_episode.py` (2026-10-19; host tests `tests/host/test_build_episode.py`). For E1M1..E1M9 (or
+`--maps E1M1 E1M2`), ONE AT A TIME, per map in section 4's order:
+
+| step | what runs (each heavy one as `heavy.py creator --prio 8 [--build] --log <out>/logs/<map>_<step>.log -- ...`, `DOOMFJ_MAP=<map>`) | passes on |
+|---|---|---|
+| `emit_check` | `scripts/emit_check.py <map> --json ...` (asserts ON) | rc 0, `EMITTED in`, `asserts ON` |
+| `build` | `build_labeled.py` with the map's RECORDED flags (`--build`: other agents' `--light` work waits); refused under 15 GB free disk (G8); the map's `generated_doom_<map>` directory removed after it (G8) | rc 0, `done in Ns` |
+| `sha256` | in process: the binary against the recorded sha256 (a byte-identical REBUILD check when one is recorded); the census written beside it compared with the recorded one (information) | equal, or no record (a NEW binary) |
+| `p2a` `m2_std` `m3` `hurt` `fight` `die` | section 4.5's gates on the built binary and its label table | rc 0 AND the gate's own PASS line |
+| `b0` | `b0_scenarios.py --file <the map's combat set> --pixel-every 1 --proxy` | `B0 OK`, binding <= 22,000,000 (CAP-22) |
+| `gamespeed_trail` | `--record` where the map keeps `scenarios/<map>/gamespeed.json` (E1M2; E1M1's record is `gamespeed.BINARY_ENDS`) | `TRAIL ...: PASS` |
+| `gamespeed` | `--map <map> --fjm ...` | speed binding PASS; size <= the row's cap (E1M1 43%; E1M2's 62.19% WAIVED by the owner, "Size is ok") |
+| `playthrough` | `scratchpad/gp/playthrough_gate.py --map --fjm --labels [--skill]` -- OPTIONAL while the script does not exist: `MISSING` + a WARNING in the report, re-tried on the next run | rc 0 |
+| `feature_tests` | the map's own tests/fj files (`pytest -q`) | rc 0, `N passed`, nothing failed |
+| `msframe` | `--map <map> --a <new> --against <shipped / shipped_<map>>` (alone, with a WARNING, when no baseline is saved; the plan warns when the baseline's binary is not on disk, which msframe refuses) | a median; never `B SLOWER` |
+
+A failed `emit_check` or `build` stops its map (the rest `NOT RUN`); any other failure is recorded and the map goes on.
+
+**The registry** (`REGISTRY`, one row a map) holds what docs/ship-gate.md records: wad, spread, heat list, combat set,
+baseline, size cap, the recorded output / labels / census / full sha256, the feature tests. E1M1 = blocked63 (1b),
+E1M2 = r4 (5). E1M3..E1M9 are placeholders marked NOT READY (shown by `--dry-run`, never run); when a level ships, fill
+its row from its ship-gate block and set `ready=True`. The host tests parse ship-gate's recorded build lines and
+require each ready row to reproduce them token for token (negative control: a changed spread / heat / wad / census
+is caught). The creator writes ONLY under `--out-dir` (default `build/episode/`: `doom_<map>.fjm`, its
+`.labels.tsv.gz`, `census_<map>.json.gz`, `logs/`, `state.json`, `report.md`, `report.json`) -- never over a shipped
+binary or a tracked census. The exception is the trail's `--record` (a tracked file; equal bytes for an equal binary).
+
+**Resumable.** A step's key = its command and environment + the source tree (git: tracked files under `src`,
+`scripts`, `scenarios`, `tests/fj`, `tests/fixtures`, `scratchpad/**.py`, `scratchpad/gp/scenarios`, worktree edits
+included; the creator itself excluded) + the installed flipjump's HEAD + its input files' content + (after the build)
+the binary's sha256. A step that PASSED under the same key is skipped; anything else runs; `--force` re-runs all;
+`--steps a b` runs a subset. So a flag change re-runs the build, and the gates only if the bytes changed. Tested with
+a fake runner: the re-run skips everything; a changed source re-runs every step (the negative control); a failed step
+re-runs; a failed build blocks; the dry run writes nothing.
+
+**Guards.** `python -O` and `PYTHONOPTIMIZE` are refused; so is running it UNDER heavy.py (it takes the lock per step
+itself; its parent holding the lock would deadlock it). The lock is never held between steps.
+
+**The estimate (G12)** comes from measured step times: the step's own last run on the map, else its mean on the
+other maps, else a constant read off the blocked63 / e1m2_r4 evidence logs, printed as `guess`. The dry run at
+c1905d63: ~8.8 h for E1M1 + E1M2 (all of it guessed; the playthrough not counted while missing), ~38.8 h for every
+step of all nine -- the 1.5-2 day estimate stands until the first real run replaces the guesses.
+
+    python scripts/build_episode.py --dry-run                 # the plan: every command, RUN / SKIP / NOT READY
+    python scripts/build_episode.py --maps E1M1 E1M2          # the integrator's first real run
 
 ## 9. Status
 
 | date | event |
 |---|---|
 | 2026-10-19 | plan approved; C1 started (branch `m8-runtime-ids`); CR follow-ups #149 (branch `m8-cr149`); PR #148 (E1M2 r4 + blocked63) in CI |
+| 2026-10-19 | the owner: no more RAM ("i cant buy more ram"); **2^27 words is a super hard limit** -- "Optimize the levels or even lose unimportant features". Started: ASSEMBLER MEMORY WORK (flipjump, branch `asm-memory`, target <= ~11 GB peak for an E1M2-sized program, output byte-identical) and SIZE WORK (branch `m8-size`: attribution, per-map projection, cuts, feature-loss proposals). Lessons survey: E1M7 projected ~32.8 GB / pool 157% at spread 1, E1M6 ~20.8 GB (estimates) |
+| 2026-10-19 | merged into `m8-episode`: the final creator (`scripts/build_episode.py`), the lessons (`docs/level-lessons.md`, 13 survey checks) |
 
 ## 10. Orchestration
 

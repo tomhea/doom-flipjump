@@ -317,8 +317,8 @@ class Survey:
             elif "door" in k:
                 note = "the renderer refuses a door beside another dynamic sector"
             else:
-                note = ("renderer OK (the pair switch); collision / sight / noise / missiles read the cell the opening "
-                        "depends on (monstersight.line_states / collision.mover_line_states; both refused)")
+                note = ("renderer: the pair switch (its gate: the 'dynamic segs' row); collision / sight / noise / "
+                        "missiles: the readers' own rows below (collision.mover_line_states, monstersight.line_states)")
             self.row("WARN", "lines between two dynamic sectors: %s" % k, n, "",
                      "%s -- linedefs %s" % (note, [x[0] for x in lines if x[3] == k][:8]))
 
@@ -407,7 +407,10 @@ class Survey:
         pid_lo = len({((s.ceil_h, s.light & 0xFF, s.ceil_tex.upper()), (s.floor_h, s.light & 0xFF, s.floor_tex.upper()))
                       for s in self.secs})
         cfg = map_cfg(Config(), self.m)
-        self.row("INFO", "plane pairs (ESTIMATE, no direction; measured: m4_bands.py)", pid_lo,
+        # docs/level-lessons.md: E1M2's plane ids (376 > 255) were found by an emission; the measured real/estimate
+        # ratios are 1.46 (E1M1) and 1.25 (E1M2), so x1.5 past the cap makes this a WARN, not a footnote
+        self.row("WARN" if pid_lo * 1.5 >= 16 ** cfg.PID_NIBBLES else "INFO",
+                 "plane pairs (ESTIMATE, no direction; measured: m4_bands.py)", pid_lo,
                  "< %d" % 16 ** cfg.PID_NIBBLES,
                  "E1M1 est 152 -> 222 real; E1M2 329 -> 411. PID_NIBBLES %d for this map%s"
                  % (cfg.PID_NIBBLES, "" if pid_lo * 1.5 < 256 else ": likely needs 3 (MAP_CONFIG)"))
@@ -434,10 +437,328 @@ class Survey:
                       and any(WR.seg_marks_in(self.lds, self.sds, seg, v) for v in variants))
         self.cap("marking two-sided segs (n_tsv 3 nibbles)", marking, WR.DEG_PNEAR, strict_less=True)
 
+    # ------------------------------------------------------------------ docs/level-lessons.md: checks a mistake earned
+    # Each check below is a lesson E1M1 or E1M2 paid for (a dead build, a gate failure, a CR blocker, a playtest
+    # finding), moved to the cheap end. Each calls the model's own functions, as every check above, and each is a row
+    # of docs/level-lessons.md; tests/host/test_level_lessons.py runs each with a negative control (R9).
+
+    def lessons(self):
+        for name, fn in (("door clearance", self._door_clearance),
+                         ("back sides without ML_TWOSIDED", self._twosided_flags),
+                         ("the door neighbour rule", self._neighbour_rule),
+                         ("NEW GAME restarts the floor groups", self._restart_floors),
+                         ("the renderer's per-seg machines", self._seg_machines),
+                         ("the openings of lines between dynamic sectors", self._dyn_openings),
+                         ("slanted W1 floor lines", self._slanted_floor_lines),
+                         ("barrel chains", self._barrel_chains),
+                         ("the oracle's thvis mirror", self._vis_mirror),
+                         ("the per-map feature flags", self._feature_flags),
+                         ("the pool and the RAM, projected", self._projection)):
+            self.guard("lesson: " + name, fn)
+
+    def _door_clearance(self):
+        """E1M2 playtest (a0af8d4f): blue door 54 opened 12 units over its floor -- the legacy neighbour rule read a
+        one-sided line's missing back as the last sidedef's sector -- and could never be passed. Every door must
+        reach the player's 56-unit gap at its top state (`doors.pass_state`, the threshold fj bakes per door)."""
+        from doomfj import doors
+        st = doors.door_states(self.secs, self.lds, self.sds)
+        never = [(si, self.secs[si].floor_h, st[si][-1]) for si in sorted(st)
+                 if doors.pass_state(self.secs, self.lds, self.sds, si) >= len(st[si])]
+        self.row("OK" if not never else "WARN", "doors the player can pass when open (doors.pass_state, 56 units)",
+                 "%d of %d" % (len(st) - len(never), len(st)), "all",
+                 "" if not never else "NEVER passable (sector, floor, open ceiling): %s -- check the open height "
+                                      "against DOOM's (the E1M2 door 54 lesson)" % never[:8])
+
+    def _twosided_flags(self):
+        """CR of #148 (#149 item 1): DOOM's getNextSector skips a line without ML_TWOSIDED; `lights` tests the flag,
+        `doors.two_sided_neighbours` tests the back side -- the two agree only while no line has a back side without
+        the flag (E1M2: none)"""
+        bad = [i for i, ld in enumerate(self.lds) if ld.back not in (0xFFFF, -1) and ld.back < len(self.sds)
+               and not ld.flags & gd.ML_TWOSIDED]
+        self.row("OK" if not bad else "WARN", "lines with a back side but no ML_TWOSIDED", len(bad), "0",
+                 "" if not bad else "the doors' and the lights' neighbour rules part on linedefs %s" % bad[:8])
+
+    def _neighbour_rule(self):
+        """CR of #148 (#149 item 1): `doors.LEGACY_NEIGHBOUR_MAPS` picks E1M1's legacy door rule by a (sectors,
+        linedefs, sidedefs) fingerprint, not by the map's name -- another map that matches it silently takes it"""
+        from doomfj import doors
+        legacy = (len(self.secs), len(self.lds), len(self.sds)) in doors.LEGACY_NEIGHBOUR_MAPS
+        if self.m.upper() == "E1M1" or not legacy:
+            self.row("OK", "door neighbour rule (doors.door_neighbours)",
+                     "legacy (E1M1 family)" if legacy else "DOOM's two-sided")
+        else:
+            self.row("WRONG", "door neighbour rule (doors.door_neighbours)", "legacy", "two-sided",
+                     "%s matches E1M1's size fingerprint: its doors open by the legacy rule" % self.m)
+
+    def _restart_floors(self):
+        """CR of #146 (#147): `wall_renderer.restart_lines` zeroes `fswitch` only when the map has a lift -- a map with
+        floor groups and no lift keeps its floors moved across NEW GAME and the restart after death"""
+        from types import SimpleNamespace
+        from doomfj import movers
+        from doomfj.wall_renderer import restart_lines
+        groups = movers.floor_groups(self.secs, self.lds, self.sds)
+        check = "NEW GAME restarts the floor groups (wall_renderer.restart_lines)"
+        if not groups:
+            self.row("OK", check, 0, "", "no floor group")
+            return
+        nlift = len(movers.lift_states(self.secs, self.lds, self.sds))
+        common, _sk = restart_lines(SimpleNamespace(x=0, y=0, angle=0), 0, [], [], 0, [], nlift=nlift,
+                                    nfs=movers.fswitch_nibbles(groups))
+        ok = any("fswitch" in ln for ln in common)
+        self.row("OK" if ok else "WRONG", check, "%d groups, %d lifts" % (len(groups), nlift), "fswitch zeroed",
+                 "" if ok else "fswitch is zeroed only with a lift: the floors stay moved after NEW GAME (#147)")
+
+    def _machines(self):
+        """the door / mover tables the game tier's emitter builds (emit_wall_renderer's `_dst_tbl`, `_dsecs`, `_mtab`,
+        `_msecs`, `_mcell`), by the same model calls"""
+        if "_machines" not in self.facts:
+            from doomfj import doors, movers
+            from doomfj.reference_model import apply_sector_heights
+            secs, lds, sds = self.secs, self.lds, self.sds
+            dst = doors.door_states(secs, lds, sds)
+            dmax = max((len(v) for v in dst.values()), default=0)
+            dsecs = [apply_sector_heights(secs, doors.heights_for_states(
+                secs, lds, sds, {si: min(k, len(s) - 1) for si, s in dst.items()})) for k in range(dmax)]
+            mtab = movers.mover_table(secs, lds, sds)
+            self.facts["_machines"] = (dst, dsecs, movers.mover_secs(mtab, secs),
+                                       {si: c for si, (c, _h) in mtab.items()})
+        return self.facts["_machines"]
+
+    def _line_machines(self, f, b):
+        """emit_wall_renderer's `_seg_machines` for a seg between sectors f and b (lights aside): [(sector, its
+        per-state sector lists)], or the refusal (`_seg_door` / `_seg_movers`' asserts) as a string"""
+        dst, dsecs, msecs, mcell = self._machines()
+        if f in dst and b in dst:
+            return "a door on both sides (%d, %d)" % (f, b)
+        door = f if f in dst else (b if b in dst else None)
+        hit = tuple(sorted({x for x in (f, b) if x in msecs}))
+        if hit and door is not None:
+            return "a door (%d) and a mover %s on one seg" % (door, list(hit))
+        if len(hit) == 2 and mcell[hit[0]] == mcell[hit[1]] and msecs[hit[0]] == msecs[hit[1]]:
+            hit = hit[:1]                                       # one machine (a floor group's sectors)
+        if door is not None:
+            return [(door, dsecs[:len(dst[door])])]
+        return [(m, msecs[m]) for m in hit]
+
+    @staticmethod
+    def shut_gate(st, dims):
+        """emit_wall_renderer's `_seg_dual_cell` on a dynamic seg's shut pattern `st` (one bool per state, the first
+        machine's state major) over machines of `dims` states: "never" (a marking seg), "every" (the solid path,
+        `_seg_closed_moving`: the CR of #146's lines), the index of the machine whose state 0 is EXACTLY the shut set
+        (the one-op `hex.if0` gate), or None -- the emitter refuses it"""
+        st = list(st)
+        if not any(st):
+            return "never"
+        if all(st):
+            return "every"
+        if not st[0]:
+            return None
+        if len(dims) == 1:
+            return 0 if st == [True] + [False] * (len(st) - 1) else None
+        na, nb = dims
+        if st == [ia == 0 for ia in range(na) for ib in range(nb)]:
+            return 0
+        if st == [ib == 0 for ia in range(na) for ib in range(nb)]:
+            return 1
+        return None
+
+    def _seg_machines(self):
+        """CR of #146 (BLOCKING, 9b8ef2c0): four E1M2 lines shut at EVERY floor state took the marking path in fj and
+        the solid one in the oracle -- no gate looked there. The emitter now refuses an open-then-shut seg and a seg
+        on a door and a mover; this runs the same classification over every two-sided line in seconds"""
+        refused, every = [], []
+        for i, ld in enumerate(self.lds):
+            if ld.back in (0xFFFF, -1) or ld.back >= len(self.sds):
+                continue
+            f, b = self.sds[ld.front].sector, self.sds[ld.back].sector
+            ms = self._line_machines(f, b)
+            if isinstance(ms, str):
+                refused.append((i, ms))
+                continue
+            if not ms:
+                continue
+            if len(ms) == 1:
+                svs = ms[0][1]
+            else:
+                (_a, sva), (mb, svb) = ms
+                svs = []
+                for sa in sva:
+                    for sb in svb:
+                        sv = list(sa)
+                        sv[mb] = sb[mb]
+                        svs.append(sv)
+            st = [min(sv[f].ceil_h, sv[b].ceil_h) <= max(sv[f].floor_h, sv[b].floor_h) for sv in svs]
+            g = self.shut_gate(st, [len(m[1]) for m in ms])
+            if g is None:
+                refused.append((i, "shut at states %s of %s" % ([k for k, x in enumerate(st) if x],
+                                                               [m[0] for m in ms])))
+            elif g == "every":
+                every.append(i)
+        self.row("OK" if not refused else "REFUSED",
+                 "dynamic segs the renderer can gate (wall_renderer._seg_dual_cell / _seg_movers)", len(refused), "0",
+                 "" if not refused else "linedefs %s" % refused[:6])
+        if every:
+            self.row("INFO", "dynamic segs shut at EVERY state (the solid path: _seg_closed_moving)", len(every), "",
+                     "linedefs %s" % every[:10])
+
+    def _dyn_openings(self):
+        """CR of #142 (#143): the survey's "lines between two dynamic sectors" note was hand-written; these are the
+        readers' OWN functions -- collision.mover_line_states (the opening and the low floor) and
+        monstersight.line_states (sight, sound and missiles) -- each refusing a line whose value needs both cells"""
+        from doomfj.collision import mover_line_states
+        _dst, _ds, msecs, mcell = self._machines()
+        n0 = len(self.rows)
+        for fn in (max, min):
+            self.guard("collision.mover_line_states(%s): every mover line read through one cell" % fn.__name__,
+                       lambda fn=fn: mover_line_states(self.lds, self.sds, msecs, mcell, fn))
+        if len(self.rows) == n0:
+            self.row("OK", "collision.mover_line_states (max, min): every mover line read through one cell")
+        w = self.facts.get("_world")
+        if w is None:
+            self.row("INFO", "monstersight.line_states over the dynamic lines", "", "", "needs the World (above)")
+            return
+        from doomfj.monstersight import line_states
+        dyn = set(w.door_order) | set(w.mover_order)
+        bad, n = [], 0
+        for i, ld in enumerate(self.lds):
+            if ld.back in (0xFFFF, -1) or ld.back >= len(self.sds):
+                continue
+            a, b = self.sds[ld.front].sector, self.sds[ld.back].sector
+            if a == b or not ({a, b} & dyn):
+                continue
+            n += 1
+            try:
+                line_states(w, a, b)
+            except AssertionError as e:
+                bad.append((i, ("%s" % e)[:80]))
+        self.row("OK" if not bad else "REFUSED", "monstersight.line_states: every dynamic line read through one cell",
+                 "%d of %d" % (n - len(bad), n), "all", "" if not bad else "linedefs %s" % bad[:4])
+
+    def _slanted_floor_lines(self):
+        """CR of #146 (#147): a slanted W1 floor line crosses by `movers.crossed_shape` (the bounding box grown by
+        the radius), a slanted door line by DOOM's spechit straddle (`doors.crossed`) -- each mirror matches its own
+        model, so no gate sees the difference from DOOM; the playtest should"""
+        from doomfj import movers
+        groups = movers.floor_groups(self.secs, self.lds, self.sds)
+        slanted = [li for li, ld in enumerate(self.lds) if ld.special in movers.FLOOR_WALK_SPECIALS and ld.tag
+                   and self.verts[ld.v1].x != self.verts[ld.v2].x and self.verts[ld.v1].y != self.verts[ld.v2].y]
+        n = sum(1 for _g, shape in movers.floor_walk_triggers(self.lds, self.verts, groups) if shape[0] == "d")
+        assert n == len(slanted), (n, slanted)
+        self.row("OK" if not slanted else "WARN", "slanted W1 floor lines (movers.crossed_shape: not DOOM's rule)",
+                 len(slanted), "0", "" if not slanted else "linedefs %s: crossed by the grown box, not spechit -- "
+                                                           "play-test them" % slanted[:8])
+
+    def _barrel_chains(self):
+        """F1.2 / emit_check's `barrel-chains-static` stand-in: a barrel chain whose trace only a DYNAMIC line touches
+        is refused by `barrelcode.chain_pairs` at emit time (its LOS would depend on the tic)"""
+        w = self.facts.get("_world")
+        if w is None or not w.barrel_things:
+            return
+        from doomfj import barrelcode
+        pairs = barrelcode.chain_pairs(w)
+        self.row("OK", "barrel chains (barrelcode.chain_pairs: no chain behind a dynamic line)",
+                 sum(len(v) for v in pairs.values()))
+
+    def _vis_mirror(self):
+        """CR of #142 (BLOCKING, cd969f2): the oracle's thvis mirror (`MonsterViews.vis_state`) knew pickups and
+        barrels only; E1M2's hard-only lamp got a slot from `things.vanishable_slots` and every gate reading thvis
+        raised KeyError. The mirror runs here at every skill, against the slot count the emitter declares"""
+        w = self.facts.get("_world")
+        if w is None:
+            self.row("INFO", "the oracle's thvis mirror (MonsterViews.vis_state)", "", "", "needs the World (above)")
+            return
+        from types import SimpleNamespace
+        from doomfj.monsters import MonsterViews
+        from doomfj.wall_renderer import SKILLS
+        # the mirror keys every World thing by its DRAWABLE index (things.drawable_things: art in the sprite wad) -- a
+        # World thing with no art (E1M8's cell pack 17: a pickup whose type names no sprite) has none
+        cache = {}
+        noart = sorted({t.type for t in list(w.mon_things) + list(w.pickup_things) + list(w.barrel_things)
+                        if w.rm.sprite_art(self.asset, t.type, cache) is None})
+        self.row("OK" if not noart else "REFUSED", "World things with sprite art (things.drawable_things)",
+                 len(noart), "0", "" if not noart else "types %s: in the World, never drawn; the oracle's mirror "
+                                                       "cannot key them" % noart)
+        mv = MonsterViews(w.rm, w.mw, self.m, self.asset, w)
+        n = len(mv.vis_slots) + len(mv.rt_pickups)
+        for sk in SKILLS:
+            w.reset(sk)
+            got = len(mv.vis_state(SimpleNamespace(world=w))["thvis"])
+            assert got == n, "skill %d: the oracle reads %d thvis slots of %d" % (sk, got, n)
+        other = len(set(mv.vis_slots) - set(mv.pdi) - set(mv.bdi))
+        self.row("OK", "the oracle's thvis mirror reads every slot at every skill (MonsterViews.vis_state)", n, "",
+                 "%d slot(s) neither pickup nor barrel (things.skill_absent)" % other if other else "")
+
+    def feature_guard(self, flag, check, fn):
+        """a per-map feature (config.MAP_CONFIG `flag`: E1M2's polish) run on this map whether or not it is on: a
+        refusal is REFUSED when the flag is on, else a WARN for the day it is turned on"""
+        on = bool(getattr(map_cfg(Config(), self.m), flag))
+        try:
+            note = fn() or ""
+        except AssertionError as e:
+            self.row("REFUSED" if on else "WARN", check, "", "",
+                     "%s%s" % ("" if on else "when %s is turned on: " % flag, ("%s" % e).replace("\n", " ")[:240]))
+            return
+        self.row("OK", check, "on" if on else "off", "", note)
+
+    def _feature_flags(self):
+        """E1M2's polish (SECTOR_LIGHTS, SWITCH_TEX, AUTOMAP) runs model asserts only E1M2 (and E1M1's map page) has
+        passed -- a new map turning a flag on hits them at emission; here, in seconds"""
+        from doomfj import automap, lights, switches
+        dst, _ds, msecs, _mc = self._machines()
+
+        def lit():
+            ths = lights.thinkers(self.secs, self.lds, self.sds)
+            both = sorted({th.sector for th in ths} & (set(dst) | set(msecs)))
+            assert not both, "animated light sectors %s are doors or movers (emit_wall_renderer refuses)" % both
+            lsec = {th.sector for th in ths}
+            over = []
+            for i, ld in enumerate(self.lds):
+                if ld.back in (0xFFFF, -1) or ld.back >= len(self.sds):
+                    continue
+                f, b = self.sds[ld.front].sector, self.sds[ld.back].sector
+                ms = self._line_machines(f, b)
+                if not isinstance(ms, str) and len(ms) + len({x for x in (f, b) if x in lsec}) > 2:
+                    over.append(i)
+            assert not over, "segs on more than two state cells (a machine and lights): linedefs %s" % over[:6]
+            return "%d thinkers" % len(ths)
+        self.feature_guard("SECTOR_LIGHTS", "animated lights (lights.thinkers; no light on a door / mover)", lit)
+        self.feature_guard("SWITCH_TEX", "switch textures (switches.map_switches: one exit switch line)",
+                           lambda: "%d switch lines" % len(switches.map_switches(self.secs, self.lds, self.sds,
+                                                                                  self.verts)))
+        c = map_cfg(Config(), self.m)
+        pal = bytes(v for rgb in self.asset.playpal(0) for v in rgb)
+        self.feature_guard("AUTOMAP", "the MAP page (automap.build + check: the map fits its page)",
+                           lambda: "%d-unit scale" % automap.build(self.wad, self.m, pal, c.W, c.H).units)
+
+    # measured, each from a build's own record (named); projected by segs, an ESTIMATE from two maps
+    POOL_CAPACITY = 67_108_863                          # words: --pool-base 0x80000000 --span-bits 0x7fffffe0
+    POOL_PER_SEG_SPREAD2 = 90_317_184 / 3650            # E1M2's census at the ship knobs, 134.6% (handoff-e1m2 8);
+    #                                                     E1M1's 49,798,976 / 2,057 (blocked62) is 24,210: the larger
+    POOL_PER_SEG_SPREAD1 = 0.826 * 67_108_863 / 3650    # E1M2 r3 at spread 1: 82.6% of the pool (ship-gate 5)
+    RAM_GB_BUILT = 17.21                                # E1M2 r4's assembly: peak private 17.21 GB (ship-gate 5)
+    RAM_GB_PER_SEG = RAM_GB_BUILT / 3650
+
+    def _projection(self):
+        """E1M2 (handoff-e1m2 7-8): the pool overflowed at spread 2 (134.6%) -- found by a build's PREFLIGHT -- and the
+        assembly filled the machine (17.21 GB, 0.02 GB left). Both scale with the segs (E1M1 -> E1M2: segs x1.77, the
+        pool x1.81): projected here, so a map that cannot fit, or cannot be assembled on this box, is known first"""
+        n = len(self.wad.segs(self.m))
+        p2, p1 = n * self.POOL_PER_SEG_SPREAD2, n * self.POOL_PER_SEG_SPREAD1
+        cap = self.POOL_CAPACITY
+        self.row("OK" if p1 <= cap else "WARN", "pool demand (ESTIMATE by segs from E1M1 / E1M2's builds)",
+                 "spread 2 %.0f%%, spread 1 %.0f%%" % (100.0 * p2 / cap, 100.0 * p1 / cap), "<= 100%",
+                 ("--spread %d" % (2 if p2 <= cap else 1)) if p1 <= cap else
+                 "over the pool even at spread 1 (E1M2's lever): size work before any build")
+        ram = n * self.RAM_GB_PER_SEG
+        self.row("OK" if ram <= self.RAM_GB_BUILT else "WARN",
+                 "assembly peak RAM (ESTIMATE by segs from E1M2's 17.21 GB)", "%.1f GB" % ram,
+                 "<= %.2f GB (built here)" % self.RAM_GB_BUILT,
+                 "" if ram <= self.RAM_GB_BUILT else "past anything this box has assembled: a probe first (rule 1)")
+
     def run(self):
         for name, fn in (("geometry", self.geometry), ("textures", self.textures), ("specials", self.specials),
                          ("things", self.things), ("doors/movers", self.doors_and_movers), ("world", self.world),
-                         ("render caps", self.render_caps)):
+                         ("render caps", self.render_caps), ("lessons", self.lessons)):
             self.guard("section " + name, fn)
         return self
 
@@ -466,9 +787,12 @@ def matrix(wad, asset, maps):
     svs = [Survey(wad, m, asset).run() for m in maps]
     need = {}
     for s in svs:
-        for st, check, value, _, _ in s.rows:
-            if st in ("REFUSED", "ERROR", "OVER", "MISSING", "WARN", "WRONG") and not check.startswith("World(strict"):
-                need.setdefault("%s: %s" % (st, check), {})[s.m] = value or "x"
+        for st, check, value, _lim, note in s.rows:
+            if st not in ("REFUSED", "ERROR", "OVER", "MISSING", "WARN", "WRONG") or check == "World(strict=True) builds":
+                continue                        # the plain World row: its MISSING thing rows say the same, per type
+            if check.startswith("World(strict=True) without"):    # docs/level-lessons.md: this row WAS hidden too
+                check, value = "World(strict=True) without the unknown thing types", note[:60]
+            need.setdefault("%s: %s" % (st, check), {})[s.m] = value or "x"
     out = ["| need | %s | maps |" % " | ".join(maps), "|---|%s---|" % ("---|" * len(maps))]
     for check, per in sorted(need.items(), key=lambda kv: (-len(kv[1]), kv[0])):
         out.append("| %s | %s | %d |" % (check, " | ".join(per.get(m, "") for m in maps), len(per)))

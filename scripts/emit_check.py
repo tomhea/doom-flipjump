@@ -228,6 +228,11 @@ def main():
     mw = WadFile.from_path(str(ROOT / profile(a.map).wad))
     art = WadFile.from_path(str(ROOT / "assets" / "freedoom1.wad"))
     cfg = tier_cfg(map_cfg(Config(), a.map), a.tier)
+    import doomfj
+    # M8: a worktree's run must measure ITS code -- `import doomfj` without ROOT/src first finds the installed package
+    print("doomfj from %s" % doomfj.__file__, flush=True)
+    assert Path(doomfj.__file__).resolve().is_relative_to((ROOT / "src").resolve()), (
+        "emit_check imported doomfj from %s, not this tree's src" % doomfj.__file__)
     print("emit_check %s tier %s stand-ins %s (asserts %s)" % (a.map, a.tier, a.standin or "none",
                                                                "ON" if __debug__ else "OFF -- refused"), flush=True)
     assert __debug__, "emit_check runs with asserts ON (no python -O): a skipped guard costs an assembly"

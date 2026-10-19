@@ -627,8 +627,9 @@ class Steer:
             if shotgun and c.get("wp_rdy") == 2 and foe[0] > 260 and (c.get("p_hp") or 0) > 35 and abs(d) < 20:
                 kd.add("forward")
             g = f + 7 * self.seed_at(f)              # the seed shifts the dodge's rhythm (another real play)
-            if foe[0] > 160 and (g // 10) % 3 == 0:  # a side step now and then: fireballs and hitscan less often
-                kd.add("strafe_left" if (g // 30) % 2 else "strafe_right")
+            if foe[0] > 120 and "forward" not in kd:  # CIRCLE-STRAFE while fighting: a fireball aimed at where the
+                # player was misses a player moving across it; the side flips every 16 frames (the seed shifts when)
+                kd.add("strafe_left" if (g // 16) % 2 else "strafe_right")
             self.last_pose = None
             return kd
         # no foe to face: still shoot what the aim window holds of the hunters (passing by, or a monster passed by)

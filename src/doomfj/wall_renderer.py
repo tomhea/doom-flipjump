@@ -2427,7 +2427,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # uninhabitable, which is exactly what a SHUT door is -- so on the stored map every door
     # subsector is pruned out of the walk and out of the bbox gate, and the first frame after a
     # door opens has nothing emitted for it. The union is the open state.
-    _thing_live_gate = thing_live_subsectors(cmap, lds, sds, _dsecs_open)
+    _thing_live_gate = thing_live_subsectors(cmap, lds, sds, closed_lifts_lowered(secs, lds, sds, _dsecs_open))
     _thing_live = _thing_live_gate if _do_things else frozenset()
     # THE LOUD FAILURE (handoff-m14.md section 3: "a silent vanish is unacceptable; a hard failure
     # is fine"). Anything the predicate calls uninhabitable must be provably unreachable, so a thing
@@ -5310,6 +5310,21 @@ def seg_marks_in(lds, sds, seg, sv) -> bool:
             != (bs_.ceil_h, bs_.light & 0xFF, bs_.ceil_tex.upper())
             or (fs_.floor_h, fs_.light & 0xFF, fs_.floor_tex.upper())
             != (bs_.floor_h, bs_.light & 0xFF, bs_.floor_tex.upper()))
+
+
+def closed_lifts_lowered(secs, lds, sds, secs_open):
+    """M8 C11 (E1M7): `secs_open` with every lift STORED CLOSED (floor >= ceiling: E1M7's 249, 274, 548, 595) at its
+    lowest stop -- the "could a thing ever be here?" question (`thing_live_subsectors`) for a lift that is shut until
+    it lowers: E1M7's secret lift 274 (SR 123, floor = ceiling = 128) carries an energy cell (2047 at (1528, 2112)),
+    which the walk prune would drop with the leaf. Every tier asks (a tier without movers keeps the leaf: conservative,
+    the prune only keeps more). A map without such a lift (E1M1, E1M2) gets `secs_open` itself: nothing it emits moves.
+    The oracle has no prune, and its bbox gate (reference_model: `thing_live_subsectors` on the frame's sectors) is the
+    same set of boxes on E1M1 / E1M2 / E1M7 with or without these leaves (tests/host/test_closed_lift_live.py)."""
+    from doomfj.movers import lift_states
+    from doomfj.reference_model import apply_sector_heights
+    low = {si: (min(st), secs[si].ceil_h) for si, st in lift_states(secs, lds, sds).items()
+           if secs[si].floor_h >= secs[si].ceil_h and min(st) < secs[si].ceil_h}
+    return apply_sector_heights(secs_open, low) if low else secs_open
 
 
 def marking_seg_count(cmap, lds, seg_marks) -> int:

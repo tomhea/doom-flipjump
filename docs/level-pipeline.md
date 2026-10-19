@@ -141,6 +141,21 @@ What made the tools map-generic (each with a host test and a control):
 - `scenarios_map.suggest` on a map with no region of five monsters (E1M8: four Barons) refuses by name; p2a's walk-over
   pose is never on a mover / door floor (E1M3's W1 ring around the raised card platform) nor from a diagonal trigger.
 - the survey names a pickup with no sprite (`THING_SPRITE`: E1M8's cell pack 17), which every gate's views KeyError on.
+- the survey refuses a second weapon light row (E1M9's one darker sector: hudcode bakes one); the tools refuse another
+  checkout's `doomfj` (`mapprofile.check_checkout`: the installed package is the MAIN repo's); a planned run that never
+  moves is refused (E1M4); the aftermath faces a corpse in sight, on the start's floor (E1M3, E1M9).
+
+The matrix on 2026-10-19 (after the fixes; every cell host-side, PASS = with the named stand-ins, never clean yet):
+
+| map | roles | checkpoints | plan | tours | stand-ins / blocking feature |
+|---|---|---|---|---|---|
+| E1M3 | PASS (12 roles, 13 N/A) | PASS | PASS | PASS | unknown-things (C6: 2024, 2046) |
+| E1M4 | PASS (14, 12) | PASS | PASS | PASS (10/10 end cells) | unknown-things (C6: 2025, 2046) |
+| E1M5 | PASS (10, 12) | PASS | PASS | PASS | unknown-things (C6 / C7) |
+| E1M8 | PASS (6, 18) | C8: its only monsters are 4 Barons | -- | PASS | unknown-things, undrawn-pickups (C8, C6: 17) |
+| E1M9 | PASS (14, 12) | PASS | PASS | PASS | unknown-things, door-first-kind (C3), weapon-one-row (HUD) |
+| E1M6 | C1/C2: runtime ids (byte leaf lists) | | | | |
+| E1M7 | C5: a teleport destination in another line's reach | | | | |
 
 ## 5. Features once, in the order that unblocks the most maps
 

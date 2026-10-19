@@ -429,9 +429,13 @@ def _aftermath_look(w, trio, cx, cy):
     (E1M9's farthest, 114 units off, stood behind a wall): either way frame 0 drew no corpse and the planned set FAILED
     "one drawn on its first frame". E1M2's first, 48 units off and in sight, is still the one faced"""
     order = [trio[0]] + sorted(trio[1:], key=lambda m: (-math.hypot(m[1] - cx, m[2] - cy), m[0]))
-    for m in order:
-        if math.hypot(m[1] - cx, m[2] - cy) >= AFTER_FACE_MIN and w.los_points((cx << 16, cy << 16),
-                                                                                (m[1] << 16, m[2] << 16)):
+
+    def floor(x, y):
+        return w.secs[w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)]].floor_h
+    f0 = floor(cx, cy)
+    for m in order:              # ... and on a floor within a step of the start's (E1M9's lay 64 below, past a ledge)
+        if (math.hypot(m[1] - cx, m[2] - cy) >= AFTER_FACE_MIN and abs(floor(m[1], m[2]) - f0) <= 24
+                and w.los_points((cx << 16, cy << 16), (m[1] << 16, m[2] << 16))):
             return m
     return None
 

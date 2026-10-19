@@ -160,8 +160,15 @@ def test_the_model_schema_keeps_its_8_bit_lists():
     assert {x.name: x.bits for x in big if x.name in ("leaf_head", "mob_next")} == {"leaf_head": 12, "mob_next": 12}
 
 
-def test_the_wide_twins_are_appended_not_edited():
-    """the 8-bit list macros keep their text (their macro paths are heat-list keys); the wide ones are new names"""
-    text = (Path(__file__).resolve().parents[2] / "src" / "fj" / "sim.fj").read_text(encoding="utf-8")
-    for name in ("leaf_link_w", "leaf_unlink_w", "thing_pass_depth_w", "rank_key_w"):
-        assert ("def %s " % name) in text, name
+def test_the_wide_twins_live_in_their_own_file_and_only_wide_builds_include_it():
+    """the 8-bit list macros keep their text (their macro paths are heat-list keys, and tests mutate sim.fj by text);
+    the wide ones are new names in sim_wide.fj, which build_wall_renderer includes only for a LIST_WIDE config"""
+    fj = Path(__file__).resolve().parents[2] / "src" / "fj"
+    wide, text = (fj / "sim_wide.fj").read_text(encoding="utf-8"), (fj / "sim.fj").read_text(encoding="utf-8")
+    for name in ("leaf_link_w", "leaf_unlink_w", "thing_pass_depth_w", "rank_key_w", "zerocell12"):
+        assert ("def %s " % name) in wide and ("def %s " % name) not in text, name
+    from doomfj import build
+    import inspect
+    src = inspect.getsource(build.build_wall_renderer)
+    assert build._SIM_WIDE_INCLUDES == ["sim_wide.fj"]
+    assert "(_SIM_WIDE_INCLUDES if player_sim and cfg.LIST_WIDE else [])" in src

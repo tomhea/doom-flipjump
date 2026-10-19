@@ -50,25 +50,6 @@ ns m1 {
         hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, hex.pointers.read_byte+dw
     }
 
-    // M8 F1.5 (docs/f1-runtime-ids.md): zerobyte for a 12-bit list cell (a wide-list map's sshead / thnext, at
-    // Config.LIST_ID_BITS 12) -- the same round trip through the WIDE decoder table: flip bit dbit+12 of c, so its jump
-    // word is (v+4096)*dw = `read_ptr_wide_table + v` (laid at op 4,096 by -D hex.pointers.PTR_WIDE_BITS=12), which
-    // xors v's 12 bits into the 3-nibble read register and returns through ret_after_read_wide; then the three
-    // nibbles xor back onto c. Needs the wide table (the guard makes its absence an assembly error, not a wild jump).
-    // tests/fj/test_wide_ids_fj.py runs it on planted 0xFFF / 0x100 / 0x0FF / 0x123 (and a mutant missing a nibble).
-    def zerocell12 c @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_wide {
-        rep(hex.pointers.PTR_WIDE_BITS != 12, i) .zerocell12__needs__D_hex_pointers_PTR_WIDE_BITS_12
-        hex.zero 3, hex.pointers.read_byte
-        wflip hex.pointers.ret_after_read_wide+w, back
-        c+dbit+12; c
-      back:
-        wflip hex.pointers.ret_after_read_wide+w, back
-        c+dbit+12;
-        hex.exact_xor c+dbit+3, c+dbit+2, c+dbit+1, c+dbit+0, hex.pointers.read_byte
-        hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, hex.pointers.read_byte+dw
-        hex.exact_xor c+dbit+11, c+dbit+10, c+dbit+9, c+dbit+8, hex.pointers.read_byte+2*dw
-    }
-
     // ── the same round trip, minus the clear ──────────────────────────────────────────────────
     // `zerobyte` above is: read the byte, then xor it back onto itself (v ^ v = 0). Splitting the
     // read from the xor gives the other two byte operations for free.

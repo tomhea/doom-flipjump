@@ -61,10 +61,11 @@ def _src(name: str, mut=None) -> str:
 
 
 def _assemble(tmp: Path, name: str, prog: str, sim_mut=None, m1_mut=None, wide=True) -> Path:
-    """one image: fj_consts, fixed_point, sim (mutated or not), m1_reset (mutated or not), the program -- with the
-    wide-list map's defines file (Config.emit_fj_defines at LIST_ID_BITS 12)"""
-    files = [Config().emit_fj_consts(tmp / "fj_consts.fj"), FJ / "fixed_point.fj"]
-    for fname, mut in (("sim.fj", sim_mut), ("m1_reset.fj", m1_mut)):
+    """one image: fj_consts, fixed_point, sim, sim_wide (the twins and m1.zerocell12; mutated or not -- `sim_mut` and
+    `m1_mut` both apply to it), the program -- with the wide-list map's defines file (Config.emit_fj_defines at
+    LIST_ID_BITS 12), as build.py assembles a wide map"""
+    files = [Config().emit_fj_consts(tmp / "fj_consts.fj"), FJ / "fixed_point.fj", FJ / "sim.fj"]
+    for fname, mut in (("sim_wide.fj", list(sim_mut or ()) + list(m1_mut or ())),):
         p = tmp / ("%s_%s" % (name, fname))
         p.write_text(_src(fname, mut), encoding="utf-8")
         files.append(p)

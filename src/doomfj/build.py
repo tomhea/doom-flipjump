@@ -39,6 +39,9 @@ _LINES_INCLUDES = ["plane_bands.fj", "stream_render.fj"]
 # ordered file list is equivalent to its concatenation and the order is the contract (R54). This is
 # the same position m14_gate.py and scripts/walk_e1m1.py put it in.
 _SIM_INCLUDES = ["sim.fj"]
+# M8 F1.5 (docs/f1-runtime-ids.md): a wide-list map's list macros (Config.LIST_ID_BITS 12) -- after sim.fj, and only
+# then: the 8-bit programs never include it, so their sources are what they were
+_SIM_WIDE_INCLUDES = ["sim_wide.fj"]
 # M5: the standalone tier's keyboard poll. BEFORE sim.fj, which stays last (R54).
 _STANDALONE_INCLUDES = ["input.fj"]
 # M5: the labels the self-reset must NOT restore. A hosted frame is handed its whole world state
@@ -568,7 +571,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
     prog = write_program_files(parts, gen, mapname)
     includes = (_RENDERER_INCLUDES + _LINES_INCLUDES
                 + (_STANDALONE_INCLUDES if standalone else [])   # M5: kb.poll
-                + (_SIM_INCLUDES if player_sim else []))   # B0: sim.fj LAST (R54)
+                + (_SIM_INCLUDES if player_sim else [])    # B0: sim.fj LAST (R54)
+                + (_SIM_WIDE_INCLUDES if player_sim and cfg.LIST_WIDE else []))   # M8 F1.5: the wide twins
     paths = [consts] + [_SRC_FJ / f for f in includes] + prog
 
     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)

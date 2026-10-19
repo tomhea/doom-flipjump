@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 SIM = Path(__file__).resolve().parents[2] / "src" / "fj" / "sim.fj"
+SIM_WIDE = Path(__file__).resolve().parents[2] / "src" / "fj" / "sim_wide.fj"     # the twins' own file
 GUARD = "rep(hex.pointers.PTR_WIDE_BITS != 12, i) .LIST_WIDE__needs__D_hex_pointers_PTR_WIDE_BITS_12"
 
 
@@ -87,11 +88,12 @@ def actual(text: str, narrow: str, nparams: int) -> list:
     return [ln for ln in lines if ln != GUARD]
 
 
-def check(text: str) -> list:
-    """[(macro, first differing line)] -- empty when every wide twin is its narrow macro under RULES"""
+def check(text: str, wide: str) -> list:
+    """[(macro, first differing line)] -- empty when every wide twin (in `wide`, sim_wide.fj) is its narrow macro (in
+    `text`, sim.fj) under RULES"""
     bad = []
     for (narrow, n) in RULES:
-        d, a = derived(text, narrow, n), actual(text, narrow, n)
+        d, a = derived(text, narrow, n), actual(wide, narrow, n)
         if d != a:
             k = next((i for i, (x, y) in enumerate(zip(d, a)) if x != y), min(len(d), len(a)))
             bad.append(("%s/%d" % (narrow, n), d[k] if k < len(d) else None, a[k] if k < len(a) else None))
@@ -99,11 +101,13 @@ def check(text: str) -> list:
 
 
 def test_every_wide_twin_is_its_narrow_macro_by_rule():
-    text = SIM.read_text(encoding="utf-8")
-    assert check(text) == []
+    text, wide = SIM.read_text(encoding="utf-8"), SIM_WIDE.read_text(encoding="utf-8")
+    assert check(text, wide) == []
     # the guard is where the rule says: each wide macro that touches a list cell opens with it
     for name, n in (("leaf_link_w", 2), ("leaf_unlink_w", 2), ("thing_pass_depth_w", 9)):
-        assert macro(text, name, n)[1] == GUARD, name
+        assert macro(wide, name, n)[1] == GUARD, name
+    # and the 8-bit file holds no twin: the 8-bit programs never see them
+    assert "_w " not in "".join(ln for ln in text.split("\n") if ln.lstrip().startswith("def "))
 
 
 def test_the_rules_change_what_they_say():
@@ -123,7 +127,7 @@ def test_the_rules_change_what_they_say():
     ("the rank left 2 nibbles", "        hex.cmp 3, td_t, td_rk, r1, r0, r0\n", "        hex.cmp 2, td_t, td_rk, r1, r0, r0\n"),
 ])
 def test_a_drifted_twin_is_caught(name, old, new):
-    """R9: each mutation of the file's WIDE body must be rejected"""
-    text = SIM.read_text(encoding="utf-8")
-    assert text.count(old) == 1, "%s: the mutation no longer matches src/fj/sim.fj" % name
-    assert check(text.replace(old, new)) != [], name
+    """R9: each mutation of the WIDE file must be rejected"""
+    text, wide = SIM.read_text(encoding="utf-8"), SIM_WIDE.read_text(encoding="utf-8")
+    assert wide.count(old) == 1, "%s: the mutation no longer matches src/fj/sim_wide.fj" % name
+    assert check(text, wide.replace(old, new)) != [], name

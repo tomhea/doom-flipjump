@@ -637,7 +637,7 @@ class Planner:
 # PICKUPS ON THE WAY (the steering's survival, not the route's logic): an item the model gives, reachable in the world
 # of a leg, is taken first when the detour costs at most its budget in cells -- the weapons most, then armor and the
 # soulsphere, then ammo boxes a little (health is the steering's to seek, when it runs low)
-PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 2049: 14, 2048: 10}
+PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 2049: 14, 2048: 10, 2008: 8}
 
 
 def pickup_things(pl) -> list:

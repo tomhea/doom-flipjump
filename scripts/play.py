@@ -37,7 +37,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-for _q in (ROOT / "scripts", ROOT / "scratchpad" / "gp", ROOT / "scratchpad" / "12m", ROOT / "scratchpad", ROOT / "src"):
+for _q in (ROOT / "scripts", ROOT / "scratchpad" / "gp", ROOT / "scratchpad" / "12m", ROOT / "scratchpad",
+           ROOT / "src"):
     if str(_q) not in sys.path:
         sys.path.insert(0, str(_q))
 
@@ -123,8 +124,8 @@ class Player:
         self.mapname = self.orc.mapname
         self.dsim = onewalk.DoorSim()
         assert self.dsim.order == self.orc.door_order
-        self.card_di = ([di for di, t in enumerate(drawable_things(self.orc.rm, self.orc.mw.things(self.mapname),
-                                                                   self.orc.art)[0]) if t.type == G.CARD_TYPE] or [-1])[0]
+        drawn = drawable_things(self.orc.rm, self.orc.mw.things(self.mapname), self.orc.art)[0]
+        self.card_di = ([di for di, t in enumerate(drawn) if t.type == G.CARD_TYPE] or [-1])[0]
         self.gb = P.GameBinary(Path(fjm))
         orc = self.orc
         self.cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
@@ -301,7 +302,8 @@ class Player:
                 out["t_oracle"] += time.time() - t
                 rec.update(fr=fr, oracle_pic=want)
                 if bad or want != pic or wpal != pal:
-                    out["mismatch"] = {"frame": f, "cells": {k: [str(a), str(b)] for k, (a, b) in list(bad.items())[:8]},
+                    some = list(bad.items())[:8]
+                    out["mismatch"] = {"frame": f, "cells": {k: [str(a), str(b)] for k, (a, b) in some},
                                        "ncells": len(bad), "px": P.px_diff(pic, want) if len(pic) == len(want) else -1,
                                        "palette": None if wpal == pal else [pal, wpal, fr["pal"]]}
                     out["verdict"] = "mismatch"
@@ -380,7 +382,7 @@ class Steer:
     LOOK = 3
     GIVE_UP = 45
 
-    def __init__(self, route: dict, lv=None, log=print):
+    def __init__(self, route: dict, lv=None, log=print, seed: int = 0):
         sys.path.insert(0, str(ROOT / "scripts"))
         import level_route as LR
         self.LR = LR
@@ -389,6 +391,7 @@ class Steer:
         self.route = route
         self.legs = [dict(g) for g in route["legs"]]
         self.log = log
+        self.seed = seed
         self.li = 0
         self._leg(0)
         self.f0 = None
@@ -407,7 +410,9 @@ class Steer:
         bit = gd.skill_bit(gd.SKILL_NAMES[route["skill"]])
         # health on the map at this skill (the stimpack, the medikit, the soulsphere): sought when health runs low
         self.health = [(t.x, t.y) for t in self.lv.things if t.type in (2011, 2012, 2013) and t.flags & bit]
+        self.ammo = [(t.x, t.y) for t in self.lv.things if t.type in (2007, 2008, 2048, 2049) and t.flags & bit]
         self.health_taken = set()
+        self.retry = {}
         self.why = ""
         self.done_frame = None
         self.events = []
@@ -432,6 +437,8 @@ class Steer:
                     cur.append(tuple(p))
             self.pieces.append(cur)
         self.leg_frames = 0
+        self.final = 0
+        self.queue = []
         self.best_prog, self.best_f = (-1, -1), 1 << 30
         self.act = 0
         self.sig0 = None
@@ -491,7 +498,8 @@ class Steer:
             if dd <= self.FIGHT_R and (best is None or dd < best[0]):
                 best = (dd, mx, my, m)
         atk = (c.get("p_atk") or 0) - 1
-        if best is None and 0 <= atk < len(self.rt) and f - self.hurt_f < 30 and self.ign.get(atk, -1) <= f                 and signed(c["mon_health"][atk]) > 0:
+        recent = f - self.hurt_f < 30 and self.ign.get(atk, -1) <= f
+        if best is None and 0 <= atk < len(self.rt) and recent and signed(c["mon_health"][atk]) > 0:
             # hurt by a monster the last picture did not show (p_atk, 1 + slot): face it -- the next picture shows it
             v = c["thpos_rt"][self.rt[atk]]
             mx, my = signed(v & M32) / 65536.0, signed((v >> 32) & M32) / 65536.0
@@ -539,7 +547,11 @@ class Steer:
 
     # ---- the decision ----------------------------------------------------------------------------------------------
     def decide(self, f, c):
+        self.opportune = None
         kd = self._decide(f, c)
+        if self.opportune and "use" not in kd:
+            kd.add("fire")
+            self.fired = True
         self.last_turn = bool(kd & {"turn_left", "turn_right"})
         return kd
 
@@ -555,8 +567,19 @@ class Steer:
         if c.get("p_rct"):                           # a teleport's reaction time: nothing moves
             return kd
         self.leg_frames += 1
-        # ---- combat first
+        if self.queue:                               # a precise approach in progress (a planned key sequence)
+            self.why = "precise"
+            return set(self.queue.pop(0))
+        # ---- low health / no ammo: the nearest item first -- unless a monster is at arm's length
         foe = self._foe(c, x, y, f)
+        if (foe is None or foe[0] > 100) and not self.use_tap and self.leg["kind"] != "item":
+            hp = c.get("p_hp") or 0
+            if hp < 40 and self.health and self._seek_health(f, x, y, self.health, "health"):
+                return kd
+            low_ammo = (c.get("am_clip") or 0) < 5 and not (c.get("am_shell") or 0)
+            if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo"):
+                return kd
+        # ---- combat
         self.why = "nav %d/%d" % (self.wi, len(self.pieces[self.pi]) if self.pieces else 0)
         if foe is not None:
             m = foe[3]
@@ -571,28 +594,35 @@ class Steer:
             tol = max(1.0, math.degrees(math.atan2(14, max(foe[0], 1))))
             if abs(d) > tol:
                 self._turn_to(want, a, kd, tight=tol)
-            if aimed and (foe[0] < 320 or (not self.fired and not c.get("wp_rf"))):
+            if aimed and foe[0] < 800 and (foe[0] < 320 or (not self.fired and not c.get("wp_rf"))):
                 kd.add("fire")
             if not aimed and abs(d) <= tol:          # lined up, but the window does not hold it: cover between
                 self.covered[m] = self.covered.get(m, 0) + 1
-                if self.covered[m] > 15:
-                    self.ign[m] = f + 120
+                if self.covered[m] > 8:              # move on (a moving player is harder to hit); shoot when it shows
+                    self.ign[m] = f + 60
                     self.covered[m] = 0
-                    self.log("    f%d: monster %d ignored (lined up, never in the aim window)" % (f, m))
+                    self.log("    f%d: monster %d passed by (lined up, not in the aim window)" % (f, m))
+            if aimed:
+                self.covered[m] = 0
             self.fired = "fire" in kd
-            if foe[0] > 200 and (f // 10) % 3 == 0:  # a side step now and then: fireballs and hitscan less often
-                kd.add("strafe_left" if (f // 30) % 2 else "strafe_right")
+            g = f + 7 * self.seed_at(f)              # the seed shifts the dodge's rhythm (another real play)
+            if foe[0] > 160 and (g // 10) % 3 == 0:  # a side step now and then: fireballs and hitscan less often
+                kd.add("strafe_left" if (g // 30) % 2 else "strafe_right")
             self.last_pose = None
             return kd
+        # no foe to face: still shoot what the aim window holds of the hunters (passing by, or a monster passed by)
+        win = c.get("aim_sid") or ()
+        hunters = {1 + m for m in range(len(self.rt or ())) if c["mon_target"][m] == 1
+                   and signed(c["mon_health"][m]) > 0}
+        middle = range(max(0, len(win) // 2 - 3), min(len(win), len(win) // 2 + 4))
+        if any(win[k] in hunters for k in middle) and not self.fired and not c.get("wp_rf"):
+            self.opportune = "fire"
+        else:
+            self.opportune = None
         self.fired = False
         if self.leg.get("replan"):
             self.leg.pop("replan")
             self.replan(x, y, "back on the route")
-        # ---- low health: the nearest health item first
-        hp = c.get("p_hp") or 0
-        if hp < 40 and not self.use_tap and not self.leg["to"].startswith("health") and self.health:
-            if self._seek_health(f, x, y):
-                return kd
         # ---- the use tap in progress (press, release, press ...)
         if self.use_tap:
             self.use_tap -= 1
@@ -627,6 +657,16 @@ class Steer:
                 if abs(kx - x) < 35 and abs(ky - y) < 35:
                     return self._next(f, "in its touch box (bonus count %s)" % c.get("p_bc"))
                 tx, ty = kx, ky
+                self.final += 1
+                if self.final > 20 and math.hypot(kx - x, ky - y) < 90 and not self.queue:
+                    # the 16-unit step overshoots the box against the ledge: a short key sequence found by the
+                    # model's own step (a beam over step_sim on the static scene) lands in it
+                    self.final = 0
+                    acc = lambda sx, sy: abs(kx - sx) < 35 and abs(ky - sy) < 35            # noqa: E731
+                    acc.goal = (kx, ky)
+                    self.queue = self._precise(c, acc)
+                    self.log("    f%d: a precise approach to (%d, %d): %s" % (
+                        f, kx, ky, " ".join(keys_str(q) for q in self.queue) if self.queue else "NONE FOUND"))
             dist = math.hypot(tx - x, ty - y)
             if action == "use":
                 box = self.leg.get("box")
@@ -676,11 +716,19 @@ class Steer:
             self.why = "lift %d wait" % sec
             return kd                                # wait for the lift to come down
         here = self.pl.sector_of(self.LR.cell_of(x, y))
-        if here in self.lorder and c["lstate"][self.lorder.index(here)] != 0 and self.ride < 70:
-            self.ride += 1
-            self.last_pose = None
-            self.why = "ride"
-            return kd                                # ride (at most 70 frames: a lift re-triggered is walked off)
+        if here in self.lorder and self.ride < 90:
+            # ON A LIFT: ride while the path's next floor off the lift is too high to step up to from the lift's floor
+            # now (a lower one is a drop: walk off)
+            k = self.lorder.index(here)
+            stops = self.lv.mp.stops[here]
+            lift_floor = stops[min(c["lstate"][k], len(stops) - 1)]
+            off = next((q for q in ahead if self.pl.sector_of(self.LR.cell_of(*q)) != here), None)
+            if off is not None and self.pl.floor_at(self.pl.scenes_for(self.active - {"lift:%d" % here}),
+                                                    self.LR.cell_of(*off)) - lift_floor > 24:
+                self.ride += 1
+                self.last_pose = None
+                self.why = "ride (lift at %d)" % lift_floor
+                return kd
         if here not in self.lorder:
             self.ride = 0
         want = math.degrees(math.atan2(tgt[1] - y, tgt[0] - x)) % 360
@@ -703,12 +751,12 @@ class Steer:
             self.replan(x, y, "stuck")
         return kd
 
-    def _seek_health(self, f, x, y) -> bool:
-        """a detour leg to the nearest reachable health item not taken yet (planned in the world the legs made)"""
-        if f < getattr(self, "health_retry", 0):
+    def _seek_health(self, f, x, y, items, what) -> bool:
+        """a detour leg to the nearest reachable item of `items` not taken yet (planned in the world the legs made)"""
+        if f < self.retry.get(what, 0):
             return False
         LR = self.LR
-        cands = sorted((math.hypot(hx - x, hy - y), hx, hy) for hx, hy in self.health
+        cands = sorted((math.hypot(hx - x, hy - y), hx, hy) for hx, hy in items
                        if (hx, hy) not in self.health_taken and math.hypot(hx - x, hy - y) < 900)
         opn = {"door:%d" % si for si in self.dorder if self.lv.dp.boxes.get(si) is not None
                and (not self.pl.mechs["door:%d" % si].key or self.pl.mechs["door:%d" % si].key in self.keys)}
@@ -717,13 +765,60 @@ class Steer:
                                     and abs(LR.centre(c)[1] - hy) < 24, self.active | opn)
             if path and not any(q[0] == "teleport" for q in path) and len(path) < 70:
                 self.leg["replan"] = True
-                self.legs.insert(self.li, {"to": "health", "kind": "item", "action": "touch", "goal": [hx, hy],
+                self.legs.insert(self.li, {"to": what, "kind": "item", "action": "touch", "goal": [hx, hy],
                                            "key_at": [hx, hy], "path": [list(LR.centre(q)) for q in path]})
                 self._leg(self.li)
-                self.log("    f%d: health low -- a detour to the item at (%d, %d), %d cells" % (f, hx, hy, len(path)))
+                self.log("    f%d: %s low -- a detour to the item at (%d, %d), %d cells" % (f, what, hx, hy, len(path)))
                 return True
-        self.health_retry = f + 60
+        self.retry[what] = f + 60
         return False
+
+    def _precise(self, c, accept, depth: int = 14, width: int = 30) -> list:
+        """a beam search over the model's own player step (ReferenceModel.step_sim, the game tier's strafe and turn
+        tap) on the static scene of the world the legs made, from the binary's pose: the keys to a pose `accept`s"""
+        from dataclasses import replace
+        from doomfj.reference_model import SimState
+        rm = self.lv.rm
+        scene = self.pl.scenes_for(self.active)[0][1]
+        st = replace(SimState(signed(c["viewx"]), signed(c["viewy"]), c["viewangle"] & M32, self.lv.map),
+                     turnheld=int(self.last_turn))
+        moves = [frozenset(m) for m in (("forward",), ("forward", "turn_left"), ("forward", "turn_right"),
+                                        ("turn_left",), ("turn_right",), ("strafe_left",), ("strafe_right",),
+                                        ("back",), ("forward", "strafe_left"), ("forward", "strafe_right"))]
+        goal = getattr(accept, "goal", None)
+
+        def h(s):
+            x, y = signed(s.x) / 65536.0, signed(s.y) / 65536.0
+            return math.hypot(goal[0] - x, goal[1] - y) if goal else 0
+        beam = [(0, st, [])]
+        for _ in range(depth):
+            nxt = []
+            for _h, s0, path in beam:
+                for mv in moves:
+                    ns = rm.step_sim(s0, {k: True for k in mv}, scene=scene, strafe=True, tap=True)
+                    if accept(signed(ns.x) / 65536.0, signed(ns.y) / 65536.0):
+                        return path + [mv]
+                    nxt.append((h(ns), ns, path + [mv]))
+            nxt.sort(key=lambda t: t[0])
+            seen, beam = set(), []
+            for hh, s1, path in nxt:
+                k = (s1.x >> 18, s1.y >> 18, s1.angle >> 26, s1.turnheld)
+                if k not in seen:
+                    seen.add(k)
+                    beam.append((hh, s1, path))
+                    if len(beam) >= width:
+                        break
+        return []
+
+    def seed_at(self, f) -> int:
+        """the steering seed in force at frame f: `seed` an int, or a schedule [(from frame, seed), ...]"""
+        if isinstance(self.seed, int):
+            return self.seed
+        cur = 0
+        for f0, sd in self.seed:
+            if f >= f0:
+                cur = sd
+        return cur
 
     def _effect(self, c):
         """the cells a use leg's press must move: its door / lift state, the floor switches, the level's end"""

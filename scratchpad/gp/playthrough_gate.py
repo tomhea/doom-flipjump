@@ -45,10 +45,25 @@ if __name__ == "__main__":                         # `--map E1Mn` before probe /
     from doomfj.mapprofile import take_map_arg
     take_map_arg(keep=True)
 
-# the skill each shipped map's playthrough PASSES at by real play (the default; --skill overrides)
-DEFAULT_SKILL = {"E1M1": "easy", "E1M2": "easy"}
+# the skill and the steering seed each shipped map's playthrough PASSES at by real play (the defaults; --skill /
+# --seed override). The seed only shifts the steering's dodge rhythm: every seed is real play, none is a cheat
+DEFAULT_SKILL = {"E1M1": "medium", "E1M2": "easy"}
+DEFAULT_SEED = {}
 CONTROL_FRAMES = 40           # world frames a control runs
 CONTROL_AT = 25               # the world frame a control mutates
+
+
+def parse_seed(text):
+    """`--seed`: an int, or a schedule `frame:seed,frame:seed,...` (the seed in force from each frame on)"""
+    if text is None:
+        return None
+    if ":" not in str(text):
+        return int(text)
+    return [tuple(int(v) for v in part.split(":")) for part in str(text).split(",")]
+
+
+def seed_text(seed) -> str:
+    return str(seed) if isinstance(seed, int) else ",".join("%d:%d" % fs for fs in seed)
 
 
 def main(argv=None) -> int:
@@ -58,8 +73,14 @@ def main(argv=None) -> int:
     ap.add_argument("--labels")
     ap.add_argument("--skill", default=None, choices=("easy", "medium", "hard"))
     ap.add_argument("--budget", type=int, default=6000, help="world frames before FAIL")
+    ap.add_argument("--seed", default=None, help="the steering's dodge rhythm: N or a schedule F:N,F:N (default: the "
+                                                 "map's DEFAULT_SEED)")
     ap.add_argument("--route", default=None, help="a level_route.py JSON (default: planned now)")
     ap.add_argument("--model-only", action="store_true")
+    ap.add_argument("--search", type=int, default=0, metavar="ROUNDS",
+                    help="--model-only: on a death, re-play with the seed changed SEARCH_BACK frames before it, keep "
+                         "the attempt that got furthest, up to ROUNDS rounds -> a seed schedule for DEFAULT_SEED")
+    ap.add_argument("--search-seeds", default="1,2,3,4", help="--search: the seeds tried each round")
     ap.add_argument("--controls-only", action="store_true")
     ap.add_argument("--no-controls", action="store_true", help="skip the R9 controls (a dev run; never PASS evidence)")
     ap.add_argument("--keys-out", default=None, help="write the played key log (JSON) here")
@@ -69,7 +90,6 @@ def main(argv=None) -> int:
     import play as PLAY
     import level_route as LR
     from doomfj.mapprofile import ACTIVE
-    from doomfj.menu import LEVEL_DONE_SCR, LEVEL_DONE_SCREENS
     mapname = (a.map or ACTIVE).upper()
     skill = a.skill or DEFAULT_SKILL.get(mapname, "easy")
     if not a.model_only and not (a.fjm and a.labels):
@@ -90,10 +110,10 @@ def main(argv=None) -> int:
         return 1
     pl = PLAY.Player(a.fjm, a.labels, skill, check=True) if not a.model_only else _model_player(PLAY, skill)
     pl.workers = 0 if a.model_only else a.workers
+    lv = LR.Level(mapname, route.get("wad"), skill)
     print("setup %.0f s (NEW GAME on frame %d)" % (time.time() - t0, pl.mf), flush=True)
 
     # ---- R9: the controls, first
-    ok_ctl = True
     if not (a.model_only or a.no_controls):
         ok_ctl = controls(PLAY, pl)
         if a.controls_only:
@@ -103,62 +123,27 @@ def main(argv=None) -> int:
             print("\nPLAYTHROUGH GATE FAIL -- a control did not part: the comparison is vacuous")
             return 1
 
-    # ---- the play
-    steer = PLAY.Steer(route, log=lambda s: print(s, flush=True))
-    steer.rt = pl.monster_rows()
-    st = {"done": None, "dead": None, "hold": 0, "lastlog": 0, "hp": None, "ld": None, "t": time.time()}
-
-    def on_frame(rec):
-        c, f = rec["cells"], rec["f"]
-        if f < pl.mf:
-            return None
-        if st["hp"] is not None and c.get("p_hp") is not None and c["p_hp"] != st["hp"]:
-            if c["p_hp"] < st["hp"]:
-                steer.hurt_f = f
-        st["hp"] = c.get("p_hp")
-        if c.get("p_dead") and st["dead"] is None:
-            x, y, _a = PLAY.pose_of(c)
-            st["dead"] = (f, x, y, c.get("p_atk"))
-            return "stop"
-        mode, scr = c.get("mode"), c.get("menu_scr")
-        if mode == 1 and c.get("lvdone") == 1 and scr in LEVEL_DONE_SCREENS:
-            if st["done"] is None:
-                st["done"] = f
-                if steer.leg is not None and steer.leg["to"] == "exit":
-                    steer._next(f, "LEVEL COMPLETE")
-            if scr == LEVEL_DONE_SCR:                 # through the hold: the screen that takes a key, exact too
-                st["hold"] += 1
-                if st["hold"] >= 2:
-                    return "stop"
-        if a.trace:
-            x, y, ang = PLAY.pose_of(c)
-            print("    t%d (%d,%d) a%d hp %s %s %s" % (f - pl.mf, x, y, ang, c.get("p_hp"), PLAY.keys_str(rec["keys"]),
-                                                  steer.why), flush=True)
-        if f - st["lastlog"] >= 200:
-            st["lastlog"] = f
-            x, y, _a = PLAY.pose_of(c)
-            print("  f%d (w%d): (%d, %d) hp %s ar %s, leg %d/%d -> %s, kills %s, %.0f s" % (
-                f, f - pl.mf, x, y, c.get("p_hp"), c.get("p_ar"), steer.li, len(steer.legs),
-                steer.leg["to"] if steer.leg else "-", c.get("st_kill"), time.time() - st["t"]), flush=True)
-        return None
-    frames = pl.mf + 1 + a.budget
-    if a.model_only:
-        r = pl.run_model([], frames, decide=steer.decide, on_frame=on_frame)
-    else:
-        r = pl.run([], frames, decide=steer.decide, on_frame=on_frame)
+    seed = parse_seed(a.seed) if a.seed is not None else DEFAULT_SEED.get(mapname, 0)
+    if a.search:
+        if not a.model_only:
+            ap.error("--search is a --model-only tool")
+        seed = search(PLAY, pl, route, lv, seed, a.budget, a.search,
+                      tuple(int(v) for v in a.search_seeds.split(",")))
+    print("steering seed %s" % seed_text(seed), flush=True)
+    res = play(PLAY, pl, route, lv, seed, a.budget, a.model_only, a.trace)
+    r, steer, st = res["r"], res["steer"], res["st"]
     wall = time.time() - t0
-    nworld = r["frames"] - pl.mf
     if a.keys_out:
-        Path(a.keys_out).write_text(json.dumps({"map": mapname, "skill": skill, "fjm": a.fjm,
+        Path(a.keys_out).write_text(json.dumps({"map": mapname, "skill": skill, "fjm": a.fjm, "seed": seed_text(seed),
                                                 "keys": ["".join(PLAY.NAME_LET[n] for n in sorted(k))
                                                          for k in r["keys"]]}))
     print("")
     print("frames: %d presented (%d menu, %d world), legs done %d/%d: %s" % (
-        r["frames"], pl.mf, nworld, sum(1 for e in steer.events), len(steer.legs),
+        r["frames"], pl.mf, r["frames"] - pl.mf, len(steer.events), len(steer.legs),
         ", ".join("%s@w%d" % (e[2], e[0] - pl.mf) for e in steer.events)))
-    print("time: %.0f s wall; the binary %.0f s (%.1f ms/frame), the oracle %.0f s (%.0f ms/frame); %s ops" % (
+    print("time: %.0f s wall; the binary %.0f s (%.1f ms/frame), the oracle %.0f s (%.0f ms/frame); %s ops; seed %s" % (
         wall, r["t_binary"], 1000 * r["t_binary"] / max(1, r["frames"]), r["t_oracle"],
-        1000 * r["t_oracle"] / max(1, r["frames"]), format(r["ops"], ",")))
+        1000 * r["t_oracle"] / max(1, r["frames"]), format(r["ops"], ","), seed_text(seed)))
     if r["mismatch"]:
         mm = r["mismatch"]
         dump_mismatch(pl, r)
@@ -182,6 +167,86 @@ def main(argv=None) -> int:
     print("\nPLAYTHROUGH GATE %s -- %s LEVEL COMPLETE at frame %d (world %d) at %s, %s%.0f s"
           % (label, mapname, st["done"], st["done"] - pl.mf, skill, exact, wall))
     return 0
+
+
+def play(PLAY, pl, route, lv, seed, budget, model_only, trace=False, quiet=False):
+    """ONE play of the route with steering seed `seed`: -> {"r": the run, "steer", "st": done / dead frames}"""
+    from doomfj.menu import LEVEL_DONE_SCR, LEVEL_DONE_SCREENS
+    log = (lambda s: None) if quiet else (lambda s: print(s, flush=True))
+    steer = PLAY.Steer(route, lv=lv, log=log, seed=seed)
+    steer.rt = pl.monster_rows()
+    st = {"done": None, "dead": None, "hold": 0, "lastlog": 0, "hp": None, "t": time.time()}
+
+    def on_frame(rec):
+        c, f = rec["cells"], rec["f"]
+        if f < pl.mf:
+            return None
+        if st["hp"] is not None and c.get("p_hp") is not None and c["p_hp"] < st["hp"]:
+            steer.hurt_f = f
+        st["hp"] = c.get("p_hp")
+        if c.get("p_dead") and st["dead"] is None:
+            x, y, _a = PLAY.pose_of(c)
+            st["dead"] = (f, x, y, c.get("p_atk"))
+            return "stop"
+        mode, scr = c.get("mode"), c.get("menu_scr")
+        if mode == 1 and c.get("lvdone") == 1 and scr in LEVEL_DONE_SCREENS:
+            if st["done"] is None:
+                st["done"] = f
+                if steer.leg is not None and steer.leg["to"] == "exit":
+                    steer._next(f, "LEVEL COMPLETE")
+            if scr == LEVEL_DONE_SCR:                 # through the hold: the screen that takes a key, exact too
+                st["hold"] += 1
+                if st["hold"] >= 2:
+                    return "stop"
+        if trace:
+            x, y, ang = PLAY.pose_of(c)
+            log("    t%d (%d,%d) a%d hp %s %s %s" % (f - pl.mf, x, y, ang, c.get("p_hp"), PLAY.keys_str(rec["keys"]),
+                                                  steer.why))
+        if f - st["lastlog"] >= 200:
+            st["lastlog"] = f
+            x, y, _a = PLAY.pose_of(c)
+            log("  f%d (w%d): (%d, %d) hp %s ar %s, leg %d/%d -> %s, kills %s, %.0f s" % (
+                f, f - pl.mf, x, y, c.get("p_hp"), c.get("p_ar"), steer.li, len(steer.legs),
+                steer.leg["to"] if steer.leg else "-", c.get("st_kill"), time.time() - st["t"]))
+        return None
+    frames = pl.mf + 1 + budget
+    r = (pl.run_model if model_only else pl.run)([], frames, decide=steer.decide, on_frame=on_frame)
+    return {"r": r, "steer": steer, "st": st}
+
+
+SEARCH_BACK = 250             # frames before a death the seed changes at
+SEARCH_SEEDS = (1, 2, 3, 4)
+
+
+def search(PLAY, pl, route, lv, seed, budget, rounds, seeds=SEARCH_SEEDS):
+    """--search: from `seed`, while the play dies (or stalls), re-play with the seed changed SEARCH_BACK frames before
+    the end, trying SEARCH_SEEDS, and keep the attempt that went furthest (legs done, then frames lived). Each attempt
+    is a whole play from boot -- the steering is deterministic, so a schedule found here is the play the gate makes"""
+    def score(res):
+        return (res["st"]["done"] is not None, len(res["steer"].events), res["r"]["frames"])
+    sched = [(0, seed)] if isinstance(seed, int) else list(seed)
+    best = play(PLAY, pl, route, lv, sched, budget, True, quiet=True)
+    print("  search: %s -> %s" % (seed_text(sched), score(best)), flush=True)
+    for rnd in range(rounds):
+        if best["st"]["done"] is not None:
+            break
+        end = best["r"]["frames"]
+        found = None
+        for sd in seeds:
+            cand = [fs for fs in sched if fs[0] < end - SEARCH_BACK] + [(max(0, end - SEARCH_BACK), sd + 10 * rnd)]
+            res = play(PLAY, pl, route, lv, cand, budget, True, quiet=True)
+            print("  search round %d: %s -> %s" % (rnd, seed_text(cand), score(res)), flush=True)
+            if score(res) > score(best) and (found is None or score(res) > score(found[1])):
+                found = (cand, res)
+            if res["st"]["done"] is not None:
+                break
+        if found is None:
+            print("  search: no seed got further than %s" % (score(best),), flush=True)
+            break
+        sched, best = found
+    print("  search: the schedule %s (%s)" % (seed_text(sched), "PASS" if best["st"]["done"] is not None else
+                                                "still failing"), flush=True)
+    return sched
 
 
 def _model_player(PLAY, skill):

@@ -70,8 +70,9 @@ def _undrawn_pickups():
 
 
 def _door_first_kind():
-    """C3: a door two lines ask two MOTIONS of (E1M9's 135: a DR door its D1 open-stay line also opens) takes its first
-    line's kind (doors.door_kinds' manual > walk-over > switch order), the motion check skipped"""
+    """C3: a door two lines ask two MOTIONS of (E1M9's 135: a DR door its D1 open-stay line also opens) takes its
+    open-stay kind (an S1 switch's door must stay: doors.switch_door_triggers), else its first line's (door_kinds'
+    manual > walk-over > switch order) -- the motion check skipped"""
     import sys as _sys
     from doomfj import doors as D
 
@@ -81,6 +82,11 @@ def _door_first_kind():
         out = {}
         for si in sorted(doors):
             src = lines_of[si]
+            every = sorted({kk for ks in src.values() for kk in ks})
+            stay = [kk for kk in every if D.door_stay(kk)]
+            if len({D.KIND_MOTION[kk] for kk in every}) > 1 and stay:
+                out[si] = stay[0]            # two motions: the open-stay one (an S1 switch's door must stay)
+                continue
             for k in ("manual", "walk", "switch"):
                 if src.get(k):
                     out[si] = sorted(src[k])[0]

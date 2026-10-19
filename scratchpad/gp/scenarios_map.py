@@ -401,15 +401,11 @@ def suggest(n_runs: int = N_RUNS) -> dict:
         sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, int(cx), int(cy))]
         key = (spread, a[0])
         if reg.get(sec) is not None and (best is None or key < best[0]):
-            best = (key, near3, (int(round(cx)), int(round(cy))), sec)
+            look = _aftermath_look(w, near3, round(cx), round(cy))
+            if look is not None:             # M8: a trio whose start sees none of its corpses is no aftermath
+                best = (key, near3, (int(round(cx)), int(round(cy))), sec, look)
     if best is not None:
-        _key, trio, (cx, cy), sec = best
-        # M8 (gen_dryrun on E1M3: the first corpse lay 21 units from the start -- inside the near clip, so frame 0 drew
-        # none and the set FAILED "one drawn on its first frame"): a first corpse nearer than AFTER_FACE_MIN is not
-        # faced -- the farthest of the trio is (E1M2's first lies 48 units off: its aftermath as it was)
-        look = trio[0]
-        if math.hypot(look[1] - cx, look[2] - cy) < AFTER_FACE_MIN:
-            look = max(trio, key=lambda m: (math.hypot(m[1] - cx, m[2] - cy), -m[0]))
+        _key, trio, (cx, cy), sec, look = best
         out.insert(1, {"name": "R%d-aftermath" % reg[sec], "sector": sec, "want": (cx, cy),
                        "face": (look[1], look[2]), "region": reg[sec], "style": "collect",
                        "corpses": tuple(m[0] for m in trio),
@@ -425,6 +421,19 @@ def suggest(n_runs: int = N_RUNS) -> dict:
                         "monsters_per_region": {str(k): v for k, v in by_region.items()},
                         "quota": quota, "rule": "regions_map: v1's stages with the map's lifts, W1 doors, floor "
                                                 "switch and key doors (every colour)"}}
+
+
+def _aftermath_look(w, trio, cx, cy):
+    """the corpse the aftermath faces from its start (cx, cy), or None: the trio's first, else the others farthest first
+    -- one at least AFTER_FACE_MIN away (E1M3's first lay 21 units off, inside the near clip) and in sight of the start
+    (E1M9's farthest, 114 units off, stood behind a wall): either way frame 0 drew no corpse and the planned set FAILED
+    "one drawn on its first frame". E1M2's first, 48 units off and in sight, is still the one faced"""
+    order = [trio[0]] + sorted(trio[1:], key=lambda m: (-math.hypot(m[1] - cx, m[2] - cy), m[0]))
+    for m in order:
+        if math.hypot(m[1] - cx, m[2] - cy) >= AFTER_FACE_MIN and w.los_points((cx << 16, cy << 16),
+                                                                                (m[1] << 16, m[2] << 16)):
+            return m
+    return None
 
 
 def _cp(c, name, style):
@@ -457,6 +466,10 @@ def plan(sugg: dict, quiet: bool = False) -> dict:
                 assert sec == c["sector"] and reg.get(sec) == c["region"], (c["name"], sec, reg.get(sec))
                 nav = S.NavGraph.build(w0, (pose[0] >> 16, pose[1] >> 16), tag=c["name"])
                 keys, pname, tried = S.plan_run(c, setup, nav)
+                # M8 (gen_dryrun on E1M4: R3-s219's checkpoint faced a group centred on itself, and the autopilot
+                # turned for all 100 frames -- the set FAILED "every run moves"): a run with no movement key is refused
+                # like a placement, and the region's next suggestion planned (E1M2's runs all move: its set as it was)
+                assert any(kd.get(k) for kd in keys for k in S.MOVE_KEYS), "the plan presses no movement key"
             except AssertionError as e:
                 print("  %-22s REFUSED (%s) -- the region's next suggestion" % (c["name"], str(e)[:120]), flush=True)
                 used.append(c["name"])

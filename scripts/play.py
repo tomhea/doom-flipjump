@@ -286,7 +286,7 @@ class Player:
                     missing = sorted(k for k in exp if k not in pr.cells)
                     if missing:
                         raise Mismatch("the oracle names cells the probe cannot read: %s" % missing)
-                    state["names"] = sorted(set(exp) | set(names_steer))
+                    state["names"] = sorted(exp)          # the steering sees exactly what the model run sees
                 got = pr.read_cells(state["names"])
                 bad = {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v}
                 if fr["drawn"] == "world" and pool is not None:
@@ -437,13 +437,14 @@ class Steer:
                     cur.append(tuple(p))
             self.pieces.append(cur)
         self.leg_frames = 0
+        self.lift_wait = 0
         self.final = 0
         self.queue = []
         self.best_prog, self.best_f = (-1, -1), 1 << 30
         self.act = 0
         self.sig0 = None
 
-    def replan(self, x, y, why):
+    def replan(self, x, y, why, f=None):
         """the rest of the leg from the player's pose, in the world the route has by now"""
         LR = self.LR
         goal = tuple(self.leg["path"][-1])
@@ -451,7 +452,16 @@ class Steer:
         opn = {"door:%d" % si for si in self.dorder if self.lv.dp.boxes.get(si) is not None
                and (not self.pl.mechs["door:%d" % si].key or self.pl.mechs["door:%d" % si].key in self.keys)}
         path = self.pl.leg_path(LR.cell_of(x, y), lambda c: c == gcell, self.active | opn)
-        self.log("    re-plan (%s) from (%d, %d): %s" % (why, x, y, "%d cells" % len(path) if path else "NO PATH"))
+        wide = ""
+        if not path:                                 # the flood's world: every mechanism it found
+            path = self.pl.leg_path(LR.cell_of(x, y), lambda c: c == gcell,
+                                    self.active | opn | set(self.route.get("flood", {}).get("activated", ())))
+            wide = " (in the flood's world)" if path else ""
+        self.log("    re-plan (%s) from (%d, %d): %s%s" % (why, x, y, "%d cells" % len(path) if path else "NO PATH",
+                                                       wide))
+        if not path and self.leg["kind"] == "item" and f is not None:
+            self._next(f, "unreachable from here: the detour is dropped")
+            return False
         if path:
             self.leg["path"] = [list(LR.centre(c)) if c[0] != "teleport" else ["teleport", c[1]] for c in path]
             keep = (self.li, self.leg)
@@ -495,7 +505,7 @@ class Steer:
             v = c["thpos_rt"][row]
             mx, my = signed(v & M32) / 65536.0, signed((v >> 32) & M32) / 65536.0
             dd = math.hypot(mx - x, my - y)
-            if dd <= self.FIGHT_R and (best is None or dd < best[0]):
+            if dd <= self.FIGHT_R - 150 * (self.seed_at(f) % 2) and (best is None or dd < best[0]):
                 best = (dd, mx, my, m)
         atk = (c.get("p_atk") or 0) - 1
         recent = f - self.hurt_f < 30 and self.ign.get(atk, -1) <= f
@@ -567,6 +577,8 @@ class Steer:
         if c.get("p_rct"):                           # a teleport's reaction time: nothing moves
             return kd
         self.leg_frames += 1
+        if self.leg["kind"] == "item" and self.leg_frames > 300:
+            return self._next(f, "the detour took 300 frames: dropped")
         if self.queue:                               # a precise approach in progress (a planned key sequence)
             self.why = "precise"
             return set(self.queue.pop(0))
@@ -574,7 +586,9 @@ class Steer:
         foe = self._foe(c, x, y, f)
         if (foe is None or foe[0] > 100) and not self.use_tap and self.leg["kind"] != "item":
             hp = c.get("p_hp") or 0
-            if hp < 40 and self.health and self._seek_health(f, x, y, self.health, "health"):
+            want = 40 + 10 * (self.seed_at(f) % 3)              # the seed moves the health threshold too
+            if hp < want + 25 and self.health and self._seek_health(f, x, y, self.health, "health",
+                                                                   most=70 if hp < want else 25):
                 return kd
             low_ammo = (c.get("am_clip") or 0) < 5 and not (c.get("am_shell") or 0)
             if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo"):
@@ -622,7 +636,7 @@ class Steer:
         self.fired = False
         if self.leg.get("replan"):
             self.leg.pop("replan")
-            self.replan(x, y, "back on the route")
+            self.replan(x, y, "back on the route", f)
         # ---- the use tap in progress (press, release, press ...)
         if self.use_tap:
             self.use_tap -= 1
@@ -706,6 +720,12 @@ class Steer:
                 return kd
         lift = self._lift_ahead(c, x, y, ahead)
         if lift is not None:
+            self.lift_wait += 1
+        if lift is not None and self.lift_wait > 150:      # a lift that never comes: another way, in the flood's world
+            self.lift_wait = 0
+            self.replan(x, y, "the lift ahead never came down", f)
+            return kd
+        if lift is not None:
             k, sec = lift
             self.last_pose = None
             if c["lstate"][k] == 0 and self.leg_frames % 30 == 0:
@@ -742,16 +762,16 @@ class Steer:
         elif f - self.best_f > 50:                   # no progress along the path (knocked about, or blocked)
             self.best_f = f
             self.stuck = 0
-            self.replan(x, y, "no progress in 50 frames")
+            self.replan(x, y, "no progress in 50 frames", f)
         elif f - self.best_f > 25:
             kd.discard("forward")
             kd.add("back" if (f // 8) % 2 else "strafe_left" if (f // 16) % 2 else "strafe_right")
         if self.stuck > 40:
             self.stuck = 0
-            self.replan(x, y, "stuck")
+            self.replan(x, y, "stuck", f)
         return kd
 
-    def _seek_health(self, f, x, y, items, what) -> bool:
+    def _seek_health(self, f, x, y, items, what, most: int = 70) -> bool:
         """a detour leg to the nearest reachable item of `items` not taken yet (planned in the world the legs made)"""
         if f < self.retry.get(what, 0):
             return False
@@ -763,7 +783,7 @@ class Steer:
         for _d, hx, hy in cands[:3]:
             path = self.pl.leg_path(LR.cell_of(x, y), lambda c, hx=hx, hy=hy: abs(LR.centre(c)[0] - hx) < 24
                                     and abs(LR.centre(c)[1] - hy) < 24, self.active | opn)
-            if path and not any(q[0] == "teleport" for q in path) and len(path) < 70:
+            if path and not any(q[0] == "teleport" for q in path) and len(path) < most:
                 self.leg["replan"] = True
                 self.legs.insert(self.li, {"to": what, "kind": "item", "action": "touch", "goal": [hx, hy],
                                            "key_at": [hx, hy], "path": [list(LR.centre(q)) for q in path]})

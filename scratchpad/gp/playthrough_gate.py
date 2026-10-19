@@ -214,7 +214,7 @@ def play(PLAY, pl, route, lv, seed, budget, model_only, trace=False, quiet=False
     return {"r": r, "steer": steer, "st": st}
 
 
-SEARCH_BACK = 250             # frames before a death the seed changes at
+SEARCH_BACK = 600             # frames before a death the seed changes at
 SEARCH_SEEDS = (1, 2, 3, 4)
 
 

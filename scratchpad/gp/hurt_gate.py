@@ -377,7 +377,10 @@ class Run:
                           screen_kw=fr.get("skw"), mobiles=fr["mobiles"] if mobiles is None else mobiles,
                           removed=fr.get("removed"), barrel_views=fr.get("bviews"), card=fr["phase"][3],
                           skill=fr.get("skill"),                              # M7 P6+P7: the skill played
-                          view_drop=fr.get("vdrop", 0))                       # M7 P8a: the dying view's sink
+                          view_drop=fr.get("vdrop", 0),                       # M7 P8a: the dying view's sink
+                          wall_scroll=fr.get("wscroll", 0),                   # M8: the scrolling wall's slide
+                          sector_lights=fr.get("lights"),                     # M8: the animated lights
+                          switch_on=fr.get("switches"))                       # M8: the switch textures
 
     def px_of(self, tr, pred) -> int:
         """the pixels the mobiles `pred` names drew: on the frames holding one, the picture against it without them

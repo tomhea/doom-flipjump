@@ -58,6 +58,13 @@ first, as a shot's) -- whose SOURCE is `dm_src` (mon_target's code: 0 none, 1 th
 it, dm_out zeroes it); a player's shot (modes 0, 1) names the player, as before; a BLAST names `dm_src` too (the
 barrel's bar_src: barrelcode). The switch is DOOM's (combat.damage_monster): threshold 0, a source, not the target
 itself (`dm_me`, set by the slot's stub) -> the target is the source; mon_target is two nibbles (`dm_tg`).
+
+M8 (`telefrag`, a map with a WR teleport; doomfj.teleport, combat._teleport_player): dm_melee TELEFRAG (5) is
+P_TeleportMove's P_DamageMobj(thing, player, player, 10000) -- teleportcode's stomp leaf calls dm_go with it (through
+`tp_frag`, kb_tf 1). No reach, no blood (a BLAST's start at the target's checks); the thrust's inflictor and source
+the player (a shot's: viewx / viewy, kb_sp -- the saw's exception holds); the health SET to the 12-bit cell's floor
+combat.MON_HEALTH_MIN (the model's `max(health - 10000, MON_HEALTH_MIN)`: 10000 reaches it from any health), so the
+kill and the gib follow as for any hit (-2048 < -spawnhealth: the xdeath state where there is one); dm_dmg is unread.
 """
 from typing import Dict, List, Sequence, Tuple
 
@@ -80,6 +87,7 @@ MONSTER, BULLET = 3, 4               # M7 P8a I: dm_melee for a monster's hit (m
 FIGHT_DECLS = ["dm_src: hex.vec 2", "dm_me: hex.vec 2"]     # M7 P8a I: the hit's source; the hit slot's own code
 DM_MAX_FULL = 200                    # M7 P6: the berserk fist (A_Punch x10); a barrel's blast deals <= 128
 BLAST = 2                            # M7 P6: dm_melee's value for a barrel's blast (no reach, no blood)
+TELEFRAG = 5                         # M8: dm_melee's value for P_TeleportMove's 10000 (no reach, no blood)
 TICS_FOREVER = 15
 
 
@@ -170,6 +178,8 @@ def check_model_rules(w, *, max_dmg: int = DM_MAX, gib: bool = False) -> None:
                 assert st.action is None or st.action in SOUND_ACTIONS, (x, st.action)
                 _death_chain_ok(x)
             assert info.spawnhealth < (1 << 11), info.spawnhealth
+            from doomfj.combat import MON_HEALTH_MIN       # M8: the telefrag's health, the cell's floor
+            assert MON_HEALTH_MIN == -(1 << 11) and MON_HEALTH_MIN < -info.spawnhealth
         else:
             # gib: health < -spawnhealth after a hit on a live (health >= 1) monster needs damage > spawnhealth + 1
             assert max_dmg <= info.spawnhealth + 1, (m, info.spawnhealth, "a gib path would be needed")
@@ -266,7 +276,7 @@ FX_CALL_FULL = ["    hex.zero 1, fxs_kind"] + FX_CALL
 
 
 def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knock: bool = False,
-               fight: bool = False, stats: bool = False) -> List[str]:
+               fight: bool = False, stats: bool = False, telefrag: bool = False) -> List[str]:
     """`dm_leaf` (stl.fcall dm_leaf, dm_lret) on the window -- the module docstring's order. `keys`: the profiles
     (`profiles(w)[0]`); mt_dist_leaf (monstercode.dist_leaf_lines) computes P_AproxDistance. `fx` (M7 P5): a hit in
     reach spawns blood (FX_CALL) before the target's own checks. `full` (M7 P6; `keys` are then
@@ -275,9 +285,13 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
     BEFORE the health, P_DamageMobj's thrust (kb_dm = dm_dmg, `kb_go`; the stub set kb_tg) -- the inflictor THE
     PLAYER (viewx / viewy) unless dm_melee is BLAST (the blast set the barrel's); dm_out zeroes kb_on.
     `fight` (M7 P8a I; the module docstring): the MONSTER and BULLET modes (their inflictor is the caller's, as a
-    BLAST's), the source `dm_src` and DOOM's switch on it; dm_out zeroes dm_src"""
-    from doomfj.combat import MISSILERANGE_U
+    BLAST's), the source `dm_src` and DOOM's switch on it; dm_out zeroes dm_src.
+    `telefrag` (M8; the module docstring): the TELEFRAG mode -- no reach, no blood, the player's thrust, the health
+    set to MON_HEALTH_MIN"""
+    from doomfj.combat import MISSILERANGE_U, MON_HEALTH_MIN
     classes = pain_classes(keys)
+    assert not telefrag or full, "M8: the telefrag gibs: it rides the full leaf"
+    tf = (1 << TELEFRAG) if telefrag else 0
     assert 0 < len(keys) <= 16
     assert not full or (fx and all(len(k) == 7 for k in keys)), "M7 P6: the full leaf gibs and bleeds"
     assert not knock or full, "M7 P8a: knockback rides the full leaf (its BLAST mode names the barrel's inflictor)"
@@ -286,13 +300,13 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
     out = ["dm_leaf:"]
     if full and fight:                           # M7 P8a I: a monster's hit skips the reach, its bullet bleeds
         out += ["    hex.zero 1, dm_kd",
-                "    hex.if_flags dm_melee, %d, dm_nbl, dm_chk" % ((1 << BLAST) | (1 << MONSTER)),
+                "    hex.if_flags dm_melee, %d, dm_nbl, dm_chk" % ((1 << BLAST) | (1 << MONSTER) | tf),
                 "  dm_nbl:",
                 "    hex.if_flags dm_melee, %d, dm_nmb, dm_in" % (1 << BULLET),
                 "  dm_nmb:"]
     elif full:                                   # M7 P6: a blast skips the reach and the blood
         out += ["    hex.zero 1, dm_kd",
-                "    hex.if_flags dm_melee, %d, dm_nbl, dm_chk" % (1 << BLAST),
+                "    hex.if_flags dm_melee, %d, dm_nbl, dm_chk" % ((1 << BLAST) | tf),
                 "  dm_nbl:"]
     out += [
            # _line_attack's reach FIRST: P_AproxDistance(target - player) > reach -> no hit, no blood
@@ -321,7 +335,12 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
               "  dm_kbgo:",
               "    hex.mov 2, kb_dm, dm_dmg",
               "    stl.fcall kb_go, kb_ret"] if knock else []),
+           *(["    hex.if_flags dm_melee, %d, dm_hsub, dm_htf" % tf,         # M8: the telefrag's health
+              "  dm_htf:",
+              "    hex.set 3, dm_hp, %d" % (MON_HEALTH_MIN & 0xFFF), "    ;dm_hset",
+              "  dm_hsub:"] if telefrag else []),
            "    hex.sub_shifted 3, 2, dm_hp, dm_dmg, 0",                       # health -= damage
+           *(["  dm_hset:"] if telefrag else []),
            "    hex.inc 2, dm_rng",                                            # P_Random on the monster's stream:
            "    dmrnd.lookup dm_rr, dm_rng",                                   # v & 3, and the pain bits
            "    hex.zero 1, dm_pn",
@@ -389,7 +408,7 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
 
 def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = DM_MAX, fx: bool = False,
                  full: bool = False, nbar: int = 0, drops: Dict[int, int] = None, knock: bool = False,
-                 fight: bool = False, stats: bool = False) -> dict:
+                 fight: bool = False, stats: bool = False, telefrag: bool = False) -> dict:
     """everything P4.2a's damage adds, for the World `w` (any monster mode; the emitter's needs P3.2c "decide"):
       * `decls`: the P42 cells at `boot_skill`'s level start, the interface, the window and the scratch;
       * `lines`: dm_go, the per-slot stubs, dm_leaf -- leaves (each ends in a fret), placed where nothing falls in;
@@ -403,7 +422,8 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     `knock` (M7 P8a, world.knockback_on): the stubs and the leaf thrust (doomfj.knockcode's interface and `kb_go`,
     which the caller adds). `fight` (M7 P8a I): a monster's hits (the module docstring) -- `w`'s schema must have
     the wide mon_target (a World in the "final" modes).
-    `stats` (P10, doomfj.statcode): `dm_kill` counts the kill in `st_kill` (statcode declares it: the game tier's)."""
+    `stats` (P10, doomfj.statcode): `dm_kill` counts the kill in `st_kill` (statcode declares it: the game tier's).
+    `telefrag` (M8, a map with a WR teleport): dm_melee's TELEFRAG mode (the module docstring)."""
     if stats:
         _statcode.check_world(w)
     if full:
@@ -423,6 +443,6 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
             + [("dm_tg: hex.vec 2" if fight and d == "dm_tg: hex.vec 1" else d) for d in DM_WINDOW] + DM_SCRATCH
             + (DM_FULL_SCRATCH if full else []) + (FIGHT_DECLS if fight else []),
             "lines": (go_lines(w.schema, slot_rt, of, nbar=nbar, drops=drops, knock=knock, fight=fight)
-                      + leaf_lines(keys, fx=fx, full=full, knock=knock, fight=fight, stats=stats)),
+                      + leaf_lines(keys, fx=fx, full=full, knock=knock, fight=fight, stats=stats, telefrag=telefrag)),
             "tables": [generate_dispatch_table_fj("dmrnd", dmrnd_values(pain_classes(keys)),
                                                   index_nibbles=2, result_nibbles=2)]}

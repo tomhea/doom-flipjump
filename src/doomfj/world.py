@@ -103,6 +103,7 @@ from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states
                            lift_tic, lift_walk_triggers, mover_heights, switch_sectors,
                            use_line_boxes)
 from doomfj import movers as _MV                                   # M8 F1.3: floor groups, blazing lifts
+from doomfj import lights as _LT                                   # M8: the sector light thinkers
 from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heights_for_states,
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
 from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers   # M7 P2a.1
@@ -283,6 +284,9 @@ class Layout:
     nsecret: int = 0   # P10: secret sectors (special 9) -- LEVEL COMPLETE's SECRETS
     ntele: int = 0     # M8 L4: WR teleport lines (doomfj.teleport); 0 on E1M1 -- no field, no cell
     nfloor: int = 0    # M8 F1.3: the floor groups in the WIDE layout (movers.floor_wide); 0: E1M1's one 1-bit switch
+    nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
+    nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
+    nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
 
     @property
     def nmobile(self) -> int:
@@ -427,6 +431,21 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     else:
         f("f_switch", 1, group="mover", phase="P2b",
           doc="the floor switch fired (S1): its sectors at the lowest surrounding floor")
+    # -- sector lights (M8, doomfj.lights): a map whose flag is on (config.MAP_CONFIG SECTOR_LIGHTS: E1M2) ---------
+    if lay.nlight:
+        f("lt_state", 4, count=lay.nlight, group="light", phase="M8", label="ltst",
+          doc="thinker k's light state (lights.LightThinker.levels, 0 its stored light); thinkers in sector order")
+        f("lt_count", 8, count=lay.nlight, group="light", phase="M8", label="ltct",
+          doc="tics to its next change (flash, strobe, fire); a glow's direction (0 down, 1 up)")
+        f("rng_light", R.STATE_BITS, group="light", phase="M8", label="rng_lt",
+          doc="the light thinkers' stream (rng.STREAM_LIGHT): the level start's rolls, then flash and fire")
+    if lay.nswitch:   # M8 (doomfj.switches): P_ChangeSwitchTexture -- only on a map that animates its switches
+        f("sw_on", 1, count=lay.nswitch, group="mover", phase="M8", label="swpr",
+          doc="switch line k (switches.latched) shows its other texture (SW1 <-> SW2)")
+        if lay.nswsr:
+            from doomfj.switches import BUTTON_NIBBLES
+            f("sw_time", 4 * BUTTON_NIBBLES, count=lay.nswsr, group="mover", phase="M8", label="swtm",
+              doc="SR switch j (switches.repeating): frames left before its texture swaps back, 0 in")
     # -- sound ------------------------------------------------------------------------------------
     f("snd_alert", 1, count=lay.nsound, group="sound",
       doc="node heard a shot (DOOM's sector soundtarget)")
@@ -856,10 +875,27 @@ class World(CombatMixin):
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
                              nwalk=len(self.walk_triggers), nlift=len(self.lift_order),
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
-                             nfloor=len(self.floor_groups) if self.floor_wide else 0)
+                             nfloor=len(self.floor_groups) if self.floor_wide else 0,
+                             nlight=len(self.light_thinkers),
+                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
+
+    def wall_scroll(self) -> int:
+        """M8 (doomfj.scrollcode): `render_wall_frame(wall_scroll=)` for the picture of this world frame -- leveltime's low
+        byte on a map whose Config has WALL_SCROLL and which has a special-48 line (E1M2), else 0 (E1M1: the keyword is
+        not passed). THE ONE PLACE the value is made: MonsterPhase.wall_scroll and monsters.view_drop_kw read it. The
+        binary reads lvtime at its render, after the frame's tic, as every gate's picture follows the tic"""
+        on = self.__dict__.get("_wall_scrolls")
+        if on is None:
+            from doomfj import scrollcode
+            on = self._wall_scrolls = bool(scrollcode.scroll_on(self.rm.cfg, self.mapname)
+                                           and scrollcode.scroll_lines(self.lds))
+        if not on:
+            return 0
+        from doomfj.scrollcode import wall_scroll_of
+        return wall_scroll_of(self.ws.leveltime)
 
     @property
     def sec_nibbles(self) -> int:
@@ -947,11 +983,22 @@ class World(CombatMixin):
         self.mover_table = _MV.mover_table(secs, lds, sds)
         assert set(self.switch) <= {si for g in self.floor_groups for si in g.sectors}
         self.mover_order = sorted(set(self.lift_order) | {si for g in self.floor_groups for si in g.sectors})
+        # M8 (doomfj.lights): the animated sector light thinkers, in sector order ([] unless the map's flag is on).
+        # A light sector that is also a door or a mover would need its states crossed with theirs: refused
+        self.light_thinkers = _LT.map_thinkers(mw, M)
+        _lsx = {th.sector for th in self.light_thinkers} & (set(self.door_order) | set(self.mover_order))
+        assert not _lsx, "M8: animated light sectors %r are doors or movers" % sorted(_lsx)
         # M8 L4 (doomfj.teleport): the WR teleport lines and their destinations ([] on E1M1). P_TeleportMove's floorz
         # is the destination sector's floor, baked: it must not be a door or a mover
         from doomfj.teleport import teleporters
         self.teleports = teleporters(mw, M, rm=self.rm, cmap=cmap)
         self._teleported = False
+        # M8 (doomfj.switches, the map's SWITCH_TEX): the switch lines a use changes -- `switch_cells` the ones with a
+        # `sw_on` cell (all but the exit, whose latch is g_leveldone), `switch_sr` the SR ones' indices among them
+        from doomfj import switches as _SWI
+        self.switches = (_SWI.map_switches(secs, lds, sds, cmap.vertexes) if _SWI.switches_on(M) else [])
+        self.switch_cells = _SWI.latched(self.switches)
+        self.switch_sr = _SWI.repeating(self.switches)
         for tel in self.teleports:
             assert tel.dest_sector not in set(self.door_order) | set(self.mover_order), (
                 "M8 L4: teleport destination sector %d moves" % tel.dest_sector)
@@ -1113,6 +1160,11 @@ class World(CombatMixin):
         for i, t in enumerate(self.pickup_things):
             if not t.flags & bit:
                 ws.pickup_taken[i] = 1                         # not in this skill's level
+        # M8: the light thinkers at their level start (P_SpawnSpecials' first counts, on the light stream)
+        if self.light_thinkers:
+            states, counts, ws.rng_light = _LT.level_start(self.light_thinkers)
+            for k, (s_, c_) in enumerate(zip(states, counts)):
+                ws.lt_state[k], ws.lt_count[k] = s_, c_
         self._decor_now = self._decor_for(skill)
 
     # ---------------------------------------------------------------------------- the tic
@@ -1169,6 +1221,27 @@ class World(CombatMixin):
             self._projectiles_phase(ev)
             self._barrels_phase(ev)
             self._fx_phase(ev)
+            self._lights_phase()                 # M8: the sector light thinkers (none unless the map's flag is on)
+
+    def _lights_phase(self) -> None:
+        """M8 (doomfj.lights): one DOOM tic of every animated sector light thinker, in sector order -- after the
+        effects, inside the monsters' world (so `monster_tics` tics a frame, and none on a frozen level). The binary:
+        lightcode.phase_lines (`lt_phase`, fcall'd after fx_phase in the world tic's loop)"""
+        if not self.light_thinkers:
+            return
+        ws = self.ws
+        ws.rng_light = _LT.tic_all(self.light_thinkers, ws.lt_state, ws.lt_count, ws.rng_light)
+
+    def lights_now(self) -> dict:
+        """M8: {sector: light} of every animated sector this tic ({} when none) -- the render's `sector_lights`"""
+        if not self.light_thinkers:
+            return {}
+        return _LT.lights_of(self.light_thinkers, self.ws.lt_state)
+
+    def light_render_kw(self) -> dict:
+        """M8: `render_wall_frame`'s keyword for this world's lights -- {} on a map without animated lights (E1M1:
+        every picture drawn by today's call, keyword for keyword)"""
+        return {"sector_lights": self.lights_now()} if self.light_thinkers else {}
 
     def run(self, key_script: Sequence[dict]) -> List[TicEvents]:
         return [self.tic(k) for k in key_script]
@@ -1177,6 +1250,10 @@ class World(CombatMixin):
     def _doors_phase(self, keys: dict, ev: TicEvents) -> None:
         ws = self.ws
         alive = self.player_alive()
+        # M8 (doomfj.switches): the SR buttons count down, then the door switches a held use presses swap -- on the
+        # doors' tic-start states, before the doors tic
+        self.switch_doors(bool(keys["use"] and alive), ws.px, ws.py,
+                          lambda si: switch_ready(self.door_state(si)))
         for d, si in enumerate(self.door_order):
             box = self.door_boxes.get(si)             # none for a walk-over door
             pressed = (keys["use"] and alive and box is not None and self.player_can_open(si)
@@ -1196,6 +1273,53 @@ class World(CombatMixin):
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = st
             ws.d_monreq[d] = 0
         self._door_phase_scene()
+
+    def door_state(self, si: int) -> tuple:
+        """door sector si's (state, dir, sub, wait)"""
+        ws, d = self.ws, self.door_order.index(si)
+        return (ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d])
+
+    # -- M8: the switch textures (doomfj.switches: the rules; the gates step them through monsters.MonsterPhase)
+    def switch_doors(self, used: bool, x16: int, y16: int, ready) -> None:
+        """the door phase's switch step: the SR buttons count down (`switches.countdown`), then each door switch a
+        held use presses (`switches.door_presses`: `used` the use key with the player alive, `ready(sector)` a door at
+        rest at the tic start) swaps (`switches.press`)"""
+        if not self.switch_cells:
+            return
+        from doomfj import switches as _SWI
+        ws = self.ws
+        on, tm = list(ws.sw_on), list(ws.sw_time) if self.switch_sr else []
+        _SWI.countdown(on, tm, self.switch_sr)
+        for k in _SWI.door_presses(self.switch_cells, used, x16, y16, ready):
+            _SWI.press(on, tm, self.switch_sr, k)
+        self._switch_store(on, tm)
+
+    def switch_uses(self, x16: int, y16: int, lift_rest, floor_still) -> None:
+        """a use PRESS's switch step, before the exit and the machines it fires (`switches.use_presses`)"""
+        if not self.switch_cells:
+            return
+        from doomfj import switches as _SWI
+        ws = self.ws
+        on, tm = list(ws.sw_on), list(ws.sw_time) if self.switch_sr else []
+        for k in _SWI.use_presses(self.switch_cells, x16, y16, lift_rest, floor_still):
+            _SWI.press(on, tm, self.switch_sr, k)
+        self._switch_store(on, tm)
+
+    def _switch_store(self, on, tm) -> None:
+        ws = self.ws
+        for k, v in enumerate(on):
+            ws.sw_on[k] = v
+        for j, v in enumerate(tm):
+            ws.sw_time[j] = v
+
+    def switch_on(self, leveldone=None) -> frozenset:
+        """the linedefs showing their other texture now (`render_wall_frame(switch_on=)`): the set cells, and the exit
+        once the level is done (`leveldone`; None: g_leveldone) -- empty on a map without SWITCH_TEX"""
+        if not self.switches:
+            return frozenset()
+        from doomfj.switches import pressed_lines
+        done = self.ws.g_leveldone if leveldone is None else leveldone
+        return pressed_lines(self.switches, list(self.ws.sw_on) if self.switch_cells else [], bool(done))
 
     def door_touched(self, si: int) -> bool:
         """M7 P2b: does a SHOOTABLE thing touch door `si` -- the player alive, a live monster (a
@@ -1707,7 +1831,7 @@ class World(CombatMixin):
             if crossed(trig, (ox << 16, oy << 16), (nx << 16, ny << 16), self.mon_radius[m]):
                 ws.l_req[self.lift_order.index(trig[0])] = 1
         if self.teleports:                            # M8 L4: 97 is on the non-player list too -- last, as the fj
-            nx, ny = self._teleport_monster(m, ox, oy, nx, ny)
+            nx, ny = self._teleport_monster(m, ox, oy, nx, ny, ev)
         if step:
             ev.moves.append(m)
         leaf = self.rm.point_in_subsector(self.cmap, nx, ny)
@@ -1718,12 +1842,13 @@ class World(CombatMixin):
             self._list_insert(m, leaf)
             ev.leaf_changes.append((m, old, leaf))
 
-    def _teleport_monster(self, m: int, ox: int, oy: int, nx: int, ny: int) -> Tuple[int, int]:
+    def _teleport_monster(self, m: int, ox: int, oy: int, nx: int, ny: int, ev=None) -> Tuple[int, int]:
         """M8 L4 (doomfj.teleport): EV_Teleport for slot m after its accepted move (ox, oy) -> (nx, ny), map units --
         the first teleport line crossed from its front (line order; one per move) and, unless a shootable thing stands
-        at the destination (P_TeleportMove's PIT_StompThing refuses a monster), the destination: position, floorz,
-        facing (its angle's octant), momentum and the position's fraction 0 (knockback). -> the position now (the
-        relink's). `self._teleported` says it happened (the knock move's momentum stops: combat._xy_move)"""
+        at the destination (P_TeleportMove's PIT_StompThing refuses a monster), M8 the two fogs (at (nx, ny), then
+        ahead of the destination: combat._teleport_fogs) and the destination: position, floorz, facing (its angle's
+        octant), momentum and the position's fraction 0 (knockback). -> the position now (the relink's).
+        `self._teleported` says it happened (the knock move's momentum stops: combat._xy_move)"""
         from doomfj.teleport import crossed_front, stomped
         ws = self.ws
         r = self.mon_radius[m]
@@ -1732,6 +1857,7 @@ class World(CombatMixin):
                 continue
             if stomped(self, tel.dest, r, mover=m):
                 break
+            self._teleport_fogs(tel, nx, ny, TicEvents(0) if ev is None else ev)
             nx, ny = tel.dest
             ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, tel.dest_floor
             ws.mon_facing[m] = tel.facing

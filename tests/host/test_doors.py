@@ -17,7 +17,7 @@ import pytest
 
 from doomfj.doors import door_kinds  # noqa: E402  (M7 P2a.1)
 from doomfj.doors import (DEFAULT_QUANT, MAX_STATES, OPEN_GAP, door_sectors, door_states,
-                          heights_at, neighbours, quantise, stops)
+                          door_neighbours, heights_at, neighbours, quantise, stops)
 from doomfj.reference_model import apply_sector_heights
 from doomfj.wad import WadFile
 
@@ -59,7 +59,7 @@ def test_a_lift_is_not_a_door(level):
 def test_open_height_is_p_doorraise(level):
     """min(neighbouring sector ceiling) - 4, and the neighbour set is non-empty for every door."""
     secs, lds, sds = level
-    nb = neighbours(lds, sds)
+    nb = door_neighbours(secs, lds, sds)        # M8: DOOM's two-sided rule off the E1M1 family
     for si, open_h in door_sectors(secs, lds, sds).items():
         assert nb[si], si
         assert open_h == min(secs[n].ceil_h for n in nb[si]) - OPEN_GAP
@@ -200,7 +200,7 @@ def test_the_excluded_sectors_are_exactly_the_downward_ones(full):
     from doomfj.doors import MANUAL_DOOR_KINDS
     for m in E1:
         secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
-        nb = neighbours(lds, sds)
+        nb = door_neighbours(secs, lds, sds)
         kept = door_sectors(secs, lds, sds)
         for ld in lds:
             if ld.special not in MANUAL_DOOR_KINDS or ld.back in (0xFFFF, -1) or ld.back >= len(sds):
@@ -231,7 +231,7 @@ def test_the_filter_has_teeth(full):
     dropped = {}
     for m in E1:
         secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
-        nb = neighbours(lds, sds)
+        nb = door_neighbours(secs, lds, sds)
         n = 0
         for ld in lds:
             if not ld.special or ld.back == 0xFFFF or ld.back >= len(sds):
@@ -243,7 +243,9 @@ def test_the_filter_has_teeth(full):
                 n += 1
         if n:
             dropped[m] = len({si for si in ()} ) or n
-    assert set(dropped) == {"E1M3", "E1M4", "E1M5", "E1M6", "E1M7", "E1M9"}
+    # M8 (the E1M2 playtest): under DOOM's two-sided rule (doors.door_neighbours) E1M6 has no downward door any more --
+    # its one was the legacy rule's fake neighbour (the last sidedef's sector)
+    assert set(dropped) == {"E1M3", "E1M4", "E1M5", "E1M7", "E1M9"}
 
 
 # -- the pid byte: the ceiling on DEFAULT_QUANT that does not look like one --------------------

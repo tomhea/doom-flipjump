@@ -50,9 +50,15 @@ from doomfj.restartcode import routine_lines
 from doomfj.restartcode import LVTIME_NIBBLES
 from doomfj.wall_renderer import (BOOT_MENU_SKILL, MENU_STATE_DECLS, SKILLS, menu_state_lines,
                                   restart_lines)
+from doomfj.automap import has_page                                         # M8: the map page
+from doomfj.menu import MAIN_MAP_SCR, program_cells                        # M8
+from doomfj.wall_renderer import AUTOMAP_STATE_DECLS                       # M8
 
 SRC = [Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
-POLLS, FRAMES = 4, 8
+# M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's menu has the MAP item (down from HELP, up from EXIT) -- the
+# machine is run as E1M1 emits it, `amap` printed beside `menu_scr` (menu.program_cells: the oracle's map states)
+AUTOMAP = has_page("E1M1")
+POLLS, FRAMES = 4, 8 + AUTOMAP          # M8: one more frame for the extra down to EXIT past MAP
 ENTER, ESC, UP, DOWN, W_KEY, S_KEY = 0x0D, 0x1B, 0x80, 0x81, 0x77, 0x73
 H_KEY = 0x68                                        # M7 P3.4: help
 Q_KEY = 0x71                                        # P10: a key the poll's table discards -- still "any key"
@@ -124,7 +130,8 @@ def _dump():
     """print: mode menu_scr menu_sel g_live (P10), then every HEX_TARGETS element and every BYTE_TARGETS byte,
     space-separated -- `_fmt` is the same line"""
     out = ["    hex.print_as_digit 1, mode, 0", "    hex.print_as_digit 1, menu_scr, 0",
-           "    hex.print_as_digit 1, menu_sel, 0", "    hex.print_as_digit 1, g_live, 0"]
+           "    hex.print_as_digit 1, menu_sel, 0", "    hex.print_as_digit 1, g_live, 0",
+           "    hex.print_as_digit 1, amap, 0"]                                           # M8
     for label, n, count in HEX_TARGETS:
         for i in range(count):
             out += ["    stl.output_char 32", f"    hex.print_as_digit {n}, {label} + {i * n}*dw, 0"]
@@ -138,7 +145,8 @@ def _dump():
 
 
 def _fmt(st) -> str:
-    return " ".join(["%d%x%d%d" % (st["mode"], st["scr"], st["sel"], st["live"])]     # P10: the hold's codes are hex
+    ms, am = program_cells(st["scr"])                                                 # M8: (menu_scr, amap)
+    return " ".join(["%d%x%d%d%d" % (st["mode"], ms, st["sel"], st["live"], am)]     # P10: the hold's codes are hex
                     + ["%0*x" % (n, v) for label, n, _c in HEX_TARGETS for v in st[label]]
                     + ["%02x" % v for label, _c in BYTE_TARGETS for v in st[label]])
 
@@ -166,6 +174,7 @@ def _program(state_lines, routines, scr0=0):
         "mode: hex.vec 1, 1",
         f"g_live: hex.vec 1, {_boot_live(scr0)}",                  # P10
         *[f"menu_scr: hex.vec 1, {scr0}" if d.startswith("menu_scr:") else d for d in MENU_DECLS_CLEAN],
+        *AUTOMAP_STATE_DECLS,                                       # M8: amap, ev_map (no script presses M)
         "kstat: hex.vec 1", "kcode: hex.vec 2", "kb_f: hex.vec 1", "kb_b: hex.vec 1",
         "kb_l: hex.vec 1", "kb_r: hex.vec 1", "kb_u: hex.vec 1",
         "kb_sl: hex.vec 1", "kb_sr: hex.vec 1", "kb_fi: hex.vec 1", "kb_w1: hex.vec 1", "kb_w2: hex.vec 1", "kb_w3: hex.vec 1", "kb_w4: hex.vec 1", "kb_w5: hex.vec 1",   # M7 P4.1
@@ -218,7 +227,7 @@ def _expected(events, scr0=0):
                 if e.is_down:
                     ev.add(ANY_KEY_EVENT)           # P10
         st["mode"], st["scr"], st["sel"], new_game, st["live"] = menu_step(st["mode"], st["scr"], st["sel"], ev,
-                                                                           st["live"])
+                                                                           st["live"], automap=AUTOMAP)
         if st["scr"] == MENU_HALTED:                # P9: EXIT halts the program mid-frame: no dump, no later frame --
             lines.append("")                        # the output ends with the last frame's newline
             states.append(dict(st))
@@ -351,7 +360,7 @@ RESUME_SCRIPTS = {
 
 
 # P9 (the owner's play-test, 2026-10-10) -- the main menu's EXIT item: enter on it HALTS the program
-EXIT_SCRIPTS = {
+_EXIT_SCRIPTS = {
     "exit: down, down, enter halts on frame 3 (nothing printed for it or after)": [
         (0, True, DOWN), (1, False, DOWN), (4, True, S_KEY), (5, False, S_KEY),
         (12, True, ENTER), (13, False, ENTER), (20, True, ESC), (21, False, ESC)],
@@ -381,6 +390,28 @@ EXIT_SCRIPTS = {
 }
 
 
+def _past_map(script, tic):
+    """M8: on a menu with MAP (between HELP and EXIT), one more DOWN before the down at `tic` (the one that reached
+    EXIT from HELP), every later event a frame later -- the script then reaches EXIT where it did on a menu without"""
+    if not AUTOMAP:
+        return script
+    return ([(t + POLLS if t >= tic else t, d, k) for t, d, k in script]
+            + [(tic, True, DOWN), (tic + 1, False, DOWN)])
+
+
+# the tic of each script's down that reaches EXIT from HELP (M8: MAP comes first)
+_EXIT_DOWN = {"exit: down, down, enter halts on frame 3 (nothing printed for it or after)": 4,
+              "exit: esc on EXIT is no rule without a game": 4,
+              "exit: with a game, esc on EXIT resumes the world; esc, the menu on RESUME": 20,
+              "exit: h on EXIT opens the help, which closes to HELP; up to NEW GAME": 4,
+              "exit: up from EXIT is HELP, enter there opens the help (no halt)": 4,
+              "exit: with a game, esc and enter in one frame on EXIT: esc wins": 20,
+              "exit: without a game, esc and enter in one frame on EXIT: esc is no rule, enter halts": 4}
+EXIT_SCRIPTS = {n: _past_map(sc, _EXIT_DOWN[n]) for n, sc in _EXIT_SCRIPTS.items()}
+# M8: up from EXIT reaches MAP on a menu with it, HELP on one without
+UP_FROM_EXIT = MAIN_MAP_SCR if AUTOMAP else MAIN_HELP_SCR
+
+
 def _restart():
     return restart_lines(SPAWN, NDOORS, BINDS, POS, NSS, PER_SKILL, nlift=NLIFT)
 
@@ -388,7 +419,7 @@ def _restart():
 @pytest.fixture(scope="module")
 def shipped(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("skillmenu")
-    return _assemble(tmp, "menu", menu_state_lines(_restart()), _restart())
+    return _assemble(tmp, "menu", menu_state_lines(_restart(), AUTOMAP), _restart())
 
 
 @pytest.mark.parametrize("name", sorted(SCRIPTS))
@@ -400,13 +431,13 @@ def test_the_menu_follows_the_rules(shipped, name):
 @pytest.fixture(scope="module")
 def shipped_done(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("leveldone")
-    return _assemble(tmp, "menu_done", menu_state_lines(_restart()), _restart(), scr0=LEVEL_DONE_SCR)
+    return _assemble(tmp, "menu_done", menu_state_lines(_restart(), AUTOMAP), _restart(), scr0=LEVEL_DONE_SCR)
 
 
 @pytest.fixture(scope="module")
 def shipped_hold(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("leveldone_hold")
-    return _assemble(tmp, "menu_hold", menu_state_lines(_restart()), _restart(), scr0=LEVEL_DONE_ENTER)
+    return _assemble(tmp, "menu_hold", menu_state_lines(_restart(), AUTOMAP), _restart(), scr0=LEVEL_DONE_ENTER)
 
 
 # P10: LEVEL COMPLETE as the exit opens it -- its hold's first code: eight frames whatever is pressed
@@ -423,12 +454,12 @@ def test_the_level_complete_hold_follows_the_rules(shipped_hold, name):
     ev = HOLD_SCRIPTS[name]
     got, want = _run(shipped_hold, ev), _expected(ev, LEVEL_DONE_ENTER)[0]
     assert got == want, _first_difference(name, got, want)
-    assert [ln[1] for ln in want] == ["e", "d", "c", "b", "a", "9", "8", "2"], want     # the countdown, keys or not
+    assert [ln[1] for ln in want[:8]] == ["e", "d", "c", "b", "a", "9", "8", "2"], want     # the countdown, keys or not
 
 
 def test_a_level_complete_without_its_hold_is_caught(tmp_path):
     """R9 (P10): the hold's countdown jumping straight to the screen -- its keys then read -- must show"""
-    lines = menu_state_lines(_restart())
+    lines = menu_state_lines(_restart(), AUTOMAP)
     bad_lines = _mutate_once(lines, "hex.dec 1, menu_scr", "hex.set 1, menu_scr, %d" % LEVEL_DONE_SCR)
     bad = _assemble(tmp_path, "nohold", bad_lines, _restart(), scr0=LEVEL_DONE_ENTER)
     ev = HOLD_SCRIPTS["hold: every frame's key ignored, the screen after it"]
@@ -465,9 +496,9 @@ def test_the_exit_scripts_halt_once_and_reach_every_exit_move():
     assert halted == ["exit: down, down, enter halts on frame 3 (nothing printed for it or after)",
                       "exit: without a game, esc and enter in one frame on EXIT: esc is no rule, enter halts"], halted
     want = _expected(EXIT_SCRIPTS[halted[0]])[0]
-    assert len(want) == 4 and want[3] == "" and all(want[:3]), want
+    assert len(want) == 4 + AUTOMAP and want[-1] == "" and all(want[:-1]), want     # M8: the extra down
     steps = {((a["mode"], a["scr"]), (b["mode"], b["scr"])) for r in runs.values() for a, b in zip(r, r[1:])}
-    assert ((1, MAIN_EXIT_SCR), (1, MAIN_HELP_SCR)) in steps and ((1, MAIN_EXIT_SCR), (0, 0)) in steps
+    assert ((1, MAIN_EXIT_SCR), (1, UP_FROM_EXIT)) in steps and ((1, MAIN_EXIT_SCR), (0, 0)) in steps
     assert ((1, MAIN_EXIT_SCR), (1, HELP_MENU_SCR)) in steps and ((1, MAIN_EXIT_SCR), (1, MENU_HALTED)) in steps
 
 
@@ -483,7 +514,7 @@ EXIT_MUTANTS = {
 def test_a_broken_exit_is_caught(tmp_path, name):
     """R9: each mutant of P9's lines, assembled through the same harness, must disagree with the mirror on some
     EXIT script"""
-    lines = menu_state_lines(_restart())
+    lines = menu_state_lines(_restart(), AUTOMAP)
     old, new = EXIT_MUTANTS[name]
     bad_lines = _mutate(lines, old, new)
     bad = _assemble(tmp_path, "exitbad", bad_lines, _restart())
@@ -538,7 +569,7 @@ LIVE_MUTANTS = {
 def test_a_broken_live_rule_is_caught(tmp_path, name):
     """R9: each P10 mutant -- of `g_live`'s three writes and its reads, RESUME's rules and the any-key exit --
     assembled through the same harness, must disagree with the mirror on some script"""
-    lines = menu_state_lines(_restart())
+    lines = menu_state_lines(_restart(), AUTOMAP)
     old, new = LIVE_MUTANTS[name]
     bad_lines = _mutate(lines, old, new) if old in lines else _mutate_once(lines, old, new)
     pool = {**SCRIPTS, **RESUME_SCRIPTS, **HELP_SCRIPTS, **EXIT_SCRIPTS}
@@ -556,7 +587,7 @@ def test_the_help_scripts_reach_every_new_state():
     HELP_GAME_SCR and to the main menu on HELP from HELP_MENU_SCR"""
     runs = {n: _expected(HELP_SCRIPTS[n])[1] for n in HELP_SCRIPTS}
     seen = {(s["mode"], s["scr"]) for r in runs.values() for s in r}
-    assert seen == {(0, 0), (1, 0), (1, 1), (1, MAIN_HELP_SCR), (1, HELP_MENU_SCR),
+    assert seen - ({(1, MAIN_MAP_SCR)} if AUTOMAP else set()) == {(0, 0), (1, 0), (1, 1), (1, MAIN_HELP_SCR), (1, HELP_MENU_SCR),
                     (1, HELP_GAME_SCR), (1, MAIN_EXIT_SCR), (1, MAIN_RESUME_SCR)}, seen   # P9: EXIT; P10: RESUME
     boot = {"mode": 1, "scr": 0}                    # every script starts on the main menu
     steps = {((a["mode"], a["scr"]), (b["mode"], b["scr"])) for r in runs.values()
@@ -595,7 +626,7 @@ HELP_MUTANTS = {
 def test_a_broken_help_is_caught(tmp_path, name):
     """R9: each mutant of the new state lines, assembled through the same harness, must disagree
     with the mirror on some help script"""
-    lines = menu_state_lines(_restart())
+    lines = menu_state_lines(_restart(), AUTOMAP)
     bad_lines = _mutate(lines, *HELP_MUTANTS[name])
     bad = _assemble(tmp_path, "helpbad", bad_lines, _restart())
     caught = [n for n in HELP_SCRIPTS if _run(bad, HELP_SCRIPTS[n]) != _expected(HELP_SCRIPTS[n])[0]]
@@ -604,7 +635,7 @@ def test_a_broken_help_is_caught(tmp_path, name):
 
 def test_a_level_complete_screen_that_ignores_any_key_is_caught(tmp_path):
     """R9 (P10): the screen's ANY-key way out dropped must show"""
-    lines = menu_state_lines(_restart())
+    lines = menu_state_lines(_restart(), AUTOMAP)
     bad_lines = _mutate_once(lines, "hex.if0 1, ev_any, mn_done", ";mn_done")
     bad = _assemble(tmp_path, "lvbad", bad_lines, _restart(), scr0=LEVEL_DONE_SCR)
     name = "level complete: enter -> the main menu -> new game at medium"
@@ -637,7 +668,7 @@ def test_the_scripts_reach_every_skill_and_every_screen():
 
 def test_a_broken_menu_is_caught(tmp_path):
     """R9: the same harness must say no to swapped up / down moves"""
-    lines = menu_state_lines(_restart())
+    lines = menu_state_lines(_restart(), AUTOMAP)
     swapped = [l.replace("hex.dec 1, menu_sel", "@@").replace("hex.inc 1, menu_sel", "hex.dec 1, menu_sel")
                .replace("@@", "hex.inc 1, menu_sel") for l in lines]
     assert swapped != lines

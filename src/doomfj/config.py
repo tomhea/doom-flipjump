@@ -234,6 +234,27 @@ class Config:
     # lines expand to nothing -- SPR_SLOT_CAP_ON -- and the oracle takes the old path). wall_renderer.check_slot_ids
     # holds it below SPR_THING_SLOTS and asks for it when the map's bound does not fit.
     SPR_SLOT_CAP: int = 0
+    # M8 (doomfj.lights): the map's SECTOR LIGHT SPECIALS animate (flash, strobes, glow, fire flicker: DOOM's p_lights.c
+    # thinkers) -- 1 on E1M2. 0 (E1M1, the default): its lights stay static and its emission is unchanged. Not an fj
+    # constant (`constants()` leaves it out): the emitter and the model read it here.
+    SECTOR_LIGHTS: int = 0
+    # M8 (the special-48 simplification, owner rule "implement it if it costs <= +0.5%"): 1 = the segs of a scrolling
+    # wall line (doomfj.scrollcode.SCROLL_SPECIALS) slide their W1R pattern key by `leveltime & WALL_SCROLL_MASK` -- the
+    # game tier's visible form of DOOM's textureoffset += FRACUNIT a tic (a 1x1 W1R canvas has no texture u to move).
+    # A DELIBERATE APPROXIMATION: screen-space, not world-anchored, and the pattern jumps once every 256 frames when
+    # the low byte wraps. 0 (E1M1): nothing is emitted and the oracle takes the old path.
+    WALL_SCROLL: int = 0
+
+    # M8 (the owner, 2026-10-18: a recorded simplification is implemented when it costs <= +0.5% speed) -- THE SWITCH
+    # TEXTURES CHANGE: DOOM's P_ChangeSwitchTexture, a used switch line's SW1 texture shown as its SW2 (an S1 / exit line
+    # for good, an SR line for BUTTONTIME). 1 on a map that animates them (doomfj.switches; the game picture's wall
+    # tones draw the change), 0 on E1M1, whose emission stays byte-identical. Host-side only: NOT an fj constant.
+    SWITCH_TEX: int = 0
+
+    # M8 (doomfj.automap; the owner, 2026-10-18): 1 = the game tier has the MAP PAGE -- the main menu's MAP item, the key
+    # M, the level's lines baked as a frame and the player's dot computed at run time. Per map (MAP_CONFIG), so E1M1's
+    # emission is untouched while the page is off there (0, the default: not one line differs).
+    AUTOMAP: int = 0
 
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
@@ -298,7 +319,16 @@ GAME_CFG = Config(VIEW_ROWS=84)
 MAP_CONFIG = {
     # M8 F1.4: SPR_SLOT_CAP -- 305 drawable things over the skills, hard's 295 + 10 pool things + 54 droppers' drops
     # (> 255 slot ids: wall_renderer.check_slot_ids)
-    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255},
+    # M8: SECTOR_LIGHTS -- its light specials animate (doomfj.lights: 9 thinkers -- 3 flashes, a strobe, a fire flicker,
+    # 4 glows; its other 9 glows sit between equal lights and stay static)
+    # M8: WALL_SCROLL -- lines 1254 and 1338 (COMPBLUE) are special 48, the scrolling wall (doomfj.scrollcode)
+    # M8: SWITCH_TEX -- the used switches change their texture (doomfj.switches)
+    # M8: AUTOMAP -- the map page (doomfj.automap)
+    "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1,
+             "WALL_SCROLL": 1, "SWITCH_TEX": 1, "AUTOMAP": 1},
+    # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's ONLY entry -- the map page, at 40 units a pixel (doomfj.
+    # automap). Every other field keeps its default, which is what E1M1 had with no entry at all
+    "E1M1": {"AUTOMAP": 1},
 }
 
 

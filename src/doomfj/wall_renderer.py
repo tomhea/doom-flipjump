@@ -28,7 +28,8 @@ from doomfj.reference_model import STRAFE_MOVE                                  
 from doomfj.reference_model import (ANG90, ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
                                     apply_sector_heights, spawn_state)
-from doomfj.config import Config
+from doomfj.config import Config, map_cfg                                    # M8: a map's SWITCH_TEX
+from doomfj import switches as _switches, switchcode as _switchcode        # M8: the switch textures
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
                                KEY_FORWARD_MASK, KEY_BACK_MASK,
@@ -72,7 +73,12 @@ from doomfj.menu import MAIN_RESUME_SCR                                   # P10:
 from doomfj.menu import LEVEL_DONE_ENTER, LEVEL_DONE_HOLD_LAST, LEVEL_DONE_SCREENS   # P10: LEVEL COMPLETE's hold
 from doomfj import statcode as _statcode                                  # P10: LEVEL COMPLETE's stats
 from doomfj import teleportcode as _teleportcode                          # M8 L4: the WR teleports
+from doomfj import lightcode as _lightcode                                # M8: the sector light thinkers
+from doomfj import lights as _lights                                      # M8: ... and their rules
+from doomfj import scrollcode as _scrollcode                              # M8: the scrolling wall (special 48)
 from doomfj import keyboard as _keyboard                                   # P9: the press latch
+from doomfj import automap as _automap                                     # M8: the map page
+from doomfj.menu import AMAP_CODES, MAIN_MAP_SCR, MAP_GAME_SCR, MAP_MENU_SCR   # M8: the map page's states
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
@@ -241,6 +247,17 @@ def _seg_xorby_block(label, fields, ret="xb_ret"):
     return lines
 
 
+def switch_seg_blocks(label, fields_own, fields_used, cell):
+    """M8 (doomfj.switches): (block lines, call lines) -- a switch seg's constant block twice, the fields of its own
+    texture (state 0) and of its other one (state 1, the switch used), behind `generate_state_switch_fj` on the switch's
+    0 / 1 cell (`lvdone` for the exit, `switchcode.cell(k)` for a latched one): `_door_blocks`' per-state idiom, whose
+    blocks return to the switch (`dsw_<label>_x`). tests/fj/test_switch_tex_fj.py runs it"""
+    blk = (_seg_xorby_block(f"{label}_st0", fields_own, ret=f"dsw_{label}_x")
+           + _seg_xorby_block(f"{label}_st1", fields_used, ret=f"dsw_{label}_x"))
+    blk += generate_state_switch_fj(f"dsw_{label}", [f"{label}_st0", f"{label}_st1"]).splitlines()
+    return blk, [f"    dsw_{label}_go {cell}"]
+
+
 def barrel_state_fields(tfields, row, floor_h: int, cls: int):
     """M7 P6 (docs/gp-p67-interface.md 5): a BAKED barrel's xor_by fields for one non-S_BAR1 state -- the map barrel's
     `tfields` (THING_XORBY_FIELDS' layout) with the art, depth bounds, bank regions and light class of the state's
@@ -256,6 +273,43 @@ def barrel_state_fields(tfields, row, floor_h: int, cls: int):
            "sp_lt": cls & 0xFF}
     out = [(n, w_, new.get(n, v)) for n, w_, v in tfields]
     return out + ([("sp_lt_hi", 2, cls >> 8)] if cls >> 8 else [])
+
+
+def light_class_fields(tfields, cls: int):
+    """M8 (doomfj.lights): a BAKED thing's xor_by fields (THING_XORBY_FIELDS' layout) at light class `cls` -- the
+    block of one light state of a thing standing in an animated light sector. The class is `ltw` = 2 bytes in the
+    animated game tier, so `barrel_state_fields`' rule: its low byte in `sp_lt`, a non-zero high byte in `sp_lt_hi`
+    (zero between things; the involution restores it). A light state's class comes from the moving-things cross
+    product, past the spawn pairs, so it can pass 255 where the stored light's did not."""
+    assert 0 <= cls < 0x10000, cls
+    out = [(n, w_, (cls & 0xFF) if n == "sp_lt" else v) for n, w_, v in tfields]
+    return out + ([("sp_lt_hi", 2, cls >> 8)] if cls >> 8 else [])
+
+
+def state_dispatch_lines(tag: str, cell: str, blocks) -> list:
+    """`sim.jump16` on the state nibble `cell` into `blocks[k]` (a list of lines) for state k, each ending at
+    `<tag>_end`; states past the last reuse the last block. The landings' idiom: plain code, so `hex.set` is legal.
+    A mover's leaf (its floor: emit_wall_renderer's `_mover_dispatch`) and, M8, an animated light's leaf (its sprite
+    light base) -- the text is the closure's it replaced, line for line."""
+    labs = [f"{tag}_{k}" for k in range(len(blocks))]
+    assert 0 < len(labs) <= 16, (tag, len(labs))
+    out = [f"    sim.jump16 {cell}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
+    for k, b in enumerate(blocks):
+        out += [f"  {labs[k]}:", *b, f"    ;{tag}_end"]
+    return out + [f"  {tag}_end:"]
+
+
+def light_thing_blocks(label: str, cell: str, field_lists) -> tuple:
+    """M8 (doomfj.lights): a BAKED thing in an animated light sector -- its xor_by block once per light state
+    (`field_lists[k]`: `light_class_fields` at state k's class), each returning to the state switch, and the switch on
+    the thinker's state nibble `cell` -> (block lines, the call line). The call site runs the call twice (SET, CLEAR),
+    as it runs a static thing's `stl.fcall`: the state cannot change between the two (the walk reads, the world tic
+    writes)."""
+    blk = []
+    for k, fields in enumerate(field_lists):
+        blk += _seg_xorby_block(f"{label}_st{k}", fields, ret=f"dsw_{label}_x")
+    blk += generate_state_switch_fj(f"dsw_{label}", [f"{label}_st{k}" for k in range(len(field_lists))]).splitlines()
+    return blk, f"    dsw_{label}_go {cell}"
 
 
 def _seg_xorby_use(label, clear=True):
@@ -454,6 +508,14 @@ MENU_EXIT_ITEM = "EXIT"
 # P10 (the owner's play-test, 2026-10-12: "Add menu resume when possible"): the RESUME item, right above NEW GAME --
 # ONLY while a game is in progress (`g_live`; `main_menu_entries` adds it); `menu_scr` MAIN_RESUME_SCR highlights it
 MENU_RESUME_ITEM = "RESUME"
+# M8 (doomfj.automap; the owner, 2026-10-18): the main menu's MAP item, under HELP -- ONLY on a map with the map page
+# (config.Config.AUTOMAP; `menu_entries_for` adds it); the oracle's menu.MAIN_MAP_SCR highlights it
+MENU_MAP_ITEM = "MAP"
+# M8: the map page's two cells, declared only on a map with the page. `amap` is the program's half of the oracle's
+# map states (menu.AMAP_CODES: 1 the page opened from the world, 2 from the main menu, 3 the main menu on MAP; 0
+# otherwise) -- `menu_scr` has no value left -- PERSISTED like `menu_scr` (build.automap_persist). `ev_map` is M's
+# down edge, zeroed before every frame's polls like the other events (`standalone_key_lines`), so it is not restored.
+AUTOMAP_STATE_DECLS = ["amap: hex.vec 1, 0", "ev_map: hex.vec 1"]
 
 # M7 P1.5 -- the SKILL SCREEN NEW GAME opens (docs/gp-skill-menu.md): entry SKILL_MENU_FIRST + k is
 # skill SKILLS[k], and `menu_sel` holds k. P10 (the owner's play-test, 2026-10-12: "skill screen default to medium"):
@@ -650,7 +712,7 @@ def p8a_restart_parts(world) -> list:
     return out
 
 
-def p5_tic_lines(hrt, barrels: bool = False, bar_always: bool = False) -> list:
+def p5_tic_lines(hrt, barrels: bool = False, bar_always: bool = False, lights: bool = False) -> list:
     """M7 P5 -- the frame's tic after the monsters' (`tic_after_eye`): the fireballs, then the blood (projcode's
     `pj_phase` / `fx_phase`, each skipping itself while `lvdone`: world.tic's order monsters -> projectiles ->
     barrels -> effects), then the bar's health and armor (`hrt` is hurtcode.hurt_parts' dict: its `bar`, hp_bar)
@@ -661,10 +723,13 @@ def p5_tic_lines(hrt, barrels: bool = False, bar_always: bool = False) -> list:
     M8 F7 (issue #123 item 4, `bar_always`): the bar AFTER the guard, every frame -- on the frame the exit is pressed
     the player phase still runs after the press (nukage, the walk's pickups: World.tic's exit frame), so a health or
     armor change there must reach the bar; a frozen frame changes neither, so hp_bar writes the values it found. Taken
-    on a map where such a change can happen (`exit_frame_bar_hazards`); elsewhere (E1M1) the text is blocked48's."""
+    on a map where such a change can happen (`exit_frame_bar_hazards`); elsewhere (E1M1) the text is blocked48's.
+    M8 (`lights`, doomfj.lightcode): the sector light thinkers' phase after the effects (world.World._monster_world's
+    order; it skips itself while `lvdone`) -- a map whose lights animate (E1M2); elsewhere no text."""
     bar = list(hrt["bar"])
     return (["stl.fcall pj_phase, pj_pret"] + (["stl.fcall bar_phase, bar_pret"] if barrels else [])
-            + ["stl.fcall fx_phase, fx_pret", "hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(),
+            + ["stl.fcall fx_phase, fx_pret"] + ([_lightcode.TIC_CALL] if lights else [])
+            + ["hex.if1 1, lvdone, p5_bar_skip", *_restartcode.lvtime_tic_lines(),
                *([] if bar_always else bar), "p5_bar_skip:", *(bar if bar_always else [])])
 
 
@@ -829,14 +894,18 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     rockets = bool(p31.get("rockets"))           # P9: the player's rocket shares the fireballs' pool
     if rockets:
         names.update({"S_ROCKET": 222, "S_EXPLODE1": 223, "S_EXPLODE2": 224, "S_EXPLODE3": 225})
+    fog = bool(p31.get("tele"))                  # M8: the teleport fog shares the effects pool
+    if fog:
+        names.update({s: 234 + i for i, s in enumerate(
+            ("S_TFOG", "S_TFOG01", "S_TFOG02") + tuple("S_TFOG%d" % k for k in range(2, 11)))})
     assert {s: gd.STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
-    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets)) == sorted(names.values())
+    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets, fog)) == sorted(names.values())
     assert (FIREBALL_INFO.spawnstate, FIREBALL_INFO.deathstate) == ("S_TBALL1", "S_TBALLX1")
     mv = p31["mob_view"]
     assert sorted(mv) == sorted(names.values()), sorted(mv)
     rows, nt = p31["view_rows"], len(p31["rt_slot"])
     by_lump = {}
-    for s in projcode.pool_states(puffs, rockets):
+    for s in projcode.pool_states(puffs, rockets, fog):
         row = mv[gd.STATE_INDEX[s]]
         assert p31["mob_first"] <= row < nt + len(rows), (s, row)
         by_lump.setdefault(mobile_lump(s), set()).add(row)
@@ -862,7 +931,8 @@ def _skill_dispatch(prefix: str) -> list:
     return _restartcode.skill_dispatch(prefix, "menu_sel", len(SKILLS))   # M7 P7: one dispatch shape
 
 
-def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), stats=None) -> list:
+def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), stats=None, automap=None,
+                cold=None) -> list:
     """M3 — the MENU frames, and the branch that chooses them.
 
     A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
@@ -892,12 +962,21 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
     RESUME highlighted is one more frame. LEVEL COMPLETE shows the level's stats: `stats` is the World (the game
     tier's; doomfj.statcode computes the digit slots and draws them over its baked frame). Without one (a test
     harness's menu) the frame is baked with its slots empty.
+
+    M8 (doomfj.automap): `automap` -- the map's `automap.Pages`, or None (E1M1: every line as before). The main menu
+    gains MAP under HELP (`menu_entries_for`), the help lists M, and two more producers come before the `menu_scr`
+    branch, behind one `if0` on `amap` that only a menu frame pays: the main menu on MAP (each `g_live` variant) and
+    the map page -- its band's baked frame and the dot (`automap.fj_lines`). Those producers are ~90k ops of baked
+    frames, so they are COLD: `automap_cold_lines`, reached by a jump. `cold` -- a list the caller places where
+    nothing falls in and no hot code follows (the emitter: the end of the last part, so not one op of the renderer
+    moves); None places them here, after the fcall'd routines.
     """
     from doomfj.menu import fj as menu_fj, help_fj, level_done_fj, palette_colours
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
     assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
     assert MENU_HELP_ITEM in entries, "the main menu needs its %r item (M7 P3.4)" % MENU_HELP_ITEM
     assert MENU_EXIT_ITEM in entries, "the main menu needs its %r item (P9)" % MENU_EXIT_ITEM
+    entries = menu_entries_for(entries, automap is not None)       # M8: MAP under HELP on a map with the page
     live_entries, live_selected = main_menu_entries(entries, selected, 1)
 
     def main(label, lines, row):
@@ -909,6 +988,9 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
                 + [f"{p}_l:"] + main(label + "_l", live_entries,
                                      live_entries.index(item) if item else live_selected))
 
+    _am_cold = automap_cold_lines(automap, by_live) if automap is not None else []
+    if automap is not None and cold is not None:
+        cold.extend(_am_cold)                                   # M8: the caller places them
     if stats is not None:
         level_done = _statcode.digit_lines(stats, SKILLS) + _statcode.frame_lines(cfg.W, cfg.H, colours, stats)
     else:
@@ -916,10 +998,12 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
     return [
         # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
-        *menu_state_lines(restart),
+        *menu_state_lines(restart, automap is not None),       # M8: the map page's states too
         # -- the frame: the world, or one of the baked screens
         "hex.if0 1, mode, do_world",
         *hud,                              # M7 P4.0: a menu frame covers the bar -- redraw it on the next world frame
+        # M8: the map page and the main menu on MAP -- `amap` 0 goes on to the `menu_scr` branch
+        *(["hex.if0 1, amap, mf_nam", ";mf_am", "mf_nam:"] if automap is not None else []),
         "hex.if0 1, menu_scr, mf_main",
         # M7 P3.4: the help (either id) and the main menu with HELP highlighted (P9: EXIT; P10: RESUME)
         f"hex.if_flags menu_scr, {_P34_SCREENS}, mf_np34, mf_p34",
@@ -938,7 +1022,8 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
         "mf_mainh:",
         *by_live("mf_mainh", "menu_frame_help", MENU_HELP_ITEM),
         "mf_help:",
-        help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False),
+        help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False,
+                **({"automap": True} if automap is not None else {})),      # M8: the help lists M
         ";frame_end",
         "mf_mainx:",                       # P9
         *by_live("mf_mainx", "menu_frame_exit", MENU_EXIT_ITEM),
@@ -955,8 +1040,33 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
         # fcall'd only: every screen above ends in a jump. M7 P7: restart_common and each skill's rs_skill<k>
         *_restartcode.routine_lines(restart),
         *(_statcode.routine_lines() if stats is not None else []),     # P10: lvd_dec, and the unreachable lvd_div0
+        *(_am_cold if (automap is not None and cold is None) else []),   # M8: the page's producers, here
         "do_world:",
     ]
+
+
+def menu_entries_for(entries, automap: bool) -> list:
+    """M8: the main menu's lines on a map with the map page -- MENU_MAP_ITEM right under MENU_HELP_ITEM -- or
+    `entries` unchanged"""
+    entries = list(entries)
+    if not automap:
+        return entries
+    k = entries.index(MENU_HELP_ITEM) + 1
+    return entries[:k] + [MENU_MAP_ITEM] + entries[k:]
+
+
+def automap_cold_lines(pages, by_live) -> list:
+    """M8 -- the map page's producers, jumped to (`;mf_am`) from `_menu_lines`' branch when `amap` is not 0: 3
+    (menu.AMAP_CODES[MAIN_MAP_SCR]) is the main menu on MAP, either `g_live` variant (`by_live`); 1 and 2 are the map
+    page (`automap.fj_lines`), whichever way it was opened. Every path ends in a jump to the frame's tail, so nothing
+    falls out -- placed where nothing falls in"""
+    return ["mf_am:",
+            f"hex.if_flags amap, 1<<{AMAP_CODES[MAIN_MAP_SCR]}, mf_amap, mf_mainm",
+            "mf_mainm:",
+            *by_live("mf_mainm", "menu_frame_map", MENU_MAP_ITEM),
+            "mf_amap:",
+            *_automap.fj_lines(pages),
+            ";frame_end"]
 
 
 def main_menu_entries(entries, selected: int, live: int) -> tuple:
@@ -968,7 +1078,7 @@ def main_menu_entries(entries, selected: int, live: int) -> tuple:
     return entries[:selected] + [MENU_RESUME_ITEM] + entries[selected:], selected + 1
 
 
-def menu_state_lines(restart) -> list:
+def menu_state_lines(restart, automap: bool = False) -> list:
     """M7 P1.5 -- the menu's STATE MACHINE (see `_menu_lines`), alone: the events in, `mode`,
     `menu_scr`, `menu_sel` and -- on a skill's NEW GAME -- the restart block out. No frame: the
     caller draws. `restart` is `restart_lines(...)`; its shared routine (`restart_common`, fcall'd
@@ -984,12 +1094,28 @@ def menu_state_lines(restart) -> list:
 
     P10 (menu.menu_step's `live`): `g_live` -- NEW GAME sets it, LEVEL COMPLETE's ANY key (`ev_any`) clears it on its
     way to the main menu. Esc on a main-menu item resumes the world only while it is set (else the next event in the
-    order is read); the world opens the menu on RESUME while it is set; up from NEW GAME reaches RESUME only then."""
+    order is read); the world opens the menu on RESUME while it is set; up from NEW GAME reaches RESUME only then.
+
+    M8 (doomfj.automap; menu.menu_step's `automap`): the map page, on a map that has it. `amap` (menu.AMAP_CODES) is
+    read FIRST on a menu frame -- one `if0` -- and is 0 but on the page and the main menu on MAP. In the world the
+    only addition is one more `if0`, on `ev_map`, reached when neither esc, enter nor h is down. Every main-menu item
+    reads m after h (it opens the page from the menu); HELP's down and EXIT's up reach MAP; without `automap` every
+    line is as before."""
     _common, skills = restart
+    A = automap
+
+    def m_check(lbl):
+        """M8: on a main-menu item, m (after h) opens the map page from the menu"""
+        return ([f"hex.if0 1, ev_map, {lbl}", ";mn_tomap", f"{lbl}:"] if A else [])
+
+    def to_main_map():
+        """M8: the main menu on MAP: `menu_scr` 0, `amap` 3"""
+        return ["hex.zero 1, menu_scr", f"hex.set 1, amap, {AMAP_CODES[MAIN_MAP_SCR]}"]
     assert len(skills) == len(SKILLS), "one restart block per skill: %d for %d" % (len(skills),
                                                                                   len(SKILLS))
     return [
         "hex.if0 1, mode, mn_world",
+        *(automap_state_lines() if A else []),          # M8: the map page and the main menu on MAP
         "hex.if0 1, menu_scr, mn_main",
         # M7 P3.4: the help (HELP_MENU_SCR / HELP_GAME_SCR) and the main menu on HELP (P9: EXIT; P10: RESUME)
         f"hex.if_flags menu_scr, {_P34_SCREENS}, mn_np34, mn_p34",
@@ -1045,8 +1171,10 @@ def menu_state_lines(restart) -> list:
         "mn_q1:",
         "hex.if0 1, ev_enter, mn_q2", ";mn_tohelp", "mn_q2:",
         "hex.if0 1, ev_help, mn_q3", ";mn_tohelp", "mn_q3:",
+        *m_check("mn_qm"),
         "hex.if0 1, ev_up, mn_q4", "hex.zero 1, menu_scr", ";mn_done", "mn_q4:",
-        "hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_EXIT_SCR}", ";mn_done",
+        *(["hex.if0 1, ev_dn, mn_done", *to_main_map(), ";mn_done"] if A else      # M8: down to MAP
+          ["hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_EXIT_SCR}", ";mn_done"]),
         "mn_tohelp:", f"hex.set 1, menu_scr, {HELP_MENU_SCR}", ";mn_done",
         "mn_cont:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",      # P10: back to the world
         # P9 -- the main menu on EXIT: esc resumes a game in progress (P10), ENTER HALTS THE PROGRAM, h opens the help,
@@ -1058,7 +1186,9 @@ def menu_state_lines(restart) -> list:
         "mn_x1:",
         "hex.if0 1, ev_enter, mn_x2", ";mn_exit", "mn_x2:",
         "hex.if0 1, ev_help, mn_x3", ";mn_tohelp", "mn_x3:",
-        "hex.if0 1, ev_up, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
+        *m_check("mn_xm"),
+        *(["hex.if0 1, ev_up, mn_done", *to_main_map(), ";mn_done"] if A else      # M8: up to MAP
+          ["hex.if0 1, ev_up, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done"]),
         "mn_exit: stl.loop",
         # P10 -- the main menu on RESUME (only while g_live): esc or enter resume, h opens the help, down goes to NEW
         # GAME (up is clamped: RESUME is the first item)
@@ -1066,6 +1196,7 @@ def menu_state_lines(restart) -> list:
         "hex.if0 1, ev_esc, mn_c1", ";mn_cont", "mn_c1:",
         "hex.if0 1, ev_enter, mn_c2", ";mn_cont", "mn_c2:",
         "hex.if0 1, ev_help, mn_c3", ";mn_tohelp", "mn_c3:",
+        *m_check("mn_cm"),
         "hex.if0 1, ev_dn, mn_done", "hex.zero 1, menu_scr", ";mn_done",
         # -- the main menu (NEW GAME highlighted)
         "mn_main:",
@@ -1073,6 +1204,7 @@ def menu_state_lines(restart) -> list:
         "hex.if0 1, ev_enter, mn_m2", "hex.set 1, menu_scr, 1", ";mn_done", "mn_m2:",
         # M7 P3.4: h opens the help; P10: up highlights RESUME while a game is in progress; down highlights HELP
         "hex.if0 1, ev_help, mn_m3", ";mn_tohelp", "mn_m3:",
+        *m_check("mn_mm"),
         "hex.if0 1, ev_up, mn_m4", "hex.if0 1, g_live, mn_m4",
         f"hex.set 1, menu_scr, {MAIN_RESUME_SCR}", ";mn_done", "mn_m4:",
         "hex.if0 1, ev_dn, mn_done", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done",
@@ -1083,9 +1215,44 @@ def menu_state_lines(restart) -> list:
         "mn_open:", "hex.set 1, mode, 1", "hex.zero 1, menu_scr",
         "hex.if0 1, g_live, mn_done", f"hex.set 1, menu_scr, {MAIN_RESUME_SCR}", ";mn_done",   # P10: on RESUME
         # M7 P3.4: h opens the help, which closes back to the world
-        "mn_w2:", "hex.if0 1, ev_help, mn_done",
+        "mn_w2:", "hex.if0 1, ev_help, mn_w3" if A else "hex.if0 1, ev_help, mn_done",
         "hex.set 1, mode, 1", f"hex.set 1, menu_scr, {HELP_GAME_SCR}",
+        # M8: m opens the map page, which closes back to the world
+        *([";mn_done", "mn_w3:", "hex.if0 1, ev_map, mn_done",
+           "hex.set 1, mode, 1", f"hex.set 1, amap, {AMAP_CODES[MAP_GAME_SCR]}"] if A else []),
         "mn_done:",
+    ]
+
+
+def automap_state_lines() -> list:
+    """M8 -- the map page's states, read first on a menu frame (`menu_state_lines`; menu.menu_step's rules): `amap`
+    0 goes on to the `menu_scr` machine. On the page (1 from the world, 2 from the menu) esc or m close it -- to the
+    world, or to the main menu on MAP (3). On the main menu on MAP: esc resumes a game in progress, enter or m open the
+    page, h the help, up HELP, down EXIT -- leaving MAP zeroes `amap`. `mn_tomap` (here; every main-menu item's m
+    jumps to it) opens the page from the menu"""
+    g, mm, m3 = AMAP_CODES[MAP_GAME_SCR], AMAP_CODES[MAP_MENU_SCR], AMAP_CODES[MAIN_MAP_SCR]
+    return [
+        "hex.if0 1, amap, mn_nam",
+        f"hex.if_flags amap, 1<<{m3}, mn_apg, mn_mainm",
+        # the page: esc or m close it, back to where it was opened from
+        "mn_apg:",
+        "hex.if0 1, ev_esc, mn_a1", ";mn_aclose", "mn_a1:",
+        "hex.if0 1, ev_map, mn_done",
+        "mn_aclose:", f"hex.if_flags amap, 1<<{g}, mn_amenu, mn_agame",
+        "mn_agame:", "hex.zero 1, mode", "hex.zero 1, amap", ";mn_done",
+        "mn_amenu:", f"hex.set 1, amap, {m3}", ";mn_done",
+        # the main menu on MAP
+        "mn_mainm:",
+        "hex.if0 1, ev_esc, mn_mp1", "hex.if0 1, g_live, mn_mp1", "hex.zero 1, amap", ";mn_cont",
+        "mn_mp1:",
+        "hex.if0 1, ev_enter, mn_mp2", ";mn_tomap", "mn_mp2:",
+        "hex.if0 1, ev_help, mn_mp3", "hex.zero 1, amap", ";mn_tohelp", "mn_mp3:",
+        "hex.if0 1, ev_map, mn_mp4", ";mn_tomap", "mn_mp4:",
+        "hex.if0 1, ev_up, mn_mp5", "hex.zero 1, amap", f"hex.set 1, menu_scr, {MAIN_HELP_SCR}", ";mn_done", "mn_mp5:",
+        "hex.if0 1, ev_dn, mn_done", "hex.zero 1, amap", f"hex.set 1, menu_scr, {MAIN_EXIT_SCR}", ";mn_done",
+        # the page, opened from the menu (from any main-menu item's m, or MAP's enter)
+        "mn_tomap:", "hex.zero 1, menu_scr", f"hex.set 1, amap, {mm}", ";mn_done",
+        "mn_nam:",
     ]
 
 
@@ -1099,7 +1266,7 @@ _HOLD_SCREENS = "%#06x" % sum(1 << v for v in range(LEVEL_DONE_HOLD_LAST, LEVEL_
 _LEVEL_DONE_MASK = "%#06x" % sum(1 << v for v in LEVEL_DONE_SCREENS)
 
 
-def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=None) -> list:
+def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=None, automap=None, view=None) -> list:
     """M7 P3.4 -- THE ORACLE'S PICTURE of a menu frame: what `_menu_lines` bakes for `menu_scr` =
     `scr` (and, on the skill screen, `menu_sel` = `sel`) -- the main menu on either item, the skill
     screen, LEVEL COMPLETE or the help. ONE mapping from the state to the screen, for every gate
@@ -1109,12 +1276,20 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
     progress; MAIN_RESUME_SCR exists only then (refused otherwise). LEVEL COMPLETE's `stats` is (nsecret, the digit
     slots: menu.stats_digits(*statcode.stats_of(world), statcode.count_digits(world))) -- None, the frame a menu
     without a World bakes (its slots
-    empty, `_menu_lines(stats=None)`)."""
-    from doomfj.menu import MENU_HALTED, help_pixels, level_done_pixels, pixels
+    empty, `_menu_lines(stats=None)`).
+    M8: `automap` -- the map's `automap.Pages` (automap.pages_for), None on a map without the page: the main menu then
+    has MAP, the help lists M, and the map page (menu.MAP_SCREENS) is `automap.pixels` at `view` = (viewx, viewy),
+    16.16 -- the dot is the one picture that depends on the world; MAIN_MAP_SCR is the main menu on MAP."""
+    from doomfj.menu import MAP_SCREENS, MENU_HALTED, help_pixels, level_done_pixels, pixels
     if scr == MENU_HALTED:
         raise ValueError("menu.MENU_HALTED: the program halted on EXIT and presents no frame")
+    if scr in (MAP_SCREENS + (MAIN_MAP_SCR,)) and automap is None:
+        raise ValueError("menu.MAP_SCREENS / MAIN_MAP_SCR: the map page exists only on a map that has it (automap=)")
+    if scr in MAP_SCREENS:
+        assert view is not None, "the map page's dot is the player's: pass view=(viewx, viewy)"
+        return _automap.pixels(automap, *view)
     if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
-        return help_pixels(cfg.W, cfg.H, colours)
+        return help_pixels(cfg.W, cfg.H, colours, **({"automap": True} if automap is not None else {}))
     if scr in LEVEL_DONE_SCREENS:                  # P10: the screen and its hold
         nsecret, digits = stats if stats is not None else (0, None)
         return level_done_pixels(cfg.W, cfg.H, colours, nsecret, digits)
@@ -1122,13 +1297,14 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
         return pixels(cfg.W, cfg.H, SKILL_MENU, SKILL_MENU_FIRST + sel, colours)
     if scr == MAIN_RESUME_SCR and not live:
         raise ValueError("menu.MAIN_RESUME_SCR: RESUME is on the main menu only while a game is in progress")
-    entries, new_game = main_menu_entries(DEFAULT_MENU, DEFAULT_MENU_SELECTED, live)
+    entries, new_game = main_menu_entries(menu_entries_for(DEFAULT_MENU, automap is not None), DEFAULT_MENU_SELECTED,
+                                          live)                                         # M8: MAP on its maps
     item = {0: None, MAIN_HELP_SCR: MENU_HELP_ITEM, MAIN_EXIT_SCR: MENU_EXIT_ITEM,     # P9
-            MAIN_RESUME_SCR: MENU_RESUME_ITEM}[scr]                                      # P10
+            MAIN_RESUME_SCR: MENU_RESUME_ITEM, MAIN_MAP_SCR: MENU_MAP_ITEM}[scr]         # P10; M8
     return pixels(cfg.W, cfg.H, entries, new_game if item is None else entries.index(item), colours)
 
 
-def exit_lines(boxes, press_miss=()) -> list:
+def exit_lines(boxes, press_miss=(), press_first=()) -> list:
     """M7 P2a.2 -- the exit switch in fj (docs/gp-exit.md; the model's P_UseLines for special 11):
     a use PRESS -- `duse` this tic, `pusedn` clear -- sets `pusedn`, and inside any exit box
     (`doors.exit_boxes`, the doors' inclusive 16.16 test) ends the level: `lvdone` 1 and the
@@ -1137,10 +1313,12 @@ def exit_lines(boxes, press_miss=()) -> list:
     whose menu branch comes before the tics. Use released clears `pusedn`. Runs after the door tic
     (which writes `duse`) and before the player's move, the model's order. M7 P2b: `press_miss`
     runs on a press that misses the exit -- the SR lifts and the S1 switch (`movercode.
-    use_line_lines`), after the exit as in the model's P_UseLines."""
+    use_line_lines`), after the exit as in the model's P_UseLines. M8: `press_first` runs on every press BEFORE the
+    exit's boxes -- the switch textures' floor and lift lines (`switchcode.use_press_lines`, World._use_lines' first
+    step); without it the text is P10's."""
     out = ["hex.if0 1, duse, ex_up",
            "hex.if0 1, pusedn, ex_press", ";ex_done",
-           "ex_press:", "hex.set 1, pusedn, 1"]
+           "ex_press:", "hex.set 1, pusedn, 1", *press_first]
     for k, box in enumerate(boxes):
         out += _box_test(f"x{k}", box, "ex_hit", f"ex_miss{k}") + [f"ex_miss{k}:"]
     out += [*press_miss,
@@ -1168,7 +1346,7 @@ def landing_drop_lines() -> list:
             "lnd_vd_end:"]
 
 
-def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
+def standalone_key_lines(polls: int = STANDALONE_POLLS, automap: bool = False) -> list:
     """M5 / M7 P1.5 / P9 -- the standalone frame's INPUT, alone: the menu's events and the press latch zeroed, the
     `polls` keyboard polls, the latch OR-ed with the held flags, and the key byte `pkeys` built from the latch.
     tests/fj/test_key_latch.py runs exactly these lines.
@@ -1177,9 +1355,21 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
     the frame acts on `kb_now` -- each held key's nibble is 1 when the key is held after the polls OR went down during
     them -- not on the held flags, which a tap inside one frame's polls left unchanged. `pkeys` (the sim's, the doors',
     the exit's, the restart's and the fire's) and the weapon's number keys (weaponcode) read it. The held flags still
-    carry "held" across frames (persisted), and a release with no press in the frame still takes effect."""
+    carry "held" across frames (persisted), and a release with no press in the frame still takes effect.
+
+    M8 (doomfj.automap): `automap` -- the map has the map page, so M's DOWN edge is the menu's `ev_map`. kb.poll's
+    table and parameters are frozen (rule 4) and E1M1's poll must stay what it is, so the key is read BESIDE the poll:
+    each of the `polls` polls is written out (the same expansion `rep` makes) and followed by `map_key_lines`, which
+    reads what the poll left -- the status nibble and the keycode byte, which kb.poll consumes into `kbstat` / `kbcode`
+    on every event and discards for a key it does not know (M is one). An idle poll pays one `if_flags`."""
     from doomfj import keyboard as KB
     now = KB.now_cell
+    poll = ("kb.poll kbstat, kbcode, " + "".join(f"{KB.flag(k)}, " for k in KB.HELD_KEYS) + f"{KB.KEY_NOW}, "
+            "ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad")
+    if automap:
+        polls_ = ["hex.zero 1, ev_map"] + [ln for i in range(polls) for ln in [poll] + map_key_lines(f"kbm{i}")]
+    else:
+        polls_ = [f"rep({polls}, i) " + poll]
     return [
         # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
         # state machine reads them
@@ -1187,10 +1377,8 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
         "hex.zero 1, ev_help",                                          # M7 P3.4
         "hex.zero 1, ev_any",                                           # P10: any key's down edge
         f"hex.zero {len(KB.HELD_KEYS)}, {KB.KEY_NOW}",                  # P9: the press latch
-        f"rep({polls}, i) kb.poll kbstat, kbcode, "
-        + "".join(f"{KB.flag(k)}, " for k in KB.HELD_KEYS)            # M7 P4.1: strafe, fire, 1..4
-        + f"{KB.KEY_NOW}, "                                             # P9
-        "ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad",          # P10: ev_any
+        # the polls (M7 P4.1: strafe, fire, 1..4; P9: the latch; P10: ev_any) -- M8: each read for M after it
+        *polls_,
         *KB.now_lines(),                                                # P9: kb_now |= the held flags
         # the frame's keys -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
@@ -1208,10 +1396,20 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS) -> list:
     ]
 
 
+def map_key_lines(p: str) -> list:
+    """M8: after ONE kb.poll -- `ev_map` = 1 when that poll delivered M's DOWN edge (status 0x9, keycode 0x6D,
+    menu.MAP_KEY). Labels `<p>_*`. A poll with no event (status 0) or an up edge (0x8) costs the first if_flags"""
+    from doomfj.menu import MAP_KEY
+    return [f"hex.if_flags kbstat, 1<<0x9, {p}_no, {p}_dn", f"{p}_dn:",
+            f"hex.if_flags kbcode + dw, 1<<{MAP_KEY >> 4:#x}, {p}_no, {p}_hi",
+            f"{p}_hi:", f"hex.if_flags kbcode, 1<<{MAP_KEY & 15:#x}, {p}_no, {p}_m",
+            f"{p}_m:", "hex.set 1, ev_map, 1", f"{p}_no:"]
+
+
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
                             press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
-                            use_guard=((), ()), weapon_bar=(), knock_move=()) -> list:
+                            use_guard=((), ()), weapon_bar=(), knock_move=(), press_first=(), automap: bool = False) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -1232,9 +1430,11 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     M7 P8a (docs/gp-final-plan.md 4.3 step 6; doomfj.knockcode): `knock_move` -- the player's KNOCK move, spliced right
     after `simmv_done` (the walk's landing, which the dead player's skipped move reaches too: the corpse slides) and
     before the bar's weapon slots (the knock's pickups change them).
+
+    M8: `automap` -- the map has the map page: the polls read M too (`standalone_key_lines`).
     """
     return [
-        *standalone_key_lines(polls),      # the polls, the press latch, the key byte (P9: factored out)
+        *standalone_key_lines(polls, automap),   # the polls, the press latch, the key byte (P9: factored out)
         *(menu or []),                     # M3: the menu frame + the branch past the world
         # M7 P7: the restart on use after death (restartcode.tic_lines) -- the world frame's START, before the
         # frozen-level guard and the door tic: the model's World.tic runs the restart, then the tic
@@ -1250,7 +1450,8 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
            f"hex.if_flags pkeys + dw, {KEY_USE_MASK:#06x}, duse_nos, duse_yess",
            f"duse_yess:", "hex.xor_by 1, duse, 1",
            f"duse_nos:", *door_lines] if door_lines else []),
-        *((list(use_guard[0]) + exit_lines(exit_boxes_, press_miss) + list(use_guard[1])) if exit_boxes_ else []),
+        *((list(use_guard[0]) + exit_lines(exit_boxes_, press_miss, press_first) + list(use_guard[1]))
+          if exit_boxes_ else []),
         # M7 P4.1: the weapon -- the model's player phase runs the number keys and the psprites before the move
         *weapon,
         *_player_sim_lines(collide, strafe=True, tap=True),   # M7 P4.1: the game tier strafes; P6+P7: the tap turn
@@ -1270,7 +1471,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
 
 def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                          spr_base, spr_ldbase, spr_dw, spr_cls, *, spr_cache: dict,
-                         keep=None, view_rows=(), ltw: int = 1, mobiles: int = 0):
+                         keep=None, view_rows=(), ltw: int = 1, mobiles: int = 0, extra_lights=()):
     """M14-e — everything the runtime thing table needs, baked ONCE by thing index.
 
     The static path bakes one xor-involution block per (subsector, thing), which is only possible
@@ -1297,7 +1498,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                            keep=keep)
     things = [allt[i] for i in idx]
     ssflr, sslgt_raw = subsector_tables(rm, cmap, lds, sds, secs)
-    lns = reachable_lightnums(rm, secs)
+    lns = reachable_lightnums(rm, secs, extra_lights)        # M8: + the animated lights' states
     lnpos = {ln: k for k, ln in enumerate(lns)}
     # a seg-less leaf has no sector and gets 0 -- nothing can bind to it (point location only ever
     # returns a leaf with geometry), so which row it names never matters
@@ -1732,6 +1933,28 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _mtab = _movers.mover_table(secs, lds, sds, door_quant) if _movers_on else {}
     _msecs = _movers.mover_secs(_mtab, secs)
     _mcell = {si: c for si, (c, _h) in _mtab.items()}
+    # M8 (doomfj.lights): THE SECTOR LIGHTS -- a map whose flag is on (config SECTOR_LIGHTS: E1M2), in the game tier,
+    # whose world runs the thinkers (doomfj.lightcode's `lt_phase`). A light sector's constants fan out over ITS states
+    # exactly as a mover's over its stops: `_lsecs[si]` the map at each of its light states (state 0 the stored light),
+    # chosen at run time by the thinker's state nibble `_lcell[si]` (ltst + k*dw) -- the walls (seg_lit), the plane
+    # pair ids (pids carry the light), the step faces' classes, a leaf's sprite light base, a baked thing's class.
+    # Off (E1M1, and every other tier): all empty, and every predicate below is exactly what it was.
+    _lth = _lights.thinkers(secs, lds, sds) if (_movers_on and cfg.SECTOR_LIGHTS) else []
+    _lsecs = {th.sector: _lights.state_secs(secs, th) for th in _lth}
+    _lcell = {th.sector: _lightcode.state_cell(k) for k, th in enumerate(_lth)}
+    assert not set(_lsecs) & (set(_dst_tbl) | set(_msecs)), (
+        f"{mapname}: animated light sectors {sorted(set(_lsecs) & (set(_dst_tbl) | set(_msecs)))} are doors or movers "
+        "-- their states would have to be crossed with the machine's")
+    _lt_extra = sorted({v for th in _lth for v in th.levels})          # every light an animated sector can show
+    # M8 (doomfj.switches; the map's SWITCH_TEX): THE SWITCH TEXTURES CHANGE -- the switch lines a use changes, drawn
+    # by the game picture's wall tones (below) and stepped by doomfj.switchcode's lines on the cells `swpr` / `swtm`
+    # (the exit's latch is `lvdone`). [] on E1M1: no text anywhere
+    from doomfj.reference_model import GAME_RENDER_KW as _GRKS
+    _SWI = (_switches.map_switches(secs, lds, sds, verts)
+            if (_LOOT and _movers_on and _GRKS.get("wall_tones") and map_cfg(cfg, mapname).SWITCH_TEX) else [])
+    _SWI_LAT, _SWI_SR = _switches.latched(_SWI), _switches.repeating(_SWI)
+    if any(s_.kind == "lift" for s_ in _SWI):
+        assert sorted(_lift_st) == sorted(lift_states(secs, lds, sds)), "M8: a lift switch's slots are the lifts' order"
     # the union question ("could it ever be open?") takes each floor-group sector at its LOWEST floor (a mover's
     # ceiling never moves): E1M1's pillars lowered, as before; a raised floor (58) is at its widest stored
     _flow = {si: (min(h), secs[si].ceil_h) for g in _floor_groups for si, h in g.heights if min(h) < secs[si].floor_h}
@@ -1762,6 +1985,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             dt = dt + lift_tic_lines(sorted(_lift_st), {si: len(v) for si, v in _lift_st.items()},
                                      {si: _movers.lift_stride(secs, lds, si) for si in _lift_st})
             dt = dt + floor_tic_lines(_floor_groups)          # M8 F1.3: the moving floor groups (none on E1M1)
+        if _SWI and dt:
+            # M8 (doomfj.switchcode): the door phase's FIRST lines -- the SR countdown and the door switches, on the
+            # doors' tic-start states (World._doors_phase -> switch_doors)
+            dt = _switchcode.door_phase_lines(_SWI, _dslot, dead="p_dd0" if _LOOT else None) + dt
         return dt
     # M7 P2a.1: the walk-over triggers (doomfj.doors), fired from the collision move
     _walk_trig = walkover_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
@@ -1812,49 +2039,74 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                    else lds[cmap.segs[cmap.subsectors[s_].firstseg].linedef].back].sector
         return sec_ if sec_ in _msecs else None
 
+    def _cell_dispatch(tag, cell, svs, block):
+        """`sim.jump16` on the state nibble `cell` into one block per state -- `block(sv)` gives a state's lines from
+        its sector list `svs[k]` -- each ending at `<tag>_end` (states past the last reuse the last block). The
+        landings' idiom: plain code, so `hex.set` is legal. (M8: a mover's and a light thinker's.)"""
+        return state_dispatch_lines(tag, cell, [block(sv) for sv in svs])
+
     def _mover_dispatch(tag, m_, block):
-        """M7 P2b: `sim.jump16` on mover `m_`'s state cell into one block per state -- `block(sv)`
-        gives a state's lines from its sector list -- each ending at `<tag>_end` (states past the
-        last reuse the last block). The landings' idiom: plain code, so `hex.set` is legal."""
-        svs = _msecs[m_]
-        labs = [f"{tag}_{k}" for k in range(len(svs))]
-        out_ = [f"    sim.jump16 {_mcell[m_]}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
-        for k, sv in enumerate(svs):
-            out_ += [f"  {labs[k]}:", *block(sv), f"    ;{tag}_end"]
-        return out_ + [f"  {tag}_end:"]
+        """M7 P2b: `_cell_dispatch` on mover `m_`'s state cell, over its states"""
+        return _cell_dispatch(tag, _mcell[m_], _msecs[m_], block)
+
+    def _seg_lights(seg):
+        """M8: the ANIMATED light sectors on this seg's two sides, sorted -- none unless the map's lights animate"""
+        if not _lsecs:
+            return ()
+        ld_ = lds[seg.linedef]
+        f_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
+        b_ = sds[ld_.back if seg.side == 0 else ld_.front].sector if ld_.back != -1 else None
+        return tuple(sorted({x for x in (f_, b_) if x is not None and x in _lsecs}))
+
+    def _leaf_light(s_):
+        """M8: the animated light sector subsector `s_` lies in (its first seg's front sector), or None"""
+        if not _lsecs:
+            return None
+        sg_ = cmap.segs[cmap.subsectors[s_].firstseg]
+        sec_ = sds[lds[sg_.linedef].front if sg_.side == 0 else lds[sg_.linedef].back].sector
+        return sec_ if sec_ in _lsecs else None
+
+    def _seg_machines(seg):
+        """[(sector, state cell, its per-state sector lists)] -- the machines a dynamic seg's constants switch on:
+        its door, or (M7 P2b) its mover, or (M8 L1) its two movers; then (M8) the animated light sectors on its sides.
+        At most two, the door / mover first: two take the PAIR switch (`generate_pair_state_switch_fj`)."""
+        d_ = _seg_door(seg)
+        if d_ is not None:
+            ms_ = [(d_, f"dstate + {_dslot[d_]}*dw", _dsecs[:len(_dst_tbl[d_])])]
+        else:
+            ms_ = [(m_, _mcell[m_], _msecs[m_]) for m_ in _seg_movers(seg)]
+        ms_ += [(l_, _lcell[l_], _lsecs[l_]) for l_ in _seg_lights(seg)]
+        assert len(ms_) <= 2, f"{mapname}: seg on linedef {seg.linedef} switches on {len(ms_)} state cells"
+        return ms_
 
     def _seg_cell(seg):
         """the state cell a dynamic seg's per-state blocks switch on: its door's `dstate` slot or
-        (M7 P2b) its mover's cell; None for a static seg. M8 L1: a seg between two movers switches on BOTH: the pair of
-        their cells (first mover, second mover)."""
-        d_ = _seg_door(seg)
-        if d_ is not None:
-            return f"dstate + {_dslot[d_]}*dw"
-        ms_ = _seg_movers(seg)
+        (M7 P2b) its mover's cell -- M8: or its animated light's (`ltst + k*dw`); None for a static seg. M8 L1: a seg
+        on two machines (two movers; M8: a mover or a door and a light, two lights) switches on BOTH: the pair of their
+        cells (`_seg_machines`' order)."""
+        ms_ = _seg_machines(seg)
         if len(ms_) == 2:
-            return (_mcell[ms_[0]], _mcell[ms_[1]])
-        return _mcell[ms_[0]] if ms_ else None
+            return (ms_[0][1], ms_[1][1])
+        return ms_[0][1] if ms_ else None
 
     def _seg_secs(seg):
         """The sector lists this seg's constants must be baked against: one per state of its door
-        (M7 P2b: or mover), or just the map itself. This is the ONLY place the per-state fan-out is
-        decided, so a seg nothing can move emits exactly what it emitted before doors existed."""
-        d_ = _seg_door(seg)
-        if d_ is not None:
-            return _dsecs[:len(_dst_tbl[d_])]
-        ms_ = _seg_movers(seg)
+        (M7 P2b: or mover; M8: or animated light), or just the map itself. This is the ONLY place the per-state fan-out
+        is decided, so a seg nothing can move emits exactly what it emitted before doors existed."""
+        ms_ = _seg_machines(seg)
         if len(ms_) == 2:
-            # M8 L1: every PAIR of states, the first mover's major: its state's sector list with the second mover's
-            # sector at that one's state (each mover is one sector; the lists differ from the map only there)
-            a_, b_ = ms_
+            # M8 L1: every PAIR of states, the first machine's major: its state's sector list with the second
+            # machine's sector at that one's state (a lift and a light are one sector; the lists differ from the
+            # map only there -- the seg's constants read its two sides alone)
+            (_a, _ca, sva_), (b_, _cb, svb_) = ms_
             out_ = []
-            for sa in _msecs[a_]:
-                for sb in _msecs[b_]:
+            for sa in sva_:
+                for sb in svb_:
                     sv = list(sa)
                     sv[b_] = sb[b_]
                     out_.append(sv)
             return out_
-        return [secs] if not ms_ else _msecs[ms_[0]]
+        return [secs] if not ms_ else ms_[0][2]
 
     def _door_blocks(si, seg, label, build_fields):
         """(block lines, call lines) -- the constant block, or one per state behind a switch.
@@ -1869,9 +2121,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             return _seg_xorby_block(label, build_fields(secs)), [f"    stl.fcall {label}, xb_ret"]
         cell = _seg_cell(seg)
         if isinstance(cell, tuple):
-            # M8 L1: two movers -- a block per PAIR of states behind a switch on both cells (the first mover's
-            # state switch, whose landings sim.jump16 on the second's)
-            na_, nb_ = len(_msecs[_seg_movers(seg)[0]]), len(_msecs[_seg_movers(seg)[1]])
+            # M8 L1: two movers (M8: or a machine and a light, or two lights) -- a block per PAIR of states behind a
+            # switch on both cells (the first machine's state switch, whose landings sim.jump16 on the second's)
+            na_, nb_ = (len(m_[2]) for m_ in _seg_machines(seg))
             assert len(variants) == na_ * nb_
             blk = []
             for i in range(na_):
@@ -1887,6 +2139,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         blk += generate_state_switch_fj(
             f"dsw_{label}", [f"{label}_st{k}" for k in range(len(variants))]).splitlines()
         return blk, [f"    dsw_{label}_go {_seg_cell(seg)}"]
+
+    def _switch_seg_blocks(si, seg, label, build_fields, cell, tb_on):
+        """M8: `switch_seg_blocks` for seg si -- its fields against the map, with its own tone and (`_tb=tb_on`) its
+        used one. A switch seg nothing else moves (asserted: its constants have no door or mover state)"""
+        assert len(_seg_secs(seg)) == 1, f"M8: switch seg {si} also moves with a door or a mover"
+        # M8 (the polish merge): its two blocks are built against the stored map -- a switch seg on a door, a mover or an
+        # animated light sector would need the two machines crossed: refused (none on E1M2)
+        assert _seg_cell(seg) is None, (f"{mapname}: switch seg {si} (linedef {seg.linedef}) also moves with "
+                                        f"{_seg_cell(seg)}")
+        return switch_seg_blocks(label, build_fields(secs), build_fields(secs, _tb=tb_on), cell)
 
     # ⚠ THE OVERRIDE GOES HERE TOO. `secs` above has the doors applied and `scene` did not, so the
     # emitter held TWO sector sources that disagreed about where a door is. Only
@@ -1926,8 +2188,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # the game picture's (GAME_RENDER_KW `wall_tones`, where the full player loots: the game tier), from the map's own
     # level data, as the oracle's `_wall_tones` reads it
     from doomfj.reference_model import GAME_RENDER_KW as _GRKT, wall_tone_names as _wall_tone_names
-    _wall_tones = (_wall_tone_names(lds, sds, map_wad.sectors(mapname))
+    _wall_tones = (_wall_tone_names(lds, sds, map_wad.sectors(mapname),
+                                    switch_tex=bool(map_cfg(cfg, mapname).SWITCH_TEX))   # M8: an SW2 switch's tone
                    if (_LOOT and _GRKT.get("wall_tones")) else {})
+    # M8 (doomfj.switches): every animated switch line's tone once used (its other texture), and the cell its segs'
+    # render constants switch on -- the exit's `lvdone` (the level done IS its latch), a latched one's `swpr` nibble
+    _wall_tones_on = (_wall_tone_names(lds, sds, map_wad.sectors(mapname), switch_tex=True,
+                                       pressed=frozenset(s_.line for s_ in _SWI)) if _SWI else {})
+    _sw_cell = {s_.line: ("lvdone" if s_.kind == "exit" else _switchcode.cell(_SWI_LAT.index(s_))) for s_ in _SWI}
+    assert not _SWI or _wall_tones, "M8: the switch textures draw through the wall tones"
 
     def _seg_wall_tex_name(seg):
         """The texture a seg's SOLID body wears.
@@ -1952,6 +2221,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # the oracle's _wall_texture), plus the 1x1 WALL_BG sentinel; per-seg texinfo precomputed via the oracle rule.
     cache = {}
     seg_texinfo = {}                                         # si -> (texbase, texheight, texwidth)
+    seg_texinfo_on = {}                                      # M8: a switch seg's, once used (its cell: _sw_cell)
     names = set()
     for si, seg in enumerate(cmap.segs):
         ld = lds[seg.linedef]
@@ -1960,6 +2230,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _tn = _seg_wall_tex_name(seg)
         if rm._wall_texture(asset_wad, _tn, cache, wall_mode=tex_mode) is not None:
             names.add(_tn.upper())
+            if seg.linedef in _sw_cell:                      # M8: and its used tone
+                names.add(_wall_tones_on[seg.linedef])
     combined, info = [], {}
     for nm in sorted(names) + [None]:
         key = nm if nm else "__WALLBG__"
@@ -1988,6 +2260,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _tn = _seg_wall_tex_name(seg)
         t = rm._wall_texture(asset_wad, _tn, cache, wall_mode=tex_mode)
         seg_texinfo[si] = info[_tn.upper()] if t is not None else info["__WALLBG__"]
+        if seg.linedef in _sw_cell and t is not None:
+            # M8: the switch seg's used tone -- the oracle's `_wtex` with the line in `switch_on`
+            assert _tn.startswith("#") and _tn == _wall_tones[seg.linedef], (si, _tn)
+            seg_texinfo_on[si] = info[_wall_tones_on[seg.linedef]]
 
     tex = _texel_table("tex", combined, "per_entry", over_align=False)
 
@@ -2087,7 +2363,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname) if _do_things
         else ("", {}, {}, {}, {}))
     sprlight, spr_cls = (_lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname,
-                                             cmap, lds, sds, secs, moving_things=moving_things)
+                                             cmap, lds, sds, secs, moving_things=moving_things,
+                                             extra_lights=_lt_extra)
                          if _do_things else ("", {}))
     # h -> [bucket_height:2][bucket:2], the one runtime step of the height quantisation
     sprbkt = (generate_dispatch_table_fj(
@@ -2210,6 +2487,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # built before that was known, is rebuilt without the dead player's guard (it would read an undeclared p_dd0)
         _LOOT = False
         assert not _chase
+        assert not _SWI, "M8: the switch textures are the looting game tier's (a map with monsters)"
         _door_tic = _make_door_tic()
     # M7 P8a (docs/gp-final-plan.md 3.0): the final rung's three switches, each from its ONE rule -- and so OFF in
     # the "full" / "full" game tier, whose text is blocked51's byte for byte (scratchpad/cr/emit_baseline.py --check):
@@ -2226,6 +2504,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     if _TELE:
         from doomfj.monstercode import cell_nibbles as _cn8
         _teleportcode.check_barrels(_p31["world"])
+        assert _W8.player_resolves(PLAYER_MODE), "M8: the telefrag kills through damagecode's dm_go (TELEFRAG)"
         assert _cn8(_p31["world"].schema, "mon_facing") == 1, "M8 L4: the knock stubs' facing cell is one nibble"
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
@@ -2263,13 +2542,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     if _ANIM:
         sprlight, spr_cls = _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds,
                                                 sds, secs, moving_things=moving_things,
-                                                extra_heights=_p31["view_heights"])
+                                                extra_heights=_p31["view_heights"],
+                                                extra_lights=_lt_extra)        # M8: every light state's
     # M14-e: the runtime half of the same data, baked by INDEX rather than by (subsector, thing).
     _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS, _MT_LTB, _MT_BINDS = (
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                              spr_base, spr_ldbase, spr_dw, spr_cls, spr_cache=spr_cache,
                              keep=_mt_keep, view_rows=_p31["view_rows"] if _p31 else (),
                              ltw=2 if _p31 else 1,
+                             extra_lights=_lt_extra,       # M8: the animated lights' states reach the leaf bases
                              # M7 P6: + the drops' runtime things after the mobiles
                              mobiles=(_p31["nmob"] + _p31.get("ndrop", 0)) if _p31 else 0)
         if moving_things else ("", "", [], 0, 0, {}, []))
@@ -2430,7 +2711,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
     # W1R-ANCHOR: the pattern key is (x + wnoff) with wnoff in [0, 640), so the W1R tables
     # cover the whole shifted domain (the hash is pure, so this is just more baked entries).
-    _wn_dom = cfg.VIEW_W + 1 + (640 if w1r_flag else 0)
+    # M8 (doomfj.scrollcode): a scrolling map's game tier slides the key of its special-48 segs by lvtime's low byte,
+    # so the tables cover WALL_SCROLL_MASK more keys -- only there (lvtime is a standalone cell); E1M1: 801, as before
+    _scroll_on = bool(w1r_flag and lines and standalone and _scrollcode.scroll_on(cfg, mapname))
+    _scroll_lds = _scrollcode.scroll_lines(lds) if _scroll_on else frozenset()
+    assert not _scroll_on or _scroll_lds, ("WALL_SCROLL is set for %s, which has no special-48 line" % mapname)
+    _wn_dom = _scrollcode.wnoise_domain(cfg.VIEW_W, bool(w1r_flag), _scroll_on)
     _wn_idx = 3 if w1r_flag else 2
     wnoise = (generate_dispatch_table_fj(
         "wnoise", [rm.wall_noise(x) for x in range(_wn_dom)],
@@ -2499,6 +2785,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         emitted in every one -- there is one program, and the compile-time cull cannot be
         conditional on a runtime cell."""
         return any(_seg_marks_in(seg, sv) for sv in _seg_secs(seg))
+
+    # M8 (doomfj.lights): the oracle never skips a two-sided seg with an ANIMATED light on either side (its marking
+    # test reads `sector_lights`' keys); the program walks a seg that marks in ANY state (`_seg_marks`). The two agree
+    # because every such seg marks in some light state -- an animated light differs from a static neighbour in one of
+    # its states, and two animated neighbours differ in some pair. Checked here seg for seg, so the oracle's rule is
+    # this program's, not an argument about it.
+    for _sg_lt in (cmap.segs if _lsecs else ()):
+        assert lds[_sg_lt.linedef].back == -1 or not _seg_lights(_sg_lt) or _seg_marks(_sg_lt), (
+            f"{mapname}: seg on linedef {_sg_lt.linedef} touches an animated light and marks in no state")
 
     def _seg_draws_wall(seg) -> bool:
         """M13-2S rung 3b (ablate "tsfull", measurement only): would this two-sided seg draw an
@@ -2572,7 +2867,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # M8 L1 + F1.3: two movers (the pairs, the first mover's state major: `_seg_secs`). The gate stays ONE
         # `hex.if0` when the shut pairs are exactly one mover's state 0 -- E1M2's linedef 1199 (lift 47 / floor 206) is
         # shut exactly while 206 stands at its stored floor, the lift's ceiling, whatever the lift's state
-        na_, nb_ = (len(_msecs[m_]) for m_ in _seg_movers(seg))
+        na_, nb_ = (len(m_[2]) for m_ in _seg_machines(seg))      # M8: a light's states too
         assert len(st_) == na_ * nb_
         if st_ == [ia == 0 for ia in range(na_) for ib in range(nb_)]:
             return cell[0]
@@ -2924,7 +3219,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 _tzmax2 = dict((n, v) for n, w, v in _tfields).get("sp_tzmax2", 0)
                 assert _tfb(_tzmax_fixed, _art[5], _art[3], cfg.SPR_REACH) and _tzmax2 <= _tzmax_fixed, (
                     f"P12: baked thing type {_t.type} outside project_thing's tight far bound -- raise Config.SPR_REACH")
+                # M8: a baked thing standing in an animated light sector -- its block once per light state
+                _tl_ = _leaf_light(s)
+                assert _tl_ is None or _tsec == secs[_tl_], ("M8: a baked thing's sector is not its leaf's", _tag)
                 if _bar and _t.type == BARREL_TYPE:
+                    assert _tl_ is None, f"M8: baked barrel {_tag} stands in animated light sector {_tl_}"
                     # M7 P6+P7: a baked barrel is hidden by its STATE here (bar_st 0); the vanishable slot its type
                     # has in every tier stays, kept equal to `bar_st != 0` by the phase (barrelcode.phase_lines'
                     # barrel_vis) -- package A's thvis layout reads it so
@@ -2935,7 +3234,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     # standing, it records the aim window (thing_leaf_bb)
                     out += _baked_barrel_site(cid, _ti, _tag, _t, _tfields, _tsec, xorby_blocks)
                     continue
-                xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", _tfields)
+                if _tl_ is None:
+                    xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", _tfields)
+                    _tcall = f"    stl.fcall thing{_tag}_consts, xb_ret"
+                else:
+                    assert _ANIM, "M8: a light state's class needs the two-byte light class (sp_lt_hi)"
+                    _tblk, _tcall = light_thing_blocks(f"thing{_tag}_consts", _lcell[_tl_], [
+                        light_class_fields(_tfields, spr_cls[(rm.wall_lightnum(_sv[_tl_].light, 0), max(1, _art[4]))])
+                        for _sv in _lsecs[_tl_]])
+                    xorby_blocks[f"T{_tag}"] = _tblk
                 out += [
                     # M14.5 §3.3: read-many, write-rarely, and the index is a COMPILE-TIME
                     # constant here -- so this is a fixed-address 1-nibble test, not a pointer
@@ -2946,9 +3253,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     f"    hex.if0 1, tstop, ss{cid}_thing{_ti}_do",
                     f"    ;ss{cid}_thing{_ti}_skip",
                     f"  ss{cid}_thing{_ti}_do:"] + [
-                        f"    stl.fcall thing{_tag}_consts, xb_ret",
+                        _tcall,
                         f"    stl.fcall {_baked_leaf}, thing_ret",
-                        f"    stl.fcall thing{_tag}_consts, xb_ret",
+                        _tcall,
                         f"  ss{cid}_thing{_ti}_skip:"]
         if _do_things and ss.numsegs and moving_things:
             # M14-e: the leaf no longer knows which things are its own -- `bind_things` decided
@@ -2960,6 +3267,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # inside thing_load meant three `read_table_packed`s PER THING for values constant
             # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
             _m_fl = _leaf_mover(s)
+            _l_lt = _leaf_light(s)                     # M8: an animated light's leaf takes its base from the state
             _ltb = _MT_LTB[rm.wall_lightnum(psec.light, 0)]
             # P13: the leaf's registers keep a ZERO INVARIANT between leaves -- the baked constants are XORed in
             # here and back out after the call (as the BSP partition blocks' constants are), where each was a
@@ -2973,12 +3281,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                       _mover_dispatch(f"sfl{cid}", _m_fl, lambda sv: [
                           f"    hex.xor_by 4, ss_flr, "
                           f"{rm._seg_sector(lds, sds, sv, cmap.segs[ss.firstseg]).floor_h & 0xFFFF}"])),
-                    f"    hex.xor_by 4, ss_ltb, {_ltb}",
+                    *([f"    hex.xor_by 4, ss_ltb, {_ltb}"] if _l_lt is None else
+                      _cell_dispatch(f"slt{cid}", _lcell[_l_lt], _lsecs[_l_lt], lambda sv: [
+                          f"    hex.xor_by 4, ss_ltb, "
+                          f"{_MT_LTB[rm.wall_lightnum(rm._seg_sector(lds, sds, sv, cmap.segs[ss.firstseg]).light, 0)]}"])),
                     "    stl.fcall thing_pass_leaf, tp_ret",
                     f"    hex.xor_by w/4, cur_ssp, sshead + {s}*dw",
                     *([f"    hex.xor_by 4, ss_flr, {psec.floor_h & 0xFFFF}"] if _m_fl is None else
                       ["    hex.zero 4, ss_flr"]),
-                    f"    hex.xor_by 4, ss_ltb, {_ltb}"]
+                    *([f"    hex.xor_by 4, ss_ltb, {_ltb}"] if _l_lt is None else ["    hex.zero 4, ss_ltb"])]
         for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
             seg = cmap.segs[si]
             ld = lds[seg.linedef]
@@ -3107,27 +3418,29 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             gfields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
                        ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
                        ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc)]
-            def rfields(sv, _sg=seg, _si=si):
+            def rfields(sv, _sg=seg, _si=si, _tb=None):
+                # M8: `_tb` -- a switch seg's used tone (seg_texinfo_on); None its own (`tb`)
+                tb_ = tb if _tb is None else _tb
                 ssec = rm._seg_sector(lds, sds, sv, _sg)
                 ckey, fkey = _plane_keys(ssec)
                 return [("seg_segangle", 8, _sg.angle),
                        *([]),
                        ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
                        ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
-                       ("seg_lit", 2, wlit(ssec.light, combined[tb],
-                                           flat_wall=tb in w1r_flat_tb)),
+                       ("seg_lit", 2, wlit(ssec.light, combined[tb_],
+                                           flat_wall=tb_ in w1r_flat_tb)),
                        # W1R-2C: the SECOND colour byte -- the canvas's second texel
                        # (combined[tb+1] at the 2-texel W1R tier) through the same bake.
                        # W1R-FLAT: the per-seg stay-flat flag (texture-less only;
                        # sky walls pattern like any other since CR-2026-08).
-                       *([("seg_lit2", 2, wlit(ssec.light, combined[tb + 1],
-                                               flat_wall=tb in w1r_flat_tb)),
-                          ("seg_w1rf", 1, 1 if tb in w1r_flat_tb else 0)]
+                       *([("seg_lit2", 2, wlit(ssec.light, combined[tb_ + 1],
+                                               flat_wall=tb_ in w1r_flat_tb)),
+                          ("seg_w1rf", 1, 1 if tb_ in w1r_flat_tb else 0)]
                          if w1r_flag else []),
                        # 25M-CAP SLIVER: the UNbrightened flat tone. seg_lit carries the
                        # W1R_BASE_BRIGHTEN headroom (R44) so the pattern can darken from it;
                        # a sliver drawn flat must use the true W1-tone the oracle draws.
-                       *([("seg_litf", 2, wlit(ssec.light, combined[tb], flat_wall=True))]
+                       *([("seg_litf", 2, wlit(ssec.light, combined[tb_], flat_wall=True))]
                          if w1r_flag else []),
                        # M13-2S rung 3a: the emit half derives both list addresses from the
                        # column's plane-pair id, so ONE 2-nibble bake replaces the two offsets
@@ -3136,7 +3449,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # M2-R3: only the RENDER block moves with a door -- the geom block is vertices and
             # affine coefficients, which a ceiling cannot change. So a door's own wall pays one
             # switch dispatch, not two, and its pass-1 cull is untouched.
-            _rblk, _rcall = _door_blocks(si, seg, f"seg{si}_render_consts", rfields)
+            if si in seg_texinfo_on:
+                # M8 (doomfj.switches): a switch seg's render constants per switch state -- its own tone, its used one
+                # -- behind the one-nibble state switch on its cell (`lvdone` / `swpr`), as a door seg's per door state
+                _rblk, _rcall = _switch_seg_blocks(si, seg, f"seg{si}_render_consts", rfields,
+                                                   _sw_cell[seg.linedef], seg_texinfo_on[si][0])
+            else:
+                _rblk, _rcall = _door_blocks(si, seg, f"seg{si}_render_consts", rfields)
             xorby_blocks[si] = (xorby_blocks.get(si, []) if _dual else []) + (
                 _seg_xorby_block(f"seg{si}_geom_consts", gfields) + _rblk)
             # ss{cid}_seg{si}_unseen: keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
@@ -3145,7 +3464,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     "    stl.fcall seg_pass1_leaf, seg_ret",
                     f"    hex.if0 1, proceed, ss{cid}_seg{si}_unseen",
                     *_rcall,
-                    "    stl.fcall seg_pass2_leaf, seg_ret2",
+                    # M8 (doomfj.scrollcode): a scrolling line's seg slides wnoff around its pass 2
+                    *_scrollcode.pass2_lines(_scrollcode.seg_scrolls(seg, _scroll_lds)),
                     *_rcall,
                     f"  ss{cid}_seg{si}_unseen:",
                     f"    stl.fcall seg{si}_geom_consts, xb_ret"]
@@ -3331,7 +3651,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"],   # M7 P4.2a: mon_solid
                                     hurt=bool(_chase.get("hurt")))                # M7 P5: a dead player blocks nothing
                 # M8 L4: P_TeleportMove's stomp test (tp_stomp, jumping over itself)
-                + (_teleportcode.stomp_leaf_lines(_chase["slots_rt"], hurt=bool(_chase.get("hurt"))) if _TELE else [])
+                + (_teleportcode.stomp_leaf_lines(_chase["slots_rt"], hurt=bool(_chase.get("hurt")), knock=_KNOCK)
+                   if _TELE else [])
                 + move_leaf_lines(root=_mroot, lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:])
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
@@ -3351,6 +3672,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # leaves (projcode), and the missile cells (which jump over themselves); behind this block's guard,
                 # where nothing falls in
                 + ((list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]]) if _hrt else [])
+                # M8 (doomfj.lightcode): the sector light thinkers' phase, lt_phase -- a leaf
+                + (_lightcode.phase_lines(_lth) if _lth else [])
                 # M7 P8a (doomfj.knockcode, package K): the thrust (kb_go), the player's and the monsters' knock
                 # moves (kb_pmove, kb_mmove, the slot stubs kbs<m>) -- leaves, jumping over themselves
                 + (_knockcode.leaf_lines(
@@ -3361,7 +3684,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     # M8 L4: a monster's knock step teleports too; its stub writes the facing back
                     **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpq", knock_ctx=True),
                         "slot_back": (lambda m_: _teleportcode.slot_back_lines(
-                            m_, facing="mon_facing + %d*dw" % m_, knock=True, walk=False, tag="tpkb"))}
+                            m_, facing="mon_facing + %d*dw" % m_, knock=True, walk=False, tag="tpkb")),
+                        "telefrag": True}                        # M8: the thrust of P_TeleportMove's 10000
                        if _TELE else {})) if _KNOCK else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
@@ -3379,6 +3703,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _loot = None
         assert not _LOOT, "M7 P6: the 'full' player moves through the collision cells"
 
+    # M8: the map page, on a map whose MAP_CONFIG turns it on (config.Config.AUTOMAP) -- the menu's tier only; its
+    # inks from the menu's palette
+    _AUTOMAP = (_automap.pages_for(map_wad, mapname, bytes(b for rgb in asset_wad.playpal(0) for b in rgb), cfg)
+                if menu else None)
     # M3: the menu frame + the branch past the world. Built here, where `asset_wad` is
     # resolved, so its colours come from the SAME palette the renderer bakes.
     if menu:
@@ -3405,11 +3733,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             p6_common=_p6_restart[0], p6_skills=_p6_restart[1],
             p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None),     # M7 P8a: the packages' cells
             p10_common=(list(_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
-                        + (_teleportcode.level_start_lines() if _TELE else [])))             # M8 L4: no reactiontime
+                        + (_teleportcode.level_start_lines() if _TELE else [])              # M8 L4: no reactiontime
+                        + (_lightcode.level_start_lines(_lth) if _lth else [])            # M8: the lights' start
+                        # M8: every switch as the map has it (switchcode)
+                        + (_switchcode.level_start_lines(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else [])))
+    _am_cold = []                          # M8: the map page's producers, placed at the end of the last part
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart,
                                stats=_p31["world"] if _STATS else None,     # P10: LEVEL COMPLETE's numbers
+                               automap=_AUTOMAP, cold=_am_cold,             # M8: the map page (None: E1M1)
                                # M7 P5: a menu frame shows PLAYPAL 0 (hurtcode.pal_menu_lines: sent only on a change)
                                hud=(list(_hud["menu"]) + (list(_hrt["menu_palette"]) if _hrt else []))
                                if _hud else ())
@@ -3423,6 +3756,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   [], _movers.lift_slots_of_tag(secs, sorted(_lift_slot)), _floor_groups,
                                   _movers.floor_use_boxes(lds, map_wad.vertexes(mapname), _floor_groups))
                    if (_movers_on and _exit) else [])
+    # M8 (doomfj.switchcode): the switch textures' floor and lift lines, on a use press before the exit's boxes
+    _press_first = (_switchcode.use_press_lines(_SWI, _floor_groups, _movers.floor_wide(_floor_groups))
+                    if _SWI else [])
+    assert not _SWI or _exit, "M8: the switch textures' use press is the exit's edge (a map with an exit)"
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, monster_tic=_p31["tic"] if _p31 else (),
                                   # M7 P5: the damage count fades right after the weapon tic (hurtcode's
@@ -3438,10 +3775,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   weapon_bar=(_wpn.get("bar", ()) if _wpn else ()),   # M7 P6+P7: after the move
                                   # M7 P8a: the player's knock move (doomfj.knockcode's splice point, package K)
                                   knock_move=_knockcode.player_move_lines() if _KNOCK else (),
+                                  automap=_AUTOMAP is not None,              # M8: the polls read M
                                   latch=_loot["latch"] if _loot else (),
                                   use_guard=_loot["use_guard"] if _loot else ((), ()),
                                   door_lines=_door_tic,
                                   exit_boxes_=_exit, press_miss=_press_miss,
+                                  press_first=_press_first,           # M8: the switch textures (switchcode)
                                   # M7 P7: the restart on use after death, when the player can die (the menu's
                                   # tier: it holds the restart routines and g_rs)
                                   restart_tic=(_restartcode.tic_lines(len(SKILLS))
@@ -3507,8 +3846,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M8 F7 (issue #123 item 4): a map where the exit frame can move the health or armor runs the bar after the
     # lvdone guard (E1M1 cannot: its text is unchanged)
     _bar_always = bool(_hrt and _exit and exit_frame_bar_hazards(map_wad, mapname, _exit)["hazards"])
-    _wt_pools = (p5_tic_lines(_hrt, barrels=bool(_bar), bar_always=_bar_always)     # M7 P6: + the barrels' phase
+    # M7 P6: + the barrels' phase; M8: + the light thinkers (doomfj.lightcode)
+    _wt_pools = (p5_tic_lines(_hrt, barrels=bool(_bar), bar_always=_bar_always, lights=bool(_lth))
                  if _hrt else [])
+    # M8 (doomfj.lights): the lights' states are the game tier world's -- its tic runs lt_phase (above, in the loop)
+    # and its leaves hold it; and the thinkers baked here are the model World's, thinker for thinker
+    assert not _lth or (_hrt and _chase and _wt_tic and _p31["world"].light_thinkers == _lth), (
+        "M8: animated sector lights need the game tier's world tic, and the model's thinkers")
     # M7 P6+P7 E: the monsters' world (the monster tic and the pools) world.MONSTER_TICS_PER_FRAME times a frame
     pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)
     # M7 P4.2a: an empty aim window and this frame's r_eff pair, before the walk records into it (the weapon, which
@@ -3847,6 +4191,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *(_statcode.decls(_p31["world"]) if _STATS else []),           # P10: the stats' cells and scratch
           *(_teleportcode.decls() if _TELE else []),                      # M8 L4: p_rct and the teleports' scratch
+          *((_lightcode.decls(_lth) + _lightcode.tables(_lth)) if _lth else []),   # M8: the light cells, their tables
+          *(_switchcode.decls(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else []),   # M8: the switch textures' cells
           *_aim_decls,                                                      # M7 P4.2a: the aim window
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *(WT_DECLS if (_p31 and _hrt and _WT_TICS > 1) else []),   # M7 P6+P7 E: the tempo loop's counter
@@ -3859,6 +4205,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # M5: the keyboard poll's scratch, and the four PERSISTENT held-key flags. The flags are
           # the only cells besides the view state that the M1 reset must leave alone.
           *(STANDALONE_SCRATCH_DECLS if standalone else []),
+          *(_scrollcode.DECLS if _scroll_on else []),       # M8: the scrolling wall's wnoff save / slide
+          # M8: the map page's state and scratch (doomfj.automap), on a map that has it
+          *((AUTOMAP_STATE_DECLS + _automap.decls(_AUTOMAP)) if (standalone and _AUTOMAP is not None) else []),
           # M14-c: the player tic's scratch -- the signed 16.16 move magnitude, the
           # finesine index it is projected through, and the two 16.16 deltas
           *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",
@@ -3991,6 +4340,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
           palette,
           yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
+          # M8: the map page's producers (automap_cold_lines) -- LAST, after every table, so the ~90k ops of baked
+          # page move no op of the renderer; reached only by the menu's `;mf_am`, and every path leaves by a jump
+          *((["// M8 (doomfj.automap): the map page's producers, cold"] + _am_cold) if _am_cold else []),
       ]),
     ]
     _texts = [(n, chr(10).join(g)) for n, g in _parts if g]
@@ -4812,12 +5164,16 @@ ANIM_ACTORS = ("MT_BARREL", "MT_TROOPSHOT", "MT_PUFF", "MT_BLOOD",
 
 def anim_frames(map_wad, mapname) -> dict:
     """{sprite: sorted frame indices} for every state the map's monster types and ANIM_ACTORS can
-    reach from their entry states (gamedata's state chains, `next` followed to the end)"""
+    reach from their entry states (gamedata's state chains, `next` followed to the end). M8: + MT_TFOG's on a map
+    with a WR teleport line (the teleport fog: doomfj.teleport) -- none on E1M1"""
     from doomfj import gamedata as gd
+    from doomfj.teleport import TELEPORT_SPECIALS
     types = {t.type for t in map_wad.things(mapname) if t.type in MONSTER_TYPES}
+    actors = ANIM_ACTORS + (("MT_TFOG",) if any(ld.special in TELEPORT_SPECIALS
+                                                  for ld in map_wad.linedefs(mapname)) else ())
     out: dict = {}
     for name, mi in sorted(gd.MOBJINFO.items()):
-        if mi.doomednum not in types and name not in ANIM_ACTORS:
+        if mi.doomednum not in types and name not in actors:
             continue
         seen, todo = set(), list(mi.entry_states())
         while todo:
@@ -5007,7 +5363,7 @@ def _thing_sector(rm, cmap, lds, sds, secs, t):
 
 
 def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, secs,
-                        *, moving_things: bool = False, extra_heights=()):
+                        *, moving_things: bool = False, extra_heights=(), extra_lights=()):
     """V4 — the sprite SHADE-ROW bank + the (lightnum, sprite world height) class each thing bakes.
 
     A billboard takes DOOM's scalelight row for its own on-screen height, exactly as a wall column
@@ -5041,7 +5397,10 @@ def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, s
         # exactly where it was, so widening the bank cannot move a pixel by itself
         # M7 P3.1: + the monsters' view heights (a view row's light class, monstercode.p31_parts)
         heights = sorted({h for (_ln, h) in cls_of} | set(extra_heights))
-        for ln in sorted({rm.wall_lightnum(s.light, 0) for s in secs}):
+        # M8 (doomfj.lights): + every light an ANIMATED sector can show (`extra_lights`) -- a thing stands in it at
+        # each of them; none on E1M1 (the classes and their order unchanged)
+        for ln in sorted({rm.wall_lightnum(s.light, 0) for s in secs}
+                         | {rm.wall_lightnum(v, 0) for v in extra_lights}):
             for h in heights:
                 cls_of.setdefault((ln, h), len(cls_of))
     # M7 P3.1: the monsters' views take the class to TWO bytes (`ltw`, the animated game tier only)

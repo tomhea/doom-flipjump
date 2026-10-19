@@ -156,9 +156,24 @@ def view_drop_kw(phase) -> dict:
     """M7 P8a (V): `render_wall_frame`'s keyword for a world frame of `phase` (a MonsterPhase, or None): the dying
     view's sink (`MonsterPhase.view_drop`) -- {} while it is 0, so every picture before package A lands (and every
     living frame after it) is drawn by today's call, keyword for keyword. EVERY game-tier gate's world render passes
-    it, or `view_drop=` itself (tests/host/test_p8a_gates.py, static: rule 5)"""
+    it, or `view_drop=` itself (tests/host/test_p8a_gates.py, static: rule 5).
+    M8 (doomfj.lights): and the world's animated sector lights (`World.light_render_kw`: `sector_lights`) -- the one
+    keyword every game-tier gate's world render already spreads, so a map with light specials (E1M2) draws them in
+    every gate at once; {} on a map without (E1M1: nothing changes).
+    M8 (doomfj.switches): and the switch lines showing their other texture (`MonsterPhase.switch_kw`, the exit's by
+    the world's g_leveldone) -- {} while none is, so a map without SWITCH_TEX (E1M1) draws by today's call"""
     d = phase.view_drop() if phase is not None else 0
-    return {"view_drop": d} if d else {}
+    out = {"view_drop": d} if d else {}
+    if phase is not None:
+        out.update(phase.world.light_render_kw())
+    # M8 (doomfj.scrollcode): and the scrolling wall's slide this frame (World.wall_scroll) -- {} on E1M1, so its
+    # gates' calls stay keyword for keyword what they were
+    sc = phase.wall_scroll() if phase is not None else 0
+    if sc:
+        out["wall_scroll"] = sc
+    if phase is not None:
+        out.update(phase.switch_kw())         # M8 (doomfj.switches): the pressed switch lines
+    return out
 
 
 class KnockTap:
@@ -312,14 +327,52 @@ class MonsterPhase:
         w = self.world
         orig = w._walkover
 
-        def walkover(x, y, cx, cy, _orig=orig):
+        def walkover(x, y, cx, cy, ev=None, _orig=orig):
             if self._segs is not None:
                 self._segs.append(((x, y), (cx, cy)))
-            return _orig(x, y, cx, cy)
+            return _orig(x, y, cx, cy, ev)
         w._walkover = walkover
 
     def reset(self, skill: int) -> None:
         self.world.reset(skill)
+
+    # ---- M8 (doomfj.switches): the switch textures, stepped by the gate's phases -------------------------------------
+    def switch_doors(self, doors: dict, used: bool, x16: int, y16: int) -> None:
+        """the door phase's switch step, called by a gate BEFORE its door tic (`doors.DoorPhase.tic`): `doors` its
+        tic-start {sector: (state, dir, sub, wait)}, `used` the use key as the door tic takes it (held, the player
+        alive) -- World.switch_doors, the SR countdown and the door switches. No-op on a map without SWITCH_TEX"""
+        from doomfj.doors import switch_ready
+        self.world.switch_doors(bool(used), x16, y16, lambda si: switch_ready(doors[si]))
+
+    def switch_uses(self, movers: tuple, x16: int, y16: int) -> None:
+        """a use PRESS's switch step, called by a gate on the press edge BEFORE its exit test and its
+        `movers.MoverPhase.use_press`: `movers` the gate's mover state (lifts, req, switched) -- World.switch_uses on
+        the lifts' states and the floor groups' timers (the wide fswitch vector's second half; E1M1's layout has none)"""
+        w = self.world
+        if not w.switch_cells:
+            return
+        lifts, _req, sw = movers
+        ng = len(w.floor_groups)
+        w.switch_uses(x16, y16, lambda k: lifts[k][0] == 0,
+                      lambda g: (sw[ng + g] if w.floor_wide else 0) == 0)
+
+    def switch_kw(self, leveldone=None) -> dict:
+        """`render_wall_frame(switch_on=)` for this world frame: {} when no switch line shows its other texture.
+        `leveldone`: the gate's own exit flag (None: the world's g_leveldone) -- the used exit swaps too"""
+        on = self.world.switch_on(leveldone)
+        return {"switch_on": on} if on else {}
+
+    def switch_state(self) -> dict:
+        """the switch cells in the fj's units (probe's OPTIONAL_GROUPS): swpr a nibble per latched switch (0/1),
+        swtm BUTTON_NIBBLES per SR one -- a one-element cell reads as a scalar; {} on a map without SWITCH_TEX"""
+        w, ws = self.world, self.world.ws
+        if not w.switch_cells:
+            return {}
+        one = (lambda t: t if len(t) > 1 else t[0])
+        out = {"swpr": one(tuple(ws.sw_on))}
+        if w.switch_sr:
+            out["swtm"] = one(tuple(ws.sw_time))
+        return out
 
     # ---- M7 P8a (V, docs/gp-final-plan.md 4.1 / 5): the dying view and the knock ------------------------------------
     def view_drop(self) -> int:
@@ -328,6 +381,12 @@ class MonsterPhase:
         gate's render passes it (`probe.view_drop_kw`; tests/host/test_p8a_gates.py holds the call sites)"""
         from doomfj.world import player_sinks
         return self.world.ws.p_vdrop if player_sinks(self.world.player) else 0
+
+    def wall_scroll(self) -> int:
+        """M8: `render_wall_frame(wall_scroll=)` for this world frame -- the world's (World.wall_scroll: leveltime's low
+        byte on a scrolling map, else 0). EVERY game-tier gate's render passes it (`view_drop_kw`, or `wall_scroll=`;
+        tests/host/test_wall_scroll.py holds the call sites)"""
+        return self.world.wall_scroll()
 
     def knocks(self) -> bool:
         """the world's knockback is on (world.knockback_on) -- the player's knock move runs in `move`"""
@@ -733,7 +792,9 @@ class MonsterPhase:
           fight (world.infighting_on): bar_src per barrel (2 nibbles: 0 none, 1 the player, 2 + slot the FIRST
                   thing that damaged it) -- `mon_target` (state(), 2 nibbles in this mode) names 0 / 1 / 2 + slot
           p_rct   2 nibbles  M8 L4: the player's reactiontime after a teleport, 0..18 (a map with a WR teleport
-                             in a looting mode: doomfj.teleportcode)"""
+                             in a looting mode: doomfj.teleportcode)
+          ltst    1 nibble a thinker, ltct 2 nibbles a thinker, rng_lt 2 nibbles -- M8: the sector light thinkers'
+                  states, counts (a glow's direction) and stream (a map whose flag is on: doomfj.lightcode)"""
         from doomfj.world import infighting_on, knockback_on, player_loots, player_sinks
         w, ws, n = self.world, self.world.ws, self.world.layout.nmon
         out = {}
@@ -753,6 +814,11 @@ class MonsterPhase:
             out["bar_src"] = tuple(ws.bar_src)
         if getattr(w, "teleports", None) and player_loots(w.player):
             out["p_rct"] = ws.p_reaction
+        if getattr(w, "light_thinkers", None):   # M8 (doomfj.lightcode): the light thinkers' cells
+            one = len(w.light_thinkers) == 1         # the probe reads a count-1 cell as an int
+            out.update({"ltst": ws.lt_state[0] if one else tuple(ws.lt_state),
+                        "ltct": ws.lt_count[0] if one else tuple(ws.lt_count), "rng_lt": ws.rng_light})
+        out.update(self.switch_state())                      # M8: the switch textures (a SWITCH_TEX map)
         return out
 
     # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------
@@ -840,13 +906,16 @@ class MonsterPhase:
         for the effects and the drops, drawn first in their leaf; 1 for the fireballs, as the monsters), the fj by the
         row ranges above (monstercode.rank_threshold). The tuples are unchanged, so every reader keeps its shape."""
         from doomfj.world import FIREBALL_POOL, FX_POOL
+        from doomfj.reference_model import FLOOR_EFFECTS                 # M8: the teleport fog, on the floor
         ws, gd, out = self.world.ws, self.gd, []
         for s in range(FIREBALL_POOL):
             if ws.proj_active[s]:
                 out.append((ws.proj_x[s] >> 16, ws.proj_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.proj_state[s]])))
         for s in range(FX_POOL):
             if ws.fx_active[s]:
-                out.append((ws.fx_x[s] >> 16, ws.fx_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])))
+                lump = mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])
+                # M8: the teleport fog stands on the floor (reference_model.FLOOR_EFFECTS: z 0, an effect, not a drop)
+                out.append((ws.fx_x[s] >> 16, ws.fx_y[s] >> 16, lump) + ((0,) if lump[:4] in FLOOR_EFFECTS else ()))
         if drop_rows(self.world):
             for m in droppers(self.world):
                 if ws.mon_drop[m] == 1:                 # M7 P8a: at the drop's own position (World.drop_pos)

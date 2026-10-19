@@ -1,8 +1,8 @@
 """M8 L4 -- THE TELEPORTERS (line special 97, WR teleport): the rules, ONE definition for both mirrors.
 
 The model (`combat.CombatMixin._teleport_player`, `world.World._teleport_monster`) and the fj (`doomfj.teleportcode`)
-both read this module's `teleporters`, `crossed_front` and `stomped`; neither re-derives a destination, a side or a
-constant.
+both read this module's `teleporters`, `crossed_front`, `stomped` and `stomp_victims`; neither re-derives a
+destination, a side or a constant.
 
 DOOM (Chocolate Doom p_map.c P_TryMove, p_spec.c P_CrossSpecialLine, p_telept.c EV_Teleport, P_TeleportMove):
 
@@ -18,16 +18,27 @@ DOOM (Chocolate Doom p_map.c P_TryMove, p_spec.c P_CrossSpecialLine, p_telept.c 
     searched in thinker (spawn = WAD) order -- `teleporters` bakes it. P_TeleportMove(thing, dest): PIT_StompThing on
     every MF_SHOOTABLE thing whose box overlaps the destination box (`abs(dx) < blockdist` on both axes, strict): a
     MONSTER's teleport FAILS there (`if (!tmthing->player && gamemap != 30) return false`; the move it made stays);
+    the PLAYER's TELEFRAGS it (`P_DamageMobj(thing, tmthing, tmthing, 10000)`: the player is the inflictor -- at his
+    position after the move, P_TryMove has set it -- and the source; `stomp_victims`, TELEFRAG_DAMAGE) and goes on;
     then x, y = the destination, floorz = the destination SUBSECTOR's sector floor (lines are not checked), z =
     floorz, angle = the destination's (ANG45 * (angle / 45)), momx = momy = momz = 0, and a player gets
     reactiontime = 18: P_PlayerThink skips P_MovePlayer (the turn and the walk) while it counts down.
 
 THE SIMPLIFICATIONS (M8 L4, recorded; the owner's "you can remove some weird stuff", docs/handoff-e1m2.md 3):
-  * NO TELEFRAG. DOOM's PLAYER kills every shootable thing at the destination (P_DamageMobj 10000); here the
-    player's teleport is refused there exactly as a monster's is (his move stays). Both mirrors; E1M2's destinations
-    are monster arrival pads, where a refused teleport is the rare case.
-  * NO TELEPORT FOG (MT_TFOG at the source and 20 units ahead of the destination) and no sound: nothing in the
-    simulation reads them.
+  * TELEFRAG (the owner, 2026-10-18: the earlier "no telefrag" simplification REMOVED): DOOM's rule above, in both
+    mirrors -- a monster takes P_DamageMobj's 10000 (`combat.damage_monster`: the thrust from the player, then the
+    health, held at the 12-bit cell's floor MON_HEALTH_MIN -- 10000 takes any health there -- and the death: every
+    gib rule of a kill, the tics roll, the drop, the kill count), a barrel would explode (`damage_barrel`; none stands
+    within reach of a destination: `teleportcode.check_barrels`, so the fj tests none).
+  * TELEPORT FOG (the owner, 2026-10-18: "if teleport fog is simple and cheap add it"): EV_Teleport's two MT_TFOG,
+    after a teleport that happened -- one where the thing stood when it crossed (its position after the move), then
+    one 20 units ahead of the destination along its angle (`fog_dest`: Teleporter.fog) -- through the EFFECTS POOL (world.FX_POOL's
+    two slots, combat._spawn_fx(kind="fog"), no P_Random: P_SpawnMobj draws none), at whole units (the pool's
+    convention), drawn on the floor; S_TFOG .. S_TFOG10, 6 tics each, then removed. Where DOOM has no limit the pool
+    has two slots, so A FOG YIELDS: a fog takes only a free slot (else it is skipped), and blood or a puff takes the
+    first slot that is free OR holds a fog (the fog removed) -- blood and puffs spawn exactly as they would with no
+    fog at all. On every map with a teleport line in the modes whose player loots (`fog_on`: the game tier's; the
+    fj's teleports exist only there). No sound.
   * ONE TELEPORT PER MOVE: DOOM's spechit loop goes on after a teleport, testing the remaining lines against the
     thing's NEW (teleported) position; `teleporters` asserts no destination lies within any teleport line's reach,
     so no second line can fire (exact on E1M2).
@@ -45,6 +56,8 @@ from typing import List, Tuple
 TELEPORT_SPECIALS = frozenset({97})    # WR teleport (E1M2's four lines); 39 (W1) would add a latch
 TELEPORT_DEST_TYPE = 14                # MT_TELEPORTMAN (gamedata.TELEPORT_DEST_TYPE: one value, asserted)
 REACTION_TICS = 18                     # EV_Teleport: `if (thing->player) thing->reactiontime = 18`
+TELEFRAG_DAMAGE = 10000                # PIT_StompThing: `P_DamageMobj (thing, tmthing, tmthing, 10000)`
+FOG_AHEAD = 20                         # EV_Teleport: the destination fog at m->x + 20*finecosine[an], m->y + 20*finesine
 REACTION_BITS = 5                      # 0..18 (world schema `p_reaction`; fj `p_rct`, 2 nibbles)
 REACH_MAX = 30                         # the largest thing radius a crossing test is run with (the monsters' 30)
 ANG45 = 0x20000000
@@ -55,7 +68,8 @@ class Teleporter:
     """one WR teleport line, axis-aligned (asserted): `axis` "x" -- a vertical line x = coord, y in [lo, hi] -- or "y"
     (horizontal), `doors.walkover_triggers`' shape; `front_le` -- the line's FRONT side (P_PointOnLineSide 0) is the
     `c <= coord` side; the destination `dest` (x, y) in map units, its BAM `angle`, its subsector `dest_leaf`, its
-    sector `dest_sector` and that sector's floor `dest_floor` (P_TeleportMove's floorz)"""
+    sector `dest_sector` and that sector's floor `dest_floor` (P_TeleportMove's floorz); M8 `fog`, the destination
+    fog's position (`fog_dest`)"""
     line: int
     tag: int
     axis: str
@@ -68,6 +82,7 @@ class Teleporter:
     dest_leaf: int
     dest_sector: int
     dest_floor: int
+    fog: Tuple[int, int] = (0, 0)     # M8: EV_Teleport's destination fog, whole units (`fog_dest`, baked here)
 
     @property
     def trig(self) -> tuple:
@@ -143,15 +158,37 @@ def teleporters(map_wad, mapname: str, *, rm=None, cmap=None) -> List[Teleporter
         skills = gd.MTF_EASY | gd.MTF_NORMAL | gd.MTF_HARD
         assert t.flags & skills == skills and not t.flags & gd.MTF_NOTSINGLE, (
             "M8 L4: destination %r is not on every single-player skill" % (t,))
+        angle = ((t.angle // 45) * ANG45) & 0xFFFFFFFF
         out.append(Teleporter(line=li, tag=ld.tag, axis=axis, coord=coord, lo=lo, hi=hi, front_le=front_le,
-                              dest=(t.x, t.y), angle=((t.angle // 45) * ANG45) & 0xFFFFFFFF,
-                              dest_leaf=leaf, dest_sector=s, dest_floor=secs[s].floor_h))
+                              dest=(t.x, t.y), angle=angle, dest_leaf=leaf, dest_sector=s, dest_floor=secs[s].floor_h,
+                              fog=fog_dest((t.x, t.y), angle, rm)))
     check_one_per_move(out)
     return out
 
 
 SELF_MARGIN = 4 * REACH_MAX           # a crossing thing's centre: <= 2 * REACH_MAX from the line (a knock step <= 30
                                       # past a radius-30 reach); + the largest blockdist, 2 * REACH_MAX
+
+
+def fog_on(world) -> bool:
+    """the ONE rule "a teleport spawns its fog": a map with a teleport line, the player in a looting mode (the game
+    tier's -- world.player_loots; the fj's teleports, fogs and effects pool are emitted there)"""
+    from doomfj.world import player_loots
+    return bool(getattr(world, "teleports", None)) and player_loots(world.player)
+
+
+def fog_dest(dest: Tuple[int, int], angle: int, rm) -> Tuple[int, int]:
+    """EV_Teleport's destination fog, whole map units: the destination + FOG_AHEAD * (finecosine, finesine) of its
+    angle (the repo's trig: rm's fine tables at angle >> angle_shift), floored to whole units (the effects pool's
+    positions carry no fraction). `teleporters` bakes it into Teleporter.fog"""
+    idx = (angle & 0xFFFFFFFF) >> rm.angle_shift
+
+    def s32(v):
+        v &= 0xFFFFFFFF
+        return v - (1 << 32) if v >> 31 else v
+    x16 = (dest[0] << 16) + FOG_AHEAD * s32(rm._finecos_idx(idx))
+    y16 = (dest[1] << 16) + FOG_AHEAD * s32(rm._finesin_idx(idx))
+    return x16 >> 16, y16 >> 16
 
 
 def check_one_per_move(tels) -> None:
@@ -177,26 +214,34 @@ def crossed_front(tel: Teleporter, old16: tuple, new16: tuple, radius: int) -> b
     return (old16[a] <= tel.coord << 16) == tel.front_le
 
 
-def stomped(world, dest: Tuple[int, int], radius: int, *, mover=None) -> bool:
-    """PIT_StompThing's refusal at `dest` (map units) for a thing of `radius`: a SHOOTABLE thing whose box overlaps
-    (|dx| < r + r', strict, both axes) -- the live monsters (active and shootable) but `mover` (the teleporting slot),
-    the standing barrels, and the living player unless he is the one teleporting (`mover` None)"""
+def stomp_victims(world, dest: Tuple[int, int], radius: int, *, mover=None) -> List[tuple]:
+    """PIT_StompThing's things at `dest` (map units) for a thing of `radius`, in the model's order (slots, then
+    barrels, then the player): every SHOOTABLE thing whose box overlaps (|dx| < r + r', strict, both axes) -- the live
+    monsters (active and shootable) but `mover` (the teleporting slot) as ("mon", slot), the standing barrels as
+    ("bar", b), and the living player as ("player", -1) unless he is the one teleporting (`mover` None). A monster's
+    teleport is refused by any (`stomped`); the player's kills each (combat._teleport_player)"""
     from doomfj.combat import BARREL_R, PLAYER_R
     ws = world.ws
     dx, dy = dest
+    out = []
     for k in range(world.layout.nmon):
         if k == mover or not (ws.mon_active[k] and ws.mon_shootable[k]):
             continue
         bd = radius + world.mon_radius[k]
         if abs(ws.mon_x[k] - dx) < bd and abs(ws.mon_y[k] - dy) < bd:
-            return True
+            out.append(("mon", k))
     for b, t in enumerate(world.barrel_things):
         if ws.bar_state[b] and ws.bar_health[b] > 0:
             bd = radius + BARREL_R
             if abs(t.x - dx) < bd and abs(t.y - dy) < bd:
-                return True
+                out.append(("bar", b))
     if mover is not None and world.player_alive():
         bd = (radius + PLAYER_R) << 16
         if abs(ws.px - (dx << 16)) < bd and abs(ws.py - (dy << 16)) < bd:
-            return True
-    return False
+            out.append(("player", -1))
+    return out
+
+
+def stomped(world, dest: Tuple[int, int], radius: int, *, mover=None) -> bool:
+    """PIT_StompThing's refusal of a MONSTER's teleport (`mover` its slot) at `dest`: any `stomp_victims`"""
+    return bool(stomp_victims(world, dest, radius, mover=mover))

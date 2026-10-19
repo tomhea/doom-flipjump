@@ -144,6 +144,7 @@ def _read_quiet(p: Path) -> str:
 # card, the walk-over triggers' W1 bits) -- every binary before P2a.1 lacks all three. Each group
 # comes whole or not at all.
 OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcard", "wfired"}),
+                   frozenset({"amap"}),                   # M8: the map page's state (a map with the page only)
                    frozenset({"lvdone", "pusedn"}),       # M7 P2a.2: the exit's two cells
                    frozenset({"lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"}),  # M7 P2b
                    frozenset({"mon_state", "mon_tics", "mon_facing", "mon_active"}),  # M7 P3.1
@@ -189,7 +190,12 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # ... and LEVEL COMPLETE's counters (doomfj.statcode)
                    frozenset({"st_kill", "st_item", "st_secn", "st_secm"}),
                    # M8 L4: the player's reactiontime after a teleport (doomfj.teleportcode; a map with a WR teleport)
-                   frozenset({"p_rct"}))
+                   frozenset({"p_rct"}),
+                   # M8: the sector light thinkers' cells (doomfj.lightcode; a map whose lights animate: E1M2)
+                   frozenset({"ltst", "ltct", "rng_lt"}),
+                   # M8: the switch textures (doomfj.switchcode; a SWITCH_TEX map: MonsterPhase.switch_state) -- two
+                   # groups: a map with no SR switch line (E1M2) declares `swpr` alone
+                   frozenset({"swpr"}), frozenset({"swtm"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -392,6 +398,8 @@ class Probe:
     def read_cells(self, names=None) -> dict:
         out = {}
         for key in (self.cells if names is None else names):
+            if key not in self.cells and key in OPTIONAL_LABELS:
+                continue            # M8: an optional cell this binary lacks (E1M2 has no SR switch: no `swtm`)
             c = self.cells[key]
             vals = []
             for e in range(c.count):
@@ -672,7 +680,9 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
              "viewangle": Cell("viewangle", "hex", 8),
              "mode": Cell("mode", "hex", 1),
              # M7 P1.5: the skill menu's screen and highlight, persisted like `mode`
-             "menu_scr": Cell("menu_scr", "hex", 1), "menu_sel": Cell("menu_sel", "hex", 1)}
+             "menu_scr": Cell("menu_scr", "hex", 1), "menu_sel": Cell("menu_sel", "hex", 1),
+             # M8 (doomfj.automap): the map page's state nibble, on a map with the page (OPTIONAL elsewhere)
+             "amap": Cell("amap", "hex", 1)}
     for k in ("kb_f", "kb_b", "kb_l", "kb_r", "kb_u"):
         cells[k] = Cell(k, "hex", 1)
     cells["dstate"] = Cell("dstate", "hex", 1, count=ndoors)
@@ -767,6 +777,15 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     cells["pj_z"] = Cell("pj_z", "hex", 4, count=FIREBALL_POOL)
     cells["bar_src"] = Cell("bar_src", "hex", 2, count=nbar)
     cells["p_rct"] = Cell("p_rct", "hex", 2)          # M8 L4 (monsters.MonsterPhase.p8a_state: 0..18)
+    # M8 (doomfj.lightcode; MonsterPhase.p8a_state's units): a state nibble and a 2-nibble count a thinker, the stream
+    cells["ltst"] = Cell("ltst", "hex", 1, count=_nlight())
+    cells["ltct"] = Cell("ltct", "hex", 2, count=_nlight())
+    cells["rng_lt"] = Cell("rng_lt", "hex", 2)
+    # M8: the switch textures (MonsterPhase.switch_state's units; a map without them declares neither label: OPTIONAL)
+    from doomfj.switches import BUTTON_NIBBLES
+    nsw, nsr = _nswitch()
+    cells["swpr"] = Cell("swpr", "hex", 1, count=max(nsw, 1))
+    cells["swtm"] = Cell("swtm", "hex", BUTTON_NIBBLES, count=max(nsr, 1))
     return cells
 
 
@@ -826,6 +845,12 @@ def _loot_counts() -> tuple:
     return len(droppers(w)), w.layout.nbarrel
 
 
+def _nlight() -> int:
+    """M8: the animated sector light thinkers (World.light_thinkers) -- `ltst` / `ltct`'s count (one at least: a map
+    without them has no such label, an OPTIONAL group)"""
+    return max(1, len(_idle_world().light_thinkers))
+
+
 def _nsecret() -> int:
     """P10: the secret sectors (World.secret_sectors) -- `st_secm`'s count"""
     return max(1, len(_idle_world().secret_sectors))
@@ -834,6 +859,12 @@ def _nsecret() -> int:
 def _sec_nibbles() -> int:
     """M8 L1: the sector-id width (World.sec_nibbles) -- `msec`'s cell width"""
     return _idle_world().sec_nibbles
+
+
+def _nswitch() -> tuple:
+    """M8: (latched switches, SR ones) on the counts map (World.switch_cells / switch_sr; (0, 0) without SWITCH_TEX)"""
+    w = _idle_world()
+    return len(w.switch_cells), len(w.switch_sr)
 
 
 def _nsound() -> int:
@@ -890,6 +921,14 @@ class Oracle:
     @property
     def ndoors(self):
         return len(self.door_order)
+
+    @property
+    def automap(self):
+        """M8: the map's page (doomfj.automap.Pages), None on a map without it -- its main menu has MAP, its help M"""
+        if not hasattr(self, "_automap"):
+            from doomfj.automap import pages_for
+            self._automap = pages_for(self.mw, self.mapname, bytes(b for rgb in self.mw.playpal(0) for b in rgb))
+        return self._automap
 
     @property
     def lift_order(self):
@@ -958,7 +997,8 @@ class Oracle:
 
     def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
                views=None, seen_out=None, positions=None, screen_kw=None, aim_things=None, aim_out=None,
-               mobiles=None, card=None, removed=None, barrel_views=None, skill=None, view_drop=0) -> bytes:
+               mobiles=None, card=None, removed=None, barrel_views=None, skill=None, view_drop=0,
+               sector_lights=None, wall_scroll=0, switch_on=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
         `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
         `thing_views` list (`monster_views`), None for every thing's type art.
@@ -977,7 +1017,13 @@ class Oracle:
         fight F5 / die D4s at medium (the imp, slot 23) and die D5 at easy (the hard trio 21-23, and not slot 50).
         None keeps BOOT_SKILL's set.
         M7 P8a (V): `view_drop` -- the dying view's sink this frame (`MonsterPhase.view_drop`, map units, package A's
-        `render_wall_frame(view_drop=)`); 0 draws today's call unchanged (the keyword is not passed)."""
+        `render_wall_frame(view_drop=)`); 0 draws today's call unchanged (the keyword is not passed).
+        M8: `sector_lights` -- the world's animated sector lights (`World.lights_now`; a map whose lights animate, E1M2:
+        an E1M2 scenario set passes it); None draws today's call unchanged.
+        M8: `wall_scroll` -- the scrolling wall's slide this frame (`MonsterPhase.wall_scroll`, doomfj.scrollcode); 0
+        (E1M1, or a map without special 48) is not passed.
+        M8: `switch_on` -- the switch lines showing their other texture (`MonsterPhase.switch_kw`'s set, doomfj.switches);
+        empty or None draws today's call unchanged."""
         from doomfj.reference_model import SimState
         hidden = self.hidden if skill is None else self.hidden_at(skill)
         view = bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
@@ -989,6 +1035,9 @@ class Oracle:
                                                mobiles=mobiles,                         # M7 P5
                                                thing_removed=removed, barrel_views=barrel_views,   # M7 P6
                                                **({"view_drop": view_drop} if view_drop else {}),   # M7 P8a
+                                               **({"sector_lights": sector_lights} if sector_lights else {}),  # M8
+                                               **({"wall_scroll": wall_scroll} if wall_scroll else {}),   # M8
+                                               **({"switch_on": frozenset(switch_on)} if switch_on else {}),   # M8
                                                **self.RENDER_KW))
         # M7 P4.1: `screen_kw` = monsters.MonsterPhase.screen_kw() -- the weapon's frame and the bar's values
         return self.screen.frame(view, card=bool(hidden_extra) if card is None else bool(card), **(screen_kw or {}))
@@ -1089,15 +1138,17 @@ class Oracle:
         from doomfj.menu import palette_colours
         from doomfj.wall_renderer import menu_screen_pixels
         colours = palette_colours(bytes(b for rgb in self.mw.playpal(0) for b in rgb))
-        return bytes(menu_screen_pixels(self.rm.cfg, colours, scr, sel, live, stats))
+        return bytes(menu_screen_pixels(self.rm.cfg, colours, scr, sel, live, stats,
+                                        automap=self.automap))                         # M8: MAP, the help's M
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""
         from doomfj.menu import palette_colours, pixels
-        from doomfj.wall_renderer import DEFAULT_MENU
+        from doomfj.wall_renderer import DEFAULT_MENU, menu_entries_for
         cfg = self.rm.cfg
         colours = palette_colours(bytes(b for rgb in self.mw.playpal(0) for b in rgb))
-        return bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, 2, colours))
+        return bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, menu_entries_for(DEFAULT_MENU, self.automap is not None), 2,
+                            colours))                                                  # M8: MAP on its maps
 
     def door_states_tuple(self, ds: dict) -> tuple:
         return tuple(ds[si][0] for si in self.door_order)
@@ -1482,7 +1533,8 @@ def demo(fjm: Path, labels_path: Path) -> int:
     st, mode, n_state, n_pix = dsim.reset(), 1, 0, 0
     scr, sel, live = known["menu_scr"], known["menu_sel"], known["g_live"]
     for f in range(len(per_frame)):
-        mode, scr, sel, _ng, live = menu_step(mode, scr, sel, menu_events[f], live)
+        mode, scr, sel, _ng, live = menu_step(mode, scr, sel, menu_events[f], live,
+                                              automap=orc.automap is not None)            # M8
         # P10: the boot pick's NEW GAME (at the boot skill: the pristine level start the DoorSim starts from)
         assert _ng is None or f == gate.MENU_FRAMES, "the demo's walk starts no new game but the boot pick's"
         if mode == 0:

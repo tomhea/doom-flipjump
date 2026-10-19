@@ -94,6 +94,23 @@ def neighbours(lds, sds):
     return out
 
 
+# M8 (the E1M2 playtest, 2026-10-18): the legacy rule above reads a one-sided line's missing back as the LAST sidedef's
+# sector -- on E1M2 sector 309 (ceiling 152), which capped five doors at 148: blue door 54 (floor 136) opened 12
+# units and could never be passed. Every map takes DOOM's rule (`two_sided_neighbours`: getNextSector skips a line
+# without a back) EXCEPT the shipped E1M1 family, whose door stops its one-byte pid budget froze (PR #103) --
+# recognised by its own sizes: Freedoom E1M1 (assets / tests/fixtures) and the tests' e1m1_lite, which carries the
+# same doors. (sectors, linedefs, sidedefs).
+LEGACY_NEIGHBOUR_MAPS = frozenset({(182, 1175, 1829), (118, 836, 1228)})
+
+
+def door_neighbours(secs, lds, sds) -> dict:
+    """the neighbours a door's open height is found among (P_FindLowestCeilingSurrounding): DOOM's
+    `two_sided_neighbours`, or the legacy `neighbours` on the E1M1 family (LEGACY_NEIGHBOUR_MAPS)"""
+    if (len(secs), len(lds), len(sds)) in LEGACY_NEIGHBOUR_MAPS:
+        return neighbours(lds, sds)
+    return two_sided_neighbours(lds, sds)
+
+
 def _door_lines_of(secs, lds, sds) -> dict:
     """M8 L2: `{sector: {"manual": {kind}, "walk": {kind}, "switch": {kind}}}` -- the door kind every DOOR line asks
     of a sector: a MANUAL line's (DR / D1, EV_VerticalDoor: the sector behind it), a walk-over line's (W1,
@@ -126,7 +143,7 @@ def door_sectors(secs, lds, sds) -> dict:
     open rises from the ceiling the sector has and never closes, so its stops start at that ceiling
     (`door_states`). A stored-open sector a re-closing door line moves stays out: it would close to its
     floor, below its state 0."""
-    nb = neighbours(lds, sds)
+    nb = door_neighbours(secs, lds, sds)      # M8: DOOM's rule off the E1M1 family
     out = {}
     lines_of = _door_lines_of(secs, lds, sds)
     candidates = []
@@ -608,8 +625,8 @@ def switch_door_triggers(secs, lds, sds, verts, rng: int = USE_RANGE) -> list:
     (P_ChangeSwitchTexture(line, 0) after EV_DoDoor returned 1). That latch is NOT kept, and it need not
     be: an S1 door switch's doors are open-STAY doors (asserted), and once such a door has been
     started it moves only up and comes to rest open, where a press changes nothing (`door_tic`) --
-    so every press after the first finds nothing to do, latched or not. (No switch texture changes:
-    the renderer animates no switch.)"""
+    so every press after the first finds nothing to do, latched or not. (The line's TEXTURE latch is
+    doomfj.switches' -- a map's SWITCH_TEX; E1M1 animates no switch.)"""
     def xy(v):
         v = verts[v]
         return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])

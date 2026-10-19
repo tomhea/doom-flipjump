@@ -73,21 +73,50 @@ B0 on its set, gamespeed, msframe, rebuild).
 
 ## 3. Simplifications ("you can remove some weird stuff") -- recorded as made
 
-- Sector lights stay static (E1M1 already ignores its lights).
+- Sector lights stay static (E1M1 already ignores its lights). **IMPLEMENTED (M8, the owner's <= +0.5% rule):** E1M2's
+  light specials animate -- `config.MAP_CONFIG` `SECTOR_LIGHTS` (E1M2 only; E1M1's emission unchanged), the rules in
+  `doomfj.lights` (p_lights.c: flash 1, strobes 2/3/4/12/13, glow 8, fire flicker 17; 9 animated thinkers, its 9 glows
+  between equal lights static), the fj in `doomfj.lightcode` (`lt_phase`, twice a frame in the monsters' world, its own
+  stream `rng_lt`), and every light-dependent constant per light state behind the thinker's state nibble (walls, plane
+  pair ids, step faces, a leaf's sprite light base, a baked thing's class). Nothing dropped; the one structural change
+  is the oracle never skipping a marking seg on an animated light (the program marks it in every state).
 - The computer map is picked up and does nothing (there is no automap).
 - Deathmatch / co-op starts and things are ignored (single player only, as E1M1).
-- The scrolling wall (48, two lines): decided in L5 -- animated if cheap, else static.
-- The teleporters (97, L4; `doomfj.teleport` holds the rules and these decisions): NO TELEPORT FOG and no sound (nothing
-  reads them); NO TELEFRAG -- DOOM's player kills every shootable thing at the destination, here his teleport is
-  refused there exactly as a monster's is (P_TeleportMove's stomp for a monster), in both mirrors; ONE TELEPORT PER MOVE
+- The scrolling wall (48, lines 1254 and 1338, COMPBLUE): ANIMATED, as a DELIBERATE APPROXIMATION (the integrator,
+  2026-10-18, under the owner's "implement it if it costs <= +0.5%"). DOOM slides the texture one texel a tic; the game
+  tier has no texture u (a W1R wall is a 1-column, 2-texel canvas keyed on the screen column: an offset moves 0 pixels,
+  `scratchpad/p48_scroll_probe.py`), so the segs of a special-48 line slide their W1R PATTERN KEY instead: x + wnoff +
+  (leveltime & 0xFF), one screen column a frame -- screen-space, not world-anchored, with a jump every 256 frames when
+  the low byte wraps. Both mirrors: `doomfj.scrollcode` (config.MAP_CONFIG `WALL_SCROLL`, E1M2 only; E1M1's text
+  unchanged), `render_wall_frame(wall_scroll=)` from `World.wall_scroll()`. Price: 539 ops per scrolling seg drawn
+  (tests/fj/test_wall_scroll_fj.py), the wnoise tables 801 -> 1,056 keys.
+- The teleporters (97, L4; `doomfj.teleport` holds the rules and these decisions): no sound. M8 (the owner,
+  2026-10-18): the TELEFRAG is DOOM's -- the player's teleport kills every shootable monster at the destination
+  (P_DamageMobj 10000 from him: thrust, health held at the 12-bit floor -2048, gib / death, drop, kill count; a
+  monster's teleport is still refused there), and the TELEPORT FOG is in: two MT_TFOG per teleport (where the mover
+  stood, and 20 units ahead of the destination) through the two-slot EFFECTS POOL, drawn on the floor -- A FOG YIELDS
+  (blood and puffs take a fog's slot; a fog takes only a free one), so blood and puffs behave as before; ONE TELEPORT PER MOVE
   (asserted exact on E1M2: no destination lies within any teleport line's reach). Kept DOOM's: the front side only,
   WR (every crossing), monsters and sliding corpses teleport, the destination's angle (a monster's facing octant),
   floorz from the destination sector, momentum 0, the player's 18-tic reactiontime (no turn, no walk).
 - M8 F1.3 (the movers): every one-shot floor moves on the doors' 16-unit grid -- a stop every 4 frames (FLOORSPEED, a
   quarter of the lift's), turboLower (71) every frame, the S1 23 switch INSTANT as on E1M1 (D-L2); a floor's destination
   is computed from its neighbours' STORED floors (EV_DoFloor reads them at the trigger: sector 206 borders blazing lift
-  47); the S1 switch textures do not change; a W1 crossing is tested once per tic (start to end), a slanted one by the
-  exact cross product (P_PointOnLineSide without FixedMul's truncation); a blazing lift (120 / 123) strides two stops.
+  47); ~~the S1 switch textures do not change~~ (M8, 2026-10-18: IMPLEMENTED -- `doomfj.switches`, below); a W1
+  crossing is tested once per tic (start to end), a slanted one by the exact cross product (P_PointOnLineSide without
+  FixedMul's truncation); a blazing lift (120 / 123) strides two stops.
+- M8 (the owner, 2026-10-18: a recorded simplification is implemented when it costs <= +0.5% speed) -- THE SWITCH
+  TEXTURES CHANGE (`config.MAP_CONFIG` SWITCH_TEX, E1M2 only: E1M1's emission is unchanged). DOOM's
+  P_ChangeSwitchTexture in the game picture's wall tones: a switch line showing an SW1 texture wears "#SWITCH" (the
+  exit "#EXIT"), an SW2 one "#SWITCHON" (green) -- so 1544 (SW2CMT) starts green and goes orange when used. A use that
+  STARTS something swaps the line (EV_DoDoor / EV_DoFloor / EV_DoPlat returned 1: a door of its tag at rest, its floor
+  group still, a lift of its tag at rest; the exit always); S1 and the exit for good, SR for BUTTONTIME (35 frames;
+  E1M2 has no SR switch texture -- the countdown is run by tests/fj/test_switch_tex_fj.py on synthetic lines). The
+  model: `World.switch_doors` (the door phase, before the doors tic: held use) and `World.switch_uses` (a use press,
+  before the exit); the cells `sw_on` / `sw_time` (fj `swpr` / `swtm`, persisted, zeroed by NEW GAME), the exit's latch
+  `g_leveldone` / `lvdone`; the gates step them through `MonsterPhase.switch_doors` / `switch_uses` and draw them
+  through `switch_kw` (`view_drop_kw` carries it). Simplifications: a press on an SR line whose button is out changes
+  nothing; a tic is a frame; one exit switch line per map.
 
 ## 4. The width plan for L1 (analysis 2026-10-16, read-only, at be8f2cc)
 
@@ -251,7 +280,7 @@ stand-ins' features are not built, and no E1M2 gate has run (E1M2's gates are L6
 - **Keys:** the fj reads `pcard_y` / `pcard_r` (declared and written by the pickups: `lootcode.card_cells`).
 - **Switches:** a use in a switch box presses a door only at rest (`doors.switch_ready`: EV_DoDoor's
   `sec->specialdata` skip). The S1 latch is not kept: its doors are open-stay (asserted), where it is unobservable.
-  No switch texture changes (the renderer animates no switch).
+  No switch texture changes (the renderer animates no switch) -- M8 2026-10-18: they do now, `doomfj.switches`.
 - **Walk-over per LINE**, one entry per (line, door): a tag opens every door it names; collinear touching lines of
   one tag fuse (exact for stay doors, asserted: E1M1's two tags stay one segment each); slanted lines cross by
   P_PointOnLineSide + the new box in spechit (`doors.crossed`, `doorcode._crossed_d_lines`). E1M3's tag 11 ring: 12 entries.

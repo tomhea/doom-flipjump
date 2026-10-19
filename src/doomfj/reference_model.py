@@ -28,6 +28,7 @@ import dataclasses
 from dataclasses import dataclass, replace
 
 from doomfj.config import Config, PNEAR_SEG_BUDGET, map_cfg
+from doomfj import scrollcode as _scrollcode                    # M8: the scrolling wall (special 48)
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
 from doomfj.fixedpoint import aprox_distance                   # P_AproxDistance, ONE definition (M7 P3.3)
 from doomfj.mapcompiler import (  # shared geometry (R6)
@@ -209,20 +210,27 @@ V5_STACK = 2                      # V5: stacked boundary pieces kept per column 
 WALL_TONE_RGB = {"#EXIT": ((235, 35, 30), (110, 10, 10)),        # the exit switch: red
                  "#SWITCH": ((245, 160, 30), (100, 55, 10)),     # the other switches: orange
                  "#DOOR": ((190, 150, 95), (70, 45, 20)),        # a door a player opens: tan over dark brown
-                 "#DOORBLUE": ((60, 95, 235), (15, 25, 95))}     # a blue-key door and its jambs: blue
+                 "#DOORBLUE": ((60, 95, 235), (15, 25, 95)),     # a blue-key door and its jambs: blue
+                 # M8 (doomfj.switches, a map's SWITCH_TEX): a switch showing its SW2 texture -- used (SW1 -> SW2), or
+                 # an SW2 one at the level start not yet used -- and the used exit: green, DOOM's lit switch
+                 "#SWITCHON": ((60, 215, 60), (15, 85, 15))}
 WALL_TONE_EXIT_SPECIALS = frozenset({11, 51})                    # S1 exit, S1 secret exit
 WALL_TONE_DOOR_SPECIALS = frozenset({1, 26, 27, 28, 31, 32, 33, 34, 117, 118})   # DR / D1 doors a player opens
 WALL_TONE_BLUE_SPECIALS = frozenset({26, 32})                    # DR / D1 blue-key doors
 WALL_TONE_SWITCH_PREFIXES = ("SW1", "SW2")                       # DOOM's switch textures
 
 
-def wall_tone_names(lds, sds, secs) -> dict:
+def wall_tone_names(lds, sds, secs, switch_tex: bool = False, pressed=frozenset()) -> dict:
     """{linedef: tone name} -- THE wall-tone rule both mirrors read (see WALL_TONE_RGB): an exit special first, then a
     switch texture on any of the line's sides, then a door's face (a two-sided line with a door-use special, not
     ML_SECRET, beside a door sector -- blue when a blue-key line opens that door), then a blue door's jamb (a one-sided
-    line of a blue door's sector). A face's tone shows while the door is shut, when the line draws as a solid wall"""
+    line of a blue door's sector). A face's tone shows while the door is shut, when the line draws as a solid wall.
+    M8 `switch_tex` (a map's SWITCH_TEX, doomfj.switches): a switch line SHOWING an SW2 texture wears "#SWITCHON" --
+    its own texture an SW2 one, flipped for each linedef in `pressed` (P_ChangeSwitchTexture: SW1 <-> SW2); off, the
+    text and the tones are P10's"""
     from doomfj.doors import door_states
     from doomfj.gamedata import ML_SECRET
+    assert switch_tex or not pressed, "M8: a pressed switch on a map without SWITCH_TEX"
     doors = set(door_states(secs, lds, sds))
     blue = set()
     for ld in lds:
@@ -233,6 +241,11 @@ def wall_tone_names(lds, sds, secs) -> dict:
         sides = [sds[ld.front]] + ([sds[ld.back]] if 0 <= ld.back < len(sds) else [])
         texs = [(t or "").upper() for sd in sides for t in (sd.upper, sd.middle, sd.lower)]
         two = len(sides) == 2
+        if switch_tex and any(t.startswith(WALL_TONE_SWITCH_PREFIXES) for t in texs):
+            from doomfj.switches import switch_texture
+            if switch_texture(lds, sds, i).startswith("SW2") != (i in pressed):
+                out[i] = "#SWITCHON"
+                continue
         if ld.special in WALL_TONE_EXIT_SPECIALS:
             out[i] = "#EXIT"
         elif any(t.startswith(WALL_TONE_SWITCH_PREFIXES) for t in texs):
@@ -501,14 +514,17 @@ class MobileThing:
     type: int = -1
     z: int | None = None
 
+    effect: bool = False
+
     @property
     def drop(self) -> bool:
         """M7 P6: a DROP -- the item a monster left, standing ON its floor (`monsters.MonsterPhase.mobiles`' (x, y,
         lump, 0)): drawn as SCENERY under every rule, never an actor (docs/gp-p67-interface.md section 5; the fj's drop
         rows, monstercode.drop_view_rows). The fireballs, blood and puffs fly at MISSILE_Z (z None, or a 4th element
         that says so) and are the mobiles the actors rule exempts: the 4th element moves the height, and z 0 is what
-        marks an item"""
-        return self.z == 0
+        marks an item -- M8: but a FLOOR EFFECT's (`effect`: the teleport fog, FLOOR_EFFECTS), an effect standing on
+        the floor, an actor as every pool effect"""
+        return self.z == 0 and not self.effect
 
 
 def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
@@ -523,7 +539,10 @@ def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
 # (the monsters, live or dead, the fireballs, the map's runtime barrels and pickups). By the POOL a mobile's lump
 # belongs to, which is what the fj's row ranges are (monstercode.rank_threshold: runtime rows < nt + FIREBALL_POOL
 # rank 1): BAL1* only ever shows in the fireball pool, BLUD* / PUFF* only in the fx pool (test_d3_rules holds it).
-MOBILE_RANK = {"BAL1": 1, "BLUD": 0, "PUFF": 0, "MISL": 1}      # P9: the player's rocket -- a missile, as BAL1
+MOBILE_RANK = {"BAL1": 1, "BLUD": 0, "PUFF": 0, "MISL": 1,      # P9: the player's rocket -- a missile, as BAL1
+               "TFOG": 0}                                       # M8: the teleport fog -- an effect (the fx pool)
+# M8: the effects that stand ON the floor (z 0 in `mobiles`) and are not drops: the teleport fog
+FLOOR_EFFECTS = frozenset({"TFOG"})
 
 
 def mobile_rank(lump: str, z=None) -> int:
@@ -1401,13 +1420,16 @@ class ReferenceModel:
         rw_centerangle = (ANG90 + viewangle - rw_normalangle) & ANGLE_MASK
         return rw_offset, rw_centerangle
 
-    def _wall_tones(self, scene) -> dict:
-        """P10: `wall_tone_names` for the scene's map -- its own (pristine) level data, once per map and model"""
-        key = (id(scene.map_wad), scene.mapname)
+    def _wall_tones(self, scene, pressed=frozenset()) -> dict:
+        """P10: `wall_tone_names` for the scene's map -- its own (pristine) level data, once per map, model and (M8)
+        set of pressed switch lines (`render_wall_frame(switch_on=)`; the map's SWITCH_TEX through MAP_CONFIG)"""
+        pressed = frozenset(pressed)
+        key = (id(scene.map_wad), scene.mapname, pressed)
         cache = self.__dict__.setdefault("_tone_cache", {})
         if key not in cache:
             mw, m = scene.map_wad, scene.mapname
-            cache[key] = wall_tone_names(mw.linedefs(m), mw.sidedefs(m), mw.sectors(m))
+            cache[key] = wall_tone_names(mw.linedefs(m), mw.sidedefs(m), mw.sectors(m),
+                                         switch_tex=bool(map_cfg(self.cfg, m).SWITCH_TEX), pressed=pressed)
         return cache[key]
 
     def _wall_texture(self, asset_wad, name, cache, *, wall_mode="textured"):
@@ -2127,7 +2149,8 @@ class ReferenceModel:
                           mobiles=None, barrel_views: dict | None = None, thing_removed=None,
                           degrade: bool = False, exempt_actors: bool = False,
                           view_drop: int = 0, wall_tones: bool = False,
-                          slot_trace: list | None = None) -> bytes:
+                          slot_trace: list | None = None, sector_lights: dict | None = None,
+                          wall_scroll: int = 0, switch_on=frozenset()) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -2215,7 +2238,15 @@ class ReferenceModel:
         `view_z(floor) - (d << 16)`, while the floor and ceiling SHADING (the FT1 band lists, `_flat_row_colours`' ph
         = |plane_h - viewz|) stays on the STANDING eye `view_z(floor)` -- the band lists the fj bakes per eye class,
         which the fj's landing keeps (`wall_renderer.landing_drop_lines` subtracts from `viewz` after `vzcbase` is
-        set). 0 (the default) is every picture before P8a, byte for byte (scratchpad/gp/p8_identity.py)."""
+        set). 0 (the default) is every picture before P8a, byte for byte (scratchpad/gp/p8_identity.py).
+
+        M8 `sector_lights` (doomfj.lights; the world's `World.lights_now`, through `monsters.view_drop_kw` /
+        `World.light_render_kw`): {sector: light} of EVERY animated sector of the map, at its light this tic -- the
+        picture takes those lights (walls, planes, step faces, sprites). Its keys also change ONE structural rule: a
+        two-sided seg with an animated sector on either side is never skipped by the marking test (the two sides' equal
+        (height, light, flat) keys), because the binary bakes its marking decision once for every light state and an
+        animated light differs from its neighbour in at least one (wall_renderer asserts it, seg for seg). None / {}
+        (the default, every map without animated lights) is today's picture, byte for byte."""
         # M7 P3.3: a misspelt depth order must fail here, not fall through to the "aprox" key
         assert rt_depth_order in RT_DEPTH_ORDERS, (
             f"rt_depth_order={rt_depth_order!r}: one of {RT_DEPTH_ORDERS}")
@@ -2276,15 +2307,31 @@ class ReferenceModel:
         lds = scene.map_wad.linedefs(scene.mapname)
         sds = scene.map_wad.sidedefs(scene.mapname)
         secs = scene_sectors(scene)
+        # M8 (doomfj.lights): the animated lights of the moment; the KEYS are the map's animated sectors (the marking rule)
+        _lt_dyn = frozenset(sector_lights or ())
+        if sector_lights:
+            from doomfj.lights import apply_sector_lights
+            secs = apply_sector_lights(secs, sector_lights)
         verts = scene.cmap.vertexes
         texcache: dict = {}
-        _tones = self._wall_tones(scene) if wall_tones else {}     # P10: the wall tones, from the map's own data
+        # P10: the wall tones, from the map's own data -- M8: the switch lines `switch_on` names (doomfj.switches:
+        # World.switch_on, the gates' MonsterPhase.switch_kw) showing their other texture
+        assert wall_tones or not switch_on, "M8: switch_on draws through the wall tones (the game picture's)"
+        _tones = self._wall_tones(scene, switch_on) if wall_tones else {}
 
         viewx, viewy, viewangle = state.x, state.y, state.angle
         # W1R-ANCHOR: the pattern key is (x + this) -- viewangle * 640 columns-per-turn >> 32
         # (= *5 >> 25 exactly), so TURNING slides the pattern with the walls instead of
         # re-rolling it every frame. fj computes the identical value once per frame (wnoff).
         w1r_xoff = ((viewangle & 0xFFFFFFFF) * 5) >> 25
+        # M8 (doomfj.scrollcode -- DOOM's special 48 as the tier can show it, a DELIBERATE APPROXIMATION): on a map with
+        # WALL_SCROLL, a scrolling line's seg keys its pattern on x + w1r_xoff + the slide (`wall_scroll`, the world's
+        # `World.wall_scroll()`: leveltime's low byte) -- its runs and the step faces of every column it draws (`col_xoff`:
+        # fj keys a column's faces on the same p2_xkey, made in that seg's pass 2). 0 / E1M1: the old key everywhere
+        _scr_lds = (_scrollcode.scroll_lines(lds) if (wall_scroll and _scrollcode.scroll_on(self.cfg, scene.mapname))
+                    else frozenset())
+        _wscr = _scrollcode.wall_scroll_of(wall_scroll)
+        col_xoff = [w1r_xoff] * cfg.VIEW_W
         px = _signed(state.x, 32) >> 16
         py = _signed(state.y, 32) >> 16
         # the eye z = the player's own sector floor + VIEWHEIGHT
@@ -2480,7 +2527,7 @@ class ReferenceModel:
                 _mx, _my, _mlump = _mo[:3]
                 _mz = _mo[3] if len(_mo) > 3 else None   # M7 P6: a drop's z (0); P5's 3-tuples: MISSILE_Z
                 things_by_ss.setdefault(self.point_in_subsector(scene.cmap, _mx, _my), []).append(
-                    (MobileThing(_mx, _my, z=_mz), (_mlump, False), _ndraw + _k))
+                    (MobileThing(_mx, _my, z=_mz, effect=_mlump[:4] in FLOOR_EFFECTS), (_mlump, False), _ndraw + _k))
             # M7 P3.3 (D3 d): a leaf's RUNTIME things nearest first -- the walk is front-to-back and a sprite
             # pixel is written once, so within a leaf the near one must be drawn before the far one
             # M7 P8a (C, D3 a): `rt_rank` -- the key becomes (rank, key): the effects and the drops (rank 0) are drawn
@@ -2766,10 +2813,13 @@ class ReferenceModel:
                 # attributing the plane to the back sector then renders identically.
                 fsec = self._seg_sector(lds, sds, secs, seg)
                 bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
+                # M8: ... unless an ANIMATED light is on either side (`sector_lights`' keys): the binary marks such a seg
+                # in every light state, since it marks in one (wall_renderer `_seg_marks` is the union of the states)
                 if ((fsec.ceil_h, fsec.light, fsec.ceil_tex)
                         == (bsec.ceil_h, bsec.light, bsec.ceil_tex)
                         and (fsec.floor_h, fsec.light, fsec.floor_tex)
-                        == (bsec.floor_h, bsec.light, bsec.floor_tex)):
+                        == (bsec.floor_h, bsec.light, bsec.floor_tex)
+                        and not (_lt_dyn and (_fi2 in _lt_dyn or _bi2 in _lt_dyn))):
                     continue
                 # the two STOP conditions the fj shares (one `tsstop` flag there): every column
                 # attributed, or the per-frame seg BUDGET spent. The budget is what bounds the cost
@@ -2966,8 +3016,10 @@ class ReferenceModel:
             wall_contrast = self.wall_fake_contrast(verts[seg.v1], verts[seg.v2])
             worldtop = sec.ceil_h - viewz_world              # world units the ceiling is above the eye
             flat_fill = colormap[light_row][WALL_BG]
+            seg_xoff = w1r_xoff + (_wscr if seg.linedef in _scr_lds else 0)    # M8: the scrolling wall's slide
             for x in range(x1, x2):
                 if not drawn[x]:
+                    col_xoff[x] = seg_xoff
                     top, bottom = self.wall_screen_span(sec.ceil_h, sec.floor_h, viewz, scale & ANGLE_MASK)
                     top = max(0, top)
                     bottom = min(cfg.VIEW_H - 1, bottom)
@@ -3029,7 +3081,7 @@ class ReferenceModel:
                             base = colormap[blr][tex[0][0]]
                             base2 = colormap[blr][tex[0][1]]
                             ya = top
-                            for rel, row, alt in self.w1r_runs(bottom + 1 - top, x + w1r_xoff):
+                            for rel, row, alt in self.w1r_runs(bottom + 1 - top, x + seg_xoff):
                                 cc = colormap[row][base2 if alt else base]
                                 for y in range(ya, top + rel):
                                     fb[y * cfg.VIEW_W + x] = cc
@@ -3098,7 +3150,7 @@ class ReferenceModel:
                         # (faces have no second texel -- the alt bit is ignored here)
                         base = colormap[max(0, lr - self.W1R_BASE_BRIGHTEN)][STEP_FACE_BASE]
                         ya = y1
-                        for rel, row, _alt in self.w1r_runs(h, x + w1r_xoff):
+                        for rel, row, _alt in self.w1r_runs(h, x + col_xoff[x]):
                             cc = colormap[row][base]
                             for y in range(ya, y1 + rel):
                                 fb[y * cfg.VIEW_W + x] = cc

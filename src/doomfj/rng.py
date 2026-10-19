@@ -125,6 +125,9 @@ def p_random_outcome(state: int, table: Sequence[int]) -> Tuple[int, int]:
 # Stream numbers: 0 = world (level-start rolls, barrels), 1 = player (weapon spread and damage),
 # 2 = effects (puffs, blood, fireball impacts), 3 + slot = monster `slot`.
 STREAM_WORLD, STREAM_PLAYER, STREAM_FX, STREAM_MONSTER0 = 0, 1, 2, 3
+# M8 (doomfj.lights): the sector light thinkers' stream -- the LAST stream number, so no map's monster slot (3 + slot,
+# fewer than 252 slots) shares it
+STREAM_LIGHT = 255
 # Odd, so `k * STRIDE` mod 256 is distinct for all 256 streams: no two streams start in lockstep.
 STREAM_SEED_STRIDE = 37
 

@@ -65,6 +65,7 @@ from doomfj.fixedpoint import _signed                                        # n
 from doomfj.reference_model import SimState                                  # noqa: E402
 from doomfj.things import drawable_things                                    # noqa: E402
 from doomfj.doors import exit_boxes                                          # noqa: E402
+from doomfj.automap import has_page                                       # noqa: E402 (M8: the map page)
 from doomfj.menu import (LEVEL_DONE_ENTER, LEVEL_DONE_SCR, LEVEL_DONE_SCREENS, menu_step,  # noqa: E402
                          palette_colours, stats_digits)
 from doomfj.wall_renderer import (BOOT_MENU_SKILL, BOOT_SKILL, SKILLS, STANDALONE_POLLS,     # noqa: E402
@@ -212,7 +213,8 @@ class Mirror:
                     poke = {k: v for k, v in after.items() if before.get(k) != v}
                 # P10: a frame's menu keys are its only typed keys (the moves are poked flags), so they are its "any"
                 mev_ = set(kd.get("menu", ()))
-                mode, scr, sel, ng, live = menu_step(mode, scr, sel, mev_ | ({"any"} if mev_ else set()), live)
+                mode, scr, sel, ng, live = menu_step(mode, scr, sel, mev_ | ({"any"} if mev_ else set()), live,
+                                                     automap=has_page(sim.mapname))      # M8: MAP's rules
                 if ng is not None:                            # NEW GAME: the level start
                     st = SimState(sim.spawn.x, sim.spawn.y, sim.spawn.angle, sim.mapname)
                     ph, taken, pusedn = dp.initial(), False, 1
@@ -237,6 +239,8 @@ class Mirror:
                     keys_kw = door_keys_kw(mph if loots else None)
                     has_blue = {"card": True, "no_card": False}.get(self.ctl, keys_kw.pop("has_blue", None))
                     alive = not dead or self.ctl == "dead_holds_door"
+                    # M8 (doomfj.switches): the SR countdown and the door switches, on the tic-start doors
+                    mph.switch_doors(ph[0], use and (not dead or self.ctl == "dead_uses"), st.x, st.y)
                     ph = dp.tic(ph, use and (not dead or self.ctl == "dead_uses"), st.x, st.y, has_blue=has_blue,
                                 others=mph.boxes(), player=alive, **keys_kw)    # P3.2b; P7-c
                     before_sw = ms[2]
@@ -250,6 +254,7 @@ class Mirror:
                     elif use:                                 # the exit: a PRESS in its box
                         if not pusedn or self.ctl == "edge":
                             pusedn = 1
+                            mph.switch_uses(ms, st.x, st.y)   # M8: the floor / lift switches, before the exit
                             if any(in_use_box_fixed(b, st.x, st.y) for b in self.exits):
                                 lvdone, mode, scr = 1, 1, LEVEL_DONE_ENTER   # P10: LEVEL COMPLETE, its hold first
                             elif self.ctl != "no_use_lines":  # else the SR lifts and the switch
@@ -333,6 +338,11 @@ class Mirror:
                             "removed": removed, "bviews": bviews,               # M7 P6
                             "skill": mph.world.ws.skill,                        # M7 P6+P7: what the picture hides
                             "vdrop": mph.view_drop(),                           # M7 P8a: the dying view's sink
+                            "wscroll": mph.wall_scroll(),                       # M8: the scrolling wall's slide
+                            # M8: the animated sector lights this frame (World.light_render_kw; None: none)
+                            "lights": mph.world.light_render_kw().get("sector_lights"),
+                            # M8: the switch lines showing their other texture (the exit's by this gate's lvdone)
+                            "switches": mph.switch_kw(lvdone).get("switch_on"),
                             # M7 P8a: this frame's knock moves and the walls that refused them (monsters.KnockTap),
                             # and every monster's whole-unit position (a corpse's slide)
                             "knock": ((len(mph.tap.since(k_tap)), len(mph.tap.wall_refusals(mph.tap.since(k_tap))))
@@ -360,7 +370,9 @@ def seen_of(orc, dsim, card_di):
                    removed=orc.monster_removed(mph) if loot else None,       # M7 P6
                    barrel_views=orc.monster_barrel_views(mph) if loot else None,
                    skill=mph.world.ws.skill,                                  # M7 P6+P7: the skill played
-                   view_drop=mph.view_drop())                                 # M7 P8a: the dying view's sink
+                   # switch_on: N/A -- the seen marks and the aim window read no wall colour (M8)
+                   view_drop=mph.view_drop(),                                 # M7 P8a: the dying view's sink
+                   wall_scroll=mph.wall_scroll())                             # M8: the scrolling wall's slide
         mph.set_aim(aim)                    # M7 P4.2a: this picture's window -> the next frame's shots
         return orc._mviews.slots_of(seen)
     return fn
@@ -389,7 +401,10 @@ def picture(orc, dsim, fr: dict, card_di) -> bytes:
                       mobiles=fr["mobiles"],                                        # M7 P5
                       removed=fr.get("removed"), barrel_views=fr.get("bviews"),     # M7 P6
                       card=fr["phase"][3], skill=fr.get("skill"),                  # M7 P6+P7: the skill played
-                      view_drop=fr.get("vdrop", 0))                                # M7 P8a: the dying view's sink
+                      view_drop=fr.get("vdrop", 0),                                # M7 P8a: the dying view's sink
+                      wall_scroll=fr.get("wscroll", 0),                            # M8: the scrolling wall's slide
+                      sector_lights=fr.get("lights"),                              # M8: the animated lights
+                      switch_on=fr.get("switches"))                                # M8: the switch textures
 
 
 def expected_cells(fr: dict, order: list, mover_order=()) -> dict:
@@ -415,7 +430,8 @@ def screen(orc, scr: int, sel: int, live: int = 0, stats=None) -> bytes:
     P3.4) the main menu on HELP and the help: `wall_renderer.menu_screen_pixels`, the one mapping. P10: `live` picks
     the main menu's variant, `stats` is LEVEL COMPLETE's (nsecret, digits)"""
     colours = palette_colours(bytes(b for rgb in orc.mw.playpal(0) for b in rgb))
-    return bytes(menu_screen_pixels(orc.rm.cfg, colours, scr, sel, live, stats))
+    return bytes(menu_screen_pixels(orc.rm.cfg, colours, scr, sel, live, stats,
+                                    automap=orc.automap))                                # M8: MAP, the help's M
 
 
 def menu_events(keys: list) -> list:

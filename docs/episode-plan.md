@@ -153,6 +153,8 @@ step of all nine -- the 1.5-2 day estimate stands until the first real run repla
 | date | event |
 |---|---|
 | 2026-10-19 | plan approved; C1 started (branch `m8-runtime-ids`); CR follow-ups #149 (branch `m8-cr149`); PR #148 (E1M2 r4 + blocked63) in CI |
+| 2026-10-19 | the owner: no more RAM ("i cant buy more ram"); **2^27 words is a super hard limit** -- "Optimize the levels or even lose unimportant features". Started: ASSEMBLER MEMORY WORK (flipjump, branch `asm-memory`, target <= ~11 GB peak for an E1M2-sized program, output byte-identical) and SIZE WORK (branch `m8-size`: attribution, per-map projection, cuts, feature-loss proposals). Lessons survey: E1M7 projected ~32.8 GB / pool 157% at spread 1, E1M6 ~20.8 GB (estimates) |
+| 2026-10-19 | merged into `m8-episode`: the final creator (`scripts/build_episode.py`), the lessons (`docs/level-lessons.md`, 13 survey checks) |
 
 ## 10. Orchestration
 

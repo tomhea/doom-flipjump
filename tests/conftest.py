@@ -19,7 +19,21 @@ cancelled in `scripts/test.sh` at 6 h 00 m). tests/host/test_shards.py holds the
 balance."""
 import json
 import os
+import sys
 from pathlib import Path
+
+# THIS checkout's src first, for the run and for every subprocess it starts (M8 lesson, the C3 agent 2026-10-19):
+# the installed `doomfj` points at the main repo, so a worktree's pytest without PYTHONPATH=src silently tested the
+# MAIN repo's code. tests/host/test_conftest_src.py holds it.
+SRC = str(Path(__file__).resolve().parents[1] / "src")
+if sys.path[:1] != [SRC]:
+    sys.path.insert(0, SRC)
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    [SRC] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x and x != "src" and os.path.abspath(x) != SRC])
+if "doomfj" in sys.modules:
+    assert os.path.dirname(os.path.dirname(os.path.abspath(sys.modules["doomfj"].__file__))) == SRC, (
+        "doomfj was imported from %s before conftest ran, not from this checkout's %s"
+        % (sys.modules["doomfj"].__file__, SRC))
 
 DURATIONS = Path(__file__).resolve().parent / "durations.json"
 

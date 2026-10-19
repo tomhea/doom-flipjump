@@ -27,6 +27,15 @@ R9 -- THE CONTROLS, run first, each on the same composition for CONTROL_FRAMES f
 mutated on one world frame (a turn added): the state must part on that frame; `pixel` -- one pixel of the BINARY's
 picture changed on one frame: the picture check must part on exactly that frame. A gate whose controls do not fail
 does not run its play.
+
+THE STEERING SEED (DEFAULT_SEED, --seed, --search). The steering is deterministic, and so are the binary and the model:
+a play is a function of (map, skill, steering code, seed). The seed shifts the dodge rhythm, the fight range and the
+health threshold -- each seed is a different, equally real play. `--model-only --search ROUNDS` finds a seed (or a
+schedule F:N,F:N: seed N from frame F on) that reaches LEVEL COMPLETE on the model alone, at ~0.15-0.25 s a frame and
+with no heavy lock; since the steering reads exactly the cells the oracle checks, the binary run with that seed makes
+the same play key for key (or parts from the oracle, which is a FAIL). A change to play.py's Steer moves every play:
+re-search and re-pin DEFAULT_SEED after one. The final creator's order: search on the model, then the gate on the
+binary.
 """
 from __future__ import annotations
 

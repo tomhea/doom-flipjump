@@ -22,7 +22,7 @@ import time
 DOCS = r"C:\Users\tomhe\Documents"
 LOCK = os.path.join(DOCS, "HEAVY.lock")
 QUEUE = os.path.join(DOCS, "HEAVY.queue")
-MIN_AVAIL_GB = 6.0
+MIN_AVAIL_GB = 4.5
 POLL = 30
 
 

@@ -737,10 +737,15 @@ def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, heigh
 # and a descent visits ~13 nodes. Exact, not a grid approximation, so it costs no fidelity and
 # needs no decision about which leaf owns a thing near a boundary.
 
-def generate_point_location_fj(cmap, *, label="ptloc") -> str:
+def generate_point_location_fj(cmap, *, label="ptloc", shared: bool = False) -> str:
     """`{label}_walk` reads `ptx`/`pty` (10-nibble SIGNED map units) and leaves the containing
     subsector index in `ptss`, then `stl.fret {label}_ret`. Mirrors `mapcompiler._point_side`'s
-    convention exactly: side = dx*(y - py) - dy*(x - px), and side > 0 is the BACK (left) child."""
+    convention exactly: side = dx*(y - py) - dy*(x - px), and side > 0 is the BACK (left) child.
+
+    `shared` (config PTLOC_SHARED, M8 size): the same descent, with every node's arithmetic in a
+    shared subroutine (`_shared_point_location_fj`)."""
+    if shared:
+        return _shared_point_location_fj(cmap, label=label)
     from doomfj.mapcompiler import NF_SUBSECTOR
     M40 = (1 << 40) - 1
     out = [f"// M14-e point location as code: {len(cmap.nodes)} nodes, {len(cmap.subsectors)} leaves",
@@ -784,7 +789,97 @@ def generate_point_location_fj(cmap, *, label="ptloc") -> str:
     return "\n".join(out) + "\n"
 
 
-def point_location_decls(label="ptloc") -> list:
+# ── M8 size: the SAME point location, its arithmetic shared ──────────────────────────────────────
+#
+# The inline walk above emits a whole 10-nibble `hex.mul_lo` pair (or a `hex.scmp 10`) PER NODE. Inlined, one
+# multiply is ~15.7K words of the binary (its code, its wflip chains and its tables in the blocked pool): E1M2 r4's
+# `ptloc_walk` was 19.5M of 83.5M words, and it grows with the nodes (E1M7: 2,063). The node's only own data are its
+# four constants, so here a node XORs them into ZERO-AT-REST registers (`hex.xor_by`: a wflip per nonzero nibble, no
+# table) and calls ONE subroutine per kind:
+#
+#   * a diagonal node: `{label}_sd` -- dx = x - px, dy = y - py, p = dy*ndx - dx*ndy, exactly the inline order
+#     (the constant second); r = 1 iff p > 0 (BACK), else 0 (FRONT: p < 0, and p == 0 on the line);
+#   * a vertical / horizontal node: `{label}_sx` / `{label}_sy` -- r = 0 / 1 / 2 for x <, ==, > px (y, py);
+#
+# and every subroutine zeroes the registers it read before it returns (the invariant the next node's XOR needs; they
+# are declared zero, and no other code writes them, so no reset entry is needed). The node then branches on the
+# one-nibble `{label}r`. The leaf zeroes nothing: `ptss` is zeroed once at the walk's entry and the leaf XORs its
+# index in. The answer is the inline walk's for every point (tests/fj/test_collision_fj.py runs both), for a fcall
+# per node visited.
+
+def _shared_point_location_fj(cmap, *, label="ptloc") -> str:
+    from doomfj.mapcompiler import NF_SUBSECTOR
+    M40 = (1 << 40) - 1
+
+    def xor_const(reg, value):
+        v = value & M40
+        return [f"    hex.xor_by {reg} + {i}*dw, {(v >> 4 * i) & 15}" for i in range(10) if (v >> 4 * i) & 15]
+
+    def target(child):
+        return (f"{label}_l{child & (NF_SUBSECTOR - 1)}" if child & NF_SUBSECTOR
+                else f"{label}_n{child}")
+
+    out = [f"// M14-e point location as code, its arithmetic SHARED (config PTLOC_SHARED): {len(cmap.nodes)} nodes, "
+           f"{len(cmap.subsectors)} leaves",
+           f"{label}_walk:",
+           "    hex.zero w/4, ptss",
+           f"    ;{target(cmap.root)}"]
+    for i, n in enumerate(cmap.nodes):
+        back, front = target(n.left), target(n.right)      # left = back, right = front
+        out.append(f"  {label}_n{i}:")
+        if n.dx == 0 or n.dy == 0:
+            # the inline walk's compare: lt -> lo, eq -> front, gt -> hi, with front one of lo / hi
+            if n.dx == 0:
+                lo, hi = (back, front) if n.dy > 0 else (front, back)
+                out += xor_const(f"{label}kx", n.x) + [f"    stl.fcall {label}_sx, {label}_sret"]
+            else:
+                lo, hi = (front, back) if n.dx > 0 else (back, front)
+                out += xor_const(f"{label}ky", n.y) + [f"    stl.fcall {label}_sy, {label}_sret"]
+            if hi == front:                                # r 0 (lt) -> lo; 1, 2 -> front
+                out += [f"    hex.if0 1, {label}r, {lo}", f"    ;{front}"]
+            else:                                          # r 2 (gt) -> hi; 0, 1 -> front
+                out += [f"    hex.xor_by {label}r, 2", f"    hex.if0 1, {label}r, {hi}", f"    ;{front}"]
+        else:
+            out += (xor_const(f"{label}kx", n.x) + xor_const(f"{label}ky", n.y)
+                    + xor_const(f"{label}kdx", n.dx) + xor_const(f"{label}kdy", n.dy)
+                    + [f"    stl.fcall {label}_sd, {label}_sret",
+                       f"    hex.if0 1, {label}r, {front}", f"    ;{back}"])
+    for s in range(len(cmap.subsectors)):
+        out += [f"  {label}_l{s}:"] + [f"    hex.xor_by ptss + {i}*dw, {(s >> 4 * i) & 15}"
+                                       for i in range(8) if (s >> 4 * i) & 15] + [f"    stl.fret {label}_ret"]
+    # the shared subroutines (each leaves {label}r and zeroes the registers it read)
+    out += [f"{label}_sd:",
+            f"    hex.mov 10, {label}dx, ptx", f"    hex.sub 10, {label}dx, {label}kx",
+            f"    hex.mov 10, {label}dy, pty", f"    hex.sub 10, {label}dy, {label}ky",
+            f"    hex.mul_lo 10, {label}p, {label}dy, {label}kdx",
+            f"    hex.mul_lo 10, {label}q, {label}dx, {label}kdy",
+            f"    hex.sub 10, {label}p, {label}q",
+            f"    hex.zero 10, {label}kx", f"    hex.zero 10, {label}ky",
+            f"    hex.zero 10, {label}kdx", f"    hex.zero 10, {label}kdy",
+            f"    hex.zero 1, {label}r",
+            f"    hex.sign 10, {label}p, {label}_sdq, {label}_sdg",     # < 0 -> front (r 0)
+            f"  {label}_sdg:",
+            f"    hex.if0 10, {label}p, {label}_sdq",                   # == 0 -> front (on the line)
+            f"    hex.xor_by {label}r, 1",                              # > 0 -> back
+            f"  {label}_sdq:",
+            f"    stl.fret {label}_sret"]
+    for ax, coord in (("x", "ptx"), ("y", "pty")):
+        k = f"{label}k{ax}"
+        out += [f"{label}_s{ax}:",
+                f"    hex.zero 1, {label}r",
+                f"    hex.scmp 10, {coord}, {k}, {label}_s{ax}q, {label}_s{ax}e, {label}_s{ax}g",
+                f"  {label}_s{ax}g:",
+                f"    hex.xor_by {label}r, 2",
+                f"    ;{label}_s{ax}q",
+                f"  {label}_s{ax}e:",
+                f"    hex.xor_by {label}r, 1",
+                f"  {label}_s{ax}q:",
+                f"    hex.zero 10, {k}",
+                f"    stl.fret {label}_sret"]
+    return "\n".join(out) + "\n"
+
+
+def point_location_decls(label="ptloc", shared: bool = False) -> list:
     # ⚠ ptss is w/4 wide, not 4: `hex.ptr_index` does `mov w/4` OUT of its index register, so a
     # narrower cell drags its neighbour in and yields a wild pointer (fj-lessons: an n-nibble
     # op reads n nibbles of its SOURCE).
@@ -796,4 +891,7 @@ def point_location_decls(label="ptloc") -> list:
             f"{label}dx: hex.vec 10", f"{label}dy: hex.vec 10",
             f"{label}p: hex.vec 10", f"{label}q: hex.vec 10",
             "ptp: hex.vec w/4", "ptq: hex.vec w/4",
-            "bhv: hex.vec 2", "btv: hex.vec 2", "bdv: hex.vec 4"]
+            "bhv: hex.vec 2", "btv: hex.vec 2", "bdv: hex.vec 4"] + (
+        # PTLOC_SHARED: the zero-at-rest constant registers, the subroutines' return and their one-nibble answer
+        [f"{label}kx: hex.vec 10", f"{label}ky: hex.vec 10", f"{label}kdx: hex.vec 10", f"{label}kdy: hex.vec 10",
+         f"{label}_sret: hex.vec w/4", f"{label}r: hex.vec 1"] if shared else [])

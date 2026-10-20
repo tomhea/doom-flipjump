@@ -122,6 +122,11 @@ def _save_counts(path, a, frozen):
     print("  counts cached to %s" % path, flush=True)
 
 
+def _pack_kw(a):
+    """BlockPool(pack=True) under --pack-blocks; nothing otherwise (so a flipjump without pack= still builds)"""
+    return {"pack": True} if getattr(a, "pack_blocks", False) else {}
+
+
 def _preflight(pool_cls, W, a, frozen, wants, heat=None):
     """Price the configuration BEFORE the 25-minute assembly.
 
@@ -134,8 +139,11 @@ def _preflight(pool_cls, W, a, frozen, wants, heat=None):
                      span_bits=a.span_bits, alias=frozen.get("alias"), spread=a.spread,
                      spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops,
                      width_hist=frozen.get("width_hist"), width_buckets=a.width_buckets,
-                     wants=wants, **({"heat": heat} if heat else {}))
+                     wants=wants, **({"heat": heat} if heat else {}), **_pack_kw(a))
     demand = sum(probe._block_bits(g) for g in frozen["counts"])
+    if getattr(a, "pack_blocks", False):
+        print("  PREFLIGHT (--pack-blocks): the packed blocks end %s words past the pool base (the demand below is "
+              "the blocks' whole sizes, unpacked)" % format(probe._used // W, ","), flush=True)
     limit = (1 << W) if a.span_bits is None else min(1 << W, a.pool_base + a.span_bits)
     capacity = limit - a.pool_base
     placed = len(probe.groups)
@@ -295,11 +303,25 @@ def main():
                     help="ONE expansion, no counting assembly (flipjump #369, BlockPool(one_pass=True)): the tables wait "
                          "out of the op stream and the blocks are sized from the same expansion's census. "
                          "--counts-cache is written (the census), never read.")
+    ap.add_argument("--pack-blocks", action="store_true",
+                    help="M8 size: BlockPool(pack=True) -- every block keeps its size, alignment and every table's index "
+                         "(so every arm flips what it flips without it), but the space inside it that its own tables "
+                         "do not use (bucket tails, the power-of-two round-up, the slots the cheap-index order skips) "
+                         "holds other blocks. E1M2 r4's census: spread 1 56.46M -> 33.37M words of pool, spread 2 "
+                         "94.19M -> 64.12M. Needs flipjump with BlockPool(pack=) (branch block-pack).")
     ap.add_argument("--no-pin", action="store_true",
                     help="relocate into blocks but do NOT pin the source words. Splits blocking's "
                          "two halves against the standalone gate, the way --no-pin split them "
                          "against deg_gate (FINDINGS BG).")
     a = ap.parse_args()
+    if a.pack_blocks:
+        import inspect
+        from flipjump.assembler.preprocessor import BlockPool as _BP
+        if "pack" not in inspect.signature(_BP.__init__).parameters:
+            ap.error("--pack-blocks needs flipjump with BlockPool(pack=) (the block-pack branch); this one is %s"
+                     % inspect.getfile(_BP))
+        if a.evict_by_value:
+            ap.error("--pack-blocks and --evict-by-value are not combined (BlockPool refuses it)")
     if a.one_pass_blocks:
         clash = [f for f, on in (("--counts-trust", a.counts_trust), ("--preflight-only", a.preflight_only),
                                  ("--record-sites", a.record_sites)) if on]
@@ -466,7 +488,7 @@ def main():
                          span_bits=a.span_bits, spread=a.spread, spread_min_count=a.spread_min_count,
                          max_slot_ops=a.max_slot_ops, evict_by_value=a.evict_by_value,
                          pin_broken=a.pin_broken, width_buckets=a.width_buckets, wants=wants,
-                         **({"heat": heat} if heat else {}))
+                         **({"heat": heat} if heat else {}), **_pack_kw(a))
         pool.pin_exclude = _reset_owned          # NEVER PIN A WORD THE M1 SELF-RESET OWNS (see the placing pool)
         pools.append(pool)
         kwargs["table_pool"] = pool
@@ -580,7 +602,7 @@ def main():
                          max_slot_ops=a.max_slot_ops, evict_by_value=a.evict_by_value,
                          pin_broken=a.pin_broken, width_hist=frozen.get("width_hist"),
                          width_buckets=a.width_buckets, wants=wants,
-                         **({"heat": heat} if heat else {}))
+                         **({"heat": heat} if heat else {}), **_pack_kw(a))
         if heat:
             print("  pin-heat: %s" % pool.heat_report(), flush=True)
         # NEVER PIN A WORD THE M1 SELF-RESET OWNS. emit_reset_part drops a cell from the restore

@@ -1628,6 +1628,9 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     """
     from doomfj.collision import generate_point_location_fj, point_location_decls
     from doomfj.lut_generator import generate_packed_lut_fj
+    # M8 size: the map's point location with its arithmetic shared (config PTLOC_SHARED, MAP_SIZE_CONFIG; off on E1M1
+    # and E1M2, whose walk is the inline one byte for byte)
+    _ptloc_shared = bool(map_cfg(rm.cfg, mapname).PTLOC_SHARED)
     from doomfj.things import (THING_ROW_COLD_BYTES, THING_ROW_COLD_LEN, THING_ROW_HOT_BYTES,
                                THING_ROW_HOT_LEN, cold_row, hot_row, reachable_lightnums,
                                sprite_light_table, subsector_tables, thing_dz, thing_pos_value, thing_rows,
@@ -1702,12 +1705,12 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
              # the host reloads the pristine image every frame. That makes 0 a free-to-restore
              # EMPTY sentinel, which is why bind_things has no clear loop and why the lists hold
              # t+1 rather than t. Deleted ~1.65M ops/frame.
-             *point_location_decls()]
+             *point_location_decls(shared=_ptloc_shared)]
     # lightnum -> the row base into `sprlt`, for the leaf to bake, and (M5) each runtime thing's
     # SPAWN leaf. The hosted tier is fed that binding every frame; a standalone build has no host,
     # nothing moves things (that is C4), so the same values bake and `bind_things` takes its
     # `clean` path for every thing and never runs point location.
-    return (text, generate_point_location_fj(cmap), decls, nt, nss,
+    return (text, generate_point_location_fj(cmap, shared=_ptloc_shared), decls, nt, nss,
             {ln: k * len(rows) for k, ln in enumerate(lns)},
             [rm.point_in_subsector(cmap, t.x, t.y) for t in things])
 
@@ -3233,7 +3236,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _sky_lists = _sky_pair_lists(rm, asset_wad, cfg) if _has_sky else []
         sky_base_id = len(_main_lists)
         bands_code = generate_bands_walk_fj(_main_lists + _sky_lists,
-                                            index_nibbles=cfg.BAND_NIBBLES)
+                                            index_nibbles=cfg.BAND_NIBBLES,
+                                            # M8 size: VPB_DIRECT (MAP_SIZE_CONFIG; off on E1M1 / E1M2)
+                                            direct=bool(map_cfg(cfg, mapname).VPB_DIRECT))
         skybands = ""                          # the sky DATA bank dies with the plane bank
 
     # M13-prune (lines): count one-sided segs below every subtree; zero => the subtree can be

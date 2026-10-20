@@ -108,7 +108,6 @@ from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heigh
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
 from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers   # M7 P2a.1
 from doomfj.doors import switch_boxes as door_switch_boxes, switch_ready          # M8 L2: SR / S1 door switches
-from doomfj.doors import stay_switch_boxes as door_stay_switch_boxes          # M8 C11: the mixed doors (E1M9)
 from doomfj.reference_model import (ReferenceModel, Scene, apply_sector_heights, spawn_state)
 from doomfj.things import single_player
 
@@ -957,7 +956,6 @@ class World(CombatMixin):
         self.door_kind = door_kinds(secs, lds, sds)
         # M8 L2: the switch boxes that press each door (SR 63 / S1 103: EV_DoDoor on the doors their tag names)
         self.door_switches = door_switch_boxes(secs, lds, sds, cmap.vertexes)
-        self.door_stay_switches = door_stay_switch_boxes(secs, lds, sds, cmap.vertexes)    # M8 C11: {} but E1M9
         self.walk_triggers = walkover_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
         self.door_lines = door_line_ids(secs, lds, sds, tbl)
         self.open_h = {si: (secs[si].floor_h, tbl[si][-1]) for si in self.door_order}
@@ -1268,14 +1266,10 @@ class World(CombatMixin):
             # M7 P2b: reversal -- asked only of a closing door at its pass step (door_tic's rule)
             blocked = (ws.d_dir[d] == CLOSING and ws.d_state[d] >= self.door_pass[si]
                        and self.door_touched(si))
-            # M8 C11: an open-stay switch on a MIXED door (doors.stay_switch_boxes), at rest: opens it to stay
-            spress = (keys["use"] and alive and self.door_stay_switches.get(si)
-                      and switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))
-                      and any(in_use_box_fixed(b, ws.px, ws.py) for b in self.door_stay_switches[si]))
             st = door_tic((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]),
                           self.door_nstates[si], bool(pressed or ws.d_monreq[d]),
                           stride=door_stride(kind), stay=door_stay(kind), blocked=blocked,
-                          pass_at=self.door_pass[si], stay_used=bool(spress))
+                          pass_at=self.door_pass[si])
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = st
             ws.d_monreq[d] = 0
         self._door_phase_scene()

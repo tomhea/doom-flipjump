@@ -259,13 +259,6 @@ class Survey:
             self.row("WRONG", "door behind special %d %s" % (s, LINE_SPECIAL_NAMES.get(s, "")), n, "",
                      "doors.door_sectors makes it a PLAIN DR door (no key, re-closes)")
         self.row("INFO", "door kinds", dict(Counter(kinds.values())))
-        # M8 C11 (E1M9's 135): a re-closing door an open-stay switch (S1 103) opens to stay -- both mirrors run it
-        # (doors.stay_switch_boxes, door_tic's stay_used); the S1 latch is not kept (a simplification: after a DR use
-        # closed it, DOOM's spent switch does nothing, this one opens it again)
-        mixed = sorted(doors.stay_switch_boxes(secs, lds, sds, self.verts))
-        if mixed:
-            self.row("WARN", "mixed doors (DR + S1 open-stay switch; the S1 latch not kept)", len(mixed), "",
-                     "door sectors %s" % mixed)
         geo = doors.door_contact_geo(secs, lds, sds, self.verts)
         slanted = [si for si, (area, _) in geo.items() if area and area[0] == "poly"]
         if slanted:

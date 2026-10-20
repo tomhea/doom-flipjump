@@ -58,7 +58,6 @@ from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_li
 from doomfj.doorcode import card_pickup_lines, walkover_lines   # M7 P2a.1
 from doomfj.doors import door_kinds, walkover_triggers                    # M7 P2a.1
 from doomfj.doors import switch_boxes as door_switch_boxes                 # M8 L2
-from doomfj.doors import stay_switch_boxes as door_stay_switch_boxes       # M8 C11: E1M9's mixed door
 from doomfj.doors import exit_boxes                                        # M7 P2a.2
 from doomfj.doors import door_contact_geo                                  # M7 P2b
 from doomfj.movers import (LIFT_USE_SPECIALS,                              # M7 P2b
@@ -1979,9 +1978,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              dead="p_dd0" if _LOOT else None,
                              # M8 L2: the door switches (SR 63 / S1 103) and the doors a walk-over line opens
                              switches=door_switch_boxes(secs, lds, sds, verts),
-                             walked={t_[0] for t_ in _walk_trig},
-                             # M8 C11: a mixed door's open-stay switches ({} on every map but E1M9: the text unchanged)
-                             stay_switches=door_stay_switch_boxes(secs, lds, sds, verts))
+                             walked={t_[0] for t_ in _walk_trig})
               if (_dst_tbl and player_sim) else [])
         # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
         if _movers_on and dt:

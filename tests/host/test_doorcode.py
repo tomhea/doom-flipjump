@@ -86,8 +86,7 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     # M7 P7: `dead` names the tic-start death cell the guards READ (lootcode's p_dd0) -- not a collision input
     assert list(inspect.signature(doorcode.door_tic_lines).parameters) == \
         ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius", "mon_press", "mon_contact", "dead",
-         "switches", "walked", "stay_switches"], (  # M8 L2: switch boxes and walked doors; C11: a mixed door's
-            # open-stay switch boxes (all READ only)
+         "switches", "walked"], (  # M8 L2: switch boxes and walked doors (both READ only)
             "door_tic_lines takes collision inputs again")
     secs, lds, sds, verts = level
     slots = sorted(doors)
@@ -98,10 +97,7 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
         passes={si: pass_state(secs, lds, sds, si) for si in slots},
         # M7 P3.2b: armed with the monsters' presses and contacts too -- they only READ (thpos_rt, mon_active)
         mon_press=frozenset(slots[:3]),
-        mon_contact=[("thpos_rt + 0*dw", "thpos_rt + 8*dw", 20, "mon_active + 0*dw")],
-        # M8 C11: armed with a mixed door's open-stay switch too -- it writes only the door's own cells
-        stay_switches={slots[0]: [(0, 0, 64, 64)]}))
-    assert "_spress:" in text, "the census must see the mixed door's press"
+        mon_contact=[("thpos_rt + 0*dw", "thpos_rt + 8*dw", 20, "mon_active + 0*dw")]))
     assert "_rev:" in text, "the census must see the reversal's code"
     assert "thpos_rt" in text and "mon_active" in text, "the census must see the monsters' code"
     assert "wflip" not in text and "lnrow" not in text and "ca_" not in text

@@ -201,7 +201,9 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    # groups: a map with no SR switch line (E1M2) declares `swpr` alone
                    frozenset({"swpr"}), frozenset({"swtm"}),
                    # M8 C6: the timed powers' counters (doomfj.powercode; a map holding 2024 / 2025, each its own)
-                   frozenset({"p_inv"}), frozenset({"p_rad"}))
+                   frozenset({"p_inv"}), frozenset({"p_rad"}),
+                   # M8 C8: the lost souls' cells (doomfj.soulcode; a map with a soul only)
+                   frozenset({"sk_fly", "sk_inf", "sk_z", "sk_momz", "sk_ceil"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -807,6 +809,11 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     from doomfj.powers import NIBBLES as _PWN
     cells["p_inv"] = Cell("p_inv", "hex", _PWN)
     cells["p_rad"] = Cell("p_rad", "hex", _PWN)
+    # M8 C8 (doomfj.soulcode.PERSIST; MonsterPhase.soul_state's units): the lost souls, one row each (OPTIONAL: a map
+    # without a soul declares none of them)
+    nsk = max(1, len(getattr(_idle_world(), "soul_slots", ())))
+    for name, width in (("sk_fly", 1), ("sk_inf", 1), ("sk_z", 8), ("sk_momz", 8), ("sk_ceil", 4)):
+        cells[name] = Cell(name, "hex", width, count=nsk)
     return cells
 
 

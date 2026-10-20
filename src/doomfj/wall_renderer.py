@@ -537,6 +537,13 @@ from doomfj import hurtcode as _hurtcode                          # noqa: E402 (
 from doomfj import lootcode as _lootcode                          # noqa: E402 (M7 P6+P7 package B: the player's side)
 from doomfj import powercode as _powercode                        # noqa: E402 (M8 C6: the timed powers)
 from doomfj import knockcode as _knockcode                        # noqa: E402 (M7 P8a: knockback's hooks)
+from doomfj import soulcode as _soulcode                          # noqa: E402 (M8 C8: the lost soul)
+
+
+def _soul_var(w) -> list:
+    """M8 C8: the skill-dependent solid decorations' indices (monstermove.static_blockers' `var`: their mc_don flags)"""
+    from doomfj.monstermove import static_blockers
+    return static_blockers(w)[1]
 
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
@@ -975,7 +982,7 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
         assert missile == "MT_BRUISERSHOT", missile
         for s in ("S_TBALL1", "S_TBALL2", "S_TBALLX1", "S_TBALLX2", "S_TBALLX3"):
             del names[s]
-        names.update({s: gd.EXT_ALIAS_BASE + gd.EXT_STATE_NAMES.index(s)
+        names.update({s: gd.EXT_ALIAS_CODES[gd.EXT_STATE_NAMES.index(s)]
                       for s in ("S_BRBALL1", "S_BRBALL2", "S_BRBALLX1", "S_BRBALLX2", "S_BRBALLX3")})
     puffs = bool(p31.get("barrel"))              # M7 P6: the puffs share the blood's pool (projcode `puffs`)
     if puffs:
@@ -2619,6 +2626,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                          **({"stats": True} if _STATS else {}),         # P10: dm_kill counts the kill
                          list_bits=_LIST_BITS)                          # M8 F1.5: the lists' id width
     _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
+    # M8 C8 (doomfj.soulcode): THE LOST SOULS -- p31_parts' slots, their leaves, the aim's radius-16 class, the render's
+    # z; off on a map without one (E1M1, E1M2: not one line)
+    _SOUL = bool(_p31 and _p31.get("soul"))
     # M7 P3.3 (D3 d): the game tier's leaf walk is sim.thing_pass_depth (nearest first), which reads `cur_ssp`
     # and not `cur_ss` (P13: the leaf code sets cur_ss only for the index-order sim.thing_pass)
     _depth_pass = bool(_p31 and _p31.get("depth"))
@@ -2638,12 +2648,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         from doomfj.combat import aim_window as _aim_window
         assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
         # M7 P6: a standing barrel records too (radius class aimcode.RC_BARREL)
-        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar), centery=cfg.CENTERY, viewh=cfg.VIEW_H)
+        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar), centery=cfg.CENTERY, viewh=cfg.VIEW_H,
+                                        **({"souls": True} if _SOUL else {}))       # M8 C8: the soul's class
         # issue #119 items 4 and 7: table_text runs the leaf's emit-time proofs (the MINZ order, every box >= 1 column;
         # a barrel's bound needs its standing frame from the sprite wad)
-        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(
-            rm, bool(_bar), sprite_wad=sprite_wad,
-            **({"r0": _p31["chase"]["r0"]} if _p31.get("chase") and _p31["chase"]["r0"] != 20 else {}))]   # M8 C8
+        _aim_decls = (_aimcode.decls(bool(_bar), **({"souls": True} if _SOUL else {}))
+                      + [_aimcode.table_text(
+                          rm, bool(_bar), sprite_wad=sprite_wad,
+                          **({"r0": _p31["chase"]["r0"]} if _p31.get("chase") and _p31["chase"]["r0"] != 20 else {}),
+                          **({"souls": True} if _SOUL else {}))])                                        # M8 C8
     else:
         _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
@@ -2695,6 +2708,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert standalone or all(t_.skills == 7 for t_ in _TELE), "M8 C5: a skill-gated teleport needs g_skill"
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
+    assert not _SOUL or (_KNOCK and _FIGHT), "M8 C8: the lost soul flies on the knock cells and the fight's target load"
+    assert not (_SOUL and _TELE), ("M8 C8: a lost soul's teleport (EV_Teleport's z, momz and ceilingz: lostsoul."
+                                   "_soul_teleported) is the model's only -- wire soulcode.try_lines' and mm_move's "
+                                   "teleports before a map with both ships")
     _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
     assert bool(_p31 and _p31.get("d3")) == _D3, "M7 P8a: p31_parts' compositor rules and the emitter's disagree"
     if _LOOT:                                 # the oracle's two D3 keys (reference_model.GAME_RENDER_KW) follow the rule
@@ -2833,6 +2850,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         M7 P6 `aim_baked`: a BAKED body that records the aim window (the standing baked barrels'
         `thing_leaf_bb`; every other baked thing keeps the body that never records)."""
         return [f"{label}:",
+                # M8 C8: a soul's row select swapped the leaf's floor for its z (soulcode.select_lines): back
+                *(_soulcode.leaf_restore_lines() if (_SOUL and mt and label == "thing_leaf") else []),
                 f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
                 f"{proj}, {cfg.CENTERX}, "
                 f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
@@ -3853,7 +3872,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"],
                                   **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpm")} if _TELE else {}),
                                   list_bits=_LIST_BITS,                   # M8 F1.5: the relink's twins
-                                  **({"r0": _chase["r0"]} if _chase.get("r0", 20) != 20 else {}))   # M8 C8
+                                  **({"r0": _chase["r0"]} if _chase.get("r0", 20) != 20 else {}),   # M8 C8
+                                  **({"soul": True} if _SOUL else {}))       # M8 C8: a soul's float
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES,
                                  **({"fight": True} if _FIGHT else {}))    # M7 P8a I: toward the target
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
@@ -3864,7 +3884,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                    **({"fight": True} if _FIGHT else {}),   # M7 P8a I: the TARGET's
                                    # M8 C8: the Baron's attack (A_BruisAttack: brclaw, else pj_spawn)
                                    **({"bruiser": True} if "MT_BRUISER" in _p31["types"] else {}),
-                                   **({"shadow": True} if _INVIS_T in _POWERS else {}))   # M8 C6: invisibility
+                                   **({"shadow": True} if _INVIS_T in _POWERS else {}),  # M8 C6: invisibility
+                                   **({"soul": True} if _SOUL else {}))     # M8 C8: the soul's range
                     + _p31["decide_lines"])
                    if _p31.get("decide_lines") else [])
                 # M7 P5: the leaves the attacks land through -- dp_go (hurtcode), the pools' spawns, phases and shared
@@ -3887,7 +3908,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                         "slot_back": (lambda m_: _teleportcode.slot_back_lines(
                             m_, facing="mon_facing + %d*dw" % m_, knock=True, walk=False, tag="tpkb")),
                         "telefrag": True}                        # M8: the thrust of P_TeleportMove's 10000
-                       if _TELE else {})) if _KNOCK else [])
+                       if _TELE else {}),
+                    **({"souls": dict(_p31["world"].soul_of)} if _SOUL else {})) if _KNOCK else [])
+                # M8 C8 (doomfj.soulcode): the lost souls' leaves -- the thinker stubs, the charge, the slam
+                + (_soulcode.leaves(_p31["world"], slot_rt=[t_ for t_, _r in _chase["slots_rt"]], mon_root=_mroot,
+                                    lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:]) for t_ in _chase["lift_walk"]],
+                                    pick_slots=_loot_slots,
+                                    drop_rt=[_bar["drop_first"] + k_ for k_ in range(_bar["ndrop"])],
+                                    var=_soul_var(_p31["world"])) if _SOUL else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
@@ -5427,7 +5455,7 @@ def anim_patches(sprite_wad, frames) -> dict:
     rotation 8; a `...A0` lump is every rotation (0). A frame with no lump at all is an error: P3
     would have nothing to draw."""
     # M8 C8: a sprite lump's rotation characters are digits -- BOSSBACK (Doom II's cast backdrop, in freedoom1.wad) has
-    # the Baron's prefix and an 8-character name, and is no sprite
+    # the Baron's prefix and an 8-character name, and SKULFACE (the lost soul's prefix) 8 letters: neither is a sprite
     names = [n for n in sprite_wad.names() if len(n) in (6, 8) and n[5].isdigit() and (len(n) == 6 or n[7].isdigit())]
     out = {}
     for sprite, idxs in frames.items():

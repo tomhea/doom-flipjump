@@ -61,7 +61,7 @@ def test_the_facts_the_model_leans_on():
     assert all(m[t].height == 56 * F for t in core)
     assert m["MT_TROOP"].meleestate == m["MT_TROOP"].missilestate == "S_TROO_ATK1"
     assert m["MT_POSSESSED"].meleestate == gd.S_NULL and m["MT_SERGEANT"].missilestate == gd.S_NULL
-    assert [m[t].reactiontime for t in gd.MONSTER_DOOMEDNUMS.values()] == [8] * 6
+    assert [m[t].reactiontime for t in gd.MONSTER_DOOMEDNUMS.values()] == [8] * len(gd.MONSTER_DOOMEDNUMS)
     assert m["MT_TROOPSHOT"].speed == 10 * F and m["MT_TROOPSHOT"].damage == 3
     assert m["MT_BARREL"].spawnhealth == 20 and m["MT_SHADOWS"].flags & gd.MF_SHADOW
     assert [gd.STATES["S_%s_RUN1" % p].tics for p in ("POSS", "SPOS", "TROO", "SARG")] == [4, 3, 3, 2]

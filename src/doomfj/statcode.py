@@ -103,7 +103,9 @@ def item_lines() -> List[str]:
 def check_world(w) -> None:
     """the emit-time facts the counters lean on: every monster counts as a kill, every count fits two decimal digits
     (LEVEL COMPLETE's slots) and its cell, and the secrets fit one slot"""
-    assert all(gd.THING_TYPES[t.type].flags & gd.MF_COUNTKILL for t in w.mon_things), (
+    # M8 C8: the lost soul (MT_SKULL) is not COUNTKILL -- damagecode's dm_kill skips the count for it (`dm_sk`)
+    assert all(gd.THING_TYPES[t.type].flags & gd.MF_COUNTKILL or t.type == gd.MOBJINFO["MT_SKULL"].doomednum
+               for t in w.mon_things), (
         "kill_lines counts every monster death: a non-COUNTKILL monster type needs a test at dm_kill")
     # M8 F1.1: 2 or 3 decimal digits a count (count_digits), in 8-bit cells (p_killcount / p_itemcount)
     assert len(w.mon_things) <= 0xFF, "the kills are an 8-bit cell: %d monster slots" % len(w.mon_things)

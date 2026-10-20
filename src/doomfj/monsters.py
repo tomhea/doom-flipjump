@@ -842,7 +842,24 @@ class MonsterPhase:
             out.update({"ltst": ws.lt_state[0] if one else tuple(ws.lt_state),
                         "ltct": ws.lt_count[0] if one else tuple(ws.lt_count), "rng_lt": ws.rng_light})
         out.update(self.switch_state())                      # M8: the switch textures (a SWITCH_TEX map)
+        out.update(self.soul_state())                        # M8 C8: the lost souls (doomfj.soulcode)
         return out
+
+    def soul_state(self) -> Dict[str, object]:
+        """M8 C8 (doomfj.soulcode.PERSIST): the lost souls' cells in their fj units -- sk_fly, sk_inf (1 nibble a
+        soul), sk_z, sk_momz (16.16 as 32 bits unsigned), sk_ceil (16 bits); {} on a map without a soul. A probe
+        reads a count-1 cell as an int"""
+        w = self.world
+        souls = getattr(w, "soul_slots", ())
+        if not souls or w.monsters not in ("push", "final"):
+            return {}
+        ws, n = w.ws, len(souls)
+
+        def cell(vals):
+            return vals[0] if n == 1 else tuple(vals)
+        return {"sk_fly": cell(list(ws.sk_fly)), "sk_inf": cell(list(ws.sk_inf)),
+                "sk_z": cell([v & MASK32 for v in ws.sk_z]), "sk_momz": cell([v & MASK32 for v in ws.sk_momz]),
+                "sk_ceil": cell([v & 0xFFFF for v in ws.sk_ceil])}
 
     # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------
     def hurt_state(self) -> Dict[str, int]:
@@ -1005,8 +1022,11 @@ class MonsterViews:
         the phase has moved them (map units)"""
         ws = phase.world.ws
         out = [(t.x, t.y) for t in self.drawable]
+        souls = getattr(phase.world, "soul_of", {})
         for m, di in enumerate(self.mdi):
             out[di] = (ws.mon_x[m], ws.mon_y[m])
+            if m in souls:                     # M8 C8: a lost soul stands at its own z (map units: z >> 16)
+                out[di] += (ws.sk_z[souls[m]] >> 16,)
         return out
 
     def rt_state(self, phase: "MonsterPhase") -> dict:
@@ -1020,7 +1040,7 @@ class MonsterViews:
         M = 0xFFFFFFFF
         thpos, thss = [], []
         for di in self.rt_drawable:
-            x, y = pos[di]
+            x, y = pos[di][:2]
             thpos.append(((x << 16) & M) | (((y << 16) & M) << 32))
             thss.append(self.rm.point_in_subsector(self.cmap, x, y))
         for m, t in enumerate(self.rt):                   # a monster's leaf is the model's own
@@ -1076,7 +1096,17 @@ class MonsterViews:
         """M7 P6: `render_wall_frame(thing_removed=)` -- the drawable indices of what the game removed (the pickups
         taken, the barrels gone; `MonsterPhase.taken`)"""
         picks, bars = phase.taken()
-        return sorted([self.pdi[i] for i in picks] + [self.bdi[b] for b in bars])
+        # M8 C8: a lost soul REMOVED at the end of its death (S_NULL: inactive, though its skill spawned it)
+        w = phase.world
+        bit = self.gd_skill_bit(w.ws.skill)
+        souls = [self.mdi[m] for m in getattr(w, "soul_slots", ())
+                 if not w.ws.mon_active[m] and w.mon_things[m].flags & bit]
+        return sorted([self.pdi[i] for i in picks] + [self.bdi[b] for b in bars] + souls)
+
+    @staticmethod
+    def gd_skill_bit(skill: int) -> int:
+        from doomfj.gamedata import skill_bit
+        return skill_bit(skill)
 
     def barrel_views(self, phase: "MonsterPhase") -> Dict[int, str]:
         """M7 P6: `render_wall_frame(barrel_views=)` -- {drawable index: lump} of every standing barrel, its state's

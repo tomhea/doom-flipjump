@@ -297,6 +297,7 @@ THING_SPRITE = {
     # M8 C7: the hanging bodies E1M9 adds (drawn from the ceiling down: gamedata.spawn_dz) and its dead cacodemon,
     # whose frame is not A (THING_SPRITE_FRAME)
     53: "GOR5", 59: "GOR2", 62: "GOR5", 63: "GOR1", 22: "HEAD",
+    3006: "SKUL",                 # M8 C8: the lost soul (doomfj.lostsoul) -- drawn at its own z
     58: "SARG",                   # the SPECTRE. DOOM draws it as a fuzzed SARG; there is no fuzz
                                   # here, so it renders as a plain demon -- which is a great deal
                                   # better than the previous behaviour, where the one spectre in
@@ -384,6 +385,9 @@ VANISHABLE_TYPES = frozenset({
     2035,                                   # BAR1  the barrel -- destroyed, not picked up
 })
 BARREL_TYPE = 2035                          # M7 P6: the barrel (`render_wall_frame(barrel_views=)`)
+# M8 C8: the monsters the GAME removes (their death states end in S_NULL: the lost soul) -- `thing_removed` may name
+# them (a runtime thing: the fj unlinks it, doomfj.soulcode.remove_lines); they have no visibility flag
+REMOVABLE_MONSTER_TYPES = frozenset({3006})
 
 # ── THE 25M PACKAGE (owner goal, 2026-08-14) — A DELIBERATE PICTURE CHANGE ─────────────────────
 #
@@ -2475,19 +2479,23 @@ class ReferenceModel:
                                       **mover_mask_kw(self, scene.cmap, _drawable,
                                                       mover_leaves(scene.map_wad, scene.mapname, scene.cmap)))
             _drawable_spawn = _drawable          # the classification's own (pre-override) list
+            # M8 C8 (doomfj.lostsoul): a thing whose `thing_positions` entry carries a THIRD value, its z (map units,
+            # absolute), is drawn standing there instead of on its leaf's floor -- a lost soul (MonsterViews.positions)
+            _tz_abs = {}
             if thing_positions is not None:
                 assert len(thing_positions) == len(_drawable), (
                     f"thing_positions has {len(thing_positions)} entries, "
                     f"{scene.mapname} has {len(_drawable)} drawable things")
                 # ⚠ A BAKED thing is CODE inside its leaf: fj cannot move it, and the wire does not
                 # even carry its position. Moving one here would compare two different worlds.
-                _moved = [i for i, (t, (px, py)) in enumerate(zip(_drawable, thing_positions))
-                          if _baked[i] and (px, py) != (t.x, t.y)]
+                _moved = [i for i, (t, _p) in enumerate(zip(_drawable, thing_positions))
+                          if _baked[i] and (_p[0], _p[1]) != (t.x, t.y)]
                 assert not _moved, (
                     f"thing_positions moves BAKED things {_moved[:8]} -- they are baked into their "
                     f"leaf's code and cannot move (see doomfj.things.baked_thing_mask)")
-                _drawable = [replace(t, x=px, y=py)
-                             for t, (px, py) in zip(_drawable, thing_positions)]
+                _drawable = [replace(t, x=_p[0], y=_p[1])
+                             for t, _p in zip(_drawable, thing_positions)]
+                _tz_abs = {i: _p[2] for i, _p in enumerate(thing_positions) if len(_p) > 2}
             # M14.5 §3.3: the visibility flags. `thing_hidden` is a set of DRAWABLE indices the
             # host has removed from the world (picked up, destroyed). A baked thing can be hidden
             # only through its flag, so only a baked VANISHABLE one may be named; asking to hide
@@ -2516,7 +2524,8 @@ class ReferenceModel:
                 _views[_bdi] = (_blump, False)
             # M7 P6: what the game removed (a pickup taken, a barrel gone) -- checked here, joined below
             _removed = frozenset(thing_removed or ())
-            _rbad = sorted(di for di in _removed if _drawable_spawn[di].type not in VANISHABLE_TYPES)
+            _rbad = sorted(di for di in _removed if _drawable_spawn[di].type not in VANISHABLE_TYPES
+                           and _drawable_spawn[di].type not in REMOVABLE_MONSTER_TYPES)   # M8 C8: a removed soul
             assert not _rbad, (f"thing_removed names drawables {_rbad[:8]} whose types cannot vanish "
                                f"(VANISHABLE_TYPES: the pickups and the barrel)")
             _hidden = frozenset(thing_hidden or ())
@@ -2640,7 +2649,7 @@ class ReferenceModel:
                             _sss = scene.cmap.subsectors[ss_first[seg_i]]
                             _ssec = self._seg_sector(lds, sds, secs, scene.cmap.segs[_sss.firstseg])
                             _spr = self.project_thing(viewx, viewy, viewangle, viewz, t.x, t.y,
-                                                      _ssec.floor_h, _sart, MIN_SPRITE_H_MONSTER)
+                                                      _tz_abs.get(t_di, _ssec.floor_h), _sart, MIN_SPRITE_H_MONSTER)
                             # P11 (d): and its bucket box is not FULLY behind that column's nearer pieces
                             if _spr is not None:
                                 _shb = sprite_bucket_height(sprite_bucket(_spr[3], H), H)
@@ -2705,7 +2714,8 @@ class ReferenceModel:
                                 _ass = scene.cmap.subsectors[ss_first[seg_i]]
                                 _asec = self._seg_sector(lds, sds, secs, scene.cmap.segs[_ass.firstseg])
                                 _aty, _ath = self.thing_rows(
-                                    viewz, _asec.floor_h + (((MISSILE_Z if t.z is None else t.z) if mob else 0)),
+                                    viewz, _tz_abs.get(t_di, _asec.floor_h)
+                                    + (((MISSILE_Z if t.z is None else t.z) if mob else 0)),
                                     _aart, _axs)
                                 _ahb = sprite_bucket_height(sprite_bucket(_ath, H), H)
                                 _ayb = _aty + _ath - _ahb
@@ -2732,7 +2742,7 @@ class ReferenceModel:
                     # (minh_: the graduated acceptance's bound, decided above the aim window)
                     # M8 C7: a map thing hung from the ceiling sits at ceiling - height (gamedata.spawn_dz; 0 for the rest)
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
-                                            t.x, t.y, tsec.floor_h + (((MISSILE_Z if t.z is None else t.z)
+                                            t.x, t.y, _tz_abs.get(t_di, tsec.floor_h) + (((MISSILE_Z if t.z is None else t.z)
                                                                        if mob else _GD().spawn_dz(t.type, tsec.floor_h,
                                                                                                   tsec.ceil_h))),
                                             art, minh_)

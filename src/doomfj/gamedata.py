@@ -500,6 +500,24 @@ _EXT_STATE_ROWS: Tuple[Tuple, ...] = (
     ('S_BRBALLX1', 'BAL7', 32770, 6, None, 'S_BRBALLX2'),
     ('S_BRBALLX2', 'BAL7', 32771, 6, None, 'S_BRBALLX3'),
     ('S_BRBALLX3', 'BAL7', 32772, 6, None, 'S_NULL'),
+    # M8 C8 part 2: the lost soul (info.c S_SKULL_STND .. S_SKULL_DIE6, Chocolate Doom at SOURCE_COMMIT, fetched raw
+    # with curl 2026-10-19) -- after the Baron's, so its borrowed indices are 30 .. 45
+    ('S_SKULL_STND', 'SKUL', 32768, 10, 'A_Look', 'S_SKULL_STND2'),
+    ('S_SKULL_STND2', 'SKUL', 32769, 10, 'A_Look', 'S_SKULL_STND'),
+    ('S_SKULL_RUN1', 'SKUL', 32768, 6, 'A_Chase', 'S_SKULL_RUN2'),
+    ('S_SKULL_RUN2', 'SKUL', 32769, 6, 'A_Chase', 'S_SKULL_RUN1'),
+    ('S_SKULL_ATK1', 'SKUL', 32770, 10, 'A_FaceTarget', 'S_SKULL_ATK2'),
+    ('S_SKULL_ATK2', 'SKUL', 32771, 4, 'A_SkullAttack', 'S_SKULL_ATK3'),
+    ('S_SKULL_ATK3', 'SKUL', 32770, 4, None, 'S_SKULL_ATK4'),
+    ('S_SKULL_ATK4', 'SKUL', 32771, 4, None, 'S_SKULL_ATK3'),
+    ('S_SKULL_PAIN', 'SKUL', 32772, 3, None, 'S_SKULL_PAIN2'),
+    ('S_SKULL_PAIN2', 'SKUL', 32772, 3, 'A_Pain', 'S_SKULL_RUN1'),
+    ('S_SKULL_DIE1', 'SKUL', 32773, 6, None, 'S_SKULL_DIE2'),
+    ('S_SKULL_DIE2', 'SKUL', 32774, 6, 'A_Scream', 'S_SKULL_DIE3'),
+    ('S_SKULL_DIE3', 'SKUL', 32775, 6, None, 'S_SKULL_DIE4'),
+    ('S_SKULL_DIE4', 'SKUL', 32776, 6, 'A_Fall', 'S_SKULL_DIE5'),
+    ('S_SKULL_DIE5', 'SKUL', 9, 6, None, 'S_SKULL_DIE6'),
+    ('S_SKULL_DIE6', 'SKUL', 10, 6, None, 'S_NULL'),
 )
 
 # M8 C6 (the PLASMA RIFLE, E1M6 / E1M9) -- info.c's rows. THE STATE BYTE WAS FULL: 246 states held indices 0..245 and
@@ -552,12 +570,16 @@ assert len(STATE_NAMES) <= 255
 # weapon-only by check_thing_aliases). Read a thing cell with THING_STATE_NAMES, write it with THING_STATE_INDEX --
 # never STATE_NAMES / STATE_INDEX, which name the weapon state at a borrowed index.
 EXT_STATE_NAMES: Tuple[str, ...] = tuple(r[0] for r in _EXT_STATE_ROWS)
-EXT_ALIAS_BASE = 3                       # S_PUNCHDOWN: the borrowed run is 3 .. 3 + len(EXT_STATE_NAMES) - 1 (= 29)
-THING_STATE_INDEX: Dict[str, int] = {**STATE_INDEX,
-                                     **{n: EXT_ALIAS_BASE + k for k, n in enumerate(EXT_STATE_NAMES)}}
-THING_STATE_NAMES: Tuple[str, ...] = tuple(
-    EXT_STATE_NAMES[i - EXT_ALIAS_BASE] if 0 <= i - EXT_ALIAS_BASE < len(EXT_STATE_NAMES) else n
-    for i, n in enumerate(STATE_NAMES))
+EXT_ALIAS_BASE = 3                       # S_PUNCHDOWN: the Baron's 27 borrow the run 3 .. 29
+# M8 C8 part 2: EVERY extension state's borrowed index, in EXT_STATE_NAMES order -- the Baron's run 3 .. 29, then the
+# lost soul's 16: 30 .. 38 (the rest of the run: S_SAW1 .. S_SAW3 end it, S_BLOOD1 at 39 is a thing's) and 212 .. 218
+# (the next weapon-only states). check_thing_aliases proves each one weapon-only; still free after these (2026-10-19):
+# 1, 2, 219 .. 221, 226 .. 233
+EXT_ALIAS_CODES: Tuple[int, ...] = tuple(range(EXT_ALIAS_BASE, 39)) + tuple(range(212, 219))
+assert len(EXT_ALIAS_CODES) == len(EXT_STATE_NAMES) == len(set(EXT_ALIAS_CODES)), "an extension state without an index"
+THING_STATE_INDEX: Dict[str, int] = {**STATE_INDEX, **dict(zip(EXT_STATE_NAMES, EXT_ALIAS_CODES))}
+_EXT_OF_CODE: Dict[int, str] = dict(zip(EXT_ALIAS_CODES, EXT_STATE_NAMES))
+THING_STATE_NAMES: Tuple[str, ...] = tuple(_EXT_OF_CODE.get(i, n) for i, n in enumerate(STATE_NAMES))
 assert all(THING_STATE_NAMES[THING_STATE_INDEX[n]] == n for n in EXT_STATE_NAMES)
 # a ghost is never ENTERED: no state's next is a ghost but another ghost's (the raise chain itself)
 assert all(st.next not in STATE_GHOSTS or n in STATE_GHOSTS for n, st in STATES.items())
@@ -619,6 +641,7 @@ ACTIONS: Dict[str, Action] = {a.name: a for a in (
     Action("A_BossDeath", "mobj", "cheap", "M8", "E1M8: the last Baron's death lowers the tag-666 floor"),
     Action("A_FirePlasma", "psprite", "psprite", "M8",
            "the plasma rifle: one cell, the flash flashstate + (P_Random() & 1), P_SpawnPlayerMissile (MT_PLASMA)"),
+    Action("A_SkullAttack", "mobj", "heavy", "M8", "the lost soul: MF_SKULLFLY, the charge at SKULLSPEED, momz"),
 )}
 
 
@@ -737,16 +760,21 @@ MOBJINFO: Dict[str, MobjInfo] = {m.name: m for m in (
     _mi("MT_PLASMA", -1, "S_PLASBALL", 1000, S_NULL, "sfx_plasma", 8, "sfx_None", S_NULL, 0,
         "sfx_None", S_NULL, S_NULL, "S_PLASEXP", S_NULL, "sfx_firxpl", 25 * F, 13 * F, 8 * F, 100,
         5, "sfx_None", MF_NOBLOCKMAP | MF_MISSILE | MF_DROPOFF | MF_NOGRAVITY, S_NULL),
+    # M8 C8: the lost soul (info.c MT_SKULL, fetched raw 2026-10-19) -- not MF_COUNTKILL; painchance 256 (always)
+    _mi("MT_SKULL", 3006, "S_SKULL_STND", 100, "S_SKULL_RUN1", "sfx_None", 8, "sfx_sklatk", "S_SKULL_PAIN", 256,
+        "sfx_dmpain", 0, "S_SKULL_ATK1", "S_SKULL_DIE1", S_NULL, "sfx_firxpl", 8, 16 * F, 56 * F, 50, 3,
+        "sfx_dmact", MF_SOLID | MF_SHOOTABLE | MF_FLOAT | MF_NOGRAVITY, S_NULL),
 )}
 del F
 
 # The five monster types E1M1 spawns, by editor number.
 MONSTER_DOOMEDNUMS: Dict[int, str] = {3004: "MT_POSSESSED", 9: "MT_SHOTGUY", 3001: "MT_TROOP",
                                       3002: "MT_SERGEANT", 58: "MT_SHADOWS",
-                                      3003: "MT_BRUISER"}                   # M8 C8: E1M8's Barons
+                                      3003: "MT_BRUISER",                   # M8 C8: E1M8's Barons
+                                      3006: "MT_SKULL"}                     # M8 C8: the lost soul (E1M6, E1M7)
 # M8 C8: the monster types whose states are EXTENSION states (THING_STATE_INDEX): a map without them emits what it
 # emitted before (monstercode.map_monster_types -- E1M1 and E1M2 have none)
-EXT_MONSTER_TYPES: Tuple[str, ...] = ("MT_BRUISER",)
+EXT_MONSTER_TYPES: Tuple[str, ...] = ("MT_BRUISER", "MT_SKULL")
 # M8 C8: A_BossDeath's maps (p_enemy.c, Doom 1: CheckBossEnd and the episode switch) -- map -> (the boss type whose last
 # death fires it, the sector tag, EV_DoFloor's rule). E1M8: every Baron dead -> tag 666 lowerFloorToLowest. (E2M8 /
 # E3M8 end the level and E4 lowers / opens other tags: not E1, not here)
@@ -802,6 +830,7 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     *(_tt_from_info(mt) for mt in ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT",
                                    "MT_SHADOWS", "MT_BARREL", "MT_CLIP", "MT_SHOTGUN")),
     _tt_from_info("MT_BRUISER"),                                      # M8 C8: radius 24, solid
+    _tt_from_info("MT_SKULL"),                                        # M8 C8: the lost soul, radius 16, solid
     # pickups verified in info.c's visible part (MT_MISC0..MT_MISC18)
     ThingType(2018, "MT_MISC0", 20, MF_SPECIAL, "info.c"),
     ThingType(2019, "MT_MISC1", 20, MF_SPECIAL, "info.c"),
@@ -1017,8 +1046,9 @@ def check_thing_aliases(alias_base: int = None, ext_names: Sequence[str] = None)
     reaches (the weaponinfo roots and the code-set psprite states; never a mobjinfo root, never the player thing's
     states), is not S_NULL and stays below the core count -- so no thing cell holds it in its own meaning; and every
     extension state is a THING's (reached from a mobjinfo root). One line per defect (the host test mutates the base)."""
-    base = EXT_ALIAS_BASE if alias_base is None else alias_base
     names = EXT_STATE_NAMES if ext_names is None else tuple(ext_names)
+    # M8 C8 part 2: the indices EXT_ALIAS_CODES gives; a base (the host test's mutation) makes them one run from it
+    codes = EXT_ALIAS_CODES if alias_base is None else tuple(range(alias_base, alias_base + len(names)))
     mobj = _closure([s for mi in MOBJINFO.values() for s in mi.entry_states()]
                     + [s for s, d in CODE_ENTRY_STATES.items() if d == "mobj"], STATES)
     psp = _closure([s for w in WEAPONINFO.values() for s in (w.upstate, w.downstate, w.readystate, w.atkstate,
@@ -1026,7 +1056,7 @@ def check_thing_aliases(alias_base: int = None, ext_names: Sequence[str] = None)
                    + [s for s, d in CODE_ENTRY_STATES.items() if d == "psprite"], STATES)
     bad = []
     for k, n in enumerate(names):
-        i = base + k
+        i = codes[k]
         if not 0 < i < CORE_STATE_COUNT:
             bad.append("%s: borrowed index %d outside 1 .. %d" % (n, i, CORE_STATE_COUNT - 1))
             continue

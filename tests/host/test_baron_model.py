@@ -249,11 +249,13 @@ def test_control_a_boss_death_without_the_player_check_is_caught(e1m8, monkeypat
 
 
 def test_the_radius_classes_hold_30_and_one_other():
-    """M8 C8 (world.radius_classes): class 0 is 20 on every core map, E1M8's 24; a third radius (a lost soul's 16 beside
-    an imp's 20) is refused -- the survey's radius row reports it"""
+    """M8 C8 (world.radius_classes): class 0 is 20 on every core map, E1M8's 24; a third radius (a 20 beside a 24) is
+    refused -- the survey's radius row reports it. M8 C8 part 2: the lost soul's 16 is a class of its own (soulcode,
+    aimcode.RC_SOUL), never one of the two -- E1M6 / E1M7's 16 + 20 + 30 keep (20, 30)"""
     from doomfj.world import radius_classes
     assert radius_classes([20, 30, 20]) == (20, 30) == radius_classes([30]) == radius_classes([])
     assert radius_classes([24, 24]) == (24, 30) == radius_classes([24, 30])
-    for bad in ([16, 20, 30], [16, 24], [20, 24]):
+    assert radius_classes([16, 20, 30]) == (20, 30) and radius_classes([16, 24]) == (24, 30)
+    for bad in ([20, 24], [16, 20, 24], [31, 20]):
         with pytest.raises(AssertionError):
             radius_classes(bad)

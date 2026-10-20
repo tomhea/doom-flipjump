@@ -106,7 +106,8 @@ KB_SCRATCH = ["kb_tx: hex.vec 8", "kb_ty: hex.vec 8", "kb_i8x: hex.vec 8", "kb_i
 STOPSPEED, FRICTION, MAXMOVE = gd.STOPSPEED, gd.FRICTION, gd.MAXMOVE
 CORPSE_QUARTER = gd.FRACUNIT // 4          # P_XYMovement's corpse rule: |mom| > FRACUNIT/4
 REVERSE_DMG, REVERSE_DZ = 40, 64           # P_DamageMobj: damage < 40, target->z - inflictor->z > 64*FRACUNIT
-MASS_SHIFT = {100: 3, 400: 5}              # FixedMul(dmg * (FRACUNIT >> 3) * 100 / mass, trig) == dmg * trig >> this
+MASS_SHIFT = {100: 3, 400: 5, 50: 2}       # FixedMul(dmg * (FRACUNIT >> 3) * 100 / mass, trig) == dmg * trig >> this
+MASS_CLASS = {100: 0, 400: 1, 50: 2}       # kb_hv: the target's mass class (M8 C8: 50 the lost soul's, kb_th's soul path)
 # M8 C8: the Baron's mass 1000 is no shift: its thrust T = dmg * (FRACUNIT >> 3) * 100 // 1000 is a table on the damage
 # (`kbm1k`, 5 nibbles), and FixedMul(T [* 4], trig) is hex.fixed_mul_lo 8, 4 -- exactly fixedpoint.fixed_mul(.., 8, 4),
 # the model's (combat._thrust). Only a map with a mass-1000 monster emits any of it (E1M8)
@@ -136,9 +137,13 @@ def check_model_rules(w=None) -> None:
         assert w.rm.angle_shift == 20, "kb_idx is kb_ang's top 3 nibbles"
         n = w.layout.nmon
         assert {w.mon_info[m].mass for m in range(n)} <= set(MASS_SHIFT) | {MASS_TABLE}
-        # M8 C8: ONE monster height (move_lines' `height`: E1M8's Barons 64) and the map's radius classes
+        # M8 C8: ONE monster height (move_lines' `height`: E1M8's Barons 64) and the map's radius classes -- the lost
+        # soul's 16 its own class (doomfj.soulcode; world.radius_classes leaves it out)
         from doomfj.world import radius_classes
-        assert len(set(w.mon_height[:n])) == 1 and set(w.mon_radius[:n]) <= set(radius_classes(w.mon_radius[:n]))
+        souls = set(getattr(w, "soul_slots", ()))
+        assert len(set(w.mon_height[:n])) == 1
+        assert set(w.mon_radius[m] for m in range(n) if m not in souls) <= set(radius_classes(w.mon_radius[:n]))
+        assert all(w.mon_radius[m] == 16 for m in souls)
         assert not (MASS_TABLE in {w.mon_info[m].mass for m in range(n)} and w.teleports), (
             "M8 C8: the telefrag's thrust (kb_tf) on a mass-1000 monster is not built")
         from doomfj.combat import PLAYER_R
@@ -262,10 +267,11 @@ def _friction(cell: str, tag: str) -> List[str]:
 
 
 # ---- kb_go and the thrust --------------------------------------------------------------------------------------------
-def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False) -> List[str]:
+def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False, souls=None) -> List[str]:
     """`kb_go` (stl.fcall kb_go, kb_ret), its slot stubs `kbt<m>`, `kb_gm` and the thrust `kb_th` (+ `kb_pz`, the
     player's z). `slots[m]` = (runtime thing, radius, mass) per monster slot. PACKAGE 0's STUB without `slots`.
-    M8 (`telefrag`, a map with a WR teleport: thrust_lines') -- kb_tf 1 is the telefrag's 10000"""
+    M8 (`telefrag`, a map with a WR teleport: thrust_lines') -- kb_tf 1 is the telefrag's 10000. M8 C8 (`souls`
+    {slot: soul index}, a map with a lost soul): a soul's z is its sk_z (whole units) and its mass class 2 (50)"""
     if slots is None:
         return ["// M7 P8a (doomfj.knockcode): P_DamageMobj's thrust -- package 0's stub, package K's leaf",
                 "kb_go:",
@@ -302,10 +308,11 @@ def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False) -> List[str]
         out += ["  kbt%d:" % m,
                 "    hex.mov 4, kb_tx, mfx + %d*dw" % (4 * m), "    hex.mov 4, kb_tx + 4*dw, dm_x",
                 "    hex.mov 4, kb_ty, mfy + %d*dw" % (4 * m), "    hex.mov 4, kb_ty + 4*dw, dm_y",
-                "    hex.mov 4, kb_tz, mon_floorz + %d*dw" % (4 * m),
+                ("    hex.mov 4, kb_tz, sk_z + %d*dw" % (8 * souls[m] + 4) if souls and m in souls else
+                 "    hex.mov 4, kb_tz, mon_floorz + %d*dw" % (4 * m)),
                 *(["    hex.zero 1, kb_hv", "    hex.set 1, kb_hk, %d" % int(mass == MASS_TABLE)] if k1k and
                   mass == MASS_TABLE else
-                  ["    hex.set 1, kb_hv, %d" % int(MASS_SHIFT[mass] == 5)] + (["    hex.zero 1, kb_hk"] if k1k else [])),
+                  ["    hex.set 1, kb_hv, %d" % MASS_CLASS[mass]] + (["    hex.zero 1, kb_hk"] if k1k else [])),
                 "    hex.mov 8, kb_vx, mkx + %d*dw" % (8 * m), "    hex.mov 8, kb_vy, mky + %d*dw" % (8 * m),
                 "    stl.fcall kb_gm, kb_gmret",
                 "    hex.mov 8, mkx + %d*dw, kb_vx" % (8 * m), "    hex.mov 8, mky + %d*dw, kb_vy" % (8 * m),
@@ -330,11 +337,11 @@ def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False) -> List[str]
             "    hex.inc 2, kb_live",                                         # stopped -> moving
             "  kq_gr:",
             "    stl.fret kb_gmret"]
-    out += thrust_lines(telefrag, mass1k=k1k)
+    out += thrust_lines(telefrag, soul=bool(souls), mass1k=k1k)
     return out
 
 
-def thrust_lines(telefrag: bool = False, mass1k: bool = False) -> List[str]:
+def thrust_lines(telefrag: bool = False, soul: bool = False, mass1k: bool = False) -> List[str]:
     """`kb_th` (stl.fcall kb_th, kb_tret) on the window -- kb_tx / kb_ty (the target, 16.16), kb_i8x / kb_i8y (the
     inflictor << 16), kb_dm, kb_hp (health > 0), kb_rng (the target's stream), kb_tz / kb_tzp (its z, or the player's),
     kb_iz / kb_izp, kb_hv (mass 400) -- into kb_mx / kb_my (the momentum to add); and `kb_pz` (kb_pzv = the player's
@@ -343,7 +350,8 @@ def thrust_lines(telefrag: bool = False, mass1k: bool = False) -> List[str]:
     teleport.TELEFRAG_DAMAGE, which kb_dm's two nibbles cannot hold: no reversal (damage < 40 fails) and the product's
     damage operand is the constant -- 10000 * trig fits mul_lo's 8 nibbles (check_model_rules).
     M8 C8 (`mass1k`, a map with a mass-1000 monster: kb_hk 1 for it): the thrust T = kbm1k[damage] (x4 reversed), and
-    the momentum FixedMul(T, trig) by hex.fixed_mul_lo 8, 4 -- the model's fixed_mul exactly"""
+    the momentum FixedMul(T, trig) by hex.fixed_mul_lo 8, 4 -- the model's fixed_mul exactly. M8 C8 part 2 (`soul`):
+    mass class 2 (50, the lost soul) shifts by 2, by 0 reversed (the thrust x4)"""
     assert not (telefrag and mass1k), "M8 C8: the telefrag's thrust on a mass-1000 monster is not built"
     k1k = (["    hex.if1 1, kb_hk, kq_k1k"] if mass1k else [])
     k1k_lines = (["  kq_k1k:",
@@ -396,6 +404,10 @@ def thrust_lines(telefrag: bool = False, mass1k: bool = False) -> List[str]:
             "    finesine.read_sin kb_cs, kb_idx",
             "    hex.mul_lo 8, kb_my, kb_cs, kb_d8",
             # >> 3 (mass 100) or 5 (400), 2 less reversed (the thrust x4)
+            *(["    hex.if_flags kb_hv, %d, kq_sm, kq_s50" % (1 << MASS_CLASS[50]),   # M8 C8: the soul's 50
+               "  kq_s50:", "    hex.if1 1, kb_rev, kq_s3",
+               *_sar("kb_mx", 2, "kq_s5x"), *_sar("kb_my", 2, "kq_s5y"), "    ;kq_s3",
+               "  kq_sm:"] if soul else []),
             *_sar("kb_mx", 1, "kq_s1x"), *_sar("kb_my", 1, "kq_s1y"),
             "    hex.if1 1, kb_rev, kq_s2",
             *_sar("kb_mx", 2, "kq_s2x"), *_sar("kb_my", 2, "kq_s2y"),
@@ -428,8 +440,11 @@ def cell_lines(player_root: str) -> List[str]:
             "    stl.fret kb_cret"]
 
 
-def xy_lines() -> List[str]:
-    """`kb_xy` (stl.fcall kb_xy, kb_xyret): P_XYMovement on the move window (combat._xy_move)"""
+def xy_lines(soul: bool = False) -> List[str]:
+    """`kb_xy` (stl.fcall kb_xy, kb_xyret): P_XYMovement on the move window (combat._xy_move). M8 C8 (`soul`, a map
+    with a lost soul): kb_who 2 is a soul -- its try `sk_try`, and no friction while it flies or is airborne
+    (doomfj.soulcode)"""
+    from doomfj import soulcode as _SC
     def try_at(tag):
         return ["    stl.fcall kb_try, kb_tyret",
                 "    hex.if1 1, kb_ok, %s" % tag,
@@ -453,6 +468,7 @@ def xy_lines() -> List[str]:
            "    hex.mov 8, kb_cx, kb_px", "    hex.add 8, kb_cx, kb_xm",
            "    hex.mov 8, kb_cy, kb_py", "    hex.add 8, kb_cy, kb_ym",
            *try_at("kq_t2"),
+           *(_SC.xy_friction_lines() if soul else []),                   # M8 C8: SKULLFLY, airborne
            # the corpse rule: no friction while |mom| > FRACUNIT/4 on an axis and floorz is not the leaf's floor
            "    hex.if0 1, kb_dead, kq_stop",
            *_abs_cmp("kb_vx", CORPSE_QUARTER, "kq_cr1", "kq_cr1", "kq_crf", "kq_c1"),
@@ -478,9 +494,10 @@ def xy_lines() -> List[str]:
            *_friction("kb_vx", "kq_frx"), *_friction("kb_vy", "kq_fry"),
            "  kq_xout:",
            "    stl.fret kb_xyret",
-           "kb_try:",
-           "    hex.if1 1, kb_who, kb_mtry",
-           "    ;kb_ptry"]
+           *(_SC.try_dispatch_lines() if soul else
+             ["kb_try:",
+              "    hex.if1 1, kb_who, kb_mtry",
+              "    ;kb_ptry"])]
     return out
 
 
@@ -593,7 +610,7 @@ def mtry_lines(mon_root: str, lift_trigs=(), teleport: Sequence[str] = (), r0: i
 
 
 def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid", slot_back=None,
-               height: int = 56) -> List[str]:
+               height: int = 56, souls=None) -> List[str]:
     """`kb_pmove` (the player's: stl.fcall kb_pmove, kb_pret), `kb_mmove` (a monster's, on the context) and the slot
     stubs `kbs<m>` (stl.fcall kbs<m>, kbs_ret: the slot's momentum not 0 -> its cells into the context, its own
     `solid` flag cleared so mm_things skips it, kb_mmove, the cells back). `slots[m]` = (runtime thing, radius, mass);
@@ -628,6 +645,8 @@ def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid", sl
            "  kq_mlv:",
            "    stl.fret kb_mret"]
     for m, (rt, r, _mass) in enumerate(slots):
+        if souls and m in souls:
+            continue                           # M8 C8: a soul's slot moves through soulcode's sks<k>
         assert r in (r0, 30), r
         X, Y = "thpos_rt + %d*dw" % (16 * rt + 4), "thpos_rt + %d*dw" % (16 * rt + 12)
         out += ["kbs%d:" % m,
@@ -661,7 +680,7 @@ def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid", sl
 
 def leaf_lines(slots: Sequence[tuple], *, player_root: str, mon_root: str, nib: int, lift_trigs=(),
                after_accept: Sequence[str] = (), solid: str = "mon_solid", teleport: Sequence[str] = (),
-               slot_back=None, telefrag: bool = False, r0: int = 20, height: int = 56) -> List[str]:
+               slot_back=None, telefrag: bool = False, r0: int = 20, height: int = 56, souls=None) -> List[str]:
     """every knock leaf, jumping over itself: kb_go (+ kbt<m>, kb_gm, kb_th, kb_pz), kb_cell, kb_xy (+ kb_try),
     kb_ptry, kb_mtry, kb_pmove, kb_mmove, kbs<m>. The program must hold: the cells (`decls(nmon)`), `tables_fj`,
     mrnd, finesine, the point_to_angle tables, ptloc_walk, ms_seed_leaf, the player's and the monsters' cells (their
@@ -669,11 +688,14 @@ def leaf_lines(slots: Sequence[tuple], *, player_root: str, mon_root: str, nib: 
     (dm_hp, dm_rng, dm_x, dm_y), p_hp / p_dead / rng_pl / wp_rdy, thpos_rt / thss_rt / msec / mon_floorz /
     mon_shootable / `solid`, lreq. `nib`: a sector id's width (World.sec_nibbles: move_lines' msec). M8 L4: `teleport`
     (mtry_lines') and `slot_back` (move_lines') -- the WR teleports of a monster's knock step; none on E1M1. M8:
-    `telefrag` (a map with a WR teleport) -- the thrust's kb_tf (thrust_lines)"""
+    `telefrag` (a map with a WR teleport) -- the thrust's kb_tf (thrust_lines). M8 C8: `souls` {slot: soul index}
+    (a map with a lost soul) -- their z and mass in the thrust, kb_xy's soul path, no kbs<m> for them"""
+    sk = {"souls": souls} if souls else {}
     return (["// M7 P8a (doomfj.knockcode, package K): knockback's leaves", ";kq_end"]
-            + go_lines(slots, telefrag) + cell_lines(player_root) + xy_lines() + ptry_lines(after_accept)
+            + go_lines(slots, telefrag, **sk) + cell_lines(player_root) + xy_lines(**({"soul": True} if souls else {}))
+            + ptry_lines(after_accept)
             + mtry_lines(mon_root, lift_trigs, teleport, **({"r0": r0} if r0 != 20 else {}))
-            + move_lines(slots, nib=nib, solid=solid, slot_back=slot_back,
+            + move_lines(slots, nib=nib, solid=solid, slot_back=slot_back, **sk,
                          **({"height": height} if height != 56 else {}))       # M8 C8: r0, the monsters' height
             + ["kq_end:"])
 

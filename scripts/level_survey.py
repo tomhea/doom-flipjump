@@ -455,6 +455,7 @@ class Survey:
             self.row("OK", "World(strict=True) builds")
         self.facts["_world"] = w
         self._readers(w)
+        self.monster_extensions(w)                          # M8 C8: the lost soul, the extension rows, the pain bits
         nmon, nbar = len(w.mon_things), len(w.barrel_things)
         self.facts.update(monsters=nmon, barrels=nbar, pickups=len(w.pickup_things), secrets=len(w.secret_sectors),
                           sound_nodes=getattr(w, "nsound", "?"))
@@ -504,6 +505,30 @@ class Survey:
             odd = sorted((r, v[:6]) for r, v in rows.items() if len(v) < max(len(x) for x in rows.values()))
             self.row("REFUSED", "weapon light: colormap rows", len(rows), 1,
                      "hudcode bakes one row; sectors on the others (row, sectors): %s" % odd)
+
+    def monster_extensions(self, w):
+        """M8 C8 (doomfj.lostsoul / soulcode; the lessons of the lost soul): the extension states' borrowed thing indices
+        (gamedata.EXT_ALIAS_CODES: a new monster's states take weapon-only states' indices -- check_thing_aliases proves
+        each; a later monster can run out of them), damagecode's pain classes (one nibble of dmrnd: at most 4
+        painchances on a map), and a map's souls -- their 16.16 heights (soulcode.check_model_rules) and a teleport line
+        beside them (EV_Teleport's z: the model's, not yet the fj's)"""
+        bad = gd.check_thing_aliases()
+        self.row("OK" if not bad else "REFUSED",
+                 "extension states' borrowed thing indices (gamedata.EXT_ALIAS_CODES, check_thing_aliases)",
+                 len(gd.EXT_STATE_NAMES), "", "; ".join(bad[:3]))
+        from doomfj.damagecode import pain_classes, profiles
+        self.cap("monster pain classes (damagecode: dmrnd's pain bits, one nibble)",
+                 len(pain_classes(profiles(w, gib=True)[0])), 4)
+        souls = getattr(w, "soul_slots", ())
+        if not souls:
+            return
+        from doomfj import soulcode
+        self.row("OK", "lost souls (MT_SKULL: doomfj.lostsoul, soulcode)", len(souls))
+        self.guard("lost souls: soulcode.check_model_rules (16.16 heights, radius 16)",
+                   lambda: soulcode.check_model_rules(w))
+        tels = getattr(w, "teleports", ())
+        self.row("REFUSED" if tels else "OK", "lost souls beside teleport lines (fj: EV_Teleport's soul z unwired)",
+                 len(tels), "", "wall_renderer refuses a map with both until soulcode wires tp_hit's z" if tels else "")
 
     def monsters_c8(self, w):
         """M8 C8 (the Baron): what the fj bakes per map about its monsters -- A_BossDeath's floor group (E1M8's tag 666),

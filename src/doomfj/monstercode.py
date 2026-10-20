@@ -25,7 +25,14 @@ MONSTER_TYPES = ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP", "MT_SERGEANT", "MT_SH
 # action ids; the sound actions (A_Pain, A_Scream, A_XScream) are no-ops (D5: no sound) and read 0
 MON_ACTIONS = (None, "A_Look", "A_Chase", "A_FaceTarget", "A_Fall", "A_PosAttack", "A_SPosAttack",
                "A_TroopAttack", "A_SargAttack",
-               "A_BruisAttack", "A_BossDeath")          # M8 C8: the Baron's (ids 9, 10: only a Baron's rows hold them)
+               "A_BruisAttack", "A_BossDeath",          # M8 C8: the Baron's (ids 9, 10: only a Baron's rows hold them)
+               "A_SkullAttack")                         # M8 C8: the lost soul's charge (id 11, doomfj.soulcode)
+
+
+def world_monster_types(w) -> Tuple[str, ...]:
+    """M8 C8: map_monster_types of a World's map (its monsters' mobjtype names)"""
+    return map_monster_types(gd.MONSTER_DOOMEDNUMS[t.type] for t in w.mw.things(w.mapname)
+                             if t.type in gd.MONSTER_DOOMEDNUMS)
 SOUND_ACTIONS = frozenset(a for a, x in gd.ACTIONS.items() if x.phase == "sound")
 TICS_FOREVER = 15
 STATE_FIELDS = (("next", 0, 2), ("tics", 2, 1), ("action", 3, 1), ("view", 4, 2))   # (name, nibble, width)
@@ -91,6 +98,8 @@ def state_table_values(types: Sequence[str] = MONSTER_TYPES) -> List[int]:
     vals = [0] * gd.CORE_STATE_COUNT                   # M8: the fog's states (after these) are no monster's
     states = monster_states(types)
     assert all(gd.THING_STATE_INDEX[s] < gd.CORE_STATE_COUNT for s in states)
+    # M8 C8: an extension row sits at a borrowed index (a weapon state's): no two monster states share one
+    assert len({gd.THING_STATE_INDEX[s] for s in states}) == len(states), "two monster states on one index"
     for s in states:
         vals[gd.THING_STATE_INDEX[s]] = pack(state_row(s, types))
     return vals
@@ -233,6 +242,11 @@ def rot_table_fj() -> str:
 
 
 # ---- P3.1: the emitter's parts (docs/gp-monsters.md section 7, items 1-4) --------------------------------------------
+def _sk_ctx(w, m: int, back: bool) -> list:
+    from doomfj.soulcode import move_context_lines
+    return move_context_lines(w, m, back)
+
+
 def _thing_key(t):
     return (t.type, t.x, t.y, t.angle, t.flags)
 
@@ -408,6 +422,12 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     assert tele == fog, "M8: the fog's rows and the teleports' rule disagree"
     nmon, schema = w.layout.nmon, w.schema
     snib = w.sec_nibbles                 # M8 L1: a sector id's width (doomfj.sectorcode)
+    # M8 C8 (doomfj.soulcode): THE LOST SOULS -- their cells and leaves ride the "final" modes (the knock cells, the
+    # fight's target load); a map without one has none of it
+    from doomfj.soulcode import soul_on as _soul_on
+    souls_map = _soul_on(w)                    # the map holds a soul (a radius-16 slot)
+    souls = souls_map and chase                # ... and it moves: its code (the "final" modes)
+    assert not souls or (knock and fight), "M8 C8: the lost soul flies on the knock cells and the fight's target load"
     if nmon == 0 or not rows:
         return None                      # a map without monsters animates nothing
     if loot:
@@ -498,11 +518,13 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         if shoot:
             sel.append("    hex.zero 2, sp_sid")
             if m is not None:
-                assert w.mon_radius[m] in (r0, 30), (m, w.mon_radius[m])      # sp_rc: class 0 r0, class 1 30
+                assert w.mon_radius[m] in (r0, 30) + ((16,) if souls_map else ()), (m, w.mon_radius[m])  # sp_rc
+                from doomfj.aimcode import RC_SOUL
                 sel += ["    hex.if0 1, mon_shootable + %d*dw, thsel_q%d" % (m, t),
                         "    hex.set 2, sp_sid, %d" % (m + 1),
                         "  thsel_q%d:" % t,
-                        "    hex.set 1, sp_rc, %d" % int(w.mon_radius[m] == 30)]
+                        "    hex.set 1, sp_rc, %d" % (RC_SOUL if w.mon_radius[m] == 16
+                                                    else int(w.mon_radius[m] == 30))]
         if m is not None:
             sel += ["    hex.mov 8, mr_tx, sp_x", "    hex.mov 8, mr_ty, sp_y",
                     "    hex.mov 1, mr_face, mon_facing + %d*dw" % m,
@@ -512,6 +534,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     "    hex.mov 2, ts_idx + 1*dw, ts_row + 4*dw",
                     "    hex.zero w/4, sp_ti",
                     "    mview.lookup sp_ti, ts_idx"]
+            if souls and m in w.soul_of:              # M8 C8: drawn at its z (soulcode.select_lines)
+                from doomfj.soulcode import select_lines as _sk_sel
+                sel += _sk_sel(w, m)
         if t in rt_bar:                      # M7 P6: a runtime barrel -- its state's view; aimed while it stands
             sel += barrel_select_lines(t, rt_bar[t], nmon=nmon, shoot=shoot, ex=d3)
         sel.append("    stl.fret thsel_ret")
@@ -531,7 +556,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                       see_tics=gd.STATES[w.mon_info[m].seestate].tics,
                       **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m],
                                      **({"r0": r0} if r0 != 20 else {}),               # M8 C8
-                                     **({"tp": dict(knock=knock)} if tele else {}))} if chase else {}),
+                                     **({"tp": dict(knock=knock)} if tele else {}),
+                                     **({"sk": (_sk_ctx(w, m, False), _sk_ctx(w, m, True))} if souls else {}))}
+                         if chase else {}),
                       **({"boss": boss_of[m]} if m in boss_of else {}),              # M8 C8
                       **({"dc": type_decide(w.mon_info[m])} if decide else {}),
                       **({"dmg": True} if damage else {}),
@@ -539,7 +566,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                       **({"hurt": dict(sp=gd.THING_STATE_INDEX[w.mon_info[m].spawnstate],
                                        spt=gd.STATES[w.mon_info[m].spawnstate].tics)} if hurt else {}),
                       **({"knock": True} if knock else {}),                      # M7 P8a: the knock move's splice
-                      **({"fight": True} if fight else {}))                      # M7 P8a I: the target
+                      **({"fight": True} if fight else {}),                      # M7 P8a I: the target
+                      **({"soul": dict(w=w, rt=slot_t[m], sp=gd.THING_STATE_INDEX[w.mon_info[m].spawnstate],
+                                       spt=gd.STATES[w.mon_info[m].spawnstate].tics)}
+                         if souls and m in w.soul_of else {}))                   # M8 C8: a lost soul's slot
                  for m in range(nmon)]
         nleaf = len(w.cmap.subsectors)
         extra = {
@@ -570,6 +600,13 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                 extra["decls_wake"] += [mc_don_decl(w, var, boot_skill)]
                 for k, sk in enumerate(skills):
                     restart[k] = restart[k] + mc_don_restart(w, var, sk)
+            if souls:                                  # M8 C8: the soul cells, their scratch, NEW GAME's lines
+                from doomfj import soulcode as _SC
+                _SC.check_model_rules(w)
+                extra["decls_wake"] += _SC.cell_decls(w, boot_skill) + _SC.SCRATCH
+                for k, sk in enumerate(skills):
+                    restart[k] = restart[k] + _SC.restart_lines(w, sk)
+                extra["soul"] = True
             nb = max(1, len(w.barrel_things))
             extra["decls_wake"] += (
                 p32b_decls(schema, nmon, {f: boot[f] for f in P32B_FIELDS}, [w._mon_sector(m) for m in range(nmon)],
@@ -620,7 +657,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                                        **({"knock": True} if knock else {}),
                                        **({"fight": True} if fight else {}),   # M7 P8a I: a monster's source
                                        **({"stats": True} if stats else {}),   # P10: the kill counter
-                                       **({"telefrag": True} if tele else {}))  # M8: P_TeleportMove's 10000
+                                       **({"telefrag": True} if tele else {}),  # M8: P_TeleportMove's 10000
+                                       **({"souls": dict(w.soul_of)} if souls else {}))   # M8 C8: the soul's flight
                     extra["decls_wake"] += dmp["decls"]
                     extra["decide_lines"] += dmp["lines"]
                     extra["tables"] += dmp["tables"]
@@ -882,10 +920,11 @@ NEAR_UNITS = NEAR                    # doomfj.sight.NEAR (R6: one source): REJEC
 BEHIND_REACH = LOOK_BEHIND_REACH     # world.LOOK_BEHIND_REACH: P_LookForPlayers sees behind within this
 
 
-def heavy_mask(dc) -> int:
+def heavy_mask(dc, soul: bool = False) -> int:
     """the action ids a slot takes as HEAVY (a K slot): HEAVY_IDS, and (M8 C8) A_BruisAttack's when the slot's type runs
-    it -- every core slot's mask is HEAVY_IDS' (its text unchanged)"""
+    it, A_SkullAttack's on a lost soul's slot -- every core slot's mask is HEAVY_IDS' (its text unchanged)"""
     ids = HEAVY_IDS + ((MON_ACTIONS.index("A_BruisAttack"),) if dc and "A_BruisAttack" in dc["acts"] else ())
+    ids += (MON_ACTIONS.index("A_SkullAttack"),) if soul else ()
     assert all(gd.ACTIONS[MON_ACTIONS[h]].cls == "heavy" for h in ids)
     return sum(1 << h for h in ids)
 
@@ -986,7 +1025,7 @@ def _sign_branch(cell, kind, yes, no):
 
 def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema, nib: int, mv=None,
               dc=None, dmg: bool = False, hear: bool = False, sec: int = None, hurt=None, knock: bool = False,
-              fight: bool = False, boss=None) -> list:
+              fight: bool = False, boss=None, soul=None) -> list:
     """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
     A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
     REJECT row of its spawn sector (indexed by the player's sector); t: its seen flag's index (`thseen`); nib: a
@@ -1028,7 +1067,12 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     the spawn state, whose A_Look runs at once (the slot's own look: its sound branch can wake it).
 
     `boss` (M8 C8, a boss map's boss slot -- E1M8's Barons: boss_lines' dict): its A_BossDeath. A slot whose type runs
-    A_BruisAttack takes that action as HEAVY too (heavy_mask: its id 9 joins HEAVY_IDS')."""
+    A_BruisAttack takes that action as HEAVY too (heavy_mask: its id 9 joins HEAVY_IDS').
+
+    `soul` (M8 C8, doomfj.soulcode: a LOST SOUL's slot -- dict(w=the World, rt=its runtime thing, sp / spt its spawn
+    state's index and tics)): its thinker splice (P_XYMovement, the spawn state a slam or a stop set -- its A_Look
+    run at once, the look's exits returning through `lkx` -- then P_ZMovement) in place of the knock splice; S_NULL
+    after its death states removes it (`rm`); A_SkullAttack is heavy and runs the charge (`k_A_SkullAttack`)."""
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     nthr = cell_nibbles(schema, "mon_threshold")
     ntg = cell_nibbles(schema, "mon_target")                     # M7 P8a I: 2 with infighting, else 1
@@ -1039,11 +1083,15 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     RE, TH, MD = "mon_reaction + %d*dw" % m, "mon_threshold + %d*dw" % (nthr * m), "mon_movedir + %d*dw" % m
     L = "mw%d_" % m
     nxt = "mw%d_next" % m
+    lx = ("%slkx" % L) if soul else nxt                  # M8 C8: a soul's look exits through lkx (soulcode)
+    if soul:
+        from doomfj import soulcode as _SC
     out = ["  mw%d:" % m,
            "    hex.if0 2, mt_n, mt_end",
            "    hex.dec 2, mt_n",
            "    hex.if0 1, %s, %s" % (AC, nxt),
-           *(_knock_slot_lines(m) if knock else []),                  # M7 P8a: the knock move (package K)
+           *(_SC.splice_lines(soul["w"], m, L=L, spawn=soul["sp"], spawn_tics=soul["spt"], ns=ns, nt=nt) if soul
+             else _knock_slot_lines(m) if knock else []),          # M7 P8a: the knock move (package K); M8 C8: a soul's
            "    hex.if_flags %s, %d, %sgo, %s" % (TI, 1 << TICS_FOREVER, L, nxt),
            "  %sgo:" % L,
            "    hex.if0 1, %s, %sready" % (TI, L),              # tics 0 at entry: deferred last tic -- READY
@@ -1053,8 +1101,9 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "  %sready:" % L,
            "    mstate.lookup mt_row, %s" % ST,
            "    hex.mov 2, mt_nxt, mt_row",
+           *(["    hex.if0 2, mt_nxt, %srm" % L] if soul else []),        # M8 C8: S_NULL -- P_RemoveMobj
            "    mstate.lookup mt_row, mt_nxt",
-           "    hex.if_flags mt_row + 3*dw, %d, %slight, %sheavy" % (heavy_mask(dc), L, L),
+           "    hex.if_flags mt_row + 3*dw, %d, %slight, %sheavy" % (heavy_mask(dc, soul=bool(soul)), L, L),
            "  %sheavy:" % L,
            "    hex.if_flags mt_used, %d, %stake, %sdefer" % (1 << K_SLOTS, L, L),
            "  %sdefer:" % L,                                  # no slot: tics stay 0, served first next tic
@@ -1072,7 +1121,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            # ---- A_Look: threshold 0; no sound before P4; P_LookForPlayers (not all around) -----------------
            "  %slook:" % L,
            "    hex.zero %d, %s" % (nthr, TH),
-           *(["    hex.if1 1, p_dead, %s" % nxt] if hurt else []),        # M7 P5: no live player to hear or see
+           *(["    hex.if1 1, p_dead, %s" % lx] if hurt else []),        # M7 P5: no live player to hear or see
            *(["    hex.zero 1, nz_amb",                                   # M7 P4.2b: the sound branch
               ("    hex.mov %d, mt_ms, %s" % (nib, msec_cell(m, nib)) if mv else
                "    hex.set %d, mt_ms, %d" % (nib, sec or 0)),
@@ -1090,15 +1139,15 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    hex.sub_constant 4, mt_dy, %d" % (y & 0xFFFF)),
            "    stl.fcall mt_dist_leaf, mt_ret",                  # mt_d = P_AproxDistance(dx, dy)
            "    hex.if1 1, thseen + %d*dw, %sbehind" % (t, L),     # seen by last frame's picture
-           "    hex.cmp 4, mt_d, mt_c128, %snear, %snear, %s" % (L, L, nxt),
+           "    hex.cmp 4, mt_d, mt_c128, %snear, %snear, %s" % (L, L, lx),
            "  %snear:" % L,
            "    stl.fcall mt_psec_leaf, mt_ret",                  # psec, once a frame
            *(["    hex.mov %d, mt_ms, %s" % (nib, msec_cell(m, nib)), "    stl.fcall mt_rj_leaf, mt_rjret"] if mv else
              ["    %s.lookup mt_rj, psec" % rj]),
-           "    hex.if0 1, mt_rj, %s" % nxt,
+           "    hex.if0 1, mt_rj, %s" % lx,
            "  %sbehind:" % L,                                  # behind and beyond 64: not seen
            *(["    hex.if1 1, nz_amb, %swake" % L] if hear else []),   # a heard ambusher in sight: no facing test
-           "    sim.jump16 %s, %s" % (FA, ", ".join(["%sf%d" % (L, k) for k in range(8)] + [nxt] * 8))]
+           "    sim.jump16 %s, %s" % (FA, ", ".join(["%sf%d" % (L, k) for k in range(8)] + [lx] * 8))]
     for k in range(8):
         cell, kind = FACING_BEHIND[k]
         src = {"dx": "mt_dx", "dy": "mt_dy", "sum": "mt_s", "dydx": "mt_s", "dxdy": "mt_s"}[cell]
@@ -1110,12 +1159,12 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
         elif cell == "dxdy":
             out += ["    hex.mov 4, mt_s, mt_dx", "    hex.sub 4, mt_s, mt_dy"]
         out += _sign_branch(src, kind, "%sbh%d" % (L, k), "%swake" % L)
-        out += ["  %sbh%d:" % (L, k), "    hex.cmp 4, mt_d, mt_c64, %swake, %swake, %s" % (L, L, nxt)]
+        out += ["  %sbh%d:" % (L, k), "    hex.cmp 4, mt_d, mt_c64, %swake, %swake, %s" % (L, L, lx)]
     out += ["  %swake:" % L,
             "    hex.set %d, %s, 1" % (ntg, TG),
             "    hex.set %d, %s, %d" % (ns, ST, see_idx),        # D-WAKE: the see state, no action run now
             "    hex.set %d, %s, %d" % (nt, TI, see_tics),
-            "    ;%s" % nxt,
+            "    ;%s" % lx,
             # ---- M7 P4.2a: A_Fall -- the corpse stops blocking (World._run_action) ------------------------------
             *(["  %sfall:" % L, "    hex.zero 1, mon_solid + %d*dw" % m, "    ;%s" % nxt] if dmg else []),
             *(boss_lines(L, nxt, boss) if boss else []),               # M8 C8: A_BossDeath
@@ -1171,6 +1220,9 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     if dc:
         out += p32c_slot_lines(m, t=t, rt=mv["rt"], dc=dc, schema=schema, nxt=nxt, hear=hear, src=bool(hurt),
                                knock=knock, fight=fight)
+    if soul:                                    # M8 C8: the look's exit, the removal, the charge (doomfj.soulcode)
+        out += (_SC.look_exit_lines(L=L, nxt=nxt) + _SC.remove_lines(soul["w"], m, soul["rt"], L=L, nxt=nxt)
+                + _SC.attack_slot_lines(soul["w"], m, soul["rt"], L=L, nxt=nxt, hear=hear))
     out += ["  %s:" % nxt]
     return out
 
@@ -1180,7 +1232,7 @@ P32B_FIELDS = ("mon_movecount", "mon_rng", "mon_floorz")
 
 
 def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: int, dc=None,
-                    solid: str = "mon_active", tp=None, r0: int = 20) -> list:
+                    solid: str = "mon_active", tp=None, r0: int = 20, sk=None) -> list:
     """slot m's move: its cells into the context, `mm_chase` (its own `solid` flag cleared, so the thing test skips
     it), the context back -- position into thpos_rt, the leaf into thss_rt, the sector into msec. `dc` (M7 P3.2c):
     `mm_decide` instead, with the decision's inputs (justattacked, seen, the kinds, reaction) and justattacked back;
@@ -1189,10 +1241,12 @@ def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: in
     until monsters die; M7 P4.2a: mon_solid, SET again after the move: a monster that moves is alive and solid,
     damagecode.check_model_rules). `nib`: a sector id's width (World.sec_nibbles: `msec`, `mm_sec`). M8 L4 (`tp`, a
     map with a WR teleport: dict(knock=)): after the move, a teleport's facing (and with knockback the momentum and
-    the fraction 0) -- teleportcode.slot_back_lines; None: the text is unchanged"""
+    the fraction 0) -- teleportcode.slot_back_lines; None: the text is unchanged. M8 C8 (`sk`, a map with a lost soul:
+    soulcode.move_context_lines' (in, back)): the soul context -- a soul's float rules in mm_move, its range in
+    mm_decide; None: the text is unchanged"""
     nz, nr, nc = (cell_nibbles(schema, f) for f in ("mon_floorz", "mon_rng", "mon_movecount"))
     assert (nz, nr, nc) == (4, 2, 2), (nz, nr, nc)
-    assert radius in (r0, 30) and speed in (8, 10), (radius, speed)     # M8 C8: r0, radius class 0 (radius_classes)
+    assert radius in (r0, 30) + ((16,) if sk else ()) and speed in (8, 10), (radius, speed)  # M8 C8: r0; a soul's 16
     X, Y = "thpos_rt + %d*dw" % (16 * rt + 4), "thpos_rt + %d*dw" % (16 * rt + 12)
     FZ, RN, MC = "mon_floorz + %d*dw" % (4 * m), "mon_rng + %d*dw" % (2 * m), "mon_movecount + %d*dw" % (2 * m)
     MD, AC, SS = "mon_movedir + %d*dw" % m, "%s + %d*dw" % (solid, m), "thss_rt + %d*dw" % (16 * rt)
@@ -1205,6 +1259,7 @@ def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: in
             "    hex.set w/4, mm_tw, %d" % rt,
             "    hex.zero w/4, mm_leafw", "    hex.mov 3, mm_leafw, %s" % SS,
             "    hex.mov %d, mm_sec, %s" % (nib, SC),
+            *(sk[0] if sk else []),                                  # M8 C8: the soul context
             "    hex.zero 1, %s" % AC,
             *(["    hex.mov 1, mm_ja, mon_justattacked + %d*dw" % m, "    hex.mov 1, mm_seen, thseen + %d*dw" % dc["t"],
                "    hex.set 1, mm_mk, %d" % dc["mk"], "    hex.mov 1, mm_re, mon_reaction + %d*dw" % m,
@@ -1213,6 +1268,7 @@ def p32b_move_lines(m: int, *, rt: int, radius: int, speed: int, schema, nib: in
                *(["    hex.mov 1, mon_justhit + %d*dw, mm_jh" % m] if dc.get("jh") else [])]
               if dc else ["    stl.fcall mm_chase, mm_cret"]),
             *(_tele_back(m, schema, tp) if tp else []),             # M8 L4: a teleport's facing, momentum, fraction
+            *(sk[1] if sk else []),                                  # M8 C8: the soul's z, floating, ceiling back
             "    hex.set 1, %s, 1" % AC,
             "    hex.mov 4, %s, mm_x" % X, "    hex.mov 4, %s, mm_y" % Y,
             "    hex.mov 4, %s, mm_z" % FZ,
@@ -1291,6 +1347,8 @@ def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear
                     "    hex.set %d, %s, %d" % (nt, TI, st[1]), "    ;%s" % nxt]
     from doomfj.combat import NO_FACE_ATTACKS
     for a in sorted(dc["acts"]):
+        if a == "A_SkullAttack":                # M8 C8: the soul's charge is its own (soulcode.attack_slot_lines)
+            continue
         # M8 C8: an attack that does not face its target (A_BruisAttack) runs the attack without the facing write
         # and without A_FaceTarget's MF_AMBUSH clear (`k_gon`)
         go = "%sk_gon" % L if a in NO_FACE_ATTACKS else "%sk_go" % L
@@ -1379,6 +1437,7 @@ def p32b_change_sector_lines(w, nmon: int, *, exit_guard: bool) -> list:
                 "    hex.mov %d, mt_ms, %s" % (nib, msec_cell(m, nib)),
                 "    stl.fcall mcf_leaf, mcf_ret",
                 "    hex.if0 1, mcf_hit, mcs_m%d" % m,
+                *(_soul_cs(w, m) if m in getattr(w, "soul_of", {}) else []),      # M8 C8: a soul ON the lift
                 "    hex.mov 4, mon_floorz + %d*dw, mcf_val" % (4 * m),
                 "  mcs_m%d:" % m]
     out += ["    ;mcs_skip"]
@@ -1393,6 +1452,11 @@ def p32b_change_sector_lines(w, nmon: int, *, exit_guard: bool) -> list:
             out += ["  %s:" % labs[k], "    hex.set 4, mcf_val, %d" % (fl & 0xFFFF), "    ;mcf_one"]
     out += ["  mcf_one:", "    hex.set 1, mcf_hit, 1", "  mcf_out:", "    stl.fret mcf_ret", "  mcs_skip:"]
     return out
+
+
+def _soul_cs(w, m: int) -> list:
+    from doomfj.soulcode import change_sector_lines
+    return change_sector_lines(w, m)
 
 
 def p32b_rj_leaf(sectors, nsec: int, nib: int) -> list:

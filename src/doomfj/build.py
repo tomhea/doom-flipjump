@@ -221,6 +221,7 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
     from doomfj.monstermove import map_persist
     from doomfj.switchcode import map_persist as _switch_persist
     from doomfj.teleportcode import map_persist as _tele_persist
+    from doomfj.soulcode import map_persist as _soul_persist              # M8 C8: the lost souls' cells
     from doomfj.exitcode import map_persist as _exit_persist
     from doomfj.powercode import map_persist as _power_persist
     from doomfj.wall_renderer import plasma_game_on
@@ -229,7 +230,8 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
             + _switch_persist(wad, mapname)
             + _exit_persist(wad, mapname)                   # M8 C9: lvsec on a map with a secret exit
             + _power_persist(wad, mapname)                  # M8 C6: the timed powers
-            + (PLASMA_PERSIST if plasma_game_on(wad, mapname) else ()))   # M8 C6: key 6's held flag
+            + (PLASMA_PERSIST if plasma_game_on(wad, mapname) else ())    # M8 C6: key 6's held flag
+            + _soul_persist(wad, mapname))                  # M8 C8: the lost souls' cells
 
 
 def automap_persist(cfg, menu: bool) -> tuple:

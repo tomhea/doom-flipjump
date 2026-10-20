@@ -129,12 +129,19 @@ class SeenHook:
         from doomfj.world import player_sinks
         ws, n = world.ws, world.layout.nmon
         pos = [(t.x, t.y) for t in self.drawable]
-        hidden = set()
+        hidden, removed = set(), set()
+        from doomfj.gamedata import skill_bit
+        bit = skill_bit(ws.skill)
         for m in range(n):
             di = self.views.mdi[m]
             pos[di] = (ws.mon_x[m], ws.mon_y[m])
+            if m in getattr(world, "soul_of", {}):              # M8 C8: a lost soul is drawn at its own z
+                pos[di] += (ws.sk_z[world.soul_of[m]] >> 16,)
             if not ws.mon_active[m]:
-                hidden.add(di)
+                # M8 C8: a lost soul the game REMOVED (its death ends in S_NULL) is the game's removal, not the
+                # skill's absence (reference_model's thing_removed: REMOVABLE_MONSTER_TYPES)
+                (removed if (m in getattr(world, "soul_of", {}) and world.mon_things[m].flags & bit)
+                 else hidden).add(di)
         # M8 (gen_dryrun on E1M5): a RUNTIME thing that is not a monster -- a pickup or decoration on a mover's floor
         # (M8 F1.3) -- is hidden too when this skill does not spawn it, as the game render's thing_hidden has it: the
         # renderer requires the runtime hidden set to be exactly ONE skill's absent set (things.skill_absent), and E1M5's
@@ -157,6 +164,7 @@ class SeenHook:
         try:
             self.rm.render_wall_frame(SimState(ws.px, ws.py, ws.pangle, world.mapname), self._scene(world),
                                       sprite_wad=self.art, thing_positions=pos, thing_hidden=hidden,
+                                      **({"thing_removed": removed} if removed else {}),     # M8 C8
                                       thing_views=views, seen_out=seen,
                                       **({"view_drop": drop} if drop else {}), **aim_kw,
                                       **({"wall_scroll": world.wall_scroll()} if world.wall_scroll() else {}),  # M8

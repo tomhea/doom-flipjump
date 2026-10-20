@@ -89,9 +89,17 @@ def line_states(w, a: int, b: int) -> Tuple[str, int, list]:
         return min(ta, tb), max(fa, fb)
     if all(opening(i, j) == opening(i, 0) for i in range(na) for j in range(nb)):
         return ca, na, [(at(ha[i], a), at(hb[0], b)) for i in range(na)]
-    assert all(opening(i, j) == opening(0, j) for i in range(na) for j in range(nb)), (
+    if all(opening(i, j) == opening(0, j) for i in range(na) for j in range(nb)):
+        return cb, nb, [(at(ha[0], a), at(hb[j], b)) for j in range(nb)]
+    # M8 C4 (E1M6's line 512: SR lift 363 lowering into the nukage pool 142 that its 20 / 22 raises): the opening needs
+    # both cells, but every reader of these states asks one question of it -- shut for sight and sound (<= 0), for a
+    # missile (< FIREBALL_H) -- and when the line is OPEN FOR ALL OF THEM at every pair of states (or shut for all of
+    # them), any one cell's states answer it: `ca`'s, the other side at its state 0
+    from doomfj.combat import FIREBALL_H
+    gaps = [opening(i, j) for i in range(na) for j in range(nb)]
+    assert all(t - f >= FIREBALL_H for t, f in gaps) or all(t - f <= 0 for t, f in gaps), (
         "a line between two dynamic sectors (%d, %d) on two state cells whose opening needs both" % (a, b))
-    return cb, nb, [(at(ha[0], a), at(hb[j], b)) for j in range(nb)]
+    return ca, na, [(at(ha[i], a), at(hb[0], b)) for i in range(na)]
 
 
 def sight_segments(w) -> List[dict]:

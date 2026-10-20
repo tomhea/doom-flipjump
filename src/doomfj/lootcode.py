@@ -130,6 +130,42 @@ def nkleaf_values(w) -> List[int]:
     return [SECTOR_HURT.get(w.secs[w.leaf_sector[s]].special, 0) for s in range(len(w.cmap.subsectors))]
 
 
+def nkgrp_values(w) -> List[int]:
+    """M8 C4: `nkgrp`, by leaf: 1 + the texture-change floor group (movers.FLOOR_CHANGE_SPECIALS) whose DAMAGING sector
+    the leaf lies in -- its damage stops once the group fired (`World.floor_special_cleared`) -- else 0. [] when the
+    map has no such sector (no table, no text: E1M1 / E1M2)"""
+    from doomfj.combat import SECTOR_HURT
+    grp = {si: g for si, (_h, _f, g) in getattr(w, "floor_change", {}).items() if w.secs[si].special in SECTOR_HURT}
+    if not grp:
+        return []
+    out = [grp[w.leaf_sector[s]] + 1 if w.leaf_sector[s] in grp else 0 for s in range(len(w.cmap.subsectors))]
+    assert max(out) < 16, "nkgrp is one nibble"
+    return out
+
+
+def nukage_clear_lines(w, out: str = "nk_out") -> List[str]:
+    """M8 C4: after `nkleaf` found a damage at leaf `ptss` -- `nkgrp`'s group, and when that texture-change group FIRED
+    (its state off 0 or its timer running: `movers.floor_fired`) on to `out` (no damage), else on to `nk_keep`. [] on a
+    map without such a sector (E1M1 / E1M2: nukage's text unchanged)"""
+    ng = nkgrp_values(w)
+    if not ng:
+        return []
+    from doomfj.movers import floor_sub_cell, switch_cell
+    groups = w.floor_groups
+    gs = sorted({v - 1 for v in ng if v})
+    assert len(groups) > 1 or groups[0].sub, "a moving group: the wide fswitch layout (movers.floor_wide)"
+    labs = ["nk_keep"] + [f"nk_g{g + 1}" for g in range(max(gs) + 1)]
+    lines = ["    nkgrp.lookup nk_g, ptss",
+             "    sim.jump16 nk_g, " + ", ".join(labs + ["nk_keep"] * (16 - len(labs)))]
+    for g in range(max(gs) + 1):
+        lines += [f"  nk_g{g + 1}:"]
+        if g in gs:
+            lines += [f"    hex.if1 1, {switch_cell(g)}, {out}",
+                      f"    hex.if1 1, {floor_sub_cell(g, len(groups))}, {out}"]
+        lines += ["    ;nk_keep"]
+    return lines + ["  nk_keep:"]
+
+
 def bk10_values() -> List[int]:
     """`bk10`: the berserk fist's damage x10 (A_Punch's `damage *= 10`), by the melee damage; 0 past one byte"""
     return [v * 10 if v * 10 < 256 else 0 for v in range(256)]
@@ -139,9 +175,11 @@ def tables_fj(w) -> List[str]:
     """every D4 table the loot code reads: amcap, nkleaf, pkxyz (bk10 is weaponcode's, bonpal hurtcode's)"""
     nk = nkleaf_values(w)
     assert max(nk) < 256
-    return [generate_dispatch_table_fj("amcap", amcap_values(), index_nibbles=2, result_nibbles=3),
-            generate_dispatch_table_fj("nkleaf", nk, index_nibbles=3, result_nibbles=2),
-            pickup_table_fj(w)]
+    ng = nkgrp_values(w)                  # M8 C4: the texture-change floors' cleared damage (none: no table)
+    return ([generate_dispatch_table_fj("amcap", amcap_values(), index_nibbles=2, result_nibbles=3),
+             generate_dispatch_table_fj("nkleaf", nk, index_nibbles=3, result_nibbles=2),
+             pickup_table_fj(w)]
+            + ([generate_dispatch_table_fj("nkgrp", ng, index_nibbles=3, result_nibbles=1)] if ng else []))
 
 
 # ---- which cell each pickup lives in ---------------------------------------------------------------------------
@@ -724,10 +762,17 @@ def nukage_lines(w, cell_root: str) -> List[str]:
     from doomfj.reference_model import PLAYER_RADIUS
     assert HURT_PERIOD_MASK == 0x1F
     # the use lines run BEFORE this in fj and after it in the model: a floor switch fired this tic must not move a
-    # floor this query can read -- no mover line within the box's reach of any damaging sector (E1M1: none)
+    # floor this query can read -- no INSTANT floor group's line within the box's reach of a damaging sector (E1M1:
+    # none). M8 C4: only an instant group moves a floor at the press (a lift's request and a moving group's timer move
+    # nothing before the next mover tic, in both mirrors), so only its sectors are kept apart -- from each damaging
+    # sector's own box (the union box of them all refused every lift of E1M3 / E1M4)
+    from doomfj.movers import FLOOR_CHANGE_SPECIALS, FLOOR_USE_SPECIALS, use_line_boxes
     hurt = [s for s, v in enumerate(nkleaf_values(w)) if v]
     hsec = {w.leaf_sector[s] for s in hurt}
-    assert not hsec & set(w.mover_order), hsec
+    chg = set(getattr(w, "floor_change", {}))
+    # M8 C4: a DAMAGING mover is a texture-change floor alone (its damage stops when its group fires; at state 0 its
+    # floor is the stored one, so `ms_seed_leaf` and the box's floorz read what the model's do)
+    assert not (hsec & set(w.mover_order)) - chg, hsec & set(w.mover_order)
     V = w.cmap.vertexes
 
     def box(secset):
@@ -738,16 +783,30 @@ def nukage_lines(w, cell_root: str) -> List[str]:
                 xs += [V[ld.v1][0], V[ld.v2][0]]
                 ys += [V[ld.v1][1], V[ld.v2][1]]
         return min(xs), max(xs), min(ys), max(ys)
-    hb = box(hsec) if hsec else None      # a map with no damaging floor (the one-room fixtures): nothing to keep apart
+    hboxes = [box({s}) for s in sorted(hsec)]   # a map with no damaging floor (the one-room fixtures): none
     # issue #123 R5a: cp_floor and cp_seedf are SIGNED floor heights and `hex.cmp` compares unsigned -- exact here
     # because only EQUALITY is read ("Falling, not all the way down yet?": floorz != the sector's floor -> no damage),
     # and equality is sign-agnostic. Asserted: the compare's lt and gt arms are the same label, so no order is ever taken
     _nk_lt, _nk_eq, _nk_gt = "nk_out", "nk_hit", "nk_out"
     assert _nk_lt == _nk_gt != _nk_eq, "nukage's unsigned floor compare may read equality only (issue #123 R5a)"
-    for mv in (w.mover_order if hb else ()):
+    r = (PLAYER_RADIUS >> 16) + 1
+
+    def apart(a, b, m):
+        return a[1] < b[0] - m or a[0] > b[1] + m or a[3] < b[2] - m or a[2] > b[3] + m
+    instant = sorted({si for g in getattr(w, "floor_groups", ()) if not g.sub for si in g.sectors})
+    for mv in instant:
         mb = box({mv})
-        r = (PLAYER_RADIUS >> 16) + 1
-        assert mb[1] < hb[0] - r or mb[0] > hb[1] + r or mb[3] < hb[2] - r or mb[2] > hb[3] + r, (mv, mb, hb)
+        for hb in hboxes:
+            assert apart(mb, hb, r), (mv, mb, hb)
+    # M8 C4: an S1 texture-change line fires its group -- and stops its sectors' damage -- at the press, which the fj
+    # runs before this query and the model after it: the player's CENTRE (the leaf this reads) cannot be in a damaging
+    # change sector while inside such a line's use box (E1M3's 933: the switch stands on a ledge 240 above the pool)
+    s1 = [b for _t, b in use_line_boxes(w.secs, w.lds, V, FLOOR_CHANGE_SPECIALS & FLOOR_USE_SPECIALS)]
+    for si in sorted(chg & hsec):
+        sb = box({si})
+        for (x0, y0, x1, y1) in s1:
+            assert apart((x0, x1, y0, y1), sb, 1), ("an S1 texture-change line's use box meets damaging sector", si)
+    clear = nukage_clear_lines(w)
     return ["// M7 P6 (doomfj.lootcode): nukage -- P_PlayerInSpecialSector's damaging floors", ";nk_end",
             "nk_go:",
             "    hex.if0 1, lvtime, nk_a", "    ;nk_out",
@@ -759,6 +818,7 @@ def nukage_lines(w, cell_root: str) -> List[str]:
             "    stl.fcall ptloc_walk, ptloc_ret",
             "    nkleaf.lookup nk_dmg, ptss",
             "    hex.if0 2, nk_dmg, nk_out",
+            *clear,
             "    stl.fcall ms_seed_leaf, ms_seed_ret",                     # the sector's floor now (cp_seedf)
             "    hex.mov 8, cpx, viewx", "    hex.mov 8, cpy, viewy",
             "    hex.set 8, cprad, %d" % PLAYER_RADIUS,
@@ -770,6 +830,7 @@ def nukage_lines(w, cell_root: str) -> List[str]:
             "    stl.fcall dp_go, dp_ret",
             "  nk_out:",
             "    stl.fret nk_ret",
+            *(["nk_g: hex.vec 1"] if clear else []),                  # M8 C4: nkgrp's result (never executed)
             "nk_end:"]
 
 

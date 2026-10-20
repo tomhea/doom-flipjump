@@ -1010,6 +1010,7 @@ class World(CombatMixin):
         self.lift_walk_mon = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname),
                                                 _MV.LIFT_MONSTER_SPECIALS)
         self.lift_stride = [_MV.lift_stride(secs, lds, si) for si in self.lift_order]
+        self.lift_perp = [_MV.lift_perpetual(secs, lds, si) for si in self.lift_order]    # M8 C4: 53's machine
         self.lift_use = use_line_boxes(secs, lds, cmap.vertexes, LIFT_USE_SPECIALS)
         self.lift_of_tag = _MV.lift_slots_of_tag(secs, self.lift_order)       # M8 F1.3: tag -> (slot, ...)
         self.switch = switch_sectors(secs, lds, sds)
@@ -1026,11 +1027,21 @@ class World(CombatMixin):
                                                {gd.MONSTER_DOOMEDNUMS[t.type] for t in self.things
                                                 if t.type in gd.MONSTER_DOOMEDNUMS})
         self.mover_table = _MV.mover_table(secs, lds, sds)
+        # M8 C4: the texture-change floors (20 / 22): {sector: (stored floor, new flat, group)} -- their special (the
+        # nukage's damage) is cleared once their group fired (`floor_special_cleared`)
+        self.floor_change = _MV.change_table(self.floor_groups)
         assert set(self.switch) <= {si for g in self.floor_groups for si in g.sectors}
         self.mover_order = sorted(set(self.lift_order) | {si for g in self.floor_groups for si in g.sectors})
         # M8 (doomfj.lights): the animated sector light thinkers, in sector order ([] unless the map's flag is on).
         # A light sector that is also a door or a mover would need its states crossed with theirs: refused
         self.light_thinkers = _LT.map_thinkers(mw, M)
+        # M8 C4: the light-switch lines (138): [(use box, (thinker index, ...))] -- a use press sets them bright
+        self.light_uses = _LT.light_switch_uses(secs, lds, cmap.vertexes, self.light_thinkers)
+        from doomfj.doors import exit_boxes as _exit_boxes
+        for _b, _k in self.light_uses:
+            for (x0, y0, x1, y1) in _exit_boxes(lds, cmap.vertexes):
+                assert _b[2] < x0 or _b[0] > x1 or _b[3] < y0 or _b[1] > y1, ("M8 C4: a light switch box meets the "
+                                                                              "exit's", _b)
         _lsx = {th.sector for th in self.light_thinkers} & (set(self.door_order) | set(self.mover_order))
         assert not _lsx, "M8: animated light sectors %r are doors or movers" % sorted(_lsx)
         # M8 L4 (doomfj.teleport): the WR teleport lines and their destinations ([] on E1M1). P_TeleportMove's floorz
@@ -1400,8 +1411,10 @@ class World(CombatMixin):
         the scenes again"""
         ws = self.ws
         for k, si in enumerate(self.lift_order):
-            st = lift_tic((ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k]),
-                          len(self.lift_stops[si]), bool(ws.l_req[k]), self.lift_stride[k])
+            st = _MV.lift_machine_tic((ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k]),
+                                      len(self.lift_stops[si]), bool(ws.l_req[k]), self.lift_stride[k],
+                                      self.lift_perp[k])          # M8 C4: or a perpetual lift's
+
             ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k] = st
             ws.l_req[k] = 0
         # M8 F1.3: then every moving floor group, in group order (movers.floor_tic)
@@ -1432,6 +1445,22 @@ class World(CombatMixin):
         self._set_floor(g, *_MV.floor_trigger(before, self.floor_sub(g), grp.sub))
         if self.floor_state(g) != before:
             self._door_phase_scene()
+
+    def light_presses(self, x16: int, y16: int) -> None:
+        """M8 C4: a use PRESS at (x16, y16) on the light switches (138: EV_LightTurnOn) -- the thinkers of each line
+        whose box holds it go to their bright state. The model's `_use_lines` and the gates (`MonsterPhase.switch_uses`,
+        on every press edge) call this; no light-switch box meets an exit box (asserted at load), so the exit's early
+        return in `_use_lines` cannot order them differently"""
+        for box, ks in self.light_uses:
+            if in_use_box_fixed(box, x16, y16):
+                for k in ks:
+                    self.ws.lt_state[k] = 1
+
+    def floor_special_cleared(self, sec: int) -> bool:
+        """M8 C4: is sector `sec`'s special cleared -- a texture-change floor (20 / 22) whose group fired (EV_DoPlat:
+        `sec->special = 0` at the trigger)"""
+        hit = self.floor_change.get(sec)
+        return hit is not None and _MV.floor_fired(self.floor_state(hit[2]), self.floor_sub(hit[2]))
 
     def mover_heights_now(self) -> dict:
         """M7 P2b: `{sector: (floor, ceil)}` of every mover off its stored floor, from the cells"""

@@ -45,9 +45,10 @@ BUTTON_NIBBLES = 2                        # the countdown's cell
 assert 0 < BUTTON_FRAMES < 16 ** BUTTON_NIBBLES
 EXIT_SWITCH_SPECIALS = frozenset({11})    # S1 exit (doors.EXIT_SPECIALS)
 DOOR_SWITCH_SPECIALS = frozenset({63, 103, 61, 112, 114, 133})   # doors.SWITCH_DOOR_KINDS (M8 C3: 61 112 114 133)
-FLOOR_SWITCH_SPECIALS = frozenset({23, 71, 102})     # movers.FLOOR_USE_SPECIALS
+FLOOR_SWITCH_SPECIALS = frozenset({23, 71, 102, 7, 20})     # movers.FLOOR_USE_SPECIALS (M8 C4: + 7 stairs, 20 plat)
 LIFT_SWITCH_SPECIALS = frozenset({62, 123})          # movers.LIFT_USE_SPECIALS
-REPEAT_SPECIALS = frozenset({62, 123, 63, 61, 114, 46})   # SR (and GR 46): the texture comes back after BUTTONTIME
+LIGHT_SWITCH_SPECIALS = frozenset({138})             # M8 C4: lights.SWITCH_LIGHT_SPECIALS (EV_LightTurnOn: always)
+REPEAT_SPECIALS = frozenset({62, 123, 63, 61, 114, 46, 138})   # SR (and GR 46): the texture comes back after BUTTONTIME
 SHOT_SWITCH_SPECIALS = frozenset({46})               # M8 C3: GR 46 (doors.SHOOT_DOOR_KINDS) -- a shot swaps it
 
 
@@ -55,7 +56,7 @@ SHOT_SWITCH_SPECIALS = frozenset({46})               # M8 C3: GR 46 (doors.SHOOT
 class Switch:
     """one animated switch line. `kind` "exit" / "door" / "floor" / "lift"; `sw2` its level-start texture is an SW2
     one; `box` (x0, y0, x1, y1) map units; `targets` -- a door switch's door SECTORS, a lift line's lift SLOTS (the lifts'
-    sector order), a floor line's (group index,); the exit's ()"""
+    sector order), a floor line's (group index,); the exit's (); M8 C4 a light switch's ("light") tagged sectors"""
     line: int
     special: int
     kind: str
@@ -113,6 +114,9 @@ def map_switches(secs, lds, sds, verts, rng: int = USE_RANGE) -> List[Switch]:
             kind, targets = "floor", (group_of[ld.tag],)
         elif sp in LIFT_SWITCH_SPECIALS and ld.tag:
             kind, targets = "lift", tuple(lift_slots.get(ld.tag, ()))
+        elif sp in LIGHT_SWITCH_SPECIALS and ld.tag:
+            # M8 C4: P_UseSpecialLine 138 -- EV_LightTurnOn, then P_ChangeSwitchTexture(line, 1) whatever it found
+            kind, targets = "light", tuple(si for si, sec in enumerate(secs) if sec.tag == ld.tag)
         else:
             continue                                   # no special a use starts here: the texture stays
         if kind != "exit" and not targets:
@@ -186,6 +190,8 @@ def use_presses(lat: Sequence[Switch], x16: int, y16: int, lift_rest: Callable[[
             ok = floor_still(s.targets[0])
         elif s.kind == "lift":
             ok = any(lift_rest(t) for t in s.targets)
+        elif s.kind == "light":                  # M8 C4: EV_LightTurnOn's switch always changes
+            ok = True
         else:
             continue
         if ok and in_box_fixed(s.box, x16, y16):

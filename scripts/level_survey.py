@@ -104,6 +104,13 @@ def supported_line_specials():
             out[s] = "movers (%s1 floor group per tag: %s, %s)" % (trig, rule, "a stop every %d frames" % sub)
     for s in movers.LIFT_FAST_SPECIALS:
         out[s] = "movers (blazing lift: stride %d)" % movers.LIFT_FAST_STRIDE
+    for s in movers.LIFT_PERPETUAL_SPECIALS:          # M8 C4
+        out[s] = "movers (perpetual lift: a stop every %d frames, first DOWN)" % movers.PERP_SUB
+    for s in movers.FLOOR_CHANGE_SPECIALS:
+        out[s] += "; the flat changes (from its first stop), the damage stops (at the trigger)"
+    from doomfj import lights
+    for s, b in lights.SWITCH_LIGHT_SPECIALS.items():
+        out[s] = "lights (switch thinker: light %d on a use press)" % b
     from doomfj import teleport
     for s in teleport.TELEPORT_SPECIALS:
         out[s] = "teleport (M8 L4: player and monsters; no telefrag, no fog)"
@@ -320,6 +327,7 @@ class Survey:
         dyn.update({si: ("switch" if si in sw else "floor") for si in cells if si not in lifts})
         pairs = Counter()
         lines = []
+        self.facts["dyn_pairs"] = lines        # M8 C4: `world` runs the readers over each of them
         for i, ld in enumerate(lds):
             if ld.back in (0xFFFF, -1) or ld.back >= len(sds):
                 continue
@@ -331,15 +339,14 @@ class Survey:
                 pairs[k] += 1
                 lines.append((i, a, b, k))
         for k, n in sorted(pairs.items()):
-            if k.endswith("(one cell)"):    # M8 L1 / F1.3: one cell moves both -- read through it everywhere
-                note = "one machine: rendered and read by collision / sight / noise / missiles"
-            elif "door" in k:
-                note = "the renderer refuses a door beside another dynamic sector"
-            else:
-                note = ("renderer: the pair switch (its gate: the 'dynamic segs' row); collision / sight / noise / "
-                        "missiles: the readers' own rows below (collision.mover_line_states, monstersight.line_states)")
-            self.row("WARN", "lines between two dynamic sectors: %s" % k, n, "",
-                     "%s -- linedefs %s" % (note, [x[0] for x in lines if x[3] == k][:8]))
+            if k == "door-door":            # wall_renderer._seg_door: one door a seg
+                self.row("REFUSED", "lines between two dynamic sectors: %s" % k, n, "",
+                         "the renderer's door switch addresses one door -- linedefs %s"
+                         % [x[0] for x in lines if x[3] == k][:8])
+        # M8 C4: every other pair is HANDLED -- the renderer's pair switch (a door and a mover: E1M3's 519 / 1077; two
+        # movers: the PAIR of cells), and the readers (sight / noise / missiles: monstersight.line_states; collision:
+        # collision.mover_line_states, a door line beside a mover by `collision_cells_fj`'s door_mover arm) take the cell
+        # the opening depends on. `world` runs those functions on each line: a pair they refuse is a REFUSED row there
 
     def world(self):
         from doomfj.world import World
@@ -366,6 +373,7 @@ class Survey:
         else:
             self.row("OK", "World(strict=True) builds")
         self.facts["_world"] = w
+        self._readers(w)
         nmon, nbar = len(w.mon_things), len(w.barrel_things)
         self.facts.update(monsters=nmon, barrels=nbar, pickups=len(w.pickup_things), secrets=len(w.secret_sectors),
                           sound_nodes=getattr(w, "nsound", "?"))
@@ -449,6 +457,44 @@ class Survey:
         ext = [n for n in _gd.EXT_MONSTER_TYPES if n in names]
         if ext:
             self.row("INFO", "extension monster types (gamedata.THING_STATE_INDEX: borrowed state indices)", ext)
+
+    def _readers(self, w):
+        """M8 C4: THE MOVERS' READERS, run on the map (each the model's own function, in its own guard): every line
+        between two dynamic sectors through the cell its opening depends on (sight / noise / missiles), the collision
+        cells' per-state openings and low floors, the missile cells (a lift line that shuts a fireball), the nukage
+        query's separation from the instant floors and the S1 texture-change lines -- each was an emit-time refusal
+        E1M3 / E1M4 would have met 30 minutes into an emission"""
+        from doomfj import collision, lootcode, monstersight, movers, noisecode, projcode
+        lines = self.facts.get("dyn_pairs", [])
+        handled = Counter()
+
+        def check(name, fn):            # an OK row when it passes (lesson P6: a refusal-only guard proves nothing)
+            n = len(self.rows)
+            self.guard(name, fn)
+            if len(self.rows) == n:
+                self.row("OK", name)
+
+        def pairs():
+            for li, a, b, k in lines:
+                if k != "door-door":
+                    monstersight.line_states(w, a, b)
+                    handled[k] += 1
+        check("lines between two dynamic sectors (monstersight.line_states: the cell the opening reads)", pairs)
+        for k, n in sorted(handled.items()):
+            self.row("INFO", "lines between two dynamic sectors: %s" % k, n, "",
+                     "handled: the renderer's pair switch, the readers through the cell the opening depends on -- "
+                     "linedefs %s" % [x[0] for x in lines if x[3] == k][:8])
+        msecs = movers.mover_secs(w.mover_table, w.secs, movers.change_table(w.floor_groups))
+        mcell = {si: c for si, (c, _h) in w.mover_table.items()}
+        for fn in (max, min):
+            check("collision cells: mover lines' %s floor (collision.mover_line_states)"
+                  % ("opening" if fn is max else "low"),
+                  lambda fn=fn: collision.mover_line_states(w.lds, w.sds, msecs, mcell, fn))
+        check("sight segments (monstersight.sight_segments)", lambda: monstersight.sight_segments(w))
+        check("sound edges (noisecode.sound_edges)", lambda: noisecode.sound_edges(w))
+        check("missile cells (projcode.missile_rows: a mover line shut below a pass state)",
+              lambda: projcode.missile_rows(w))
+        check("nukage vs the movers (lootcode.nukage_lines)", lambda: lootcode.nukage_lines(w, "root"))
 
     def render_caps(self):
         from doomfj import wall_renderer as WR
@@ -582,7 +628,7 @@ class Survey:
             return
         nlift = len(movers.lift_states(self.secs, self.lds, self.sds))
         common, _sk = restart_lines(SimpleNamespace(x=0, y=0, angle=0), 0, [], [], 0, [], nlift=nlift,
-                                    nfs=movers.fswitch_nibbles(groups))
+                                    nfs=movers.fswitch_nibbles(groups), nfloor=len(groups))
         ok = any("fswitch" in ln for ln in common)
         self.row("OK" if ok else "WRONG", check, "%d groups, %d lifts" % (len(groups), nlift), "fswitch zeroed",
                  "" if ok else "fswitch is zeroed only with a lift: the floors stay moved after NEW GAME (#147)")
@@ -599,7 +645,9 @@ class Survey:
             dsecs = [apply_sector_heights(secs, doors.heights_for_states(
                 secs, lds, sds, {si: min(k, len(s) - 1) for si, s in dst.items()})) for k in range(dmax)]
             mtab = movers.mover_table(secs, lds, sds)
-            self.facts["_machines"] = (dst, dsecs, movers.mover_secs(mtab, secs),
+            self.facts["_machines"] = (dst, dsecs,      # M8 C4: the texture-change floors' flats, as the emitter
+                                       movers.mover_secs(mtab, secs, movers.change_table(movers.floor_groups(
+                                           secs, lds, sds))),
                                        {si: c for si, (c, _h) in mtab.items()})
         return self.facts["_machines"]
 
@@ -611,35 +659,24 @@ class Survey:
             return "a door on both sides (%d, %d)" % (f, b)
         door = f if f in dst else (b if b in dst else None)
         hit = tuple(sorted({x for x in (f, b) if x in msecs}))
-        if hit and door is not None:
-            return "a door (%d) and a mover %s on one seg" % (door, list(hit))
         if len(hit) == 2 and mcell[hit[0]] == mcell[hit[1]] and msecs[hit[0]] == msecs[hit[1]]:
             hit = hit[:1]                                       # one machine (a floor group's sectors)
-        if door is not None:
-            return [(door, dsecs[:len(dst[door])])]
-        return [(m, msecs[m]) for m in hit]
+        # M8 C4: a door and a mover on one seg are a PAIR, the door first (wall_renderer._seg_machines)
+        out = [(door, dsecs[:len(dst[door])])] if door is not None else []
+        out += [(m, msecs[m]) for m in hit]
+        if len(out) > 2:
+            return "a door (%d) and two movers %s on one seg" % (door, list(hit))
+        return out
 
     @staticmethod
     def shut_gate(st, dims):
         """emit_wall_renderer's `_seg_dual_cell` on a dynamic seg's shut pattern `st` (one bool per state, the first
         machine's state major) over machines of `dims` states: "never" (a marking seg), "every" (the solid path,
         `_seg_closed_moving`: the CR of #146's lines), the index of the machine whose state 0 is EXACTLY the shut set
-        (the one-op `hex.if0` gate), or None -- the emitter refuses it"""
-        st = list(st)
-        if not any(st):
-            return "never"
-        if all(st):
-            return "every"
-        if not st[0]:
-            return None
-        if len(dims) == 1:
-            return 0 if st == [True] + [False] * (len(st) - 1) else None
-        na, nb = dims
-        if st == [ia == 0 for ia in range(na) for ib in range(nb)]:
-            return 0
-        if st == [ib == 0 for ia in range(na) for ib in range(nb)]:
-            return 1
-        return None
+        (the one-op `hex.if0` gate), or None -- the emitter refuses it. M8 C4: the emitter's own rule now
+        (`wall_renderer.seg_shut_gate`): (machine, shut mask) when one machine's state decides it"""
+        from doomfj.wall_renderer import seg_shut_gate
+        return seg_shut_gate(st, dims)
 
     def _seg_machines(self):
         """CR of #146 (BLOCKING, 9b8ef2c0): four E1M2 lines shut at EVERY floor state took the marking path in fj and

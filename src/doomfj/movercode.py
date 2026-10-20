@@ -15,7 +15,7 @@ groups (`movers.floor_tic`), `floor_walk_lines` fires the W1 lines after an acce
 from __future__ import annotations
 
 from doomfj.doorcode import WAIT_NIBBLES, _box_test, _crossed_lines, _scmp_const, machine_lines
-from doomfj.movers import LIFT_WAIT, floor_sub_cell, switch_cell
+from doomfj.movers import LIFT_WAIT, PERP_SUB, floor_sub_cell, switch_cell
 
 M40 = (1 << 40) - 1
 
@@ -35,16 +35,77 @@ def mover_decls(nlift: int, nfs: int = 1) -> list:
     ]
 
 
-def lift_tic_lines(slots, nstates, strides=None) -> list:
+def perpetual_lines(p: str, st: str, dr: str, sub: str, wt: str, rq: str, last: int) -> list:
+    """M8 C4: one frame of a PERPETUAL lift (53) -- `movers.perpetual_tic` on the lift's cells, its request `rq`
+    cleared: a request starts it only while it was never started (idle, no wait); moving, a stop every PERP_SUB frames,
+    DOWN (OPENING: state + 1) or UP (CLOSING: state - 1); at either end idle with LIFT_WAIT; the wait run out, on again
+    (up from the bottom, down from the top). An idle-and-never-started lift costs two nibble tests."""
+    from doomfj.doors import CLOSING, OPENING
+    return [
+        f"    hex.if0 1, {rq}, {p}_nr",
+        f"    hex.zero 1, {rq}",
+        f"    hex.if0 1, {dr}, {p}_iw",
+        f"    ;{p}_nr",
+        f"  {p}_iw:",
+        f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_start",        # never started: the request starts it
+        f"    ;{p}_nr",
+        f"  {p}_start:",
+        f"    hex.set 1, {dr}, {OPENING}",
+        f"    hex.set 1, {sub}, {PERP_SUB}",
+        f"  {p}_nr:",
+        f"    hex.if0 1, {dr}, {p}_idle",
+        f"    hex.dec 1, {sub}",
+        f"    hex.if0 1, {sub}, {p}_step",
+        f"    ;{p}_done",
+        f"  {p}_step:",
+        f"    hex.set 1, {sub}, {PERP_SUB}",
+        f"    hex.xor_by 1, {dr}, {OPENING}",
+        f"    hex.if0 1, {dr}, {p}_down",
+        f"    hex.xor_by 1, {dr}, {OPENING}",
+        f"    hex.dec 1, {st}",                                # up: state - 1, at 0 the top
+        f"    hex.if0 1, {st}, {p}_end",
+        f"    ;{p}_done",
+        f"  {p}_down:",
+        f"    hex.xor_by 1, {dr}, {OPENING}",
+        f"    hex.inc 1, {st}",                                # down: state + 1, at `last` the bottom
+        f"    hex.xor_by 1, {st}, {last}",
+        f"    hex.if0 1, {st}, {p}_endb",
+        f"    hex.xor_by 1, {st}, {last}",
+        f"    ;{p}_done",
+        f"  {p}_endb:",
+        f"    hex.xor_by 1, {st}, {last}",
+        f"  {p}_end:",
+        f"    hex.zero 1, {dr}",
+        f"    hex.zero 1, {sub}",
+        f"    hex.set {WAIT_NIBBLES}, {wt}, {LIFT_WAIT}",
+        f"    ;{p}_done",
+        f"  {p}_idle:",
+        f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_done",
+        f"    hex.dec {WAIT_NIBBLES}, {wt}",
+        f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_go",
+        f"    ;{p}_done",
+        f"  {p}_go:",
+        f"    hex.set 1, {sub}, {PERP_SUB}",
+        f"    hex.set 1, {dr}, {OPENING}",                     # from the top: down
+        f"    hex.if0 1, {st}, {p}_done",
+        f"    hex.set 1, {dr}, {CLOSING}",                     # from the bottom: up
+        f"  {p}_done:"]
+
+
+def lift_tic_lines(slots, nstates, strides=None, perpetual=None) -> list:
     """One frame of every lift -- `movers.lift_tic`: a request (`lreq`, cleared) presses only a lift
     at rest at the top (state 0, idle, no wait); the motion is the doors'. `slots` = sorted lift
     sectors, `nstates[si]` its stops, M8 F1.3 `strides[si]` its stops a frame (`movers.lift_stride`; 1 when
-    None). Labels `lf{k}_`."""
+    None). M8 C4: `perpetual[si]` true -- a perpetual lift's machine (`perpetual_lines`). Labels `lf{k}_`."""
     out = ["// == M7 P2b: the lifts, one tic each (doomfj.movers.lift_tic) =========="]
     for k, si in enumerate(slots):
         p = f"lf{k}"
         st, dr, sub = f"lstate + {k}*dw", f"ldir + {k}*dw", f"lsub + {k}*dw"
         wt, rq = f"lwait + {WAIT_NIBBLES * k}*dw", f"lreq + {k}*dw"
+        if perpetual and perpetual.get(si):
+            out += [f"  // ---- lift {k} (sector {si}): perpetual, {nstates[si]} states ----",
+                    *perpetual_lines(p, st, dr, sub, wt, rq, nstates[si] - 1)]
+            continue
         trigger = [f"    hex.if0 1, {rq}, {p}_moved",
                    f"    hex.zero 1, {rq}",
                    f"    hex.if0 1, {st}, {p}_press",          # at rest is state 0 (lift_tic)

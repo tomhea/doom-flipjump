@@ -110,7 +110,7 @@ def use_press_lines(switches, groups, wide: bool) -> List[str]:
     ng = len(groups)
     out = ["// == M8: the switch textures on a use press (doomfj.switches.use_presses), before the exit =="]
     for k, s in enumerate(lat):
-        if s.kind not in ("floor", "lift"):
+        if s.kind not in ("floor", "lift", "light"):
             continue
         p = f"swu{k}"
         out += [f"    hex.if1 1, {cell(k)}, {p}_no"]
@@ -118,8 +118,9 @@ def use_press_lines(switches, groups, wide: bool) -> List[str]:
             g = s.targets[0]
             if wide and groups[g].sub:
                 out += [f"    hex.if1 1, {floor_sub_cell(g, ng)}, {p}_no"]
-        else:                                       # EV_DoPlat: one of its lifts at rest at the top (state 0)
+        elif s.kind == "lift":                      # EV_DoPlat: one of its lifts at rest at the top (state 0)
             out += [f"    hex.if0 1, lstate + {slot}*dw, {p}_box" for slot in s.targets] + [f"    ;{p}_no"]
+        # M8 C4: a light switch ("light") always changes -- straight to its box
         out += [f"  {p}_box:", *_box_test(0, s.box, f"{p}_hit", f"{p}_no", tag=f"{p}_b"),
                 f"  {p}_hit:", *_press(k, sr), f"  {p}_no:"]
     return out

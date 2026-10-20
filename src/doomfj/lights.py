@@ -23,6 +23,14 @@ THE THINKERS (P_SpawnSpecials' sector loop, in SECTOR ORDER -- the order they th
                                                   minlight (= the min surrounding + 16) -> minlight, else
                                                   maxlight - amount
 
+M8 C4 -- THE LIGHT SWITCHES (p_lights.c EV_LightTurnOn, `SWITCH_LIGHT_SPECIALS`: 138 SR "light to 255", E1M3's line
+2024): every sector the line's tag names takes the line's light, at once, on a use press in the line's box (the SR
+lift's box, `movers.use_line_boxes`). Each such sector is a thinker of kind "switch" -- two states, its stored light and
+the bright one, no tic, no roll -- in the same table, cells and per-state render blocks as the animated ones. They exist
+on EVERY map that has such a line, whatever its SECTOR_LIGHTS flag (`game_thinkers`): a switch that did nothing would
+be a missing feature, not a static light. E1M1 and E1M2 have none (their thinkers unchanged). A sector both animated
+and switched is refused (the animation would overwrite the switched light; no map has one).
+
 A thinker whose light can never change (a glow between equal lights: E1M2's nine static glows) is NOT animated: no
 cell, no roll, its sector static -- a pure filter, the same in both mirrors.
 
@@ -54,6 +62,8 @@ FIRE_STEP = 16                # amount = (P_Random() & 3) * 16; minlight = the m
 FIRE_MASK = 3
 ML_TWOSIDED = 4
 
+# M8 C4: line special -> the light its use sets (EV_LightTurnOn(line, bright), bright != 0)
+SWITCH_LIGHT_SPECIALS = {138: 255}
 # special -> (kind, darktime, in sync)   (the darktime and the sync are the strobes')
 LIGHT_SPECIALS = {1: ("flash", 0, False), 2: ("strobe", FASTDARK, False), 3: ("strobe", SLOWDARK, False),
                   4: ("strobe", FASTDARK, False), 8: ("glow", 0, False), 12: ("strobe", SLOWDARK, True),
@@ -86,7 +96,7 @@ def min_surrounding_light(secs, lds, sds, si: int, max_: int) -> int:
 class LightThinker:
     sector: int
     special: int
-    kind: str                 # "flash" | "strobe" | "glow" | "fire"
+    kind: str                 # "flash" | "strobe" | "glow" | "fire" | M8 C4 "switch" (EV_LightTurnOn)
     maxlight: int
     minlight: int
     levels: Tuple[int, ...]   # the light of each state; state 0 the stored light (= maxlight)
@@ -160,11 +170,52 @@ def thinkers(secs, lds, sds) -> List[LightThinker]:
     return out
 
 
+def switch_thinkers(secs, lds) -> List[LightThinker]:
+    """M8 C4: a "switch" thinker for every sector a light-switch line (SWITCH_LIGHT_SPECIALS) tags whose light the line
+    changes, in sector order: levels (stored, bright). Two lines setting one sector different lights are refused."""
+    bright: Dict[int, int] = {}
+    for ld in lds:
+        b = SWITCH_LIGHT_SPECIALS.get(ld.special)
+        if b is None or not ld.tag:
+            continue
+        for si, s in enumerate(secs):
+            if s.tag == ld.tag:
+                assert bright.setdefault(si, b) == b, ("sector %d: two light switches set it %d and %d"
+                                                       % (si, bright[si], b))
+    return [LightThinker(si, secs[si].special, "switch", b, secs[si].light, (secs[si].light, b))
+            for si, b in sorted(bright.items()) if b != secs[si].light]
+
+
+def game_thinkers(secs, lds, sds, animate: bool) -> List[LightThinker]:
+    """M8 C4: the map's thinkers in sector order -- the animated ones when `animate` (its SECTOR_LIGHTS flag), and the
+    light switches' always. THE ONE LIST the model (`map_thinkers`) and the emitter take"""
+    sw = switch_thinkers(secs, lds)
+    out = (thinkers(secs, lds, sds) if animate else []) + sw
+    assert len({th.sector for th in out}) == len(out), (
+        "M8 C4: sectors %s are animated and switched" % sorted({th.sector for th in sw} & {th.sector for th in out
+                                                                                            if th.kind != "switch"}))
+    for th in sw:
+        assert th.levels[1] < 256 and th.levels[0] != th.levels[1], th
+    return sorted(out, key=lambda th: th.sector)
+
+
+def light_switch_uses(secs, lds, verts, ths) -> list:
+    """M8 C4: `[(box, (thinker index, ...))]`, one per light-switch line in linedef order: the use box (the doors'
+    proximity box, `movers.use_line_boxes`) and the switch thinkers its tag names"""
+    from doomfj.movers import use_line_boxes
+    idx = {th.sector: k for k, th in enumerate(ths) if th.kind == "switch"}
+    out = []
+    for tag, box in use_line_boxes(secs, lds, verts, frozenset(SWITCH_LIGHT_SPECIALS)):
+        ks = tuple(idx[si] for si, s in enumerate(secs) if s.tag == tag and si in idx)
+        if ks:
+            out.append((box, ks))
+    return out
+
+
 def map_thinkers(map_wad, mapname: str) -> List[LightThinker]:
-    """the map's animated thinkers, [] when its flag is off"""
-    if not lights_on(mapname):
-        return []
-    return thinkers(map_wad.sectors(mapname), map_wad.linedefs(mapname), map_wad.sidedefs(mapname))
+    """the map's thinkers (`game_thinkers`): the animated ones when its flag is on, and its light switches'"""
+    return game_thinkers(map_wad.sectors(mapname), map_wad.linedefs(mapname), map_wad.sidedefs(mapname),
+                         lights_on(mapname))
 
 
 def level_start(ths: Sequence[LightThinker]) -> Tuple[List[int], List[int], int]:
@@ -183,7 +234,7 @@ def level_start(ths: Sequence[LightThinker]) -> Tuple[List[int], List[int], int]
             else:
                 v, rng = R.p_random(rng)
                 counts.append((v & STROBE_FIRST_MASK) + 1)
-        elif th.kind == "glow":
+        elif th.kind in ("glow", "switch"):
             counts.append(0)
         else:
             counts.append(FIRE_COUNT)
@@ -193,6 +244,8 @@ def level_start(ths: Sequence[LightThinker]) -> Tuple[List[int], List[int], int]
 def tic(th: LightThinker, state: int, count: int, rng: int) -> Tuple[int, int, int]:
     """ONE tic of thinker `th` -- T_LightFlash / T_StrobeFlash / T_Glow / T_FireFlicker on its light VALUE, line for
     line -> (state, count, rng)"""
+    if th.kind == "switch":                             # M8 C4: no thinker -- the use press sets it
+        return state, count, rng
     light = th.levels[state]
     if th.kind == "glow":
         if count == 0:                                  # direction -1

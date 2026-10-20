@@ -270,7 +270,7 @@ def missile_rows(w) -> Tuple[list, Dict[int, tuple]]:
       * a line on a door or on the floor switch: shut exactly at the states below its pass state -- the first state
         whose opening (`monstersight.closed_states`' heights, the model's `heights_now`) is >= FIREBALL_H; `doors`
         maps it to ((door slot or the switch's cell, pass state),);
-      * a lift's line never shuts a missile (asserted)."""
+      * M8 C4: a lift's line the same way, on its `lstate` cell (E1M1's never shut one)."""
     from doomfj.collision import FLAG_BLOCKING, line_rows
     from doomfj.combat import FIREBALL_H
     from doomfj.monstersight import line_states
@@ -291,9 +291,9 @@ def missile_rows(w) -> Tuple[list, Dict[int, tuple]]:
                 # the opening depends on (monstersight.line_states)
                 cell, n, pairs = line_states(w, fs, bs)
                 shut = [min(c1, c2) - max(f1, f2) < FIREBALL_H for (f1, c1), (f2, c2) in pairs]
-                if cell.startswith("lstate"):
-                    assert not any(shut), "lift line %d shuts a missile at a state: it needs a per-state block" % li
-                elif any(shut):
+                # M8 C4: a LIFT's line too (E1M3's 261, E1M4's 1933: shut while the lift stands near its top) -- its
+                # floor only lowers with its state, so it is shut below a pass state like a door's, read on its cell
+                if any(shut):
                     p = shut.index(False) if False in shut else n
                     assert shut == [True] * p + [False] * (n - p), (li, shut, "not shut exactly below a pass state")
                     slot = int(cell.split("+")[1].split("*")[0]) if cell.startswith("dstate") else cell

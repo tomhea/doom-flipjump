@@ -57,10 +57,10 @@ def _prune_closures(cmap, lds, sds, secs, live):
             return True
         fs = secs[sds[ld.front if seg.side == 0 else ld.back].sector]
         bs = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
-        return ((fs.ceil_h, fs.light & 0xFF, fs.ceil_tex.upper())
-                != (bs.ceil_h, bs.light & 0xFF, bs.ceil_tex.upper())
-                or (fs.floor_h, fs.light & 0xFF, fs.floor_tex.upper())
-                != (bs.floor_h, bs.light & 0xFF, bs.floor_tex.upper()))
+        return ((fs.ceil_h, fs.light, fs.ceil_tex.upper())
+                != (bs.ceil_h, bs.light, bs.ceil_tex.upper())
+                or (fs.floor_h, fs.light, fs.floor_tex.upper())
+                != (bs.floor_h, bs.light, bs.floor_tex.upper()))
 
     def solid(seg):
         return lds[seg.linedef].back == -1

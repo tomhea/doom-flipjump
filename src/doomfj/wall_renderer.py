@@ -3144,8 +3144,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     lines_bank_keys: list = []                 # the bank's key order (a LIST: pid pairs repeat keys)
 
     def _plane_keys(sec):
-        return ((sec.ceil_h, sec.light & 0xFF, _flatval(sec.ceil_tex), sec.ceil_tex.upper()),
-                (sec.floor_h, sec.light & 0xFF, _flatval(sec.floor_tex), sec.floor_tex.upper()))
+        return ((sec.ceil_h, plane_key_light(sec.light), _flatval(sec.ceil_tex), sec.ceil_tex.upper()),
+                (sec.floor_h, plane_key_light(sec.light), _flatval(sec.floor_tex), sec.floor_tex.upper()))
 
     for _si_ss, _ss in enumerate(cmap.subsectors):
         _m_ss = _leaf_mover(_si_ss)
@@ -5572,10 +5572,22 @@ def seg_marks_in(lds, sds, seg, sv) -> bool:
         return True
     fs_ = sv[sds[ld_.front if seg.side == 0 else ld_.back].sector]
     bs_ = sv[sds[ld_.back if seg.side == 0 else ld_.front].sector]
-    return ((fs_.ceil_h, fs_.light & 0xFF, fs_.ceil_tex.upper())
-            != (bs_.ceil_h, bs_.light & 0xFF, bs_.ceil_tex.upper())
-            or (fs_.floor_h, fs_.light & 0xFF, fs_.floor_tex.upper())
-            != (bs_.floor_h, bs_.light & 0xFF, bs_.floor_tex.upper()))
+    lf, lb = plane_key_light(fs_.light), plane_key_light(bs_.light)
+    return ((fs_.ceil_h, lf, fs_.ceil_tex.upper()) != (bs_.ceil_h, lb, bs_.ceil_tex.upper())
+            or (fs_.floor_h, lf, fs_.floor_tex.upper()) != (bs_.floor_h, lb, bs_.floor_tex.upper()))
+
+
+def plane_key_light(light: int) -> int:
+    """The LIGHT field of a band-bank plane key (`_plane_keys`, `seg_marks_in`): the sector's light AS IT IS.
+
+    M8 (E1M5's first binary): it was `light & 0xFF`, and E1M4 / E1M5 have sectors at light 256 (E1M5: 57 of 214,
+    among them the spawn sector). The byte wrapped them to 0, so their band lists baked at light level 0 -- colour 0,
+    a black floor and ceiling -- while the oracle (and DOOM: `lightlevel >> LIGHTSEGSHIFT`, clamped to 15) draws them
+    at full light; and `seg_marks_in` called 256 and 0 the same key where R_StoreWallRange (the oracle's marking
+    test) does not. The full value is exact against both: `_band_pair_lists` clamps `light >> 4` into 0..15 as the
+    oracle does, and on every light in 0..255 (all of E1M1 / E1M2 / E1M3 / E1M6..E1M9) it is the byte, so their
+    emission is unchanged. tests/fj/test_lines_render.py's light-256 room runs it in fj, with the byte as its control."""
+    return light
 
 
 def closed_lifts_lowered(secs, lds, sds, secs_open):

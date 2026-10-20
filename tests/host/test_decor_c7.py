@@ -91,7 +91,7 @@ def _sprite_rows(things):
         mw = _room(extra)
         scene = RM.build_scene(mw, WadFile.from_path(str(ASSET)), "MAP01")
         frames.append(rm.render_wall_frame(RM.spawn_state(mw, "MAP01"), scene, sprite_wad=art,
-                                           **{**RM.GAME_RENDER_KW, "sky": False}))
+                                           **RM.GAME_RENDER_KW))   # the shared set (sky the same in both frames)
     w = cfg.VIEW_W
     rows = sorted({i // w for i, (a, b) in enumerate(zip(*frames)) if a != b})
     return rows, cfg

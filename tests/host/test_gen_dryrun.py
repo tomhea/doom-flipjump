@@ -60,6 +60,8 @@ def test_door_first_kind_gets_past_e1m9s_door_135():
 
 def test_unknown_things_drops_only_the_unknown():
     rc, out = _run(PRE + "from doomfj import gamedata as gd\n"
+                   # every E1M9 type is known since M8 C6 / C7: one (a hanging body, 59) is made unknown here
+                   "gd.THING_TYPES.pop(59)\n"
                    "before = w.things('E1M9')\nG._unknown_things()\nafter = w.things('E1M9')\n"
                    "gone = {t.type for t in before} - {t.type for t in after}\n"
                    "assert gone and all(t not in gd.THING_TYPES for t in gone), gone\n"

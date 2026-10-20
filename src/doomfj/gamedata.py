@@ -588,7 +588,7 @@ assert all(st.next not in STATE_GHOSTS or n in STATE_GHOSTS for n, st in STATES.
 # weapon-only indices: STATE_NAMES there names a plasma WEAPON state, yet the monster table's row is the ghost's)
 GHOST_INDICES = frozenset(STATE_INDEX[g] for g in STATE_GHOSTS)
 # M8 C8 x C6: the Baron's borrowed thing-domain run and the ghosts the monster tables keep never meet
-assert not set(range(EXT_ALIAS_BASE, EXT_ALIAS_BASE + len(EXT_STATE_NAMES))) & GHOST_INDICES
+assert not set(EXT_ALIAS_CODES) & GHOST_INDICES
 
 
 # ================================================================================================

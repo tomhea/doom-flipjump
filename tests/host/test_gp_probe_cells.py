@@ -137,6 +137,8 @@ def test_only_the_skill_menu_is_optional(tmp_path):
                                  "ltst", "ltct", "rng_lt",                # M8: the sector light thinkers
                                  "swpr", "swtm",                          # M8: the switch textures
                                  "p_inv", "p_rad",                        # M8 C6: the timed powers (their maps)
+                                 "tp_w1",                                 # M8 C5: the W1 monster teleports' latch
+                                 "sk_fly", "sk_inf", "sk_z", "sk_momz", "sk_ceil",   # M8 C8: the lost souls
                                  "amap"}                                  # M8: the map page's state (its maps only)
     for one in ("p_bc", "rng_wd", "dr_live", "g_skill", "p_atk", "st_kill"):   # M7 P6 / P7 (P10: the stats): each group
         with pytest.raises(KeyError, match="come together"):

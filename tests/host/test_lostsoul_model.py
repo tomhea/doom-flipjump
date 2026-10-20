@@ -77,11 +77,13 @@ def test_extension_codes_are_monster_domain_free():
         code = gd.THING_STATE_INDEX[n]
         assert gd.THING_STATE_NAMES[code] == n and n not in gd.STATE_INDEX
         assert gd.STATE_NAMES[code] not in core, (n, gd.STATE_NAMES[code])
-    for s in monster_states(types):
-        assert gd.THING_STATE_NAMES[gd.THING_STATE_INDEX[s]] == s
+    for s in monster_states(types):            # a ghost (never entered: M8 C6) decodes to the plasma state on it
+        assert gd.THING_STATE_NAMES[gd.THING_STATE_INDEX[s]] == s or s in gd.STATE_GHOSTS
     codes = [gd.THING_STATE_INDEX[s] for s in monster_states(types)]
     assert len(codes) == len(set(codes))
-    assert all(gd.THING_STATE_INDEX[s] == gd.STATE_INDEX[s] == gd.STATE_NAMES.index(s) for s in core)
+    assert all(gd.THING_STATE_INDEX[s] == gd.STATE_INDEX[s] == gd.STATE_NAMES.index(s)
+               for s in core if s not in gd.STATE_GHOSTS)
+    assert all(gd.THING_STATE_INDEX[s] == gd.STATE_INDEX[s] for s in core)
 
 
 def test_control_a_soul_index_on_a_thing_state_is_caught(monkeypatch):

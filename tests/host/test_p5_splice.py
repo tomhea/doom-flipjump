@@ -214,7 +214,7 @@ def test_the_hurt_tic_menu_palette_restart_and_leaves_are_spliced():
     i_leaves = src.index('(list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]])')
     assert src.index('["    ;mm_block_end", _mcells]') < i_leaves < src.index('["mm_block_end:"]) + BSn')
     assert "full=bool(_chase.get(\"hurt\"))" in src and "hurt=bool(_chase.get(\"hurt\"))" in src
-    assert "hurt=_P5," in src and "loot=_LOOT, shots=_shot_spec or None) if menu else None" in src and "_P5 = _P5 and _p31 is not None" in src
+    assert "hurt=_P5," in src and "loot=_LOOT, shots=_shot_spec or None, plasma=_PLASMA) if menu else None" in src and "_P5 = _P5 and _p31 is not None" in src
     assert "_p5_assert_labels(_texts)" in src and "_p5_model_asserts(_p31, _proj, _hrt)" in src
 
 

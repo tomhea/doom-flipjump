@@ -597,7 +597,7 @@ def _hs_shadow(tmp_path, name, mut, monkeypatch):
                                                    HS._apply)
     monkeypatch.setattr(MD, "attack_leaf_lines", lambda **kw: orig_attack(**kw, shadow=True) + PC.shj_leaf_lines())
     monkeypatch.setattr(MD, "context_decls", lambda: orig_ctx() + PC.decls((P.INVIS_TYPE,)))
-    monkeypatch.setattr(MD, "fight_tables_fj", lambda sine: orig_tab(sine) + PC.tables_fj((P.INVIS_TYPE,)))
+    monkeypatch.setattr(MD, "fight_tables_fj", lambda sine, *rest: orig_tab(sine, *rest) + PC.tables_fj((P.INVIS_TYPE,)))
 
     def apply(ww, rec, log):
         ww.ws.p_invis = rec["inv"]
@@ -736,7 +736,7 @@ def _tg_shadow(tmp_path, name, mut, monkeypatch):
     orig_dl, orig_ctx, orig_tab = MD.decide_leaves, MD.context_decls, MD.fight_tables_fj
     monkeypatch.setattr(MD, "decide_leaves", lambda **kw: orig_dl(**kw, shadow=True))
     monkeypatch.setattr(MD, "context_decls", lambda: orig_ctx() + PC.decls((P.INVIS_TYPE,)))
-    monkeypatch.setattr(MD, "fight_tables_fj", lambda sine: orig_tab(sine) + PC.tables_fj((P.INVIS_TYPE,)))
+    monkeypatch.setattr(MD, "fight_tables_fj", lambda sine, *rest: orig_tab(sine, *rest) + PC.tables_fj((P.INVIS_TYPE,)))
     script = _tg_script(TG)
     orig_set = TG._set
     monkeypatch.setattr(TG, "_world", _tg_world)

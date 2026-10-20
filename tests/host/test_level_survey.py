@@ -96,8 +96,8 @@ def test_runtime_ids_are_capped_at_the_maps_list_width(ls, wad, monkeypatch):
 def test_a_pickup_without_a_sprite_is_missing(ls, wad, monkeypatch):
     """M8 (gates-ready): E1M8's cell pack (17) has a give but no sprite -- every gate's views KeyError on it; the survey
     names it. CONTROL: on E1M1, a pickup it uses (the clip, 2007) taken out of THING_SPRITE turns MISSING too"""
-    rows = _rows(ls, wad, "E1M8")
-    assert any(r[0] == "MISSING" and r[1].startswith("thing 17 ") and "sprite NO" in r[4] for r in rows), (
+    rows = _rows(ls, wad, "E1M8")                        # M8 C6 gave the cell pack its art (CELP): OK now
+    assert any(r[0] == "OK" and r[1].startswith("thing 17 ") and "sprite yes" in r[4] for r in rows), (
         [r for r in rows if r[1].startswith("thing 17")])
     import doomfj.reference_model as RM
     monkeypatch.setattr(RM, "THING_SPRITE", {k: v for k, v in RM.THING_SPRITE.items() if k != 2007})

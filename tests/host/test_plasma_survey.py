@@ -82,9 +82,10 @@ def test_the_plasma_sprites_are_in_a_rifle_map_s_bank_only(wad, monkeypatch):
 
 
 def test_the_state_byte(ls, wad):
-    """E1M1 / E1M2 / E1M9 need no new state; E1M6 / E1M7 (the lost soul, 16) and E1M8 (the Baron and its shot, 27)
-    are OVER the 14 indices left (9 past the table, 5 raise ghosts)"""
-    for m, want in (("E1M1", ("OK", "0")), ("E1M9", ("OK", "0")), ("E1M6", ("OVER", "16")), ("E1M8", ("OVER", "27"))):
+    """no map needs a new state any more: the Baron and the lost soul (M8 C8) have theirs in the thing domain
+    (gamedata.EXT_ALIAS_CODES) -- before them E1M6 was OVER by 16 and E1M8 by 27 (this test's first form); the
+    control below still counts the free indices"""
+    for m, want in (("E1M1", ("OK", "0")), ("E1M9", ("OK", "0")), ("E1M6", ("OK", "0")), ("E1M8", ("OK", "0"))):
         r = _one(_rows(ls, wad, m, "_state_byte"), "the state byte")
         assert (r[0], r[2]) == want and "<= 14 free" in r[3], (m, r)
 

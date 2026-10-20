@@ -188,10 +188,12 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **blocked30 = blocked29 with persistent leaf lists** (`doom_e1m1_blocked30.fjm`, shipped 2026-09-27) | **90,399,040** (data 36,208,972) | 1.347× OVER | **0.674×** (data 0.270×) | **flat** (asserted) |
 | **blocked31 = blocked30 with the v2 sprite column** (`doom_e1m1_blocked31.fjm`, shipped 2026-09-27; +2,048 words of `gpslot` -- 256 slots x 4 bytes, one op each -- and `sprbank`'s `pad 64`, 0..63 ops) | **90,569,312** (data 36,657,086) | 1.350× OVER | **0.675×** (data 0.273×) | **flat** (asserted) |
 | **blocked32 = blocked31 with the skill filter and the skill menu** (`doom_e1m1_blocked32.fjm`, shipped 2026-09-28; 26 multiplayer-only things and 5 sprite kinds out of the image) | **90,671,968** (data 36,410,172) | 1.351× OVER | **0.676×** (data 0.271×) | **flat** (asserted) |
-| **blocked33 = blocked32 with the native-list sprite bank** (**the shipped `doom_e1m1_blocked33.fjm` today**; one native run list per patch column and tier, the `rowmap` dispatch, every monster frame and rotation) | **90,641,792** (data 36,179,196) | 1.351× OVER | **0.675×** (data 0.270×) | **flat** (asserted) |
+| **blocked33 = blocked32 with the native-list sprite bank** (`doom_e1m1_blocked33.fjm`, shipped 2026-09-28; one native run list per patch column and tier, the `rowmap` dispatch, every monster frame and rotation) | **90,641,792** (data 36,179,196) | 1.351× OVER | **0.675×** (data 0.270×) | **flat** (asserted) |
+| **blocked63 = blocked62 + the MAP page** (**the shipped `doom_e1m1_blocked63.fjm` today**, shipped 2026-10-18; M8: E1M1 + the menu's MAP item, the M key and the map page; the rows from blocked34 to blocked62 are not ledgered here -- `docs/ship-gate.md` and `docs/gp-ledger.md` carry them; measured by `gamespeed.py`'s SIZE line, `docs/ship-evidence/blocked63_gamespeed.log`) | **117,658,720** (data 52,323,960) | 1.753× OVER | **0.877×** (data 0.390×) | **flat** (asserted) |
+| **E1M2 r4 = E1M2's own binary, polished** (`doom_e1m2_r4.fjm`, the standing E1M2 binary from 2026-10-18; its own map, not the E1M1 image; `docs/ship-evidence/e1m2_r4_gamespeed.log`) | **123,567,424** (data 83,467,260) | 1.841× OVER | **0.921×** (data 0.622×) | **flat** (asserted) |
 
 ⚠ Updated 2026-09-07 (M6 rung 0 + S2 + W1) — **and its "now" is the PRE-BLOCKING binary; today's
-shipped binary is the blocked33 row, see the 2026-09-15, 2026-09-25 and 2026-09-27 notes below**: the shipped binary was
+shipped binary is the blocked63 row (#149), see the 2026-09-15, 2026-09-25 and 2026-09-27 notes below**: the shipped binary was
 89,494,606 words when this table was written and is **51,094,744** now — 0.761× of 2^26 and
 **0.381× of 2^27**, i.e. 38.07% of the w=32 ceiling, no longer OVER. Measured with
 `scratchpad/12m/fjmsize.py`; `m2_std_gate` PASS.

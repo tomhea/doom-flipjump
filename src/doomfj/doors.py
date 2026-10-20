@@ -62,15 +62,21 @@ OPEN_GAP = 4              # P_DoorRaise: min(neighbouring ceiling) - 4
 
 
 NO_SIDE = (0xFFFF, -1)          # a linedef's missing side: 0xFFFF raw, -1 as the WAD parser gives it
+ML_TWOSIDED = 4                 # doomdata.h: the linedef flag getNextSector tests
 
 
 def two_sided_neighbours(lds, sds):
     """sector -> the set of sectors sharing a TWO-SIDED linedef with it: DOOM's getNextSector, which
-    skips a line without a back side. The movers' rule (PR #103 review: `neighbours` below reads a
-    one-sided line's -1 back as the last sidedef's sector)."""
+    skips a line without ML_TWOSIDED (#149: the flag, as doomfj.lights' min_surrounding_light tests it) or without a
+    back side. The movers' rule and every map's door rule but E1M1's (PR #103 review: `neighbours` below reads a
+    one-sided line's -1 back as the last sidedef's sector).
+    #149: MEASURED before adding the flag test -- on all 36 Freedoom maps (assets/freedoom1.wad, which E1M1's and
+    E1M2's fixtures are) no linedef has a back side without ML_TWOSIDED or the flag without a back side, so this
+    returns exactly what the back-side test alone did on every map this repo builds (tests/host/test_door_heights.py
+    pins E1M1 and E1M2; scratchpad/cr/emit_baseline.py SAME). It matters on a wad whose one-sided line carries a back."""
     out: dict = {}
     for ld in lds:
-        if ld.front in NO_SIDE or ld.back in NO_SIDE:
+        if ld.front in NO_SIDE or ld.back in NO_SIDE or not ld.flags & ML_TWOSIDED:
             continue
         f, b = sds[ld.front].sector, sds[ld.back].sector
         if f != b:
@@ -97,16 +103,31 @@ def neighbours(lds, sds):
 # M8 (the E1M2 playtest, 2026-10-18): the legacy rule above reads a one-sided line's missing back as the LAST sidedef's
 # sector -- on E1M2 sector 309 (ceiling 152), which capped five doors at 148: blue door 54 (floor 136) opened 12
 # units and could never be passed. Every map takes DOOM's rule (`two_sided_neighbours`: getNextSector skips a line
-# without a back) EXCEPT the shipped E1M1 family, whose door stops its one-byte pid budget froze (PR #103) --
-# recognised by its own sizes: Freedoom E1M1 (assets / tests/fixtures) and the tests' e1m1_lite, which carries the
-# same doors. (sectors, linedefs, sidedefs).
-LEGACY_NEIGHBOUR_MAPS = frozenset({(182, 1175, 1829), (118, 836, 1228)})
+# without a back) EXCEPT E1M1, whose door stops its one-byte pid budget froze (PR #103).
+# #149 (the CR of #148, R6): WHICH rule is the map's flag, config.MAP_CONFIG DOOR_NEIGHBOURS ("legacy" on E1M1, the
+# default "two_sided" everywhere else), read for the map the sectors came from (wad.MapRecords.mapname). It used to be
+# recognised by its (sectors, linedefs, sidedefs) counts -- Freedoom E1M1 (182, 1175, 1829) and the tests' e1m1_lite
+# (118, 836, 1228), both named E1M1 -- so another wad's E1M1 silently took the two-sided rule. On every map in the
+# repo (the fixtures and the 36 maps of assets/freedoom1.wad) the flag picks the rule the counts did.
+DOOR_RULES = ("legacy", "two_sided")
+
+
+def door_rule(mapname: str) -> str:
+    """the map's door neighbour rule (config.MAP_CONFIG DOOR_NEIGHBOURS): "legacy" or "two_sided" """
+    from doomfj.config import Config, map_cfg
+    rule = map_cfg(Config(), mapname).DOOR_NEIGHBOURS
+    assert rule in DOOR_RULES, ("%s: DOOR_NEIGHBOURS %r is not one of %r" % (mapname, rule, DOOR_RULES))
+    return rule
 
 
 def door_neighbours(secs, lds, sds) -> dict:
-    """the neighbours a door's open height is found among (P_FindLowestCeilingSurrounding): DOOM's
-    `two_sided_neighbours`, or the legacy `neighbours` on the E1M1 family (LEGACY_NEIGHBOUR_MAPS)"""
-    if (len(secs), len(lds), len(sds)) in LEGACY_NEIGHBOUR_MAPS:
+    """the neighbours a door's open height is found among (P_FindLowestCeilingSurrounding): the map's rule
+    (`door_rule`) -- DOOM's `two_sided_neighbours`, or the legacy `neighbours` on E1M1. The map is the one `secs` was
+    read for (WadFile.sectors -> wad.MapRecords); a list that does not know its map is refused, never guessed."""
+    mapname = getattr(secs, "mapname", "")
+    assert mapname, ("door_neighbours: the sectors do not say which map they are (pass WadFile.sectors(map)'s own "
+                     "list, not a copy) -- the door rule is per map, config.MAP_CONFIG DOOR_NEIGHBOURS")
+    if door_rule(mapname) == "legacy":
         return neighbours(lds, sds)
     return two_sided_neighbours(lds, sds)
 
@@ -146,7 +167,6 @@ def door_sectors(secs, lds, sds) -> dict:
     open rises from the ceiling the sector has and never closes, so its stops start at that ceiling
     (`door_states`). A stored-open sector a re-closing door line moves stays out: it would close to its
     floor, below its state 0."""
-    nb = door_neighbours(secs, lds, sds)      # M8: DOOM's rule off the E1M1 family
     out = {}
     lines_of = _door_lines_of(secs, lds, sds)
     candidates = []
@@ -154,6 +174,9 @@ def door_sectors(secs, lds, sds) -> dict:
         if ld.special in MANUAL_DOOR_KINDS and ld.back not in NO_SIDE and ld.back < len(sds):
             candidates.append(sds[ld.back].sector)
     candidates += [si for si in range(len(secs)) if set(lines_of.get(si, ())) - {"manual"}]
+    # the map's rule (M8: DOOM's off E1M1; #149: its MAP_CONFIG flag) -- asked only of a map with a door line, so a
+    # door-free hand-built level (a test's synthetic sectors) needs no map name
+    nb = door_neighbours(secs, lds, sds) if candidates else {}
     for si in candidates:
         s = secs[si]
         if s.ceil_h != s.floor_h:

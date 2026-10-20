@@ -85,18 +85,26 @@ def test_control_a_cleared_two_sided_flag_is_reported(ls, wad):
     assert r[0] == "WARN" and str(i) in r[4]
 
 
-# ---- the legacy door rule's fingerprint (the CR of #148)
+# ---- the legacy door rule is E1M1's flag (the CR of #148; #149: MAP_CONFIG DOOR_NEIGHBOURS, not a fingerprint)
 def test_neighbour_rule(e1m1, e1m2):
-    assert _row(e1m1, "door neighbour rule")[2].startswith("legacy")
+    assert _row(e1m1, "door neighbour rule")[:3] == ("OK", "door neighbour rule (doors.door_neighbours)",
+                                                      "legacy (E1M1, MAP_CONFIG DOOR_NEIGHBOURS)")
     assert _row(e1m2, "door neighbour rule")[:3] == ("OK", "door neighbour rule (doors.door_neighbours)",
                                                       "DOOM's two-sided")
 
 
-def test_control_a_map_matching_e1m1s_fingerprint_is_wrong(ls, wad, monkeypatch):
+def test_control_another_map_asking_for_the_legacy_rule_is_wrong(ls, wad, monkeypatch):
+    from doomfj import config
+    sv = ls.Survey(wad, "E1M2", wad)
+    monkeypatch.setitem(config.MAP_CONFIG, "E1M2", {**config.MAP_CONFIG["E1M2"], "DOOR_NEIGHBOURS": "legacy"})
+    sv._neighbour_rule()
+    assert _row(sv, "door neighbour rule")[0] == "WRONG"
+
+
+def test_control_a_rule_that_ignores_the_flag_is_wrong(ls, wad, monkeypatch):
     from doomfj import doors
     sv = ls.Survey(wad, "E1M2", wad)
-    monkeypatch.setattr(doors, "LEGACY_NEIGHBOUR_MAPS",
-                        doors.LEGACY_NEIGHBOUR_MAPS | {(len(sv.secs), len(sv.lds), len(sv.sds))})
+    monkeypatch.setattr(doors, "door_neighbours", lambda secs, lds, sds: doors.neighbours(lds, sds))
     sv._neighbour_rule()
     assert _row(sv, "door neighbour rule")[0] == "WRONG"
 

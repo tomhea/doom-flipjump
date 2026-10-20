@@ -153,8 +153,9 @@ def line_kind(ld, sides, sectors) -> Optional[str]:
     return "step" if (a.floor_h != b.floor_h or a.ceil_h != b.ceil_h) else None
 
 
-def build(map_wad, mapname: str, palette_rgb, width: int = 160, height: int = 100) -> Pages:
-    """the map page of `mapname`: the finest scale (UNITS_MIN, + UNITS_STEP, ...) whose map fits the map area's width
+def build(map_wad, mapname: str, palette_rgb, width: int, height: int) -> Pages:
+    """the map page of `mapname` on a `width` x `height` screen (the config's W x H -- `pages_for` passes them; #149,
+    R6: no 160 x 100 default of its own): the finest scale (UNITS_MIN, + UNITS_STEP, ...) whose map fits the map area's width
     in at most BANDS_MAX bands, the bands spread evenly over the map's rows, the lines in full-map pixels. CHECKED
     (`check`)"""
     vs, lds = map_wad.vertexes(mapname), map_wad.linedefs(mapname)

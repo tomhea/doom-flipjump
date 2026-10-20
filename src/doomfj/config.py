@@ -404,7 +404,14 @@ MAP_CONFIG = {
     "E1M9": {"SPR_SLOT_CAP": 255},
     # M8 C11: SPR_SLOT_CAP for the wave-1 / wave-3 maps past a byte of drawable things over the skills (level_survey:
     # E1M3 352, E1M4 340, E1M5 330, E1M6 461) -- a per-map entry their own level rungs extend with their widths
-    "E1M3": {"SPR_SLOT_CAP": 255}, "E1M4": {"SPR_SLOT_CAP": 255}, "E1M5": {"SPR_SLOT_CAP": 255},
+    # M8 wave 1 (docs/episode-plan.md 3): LIST_ID_BITS 12 -- 341 / 346 / 370 runtime ids (F1.5); E1M3 / E1M4 take E1M2's
+    # widths (plane pairs 249 / 237 estimated, the band lists, the hot block: the lessons survey); the MAP page and the
+    # switch textures as E1M2; the animated lights only where the survey has none on a mover / past a byte (E1M3)
+    "E1M3": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1,
+             "AUTOMAP": 1, "SWITCH_TEX": 1, "SECTOR_LIGHTS": 1},
+    "E1M4": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1,
+             "AUTOMAP": 1, "SWITCH_TEX": 1},
+    "E1M5": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "AUTOMAP": 1, "SWITCH_TEX": 1},
     "E1M6": {"SPR_SLOT_CAP": 255},
     # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): the map page, at 40 units a pixel (doomfj.automap).
     # #149: DOOR_NEIGHBOURS "legacy" -- the door rule E1M1 shipped with (its stops are frozen, PR #103); it was the

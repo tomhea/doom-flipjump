@@ -57,4 +57,4 @@ def test_control_the_unknown_monsters_are_counted(ls, wad, monkeypatch):
 def test_the_slot_cap_row_takes_the_maps_cap(ls, wad, monkeypatch):
     assert [st for st, _v in _rows(ls, wad, "E1M7", "render_caps", DRAW)] == ["OK"]
     monkeypatch.setitem(C.MAP_CONFIG, "E1M7", dict(C.MAP_CONFIG["E1M7"], SPR_SLOT_CAP=0))
-    assert _rows(ls, wad, "E1M7", "render_caps", DRAW) == [("OVER", "606")]          # R9
+    assert _rows(ls, wad, "E1M7", "render_caps", DRAW) == [("OVER", "614")]          # R9 (606 before C7 drew its decor)

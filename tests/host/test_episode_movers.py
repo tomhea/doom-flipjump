@@ -118,9 +118,17 @@ def test_e1m6_one_tag_two_triggers(wad):
     assert [k for k, _s in mp.floor_walk].count(g) == 1 and [k for k, _b in mp.floor_use].count(g) == 1
 
 
+
+def _named_copy(secs):
+    """a mutable copy that still names its map (wad.MapRecords: #149's per-map door rule refuses a bare list)"""
+    from doomfj.wad import MapRecords
+    out = MapRecords(secs)
+    out.mapname = secs.mapname
+    return out
+
 def test_control_change_lines_disagreeing_on_the_flat_refused(wad):
     secs, lds, sds, _v = _map(wad, "E1M6")
-    secs = list(secs)
+    secs = _named_copy(secs)          # #149: the door rule reads the map the list came from
     s = sds[lds[1530].front].sector
     secs[s] = dataclasses.replace(secs[s], floor_tex="FLAT20")
     with pytest.raises(AssertionError, match="texture-change lines give the flats"):
@@ -346,7 +354,7 @@ def test_control_two_cell_line_shut_somewhere_refused(wad):
     others: no one cell answers sight -- refused"""
     from doomfj import monstersight
     secs, lds, sds, _v = _map(wad, "E1M6")
-    secs = list(secs)
+    secs = _named_copy(secs)          # #149: the door rule reads the map the list came from
     secs[142] = dataclasses.replace(secs[142], ceil_h=4)
     with pytest.raises(AssertionError, match="whose opening needs both"):
         monstersight.line_states(_ns(secs, lds, sds), 142, 363)

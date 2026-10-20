@@ -112,10 +112,11 @@ def _walk_across(w, x, y, angle, frames=6):
 @pytest.mark.parametrize("x,angle", [(1040, 0x80000000), (1010, 0)])
 def test_walking_across_the_pad_ends_the_level_either_way(e1m8, x, angle):
     """x = 1024 is the pad's east side: walking west onto it from x 1040 and east off it from x 1010"""
-    sk = e1m8.rm.check_position(e1m8.scene_c, x << 16, 320 << 16)
+    # y 270: the pad's east side runs y 256..384, and the SOLID torch (45, M8 C7) at (1056, 320) blocks y 288..352
+    sk = e1m8.rm.check_position(e1m8.scene_c, x << 16, 270 << 16)
     if not sk[0]:
         pytest.skip("the pad's side is blocked here (%r)" % (sk,))
-    f, ev = _walk_across(e1m8, x, 320, angle)
+    f, ev = _walk_across(e1m8, x, 270, angle)
     assert f is not None and e1m8.ws.g_leveldone == 1
     assert e1m8.tic(_keys(forward=True)).frozen
 
@@ -128,7 +129,7 @@ def test_control_a_one_way_w1_exit_misses_the_back_crossing(e1m8, monkeypatch):
     real = CB.crossed
     monkeypatch.setattr(CB, "crossed", lambda trig, o, n, r: real(trig, o, n, r) and (
         trig not in e1m8.exit_walk or o[0 if trig[1] == "x" else 1] > (trig[2] << 16)))
-    f, _ev = _walk_across(e1m8, 1010, 320, 0)
+    f, _ev = _walk_across(e1m8, 1010, 270, 0)                 # clear of the torch (above)
     assert f is None and e1m8.ws.g_leveldone == 0
 
 

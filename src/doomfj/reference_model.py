@@ -2313,7 +2313,8 @@ class ReferenceModel:
             if deg_stack_scale is None:
                 deg_stack_scale = DEG_STACK_SCALE
             if deg_mark is None:
-                deg_mark = DEG_PNEAR
+                # M8 C11: the map's budget (Config.TSV_BUDGET through MAP_CONFIG: the fj's n_tsv max; DEG_PNEAR on E1M1)
+                deg_mark = map_cfg(cfg, scene.mapname).TSV_BUDGET
             if deg_lip_scale is None:
                 deg_lip_scale = DEG_LIP_SCALE
         # M7 P6+P7 E (the owner, 2026-10-05): `exempt_actors` -- THE ACTORS (the monsters, live or dead, and the

@@ -97,6 +97,88 @@ def _attacker_7bit():
     hc.turn_lines = lambda slot_rows, *a, **k: orig(list(slot_rows)[:0x7E], *a, **k)
 
 
+# M8 C11 (the E1M7 feasibility probe, docs/episode-plan.md 3 / G7): stand-ins for clusters other agents own, so a map's
+# EMISSION -- its size, the episode's biggest risk -- is measured before they land. STANDIN_MAP is the map the
+# command line names (main sets it before the stand-ins run).
+STANDIN_MAP = ["E1M1"]
+# DOOM's thing types gamedata lacks (E1M1..E1M9), each read as a KNOWN one of its role: a solid decoration as the
+# techno column (48), a non-solid one as the dead player (15), a pickup as one of its give class, a monster as the imp
+STANDIN_TYPES = {**{t: 48 for t in (30, 31, 32, 36, 42, 44, 45, 46, 53, 55, 56, 57)},     # C7: solid decor
+                 **{t: 15 for t in (22, 59, 62, 63)},                                    # C7: decor
+                 2004: 2002, 2006: 2002, 2024: 2013, 2025: 2013, 2046: 2010,              # C6: weapons, powerups, ammo
+                 3003: 3001, 3006: 3001}                                                 # C8: the Baron, the lost soul
+
+
+def _things_patch(keep=None):
+    """WadFile.things through STANDIN_TYPES, and (`keep`, a set of thing indices of STANDIN_MAP's monsters) without
+    the monsters outside it"""
+    from doomfj import gamedata as gd
+    from doomfj.wad import Thing, WadFile
+    orig = getattr(WadFile, "_c11_orig_things", WadFile.things)
+    WadFile._c11_orig_things = orig
+    mon = set(gd.MONSTER_DOOMEDNUMS) | {3003, 3006}
+
+    def things(self, m):
+        out = []
+        for i, t in enumerate(orig(self, m)):
+            if keep is not None and m.upper() == STANDIN_MAP[0] and t.type in mon and i not in keep:
+                continue
+            out.append(Thing(t.x, t.y, t.angle, STANDIN_TYPES.get(t.type, t.type), t.flags))
+        return out
+    WadFile.things = things
+
+
+def _unknown_things():
+    """C6 / C7 / C8: a thing type gamedata lacks read as a known one of its role (STANDIN_TYPES) -- the code's size
+    and a known sprite's, not the thing (a new monster's or pickup's own sprites grow the bank: G6)"""
+    _things_patch()
+
+
+def _slots_trim():
+    """C1 / C2 + the monster slot ids past a byte (no cluster yet): the map's monsters thinned EVENLY (every skill's,
+    in thing order) to the most whose runtime ids (things + pools + drops, level_survey's row) fit LIST_MAX_THINGS
+    and whose slots + barrels fit 254 -- the geometry whole, the per-monster code for the kept ones only (scale
+    the sim's parts by the slot ratio printed). Implies unknown-things"""
+    from doomfj import gamedata as gd
+    from doomfj import wall_renderer as WR
+    from doomfj.barrelcode import droppers
+    from doomfj.config import Config
+    from doomfj.mapcompiler import bake_bsp
+    from doomfj.mapprofile import profile
+    from doomfj.reference_model import ReferenceModel
+    from doomfj.things import LIST_MAX_THINGS, baked_thing_mask, drawable_things, mover_leaves, mover_mask_kw
+    from doomfj.wad import WadFile
+    from doomfj.world import FIREBALL_POOL, FX_POOL, World
+    m = STANDIN_MAP[0]
+    _things_patch()
+    wad = WadFile.from_path(str(ROOT / profile(m).wad))
+    art = WadFile.from_path(str(ROOT / "assets" / "freedoom1.wad"))
+    mon = set(gd.MONSTER_DOOMEDNUMS) | {3003, 3006}
+    idx = [i for i, t in enumerate(WadFile._c11_orig_things(wad, m)) if t.type in mon]
+    cmap, rm = bake_bsp(wad, m), ReferenceModel(Config())
+
+    def fits(k):
+        _things_patch({idx[(j * len(idx)) // k] for j in range(k)} if k < len(idx) else None)
+        draw, draw_idx = drawable_things(rm, wad.things(m), art, {})
+        baked = baked_thing_mask(rm, cmap, draw, WR.MONSTER_TYPES,
+                                 **mover_mask_kw(rm, cmap, draw, mover_leaves(wad, m, cmap)))
+        nt = len({i for i, b in zip(draw_idx, baked) if not b})
+        if nt > LIST_MAX_THINGS:
+            return False
+        try:
+            w = World(wad, m, monsters="idle")
+        except AssertionError:
+            return False
+        return (nt + FIREBALL_POOL + FX_POOL + len(droppers(w)) <= LIST_MAX_THINGS
+                and w.layout.nmon + len(w.barrel_things) <= 254)
+    lo, hi = 0, len(idx)
+    while lo < hi:                      # the largest k that fits (fits is monotone in k: thinning only removes)
+        mid = (lo + hi + 1) // 2
+        lo, hi = (mid, hi) if fits(mid) else (lo, mid - 1)
+    assert lo > 0 and fits(lo), "slots-trim: no monster count fits"
+    print("STAND-IN slots-trim: %s keeps %d of its %d monsters (every skill's)" % (m, lo, len(idx)), flush=True)
+
+
 # M8 F4 RETIRED "gives" (lootcode.give_lines: the yellow / red cards, the soulsphere, the computer map), F7 RETIRED
 # "exit-bar-stale" (wall_renderer.p5_tic_lines(bar_always=): the bar runs after the lvdone guard where the exit frame
 # can move it), F2 RETIRED "slanted-doors" (doorcode: a slanted door's contact by its own lines) and M8 L5 RETIRED
@@ -104,7 +186,8 @@ def _attacker_7bit():
 STANDINS = {"decor-every-skill": _decor_every_skill,
             "stats-digits": _stats_digits, "far-los": _far_los, "barrels-one-skill": _barrels_one_skill,
             "barrel-chains-static": _barrel_chains_static,
-            "attacker-7bit": _attacker_7bit}
+            "attacker-7bit": _attacker_7bit,
+            "unknown-things": _unknown_things, "slots-trim": _slots_trim}
 
 
 # docs/level-lessons.md (the CR of #142 item 3, #145 F10): E1M2's 66.85% size measurement ran three stand-ins F1.1 had
@@ -119,7 +202,10 @@ STANDIN_ROWS = {  # stand-in: (refusing row prefixes, witness row prefixes)
     "far-los": (("map extent, far LOS",), ("map extent, far LOS",)),
     "barrels-one-skill": (("barrels: level start the same on every skill",), ("barrels (barrelcode",)),
     "barrel-chains-static": (("lesson: barrel chains",), ("barrel chains", "barrels (barrelcode")),
-    "attacker-7bit": (("monsters + barrels -> aim_sid",), ("monsters + barrels -> aim_sid",))}
+    "attacker-7bit": (("monsters + barrels -> aim_sid",), ("monsters + barrels -> aim_sid",)),
+    # M8 C11 (the E1M7 probe's)
+    "unknown-things": (("World(strict=True) builds",), ("World(strict=True) builds",)),
+    "slots-trim": (("runtime ids", "runtime things", "monster slots + barrels"), ("runtime things",))}
 STANDIN_BLOCKING = ("REFUSED", "OVER", "ERROR")
 
 
@@ -176,6 +262,7 @@ def main():
         over = {k: int(v) for k, v in (kv.split("=", 1) for kv in a.map_config)}
         _config.MAP_CONFIG[a.map.upper()] = dict(_config.MAP_CONFIG.get(a.map.upper(), {}), **over)
         print("MAP_CONFIG[%s] = %s" % (a.map.upper(), _config.MAP_CONFIG[a.map.upper()]), flush=True)
+    STANDIN_MAP[0] = a.map.upper()
     assert set(STANDIN_ROWS) == set(STANDINS), "every stand-in names its survey rows (STANDIN_ROWS)"
     if a.standin:
         stale = stale_standins(a.standin, survey_rows(a.map))
@@ -190,6 +277,11 @@ def main():
     mw = WadFile.from_path(str(ROOT / profile(a.map).wad))
     art = WadFile.from_path(str(ROOT / "assets" / "freedoom1.wad"))
     cfg = tier_cfg(map_cfg(Config(), a.map), a.tier)
+    import doomfj
+    # M8: a worktree's run must measure ITS code -- `import doomfj` without ROOT/src first finds the installed package
+    print("doomfj from %s" % doomfj.__file__, flush=True)
+    assert Path(doomfj.__file__).resolve().is_relative_to((ROOT / "src").resolve()), (
+        "emit_check imported doomfj from %s, not this tree's src" % doomfj.__file__)
     print("emit_check %s tier %s stand-ins %s (asserts %s)" % (a.map, a.tier, a.standin or "none",
                                                                "ON" if __debug__ else "OFF -- refused"), flush=True)
     assert __debug__, "emit_check runs with asserts ON (no python -O): a skipped guard costs an assembly"
@@ -291,5 +383,20 @@ def reset_check(parts, mw, mapname, cfg, tier):
 ONE_PASS_RESET_TIERS = ("game",)        # build.ONE_PASS_TIERS' standalone member (the shipped one)
 
 
+def peak_memory() -> str:
+    """M8 C11: this process's peak working set and peak private bytes (Windows; psutil), for the RAM a map's emission
+    or assembly needs -- rule 1's number"""
+    try:
+        import psutil
+        mi = psutil.Process().memory_info()
+        return "PEAK working set %.2f GB, peak private %.2f GB" % (getattr(mi, "peak_wset", 0) / 2 ** 30,
+                                                                  getattr(mi, "peak_pagefile", 0) / 2 ** 30)
+    except Exception as e:                 # a measurement aid: its absence never fails the check
+        return "PEAK memory unavailable (%s)" % e
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        print(peak_memory(), flush=True)

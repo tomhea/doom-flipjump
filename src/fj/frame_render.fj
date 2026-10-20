@@ -1469,13 +1469,13 @@ ns frame {
         // reaches VIEW_W, and one such E1M1 viewpoint measured 69.6M ops/frame before this existed.
         // ⚠ A budget that actually BINDS hands mid-screen columns to a far one-sided wall's sector
         // -- giant wrong-colour shafts (the smudged-column bug; history: docs/handoff-*.md). So the
-        // deg budget is 4095 (the 3-NIBBLE counter's max) and the EMITTER asserts the map's total
-        // seg count stays below it: it provably never binds. The real per-frame stops are the
-        // full-latch above, claim-complete, and the fbspent idle stop; this count survives only as
-        // the counter-width fuse.
-        hex.inc 3, n_tsv
-        hex.set 3, bcap, budget
-        hex.cmp 3, n_tsv, bcap, budget_ok, budget_stop, budget_ok
+        // deg budget is the counter's max (16^n - 1: 4095 at 3 nibbles; M8 C11, E1M7: 4) and the EMITTER
+        // asserts the map's marking-seg count stays below it: it provably never binds. The real stops
+        // are the full-latch above, claim-complete and the fbspent idle stop; this count is the width
+        // fuse. Its width is DERIVED from the budget, (#budget+3)/4, so the decl (TSV_NIBBLES) cannot drift.
+        hex.inc (#budget+3)/4, n_tsv
+        hex.set (#budget+3)/4, bcap, budget
+        hex.cmp (#budget+3)/4, n_tsv, bcap, budget_ok, budget_stop, budget_ok
       budget_stop:
         hex.set 1, tsstop, 1                    // this seg is the last one the budget allows
         hex.set 1, tsbstop, 1                   // V5-DROP-P2b: the BUDGET-ONLY latch piece-seg
@@ -1557,7 +1557,7 @@ ns frame {
       xa: hex.vec 2
       xb: hex.vec 2
       pm1: hex.vec 2
-      bcap: hex.vec 3
+      bcap: hex.vec (#budget+3)/4
     }
 
     // M13-2S rung 3a — a column's two band-list addresses FROM ITS PLANE-PAIR ID. The bank is laid

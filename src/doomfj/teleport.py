@@ -272,6 +272,17 @@ def neighbours(t: Teleporter, u: Teleporter) -> bool:
             and ay0 - SELF_MARGIN <= by1 + SELF_MARGIN and by0 - SELF_MARGIN <= ay1 + SELF_MARGIN)
 
 
+def segment_box(t: Teleporter) -> tuple:
+    """(x0, y0, x1, y1): the teleport line's segment as a box (an axis-aligned line: zero width on its axis)"""
+    return (t.coord, t.lo, t.coord, t.hi) if t.axis == "x" else (t.lo, t.coord, t.hi, t.coord)
+
+
+def segment_gap(t: Teleporter, u: Teleporter) -> int:
+    """M8 C11: the Chebyshev gap between two teleport lines' segments (0 when their boxes touch)"""
+    a, b = segment_box(t), segment_box(u)
+    return max(0, a[0] - b[2], b[0] - a[2], a[1] - b[3], b[1] - a[3])
+
+
 def check_one_per_move(tels) -> None:
     """ONE TELEPORT PER MOVE, and no teleporting thing stomps ITSELF: every destination lies farther than SELF_MARGIN
     from its own line's segment and from every NEIGHBOUR line's (`neighbours`: a line one move can touch together

@@ -137,6 +137,10 @@ def fj_gives(kind):
 STATIC_SPECIALS = {48: "drawn static, no scroll (simplification, as the lights)"}
 
 
+# M8 C11: every DOOM monster's doomednum (info.c), gamedata's and the ones it lacks: the slot count is the WAD's
+DOOM_MONSTERS = frozenset({3004, 9, 3001, 3002, 58, 3006, 3003, 3005, 16, 7, 64, 65, 66, 67, 68, 69, 71, 84})
+
+
 class Survey:
     def __init__(self, wad, mapname, asset):
         self.wad, self.m, self.asset = wad, mapname, asset
@@ -275,6 +279,13 @@ class Survey:
             else:
                 self.decor_row(ty, tt, label, n)
         self.guard("hanging things on still sectors", self.hanging)
+        # M8 C11: THE MONSTER SLOT IDS, from the WAD (the World refuses E1M6 / E1M7 before its own row runs): a slot per
+        # monster of EVERY skill plus the barrels -- dm_id, sp_sid, aim_sid, mon_target / bar_src (2 + slot), p_atk are
+        # BYTES in fj with two-level jump16 dispatches (world._code_bits, aim_bits, barrelcode's `dm_id is two nibbles`).
+        # DOOM's monsters, the ones gamedata lacks included (3003 the Baron, 3006 the lost soul, ...)
+        nslot = sum(n for ty, n in c.items() if ty in DOOM_MONSTERS) + c.get(2035, 0)
+        self.cap("monster slots + barrels, every skill, from the WAD (byte slot ids: dm_id, aim_sid, mon_target)",
+                 nslot, 254, "" if nslot <= 254 else "past a byte: 3-nibble slot ids in every mirror (no cluster yet)")
         # M8 C6 (lesson): a pickup the model and the fj both take can still be INVISIBLE -- its kind needs a sprite
         # prefix (reference_model.THING_SPRITE) whose lump is in the asset wad, or the renderers silently skip it
         from doomfj import reference_model as _RM
@@ -614,7 +625,18 @@ class Survey:
         baked = baked_thing_mask(rm, cmap, draw, WR.MONSTER_TYPES,     # M8 F1.3: things on movers run
                                  **mover_mask_kw(rm, cmap, draw, mover_leaves(self.wad, self.m, cmap)))
         nt = len({i for i, b in zip(draw_idx, baked) if not b})
-        self.cap("drawable things, every skill (1-byte fragment slot id)", len(draw), 256, strict_less=True)
+        # M8 C11: the emitter's own bound (wall_renderer.check_slot_ids): a map with a per-frame SPR_SLOT_CAP (F1.4,
+        # MAP_CONFIG) is bounded by construction; without one, every skill's drawable things must fit the byte
+        _cfg = map_cfg(Config(), self.m)
+        try:
+            WR.check_slot_ids(len(draw), 0, 0, _cfg)
+            self.row("OK", "drawable things, every skill (1-byte fragment slot id)", len(draw),
+                     "cap %d a frame" % _cfg.SPR_SLOT_CAP if _cfg.SPR_SLOT_CAP else "< 256",
+                     "SPR_SLOT_CAP (MAP_CONFIG): past it the farthest drop, DOOM's MAXVISSPRITES rule"
+                     if _cfg.SPR_SLOT_CAP else "")
+        except AssertionError:
+            self.row("OVER", "drawable things, every skill (1-byte fragment slot id)", len(draw), "< 256",
+                     "give the map a SPR_SLOT_CAP (config.MAP_CONFIG; docs/f1-big-map-widths.md 1)")
         # M8 F1.5 (docs/f1-runtime-ids.md): the lists' id width is the map's Config.LIST_ID_BITS (MAP_CONFIG) -- 8 bits
         # hold 254 ids, 12 hold 4,094 (things.list_max); the caps below are against the map's OWN width
         from doomfj.things import list_bits, list_max
@@ -645,7 +667,8 @@ class Survey:
                  "plane pairs (ESTIMATE, no direction; measured: m4_bands.py)", pid_lo,
                  "< %d" % 16 ** cfg.PID_NIBBLES,
                  "E1M1 est 152 -> 222 real; E1M2 329 -> 411. PID_NIBBLES %d for this map%s"
-                 % (cfg.PID_NIBBLES, "" if pid_lo * 1.5 < 256 else ": likely needs 3 (MAP_CONFIG)"))
+                 % (cfg.PID_NIBBLES, "" if pid_lo * 1.5 < 16 ** cfg.PID_NIBBLES or cfg.PID_NIBBLES >= 3
+                    else ": likely needs 3 (MAP_CONFIG)"))
 
     def _marking(self, WR, cmap):
         from doomfj import doors
@@ -667,7 +690,9 @@ class Survey:
                                                                  for si, h in g.heights}))
         marking = sum(1 for seg in cmap.segs if self.lds[seg.linedef].back != -1
                       and any(WR.seg_marks_in(self.lds, self.sds, seg, v) for v in variants))
-        self.cap("marking two-sided segs (n_tsv 3 nibbles)", marking, WR.DEG_PNEAR, strict_less=True)
+        cfg = map_cfg(Config(), self.m)       # M8 C11: the map's n_tsv width (MAP_CONFIG TSV_NIBBLES; E1M7 4)
+        self.cap("marking two-sided segs (n_tsv %d nibbles)" % cfg.TSV_NIBBLES, marking, cfg.TSV_BUDGET,
+                 "" if marking < cfg.TSV_BUDGET else "raise the map's TSV_NIBBLES (config.MAP_CONFIG)", strict_less=True)
 
     # ------------------------------------------------------------------ docs/level-lessons.md: checks a mistake earned
     # Each check below is a lesson E1M1 or E1M2 paid for (a dead build, a gate failure, a CR blocker, a playtest

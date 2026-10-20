@@ -1307,7 +1307,7 @@ class CombatMixin:
     #     (mon_x << 16) + mon_fx), the INFLICTOR's WHOLE UNITS << 16 (the integer half of its 16.16: the player's,
     #     a fireball's, a monster's and a barrel's -- what knockcode's kb_ix / kb_iy carry);
     #   * a thing's Z (2D: a thing stands on its floor): the player's check_position floorz at his position, a
-    #     monster's mon_floorz, a barrel's sector floor (static), a fireball's proj_z (its shooter's mon_floorz + 32 at
+    #     monster's mon_floorz, a barrel's sector floor (now: M8, a barrel on a mover rides it), a fireball's proj_z (its shooter's mon_floorz + 32 at
     #     the spawn: P_SpawnMissile's z + 4*8*FRACUNIT, no gravity);
     #   * the reversal's coin draws on the TARGET's stream (rng_player / mon_rng[slot]), only when its three other
     #     conditions hold (C's short circuit), before the armor and the pain or death draw;

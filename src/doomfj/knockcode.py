@@ -179,11 +179,10 @@ def restart_lines(nmon: int, pool: int = None) -> List[str]:
 
 
 def barrel_floor_values(w) -> List[int]:
-    """`kbbz[b]`: barrel b's z, its sector's floor (combat._knock_z: barrels never move, no mover holds one)"""
+    """`kbbz[b]`: barrel b's z, its sector's floor (combat._knock_z: a barrel never moves). M8 wave 1: a barrel on a
+    MOVER's floor rides it -- its z is read live by its stub (barrelcode.mover_z_lines: E1M3's on a lift), and its
+    entry here (its level-start floor) is never read"""
     floors = [w._floor_at(t.x, t.y) for t in w.barrel_things]
-    for t in w.barrel_things:
-        sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, t.x, t.y)]
-        assert sec not in w.mover_order, "a barrel on a mover: its z would move"
     return [f & 0xFFFF for f in floors]
 
 

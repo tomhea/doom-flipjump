@@ -60,6 +60,13 @@ P9 (`rockets`, the owner's ROCKET LAUNCHER; projcode's `rk_blast` is the caller)
 target floored to whole units -- combat._rocket_blast's whole-unit ends) instead of the barrel's static per-spot list;
 the knock's inflictor z is `bl_z` -- the barrel's floor (`kbbz` by bl_b, at bl_leaf's top) or the rocket's z (the
 caller's); `bl_mon10` (BARREL_R) is the barrels' distance and LOS entry the rocket's barrel loop calls.
+
+M8 wave 1 (E1M3's barrel on a lift): a barrel on a MOVER's floor rides it (P_ChangeSector; the model's
+`combat._knock_z` reads `_floor_at`, the live `secs_c`), so its z is not kbbz's stored floor: its stub sets `ptss` to
+its leaf, calls `ms_seed_leaf` (mover-aware: the mover's state cell -> that state's floor in `cp_seedf`), writes the
+floor's low half to `bl_z` and sets `bl_mv`; bl_leaf's top takes bl_z as it is while bl_mv is 1 (and clears it)
+instead of looking kbbz up (`mover_barrel_leaves`, `mover_z_lines`; a map with no barrel on a mover -- E1M1, E1M2 --
+emits exactly what it did).
 """
 from typing import Dict, List, Sequence, Tuple
 
@@ -282,6 +289,33 @@ def damage_lines(nbar: int, fight: bool = False) -> List[str]:
         "    stl.fret bd_ret"]
 
 
+def mover_barrel_leaves(w) -> Dict[int, int]:
+    """M8 wave 1: `{barrel: its leaf}` for every barrel standing in a MOVER's sector (`World.mover_order`, the rule of
+    `World.pickup_on_mover`): its z is its leaf's floor NOW (the module docstring). E1M1, E1M2: none"""
+    out = {}
+    for b, t in enumerate(w.barrel_things):
+        leaf = w.rm.point_in_subsector(w.cmap, t.x, t.y)
+        if w.leaf_sector[leaf] in w.mover_order:
+            out[b] = leaf
+    return out
+
+
+def mover_z_lines(leaf: int) -> List[str]:
+    """a mover barrel's stub, before `stl.fcall bl_leaf`: its z = its leaf's floor now (`ms_seed_leaf` -> `cp_seedf`,
+    whole units; the low four nibbles, as kbbz's `floor & 0xFFFF`) into `bl_z`, and `bl_mv` 1 (bl_leaf keeps it)"""
+    return ["    hex.set w/4, ptss, %d" % leaf, "    stl.fcall ms_seed_leaf, ms_seed_ret",
+            "    hex.mov 4, bl_z, cp_seedf", "    hex.set 1, bl_mv, 1"]
+
+
+def blast_z_lines(mover: bool) -> List[str]:
+    """bl_leaf's top (P9, `rockets`): `bl_z` -- the rocket's own (bl_dyn 1), a mover barrel's from its stub (bl_mv 1,
+    cleared here), else kbbz by bl_b. `mover` False (no barrel on a mover): the pre-M8 text"""
+    if not mover:
+        return ["    hex.if1 1, bl_dyn, bl_zd", "    kbbz.lookup bl_z, bl_b", "  bl_zd:"]
+    return ["    hex.if1 1, bl_dyn, bl_zd", "    hex.if1 1, bl_mv, bl_zm", "    kbbz.lookup bl_z, bl_b",
+            "  bl_zm:", "    hex.zero 1, bl_mv", "  bl_zd:"]
+
+
 def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool = False,
                 rockets: bool = False) -> List[str]:
     """`bl_leaf` (stl.fcall bl_leaf, bl_ret; bl_b, bl_px, bl_py the barrel) -- the player, then the monster slots --
@@ -299,6 +333,8 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
     zl = ["    hex.mov 4, kb_iz, bl_z"] if rockets else ["    kbbz.lookup kb_iz, bl_b"]
     kb = inflictor_lines("bl_px", "bl_py", z_lines=zl, src_player=not fight) if knock else []
     assert not rockets or (knock and fight), "P9: the rocket's blast is the final modes' (its z, its source)"
+    mover = bool(mover_barrel_leaves(w))
+    assert not (mover and knock and not rockets), "M8: a barrel on a mover's z is bl_z's (the rockets' modes)"
     if knock and fight:
         assert kb[-1] == "    hex.zero 1, kb_sp", kb
         kb[-1] = "    hex.mov 1, kb_sp, bl_sp"                         # M7 P8a K x I: the player set it off?
@@ -308,7 +344,7 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
     assert len(slot_rt) == n
     hn = cell_nibbles(w.schema, "mon_health")
     out = ["bl_leaf:",
-           *(["    hex.if1 1, bl_dyn, bl_zd", "    kbbz.lookup bl_z, bl_b", "  bl_zd:"] if rockets else []),
+           *(blast_z_lines(mover) if rockets else []),
            *(["    hex.zero 1, bl_sp",                                       # M7 P8a K x I: bl_sp = bl_src == 1
               "    hex.if_flags bl_src + 1*dw, 1, bl_sp0, bl_sph",          # (the high nibble 0 ...
               "  bl_sph:",
@@ -421,6 +457,7 @@ def phase_lines(w, *, barrel_rt: Dict[int, int] = None, exit_guard: bool = True,
     chains = chain_pairs(w) if chains is None else chains
     barrel_rt = barrel_rt or {}
     barrel_vis = barrel_vis or {}
+    mleaf = mover_barrel_leaves(w)                                   # M8: a barrel on a mover (bl_z, bl_mv)
     out = ["bar_phase:"]
     if exit_guard:
         out.append("    hex.if1 1, lvdone, bar_ph_out")                     # a finished level: the world is frozen
@@ -439,6 +476,7 @@ def phase_lines(w, *, barrel_rt: Dict[int, int] = None, exit_guard: bool = True,
                 "    hex.set 2, bl_b, %d" % b,
                 "    hex.set 4, bl_px, %d" % (t.x & 0xFFFF), "    hex.set 4, bl_py, %d" % (t.y & 0xFFFF),
                 *(["    hex.mov 2, bl_src, bar_src + %d*dw" % (2 * b)] if fight else []),   # M7 P8a I
+                *(mover_z_lines(mleaf[b]) if b in mleaf else []),             # M8: its floor now
                 "    stl.fcall bl_leaf, bl_ret"]
         for c, dmg in chains[b]:                                              # 3. the other barrels, static
             out += ["    hex.set 2, bw_dmg, %d" % dmg,
@@ -608,11 +646,14 @@ def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills:
     from doomfj.combat import PLAYER_R
     from doomfj.monstersight import blast_los_lines
     check_model_rules(w, tuple(skills) or (boot_skill,))
+    mover = bool(mover_barrel_leaves(w))
+    assert not mover or rockets, "M8: a barrel on a mover's z is bl_z's: the rockets' modes (P9) only"
     spots = [(t.x, t.y) for t in w.barrel_things]
     maxr = max([PLAYER_R] + list(w.mon_radius[:w.layout.nmon]))
     from doomfj.world import FIREBALL_POOL, FX_POOL
     return {"decls": (decls(w, boot_skill, list_bits=list_bits) + (fight_decls(w) if fight else [])
-                      + (["bl_dyn: hex.vec 1", "bl_z: hex.vec 4"] if rockets else [])),   # P9: the rocket's entry
+                      + (["bl_dyn: hex.vec 1", "bl_z: hex.vec 4"] if rockets else [])   # P9: the rocket's entry
+                      + (["bl_mv: hex.vec 1"] if mover else [])),                      # M8: a barrel on a mover
             "lines": (phase_lines(w, barrel_rt=barrel_rt, exit_guard=exit_guard, barrel_vis=barrel_vis, fight=fight)
                       + damage_lines(len(spots), fight=fight)
                       + blast_lines(w, slot_rt=slot_rt, knock=knock, fight=fight, rockets=rockets)

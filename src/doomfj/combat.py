@@ -434,6 +434,10 @@ class CombatMixin:
                         for t in self.mon_things]
         # the exit switch: the door-style proximity box around each exit line (plan 6.7)
         self.exit_boxes = exit_boxes(self.lds, self.cmap.vertexes, W.USE_RANGE)
+        # M8 C9: box k's line (doors.exit_lines) and whether it is the secret exit (51)
+        from doomfj.doors import exit_lines as _exit_lines, secret_exits as _secret_exits
+        self.exit_box_lines = _exit_lines(self.lds)
+        self.exit_secret = _secret_exits(self.lds)
         # key doors: the cards that open each door sector (EV_VerticalDoor) -- M8 C3: by the door's KIND (its card,
         # doors.KIND_CARD), so a door whose lines need different cards (E1M3 150: D1 31 and D1 32) keeps its keyless
         # kind on its main box and the keyed lines their own (World.door_keyed); every E1M1 / E1M2 door as before
@@ -627,10 +631,13 @@ class CombatMixin:
         # M8 (doomfj.switches): the S1 floor and SR lift switch lines this press changes -- their EV_* read on the
         # machines BEFORE the press fires them, and before the exit (whose own latch is g_leveldone)
         self.switch_uses(ws.px, ws.py, lambda k: ws.l_state[k] == 0, lambda g: self.floor_sub(g) == 0)
-        for box in self.exit_boxes:
+        for k, box in enumerate(self.exit_boxes):
             if W.in_use_box_fixed(box, ws.px, ws.py):
                 ws.g_leveldone = 1
                 ev.level_done = True
+                if self.exit_secret[k]:              # M8 C9: the secret exit (51) -- LEVEL COMPLETE says so
+                    ws.g_secretexit = 1
+                self.switch_exit(self.exit_box_lines[k])     # M8 C9: a map with two exit lines: this one swaps
                 return
         for tag, box in self.lift_use:
             if W.in_use_box_fixed(box, ws.px, ws.py):
@@ -2046,6 +2053,12 @@ class CombatMixin:
         for g, shape in self.floor_walk:              # M8 F1.3: the W1 floor lines (each group fires once)
             if _crossed_shape(shape, (x, y), (cx, cy), PLAYER_R):
                 self.floor_fire(g)
+        for trig in self.exit_walk:                   # M8 C9: the W1 exit (52) -- either side, the player only
+            if crossed(trig, (x, y), (cx, cy), PLAYER_R):
+                ws.g_leveldone = 1
+                if ev is not None:
+                    ev.level_done = True
+                break
         if self.teleports:                            # M8 L4: the WR teleports -- LAST (they move him)
             self._teleport_player(x, y, cx, cy, ev)
 
@@ -2064,7 +2077,8 @@ class CombatMixin:
         ws = self.ws
         ev = _W().TicEvents(0) if ev is None else ev
         for tel in self.teleports:
-            if not crossed_front(tel, (x, y), (cx, cy), PLAYER_R):
+            # M8 C5: the monster-only lines (125 / 126) are not his; a skill without the destination finds none
+            if tel.monster_only or not tel.on_skill(ws.skill) or not crossed_front(tel, (x, y), (cx, cy), PLAYER_R):
                 continue
             me = ("player", -1)                       # PIT_StompThing: tmthing is the inflictor AND the source
             for kind, i in stomp_victims(self, tel.dest, PLAYER_R):

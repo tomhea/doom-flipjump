@@ -28,8 +28,8 @@ THE PICTURE: the game picture's wall tones (reference_model.wall_tone_names) -- 
 "#EXIT") while it shows an SW1 texture and "#SWITCHON" while it shows an SW2 one.
 
 KNOWN SIMPLIFICATIONS: a press on an SR line whose button is still out changes nothing (DOOM swaps the texture back early
-and keeps the first button's timer); a tic is a frame, as the doors' WAIT; the exit's latch is the level's, so a map
-with two exit switch lines is refused (`map_switches`). A switch line whose special starts nothing here (an unsupported
+and keeps the first button's timer); a tic is a frame, as the doors' WAIT; the exit's latch is the level's (M8 C9: on a map
+with two exit switch lines each has its own cell, `latched`). A switch line whose special starts nothing here (an unsupported
 special, or a tag naming no machine) keeps its texture.
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ SWITCH_PREFIXES = ("SW1", "SW2")          # DOOM's switch textures (alphSwitchLi
 BUTTON_FRAMES = 35                        # BUTTONTIME (35 tics): a tic is a frame here
 BUTTON_NIBBLES = 2                        # the countdown's cell
 assert 0 < BUTTON_FRAMES < 16 ** BUTTON_NIBBLES
-EXIT_SWITCH_SPECIALS = frozenset({11})    # S1 exit (doors.EXIT_SPECIALS)
+EXIT_SWITCH_SPECIALS = frozenset({11, 51})    # S1 exit, M8 C9 S1 secret exit (doors.EXIT_SPECIALS)
 DOOR_SWITCH_SPECIALS = frozenset({63, 103, 61, 112, 114, 133})   # doors.SWITCH_DOOR_KINDS (M8 C3: 61 112 114 133)
 FLOOR_SWITCH_SPECIALS = frozenset({23, 71, 102, 7, 20})     # movers.FLOOR_USE_SPECIALS (M8 C4: + 7 stairs, 20 plat)
 LIFT_SWITCH_SPECIALS = frozenset({62, 123})          # movers.LIFT_USE_SPECIALS
@@ -124,14 +124,16 @@ def map_switches(secs, lds, sds, verts, rng: int = USE_RANGE) -> List[Switch]:
         (ax, ay), (bx, by) = _xy(verts[ld.v1]), _xy(verts[ld.v2])
         out.append(Switch(i, sp, kind, sp in REPEAT_SPECIALS, tex.startswith("SW2"),
                           (min(ax, bx) - rng, min(ay, by) - rng, max(ax, bx) + rng, max(ay, by) + rng), targets))
-    assert sum(s.kind == "exit" for s in out) <= 1, (
-        "two exit switch lines: the exit's latch is the level's (lvdone), one line's")
     return out
 
 
 def latched(switches: Sequence[Switch]) -> List[Switch]:
-    """the switches with a cell of their own (all but the exit), in order: switch k is cell `swpr + k*dw`"""
-    return [s for s in switches if s.kind != "exit"]
+    """the switches with a cell of their own (all but the exit), in order: switch k is cell `swpr + k*dw`. M8 C9: a
+    map with MORE THAN ONE exit switch line (E1M3: 11 and the secret 51; E1M7: two 11s) gives each its own cell too
+    -- `lvdone` says the level ended, not which line was pressed; the press sets the pressed line's cell (World.
+    switch_exit, the fj exit's per-box hit). One exit line keeps `lvdone` as its latch (E1M2's text unchanged)"""
+    shared = sum(s.kind == "exit" for s in switches) <= 1
+    return [s for s in switches if s.kind != "exit" or not shared]
 
 
 def repeating(switches: Sequence[Switch]) -> List[int]:
@@ -210,5 +212,5 @@ def pressed_lines(switches: Sequence[Switch], on: Sequence[int], leveldone: bool
     lat = latched(switches)
     out = {s.line for k, s in enumerate(lat) if on[k]}
     if leveldone:
-        out |= {s.line for s in switches if s.kind == "exit"}
+        out |= {s.line for s in switches if s.kind == "exit" and s not in lat}
     return frozenset(out)

@@ -75,6 +75,10 @@ def supported_line_specials():
     """{special: what implements it} -- read from the SSOT sets, so a special added there shows up here"""
     from doomfj import doors, movers
     out = {1: "doors (plain DR; monsters open it: world)", 11: "doors (S1 exit)"}
+    for s in doors.SECRET_EXIT_SPECIALS:          # M8 C9: the level ends there too (plan G11); LEVEL COMPLETE says so
+        out[s] = "exit (M8 C9: S1 secret exit -- LEVEL COMPLETE, SECRET EXIT; exitcode)"
+    for s in doors.WALK_EXIT_SPECIALS:
+        out[s] = "exit (M8 C9: W1, the player crossing either way; exitcode.walk_lines)"
     for s in doors.BLUE_DOOR_SPECIALS:
         out[s] = "doors (blue card)"
     for s in doors.YELLOW_DOOR_SPECIALS:
@@ -113,7 +117,9 @@ def supported_line_specials():
         out[s] = "lights (switch thinker: light %d on a use press)" % b
     from doomfj import teleport
     for s in teleport.TELEPORT_SPECIALS:
-        out[s] = "teleport (M8 L4: player and monsters; no telefrag, no fog)"
+        out[s] = ("teleport (M8 C5: monsters only%s; fog, no telefrag)" % (", W1 latch" if s in teleport.ONCE_SPECIALS
+                                                                           else "")
+                  if s in teleport.MONSTER_ONLY_SPECIALS else "teleport (M8 L4: player and monsters; telefrag, fog)")
     return out
 
 
@@ -204,6 +210,8 @@ class Survey:
                 self.row("INFO", "line special %d %s" % (s, name), n, "", STATIC_SPECIALS[s])
             else:
                 self.row("MISSING", "line special %d %s" % (s, name), n, "", "no implementation: INERT today")
+        self.guard("teleport lines (teleport.teleporters: a destination per skill, one teleport per move)",
+                   self._teleports)
         from doomfj.combat import SECTOR_HURT, SECRET_SPECIAL
         sc = Counter(sec.special for sec in self.secs if sec.special)
         self.facts["sector_specials"] = dict(sc)
@@ -219,6 +227,25 @@ class Survey:
         blk = sum(1 for ld in self.lds if ld.flags & gd.ML_SOUNDBLOCK)
         self.row("INFO" if not blk else "WARN", "ML_SOUNDBLOCK lines", blk, "",
                  "the model has them (M8 L0); the fj noise flood refuses them (noisecode) until M8 L5")
+
+    def _teleports(self):
+        """M8 C5: the teleport lines as the model bakes them (its refusals are this row's REFUSED); INFO the lines whose
+        destination some skill lacks (teleportcode's g_skill test: E1M5) and the lines one move can touch together
+        (the first decides, where DOOM's spechit may teleport twice: teleport.py's KNOWN SIMPLIFICATION)"""
+        from doomfj import teleport
+        tels = teleport.teleporters(self.wad, self.m)
+        if not tels:
+            return
+        self.row("OK", "teleport lines baked (player / monster-only / W1)",
+                 "%d / %d / %d" % (len(teleport.player_teleporters(tels)), sum(t.monster_only for t in tels),
+                                   len(teleport.once_lines(tels))))
+        gated = [(t.line, t.skills) for t in tels if t.skills != teleport.ALL_SKILLS]
+        if gated:
+            self.row("INFO", "teleport destinations some skill lacks (line, MTF bits): inert there", gated)
+        touch = [(a.line, b.line) for i, a in enumerate(tels) for b in tels[i + 1:] if teleport.neighbours(a, b)]
+        if touch:
+            self.row("INFO", "teleport line pairs one move can touch (the first decides)", len(touch), "",
+                     "%s" % touch[:6])
 
     def things(self):
         from doomfj.things import single_player
@@ -381,7 +408,8 @@ class Survey:
         from doomfj.world import aim_bits
         self.cap("monsters + barrels -> aim_sid (world.aim_bits: the fj byte)", nmon + nbar, 0xFF,
                  "aim_sid %d bits" % aim_bits(w.layout))
-        self.row("OK" if nbar else "REFUSED", "barrels >= 1 (barrelcode asserts one)", nbar)
+        # M8 C10: a map with no barrel is a supported case (barrelcode: no per-barrel stub, its cells one dead slot)
+        self.row("OK" if nbar else "INFO", "barrels (barrelcode: none is supported, M8 C10)", nbar)
         from doomfj.statcode import count_digits
         self.cap("monsters on LEVEL COMPLETE (an 8-bit cell; statcode.count_digits)", nmon, 0xFF,
                  "%d digits a count" % count_digits(w))
@@ -393,7 +421,7 @@ class Survey:
         self.guard("statcode.check_world", lambda: statcode.check_world(w) if hasattr(statcode, "check_world") else None)
         from doomfj import barrelcode
         self.guard("barrels: level start the same on every skill (barrelcode.check_model_rules)",
-                   lambda: barrelcode.check_model_rules(w, (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)) if nbar else None)
+                   lambda: barrelcode.check_model_rules(w, (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)))
         # M8 F1.3 (docs/f1-big-map-widths.md 9): an item on a mover's floor touches at the live floor (pk_mbox) and
         # renders runtime (things.mover_leaves); a door's floor never moves
         moving = [(t.type, w.pickup_sector[i]) for i, t in enumerate(w.pickup_things) if w.pickup_on_mover[i]]

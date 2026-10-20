@@ -98,6 +98,7 @@ from doomfj.combat import CombatMixin, STRAFE_MOVE, WEAPON_KEYS  # noqa: F401 (r
 from doomfj.doorcode import door_line_ids
 from doomfj.fixedpoint import aprox_distance  # noqa: F401 -- P_AproxDistance, ONE definition (M7 P3.3); re-exported
 from doomfj.doors import crossed                                   # M7 P2b: WR lifts
+from doomfj.doors import secret_exits as _secret_exits             # M8 C9: the secret exit's field
 from doomfj.doors import door_contact_geo, touches_door            # M7 P2b: reversal
 from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states,  # M7 P2b
                            lift_tic, lift_walk_triggers, mover_heights, switch_sectors,
@@ -284,11 +285,13 @@ class Layout:
     nlift: int = 0     # M7 P2b: lifts (doomfj.movers)
     nsecret: int = 0   # P10: secret sectors (special 9) -- LEVEL COMPLETE's SECRETS
     ntele: int = 0     # M8 L4: WR teleport lines (doomfj.teleport); 0 on E1M1 -- no field, no cell
+    ntonce: int = 0    # M8 C5: the W1 monster teleports (125, teleport.once_lines); 0 -- no field, no cell
     nfloor: int = 0    # M8 F1.3: the floor groups in the WIDE layout (movers.floor_wide); 0: E1M1's one 1-bit switch
     nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
     nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
     nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
     nshot: int = 0     # M8 C3: the GR 46 shot lines (doors.shot_lines): their aim ids from the top of aim_sid's byte
+    secexit: int = 0   # M8 C9: 1 on a map with a secret exit line (51): the g_secretexit field
 
     @property
     def nmobile(self) -> int:
@@ -364,6 +367,8 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("g_restart", 1, group="game", phase="S3b",
       doc="restart asked (use while dead, NEW GAME): the frame tail runs the restart block")
     f("g_leveldone", 1, group="game", phase="S3b", doc="the exit switch was used: world frozen")
+    if lay.secexit:  # M8 C9 (doors.SECRET_EXIT_SPECIALS): which exit ended the level (LEVEL COMPLETE shows SECRET EXIT)
+        f("g_secretexit", 1, group="game", phase="C9", label="lvsec", doc="the level ended by its secret exit (51)")
     # -- input and mode (existing standalone persist set) ----------------------------------------
     f("mode", 1, group="input", phase="existing", label="mode", doc="1 = menu frame producer")
     for k in ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5"):   # M7 P4.1; P9: 5
@@ -378,6 +383,9 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
         from doomfj.teleport import REACTION_BITS
         f("p_reaction", REACTION_BITS, group="player", phase="L4", label="p_rct",
           doc="0..18: the tics P_PlayerThink skips P_MovePlayer (turn and walk) after a teleport")
+    if lay.ntonce:  # M8 C5 (doomfj.teleport): the W1 monster teleports' latches (P_CrossSpecialLine: special = 0)
+        f("tp_fired", 1, count=lay.ntonce, group="door", phase="C5", label="tp_w1",
+          doc="W1 monster teleport j (teleport.once_lines) was crossed by a monster: its special is gone")
     f("p_health", 12, signed=True, group="player", phase="S3b", doc="health; < 0 after a kill")
     f("p_armor", 8, group="player", phase="S3b", doc="armor points, 0..200")
     f("p_armortype", 2, group="player", phase="S3b", doc="0 none, 1 green, 2 blue")
@@ -907,10 +915,12 @@ class World(CombatMixin):
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
                              nwalk=len(self.walk_triggers) + self.door_nlatch, nlift=len(self.lift_order),
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
+                             ntonce=len(self.tele_once),
                              nfloor=len(self.floor_groups) if self.floor_wide else 0,
                              nlight=len(self.light_thinkers),
                              nswitch=len(self.switch_cells), nswsr=len(self.switch_sr),
-                             nshot=len(self.door_shots))
+                             nshot=len(self.door_shots),
+                             secexit=int(any(_secret_exits(self.mw.linedefs(self.mapname)))))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -1006,6 +1016,9 @@ class World(CombatMixin):
         self.lift_stops = lift_states(secs, lds, sds)
         self.lift_order = sorted(self.lift_stops)
         self.lift_walk = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
+        # M8 C9: the W1 exit lines (52; E1M8), fused -- the player's crossing ends the level ([] on E1M1 / E1M2)
+        from doomfj.doors import exit_walk_triggers
+        self.exit_walk = exit_walk_triggers(lds, self.mw.vertexes(self.mapname))
         # M8 F1.3: the WR lines a MONSTER triggers (88, not the blazing 120), each lift's stride, a tag's lifts
         self.lift_walk_mon = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname),
                                                 _MV.LIFT_MONSTER_SPECIALS)
@@ -1048,6 +1061,8 @@ class World(CombatMixin):
         # is the destination sector's floor, baked: it must not be a door or a mover
         from doomfj.teleport import teleporters
         self.teleports = teleporters(mw, M, rm=self.rm, cmap=cmap)
+        from doomfj.teleport import once_lines
+        self.tele_once = once_lines(self.teleports)  # M8 C5: the W1 (125) lines, latch j = tp_fired[j]
         self._teleported = False
         # M8 (doomfj.switches, the map's SWITCH_TEX): the switch lines a use changes -- `switch_cells` the ones with a
         # `sw_on` cell (all but the exit, whose latch is g_leveldone), `switch_sr` the SR ones' indices among them
@@ -1374,6 +1389,13 @@ class World(CombatMixin):
         for k in _SWI.use_presses(self.switch_cells, x16, y16, lift_rest, floor_still):
             _SWI.press(on, tm, self.switch_sr, k)
         self._switch_store(on, tm)
+
+    def switch_exit(self, line: int) -> None:
+        """M8 C9: exit line `line` was pressed -- on a map with more than one exit switch line each has its own cell
+        (switches.latched), which swaps; a single exit line's latch is g_leveldone itself (nothing to do)"""
+        for k, s in enumerate(self.switch_cells):
+            if s.kind == "exit" and s.line == line:
+                self.ws.sw_on[k] = 1
 
     def _switch_store(self, on, tm) -> None:
         ws = self.ws
@@ -1957,11 +1979,21 @@ class World(CombatMixin):
         ahead of the destination: combat._teleport_fogs) and the destination: position, floorz, facing (its angle's
         octant), momentum and the position's fraction 0 (knockback). -> the position now (the relink's).
         `self._teleported` says it happened (the knock move's momentum stops: combat._xy_move)"""
-        from doomfj.teleport import crossed_front, stomped
+        from doomfj.teleport import crossed_side, stomped
         ws = self.ws
         r = self.mon_radius[m]
         for tel in self.teleports:
-            if not crossed_front(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r):
+            if tel.once:                             # M8 C5: W1 125 -- a crossing either way clears it for the level
+                j = [t.line for t in self.tele_once].index(tel.line)
+                if ws.tp_fired[j]:
+                    continue
+                side = crossed_side(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r)
+                if side is not None:
+                    ws.tp_fired[j] = 1
+            else:
+                side = crossed_side(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r)
+            # the front only; M8 C5: a skill whose search finds no destination (E1M5's easy / medium) teleports nothing
+            if not side or not tel.on_skill(ws.skill):
                 continue
             if stomped(self, tel.dest, r, mover=m):
                 break

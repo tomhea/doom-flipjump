@@ -73,6 +73,8 @@ from doomfj.menu import MAIN_RESUME_SCR                                   # P10:
 from doomfj.menu import LEVEL_DONE_ENTER, LEVEL_DONE_HOLD_LAST, LEVEL_DONE_SCREENS   # P10: LEVEL COMPLETE's hold
 from doomfj import statcode as _statcode                                  # P10: LEVEL COMPLETE's stats
 from doomfj import teleportcode as _teleportcode                          # M8 L4: the WR teleports
+from doomfj import exitcode as _exitcode                                  # M8 C9: the secret and W1 exits
+from doomfj import doors as _doors_mod                                    # M8 C9: exit_walk_triggers
 from doomfj import lightcode as _lightcode                                # M8: the sector light thinkers
 from doomfj import lights as _lights                                      # M8: ... and their rules
 from doomfj import scrollcode as _scrollcode                              # M8: the scrolling wall (special 48)
@@ -1344,7 +1346,8 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
     progress; MAIN_RESUME_SCR exists only then (refused otherwise). LEVEL COMPLETE's `stats` is (nsecret, the digit
     slots: menu.stats_digits(*statcode.stats_of(world), statcode.count_digits(world))) -- None, the frame a menu
     without a World bakes (its slots
-    empty, `_menu_lines(stats=None)`).
+    empty, `_menu_lines(stats=None)`). M8 C9: an optional third field, the world's g_secretexit -- SECRET EXIT under
+    the title (menu.level_done_pixels(secret=)).
     M8: `automap` -- the map's `automap.Pages` (automap.pages_for), None on a map without the page: the main menu then
     has MAP, the help lists M, and the map page (menu.MAP_SCREENS) is `automap.pixels` at `view` = (viewx, viewy),
     16.16 -- the dot is the one picture that depends on the world; MAIN_MAP_SCR is the main menu on MAP."""
@@ -1359,8 +1362,9 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
     if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
         return help_pixels(cfg.W, cfg.H, colours, **({"automap": True} if automap is not None else {}))
     if scr in LEVEL_DONE_SCREENS:                  # P10: the screen and its hold
-        nsecret, digits = stats if stats is not None else (0, None)
-        return level_done_pixels(cfg.W, cfg.H, colours, nsecret, digits)
+        nsecret, digits = stats[:2] if stats is not None else (0, None)
+        secret = bool(stats[2]) if stats is not None and len(stats) > 2 else False     # M8 C9: the secret exit
+        return level_done_pixels(cfg.W, cfg.H, colours, nsecret, digits, **({"secret": True} if secret else {}))
     if scr == 1:
         return pixels(cfg.W, cfg.H, SKILL_MENU, SKILL_MENU_FIRST + sel, colours)
     if scr == MAIN_RESUME_SCR and not live:
@@ -1372,7 +1376,7 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
     return pixels(cfg.W, cfg.H, entries, new_game if item is None else entries.index(item), colours)
 
 
-def exit_lines(boxes, press_miss=(), press_first=()) -> list:
+def exit_lines(boxes, press_miss=(), press_first=(), hits=None) -> list:
     """M7 P2a.2 -- the exit switch in fj (docs/gp-exit.md; the model's P_UseLines for special 11):
     a use PRESS -- `duse` this tic, `pusedn` clear -- sets `pusedn`, and inside any exit box
     (`doors.exit_boxes`, the doors' inclusive 16.16 test) ends the level: `lvdone` 1 and the
@@ -1383,14 +1387,17 @@ def exit_lines(boxes, press_miss=(), press_first=()) -> list:
     runs on a press that misses the exit -- the SR lifts and the S1 switch (`movercode.
     use_line_lines`), after the exit as in the model's P_UseLines. M8: `press_first` runs on every press BEFORE the
     exit's boxes -- the switch textures' floor and lift lines (`switchcode.use_press_lines`, World._use_lines' first
-    step); without it the text is P10's."""
+    step); without it the text is P10's. M8 C9: `hits` {box k: lines} -- what box k's press runs before the shared
+    hit (exitcode.hit_lines: the secret exit's `lvsec`, the pressed line's own switch cell); None / {}: P10's text"""
+    hits = hits or {}
     out = ["hex.if0 1, duse, ex_up",
            "hex.if0 1, pusedn, ex_press", ";ex_done",
            "ex_press:", "hex.set 1, pusedn, 1", *press_first]
     for k, box in enumerate(boxes):
-        out += _box_test(f"x{k}", box, "ex_hit", f"ex_miss{k}") + [f"ex_miss{k}:"]
+        out += _box_test(f"x{k}", box, f"ex_hit{k}" if k in hits else "ex_hit", f"ex_miss{k}") + [f"ex_miss{k}:"]
     out += [*press_miss,
             ";ex_done",
+            *[ln for k in sorted(hits) for ln in (f"ex_hit{k}:", *hits[k], ";ex_hit")],
             "ex_hit:", "hex.set 1, lvdone, 1", "hex.set 1, mode, 1",
             f"hex.set 1, menu_scr, {LEVEL_DONE_ENTER}", ";ex_done",          # P10: LEVEL COMPLETE, its hold first
             "ex_up:", "hex.zero 1, pusedn",
@@ -1477,7 +1484,8 @@ def map_key_lines(p: str) -> list:
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
                             press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
-                            use_guard=((), ()), weapon_bar=(), knock_move=(), press_first=(), automap: bool = False) -> list:
+                            use_guard=((), ()), weapon_bar=(), knock_move=(), press_first=(), automap: bool = False,
+                            exit_hits=None, exit_walk: bool = False, use_edge: bool = False) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -1500,7 +1508,14 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     before the bar's weapon slots (the knock's pickups change them).
 
     M8: `automap` -- the map has the map page: the polls read M too (`standalone_key_lines`).
+
+    M8 C9 (doomfj.exitcode): `exit_hits` -- exit_lines' per-box lines; `exit_walk` -- the map has a W1 exit (E1M8,
+    which has no exit switch): the frozen-level guard is emitted for it too (the walk's after_accept sets `lvdone`);
+    `use_edge` -- the use PRESS block (`exit_lines`: the `pusedn` edge, the switch textures, the SR lifts and floor
+    switches) is emitted even with no exit box (E1M8: no exit switch, its lifts still take a press).
     """
+    _frozen = bool(exit_boxes_) or exit_walk
+    _uses = bool(exit_boxes_) or use_edge
     return [
         *standalone_key_lines(polls, automap),   # the polls, the press latch, the key byte (P9: factored out)
         *(menu or []),                     # M3: the menu frame + the branch past the world
@@ -1510,7 +1525,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         *latch,                            # M7 P6+P7: p_dd0 = p_dead (the TIC-START death every guard reads)
         # M7 P2a.2: a finished level is FROZEN -- no door tic, no player tic (the model's frozen
         # tic); the frame draws the world where it stopped
-        *(["hex.if0 1, lvdone, lv_live", ";lv_frozen", "lv_live:"] if exit_boxes_ else []),
+        *(["hex.if0 1, lvdone, lv_live", ";lv_frozen", "lv_live:"] if _frozen else []),
         # M2-R4: the use key -> `duse`, then one tic of every door. THE DOORS TIC FIRST, before
         # the player moves: it is what lets a door opened this frame be walked through on the same
         # frame, and both mirrors have to agree on the order or they disagree about that frame.
@@ -1518,8 +1533,8 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
            f"hex.if_flags pkeys + dw, {KEY_USE_MASK:#06x}, duse_nos, duse_yess",
            f"duse_yess:", "hex.xor_by 1, duse, 1",
            f"duse_nos:", *door_lines] if door_lines else []),
-        *((list(use_guard[0]) + exit_lines(exit_boxes_, press_miss, press_first) + list(use_guard[1]))
-          if exit_boxes_ else []),
+        *((list(use_guard[0]) + exit_lines(exit_boxes_, press_miss, press_first, exit_hits) + list(use_guard[1]))
+          if _uses else []),
         # M7 P4.1: the weapon -- the model's player phase runs the number keys and the psprites before the move
         *weapon,
         *_player_sim_lines(collide, strafe=True, tap=True),   # M7 P4.1: the game tier strafes; P6+P7: the tap turn
@@ -1530,7 +1545,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         # M7 P3.1: the monsters tic after the player (the model's order: doors, player, monsters);
         # a frozen level skips them with the player
         *monster_tic,
-        *(["lv_frozen:"] if exit_boxes_ else []),
+        *(["lv_frozen:"] if _frozen else []),
         *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
         *_int_part_lines("vy", "viewy", "vysx", "vydone"),
         # ... and NO echo. There is no host to relay the state, which is the whole point.
@@ -2283,7 +2298,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # render constants switch on -- the exit's `lvdone` (the level done IS its latch), a latched one's `swpr` nibble
     _wall_tones_on = (_wall_tone_names(lds, sds, map_wad.sectors(mapname), switch_tex=True,
                                        pressed=frozenset(s_.line for s_ in _SWI)) if _SWI else {})
-    _sw_cell = {s_.line: ("lvdone" if s_.kind == "exit" else _switchcode.cell(_SWI_LAT.index(s_))) for s_ in _SWI}
+    _sw_cell = {s_.line: ("lvdone" if s_ not in _SWI_LAT else _switchcode.cell(_SWI_LAT.index(s_)))  # M8 C9: 2 exits
+                for s_ in _SWI}
     assert not _SWI or _wall_tones, "M8: the switch textures draw through the wall tones"
 
     def _seg_wall_tex_name(seg):
@@ -2599,12 +2615,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M8 L4 (doomfj.teleportcode): THE WR TELEPORTS -- the game tier's player (his reactiontime persists, its gate is
     # the standalone prologue's) and its moving monsters; [] on a map without one (E1M1: no text anywhere)
     _TELE = list(_p31["world"].teleports) if (_LOOT and _chase) else []
+    # M8 C9 (doomfj.exitcode): the W1 exit lines (52), where the game has the exit's screen ([] on E1M1 / E1M2)
+    _EXIT_WALK = (_doors_mod.exit_walk_triggers(lds, map_wad.vertexes(mapname)) if (standalone and menu and _door_tic)
+                  else [])
+    _EXIT_FIRE = ["hex.set 1, lvdone, 1", "hex.set 1, mode, 1", f"hex.set 1, menu_scr, {LEVEL_DONE_ENTER}"]
     assert bool(_p31 and _p31.get("tele")) == bool(_TELE), "M8 L4: p31_parts' teleports and the emitter's disagree"
     if _TELE:
         from doomfj.monstercode import cell_nibbles as _cn8
         _teleportcode.check_barrels(_p31["world"])
         assert _W8.player_resolves(PLAYER_MODE), "M8: the telefrag kills through damagecode's dm_go (TELEFRAG)"
         assert _cn8(_p31["world"].schema, "mon_facing") == 1, "M8 L4: the knock stubs' facing cell is one nibble"
+        # M8 C5: a destination some skill lacks (E1M5's 126) is tested on `g_skill`, a standalone cell
+        assert standalone or all(t_.skills == 7 for t_ in _TELE), "M8 C5: a skill-gated teleport needs g_skill"
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
     _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
@@ -3692,6 +3714,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     + (floor_walk_lines(_floor_groups, _movers.floor_walk_triggers(
                         lds, map_wad.vertexes(mapname), _floor_groups), PLAYER_RADIUS >> 16, prefix=lw + "f")
                        if _movers_on else [])
+                    # M8 C9: the W1 exit (52; doomfj.exitcode) -- before the teleports, as the model's _walkover
+                    + _exitcode.walk_lines(_EXIT_WALK, PLAYER_RADIUS >> 16, _EXIT_FIRE, prefix=(wo + "x"))
                     + (_teleportcode.player_lines(_TELE, prefix=tp or "tpw", knock_cells=_KNOCK, knock_ctx=bool(tp))
                        if _TELE else []))
         _collide_block = ([";simcollide_skip", "simcollide:"]
@@ -3841,7 +3865,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             p6_common=_p6_restart[0], p6_skills=_p6_restart[1],
             p8a_common=p8a_restart_parts(_p31["world"] if _p31 else None),     # M7 P8a: the packages' cells
             p10_common=(list(_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
-                        + (_teleportcode.level_start_lines() if _TELE else [])              # M8 L4: no reactiontime
+                        + (_teleportcode.level_start_lines(_TELE) if _TELE else [])          # M8 L4: no reactiontime; C5: W1 armed
+                        + (_exitcode.level_start_lines(lds) if standalone and menu else [])   # M8 C9: no exit used
                         + (_lightcode.level_start_lines(_lth) if _lth else [])            # M8: the lights' start
                         # M8: every switch as the map has it (switchcode)
                         + (_switchcode.level_start_lines(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else [])))
@@ -3858,6 +3883,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P2a.2: the exit switch, where the game has a menu to open and doors (its use key, `duse`)
     _exit = (exit_boxes(lds, map_wad.vertexes(mapname)) if (standalone and menu and _door_tic)
              else [])
+    # M8 C9: the use press's edge exists wherever the exit's would (E1M8 has no exit switch, but lifts and switches)
+    _use_edge = bool(standalone and menu and _door_tic)
     # M7 P2b: the SR lifts and the floor switch, on a use press that misses the exit
     # M8 F1.3: every lift of an SR line's tag, and every S1 floor group by its own lines (group 0's text is E1M1's)
     _press_miss = (use_line_lines(use_line_boxes(secs, lds, map_wad.vertexes(mapname), LIFT_USE_SPECIALS),
@@ -3865,11 +3892,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   _movers.floor_use_boxes(lds, map_wad.vertexes(mapname), _floor_groups))
                    # M8 C4: and the light switches (138), after them (combat._use_lines' order); none on E1M1 / E1M2
                    + _lightcode.switch_use_lines(_lights.light_switch_uses(secs, lds, map_wad.vertexes(mapname), _lth))
-                   if (_movers_on and _exit) else [])
+                   if (_movers_on and _use_edge) else [])
     # M8 (doomfj.switchcode): the switch textures' floor and lift lines, on a use press before the exit's boxes
     _press_first = (_switchcode.use_press_lines(_SWI, _floor_groups, _movers.floor_wide(_floor_groups))
                     if _SWI else [])
-    assert not _SWI or _exit, "M8: the switch textures' use press is the exit's edge (a map with an exit)"
+    assert not _SWI or _use_edge, "M8: the switch textures' use press is the exit's edge (the menu's tier)"
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, monster_tic=_p31["tic"] if _p31 else (),
                                   # M7 P5: the damage count fades right after the weapon tic (hurtcode's
@@ -3891,6 +3918,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   door_lines=_door_tic,
                                   exit_boxes_=_exit, press_miss=_press_miss,
                                   press_first=_press_first,           # M8: the switch textures (switchcode)
+                                  # M8 C9 (doomfj.exitcode): the secret exit's lvsec, two exit lines' cells; the W1 exit
+                                  exit_hits=(_exitcode.hit_lines(lds, _SWI_LAT) if _exit else None),
+                                  exit_walk=bool(_EXIT_WALK), use_edge=_use_edge,
                                   # M7 P7: the restart on use after death, when the player can die (the menu's
                                   # tier: it holds the restart routines and g_rs)
                                   restart_tic=(_restartcode.tic_lines(len(SKILLS))
@@ -3956,6 +3986,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M8 F7 (issue #123 item 4): a map where the exit frame can move the health or armor runs the bar after the
     # lvdone guard (E1M1 cannot: its text is unchanged)
     _bar_always = bool(_hrt and _exit and exit_frame_bar_hazards(map_wad, mapname, _exit)["hazards"])
+    # M8 C9: a W1 exit (52) ends the level INSIDE the walk -- nukage and the move's pickups before it on that frame --
+    # so its bar runs after the guard (`p5_tic_lines(bar_always=)`: it costs only the frozen frames)
+    _bar_always = _bar_always or bool(_hrt and _EXIT_WALK)
     # M7 P6: + the barrels' phase; M8: + the light thinkers (doomfj.lightcode)
     _wt_pools = (p5_tic_lines(_hrt, barrels=bool(_bar), bar_always=_bar_always, lights=bool(_lth))
                  if _hrt else [])
@@ -4301,7 +4334,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *(_statcode.decls(_p31["world"]) if _STATS else []),           # P10: the stats' cells and scratch
-          *(_teleportcode.decls() if _TELE else []),                      # M8 L4: p_rct and the teleports' scratch
+          *(_teleportcode.decls(_TELE) if _TELE else []),                  # M8 L4: p_rct and the scratch; C5: tp_w1
+          *(_exitcode.decls(lds) if standalone and menu else []),          # M8 C9: lvsec (a map with a secret exit)
           *((_lightcode.decls(_lth) + _lightcode.tables(_lth)) if _lth else []),   # M8: the light cells, their tables
           *(_switchcode.decls(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else []),   # M8: the switch textures' cells
           *_aim_decls,                                                      # M7 P4.2a: the aim window

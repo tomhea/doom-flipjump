@@ -184,7 +184,7 @@ def check_model_rules(w, skills: Sequence[int] = ()) -> None:
     assert 0 < info.spawnhealth < 128 and BARREL_HEALTH_MIN == -128, "bar_hp is 8-bit two's complement"
     assert BOMB_DAMAGE <= DP_MAX and BOMB_DAMAGE <= DM_MAX_FULL and BOMB_DAMAGE < 256
     assert PLAYER_R < 256 and all(r < 256 for r in w.mon_radius[:w.layout.nmon])
-    assert 0 < len(w.barrel_things) <= 255
+    assert 0 <= len(w.barrel_things) <= 255      # M8 C10: a map with no barrel (E1M5, E1M8) -- `no_barrels`
     assert w.layout.nmon + len(w.barrel_things) < 255, "dm_id is two nibbles"
     # M8 F1.2 (docs/f1-big-map-widths.md 7a): the barrels' level start MAY differ by skill (E1M2, E1M9) -- NEW GAME's
     # lines are per skill (`restart_lines(w, skill)`, barrel_parts' "restart"), the leaf lists and thvis per skill
@@ -581,7 +581,7 @@ def restart_lines(w, skill: int, *, nt: int) -> List[str]:
     first = nt + FIREBALL_POOL + FX_POOL
     out = ["    hex.set %d, %s, %d" % (nib * len(v[name]), name, sum((x & (16 ** nib - 1)) << (4 * nib * i)
                                                                        for i, x in enumerate(v[name])))
-           for name, nib in BAR_FIELDS]
+           for name, nib in BAR_FIELDS if v[name]]                      # M8 C10: no barrel, no cell to set
     return out + ["    hex.set 2, rng_wd, %d" % v["rng_wd"], "    hex.zero %d, mdrop" % max(1, nd),
                   "    hex.zero 2, dr_live",
                   "    hex.zero %d, thpos_rt + %d*dw" % (16 * nd, 16 * first),
@@ -620,7 +620,8 @@ def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills:
                       + shot_lines(w, fight=fight)
                       + drop_lines(w, nt=nt, slot_rt=slot_rt, list_bits=list_bits)),   # M8 F1.5: dr_t
             "tables": tables_fj(),
-            "restart": [restart_lines(w, sk, nt=nt) + (["    hex.zero %d, bar_src" % (2 * len(spots))] if fight else [])
+            "restart": [restart_lines(w, sk, nt=nt) + (["    hex.zero %d, bar_src" % (2 * len(spots))]
+                                                       if fight and spots else [])      # M8 C10: no barrel, no cell
                         for sk in skills],
             "persist": BARREL_PERSIST + DROP_PERSIST + (FIGHT_PERSIST if fight else ()),
             "nbar": len(spots), "drops": {m: k for k, m in enumerate(droppers(w))}, "ndrop": len(droppers(w)),

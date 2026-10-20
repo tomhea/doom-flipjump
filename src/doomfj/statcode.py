@@ -311,4 +311,9 @@ def frame_lines(width: int, height: int, colours, w, label: str = "menu_level_do
                     for b in level_done_digit_records(width, height, colours, nsec, i, d, nd)]
             out.append(f"    ;{p}_x")
         out.append(f"  {p}_x:")
+    if getattr(w.layout, "secexit", 0):             # M8 C9: the secret exit used -> SECRET EXIT under the title
+        from doomfj.menu import level_done_secret_records
+        out += ["    hex.if0 1, lvsec, lvd_sx"]
+        out += ["    stl.output_char %d" % b for b in level_done_secret_records(width, height, colours, nsec, nd)]
+        out += ["  lvd_sx:"]
     return out

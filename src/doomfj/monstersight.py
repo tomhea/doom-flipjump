@@ -611,7 +611,7 @@ def blast_los_lines(w, spots, max_radius: int, lists=None, fight: bool = False, 
     if lists is None:
         lists = spot_lists(segs, spots, margin)
     n = len(spots)
-    assert 0 < n <= 255 and len(lists) == n
+    assert 0 <= n <= 255 and len(lists) == n        # M8 C10: a map with no barrel (n 0) -- the rocket's entry only
     out = ["bl_los:", "    hex.zero 1, sl_hit", "    hex.mov 4, mm_x, bl_px", "    hex.mov 4, mm_y, bl_py"]
     if dyn:                                       # P9: the rocket's spot -- the far LOS to the floored target
         out += ["    hex.if0 1, bl_dyn, bl_lst",
@@ -620,6 +620,8 @@ def blast_los_lines(w, spots, max_radius: int, lists=None, fight: bool = False, 
                 "    stl.fcall sl_far, sf_ret",
                 "    ;bl_ldone",
                 "  bl_lst:"]
+    if not n:                                     # M8 C10: no barrel spot -- no static list to walk (none calls it)
+        return out + ["bl_ldone:", "    stl.fret bl_lret"]
     for c in ("x", "y"):                         # sl_los' prologue, with Q = (bl_qx, bl_qy)
         p, q = "sl_p" + c, "bl_q" + c
         out += ["    hex.zero 4, %s" % p, "    hex.mov 4, %s + 4*dw, mm_%s" % (p, c),

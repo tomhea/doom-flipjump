@@ -613,13 +613,58 @@ def stats_digits(kills: int, total_kills: int, items: int, total_items: int, sec
             + count_codes(total_items, count_digits) + [secrets] + _two_digits(mm) + _two_digits(ss, lead_blank=False))
 
 
-def _level_done_bitmap(width, height, colours, nsecret: int, digits=None, count_digits: int = 2):
+# M8 C9: the line LEVEL COMPLETE shows under its title when the level ended by its SECRET exit (special 51; a single
+# level's binary ends there too -- the episode plan's G11). Drawn in the text colour on the blank line 1, AFTER the
+# frame (the program: `level_done_secret_records`, behind its `lvsec` cell; statcode.frame_lines)
+SECRET_EXIT_TEXT = "SECRET EXIT"
+
+
+def secret_exit_origin(width, height, nsecret: int, count_digits: int = 2) -> tuple:
+    """M8 C9: SECRET EXIT's top-left: centred on LEVEL COMPLETE's line 1 (the blank line under the title)"""
+    lines, _sel, _rows, _slots = level_done_layout(width, height, nsecret, count_digits)
+    assert lines[1] == "", lines
+    return max(0, (width - text_width(SECRET_EXIT_TEXT)) // 2), _line_y(height, len(lines), 1)
+
+
+def level_done_secret_records(width, height, colours, nsecret: int, count_digits: int = 2) -> bytes:
+    """M8 C9: SECRET EXIT as column records drawn after the frame (`level_done_digit_records`' form: per glyph column
+    with ink, [x], [KEEP][y][y2][ink] per vertical run, END), in the text colour"""
+    _background, text, _highlight, _credit = colours
+    assert height <= COLLINES_TOKENS_MAX_HEIGHT, "KEEP is a token only on a screen of <= 251 rows"
+    x, y0 = secret_exit_origin(width, height, nsecret, count_digits)
+    out = bytearray()
+    for ch in SECRET_EXIT_TEXT:
+        glyph = _GLYPHS.get(ch, _GLYPHS[" "]).split("|")
+        for gx in range(len(glyph[0])):
+            runs, gy = [], 0
+            while gy < len(glyph):
+                if glyph[gy][gx] != "#":
+                    gy += 1
+                    continue
+                e = gy + 1
+                while e < len(glyph) and glyph[e][gx] == "#":
+                    e += 1
+                runs.append((y0 + gy, y0 + e))
+                gy = e
+            if runs and 0 <= x + gx < width:
+                out.append(x + gx)
+                for ys, ye in runs:
+                    out += bytes([KEEP, ys, ye, text])
+                out.append(END)
+        x += len(glyph[0]) + GLYPH_GAP
+    return bytes(out)
+
+
+def _level_done_bitmap(width, height, colours, nsecret: int, digits=None, count_digits: int = 2,
+                       secret: bool = False):
     """LEVEL COMPLETE: `_bitmap`'s title, prompt and credit, the labels in the text colour, the values -- their fixed
     glyphs and, with `digits`, each slot's digit -- in the highlight colour. `digits` None: the slots left empty (the
-    program's baked frame)"""
+    program's baked frame). M8 C9: `secret` -- SECRET EXIT under the title (`secret_exit_origin`)"""
     _background, text, highlight, _credit = colours
     lines, selected, rows, slots = level_done_layout(width, height, nsecret, count_digits)
     out = _bitmap(width, height, lines, selected, colours)
+    if secret:
+        _draw(out, width, height, SECRET_EXIT_TEXT, *secret_exit_origin(width, height, nsecret, count_digits), text)
     for x_label, y, label, glyphs in rows:
         _draw(out, width, height, label, x_label, y, text)
         for x, ch in glyphs:
@@ -632,11 +677,12 @@ def _level_done_bitmap(width, height, colours, nsecret: int, digits=None, count_
     return out
 
 
-def level_done_pixels(width, height, colours, nsecret: int, digits) -> list:
+def level_done_pixels(width, height, colours, nsecret: int, digits, secret: bool = False) -> list:
     """What the ORACLE expects on LEVEL COMPLETE, the slots showing `digits` (`stats_digits`) -- M8 F1.1: their count
-    names the layout (count_slots: 13 two-digit counts, 17 three)"""
+    names the layout (count_slots: 13 two-digit counts, 17 three). M8 C9: `secret` -- the level ended by its secret
+    exit (the world's g_secretexit): SECRET EXIT under the title"""
     nd = 2 if digits is None else {count_slots(2): 2, count_slots(3): 3}[len(digits)]
-    return _level_done_bitmap(width, height, colours, nsecret, digits, nd)
+    return _level_done_bitmap(width, height, colours, nsecret, digits, nd, secret)
 
 
 def level_done_stream(width, height, colours, nsecret: int, count_digits: int = 2) -> bytes:

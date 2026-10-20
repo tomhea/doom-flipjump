@@ -173,12 +173,14 @@ def one_draw_values(site: str) -> List[int]:
 
 
 ATTACK_TABLES = {"trclaw": "troop_claw", "sgbite": "sarg_bite"}
+BRUISER_TABLES = {"brclaw": "bruis_claw"}          # M8 C8: A_BruisAttack's claw, on a map with a Baron
 
 
-def tables_fj(hwt: Sequence[int], loot: bool = False) -> List[str]:
-    """every D4 table P5's hurt code reads: mbul, trclaw, sgbite, dpsav, palidx; `loot` (M7 P6): and bonpal"""
+def tables_fj(hwt: Sequence[int], loot: bool = False, bruiser: bool = False) -> List[str]:
+    """every D4 table P5's hurt code reads: mbul, trclaw, sgbite, dpsav, palidx; `loot` (M7 P6): and bonpal; `bruiser`
+    (M8 C8, a map with a Baron): brclaw"""
     out = [generate_dispatch_table_fj("mbul", mbul_values(hwt), index_nibbles=2, result_nibbles=3)]
-    for label, site in ATTACK_TABLES.items():
+    for label, site in list(ATTACK_TABLES.items()) + (list(BRUISER_TABLES.items()) if bruiser else []):
         vals = one_draw_values(site)
         assert max(vals) <= DP_MAX
         out.append(generate_dispatch_table_fj(label, vals, index_nibbles=2, result_nibbles=2))
@@ -439,7 +441,8 @@ def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool 
     (`dp_lines(knock=True)`); the program must then hold doomfj.knockcode's interface and `kb_go`."""
     start = level_start(w)
     return {"decls": hurt_decls(start) + (["pal_bk: hex.vec 1"] if loot else []),
-            "tables": tables_fj(w.hwt, loot) + palette_tables_fj(sprite_wad, boot_wad,
+            "tables": tables_fj(w.hwt, loot, any(mi.name == "MT_BRUISER" for mi in w.mon_info))   # M8 C8: brclaw
+                      + palette_tables_fj(sprite_wad, boot_wad,
                                                                  NPALETTES_LOOT if loot else NPALETTES),
             "leaves": dp_lines(knock), "tic": hp_tic_lines(), "bar": hp_bar_lines(), "palette": pal_lines(loot),
             "menu_palette": pal_menu_lines(), "restart": restart_lines(start), "persist": PERSIST, "start": start}

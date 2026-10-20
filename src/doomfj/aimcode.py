@@ -38,15 +38,15 @@ RC_BARREL = 2                          # M7 P6: sp_rc's class for a barrel (radi
 _PROJECTION_FJ = Path(__file__).resolve().parents[1] / "fj" / "projection.fj"
 
 
-def reff_values(rm, barrels: bool = False) -> List[int]:
+def reff_values(rm, barrels: bool = False, r0: int = 20) -> List[int]:
     """`aimr`: the view angle's top 8 bits -> r_eff(20) | r_eff(30) << 8 (combat.aim_radius, the ONE definition);
-    M7 P6 (`barrels`): | r_eff(BARREL_R) << 16"""
+    M7 P6 (`barrels`): | r_eff(BARREL_R) << 16. M8 C8: `r0` radius class 0 (world.radius_classes: E1M8's 24)"""
     from doomfj.combat import CombatMixin, AIM_REFF_BITS, BARREL_R
     assert AIM_REFF_BITS == REFF_BITS
     out = []
     for i in range(1 << REFF_BITS):
         a = i << (32 - REFF_BITS)
-        r20, r30 = CombatMixin.aim_radius(rm, a, 20), CombatMixin.aim_radius(rm, a, 30)
+        r20, r30 = CombatMixin.aim_radius(rm, a, r0), CombatMixin.aim_radius(rm, a, 30)
         r10 = CombatMixin.aim_radius(rm, a, BARREL_R)
         assert r20 < 256 and r30 < 256 and r10 < 256
         out.append(r20 | r30 << 8 | ((r10 << 16) if barrels else 0))
@@ -172,7 +172,7 @@ def check_minz_first(text: str = None) -> None:
                                "hook: a negative pth_tz would compare as huge and the far test would misread it")
 
 
-def check_box_widths(rm, barrel_wph: int = None) -> dict:
+def check_box_widths(rm, barrel_wph: int = None, r0: int = 20) -> dict:
     """issue #119 item 7 (emit time): every box `aim_record` sees is at least ONE column wide, so x2 >= x1 and the
     leaf's count n = hi - lo + 1 is >= 1 after clipping (an empty box would wrap n to 0xFF -- see leaf_lines).
     x1 = (c + P - Q) >> 16 and x2 = ((c + P + Q) >> 16) - 1 with Q = r_eff * xscale exactly (the leaf's
@@ -190,7 +190,7 @@ def check_box_widths(rm, barrel_wph: int = None) -> dict:
     from doomfj.combat import BARREL_R, CombatMixin
     from doomfj.reference_model import MIN_SPRITE_H
     proj = rm.cfg.PROJECTION
-    classes = {0: (20, MAXTZ), 1: (30, MAXTZ)}
+    classes = {0: (r0, MAXTZ), 1: (30, MAXTZ)}                # M8 C8: class 0 r0
     if barrel_wph is not None:
         classes[RC_BARREL] = (BARREL_R, min(MAXTZ, rm.sprite_tz_min_size(barrel_wph, MIN_SPRITE_H)))
     out = {}
@@ -213,12 +213,12 @@ def barrel_standing_wph(rm, sprite_wad) -> int:
     return max(rm.art_of_lump(sprite_wad, mobile_lump(s), cache)[4] for s in ("S_BAR1", "S_BAR2"))
 
 
-def table_text(rm, barrels: bool = False, sprite_wad=None) -> str:
+def table_text(rm, barrels: bool = False, sprite_wad=None, r0: int = 20) -> str:
     """`aimr` -- and, at emit time, the leaf's two proofs (check_minz_first, check_box_widths): `barrels` needs the
     `sprite_wad` the barrels are drawn from (their box bound depends on the standing frame's height)"""
     from doomfj.lut_generator import generate_dispatch_table_fj
     check_minz_first()
     assert not barrels or sprite_wad is not None, "aimcode.table_text(barrels=True) needs the sprite wad (#119 item 7)"
-    check_box_widths(rm, barrel_standing_wph(rm, sprite_wad) if barrels else None)
-    return generate_dispatch_table_fj("aimr", reff_values(rm, barrels), index_nibbles=2,
+    check_box_widths(rm, barrel_standing_wph(rm, sprite_wad) if barrels else None, r0)
+    return generate_dispatch_table_fj("aimr", reff_values(rm, barrels, r0), index_nibbles=2,
                                       result_nibbles=6 if barrels else 4)

@@ -76,8 +76,9 @@ def monster_seed_decls(label: str = "ms_seed") -> list:
 # `mon_active` (M7 P4.2a: `mon_solid`) around the call.
 # ================================================================================================================
 
-def p32b_context(nib: int) -> list:
-    """the move's context cells; `nib`: a sector id's width (World.sec_nibbles: `mm_sec`)"""
+def p32b_context(nib: int, r0: int = 20) -> list:
+    """the move's context cells; `nib`: a sector id's width (World.sec_nibbles: `mm_sec`); `r0` (M8 C8): radius class 0
+    (world.radius_classes: 20, E1M8's 24) -- `mm_bd<r0>`"""
     return [
         "mm_x: hex.vec 4", "mm_y: hex.vec 4",          # the mover's integer position (int16)
         "mm_nx: hex.vec 4", "mm_ny: hex.vec 4",        # the candidate
@@ -89,7 +90,7 @@ def p32b_context(nib: int) -> list:
         "mm_sec: hex.vec %d" % nib,                    # its sector (the REJECT row; P_ChangeSector)
         "mm_ok: hex.vec 1", "mm_blk: hex.vec 1",
         "mm_ox16: hex.vec 8", "mm_oy16: hex.vec 8",    # the position before the step, 16.16 (the crossings, boxes)
-        "mm_bd20: hex.vec 4", "mm_bd30: hex.vec 4", "mm_bdp: hex.vec 8",   # r + 20, r + 30; (r + 16) << 16
+        "mm_bd%d: hex.vec 4" % r0, "mm_bd30: hex.vec 4", "mm_bdp: hex.vec 8",   # r + r0, r + 30; (r + 16) << 16
         "mm_rr: hex.vec 4",                            # an mrnd row
         "mm_dx: hex.vec 4", "mm_dy: hex.vec 4", "mm_adx: hex.vec 4", "mm_ady: hex.vec 4",
         "mm_d1: hex.vec 1", "mm_d2: hex.vec 1", "mm_ta: hex.vec 1", "mm_od: hex.vec 1",   # NewChaseDir's
@@ -116,14 +117,18 @@ def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> l
     blocking); `mon_active` before monsters die, where the two are equal. The mover's own flag is clear during the
     call (monstercode.p32b_move_lines, the same `solid`). The player is tested at 16.16: |px - (nx << 16)| <
     (r + 16) << 16. `hurt` (M7 P5, doomfj.hurtcode): a dead player (`p_dead`) is not MF_SOLID and blocks nothing;
-    off, the player is always alive and the text is P4's to the byte."""
+    off, the player is always alive and the text is P4's to the byte. M8 C8: the radius classes are the slots'
+    (world.radius_classes: E1M8's Barons r0 24, `mm_bd24`)."""
+    from doomfj.world import radius_classes
+    r0, _r1 = radius_classes([rad for _t, rad in slots])
+    b0 = "mm_bd%d" % r0
     out = ["mm_things:",
            "    hex.zero 1, mm_blk",
-           "    hex.zero 2, mm_bd20 + 2*dw", "    hex.mov 2, mm_bd20, mm_r", "    hex.mov 4, mm_bd30, mm_bd20",
-           *_add_const(4, "mm_bd20", 20), *_add_const(4, "mm_bd30", 30)]
+           "    hex.zero 2, %s + 2*dw" % b0, "    hex.mov 2, %s, mm_r" % b0, "    hex.mov 4, mm_bd30, %s" % b0,
+           *_add_const(4, b0, r0), *_add_const(4, "mm_bd30", 30)]
     for j, (t, rad) in enumerate(slots):
         bd = "mm_bd%d" % rad
-        assert rad in (20, 30), rad
+        assert rad in (r0, 30), rad
         nj = "mm_th%d_n" % j
         out += ["    hex.if0 1, %s + %d*dw, %s" % (solid, j, nj),
                 "    hex.mov 4, ct_a, thpos_rt + %d*dw" % (16 * t + 4),
@@ -145,7 +150,7 @@ def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> l
 
 
 def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: int, height: int,
-                    teleport=(), list_bits: int = 8) -> list:
+                    teleport=(), list_bits: int = 8, r0: int = 20) -> list:
     """`mm_move`: P_Move for the context's monster (world._p_move): no direction -> mm_ok 0; else one step
     (step_delta: `speed` on an axis, 6 / 7 on both for a diagonal), P_TryMove (the things, then the seed at the
     candidate and the monster cells), and
@@ -157,7 +162,8 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
         `dreq`, and movedir = NODIR -> mm_ok 1 (the move counts as made); else mm_ok 0.
     M8 L4 (`teleport`: doomfj.teleportcode.monster_lines): the WR teleports, after the lifts and before the move is
     taken -- a fire makes the destination the move (mm_nx / mm_ny, cp_floor, ptss). () on a map without one: the
-    text is unchanged. M8 F1.5: `list_bits` 12 -- the relink is the wide twins (things.list_macros)."""
+    text is unchanged. M8 F1.5: `list_bits` 12 -- the relink is the wide twins (things.list_macros). `r0` (M8 C8):
+    radius class 0 (world.radius_classes) -- the lifts crossed at r0 or 30."""
     from doomfj.things import list_macros
     mac = list_macros(list_bits)
     from doomfj.doorcode import _box_test, _crossed_lines
@@ -195,7 +201,7 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
             "    hex.zero 4, mm_ox16", "    hex.mov 4, mm_ox16 + 4*dw, mm_x",
             "    hex.zero 4, mm_oy16", "    hex.mov 4, mm_oy16 + 4*dw, mm_y",
             "    hex.if1 1, mm_r30, mm_lw30"]
-    for rad in (20, 30):
+    for rad in (r0, 30):
         if rad == 30:
             out.append("  mm_lw30:")
         for k, (slot, axis, coord, lo, hi) in enumerate(lift_trigs):

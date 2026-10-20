@@ -178,7 +178,7 @@ class SeenHook:
         for m in range(world.layout.nmon):
             if not ws.mon_active[m]:
                 continue
-            st = gd.STATES[gd.STATE_NAMES[ws.mon_state[m]]]
+            st = gd.STATES[gd.THING_STATE_NAMES[ws.mon_state[m]]]
             rot = rotation(world.rm, ws.px, ws.py, ws.mon_x[m] << 16, ws.mon_y[m] << 16, ws.mon_facing[m])
             out[m] = view_of(self.views.patches, st.sprite, st.frame_index, rot)
         return out

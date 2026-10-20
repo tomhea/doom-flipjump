@@ -910,6 +910,13 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     # the pool states (docs/gp-p5-interface.md): S_BLOOD1..3 = 39..41, S_TBALL1/2 = 46/47, S_TBALLX1..3 = 48..50
     names = {"S_BLOOD1": 39, "S_BLOOD2": 40, "S_BLOOD3": 41, "S_TBALL1": 46, "S_TBALL2": 47, "S_TBALLX1": 48,
              "S_TBALLX2": 49, "S_TBALLX3": 50}
+    missile = proj.get("missile")                 # M8 C8: the map's one monster missile (projcode.missile_of_world)
+    if missile:                                   # E1M8: the Baron's -- its states at their borrowed thing indices
+        assert missile == "MT_BRUISERSHOT", missile
+        for s in ("S_TBALL1", "S_TBALL2", "S_TBALLX1", "S_TBALLX2", "S_TBALLX3"):
+            del names[s]
+        names.update({s: gd.EXT_ALIAS_BASE + gd.EXT_STATE_NAMES.index(s)
+                      for s in ("S_BRBALL1", "S_BRBALL2", "S_BRBALLX1", "S_BRBALLX2", "S_BRBALLX3")})
     puffs = bool(p31.get("barrel"))              # M7 P6: the puffs share the blood's pool (projcode `puffs`)
     if puffs:
         names.update({"S_PUFF1": 42, "S_PUFF2": 43, "S_PUFF3": 44, "S_PUFF4": 45})
@@ -920,15 +927,16 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     if fog:
         names.update({s: 234 + i for i, s in enumerate(
             ("S_TFOG", "S_TFOG01", "S_TFOG02") + tuple("S_TFOG%d" % k for k in range(2, 11)))})
-    assert {s: gd.STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
-    assert sorted(gd.STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets, fog)) == sorted(names.values())
+    assert {s: gd.THING_STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
+    assert sorted(gd.THING_STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets, fog, missile)) == sorted(
+        names.values())
     assert (FIREBALL_INFO.spawnstate, FIREBALL_INFO.deathstate) == ("S_TBALL1", "S_TBALLX1")
     mv = p31["mob_view"]
     assert sorted(mv) == sorted(names.values()), sorted(mv)
     rows, nt = p31["view_rows"], len(p31["rt_slot"])
     by_lump = {}
-    for s in projcode.pool_states(puffs, rockets, fog):
-        row = mv[gd.STATE_INDEX[s]]
+    for s in projcode.pool_states(puffs, rockets, fog, missile):
+        row = mv[gd.THING_STATE_INDEX[s]]
         assert p31["mob_first"] <= row < nt + len(rows), (s, row)
         by_lump.setdefault(mobile_lump(s), set()).add(row)
         r = rows[row - nt]
@@ -940,7 +948,7 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     assert MISSILE_Z == 32, MISSILE_Z
     assert proj["nt"] == nt
     # the damage dp_go takes: every source fits DP_MAX (the fireball's impact: fxrnd's nibbles 0-1)
-    assert max(v & 0xFF for v in projcode.fxrnd_values()) <= hurtcode.DP_MAX
+    assert max(v & 0xFF for v in projcode.fxrnd_values(missile)) <= hurtcode.DP_MAX
     assert hrt["persist"] == hurtcode.PERSIST and proj["persist"] == projcode.PERSIST
 
 
@@ -1699,9 +1707,11 @@ def window_chrome_fj():
     return macro, calls
 
 
-def _monster_tables() -> list:
-    from doomfj.monstercode import p30_tables_fj      # local: monstercode imports world
-    return p30_tables_fj()
+def _monster_tables(types=None) -> list:
+    """M8 C8: `types` the map's monster types (p31_parts' "types": an extension type's rows join mstate); None, a tier
+    without the monster parts: the core MONSTER_TYPES, as before"""
+    from doomfj.monstercode import MONSTER_TYPES, p30_tables_fj      # local: monstercode imports world
+    return p30_tables_fj(MONSTER_TYPES if types is None else types)
 
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, sprite_wad=None,
@@ -2501,7 +2511,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar), centery=cfg.CENTERY, viewh=cfg.VIEW_H)
         # issue #119 items 4 and 7: table_text runs the leaf's emit-time proofs (the MINZ order, every box >= 1 column;
         # a barrel's bound needs its standing frame from the sprite wad)
-        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar), sprite_wad=sprite_wad)]
+        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(
+            rm, bool(_bar), sprite_wad=sprite_wad,
+            **({"r0": _p31["chase"]["r0"]} if _p31.get("chase") and _p31["chase"]["r0"] != 20 else {}))]   # M8 C8
     else:
         _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
@@ -3695,7 +3707,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
                                   dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"],
                                   **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpm")} if _TELE else {}),
-                                  list_bits=_LIST_BITS)                   # M8 F1.5: the relink's twins
+                                  list_bits=_LIST_BITS,                   # M8 F1.5: the relink's twins
+                                  **({"r0": _chase["r0"]} if _chase.get("r0", 20) != 20 else {}))   # M8 C8
                 + ncd_leaf_lines(deadzone=CHASE_DEADZONE, max_tries=NEWCHASEDIR_MAX_TRIES,
                                  **({"fight": True} if _FIGHT else {}))    # M7 P8a I: toward the target
                 + walk_leaf_lines(max_tries=NEWCHASEDIR_MAX_TRIES) + chase_leaf_lines()
@@ -3703,7 +3716,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + ((_decide_leaves(justhit=bool(_p31.get("justhit")),
                                    full=bool(_chase.get("hurt")),       # M7 P5: md_attack APPLIES its draws
                                    **({"knock": True} if _KNOCK else {}),   # M7 P8a: the attacker inflicts
-                                   **({"fight": True} if _FIGHT else {}))   # M7 P8a I: the TARGET's
+                                   **({"fight": True} if _FIGHT else {}),   # M7 P8a I: the TARGET's
+                                   # M8 C8: the Baron's attack (A_BruisAttack: brclaw, else pj_spawn)
+                                   **({"bruiser": True} if "MT_BRUISER" in _p31["types"] else {}))
                     + _p31["decide_lines"])
                    if _p31.get("decide_lines") else [])
                 # M7 P5: the leaves the attacks land through -- dp_go (hurtcode), the pools' spawns, phases and shared
@@ -3719,6 +3734,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     player_root=_croot, mon_root=_mroot, nib=_p31["world"].sec_nibbles,
                     lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:]) for t_ in _chase["lift_walk"]],
                     after_accept=_after_accept("kbwo", "kblw", "tpk"), solid=_chase["solid"],
+                    **({"r0": _chase["r0"]} if _chase.get("r0", 20) != 20 else {}),             # M8 C8
+                    **({"height": _chase["height"]} if _chase["height"] != 56 else {}),         # M8 C8
                     # M8 L4: a monster's knock step teleports too; its stub writes the facing back
                     **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpq", knock_ctx=True),
                         "slot_back": (lambda m_: _teleportcode.slot_back_lines(
@@ -3995,7 +4012,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                  tex, cm, ttang, sdrecip, srdisp, xtadisp, vtxdisp, sinadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid]
               # M7 P3.0 (docs/gp-monsters.md): the monster phase's tables, in the game tier only and
               # called by nothing yet -- the build that carries them prices the placement tax
-              + (_monster_tables() if _movers_on else [])
+              + (_monster_tables(_p31["types"] if _p31 else None) if _movers_on else [])
               + ([_p31["mview"], _p31["mrot"]] if _p31 else [])            # M7 P3.1
               + ([_p31["mobview"]] if (_p31 and _p31.get("mobview")) else [])   # M7 P5: the mobiles' view rows
               + ([_p31["barview"]] if (_p31 and _p31.get("barview")) else [])   # M7 P6: the barrels' view rows
@@ -5210,6 +5227,14 @@ def anim_frames(map_wad, mapname) -> dict:
     types = {t.type for t in map_wad.things(mapname) if t.type in MONSTER_TYPES}
     actors = ANIM_ACTORS + (("MT_TFOG",) if any(ld.special in TELEPORT_SPECIALS
                                                   for ld in map_wad.linedefs(mapname)) else ())
+    # M8 C8: the map's monster missiles -- the Baron's MT_BRUISERSHOT only on a map with a Baron; and the imp's
+    # MT_TROOPSHOT (an ANIM_ACTOR) only on a map with an imp or without any other shooter (E1M8: no BAL1 frames in the
+    # bank, gap G6; every map with an imp -- E1M1, E1M2 -- unchanged)
+    missiles = {gd.MISSILE_OF[gd.MOBJINFO[n].name] for n in gd.MOBJINFO
+                if gd.MOBJINFO[n].doomednum in types and gd.MOBJINFO[n].name in gd.MISSILE_OF}
+    if missiles and "MT_TROOPSHOT" not in missiles:
+        actors = tuple(a for a in actors if a != "MT_TROOPSHOT")
+    actors += tuple(sorted(missiles - set(ANIM_ACTORS)))
     out: dict = {}
     for name, mi in sorted(gd.MOBJINFO.items()):
         if mi.doomednum not in types and name not in actors:
@@ -5231,7 +5256,9 @@ def anim_patches(sprite_wad, frames) -> dict:
     off the wad's own lump names: `TROOA1` is rotation 1, `TROOA2A8` is rotation 2 and, MIRRORED,
     rotation 8; a `...A0` lump is every rotation (0). A frame with no lump at all is an error: P3
     would have nothing to draw."""
-    names = [n for n in sprite_wad.names() if len(n) in (6, 8)]
+    # M8 C8: a sprite lump's rotation characters are digits -- BOSSBACK (Doom II's cast backdrop, in freedoom1.wad) has
+    # the Baron's prefix and an 8-character name, and is no sprite
+    names = [n for n in sprite_wad.names() if len(n) in (6, 8) and n[5].isdigit() and (len(n) == 6 or n[7].isdigit())]
     out = {}
     for sprite, idxs in frames.items():
         for fi in idxs:

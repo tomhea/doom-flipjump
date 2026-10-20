@@ -174,7 +174,7 @@ def check_model_rules(w, *, max_dmg: int = DM_MAX, gib: bool = False) -> None:
             x = info.xdeathstate
             if x != gd.S_NULL:
                 st = gd.STATES[x]
-                assert 4 <= st.tics < TICS_FOREVER and gd.STATE_INDEX[x] < 256, (x, st.tics)
+                assert 4 <= st.tics < TICS_FOREVER and gd.THING_STATE_INDEX[x] < 256, (x, st.tics)
                 assert st.action is None or st.action in SOUND_ACTIONS, (x, st.action)
                 _death_chain_ok(x)
             assert info.spawnhealth < (1 << 11), info.spawnhealth
@@ -189,9 +189,9 @@ def check_model_rules(w, *, max_dmg: int = DM_MAX, gib: bool = False) -> None:
             st = gd.STATES[s]
             assert 0 < st.tics < TICS_FOREVER, (s, st.tics, "a zero-tic or forever state: _set_state would chain")
             assert not run or st.action is None or st.action in SOUND_ACTIONS, (s, st.action)
-            assert gd.STATE_INDEX[s] < 256
+            assert gd.THING_STATE_INDEX[s] < 256
         assert gd.STATES[death].tics >= 4, (death, "tics - (P_Random() & 3) could clamp at 1")
-        assert gd.STATE_INDEX[spawn] < 256 and see != gd.S_NULL
+        assert gd.THING_STATE_INDEX[spawn] < 256 and see != gd.S_NULL
         _death_chain_ok(death)
     assert 0 < gd.BASETHRESHOLD < 128, "mon_threshold is 7 bits"
 
@@ -347,15 +347,15 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
            "    sim.jump16 dm_type, " + ", ".join("dm_p%d" % k if k < len(keys) else "dm_out" for k in range(16))]
     for k, (pc, pain, death, spawn, see, *gib) in enumerate(keys):
         out += ["  dm_p%d:" % k,
-                "    hex.set 2, dm_dst, %d" % gd.STATE_INDEX[death], "    hex.set 1, dm_dti, %d" % _tics(death)]
+                "    hex.set 2, dm_dst, %d" % gd.THING_STATE_INDEX[death], "    hex.set 1, dm_dti, %d" % _tics(death)]
         if full:                                 # M7 P6: the gib -- below -spawnhealth, the xdeath state
             hp0, xd = gib
             xd = death if xd == gd.S_NULL else xd   # none: the gib test's both outcomes are the death
             out += ["    hex.set 3, dm_nsh, %d" % (-hp0 & 0xFFF),
-                    "    hex.set 2, dm_xst, %d" % gd.STATE_INDEX[xd], "    hex.set 1, dm_xti, %d" % _tics(xd)]
-        out += ["    hex.set 2, dm_pst, %d" % gd.STATE_INDEX[pain], "    hex.set 1, dm_pti, %d" % _tics(pain),
-                "    hex.set 2, dm_sp, %d" % gd.STATE_INDEX[spawn],
-                "    hex.set 2, dm_se, %d" % gd.STATE_INDEX[see], "    hex.set 1, dm_seti, %d" % _tics(see),
+                    "    hex.set 2, dm_xst, %d" % gd.THING_STATE_INDEX[xd], "    hex.set 1, dm_xti, %d" % _tics(xd)]
+        out += ["    hex.set 2, dm_pst, %d" % gd.THING_STATE_INDEX[pain], "    hex.set 1, dm_pti, %d" % _tics(pain),
+                "    hex.set 2, dm_sp, %d" % gd.THING_STATE_INDEX[spawn],
+                "    hex.set 2, dm_se, %d" % gd.THING_STATE_INDEX[see], "    hex.set 1, dm_seti, %d" % _tics(see),
                 "    hex.if_flags dm_rr + 1*dw, %d, dm_typed, dm_p%dy" % (pain_mask(classes.index(pc)), k),
                 "  dm_p%dy:" % k,
                 "    hex.set 1, dm_pn, 1",

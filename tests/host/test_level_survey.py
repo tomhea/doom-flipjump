@@ -115,3 +115,24 @@ def test_weapon_light_rows(ls, wad, monkeypatch):
     orig = hud.psprite_light_row
     monkeypatch.setattr(hud, "psprite_light_row", lambda rm, light: orig(rm, light) + (light == 255))
     assert any(r[0] == "REFUSED" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M1"))
+
+def test_e1m8_surveys_its_barons_and_the_boss_trigger(ls, wad):
+    """M8 C8: thing 3003 is a monster (no MISSING row), and the rows the Baron's fj bakes per map: A_BossDeath's floor
+    group (tag 666, sector 3), the radius classes (24, 30), the one missile (MT_BRUISERSHOT), one height (64)"""
+    rows = _rows(ls, wad, "E1M8")
+    assert not any("3003" in r[1] and r[0] != "OK" for r in rows)
+    assert ("OK", "thing 3003  (monster MT_BRUISER)", "4") in {r[:3] for r in rows}
+    got = {r[1].split(" (")[0]: (r[0], r[2]) for r in rows}
+    assert got["A_BossDeath"] == ("OK", "group 2, sectors [3]")
+    assert got["monster radius classes"] == ("OK", "(24, 30)")
+    assert got["one monster missile species"] == ("OK", "MT_BRUISERSHOT")
+    assert got["one monster height"] == ("OK", "[64]")
+    e1 = {r[1].split(" (")[0]: (r[0], r[2]) for r in _rows(ls, wad, "E1M1")}
+    assert "A_BossDeath" not in e1 and e1["monster radius classes"] == ("OK", "(20, 30)")
+
+
+def test_control_a_boss_tag_without_a_group_is_refused(ls, wad, monkeypatch):
+    """R9: E1M8's boss rule moved to a tag no line names (667) -- the model refuses the map and the survey says so"""
+    monkeypatch.setitem(ls.gd.BOSS_MAPS, "E1M8", ("MT_BRUISER", 667, "lowest"))
+    rows = _rows(ls, wad, "E1M8")
+    assert any(r[0] == "REFUSED" and "boss tag 667" in r[4] for r in rows), [r for r in rows if r[0] == "REFUSED"]

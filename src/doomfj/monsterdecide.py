@@ -40,10 +40,17 @@ from doomfj import gamedata as gd
 P32C_FIELDS = ("mon_justattacked",)
 
 # md_attack's kinds (mm_kind), one per attack action the decide mode runs
-ATTACK_KINDS = {"A_FaceTarget": 0, "A_PosAttack": 1, "A_SPosAttack": 2, "A_TroopAttack": 3, "A_SargAttack": 4}
+ATTACK_KINDS = {"A_FaceTarget": 0, "A_PosAttack": 1, "A_SPosAttack": 2, "A_TroopAttack": 3, "A_SargAttack": 4,
+                "A_BruisAttack": 5}                   # M8 C8: the Baron -- md_attack's `bruiser` branch (md_bclaw)
 
 # M7 P8a I: the radius classes the bullets' width table `hwtr` is indexed by (rc << 8 | distance >> 4)
 RC = {16: 0, 20: 1, 30: 2, 10: 3}
+
+
+def rc_of(r0: int = 20) -> dict:
+    """M8 C8: the classes on a map whose radius class 0 is r0 (world.radius_classes: E1M8's Barons 24) -- r0 takes
+    radius 20's class 1; every core map's is RC"""
+    return {16: 0, r0: 1, 30: 2, 10: 3}
 DM_MONSTER, DM_BULLET = 3, 4          # damagecode's dm_melee for a monster's hit: no reach, no blood / with blood
 # the fight's registers (not persisted; the scan's are scratch between two calls)
 FIGHT_DECLS = ["mm_tg: hex.vec 2", "mt_tqx: hex.vec 8", "mt_tqy: hex.vec 8", "mt_pl: hex.vec 1", "mt_al: hex.vec 1",
@@ -209,7 +216,7 @@ def decide_leaf_lines(justhit: bool = False, fight: bool = False) -> List[str]:
             "    stl.fret mm_dret"]
 
 
-def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = False) -> List[str]:
+def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = False, bruiser: bool = False) -> List[str]:
     """`md_attack` (stl.fcall md_attack, md_ret): mm_kind's action, its facing and its draws (combat.BULLETS
     bullets of 3 draws each for the hitscanners).
 
@@ -226,18 +233,23 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
     `fight` (M7 P8a I, world.infighting_on; the module docstring): the attacks are at the TARGET (mt_load ran) -- the
     claw and the bite land on a monster target through dm_go (DM_MONSTER: no reach, no blood; dm_src the attacker),
     the bullets meet the things in the way first (`hs_scan`, then the target's own width), a bullet on a monster or a
-    barrel goes through dm_go (DM_BULLET: blood, or the barrel's puff)"""
+    barrel goes through dm_go (DM_BULLET: blood, or the barrel's puff).
+    `bruiser` (M8 C8, a map with a Baron): kind 5, A_BruisAttack -- the imp's shape (the claw in reach with the
+    attack sight, else pj_spawn: the map's ONE monster missile, projcode's `missile`) on its own table `brclaw`
+    ((P_Random()%8+1)*10, hurtcode); its facing is not written back (monstercode's k_gon). Off: the text unchanged"""
     from doomfj.combat import BULLETS
     from doomfj.knockcode import inflictor_lines
     assert not knock or full, "M7 P8a: the thrust rides the applied attacks"
     assert not fight or full, "M7 P8a I: infighting rides the applied attacks"
     if fight:
-        return _fight_attack_lines(knock)
+        return _fight_attack_lines(knock, bruiser)
     kb = inflictor_lines("mm_x", "mm_y", z="kb_az") if knock else []     # package K: the attacker's floorz (k_go)
     k = draws()
     pos = [ATTACK_KINDS[a] for a in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack")]
     tg = ["md_out"] * 16
     tg[pos[0]], tg[pos[1]], tg[pos[2]], tg[pos[3]] = "md_pos", "md_spos", "md_claw", "md_bite"
+    if bruiser:                                                          # M8 C8: the decide mode's claw draws the same
+        tg[ATTACK_KINDS["A_BruisAttack"]] = "md_bclaw" if full else "md_claw"
     out = ["md_attack:",
            "    hex.zero 1, mm_asok",
            "    stl.fcall mm_todist, mm_tdret",
@@ -262,7 +274,8 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
         out += ["  %s:" % lab, "    stl.fcall md_hs, md_bret"]
         out += ["    stl.fcall md_bul, md_bret"] * BULLETS[act]
         out += ["    ;md_out"]
-    for lab, table, far in (("md_claw", "trclaw", "md_claw_f"), ("md_bite", "sgbite", "md_out")):
+    for lab, table, far in (("md_claw", "trclaw", "md_claw_f"), ("md_bite", "sgbite", "md_out"),
+                            *((("md_bclaw", "brclaw", "md_claw_f"),) if bruiser else ())):
         out += ["  %s:" % lab,
                 "    hex.cmp 4, mt_d, mt_c60, %s_r, %s, %s" % (lab, far, far),
                 "  %s_r:" % lab,
@@ -300,12 +313,13 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
     return out
 
 
-def decide_leaves(justhit: bool = False, full: bool = False, knock: bool = False, fight: bool = False) -> List[str]:
+def decide_leaves(justhit: bool = False, full: bool = False, knock: bool = False, fight: bool = False,
+                  bruiser: bool = False) -> List[str]:
     """`full` (M7 P5): md_attack applies its draws (attack_leaf_lines(full=True)); off, P3.2c's text to the byte.
     `knock` (M7 P8a): the attacker is each hit's inflictor (attack_leaf_lines(knock=True)). `fight` (M7 P8a I): the
     TARGET's (the module docstring) -- the program must hold `fight_parts`' lines and monstersight's sl_far"""
     return (todist_leaf_lines(fight) + octant_leaf_lines() + as_leaf_lines(fight) + decide_leaf_lines(justhit, fight)
-            + attack_leaf_lines(full, knock, fight))
+            + attack_leaf_lines(full, knock, fight, bruiser))
 
 
 def type_decide(info) -> dict:
@@ -318,7 +332,7 @@ def type_decide(info) -> dict:
         st = gd.STATES[st0]
         assert st.action == "A_FaceTarget" and st.tics > 0, (st0, st.action, st.tics)
         out["mk"] |= bit
-        out[key] = (gd.STATE_INDEX[st0], st.tics)
+        out[key] = (gd.THING_STATE_INDEX[st0], st.tics)
         s, seen = st0, set()
         while s != gd.S_NULL and s not in seen and gd.STATES[s].action != "A_Chase":
             seen.add(s)
@@ -331,7 +345,7 @@ def type_decide(info) -> dict:
 
 
 # ---- M7 P8a I: the target, the angle, the bullets' scan (docs/gp-final-plan.md 1.2.2 / 1.2.3) ----------------------
-def _fight_attack_lines(knock: bool) -> List[str]:
+def _fight_attack_lines(knock: bool, bruiser: bool = False) -> List[str]:
     """`md_attack` with infighting (attack_leaf_lines(full=True, fight=True)) -- see attack_leaf_lines"""
     from doomfj.combat import BULLETS
     from doomfj.knockcode import inflictor_lines
@@ -341,6 +355,8 @@ def _fight_attack_lines(knock: bool) -> List[str]:
     pos = [ATTACK_KINDS[a] for a in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack")]
     tg = ["md_out"] * 16
     tg[pos[0]], tg[pos[1]], tg[pos[2]], tg[pos[3]] = "md_pos", "md_spos", "md_claw", "md_bite"
+    if bruiser:                                                          # M8 C8: the Baron's claw-or-missile
+        tg[ATTACK_KINDS["A_BruisAttack"]] = "md_bclaw"
     # md_fa: A_FaceTarget's facing, kept across the attack -- a hit on a monster or a barrel spawns its blood or
     # puff inside dm_go (projcode.fx_spawn_leaf), whose octant runs the SHARED mm_octant and rewrites mm_fa; the slot
     # writes mon_facing from mm_fa after md_attack (blocked52's p2a S7: the shooter turned to face the player)
@@ -354,7 +370,8 @@ def _fight_attack_lines(knock: bool) -> List[str]:
         out += ["  %s:" % lab, "    stl.fcall md_hs, md_bret"]
         out += ["    stl.fcall md_bul, md_bret"] * BULLETS[act]
         out += ["    ;md_out"]
-    for lab, table, far in (("md_claw", "trclaw", "md_claw_f"), ("md_bite", "sgbite", "md_out")):
+    for lab, table, far in (("md_claw", "trclaw", "md_claw_f"), ("md_bite", "sgbite", "md_out"),
+                            *((("md_bclaw", "brclaw", "md_claw_f"),) if bruiser else ())):
         out += ["  %s:" % lab,
                 "    hex.cmp 4, mt_d, mt_reach, %s_r, %s, %s" % (lab, far, far),
                 "  %s_r:" % lab,
@@ -432,11 +449,12 @@ def _fight_attack_lines(knock: bool) -> List[str]:
     return out
 
 
-def target_load_lines(slot_rt, radii) -> List[str]:
+def target_load_lines(slot_rt, radii, rc: dict = None) -> List[str]:
     """`mt_load` (stl.fcall mt_load, mt_lret; in: mm_tg) -- the module docstring's target load. `slot_rt[m]`: slot m's
     runtime thing (its thpos_rt row: whole units in nibbles 4-7 / 12-15), `radii[m]` its radius"""
     from doomfj.combat import PLAYER_R
     from doomfj.world import MELEE_BASE
+    RC = rc or globals()["RC"]                                  # M8 C8: the map's classes (rc_of)
     n = len(slot_rt)
     assert len(radii) == n and 0 < n and n + 2 <= 0x100
     hi = (n + 2 + 15) // 16
@@ -473,7 +491,7 @@ def angle_leaf_lines() -> List[str]:
     return ["ia_leaf:", "    proj.point_to_angle ia_ang, ia_x1, ia_y1, ia_x2, ia_y2, 1", "    stl.fret ia_ret"]
 
 
-def scan_lines(slot_rt, radii, barrels) -> List[str]:
+def scan_lines(slot_rt, radii, barrels, rc: dict = None) -> List[str]:
     """`hs_scan` (stl.fcall hs_scan, hs_ret): hs_vic = the code of the thing a bullet meets before its target
     (combat._bullet_victim; 0 none, 1 the player, 2 + slot, 2 + nmon + b a barrel) -- md_hs set md_at (the target's
     angle), md_td (its distance), md_me (the shooter's code), ia_x1 / ia_y1 (the shooter); md_bul set md_sp (the
@@ -481,6 +499,7 @@ def scan_lines(slot_rt, radii, barrels) -> List[str]:
     barrels (standing: state != 0, health > 0) -- each a copy-stub into `hs_cand`; `barrels` = [(x, y)] by index.
     Then `hs_cand` and `hs_wid` (the width: hs_in = hs_d < 2048 and |md_sp - hs_del| <= hwtr[hs_rc][hs_d >> 4])"""
     from doomfj.combat import BARREL_R
+    RC = rc or globals()["RC"]                                  # M8 C8: the map's classes (rc_of)
     n = len(slot_rt)
     out = ["hs_scan:",
            "    hex.zero 2, hs_vic",
@@ -595,9 +614,11 @@ def mbsd_values() -> List[int]:
     return outcome_table_k(lambda a, b, c: mbsd_row(*f(a, b, c)), 3)
 
 
-def hwtr_values(sine) -> List[int]:
-    """`hwtr[rc << 8 | q]`: combat.half_width_table at hit_half_width(r) for the radius r of class rc, q < 128"""
+def hwtr_values(sine, rc: dict = None) -> List[int]:
+    """`hwtr[rc << 8 | q]`: combat.half_width_table at hit_half_width(r) for the radius r of class rc, q < 128 (M8 C8:
+    `rc` the map's classes, rc_of)"""
     from doomfj.combat import HWT_SIZE, half_width_table, hit_half_width
+    RC = rc or globals()["RC"]
     out = [0] * (len(RC) << 8)
     for r, rc in RC.items():
         t = half_width_table(sine, hit_half_width(r))
@@ -607,10 +628,10 @@ def hwtr_values(sine) -> List[int]:
     return out
 
 
-def fight_tables_fj(sine) -> List[str]:
+def fight_tables_fj(sine, rc: dict = None) -> List[str]:
     from doomfj.lut_generator import generate_dispatch_table_fj
     return [generate_dispatch_table_fj("mbsd", mbsd_values(), index_nibbles=2, result_nibbles=4),
-            generate_dispatch_table_fj("hwtr", hwtr_values(sine), index_nibbles=3, result_nibbles=2)]
+            generate_dispatch_table_fj("hwtr", hwtr_values(sine, rc), index_nibbles=3, result_nibbles=2)]
 
 
 def fight_parts(w, slot_rt) -> dict:
@@ -618,11 +639,13 @@ def fight_parts(w, slot_rt) -> dict:
     registers, the target load, the angle leaf, the scan, the tables"""
     n = w.layout.nmon
     radii = [w.mon_radius[m] for m in range(n)]
-    assert set(radii) <= set(RC), radii
+    from doomfj.world import radius_classes
+    rc = rc_of(radius_classes(radii)[0])                        # M8 C8: E1M8's Barons take class 1 at 24
+    assert set(radii) <= set(rc), radii
     bars = [(t.x, t.y) for t in w.barrel_things]
     hs_bar = "hs_bar: hex.vec %d, %d" % (max(1, 8 * len(bars)), sum(
         (((x & 0xFFFF) ^ 0x8000) | (((y & 0xFFFF) ^ 0x8000) << 16)) << (32 * b) for b, (x, y) in enumerate(bars)))
     return {"decls": list(FIGHT_DECLS) + [hs_bar],
-            "lines": (target_load_lines(slot_rt, radii) + angle_leaf_lines()
-                      + scan_lines(slot_rt, radii, [(t.x, t.y) for t in w.barrel_things])),
-            "tables": fight_tables_fj(w.rm.sine)}
+            "lines": (target_load_lines(slot_rt, radii, rc) + angle_leaf_lines()
+                      + scan_lines(slot_rt, radii, [(t.x, t.y) for t in w.barrel_things], rc)),
+            "tables": fight_tables_fj(w.rm.sine, rc)}

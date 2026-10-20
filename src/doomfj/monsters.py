@@ -59,7 +59,14 @@ def drop_lump(kind: int) -> str:
 # P9: a mobile frame with NO single-rotation lump is drawn at ONE fixed rotation -- the player's rocket in flight
 # (MISLA has rotations 1..8 only): rotation 5, the rocket SEEN FROM BEHIND, as the player who fired it mostly sees it
 # (a convention: DOOM picks the rotation by the viewer's angle to the rocket's flight)
-MOBILE_ROTATION = {("MISL", 0): 5}
+MOBILE_ROTATION = {("MISL", 0): 5,
+                   # M8 C8: the Baron's green fireball in flight (BAL7A / BAL7B have rotations 1..8 only): rotation 1,
+                   # the fireball SEEN FROM THE FRONT, as its target mostly sees it (the rocket's convention, mirrored);
+                   # its explosion BAL7C0 .. E0 is single-rotation
+                   ("BAL7", 0): 1, ("BAL7", 1): 1}
+# M8 C8: a fixed rotation whose lump also holds a MIRRORED one is named by both (BAL7A1A5: rotation 1, 5 mirrored) --
+# the lump a mobile is drawn from, its first (unmirrored) rotation
+MOBILE_LUMP_NAMES = {("BAL7", "A", 1): "BAL7A1A5", ("BAL7", "B", 1): "BAL7B1B5"}
 
 
 def mobile_view(state_name: str) -> Tuple[str, str, int]:
@@ -75,7 +82,7 @@ def mobile_lump(state_name: str) -> str:
     single-rotation `...0` lump (BAL1A0 .. BAL1E0, BLUDA0 .. BLUDC0, PUFFA0 .. PUFFD0); P9: the rocket's MISLA5 (in
     flight, MOBILE_ROTATION) and MISLB0 .. MISLD0 (its explosion)"""
     sprite, letter, rot = mobile_view(state_name)
-    return "%s%s%d" % (sprite, letter, rot)
+    return MOBILE_LUMP_NAMES.get((sprite, letter, rot), "%s%s%d" % (sprite, letter, rot))
 
 
 def rotation(rm, view_x16: int, view_y16: int, thing_x16: int, thing_y16: int, facing: int) -> int:
@@ -910,7 +917,7 @@ class MonsterPhase:
         ws, gd, out = self.world.ws, self.gd, []
         for s in range(FIREBALL_POOL):
             if ws.proj_active[s]:
-                out.append((ws.proj_x[s] >> 16, ws.proj_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.proj_state[s]])))
+                out.append((ws.proj_x[s] >> 16, ws.proj_y[s] >> 16, mobile_lump(gd.THING_STATE_NAMES[ws.proj_state[s]])))
         for s in range(FX_POOL):
             if ws.fx_active[s]:
                 lump = mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])
@@ -928,7 +935,7 @@ class MonsterPhase:
         for m in range(self.world.layout.nmon):
             if not ws.mon_active[m]:
                 continue
-            st = gd.STATES[gd.STATE_NAMES[ws.mon_state[m]]]
+            st = gd.STATES[gd.THING_STATE_NAMES[ws.mon_state[m]]]
             rot = rotation(rm, view_x16, view_y16, ws.mon_x[m] << 16, ws.mon_y[m] << 16, ws.mon_facing[m])
             out[m] = view_of(patches, st.sprite, st.frame_index, rot)
         return out

@@ -72,6 +72,8 @@ DEFAULT_FJM = ROOT / "build" / "doom_e1m1_blocked27.fjm"
 DEFAULT_LABELS = ROOT / "scratchpad" / "12m" / "atlas" / "blocked27.labels.tsv.gz"
 # M8 (docs/level-pipeline.md 3): the map from doomfj.mapprofile (DOOMFJ_MAP; E1M1 when unset)
 from doomfj.mapprofile import profile as _map_profile                       # noqa: E402
+from doomfj.mapprofile import check_checkout as _check_checkout            # noqa: E402
+_check_checkout(__file__)       # M8: this checkout's doomfj (the installed one is the main repo's)
 DEFAULT_WAD = _map_profile().wad
 DEFAULT_ASSET = "assets/freedoom1.wad"
 DEFAULT_MAP = _map_profile().map
@@ -606,6 +608,9 @@ class GameBinary:
 
     def __init__(self, fjm=DEFAULT_FJM, flat_max_words: int | None = None, loader: str = "lean"):
         from doomfj.config import RENDER_FLAT_MAX_WORDS
+        # M8 (gates-ready): a binary NAMED for another map than the one this process's oracles measure is refused
+        from doomfj.mapprofile import check_binary
+        check_binary(fjm, _counts_map()[1])
         from doomfj.fastrun import _fjcore
         t = time.time()
         self.fjm = Path(fjm)
@@ -760,7 +765,8 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells[name] = Cell(name, "hex", width)
     # P10: the menu's `g_live`, and the stats (statcode.PERSIST; MonsterPhase.game_state's units)
     cells["g_live"] = Cell("g_live", "hex", 1)
-    for name, width in (("st_kill", 2), ("st_item", 2), ("st_secn", 1)):
+    from doomfj.statcode import COUNT_NIBBLES      # M8 (gates-ready): the emitter's width, never a copied literal
+    for name, width in (("st_kill", COUNT_NIBBLES), ("st_item", COUNT_NIBBLES), ("st_secn", 1)):
         cells[name] = Cell(name, "hex", width)
     cells["st_secm"] = Cell("st_secm", "hex", 1, count=_nsecret())
     ndrop, nbar = _loot_counts()
@@ -1358,6 +1364,8 @@ def selftest(fjm: Path, labels_path: Path) -> int:
     # ---- C2 PLANTED VALUES read back, sit where the layout says, and do what the program says ----
     # C2a WORD kind (an 8-nibble 16.16 number): plant a far, fractional viewpoint.
     tx, ty, ta = (1272 << 16) + 0x8000, (-724 << 16) + 0x4000, 0x2E000000   # inside E1M1
+    if orc.mapname != "E1M1":       # M8 (the gate-tool audit): another map's own spawn, fractional (E1M1's pose may be void)
+        tx, ty = (orc.spawn.x & 0xFFFF0000) + 0x8000, (orc.spawn.y & 0xFFFF0000) + 0x4000
     got = {}
 
     def plant_view(pr, f):
@@ -1502,6 +1510,9 @@ def selftest(fjm: Path, labels_path: Path) -> int:
         rr2 = gb.run(len(per_run), GS.events_for(GS.full_script(RECORDED_RUN + 1, 100)))
         check("C5 negative: a DIFFERENT run's script does not reproduce it",
               rr2.ops != RECORDED_RUN_OPS, format(rr2.ops, ","))
+    elif orc.mapname != "E1M1":     # M8: the recorded totals are E1M1 blocked27's -- another map has none to replay
+        print("  C5 SKIPPED on %s: the recorded totals are E1M1 blocked27's (sha256 %s...)"
+              % (orc.mapname, RECORDED_SHA16), flush=True)
     else:
         check("C5 recorded totals exist only for sha256 %s..." % RECORDED_SHA16, False,
               "this binary is %s" % gb.sha[:16])

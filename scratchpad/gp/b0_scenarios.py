@@ -661,6 +661,12 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
     M7 P6+P7: T7 a run's SETUP poke (v6's aftermath corpses) takes effect and a binary not poked is rejected (SKIPPED
     on a set without a setup); T8 a proxy run is judged against its own oracle, and a broken one FAILS `judge`."""
     global setup_poke
+    # M8 (the gate-tool audit): the selftest's runs are E1M1's v2 set BY NAME (R0-courtyard, R0-northwest ...) and its
+    # world is built before any set is installed -- an E1M1 instrument check; refused on another map's set, which the
+    # driver's main path (b0) runs by the set's own "map"
+    _m = json.loads(Path(doc_path).read_text(encoding="ascii")).get("map", "E1M1").upper()
+    if _m != "E1M1":
+        raise SystemExit("b0_scenarios --selftest checks the driver on E1M1's v2 set; %s names %s" % (doc_path, _m))
     import m2_std_gate as gate
     import b0 as B
     fails = []

@@ -91,3 +91,27 @@ def test_runtime_ids_are_capped_at_the_maps_list_width(ls, wad, monkeypatch):
     info = next(x for x in rows if x[1].startswith("list id bits needed"))
     assert info[2] == "12" and info[4] == "MAP_CONFIG has 12", info
     assert not any(x[0] in BAD and ("runtime" in x[1] or "list id" in x[1]) for x in rows)
+
+
+def test_a_pickup_without_a_sprite_is_missing(ls, wad, monkeypatch):
+    """M8 (gates-ready): E1M8's cell pack (17) has a give but no sprite -- every gate's views KeyError on it; the survey
+    names it. CONTROL: on E1M1, a pickup it uses (the clip, 2007) taken out of THING_SPRITE turns MISSING too"""
+    rows = _rows(ls, wad, "E1M8")
+    assert any(r[0] == "MISSING" and r[1].startswith("thing 17 ") and "sprite NO" in r[4] for r in rows), (
+        [r for r in rows if r[1].startswith("thing 17")])
+    import doomfj.reference_model as RM
+    monkeypatch.setattr(RM, "THING_SPRITE", {k: v for k, v in RM.THING_SPRITE.items() if k != 2007})
+    bad = [r for r in _rows(ls, wad, "E1M1") if r[0] == "MISSING"]
+    assert any(r[1].startswith("thing 2007 ") and "sprite NO" in r[4] for r in bad), bad
+
+
+def test_weapon_light_rows(ls, wad, monkeypatch):
+    """M8 (gates-ready): the weapon is lit by ONE baked colormap row (hudcode); E1M9 has a sector dark enough for a
+    second -- REFUSED by the survey (it refused every game-tier tool at hud.GameScreen). CONTROL: E1M1 is OK, and a
+    sector of E1M1 darkened to E1M9's needs turns it REFUSED"""
+    assert any(r[0] == "REFUSED" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M9"))
+    assert any(r[0] == "OK" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M1"))
+    from doomfj import hud
+    orig = hud.psprite_light_row
+    monkeypatch.setattr(hud, "psprite_light_row", lambda rm, light: orig(rm, light) + (light == 255))
+    assert any(r[0] == "REFUSED" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M1"))

@@ -12,6 +12,12 @@
     python scratchpad/12m/msframe.py --map E1M2 --a build/doom_e1m2_X.fjm --save-baseline shipped
         # M8: a map's baseline -- "shipped" means shipped_<map> off E1M1 (doomfj.mapprofile: shipped_e1m2), the
         # baseline records its map and --against refuses another map's
+    python scratchpad/12m/msframe.py --map E1M5 --plan-script [PATH]
+        # M8 G (gates-ready): the map's TIMED WALK -- E1M1's spawn faces a long corridor, but E1M3..E1M9's spawns walk
+        # into a wall within 5-17 frames, so "hold forward" would time ~185 frames of one stuck view. This writes
+        # gamespeed's steered route 0 for --frames frames (default scenarios/<map>/msframe.draft.json -- a DRAFT; the
+        # integrator promotes it to msframe.json). A map with msframe.json is timed on it (E1M1 / E1M2 have none: they
+        # keep forward); the baseline records the workload and --against refuses a baseline of another workload.
 
 WHY THIS EXISTS. The project's speed thesis is "optimise ms/frame, not ops/frame" -- and until
 this file there was no instrument for ms/frame at all. gamespeed.py counts ops. The ad-hoc runs
@@ -63,6 +69,7 @@ LEDGER = ROOT / "scratchpad" / "12m" / "msframe_ledger.jsonl"
 BASELINES = ROOT / "scratchpad" / "12m" / "msframe_baselines"
 
 DEFAULT_FRAMES = 200
+WORKLOAD_FILE = "msframe.json"     # M8: scenarios/<map>/msframe.json -- the map's timed walk (absent: hold forward)
 DEFAULT_REPS = 5
 DEFAULT_CPU = 2            # a P-core on the i7-12700H (logical 0-11 are P, 12-19 are E);
                            # not 0, which takes the interrupts. --cpu overrides; --probe-cores finds it.
@@ -132,7 +139,14 @@ class Rec(gate.Recording):
             time.sleep(delay_ms / 1000.0)      # the selftest's KNOWN effect, nothing else
 
 y0 = yard()
-per_frame = [{} for _ in range(GS.MENU_FRAMES)] + [{"forward": True} for _ in range(nf)]
+_script = os.environ.get("MSFRAME_SCRIPT", "")
+if _script:                                # M8: the map's timed walk (scenarios/<map>/msframe.json)
+    import json as _json
+    _keys = _json.loads(Path(_script).read_text(encoding="ascii"))["keys"]
+    assert len(_keys) >= nf, "the workload %s has %d frames, %d asked" % (_script, len(_keys), nf)
+    per_frame = [{} for _ in range(GS.MENU_FRAMES)] + [{k: True for k in ks} for ks in _keys[:nf]]
+else:
+    per_frame = [{} for _ in range(GS.MENU_FRAMES)] + [{"forward": True} for _ in range(nf)]
 events = GS.events_for(per_frame); n = len(per_frame)
 t0 = time.time()
 runner = FjmRunner(fjm)
@@ -162,6 +176,61 @@ out = {"frames": fr, "ops": ops, "secs": dt, "io_secs": paused, "load_secs": loa
 import json
 print("MSFRAME_RESULT " + json.dumps(out), flush=True)
 '''
+
+
+def workload(the_map):
+    """M8: (path or None, tag) of the map's timed walk: scenarios/<map>/msframe.json when it exists, else hold forward"""
+    from doomfj.mapprofile import scenario_dir
+    p = scenario_dir(the_map) / WORKLOAD_FILE
+    if not p.exists():
+        return None, "forward"
+    return p, "script %s" % hashlib.sha256(p.read_bytes()).hexdigest()[:16]
+
+
+def plan_script(the_map, frames, out):
+    """M8: the map's timed walk as a DRAFT -- gamespeed's steered route 0 (deterministic; doors opened on the way)"""
+    os.environ["DOOMFJ_MAP"] = the_map
+    for q in (ROOT / "tests", ROOT / "src", ROOT / "scratchpad", ROOT / "scratchpad" / "12m", ROOT):
+        if str(q) not in sys.path:
+            sys.path.insert(0, str(q))
+    import doomfj.mapprofile as MP
+    MP.ACTIVE = the_map                                   # gamespeed reads its DEFAULT_MAP from it at import
+    import gamespeed as GS
+    assert GS.DEFAULT_MAP == the_map, (GS.DEFAULT_MAP, the_map)
+    keys = GS._route(0, frames, GS.DEFAULT_WAD, the_map)
+    rm, scene, st = GS._oracle(GS.DEFAULT_WAD, the_map)
+    fwd, moved = 0, 0
+    st0 = st
+    for kd in [{"forward": True}] * frames:                 # what hold-forward would time, for the record
+        nx = rm.step_sim(st0, kd, scene=scene)
+        moved += abs(nx.x - st0.x) + abs(nx.y - st0.y) >= 1 << 16
+        st0 = nx
+    if GS.tour_gen(the_map) >= 4:                         # gen 4 routes are steered on the whole game: replay there
+        g = GS.GameSim(GS.DEFAULT_WAD, the_map)
+        st, stp = g.reset(), g.step
+    else:
+        scene0 = GS._tour_plan(GS.DEFAULT_WAD, the_map)[0]
+
+        def stp(s, kd):
+            return rm.step_sim(s, kd, scene=scene0)
+    for kd in keys:
+        nx = stp(st, kd)
+        fwd += abs(nx.x - st.x) + abs(nx.y - st.y) >= 1 << 16
+        st = nx
+    doc = {"map": the_map, "status": "DRAFT -- the timed walk msframe.py reads once promoted to %s" % WORKLOAD_FILE,
+           "frames": frames,
+           "rule": "gamespeed._route(0, frames): steered toward the farthest reachable points (gen %d)"
+                   % GS.tour_gen(the_map),
+           "moved_frames_route": fwd, "moved_frames_hold_forward": moved,
+           "keys": [sorted(k for k, v in kd.items() if v) for kd in keys]}
+    out = Path(out) if out else None
+    if out is None:
+        from doomfj.mapprofile import scenario_dir
+        out = scenario_dir(the_map) / "msframe.draft.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(doc, indent=1) + "\n", encoding="ascii", newline="\n")
+    print("%s: the route moves on %d of %d frames (hold forward: %d); wrote %s" % (the_map, fwd, frames, moved, out))
+    return 0
 
 
 def run_child(fjm, frames, cpu, env_extra):
@@ -420,20 +489,39 @@ def main():
     ap.add_argument("--note", default="", help="free text recorded in the ledger")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--map", default=None, help="M8: the binary's map (default DOOMFJ_MAP, E1M1): names the baseline")
+    ap.add_argument("--plan-script", nargs="?", const="", default=None, metavar="PATH",
+                    help="M8: write the map's timed walk (a DRAFT; default scenarios/<map>/msframe.draft.json)")
     a = ap.parse_args()
     # M8: one baseline per map -- "shipped" is E1M1's; on another map it is mapprofile's shipped_<map>
     sys.path.insert(0, str(ROOT / "src"))
-    from doomfj.mapprofile import ACTIVE, profile
+    from doomfj.mapprofile import ACTIVE, check_checkout, profile
+    check_checkout(__file__)            # M8: this checkout's doomfj (the installed one is the main repo's)
     the_map = (a.map or ACTIVE).upper()
     for attr in ("against", "save_baseline"):
         if getattr(a, attr) == "shipped":
             setattr(a, attr, profile(the_map).baseline)
+
+    if a.plan_script is not None:
+        return plan_script(the_map, a.frames, a.plan_script or None)
+    os.environ["DOOMFJ_MAP"] = the_map                  # the child's gamespeed import
+    wl_path, wl_tag = workload(the_map)
+    if wl_path is not None:
+        os.environ["MSFRAME_SCRIPT"] = str(wl_path)
+    else:
+        os.environ.pop("MSFRAME_SCRIPT", None)
+        if the_map not in ("E1M1", "E1M2"):
+            print("NOTE: %s has no %s -- timing hold-forward from spawn, which meets a wall within ~20 frames on "
+                  "E1M3..E1M9 (msframe.py --map %s --plan-script)" % (the_map, WORKLOAD_FILE, the_map), flush=True)
 
     if a.selftest:
         return selftest(min(a.frames, 60), a.cpu)
 
     if not a.a:
         raise SystemExit("--a is required")
+    from doomfj.mapprofile import check_binary
+    for f in (a.a, a.b):                                  # M8: a binary named for another map is not this map's
+        if f:
+            check_binary(f, the_map)
 
     # ── the machine must be quiet, or the number is about the machine
     busy = busy_processes()
@@ -456,6 +544,9 @@ def main():
         if base.get("map", "E1M1").upper() != the_map:
             raise SystemExit("baseline '%s' is %s's; this binary is %s's (--map)" % (a.against, base.get("map", "E1M1"),
                                                                                   the_map))
+        if base.get("workload", "forward") != wl_tag:
+            raise SystemExit("baseline '%s' timed '%s', this run times '%s' -- not comparable (re-save the baseline)"
+                             % (a.against, base.get("workload", "forward"), wl_tag))
         # the saved baseline's binary is the control; the user's --a is the change
         b_fjm, env_b, label_b = a_fjm, env_a, "change"
         a_fjm, env_a, label_a = Path(base["binary"]), base.get("env", {}), "base"
@@ -473,7 +564,8 @@ def main():
     s = summarize(rows, label_a, label_b, a.resolution)
     print_summary(s, label_a, label_b, a.frames)
 
-    record = {"when": time.strftime("%Y-%m-%d %H:%M:%S"), "frames": a.frames, "reps": a.reps,
+    record = {"when": time.strftime("%Y-%m-%d %H:%M:%S"), "frames": a.frames, "reps": a.reps, "map": the_map,
+              "workload": wl_tag,
               "cpu": a.cpu, "resolution": a.resolution, "note": a.note,
               "a": {"binary": str(a_fjm), "sha": sha256_file(a_fjm), "env": env_a},
               "b": ({"binary": str(b_fjm), "sha": sha256_file(b_fjm), "env": env_b} if b_fjm else None),
@@ -487,7 +579,8 @@ def main():
     if a.save_baseline:
         BASELINES.mkdir(parents=True, exist_ok=True)
         out = BASELINES / (a.save_baseline + ".json")
-        out.write_text(json.dumps({"map": the_map, "binary": str(a_fjm), "binary_sha": sha256_file(a_fjm),
+        out.write_text(json.dumps({"map": the_map, "workload": wl_tag, "binary": str(a_fjm),
+                                   "binary_sha": sha256_file(a_fjm),
                                    "env": env_a, "when": record["when"], "frames": a.frames,
                                    "reps": a.reps, "engine_pyd_sha": record["engine_pyd_sha"],
                                    "git": record["git"], "summary": s}, indent=1),

@@ -3,6 +3,8 @@ fingerprint against the gates at a git ref. Oracle only: no binary, no build.
 
     python scratchpad/gp/gate_roles_check.py [--ref a6b5e63] [--gates p2a fight die hurt]
     python scratchpad/gp/gate_roles_check.py --selftest       # + R9: the fingerprint must SEE a moved role
+    python scratchpad/gp/gate_roles_check.py --map E1M2 --ref <ref>   # M8: another map's scenarios against a ref
+                                                                      # (its roles file is the current tree's)
 
 WHAT IS COMPARED. Each gate's scenario list, built the way its `main` builds it (`p2a_gate.scenarios`,
 `fight_gate.scenario_list`, `die_gate.scenario_list`, `hurt_gate.scenario_list`, on E1M1 at the game tier's modes),
@@ -185,8 +187,8 @@ def dump(gates: list, out: Path) -> None:
     out.write_text(json.dumps(res, indent=1), encoding="ascii")
 
 
-def child(gates, out: Path, first=None, env_extra=None) -> dict:
-    env = dict(os.environ, DOOMFJ_MAP="E1M1")
+def child(gates, out: Path, first=None, env_extra=None, mapname="E1M1") -> dict:
+    env = dict(os.environ, DOOMFJ_MAP=mapname)
     env.pop("GATE_ROLES_OVERRIDE", None)
     env.pop("PYTHONPATH", None)
     env.update(env_extra or {})
@@ -226,14 +228,18 @@ def main(argv=None) -> int:
     ap.add_argument("--ref", default=DEFAULT_REF)
     ap.add_argument("--gates", nargs="*", default=list(GATES))
     ap.add_argument("--selftest", action="store_true", help="also run the R9 controls")
+    ap.add_argument("--map", default="E1M1", help="M8: the map whose scenarios are compared (the controls: E1M1's)")
     a = ap.parse_args(argv)
+    a.map = a.map.upper()
+    if a.selftest and a.map != "E1M1":
+        ap.error("--selftest's controls move E1M1's roles: run it on E1M1")
     t0 = time.time()
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         refdir = extract(a.ref, tmp)
-        old = child(a.gates, tmp / "old.json", first=refdir)
+        old = child(a.gates, tmp / "old.json", first=refdir, mapname=a.map)
         assert all(Path(f).resolve().parent == refdir.resolve() for f in old["files"].values()), old["files"]
-        new = child(a.gates, tmp / "new.json")
+        new = child(a.gates, tmp / "new.json", mapname=a.map)
         assert all(Path(f).resolve().parent == HERE for f in new["files"].values()), new["files"]
         diff = compare(old, new, a.gates)
         ok = True
@@ -244,8 +250,8 @@ def main(argv=None) -> int:
                 "IDENTICAL fingerprints" if not diff[g] else "DIFFER: %s" % diff[g],
                 "; N/A (not run): %s" % new[g]["<N/A>"] if "<N/A>" in new[g] else ""), flush=True)
             ok &= not diff[g]
-        print("E1M1 SCENARIOS %s against %s (%d gates, %d scenarios compared)" % (
-            "UNCHANGED" if ok else "CHANGED", a.ref, len(a.gates),
+        print("%s SCENARIOS %s against %s (%d gates, %d scenarios compared)" % (
+            a.map, "UNCHANGED" if ok else "CHANGED", a.ref, len(a.gates),
             sum(len([k for k in new[g] if k != "<N/A>"]) for g in a.gates)), flush=True)
         if a.selftest:
             for k, (ov, want) in enumerate(CONTROLS):

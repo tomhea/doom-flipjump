@@ -864,8 +864,11 @@ def main():
     _cands_tried = []
     picked = None
     from doomfj.combat import KEY_DOOR_CARDS      # M8: the key doors by their line special (the candidates skip them)
+    # M8: DOOM's every key-door special (gp/gate_roles.KEY_LINE_COLOURS: the blazing 99, 133..137 too, which
+    # the model's KEY_DOOR_CARDS lacks until C3) -- never a key door the walk would press use at, shut
+    KEY_LINES = set(KEY_DOOR_CARDS) | {99, 133, 134, 135, 136, 137}
     _keyed = {sds[ld.back].sector for ld in lds
-              if ld.special in KEY_DOOR_CARDS and ld.back not in (-1, 0xFFFF) and ld.back < len(sds)}
+              if ld.special in KEY_LINES and ld.back not in (-1, 0xFFFF) and ld.back < len(sds)}
     # M8 (E1M2: every door the start reaches has a monster on its ground or beside its path, at every skill): when no
     # clear-ground candidate exists, the candidates are tried AGAIN with the monster pre-filter off -- the mirror steps
     # the world's real monsters, so a walk it accepts (opened, crossed, kept open, no death) is still exact; the

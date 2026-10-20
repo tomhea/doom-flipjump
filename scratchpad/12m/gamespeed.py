@@ -72,6 +72,8 @@ SIZE_TARGET_PCT = 43.0             # of the address ceiling: 43% from M7 P10 (th
 
 # M8 (docs/level-pipeline.md 3): the map from doomfj.mapprofile (DOOMFJ_MAP; E1M1 when unset)
 from doomfj.mapprofile import profile as _map_profile                       # noqa: E402
+from doomfj.mapprofile import check_checkout as _check_checkout            # noqa: E402
+_check_checkout(__file__)       # M8: this checkout's doomfj (the installed one is the main repo's)
 DEFAULT_WAD = _map_profile().wad
 DEFAULT_MAP = _map_profile().map
 UNIT = 1 << 16                      # the sim's fixed-point unit
@@ -205,8 +207,11 @@ def _tour_plan(wad, mapname):
     # standing metric's history).
     if mapname.upper() != "E1M1":
         from doomfj.combat import KEY_DOOR_CARDS
+        # M8: DOOM's every key-door special (gp/gate_roles.KEY_LINE_COLOURS: the blazing 99, 133..137 too, which
+        # the model's KEY_DOOR_CARDS lacks until C3) -- never a key door the walk would press use at, shut
+        KEY_LINES = set(KEY_DOOR_CARDS) | {99, 133, 134, 135, 136, 137}
         keyed = {sds[ld.back].sector for ld in lds
-                 if ld.special in KEY_DOOR_CARDS and ld.back not in (-1, 0xFFFF) and ld.back < len(sds)}
+                 if ld.special in KEY_LINES and ld.back not in (-1, 0xFFFF) and ld.back < len(sds)}
         tbl = {si: v for si, v in tbl.items() if si not in keyed}
     # PLAN WITH THE DOORS OPEN. The routes must be allowed to cross them; the run then presses
     # `use` on the way, exactly as a player does. Planning against shut doors is what confined the
@@ -238,7 +243,7 @@ def _waypoints(rm, scene, st, goal, spacing=4):
     return path[::spacing] + [path[-1]]
 
 
-def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
+def _steer(rm, scene, st, waypoints, budget, boxes, in_box, step=None):
     """Drive toward each waypoint HOLDING FORWARD, turning while moving.
 
     ⚠ THIS IS THE WHOLE POINT, and the first route-based attempt got it wrong. `ANGLE_TURN` is
@@ -278,7 +283,7 @@ def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
             del kd["forward"]                   # gen 3b: inside the turning circle -- turn on the spot
         if any(in_box(b, st.x, st.y) for b in boxes):
             kd["use"] = True                    # a player opens the door in front of them
-        nxt = rm.step_sim(st, kd, scene=scene)
+        nxt = rm.step_sim(st, kd, scene=scene) if step is None else step(st, kd)
         if "forward" not in kd or abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
             stuck = 0                           # (gen 3b: a turn on the spot is not a refused step)
         else:
@@ -293,8 +298,19 @@ def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
 
 OPENING_TURN = 3            # frames of turn per seed index, before the route starts
 
+# M8 (gates-ready, gen_dryrun on E1M5): GEN 4 steers CLOSED-LOOP on the whole game (GameSim: monsters block, chase and
+# shoot, things are taken) instead of the static doors-open scene -- what the binary plays. Gen 3b planned and steered
+# blind to the monsters: on E1M5 five of the ten runs pressed forward into one live monster for ~80 frames (63-76%
+# blocked, ending on the same spot); closed-loop, the stuck rule moves on to the next waypoint. E1M1 and E1M2 keep gen
+# 3b: their tours are RECORDED (BINARY_ENDS, scenarios/e1m2/gamespeed.json) and the standing metric's history is theirs.
+TOUR_GEN = {"E1M1": 3, "E1M2": 3}
 
-def _route(seed, n_game, wad, mapname):
+
+def tour_gen(mapname) -> int:
+    return TOUR_GEN.get(mapname.upper(), 4)
+
+
+def _route(seed, n_game, wad, mapname, flip=False):
     """One run: turn to this seed's own opening heading, then tour the destinations.
 
     ⚠ THE OPENING TURN IS WHAT MAKES THE TEN RUNS TEN SAMPLES. Every run starts at the same baked
@@ -311,11 +327,18 @@ def _route(seed, n_game, wad, mapname):
     up to 100 breadth-first searches and did not finish."""
     rm, _scene, sp = _oracle(wad, mapname)
     open_scene, targets, boxes, in_box = _tour_plan(wad, mapname)
-    turn = "turn_left" if seed % 2 else "turn_right"
+    turn = "turn_left" if (seed % 2) != flip else "turn_right"     # `flip`: the other way (a duplicate's retry)
     keys, st = [], sp
+    step = None                                 # gen 3b: the static doors-open scene
+    if tour_gen(mapname) >= 4:                  # gen 4: closed-loop on the whole game, from its level start
+        gsim = GameSim(wad, mapname)
+        st, step = gsim.reset(), gsim.step
+
+    def one(st, kd):
+        return rm.step_sim(st, kd, scene=open_scene) if step is None else step(st, kd)
     for _ in range(min(seed * OPENING_TURN, n_game // 2)):
         kd = {turn: True}
-        st = rm.step_sim(st, kd, scene=open_scene)
+        st = one(st, kd)
         keys.append(kd)
     for k in range(len(targets)):
         if len(keys) >= n_game:
@@ -324,18 +347,26 @@ def _route(seed, n_game, wad, mapname):
         wps = _waypoints(rm, open_scene, st, goal)
         if not wps:
             continue
-        st, more = _steer(rm, open_scene, st, wps, n_game - len(keys), boxes, in_box)
+        st, more = _steer(rm, open_scene, st, wps, n_game - len(keys), boxes, in_box, step)
         if not more:
             continue
         keys += more
+    stalled = False
     while len(keys) < n_game:
         kd = {"forward": True}
-        nxt = rm.step_sim(st, kd, scene=open_scene)
-        if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
+        if step is None:
+            nxt = rm.step_sim(st, kd, scene=open_scene)
+            if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
+                st = nxt
+            else:
+                kd = {turn: True}
+                st = rm.step_sim(st, kd, scene=open_scene)
+        else:                                   # gen 4: a stateful game is stepped once a frame -- forward while it
+            if keys and keys[-1] == {"forward": True} and stalled:     # moves, else turn
+                kd = {turn: True}
+            nxt = step(st, kd)
+            stalled = "forward" in kd and abs(nxt.x - st.x) + abs(nxt.y - st.y) < UNIT
             st = nxt
-        else:
-            kd = {turn: True}
-            st = rm.step_sim(st, kd, scene=open_scene)
         keys.append(kd)
     return keys[:n_game]
 
@@ -345,7 +376,15 @@ def _all_scripts(n_game, wad, mapname):
     key = (n_game, wad, mapname)
     if key in _ALL:
         return _ALL[key]
-    out = [_route(seed, n_game, wad, mapname) for seed in range(TOUR_TARGETS)]
+    out = []
+    for seed in range(TOUR_TARGETS):
+        keys = _route(seed, n_game, wad, mapname)
+        if keys in out and mapname.upper() not in TOUR_GEN:
+            # M8 (gen_dryrun on E1M8): the opening turn does NOT make the scripts distinct by construction -- seed 2's 6
+            # turn frames and steering that turns the same way 6 more equal seed 4's 12 -- so a duplicate (off the
+            # recorded maps, which never had one) retries ONCE turning the other way, a different leading key
+            keys = _route(seed, n_game, wad, mapname, flip=True)
+        out.append(keys)
     sigs = {repr(k) for k in out}
     assert len(sigs) == len(out), (
         "only %d of %d speed runs are distinct -- duplicates weight the percentile toward "
@@ -629,6 +668,23 @@ def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_M
     return out, spread
 
 
+def write_tours(path, out, spread, n_frames=100):
+    """M8 (gen_dryrun.py): the map's ten tours as a DRAFT -- their keys and where the MODEL ends them (GameSim). Not a
+    record: gamespeed_trail.py --record writes the binary's, which --validate and --selftest hold the tours to."""
+    import hashlib
+    import json
+    keys = [script(r, n_frames) for r in range(len(out))]
+    doc = {"map": DEFAULT_MAP, "status": "DRAFT -- generated tours, not a record (gamespeed_trail.py --record)",
+           "frames": n_frames, "tour_targets": [list(t) for t in _tour_plan(DEFAULT_WAD, DEFAULT_MAP)[1]],
+           "model_ends": [list(r[0]) for r in out], "model_doors": [r[4] for r in out],
+           "moved_frames": [[r[3], r[2]] for r in out], "spread": spread,
+           "keys": [[sorted(k for k, v in kd.items() if v) for kd in ks] for ks in keys],
+           "generator_sha16": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]}
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(doc, indent=1) + "\n", encoding="ascii", newline="\n")
+    print("wrote %s (%d tours)" % (path, len(keys)), flush=True)
+
+
 # ----------------------------------------------------------------------------------------------
 # R9: the negative controls
 # ----------------------------------------------------------------------------------------------
@@ -794,14 +850,21 @@ def main():
                     help="G5: step the oracle, doors included, through the 10 scripts and show "
                          "where they go")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--tours-out", help="--validate: also write the ten tours (keys, the model's ends) here as a DRAFT "
+                                        "(gen_dryrun.py) -- the record a binary's trail is held to is "
+                                        "gamespeed_trail.py --record's, never this")
     a = ap.parse_args()
 
     if a.selftest:
         return selftest(a.fjm if ("--fjm" in sys.argv and Path(a.fjm).exists()) else None)
     if a.validate:
-        validate_scripts(a.runs, a.frames)
+        out, spread = validate_scripts(a.runs, a.frames)
+        if a.tours_out:
+            write_tours(a.tours_out, out, spread, a.frames)
         return 0
 
+    from doomfj.mapprofile import check_binary
+    check_binary(a.fjm, DEFAULT_MAP)            # M8: E1M1's default binary is not another map's
     size = read_fjm_size(a.fjm)
     print("SIZE: %s" % size, flush=True)
     run_avgs, raw_avgs, _ = measure_speed(a.fjm, a.runs, a.frames, calibrate=not a.no_calibrate)

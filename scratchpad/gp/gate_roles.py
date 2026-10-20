@@ -51,6 +51,13 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
 FILE_NAME = "gates.json"
+# M8 (gates-ready): DOOM's key-door line specials by colour -- the WAD's truth, whatever the model supports yet (the
+# model's own table is combat.KEY_DOOR_CARDS: 26 27 28 32 33 34 today; C3 adds the blazing key doors). The generators
+# read THIS one, so a key door the model does not know yet (E1M7's 133) is still a key door to them -- never a door a
+# tour or a checkpoint flood walks through
+KEY_LINE_COLOURS = {26: "blue", 32: "blue", 99: "blue", 133: "blue",
+                    27: "yellow", 34: "yellow", 136: "yellow", 137: "yellow",
+                    28: "red", 33: "red", 134: "red", 135: "red"}
 NORTH, WEST = 0x40000000, 0x80000000
 
 # what the gates hard-wired on E1M1 before M8, role by role (the literals, verbatim)

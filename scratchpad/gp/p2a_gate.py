@@ -511,6 +511,19 @@ def below_card_pose(dsim, card, sector: int = 124, frames: int = 3):
     raise AssertionError("no pose in sector %d whose step reaches the card's box" % sector)
 
 
+def exit_na(dsim):
+    """M8 (gen_dryrun's audit): why the map cannot host the exit scenarios (p2a S8, die D3x), or None -- they need
+    exactly one SWITCH exit (doors.EXIT_SPECIALS, special 11): E1M8 has only W1 exits (52), which the model does not
+    end the level on yet (C9); a map with two switch exits would need a role naming one"""
+    n = len(exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname)))
+    if n == 1:
+        return None
+    other = sorted({ld.special for ld in dsim.lds if ld.special in (51, 52, 124)})
+    return "%s has %d switch exits (special %s)%s" % (
+        dsim.mapname, n, sorted(D.EXIT_SPECIALS), "; its exit lines %s are C9's (no level end in the model)" % other
+        if other else "")
+
+
 def exit_pose(dsim):
     """a standing pose inside the exit box, off the exit line, facing it"""
     (x0, y0, x1, y1), = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))
@@ -727,12 +740,18 @@ def _in_box(dsim, box):
 
 
 def trigger_pose(dsim, trig, back: int = 40):
-    """`back` units before the trigger line's middle, facing across it"""
+    """`back` units before the trigger line's middle, facing across it. M8 (gen_dryrun on E1M3: tag 11's W1 lines ring
+    the blue card's platform, a floor switch's floor): never a pose ON a mover's or a door's floor -- the static check
+    takes it, the player cannot walk off it at the level start"""
     _si, axis, coord, lo, hi = trig
+    assert axis in ("x", "y"), "a diagonal trigger has no axis pose: %s" % (trig,)
     mid = (lo + hi) // 2
+    moving = set(dsim.mp.stops) | set(dsim.mp.switch) | set(dsim.order)
     for side in (-1, 1):
         a = coord + side * back
         x, y = (mid, a) if axis == "y" else (a, mid)
+        if _sector(dsim, x, y) in moving:
+            continue
         if _ok(dsim, x << 16, y << 16):
             ang = bam(0, -side) if axis == "y" else bam(-side, 0)
             return (x << 16, y << 16, ang)
@@ -758,6 +777,13 @@ def scenarios(dsim, card) -> list:
     R = gate_roles.roles(dsim.mapname)
     kinds = dsim.dp.kinds
     trig = {t[0]: t for t in dsim.dp.triggers}
+    # M8: a door's LAST trigger, as always -- unless it is diagonal (no axis pose: E1M3's ring of W1 lines): then its
+    # last axis-aligned one
+    for _si in list(trig):
+        if trig[_si][1] not in ("x", "y"):
+            ax = [t for t in dsim.dp.triggers if t[0] == _si and t[1] in ("x", "y")]
+            if ax:
+                trig[_si] = ax[-1]
     n = dsim.nstates
     F, B, U, I = {"forward": True}, {"back": True}, {"use": True}, {}
     out = []
@@ -912,6 +938,10 @@ def scenarios(dsim, card) -> list:
     # P10: LEVEL COMPLETE holds eight frames (an enter among them ignored), then any key leaves for the boot's menu
     # (no game in progress: esc there is no rule, and the frozen world is never drawn again -- P2a.2's "frozen"
     # control parted on the frozen world's frame, which no play reaches now), and NEW GAME starts the level over
+    if exit_na(dsim):                                # M8: E1M8 (W1 exits only) -- N/A, named
+        out.append(na("S8 the exit: a press ends the level; LEVEL COMPLETE (its hold); any key: the menu; NEW GAME",
+                      exit_na(dsim)))
+        return out
     out.append({
         "name": "S8 the exit: a press ends the level; LEVEL COMPLETE (its hold); any key: the menu; NEW GAME",
         "pose": exit_pose(dsim),

@@ -73,7 +73,15 @@ def packages() -> dict:
     global _PKG
     if _PKG is not None:
         return _PKG
-    from doomfj.world import TicEvents, World
+    from doomfj.world import TicEvents
+    from doomfj.world import World as _World
+    from doomfj.config import DEFAULT_MAP_WAD
+    from doomfj.wad import WadFile
+
+    def World(**kw):
+        # M8: the packages are MODEL features, probed on E1M1 whatever map the gate measures -- named explicitly, so
+        # World's no-map refusal (DOOMFJ_MAP off E1M1) cannot turn a probe into a silent "package not in"
+        return _World(WadFile.from_path(DEFAULT_MAP_WAD), "E1M1", **kw)
     out = {}
     # A: the death think sinks the view one unit, and the oracle draws a sunk eye
     try:

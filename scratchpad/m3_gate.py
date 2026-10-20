@@ -206,6 +206,26 @@ def _screen_key(scr, sel, live):
     return (scr, sel if scr == 1 else None, live if scr in _MAIN + (MAIN_RESUME_SCR, MAIN_MAP_SCR) else None)
 
 
+def special_crossings(mw, mapname, states) -> list:
+    """(line, special) of every special linedef the path through `states` (SimStates, frame by frame) crosses"""
+    vs, lds = mw.vertexes(mapname), mw.linedefs(mapname)
+    pts = [(_signed(s.x, 32) / 65536, _signed(s.y, 32) / 65536) for s in states]
+
+    def o(u, v, w):
+        return (v[0] - u[0]) * (w[1] - u[1]) - (v[1] - u[1]) * (w[0] - u[0])
+    out = set()
+    for p, q in zip(pts, pts[1:]):
+        if p == q:
+            continue
+        for i, ld in enumerate(lds):
+            if not ld.special:
+                continue
+            a, b = (vs[ld.v1].x, vs[ld.v1].y), (vs[ld.v2].x, vs[ld.v2].y)
+            if o(a, b, p) * o(a, b, q) < 0 and o(p, q, a) * o(p, q, b) < 0:
+                out.add((i, ld.special))
+    return sorted(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fjm", default="build/doom_e1m1_menu.fjm")
@@ -469,6 +489,13 @@ def main():
     else:
         map_frozen = map_both_ways = True
     walked = (rows[WALKED_NEW_GAME]["before"].x, rows[WALKED_NEW_GAME]["before"].y) != (spawn.x, spawn.y)
+    # M8 (gates-ready): the mirror holds the doors and movers at their level start, so a walk that crossed a SPECIAL line
+    # (a W1 trigger, a WR lift, a teleport, a walk-over exit) would fire it in the binary alone -- a confusing FAIL far
+    # from its cause. Refused by name instead. (E1M1..E1M9: the walk crosses none -- 80 to 160 units from the spawn.)
+    crossed = special_crossings(mw, args.map, [r["state"] for r in rows])
+    if crossed:
+        raise SystemExit("m3_gate: on %s the scripted walk crosses special line(s) %s (line, special) -- the mirror "
+                         "holds doors and movers still; this map needs another walk" % (args.map, crossed))
     reset = all((rows[f]["state"].x, rows[f]["state"].y, rows[f]["state"].angle)
                 == (spawn.x, spawn.y, spawn.angle) for f in NEW_GAMES)
     # the three NEW GAME frames as the oracle drew them -- distinct only if the skills can be TOLD

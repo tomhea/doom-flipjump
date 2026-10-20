@@ -51,13 +51,17 @@ if __name__ == "__main__":
     from doomfj.mapprofile import take_map_arg
     take_map_arg()
 
+from doomfj.mapprofile import check_checkout                                    # noqa: E402
+check_checkout(__file__)            # M8: this checkout's doomfj (the installed one is the main repo's)
 E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 ENGAGE = 640               # a checkpoint's group: the monsters within this many units
 SPREAD = 768               # checkpoints at least this far apart
 STANDOFF = 256             # the start spot's wanted distance from the nearest monster
 N_RUNS = 11                # v10's shape: 11 runs x 100 frames
 DOORS_WANTED = 3           # scenarios_v2's MIN_DOORS: usable doors a checkpoint should start near
-KEY_SPECIALS = (26, 27, 28, 32, 33, 34)
+AFTER_FACE_MIN = 32        # the aftermath faces a corpse at least this far from its start (else the farthest)
+from gate_roles import KEY_LINE_COLOURS                                     # noqa: E402
+KEY_SPECIALS = tuple(sorted(KEY_LINE_COLOURS))   # M8: DOOM's every key door (99, 133 .. 137 too: no E1M1 / E1M2 line)
 INSTALLED = {"map": "E1M1"}
 _ORIGINALS = {}
 
@@ -82,7 +86,8 @@ def install(mapname: str, checkpoints=None) -> None:
         return
     wad = profile(m).wad
     INSTALLED["map"] = m
-    for mod, names in ((S, ("MODEL_FILES", "CENSUS_FILES", "new_world", "regions", "CHECKPOINTS", "plan_set")),
+    for mod, names in ((S, ("MODEL_FILES", "CENSUS_FILES", "new_world", "regions", "CHECKPOINTS", "plan_set",
+                            "REGION_NAMES")),
                        (CL, ("WadFile", "W", "SimState", "build_scene"))):
         for n in names:
             _ORIGINALS[(mod.__name__, n)] = getattr(mod, n)
@@ -94,8 +99,10 @@ def install(mapname: str, checkpoints=None) -> None:
         return S.apply_sight_rule(W.World(mw, m, skill=S.SKILL, player=S.PLAYER_MODE, monsters=S.MONSTER_MODE))
     S.new_world = new_world
     S.regions = regions_map
-    if checkpoints is not None:
-        S.CHECKPOINTS = tuple(checkpoints)
+    # M8 (the gate-tool audit): the map's checkpoints, or NONE -- never E1M1's (a set whose map has no checkpoints file
+    # kept E1M1's 11 hand-placed ones in this process); and R3 is every colour's key doors here (regions_map)
+    S.CHECKPOINTS = tuple(checkpoints) if checkpoints is not None else ()
+    S.REGION_NAMES = tuple("R3 behind the key doors" if n.startswith("R3 ") else n for n in S.REGION_NAMES)
     plan_set0 = S.plan_set
 
     def plan_set(quiet=False):
@@ -306,6 +313,11 @@ def suggest(n_runs: int = N_RUNS) -> dict:
                      "nearest": int(near(spot))})
     cand.sort(key=lambda c: (-c["score"], c["sector"]))
     regions_with = sorted(r for r, n in by_region.items() if r is not None and n >= 5)
+    if not regions_with:            # M8 (gen_dryrun on E1M8): a sparse map -- every reached region with a monster
+        regions_with = sorted(r for r, n in by_region.items() if r is not None and n >= 1)
+    if not regions_with:
+        raise SystemExit("suggest: no monster of %s lies in a region the flood from the start reaches (%s)"
+                         % (INSTALLED["map"], dict(by_region)))
     total = sum(by_region[r] for r in regions_with) or 1
     quota = {r: max(1, round((n_runs - 1) * by_region[r] / total)) for r in regions_with}
     while sum(quota.values()) > n_runs - 1:
@@ -389,23 +401,43 @@ def suggest(n_runs: int = N_RUNS) -> dict:
         sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, int(cx), int(cy))]
         key = (spread, a[0])
         if reg.get(sec) is not None and (best is None or key < best[0]):
-            best = (key, near3, (int(round(cx)), int(round(cy))), sec)
+            look = _aftermath_look(w, near3, round(cx), round(cy))
+            if look is not None:             # M8: a trio whose start sees none of its corpses is no aftermath
+                best = (key, near3, (int(round(cx)), int(round(cy))), sec, look)
     if best is not None:
-        _key, trio, (cx, cy), sec = best
+        _key, trio, (cx, cy), sec, look = best
         out.insert(1, {"name": "R%d-aftermath" % reg[sec], "sector": sec, "want": (cx, cy),
-                       "face": (trio[0][1], trio[0][2]), "region": reg[sec], "style": "collect",
+                       "face": (look[1], look[2]), "region": reg[sec], "style": "collect",
                        "corpses": tuple(m[0] for m in trio),
                        "why": "AFTERMATH: %s (slots %s) injected as corpses at their spawns, the player among "
                               "them -- the post-kill drawing (corpses, drops)"
                               % (", ".join(m[4] for m in trio), [m[0] for m in trio])})
-    else:
-        out.append(_cp(reserve.pop(0), "R%d-extra" % reserve[0]["region"], "fight"))
+    elif reserve:                    # M8: the popped checkpoint's own region (it named the NEXT one's, and an
+        c = reserve.pop(0)           # IndexError with one in reserve)
+        out.append(_cp(c, "R%d-extra" % c["region"], "fight"))
     return {"map": INSTALLED["map"], "checkpoints": out,
             "reserve": [_cp(c, "R%d-s%d" % (c["region"], c["sector"]), "fight") for c in reserve[:30]],
             "regions": {"sectors_per_region": dict(collections.Counter(reg.values())),
                         "monsters_per_region": {str(k): v for k, v in by_region.items()},
                         "quota": quota, "rule": "regions_map: v1's stages with the map's lifts, W1 doors, floor "
                                                 "switch and key doors (every colour)"}}
+
+
+def _aftermath_look(w, trio, cx, cy):
+    """the corpse the aftermath faces from its start (cx, cy), or None: the trio's first, else the others farthest first
+    -- one at least AFTER_FACE_MIN away (E1M3's first lay 21 units off, inside the near clip) and in sight of the start
+    (E1M9's farthest, 114 units off, stood behind a wall): either way frame 0 drew no corpse and the planned set FAILED
+    "one drawn on its first frame". E1M2's first, 48 units off and in sight, is still the one faced"""
+    order = [trio[0]] + sorted(trio[1:], key=lambda m: (-math.hypot(m[1] - cx, m[2] - cy), m[0]))
+
+    def floor(x, y):
+        return w.secs[w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)]].floor_h
+    f0 = floor(cx, cy)
+    for m in order:              # ... and on a floor within a step of the start's (E1M9's lay 64 below, past a ledge)
+        if (math.hypot(m[1] - cx, m[2] - cy) >= AFTER_FACE_MIN and abs(floor(m[1], m[2]) - f0) <= 24
+                and w.los_points((cx << 16, cy << 16), (m[1] << 16, m[2] << 16))):
+            return m
+    return None
 
 
 def _cp(c, name, style):
@@ -438,6 +470,10 @@ def plan(sugg: dict, quiet: bool = False) -> dict:
                 assert sec == c["sector"] and reg.get(sec) == c["region"], (c["name"], sec, reg.get(sec))
                 nav = S.NavGraph.build(w0, (pose[0] >> 16, pose[1] >> 16), tag=c["name"])
                 keys, pname, tried = S.plan_run(c, setup, nav)
+                # M8 (gen_dryrun on E1M4: R3-s219's checkpoint faced a group centred on itself, and the autopilot
+                # turned for all 100 frames -- the set FAILED "every run moves"): a run with no movement key is refused
+                # like a placement, and the region's next suggestion planned (E1M2's runs all move: its set as it was)
+                assert any(kd.get(k) for kd in keys for k in S.MOVE_KEYS), "the plan presses no movement key"
             except AssertionError as e:
                 print("  %-22s REFUSED (%s) -- the region's next suggestion" % (c["name"], str(e)[:120]), flush=True)
                 used.append(c["name"])
@@ -520,6 +556,8 @@ def main(argv=None) -> int:
     ap.add_argument("--file")
     ap.add_argument("--runs", type=int, default=N_RUNS)
     ap.add_argument("--only", help="--plan: only the checkpoints whose name starts with this (a trial)")
+    ap.add_argument("--checkpoints", help="the checkpoints file --suggest-checkpoints writes and --plan reads (default "
+                                          "scenarios/<map>/checkpoints.json; gen_dryrun.py: a DRAFT path)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -543,7 +581,7 @@ def main(argv=None) -> int:
     S.use_sight_rule({"sight_rule": "seen", "monster_tics": W.MONSTER_TICS_PER_FRAME, "player_mode": PM,
                       "monster_mode": MM})
     install(m)
-    cpath = checkpoints_path(m)
+    cpath = Path(a.checkpoints) if a.checkpoints else checkpoints_path(m)
     if a.suggest_checkpoints:
         t0 = time.time()
         sug = suggest(a.runs)

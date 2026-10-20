@@ -494,20 +494,20 @@ def selftest(fjm_path, cache_path, knobs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fjm", default="build/doom_e1m1_blocked28.fjm")
-    ap.add_argument("--counts-cache", default="scratchpad/12m/_counts_game.json.gz")
+    ap.add_argument("--fjm", default=None, help="default: E1M1's blocked28 (another map: required)")
+    ap.add_argument("--counts-cache", default=None, help="default: E1M1 _counts_game.json.gz, another map its census")
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=SHIP_GATE["pool_base"])
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=SHIP_GATE["span_bits"])
     ap.add_argument("--spread", type=int, default=SHIP_GATE["spread"])
     ap.add_argument("--spread-min-count", type=int, default=SHIP_GATE["spread_min_count"])
     ap.add_argument("--max-slot-ops", type=int, default=SHIP_GATE["max_slot_ops"])
     ap.add_argument("--no-width-buckets", action="store_true")
-    ap.add_argument("--heat", default=SHIP_GATE["heat"],
-                    help="the build's --pin-heat list (default: ship-gate 1b's)")
+    ap.add_argument("--heat", default=None,
+                    help="the build's --pin-heat list (default: ship-gate 1b's; another map its own, else E1M1's)")
     ap.add_argument("--no-heat", action="store_true", help="price the placement without a heat list")
     ap.add_argument("--tier", default=SHIP_GATE["tier"])
-    ap.add_argument("--map", default=SHIP_GATE["map"])
-    ap.add_argument("--wad", default=SHIP_GATE["wad"])
+    ap.add_argument("--map", default=None, help="default: DOOMFJ_MAP, else E1M1 (ship-gate 1b's)")
+    ap.add_argument("--wad", default=None, help="default: the map's fixture (doomfj.mapprofile)")
     ap.add_argument("--allow-stale", action="store_true",
                     help="price a counts cache whose signature no longer matches the working tree. "
                          "The signature hashes the emitter sources' bytes, so a line-ending sweep "
@@ -515,6 +515,17 @@ def main():
                          "block sizes are then the CACHED program's, and the run says so.")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
+    # M8 G13: the map's own wad, census and heat list by default (a --map with E1M1's --wad priced the wrong program)
+    from doomfj.mapprofile import ACTIVE, heat_list, profile
+    a.map = (a.map or ACTIVE).upper()
+    e1 = a.map == SHIP_GATE["map"]
+    a.wad = a.wad or (SHIP_GATE["wad"] if e1 else profile(a.map).wad)
+    a.heat = a.heat or (SHIP_GATE["heat"] if e1 else heat_list(a.map)[0])
+    a.counts_cache = a.counts_cache or ("scratchpad/12m/_counts_game.json.gz" if e1 else profile(a.map).census)
+    if a.fjm is None:
+        if not e1:
+            ap.error("--fjm is required off E1M1")
+        a.fjm = "build/doom_e1m1_blocked28.fjm"
     knobs = dict(pool_base=a.pool_base, span_bits=a.span_bits, spread=a.spread,
                  spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops,
                  width_buckets=not a.no_width_buckets, tier=a.tier, map=a.map, wad=a.wad,

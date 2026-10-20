@@ -764,7 +764,7 @@ def scenario_list(dsim, w, card) -> list:
     menu = [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
     keys5 = menu + [F] * 3 + [I] * 40 + [FIRE] * 3 + [I] * 12
     f5 = []
-    wm = _world_at(gd.SK_MEDIUM)
+    wm = _world_at(gd.SK_MEDIUM, w)
     for i in pstr:
         for p in poses_facing(dsim, w, pk[i].x, pk[i].y, (40, 48, 32)):
             for m in first_live(wm, "MT_POSSESSED", near=(pk[i].x, pk[i].y))[:2]:
@@ -1338,12 +1338,14 @@ def mon_moved_(tr, m: int) -> bool:
 _WORLDS = {}
 
 
-def _world_at(skill):
-    """a World at `skill`'s level start (the placing of a scenario that starts with NEW GAME there)"""
-    if skill not in _WORLDS:
+def _world_at(skill, w):
+    """a World at `skill`'s level start on `w`'s map (the placing of a scenario that starts with NEW GAME there).
+    M8: it was World(skill=...) -- E1M1's level start whatever the map (gen_dryrun's audit)"""
+    key = (w.mapname, skill)
+    if key not in _WORLDS:
         from doomfj.world import World
-        _WORLDS[skill] = World(skill=skill, monsters="idle")
-    return _WORLDS[skill]
+        _WORLDS[key] = World(w.mw, w.mapname, skill=skill, monsters="idle")
+    return _WORLDS[key]
 
 
 def _touched_box(w, tr, items) -> bool:
@@ -1370,9 +1372,26 @@ def _passed(tr) -> bool:
 NEED = ("pickups", "pickup_items", "pickup_drops", "bonus_frames", "berserk_frames", "gibs", "drop_frames",
         "bexp_frames", "barrel_blasts", "puffs", "blast_kills", "barrel_hurt", "player_blocked", "nukage",
         "barrel_hits", "fx_spawns")
-# M8: the NEED counters a scenario is the only one to raise (by its tag): when the map cannot host it (N/A) they are
-# not owed. F5's punch is the only berserk and its gib (F6's blast gibs too: gibs stays owed); F9 / D6 the nukage
-OWNS = {"F5": ("berserk_frames",), "F9": ("nukage",), "D6": ("nukage",)}
+# M8: the NEED counters each scenario (by its tag) raises: a counter is not owed when EVERY scenario of this gate that
+# raises it is N/A on the map. F5's punch is the only berserk; the gibs are F5's and F6's blast; F9 / D6 the nukage;
+# gen_dryrun's audit: the barrel counters are the barrel rows' (E1M5 / E1M8 have no barrel -- they FAILed "every event
+# counter nonzero" with every barrel row N/A), D7's the barrel's hurt in die_gate
+_BARREL = ("bexp_frames", "barrel_blasts", "blast_kills", "barrel_hurt", "barrel_hits")
+OWNS = {"F5": ("berserk_frames", "gibs"), "F9": ("nukage",), "D6": ("nukage",),
+        "F6": _BARREL + ("gibs",), "F6d": _BARREL, "F6p": _BARREL, "F7": _BARREL, "S2": _BARREL, "S4": _BARREL,
+        "D7": ("barrel_hurt",)}
+
+
+def unowed(need, tags, na_tags, declared=None) -> list:
+    """the `need` counters every present owner of is N/A (tags: this gate's scenario tags; declared: {tag: owns} a
+    scenario named itself) -- a counter no present scenario owns stays owed"""
+    owns = dict(OWNS, **(declared or {}))
+    out = []
+    for k in need:
+        owners = [t for t in tags if k in owns.get(t, ())]
+        if owners and all(t in na_tags for t in owners):
+            out.append(k)
+    return out
 
 
 def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_cls=None, doc=None) -> int:
@@ -1423,7 +1442,7 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
             "the label table has no %s: a binary before P6/P7" % sorted(table.absent))
     totals = {}
     awaiting, ran_need = [], set()                    # M7 P8a: what waits for a package; the P8a counters owed
-    nas, na_owns = [], set()                          # M8: the scenarios this map cannot host, the counters they own
+    nas, declared = [], {}                            # M8: the scenarios this map cannot host, the counters they own
     for sc in scen:
         why = sc.get("na")
         if not why and dsim.mapname != "E1M1":
@@ -1437,7 +1456,8 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
             why = R.na_reasons.get(sc["name"].split()[0], "no candidate placed from %s's things" % dsim.mapname)
         if why:
             nas.append(sc["name"].split()[0])
-            na_owns |= set(sc.get("owns", OWNS.get(sc["name"].split()[0], ())))
+            if sc.get("owns"):
+                declared[sc["name"].split()[0]] = tuple(sc["owns"])
             print("\n%s -- N/A: %s" % (sc["name"], why), flush=True)
             continue
         stat = P8.status(sc, PMODE, MMODE)            # M7 P8a: the scenario's rule at these modes, its packages
@@ -1486,7 +1506,8 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
             continue
         ok &= binary_scenario(gb, cells, table, run, sc, pose, setup or (lambda mph: None), want)
     # --only: the scenarios that ran still owe their own `need` (P9: the R rows' counters)
-    owed = [k for k in need if k not in na_owns]     # M8: a counter only an N/A scenario raises is not owed
+    na_owns = set(unowed(need, [s["name"].split()[0] for s in scen], set(nas), declared))
+    owed = [k for k in need if k not in na_owns]     # M8: a counter only N/A scenarios raise is not owed
     if nas:
         print("\nN/A on %s: %d -- %s; counters no longer owed: %s"
               % (dsim.mapname, len(nas), " ".join(nas), sorted(set(need) - set(owed)) or "none"))

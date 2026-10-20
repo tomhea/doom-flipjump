@@ -658,7 +658,10 @@ def _cworld():
     ws.p_owned[gd.WP_SHOTGUN] = ws.p_owned[gd.WP_CHAINSAW] = ws.p_owned[gd.WP_MISSILE] = 1
     ws.p_owned[gd.WP_CHAINGUN] = ws.p_owned[gd.WP_PLASMA] = 1
     ws.p_ammo[gd.AM_SHELL], ws.p_ammo[gd.AM_CLIP], ws.p_ammo[gd.AM_MISL] = 4, 30, 3
-    ws.p_ammo[gd.AM_CELL] = 60                          # the rifle runs dry inside the script
+    # the rifle runs dry inside the script: the script fires 55 (60 left 5 and never ran dry). 55, not fewer: the
+    # auto-switch TO the rifle at tic 665 (P_CheckAmmo's rifle first, the pref_norifle control) needs cells left
+    # then; 55 runs dry at tic 686 and the pistol is picked (<= 53 dries by tic 556 and loses the tic-665 switch)
+    ws.p_ammo[gd.AM_CELL] = 55
     return w
 
 

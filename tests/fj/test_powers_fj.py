@@ -603,7 +603,10 @@ def _hs_shadow(tmp_path, name, mut, monkeypatch):
         ww.ws.p_invis = rec["inv"]
         return orig_apply(ww, rec, log)
     monkeypatch.setattr(HS, "_apply", apply)
-    monkeypatch.setattr(HS, "N", 100)                     # E1M3 holds 152 slots (E1M1 53): fewer records
+    # E1M3 holds 152 slots (E1M1 53): fewer records than E1M1's 320. 120, not 100: the model gives 17 bullets at an
+    # invisible live player in the first 100 (~19 expected: 0.45 x 2/3 x 3/4 x 0.85), 22 in 120 -- the stream is
+    # prefix-stable, so the first 100 records are unchanged
+    monkeypatch.setattr(HS, "N", 120)
     rnd = random.Random(0xC64)
     records = HS._records(w)
     for rec in records:
@@ -719,7 +722,10 @@ def _tg_script(TG):
     for f in range(TG_FRAMES):
         px += rnd.randint(-30, 30)
         py += rnd.randint(-30, 30)
-        seen = set(rnd.sample(awake, min(6, len(awake))))
+        # 24 seen, not test_monster_target_fj's 6: A_Chase decides a missile only at movecount 0 and after
+        # P_CheckMissileRange's roll, so 6 of E1M3's ~40 awake gave 1 decision at the invisible player in 50 frames
+        # (24: 7 decisions, 16 bullets)
+        seen = set(rnd.sample(awake, min(24, len(awake))))
         inv = 2100 - f if 10 <= f < 100 else 0
         rec = (((px << 16) | rnd.randrange(1 << 16)) & M32, ((py << 16) | rnd.randrange(1 << 16)) & M32,
                rnd.randrange(1 << 32), 0, seen, set(), inv)

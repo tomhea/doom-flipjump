@@ -186,12 +186,14 @@ def slot_index(name: str) -> int:
 READY_WEAPON = "PISGA0"        # P4.0 draws the ready pistol; P4.1's weapon state machine picks the frame
 
 
-def game_hud_parts(rm, asset_wad, sprite_wad, sectors, cards: Sequence[str] = (), shadow: bool = False) -> dict:
+def game_hud_parts(rm, asset_wad, sprite_wad, sectors, cards: Sequence[str] = (), shadow: bool = False,
+                   plasma: bool = False) -> dict:
     """everything the game tier's emitter splices in: `decls` (state cells), `restart` (NEW GAME's values), `menu` (the
     line every menu frame runs: the bar is redrawn after it) and `tail` (the world frame's weapon and bar, before
     `frame_end`). ONE colormap row lights the weapon on every sector of the map (asserted: a map with darker sectors
     needs the row chosen at runtime, which P4.0 does not emit). M8 F4: `cards` -- the map's extra key icons
-    (lootcode.hud_cards: "yellow" / "red"; E1M1 none), slots after every other one."""
+    (lootcode.hud_cards: "yellow" / "red"; E1M1 none), slots after every other one. M8 C6: `plasma` -- the map's rifle
+    (combat.plasma_on): its frames PLSGA0 / PLSGB0 and flashes PLSFA0 / PLSFB0 join the overlays (none elsewhere)."""
     palette = bytes(b for rgb in asset_wad.playpal(0) for b in rgb)
     colours = hud.bar_colours(palette)
     rows = {hud.psprite_light_row(rm, s.light) for s in sectors}
@@ -204,7 +206,7 @@ def game_hud_parts(rm, asset_wad, sprite_wad, sectors, cards: Sequence[str] = ()
 
     def cols(lump):
         return hud.psprite_columns(sprite_wad.get_data(lump), view_w=rm.cfg.VIEW_W, view_rows=rm.cfg.VIEW_H)
-    overlay = ([cols(lump) for lump in WC.overlay_frames()], [cols(lump) for lump in WC.flash_frames()])
+    overlay = ([cols(lump) for lump in WC.overlay_frames(plasma=plasma)], [cols(lump) for lump in WC.flash_frames(plasma)])
     from doomfj.wall_renderer import PLAYER_MODE
     from doomfj.world import player_mortal
     # M8 C6 (`shadow`, a map holding partial invisibility): the shadow weapon's frames (hud.shadow_columns)

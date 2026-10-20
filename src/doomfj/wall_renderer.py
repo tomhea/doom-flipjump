@@ -651,6 +651,25 @@ def dual_gate_lines(dc, open_lbl: str, solid_lbl: str) -> list:
     return [f"    hex.if0 1, {dc}, {solid_lbl}"]
 
 
+def standalone_scratch_decls(plasma: bool = False) -> list:
+    """STANDALONE_SCRATCH_DECLS for a map (M8 C6: with the plasma rifle, key 6's held flag `kb_w6` -- persisted through
+    build._map_persist -- and `kb_now` one nibble wider); E1M1's list itself when off"""
+    if not plasma:
+        return STANDALONE_SCRATCH_DECLS
+    out = [_keyboard.now_decl(True) if d == _keyboard.NOW_DECL else d for d in STANDALONE_SCRATCH_DECLS]
+    return out + ["kb_w6: hex.vec 1, 0"]
+
+
+def plasma_game_on(map_wad, mapname: str) -> bool:
+    """M8 C6: the game tier of this map has the PLASMA RIFLE -- the map holds one (combat.plasma_on) and the tier's modes
+    fire the player's missiles (the loot player, knockback and infighting: monstercode.p31_parts' `rockets`). ONE rule:
+    the emitter's `_PLASMA` (with the menu) and build._map_persist's kb_w6"""
+    from doomfj.combat import plasma_on
+    from doomfj import world as W
+    return bool(plasma_on(map_wad.things(mapname)) and _lootcode.loot_on(PLAYER_MODE)
+                and W.knockback_on(PLAYER_MODE, MONSTER_MODE) and W.infighting_on(MONSTER_MODE))
+
+
 def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0, hud=(),
                   monsters=None, nmobile=0, skill_extra=None, nfs=1, list_bits=8, nfloor=0) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
@@ -968,15 +987,19 @@ def _p5_model_asserts(p31, proj, hrt) -> None:
     if fog:
         names.update({s: 234 + i for i, s in enumerate(
             ("S_TFOG", "S_TFOG01", "S_TFOG02") + tuple("S_TFOG%d" % k for k in range(2, 11)))})
+    plasma = bool(p31.get("plasma"))             # M8 C6: the player's plasma ball shares the fireballs' pool
+    if plasma:                                   # the raise states' GHOST indices (gamedata.STATE_GHOSTS)
+        names.update({"S_PLASBALL": 0x8E, "S_PLASBALL2": 0xAB, "S_PLASEXP": 0xAC, "S_PLASEXP2": 0xAD,
+                      "S_PLASEXP3": 0xAE, "S_PLASEXP4": 0xAF, "S_PLASEXP5": 0xC5})
     assert {s: gd.THING_STATE_INDEX[s] for s in names} == names, "the pool states' GAMEDATA indices moved"
-    assert sorted(gd.THING_STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets, fog, missile)) == sorted(
+    assert sorted(gd.THING_STATE_INDEX[s] for s in projcode.pool_states(puffs, rockets, fog, missile, plasma)) == sorted(
         names.values())
     assert (FIREBALL_INFO.spawnstate, FIREBALL_INFO.deathstate) == ("S_TBALL1", "S_TBALLX1")
     mv = p31["mob_view"]
     assert sorted(mv) == sorted(names.values()), sorted(mv)
     rows, nt = p31["view_rows"], len(p31["rt_slot"])
     by_lump = {}
-    for s in projcode.pool_states(puffs, rockets, fog, missile):
+    for s in projcode.pool_states(puffs, rockets, fog, missile, plasma):
         row = mv[gd.THING_STATE_INDEX[s]]
         assert p31["mob_first"] <= row < nt + len(rows), (s, row)
         by_lump.setdefault(mobile_lump(s), set()).add(row)
@@ -1003,7 +1026,7 @@ def _skill_dispatch(prefix: str) -> list:
 
 
 def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), stats=None, automap=None,
-                cold=None) -> list:
+                cold=None, plasma: bool = False) -> list:
     """M3 — the MENU frames, and the branch that chooses them.
 
     A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
@@ -1094,7 +1117,8 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
         *by_live("mf_mainh", "menu_frame_help", MENU_HELP_ITEM),
         "mf_help:",
         help_fj(cfg.W, cfg.H, colours, label="menu_help", end_marker=False,
-                **({"automap": True} if automap is not None else {})),      # M8: the help lists M
+                **({"automap": True} if automap is not None else {}),       # M8: the help lists M
+                **({"plasma": True} if plasma else {})),                    # M8 C6: and key 6
         ";frame_end",
         "mf_mainx:",                       # P9
         *by_live("mf_mainx", "menu_frame_exit", MENU_EXIT_ITEM),
@@ -1337,7 +1361,8 @@ _HOLD_SCREENS = "%#06x" % sum(1 << v for v in range(LEVEL_DONE_HOLD_LAST, LEVEL_
 _LEVEL_DONE_MASK = "%#06x" % sum(1 << v for v in LEVEL_DONE_SCREENS)
 
 
-def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=None, automap=None, view=None) -> list:
+def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=None, automap=None, view=None,
+                       plasma: bool = False) -> list:
     """M7 P3.4 -- THE ORACLE'S PICTURE of a menu frame: what `_menu_lines` bakes for `menu_scr` =
     `scr` (and, on the skill screen, `menu_sel` = `sel`) -- the main menu on either item, the skill
     screen, LEVEL COMPLETE or the help. ONE mapping from the state to the screen, for every gate
@@ -1351,7 +1376,8 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
     the title (menu.level_done_pixels(secret=)).
     M8: `automap` -- the map's `automap.Pages` (automap.pages_for), None on a map without the page: the main menu then
     has MAP, the help lists M, and the map page (menu.MAP_SCREENS) is `automap.pixels` at `view` = (viewx, viewy),
-    16.16 -- the dot is the one picture that depends on the world; MAIN_MAP_SCR is the main menu on MAP."""
+    16.16 -- the dot is the one picture that depends on the world; MAIN_MAP_SCR is the main menu on MAP.
+    M8 C6: `plasma` -- the map has the plasma rifle (plasma_game_on): the help lists key 6."""
     from doomfj.menu import MAP_SCREENS, MENU_HALTED, help_pixels, level_done_pixels, pixels
     if scr == MENU_HALTED:
         raise ValueError("menu.MENU_HALTED: the program halted on EXIT and presents no frame")
@@ -1361,7 +1387,8 @@ def menu_screen_pixels(cfg, colours, scr: int, sel: int, live: int = 0, stats=No
         assert view is not None, "the map page's dot is the player's: pass view=(viewx, viewy)"
         return _automap.pixels(automap, *view)
     if scr in (HELP_MENU_SCR, HELP_GAME_SCR):
-        return help_pixels(cfg.W, cfg.H, colours, **({"automap": True} if automap is not None else {}))
+        return help_pixels(cfg.W, cfg.H, colours, **({"automap": True} if automap is not None else {}),
+                           **({"plasma": True} if plasma else {}))
     if scr in LEVEL_DONE_SCREENS:                  # P10: the screen and its hold
         nsecret, digits = stats[:2] if stats is not None else (0, None)
         secret = bool(stats[2]) if stats is not None and len(stats) > 2 else False     # M8 C9: the secret exit
@@ -1422,7 +1449,7 @@ def landing_drop_lines() -> list:
             "lnd_vd_end:"]
 
 
-def standalone_key_lines(polls: int = STANDALONE_POLLS, automap: bool = False) -> list:
+def standalone_key_lines(polls: int = STANDALONE_POLLS, automap: bool = False, plasma: bool = False) -> list:
     """M5 / M7 P1.5 / P9 -- the standalone frame's INPUT, alone: the menu's events and the press latch zeroed, the
     `polls` keyboard polls, the latch OR-ed with the held flags, and the key byte `pkeys` built from the latch.
     tests/fj/test_key_latch.py runs exactly these lines.
@@ -1437,13 +1464,18 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS, automap: bool = False) -
     table and parameters are frozen (rule 4) and E1M1's poll must stay what it is, so the key is read BESIDE the poll:
     each of the `polls` polls is written out (the same expansion `rep` makes) and followed by `map_key_lines`, which
     reads what the poll left -- the status nibble and the keycode byte, which kb.poll consumes into `kbstat` / `kbcode`
-    on every event and discards for a key it does not know (M is one). An idle poll pays one `if_flags`."""
+    on every event and discards for a key it does not know (M is one). An idle poll pays one `if_flags`.
+
+    M8 C6: `plasma` -- the map has the plasma rifle, so key 6 is a HELD key (keyboard.HELD_KEYS_PLASMA: `kb_w6`, the
+    14th nibble of `kb_now`), read beside each poll the same way (`w6_key_lines`). Off, the text is E1M1's."""
     from doomfj import keyboard as KB
     now = KB.now_cell
     poll = ("kb.poll kbstat, kbcode, " + "".join(f"{KB.flag(k)}, " for k in KB.HELD_KEYS) + f"{KB.KEY_NOW}, "
             "ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad")
-    if automap:
-        polls_ = ["hex.zero 1, ev_map"] + [ln for i in range(polls) for ln in [poll] + map_key_lines(f"kbm{i}")]
+    if automap or plasma:
+        polls_ = (["hex.zero 1, ev_map"] if automap else []) + [
+            ln for i in range(polls)
+            for ln in [poll] + (map_key_lines(f"kbm{i}") if automap else []) + (w6_key_lines(f"kb6{i}") if plasma else [])]
     else:
         polls_ = [f"rep({polls}, i) " + poll]
     return [
@@ -1452,10 +1484,10 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS, automap: bool = False) -
         "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
         "hex.zero 1, ev_help",                                          # M7 P3.4
         "hex.zero 1, ev_any",                                           # P10: any key's down edge
-        f"hex.zero {len(KB.HELD_KEYS)}, {KB.KEY_NOW}",                  # P9: the press latch
+        f"hex.zero {len(KB.held_keys(plasma))}, {KB.KEY_NOW}",          # P9: the press latch (M8 C6: + w6)
         # the polls (M7 P4.1: strafe, fire, 1..4; P9: the latch; P10: ev_any) -- M8: each read for M after it
         *polls_,
-        *KB.now_lines(),                                                # P9: kb_now |= the held flags
+        *KB.now_lines(plasma=plasma),                                   # P9: kb_now |= the held flags
         # the frame's keys -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
         "hex.zero 2, pkeys",
@@ -1472,6 +1504,21 @@ def standalone_key_lines(polls: int = STANDALONE_POLLS, automap: bool = False) -
     ]
 
 
+def w6_key_lines(p: str) -> list:
+    """M8 C6: after ONE kb.poll on a plasma map -- key '6' (keyboard.W6_CODE, 0x36): its DOWN edge (status 0x9) sets the
+    held flag `kb_w6` and its `kb_now` nibble (the press latch), its UP edge (0x8) clears the held flag -- kb.poll's own
+    rule for every held key, read from what the poll left in `kbstat` / `kbcode`. Labels `<p>_*`. An idle poll (status
+    0) pays the first if_flags"""
+    from doomfj.keyboard import W6_CODE, now_cell
+    return [f"hex.if_flags kbstat, {(1 << 0x8) | (1 << 0x9):#x}, {p}_no, {p}_ev", f"{p}_ev:",
+            f"hex.if_flags kbcode + dw, 1<<{W6_CODE >> 4:#x}, {p}_no, {p}_hi",
+            f"{p}_hi:", f"hex.if_flags kbcode, 1<<{W6_CODE & 15:#x}, {p}_no, {p}_k",
+            f"{p}_k:", f"hex.if_flags kbstat, 1<<0x9, {p}_up, {p}_dn",
+            f"{p}_dn:", "hex.set 1, kb_w6, 1", f"hex.set 1, {now_cell('w6')}, 1", f";{p}_no",
+            f"{p}_up:", "hex.zero 1, kb_w6",
+            f"{p}_no:"]
+
+
 def map_key_lines(p: str) -> list:
     """M8: after ONE kb.poll -- `ev_map` = 1 when that poll delivered M's DOWN edge (status 0x9, keycode 0x6D,
     menu.MAP_KEY). Labels `<p>_*`. A poll with no event (status 0) or an up edge (0x8) costs the first if_flags"""
@@ -1486,7 +1533,8 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
                             press_miss=(), monster_tic=(), weapon=(), restart_tic=(), latch=(),
                             use_guard=((), ()), weapon_bar=(), knock_move=(), press_first=(), automap: bool = False,
-                            exit_hits=None, exit_walk: bool = False, use_edge: bool = False) -> list:
+                            exit_hits=None, exit_walk: bool = False, use_edge: bool = False,
+                            plasma: bool = False) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -1514,11 +1562,12 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     which has no exit switch): the frozen-level guard is emitted for it too (the walk's after_accept sets `lvdone`);
     `use_edge` -- the use PRESS block (`exit_lines`: the `pusedn` edge, the switch textures, the SR lifts and floor
     switches) is emitted even with no exit box (E1M8: no exit switch, its lifts still take a press).
+    M8 C6: `plasma` -- key 6.
     """
     _frozen = bool(exit_boxes_) or exit_walk
     _uses = bool(exit_boxes_) or use_edge
     return [
-        *standalone_key_lines(polls, automap),   # the polls, the press latch, the key byte (P9: factored out)
+        *standalone_key_lines(polls, automap, plasma),   # the polls, the press latch, the key byte (P9: factored out)
         *(menu or []),                     # M3: the menu frame + the branch past the world
         # M7 P7: the restart on use after death (restartcode.tic_lines) -- the world frame's START, before the
         # frozen-level guard and the door tic: the model's World.tic runs the restart, then the tic
@@ -1943,12 +1992,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P4.0 (docs/gp-combat.md section 2): the game tier's status bar and weapon overlay (doomfj.hudcode)
     from doomfj.hudcode import game_hud_parts
     # M8 F4: the map's yellow / red key icons (lootcode.hud_cards; E1M1 none) -- the loot's card cells they read
+    # M8 C6: THE PLASMA RIFLE -- on a map that holds one (combat.plasma_on: E1M6, E1M9; never E1M1 / E1M2), in the modes
+    # whose player fires the rocket (loot, knockback, infighting: p31_parts' `rockets`); asserted equal to p31_parts'
+    _PLASMA = bool(menu and plasma_game_on(map_wad, mapname))
     # M8 C6 (doomfj.powers / powercode): the map's timed powers -- the looting player's (E1M1, E1M2: none, no text)
     from doomfj.powers import INVIS_TYPE as _INVIS_T, SUIT_TYPE as _SUIT_T, map_powers as _map_powers
     _POWERS = _map_powers(map_wad.things(mapname)) if (menu and _lootcode.loot_on(PLAYER_MODE)) else ()
     _hud = game_hud_parts(rm, asset_wad, sprite_wad, map_wad.sectors(mapname),
                           cards=_lootcode.hud_cards(map_wad, mapname) if _lootcode.loot_on(PLAYER_MODE) else (),
-                          **({"shadow": True} if _INVIS_T in _POWERS else {})   # M8 C6: the shadow weapon
+                          **({"shadow": True} if _INVIS_T in _POWERS else {}),  # M8 C6: the shadow weapon
+                          **({"plasma": True} if _PLASMA else {})
                           ) if menu else None
     # M7 P4.1 (doomfj.weaponcode): the player's weapon, the model's "fire" mode
     from doomfj.weaponcode import weapon_parts
@@ -2644,13 +2697,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert bool(_GRK8.get("rt_rank")) == bool(_GRK8.get("exempt_barrels")) == _D3, (
             "M7 P8a (C): GAME_RENDER_KW's rt_rank / exempt_barrels must be %s at PLAYER_MODE %r (world.compositor_d3) "
             "-- flip them with the mode (reference_model.D3_RENDER_KW)" % (_D3, PLAYER_MODE))
+    assert bool(_p31 and _p31.get("plasma")) == _PLASMA, "M8 C6: p31_parts' plasma ball and the emitter's disagree"
     # M8 C3 (doomfj.shotcode): the GR 46 shot lines -- recorded by the picture into the aim window, pressed by a gun's
     # shot. Only where the aim window is (`_AIM`) and the doors run; [] / {} on E1M1 and E1M2: no text anywhere
     _shot_spec = (_shotcode.shot_specs(secs, lds, sds, _SWI) if (_AIM and _dst_tbl and player_sim) else [])
     _shot_k = ({li_: k_ for k_, (li_, _t) in enumerate(_doors.shot_lines(secs, lds, sds))} if _shot_spec else {})
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
-                        loot=_LOOT, shots=_shot_spec or None) if menu else None   # M7 P6+P7: the latch, berserk ...
+                        loot=_LOOT, shots=_shot_spec or None, plasma=_PLASMA) if menu else None   # M7 P6+P7: the latch, berserk ...
     # P9: the loot weapon's A_FireMissile calls the pool's rk_spawn -- p31_parts emits the rocket with the loot player
     assert not _LOOT or bool(_p31 and _p31.get("rockets")), (
         "P9: the loot player's launcher fires rk_spawn, which p31_parts emits only with knockback and infighting")
@@ -3689,7 +3743,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 drop_take=lambda k_: [f"    stl.fcall drop_take{k_}, drt_ret"],
                 # M7 P8a (package K): a corpse slides away from its drop -- the pickup reads the drop's own row
                 **({"drop_rt": [_bar["drop_first"] + k_ for k_ in range(_bar["ndrop"])]} if _KNOCK else {}),
-                **({"stats": True} if _STATS else {}))      # P10: the items counted, the secrets checked
+                **({"stats": True} if _STATS else {}),      # P10: the items counted, the secrets checked
+                **({"plasma": True} if _PLASMA else {}))    # M8 C6: the rifle's give, the cells' switch
             assert _loot["slots"] == _loot_slots and _loot["extra_vis"] == _LOOT_EXTRA_VIS
             from doomfj.build import LOOT_PERSIST as _LOOT_PERSIST
             assert set(_loot["persist"]) <= set(_LOOT_PERSIST), "M7 P6: build.LOOT_PERSIST lacks lootcode's cells"
@@ -3887,6 +3942,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                restart=_restart,
                                stats=_p31["world"] if _STATS else None,     # P10: LEVEL COMPLETE's numbers
                                automap=_AUTOMAP, cold=_am_cold,             # M8: the map page (None: E1M1)
+                               plasma=_PLASMA,                              # M8 C6: the help's key 6
                                # M7 P5: a menu frame shows PLAYPAL 0 (hurtcode.pal_menu_lines: sent only on a change)
                                hud=(list(_hud["menu"]) + (list(_hrt["menu_palette"]) if _hrt else []))
                                if _hud else ())
@@ -3924,6 +3980,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   # M7 P8a: the player's knock move (doomfj.knockcode's splice point, package K)
                                   knock_move=_knockcode.player_move_lines() if _KNOCK else (),
                                   automap=_AUTOMAP is not None,              # M8: the polls read M
+                                  plasma=_PLASMA,                            # M8 C6: and key 6
                                   latch=_loot["latch"] if _loot else (),
                                   use_guard=_loot["use_guard"] if _loot else ((), ()),
                                   door_lines=_door_tic,
@@ -4361,7 +4418,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             ["wmagic: hex.vec 2", "pkeys: hex.vec 2"]),
           # M5: the keyboard poll's scratch, and the four PERSISTENT held-key flags. The flags are
           # the only cells besides the view state that the M1 reset must leave alone.
-          *(STANDALONE_SCRATCH_DECLS if standalone else []),
+          *(standalone_scratch_decls(_PLASMA) if standalone else []),     # M8 C6: kb_w6, a 14-nibble kb_now
           *(_scrollcode.DECLS if _scroll_on else []),       # M8: the scrolling wall's wnoff save / slide
           # M8: the map page's state and scratch (doomfj.automap), on a map that has it
           *((AUTOMAP_STATE_DECLS + _automap.decls(_AUTOMAP)) if (standalone and _AUTOMAP is not None) else []),
@@ -5317,13 +5374,18 @@ BARREL_TYPE = 2035                       # M7 P6: MT_BARREL's doomednum (a baked
 # the barrels (they explode) and what the monsters' attacks spawn (P3-P5 draw them)
 ANIM_ACTORS = ("MT_BARREL", "MT_TROOPSHOT", "MT_PUFF", "MT_BLOOD",
                "MT_ROCKET")                                   # P9: the player's rocket (MISLA5, MISLB0 .. D0)
+# M8 C6: the plasma ball (PLSSA0 / PLSSB0, PLSEA0 .. E0) -- on a map with the rifle alone (combat.plasma_on: G6, a map
+# without a 2004 carries none of its words)
+PLASMA_ACTORS = ("MT_PLASMA",)
 
 
 def anim_frames(map_wad, mapname) -> dict:
     """{sprite: sorted frame indices} for every state the map's monster types and ANIM_ACTORS can
     reach from their entry states (gamedata's state chains, `next` followed to the end). M8: + MT_TFOG's on a map
-    with a WR teleport line (the teleport fog: doomfj.teleport) -- none on E1M1"""
+    with a WR teleport line (the teleport fog: doomfj.teleport) -- none on E1M1. M8 C6: + MT_PLASMA's on a map with
+    the plasma rifle (combat.plasma_on) -- none on E1M1 or E1M2"""
     from doomfj import gamedata as gd
+    from doomfj.combat import plasma_on
     from doomfj.teleport import TELEPORT_SPECIALS
     types = {t.type for t in map_wad.things(mapname) if t.type in MONSTER_TYPES}
     actors = ANIM_ACTORS + (("MT_TFOG",) if any(ld.special in TELEPORT_SPECIALS
@@ -5336,6 +5398,7 @@ def anim_frames(map_wad, mapname) -> dict:
     if missiles and "MT_TROOPSHOT" not in missiles:
         actors = tuple(a for a in actors if a != "MT_TROOPSHOT")
     actors += tuple(sorted(missiles - set(ANIM_ACTORS)))
+    actors += PLASMA_ACTORS if plasma_on(map_wad.things(mapname)) else ()
     out: dict = {}
     for name, mi in sorted(gd.MOBJINFO.items()):
         if mi.doomednum not in types and name not in actors:

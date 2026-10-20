@@ -368,6 +368,9 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     fight = loot and _fight_on(mode)           # M7 P8a I: monsters fight monsters (monsterdecide's fight parts)
     # P9 (the owner, 2026-10-10): THE PLAYER'S ROCKET -- in the pool, meeting things (fight), carrying its z (knock)
     rockets = fight and knock
+    # M8 C6: THE PLAYER'S PLASMA BALL -- on a map with the rifle (combat.plasma_on), riding the rocket's paths
+    from doomfj.combat import plasma_on
+    plasma = rockets and plasma_on(map_wad.things(mapname))
     # M8 (doomfj.teleport's TELEPORT FOG): a map with a WR teleport line draws MT_TFOG from the effects pool -- the
     # tier's teleports' own rule (`tele`, below: loot, chase and the lines), asserted equal there
     from doomfj.teleport import TELEPORT_SPECIALS
@@ -379,7 +382,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     mob_rows, mob_view = (mobile_view_rows(rm, sprite_wad, anim_index, spr_near=spr_near, cache=cache,
                                            first=mob_first, puffs=loot, rockets=rockets,
                                            **({"fog": True} if fog else {}),
-                                           **({"missile": _missile} if _missile else {})) if nmob else ([], {}))
+                                           **({"missile": _missile} if _missile else {}),
+                                           **({"plasma": True} if plasma else {})) if nmob else ([], {}))
     rows = rows + mob_rows
     drop_row, bar_view, bar_rows = {}, {}, []
     if loot:
@@ -627,6 +631,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                                                **({"fight": True, "slot_rt": [slot_t[m] for m in range(nmon)]}
                                                   if fight else {}),       # M7 P8a I: things stop it
                                                **({"rockets": True} if rockets else {}),   # P9: the rocket
+                                               **({"plasma": True} if plasma else {}),     # M8 C6: the ball
                                                **({"fog": True} if tele else {}),         # M8: the teleport fog
                                                **({"list_bits": list_bits} if list_bits != 8 else {}))   # M8 F1.5
                     extra["proj"]["nt"] = nt
@@ -655,6 +660,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         extra["tele"] = True           # M8 L4: the emitter asserts its own `_TELE` agrees
     if rockets:
         extra["rockets"] = True        # P9: the weapon's A_FireMissile calls rk_spawn (the emitter asserts it)
+    if plasma:
+        extra["plasma"] = True         # M8 C6: the weapon's A_FirePlasma calls pl_spawn (the emitter asserts it)
     if d3:
         # M7 P8a (C): the emitter asserts its own `_D3` agrees, passes `rank0` to sim.thing_pass_depth (D3 a) and the
         # scenery soft flag to frame.thing_record_body (D3 b). The rank rides bit 15 of the aprox key: every key the
@@ -708,7 +715,7 @@ def boss_slots(w) -> dict:
 
 # ---- M7 P5: the MOBILES' rows (docs/gp-p5-interface.md, THE MOBILE ROWS) ---------------------------------------
 def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict, first: int, puffs: bool = False,
-                     rockets: bool = False, fog: bool = False, missile: str = None):
+                     rockets: bool = False, fog: bool = False, missile: str = None, plasma: bool = False):
     """-> (rows, {state index: row}): one thing row per distinct mobile LUMP (`monsters.mobile_lump` of every pool
     state, projcode.pool_states' order), `things.thing_rows`' layout -- how the oracle draws a mobile
     (reference_model.render_wall_frame(mobiles=)), field by field:
@@ -726,14 +733,15 @@ def mobile_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
     puff's states too (projcode.pool_states(puffs=True)), PUFFA0 .. PUFFD0 at MISSILE_Z as blood. P9 (`rockets`): the
     rocket's states -- MISLA5 in flight (monsters.MOBILE_ROTATION: one fixed rotation, never mirrored), MISLB0 .. MISLD0
     exploding -- at MISSILE_Z as the fireball. M8 (`fog`, a map with a WR teleport): the TELEPORT FOG's states,
-    TFOGA0 .. TFOGJ0, ON the floor (z 0: reference_model.FLOOR_EFFECTS -- an actor still, not a drop)."""
+    TFOGA0 .. TFOGJ0, ON the floor (z 0: reference_model.FLOOR_EFFECTS -- an actor still, not a drop). M8 C6 (`plasma`, a
+    map with the rifle): the PLASMA BALL's PLSSA0 / PLSSB0 in flight and PLSEA0 .. PLSEE0 exploding, at MISSILE_Z, last."""
     from doomfj.monsters import mobile_lump, mobile_view
     from doomfj.projcode import pool_states
     from doomfj.reference_model import (FLOOR_EFFECTS, GAME_RENDER_KW, MIN_SPRITE_H, MIN_SPRITE_H_MONSTER,
                                         MISSILE_Z)
     actor = bool(GAME_RENDER_KW.get("exempt_actors"))
     rows, lump_row, by_state = [], {}, {}
-    for s in pool_states(puffs, rockets, fog, missile):         # M8 C8: the map's monster missile (projcode)
+    for s in pool_states(puffs, rockets, fog, missile, plasma):  # M8 C8: the map's monster missile; C6: the ball
         lump = mobile_lump(s)
         if lump not in lump_row:
             sprite, letter, rot = mobile_view(s)

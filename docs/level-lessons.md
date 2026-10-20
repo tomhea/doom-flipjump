@@ -165,6 +165,19 @@ The REFUSED segs mirror `_seg_dual_cell`'s asserts from the model's tables (the 
 `mover_secs` calls as the emitter); E1M1 and E1M2 (both emit) show none. The prediction on E1M3..E1M9 is not yet
 confirmed by an emission (each map's World refuses first).
 
+## 4b. C6 (the plasma rifle, branch `m8-plasma`): what the rifle paid for
+
+| # | what happened | evidence | where it lives now |
+|---|---|---|---|
+| C6-1 | THE STATE BYTE WAS FULL: 246 states held 0..245 of the one byte every state cell is; the rifle's 15 had no index. They took the unreachable RAISE states' (only the Arch-vile enters them) as GHOSTS: the ghost keeps its index and row for the tables built from names (E1M1's monster table unchanged), `STATE_NAMES` decodes the live plasma state. 5 raise indices + 9 past the table remain -- the Baron needs 27, the lost soul 16 | `gamedata.STATE_GHOSTS` | SURVEY **NEW** "the state byte" (OVER on E1M6 / E1M7 16, E1M8 27); TEST `test_plasma_model.py` (every table domain injective; control: a plasma state on its domain's live index) and `test_plasma_survey.py` (control: the ghosts handed back) |
+| C6-2 | info.c's S_PLASMA2 lasts 20 tics, past the tics nibble (MAX_FINITE_TICS 14): split into S_PLASMA2 (10, A_ReFire) + S_PLASMA2B (10) -- the same picture and timing | `gamedata.check_integrity` refused the row | `check_integrity` (tics); TEST `test_plasma_model.py` (a released trigger waits 20 tics) |
+| C6-3 | kb.poll's table and parameters are frozen (rule 4): a new held key is read BESIDE the poll (`wall_renderer.w6_key_lines`, as the map page's M), its latch the 14th nibble of `kb_now` | wall_renderer.standalone_key_lines | TEST `tests/fj/test_plasma_fj.py` E (controls: the up edge kept, no latch, the 14th nibble never zeroed) |
+| C6-4 | a per-map feature must not touch E1M1's SCHEMA: `kb_w6` exists only where `combat.plasma_on` (Layout.plasma), so every frozen digest keeps its fields | `world.build_schema` | TEST `test_plasma_model.py` (E1M1's schema: kb_w5 then px) |
+| C6-5 | G6: the sprites a feature adds must ride the map's rule -- MT_PLASMA's anim lumps only where plasma_on (36,864 words on E1M6 / E1M9; the rifle's psprite overlays PLSG / PLSF ~126K words more, measured assembled alone) | `wall_renderer.PLASMA_ACTORS` | TEST `test_plasma_survey.py` (control: the rule forced on, E1M1 carries them) |
+| C6-6 | a player's missile in a big room: a held trigger spawns a ball every 3 tics (~0.67 a frame) into the 8-slot pool the imps share -- the pool fills and balls (and imp fireballs) fizzle; a ball that leaves the map (the harness's flickering doors let some through) holds its slot until its 16.16 position wraps | tests/fj/test_plasma_fj.py A's records | PROSE ONLY: a pool size per map is a schema / runtime-id decision (C1 counts the pool's ids) |
+| C6-7 | gates on a plasma map need the map's rifle passed in: `hud.GameScreen(plasma=)`, `menu_screen_pixels(plasma=)` (the help's 6 cap), `keyboard.BINDING_PLASMA` (0x36), probe's `kb_w6` (OPTIONAL_GROUPS / KEYFLAG) | `wall_renderer.plasma_game_on` | GATE (the gate tools, when E1M6 / E1M9 build) |
+| C6-8 | E1M8's cell pack 17 had no sprite art (L17's row) | `reference_model.THING_SPRITE` | 17 -> CELP, vanishable; SURVEY "World things with sprite art" OK on E1M8 (TEST `test_plasma_survey.py`) |
+
 ## 5. Adding a lesson
 
 A new mistake gets a row here in the commit that fixes it: what happened, the evidence (commit / PR / doc), and where it

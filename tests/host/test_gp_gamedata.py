@@ -14,7 +14,7 @@ def test_the_state_graph_is_closed_and_every_action_is_known():
     assert gd.STATE_NAMES[0] == gd.S_NULL and gd.STATE_INDEX[gd.S_NULL] == 0
     assert len(gd.STATE_NAMES) <= 255              # a state cell is one byte (M8 C8: the core index)
     # M8 C8: the extension states have a THING-domain index, one byte too, borrowed from weapon-only states
-    assert set(gd.STATES) == set(gd.STATE_NAMES) | set(gd.EXT_STATE_NAMES)
+    assert set(gd.STATES) == set(gd.STATE_NAMES) | set(gd.EXT_STATE_NAMES) | set(gd.STATE_GHOSTS)   # M8 C6: + the ghosts
     assert max(gd.THING_STATE_INDEX.values()) < 256 and gd.check_thing_aliases() == []
     for st in gd.STATES.values():
         assert st.action is None or st.action in gd.ACTIONS

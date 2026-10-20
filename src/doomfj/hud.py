@@ -374,16 +374,18 @@ class GameScreen:
     frame builds one of these and passes the view through `frame` (ONE composition, R6). The weapon and its light row
     are `hudcode.game_hud_parts`' choices (the same frame, the same single row), read from there."""
 
-    def __init__(self, rm, asset_wad, sprite_wad, sectors):
+    def __init__(self, rm, asset_wad, sprite_wad, sectors, plasma: bool = False):
         from doomfj import hudcode
         assert rm.cfg.VIEW_H == VIEW_ROWS, ("the game screen needs the game tier's 84-row config "
                                            "(config.GAME_CFG), not %d rows" % rm.cfg.VIEW_H)
         from doomfj import weaponcode as WC
-        parts = hudcode.game_hud_parts(rm, asset_wad, sprite_wad, sectors)
+        # M8 C6: `plasma` -- a map with the rifle (combat.plasma_on): its psprites join the overlays
+        parts = hudcode.game_hud_parts(rm, asset_wad, sprite_wad, sectors, plasma=plasma)
         self.cfg = rm.cfg
         self.colours, self.row = parts["colours"], parts["colormap_row"]
         weapons, flashes = parts["overlay"]
-        self.overlays = dict(zip(WC.overlay_frames(), weapons)) | dict(zip(WC.flash_frames(), flashes))
+        self.overlays = (dict(zip(WC.overlay_frames(plasma=plasma), weapons))
+                         | dict(zip(WC.flash_frames(plasma), flashes)))
         # M8 C6: the shadow weapon (partial invisibility) -- the same frames, stippled and darkened (shadow_columns)
         self.shadows = {k: shadow_columns(v) for k, v in self.overlays.items()}
         self.shadow_row = shadow_row(asset_wad.colormap(), self.row)

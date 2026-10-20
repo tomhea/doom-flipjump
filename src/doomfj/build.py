@@ -69,6 +69,9 @@ STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
 # -- the menu's own memory, persisted for the reason `menu_scr` is: a page that reset every frame could never be left.
 # Registered and persisted through the map's `extra` names (`automap_persist`), as F1.2's map cells are.
 AUTOMAP_PERSIST = ("amap",)
+# M8 C6: key 6's held flag `kb_w6` on a map with the plasma rifle (wall_renderer.plasma_game_on) -- a held key, persisted
+# for the reason kb_w5 is (STANDALONE_PERSIST), through the map's `extra` names
+PLASMA_PERSIST = ("kb_w6",)
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it
@@ -220,11 +223,13 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
     from doomfj.teleportcode import map_persist as _tele_persist
     from doomfj.exitcode import map_persist as _exit_persist
     from doomfj.powercode import map_persist as _power_persist
+    from doomfj.wall_renderer import plasma_game_on
     return (map_persist(wad, mapname) + card_persist(wad, mapname) + _tele_persist(wad, mapname)
             + _light_persist(wad, mapname)
             + _switch_persist(wad, mapname)
             + _exit_persist(wad, mapname)                   # M8 C9: lvsec on a map with a secret exit
-            + _power_persist(wad, mapname))                 # M8 C6: the timed powers
+            + _power_persist(wad, mapname)                  # M8 C6: the timed powers
+            + (PLASMA_PERSIST if plasma_game_on(wad, mapname) else ()))   # M8 C6: key 6's held flag
 
 
 def automap_persist(cfg, menu: bool) -> tuple:

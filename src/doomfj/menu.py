@@ -260,6 +260,9 @@ HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEF
 MAP_KEY = 0x6D                                              # 'm' (pygame_window's SDL code; automap.AUTOMAP_KEY)
 HELP_MAP_ITEM = (("M",), ("MAP",))
 HELP_MAP_KEYCODE = {"M": MAP_KEY}
+# M8 C6: on a map with the PLASMA RIFLE (combat.plasma_on) the weapons item lists key 6 too ("1 .. 6 WEAPONS"), and its
+# keycode joins the table there only -- a map without the rifle lists no key that does nothing
+HELP_PLASMA_KEYCODE = {"6": 0x36}
 # THE GEOMETRY, px. A cap is a 1-px box in the credit's dim gray with 1 px of padding round its
 # legend, the legend centred; every cap of a cluster is as wide as its widest legend's cap (all 9: W and the arrows
 # are five columns), and each cap of a key row fits its own legend.
@@ -292,23 +295,29 @@ HELP_ITEM_GAP = 8                        # the least gutter between a row's firs
 HELP_LINE_PITCH = HELP_TEXT_H + 1        # one description line to the next
 
 
-def help_rows(automap: bool = False) -> tuple:
+def help_rows(automap: bool = False, plasma: bool = False) -> tuple:
     """the help's key rows: HELP_ROWS, and M8's MAP item after the last row's (`HELP_MAP_ITEM`) on a map with the map
-    page"""
+    page; M8 C6: key 6 after the weapons' 5 on a map with the plasma rifle"""
+    rows = HELP_ROWS
+    if plasma:
+        (keys, lines), *rest = rows[1]
+        assert keys[-1] == "5", keys
+        rows = rows[:1] + ((((*keys, "6"), lines), *rest),) + rows[2:]
     if not automap:
-        return HELP_ROWS
-    return HELP_ROWS[:-1] + (HELP_ROWS[-1] + (HELP_MAP_ITEM,),)
+        return rows
+    return rows[:-1] + (rows[-1] + (HELP_MAP_ITEM,),)
 
 
-def help_keycodes(automap: bool = False) -> dict:
-    """the keycode of every key the help shows (HELP_KEYCODES; M8: and M's on a map with the map page)"""
-    return {**HELP_KEYCODES, **(HELP_MAP_KEYCODE if automap else {})}
+def help_keycodes(automap: bool = False, plasma: bool = False) -> dict:
+    """the keycode of every key the help shows (HELP_KEYCODES; M8: and M's on a map with the map page; M8 C6: and 6's
+    on a map with the plasma rifle)"""
+    return {**HELP_KEYCODES, **(HELP_MAP_KEYCODE if automap else {}), **(HELP_PLASMA_KEYCODE if plasma else {})}
 
 
-def help_key_names(automap: bool = False) -> list:
+def help_key_names(automap: bool = False, plasma: bool = False) -> list:
     """every key name the help screen shows, in screen order: the clusters', then the rows'"""
     return ([k for cluster in HELP_CLUSTERS for k in cluster]
-            + [k for row in help_rows(automap) for keys, _lines in row for k in keys])
+            + [k for row in help_rows(automap, plasma) for keys, _lines in row for k in keys])
 
 
 def help_cap_legend(key: str) -> str:
@@ -337,7 +346,7 @@ def _help_item_width(keys, lines) -> int:
     return caps + HELP_DESC_GAP + max(help_text_width(line) for line in lines)
 
 
-def help_layout(width, height, automap: bool = False) -> tuple:
+def help_layout(width, height, automap: bool = False, plasma: bool = False) -> tuple:
     """THE help screen's layout: `(caps, texts)` -- `caps` the keycaps as `(key, x, y, w)`, each an
     outer box HELP_CAP_H high; `texts` every string drawn, as `(label, x, y, role)`, role
     "title" (the highlight colour, the 5x7 font) or "text" (the text colour, HELP_FONT), the caps' legends among them.
@@ -351,7 +360,7 @@ def help_layout(width, height, automap: bool = False) -> tuple:
     caps).
 
     M8: `automap` -- the rows are `help_rows(automap)`: on a map with the map page, the last row's third item is M MAP"""
-    rows_ = help_rows(automap)
+    rows_ = help_rows(automap, plasma)                  # M8 C6: `plasma` -- the weapons' key 6
     caps, texts = [], [(HELP_TITLE, (width - help_text_width(HELP_TITLE, "title")) // 2, HELP_TITLE_Y, "title")]
 
     def cap(key, x, y, w):
@@ -412,7 +421,7 @@ def _draw_box(out, width, x0, y0, w, h, ink):
         out[y * width + x0] = out[y * width + x0 + w - 1] = ink
 
 
-def _help_bitmap(width, height, colours, automap: bool = False):
+def _help_bitmap(width, height, colours, automap: bool = False, plasma: bool = False):
     """The help screen as a width*height list of palette indices -- THE picture, for both mirrors:
     `help_layout` drawn -- the caps' boxes in the credit's dim gray, the title in the highlight
     colour, every other string (the caps' legends among them) in the text colour -- and the credit.
@@ -420,7 +429,7 @@ def _help_bitmap(width, height, colours, automap: bool = False):
     bottom-right and the H cap reaches as low on the left, so a whole-row rule would be wrong)."""
     background, text, highlight, credit = colours
     out = [background] * (width * height)
-    caps, texts = help_layout(width, height, automap)
+    caps, texts = help_layout(width, height, automap, plasma)
     for _key, x, y, w in caps:
         _draw_box(out, width, x, y, w, HELP_CAP_H, credit)
     for label, x, y, role in texts:
@@ -433,19 +442,21 @@ def _help_bitmap(width, height, colours, automap: bool = False):
     return out
 
 
-def help_pixels(width, height, colours, automap: bool = False):
-    """What the ORACLE expects on screen while the help is up (M8: `automap` -- the map's M MAP item)."""
-    return _help_bitmap(width, height, colours, automap)
+def help_pixels(width, height, colours, automap: bool = False, plasma: bool = False):
+    """What the ORACLE expects on screen while the help is up (M8: `automap` -- the map's M MAP item; M8 C6: `plasma`
+    -- the rifle's key 6)."""
+    return _help_bitmap(width, height, colours, automap, plasma)
 
 
-def help_stream(width, height, colours, automap: bool = False) -> bytes:
+def help_stream(width, height, colours, automap: bool = False, plasma: bool = False) -> bytes:
     """The 0x0B frame that paints exactly `help_pixels()` -- `stream()`'s encoder."""
-    return _encode(_help_bitmap(width, height, colours, automap), width, height)
+    return _encode(_help_bitmap(width, height, colours, automap, plasma), width, height)
 
 
-def help_fj(width, height, colours, label: str = "menu_help", end_marker: bool = True, automap: bool = False) -> str:
+def help_fj(width, height, colours, label: str = "menu_help", end_marker: bool = True, automap: bool = False,
+            plasma: bool = False) -> str:
     """The baked help frame as fj -- `fj()`'s shape: one `stl.output_char` per stream byte."""
-    return _fj_text(help_stream(width, height, colours, automap), label, end_marker,
+    return _fj_text(help_stream(width, height, colours, automap, plasma), label, end_marker,
                     "M7 P3.4: the baked help frame")
 
 

@@ -602,17 +602,23 @@ def mbox_decls(w) -> List[str]:
     return ["pk_mret: hex.vec w/4"] if mover_pickup_leaves(w) else []
 
 
-def _drop_leaf() -> List[str]:
+def _drop_leaf(thss_cold: bool = False) -> List[str]:
     """`pk_drop` (stl.fcall pk_drop, pk_dret): the drop of runtime row `pk_t` (its monster's thpos_rt / thss_rt row):
     its 16.16 position, its leaf's floor now (`ms_seed_leaf`: mover-aware, the model's `_floor_at`), then `pk_boxz`
-    (sim.thing_pos_read's row read)"""
+    (sim.thing_pos_read's row read).
+    M8 wave 1 (`thss_cold`, config.Config.THSS_COLD: thss_rt past the hot data block): the read arms the pointer library
+    OUTSIDE frame.arm5's window, where the in-window thss_rt left it; a full arm at `thnext` (in the window) puts it
+    back -- frame_render's rec_seen_mark re-arm, so whatever narrow arm comes next sees an in-window predecessor as
+    before (arm5 reads only the high hexes, the same anywhere in the window)"""
+    rearm = (["    hex.set w/4, pk_base, thnext", "    hex.pointers.set_flip_and_jump_pointers pk_base"]
+             if thss_cold else [])
     return ["pk_drop:",
             "    hex.zero w/4, pk_off", "    hex.mov 2, pk_off, pk_t", "    hex.shl_hex w/4, 1, pk_off",   # 16 a row
             "    hex.set w/4, pk_base, thpos_rt", "    hex.ptr_index pk_ptr, pk_base, pk_off",
             "    hex.read_hex 16, pk_pos, pk_ptr",
             "    hex.mov 8, pk_tx, pk_pos", "    hex.mov 8, pk_ty, pk_pos + 8*dw",
             "    hex.set w/4, pk_base, thss_rt", "    hex.ptr_index pk_ptr, pk_base, pk_off",
-            "    hex.zero w/4, ptss", "    hex.read_hex 3, ptss, pk_ptr",
+            "    hex.zero w/4, ptss", "    hex.read_hex 3, ptss, pk_ptr", *rearm,
             "    stl.fcall ms_seed_leaf, ms_seed_ret",
             "    hex.mov 8, pk_tz, cp_seedf",
             "    stl.fcall pk_boxz, pk_bret",
@@ -621,7 +627,7 @@ def _drop_leaf() -> List[str]:
 
 def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable = _default_rt_unlink,
                  drop_take: Callable = _default_drop_take, lists=None, drop_rt: Sequence[int] = None,
-                 stats: bool = False, plasma: bool = False) -> List[str]:
+                 stats: bool = False, plasma: bool = False, thss_cold: bool = False) -> List[str]:
     """`pk_go` (stl.fcall pk_go, pk_ret): `combat._touch_specials` at the candidate (`cpx`, `cpy`) with the floor
     `cm_hf` (the module docstring). `slots`: `pickup_slots`; `mon_rt[m]`: monster slot m's runtime thing (its
     thpos_rt / thss_rt row). `lists` overrides the cell lists (the host control's mutated grid). Jumps over itself.
@@ -676,7 +682,7 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
         out += [f"  {p}_n:"]
     out += ["pk_out:", "    stl.fret pk_ret"]
     # ---- the shared leaves and the give routines ----
-    out += _box_leaf() + _drop_leaf() + (_mbox_leaf() if mleaf else [])
+    out += _box_leaf() + _drop_leaf(thss_cold) + (_mbox_leaf() if mleaf else [])
     out += ["pk_bonus:"] + _bonus_lines("pkb") + ["    stl.fret pk_nret"]
     kinds = give_kinds(w)
     assert plasma or (2004, False) not in kinds, ("M8 C6: a plasma rifle on the map, and no rifle in the weapon code "
@@ -914,7 +920,8 @@ def use_guard() -> tuple:
 # ---- the splice ------------------------------------------------------------------------------------------------------
 def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int], cell_root: str,
                rt_unlink: Callable = _default_rt_unlink, drop_take: Callable = _default_drop_take,
-               drop_rt: Sequence[int] = None, stats: bool = False, plasma: bool = False) -> dict:
+               drop_rt: Sequence[int] = None, stats: bool = False, plasma: bool = False,
+               thss_cold: bool = False) -> dict:
     """everything package B adds to the game tier, for the World `w` (its level start; any skill):
       * `decls`: the persisted cells (p_bc, p_str, p_bp, am_misl, am_cell), p_dd0, the interfaces and scratch;
       * `tables`: amcap, nkleaf;
@@ -938,11 +945,12 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
     carry `sc_go` (statcode declares the cells: the game tier's).
     M8 F4: `decls` also declares the map's new card cells (`card_decls`: pcard_y / pcard_r, E1M1 none) and `cards`
     names them -- build._map_persist persists them, p6_restart_parts zeroes them.
-    M8 C6: `plasma` -- the tier has the rifle (wall_renderer.plasma_game_on): its give and the cells' switch to it."""
+    M8 C6: `plasma` -- the tier has the rifle (wall_renderer.plasma_game_on): its give and the cells' switch to it.
+    M8 wave 1: `thss_cold` -- thss_rt is past the hot data block (config.Config.THSS_COLD): pk_drop re-arms."""
     start = level_start(w)
     slots = pickup_slots(w, rm, map_wad, mapname, sprite_wad)
     leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt, stats=stats,
-                           plasma=plasma)
+                           plasma=plasma, **({"thss_cold": True} if thss_cold else {}))   # M8 wave 1
               + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root)
               + (_statcode.secret_lines(w, cell_root) if stats else []))
     pw = tuple(getattr(w, "powers", ()))                            # M8 C6: the map's timed powers (E1M1: none)

@@ -2619,6 +2619,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # MAP_CONFIG (the authority, as for SWITCH_TEX): 8 on E1M1 / E1M2 (every line below emits what it always did), 12
     # on a map whose runtime things + pools + drops pass 254 (the dual table, the `_w` list macros: things.list_macros)
     _LIST_BITS = map_cfg(cfg, mapname).LIST_ID_BITS
+    # M8 wave 1 (E1M4, config.Config.THSS_COLD): `thss_rt` -- 16 cells a runtime thing, 5,536 ops on E1M4 -- leaves the
+    # narrow-arm window for just past it (before `__hot_end`, the hot data block's declarations below): no arm5 reaches
+    # it, and its one game-tier pointer reader (lootcode's pk_drop) re-arms into the window after it. The game tier
+    # only (the hosted tiers' sim.bind_things reads it too); E1M1 / E1M2: 0, their text unchanged
+    _thss_cold = bool(map_cfg(cfg, mapname).THSS_COLD) and standalone and moving_things
     if _do_things and standalone and moving_things:
         from doomfj.monstercode import p31_parts
         _p31 = p31_parts(rm, map_wad, mapname, sprite_wad, _anim,
@@ -3774,6 +3779,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # M7 P8a (package K): a corpse slides away from its drop -- the pickup reads the drop's own row
                 **({"drop_rt": [_bar["drop_first"] + k_ for k_ in range(_bar["ndrop"])]} if _KNOCK else {}),
                 **({"stats": True} if _STATS else {}),      # P10: the items counted, the secrets checked
+                **({"thss_cold": True} if _thss_cold else {}),     # M8 wave 1: pk_drop re-arms (THSS_COLD)
                 **({"plasma": True} if _PLASMA else {}))    # M8 C6: the rifle's give, the cells' switch
             assert _loot["slots"] == _loot_slots and _loot["extra_vis"] == _LOOT_EXTRA_VIS
             from doomfj.build import LOOT_PERSIST as _LOOT_PERSIST
@@ -4142,6 +4148,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M8 L1: sshead at cfg.SSHEAD_RATIO cells a leaf (2 on E1M1: the restore set's spans; 1 on E1M2: its hot block
     # must fit one 16^5 window -- config.Config.SSHEAD_RATIO)
     _ss_cells, _th_cells = cfg.SSHEAD_RATIO * _MT_NSS, max(2 * _MT_NT, _MT_NT + _MT_NMOB)   # M8 F1.5: + the mobiles
+    def _thss_decl():
+        return ([NLJ.join(["thss_rt:"]
+                          + [f"    hex.vec 16, {ss}" for ss in _MT_BINDS]
+                          # M7 P5: the mobiles' leaves -- 0, in no list, until a slot spawns
+                          + ["    hex.vec 16, 0"] * _MT_NMOB)]
+                if standalone else [f"thss_rt: hex.vec {16 * _MT_NT}"])
     _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw"
                                              for _ in range(cfg.VIEW_W * cfg.PID_BYTES)),
                     # P10 G2: `sfbase` -- a column's ceiling / floor BASE pid ([VIEW_W ceilings][VIEW_W
@@ -4183,11 +4195,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                       # bakes the SPAWN one -- and since M7 P1.3 the lists it implies, which
                       # persist (build.THING_PERSIST) where bind_things rebuilt them every frame.
                       # The 2x extents are unchanged: the M1 restore set spans them.
-                      + ([NLJ.join(["thss_rt:"]
-                                   + [f"    hex.vec 16, {ss}" for ss in _MT_BINDS]
-                                   # M7 P5: the mobiles' leaves -- 0, in no list, until a slot spawns
-                                   + ["    hex.vec 16, 0"] * _MT_NMOB)]
-                         if standalone else [f"thss_rt: hex.vec {16 * _MT_NT}"])
+                      + ([] if _thss_cold else _thss_decl())
                       if moving_things else []))
     # ⚠ ANCHOR, not decoration. frame.arm5 -- the five-hex pointer arm -- is exact only while
     # every narrow-armed table lies inside ONE 16^5 window, and this block IS those tables
@@ -4214,7 +4222,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
               # which changes the shipped text and so its emit hash -- caught by
               # scratchpad/cr/emit_baseline.py, which is exactly what that control is for.
-              + ([_mt_tables] if moving_things else []) + ["__hot_end:"])
+              + ([_mt_tables] if moving_things else [])
+              + (_thss_decl() if _thss_cold else [])           # M8 wave 1: past the window (THSS_COLD)
+              + ["__hot_end:"])
     # M13-raster: the walk EMITS records inline (present.begin_frame_raster is prepended to pass1,
     # before the walk jump), so present.set_palette + the NEW load_raster_tables address handoff MUST
     # run before pass1 -- otherwise their command bytes would land INSIDE the interleaved raster

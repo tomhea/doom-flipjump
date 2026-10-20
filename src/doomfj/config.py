@@ -104,6 +104,12 @@ class Config:
     # frame.arm5, and at 2 it ran 96 ops past it (16,480 of 16,384) -- the binary jumped to op 0 on its first frame.
     SSHEAD_RATIO: int = 2
 
+    # M8 wave 1 -- `thss_rt` (a runtime thing's leaf, 16 cells a row) declared PAST the hot data block instead of inside
+    # it (the game tier: wall_renderer's hot block; lootcode.pk_drop, its one pointer reader, re-arms into the window
+    # after it). E1M4's block was 17,482 ops of the 16,384-op window (346 runtime things: thss_rt 5,536 of them); with
+    # it out, 11,946 (E1M3: 17,061 -> 11,605). 0 keeps E1M1's / E1M2's text
+    THSS_COLD: int = 0
+
     # M8 F1.5 (docs/f1-runtime-ids.md, option A1) -- HOW WIDE A RUNTIME THING ID IS in the per-leaf lists (`sshead` /
     # `thnext`), in bits: 8 (E1M1's, E1M2's: an id + 1 in one byte, at most 254 ids) or 12 (at most 4,094: E1M3 341,
     # E1M4 345, E1M5 370 runtime things + pools + drops). A list entry stays ONE cell at the same stride either way --
@@ -407,10 +413,12 @@ MAP_CONFIG = {
     # M8 wave 1 (docs/episode-plan.md 3): LIST_ID_BITS 12 -- 341 / 346 / 370 runtime ids (F1.5); E1M3 / E1M4 take E1M2's
     # widths (plane pairs 249 / 237 estimated, the band lists, the hot block: the lessons survey); the MAP page and the
     # switch textures as E1M2; the animated lights only where the survey has none on a mover / past a byte (E1M3)
+    # E1M3 / E1M4: THSS_COLD -- their hot blocks were 677 / 1,098 ops past frame.arm5's window with thss_rt inside
+    # (17,061 / 17,482 of 16,384 ops; thss_rt 5,456 / 5,536 of them: Config.THSS_COLD)
     "E1M3": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1,
-             "AUTOMAP": 1, "SWITCH_TEX": 1, "SECTOR_LIGHTS": 1},
+             "AUTOMAP": 1, "SWITCH_TEX": 1, "SECTOR_LIGHTS": 1, "THSS_COLD": 1},
     "E1M4": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1,
-             "AUTOMAP": 1, "SWITCH_TEX": 1},
+             "AUTOMAP": 1, "SWITCH_TEX": 1, "THSS_COLD": 1},
     "E1M5": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "AUTOMAP": 1, "SWITCH_TEX": 1},
     "E1M6": {"SPR_SLOT_CAP": 255},
     # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): the map page, at 40 units a pixel (doomfj.automap).

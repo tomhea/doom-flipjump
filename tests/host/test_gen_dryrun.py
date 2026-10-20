@@ -50,7 +50,9 @@ PRE = ("import sys; sys.path[:0] = [r'%s', r'%s']\n" % (ROOT / "src", ROOT / "sc
 
 def test_door_first_kind_gets_past_e1m9s_door_135():
     rc, out = _run(PRE + "D.door_kinds(w.sectors('E1M9'), w.linedefs('E1M9'), w.sidedefs('E1M9'))")
-    assert rc != 0 and "door 135 is asked two motions" in out          # CONTROL: the model refuses it
+    # the model refused it ("door 135 is asked two motions") until M8 C3 gave E1M9's mixed door its two kinds; the
+    # stand-in stays harmless on top of it
+    assert rc == 0 and "two motions" not in out, out[-800:]
     rc, out = _run(PRE + "G._door_first_kind()\n"
                    "k = D.door_kinds(w.sectors('E1M9'), w.linedefs('E1M9'), w.sidedefs('E1M9'))\nprint('K', k[135])")
     assert rc == 0 and "K " in out, out[-800:]

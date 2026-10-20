@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 import flipjump as fj
-from flipjump.fjm.fjm_reader import Reader
+from flipjump.fjm.fjm_reader import read_fjm_header
 
 from doomfj.config import (DEFAULT_MAP_WAD, FLAT_MAX_WORDS, RENDER_FLAT_MAX_WORDS,
                            Config)
@@ -347,7 +347,9 @@ def _safe(prefix: str, name: str) -> str:
 def _span_words(fjm_path: Path) -> int:
     """The assembled program's flat address-span in words = max(segment_start + segment_length).
     Compared against flat_max_words: storage_mode flips flat->hybrid when the limit drops below it."""
-    return max(s.segment_start + s.segment_length for s in Reader(fjm_path).memory_segments)
+    # the header alone (M8, the assembler-memory work): a full Reader is a dict of every word -- +4.7 GB after an E1M1
+    # assembly, the build's peak (12.29 -> 4.00 GB with flipjump#373)
+    return read_fjm_header(Path(fjm_path)).span_words
 
 
 def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,

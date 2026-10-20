@@ -627,7 +627,7 @@ def test_the_door_beside_a_lift_is_the_model(tmp_path, door_lift):
     got, want = door_lift.run(tmp_path, "doorlift", mv)
     bad = [(k, g, w_) for k, (g, w_) in enumerate(zip(got, want)) if g != w_]
     assert not bad, "%d of %d parted, first %s" % (len(bad), len(got), bad[:3])
-    assert 0.1 < sum(r[0] for r in want) / len(want) < 0.9, "refusals and accepts"
+    assert 0.05 < sum(r[0] for r in want) / len(want) < 0.95, "refusals and accepts"   # E1M3 519: 30 of 300
 
 
 def test_control_the_door_beside_a_lift_on_its_stored_floor(tmp_path, door_lift):
@@ -683,7 +683,10 @@ def test_control_a_broken_pair_dispatch_parts(tmp_path, pair_line, mut):
     if mut == "cells_swapped":
         mv[1199] = ("pair", cb, ca, ob, lf)
     else:
-        mv[1199] = ("pair", ca, cb, ob, [[lf[i][0]] * len(lf[0]) for i in range(len(lf))])
+        # the low floor varies with the LIFT (rows) and not with the floor switch (E1M2 1199: min of the two floors is
+        # always the lift's side) -- flattening the columns was an equivalent mutant; flatten the rows
+        assert any(lf[i] != lf[0] for i in range(len(lf))), "the control must change the grid"
+        mv[1199] = ("pair", ca, cb, ob, [list(lf[0]) for _ in range(len(lf))])
     got, want = pair_line.run(tmp_path, "pair_" + mut, mv)
     assert got != want
 

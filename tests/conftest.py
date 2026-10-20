@@ -26,6 +26,11 @@ from pathlib import Path
 # the installed `doomfj` points at the main repo, so a worktree's pytest without PYTHONPATH=src silently tested the
 # MAIN repo's code. tests/host/test_conftest_src.py holds it.
 SRC = str(Path(__file__).resolve().parents[1] / "src")
+# an EXPLICIT PYTHONPATH whose first entry holds a doomfj package is honoured: the mutation tests run this suite on a
+# mutated copy of src that way (test_slot_cap_oracle and friends) -- only a missing / relative "src" one is replaced
+_first = os.environ.get("PYTHONPATH", "").split(os.pathsep)[0]
+if _first and os.path.isabs(_first) and os.path.isfile(os.path.join(_first, "doomfj", "__init__.py")):
+    SRC = os.path.abspath(_first)
 if sys.path[:1] != [SRC]:
     sys.path.insert(0, SRC)
 os.environ["PYTHONPATH"] = os.pathsep.join(

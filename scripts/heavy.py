@@ -74,7 +74,14 @@ def higher_waiter(prio):
     return None
 
 
+GIT_BASH = "C:/Program Files/Git/bin/bash.exe"      # CreateProcess searches System32 (WSL bash) before PATH
+
+
 def run(cmd, log):
+    # `bash` alone resolves to WSL's bash (System32) from a Windows python: it has no /c/... paths and no python, so
+    # every agent chain died at once and "passed" through the queue overnight (2026-10-19) -- use Git Bash
+    if cmd and cmd[0] in ("bash", "bash.exe", "sh") and os.path.exists(GIT_BASH):
+        cmd = [GIT_BASH] + cmd[1:]
     if log:
         with open(log, "w") as f:
             return subprocess.call(cmd, stdout=f, stderr=subprocess.STDOUT)

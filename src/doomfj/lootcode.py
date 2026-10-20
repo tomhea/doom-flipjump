@@ -344,7 +344,7 @@ def _give_body(p: str, n: int, done: str, refused: Optional[str]) -> List[str]:
             f"  {p}gc:", f"    hex.mov 3, p_hp, gv_c", f"    ;{done}"]
 
 
-def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[str]:
+def give_lines(kind: int, dropped: bool = False, stats: bool = False, count_nib: int = 2) -> List[str]:
     """`give_<kind>` (`give_<kind>d` for a dropped one): combat._touch's case for `kind` after the reach test ->
     `gv_ok`. Leaves through `stl.fret gv_ret` on every path. P10 (`stats`, doomfj.statcode): a COUNTITEM kind's
     taken exit counts the item in `st_item` (combat._touch_specials' itemcount)."""
@@ -414,7 +414,7 @@ def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[st
         out += _ga_call(a, num * gd.CLIPAMMO[a] if num else gd.CLIPAMMO[a] // 2)
         out += ["    stl.fret gv_ret"]
     out += [f"  {no}:", "    hex.zero 1, gv_ok", "    stl.fret gv_ret",
-            f"  {ok}:", *(_statcode.item_lines() if stats and _statcode.counts_item(kind, dropped) else []),
+            f"  {ok}:", *(_statcode.item_lines(count_nib) if stats and _statcode.counts_item(kind, dropped) else []),
             "    hex.set 1, gv_ok, 1", "    stl.fret gv_ret"]
     return out
 
@@ -626,7 +626,7 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
     out += _box_leaf() + _drop_leaf() + (_mbox_leaf() if mleaf else [])
     out += ["pk_bonus:"] + _bonus_lines("pkb") + ["    stl.fret pk_nret"]
     for kind, dropped in give_kinds(w):
-        out += give_lines(kind, dropped, stats)
+        out += give_lines(kind, dropped, stats, _statcode.count_nibbles(w) if stats else 2)   # M8 C2: st_item's width
     for a in range(gd.NUMAMMO):
         out += give_ammo_lines(a)
     out += ["pk_end:"]

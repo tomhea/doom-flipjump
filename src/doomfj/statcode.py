@@ -54,6 +54,15 @@ def count_digits(w) -> int:
     return 2 if big <= 99 else 3
 
 
+def count_nibbles(w) -> int:
+    """M8 C2 (docs/c2-slot-ids.md): st_kill's and st_item's width -- the schema's p_killcount (world.count_bits): 2,
+    or 3 on a map whose monsters or pickups pass a byte (E1M6 291, E1M7 281 monsters)"""
+    from doomfj.monstercode import cell_nibbles
+    nib = cell_nibbles(w.schema, "p_killcount")
+    assert nib in (2, 3) and nib == cell_nibbles(w.schema, "p_itemcount"), nib
+    return nib
+
+
 def secret_nibbles(w) -> int:
     """`st_secm`'s width: a nibble a secret sector (one at least: the schema's `max(1, nsecret)`)"""
     return max(1, len(w.secret_sectors))
@@ -65,7 +74,8 @@ def decls(w) -> List[str]:
     from doomfj.wall_renderer import MAX_FPS
     assert LVTIME_NIBBLES == TIME_NIBBLES, (LVTIME_NIBBLES, TIME_NIBBLES)
     assert 0 < MAX_FPS < 256, "TIME divides lvtime by the frame-rate cap: %r" % MAX_FPS
-    return [f"st_kill: hex.vec {COUNT_NIBBLES}, 0", f"st_item: hex.vec {COUNT_NIBBLES}, 0", "st_secn: hex.vec 1, 0",
+    cn = count_nibbles(w)                                                       # M8 C2: 3 past a byte
+    return [f"st_kill: hex.vec {cn}, 0", f"st_item: hex.vec {cn}, 0", "st_secn: hex.vec 1, 0",
             f"st_secm: hex.vec {secret_nibbles(w)}, 0",
             # the secret check's scratch
             "sc_bx: hex.vec 4", f"sc_sec: hex.vec {w.sec_nibbles}", "sc_on: hex.vec 1", "sc_ret: hex.vec w/4", "sc_fret: hex.vec w/4",
@@ -73,19 +83,21 @@ def decls(w) -> List[str]:
             f"st_dig: hex.vec {count_slots(count_digits(w))}",
             f"lvd_s: hex.vec {TIME_NIBBLES}", "lvd_r: hex.vec 2", f"lvd_m: hex.vec {TIME_NIBBLES}", "lvd_ss: hex.vec 2",
             f"lvd_t: hex.vec {TIME_NIBBLES}", "lvd_v: hex.vec 2", "lvd_q: hex.vec 2", "lvd_o: hex.vec 1",
+            *(["lvd_v3: hex.vec 3", "lvd_q3: hex.vec 3"] if cn == 3 else []),          # M8 C2: a 3-nibble count
             "lvd_ret: hex.vec w/4",
             f"lvd_cf: hex.vec 2, {MAX_FPS}", "lvd_c60: hex.vec 2, 60", "lvd_c10: hex.vec 1, 10"]
 
 
 def level_start_lines(w) -> List[str]:
     """the level start's counters (restart_common's: no skill changes them) -- for compose_restart(p10_common=)"""
-    return [f"    hex.zero {COUNT_NIBBLES}, st_kill", f"    hex.zero {COUNT_NIBBLES}, st_item",
+    cn = count_nibbles(w)
+    return [f"    hex.zero {cn}, st_kill", f"    hex.zero {cn}, st_item",
             "    hex.zero 1, st_secn", f"    hex.zero {secret_nibbles(w)}, st_secm"]
 
 
-def kill_lines() -> List[str]:
-    """damagecode's `dm_kill` (P_KillMobj): one more kill"""
-    return ["    hex.inc %d, st_kill" % COUNT_NIBBLES]
+def kill_lines(cn: int = COUNT_NIBBLES) -> List[str]:
+    """damagecode's `dm_kill` (P_KillMobj): one more kill. M8 C2: `cn` = count_nibbles"""
+    return ["    hex.inc %d, st_kill" % cn]
 
 
 def counts_item(kind: int, dropped: bool = False) -> bool:
@@ -95,9 +107,9 @@ def counts_item(kind: int, dropped: bool = False) -> bool:
     return counted
 
 
-def item_lines() -> List[str]:
-    """a COUNTITEM give routine's taken exit: one more item"""
-    return ["    hex.inc %d, st_item" % COUNT_NIBBLES]
+def item_lines(cn: int = COUNT_NIBBLES) -> List[str]:
+    """a COUNTITEM give routine's taken exit: one more item. M8 C2: `cn` = count_nibbles"""
+    return ["    hex.inc %d, st_item" % cn]
 
 
 def check_world(w) -> None:
@@ -105,10 +117,13 @@ def check_world(w) -> None:
     (LEVEL COMPLETE's slots) and its cell, and the secrets fit one slot"""
     assert all(gd.THING_TYPES[t.type].flags & gd.MF_COUNTKILL for t in w.mon_things), (
         "kill_lines counts every monster death: a non-COUNTKILL monster type needs a test at dm_kill")
-    # M8 F1.1: 2 or 3 decimal digits a count (count_digits), in 8-bit cells (p_killcount / p_itemcount)
-    assert len(w.mon_things) <= 0xFF, "the kills are an 8-bit cell: %d monster slots" % len(w.mon_things)
+    # M8 F1.1: 2 or 3 decimal digits a count (count_digits), in 8-bit cells (p_killcount / p_itemcount) -- M8 C2:
+    # 12-bit cells past a byte (count_nibbles); three decimal digits hold 999
+    cmax = 16 ** count_nibbles(w) - 1
+    assert len(w.mon_things) <= min(cmax, 999), "the kills are a %d-bit cell: %d monster slots" % (
+        4 * count_nibbles(w), len(w.mon_things))
     nitems = sum(1 for t in w.pickup_things if counts_item(t.type))
-    assert nitems <= 0xFF, "the items are an 8-bit cell: %d COUNTITEM pickups" % nitems
+    assert nitems <= min(cmax, 999), "the items are a %d-bit cell: %d COUNTITEM pickups" % (4 * count_nibbles(w), nitems)
     assert len(w.secret_sectors) <= 9, "the secrets are one decimal digit: %d" % len(w.secret_sectors)
 
 
@@ -209,15 +224,19 @@ def secret_call_lines() -> List[str]:
 
 
 # ---- LEVEL COMPLETE ---------------------------------------------------------------------------------------------------
-def _split_lines(src: str, slot: int, blank: bool, nd: int = 2) -> List[str]:
+def _split_lines(src: str, slot: int, blank: bool, nd: int = 2, cn: int = 2) -> List[str]:
     """st_dig[slot], st_dig[slot + 1] = the two decimal digits of the 2-nibble `src` (<= 99) through `lvd_dec` (ONE
     shared division); the tens a DIGIT_BLANK when 0 and `blank`. M8 F1.1 (`nd` 3, a count <= 255): three slots --
     the ones first, then the quotient (<= 25) divided again for the hundreds and the tens; with `blank` the hundreds
-    a blank when 0 and the tens too when both are (menu.count_codes)"""
+    a blank when 0 and the tens too when both are (menu.count_codes). M8 C2 (`cn` 3, a 3-nibble count <= 999): the
+    first division is a 3-nibble one, inline (lvd_v3 / lvd_q3: LEVEL COMPLETE's frames only), its quotient <= 99"""
     from doomfj.menu import DIGIT_BLANK
+    assert cn == 2 or nd == 3, (cn, nd)
     if nd == 3:
-        out = [f"    hex.mov 2, lvd_v, {src}", "    stl.fcall lvd_dec, lvd_ret",
-               f"    hex.mov 1, st_dig + {slot + 2}*dw, lvd_o",
+        first = ([f"    hex.mov 2, lvd_v, {src}", "    stl.fcall lvd_dec, lvd_ret"] if cn == 2 else
+                 [f"    hex.mov 3, lvd_v3, {src}", "    hex.div 3, 1, lvd_q3, lvd_o, lvd_v3, lvd_c10, lvd_div0",
+                  "    hex.mov 2, lvd_q, lvd_q3"])
+        out = first + [f"    hex.mov 1, st_dig + {slot + 2}*dw, lvd_o",
                "    hex.mov 2, lvd_v, lvd_q", "    stl.fcall lvd_dec, lvd_ret",
                f"    hex.mov 1, st_dig + {slot}*dw, lvd_q", f"    hex.mov 1, st_dig + {slot + 1}*dw, lvd_o"]
         if blank:
@@ -254,14 +273,15 @@ def digit_lines(w, skills) -> List[str]:
     check_world(w)
     nd = count_digits(w)                                                         # M8 F1.1: 2 or 3 a count
     out = ["// P10 (doomfj.statcode): LEVEL COMPLETE's digit slots"]
-    out += _split_lines("st_kill", 0, True, nd)                                  # kills
+    cn = count_nibbles(w)                                                        # M8 C2: 2 or 3 nibbles a counter
+    out += _split_lines("st_kill", 0, True, nd, cn)                              # kills
     out += skill_dispatch("lvt", "g_skill", len(skills))                         # the skill's totals
     for k, sk in enumerate(skills):
         tk, ti = level_totals(w, sk)
         out += [f"lvt{k}:", *_digit_set_lines(nd, tk, True, nd), *_digit_set_lines(3 * nd, ti, True, nd),
                 ";lvt_done"]
     out += ["lvt_done:"]
-    out += _split_lines("st_item", 2 * nd, True, nd)                             # items
+    out += _split_lines("st_item", 2 * nd, True, nd, cn)                         # items
     out += [f"    hex.mov 1, st_dig + {4 * nd}*dw, st_secn"]                      # secrets
     # the clock: seconds = lvtime / MAX_FPS, then minutes and seconds, capped at 99:59 (menu.TIME_CAP)
     mm_cap, ss_cap = divmod(TIME_CAP, 60)

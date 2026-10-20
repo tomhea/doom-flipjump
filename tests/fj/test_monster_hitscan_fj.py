@@ -19,7 +19,12 @@ R9 (each must part from the model): a bullet that passes through everything (the
 in its own way; every thing as wide as the player (the radius class ignored); the first thing met instead of the
 nearest; the offset's sign reversed; a monster target's attack sight ignored (the far LOS never consulted); a monster
 target's melee reach the player's; the scan box's low x bound left unbiased; the facing not put back after
-the attack (dm_go is a stub, so it does to mm_fa and mt_dx .. mt_ay what the real one's blood does)."""
+the attack (dm_go is a stub, so it does to mm_fa and mt_dx .. mt_ay what the real one's blood does).
+
+M8 C2 (docs/c2-slot-ids.md): every test runs on E1M1 AND on E1M6 (tests/fj/wide_maps.py) -- 291 monster slots + 7
+barrels, so every code here (mm_tg, md_src, md_me, hs_vic / hs_id, dm_id, dm_src, dp_src) is THREE nibbles
+(world.slot_nibbles): the shooters are the map's LAST slot of each type (past 255), the targets and the crowd any slot,
+the barrels' codes 2 + 291 + b. R9 there: mt_load's third dispatch level dropped (every target read by its low byte)."""
 import random
 from pathlib import Path
 
@@ -36,7 +41,8 @@ from doomfj.harness import W
 from doomfj.lut_generator import generate_dispatch_table_fj, generate_tantoangle_lut_fj
 from doomfj.reference_model import SLOPERANGE
 from doomfj.tables import slopediv_recip8_table, tantoangle_table
-from doomfj.world import MELEE_BASE, TicEvents, World
+from doomfj.world import MELEE_BASE, TicEvents, slot_nibbles
+from tests.fj.wide_maps import MAPS, map_world
 
 ROOT = Path(__file__).resolve().parents[2]
 FJ = ROOT / "src" / "fj"
@@ -45,8 +51,8 @@ M32 = 0xFFFFFFFF
 ACTION = {3004: "A_PosAttack", 9: "A_SPosAttack", 3001: "A_TroopAttack", 3002: "A_SargAttack"}
 
 
-def _world():
-    return World(skill=gd.SK_HARD, monsters="final", player="final", sight_rule="seen")
+def _world(mapname="E1M1"):
+    return map_world(mapname, skill=gd.SK_HARD, monsters="final", player="final", sight_rule="seen")
 
 
 def _s32(v):
@@ -55,9 +61,11 @@ def _s32(v):
 
 
 def _shooters(w):
+    """the first active slot of each attacking type -- M8 C2: on a map past 255 slots the LAST (an id past the byte)"""
     out = {}
+    wide = w.layout.nmon > 255
     for m, t in enumerate(w.mon_things):
-        if t.type in ACTION and t.type not in out and w.ws.mon_active[m]:
+        if t.type in ACTION and (wide or t.type not in out) and w.ws.mon_active[m]:
             out[t.type] = m
     return out
 
@@ -140,6 +148,7 @@ def _records(w):
 def _apply(w, rec, log):
     """the record on the model: the cells, then `_monster_attack` with the damage and the spawn recorded"""
     ws, n = w.ws, w.layout.nmon
+    S = slot_nibbles(w.layout)                     # M8 C2: a code's printed width
     m = rec["m"]
     for j in range(n):
         ws.mon_active[j], ws.mon_shootable[j], ws.mon_health[j] = 1, 0, 0
@@ -165,13 +174,13 @@ def _apply(w, rec, log):
     mode = {"v": 3}
 
     def dp(dmg, source, inflictor, ev):
-        log.append("P%02x%02x" % (dmg, source[1] + 1))
+        log.append("P%02x%0*x" % (dmg, S, source[1] + 1))
 
     def dmon(j, dmg, source, inflictor, ev):
-        log.append("M%02x%02x%x%02x" % (1 + j, dmg, mode["v"], 2 + source[1]))
+        log.append("M%0*x%02x%x%0*x" % (S, 1 + j, dmg, mode["v"], S, 2 + source[1]))
 
     def dbar(b, dmg, source, ev):
-        log.append("M%02x%02x%x%02x" % (1 + n + b, dmg, 4, 2 + source[1]))
+        log.append("M%0*x%02x%x%0*x" % (S, 1 + n + b, dmg, 4, S, 2 + source[1]))
 
     def spawn(mm, ev):
         tx16, ty16 = w._target_pos16(mm)
@@ -221,6 +230,7 @@ MUTANTS = {
 
 def _program(w, mut=None):
     n = w.layout.nmon
+    S = slot_nibbles(w.layout)                     # M8 C2: the codes' width
     tables = H.tables_fj(w.hwt) + MD.fight_tables_fj(w.rm.sine)
     if mut == "radius":
         vals = MD.hwtr_values(w.rm.sine)
@@ -233,16 +243,23 @@ def _program(w, mut=None):
     fp = MD.fight_parts(w, list(range(n)))
     text = "\n".join(MD.todist_leaf_lines(True) + MD.octant_leaf_lines() + MD.as_leaf_lines(True)
                      + MD.attack_leaf_lines(full=True, fight=True) + fp["lines"] + MC.dist_leaf_lines()) + "\n"
-    if mut and MUTANTS[mut]:
-        old, new = MUTANTS[mut]
+    if mut == "third_level":                       # M8 C2: mt_load's third level dropped (the wide map's control)
+        old = [ln for ln in text.split("\n") if ln.startswith("    sim.jump16 mm_tg + 2*dw,")]
+        assert len(old) == 1, len(old)
+        text = text.replace(old[0] + "\n", "    ;mtl_g0\n")
+    elif mut and MUTANTS[mut]:
+        old, new = (s_.replace("hex.zero 2, hs_vic", "hex.zero %d, hs_vic" % S)
+                    .replace("hex.cmp 2, hs_id, md_me", "hex.cmp %d, hs_id, md_me" % S) for s_ in MUTANTS[mut])
         assert text.count(old) == 1, (mut, text.count(old))
         text = text.replace(old, new)
     stubs = ["sl_los:", "    stl.fret sl_ret", "sl_far:", "    stl.fret sf_ret",
-             "dp_go:", "    stl.output 80", "    hex.print_as_digit 2, dp_dmg, 0", "    hex.print_as_digit 2, dp_src, 0",
-             "    stl.output 10", "    hex.zero 2, dp_src", "    stl.fret dp_ret",
-             "dm_go:", "    stl.output 77", "    hex.print_as_digit 2, dm_id, 0", "    hex.print_as_digit 2, dm_dmg, 0",
-             "    hex.print_as_digit 1, dm_melee, 0", "    hex.print_as_digit 2, dm_src, 0", "    stl.output 10",
-             "    hex.zero 2, dm_src",
+             "dp_go:", "    stl.output 80", "    hex.print_as_digit 2, dp_dmg, 0",
+             "    hex.print_as_digit %d, dp_src, 0" % S,
+             "    stl.output 10", "    hex.zero %d, dp_src" % S, "    stl.fret dp_ret",
+             "dm_go:", "    stl.output 77", "    hex.print_as_digit %d, dm_id, 0" % S,
+             "    hex.print_as_digit 2, dm_dmg, 0",
+             "    hex.print_as_digit 1, dm_melee, 0", "    hex.print_as_digit %d, dm_src, 0" % S, "    stl.output 10",
+             "    hex.zero %d, dm_src" % S,
              # the real dm_go spawns the victim's blood (damagecode: fx_spawn; a barrel's puff, barrelcode), whose
              # fx_spawn_leaf runs the SHARED mm_octant on (player - blood): it writes mm_fa and mt_dx .. mt_ay. The
              # stub does the same damage to them, so a facing read after a hit on a monster or a barrel parts
@@ -254,23 +271,24 @@ def _program(w, mut=None):
              "    hex.print_as_digit 8, mt_tqx, 0", "    hex.print_as_digit 8, mt_tqy, 0", "    stl.output 10",
              "    stl.fret pj_sret"]
     nbar = len(w.barrel_things)
-    decls = (H.hurt_decls(H.level_start(w)) + MD.context_decls() + MC.P32A_SCRATCH + fp["decls"]
+    decls = (H.hurt_decls(H.level_start(w), S) + MD.context_decls() + MC.p32a_scratch(S) + fp["decls"]
              + ["mm_x: hex.vec 4", "mm_y: hex.vec 4", "mm_rng: hex.vec 2",
                 "mt_dx: hex.vec 4", "mt_dy: hex.vec 4", "mt_ax: hex.vec 4", "mt_ay: hex.vec 4", "mt_d: hex.vec 4",
                 "mt_t: hex.vec 4", "viewx: hex.vec 8", "viewy: hex.vec 8",
                 "sl_hit: hex.vec 1", "sl_ret: hex.vec w/4", "sf_ret: hex.vec w/4", "pj_sret: hex.vec w/4",
-                "dm_id: hex.vec 2", "dm_dmg: hex.vec 2", "dm_melee: hex.vec 1", "dm_src: hex.vec 2",
+                "dm_id: hex.vec %d" % S, "dm_dmg: hex.vec 2", "dm_melee: hex.vec 1", "dm_src: hex.vec %d" % S,
                 "dm_ret: hex.vec w/4",
                 "mon_shootable: hex.vec %d" % n, "thpos_rt: hex.vec %d" % (16 * n),
                 "bar_st: hex.vec %d" % (2 * nbar), "bar_hp: hex.vec %d" % (2 * nbar)])
     return decls, text + "\n".join(stubs) + "\n", tables
 
 
-def _build(tmp_path, name, mut=None):
-    w = _world()
+def _build(tmp_path, name, mut=None, mapname="E1M1"):
+    w = _world(mapname)
     records = _records(w)
     want = _expected(w, records)
     n = w.layout.nmon
+    S = slot_nibbles(w.layout)                     # M8 C2: the codes' width
     kinds = MD.ATTACK_KINDS
     body = ["stl.startup_and_init_all"]
     for rec in records:
@@ -294,7 +312,7 @@ def _build(tmp_path, name, mut=None):
                  "hex.set 4, mm_x, %d" % (rec["mx"] & 0xFFFF), "hex.set 4, mm_y, %d" % (rec["my"] & 0xFFFF),
                  "hex.set 2, mm_rng, %d" % rec["rng"], "hex.set 1, mm_seen, %d" % rec["seen"],
                  "hex.set 1, sl_hit, %d" % rec["hit"], "hex.set 1, mm_kind, %d" % kinds[ACTION[rec["tp"]]],
-                 "hex.set 2, md_src, %d" % (m + 1), "hex.set 2, mm_tg, %d" % rec["target"],
+                 "hex.set %d, md_src, %d" % (S, m + 1), "hex.set %d, mm_tg, %d" % (S, rec["target"]),
                  "stl.fcall mt_load, mt_lret", "stl.fcall md_attack, md_ret",
                  "hex.print_as_digit 2, mm_rng, 0", "hex.print_as_digit 1, mm_fa, 0", "stl.output 10"]
     body += ["stl.loop"]
@@ -309,19 +327,21 @@ def _build(tmp_path, name, mut=None):
     return srcs, want
 
 
-def _run(tmp_path, name, mut=None) -> bool:
-    srcs, want = _build(tmp_path, name, mut)
+def _run(tmp_path, name, mut=None, mapname="E1M1") -> bool:
+    srcs, want = _build(tmp_path, name, mut, mapname)
     return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
                                            should_raise_assertion_error=False)
 
 
-def test_the_records_exercise_every_path():
+@pytest.mark.parametrize("mapname", MAPS)
+def test_the_records_exercise_every_path(mapname):
     """the model's own outcomes over the records: bullets on the target (the player, a monster), on a monster in
     the way, on a barrel in the way, on the player in the way, missed; claws and bites on a monster target; fireballs
-    at a monster target; a dead target's bullets missed"""
-    w = _world()
+    at a monster target; a dead target's bullets missed. M8 C2 (the wide map): shooters, targets and victims past 255"""
+    w = _world(mapname)
+    S = slot_nibbles(w.layout)
     seen = dict(t_player=0, t_mon=0, way_mon=0, way_bar=0, way_player=0, miss=0, claw_mon=0, bite_mon=0,
-                fire_mon=0, dead_target=0, near_not_nearest=0)
+                fire_mon=0, dead_target=0, near_not_nearest=0, wide_victim=0, wide_target=0, wide_shooter=0)
     for rec in _records(w):
         log = []
         ev = _apply(w, rec, log)
@@ -331,7 +351,8 @@ def test_the_records_exercise_every_path():
             if ln[0] == "P":
                 seen["t_player" if tg == 1 else "way_player"] += 1
             elif ln[0] == "M":
-                i, mode = int(ln[1:3], 16), int(ln[5], 16)
+                i, mode = int(ln[1:1 + S], 16), int(ln[S + 3], 16)
+                seen["wide_victim"] += i > 0xFF
                 if mode == 3:
                     seen["claw_mon" if rec["tp"] == 3001 else "bite_mon"] += 1
                 elif i > n:
@@ -345,15 +366,24 @@ def test_the_records_exercise_every_path():
         seen["miss"] += sum(1 for s in ev.mon_shots if not s[3])
         seen["dead_target"] += bool(ev.mon_shots) and tg >= 2 and not rec["talive"]
         seen["near_not_nearest"] += len([1 for j in rec["crowd"] if rec["crowd"][j][2]]) >= 2
+        seen["wide_target"] += tg > 0xFF and bool(log)
+        seen["wide_shooter"] += rec["m"] + 1 > 0xFF and bool(log)
     want = dict(t_player=20, t_mon=20, way_mon=20, way_bar=5, way_player=3, miss=60, claw_mon=3, bite_mon=3,
                 fire_mon=10, dead_target=5, near_not_nearest=40)
+    if w.layout.nmon > 255:                        # M8 C2: codes past the byte, every role
+        want.update(wide_victim=5, wide_target=5, wide_shooter=20, way_player=1)   # (its seed meets the player once)
     assert all(seen[k] >= v for k, v in want.items()), sorted((k, seen[k], v) for k, v in want.items())
 
 
-def test_the_attacks_at_the_target_follow_the_model(tmp_path):
-    assert _run(tmp_path, "mhitscan"), "the fj attacks at the target parted from the model's _monster_attack"
+@pytest.mark.parametrize("mapname", MAPS)
+def test_the_attacks_at_the_target_follow_the_model(tmp_path, mapname):
+    assert _run(tmp_path, "mhitscan", mapname=mapname), (
+        "the fj attacks at the target parted from the model's _monster_attack")
 
 
-@pytest.mark.parametrize("mut", sorted(MUTANTS))
-def test_control_a_broken_attack_is_caught(tmp_path, mut):
-    assert not _run(tmp_path, "mhitscan_" + mut, mut=mut), "%s passed: the comparison is vacuous" % mut
+@pytest.mark.parametrize("mut", sorted(MUTANTS) + ["third_level"])
+@pytest.mark.parametrize("mapname", MAPS)
+def test_control_a_broken_attack_is_caught(tmp_path, mut, mapname):
+    if mut == "third_level" and mapname == "E1M1":
+        pytest.skip("M8 C2: the wide map's control (E1M1's mt_load has two levels)")
+    assert not _run(tmp_path, "mhitscan_" + mut, mut=mut, mapname=mapname), "%s passed: the comparison is vacuous" % mut

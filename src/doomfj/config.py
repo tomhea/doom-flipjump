@@ -112,6 +112,13 @@ class Config:
     # hex.write_cell), and its emitter calls the `_w` twins of sim.fj's list macros. 8 lays no table and emits the text
     # it always did (not an fj constant: `constants()` leaves it out, so fj_consts.fj is unchanged too).
     LIST_ID_BITS: int = 8
+    # M8 C2 (docs/c2-slot-ids.md) -- HOW WIDE A MONSTER / BARREL SLOT ID IS in the fj registers and cells (aim_sid,
+    # dm_id, the codes mon_target / bar_src / dm_src, p_atk, kb_tg, pj_src, the scheduler's): 8 bits (two nibbles,
+    # nmon + nbarrel <= 254: E1M1, E1M2) or 12 (three: E1M6's 298, E1M7's 297). The width itself is DERIVED from the
+    # map's counts (world.slot_nibbles, as World.sec_nibbles); this names what the map's emission expects, and the
+    # emitter refuses a mismatch (wall_renderer) -- so a big map without its entry fails at emission, never in a
+    # gate. Not an fj constant (constants() leaves it out: fj_consts.fj is unchanged).
+    SLOT_ID_BITS: int = 8
 
     @property
     def LIST_WIDE(self) -> int:
@@ -363,6 +370,11 @@ MAP_CONFIG = {
     # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's ONLY entry -- the map page, at 40 units a pixel (doomfj.
     # automap). Every other field keeps its default, which is what E1M1 had with no entry at all
     "E1M1": {"AUTOMAP": 1},
+    # M8 C2 (docs/c2-slot-ids.md): the big maps' ids -- runtime things past 254 (E1M6 345, E1M7 337: the 12-bit lists of
+    # F1.5), monster + barrel slots past 254 (E1M6 291 + 7, E1M7 281 + 16: three-nibble slot ids), and more drawable
+    # things than a one-byte fragment slot id holds (E1M6 461, E1M7 606: the per-frame cap of F1.4, as E1M2's)
+    "E1M6": {"LIST_ID_BITS": 12, "SLOT_ID_BITS": 12, "SPR_SLOT_CAP": 255},
+    "E1M7": {"LIST_ID_BITS": 12, "SLOT_ID_BITS": 12, "SPR_SLOT_CAP": 255},
 }
 
 

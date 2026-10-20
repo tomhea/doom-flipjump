@@ -19,6 +19,11 @@ SPR-NEAR clamp; the height bucket), the pieces from the column's sfflag / sfslot
 upper and / or a lower side, one or two pieces, the last piece's row on the box's edge +-1, a DECOY at the other
 piece's offsets). Three more mutants: the test gone in the window's middle column, the bucket's INDEX taken for its
 height, the box from the sprite's top instead of the bucket's.
+
+M8 C2 (docs/c2-slot-ids.md): the same leaf at THREE-nibble slot ids (`leaf_lines(sn=3)`, E1M6's 291 + 7 slots): the
+id rides in `sp_sidw` (aimcode.sid_reg; `sp_sid` the aimable flag projection.fj's aim_hook tests) and every window cell
+is three nibbles; the ids and the prior cells straddle 0x100 (255, 256, 0x1FF, 0x200 ...). R9 there: a window cell
+written in two nibbles, and an empty-cell test on two nibbles (a cell holding 0x100 read as empty).
 """
 import random
 import struct
@@ -97,7 +102,10 @@ def _ref(tz, tx, xscale, sid, rc, drawn, sids, tzs, spz, viewz, sphh, ledge):
     return sids
 
 
-def _records(seed=3, barrels=False):
+WIDE_IDS = (1, 255, 256, 257, 0x1FF, 0x200, 0x2A1, 298)
+
+
+def _records(seed=3, barrels=False, wide=False):
     rng = random.Random(seed)
     out = []
     for _ in range(N):
@@ -107,6 +115,9 @@ def _records(seed=3, barrels=False):
         sid, rc = rng.randrange(1, 77 if barrels else 54), rng.randrange(3 if barrels else 2)
         drawn = [int(rng.random() < 0.2) for _ in range(AC.NCOLS)]
         sids = [rng.choice([0, 0, rng.randrange(1, 54)]) for _ in range(AC.NCOLS)]
+        if wide:                                                # M8 C2: ids and prior cells across 0x100
+            sid = rng.choice(WIDE_IDS + (rng.randrange(1, 299),))
+            sids = [rng.choice([0, 0, rng.choice(WIDE_IDS), rng.randrange(1, 299)]) for _ in range(AC.NCOLS)]
         tie = rng.random() < 0.35                               # equal depths: a tie must NOT overwrite
         tzs = [(tz >> 16 if tie else rng.randrange(0, 0x800)) if s else 0 for s in sids]
         viewz = (41 + rng.randrange(-60, 120)) << 16
@@ -141,41 +152,49 @@ def _ledge_col(rng, box):
 
 BARREL_MUTS = {"rc2": ("hex.if_flags sp_rc, %d, ar_r30, ar_r10" % (1 << AC.RC_BARREL),
                        "hex.if_flags sp_rc, %d, ar_r30, ar_r30" % (1 << AC.RC_BARREL))}
+# M8 C2 (sn 3): column 8's cell written in two nibbles; its empty test on two nibbles
+WIDE_MUTS = {"write2": ("hex.mov 3, aim_sid + 24*dw, sp_sidw", "hex.mov 2, aim_sid + 24*dw, sp_sidw"),
+             "empty2": ("hex.if0 3, aim_sid + 24*dw, aimw8", "hex.if0 2, aim_sid + 24*dw, aimw8")}
 
 
-def _program(mut=None, barrels=False):
-    leaf = "\n".join(AC.leaf_lines(CENTERX, barrels=barrels, centery=CENTERY, viewh=H))
+def _program(mut=None, barrels=False, wide=False):
+    sn = 3 if wide else 2
+    leaf = "\n".join(AC.leaf_lines(CENTERX, barrels=barrels, centery=CENTERY, viewh=H, sn=sn))
     if mut:
-        old, new = {**MUTS, **BARREL_MUTS}[mut]
+        old, new = {**MUTS, **BARREL_MUTS, **WIDE_MUTS}[mut]
         assert leaf.count(old) == 1, (mut, leaf.count(old))
         leaf = leaf.replace(old, new)
     nib = lambda n: sum(1 for _ in range(n))                     # noqa: E731
     body = ["stl.startup_and_init_all",
             "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
             "hex.input 4, pth_tz", "hex.input 4, pth_tx", "hex.input 4, pth_xscale",
-            "hex.input 1, sp_sid", "hex.input 1, rcin", "hex.mov 1, sp_rc, rcin",
+            *(["hex.input 1, sp_sid"] if not wide else
+              ["hex.input 2, sidin", "hex.mov 3, sp_sidw, sidin", "hex.set 2, sp_sid, 1"]),   # M8 C2: the flag
+            "hex.input 1, rcin", "hex.mov 1, sp_rc, rcin",
             "hex.input 4, sp_z", "hex.input 4, viewz", "hex.input 4, sp_hh",       # P11: the rows' inputs
             *["hex.input 1, t_in\nhex.set w/4, t_p, sfflag + %d*dw\nhex.write_byte t_p, t_in" % (AC.FIRST + c)
               for c in range(AC.NCOLS)],
             *["hex.input 1, t_in\nhex.set w/4, t_p, sfslot + %d*dw\nhex.write_byte t_p, t_in"
               % ((AC.FIRST + c) * STRIDE + o) for c in range(AC.NCOLS) for o in range(STRIDE)],
             *["hex.input 1, din\nhex.mov 1, drawn + %d*dw, din" % (AC.FIRST + c) for c in range(AC.NCOLS)],
-            *["hex.input 1, aim_sid + %d*dw" % (2 * c) for c in range(AC.NCOLS)],
+            *(["hex.input 1, aim_sid + %d*dw" % (2 * c) for c in range(AC.NCOLS)] if not wide else
+              ["hex.input 2, sidin\nhex.mov 3, aim_sid + %d*dw, sidin" % (3 * c) for c in range(AC.NCOLS)]),
             *["hex.input 2, tzin\nhex.mov 3, aim_tz + %d*dw, tzin" % (3 * c) for c in range(AC.NCOLS)],
             "stl.fcall aim_record, aim_ret",
-            *["hex.print_as_digit 2, aim_sid + %d*dw, 0\nstl.output 44" % (2 * c) for c in range(AC.NCOLS)],
+            *["hex.print_as_digit %d, aim_sid + %d*dw, 0\nstl.output 44" % (sn, sn * c) for c in range(AC.NCOLS)],
             "stl.output 10", ";loop",
             "done:", "stl.loop",
             leaf,
             "rmagic: hex.vec 2", "rcin: hex.vec 2", "din: hex.vec 2", "tzin: hex.vec 4",
             "t_in: hex.vec 2", "t_p: hex.vec w/4", "sp_z: hex.vec 8", "viewz: hex.vec 8", "sp_hh: hex.vec 8",
+            "sidin: hex.vec 4",
             wr.hoisted_scratch_fj(GAME_CFG),                       # pth_*, and P11's lb_* / lt_*
             generate_dispatch_table_fj("sprbkt", [0] + [sprite_bucket(h, H) | (sprite_bucket_height(
                 sprite_bucket(h, H), H) << 8) for h in range(1, H + 1)], index_nibbles=2, result_nibbles=4),
             "drawn:\n" + "\n".join(";0 * dw" for _ in range(GAME_CFG.VIEW_W)),
             "sfflag:\n" + "\n".join(";0 * dw" for _ in range(GAME_CFG.VIEW_W)),
             "sfslot:\n" + "\n".join(";0 * dw" for _ in range(GAME_CFG.VIEW_W * STRIDE)),
-            *AC.decls(barrels),
+            *AC.decls(barrels, sn),
             # the harness's r_eff pair, where the frame's prologue would have looked it up
             ]
     if barrels:
@@ -186,22 +205,24 @@ def _program(mut=None, barrels=False):
     return text + "\n"
 
 
-def _run(tmp_path, name, mut=None, barrels=False):
+def _run(tmp_path, name, mut=None, barrels=False, wide=False):
     src = tmp_path / (name + ".fj")
-    src.write_text(_program(mut, barrels), encoding="utf-8")
+    src.write_text(_program(mut, barrels, wide), encoding="utf-8")
     out = tmp_path / (name + ".fjm")
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
     from pathlib import Path
     fjdir = Path(__file__).resolve().parents[2] / "src" / "fj"
     fj.assemble([consts.resolve(), (fjdir / "fixed_point.fj").resolve(), (fjdir / "frame_render.fj").resolve(),
                  (fjdir / "projection.fj").resolve(), src.resolve()], out, memory_width=W, print_time=False)
-    recs = _records(barrels=barrels)
+    recs = _records(barrels=barrels, wide=wide)
     feed = b""
     for tz, tx, xs, sid, rc, drawn, sids, tzs, spz, viewz, sphh, ledge in recs:
-        feed += bytes([1]) + struct.pack("<III", tz & M32, tx & M32, xs & M32) + bytes([sid, rc])
+        feed += bytes([1]) + struct.pack("<III", tz & M32, tx & M32, xs & M32)
+        feed += (struct.pack("<H", sid) if wide else bytes([sid])) + bytes([rc])
         feed += struct.pack("<III", spz & M32, viewz & M32, sphh & M32)
         feed += bytes(lc[0] for lc in ledge) + b"".join(bytes(lc[1]) for lc in ledge)
-        feed += bytes(drawn) + bytes(sids) + b"".join(struct.pack("<H", t) for t in tzs)
+        feed += bytes(drawn) + (b"".join(struct.pack("<H", s) for s in sids) if wide else bytes(sids))
+        feed += b"".join(struct.pack("<H", t) for t in tzs)
     io = FixedIO(feed + bytes([0]))
     fj.run(out, io_device=io, print_time=False, print_termination=False)
     got = [[int(v, 16) for v in line.split(",")[:AC.NCOLS]]
@@ -239,6 +260,21 @@ def test_the_leaf_with_barrels_is_the_box_rule(tmp_path):
 @pytest.mark.parametrize("mut", sorted(BARREL_MUTS) + ["r+1"])
 def test_the_checks_catch_a_broken_barrel_leaf(tmp_path, mut):
     got, want, _ = _run(tmp_path, "b" + mut, mut, barrels=True)
+    assert got != want, "the mutant %s went unnoticed" % mut
+
+
+def test_the_leaf_at_three_nibble_ids_is_the_box_rule(tmp_path):
+    """M8 C2: barrels on, sn 3 -- the ids straddle 0x100 and every window cell is three nibbles"""
+    got, want, recs = _run(tmp_path, "aimw", barrels=True, wide=True)
+    bad = next((i for i, (g, w) in enumerate(zip(got, want)) if g != w), None)
+    assert len(got) == N and bad is None, "record %d: %s != %s" % (bad, got[bad], want[bad])
+    took = [w[c] for w, r in zip(want, recs) for c in range(AC.NCOLS) if w[c] != r[6][c]]
+    assert {256, 0x200} <= set(took) and max(took) > 0xFF, sorted(set(took))[-5:]
+
+
+@pytest.mark.parametrize("mut", sorted(WIDE_MUTS))
+def test_the_checks_catch_a_narrow_cell_at_three_nibbles(tmp_path, mut):
+    got, want, _ = _run(tmp_path, "w" + mut, mut, barrels=True, wide=True)
     assert got != want, "the mutant %s went unnoticed" % mut
 
 

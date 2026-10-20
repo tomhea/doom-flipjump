@@ -79,6 +79,13 @@ survey rows marked **NEW**, and emit_check's stale stand-in refusal.
 | L54 | an E1M2 S1 door switch's latch is not kept: its doors must be open-stay | handoff-e1m2 11 | SURVEY guard "door switches (SR 63 / S1 103)" (`switch_door_triggers` asserts) |
 | L55 | a closing door some box fits inside needs a centre-inside test doorcode does not run | handoff-e1m2 11 | SURVEY "closing doors a box fits inside" (REFUSED: E1M4 102) |
 | L56 | one teleport per move: a destination within a teleport line's reach | handoff-e1m2 3; `teleport.check_one_per_move` | SURVEY (the filtered World refuses; now visible in the matrix: **E1M7 line 516's destination within line 52**) |
+| L57 | slot ids (aim, damage, attacker, target, infighting, the scheduler) were two nibbles in ~15 emitters; the survey saw only `aim_sid` (World's assert): `mt_n` set to 291 in two nibbles, a 2-nibble `dm_id` on id 256, would have WRAPPED silently | C2 (docs/c2-slot-ids.md) | SURVEY "monster slots + barrels (slot ids, Config.SLOT_ID_BITS)" + INFO "slot id bits needed"; EMIT `wall_renderer.check_slot_bits`; TEST `tests/host/test_wide_slots.py`, the fj harnesses at E1M6 (tests/fj/wide_maps.py) |
+| L58 | a LIBRARY macro read an id in two nibbles (projection.fj `proj.aim_hook`: `hex.if0 2, sp_sid`) -- widening the emitters alone would make id 0x100 unaimable | C2 | `aimcode.sid_reg` (a 3-nibble `sp_sidw` beside the 2-nibble flag: the library untouched); TEST `test_aim_record_fj` wide controls; PROSE ONLY as a rule: grep src/fj for a register before widening it |
+| L59 | the survey's "drawable things" row ignored `SPR_SLOT_CAP`: OVER on E1M2, which emits and ships | C2 | SURVEY (the row reads the map's cap); TEST `test_level_survey.py::test_the_drawable_row_reads_the_maps_slot_cap` (control: the cap removed) |
+| L60 | a World refused for ONE reason hid every row computed from it (E1M7's slot ids behind C5's teleport) | C2 | SURVEY: the slot rows and the runtime-ids row from `world.level_things` when the World refuses; TEST `test_the_slot_rows_survive_a_world_refused_for_another_reason` |
+| L61 | LEVEL COMPLETE's kill / item counters were 8-bit cells: past 255 monsters both mirrors WRAP (no crash, a wrong number) | C2 | SURVEY "monsters on LEVEL COMPLETE" against `statcode.count_nibbles`; TEST `test_level_done_fj` (E1M6: 255 / 256 / 291; control: the low-byte division) |
+| L62 | an fj harness on a big map is a heavy job: test_monster_hitscan_fj at E1M6 reached 12 GB private | C2 (the coordinator, 2026-10-19) | TOOL `heavy.py` (a --light command naming tests/fj runs heavy) |
+| L63 | source-text tests pin call text (test_p5_splice's `loot=_LOOT) if menu else None`, test_p8a_interface's needles and a 1-argument monkeypatch of `monster_slot_lines`): a plumbing-only change breaks them | C2 | PROSE ONLY: keep a pinned call's text (add a keyword elsewhere) or update the needle in the same commit; run tests/host before committing |
 
 ## 2. E1M1's gameplay lessons (M7) a new level's features can hit again
 
@@ -146,7 +153,7 @@ survey rows marked **NEW**, and emit_check's stale stand-in refusal.
 | E1M3, E1M4, E1M9 | pool at spread 2 110% / 129% / 117%: build at `--spread 1` (E1M5, E1M8: spread 2) | L19 | the level rung |
 | E1M5 | WARN (if SECTOR_LIGHTS on): a fire flicker in sector 31 with maxlight 256 -- a light state past the byte | L43 | the lights, if E1M5 gets them |
 | E1M6 | REFUSED: 2 segs (1254, 1348: shut at states 0-7 of 182); pool 100% at spread 1 (at the edge); RAM ~20.8 GB projected | L35, L19, L20 | C4; the E1M6 probe |
-| E1M6, E1M7 | the filtered World refuses: "leaf lists store mobile index + 1 in a byte" (was hidden by the matrix) | L29 | C1 / C2 |
+| E1M6, E1M7 | the filtered World refuses: "leaf lists store mobile index + 1 in a byte" (was hidden by the matrix) | L29 | C1 / C2: DONE (12-bit lists, 3-nibble slot ids: MAP_CONFIG E1M6 / E1M7; docs/c2-slot-ids.md) |
 | E1M7 | the filtered World refuses: line 516's teleport destination (1568, 1312) lies within line 52 (one teleport per move; was hidden) | L29, L56 | C5 (teleports) |
 | E1M7 | REFUSED: 7 segs (269, 272, 2579, 3461, 3469, 3489, ...); pool 157% at spread 1 and ~32.8 GB RAM projected (WARN both); two exit switch lines (WARN if SWITCH_TEX) | L35, L19, L20, L43 | C11's feasibility probe; C9 |
 | E1M8 | WRONG: NEW GAME keeps the floors moved -- 3 floor groups, 0 lifts (`restart_lines` zeroes `fswitch` only with a lift) | L36 | the fix belongs in `wall_renderer.restart_lines` (both mirrors' restart): E1M8's level rung or C4 |

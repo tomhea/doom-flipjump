@@ -322,6 +322,16 @@ class Survey:
                 gd.NOT_THINGS = saved
             w = holder.get("w")
             if w is None:
+                # M8 C2 (docs/c2-slot-ids.md): the slot-id rows need only the level's things -- report them from the
+                # WAD's lists (World's own `level_things`) when the World refuses for another reason (E1M7: a teleport)
+                gd.NOT_THINGS = frozenset(saved | unknown)
+                try:
+                    from doomfj.world import level_things
+                    _t, mon, bar = level_things(self.wad, self.m)
+                finally:
+                    gd.NOT_THINGS = saved
+                self._slot_caps(len(mon), len(bar), " (from the WAD's things: the World refused)")
+                self.facts["_level_things"] = (_t, mon, bar)
                 return
             self.row("INFO", "the counts below exclude the unknown thing types", sorted(unknown))
         else:
@@ -330,17 +340,19 @@ class Survey:
         nmon, nbar = len(w.mon_things), len(w.barrel_things)
         self.facts.update(monsters=nmon, barrels=nbar, pickups=len(w.pickup_things), secrets=len(w.secret_sectors),
                           sound_nodes=getattr(w, "nsound", "?"))
-        self.cap("monster slots + barrels (dm_id/sp_sid, 2 nibbles)", nmon + nbar, 254)
+        self._slot_caps(nmon, nbar)
         from doomfj.world import aim_bits
-        self.cap("monsters + barrels -> aim_sid (world.aim_bits: the fj byte)", nmon + nbar, 0xFF,
-                 "aim_sid %d bits" % aim_bits(w.layout))
+        self.cap("monsters + barrels -> aim_sid (world.aim_bits: the fj cell)", nmon + nbar,
+                 0xFF if aim_bits(w.layout) <= 8 else 0xFFF, "aim_sid %d bits" % aim_bits(w.layout))
         self.row("OK" if nbar else "REFUSED", "barrels >= 1 (barrelcode asserts one)", nbar)
-        from doomfj.statcode import count_digits
-        self.cap("monsters on LEVEL COMPLETE (an 8-bit cell; statcode.count_digits)", nmon, 0xFF,
-                 "%d digits a count" % count_digits(w))
+        from doomfj.statcode import count_digits, count_nibbles
+        # M8 C2: the counters are 12-bit cells on a map past a byte (world.count_bits); three digits hold 999
+        cmax = 0xFF if count_nibbles(w) == 2 else 999
+        self.cap("monsters on LEVEL COMPLETE (st_kill: statcode.count_nibbles / count_digits)", nmon, cmax,
+                 "%d nibbles, %d digits a count" % (count_nibbles(w), count_digits(w)))
         from doomfj import statcode
         items = sum(1 for t in w.pickup_things if statcode.counts_item(t.type))
-        self.cap("COUNTITEM pickups on LEVEL COMPLETE (an 8-bit cell)", items, 0xFF)
+        self.cap("COUNTITEM pickups on LEVEL COMPLETE (st_item: statcode.count_nibbles)", items, cmax)
         self.cap("secret sectors on LEVEL COMPLETE (p_secretcount 4 bits, 1 digit)", len(w.secret_sectors), 9)
         self.cap("pickups (pkxyz index, 2 nibbles)", len(w.pickup_things), 256, strict_less=True)
         self.guard("statcode.check_world", lambda: statcode.check_world(w) if hasattr(statcode, "check_world") else None)
@@ -358,6 +370,20 @@ class Survey:
         self.row("OK", "solid decorations some skill lacks (monstercode: mc_don at NEW GAME)",
                  len(var), "", "" if not var else "mc_don flags for decor_solid indices %s" % var[:10])
 
+    def _slot_caps(self, nmon: int, nbar: int, src: str = ""):
+        """M8 C2 (docs/c2-slot-ids.md): the monster + barrel SLOT IDS against the map's Config.SLOT_ID_BITS (MAP_CONFIG:
+        254 slots at 8 bits, SLOT_IDS_WIDE at 12), and an INFO row with the width the counts need (world.slot_nibbles)
+        -- a mismatch is what the emitter refuses"""
+        from types import SimpleNamespace
+        from doomfj.world import SLOT_IDS_NARROW, SLOT_IDS_WIDE, slot_nibbles
+        bits = map_cfg(Config(), self.m).SLOT_ID_BITS
+        self.cap("monster slots + barrels (slot ids, Config.SLOT_ID_BITS: aim_sid, dm_id, the codes)", nmon + nbar,
+                 SLOT_IDS_NARROW if bits == 8 else SLOT_IDS_WIDE, "%d-bit slot ids%s" % (bits, src))
+        need = 4 * slot_nibbles(SimpleNamespace(nmon=nmon, nbarrel=nbar)) if nmon + nbar <= SLOT_IDS_WIDE else None
+        self.row("INFO", "slot id bits needed (world.slot_nibbles)", need if need else "> 12", "",
+                 "MAP_CONFIG has %d%s" % (bits, "" if need == bits else
+                                         ": set SLOT_ID_BITS %s (C2)" % need if need else ": past three nibbles"))
+
     def render_caps(self):
         from doomfj import wall_renderer as WR
         from doomfj.mapcompiler import bake_bsp
@@ -369,7 +395,15 @@ class Survey:
         baked = baked_thing_mask(rm, cmap, draw, WR.MONSTER_TYPES,     # M8 F1.3: things on movers run
                                  **mover_mask_kw(rm, cmap, draw, mover_leaves(self.wad, self.m, cmap)))
         nt = len({i for i, b in zip(draw_idx, baked) if not b})
-        self.cap("drawable things, every skill (1-byte fragment slot id)", len(draw), 256, strict_less=True)
+        # M8 C2: a map with a per-frame cap (Config.SPR_SLOT_CAP, F1.4: E1M2) holds any count -- the row was OVER on
+        # E1M2, which emits and ships (wall_renderer.check_slot_ids is the emitter's own rule)
+        slot_cap = map_cfg(Config(), self.m).SPR_SLOT_CAP
+        if slot_cap:
+            self.row("OK", "drawable things, every skill (1-byte fragment slot id)", len(draw), "",
+                     "Config.SPR_SLOT_CAP %d a frame (MAP_CONFIG; wall_renderer.check_slot_ids)" % slot_cap)
+        else:
+            self.cap("drawable things, every skill (1-byte fragment slot id)", len(draw), 256, strict_less=True,
+                     note="past it: MAP_CONFIG SPR_SLOT_CAP 255 (F1.4)")
         # M8 F1.5 (docs/f1-runtime-ids.md): the lists' id width is the map's Config.LIST_ID_BITS (MAP_CONFIG) -- 8 bits
         # hold 254 ids, 12 hold 4,094 (things.list_max); the caps below are against the map's OWN width
         from doomfj.things import list_bits, list_max
@@ -379,10 +413,16 @@ class Survey:
         # F1 item 12 (docs/f1-big-map-widths.md 0.3): the lists hold the runtime things, the fireball and effect pools
         # and every monster drop -- the sum monstercode.p31_parts bounds by list_max(LIST_ID_BITS)
         def ids():
-            from doomfj.barrelcode import droppers
             from doomfj.world import FIREBALL_POOL, FX_POOL, World
-            w = self.facts.get("_world") or World(self.wad, self.m, monsters="idle")
-            n = nt + FIREBALL_POOL + FX_POOL + len(droppers(w))
+            if self.facts.get("_world") is None and self.facts.get("_level_things"):
+                # M8 C2: the World refused for another reason -- the droppers from the WAD's monsters (combat's rule)
+                from doomfj.combat import DROP_ITEM
+                ndrop = sum(1 for t in self.facts["_level_things"][1]
+                            if DROP_ITEM.get(gd.DROPS.get(gd.MONSTER_DOOMEDNUMS[t.type])) is not None)
+            else:
+                from doomfj.barrelcode import droppers
+                ndrop = len(droppers(self.facts.get("_world") or World(self.wad, self.m, monsters="idle")))
+            n = nt + FIREBALL_POOL + FX_POOL + ndrop
             self.cap("runtime ids: things + pools + drops (list cells, Config.LIST_ID_BITS)", n, list_max(lbits),
                      "%d-bit lists (MAP_CONFIG)" % lbits)
             need = list_bits(n) if n <= list_max(12) else None

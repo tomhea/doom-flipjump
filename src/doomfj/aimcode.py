@@ -6,6 +6,8 @@ weapon reads it (`window_aim`). The binary records it where it projects things: 
 leaf `aim_record` right after `pth_xscale` (its `aim` parameter is 1 for the runtime monsters' projections only, so a
 baked thing never records). `sp_sid` is the thing's id (0 = not shootable: its row-select stub sets it) and `sp_rc`
 its radius class (0 = 20, 1 = 30).
+M8 C2 (docs/c2-slot-ids.md): on a map past 254 monster + barrel slots (world.slot_nibbles 3) every id is THREE nibbles
+(aim_sid's cells) and the stub writes it into `sp_sidw`; `sp_sid` is then the aimable flag (`sid_reg`).
 
 THE LEAF (gp-aim-window 1.4 -- no divide):
   * range: tz <= 2048 << 16 (MISSILERANGE along the view axis); MINZ, the base far bound and the FOV test are
@@ -53,9 +55,29 @@ def reff_values(rm, barrels: bool = False) -> List[int]:
     return out
 
 
-def decls(barrels: bool = False) -> List[str]:
-    return [f"aim_sid: hex.vec {2 * NCOLS}", f"aim_tz: hex.vec {3 * NCOLS}", f"aim_rr: hex.vec {6 if barrels else 4}",
-            "aim_ret: hex.vec w/4", "sp_sid: hex.vec 2", "sp_rc: hex.vec 1",
+def sid_reg(sn: int = 2) -> str:
+    """M8 C2 (docs/c2-slot-ids.md): the register holding a projected thing's aim ID -- `sp_sid` itself at two nibbles;
+    at three (world.slot_nibbles 3) `sp_sidw`, while `sp_sid` stays the 2-nibble AIMABLE flag projection.fj's
+    `proj.aim_hook` tests (`hex.if0 2, sp_sid`: the library is untouched, and an id like 0x100 would read as 0 there)"""
+    assert sn in (2, 3), sn
+    return "sp_sid" if sn == 2 else "sp_sidw"
+
+
+def sid_set_lines(value: int, sn: int = 2, indent: str = "    ") -> List[str]:
+    """a row-select stub's aim id `value` (non-zero): `hex.set 2, sp_sid, value` -- M8 C2 at three nibbles the flag
+    1 and the id in sp_sidw (`sid_reg`)"""
+    assert 0 < value < 16 ** sn, (value, sn)
+    if sn == 2:
+        return [indent + "hex.set 2, sp_sid, %d" % value]
+    return [indent + "hex.set 2, sp_sid, 1", indent + "hex.set 3, sp_sidw, %d" % value]
+
+
+def decls(barrels: bool = False, sn: int = 2) -> List[str]:
+    """M8 C2 (`sn`, world.slot_nibbles): a slot id's nibbles -- aim_sid's per column; at 3 the id register sp_sidw
+    beside the flag sp_sid (`sid_reg`)"""
+    return [f"aim_sid: hex.vec {sn * NCOLS}", f"aim_tz: hex.vec {3 * NCOLS}", f"aim_rr: hex.vec {6 if barrels else 4}",
+            "aim_ret: hex.vec w/4", "sp_sid: hex.vec 2", *(["sp_sidw: hex.vec 3"] if sn == 3 else []),
+            "sp_rc: hex.vec 1",
             "ar_p: hex.vec 8", "ar_q: hex.vec 8", "ar_r16: hex.vec 8", "ar_x1: hex.vec 8", "ar_x2: hex.vec 8",
             "ar_lo: hex.vec 2", "ar_n: hex.vec 2", "ar_tzi: hex.vec 3",
             # P11 (d): the thing's bucket box (proj.thing_rows, sprbkt, frame.ledge_box) and a column's piece counts
@@ -64,17 +86,18 @@ def decls(barrels: bool = False) -> List[str]:
             f"ar_maxtz: hex.vec 8, {MAXTZ}", f"ar_c72: hex.vec 8, {FIRST}", f"ar_c88: hex.vec 8, {FIRST + NCOLS - 1}"]
 
 
-def prologue_lines() -> List[str]:
-    """the frame's start: an empty window, and this frame's r_eff pair (one lookup on the view angle)"""
-    return [f"hex.zero {2 * NCOLS}, aim_sid", "aimr.lookup aim_rr, viewangle + 6*dw"]
+def prologue_lines(sn: int = 2) -> List[str]:
+    """the frame's start: an empty window, and this frame's r_eff pair (one lookup on the view angle). M8 C2: `sn`"""
+    return [f"hex.zero {sn * NCOLS}, aim_sid", "aimr.lookup aim_rr, viewangle + 6*dw"]
 
 
-def leaf_lines(centerx: int, barrels: bool = False, *, centery: int, viewh: int) -> List[str]:
+def leaf_lines(centerx: int, barrels: bool = False, *, centery: int, viewh: int, sn: int = 2) -> List[str]:
     """`aim_record:` ... `stl.fret aim_ret` -- fcall'd from project_thing after pth_xscale, with sp_sid != 0.
     M7 P6 (`barrels`): class RC_BARREL reads r_eff(10). P11 (d): a column where the thing's bucket box is FULLY
     behind the column's nearer pieces (frame.ledge_test, the oracle's ledge_hidden) is skipped as a wall-drawn one is
-    -- the box from project_thing's own rows (proj.thing_rows), taken once the box meets the window"""
-    assert RC_BARREL == 2
+    -- the box from project_thing's own rows (proj.thing_rows), taken once the box meets the window. M8 C2 (`sn`,
+    world.slot_nibbles): a slot id's nibbles -- aim_sid's cells and sp_sid (3 on a map past 254 slots)"""
+    assert RC_BARREL == 2 and sn in (2, 3)
     check_minz_first()
     # issue #119 item 4: `hex.cmp` is UNSIGNED on the signed pth_tz -- exact only because pth_tz is positive here:
     # project_thing's MINZ reject (`hex.scmp`, signed) runs before this leaf is called, and 0 < MINZ < MAXTZ < 2^31
@@ -138,10 +161,10 @@ def leaf_lines(centerx: int, barrels: bool = False, *, centery: int, viewh: int)
                 "hex.read_byte ar_cv, ar_fp",                                       # on the full arm
                 f"hex.set 2, ar_colx, {x}",
                 f"frame.ledge_test ar_cv, ar_colx, ar_ylo1, ar_yhi1, 0, aimx{c}",  # fully behind them: skip
-                f"hex.if0 2, aim_sid + {2 * c}*dw, aimw{c}",                       # empty: take it
+                f"hex.if0 {sn}, aim_sid + {sn * c}*dw, aimw{c}",                     # empty: take it
                 f"hex.cmp 3, ar_tzi, aim_tz + {3 * c}*dw, aimw{c}, aimx{c}, aimx{c}",   # strictly nearer
                 f"aimw{c}:",
-                f"hex.mov 2, aim_sid + {2 * c}*dw, sp_sid",
+                f"hex.mov {sn}, aim_sid + {sn * c}*dw, {sid_reg(sn)}",
                 f"hex.mov 3, aim_tz + {3 * c}*dw, ar_tzi",
                 f"aimx{c}:",
                 "hex.dec 2, ar_n", "hex.if0 2, ar_n, ar_out"]

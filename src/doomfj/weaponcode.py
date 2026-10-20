@@ -193,7 +193,7 @@ def _by_ready(prefix: str, target: Dict[int, str]) -> List[str]:
 
 
 def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, noise: bool = False,
-                 hurt: bool = False, loot: bool = False, tics: Optional[int] = None) -> List[str]:
+                 hurt: bool = False, loot: bool = False, tics: Optional[int] = None, sn: int = 2) -> List[str]:
     """the frame's weapon tic: the number keys, then P_MovePsprites (the weapon, then the flash), then the bar's ammo
     and arms. Falls through at `wp_end`. Uses `pkeys` (fire: the high nibble's bit 3) and the number keys as the frame
     acts on them -- P9: `kb_now`'s nibbles (doomfj.keyboard.now_cell: held, or pressed during this frame's polls).
@@ -209,7 +209,8 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
     `tics` (M7 P6+P7, the owner's x2 fire rate): P_MovePsprites runs this many times a frame -- the ONE weapon + flash
     block, looped on the scratch counter `wp_pass` (back to 0 when the loop ends), the keys before it and the bar
     after it once; default `world.WEAPON_TICS`, the model's own count (`combat._weapon_tics`). At 1 the text is the
-    P5 one to the byte (no loop label, no counter read)."""
+    P5 one to the byte (no loop label, no counter read).
+    M8 C2 (`sn`, world.slot_nibbles): the shot's ids -- aim_sid's cells and dm_id -- three nibbles past 254 slots."""
     if tics is None:
         from doomfj.world import WEAPON_TICS as tics
     assert 1 <= tics < 16, tics                                      # wp_pass is one nibble
@@ -270,7 +271,7 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
         st = gd.STATES[s]
         out += [f"{wen(s)}:", f"hex.set 2, wp_st, {idx[s]}", f"hex.set 1, wp_tics, {st.tics}",
                 f"hex.set {FRAME_NIBBLES}, wp_frm, {frames.index(psprite_lump(s))}"]
-        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise, hurt, loot, state=s)
+        out += _action(st.action, f"a{idx[s]}", wen, fen, flash_frame, shoot, noise, hurt, loot, state=s, sn=sn)
         out += [f";{wen(st.next)}" if st.tics == 0 else ";wp_flash"]
     # -- 3. P_MovePsprites, the flash
     out += ["wp_flash:",
@@ -294,7 +295,7 @@ def weapon_lines(states: List[str], frames: List[str], shoot: bool = False, nois
                 f"hex.set 1, fl_frm, {flash_frame[s]}",
                 f";{fen(st.next)}" if st.tics == 0 else "stl.fret fl_ret"]
     if shoot:                                   # the shot's leaves: out of line, after the flash's last fret
-        out += shot_leaves()
+        out += shot_leaves(sn)
     # a state cell holding no state of its psprite: the program's halt (never reached by a fall-through)
     out += ["wp_bad:", ";bad"]
     if looped:                                  # M7 P6+P7: one pass done -- another, or the counter back to 0 and on
@@ -404,7 +405,7 @@ def _hp_le0(p: str, yes: str) -> List[str]:
 
 
 def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: bool = False,
-            hurt: bool = False, loot: bool = False, state: Optional[str] = None) -> List[str]:
+            hurt: bool = False, loot: bool = False, state: Optional[str] = None, sn: int = 2) -> List[str]:
     """one state's action, inline; it ends by falling through (no psprite set) or by a tail jump. `shoot`: the fire
     actions resolve their shots (`_shot_*`) instead of only advancing the stream. `hurt` (M7 P5): the health and
     death reads (weapon_lines)."""
@@ -464,7 +465,7 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: b
         out = [f"hex.sub_constant 3, {AMMO_CELL[info[w].ammo]}, 1",
                f"stl.fcall {fen(info[w].flashstate)}, fl_ret"]
         if shoot:
-            return out + (_shot_pistol(p) if pistol else _shot_shotgun(p))
+            return out + (_shot_pistol(p, sn) if pistol else _shot_shotgun(p))
         if pistol:                                                       # accurate = no refire: 1 draw, else 3
             out += [f"hex.if0 2, wp_rf, {p}acc", f"hex.add_constant 2, rng_pl, {DRAWS['gunshot']}", f";{p}drw",
                     f"{p}acc:", f"hex.add_constant 2, rng_pl, {DRAWS['pistol_acc']}", f"{p}drw:"]
@@ -479,7 +480,7 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: b
                "hex.sub_constant 3, am_clip, 1",
                f"stl.fcall {fen(CGUN_FLASH[state])}, fl_ret"]
         if shoot:
-            out += _shot_pistol(p)
+            out += _shot_pistol(p, sn)
         else:
             out += [f"hex.if0 2, wp_rf, {p}acc", f"hex.add_constant 2, rng_pl, {DRAWS['gunshot']}", f";{p}drw",
                     f"{p}acc:", f"hex.add_constant 2, rng_pl, {DRAWS['pistol_acc']}", f"{p}drw:"]
@@ -490,9 +491,9 @@ def _action(action, p: str, wen, fen, flash_frame, shoot: bool = False, noise: b
         return ([f"hex.sub_constant 3, {AMMO_CELL[info[gd.WP_MISSILE].ammo]}, 1"]
                 + (["stl.fcall rk_spawn, rk_sret"] if loot else []))
     if action == "A_Punch":
-        return _shot_melee(p, "punch", loot) if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['punch']}"]
+        return _shot_melee(p, "punch", loot, sn) if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['punch']}"]
     if action == "A_Saw":
-        return _shot_melee(p, "saw") if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['saw']}"]
+        return _shot_melee(p, "saw", sn=sn) if shoot else [f"hex.add_constant 2, rng_pl, {DRAWS['saw']}"]
     raise NotImplementedError("%s on an E1M1 psprite" % action)
 
 
@@ -505,6 +506,11 @@ AIM_N = AIM_COLUMNS                             # aim_sid's cells: the window's 
 SHOT_PELLETS = 7                                # A_FireShotgun: 7 x P_GunShot (combat._psp_action)
 SHOT_ROW_NIBBLES = 5                            # wpo's row: melee damage (0-1), gun damage (2), column index (3-4)
 DM_CELLS = (("dm_id", 2), ("dm_dmg", 2), ("dm_melee", 1), ("dm_reach", 2))   # the damage machinery's arguments
+
+
+def dm_cells(sn: int = 2) -> tuple:
+    """DM_CELLS at M8 C2's slot-id width `sn` (world.slot_nibbles): dm_id is `sn` nibbles"""
+    return tuple((c, sn if c == "dm_id" else n) for c, n in DM_CELLS)
 
 
 def shot_row(melee: int, gun: int, col: int) -> int:
@@ -580,9 +586,10 @@ def shot_table_fj(rm=None) -> str:
     return generate_dispatch_table_fj("wpo", shot_values(rm), index_nibbles=2, result_nibbles=SHOT_ROW_NIBBLES)
 
 
-def shot_decls() -> List[str]:
-    """the shot's cells: the row, the leaves' fcall register, and the damage machinery's four arguments"""
-    return [f"sh_row: hex.vec {SHOT_ROW_NIBBLES}", "sh_ret: hex.vec w/4"] + [f"{c}: hex.vec {n}" for c, n in DM_CELLS]
+def shot_decls(sn: int = 2) -> List[str]:
+    """the shot's cells: the row, the leaves' fcall register, and the damage machinery's four arguments (M8 C2: dm_id
+    `sn` nibbles)"""
+    return [f"sh_row: hex.vec {SHOT_ROW_NIBBLES}", "sh_ret: hex.vec w/4"] + [f"{c}: hex.vec {n}" for c, n in dm_cells(sn)]
 
 
 def _col_tree(cell: str) -> List[str]:
@@ -596,32 +603,32 @@ def _col_tree(cell: str) -> List[str]:
     return out
 
 
-def shot_leaves() -> List[str]:
+def shot_leaves(sn: int = 2) -> List[str]:
     """the shot's fcall'd leaves (`sh_ret`). `sh_rd3`: a 3-draw shot -- the row at the post-increment state, the
     stream +3 in all -- then `sh_col`: dm_id = aim_sid at the row's column. `sh_gun`: a bullet's hand-off -- when
-    dm_id names a target, the gun damage, not melee, and `dm_go`."""
+    dm_id names a target, the gun damage, not melee, and `dm_go`. M8 C2: `sn` -- the ids' width"""
     out = ["// M7 P4.2a: the shot's leaves",
            "sh_rd3:", "hex.inc 2, rng_pl", "wpo.lookup sh_row, rng_pl", "hex.add_constant 2, rng_pl, 2",
            "sh_col:", "hex.if_flags sh_row + 4*dw, 1<<1, shc_3_0, shc_c16"]
     out += _col_tree("sh_row + 3*dw")
     for c in range(AIM_N):
-        out += [f"shc_c{c}:", f"hex.mov 2, dm_id, aim_sid + {2 * c}*dw", ";shc_end"]
+        out += [f"shc_c{c}:", f"hex.mov {sn}, dm_id, aim_sid + {sn * c}*dw", ";shc_end"]
     out += ["shc_end:", "stl.fret sh_ret",
-            "sh_gun:", "hex.if0 2, dm_id, shg_end",
+            "sh_gun:", f"hex.if0 {sn}, dm_id, shg_end",
             "hex.zero 1, dm_dmg + dw", "hex.mov 1, dm_dmg, sh_row + 2*dw", "hex.zero 1, dm_melee",
             "stl.fcall dm_go, dm_ret",
             "shg_end:", "stl.fret sh_ret"]
     return out
 
 
-def _shot_pistol(p: str) -> List[str]:
+def _shot_pistol(p: str, sn: int = 2) -> List[str]:
     """A_FirePistol's P_GunShot: accurate (refire 0) -- one draw, the gun damage, the window's centre -- else a
     3-draw bullet"""
     lo, centre, _hi = shot_window()
     return [f"hex.if0 2, wp_rf, {p}acc",
             "stl.fcall sh_rd3, sh_ret", "stl.fcall sh_gun, sh_ret", f";{p}drw",
             f"{p}acc:", "hex.inc 2, rng_pl", "wpo.lookup sh_row, rng_pl",
-            f"hex.mov 2, dm_id, aim_sid + {2 * (centre - lo)}*dw",
+            f"hex.mov {sn}, dm_id, aim_sid + {sn * (centre - lo)}*dw",
             "stl.fcall sh_gun, sh_ret",
             f"{p}drw:"]
 
@@ -634,14 +641,14 @@ def _shot_shotgun(p: str) -> List[str]:
     return out
 
 
-def _shot_melee(p: str, site: str, loot: bool = False) -> List[str]:
+def _shot_melee(p: str, site: str, loot: bool = False, sn: int = 2) -> List[str]:
     """A_Punch / A_Saw: a 3-draw shot; when the window names a target, the melee damage and the weapon's reach.
     `loot` (M7 P6): A_Punch's berserk `damage *= 10` while `p_str` runs (`bk10`)"""
     from doomfj.combat import PUNCH_REACH, SAW_REACH
     reach = {"punch": PUNCH_REACH, "saw": SAW_REACH}[site]
     berserk = ([f"hex.if0 4, p_str, {p}nb", "bk10.lookup dm_dmg, sh_row", f"{p}nb:"]
                if loot and site == "punch" else [])
-    return ["stl.fcall sh_rd3, sh_ret", f"hex.if0 2, dm_id, {p}sx",
+    return ["stl.fcall sh_rd3, sh_ret", f"hex.if0 {sn}, dm_id, {p}sx",
             "hex.mov 2, dm_dmg, sh_row", *berserk, "hex.set 1, dm_melee, 1", f"hex.set 2, dm_reach, {reach}",
             "stl.fcall dm_go, dm_ret",
             f"{p}sx:"]
@@ -684,7 +691,7 @@ def bk10_table_fj() -> str:
 
 
 def weapon_parts(map_wad, mapname: str, shoot: bool = False, noise: bool = False, hurt: bool = False,
-                 loot: bool = False, tics: Optional[int] = None) -> dict:
+                 loot: bool = False, tics: Optional[int] = None, sn: int = None) -> dict:
     """everything the game tier's emitter splices in for the weapon: `decls` (the cells, the two constants, the ammo
     digit table), `tic` (the frame's weapon lines), `restart` (NEW GAME's values). `shoot` (P4.2a) adds the shot's
     cells to `decls`, the `wpo` table to `tables` and its leaves to `tic`; the program must then also hold `aim_sid`
@@ -694,15 +701,19 @@ def weapon_parts(map_wad, mapname: str, shoot: bool = False, noise: bool = False
     hurtcode.HURT_PLAYER_MODES) reads the health and death cells: the program must then hold hurtcode's decls.
     `loot` (M7 P6 + P7, lootcode.LOOT_PLAYER_MODES): the latch, berserk's key 1 and fist (`bk10` in `tables`); the
     program must then hold lootcode's decls (p_dd0, p_str). `tics` (M7 P6+P7): P_MovePsprites per frame, default
-    `world.WEAPON_TICS` (weapon_lines)."""
+    `world.WEAPON_TICS` (weapon_lines). M8 C2: `sn` -- the shot's slot-id width (None: the map's, world.slot_nibbles
+    of the level start's World)."""
     from doomfj.lut_generator import generate_dispatch_table_fj
     start = level_start(map_wad, mapname)
+    if sn is None:
+        from doomfj.world import World, slot_nibbles
+        sn = slot_nibbles(World(map_wad, mapname, gd.SK_HARD, monsters="idle", player="fire").layout)
     states, frames = weapon_states(), overlay_frames()
     tables = [generate_dispatch_table_fj("ammobcd", ammo_digit_values(), index_nibbles=3, result_nibbles=3)]
     return {"decls": (weapon_decls(start, states, frames, misl=not loot) + weapon_const_decls()   # P9: am_misl
-                      + (shot_decls() if shoot else [])),
+                      + (shot_decls(sn) if shoot else [])),
             "tables": tables + ([shot_table_fj()] if shoot else []) + ([bk10_table_fj()] if loot else []),
-            "tic": weapon_lines(states, frames, shoot, noise, hurt, loot=loot, tics=tics),
+            "tic": weapon_lines(states, frames, shoot, noise, hurt, loot=loot, tics=tics, sn=sn),
             # M7 P6+P7: with `loot` the bar's weapon slots are copied AFTER the move (the pickups): the frame places it
             "bar": bar_lines() if loot else [],
             "restart": restart_lines(start, states, frames),

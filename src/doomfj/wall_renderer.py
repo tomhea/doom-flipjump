@@ -672,18 +672,32 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
     return common, skills
 
 
+def check_slot_bits(cfg, mapname: str, layout) -> int:
+    """M8 C2 (docs/c2-slot-ids.md): a monster / barrel SLOT ID's width in nibbles -- derived from the map's counts
+    (world.slot_nibbles: 3 past 254 slots, E1M6 / E1M7) -- after refusing a map whose Config.SLOT_ID_BITS (MAP_CONFIG)
+    does not name it: a big map without its entry fails at emission, never in a gate"""
+    from doomfj.world import slot_nibbles
+    sn = slot_nibbles(layout)
+    bits = map_cfg(cfg, mapname).SLOT_ID_BITS
+    assert bits == 4 * sn, (
+        "M8 C2: %s has %d monster + barrel slots -- slot ids %d bits (world.slot_nibbles); its Config.SLOT_ID_BITS is "
+        "%d: set MAP_CONFIG[%r]['SLOT_ID_BITS'] (docs/c2-slot-ids.md)"
+        % (mapname, layout.nmon + layout.nbarrel, 4 * sn, bits, mapname.upper()))
+    return sn
+
+
 def compose_restart(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, *, nwalk, nlift, monsters, hud_restart,
                     wpn_restart, aim, hrt_restart, proj_restart, nmobile, p6_common=(), p6_skills=None,
-                    p8a_common=(), p10_common=(), nfs=1, list_bits=8) -> tuple:
+                    p8a_common=(), p10_common=(), nfs=1, list_bits=8, sn=2) -> tuple:
     """M7 P7 -- THE GAME TIER'S RESTART BLOCK, composed: `restart_lines` over the parts each rung owns (the bar's
     values, the weapon's, the aim window, the player's hurt cells, the pools; P6's cells, common and per skill).
     emit_wall_renderer calls exactly this, and tests/fj/test_restart_fj.py runs exactly this against the model's level
     start, so the two cannot be composed differently. `hud_restart` None: a tier without the game screen (then none of
-    the screen's parts either)."""
+    the screen's parts either). M8 C2: `sn` (world.slot_nibbles) -- aim_sid's per column."""
     from doomfj.world import AIM_COLUMNS          # issue #119 item 6: the window's width, ONE definition
     extra = (() if hud_restart is None else
              (list(hud_restart) + list(wpn_restart)
-              + ([f"hex.zero {2 * AIM_COLUMNS}, aim_sid"] if aim else [])                 # M7 P4.2a: no aim
+              + ([f"hex.zero {sn * AIM_COLUMNS}, aim_sid"] if aim else [])                # M7 P4.2a: no aim
               # M7 P5: the player's health, armor, damage count and death at the level start (never pal_cur: a
               # device shadow, restartcode.DEVICE_SHADOWS); the pools empty, their rows zero, rng_fx at its seed
               + list(hrt_restart) + list(proj_restart) + list(p6_common)
@@ -730,7 +744,7 @@ def p8a_restart_parts(world) -> list:
     from doomfj import world as _w
     out = []
     if world is not None and _w.knockback_on(PLAYER_MODE, MONSTER_MODE):
-        out += _knockcode.restart_lines(world.layout.nmon)
+        out += _knockcode.restart_lines(world.layout.nmon, sn=_w.slot_nibbles(world.layout))   # M8 C2: kb_live
     return out
 
 
@@ -2493,15 +2507,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P4.2a (doomfj.aimcode): the game tier's AIM WINDOW, when its player's shots resolve -- recorded by the runtime
     # monsters' projections (their seen machinery reaches xscale for every monster D3 e counts)
     _AIM = 1 if (_SEEN and menu and _player_resolves(PLAYER_MODE)) else 0
+    # M8 C2 (docs/c2-slot-ids.md): a monster / barrel SLOT ID's width -- derived from the map's counts (world.slot_nibbles:
+    # 3 past 254 slots, E1M6 / E1M7), and the map's Config.SLOT_ID_BITS must name it (MAP_CONFIG): a big map without
+    # its entry fails HERE, at emission, never in a gate
+    _SN = check_slot_bits(cfg, mapname, _p31["world"].layout) if _p31 else 2
     if _AIM:
         from doomfj import aimcode as _aimcode
         from doomfj.combat import aim_window as _aim_window
         assert _aim_window(rm) == (_aimcode.FIRST, _aimcode.FIRST + _aimcode.NCOLS - 1), "the window moved"
         # M7 P6: a standing barrel records too (radius class aimcode.RC_BARREL)
-        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar), centery=cfg.CENTERY, viewh=cfg.VIEW_H)
+        _aim_leaf = _aimcode.leaf_lines(cfg.CENTERX, barrels=bool(_bar), centery=cfg.CENTERY, viewh=cfg.VIEW_H,
+                                        sn=_SN)
         # issue #119 items 4 and 7: table_text runs the leaf's emit-time proofs (the MINZ order, every box >= 1 column;
         # a barrel's bound needs its standing frame from the sprite wad)
-        _aim_decls = _aimcode.decls(bool(_bar)) + [_aimcode.table_text(rm, bool(_bar), sprite_wad=sprite_wad)]
+        _aim_decls = _aimcode.decls(bool(_bar), sn=_SN) + [_aimcode.table_text(rm, bool(_bar), sprite_wad=sprite_wad)]
     else:
         _aim_leaf = _aim_decls = []
     # M7 P3.2b: monsters that MOVE press the monster doors and hold closing doors open (docs/gp-monsters.md 8.4)
@@ -2551,7 +2570,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert bool(_GRK8.get("rt_rank")) == bool(_GRK8.get("exempt_barrels")) == _D3, (
             "M7 P8a (C): GAME_RENDER_KW's rt_rank / exempt_barrels must be %s at PLAYER_MODE %r (world.compositor_d3) "
             "-- flip them with the mode (reference_model.D3_RENDER_KW)" % (_D3, PLAYER_MODE))
-    _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
+    _wpn = weapon_parts(map_wad, mapname, sn=_SN, shoot=_player_resolves(PLAYER_MODE),   # M8 C2: the shot's ids
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
                         loot=_LOOT) if menu else None                # M7 P6+P7: the latch, berserk's key 1 and fist
     # P9: the loot weapon's A_FireMissile calls the pool's rk_spawn -- p31_parts emits the rocket with the loot player
@@ -2570,6 +2589,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # boot_wad: the asset wad, whose palette 0 the boot sends as `palette` -- hurtcode asserts playpal0 equals it
         _hrt = hurt_parts(_w5, sprite_wad=sprite_wad, boot_wad=asset_wad,
                           loot=_LOOT,                               # M7 P6: the berserk and bonus palettes
+                          # M8 C2: dt_t's width -- the monsters' runtime rows turn_lines is given
+                          **({"slot_rows": [t_ for t_, _r in _chase["slots_rt"]]} if _chase else {}),
                           **({"knock": True} if _KNOCK else {}))   # M7 P8a: dp_go thrusts
         _p5_model_asserts(_p31, _proj, _hrt)
     else:
@@ -2708,6 +2729,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         stub leaves its own id there."""
         from doomfj import gamedata as _gd
         from doomfj.aimcode import RC_BARREL
+        from doomfj import aimcode as _aimcode_c2                       # M8 C2: sid_set_lines
         from doomfj.barrelcode import barrel_states
         from doomfj.monstercode import _thing_key
         _w = _p31["world"]
@@ -2736,7 +2758,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             stand = k < 2
             blocks += [f"  {L}_s{k}:"]
             if stand:
-                blocks += [f"    hex.set 2, sp_sid, {1 + _p31['nmon'] + b}", f"    hex.set 1, sp_rc, {RC_BARREL}"]
+                blocks += [*_aimcode_c2.sid_set_lines(1 + _p31['nmon'] + b, _SN),      # M8 C2: 3 nibbles past 254
+                           f"    hex.set 1, sp_rc, {RC_BARREL}"]
             blocks += [f"    stl.fcall {label}, xb_ret",
                        f"    stl.fcall {'thing_leaf_bb' if stand else _baked_leaf}, thing_ret",
                        f"    stl.fcall {label}, xb_ret", f"    ;{L}_skip"]
@@ -3688,7 +3711,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"],   # M7 P4.2a: mon_solid
                                     hurt=bool(_chase.get("hurt")))                # M7 P5: a dead player blocks nothing
                 # M8 L4: P_TeleportMove's stomp test (tp_stomp, jumping over itself)
-                + (_teleportcode.stomp_leaf_lines(_chase["slots_rt"], hurt=bool(_chase.get("hurt")), knock=_KNOCK)
+                + (_teleportcode.stomp_leaf_lines(_chase["slots_rt"], hurt=bool(_chase.get("hurt")), knock=_KNOCK,
+                                                  sn=_SN)
                    if _TELE else [])
                 + move_leaf_lines(root=_mroot, lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:])
                                                            for t_ in _chase["lift_walk"]],
@@ -3703,7 +3727,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 + ((_decide_leaves(justhit=bool(_p31.get("justhit")),
                                    full=bool(_chase.get("hurt")),       # M7 P5: md_attack APPLIES its draws
                                    **({"knock": True} if _KNOCK else {}),   # M7 P8a: the attacker inflicts
-                                   **({"fight": True} if _FIGHT else {}))   # M7 P8a I: the TARGET's
+                                   **({"fight": True} if _FIGHT else {}),   # M7 P8a I: the TARGET's
+                                   sn=_SN)                                  # M8 C2: the codes' width
                     + _p31["decide_lines"])
                    if _p31.get("decide_lines") else [])
                 # M7 P5: the leaves the attacks land through -- dp_go (hurtcode), the pools' spawns, phases and shared
@@ -3724,11 +3749,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                         "slot_back": (lambda m_: _teleportcode.slot_back_lines(
                             m_, facing="mon_facing + %d*dw" % m_, knock=True, walk=False, tag="tpkb")),
                         "telefrag": True}                        # M8: the thrust of P_TeleportMove's 10000
-                       if _TELE else {})) if _KNOCK else [])
+                       if _TELE else {}), sn=_SN) if _KNOCK else [])          # M8 C2: kb_tg, kb_live
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
-                + (_hurtcode.turn_lines([t_ for t_, _r in _chase["slots_rt"]], sink=_SINK)   # M7 P8a A: + the drop
+                + (_hurtcode.turn_lines([t_ for t_, _r in _chase["slots_rt"]], sink=_SINK, sn=_SN)   # P8a A: the drop
                    if (_hrt and menu and _restartcode.mortal(PLAYER_MODE)) else [])
                 # M7 P6+P7: package B's leaves -- pk_go (the grid, the stubs, the drops, the gives), pb_mon, nk_go
                 + (list(_loot["leaves"]) if _loot else [])
@@ -3765,7 +3790,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             nfs=_movers.fswitch_nibbles(_floor_groups),                 # M8 F1.3: the fswitch vector
             monsters=_p31["restart"] if _p31 else None,
             hud_restart=_hud["restart"] if _hud else None, wpn_restart=_wpn["restart"] if _hud else (),
-            aim=bool(_AIM), hrt_restart=_hrt["restart"] if _hrt else (),
+            aim=bool(_AIM), sn=_SN, hrt_restart=_hrt["restart"] if _hrt else (),
             proj_restart=_proj["restart"] if _hrt else (), nmobile=_MT_NMOB,
             # M7 P6: the barrels' level start (the same on every skill: barrelcode.check_model_rules), no drops; the
             # loot cells; each skill's runtime pickups' thvis slots (p6_restart_parts, the one composition)
@@ -3898,7 +3923,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # runs before this, has already read last frame's)
     if _AIM:
         from doomfj.aimcode import prologue_lines as _aim_prologue
-        pass1 += _aim_prologue()
+        pass1 += _aim_prologue(_SN)                  # M8 C2: aim_sid's per-column width
     # M7 P5: the frame's palette -- after everything that moves the damage count, BEFORE the record stream starts
     # (a command byte inside the run-lists would corrupt them); sent only on a change (hurtcode.pal_lines)
     if _hrt:
@@ -4224,7 +4249,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_hrt["decls"]) + list(_proj["decls"]) + list(_hrt["tables"]) + list(_proj["tables"]))
             if _hrt else []),
           # M7 P8a (package K): the thrust's interface, the knock cells and scratch, the barrels' z table
-          *((_knockcode.decls(_p31["world"].layout.nmon) + _knockcode.tables_fj(_p31["world"])) if _KNOCK else []),
+          # M8 C2: kb_tg / kb_live at the map's slot-id width (_SN)
+          *((_knockcode.decls(_p31["world"].layout.nmon, sn=_SN) + _knockcode.tables_fj(_p31["world"])) if _KNOCK else []),
           *((_restartcode.view_decls() + _hurtcode.sink_decls()) if _SINK else []),   # M7 P8a A: p_vd, its cap
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot

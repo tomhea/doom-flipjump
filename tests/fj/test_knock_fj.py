@@ -41,7 +41,8 @@ from doomfj.reference_model import SLOPERANGE
 from doomfj.sectorcode import msec_cell
 from doomfj.tables import slopediv_recip8_table, tantoangle_table
 from doomfj.wall_renderer import hoisted_scratch_fj
-from doomfj.world import TicEvents, World
+from doomfj.world import TicEvents, World, slot_nibbles
+from tests.fj.wide_maps import MAPS, map_world
 
 ROOT = Path(__file__).resolve().parents[2]
 FJ = ROOT / "src" / "fj"
@@ -55,8 +56,11 @@ def _s32(v):
     return v - (1 << 32) if v >> 31 else v
 
 
-def _world():
-    return World(skill=gd.SK_HARD, monsters="final", player="final")
+def _world(mapname="E1M1"):
+    """M8 C2 (docs/c2-slot-ids.md): THE THRUST runs on E1M1 and on E1M6 (tests/fj/wide_maps.py: 291 slots -- kb_tg
+    and kb_live THREE nibbles, kb_go's dispatch three levels; its records' monster targets favour the slots past 255;
+    R9 there: the dispatch's third level dropped). The moves below stay E1M1's"""
+    return map_world(mapname, skill=gd.SK_HARD, monsters="final", player="final")
 
 
 def _legal_spots(w, n=200):
@@ -90,6 +94,8 @@ def _thrust_records(w):
         rec = {}
         rec["target"] = ("player", -1) if rnd.random() < 0.4 else ("mon", rnd.choice(heavy if rnd.random() < 0.3
                                                                                        else act))
+        if n > 255 and rec["target"][0] == "mon" and r % 2:                # M8 C2: a target past the byte
+            rec["target"] = ("mon", rnd.choice([m for m in act if m >= 250]))
         px, py = rnd.choice(spots)
         rec["p"] = ((px << 16) + rnd.choice((0, 0x8000, rnd.randrange(1 << 16))),
                     (py << 16) + rnd.choice((0, 0xFFFF, rnd.randrange(1 << 16))))
@@ -212,6 +218,7 @@ def _thrust_apply(w, rec, feed=None):
 
 def _thrust_row(w, rec, pre):
     ws = w.ws
+    sn = slot_nibbles(w.layout)
     tgt = rec["target"]
     n = w.layout.nmon
     live = sum(1 for m in range(n) if ws.mon_momx[m] or ws.mon_momy[m]) + rec["live0"]
@@ -219,7 +226,7 @@ def _thrust_row(w, rec, pre):
     if tgt[0] == "mon":
         m = tgt[1]
         s += "%08x%08x%02x" % (ws.mon_momx[m] & M32, ws.mon_momy[m] & M32, ws.mon_rng[m])
-    return s + "%02x00" % live
+    return s + "%0*x00" % (sn, live)
 
 
 THRUST_MUTANTS = {
@@ -237,16 +244,21 @@ THRUST_MUTANTS = {
 
 def _thrust_program(w, mut=None):
     n = w.layout.nmon
+    sn = slot_nibbles(w.layout)                                     # M8 C2
     slots = KC.slots_of(w, list(range(n)))
-    code = "\n".join(KC.go_lines(slots)) + "\n"
+    code = "\n".join(KC.go_lines(slots, sn=sn)) + "\n"
     a = code.index("kb_pz:\n")
     b = code.index("    stl.fret kb_pzret\n", a) + len("    stl.fret kb_pzret\n")
     code = code[:a] + "kb_pz:\n    hex.input 2, kb_pzv\n    stl.fret kb_pzret\n" + code[b:]     # THE ONE STUB
-    if mut:
-        old, new = THRUST_MUTANTS[mut]
+    if mut == "third_level":                                        # M8 C2: the wide map's control
+        top = [ln for ln in code.split("\n") if ln.startswith("    sim.jump16 kb_tg + 2*dw,")]
+        assert len(top) == 1, len(top)
+        code = code.replace(top[0] + "\n", "    ;kq_g0\n")
+    elif mut:
+        old, new = (s_.replace("hex.inc 2, kb_live", "hex.inc %d, kb_live" % sn) for s_ in THRUST_MUTANTS[mut])
         assert code.count(old) == 1, (mut, code.count(old))
         code = code.replace(old, new)
-    decls = (KC.decls(n) + ["viewx: hex.vec 8", "viewy: hex.vec 8", "p_hp: hex.vec 3", "rng_pl: hex.vec 2",
+    decls = (KC.decls(n, sn=sn) + ["viewx: hex.vec 8", "viewy: hex.vec 8", "p_hp: hex.vec 3", "rng_pl: hex.vec 2",
                             "wp_rdy: hex.vec 1", "dm_hp: hex.vec 3", "dm_rng: hex.vec 2", "dm_x: hex.vec 4",
                             "dm_y: hex.vec 4", "mon_floorz: hex.vec %d" % (4 * n)])
     tables = [generate_dispatch_table_fj("mrnd", rnd_values(), index_nibbles=2, result_nibbles=4),
@@ -257,10 +269,11 @@ def _thrust_program(w, mut=None):
     return decls, code, tables
 
 
-def _thrust_build(tmp_path, name, mut=None):
-    w = _world()
+def _thrust_build(tmp_path, name, mut=None, mapname="E1M1"):
+    w = _world(mapname)
     recs = _thrust_records(w)
     n = w.layout.nmon
+    sn = slot_nibbles(w.layout)                                     # M8 C2
     feed, want = [], []
     body = ["stl.startup_and_init_all"]
     for rec in recs:
@@ -271,11 +284,11 @@ def _thrust_build(tmp_path, name, mut=None):
         ws0 = pre
         body += ["hex.set 8, viewx, %d" % (rec["p"][0] & M32), "hex.set 8, viewy, %d" % (rec["p"][1] & M32),
                  "hex.set 1, wp_rdy, %d" % (gd.WP_CHAINSAW if rec["saw"] else gd.WP_PISTOL),
-                 "hex.zero 8, p_kmx", "hex.zero 8, p_kmy", "hex.set 2, kb_live, %d" % ws0["live"]]
+                 "hex.zero 8, p_kmx", "hex.zero 8, p_kmy", "hex.set %d, kb_live, %d" % (sn, ws0["live"])]
         if tgt[0] == "player":
             body += ["hex.set 3, p_hp, %d" % rec["hp"], "hex.set 2, rng_pl, %d" % rec["rng"],
                      "hex.set 8, p_kmx, %d" % (ws0["mom"][0] & M32), "hex.set 8, p_kmy, %d" % (ws0["mom"][1] & M32),
-                     "hex.set 2, kb_tg, 0"]
+                     "hex.set %d, kb_tg, 0" % sn]
         else:
             m = tgt[1]
             tx, ty, fx, fy = rec["tpos"]
@@ -285,7 +298,7 @@ def _thrust_build(tmp_path, name, mut=None):
                      "hex.set 4, mon_floorz + %d*dw, %d" % (4 * m, w.ws.mon_floorz[m] & 0xFFFF),
                      "hex.set 8, mkx + %d*dw, %d" % (8 * m, ws0["mom"][0] & M32),
                      "hex.set 8, mky + %d*dw, %d" % (8 * m, ws0["mom"][1] & M32),
-                     "hex.set 2, rng_pl, %d" % w.ws.rng_player, "hex.set 2, kb_tg, %d" % (m + 1)]
+                     "hex.set 2, rng_pl, %d" % w.ws.rng_player, "hex.set %d, kb_tg, %d" % (sn, m + 1)]
         body += ["hex.set 1, kb_on, %d" % site["on"], "hex.set 4, kb_ix, %d" % site["ix"],
                  "hex.set 4, kb_iy, %d" % site["iy"], "hex.set 4, kb_iz, %d" % site["iz"],
                  "hex.set 1, kb_izp, %d" % site["izp"], "hex.set 1, kb_sp, %d" % site["sp"],
@@ -297,7 +310,7 @@ def _thrust_build(tmp_path, name, mut=None):
             m = tgt[1]
             body += ["hex.print_as_digit 8, mkx + %d*dw, 0" % (8 * m), "hex.print_as_digit 8, mky + %d*dw, 0" % (8 * m),
                      "hex.print_as_digit 2, dm_rng, 0"]
-        body += ["hex.print_as_digit 2, kb_live, 0", "hex.print_as_digit 1, kb_sp, 0",
+        body += ["hex.print_as_digit %d, kb_live, 0" % sn, "hex.print_as_digit 1, kb_sp, 0",
                  "hex.print_as_digit 1, kb_izp, 0", "stl.output 10"]
         if tgt[0] == "mon":                       # clear the slot for the next record (the fj's cells persist)
             m = tgt[1]
@@ -314,17 +327,21 @@ def _thrust_build(tmp_path, name, mut=None):
     return srcs, fin, ("\n".join(want) + "\n").encode()
 
 
-def _thrust_run(tmp_path, name, mut=None) -> bool:
-    srcs, fin, want = _thrust_build(tmp_path, name, mut)
+def _thrust_run(tmp_path, name, mut=None, mapname="E1M1") -> bool:
+    srcs, fin, want = _thrust_build(tmp_path, name, mut, mapname)
     return fj.assemble_and_run_test_output(srcs, fin, want, memory_width=W, warning_as_errors=True,
                                            should_raise_assertion_error=False)
 
 
-def test_the_thrust_records_exercise_every_path():
+@pytest.mark.parametrize("mapname", MAPS)
+def test_the_thrust_records_exercise_every_path(mapname):
     """the model over the records: both targets and both masses, every inflictor kind, no inflictor, the saw (both
     sources), reversals with both coins, a reversal refused by each condition, kb_live going up, down and staying,
-    and the player's z read for a target and for an inflictor"""
-    w = _world()
+    and the player's z read for a target and for an inflictor. M8 C2 (the wide map): targets past slot 255"""
+    w = _world(mapname)
+    if w.layout.nmon > 255:
+        wide = [r["target"][1] for r in _thrust_records(w) if r["target"][0] == "mon" and r["target"][1] >= 255]
+        assert len(wide) >= 50 and len(set(wide)) >= 15 and max(wide) > 0xFF, wide
     seen = dict(player=0, mon=0, heavy=0, none=0, saw_none=0, saw_hit=0, rev_odd=0, rev_even=0, near40=0, nearhp=0,
                 nearz=0, up=0, down=0, pz_t=0, pz_i=0, **{"i_" + k: 0 for k in ("player", "mon", "proj", "bar")})
     for rec in _thrust_records(w):
@@ -357,13 +374,23 @@ def test_the_thrust_records_exercise_every_path():
     assert all(seen[k] >= v for k, v in want.items()), (seen, want)
 
 
-def test_the_thrust_follows_the_model(tmp_path):
-    assert _thrust_run(tmp_path, "kthrust"), "the fj thrust parted from the model's _thrust"
+@pytest.mark.parametrize("mapname", MAPS)
+def test_the_thrust_follows_the_model(tmp_path, mapname):
+    assert _thrust_run(tmp_path, "kthrust", mapname=mapname), "the fj thrust parted from the model's _thrust"
 
 
 @pytest.mark.parametrize("mut", sorted(THRUST_MUTANTS))
 def test_control_a_broken_thrust_is_caught(tmp_path, mut):
     assert not _thrust_run(tmp_path, "kthrust_" + mut, mut), "%s passed: the comparison is vacuous" % mut
+
+
+@pytest.mark.parametrize("mut", ["third_level", "live"])
+def test_control_a_broken_wide_thrust_is_caught(tmp_path, mut):
+    """M8 C2's R9 on E1M6: kb_go's third dispatch level dropped; kb_live's count not kept"""
+    from tests.fj.wide_maps import ASSET, WIDE_MAP
+    if not ASSET.exists():
+        pytest.skip("needs assets/freedoom1.wad")
+    assert not _thrust_run(tmp_path, "kthrustw_" + mut, mut, WIDE_MAP), "%s passed: the comparison is vacuous" % mut
 
 
 # ================================================================================================================

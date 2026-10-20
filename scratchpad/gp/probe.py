@@ -681,6 +681,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         modes = (PLAYER_MODE, MONSTER_MODE)
     from doomfj.world import infighting_on
     fight = infighting_on(modes[1])
+    sn, cn = _slot_nibbles(), _count_nibbles()        # M8 C2: slot ids and LEVEL COMPLETE's counters, by the map
     cells = {"viewx": Cell("viewx", "hex", 8, signed=True),
              "viewy": Cell("viewy", "hex", 8, signed=True),
              "viewangle": Cell("viewangle", "hex", 8),
@@ -716,9 +717,9 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         for name in ("mon_target", "mon_reaction", "mon_movedir"):
             cells[name] = Cell(name, "hex", 1, count=nmon)
         if fight:                       # M7 P8a I: 0 none, 1 the player, 2 + slot (docs/gp-final-plan.md 4.1)
-            cells["mon_target"] = Cell("mon_target", "hex", 2, count=nmon)
+            cells["mon_target"] = Cell("mon_target", "hex", sn, count=nmon)
         cells["mon_threshold"] = Cell("mon_threshold", "hex", 2, count=nmon)
-        cells["sched_cursor"] = Cell("sched_cursor", "hex", 2)
+        cells["sched_cursor"] = Cell("sched_cursor", "hex", sn)
         cells["thseen"] = Cell("thseen", "hex", 1, count=nmon)     # per SLOT, written by the render
         # M7 P3.2b: the chase's per-slot cells (monstercode.p32b_decls)
         for name, width in (("mon_movecount", 2), ("mon_rng", 2), ("mon_floorz", 4), ("msec", _sec_nibbles())):
@@ -736,17 +737,17 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", len(_WC.WEAPONS)), ("rng_pl", 2), ("wp_frm", _WC.FRAME_NIBBLES), ("fl_frm", 1)):
         cells[name] = Cell(name, "hex", width)
     from doomfj.world import AIM_COLUMNS                             # issue #119 item 6: ONE definition
-    cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=AIM_COLUMNS)  # M7 P4.2a: the aim window (doomfj.aimcode)
+    cells["aim_sid"] = Cell("aim_sid", "hex", sn, count=AIM_COLUMNS)  # M7 P4.2a: the aim window (doomfj.aimcode)
     # M7 P5 (docs/gp-p5-interface.md, "the cells' units"; monsters.MonsterPhase.hurt_state / proj_state / fx_state):
     # the player's health (12 bits, read unsigned -- the oracle masks), armor, armor type, damage count, death, and
     # the palette the last present showed (hurtcode); the fireball pool and the blood pool (projcode), rng_fx
     for name, width in (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("p_dc", 2), ("p_dead", 1), ("pal_cur", 1),
-                        ("rng_fx", 2), ("p_atk", 2)):                      # M7 P7: p_atk, 0 or 1 + the slot
+                        ("rng_fx", 2), ("p_atk", sn)):                     # M7 P7: p_atk, 0 or 1 + the slot
         cells[name] = Cell(name, "hex", width)
     from doomfj.world import FIREBALL_POOL, FX_POOL
     for pool, n in (("pj", FIREBALL_POOL), ("fx", FX_POOL)):
         cells[pool + "_act"] = Cell(pool + "_act", "hex", 1, count=n)
-        for name, width in (("_x", 8), ("_y", 8), ("_st", 2), ("_ti", 1)) + ((("_mx", 8), ("_my", 8), ("_src", 2))
+        for name, width in (("_x", 8), ("_y", 8), ("_st", 2), ("_ti", 1)) + ((("_mx", 8), ("_my", 8), ("_src", sn))
                                                                              if pool == "pj" else ()):
             cells[pool + name] = Cell(pool + name, "hex", width, count=n)
     if nrt:
@@ -760,7 +761,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells[name] = Cell(name, "hex", width)
     # P10: the menu's `g_live`, and the stats (statcode.PERSIST; MonsterPhase.game_state's units)
     cells["g_live"] = Cell("g_live", "hex", 1)
-    for name, width in (("st_kill", 2), ("st_item", 2), ("st_secn", 1)):
+    for name, width in (("st_kill", cn), ("st_item", cn), ("st_secn", 1)):
         cells[name] = Cell(name, "hex", width)
     cells["st_secm"] = Cell("st_secm", "hex", 1, count=_nsecret())
     ndrop, nbar = _loot_counts()
@@ -775,13 +776,13 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     # M7 P8a (V, docs/gp-final-plan.md 4.1; monsters.MonsterPhase.p8a_state documents the units): P6+P7's turn flag,
     # the sink, knockback's cells (the per-slot ones only with `nmon`), infighting's barrel source -- each group an
     # OPTIONAL_GROUP (a binary built without the rule has none of its labels)
-    for name, width in (("p_tnh", 1), ("p_vd", 2), ("p_kmx", 8), ("p_kmy", 8), ("kb_live", 2)):
+    for name, width in (("p_tnh", 1), ("p_vd", 2), ("p_kmx", 8), ("p_kmy", 8), ("kb_live", sn)):
         cells[name] = Cell(name, "hex", width)
     if nmon:
         for name, width in (("mkx", 8), ("mky", 8), ("mfx", 4), ("mfy", 4)):
             cells[name] = Cell(name, "hex", width, count=nmon)
     cells["pj_z"] = Cell("pj_z", "hex", 4, count=FIREBALL_POOL)
-    cells["bar_src"] = Cell("bar_src", "hex", 2, count=nbar)
+    cells["bar_src"] = Cell("bar_src", "hex", sn, count=nbar)
     cells["p_rct"] = Cell("p_rct", "hex", 2)          # M8 L4 (monsters.MonsterPhase.p8a_state: 0..18)
     # M8 (doomfj.lightcode; MonsterPhase.p8a_state's units): a state nibble and a 2-nibble count a thinker, the stream
     cells["ltst"] = Cell("ltst", "hex", 1, count=_nlight())
@@ -860,6 +861,19 @@ def _nlight() -> int:
 def _nsecret() -> int:
     """P10: the secret sectors (World.secret_sectors) -- `st_secm`'s count"""
     return max(1, len(_idle_world().secret_sectors))
+
+
+def _slot_nibbles() -> int:
+    """M8 C2 (docs/c2-slot-ids.md): a monster / barrel slot id's width (world.slot_nibbles) -- aim_sid, mon_target
+    (infighting), sched_cursor, p_atk, pj_src, kb_live, bar_src: 2 on E1M1 / E1M2, 3 past 254 slots"""
+    from doomfj.world import slot_nibbles
+    return slot_nibbles(_idle_world().layout)
+
+
+def _count_nibbles() -> int:
+    """M8 C2: st_kill / st_item's width (statcode.count_nibbles: 3 when the map's monsters or pickups pass a byte)"""
+    from doomfj.statcode import count_nibbles
+    return count_nibbles(_idle_world())
 
 
 def _sec_nibbles() -> int:

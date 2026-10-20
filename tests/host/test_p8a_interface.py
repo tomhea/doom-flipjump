@@ -366,7 +366,7 @@ def test_the_splice_points_are_wired_behind_their_rules():
                    '_KNOCK = bool(_LOOT and _W8.knockback_on(PLAYER_MODE, MONSTER_MODE))',
                    '_FIGHT = bool(_LOOT and _W8.infighting_on(MONSTER_MODE))',
                    '+ (_knockcode.leaf_lines(',                               # package K: kb_go and the moves
-                   '_knockcode.decls(_p31["world"].layout.nmon) + _knockcode.tables_fj(_p31["world"])) if _KNOCK',
+                   '_knockcode.decls(_p31["world"].layout.nmon, sn=_SN) + _knockcode.tables_fj(_p31["world"])) if _KNOCK',   # M8 C2
                    'knock_move=_knockcode.player_move_lines() if _KNOCK else ()',
                    '"dsc_done:"]\n',
                    'if _SINK:\n        pass1 += landing_drop_lines()'):
@@ -385,7 +385,7 @@ def test_the_splice_points_are_wired_behind_their_rules():
     assert filled[k:k + 3] == KC.monster_slot_lines(3) and filled[:k] + filled[k + 3:] == off
     orig = KC.monster_slot_lines
     try:
-        KC.monster_slot_lines = lambda m: ["    KNOCK %d" % m]
+        KC.monster_slot_lines = lambda m, sn=2: ["    KNOCK %d" % m]   # M8 C2: + sn
         on = MC.p32a_slot(3, schema=w.schema, nib=w.sec_nibbles, knock=True, **slot)
     finally:
         KC.monster_slot_lines = orig

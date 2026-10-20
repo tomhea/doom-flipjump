@@ -13,6 +13,7 @@ carries them prices the pure placement tax.
 """
 from typing import Dict, List, Sequence, Tuple
 
+from doomfj import aimcode as _aimcode                                    # M8 C2: the aim id (sid_set_lines)
 from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.lut_generator import generate_dispatch_table_fj
@@ -382,6 +383,8 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
     assert tele == fog, "M8: the fog's rows and the teleports' rule disagree"
     nmon, schema = w.layout.nmon, w.schema
     snib = w.sec_nibbles                 # M8 L1: a sector id's width (doomfj.sectorcode)
+    from doomfj.world import slot_nibbles
+    sn = slot_nibbles(w.layout)          # M8 C2: a slot id's width (docs/c2-slot-ids.md)
     if nmon == 0 or not rows:
         return None                      # a map without monsters animates nothing
     if loot:
@@ -471,7 +474,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             if m is not None:
                 assert w.mon_radius[m] in (20, 30), (m, w.mon_radius[m])
                 sel += ["    hex.if0 1, mon_shootable + %d*dw, thsel_q%d" % (m, t),
-                        "    hex.set 2, sp_sid, %d" % (m + 1),
+                        *_aimcode.sid_set_lines(m + 1, sn),                 # M8 C2: three nibbles past 254
                         "  thsel_q%d:" % t,
                         "    hex.set 1, sp_rc, %d" % int(w.mon_radius[m] == 30)]
         if m is not None:
@@ -484,7 +487,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                     "    hex.zero w/4, sp_ti",
                     "    mview.lookup sp_ti, ts_idx"]
         if t in rt_bar:                      # M7 P6: a runtime barrel -- its state's view; aimed while it stands
-            sel += barrel_select_lines(t, rt_bar[t], nmon=nmon, shoot=shoot, ex=d3)
+            sel += barrel_select_lines(t, rt_bar[t], nmon=nmon, shoot=shoot, ex=d3, sn=sn)
         sel.append("    stl.fret thsel_ret")
     sel += mobile_select_lines(nt, nmob, wake=wake, shoot=shoot)
     sel += drop_select_lines(nt + nmob, [drop_row[w.dropper[m]] for m in drop_slots], wake=wake, shoot=shoot)
@@ -522,7 +525,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                        + (noise_leaf_lines(w) if hear else [])),
             "decls_wake": (p32a_decls(schema, nmon, {**{f: boot[f] for f in P32A_FIELDS}, "sched_cursor": w.ws.sched_cursor},
                                  nmon, snib)
-                      + P32A_SCRATCH + ["sp_sa: hex.vec w/4", "trb_seenf: hex.vec 1", "trb_one: hex.vec 1, 1"]
+                      + p32a_scratch(sn) + ["sp_sa: hex.vec w/4", "trb_seenf: hex.vec 1", "trb_one: hex.vec 1, 1"]
                       + ([ambush_decl(nmon, boot["mon_ambush"])] + noise_decls(w) if hear else [])
                       + (["mt_ms: hex.vec %d" % snib] if hear and not chase else [])),   # nz_heard's operand (chase: p32b)
         }
@@ -781,13 +784,14 @@ def barrel_view_rows(rm, sprite_wad, anim_index, *, spr_near: bool, cache: dict,
     return rows, by_state
 
 
-def barrel_select_lines(t: int, b: int, *, nmon: int, shoot: bool, ex: bool = False) -> list:
+def barrel_select_lines(t: int, b: int, *, nmon: int, shoot: bool, ex: bool = False, sn: int = 2) -> list:
     """runtime thing t, barrel b: the row of its state (`barview` on bar_st); while it STANDS (S_BAR1 / S_BAR2 --
     `combat.shootable_targets`' state != 0 and health > 0: the killing blow takes S_BEXP) its aim id 1 + nmon + b and
     the barrel's radius class. A removed barrel is in no list, so its stub never runs at state 0.
     M7 P8a (C, D3 b) `ex`: in every state the stub SETS `sp_ex` -- the barrel flag frame.thing_record_body's soft test
-    and count read (no soft raise, not counted); sim.thing_pass_depth (its `ex`) zeroes it after the record"""
-    from doomfj.aimcode import RC_BARREL
+    and count read (no soft raise, not counted); sim.thing_pass_depth (its `ex`) zeroes it after the record.
+    M8 C2 (`sn`, world.slot_nibbles): the aim id's width (aimcode.sid_set_lines)"""
+    from doomfj.aimcode import RC_BARREL, sid_set_lines
     from doomfj.barrelcode import barrel_states
     stand = [gd.STATE_INDEX[s] for s in barrel_states()[:2]]
     assert [gd.STATES[s].sprite for s in barrel_states()[:2]] == ["BAR1", "BAR1"] and stand[1] == stand[0] + 1
@@ -800,7 +804,7 @@ def barrel_select_lines(t: int, b: int, *, nmon: int, shoot: bool, ex: bool = Fa
                 "    hex.inc 2, ts_mob",
                 "    hex.cmp 2, bar_st + %d*dw, ts_mob, %s_v, %s_a, %s_v" % (2 * b, L, L, L),
                 "  %s_a:" % L,
-                "    hex.set 2, sp_sid, %d" % (1 + nmon + b),
+                *sid_set_lines(1 + nmon + b, sn),
                 "    hex.set 1, sp_rc, %d" % RC_BARREL,
                 "  %s_v:" % L]
     return out + (["    hex.set 1, sp_ex, 1"] if ex else []) + [
@@ -969,18 +973,20 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     nthr = cell_nibbles(schema, "mon_threshold")
     ntg = cell_nibbles(schema, "mon_target")                     # M7 P8a I: 2 with infighting, else 1
+    from doomfj.world import schema_slot_nibbles
+    sn = schema_slot_nibbles(schema)                             # M8 C2: 3 past 254 slots (the target's too)
     assert not hear or mv or sec is not None, "a hearing slot needs its sector: msec (mv) or the spawn sector"
-    assert not fight or (mv and dc and hurt and ntg == 2), "M7 P8a I: infighting rides the full slot (a wide target)"
+    assert not fight or (mv and dc and hurt and ntg == sn), "M7 P8a I: infighting rides the full slot (a wide target)"
     ST, TI, AC = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_active + %d*dw" % m
     FA, TG = "mon_facing + %d*dw" % (nf * m), "mon_target + %d*dw" % (ntg * m)
     RE, TH, MD = "mon_reaction + %d*dw" % m, "mon_threshold + %d*dw" % (nthr * m), "mon_movedir + %d*dw" % m
     L = "mw%d_" % m
     nxt = "mw%d_next" % m
     out = ["  mw%d:" % m,
-           "    hex.if0 2, mt_n, mt_end",
-           "    hex.dec 2, mt_n",
+           "    hex.if0 %d, mt_n, mt_end" % sn,
+           "    hex.dec %d, mt_n" % sn,
            "    hex.if0 1, %s, %s" % (AC, nxt),
-           *(_knock_slot_lines(m) if knock else []),                  # M7 P8a: the knock move (package K)
+           *(_knock_slot_lines(m, sn) if knock else []),              # M7 P8a: the knock move (package K)
            "    hex.if_flags %s, %d, %sgo, %s" % (TI, 1 << TICS_FOREVER, L, nxt),
            "  %sgo:" % L,
            "    hex.if0 1, %s, %sready" % (TI, L),              # tics 0 at entry: deferred last tic -- READY
@@ -995,10 +1001,10 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "  %sheavy:" % L,
            "    hex.if_flags mt_used, %d, %stake, %sdefer" % (1 << K_SLOTS, L, L),
            "  %sdefer:" % L,                                  # no slot: tics stay 0, served first next tic
-           "    hex.if0 2, mt_fdef, %sfirst" % L,
+           "    hex.if0 %d, mt_fdef, %sfirst" % (sn, L),
            "    ;%s" % nxt,
            "  %sfirst:" % L,
-           "    hex.set 2, mt_fdef, %d" % (m + 1),
+           "    hex.set %d, mt_fdef, %d" % (sn, m + 1),
            "    ;%s" % nxt,
            "  %stake:" % L,
            "    hex.inc 1, mt_used",
@@ -1060,7 +1066,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
             "    hex.if0 1, %s, %sr0" % (RE, L),
             "    hex.dec 1, %s" % RE,
             "  %sr0:" % L,
-            *(["    hex.mov 2, mm_tg, %s" % TG, "    stl.fcall mt_load, mt_lret"] if fight else []),  # M7 P8a I
+            *(["    hex.mov %d, mm_tg, %s" % (ntg, TG), "    stl.fcall mt_load, mt_lret"] if fight else []),  # P8a I
             "    hex.if0 %d, %s, %st0" % (nthr, TH, L),
             *((["    hex.if0 1, mt_al, %sthz" % L] if fight else              # M7 P8a I: a dead TARGET resets it
               ["    hex.if1 1, p_dead, %sthz" % L]) if hurt else []),       # M7 P5: a dead target resets it
@@ -1187,6 +1193,7 @@ def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear
     inflictor z, its fireball's spawn z). `fight` (M7 P8a I): the target is two nibbles, and an attack loads it
     (`mt_load`) first"""
     from doomfj.monsterdecide import ATTACK_KINDS
+    from doomfj.world import schema_slot_nibbles               # M8 C2: md_src's width
     ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
     ST, TI, FA = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_facing + %d*dw" % (nf * m)
     ntg = cell_nibbles(schema, "mon_target")                     # M7 P8a I: 2 with infighting
@@ -1206,13 +1213,13 @@ def p32c_slot_lines(m: int, *, t: int, rt: int, dc: dict, schema, nxt: str, hear
     if dc["acts"]:
         out += ["  %sk_go:" % L,
                 "    hex.if0 %d, %s, %s" % (ntg, TG, nxt),
-                *(["    hex.mov 2, mm_tg, %s" % TG, "    stl.fcall mt_load, mt_lret"] if fight else []),  # M7 P8a I
+                *(["    hex.mov %d, mm_tg, %s" % (ntg, TG), "    stl.fcall mt_load, mt_lret"] if fight else []),
                 *amb,
                 "    hex.mov 4, mm_x, thpos_rt + %d*dw" % (16 * rt + 4),
                 "    hex.mov 4, mm_y, thpos_rt + %d*dw" % (16 * rt + 12),
                 "    hex.mov 1, mm_seen, thseen + %d*dw" % t, "    hex.mov 2, mm_rng, %s" % RN,
                 # M7 P7 (`src`: the attacks land, hurtcode): the attacker's id for dp_go and a fireball's pj_src
-                *(["    hex.set 2, md_src, %d" % (m + 1)] if src else []),
+                *(["    hex.set %d, md_src, %d" % (schema_slot_nibbles(schema), m + 1)] if src else []),
                 *(["    hex.mov 4, kb_az, mon_floorz + %d*dw" % (4 * m)] if knock else []),   # M7 P8a (package K)
                 "    stl.fcall md_attack, md_ret",
                 "    hex.mov 1, %s, mm_fa" % FA, "    hex.mov 2, %s, mm_rng" % RN,
@@ -1395,6 +1402,29 @@ def select_tree_lines(ntm: int) -> list:
     return sel
 
 
+def id_jump_lines(reg: str, nib: int, n: int, target, none: str, lab: str, glab: str) -> list:
+    """M8 C2 (docs/c2-slot-ids.md): a `sim.jump16` tree on the `nib`-nibble id register `reg` -- id i < n jumps to
+    `target(i)`, every other id to `none`. nib 2: TWO levels (nibble 1 to `lab % h` for the 16-blocks that hold an id,
+    then nibble 0) -- the text every narrow map's dispatches have (dm_go, kb_go, mt_load, dt_turn, the wake tic's
+    cursor); nib 3: a THIRD level first, nibble 2 to `glab % g` for the 256-blocks, each then picking its 16-blocks.
+    tests/fj/test_wide_slots_fj.py runs it at three nibbles."""
+    nh = (n + 15) // 16
+    if nib == 2:
+        assert n <= 256, (reg, n)
+        out = ["    sim.jump16 %s + 1*dw, " % reg + ", ".join(lab % h if h < nh else none for h in range(16))]
+    else:
+        assert nib == 3 and n <= 4096, (reg, nib, n)
+        ng = (n + 255) // 256
+        out = ["    sim.jump16 %s + 2*dw, " % reg + ", ".join(glab % g if g < ng else none for g in range(16))]
+        for g in range(ng):
+            out += ["  %s:" % (glab % g), "    sim.jump16 %s + 1*dw, " % reg + ", ".join(
+                lab % (16 * g + h) if 16 * g + h < nh else none for h in range(16))]
+    for h in range(nh):
+        out += ["  %s:" % (lab % h), "    sim.jump16 %s, " % reg + ", ".join(
+            target(16 * h + k) if 16 * h + k < n else none for k in range(16))]
+    return out
+
+
 def rank_threshold(nt: int) -> int:
     """M7 P8a (C, D3 a): the first runtime row of RANK 0 -- the rows run [0, nt) the map's runtime things, then the
     fireball pool (nt + s, s < FIREBALL_POOL), the fx pool (blood and puffs), the drops (`mobile_select_lines`,
@@ -1444,32 +1474,30 @@ def dist_leaf_lines() -> list:
     return out
 
 
-def _knock_slot_lines(m: int) -> list:
+def _knock_slot_lines(m: int, sn: int = 2) -> list:
     from doomfj.knockcode import monster_slot_lines   # lazy: K's module reads this one's helpers
-    return monster_slot_lines(m)
+    return monster_slot_lines(m, sn)
 
 
 def p32a_tic_lines(schema, nmon: int, slots: list, exit_guard: bool, nib: int) -> list:
     """the whole wake tic: from `sched_cursor`, every slot once in order (world._monsters_phase), then the cursor to
-    the first deferred slot. `slots[m]` = p32a_slot's keyword arguments for slot m."""
-    nh = (nmon + 15) // 16
+    the first deferred slot. `slots[m]` = p32a_slot's keyword arguments for slot m. M8 C2: the cursor, mt_fdef and
+    mt_n at the map's slot-id width (world.schema_slot_nibbles: 3 past 254 slots)"""
+    from doomfj.world import schema_slot_nibbles
+    sn = schema_slot_nibbles(schema)
     out = ["mt_tic:"]
     if exit_guard:
         out.append("    hex.if1 1, lvdone, mt_skip")                    # a finished level: the world is frozen
-    out += ["    hex.zero 1, mt_used", "    hex.zero 2, mt_fdef", "    hex.set 2, mt_n, %d" % nmon,
-            "    hex.zero 1, mt_psok",
-            "    sim.jump16 sched_cursor + 1*dw, " + ", ".join(
-                ["mt_h%d" % h if h < nh else "mt_end" for h in range(16)])]
-    for h in range(nh):
-        out += ["  mt_h%d:" % h, "    sim.jump16 sched_cursor, " + ", ".join(
-            ["mw%d" % (16 * h + l) if 16 * h + l < nmon else "mt_end" for l in range(16)])]
+    out += ["    hex.zero 1, mt_used", "    hex.zero %d, mt_fdef" % sn, "    hex.set %d, mt_n, %d" % (sn, nmon),
+            "    hex.zero 1, mt_psok"]
+    out += id_jump_lines("sched_cursor", sn, nmon, lambda i: "mw%d" % i, "mt_end", "mt_h%d", "mt_g%d")
     for m in range(nmon):
         out += p32a_slot(m, schema=schema, nib=nib, **slots[m])
     out += ["    ;mw0",                                                # the chain wraps; mt_n ends it
             "  mt_end:",
-            "    hex.if0 2, mt_fdef, mt_skip",
-            "    hex.mov 2, sched_cursor, mt_fdef",
-            "    hex.dec 2, sched_cursor",
+            "    hex.if0 %d, mt_fdef, mt_skip" % sn,
+            "    hex.mov %d, sched_cursor, mt_fdef" % sn,
+            "    hex.dec %d, sched_cursor" % sn,
             "  mt_skip:"]
     return out
 
@@ -1479,3 +1507,8 @@ def p32a_tic_lines(schema, nmon: int, slots: list, exit_guard: bool, nib: int) -
 assert 0 < NEAR_UNITS < 16 ** 4 and 0 < BEHIND_REACH < 16 ** 4
 P32A_SCRATCH = ["mt_c128: hex.vec 4, %d" % NEAR_UNITS, "mt_c64: hex.vec 4, %d" % BEHIND_REACH,
                 "mt_s: hex.vec 4", "mt_n: hex.vec 2", "mt_psok: hex.vec 1", "mt_ret: hex.vec w/4"]
+
+
+def p32a_scratch(sn: int = 2) -> list:
+    """P32A_SCRATCH with M8 C2's `mt_n` (the slots left this tic: up to nmon) at the map's slot-id width"""
+    return [("mt_n: hex.vec %d" % sn) if d == "mt_n: hex.vec 2" else d for d in P32A_SCRATCH]

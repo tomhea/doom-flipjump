@@ -79,12 +79,14 @@ def test_runtime_ids_are_capped_at_the_maps_list_width(ls, wad, monkeypatch):
     lists (254) and the INFO row asks for 12; with MAP_CONFIG's LIST_ID_BITS 12 the same count is OK against 4,094.
     The CONTROL is the pair: a survey that ignored the map's width would report the same row both times."""
     import doomfj.config as config
+    # wave 1 gave E1M5 its 12-bit lists: the 8-bit form is E1M5 without LIST_ID_BITS
+    monkeypatch.setitem(config.MAP_CONFIG, "E1M5", {k: v for k, v in config.MAP_CONFIG["E1M5"].items() if k != "LIST_ID_BITS"})
     rows = _rows(ls, wad, "E1M5")
     r = _ids_row(rows)
     assert (r[0], r[2], r[3]) == ("OVER", "370", "<= 254"), r
     info = next(x for x in rows if x[1].startswith("list id bits needed"))
     assert info[2] == "12" and "set LIST_ID_BITS 12" in info[4], info
-    monkeypatch.setitem(config.MAP_CONFIG, "E1M5", {"LIST_ID_BITS": 12})
+    monkeypatch.setitem(config.MAP_CONFIG, "E1M5", dict(config.MAP_CONFIG["E1M5"], LIST_ID_BITS=12))
     rows = _rows(ls, wad, "E1M5")
     r = _ids_row(rows)
     assert (r[0], r[2], r[3]) == ("OK", "370", "<= 4094"), r

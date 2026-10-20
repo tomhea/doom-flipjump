@@ -887,7 +887,10 @@ def main():
                                           for cx, cy in _cells))
             # M7 P2a.1: a door the player can open with no card, by use (the walk-over doors have no box). M8: and no
             # key door by its LINE special -- until M8 F2 the model calls E1M2's yellow and red doors plain (E1M1: none)
-            _cands = sorted((si for si in order if si in boxes and dp.kinds[si] in ("plain", "blaze")
+            # M8 wave 1 (E1M5: no plain door the start reaches): the open-stay kinds (D1 31 / 118) are walked too, after
+            # the plain ones -- they open, are crossed and stay open across the M1 reset as the subject asks
+            _kinds = ("plain", "blaze") if strict else ("plain", "blaze", "stay", "blazestay")
+            _cands = sorted((si for si in order if si in boxes and dp.kinds[si] in _kinds
                              and si not in _keyed and _walkable_door(si)),
                             key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - spx) ** 2
                             + ((boxes[si][1] + boxes[si][3]) // 2 - spy) ** 2)

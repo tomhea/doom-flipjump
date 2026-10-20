@@ -136,3 +136,38 @@ def test_control_a_boss_tag_without_a_group_is_refused(ls, wad, monkeypatch):
     monkeypatch.setitem(ls.gd.BOSS_MAPS, "E1M8", ("MT_BRUISER", 667, "lowest"))
     rows = _rows(ls, wad, "E1M8")
     assert any(r[0] == "REFUSED" and "boss tag 667" in r[4] for r in rows), [r for r in rows if r[0] == "REFUSED"]
+
+
+C7 = (22, 30, 31, 32, 36, 42, 44, 45, 46, 53, 55, 56, 57, 59, 62, 63)      # M8 C7: the decorations E1M5..E1M9 add
+
+
+def test_c7_the_decorations_survey_drawn_and_e1m9_hangs_its_bodies_from_still_sectors(ls, wad):
+    """M8 C7: no C7 type is MISSING on the maps that have them; each is drawn (OK, not the WARN of an undrawn type);
+    E1M9's 16 hanging bodies (4 of them type 60) stand in sectors that never move"""
+    for m in ("E1M5", "E1M7", "E1M8", "E1M9"):
+        rows = _rows(ls, wad, m)
+        assert not any(r[1] == "thing type %d" % ty for r in rows for ty in C7), m
+        for ty in C7:
+            mine = [r for r in rows if r[1].startswith("thing %d " % ty)]
+            assert all(r[0] == "OK" for r in mine), (m, mine)
+    rows = _rows(ls, wad, "E1M9")
+    assert ("OK", "hanging things on still sectors", "16") in {r[:3] for r in rows}
+
+
+def test_c7_control_a_hanging_body_on_a_door_is_refused(ls, wad, monkeypatch):
+    """the gore room of E1M9 (sector 250) made a door sector: the survey refuses its hanging bodies, as the emitter"""
+    from doomfj import doors
+    real = doors.door_states
+    monkeypatch.setattr(doors, "door_states", lambda secs, lds, sds, *a, **k: {**real(secs, lds, sds, *a, **k),
+                                                                             250: [0, 64]})
+    rows = _rows(ls, wad, "E1M9")
+    assert any(r[0] == "REFUSED" and r[1] == "hanging things on a moving sector" and r[2] == "14" for r in rows)
+
+
+def test_c7_an_undrawn_decoration_is_reported(ls, wad):
+    """E1M1's corpses, its hanging body 60 and its impaled body 26 (MF_SOLID: an invisible blocker) have no picture in
+    reference_model.THING_SPRITE: the survey says so (WARN), so a new map's undrawn types are seen"""
+    rows = _rows(ls, wad, "E1M1")
+    warn = {r[1].split()[1] for r in rows if r[0] == "WARN" and r[4].startswith("NOT DRAWN")}
+    assert {"26", "60", "15", "18"} <= warn
+    assert any(r[1].startswith("thing 26 ") and "BLOCKER" in r[4] for r in rows)

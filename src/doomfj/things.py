@@ -150,6 +150,45 @@ def drawable_things(rm, things, sprite_wad, cache=None):
     return out, idx
 
 
+def thing_dz(rm, cmap, lds, sds, secs, t) -> int:
+    """M8 C7: map thing `t`'s z above the floor of the sector it spawns in (gamedata.spawn_dz: a hanging thing's
+    ceiling - height - floor, else 0) -- the sector of its spawn leaf, mapcompiler.seg_sector's rule (the emitter's
+    _thing_sector)"""
+    from doomfj import gamedata as gd          # lazy, as single_player
+    from doomfj.mapcompiler import seg_sector
+    sec = seg_sector(lds, sds, secs, cmap.segs[cmap.subsectors[rm.point_in_subsector(cmap, t.x, t.y)].firstseg])
+    return gd.spawn_dz(t.type, sec.floor_h, sec.ceil_h)
+
+
+def hanging_on_movers(rm, cmap, map_wad, mapname: str) -> list:
+    """M8 C7: `[(wad index, type, sector)]` -- the single-player HANGING things (gamedata MF_SPAWNCEILING) whose sector
+    can move. Every mirror draws a hanging thing at its SPAWN sector's ceiling - height (gamedata.spawn_dz: the
+    baked `sp_z`, the runtime row's `zoff` over the leaf floor, the oracle's z), which holds only while neither that
+    sector's floor (the runtime leaf floor follows a mover) nor its ceiling (DOOM's P_ChangeSector moves a hanging
+    thing with it) moves. CONSERVATIVE: a door or mover sector (doors.door_states, movers.mover_table), a sector a
+    special line's tag names, or the back sector of a special line -- whatever the special is. The emitter refuses
+    a map with one (wall_renderer); scripts/level_survey.py reports it. E1M9's 16 hang in three still sectors."""
+    from doomfj import gamedata as gd
+    from doomfj.doors import door_states
+    from doomfj.movers import mover_table
+    lds, sds, secs = map_wad.linedefs(mapname), map_wad.sidedefs(mapname), map_wad.sectors(mapname)
+    moving = set(door_states(secs, lds, sds)) | set(mover_table(secs, lds, sds))
+    tags = {ld.tag for ld in lds if ld.special and ld.tag}
+    moving |= {si for si, sec in enumerate(secs) if sec.tag in tags}
+    moving |= {sds[ld.back].sector for ld in lds if ld.special and ld.back != -1}
+    out = []
+    for i, t in enumerate(map_wad.things(mapname)):
+        tt = gd.THING_TYPES.get(t.type)
+        if tt is None or not tt.hangs or not single_player(t):
+            continue
+        sg = cmap.segs[cmap.subsectors[rm.point_in_subsector(cmap, t.x, t.y)].firstseg]
+        ld = lds[sg.linedef]
+        si = sds[ld.front if sg.side == 0 else ld.back].sector
+        if si in moving:
+            out.append((i, t.type, si))
+    return out
+
+
 _MOVER_LEAVES: dict = {}
 
 
@@ -239,7 +278,7 @@ def vanishable_slots(drawable, baked, vanishable_types):
 
 def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_types,
                min_h, min_h_monster, deg_min_h, deg_min_h_monster, *, deg: bool,
-               spr_near: bool, cache=None, keep=None):
+               spr_near: bool, cache=None, keep=None, dz_of=None):
     """One packed row per DRAWABLE thing, in `THING_ROW_BYTES` order, plus the index list.
 
     Returns `(rows, indices)` where `indices[i]` is the position of row `i` in the wad's THINGS
@@ -247,7 +286,11 @@ def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_typ
     index and neither needs a pointer to the other.
 
     `keep`, when given, is the set of wad indices that take the RUNTIME path (M14.5): everything
-    else bakes into its leaf and must NOT appear here, or it would be drawn twice."""
+    else bakes into its leaf and must NOT appear here, or it would be drawn twice.
+
+    M8 C7: `dz_of(t)`, when given, is the map thing's z above its spawn floor (gamedata.spawn_dz: a hanging thing's
+    ceiling - height - floor), added to the row's `zoff` -- the runtime `sp_z` is the bound leaf's floor + zoff, the
+    value the baked block holds. None: every thing stands on its floor (E1M1 and E1M2 hang nothing they draw)."""
     cache = {} if cache is None else cache
     rows, idx = [], []
     for i, t in enumerate(things):
@@ -259,7 +302,7 @@ def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_typ
         if keep is not None and i not in keep:
             continue                                    # M14.5: baked into its leaf instead
         mon = t.type in monster_types
-        rows.append((art[5], art[3], art[4], art[6],
+        rows.append((art[5], art[3], art[4], art[6] + (dz_of(t) if dz_of is not None else 0),
                      rm.sprite_tz_min_size(art[4], min_h_monster if mon else min_h) & 0xFFFFFFFF,
                      (rm.sprite_tz_min_size(art[4], deg_min_h_monster if mon else deg_min_h)
                       & 0xFFFFFFFF) if deg else 0,

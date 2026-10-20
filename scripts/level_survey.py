@@ -273,7 +273,8 @@ class Survey:
                 self.row(st, label + " (pickup)", n, "", "model %s, fj give %s, sprite %s" % (
                     "yes" if model else "NO", "yes" if fj else "NO", "yes" if drawn else "NO"))
             else:
-                self.row("OK", label + (" (solid decor)" if tt.solid else " (decor)"), n)
+                self.decor_row(ty, tt, label, n)
+        self.guard("hanging things on still sectors", self.hanging)
         # M8 C6 (lesson): a pickup the model and the fj both take can still be INVISIBLE -- its kind needs a sprite
         # prefix (reference_model.THING_SPRITE) whose lump is in the asset wad, or the renderers silently skip it
         from doomfj import reference_model as _RM
@@ -294,6 +295,39 @@ class Survey:
             return True
         except (KeyError, ValueError, IndexError):
             return False
+
+
+    def decor_row(self, ty, tt, label, n):
+        """M8 C7: a decoration is OK when it is DRAWN (its picture in the asset wad: reference_model.sprite_art); a type
+        THING_SPRITE leaves out is not drawn (WARN: E1M1's corpses and hanging body 60, a standing decision -- and
+        E1M1's impaled body 26 at (1184, 32), MF_SOLID: an invisible BLOCKER the shipped binary has; drawing it moves
+        E1M1's pixels, the owner's call), and one THING_SPRITE names whose lump the asset wad lacks is MISSING (it
+        would vanish with no other symptom)"""
+        from doomfj.reference_model import THING_SPRITE, ReferenceModel
+        kind = label + (" (solid decor)" if tt.solid else " (decor)") + (" hanging" if tt.hangs else "")
+        if THING_SPRITE.get(ty) is None:
+            self.row("WARN", kind, n, "",
+                     "NOT DRAWN: no picture in reference_model.THING_SPRITE" + (" -- an invisible BLOCKER" if tt.solid
+                                                                               else ""))
+        elif ReferenceModel(Config()).sprite_art(self.asset, ty, {}) is None:
+            self.row("MISSING", kind, n, "", "THING_SPRITE %s: no such lump in the asset wad" % THING_SPRITE[ty])
+        else:
+            self.row("OK", kind, n)
+
+    def hanging(self):
+        """M8 C7: every mirror draws a hanging thing at its spawn sector's ceiling - height; a sector that can move
+        breaks that (things.hanging_on_movers, the emitter's refusal)"""
+        from doomfj.mapcompiler import bake_bsp
+        from doomfj.reference_model import ReferenceModel
+        from doomfj.things import hanging_on_movers, single_player
+        bad = hanging_on_movers(ReferenceModel(Config()), bake_bsp(self.wad, self.m), self.wad, self.m)
+        n = sum(1 for t in self.wad.things(self.m)
+                if t.type in gd.THING_TYPES and gd.THING_TYPES[t.type].hangs and single_player(t))
+        if bad:
+            self.row("REFUSED", "hanging things on a moving sector", len(bad), "0",
+                     "(wad index, type, sector) %s: the emitter refuses (things.hanging_on_movers)" % (bad[:6],))
+        else:
+            self.row("OK", "hanging things on still sectors", n)
 
     def doors_and_movers(self):
         from doomfj import doors, movers

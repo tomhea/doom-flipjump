@@ -768,15 +768,31 @@ class ThingType:
     radius: int                    # map units
     flags: int
     source: str                    # "info.c" | "template" | "gzdoom"
+    height: int = 16               # map units (M8 C7: info.c's height; read only for MF_SPAWNCEILING -- spawn_dz)
 
     @property
     def solid(self) -> bool:
         return bool(self.flags & MF_SOLID)
 
+    @property
+    def hangs(self) -> bool:
+        """M8 C7: hung from the ceiling (MF_SPAWNCEILING: info.c's hanging bodies 49..53 / 59..63)"""
+        return bool(self.flags & MF_SPAWNCEILING)
+
 
 def _tt_from_info(mt: str) -> ThingType:
     m = MOBJINFO[mt]
-    return ThingType(m.doomednum, mt, m.radius >> FRACBITS, m.flags, m.source)
+    return ThingType(m.doomednum, mt, m.radius >> FRACBITS, m.flags, m.source, m.height >> FRACBITS)
+
+
+def spawn_dz(doomednum: int, floor_h: int, ceil_h: int) -> int:
+    """M8 C7 -- P_SpawnMobj's z, relative to the floor of the sector a map thing spawns in: an MF_SPAWNCEILING thing
+    hangs at `ceilingz - height` (ONCEILINGZ), every other map thing stands on the floor (ONFLOORZ: 0). ONE rule for
+    every mirror: the oracle's sprite z (reference_model.render_wall_frame), the emitter's baked `sp_z` and the
+    runtime row's `zoff` (things.thing_rows). A hanging thing never moves, and things.hanging_on_movers refuses one
+    whose sector's floor or ceiling can move, so the spawn sector's heights are its heights for the whole level."""
+    tt = THING_TYPES.get(doomednum)
+    return ceil_h - floor_h - tt.height if tt is not None and tt.hangs else 0
 
 
 # P11 (a): the EXIT sign (doomfj.exitsign) -- a VIRTUAL decoration the renderers draw and the world ignores
@@ -825,7 +841,7 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(54, "BigTree", 32, MF_SOLID, "gzdoom"),
     ThingType(26, "LiveStick", 16, MF_SOLID, "gzdoom"),
     ThingType(2028, "Column", 16, MF_SOLID, "gzdoom"),
-    ThingType(60, "NonsolidMeat4", 20, MF_SPAWNCEILING | MF_NOGRAVITY, "gzdoom"),
+    ThingType(60, "NonsolidMeat4", 20, MF_SPAWNCEILING | MF_NOGRAVITY, "gzdoom", 68),   # M8 C7: info.c's height
     ThingType(10, "GibbedMarine", 20, 0, "gzdoom"),
     ThingType(12, "GibbedMarineExtra", 20, 0, "gzdoom"),
     ThingType(15, "DeadMarine", 20, 0, "gzdoom"),
@@ -836,6 +852,29 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(24, "Gibs", 20, 0, "gzdoom"),
     ThingType(34, "Candlestick", 20, 0, "gzdoom"),                    # M8 L0 (E1M2): not solid
     ThingType(35, "Candelabra", 16, MF_SOLID, "gzdoom"),
+    # M8 C7 (docs/episode-plan.md section 2): the decorations E1M5..E1M9 add. EVERY value is info.c's mobjinfo[]
+    # (radius, height, flags; the spawn state names the sprite -- reference_model.THING_SPRITE), read from the RAW
+    # file by script, not through a summarising fetch: Chocolate Doom at SOURCE_COMMIT and id's linuxdoom-1.10, all
+    # 137 mobjinfo blocks of the two parsed and compared field by field -- identical. (The same extraction agrees
+    # with every "gzdoom" row above: 2028, 34, 35, 43, 47, 48, 54, 26, 60 and the corpses.)
+    ThingType(30, "MT_MISC32", 16, MF_SOLID, "info.c"),                # S_TALLGRNCOL  COL1
+    ThingType(31, "MT_MISC33", 16, MF_SOLID, "info.c"),                # S_SHRTGRNCOL  COL2
+    ThingType(32, "MT_MISC34", 16, MF_SOLID, "info.c"),                # S_TALLREDCOL  COL3
+    ThingType(36, "MT_MISC37", 16, MF_SOLID, "info.c"),                # S_HEARTCOL    COL5 A/B (14 tics each)
+    ThingType(42, "MT_MISC39", 16, MF_SOLID, "info.c"),                # S_FLOATSKULL  FSKU A/B/C bright
+    ThingType(44, "MT_MISC41", 16, MF_SOLID, "info.c"),                # S_BLUETORCH   TBLU A-D bright
+    ThingType(45, "MT_MISC42", 16, MF_SOLID, "info.c"),                # S_GREENTORCH  TGRN A-D bright
+    ThingType(46, "MT_MISC43", 16, MF_SOLID, "info.c"),                # S_REDTORCH    TRED A-D bright
+    ThingType(55, "MT_MISC44", 16, MF_SOLID, "info.c"),                # S_BTORCHSHRT  SMBT A-D bright
+    ThingType(56, "MT_MISC45", 16, MF_SOLID, "info.c"),                # S_GTORCHSHRT  SMGT A-D bright
+    ThingType(57, "MT_MISC46", 16, MF_SOLID, "info.c"),                # S_RTORCHSHRT  SMRT A-D bright
+    ThingType(22, "MT_MISC61", 20, 0, "info.c"),                       # S_HEAD_DIE6   HEAD L (a dead cacodemon)
+    # the hanging bodies: MF_SPAWNCEILING | MF_NOGRAVITY, z = ceiling - height (spawn_dz). 53 is MF_SOLID and BLOCKS
+    # the player and monsters at any height -- vanilla PIT_CheckThing never looks at z
+    ThingType(53, "MT_MISC55", 16, MF_SOLID | MF_SPAWNCEILING | MF_NOGRAVITY, "info.c", 52),   # S_MEAT5 GOR5
+    ThingType(59, "MT_MISC56", 20, MF_SPAWNCEILING | MF_NOGRAVITY, "info.c", 84),              # S_MEAT2 GOR2
+    ThingType(62, "MT_MISC59", 20, MF_SPAWNCEILING | MF_NOGRAVITY, "info.c", 52),              # S_MEAT5 GOR5
+    ThingType(63, "MT_MISC60", 20, MF_SPAWNCEILING | MF_NOGRAVITY, "info.c", 68),              # S_BLOODYTWITCH GOR1
 )}
 # Editor numbers P_SpawnMapThing never turns into a thing (player and deathmatch starts). M8 L0: the teleport
 # destination (14, MT_TELEPORTMAN: no sprite, never touched or drawn) is a position the teleporters read (L4), not a

@@ -158,6 +158,10 @@ class Mirror:
             C.CombatMixin._touch = orig_touch
 
     def run(self, pose, keys: list, pcard: int = 0, fswitch=None) -> list:
+        """the whole scenario at once: `steps` listed"""
+        return list(self.steps(pose, keys, pcard, fswitch))
+
+    def steps(self, pose, keys, pcard: int = 0, fswitch=None, boot: bool = False):
         """-> per frame {"pose", "phase", "taken", "mode", "scr", "sel", "lvdone", "pusedn",
         "drawn"}: the state after the frame, and what it drew ("world", or the menu screen). The
         binary's order: the menu's state machine on the frame's events, then -- on a world frame,
@@ -178,8 +182,9 @@ class Mirror:
         ph = dp.initial()
         ph = (ph[0], ph[1], ph[2], pcard)
         taken, out = False, []
-        # poked into the world with a game in progress (P10: `g_live` 1, poked too); sel baked (P10: medium)
-        mode, scr, sel, live = 0, 0, SKILLS.index(BOOT_MENU_SKILL), 1
+        # poked into the world with a game in progress (P10: `g_live` 1, poked too); sel baked (P10: medium) -- or M8
+        # (playthrough_gate.py, `boot`): the BOOT MENU, as the binary boots (no game: `g_live` 0), the world at BOOT_SKILL
+        mode, scr, sel, live = (1, 0, SKILLS.index(BOOT_MENU_SKILL), 0) if boot else (0, 0, SKILLS.index(BOOT_MENU_SKILL), 1)
         pusedn, lvdone = 1, 0                                  # baked: G_PlayerReborn's usedown
         mp, ms = self.mp, self.mp.initial()                    # M7 P2b: every lift at its top
         if fswitch is not None:                                # M8 F1.3: the scenario's POKED fswitch vector (S15)
@@ -350,7 +355,7 @@ class Mirror:
                             "mxy": tuple(zip(mph.world.ws.mon_x, mph.world.ws.mon_y)),
                             "views": self.viewfn(mph, st.x, st.y) if self.viewfn else None,
                             "positions": self.posfn(mph) if self.posfn else None})
-        return out
+                yield out.pop()                       # M8 playthrough: a step at a time, nothing kept
 
 
 def seen_of(orc, dsim, card_di):

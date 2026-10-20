@@ -28,7 +28,7 @@ ALLOWED = {
                                   "tic": "+move: the planner's step (mph None); the mirror passes mph"},
     "scratchpad/gp/scenarios_v2.py": {"step": "+move: model_frames' blocked27 expectation (mph None)"},
 }
-MIRRORS = {"scratchpad/gp/p2a_gate.py": "run", "scratchpad/m3_gate.py": "main", "scratchpad/m2_std_gate.py": "tic",
+MIRRORS = {"scratchpad/gp/p2a_gate.py": "steps", "scratchpad/m3_gate.py": "main", "scratchpad/m2_std_gate.py": "tic",
            "scratchpad/gp/scenarios_v2.py": "step"}
 
 

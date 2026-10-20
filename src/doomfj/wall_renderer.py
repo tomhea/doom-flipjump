@@ -78,6 +78,8 @@ from doomfj import lights as _lights                                      # M8: 
 from doomfj import scrollcode as _scrollcode                              # M8: the scrolling wall (special 48)
 from doomfj import keyboard as _keyboard                                   # P9: the press latch
 from doomfj import automap as _automap                                     # M8: the map page
+from doomfj import doors as _doors, doorcode as _doorcode                  # M8 C3: the door kinds of E1M3..E1M9
+from doomfj import shotcode as _shotcode                                   # M8 C3: the GR 46 shot doors
 from doomfj.menu import AMAP_CODES, MAIN_MAP_SCR, MAP_GAME_SCR, MAP_MENU_SCR   # M8: the map page's states
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
@@ -2015,7 +2017,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              dead="p_dd0" if _LOOT else None,
                              # M8 L2: the door switches (SR 63 / S1 103) and the doors a walk-over line opens
                              switches=door_switch_boxes(secs, lds, sds, verts),
-                             walked={t_[0] for t_ in _walk_trig})
+                             walked=_doors.requested_doors(secs, lds, sds, map_wad.vertexes(mapname)),
+                             # M8 C3: a mixed door's keyed boxes; the switches' cards, latches, stay presses; the
+                             # close lines' doors (all empty / plain on E1M1 and E1M2: their text as it was)
+                             keyed=_doors.keyed_boxes_xy(secs, lds, sds, verts),
+                             switch_info={si_: [e_[1:] for e_ in v_] for si_, v_ in
+                                          _doors.switch_entries(secs, lds, sds, verts).items()},
+                             nwalk=len(_walk_trig), close=_doors.close_strides(secs, lds, sds))
               if (_dst_tbl and player_sim) else [])
         # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
         if _movers_on and dt:
@@ -2029,6 +2037,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         return dt
     # M7 P2a.1: the walk-over triggers (doomfj.doors), fired from the collision move
     _walk_trig = walkover_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
+    # M8 C3: the S1 switch latches (W1 bits after the triggers': `wfired + nwalk + latch`) and the WR door lines
+    _door_nlatch = len(_doors.switch_latches(secs, lds, sds)) if _dst_tbl else 0
+    _door_repeats = _doors.repeat_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
     _door_tic = _make_door_tic()
 
     def _seg_door(seg):
@@ -2563,9 +2574,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert bool(_GRK8.get("rt_rank")) == bool(_GRK8.get("exempt_barrels")) == _D3, (
             "M7 P8a (C): GAME_RENDER_KW's rt_rank / exempt_barrels must be %s at PLAYER_MODE %r (world.compositor_d3) "
             "-- flip them with the mode (reference_model.D3_RENDER_KW)" % (_D3, PLAYER_MODE))
+    # M8 C3 (doomfj.shotcode): the GR 46 shot lines -- recorded by the picture into the aim window, pressed by a gun's
+    # shot. Only where the aim window is (`_AIM`) and the doors run; [] / {} on E1M1 and E1M2: no text anywhere
+    _shot_spec = (_shotcode.shot_specs(secs, lds, sds, _SWI) if (_AIM and _dst_tbl and player_sim) else [])
+    _shot_k = ({li_: k_ for k_, (li_, _t) in enumerate(_doors.shot_lines(secs, lds, sds))} if _shot_spec else {})
     _wpn = weapon_parts(map_wad, mapname, shoot=_player_resolves(PLAYER_MODE),
                         noise=PLAYER_MODE in NOISE_PLAYER_MODES, hurt=_P5,
-                        loot=_LOOT) if menu else None                # M7 P6+P7: the latch, berserk's key 1 and fist
+                        loot=_LOOT, shots=_shot_spec or None) if menu else None   # M7 P6+P7: the latch, berserk ...
     # P9: the loot weapon's A_FireMissile calls the pool's rk_spawn -- p31_parts emits the rocket with the loot player
     assert not _LOOT or bool(_p31 and _p31.get("rockets")), (
         "P9: the loot player's launcher fires rk_spawn, which p31_parts emits only with knockback and infighting")
@@ -3509,8 +3524,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 _seg_xorby_block(f"seg{si}_geom_consts", gfields) + _rblk)
             # ss{cid}_seg{si}_unseen: keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
             # leaf's action once per parent branch, so seg-index labels would collide (R6m).
+            _shk = _shot_k.get(seg.linedef)        # M8 C3: a GR 46 line records into the aim window (shotcode)
             out += [f"    stl.fcall seg{si}_geom_consts, xb_ret",
+                    *(_shotcode.pre_lines() if _shk is not None else []),
                     "    stl.fcall seg_pass1_leaf, seg_ret",
+                    *(_shotcode.post_lines(_shk) if _shk is not None else []),
                     f"    hex.if0 1, proceed, ss{cid}_seg{si}_unseen",
                     *_rcall,
                     # M8 (doomfj.scrollcode): a scrolling line's seg slides wnoff around its pass 2
@@ -3635,6 +3653,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             copy's prefix -- it restarts the knock loop at the destination)"""
             return ((walkover_lines(_walk_trig, sorted(_dst_tbl), PLAYER_RADIUS >> 16, prefix=wo)
                      if _walk_trig else [])
+                    + (_doorcode.repeat_walk_lines(_door_repeats, sorted(_dst_tbl), PLAYER_RADIUS >> 16,
+                                                   prefix=wo + "r") if _door_repeats else [])
                     + (lift_walk_lines(lift_walk_triggers(secs, lds, sds, map_wad.vertexes(mapname)),
                                        sorted(_lift_st), PLAYER_RADIUS >> 16, prefix=lw)
                        if _movers_on else [])
@@ -3777,7 +3797,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk, max_things=list_max(_LIST_BITS))
-             for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
+             for sk in SKILLS], nwalk=len(_walk_trig) + _door_nlatch, nlift=len(_lift_slot),
             list_bits=_LIST_BITS,                                       # M8 F1.5: the list fragment's width
             nfs=_movers.fswitch_nibbles(_floor_groups),                 # M8 F1.3: the fswitch vector
             monsters=_p31["restart"] if _p31 else None,
@@ -4111,6 +4131,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *(["frame_end:"] if menu else []), *present_tail, "stl.loop",
           "bad: stl.loop",
           *(_aim_leaf if _AIM else []),                 # M7 P4.2a: the aim window's shared leaf
+          *(_shotcode.leaf_lines() if _shot_spec else []),   # M8 C3: the GR lines' record
           *fb_leaves,
           *((["seg_pass1_leaf:", "stl.fret seg_ret"]
              + (["seg_pass2_leaf:", "stl.fret seg_ret2"])) if "segstub" in ablate else
@@ -4231,7 +4252,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # state switch dispatches on. Zero is SHUT for every door by construction of
           # `doors.door_states`, so this declaration is the level's initial condition, exactly as
           # `viewx/viewy/viewangle` are for the player.
-          *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
+          *(door_decls(len(_dslot), len(_walk_trig) + _door_nlatch) if _dst_tbl else []),
           *(mover_decls(len(_lift_slot), _movers.fswitch_nibbles(_floor_groups)) if _movers_on else []),  # M7 P2b
           *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
           *(_hud["decls"] if _hud else []),                               # M7 P4.0: the bar
@@ -4250,6 +4271,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((_lightcode.decls(_lth) + _lightcode.tables(_lth)) if _lth else []),   # M8: the light cells, their tables
           *(_switchcode.decls(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else []),   # M8: the switch textures' cells
           *_aim_decls,                                                      # M7 P4.2a: the aim window
+          *(_shotcode.decls(cfg.CENTERY) if _shot_spec else []),            # M8 C3: the GR lines' record
           *(_p31.get("decls_wake", ()) if _p31 else ()),
           *(WT_DECLS if (_p31 and _hrt and _WT_TICS > 1) else []),   # M7 P6+P7 E: the tempo loop's counter
           *_collide_decls,                                  # M14-d collision state

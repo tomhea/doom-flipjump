@@ -108,6 +108,7 @@ from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heigh
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
 from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers   # M7 P2a.1
 from doomfj.doors import switch_boxes as door_switch_boxes, switch_ready          # M8 L2: SR / S1 door switches
+from doomfj import doors as _D                                                     # M8 C3: the door kinds of E1M3..9
 from doomfj.reference_model import (ReferenceModel, Scene, apply_sector_heights, spawn_state)
 from doomfj.things import single_player
 
@@ -287,6 +288,7 @@ class Layout:
     nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
     nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
     nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
+    nshot: int = 0     # M8 C3: the GR 46 shot lines (doors.shot_lines): their aim ids from the top of aim_sid's byte
 
     @property
     def nmobile(self) -> int:
@@ -325,6 +327,9 @@ def aim_bits(lay: Layout) -> int:
     fj reads the cell as TWO nibbles (aimcode), so the value is held to a byte"""
     n = lay.nmon + lay.nbarrel
     assert n <= 0xFF, ("aim_sid: %d monster and barrel slots past the fj cell's byte" % n)
+    if lay.nshot:                    # M8 C3: the shot lines' ids count down from 0xFF (doors.shot_sid): the whole byte
+        assert n < 0xFF - lay.nshot + 1, ("aim_sid: %d monster and barrel ids meet the %d shot-line ids" % (n, lay.nshot))
+        return 8
     return max(7, n.bit_length())
 
 
@@ -900,11 +905,12 @@ class World(CombatMixin):
         self.layout = Layout(nmon=len(self.mon_things), ndoor=len(self.door_order),
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
-                             nwalk=len(self.walk_triggers), nlift=len(self.lift_order),
+                             nwalk=len(self.walk_triggers) + self.door_nlatch, nlift=len(self.lift_order),
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
                              nfloor=len(self.floor_groups) if self.floor_wide else 0,
                              nlight=len(self.light_thinkers),
-                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
+                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr),
+                             nshot=len(self.door_shots))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -984,6 +990,14 @@ class World(CombatMixin):
         # M8 L2: the switch boxes that press each door (SR 63 / S1 103: EV_DoDoor on the doors their tag names)
         self.door_switches = door_switch_boxes(secs, lds, sds, cmap.vertexes)
         self.walk_triggers = walkover_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
+        # M8 C3 (doomfj.doors): each switch box's card / latch / stay press (the S1 latches are W1 bits after the
+        # triggers': `w_fired[nwalk + latch]`), a mixed door's keyed front boxes, the WR lines, the close strides
+        self.door_switch_info = _D.switch_entries(secs, lds, sds, cmap.vertexes)
+        self.door_nlatch = len(_D.switch_latches(secs, lds, sds))
+        self.door_keyed = _D.keyed_boxes_xy(secs, lds, sds, cmap.vertexes)
+        self.door_repeats = _D.repeat_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
+        self.door_close = _D.close_strides(secs, lds, sds)
+        self.door_shots = _D.shot_lines(secs, lds, sds)        # M8 C3: GR 46 -- (linedef, its doors), aim ids shot_sid
         self.door_lines = door_line_ids(secs, lds, sds, tbl)
         self.open_h = {si: (secs[si].floor_h, tbl[si][-1]) for si in self.door_order}
         self.secs_c = apply_sector_heights(secs, self.open_h)   # the collision map: doors open
@@ -1286,14 +1300,26 @@ class World(CombatMixin):
         # doors' tic-start states, before the doors tic
         self.switch_doors(bool(keys["use"] and alive), ws.px, ws.py,
                           lambda si: switch_ready(self.door_state(si)))
+        nw = len(self.walk_triggers)
         for d, si in enumerate(self.door_order):
             box = self.door_boxes.get(si)             # none for a walk-over door
             pressed = (keys["use"] and alive and box is not None and self.player_can_open(si)
                        and in_use_box_fixed(box, ws.px, ws.py))
-            # M8 L2: a door switch's box (P_UseSpecialLine -> EV_DoDoor): presses a door at rest only
-            pressed = pressed or (keys["use"] and alive and self.door_switches.get(si)
-                                  and switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))
-                                  and any(in_use_box_fixed(b, ws.px, ws.py) for b in self.door_switches[si]))
+            # M8 C3: a mixed door's keyed lines (E1M3 150's D1 32), each its front box and its card
+            pressed = pressed or (keys["use"] and alive and any(
+                self.player_has_card(c) and in_use_box_fixed(b, ws.px, ws.py) for b, c in self.door_keyed.get(si, ())))
+            # M8 L2: a door switch's box (P_UseSpecialLine -> EV_DoDoor): presses a door at rest only. M8 C3: a locked
+            # switch needs its card (EV_DoLockedDoor), a latched S1 one fires once, a stay switch's press is a stay press
+            spress = False
+            if (not pressed and keys["use"] and alive and self.door_switches.get(si)
+                    and switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))):
+                for b, c, lt, sp in self.door_switch_info[si]:
+                    if ((c is None or self.player_has_card(c)) and (lt is None or not ws.w_fired[nw + lt])
+                            and in_use_box_fixed(b, ws.px, ws.py)):
+                        pressed, spress = True, sp
+                        if lt is not None:
+                            ws.w_fired[nw + lt] = 1
+                        break
             kind = self.door_kind[si]
             # M7 P2b: reversal -- asked only of a closing door at its pass step (door_tic's rule)
             blocked = (ws.d_dir[d] == CLOSING and ws.d_state[d] >= self.door_pass[si]
@@ -1301,7 +1327,8 @@ class World(CombatMixin):
             st = door_tic((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]),
                           self.door_nstates[si], bool(pressed or ws.d_monreq[d]),
                           stride=door_stride(kind), stay=door_stay(kind), blocked=blocked,
-                          pass_at=self.door_pass[si])
+                          pass_at=self.door_pass[si], close_stride=self.door_close.get(si),
+                          hold=si in self.door_close, stay_press=spress)
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = st
             ws.d_monreq[d] = 0
         self._door_phase_scene()
@@ -1322,7 +1349,7 @@ class World(CombatMixin):
         ws = self.ws
         on, tm = list(ws.sw_on), list(ws.sw_time) if self.switch_sr else []
         _SWI.countdown(on, tm, self.switch_sr)
-        for k in _SWI.door_presses(self.switch_cells, used, x16, y16, ready):
+        for k in _SWI.door_presses(self.switch_cells, used, x16, y16, ready, self.player_has_card):
             _SWI.press(on, tm, self.switch_sr, k)
         self._switch_store(on, tm)
 

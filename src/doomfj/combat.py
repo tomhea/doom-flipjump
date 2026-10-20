@@ -99,6 +99,8 @@ from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
 from doomfj.movers import crossed_shape as _crossed_shape          # M8 F1.3: the W1 floor lines (slanted too)
 from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
+from doomfj.doors import KIND_CARD as _KIND_CARD                    # M8 C3: a key door by its kind
+from doomfj import doors as _D                                      # M8 C3: the WR door lines
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE, turn_step   # STRAFE_MOVE: M7 P4.1, the ONE value
 from doomfj.reference_model import ANG180 as _ANG180                       # M7 P7: P_DeathThink's turn
 from doomfj.reference_model import VIEW_DROP_MAX                          # M7 P8a A: P_DeathThink's view drop
@@ -185,6 +187,8 @@ KEY_DOOR_CARDS = {26: (gd.IT_BLUECARD, gd.IT_BLUESKULL), 32: (gd.IT_BLUECARD, gd
                   27: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
                   34: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
                   28: (gd.IT_REDCARD, gd.IT_REDSKULL), 33: (gd.IT_REDCARD, gd.IT_REDSKULL)}
+CARD_ITEMS = {"blue": (gd.IT_BLUECARD, gd.IT_BLUESKULL), "yellow": (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
+              "red": (gd.IT_REDCARD, gd.IT_REDSKULL)}       # M8 C3: a card colour's items (KEY_DOOR_CARDS' pairs)
 WEAPON_KEYS = ("w1", "w2", "w3", "w4", "w5")   # DOOM's number keys 1..5 -> WP_FIST..WP_MISSILE (P9: 5, the launcher)
 # P10: A_FireCGun's flash frame per burst frame (flashstate + (state - S_CHAIN1))
 CGUN_FLASH = {"S_CHAIN1": "S_CHAINFLASH1", "S_CHAIN2": "S_CHAINFLASH2"}
@@ -430,13 +434,11 @@ class CombatMixin:
                         for t in self.mon_things]
         # the exit switch: the door-style proximity box around each exit line (plan 6.7)
         self.exit_boxes = exit_boxes(self.lds, self.cmap.vertexes, W.USE_RANGE)
-        # key doors: the cards that open each door sector (EV_VerticalDoor)
-        self.door_cards: Dict[int, Tuple[int, int]] = {}
-        for ld in self.lds:
-            if ld.special in KEY_DOOR_CARDS and 0 <= ld.back < len(self.sds):
-                si = self.sds[ld.back].sector
-                if si in self.door_order:
-                    self.door_cards[si] = KEY_DOOR_CARDS[ld.special]
+        # key doors: the cards that open each door sector (EV_VerticalDoor) -- M8 C3: by the door's KIND (its card,
+        # doors.KIND_CARD), so a door whose lines need different cards (E1M3 150: D1 31 and D1 32) keeps its keyless
+        # kind on its main box and the keyed lines their own (World.door_keyed); every E1M1 / E1M2 door as before
+        self.door_cards: Dict[int, Tuple[int, int]] = {
+            si: CARD_ITEMS[_KIND_CARD[k]] for si, k in self.door_kind.items() if k in _KIND_CARD}
         self.decor_radius = {t.type: gd.THING_TYPES[t.type].radius for t in self.decor_solid}
 
     def _floor_at(self, x: int, y: int) -> int:
@@ -642,6 +644,10 @@ class CombatMixin:
         """EV_VerticalDoor's key check: a key door needs its card or skull; other doors nothing."""
         cards = self.door_cards.get(si)
         return cards is None or any(self.ws.p_cards[c] for c in cards)
+
+    def player_has_card(self, colour: str) -> bool:
+        """M8 C3: the player holds the card or the skull of `colour` ("blue" / "yellow" / "red": doors.KIND_CARD's)"""
+        return any(self.ws.p_cards[c] for c in CARD_ITEMS[colour])
 
     # -- the player thing's own state (first person never shows it; kept DOOM-shaped)
     def _set_player_mobj(self, name: str) -> None:
@@ -917,6 +923,16 @@ class CombatMixin:
             ev.shots.append((weapon, col, None, dmg))
             return
         tgt = self.aim(self, col)
+        if tgt is not None and tgt[0] == "shot":
+            # M8 C3: the column's nearest target is a GR 46 line (the picture's record): a BULLET reaching it opens
+            # its doors (P_ShootSpecialLine -> EV_DoDoor(open)); a melee swing is treated as reaching nothing (the
+            # record holds no depth: the fist would otherwise open it from across the room). No puff, no damage.
+            if reach < MISSILERANGE_U:
+                tgt = None
+            else:
+                ev.shots.append((weapon, col, tgt, dmg))
+                self.shot_press(tgt[1])
+                return
         if tgt is not None:
             x, y = self._target_xy(tgt)
             if W.aprox_distance(x - (ws.px >> 16), y - (ws.py >> 16)) > reach:
@@ -933,6 +949,21 @@ class CombatMixin:
         else:
             self.damage_barrel(i, dmg, ("player", -1), ev)
         ev.hits.append((weapon, kind, i, dmg))
+
+    def shot_press(self, k: int) -> None:
+        """M8 C3: shot line k (`World.door_shots`) was hit: EV_DoDoor(open) on each door its tag names that is at rest
+        (doors.switch_ready) -- a request (`d_monreq`) its next door tic presses, as a walk-over line's"""
+        ws = self.ws
+        for si in self.door_shots[k][1]:
+            d = self.door_order.index(si)
+            if _D.switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d])):
+                ws.d_monreq[d] = 1
+        if self.switch_cells:                 # a SWITCH_TEX map: the line's texture swaps (switches.shot_presses)
+            from doomfj import switches as _SWI
+            on, tm = list(ws.sw_on), list(ws.sw_time) if self.switch_sr else []
+            for j in _SWI.shot_presses(self.switch_cells, self.door_shots[k][0]):
+                _SWI.press(on, tm, self.switch_sr, j)
+            self._switch_store(on, tm)
 
     def _target_xy(self, tgt) -> Tuple[int, int]:
         kind, i = tgt
@@ -979,6 +1010,8 @@ class CombatMixin:
         sid = world.ws.aim_sid[col - world.aim_lo]
         if sid == 0:
             return None
+        if sid > _D.SHOT_SID_TOP - world.layout.nshot:          # M8 C3: a GR 46 line (doors.shot_sid)
+            return ("shot", _D.SHOT_SID_TOP - sid)
         nmon = world.layout.nmon
         return ("mon", sid - 1) if sid <= nmon else ("bar", sid - 1 - nmon)
 
@@ -1995,6 +2028,15 @@ class CombatMixin:
             if not ws.w_fired[k] and crossed(trig, (x, y), (cx, cy), PLAYER_R):
                 ws.w_fired[k] = 1
                 ws.d_monreq[self.door_order.index(trig[0])] = 1
+        for trig in self.door_repeats:                # M8 C3: the WR door lines (doors.repeat_act), every crossing
+            if crossed(_D.repeat_shape(trig), (x, y), (cx, cy), PLAYER_R):
+                d = self.door_order.index(trig[0])
+                act = _D.repeat_act(trig, (ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))
+                if act == "press":
+                    ws.d_monreq[d] = 1
+                elif act == "close":
+                    ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = _D.close_state(
+                        (ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))
         for trig in self.lift_walk:                   # M7 P2b: the WR lifts, every crossing
             if crossed(trig, (x, y), (cx, cy), PLAYER_R):
                 ws.l_req[self.lift_order.index(trig[0])] = 1

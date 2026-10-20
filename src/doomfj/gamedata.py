@@ -158,6 +158,10 @@ AM_NOAMMO = 5
 NUMCARDS = 6
 (PW_INVULNERABILITY, PW_STRENGTH, PW_INVISIBILITY, PW_IRONFEET, PW_ALLMAP, PW_INFRARED) = range(6)
 NUMPOWERS = 6
+# M8 C6 (doomdef.h): the timed powers' durations -- INVISTICS / IRONTICS = 60 * TICRATE (P_GivePower sets the counter,
+# P_PlayerThink counts it down once a PLAYER tic: here once a frame, as p_strength / damagecount / bonuscount are)
+TICRATE = 35
+INVISTICS = IRONTICS = 60 * TICRATE
 
 # ---- p_inter.c ---------------------------------------------------------------------------------
 MAXAMMO = (200, 50, 300, 50)      # indexed by AM_*; a backpack doubles these
@@ -759,6 +763,11 @@ THING_TYPES: Dict[int, ThingType] = {t.doomednum: t for t in (
     ThingType(6, "MT_MISC6", 20, MF_SPECIAL | MF_NOTDMATCH, "info.c"),      # yellow keycard
     ThingType(2013, "MT_MISC12", 20, MF_SPECIAL | MF_COUNTITEM, "info.c"),  # soulsphere
     ThingType(2026, "MT_MISC21", 20, MF_SPECIAL | MF_COUNTITEM, "info.c"),  # computer area map
+    # M8 C6 (E1M3..E1M9): info.c MT_MISC19 (the box of rockets), MT_INS (partial invisibility: counted) and MT_MISC14
+    # (the radiation suit: NOT counted -- vanilla's suit and backpack carry no MF_COUNTITEM)
+    ThingType(2046, "MT_MISC19", 20, MF_SPECIAL, "info.c"),                 # box of rockets
+    ThingType(2024, "MT_INS", 20, MF_SPECIAL | MF_COUNTITEM, "info.c"),     # partial invisibility
+    ThingType(2025, "MT_MISC14", 20, MF_SPECIAL, "info.c"),                 # radiation suit
     # decor: radius and MF_SOLID from GZDoom (vanilla values); corpses and gore are not solid
     ThingType(43, "TorchTree", 16, MF_SOLID, "gzdoom"),
     ThingType(47, "Stalagtite", 16, MF_SOLID, "gzdoom"),

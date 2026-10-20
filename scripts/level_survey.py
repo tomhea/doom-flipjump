@@ -274,6 +274,26 @@ class Survey:
                     "yes" if model else "NO", "yes" if fj else "NO", "yes" if drawn else "NO"))
             else:
                 self.row("OK", label + (" (solid decor)" if tt.solid else " (decor)"), n)
+        # M8 C6 (lesson): a pickup the model and the fj both take can still be INVISIBLE -- its kind needs a sprite
+        # prefix (reference_model.THING_SPRITE) whose lump is in the asset wad, or the renderers silently skip it
+        from doomfj import reference_model as _RM
+        nosprite = []
+        for ty in sorted(c):
+            tt = gd.THING_TYPES.get(ty)
+            if tt is None or not tt.flags & gd.MF_SPECIAL:
+                continue
+            pre = _RM.THING_SPRITE.get(ty)
+            if pre is None or not any(self._has_lump(pre + sfx) for sfx in ("A0", "A1", "A2A8", "A1D1")):
+                nosprite.append(ty)
+        self.row("MISSING" if nosprite else "OK", "pickup sprite (a gettable kind is drawn)", nosprite or "",
+                 "", "reference_model.THING_SPRITE + the asset wad's lump: a pickup with no art is taken unseen")
+
+    def _has_lump(self, name):
+        try:
+            self.asset.get_data(name)
+            return True
+        except (KeyError, ValueError, IndexError):
+            return False
 
     def doors_and_movers(self):
         from doomfj import doors, movers

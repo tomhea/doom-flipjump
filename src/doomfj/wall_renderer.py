@@ -535,6 +535,7 @@ BOOT_MENU_SKILL = _gd.SK_MEDIUM
 from doomfj import restartcode as _restartcode                    # noqa: E402 (M7 P7)
 from doomfj import hurtcode as _hurtcode                          # noqa: E402 (M7 P7: the death think's turn)
 from doomfj import lootcode as _lootcode                          # noqa: E402 (M7 P6+P7 package B: the player's side)
+from doomfj import powercode as _powercode                        # noqa: E402 (M8 C6: the timed powers)
 from doomfj import knockcode as _knockcode                        # noqa: E402 (M7 P8a: knockback's hooks)
 
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
@@ -1942,8 +1943,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P4.0 (docs/gp-combat.md section 2): the game tier's status bar and weapon overlay (doomfj.hudcode)
     from doomfj.hudcode import game_hud_parts
     # M8 F4: the map's yellow / red key icons (lootcode.hud_cards; E1M1 none) -- the loot's card cells they read
+    # M8 C6 (doomfj.powers / powercode): the map's timed powers -- the looting player's (E1M1, E1M2: none, no text)
+    from doomfj.powers import INVIS_TYPE as _INVIS_T, SUIT_TYPE as _SUIT_T, map_powers as _map_powers
+    _POWERS = _map_powers(map_wad.things(mapname)) if (menu and _lootcode.loot_on(PLAYER_MODE)) else ()
     _hud = game_hud_parts(rm, asset_wad, sprite_wad, map_wad.sectors(mapname),
-                          cards=_lootcode.hud_cards(map_wad, mapname) if _lootcode.loot_on(PLAYER_MODE) else ()
+                          cards=_lootcode.hud_cards(map_wad, mapname) if _lootcode.loot_on(PLAYER_MODE) else (),
+                          **({"shadow": True} if _INVIS_T in _POWERS else {})   # M8 C6: the shadow weapon
                           ) if menu else None
     # M7 P4.1 (doomfj.weaponcode): the player's weapon, the model's "fire" mode
     from doomfj.weaponcode import weapon_parts
@@ -2612,6 +2617,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     _SINK = bool(_LOOT and _W8.player_sinks(PLAYER_MODE))                      # A: the dying view sinks
     _KNOCK = bool(_LOOT and _W8.knockback_on(PLAYER_MODE, MONSTER_MODE))      # K: P_DamageMobj's thrust, the knock
     _FIGHT = bool(_LOOT and _W8.infighting_on(MONSTER_MODE))                  # I: monsters fight monsters
+    # M8 C6: the timed powers ride the looting game tier; invisibility's aim turn the fight's target load (mt_pl)
+    assert not _POWERS or _LOOT, "M8 C6: a map's timed powers need the looting player (a map with monsters)"
+    assert _INVIS_T not in _POWERS or _FIGHT, "M8 C6: the shadow turn is the fight emission's (monsterdecide)"
     # M8 L4 (doomfj.teleportcode): THE WR TELEPORTS -- the game tier's player (his reactiontime persists, its gate is
     # the standalone prologue's) and its moving monsters; [] on a map without one (E1M1: no text anywhere)
     _TELE = list(_p31["world"].teleports) if (_LOOT and _chase) else []
@@ -2659,6 +2667,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # boot_wad: the asset wad, whose palette 0 the boot sends as `palette` -- hurtcode asserts playpal0 equals it
         _hrt = hurt_parts(_w5, sprite_wad=sprite_wad, boot_wad=asset_wad,
                           loot=_LOOT,                               # M7 P6: the berserk and bonus palettes
+                          **({"suit": True} if _SUIT_T in _POWERS else {}),   # M8 C6: the radiation palette
                           **({"knock": True} if _KNOCK else {}))   # M7 P8a: dp_go thrusts
         _p5_model_asserts(_p31, _proj, _hrt)
     else:
@@ -3793,7 +3802,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                    **({"knock": True} if _KNOCK else {}),   # M7 P8a: the attacker inflicts
                                    **({"fight": True} if _FIGHT else {}),   # M7 P8a I: the TARGET's
                                    # M8 C8: the Baron's attack (A_BruisAttack: brclaw, else pj_spawn)
-                                   **({"bruiser": True} if "MT_BRUISER" in _p31["types"] else {}))
+                                   **({"bruiser": True} if "MT_BRUISER" in _p31["types"] else {}),
+                                   **({"shadow": True} if _INVIS_T in _POWERS else {}))   # M8 C6: invisibility
                     + _p31["decide_lines"])
                    if _p31.get("decide_lines") else [])
                 # M7 P5: the leaves the attacks land through -- dp_go (hurtcode), the pools' spawns, phases and shared
@@ -3867,6 +3877,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             p10_common=(list(_statcode.level_start_lines(_p31["world"]) if _STATS else ())   # P10: the stats at 0
                         + (_teleportcode.level_start_lines(_TELE) if _TELE else [])          # M8 L4: no reactiontime; C5: W1 armed
                         + (_exitcode.level_start_lines(lds) if standalone and menu else [])   # M8 C9: no exit used
+                        + _powercode.level_start_lines(_POWERS)                       # M8 C6: no power (E1M1: none)
                         + (_lightcode.level_start_lines(_lth) if _lth else [])            # M8: the lights' start
                         # M8: every switch as the map has it (switchcode)
                         + (_switchcode.level_start_lines(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else [])))

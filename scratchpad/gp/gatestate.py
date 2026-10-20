@@ -47,7 +47,8 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "p_rct",                                                             # M8 L4: the reactiontime
                "tp_w1",                                                             # M8 C5: the W1 teleports
                "ltst", "ltct", "rng_lt",                                            # M8: the light thinkers
-               "swpr", "swtm")                                                      # M8: the switch textures
+               "swpr", "swtm",                                                      # M8: the switch textures
+               "p_inv", "p_rad")                                                    # M8 C6: the timed powers
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int | None = None,

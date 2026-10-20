@@ -94,6 +94,7 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from doomfj import gamedata as gd
+from doomfj import powers as _PW                       # M8 C6: the timed powers' rules
 from doomfj import rng as R
 from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
@@ -205,7 +206,8 @@ ANGLE_MASK32 = 0xFFFFFFFF
 # P_TouchSpecialThing's cases for every gettable thing E1M1 holds (sprite name in the comment)
 GETTABLE = frozenset({2018, 2019, 2014, 2015, 5, 2011, 2012, 2023, 2007, 2048, 2010, 2046, 2047,
                       17, 2008, 2049, 8, 2005, 2001, 2003, 2002,     # P9: 2003, the rocket launcher; P10: 2002
-                      13, 6, 2013, 2026})            # M8 L0 (E1M2): the red and yellow cards, the soulsphere, the map
+                      13, 6, 2013, 2026,             # M8 L0 (E1M2): the red and yellow cards, the soulsphere, the map
+                      2024, 2025})                   # M8 C6: partial invisibility, the radiation suit (doomfj.powers)
 SOUL_HEALTH, MAX_SOUL = 100, 200            # p_inter.c: the soulsphere's give and cap (deh_soul_health, deh_max_soul)
 
 
@@ -275,6 +277,11 @@ class Sites:
         self.bruiser_hit = (1, one(lambda v: (v % 8 + 1) * BRUISERSHOT_INFO.damage))      # M8 C8: the Baron's 8
         # `tics -= P_Random()&3`: P_KillMobj, P_ExplodeMissile, P_CheckMissileSpawn, puff, blood
         self.tics_roll = (1, one(lambda v: v & 3))
+        # M8 C6 (doomfj.powers): A_FaceTarget at a shadow target (`<< 21`, in the spread's 2^20 unit), P_SpawnMissile
+        # at one (`<< 20`, BAM), the suit's leak on a 20-damage floor (`P_Random() < 5`)
+        self.shadow_face = (2, outcome_table_k(_PW.face_jitter, 2))
+        self.shadow_missile = (2, outcome_table_k(_PW.missile_jitter, 2))
+        self.suit_leak = (1, one(lambda v: int(_PW.suit_leaks(v))))
         # P_DamageMobj: P_Random () < target->info->painchance -- one table per painchance value
         self.pain: Dict[int, Tuple[int, List]] = {}
         for info in gd.MOBJINFO.values():
@@ -307,6 +314,9 @@ def site_formulas(col: Callable[[int], int]) -> Dict[str, Tuple[int, Callable]]:
         "rocket_hit": (1, lambda v: (v % 8 + 1) * 20),                     # P9
         "bruiser_hit": (1, lambda v: (v % 8 + 1) * 8),                     # M8 C8
         "tics_roll": (1, lambda v: v & 3),
+        "shadow_face": (2, lambda a, b: (a - b) << 1),                        # M8 C6: P_SubRandom() << 21, in 2^20
+        "shadow_missile": (2, lambda a, b: (a - b) << 20),                    # M8 C6: P_SubRandom() << 20
+        "suit_leak": (1, lambda v: int(v < 5)),                               # M8 C6: P_Random() < 5
         **pains,
     }
 
@@ -349,7 +359,7 @@ def fireball_momentum_table(rm, info=None) -> List[Tuple[int, int]]:
 STARTREDPALS, NUMREDPALS = 1, 8             # the damage flash: palettes 1..8
 STARTBONUSPALS, NUMBONUSPALS = 9, 4         # the pickup flash: palettes 9..12
 DC_CAP = 100                                # P_DamageMobj: player->damagecount capped at 100 (hurtcode imports it)
-# (RADIATIONPAL 13: pw_ironfeet -- E1M1 holds no radiation suit, and the schema no powers[pw_ironfeet])
+# (RADIATIONPAL 13: pw_ironfeet -- M8 C6, doomfj.powers: only a map holding the suit has the `p_ironfeet` field)
 
 
 def palette_index(ws) -> int:
@@ -364,6 +374,8 @@ def palette_index(ws) -> int:
         return min(NUMREDPALS - 1, (cnt + 7) >> 3) + STARTREDPALS
     if ws.p_bonuscount:
         return min(NUMBONUSPALS - 1, (ws.p_bonuscount + 7) >> 3) + STARTBONUSPALS
+    if _PW.blinking(getattr(ws, "p_ironfeet", 0)):        # M8 C6: the suit's green, flickering out at the end
+        return _PW.RADIATIONPAL
     return 0
 
 
@@ -529,6 +541,7 @@ class CombatMixin:
             self._weapon_tics(keys, ev)
         if ws.p_strength:
             ws.p_strength = min(ws.p_strength + 1, 0xFFFF)
+        self._power_tic()                         # M8 C6: P_PlayerThink's power countdown (invisibility, ironfeet)
         if ws.p_damagecount:
             ws.p_damagecount -= 1
         if ws.p_bonuscount:
@@ -601,8 +614,34 @@ class CombatMixin:
             return
         if not self._on_sector_floor(sec):
             return                               # "Falling, not all the way down yet?"
+        if self._suit_stops(dmg):                # M8 C6: the radiation suit (doomfj.powers)
+            return
         ev.nukage += 1
         self.damage_player(dmg, ("sector", sec), None, ev)       # no inflictor: sector damage thrusts nothing
+
+    def _power_tic(self) -> None:
+        """M8 C6 (doomfj.powers): P_PlayerThink's countdown of the map's timed powers, each running counter one less
+        (the fj: powercode.countdown_lines)"""
+        ws = self.ws
+        for k in self.powers:
+            f = _PW.FIELD[k]
+            if getattr(ws, f):
+                setattr(ws, f, getattr(ws, f) - 1)
+
+    def _suit_stops(self, dmg: int) -> bool:
+        """M8 C6 (doomfj.powers): P_PlayerInSpecialSector's suit test at a hurt -- True when the suit stops the damage
+        `dmg`: worn, and the floor is not a 20-damage one, or it is and `P_Random() < 5` fails (one draw on rng_player,
+        on the hurt tic only: powers.py's recorded convention). The fj: powercode.suit_lines"""
+        if not getattr(self.ws, "p_ironfeet", 0):
+            return False
+        return dmg != _PW.SUIT_LEAK_DAMAGE or not self._roll("rng_player", self.sites.suit_leak)
+
+    def _shadow_missile_turn(self, m: int, an: int) -> int:
+        """M8 C6 (doomfj.powers): P_SpawnMissile's `an += P_SubRandom() << 20` at a shadow target (two draws on the
+        shooter's stream), else `an`. The fj: powercode.missile_lines"""
+        if self.shadow_target(m):
+            return (an + self._roll("mon_rng", self.sites.shadow_missile, m)) & M32
+        return an
 
     def _on_sector_floor(self, sec: int) -> bool:
         """P_PlayerInSpecialSector's "Falling, not all the way down yet?": the player box's floorz is sector `sec`'s
@@ -1434,13 +1473,13 @@ class CombatMixin:
         ev.attacks.append((m, action))
         if not self.ws.mon_target[m]:
             return
-        if action not in NO_FACE_ATTACKS:                # M8 C8: A_BruisAttack does not face (its ATK1 / ATK2 did)
-            self._a_face_target(m)
+        # M8 C8: A_BruisAttack does not face (its ATK1 / ATK2 did); M8 C6: a shadow target's turn (0 when none)
+        jit = self._a_face_target(m) if action not in NO_FACE_ATTACKS else 0
         if self.monsters == "decide":                    # M7 P3.2c: the rolls without their effects (P5)
             self._attack_rolls(m, action)
             return
         if action in BULLETS:
-            self._mon_hitscan(m, BULLETS[action], ev)
+            self._mon_hitscan(m, BULLETS[action], ev, *((jit,) if jit else ()))   # M8 C6: a turn only when one
         elif action in CLAW_SITES:                       # the imp's and (M8 C8) the Baron's: claw, else the missile
             if self._check_melee_range(m):
                 self._mon_melee(m, getattr(self.sites, CLAW_SITES[action]), ev)
@@ -1478,7 +1517,7 @@ class CombatMixin:
             return
         self.damage_player(dmg, ("mon", m), ("mon", m), ev)
 
-    def _mon_hitscan(self, m: int, bullets: int, ev) -> None:
+    def _mon_hitscan(self, m: int, bullets: int, ev, jit: int = 0) -> None:
         """A_PosAttack / A_SPosAttack: one aim (sight and range), then each bullet's spread against
         the player's width at that distance. Every bullet draws, hit or not.
 
@@ -1487,14 +1526,15 @@ class CombatMixin:
         (`_bullet_victim`: the player, monsters, barrels; never the shooter or the target) within that thing's width
         of the bullet's line; else the target by the rule above; else nothing. A target the shooter does not see is
         missed, and so is everything in front of it (the shooter fires along the line it sees). A monster hit
-        bleeds and a barrel puffs (toward the player, as a player's shot's effect: `_spawn_fx_at_target`)."""
+        bleeds and a barrel puffs (toward the player, as a player's shot's effect: `_spawn_fx_at_target`).
+        M8 C6 (doomfj.powers): `jit` -- A_FaceTarget's turn at an invisible player -- adds to every bullet's spread."""
         W = _W()
         if not self._fight:
             seen = self.player_alive() and self.attack_sight(self, m)   # M7 P3.2
             dist = W.aprox_distance(*self._to_player(m))
             for _ in range(bullets):
                 spread, dmg = self._roll("mon_rng", self.sites.mon_bullet, m)
-                hit = seen and dist < MISSILERANGE_U and abs(spread) <= self.hwt[dist >> HWT_SHIFT]
+                hit = seen and dist < MISSILERANGE_U and abs(spread + jit) <= self.hwt[dist >> HWT_SHIFT]
                 ev.mon_shots.append((m, spread, dmg, hit))
                 if hit:
                     self.damage_player(dmg, ("mon", m), ("mon", m), ev)
@@ -1509,8 +1549,8 @@ class CombatMixin:
             spread, dmg = self._roll("mon_rng", self.sites.mon_bullet, m)
             victim = None
             if seen:
-                victim = self._bullet_victim(m, spread, a_t, dist)
-                if victim is None and dist < MISSILERANGE_U and abs(spread) <= hwt_t[dist >> HWT_SHIFT]:
+                victim = self._bullet_victim(m, spread + jit, a_t, dist)
+                if victim is None and dist < MISSILERANGE_U and abs(spread + jit) <= hwt_t[dist >> HWT_SHIFT]:
                     victim = ("mon", t - 2) if t >= 2 else ("player", -1)
             ev.mon_shots.append((m, spread, dmg, victim is not None))
             if victim is None:
@@ -1589,6 +1629,7 @@ class CombatMixin:
         # M7 P8a I: P_SpawnMissile aims at the TARGET (the player before infighting; `_target_pos16`). Convention: a
         # spectre target's MF_SHADOW jitter (an += P_SubRandom() << 20) is not drawn -- nor A_FaceTarget's on it
         an = self.rm.point_to_angle(sx, sy, *self._target_pos16(m))
+        an = self._shadow_missile_turn(m, an)    # M8 C6: P_SpawnMissile at an invisible player (doomfj.powers)
         momx, momy = self.missile_mom[info.name][an >> self.rm.angle_shift]
         ws.proj_active[slot], ws.proj_src[slot] = 1, m
         ws.proj_momx[slot], ws.proj_momy[slot] = momx, momy
@@ -2183,6 +2224,9 @@ class CombatMixin:
             taken = True
         elif kind == 2013:                                            # SOUL (M8 L0): +100, capped at 200
             ws.p_health = min(ws.p_health + SOUL_HEALTH, MAX_SOUL)
+            taken = True
+        elif kind in _PW.POWER_TYPES:                                 # PINS / SUIT (M8 C6): P_GivePower, always
+            setattr(ws, _PW.FIELD[kind], _PW.TICS[kind])              # taken (the counter restarts)
             taken = True
         elif kind == 2026:                                            # PMAP (M8 L0): P_GivePower(pw_allmap) --
             taken = True                                              # refused only when held (one map a level)

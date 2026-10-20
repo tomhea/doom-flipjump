@@ -290,6 +290,7 @@ THING_SPRITE = {
     2002: "MGUN", 2005: "CSAW", 2006: "BFUG", 2003: "LAUN", 2004: "PLAS", 2013: "SOUL",
     2022: "PINV", 2023: "PSTR", 2024: "PINS", 2025: "SUIT", 2026: "PMAP", 2045: "PVIS",
     2007: "CLIP", 2048: "AMMO", 2046: "BROK", 2047: "CELL", 2049: "SBOX", 8: "BPAK",
+    17: "CELP",                   # M8 C6: the cell charge pack (E1M8; E1M1's two are multiplayer-only, never drawn)
     34: "CAND", 35: "CBRA", 44: "TBLU", 45: "TGRN", 46: "TRED", 55: "SMBT", 56: "SMGT",
     57: "SMRT", 48: "ELEC", 30: "COL1", 31: "COL2", 32: "COL3", 33: "COL4", 36: "COL5",
     37: "COL6", 41: "CEYE", 42: "FSKU", 49: "GOR1", 50: "GOR2",
@@ -363,6 +364,7 @@ VANISHABLE_TYPES = frozenset({
     2022, 2023, 2024, 2025, 2026, 2045,     # PINV PSTR PINS SUIT PMAP PVIS  powerups
     2001, 2002, 2003, 2004, 2005, 2006,     # SHOT MGUN LAUN PLAS CSAW BFUG  weapons
     2007, 2008, 2010, 2046, 2047, 2048, 2049, 8,   # CLIP SHEL ROCK BROK CELL AMMO SBOX BPAK
+    17,                                     # CELP (M8 C6: E1M8's cell charge pack)
     5, 6, 13, 38, 39, 40,                   # the keys (none drawable on E1M1 today; harmless)
     2035,                                   # BAR1  the barrel -- destroyed, not picked up
 })

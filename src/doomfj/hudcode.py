@@ -115,12 +115,14 @@ VALUE_CELLS = {"card": "pcard", "card_y": "pcard_y", "card_r": "pcard_r"}
 
 def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_row: Sequence[int],
                    view_rows: int = hud.VIEW_ROWS, value_cells: Dict[str, str] = VALUE_CELLS,
-                   dead_cell: Optional[str] = None, cards: Sequence[str] = ()) -> List[str]:
+                   dead_cell: Optional[str] = None, cards: Sequence[str] = (), shadow=None) -> List[str]:
     """the world frame's tail before `frame_end`: the weapon, then the bar's changed columns.
     P10 (the owner's play-test, 2026-10-12): with `dead_cell` (the game tier's `p_dead`), a dead player draws no weapon
     and no flash -- DOOM's P_DropWeapon lowers the weapon out of view; the overlays are baked at WEAPONTOP, so the
     picture hides it at once (hud.NO_PSPRITE is the oracle's side).
-    M8 F4: `cards` -- the map's extra key icons (hud.bar_slots(cards)), their slots reading `value_cells`' card cells"""
+    M8 F4: `cards` -- the map's extra key icons (hud.bar_slots(cards)), their slots reading `value_cells`' card cells.
+    M8 C6: `shadow` -- (weapons, flashes, colour row) of the SHADOW weapon (hud.shadow_columns, a map holding partial
+    invisibility): drawn instead while `p_inv` shows (powercode.shadow_lines); None (E1M1): the text is as before"""
     slots = hud.bar_slots(cards)
     owned_cols = {x for _n, x0, w, _v in slots for x in range(x0, x0 + w)}
     out = ["// M7 P4.0 (doomfj.hudcode): the weapon overlay, then the bar's changed columns"]
@@ -132,6 +134,14 @@ def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_r
         # M7 P4.1: one overlay per weapon frame, chosen by `wp_frm`; then the flash's, by `fl_frm` (0 = none) -- the
         # psprites in DOOM's order, the flash's records after the weapon's (the device draws a later record over)
         weapons, flashes = overlay
+        if shadow is not None:                       # M8 C6: an invisible player's psprites, R_DrawPSprite's shadow
+            from doomfj.powercode import shadow_lines
+            sw, sf, srow = shadow
+            out += shadow_lines("hsd_on", "hsd_off") + ["hsd_on:"]
+            out += _frame_dispatch2("hsw", "wp_frm", [weapon_record_lines(o, srow) for o in sw], "hsw_end")
+            out += ["hsw_end:"]
+            out += _frame_dispatch("hsf", "fl_frm", [[]] + [weapon_record_lines(o, srow) for o in sf], "hff_end")
+            out += ["hsd_off:"]
         out += _frame_dispatch2("hwf", "wp_frm", [weapon_record_lines(o, colormap_row) for o in weapons], "hwf_end")
         out += ["hwf_end:"]
         out += _frame_dispatch("hff", "fl_frm", [[]] + [weapon_record_lines(o, colormap_row) for o in flashes],
@@ -176,7 +186,7 @@ def slot_index(name: str) -> int:
 READY_WEAPON = "PISGA0"        # P4.0 draws the ready pistol; P4.1's weapon state machine picks the frame
 
 
-def game_hud_parts(rm, asset_wad, sprite_wad, sectors, cards: Sequence[str] = ()) -> dict:
+def game_hud_parts(rm, asset_wad, sprite_wad, sectors, cards: Sequence[str] = (), shadow: bool = False) -> dict:
     """everything the game tier's emitter splices in: `decls` (state cells), `restart` (NEW GAME's values), `menu` (the
     line every menu frame runs: the bar is redrawn after it) and `tail` (the world frame's weapon and bar, before
     `frame_end`). ONE colormap row lights the weapon on every sector of the map (asserted: a map with darker sectors
@@ -197,8 +207,12 @@ def game_hud_parts(rm, asset_wad, sprite_wad, sectors, cards: Sequence[str] = ()
     overlay = ([cols(lump) for lump in WC.overlay_frames()], [cols(lump) for lump in WC.flash_frames()])
     from doomfj.wall_renderer import PLAYER_MODE
     from doomfj.world import player_mortal
+    # M8 C6 (`shadow`, a map holding partial invisibility): the shadow weapon's frames (hud.shadow_columns)
+    shd = ([hud.shadow_columns(o) for o in overlay[0]], [hud.shadow_columns(o) for o in overlay[1]],
+           hud.shadow_row(asset_wad.colormap(), row)) if shadow else None
     return {"decls": hud_decls(start, cards), "restart": hud_restart_lines(start), "menu": ["hex.set 1, hud_full, 1"],
             "tail": hud_tail_lines(colours, overlay, row, view_rows=rm.cfg.VIEW_H,
-                                   dead_cell="p_dead" if player_mortal(PLAYER_MODE) else None, cards=cards),
+                                   dead_cell="p_dead" if player_mortal(PLAYER_MODE) else None, cards=cards,
+                                   shadow=shd),
             "colours": colours,
             "overlay": overlay, "colormap_row": row}

@@ -209,7 +209,8 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
     M8 F4: + the map's new card cells (lootcode.map_persist: pcard_y / pcard_r, the game tier's loot; none on E1M1);
     M8 L4: + the player's reactiontime on a map with a WR teleport (teleportcode.map_persist: `p_rct`);
     M8: + the sector light thinkers' cells on a map whose lights animate (lightcode.map_persist: ltst, ltct, rng_lt);
-    M8: + the switch textures' cells on a map that animates its switches (switchcode.map_persist: `swpr`, `swtm`)"""
+    M8: + the switch textures' cells on a map that animates its switches (switchcode.map_persist: `swpr`, `swtm`);
+    M8 C6: + the timed powers' counters on a map holding them (powercode.map_persist: `p_inv`, `p_rad`)"""
     if not on:
         return ()
     from doomfj.lightcode import map_persist as _light_persist
@@ -218,10 +219,12 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
     from doomfj.switchcode import map_persist as _switch_persist
     from doomfj.teleportcode import map_persist as _tele_persist
     from doomfj.exitcode import map_persist as _exit_persist
+    from doomfj.powercode import map_persist as _power_persist
     return (map_persist(wad, mapname) + card_persist(wad, mapname) + _tele_persist(wad, mapname)
             + _light_persist(wad, mapname)
             + _switch_persist(wad, mapname)
-            + _exit_persist(wad, mapname))                  # M8 C9: lvsec on a map with a secret exit
+            + _exit_persist(wad, mapname)                   # M8 C9: lvsec on a map with a secret exit
+            + _power_persist(wad, mapname))                 # M8 C6: the timed powers
 
 
 def automap_persist(cfg, menu: bool) -> tuple:

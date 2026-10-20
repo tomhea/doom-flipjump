@@ -722,13 +722,16 @@ class MonsterPhase:
                 gd.WP_MISSILE: ws.p_ammo[gd.AM_MISL],                             # P9: the launcher's rockets
                 gd.WP_CHAINGUN: ws.p_ammo[gd.AM_CLIP]}.get(ws.p_ready)            # P10: the chaingun's bullets
         from doomfj.hud import NO_PSPRITE
+        from doomfj.powers import INVIS_TYPE as _INVIS, blinking as _blinking
         dead = bool(ws.p_dead)                          # P10: a dead player draws no weapon (hudcode's `dead_cell`)
         return {"weapon": NO_PSPRITE if dead else WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
                 "flash": None if dead or fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
                 "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,
                            "owned": arms_owned(ws.p_owned),             # P9: DOOM's six ARMS digits 2..7
                            # M8 F4: the yellow and red cards' icons (never held on E1M1: its bar is unchanged)
-                           "yellow": bool(ws.p_cards[gd.IT_YELLOWCARD]), "red": bool(ws.p_cards[gd.IT_REDCARD])}}
+                           "yellow": bool(ws.p_cards[gd.IT_YELLOWCARD]), "red": bool(ws.p_cards[gd.IT_REDCARD])},
+                # M8 C6: an invisible player's psprites are the shadow weapon (R_DrawPSprite; a map holding 2024 only)
+                **({"shadow": _blinking(ws.p_invis)} if _INVIS in self.world.powers else {})}
 
     def boxes(self) -> list:
         """[(x16, y16, r16)] of every live monster -- a closing door reverses on them (World.door_touched)"""
@@ -805,7 +808,9 @@ class MonsterPhase:
           p_rct   2 nibbles  M8 L4: the player's reactiontime after a teleport, 0..18 (a map with a WR teleport
                              in a looting mode: doomfj.teleportcode)
           ltst    1 nibble a thinker, ltct 2 nibbles a thinker, rng_lt 2 nibbles -- M8: the sector light thinkers'
-                  states, counts (a glow's direction) and stream (a map whose flag is on: doomfj.lightcode)"""
+                  states, counts (a glow's direction) and stream (a map whose flag is on: doomfj.lightcode)
+          p_inv / p_rad   3 nibbles each -- M8 C6: the timed powers' counters (a map holding 2024 / 2025:
+                  doomfj.powercode)"""
         from doomfj.world import infighting_on, knockback_on, player_loots, player_sinks
         w, ws, n = self.world, self.world.ws, self.world.layout.nmon
         out = {}
@@ -827,6 +832,9 @@ class MonsterPhase:
             out["p_rct"] = ws.p_reaction
             if getattr(w, "tele_once", None):        # M8 C5: the W1 monster teleports' latches (E1M7)
                 out["tp_w1"] = ws.tp_fired[0] if len(w.tele_once) == 1 else tuple(ws.tp_fired)
+        from doomfj import powers as _PW                     # M8 C6: the timed powers' counters
+        for k in getattr(w, "powers", ()):
+            out[_PW.CELL[k]] = getattr(ws, _PW.FIELD[k])
         if getattr(w, "light_thinkers", None):   # M8 (doomfj.lightcode): the light thinkers' cells
             one = len(w.light_thinkers) == 1         # the probe reads a count-1 cell as an int
             out.update({"ltst": ws.lt_state[0] if one else tuple(ws.lt_state),

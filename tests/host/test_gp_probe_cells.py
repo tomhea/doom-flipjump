@@ -136,6 +136,7 @@ def test_only_the_skill_menu_is_optional(tmp_path):
                                  "p_rct",                                 # M8 L4: the teleport's reactiontime
                                  "ltst", "ltct", "rng_lt",                # M8: the sector light thinkers
                                  "swpr", "swtm",                          # M8: the switch textures
+                                 "p_inv", "p_rad",                        # M8 C6: the timed powers (their maps)
                                  "amap"}                                  # M8: the map page's state (its maps only)
     for one in ("p_bc", "rng_wd", "dr_live", "g_skill", "p_atk", "st_kill"):   # M7 P6 / P7 (P10: the stats): each group
         with pytest.raises(KeyError, match="come together"):

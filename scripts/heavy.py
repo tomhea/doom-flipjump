@@ -50,6 +50,19 @@ def pid_alive(pid):
     return code.value == 259                                           # STILL_ACTIVE
 
 
+def clear_stale_lock():
+    """a lock whose holder died (a session ended mid-job, 2026-10-20: the queue sat blocked for a day) is removed --
+    the holder's pid is in the lock text; a live holder, or a lock with no pid, is left alone"""
+    import re
+    m = re.search(r"\bpid (\d+)\b", lock_text())
+    if m and not pid_alive(int(m.group(1))):
+        try:
+            os.remove(LOCK)
+            print("heavy.py: removed a stale lock (pid %s is gone)" % m.group(1), flush=True)
+        except OSError:
+            pass
+
+
 def lock_text():
     try:
         return open(LOCK).read().strip()
@@ -124,6 +137,7 @@ def main():
     said = False
     try:
         while True:
+            clear_stale_lock()
             if not os.path.exists(LOCK) and not higher_waiter(prio) and avail_gb() >= MIN_AVAIL_GB:
                 try:
                     fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)

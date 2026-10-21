@@ -44,14 +44,16 @@ def _rows(ls, wad, m, section, name):
     return [(r[0], r[2]) for r in s.rows if r[1].startswith(name)]
 
 
-@pytest.mark.parametrize("m, want", [("E1M2", ("OK", "138")), ("E1M6", ("OVER", "301")), ("E1M7", ("OVER", "305"))])
+# M8 C2 (docs/c2-slot-ids.md): E1M6 / E1M7 hold their slot ids in three nibbles (MAP_CONFIG SLOT_ID_BITS 12): OK at
+# 4093; the control of the width is test_level_survey's (without SLOT_ID_BITS the same counts read OVER)
+@pytest.mark.parametrize("m, want", [("E1M2", ("OK", "138")), ("E1M6", ("OK", "301")), ("E1M7", ("OK", "305"))])
 def test_monster_slots_from_the_wad(ls, wad, m, want):
     assert _rows(ls, wad, m, "things", SLOTS) == [want]
 
 
 def test_control_the_unknown_monsters_are_counted(ls, wad, monkeypatch):
     monkeypatch.setattr(ls, "DOOM_MONSTERS", ls.DOOM_MONSTERS - {3006})
-    assert _rows(ls, wad, "E1M7", "things", SLOTS) == [("OVER", "297")]
+    assert _rows(ls, wad, "E1M7", "things", SLOTS) == [("OK", "297")]
 
 
 def test_the_slot_cap_row_takes_the_maps_cap(ls, wad, monkeypatch):

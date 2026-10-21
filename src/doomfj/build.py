@@ -182,10 +182,10 @@ def p8a_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     not) -- `game_screen_persisted_decls`' candidates for VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST. Candidates
     only: a name is persisted by `p8a_persist`, behind its rule. Package A: p_vd; package K: knockcode's (p_kmx ..
     pj_z, at the map's slot count); package I: bar_src (barrelcode.fight_decls)"""
-    from doomfj.world import World
+    from doomfj.world import World, slot_nibbles
     w = World(map_wad, mapname)
     return (list(_restartcode_p8a.view_decls())                                  # package A: p_vd
-            + _knockcode.persisted_decls(w.layout.nmon)                          # package K
+            + _knockcode.persisted_decls(w.layout.nmon, sn=slot_nibbles(w.layout))   # package K (M8 C2: kb_live)
             + [d for d in _barrelcode.fight_decls(w) if d.split(":")[0] in FIGHT_PERSIST])   # package I
 
 
@@ -247,7 +247,7 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     from doomfj import aimcode, hud, hudcode, hurtcode, projcode
     from doomfj import weaponcode as WC
     from doomfj.selfreset import decl_words
-    from doomfj.world import World
+    from doomfj.world import World, slot_nibbles
     # M7 P7: GAME_PERSIST's cells are NOT here -- they are standalone globals (wall_renderer.MENU_STATE_DECLS), which
     # m5_setfile adds through STANDALONE_SCRATCH_DECLS; listing them twice would declare them twice.
     # M7 P6: + LOOT_PERSIST + BARREL_PERSIST, their modules' decl lists in `cand`
@@ -257,11 +257,12 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
              + STAT_PERSIST                                           # P10: the stats (statcode.decls)
              + p8a_persist())                                         # M7 P8a: the hooks at the game tier's modes
     _cards = lootcode.hud_cards(map_wad, mapname)                    # M8 F4: the map's extra key icons' slots
+    _sn = slot_nibbles(World(map_wad, mapname).layout)               # M8 C2: aim_sid, p_atk, pj_src's widths
     cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START, cards=_cards), _cards), _cards)
             + WC.weapon_decls(WC.level_start(map_wad, mapname), WC.weapon_states(), WC.overlay_frames())
-            + WC.weapon_const_decls() + aimcode.decls()
-            + hurtcode.hurt_decls(hurtcode.level_start(World(map_wad, mapname)))   # M7 P5
-            + projcode.pool_decls()
+            + WC.weapon_const_decls() + aimcode.decls(sn=_sn)
+            + hurtcode.hurt_decls(hurtcode.level_start(World(map_wad, mapname)), _sn)   # M7 P5
+            + projcode.pool_decls(sn=_sn)
             + barrelcode.decls(World(map_wad, mapname), BOOT_SKILL)      # M7 P6: barrels, drops
             + lootcode.loot_decls(lootcode.level_start(World(map_wad, mapname)))   # M7 P6: the player's loot
             + p8a_persisted_decls(map_wad, mapname)                                # M7 P8a: the hooks' modules

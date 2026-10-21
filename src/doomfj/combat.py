@@ -1110,7 +1110,7 @@ class CombatMixin:
         sid = world.ws.aim_sid[col - world.aim_lo]
         if sid == 0:
             return None
-        if sid > _D.SHOT_SID_TOP - world.layout.nshot:          # M8 C3: a GR 46 line (doors.shot_sid)
+        if world.layout.nshot and sid > _D.SHOT_SID_TOP - world.layout.nshot:   # (M8 C2: a wide map's ids pass 0xFF)          # M8 C3: a GR 46 line (doors.shot_sid)
             return ("shot", _D.SHOT_SID_TOP - sid)
         nmon = world.layout.nmon
         return ("mon", sid - 1) if sid <= nmon else ("bar", sid - 1 - nmon)

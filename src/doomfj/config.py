@@ -118,6 +118,13 @@ class Config:
     # hex.write_cell), and its emitter calls the `_w` twins of sim.fj's list macros. 8 lays no table and emits the text
     # it always did (not an fj constant: `constants()` leaves it out, so fj_consts.fj is unchanged too).
     LIST_ID_BITS: int = 8
+    # M8 C2 (docs/c2-slot-ids.md) -- HOW WIDE A MONSTER / BARREL SLOT ID IS in the fj registers and cells (aim_sid,
+    # dm_id, the codes mon_target / bar_src / dm_src, p_atk, kb_tg, pj_src, the scheduler's): 8 bits (two nibbles,
+    # nmon + nbarrel <= 254: E1M1, E1M2) or 12 (three: E1M6's 298, E1M7's 297). The width itself is DERIVED from the
+    # map's counts (world.slot_nibbles, as World.sec_nibbles); this names what the map's emission expects, and the
+    # emitter refuses a mismatch (wall_renderer) -- so a big map without its entry fails at emission, never in a
+    # gate. Not an fj constant (constants() leaves it out: fj_consts.fj is unchanged).
+    SLOT_ID_BITS: int = 8
 
     @property
     def LIST_WIDE(self) -> int:
@@ -405,7 +412,10 @@ MAP_CONFIG = {
     # -- ~545 plane pairs before directions (E1M2: 329 -> 411 baked), the band lists past E1M2's (> 65,535 there);
     # SSHEAD_RATIO 1 -- the hot data block (pclm .. wrej) inside frame.arm5's window, as E1M2; SPR_SLOT_CAP -- 606
     # drawable things over the skills (wall_renderer.check_slot_ids)
-    "E1M7": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "TSV_NIBBLES": 4},
+    # M8 C2 (docs/c2-slot-ids.md): LIST_ID_BITS 12 -- 337 runtime ids (F1.5); SLOT_ID_BITS 12 -- 281 monster + 16 barrel
+    # slots (+ 8 lost souls) past 254: three-nibble slot ids
+    "E1M7": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "TSV_NIBBLES": 4,
+             "LIST_ID_BITS": 12, "SLOT_ID_BITS": 12},
     # M8 C11 (E1M9): SPR_SLOT_CAP -- 293 drawable things over the skills (wall_renderer.check_slot_ids)
     "E1M9": {"SPR_SLOT_CAP": 255},
     # M8 C11: SPR_SLOT_CAP for the wave-1 / wave-3 maps past a byte of drawable things over the skills (level_survey:
@@ -420,7 +430,9 @@ MAP_CONFIG = {
     "E1M4": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1,
              "AUTOMAP": 1, "SWITCH_TEX": 1, "THSS_COLD": 1},
     "E1M5": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "AUTOMAP": 1, "SWITCH_TEX": 1},
-    "E1M6": {"SPR_SLOT_CAP": 255},
+    # M8 C2 (docs/c2-slot-ids.md): LIST_ID_BITS 12 -- 345 runtime ids (F1.5); SLOT_ID_BITS 12 -- 291 monster + 7 barrel
+    # slots (+ 3 lost souls) past 254: three-nibble slot ids
+    "E1M6": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "SLOT_ID_BITS": 12},
     # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): the map page, at 40 units a pixel (doomfj.automap).
     # #149: DOOR_NEIGHBOURS "legacy" -- the door rule E1M1 shipped with (its stops are frozen, PR #103); it was the
     # default before E1M2, picked by the map's record counts until #149. Every other field keeps its default

@@ -141,3 +141,57 @@ def test_e1m1_lines_w1r_ft1_byte_exact_vs_oracle(tmp_path):
             print(f"[lines W1R+FT1] E1M1 spawn frame = {term.op_counter:,} ops")
 
 
+
+
+def _room_at_light(light):
+    """square_room.wad with its one sector's light set to `light` (only the SECTORS lump rewritten)"""
+    import struct
+    from doomfj.wad import Lump
+    wad = WadFile.from_path(ROOM)
+    lumps = list(wad._lumps)
+    k = next(i for i, lp in enumerate(lumps) if lp.name == "SECTORS")
+    d = bytearray(lumps[k].data)
+    struct.pack_into("<h", d, 20, light)          # floor_h, ceil_h, floor_tex[8], ceil_tex[8], LIGHT, special, tag
+    lumps[k] = Lump("SECTORS", 0, len(d), bytes(d))
+    out = WadFile(wad.wad_type, lumps)
+    assert out.sectors("MAP01")[0].light == light
+    return out
+
+
+def _light256_mismatches(tmp_path, monkeypatch, key_light):
+    """the light-256 room's frames that differ from the oracle, with `key_light` as the emitter's plane-key light"""
+    import doomfj.wall_renderer as wr
+    monkeypatch.setattr(wr, "plane_key_light", key_light)
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = _room_at_light(256)
+    aw = WadFile.from_path(ASSET)
+    scene = build_scene(mw, aw, "MAP01")
+    VIEWPOINTS = [(128, 128, 0x40000000), (24, 24, 0x20000000)]
+    out = _assemble_lines(tmp_path, mw, "MAP01", cfg, asset_wad=aw)
+    bad = []
+    for vx, vy, va in VIEWPOINTS:
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene,
+                                    floor_texturing=False, wall_mode="W1R", floor_mode_ft1=True,
+                                    wall_noise=True, plane_near=True, sky=False, near_steps=True,
+                                    stack_steps=True, bbox_cull=True, degrade=True)
+        screen, _term = _run_lines(out, vx, vy, va)
+        if bytes(screen.pixel_indices) != bytes(want):
+            bad.append(((vx, vy, va), sum(a != b for a, b in zip(screen.pixel_indices, want))))
+    return bad
+
+
+def test_light256_planes_byte_exact_vs_oracle(tmp_path, monkeypatch):
+    """M8 (E1M5's first binary, build/doom_e1m5_b1.fjm, parted from the oracle on its first world frame by 5,071 px):
+    a sector at light 256 -- E1M4 has 2, E1M5 57, its spawn sector among them. The band-bank plane key took
+    `light & 0xFF`, so that sector's floor and ceiling baked at light 0 (colour 0, black) where the oracle draws them
+    at DOOM's clamped full light. RUN in fj: the room at light 256, byte-exact vs the oracle at two viewpoints."""
+    import doomfj.wall_renderer as wr
+    assert _light256_mismatches(tmp_path, monkeypatch, wr.plane_key_light) == []
+
+
+def test_light256_control_byte_key_fails(tmp_path, monkeypatch):
+    """R9: the SAME room and viewpoints with the old byte key (`light & 0xFF`) must part from the oracle at both"""
+    bad = _light256_mismatches(tmp_path, monkeypatch, lambda light: light & 0xFF)
+    print("[light256 control] byte key mismatches:", bad)
+    assert len(bad) == 2 and all(n > 100 for _vp, n in bad), bad

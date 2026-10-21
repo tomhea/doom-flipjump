@@ -658,7 +658,7 @@ class Survey:
                                              ": set LIST_ID_BITS %s (F1.5)" % need if need else ": past 4,094 ids"))
         self.guard("runtime ids: things + pools + drops (list cells, Config.LIST_ID_BITS)", ids)
         self.guard("marking segs < DEG_PNEAR", lambda: self._marking(WR, cmap))
-        pid_lo = len({((s.ceil_h, s.light & 0xFF, s.ceil_tex.upper()), (s.floor_h, s.light & 0xFF, s.floor_tex.upper()))
+        pid_lo = len({((s.ceil_h, s.light, s.ceil_tex.upper()), (s.floor_h, s.light, s.floor_tex.upper()))
                       for s in self.secs})
         cfg = map_cfg(Config(), self.m)
         # docs/level-lessons.md: E1M2's plane ids (376 > 255) were found by an emission; the measured real/estimate
@@ -1040,7 +1040,7 @@ class Survey:
         cmap = bake_bsp(self.wad, self.m)
         th = [t for t in self.wad.things(self.m) if single_player(t)]
         vz = len({rm.view_z(sc.floor_h) for sc in self.secs})
-        pairs = len({(sc.ceil_h, sc.floor_h, sc.light & 0xFF, sc.ceil_tex.upper(), sc.floor_tex.upper())
+        pairs = len({(sc.ceil_h, sc.floor_h, sc.light, sc.ceil_tex.upper(), sc.floor_tex.upper())
                      for sc in self.secs})
         diag = sum(1 for n in cmap.nodes if n.dx and n.dy)
         return cmap, {"segs": len(self.wad.segs(self.m)), "linedefs": len(self.lds), "sectors": len(self.secs),

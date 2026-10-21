@@ -271,9 +271,9 @@ def _door_pid_pairs(secs, lds, sds, quant, walkover=True):
         if not walkover and kinds[si] == "walkover":
             continue
         s = secs[si]
-        floor_key = (s.floor_h, s.light & 0xFF, s.floor_tex.upper())
+        floor_key = (s.floor_h, s.light, s.floor_tex.upper())
         for h in stops(s.floor_h, open_h, quant):
-            out.add(((h, s.light & 0xFF, s.ceil_tex.upper()), floor_key))
+            out.add(((h, s.light, s.ceil_tex.upper()), floor_key))
     return out
 
 

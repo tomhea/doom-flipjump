@@ -1,0 +1,594 @@
+{
+ "map": "E1M4",
+ "what": "the gates' ROLES on E1M4 (scratchpad/gp/gate_roles.py reads them; gate_targets.py writes them)",
+ "roles": {
+  "key_doors": {
+   "blue": [
+    188
+   ],
+   "yellow": [
+    28,
+    172,
+    175
+   ],
+   "red": []
+  },
+  "cards": {
+   "blue": [
+    3456,
+    1472,
+    -320
+   ],
+   "yellow": [
+    -960,
+    640,
+    -40
+   ]
+  },
+  "blue_door": 188,
+  "yellow_door": 28,
+  "sr_lift": {
+   "sector": 63,
+   "tag": 7
+  },
+  "reversal_door": 5,
+  "lift_leaf_sector": 33,
+  "pickup_walks": [
+   [
+    -1744,
+    -608,
+    0
+   ],
+   [
+    -1456,
+    -608,
+    2147483648
+   ],
+   [
+    -1776,
+    -608,
+    0
+   ]
+  ],
+  "chain": {
+   "barrels": [
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+   ],
+   "west_of": null
+  },
+  "block_barrel": 0,
+  "nukage_sector": 151,
+  "court": {
+   "points": [
+    [
+     3230,
+     1406
+    ],
+    [
+     3213,
+     1389
+    ],
+    [
+     3196,
+     1372
+    ]
+   ],
+   "angle": 536870912,
+   "facing_slot": 142
+  },
+  "teleports": [
+   [
+    1892,
+    126,
+    9,
+    86
+   ],
+   [
+    1933,
+    97,
+    6,
+    70
+   ],
+   [
+    1938,
+    97,
+    6,
+    70
+   ],
+   [
+    1966,
+    97,
+    8,
+    177
+   ],
+   [
+    1967,
+    97,
+    8,
+    177
+   ],
+   [
+    1968,
+    97,
+    8,
+    177
+   ],
+   [
+    1969,
+    97,
+    8,
+    177
+   ],
+   [
+    1970,
+    97,
+    8,
+    177
+   ],
+   [
+    1971,
+    97,
+    8,
+    177
+   ],
+   [
+    1972,
+    97,
+    8,
+    177
+   ],
+   [
+    1973,
+    97,
+    8,
+    177
+   ],
+   [
+    1974,
+    97,
+    8,
+    177
+   ],
+   [
+    1975,
+    97,
+    8,
+    177
+   ],
+   [
+    1976,
+    97,
+    8,
+    177
+   ],
+   [
+    1977,
+    97,
+    8,
+    177
+   ]
+  ],
+  "exit": [
+   1996,
+   11
+  ]
+ },
+ "na": {
+  "card_pose": "no standing pose of E1M4 walks onto its blue card in 4 frames",
+  "red_door": "E1M4 has no red key door",
+  "below_card_sector": "no sector beside E1M4's card puts it out of a tried step's reach (tried [220, 222, 231])",
+  "blaze_door": "E1M4 has no blazing door",
+  "walkovers": "E1M4 has no W1 walk-over door",
+  "wr_lift": "no WR lift pose verifies",
+  "floor_switch": "E1M4 has no floor switch",
+  "F3": "E1M4 has no chainsaw (2005)",
+  "F5": "E1M4 has no berserk pack (2023) on any skill",
+  "C2": "no candidate of 12 places on E1M4's oracle (gate_targets sweep: the claim is not met without a death)",
+  "S4": "no candidate of 40 places on E1M4's oracle (gate_targets sweep: the claim is not met without a death)",
+  "D1": "no candidate of 12 places on E1M4's oracle (gate_targets sweep: the claim is not met)"
+ },
+ "candidates": {
+  "blue_door": [
+   {
+    "value": 188,
+    "refused": null
+   }
+  ],
+  "card_pose": [
+   {
+    "value": [
+     3480,
+     1472,
+     2147483648
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3478,
+     1481,
+     2412924840
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3473,
+     1489,
+     2684354560
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3465,
+     1494,
+     2955784280
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3456,
+     1496,
+     3221225472
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3447,
+     1494,
+     3486666664
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3439,
+     1489,
+     3758096384
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3434,
+     1481,
+     4029526104
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3432,
+     1472,
+     0
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3434,
+     1463,
+     265441192
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3439,
+     1455,
+     536870912
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3447,
+     1450,
+     808300632
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3456,
+     1448,
+     1073741824
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3465,
+     1450,
+     1339183016
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3473,
+     1455,
+     1610612736
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     3478,
+     1463,
+     1882042456
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   }
+  ],
+  "below_card_sector": [
+   {
+    "value": 220,
+    "refused": "S4: the oracle does not do what it claims"
+   },
+   {
+    "value": 222,
+    "refused": "S4: the oracle does not do what it claims"
+   },
+   {
+    "value": 231,
+    "refused": "placing it: AssertionError: no pose in sector 231 whose step reaches the card's box"
+   }
+  ],
+  "wr_lift": [
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -600,
+      -704,
+      0
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -552,
+      -704,
+      2147483648
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -608,
+      -704,
+      0
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -544,
+      -704,
+      2147483648
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -616,
+      -704,
+      0
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -536,
+      -704,
+      2147483648
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -624,
+      -704,
+      0
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -528,
+      -704,
+      2147483648
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -592,
+      -704,
+      0
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -560,
+      -704,
+      2147483648
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -632,
+      -600,
+      1073741824
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 33,
+     "pose": [
+      -632,
+      -552,
+      3221225472
+     ]
+    },
+    "refused": "S9: the oracle does not do what it claims"
+   }
+  ],
+  "sr_lift": [
+   {
+    "value": {
+     "sector": 33,
+     "tag": 1
+    },
+    "refused": "S10: the oracle does not do what it claims"
+   },
+   {
+    "value": {
+     "sector": 63,
+     "tag": 7
+    },
+    "refused": null
+   }
+  ],
+  "reversal_door": [
+   {
+    "value": 5,
+    "refused": null
+   }
+  ],
+  "pickup_walks": [
+   {
+    "value": [
+     -1744,
+     -608,
+     0
+    ],
+    "items_on_the_ray": 9,
+    "refused": null
+   },
+   {
+    "value": [
+     -1456,
+     -608,
+     2147483648
+    ],
+    "items_on_the_ray": 9,
+    "refused": null
+   },
+   {
+    "value": [
+     -1312,
+     -464,
+     1073741824
+    ],
+    "items_on_the_ray": 9,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -1312,
+     -176,
+     3221225472
+    ],
+    "items_on_the_ray": 9,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -1776,
+     -608,
+     0
+    ],
+    "items_on_the_ray": 8,
+    "refused": null
+   }
+  ],
+  "chain": [
+   {
+    "value": {
+     "barrels": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+     ],
+     "west_of": null
+    },
+    "refused": null
+   }
+  ],
+  "block_barrel": [
+   {
+    "value": 0,
+    "refused": null
+   }
+  ],
+  "nukage_sector": [
+   {
+    "value": 151,
+    "refused": null
+   }
+  ]
+ },
+ "provenance": {
+  "generator": "scratchpad/gp/gate_targets.py",
+  "generator_sha16": "316e9d41527e77a7",
+  "wad": "tests/fixtures/freedoom_e1m4.wad",
+  "wad_sha16": "abde8a6f2319759c",
+  "model_sha16": {
+   "src/doomfj/doors.py": "a8a4a5b146d45f0e",
+   "src/doomfj/movers.py": "fb0c329dc1661725",
+   "src/doomfj/world.py": "46fb8611926a2daf",
+   "src/doomfj/combat.py": "ca0058ceda9762df",
+   "scratchpad/gp/p2a_gate.py": "10897c08760566ee",
+   "scratchpad/gp/fight_gate.py": "58494b6f4c81c870"
+  },
+  "fight_verified": true,
+  "seconds": 2647
+ }
+}

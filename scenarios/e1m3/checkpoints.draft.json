@@ -1,0 +1,654 @@
+{
+ "map": "E1M3",
+ "checkpoints": [
+  {
+   "name": "R0-s38",
+   "sector": 38,
+   "want": [
+    -928,
+    1456
+   ],
+   "face": [
+    -929,
+    1400
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 32 monsters within 640 units (5 MT_POSSESSED, 1 MT_SHADOWS, 18 MT_SHOTGUY, 8 MT_TROOP), the nearest 135 units from the start; 15 pickups within 512"
+  },
+  {
+   "name": "R0-aftermath",
+   "sector": 24,
+   "want": [
+    437,
+    2275
+   ],
+   "face": [
+    408,
+    2300
+   ],
+   "region": 0,
+   "style": "collect",
+   "corpses": [
+    17,
+    140,
+    133
+   ],
+   "why": "AFTERMATH: MT_POSSESSED, MT_SHOTGUY, MT_TROOP (slots [17, 140, 133]) injected as corpses at their spawns, the player among them -- the post-kill drawing (corpses, drops)"
+  },
+  {
+   "name": "R0-s42",
+   "sector": 42,
+   "want": [
+    -1312,
+    1456
+   ],
+   "face": [
+    -1160,
+    1437
+   ],
+   "region": 0,
+   "style": "collect",
+   "why": "region 0: 25 monsters within 640 units (5 MT_POSSESSED, 14 MT_SHOTGUY, 6 MT_TROOP), the nearest 96 units from the start; 16 pickups within 512"
+  },
+  {
+   "name": "R0-s56",
+   "sector": 56,
+   "want": [
+    -1160,
+    672
+   ],
+   "face": [
+    -1117,
+    732
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (5 MT_POSSESSED, 1 MT_SERGEANT, 12 MT_SHOTGUY, 6 MT_TROOP), the nearest 39 units from the start; 18 pickups within 512"
+  },
+  {
+   "name": "R0-s109",
+   "sector": 109,
+   "want": [
+    272,
+    2416
+   ],
+   "face": [
+    412,
+    2590
+   ],
+   "region": 0,
+   "style": "collect",
+   "why": "region 0: 20 monsters within 640 units (6 MT_POSSESSED, 1 MT_SERGEANT, 4 MT_SHOTGUY, 9 MT_TROOP), the nearest 133 units from the start; 10 pickups within 512"
+  },
+  {
+   "name": "R0-s105",
+   "sector": 105,
+   "want": [
+    -816,
+    2256
+   ],
+   "face": [
+    -893,
+    2186
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 19 monsters within 640 units (3 MT_POSSESSED, 1 MT_SERGEANT, 7 MT_SHOTGUY, 8 MT_TROOP), the nearest 182 units from the start; 17 pickups within 512"
+  },
+  {
+   "name": "R0-s3",
+   "sector": 3,
+   "want": [
+    -728,
+    -8
+   ],
+   "face": [
+    -715,
+    224
+   ],
+   "region": 0,
+   "style": "collect",
+   "why": "region 0: 10 monsters within 640 units (3 MT_POSSESSED, 1 MT_SERGEANT, 1 MT_SHADOWS, 4 MT_SHOTGUY, 1 MT_TROOP), the nearest 215 units from the start; 7 pickups within 512"
+  },
+  {
+   "name": "R2-s135",
+   "sector": 135,
+   "want": [
+    1120,
+    2594
+   ],
+   "face": [
+    830,
+    2594
+   ],
+   "region": 2,
+   "style": "fight",
+   "why": "region 2: 5 monsters within 640 units (1 MT_POSSESSED, 1 MT_SHOTGUY, 3 MT_TROOP), the nearest 144 units from the start; 9 pickups within 512"
+  },
+  {
+   "name": "R3-s178",
+   "sector": 178,
+   "want": [
+    -1808,
+    1104
+   ],
+   "face": [
+    -1790,
+    1088
+   ],
+   "region": 3,
+   "style": "collect",
+   "why": "region 3: 22 monsters within 640 units (3 MT_POSSESSED, 1 MT_SERGEANT, 11 MT_SHOTGUY, 7 MT_TROOP), the nearest 183 units from the start; 20 pickups within 512"
+  },
+  {
+   "name": "R3-s151",
+   "sector": 151,
+   "want": [
+    -1728,
+    32
+   ],
+   "face": [
+    -1711,
+    344
+   ],
+   "region": 3,
+   "style": "fight",
+   "why": "region 3: 12 monsters within 640 units (1 MT_POSSESSED, 4 MT_SHOTGUY, 7 MT_TROOP), the nearest 189 units from the start; 11 pickups within 512"
+  },
+  {
+   "name": "R3-s212",
+   "sector": 212,
+   "want": [
+    -2368,
+    496
+   ],
+   "face": [
+    -1979,
+    582
+   ],
+   "region": 3,
+   "style": "collect",
+   "why": "region 3: 8 monsters within 640 units (1 MT_POSSESSED, 1 MT_SERGEANT, 2 MT_SHOTGUY, 4 MT_TROOP), the nearest 235 units from the start; 13 pickups within 512"
+  }
+ ],
+ "reserve": [
+  {
+   "name": "R0-s39",
+   "sector": 39,
+   "want": [
+    -896,
+    1456
+   ],
+   "face": [
+    -929,
+    1400
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 32 monsters within 640 units (5 MT_POSSESSED, 1 MT_SHADOWS, 18 MT_SHOTGUY, 8 MT_TROOP), the nearest 150 units from the start; 14 pickups within 512"
+  },
+  {
+   "name": "R0-s40",
+   "sector": 40,
+   "want": [
+    -864,
+    1456
+   ],
+   "face": [
+    -929,
+    1400
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 32 monsters within 640 units (5 MT_POSSESSED, 1 MT_SHADOWS, 18 MT_SHOTGUY, 8 MT_TROOP), the nearest 120 units from the start; 15 pickups within 512"
+  },
+  {
+   "name": "R0-s35",
+   "sector": 35,
+   "want": [
+    -832,
+    1456
+   ],
+   "face": [
+    -915,
+    1410
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 31 monsters within 640 units (5 MT_POSSESSED, 1 MT_SHADOWS, 17 MT_SHOTGUY, 8 MT_TROOP), the nearest 92 units from the start; 16 pickups within 512"
+  },
+  {
+   "name": "R0-s37",
+   "sector": 37,
+   "want": [
+    -960,
+    1456
+   ],
+   "face": [
+    -949,
+    1394
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 31 monsters within 640 units (4 MT_POSSESSED, 1 MT_SHADOWS, 18 MT_SHOTGUY, 8 MT_TROOP), the nearest 109 units from the start; 13 pickups within 512"
+  },
+  {
+   "name": "R0-s36",
+   "sector": 36,
+   "want": [
+    -992,
+    1456
+   ],
+   "face": [
+    -968,
+    1400
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 30 monsters within 640 units (4 MT_POSSESSED, 1 MT_SHADOWS, 18 MT_SHOTGUY, 7 MT_TROOP), the nearest 87 units from the start; 13 pickups within 512"
+  },
+  {
+   "name": "R0-s57",
+   "sector": 57,
+   "want": [
+    -1120,
+    1552
+   ],
+   "face": [
+    -1014,
+    1423
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 29 monsters within 640 units (5 MT_POSSESSED, 1 MT_SHADOWS, 16 MT_SHOTGUY, 7 MT_TROOP), the nearest 77 units from the start; 9 pickups within 512"
+  },
+  {
+   "name": "R0-s49",
+   "sector": 49,
+   "want": [
+    -1120,
+    1584
+   ],
+   "face": [
+    -1029,
+    1485
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 28 monsters within 640 units (4 MT_POSSESSED, 1 MT_SHADOWS, 15 MT_SHOTGUY, 8 MT_TROOP), the nearest 95 units from the start; 8 pickups within 512"
+  },
+  {
+   "name": "R0-s266",
+   "sector": 266,
+   "want": [
+    -1024,
+    1292
+   ],
+   "face": [
+    -1017,
+    1342
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 28 monsters within 640 units (4 MT_POSSESSED, 1 MT_SHADOWS, 18 MT_SHOTGUY, 5 MT_TROOP), the nearest 184 units from the start; 11 pickups within 512"
+  },
+  {
+   "name": "R0-s41",
+   "sector": 41,
+   "want": [
+    -1152,
+    1552
+   ],
+   "face": [
+    -1087,
+    1367
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 26 monsters within 640 units (5 MT_POSSESSED, 16 MT_SHOTGUY, 5 MT_TROOP), the nearest 91 units from the start; 10 pickups within 512"
+  },
+  {
+   "name": "R0-s46",
+   "sector": 46,
+   "want": [
+    -1184,
+    1552
+   ],
+   "face": [
+    -1121,
+    1381
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 26 monsters within 640 units (5 MT_POSSESSED, 15 MT_SHOTGUY, 6 MT_TROOP), the nearest 113 units from the start; 10 pickups within 512"
+  },
+  {
+   "name": "R0-s50",
+   "sector": 50,
+   "want": [
+    -1120,
+    1616
+   ],
+   "face": [
+    -1059,
+    1508
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 26 monsters within 640 units (4 MT_POSSESSED, 1 MT_SHADOWS, 14 MT_SHOTGUY, 7 MT_TROOP), the nearest 117 units from the start; 8 pickups within 512"
+  },
+  {
+   "name": "R0-s45",
+   "sector": 45,
+   "want": [
+    -1216,
+    1552
+   ],
+   "face": [
+    -1135,
+    1395
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 25 monsters within 640 units (5 MT_POSSESSED, 15 MT_SHOTGUY, 5 MT_TROOP), the nearest 139 units from the start; 10 pickups within 512"
+  },
+  {
+   "name": "R0-s52",
+   "sector": 52,
+   "want": [
+    -1024,
+    1680
+   ],
+   "face": [
+    -1066,
+    1576
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 25 monsters within 640 units (5 MT_POSSESSED, 1 MT_SHADOWS, 12 MT_SHOTGUY, 7 MT_TROOP), the nearest 111 units from the start; 9 pickups within 512"
+  },
+  {
+   "name": "R0-s58",
+   "sector": 58,
+   "want": [
+    -704,
+    1664
+   ],
+   "face": [
+    -846,
+    1429
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 25 monsters within 640 units (4 MT_POSSESSED, 1 MT_SHADOWS, 13 MT_SHOTGUY, 7 MT_TROOP), the nearest 165 units from the start; 15 pickups within 512"
+  },
+  {
+   "name": "R0-s179",
+   "sector": 179,
+   "want": [
+    -704,
+    976
+   ],
+   "face": [
+    -889,
+    1128
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 25 monsters within 640 units (5 MT_POSSESSED, 1 MT_SERGEANT, 1 MT_SHADOWS, 14 MT_SHOTGUY, 4 MT_TROOP), the nearest 86 units from the start; 11 pickups within 512"
+  },
+  {
+   "name": "R0-s182",
+   "sector": 182,
+   "want": [
+    -848,
+    880
+   ],
+   "face": [
+    -909,
+    986
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 25 monsters within 640 units (5 MT_POSSESSED, 2 MT_SERGEANT, 14 MT_SHOTGUY, 4 MT_TROOP), the nearest 68 units from the start; 12 pickups within 512"
+  },
+  {
+   "name": "R0-s34",
+   "sector": 34,
+   "want": [
+    -1344,
+    1656
+   ],
+   "face": [
+    -1236,
+    1446
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (6 MT_POSSESSED, 13 MT_SHOTGUY, 5 MT_TROOP), the nearest 153 units from the start; 12 pickups within 512"
+  },
+  {
+   "name": "R0-s43",
+   "sector": 43,
+   "want": [
+    -1280,
+    1456
+   ],
+   "face": [
+    -1151,
+    1407
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (5 MT_POSSESSED, 14 MT_SHOTGUY, 5 MT_TROOP), the nearest 124 units from the start; 15 pickups within 512"
+  },
+  {
+   "name": "R0-s44",
+   "sector": 44,
+   "want": [
+    -1248,
+    1456
+   ],
+   "face": [
+    -1151,
+    1407
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (5 MT_POSSESSED, 14 MT_SHOTGUY, 5 MT_TROOP), the nearest 151 units from the start; 16 pickups within 512"
+  },
+  {
+   "name": "R0-s51",
+   "sector": 51,
+   "want": [
+    -1024,
+    1648
+   ],
+   "face": [
+    -1069,
+    1546
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (4 MT_POSSESSED, 1 MT_SHADOWS, 12 MT_SHOTGUY, 7 MT_TROOP), the nearest 123 units from the start; 8 pickups within 512"
+  },
+  {
+   "name": "R0-s67",
+   "sector": 67,
+   "want": [
+    -1552,
+    944
+   ],
+   "face": [
+    -1558,
+    1038
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (6 MT_POSSESSED, 1 MT_SERGEANT, 11 MT_SHOTGUY, 6 MT_TROOP), the nearest 255 units from the start; 21 pickups within 512"
+  },
+  {
+   "name": "R0-s74",
+   "sector": 74,
+   "want": [
+    -1584,
+    1348
+   ],
+   "face": [
+    -1568,
+    1263
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (6 MT_POSSESSED, 12 MT_SHOTGUY, 6 MT_TROOP), the nearest 194 units from the start; 19 pickups within 512"
+  },
+  {
+   "name": "R0-s185",
+   "sector": 185,
+   "want": [
+    -880,
+    1008
+   ],
+   "face": [
+    -964,
+    1098
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (5 MT_POSSESSED, 15 MT_SHOTGUY, 4 MT_TROOP), the nearest 95 units from the start; 12 pickups within 512"
+  },
+  {
+   "name": "R0-s188",
+   "sector": 188,
+   "want": [
+    -816,
+    880
+   ],
+   "face": [
+    -901,
+    966
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (4 MT_POSSESSED, 2 MT_SERGEANT, 14 MT_SHOTGUY, 4 MT_TROOP), the nearest 96 units from the start; 11 pickups within 512"
+  },
+  {
+   "name": "R0-s189",
+   "sector": 189,
+   "want": [
+    -784,
+    880
+   ],
+   "face": [
+    -901,
+    966
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (4 MT_POSSESSED, 2 MT_SERGEANT, 14 MT_SHOTGUY, 4 MT_TROOP), the nearest 127 units from the start; 13 pickups within 512"
+  },
+  {
+   "name": "R0-s190",
+   "sector": 190,
+   "want": [
+    -752,
+    880
+   ],
+   "face": [
+    -901,
+    966
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 24 monsters within 640 units (4 MT_POSSESSED, 2 MT_SERGEANT, 14 MT_SHOTGUY, 4 MT_TROOP), the nearest 158 units from the start; 12 pickups within 512"
+  },
+  {
+   "name": "R0-s144",
+   "sector": 144,
+   "want": [
+    -1480,
+    1053
+   ],
+   "face": [
+    -1388,
+    1106
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 23 monsters within 640 units (7 MT_POSSESSED, 11 MT_SHOTGUY, 5 MT_TROOP), the nearest 142 units from the start; 21 pickups within 512"
+  },
+  {
+   "name": "R0-s147",
+   "sector": 147,
+   "want": [
+    -1472,
+    1196
+   ],
+   "face": [
+    -1287,
+    1123
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 23 monsters within 640 units (6 MT_POSSESSED, 11 MT_SHOTGUY, 6 MT_TROOP), the nearest 157 units from the start; 21 pickups within 512"
+  },
+  {
+   "name": "R2-s48",
+   "sector": 48,
+   "want": [
+    -720,
+    1744
+   ],
+   "face": [
+    -786,
+    1668
+   ],
+   "region": 2,
+   "style": "fight",
+   "why": "region 2: 22 monsters within 640 units (5 MT_POSSESSED, 1 MT_SHADOWS, 10 MT_SHOTGUY, 6 MT_TROOP), the nearest 231 units from the start; 15 pickups within 512"
+  },
+  {
+   "name": "R0-s53",
+   "sector": 53,
+   "want": [
+    -1024,
+    1712
+   ],
+   "face": [
+    -1045,
+    1643
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 22 monsters within 640 units (5 MT_POSSESSED, 1 MT_SHADOWS, 9 MT_SHOTGUY, 7 MT_TROOP), the nearest 90 units from the start; 10 pickups within 512"
+  }
+ ],
+ "regions": {
+  "sectors_per_region": {
+   "0": 135,
+   "2": 44,
+   "3": 59,
+   "4": 4
+  },
+  "monsters_per_region": {
+   "0": 63,
+   "None": 41,
+   "2": 14,
+   "3": 29
+  },
+  "quota": {
+   "0": 6,
+   "2": 1,
+   "3": 3
+  },
+  "rule": "regions_map: v1's stages with the map's lifts, W1 doors, floor switch and key doors (every colour)"
+ },
+ "provenance": {
+  "tool": "scratchpad/gp/scenarios_map.py --suggest-checkpoints",
+  "sight_rule": "seen",
+  "player_mode": "final",
+  "monster_mode": "final",
+  "seconds": 5
+ }
+}

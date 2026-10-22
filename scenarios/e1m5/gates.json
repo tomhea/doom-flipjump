@@ -1,0 +1,250 @@
+{
+ "map": "E1M5",
+ "what": "the gates' ROLES on E1M5 (scratchpad/gp/gate_roles.py reads them; gate_targets.py writes them)",
+ "roles": {
+  "key_doors": {
+   "blue": [],
+   "yellow": [],
+   "red": [
+    30
+   ]
+  },
+  "cards": {
+   "red": [
+    1376,
+    2592,
+    -144
+   ]
+  },
+  "red_door": 30,
+  "wr_lift": {
+   "sector": 105,
+   "pose": [
+    1472,
+    1704,
+    1073741824
+   ]
+  },
+  "sr_lift": {
+   "sector": 105,
+   "tag": 2
+  },
+  "reversal_door": 11,
+  "lift_leaf_sector": 105,
+  "pickup_walks": [
+   [
+    -4496,
+    1760,
+    0
+   ],
+   [
+    -4464,
+    1760,
+    0
+   ],
+   [
+    -4432,
+    1760,
+    0
+   ]
+  ],
+  "court": {
+   "points": [
+    [
+     1568,
+     1360
+    ],
+    [
+     1568,
+     1336
+    ],
+    [
+     1568,
+     1312
+    ]
+   ],
+   "angle": 1073741824,
+   "facing_slot": 30
+  },
+  "teleports": [
+   [
+    633,
+    126,
+    5,
+    60
+   ]
+  ],
+  "exit": [
+   634,
+   11
+  ]
+ },
+ "na": {
+  "blue_door": "E1M5 has no blue card (type 5)",
+  "yellow_door": "E1M5 has no yellow key door",
+  "below_card_sector": "E1M5 has no blue card",
+  "blaze_door": "no blazing door verifies ([212])",
+  "walkovers": "E1M5 has no W1 walk-over door",
+  "floor_switch": "E1M5 has no floor switch",
+  "chain": "E1M5 has no barrel",
+  "block_barrel": "E1M5 has no barrel",
+  "nukage_sector": "no sector of E1M5 has a damaging special [4, 5, 7, 16]: F9 / F9l / D6 cannot be hosted",
+  "F5": "E1M5 has no berserk pack (2023) on any skill",
+  "D9": "placed, but control band_eye never parts there (gate_targets sweep)"
+ },
+ "candidates": {
+  "blue_door": [],
+  "blaze_door": [
+   {
+    "value": 212,
+    "refused": "S5: the oracle does not do what it claims"
+   }
+  ],
+  "wr_lift": [
+   {
+    "value": {
+     "sector": 105,
+     "pose": [
+      1472,
+      1704,
+      1073741824
+     ]
+    },
+    "refused": null
+   }
+  ],
+  "sr_lift": [
+   {
+    "value": {
+     "sector": 105,
+     "tag": 2
+    },
+    "refused": null
+   }
+  ],
+  "reversal_door": [
+   {
+    "value": 11,
+    "refused": null
+   }
+  ],
+  "pickup_walks": [
+   {
+    "value": [
+     -896,
+     368,
+     1073741824
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -896,
+     400,
+     1073741824
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -896,
+     656,
+     3221225472
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -896,
+     688,
+     3221225472
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -832,
+     368,
+     1073741824
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -832,
+     400,
+     1073741824
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -832,
+     656,
+     3221225472
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -832,
+     688,
+     3221225472
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -4496,
+     1760,
+     0
+    ],
+    "items_on_the_ray": 6,
+    "refused": null
+   },
+   {
+    "value": [
+     -4464,
+     1760,
+     0
+    ],
+    "items_on_the_ray": 6,
+    "refused": null
+   },
+   {
+    "value": [
+     -4432,
+     1760,
+     0
+    ],
+    "items_on_the_ray": 6,
+    "refused": null
+   }
+  ],
+  "nukage_sector": []
+ },
+ "provenance": {
+  "generator": "scratchpad/gp/gate_targets.py",
+  "generator_sha16": "316e9d41527e77a7",
+  "wad": "tests/fixtures/freedoom_e1m5.wad",
+  "wad_sha16": "7082deffaaf99121",
+  "model_sha16": {
+   "src/doomfj/doors.py": "a8a4a5b146d45f0e",
+   "src/doomfj/movers.py": "fb0c329dc1661725",
+   "src/doomfj/world.py": "46fb8611926a2daf",
+   "src/doomfj/combat.py": "f28af6db441ba22f",
+   "scratchpad/gp/p2a_gate.py": "10897c08760566ee",
+   "scratchpad/gp/fight_gate.py": "58494b6f4c81c870"
+  },
+  "fight_verified": true,
+  "seconds": 743
+ }
+}

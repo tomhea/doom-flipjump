@@ -741,7 +741,7 @@ def main():
     from doomfj.doors import SPEED as _DSPEED
     spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
 
-    def geometry(target):
+    def geometry(target, depth=88):
         """THE DOORWAY, not the use box. The box is inflated by USE_RANGE and its south edge is 90 units
         clear of the opening, so "reach the box" put the player alongside the door and the walk-through
         leg then went AROUND it. Both legs aim at the gap between the door's own two line segments:
@@ -756,7 +756,7 @@ def main():
         nx, ny = nx / nlen, ny / nlen
         sgn = -1.0 if (spx - mx) * nx + (spy - my) * ny > 0 else 1.0
         return (segs, (mx - sgn * nx * 56, my - sgn * ny * 56),   # the player's side of the opening
-                (mx + sgn * nx * 88, my + sgn * ny * 88))         # through it, and out the far side
+                (mx + sgn * nx * depth, my + sgn * ny * depth))   # through it, and out the far side
 
     # ── THE DOOR AND THE SKILL: the first whose ground is clear, tried in order ──────────────────────
     # ⚠ NEAREST REACHABLE, not nearest. Straight-line nearest picks door 48, whose use box sits
@@ -774,6 +774,7 @@ def main():
     # does not open, cross and keep the door open into NEW GAME, or in which the player dies, is skipped.
     CLEAR = 128
     PATH_CLEAR = 40
+    BEYOND_DEPTHS = (88, 72, 56, 40)     # `beyond`'s distance past the opening: 88 first, shallower when it is walled off
 
     def ground(skill):
         """`skill`'s level start in the model: (the static blocker test, the monsters' positions)"""
@@ -840,9 +841,18 @@ def main():
                 "door %d is at state %d, not open, after %d frames of waiting"
                 % (target, s1.state["d"][0][target][0], wait))
         st1, pre = s1.state["st"], route + press + [{} for _ in range(wait)]
-        through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st1, beyond, 40,
-                                max_tics=600, blocked=blocked,
-                                fresh=lambda: made.append(mirror_stepper(skill, prefix=pre)) or made[-1])
+        # M8 wave 2 (E1M8: its only door, 95, opens on a 56-unit secret closet, sector 51 -- `beyond`, 88 units past
+        # the opening, lay in the room BEHIND the closet's back wall, and every through-walk failed "no mirror walk
+        # through the opening"): when the 88-unit point cannot be walked to, shallower points on the same normal are
+        # tried, nearest the far side's back first (E1M1 / E1M2 walk through at 88: their plans are the ones they were)
+        for depth in BEYOND_DEPTHS:
+            if depth != BEYOND_DEPTHS[0]:
+                beyond = geometry(target, depth)[2]
+            through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st1, beyond, 40,
+                                    max_tics=600, blocked=blocked,
+                                    fresh=lambda: made.append(mirror_stepper(skill, prefix=pre)) or made[-1])
+            if through:
+                break
         if not through:
             return route, None, door_segs, approach, beyond, "no mirror walk through the opening " + why_not()
         s2 = s1                                          # on from the door open: the through leg, stepped

@@ -451,6 +451,34 @@ def _cp(c, name, style):
 # ================================================================================================
 # the plan: scenarios_v2's plan_set, a refused checkpoint replaced from the reserve
 # ================================================================================================
+def _plan_run_without(S, cp: dict, setup: dict, nav, refused: list):
+    """scenarios_v2.plan_run (the hashed checker, untouched) with the parameter sets named in `refused` left out:
+    its own loop over `cp["params"] + PARAMS`, PARAMS swapped in its namespace for the call (as `install` does)"""
+    if not refused:
+        return S.plan_run(cp, setup, nav)
+    orig = S.PARAMS
+    S.PARAMS = tuple(p for p in orig if p["name"] not in refused)
+    try:
+        return S.plan_run(dict(cp, params=tuple(p for p in cp.get("params", ()) if p["name"] not in refused)),
+                          setup, nav)
+    finally:
+        S.PARAMS = orig
+
+
+_B0_ORACLE = {}
+
+
+def mirror_deaths(run: dict) -> list:
+    """the frames on which b0's MIRROR of planned run `run` has a dead player (b0_scenarios --oracle-only's check:
+    `drive` with no binary steps the expectation from the injected poses, health and knock; a death FAILS b0)"""
+    import b0_scenarios as B0
+    m = INSTALLED["map"]
+    if m not in _B0_ORACLE:
+        _B0_ORACLE.clear()
+        _B0_ORACLE[m] = B0.game_oracle({"map": m})
+    return B0.drive(None, None, _B0_ORACLE[m], B0.model_frames(run))["dead"]
+
+
 def plan(sugg: dict, quiet: bool = False) -> dict:
     import scenarios_v2 as S
     w0 = S.new_world()
@@ -469,23 +497,37 @@ def plan(sugg: dict, quiet: bool = False) -> dict:
                 sec = w0.leaf_sector[w0.rm.point_in_subsector(w0.cmap, pose[0] >> 16, pose[1] >> 16)]
                 assert sec == c["sector"] and reg.get(sec) == c["region"], (c["name"], sec, reg.get(sec))
                 nav = S.NavGraph.build(w0, (pose[0] >> 16, pose[1] >> 16), tag=c["name"])
-                keys, pname, tried = S.plan_run(c, setup, nav)
-                # M8 (gen_dryrun on E1M4: R3-s219's checkpoint faced a group centred on itself, and the autopilot
-                # turned for all 100 frames -- the set FAILED "every run moves"): a run with no movement key is refused
-                # like a placement, and the region's next suggestion planned (E1M2's runs all move: its set as it was)
-                assert any(kd.get(k) for kd in keys for k in S.MOVE_KEYS), "the plan presses no movement key"
+                # M8 wave 1 (b0 on doom_e1m3_b4: R3-s151 state- and pixel-exact on all 100 frames, but its B0 MIRROR's
+                # player died at frames 97..99 -- "every run survives" holds on the model, whose run the planner
+                # checks, and not on the mirror b0 steps from the injected poses, health and knock): a parameter set
+                # whose run the mirror sees die is refused like a death (`mirror_deaths`), the next set planned, and
+                # with none left the region's next suggestion. E1M2's set: no mirror died there (b0 PASS), so its
+                # plan is the one it was
+                refused = []
+                while True:
+                    keys, pname, tried = _plan_run_without(S, c, setup, nav, refused)
+                    # M8 (gen_dryrun on E1M4: R3-s219's checkpoint faced a group centred on itself, and the autopilot
+                    # turned for all 100 frames -- the set FAILED "every run moves"): a run with no movement key is
+                    # refused like a placement, and the region's next suggestion planned (E1M2's runs all move)
+                    assert any(kd.get(k) for kd in keys for k in S.MOVE_KEYS), "the plan presses no movement key"
+                    run = {"name": c["name"], "region": S.REGION_NAMES[c["region"]], "sector": sec,
+                           "why": c["why"], "style": c.get("style", "fight"), "params": pname, "setup": setup,
+                           "checkpoint": {"x16": pose[0], "y16": pose[1], "angle": pose[2], "x": pose[0] >> 16,
+                                          "y": pose[1] >> 16, "skill": S.SKILL, "face": list(c["face"])},
+                           "keys": [S.keys_to_str(k) for k in keys]}
+                    rep = S.replay(run)
+                    run.update({"poses": rep["poses"], "model_final_digest": rep["digest"], "totals": rep["totals"]})
+                    dead = mirror_deaths(run)
+                    if not dead:
+                        break
+                    print("  %-22s params %-10s REFUSED: b0's mirror dies at frames %s -- the next parameter set"
+                          % (c["name"], pname, dead[:3]), flush=True)
+                    refused.append(pname)
             except AssertionError as e:
                 print("  %-22s REFUSED (%s) -- the region's next suggestion" % (c["name"], str(e)[:120]), flush=True)
                 used.append(c["name"])
                 continue
             used.append(c["name"])
-            run = {"name": c["name"], "region": S.REGION_NAMES[c["region"]], "sector": sec,
-                   "why": c["why"], "style": c.get("style", "fight"), "params": pname, "setup": setup,
-                   "checkpoint": {"x16": pose[0], "y16": pose[1], "angle": pose[2], "x": pose[0] >> 16,
-                                  "y": pose[1] >> 16, "skill": S.SKILL, "face": list(c["face"])},
-                   "keys": [S.keys_to_str(k) for k in keys]}
-            rep = S.replay(run)
-            run.update({"poses": rep["poses"], "model_final_digest": rep["digest"], "totals": rep["totals"]})
             if not quiet:
                 print("  %-22s sector %3d params %-10s tried %-40s %5.1f s  kills %d picks %d doors %s hp %d "
                       "move %d%% strafe %d%%" % (c["name"], sec, pname, [t for t in tried], time.time() - t0,

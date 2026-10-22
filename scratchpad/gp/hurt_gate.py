@@ -231,6 +231,12 @@ def control(name: str | None):
             orig_init(self, *a, **k)
             t = self.fireball_mom
             self.fireball_mom = [t[(i + 1) % len(t)] for i in range(len(t))]
+            # M8 C8 (64ffb8f) made the spawn read `missile_mom[name]`, a dict built in _combat_init holding the
+            # ORIGINAL list: rebinding `fireball_mom` alone mutated nothing and H2's control was VACUOUS on every map
+            # (E1M3 / E1M4 / E1M5 b4's hurt gates: "parts at frame None"). The table the spawn reads is moved too
+            mm = getattr(self, "missile_mom", None)
+            if mm is not None and C.FIREBALL_INFO.name in mm:
+                mm[C.FIREBALL_INFO.name] = self.fireball_mom
         patch(CM, "_combat_init", off)
     elif name == "explode_draw":                 # the explosion is not drawn
         orig_mob = MS.MonsterPhase.mobiles
@@ -489,11 +495,12 @@ def main(argv=None) -> int:
             nas.append(sc["name"].split()[0])
             print("\n%s -- N/A: %s" % (sc["name"], why))
             continue
-        got = place(run, sc)
+        lim = place_limit(dsim.mapname)
+        got = place(run, sc, lim)
         print("\n%s -- %d frames" % (sc["name"], len(sc["keys"])))
         if got is None:
             ok = False
-            print("  the oracle does what the scenario claims: NO candidate of %d -- FAIL" % len(sc["cands"][:12]))
+            print("  the oracle does what the scenario claims: NO candidate of %d -- FAIL" % len(sc["cands"][:lim]))
             continue
         pose, setup, want, c = got
         print("  from (%.0f, %.0f) angle %08x: the oracle does what the scenario claims: yes"
@@ -537,6 +544,17 @@ OWNS = {"H1": ("mon_hits", "mon_misses", "player_hurt"), "H2": ("proj_spawns", "
         "H5": ("armor_out", "player_hurt", "mon_hits"), "H6": ("fx_spawns", "fx_skipped", "blood_px"),
         "S1": ("proj_spawns", "fizzles")}
 S1_IMPS = 9                     # S1's claim: 8 in flight and a fizzle -- nine imps poked to fire at once
+
+
+def place_limit(mapname: str) -> int:
+    """how many of a scenario's candidates `place` tries: E1M1's 12 (every scenario places within them), deeper off
+    it -- M8 wave 1: E1M5's H3 first places at candidate 13 and E1M4's at 64 (of 523: from most poses the imp's
+    second fireball hits the strafing player), both "NO candidate of 12" at b4. The first candidate that places is
+    taken, so a map whose scenarios place within 12 (E1M2) places exactly as before"""
+    return 12 if mapname == "E1M1" else DEEP_LIMIT
+
+
+DEEP_LIMIT = 128
 
 
 def na_why(sc, mapname):

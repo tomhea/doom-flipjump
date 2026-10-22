@@ -1376,10 +1376,29 @@ NEED = ("pickups", "pickup_items", "pickup_drops", "bonus_frames", "berserk_fram
 # raises it is N/A on the map. F5's punch is the only berserk; the gibs are F5's and F6's blast; F9 / D6 the nukage;
 # gen_dryrun's audit: the barrel counters are the barrel rows' (E1M5 / E1M8 have no barrel -- they FAILed "every event
 # counter nonzero" with every barrel row N/A), D7's the barrel's hurt in die_gate
-_BARREL = ("bexp_frames", "barrel_blasts", "blast_kills", "barrel_hurt", "barrel_hits")
+# M8 wave 1 (E1M5 b4's fight gate: "every event counter nonzero: NO -- ['puffs']" with every barrel row N/A): a puff is
+# the shot on a BARREL on this engine (combat: "puff" if the target is a barrel, else blood) -- a barrel counter too
+_BARREL = ("bexp_frames", "barrel_blasts", "blast_kills", "barrel_hurt", "barrel_hits", "puffs")
 OWNS = {"F5": ("berserk_frames", "gibs"), "F9": ("nukage",), "D6": ("nukage",),
         "F6": _BARREL + ("gibs",), "F6d": _BARREL, "F6p": _BARREL, "F7": _BARREL, "S2": _BARREL, "S4": _BARREL,
         "D7": ("barrel_hurt",)}
+
+
+# M8 wave 1: why a scenario's candidate list is EMPTY on a map (what the candidates are built from is absent there)
+EMPTY_WHY = {
+    "K3": "no barrel of %s has a zombieman, sergeant or imp within 96 units at the level start (K3's crowd to throw)",
+    "I3": "no zombieman or sergeant of %s stands 64..320 units from a barrel with line of sight to it (I3's shooter)",
+    "I6": "no imp of %s has a zombieman or sergeant 64..800 units away and a third shooter in line of sight of it "
+          "(I6's pair and its second attacker)",
+    "C3": "no standing pose of %s faces a barrel from 320..704 units (C3's far barrel)"}
+BARREL_ROWS = ("K3", "I3", "C3")              # their candidates are built on the map's barrels
+
+
+def empty_na(tag: str, w, mapname: str) -> str:
+    """the reason scenario `tag` has no candidate on `mapname` (world `w`: the level start's)"""
+    if tag in BARREL_ROWS and not w.barrel_things:
+        return "%s has no barrel" % mapname
+    return EMPTY_WHY[tag] % mapname if tag in EMPTY_WHY else "no candidate placed from %s's things" % mapname
 
 
 def unowed(need, tags, na_tags, declared=None) -> list:
@@ -1450,10 +1469,12 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
             # or a control never parts) -- N/A by its tag, with that reason
             why = R.na_reasons.get(sc["name"].split()[0])
         if not why and not sc.get("cands") and "cands" in sc and dsim.mapname != "E1M1" \
-                and not sc.get("na_if_no_cands") and not sc.get("rule"):
+                and not sc.get("na_if_no_cands") and (not sc.get("rule") or P8.status(sc, PMODE, MMODE) == "run"):
             # M8: a scenario whose candidates come from the map's things (a chainsaw, a berserk, a monster kind) and
-            # the map has none: N/A, named -- never on E1M1, where every scenario places (an empty list FAILS there)
-            why = R.na_reasons.get(sc["name"].split()[0], "no candidate placed from %s's things" % dsim.mapname)
+            # the map has none: N/A, named -- never on E1M1, where every scenario places (an empty list FAILS there).
+            # M8 wave 1 (E1M4 / E1M5 b4: K3 I3 I6 C3 "NO candidate of 0 -- FAIL"): a RULE scenario whose rule runs at
+            # these modes too (one still awaiting its package says so below, as before); its reason by `empty_na`
+            why = R.na_reasons.get(sc["name"].split()[0]) or empty_na(sc["name"].split()[0], w0.world, dsim.mapname)
         if why:
             nas.append(sc["name"].split()[0])
             if sc.get("owns"):

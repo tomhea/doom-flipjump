@@ -406,8 +406,12 @@ MAP_CONFIG = {
     # SSHEAD_RATIO 1 -- the hot data block (pclm .. wrej) inside frame.arm5's window, as E1M2; SPR_SLOT_CAP -- 606
     # drawable things over the skills (wall_renderer.check_slot_ids)
     "E1M7": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "TSV_NIBBLES": 4},
-    # M8 C11 (E1M9): SPR_SLOT_CAP -- 293 drawable things over the skills (wall_renderer.check_slot_ids)
-    "E1M9": {"SPR_SLOT_CAP": 255},
+    # M8 C11 (E1M9): SPR_SLOT_CAP -- 293 drawable things over the skills (wall_renderer.check_slot_ids). M8 wlight:
+    # PID_NIBBLES 3 -- ~264 plane pairs before directions (level_survey's estimate; 474 baked); BAND_NIBBLES 5 -- 114,528
+    # band lists (emit_check: past 4 nibbles' 65,536); SSHEAD_RATIO 1 -- the hot data block was 16,416 ops of
+    # frame.arm5's 16,384 at 2 (emit_check); the MAP page and the switch textures as the other maps
+    "E1M9": {"SPR_SLOT_CAP": 255, "PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "AUTOMAP": 1,
+             "SWITCH_TEX": 1},
     # M8 wave 2: E1M8 (123 things, the four Barons) -- the defaults fit its counts; the MAP page and switch textures
     "E1M8": {"AUTOMAP": 1, "SWITCH_TEX": 1},
     # M8 C11: SPR_SLOT_CAP for the wave-1 / wave-3 maps past a byte of drawable things over the skills (level_survey:

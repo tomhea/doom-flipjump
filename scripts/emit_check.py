@@ -312,8 +312,28 @@ def main():
     if a.json:
         Path(a.json).write_text(json.dumps({"map": a.map, "standins": a.standin, "parts": res}, indent=1))
     hot_block_check(parts)
+    constant_width_check(parts)
     if a.tier in ONE_PASS_RESET_TIERS:
         reset_check(parts, mw, a.map, cfg, a.tier)
+
+
+def constant_width_check(parts):
+    """M8 l12fix: a literal constant wider than the register it is set into -- `hex.set n, reg, v` / `hex.xor_by n, reg,
+    v` with v >= 16**n. fj keeps the low n nibbles SILENTLY: E1M3 / E1M4 / E1M5's `hex.set 2, pk_t, 256 .. 3xx` read the
+    wrong drop row, and only a gate that walked over a drop past row 255 saw it (E1M5 m2_std_gate, frame 94). Scans
+    every part's text; E1M1 / E1M2 / E1M1 at 12 bits have none."""
+    import re
+    pat = re.compile(r"hex\.(set|xor_by)\s+(\d+)\s*,\s*([^,]+?)\s*,\s*(0x[0-9a-fA-F]+|\d+)\s*(?://.*)?$")
+    bad = {}
+    for name, text in (parts.items() if isinstance(parts, dict) else parts):
+        for ln in text.split(chr(10)):
+            m = pat.search(ln.strip())
+            if m and int(m.group(4), 0) >= 16 ** int(m.group(2)):
+                bad.setdefault((name, m.group(1), int(m.group(2)), re.sub(r"\s*\+.*", "", m.group(3))), ln.strip())
+    print("CONSTANT WIDTHS: %s" % ("every literal fits its register" if not bad else
+                                   "%d registers set past their width" % len(bad)), flush=True)
+    assert not bad, ("constants wider than their registers (fj keeps the low nibbles silently): %s"
+                     % sorted(bad.values())[:5])
 
 
 HOT_WINDOW_OPS = 1 << 14        # frame.arm5's window: 16^5 bits = 16,384 ops (2^20 / 64)

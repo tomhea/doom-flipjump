@@ -157,6 +157,15 @@ old declaration as its R9 control) and `tests/fj/test_wide_ids_fj.py` 1b (the re
 scratch, ids below and past 256; the 2-nibble scratch as the control). ⚠ The lesson: a twin's harness that declares its
 own registers proves the macro, not the program's declarations of them -- test the EMITTED decls too.
 
+**The second leftover (m8-l12fix, 2026-10-22): the drop row `pk_t`.** lootcode's pickup sets `pk_t` to a dropper's
+runtime row and `pk_drop` reads thpos_rt / thss_rt there; it was 2 nibbles, so `hex.set 2, pk_t, 275` kept 0x13 --
+SILENTLY (fj takes the low nibbles of a literal). E1M3 (85 sets past 255), E1M4 (90) and E1M5 (114) all carried it;
+only E1M5's m2_std_gate walked over such a drop (frame 94: p_bc / mdrop / dr_live / thpos_rt[275]). `pk_t` is now
+`lootcode.pk_row_nibbles(drop_rows(..))` wide in the declaration, the set and the move (2 on every 8-bit map). Held by
+`tests/host/test_pk_row_width.py`, `tests/fj/test_pk_drop_wide_rows_fj.py` (rows 0 .. 299 read, 2-nibble control), and
+a new emit_check refusal for the whole CLASS: `constant_width_check` -- any `hex.set n, reg, v` / `hex.xor_by n, reg, v`
+with v >= 16**n in the emitted text (tests/host/test_emit_check_hot.py).
+
 Open for the level rungs: MAP_CONFIG `LIST_ID_BITS: 12` per map (E1M3 / E1M4 / E1M5); a wide map's first build (the
 table placement risk of 5); **C2 (runtime THINGS past 254, E1M6 / E1M7)** is covered by the lists, but
 `hurtcode.turn_lines`' `dt_t` (a monster's runtime row, 2 nibbles, asserted < 256) still refuses a monster row past

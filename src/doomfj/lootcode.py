@@ -292,8 +292,23 @@ def level_start(w) -> Dict[str, int]:
     return out
 
 
-def loot_decls(start: Dict[str, int]) -> List[str]:
-    """the persisted cells (at `start`), the latch, the interfaces and the scratch"""
+def drop_rows(w, mon_rt: Sequence[int], drop_rt: Sequence[int] = None) -> List[int]:
+    """the runtime row the pickup reads dropper k's drop at (`pk_t`): its monster's (mon_rt) or, M7 P8a, its own"""
+    return [mon_rt[m] if drop_rt is None else drop_rt[k] for k, m in enumerate(droppers(w))]
+
+
+def pk_row_nibbles(rows: Sequence[int]) -> int:
+    """M8 l12fix: `pk_t`'s width -- 2 nibbles while every drop row fits a byte (every 8-bit map: E1M1 / E1M2's text),
+    3 past it (a wide-list map: E1M5's drop rows reach 275). At 2, `hex.set 2, pk_t, 275` kept 0x13 and the player
+    read row 19 for the drop at row 275: E1M5's m2_std_gate parted at frame 94 (the drop not taken)"""
+    nib = max(2, (max(rows, default=0).bit_length() + 3) // 4)
+    assert nib <= 3, ("a drop row past 4,095", max(rows))
+    return nib
+
+
+def loot_decls(start: Dict[str, int], pk_nib: int = 2) -> List[str]:
+    """the persisted cells (at `start`), the latch, the interfaces and the scratch; `pk_nib`: pk_t's width
+    (pk_row_nibbles)"""
     return ([f"{cell}: hex.vec {nib}, {start[cell]}" for cell, _f, nib, _a in CELLS]
             + ["p_dd0: hex.vec 1",                                          # the TIC-START p_dead (P7-a)
                "gv_ok: hex.vec 1", "gv_ret: hex.vec w/4", "gv_c: hex.vec 3",
@@ -302,7 +317,7 @@ def loot_decls(start: Dict[str, int]) -> List[str]:
                "pk_nret: hex.vec w/4", "pk_d: hex.vec 8", "pk_bd: hex.vec 8, %d" % (PK_RADIUS << 16),
                "pk_cup: hex.vec 8, %d" % REACH_UP, "pk_cdn: hex.vec 8, %d" % (-REACH_DOWN & M32),
                "pk_i: hex.vec 2", "pk_r: hex.vec 12", "pk_tx: hex.vec 8", "pk_ty: hex.vec 8", "pk_tz: hex.vec 8",
-               "pk_in: hex.vec 1", "pk_t: hex.vec 2", "pk_off: hex.vec w/4", "pk_base: hex.vec w/4",
+               "pk_in: hex.vec 1", "pk_t: hex.vec %d" % pk_nib, "pk_off: hex.vec w/4", "pk_base: hex.vec w/4",
                "pk_ptr: hex.vec w/4", "pk_pos: hex.vec 16",
                "pb_ret: hex.vec w/4", "pb_tret: hex.vec w/4", "pb_hit: hex.vec 1", "pb_c: hex.vec 8",
                "pb_tx: hex.vec 8", "pb_ty: hex.vec 8",
@@ -602,7 +617,7 @@ def mbox_decls(w) -> List[str]:
     return ["pk_mret: hex.vec w/4"] if mover_pickup_leaves(w) else []
 
 
-def _drop_leaf(thss_cold: bool = False) -> List[str]:
+def _drop_leaf(thss_cold: bool = False, pk_nib: int = 2) -> List[str]:
     """`pk_drop` (stl.fcall pk_drop, pk_dret): the drop of runtime row `pk_t` (its monster's thpos_rt / thss_rt row):
     its 16.16 position, its leaf's floor now (`ms_seed_leaf`: mover-aware, the model's `_floor_at`), then `pk_boxz`
     (sim.thing_pos_read's row read).
@@ -613,7 +628,7 @@ def _drop_leaf(thss_cold: bool = False) -> List[str]:
     rearm = (["    hex.set w/4, pk_base, thnext", "    hex.pointers.set_flip_and_jump_pointers pk_base"]
              if thss_cold else [])
     return ["pk_drop:",
-            "    hex.zero w/4, pk_off", "    hex.mov 2, pk_off, pk_t", "    hex.shl_hex w/4, 1, pk_off",   # 16 a row
+            "    hex.zero w/4, pk_off", "    hex.mov %d, pk_off, pk_t" % pk_nib, "    hex.shl_hex w/4, 1, pk_off",   # 16 a row
             "    hex.set w/4, pk_base, thpos_rt", "    hex.ptr_index pk_ptr, pk_base, pk_off",
             "    hex.read_hex 16, pk_pos, pk_ptr",
             "    hex.mov 8, pk_tx, pk_pos", "    hex.mov 8, pk_ty, pk_pos + 8*dw",
@@ -670,11 +685,13 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
         out += [f"  {p}_n:", "    stl.fret pk_iret"]
     # ---- the drops, in slot order ----
     out += ["pk_drops:", "    hex.if0 2, dr_live, pk_out"]
+    rows = drop_rows(w, mon_rt, drop_rt)
+    pk_nib = pk_row_nibbles(rows)                    # M8 l12fix: 3 nibbles once a drop row passes 255
     for k, m in enumerate(droppers(w)):
         p = f"pkd{k}"
         kind = DROP_ITEM[gd.DROPS[gd.MONSTER_DOOMEDNUMS[w.mon_things[m].type]]]
         out += [f"    hex.if_flags mdrop + {k}*dw, {1 << 1:#06x}, {p}_n, {p}_t", f"  {p}_t:",
-                f"    hex.set 2, pk_t, {mon_rt[m] if drop_rt is None else drop_rt[k]}",
+                f"    hex.set {pk_nib}, pk_t, {rows[k]}",
                 "    stl.fcall pk_drop, pk_dret", f"    hex.if0 1, pk_in, {p}_n",
                 f"    stl.fcall {DROPPED[kind]}, gv_ret", f"    hex.if0 1, gv_ok, {p}_n",
                 "    stl.fcall pk_bonus, pk_nret"]
@@ -682,7 +699,7 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
         out += [f"  {p}_n:"]
     out += ["pk_out:", "    stl.fret pk_ret"]
     # ---- the shared leaves and the give routines ----
-    out += _box_leaf() + _drop_leaf(thss_cold) + (_mbox_leaf() if mleaf else [])
+    out += _box_leaf() + _drop_leaf(thss_cold, pk_nib) + (_mbox_leaf() if mleaf else [])
     out += ["pk_bonus:"] + _bonus_lines("pkb") + ["    stl.fret pk_nret"]
     kinds = give_kinds(w)
     assert plasma or (2004, False) not in kinds, ("M8 C6: a plasma rifle on the map, and no rifle in the weapon code "
@@ -954,7 +971,8 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
               + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root)
               + (_statcode.secret_lines(w, cell_root) if stats else []))
     pw = tuple(getattr(w, "powers", ()))                            # M8 C6: the map's timed powers (E1M1: none)
-    return {"decls": loot_decls(start) + card_decls(w) + mbox_decls(w)    # M8 F4 + F1.3
+    # M8 l12fix: pk_t declared at the width pickup_lines sets and moves it (pk_row_nibbles of the same rows)
+    return {"decls": loot_decls(start, pk_row_nibbles(drop_rows(w, mon_rt, drop_rt))) + card_decls(w) + mbox_decls(w)
             + _powercode.decls(pw), "tables": tables_fj(w) + _powercode.tables_fj(pw), "leaves": leaves,
             "latch": latch_lines(), "pre": pre_lines(stats), "post": post_lines(powers=pw), "use_guard": use_guard(),
             "tic": (lambda weapon_tic, hurt_tic, turn=True: tic_lines(weapon_tic, hurt_tic, turn, stats, pw)),

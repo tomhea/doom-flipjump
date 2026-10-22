@@ -130,7 +130,10 @@ def diff(got, want: dict) -> dict:
     """{cell: (the binary's value, the oracle's)} for every cell that disagrees; a missing reading
     (the binary presented fewer frames) disagrees in every cell"""
     got = got or {}
-    return {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
+    # M8 (E1M8: ONE door): the probe reads a count-1 cell as its value, the oracle builds a 1-tuple -- the same reading
+    def one(v):
+        return v[0] if isinstance(v, tuple) and len(v) == 1 else v
+    return {k: (got.get(k), v) for k, v in want.items() if one(got.get(k)) != one(v)}
 
 
 def palette_diff(palettes: list, f: int, wad, index: int) -> dict:

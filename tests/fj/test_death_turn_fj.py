@@ -13,6 +13,12 @@ ANG180 (DOOM turns the minus way), long turns (most of a half circle) and the no
 
 R9 (the coordinator's three, each must be caught): no turn; the turn's direction flipped; the turn never stops.
 Plus: the fade while turning (DOOM fades only once facing).
+
+M8 C2 (docs/c2-slot-ids.md): every test runs on E1M1 AND on E1M6 (tests/fj/wide_maps.py) -- 294 monster slots (3 lost souls among them), so
+p_atk is THREE nibbles (world.slot_nibbles) with a third dispatch level, and the attackers' rows (slot + ROW_OFFSET)
+pass 255, so dt_t is three nibbles too (hurtcode.row_nibbles); the cases reach every 256-block of the ids. Two more
+R9 controls there: the dispatch's third level dropped (every id read as its low byte) and dt_t's row cut to two
+nibbles -- each must part from the model.
 """
 import random
 from pathlib import Path
@@ -29,6 +35,8 @@ from doomfj.lut_generator import generate_dispatch_table_fj, generate_tantoangle
 from doomfj.reference_model import SLOPERANGE
 from doomfj.tables import slopediv_recip8_table, tantoangle_table
 from doomfj.wall_renderer import hoisted_scratch_fj
+from doomfj.world import slot_nibbles
+from tests.fj.wide_maps import MAPS, map_world
 
 FJ = Path(__file__).resolve().parents[2] / "src" / "fj"
 M32 = 0xFFFFFFFF
@@ -36,11 +44,10 @@ TICS = 40
 ROW_OFFSET = 2                     # monster slot m's runtime thing is m + ROW_OFFSET
 
 
-@pytest.fixture(scope="module")
-def world():
-    from doomfj.world import World
-    w = World(player="full", monsters="full")
-    assert w.layout.nmon == 53
+@pytest.fixture(scope="module", params=MAPS)
+def world(request):
+    w = map_world(request.param, player="full", monsters="full")
+    assert w.layout.nmon == {"E1M1": 53, "E1M6": 294}[request.param]
     return w
 
 
@@ -51,8 +58,13 @@ def _cases(w):
     views = [(1056 << 16 | 0x8000, (-3616 << 16) + 0x4321), (-512 << 16, 700 << 16 | 0x1), (0, 0)]
     offs = [(300, 0), (0, 300), (-300, 0), (0, -300), (200, 200), (-200, 200), (200, -200), (-200, -200),
             (500, 7), (7, 500), (-500, -7), (1, 0), (0, 0), (-3, 900)]
-    for k, ((vx, vy), (dx, dy)) in enumerate([(v, o) for v in views for o in offs]):
+    pairs = [(v, o) for v in views for o in offs]
+    if nmon > 255:                                        # M8 C2: the ids around and past 256, twice each
+        pairs = pairs + pairs
+    for k, ((vx, vy), (dx, dy)) in enumerate(pairs):
         m = (k * 7) % nmon                                # every hi nibble of the id: 1..53
+        if nmon > 255 and k >= len(pairs) // 2:
+            m = (253, 254, 255, 256, 257, 270, nmon - 1)[k % 7]
         ax, ay = ((vx >> 16) + dx) << 16, ((vy >> 16) + dy) << 16
         out.append((vx, vy, rnd.getrandbits(32), rnd.randrange(101), m + 1, ax, ay))
     # the boundaries: delta exactly +-ANG5, +-ANG5 +- 1, exactly ANG180, just past it
@@ -82,12 +94,12 @@ def _model(w, case):
     return out
 
 
-def _program(cases, nmon, leaf):
+def _program(cases, nmon, leaf, sn=2):
     rows = nmon + ROW_OFFSET
     body, data = ["stl.startup_and_init_all"], []
     for k, (vx, vy, ang, dc, atk, ax, ay) in enumerate(cases):
         body += ["hex.mov 8, viewx, vx%d" % k, "hex.mov 8, viewy, vy%d" % k, "hex.mov 8, viewangle, va%d" % k,
-                 "hex.set 2, p_dc, %d" % dc, "hex.set 2, p_atk, %d" % atk]
+                 "hex.set 2, p_dc, %d" % dc, "hex.set %d, p_atk, %d" % (sn, atk)]
         if atk:
             t = atk - 1 + ROW_OFFSET
             body += ["hex.mov 8, thpos_rt + %d*dw, ax%d" % (16 * t, k), "hex.mov 8, thpos_rt + %d*dw, ay%d" % (16 * t + 8, k)]
@@ -98,8 +110,9 @@ def _program(cases, nmon, leaf):
     body += ["stl.loop"]
     macro = ["def tm_tic < dt_tret, dt_turn, viewangle, p_dc {", "    stl.fcall dt_turn, dt_tret", "    hex.print_as_digit 8, viewangle, 0",
              "    hex.print_as_digit 2, p_dc, 0", "    stl.output_char 32", "}"]
-    data += ["viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8", "p_dc: hex.vec 2", "p_atk: hex.vec 2",
-             "thpos_rt: hex.vec %d" % (16 * rows), *HC.TURN_DECLS, *leaf,
+    data += ["viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8", "p_dc: hex.vec 2", "p_atk: hex.vec %d" % sn,
+             "thpos_rt: hex.vec %d" % (16 * rows),
+             *HC.turn_decls(HC.row_nibbles(range(rows))), *leaf,
              # the monsters' rotation leaf the turn shares its R_PointToAngle2 with (monstercode, P3.1)
              *MC.ROT_DECLS, *MC.rotation_leaf_lines(1), MC.rot_table_fj(),
              generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE), index_nibbles=3, result_nibbles=8),
@@ -110,7 +123,7 @@ def _program(cases, nmon, leaf):
 
 def _run(tmp_path, name, w, cases, leaf):
     p = tmp_path / ("%s.fj" % name)
-    p.write_text(_program(cases, w.layout.nmon, leaf), encoding="utf-8")
+    p.write_text(_program(cases, w.layout.nmon, leaf, slot_nibbles(w.layout)), encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     out = tmp_path / ("%s.fjm" % name)
     fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
@@ -124,7 +137,7 @@ def _run(tmp_path, name, w, cases, leaf):
 
 
 def _leaf(w):
-    return HC.turn_lines([m + ROW_OFFSET for m in range(w.layout.nmon)])
+    return HC.turn_lines([m + ROW_OFFSET for m in range(w.layout.nmon)], sn=slot_nibbles(w.layout))
 
 
 def _first_diff(got, want, cases):
@@ -150,7 +163,10 @@ def test_the_dead_view_turns_to_the_killer_as_the_model(tmp_path, world):
         plus += d == ANG5
         minus += d == (-ANG5 & M32)
     assert plus and minus, (plus, minus)
-    assert {c[4] >> 4 for c in cases if c[4]} == {0, 1, 2, 3}
+    assert {c[4] >> 4 for c in cases if c[4]} >= {0, 1, 2, 3}
+    if world.layout.nmon > 255:                     # M8 C2: both 256-blocks, and rows past 255 (dt_t 3 nibbles)
+        assert {c[4] >> 8 for c in cases if c[4]} == {0, 1} and {255, 256, 257} <= {c[4] for c in cases}
+        assert HC.row_nibbles([m + ROW_OFFSET for m in range(world.layout.nmon)]) == 3
     assert any(c[4] == 0 and r[-1][1] == 0 and r[0][0] == c[2] for c, r in zip(cases, want))
 
 
@@ -173,9 +189,24 @@ MUTANTS = {
 }
 
 
-@pytest.mark.parametrize("name", sorted(MUTANTS))
+# M8 C2 (the wide map's): the dispatch's third level dropped -- every id jumps by its low byte (group 0); dt_t's row
+# cut to its low two nibbles (the two-nibble dt_t of before)
+WIDE_MUTANTS = {
+    "the third level dropped": lambda lf: [";dtt_g0" if ln.startswith("    sim.jump16 p_atk + 2*dw,") else ln
+                                           for ln in lf],
+    "dt_t two nibbles": lambda lf: [ln.replace("hex.mov 3, dt_off + 1*dw, dt_t", "hex.mov 2, dt_off + 1*dw, dt_t")
+                                    for ln in lf],
+}
+
+
+@pytest.mark.parametrize("name", sorted(MUTANTS) + sorted(WIDE_MUTANTS))
 def test_a_broken_turn_is_caught(tmp_path, world, name):
+    if name in WIDE_MUTANTS and world.layout.nmon <= 255:
+        pytest.skip("a wide map's control")
+    leaf = _leaf(world)
+    bad = (MUTANTS.get(name) or WIDE_MUTANTS[name])(leaf)
+    assert bad != leaf, name
     cases = _cases(world)
     want = [_model(world, c) for c in cases]
-    got = _run(tmp_path, "mut", world, cases, MUTANTS[name](_leaf(world)))
+    got = _run(tmp_path, "mut", world, cases, bad)
     assert _first_diff(got, want, cases) is not None, "a turn with %r passed every case" % name

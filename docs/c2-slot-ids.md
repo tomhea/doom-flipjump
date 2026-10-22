@@ -51,31 +51,38 @@ drawable-things row reads the map's `SPR_SLOT_CAP` (it was OVER on E1M2, which e
 World refuses for another reason (E1M7: C5's teleport) the slot rows come from the WAD's things (`world.level_things`)
 and the runtime-ids row counts the droppers from them. `--matrix E1M6 E1M7`: no id-width row left.
 
-## 4. Proof
+## 4. Proof (m8-c2b, 2026-10-21 .. 23; every heavy run through scripts/heavy.py)
 
-- **E1M1 / E1M2 emission identity**: `scratchpad/cr/emit_baseline.py --check` (E1M1, 3 configs) and
-  `--map E1M2 --baseline scratchpad/cr/emit_baseline_e1m2.json`.
-- **RUN in fj at E1M6** (tests/fj/wide_maps.py: E1M6 from the asset wad, its unknown types filtered), each against the
-  MODEL, each with a wide control: `test_monster_damage_fj` (dm_go and dm_leaf, shoot and fight: dm_src / dm_me /
-  dm_tg past 255; control: the third level dropped), `test_monster_hitscan_fj` (mt_load, md_attack, hs_scan; shooters
-  past 255; control: mt_load's third level), `test_death_turn_fj` (dt_turn: p_atk past 255, rows past 255; controls:
-  third level, dt_t two nibbles), `test_monster_wake_fj` (the cursor from 250 across 256; controls: third level,
-  mt_n in two nibbles), `test_knock_fj` THE THRUST (kb_go; control: third level), `test_level_done_fj` (3-nibble
-  kills 255 / 256 / 291; control: the low-byte division), `test_aim_record_fj` (sp_sidw, 3-nibble cells around 0x100;
-  controls: a 2-nibble write, a 2-nibble empty test), `test_wide_slots_fj` (the tree itself at 300 targets; controls:
-  the two-level tree, a swapped 256-block).
-- **Host**: `tests/host/test_wide_slots.py` (the widths, the narrow schema = the old formulas, the narrow trees = the
-  old text, the emitter's refusal -- each with its control), `tests/host/test_level_survey.py` (the slot rows at both
-  configs, the E1M7 fallback, the drawable row's cap -- controls the pairs).
+- **E1M1 / E1M2 emission identity**: `scratchpad/cr/emit_baseline.py --check` -- E1M1 21 / 21 parts SAME (certified,
+  hosted_doors, standalone); `--check --map E1M2 --baseline scratchpad/cr/emit_baseline_e1m2.json` -- 7 / 7 SAME;
+  "EMISSION IDENTICAL" both. (The later monstercode change -- a static slot at x or y 0 subtracts nothing -- emits
+  the same text for every non-zero coordinate, and a zero one never assembled: hex.sub_constant refuses 0.)
+- **RUN in fj at E1M6** (tests/fj/wide_maps.py: E1M6 from the asset wad, 294 + 7 slots), each against the MODEL, each
+  with its wide control: `test_monster_damage_fj` 20 passed at E1M6 (shoot and fight; control: dm_go's third level
+  dropped, both modes), `test_monster_hitscan_fj` 12 (control: mt_load's third level), `test_death_turn_fj` 12 (+2
+  E1M1 skips of the wide mutants), `test_monster_wake_fj` 6 at E1M6 (the cursor across 256; controls: the third
+  level, mt_n in two nibbles), `test_knock_fj` 4 at E1M6 (THE THRUST; control: kb_go's third level), `test_level_done_fj`
+  19 (3-nibble kills 255 / 256 / 257 / 270; control: the low-byte division), `test_aim_record_fj` 15 (sp_sidw;
+  controls: a 2-nibble write, a 2-nibble empty test), `test_wide_slots_fj` 4 (the tree at 300 targets; controls: the
+  two-level tree, a swapped 256-block).
+- **Host**: `tests/host/test_wide_slots.py`, `test_level_survey.py`, `test_survey_widths.py`, `test_p8a_interface.py`
+  -- 48 passed (controls: the width without its MAP_CONFIG entry OVER / refused, a narrow map claiming 12 refused, the
+  narrow tree = the old text, E1M1's schema = the old formulas, a GR shot line on a wide map refused).
+- **Survey**: `--matrix E1M6 E1M7` shows no slot-id, aim_sid, LEVEL COMPLETE or runtime-ids row.
+
+The harnesses leave E1M6's 3 lost souls (287, 288, 290) out of the damage and thrust targets: a soul's hit and thrust
+are C8's (damage_parts / go_lines(souls=): the flight, sk_z, no kill count), cells these harnesses do not declare.
 
 ## 5. Open
 
-- Not run in fj at E1M6: projcode's pt_lines / the rocket (pt codes, pw_src), barrelcode's blast sources (bl_src's
+- Not run in fj at E1M6: soulcode's wide registers (sk_hj, sw_me, sw_id, sz_tg: test_lostsoul_fj runs E1M8's narrow
+  souls), projcode's pt_lines / the rocket / the plasma ball (pt codes, pw_src), barrelcode's blast sources (bl_src's
   nibble-2 tests, bar_src cells), the weapon's aim_sid -> dm_id reads, teleportcode's stomp. Each is a `%d` of the same
   `sn` in text the narrow maps keep byte for byte; test_fireball_pool_fj / test_barrel_fj / test_player_shot_fj /
-  test_telefrag_fj take the map parameter the same way (tests/fj/wide_maps.py) when a level rung needs them.
-- E1M6's first emission is blocked by other clusters (lost souls, doors, movers ...); the gates' probe widths are
-  ready (scratchpad/gp/probe.py).
+  test_telefrag_fj / test_lostsoul_fj take the map parameter the same way (tests/fj/wide_maps.py) when a level rung
+  needs them.
+- E1M6's first emission: the survey still REFUSES it on "lost souls beside teleport lines" (C8 x C5: EV_Teleport's
+  soul z is unwired in fj; wall_renderer refuses the map), so `scripts/emit_check.py E1M6` was not run.
 - Per-frame cost: a wide map pays one more `sim.jump16` per id dispatch (dm_go, kb_go, mt_load, dt_turn, the wake
-  tic: ~5 dispatches a hit, one per monster tic) and 3-nibble instead of 2-nibble moves on the ids -- not measured
-  (no E1M6 binary exists); E1M1 / E1M2 pay nothing (identical text).
+  tic) and 3-nibble instead of 2-nibble moves on the ids -- not measured (no E1M6 binary exists); E1M1 / E1M2 pay
+  nothing (identical text).

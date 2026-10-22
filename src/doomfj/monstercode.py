@@ -1138,11 +1138,12 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
               "    hex.set 1, nz_amb, 1",                                 # an ambusher: the sight decides
               "  %ssee:" % L] if hear else []),
            "    hex.mov 4, mt_dx, viewx + 4*dw",
-           ("    hex.sub 4, mt_dx, thpos_rt + %d*dw" % (16 * mv["rt"] + 4) if mv else
-            "    hex.sub_constant 4, mt_dx, %d" % (x & 0xFFFF)),
+           # (a static slot at x or y 0 -- E1M6 has one -- subtracts nothing: hex.sub_constant refuses the constant 0)
+           *(["    hex.sub 4, mt_dx, thpos_rt + %d*dw" % (16 * mv["rt"] + 4)] if mv else
+             ["    hex.sub_constant 4, mt_dx, %d" % (x & 0xFFFF)] if x & 0xFFFF else []),
            "    hex.mov 4, mt_dy, viewy + 4*dw",
-           ("    hex.sub 4, mt_dy, thpos_rt + %d*dw" % (16 * mv["rt"] + 12) if mv else
-            "    hex.sub_constant 4, mt_dy, %d" % (y & 0xFFFF)),
+           *(["    hex.sub 4, mt_dy, thpos_rt + %d*dw" % (16 * mv["rt"] + 12)] if mv else
+             ["    hex.sub_constant 4, mt_dy, %d" % (y & 0xFFFF)] if y & 0xFFFF else []),
            "    stl.fcall mt_dist_leaf, mt_ret",                  # mt_d = P_AproxDistance(dx, dy)
            "    hex.if1 1, thseen + %d*dw, %sbehind" % (t, L),     # seen by last frame's picture
            "    hex.cmp 4, mt_d, mt_c128, %snear, %snear, %s" % (L, L, lx),

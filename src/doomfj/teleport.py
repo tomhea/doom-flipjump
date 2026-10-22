@@ -115,6 +115,8 @@ class Teleporter:
     monster_only: bool = False        # M8 C5: 125 / 126 -- the player never fires it
     once: bool = False                # M8 C5: 125 (W1) -- a monster's crossing clears it for the level (`once_lines`)
     skills: int = ALL_SKILLS          # M8 C5: the MTF_ skill bits on which EV_Teleport finds `dest` (E1M5: hard only)
+    dest_moves: bool = False          # M8 C5b: `dest_sector` is a mover (World sets it): floorz is its floor NOW, not
+                                      # `dest_floor` (world._teleport_monster's secs_c, teleportcode's ms_seed_leaf)
 
     def on_skill(self, skill: int) -> bool:
         """M8 C5: EV_Teleport finds this destination on `skill` (a gamedata SK_*)"""

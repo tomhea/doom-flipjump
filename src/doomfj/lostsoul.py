@@ -379,7 +379,7 @@ class SoulMixin:
     def _soul_teleported(self, m: int, tel) -> None:
         """EV_Teleport's z, momz and ceilingz (world._teleport_monster)"""
         k, ws = self.soul_of[m], self.ws
-        ws.sk_z[k] = tel.dest_floor << 16
+        ws.sk_z[k] = ws.mon_floorz[m] << 16          # M8 C5b: the destination's floor now (a mover's where it stands)
         ws.sk_momz[k] = 0
         ws.sk_ceil[k] = self.secs_c[tel.dest_sector].ceil_h
 

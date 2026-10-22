@@ -14,7 +14,8 @@ THE PIECES (each spliced by the emitter where the model runs the rule):
     position is taken: monstermove.move_leaf_lines (P_Move: mm_ox16 / mm_oy16 -> cpx / cpy) and knockcode.mtry_lines
     (a knock step); a fire overwrites the candidate's mm_nx / mm_ny, its floor cp_floor and its leaf ptss -- the
     lines after take the destination as the move (the position, floorz, the relink, the sector) -- and leaves the
-    facing in `tp_fa` with `tp_hit` 1 for the slot's write-back.
+    facing in `tp_fa` with `tp_hit` 1 for the slot's write-back. M8 C5b: a destination on a mover (E1M7's 516) reads
+    its floor where the mover stands (`dest_floor_lines`: ms_seed_leaf), as world._teleport_monster's secs_c.
   * `slot_back_lines(m, ...)` -- per slot, after its move (monstercode.p32b_move_lines) or its knock move (the stub
     kbs<m>): tp_hit -> the facing, and on the walk the knock momentum and the position's fraction 0, tp_hit 0.
   * `stomp_leaf_lines(slots)` -- `tp_stomp` (stl.fcall tp_stomp, tp_sret): PIT_StompThing at (tp_dx, tp_dy) for
@@ -254,14 +255,25 @@ def monster_lines(tels, *, prefix: str, knock_ctx: bool = False,
                 *_stomp_call(tel, ["    hex.zero 2, tp_r", "    hex.mov 2, tp_r, mm_r"], 1, end),
                 *_fog_lines(f"{regs[2]} + 4*dw", f"{regs[3]} + 4*dw", tel),       # M8: the fogs (before ptss)
                 f"    hex.set 4, mm_nx, {dx & 0xFFFF:#x}", f"    hex.set 4, mm_ny, {dy & 0xFFFF:#x}",
-                f"    hex.set 8, cp_floor, {tel.dest_floor & M32:#x}",
-                "    hex.zero w/4, ptss", f"    hex.set 3, ptss, {tel.dest_leaf:#x}",
+                *dest_floor_lines(tel),
                 f"    hex.set 1, tp_fa, {tel.facing}", "    hex.set 1, tp_hit, 1",
                 *([f"    hex.set 8, kb_cx, {(dx << 16) & M32:#x}", f"    hex.set 8, kb_cy, {(dy << 16) & M32:#x}",
                    "    hex.zero 8, kb_vx", "    hex.zero 8, kb_vy"] if knock_ctx else []),
                 f"    ;{end}"]
     out += [f"  {end}:"]
     return out
+
+
+def dest_floor_lines(tel) -> List[str]:
+    """a monster fire's floorz and leaf: `cp_floor` = the destination sector's floor, `ptss` = its leaf. M8 C5b: on a
+    mover's sector (`Teleporter.dest_moves`, E1M7's 516) the floor NOW -- `ms_seed_leaf` on the leaf, its mover state
+    cell -> `cp_seedf` (it writes cp_seedf / cp_seedc only, neither read again before the next seed) -- as the model's
+    `secs_c`; else the stored floor, baked (the pre-C5b text)"""
+    if tel.dest_moves:
+        return ["    hex.zero w/4, ptss", f"    hex.set 3, ptss, {tel.dest_leaf:#x}",
+                "    stl.fcall ms_seed_leaf, ms_seed_ret", "    hex.mov 8, cp_floor, cp_seedf"]
+    return [f"    hex.set 8, cp_floor, {tel.dest_floor & M32:#x}",
+            "    hex.zero w/4, ptss", f"    hex.set 3, ptss, {tel.dest_leaf:#x}"]
 
 
 def _front_gated(p: str, tel, radius: int, regs: Sequence[str], fire: str) -> List[str]:

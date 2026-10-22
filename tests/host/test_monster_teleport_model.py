@@ -40,12 +40,7 @@ def art():
     return WadFile.from_path(str(ART))
 
 
-E1M7_BLOCKED = "M8 C5b (wave 3): E1M7's teleport 516 lands on sector 89, which W1 36 line 4272 lowers (tag 60) -- a teleport onto a mover; World refuses it (M8 L4) until the destination z reads the mover"
-
-
 def _world(art, m, skill=gd.SK_HARD):
-    if m == "E1M7":
-        pytest.xfail(E1M7_BLOCKED)
     w = World(episode_wad(art, m), m, skill=skill, player="final", monsters="final")
     ws = w.ws
     for k in range(w.layout.nmon):              # nothing in the way: no monster stands anywhere
@@ -240,8 +235,6 @@ def test_control_e1m5s_destination_on_every_skill_fires_on_medium(art):
 def test_the_tic_runs_on_a_monster_only_map(art):
     """the world's own tic on E1M7 (the W1 latches in the schema) and E1M5: forty frames, no refusal"""
     for m in ("E1M5", "E1M7"):
-        if m == "E1M7":
-            pytest.xfail(E1M7_BLOCKED)                 # E1M5 ran first
         w = World(episode_wad(art, m), m, player="final", monsters="final")
         for f in range(40):
             k = dict.fromkeys(KEYS, False)

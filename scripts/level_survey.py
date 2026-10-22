@@ -141,6 +141,18 @@ STATIC_SPECIALS = {48: "drawn static, no scroll (simplification, as the lights)"
 DOOM_MONSTERS = frozenset({3004, 9, 3001, 3002, 58, 3006, 3003, 3005, 16, 7, 64, 65, 66, 67, 68, 69, 71, 84})
 
 
+
+def teleport_mover_destinations(secs, lds, sds, tels) -> dict:
+    """M8 C5b: {"mover": [(line, sector)], "door": [(line, sector)]} -- the teleport lines whose destination sector is a
+    lift or a floor group (the world's mover_order: its z read at run time) or a door (World refuses it)"""
+    from doomfj import movers
+    from doomfj.doors import door_states
+    from doomfj.movers import lift_states
+    mv = set(lift_states(secs, lds, sds)) | {si for g in movers.floor_groups(secs, lds, sds) for si in g.sectors}
+    dr = set(door_states(secs, lds, sds))
+    return {"mover": [(t.line, t.dest_sector) for t in tels if t.dest_sector in mv],
+            "door": [(t.line, t.dest_sector) for t in tels if t.dest_sector in dr]}
+
 class Survey:
     def __init__(self, wad, mapname, asset):
         self.wad, self.m, self.asset = wad, mapname, asset
@@ -246,6 +258,13 @@ class Survey:
         gated = [(t.line, t.skills) for t in tels if t.skills != teleport.ALL_SKILLS]
         if gated:
             self.row("INFO", "teleport destinations some skill lacks (line, MTF bits): inert there", gated)
+        on_mover = teleport_mover_destinations(self.secs, self.lds, self.sds, tels)
+        if on_mover["mover"]:
+            self.row("OK", "teleport destinations on a mover (line, sector): z read where it stands (M8 C5b)",
+                     on_mover["mover"], "", "world._teleport_monster's secs_c; teleportcode's ms_seed_leaf")
+        if on_mover["door"]:
+            self.row("REFUSED", "teleport destinations on a door (line, sector)", on_mover["door"], "",
+                     "world.World refuses them (M8 L4)")
         touch = [(a.line, b.line) for i, a in enumerate(tels) for b in tels[i + 1:] if teleport.neighbours(a, b)]
         if touch:
             self.row("INFO", "teleport line pairs one move can touch (the first decides)", len(touch), "",

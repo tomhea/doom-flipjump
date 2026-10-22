@@ -1091,9 +1091,12 @@ class World(SoulMixin, CombatMixin):
         _lsx = {th.sector for th in self.light_thinkers} & (set(self.door_order) | set(self.mover_order))
         assert not _lsx, "M8: animated light sectors %r are doors or movers" % sorted(_lsx)
         # M8 L4 (doomfj.teleport): the WR teleport lines and their destinations ([] on E1M1). P_TeleportMove's floorz
-        # is the destination sector's floor, baked: it must not be a door or a mover
+        # is the destination sector's floor: baked on a still sector, read where it stands on a mover (M8 C5b); not a door
         from doomfj.teleport import teleporters
         self.teleports = teleporters(mw, M, rm=self.rm, cmap=cmap)
+        # M8 C5b: a destination on a mover reads its floor where the mover stands (E1M7's 516 on sector 89)
+        self.teleports = [dataclasses.replace(t, dest_moves=True) if t.dest_sector in set(self.mover_order) else t
+                          for t in self.teleports]
         from doomfj.teleport import once_lines
         self.tele_once = once_lines(self.teleports)  # M8 C5: the W1 (125) lines, latch j = tp_fired[j]
         self._teleported = False
@@ -1104,8 +1107,10 @@ class World(SoulMixin, CombatMixin):
         self.switch_cells = _SWI.latched(self.switches)
         self.switch_sr = _SWI.repeating(self.switches)
         for tel in self.teleports:
-            assert tel.dest_sector not in set(self.door_order) | set(self.mover_order), (
-                "M8 L4: teleport destination sector %d moves" % tel.dest_sector)
+            # M8 C5b: a destination on a MOVER (a lift / a floor) is read where the mover stands (`_teleport_monster`'s
+            # secs_c; the fj's teleportcode.monster_lines by `ms_seed_leaf`); a door's is still refused
+            assert tel.dest_sector not in set(self.door_order), (
+                "M8 L4: teleport destination sector %d is a door" % tel.dest_sector)
         self._mh_last = {}
         self.mon_door_boxes = {}
         for si in self.door_order:
@@ -2057,7 +2062,9 @@ class World(SoulMixin, CombatMixin):
                 break
             self._teleport_fogs(tel, nx, ny, TicEvents(0) if ev is None else ev)
             nx, ny = tel.dest
-            ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, tel.dest_floor
+            # M8 C5b: P_TeleportMove's floorz is the destination sector's floor NOW (`secs_c`: a mover where it stands
+            # -- E1M7's 516 lands on sector 89, which W1 36 lowers); on a still sector it is the stored `dest_floor`
+            ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, self.secs_c[tel.dest_sector].floor_h
             ws.mon_facing[m] = tel.facing
             if m in self.soul_of:
                 self._soul_teleported(m, tel)              # M8 C8: z on the destination floor, momz 0

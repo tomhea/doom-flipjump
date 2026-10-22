@@ -541,6 +541,7 @@ def _shadow_run(tmp_path, name, mut=None):
     gs.overlays = dict(zip(names_w, weapons)) | dict(zip(names_f, flashes))
     gs.shadows = {k: hud.shadow_columns(v) for k, v in gs.overlays.items()}
     gs.row, gs.shadow_row = row, srow
+    gs.set_light_rows(art.colormap(), [row], [0], names_f)     # M8: one row (E1M3's), the flashes fullbright
     gs.cfg, gs.colours, gs.level_start = GAME_CFG, colours, dict(hudcode.LEVEL_START)
     for f, (wf, ff, inv) in enumerate(PSP):
         view = bytes(_view_column(f, x)[1][y] for y in range(VH) for x in range(WIDTH)) + bytes(WIDTH * (HH - VH))

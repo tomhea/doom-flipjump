@@ -33,7 +33,7 @@ from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-f
 from doomfj.fixedpoint import aprox_distance                   # P_AproxDistance, ONE definition (M7 P3.3)
 from doomfj.mapcompiler import (  # shared geometry (R6)
     NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side, seg_affine_coeffs,
-    bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector,
+    bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector, seg_sector_index,
     thing_live_subsectors, blockmap_candidates,
 )
 from doomfj.spritebank import bank_list_of, strip_at   # M7 P1.6: the native-list bank (R6)
@@ -2376,6 +2376,8 @@ class ReferenceModel:
         # the eye z = the player's own sector floor + VIEWHEIGHT
         pss = scene.cmap.subsectors[self.point_in_subsector(scene.cmap, px, py)]
         viewz = self.view_z(self._seg_sector(lds, sds, secs, scene.cmap.segs[pss.firstseg]).floor_h)
+        # M8 (E1M9): the player's sector INDEX -- the weapon's light row on a map of several (hud.GameScreen.frame)
+        self.view_sector = seg_sector_index(lds, sds, scene.cmap.segs[pss.firstseg])
         # M7 P8a (S0): the planes' band lists keep the STANDING eye; the geometry takes the sunk one
         assert 0 <= view_drop <= VIEW_DROP_MAX, f"view_drop={view_drop}: 0..{VIEW_DROP_MAX}"
         assert not view_drop or floor_mode_ft1, "view_drop is the FT1 tier's split (the band lists it keeps)"

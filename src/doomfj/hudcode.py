@@ -4,7 +4,9 @@ from `doomfj.hud`, the generator the oracle composes with, so the two mirrors ca
 THE FRAME (decisions C3/C4): after the view's 160 column records, before the frame's closing 0xFF --
   1. the WEAPON: one record per covered column, `[x][0xFC][y0]` (keep the world above it), then per run of one texel
      `[y_end][colour]`, with `[0xFC][y]` over a transparent gap, and `[0xFF]`. Every colour is a constant: E1M1's
-     sectors all light a psprite with one colormap row (asserted at emit time), so nothing is looked up at runtime;
+     sectors all light a psprite with one colormap row, so nothing is looked up at runtime. M8 (E1M9's dark sector):
+     a map of several rows bakes one weapon drawing per row, picked by the nibble the view's leaf sets
+     (`weapon_row_lines`); the flashes are FF_FULLBRIGHT, drawn once at hud.FULLBRIGHT_ROW;
   2. the BAR: rows [VIEW_ROWS, H) of a column, `[x][0xFC][VIEW_ROWS][pairs][0xFF]`, ONLY for columns that changed.
      Each dynamic slot (`hud.bar_slots`) has a value cell in `hud_v` and a shadow in `hud_s` (what the screen shows);
      a slot whose value differs from its shadow is redrawn and the shadow copied. `hud_full` -- set by every menu
@@ -115,14 +117,19 @@ VALUE_CELLS = {"card": "pcard", "card_y": "pcard_y", "card_r": "pcard_r"}
 
 def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_row: Sequence[int],
                    view_rows: int = hud.VIEW_ROWS, value_cells: Dict[str, str] = VALUE_CELLS,
-                   dead_cell: Optional[str] = None, cards: Sequence[str] = (), shadow=None) -> List[str]:
+                   dead_cell: Optional[str] = None, cards: Sequence[str] = (), shadow=None,
+                   flash_row: Optional[Sequence[int]] = None, weapon_rows=None) -> List[str]:
     """the world frame's tail before `frame_end`: the weapon, then the bar's changed columns.
     P10 (the owner's play-test, 2026-10-12): with `dead_cell` (the game tier's `p_dead`), a dead player draws no weapon
     and no flash -- DOOM's P_DropWeapon lowers the weapon out of view; the overlays are baked at WEAPONTOP, so the
     picture hides it at once (hud.NO_PSPRITE is the oracle's side).
     M8 F4: `cards` -- the map's extra key icons (hud.bar_slots(cards)), their slots reading `value_cells`' card cells.
     M8 C6: `shadow` -- (weapons, flashes, colour row) of the SHADOW weapon (hud.shadow_columns, a map holding partial
-    invisibility): drawn instead while `p_inv` shows (powercode.shadow_lines); None (E1M1): the text is as before"""
+    invisibility): drawn instead while `p_inv` shows (powercode.shadow_lines); None (E1M1): the text is as before.
+    M8 (E1M9's dark sector): `flash_row` -- the flashes' colours (hud.FULLBRIGHT_ROW's; None: `colormap_row`, the old
+    call); `weapon_rows` -- None (one row: `colormap_row` lights the weapon, the text as before), or [(lit row, shadow
+    row or None)] per distinct sector row: one baked weapon drawing per row, picked by the nibble `WEAPON_ROW_CELL`
+    that the view's descend leaf sets (`weapon_row_lines`); the shadow flash keeps `shadow`'s row"""
     slots = hud.bar_slots(cards)
     owned_cols = {x for _n, x0, w, _v in slots for x in range(x0, x0 + w)}
     out = ["// M7 P4.0 (doomfj.hudcode): the weapon overlay, then the bar's changed columns"]
@@ -134,17 +141,28 @@ def hud_tail_lines(colours: Dict[str, int], overlay: Dict[int, list], colormap_r
         # M7 P4.1: one overlay per weapon frame, chosen by `wp_frm`; then the flash's, by `fl_frm` (0 = none) -- the
         # psprites in DOOM's order, the flash's records after the weapon's (the device draws a later record over)
         weapons, flashes = overlay
+        frow = colormap_row if flash_row is None else flash_row
+
+        def wdraw(prefix, frames, row_, end):
+            return _frame_dispatch2(prefix, "wp_frm", [weapon_record_lines(o, row_) for o in frames], end)
+
+        def wrows(prefix, frames, rows_, end):
+            """M8: the weapon's drawing per light row, on `WEAPON_ROW_CELL` (one row: the old single drawing)"""
+            if weapon_rows is None:
+                return wdraw(prefix, frames, rows_, end)
+            return _frame_dispatch(prefix + "r", WEAPON_ROW_CELL,
+                                   [wdraw(f"{prefix}{k}x", frames, r_, end) for k, r_ in enumerate(rows_)], end)
         if shadow is not None:                       # M8 C6: an invisible player's psprites, R_DrawPSprite's shadow
             from doomfj.powercode import shadow_lines
             sw, sf, srow = shadow
             out += shadow_lines("hsd_on", "hsd_off") + ["hsd_on:"]
-            out += _frame_dispatch2("hsw", "wp_frm", [weapon_record_lines(o, srow) for o in sw], "hsw_end")
+            out += wrows("hsw", sw, srow if weapon_rows is None else [s_ for _r, s_ in weapon_rows], "hsw_end")
             out += ["hsw_end:"]
             out += _frame_dispatch("hsf", "fl_frm", [[]] + [weapon_record_lines(o, srow) for o in sf], "hff_end")
             out += ["hsd_off:"]
-        out += _frame_dispatch2("hwf", "wp_frm", [weapon_record_lines(o, colormap_row) for o in weapons], "hwf_end")
+        out += wrows("hwf", weapons, colormap_row if weapon_rows is None else [r_ for r_, _s in weapon_rows], "hwf_end")
         out += ["hwf_end:"]
-        out += _frame_dispatch("hff", "fl_frm", [[]] + [weapon_record_lines(o, colormap_row) for o in flashes],
+        out += _frame_dispatch("hff", "fl_frm", [[]] + [weapon_record_lines(o, frow) for o in flashes],
                                "hff_end")
         out += ["hff_end:"]
     # the full redraw: the static columns, and every shadow stale
@@ -196,10 +214,12 @@ def game_hud_parts(rm, asset_wad, sprite_wad, sectors, cards: Sequence[str] = ()
     (combat.plasma_on): its frames PLSGA0 / PLSGB0 and flashes PLSFA0 / PLSFB0 join the overlays (none elsewhere)."""
     palette = bytes(b for rgb in asset_wad.playpal(0) for b in rgb)
     colours = hud.bar_colours(palette)
-    rows = {hud.psprite_light_row(rm, s.light) for s in sectors}
-    assert len(rows) == 1, ("the weapon is lit by %d colormap rows on this map (%s); P4.0 bakes one -- a darker map "
-                            "needs the row selected per frame" % (len(rows), sorted(rows)))
-    row = asset_wad.colormap()[rows.pop()]
+    # M8 (E1M9): the weapon's light rows -- one per distinct row the map's sectors give (one: E1M1..E1M8, the text as
+    # it was); the flash is FULLBRIGHT (gamedata's FF_FULLBRIGHT, asserted below), so it bakes once
+    light_rows, sector_rows = hud.weapon_light_rows(rm, sectors)
+    cmap_ = asset_wad.colormap()
+    row = cmap_[light_rows[0]]
+    bright = cmap_[hud.FULLBRIGHT_ROW]
     start = slot_codes(hud.slot_values(**LEVEL_START, cards=cards), cards)
     # M7 P4.1: every weapon frame (`wp_frm` indexes weaponcode.overlay_frames) and every flash frame (`fl_frm` - 1)
     from doomfj import weaponcode as WC
@@ -207,14 +227,42 @@ def game_hud_parts(rm, asset_wad, sprite_wad, sectors, cards: Sequence[str] = ()
     def cols(lump):
         return hud.psprite_columns(sprite_wad.get_data(lump), view_w=rm.cfg.VIEW_W, view_rows=rm.cfg.VIEW_H)
     overlay = ([cols(lump) for lump in WC.overlay_frames(plasma=plasma)], [cols(lump) for lump in WC.flash_frames(plasma)])
+    _fb = WC.frames_fullbright(plasma)
+    assert not any(_fb[0]) and all(_fb[1]), ("M8: the weapon frames are lit by the sector and the flashes FULLBRIGHT "
+                                             "(R_DrawPSprite) -- a frame broke the rule", _fb)
     from doomfj.wall_renderer import PLAYER_MODE
     from doomfj.world import player_mortal
     # M8 C6 (`shadow`, a map holding partial invisibility): the shadow weapon's frames (hud.shadow_columns)
     shd = ([hud.shadow_columns(o) for o in overlay[0]], [hud.shadow_columns(o) for o in overlay[1]],
-           hud.shadow_row(asset_wad.colormap(), row)) if shadow else None
-    return {"decls": hud_decls(start, cards), "restart": hud_restart_lines(start), "menu": ["hex.set 1, hud_full, 1"],
+           hud.shadow_row(cmap_, bright)) if shadow else None
+    # M8: several rows -- each its lit row and (with the shadow weapon) its shadow row, hud.shadow_row of it
+    # (E1M1..E1M8: the one row IS the fullbright one, so the weapon, the flash and their shadows share it -- the text as
+    # it was; a one-row map off it takes the per-row drawing with one row, its cell always 0)
+    wrows_ = None if _one_row(light_rows) else [
+        (cmap_[r], hud.shadow_row(cmap_, cmap_[r]) if shadow else None) for r in light_rows]
+    return {"decls": hud_decls(start, cards) + ([f"{WEAPON_ROW_CELL}: hex.vec 1"] if wrows_ else []),
+            "restart": hud_restart_lines(start), "menu": ["hex.set 1, hud_full, 1"],
             "tail": hud_tail_lines(colours, overlay, row, view_rows=rm.cfg.VIEW_H,
                                    dead_cell="p_dead" if player_mortal(PLAYER_MODE) else None, cards=cards,
-                                   shadow=shd),
+                                   shadow=shd, flash_row=bright if wrows_ else None, weapon_rows=wrows_),
             "colours": colours,
-            "overlay": overlay, "colormap_row": row}
+            "overlay": overlay, "colormap_row": row,
+            "light_rows": light_rows, "sector_rows": sector_rows}
+
+
+# M8 (E1M9): the nibble that picks the weapon's light row -- the index into hud.weapon_light_rows' rows of the player's
+# sector, set by the view's descend leaf every frame (`weapon_row_lines`); declared on a map of several rows only
+WEAPON_ROW_CELL = "hud_lrow"
+
+
+def _one_row(light_rows) -> bool:
+    """the weapon's row needs no runtime pick: the map's one row, and it is the flash's (fullbright) one"""
+    return tuple(light_rows) == (hud.FULLBRIGHT_ROW,)
+
+
+def weapon_row_lines(parts: Optional[dict], sector: int) -> List[str]:
+    """the view's descend leaf in `sector`: set WEAPON_ROW_CELL to its row index -- nothing on a one-row map (or
+    without the game screen)"""
+    if parts is None or _one_row(parts["light_rows"]):
+        return []
+    return [f"    hex.set 1, {WEAPON_ROW_CELL}, {parts['sector_rows'][sector]}"]

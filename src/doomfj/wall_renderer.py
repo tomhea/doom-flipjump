@@ -3736,7 +3736,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                        plane_gate=_lines_plane_gate if (lines and plane_near) else None,
                        plane_gate_label="tsstop",
                        extra_gate=_bbox_gate_lines if bbox_gate else None)
-    bsp += _bsp_descend_code(_pfx(mapname), cmap, _lines_descend_leaf, done_label="dsc_done")
+    # M8 (E1M9's dark sector): on a map whose sectors light the weapon with several colormap rows, the view's leaf sets
+    # the row the weapon is drawn with (hudcode.weapon_row_lines; nothing on a one-row map, the text as before). An
+    # animated light sector must keep its row through its states (the row is the leaf's, baked): refused otherwise.
+    if _hud is not None:
+        from doomfj.hud import psprite_light_row as _pslr
+        for _th in _lth:
+            assert {_pslr(rm, v) for v in _th.levels} == {_pslr(rm, secs[_th.sector].light)}, (
+                f"{mapname}: light sector {_th.sector}'s states light the weapon with other colormap rows -- the "
+                "weapon's row is baked per leaf (hudcode.weapon_row_lines)")
+    from doomfj.hudcode import weapon_row_lines as _wrl
+    from doomfj.mapcompiler import seg_sector_index as _ssi
+    bsp += _bsp_descend_code(_pfx(mapname), cmap, lambda s: _wrl(_hud, _ssi(
+        lds, sds, cmap.segs[cmap.subsectors[s].firstseg])) + list(_lines_descend_leaf(s)), done_label="dsc_done")
     xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # the shared per-seg xorby blocks (once)
 
     if collide:

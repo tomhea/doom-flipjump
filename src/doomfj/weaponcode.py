@@ -157,6 +157,20 @@ def flash_frames(plasma: bool = False) -> List[str]:
     return out
 
 
+def frames_fullbright(plasma: bool = False) -> tuple:
+    """M8 (R_DrawPSprite's FF_FULLBRIGHT, hud.FULLBRIGHT_ROW): ([fullbright] per overlay frame, [fullbright] per flash
+    frame) -- each lump's states agree (asserted), so a lump is lit one way"""
+    def flags(states, lumps):
+        by = {}
+        for s in states:
+            if s != gd.S_NULL and psprite_lump(s) in lumps:
+                by.setdefault(psprite_lump(s), set()).add(gd.STATES[s].fullbright)
+        assert all(len(v) == 1 for v in by.values()), ("a psprite lump drawn both fullbright and lit", by)
+        return [by[x].pop() for x in lumps]
+    return (flags(psprite_states(plasma), overlay_frames(plasma=plasma)),
+            flags([s for s in flash_states(plasma) if s == gd.S_NULL or gd.STATES[s].tics != 0], flash_frames(plasma)))
+
+
 def psprite_lump(state: str) -> str:
     st = gd.STATES[state]
     return "%s%s0" % (st.sprite, chr(ord("A") + (st.frame & 0x7FFF)))

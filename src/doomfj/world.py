@@ -308,10 +308,49 @@ def _index_bits(n: int) -> int:
     return max(1, (n - 1).bit_length())
 
 
-def _code_bits(nmon: int) -> int:
+# M8 C2 (docs/c2-slot-ids.md): the most monster + barrel slots whose ids fit the fj's TWO-nibble registers -- the
+# tightest of them is the bullets' scan code 2 + nmon + b (monsterdecide.scan_lines) and dm_go's id space (damagecode:
+# nid < 255), so nmon + nbarrel <= 254; past it every slot-id register and cell is THREE nibbles (`slot_nibbles`)
+SLOT_IDS_NARROW = 254
+SLOT_IDS_WIDE = 0xFFF - 2           # three nibbles: the code 2 + nmon - 1 and the scan code 1 + nmon + nbarrel
+
+
+def slot_nibbles(lay: Layout) -> int:
+    """M8 C2 (docs/c2-slot-ids.md): the fj width of a monster / barrel SLOT ID -- aim_sid, sp_sid, dm_id, the codes
+    (mon_target, bar_src, dm_src, dm_me, mm_tg, hs_*, pt_*: 0 none, 1 the player, 2 + slot), p_atk, kb_tg, pj_src,
+    md_src, the scheduler's cursor and counts (sched_cursor, mt_fdef, mt_n) and kb_live -- 2 while nmon + nbarrel <=
+    SLOT_IDS_NARROW (E1M1 75, E1M2 138: their text), else 3 (E1M6 298, E1M7 297). DERIVED from the counts, never set
+    (as World.sec_nibbles); config.SLOT_ID_BITS names the width a map's emission expects and the emitter asserts the
+    two agree (wall_renderer)"""
+    n = lay.nmon + lay.nbarrel
+    if n <= SLOT_IDS_NARROW:
+        return 2
+    assert n <= SLOT_IDS_WIDE, ("%d monster and barrel slots past three nibbles of slot id" % n)
+    return 3
+
+
+def level_things(mw, mapname: str) -> tuple:
+    """(things, monster things, barrel things) of a level -- the union of every single-player skill, in WAD order,
+    without gamedata.NOT_THINGS: World's own lists (`_build_level`), and the survey's when the World refuses for
+    another reason (M8 C2: the slot-id rows of E1M7, whose World refuses on a teleport)"""
+    things = [t for t in mw.things(mapname) if t.type not in gd.NOT_THINGS and single_player(t)]
+    return (things, [t for t in things if t.type in gd.MONSTER_DOOMEDNUMS], [t for t in things if t.type == 2035])
+
+
+def schema_slot_nibbles(schema) -> int:
+    """`slot_nibbles` from a schema (the emitters that hold only it): `p_attacker` is 4 * slot_nibbles bits on a wide
+    map (build_schema) and at most 8 on a narrow one"""
+    f = next(x for x in schema if x.name == "p_attacker")
+    return 3 if f.bits > 8 else 2
+
+
+def _code_bits(nmon: int, wide: bool = False) -> int:
     """M7 P8a I: `mon_target` / `bar_src`'s width -- a code 0 none, 1 the player, 2 + slot -- at least 5 bits: the fj
     reads these cells as TWO nibbles (monstercode's slots, mt_load, damagecode's dm_src, barrelcode's bar_src), so a
-    map with <= 14 monsters (test_slot_layouts_fj's rooms) keeps the 2-nibble layout; E1M1's 53 slots need 6 either way"""
+    map with <= 14 monsters (test_slot_layouts_fj's rooms) keeps the 2-nibble layout; E1M1's 53 slots need 6 either way.
+    M8 C2 (`wide`, slot_nibbles 3): THREE nibbles, 12 bits"""
+    if wide:
+        return 12
     assert nmon + 2 <= 0x100, ("a code 0 none, 1 the player, 2 + slot: %d slots past the fj cells' byte" % nmon)
     return max(5, _index_bits(nmon + 2))
 
@@ -336,13 +375,26 @@ def radius_classes(radii) -> Tuple[int, int]:
 def aim_bits(lay: Layout) -> int:
     """M8 F1.1 (docs/f1-big-map-widths.md 2): `aim_sid`'s width -- 0 none, 1 + slot for the monsters and the barrels,
     so at most nmon + nbarrel -- at least the 7 bits every frozen digest was recorded with (E1M1: 53 + 22 < 128). The
-    fj reads the cell as TWO nibbles (aimcode), so the value is held to a byte"""
+    fj reads the cell as TWO nibbles (aimcode), so the value is held to a byte. M8 C2: on a map past SLOT_IDS_NARROW
+    (slot_nibbles 3) three nibbles, 12 bits"""
+    if slot_nibbles(lay) == 3:
+        # the shot lines' ids count down from doors.SHOT_SID_TOP, the top of a BYTE: a wide map's monster ids pass it
+        assert not lay.nshot, ("aim_sid: GR 46 shot lines (ids from 0xFF down) on a map with %d slot ids past a byte"
+                               % (lay.nmon + lay.nbarrel))
+        return 12
     n = lay.nmon + lay.nbarrel
     assert n <= 0xFF, ("aim_sid: %d monster and barrel slots past the fj cell's byte" % n)
     if lay.nshot:                    # M8 C3: the shot lines' ids count down from 0xFF (doors.shot_sid): the whole byte
         assert n < 0xFF - lay.nshot + 1, ("aim_sid: %d monster and barrel ids meet the %d shot-line ids" % (n, lay.nshot))
         return 8
     return max(7, n.bit_length())
+
+
+def count_bits(n: int) -> int:
+    """M8 C2: LEVEL COMPLETE's kill / item counters (p_killcount / p_itemcount: st_kill / st_item) -- 8 bits while the
+    map's monster and pickup counts fit a byte (every frozen digest's), else 12 (statcode.count_nibbles: three)"""
+    assert n <= 0xFFF, n
+    return 8 if n <= 0xFF else 12
 
 
 def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight: bool = False) -> Tuple[Field, ...]:
@@ -365,14 +417,20 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
                         array=count is not None))
 
     leaf_bits, mon_bits = _index_bits(lay.nleaf), _index_bits(lay.nmon)
+    # M8 C2 (docs/c2-slot-ids.md): a map past SLOT_IDS_NARROW holds every slot id and code in THREE nibbles -- the fields
+    # the fj keeps as slot ids (aim_sid, mon_target, bar_src, p_attacker, sched_cursor, proj_src) are 12 bits there;
+    # a narrow map's widths are untouched (E1M1, E1M2: the schema every frozen set was recorded with)
+    wide = slot_nibbles(lay) == 3
+    sid_bits = mon_bits if not wide else 12
     # -- game ------------------------------------------------------------------------------------
     f("skill", 2, group="game", doc="DOOM gameskill: 1 easy, 2 medium, 3 hard (D7, menu)")
     f("leveltime", LEVELTIME_BITS, group="game",
       doc="tics since level start, wraps (nukage timing, S3b; P10: LEVEL COMPLETE's TIME, 16 -> 20 bits)")
     # M8 C8: at least 5 bits -- the fj's tic reads and writes the cursor (and mt_fdef, declared at its width) as TWO
     # nibbles (monstercode.p32a_tic_lines), so a map with <= 16 monster slots (E1M8's 4 Barons) keeps the 2-nibble
-    # layout, as _code_bits keeps mon_target's; every map with more (E1M1 53, E1M2) is unchanged
-    f("sched_cursor", max(5, mon_bits), group="game", doc="the K-slot scheduler's first slot this tic")
+    # layout, as _code_bits keeps mon_target's; every map with more (E1M1 53, E1M2) is unchanged. M8 C2: 12 bits (three
+    # nibbles) on a wide map
+    f("sched_cursor", max(5, mon_bits) if not wide else 12, group="game", doc="the K-slot scheduler's first slot this tic")
     f("g_restart", 1, group="game", phase="S3b",
       doc="restart asked (use while dead, NEW GAME): the frame tail runs the restart block")
     f("g_leveldone", 1, group="game", phase="S3b", doc="the exit switch was used: world frozen")
@@ -426,14 +484,16 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     # M7 P7 (owner, 2026-10-05: the dead view turns to the killer): player->attacker -- the source of the last hit
     # that landed (P_DamageMobj), as 0 (none: sector damage, or the player himself -- a barrel he set off) or
     # 1 + the monster slot; P_DeathThink turns the dead view toward it
-    f("p_attacker", _index_bits(lay.nmon + 1), group="player", phase="P7", doc="0 or 1 + monster slot")
+    f("p_attacker", _index_bits(lay.nmon + 1) if not wide else 12, group="player", phase="P7", doc="0 or 1 + monster slot")
     # P10 (the owner's play-test, 2026-10-12): LEVEL COMPLETE's stats -- player_t's killcount, itemcount and
     # secretcount, and which secret sectors were entered (DOOM zeroes the sector's special; this level data is static,
     # so the found set is the player's). All four are 0 at the level start and the restart (combat.RESTART_KEEP
     # leaves them out). doomfj.statcode is their fj side
-    f("p_killcount", 8, group="player", phase="P10", label="st_kill",
+    cbits = count_bits(max(lay.nmon, lay.npickup))     # M8 C2: both counters 12 bits when either count passes a byte
+    f("p_killcount", cbits, group="player", phase="P10", label="st_kill",
       doc="P_KillMobj's killcount: every COUNTKILL death (a single player counts the monsters' kills too)")
-    f("p_itemcount", 8, group="player", phase="P10", label="st_item", doc="COUNTITEM pickups taken")
+    f("p_itemcount", cbits, group="player", phase="P10", label="st_item",
+      doc="COUNTITEM pickups taken")
     f("p_secretcount", 4, group="player", phase="P10", label="st_secn", doc="secret sectors entered")
     f("p_secret", 1, count=max(1, lay.nsecret), group="player", phase="P10", label="st_secm",
       doc="secret sector k (special 9, sector order) was entered")
@@ -519,7 +579,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("mon_reaction", 4, count=n, group="monster", doc="reactiontime")
     f("mon_threshold", 7, count=n, group="monster", doc="threshold, <= BASETHRESHOLD")
     if fight:   # M7 P8a I (docs/gp-final-plan.md 1.2.2): a target names a thing
-        f("mon_target", _code_bits(n), count=n, group="monster", phase="P8a",
+        f("mon_target", _code_bits(n, wide), count=n, group="monster", phase="P8a",
           doc="0 none, 1 the player, 2 + slot a monster")
     else:
         f("mon_target", 1, count=n, group="monster", doc="has a target (always the player)")
@@ -561,7 +621,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("proj_y", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16")
     f("proj_momx", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16 per tic")
     f("proj_momy", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16 per tic")
-    f("proj_src", mon_bits, count=p, group="proj", phase="S3b",
+    f("proj_src", sid_bits, count=p, group="proj", phase="S3b",
       doc="shooter's monster slot (P9: 0 and unread for the player's rocket -- its state names it)")
     if knock:   # M7 P8a K (1.2.2, G-B4): the missile's z for the thrust's reversal
         f("proj_z", 16, count=p, signed=True, group="proj", phase="P8a", label="pj_z",
@@ -586,7 +646,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
       doc="health (20 at spawn)")
     f("bar_solid", 1, count=lay.nbarrel, group="barrel", phase="S3b", doc="blocks things")
     if fight:   # M7 P8a I (1.2.2, G-I7): the blast's source
-        f("bar_src", _code_bits(lay.nmon), count=lay.nbarrel, group="barrel", phase="P8a",
+        f("bar_src", _code_bits(lay.nmon, wide), count=lay.nbarrel, group="barrel", phase="P8a",
           doc="0 none, 1 the player, 2 + slot: the FIRST thing that damaged it (DOOM's barrel target)")
     names = [x.name for x in fs]
     assert len(names) == len(set(names)), "duplicate schema field"
@@ -992,12 +1052,9 @@ class World(SoulMixin, CombatMixin):
         self.secret_sectors = [s for s, sec in enumerate(self.secs) if sec.special == SECRET_SPECIAL]
         lds, sds, secs, cmap = self.lds, self.sds, self.secs, self.cmap
         # -- things: the union of every single-player skill, in WAD order ----------------------
-        self.things = [t for t in mw.things(M)
-                       if t.type not in gd.NOT_THINGS and single_player(t)]
+        self.things, self.mon_things, self.barrel_things = level_things(mw, M)
         unknown = sorted({t.type for t in self.things} - set(gd.THING_TYPES))
         assert not unknown, "thing types missing from gamedata.THING_TYPES: %s" % unknown
-        self.mon_things = [t for t in self.things if t.type in gd.MONSTER_DOOMEDNUMS]
-        self.barrel_things = [t for t in self.things if t.type == 2035]
         self.pickup_things = [t for t in self.things
                               if gd.THING_TYPES[t.type].flags & gd.MF_SPECIAL]
         from doomfj.powers import map_powers

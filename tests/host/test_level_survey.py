@@ -173,3 +173,51 @@ def test_c7_an_undrawn_decoration_is_reported(ls, wad):
     warn = {r[1].split()[1] for r in rows if r[0] == "WARN" and r[4].startswith("NOT DRAWN")}
     assert {"26", "60", "15", "18"} <= warn
     assert any(r[1].startswith("thing 26 ") and "BLOCKER" in r[4] for r in rows)
+
+
+# ---- M8 C2 (docs/c2-slot-ids.md): the monster / barrel slot ids and the counters past a byte -------------------------
+def _row(rows, prefix):
+    return next(r for r in rows if r[1].startswith(prefix))
+
+
+def test_the_slot_ids_are_capped_at_the_maps_slot_width(ls, wad, monkeypatch):
+    """E1M6's 294 monster slots (3 lost souls among them) + 7 barrels: OK against MAP_CONFIG's SLOT_ID_BITS 12 (the
+    World's row, the WAD's row, and the INFO row agree). The CONTROL is the pair: without its entry (the default 8
+    bits) the same count is OVER on both rows and the INFO row asks for 12 -- a survey that ignored the map's width
+    would report the same rows both times"""
+    import doomfj.config as config
+    rows = _rows(ls, wad, "E1M6")
+    r = _row(rows, "monster slots + barrels (slot ids")
+    assert (r[0], r[2], r[3]) == ("OK", "301", "<= 4093"), r
+    r = _row(rows, "monster slots + barrels, every skill, from the WAD")
+    assert (r[0], r[2], r[3]) == ("OK", "301", "<= 4093"), r
+    assert _row(rows, "slot id bits needed")[2:] == ("12", "", "MAP_CONFIG has 12")
+    assert _row(rows, "monsters + barrels -> aim_sid")[0] == "OK"
+    assert _row(rows, "monsters on LEVEL COMPLETE")[:3] == ("OK", "monsters on LEVEL COMPLETE (st_kill: "
+                                                            "statcode.count_nibbles / count_digits)", "294")
+    assert not any(x[0] in BAD and any(k in x[1] for k in ("slot", "aim_sid", "LEVEL COMPLETE", "runtime"))
+                   for x in rows), [x for x in rows if x[0] in BAD]
+    monkeypatch.setitem(config.MAP_CONFIG, "E1M6", {k: v for k, v in config.MAP_CONFIG["E1M6"].items()
+                                                    if k != "SLOT_ID_BITS"})
+    rows = _rows(ls, wad, "E1M6")
+    r = _row(rows, "monster slots + barrels (slot ids")
+    assert (r[0], r[2], r[3]) == ("OVER", "301", "<= 254"), r
+    r = _row(rows, "monster slots + barrels, every skill, from the WAD")
+    assert (r[0], r[2], r[3]) == ("OVER", "301", "<= 254") and "SLOT_ID_BITS 12" in r[4], r
+    info = _row(rows, "slot id bits needed")
+    assert info[2] == "12" and "set SLOT_ID_BITS 12" in info[4], info
+
+
+def test_the_slot_rows_survive_a_world_refused_for_another_reason(ls, wad, monkeypatch):
+    """E1M7's filtered World refuses (a teleport destination on a mover): the WAD's slot row still reads 281 + 8 souls
+    + 16 barrels against its 12 bits, and the runtime-ids row counts its droppers from the WAD's things
+    (world.level_things). CONTROL: E1M7 without SLOT_ID_BITS -- the same row OVER"""
+    import doomfj.config as config
+    rows = _rows(ls, wad, "E1M7")
+    assert any(r[0] == "REFUSED" and r[1].startswith("World(strict=True) without") for r in rows)
+    r = _row(rows, "monster slots + barrels, every skill, from the WAD")
+    assert (r[0], r[2]) == ("OK", "305"), r
+    assert _row(rows, "runtime ids: things + pools + drops")[0] == "OK"
+    monkeypatch.setitem(config.MAP_CONFIG, "E1M7", {k: v for k, v in config.MAP_CONFIG["E1M7"].items()
+                                                    if k != "SLOT_ID_BITS"})
+    assert _row(_rows(ls, wad, "E1M7"), "monster slots + barrels, every skill, from the WAD")[0] == "OVER"

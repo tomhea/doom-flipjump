@@ -105,6 +105,28 @@ SCRATCH = ["sk_lk: hex.vec 1", "sk_lr: hex.vec 1", "sk_fok: hex.vec 1", "sk_hit:
 
 
 # ---- small helpers -------------------------------------------------------------------------------------------------
+# M8 C2 (docs/c2-slot-ids.md): the scratch registers holding a slot id or a code -- `sn` nibbles each (`scratch`)
+SLOT_REGS = ("sk_hj", "sw_me", "sw_id", "sz_tg")
+
+
+def scratch(sn: int = 2) -> List[str]:
+    """SCRATCH at M8 C2's slot-id width `sn` (world.slot_nibbles): sk_hj (a slot or barrel index), sw_me / sw_id (the
+    soul's code and id) and sz_tg (its target's code) three nibbles past 254 slots"""
+    out = []
+    for d in SCRATCH:
+        name, _, rest = d.partition(": hex.vec ")
+        if name in SLOT_REGS:
+            assert rest == "2", d
+            d = "%s: hex.vec %d" % (name, sn)
+        out.append(d)
+    return out
+
+
+def _sn(w) -> int:
+    from doomfj.world import slot_nibbles
+    return slot_nibbles(w.layout)
+
+
 def _hi16(dst: str, src4: str) -> List[str]:
     """dst[:8] = src4[:4] << 16 (a 16.16 from whole map units)"""
     return ["    hex.zero 4, %s" % dst, "    hex.mov 4, %s + 4*dw, %s" % (dst, src4)]
@@ -156,7 +178,7 @@ def xy_stub_lines(w, m: int, rt: int) -> List[str]:
             "    hex.mov 8, sw_mz, %s" % c["mz"],
             "    hex.mov 4, sw_c, %s" % c["c"], "    hex.sign_extend 8, 4, sw_c",
             "    hex.mov 2, sw_rng, %s" % c["rng"],
-            "    hex.set 2, sw_me, %d" % (m + 2), "    hex.set 2, sw_id, %d" % (m + 1),
+            "    hex.set %d, sw_me, %d" % (_sn(w), m + 2), "    hex.set %d, sw_id, %d" % (_sn(w), m + 1),
             # itself out of the thing test and the slam scan: MF_SOLID and MF_SHOOTABLE cleared around the move
             "    hex.mov 1, kb_sv, %s" % c["so"], "    hex.zero 1, %s" % c["so"],
             "    hex.mov 1, sw_sh, %s" % c["sh"], "    hex.zero 1, %s" % c["sh"],
@@ -174,8 +196,9 @@ def xy_stub_lines(w, m: int, rt: int) -> List[str]:
             "    stl.fret sks_ret"]
 
 
-def mmove_lines() -> List[str]:
-    """`sk_mmove` (stl.fcall sk_mmove, kb_mret): knockcode's kb_xy for a soul -- kb_who 2, its height (a corpse 14)"""
+def mmove_lines(sn: int = 2) -> List[str]:
+    """`sk_mmove` (stl.fcall sk_mmove, kb_mret): knockcode's kb_xy for a soul -- kb_who 2, its height (a corpse 14).
+    M8 C2: kb_live is `sn` nibbles"""
     return ["sk_mmove:",
             "    hex.set 1, kb_who, 2",
             "    hex.set 8, kb_ht, %d" % SOUL_H,
@@ -183,7 +206,7 @@ def mmove_lines() -> List[str]:
             "  skm_a:",
             "    stl.fcall kb_xy, kb_xyret",
             "    hex.if1 8, kb_vx, skm_lv", "    hex.if1 8, kb_vy, skm_lv",
-            "    hex.dec 2, kb_live",                                          # it stopped
+            "    hex.dec %d, kb_live" % sn,                                    # it stopped
             "  skm_lv:",
             "    stl.fret kb_mret"]
 
@@ -313,10 +336,11 @@ def slam_lines(w, slot_rt: Sequence[int], *, pick_slots=None, drop_rt=None, var=
     from doomfj.barrelcode import droppers
     bd = {16: "sk_b32", 20: "sk_b36", 30: "sk_b46"}
     assert BARREL_R + SOUL_R == 26 and ITEM_RADIUS + SOUL_R == 36
-    out = ["sk_slam:", "    hex.zero 1, sk_hit", "    hex.zero 2, sk_hj"]
+    sn = _sn(w)                                         # M8 C2: sk_hj's width
+    out = ["sk_slam:", "    hex.zero 1, sk_hit", "    hex.zero %d, sk_hj" % sn]
 
     def hit(kind, idx):
-        return ["    hex.set 1, sk_hit, %d" % kind, "    hex.set 2, sk_hj, %d" % idx, "    ;sk_sl_o"]
+        return ["    hex.set 1, sk_hit, %d" % kind, "    hex.set %d, sk_hj, %d" % (sn, idx), "    ;sk_sl_o"]
     for j in range(w.layout.nmon):
         t, r = slot_rt[j], w.mon_radius[j]
         tag = "skm%d" % j
@@ -357,10 +381,11 @@ def slam_lines(w, slot_rt: Sequence[int], *, pick_slots=None, drop_rt=None, var=
     return out + ["  sk_sl_o:", "    stl.fret sk_slret"]
 
 
-def hitgo_lines(nmon: int, knock: bool = True) -> List[str]:
+def hitgo_lines(nmon: int, knock: bool = True, sn: int = 2) -> List[str]:
     """`sk_hitgo` (stl.fcall sk_hitgo, sk_hret): the slam -- P_Random on the soul's stream (sw_rng), the claw's table
     (`trclaw`: ((v % 8) + 1) * 3), and P_DamageMobj(the thing, the soul, the soul): a monster or a barrel through
-    dm_go in its MONSTER mode (no reach, no blood; dm_src the soul's code), the player through dp_go"""
+    dm_go in its MONSTER mode (no reach, no blood; dm_src the soul's code), the player through dp_go. M8 C2: `sn`
+    (world.slot_nibbles) -- the ids and codes"""
     from doomfj.damagecode import MONSTER
     from doomfj.knockcode import inflictor_lines
     kb = inflictor_lines("mm_x", "mm_y", z="sw_z + 4*dw") if knock else []
@@ -369,19 +394,19 @@ def hitgo_lines(nmon: int, knock: bool = True) -> List[str]:
             "    sim.jump16 sk_hit, skg_o, skg_mon, skg_pl, skg_bar, %s" % ", ".join(["skg_o"] * 12),
             "  skg_mon:",
             "    hex.mov 2, dm_dmg, dp_dmg", "    hex.set 1, dm_melee, %d" % MONSTER,
-            "    hex.mov 2, dm_src, sw_me",
-            "    hex.mov 2, dm_id, sk_hj", "    hex.inc 2, dm_id",                 # dm_go's id: 1 + the slot
+            "    hex.mov %d, dm_src, sw_me" % sn,
+            "    hex.mov %d, dm_id, sk_hj" % sn, "    hex.inc %d, dm_id" % sn,         # dm_go's id: 1 + the slot
             *kb,
             "    stl.fcall dm_go, dm_ret",
             "    ;skg_o",
             "  skg_bar:",
             "    hex.mov 2, dm_dmg, dp_dmg", "    hex.set 1, dm_melee, %d" % MONSTER,
-            "    hex.mov 2, dm_src, sw_me",
-            "    hex.set 2, dm_id, %d" % (1 + nmon), "    hex.add 2, dm_id, sk_hj",  # 1 + nmon + the barrel
+            "    hex.mov %d, dm_src, sw_me" % sn,
+            "    hex.set %d, dm_id, %d" % (sn, 1 + nmon), "    hex.add %d, dm_id, sk_hj" % sn,  # 1 + nmon + the barrel
             "    stl.fcall dm_go, dm_ret",
             "    ;skg_o",
             "  skg_pl:",
-            "    hex.mov 2, dp_src, sw_id",                                        # the attacker: 1 + the slot
+            "    hex.mov %d, dp_src, sw_id" % sn,                                        # the attacker: 1 + the slot
             *kb,
             "    stl.fcall dp_go, dp_ret",
             "  skg_o:",
@@ -401,7 +426,7 @@ def z_stub_lines(w, m: int, rt: int) -> List[str]:
             "    hex.mov 8, sz_z, %s" % c["z"], "    hex.mov 8, sz_mz, %s" % c["mz"],
             *_hi16("sz_c", c["c"]), *_hi16("sz_f", c["fz"]),
             "    hex.mov 1, sz_fly, %s" % c["fly"], "    hex.mov 1, sz_inf, %s" % c["inf"],
-            "    hex.mov 1, sz_live, %s" % c["sh"], "    hex.mov 2, sz_tg, %s" % c["tg"],
+            "    hex.mov 1, sz_live, %s" % c["sh"], "    hex.mov %d, sz_tg, %s" % (_sn(w), c["tg"]),
             "    hex.mov 4, sz_x, %s" % c["fx"], "    hex.mov 4, sz_x + 4*dw, thpos_rt + %d*dw" % (16 * rt + 4),
             "    hex.mov 4, sz_y, %s" % c["fy"], "    hex.mov 4, sz_y + 4*dw, thpos_rt + %d*dw" % (16 * rt + 12),
             "    stl.fcall sk_zm, sk_zret",
@@ -432,14 +457,15 @@ def _target_z(dst: str, tag: str) -> List[str]:
             "  %s_d:" % tag]
 
 
-def zm_lines() -> List[str]:
-    """`sk_zm` (stl.fcall sk_zm, sk_zret): P_ZMovement on the z window (lostsoul._soul_z_move)"""
+def zm_lines(sn: int = 2) -> List[str]:
+    """`sk_zm` (stl.fcall sk_zm, sk_zret): P_ZMovement on the z window (lostsoul._soul_z_move). M8 C2: sz_tg / mm_tg
+    are `sn` nibbles"""
     return ["sk_zm:",
             "    hex.add 8, sz_z, sz_mz",
-            "    hex.if0 1, sz_live, szm_fl", "    hex.if0 2, sz_tg, szm_fl",
+            "    hex.if0 1, sz_live, szm_fl", "    hex.if0 %d, sz_tg, szm_fl" % sn,
             "    hex.if1 1, sz_fly, szm_fl", "    hex.if1 1, sz_inf, szm_fl",
             # the float toward the target: dist (16.16 positions), delta = tz + 28 - z
-            "    hex.mov 2, mm_tg, sz_tg", "    stl.fcall mt_load, mt_lret",
+            "    hex.mov %d, mm_tg, sz_tg" % sn, "    stl.fcall mt_load, mt_lret",
             *_target_z("sz_tz", "szt"),
             "    hex.add_constant 8, sz_tz, %d" % (SOUL_HALF << 16), "    hex.sub 8, sz_tz, sz_z",
             "    hex.mov 8, sk_dx, sz_x", "    hex.sub 8, sk_dx, mt_tqx",
@@ -527,7 +553,7 @@ def attack_slot_lines(w, m: int, rt: int, *, L: str, nxt: str, hear: bool) -> Li
     A = "%ssk" % L
     return ["  %sk_A_SkullAttack:" % L,
             "    hex.if0 %d, %s, %s" % (ntg, c["tg"], nxt),
-            "    hex.mov 2, mm_tg, %s" % c["tg"], "    stl.fcall mt_load, mt_lret",
+            "    hex.mov %d, mm_tg, %s" % (ntg, c["tg"]), "    stl.fcall mt_load, mt_lret",
             *(["    hex.zero 1, mon_ambush + %d*dw" % m] if hear else []),
             "    hex.mov 4, mm_x, thpos_rt + %d*dw" % (16 * rt + 4),
             "    hex.mov 4, mm_y, thpos_rt + %d*dw" % (16 * rt + 12),
@@ -543,9 +569,9 @@ def attack_slot_lines(w, m: int, rt: int, *, L: str, nxt: str, hear: bool) -> Li
             "    hex.mov 8, %s, sc_mx" % c["mx"], "    hex.mov 8, %s, sc_my" % c["my"],
             "    hex.mov 8, %s, sc_mz" % c["mz"],
             "    hex.if1 8, sc_mx, %s_nz" % A, "    hex.if1 8, sc_my, %s_nz" % A,
-            "    hex.if0 1, sc_was, %s" % nxt, "    hex.dec 2, kb_live", "    ;%s" % nxt,
+            "    hex.if0 1, sc_was, %s" % nxt, "    hex.dec %d, kb_live" % _sn(w), "    ;%s" % nxt,
             "  %s_nz:" % A,
-            "    hex.if1 1, sc_was, %s" % nxt, "    hex.inc 2, kb_live", "    ;%s" % nxt]
+            "    hex.if1 1, sc_was, %s" % nxt, "    hex.inc %d, kb_live" % _sn(w), "    ;%s" % nxt]
 
 
 # ---- the slot code's other soul lines (monstercode.p32a_slot) -------------------------------------------------------
@@ -579,7 +605,7 @@ def remove_lines(w, m: int, rt: int, *, L: str, nxt: str) -> List[str]:
             "    hex.set w/4, pw_t, %d" % rt, "    hex.zero w/4, pw_leaf", "    hex.mov 3, pw_leaf, thss_rt + %d*dw" % (16 * rt),
             "    stl.fcall pw_unlink, pw_ulret",
             "    hex.if1 8, %s, %srml" % (c["mx"], L), "    hex.if0 8, %s, %s" % (c["my"], nxt),
-            "  %srml:" % L, "    hex.dec 2, kb_live",
+            "  %srml:" % L, "    hex.dec %d, kb_live" % _sn(w),
             "    ;%s" % nxt]
 
 
@@ -675,9 +701,11 @@ def leaves(w, *, slot_rt, mon_root: str, lift_trigs=(), pick_slots=None, drop_rt
     out = ["// M8 C8 (doomfj.soulcode): the lost souls' leaves", ";sk_end"]
     for k, m in enumerate(w.soul_slots):
         out += xy_stub_lines(w, m, slot_rt[m]) + z_stub_lines(w, m, slot_rt[m])
-    out += (mmove_lines() + try_lines(mon_root, lift_trigs) + hts_lines()
-            + slam_lines(w, slot_rt, pick_slots=pick_slots, drop_rt=drop_rt, var=var) + hitgo_lines(w.layout.nmon)
-            + ap_lines() + zm_lines() + charge_lines())
+    sn = _sn(w)                                         # M8 C2: the slot ids' width
+    out += (mmove_lines(sn) + try_lines(mon_root, lift_trigs) + hts_lines()
+            + slam_lines(w, slot_rt, pick_slots=pick_slots, drop_rt=drop_rt, var=var)
+            + hitgo_lines(w.layout.nmon, sn=sn)
+            + ap_lines() + zm_lines(sn) + charge_lines())
     return out + ["sk_end:"]
 
 

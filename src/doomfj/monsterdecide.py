@@ -65,6 +65,22 @@ FIGHT_DECLS = ["mm_tg: hex.vec 2", "mt_tqx: hex.vec 8", "mt_tqy: hex.vec 8", "mt
                "hs_xlo: hex.vec 4", "hs_xhi: hex.vec 4", "hs_ylo: hex.vec 4", "hs_yhi: hex.vec 4",
                "hs_ret: hex.vec w/4", "hs_cret: hex.vec w/4", "hs_wret: hex.vec w/4"]
 
+# M8 C2 (docs/c2-slot-ids.md): the registers above that hold a slot id or a code -- `sn` nibbles each (fight_decls)
+FIGHT_SLOT_REGS = ("mm_tg", "md_me", "md_c1", "hs_vic", "hs_id")
+
+
+def fight_decls(sn: int = 2) -> List[str]:
+    """FIGHT_DECLS at M8 C2's slot-id width `sn` (world.slot_nibbles): every code register three nibbles past 254"""
+    out = []
+    for d in FIGHT_DECLS:
+        name, _, rest = d.partition(": hex.vec ")
+        if name in FIGHT_SLOT_REGS:
+            assert rest.split(",")[0] == "2", d
+            d = "%s: hex.vec %d%s" % (name, sn, rest[1:])
+        out.append(d)
+    return out
+
+
 P32C_CONTEXT = [
     "mm_ja: hex.vec 1", "mm_seen: hex.vec 1", "mm_mk: hex.vec 1", "mm_re: hex.vec 1",   # in: justattacked, seen,
     "mm_dec: hex.vec 1", "mm_fa: hex.vec 1", "mm_kind: hex.vec 1",          # kinds (1 melee | 2 missile), reaction
@@ -229,7 +245,7 @@ def _soul_range() -> List[str]:
 
 
 def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = False, bruiser: bool = False,
-                      shadow: bool = False) -> List[str]:
+                      shadow: bool = False, sn: int = 2) -> List[str]:
     """`md_attack` (stl.fcall md_attack, md_ret): mm_kind's action, its facing and its draws (combat.BULLETS
     bullets of 3 draws each for the hitscanners).
 
@@ -249,14 +265,16 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
     barrel goes through dm_go (DM_BULLET: blood, or the barrel's puff).
     `bruiser` (M8 C8, a map with a Baron): kind 5, A_BruisAttack -- the imp's shape (the claw in reach with the
     attack sight, else pj_spawn: the map's ONE monster missile, projcode's `missile`) on its own table `brclaw`
-    ((P_Random()%8+1)*10, hurtcode); its facing is not written back (monstercode's k_gon). Off: the text unchanged"""
+    ((P_Random()%8+1)*10, hurtcode); its facing is not written back (monstercode's k_gon). Off: the text unchanged.
+    M8 C2: `sn` (world.slot_nibbles) -- every slot id and code here (md_src, dp_src, dm_src, dm_id, mm_tg, md_me,
+    hs_*) three nibbles past 254 slots"""
     from doomfj.combat import BULLETS
     from doomfj.knockcode import inflictor_lines
     assert not knock or full, "M7 P8a: the thrust rides the applied attacks"
     assert not fight or full, "M7 P8a I: infighting rides the applied attacks"
     assert not shadow or fight, "M8 C6: the shadow turn is the fight emission's (mt_pl, md_sp)"
     if fight:
-        return _fight_attack_lines(knock, bruiser, shadow)
+        return _fight_attack_lines(knock, bruiser, shadow, sn)
     kb = inflictor_lines("mm_x", "mm_y", z="kb_az") if knock else []     # package K: the attacker's floorz (k_go)
     k = draws()
     pos = [ATTACK_KINDS[a] for a in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack")]
@@ -297,7 +315,7 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
                 "    hex.if0 1, mm_asr, %s" % far,
                 "    hex.inc 2, mm_rng",
                 "    %s.lookup dp_dmg, mm_rng" % table,
-                "    hex.mov 2, dp_src, md_src",                  # M7 P7: the attacker (dp_go zeroes dp_src)
+                "    hex.mov %d, dp_src, md_src" % sn,            # M7 P7: the attacker (dp_go zeroes dp_src)
                 *kb,                                              # M7 P8a: the attacker inflicts
                 "    stl.fcall dp_go, dp_ret",
                 "    ;md_out"]
@@ -320,7 +338,7 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
             "    hex.cmp 3, mt_d + 1*dw, md_row + 1*dw, md_bul_hit, md_bul_out, md_bul_out",   # mt_d < L
             "  md_bul_hit:",
             "    hex.zero 2, dp_dmg", "    hex.mov 1, dp_dmg, md_row",
-            "    hex.mov 2, dp_src, md_src",                          # M7 P7: the attacker, every bullet
+            "    hex.mov %d, dp_src, md_src" % sn,                    # M7 P7: the attacker, every bullet
             *kb,                                                      # M7 P8a: the attacker inflicts
             "    stl.fcall dp_go, dp_ret",
             "  md_bul_out:", "    stl.fret md_bret"]
@@ -328,17 +346,18 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
 
 
 def decide_leaves(justhit: bool = False, full: bool = False, knock: bool = False, fight: bool = False,
-                  bruiser: bool = False, shadow: bool = False, soul: bool = False) -> List[str]:
+                  bruiser: bool = False, shadow: bool = False, soul: bool = False,
+                  sn: int = 2) -> List[str]:
     """`full` (M7 P5): md_attack applies its draws (attack_leaf_lines(full=True)); off, P3.2c's text to the byte.
     `knock` (M7 P8a): the attacker is each hit's inflictor (attack_leaf_lines(knock=True)). `fight` (M7 P8a I): the
     TARGET's (the module docstring) -- the program must hold `fight_parts`' lines and monstersight's sl_far. M8 C8:
     `bruiser` the Baron's attack, `soul` the lost soul's range (decide_leaf_lines). `shadow` (M8 C6, a map holding
     partial invisibility): every A_FaceTarget at an invisible player draws its turn and the bullets take it
-    (doomfj.powercode's mm_shj leaf, emitted here)"""
+    (doomfj.powercode's mm_shj leaf, emitted here). M8 C2: `sn` (world.slot_nibbles), attack_leaf_lines'"""
     from doomfj.powercode import shj_leaf_lines
     return (todist_leaf_lines(fight) + octant_leaf_lines() + as_leaf_lines(fight)
             + decide_leaf_lines(justhit, fight, shadow, **({"soul": True} if soul else {}))   # M8 C8: the soul's range
-            + attack_leaf_lines(full, knock, fight, bruiser, shadow)
+            + attack_leaf_lines(full, knock, fight, bruiser, shadow, sn)
             + (shj_leaf_lines() if shadow else []))
 
 
@@ -365,7 +384,7 @@ def type_decide(info) -> dict:
 
 
 # ---- M7 P8a I: the target, the angle, the bullets' scan (docs/gp-final-plan.md 1.2.2 / 1.2.3) ----------------------
-def _fight_attack_lines(knock: bool, bruiser: bool = False, shadow: bool = False) -> List[str]:
+def _fight_attack_lines(knock: bool, bruiser: bool = False, shadow: bool = False, sn: int = 2) -> List[str]:
     """`md_attack` with infighting (attack_leaf_lines(full=True, fight=True)) -- see attack_leaf_lines"""
     from doomfj.combat import BULLETS
     from doomfj.knockcode import inflictor_lines
@@ -401,15 +420,15 @@ def _fight_attack_lines(knock: bool, bruiser: bool = False, shadow: bool = False
                 "    hex.inc 2, mm_rng",
                 "    %s.lookup dp_dmg, mm_rng" % table,
                 "    hex.if0 1, mt_pl, md_mel_m",
-                "    hex.mov 2, dp_src, md_src",                  # M7 P7: the attacker (dp_go zeroes dp_src)
+                "    hex.mov %d, dp_src, md_src" % sn,            # M7 P7: the attacker (dp_go zeroes dp_src)
                 *kb,                                              # M7 P8a: the attacker inflicts
                 "    stl.fcall dp_go, dp_ret",
                 "    ;md_out"]
     out += ["  md_mel_m:",                                        # a MONSTER target: P_DamageMobj(target, me, me)
             "    hex.mov 2, dm_dmg, dp_dmg",
             "    hex.set 1, dm_melee, %d" % DM_MONSTER,
-            "    hex.mov 2, dm_src, md_src", "    hex.inc 2, dm_src",            # the attacker's code: 2 + slot
-            "    hex.mov 2, dm_id, mm_tg", "    hex.dec 2, dm_id",              # dm_go's id: 1 + its slot
+            "    hex.mov %d, dm_src, md_src" % sn, "    hex.inc %d, dm_src" % sn,  # the attacker's code: 2 + slot
+            "    hex.mov %d, dm_id, mm_tg" % sn, "    hex.dec %d, dm_id" % sn,    # dm_go's id: 1 + its slot
             *kb,
             "    stl.fcall dm_go, dm_ret",
             "    ;md_out",
@@ -429,7 +448,7 @@ def _fight_attack_lines(knock: bool, bruiser: bool = False, shadow: bool = False
             "    stl.fcall ia_leaf, ia_ret",
             "    hex.mov 8, md_at, ia_ang",
             "    hex.mov 4, md_td, mt_d",
-            "    hex.mov 2, md_me, md_src", "    hex.inc 2, md_me",            # the shooter's code: 2 + slot
+            "    hex.mov %d, md_me, md_src" % sn, "    hex.inc %d, md_me" % sn,  # the shooter's code: 2 + slot
             # the scan's box: a thing nearer than the target lies within d_t - 1 of the shooter on both axes
             # (P_AproxDistance >= either |delta|) -- [mm - d_t + 1, mm + d_t - 1], BIASED for unsigned compares
             "    hex.mov 4, hs_t4, md_td", "    hex.dec 4, hs_t4",
@@ -447,51 +466,47 @@ def _fight_attack_lines(knock: bool, bruiser: bool = False, shadow: bool = False
             "    hex.mov 3, md_sp, md_row + 1*dw", "    hex.sign_extend 4, 3, md_sp",
             *(["    hex.add 4, md_sp, md_jit"] if shadow else []),        # M8 C6: the facing's shadow turn
             "    stl.fcall hs_scan, hs_ret",
-            "    hex.if1 2, hs_vic, md_bul_v",
+            "    hex.if1 %d, hs_vic, md_bul_v" % sn,
             "    hex.mov 4, hs_d, md_td", "    hex.mov 1, hs_rc, mt_rc", "    hex.zero 4, hs_del",
             "    stl.fcall hs_wid, hs_wret",
             "    hex.if0 1, hs_in, md_bul_out",
-            "    hex.mov 2, hs_vic, mm_tg",
+            "    hex.mov %d, hs_vic, mm_tg" % sn,
             "  md_bul_v:",
             "    hex.zero 2, dp_dmg", "    hex.mov 1, dp_dmg, md_row",
-            "    hex.cmp 2, hs_vic, md_c1, md_bul_out, md_bul_p, md_bul_t",
+            "    hex.cmp %d, hs_vic, md_c1, md_bul_out, md_bul_p, md_bul_t" % sn,
             "  md_bul_p:",                                        # the player
-            "    hex.mov 2, dp_src, md_src",
+            "    hex.mov %d, dp_src, md_src" % sn,
             *kb,
             "    stl.fcall dp_go, dp_ret",
             "    ;md_bul_out",
             "  md_bul_t:",                                        # a monster or a barrel: dm_go's id is the code - 1
             "    hex.mov 2, dm_dmg, dp_dmg",
             "    hex.set 1, dm_melee, %d" % DM_BULLET,
-            "    hex.mov 2, dm_src, md_me",
-            "    hex.mov 2, dm_id, hs_vic", "    hex.dec 2, dm_id",
+            "    hex.mov %d, dm_src, md_me" % sn,
+            "    hex.mov %d, dm_id, hs_vic" % sn, "    hex.dec %d, dm_id" % sn,
             *kb,
             "    stl.fcall dm_go, dm_ret",
             "  md_bul_out:", "    stl.fret md_bret"]
     return out
 
 
-def target_load_lines(slot_rt, radii, zs=None, rc: dict = None) -> List[str]:
+def target_load_lines(slot_rt, radii, zs=None, rc: dict = None, sn: int = 2) -> List[str]:
     """`mt_load` (stl.fcall mt_load, mt_lret; in: mm_tg) -- the module docstring's target load. `slot_rt[m]`: slot m's
     runtime thing (its thpos_rt row: whole units in nibbles 4-7 / 12-15), `radii[m]` its radius. M8 C8 (`zs`, a map with
     a lost soul: per slot its z cell -- ("floor", mon_floorz cell) or ("soul", sk_z cell)): a monster target's z into
-    `mt_tz`, 16.16 (the soul's float and charge read it; the player's z is kb_pz's)"""
+    `mt_tz`, 16.16 (the soul's float and charge read it; the player's z is kb_pz's). M8 C2: `sn`
+    (world.slot_nibbles) -- mm_tg's width; 3 adds a dispatch level (monstercode.id_jump_lines)"""
     from doomfj.combat import PLAYER_R
+    from doomfj.monstercode import id_jump_lines
     from doomfj.world import MELEE_BASE
     RC = rc or globals()["RC"]                                  # M8 C8: the map's classes (rc_of)
     n = len(slot_rt)
-    assert len(radii) == n and 0 < n and n + 2 <= 0x100
-    hi = (n + 2 + 15) // 16
+    assert len(radii) == n and 0 < n and n + 2 <= 16 ** sn, (n, sn)
     out = ["mt_load:",
            "    hex.zero 1, mt_al", "    hex.zero 1, mt_pl",
-           "    hex.if0 2, mm_tg, mtl_out",                       # no target: not alive
-           "    sim.jump16 mm_tg + 1*dw, " + ", ".join("mtl_h%d" % h if h < hi else "mtl_out" for h in range(16))]
-    for h in range(hi):
-        tg = []
-        for k in range(16):
-            c = 16 * h + k
-            tg.append("mtl_pl" if c == 1 else "mtl_m%d" % (c - 2) if 2 <= c < n + 2 else "mtl_out")
-        out += ["  mtl_h%d:" % h, "    sim.jump16 mm_tg, " + ", ".join(tg)]
+           "    hex.if0 %d, mm_tg, mtl_out" % sn]                 # no target: not alive
+    out += id_jump_lines("mm_tg", sn, n + 2, lambda c: "mtl_pl" if c == 1 else "mtl_m%d" % (c - 2) if c >= 2
+                         else "mtl_out", "mtl_out", "mtl_h%d", "mtl_g%d")
     out += ["  mtl_pl:",                                          # the player: alive while not dead
             "    hex.set 1, mt_pl, 1",
             "    hex.mov 8, mt_tqx, viewx", "    hex.mov 8, mt_tqy, viewy",
@@ -523,23 +538,25 @@ def angle_leaf_lines() -> List[str]:
     return ["ia_leaf:", "    proj.point_to_angle ia_ang, ia_x1, ia_y1, ia_x2, ia_y2, 1", "    stl.fret ia_ret"]
 
 
-def scan_lines(slot_rt, radii, barrels, rc: dict = None) -> List[str]:
+def scan_lines(slot_rt, radii, barrels, rc: dict = None, sn: int = 2) -> List[str]:
     """`hs_scan` (stl.fcall hs_scan, hs_ret): hs_vic = the code of the thing a bullet meets before its target
     (combat._bullet_victim; 0 none, 1 the player, 2 + slot, 2 + nmon + b a barrel) -- md_hs set md_at (the target's
     angle), md_td (its distance), md_me (the shooter's code), ia_x1 / ia_y1 (the shooter); md_bul set md_sp (the
     spread). The candidates in the model's order -- the player (alive, not the target), the slots (shootable), the
     barrels (standing: state != 0, health > 0) -- each a copy-stub into `hs_cand`; `barrels` = [(x, y)] by index.
-    Then `hs_cand` and `hs_wid` (the width: hs_in = hs_d < 2048 and |md_sp - hs_del| <= hwtr[hs_rc][hs_d >> 4])"""
+    Then `hs_cand` and `hs_wid` (the width: hs_in = hs_d < 2048 and |md_sp - hs_del| <= hwtr[hs_rc][hs_d >> 4]).
+    M8 C2: `sn` (world.slot_nibbles) -- the codes hs_vic / hs_id / md_me, three nibbles past 254 slots"""
     from doomfj.combat import BARREL_R
     RC = rc or globals()["RC"]                                  # M8 C8: the map's classes (rc_of)
     n = len(slot_rt)
+    assert 1 + n + len(barrels) < 16 ** sn, (n, len(barrels), sn)
     out = ["hs_scan:",
-           "    hex.zero 2, hs_vic",
+           "    hex.zero %d, hs_vic" % sn,
            "    hex.mov 4, hs_bd, md_td",                         # nearer than the target, then than the best
            "    hex.if1 1, mt_pl, hs_mons",
            "    hex.if1 1, p_dead, hs_mons",
            "    hex.mov 4, hs_cx, viewx + 4*dw", "    hex.mov 4, hs_cy, viewy + 4*dw",
-           "    hex.set 2, hs_id, 1", "    hex.set 1, hs_rc, %d" % RC[16], "    hex.set 1, hs_pl, 1",
+           "    hex.set %d, hs_id, 1" % sn, "    hex.set 1, hs_rc, %d" % RC[16], "    hex.set 1, hs_pl, 1",
            "    stl.fcall hs_cand, hs_cret",
            "    hex.zero 1, hs_pl",
            "  hs_mons:"]
@@ -548,7 +565,7 @@ def scan_lines(slot_rt, radii, barrels, rc: dict = None) -> List[str]:
         out += ["    hex.if0 1, mon_shootable + %d*dw, %s" % (m, L)]
         out += _scan_box(X, Y, L, True)
         out += ["    hex.mov 4, hs_cx, %s" % X, "    hex.mov 4, hs_cy, %s" % Y,
-                "    hex.set 2, hs_id, %d" % (2 + m), "    hex.set 1, hs_rc, %d" % RC[r],
+                "    hex.set %d, hs_id, %d" % (sn, 2 + m), "    hex.set 1, hs_rc, %d" % RC[r],
                 "    stl.fcall hs_cand, hs_cret",
                 "  %s:" % L]
     for b, (x, y) in enumerate(barrels):
@@ -559,7 +576,7 @@ def scan_lines(slot_rt, radii, barrels, rc: dict = None) -> List[str]:
                 "    hex.if0 2, bar_hp + %d*dw, %s" % (2 * b, L)]                        # health == 0
         out += _scan_box("hs_bar + %d*dw" % (8 * b), "hs_bar + %d*dw" % (8 * b + 4), L, False)
         out += ["    hex.set 4, hs_cx, %d" % (x & 0xFFFF), "    hex.set 4, hs_cy, %d" % (y & 0xFFFF),
-                "    hex.set 2, hs_id, %d" % (2 + n + b), "    hex.set 1, hs_rc, %d" % RC[BARREL_R],
+                "    hex.set %d, hs_id, %d" % (sn, 2 + n + b), "    hex.set 1, hs_rc, %d" % RC[BARREL_R],
                 "    stl.fcall hs_cand, hs_cret",
                 "  %s:" % L]
     out += ["    stl.fret hs_ret",
@@ -574,7 +591,7 @@ def scan_lines(slot_rt, radii, barrels, rc: dict = None) -> List[str]:
             "    hex.mov 4, hs_t4, mt_dy", "    hex.abs 4, hs_t4",
             "    hex.cmp 4, hs_t4, hs_bd, hsc_me, hsc_out, hsc_out",
             "  hsc_me:",
-            "    hex.cmp 2, hs_id, md_me, hsc_d, hsc_out, hsc_d",
+            "    hex.cmp %d, hs_id, md_me, hsc_d, hsc_out, hsc_d" % sn,
             "  hsc_d:",
             "    stl.fcall mt_dist_leaf, mt_ret",
             "    hex.cmp 4, mt_d, hs_bd, hsc_r, hsc_out, hsc_out",
@@ -594,7 +611,7 @@ def scan_lines(slot_rt, radii, barrels, rc: dict = None) -> List[str]:
             "    hex.mov 4, hs_d, mt_d",
             "    stl.fcall hs_wid, hs_wret",
             "    hex.if0 1, hs_in, hsc_out",
-            "    hex.mov 4, hs_bd, mt_d", "    hex.mov 2, hs_vic, hs_id",
+            "    hex.mov 4, hs_bd, mt_d", "    hex.mov %d, hs_vic, hs_id" % sn,
             "  hsc_out:",
             "    stl.fret hs_cret",
             "hs_wid:",
@@ -668,7 +685,9 @@ def fight_tables_fj(sine, rc: dict = None) -> List[str]:
 
 def fight_parts(w, slot_rt) -> dict:
     """everything infighting adds to the decide leaves, for the World `w` (its schema has the wide mon_target): the
-    registers, the target load, the angle leaf, the scan, the tables"""
+    registers, the target load, the angle leaf, the scan, the tables. M8 C2: at the map's slot-id width"""
+    from doomfj.world import slot_nibbles
+    sn = slot_nibbles(w.layout)
     n = w.layout.nmon
     radii = [w.mon_radius[m] for m in range(n)]
     from doomfj.world import radius_classes
@@ -680,7 +699,7 @@ def fight_parts(w, slot_rt) -> dict:
     souls = getattr(w, "soul_of", {})             # M8 C8: each target's z (the souls' float and charge)
     zs = ([("soul", "sk_z + %d*dw" % (8 * souls[m])) if m in souls else ("floor", "mon_floorz + %d*dw" % (4 * m))
            for m in range(n)] if souls else None)
-    return {"decls": list(FIGHT_DECLS) + [hs_bar],
-            "lines": (target_load_lines(slot_rt, radii, zs, rc) + angle_leaf_lines()
-                      + scan_lines(slot_rt, radii, [(t.x, t.y) for t in w.barrel_things], rc)),
+    return {"decls": fight_decls(sn) + [hs_bar],
+            "lines": (target_load_lines(slot_rt, radii, zs, rc, sn) + angle_leaf_lines()
+                      + scan_lines(slot_rt, radii, [(t.x, t.y) for t in w.barrel_things], rc, sn)),
             "tables": fight_tables_fj(w.rm.sine, rc)}

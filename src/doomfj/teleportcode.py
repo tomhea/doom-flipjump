@@ -301,13 +301,13 @@ def slot_back_lines(m: int, *, facing: str, knock: bool, walk: bool, tag: str) -
             f"  {skip}:"]
 
 
-def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True, knock: bool = True) -> List[str]:
+def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True, knock: bool = True, sn: int = 2) -> List[str]:
     """`tp_stomp`, jumping over itself: PIT_StompThing at the destination (tp_dx, tp_dy) for radius tp_r over each
     shootable monster's box (`slots`: [(runtime thing, radius)] per slot -- slot j is dm_go's id j + 1;
     mon_shootable) -- |thing - dest| < r + r', strict, whole units -- and, with tp_pl 1, the living player's (`hurt`:
     p_dead is not shootable), 16.16. tp_pl 1 (a monster teleporting): the first hit sets tp_blk 1 and returns. tp_pl 0
     (the player): each hit is a TELEFRAG -- `tp_frag` (dm_go, dm_melee TELEFRAG; `knock`: kb_tf 1 around it) -- and
-    the loop goes on; tp_blk stays 0"""
+    the loop goes on; tp_blk stays 0. M8 C2: `sn` (world.slot_nibbles) -- dm_id's width"""
     from doomfj.damagecode import TELEFRAG
     from doomfj.combat import PLAYER_R
     from doomfj.monstermove import _add_const
@@ -328,7 +328,7 @@ def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True, knock: bool =
                 f"    hex.scmp 4, tp_a, {bd}, tp_s{j}_h, {nj}, {nj}",
                 f"  tp_s{j}_h:",                                             # a hit: refused, or a telefrag
                 "    hex.if1 1, tp_pl, tp_stk",
-                f"    hex.set 2, dm_id, {j + 1}",
+                f"    hex.set {sn}, dm_id, {j + 1}",
                 "    stl.fcall tp_frag, tp_fret",
                 f"  {nj}:"]
     out += ["    hex.if0 1, tp_pl, tp_out"]

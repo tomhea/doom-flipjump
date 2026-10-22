@@ -156,26 +156,32 @@ def _telefrag_damage() -> int:
     return TELEFRAG_DAMAGE
 
 
-def persisted_decls(nmon: int, pool: int = None) -> List[str]:
-    """the persisted cells at their level start (all 0)"""
+def interface_decls(sn: int = 2) -> List[str]:
+    """KB_INTERFACE at M8 C2's slot-id width `sn` (world.slot_nibbles): kb_tg (0 the player, else 1 + a slot)"""
+    return [("kb_tg: hex.vec %d" % sn) if d == "kb_tg: hex.vec 2" else d for d in KB_INTERFACE]
+
+
+def persisted_decls(nmon: int, pool: int = None, sn: int = 2) -> List[str]:
+    """the persisted cells at their level start (all 0). M8 C2: `kb_live` (the moving slots, <= nmon) is `sn`
+    nibbles (world.slot_nibbles)"""
     if pool is None:
         from doomfj.world import FIREBALL_POOL as pool
     return ["p_kmx: hex.vec 8", "p_kmy: hex.vec 8", "mkx: hex.vec %d" % (8 * nmon), "mky: hex.vec %d" % (8 * nmon),
-            "mfx: hex.vec %d" % (4 * nmon), "mfy: hex.vec %d" % (4 * nmon), "kb_live: hex.vec 2",
+            "mfx: hex.vec %d" % (4 * nmon), "mfy: hex.vec %d" % (4 * nmon), "kb_live: hex.vec %d" % sn,
             "pj_z: hex.vec %d" % (4 * pool)]
 
 
-def decls(nmon: int = None, pool: int = None) -> List[str]:
-    """the interface registers; with `nmon` (package K) the persisted cells and the scratch too"""
+def decls(nmon: int = None, pool: int = None, sn: int = 2) -> List[str]:
+    """the interface registers; with `nmon` (package K) the persisted cells and the scratch too. M8 C2: `sn`"""
     if nmon is None:
-        return list(KB_INTERFACE)
-    return list(KB_INTERFACE) + persisted_decls(nmon, pool) + list(KB_SCRATCH)
+        return interface_decls(sn)
+    return interface_decls(sn) + persisted_decls(nmon, pool, sn) + list(KB_SCRATCH)
 
 
-def restart_lines(nmon: int, pool: int = None) -> List[str]:
+def restart_lines(nmon: int, pool: int = None, sn: int = 2) -> List[str]:
     """NEW GAME / the restart: every knock cell at its level start, 0"""
     return ["    hex.zero %s, %s" % (d.split("hex.vec ")[1].split(",")[0], d.split(":")[0])
-            for d in persisted_decls(nmon, pool)]
+            for d in persisted_decls(nmon, pool, sn)]
 
 
 def barrel_floor_values(w) -> List[int]:
@@ -266,18 +272,20 @@ def _friction(cell: str, tag: str) -> List[str]:
 
 
 # ---- kb_go and the thrust --------------------------------------------------------------------------------------------
-def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False, souls=None) -> List[str]:
+def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False, souls=None, sn: int = 2) -> List[str]:
     """`kb_go` (stl.fcall kb_go, kb_ret), its slot stubs `kbt<m>`, `kb_gm` and the thrust `kb_th` (+ `kb_pz`, the
     player's z). `slots[m]` = (runtime thing, radius, mass) per monster slot. PACKAGE 0's STUB without `slots`.
     M8 (`telefrag`, a map with a WR teleport: thrust_lines') -- kb_tf 1 is the telefrag's 10000. M8 C8 (`souls`
-    {slot: soul index}, a map with a lost soul): a soul's z is its sk_z (whole units) and its mass class 2 (50)"""
+    {slot: soul index}, a map with a lost soul): a soul's z is its sk_z (whole units) and its mass class 2 (50).
+    M8 C2 (`sn`, world.slot_nibbles): kb_tg and kb_live at the slot-id width -- 3 past 254 slots, a third dispatch
+    level (monstercode.id_jump_lines)"""
     if slots is None:
         return ["// M7 P8a (doomfj.knockcode): P_DamageMobj's thrust -- package 0's stub, package K's leaf",
                 "kb_go:",
                 "    stl.fret kb_ret"]
+    from doomfj.monstercode import id_jump_lines
     n = len(slots)
-    assert 0 < n < 255
-    nh = n // 16 + 1                                      # kb_tg 1 .. n
+    assert 0 < n < 16 ** sn - 1, (n, sn)
     k1k = any(mass == MASS_TABLE for _rt, _r, mass in slots)        # M8 C8: a mass-1000 slot (kb_hk, kbm1k)
     out = ["// M7 P8a (doomfj.knockcode, package K): P_DamageMobj's thrust",
            "kb_go:",
@@ -287,7 +295,7 @@ def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False, souls=None) 
            "  kq_ns:",
            "    hex.zero 4, kb_i8x", "    hex.mov 4, kb_i8x + 4*dw, kb_ix",
            "    hex.zero 4, kb_i8y", "    hex.mov 4, kb_i8y + 4*dw, kb_iy",
-           "    hex.if1 2, kb_tg, kq_mon",
+           "    hex.if1 %d, kb_tg, kq_mon" % sn,
            # ---- the player: his 16.16 position, health, stream; mass 100; his z when needed
            "    hex.mov 8, kb_tx, viewx", "    hex.mov 8, kb_ty, viewy",
            "    hex.mov 3, kb_hp, p_hp", "    hex.mov 2, kb_rng, rng_pl",
@@ -298,11 +306,9 @@ def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False, souls=None) 
            "    ;kq_out",
            # ---- a monster: dm_leaf's window holds its health, stream and whole-unit position
            "  kq_mon:",
-           "    hex.mov 3, kb_hp, dm_hp", "    hex.mov 2, kb_rng, dm_rng", "    hex.zero 1, kb_tzp",
-           "    sim.jump16 kb_tg + 1*dw, " + ", ".join("kq_h%d" % h if h < nh else "kq_out" for h in range(16))]
-    for h in range(nh):
-        out += ["  kq_h%d:" % h, "    sim.jump16 kb_tg, " + ", ".join(
-            "kbt%d" % (16 * h + l - 1) if 1 <= 16 * h + l <= n else "kq_out" for l in range(16))]
+           "    hex.mov 3, kb_hp, dm_hp", "    hex.mov 2, kb_rng, dm_rng", "    hex.zero 1, kb_tzp"]
+    out += id_jump_lines("kb_tg", sn, n + 1, lambda i: "kbt%d" % (i - 1) if i else "kq_out", "kq_out",
+                         "kq_h%d", "kq_g%d")                     # kb_tg 1 .. n
     for m, (rt, _r, mass) in enumerate(slots):
         out += ["  kbt%d:" % m,
                 "    hex.mov 4, kb_tx, mfx + %d*dw" % (4 * m), "    hex.mov 4, kb_tx + 4*dw, dm_x",
@@ -330,10 +336,10 @@ def go_lines(slots: Sequence[tuple] = None, telefrag: bool = False, souls=None) 
             "    hex.add 8, kb_vx, kb_mx", "    hex.add 8, kb_vy, kb_my",
             "    hex.if1 8, kb_vx, kq_gn", "    hex.if1 8, kb_vy, kq_gn",
             "    hex.if0 1, kb_was, kq_gr",                                   # 0 -> 0: no change
-            "    hex.dec 2, kb_live", "    ;kq_gr",                           # moving -> stopped (a cancelling hit)
+            "    hex.dec %d, kb_live" % sn, "    ;kq_gr",                     # moving -> stopped (a cancelling hit)
             "  kq_gn:",
             "    hex.if1 1, kb_was, kq_gr",
-            "    hex.inc 2, kb_live",                                         # stopped -> moving
+            "    hex.inc %d, kb_live" % sn,                                   # stopped -> moving
             "  kq_gr:",
             "    stl.fret kb_gmret"]
     out += thrust_lines(telefrag, soul=bool(souls), mass1k=k1k)
@@ -609,7 +615,7 @@ def mtry_lines(mon_root: str, lift_trigs=(), teleport: Sequence[str] = (), r0: i
 
 
 def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid", slot_back=None,
-               height: int = 56, souls=None) -> List[str]:
+               height: int = 56, souls=None, sn: int = 2) -> List[str]:
     """`kb_pmove` (the player's: stl.fcall kb_pmove, kb_pret), `kb_mmove` (a monster's, on the context) and the slot
     stubs `kbs<m>` (stl.fcall kbs<m>, kbs_ret: the slot's momentum not 0 -> its cells into the context, its own
     `solid` flag cleared so mm_things skips it, kb_mmove, the cells back). `slots[m]` = (runtime thing, radius, mass);
@@ -640,7 +646,7 @@ def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid", sl
            "  kq_ma:",
            "    stl.fcall kb_xy, kb_xyret",
            "    hex.if1 8, kb_vx, kq_mlv", "    hex.if1 8, kb_vy, kq_mlv",
-           "    hex.dec 2, kb_live",                                          # it stopped
+           "    hex.dec %d, kb_live" % sn,                                    # it stopped
            "  kq_mlv:",
            "    stl.fret kb_mret"]
     for m, (rt, r, _mass) in enumerate(slots):
@@ -679,7 +685,8 @@ def move_lines(slots: Sequence[tuple], *, nib: int, solid: str = "mon_solid", sl
 
 def leaf_lines(slots: Sequence[tuple], *, player_root: str, mon_root: str, nib: int, lift_trigs=(),
                after_accept: Sequence[str] = (), solid: str = "mon_solid", teleport: Sequence[str] = (),
-               slot_back=None, telefrag: bool = False, r0: int = 20, height: int = 56, souls=None) -> List[str]:
+               slot_back=None, telefrag: bool = False, r0: int = 20, height: int = 56, souls=None,
+               sn: int = 2) -> List[str]:
     """every knock leaf, jumping over itself: kb_go (+ kbt<m>, kb_gm, kb_th, kb_pz), kb_cell, kb_xy (+ kb_try),
     kb_ptry, kb_mtry, kb_pmove, kb_mmove, kbs<m>. The program must hold: the cells (`decls(nmon)`), `tables_fj`,
     mrnd, finesine, the point_to_angle tables, ptloc_walk, ms_seed_leaf, the player's and the monsters' cells (their
@@ -688,13 +695,13 @@ def leaf_lines(slots: Sequence[tuple], *, player_root: str, mon_root: str, nib: 
     mon_shootable / `solid`, lreq. `nib`: a sector id's width (World.sec_nibbles: move_lines' msec). M8 L4: `teleport`
     (mtry_lines') and `slot_back` (move_lines') -- the WR teleports of a monster's knock step; none on E1M1. M8:
     `telefrag` (a map with a WR teleport) -- the thrust's kb_tf (thrust_lines). M8 C8: `souls` {slot: soul index}
-    (a map with a lost soul) -- their z and mass in the thrust, kb_xy's soul path, no kbs<m> for them"""
+    (a map with a lost soul) -- their z and mass in the thrust, kb_xy's soul path, no kbs<m> for them. M8 C2: `sn` (world.slot_nibbles)"""
     sk = {"souls": souls} if souls else {}
     return (["// M7 P8a (doomfj.knockcode, package K): knockback's leaves", ";kq_end"]
-            + go_lines(slots, telefrag, **sk) + cell_lines(player_root) + xy_lines(**({"soul": True} if souls else {}))
+            + go_lines(slots, telefrag, sn=sn, **sk) + cell_lines(player_root) + xy_lines(**({"soul": True} if souls else {}))
             + ptry_lines(after_accept)
             + mtry_lines(mon_root, lift_trigs, teleport, **({"r0": r0} if r0 != 20 else {}))
-            + move_lines(slots, nib=nib, solid=solid, slot_back=slot_back, **sk,
+            + move_lines(slots, nib=nib, solid=solid, slot_back=slot_back, sn=sn, **sk,
                          **({"height": height} if height != 56 else {}))       # M8 C8: r0, the monsters' height
             + ["kq_end:"])
 
@@ -707,10 +714,10 @@ def player_move_lines() -> List[str]:
             "kbp_done:"]
 
 
-def monster_slot_lines(m: int) -> List[str]:
+def monster_slot_lines(m: int, sn: int = 2) -> List[str]:
     """SPLICE (4.3 step 7): slot `m`'s knock move at the top of its turn -- the fast skip while no slot moves
-    (kb_live 0), else its stub (its own momentum test, kb_mmove)"""
-    return ["    hex.if0 2, kb_live, kbm%d_n" % m,
+    (kb_live 0), else its stub (its own momentum test, kb_mmove). M8 C2: kb_live is `sn` nibbles"""
+    return ["    hex.if0 %d, kb_live, kbm%d_n" % (sn, m),
             "    stl.fcall kbs%d, kbs_ret" % m,
             "  kbm%d_n:" % m]
 

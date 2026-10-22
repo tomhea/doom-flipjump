@@ -78,12 +78,7 @@ class Ctx:
 _CTX = {}
 
 
-E1M7_BLOCKED = "M8 C5b (wave 3): E1M7's teleport 516 lands on sector 89, which W1 36 line 4272 lowers (tag 60) -- a teleport onto a mover; World refuses it (M8 L4) until the destination z reads the mover"
-
-
 def ctx_of(mapname):
-    if mapname == "E1M7":
-        pytest.xfail(E1M7_BLOCKED)
     if mapname not in _CTX:
         _CTX[mapname] = Ctx(mapname)
     return _CTX[mapname]
@@ -158,6 +153,22 @@ def monster_program(ctx, *, knock_ctx=False, muts=(), tels=None):
                     ("kerr", 1), *FOG_CELLS, ("tp_w1", n)):
         body += _pr(reg, w_)
     decls = [d for d in _common_decls() if not d.startswith("tp_w1:")]
+    moving = [t for t in tels if t.dest_moves]
+    if moving:
+        # M8 C5b: E1M7's 516 / 521 land on movers. The model's world is at the level start here, where each mover
+        # destination's floor is its stored one: a stub `ms_seed_leaf` returning that by ptss (this harness has no
+        # sim.fj for the real seed; tests/fj/test_teleport_mover_fj RUNS the real one at every mover state)
+        w = ctx.w
+        assert not any(w.ws.l_state) and not any(w.ws.f_switch), "the stub's floors are the level start's"
+        stub = ["", "ms_seed_leaf:"]
+        for j, t in enumerate(moving):
+            assert w.secs_c[t.dest_sector].floor_h == t.dest_floor, t
+            stub += [f"    hex.cmp 3, ptss, c5b_l{j}, c5b_n{j}, c5b_y{j}, c5b_n{j}",
+                     f"  c5b_y{j}:", f"    hex.set 8, cp_seedf, {t.dest_floor & M32:#x}", "    stl.fret ms_seed_ret",
+                     f"  c5b_n{j}:"]
+            decls.append(f"c5b_l{j}: hex.vec 3, {t.dest_leaf:#x}")
+        stomp += "\n".join(stub + ["    hex.set 8, cp_seedf, 0xDEADBEEF", "    stl.fret ms_seed_ret"])
+        decls += ["cp_seedf: hex.vec 8", "ms_seed_ret: hex.vec w/4"]
     if not ctx.nonce:
         decls.append("tp_w1: hex.vec 1, 0")                          # read back as 0 (no W1 line on this map)
     body += [";loop", "done:", "stl.loop", stomp,

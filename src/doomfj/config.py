@@ -408,6 +408,8 @@ MAP_CONFIG = {
     "E1M7": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "TSV_NIBBLES": 4},
     # M8 C11 (E1M9): SPR_SLOT_CAP -- 293 drawable things over the skills (wall_renderer.check_slot_ids)
     "E1M9": {"SPR_SLOT_CAP": 255},
+    # M8 wave 2: E1M8 (123 things, the four Barons) -- the defaults fit its counts; the MAP page and switch textures
+    "E1M8": {"AUTOMAP": 1, "SWITCH_TEX": 1},
     # M8 C11: SPR_SLOT_CAP for the wave-1 / wave-3 maps past a byte of drawable things over the skills (level_survey:
     # E1M3 352, E1M4 340, E1M5 330, E1M6 461) -- a per-map entry their own level rungs extend with their widths
     # M8 wave 1 (docs/episode-plan.md 3): LIST_ID_BITS 12 -- 341 / 346 / 370 runtime ids (F1.5); E1M3 / E1M4 take E1M2's

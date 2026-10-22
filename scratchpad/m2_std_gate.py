@@ -1038,11 +1038,42 @@ def main():
     mph, mviews = new_mirror(BOOT_SKILL)
     pals = []                                           # M7 P5: the palette each present showed
     deaths = 0                                          # M7 P7: the frames the mirror's player was dead
+    # debugging aid (M8 wave 1): M2_MAX_FRAMES cuts the run (and so the comparison) to its first N frames
+    frames = min(frames, int(__import__("os").environ.get("M2_MAX_FRAMES", frames)))
+    if __import__("os").environ.get("M2_TOLERATE_CRASH"):      # debugging aid: compare the frames before a crash
+        _P = GST.P
+
+        def _tolerant(self, frames, events=(), probe=None, pre_run=None):
+            import time as _t
+            from flipjump.interpreter.io_devices.KeyboardIO import ScriptedKeyEventSource
+            from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
+            from flipjump.interpreter.io_devices.pygame_window import PcIO
+            ProbeScreen, ProbeKeyboard, IOReadOnEOF = _P._devices()
+            self.core.reset()
+            screen = ProbeScreen(probe)
+            kb = ProbeKeyboard(ScriptedKeyEventSource(list(events)), screen, frames, probe)
+            io = PcIO(screen, kb)
+            io.attach_memory(NativeDeviceMemory(self.core, self.width))
+            if probe is not None:
+                probe.attach(screen.device_memory, self.core)
+            t = _t.time()
+            try:
+                _c, ops, _e, _l, _p = self.core.run(io.read_bit, io.write_bit, IOReadOnEOF, last_ops_length=0)
+            except Exception as e:                              # noqa: BLE001
+                print("!! CRASH after %d presented frames: %s %s" % (len(screen.frames), type(e).__name__, e))
+                _c, ops = 0, 0
+            return _P.RunResult(list(screen.frames), list(screen.palettes), int(ops),
+                                list(probe.readings) if probe is not None else [], _t.time() - t, int(_c))
+        _P.GameBinary.run = _tolerant
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
                                             len(order), len(dp.triggers), len(mp.order),
                                             nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
                                             palettes_out=pals,
                                             nthvis=mviews.nvis if player_loots(PLAYER_MODE) else 0)   # M7 P6
+    if __import__("os").environ.get("M2_TOLERATE_CRASH") and len(got) < frames:
+        print("!! comparing only the %d frames presented before the crash" % len(got))
+        frames = len(got)
+        reads = reads[:frames]
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")

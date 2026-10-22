@@ -183,3 +183,17 @@ def test_c7_an_undrawn_decoration_is_reported(ls, wad):
     warn = {r[1].split()[1] for r in rows if r[0] == "WARN" and r[4].startswith("NOT DRAWN")}
     assert {"26", "60", "15", "18"} <= warn
     assert any(r[1].startswith("thing 26 ") and "BLOCKER" in r[4] for r in rows)
+
+
+def test_band_lists_estimate_against_the_band_index(ls, wad, monkeypatch):
+    """M8 wlight: E1M9's 114,528 band lists (emit_check) passed BAND_NIBBLES 4 -- the survey's band-list ESTIMATE row
+    is OK at E1M9's 5 and E1M1's 4 (54,428 est); CONTROL: E1M9 back at 4 nibbles is OVER"""
+    def bl(m):
+        return next((r[0], int(r[2])) for r in _rows(ls, wad, m) if r[1].startswith("band lists"))
+    st, est = bl("E1M9")
+    assert st == "OK" and 100_000 < est < 140_000, (st, est)
+    assert bl("E1M1")[0] == "OK"
+    from doomfj import config
+    monkeypatch.setitem(config.MAP_CONFIG, "E1M9", {k: v for k, v in config.MAP_CONFIG["E1M9"].items()
+                                                    if k != "BAND_NIBBLES"})
+    assert bl("E1M9")[0] == "OVER"

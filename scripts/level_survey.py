@@ -692,6 +692,15 @@ class Survey:
                  "E1M1 est 152 -> 222 real; E1M2 329 -> 411. PID_NIBBLES %d for this map%s"
                  % (cfg.PID_NIBBLES, "" if pid_lo * 1.5 < 16 ** cfg.PID_NIBBLES or cfg.PID_NIBBLES >= 3
                     else ": likely needs 3 (MAP_CONFIG)"))
+        # M8 wlight (E1M9's emit_check: 114,528 band lists past BAND_NIBBLES 4's 65,536 -- found by an emission, as
+        # E1M2's were): the size model's band-list estimate against the band index (est / real: E1M1 54,428 / 54,616,
+        # E1M2 134,989 / 134,328, E1M9 118,166 / 114,528 -- within 4%, so WARN at 1.1x)
+        vpb = self._size_drivers()[1]["vpb"]
+        self.row("OVER" if vpb >= 16 ** cfg.BAND_NIBBLES else "WARN" if vpb * 1.1 >= 16 ** cfg.BAND_NIBBLES else "OK",
+                 "band lists (ESTIMATE: lut_generator.generate_bands_walk_fj's index)", vpb,
+                 "< %d" % 16 ** cfg.BAND_NIBBLES,
+                 "BAND_NIBBLES %d for this map%s" % (cfg.BAND_NIBBLES, ": set 5 (MAP_CONFIG)"
+                                                     if vpb * 1.1 >= 16 ** cfg.BAND_NIBBLES else ""))
 
     def _marking(self, WR, cmap):
         from doomfj import doors

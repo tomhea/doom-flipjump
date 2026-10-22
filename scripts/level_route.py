@@ -270,6 +270,7 @@ class Mech:
 
     def __init__(self, mid: str, kind: str, sectors=(), key=None, detail=""):
         self.id, self.kind, self.sectors, self.key, self.detail = mid, kind, tuple(sectors), key, detail
+        self.need_key = None            # a mixed-card door (doors.keyed_boxes_xy) opened through a KEYED box: its card
         self.epoch = None               # activated at the END of this epoch
         self.cell = None                # the cell that reached its trigger
         self.trigger = None             # "use" / "switch" / "walk" / "touch"
@@ -384,6 +385,11 @@ class Planner:
             for b in lv.dp.switches.get(si, ()):
                 if in_use_box(b, x, y):
                     out.append(("door:%d" % si, "switch", tuple(b)))
+            # a mixed-card door's KEYED front boxes (E1M3 150: D1 31 west, D1 32 BLUE east), each with its card --
+            # the model's own (DoorPhase.keyed, the box the press is tested in after the door's own box misses)
+            for b, card in getattr(lv.dp, "keyed", {}).get(si, ()):
+                if in_use_box(b, x, y):
+                    out.append(("door:%d" % si, "use", tuple(b), card))
         if lv.mp is not None:
             for tag, box in lv.mp.use:
                 if in_use_box(box, x, y):
@@ -442,7 +448,7 @@ class Planner:
         self.visit = {start: (None, 0, None, 0)}
         self.active, self.keys = set(), set()
         self.exit_hits = {}                       # exit index -> cell
-        self.pending_key = {}                     # key door id -> the cell that reached its box without the key
+        self.pending_key = {}                     # key door id -> (the cell that reached its box without the key, card)
         self.touch_at = {}                        # key id -> the position the touch was found at (map units)
         self.use_box = {}                         # mech id -> the box its use press was found in (map units)
         failed = collections.defaultdict(list)    # unvisited cell -> [cells an edge from was refused]
@@ -493,9 +499,11 @@ class Planner:
                     self.keys.add(m.key)
                     m.epoch, m.cell, m.trigger = epoch, cell, kind
                     new.append(m)
-            for did, cell in self.pending_key.items():
-                if self.mechs[did].key in self.keys:
-                    found.setdefault(did, (cell, "use"))
+            for did, (cell, card) in self.pending_key.items():
+                if card in self.keys and did not in found and self.mechs[did].epoch is None:
+                    found[did] = (cell, "use")
+                    if card != self.mechs[did].key:       # a keyed box of a mixed door: the card is its dependency
+                        self.mechs[did].need_key = card
             for mid, (cell, kind) in sorted(found.items(), key=lambda kv: self.visit[kv[1][0]][3]):
                 m = self.mechs[mid]
                 if m.kind == "key" or m.epoch is not None:
@@ -523,6 +531,7 @@ class Planner:
 
     def _note(self, trig, cell, found):
         mid, kind = trig[:2]
+        card = trig[3] if len(trig) > 3 else None
         if len(trig) > 2:                         # a key's touch point, or the use box a press is made in
             (self.touch_at if kind == "touch" else self.use_box).setdefault(mid, trig[2])
         if kind == "exit":
@@ -531,8 +540,9 @@ class Planner:
         m = self.mechs.get(mid)
         if m is None or m.epoch is not None:
             return
-        if m.kind == "door" and kind == "use" and m.key and m.key not in self.keys:
-            self.pending_key.setdefault(mid, cell)
+        need = card or (m.key if m.kind == "door" and kind == "use" else None)
+        if need and need not in self.keys:
+            self.pending_key.setdefault(mid, (cell, need))
             return
         found.setdefault(mid, (cell, kind))
 
@@ -578,8 +588,8 @@ class Planner:
             need.add(mid)
             m = self.mechs[mid]
             todo.append(m.cell)
-            if m.key and m.kind != "key":                    # a key door: its key
-                k = self.mechs.get("key:%s" % m.key)
+            if (m.key or m.need_key) and m.kind != "key":    # a key door: its key
+                k = self.mechs.get("key:%s" % (m.key or m.need_key))
                 if k is not None and k.epoch is not None:
                     add(k.id)
             if m.kind == "key":
@@ -637,6 +647,9 @@ class Planner:
 # PICKUPS ON THE WAY (the steering's survival, not the route's logic): an item the model gives, reachable in the world
 # of a leg, is taken first when the detour costs at most its budget in cells -- the weapons most, then armor and the
 # soulsphere, then ammo boxes a little (health is the steering's to seek, when it runs low)
+# Within its budget the NEAREST pickup is taken first (PICKUP_ORDER "nearest"; "cheapest" -- the smallest detour first --
+# is the old order, kept for the host test's control: on E1M5 it walks past the shotgun 24 cells from the start)
+PICKUP_ORDER = "nearest"
 PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 2049: 14, 2048: 10, 2008: 8}
 
 
@@ -674,11 +687,14 @@ def take_pickups(pl, cur, pred, world, pickups, out):
             if back is None:
                 continue
             detour = len(tp) + len(back) - len(base)
-            if detour <= it["budget"] and (best is None or detour < best[0]):
-                best = (detour, it, tp)
+            # within its budget, the NEAREST first (the walk's order): cheapest-first took a chaingun on the path 230
+            # cells on before the shotgun 24 cells from E1M5's start, and the detour back to it was then too long
+            rank = (len(tp), detour) if PICKUP_ORDER == "nearest" else (detour, len(tp))
+            if detour <= it["budget"] and (best is None or rank < best[3]):
+                best = (detour, it, tp, rank)
         if best is None:
             return cur
-        detour, it, tp = best
+        detour, it, tp, _n = best
         it["taken"] = True
         out.append({"to": "item:%d" % it["type"], "kind": "item", "action": "touch", "goal": [it["x"], it["y"]],
                     "key_at": [it["x"], it["y"]], "detour_cells": detour, "path": [list(centre(c)) for c in tp]})
@@ -811,7 +827,7 @@ def plan(mapname: str, skill: str, wad: str | None = None, budget_s: float = 900
     for mid in order:
         m = pl.mechs[mid]
         row = {"id": mid, "kind": m.kind, "trigger": m.trigger, "at": list(centre(m.cell)), "epoch": m.epoch,
-               "key": m.key, "detail": m.detail, "sectors": list(m.sectors)}
+               "key": m.key or m.need_key, "detail": m.detail, "sectors": list(m.sectors)}
         sp = sorted({unsup[li] for li in unsup for side in (lv.lds[li].front, lv.lds[li].back)
                      if side not in (-1, 0xFFFF) and side < len(lv.sds) and lv.sds[side].sector in m.sectors})
         if sp:

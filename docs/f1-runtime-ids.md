@@ -145,6 +145,18 @@ Proof: `tests/fj/test_wide_ids_fj.py` RUNS (1) the relink at NT 300 against `Wor
 (4) the restart fragment on planted 0xFFF / 0x100 / 0x0FF / 0x123 cells, (5) drop_link / drop_take on rows 260+, with
 controls nib2, narrow, rank2, rk_set2, select2, zero8, flip8, drt2 and the no-table guard.
 
+**The first real build failed (fixed by m8-l12fix, 2026-10-22).** The harness above declared the relink's scratch with
+`leaf_link_decls(3)`, but the EMITTER (`monstercode.p31_parts`, the chase block) still declared `LEAF_LINK_DECLS` -- 2
+nibbles -- at every width. Under the 3-nibble twins each of `ll_enc` / `ll_v` / `ll_nxt` then had the NEXT register's
+first nibble as its top one, so a relink compared and indexed through garbage even with every id below 256: E1M1 built
+at 12 bits ran m2_std_gate byte- and state-exact for 210 frames and died presenting frame 210 ("collines run ends at
+row 131"); E1M3 / E1M4 / E1M5 failed the same way. Not the arm5 window, not the table placement: a declaration. The
+emitter now declares `leaf_link_decls(list_bits // 4)` (8 bits: LEAF_LINK_DECLS' text). Held by
+`tests/host/test_wide_relink_decls.py` (the game tier's emitted widths against what sim_wide.fj's twins use, with the
+old declaration as its R9 control) and `tests/fj/test_wide_ids_fj.py` 1b (the relink RUN with the list width's
+scratch, ids below and past 256; the 2-nibble scratch as the control). ⚠ The lesson: a twin's harness that declares its
+own registers proves the macro, not the program's declarations of them -- test the EMITTED decls too.
+
 Open for the level rungs: MAP_CONFIG `LIST_ID_BITS: 12` per map (E1M3 / E1M4 / E1M5); a wide map's first build (the
 table placement risk of 5); **C2 (runtime THINGS past 254, E1M6 / E1M7)** is covered by the lists, but
 `hurtcode.turn_lines`' `dt_t` (a monster's runtime row, 2 nibbles, asserted < 256) still refuses a monster row past

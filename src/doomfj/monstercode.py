@@ -592,7 +592,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
         if chase:
             from doomfj.collision import MON_CELL_DECLS
             from doomfj.monstermove import monster_seed_decls, static_blockers
-            from doomfj.things import LEAF_LINK_DECLS
+            from doomfj.things import leaf_link_decls
             from doomfj.monstermove import mc_don_decl, mc_don_restart
             things, var = static_blockers(w)
             # M8 F1.2: a decoration some skill lacks stands by its mc_don flag, set at NEW GAME per skill (E1M1: none)
@@ -611,7 +611,11 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
             extra["decls_wake"] += (
                 p32b_decls(schema, nmon, {f: boot[f] for f in P32B_FIELDS}, [w._mon_sector(m) for m in range(nmon)],
                            snib, r0)
-                + MON_CELL_DECLS + monster_seed_decls() + LEAF_LINK_DECLS
+                # M8 l12fix: the relink's scratch at the LIST width -- sim.leaf_link_w / leaf_unlink_w move, read and
+                # compare ll_enc / ll_v / ll_nxt at 3 nibbles; declared at 2 (LEAF_LINK_DECLS) each one's third nibble
+                # was the next register's first, so the relink compared and indexed through garbage (E1M1 at
+                # LIST_ID_BITS 12 crashed its screen ~20 walk frames in). 8 bits: LEAF_LINK_DECLS' text, unchanged
+                + MON_CELL_DECLS + monster_seed_decls() + leaf_link_decls(list_bits // 4)
                 + ["bar_solid: hex.vec %d, %d" % (nb, sum(w.ws.bar_solid[b] << (4 * b)
                                                           for b in range(len(w.barrel_things)))),
                    "mh_prev: hex.vec %d" % mh_width(w), "mcf_val: hex.vec 4", "mcf_hit: hex.vec 1",

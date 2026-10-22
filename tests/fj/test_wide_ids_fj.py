@@ -125,17 +125,18 @@ def _lists():
     return spawn_leaf_lists(BINDS, NLEAVES, present=[t in PRESENT for t in range(NT)], max_things=MAX)
 
 
-def _relink_model():
+def _relink_model(ops=None):
     head, nxt = _lists()
     fake = SimpleNamespace(ws=SimpleNamespace(leaf_head=list(head), mob_next=list(nxt)))
     out = []
-    for op, t, leaf in OPS:
+    for op, t, leaf in (OPS if ops is None else ops):
         (World._list_insert if op == LINK else World._list_remove)(fake, t, leaf)
         out.append((tuple(fake.ws.leaf_head), tuple(fake.ws.mob_next)))
     return out
 
 
-def _relink_prog() -> str:
+def _relink_prog(scratch=None) -> str:
+    """`scratch`: the relink's scratch declarations (default leaf_link_decls(3), the width the `_w` twins use)"""
     head, nxt = _lists()
     mac = list_macros(12)
     return "\n".join([
@@ -157,13 +158,14 @@ def _relink_prog() -> str:
         byte_array_decl("thnext", nxt, 2 * NT, bits=12),
         "rmagic: hex.vec 2", "rop: hex.vec 2", "rt: hex.vec w/4", "rl: hex.vec w/4",
         "dump_ret: hex.vec w/4", "dmp_i: hex.vec w/4", "dmp_n: hex.vec w/4",
-        *leaf_link_decls(3)]) + "\n"
+        *(leaf_link_decls(3) if scratch is None else scratch)]) + "\n"
 
 
-def _relink_run(tmp, name, sim_mut=None):
-    feed = b"".join(bytes([0xD0, op]) + struct.pack("<H", t) + bytes([leaf]) for op, t, leaf in OPS) + b"\x00"
-    lines = _run(_assemble(tmp, name, _relink_prog(), sim_mut=sim_mut), feed)
-    return [(_cells(ln, NLEAVES), _cells(ln[3 * NLEAVES:], NT)) for ln in lines[:len(OPS)]
+def _relink_run(tmp, name, sim_mut=None, ops=None, scratch=None):
+    ops = OPS if ops is None else ops
+    feed = b"".join(bytes([0xD0, op]) + struct.pack("<H", t) + bytes([leaf]) for op, t, leaf in ops) + b"\x00"
+    lines = _run(_assemble(tmp, name, _relink_prog(scratch), sim_mut=sim_mut), feed)
+    return [(_cells(ln, NLEAVES), _cells(ln[3 * NLEAVES:], NT)) for ln in lines[:len(ops)]
             if len(ln) >= 3 * (NLEAVES + NT)]
 
 
@@ -220,6 +222,34 @@ def test_control_a_narrow_relink_is_caught(tmp_path, mut):
         assert len(got) == len(OPS) and got[0] != want[0], (mut, len(got))
     else:
         assert 0 < len(got) < len(OPS) and got == want[:len(got)], (mut, len(got))
+
+
+# ---- 1b. the relink's SCRATCH at the list width (M8 l12fix) ----------------------------------------------------------
+# The `_w` twins move, read and compare ll_enc / ll_v / ll_nxt at 3 nibbles. E1M1 built at LIST_ID_BITS 12 declared them
+# at 2 (monstercode emitted things.LEAF_LINK_DECLS whatever the width): each register's third nibble was the NEXT one's
+# first, so `hex.cmp 3, ll_v, ll_enc` compared ll_v's low nibble as ll_enc's top and `hex.mov 3, ll_idx, ll_v` took
+# ll_nxt's -- with every id below 256. The game's screen device died ~20 walk frames in (a monster's relink between
+# leaves). tests/host/test_wide_relink_decls.py holds the EMITTER to the width; this RUNS the width's effect.
+SMALL_MOVES = [(2, 2, 1), (100, 0, 3), (1, 1, 0), (253, 1, 2), (0, 0, 1), (100, 3, 0)]   # every id below 255
+SMALL_OPS = [op for t, old, new in SMALL_MOVES for op in ((UNLINK, t, old), (LINK, t, new))]
+
+
+@pytest.mark.parametrize("which", ["small", "wide"])
+def test_the_relink_runs_with_the_list_widths_scratch(tmp_path, which):
+    """the scratch declared at Config.LIST_NIB (3 at 12 bits) -- what the emitter declares since l12fix -- follows the
+    model through ids below 256 (E1M1's: the case the game hit) and past it"""
+    ops = SMALL_OPS if which == "small" else OPS
+    got = _relink_run(tmp_path, "relink_nib_" + which, ops=ops, scratch=leaf_link_decls(WIDE.LIST_NIB))
+    assert WIDE.LIST_NIB == 3 and got == _relink_model(ops), which
+
+
+def test_control_a_two_nibble_scratch_is_caught(tmp_path):
+    """R9: the bug itself -- the scratch at 2 nibbles (LEAF_LINK_DECLS) under the 3-nibble twins -- parts from the model
+    with every id below 256 (E1M1's case). Only the small sequence: on OPS (ids past 255) the garbage ll_idx sends the
+    walk into a loop that never ends, so that run would hang rather than fail"""
+    want = _relink_model(SMALL_OPS)
+    got = _relink_run(tmp_path, "relink_nib2_small", ops=SMALL_OPS, scratch=leaf_link_decls(2))
+    assert got != want, len(got)
 
 
 # ---- 2. the depth walk on rows 250 .. 262 ----------------------------------------------------------------------------

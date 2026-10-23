@@ -2738,9 +2738,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     assert bool(_p31 and _p31.get("knock")) == _KNOCK, "M7 P8a: p31_parts' knock hooks and the emitter's disagree"
     assert bool(_p31 and _p31.get("fight")) == _FIGHT, "M7 P8a I: p31_parts' fight parts and the emitter's disagree"
     assert not _SOUL or (_KNOCK and _FIGHT), "M8 C8: the lost soul flies on the knock cells and the fight's target load"
-    assert not (_SOUL and _TELE), ("M8 C8: a lost soul's teleport (EV_Teleport's z, momz and ceilingz: lostsoul."
-                                   "_soul_teleported) is the model's only -- wire soulcode.try_lines' and mm_move's "
-                                   "teleports before a map with both ships")
+    # M8 soultele: a lost soul's teleport (EV_Teleport's z, momz and ceilingz: lostsoul._soul_teleported) -- mm_move's
+    # copy (teleportcode.monster_lines soul="walk") and sk_try's (soul="knock"); tests/fj/test_soul_teleport_fj
     _D3 = bool(_LOOT and _W8.compositor_d3(PLAYER_MODE))                       # C: the compositor rules D3 a / b
     assert bool(_p31 and _p31.get("d3")) == _D3, "M7 P8a: p31_parts' compositor rules and the emitter's disagree"
     if _LOOT:                                 # the oracle's two D3 keys (reference_model.GAME_RENDER_KW) follow the rule
@@ -3921,7 +3920,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                                            for t_ in _chase["lift_walk"]],
                                   door_boxes=[(_dslot[si_], b_) for si_, b_ in _chase["mon_door_boxes"]],
                                   dropmax=DROPOFF_MAX, stepup=STEP_UP, height=_chase["height"],
-                                  **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tpm")} if _TELE else {}),
+                                  **({"teleport": _teleportcode.monster_lines(
+                                      _TELE, prefix="tpm", **({"soul": "walk"} if _SOUL else {}))}   # M8 soultele
+                                     if _TELE else {}),
                                   list_bits=_LIST_BITS,                   # M8 F1.5: the relink's twins
                                   **({"r0": _chase["r0"]} if _chase.get("r0", 20) != 20 else {}),   # M8 C8
                                   **({"soul": True} if _SOUL else {}))       # M8 C8: a soul's float
@@ -3968,7 +3969,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                     lift_trigs=[(_lift_slot[t_[0]],) + tuple(t_[1:]) for t_ in _chase["lift_walk"]],
                                     pick_slots=_loot_slots,
                                     drop_rt=[_bar["drop_first"] + k_ for k_ in range(_bar["ndrop"])],
-                                    var=_soul_var(_p31["world"])) if _SOUL else [])
+                                    var=_soul_var(_p31["world"]),
+                                    # M8 soultele: the soul's XY try teleports too
+                                    **({"teleport": _teleportcode.monster_lines(_TELE, prefix="tps", knock_ctx=True,
+                                                                                soul="knock")} if _TELE else {}))
+                   if _SOUL else [])
                 # M7 P6: the barrels' phase, blast, LOS entry, shot and drops (barrelcode) -- leaves
                 + (list(_bar["lines"]) if _bar else [])
                 # M7 P7: the dead view's turn to the killer (hurtcode.turn_lines; package B's death think calls it)
@@ -4494,7 +4499,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *((list(_bar["decls"]) + list(_bar["tables"])) if _bar else []),  # M7 P6: the barrels and drops
           *((list(_loot["decls"]) + list(_loot["tables"])) if _loot else []),   # M7 P6+P7: the player's loot
           *(_statcode.decls(_p31["world"]) if _STATS else []),           # P10: the stats' cells and scratch
-          *(_teleportcode.decls(_TELE) if _TELE else []),                  # M8 L4: p_rct and the scratch; C5: tp_w1
+          # M8 L4: p_rct and the scratch; C5: tp_w1; soultele: the stomp's radius-16 bound
+          *(_teleportcode.decls(_TELE, **({"souls": True} if _SOUL else {})) if _TELE else []),
           *(_exitcode.decls(lds) if standalone and menu else []),          # M8 C9: lvsec (a map with a secret exit)
           *((_lightcode.decls(_lth) + _lightcode.tables(_lth)) if _lth else []),   # M8: the light cells, their tables
           *(_switchcode.decls(len(_SWI_LAT), len(_SWI_SR)) if _SWI_LAT else []),   # M8: the switch textures' cells

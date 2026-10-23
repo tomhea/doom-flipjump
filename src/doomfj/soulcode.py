@@ -148,8 +148,11 @@ def _slot_cells(w, m: int) -> dict:
 
 
 # ---- the XY move: the slot stub, sk_mmove, sk_try --------------------------------------------------------------------
-def xy_stub_lines(w, m: int, rt: int) -> List[str]:
-    """`sks<k>` (stl.fcall sks<k>, sks_ret) for soul slot m (runtime thing rt): P_XYMovement's half of the thinker"""
+def xy_stub_lines(w, m: int, rt: int, tele: bool = False) -> List[str]:
+    """`sks<k>` (stl.fcall sks<k>, sks_ret) for soul slot m (runtime thing rt): P_XYMovement's half of the thinker.
+    M8 soultele (`tele`, a map with a teleport line): after the move a teleport's facing (teleportcode.slot_back_lines:
+    tp_hit) and the z back (sw_z: sk_try's fire set it to the destination floor)"""
+    from doomfj.teleportcode import slot_back_lines
     c = _slot_cells(w, m)
     k, L = c["k"], "sks%d" % c["k"]
     nib = w.sec_nibbles
@@ -183,6 +186,8 @@ def xy_stub_lines(w, m: int, rt: int) -> List[str]:
             "    hex.mov 1, kb_sv, %s" % c["so"], "    hex.zero 1, %s" % c["so"],
             "    hex.mov 1, sw_sh, %s" % c["sh"], "    hex.zero 1, %s" % c["sh"],
             "    stl.fcall sk_mmove, kb_mret",
+            *(slot_back_lines(m, facing="mon_facing + %d*dw" % m, knock=True, walk=False, tag="tpsb")
+              + ["    hex.mov 8, %s, sw_z" % c["z"]] if tele else []),           # M8 soultele: EV_Teleport's
             "    hex.mov 1, %s, kb_sv" % c["so"], "    hex.mov 1, %s, sw_sh" % c["sh"],
             "    hex.mov 8, %s, kb_vx" % c["mx"], "    hex.mov 8, %s, kb_vy" % c["my"],
             "    hex.mov 4, %s, kb_px" % c["fx"], "    hex.mov 4, %s, kb_py" % c["fy"],
@@ -231,8 +236,11 @@ def try_dispatch_lines() -> List[str]:
             "    ;kb_ptry"]
 
 
-def try_lines(mon_root: str, lift_trigs=()) -> List[str]:
-    """`sk_try` (via kb_try; frets kb_tyret): the soul's P_TryMove of an XY step at (kb_cx, kb_cy)"""
+def try_lines(mon_root: str, lift_trigs=(), teleport: Sequence[str] = ()) -> List[str]:
+    """`sk_try` (via kb_try; frets kb_tyret): the soul's P_TryMove of an XY step at (kb_cx, kb_cy). M8 soultele
+    (`teleport`: teleportcode.monster_lines(knock_ctx=True, soul="knock")): the WR teleports after the lifts, as
+    knockcode.mtry_lines -- a fire makes the destination the move and the candidate, its floor and ceiling the soul's
+    (cp_floor, cp_ceil), z = the floor << 16 and momz 0 (sw_z, sw_mz), the momentum stopped"""
     from doomfj.doorcode import _crossed_lines
     out = ["sk_try:",
            "    hex.set 1, kb_ok, 1",
@@ -269,6 +277,7 @@ def try_lines(mon_root: str, lift_trigs=()) -> List[str]:
     for j, (slot, axis, coord, lo, hi) in enumerate(lift_trigs):
         out += _crossed_lines("sktl%d" % j, axis, coord, lo, hi, SOUL_R,
                               ["    hex.set 1, lreq + %d*dw, 1" % slot], regs=("mm_ox16", "mm_oy16", "cpx", "cpy"))
+    out += list(teleport)                                                     # M8 soultele: EV_Teleport
     out += ["    hex.mov 4, mm_x, mm_nx", "    hex.mov 4, mm_y, mm_ny",
             "    hex.mov 8, mm_z, cp_floor",
             "    hex.mov 8, sw_c, cp_ceil",
@@ -696,13 +705,15 @@ def leaf_restore_lines() -> List[str]:
     return ["    hex.if0 1, sf_d, thsk_r", "    hex.mov 4, ss_flr, sf_sv", "    hex.zero 1, sf_d", "  thsk_r:"]
 
 
-def leaves(w, *, slot_rt, mon_root: str, lift_trigs=(), pick_slots=None, drop_rt=None, var=()) -> List[str]:
-    """every soul leaf, jumping over itself"""
+def leaves(w, *, slot_rt, mon_root: str, lift_trigs=(), pick_slots=None, drop_rt=None, var=(),
+           teleport: Sequence[str] = ()) -> List[str]:
+    """every soul leaf, jumping over itself. M8 soultele: `teleport` -- sk_try's WR teleports
+    (teleportcode.monster_lines(knock_ctx=True, soul="knock")); () on a map without one"""
     out = ["// M8 C8 (doomfj.soulcode): the lost souls' leaves", ";sk_end"]
     for k, m in enumerate(w.soul_slots):
-        out += xy_stub_lines(w, m, slot_rt[m]) + z_stub_lines(w, m, slot_rt[m])
+        out += xy_stub_lines(w, m, slot_rt[m], tele=bool(teleport)) + z_stub_lines(w, m, slot_rt[m])
     sn = _sn(w)                                         # M8 C2: the slot ids' width
-    out += (mmove_lines(sn) + try_lines(mon_root, lift_trigs) + hts_lines()
+    out += (mmove_lines(sn) + try_lines(mon_root, lift_trigs, teleport) + hts_lines()
             + slam_lines(w, slot_rt, pick_slots=pick_slots, drop_rt=drop_rt, var=var)
             + hitgo_lines(w.layout.nmon, sn=sn)
             + ap_lines() + zm_lines(sn) + charge_lines())

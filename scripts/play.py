@@ -729,7 +729,9 @@ class Steer:
                     radius=3000 if hp < 30 else 900):
                 return kd
             low_ammo = (c.get("am_clip") or 0) < 5 and not (c.get("am_shell") or 0)
-            if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo"):
+            dry = not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0)
+            if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo", most=250 if dry else 70,
+                                                           radius=3000 if dry else 900):
                 return kd
         # ---- the DASH: when what is left of the route is short, run it -- stopping to fight a crowd on the last
         # stretch is how a worn-down player dies (E1M2's finale); the aim window's hunters are still shot in passing
@@ -746,6 +748,9 @@ class Steer:
         if f < self.run_until and foe is not None and foe[0] > 80:
             foe = None
             self.why = "run"
+        if foe is not None and foe[0] > 64 and not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0):
+            foe = None                               # dry (no bullet, no shell): run, punch only what is at arm's length
+            self.why = "dry"
         if foe is not None and foe[0] > 100 and self.pl.hurts(self.LR.cell_of(x, y)):
             foe = None                               # on a damaging floor: walk on (shooting in passing), fight off it
         # ---- combat

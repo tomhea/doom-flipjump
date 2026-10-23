@@ -124,6 +124,16 @@ def memo_textures() -> None:
         return _TEX_MEMO[k][1]
     wall_texture._memo = True
     RM._wall_texture = wall_texture
+    # the sprites likewise (`sprite_art` by thing type, `art_of_lump` by lump name: per-frame caches too)
+    for name in ("sprite_art", "art_of_lump"):
+        def wrap(orig, name=name):
+            def art(self, sprite_wad, what, cache):
+                k = (name, id(sprite_wad), what, self.downscale)
+                if k not in _TEX_MEMO:
+                    _TEX_MEMO[k] = (sprite_wad, orig(self, sprite_wad, what, cache))
+                return _TEX_MEMO[k][1]
+            return art
+        setattr(RM, name, wrap(getattr(RM, name)))
 
 
 class Player:
@@ -411,11 +421,14 @@ class Steer:
     FIGHT_R = 900
     HITSCAN = frozenset({3004, 9, 65})        # zombieman, sergeant, chaingunner: their spread is an ANGLE -- far is safer
     MELEE = frozenset({3002, 58})             # demon, spectre: back away while shooting
-    # the tactics' knobs (BOT_CFG, a JSON of them, overrides for an evaluation run -- scratchpad/gp/bot/evalseeds.py)
-    RETREAT = True             # badly hurt and still hit: back along the trail
-    LOW_BACK = True            # hurt: back away from the foe while shooting
-    CLOSE_STRAFE = True        # circle-strafe close in too (not only past 120 units)
-    RUN_HURT = 0               # > 0: losing this much health in 60 frames (below 70) -> run the route for 60 frames
+    # the tactics' knobs (BOT_CFG, a JSON of them, overrides for an evaluation run -- scratchpad/gp/bot/evalseeds.py).
+    # The defaults are the measured ones: on E1M2 easy, seeds 0..7 whole plays, the retreat / back-when-low /
+    # close-strafe OFF and RUN_HURT 30 averaged 17.8 legs of ~25 (all ON: 13.2; scratchpad/gp/bot/ev_e1m2_*.log)
+    RETREAT = False            # badly hurt and still hit: back along the trail
+    LOW_BACK = False           # hurt: back away from the foe while shooting
+    CLOSE_STRAFE = False       # circle-strafe close in too (not only past 120 units)
+    BARREL_SAFE = 220          # no shot while a barrel this near (Chebyshev) is in the aim window
+    RUN_HURT = 30              # > 0: losing this much health in 60 frames (below 70) -> run the route for 60 frames
     DASH = 160                 # cells of route left under which the player stops fighting and runs for the exit
     LOOK = 3
     GIVE_UP = 35
@@ -455,12 +468,14 @@ class Steer:
         self.ammo = [(t.x, t.y) for t in self.lv.things if t.type in (2007, 2008, 2048, 2049) and t.flags & bit]
         from doomfj.world import level_things
         self.mtype = [t.type for t in level_things(self.lv.mw, self.lv.map)[1]]     # monster slot -> its type
+        # the barrels (their spawn spots; aim_sid's id 1 + nmon + b, combat.window_aim): never shot close by
+        self.barrels = [(t.x, t.y) for t in level_things(self.lv.mw, self.lv.map)[2]]
         self.trail = collections.deque(maxlen=400)   # the player's own recent positions: the way back (a retreat)
         self.retreat_f, self.retreat_i, self.retreat_next = -1, 0, -1
         self.hp_hist = collections.deque(maxlen=60)
         self.run_until = -1
         self.health_taken = set()
-        self.called = {}                             # lift sector -> the times its switch was walked to
+        self.called = {}                             # lift sector -> the frames its switch was walked to
         self.retry = {}
         self.why = ""
         self.done_frame = None
@@ -665,6 +680,8 @@ class Steer:
         if self.opportune and "use" not in kd:
             kd.add("fire")
             self.fired = True
+        if "fire" in kd and c is not None and self._barrel_near(c):
+            kd.discard("fire")                       # a barrel by the player in the aim window: its blast is his
         self.last_turn = bool(kd & {"turn_left", "turn_right"})
         return kd
 
@@ -927,6 +944,21 @@ class Steer:
             self.replan(x, y, "stuck", f)
         return kd
 
+    def _barrel_near(self, c) -> bool:
+        """a live barrel in the last picture's aim window within BARREL_SAFE (Chebyshev) of the player: a shot that
+        bursts it (A_Explode, 128 at the blast's centre) hurts him -- E1M3 seed 0 died by the barrel at (780, 2448)"""
+        win = c.get("aim_sid") or ()
+        if not win or not self.barrels:
+            return False
+        x, y, _a = pose_of(c)
+        nmon = len(self.mtype)
+        for sid in set(win):
+            b = sid - 1 - nmon
+            if 0 <= b < len(self.barrels) and max(abs(self.barrels[b][0] - x),
+                                                   abs(self.barrels[b][1] - y)) < self.BARREL_SAFE:
+                return True
+        return False
+
     def _safe(self, x, y, ang, dist: int = 40) -> bool:
         """is a step `dist` units toward `ang` (degrees) SAFE to strafe / back into: no damaging floor, no drop of more
         than a step (a nukage pit, a ledge the route would have to climb back from), not a refused cell"""
@@ -943,10 +975,11 @@ class Steer:
 
     def _call_lift(self, f, x, y, sec, boxes) -> bool:
         """a leg inserted before this one: to the nearest reachable cell inside one of the lift's use boxes (SR 62 /
-        S1 lines, `movers.use_line_boxes`), and a use press there -- three times a lift at most"""
-        if not boxes or self.called.get(sec, 0) >= 3:
+        S1 lines, `movers.use_line_boxes`), and a use press there -- three times in any 600 frames at most"""
+        recent = [g for g in self.called.get(sec, ()) if f - g < 600]
+        if not boxes or len(recent) >= 3:
             return False
-        self.called[sec] = self.called.get(sec, 0) + 1
+        self.called[sec] = recent + [f]
         LR = self.LR
 
         def inbox(cell):
@@ -980,7 +1013,8 @@ class Steer:
         for _d, hx, hy in cands[:3]:
             path = self.pl.leg_path(LR.cell_of(x, y), lambda c, hx=hx, hy=hy: abs(LR.centre(c)[0] - hx) < 24
                                     and abs(LR.centre(c)[1] - hy) < 24, self.active | opn)
-            if path and not any(q[0] == "teleport" for q in path) and len(path) < most:
+            if path and not any(q[0] == "teleport" for q in path) and len(path) < most \
+                    and not any(self.pl.sector_of(q) in self.lorder for q in path):
                 self.leg["replan"] = True
                 self.legs.insert(self.li, {"to": what, "kind": "item", "action": "touch", "goal": [hx, hy],
                                            "key_at": [hx, hy], "path": [list(LR.centre(q)) for q in path]})

@@ -274,7 +274,10 @@ def search(PLAY, pl, route, lv, seed, budget, rounds, seeds=SEARCH_SEEDS, worker
             for back in SEARCH_BACK:
                 for sd in seeds:
                     cut = max(0, end - back)
-                    cand = [fs for fs in sched if fs[0] < cut] + [(cut, sd + 10 * rnd)]
+                    head = [fs for fs in sched if fs[0] < cut]
+                    if cut < 100 or (head and head[-1][1] == sd + 10 * rnd):
+                        continue                     # a whole-seed play (tried above), or no change at the cut
+                    cand = head + [(cut, sd + 10 * rnd)]
                     if cand not in cands and cand != sched:
                         cands.append(cand)
             jobs = [(mapname, pl.skill, route, cand, budget) for cand in cands]

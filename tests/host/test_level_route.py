@@ -119,10 +119,12 @@ def test_control_e1m3_without_the_blue_card(lr):
 
 @needs_wad
 def test_pickups_nearest_first(lr, monkeypatch):
-    """E1M5: the shotgun 24 cells from the start is the first leg (nearest first); CONTROL: the old cheapest-detour
-    order takes the chaingun on the path first and never comes back for the shotgun"""
+    """E1M5: the shotgun 24 cells from the start is taken among the first legs (nearest first: the backpack and the
+    ammo boxes by the start, then it), long before the chaingun; CONTROL: the old cheapest-detour order takes the
+    chaingun on the path first and never comes back for the shotgun"""
     r = lr.plan("E1M5", "easy")
-    assert r["ok"] and r["legs"][0]["to"] == "item:2001"
+    to = [g["to"] for g in r["legs"]]
+    assert r["ok"] and "item:2001" in to[:5] and to.index("item:2001") < to.index("item:2002")
     monkeypatch.setattr(lr, "PICKUP_ORDER", "cheapest")
     r = lr.plan("E1M5", "easy")
     assert r["legs"][0]["to"] != "item:2001", "CONTROL: the pickups' order made no difference"

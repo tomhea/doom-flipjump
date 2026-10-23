@@ -327,6 +327,28 @@ Strongest MINOR: move `TablePool` / `BlockPool` / `BlockCensus` / `DeferredTable
 
 Every proposed change keeps the assembled `.fjm` byte-identical.
 
+**The owner's API decisions (2026-10-24, round 1b, after round 1's fixes).** The audit compared every public
+entry point with `main`.
+
+1. **Every combined quickstart helper takes every parameter of its halves.** `assemble_and_run`,
+   `assemble_and_debug` and `assemble_and_run_test_output` gain:
+   - from `assemble`: `table_pool`, `defines_file`, the lzma option;
+   - from `run` / `debug`: `flat_memory`, `flat_required`, `profile`, `flat_max_words`.
+
+   `run_test_output` gains `flat_required` and `profile`. A unit test pins it: each helper's parameters cover its
+   halves', except the output paths.
+2. **`-f` / `--flags` stays removed.** `--run-flags` and `--io-mode` replace it, and so do the Writer's
+   `run_flags=` / `io_mode=`.
+3. **lzma: one name in both the command line and Python.** `--lzma_preset` / `lzma_preset=`; Python's `lzma_fast`
+   is in question (see the update log).
+4. **The table pool moves to `flipjump/assembler/table_pool.py`.** `TablePool`, `BlockPool`, `BlockCensus`,
+   `DeferredTables` and their helpers move unchanged and are re-imported from `preprocessor.py`, so existing
+   imports keep working. It is reachable:
+   - in Python, as it is today (`table_pool=`);
+   - from the command line, through **one simplified option** with defaults that work on any program (designed in
+     round 1b; it refuses with an exact reason where a pool cannot be used, for example a program that reads cells
+     through `hex.pointers`).
+
 **The baseline moves (gap 5).** When stl work merges into 1.5.1 and then into `cr-main`, re-save
 `crmain_base.json` at that merge commit, before the next fixer round.
 
@@ -404,3 +426,4 @@ Estimated 2026-10-24 01:00, Sat. Each estimate assumes nothing big breaks; one g
 | when | change |
 |---|---|
 | 2026-10-24 ~01:30 | written from the night's decisions. Status: #374 + #375 merged (1.5.1 = 9f6119c); E1M1 + E1M2 green on the API; part A committed; A1 text done; byte output closed; area 1 round 1 reviewed (4 BLOCKING / 31 MINOR); ship #1 rebuild running |
+| 2026-10-24 ~03:00 | ship #1: rebuild BYTE-IDENTICAL (f52751a2bb846c7a); gamespeed re-run (`--validate` only checks the tours); msframe refused a busy box, so it waits for a quiet window. STATUS.md for E1M3-E1M9 written (30fb0a29). Owner's API decisions 1-4 recorded in 6 (round 1b). lzma question open: `lzma_fast` is the match finder, not a preset; fjdoom builds with it, and the shipped bytes depend on it |

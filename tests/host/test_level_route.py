@@ -142,3 +142,16 @@ def test_e1m3_legs_keep_off_the_nukage(lr, monkeypatch):
     assert _hurt_cells(lr, lr.plan("E1M3", "easy")) == 0
     monkeypatch.setattr(lr, "HURT_COST", 0)
     assert _hurt_cells(lr, lr.plan("E1M3", "easy")) > 0, "CONTROL: the cost made no difference"
+
+
+@needs_wad
+def test_e1m3_no_pickup_on_a_lift(lr, monkeypatch):
+    """an item lying on a LIFT is no pickup leg (at rest the lift holds it up out of reach): E1M3's three shells boxes
+    on lifts 160 / 163 / 256 are left; CONTROL: with the lift list emptied they are pickups again"""
+    lv = lr.Level("E1M3", None, "easy")
+    on_lifts = {(-2160, 1152), (-1920, 2112), (-2160, 608)}
+    got = {(it["x"], it["y"]) for it in lr.pickup_things(lr.Planner(lv))}
+    assert not (got & on_lifts) and got
+    lv.mp.order = []
+    got = {(it["x"], it["y"]) for it in lr.pickup_things(lr.Planner(lv))}
+    assert on_lifts <= got, "CONTROL: the lift filter made no difference"

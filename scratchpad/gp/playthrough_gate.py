@@ -288,8 +288,8 @@ def search(PLAY, pl, route, lv, seed, budget, rounds, seeds=SEARCH_SEEDS, worker
             outs = pool.imap_unordered(_search_job, jobs) if pool else (_search_job(j) for j in jobs)
             found = None
             for o in outs:
-                print("  search round %d: %s -> %s %s" % (rnd, seed_text(o["sched"]), _score(o),
-                                                          o["dead"] or ""), flush=True)
+                print("  search round %d: %s -> %s %s on leg -> %s" % (rnd, seed_text(o["sched"]), _score(o),
+                                                                      o["dead"] or "", o["leg"]), flush=True)
                 if _score(o) > _score(best) and (found is None or _score(o) > _score(found)):
                     found = o
                 if o["done"] is not None:            # a PASS: taken at once (the round's other plays dropped)

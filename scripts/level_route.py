@@ -672,7 +672,8 @@ class Planner:
 # Within its budget the NEAREST pickup is taken first (PICKUP_ORDER "nearest"; "cheapest" -- the smallest detour first --
 # is the old order, kept for the host test's control: on E1M5 it walks past the shotgun 24 cells from the start)
 PICKUP_ORDER = "nearest"
-PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 8: 40, 2049: 14, 2048: 10, 2008: 8}
+PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 8: 40, 2049: 14, 2048: 10, 2008: 8,
+                 2025: 60}     # the radiation suit (E1M4 alone: two, by its nukage channel -- 10 a crossing)
 
 
 def pickup_things(pl) -> list:

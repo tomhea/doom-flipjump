@@ -41,7 +41,7 @@
 //   n_… / …_i    an entry COUNT and the running INDEX over it (n_ent/ent_i, n_top/top_i).
 //   c…           a CONSTANT register: ccy = CENTERY, cviewh = VIEW_H, cFF = 0xFF, c_one = 1.
 //   win_lo/win_end   the half-open ROW WINDOW [lo, end) a band/run walk is restricted to.
-//   y2r / colr   the unit of the 0x0B protocol: one emitted pair's END ROW and its FINAL palette
+//   y2r / colr   the unit of the draw_collines protocol: one emitted pair's END ROW and its FINAL palette
 //                byte (colours are pre-composed through the colormap at bake time).
 //   ctake        the ceiling prefix's end row = min(cexcl, fstart) = the wall run's first row.
 //
@@ -311,7 +311,7 @@ ns stream {
     }
 
     // M13-lines (the DUMB-DEVICE mode): one claimed column's three windows emitted at CLAIM
-    // TIME as the 0x0B packed column-run frame. M13-bakedbands: the per-visplane lists are
+    // TIME as the draw_collines column records. M13-bakedbands: the per-visplane lists are
     // COMPILE-TIME data with [y2_absolute][final_colour] pairs (colours pre-composed through
     // the colormap at emit time, cumulative y2) -- so the walkers below just stream bytes:
     // no ycur arithmetic, no colormap dispatch, no base registers. The ceiling PREFIX emits
@@ -320,7 +320,7 @@ ns stream {
     // @requires hex.init & stl.ptr_init
 
     // ══ M13-2S rung 3b — the TWO-SIDED emit ══════════════════════════════════════════════════
-    // The 0x0B protocol needs ONE contiguous top-to-bottom record per column, but walking segs
+    // The draw_collines protocol needs ONE contiguous top-to-bottom record per column, but walking segs
     // front-to-back a column is built from BOTH ENDS: ceiling regions and upper walls arrive
     // top-down, floor regions and lower walls bottom-UP. So the walk buffers each column's REGIONS
     // -- 4 packed bytes, [kind][arg][y1][yend] -- into a top list and a bottom list, and the record
@@ -401,7 +401,7 @@ ns stream {
     // V3 -- the two-piece splice, ceiling side: emit the face's own [y2][colour] pair, then re-aim
     // the window at [uy2+1, ctake) so the REST of the ceiling still reaches ctake. The list is
     // re-walked from its head rather than resumed, which is why qwalk needs a skip bound at all:
-    // the 0x0B cursor only ever moves forward, so re-emitting an already-covered pair would rewind
+    // the draw_collines cursor only ever moves forward, so re-emitting an already-covered pair would rewind
     // it and repaint over the face.
     def face_splice fl, y2f, colf, hi, qlo, qbound, ptr, ccy, qwalk, qret, bufa, bufd, eabl, ascode, w1r, gnrow, cmidx \
             @ none, end {
@@ -1301,7 +1301,7 @@ ns stream {
         rep(things, k) .frag_runs_cut gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx, gps_sy1, gps_sy2, gps_cut
         rep(things, k) .emit_region gps_sy2, ecl_full_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
       col_done:
-        stl.output_char 0xFF                     // ends this column's pair list
+        stl.output_char 0xFF                     // END (screenwire.END): closes this column's record
         ;end
 
       // band_walk: over the window [ecl_win_lo, ecl_win_end) -- skip pairs ending at or before ecl_win_lo,

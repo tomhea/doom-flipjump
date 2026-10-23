@@ -923,7 +923,7 @@ def test_control_a_broken_rifle_give_is_caught(tmp_path, mut):
 
 # ================================================================================================ E. KEY 6
 POLLS, E_FRAMES = STANDALONE_POLLS, 6
-SIX, FIRE, FIVE = KB.W6_CODE, 0x85, 0x35
+SIX, FIRE, FIVE = KB.W6_CODE, KB.KC_LCTRL, 0x35
 
 
 def _eprogram(key_lines) -> str:

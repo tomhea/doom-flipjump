@@ -14,6 +14,7 @@ from flipjump.interpreter.io_devices.FixedIO import FixedIO
 from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 
 from doomfj import menu as MN
+from doomfj import screenwire as SW
 from doomfj import statcode
 from doomfj.config import Config
 from doomfj.harness import W as MEMW
@@ -36,16 +37,16 @@ def _feed(device, data: bytes):
 
 def _present(data: bytes):
     screen = InMemoryScreen()
-    _feed(screen, bytes([0x01, W & 0xFF, W >> 8, H & 0xFF, H >> 8, 8, 0, 1]))
+    _feed(screen, SW.init_screen(W, H))
     _feed(screen, data)
     return screen
 
 
 def _program_bytes(secret_records: bytes, nsecret=3):
-    data = bytearray(level_done_stream(W, H, COLOURS, nsecret)[:-1])
+    data = bytearray(SW.strip_frame_tail(level_done_stream(W, H, COLOURS, nsecret)))
     for slot, d in enumerate(DIGITS):
         data += level_done_digit_records(W, H, COLOURS, nsecret, slot, d)
-    return bytes(data) + secret_records + bytes([0xFF])
+    return bytes(data) + secret_records + SW.FRAME_TAIL
 
 
 def test_secret_exit_paints_exactly_the_oracle_picture():

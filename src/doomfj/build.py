@@ -33,7 +33,7 @@ _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
 _RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj"]
 # ... plus these two for raster_mode="lines" (the shipping tier): the packed-byte ceiling/floor BAND
-# lists pass-1 builds, and the 0x0B column-stream present that replaces the framebuffer raster.
+# lists pass-1 builds, and the draw_collines present (screenwire) that replaces the framebuffer raster.
 _LINES_INCLUDES = ["plane_bands.fj", "stream_render.fj"]
 # B0 (2026-08-18): the player sim. ⚠ LAST in the list -- fj top-level labels are global, so the
 # ordered file list is equivalent to its concatenation and the order is the contract (R54). This is
@@ -762,96 +762,6 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
     assert span < limit, f"R4: span {span} >= flat limit {limit}"
     return metrics
-
-
-def build_unroll_frame(wad_path, texname, *, cfg=None, light, width=None, count=None, step, frac0=0,
-                       downscale=None, lights=None, out_fjm, generated_dir, run=True):
-    """M11c (F5 / D2b — the D2 bake-off): assemble (+ optionally run) the FULL-UNROLL renderer —
-    `rep(width, x) frame.column ... rep(count, row) frame.pixel ...` writing each pixel DIRECTLY into its
-    hex.vec2 framebuffer cell (no deposit, §2.1). With `run=True` it also presents over the 0x06 register
-    device and captures the frame headless (pixel_indices + per-frame sha256 + op_counter/per_pixel_ops).
-
-    `run=False` assembles ONLY — returns assemble_seconds + fjm_bytes + span_words (the R-2/R-4 gate
-    numbers) without executing. Executing a full 160x100 frame is ~24M ops through the headless
-    interpreter (minutes); the gate needs only the ASSEMBLE time + span, and ops/frame is extrapolated
-    from a small run's per_pixel_ops — so the full-scale measurement uses run=False.
-
-    `width`/`count` default to the full viewport (VIEW_W x VIEW_H = the bake-off scale); pass smaller for
-    the fast committed golden. The synthetic frame splats texcol = x % texwidth across the screen at a
-    constant `light`/`step` (matching the oracle). The two per-pixel tables are over-aligned (§2.1)."""
-    cfg = cfg or Config()
-    factor = downscale if downscale is not None else cfg.TEXTURE_DOWNSCALE
-    width = width if width is not None else cfg.VIEW_W
-    count = count if count is not None else cfg.VIEW_H
-    wad = WadFile.from_path(wad_path)
-    defs = {d.name: d for d in wad.texture_defs()}
-    texheight = defs[texname].height // factor
-    texwidth = defs[texname].width // factor
-    lights = lights if lights is not None else max(32, light + 1)
-    gen = Path(generated_dir)
-    gen.mkdir(parents=True, exist_ok=True)
-
-    consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
-    # §2.1: over-align both very-hot per-pixel dispatch tables (texture + colormap).
-    tex = compile_texture("tex", wad, texname, over_align=True, downscale=factor)
-    cm = compile_colormap("cm", wad, lights=lights, over_align=True)
-    palette = compile_palette("palette", wad)
-
-    stride = cfg.W
-    render = []
-    for x in range(width):
-        render.append(f"frame.setup_col {(x % texwidth) * texheight}, {light}, {step}, {frac0}")
-        for row in range(count):
-            render.append(f"frame.pixel framebuffer + {2 * (row * stride + x)}*dw")
-    main = "\n".join([
-        "stl.startup_and_init_all",
-        "present.init_screen",
-        *render,
-        "present.set_palette palette",
-        "present.update_screen_reg framebuffer",
-        "stl.loop",
-        "pixel_leaf:",                                # the shared per-pixel leaf (emitted ONCE)
-        "frame.leaf_body",
-        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",   # register form: 2 ops/pixel (low, high nibble)
-        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
-        "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
-        f"heightmask: hex.vec 3, {texheight - 1}",
-        "pixel_ret: ;0",                             # the stl.fcall return-register (one op)
-        tex, cm, palette,
-    ])
-    (gen / "main.fj").write_text(main, encoding="utf-8")
-
-    paths = [consts, Path("src/fj/present.fj"), Path("src/fj/frame_render.fj"), gen / "main.fj"]
-    out = Path(out_fjm)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    t = time.perf_counter()
-    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
-                lzma_fast=FJM_LZMA_FAST)
-    assemble_seconds = round(time.perf_counter() - t, 3)
-
-    pixels = width * count
-    m = {
-        "span_words": _span_words(out),
-        "assemble_seconds": assemble_seconds,
-        "fjm_bytes": out.stat().st_size,
-        "width": width,
-        "count": count,
-        "pixels": pixels,
-    }
-    if not run:
-        return m
-
-    from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
-    screen = InMemoryScreen()
-    term = fj.run(out, io_device=screen, print_time=False, print_termination=False)
-    m.update({
-        "storage_mode": str(term.storage_mode),
-        "op_counter": term.op_counter,
-        "per_pixel_ops": term.op_counter // pixels if pixels else 0,
-        "pixel_indices": screen.pixel_indices,
-        "frame_hash": screen.frame_hashes[-1][1] if screen.frame_hashes else None,
-    })
-    return m
 
 
 if __name__ == "__main__":

@@ -75,10 +75,15 @@ def _icon_indices(macro_lines):
             (re.match(r"\s*stl\.output_char (\d+)$", ln) for ln in macro_lines) if m]
 
 
+ICON_TEST_PALETTE = [(k, (k * 7) & 0xFF, 255 - k) for k in range(256)]   # distinct colours: an index mix-up shows
+
+
 def _feed_device(payload):
-    """The device the standalone binary presents to, fed the same bytes present.fj emits."""
+    """The device the standalone binary presents to, fed the same bytes present.fj emits -- after its boot screen
+    (init_screen, and a palette in slot 0)."""
+    from doomfj import screenwire as SW
     screen = InMemoryScreen()
-    for data in (bytes([0x01, 160 & 0xFF, 160 >> 8, 100 & 0xFF, 100 >> 8, 8, 0, 1]), payload):
+    for data in (SW.init_screen(160, 100) + SW.define_palette(0, ICON_TEST_PALETTE), payload):
         for byte in data:
             for i in range(8):
                 screen.write_bit(bool((byte >> i) & 1))
@@ -151,16 +156,18 @@ def test_the_title_packing_is_what_present_fj_unpacks():
 
 
 def test_the_device_reads_the_emitted_indices_as_the_icon():
-    """End to end through the real InMemoryScreen: the 0x13 command, the two size bytes, then the
-    pixels. If the header and the payload ever disagree the device desynchronises and every later
-    command is garbage."""
+    """End to end through the real InMemoryScreen: the icon command (0x05), the two size bytes, then the
+    pixels' colours -- drawn through the palette selected when it runs (slot 0). If the header and the payload ever
+    disagree the device desynchronises and every later command is garbage."""
+    from doomfj import screenwire as SW
     macro, _calls = window_chrome_fj()
     n = WINDOW_ICON_SIZE
-    screen = _feed_device(bytes([0x13, n, n]) + bytes(_icon_indices(macro)))
+    screen = _feed_device(bytes([SW.OP_SET_WINDOW_ICON, n, n]) + bytes(_icon_indices(macro)))
     assert screen.window_icon is not None
-    w, h, idx = screen.window_icon
+    w, h, rgb = screen.window_icon
     assert (w, h) == (n, n)
-    assert idx == [WINDOW_ICON_INDEX if c == "#" else 0 for c in WINDOW_ICON_ART]
+    want = [ICON_TEST_PALETTE[WINDOW_ICON_INDEX if c == "#" else 0] for c in WINDOW_ICON_ART]
+    assert [tuple(c) for c in rgb] == want
 
 
 def test_the_present_macros_the_chrome_calls_exist_with_that_arity():
@@ -196,12 +203,16 @@ def test_the_window_chrome_is_emitted_before_the_resets_landing_point():
         "the chrome is emitted AFTER the `;__hot_end` jump, so it never runs at boot")
 
 
-def test_the_prelude_does_not_carry_the_chrome():
-    """The other half of the same property, stated where a reader of the prelude would look."""
+def test_the_chrome_follows_the_boot_screen():
+    """The other half: the API refuses any command before init_screen, so the chrome runs after the boot screen
+    (`;io_boot` .. `io_boot_done:`) -- and the main part, re-entered every frame, holds none of it."""
     src = inspect.getsource(WR.emit_wall_renderer)
-    line = next(ln for ln in src.split("\n") if ln.strip().startswith("prelude = "))
-    assert "_chrome_calls" not in line, (
-        "the chrome is back in the per-frame prelude: " + line.strip())
+    entry = src[src.index('("entry", ['):]
+    entry = entry[:entry.index('("tables", [')]
+    assert entry.index('"io_boot_done:",') < entry.index("*_chrome_calls,")
+    main = src[src.index('("main", ['):]
+    main = main[:main.index("*pass1,")]
+    assert "_chrome_calls" not in main and "init_screen" not in main
 
 
 # -- the ablate registry ---------------------------------------------------------------------------
@@ -576,9 +587,9 @@ def _restart():
 
 def test_the_menu_omits_exactly_the_frame_end_byte():
     """The trap the docstring names: both producers fall into the SAME tail, whose last line is
-    `stl.output_char 0xFF`. A second 0xFF presents an EMPTY frame, and jumping past the tail breaks
-    `selfreset.emit_reset_part`'s assert -- a black-screen menu that costs a full game build to
-    discover. `doomfj.menu` itself is well tested; this wrapper was not tested at all."""
+    `present.end_frame` (END_CMD, present). A second END_CMD leaves a stray opcode, and jumping past the tail breaks
+    `selfreset.emit_reset_part`'s assert -- a broken menu that costs a full game build to discover. `doomfj.menu`
+    itself is well tested; this wrapper was not tested at all."""
     cfg = Config()
     asset_wad = WadFile.from_path(ASSETS)
     from doomfj.menu import help_stream, level_done_stream
@@ -601,8 +612,9 @@ def test_the_menu_omits_exactly_the_frame_end_byte():
                + [menu_stream(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours) for k in range(3)]
                + [level_done_stream(cfg.VIEW_W, cfg.VIEW_H, colours, 0)])
     assert len(streams) == 12
-    assert all(full[-1] == 0xFF for full in streams), "doomfj.menu.stream lost its frame-end marker"
-    assert "\n".join(lines).count("stl.output_char") == sum(len(full) - 1 for full in streams)
+    from doomfj import screenwire as SW
+    assert all(full[-2:] == SW.FRAME_TAIL for full in streams), "doomfj.menu.stream lost its END_CMD + present"
+    assert "\n".join(lines).count("stl.output_char") == sum(len(full) - 2 for full in streams)
 
 
 def test_the_menu_branch_wraps_the_stream_in_the_documented_order():

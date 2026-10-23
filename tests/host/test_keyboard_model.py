@@ -5,7 +5,7 @@ from doomfj import keyboard as KB
 from doomfj.menu import MENU_KEYS
 from doomfj.wall_renderer import STANDALONE_POLLS as P
 
-FIRE, W2, FWD = 0x85, 0x32, 0x77
+FIRE, W2, FWD = KB.KC_LCTRL, 0x32, 0x77
 
 
 def test_a_tap_inside_one_frame_counts_for_that_frame_only():

@@ -32,8 +32,10 @@ from flipjump.interpreter.io_devices.pygame_window import PcIO
 from flipjump.utils.exceptions import IODeviceException
 
 from doomfj import automap as A
+from doomfj.keyboard import KC_DOWN, KC_UP                                    # noqa: E402
 from doomfj import keyboard as KB
 from doomfj.config import Config
+from doomfj import screenwire as SW
 from doomfj.harness import W
 from doomfj.lut_generator import generate_emit_byte_by_nibbles_fj
 from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, MAIN_EXIT_SCR, MAIN_HELP_SCR, MAIN_MAP_SCR,
@@ -50,7 +52,7 @@ MAP_WAD = Path("tests/fixtures/freedoom_e1m2.wad")
 SRC = [Path("src/fj") / "present.fj", Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
 POLLS = 4
 STUB = 7                                            # the world stub paints every column this colour
-ENTER, ESC, UP, DOWN, H_KEY, M_KEY, W_KEY = 0x0D, 0x1B, 0x80, 0x81, 0x68, 0x6D, 0x77
+ENTER, ESC, UP, DOWN, H_KEY, M_KEY, W_KEY = 0x0D, 0x1B, KC_UP, KC_DOWN, 0x68, 0x6D, 0x77
 M32 = 0xFFFFFFFF
 
 SPAWN = type("Spawn", (), {"x": 1 << 16, "y": 2 << 16, "angle": 0})()
@@ -133,7 +135,7 @@ def _dot_program(p, poses, page_lines):
     body = ["stl.startup_and_init_all", "present.init_screen"]
     for vx, vy in poses:
         body += [f"hex.set 8, viewx, {vx}", f"hex.set 8, viewy, {vy}", "stl.fcall am_page, am_ret",
-                 "stl.output_char 0xFF"]
+                 "present.end_frame"]
     return "\n".join(body + ["stl.loop", "am_page:", *page_lines, "stl.fret am_ret",
                              "bad: stl.loop", "am_ret: hex.vec w/4", "viewx: hex.vec 8", "viewy: hex.vec 8",
                              *A.decls(p)]) + "\n"
@@ -246,10 +248,9 @@ FRAMES = 42
 
 def _menu_program(menu_lines, key_lines, frames, world_tic=True, walk=WALK["E1M2"]):
     (start_x, start_y), dx, dy = walk
-    world = []
-    for x in range(CFG.VIEW_W):                     # the world STUB: one flat frame
-        world += [f"    stl.output_char {x}", f"    stl.output_char {CFG.VIEW_H}",
-                  f"    stl.output_char {STUB}", "    stl.output_char 0xFF"]
+    # the world STUB: one flat frame -- a column per x, its run to the view's bottom, then END (screenwire.column)
+    world = SW.fj_lines(b"".join(SW.column(x, [("fill", CFG.VIEW_H, STUB)], CFG.H) for x in range(CFG.VIEW_W)),
+                        "    ")
     return "\n".join([
         "stl.startup_and_init_all",
         "present.init_screen",
@@ -258,10 +259,10 @@ def _menu_program(menu_lines, key_lines, frames, world_tic=True, walk=WALK["E1M2
         *menu_lines,                                # ends at `do_world:`
         # the world STUB's tic: the player walks DX east, DY south -- only a world frame reaches here
         *([f"    hex.add_constant 8, viewx, {dx}", f"    hex.sub_constant 8, viewy, {dy}"] if world_tic else []),
-        "    stl.output_char 0x0B",
+        "    present.draw_collines",
         *world,
         "frame_end:",
-        "    stl.output_char 0xFF",
+        "    present.end_frame",
         "    hex.inc 2, tm_count",
         "    hex.cmp 2, tm_count, tm_frames, tm_frame, tm_done, tm_done",
         "tm_done:", "    stl.loop",

@@ -201,7 +201,7 @@ def _emit(tmp_path, entries, values, view_w=2, nss=3, main=None):
     gen = tmp_path / "gen"
     gen.mkdir()
     (gen / "e1m1_02_main.fj").write_text(
-        main if main is not None else "stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
+        main if main is not None else "present.end_frame\nstl.loop\nbad: stl.loop\n",
         encoding="utf-8")
     p = _set_file(tmp_path, entries, labels=FAKE_BITS)
     part, n_nib, n_byte = selfreset.emit_reset_part(
@@ -243,7 +243,7 @@ def test_emit_ignores_words_below_code_start(tmp_path):
     """code_start is DERIVED from word 1, and everything below it is the stl's own tables."""
     bits = dict(FAKE_BITS, low=50 * W)
     gen = tmp_path / "gen"; gen.mkdir()
-    (gen / "e1m1_02_main.fj").write_text("stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
+    (gen / "e1m1_02_main.fj").write_text("present.end_frame\nstl.loop\nbad: stl.loop\n",
                                          encoding="utf-8")
     p = _set_file(tmp_path, BYTE_ENTRIES + [["low", 0, 1], ["scratch", 0, 1]], labels=bits)
     _part, n_nib, _b = selfreset.emit_reset_part(gen, bits, _pristine({}), p, 2, 3, "e1m1")
@@ -264,13 +264,13 @@ def test_emit_patches_the_frame_tail_size_neutrally(tmp_path):
     and the whole two-pass scheme would be void."""
     _txt, _n, _b, gen = _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1]], {})
     out = (gen / "e1m1_02_main.fj").read_text(encoding="utf-8").split("\n")
-    assert out == ["stl.output_char 0xFF", ";m1_reset", "bad: stl.loop", ""]
+    assert out == ["present.end_frame", ";m1_reset", "bad: stl.loop", ""]
 
 
 @pytest.mark.parametrize("main,match", [
-    ("stl.output_char 0xFF\nstl.loop\nstl.loop\nbad: stl.loop\n", "exactly 1 bare stl.loop"),
-    ("stl.output_char 0xFF\nstl.loop\n", "junk-input halt"),
-    ("nop\nstl.loop\nbad: stl.loop\n", "0xFF end-of-frame marker"),
+    ("present.end_frame\nstl.loop\nstl.loop\nbad: stl.loop\n", "exactly 1 bare stl.loop"),
+    ("present.end_frame\nstl.loop\n", "junk-input halt"),
+    ("nop\nstl.loop\nbad: stl.loop\n", "end of frame"),
 ])
 def test_emit_refuses_a_main_part_it_does_not_recognise(tmp_path, main, match):
     """The patch is done by text surgery on generated code. If the frame tail is not exactly where
@@ -431,7 +431,7 @@ PERSIST_ENTRIES = BYTE_ENTRIES + [["scratch", 0, 1, 2, 3], ["other", 0, 1, 2, 3]
 def _emit_persist(tmp_path, persist, entries=None, values=None, bits=None):
     bits = dict(PERSIST_BITS if bits is None else bits)
     gen = tmp_path / "gen"; gen.mkdir(parents=True)
-    (gen / "e1m1_02_main.fj").write_text("stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
+    (gen / "e1m1_02_main.fj").write_text("present.end_frame\nstl.loop\nbad: stl.loop\n",
                                          encoding="utf-8")
     p = _set_file(tmp_path, PERSIST_ENTRIES if entries is None else entries, labels=bits)
     part, n_nib, n_byte = selfreset.emit_reset_part(

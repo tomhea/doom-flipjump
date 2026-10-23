@@ -172,19 +172,23 @@ def _src():
     return inspect.getsource(WR.emit_wall_renderer)
 
 
-def test_the_screen_init_and_boot_palette_run_once_in_the_entry_part():
+def test_the_screen_init_and_boot_palette_run_once_from_the_entry_part():
+    """every tier: the entry jumps to the cold `io_boot` (init_screen + the palettes) and comes back BEFORE the chrome
+    and the `;__hot_end` jump -- once per run, never on the M1 reset's per-frame path -- and the main part holds no
+    init or palette at all"""
     src = _src()
     entry = src[src.index('("entry", ['):]
     entry = entry[:entry.index('("tables", [')]
-    assert "*(_boot_screen if _boot_screen else [])," in entry
-    assert entry.index("*(_boot_screen if _boot_screen else []),") < entry.index("*hotdata[:1],")
+    assert entry.index('";io_boot",') < entry.index('"io_boot_done:",') < entry.index("*_chrome_calls,") \
+        < entry.index("*hotdata[:1],")
+    assert "*_boot_screen," in src[src.index('("banks", ['):]
     main = src[src.index('("main", ['):]
     main = main[:main.index("*pass1,")]
-    assert "*([] if _boot_screen else" in main and "*([] if _boot_screen else prelude)," in main
-    # ... and only the game-screen tier (the bar, the palette) moves them: every other tier keeps its per-frame ones
+    assert "init_screen" not in main and "palette" not in main
     line = next(ln for ln in src.split("\n") if ln.strip().startswith("_boot_screen = "))
-    nxt = src[src.index(line):].split("\n")[1]
-    assert "if _hud else None" in line + nxt
+    nxt = "\n".join(src[src.index(line):].split("\n")[:4])
+    assert '"io_boot:"' in nxt and "present.init_screen" in nxt and "SW.define_palette" in nxt
+    assert ';io_boot_done"' in nxt
 
 
 def test_the_palette_goes_before_the_record_stream_and_the_phases_after_the_monsters():
@@ -196,7 +200,7 @@ def test_the_palette_goes_before_the_record_stream_and_the_phases_after_the_mons
     # M7 P6+P7 E: the two composed into the monsters' world at the tempo (world_tic_lines; tests/fj/test_monster_tempo_fj)
     i_wt = src.index("pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)")
     i_pal = src.index('pass1 += list(_hrt["palette"])')
-    i_begin = src.index('pass1.append("present.begin_frame_collines")')
+    i_begin = src.index('pass1.append("present.draw_collines")')
     assert i_eye < i_p5 < i_wt < i_pal < i_begin
 
 

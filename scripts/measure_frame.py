@@ -79,7 +79,7 @@ def main():
     vy = args.vy if args.vy is not None else _signed(sp.y, 32) >> 16
     va = args.va if args.va is not None else sp.angle
     stdin = encode_feed_mapunits(vx, vy, va)
-    screen = StreamScreen(stdin=stdin)     # the lines raster presents 0x0B column run-lists
+    screen = StreamScreen(stdin=stdin)     # the lines raster presents draw_collines frames
     term = fj.run(tmp / "m.fjm", io_device=screen, print_time=False, print_termination=False,
                   flat_max_words=RENDER_FLAT_WORDS)
     assert str(term.storage_mode) == "flat", (

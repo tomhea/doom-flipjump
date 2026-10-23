@@ -13,7 +13,7 @@ fj top-level labels are global, so **the order is the contract** — never reord
 | file | macros | called from `MAIN` | what it is |
 |---|---:|---|---|
 | `fixed_point.fj` | 10 | `hex.fixed_mul_lo`, `hex.mul_lo` | 16.16 fixed-point + the packed-table reads. Extends the stl's `hex` namespace, so everything uses it. |
-| `present.fj` | 14 | `init_screen_stream`, `set_palette`, `begin_frame_collines` | drives the screen device: command bytes on the output stream. |
+| `present.fj` | 7 | `init_screen`, `select_palette`, `draw_collines`, `end_frame` | drives the screen device: command bytes on the output stream. |
 | `projection.fj` | 32 | `point_on_side_leaf`, `wedge_setup`, `wedge_bbox` | the projection math — angles, scales, column ranges. 12 more macros are called by `frame_render.fj`. |
 | `frame_render.fj` | 78 | `seg_pass1_leaf_body_lines`, `seg_pass1_leaf_body_ts`, `seg_pass2_leaf_body_lines`, `thing_record_body` | the frame. **Only 24 of its 78 macros are called from outside** (other fj files and the emitters); the rest are its internals. |
 | `stream_render.fj` | 29 | `emit_bytes4` | the per-column run emitter — pushes runs to the device. |

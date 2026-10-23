@@ -369,7 +369,7 @@ def p10_rows(top, words, facts=None):
 
 
 LABEL_LINE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_.]*):(?:\s|$)")
-FRAME_BYTES = re.compile(r"^//.*?(?:(\d+) bytes of 0x0B column run-lists|\((\d+) bytes\), then the digit slots)")
+FRAME_BYTES = re.compile(r"^//.*?(?:(\d+) bytes of draw_collines column records|\((\d+) bytes\), then the digit slots)")
 
 
 def text_facts(gen_dir, wanted):

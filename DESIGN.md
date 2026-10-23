@@ -1143,13 +1143,22 @@ Per handoff §H / §3.5. Top to bottom:
 
 #### F7 — Present layer
 - **Purpose:** Drive the screen device over the output stream (init/palette/present/input).
-- **Supplies:** `init_screen`, `set_palette`, `present` (`update_screen` 0x03), input-poll helpers; `update_rectangle` (0x04) reserved for status-bar/menu rects.
-- **Depends/related:** F4 (framebuffer base), H4 (palette); the device (below).
-- **Assumes / Device contract (read from `ScreenIO.py`, authoritative):**
-  - `[0x01][w:2][h:2][bpp:1][palette_size:2]` init (bpp ∈ {4,8}); `[0x02][palette_addr:w/8]` set_palette; `[0x03][screen_addr:w/8]` update_screen (primary present, memory-hook, ~free); `[0x04][x,y,rw,rh:2 each][screen_addr:w/8]` update_rectangle (reads the *full-screen* base with screen stride — status-bar/menu only); `[0x05]` raw in-stream — **don't use**.
-  - **Framebuffer:** pixel `(px,py)` = packed byte at `screen_addr + (px + py·W)·dw`, masked to bpp. One byte/op, stride `dw`, row-major.
-  - **Palette:** entry `k` = 3 packed bytes R,G,B at `palette_addr + 3k·dw`.
-  - Keyboard (input side of `pc`): non-blocking, tic-based — one status poll (`0x0` none / `0x8` up / `0x9` down) then one keycode byte on events; keycodes ASCII-like `<0x80`, arrows/shift/ctrl/alt `0x80–0x86` (§1.1).
+- **Supplies (today, `src/fj/present.fj`):** `init_screen`, `select_palette`, `draw_collines`, `end_frame` (END_CMD +
+  present), the window's title / icon / frame-rate cap; the palettes are defined in the stream at boot
+  (`doomfj.screenwire.define_palette`). Input: `src/fj/input.fj`'s `kb.poll`.
+- **Device contract (authoritative: flipjump `flipjump/interpreter/io_devices/README.md`; this repo's one copy of its
+  numbers is `doomfj.screenwire`, of the key codes `doomfj.keyboard`'s `KC_*`):**
+  - every frame is `[0x11] draw_collines` -- column records `[x]` then `[y2][colour]` runs top-down, `[0xFE][y]` KEEP,
+    `[0xFD][y]` COPY (column x-1), `[0xFF]` END (always: it closes every column; an item may leave the cursor where
+    it is, painting nothing) -- then `[0xFF]` END_CMD and `[0x1F]` present. The screen never reads program memory.
+  - once at boot (`wall_renderer`'s cold `io_boot`): `[0x01][w:2][h:2][format=8]` init_screen, then PLAYPAL 0..n-1 into
+    palette slots 0..n-1 (`[0x02][slot][first][last][RGB...]`); a damage / bonus / suit flash is `[0x06][slot]`.
+  - Keyboard (input side of `pc`): non-blocking, tic-based -- one status poll (`0x0` none / `0x8` up / `0x9` down)
+    then one keycode byte on events; keycodes are Arduino `Keyboard.h`'s: ASCII below `0x80` (the key, unshifted),
+    modifiers `0x80-0x87` (left Ctrl/Shift/Alt/GUI, then right), every other key `0x88` + its USB HID usage (the arrows
+    Right `0xD7`, Left `0xD8`, Down `0xD9`, Up `0xDA`).
+  - *History:* the framebuffer present below (0x03, read from memory) and the 0x0B column frames it led to are gone --
+    the API keeps only in-stream commands.
 - **Present-path rationale — memory-hook (0x03) over raw-stream (0x05):** *decisive reason = render order ≠ scan order.* The raw stream demands W·H bytes in **row-major** order; DOOM/BSP renders **column-major + front-to-back** with overdraw and multi-segment columns, so pixels are produced out of scan order. The framebuffer decouples render order from scan order; 0x03 then scans out the finished buffer for ~free (~70 ops/frame). *Per byte (@-invariant comparison):* raw output ≈ **~2@** vs deposit ≈ **~4@** — so raw output *is* ~2× cheaper per pixel, BUT that only helps if you emit directly row-major with **no** framebuffer (forfeits incremental `frac+=step` column sampling, and is impossible for multi-segment BSP columns). *With* a framebuffer (which BSP requires), 0x03 (deposit + ~70/frame) beats 0x05 (deposit + ~2@/px ⇒ **+~0.8M/frame at @ = 25**). So 0x03 is strictly better here.
 - **Data & layout:** command bytes only; reads F4's framebuffer + H4's palette in memory.
 - **Time:** present ~70 fj-ops/frame; poll ~tens — negligible.

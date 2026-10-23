@@ -2920,7 +2920,7 @@ ns frame {
         // byte-exact frame, not by stubbing something the rest of the frame depends on.
         rep(things*spremit, k) .lines_spr_load p2_sprfl, p2_s, p2_sblk, p2_sb, p2_sblkb
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
-        // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
+        // list would be identical, so emit [x][COPY][VIEW_H] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
         // W1R-ANCHOR: the pattern key is (x + wnoff), wnoff = viewangle*640/turn computed
         // once per frame -- turning slides the masonry WITH the walls instead of
@@ -3080,13 +3080,11 @@ ns frame {
         rep(pnear, k) .lines_ditto_plane pval8, p2_dpid, emit_ditto, emit_full
       emit_ditto:
         byte.emit x
-        // M7 P4.0 (docs/gp-partial-ditto.md 5a): under a status bar (VIEW_H < H) the ditto copies the VIEW's rows
-        // only -- [0xFD][VIEW_H][0xFF], a PARTIAL DITTO -- so the left column's bar is never copied; a full-screen
-        // view keeps the one-byte [0xFE]. Assembly-time: a tier without the bar emits exactly what it did.
-        rep(VIEW_H < H, k) stl.output_char 0xFD
-        rep(VIEW_H < H, k) stl.output_char VIEW_H
-        rep(VIEW_H < H, k) stl.output_char 0xFF
-        rep(VIEW_H >= H, k) stl.output_char 0xFE
+        // the ditto is COPY (screenwire.COPY): [0xFD][VIEW_H] copies the VIEW's rows of column x-1 (under a status
+        // bar, VIEW_H < H, the left column's bar is never copied), and END closes the record
+        stl.output_char 0xFD
+        stl.output_char VIEW_H
+        stl.output_char 0xFF
         ;col_emitted
         // ==========================================================================================
         // == 4. EMIT, THEN SAVE THE SIGNATURE ==
@@ -3203,7 +3201,7 @@ ns frame {
     // narrowing [chi, flo) from both ends; a one-sided seg fills what is left and closes the
     // column. Each piece appends finished [y2][colour] pairs to the column's TOP or BOTTOM buffer
     // (stream.band_range / stream.wall_run); the record itself is assembled after the walk by
-    // stream.flush_col, because the bottom pieces arrive in the wrong order for the 0x0B protocol.
+    // stream.flush_col, because the bottom pieces arrive in the wrong order for the draw_collines protocol.
     //
     // Everything here is 2-nibble UNSIGNED row arithmetic on EXCLUSIVE ends, which is what makes it
     // cheap: `ctake` = clamp(top, 0, VIEW_H) and `fstart` = clamp(bot+1, 0, VIEW_H) fold DOOM's

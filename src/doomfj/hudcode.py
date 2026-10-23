@@ -1,13 +1,14 @@
 """M7 P4.0 -- the fj side of the game screen's bar and weapon overlay (docs/gp-combat.md section 2). Every byte comes
 from `doomfj.hud`, the generator the oracle composes with, so the two mirrors cannot drift.
 
-THE FRAME (decisions C3/C4): after the view's 160 column records, before the frame's closing 0xFF --
-  1. the WEAPON: one record per covered column, `[x][0xFC][y0]` (keep the world above it), then per run of one texel
-     `[y_end][colour]`, with `[0xFC][y]` over a transparent gap, and `[0xFF]`. Every colour is a constant: E1M1's
+THE FRAME (decisions C3/C4): after the view's 160 column records, before the frame's closing END_CMD (doomfj.screenwire
+holds the tokens: KEEP 0xFE, END 0xFF) --
+  1. the WEAPON: one record per covered column, `[x][KEEP][y0]` (keep the world above it), then per run of one texel
+     `[y_end][colour]`, with `[KEEP][y]` over a transparent gap, and `[END]`. Every colour is a constant: E1M1's
      sectors all light a psprite with one colormap row, so nothing is looked up at runtime. M8 (E1M9's dark sector):
      a map of several rows bakes one weapon drawing per row, picked by the nibble the view's leaf sets
      (`weapon_row_lines`); the flashes are FF_FULLBRIGHT, drawn once at hud.FULLBRIGHT_ROW;
-  2. the BAR: rows [VIEW_ROWS, H) of a column, `[x][0xFC][VIEW_ROWS][pairs][0xFF]`, ONLY for columns that changed.
+  2. the BAR: rows [VIEW_ROWS, H) of a column, `[x][KEEP][VIEW_ROWS][pairs][END]`, ONLY for columns that changed.
      Each dynamic slot (`hud.bar_slots`) has a value cell in `hud_v` and a shadow in `hud_s` (what the screen shows);
      a slot whose value differs from its shadow is redrawn and the shadow copied. `hud_full` -- set by every menu
      frame and at boot -- redraws the static columns and invalidates every shadow (to SHADOW_STALE, which no variant
@@ -23,6 +24,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Sequence
 
 from doomfj import hud
+from doomfj import screenwire as SW
 
 BLANK = 10                     # a digit slot's "no digit" (a leading zero, or no ammo)
 SHADOW_STALE = 15              # a shadow value no variant uses: forces a redraw
@@ -44,17 +46,11 @@ def slot_codes(values: dict, cards: Sequence[str] = ()) -> List[int]:
 
 
 def _bar_record(x: int, column: Sequence[int], view_rows: int) -> List[str]:
-    """one bar column: keep the view, then the bar's rows as constant (y2, colour) pairs"""
-    out = [f"stl.output_char {x}", "stl.output_char 0xFC", f"stl.output_char {view_rows}"]
-    y = 0
-    while y < len(column):
-        c = column[y]
-        e = y + 1
-        while e < len(column) and column[e] == c:
-            e += 1
-        out += [f"stl.output_char {view_rows + e}", f"stl.output_char {c}"]
-        y = e
-    return out + ["stl.output_char 0xFF"]
+    """one bar column: keep the view, then the bar's rows as constant (y2, colour) pairs, down to the screen's last
+    row, then END"""
+    height = view_rows + len(column)
+    assert height == hud.VIEW_ROWS + hud.BAR_ROWS, (view_rows, len(column))
+    return SW.fj_lines(SW.column(x, [("keep", view_rows)] + SW.runs(column, view_rows), height))
 
 
 def weapon_record_lines(overlay: Dict[int, list], colormap_row: Sequence[int]) -> List[str]:
@@ -62,14 +58,14 @@ def weapon_record_lines(overlay: Dict[int, list], colormap_row: Sequence[int]) -
     out = []
     for x in sorted(overlay):
         runs = overlay[x]
-        out += [f"stl.output_char {x}", "stl.output_char 0xFC", f"stl.output_char {runs[0][0]}"]
+        items = [("keep", runs[0][0])]
         cursor = runs[0][0]
         for y0, y1, texel in runs:
             if y0 > cursor:
-                out += ["stl.output_char 0xFC", f"stl.output_char {y0}"]
-            out += [f"stl.output_char {y1}", f"stl.output_char {colormap_row[texel]}"]
+                items.append(("keep", y0))
+            items.append(("fill", y1, colormap_row[texel]))
             cursor = y1
-        out.append("stl.output_char 0xFF")
+        out += SW.fj_lines(SW.column(x, items, hud.VIEW_ROWS + hud.BAR_ROWS))
     return out
 
 

@@ -29,6 +29,7 @@ from doomfj.reference_model import (ANG90, ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_M
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
                                     apply_sector_heights, spawn_state)
 from doomfj.config import Config, map_cfg                                    # M8: a map's SWITCH_TEX
+from doomfj import screenwire as SW                                         # the screen API (flipjump io_devices/README.md)
 from doomfj import switches as _switches, switchcode as _switchcode        # M8: the switch textures
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
@@ -51,7 +52,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
                                     MIN_SPRITE_H_MONSTER, VANISHABLE_TYPES,
                                     SPRITE_MINZ, sprite_bucket, sprite_bucket_height,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
-from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
+from doomfj.texturecompiler import (compile_colormap, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_lines
@@ -946,7 +947,7 @@ P5_SHARED_LABELS = ("mm_x", "mm_y", "viewx", "viewy", "lvdone", "cpx", "cpy", "c
                     "ptloc_walk", "ptloc_ret", "sshead", "thnext", "ll_enc", "thpos_rt", "thss_rt", "mt_dx", "mt_dy",
                     "mt_ax", "mt_ay", "mm_octant", "mm_ocret", "mm_fa", "rng_pl", "hud_v", "wp_st", "wp_sy",
                     "wp_tics", "wp_frm", "wp_bottom_c", "dm_leaf", "md_attack", "sp_sa", "sp_sid", "sp_ti",
-                    "thsel_ret", "palette",
+                    "thsel_ret",
                     # P5's own: what its callers jump to
                     "dp_go", "dp_ret", "dp_dmg", "pj_spawn", "pj_sret", "pj_phase", "fx_spawn", "fx_sret", "fx_phase",
                     "p_hp", "p_dead", "pal_cur", "rng_fx", "ts_mob", "thsel_mob")
@@ -1050,14 +1051,15 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
                 cold=None, plasma: bool = False) -> list:
     """M3 — the MENU frames, and the branch that chooses them.
 
-    A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
+    A menu screen is a picture that never changes, and the device already takes pictures as draw_collines
     column run-lists, so this is a constant byte stream: no renderer, no map, no tables, no
     dispatch. MEASURED at ~1,172 bytes -> ~2,344 ops against a world frame's ~28,000,000.
 
-    ⚠ THE STREAM'S END-OF-FRAME BYTE IS OMITTED ON PURPOSE. Both producers fall into the SAME
-    tail, whose last line is `stl.output_char 0xFF` -- which `selfreset.emit_reset_part` asserts on
-    when it patches the frame into a loop. Emitting a second 0xFF here would present an empty
-    frame; jumping past the tail would break that assert. So the menu ends where the world ends.
+    ⚠ THE STREAM'S END_CMD IS OMITTED ON PURPOSE. Both producers fall into the SAME tail, whose
+    last line is `present.end_frame` (END_CMD, then present) -- which `selfreset.emit_reset_part`
+    asserts on when it patches the frame into a loop. Ending the command here as well would leave
+    the tail's END_CMD as a stray opcode; jumping past the tail would break that assert. So the
+    menu ends where the world ends.
 
     M7 P1.5 -- THE STATE MACHINE (docs/gp-skill-menu.md). The polls only record events
     (`ev_enter`, `ev_esc`, `ev_up`, `ev_dn`; M7 P3.4: `ev_help`; P10: `ev_any`); here, first match wins, in the
@@ -1730,7 +1732,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
 
 
 WINDOW_TITLE = "FlipJump DOOM"
-# P10 (the owner, 2026-10-12): the frame-rate cap the program sends at boot (present.set_max_fps -> flipjump's 0x14).
+# P10 (the owner, 2026-10-12): the frame-rate cap the program sends at boot (present.set_max_fps -> the screen API's 0x03).
 # 20 (measured on gamespeed's 10 games, blocked54: frames 33..378 ms, median 125): only the cheap views wait -- the
 # world's step is per frame, so this bounds the game's real-time speed from above (the monsters' 2 tics a frame run at
 # <= 40 tics/s, DOOM's own 35 near it); a heavy frame is already slower and is never delayed.
@@ -1794,7 +1796,7 @@ assert len(WINDOW_ICON_ART) == WINDOW_ICON_SIZE ** 2, (
 
 
 def window_chrome_fj():
-    """(macro_lines, call_lines) for the 0x12 title and 0x13 icon commands.
+    """(macro_lines, call_lines) for the title (0x04), the frame-rate cap (0x03) and the icon (0x05) commands.
 
     ⚠ THESE MUST BE EMITTED INTO THE **ENTRY** PART, NOT THE PRELUDE, and the docstring here used
     to claim the opposite: "Boot-only ... costs ZERO ops on the frame metric". That was false. The
@@ -1807,9 +1809,9 @@ def window_chrome_fj():
     The icon needs NO WAD: it is generated from `WINDOW_ICON_ART`. That is why every tier gets it,
     including `render`, which passes no sprite wad and therefore used to ship title-only.
 
-    Index 0 is transparent (the device turns it into an SDL colorkey). The icon is sent before the
-    palette, which is safe: the device holds it as `_pending_icon` and applies it when the palette
-    arrives (`pygame_window._set_palette`)."""
+    The icon's colours are palette indices, drawn through the palette selected when the command runs -- so it is
+    sent after init_screen and the boot palettes (slot 0 selected). The API has no transparency: colour 0 is the
+    palette's black, the icon's background."""
     big = 0
     for i, ch in enumerate(WINDOW_TITLE.encode("utf-8")):
         big |= ch << (8 * i)
@@ -1828,7 +1830,7 @@ def window_chrome_fj():
         body.extend("    stl.output_char %d" % (WINDOW_ICON_INDEX if c == "#" else 0)
                     for c in row)
     macro = ["// the window icon: the DOOM wordmark from WINDOW_ICON_ART, %dx%d palette indices,"
-             " index 0 transparent. Runs ONCE, from the entry part." % (n, n),
+             " colour 0 its black background. Runs ONCE, from the entry part." % (n, n),
              "def doom_window_icon {"] + body + ["}"]
     calls.append("doom_window_icon")
     return macro, calls
@@ -1982,7 +1984,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         "standalone=True needs player_sim=True -- the keyboard drives the sim, and nothing else "
         "moves the player")
     assert not standalone or lines, (
-        "standalone=True presents 0x0B column run-lists, which is the lines tier")
+        "standalone=True presents draw_collines column records, which is the lines tier")
     # the player start, which only the standalone tier bakes (see the view-state declaration)
     _spawn = spawn_state(map_wad, mapname) if standalone else None
     assert not menu or standalone, "menu=True is a standalone-tier frame producer"
@@ -2476,7 +2478,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
                                         over_align=True),
     ])
-    palette = compile_palette("palette", asset_wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
     # M13-ATANDISP (lines mode): the SAME tantoangle values as a D4 per-entry dispatch table, so
     # point_to_angle_m can trade its ~289@ packed read (4x read_byte_and_inc + a mul_const, per the
@@ -4162,7 +4163,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # (a command byte inside the run-lists would corrupt them); sent only on a change (hurtcode.pal_lines)
     if _hrt:
         pass1 += list(_hrt["palette"])
-    pass1.append("present.begin_frame_collines")
+    pass1.append("present.draw_collines")
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
     else:
@@ -4173,12 +4174,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     zlight = generate_zlight_lut_fj("zlight", cfg.VIEW_W, COLORMAP_LIGHTS)
     distscale = generate_distscale_lut_fj("distscale", cfg.VIEW_W, cfg.TRIG_N)
 
-    # M13pS2: the stream present -- the frame leaves the program AS the emitted run bytes (device
-    # DMA decode); one unrolled emit_column per screen column, every col_* read at a compile-time
-    # address. Replaces update_screen_reg + the whole fb/pass-2/plane-pass raster.
-    # M13-lines: fillCol records were emitted inline during the walk; one 0xFF x-sentinel ends
-    # the frame (x is never 0xFF for real: VIEW_W = 160).
-    present_tail = ["stl.output_char 0xFF"]
+    # the frame leaves the program AS the draw_collines records the walk emitted inline; `present.end_frame` closes the
+    # command (END_CMD, where a column would start: x is never 0xFF for real, VIEW_W = 160) and presents it (0x1F).
+    present_tail = ["present.end_frame"]
     # the framebuffer raster's shared leaves went with `raster_mode`: the lines tier emits none.
     fb_leaves = []
     # M13-hotdata (stream only, R20): pointer-deref/dispatch wflip cost scales with the ADDRESS's
@@ -4267,25 +4265,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               + ([_mt_tables] if moving_things else [])
               + (_thss_decl() if _thss_cold else [])           # M8 wave 1: past the window (THSS_COLD)
               + ["__hot_end:"])
-    # M13-raster: the walk EMITS records inline (present.begin_frame_raster is prepended to pass1,
-    # before the walk jump), so present.set_palette + the NEW load_raster_tables address handoff MUST
-    # run before pass1 -- otherwise their command bytes would land INSIDE the interleaved raster
-    # stream and corrupt it (every other mode buffers-then-emits in present_tail, safely after
-    # set_palette). All other modes keep set_palette in its original post-pass1 position.
+    # THE BOOT SCREEN, once per run (the M1 reset re-enters at `__hot_end`, below the entry's jump to it): init_screen,
+    # then the palettes into slots 0..n-1 (PLAYPAL 0..n-1: the hurt / bonus / suit ones where the tier has them;
+    # init_screen selects slot 0) -- and the window's chrome after them, as the API requires (no command before
+    # init_screen). init_screen starts the device over (picture, palettes), so per frame it would put slot 0 back behind
+    # hurtcode's `pal_cur` and blank every bar column hudcode's tail does not redraw (it redraws only the changed ones).
+    # The ~11k ops of palette bytes are COLD: `io_boot` sits at the very end of the program (the entry jumps there and
+    # back), so they move no table and no op of the renderer -- the entry keeps the shape it had: startup, chrome, jump.
     _icon_macro, _chrome_calls = window_chrome_fj()
-    # AFTER set_palette so the icon's indices resolve against the registered palette. (The device
-    # also re-applies a pending icon when a palette arrives later, so the order is not load-bearing
-    # -- but emitting it in the natural order keeps the stream readable.)
-    # ⚠ THE CHROME IS NOT HERE ANY MORE. The prelude runs on every frame (the M1 reset
-    # lands on it), and the title+icon cost 8,440 ops and 0.57 ms each time. They moved
-    # to the ENTRY part, ahead of the `;__hot_end` jump, so they run once at boot.
-    prelude = ["present.set_palette palette"]
-    # M7 P5: the GAME SCREEN tier (the bar, P4.0; the damage palette, P5) sends its init and boot palette from the
-    # ENTRY part, once: `init_screen` ZEROES the device's palette AND pixels (ScreenIO._init_screen), and the M1 reset
-    # re-enters at `__hot_end`, so per frame it would put playpal 0 back behind hurtcode's `pal_cur` and blank every
-    # bar column hudcode's tail does not redraw (it redraws only the changed ones: the device keeps the rest)
-    _boot_screen = (["present.init_screen" if standalone else "present.init_screen_stream 0"] + prelude
-                    if _hud else None)
+    _boot_rgbs = _hrt["palettes"] if _hrt else [asset_wad.playpal(0)]
+    _boot_screen = (["io_boot:", "    present.init_screen"]
+                    + [ln for k, rgb in enumerate(_boot_rgbs) for ln in SW.fj_lines(SW.define_palette(k, rgb), "    ")]
+                    + ["    ;io_boot_done"])
     postlude_palette = []
     # ── PARTITIONED EMISSION ────────────────────────────────────────────────────────────
     # The emitted program is built as ORDERED, NAMED PARTS instead of one 107M-char blob, so
@@ -4330,28 +4321,21 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         "// =========================================================================",
         *_icon_macro,                                  # the icon macro DEFINITION (emits no ops)
         "stl.startup_and_init_all",
-        # BOOT-ONLY, and this time really: everything below `;__hot_end` is re-entered by the M1
-        # reset every frame, everything above it runs once. The window title and icon belong above.
+        # BOOT-ONLY: everything below `;__hot_end` is re-entered by the M1 reset every frame, everything above it runs
+        # once. The screen's init and palettes first (`io_boot`, cold, at the end of the program: no command may
+        # precede init_screen), then the title and icon.
+        ";io_boot",
+        "io_boot_done:",
         *_chrome_calls,
-        # M7 P5: the game-screen tier's screen init and its boot palette run ONCE, here (`_boot_screen`) --
-        # `init_screen` zeroes the device's palette and pixels (ScreenIO._init_screen), so re-sent every frame it would
-        # put playpal 0 back behind `pal_cur` (hurtcode.pal_lines sends a palette only on a change) and blank the bar
-        *(_boot_screen if _boot_screen else []),
         *hotdata[:1],                                  # the `;__hot_end` jump over the tables
       ]),
       ("tables", [
         *hotdata[1:],                                  # shared decls + trig/reciprocal LUTs + dispatch tables
       ]),
       ("main", [
-          # M5: standalone is run by the plain `fj` CLI, whose stock InMemoryScreen wants the
-          # 8-byte init. `flush_mode` governs only the 0x07 pixel-stream mode, which the 0x0B
-          # frames this tier presents do not use, so dropping it costs the picture nothing.
-          *([] if _boot_screen else
-            ["present.init_screen" if standalone else "present.init_screen_stream 0"]),
-          *([] if _boot_screen else prelude),
           *pass1, *pass2, *plane_pass,
           # M3: both frame producers fall into ONE tail. The label goes BEFORE the tail's
-          # `stl.output_char 0xFF`, so the line preceding `stl.loop` is still that 0xFF and
+          # `present.end_frame`, so the line preceding `stl.loop` is still that end of frame and
           # `selfreset.emit_reset_part`'s structural assert is untouched.
           *postlude_palette, *(_hud["tail"] if _hud else []),            # M7 P4.0: the weapon, the bar
           *(["frame_end:"] if menu else []), *present_tail, "stl.loop",
@@ -4644,11 +4628,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           *([lines_wstrip_txt] if lines_wstrip_txt else []),
           *([] if True else      # M13-hotdata: retired with the non-lines modes
             [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
-          palette,
           yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
           # M8: the map page's producers (automap_cold_lines) -- LAST, after every table, so the ~90k ops of baked
           # page move no op of the renderer; reached only by the menu's `;mf_am`, and every path leaves by a jump
           *((["// M8 (doomfj.automap): the map page's producers, cold"] + _am_cold) if _am_cold else []),
+          # the boot screen (init_screen + the palettes), cold: reached once, by the entry's `;io_boot`
+          "// the boot screen: init_screen and the palettes (doomfj.screenwire), run once from the entry",
+          *_boot_screen,
       ]),
     ]
     _texts = [(n, chr(10).join(g)) for n, g in _parts if g]

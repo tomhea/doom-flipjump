@@ -2,9 +2,9 @@
 it is told — explicit lines/rectangles/pixels; no projection, no DDA, no shading, no resident
 geometry). fj does EVERYTHING: BSP walk, wedge + back-face culls, per-seg projection, per-column
 top/bottom + clipping, occlusion (claim-time, front-to-back), distance-light band boundaries and
-colormap lookups. The device receives the 0x0B packed column-run frame: per column [x] +
-[y2][colour] pairs filling rows top-down (plus the 0xFE "ditto" = copy column x-1, the
-owner-approved rectangle-widening), 0xFF ends a column / the frame.
+colormap lookups. The device receives a draw_collines frame (doomfj.screenwire): per column [x] +
+[y2][colour] pairs filling rows top-down (plus COPY = copy column x-1, the owner-approved rectangle-widening),
+END closing a column that stops short of the bottom row, END_CMD + present ending the frame.
 
 Byte-exact vs the same W1/flat oracle as the stream/spans/raster gates."""
 from pathlib import Path

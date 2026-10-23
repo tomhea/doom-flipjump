@@ -19,6 +19,7 @@ from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 from flipjump.interpreter.io_devices.pygame_window import PcIO
 
 from doomfj.config import Config
+from doomfj import screenwire as SW
 from doomfj.harness import W
 from doomfj.menu import fj as menu_fj, pixels
 
@@ -31,10 +32,9 @@ SRC = [Path("src/fj") / "present.fj", Path("src/fj") / "input.fj"]
 
 
 def _program(mode_init):
-    world = []
-    for x in range(VW):                       # the world STUB: one flat frame, no renderer
-        world += ["    stl.output_char %d" % x, "    stl.output_char %d" % VH,
-                  "    stl.output_char %d" % STUB, "    stl.output_char 0xFF"]
+    # the world STUB: one flat frame -- a column per x, its run to the view's bottom, then END (screenwire.column)
+    world = SW.fj_lines(b"".join(SW.column(x, [("fill", VH, STUB)], CFG.H) for x in range(VW)),
+                        "    ")
     return "\n".join([
         "stl.startup_and_init_all",
         "present.init_screen",
@@ -46,10 +46,10 @@ def _program(mode_init):
         menu_fj(VW, VH, LINES, 2, COLOURS, label="menu_frame", end_marker=False),
         "    ;frame_end",
         "do_world:",
-        "    stl.output_char 0x0B",
+        "    present.draw_collines",
         *world,
         "frame_end:",
-        "stl.output_char 0xFF",
+        "present.end_frame",
         "stl.loop",
         "bad: stl.output_char 0x21",
         "     stl.loop",
@@ -103,9 +103,9 @@ def test_the_two_producers_really_differ(tmp):
 
 def test_the_tail_shape_the_reset_asserts_on_is_intact():
     """`selfreset.emit_reset_part` refuses unless the line before the bare `stl.loop` is
-    `stl.output_char 0xFF`. The menu branch must not disturb that -- so the shared frame-end label
+    `present.end_frame`. The menu branch must not disturb that -- so the shared frame-end label
     goes BEFORE the tail, not after it."""
     lines = [l.strip() for l in _program(1).split("\n")]
     loop_at = lines.index("stl.loop")
-    assert lines[loop_at - 1] == "stl.output_char 0xFF"
+    assert lines[loop_at - 1] == "present.end_frame"
     assert lines[loop_at - 2] == "frame_end:"

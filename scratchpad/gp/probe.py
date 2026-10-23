@@ -3,7 +3,7 @@
     python scratchpad/gp/probe.py --selftest            # R9: controls C0..C4 (takes the binary lock)
     python scratchpad/gp/probe.py --demo                # read a walk, inject a viewpoint (blocked27)
 
-WHAT IT IS. The screen device holds `device_memory` (NativeDeviceMemory: read_word/write_word) for
+WHAT IT IS. The harness holds a `device_memory` view (NativeDeviceMemory: read_word/write_word) for
 the whole run, and the frame loop calls back into Python on every input bit and every present. So a
 gate can READ any cell of the running program by LABEL, and WRITE one, at a known point of the frame
 -- with no change to the program at all. That is what makes gates state-exact (plan section 9) and
@@ -669,9 +669,12 @@ class GameBinary:
         screen = ProbeScreen(probe)
         kb = ProbeKeyboard(ScriptedKeyEventSource(list(events)), screen, frames, probe)
         io = PcIO(screen, kb)
-        io.attach_memory(NativeDeviceMemory(self.core, self.width))
+        # the probe's view of memory is the harness's own: the screen never reads program memory (flipjump
+        # io_devices/README.md), so it no longer keeps the view it is attached
+        dm = NativeDeviceMemory(self.core, self.width)
+        io.attach_memory(dm)
         if probe is not None:
-            probe.attach(screen.device_memory, self.core)
+            probe.attach(dm, self.core)
         if pre_run is not None:
             pre_run(probe)                       # e.g. the known-value check on the pristine image
         t = time.time()

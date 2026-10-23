@@ -32,11 +32,10 @@ What this file pins, and what breaks in the shipped program if it stops holding:
   and BINDING_DIRTY's sentinel-ness: a spuriously dirty binding leaves the PIXELS correct and
   silently restores the 27.2M ops/frame that M14-e removed -- a perf regression with byte-exact
   output, the one class of defect `deg_gate`'s op-count check exists for.
-* THAT THE TWO COMMAND-BYTE REGISTRIES DO NOT COLLIDE. STATE_CMD/THING_CMD live here; the
-  present-protocol CMD_* live in `tests/fj/stream_screen.py` with no cross-check. If a future
-  present command takes 0x10, StreamScreen mis-frames the stream and every frame decodes as
-  garbage. The other registry is read out of its file with `ast` rather than re-typed here, so the
-  two cannot be pinned to stale copies of each other.
+* THAT THE HOST CHANNEL DOES NOT COLLIDE WITH THE SCREEN. STATE_CMD/THING_CMD live here; the screen API's opcodes
+  live in `doomfj.screenwire`. They share one output stream, and the hosted harness takes the host channel out
+  before flipjump's screen decodes the rest -- a host opcode that is also a screen opcode would be read as a screen
+  command. The screen's are read from screenwire's OP_* names, not re-typed here.
 
 R9 -- these can fail. Written on 2026-09-11 against 26 in-memory mutants of `wireformat.py` (the
 module source was mutated and exec'd under a shimmed `sys.modules` entry; `src/` was not touched):
@@ -53,7 +52,6 @@ that a wrong MAGIC lands the program on `bad:`, that `hex.if_flags` interprets a
 the way the comment says, that FEED_BYTES is what the program actually consumes, and cumulative
 multi-frame fidelity.
 """
-import ast
 import random
 import struct
 from pathlib import Path
@@ -358,42 +356,17 @@ def test_visibility_is_one_byte_per_flag_in_slot_order():
 
 # -- the two command-byte registries -------------------------------------------------------------
 
-def _present_protocol_command_bytes():
-    """The present-protocol command bytes, read out of tests/fj/stream_screen.py with `ast` rather
-    than re-typed here -- a re-typed copy is how two registries in two files drift apart. That file
-    imports `flipjump`, so it is PARSED, never imported."""
-    src = (ROOT / "tests" / "fj" / "stream_screen.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    named, compared = {}, set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) \
-                and isinstance(node.value.value, int) and not isinstance(node.value.value, bool):
-            for t in node.targets:
-                if isinstance(t, ast.Name) and t.id.startswith("CMD_"):
-                    named[t.id] = node.value.value
-        # the dispatch tests one command byte inline (CMD_INIT_SCREEN); catch it by shape
-        if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) \
-                and node.left.id == "command":
-            for c in node.comparators:
-                if isinstance(c, ast.Constant) and isinstance(c.value, int):
-                    compared.add(c.value)
-    return named, compared
-
-
-def test_the_state_wire_commands_do_not_collide_with_the_present_protocol():
-    """The two registries live in different files with no collision check, and they share ONE
-    numbering space on the output stream. If a present-protocol command ever takes 0x10 or 0x11,
-    StreamScreen mis-frames the stream and every frame decodes as garbage -- discovered only by
-    building. This also documents that wireformat.py owns 0x10/0x11."""
-    named, compared = _present_protocol_command_bytes()
-    # the scan must actually have found the registry, or this test proves nothing (R9)
-    assert "CMD_BEGIN_FRAME_STREAM" in named and len(named) >= 8, sorted(named)
-    assert compared, "no inline command-byte comparison found; the dispatch moved"
-    others = set(named.values()) | compared
+def test_the_state_wire_commands_do_not_collide_with_the_screen_api():
+    """The host channel and the screen share ONE output stream: the hosted harness (tests/fj/stream_screen.py) takes
+    STATE_CMD / THING_CMD out and hands the rest to flipjump's screen, so neither may be a screen-API opcode -- and the
+    screen's opcodes are read from doomfj.screenwire, the program's one copy of them (R9: the scan must find all ten)."""
+    from doomfj import screenwire as SW
+    api = {v for k, v in vars(SW).items() if k.startswith("OP_")}
+    assert len(api) == 10 and {0x01, 0x10, 0x11, 0x1F} <= api, sorted(api)
     assert STATE_CMD != THING_CMD
     for name, cmd in (("STATE_CMD", STATE_CMD), ("THING_CMD", THING_CMD)):
-        assert cmd not in others, f"{name} = {cmd:#04x} collides with the present protocol"
-        assert 0 <= cmd <= 0xFF, f"{name} is not one byte"
+        assert cmd not in api, f"{name} = {cmd:#04x} collides with the screen API"
+        assert 0x80 <= cmd <= 0xFF, f"{name} is not a one-byte host-channel opcode (0x80 and up)"
 
 
 # -- the magic byte: the one constant a round-trip test is BLIND to ---------------------------

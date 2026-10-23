@@ -32,6 +32,8 @@ from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 from flipjump.interpreter.io_devices.pygame_window import PcIO
 
 from doomfj.config import Config
+from doomfj import screenwire as SW
+from doomfj.keyboard import KC_DOWN, KC_UP                                    # noqa: E402
 from doomfj.harness import W
 from doomfj.menu import (ANY_KEY_EVENT, HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_ENTER, LEVEL_DONE_SCR,
                          LEVEL_DONE_SCREENS, MAIN_EXIT_SCR, MAIN_HELP_SCR, MAIN_RESUME_SCR, MENU_HALTED, MENU_KEYS,
@@ -54,7 +56,7 @@ ASSETS = Path("tests/fixtures/freedoom_assets.wad")
 SRC = [Path("src/fj") / "present.fj", Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
 POLLS = 4
 STUB = 7                                            # the world stub paints every column this colour
-ENTER, ESC, UP, DOWN, H_KEY = 0x0D, 0x1B, 0x80, 0x81, 0x68
+ENTER, ESC, UP, DOWN, H_KEY = 0x0D, 0x1B, KC_UP, KC_DOWN, 0x68
 
 # a minimal restart block: no doors, one runtime thing on one leaf (the block must assemble; what
 # it writes is tests/fj/test_skill_menu.py's business)
@@ -117,10 +119,9 @@ HOLD_FRAMES = 12
 
 
 def _program(menu_lines, scr0, frames):
-    world = []
-    for x in range(VW):                             # the world STUB: one flat frame
-        world += [f"    stl.output_char {x}", f"    stl.output_char {VH}",
-                  f"    stl.output_char {STUB}", "    stl.output_char 0xFF"]
+    # the world STUB: one flat frame -- a column per x, its run to the view's bottom, then END (screenwire.column)
+    world = SW.fj_lines(b"".join(SW.column(x, [("fill", VH, STUB)], CFG.H) for x in range(VW)),
+                        "    ")
     return "\n".join([
         "stl.startup_and_init_all",
         "present.init_screen",
@@ -129,10 +130,10 @@ def _program(menu_lines, scr0, frames):
         f"    rep({POLLS}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, kb_w5, kb_now, "
         "ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad",     # P10: ev_any
         *menu_lines,                                # ends at `do_world:`
-        "    stl.output_char 0x0B",
+        "    present.draw_collines",
         *world,
         "frame_end:",
-        "    stl.output_char 0xFF",
+        "    present.end_frame",
         "    hex.inc 2, tm_count",
         "    hex.cmp 2, tm_count, tm_frames, tm_frame, tm_done, tm_done",
         "tm_done:", "    stl.loop",

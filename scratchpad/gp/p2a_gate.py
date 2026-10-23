@@ -60,6 +60,7 @@ import probe as P                                                            # n
 import onewalk                                                               # noqa: E402
 import gate_roles                                                            # noqa: E402  (M8)
 from doomfj import doors as D                                                # noqa: E402
+from doomfj.keyboard import KC_DOWN, KC_UP                                    # noqa: E402
 from doomfj.doors import in_use_box_fixed                                    # noqa: E402
 from doomfj.fixedpoint import _signed                                        # noqa: E402
 from doomfj.reference_model import SimState                                  # noqa: E402
@@ -82,7 +83,7 @@ READ = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "dstate", "ddir", "ds
         "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",   # M7 P3.2a
         "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt",                   # M7 P3.2b
         "mon_justattacked")                                                                       # M7 P3.2c
-MENU_CODES = {"enter": 0x0D, "esc": 0x1B, "up": 0x80, "dn": 0x81}     # M7 P6: up / down (F5's NEW GAME medium)
+MENU_CODES = {"enter": 0x0D, "esc": 0x1B, "up": KC_UP, "dn": KC_DOWN}     # M7 P6: up / down (F5's NEW GAME medium)
 CARD_TYPE = 5
 # M7 P6: the player mode a Mirror steps when its caller names none -- None is the game tier's
 # (wall_renderer.PLAYER_MODE); `--player-mode` sets it for an --oracle-only run (the rung's target before the

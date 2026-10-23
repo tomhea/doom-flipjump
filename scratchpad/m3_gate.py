@@ -74,7 +74,7 @@ if __name__ == "__main__":          # M8 (CR of #146): `--map E1Mn` before probe
     take_map_arg(keep=True)         # keep: this gate's own parser takes --map too
 
 from doomfj.config import Config                                          # noqa: E402
-from doomfj.doors import door_states, initial_states, walkover_triggers   # noqa: E402
+from doomfj.doors import door_states, initial_states, wfired_count       # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, MAIN_EXIT_SCR,    # noqa: E402
                          MAIN_HELP_SCR, MAIN_RESUME_SCR, MENU_HALTED, menu_step, palette_colours)
@@ -87,7 +87,7 @@ from doomfj.wad import WadFile                                            # noqa
 from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.wall_renderer import (BOOT_MENU_SKILL, BOOT_SKILL, DEFAULT_MENU,               # noqa: E402
                                   SKILL_MENU, SKILL_MENU_FIRST, SKILLS, STANDALONE_POLLS,
-                                  menu_screen_pixels)
+                                  menu_screen_pixels, plasma_game_on)
 from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent               # noqa: E402
 
 ENTER, ESC, K_FWD, K_BACK = 0x0D, 0x1B, 0x77, 0x73
@@ -272,11 +272,15 @@ def main():
     from doomfj.hud import GameScreen
     cfg = GAME_CFG
     rm = ReferenceModel(cfg)
-    gscreen = GameScreen(rm, mw, art, mw.sectors(args.map))
+    # M8 C6: a map with the plasma rifle (E1M6, E1M9) -- the help lists key 6, the overlays hold its frames (the emitter's
+    # `_PLASMA`, plasma_game_on: ONE rule). Missing here, E1M9's help-from-the-world frame parted by 1,031 px (the "6")
+    plasma = plasma_game_on(mw, args.map)
+    gscreen = GameScreen(rm, mw, art, mw.sectors(args.map), plasma=plasma)
     scene = build_scene(mw, mw, args.map)
     colours = palette_colours(bytes(b for rgb in mw.playpal(0) for b in rgb))
     # M7 P3.4: the menu's pictures through the ONE mapping from its state (the help joined them)
-    screens = {key: bytes(menu_screen_pixels(cfg, colours, key[0], key[1] or 0, key[2] or 0, automap=pages))
+    screens = {key: bytes(menu_screen_pixels(cfg, colours, key[0], key[1] or 0, key[2] or 0, automap=pages,
+                                                     plasma=plasma))
                for key in ALL_SCREENS if key[0] not in MAP_SCREENS}        # M8: a page is drawn at its frame's pose
     render_kw = dict(GAME_RENDER_KW, sprite_wad=art)
     hidden = {s: skill_hidden(rm, mw.things(args.map), art, s) for s in SKILLS}
@@ -303,7 +307,7 @@ def main():
     doors0 = [init[si] for si in order]          # this script never presses use: shut and idle
     # M7 P2a.1: ...and never reaches a walk-over trigger or the blue card: no press pending, no
     # card, no trigger fired (doors.DoorPhase's initial state)
-    nwalk = len(walkover_triggers(secs, lds, sds, mw.vertexes(args.map)))
+    nwalk = wfired_count(secs, lds, sds, mw.vertexes(args.map))       # M8 C3: the triggers' W1 bits + the latches'
     phase0 = (init, (0,) * nwalk, frozenset(), 0)
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
     import gatestate as GST

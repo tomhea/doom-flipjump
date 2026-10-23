@@ -256,3 +256,15 @@ def test_a_gun_on_a_gr_switch_swaps_its_texture(wad, monkeypatch):
     w.aim = lambda world, col: ("shot", 0)
     w._line_attack("pistol", 80, 5, MISSILERANGE_U, TicEvents(0))
     assert w.ws.sw_on[j[0]] == 0
+
+
+@pytest.mark.parametrize("m", ["E1M1", "E1M6", "E1M9"])
+def test_wfired_count_is_the_phase_fired_length(wad, m):
+    """M8 (E1M9's m2_std_gate: "wfired: fj 0, oracle (0, 0)"): `wfired` holds the walk-over triggers' W1 bits AND the S1
+    latches' (the emitter's door_decls) -- doors.wfired_count is the ONE count a gate's probe reads the cell with, equal
+    to DoorPhase's `fired`. CONTROL: on E1M9 (1 trigger + 1 latch) the triggers alone -- what the probe read -- differ"""
+    secs, lds, sds, v = wad.sectors(m), wad.linedefs(m), wad.sidedefs(m), wad.vertexes(m)
+    dp = D.DoorPhase(secs, lds, sds, v, D.use_boxes_xy(secs, lds, sds, bake_bsp(wad, m).vertexes))
+    assert D.wfired_count(secs, lds, sds, v) == dp.nfired == len(dp.initial()[1])
+    if m == "E1M9":
+        assert dp.nfired == 2 and len(D.walkover_triggers(secs, lds, sds, v)) != dp.nfired

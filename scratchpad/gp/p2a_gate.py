@@ -69,7 +69,7 @@ from doomfj.automap import has_page                                       # noqa
 from doomfj.menu import (LEVEL_DONE_ENTER, LEVEL_DONE_SCR, LEVEL_DONE_SCREENS, menu_step,  # noqa: E402
                          palette_colours, stats_digits)
 from doomfj.wall_renderer import (BOOT_MENU_SKILL, BOOT_SKILL, SKILLS, STANDALONE_POLLS,     # noqa: E402
-                                  menu_screen_pixels)
+                                  menu_screen_pixels, plasma_game_on)
 from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent             # noqa: E402
 
 M32 = 0xFFFFFFFF
@@ -436,7 +436,8 @@ def screen(orc, scr: int, sel: int, live: int = 0, stats=None) -> bytes:
     the main menu's variant, `stats` is LEVEL COMPLETE's (nsecret, digits)"""
     colours = palette_colours(bytes(b for rgb in orc.mw.playpal(0) for b in rgb))
     return bytes(menu_screen_pixels(orc.rm.cfg, colours, scr, sel, live, stats,
-                                    automap=orc.automap))                                # M8: MAP, the help's M
+                                    automap=orc.automap,                                 # M8: MAP, the help's M
+                                    plasma=plasma_game_on(orc.mw, orc.mapname)))         # M8 C6: the help's key 6
 
 
 def menu_events(keys: list) -> list:

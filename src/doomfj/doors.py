@@ -1167,6 +1167,12 @@ def touches_door(geo, x16: int, y16: int, r16: int) -> bool:
     return False
 
 
+def wfired_count(secs, lds, sds, verts) -> int:
+    """M8 C3: the W1 bits `wfired` holds -- one per walk-over trigger, then one per S1 switch latch (DoorPhase's
+    `fired`, the emitter's door_decls). A reader of the cell (a gate's probe) takes its count from here"""
+    return len(walkover_triggers(secs, lds, sds, verts)) + len(switch_latches(secs, lds, sds))
+
+
 def walkover_triggers(secs, lds, sds, verts) -> list:
     """`[(door sector, axis, coord, lo, hi)]` for an axis-aligned trigger -- `axis` "y" for a horizontal
     one (y = coord, x in [lo, hi]), "x" for a vertical one -- and `[(door sector, "d", x1, y1, x2, y2)]`
@@ -1280,7 +1286,12 @@ class DoorPhase:
         self._initial = initial_states(secs, lds, sds, quant)
 
     def initial(self):
-        return (dict(self._initial), (0,) * (len(self.triggers) + self.nlatch), frozenset(), 0)
+        return (dict(self._initial), (0,) * self.nfired, frozenset(), 0)
+
+    @property
+    def nfired(self) -> int:
+        """`fired`'s length: the triggers', then the latches' W1 bits (doors.wfired_count)"""
+        return len(self.triggers) + self.nlatch
 
     def tic(self, state, use: bool, x16: int, y16: int, has_blue=None, others=(), player: bool = True,
             has_yellow: bool = False, has_red: bool = False):

@@ -998,9 +998,10 @@ class Oracle:
 
     @property
     def nwalk(self):
-        """M7 P2a.1: the walk-over triggers (doors.walkover_triggers), one wfired bit each"""
-        from doomfj.doors import walkover_triggers
-        return len(walkover_triggers(self.secs, self.lds, self.sds, self.mw.vertexes(self.mapname)))
+        """M7 P2a.1: the walk-over triggers (doors.walkover_triggers), one wfired bit each -- M8 C3: and the S1
+        switch latches' after them (doors.wfired_count: the cell's count, as the emitter declares it)"""
+        from doomfj.doors import wfired_count
+        return wfired_count(self.secs, self.lds, self.sds, self.mw.vertexes(self.mapname))
 
     def known_pristine(self) -> dict:
         """what the game tier BAKES, from sources independent of the binary: the WAD's player
@@ -1103,7 +1104,8 @@ class Oracle:
         """M7 P4.0: the oracle's game screen (built once: it bakes the weapon's runs)"""
         if getattr(self, "_screen", None) is None:
             from doomfj.hud import GameScreen
-            self._screen = GameScreen(self.rm, self.mw, self.art, self.secs)   # the palette the build bakes: the map wad's
+            from doomfj.wall_renderer import plasma_game_on      # M8 C6: the rifle's frames (E1M6, E1M9)
+            self._screen = GameScreen(self.rm, self.mw, self.art, self.secs, plasma=plasma_game_on(self.mw, self.mapname))   # the palette the build bakes: the map wad's
         return self._screen
 
     # -- M7 P3.1: the monsters' views (doomfj.monsters.MonsterViews, the one mapping) -------------
@@ -1184,10 +1186,11 @@ class Oracle:
         """P10: any menu state's picture -- wall_renderer.menu_screen_pixels, the one mapping (the main menu by
         `live`'s variant; LEVEL COMPLETE's `stats` = (nsecret, digits))"""
         from doomfj.menu import palette_colours
-        from doomfj.wall_renderer import menu_screen_pixels
+        from doomfj.wall_renderer import menu_screen_pixels, plasma_game_on
         colours = palette_colours(bytes(b for rgb in self.mw.playpal(0) for b in rgb))
         return bytes(menu_screen_pixels(self.rm.cfg, colours, scr, sel, live, stats,
-                                        automap=self.automap))                         # M8: MAP, the help's M
+                                        automap=self.automap,                          # M8: MAP, the help's M
+                                        plasma=plasma_game_on(self.mw, self.mapname)))   # M8 C6: the help's key 6
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""

@@ -500,7 +500,8 @@ def main():
     from doomfj.config import GAME_CFG
     from doomfj.hud import GameScreen
     rm = ReferenceModel(GAME_CFG)
-    screen = GameScreen(rm, mw, art, mw.sectors(args.map))
+    from doomfj.wall_renderer import plasma_game_on
+    screen = GameScreen(rm, mw, art, mw.sectors(args.map), plasma=plasma_game_on(mw, args.map))   # M8 C6: the rifle
     cmap = bake_bsp(mw, args.map)
     secs, lds, sds = mw.sectors(args.map), mw.linedefs(args.map), mw.sidedefs(args.map)
     # ── CONTROL 5, BEFORE 4.5 BILLION OPS ───────────────────────────────────────────────────
@@ -1076,7 +1077,7 @@ def main():
                                 list(probe.readings) if probe is not None else [], _t.time() - t, int(_c))
         _P.GameBinary.run = _tolerant
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
-                                            len(order), len(dp.triggers), len(mp.order),
+                                            len(order), dp.nfired, len(mp.order),   # M8 C3: + the latches
                                             nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
                                             palettes_out=pals,
                                             nthvis=mviews.nvis if player_loots(PLAYER_MODE) else 0)   # M7 P6

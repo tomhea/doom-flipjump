@@ -28,7 +28,7 @@ from doomfj.reference_model import STRAFE_MOVE                                  
 from doomfj.reference_model import (ANG90, ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
                                     apply_sector_heights, spawn_state)
-from doomfj.config import Config, map_cfg                                    # M8: a map's SWITCH_TEX
+from doomfj.config import DOOR_TOP_STEP_LEGACY, Config, map_cfg              # M8: a map's SWITCH_TEX
 from doomfj import switches as _switches, switchcode as _switchcode        # M8: the switch textures
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
@@ -2180,7 +2180,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              keyed=_doors.keyed_boxes_xy(secs, lds, sds, verts),
                              switch_info={si_: [e_[1:] for e_ in v_] for si_, v_ in
                                           _doors.switch_entries(secs, lds, sds, verts).items()},
-                             nwalk=len(_walk_trig), close=_doors.close_strides(secs, lds, sds))
+                             nwalk=len(_walk_trig), close=_doors.close_strides(secs, lds, sds),
+                             # M8 w2fix: a door reversing at its top clamps there (E1M1 keeps the old step)
+                             top_clamp=mapname not in DOOR_TOP_STEP_LEGACY)
               if (_dst_tbl and player_sim) else [])
         # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
         if _movers_on and dt:

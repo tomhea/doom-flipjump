@@ -727,7 +727,7 @@ class Steer:
             hp = c.get("p_hp") or 0
             ahead = self.pieces[self.pi][self.wi:self.wi + 240]
             burn = sum(1 for q in ahead if self.pl.hurts(self.LR.cell_of(*q)))
-            if burn > 20 and hp < burn * self.BURN + 20 and self._seek_health(
+            if burn > 20 and hp < min(80, burn * self.BURN + 20) and self._seek_health(
                     f, x, y, self.health, "health", most=150, radius=2500):
                 self.log("    f%d: %d damaging cells ahead at %d health: health first" % (f, burn, hp))
                 return kd

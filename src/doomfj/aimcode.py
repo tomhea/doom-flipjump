@@ -127,9 +127,9 @@ def leaf_lines(centerx: int, barrels: bool = False, *, centery: int, viewh: int,
            "ar_rok:",
            "hex.fixed_mul_lo 8, 4, ar_p, pth_tx, pth_xscale",                   # P = FixedMul(tx, xscale)
            "hex.fixed_mul_lo 8, 4, ar_q, ar_r16, pth_xscale",                  # Q = r_eff * xscale, exactly
-           f"hex.set 8, ar_x1, {centerx << 16}", "frame.add8_chain ar_x1, ar_p", "frame.sub8_chain ar_x1, ar_q",
+           f"hex.set 8, ar_x1, {centerx << 16}", "hex.add 8, ar_x1, ar_p", "hex.sub 8, ar_x1, ar_q",
            "hex.shr_hex 8, 4, ar_x1", "hex.sign_extend 8, 4, ar_x1",
-           f"hex.set 8, ar_x2, {centerx << 16}", "frame.add8_chain ar_x2, ar_p", "frame.add8_chain ar_x2, ar_q",
+           f"hex.set 8, ar_x2, {centerx << 16}", "hex.add 8, ar_x2, ar_p", "hex.add 8, ar_x2, ar_q",
            "hex.shr_hex 8, 4, ar_x2", "hex.sign_extend 8, 4, ar_x2", "hex.dec 8, ar_x2",
            # the box against the window: x2 < 72 or x1 > 88 -> nothing; then lo = max(x1, 72), hi = min(x2, 88)
            "hex.scmp 8, ar_x2, ar_c72, ar_out, ar_a, ar_a",
@@ -151,7 +151,7 @@ def leaf_lines(centerx: int, barrels: bool = False, *, centery: int, viewh: int,
            f"proj.thing_rows ar_ytop, ar_hpx, {centery}, {viewh}, ar_out",
            "sprbkt.lookup ar_bkt, ar_hpx",
            "hex.zero 6, ar_hb + 2*dw", "hex.mov 2, ar_hb, ar_bkt + 2*dw",
-           "hex.mov 8, ar_y0, ar_ytop", "frame.add8_chain ar_y0, ar_hpx", "frame.sub8_chain ar_y0, ar_hb",
+           "hex.mov 8, ar_y0, ar_ytop", "hex.add 8, ar_y0, ar_hpx", "hex.sub 8, ar_y0, ar_hb",
            f"frame.ledge_box ar_y0, ar_hb, ar_ylo1, ar_yhi1, {viewh}"]
     # the jump into the chain at block lo: the high nibble (0 or 1), then the low nibble
     out += ["hex.if_flags ar_lo + dw, 1<<1, ar_jl0, ar_jl1"]

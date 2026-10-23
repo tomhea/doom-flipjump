@@ -65,7 +65,7 @@ CONTROL: cutting the sweep to one assignment, and evaluating the identities at a
 
 WHAT THIS DOES NOT COVER, and none of it is a substitute for the byte-exact gates:
 
-* A width hidden in a macro NAME (`frame.add4_chain`) or in a macro whose first argument is not a
+* A width hidden in a macro NAME or in a macro whose first argument is not a
   width (`cm.apply`, `hex.ptr_index`, `frame.ptr_index`) is invisible to the coverage half. At a
   site whose only later references are of that shape the fallback is the `hex.vec` declaration,
   which bounds the register, not how wide the code reads it.
@@ -724,8 +724,8 @@ HOISTED_DECL = '''        "hz_reg: hex.vec 8",'''
 # `trb_run_w8` clears and the column emit's `srw_rel_w` / `srn_rel_w` -- and none since: the v2
 # column retired all four, and every register its new sites clear is read at a visible width
 # after them. Pinned, so a new one is SEEN (and then the control below has a real site again).
-EXPECTED_HOIST_LEANING = {name: 0 for name in NARROWED_FILES}
-EXPECTED_HOIST_LEANING["frame_render.fj"] = 1      # P11: frame.ledge_box's lb_c, `hex.vec 8` in the hoisted list
+EXPECTED_HOIST_LEANING = {name: 0 for name in NARROWED_FILES}   # frame.ledge_box's lb_c leaned on its hoisted
+# `hex.vec 8` until its add was written `hex.add 8` (the width visible to the scan, not hidden in a macro name)
 
 
 def test_the_hoisted_scratch_declarations_are_load_bearing(monkeypatch):

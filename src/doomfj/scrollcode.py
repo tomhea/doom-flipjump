@@ -61,13 +61,13 @@ def wall_scroll_of(leveltime: int) -> int:
 
 def pass2_lines(scrolls: bool) -> List[str]:
     """a seg's pass-2 call in the BSP code (wall_renderer's seg block): the plain call, or -- a scrolling seg --
-    wrapped: wnoff saved, lvtime's low byte added (frame.add4_chain: wnoff + it < 4096 never carries out), the
+    wrapped: wnoff saved, lvtime's low byte added (hex.add 4: wnoff + it < 4096 never carries out), the
     pass (every column's p2_xkey = x + wnoff reads the slid offset), wnoff restored for the segs after it"""
     if not scrolls:
         return [PASS2_CALL]
     return ["    hex.mov 4, wnsave, wnoff",
             "    hex.mov %d, wnscr, lvtime" % SCROLL_NIBBLES,
-            "    frame.add4_chain wnoff, wnscr",
+            "    hex.add 4, wnoff, wnscr",
             PASS2_CALL,
             "    hex.mov 4, wnoff, wnsave"]
 

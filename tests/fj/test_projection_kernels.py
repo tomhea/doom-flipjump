@@ -25,7 +25,7 @@ from doomfj.wad import WadFile
 from doomfj.wall_renderer import hoisted_scratch_fj
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
-FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")   # projection.fj uses its frame.sub8/sub10/add6_chain (idea 14, 2026-09-03)
+FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")   # projection.fj uses frame_render's macros
 FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table + hex.fixed_div
 E1M1_WAD = Path("tests/fixtures/freedoom_e1m1.wad")
 MASK40 = (1 << 40) - 1   # 10-nibble two's-complement mask (point_on_side's working width)

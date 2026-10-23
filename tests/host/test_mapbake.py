@@ -27,7 +27,7 @@ PROJECTION_FJ = Path("src/fj/projection.fj")             # provides proj.point_o
 # that expands them standalone must declare those too. ONE source with the emitter (R6).
 from doomfj.wall_renderer import hoisted_scratch_fj    # noqa: E402
 FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")           # provides hex.mul_lo (point_on_side_leaf's cross product)
-FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")         # provides frame.sub10_chain (Idea 14: point_on_side_leaf's signed subtract)
+FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")         # provides hex.sub 10, (Idea 14: point_on_side_leaf's signed subtract)
 
 
 def _room():

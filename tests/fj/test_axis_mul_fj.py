@@ -59,6 +59,6 @@ def test_axis_add_is_fixed_mul(tmp_path):
 def test_axis_add_negative_control(tmp_path):
     """the -1.0 arm mutated to ADD: the same harness must reject it (else it proves nothing about that arm)"""
     src = PROJECTION_FJ.read_text(encoding="utf-8")
-    old = "      neg:\n        frame.sub8_chain acc, v\n"
+    old = "      neg:\n        hex.sub 8, acc, v\n"
     assert src.count(old) == 1
-    assert not _run(tmp_path, src.replace(old, "      neg:\n        frame.add8_chain acc, v\n"))
+    assert not _run(tmp_path, src.replace(old, "      neg:\n        hex.add 8, acc, v\n"))

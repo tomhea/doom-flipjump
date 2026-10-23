@@ -414,8 +414,9 @@ MAP_CONFIG = {
     # drawable things over the skills (wall_renderer.check_slot_ids)
     # M8 C2 (docs/c2-slot-ids.md): LIST_ID_BITS 12 -- 337 runtime ids (F1.5); SLOT_ID_BITS 12 -- 281 monster + 16 barrel
     # slots (+ 8 lost souls) past 254: three-nibble slot ids
+    # M8 soultele: THSS_COLD -- emit_check's hot block was 20,264 ops of frame.arm5's 16,384 with SSHEAD_RATIO 1
     "E1M7": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "TSV_NIBBLES": 4,
-             "LIST_ID_BITS": 12, "SLOT_ID_BITS": 12},
+             "LIST_ID_BITS": 12, "SLOT_ID_BITS": 12, "THSS_COLD": 1},
     # M8 C11 (E1M9): SPR_SLOT_CAP -- 293 drawable things over the skills (wall_renderer.check_slot_ids). M8 wlight:
     # PID_NIBBLES 3 -- ~264 plane pairs before directions (level_survey's estimate; 474 baked); BAND_NIBBLES 5 -- 114,528
     # band lists (emit_check: past 4 nibbles' 65,536); SSHEAD_RATIO 1 -- the hot data block was 16,416 ops of

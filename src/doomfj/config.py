@@ -438,7 +438,11 @@ MAP_CONFIG = {
     "E1M5": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "AUTOMAP": 1, "SWITCH_TEX": 1},
     # M8 C2 (docs/c2-slot-ids.md): LIST_ID_BITS 12 -- 345 runtime ids (F1.5); SLOT_ID_BITS 12 -- 291 monster + 7 barrel
     # slots (+ 3 lost souls) past 254: three-nibble slot ids
-    "E1M6": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "SLOT_ID_BITS": 12},
+    # M8 soultele: PID_NIBBLES / BAND_NIBBLES -- level_survey's 328 plane pairs before directions (E1M2's 329 needed
+    # them) and ~176K band lists past BAND_NIBBLES 4's 65,535; the MAP page and switch textures as every episode map;
+    # SSHEAD_RATIO 1 + THSS_COLD -- emit_check's hot block was 22,140 ops of frame.arm5's 16,384 (E1M3 / E1M4's fix)
+    "E1M6": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "SLOT_ID_BITS": 12, "PID_NIBBLES": 3, "BAND_NIBBLES": 5,
+             "AUTOMAP": 1, "SWITCH_TEX": 1, "SSHEAD_RATIO": 1, "THSS_COLD": 1},
     # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): the map page, at 40 units a pixel (doomfj.automap).
     # #149: DOOR_NEIGHBOURS "legacy" -- the door rule E1M1 shipped with (its stops are frozen, PR #103); it was the
     # default before E1M2, picked by the map's record counts until #149. Every other field keeps its default

@@ -95,7 +95,7 @@ The API is `flipjump/interpreter/io_devices/README.md`.
 | 1c | E1M1 (`build/doom_e1m1_io.fjm` = **blocked64**) | ✅ | m3 88 frames, m2 421, p2a, hurt, fight, die PASS; B0 OK 16,297,393 (+0.26% vs blocked63); window smoke PASS; re-checked on the cleaned device (m3, m2) |
 | 1d | E1M2 (`build/doom_e1m2_io.fjm`) | ✅ | m3, m2 (258), p2a, hurt, fight, die PASS; B0 OK 20,193,314; window smoke PASS |
 | 1e | E1M3+ | ✖ folded into 4d (owner) | — |
-| 1f | **E1M1 ship #1** (`ship1.sh`): rebuild byte-identical, `gamespeed --validate`, msframe A/B vs blocked63 | ▶ rebuild running | sha `f52751a2bb846c7a` must reproduce |
+| 1f | **E1M1 ship #1**: rebuild byte-identical, `gamespeed`, msframe A/B vs blocked63 | ▶ rebuild **BYTE-IDENTICAL** (`f52751a2bb846c7a`); gamespeed binding **16,921,550 PASS** (mean 16,151,475, p80 17,691,624), size **39.13% PASS** (file 39,836,502 bytes). msframe waits for a quiet box (refused while agents ran) | blocked63's 16,892,755 / 38.98% come from ship-gate.md, UNVERIFIED here: +0.17% ops, +0.15 points of size |
 | 1g | Ship record: `docs/ship-gate.md` 1 + 1b, CLAUDE.md's shipped-binary line, the README's play command, `shipped` baseline re-frozen on blocked64 under the new flipjump | ⏳ after 1f | — |
 | 1h | PR `io-api` → `m8-episode`, CI green, merge | ⏳ after 1g | — |
 

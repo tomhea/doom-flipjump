@@ -56,8 +56,12 @@ if __name__ == "__main__":                         # `--map E1Mn` before probe /
 
 # the skill and the steering seed each shipped map's playthrough PASSES at by real play (the defaults; --skill /
 # --seed override). The seed only shifts the steering's dodge rhythm: every seed is real play, none is a cheat
-DEFAULT_SKILL = {"E1M1": "medium", "E1M2": "easy"}
-DEFAULT_SEED = {("E1M1", "medium"): 1, ("E1M2", "easy"): 1}     # found by --search (model only); E1M1 easy: 0
+DEFAULT_SKILL = {"E1M1": "medium", "E1M2": "easy", "E1M3": "easy", "E1M4": "easy", "E1M5": "easy"}
+# found by --search on the model (M8 bot, the steering of 8c9324ec): each a whole play from boot to LEVEL COMPLETE
+DEFAULT_SEED = {("E1M1", "medium"): 1,                                                      # world 499
+                ("E1M2", "easy"): [(0, 1), (1532, 2), (3463, 22), (3992, 32)],             # world 4319
+                ("E1M3", "easy"): [(0, 0), (415, 1)],                                       # world 3143
+                ("E1M5", "easy"): [(0, 0), (342, 3), (1630, 11), (3352, 24)]}              # world 4253
 CONTROL_FRAMES = 40           # world frames a control runs
 CONTROL_AT = 25               # the world frame a control mutates
 
@@ -290,9 +294,9 @@ def search(PLAY, pl, route, lv, seed, budget, rounds, seeds=SEARCH_SEEDS, worker
                     found = o
                 if o["done"] is not None:            # a PASS: taken at once (the round's other plays dropped)
                     break
-            if found is None:
-                print("  search: no seed got further than %s" % (_score(best),), flush=True)
-                break
+            if found is None:                        # the next round tries the next seeds (sd + 10 * round)
+                print("  search: no seed got further than %s this round" % (_score(best),), flush=True)
+                continue
             sched, best = found["sched"], found
             if best["done"] is not None and pool is not None:
                 pool.terminate()                     # the round's unfinished plays

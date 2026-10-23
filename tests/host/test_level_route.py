@@ -77,3 +77,97 @@ def test_control_no_floor_switch(lr, monkeypatch):
     r = lr.plan("E1M2", "easy", with_legs=False)
     assert not r["ok"], "CONTROL: the blue card was taken with its floor never lowered"
     assert "blue" not in r["flood"]["keys"]
+
+
+# ---- M8 wave 1 (the auto-gameplay agent): E1M3's mixed-card door and the pickups' order, on the full Freedoom wad
+WAD = ROOT / "assets" / "freedoom1.wad"
+needs_wad = pytest.mark.skipif(not WAD.exists(), reason="needs assets/freedoom1.wad (E1M3..E1M9)")
+
+
+@needs_wad
+def test_e1m3_route_through_the_blue_side_of_door_150(lr):
+    """E1M3's door 150 is D1 31 on its west side and D1 32 BLUE on its east (doors.keyed_boxes_xy): the whole west of
+    the map, the exit with it, is behind its blue side. The planner presses the keyed box once the blue card is held,
+    and the card becomes the door's dependency"""
+    r = lr.plan("E1M3", "easy", with_legs=False)
+    assert r["ok"], r.get("why")
+    assert r["exit"]["special"] == 11 and r["exit"]["line"] == 1367
+    row = {n["id"]: n for n in r["needs"]}
+    assert "door:150" in row and row["door:150"]["key"] == "blue"
+    assert r["keys_order"] == ["blue"]
+
+
+@needs_wad
+def test_control_e1m3_without_keyed_boxes(lr, monkeypatch):
+    """CONTROL: the keyed boxes taken out of the model's DoorPhase -- the west is unreachable, the planner must say so"""
+    import doomfj.doors as D
+    real = D.DoorPhase.__init__
+
+    def init(self, *a, **kw):
+        real(self, *a, **kw)
+        self.keyed = {}
+    monkeypatch.setattr(D.DoorPhase, "__init__", init)
+    r = lr.plan("E1M3", "easy", with_legs=False)
+    assert not r["ok"], "CONTROL: E1M3 planned with no way through door 150's blue side"
+
+
+@needs_wad
+def test_control_e1m3_without_the_blue_card(lr):
+    r = lr.plan("E1M3", "easy", drop_keys=("blue",), with_legs=False)
+    assert not r["ok"], "CONTROL: E1M3 planned through the blue side of door 150 with no blue card"
+
+
+@needs_wad
+def test_pickups_nearest_first(lr, monkeypatch):
+    """E1M5: the shotgun 24 cells from the start is taken among the first legs (nearest first: the backpack and the
+    ammo boxes by the start, then it), long before the chaingun; CONTROL: the old cheapest-detour order takes the
+    chaingun on the path first and never comes back for the shotgun"""
+    r = lr.plan("E1M5", "easy")
+    to = [g["to"] for g in r["legs"]]
+    assert r["ok"] and "item:2001" in to[:5] and to.index("item:2001") < to.index("item:2002")
+    monkeypatch.setattr(lr, "PICKUP_ORDER", "cheapest")
+    r = lr.plan("E1M5", "easy")
+    assert r["legs"][0]["to"] != "item:2001", "CONTROL: the pickups' order made no difference"
+    assert "item:2001" not in [g["to"] for g in r["legs"]]
+
+
+def _hurt_cells(lr, r):
+    lv = lr.Level(r["map"], None, r["skill"])
+    return sum(lv.secs[lv.sector_at(*p)].special in lr.HURT_SPECIALS
+               for g in r["legs"] for p in g["path"] if p[0] != "teleport")
+
+
+@needs_wad
+def test_e1m3_legs_keep_off_the_nukage(lr, monkeypatch):
+    """a leg's path pays HURT_COST for a damaging floor: E1M3's walk crosses none of its NUKAGE1 (sector 90 by the blue
+    card); CONTROL: at HURT_COST 0 the shortest paths cross it"""
+    assert _hurt_cells(lr, lr.plan("E1M3", "easy")) == 0
+    monkeypatch.setattr(lr, "HURT_COST", 0)
+    assert _hurt_cells(lr, lr.plan("E1M3", "easy")) > 0, "CONTROL: the cost made no difference"
+
+
+@needs_wad
+def test_e1m3_no_pickup_on_a_lift(lr, monkeypatch):
+    """an item lying on a LIFT is no pickup leg (at rest the lift holds it up out of reach): E1M3's three shells boxes
+    on lifts 160 / 163 / 256 are left; CONTROL: with the lift list emptied they are pickups again"""
+    lv = lr.Level("E1M3", None, "easy")
+    on_lifts = {(-2160, 1152), (-1920, 2112), (-2160, 608)}
+    got = {(it["x"], it["y"]) for it in lr.pickup_things(lr.Planner(lv))}
+    assert not (got & on_lifts) and got
+    lv.mp.order = []
+    got = {(it["x"], it["y"]) for it in lr.pickup_things(lr.Planner(lv))}
+    assert on_lifts <= got, "CONTROL: the lift filter made no difference"
+
+
+@needs_wad
+def test_e1m4_takes_the_suit_before_the_way_back(lr, monkeypatch):
+    """E1M4's blue card lies past a NUKAGE1 channel: the route takes the radiation suit by the card (3392, 1728) as a
+    MUST pickup (never dropped for time) before the key and the exit leg back across; CONTROL: without 2025 in the
+    pickups' budget there is no suit leg"""
+    r = lr.plan("E1M4", "easy")
+    to = [g["to"] for g in r["legs"]]
+    suit = [g for g in r["legs"] if g["to"] == "item:2025"]
+    assert suit and suit[-1]["goal"] == [3392, 1728] and suit[-1].get("must")
+    assert to.index("item:2025") < to.index("key:blue") < to.index("exit")
+    monkeypatch.setitem(lr.PICKUP_BUDGET, 2025, 0)
+    assert "item:2025" not in [g["to"] for g in lr.plan("E1M4", "easy")["legs"]], "CONTROL: the suit leg stayed"

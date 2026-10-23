@@ -677,7 +677,7 @@ PICKUP_ORDER = "nearest"
 # health killed the play)
 MUST_PICKUPS = frozenset({2025})
 PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 8: 40, 2049: 14, 2048: 10, 2008: 8,
-                 2025: 150}    # the radiation suit (E1M4 alone: two, one at each end of its nukage channel)
+                 2025: 60}     # the radiation suit (E1M4 alone: the one at the far end of its nukage channel)
 
 
 def pickup_things(pl) -> list:

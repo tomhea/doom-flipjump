@@ -722,6 +722,15 @@ class Steer:
             return set(self.queue.pop(0))
         # ---- low health / no ammo: the nearest item first -- unless a monster is at arm's length
         foe = self._foe(c, x, y, f)
+        if (foe is None or foe[0] > 100) and not self.use_tap and not c.get("p_rad") and self.health                 and self.pieces and self.leg.get("to") != "health":
+            # (any leg: E1M4's channel is crossed on the way to an item -- the armor beyond it)
+            hp = c.get("p_hp") or 0
+            ahead = self.pieces[self.pi][self.wi:self.wi + 240]
+            burn = sum(1 for q in ahead if self.pl.hurts(self.LR.cell_of(*q)))
+            if burn > 20 and hp < burn * self.BURN + 20 and self._seek_health(
+                    f, x, y, self.health, "health", most=150, radius=2500):
+                self.log("    f%d: %d damaging cells ahead at %d health: health first" % (f, burn, hp))
+                return kd
         if (foe is None or foe[0] > 100) and not self.use_tap and self.leg["kind"] != "item":
             hp = c.get("p_hp") or 0
             want = 40 + 10 * (self.seed_at(f) % 3)              # the seed moves the health threshold too
@@ -729,13 +738,6 @@ class Steer:
                     f, x, y, self.health, "health", most=250 if hp < 30 else 70 if hp < want else 25,
                     radius=3000 if hp < 30 else 900):
                 return kd
-            if not c.get("p_rad") and self.health and self.pieces:
-                ahead = self.pieces[self.pi][self.wi:self.wi + 240]
-                burn = sum(1 for q in ahead if self.pl.hurts(self.LR.cell_of(*q)))
-                if burn > 20 and hp < burn * self.BURN + 20 and self._seek_health(
-                        f, x, y, self.health, "health", most=150, radius=2500):
-                    self.log("    f%d: %d damaging cells ahead at %d health: health first" % (f, burn, hp))
-                    return kd
             low_ammo = (c.get("am_clip") or 0) < 5 and not (c.get("am_shell") or 0)
             dry = not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0)
             if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo", most=250 if dry else 70,

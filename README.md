@@ -1,11 +1,11 @@
 <h1 align="center">DOOM on FlipJump</h1>
 
-<p align="center"><b>FlipJump has exactly one instruction: flip a bit, then jump to the next opcode.<br>This is DOOM running on it.</b></p>
-
 <p align="center">
   <img src="docs/media/hero.gif" width="640"
        alt="DOOM on FlipJump: a fight in the courtyard of Freedoom's first level, status bar and pistol included">
 </p>
+
+<p align="center"><b>FlipJump has exactly one instruction: flip a bit, then jump to the next opcode.<br>This is DOOM running on it.</b></p>
 
 <p align="center">
   <a href="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml"><img src="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -136,7 +136,7 @@ trick: arithmetic is read, not computed. Measured on blocked62; the shipped bloc
 | | |
 |---|---|
 | instructions in the language | 1 |
-| the program | 52.3 million words, 39.8 MB; 39% of the largest address space the interpreter allows |
+| the program | 52.3 million words, 39.8 MB; 39% of the 2^32-bit address space |
 | one frame | about 16 million flip-jumps; up to 28 million in the heaviest fight |
 | speed | 68 ms a frame, about 15 fps, on one core, at 233 million flip-jumps per second |
 | a 32-bit addition | about 800 flip-jumps, so a pixel costs about one addition |
@@ -171,7 +171,7 @@ with a negative control. The whole record, including every per-milestone handoff
 
 **Why 160x100 and 15 fps?** Cost is counted in flip-jumps and a frame is 14 to 16 million of them,
 at 233 million per second on one core. DOOM's native width is 320; 160 halves the per-frame work and
-is what fits the 2^27-word address space with room for the game. What was tried, kept and closed
+is what fits a 32-bit address space (2^32 bits of memory, 2^27 words of 32 bits) with room for the game. What was tried, kept and closed
 on the way is in [docs/ship-gate.md](docs/ship-gate.md).
 
 **Can I play it in the browser?** Not yet. The interpreter is C; a WebAssembly build is the open item.

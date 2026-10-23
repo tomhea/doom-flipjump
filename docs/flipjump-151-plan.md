@@ -55,6 +55,7 @@ fjdoom must run on all of it, and it must already use every macro that moved int
 | `flipjump-io` | `io-api` | the API work | fast-forwarded to `9f6119c` (= 1.5.1 after #375); junction `fjio-path` |
 | `flipjump-cr` | `cr-minimal` | io-api's review loop | `eacc7ee`, pushed, merged by #375; junction `fjcr-path` |
 | `flipjump-chain` | `stl-additions` | phase 3 implementer | part A committed (`691d19f`, `932352e`, `0823543`, `ea823e4`), part B in the working tree; junction `fjstl-path` |
+| `flipjump-stlpin` | detached at the last COMMITTED `stl-additions` commit | what the doom adoption checks run against | `ea823e4`; advanced to each new stl commit; junction `fjstlpin-path`. **Never point a check at the implementer's live working tree:** its uncommitted moves collide with fjdoom's copies, which made 44 fj tests fail on 10-24 |
 | (new) | `stl-seq-ptr` | part C (3d) | not created yet; it branches from `stl-additions` |
 | `flipjump-crmain` | `cr-main` | phase 6 | from `9f6119c`; baseline `crmain_base.json` saved |
 | `flipjump-bytes` | `stl-byte-output` | the byte-output check | ✖ closed: no improvement, never merged |
@@ -230,7 +231,8 @@ The owner's five rules (section 6) are applied to the new stl code until a round
 
 | # | adoption item | status |
 |---|---|---|
-| A1 | `frame.add*/sub*_chain` + `dance_boundary` → `hex.add n` / `hex.sub n` (~160 sites: projection.fj 101, frame_render 36, stream_render 15, aimcode 6, scrollcode 1, tests) | ▶ text done, grep empty; verification queued (host suite, fj tests, E1M1 emit) |
+| A1 | `frame.add*/sub*_chain` + `dance_boundary` → `hex.add n` / `hex.sub n` (~160 sites: projection.fj 101, frame_render 36, stream_render 15, aimcode 6, scrollcode 1, tests) | ▶ grep empty. E1M1 emit_check PASSES (asserts on; hot block 10,430 of 16,384). Host 2681 passed; its 7 failures are 6 from the live-tree collision plus 1 expected: `lb_c`'s width is now visible to the narrowed-clear scan, so its pin moved from 1 to 0. Re-run against `flipjump-stlpin` queued |
+| A10 | `FJM_LZMA_FAST` (harness.py) → `lzma_preset`: a low preset for day-to-day builds, normal compression for ship builds; chosen by measurement (owner, 10-24) | ⏳ after round 1b |
 | A2 | `fixed_point.fj` deleted → `hex.fixed_mul/div`, `mul_low`, `fixed_mul_low`, `mul_const` | ⏳ after 3b |
 | A3 | `read_table*` → `hex.read_entry*` | ⏳ after 3b |
 | A4 | `frame.ptr_index4/5/6` + `ptr_index_fill` → `hex.ptr_index n` | ⏳ after 3b |

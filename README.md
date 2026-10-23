@@ -176,8 +176,9 @@ on the way is in [docs/ship-gate.md](docs/ship-gate.md).
 
 **Can I play it in the browser?** Not yet. The interpreter is C; a WebAssembly build is the open item.
 
-**Can I build it myself?** Yes: [docs/developing.md](docs/developing.md). It wants about 10 GB of RAM
-and about 45 minutes.
+**Can I build it myself?** You do not need to: the built game is one file, and [Try it](#try-it) above
+runs it in three lines. If you want to build it anyway, [docs/developing.md](docs/developing.md) has the
+recipe; the build takes about 45 minutes.
 
 ## The story, in sixty seconds
 

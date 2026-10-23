@@ -108,15 +108,25 @@ def test_a_pickup_without_a_sprite_is_missing(ls, wad, monkeypatch):
 
 
 def test_weapon_light_rows(ls, wad, monkeypatch):
-    """M8 (gates-ready): the weapon is lit by ONE baked colormap row (hudcode); E1M9 has a sector dark enough for a
-    second -- REFUSED by the survey (it refused every game-tier tool at hud.GameScreen). CONTROL: E1M1 is OK, and a
-    sector of E1M1 darkened to E1M9's needs turns it REFUSED"""
-    assert any(r[0] == "REFUSED" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M9"))
-    assert any(r[0] == "OK" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M1"))
+    """M8 (E1M9's dark sector): the weapon is drawn once per distinct colormap row its sectors light it with, picked per
+    frame by the view's leaf (hudcode.weapon_row_lines) -- E1M9's two rows are OK now (it was REFUSED while one row was
+    baked), E1M1's one row is OK. CONTROLS: a light per row (E1M9's sectors give > 16 rows, more than the nibble's
+    pick) is REFUSED; on E1M2 (animated lights), a row that moves with the light makes its flashing sectors cross rows
+    -- REFUSED (the row is the leaf's, baked)"""
+    def wl(m):
+        return {r[1].split(" (")[0].split(":")[1].strip(): (r[0], r[2]) for r in _rows(ls, wad, m)
+                if r[1].startswith("weapon light")}
+    got = wl("E1M9")
+    assert got == {"colormap rows": ("OK", "2"), "light sectors keep their row through their states": ("OK", "0")}, got
+    assert wl("E1M1")["colormap rows"] == ("OK", "1")
+    assert wl("E1M2")["light sectors keep their row through their states"] == ("OK", "0")
     from doomfj import hud
     orig = hud.psprite_light_row
-    monkeypatch.setattr(hud, "psprite_light_row", lambda rm, light: orig(rm, light) + (light == 255))
-    assert any(r[0] == "REFUSED" and r[1].startswith("weapon light") for r in _rows(ls, wad, "E1M1"))
+    monkeypatch.setattr(hud, "psprite_light_row", lambda rm, light: light)
+    assert wl("E1M9")["colormap rows"][0] == "REFUSED"
+    monkeypatch.setattr(hud, "psprite_light_row", lambda rm, light: orig(rm, light) + (light < 128))
+    assert wl("E1M2")["light sectors keep their row through their states"][0] == "REFUSED"
+
 
 def test_e1m8_surveys_its_barons_and_the_boss_trigger(ls, wad):
     """M8 C8: thing 3003 is a monster (no MISSING row), and the rows the Baron's fj bakes per map: A_BossDeath's floor
@@ -221,3 +231,17 @@ def test_the_slot_rows_survive_a_world_refused_for_another_reason(ls, wad, monke
     monkeypatch.setitem(config.MAP_CONFIG, "E1M7", {k: v for k, v in config.MAP_CONFIG["E1M7"].items()
                                                     if k != "SLOT_ID_BITS"})
     assert _row(_rows(ls, wad, "E1M7"), "monster slots + barrels, every skill, from the WAD")[0] == "OVER"
+
+
+def test_band_lists_estimate_against_the_band_index(ls, wad, monkeypatch):
+    """M8 wlight: E1M9's 114,528 band lists (emit_check) passed BAND_NIBBLES 4 -- the survey's band-list ESTIMATE row
+    is OK at E1M9's 5 and E1M1's 4 (54,428 est); CONTROL: E1M9 back at 4 nibbles is OVER"""
+    def bl(m):
+        return next((r[0], int(r[2])) for r in _rows(ls, wad, m) if r[1].startswith("band lists"))
+    st, est = bl("E1M9")
+    assert st == "OK" and 100_000 < est < 140_000, (st, est)
+    assert bl("E1M1")[0] == "OK"
+    from doomfj import config
+    monkeypatch.setitem(config.MAP_CONFIG, "E1M9", {k: v for k, v in config.MAP_CONFIG["E1M9"].items()
+                                                    if k != "BAND_NIBBLES"})
+    assert bl("E1M9")[0] == "OVER"

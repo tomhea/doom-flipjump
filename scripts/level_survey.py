@@ -537,21 +537,25 @@ class Survey:
                  len(var), "", "" if not var else "mc_don flags for decor_solid indices %s" % var[:10])
 
     def weapon_light(self):
-        """M8 (gates-ready, gen_dryrun on E1M9): the weapon sprite is lit by ONE baked colormap row
-        (hudcode.game_hud_parts asserts it); a sector dark enough for another row refuses every game-tier tool"""
-        from doomfj import hud
+        """M8 (E1M9's dark sector): the weapon sprite is lit by its sector's colormap row (hud.psprite_light_row) -- one
+        baked drawing per distinct row, picked per frame by the view's leaf (hudcode.weapon_row_lines); the flash is
+        fullbright. REFUSED: more rows than the one-nibble pick holds, or an animated / switched light sector whose
+        states cross rows (the row is the LEAF's, baked: wall_renderer asserts it)"""
+        from doomfj import hud, lights
         from doomfj.config import GAME_CFG
         from doomfj.reference_model import ReferenceModel
         rm = ReferenceModel(GAME_CFG)
         rows = {}
         for i, sec in enumerate(self.secs):
             rows.setdefault(hud.psprite_light_row(rm, sec.light), []).append(i)
-        if len(rows) == 1:
-            self.row("OK", "weapon light: one colormap row", 1, 1)
-        else:
-            odd = sorted((r, v[:6]) for r, v in rows.items() if len(v) < max(len(x) for x in rows.values()))
-            self.row("REFUSED", "weapon light: colormap rows", len(rows), 1,
-                     "hudcode bakes one row; sectors on the others (row, sectors): %s" % odd)
+        cross = [th.sector for th in lights.map_thinkers(self.wad, self.m)
+                 if {hud.psprite_light_row(rm, v) for v in th.levels} != {hud.psprite_light_row(
+                     rm, self.secs[th.sector].light)}]
+        odd = sorted((r, v[:6]) for r, v in rows.items() if len(v) < max(len(x) for x in rows.values()))
+        self.row("OK" if len(rows) <= 16 else "REFUSED", "weapon light: colormap rows (hudcode: a drawing per row)",
+                 len(rows), 16, "" if len(rows) == 1 else "one weapon drawing per row (row, sectors): %s" % odd)
+        self.row("REFUSED" if cross else "OK", "weapon light: light sectors keep their row through their states",
+                 len(cross), 0, "" if not cross else "sectors %s" % cross[:8])
 
     def monster_extensions(self, w):
         """M8 C8 (doomfj.lostsoul / soulcode; the lessons of the lost soul): the extension states' borrowed thing indices
@@ -725,6 +729,15 @@ class Survey:
                  "E1M1 est 152 -> 222 real; E1M2 329 -> 411. PID_NIBBLES %d for this map%s"
                  % (cfg.PID_NIBBLES, "" if pid_lo * 1.5 < 16 ** cfg.PID_NIBBLES or cfg.PID_NIBBLES >= 3
                     else ": likely needs 3 (MAP_CONFIG)"))
+        # M8 wlight (E1M9's emit_check: 114,528 band lists past BAND_NIBBLES 4's 65,536 -- found by an emission, as
+        # E1M2's were): the size model's band-list estimate against the band index (est / real: E1M1 54,428 / 54,616,
+        # E1M2 134,989 / 134,328, E1M9 118,166 / 114,528 -- within 4%, so WARN at 1.1x)
+        vpb = self._size_drivers()[1]["vpb"]
+        self.row("OVER" if vpb >= 16 ** cfg.BAND_NIBBLES else "WARN" if vpb * 1.1 >= 16 ** cfg.BAND_NIBBLES else "OK",
+                 "band lists (ESTIMATE: lut_generator.generate_bands_walk_fj's index)", vpb,
+                 "< %d" % 16 ** cfg.BAND_NIBBLES,
+                 "BAND_NIBBLES %d for this map%s" % (cfg.BAND_NIBBLES, ": set 5 (MAP_CONFIG)"
+                                                     if vpb * 1.1 >= 16 ** cfg.BAND_NIBBLES else ""))
 
     def _marking(self, WR, cmap):
         from doomfj import doors

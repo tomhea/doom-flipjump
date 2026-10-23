@@ -149,7 +149,7 @@ ns plane {
         hex.mul_const w/4, ysoff, y0w, 3*dw
         hex.add w/4, ysptr, ysoff                       // ysptr -> yslope_packed[y0]
         rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr   // ys[0:6] = yslope[y0]; ysptr -> y0+1
-        hex.fixed_mul_lo 8, 4, dist, bb_ph, ys             // ys[6:8] stay zero-init (R11-safe wide read)
+        hex.fixed_mul_low 8, 4, dist, bb_ph, ys             // ys[6:8] stay zero-init (R11-safe wide read)
         hex.shr_hex 8, 5, dist
         hex.set 3, c127, 127
         hex.mov 3, zidx, dist   // (hex.mov zeroes dst first)

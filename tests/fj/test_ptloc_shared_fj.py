@@ -132,7 +132,7 @@ def test_inline_walk_text_unchanged_by_default():
     wad = WadFile.from_path(WADS["E1M1"])
     cmap = bake_bsp(wad, "E1M1")
     text = generate_point_location_fj(cmap)
-    assert "ptloc_sd" not in text and "hex.mul_lo 10, ptlocp, ptlocdy, ptlock" in text
+    assert "ptloc_sd" not in text and "hex.mul_low 10, ptlocp, ptlocdy, ptlock" in text
     assert point_location_decls() == point_location_decls(shared=False)
     assert not any("ptlockx" in d for d in point_location_decls())
     from doomfj.config import map_cfg

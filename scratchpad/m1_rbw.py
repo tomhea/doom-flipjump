@@ -75,11 +75,11 @@ WRITE_FIRST = {
     # silently drops a cell that IS read, and the symptom is a corrupted later frame:
     #   read_table_packed nb, dst, table, idx_n, idx  -> `rep(nb,k) .read_byte_and_inc dst+..`,
     #        and read_byte zeroes its destination (fixed_point.fj:178-183)
-    #   fixed_mul_lo n, f, dst, a, b                  -> ends `.mov n, dst, res + f*dw`, and dst
-    #        appears nowhere earlier in the body (fixed_point.fj:77-84)
+    #   fixed_mul_low n, f, dst, a, b                 -> ends `.mov n, dst, product+f*dw`, and dst
+    #        appears nowhere earlier in the body (the stl's hex/mul.fj)
     #   sim.fix16 dst, src                            -> `hex.zero 8, dst` first (sim.fj:48-50)
     "hex.read_table_packed": {5: [1]},
-    "hex.fixed_mul_lo":      {5: [2]},
+    "hex.fixed_mul_low":      {5: [2]},
     "sim.fix16":             {2: [0]},
 }
 # ⚠ Inside `ns hex`, the stl writes `.mov`, not `hex.mov` -- the leading dot IS the namespace. A
@@ -189,11 +189,11 @@ def first_use(macro, local):
 # claim is unchanged: 14 bytes = 28 cells, all written before any read.
 for mac, loc, want in (("hex.scmp", "ba", "write"),          # .mov n, ba, a
                        ("hex.scmp", "bb", "write"),          # .mov n, bb, b
-                       ("hex.fixed_mul_lo", "res", "write"),  # .zero n+f, res
+                       ("hex.fixed_mul_low", "product", "write"),  # .zero n+f, product
                        ("sim.check_line", "cl_rest", "write"),   # read_table_packed fills all 28
                        # ⚠ THE TWO BELOW EXIST TO COVER classify()'s DECLARATION-SKIP BRANCH, and
                        # CR 2026-08-25 proved the other four do not. Deleting that branch left all
-                       # of scmp.ba/bb, fixed_mul_lo.res and check_line.cl_rest still passing: in
+                       # of scmp.ba/bb, fixed_mul_low.product and check_line.cl_rest still passing: in
                        # each of those the write PRECEDES the declaration (or, for cl_rest since
                        # bdf1f1a, the cell is a `<` global whose decl is not in the body at all).
                        # The branch is load-bearing -- counting a declaration as a first use

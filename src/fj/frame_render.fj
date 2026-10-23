@@ -852,7 +852,7 @@ ns frame {
         hex.zero 8, trb_col_x
         hex.mov 8, trb_negx1, trb_tx1
         hex.neg 8, trb_negx1
-        hex.mul_lo 8, trb_frac_u, trb_negx1, trb_tistep
+        hex.mul_low 8, trb_frac_u, trb_negx1, trb_tistep
       x1_done:
         hex.set 8, trb_cbound, viewwc              // x2 is INCLUSIVE, so clamp it to VIEW_W-1
         hex.dec 8, trb_cbound
@@ -1152,33 +1152,33 @@ ns frame {
         // 2 frac and 2 step multiplies (6+8 rows each) are dead weight. Gate per side.
         hex.if0 1, seg_fmask, u_done
         hex.zero 8, fru1
-        rep(6, j) hex.fixed_mul_lo.row 8, j, fru1, fwu1, fscale
+        rep(6, j) hex.mul_low.row 8, j, fru1, fwu1, fscale + j*dw
         hex.neg 8, fru1
         hex.add 8, fru1, ccyfix
         hex.zero 8, stu1
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stu1, fwu1, fsstep
+        rep(8, j) hex.mul_low.row 8, j, stu1, fwu1, fsstep + j*dw
         hex.if1 1, tsf_lip_u, u_done               // ts-idea 4: a lip's frac2 is dead
         hex.zero 8, fru2
-        rep(6, j) hex.fixed_mul_lo.row 8, j, fru2, fwu2, fscale
+        rep(6, j) hex.mul_low.row 8, j, fru2, fwu2, fscale + j*dw
         hex.neg 8, fru2
         hex.add 8, fru2, ccyfix
         hex.zero 8, stu2
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stu2, fwu2, fsstep
+        rep(8, j) hex.mul_low.row 8, j, stu2, fwu2, fsstep + j*dw
       u_done:
         hex.if0 1, seg_fmask + 1*dw, l_done
         hex.zero 8, frl2
-        rep(6, j) hex.fixed_mul_lo.row 8, j, frl2, fwl2, fscale
+        rep(6, j) hex.mul_low.row 8, j, frl2, fwl2, fscale + j*dw
         hex.neg 8, frl2
         hex.add 8, frl2, ccyfix
         hex.zero 8, stl2
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stl2, fwl2, fsstep
+        rep(8, j) hex.mul_low.row 8, j, stl2, fwl2, fsstep + j*dw
         hex.if1 1, tsf_lip_l, l_done               // ts-idea 4: a lower lip's frac1 is dead
         hex.zero 8, frl1
-        rep(6, j) hex.fixed_mul_lo.row 8, j, frl1, fwl1, fscale
+        rep(6, j) hex.mul_low.row 8, j, frl1, fwl1, fscale + j*dw
         hex.neg 8, frl1
         hex.add 8, frl1, ccyfix
         hex.zero 8, stl1
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stl1, fwl1, fsstep
+        rep(8, j) hex.mul_low.row 8, j, stl1, fwl1, fsstep + j*dw
       l_done:
         ;end
       ccyfix: hex.vec 8
@@ -1832,13 +1832,13 @@ ns frame {
     // scale walk, the same identity the Option-A face DDA relies on.
     def lines_dda_seed scale, scalestep, wtc8, wtf8 < p2_prodc, p2_prodf, p2_stepc, p2_stepf {
         hex.zero 8, p2_prodc
-        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_prodc, wtc8, scale
+        rep(8, j) hex.mul_low.row 8, j, p2_prodc, wtc8, scale + j*dw
         hex.zero 8, p2_stepc
-        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_stepc, wtc8, scalestep
+        rep(8, j) hex.mul_low.row 8, j, p2_stepc, wtc8, scalestep + j*dw
         hex.zero 8, p2_prodf
-        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_prodf, wtf8, scale
+        rep(8, j) hex.mul_low.row 8, j, p2_prodf, wtf8, scale + j*dw
         hex.zero 8, p2_stepf
-        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_stepf, wtf8, scalestep
+        rep(8, j) hex.mul_low.row 8, j, p2_stepf, wtf8, scalestep + j*dw
     }
     // P2-1 (2026-09-04): hex.ptr_index with a chained add.
     //   the stl macro is  mov w/4 ; shl_hex ; 3x shr_bit ; shl_hex ; ADD w/4  -- and measured

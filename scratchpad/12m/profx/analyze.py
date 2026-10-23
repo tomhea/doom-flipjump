@@ -140,8 +140,8 @@ def cmd_sub(prefix, oid):
 
 
 FAMILIES = ["hex.ptr_index", "hex.read_byte", "hex.write_byte", "hex.read_hex", "hex.write_hex",
-            "hex.read_byte_and_inc", "hex.read_table_packed", "hex.mul", "hex.mul_const", "hex.mul_lo",
-            "hex.fixed_mul_lo", "hex.cmp", "hex.scmp", "hex.mov", "hex.sparse_mov", "hex.add", "hex.sub",
+            "hex.read_byte_and_inc", "hex.read_table_packed", "hex.mul", "hex.mul_const", "hex.mul_low",
+            "hex.fixed_mul_low", "hex.cmp", "hex.scmp", "hex.mov", "hex.sparse_mov", "hex.add", "hex.sub",
             "hex.add_constant", "hex.xor", "hex.zero", "hex.set", "hex.if0", "hex.if_flags", "hex.inc", "hex.dec",
             "hex.shl_hex", "hex.shr_hex", "hex.shl_bit", "hex.shr_bit", "hex.div", "sim.thing_load",
             "sim.try_move", "sim.check_cells", "sim.line_test", "sim.jump16", "sim.thing_pass",

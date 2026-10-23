@@ -1125,7 +1125,7 @@ MUTANTS = [
     ("r6: the left clip's negation two nibbles wide", "write", FR,
      "hex.neg 8, trb_negx1", "hex.neg 2, trb_negx1"),
     ("r6: the left clip's product five nibbles wide", "write", FR,
-     "hex.mul_lo 8, trb_frac_u, trb_negx1, trb_tistep", "hex.mul_lo 5, trb_frac_u, trb_negx1, trb_tistep"),
+     "hex.mul_low 8, trb_frac_u, trb_negx1, trb_tistep", "hex.mul_low 5, trb_frac_u, trb_negx1, trb_tistep"),
     # the review's round-7 edits
     ("r7: the left clip's negation three nibbles wide", "write", FR, "hex.neg 8, trb_negx1", "hex.neg 3, trb_negx1"),
     ("r7: the left clip's negation four nibbles wide", "write", FR, "hex.neg 8, trb_negx1", "hex.neg 4, trb_negx1"),

@@ -68,8 +68,8 @@ ns sim {
         hex.sub 8, ax, v1x
         hex.mov 8, ay, y
         hex.sub 8, ay, v1y
-        hex.fixed_mul_lo 8, 4, l, dyi, ax
-        hex.fixed_mul_lo 8, 4, r, ay, dxi
+        hex.fixed_mul_low 8, 4, l, dyi, ax
+        hex.fixed_mul_low 8, 4, r, ay, dxi
         hex.scmp 8, r, l, front, back, back
       front:
         hex.set 1, side, 0

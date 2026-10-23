@@ -54,8 +54,8 @@ object 11 seg_pass1_ts_leaf: 2,723,647,563 ops over the run = 2,723,647 per game
 
 $ python analyze.py sub games 18
 object 18 bspcode walk (nodes, pos_leaf, ss code): 1,080,000,579 ops over the run = 1,080,000 per game frame (the run's menu frames included, / 1000 game frames)
-       225,093  20.84%  f15:l7:proj.point_on_side_leaf(10)---f4:l1748:hex.mul_lo(4)
-       204,495  18.93%  f15:l7:proj.point_on_side_leaf(10)---f4:l1749:hex.mul_lo(4)
+       225,093  20.84%  f15:l7:proj.point_on_side_leaf(10)---f4:l1748:hex.mul_low(4)
+       204,495  18.93%  f15:l7:proj.point_on_side_leaf(10)---f4:l1749:hex.mul_low(4)
        139,250  12.89%  f15:l7:proj.point_on_side_leaf(10)---f4:l1722:frame.sub10_chain(2)
        125,408  11.61%  f15:l7:proj.point_on_side_leaf(10)---f4:l1724:frame.sub10_chain(2)
         24,345   2.25%  f15:l7:proj.point_on_side_leaf(10)---f4:l1721:hex.sparse_mov(4)

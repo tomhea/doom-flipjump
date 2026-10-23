@@ -33,8 +33,8 @@ campaign ships on the 260-frame sweep median, so MEDIAN is the column that ranks
 | `stream.emit_col_lines` | 3,813,883 | 509,331 | 13,119,250 | 19.75% |
 | `frame.ts_step_faces` | 3,276,489 | 2 | 3,517,856 | 16.97% |
 | `frame.thing_record_body` | 2,307,796 | 211,124 | 6,273,338 | 11.95% |
-| `hex.fixed_mul_lo.row` | 1,960,903 | 65,086 | 2,271,148 | 10.16% |
-| `hex.fixed_mul_lo` | 1,881,451 | 21,221 | 2,008,149 | 9.74% |
+| `hex.mul_low.row` | 1,960,903 | 65,086 | 2,271,148 | 10.16% |
+| `hex.fixed_mul_low` | 1,881,451 | 21,221 | 2,008,149 | 9.74% |
 | `hex.add_mul` | 1,844,048 | 59,600 | 2,131,681 | 9.55% |
 | `proj.wall_x_range_m` | 1,744,608 | 29,636 | 2,065,818 | 9.04% |
 | `hex.xor_zero` | 1,706,321 | 289,893 | 2,831,549 | 8.84% |
@@ -104,7 +104,7 @@ against this and refuses to credit an op sitting >4096 ops past a bare label.
 | `<top level: hex.add.dst>` | 93,577 | 0.48% |
 | `bit.exact_xor` | 87,973 | 0.46% |
 | `hex.add.init` | 87,813 | 0.45% |
-| `hex.fixed_mul_lo.row` | 83,385 | 0.43% |
+| `hex.mul_low.row` | 83,385 | 0.43% |
 | `<top level: hex.mul.dst>` | 81,405 | 0.42% |
 | `hex.mul.clear_carry` | 71,518 | 0.37% |
 | `frame.sub4_chain` | 67,794 | 0.35% |
@@ -113,7 +113,7 @@ against this and refuses to credit an op sitting >4096 ops past a bare label.
 | `<top level: hex.mul.add_carry_dst>` | 60,554 | 0.31% |
 | `byte.emit` | 59,218 | 0.31% |
 | `frame.sub10_chain` | 54,373 | 0.28% |
-| `hex.fixed_mul_lo` | 51,937 | 0.27% |
+| `hex.fixed_mul_low` | 51,937 | 0.27% |
 | `hex.if1` | 45,332 | 0.23% |
 | `frame.add4_chain` | 43,007 | 0.22% |
 | `hex.if0` | 42,958 | 0.22% |
@@ -208,7 +208,7 @@ f<i> is the i-th file passed to the assembler: f1=fj_consts, f2=fixed_point, f3=
 | `s28:l45` | `hex.pointers.read_cell_from_inners_ptrs` | 66,212 | 0.34% |
 | `s20:l122` | `hex.cmp` | 65,115 | 0.34% |
 | `f5:l1937` | `frame.arm5` | 54,700 | 0.28% |
-| `f2:l91` | `hex.fixed_mul_lo.row` | 46,974 | 0.24% |
+| `f2:l91` | `hex.mul_low.row` | 46,974 | 0.24% |
 | `f4:l239` | `frame.add8_chain` | 46,448 | 0.24% |
 | `s20:l49` | `hex.if1` | 40,601 | 0.21% |
 | `f5:l916` | `frame.sub8_chain` | 32,592 | 0.17% |

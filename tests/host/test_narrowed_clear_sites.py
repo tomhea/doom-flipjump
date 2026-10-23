@@ -559,7 +559,7 @@ ns demo {
     def narrow_sparse dst, src, other @ end {
         hex.sparse_zero PAD, 3, dst + 5*dw
         hex.sparse_mov PAD, 5, dst, src
-        hex.mul_lo 8, other, dst, src
+        hex.mul_low 8, other, dst, src
         ;end
       end:
     }

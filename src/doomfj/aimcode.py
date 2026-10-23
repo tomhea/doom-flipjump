@@ -125,8 +125,8 @@ def leaf_lines(centerx: int, barrels: bool = False, *, centery: int, viewh: int,
     out += ["hex.mov 2, ar_r16 + 4*dw, aim_rr + 2*dw", ";ar_rok",               # r_eff(30) << 16
            "ar_r20:", "hex.mov 2, ar_r16 + 4*dw, aim_rr",                     # r_eff(20) << 16
            "ar_rok:",
-           "hex.fixed_mul_lo 8, 4, ar_p, pth_tx, pth_xscale",                   # P = FixedMul(tx, xscale)
-           "hex.fixed_mul_lo 8, 4, ar_q, ar_r16, pth_xscale",                  # Q = r_eff * xscale, exactly
+           "hex.fixed_mul_low 8, 4, ar_p, pth_tx, pth_xscale",                   # P = FixedMul(tx, xscale)
+           "hex.fixed_mul_low 8, 4, ar_q, ar_r16, pth_xscale",                  # Q = r_eff * xscale, exactly
            f"hex.set 8, ar_x1, {centerx << 16}", "hex.add 8, ar_x1, ar_p", "hex.sub 8, ar_x1, ar_q",
            "hex.shr_hex 8, 4, ar_x1", "hex.sign_extend 8, 4, ar_x1",
            f"hex.set 8, ar_x2, {centerx << 16}", "hex.add 8, ar_x2, ar_p", "hex.add 8, ar_x2, ar_q",
@@ -210,7 +210,7 @@ def check_box_widths(rm, barrel_wph: int = None, r0: int = 20, souls: bool = Fal
     """issue #119 item 7 (emit time): every box `aim_record` sees is at least ONE column wide, so x2 >= x1 and the
     leaf's count n = hi - lo + 1 is >= 1 after clipping (an empty box would wrap n to 0xFF -- see leaf_lines).
     x1 = (c + P - Q) >> 16 and x2 = ((c + P + Q) >> 16) - 1 with Q = r_eff * xscale exactly (the leaf's
-    `fixed_mul_lo` of r_eff << 16), so 2Q >= 1 << 16 suffices, for every view angle's r_eff and every depth the leaf
+    `fixed_mul_low` of r_eff << 16), so 2Q >= 1 << 16 suffices, for every view angle's r_eff and every depth the leaf
     records at:
       * a monster (classes 0 / 1, r_eff of radius 20 / 30): any depth up to MAXTZ (MIN_SPRITE_H_MONSTER rows lets a
         monster project nearly to MISSILERANGE);

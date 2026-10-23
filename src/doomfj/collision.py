@@ -773,12 +773,12 @@ def generate_point_location_fj(cmap, *, label="ptloc", shared: bool = False) -> 
                     f"    hex.mov 10, {label}dx, ptx", f"    hex.sub 10, {label}dx, {label}k",
                     f"    hex.set 10, {label}k, {n.y & M40}",
                     f"    hex.mov 10, {label}dy, pty", f"    hex.sub 10, {label}dy, {label}k",
-                    # the CONSTANT goes second: fixed_mul_lo/mul_lo cost one schoolbook row per
+                    # the CONSTANT goes second: fixed_mul_low/mul_low cost one schoolbook row per
                     # nonzero nibble of the second operand, and a partition delta is small
                     f"    hex.set 10, {label}k, {n.dx & M40}",
-                    f"    hex.mul_lo 10, {label}p, {label}dy, {label}k",
+                    f"    hex.mul_low 10, {label}p, {label}dy, {label}k",
                     f"    hex.set 10, {label}k, {n.dy & M40}",
-                    f"    hex.mul_lo 10, {label}q, {label}dx, {label}k",
+                    f"    hex.mul_low 10, {label}q, {label}dx, {label}k",
                     f"    hex.sub 10, {label}p, {label}q",
                     f"    hex.sign 10, {label}p, {front}, {label}_g{i}",   # < 0 -> front
                     f"  {label}_g{i}:",
@@ -791,7 +791,7 @@ def generate_point_location_fj(cmap, *, label="ptloc", shared: bool = False) -> 
 
 # ── M8 size: the SAME point location, its arithmetic shared ──────────────────────────────────────
 #
-# The inline walk above emits a whole 10-nibble `hex.mul_lo` pair (or a `hex.scmp 10`) PER NODE. Inlined, one
+# The inline walk above emits a whole 10-nibble `hex.mul_low` pair (or a `hex.scmp 10`) PER NODE. Inlined, one
 # multiply is ~15.7K words of the binary (its code, its wflip chains and its tables in the blocked pool): E1M2 r4's
 # `ptloc_walk` was 19.5M of 83.5M words, and it grows with the nodes (E1M7: 2,063). The node's only own data are its
 # four constants, so here a node XORs them into ZERO-AT-REST registers (`hex.xor_by`: a wflip per nonzero nibble, no
@@ -851,8 +851,8 @@ def _shared_point_location_fj(cmap, *, label="ptloc") -> str:
     out += [f"{label}_sd:",
             f"    hex.mov 10, {label}dx, ptx", f"    hex.sub 10, {label}dx, {label}kx",
             f"    hex.mov 10, {label}dy, pty", f"    hex.sub 10, {label}dy, {label}ky",
-            f"    hex.mul_lo 10, {label}p, {label}dy, {label}kdx",
-            f"    hex.mul_lo 10, {label}q, {label}dx, {label}kdy",
+            f"    hex.mul_low 10, {label}p, {label}dy, {label}kdx",
+            f"    hex.mul_low 10, {label}q, {label}dx, {label}kdy",
             f"    hex.sub 10, {label}p, {label}q",
             f"    hex.zero 10, {label}kx", f"    hex.zero 10, {label}ky",
             f"    hex.zero 10, {label}kdx", f"    hex.zero 10, {label}kdy",

@@ -142,7 +142,7 @@
         "proof": "scratchpad/_pj1_probe.py: fj 120/120 agree, per-axis 110/10. Roles INVERTED vs before the fix, which is itself the regression test."
       },
       "PJ-2": {
-        "bug": "sgn = -fixed_mul_lo(a, |viewx|) truncates toward zero; the oracle's fixed_mul floors. Equal iff P mod 2^16 == 0, i.e. only at a whole map unit.",
+        "bug": "sgn = -fixed_mul_low(a, |viewx|) truncates toward zero; the oracle's fixed_mul floors. Equal iff P mod 2^16 == 0, i.e. only at a whole map unit.",
         "fix": "fj multiplies the SIGNED value, at THREE sites: projection.fj wall_x_range + wall_x_range_m, and frame_render.fj seg_pass1_leaf_body_proj -- the third was NOT in the CR finding and is the 'fixed in one macro, not its twin' shape that let the M14-c bug survive.",
         "forced_fanout": "flipjump warns on an UNUSED MACRO PARAMETER and the build is --werror, so the 4 dead abs/sign params could not be left in place: 2 signatures, 2 bodies, 2 dead @-locals, 19 frame_render lines (9 calls + 10 scope lists), 12 emitter statements + 4 labels, 7 test heads + 7 decls, 1 test call, 2 harnesses. Safe on rule 4 because NO Python f-string emits these calls (grep over src/doomfj/).",
         "proof": "scratchpad/_pj2_probe.py: signed 10/10, abs/negate 5/10 (every divergence +1 ULP). Control 6 MEASURES that the row-rule operand swap is bit-identical rather than assuming it. R17 trap confirmed: even `a` at a half unit agrees, odd `a` differs."
@@ -204,7 +204,7 @@
           "after": 4911964,
           "note": "still identical to the digit across all four viewpoints"
         },
-        "ATTRIBUTION": "ALL of the cost is PJ-2's operand order, none is PJ-1 (whose fj emission is unchanged). Filed as PJ-2b with the weighted cost model that predicts the sign of all four viewpoints, and the exact-and-cheaper form fixed_mul_lo(-a, |viewx|). DEFERRED TO BATCH 2 (row-rule operand swaps) so it shares a build instead of spending a 30-min gate alone.",
+        "ATTRIBUTION": "ALL of the cost is PJ-2's operand order, none is PJ-1 (whose fj emission is unchanged). Filed as PJ-2b with the weighted cost model that predicts the sign of all four viewpoints, and the exact-and-cheaper form fixed_mul_low(-a, |viewx|). DEFERRED TO BATCH 2 (row-rule operand swaps) so it shares a build instead of spending a 30-min gate alone.",
         "NOTE": "the gate viewpoints moved ~2% while the MEDIAN moved 0.46% -- a clean demonstration of why the median is the metric and gate viewpoints are worst cases."
       }
     },

@@ -176,7 +176,7 @@ def lift_walk_lines(triggers, slots, radius: int, prefix: str = "lw") -> list:
 
 def slanted_side_lines(p: str, shape, xr: str, yr: str, side1: str, side0: str) -> list:
     """`movers.line_side` in fj for the 16.16 point (`xr`, `yr`) and the slanted line `shape` = ("d", x1, y1, x2,
-    y2): A = x - x1, B = y - y1 (sign-extended to 10 nibbles), s = B*dx - A*dy by two `hex.mul_lo` against the
+    y2): A = x - x1, B = y - y1 (sign-extended to 10 nibbles), s = B*dx - A*dy by two `hex.mul_low` against the
     |deltas| (the constant second: a row per nibble), the signs folded into an add or a subtract -> `side1` when
     s >= 0, else `side0`. The point-location scratch (ptlocdx/dy/k/p/q: written before read, kept by nobody across
     an accepted move). The caller bounds |A|, |B| (`floor_walk_lines`: the new centre in the line's box)."""
@@ -187,8 +187,8 @@ def slanted_side_lines(p: str, shape, xr: str, yr: str, side1: str, side0: str) 
            f"    hex.set 10, ptlock, {(x1 << 16) & M40:#x}", "    hex.sub 10, ptlocdx, ptlock",
            "    hex.zero 10, ptlocdy", f"    hex.mov 8, ptlocdy, {yr}", "    hex.sign_extend 10, 8, ptlocdy",
            f"    hex.set 10, ptlock, {(y1 << 16) & M40:#x}", "    hex.sub 10, ptlocdy, ptlock",
-           f"    hex.set 10, ptlock, {abs(dx)}", "    hex.mul_lo 10, ptlocp, ptlocdy, ptlock",    # P = B*|dx|
-           f"    hex.set 10, ptlock, {abs(dy)}", "    hex.mul_lo 10, ptlocq, ptlocdx, ptlock"]    # Q = A*|dy|
+           f"    hex.set 10, ptlock, {abs(dx)}", "    hex.mul_low 10, ptlocp, ptlocdy, ptlock",    # P = B*|dx|
+           f"    hex.set 10, ptlock, {abs(dy)}", "    hex.mul_low 10, ptlocq, ptlocdx, ptlock"]    # Q = A*|dy|
     # s = sgn(dx) P - sgn(dy) Q
     if dx > 0 and dy > 0:
         out += ["    hex.sub 10, ptlocp, ptlocq"]                 # s = P - Q

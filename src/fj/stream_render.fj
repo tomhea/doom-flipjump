@@ -221,10 +221,10 @@ ns stream {
         hex.read_byte_and_inc y2r, ptr             // cum band index (1..16)
         hex.read_byte_and_inc colr, ptr            // the band's final palette byte
         hex.zero 2, mul_cum + 2*dw   // both operands zero-extended to the mul width
-        hex.mov 2, mul_cum, y2r                    // (mul_lo n reads n nibbles from BOTH sources)
+        hex.mov 2, mul_cum, y2r                    // (mul_low n reads n nibbles from BOTH sources)
         hex.zero 2, mul_wlen + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, mul_wlen, wlen
-        hex.mul_lo 4, mul_out, mul_cum, mul_wlen   // cum * wlen  (<=16 x <=100)
+        hex.mul_low 4, mul_out, mul_cum, mul_wlen   // cum * wlen  (<=16 x <=100)
         hex.shr_hex 4, 1, mul_out                  // >> 4 bits = the 1/16 split
         hex.mov 2, y2r, mul_out
         hex.add 2, y2r, ctake                      // y2 = ctake + ((cum*wlen) >> 4)

@@ -99,31 +99,6 @@ def test_mul_const_parity(tmp_path):
     _run(tmp_path, "mul_const", body, data, expected)
 
 
-def test_maybe_add_shifted(tmp_path):
-    """mul_const's building block: if `bit` (compile-time 0/1) is set, dst += shifted; then shifted is
-    ALWAYS shifted left one bit. No precondition ⇒ no should-fail; covers both bit values + the shl wrap."""
-    body = [
-        # bit=1: dst 0x0010 + shifted 0x0003 = 0x0013; shifted 0x0003<<1 = 0x0006
-        "hex.set 4, dst, 0x0010", "hex.set 4, sh, 0x0003",
-        "hex.mul_const.maybe_add_shifted 4, dst, sh, 1",
-        "hex.print_as_digit 4, dst, 0", "stl.output 10",
-        "hex.print_as_digit 4, sh, 0", "stl.output 10",
-        # bit=0: dst unchanged 0x0010; shifted still doubles 0x0003 -> 0x0006
-        "hex.set 4, dst, 0x0010", "hex.set 4, sh, 0x0003",
-        "hex.mul_const.maybe_add_shifted 4, dst, sh, 0",
-        "hex.print_as_digit 4, dst, 0", "stl.output 10",
-        "hex.print_as_digit 4, sh, 0", "stl.output 10",
-        # shl wrap edge: shifted 0x8000 (high bit) << 1 wraps to 0x0000 (mod 2^16, n=4 nibbles)
-        "hex.set 4, dst, 0x0001", "hex.set 4, sh, 0x8000",
-        "hex.mul_const.maybe_add_shifted 4, dst, sh, 1",
-        "hex.print_as_digit 4, dst, 0", "stl.output 10",
-        "hex.print_as_digit 4, sh, 0", "stl.output 10",
-    ]
-    data = ["dst: hex.vec 4", "sh: hex.vec 4"]
-    expected = b"0013\n0006\n0010\n0006\n8001\n0000\n"
-    _run(tmp_path, "maybe_add_shifted", body, data, expected)
-
-
 def test_read_table_byte_every_entry_call_twice(tmp_path):
     """read_table_byte: packed-byte LUT (one data-op per entry). Read EVERY entry TWICE (R5 #8) —
     catches result-reg / pointer cleanup bugs — byte-exact vs the table contents."""

@@ -141,7 +141,7 @@ def price(counter, names, cover_ops, src_tags=()):
         if hw:
             hand[hw[-1]] += n
             # the CALLER of the deepest hand-written frame, when it is also hand-written.
-            # Without it a macro defined in a .fj file (hex.fixed_mul_lo.row) collapses all
+            # Without it a macro defined in a .fj file (hex.mul_low.row) collapses all
             # of its callers into one row and the caller breakdown is lost.
             pair[(hw[-2][0] if len(hw) > 1 else "-", hw[-1][0], hw[-1][1])] += n
     return inc, exc, site, hand, pair

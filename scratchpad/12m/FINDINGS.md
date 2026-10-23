@@ -245,7 +245,7 @@ Full table in ATLAS.md. The headline shape, which is NOT what the stale table sa
 - `stream.emit_col_lines` 3,812,820; `frame.ts_step_faces` 3,563,542; `frame.thing_record_body`
   2,383,571; the pointer arm (`set_flip_and_jump_pointers`) 2,022,344.
 - CONCENTRATED, by contrast: `hex.add_mul` 1,832,124 at ONE line (fixed_point.fj's
-  `fixed_mul_lo.row`), of which 1,186,378 comes from full `hex.fixed_mul_lo 8,4` calls;
+  `mul_low.row`), of which 1,186,378 comes from full `hex.fixed_mul_low 8,4` calls;
   `hex.scmp` 852,998 over just 15 sites; `frame.dance_boundary` 1,290,578 in three lines;
   the four `write_byte_and_inc` of `ts_piece_wr` 795,631.
 
@@ -303,7 +303,7 @@ Full census of adjacent `hex.zero N,X` / `hex.mov m,X[+k*dw]` in fixed_point / p
 frame_render / stream_render / present.fj. Three shipped as P7-1 (independently agreed by the
 audit). **Two more verified dead, not yet shipped:** `proj.slope_div`'s and `proj.slope_div_m`'s
 `recip_wide` -- each a separate macro-local, `zero 8` + `mov 6,k=0`, and the uncovered nibbles
-6..7 are read only as a zero-extended `fixed_mul_lo.row` operand and written by nothing.
+6..7 are read only as a zero-extended `mul_low.row` operand and written by nothing.
 
 **THE TWO PATTERNS THAT MAKE ~90% OF THESE ZEROS LOOK REDUNDANT BUT AREN'T** -- read this before
 proposing any further zero deletion:
@@ -311,7 +311,7 @@ proposing any further zero deletion:
    no matter how narrow the caller's data is (R37/R11). Live at `seg_pass1_leaf_body_ts`'s `x`,
    `step_shade`'s `sh_idx`, `lines_step_load`'s `slot_idx`, `lines_steps_seed`/`lines_spr_seed`'s
    `sidx`, `sprite_runs(_win)`'s `srw_sidx`/`srn_sidx`. All KEEP.
-2. **shr_hex / shl_hex / shl_bit / add_chain / mul_lo / mul_const rewrite the full width they
+2. **shr_hex / shl_hex / shl_bit / add_chain / mul_low / mul_const rewrite the full width they
    declare**, so a zero followed by a narrower mov is CONSUMED, not redundant, whenever one of
    those is the next instruction. That is ~30 of the 41 KEEPs.
 3. Self-dirtying: `slope_div_m`'s `den_norm`/`num_norm` are re-zeroed every call because that same
@@ -493,7 +493,7 @@ chain and the net was -57,501. Do not read that row as a regression.
 
 | site | ops | share | what |
 |---|---:|---:|---|
-| `f2:l104` | **1,844,048** | **9.55%** | `add_mul` in `fixed_mul_lo.row` -- the multiply |
+| `f2:l104` | **1,844,048** | **9.55%** | `add_mul` in `mul_low.row` -- the multiply |
 | `f5:l1546` | 702,752 | 3.64% | `hex.xor jumper, dst_next` in dance_boundary |
 | `f5:l1545` | 685,879 | 3.55% | `hex.xor_zero dst_prev, hex.tables.res` |
 | `f8:l1090` | 653,910 | 3.39% | `w1rpat.walk` |
@@ -502,7 +502,7 @@ chain and the net was -57,501. Do not read that row as a regression.
 | `f5:l1890` | 422,090 | 2.19% | arm5's SET pass |
 | `f5:l1940` | 244,750 | 1.27% | `xor_byte_to_flip_ptr` (the write dance) |
 | `f5:l949` | 178,684 | 0.93% | `hex.scmp 5` in ts_piece_store |
-| `f2:l86/88/90/92` | 493,073 | 2.55% | fixed_mul_lo's setup movs + zero |
+| `f2:l86/88/90/92` | 493,073 | 2.55% | fixed_mul_low's setup movs + zero |
 
 So the MULTIPLY FAMILY (add_mul + setup) is **2,337,121 = 12.1%**, the biggest addressable pool
 left, and the arm remainder is 881,786 at the two arm5 lines plus the un-narrowed full arms.
@@ -590,7 +590,7 @@ is absurd. A realistic round is a fraction of the 2^8 row.
 best available move is -5,286 (thing_leaf, 256 ops); every other size at every point is WORSE.
 Five placement rounds in earlier campaigns tuned exactly these.
 
-**AND THE ONE NEW KNOB IS TOO.** `fixed_mul_lo`'s in-macro filler shifts at 20 expansions at once
+**AND THE ONE NEW KNOB IS TOO.** `fixed_mul_low`'s in-macro filler shifts at 20 expansions at once
 (the compound shift that accidentally bought 139,917 on P3-2). `scratchpad/12m/multishift.py`
 generalises the predictor to that case and searched 1182..3000 at step 16: **1998 -- the accidental
 value -- is the best in the range**, everything else is worse. Saved a 20-minute gate by predicting.

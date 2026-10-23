@@ -13,7 +13,7 @@ nothing a Baron reads):
   * the green fireball's pool (projcode.pj_lines(missile="MT_BRUISERSHOT")): the spawn at speed 15 (16v - v), S_BRBALL1
     with its tics roll, the flight, the impact (P_Random()%8+1)*8 and S_BRBALLX1 -- against _spawn_fireball /
     _projectiles_phase;
-  * the thrust on a mass-1000 target (knockcode.thrust_lines(mass1k=True): kbm1k and hex.fixed_mul_lo) against
+  * the thrust on a mass-1000 target (knockcode.thrust_lines(mass1k=True): kbm1k and hex.fixed_mul_low) against
     combat._thrust's momentum.
 
 R9: each comparison has controls that break the piece and must part from the model.

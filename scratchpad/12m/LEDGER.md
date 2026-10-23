@@ -173,7 +173,7 @@ All four deg viewpoints moved by exactly -61,600: a fixed number of claims per f
 
 ### Running total after 11 ideas: 18,982,338 -> 18,171,018 = **-811,320 (-4.27%)**
 
-| P3-1 | P3 | `fixed_mul_lo` drives its rows off `b` in place; `wide_b` deleted | -450,083 / -478,242 / -467,052 / -462,600 | **17,919,032** (-251,986, -1.39%) | SHIP | (commit) |
+| P3-1 | P3 | `fixed_mul_low` drives its rows off `b` in place; `wide_b` deleted | -450,083 / -478,242 / -467,052 / -462,600 | **17,919,032** (-251,986, -1.39%) | SHIP | (commit) |
 
 **P3-1 detail -- the biggest idea of the campaign.** The macro copied BOTH operands into
 12-nibble scratch vectors, but `wide_b` existed only to be read one nibble at a time as the row
@@ -196,7 +196,7 @@ status, and the comment says so.
 
 ### Running total after 12 ideas: 18,982,338 -> 17,919,032 = **-1,063,306 (-5.60%)**
 
-| P3-2 | P3 | `fixed_mul_lo` reads `a` in place; `wide_a` deleted | -514,968 / -411,759 / -460,255 / -464,279 | **17,673,906** (-245,126, -1.37%) | SHIP | (commit) |
+| P3-2 | P3 | `fixed_mul_low` reads `a` in place; `wide_a` deleted | -514,968 / -411,759 / -460,255 / -464,279 | **17,673,906** (-245,126, -1.37%) | SHIP | (commit) |
 
 **P3-2 detail.** `wide_a` was only [a's n nibbles, then f copies of its sign], so rows read `a`
 directly and take the tail from a 4-nibble all-sign vector written before it is read.
@@ -211,7 +211,7 @@ same commit rather than left to break in a later session.
 
 > ⚠ **FREEZE MISS: +16,320 ops, AND IT WAS AN ARITHMETIC ERROR, not tool drift.** micro.py
 > measured 1203 as the TOTAL filler for the new macro to match the current one -- and I added it
-> to P3-1's existing 795, double-counting. The label table settles it: `fixed_mul_lo` has 12 call
+> to P3-1's existing 795, double-counting. The label table settles it: `fixed_mul_low` has 12 call
 > sites but **20 EXPANSIONS** (some sit inside `rep`), and 20 x (1998 - 1182) = 16,320 exactly.
 > **The correct filler is 1182.** Count EXPANSIONS, not call sites, and remember that a measured
 > filler is a TOTAL, never an increment on the one already there.

@@ -378,7 +378,7 @@ def _player_sim_lines(collide: bool = False, strafe: bool = False, tap=None) -> 
     Two things are worth stating because they are where a mirror would drift:
       * the angle is modular, so `-= ANGLE_TURN` is emitted as `+= (2**32 - ANGLE_TURN)` -- one
         primitive, and bit-identical to the oracle's `& 0xFFFFFFFF` subtract;
-      * `fixed_mul_lo` is the cheap form of `fixed_mul`, documented bit-identical, and the operands
+      * `fixed_mul_low` is the cheap form of `fixed_mul`, documented bit-identical, and the operands
         are in the oracle's order (move first, trig second).
 
     The key byte's bits are tested with `hex.if_flags`, whose mask is a set of NIBBLE VALUES: bit 0
@@ -436,10 +436,10 @@ def _player_sim_lines(collide: bool = False, strafe: bool = False, tap=None) -> 
         "hex.mov 8, pangt, viewangle", "hex.shr_hex 8, 5, pangt", "hex.mov 3, pangi, pangt",
         "finesine.read_cos pmvc, pangi",
         "finesine.read_sin pmvs, pangi",
-        "hex.fixed_mul_lo 8, 4, pmvdx, pmove, pmvc",
-        "hex.fixed_mul_lo 8, 4, pmvdy, pmove, pmvs",
-        *(["hex.fixed_mul_lo 8, 4, psdx, psid, pmvs", "hex.add 8, pmvdx, psdx",
-           "hex.fixed_mul_lo 8, 4, psdy, psid, pmvc", "hex.sub 8, pmvdy, psdy"] if strafe else []),
+        "hex.fixed_mul_low 8, 4, pmvdx, pmove, pmvc",
+        "hex.fixed_mul_low 8, 4, pmvdy, pmove, pmvs",
+        *(["hex.fixed_mul_low 8, 4, psdx, psid, pmvs", "hex.add 8, pmvdx, psdx",
+           "hex.fixed_mul_low 8, 4, psdy, psid, pmvc", "hex.sub 8, pmvdy, psdy"] if strafe else []),
         # M14-d: with collision on the move is a REQUEST -- `move_with_collision_lines` decides
         # where it actually lands. Without it the delta is applied straight, as M14-c shipped.
         *(["hex.mov 8, cm_dx, pmvdx", "hex.mov 8, cm_dy, pmvdy", ";simcollide"] if collide else

@@ -121,7 +121,7 @@ ns proj {
         hex.mov 6, recip_wide, recip
         // the mod-16^8 product needs only num_norm's 3 post-normalize nibbles as multiplier rows
         hex.zero 8, prod
-        rep(3, j) hex.fixed_mul_lo.row 8, j, prod, recip_wide, num_norm
+        rep(3, j) hex.mul_low.row 8, j, prod, recip_wide, num_norm + j*dw
         hex.shr_hex 8, 4, prod                   // >> (RK-8 = 16 bits): the FIXED final shift
 
         hex.if0 1, prod + 3*dw, prod_small       // nibble 3 set => >= 0x1000 > 0x800 -> clamp
@@ -640,8 +640,8 @@ ns proj {
         hex.mov 4, rw_normalangle + 4*dw, segangle      // rw_normalangle = segangle << 16 ...
         hex.add 8, rw_normalangle, cang90               //   ... + ANG90 (the wall normal)
 
-        hex.fixed_mul_lo 8, 4, rw_distance, a, viewx       // rw_distance = a*viewx ...
-        hex.fixed_mul_lo 8, 4, bviewy, b, viewy
+        hex.fixed_mul_low 8, 4, rw_distance, a, viewx       // rw_distance = a*viewx ...
+        hex.fixed_mul_low 8, 4, bviewy, b, viewy
         hex.add 8, rw_distance, bviewy                  //   + b*viewy ...
         hex.add 8, rw_distance, c                       //   + c  (signed perpendicular distance, mod 2^32)
         hex.abs 8, rw_distance                          // front-facing => signed>0 => abs is a no-op
@@ -711,7 +711,7 @@ ns proj {
         hex.mov 8, srd_num_wide + 4*dw, num          // srd_num_wide = num << 16 (4 nibbles, by placement)
         hex.mov 6, srd_recip_wide, srd_recip
         hex.zero 14, srd_prod
-        rep(5, j) hex.fixed_mul_lo.row 14, j, srd_prod, srd_num_wide, srd_recip_wide   // mod 16^14
+        rep(5, j) hex.mul_low.row 14, j, srd_prod, srd_num_wide, srd_recip_wide + j*dw   // mod 16^14
         // srd_shift_nibs in [4,11]: den has 1..8 significant nibbles -> at most 5 right- or 2 left-shifts
         hex.cmp 2, srd_shift_nibs, srd_csh8, shift_lo, shift8, shift_hi
         // LAYOUT FREEZE for the 864 ops the two deleted zeros above cost. UNREACHABLE: hex.cmp
@@ -781,19 +781,19 @@ ns proj {
         hex.mov 3, sga_sin_idx, sga_angleb              //   read_sin idx = sga_angleb >> 20 (low 3 nibbles)
         finesine.read_sin sga_sinv, sga_sin_idx
         // M13-CPROJSTATIC: `hex.set 8, cproj, projection` used to run HERE, once per call, to
-        // reload a value fixed at emit time. hex.fixed_mul_lo never writes its operands, so
+        // reload a value fixed at emit time. hex.fixed_mul_low never writes its operands, so
         // cproj is never disturbed -- the vec below carries the constant instead. 127.3 ops/call
         // saved (scratchpad/_ptr_price.log, "hex.set 8 (const addr)").
         // ⚠ P3-1 SHARPENED THIS. The macro used to SNAPSHOT b into wide_b before the row loop;
         // it now reads b LIVE, one nibble per row. "Never writes b" was a convenience then and
         // is a REQUIREMENT now, and it holds for the same reason: hex.add_mul's two
         // `.xor .mul.dst, b` are restore dances, so b leaves every row exactly as it entered.
-        // M13-mulorder: operands SWAPPED vs the obvious order. fixed_mul_lo runs one schoolbook row
+        // M13-mulorder: operands SWAPPED vs the obvious order. fixed_mul_low runs one schoolbook row
         // per NONZERO nibble of its SECOND operand, and a negative 16.16 sine sign-extends to a dense
         // 12-nibble pattern (~10k ops as a multiplier) while cproj = PROJECTION<<16 has ONE nonzero
         // nibble (~1.9k). Multiplication is commutative and the macro takes the same mod-16^12 low
         // product either way, so this is BIT-IDENTICAL -- purely a row-count choice.
-        hex.fixed_mul_lo 8, 4, sga_num, sga_sinv, cproj
+        hex.fixed_mul_low 8, 4, sga_num, sga_sinv, cproj
 
         // M13-SINADISP: sga_anglea is COLUMN-ONLY. Every caller builds visangle as
         // `viewangle + xtoviewangle[col]`, so sga_anglea = ANG90 + (visangle - viewangle) reduces,
@@ -804,7 +804,7 @@ ns proj {
         rep(1-disp, k) hex.mov 3, sga_sin_idx, sga_anglea
         rep(1-disp, k) finesine.read_sin sga_sinv, sga_sin_idx
         rep(disp, k) sinadisp.lookup sga_sinv, col
-        hex.fixed_mul_lo 8, 4, sga_den, sga_sinv, rw_distance   // same swap: rw_distance is the sparse operand
+        hex.fixed_mul_low 8, 4, sga_den, sga_sinv, rw_distance   // same swap: rw_distance is the sparse operand
 
         hex.if0 8, sga_den, den_zero                // sga_den == 0 -> SCALE_MAX
         // M13-scalerecip [re-bless]: sign-split + block-FP reciprocal replaces the signed
@@ -903,7 +903,7 @@ ns proj {
         // wall's FRONT side; a one-sided wall whose front faces away (sgn<=0) is invisible -> cull without
         // paying point_to_angle x2. Byte-exact: every seg this culls that span<ANG180 would keep is
         // frustum-culled anyway (verified across viewpoints).
-        // M13-absmul (the [[fj-cost-model]] ROW RULE): fixed_mul_lo runs one schoolbook row per NONZERO
+        // M13-absmul (the [[fj-cost-model]] ROW RULE): fixed_mul_low runs one schoolbook row per NONZERO
         // nibble of its SECOND operand, and a negative 16.16 viewx sign-extends to a dense 12-nibble
         // pattern (4,984 ops) where |viewx| has 2-3 nonzero nibbles (2,632). So multiply by the
         // per-frame ABS registers (viewxa/viewya, computed once at frame start alongside their sign
@@ -932,8 +932,8 @@ ns proj {
         //   because these two macros are called only from hand-written fj (frame_render.fj, 9
         //   sites) -- NO Python f-string emits them -- so rule 4's frozen-ABI concern, which is
         //   about emitter-generated calls, does not apply. Checked by grep over src/doomfj/.
-        hex.fixed_mul_lo 8, 4, sgn, viewx, a
-        hex.fixed_mul_lo 8, 4, sgn_b, viewy, b
+        hex.fixed_mul_low 8, 4, sgn, viewx, a
+        hex.fixed_mul_low 8, 4, sgn_b, viewy, b
         hex.add 8, sgn, sgn_b
         hex.add 8, sgn, c
         hex.sign 8, sgn, end, frontok      // sgn < 0 -> back-facing, cull (visible=0)
@@ -1008,7 +1008,7 @@ ns proj {
             @ world_h, prod, end {
         hex.mov 8, world_h, ceilfix
         hex.sub 8, world_h, viewz           // worldtop = ceilfix - viewz
-        hex.fixed_mul_lo 8, 4, prod, scale, world_h   // M14-perf ROW RULE: world_h's low 4
+        hex.fixed_mul_low 8, 4, prod, scale, world_h   // M14-perf ROW RULE: world_h's low 4
         hex.set 8, top, centeryfix                    // nibbles are 0 (integer<<16), scale is dense
         hex.sub 8, top, prod                // topfrac = centeryfix - worldtop*scale
         hex.shr_hex 8, 4, top               // >> 16 (logical) ...
@@ -1016,7 +1016,7 @@ ns proj {
 
         hex.mov 8, world_h, floorfix
         hex.sub 8, world_h, viewz           // worldbottom = floorfix - viewz
-        hex.fixed_mul_lo 8, 4, prod, scale, world_h   // M14-perf ROW RULE (see above)
+        hex.fixed_mul_low 8, 4, prod, scale, world_h   // M14-perf ROW RULE (see above)
         hex.set 8, bottom, centeryfix
         hex.sub 8, bottom, prod
         hex.shr_hex 8, 4, bottom
@@ -1091,7 +1091,7 @@ ns proj {
         hex.shr_hex 8, 5, ang                          // ang >> angle_shift(20) = 5 nibbles
         hex.mov 3, ft_idx, ang                         //   low 3 nibbles = the finetangent index
         hex.read_table_packed 4, ft, finetangent, 3, ft_idx   // ft = finetangent[idx]  (signed)
-        hex.fixed_mul_lo 8, 4, prod, ft, rw_distance      // prod = ft * rw_distance (signed)
+        hex.fixed_mul_low 8, 4, prod, ft, rw_distance      // prod = ft * rw_distance (signed)
         hex.mov 8, tcol, rw_offset
         hex.sub 8, tcol, prod                          // rw_offset - prod
         hex.shr_hex 8, 4, tcol
@@ -1334,13 +1334,13 @@ ns proj {
             < sp_z, viewz, sp_hh, pth_xscale, pth_gzt, pth_tmp, pth_c_centeryfix, pth_c_viewh {
         hex.mov 8, pth_gzt, sp_z                            // pth_gzt = (thing floor + sprite top) - viewz
         hex.sub 8, pth_gzt, viewz
-        hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, pth_gzt        // M14-perf ROW RULE: pth_gzt is integer<<16
+        hex.fixed_mul_low 8, 4, pth_tmp, pth_xscale, pth_gzt        // M14-perf ROW RULE: pth_gzt is integer<<16
         hex.set 8, pth_c_centeryfix, centery*0x10000
         hex.mov 8, ytopo, pth_c_centeryfix
         hex.sub 8, ytopo, pth_tmp
         hex.shr_hex 8, 4, ytopo
         hex.sign_extend 8, 4, ytopo
-        hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, sp_hh      // M14-perf ROW RULE: sp_hh is integer<<16
+        hex.fixed_mul_low 8, 4, pth_tmp, pth_xscale, sp_hh      // M14-perf ROW RULE: sp_hh is integer<<16
         hex.shr_hex 8, 4, pth_tmp
         hex.sign_extend 8, 4, pth_tmp
         hex.mov 8, hpxo, pth_tmp
@@ -1369,7 +1369,7 @@ ns proj {
         hex.sub 8, pth_tr_y, viewy
         // T4 L-INF FAR REJECT (2026-09-03), before the two rotation multiplies. Measured in the
         // attribution round: this leaf runs 140-163 times a frame, accepts exactly 7, and 62-90%
-        // of calls die on the depth test at the tz compare -- AFTER paying the two fixed_mul_lo
+        // of calls die on the depth test at the tz compare -- AFTER paying the two fixed_mul_low
         // (~8.2k ops). Any ACCEPTED thing has tz <= sp_tzmax and |tx| <= tz<<2, so
         // d = sqrt(tz^2 + tx^2) <= sqrt(17)*sp_tzmax, and max(|tr_x|,|tr_y|) <= d. Rejecting on
         // |tr| > bound therefore kills only things the later chain rejects anyway.
@@ -1455,13 +1455,13 @@ ns proj {
         hex.set 1, pth_trig_cached, 1
       trig_have:
         // pth_tz = pth_tr_x*cos + pth_tr_y*sin  (DOOM: pth_gxt - pth_gyt with pth_gyt = -FixedMul(pth_tr_y, viewsin))
-        // ⚠ OPERANDS SWAPPED (the M13-mulorder lever). `fixed_mul_lo` runs one schoolbook row
+        // ⚠ OPERANDS SWAPPED (the M13-mulorder lever). `fixed_mul_low` runs one schoolbook row
         // per NONZERO NIBBLE OF THE SECOND OPERAND, and pth_tr_x/pth_tr_y are differences of
         // (map-unit << 16) values -- their low FOUR nibbles are always zero -- while a finesine
         // value is a dense 16.16. Commutative and the same mod-16^12 low product, so this is
         // BIT-IDENTICAL: purely a row-count choice.
-        hex.fixed_mul_lo 8, 4, pth_gxt, pth_vcos, pth_tr_x
-        hex.fixed_mul_lo 8, 4, pth_gyt, pth_vsin, pth_tr_y
+        hex.fixed_mul_low 8, 4, pth_gxt, pth_vcos, pth_tr_x
+        hex.fixed_mul_low 8, 4, pth_gyt, pth_vsin, pth_tr_y
         hex.mov 8, pth_tz, pth_gxt
         hex.add 8, pth_tz, pth_gyt
         // ⚠ pth_czlim is REUSED: it carries MINZ here and the SPR-NEAR detail radius below.
@@ -1490,8 +1490,8 @@ ns proj {
         rep(spn, k) hex.set 1, thfar, 1
       far_done:
         // pth_tx = pth_tr_x*sin - pth_tr_y*cos  (DOOM: -(pth_gyt + pth_gxt) with both negated)
-        hex.fixed_mul_lo 8, 4, pth_gxt, pth_vsin, pth_tr_x         // same swap, same reason
-        hex.fixed_mul_lo 8, 4, pth_gyt, pth_vcos, pth_tr_y
+        hex.fixed_mul_low 8, 4, pth_gxt, pth_vsin, pth_tr_x         // same swap, same reason
+        hex.fixed_mul_low 8, 4, pth_gyt, pth_vcos, pth_tr_y
         hex.mov 8, pth_tx, pth_gxt
         hex.sub 8, pth_tx, pth_gyt
         hex.mov 8, pth_tx_abs, pth_tx                           // |pth_tx| > pth_tz<<2 -> outside the view
@@ -1521,14 +1521,14 @@ ns proj {
         hex.set 8, pth_c_centerxfix, centerx*0x10000
         hex.mov 8, pth_tx_left, pth_tx
         hex.sub 8, pth_tx_left, sp_left
-        hex.fixed_mul_lo 8, 4, pth_tmp, pth_tx_left, pth_xscale
+        hex.fixed_mul_low 8, 4, pth_tmp, pth_tx_left, pth_xscale
         hex.add 8, pth_tmp, pth_c_centerxfix
         hex.shr_hex 8, 4, pth_tmp
         hex.sign_extend 8, 4, pth_tmp
         hex.mov 8, x1o, pth_tmp
         hex.mov 8, pth_tx_right, pth_tx_left
         hex.add 8, pth_tx_right, sp_w
-        hex.fixed_mul_lo 8, 4, pth_tmp, pth_tx_right, pth_xscale
+        hex.fixed_mul_low 8, 4, pth_tmp, pth_tx_right, pth_xscale
         hex.add 8, pth_tmp, pth_c_centerxfix
         hex.shr_hex 8, 4, pth_tmp
         hex.sign_extend 8, 4, pth_tmp
@@ -1567,14 +1567,14 @@ ns proj {
     def step_rows ra, rb, scale, wta8, wtb8, centeryfix_c \
             @ prod, c_centeryfix, end {
         hex.zero 8, prod
-        rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wta8, scale
+        rep(6, j) hex.mul_low.row 8, j, prod, wta8, scale + j*dw
         hex.set 8, c_centeryfix, centeryfix_c
         hex.mov 8, ra, c_centeryfix
         hex.sub 8, ra, prod                 // rowfrac = centeryfix - wt*scale
         hex.shr_hex 8, 4, ra                // >> 16 arithmetic:
         hex.sign_extend 8, 4, ra            //   logical shift + sign-extend the low half
         hex.zero 8, prod
-        rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wtb8, scale
+        rep(6, j) hex.mul_low.row 8, j, prod, wtb8, scale + j*dw
         hex.mov 8, rb, c_centeryfix
         hex.sub 8, rb, prod
         hex.shr_hex 8, 4, rb
@@ -1623,13 +1623,13 @@ ns proj {
         hex.set 1, cpm_consts_set, 1
       consts_ready:
         hex.zero 8, cpm_prod
-        rep(6, j) hex.fixed_mul_lo.row 8, j, cpm_prod, wtc8, scale
+        rep(6, j) hex.mul_low.row 8, j, cpm_prod, wtc8, scale + j*dw
         hex.mov 8, top, cpm_c_centeryfix
         hex.sub 8, top, cpm_prod                // topfrac = centeryfix - wt*scale
         hex.shr_hex 8, 4, top               // >> 16 arithmetic:
         hex.sign_extend 8, 4, top           //   logical shift + sign-extend the low half
         hex.zero 8, cpm_prod
-        rep(6, j) hex.fixed_mul_lo.row 8, j, cpm_prod, wtf8, scale
+        rep(6, j) hex.mul_low.row 8, j, cpm_prod, wtf8, scale + j*dw
         hex.mov 8, bottom, cpm_c_centeryfix
         hex.sub 8, bottom, cpm_prod
         hex.shr_hex 8, 4, bottom
@@ -1713,9 +1713,9 @@ ns proj {
         hex.mov 10, dyv, vy
         hex.sub 10, dyv, cpy              // dyv = vy - py
         hex.set 10, cdx, dx
-        hex.mul_lo 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
+        hex.mul_low 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
         hex.set 10, cdy, dy
-        hex.mul_lo 10, p2, cdy, dxv          // p2 = dy*(vx-px)
+        hex.mul_low 10, p2, cdy, dxv          // p2 = dy*(vx-px)
         hex.sub 10, p1, p2                // side = dx*(vy-py) - dy*(vx-px)
         hex.set 10, czero, 0
         hex.scmp 10, p1, czero, front, front, setback   // <0 & ==0 -> front(0); >0 -> back(1)
@@ -1748,12 +1748,12 @@ ns proj {
     //   (sign_dx/sign_dy, 1 iff the original dx/dy was negative). side = dx*(vy-py) - dy*(vx-px) > 0 ->
     //   back; writing it as signA*|dx|*|dyv| - signB*|dy|*|dxv| (signA = sign(dx)^sign(dyv), signB =
     //   sign(dy)^sign(dxv), both XORs of a baked bit with a runtime hex.sign test) turns the two
-    //   hex.mul_lo 10 signed cross-products into two hex.mul_lo 8 UNSIGNED magnitude products (int16 map
+    //   hex.mul_low 10 signed cross-products into two hex.mul_low 8 UNSIGNED magnitude products (int16 map
     //   coords -> every difference/delta magnitude fits 5 nibbles, product fits 8 -- no overflow) plus a
     //   4-way sign-pair dispatch that replaces the final signed subtract+compare with a single unsigned
     //   hex.cmp 8 (or no compare at all in the two single-sign cases). Exact: same true integer sign,
-    //   no mod-16^n wraparound anywhere. cdx_mag/cdy_mag as the mul_lo 'b' operand additionally gets
-    //   fixed_mul_lo.row's built-in zero-digit skip on their always-zero high nibbles for free.
+    //   no mod-16^n wraparound anywhere. cdx_mag/cdy_mag as the mul_low 'b' operand additionally gets
+    //   mul_low.row's built-in zero-digit skip on their always-zero high nibbles for free.
     //   Writes back(0/1) to `back` and returns via stl.fret pos_ret. @requires hex.init.
     def point_on_side_leaf back, vx, vy, cpx, cpy, cdx_mag, cdy_mag, sign_dx, sign_dy, pos_ret \
             @ dyv_neg, dyv_pos, dyv_done, dxv_neg, dxv_pos, dxv_done, signA_pos, signA_neg, both_pos, pos_neg, check_p2, both_neg, setback, front, end \
@@ -1785,8 +1785,8 @@ ns proj {
         hex.sparse_zero HOTTER_PAD, 3, pos_dxv_mag + 5*dw   // only the HIGH 3: the mov below zeroes the low 5
         hex.sparse_mov HOTTER_PAD, 5, pos_dxv_mag, pos_dxv
 
-        hex.mul_lo 8, pos_p1, pos_dyv_mag, cdx_mag   // pos_p1 = |dx|*|pos_dyv|
-        hex.mul_lo 8, pos_p2, pos_dxv_mag, cdy_mag   // pos_p2 = |dy|*|pos_dxv|
+        hex.mul_low 8, pos_p1, pos_dyv_mag, cdx_mag   // pos_p1 = |dx|*|pos_dyv|
+        hex.mul_low 8, pos_p2, pos_dxv_mag, cdy_mag   // pos_p2 = |dy|*|pos_dxv|
 
         hex.sparse_mov HOTTER_PAD, 1, pos_signA, sign_dx
         hex.sparse_xor HOTTER_PAD, 1, pos_signA, pos_sign_dyv          // pos_signA = sign(dx*pos_dyv)
@@ -1871,7 +1871,7 @@ ns proj {
         hex.zero 2, recip_wide + 6*dw   // only the HIGH 2: the mov below zeroes the low 6
         hex.mov 6, recip_wide, recip
         hex.zero 8, prod
-        rep(3, j) hex.fixed_mul_lo.row 8, j, prod, recip_wide, num_norm
+        rep(3, j) hex.mul_low.row 8, j, prod, recip_wide, num_norm + j*dw
         hex.shr_hex 8, 4, prod                   // >> 16: the FIXED final shift
         hex.if0 1, prod + 3*dw, prod_small
         ;clamp
@@ -2018,10 +2018,10 @@ ns proj {
 
     // P12: acc += fixed_mul(v, k) for a UNIT-NORMAL coefficient k (|k| <= 1.0, 16.16). k's low four nibbles all 0
     //   means k is 0, +1.0 or -1.0 (the only such values in [-1.0, 1.0]), and fixed_mul(v, +-1.0) = +-v exactly, so
-    //   the product is added (or subtracted, or skipped) without the multiply. Any other k takes fixed_mul_lo.
+    //   the product is added (or subtracted, or skipped) without the multiply. Any other k takes fixed_mul_low.
     def wxr_axis_add acc, v, k @ axis, nz, neg, pos, end < wxr_sgn_b {
         hex.if0 4, k, axis
-        hex.fixed_mul_lo 8, 4, wxr_sgn_b, v, k
+        hex.fixed_mul_low 8, 4, wxr_sgn_b, v, k
         hex.add 8, acc, wxr_sgn_b
         ;end
       axis:

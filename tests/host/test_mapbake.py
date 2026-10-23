@@ -26,7 +26,7 @@ PROJECTION_FJ = Path("src/fj/projection.fj")             # provides proj.point_o
 # M1-HOIST: projection.fj's macros now name hoisted globals in their `<` lists, so any program
 # that expands them standalone must declare those too. ONE source with the emitter (R6).
 from doomfj.wall_renderer import hoisted_scratch_fj    # noqa: E402
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")           # provides hex.mul_lo (point_on_side_leaf's cross product)
+FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")           # provides hex.mul_low (point_on_side_leaf's cross product)
 FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")         # provides hex.sub 10, (Idea 14: point_on_side_leaf's signed subtract)
 
 

@@ -396,7 +396,7 @@ Branch `cr-main` from 1.5.1 (`9f6119c`), worktree `flipjump-crmain`.
 | # | area | status | notes |
 |---|---|---|---|
 | 6a | Identity baseline: `pytest --compile --all`, 117 `.fjm` hashed | ✅ | 1263 passed, 1 skipped; R9 control OK |
-| 6b | Assembler + blocking pass | ▶ round 1 reviewed: **4 BLOCKING, 31 MINOR** | fixer next; the owner decides whether the table pool moves to its own file |
+| 6b | Assembler + blocking pass | ✅ round 1 (`87bcd35`): 4 BLOCKING + 29 MINOR fixed (S2 skipped, +2.1% slower); round 1b (`37fffc5`): all helpers take all flags, `lzma_fast` gone, `lzma_preset` 7–9 readable (8 MiB, then retry at 64 MiB), the pool moved to `table_pool.py` (preprocessor diff 2,023 → 620). Identity BYTE-IDENTICAL 117/117 | next: `pool-relocatable` (3h0), then the gap hunt, then v4 |
 | 6c | Native engine, interpreter, CLI | ⏳ | — |
 | 6d | IO devices (1.5.1's earlier changes; #375 is already clean) | ⏳ | — |
 | 6e | Tests + programs | ⏳ | — |

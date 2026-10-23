@@ -316,6 +316,26 @@ def light_thing_blocks(label: str, cell: str, field_lists) -> tuple:
     return blk, f"    dsw_{label}_go {cell}"
 
 
+def solid_seg_call_lines(si: int, cid: int, rcall: list, pass2: list, shot_k=None) -> list:
+    """a solid seg's calls in the BSP code: its geom block SET, pass 1 (the cull: `proceed`), on to `..._unseen` when
+    culled, else the render block SET, pass 2 (`pass2`: the claim loop -- the ONLY writer of `drawn`), the render block
+    CLEAR, and the geom block CLEAR. `shot_k` (M8 C3, doomfj.shotcode): a GR 46 line's index -- the window's drawn flags
+    snapshotted before pass 1 and the record AFTER PASS 2. M8 w2fix: the record sat after pass 1, which reads `drawn`
+    and never writes it, so it found no column claimed and recorded nothing (E1M9's fight F1: aim_sid all 0 where the
+    model has 252 in columns 12-16, the pixels exact); None: the text without a record (E1M1 / E1M2, every non-GR seg)"""
+    shot = shot_k is not None
+    return [f"    stl.fcall seg{si}_geom_consts, xb_ret",
+            *(_shotcode.pre_lines() if shot else []),
+            "    stl.fcall seg_pass1_leaf, seg_ret",
+            f"    hex.if0 1, proceed, ss{cid}_seg{si}_unseen",
+            *rcall,
+            *pass2,
+            *(_shotcode.post_lines(shot_k) if shot else []),
+            *rcall,
+            f"  ss{cid}_seg{si}_unseen:",
+            f"    stl.fcall seg{si}_geom_consts, xb_ret"]
+
+
 def _seg_xorby_use(label, clear=True):
     """The SET / USE / CLEAR fcall sequence at the call site. `clear=False` drops the involution CLEAR (a TDD
     FAIL stub: seg regs accumulate across segs -> wrong values for every seg after the first)."""
@@ -3701,17 +3721,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # ss{cid}_seg{si}_unseen: keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
             # leaf's action once per parent branch, so seg-index labels would collide (R6m).
             _shk = _shot_k.get(seg.linedef)        # M8 C3: a GR 46 line records into the aim window (shotcode)
-            out += [f"    stl.fcall seg{si}_geom_consts, xb_ret",
-                    *(_shotcode.pre_lines() if _shk is not None else []),
-                    "    stl.fcall seg_pass1_leaf, seg_ret",
-                    *(_shotcode.post_lines(_shk) if _shk is not None else []),
-                    f"    hex.if0 1, proceed, ss{cid}_seg{si}_unseen",
-                    *_rcall,
-                    # M8 (doomfj.scrollcode): a scrolling line's seg slides wnoff around its pass 2
-                    *_scrollcode.pass2_lines(_scrollcode.seg_scrolls(seg, _scroll_lds)),
-                    *_rcall,
-                    f"  ss{cid}_seg{si}_unseen:",
-                    f"    stl.fcall seg{si}_geom_consts, xb_ret"]
+            # M8 (doomfj.scrollcode): a scrolling line's seg slides wnoff around its pass 2
+            out += solid_seg_call_lines(si, cid, _rcall,
+                                        _scrollcode.pass2_lines(_scrollcode.seg_scrolls(seg, _scroll_lds)), _shk)
             if _dual:
                 # [gate] marking body  ;done | solid: solid body | done:
                 # `hex.if0` on the door's own state cell: state 0 IS shut, so shut takes the SOLID

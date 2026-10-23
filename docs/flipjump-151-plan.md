@@ -275,7 +275,7 @@ The owner's five rules (section 6) are applied to the new stl code until a round
 | # | adoption item | status |
 |---|---|---|
 | A1 | `frame.add*/sub*_chain` + `dance_boundary` → `hex.add n` / `hex.sub n` (~160 sites: projection.fj 101, frame_render 36, stream_render 15, aimcode 6, scrollcode 1, tests) | ▶ grep empty. E1M1 emit_check PASSES (asserts on; hot block 10,430 of 16,384). Host 2681 passed; its 7 failures are 6 from the live-tree collision plus 1 expected: `lb_c`'s width is now visible to the narrowed-clear scan, so its pin moved from 1 to 0. Re-run against `flipjump-stlpin` queued |
-| A10 | `FJM_LZMA_FAST` (harness.py) → `lzma_preset`: **preset 1 for day-to-day builds** (13.4 s against `lzma_fast`'s 17.8 s, the same size) and **preset 6 for ship builds** (−10.8% today, 132 s; preset 9 being measured). Measured on blocked64, with the control: `lzma_fast` reproduces the stored blob byte for byte | ⏳ after round 1b |
+| A10 | `FJM_LZMA_FAST` (harness.py) → `lzma_preset`: **preset 1 for day-to-day builds** (13.4 s against `lzma_fast`'s 17.8 s, the same size) and **preset 6 for ship builds**: −10.8% today. Presets 7, 8 and 9 measured −11.1%, −10.9% and −10.9%, no real gain, and they need the fixed reader; preset 6 is readable by every reader. On a quiet box: fast 6.0 s, preset 6 58 s, load 1.03–1.14 s for all. Measured on blocked64, with the control: `lzma_fast` reproduces the stored blob byte for byte | ⏳ after round 1b |
 | A11 | fjdoom's header readers (`build._span_words`, `measure_frame`, tools) on `.fjm` v4; the ship builds write v4 | ⏳ after 3h |
 | A2 | `fixed_point.fj` deleted → `hex.fixed_mul/div`, `mul_low`, `fixed_mul_low`, `mul_const` | ⏳ after 3b |
 | A3 | `read_table*` → `hex.read_entry*` | ⏳ after 3b |

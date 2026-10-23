@@ -209,6 +209,49 @@ slower. The shared-table and `pad 64` variants lose. The consequence is an **ado
 `byte.emit` → `hex.output` on the low then the high nibble, judged by msframe (it adds about 8 ops of space per
 call site).
 
+### 3h. `.fjm` version 4: the segment table compressed too (owner, 2026-10-24) ⏳
+
+Branch `fjm-compressed-segments`, taken from `cr-main` after round 1b, with a PR into 1.5.1. It may land during the
+owner's review. The spec is `scratchpad/ioapi/cr/fjm_v4_spec.md`.
+
+**Why.** Measured on blocked64:
+
+- 550,498 segments × 32 bytes = **17.6 MB stored raw, 44% of the file**. The table pool makes one segment per
+  placed table.
+- Compressed at preset 6 they take **0.62 MB**.
+- The shipped file would go from 39.8 MB to about **18.5 MB** at preset 6.
+
+**What:**
+
+- version 4 = version 3 plus a compressed segment stream, separate from the data stream, so a header-only read stays
+  cheap;
+- the default version becomes 4; versions 0–3 stay readable.
+
+**Proof:**
+
+- decode-equivalence of every test program, v4 against v3, with an R9 control;
+- a new identity baseline;
+- unit tests at every width;
+- fjdoom's header readers (`build._span_words`) still work.
+
+**Bug fixed with it (round 1b section 5, also on `main`):** `--lzma_preset 7..9` wrote a `.fjm` the reader could not
+read. The reader passed no `dict_size`, so it decoded with 8 MiB. The decoder now uses a 64 MiB dictionary.
+
+### 3i. Mission, later: the smallest shipped `.fjm` (owner, 2026-10-24)
+
+Compress the FINAL ship binaries as far as they go, and research more than the preset. Candidates, each measured on
+the shipped image (size, write time, load time, round trip):
+
+- `PRESET_EXTREME`;
+- the dictionary at least the image size;
+- `lc` / `lp` / `pb` tuned to the op structure (an op is 2w bits: `pb` / `lp` = log2 of its bytes);
+- `FILTER_DELTA` (`dist` = the word bytes) before LZMA2;
+- separating the flip words from the jump words (a column transform, as a new format version);
+- the segment order;
+- `nice_len` / `depth`.
+
+What ships is decided by the measurement. Load time must not grow noticeably.
+
 ### 3g. The review loop on `stl-additions` ⏳
 
 The owner's five rules (section 6) are applied to the new stl code until a round is clean. Then the PR
@@ -232,7 +275,8 @@ The owner's five rules (section 6) are applied to the new stl code until a round
 | # | adoption item | status |
 |---|---|---|
 | A1 | `frame.add*/sub*_chain` + `dance_boundary` → `hex.add n` / `hex.sub n` (~160 sites: projection.fj 101, frame_render 36, stream_render 15, aimcode 6, scrollcode 1, tests) | ▶ grep empty. E1M1 emit_check PASSES (asserts on; hot block 10,430 of 16,384). Host 2681 passed; its 7 failures are 6 from the live-tree collision plus 1 expected: `lb_c`'s width is now visible to the narrowed-clear scan, so its pin moved from 1 to 0. Re-run against `flipjump-stlpin` queued |
-| A10 | `FJM_LZMA_FAST` (harness.py) → `lzma_preset`: a low preset for day-to-day builds, normal compression for ship builds; chosen by measurement (owner, 10-24) | ⏳ after round 1b |
+| A10 | `FJM_LZMA_FAST` (harness.py) → `lzma_preset`: **preset 1 for day-to-day builds** (13.4 s against `lzma_fast`'s 17.8 s, the same size) and **preset 6 for ship builds** (−10.8% today, 132 s; preset 9 being measured). Measured on blocked64, with the control: `lzma_fast` reproduces the stored blob byte for byte | ⏳ after round 1b |
+| A11 | fjdoom's header readers (`build._span_words`, `measure_frame`, tools) on `.fjm` v4; the ship builds write v4 | ⏳ after 3h |
 | A2 | `fixed_point.fj` deleted → `hex.fixed_mul/div`, `mul_low`, `fixed_mul_low`, `mul_const` | ⏳ after 3b |
 | A3 | `read_table*` → `hex.read_entry*` | ⏳ after 3b |
 | A4 | `frame.ptr_index4/5/6` + `ptr_index_fill` → `hex.ptr_index n` | ⏳ after 3b |

@@ -427,6 +427,7 @@ class Steer:
     RETREAT = False            # badly hurt and still hit: back along the trail
     LOW_BACK = False           # hurt: back away from the foe while shooting
     CLOSE_STRAFE = False       # circle-strafe close in too (not only past 120 units)
+    BURN = 0.35                # health a damaging-floor cell ahead costs (10 a 32 frames at ~16 units a frame, 16-unit cells)
     RACE_FAR = 120             # a lift called from a switch this far (units) from it is raced back to, backwards
     BARREL_SAFE = 220          # no shot while a barrel this near (Chebyshev) is in the aim window
     RUN_HURT = 30              # > 0: losing this much health in 60 frames (below 70) -> run the route for 60 frames
@@ -728,6 +729,13 @@ class Steer:
                     f, x, y, self.health, "health", most=250 if hp < 30 else 70 if hp < want else 25,
                     radius=3000 if hp < 30 else 900):
                 return kd
+            if not c.get("p_rad") and self.health and self.pieces:
+                ahead = self.pieces[self.pi][self.wi:self.wi + 240]
+                burn = sum(1 for q in ahead if self.pl.hurts(self.LR.cell_of(*q)))
+                if burn > 20 and hp < burn * self.BURN + 20 and self._seek_health(
+                        f, x, y, self.health, "health", most=150, radius=2500):
+                    self.log("    f%d: %d damaging cells ahead at %d health: health first" % (f, burn, hp))
+                    return kd
             low_ammo = (c.get("am_clip") or 0) < 5 and not (c.get("am_shell") or 0)
             dry = not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0)
             if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo", most=250 if dry else 70,

@@ -49,6 +49,11 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 NAV_CELL = 16
+# the damaging floors (P_PlayerInSpecialSector: 5 / 7 / 16 / 4 / 11, the nukage and the slime) -- a leg's path pays
+# HURT_COST cells for each cell on one (the flood's reachability does not care; the walk does: E1M3's NUKAGE1 pool
+# by the blue card killed every early play that crossed it)
+HURT_SPECIALS = frozenset({4, 5, 7, 11, 16})
+HURT_COST = 12
 KEY_TYPES = {5: "blue", 40: "blue", 6: "yellow", 39: "yellow", 13: "red", 38: "red"}
 # DOOM's exits (p_spec.c): (trigger, which) -- the normal ones are preferred
 EXIT_KINDS = {11: ("S", "normal"), 52: ("W", "normal"), 51: ("S", "secret"), 124: ("W", "secret")}
@@ -282,7 +287,7 @@ class Planner:
         from doomfj.doors import KIND_CARD
         self.lv = lv
         self.mechs = {}
-        self._cp, self._scenes, self._sec, self._solid = {}, {}, {}, {}
+        self._cp, self._scenes, self._sec, self._solid, self._hurt = {}, {}, {}, {}, {}
         for si in lv.door_order:
             kind = lv.dp.kinds[si]
             self.mechs["door:%d" % si] = Mech("door:%d" % si, "door", [si], key=KIND_CARD.get(kind), detail=kind)
@@ -365,6 +370,12 @@ class Planner:
         r = self._sec.get(cell)
         if r is None:
             r = self._sec[cell] = self.lv.sector_at(*centre(cell))
+        return r
+
+    def hurts(self, cell) -> bool:
+        r = self._hurt.get(cell)
+        if r is None:
+            r = self._hurt[cell] = self.lv.secs[self.sector_of(cell)].special in HURT_SPECIALS
         return r
 
     def floor_at(self, scenes, cell) -> int:
@@ -611,13 +622,21 @@ class Planner:
         return order, ecell
 
     def leg_path(self, frm, goal_pred, active):
-        """BFS from cell `frm` to the first cell with `goal_pred(cell)`, in the world with `active` -> [cells, with
-        ("teleport", line) between the two cells of a teleport], or None"""
+        """the cheapest walk from cell `frm` to the first cell with `goal_pred(cell)`, in the world with `active` ->
+        [cells, with ("teleport", line) between the two cells of a teleport], or None. A step costs 1, a step onto a
+        damaging floor 1 + HURT_COST (Dijkstra; with no such floor on the way, a BFS's shortest path)"""
+        import heapq
         scenes = self.scenes_for(active)
         prev = {frm: None}
-        q = collections.deque([frm])
+        dist = {frm: 0}
+        q = [(0, 0, frm)]
+        n = 1
+        done = set()
         while q:
-            a = q.popleft()
+            d, _o, a = heapq.heappop(q)
+            if a in done:
+                continue
+            done.add(a)
             if goal_pred(a):
                 out = []
                 while a is not None:
@@ -630,17 +649,20 @@ class Planner:
                 return out[::-1]
             for dx, dy in STEPS:
                 b = (a[0] + dx, a[1] + dy)
-                if b in prev or not self.edge_ok(scenes, a, b):
+                if b in done or not self.edge_ok(scenes, a, b):
                     continue
                 tele = next((t[0] for t in self.edge_triggers(a, b) if t[1] == "teleport"), None)
                 if tele is not None:
-                    d = cell_of(*tele.dest)
-                    if d not in prev:
-                        prev[d] = (a, "tele", tele.line)
-                        q.append(d)
-                    continue
-                prev[b] = a
-                q.append(b)
+                    b = cell_of(*tele.dest)
+                    link = (a, "tele", tele.line)
+                else:
+                    link = a
+                nd = d + 1 + (HURT_COST if self.hurts(b) else 0)
+                if b not in dist or nd < dist[b]:
+                    dist[b] = nd
+                    prev[b] = link
+                    heapq.heappush(q, (nd, n, b))
+                    n += 1
         return None
 
 

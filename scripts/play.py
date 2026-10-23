@@ -103,6 +103,29 @@ def _pic_render(fr):
     return _W["G"].picture(_W["orc"], _W["dsim"], fr, _W["card"])
 
 
+_TEX_MEMO = {}
+
+
+def memo_textures() -> None:
+    """THE MODEL-ONLY DEV LOOP'S SPEED: `ReferenceModel._wall_texture` caches a composited wall texture per FRAME only,
+    so every picture re-composites every wall texture it shows (97% of a model-only frame: 13,651 composites and
+    116,560 patch decodes in 500 E1M5 frames). Its result is a pure function of (the asset wad, the name, the wall
+    mode, the downscale) -- memoized here across frames, the same object handed back. Installed by `run_model` alone
+    (the search and --model-only); the gate's oracle beside a binary runs the model's code untouched."""
+    from doomfj.reference_model import ReferenceModel as RM
+    if getattr(RM._wall_texture, "_memo", False):
+        return
+    orig = RM._wall_texture
+
+    def wall_texture(self, asset_wad, name, cache, *, wall_mode="textured"):
+        k = (id(asset_wad), name.upper(), wall_mode, self.downscale)
+        if k not in _TEX_MEMO:
+            _TEX_MEMO[k] = (asset_wad, orig(self, asset_wad, name, cache, wall_mode=wall_mode))
+        return _TEX_MEMO[k][1]
+    wall_texture._memo = True
+    RM._wall_texture = wall_texture
+
+
 class Player:
     """one binary run from boot, the oracle beside it (optional). `decide(frame, cells) -> set of key names` is asked
     at every world frame's start past the key log; `on_frame(rec)` sees every presented frame and may return "stop".
@@ -141,6 +164,7 @@ class Player:
         """THE MODEL ALONE (no binary, no picture): the oracle steps the keys from boot and the steering reads the
         cells the binary WOULD present (`p2a_gate.expected_cells`). For developing a route's steering without the
         binary (or the heavy lock); never evidence -- the gate's verdict is Player.run's."""
+        memo_textures()
         from doomfj.automap import has_page
         from doomfj.keyboard import frame_keys
         from doomfj.menu import menu_keys
@@ -376,15 +400,32 @@ class Steer:
     switches need), cross (walk to the cell past the line).
     COMBAT: a monster the binary's last picture SAW (`thseen`), alive, awake and hunting the player, within FIGHT_R:
     turn to it and fire when lined up; a monster shot at for GIVE_UP frames with no damage is ignored for a while.
+    THE WEAPON (`_arm`): the chaingun while it has 20 bullets, else the shotgun while it has shells, else the pistol,
+    else the saw / fist -- never the launcher (DOOM switches to a weapon picked up; its blast hurts close in). While
+    fighting: circle-strafe; back away from a demon, and from anything when hurt; close in with the shotgun on a far
+    foe that is not a hitscanner. RETREAT: badly hurt and still being hit, back along his own trail for a while, then
+    re-plan. No fight on a damaging floor (the planner's paths avoid them: level_route.HURT_COST). Low health: a detour
+    to the nearest medikit / stimpack, further when very low.
     No cheat of any kind: every key is one a player could press."""
 
     FIGHT_R = 900
+    HITSCAN = frozenset({3004, 9, 65})        # zombieman, sergeant, chaingunner: their spread is an ANGLE -- far is safer
+    MELEE = frozenset({3002, 58})             # demon, spectre: back away while shooting
+    # the tactics' knobs (BOT_CFG, a JSON of them, overrides for an evaluation run -- scratchpad/gp/bot/evalseeds.py)
+    RETREAT = True             # badly hurt and still hit: back along the trail
+    LOW_BACK = True            # hurt: back away from the foe while shooting
+    CLOSE_STRAFE = True        # circle-strafe close in too (not only past 120 units)
+    RUN_HURT = 0               # > 0: losing this much health in 60 frames (below 70) -> run the route for 60 frames
     DASH = 160                 # cells of route left under which the player stops fighting and runs for the exit
     LOOK = 3
-    GIVE_UP = 45
+    GIVE_UP = 35
 
     def __init__(self, route: dict, lv=None, log=print, seed: int = 0):
         sys.path.insert(0, str(ROOT / "scripts"))
+        import os
+        for k, v in json.loads(os.environ.get("BOT_CFG") or "{}").items():
+            assert hasattr(Steer, k), k
+            setattr(self, k, v)
         import level_route as LR
         self.LR = LR
         self.lv = lv or LR.Level(route["map"], route.get("wad"), route["skill"])
@@ -412,7 +453,14 @@ class Steer:
         # health on the map at this skill (the stimpack, the medikit, the soulsphere): sought when health runs low
         self.health = [(t.x, t.y) for t in self.lv.things if t.type in (2011, 2012, 2013) and t.flags & bit]
         self.ammo = [(t.x, t.y) for t in self.lv.things if t.type in (2007, 2008, 2048, 2049) and t.flags & bit]
+        from doomfj.world import level_things
+        self.mtype = [t.type for t in level_things(self.lv.mw, self.lv.map)[1]]     # monster slot -> its type
+        self.trail = collections.deque(maxlen=400)   # the player's own recent positions: the way back (a retreat)
+        self.retreat_f, self.retreat_i, self.retreat_next = -1, 0, -1
+        self.hp_hist = collections.deque(maxlen=60)
+        self.run_until = -1
         self.health_taken = set()
+        self.called = {}                             # lift sector -> the times its switch was walked to
         self.retry = {}
         self.why = ""
         self.done_frame = None
@@ -465,9 +513,10 @@ class Steer:
             return False
         if path:
             self.leg["path"] = [list(LR.centre(c)) if c[0] != "teleport" else ["teleport", c[1]] for c in path]
-            keep = (self.li, self.leg)
+            keep = (self.li, self.leg, self.leg_frames)
             self._leg(keep[0])
             self.leg = keep[1]
+            self.leg_frames = keep[2]                # a re-plan is the same leg: its watchdogs keep counting
             self._leg_pieces()
         return bool(path)
 
@@ -490,6 +539,51 @@ class Steer:
         if abs(d) > tight and not (abs(d) < 10 and self.last_turn):
             kd.add("turn_left" if d > 0 else "turn_right")
         return d
+
+    def _retreat(self, f, c, x, y, a):
+        """walk back along the trail (the positions he came by), fastest: forward, turned to a trail point a few
+        back; the aim window's hunters are still shot in passing -> keys, or None when the trail is used up"""
+        while self.retreat_i > 0 and math.hypot(self.trail[self.retreat_i][0] - x,
+                                                self.trail[self.retreat_i][1] - y) < 24:
+            self.retreat_i -= 1
+        if self.retreat_i <= 0:
+            self.retreat_f = -1
+            return None
+        tx, ty = self.trail[self.retreat_i]
+        kd = set()
+        want = math.degrees(math.atan2(ty - y, tx - x)) % 360
+        d = self._turn_to(want, a, kd, tight=8)
+        if abs(d) < 40:
+            kd.add("forward")
+        self.why = "retreat"
+        self.last_pose = None
+        if self.retreat_f <= f + 1:                  # the retreat ends: back on the route from wherever he is
+            self.leg["replan"] = True
+        return kd
+
+    def _arm(self, f, c, kd) -> str:
+        """the weapon to hold, and its key pressed (every 4th frame while it is not up and none is pending): the
+        chaingun while it has 20 bullets, else the shotgun while it has shells, else the pistol while it has bullets,
+        else the saw / fist -- never the launcher (its blast hurts the player close in; DOOM switches to a weapon
+        picked up). -> "chaingun" / "shotgun" / "pistol" / "melee", the class of the weapon UP now"""
+        from doomfj import gamedata as gd
+        own = c.get("wp_own") or 0
+        has = lambda nib: (own >> (4 * nib)) & 1                                  # noqa: E731 -- wp_own's nibbles
+        clip, shell = c.get("am_clip") or 0, c.get("am_shell") or 0
+        if has(5) and clip >= 20:
+            want, key = gd.WP_CHAINGUN, "w4"
+        elif has(2) and shell:
+            want, key = gd.WP_SHOTGUN, "w3"
+        elif has(5) and clip:
+            want, key = gd.WP_CHAINGUN, "w4"
+        elif clip:
+            want, key = gd.WP_PISTOL, "w2"
+        else:
+            want, key = (gd.WP_CHAINSAW if has(3) else gd.WP_FIST), "w1"
+        rdy = c.get("wp_rdy")
+        if rdy is not None and rdy != want and c.get("wp_pend") in (None, gd.WP_NOCHANGE, want) and f % 4 == 0                 and not (want == gd.WP_FIST and rdy == gd.WP_CHAINSAW):
+            kd.add(key)
+        return {gd.WP_CHAINGUN: "chaingun", gd.WP_SHOTGUN: "shotgun", gd.WP_PISTOL: "pistol"}.get(rdy, "melee")
 
     def _foe(self, c, x, y, f):
         """the nearest monster to fight: seen by the last picture, alive, hunting the player, within FIGHT_R"""
@@ -527,8 +621,14 @@ class Steer:
                 return None
         return best
 
+    def _door_boxes(self, si):
+        """the boxes a press opens door `si` from: its own use box, and a mixed-card door's KEYED boxes
+        (doors.keyed_boxes_xy: E1M3 150's blue east side) whose card the player holds"""
+        out = [self.lv.dp.boxes[si]] if self.lv.dp.boxes.get(si) is not None else []
+        return out + [b for b, card in getattr(self.lv.dp, "keyed", {}).get(si, ()) if card in self.keys]
+
     def _door_ahead(self, c, x, y, pts):
-        """the first door on the next points that is not open yet: (sector, its use box or None)"""
+        """the first door on the next points that is not open yet: (sector, the boxes a press opens it from)"""
         LR = self.LR
         prev = (x, y)
         for q in pts:
@@ -537,7 +637,7 @@ class Steer:
                     continue
                 sec = self.pl.sector_of(LR.cell_of(*q))
                 if sec == si or any(LR.seg_cross(prev, q, a, b) for a, b in self.pl.door_segs("door:%d" % si)):
-                    return si, self.lv.dp.boxes.get(si)
+                    return si, self._door_boxes(si)
             prev = q
         return None
 
@@ -560,6 +660,8 @@ class Steer:
     def decide(self, f, c):
         self.opportune = None
         kd = self._decide(f, c)
+        if c is not None and c.get("mode", 0) == 0 and not c.get("p_dead") and self.leg is not None:
+            self._arm(f, c, kd)                      # the weapon to hold (a pickup switches to it: DOOM's rule)
         if self.opportune and "use" not in kd:
             kd.add("fire")
             self.fired = True
@@ -578,7 +680,13 @@ class Steer:
         if c.get("p_rct"):                           # a teleport's reaction time: nothing moves
             return kd
         self.leg_frames += 1
-        if self.leg["kind"] == "item" and self.leg_frames > 300:
+        if self.retreat_f <= f and (not self.trail or math.hypot(x - self.trail[-1][0], y - self.trail[-1][1]) >= 12):
+            self.trail.append((x, y))           # (not while retreating: the retreat indexes the trail)
+        if self.retreat_f > f:
+            kd = self._retreat(f, c, x, y, a)
+            if kd is not None:
+                return kd
+        if self.leg["kind"] == "item" and self.leg_frames > max(300, 2 * len(self.leg["path"] or ()) + 100):
             return self._next(f, "the detour took 300 frames: dropped")
         if self.queue:                               # a precise approach in progress (a planned key sequence)
             self.why = "precise"
@@ -588,8 +696,9 @@ class Steer:
         if (foe is None or foe[0] > 100) and not self.use_tap and self.leg["kind"] != "item":
             hp = c.get("p_hp") or 0
             want = 40 + 10 * (self.seed_at(f) % 3)              # the seed moves the health threshold too
-            if hp < want + 25 and self.health and self._seek_health(f, x, y, self.health, "health",
-                                                                   most=70 if hp < want else 25):
+            if hp < want + 25 and self.health and self._seek_health(
+                    f, x, y, self.health, "health", most=250 if hp < 30 else 70 if hp < want else 25,
+                    radius=3000 if hp < 30 else 900):
                 return kd
             low_ammo = (c.get("am_clip") or 0) < 5 and not (c.get("am_shell") or 0)
             if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo"):
@@ -601,6 +710,16 @@ class Steer:
         if left < self.DASH and (foe is None or foe[0] > 64):
             foe = None
             self.why = "dash"
+        hp_now = c.get("p_hp") or 0
+        self.hp_hist.append(hp_now)
+        if self.RUN_HURT and hp_now < 70 and max(self.hp_hist) - hp_now >= self.RUN_HURT and f >= self.run_until + 120:
+            self.run_until = f + 60                  # hurt fast: run the route a while (most hunters are slower)
+            self.log("    f%d: run (lost %d in 60 frames)" % (f, max(self.hp_hist) - hp_now))
+        if f < self.run_until and foe is not None and foe[0] > 80:
+            foe = None
+            self.why = "run"
+        if foe is not None and foe[0] > 100 and self.pl.hurts(self.LR.cell_of(x, y)):
+            foe = None                               # on a damaging floor: walk on (shooting in passing), fight off it
         # ---- combat
         self.why = "nav %d/%d" % (self.wi, len(self.pieces[self.pi]) if self.pieces else 0)
         if foe is not None:
@@ -616,7 +735,11 @@ class Steer:
             tol = max(1.0, math.degrees(math.atan2(14, max(foe[0], 1))))
             if abs(d) > tol:
                 self._turn_to(want, a, kd, tight=tol)
-            if aimed and foe[0] < 800 and (foe[0] < 320 or (not self.fired and not c.get("wp_rf"))):
+            wp = self._arm(f, c, kd)
+            # the trigger: HELD close in, and with the shotgun / chaingun / saw (the pellets and the burst spread
+            # anyway); far off with the pistol, a fresh press each shot (P_GunShot: the first shot of a pull is accurate)
+            hold = foe[0] < 320 or wp in ("shotgun", "chaingun", "melee")
+            if aimed and foe[0] < 800 and (hold or (not self.fired and not c.get("wp_rf"))):
                 kd.add("fire")
             if not aimed and abs(d) <= tol:          # lined up, but the window does not hold it: cover between
                 self.covered[m] = self.covered.get(m, 0) + 1
@@ -627,17 +750,32 @@ class Steer:
             if aimed:
                 self.covered[m] = 0
             self.fired = "fire" in kd
-            # THE SHOTGUN when it has shells (key 3; DOOM's own switch picks the pistol again when they run out), and
-            # with it, close in on a foe that is far (the pellets spread)
-            shotgun = (c.get("wp_own") or 0) >> 8 & 1 and (c.get("am_shell") or 0) > 0
-            if shotgun and c.get("wp_rdy") != 2 and c.get("wp_pend") in (None, 10, 2) and f % 4 == 0:
-                kd.add("w3")
-            if shotgun and c.get("wp_rdy") == 2 and foe[0] > 260 and (c.get("p_hp") or 0) > 35 and abs(d) < 20:
-                kd.add("forward")
+            typ = self.mtype[m] if m < len(self.mtype) else 0
+            hp = c.get("p_hp") or 0
+            low = hp < 35 + 10 * (self.seed_at(f) % 2)
+            if self.RETREAT and hp < 25 + 10 * (self.seed_at(f) % 2) and f - self.hurt_f < 8 and f >= self.retreat_next                     and len(self.trail) > 8 and typ not in self.MELEE:
+                # RETREAT: badly hurt and still being hit -- back the way he came, out of the shooter's sight (a
+                # hitscanner hits what it sees; a hunter that follows is met round the corner)
+                self.retreat_f, self.retreat_i, self.retreat_next = f + 45, len(self.trail) - 1, f + 150
+                self.log("    f%d: retreat (hp %d, hit by m%d)" % (f, hp, m))
+            if wp == "melee" and abs(d) < 20 and foe[0] > 40:
+                kd.add("forward")                    # the fist / saw: close in
+            elif typ in self.MELEE and foe[0] < 200 and abs(d) < 45 and self._safe(x, y, a + 180):
+                kd.add("back")                       # a demon: back away shooting (it is faster, but the gap buys shots)
+            elif self.LOW_BACK and low and foe[0] < 260 and abs(d) < 45 and self._safe(x, y, a + 180):
+                kd.add("back")                       # hurt: open the distance -- a hitscanner's spread is an angle
+            elif wp == "shotgun" and foe[0] > 260 and hp > 35 and abs(d) < 20 and typ not in self.HITSCAN:
+                kd.add("forward")                    # the pellets spread: close in on a far foe (not a hitscanner)
             g = f + 7 * self.seed_at(f)              # the seed shifts the dodge's rhythm (another real play)
-            if foe[0] > 120 and "forward" not in kd:  # CIRCLE-STRAFE while fighting: a fireball aimed at where the
-                # player was misses a player moving across it; the side flips every 16 frames (the seed shifts when)
-                kd.add("strafe_left" if (g // 16) % 2 else "strafe_right")
+            if "forward" not in kd and (foe[0] > 120 or (self.CLOSE_STRAFE and wp != "melee")):
+                # CIRCLE-STRAFE while fighting (close in too, unless the fist / saw needs the contact): a fireball
+                # aimed at where the player was misses a player moving across it; the side flips every 16 frames (the
+                # seed shifts when)
+                side = "strafe_left" if (g // 16) % 2 else "strafe_right"
+                if not self._safe(x, y, a + (90 if side == "strafe_left" else -90)):
+                    side = "strafe_right" if side == "strafe_left" else "strafe_left"
+                if self._safe(x, y, a + (90 if side == "strafe_left" else -90)):
+                    kd.add(side)
             self.last_pose = None
             return kd
         # no foe to face: still shoot what the aim window holds of the hunters (passing by, or a monster passed by)
@@ -725,9 +863,9 @@ class Steer:
         ahead = piece[self.wi + 1:self.wi + 7]
         door = self._door_ahead(c, x, y, ahead)
         if door is not None:
-            si, box = door
+            si, boxes = door
             self.why = "door %d" % si
-            if box is not None and box[0] <= x <= box[2] and box[1] <= y <= box[3]:
+            if any(box[0] <= x <= box[2] and box[1] <= y <= box[3] for box in boxes):
                 k = self.dorder.index(si)
                 if c["dstate"][k] == 0 or self.leg_frames % 8 == 0:
                     self.use_tap = 1                 # a press (held use opens a door; a tap does too)
@@ -744,11 +882,13 @@ class Steer:
         if lift is not None:
             k, sec = lift
             self.last_pose = None
-            if c["lstate"][k] == 0 and self.leg_frames % 30 == 0:
-                for tag, box in self.lv.mp.use:
-                    if sec in self.lv.mp.lifts_of_tag[tag] and box[0] <= x <= box[2] and box[1] <= y <= box[3]:
-                        self.use_tap = 1
-                        kd.add("use")
+            boxes = [box for tag, box in self.lv.mp.use if sec in self.lv.mp.lifts_of_tag[tag]]
+            inside = any(box[0] <= x <= box[2] and box[1] <= y <= box[3] for box in boxes)
+            if c["lstate"][k] == 0 and inside and self.leg_frames % 30 == 0:
+                self.use_tap = 1
+                kd.add("use")
+            if c["lstate"][k] == 0 and not inside and self.lift_wait > 10 and self._call_lift(f, x, y, sec, boxes):
+                return kd                            # a lift at rest that this spot cannot call: walk to its switch
             self.why = "lift %d wait" % sec
             return kd                                # wait for the lift to come down
         here = self.pl.sector_of(self.LR.cell_of(x, y))
@@ -787,13 +927,54 @@ class Steer:
             self.replan(x, y, "stuck", f)
         return kd
 
-    def _seek_health(self, f, x, y, items, what, most: int = 70) -> bool:
+    def _safe(self, x, y, ang, dist: int = 40) -> bool:
+        """is a step `dist` units toward `ang` (degrees) SAFE to strafe / back into: no damaging floor, no drop of more
+        than a step (a nukage pit, a ledge the route would have to climb back from), not a refused cell"""
+        LR = self.LR
+        here = LR.cell_of(x, y)
+        to = LR.cell_of(x + dist * math.cos(math.radians(ang)), y + dist * math.sin(math.radians(ang)))
+        if to == here:
+            return True
+        if self.pl.hurts(to) and not self.pl.hurts(here):
+            return False
+        sc = self.pl.scenes_for(self.active)
+        ok, fz, _cz = self.pl.cp(sc[0], to)
+        return bool(ok) and fz >= self.pl.cp(sc[0], here)[1] - 24
+
+    def _call_lift(self, f, x, y, sec, boxes) -> bool:
+        """a leg inserted before this one: to the nearest reachable cell inside one of the lift's use boxes (SR 62 /
+        S1 lines, `movers.use_line_boxes`), and a use press there -- three times a lift at most"""
+        if not boxes or self.called.get(sec, 0) >= 3:
+            return False
+        self.called[sec] = self.called.get(sec, 0) + 1
+        LR = self.LR
+
+        def inbox(cell):
+            cx, cy = LR.centre(cell)
+            return any(b[0] + 12 <= cx <= b[2] - 12 and b[1] + 12 <= cy <= b[3] - 12 for b in boxes)
+        path = self.pl.leg_path(LR.cell_of(x, y), inbox, self.active | self._openable())
+        if not path or len(path) > 120 or any(q[0] == "teleport" for q in path):
+            self.log("    f%d: lift %d at rest and no use box reachable from here" % (f, sec))
+            return False
+        box = next(b for b in boxes if b[0] <= LR.centre(path[-1])[0] <= b[2] and b[1] <= LR.centre(path[-1])[1] <= b[3])
+        self.leg["replan"] = True
+        self.legs.insert(self.li, {"to": "lift:%d" % sec, "kind": "call", "action": "use", "box": list(box),
+                                   "goal": list(LR.centre(path[-1])), "path": [list(LR.centre(q)) for q in path]})
+        self._leg(self.li)
+        self.log("    f%d: lift %d at rest -- a detour to its switch, %d cells" % (f, sec, len(path)))
+        return True
+
+    def _openable(self):
+        return {"door:%d" % si for si in self.dorder if self.lv.dp.boxes.get(si) is not None
+                and (not self.pl.mechs["door:%d" % si].key or self.pl.mechs["door:%d" % si].key in self.keys)}
+
+    def _seek_health(self, f, x, y, items, what, most: int = 70, radius: int = 900) -> bool:
         """a detour leg to the nearest reachable item of `items` not taken yet (planned in the world the legs made)"""
         if f < self.retry.get(what, 0):
             return False
         LR = self.LR
         cands = sorted((math.hypot(hx - x, hy - y), hx, hy) for hx, hy in items
-                       if (hx, hy) not in self.health_taken and math.hypot(hx - x, hy - y) < 900)
+                       if (hx, hy) not in self.health_taken and math.hypot(hx - x, hy - y) < radius)
         opn = {"door:%d" % si for si in self.dorder if self.lv.dp.boxes.get(si) is not None
                and (not self.pl.mechs["door:%d" % si].key or self.pl.mechs["door:%d" % si].key in self.keys)}
         for _d, hx, hy in cands[:3]:

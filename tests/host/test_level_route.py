@@ -127,3 +127,18 @@ def test_pickups_nearest_first(lr, monkeypatch):
     r = lr.plan("E1M5", "easy")
     assert r["legs"][0]["to"] != "item:2001", "CONTROL: the pickups' order made no difference"
     assert "item:2001" not in [g["to"] for g in r["legs"]]
+
+
+def _hurt_cells(lr, r):
+    lv = lr.Level(r["map"], None, r["skill"])
+    return sum(lv.secs[lv.sector_at(*p)].special in lr.HURT_SPECIALS
+               for g in r["legs"] for p in g["path"] if p[0] != "teleport")
+
+
+@needs_wad
+def test_e1m3_legs_keep_off_the_nukage(lr, monkeypatch):
+    """a leg's path pays HURT_COST for a damaging floor: E1M3's walk crosses none of its NUKAGE1 (sector 90 by the blue
+    card); CONTROL: at HURT_COST 0 the shortest paths cross it"""
+    assert _hurt_cells(lr, lr.plan("E1M3", "easy")) == 0
+    monkeypatch.setattr(lr, "HURT_COST", 0)
+    assert _hurt_cells(lr, lr.plan("E1M3", "easy")) > 0, "CONTROL: the cost made no difference"

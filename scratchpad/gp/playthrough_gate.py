@@ -90,6 +90,7 @@ def main(argv=None) -> int:
                     help="--model-only: on a death, re-play with the seed changed SEARCH_BACK frames before it, keep "
                          "the attempt that got furthest, up to ROUNDS rounds -> a seed schedule for DEFAULT_SEED")
     ap.add_argument("--search-seeds", default="1,2,3,4", help="--search: the seeds tried each round")
+    ap.add_argument("--search-workers", type=int, default=6, help="--search: attempts run at once (processes)")
     ap.add_argument("--controls-only", action="store_true")
     ap.add_argument("--no-controls", action="store_true", help="skip the R9 controls (a dev run; never PASS evidence)")
     ap.add_argument("--keys-out", default=None, help="write the played key log (JSON) here")
@@ -137,7 +138,7 @@ def main(argv=None) -> int:
         if not a.model_only:
             ap.error("--search is a --model-only tool")
         seed = search(PLAY, pl, route, lv, seed, a.budget, a.search,
-                      tuple(int(v) for v in a.search_seeds.split(",")))
+                      tuple(int(v) for v in a.search_seeds.split(",")), workers=a.search_workers)
     print("steering seed %s" % seed_text(seed), flush=True)
     res = play(PLAY, pl, route, lv, seed, a.budget, a.model_only, a.trace)
     r, steer, st = res["r"], res["steer"], res["st"]
@@ -223,37 +224,80 @@ def play(PLAY, pl, route, lv, seed, budget, model_only, trace=False, quiet=False
     return {"r": r, "steer": steer, "st": st}
 
 
-SEARCH_BACK = 600             # frames before a death the seed changes at
+SEARCH_BACK = (600, 300, 1200)   # frames before a death the seed changes at (each tried)
 SEARCH_SEEDS = (1, 2, 3, 4)
+_JOB = {}
 
 
-def search(PLAY, pl, route, lv, seed, budget, rounds, seeds=SEARCH_SEEDS):
+def _search_job(args):
+    """one search attempt in a worker process (its own model player, built once): -> the attempt's summary"""
+    mapname, skill, route, sched, budget = args
+    if "pl" not in _JOB:
+        import play as PLAY
+        import level_route as LR
+        _JOB.update(PLAY=PLAY, pl=_model_player(PLAY, skill), lv=LR.Level(mapname, route.get("wad"), skill))
+        _JOB["pl"].workers = 0
+    res = play(_JOB["PLAY"], _JOB["pl"], route, _JOB["lv"], sched, budget, True, quiet=True)
+    return _summ(sched, res)
+
+
+def _summ(sched, res):
+    st = res["st"]
+    return {"sched": sched, "done": st["done"], "dead": st["dead"], "legs": len(res["steer"].events),
+            "frames": res["r"]["frames"], "leg": res["steer"].leg["to"] if res["steer"].leg else "-"}
+
+
+def _score(s):
+    """further is better (legs done, then frames lived); among plays that PASS, the shortest"""
+    if s["done"] is not None:
+        return (True, 0, -s["frames"])
+    return (False, s["legs"], s["frames"])
+
+
+def search(PLAY, pl, route, lv, seed, budget, rounds, seeds=SEARCH_SEEDS, workers: int = 6):
     """--search: from `seed`, while the play dies (or stalls), re-play with the seed changed SEARCH_BACK frames before
-    the end, trying SEARCH_SEEDS, and keep the attempt that went furthest (legs done, then frames lived). Each attempt
-    is a whole play from boot -- the steering is deterministic, so a schedule found here is the play the gate makes"""
-    def score(res):
-        return (res["st"]["done"] is not None, len(res["steer"].events), res["r"]["frames"])
+    the end (each of its distances), trying SEARCH_SEEDS (shifted by 10 a round), and keep the attempt that went
+    furthest (legs done, then frames lived). Each attempt is a whole play from boot, run `workers` at a time in
+    processes of their own -- the steering is deterministic, so a schedule found here is the play the gate makes"""
+    import multiprocessing as MP
     sched = [(0, seed)] if isinstance(seed, int) else list(seed)
-    best = play(PLAY, pl, route, lv, sched, budget, True, quiet=True)
-    print("  search: %s -> %s" % (seed_text(sched), score(best)), flush=True)
-    for rnd in range(rounds):
-        if best["st"]["done"] is not None:
-            break
-        end = best["r"]["frames"]
-        found = None
-        for sd in seeds:
-            cand = [fs for fs in sched if fs[0] < end - SEARCH_BACK] + [(max(0, end - SEARCH_BACK), sd + 10 * rnd)]
-            res = play(PLAY, pl, route, lv, cand, budget, True, quiet=True)
-            print("  search round %d: %s -> %s" % (rnd, seed_text(cand), score(res)), flush=True)
-            if score(res) > score(best) and (found is None or score(res) > score(found[1])):
-                found = (cand, res)
-            if res["st"]["done"] is not None:
+    best = _summ(sched, play(PLAY, pl, route, lv, sched, budget, True, quiet=True))
+    print("  search: %s -> %s %s" % (seed_text(sched), _score(best), best["dead"]), flush=True)
+    pool = MP.get_context("spawn").Pool(workers) if workers > 1 else None
+    mapname = route["map"]
+    try:
+        for rnd in range(rounds):
+            if best["done"] is not None:
                 break
-        if found is None:
-            print("  search: no seed got further than %s" % (score(best),), flush=True)
-            break
-        sched, best = found
-    print("  search: the schedule %s (%s)" % (seed_text(sched), "PASS" if best["st"]["done"] is not None else
+            end = best["frames"]
+            cands = [[(0, sd + 10 * rnd)] for sd in seeds] if rnd == 0 else []    # whole plays on one seed first
+            for back in SEARCH_BACK:
+                for sd in seeds:
+                    cut = max(0, end - back)
+                    cand = [fs for fs in sched if fs[0] < cut] + [(cut, sd + 10 * rnd)]
+                    if cand not in cands and cand != sched:
+                        cands.append(cand)
+            jobs = [(mapname, pl.skill, route, cand, budget) for cand in cands]
+            outs = pool.imap_unordered(_search_job, jobs) if pool else (_search_job(j) for j in jobs)
+            found = None
+            for o in outs:
+                print("  search round %d: %s -> %s %s" % (rnd, seed_text(o["sched"]), _score(o),
+                                                          o["dead"] or ""), flush=True)
+                if _score(o) > _score(best) and (found is None or _score(o) > _score(found)):
+                    found = o
+                if o["done"] is not None:            # a PASS: taken at once (the round's other plays dropped)
+                    break
+            if found is None:
+                print("  search: no seed got further than %s" % (_score(best),), flush=True)
+                break
+            sched, best = found["sched"], found
+            if best["done"] is not None and pool is not None:
+                pool.terminate()                     # the round's unfinished plays
+                pool = None
+    finally:
+        if pool is not None:
+            pool.terminate()
+    print("  search: the schedule %s (%s)" % (seed_text(sched), "PASS" if best["done"] is not None else
                                                 "still failing"), flush=True)
     return sched
 

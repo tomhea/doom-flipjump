@@ -672,6 +672,10 @@ class Planner:
 # Within its budget the NEAREST pickup is taken first (PICKUP_ORDER "nearest"; "cheapest" -- the smallest detour first --
 # is the old order, kept for the host test's control: on E1M5 it walks past the shotgun 24 cells from the start)
 PICKUP_ORDER = "nearest"
+# a pickup the steering never drops for taking too long (its detour watchdog): the radiation suit -- the nukage channel
+# after it is crossed whether it was taken or not (E1M4: a suit detour dropped after 471 frames, the crossing at 25
+# health killed the play)
+MUST_PICKUPS = frozenset({2025})
 PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 8: 40, 2049: 14, 2048: 10, 2008: 8,
                  2025: 150}    # the radiation suit (E1M4 alone: two, one at each end of its nukage channel)
 
@@ -725,6 +729,8 @@ def take_pickups(pl, cur, pred, world, pickups, out):
         it["taken"] = True
         out.append({"to": "item:%d" % it["type"], "kind": "item", "action": "touch", "goal": [it["x"], it["y"]],
                     "key_at": [it["x"], it["y"]], "detour_cells": detour, "path": [list(centre(c)) for c in tp]})
+        if it["type"] in MUST_PICKUPS:
+            out[-1]["must"] = True
         cur = tp[-1]
 
 

@@ -714,7 +714,7 @@ class Steer:
             self.replan(x, y, "the leg starts elsewhere", f)
             if self.leg is None:
                 return set()
-        if self.leg["kind"] == "item" and self.leg_frames > max(300, 2 * len(self.leg["path"] or ()) + 100):
+        if self.leg["kind"] == "item" and not self.leg.get("must") and                 self.leg_frames > max(300, 2 * len(self.leg["path"] or ()) + 100):
             return self._next(f, "the detour took 300 frames: dropped")
         if self.queue:                               # a precise approach in progress (a planned key sequence)
             self.why = "precise"

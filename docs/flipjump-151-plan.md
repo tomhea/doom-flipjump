@@ -237,6 +237,39 @@ owner's review. The spec is `scratchpad/ioapi/cr/fjm_v4_spec.md`.
 **Bug fixed with it (round 1b section 5, also on `main`):** `--lzma_preset 7..9` wrote a `.fjm` the reader could not
 read. The reader passed no `dict_size`, so it decoded with 8 MiB. The decoder now uses a 64 MiB dictionary.
 
+### 3h0. The table pool's gap hunt (owner, 2026-10-24): BEFORE v4 ⏳
+
+The owner: the pool works today because it moves only the tables of 9 whitelisted stl macros, which must not change.
+It has many gaps; find them and fix them, and keep the speedup.
+
+**Goal.** The pool's safety holds by CHECKS, not by the whitelist. The whitelist stays as policy, not as the
+safety net.
+
+1. **Write the safety contract** at the top of `table_pool.py`: exactly what must hold for a run of ops to be moved,
+   and for a jump word to be pinned.
+2. **Adversarial gap hunt.** A fresh reviewer, not the fixer, sets every assumption in the code against the
+   contract. Seeds:
+   - an outside label + offset that addresses into a moved run (already in round 1b);
+   - `pool_base` overlapping the program ("nothing here checks that", TablePool's docstring);
+   - pin safety resting on a caller-supplied `pin_exclude` that "may veto nothing", plus the name list
+     `RAW_READERS`;
+   - writes into table code through pointers (only reads are guarded);
+   - alignment / XOR == ADD on block bases;
+   - tables longer than their run (spill);
+   - debug info and breakpoints for moved labels;
+   - memory widths 8, 16 and 64;
+   - user macros named like stl ones;
+   - stale census caches.
+3. **A differential fuzzer.** Random programs built from every stl table macro (not only the 9), assembled without a
+   pool and with each pool mode, then run. Outputs and termination must be equal. It ships with mutation controls,
+   e.g. disabling a check must make a crafted program differ.
+4. **Each gap closes one of two ways:**
+   - a check that refuses or declines, with the exact reason;
+   - or a test proving the gap cannot occur.
+
+**Kill criterion:** fjdoom keeps its speed. E1M1 must rebuild byte-identical, or, if placement legitimately
+changes, msframe must not say B SLOWER.
+
 ### 3i. Mission, later: the smallest shipped `.fjm` (owner, 2026-10-24)
 
 Compress the FINAL ship binaries as far as they go, and research more than the preset. Candidates, each measured on

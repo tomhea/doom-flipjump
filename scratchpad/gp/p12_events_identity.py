@@ -29,7 +29,7 @@ def main():
             rec["s"] = gate.Recording()
             return rec["s"]
         fr, ops = gate.run_fj(fjm, evs, n, screen_factory=fac)
-        out.append((fr, rec["s"].palettes, ops))
+        out.append((fr, rec["s"].shown_palettes, ops))
         print("%s: %d frames, %s ops" % (fjm, len(fr), format(ops, ",")), flush=True)
     (a, pa, oa), (b, pb, ob) = out
     diff = [k for k in range(min(len(a), len(b))) if a[k] != b[k] or pa[k] != pb[k]]

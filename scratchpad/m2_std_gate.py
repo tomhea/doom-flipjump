@@ -137,13 +137,14 @@ class Recording(InMemoryScreen):
     def __init__(self, **kw):
         super().__init__(**kw)
         self.frames = []
-        self.palettes = []                  # M7 P5: the palette each present showed (probe.ProbeScreen's record)
+        self.shown_palettes = []            # M7 P5: the palette each present showed (probe.ProbeScreen's record;
+                                            # not `palettes`: the device's own slots)
 
     def _present(self):
         super()._present()
         self.frames.append(bytes(self.pixel_indices))
         import hashlib
-        self.palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb)).hexdigest()[:12])
+        self.shown_palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb)).hexdigest()[:12])
 
 
 class Stopper(KeyboardIO):
@@ -1075,7 +1076,7 @@ def main():
             except Exception as e:                              # noqa: BLE001
                 print("!! CRASH after %d presented frames: %s %s" % (len(screen.frames), type(e).__name__, e))
                 _c, ops = 0, 0
-            return _P.RunResult(list(screen.frames), list(screen.palettes), int(ops),
+            return _P.RunResult(list(screen.frames), list(screen.shown_palettes), int(ops),
                                 list(probe.readings) if probe is not None else [], _t.time() - t, int(_c))
         _P.GameBinary.run = _tolerant
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,

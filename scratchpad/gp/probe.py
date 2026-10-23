@@ -531,12 +531,13 @@ def _devices():
 
         def __init__(self, probe=None, **kw):
             super().__init__(**kw)
-            self.frames, self.palettes, self._probe = [], [], probe
+            # `shown_palettes`, not `palettes`: that is the device's own (its 256 slots, reset by init_screen)
+            self.frames, self.shown_palettes, self._probe = [], [], probe
 
         def _present(self):
             super()._present()
             self.frames.append(bytes(self.pixel_indices))
-            self.palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb))
+            self.shown_palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb))
                                  .hexdigest()[:12])
             if self._probe is not None:
                 self._probe._present(len(self.frames) - 1)
@@ -680,7 +681,7 @@ class GameBinary:
         t = time.time()
         _c, ops, _e, _l, _p = self.core.run(io.read_bit, io.write_bit, IOReadOnEOF,
                                             last_ops_length=0)
-        return RunResult(list(screen.frames), list(screen.palettes), int(ops),
+        return RunResult(list(screen.frames), list(screen.shown_palettes), int(ops),
                          list(probe.readings) if probe is not None else [], time.time() - t, int(_c))
 
 

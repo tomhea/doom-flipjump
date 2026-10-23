@@ -303,7 +303,7 @@ class Player:
 
         def present(pr, f):
             screen = live["screen"]
-            pic, pal = screen.frames[-1], screen.palettes[-1]
+            pic, pal = screen.frames[-1], screen.shown_palettes[-1]
             if self.binary_pic is not None:               # the R9 control: a wrong pixel in the BINARY's frame
                 pic = self.binary_pic(f, pic)
             rec = {"f": f, "world": f - self.mf, "keys": log[f - self.mf - 1] if 0 <= f - self.mf - 1 < len(log)
@@ -373,7 +373,7 @@ class Player:
                     super()._present()
                     if len(self.frames) > 2:
                         self.frames[0] = None
-                        self.palettes[0] = None
+                        self.shown_palettes[0] = None
             return LiveScreen, Keyboard, EOF
         KIO.ScriptedKeyEventSource = LiveSource
         _probe._devices = devices

@@ -502,6 +502,7 @@ class Steer:
             self.pieces.append(cur)
         self.leg_frames = 0
         self.lift_wait = 0
+        self.end_best, self.end_f = 1e9, 1 << 30
         self.final = 0
         self.queue = []
         self.best_prog, self.best_f = (-1, -1), 1 << 30
@@ -703,6 +704,11 @@ class Steer:
             kd = self._retreat(f, c, x, y, a)
             if kd is not None:
                 return kd
+        if self.leg_frames == 1 and self.pieces and self.pieces[0] and \
+                math.hypot(self.pieces[0][0][0] - x, self.pieces[0][0][1] - y) > 48:
+            self.replan(x, y, "the leg starts elsewhere", f)
+            if self.leg is None:
+                return set()
         if self.leg["kind"] == "item" and self.leg_frames > max(300, 2 * len(self.leg["path"] or ()) + 100):
             return self._next(f, "the detour took 300 frames: dropped")
         if self.queue:                               # a precise approach in progress (a planned key sequence)
@@ -870,6 +876,12 @@ class Steer:
                     return kd
             if action == "cross" and dist < 10:
                 return self._next(f, "reached")
+            if dist < self.end_best - 4:
+                self.end_best, self.end_f = dist, f
+            elif f - self.end_f > 60:
+                self.end_best, self.end_f = 1e9, f
+                self.replan(x, y, "no progress to the leg's end in 60 frames", f)
+                return kd
             want = math.degrees(math.atan2(ty - y, tx - x)) % 360
             d = self._turn_to(want, a, kd, tight=3 if dist < 40 else 6)
             if abs(d) < (25 if dist > 32 else 12):

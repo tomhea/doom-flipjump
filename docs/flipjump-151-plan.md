@@ -242,6 +242,26 @@ read. The reader passed no `dict_size`, so it decoded with 8 MiB. The decoder no
 The owner: the pool works today because it moves only the tables of 9 whitelisted stl macros, which must not change.
 It has many gaps; find them and fix them, and keep the speedup.
 
+**The owner's design (2026-10-24): declared tables.** The spec is `scratchpad/ioapi/cr/relocatable_spec.md`, on branch
+`pool-relocatable` from `cr-main` after round 1b.
+
+- **What a table is:** the expansion of a macro whose INNERMOST namespace is `__relocatable__`. Its first argument
+  is the table's start label.
+- **Errors, with the pool on (`--pool-tables` / `table_pool=`):**
+  - a `$` inside a relocatable (fall-through included);
+  - a start label not at the start;
+  - no `pad` right before the call.
+- **No call-site check.**
+- **Alignment** comes from the outer macro's `pad` just before the call.
+- **Removed:** the shape detector `_table_run` and `wants=`, deleted with no fallback.
+- **The stl:** the 8 table macros on `cr-main` declare their tables, plus `hex.switch` on `stl-additions` (9 in
+  all), with byte-identical output without the pool.
+- **The command line:** `--pool-tables`, with plain `--help` and docstrings.
+- **The relocation proof:** plain build vs pooled build, every op at its mapped address with mapped targets, plus a
+  negative control.
+
+Then the rest of the gap hunt below.
+
 **Goal.** The pool's safety holds by CHECKS, not by the whitelist. The whitelist stays as policy, not as the
 safety net.
 

@@ -214,7 +214,7 @@ def test_the_slot_rows_survive_a_world_refused_for_another_reason(ls, wad, monke
     (world.level_things). CONTROL: E1M7 without SLOT_ID_BITS -- the same row OVER"""
     import doomfj.config as config
     rows = _rows(ls, wad, "E1M7")
-    assert any(r[0] == "REFUSED" and r[1].startswith("World(strict=True) without") for r in rows)
+    # (E1M7's World builds since C5b: a teleport onto a mover is supported -- the WAD rows are read either way)
     r = _row(rows, "monster slots + barrels, every skill, from the WAD")
     assert (r[0], r[2]) == ("OK", "305"), r
     assert _row(rows, "runtime ids: things + pools + drops")[0] == "OK"

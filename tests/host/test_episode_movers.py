@@ -398,6 +398,7 @@ def test_the_gates_press_the_light_switch(wad, monkeypatch):
     edge -- the light switch rides the latter (World.light_presses), so every gate's picture lights the sector"""
     from doomfj.monsters import MonsterPhase
     w = _world(wad, "E1M3", monkeypatch)
+    monkeypatch.setattr(w, "switch_cells", [])   # wave 1 gave E1M3 SWITCH_TEX: this test is the light switch alone
     (box, _ks), = w.light_uses
     MonsterPhase.switch_uses(SimpleNamespace(world=w), ((), frozenset(), ()), (box[0] - 5) << 16, box[1] << 16)
     assert w.lights_now()[321] == 112                                         # outside the box: nothing

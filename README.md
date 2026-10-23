@@ -1,11 +1,11 @@
+<h1 align="center">DOOM on FlipJump</h1>
+
+<p align="center"><b>FlipJump has exactly one instruction: flip a bit, then jump to the next opcode.<br>This is DOOM running on it.</b></p>
+
 <p align="center">
   <img src="docs/media/hero.gif" width="640"
        alt="DOOM on FlipJump: a fight in the courtyard of Freedoom's first level, status bar and pistol included">
 </p>
-
-<h1 align="center">DOOM on FlipJump</h1>
-
-<p align="center"><b>A playable DOOM level, running in a programming language that has exactly one instruction.</b></p>
 
 <p align="center">
   <a href="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml"><img src="https://github.com/tomhea/doom-flipjump/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -132,26 +132,21 @@ number below rests on anyone's word; each row names the command that produced it
 status bar and the menus together are 1.6%. Right: the program. Lookup tables are 41% of it, which is the whole
 trick: arithmetic is read, not computed. Measured on blocked62; the shipped blocked63 adds the map page, +0.3%.</sub></p>
 
-Recorded on the shipped build, `doom_e1m1_blocked63.fjm` (SHA-256 `b65e5a97...994120c`), on
-2026-10-18. The provenance of every row, with logs, is in [docs/ship-gate.md](docs/ship-gate.md).
+| | |
+|---|---|
+| instructions in the language | 1 |
+| the program | 52.3 million words, 39.8 MB; 39% of the largest address space the interpreter allows |
+| one frame | about 16 million flip-jumps; up to 28 million in the heaviest fight |
+| speed | 68 ms a frame, about 15 fps, on one core, at about 235 million flip-jumps per second |
+| a 32-bit addition | about 800 flip-jumps, so a pixel costs about one addition |
+| the screen | 160 x 100, 256 colours, a 16-row status bar |
+| the check | every frame of eleven scripted fights identical, pixel for pixel, to the Python model |
+| the build | one pass, about 45 minutes, about 10 GB of RAM |
 
-| | | measured by |
-|---|---|---|
-| instructions in the language | 1 | |
-| program size | 52,323,960 words, 39.0% of the 2^27-word address space; 39.8 MB on disk | the build log |
-| flip-jumps per frame, ten scripted 100-frame games | 16,892,755 (mean and 80th percentile, averaged) | `scratchpad/12m/gamespeed.py` |
-| flip-jumps per frame, eleven frozen combat scenarios | 16,255,310 (same statistic), peak frame 27.8 M | `scratchpad/gp/b0_scenarios.py` |
-| flip-jumps per frame, walking forward | 16,066,011 | `scratchpad/12m/msframe.py` |
-| time per frame | 68.4 ms, about 15 fps, one pinned core, flipjump 1.5.1's byte-output engine <!-- TODO: CPU model --> | `msframe.py`, 200 frames x 5 repetitions |
-| interpreter speed | about 235 million flip-jumps per second (16.07 M ops in 68.4 ms) | same run |
-| agreement with the Python oracle | every frame of all eleven combat runs, state- and pixel-exact | `b0_scenarios.py --pixel-every 1` |
-| cost of adding two 32-bit numbers | about 800 flip-jumps | the standard library's measured cost table |
-| resolution | 160 x 100, 8-bit palette | |
-| build time | one pass, about 48 minutes for the first one-pass build (2,887 s); peak RAM TODO | `docs/ship-gate.md` 1b |
-
-For scale: DOOM on a 486DX2-66 spent about thirty instructions per pixel. This spends about 900
-flip-jumps per pixel in a fight, which is about one addition's worth. [The story](docs/story.md) has the
-arithmetic.
+Every number comes from the record of the shipped build, `doom_e1m1_blocked63.fjm`
+(SHA-256 `b65e5a97...994120c`), where each stands next to the command that produced it:
+[docs/ship-gate.md](docs/ship-gate.md). For scale: DOOM on a 486DX2-66 spent about thirty
+instructions per pixel. [The story](docs/story.md) has the arithmetic.
 
 ## Questions people ask
 
@@ -185,15 +180,21 @@ and a few hours.
 
 ## The story, in sixty seconds
 
-I made FlipJump about five years ago. A year and a half ago I showed that C compiles to it, which
-made DOOM possible in theory and hopeless in practice: a C line becomes hundreds to thousands of
-flip-jumps. I put the language down. In June 2026 a friend's talk about DOOM on his water dispenser,
-and a coding agent I had just started using, made it look like months rather than years. The budget
-said no: 200 million flip-jumps per second, a 32-bit add costing 800 of them, a 320x200 frame
-leaving 125 per pixel. The screen shrank to 160x100. The first frame cost a billion flip-jumps. Four
-months of lookup tables, a BSP tree compiled into code, and a Python oracle that every frame had to
-match byte for byte took it to about fifteen million, with monsters. The long version, with the
-numbers, the dead ends and what Claude did and did not do: **[docs/story.md](docs/story.md)**.
+I made FlipJump five years ago to prove that one instruction is enough for anything. A year and a
+half ago I wrote a C-to-FlipJump compiler and showed on Hacker News that DOOM could run on it in
+theory. In practice it could not: one line of C became hundreds to thousands of flip-jumps, and a
+frame would have taken seconds. I shelved the dream.
+
+In June 2026 two things happened in the same week. A friend gave a talk about running DOOM on his
+water dispenser, and I started using a coding agent. Months suddenly looked possible. The
+arithmetic set the terms: about 200 million flip-jumps per second, 800 of them for one 32-bit
+addition, so a 320x200 frame at 25 fps would leave 125 flip-jumps per pixel, a sixth of an addition.
+The screen became 160x100 and the target 13 frames a second.
+
+The first frame cost a billion flip-jumps. Four months of lookup tables, a BSP tree compiled into
+code, a program that resets itself every frame, and a Python oracle that every frame had to match
+byte for byte brought a frame with monsters down to about sixteen million. The long version, with
+the numbers, the dead ends and what Claude did and did not do: **[docs/story.md](docs/story.md)**.
 
 ## How it works, in one screen
 

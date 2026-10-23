@@ -265,6 +265,14 @@ class CellLayoutError(ValueError):
     """a word that is not laid out the way the cell kind says (see the module docstring)"""
 
 
+def same_reading(a, b) -> bool:
+    """a cell read off the binary and the oracle's value are the same reading -- a count-1 cell reads as its value
+    (read_cells) while an oracle array of one element is a 1-tuple (E1M8 has ONE door: (0,) vs 0)"""
+    def one(v):
+        return v[0] if isinstance(v, tuple) and len(v) == 1 else v
+    return one(a) == one(b)
+
+
 class LabelTableRejected(RuntimeError):
     """the known-value check failed: this label table does not describe this binary"""
 
@@ -463,7 +471,7 @@ class Probe:
             except CellLayoutError as e:
                 bad.append((key, want, "LAYOUT %s" % e))
                 continue
-            if got != want:
+            if not same_reading(got, want):
                 bad.append((key, want, got))
         return bad
 

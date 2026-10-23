@@ -1057,8 +1057,8 @@ def main(argv=None) -> int:
         for f, fr in enumerate(want):
             exp = expected_cells(fr, dsim.order, dsim.mp.order)
             got = reads[f] if f < len(reads) else {}
-            if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
-                s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
+            if s_bad is None and any(not P.same_reading(got.get(k), v) for k, v in exp.items()):
+                s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if not P.same_reading(got.get(k), v)})
             if fr["drawn"] == "world":
                 pic = picture(orc, dsim, fr, card_di)
             else:

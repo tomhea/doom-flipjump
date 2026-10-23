@@ -427,6 +427,7 @@ class Steer:
     RETREAT = False            # badly hurt and still hit: back along the trail
     LOW_BACK = False           # hurt: back away from the foe while shooting
     CLOSE_STRAFE = False       # circle-strafe close in too (not only past 120 units)
+    RACE_FAR = 120             # a lift called from a switch this far (units) from it is raced back to, backwards
     BARREL_SAFE = 220          # no shot while a barrel this near (Chebyshev) is in the aim window
     RUN_HURT = 30              # > 0: losing this much health in 60 frames (below 70) -> run the route for 60 frames
     DASH = 160                 # cells of route left under which the player stops fighting and runs for the exit
@@ -464,8 +465,11 @@ class Steer:
         from doomfj import gamedata as gd
         bit = gd.skill_bit(gd.SKILL_NAMES[route["skill"]])
         # health on the map at this skill (the stimpack, the medikit, the soulsphere): sought when health runs low
-        self.health = [(t.x, t.y) for t in self.lv.things if t.type in (2011, 2012, 2013) and t.flags & bit]
-        self.ammo = [(t.x, t.y) for t in self.lv.things if t.type in (2007, 2008, 2048, 2049) and t.flags & bit]
+        lifts = set(self.lv.mp.order) if self.lv.mp is not None else set()       # (an item on a lift: see pickup_things)
+        self.health = [(t.x, t.y) for t in self.lv.things if t.type in (2011, 2012, 2013) and t.flags & bit
+                       and self.lv.sector_at(t.x, t.y) not in lifts]
+        self.ammo = [(t.x, t.y) for t in self.lv.things if t.type in (2007, 2008, 2048, 2049) and t.flags & bit
+                     and self.lv.sector_at(t.x, t.y) not in lifts]
         from doomfj.world import level_things
         self.mtype = [t.type for t in level_things(self.lv.mw, self.lv.map)[1]]     # monster slot -> its type
         # the barrels (their spawn spots; aim_sid's id 1 + nmon + b, combat.window_aim): never shot close by
@@ -476,6 +480,7 @@ class Steer:
         self.run_until = -1
         self.health_taken = set()
         self.called = {}                             # lift sector -> the frames its switch was walked to
+        self.race = None                             # (lift sector, until frame): racing back to a far-called lift
         self.retry = {}
         self.why = ""
         self.done_frame = None
@@ -937,6 +942,15 @@ class Steer:
         if here not in self.lorder:
             self.ride = 0
         want = math.degrees(math.atan2(tgt[1] - y, tgt[0] - x)) % 360
+        if self.race is not None and f < self.race[1] and here != self.race[0] and \
+                abs((want - a + 540) % 360 - 180) > 90:
+            # racing a called lift: the target is behind -- back-pedal to it (no time to turn round)
+            d = self._turn_to((want + 180) % 360, a, kd, tight=6)
+            if abs(d) < 35:
+                kd.add("back")
+            self.why = "race"
+            self._stuck(f, x, y, kd)
+            return kd
         d = self._turn_to(want, a, kd, tight=6)
         if abs(d) < 35:
             kd.add("forward")
@@ -1120,6 +1134,14 @@ class Steer:
             self.done_frame = f
             self.leg = None
             return set()
+        if leg["kind"] == "call":
+            sec = int(mid[5:])
+            bb = self.lv.sector_bbox(sec)
+            gx, gy = leg["goal"]
+            far = max(bb[0] - gx, gx - bb[2], bb[1] - gy, gy - bb[3], 0) if bb else 0
+            if far > self.RACE_FAR:
+                self.race = (sec, f + 60)
+                self.log("    f%d: race back to lift %d (%d units from its switch)" % (f, sec, far))
         self._leg(self.li + 1)
         self.stuck = 0
         return set()

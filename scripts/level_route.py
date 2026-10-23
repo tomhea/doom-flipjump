@@ -677,8 +677,12 @@ PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 8: 40, 2049
 
 def pickup_things(pl) -> list:
     from doomfj.combat import GETTABLE
+    lifts = set(pl.lv.mp.order) if pl.lv.mp is not None else set()
+    # not one lying on a LIFT: at rest it is up where the player below cannot reach it, and the lift waits 26 frames
+    # at the bottom (E1M3's shells on lift 256: the play died circling under it)
     return [{"type": t.type, "x": t.x, "y": t.y, "budget": PICKUP_BUDGET[t.type], "taken": False}
-            for t in pl.lv.things if t.type in PICKUP_BUDGET and t.type in GETTABLE]
+            for t in pl.lv.things if t.type in PICKUP_BUDGET and t.type in GETTABLE
+            and pl.lv.sector_at(t.x, t.y) not in lifts]
 
 
 def take_pickups(pl, cur, pred, world, pickups, out):

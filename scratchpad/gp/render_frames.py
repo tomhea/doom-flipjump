@@ -1,13 +1,14 @@
-"""Capture what the shipped game draws, without the binary: replay a frozen combat run (v7) on the
+"""Capture what the shipped game draws, without the binary: replay a frozen combat run (v10) on the
 oracle through b0_scenarios.drive(gb=None) -- the SAME oracle-only path B0 uses -- and record every
 picture orc.render() returns plus the palette index the mirror's world shows that frame.
-B0 proved blocked53 state- and pixel-exact to this oracle on every frame of all 11 v7 runs
+B0 proved blocked63 state- and pixel-exact to this oracle on every frame of all 11 v10 runs
 (docs/ship-gate.md section 1), so these frames ARE the binary's frames.
 
 usage: python scratchpad/gp/render_frames.py <run-name> [<run-name> ...]   (cwd must be the repo root)
 writes build/frames/<run>/f000.png ... (4x nearest) and build/frames/<run>.gif (3x nearest, 78 ms a frame)
 """
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -26,8 +27,7 @@ from doomfj import monsters as M  # noqa: E402
 from doomfj.wad import WadFile  # noqa: E402
 
 W, H = 160, 100
-import os
-SET = os.environ.get("SET", "v8")      # the frozen set to replay (v8 since P9 / blocked54)
+SET = os.environ.get("SET", "v10")     # the frozen set to replay (v10 since P11; blocked63 is pixel-exact on it)
 DOC = ROOT / "scratchpad" / "gp" / "scenarios" / ("combat_scenarios_%s.json" % SET)
 ART = WadFile.from_path(str(ROOT / "assets" / "freedoom1.wad"))
 PALS = {}
@@ -93,11 +93,10 @@ def write(run_name: str, pics):
         ims.append(im)
         if i % 5 == 0 or i == len(pics) - 1:
             im.resize((W * 4, H * 4), Image.NEAREST).convert("RGB").save(d / ("f%03d.png" % i))
-    import os
     scale = int(os.environ.get("SCALE", "3"))
     big = [im.resize((W * scale, H * scale), Image.NEAREST) for im in ims]
     gif = OUT / (run_name + ("" if scale == 3 else "_%dx" % scale) + ".gif")
-    big[0].save(gif, save_all=True, append_images=big[1:], duration=78, loop=0, optimize=False, disposal=1)
+    big[0].save(gif, save_all=True, append_images=big[1:], duration=70, loop=0, optimize=False, disposal=1)
     # a contact sheet: frames 0, 20, 40, 60, 80, 99 at 2x
     sheet = Image.new("RGB", (W * 2 * 3, H * 2 * 2))
     for j, i in enumerate([0, 20, 40, 60, 80, len(pics) - 1]):

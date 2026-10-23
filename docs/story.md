@@ -27,7 +27,7 @@ FlipJump, and turn my super-long-project idea into something that could be done.
 ### What is FlipJump
 
 ```c
-/* flipjump/interpreter/_fjcore.c, for 32-bit words */
+/* flipjump/interpreter/_fjcore.c, paraphrased for 32-bit words; addresses are bit addresses */
 ip = 0;
 for (;;) {
     f = mem[ip];                        /* read the flip word */
@@ -59,7 +59,7 @@ C line compiled into several assembly instructions, each of which compiled into 
 10,000 FlipJump ops. <!-- VERIFY: the 100 to 10,000 range -->
 
 I did make the interpreter much faster while developing fjdoom, and reached 200M FlipJump ops per
-second on my laptop. <!-- the shipped record: 215.1M on one pinned core --> But that
+second on my laptop. <!-- the shipped record (blocked63): 232.6M on one pinned core, blocked63_msframe_freeze.log --> But that
 does not change the truth that compiled C cannot be optimized that far.
 
 DOOM had to be written in FlipJump itself. And it would be A LOT of FlipJump lines. And it would
@@ -169,12 +169,13 @@ Then came the first working frame.
 It was magnificent.
 
 And it cost about 1B FlipJump ops. 1,000,000,000. About 0.2 fps. Without any game logic. Nice.
+<!-- the record: 1,165,180,455 ops, docs/m13d2-perf-findings.md -->
 
 I understood that Claude could not optimize from the intuition I had built up over the years. So
 came a long phase of testing ideas, benchmarks to tell the good ideas from the bad, reading up on
 fast software rendering, and digging into the generated code to find unoptimized parts. And it
 worked. I lowered the graphics a notch and got to 25M FlipJump ops per frame.
-<!-- VERIFY: the 1B and 25M figures -->
+<!-- 1B: 1,165,180,455 (docs/m13d2-perf-findings.md); 25M: no record found, the base renderer was 28.19M (docs/handoff-perf.md) -- owner to confirm or change -->
 
 The goal looked achievable now.
 
@@ -187,19 +188,19 @@ walls.
 At that stage the game loop cost about +10M, for a total of 35M ops per frame. I found more
 optimizations as before, in both the graphics and the loop, and by now, with many worked examples
 from me, Claude managed to find more on its own. I got it to about 24M ops per frame.
-<!-- VERIFY: 35M and 24M -->
+<!-- records: 35.29M (M14.5), 24.31M (docs/handoff-perf.md) -->
 
 Then came doors and lifts, and static monsters and items. I could walk the whole first level and
 everything was static, but it worked. I played it for a while, collected everything that felt
 wrong, and fixed it. The game felt playable.
 
-Finally came moving monsters, damage taken from monsters, shooting at monsters with five weapons up
-to a rocket launcher, dying, a health and ammo bar, a main menu, a help page and a map. With Claude finding more optimizations along the way, the
+Finally came moving monsters, damage taken from monsters, shooting at monsters with six weapons on five
+keys, up to a rocket launcher, dying, a health and ammo bar, a main menu, a help page and a map. With Claude finding more optimizations along the way, the
 shipped game measures:
 
 * Binary size: 39.8 MB (52.3M 32-bit memory words, compressed)
 * Mean FlipJump ops per frame: 16.1M on the benchmark tours, 14.2M in the frozen combat scenarios <!-- blocked62: gamespeed mean 16,076,977, (mean+p80)/2 16,837,730; v10 combat mean 14,193,897 -->
-* Screen: 160x100, about 15 fps (68 ms per frame on one pinned core, about 235M flip-jumps per second)
+* Screen: 160x100, about 15 fps (68 ms per frame on one pinned core, 233M flip-jumps per second)
 
 ![Where a frame's flip-jumps go, and what the 52M-word program is made of](media/blocked62_pies.png)
 
@@ -264,6 +265,8 @@ curl -LO https://github.com/tomhea/doom-flipjump/releases/latest/download/doom.f
 fj --run doom.fjm
 ```
 
-Also possible, with nothing to install: `uvx fjdoom`. The code is at
+Also possible, with nothing to install: `uvx fjdoom`. (Until the 1.0 release is out none of these
+lines works yet: flipjump 1.5.1 is not on PyPI, the release file does not exist and the `fjdoom`
+package is not published; see docs/developing.md to build it.) The code is at
 https://github.com/tomhea/doom-flipjump, and the numbers, each with the command that produced it,
 are in [ship-gate.md](ship-gate.md).

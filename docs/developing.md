@@ -44,7 +44,7 @@ The exact build line of the shipped binary, its hashes and the gate it passed ar
 ## Flat vs. paged storage
 
 The interpreter runs the program in **flat** storage: the whole address span is one contiguous
-array, 8 bytes per word of span. The game's span is about 119 million words. A release `doom.fjm`
+array, 8 bytes per word of span. The game's span is about 118 million words. A release `doom.fjm`
 carries the flat-memory flag and the pc io mode in its header (flipjump 1.5.1's `run_flags` and
 `io_mode`, set at assembly), so `fj --run doom.fjm` allocates the flat window by itself. A file
 assembled without those fields needs `fj --run file.fjm --io pc --flat-max-words 134217728`; with a
@@ -58,4 +58,3 @@ default limit is 2^23 words, also settable with the `FLIPJUMP_FLAT_MAX_WORDS` en
 - [cr-rules.md](cr-rules.md): the review contract, rules R1 to R9.
 - [ship-gate.md](ship-gate.md): the standing numbers, their provenance, and the gate a new binary must pass.
 - `handoff-*.md`: one per milestone, the record of what was built and why.
-- [launch-plan.md](launch-plan.md): the publication checklist.

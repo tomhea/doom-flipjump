@@ -21,8 +21,8 @@ No registers, no arithmetic, no conditional branch, no load or store. Everything
 "if", is built by flipping bits inside the address of the next jump.
 
 This repository builds a 52-million-word FlipJump program that renders Freedoom's first level with
-textured walls, floors and ceilings, doors and lifts, monsters that hunt and fight back, five
-weapons up to a rocket launcher, damage, death, a menu and an automap, at 160x100, around 15 frames a second on the native FlipJump
+textured walls, floors and ceilings, doors and lifts, monsters that hunt and fight back, six
+weapons on five keys up to a rocket launcher, damage, death, a menu and an automap, at 160x100, around 15 frames a second on the native FlipJump
 interpreter.
 
 <p align="center">
@@ -48,8 +48,9 @@ flag are in its header), so there is nothing else to type.
 
 Also possible, with nothing to install: `uvx fjdoom`.
 
-Until the 1.0 release is out, the file above does not exist yet: [docs/developing.md](docs/developing.md)
-says how to build it.
+Until the 1.0 release is out, none of the three lines works yet: flipjump 1.5.1 is not on PyPI, the
+file does not exist and the `fjdoom` package is not published. [docs/developing.md](docs/developing.md)
+says how to build it today.
 
 - Needs Python 3.10 to 3.13, a display, and about 1 GB of free RAM. Prebuilt interpreter wheels
   exist for Windows, macOS (Intel and Apple silicon) and Linux (x86-64 and ARM).
@@ -72,7 +73,7 @@ says how to build it.
 | left / right arrows | turn |
 | A / D, or , / . | strafe |
 | Ctrl | fire |
-| 1 2 3 4 5 | weapons (5 is the rocket launcher) |
+| 1 2 3 4 5 | weapons (1 is the fist or the chainsaw, 5 the rocket launcher) |
 | Space or E | use (opens doors) |
 | H | help screen |
 | M | the map |
@@ -85,7 +86,7 @@ words, each a flip address or a jump address. At runtime the interpreter does no
 about 16 million times per frame:
 
 ```c
-/* flipjump/interpreter/_fjcore.c, the fetch-flip-jump loop, paraphrased for w = 32 */
+/* flipjump/interpreter/_fjcore.c, the fetch-flip-jump loop, paraphrased for w = 32 (addresses are bit addresses) */
 for (;;) {
     f = mem[ip];                        /* read the flip word            */
     mem[f >> 5] ^= 1u << (f & 31);      /* flip one bit                  */
@@ -101,7 +102,7 @@ thousand lines; the loop above is all it does per op.
 **Python wrote the program; it does not run it.** The toolchain in `src/doomfj/` is a compiler. It
 reads a DOOM-format WAD and compiles the level's BSP tree, textures, flats, sprites, light tables and
 the game rules into FlipJump source, millions of lines of it, which the FlipJump assembler turns
-into the memory image. That happens once, on a build machine, in about an hour with about
+into the memory image. That happens once, on a build machine, in about 45 minutes with about
 10 GB of RAM. <!-- TODO: blocked62's exact source size, build time and peak RSS. --> Players never
 run it.
 
@@ -137,7 +138,7 @@ trick: arithmetic is read, not computed. Measured on blocked62; the shipped bloc
 | instructions in the language | 1 |
 | the program | 52.3 million words, 39.8 MB; 39% of the largest address space the interpreter allows |
 | one frame | about 16 million flip-jumps; up to 28 million in the heaviest fight |
-| speed | 68 ms a frame, about 15 fps, on one core, at about 235 million flip-jumps per second |
+| speed | 68 ms a frame, about 15 fps, on one core, at 233 million flip-jumps per second |
 | a 32-bit addition | about 800 flip-jumps, so a pixel costs about one addition |
 | the screen | 160 x 100, 256 colours, a 16-row status bar |
 | the check | every frame of eleven scripted fights identical, pixel for pixel, to the Python model |
@@ -169,14 +170,14 @@ change ([docs/cr-rules.md](docs/cr-rules.md)), and a rule that any measurement q
 with a negative control. The whole record, including every per-milestone handoff, is in `docs/`.
 
 **Why 160x100 and 15 fps?** Cost is counted in flip-jumps and a frame is 14 to 16 million of them,
-at 238 million per second on one core. DOOM's native width is 320; 160 halves the per-frame work and
+at 233 million per second on one core. DOOM's native width is 320; 160 halves the per-frame work and
 is what fits the 2^27-word address space with room for the game. What was tried, kept and closed
 on the way is in [docs/ship-gate.md](docs/ship-gate.md).
 
 **Can I play it in the browser?** Not yet. The interpreter is C; a WebAssembly build is the open item.
 
 **Can I build it myself?** Yes: [docs/developing.md](docs/developing.md). It wants about 10 GB of RAM
-and a few hours.
+and about 45 minutes.
 
 ## The story, in sixty seconds
 

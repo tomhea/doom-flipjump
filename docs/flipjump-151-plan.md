@@ -209,6 +209,31 @@ slower. The shared-table and `pad 64` variants lose. The consequence is an **ado
 `byte.emit` → `hex.output` on the low then the high nibble, judged by msframe (it adds about 8 ops of space per
 call site).
 
+### 3h1. Which tables to declare: by MERIT, not all (owner, 2026-10-24) ⏳ after hunt round 3
+
+The owner: relocate the tables the program spends its time in. Not too many; the ones with the most merit.
+
+**Candidates** (beyond today's 8 + `hex.switch`):
+
+- hex: `output`, `print_as_digit`, `if_flags`, `inc1`, `dec1`, `add_count_bits`, `input_hex`, `input_as_hex`, `div`,
+  `add_mul`, `cmp`;
+- bit: `if`, `exact_xor`, `double_exact_xor`, `output`, `exact_xor_from_ptr`.
+
+**Method:**
+
+1. **A profile of real work:** fjdoom's E1M1 played frames (`profx`, per-label executed ops on the current binary)
+   and the hexlib suite as a generic check. For each candidate, measure:
+   - its dispatches per frame;
+   - the ops each dispatch spends on arming and disarming today (2 × popcount of the table address);
+   - the saving if relocated, i.e. the popcount after placement, estimated by the census predictor.
+2. **Merit = dispatches × saving per dispatch.** The cost side is pool span and segments; each declared table
+   competes for slots.
+3. **Rank, then declare top-down, one at a time.** Each one is proved: byte-identical without the pool, the
+   relocation proof, the fuzzer, then fjdoom's msframe. Stop when the next one no longer separates in msframe
+   (`docs/measurement-process.md` verdict rule).
+
+Expected first: `hex.output`, whose switch has been inline at 41 byte-output sites since A8.
+
 ### 3h. `.fjm` version 4: the segment table compressed too (owner, 2026-10-24) ⏳
 
 Branch `fjm-compressed-segments`, taken from `cr-main` after round 1b, with a PR into 1.5.1. It may land during the

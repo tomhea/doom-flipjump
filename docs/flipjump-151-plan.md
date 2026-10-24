@@ -280,8 +280,38 @@ It has many gaps; find them and fix them, and keep the speedup.
   - `sim.jump16` → `hex.switch` must be DECLARED on `stl-additions`, or its tables stop moving (speed!);
   - `lzma_fast` → `lzma_preset` (A10).
 
-**The gap hunt is running:** a fresh adversarial reviewer with crafted programs and a differential fuzzer, plus a
-mutation control. Its findings go to the fixer, and then v4 follows.
+**Gap hunt, round 1 (2026-10-24): 9 BLOCKING, 9 MINOR** (`scratchpad/ioapi/cr/hunt/hunt_findings.md`).
+
+- **The fuzzer found no difference in 300 random stl-only programs** (w=16/32/64, 6 pool variants, 8,719 tables
+  moved). Both of its controls fire.
+- **Every corruption came from a crafted program:**
+  - B1–B4 are BlockPool pinning:
+    - a pointer reader not on `RAW_READERS`;
+    - the `pinned_floor` heuristic;
+    - a pinned word inside a `reserve` region;
+    - an XOR retarget of a pinned word.
+  - B5: a table leaving its end through label arithmetic, checked only by the proof, not by the product;
+  - B6: a non-power-of-two `pad`.
+- **The proof's limits:**
+  - B7: an operand it cannot evaluate is skipped silently;
+  - B8: pinning is unchecked;
+  - B9: false positives.
+- **The MINOR ones:**
+  - M1–M3: late, reasonless overlap errors;
+  - M4: pool reuse;
+  - M5: flat memory at w=64;
+  - M6: the `__relocatable__` name undocumented;
+  - M7: the docs overclaim;
+  - M8: TablePool spill space;
+  - M9: a w=16 `OverflowError`.
+
+**All of them go to the fixer:**
+
+- each crafted program becomes a unit test, running identically or refused with a reason;
+- the fuzzer goes into `tests/`;
+- fjdoom's exposure is checked per finding.
+
+Then hunt round 2. Then v4.
 
 Then the rest of the gap hunt below.
 

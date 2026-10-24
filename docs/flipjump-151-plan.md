@@ -10,6 +10,21 @@ It lives in the doom repo, not in flipjump, so the 1.5.1 → `main` diff the own
 
 ---
 
+## RESUME HERE (paused 2026-10-24 ~12:30 for a Claude update)
+
+Every agent was paused. Each wrote its state to a file. Resume each piece with a NEW agent that reads its file:
+
+| work | branch / head | state file | next |
+|---|---|---|---|
+| stl review fixes: the corrected Complexity front-line table (owner rules: no "~", only n-terms, space with @ = emitted ops incl. wflip chains, a numeric derivation per row), the new macros' lines, part C's n<1 guard | `stl-additions` / `stl-seq-ptr` (flipjump-chain) | `C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/ioapi/cr/stl_STATUS.md` | finish, then publish the table to `docs/flipjump-complexity-frontline.md` for the owner |
+| table-pool gap hunt, round 3 | `pool-relocatable` 640532c (worktree flipjump-hunt) | `C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/ioapi/cr/hunt/round3/STATUS.md` | finish round 3; if no BLOCKING, the hunt closes → `.fjm` v4 (`C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/ioapi/cr/fjm_v4_spec.md`) |
+| fjdoom adoption A1–A8 | doom `stl-adopt` d6a20a52 (doom-stl) | this plan, section 4 | 4b pins, A10 presets, 4d all levels |
+| E1M1 ship #1 | doom `io-api` (doom-io) | this plan, 1f | msframe A/B vs blocked63 on a quiet box, then 1g/1h |
+
+Specs: `C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/ioapi/cr/` (relocatable_spec.md, fjm_v4_spec.md, stl_audit_spec.md, main_area1_round1b.md). The CR loop
+baseline is `C:/Users/tomhe/AppData/Local/Temp/claude/C--Users-tomhe-Documents-doom-flipjump/29ddbecf-cbb7-4734-805a-36c0e391327d/scratchpad/ioapi/cr/crmain_base.json`. Pinned stl for adoption checks: flipjump-stlpin (detached; advance it to the
+committed stl head; it needs `_fjcore.pyd` copied).
+
 ## 0. The goal and the owner's order
 
 **The end point:** the owner's manual review of flipjump `1.5.1` into `main`. By then 1.5.1 holds:

@@ -412,8 +412,16 @@ What ships is decided by the measurement. Load time must not grow noticeably.
 
 The implementer is fixing all of it on `stl-additions`, merged into `stl-seq-ptr`.
 
-**Owner addition (2026-10-24), part of this round:** every NEW or MODIFIED macro gets its docs and Complexity lines
-(time AND space) updated from MEASUREMENT. That includes the chained ops, part C's pointer ops, the moved macros, and
+**Owner addition (2026-10-24), part of this round:** NEW macros are documented fully, from MEASUREMENT.
+
+**Existing macros' Complexity lines are NOT edited directly (owner).** Instead, a FRONT-LINE table goes to the owner
+(`scratchpad/ioapi/cr/complexity_frontline.md`):
+
+- it holds only the macros whose OWN cost changed or whose doc is wrong, not their callers;
+- each row has the measured values and a verified reason.
+
+After acceptance, the accepted lines and every dependent's line are updated, transitively. The same rule holds for
+the whole-stl audit (3g2). That includes the chained ops, part C's pointer ops, the moved macros, and
 the 8 table macros that now declare `__relocatable__` (on `pool-relocatable`).
 
 ### 3g2. The whole-stl audit (owner, 2026-10-24) ⏳ after 3g round 1

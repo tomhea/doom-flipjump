@@ -632,6 +632,7 @@ Branch `cr-main` from 1.6.0 (`9f6119c`), worktree `flipjump-crmain`.
 | 6d | IO devices (1.6.0's earlier changes; #375 is already clean) | ⏳ | — |
 | 6e | Tests + programs | ⏳ | — |
 | 6f | **stl, last**, after phase 5 | ⏳ | — |
+| 6x | **Genericity sweep (owner, 2026-10-24)**, cross-cutting, everything 1.6.0 adds plus the stl branches. **(1) A scan:** fjdoom / DOOM / map words; hard-coded widths (32, `w == 32`, `1<<27`, `0x80000000`); fjdoom-tuned sizes and thresholds (span, slot caps, chunk sizes, `16*2*w`, the 2^24 flat threshold); one-device / one-io-mode logic outside the device's module; fjdoom-only defaults (pin heat, spread, census); fjdoom-numbers justifications in comments. **(2) A read-through per hit:** generalise (from `w` / a parameter, tested at w=16/32/64), document as legitimately specific, or reword. **(3) Fixes** on the owning branch, byte-identical without the pool | ⏳ the scan after the ms/frame run; the table to the owner | — |
 | 6g | Final proof: every test program byte-identical to the last baseline; the E1M1 shipped binary rebuilt byte-identical | ⏳ | — |
 | ➡ | **The owner's manual review** | — | non-stl areas from ~6e, the whole branch after 6g |
 

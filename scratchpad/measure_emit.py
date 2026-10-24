@@ -12,7 +12,6 @@ from doomfj.texturecompiler import colormap_values, _index_nibbles
 from doomfj.wad import WadFile
 from flipjump.interpreter.io_devices.FixedIO import FixedIO
 
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj").resolve()
 
 
 def run_ops(table_text, call_line, idx_width, n, tmp):
@@ -28,7 +27,7 @@ def run_ops(table_text, call_line, idx_width, n, tmp):
     p = tmp / "m.fj"
     p.write_text(main, encoding="utf-8")
     out = tmp / "m.fjm"
-    fj.assemble([FIXED_POINT_FJ, p], out, memory_width=W, print_time=False)
+    fj.assemble([p], out, memory_width=W, print_time=False)
     term = fj.run(out, io_device=FixedIO(b""), print_time=False, print_termination=False)
     return term.op_counter
 

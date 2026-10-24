@@ -1,4 +1,4 @@
-"""M13c1 (F5) — the floor/ceiling (visplane) LUTs the fj plane raster reads, emitted as `.fj` read_table
+"""M13c1 (F5) — the floor/ceiling (visplane) LUTs the fj plane raster reads, emitted as `.fj` read_entry
 data tables (yslope / distscale / zlight). Each is the SAME host kernel the M13 oracle uses (tables.py,
 R6 SSOT); here we assemble the emitted table, read a spread of entries TWICE each (R5 #8 — catches
 pointer/result-reg cleanup bugs), and assert byte-exact equality with the host value. So the fj floor
@@ -15,18 +15,17 @@ from doomfj.lut_generator import (
 )
 from doomfj.tables import yslope_table, distscale_table, zlight_table, MAXLIGHTZ, LIGHTLEVELS
 
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table
 COLORMAP_LIGHTS = 32
 
 
 def _read_lut(tmp_path, name, lut_fj, host_values, picks, *, entry_nibbles, idx_nibbles):
-    """Assemble `lut_fj` + a driver that reads each picked index twice via hex.read_table, then compare
+    """Assemble `lut_fj` + a driver that reads each picked index twice via hex.read_entry, then compare
     the printed entry_nibbles-digit output to the host values (masked to the entry width)."""
     mask = (1 << (4 * entry_nibbles)) - 1
     body, data, expected = [], [], b""
     for k, idx in enumerate(picks):
         for _ in range(2):
-            body += [f"hex.read_table {entry_nibbles}, d, {name}, {idx_nibbles}, q{k}",
+            body += [f"hex.read_entry {entry_nibbles}, d, {name}, {idx_nibbles}, q{k}",
                      f"hex.print_as_digit {entry_nibbles}, d, 0", "stl.output 10"]
             expected += f"{host_values[idx] & mask:0{entry_nibbles}x}\n".encode()
         data.append(f"q{k}: hex.vec {idx_nibbles}, {idx}")
@@ -35,9 +34,9 @@ def _read_lut(tmp_path, name, lut_fj, host_values, picks, *, entry_nibbles, idx_
     p = tmp_path / f"{name}.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), p.resolve()], b"", expected,
+        [p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
-    assert ok, f"{name}: fj read_table output != host table"
+    assert ok, f"{name}: fj read_entry output != host table"
 
 
 def test_yslope_lut_byte_exact(tmp_path):

@@ -4,8 +4,8 @@ Two families of emitter:
 
 1. **§3.4 data-table fallback** (`generate_lut_fj` / `generate_byte_lut_fj` and the canned
    sine/reciprocal wrappers, lifted from PR #1). These emit consecutive `hex.vec n, value` entries
-   (read at runtime by `hex.read_table`) or packed-byte `;value*dw` ops (read by
-   `hex.read_table_byte`). The canned wrappers draw their values from `tables.py` — the single source
+   (read at runtime by `hex.read_entry`) or packed-byte `;value*dw` ops (read by
+   `hex.read_entry_byte`). The canned wrappers draw their values from `tables.py` — the single source
    shared with the oracle (R6/D12). A table read is ~O(w) ops; the dispatch tables below are ~4@.
 
 2. **Dispatch-CODE tables** (`generate_dispatch_table_fj`) and the **D3 +4-offset packed-byte
@@ -74,12 +74,12 @@ def _nibble(value: int, p: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# §3.4 data-table fallback (read by hex.read_table / hex.read_table_byte)
+# §3.4 data-table fallback (read by hex.read_entry / hex.read_entry_byte)
 # ---------------------------------------------------------------------------
 
 def generate_lut_fj(label: str, values: Sequence[int], entry_nibbles: int) -> str:
     """Emit a `.fj` data table: `label:` + one `hex.vec entry_nibbles, value` per entry. Entry k sits
-    at `label + k*entry_nibbles*dw` — indexable with `hex.read_table entry_nibbles, dst, label, idx_n,
+    at `label + k*entry_nibbles*dw` — indexable with `hex.read_entry entry_nibbles, dst, label, idx_n,
     idx`. `values` are raw (already-encoded) unsigned words; negatives must be encoded first."""
     max_value = (1 << (4 * entry_nibbles)) - 1
     lines: List[str] = [
@@ -98,7 +98,7 @@ def generate_lut_fj(label: str, values: Sequence[int], entry_nibbles: int) -> st
 
 def generate_byte_lut_fj(label: str, values: Sequence[int]) -> str:
     """Emit a `.fj` packed-byte data table: `label:` + one `;value*dw` op per entry (the byte lives in
-    the op's data bits). Entry k sits at `label + k*dw` — read with `hex.read_table_byte`. Half the
+    the op's data bits). Entry k sits at `label + k*dw` — read with `hex.read_entry_byte`. Half the
     size of a `hex.vec 2` table; right for colormaps / light tables."""
     lines: List[str] = [
         f'// byte LUT "{label}": {len(values)} packed-byte entries (doomfj.lut_generator)',
@@ -114,9 +114,9 @@ def generate_byte_lut_fj(label: str, values: Sequence[int]) -> str:
 def generate_packed_lut_fj(label: str, values, nbytes: int) -> str:
     """M13-lutpack: entry k = `nbytes` consecutive packed BYTES (little-endian) at label +
     k*nbytes*dw, one dw-slot per byte (the `;value*dw` idiom — the yslope_packed precedent
-    generalized). Read with `hex.read_table_packed nbytes, dst, label, idx_n, idx` (dst =
-    2*nbytes nibbles): ~600 ops/byte via read_byte_and_inc instead of hex.read_table's ~1.1k
-    per NIBBLE pointer re-derivation (delta-measured: read_table 8 @ 3-nib idx ~= 10.4k)."""
+    generalized). Read with `hex.read_entry_packed nbytes, dst, label, idx_n, idx` (dst =
+    2*nbytes nibbles): ~600 ops/byte via read_byte_and_inc instead of hex.read_entry's ~1.1k
+    per NIBBLE pointer re-derivation (delta-measured: read_entry 8 @ 3-nib idx ~= 10.4k)."""
     lines = [f'// packed LUT "{label}": {len(values)} entries x {nbytes} bytes (doomfj.lut_generator)',
              f"{label}:"]
     for index, value in enumerate(values):
@@ -140,18 +140,18 @@ def generate_sine_lut_fj(label: str, count: int, fraction_bits: int, entry_nibbl
     return generate_lut_fj(label, sine_table(count, fraction_bits, 4 * entry_nibbles), entry_nibbles)
 
 
-# ── projection LUTs the fj wall renderer reads (read_table data tables; the M12* tables, R6 SSOT) ──
+# ── projection LUTs the fj wall renderer reads (read_entry data tables; the M12* tables, R6 SSOT) ──
 
 def generate_tantoangle_lut_fj(label: str, slope_range: int = 2048) -> str:
     """tantoangle (R_PointToAngle: slope quotient -> BAM angle), slope_range+1 entries of 32-bit BAM.
-    M13-lutpack: 4 PACKED BYTES/entry (read_table_packed 4). Values from `tables.tantoangle_table`
+    M13-lutpack: 4 PACKED BYTES/entry (read_entry_packed 4). Values from `tables.tantoangle_table`
     (all non-negative, < 2**32). Read once per wall."""
     return generate_packed_lut_fj(label, tantoangle_table(slope_range), 4)
 
 
 def generate_slopediv_recip_lut_fj(label: str) -> str:
     """perf #13: SlopeDiv's block-FP reciprocal table (4096 entries, m in [0x100,0xFFF] -> (1<<24)//m;
-    rest 0). M13-lutpack: 3 PACKED BYTES/entry (max recip = 65536 = 17 bits; read_table_packed 3 into
+    rest 0). M13-lutpack: 3 PACKED BYTES/entry (max recip = 65536 = 17 bits; read_entry_packed 3 into
     a 6-nibble register). Values from `tables.slopediv_recip_table` (SSOT, R6). Indexed by the
     top-3-nibble mantissa of (den>>8)."""
     return generate_packed_lut_fj(label, slopediv_recip_table(), 3)
@@ -188,7 +188,7 @@ def generate_viewangletox_lut_fj(label: str, view_w: int, trig_n: int, *, entry_
     return generate_packed_lut_fj(label, values, entry_nibbles // 2)
 
 
-# ── M13 floor/ceiling (visplane) LUTs the fj plane raster reads (read_table data tables, R6 SSOT) ──
+# ── M13 floor/ceiling (visplane) LUTs the fj plane raster reads (read_entry data tables, R6 SSOT) ──
 
 def generate_yslope_lut_fj(label: str, view_w: int, view_h: int) -> str:
     """yslope (R_MapPlane: screen row -> distance slope, 16.16, 8 nibbles), view_h entries. Values from
@@ -201,9 +201,9 @@ def generate_yslope_packed_lut_fj(label: str, view_w: int, view_h: int) -> str:
     """M13pS2-crush2: yslope as PACKED BYTES -- 3 bytes (little-endian, 6 nibbles; max real value
     0xA00000) per screen row, one dw-slot per byte (the `;value*dw` idiom) -- so `plane.build_bands`
     walks the rows with a SINGLE incrementing pointer (3x `hex.read_byte_and_inc` per row) instead of
-    a per-row `hex.read_table 8` that re-derives the full pointer each row (MEASURED at ~10k of the
+    a per-row `hex.read_entry 8` that re-derives the full pointer each row (MEASURED at ~10k of the
     old ~12.6k ops/row -- the band walk's dominant cost). Same `tables.yslope_table` values (R6
-    SSOT) as the 8-nibble `read_table` variant above."""
+    SSOT) as the 8-nibble `read_entry` variant above."""
     vals = yslope_table(view_w, view_h)
     lines = [f"{label}:"]
     for v in vals:
@@ -242,7 +242,7 @@ def generate_distscale_lut_fj(label: str, view_w: int, trig_n: int) -> str:
 def generate_zlight_lut_fj(label: str, view_w: int, num_colormaps: int) -> str:
     """zlight (R_MapPlane distance light), the LIGHTLEVELS x MAXLIGHTZ grid FLATTENED row-major to
     `LIGHTLEVELS*MAXLIGHTZ` entries of 2 nibbles (a COLORMAP row 0..num_colormaps-1). Read entry
-    `(light>>LIGHTSEGSHIFT)*MAXLIGHTZ + min(MAXLIGHTZ-1, distance>>LIGHTZSHIFT)` with `hex.read_table`.
+    `(light>>LIGHTSEGSHIFT)*MAXLIGHTZ + min(MAXLIGHTZ-1, distance>>LIGHTZSHIFT)` with `hex.read_entry`.
     Values from `tables.zlight_table` (R6 SSOT)."""
     flat = [row for lvl in zlight_table(view_w, num_colormaps) for row in lvl]
     return generate_lut_fj(label, flat, 2)

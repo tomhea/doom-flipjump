@@ -27,7 +27,6 @@ from doomfj.mapcompiler import bake_bsp
 from doomfj.reference_model import ReferenceModel
 from doomfj.wad import WadFile
 
-FIXP = Path("src/fj/fixed_point.fj")
 WADS = {"E1M1": Path("tests/fixtures/freedoom_e1m1.wad"), "E1M2": Path("tests/fixtures/freedoom_e1m2.wad")}
 
 
@@ -71,7 +70,7 @@ def _run(tmp, name, text, pts):
     src = tmp / f"{name}.fj"
     src.write_text(text, encoding="utf-8")
     out = tmp / f"{name}.fjm"
-    fj.assemble([FIXP.resolve(), src.resolve()], out, memory_width=W, print_time=False)
+    fj.assemble([src.resolve()], out, memory_width=W, print_time=False)
     io = FixedIO(b"".join(bytes([0xD0]) + struct.pack("<hh", x, y) for x, y in pts) + b"\x00")
     stats = fj.run(out, io_device=io, print_time=False, print_termination=False)
     lines = io.get_output(allow_incomplete_output=True).decode().split("\n")

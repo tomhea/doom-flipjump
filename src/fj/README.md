@@ -1,6 +1,6 @@
 # `src/fj/` — the hand-written FlipJump
 
-Read this before opening anything else. **7 of these 11 files are the program.**
+Read this before opening anything else. **6 of these 12 files are the program.** The fixed-point math and the constant-array reads are the stl's (`hex.fixed_mul_low`, `hex.mul_low`, `hex.fixed_div`, `hex.mul_const`, `hex.read_entry*`).
 
 Everything else in the shipped image is machine-written into `build/generated_loop/` — see
 [the generated side](#the-generated-side) at the bottom.
@@ -12,7 +12,6 @@ fj top-level labels are global, so **the order is the contract** — never reord
 
 | file | macros | called from `MAIN` | what it is |
 |---|---:|---|---|
-| `fixed_point.fj` | 3 | `hex.read_table`, `hex.read_table_byte` | the packed-table reads. Extends the stl's `hex` namespace, so everything uses it. The 16.16 fixed-point math is the stl's (`hex.fixed_mul_low`, `hex.mul_low`, `hex.fixed_div`, `hex.mul_const`). |
 | `present.fj` | 7 | `init_screen`, `select_palette`, `draw_collines`, `end_frame` | drives the screen device: command bytes on the output stream. |
 | `projection.fj` | 32 | `point_on_side_leaf`, `wedge_setup`, `wedge_bbox` | the projection math — angles, scales, column ranges. 12 more macros are called by `frame_render.fj`. |
 | `frame_render.fj` | 78 | `seg_pass1_leaf_body_lines`, `seg_pass1_leaf_body_ts`, `seg_pass2_leaf_body_lines`, `thing_record_body` | the frame. **Only 24 of its 78 macros are called from outside** (other fj files and the emitters); the rest are its internals. |

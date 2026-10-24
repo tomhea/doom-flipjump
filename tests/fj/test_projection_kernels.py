@@ -26,7 +26,6 @@ from doomfj.wall_renderer import hoisted_scratch_fj
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
 FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")   # projection.fj uses frame_render's macros
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table + hex.fixed_div
 E1M1_WAD = Path("tests/fixtures/freedoom_e1m1.wad")
 MASK40 = (1 << 40) - 1   # 10-nibble two's-complement mask (point_on_side's working width)
 
@@ -34,10 +33,10 @@ MASK40 = (1 << 40) - 1   # 10-nibble two's-complement mask (point_on_side's work
 def _sources(tmp_path):
     """the files every kernel program here assembles with: the generated constants first
     (projection.fj names the emitter's pad constants HOT_PAD / HOTTER_PAD -- one source, exactly
-    as the shipped build gets them, R6), then fixed_point, projection, and frame_render for the
+    as the shipped build gets them, R6), then projection and frame_render for the
     frame.*_chain macros projection.fj has used since idea 14 (2026-09-03)."""
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    return [consts.resolve(), FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), FRAME_RENDER_FJ.resolve()]
+    return [consts.resolve(), PROJECTION_FJ.resolve(), FRAME_RENDER_FJ.resolve()]
 
 
 def _run(tmp_path, name, body, data, expected: bytes):
@@ -181,7 +180,7 @@ def test_point_to_dist_byte_exact_vs_oracle(tmp_path):
 # ── proj.wall_setup (R_StoreWallRange): rw_normalangle + rw_distance for a seg ──
 # Driven on the committed DOOM-wound square room (256x256, verts (0,0)..(256,256)) from a few view
 # positions: straight-on (offsetangle≈0), near/far, and oblique (exercises the BAM-abs fold + the
-# ANG90 clamp). wall_setup INLINES point_to_angle + point_to_dist (heavy read_table bodies) per call,
+# ANG90 clamp). wall_setup INLINES point_to_angle + point_to_dist (heavy read_entry bodies) per call,
 # so we keep the case count small to stay well under the 300s assemble ceiling — the renderer-scale
 # call sites route through a shared leaf later (the integration rung). Byte-exact vs ReferenceModel.
 def _square_room():

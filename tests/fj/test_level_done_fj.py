@@ -168,7 +168,7 @@ def _run_digits(tmp_path, name, mut=None, mapname="E1M1") -> bool:
     p = tmp_path / ("%s.fj" % name)
     p.write_text(text, encoding="utf-8")
     consts = CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
+    srcs = [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
                                            should_raise_assertion_error=False)
 
@@ -290,7 +290,7 @@ class _Recording(InMemoryScreen):
 
 def _run_frames(tmp_path, name, swap=False, mapname="E1M1"):
     text, want, _cases_, _t = _frame_text(swap, mapname)
-    out, _srcs = _assemble(tmp_path, name, text, extra=("present.fj", "fixed_point.fj"))
+    out, _srcs = _assemble(tmp_path, name, text, extra=("present.fj",))
     screen = _Recording()
     fj.run(out, io_device=screen, print_time=False, print_termination=False)
     return screen.frames, want

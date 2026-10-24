@@ -27,7 +27,6 @@ from doomfj.config import Config
 from doomfj.harness import W
 from doomfj.lut_generator import generate_pair_state_switch_fj
 
-FIXP = Path("src/fj/fixed_point.fj")
 SIM = Path("src/fj/sim.fj")
 NA, NB = 3, 5
 # distinct per pair and not a simple function of (i, j): an off-by-one dispatch must not still look ordered
@@ -60,7 +59,7 @@ def _run(tmp, tag, text):
     src.write_text(text, encoding="utf-8")
     out = tmp / f"{tag}.fjm"
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")        # sim.fj's pad constants
-    fj.assemble([consts.resolve(), FIXP.resolve(), SIM.resolve(), src.resolve()], out,
+    fj.assemble([consts.resolve(), SIM.resolve(), src.resolve()], out,
                 memory_width=W, print_time=False)
     io = FixedIO(b"")
     fj.run(out, io_device=io, print_time=False, print_termination=False)

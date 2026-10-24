@@ -107,7 +107,7 @@ from doomfj.harness import W
 from doomfj.lut_generator import generate_emit_dispatch_table_fj
 
 ROOT = Path(__file__).resolve().parents[2]
-FJ_NAMES = ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
+FJ_NAMES = ("present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
             "plane_bands.fj", "stream_render.fj")
 EMITTER = "wall_renderer.py"
 # M7 P4.0: the game tier's OWN config -- the emitter rebinds `cfg = tier_cfg(cfg, tier)` (an 84-row view under the bar)

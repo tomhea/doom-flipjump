@@ -46,7 +46,7 @@ def _run(tmp: Path, name: str, nib: int, n: int, ids, tree) -> list:
     src = tmp / (name + ".fj")
     src.write_text(_prog(nib, n, ids, tree), encoding="utf-8")
     out = tmp / (name + ".fjm")
-    files = [Config().emit_fj_consts(tmp / "fj_consts.fj"), FJ / "fixed_point.fj", FJ / "sim.fj", src]
+    files = [Config().emit_fj_consts(tmp / "fj_consts.fj"), FJ / "sim.fj", src]
     fj.assemble([Path(f).resolve() for f in files], out, memory_width=W, print_time=False)
     io = FixedIO(b"")
     fj.run(out, io_device=io, print_time=False, print_termination=False)

@@ -726,7 +726,7 @@ class TestW1RSelectionTree:
 
 class TestPackedAndNibbleTwinsAgree:
     def test_zlight_packed_and_nibble_carry_the_same_sequence(self):
-        """The device DMA rasterizer reads the packed form; `hex.read_table` reads the nibble
+        """The device DMA rasterizer reads the packed form; `hex.read_entry` reads the nibble
         form. If they disagree, floors light differently depending on which path drew them."""
         cfg = Config()
         ncm = 32

@@ -52,7 +52,7 @@ from doomfj.wall_renderer import emit_wall_renderer
 from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
 from tests.fj.stream_screen import StreamScreen
 
-_SRC_NAMES = ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj",
+_SRC_NAMES = ("present.fj", "projection.fj", "frame_render.fj",
               "plane_render.fj", "plane_bands.fj", "stream_render.fj")
 # B0: `sim.fj` LAST, exactly as m14_gate.py orders it -- fj top-level labels are global, so the
 # ordered file list is equivalent to its concatenation and the order is load-bearing (R54).

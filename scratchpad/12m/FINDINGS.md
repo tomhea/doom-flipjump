@@ -220,7 +220,7 @@ nibble (mov 8 = 202.4, mov 5 = 118.8, measured).
 **Reading the atlas' per-hand-site table.** It attributes each op to the DEEPEST hand-written call
 site. So a file whose macros only call other hand-written macros shows ZERO -- plane_render.fj and
 plane_bands.fj price at 0 not because they are dead but because their work is attributed down into
-fixed_point.fj. Use the `pair` table (the two deepest hand frames) to see the caller.
+stl-fixedpoint. Use the `pair` table (the two deepest hand frames) to see the caller.
 
 ## K. THE UNREACHABLE-SLOT RULE (the freeze technique this campaign runs on)
 
@@ -244,7 +244,7 @@ Full table in ATLAS.md. The headline shape, which is NOT what the stale table sa
   sites, biggest 130k) -- they are a sweep, not one idea.
 - `stream.emit_col_lines` 3,812,820; `frame.ts_step_faces` 3,563,542; `frame.thing_record_body`
   2,383,571; the pointer arm (`set_flip_and_jump_pointers`) 2,022,344.
-- CONCENTRATED, by contrast: `hex.add_mul` 1,832,124 at ONE line (fixed_point.fj's
+- CONCENTRATED, by contrast: `hex.add_mul` 1,832,124 at ONE line (stl-fixedpoint's
   `mul_low.row`), of which 1,186,378 comes from full `hex.fixed_mul_low 8,4` calls;
   `hex.scmp` 852,998 over just 15 sites; `frame.dance_boundary` 1,290,578 in three lines;
   the four `write_byte_and_inc` of `ts_piece_wr` 795,631.
@@ -299,7 +299,7 @@ de-tunes placement only marginally, and the next idea's build absorbs it for fre
 
 ## O. hex.zero / hex.mov redundant-work audit (subagent, 2026-09-04): 46 pairs, 5 dead, 0 unsure
 
-Full census of adjacent `hex.zero N,X` / `hex.mov m,X[+k*dw]` in fixed_point / projection /
+Full census of adjacent `hex.zero N,X` / `hex.mov m,X[+k*dw]` in stl-fixedpoint / projection /
 frame_render / stream_render / present.fj. Three shipped as P7-1 (independently agreed by the
 audit). **Two more verified dead, not yet shipped:** `proj.slope_div`'s and `proj.slope_div_m`'s
 `recip_wide` -- each a separate macro-local, `zero 8` + `mov 6,k=0`, and the uncovered nibbles

@@ -26,7 +26,6 @@ from doomfj.texturecompiler import colormap_values, compile_colormap, _index_nib
 from doomfj.wad import WadFile                                            # noqa: E402
 from flipjump.interpreter.io_devices.FixedIO import FixedIO               # noqa: E402
 
-FIXED_POINT_FJ = (ROOT / "src/fj/fixed_point.fj").resolve()
 tmp = Path(tempfile.mkdtemp())
 
 
@@ -42,7 +41,7 @@ def run_ops(table_text, call_lines, decls, idx_width, n, tag):
     ])
     p = tmp / ("%s.fj" % tag); p.write_text(main, encoding="utf-8")
     out = tmp / ("%s.fjm" % tag)
-    fj.assemble([FIXED_POINT_FJ, p], out, memory_width=W, print_time=False)
+    fj.assemble([p], out, memory_width=W, print_time=False)
     term = fj.run(out, io_device=FixedIO(b""), print_time=False, print_termination=False)
     return term.op_counter
 

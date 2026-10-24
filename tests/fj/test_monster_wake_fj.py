@@ -176,7 +176,7 @@ def _run(tmp_path, name, hurt=False, hurt_mut=None, mapname="E1M1", wide_mut=Non
     p.write_text(prog, encoding="utf-8")
     from doomfj.config import Config
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    srcs = [consts.resolve(), (FJ / "projection.fj").resolve(),
             (FJ / "frame_render.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return fj.assemble_and_run_test_output(srcs, b"", _expected(script, hurt, mapname), memory_width=W,
                                            warning_as_errors=True, should_raise_assertion_error=False)

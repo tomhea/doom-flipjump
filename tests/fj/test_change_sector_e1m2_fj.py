@@ -132,7 +132,7 @@ def _run(tmp_path, name, mut=None) -> bool:
     p = tmp_path / ("%s.fj" % name)
     p.write_text("\n".join(body + decls + code) + "\n", encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
+    srcs = [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return fj.assemble_and_run_test_output(srcs, b"", _expected(script), memory_width=W, warning_as_errors=True,
                                            should_raise_assertion_error=False)
 

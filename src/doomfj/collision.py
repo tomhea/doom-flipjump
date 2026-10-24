@@ -15,7 +15,7 @@ algorithm in Python, which is what lets the host test it against the oracle in a
 of a build.
 
 WHAT IT REPLACED. M14-d walked the 256-unit blockmap through packed tables: four corners, ~20 lines
-a block, every candidate's row read with `hex.read_table_packed` (~6.8K ops a line, 576K per check,
+a block, every candidate's row read with `hex.read_entry_packed` (~6.8K ops a line, 576K per check,
 MEASURED on blocked27 -- docs/plan-gameplay.md section 3). Before that, baking a copy of every
 line's test into every block that listed it did not assemble in 50 minutes (docs/opt-experiments.md).
 A cell's line stub exists once per LINEDEF and is shared by every cell that lists it, which is what

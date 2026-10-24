@@ -47,7 +47,7 @@ def _run(tmp, name, program, feed):
     src = tmp / (name + ".fj")
     src.write_text(program, encoding="utf-8")
     out = tmp / (name + ".fjm")
-    fj.assemble([(FJ / "fixed_point.fj").resolve(), src.resolve()], out, memory_width=W, print_time=False)
+    fj.assemble([src.resolve()], out, memory_width=W, print_time=False)
     io = FixedIO(feed + bytes([0]))
     fj.run(out, io_device=io, print_time=False, print_termination=False)
     return [int(t, 16) for t in io.get_output(allow_incomplete_output=True).decode().split()]

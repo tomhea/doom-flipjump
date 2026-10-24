@@ -61,7 +61,7 @@ args = ap.parse_args()
 # program. (R6 says constants have one source; this is not a constant, it is a restatement whose
 # disagreement is the signal.)
 _SRC_FJ = ROOT / "src/fj"
-INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
+INCLUDES = ["present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
             "plane_bands.fj", "stream_render.fj", "sim.fj"]     # B0: sim.fj LAST (R54)
 
 

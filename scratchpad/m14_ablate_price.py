@@ -29,7 +29,7 @@ from doomfj.reference_model import ReferenceModel                         # noqa
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.wall_renderer import emit_wall_renderer, write_program_files  # noqa: E402
 
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("present.fj", "projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj", "sim.fj")]
 abl = sys.argv[1] if len(sys.argv) > 1 else "sprnoemit"

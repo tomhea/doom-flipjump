@@ -116,7 +116,7 @@ def _assemble_run(tmp_path, name, text):
     p.write_text(text, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     out = tmp_path / ("%s.fjm" % name)
-    fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    fj.assemble([consts.resolve(), (FJ / "projection.fj").resolve(),
                  (FJ / "frame_render.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], out,
                 memory_width=W, print_time=False)
     from flipjump.interpreter.io_devices.FixedIO import FixedIO

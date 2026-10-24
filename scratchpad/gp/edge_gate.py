@@ -45,7 +45,7 @@ from doomfj.wall_renderer import emit_wall_renderer, write_program_files    # no
 from doomfj.wireformat import encode_feed_mapunits                           # noqa: E402
 from tests.fj.stream_screen import StreamScreen                              # noqa: E402
 
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("present.fj", "projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 cfg = Config()

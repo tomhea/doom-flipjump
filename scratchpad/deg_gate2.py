@@ -24,7 +24,7 @@ for mod in (RM, WR):
     mod.DEG_DDA_FACES = 1
     mod.DEG_HD_BUDGET = 2
 
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("present.fj", "projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 cfg = Config()

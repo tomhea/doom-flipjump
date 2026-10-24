@@ -50,7 +50,7 @@ tmp = Path(tempfile.mkdtemp())
 src = tmp / "m.fj"
 src.write_text("\n".join(lines) + "\n", encoding="utf-8")
 out = tmp / "m.fjm"
-fj.assemble([(ROOT / "src/fj/fixed_point.fj").resolve(), src.resolve()], out,
+fj.assemble([src.resolve()], out,
             memory_width=W, print_time=False)
 io = FixedIO(bytes([0xD0]))
 fj.run(out, io_device=io, print_time=False, print_termination=False)

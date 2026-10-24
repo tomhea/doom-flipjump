@@ -124,15 +124,6 @@ MUTATIONS = [
      "if (floorz - here_floor) << 16 > MAX_STEP:",
      "if (floorz - here_floor) > MAX_STEP:",
      "tests/host/test_reference_model_more.py"),
-    # The thirteenth added host test (c76f6c4) is structural: it re-derives the Z premise from
-    # the real fj text, so what must redden it is a REAL narrowing, not a python constant. This
-    # is the shape Z2 shipped in the three table readers, one nibble short -- the clear then
-    # starts above where the mov stops, and the top of `ptr` keeps the last entry's address.
-    ("fixed_point: the narrowed pointer clear is one nibble short",
-     "src/fj/fixed_point.fj",
-     "        .zero w/4 - idx_n, ptr + idx_n*dw\n        .mov idx_n, ptr, idx\n        .mul_const w/4, ptr, ptr, nb*dw",
-     "        .zero w/4 - idx_n - 1, ptr + (idx_n + 1)*dw\n        .mov idx_n, ptr, idx\n        .mul_const w/4, ptr, ptr, nb*dw",
-     "tests/host/test_narrowed_clear_sites.py"),
 ]
 
 # R9 -- THE HARNESS'S OWN NEGATIVE CONTROL, run by --selftest. Changing a COMMENT cannot change
@@ -154,9 +145,9 @@ INERT = ("control: a comment-only edit must NOT be caught",
 # tree, and a file that arrives after this line is written is in it by construction.
 #
 # tests/fj is out of scope ON PURPOSE: mutcheck runs one pytest per mutation and every fj test
-# assembles a program (test_table_reader_ptr_clear.py is 65 s alone), which would make the suite
-# unrunnable at the cadence it is used. The fj side's own discrimination is asserted inside that
-# file instead.
+# assembles a program (one table-reader fj test was 65 s alone), which would make the suite
+# unrunnable at the cadence it is used. The fj side's own discrimination is asserted inside the fj
+# tests instead.
 ADDED_TESTS_BASE = "main"
 
 

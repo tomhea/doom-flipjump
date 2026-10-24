@@ -76,7 +76,7 @@ def _run(tmp, name, program, feed, sim=False):
     if sim:                                             # sim.jump16 and its constants
         from doomfj.config import Config
         extra = [Config().emit_fj_consts(tmp / "fj_consts.fj").resolve()]
-    fj.assemble([*extra, (FJ / "fixed_point.fj").resolve(), *([(FJ / "sim.fj").resolve()] if sim else []),
+    fj.assemble([*extra, *([(FJ / "sim.fj").resolve()] if sim else []),
                  src.resolve()], out, memory_width=W, print_time=False)
     io = FixedIO(feed + bytes([0]))
     fj.run(out, io_device=io, print_time=False, print_termination=False)
@@ -580,7 +580,7 @@ class Line:
         src.write_text(prog, encoding="utf-8")
         out = tmp / ("%s.fjm" % name)
         consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
-        fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), src.resolve()],
+        fj.assemble([consts.resolve(), (FJ / "sim.fj").resolve(), src.resolve()],
                     out, memory_width=W, print_time=False)
         for d, si in enumerate(w.door_order):          # every door fully open in the model too (the fj's dstate)
             w.ws.d_state[d] = w.door_nstates[si] - 1

@@ -13,7 +13,6 @@ from doomfj.wall_renderer import hoisted_scratch_fj
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
 FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")
 M = 0xFFFFFFFF
 
 KS = [0, 0x10000, 0xFFFF0000,                      # the fast path: 0, +1.0, -1.0
@@ -47,7 +46,7 @@ def _run(tmp_path, src):
     p = tmp_path / "axis.fj"
     p.write_text(prog, encoding="utf-8")
     return fj.assemble_and_run_test_output(
-        [consts.resolve(), FIXED_POINT_FJ.resolve(), p_src.resolve(), FRAME_RENDER_FJ.resolve(), p.resolve()],
+        [consts.resolve(), p_src.resolve(), FRAME_RENDER_FJ.resolve(), p.resolve()],
         b"", expected, memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
 
 

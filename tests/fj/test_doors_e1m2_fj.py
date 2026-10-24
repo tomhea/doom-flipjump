@@ -59,7 +59,7 @@ def _run(tmp, name, program, feed):
     src.write_text(program, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
     out = tmp / (name + ".fjm")
-    fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), src.resolve()],
+    fj.assemble([consts.resolve(), (FJ / "sim.fj").resolve(), src.resolve()],
                 out, memory_width=W, print_time=False)
     io = FixedIO(feed + bytes([0]))
     fj.run(out, io_device=io, print_time=False, print_termination=False)
@@ -286,7 +286,7 @@ def _contact_run(tmp_path, dp, doors, radius, pts, texts=None):
     src.write_text(contact_program(dp, doors, radius, texts), encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     out = tmp_path / "ct.fjm"
-    fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), src.resolve()],
+    fj.assemble([consts.resolve(), (FJ / "sim.fj").resolve(), src.resolve()],
                 out, memory_width=W, print_time=False)
     io = FixedIO(feed + bytes([0]))
     fj.run(out, io_device=io, print_time=False, print_termination=False)

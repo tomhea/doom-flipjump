@@ -19,7 +19,6 @@ from doomfj.texturecompiler import _index_nibbles, colormap_values
 from doomfj.wad import WadFile
 from flipjump.interpreter.io_devices.FixedIO import FixedIO
 
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj").resolve()
 PRESENT_FJ = Path("src/fj/present.fj").resolve()
 STREAM_RENDER_FJ = Path("src/fj/stream_render.fj").resolve()
 ASSET = "tests/fixtures/freedoom_assets.wad"
@@ -68,7 +67,7 @@ def run_ops(n, reps, byte_table, cm_table, idx_n, tmp):
     p = tmp / "m.fj"
     p.write_text(main, encoding="utf-8")
     out = tmp / "m.fjm"
-    fj.assemble([consts.resolve(), FIXED_POINT_FJ, PRESENT_FJ, STREAM_RENDER_FJ, p],
+    fj.assemble([consts.resolve(), PRESENT_FJ, STREAM_RENDER_FJ, p],
                 out, memory_width=W, print_time=False)
     term = fj.run(out, io_device=FixedIO(b""), print_time=False, print_termination=False)
     return term.op_counter

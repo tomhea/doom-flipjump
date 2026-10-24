@@ -1,8 +1,8 @@
-"""fj<->host parity for src/fj/fixed_point.fj (F2).
+"""fj<->host parity for the stl's fixed-point macros and constant-array reads (F2).
 
 For each op a single fj program runs all cases and prints the results; the expected bytes are
 computed by the host mirror (src/doomfj/fixedpoint.py). Byte-exact equality proves the kept PR #1
-macros match the host math bit-for-bit (M2 exit / R6). read_table is covered every-entry +
+macros match the host math bit-for-bit (M2 exit / R6). read_entry is covered every-entry +
 call-twice (R5 #8)."""
 from pathlib import Path
 
@@ -11,7 +11,6 @@ import flipjump as fj
 from doomfj.fixedpoint import fixed_mul, fixed_div, mul_const
 from doomfj.harness import W
 
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")
 
 
 def _run(tmp_path, name, body, data, expected: bytes):
@@ -19,7 +18,7 @@ def _run(tmp_path, name, body, data, expected: bytes):
     p = tmp_path / f"{name}.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), p.resolve()], b"", expected,
+        [p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, f"{name}: fj output != host mirror"
 
@@ -99,29 +98,29 @@ def test_mul_const_parity(tmp_path):
     _run(tmp_path, "mul_const", body, data, expected)
 
 
-def test_read_table_byte_every_entry_call_twice(tmp_path):
-    """read_table_byte: packed-byte LUT (one data-op per entry). Read EVERY entry TWICE (R5 #8) —
+def test_read_entry_byte_every_entry_call_twice(tmp_path):
+    """read_entry_byte: packed-byte LUT (one data-op per entry). Read EVERY entry TWICE (R5 #8) —
     catches result-reg / pointer cleanup bugs — byte-exact vs the table contents."""
     entries = [0x00, 0x7F, 0xAB, 0xFF]
     body, data = [], []
     for k in range(len(entries)):
         for _ in range(2):
-            body += [f"hex.read_table_byte d, btbl, 2, i{k}", "hex.print_as_digit 2, d, 0", "stl.output 10"]
+            body += [f"hex.read_entry_byte d, btbl, 2, i{k}", "hex.print_as_digit 2, d, 0", "stl.output 10"]
         data.append(f"i{k}: hex.vec 2, {k}")
     data += ["d: hex.vec 2", "btbl:"] + [f"    ;{hex(v)} * dw" for v in entries]
     expected = "".join(f"{v:02x}\n{v:02x}\n" for v in entries).encode()
-    _run(tmp_path, "read_table_byte", body, data, expected)
+    _run(tmp_path, "read_entry_byte", body, data, expected)
 
 
-def test_read_table_every_entry_call_twice(tmp_path):
+def test_read_entry_every_entry_call_twice(tmp_path):
     # hand-built 4-entry hex[:8] table; read EVERY entry, TWICE (R5 #8: catches result-reg /
     # in-table-jumper cleanup bugs). idx is a 2-nibble index.
     entries = [0x11111111, 0x22222222, 0xABCDEF01, 0xFFFFFFFF]
     body, data = [], []
     for k in range(len(entries)):
         for _ in range(2):  # call twice per entry
-            body += [f"hex.read_table 8, d, tbl, 2, i{k}", "hex.print_as_digit 8, d, 0", "stl.output '\\n'"]
+            body += [f"hex.read_entry 8, d, tbl, 2, i{k}", "hex.print_as_digit 8, d, 0", "stl.output '\\n'"]
         data.append(f"i{k}: hex.vec 2, {k}")
     data += ["d: hex.vec 8", "tbl:"] + [f"    hex.vec 8, {hex(v)}" for v in entries]
     expected = "".join(f"{v:08x}\n{v:08x}\n" for v in entries).encode()
-    _run(tmp_path, "read_table", body, data, expected)
+    _run(tmp_path, "read_entry", body, data, expected)

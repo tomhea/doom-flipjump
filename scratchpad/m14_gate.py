@@ -39,7 +39,7 @@ from doomfj.wireformat import (BINDING_DIRTY, encode_bindings, encode_feed,
                               encode_feed_mapunits, encode_things, encode_visibility, keys_dict)
 from tests.fj.stream_screen import StreamScreen
 
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("present.fj", "projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj", "sim.fj")]
 # the M14-a certified op counts (dec wire), in VPS order -- the baseline the bin wire is diffed

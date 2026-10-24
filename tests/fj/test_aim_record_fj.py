@@ -212,7 +212,7 @@ def _run(tmp_path, name, mut=None, barrels=False, wide=False):
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
     from pathlib import Path
     fjdir = Path(__file__).resolve().parents[2] / "src" / "fj"
-    fj.assemble([consts.resolve(), (fjdir / "fixed_point.fj").resolve(), (fjdir / "frame_render.fj").resolve(),
+    fj.assemble([consts.resolve(), (fjdir / "frame_render.fj").resolve(),
                  (fjdir / "projection.fj").resolve(), src.resolve()], out, memory_width=W, print_time=False)
     recs = _records(barrels=barrels, wide=wide)
     feed = b""

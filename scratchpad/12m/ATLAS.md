@@ -181,7 +181,7 @@ stl machinery that this line asked for, so this is the line that has to change.
 
 ## Per call SITE -- the innermost (caller file:line -> macro) pairs
 
-f<i> is the i-th file passed to the assembler: f1=fj_consts, f2=fixed_point, f3=present, f4=projection, f5=frame_render, f6=plane_render, f7=plane_bands, f8=stream_render, f9=e1m1_00_entry, f10=e1m1_01_tables, f11=e1m1_02_main, f12=e1m1_03_segconsts, f13=e1m1_04_walk, f14=e1m1_05_state, f15=e1m1_06_banks
+f<i> is the i-th file passed to the assembler: f1=fj_consts, f2=stl-fixedpoint, f3=present, f4=projection, f5=frame_render, f6=plane_render, f7=plane_bands, f8=stream_render, f9=e1m1_00_entry, f10=e1m1_01_tables, f11=e1m1_02_main, f12=e1m1_03_segconsts, f13=e1m1_04_walk, f14=e1m1_05_state, f15=e1m1_06_banks
 
 | site | macro | median frame | share |
 |---|---|---:|---:|

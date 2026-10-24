@@ -40,7 +40,7 @@ ap.add_argument("--set", default="scratchpad/_m1_final_set.json.gz")
 args = ap.parse_args()
 
 _SRC_FJ = ROOT / "src/fj"
-INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
+INCLUDES = ["present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
             "plane_bands.fj", "stream_render.fj", "sim.fj"]
 PARTS = ["e1m1_00_entry.fj", "e1m1_01_tables.fj", "e1m1_02_main.fj", "e1m1_03_segconsts.fj",
          "e1m1_04_walk.fj", "e1m1_05_state.fj", "e1m1_06_banks.fj", "e1m1_07_reset.fj"]

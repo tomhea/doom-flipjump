@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from micro import compare, price                                       # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-FILES = [ROOT / "src/fj/fixed_point.fj"]
+FILES = []
 NL = chr(10)
 
 

@@ -212,7 +212,7 @@ def _run(tmp, w, samples, name, mut=None):
     src.write_text(prog, encoding="utf-8")
     out = tmp / ("%s.fjm" % name)
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
-    fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), src.resolve()],
+    fj.assemble([consts.resolve(), (FJ / "sim.fj").resolve(), src.resolve()],
                 out, memory_width=W, print_time=False)
     feed = b""
     for kind, px, py, qx16, qy16, b, doors, lifts, sw in samples:

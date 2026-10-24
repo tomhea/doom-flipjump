@@ -22,7 +22,7 @@ from doomfj.wireformat import encode_feed_mapunits
 from tests.fj.stream_screen import StreamScreen
 
 SRC = [Path("src/fj") / f for f in
-       ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
+       ("present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
         "plane_bands.fj", "stream_render.fj")]
 ROOM = "tests/fixtures/square_room.wad"
 ASSET = "tests/fixtures/freedoom_assets.wad"

@@ -29,7 +29,7 @@ UNITS = [
     ("fj-projection", ["src/fj/projection.fj"], "high"),
     ("fj-stream_render", ["src/fj/stream_render.fj"], "high"),
     ("fj-planes-misc", ["src/fj/plane_bands.fj", "src/fj/plane_render.fj",
-                        "src/fj/present.fj", "src/fj/fixed_point.fj"], "high"),
+                        "src/fj/present.fj"], "high"),
     ("py-reference_model", ["src/doomfj/reference_model.py"], "high"),
     ("py-wall_renderer", ["src/doomfj/wall_renderer.py"], "high"),
     ("py-lut_generator", ["src/doomfj/lut_generator.py"], "high"),

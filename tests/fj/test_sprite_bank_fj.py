@@ -60,7 +60,7 @@ from doomfj.texturecompiler import _index_nibbles
 from doomfj.wad import WadFile
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("present.fj", "projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 CFG = Config()

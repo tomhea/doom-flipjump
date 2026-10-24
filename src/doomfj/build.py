@@ -31,7 +31,7 @@ from doomfj.wall_renderer import (BBOX_CULL, DEG, SPR_BLOCK_STRIDE, STACK_STEPS,
 
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
-_RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj"]
+_RENDERER_INCLUDES = ["present.fj", "projection.fj", "frame_render.fj", "plane_render.fj"]
 # ... plus these two for raster_mode="lines" (the shipping tier): the packed-byte ceiling/floor BAND
 # lists pass-1 builds, and the draw_collines present (screenwire) that replaces the framebuffer raster.
 _LINES_INCLUDES = ["plane_bands.fj", "stream_render.fj"]

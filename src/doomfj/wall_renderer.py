@@ -4,7 +4,7 @@ space optimization (M12oo pass-2 trampoline, M12pp/qq xor_by + xor-involution wa
 emitter, so build_doom inherits them for free.
 
 `emit_wall_renderer(wad, mapname, cfg)` returns the renderer `main` fj text; assemble it with the fixed
-include set [fj_consts, fixed_point, present, projection, frame_render, <main>]. The viewpoint is read from
+include set [fj_consts, present, projection, frame_render, <main>]. The viewpoint is read from
 stdin at runtime (`vx vy va`, signed decimal) so ONE assembled binary renders any E1M1 viewpoint — exactly
 the two-pass runtime renderer (B'): a runtime BSP-walk pass 1 fills the per-column param arrays, then the
 unrolled pass 2 rasters them through the shared-compare trampoline.
@@ -1697,7 +1697,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
              + ["    hex.vec 16, 0"] * mobiles)
     text = "\n".join([
         # M14-perf: HOT (everything a reject can reach) and COLD (what only a drawn sprite needs).
-        # See doomfj.things -- 94.1% of loads are rejected, and read_table_packed is linear in the
+        # See doomfj.things -- 94.1% of loads are rejected, and read_entry_packed is linear in the
         # row width, so the cold half is now read only by the 5.9% that survive.
         generate_packed_lut_fj("throw", [_pack(hot_row(r), THING_ROW_HOT_BYTES) for r in rows],
                                THING_ROW_HOT_LEN),
@@ -2487,7 +2487,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     sdrecip = (generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(),
                                           index_nibbles=3, result_nibbles=6))
     # M13-SRDISP: the SAME lever, FOURTH application. `proj.scale_recip_div` opens with a
-    # `read_table_packed 3` of `slopediv_recip` (~247@), and it runs twice per pass-2 seg, twice
+    # `read_entry_packed 3` of `slopediv_recip` (~247@), and it runs twice per pass-2 seg, twice
     # per step-face seg and once per projected thing.
     srdisp = (generate_dispatch_table_fj("srdisp", slopediv_recip_table(),
                                          index_nibbles=3, result_nibbles=6))
@@ -2499,7 +2499,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     xtadisp = (generate_dispatch_table_fj("xtadisp", xtoviewangle_table(cfg.VIEW_W, cfg.TRIG_N),
                                           index_nibbles=2, result_nibbles=8))
     # M13-VTXDISP: the SAME lever, fifth application -- and the largest one left. `proj.angle_to_x`
-    # opens with a `hex.read_table_packed 4` of `viewangletox` and runs TWICE per in-frustum seg
+    # opens with a `hex.read_entry_packed 4` of `viewangletox` and runs TWICE per in-frustum seg
     # inside `wall_x_range_m`. MEASURED on the macro itself with only the `disp` flag changed, both
     # arms vacuity-checked (scratchpad/ca2_price.py): 8,827.7 -> 1,809.5 ops/call, 7,018.2 saved.
     # 2,048 entries at 8 nibbles -> ~41k words, against an 85.5M-word span.
@@ -3505,7 +3505,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # baked call sites gate themselves individually below.
             # ⚠ the leaf's FLOOR and LIGHT-ROW BASE go with it, as baked constants. Both are
             # properties of this subsector and fixed at level load, so reading them from tables
-            # inside thing_load meant three `read_table_packed`s PER THING for values constant
+            # inside thing_load meant three `read_entry_packed`s PER THING for values constant
             # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
             _m_fl = _leaf_mover(s)
             _l_lt = _leaf_light(s)                     # M8: an animated light's leaf takes its base from the state

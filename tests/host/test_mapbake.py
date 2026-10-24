@@ -26,7 +26,6 @@ PROJECTION_FJ = Path("src/fj/projection.fj")             # provides proj.point_o
 # M1-HOIST: projection.fj's macros now name hoisted globals in their `<` lists, so any program
 # that expands them standalone must declare those too. ONE source with the emitter (R6).
 from doomfj.wall_renderer import hoisted_scratch_fj    # noqa: E402
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")           # provides hex.mul_low (point_on_side_leaf's cross product)
 FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")         # provides hex.sub 10, (Idea 14: point_on_side_leaf's signed subtract)
 
 
@@ -199,7 +198,7 @@ def _run_bsp_walk(tmp_path, name, cmap, vx, vy):
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     expected = "".join(f"{ss:04x}\n" for ss in ReferenceModel().bsp_render_order(cmap, vx, vy)).encode()
     ok = fj.assemble_and_run_test_output(
-        [consts.resolve(), FIXED_POINT_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [consts.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, f"{name} @ ({vx},{vy}): emitted BSP order != bsp_render_order"
 
@@ -244,7 +243,7 @@ def test_bsp_code_e1m1_order_byte_exact_vs_oracle(tmp_path):
     out = tmp_path / "e1m1_bsp.fjm"
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     t = time.perf_counter()
-    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], out, memory_width=W, print_time=False)
+    fj.assemble([consts.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], out, memory_width=W, print_time=False)
     assemble_s = time.perf_counter() - t
     assert assemble_s < 120, f"E1M1 BSP-as-code assemble {assemble_s:.0f}s exceeds the R-2 CI guard"
     rm = ReferenceModel()
@@ -271,7 +270,7 @@ def test_bsp_code_e1m1_order_byte_exact_vs_oracle(tmp_path):
     pb = tmp_path / "e1m1_bsp_bad.fj"
     pb.write_text(bad, encoding="utf-8")
     outb = tmp_path / "e1m1_bsp_bad.fjm"
-    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(),
+    fj.assemble([consts.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(),
                  pb.resolve()], outb, memory_width=W, print_time=False)
     parted = [v for v in views if not fj.run_test_output(
         outb, f"{v[0]}\n{v[1]}\n".encode(),
@@ -312,7 +311,7 @@ def test_bsp_code_node_consts_self_zero_after_walk(tmp_path):
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     ok = fj.assemble_and_run_test_output(
-        [consts.resolve(), FIXED_POINT_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", b"0" * 38,
+        [consts.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", b"0" * 38,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "node partition consts did not self-zero after the walk (broken xor-involution)"
 
@@ -389,7 +388,7 @@ def test_bsp_descend_point_location_exact_vs_oracle(tmp_path):
         p = tmp_path / f"{name}.fj"
         p.write_text(text + "dscleaf: hex.vec 4\n", encoding="utf-8")
         out = tmp_path / f"{name}.fjm"
-        fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(),
+        fj.assemble([consts.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(),
                      p.resolve()], out, memory_width=W, print_time=False)
         # one point a run (as the walk test above): the program stops after its walk
         return all(fj.run_test_output(out, f"{x}\n{y}\n".encode(), f"{rm.point_in_subsector(cmap, x, y):04x}\n".encode(),

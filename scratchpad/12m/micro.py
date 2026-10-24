@@ -35,7 +35,7 @@ import flipjump.assembler.assembler as _asm                              # noqa:
 from flipjump.interpreter.io_devices.FixedIO import FixedIO              # noqa: E402
 from doomfj.harness import W                                             # noqa: E402
 
-DEFAULT_FILES = [ROOT / "src/fj/fixed_point.fj"]
+DEFAULT_FILES = []
 
 
 def _assemble(text, tmp, name, files):

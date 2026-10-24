@@ -73,12 +73,12 @@ WRITE_FIRST = {
     "hex.input":      {1: [0], 2: [1]},
     # Project macros, each checked against its body before being added here -- a wrong entry
     # silently drops a cell that IS read, and the symptom is a corrupted later frame:
-    #   read_table_packed nb, dst, table, idx_n, idx  -> `rep(nb,k) .read_byte_and_inc dst+..`,
-    #        and read_byte zeroes its destination (fixed_point.fj:178-183)
+    #   read_entry_packed nb, dst, table, idx_n, idx  -> `rep(nb,k) .read_byte_and_inc dst+..`,
+    #        and read_byte zeroes its destination (the stl's read_pointers.fj)
     #   fixed_mul_low n, f, dst, a, b                 -> ends `.mov n, dst, product+f*dw`, and dst
     #        appears nowhere earlier in the body (the stl's hex/mul.fj)
     #   sim.fix16 dst, src                            -> `hex.zero 8, dst` first (sim.fj:48-50)
-    "hex.read_table_packed": {5: [1]},
+    "hex.read_entry_packed": {5: [1]},
     "hex.fixed_mul_low":      {5: [2]},
     "sim.fix16":             {2: [0]},
 }
@@ -179,18 +179,18 @@ def first_use(macro, local):
 
 # CONTROL 2: hand-checked anchors, plus the safe-direction property.
 # ⚠ My first version asserted `sim.check_line.rrow` was READ. It is not -- it is filled by
-# `hex.read_table_packed 22, rrow, ...`, which writes every one of its 44 cells. The control fired
+# `hex.read_entry_packed 22, rrow, ...`, which writes every one of its 44 cells. The control fired
 # and the EXPECTATION was what was wrong. Anchors are only worth having if a failure sends you back
 # to the source rather than to the code.
 # ⚠ 2026-08-24: it fired a SECOND time, and again the expectation was stale rather than the
 # parser. bdf1f1a hoisted check_line's scratch to named globals, so `rrow` no longer exists and
 # the anchor reported '(no use found -> default READ)'. The cell is now `cl_rest`, filled by the
-# same statement -- `hex.read_table_packed 14, cl_rest, lnrow, n_ln, li` -- so the hand-checked
+# same statement -- `hex.read_entry_packed 14, cl_rest, lnrow, n_ln, li` -- so the hand-checked
 # claim is unchanged: 14 bytes = 28 cells, all written before any read.
 for mac, loc, want in (("hex.scmp", "ba", "write"),          # .mov n, ba, a
                        ("hex.scmp", "bb", "write"),          # .mov n, bb, b
                        ("hex.fixed_mul_low", "product", "write"),  # .zero n+f, product
-                       ("sim.check_line", "cl_rest", "write"),   # read_table_packed fills all 28
+                       ("sim.check_line", "cl_rest", "write"),   # read_entry_packed fills all 28
                        # ⚠ THE TWO BELOW EXIST TO COVER classify()'s DECLARATION-SKIP BRANCH, and
                        # CR 2026-08-25 proved the other four do not. Deleting that branch left all
                        # of scmp.ba/bb, fixed_mul_low.product and check_line.cl_rest still passing: in
@@ -201,7 +201,7 @@ for mac, loc, want in (("hex.scmp", "ba", "write"),          # .mov n, ba, a
                        # needs an anchor whose first body mention IS its `hex.vec`. Both of these
                        # are @-locals, so unlike cl_rest they are pairs the production path really
                        # does route through first_use().
-                       ("frame.thing_load_cold", "rowc", "write"),  # `rowc: hex.vec 10` THEN read_table_packed 5
+                       ("frame.thing_load_cold", "rowc", "write"),  # `rowc: hex.vec 10` THEN read_entry_packed 5
                        ("sim.point_side", "ax", "write")):          # `ax: hex.vec 8`  THEN hex.mov 8, ax, x
     got, why = first_use(mac, loc)
     assert got == want, (f"CONTROL 2 FAILED: {mac}.{loc} classified {got}, expected {want} "

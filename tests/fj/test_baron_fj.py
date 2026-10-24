@@ -64,7 +64,7 @@ def _s32(v):
     return v - (1 << 32) if v >> 31 else v
 
 
-def _run_prog(tmp_path, name, prog, want, feed=b"", extra=("fixed_point.fj", "sim.fj")) -> bool:
+def _run_prog(tmp_path, name, prog, want, feed=b"", extra=("sim.fj",)) -> bool:
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
@@ -653,7 +653,7 @@ def _thrust_run(tmp_path, name, mut=None) -> bool:
                "cpx: hex.vec 8", "cpy: hex.vec 8", "cp_floor: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8"])
     prog = "\n".join(body + ["stl.loop"] + data) + "\n" + hoisted_scratch_fj()
     return _run_prog(tmp_path, name, prog, _thrust_expected(records),
-                     extra=("fixed_point.fj", "projection.fj", "frame_render.fj"))
+                     extra=("projection.fj", "frame_render.fj"))
 
 
 def test_the_thrust_records_reverse_and_not():

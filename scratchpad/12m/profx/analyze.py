@@ -140,7 +140,7 @@ def cmd_sub(prefix, oid):
 
 
 FAMILIES = ["hex.ptr_index", "hex.read_byte", "hex.write_byte", "hex.read_hex", "hex.write_hex",
-            "hex.read_byte_and_inc", "hex.read_table_packed", "hex.mul", "hex.mul_const", "hex.mul_low",
+            "hex.read_byte_and_inc", "hex.read_entry_packed", "hex.mul", "hex.mul_const", "hex.mul_low",
             "hex.fixed_mul_low", "hex.cmp", "hex.scmp", "hex.mov", "hex.sparse_mov", "hex.add", "hex.sub",
             "hex.add_constant", "hex.xor", "hex.zero", "hex.set", "hex.if0", "hex.if_flags", "hex.inc", "hex.dec",
             "hex.shl_hex", "hex.shr_hex", "hex.shl_bit", "hex.shr_bit", "hex.div", "sim.thing_load",
@@ -159,11 +159,11 @@ FAMILIES = ["hex.ptr_index", "hex.read_byte", "hex.write_byte", "hex.read_hex", 
 
 # the label table's file indices (fN) on the game tier, for printing call sites (cosmetic)
 _GEN = "build/generated_" + default_fjm().stem
-FILES = {"f2": "src/fj/fixed_point.fj", "f4": "src/fj/projection.fj", "f5": "src/fj/frame_render.fj",
-         "f8": "src/fj/stream_render.fj", "f9": "src/fj/input.fj", "f10": "src/fj/sim.fj",
-         "f12": _GEN + "/e1m1_01_tables.fj", "f13": _GEN + "/e1m1_02_main.fj",
-         "f14": _GEN + "/e1m1_03_segconsts.fj", "f15": _GEN + "/e1m1_04_walk.fj",
-         "f17": _GEN + "/e1m1_06_banks.fj", "f18": "src/fj/m1_reset.fj", "f19": _GEN + "/e1m1_07_reset.fj"}
+FILES = {"f3": "src/fj/projection.fj", "f4": "src/fj/frame_render.fj",
+         "f7": "src/fj/stream_render.fj", "f8": "src/fj/input.fj", "f9": "src/fj/sim.fj",
+         "f11": _GEN + "/e1m1_01_tables.fj", "f12": _GEN + "/e1m1_02_main.fj",
+         "f13": _GEN + "/e1m1_03_segconsts.fj", "f14": _GEN + "/e1m1_04_walk.fj",
+         "f16": _GEN + "/e1m1_06_banks.fj", "f17": "src/fj/m1_reset.fj", "f18": _GEN + "/e1m1_07_reset.fj"}
 _SRC = {}
 
 

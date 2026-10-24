@@ -26,7 +26,6 @@ from fjprobe import Probe                                                  # noq
 ROOT = F.ROOT
 from doomfj.lut_generator import generate_dispatch_table_fj  # noqa: E402
 
-FIXED = ROOT / "src" / "fj" / "fixed_point.fj"
 SIM = ROOT / "src" / "fj" / "sim.fj"
 
 
@@ -534,7 +533,7 @@ def line_probes():
             "line %s cells: sim.line_test" % tag,
             body=xors + ["sim.line_test"] + xors,
             setup=_line_setup(), pre=LINE_PRE + ["hex.set 1, cp_ok, 1"],
-            data=base_data, files=[CONSTS, FIXED, SIM],
+            data=base_data, files=[CONSTS, SIM],
             verify=["hex.if0 1, cp_ok, gp_lv_blk"] + LINE_VERIFY, expected=exp, note=what))
         for swap in ((False, True) if row[8] in (ST_POSITIVE,) else (False,)):
             code, cdata = baked_line("gp_k_", row, "gp_lv_blk", "gp_k_nxt", swap=swap)
@@ -542,7 +541,7 @@ def line_probes():
                 "line %s baked%s" % (tag, " (const multiplier)" if swap else ""),
                 body=code + ["gp_k_nxt:", "gp_lv_blk:"], vbody=code + ["gp_k_nxt:"],
                 setup=_line_setup(), pre=LINE_PRE,
-                prelude=PRELUDE_PS if swap else [], data=base_data + cdata, files=[CONSTS, FIXED, SIM],
+                prelude=PRELUDE_PS if swap else [], data=base_data + cdata, files=[CONSTS, SIM],
                 verify=LINE_VERIFY, expected=exp, note=what))
     return out
 
@@ -761,7 +760,7 @@ def ptloc_probes():
     pre = ["gp_px.lookup ptx, _mcnt", "gp_py.lookup pty, _mcnt"]
     tables = d4("gp_px", px, 2, 10) + d4("gp_py", py, 2, 10)
     exp = lambda n: b"".join(le_bytes(pts[k & 255][2], 2) for k in range(n))   # noqa: E731
-    common = dict(pre=pre, tables=tables, prelude=PRELUDE_J16, data=decls, files=[CONSTS, FIXED],
+    common = dict(pre=pre, tables=tables, prelude=PRELUDE_J16, data=decls, files=[CONSTS],
                   verify=["hex.print 2, ptss"], expected=exp, extra_safe=("gp.jump16",))
     full = Probe("ptloc full descent (ptloc_walk)", body=["stl.fcall ptloc_walk, ptloc_ret"],
                  blob=ptloc + code, **common,

@@ -475,7 +475,7 @@ ns frame {
     // M14-perf: THE COLD HALF of a thing's row, read only once the thing is known to be VISIBLE.
     //
     // MEASURED: 20,832 of 22,146 loads (94.1%) are rejected by proj.project_thing, and
-    // hex.read_table_packed costs one read_byte_and_inc PER BYTE, so a rejected thing used to pay
+    // hex.read_entry_packed costs one read_byte_and_inc PER BYTE, so a rejected thing used to pay
     // for 5 row bytes and a whole second table lookup it never read. Nothing here is reachable
     // from any reject: sp_base/sp_base2/sp_dw are first touched by the bucket/block arithmetic
     // below, and sp_lt by the shade row -- all after `hex.if0 1, vis, ret`.
@@ -497,7 +497,7 @@ ns frame {
       rowc: hex.vec 10                                   // 5 bytes: base, base2, dw
       lti: hex.vec 4
       body:
-        hex.read_table_packed 5, rowc, throwc, n_th, sp_ti
+        hex.read_entry_packed 5, rowc, throwc, n_th, sp_ti
         hex.mov 4, sp_base,  rowc                        // byte 0
         hex.mov 4, sp_base2, rowc + 4*dw                 // byte 2
         hex.mov 2, sp_dw,  rowc + 8*dw                   // byte 4
@@ -507,7 +507,7 @@ ns frame {
         // does not merely read the wrong class -- it reads off the END of the table.
         hex.mov 4, lti, ss_ltb   // (hex.mov zeroes dst first)
         hex.add 4, lti, sp_ti                            // the index needs its OWN cell: a read
-        hex.read_table_packed ltw, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
+        hex.read_entry_packed ltw, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
     }
 
     // M7 P3.1: a monster VIEW drawn mirrored (the second half of a `TROOA2A8` lump) sets bit 7 of its

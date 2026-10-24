@@ -9,7 +9,7 @@
 // ==============================================================================================
 // F5 (projection kernels, M12m+) — the runtime projection math the fj wall renderer needs, each a
 // byte-exact mirror of the H5 oracle (src/doomfj/reference_model.py). The shared LUTs (tantoangle,
-// finesine, viewangletox, xtoviewangle, finetangent) are emitted as read_table data tables (M12l).
+// finesine, viewangletox, xtoviewangle, finetangent) are emitted as read_entry data tables (M12l).
 //
 // proj.slope_div (R_PointToAngle's SlopeDiv): dst[:3] = the tantoangle index for slope num/den.
 //   num, den are NON-NEGATIVE hex[:8] (16.16 magnitudes; the caller has abs'd them).
@@ -114,7 +114,7 @@ ns proj {
         // `point_to_angle`. So the shipped binary carried the dispatch table AND kept paying the
         // packed read for the same values. `disp` is compile-time; non-lines tiers have no
         // `sdrecip` and keep the packed read.
-        rep(1-disp, k) hex.read_table_packed 3, recip, slopediv_recip8, 3, den_norm  // recip8[m] = ((1<<24)//m) << 3
+        rep(1-disp, k) hex.read_entry_packed 3, recip, slopediv_recip8, 3, den_norm  // recip8[m] = ((1<<24)//m) << 3
         rep(disp, k) sdrecip.lookup recip, den_norm
 
         hex.zero 2, recip_wide + 6*dw   // only the HIGH 2: the mov below zeroes the low 6
@@ -149,11 +149,11 @@ ns proj {
     //   vector (x1,y1)->(x2,y2). All coords are 16.16 signed world units (the SlopeDiv tuning is
     //   scale-dependent). Octant-fold around proj.slope_div + a tantoangle lookup — no atan at runtime.
     //   Mirrors reference_model.point_to_angle EXACTLY (incl. DOOM's ±1 octant-boundary quirks, e.g.
-    //   due-N = ANG90-1). Reads the shared `tantoangle` LUT (M12l, read_table data table) by that label.
+    //   due-N = ANG90-1). Reads the shared `tantoangle` LUT (M12l, read_entry data table) by that label.
     //   Algorithm: dx=x2-x1, dy=y2-y1; fold to the major octant by sign+magnitude into
     //   idx = sxneg*4 + syneg*2 + (|dx|>|dy|); base = tantoangle[slope_div(min(|dx|,|dy|), max)];
     //   result = p2a_off[idx] (+ or -, per p2a_neg[idx]) base, mod 2^32. (0,0) -> 0.
-    //   @requires hex.init & stl.ptr_init   (read_table needs the pointer init)
+    //   @requires hex.init & stl.ptr_init   (read_entry needs the pointer init)
     def point_to_angle dst, x1, y1, x2, y2, disp \
             @ czero, dx_neg, dx_pos, dx_done, dy_neg, dy_pos, dy_done, dx_zero, both_zero, nonzero, dx_major, dy_major, numden_set, oct_lo4, oct_lo2, oct_hi4, oct0, oct1, oct2, oct3, oct4, oct5, oct6, oct7, done \
             < tantoangle, pta_c1, pta_c2, pta_c4, pta_c6, pta_den, pta_dx, pta_dy, pta_num, pta_oct_idx, pta_slope_idx, pta_tan_base {
@@ -204,9 +204,9 @@ ns proj {
         // ORPHANED TABLE, see slope_div above: `ttang` ships whenever `lines` and had no live
         // reader. Same values, same shape (index_nibbles=3, result_nibbles=8 vs pta_slope_idx: hex.vec 3
         // and pta_tan_base: hex.vec 8).
-        rep(1-disp, k) hex.read_table_packed 4, pta_tan_base, tantoangle, 3, pta_slope_idx   // shared LUT, M12l
+        rep(1-disp, k) hex.read_entry_packed 4, pta_tan_base, tantoangle, 3, pta_slope_idx   // shared LUT, M12l
         rep(disp, k) ttang.lookup pta_tan_base, pta_slope_idx
-        // M13-p2acrush: the octant offset+sign, previously two read_tables (8-nib ~10.4k + 1-nib)
+        // M13-p2acrush: the octant offset+sign, previously two read_entry calls (8-nib ~10.4k + 1-nib)
         // on pta_oct_idx, is now a 3-deep COMPARE TREE to 8 constant tails (same formulas, ~1k).
         // pta_oct_idx = sxneg*4 + syneg*2 + (|pta_dx|>|pta_dy|); the oracle's 8 returns (ANG90=0x40000000 etc.),
         // with `base` = pta_tan_base:
@@ -556,7 +556,7 @@ ns proj {
     //   angle+ANG90, divide dx by sin(that)=cos(atan(slope)). Mirrors reference_model.point_to_dist
     //   EXACTLY. Coords + result are 16.16. Reads the shared `tantoangle` LUT (M12l) + the `finesine`
     //   trig idiom (M6); exact for axis-aligned (dy=0 -> dist=dx), ~quantization off-axis. (0,0)->0.
-    //   @requires hex.init & stl.ptr_init   (read_table + finesine.read_sin)
+    //   @requires hex.init & stl.ptr_init   (read_entry + finesine.read_sin)
     def point_to_dist dst, viewx, viewy, x, y \
             @ dx, dy, swap_tmp, slope, slope_idx, angle, sine, czero, c_sloperange, cang90, \
               do_swap, no_swap, swapped, dx_zero, dx_nz, clamp_idx, keep_idx, \
@@ -590,7 +590,7 @@ ns proj {
       clamp_idx:
         hex.set 3, slope_idx, 0x800
       keep_idx:
-        hex.read_table_packed 4, angle, tantoangle, 3, slope_idx   // tantoangle[idx]
+        hex.read_entry_packed 4, angle, tantoangle, 3, slope_idx   // tantoangle[idx]
         hex.add 8, angle, cang90                        // angle = tantoangle[idx] + ANG90
         hex.shr_hex 8, 5, angle                         // finesine index = angle >> 20 bits (= 5 nibbles;
         hex.mov 3, slope_idx, angle                     //   32 - log2(TRIG_N=4096) = 20). low 3 nibbles.
@@ -700,7 +700,7 @@ ns proj {
         // M13-SRDISP (the D4 dispatch lever, 4th application): 3 x read_byte_and_inc (42@ each)
         // + a mul_const ~ 247@ becomes a ~20@ lookup. `disp` is a COMPILE-TIME flag, so the
         // non-lines tiers -- which have no `srdisp` table -- keep the packed read.
-        rep(1-disp, k) hex.read_table_packed 3, srd_recip, slopediv_recip, 3, srd_den_norm  // srd_recip[m]=(1<<24)//m
+        rep(1-disp, k) hex.read_entry_packed 3, srd_recip, slopediv_recip, 3, srd_den_norm  // srd_recip[m]=(1<<24)//m
         rep(disp, k) srdisp.lookup srd_recip, srd_den_norm
         // P7-1 (2026-09-04): the two `hex.zero 14` that stood here are dead. hex.mov ZEROES its
         // destination before xoring the source in (proved on the interpreter by moving into a
@@ -848,7 +848,7 @@ ns proj {
     //   ANG90) >> angle_shift(20), clamped to [0, len(viewangletox)-1 = 0x7FF = TRIG_N/2 - 1]; the result
     //   is the SIGNED column (2's-complement; off-screen ends carry the -1 / VIEW_W+1 sentinels). idx is
     //   unsigned so the low (max-0) clamp is automatic. Mirrors reference_model.angle_to_x EXACTLY.
-    //   @requires hex.init & stl.ptr_init   (read_table)
+    //   @requires hex.init & stl.ptr_init   (read_entry)
     def angle_to_x dst, angle, disp \
             @ angt, vtx_idx, cang90, cmaxidx, clampmax, keep, end \
             < viewangletox {
@@ -860,7 +860,7 @@ ns proj {
       clampmax:
         hex.set 3, vtx_idx, 0x7ff
       keep:
-        rep(1-disp, k) hex.read_table_packed 4, dst, viewangletox, 3, vtx_idx  // signed column (2s-complement)
+        rep(1-disp, k) hex.read_entry_packed 4, dst, viewangletox, 3, vtx_idx  // signed column (2s-complement)
         // M13-VTXDISP: the SAME lever C2 applied to tantoangle/slopediv_recip8, and the same
         // values -- viewangletox as a per-entry D4 dispatch. MEASURED on THIS macro with only the
         // `disp` flag changed, both arms vacuity-checked (scratchpad/ca2_price.py, log
@@ -1081,16 +1081,16 @@ ns proj {
     //   a FLOORED modulo (result in [0, tw) even for negative tcol). Implemented as an unsigned divide on
     //   |tcol| then, when tcol<0 and the remainder != 0, dst = tw - remainder (= Python's tcol % tw).
     //   Reads the M12l xtoviewangle (idx=column) + finetangent LUTs. Mirrors the oracle EXACTLY.
-    //   @requires hex.init & stl.ptr_init   (read_table x2)
+    //   @requires hex.init & stl.ptr_init   (read_entry x2)
     def texture_u dst, rw_centerangle, rw_offset, rw_distance, x, tw \
             @ ang, ft, prod, tcol, tcol_abs, quot, rem, ft_idx, czero, \
               tpos, tneg, rem_zero, rem_nz, baddiv, end \
             < xtoviewangle, finetangent {
-        hex.read_table_packed 4, ang, xtoviewangle, 2, x      // xtoviewangle[x]   (idx = screen column)
+        hex.read_entry_packed 4, ang, xtoviewangle, 2, x      // xtoviewangle[x]   (idx = screen column)
         hex.add 8, ang, rw_centerangle                 // ang = rw_centerangle + xtoviewangle[x]
         hex.shr_hex 8, 5, ang                          // ang >> angle_shift(20) = 5 nibbles
         hex.mov 3, ft_idx, ang                         //   low 3 nibbles = the finetangent index
-        hex.read_table_packed 4, ft, finetangent, 3, ft_idx   // ft = finetangent[idx]  (signed)
+        hex.read_entry_packed 4, ft, finetangent, 3, ft_idx   // ft = finetangent[idx]  (signed)
         hex.fixed_mul_low 8, 4, prod, ft, rw_distance      // prod = ft * rw_distance (signed)
         hex.mov 8, tcol, rw_offset
         hex.sub 8, tcol, prod                          // rw_offset - prod
@@ -1168,7 +1168,7 @@ ns proj {
         hex.inc 2, norm_shift
         ;recip_norm
       recip_norm_done:
-        hex.read_table_packed 3, recip_m, slopediv_recip, 3, scale_norm   // recip[m]  (m = low 3 nibbles)
+        hex.read_entry_packed 3, recip_m, slopediv_recip, 3, scale_norm   // recip[m]  (m = low 3 nibbles)
         hex.zero 3, iscale_pre + 5*dw   // only the HIGH 3: the mov below zeroes the low 5
         hex.mov 5, iscale_pre, recip_m
         hex.shl_hex 8, 2, iscale_pre                            // recip << 2 nibbles
@@ -1246,11 +1246,11 @@ ns proj {
     //   (x2-x1))). The render loop then walks `scale += scalestep_out` across the columns. Composes the
     //   xtoviewangle lookup + scale_from_global_angle (M12q) x2 + scalestep (M12u). x1/x2 are columns
     //   (read as 2-nibble indices into xtoviewangle). `projection` is the compile-time Config arg (R6).
-    //   Mirrors the oracle EXACTLY. @requires hex.init & stl.ptr_init   (read_table + finesine.read_sin)
+    //   Mirrors the oracle EXACTLY. @requires hex.init & stl.ptr_init   (read_entry + finesine.read_sin)
 
     // proj.wall_scale_setup_m — the LINES-mode wall_scale_setup (M13-XTADISP). Identical values and
     // identical output, but the two xtoviewangle reads go through the D4 per-entry DISPATCH table
-    // `xtadisp` (~20@) instead of hex.read_table_packed 4 (~289@ per the stl's documented
+    // `xtadisp` (~20@) instead of hex.read_entry_packed 4 (~289@ per the stl's documented
     // complexities, so ~15.6k ops saved per in-frustum seg). The same lever M13-ATANDISP applied to
     // tantoangle and slopediv_recip8; byte-exact by construction, same values.
     // x1/x2 are 2-nibble column indices in [0, VIEW_W] -- exactly the dispatch table's index width.
@@ -1944,7 +1944,7 @@ ns proj {
         .slope_div_m slope_idx, num, den
         rep(dsl, q) .slope_div_m slope_idx, num, den   // ablate: price the divide
         // M13-ATANDISP: tan_base = tantoangle[slope_idx] through the D4 per-entry DISPATCH table
-        // instead of `hex.read_table_packed 4` -- the stl's own complexities say that read is
+        // instead of `hex.read_entry_packed 4` -- the stl's own complexities say that read is
         // 4 x read_byte_and_inc (42@ each) + a mul_const = ~289@, the single most expensive
         // item in the atan; a dispatch lookup is ~3 hex.xor + zero + xor_zero. Same values,
         // so the frames stay byte-exact.

@@ -32,7 +32,7 @@ from doomfj.wall_renderer import _state_wire_lines
 from doomfj.wireformat import (MAGIC, STATE_BYTES, STATE_CMD, decode_state, encode_feed,
                                keys_dict)
 
-SRC = [Path("src/fj") / f for f in ("fixed_point.fj", "present.fj", "stream_render.fj")]
+SRC = [Path("src/fj") / f for f in ("present.fj", "stream_render.fj")]
 CFG = Config()
 RM = ReferenceModel(CFG)
 

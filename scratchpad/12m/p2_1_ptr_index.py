@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from micro import compare, show                                        # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
-FILES = [ROOT / "src/fj/fixed_point.fj"]   # frame_render.fj needs emitter constants;
+FILES = []   # frame_render.fj needs emitter constants;
 # the two chain macros it defines are copied verbatim into the prelude instead.
 
 CHAIN = """

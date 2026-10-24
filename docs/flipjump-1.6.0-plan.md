@@ -232,6 +232,16 @@ slower. The shared-table and `pad 64` variants lose. The consequence is an **ado
 `byte.emit` → `hex.output` on the low then the high nibble, judged by msframe (it adds about 8 ops of space per
 call site).
 
+### 3h0b. The pool and flat memory (owner, 2026-10-24) ⏳ after hunt round 3's fixes
+
+The spec is `scratchpad/ioapi/cr/pool_flat_spec.md`.
+
+- **The pool's maximum is `--flat-max-words`** (no new option). Its default is the automatic-flat threshold.
+- **The default base is the first 2^k above the program**, falling back to compact if the pool does not fit.
+- **Tables that do not fit stay inline**, counted.
+- **Python:** `flat_max_words` drives the pool too (`BlockPool.for_flat`); the combined helpers pass theirs.
+- **The proof:** w=64 + `--pool-tables` + flat runs flat, identical to the build without the pool.
+
 ### 3h1. Which tables to declare: by MERIT, not all (owner, 2026-10-24) ⏳ after hunt round 3
 
 The owner: relocate the tables the program spends its time in. Not too many; the ones with the most merit.

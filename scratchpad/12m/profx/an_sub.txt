@@ -39,7 +39,7 @@ object 11 seg_pass1_ts_leaf: 2,723,647,563 ops over the run = 2,723,647 per game
      2,024,360  74.33%  f13:l2203:frame.seg_pass1_leaf_body_ts(15)---f5:l1181:rep0:frame.ts_step_faces(10)
        463,265  17.01%  f13:l2203:frame.seg_pass1_leaf_body_ts(15)---f5:l1176:proj.wall_x_range_m(17)
         83,992   3.08%  f13:l2203:frame.seg_pass1_leaf_body_ts(15)---f5:l1172:proj.wedge_reject(13)
-        72,378   2.66%  f13:l2203:frame.seg_pass1_leaf_body_ts(15)---f5:l1229:rep0:frame.write_byte_and_inc_prearmed(2)
+        72,378   2.66%  f13:l2203:frame.seg_pass1_leaf_body_ts(15)---f5:l1229:rep0:hex.write_back(2)
         35,278   1.30%  f13:l2203:frame.seg_pass1_leaf_body_ts(15)---f5:l1222:rep0:hex.read_byte(2)
          7,995   0.29%  f13:l2203:frame.seg_pass1_leaf_body_ts(15)---f5:l1220:hex.cmp(6)
          5,843   0.21%  f13:l2203:frame.seg_pass1_leaf_body_ts(15)---f5:l1224:hex.if0(3)

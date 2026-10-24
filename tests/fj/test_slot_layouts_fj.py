@@ -1031,7 +1031,7 @@ MUTANTS = [
     ("the record's slot: a step inserted", "write", FR,
      "hex.write_byte_and_inc gps_ptr, trb_shade_row", "hex.ptr_inc gps_ptr" + _W + "hex.write_byte_and_inc gps_ptr, trb_shade_row"),
     ("the record's slot: a prearmed write", "write", FR,
-     "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw", "frame.write_byte_and_inc_prearmed gps_ptr, gps_yb8 + 2*dw"),
+     "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw", "hex.write_back gps_yb8 + 2*dw" + _W + "hex.ptr_inc gps_ptr"),
     ("the slot offset never added", "write", FR,
      "hex.add w/4, trb_tab_idx, trb_slot_ofs", "hex.zero w/4, trb_slot_ofs"),
     ("the slot offset bumped", "write", FR,
@@ -1049,7 +1049,7 @@ MUTANTS = [
      "hex.shl_bit w/4, gps_sidx" + _W + "hex.shl_bit w/4, gps_sidx", "hex.shl_bit w/4, gps_sidx" + _W + "hex.inc 1, gps_sidx + dw" + _W + "hex.shl_bit w/4, gps_sidx"),
     # the review's round-3 edits, exactly as posted
     ("r3: the record's first slot write prearmed", "write", FR,
-     "hex.write_byte_and_inc gps_ptr, gps_yb8" + _W, "frame.write_byte_and_inc_prearmed gps_ptr, gps_yb8" + _W),
+     "hex.write_byte_and_inc gps_ptr, gps_yb8" + _W, "hex.write_back gps_yb8" + _W + "hex.ptr_inc gps_ptr" + _W),
     ("r3: the slot index bumped through r + dw", "write", FR,
      "hex.set w/4, gps_sbase, gpslot" + _W + "hex.ptr_index gps_ptr", "hex.inc 1, gps_sidx + dw" + _W + "hex.set w/4, gps_sbase, gpslot" + _W + "hex.ptr_index gps_ptr"),
     ("r3: a one-nibble shift after the slot offset", "write", FR,
@@ -1058,7 +1058,7 @@ MUTANTS = [
     ("r3: the record's column shift two nibbles wide", "write", FR,
      "rep(slotstride/16, k) hex.shl_hex w/4, 1, trb_tab_idx", "rep(slotstride/16, k) hex.shl_hex 2, 1, trb_tab_idx"),
     ("r3: the record's block-lo write prearmed", "write", FR,
-     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W, "frame.write_byte_and_inc_prearmed trb_tbl_p, trb_blk" + _W),
+     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W, "hex.write_back trb_blk" + _W + "hex.ptr_inc trb_tbl_p" + _W),
     ("r3: the seed's column shift two nibbles wide", "read", FR, "hex.shl_hex w/4, 1, sidx ", "hex.shl_hex 2, 1, sidx "),
     # the review's round-4 edits
     ("r4: B allowed whatever ballow says", "write", FR,

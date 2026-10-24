@@ -232,6 +232,18 @@ slower. The shared-table and `pad 64` variants lose. The consequence is an **ado
 `byte.emit` → `hex.output` on the low then the high nibble, judged by msframe (it adds about 8 ops of space per
 call site).
 
+### 3h0-final. CONVERGE (owner, 2026-10-24): one more fix round, one final review, done
+
+1. **Hunt round 3 finishes its runs** (the corpus, the 600-case fuzzer and its controls) with no new attack work,
+   so every finding is known.
+2. **ONE fix round:** round 3's open cases (r3a/b/c number and bitwise arms, r3e an offset across a realigned pad,
+   r3g `(L|0)+15*dw`), everything the corpus and fuzzer add, AND 3h0b (the pool under `--flat-max-words`). Every
+   fix comes with its test.
+3. **ONE final review:** it confirms every fix and runs the corpus and fuzzer once.
+   - Any silent divergence it finds is fixed and tested in that same pass, with no further hunt round.
+   - MINOR items become follow-up issues.
+   - The pool is then closed → v4.
+
 ### 3h0b. The pool and flat memory (owner, 2026-10-24) ⏳ after hunt round 3's fixes
 
 The spec is `scratchpad/ioapi/cr/pool_flat_spec.md`.

@@ -201,6 +201,14 @@ fjdoom's gates and msframe decide (4f).
   (exhaustive small widths plus random sequences against a Python model) and measures timings (ops and wall time
   against today's pointer ops).
 - It gets its own short review loop, then a PR into 1.5.1. It may land **during** the owner's review.
+- **3e, the independent testing phase (2026-10-24): CORRECT.**
+  - 22,552 cases (880 random multi-step programs + 21,672 exhaustive carry-boundary windows at w=32/64, n = 1–32),
+    all equal to pre-C and to a Python model; every mutation control is caught.
+  - **Faster:** 0.13–0.75× the ops.
+  - **Smaller in all 72 configurations:** −818 ops/call at n=1; about 38% smaller at n=32, w=32.
+  - **One regression:** n = 0 used to fail to assemble and now silently corrupts. The fix (reject n < 1) is queued to
+    the implementer; aliasing the pointer variable gets documented as undefined.
+  - **Recommendation:** merge C after that fix.
 
 ### 3f. Byte output ✅ closed: no change to the stl
 

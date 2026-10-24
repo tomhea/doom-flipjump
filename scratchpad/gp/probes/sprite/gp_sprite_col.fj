@@ -304,7 +304,7 @@ ns gpspr {
         hex.read_byte_and_inc gps_smidx, gps_ptr
         hex.mov 4, gps_yabs, gps_ybase
         frame.add4_chain gps_yabs, gps_rel
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
         ;fast
       clipped:
@@ -319,16 +319,16 @@ ns gpspr {
         hex.if0 4, gps_yabs, cl_next
         hex.scmp 4, gps_yabs, gps_cvh, cl_emit, cl_fin, cl_clamp
       cl_emit:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
       cl_next:
         ;cl_loop
       cl_fin:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
         ;done
       cl_clamp:
-        byte.emit gps_cvh
+        hex.print gps_cvh
         cm.emit gps_smidx
       done:
     }
@@ -343,7 +343,7 @@ ns gpspr {
       ctake_clamp:
         hex.mov 2, ecl_ctake, fstart
       ctake_ok:
-        byte.emit x
+        hex.print x
         stream.wpx_grain_col gnrow, ecl_cmidx
         hex.set 2, ecl_ccy, centery
         hex.zero 2, ecl_full_lo
@@ -618,7 +618,7 @@ ns gpspr {
     // region 1 runs, and its step faces read stepcol through frame.step_shade (hex.read_byte, a
     // full arm to ANOTHER cluster) -- so the first read's predecessor arm is not in this block.
     // (The first version armed it narrow and painted wrong rows on heavy:gate664; t2_emit.py's
-    // PROP2 == TODAY check caught it.) byte.emit / cm.emit / the band and W1R walkers are
+    // PROP2 == TODAY check caught it.) hex.print / cm.emit / the band and W1R walkers are
     // dispatches that never arm, so every LATER read of the column follows a read of this block.
     def runs2 @ fast, fast_loop, fast_have, clipped, cl_loop, cl_have, chk_bot, cl_pos, cl_emit, cl_fin, cl_clamp, cl_next, done \
             < gps_ptr, gps_ybase, gps_top, gps_rel, gps_yabs, gps_smidx, gps_cvh {
@@ -635,7 +635,7 @@ ns gpspr {
         .read3_and_inc gps_smidx, gps_ptr
         hex.mov 2, gps_yabs, gps_ybase
         frame.add2_chain gps_yabs, gps_rel
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
         ;fast_loop
       clipped:
@@ -653,16 +653,16 @@ ns gpspr {
         hex.if0 4, gps_yabs, cl_next
         hex.scmp 4, gps_yabs, gps_cvh, cl_emit, cl_fin, cl_clamp
       cl_emit:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
       cl_next:
         ;cl_loop
       cl_fin:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
         ;done
       cl_clamp:
-        byte.emit gps_cvh
+        hex.print gps_cvh
         cm.emit gps_smidx
       done:
     }
@@ -676,7 +676,7 @@ ns gpspr {
       ctake_clamp:
         hex.mov 2, ecl_ctake, fstart
       ctake_ok:
-        byte.emit x
+        hex.print x
         stream.wpx_grain_col gnrow, ecl_cmidx
         hex.set 2, ecl_ccy, centery
         hex.zero 2, ecl_full_lo

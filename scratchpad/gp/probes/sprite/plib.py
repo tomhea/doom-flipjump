@@ -239,7 +239,6 @@ def common_decls():
 
 def emit_tables():
     return "\n".join([
-        generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
         generate_emit_dispatch_table_fj("cm", CMV, index_nibbles=_index_nibbles(len(CMV)),
                                         over_align=True)])
 

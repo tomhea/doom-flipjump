@@ -1006,7 +1006,7 @@ ratio always favours the smallest useful pad, and the budget favours breadth ove
 
 ⚠ Top sites are deep stl chains -- `hex.zero/hex.zero/hex.xor/hex.exact_xor`,
 `hex.cmp/hex.cmp_eq_next/hex.cmp/hex.xor/hex.exact_xor` -- so reaching them means threading a PAD
-parameter through `hex.zero`, `hex.mov`, `hex.xor`, `hex.cmp`, `byte.emit`. That is an stl ABI
+parameter through `hex.zero`, `hex.mov`, `hex.xor`, `hex.cmp`, `hex.print`. That is an stl ABI
 change (CLAUDE.md rule 4) and a CR into flipjump-151.
 
 **HONEST BOUND: this idea is worth ~0.8-1.1M (5-6.4%), not 3.2M.** It takes 16,038,392 to about

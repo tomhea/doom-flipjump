@@ -10,7 +10,7 @@ compare chain simulated against the oracle's own predicate -- never a restatemen
 What breaks in the shipped program if these stop holding:
 
 * `_per_entry_emit_table` -- `HSTRIDE` is written once (9) and the handler body is written
-  separately. Drift either way and every dispatch past entry 0 lands MID-handler: `byte.emit` /
+  separately. Drift either way and every dispatch past entry 0 lands MID-handler: `hex.print` /
   `cm.emit` are how every framebuffer byte leaves the program, so the present path emits garbage.
   Same argument for `_per_entry_table`'s wide-result `hstride = result_nibbles + 1`.
 * the emit handler's bit order -- `stl.output_bit (v >> bit) & 1`, lsb-first. Reverse it and every
@@ -111,7 +111,7 @@ def _split_handlers(text, terminator):
 
 
 # ---------------------------------------------------------------------------
-# generate_emit_dispatch_table_fj -- the byte-OUTPUT dispatch (byte.emit / cm.emit)
+# generate_emit_dispatch_table_fj -- the byte-OUTPUT dispatch (hex.print / cm.emit)
 # ---------------------------------------------------------------------------
 
 class TestEmitDispatchTable:
@@ -152,12 +152,12 @@ class TestEmitDispatchTable:
         assert got[1] == 0x01 and got[2] == 0x80, "the asymmetric pair pins the direction"
 
     def test_identity_byte_table_is_the_identity(self):
-        """The shipped `byte` table is `values=range(256)` -- the run-count emitter. If the
-        handler for entry d emitted anything but d, every run length in the picture is wrong."""
-        src = generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)
+        """An identity table (`values=range(256)`): if the handler for entry d emitted anything but d,
+        the generator's bit order or stride is wrong."""
+        src = generate_emit_dispatch_table_fj("ident", list(range(256)), index_nibbles=2)
         for d, ops in _split_handlers(src, _CLEANJ):
             bits = [int(m.group(1)) for m in map(_OUTBIT.match, ops) if m]
-            assert sum(b << i for i, b in enumerate(bits)) == d, "byte table entry %d" % d
+            assert sum(b << i for i, b in enumerate(bits)) == d, "identity table entry %d" % d
 
 
 class TestPerEntryValueTableStride:

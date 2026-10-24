@@ -22,7 +22,7 @@ from doomfj.lut_generator import (
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
     generate_slopediv_recip8_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
-    generate_emit_dispatch_table_fj, generate_emit_byte_by_nibbles_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
+    generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
 from doomfj.reference_model import STRAFE_MOVE                                   # M7 P4.1
 from doomfj.reference_model import (ANG90, ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_MOVE, MAX_STEP,
@@ -1904,7 +1904,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     list must therefore contain in this mode), decoded by `StreamScreen`. The framebuffer, the pass-2
     wall trampoline, and ALL plane-pass machinery (`render_planes_spans`/`draw_span*`/`clear_planes`)
     are NOT EMITTED in this mode; the `cm`-label table is the EMIT dispatch table (`cm.emit`, run
-    colours) plus the `byte.emit` identity table, replacing `compile_colormap`'s `cm.apply` table
+    colours) -- run lengths go out through the stl's `hex.print` -- replacing `compile_colormap`'s `cm.apply` table
     (same label — they cannot coexist, and nothing calls `cm.apply` here). Requires `wall_mode="W1"`
     and `floor_mode="flat"` (the only combination pS2 targets — W2's per-band wall lighting and
     textured floors are out of scope). ⚠ every column must be CLAIMED by pass-1 (a closed level
@@ -1951,7 +1951,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # Both render wrong on purpose -- measurement only.
     pnear_flag = 1 if (plane_near and "pnearcol" not in ablate) else 0
     # M13-EMIT rung 1 (measurement only): 1 = walk the baked band lists but emit no pairs (prices the
-    # two byte.emit dispatches), 2 = skip the band walks entirely (prices the whole per-pair path:
+    # two hex.print dispatches), 2 = skip the band walks entirely (prices the whole per-pair path:
     # two hex.read_byte_and_inc pointer reads + the loop + the dispatches). Renders wrong on purpose.
     eabl_flag = 2 if "emitnowalk" in ablate else (1 if "emitnopair" in ablate else 0)
     # M13-EMIT rung 3 (measurement only): run each seg's two vertex atans TWICE, the second time
@@ -1967,8 +1967,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     deg_flag = 1                                # 25M-CAP: load-adaptive degradation package
     # M14-b: the state wire. "dec" is the historical three-decimals-on-stdin viewpoint; "bin" is the
     # M14 round-trip format (doomfj.wireformat) -- 16.16 position + BAM + key byte in, state back
-    # out ahead of the frame. The echo goes out through `stream.emit_bytes4`, i.e. `byte.emit`,
-    # which only the run-stream modes bake a table for.
+    # out ahead of the frame. The echo goes out through `stream.emit_bytes4`, i.e. `hex.print`.
     # M14-e: the runtime thing table. Positions arrive on the wire after the player's state, so it
     # needs the binary wire; and there is nothing to re-bind unless sprites are being emitted.
     assert not moving_things or (things and lines), \
@@ -2470,7 +2469,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         return (rm._flat_base(asset_wad, name, flat_basecache))
     cmv = colormap_values(asset_wad, lights=COLORMAP_LIGHTS)
     cm = "\n".join([
-        generate_emit_byte_by_nibbles_fj("byte"),     # P13: two 16-entry nibble dispatches, not one 256-entry
         generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
                                         over_align=True),
     ])

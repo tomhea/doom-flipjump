@@ -368,7 +368,7 @@ ns frame {
     // and the 11-field col_struct writes are ALL GONE, replaced by two small emitted records: one per
     // NEWLY-referenced visplane ([0xFE/0xFD tag][vp_idx][planeheight:4][light][base] — vp_idx/light/
     // base are the SAME per-seg xorby-baked runtime registers seg_cvpidx/seg_fvpidx/seg_plight/
-    // seg_ceilbase/seg_floorbase already carry today, just byte.emit'd instead of stored; only the
+    // seg_ceilbase/seg_floorbase already carry today, just hex.print'd instead of stored; only the
     // tag is a true compile-time literal since this leaf is SHARED/fcall'd, not unrolled per seg) and
     // one per surviving seg ([x1][x2][scale1:4][scalestep:4][wt_ceil:4 signed][wt_floor:4 signed]
     // [lit][cvp_idx][fvp_idx]). `drawn` is a lone packed byte per column (colstruct-style: ONE
@@ -2728,7 +2728,7 @@ ns frame {
         rep(1-pnear, k) .lines_jmp emit_ditto
         rep(pnear, k) .lines_ditto_plane pval8, p2_dpid, emit_ditto, emit_full
       emit_ditto:
-        byte.emit x
+        hex.print x
         // the ditto is COPY (screenwire.COPY): [0xFD][VIEW_H] copies the VIEW's rows of column x-1 (under a status
         // bar, VIEW_H < H, the left column's bar is never copied), and END closes the record
         stl.output_char 0xFD

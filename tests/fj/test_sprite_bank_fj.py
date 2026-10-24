@@ -220,7 +220,6 @@ def _program(lists, cases, wcases, ecases=()):
         body = wr.sprite_block_body(bl, SPRITE_HEIGHT_BUCKETS)
         bank += [";%#x * dw" % v for v in body] + [";0 * dw"] * (wr.SPR_BLOCK_STRIDE - len(body))
     main = ["stl.startup_and_init_all",
-            generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
             generate_emit_dispatch_table_fj("cm", CMV, index_nibbles=_index_nibbles(len(CMV)),
                                             over_align=True),
             wr.sprite_rowmap_fj(CFG),
@@ -231,7 +230,7 @@ def _program(lists, cases, wcases, ecases=()):
                  "    hex.set 4, t_blk, %d" % i,
                  "    stream.frag_derive t_s, t_blk, gps_ybase, gps_top, gps_sy1, gps_sy2, "
                  "gps_smidx, gps_ptr, gps_ridx",
-                 "    byte.emit gps_sy1",                          # a filler down to the fragment
+                 "    hex.print gps_sy1",                          # a filler down to the fragment
                  "    stl.output_char %d" % FILLER,
                  "    stream.frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx",
                  "    stl.output_char %d" % H,                     # ... and one to the bottom

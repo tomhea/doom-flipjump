@@ -419,7 +419,7 @@ def generate_emit_dispatch_table_fj(label: str, values: Sequence[int], *, index_
     — 8 `stl.output_bit` ops (~1 op/bit, the owner's "IO+0/1 flips instead of xoring to a result
     variable" directive) — instead of XOR-flipping the value into a kept-zero result register. There is
     no `dst`/`.res`/`xor_zero`: the byte already left the program as IO, nothing to read out. `values`
-    are raw 0-255 bytes (a `byte.emit` run-count table is the IDENTITY map `values=range(256)`; a
+    are raw 0-255 bytes (an identity table is the map `values=range(256)`; a
     `cm.emit` lit-color table reuses a colormap's existing `values` — same list `compile_colormap`'s
     `.apply` table uses, just a different handler on top). `<label>.emit idx` triggers one dispatch +
     the byte's 8 output bits + cleanup."""
@@ -467,46 +467,6 @@ def _per_entry_emit_table(label: str, values: Sequence[int], index_nibbles: int,
         "    }",
         "}", f"{label}.init", "",
     ]
-    return "\n".join(lines)
-
-
-def generate_emit_byte_by_nibbles_fj(label: str = "byte", nib_label: str = "bnib") -> str:
-    """P13: `<label>.emit idx` -- the same 8 output bits, lsb first, as the 256-entry EMIT table
-    (`generate_emit_dispatch_table_fj(label, range(256), index_nibbles=2)`), through TWO dispatches of ONE 16-entry
-    nibble table: the low nibble's 4 bits, then the high nibble's. The byte table's 256 handlers (9 ops each) missed
-    the cache on nearly every emit (timeobj: 16-26 ns/op where the frame averages 4); the nibble table's 16 handlers
-    stay resident. Same macro name and parameter list (rule 4): every call site is unchanged."""
-    lines = [f"// EMIT a byte as two nibble dispatches (doomfj.lut_generator, P13): {nib_label} 16 entries x 4 bits",
-             f"ns {nib_label} {{",
-             "    def emit idx @ return < hex.tables.ret, .dsp {",
-             "        hex.xor .dsp, idx",
-             "        wflip hex.tables.ret+w, return, .dsp",
-             "      return:",
-             "        wflip hex.tables.ret+w, return",
-             "    }",
-             "    def init @ switch, handlers, clean, end < hex.tables.ret > dsp {",
-             "        ;end",
-             "      dsp: ;switch",
-             "        pad 16",
-             "      switch:"]
-    for d in range(16):
-        lines.append(f"        ;handlers + {d}*5*dw")
-    lines.append("      handlers:")
-    for d in range(16):
-        for bit in range(4):
-            lines.append(f"        stl.output_bit {(d >> bit) & 1}")
-        lines.append(f"        ;clean + {d}*dw")
-    lines += ["      clean:",
-              "        hex.tables.clean_table_entry__table 16, .dsp, hex.tables.ret",
-              "      end:",
-              "    }",
-              "}", f"{nib_label}.init",
-              f"ns {label} {{",
-              "    def emit idx {",
-              f"        {nib_label}.emit idx",
-              f"        {nib_label}.emit idx + dw",
-              "    }",
-              "}", ""]
     return "\n".join(lines)
 
 
@@ -694,7 +654,7 @@ def _cmp3_tree(cell: str, k: int, lt: str, eq: str, gt: str, tag: str):
 
 def _raw_byte_out(cell: str, tag: str):
     """Emit a runtime 2-nibble value as one output byte, lsb-first (stl.output_char's order),
-    with bit.if + stl.output_bit only — byte.emit is a table dispatch and R42 forbids it here."""
+    with bit.if + stl.output_bit only — hex.print is a table dispatch (hex.output's switch) and R42 forbids it here."""
     out = []
     for b in range(8):
         out += [f"    bit.if {_bit3(cell, b)}, {tag}_z{b}, {tag}_o{b}",
@@ -932,7 +892,7 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
     `walk wlen, ctake, fstart, gnrow, wall_lit, wall_lit2, cmidx` emits the full wall
     [ctake, fstart) as the (height tier, grain group)'s cycled run list: per run one
     `hex.add_constant` on the running y2, one `hex.cmp` vs fstart (>= -> clamp to fstart and
-    stop), `byte.emit` + `cm.emit` with the run's baked colormap row over the run's colour low
+    stop), `hex.print` + `cm.emit` with the run's baked colormap row over the run's colour low
     byte -- `wall_lit` or `wall_lit2` per the run's baked W1R-2C alt bit (V1's grain
     mechanism -- same colour, different shade, never a hue jump). The final pair always ends
     exactly at fstart, mirroring `ReferenceModel.w1r_runs` pair for pair.
@@ -993,7 +953,7 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
             else:
                 body.append(f"        hex.cmp 2, ycur, fstart, e{k}, l{k}, l{k}")
             body += [f"      e{k}:",
-                     "        byte.emit ycur",
+                     "        hex.print ycur",
                      "        cm.emit cmidx",
                      f"        ;{nxt}",
                      f"      l{k}:",
@@ -1051,7 +1011,7 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
             out += [f"      d{t}_{v}:",
                     f"        .b{t}_{v} ycur, fstart, {colour_pass[f'b{t}_{v}']}, cmidx, last"]
     out += ["      last:",
-            "        byte.emit fstart",
+            "        hex.print fstart",
             "        cm.emit cmidx",
             "        ;end",
             *cells,
@@ -1074,7 +1034,7 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
             out += [f"      d{t}_{v}:",
                     f"        .w{t}_{v} ycur, wlo, whi, {colour_pass[f'w{t}_{v}']}, cmidx, wlast"]
     out += ["      wlast:",
-            "        byte.emit whi",
+            "        hex.print whi",
             "        cm.emit cmidx",
             "        ;end",
             *cells,

@@ -1,4 +1,4 @@
-"""M13pS0 -- measure byte.emit/cm.emit per-call op cost (the two-count delta technique, mirroring
+"""M13pS0 -- measure hex.print/cm.emit per-call op cost (the two-count delta technique, mirroring
 scratchpad/measure_walk.py). Run: python scratchpad/measure_emit.py"""
 import sys
 import tempfile
@@ -43,7 +43,7 @@ def main():
 
     byte_table = generate_emit_dispatch_table_fj("bytetbl", list(range(256)), index_nibbles=2)
     byte_ops = per_call(byte_table, "bytetbl.emit idx", 2, tmp)
-    print(f"byte.emit (identity 256-table): {byte_ops:.1f} ops/call")
+    print(f"hex.print (identity 256-table): {byte_ops:.1f} ops/call")
 
     wad = WadFile.from_path("tests/fixtures/freedoom_assets.wad")
     values = colormap_values(wad, lights=32)

@@ -111,7 +111,7 @@ against this and refuses to credit an op sitting >4096 ops past a bare label.
 | `hex.pointers.read_cell_from_inners_ptrs` | 66,212 | 0.34% |
 | `hex.add_constant` | 62,686 | 0.32% |
 | `<top level: hex.mul.add_carry_dst>` | 60,554 | 0.31% |
-| `byte.emit` | 59,218 | 0.31% |
+| `hex.print` | 59,218 | 0.31% |
 | `frame.sub10_chain` | 54,373 | 0.28% |
 | `hex.fixed_mul_low` | 51,937 | 0.27% |
 | `hex.if1` | 45,332 | 0.23% |

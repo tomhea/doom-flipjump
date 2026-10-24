@@ -40,7 +40,6 @@ from doomfj.menu import (ANY_KEY_EVENT, HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE
                          menu_step, palette_colours)
 from doomfj.wad import WadFile
 from doomfj import automap as A                                              # M8: the map page
-from doomfj.lut_generator import generate_emit_byte_by_nibbles_fj           # M8: the page's dot prints bytes
 from doomfj.wall_renderer import AUTOMAP_STATE_DECLS                       # M8
 from doomfj.menu import MAIN_MAP_SCR                                       # M8
 from doomfj.wall_renderer import (BOOT_MENU_SKILL, MENU_STATE_DECLS, SKILLS, _menu_lines, DEFAULT_MENU,
@@ -170,9 +169,7 @@ def _run(tmp, name, menu_lines, events, scr0=0, frames=FRAMES):
     src.write_text(_program(menu_lines, scr0, frames), encoding="utf-8")
     consts = CFG.emit_fj_consts(tmp / "fj_consts.fj")
     out = tmp / f"{name}.fjm"
-    byte_t = tmp / "byte_emit.fj"                   # M8: the page's dot prints run-time bytes (AFTER the program:
-    byte_t.write_text(generate_emit_byte_by_nibbles_fj("byte"), encoding="utf-8")     # it runs its init at top level)
-    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve(), byte_t.resolve()], out,
+    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve()], out,
                 memory_width=W, print_time=False)
     screen = _Recording()
     io = PcIO(screen, KeyboardIO(ScriptedKeyEventSource([KeyEvent(*e) for e in events])))

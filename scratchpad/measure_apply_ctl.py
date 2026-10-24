@@ -2,7 +2,7 @@
 
 `docs/m13p-procedural-plan.md` claims `cm.emit` is "2.07x cheaper than the OLD cm.apply(399) +
 xor_zero(284) = 683 combo". Those figures came from the same harness whose per-iteration overhead
-was never subtracted -- the one that reported `byte.emit` at 283.6 when the call is 47.1
+was never subtracted -- the one that reported `hex.print` at 283.6 when the call is 47.1
 (scratchpad/measure_emit_ctl.py, commit f93e9cb). So the comparison it supports is unverified in
 BOTH terms, and the ratio could move either way.
 

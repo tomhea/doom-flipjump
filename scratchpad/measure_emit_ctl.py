@@ -50,7 +50,7 @@ tmp = Path(tempfile.mkdtemp())
 art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 cmv = colormap_values(art, lights=32)
 tables = {
-    "byte.emit (256 entries, 2-nibble index)":
+    "hex.print (256 entries, 2-nibble index)":
         (generate_emit_dispatch_table_fj("bytetbl", list(range(256)), index_nibbles=2),
          "bytetbl.emit idx", 2),
     "cm.emit (%d entries, %d-nibble index)" % (len(cmv), _index_nibbles(len(cmv))):

@@ -104,7 +104,6 @@ import pytest
 from doomfj import wall_renderer as wr
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.lut_generator import generate_emit_dispatch_table_fj
 
 ROOT = Path(__file__).resolve().parents[2]
 FJ_NAMES = ("projection.fj", "frame_render.fj", "plane_render.fj",
@@ -819,7 +818,7 @@ def bank():
 
 
 def emit(reg, nbytes):
-    return ["    byte.emit %s" % (reg if i == 0 else "%s + %d*dw" % (reg, 2 * i)) for i in range(nbytes)]
+    return ["    hex.print %s" % (reg if i == 0 else "%s + %d*dw" % (reg, 2 * i)) for i in range(nbytes)]
 
 
 DUMP = """def lay_dump arr, n @ loop, done < lay_p, lay_n, lay_v {
@@ -827,7 +826,7 @@ DUMP = """def lay_dump arr, n @ loop, done < lay_p, lay_n, lay_v {
     hex.set 4, lay_n, n
   loop:
     hex.read_byte_and_inc lay_v, lay_p
-    byte.emit lay_v
+    hex.print lay_v
     hex.dec 4, lay_n
     hex.if0 4, lay_n, done
     ;loop
@@ -840,7 +839,7 @@ REGS = ["lay_p: hex.vec w/4", "lay_n: hex.vec 4", "lay_v: hex.vec 2", "lay_x: he
         "ld_sblkb: hex.vec 4", "dv_s: hex.vec 2", "dv_sblk: hex.vec 4", "dv_ybase: hex.vec 4",
         "dv_top: hex.vec 4", "dv_sy1: hex.vec 4", "dv_sy2: hex.vec 4", "dv_smidx: hex.vec 4",
         "dv_ptr: hex.vec w/4", "dv_ridx: hex.vec 4"]
-HEAD = ["stl.startup_and_init_all", generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)]
+HEAD = ["stl.startup_and_init_all", ]
 
 
 def write_program(frame_text, emitter_text):

@@ -267,7 +267,6 @@ def run_head_to_kernel(tmp: Path):
         f"p: hex.vec 8, {(v1x << 16) & M32}", f"q: hex.vec 8, {(v1y << 16) & M32}",
         f"r: hex.vec 8, {(v2x << 16) & M32}", f"s: hex.vec 8, {(v2y << 16) & M32}",
         f"ga: hex.vec 8, {fa}", f"gb: hex.vec 8, {fb}", f"gc: hex.vec 8, {fc}",
-        generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
         generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
         generate_slopediv_recip_lut_fj("slopediv_recip"),
         generate_slopediv_recip8_lut_fj("slopediv_recip8"),

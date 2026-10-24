@@ -37,7 +37,6 @@ from doomfj import keyboard as KB
 from doomfj.config import Config
 from doomfj import screenwire as SW
 from doomfj.harness import W
-from doomfj.lut_generator import generate_emit_byte_by_nibbles_fj
 from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, MAIN_EXIT_SCR, MAIN_HELP_SCR, MAIN_MAP_SCR,
                          MAIN_RESUME_SCR, MAP_GAME_SCR, MAP_MENU_SCR, menu_keys, menu_step)
 from doomfj.wad import WadFile
@@ -90,13 +89,11 @@ class _Recording(InMemoryScreen):
 def _assemble_run(tmp, name, text, events=(), extra=()):
     src = tmp / f"{name}.fj"
     src.write_text(text, encoding="utf-8")
-    byte_t = tmp / "byte_emit.fj"
-    byte_t.write_text(generate_emit_byte_by_nibbles_fj("byte"), encoding="utf-8")
     consts = CFG.emit_fj_consts(tmp / "fj_consts.fj")
     out = tmp / f"{name}.fjm"
     # the byte table AFTER the program: its file runs its `init` at top level, and the program's first op must be
     # stl.startup's
-    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve(), byte_t.resolve()], out,
+    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve()], out,
                 memory_width=W, print_time=False)
     screen = _Recording()
     io = PcIO(screen, KeyboardIO(ScriptedKeyEventSource([KeyEvent(*e) for e in events])))

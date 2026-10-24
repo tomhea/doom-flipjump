@@ -19,7 +19,7 @@ n = len(fr.cases)
 PRO = ["hex.mov 2, ecl_ctake, c_cexcl",
        "hex.cmp 2, ecl_ctake, c_fstart, bd_ok, bd_ok, bd_clamp",
        "bd_clamp:", "hex.mov 2, ecl_ctake, c_fstart", "bd_ok:",
-       "byte.emit c_x", "stream.wpx_grain_col c_gnrow, ecl_cmidx",
+       "hex.print c_x", "stream.wpx_grain_col c_gnrow, ecl_cmidx",
        "hex.set 2, ecl_ccy, %d" % plib.cfg.CENTERY, "hex.zero 2, ecl_full_lo",
        "hex.set 2, ecl_full_hi, %d" % plib.H]
 REG = ("stream.emit_region %s, %d, 0, 0, 1, 1, 1, %d, 0, 1, 1, ecl_ctake, c_fstart, c_wlit, c_wlit2, "

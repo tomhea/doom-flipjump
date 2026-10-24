@@ -32,7 +32,6 @@ def main():
     mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
     cmv = wr.colormap_values(mw, lights=wr.COLORMAP_LIGHTS)
     tables = "\n".join([
-        generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
         generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
                                         over_align=True)])
     # a 2-block bank: [r0][last][n][(rel,tex)...] padded to 64

@@ -25,7 +25,7 @@ ASSET = "tests/fixtures/freedoom_assets.wad"
 
 def _band_list(label, n, base_colour):
     # n bands, 2 rows each, as 3 PACKED bytes/entry (count, cidx-low, cidx-high) -- see
-    # stream.emit_band_list. Row count / colour VALUE don't affect op cost (byte.emit/cm.emit cost
+    # stream.emit_band_list. Row count / colour VALUE don't affect op cost (hex.print/cm.emit cost
     # only depends on the dispatch, R12).
     lines = [f"{label}:"]
     for i in range(n):
@@ -83,7 +83,7 @@ def main():
     wad = WadFile.from_path(ASSET)
     values = colormap_values(wad, lights=32)
     idx_n = _index_nibbles(len(values))
-    byte_table = generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)
+    byte_table = ""   # the byte emit is the stl\'s hex.print: no table
     cm_table = generate_emit_dispatch_table_fj("cm", values, index_nibbles=idx_n, over_align=True)
 
     points = {}

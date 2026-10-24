@@ -36,7 +36,7 @@ from doomfj.harness import W
 from doomfj.lut_generator import generate_emit_dispatch_table_fj
 
 KS = (1, 17, 33)
-EMIT_TABLE = generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)
+EMIT_TABLE = ""   # the byte emit is the stl\'s hex.print: no table
 
 
 def variants(k: int):
@@ -59,8 +59,8 @@ def variants(k: int):
     # ---- output ---------------------------------------------------------------------------------
     v["out const byte (stl.output_char)"] = (
         ["stl.output_char 0x5a"] * k, [], b"", b"\x5a" * k, 1)
-    v["out runtime byte (byte.emit)"] = (
-        ["byte.emit v2"] * k, ["v2: hex.vec 2, 0x5a", EMIT_TABLE], b"", b"\x5a" * k, 1)
+    v["out runtime byte (hex.print)"] = (
+        ["hex.print v2"] * k, ["v2: hex.vec 2, 0x5a", EMIT_TABLE], b"", b"\x5a" * k, 1)
     v["out decimal (hex.print_dec_uint 8)"] = (
         ["hex.print_dec_uint 8, pv"] * k, ["pv: hex.vec 8, 1869"], b"", b"1869" * k, 1)
     return v

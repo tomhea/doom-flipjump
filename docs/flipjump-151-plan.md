@@ -382,7 +382,19 @@ It has many gaps; find them and fix them, and keep the speedup.
 - The fuzzer: 600 cases, 8 pools, both controls fire. It found 0 differences.
 
 **The principle given to the fixer:** never change behaviour; prefer a safe FALLBACK (un-pin, decline) over refusing;
-refuse only when there is none; count and report every fallback. Then hunt round 3. Then v4.
+refuse only when there is none; count and report every fallback.
+
+**Fixed (02fcb63..640532c):** N1–N8.
+
+- **Fallbacks:** a table is kept inline when an operand reaches across it; a word is un-pinned where it is armed in
+  ways the pool cannot rewrite. Both are counted.
+- **The proof** checks numbers and sums, holds per-program ceilings on its unchecked operands, and judges pins from
+  the image.
+- **The corpus:** 1,125 of 1,127 run the same, 2 are refused exactly, 0 differ.
+- **The fjdoom render tier** (with its veto list): 0 refusals, 0 kept inline, 0 un-pinned; 2,138 pins kept.
+  `fj --pool-tables`, which has no veto list, un-pins every word for the pointer runtime.
+
+**Hunt round 3 is running.** Then v4.
 
 Then the rest of the gap hunt below.
 

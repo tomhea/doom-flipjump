@@ -330,7 +330,26 @@ It has many gaps; find them and fix them, and keep the speedup.
 | B2, B3, B4, B5 | not exposed |
 | B1 | protected only by fjdoom's hand-kept `POINTER_READ_CELLS` veto list plus its exact gates |
 
-**Hunt round 2 is running.** Then v4.
+**Hunt round 2 (2026-10-24):** every round-1 finding is confirmed closed. **6 new BLOCKING, 2 MINOR**
+(`scratchpad/ioapi/cr/hunt/round2/hunt_findings_r2.md`), each needing code the stl's macros never emit:
+
+- N1: `$`-relative jumps across a moved table;
+- N2: computed label operands spanning a table. The repo's own `print_address_difference.fj` differs under
+  TablePool;
+- N3: a table label passed as an argument;
+- N4: a numeric address armed into a pinned word;
+- N5: bit-flip arms of a pinned word;
+- N6: the proof's remaining blind spots;
+- N7: correct programs refused, with a remedy the CLI cannot apply;
+- N8: a misleading message.
+
+**Corpus and fuzzer:**
+
+- The repo corpus: 1,127 programs.
+- The fuzzer: 600 cases, 8 pools, both controls fire. It found 0 differences.
+
+**The principle given to the fixer:** never change behaviour; prefer a safe FALLBACK (un-pin, decline) over refusing;
+refuse only when there is none; count and report every fallback. Then hunt round 3. Then v4.
 
 Then the rest of the gap hunt below.
 

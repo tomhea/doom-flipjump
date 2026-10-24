@@ -402,14 +402,22 @@ The owner's five rules (section 6) are applied to the new stl code until a round
 | A1 | `frame.add*/sub*_chain` + `dance_boundary` → `hex.add n` / `hex.sub n` (~160 sites: projection.fj 101, frame_render 36, stream_render 15, aimcode 6, scrollcode 1, tests) | ▶ grep empty. E1M1 emit_check PASSES (asserts on; hot block 10,430 of 16,384). Host 2681 passed; its 7 failures are 6 from the live-tree collision plus 1 expected: `lb_c`'s width is now visible to the narrowed-clear scan, so its pin moved from 1 to 0. Re-run against `flipjump-stlpin` queued |
 | A10 | `FJM_LZMA_FAST` (harness.py) → `lzma_preset`: **preset 1 for day-to-day builds** (13.4 s against `lzma_fast`'s 17.8 s, the same size) and **preset 6 for ship builds**: −10.8% today. Presets 7, 8 and 9 measured −11.1%, −10.9% and −10.9%, no real gain, and they need the fixed reader; preset 6 is readable by every reader. On a quiet box: fast 6.0 s, preset 6 58 s, load 1.03–1.14 s for all. Measured on blocked64, with the control: `lzma_fast` reproduces the stored blob byte for byte | ⏳ after round 1b |
 | A11 | fjdoom's header readers (`build._span_words`, `measure_frame`, tools) on `.fjm` v4; the ship builds write v4 | ⏳ after 3h |
-| A2 | `fixed_point.fj` deleted → `hex.fixed_mul/div`, `mul_low`, `fixed_mul_low`, `mul_const` | ⏳ after 3b |
-| A3 | `read_table*` → `hex.read_entry*` | ⏳ after 3b |
-| A4 | `frame.ptr_index4/5/6` + `ptr_index_fill` → `hex.ptr_index n` | ⏳ after 3b |
-| A5 | `sim.jump16` → `hex.switch` | ⏳ after 3b |
-| A6 | `present.fj` deleted → `stl/screen.fj`; `input.fj` → the stl poll + its bindings | ⏳ after 3b |
-| A7 | `frame.write_byte_prearmed` → `hex.write_back` (and `read_back` where a prearmed read exists) | ⏳ after 3c |
-| A8 | `byte.emit` (lut_generator) → `hex.output` low + high nibble | ⏳ |
+| A2 | `fixed_point.fj` deleted → `hex.fixed_mul/div`, `mul_low`, `fixed_mul_low`, `mul_const` | ✅ `79a45aa2` |
+| A3 | `read_table*` → `hex.read_entry*` | ✅ `fef88048` |
+| A4 | `frame.ptr_index4/5/6` + `ptr_index_fill` → `hex.ptr_index n` | ✅ `a19ef32a`. Found an stl gap: the wide path breaks when `dst == index` (fixed in 3g) |
+| A5 | `sim.jump16` → `hex.switch` | ✅ `03008c34` (`SAFE_TABLE_MACROS` → `hex.switch`) |
+| A6 | `present.fj` deleted → `stl/screen.fj`; `input.fj` → the stl poll + its bindings | ✅ `9f44d10a` (`end_frame W, 0` prints the same 0xFF 0x1F) |
+| A7 | `frame.write_byte_prearmed` → `hex.write_back` (and `read_back` where a prearmed read exists) | ✅ `9b4397cc`: 3 `write_back` sites; 0 `read_back` sites qualify (all follow an `_and_inc`) |
+| A8 | `byte.emit` (lut_generator) → `hex.output` low + high nibble | ✅ `686f3ecb` (`hex.print`). Note: `hex.output`'s switch is not a declared table yet, a candidate for `__relocatable__` |
 | A9 | Part C's sequential access, where fjdoom walks arrays | ⏳ after 3e |
+
+**Interim E1M1 build after A1–A8 (2026-10-24):** `build/doom_e1m1_adopt1.fjm`, with the OLD heat/census pins.
+
+- m3 88, m2 421 and p2a: PASS.
+- gamespeed binding **16,180,820** against blocked64's 16,921,550 (both measured this session): **−4.4% ops**.
+- Size **37.95%** (blocked64: 39.13%).
+- **Not a speed verdict yet:** that needs msframe on a quiet machine, after 4b's pins are regenerated.
+- A1's leftovers in tracked scratchpad were removed (`d6a20a52`).
 
 **After the last item (the gap fixes of section 9 are built in here):**
 

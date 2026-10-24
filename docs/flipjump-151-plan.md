@@ -311,7 +311,26 @@ It has many gaps; find them and fix them, and keep the speedup.
 - the fuzzer goes into `tests/`;
 - fjdoom's exposure is checked per finding.
 
-Then hunt round 2. Then v4.
+**Fixed (97a99bd..02fcb63).** All 18 findings are closed.
+
+- The fixed-word (pin) checks work by mechanism, not by name list.
+- The B5 and B6 compile errors are in.
+- The proof checks pins and counts what it cannot check, with no false positives.
+- Overlaps are refused early.
+- An `OffsetGuard` in the PRODUCT refuses an outside label + offset into a moved table (c06, c07a–d), with a run
+  negative control. Its cost: labels resolve ×1.28, about +2 s on fjdoom's 94 s render-tier assembly.
+- The fuzzer and the 21 crafted programs are in `tests/`.
+- Identity 117/117; every suite passes.
+- The fjdoom render tier with the pool: 0 refusals over 36,033 tables, the `.fjm` identical.
+
+**fjdoom exposure of the shipped build:**
+
+| finding | shipped build |
+|---|---|
+| B2, B3, B4, B5 | not exposed |
+| B1 | protected only by fjdoom's hand-kept `POINTER_READ_CELLS` veto list plus its exact gates |
+
+**Hunt round 2 is running.** Then v4.
 
 Then the rest of the gap hunt below.
 

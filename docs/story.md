@@ -266,7 +266,7 @@ fj --run doom.fjm
 ```
 
 Also possible, with nothing to install: `uvx fjdoom`. (Until the 1.0 release is out none of these
-lines works yet: flipjump 1.5.1 is not on PyPI, the release file does not exist and the `fjdoom`
+lines works yet: flipjump 1.6.0 is not on PyPI, the release file does not exist and the `fjdoom`
 package is not published; see docs/developing.md to build it.) The code is at
 https://github.com/tomhea/doom-flipjump, and the numbers, each with the command that produced it,
 are in [ship-gate.md](ship-gate.md).

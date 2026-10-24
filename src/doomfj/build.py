@@ -469,7 +469,7 @@ ONE_PASS_TIERS = frozenset({"game", "hosted-loop"})
 
 
 def standalone_run_header(standalone: bool) -> dict:
-    """The .fjm header's defaults for how `fj --run` runs the binary (flipjump >= 1.5.1 at 342a3b9).
+    """The .fjm header's defaults for how `fj --run` runs the binary (flipjump >= 1.6.0 at 342a3b9).
 
     A standalone binary (the game) is played in the pc window and wants flat memory -- one array for its
     whole span (~119M words, ~0.5 GB at w=32), the fast native path -- so both are compiled in and the

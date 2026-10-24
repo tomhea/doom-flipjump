@@ -1056,7 +1056,7 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
     dispatch. MEASURED at ~1,172 bytes -> ~2,344 ops against a world frame's ~28,000,000.
 
     ⚠ THE STREAM'S END_CMD IS OMITTED ON PURPOSE. Both producers fall into the SAME tail, whose
-    last line is `present.end_frame` (END_CMD, then present) -- which `selfreset.emit_reset_part`
+    last line is `screenwire.FJ_END_FRAME` (END_CMD, then present) -- which `selfreset.emit_reset_part`
     asserts on when it patches the frame into a loop. Ending the command here as well would leave
     the tail's END_CMD as a stray opcode; jumping past the tail would break that assert. So the
     menu ends where the world ends.
@@ -1732,7 +1732,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
 
 
 WINDOW_TITLE = "FlipJump DOOM"
-# P10 (the owner, 2026-10-12): the frame-rate cap the program sends at boot (present.set_max_fps -> the screen API's 0x03).
+# P10 (the owner, 2026-10-12): the frame-rate cap the program sends at boot (screen.set_max_fps -> the screen API's 0x03).
 # 20 (measured on gamespeed's 10 games, blocked54: frames 33..378 ms, median 125): only the cheap views wait -- the
 # world's step is per frame, so this bounds the game's real-time speed from above (the monsters' 2 tics a frame run at
 # <= 40 tics/s, DOOM's own 35 near it); a heavy frame is already slower and is never delayed.
@@ -1812,15 +1812,11 @@ def window_chrome_fj():
     The icon's colours are palette indices, drawn through the palette selected when the command runs -- so it is
     sent after init_screen and the boot palettes (slot 0 selected). The API has no transparency: colour 0 is the
     palette's black, the icon's background."""
-    big = 0
-    for i, ch in enumerate(WINDOW_TITLE.encode("utf-8")):
-        big |= ch << (8 * i)
-    calls = ["present.set_window_title %s, %d"
-             % (hex(big), len(WINDOW_TITLE.encode("utf-8"))),
-             "present.set_max_fps %d" % MAX_FPS]          # P10: the frame-rate cap, once at boot
+    calls = [SW.fj_set_window_title(WINDOW_TITLE),
+             SW.fj_set_max_fps(MAX_FPS)]          # P10: the frame-rate cap, once at boot
 
     n = WINDOW_ICON_SIZE
-    body = ["    present.set_window_icon_header %d, %d" % (n, n)]
+    body = ["    " + SW.fj_set_window_icon_header(n, n)]
     for y in range(n):
         row = WINDOW_ICON_ART[y * n:(y + 1) * n]
         # ⚠ ONE STATEMENT PER LINE. fj has no statement separator, so N `stl.output_char`s joined
@@ -1903,7 +1899,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     wall's fully-constant lit BYTE (`seg_lit`, computed here at Python emit time from the real
     colormap — no runtime lookup needed), storing them in `col_ceil_bands`/`col_ceil_n`/
     `col_floor_bands`/`col_floor_n`/`col_lit`; then, instead of any framebuffer raster, the frame is
-    EMITTED as the device run-stream (`present.begin_frame_stream` + an unrolled
+    EMITTED as the device run-stream (`screen.draw_collines` + an unrolled
     `rep(VIEW_W,x) stream.emit_column ...` — `src/fj/stream_render.fj`, which the assemble include
     list must therefore contain in this mode), decoded by `StreamScreen`. The framebuffer, the pass-2
     wall trampoline, and ALL plane-pass machinery (`render_planes_spans`/`draw_span*`/`clear_planes`)
@@ -4163,7 +4159,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # (a command byte inside the run-lists would corrupt them); sent only on a change (hurtcode.pal_lines)
     if _hrt:
         pass1 += list(_hrt["palette"])
-    pass1.append("present.draw_collines")
+    pass1.append(SW.FJ_DRAW_COLLINES)
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
     else:
@@ -4174,9 +4170,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     zlight = generate_zlight_lut_fj("zlight", cfg.VIEW_W, COLORMAP_LIGHTS)
     distscale = generate_distscale_lut_fj("distscale", cfg.VIEW_W, cfg.TRIG_N)
 
-    # the frame leaves the program AS the draw_collines records the walk emitted inline; `present.end_frame` closes the
+    # the frame leaves the program AS the draw_collines records the walk emitted inline; `screen.end_frame` closes the
     # command (END_CMD, where a column would start: x is never 0xFF for real, VIEW_W = 160) and presents it (0x1F).
-    present_tail = ["present.end_frame"]
+    present_tail = [SW.FJ_END_FRAME]
     # the framebuffer raster's shared leaves went with `raster_mode`: the lines tier emits none.
     fb_leaves = []
     # M13-hotdata (stream only, R20): pointer-deref/dispatch wflip cost scales with the ADDRESS's
@@ -4274,7 +4270,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # back), so they move no table and no op of the renderer -- the entry keeps the shape it had: startup, chrome, jump.
     _icon_macro, _chrome_calls = window_chrome_fj()
     _boot_rgbs = _hrt["palettes"] if _hrt else [asset_wad.playpal(0)]
-    _boot_screen = (["io_boot:", "    present.init_screen"]
+    _boot_screen = (["io_boot:", "    " + SW.FJ_INIT_SCREEN]
                     + [ln for k, rgb in enumerate(_boot_rgbs) for ln in SW.fj_lines(SW.define_palette(k, rgb), "    ")]
                     + ["    ;io_boot_done"])
     postlude_palette = []
@@ -4335,7 +4331,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
       ("main", [
           *pass1, *pass2, *plane_pass,
           # M3: both frame producers fall into ONE tail. The label goes BEFORE the tail's
-          # `present.end_frame`, so the line preceding `stl.loop` is still that end of frame and
+          # `screenwire.FJ_END_FRAME`, so the line preceding `stl.loop` is still that end of frame and
           # `selfreset.emit_reset_part`'s structural assert is untouched.
           *postlude_palette, *(_hud["tail"] if _hud else []),            # M7 P4.0: the weapon, the bar
           *(["frame_end:"] if menu else []), *present_tail, "stl.loop",

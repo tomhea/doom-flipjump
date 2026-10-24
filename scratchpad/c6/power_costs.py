@@ -38,9 +38,9 @@ class _Screen(InMemoryScreen):
 
 def ops(frag, setup, decls, tables=(), frames=False):
     """ops of K runs of `frag` (a leaf) after `setup`"""
-    body = ["stl.startup_and_init_all", "present.init_screen", *setup]
+    body = ["stl.startup_and_init_all", "screen.init_screen W, H, 8", *setup]
     for _ in range(K):
-        body += (["present.begin_frame_collines"] if frames else []) + ["stl.fcall frag_leaf, frag_ret"] + (
+        body += (["screen.draw_collines"] if frames else []) + ["stl.fcall frag_leaf, frag_ret"] + (
             ["stl.output_char 0xFF"] if frames else [])
     body += ["stl.loop", "frag_ret: hex.vec w/4", "frag_leaf:", *frag, "stl.fret frag_ret", *decls, *tables]
     with tempfile.TemporaryDirectory() as d:
@@ -48,7 +48,7 @@ def ops(frag, setup, decls, tables=(), frames=False):
         src.write_text("\n".join(body) + "\n", encoding="utf-8")
         out = Path(d) / "c.fjm"
         consts = GAME_CFG.emit_fj_consts(Path(d) / "fj_consts.fj")
-        fj.assemble([consts.resolve(), (FJ / "present.fj").resolve(), (FJ / "sim.fj").resolve(), src.resolve()], out,
+        fj.assemble([consts.resolve(), (FJ / "sim.fj").resolve(), src.resolve()], out,
                     memory_width=W, print_time=False)
         st = fj.run(out, io_device=_Screen(), print_time=False, print_termination=False)
         return st.op_counter

@@ -54,7 +54,7 @@ from doomfj.wireformat import (encode_bindings, encode_feed_mapunits,     # noqa
                                encode_things, encode_visibility)
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
 
-SRC = [ROOT / "src/fj" / f for f in ("present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 SRC_M14 = SRC + [ROOT / "src/fj/sim.fj"]           # the sim wire lives in its own unit

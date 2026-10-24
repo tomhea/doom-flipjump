@@ -32,7 +32,7 @@ from doomfj.wall_renderer import _state_wire_lines
 from doomfj.wireformat import (MAGIC, STATE_BYTES, STATE_CMD, decode_state, encode_feed,
                                keys_dict)
 
-SRC = [Path("src/fj") / f for f in ("present.fj", "stream_render.fj")]
+SRC = [Path("src/fj") / f for f in ("stream_render.fj",)]
 CFG = Config()
 RM = ReferenceModel(CFG)
 
@@ -63,7 +63,7 @@ def _assemble(tmp_path, sim: bool) -> Path:
     src = tmp_path / f"wire{'_sim' if sim else ''}.fj"
     src.write_text(_program(sim), encoding="utf-8")
     out = tmp_path / f"wire{'_sim' if sim else ''}.fjm"
-    consts = CFG.emit_fj_consts(tmp_path / "fj_consts.fj")     # present.fj reads W/H/BPP/NCOLORS
+    consts = CFG.emit_fj_consts(tmp_path / "fj_consts.fj")     # the screen calls read W/H
     fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve()],
                 out, memory_width=W, print_time=False)
     return out

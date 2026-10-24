@@ -300,7 +300,7 @@ de-tunes placement only marginally, and the next idea's build absorbs it for fre
 ## O. hex.zero / hex.mov redundant-work audit (subagent, 2026-09-04): 46 pairs, 5 dead, 0 unsure
 
 Full census of adjacent `hex.zero N,X` / `hex.mov m,X[+k*dw]` in stl-fixedpoint / projection /
-frame_render / stream_render / present.fj. Three shipped as P7-1 (independently agreed by the
+frame_render / stream_render / stl-screen. Three shipped as P7-1 (independently agreed by the
 audit). **Two more verified dead, not yet shipped:** `proj.slope_div`'s and `proj.slope_div_m`'s
 `recip_wide` -- each a separate macro-local, `zero 8` + `mov 6,k=0`, and the uncovered nibbles
 6..7 are read only as a zero-extended `mul_low.row` operand and written by nothing.

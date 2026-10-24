@@ -14,7 +14,7 @@ from doomfj import screenwire as SW
 
 def boot_lines(palettes):
     """init_screen and the palettes into slots 0..n-1, as the game's boot sends them (wall_renderer's io_boot)"""
-    out = ["present.init_screen"]
+    out = ["screen.init_screen W, H, 8"]
     for k, rgb in enumerate(palettes):
         out += SW.fj_lines(SW.define_palette(k, rgb))
     return out

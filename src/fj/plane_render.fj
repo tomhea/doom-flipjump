@@ -23,7 +23,7 @@
 //
 // ── STATUS: this is the LEGACY FRAMEBUFFER TIER ─────────────────────────────────────────────
 // All four macros here write (directly or via their caller) into the compile-time FRAMEBUFFER that
-// `present.update_screen*` then blits. The SHIPPED renderer is the column-stream / M13-lines path
+// the framebuffer is then blitted. The SHIPPED renderer is the column-stream / M13-lines path
 // (`plane_bands.fj::build_bands` -> `stream_render.fj`), which builds per-column BAND LISTS and
 // emits them as device records — no framebuffer at all. Concretely, in `wall_renderer.py` the
 // list holding `span_leaf:`/`clear_leaf:` (`fb_leaves`) is EMPTY whenever the mode is

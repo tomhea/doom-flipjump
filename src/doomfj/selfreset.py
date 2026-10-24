@@ -27,6 +27,7 @@ from pathlib import Path
 import flipjump as fj
 import flipjump.assembler.assembler as _asm
 
+from doomfj import screenwire as SW
 from doomfj.harness import W
 
 DW = 2 * W
@@ -432,8 +433,8 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
                             "found %d" % len(hits))
     assert sum(1 for l in old_lines if l.strip() == "bad: stl.loop") == 1, \
         "self-reset: bad: stl.loop (the junk-input halt) is not where it was"
-    assert old_lines[hits[0] - 1].strip() == "present.end_frame", \
-        "self-reset: the line before the frame tail is not the end of frame (present.end_frame)"
+    assert old_lines[hits[0] - 1].strip() == SW.FJ_END_FRAME, \
+        "self-reset: the line before the frame tail is not the end of frame (screenwire.FJ_END_FRAME)"
     new_lines = list(old_lines)
     new_lines[hits[0]] = ";m1_reset"          # 1 op -> 1 op: size-neutral, so nothing moves
     assert len(new_lines) == len(old_lines)
@@ -785,8 +786,8 @@ def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1
     m_lines = main.read_text(encoding="utf-8").split("\n")
     hits = [k for k, s in enumerate(m_lines) if s.strip() == "stl.loop"]
     assert len(hits) == 1, "one-pass reset: expected exactly 1 bare stl.loop (the frame tail), found %d" % len(hits)
-    assert m_lines[hits[0] - 1].strip() == "present.end_frame", \
-        "one-pass reset: the line before the frame tail is not the end of frame (present.end_frame)"
+    assert m_lines[hits[0] - 1].strip() == SW.FJ_END_FRAME, \
+        "one-pass reset: the line before the frame tail is not the end of frame (screenwire.FJ_END_FRAME)"
     m_lines[hits[0]] = ";m1_reset"
     main.write_text("\n".join(m_lines), encoding="utf-8")
     entry = gen / ("%s_00_entry.fj" % mapname.lower())

@@ -27,7 +27,7 @@ from doomfj.wad import WadFile
 from tests.fj.palette_device import PalDev as _Dev, boot_lines
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = [ROOT / "src" / "fj" / "present.fj", ROOT / "src" / "fj" / "sim.fj"]
+SRC = [ROOT / "src" / "fj" / "sim.fj"]
 ART = ROOT / "assets" / "freedoom1.wad"          # 14 palettes (the map wad holds one: hurtcode.boot_palettes)
 FRAMES = 160
 
@@ -49,8 +49,8 @@ def _script():
 MUTANTS = {
     "dcshr3": None,                                                        # the table, below
     "everyframe": ("hex.cmp 1, pal_new, pal_cur, pl_chg, pl_out, pl_chg\n", ""),
-    "menukeeps": ("hex.zero 1, pal_cur\npresent.select_palette 0\n", ""),
-    "wronglump": ("pl_k3:\npresent.select_palette 3\n", "pl_k3:\npresent.select_palette 4\n"),
+    "menukeeps": ("hex.zero 1, pal_cur\nscreen.select_palette 0\n", ""),
+    "wronglump": ("pl_k3:\nscreen.select_palette 3\n", "pl_k3:\nscreen.select_palette 4\n"),
 }
 
 
@@ -68,7 +68,7 @@ def _program(mut=None):
              "hex.input 1, p_dc", "hex.input 1, pmenu",
              "hex.if0 2, pmenu, fw", "stl.fcall menu_pal, pal_ret", ";fr",
              "fw:", "stl.fcall world_pal, pal_ret",
-             "fr:", "present.draw_collines", "present.end_frame", ";loop",
+             "fr:", "screen.draw_collines", "screen.end_frame W, 0", ";loop",
              "done:", "stl.loop",
              "rmagic: hex.vec 2", "pmenu: hex.vec 2", "pal_ret: hex.vec w/4",
              "p_dc: hex.vec 2", "pal_cur: hex.vec 1, 0", "pal_new: hex.vec 1",
@@ -174,7 +174,7 @@ def _loot_run(tmp_path, name, mut=None):
              "hex.input 1, p_dc", "hex.input 2, p_str", "hex.input 1, p_bc", "hex.input 1, pmenu",
              "hex.if0 2, pmenu, fw", "stl.fcall menu_pal, pal_ret", ";fr",
              "fw:", "stl.fcall world_pal, pal_ret",
-             "fr:", "present.draw_collines", "present.end_frame", ";loop",
+             "fr:", "screen.draw_collines", "screen.end_frame W, 0", ";loop",
              "done:", "stl.loop",
              "rmagic: hex.vec 2", "pmenu: hex.vec 2", "pal_ret: hex.vec w/4",
              "p_dc: hex.vec 2", "p_str: hex.vec 4", "p_bc: hex.vec 2", "pal_cur: hex.vec 1, 0", "pal_new: hex.vec 1",

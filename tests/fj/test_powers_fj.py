@@ -266,7 +266,7 @@ def _tic_run(tmp_path, name, mut=None):
              "hex.if_flags rflags, 0xF0F0, fw, fm",
              "fm:", "stl.fcall menu_pal, pal_ret", ";fr",
              "fw:", "stl.fcall world_pal, pal_ret",
-             "fr:", "present.draw_collines", "present.end_frame", ";loop",
+             "fr:", "screen.draw_collines", "screen.end_frame W, 0", ";loop",
              "done:", "stl.loop",
              "rmagic: hex.vec 2", "rflags: hex.vec 2", "pal_ret: hex.vec w/4",
              "p_dc: hex.vec 2", "p_str: hex.vec 4", "p_bc: hex.vec 2", "pal_cur: hex.vec 1, 0", "pal_new: hex.vec 1",
@@ -278,7 +278,7 @@ def _tic_run(tmp_path, name, mut=None):
     src.write_text("\n".join(lines) + "\n", encoding="utf-8")
     out = tmp_path / (name + ".fjm")
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
-    fj.assemble([consts.resolve(), (FJ / "present.fj").resolve(), (FJ / "sim.fj").resolve(), src.resolve()], out,
+    fj.assemble([consts.resolve(), (FJ / "sim.fj").resolve(), src.resolve()], out,
                 memory_width=W, print_time=False)
     script = _tic_script()
     dev = PalDev(b"".join(bytes([1, dc, st & 0xFF, st >> 8, bc, ts | ti << 1 | menu << 2])
@@ -480,23 +480,23 @@ def _shadow_run(tmp_path, name, mut=None):
     text = _mutate("\n".join(hudcode.hud_tail_lines(colours, (weapons, flashes), row, view_rows=VH, shadow=shd)),
                    SHADOW_MUTANTS, mut)
     start = hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))
-    lines = ["stl.startup_and_init_all", "present.init_screen", ";frames", *hudcode.hud_decls(start),
+    lines = ["stl.startup_and_init_all", "screen.init_screen W, H, 8", ";frames", *hudcode.hud_decls(start),
              "pcard: hex.vec 1", "hud_ret: hex.vec w/4", "wp_frm: hex.vec 2", "fl_frm: hex.vec 1",
              *PC.decls((P.INVIS_TYPE,)),
              "hud_tail_leaf:", text, "stl.fret hud_ret", "frames:"]
     for f, (wf, ff, inv) in enumerate(PSP):
-        lines.append("present.draw_collines")
+        lines.append("screen.draw_collines")
         for x in range(WIDTH):
             rec, _px = _view_column(f, x)
             lines += [f"stl.output_char {b}" for b in rec]
         lines += [f"hex.set 2, wp_frm, {wf}", f"hex.set 1, fl_frm, {ff}", f"hex.set 3, p_inv, {inv}",
-                  "stl.fcall hud_tail_leaf, hud_ret", "present.end_frame"]
+                  "stl.fcall hud_tail_leaf, hud_ret", "screen.end_frame W, 0"]
     lines.append("stl.loop")
     src = tmp_path / (name + ".fj")
     src.write_text("\n".join(lines) + "\n", encoding="utf-8")
     out = tmp_path / (name + ".fjm")
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
-    fj.assemble([consts.resolve(), (FJ / "present.fj").resolve(), src.resolve()], out, memory_width=W,
+    fj.assemble([consts.resolve(), src.resolve()], out, memory_width=W,
                 print_time=False)
     frames = []
 

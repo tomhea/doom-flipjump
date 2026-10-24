@@ -5,7 +5,6 @@ that the fj text `doomfj.menu.fj()` emits actually puts that picture on the scre
 run. It costs seconds, because a menu frame is a constant byte stream and needs no renderer, no
 map and no tables — which is the whole reason M3 is cheap.
 """
-from pathlib import Path
 
 import flipjump as fj
 import pytest
@@ -20,7 +19,7 @@ CFG = Config()
 VW, VH = CFG.VIEW_W, CFG.VIEW_H
 LINES = ["DOOM ON FLIPJUMP", "", "NEW GAME", "LEVEL 1", "QUIT"]
 COLOURS = (0, 4, 176, 101)          # palette_colours of the E1M1 PLAYPAL (bg, text, hi, credit)
-SRC = [Path("src/fj") / "present.fj"]
+SRC = []
 
 
 class _Screen(InMemoryScreen):
@@ -34,7 +33,7 @@ class _Screen(InMemoryScreen):
 def _program(selected):
     return "\n".join([
         "stl.startup_and_init_all",
-        "present.init_screen",
+        "screen.init_screen W, H, 8",
         menu_fj(VW, VH, LINES, selected, COLOURS, label="menu_frame"),
         "stl.loop",
     ]) + "\n"

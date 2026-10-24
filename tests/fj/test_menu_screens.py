@@ -53,7 +53,7 @@ PAGES = A.pages_for(WadFile.from_path("tests/fixtures/freedoom_e1m1.wad"), "E1M1
                     bytes(b for rgb in WadFile.from_path("tests/fixtures/freedoom_assets.wad").playpal(0) for b in rgb))
 VW, VH = CFG.VIEW_W, CFG.VIEW_H
 ASSETS = Path("tests/fixtures/freedoom_assets.wad")
-SRC = [Path("src/fj") / "present.fj", Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
+SRC = [Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
 POLLS = 4
 STUB = 7                                            # the world stub paints every column this colour
 ENTER, ESC, UP, DOWN, H_KEY = 0x0D, 0x1B, KC_UP, KC_DOWN, 0x68
@@ -124,16 +124,16 @@ def _program(menu_lines, scr0, frames):
                         "    ")
     return "\n".join([
         "stl.startup_and_init_all",
-        "present.init_screen",
+        "screen.init_screen W, H, 8",
         "tm_frame:",
         *[f"    hex.zero 1, {e}" for e in ("ev_enter", "ev_esc", "ev_up", "ev_dn", "ev_help", "ev_any")],
         f"    rep({POLLS}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, kb_w5, kb_now, "
         "ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad",     # P10: ev_any
         *menu_lines,                                # ends at `do_world:`
-        "    present.draw_collines",
+        "    screen.draw_collines",
         *world,
         "frame_end:",
-        "    present.end_frame",
+        "    screen.end_frame W, 0",
         "    hex.inc 2, tm_count",
         "    hex.cmp 2, tm_count, tm_frames, tm_frame, tm_done, tm_done",
         "tm_done:", "    stl.loop",

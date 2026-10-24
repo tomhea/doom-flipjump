@@ -159,11 +159,11 @@ FAMILIES = ["hex.ptr_index", "hex.read_byte", "hex.write_byte", "hex.read_hex", 
 
 # the label table's file indices (fN) on the game tier, for printing call sites (cosmetic)
 _GEN = "build/generated_" + default_fjm().stem
-FILES = {"f3": "src/fj/projection.fj", "f4": "src/fj/frame_render.fj",
-         "f7": "src/fj/stream_render.fj", "f8": "src/fj/input.fj", "f9": "src/fj/sim.fj",
-         "f11": _GEN + "/e1m1_01_tables.fj", "f12": _GEN + "/e1m1_02_main.fj",
-         "f13": _GEN + "/e1m1_03_segconsts.fj", "f14": _GEN + "/e1m1_04_walk.fj",
-         "f16": _GEN + "/e1m1_06_banks.fj", "f17": "src/fj/m1_reset.fj", "f18": _GEN + "/e1m1_07_reset.fj"}
+FILES = {"f2": "src/fj/projection.fj", "f3": "src/fj/frame_render.fj",
+         "f6": "src/fj/stream_render.fj", "f7": "src/fj/input.fj", "f8": "src/fj/sim.fj",
+         "f10": _GEN + "/e1m1_01_tables.fj", "f11": _GEN + "/e1m1_02_main.fj",
+         "f12": _GEN + "/e1m1_03_segconsts.fj", "f13": _GEN + "/e1m1_04_walk.fj",
+         "f15": _GEN + "/e1m1_06_banks.fj", "f16": "src/fj/m1_reset.fj", "f17": _GEN + "/e1m1_07_reset.fj"}
 _SRC = {}
 
 

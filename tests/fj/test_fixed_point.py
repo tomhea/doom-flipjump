@@ -4,7 +4,6 @@ For each op a single fj program runs all cases and prints the results; the expec
 computed by the host mirror (src/doomfj/fixedpoint.py). Byte-exact equality proves the kept PR #1
 macros match the host math bit-for-bit (M2 exit / R6). read_entry is covered every-entry +
 call-twice (R5 #8)."""
-from pathlib import Path
 
 import flipjump as fj
 

@@ -21,7 +21,7 @@ from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer
 from tests.fj.stream_screen import StreamScreen
 
-SRC = [ROOT / "src/fj" / f for f in ("present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 cfg = Config()

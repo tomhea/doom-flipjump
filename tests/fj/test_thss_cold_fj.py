@@ -21,7 +21,7 @@ from doomfj.config import Config
 from doomfj.harness import W
 
 ROOT = Path(__file__).resolve().parents[2]
-FJ_NAMES = ("present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
+FJ_NAMES = ("projection.fj", "frame_render.fj", "plane_render.fj",
             "plane_bands.fj", "stream_render.fj")
 CFG = wr.tier_cfg(Config(), "game")
 NROW, NHOT, N = 24, 64, 60

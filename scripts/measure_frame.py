@@ -33,7 +33,7 @@ from doomfj.wireformat import encode_feed_mapunits
 from tests.fj.stream_screen import StreamScreen
 
 SRC = [ROOT / "src/fj" / f for f in
-       ("present.fj", "projection.fj", "frame_render.fj", "plane_render.fj")]
+       ("projection.fj", "frame_render.fj", "plane_render.fj")]
 # M13pS2: raster_mode="stream" additionally needs the band-list kernel + the run emitter, and the
 # frame decodes through StreamScreen (the run-stream device) instead of the framebuffer screen.
 STREAM_SRC = [ROOT / "src/fj" / f for f in ("plane_bands.fj", "stream_render.fj")]

@@ -6,7 +6,7 @@
 // ==============================================================================================
 // THE STREAM EMITTER — the per-column device-RUN raster. Walks a column's run-lists (ceiling band
 // list, wall run(s), floor band list, sprite fragments) and pushes each run out as `byte.emit` /
-// `cm.emit` through the device-emit dispatch tables (present.fj's `begin_frame_stream` + the tables
+// `cm.emit` through the device-emit dispatch tables (`screen.draw_collines` + the tables
 // `doomfj.lut_generator.generate_emit_dispatch_table_fj` emits, named "byte"/"cm" by the includer).
 // `emit_col_lines` is the shipped per-column entry point. (`flush_frame`, the rung-3b whole-frame
 // assembler, was retired 2026-09-11 having never shipped -- docs/handoff-m13-2s.md keeps its

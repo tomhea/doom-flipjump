@@ -4,7 +4,6 @@
 catches pointer/result-reg cleanup bugs), and assert byte-exact equality with the host value — so the fj
 renderer and the oracle index identical projection data (D12). This is the data layer of the fj renderer.
 """
-from pathlib import Path
 
 import flipjump as fj
 

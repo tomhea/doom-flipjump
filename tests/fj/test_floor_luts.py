@@ -4,7 +4,6 @@ R6 SSOT); here we assemble the emitted table, read a spread of entries TWICE eac
 pointer/result-reg cleanup bugs), and assert byte-exact equality with the host value. So the fj floor
 raster (M13c/d) and the oracle (`_plane_pixel`/`_draw_span`) index identical visplane data (D12).
 """
-from pathlib import Path
 
 import flipjump as fj
 

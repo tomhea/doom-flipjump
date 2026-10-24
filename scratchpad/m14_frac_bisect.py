@@ -282,8 +282,7 @@ def run_head_to_kernel(tmp: Path):
     src.write_text(prog, encoding="utf-8")
     out = tmp / "head.fjm"
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
-    fj.assemble([consts.resolve(), (ROOT / "src/fj/present.fj").resolve(),
-                 PROJ.resolve(), (ROOT / "src/fj/stream_render.fj").resolve(), src.resolve()],
+    fj.assemble([consts.resolve(), PROJ.resolve(), (ROOT / "src/fj/stream_render.fj").resolve(), src.resolve()],
                 out, memory_width=W, print_time=False)
     print("\nEMITTER HEAD -> wall_x_range, seg 424, via the real wire:")
     ok = True

@@ -20,7 +20,7 @@ from doomfj.texturecompiler import _index_nibbles                       # noqa: 
 from doomfj import wall_renderer as wr                                  # noqa: E402
 from doomfj.wad import WadFile                                          # noqa: E402
 
-SRC = [ROOT / "src/fj" / f for f in ("present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 

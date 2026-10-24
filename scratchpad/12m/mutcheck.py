@@ -74,11 +74,8 @@ MUTATIONS = [
     # `decode_picture`, and there is no decode any more -- the icon is generated from
     # WINDOW_ICON_ART. C1 caught the dead anchor rather than skipping it, which is the whole
     # reason C1 exists. The two below target what replaced it.
-    ("wall_renderer: the chrome goes back into the per-frame prelude",
-     "src/doomfj/wall_renderer.py",
-     '    prelude = ["present.set_palette palette"]',
-     '    prelude = ["present.set_palette palette"] + _chrome_calls',
-     "tests/host/test_wall_renderer_helpers.py"),
+    # RETIRED too: "the chrome goes back into the per-frame prelude" -- its anchor (the per-frame palette line
+    # of the old prelude) left the emitter long ago, and its screen command is the stl's now.
     ("wall_renderer: icon ink becomes the transparent index",
      "src/doomfj/wall_renderer.py", "WINDOW_ICON_INDEX = 181", "WINDOW_ICON_INDEX = 0",
      "tests/host/test_wall_renderer_helpers.py"),

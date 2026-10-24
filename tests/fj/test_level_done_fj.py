@@ -269,11 +269,11 @@ def _frame_text(swap=False, mapname="E1M1") -> tuple:
     if swap:                                             # slot 4 (the items' tens) draws a 2 for a 1 and a 1 for a 2
         frame = frame.replace("  lvd4_1:\n", "  lvd4_T:\n").replace("  lvd4_2:\n", "  lvd4_1:\n") \
                      .replace("  lvd4_T:\n", "  lvd4_2:\n")
-    body = ["stl.startup_and_init_all", "present.init_screen"]
+    body = ["stl.startup_and_init_all", "screen.init_screen W, H, 8"]
     for case in cases:
         body += _set(case) + ["stl.fcall dg_go, dg_ret", "stl.fcall fr_go, fr_ret"]
     body += ["stl.loop", "dg_go:", _digit_text(w), "    stl.fret dg_ret",
-             "fr_go:", frame, "    present.end_frame", "    stl.fret fr_ret", *SC.routine_lines(), *_decls(w)]
+             "fr_go:", frame, "    screen.end_frame W, 0", "    stl.fret fr_ret", *SC.routine_lines(), *_decls(w)]
     want = [level_done_pixels(CFG.W, CFG.H, colours, len(w.secret_sectors), _want(c, totals, nd)) for c in cases]
     return "\n".join(body) + "\n", want, cases, totals
 
@@ -290,7 +290,7 @@ class _Recording(InMemoryScreen):
 
 def _run_frames(tmp_path, name, swap=False, mapname="E1M1"):
     text, want, _cases_, _t = _frame_text(swap, mapname)
-    out, _srcs = _assemble(tmp_path, name, text, extra=("present.fj",))
+    out, _srcs = _assemble(tmp_path, name, text, extra=())
     screen = _Recording()
     fj.run(out, io_device=screen, print_time=False, print_termination=False)
     return screen.frames, want

@@ -10,6 +10,15 @@ It lives in the doom repo, not in flipjump, so the 1.6.0 → `main` diff the own
 
 ---
 
+## THE RULE FOR EVERY CHANGE (owner, 2026-10-24)
+
+- Correctness first, then speed (measured), then the SMALLEST diff vs main that keeps both.
+- Design the smallest diff BEFORE implementing: reuse main's code paths; no renames, refactors, moved code or new
+  files unless unavoidable; main's names, style and function length.
+- Every report shows `git diff --stat main...` per file, before and after.
+- Reviewers block on "could this be smaller?".
+- A conflict between them goes to the owner, in numbers.
+
 ## RESUME HERE (paused 2026-10-24 ~12:30 for a Claude update)
 
 Every agent was paused. Each wrote its state to a file. Resume each piece with a NEW agent that reads its file:
@@ -110,7 +119,7 @@ The API is `flipjump/interpreter/io_devices/README.md`.
 | 1c | E1M1 (`build/doom_e1m1_io.fjm` = **blocked64**) | ✅ | m3 88 frames, m2 421, p2a, hurt, fight, die PASS; B0 OK 16,297,393 (+0.26% vs blocked63); window smoke PASS; re-checked on the cleaned device (m3, m2) |
 | 1d | E1M2 (`build/doom_e1m2_io.fjm`) | ✅ | m3, m2 (258), p2a, hurt, fight, die PASS; B0 OK 20,193,314; window smoke PASS |
 | 1e | E1M3+ | ✖ folded into 4d (owner) | — |
-| 1f | **E1M1 ship #1**: rebuild byte-identical, `gamespeed`, msframe A/B vs blocked63 | ▶ rebuild **BYTE-IDENTICAL** (`f52751a2bb846c7a`); gamespeed binding **16,921,550 PASS** (mean 16,151,475, p80 17,691,624), size **39.13% PASS** (file 39,836,502 bytes). msframe waits for a quiet box (refused while agents ran) | blocked63's 16,892,755 / 38.98% come from ship-gate.md, UNVERIFIED here: +0.17% ops, +0.15 points of size |
+| 1f | **E1M1 ship #1**: rebuild byte-identical, `gamespeed`, msframe A/B vs blocked63 | ✅ msframe (selftest PASS, a quiet box): **B SLOWER, 67.7 → 70.2 ms (+3.7%)**, ratio 0.961, all 5 pairs; pixels identical; ops +0.44% (16,066,011 → 16,136,442); **fj/s −3.2%** (237.4M → 229.9M), so the price sits in the device/engine path, not the program. Class F (D8): recorded as the API's price, under the 90 ms tripwire. **Speed item → 6d:** profile the new device's output path against the old one. The first run was VOID: its selftest failed while git ran beside it. Rebuild **BYTE-IDENTICAL** (`f52751a2bb846c7a`); gamespeed binding **16,921,550 PASS** (mean 16,151,475, p80 17,691,624), size **39.13% PASS** (file 39,836,502 bytes). msframe waits for a quiet box (refused while agents ran) | blocked63's 16,892,755 / 38.98% come from ship-gate.md, UNVERIFIED here: +0.17% ops, +0.15 points of size |
 | 1g | Ship record: `docs/ship-gate.md` 1 + 1b, CLAUDE.md's shipped-binary line, the README's play command, `shipped` baseline re-frozen on blocked64 under the new flipjump | ⏳ after 1f | — |
 | 1h | PR `io-api` → `m8-episode`, CI green, merge | ⏳ after 1g | — |
 

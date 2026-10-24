@@ -94,7 +94,7 @@ the tree) are dead. -122 / -196 / -202 executed ops per call.
 > sweep MAX went +164 while the median improved -- that is the placement de-tuning a -192 shift
 > causes. **The next filler carries +192.**
 
-| P2-1 | P2 | `frame.ptr_index`: the stl macro with the chained add, 22 sites | -104,166 / -54,902 / -93,042 / -71,704 | **18,697,401** (-57,501, -0.31%) | SHIP | (commit) |
+| P2-1 | P2 | `hex.ptr_index`: the stl macro with the chained add, 22 sites | -104,166 / -54,902 / -93,042 / -71,704 | **18,697,401** (-57,501, -0.31%) | SHIP | (commit) |
 
 **P2-1 detail.** `hex.ptr_index` is 1,196.8 executed ops per call and runs ~760x per median
 frame; 554.8 of that is one `hex.add w/4`. Swapping it for `frame.add8_chain` needs NO bound on

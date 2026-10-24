@@ -12,9 +12,9 @@ fr = plib.Frame(plib.by_frame(plib.load_cases())[("heavy", "gate664")][:4])
 REPS = (10, 30)
 HOT = "\n".join(["spslot:"] + [";0 * dw"] * 64 + ["gp_zero2: hex.vec 2"])
 SETUP = ["hex.set w/4, gps_sbase, sprbank", "hex.set w/4, gps_sidx, 64",
-         "frame.ptr_index gps_ptr, gps_sbase, gps_sidx",
+         "hex.ptr_index gps_ptr, gps_sbase, gps_sidx",
          "hex.set w/4, gps_yb8, spslot", "hex.set w/4, gps_sidx, 8",
-         "frame.ptr_index gps_ybase8, gps_yb8, gps_sidx",
+         "hex.ptr_index gps_ybase8, gps_yb8, gps_sidx",
          "hex.write_byte gps_ybase8, gp_zero2",          # a FULL arm into the hot block first
          "hex.set 4, gps_ybase, 20", "hex.set 2, gps_rel, 7", "hex.set 4, gps_cvh, 100",
          "hex.set 4, gps_smidx, 0x0512", "hex.set 8, trb_cbound, 100", "hex.set 8, trb_y_base, 40"]
@@ -31,7 +31,7 @@ BODIES = {
     "zero 2 + mov 2": ["hex.zero 2, srn_rel_w + 2*dw", "hex.mov 2, srn_rel_w, srn_rel"],
     "6 x shl_bit w/4 + set w/4": ["rep(6, k) hex.shl_bit w/4, gps_sidx", "hex.set w/4, gps_sidx, 8"],
     "set w/4": ["hex.set w/4, gps_sidx, 8"],
-    "ptr_index (full)": ["frame.ptr_index gps_ptr, gps_sbase, gps_sidx"],
+    "ptr_index (full)": ["hex.ptr_index gps_ptr, gps_sbase, gps_sidx"],
     "write_byte5 (hot)": ["frame.write_byte5 gps_ybase8, gp_zero2"],
     "read_byte5 (hot)": ["frame.read_byte5 gps_rel, gps_ybase8"],
     "mov 8 + clamp_row": ["hex.mov 8, trb_sy1, trb_y_base", "frame.clamp_row trb_sy1, trb_cbound"],

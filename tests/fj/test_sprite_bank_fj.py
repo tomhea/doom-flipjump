@@ -594,9 +594,9 @@ def _record_program(src, cases, seen_on=False, ledges=None):
                      "    hex.set 8, trb_frac_u, %d" % (u << 16), "    hex.set 8, trb_tistep, 0",
                      "    hex.set 2, trb_dw_max, %d" % (DW_REC - 1),
                      "    hex.set w/4, trb_drawn_b, drawn",
-                     "    frame.ptr_index4 trb_drawn_p, trb_drawn_b, trb_col_x",
+                     "    hex.ptr_index 3, trb_drawn_p, trb_drawn_b, trb_col_x",
                      "    hex.set w/4, trb_sprflag_b, sprflag",
-                     "    frame.ptr_index4 trb_sprflag_p, trb_sprflag_b, trb_col_x",
+                     "    hex.ptr_index 3, trb_sprflag_p, trb_sprflag_b, trb_col_x",
                      "    stl.fcall t_col_leaf, t_ret"]
     ncol = N_COLS * len(cases)
     for base, n in (("gpslot", wr.SPR_THING_SLOT_BYTES * (len(cases) + 1)),

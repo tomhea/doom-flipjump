@@ -7,7 +7,7 @@
 // ==============================================================================================
 ns gpspr {
     // stream.steps_face, WINDOW-FIRST. The only change: the draw window [draw_lo, draw_hi) is
-    // computed and tested BEFORE the shade lookup (frame.step_shade = ptr_index6 + read_byte)
+    // computed and tested BEFORE the shade lookup (frame.step_shade = hex.ptr_index 5 + read_byte)
     // and the pattern walk. The original computes the shade for a face that lies wholly outside
     // the region's window and only then lets the walker's own guard emit nothing -- which is what
     // the SECOND region of a sprite-split column does for every face above the sprite.
@@ -245,7 +245,7 @@ ns gpspr {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx                   // x 4 bytes per slot
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.read_byte_and_inc gps_y0, gps_ptr
         hex.read_byte_and_inc gps_y0 + 2*dw, gps_ptr
         hex.read_byte gps_lr, gps_ptr
@@ -257,7 +257,7 @@ ns gpspr {
         hex.mov 4, gps_sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, gps_sidx
         hex.set w/4, gps_sbase, sprbank
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.read_byte_and_inc gps_r0, gps_ptr       // gps_r0 / gps_last are 4 wide, high byte 0
         hex.read_byte_and_inc gps_last, gps_ptr
         hex.ptr_inc gps_ptr                         // past [n]: at the first (rel, texel)
@@ -418,7 +418,7 @@ ns gpspr {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx                   // x 4 bytes per slot
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.mov 8, gps_yb8, trb_y0
         hex.add_constant 8, gps_yb8, 32768
         hex.write_byte_and_inc gps_ptr, gps_yb8
@@ -471,7 +471,7 @@ ns gpspr {
         hex.mov w/4, trb_blk_ofs, trb_blk
         rep(blkshift, k) hex.shl_bit w/4, trb_blk_ofs
         hex.set w/4, trb_tbl_b, sprbank
-        frame.ptr_index trb_tbl_p, trb_tbl_b, trb_blk_ofs
+        hex.ptr_index trb_tbl_p, trb_tbl_b, trb_blk_ofs
         hex.ptr_add trb_tbl_p, 1                    // only last_rel: r0 is read in pass 2 now
         hex.read_byte trb_run_last, trb_tbl_p
         hex.if0 2, trb_run_last, col_next           // a fully transparent sprite column
@@ -481,7 +481,7 @@ ns gpspr {
         hex.shl_hex w/4, 1, trb_tab_idx             // 16 bytes per column, as TODAY
         hex.add w/4, trb_tab_idx, trb_slot_ofs
         hex.set w/4, trb_tbl_b, spslot
-        frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.ptr_index 5, trb_tbl_p, trb_tbl_b, trb_tab_idx
         hex.write_byte_and_inc trb_tbl_p, gps_s_rec
         frame.write_byte_and_inc5 trb_tbl_p, trb_blk
         frame.write_byte5 trb_tbl_p, trb_blk + 2*dw
@@ -554,7 +554,7 @@ ns gpspr {
     }
     // a block ADDRESS by whole-nibble placement: 64 ops x 64 bits = 4096 = 16^3 bits per block,
     // so base + blk*4096 is the four nibbles of blk written at nibble 3, plus the base. TODAY:
-    // six shl_bit w/4 and a frame.ptr_index (the same address, bit-shifted, then scaled by dw).
+    // six shl_bit w/4 and a hex.ptr_index (the same address, bit-shifted, then scaled by dw).
     def blk_addr dst, blk, base < gps_boff {
         hex.zero w/4, gps_boff
         hex.mov 4, gps_boff + 3*dw, blk
@@ -572,7 +572,7 @@ ns gpspr {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.read_byte_and_inc gps_y0, gps_ptr
         hex.read_byte_and_inc gps_y0 + 2*dw, gps_ptr
         hex.read_byte gps_lr, gps_ptr
@@ -782,7 +782,7 @@ ns gpspr {
         hex.shl_hex w/4, 1, trb_tab_idx
         hex.add w/4, trb_tab_idx, trb_slot_ofs
         hex.set w/4, trb_tbl_b, spslot
-        frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.ptr_index 5, trb_tbl_p, trb_tbl_b, trb_tab_idx
         hex.write_byte_and_inc trb_tbl_p, gps_s_rec
         frame.write_byte_and_inc5 trb_tbl_p, trb_blk
         frame.write_byte5 trb_tbl_p, trb_blk + 2*dw

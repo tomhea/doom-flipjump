@@ -625,7 +625,7 @@ ns frame {
         hex.shl_hex w/4, SLOT_SHIFT, lt_idx             // the column's slot: a power-of-16 stride
         rep(SLOT_BIT, k) hex.shl_bit w/4, lt_idx        // M8 L1: x 2 more for a two-byte pid (SLOT_STRIDE 32)
         hex.set w/4, lt_p, sfslot
-        .ptr_index5 lt_b, lt_p, lt_idx
+        hex.ptr_index 4, lt_b, lt_p, lt_idx
         hex.if_flags cv, 0x0606, l_part, u_some
       u_some:
         hex.mov w/4, lt_p, lt_b
@@ -818,7 +818,7 @@ ns frame {
         hex.mov 2*ltw, trb_tab_idx + 2*dw, sp_lt              // M7 P3.1: `ltw` bytes of class
         hex.mov 2, trb_tab_idx, trb_bucket_h
         hex.set w/4, trb_tbl_b, sprlight
-        frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.ptr_index 5, trb_tbl_p, trb_tbl_b, trb_tab_idx
         hex.read_byte trb_shade_row, trb_tbl_p
         // M7 P1.4 -- THE THING'S SLOT. A fragment is recorded as (slot, block): its per-THING
         // constants -- the top row of its bucket, biased, its light row and (M7 P1.6) its bucket,
@@ -836,7 +836,7 @@ ns frame {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx               // x 4 bytes per slot
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.mov 8, gps_yb8, trb_y0
         hex.add_constant 8, gps_yb8, 32768      // two bytes: a tall NEAR sprite's top sits far above
                                                 // row -128, and a one-byte bias WRAPPED (M13-15M)
@@ -863,9 +863,9 @@ ns frame {
         hex.mov 2, trb_dw_max, sp_dw
         hex.dec 2, trb_dw_max                       // the last downscaled texture column
         hex.set w/4, trb_drawn_b, drawn
-        frame.ptr_index4 trb_drawn_p, trb_drawn_b, trb_col_x
+        hex.ptr_index 3, trb_drawn_p, trb_drawn_b, trb_col_x
         hex.set w/4, trb_sprflag_b, sprflag
-        frame.ptr_index4 trb_sprflag_p, trb_sprflag_b, trb_col_x
+        hex.ptr_index 3, trb_sprflag_p, trb_sprflag_b, trb_col_x
       col_loop:
         hex.cmp 2, trb_col_x, trb_tx2, col_body, col_body, ret
       col_body:
@@ -943,7 +943,7 @@ ns frame {
         rep(slotstride/16, k) hex.shl_hex w/4, 1, trb_tab_idx   // a power-of-16 stride: whole-nibble shift
         hex.add w/4, trb_tab_idx, trb_slot_ofs          // V4b: slot B lives at byte offset 8
         hex.set w/4, trb_tbl_b, spslot
-        frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.ptr_index 5, trb_tbl_p, trb_tbl_b, trb_tab_idx
         // P2-5: the FIRST write keeps the full arm -- its predecessor is the sprite-bank
         // (high-cluster) read above. Every later write follows it, inside spslot / sprflag, so
         // they take the narrow one. M7 P1.4: three bytes, [s][blk lo][blk hi], where there were
@@ -995,7 +995,7 @@ ns frame {
         rep(seen, k) hex.sub 8, trb_y0, trb_bucket_h
         rep(seen, k) .ledge_box trb_y0, trb_bucket_h, trb_ylo1, trb_yhi1, viewh
         rep(seen, k) hex.set w/4, trb_drawn_b, drawn
-        rep(seen, k) frame.ptr_index4 trb_drawn_p, trb_drawn_b, trb_col_x
+        rep(seen, k) hex.ptr_index 3, trb_drawn_p, trb_drawn_b, trb_col_x
       seen_loop:
         rep(seen, k) hex.cmp 2, trb_col_x, trb_tx2, seen_col, seen_col, ret
       seen_col:
@@ -1004,7 +1004,7 @@ ns frame {
         rep(seen, k) .rec_goto seen_next
       seen_open:                                // P11 (d): open -- and not FULLY behind its nearer pieces
         rep(seen, k) hex.set w/4, trb_tbl_b, sfflag
-        rep(seen, k) frame.ptr_index4 trb_clip_p, trb_tbl_b, trb_col_x
+        rep(seen, k) hex.ptr_index 3, trb_clip_p, trb_tbl_b, trb_col_x
         rep(seen, k) frame.read_byte5 trb_clip_v, trb_clip_p
         rep(seen, k) .ledge_test trb_clip_v, trb_col_x, trb_ylo1, trb_yhi1, 1, seen_next
         rep(seen, k) .rec_goto seen_hit
@@ -1319,15 +1319,15 @@ ns frame {
         hex.zero 6, tsf_col_x + 2*dw            // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, tsf_col_x, x1
         hex.set w/4, tsf_drawn_b, drawn             // the occlusion flag, read but never written here
-        frame.ptr_index4 tsf_drawn_p, tsf_drawn_b, tsf_col_x
+        hex.ptr_index 3, tsf_drawn_p, tsf_drawn_b, tsf_col_x
         hex.set w/4, tsf_sfflag_b, sfflag           // one byte per column: which slots are filled
-        frame.ptr_index4 tsf_sfflag_p, tsf_sfflag_b, tsf_col_x
+        hex.ptr_index 3, tsf_sfflag_p, tsf_sfflag_b, tsf_col_x
         hex.zero w/4 - 2, tsf_slot_idx + 2*dw   // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, tsf_slot_idx, tsf_col_x
         hex.shl_hex w/4, SLOT_SHIFT, tsf_slot_idx            // slotstride = 16 bytes -> a whole-nibble shift
         rep(SLOT_BIT, k) hex.shl_bit w/4, tsf_slot_idx       // M8 L1: 32 for a two-byte pid
         hex.set w/4, tsf_sfslot_b, sfslot
-        frame.ptr_index5 tsf_sfslot_p, tsf_sfslot_b, tsf_slot_idx
+        hex.ptr_index 4, tsf_sfslot_p, tsf_sfslot_b, tsf_slot_idx
       col_loop:
         hex.cmp 2, tsf_col_x, x2, col_body, nofaces, nofaces
       col_body:
@@ -1525,7 +1525,7 @@ ns frame {
         hex.sparse_mov HOT_PAD, 2, x, xa                        // the claim scan over the stride-1 pclm[]
         hex.set w/4, pbase, pclm
         // M4: `x` is the LOOP COUNTER as well as the index, so a wide pid cannot scale it in place
-        rep(2-PID_BYTES, k) frame.ptr_index4 pptr, pbase, x  // reads w/4 nibbles of its index (R11)
+        rep(2-PID_BYTES, k) hex.ptr_index 3, pptr, pbase, x  // reads 3 nibbles of its index (R11)
         rep(PID_BYTES-1, k) .lines_pclm_index2 pptr, pbase, x
       col_loop:
         hex.cmp 2, x, xb, col_body, ret, ret
@@ -1711,7 +1711,7 @@ ns frame {
         hex.mov 2, sh_idx, y2
         hex.sub 2, sh_idx, y1
         hex.inc 2, sh_idx                       // h = y2 - y1 + 1, in [1, VIEW_H]
-        frame.ptr_index6 sh_p, cpb, sh_idx
+        hex.ptr_index 5, sh_p, cpb, sh_idx
         hex.read_byte cls, sh_p                 // in place: the class byte becomes the colour byte
         ;end
       sh_idx: hex.vec w/4
@@ -1744,7 +1744,7 @@ ns frame {
         hex.zero 2, ly2p1
         hex.zero 2, lcol
         hex.set w/4, sfflag_b, sfflag
-        frame.ptr_index4 sfflag_p, sfflag_b, x
+        hex.ptr_index 3, sfflag_p, sfflag_b, x
         hex.read_byte stv, sfflag_p
         hex.if0 2, stv, end                     // no face in this column -- the common case
         hex.mov 2, ctake, cexcl                 // ctake = min(cexcl, fstart), as the emit computes it
@@ -1757,7 +1757,7 @@ ns frame {
         hex.shl_hex w/4, SLOT_SHIFT, slot_idx            // 16 bytes per column -> a whole-nibble shift
         rep(SLOT_BIT, k) hex.shl_bit w/4, slot_idx       // M8 L1: 32 for a two-byte pid
         hex.set w/4, sfslot_b, sfslot
-        frame.ptr_index5 sfslot_p, sfslot_b, slot_idx
+        hex.ptr_index 4, sfslot_p, sfslot_b, slot_idx
         hex.set w/4, shade_b, stepcol
         // ---- UPPER: [uy1, min(uy2, ctake-1)], inside the ceiling region
         hex.if0 1, stv, up_none
@@ -1840,51 +1840,6 @@ ns frame {
         hex.zero 8, p2_stepf
         rep(8, j) hex.mul_low.row 8, j, p2_stepf, wtf8, scalestep + j*dw
     }
-    // P2-1 (2026-09-04): hex.ptr_index with a chained add.
-    //   the stl macro is  mov w/4 ; shl_hex ; 3x shr_bit ; shl_hex ; ADD w/4  -- and measured
-    //   1,196.8 executed ops per call, of which the final `hex.add w/4` alone is 554.8. That add
-    //   is what a chained add does more cheaply -- the stl's hex.add 8 is one now -- and every width of
-    //   this macro carries the same add, so the swap moved no label at all. Measured: identical pointers for indices
-    //   0x42 / 0x1F64 / 0xFFFF, -84.0 executed ops per call, 0 ops of space.
-    // The chain is the LAST statement, so nothing runs inside its hermetic window.
-    // P2-2 (2026-09-04): the same macro with the SHIFT STAGE at the width the index needs.
-    //   ptr_index computes ptr + index*2w and 2w = 64, so a shift stage of width sw is exact iff
-    //   index < 16^sw / 64:  sw=4 -> index < 1,024;  sw=5 -> < 16,384;  sw=6 -> < 262,144.
-    //   (That rule is MEASURED, not derived: reading the shift sequence as x32 gives 16^sw/32,
-    //   which is wrong by a factor of two -- index 2047 already breaks sw=4. See FINDINGS Q.)
-    //   The mov must stay w/4 -- it clears dst for the 8-nibble add -- and the add must
-    //   stay w/4 because ptr is a full address.
-    // THE FILLER IS INSIDE THE MACRO, behind the jump, so every expansion is exactly the size of
-    // the width-8 form and nineteen call sites in a dozen macros need no local fillers at all.
-    // Measured size-identical at all three widths; the jump's one op is included in the savings
-    // below (vs 1,103.8 for width 8): sw=6 1,016.8, sw=5 952.8, sw=4 884.8.
-    def ptr_index_fill sw, fill, dst, ptr, index @ end {
-        hex.mov w/4, dst, index
-        hex.shl_hex sw, dst
-        rep(8-#w, i) hex.shr_bit sw, dst
-        hex.shl_hex sw, dst
-        hex.add 8, dst, ptr
-        ;end
-        rep(fill, i) stl.fj 0, 0
-      end:
-    }
-    def ptr_index4 dst, ptr, index {    // index < 1,024
-        .ptr_index_fill 4, 767, dst, ptr, index
-    }
-    def ptr_index5 dst, ptr, index {    // index < 16,384
-        .ptr_index_fill 5, 575, dst, ptr, index
-    }
-    def ptr_index6 dst, ptr, index {    // index < 262,144
-        .ptr_index_fill 6, 383, dst, ptr, index
-    }
-    def ptr_index dst, ptr, index {
-        hex.mov w/4, dst, index
-        hex.shl_hex w/4, dst
-        rep(8-#w, i) hex.shr_bit w/4, dst
-        hex.shl_hex w/4, dst
-        hex.add 8, dst, ptr
-    }
-
     // idea 17 (2026-09-03): read a byte into a dst the caller PROVABLY just zeroed --
     // hex.read_byte's own `.zero 2, dst` (~30 executed ops) is redundant there. Only the
     // loaders' piece paths use this, right after their Z-blocks; a dst that can be nonzero
@@ -2104,13 +2059,13 @@ ns frame {
     // idea 11 helpers: seed per seg, step at skipcol, loaders read the shared globals.
     def lines_steps_seed x1 @ sidx, bteam, end_seed < sfflag, sfslot, p2_sffp, p2_sfsp {
         hex.set w/4, bteam, sfflag
-        frame.ptr_index4 p2_sffp, bteam, x1
+        hex.ptr_index 3, p2_sffp, bteam, x1
         hex.zero w/4 - 2, sidx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, sidx, x1
         hex.shl_hex w/4, SLOT_SHIFT, sidx
         rep(SLOT_BIT, k) hex.shl_bit w/4, sidx           // M8 L1: 32 for a two-byte pid
         hex.set w/4, bteam, sfslot
-        frame.ptr_index5 p2_sfsp, bteam, sidx
+        hex.ptr_index 4, p2_sfsp, bteam, sidx
         ;end_seed
       sidx: hex.vec w/4
       bteam: hex.vec w/4
@@ -2118,12 +2073,12 @@ ns frame {
     }
     def lines_spr_seed x1 @ sidx, bteam, end_seed < sprflag, spslot, p2_spfp, p2_sspp {
         hex.set w/4, bteam, sprflag
-        frame.ptr_index4 p2_spfp, bteam, x1
+        hex.ptr_index 3, p2_spfp, bteam, x1
         hex.zero w/4 - 2, sidx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, sidx, x1
         hex.shl_hex w/4, 1, sidx                 // spslot's OWN stride (SPR_SLOT_STRIDE)
         hex.set w/4, bteam, spslot
-        frame.ptr_index5 p2_sspp, bteam, sidx
+        hex.ptr_index 4, p2_sspp, bteam, sidx
         ;end_seed
       sidx: hex.vec w/4
       bteam: hex.vec w/4
@@ -2408,13 +2363,13 @@ ns frame {
       over:
         hex.mov w/4, tmp, idx
         hex.shl_bit w/4, tmp              // idx*2: two bytes per column
-        frame.ptr_index4 dst, base, tmp
+        hex.ptr_index 3, dst, base, tmp
     }
 
     // per-SEG setup / per-column advance of the pclm[] pointer (the lockstep partner of dptr).
     def lines_plane_ptr x1 < pclm, pbase, pptr {
         hex.set w/4, pbase, pclm
-        rep(2-PID_BYTES, k) frame.ptr_index4 pptr, pbase, x1
+        rep(2-PID_BYTES, k) hex.ptr_index 3, pptr, pbase, x1
         rep(PID_BYTES-1, k) .lines_pclm_index2 pptr, pbase, x1
     }
 
@@ -2495,14 +2450,14 @@ ns frame {
         //
         // ⚠ THE `zero 8` IS LOAD-BEARING, do not drop it. An earlier version of this comment
         // claimed `x` is only read 2-wide here; that is FALSE (CR-2026-09-07).
-        // `frame.lines_step_load` does `frame.ptr_index4 sfflag_p, sfflag_b, x`, and
-        // `ptr_index_fill` opens with `hex.mov w/4, dst, index` -- eight nibbles. The correctness
-        // of this rewrite rests on the `zero 8` clearing all of them, NOT on x being narrow.
+        // `frame.lines_step_load` does `hex.ptr_index 3, sfflag_p, sfflag_b, x` -- three nibbles of x,
+        // one more than the mov below writes. The correctness of this rewrite rests on the `zero 8`
+        // clearing the rest, NOT on x being narrow.
         // Measured: this one call is 1,840,988 ops = 2.34% of the frame.
         hex.sparse_zero HOTTER_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
         hex.sparse_mov HOTTER_PAD, 2, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn
-        frame.ptr_index4 dptr, dbase, x1
+        hex.ptr_index 3, dptr, dbase, x1
         rep(noscan, k) .lines_jmp occproc        // ablate: what does the pre-scan actually buy?
         // M13-lines3: x/x2 are clipped columns in [0,161] here -- 2-nibble unsigned compares and
         // incs replace the 8-nibble signed forms in both hot loops (~2.4x cheaper each, measured).
@@ -2567,11 +2522,11 @@ ns frame {
         rep((1-pnear)*(1-ascode), k) .lines_seg_plane half_slots, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         rep((1-pnear)*ascode, k) .lines_seg_plane_ids p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         // W1: see the note at the pass-1 site. Same transform; the `zero 8` is load-bearing
-        // because `x` IS read 8-wide downstream (frame.lines_step_load -> ptr_index4 -> mov w/4).
+        // because `x` IS read wider than 2 downstream (frame.lines_step_load -> hex.ptr_index 3).
         // Measured: 1,059,850 ops = 1.35% of the frame.
         hex.sparse_zero HOT_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
         hex.sparse_mov HOT_PAD, 2, x, x1                        // the claim loop: re-aim drawn[] at x1
-        frame.ptr_index4 dptr, dbase, x1
+        hex.ptr_index 3, dptr, dbase, x1
         // idea 11: the load pointers walk in LOCKSTEP with x, like dptr/pclm above.
         rep(1-noproj, k) .lines_dda_seed scale, scalestep, p2_wtc8, p2_wtf8
         rep(steps*stack, k) .lines_steps_seed x1

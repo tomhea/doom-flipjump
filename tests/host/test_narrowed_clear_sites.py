@@ -66,7 +66,7 @@ CONTROL: cutting the sweep to one assignment, and evaluating the identities at a
 WHAT THIS DOES NOT COVER, and none of it is a substitute for the byte-exact gates:
 
 * A width hidden in a macro NAME or in a macro whose first argument is not a
-  width (`cm.apply`, `hex.ptr_index`, `frame.ptr_index`) is invisible to the coverage half. At a
+  width (`cm.apply`, the three-argument `hex.ptr_index`) is invisible to the coverage half. At a
   site whose only later references are of that shape the fallback is the `hex.vec` declaration,
   which bounds the register, not how wide the code reads it.
 * Only clears written with an OFFSET (`X + M*dw`) are treated as narrowed by the site scan. A clear

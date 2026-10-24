@@ -352,7 +352,7 @@ width-4 shift stage may be available at ~11 of the 22 sites -- unmeasured, worth
 `hex.ptr_index` call sites: 22 live ones (20 in frame_render.fj, 2 in stream_render.fj); the 8 in
 sim.fj and 3 in plane_render.fj are not in the visual tier. None is emitted from Python.
 
-## Q. frame.ptr_index's shift stage: the exact bound, measured (2026-09-04)
+## Q. hex.ptr_index's shift stage: the exact bound, measured (2026-09-04)
 
 ptr_index computes `ptr + index * 2w`, and **2w = 64**. So a shift stage of width `sw` is exact
 iff **index < 16^sw / 64**:
@@ -372,7 +372,7 @@ table above is the authority.** Evidence: 159 -> all widths agree; 2047 and 8036
 A column index (< VIEW_W = 160) is comfortably sw=4. `sh_idx = (cls<<8)|h` < 65,536 needs sw=6.
 This is the second lever on the ~760 ptr_index calls per median frame; P2-1 took the first.
 
-### Q2. The per-site bound census for frame.ptr_index (subagent, 2026-09-04) -- all 22 PROVEN
+### Q2. The per-site bound census for hex.ptr_index (subagent, 2026-09-04) -- all 22 PROVEN
 
 Nobody should re-derive these. Reusable emitter constants found in the process: SLOT_SHIFT = 1
 nibble (because PID_BYTES = 1), PIECE_BYTES = 4, SPRITE_HEIGHT_BUCKETS = 32,

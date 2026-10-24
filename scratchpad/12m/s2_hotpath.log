@@ -59,7 +59,7 @@ HOT DOOM MACROS (deepest non-stl caller -- our code)  (attributed 78,662,379 of 
   proj.point_to_angle                                 1,228,082    1.56%
   proj.scale_recip_div                                1,220,544    1.55%
   frame.ts_step_faces                                 1,189,139    1.51%
-  frame.ptr_index_fill                                1,140,826    1.45%
+  frame.the filled private ptr_index                                1,140,826    1.45%
   proj.scalestep                                      1,110,366    1.41%
   frame.add8_chain                                    1,102,425    1.40%
   frame.sub8_chain                                    1,021,584    1.30%

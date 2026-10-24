@@ -52,7 +52,7 @@ variants = [("BASE", [], ()),
              (plib.PROP_FJ,)),
             ("SR_NIB", ["hex.set 4, gps_cvh, %d" % plib.H, "gpspr.blk_addr gps_ptr, c_sblk, sprbank"], (plib.PROP_FJ,)),
             ("SR_SHL", ["hex.zero w/4, gps_sidx", "hex.mov 4, gps_sidx, c_sblk", "rep(6, k) hex.shl_bit w/4, gps_sidx",
-                        "hex.set w/4, gps_sbase, sprbank", "frame.ptr_index gps_ptr, gps_sbase, gps_sidx"], (plib.PROP_FJ,))]
+                        "hex.set w/4, gps_sbase, sprbank", "hex.ptr_index gps_ptr, gps_sbase, gps_sidx"], (plib.PROP_FJ,))]
 res = {}
 for name, leaf, xfj in variants:
     t0 = time.time()

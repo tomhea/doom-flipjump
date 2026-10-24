@@ -439,7 +439,7 @@ ns stream {
     // but anchored and shaded as the whole face, so the visible rows are pixel-identical to
     // the unfragmented ones). Reject empties/sentinels (y1 > y2 after the clip).
     // M7 P1.4: WINDOW-FIRST. The draw window is computed and tested BEFORE the shade lookup
-    // (frame.step_shade: ptr_index6 + read_byte), so a face that lies wholly outside [rlo, rhi) --
+    // (frame.step_shade: hex.ptr_index 5 + read_byte), so a face that lies wholly outside [rlo, rhi) --
     // every face above the sprite, in the region below it -- costs one compare. Pixel-neutral: both
     // walkers below emit nothing for an empty window (their own `wlo < whi` guards). The shade
     // read's pointer arm is gone on that path too, which no narrow read depends on: every read
@@ -853,7 +853,7 @@ ns stream {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx               // x 4 bytes per slot
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index ptr, gps_sbase, gps_sidx    // (ptr is free until the block address below)
+        hex.ptr_index ptr, gps_sbase, gps_sidx    // (ptr is free until the block address below)
         hex.read_byte_and_inc gps_y0, ptr
         hex.read_byte_and_inc gps_y0 + 2*dw, ptr
         hex.read_byte_and_inc gps_lr, ptr

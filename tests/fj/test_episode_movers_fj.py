@@ -73,7 +73,7 @@ def _run(tmp, name, program, feed, sim=False):
     src.write_text(program, encoding="utf-8")
     out = tmp / (name + ".fjm")
     extra = []
-    if sim:                                             # sim.jump16 and its constants
+    if sim:                                             # hex.switch and its constants
         from doomfj.config import Config
         extra = [Config().emit_fj_consts(tmp / "fj_consts.fj").resolve()]
     fj.assemble([*extra, *([(FJ / "sim.fj").resolve()] if sim else []),

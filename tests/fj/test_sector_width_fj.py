@@ -72,16 +72,16 @@ def test_dispatch_at_two_nibbles_is_the_old_text():
     """sector_dispatch at 2 nibbles: the two-level jump the emitters wrote before it (noisecode's dense form and
     monstercode's sparse form), label for label"""
     node_of = [_node(s) % 50 for s in range(182)]
-    old = ["    sim.jump16 c + 1*dw, " + ", ".join("p_h%d" % h if h < 12 else "m" for h in range(16))]
+    old = ["    hex.switch c + 1*dw, " + ", ".join("p_h%d" % h if h < 12 else "m" for h in range(16))]
     for h in range(12):
-        old += ["  p_h%d:" % h, "    sim.jump16 c, " + ", ".join(
+        old += ["  p_h%d:" % h, "    hex.switch c, " + ", ".join(
             "t%d" % node_of[16 * h + l] if 16 * h + l < 182 else "m" for l in range(16))]
     assert sector_dispatch("p_", "c", lambda s: "t%d" % node_of[s], "m", 182, 2) == old
     have = {3, 40, 41, 170}
     hs = sorted({s >> 4 for s in have})
-    old = ["    sim.jump16 c + 1*dw, " + ", ".join("qh%d" % h if h in hs else "m" for h in range(16))]
+    old = ["    hex.switch c + 1*dw, " + ", ".join("qh%d" % h if h in hs else "m" for h in range(16))]
     for h in hs:
-        old += ["  qh%d:" % h, "    sim.jump16 c, " + ", ".join(
+        old += ["  qh%d:" % h, "    hex.switch c, " + ", ".join(
             "qs%d" % (16 * h + l) if 16 * h + l in have else "m" for l in range(16))]
     assert sector_dispatch("q", "c", lambda s: "qs%d" % s if s in have else None, "m", 182, 2) == old
 

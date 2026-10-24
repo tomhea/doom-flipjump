@@ -68,7 +68,7 @@ SWITCH_LIGHT_SPECIALS = {138: 255}
 LIGHT_SPECIALS = {1: ("flash", 0, False), 2: ("strobe", FASTDARK, False), 3: ("strobe", SLOWDARK, False),
                   4: ("strobe", FASTDARK, False), 8: ("glow", 0, False), 12: ("strobe", SLOWDARK, True),
                   13: ("strobe", FASTDARK, True), 17: ("fire", 0, False)}
-MAX_LEVELS = 16               # a state is one nibble (`ltst`: sim.jump16, the one-nibble state switch)
+MAX_LEVELS = 16               # a state is one nibble (`ltst`: hex.switch, the one-nibble state switch)
 COUNT_NIBBLES = 2             # `ltct`: a flash's longest count is 65
 
 

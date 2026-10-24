@@ -550,21 +550,7 @@ def line_probes():
 # 4b. the 32-unit cell of a 16.16 position, by jumps on its coordinate nibbles
 # 5.  point location: a jump on the cell into the deepest safe BSP node, vs the full descent
 # =============================================================================================
-PRELUDE_J16 = [
-    "ns gp {",
-    "    // a 16-way jump on one hex cell, in the table shape the BlockPool can relocate: `pad 16`,",
-    "    // sixteen plain `a;b` entries, then a wflip naming the head label. Each trampoline",
-    "    // disarms the cell and jumps on (so a pinned cell pays only the index both ways).",
-    "    def jump16 x, " + ", ".join("t%d" % i for i in range(16)) +
-    " @ switch, " + ", ".join("r%d" % i for i in range(16)) + " {",
-    "        wflip x+w, switch, x",
-    "        pad 16",
-    "      switch:",
-    *["        ;r%d" % i for i in range(16)],
-    *["      r%d: wflip x+w, switch, t%d" % (i, i) for i in range(16)],
-    "    }",
-    "}",
-]
+PRELUDE_J16 = []     # the 16-way jump on one hex cell is the stl's hex.switch
 
 
 def _nib(v, i):
@@ -577,7 +563,7 @@ def sgn12(p):
 
 
 def jump_tree(tag, cell, nibs, keys, leaf, default):
-    """A tree of gp.jump16 on nibbles `nibs` (most significant first) of `cell`. `keys`: the set of
+    """A tree of hex.switch on nibbles `nibs` (most significant first) of `cell`. `keys`: the set of
     integer values to separate (the tree splits on their nibbles); `leaf(prefix_value) -> label`
     for the value the full path spells. Returns (code lines, root label)."""
     code = []
@@ -592,7 +578,7 @@ def jump_tree(tag, cell, nibs, keys, leaf, default):
             sub = [v for v in vals if _nib(v, nib) == d]
             targets.append(node((prefix << 4) | d, depth + 1, sub) if sub else default)
         code[:0] = []
-        code.extend(["%s:" % lab, "    gp.jump16 %s+%d*dw, %s" % (cell, nib, ", ".join(targets))])
+        code.extend(["%s:" % lab, "    hex.switch %s+%d*dw, %s" % (cell, nib, ", ".join(targets))])
         return lab
     root = node(0, 0, sorted(set(keys)))
     return code, root
@@ -655,13 +641,13 @@ def cell_lookup_probes():
     py = [((y & 0xFFFF) << 16) for x, y in pts]
     exp = lambda n: b"".join(le_bytes(cid(*pts[k & 255]), 2) for k in range(n))   # noqa: E731
     out = []
-    for name, extra in (("cell lookup: 6 jump16 levels", ()),):
+    for name, extra in (("cell lookup: 6 hex.switch levels", ()),):
         p = Probe(name, body=[";gp_cx_0_0", "gp_cdone:"],
                   pre=["gp_px.lookup gp_x, _mcnt", "gp_py.lookup gp_y, _mcnt"],
                   tables=d4("gp_px", px, 2, 8) + d4("gp_py", py, 2, 8),
                   prelude=PRELUDE_J16, blob=code_t,
                   data=["gp_x: hex.vec 8", "gp_y: hex.vec 8", "gp_cid: hex.vec 4"],
-                  extra_safe=("gp.jump16",),
+                  extra_safe=("hex.switch",),
                   note="x nibbles 7,6,5 then y nibbles 7,6,5 of 16.16 positions; E1M1 extent")
         pv = Probe(name + " [verify]", body=[";gp_cx_0_0", "gp_cdone:"], pre=p.pre,
                    tables=p.tables, prelude=PRELUDE_J16, blob=code_v, data=p.data,
@@ -761,11 +747,11 @@ def ptloc_probes():
     tables = d4("gp_px", px, 2, 10) + d4("gp_py", py, 2, 10)
     exp = lambda n: b"".join(le_bytes(pts[k & 255][2], 2) for k in range(n))   # noqa: E731
     common = dict(pre=pre, tables=tables, prelude=PRELUDE_J16, data=decls, files=[CONSTS],
-                  verify=["hex.print 2, ptss"], expected=exp, extra_safe=("gp.jump16",))
+                  verify=["hex.print 2, ptss"], expected=exp, extra_safe=("hex.switch",))
     full = Probe("ptloc full descent (ptloc_walk)", body=["stl.fcall ptloc_walk, ptloc_ret"],
                  blob=ptloc + code, **common,
                  note="E1M1, 256 live points; mean depth %.1f" % (sum(p[3] for p in pts) / 256))
-    grid = Probe("ptloc grid start (jump16 x3+x3 -> node)", body=["stl.fcall %s, ptloc_ret" % xroot],
+    grid = Probe("ptloc grid start (hex.switch x3+x3 -> node)", body=["stl.fcall %s, ptloc_ret" % xroot],
                  blob=ptloc + code, **common,
                  note="residual depth %.1f" % (sum(res_depth) / 256))
     return [full, grid], (sum(p[3] for p in pts) / 256, sum(res_depth) / 256)

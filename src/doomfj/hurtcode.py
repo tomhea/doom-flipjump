@@ -443,7 +443,7 @@ def pal_lines(loot: bool = False, suit: bool = False) -> List[str]:
     out += ["hex.cmp 1, pal_new, pal_cur, pl_chg, pl_out, pl_chg",
            "pl_chg:",
            "hex.mov 1, pal_cur, pal_new",
-           "sim.jump16 pal_new, " + ", ".join(tg)]
+           "hex.switch pal_new, " + ", ".join(tg)]
     for k in range(npal):
         out += ["pl_k%d:" % k, "present.select_palette %d" % k, ";pl_out"]
     return out + ["pl_out:"]

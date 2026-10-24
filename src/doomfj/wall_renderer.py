@@ -292,13 +292,13 @@ def light_class_fields(tfields, cls: int):
 
 
 def state_dispatch_lines(tag: str, cell: str, blocks) -> list:
-    """`sim.jump16` on the state nibble `cell` into `blocks[k]` (a list of lines) for state k, each ending at
+    """`hex.switch` on the state nibble `cell` into `blocks[k]` (a list of lines) for state k, each ending at
     `<tag>_end`; states past the last reuse the last block. The landings' idiom: plain code, so `hex.set` is legal.
     A mover's leaf (its floor: emit_wall_renderer's `_mover_dispatch`) and, M8, an animated light's leaf (its sprite
     light base) -- the text is the closure's it replaced, line for line."""
     labs = [f"{tag}_{k}" for k in range(len(blocks))]
     assert 0 < len(labs) <= 16, (tag, len(labs))
-    out = [f"    sim.jump16 {cell}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
+    out = [f"    hex.switch {cell}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
     for k, b in enumerate(blocks):
         out += [f"  {labs[k]}:", *b, f"    ;{tag}_end"]
     return out + [f"  {tag}_end:"]
@@ -2228,7 +2228,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         return sec_ if sec_ in _msecs else None
 
     def _cell_dispatch(tag, cell, svs, block):
-        """`sim.jump16` on the state nibble `cell` into one block per state -- `block(sv)` gives a state's lines from
+        """`hex.switch` on the state nibble `cell` into one block per state -- `block(sv)` gives a state's lines from
         its sector list `svs[k]` -- each ending at `<tag>_end` (states past the last reuse the last block). The
         landings' idiom: plain code, so `hex.set` is legal. (M8: a mover's and a light thinker's.)"""
         return state_dispatch_lines(tag, cell, [block(sv) for sv in svs])
@@ -2309,7 +2309,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         cell = _seg_cell(seg)
         if isinstance(cell, tuple):
             # M8 L1: two movers (M8: or a machine and a light, or two lights) -- a block per PAIR of states behind a
-            # switch on both cells (the first machine's state switch, whose landings sim.jump16 on the second's)
+            # switch on both cells (the first machine's state switch, whose landings hex.switch on the second's)
             na_, nb_ = (len(m_[2]) for m_ in _seg_machines(seg))
             assert len(variants) == na_ * nb_
             blk = []
@@ -2910,7 +2910,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
     def _baked_barrel_site(cid, ti, tag, t, tfields, tsec, xorby_blocks):
         """M7 P6 (docs/gp-p67-interface.md 5) -- a BAKED barrel's call site: removed (bar_st 0) draws nothing; else a
-        jump on its state's low nibble (sim.jump16; the seven barrel states' low nibbles are distinct) into its
+        jump on its state's low nibble (hex.switch; the seven barrel states' low nibbles are distinct) into its
         state's block: S_BAR1's xor_by block is the map barrel's own (`tfields`, today's), each other state's
         carries its lump's row (monstercode.barrel_view_rows, the anim bank) -- art, depth bounds, bank regions and
         light class; standing (S_BAR1 / S_BAR2) it sets its aim id 1 + nmon + b and class RC_BARREL and draws with
@@ -2952,7 +2952,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             blocks += [f"    stl.fcall {label}, xb_ret",
                        f"    stl.fcall {'thing_leaf_bb' if stand else _baked_leaf}, thing_ret",
                        f"    stl.fcall {label}, xb_ret", f"    ;{L}_skip"]
-        head.append(f"    sim.jump16 bar_st + {2 * b}*dw, " + ", ".join(lows.get(n, f"{L}_skip") for n in range(16)))
+        head.append(f"    hex.switch bar_st + {2 * b}*dw, " + ", ".join(lows.get(n, f"{L}_skip") for n in range(16)))
         return head + blocks + [f"  {L}_skip:"]
 
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).

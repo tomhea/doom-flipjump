@@ -300,7 +300,7 @@ class Survey:
         self.guard("hanging things on still sectors", self.hanging)
         # M8 C11: THE MONSTER SLOT IDS, from the WAD (the World refuses E1M6 / E1M7 before its own row runs): a slot per
         # monster of EVERY skill plus the barrels -- dm_id, sp_sid, aim_sid, mon_target / bar_src (2 + slot), p_atk are
-        # BYTES in fj with two-level jump16 dispatches (world._code_bits, aim_bits, barrelcode's `dm_id is two nibbles`).
+        # BYTES in fj with two-level hex.switch dispatches (world._code_bits, aim_bits, barrelcode's `dm_id is two nibbles`).
         # DOOM's monsters, the ones gamedata lacks included (3003 the Baron, 3006 the lost soul, ...)
         # M8 C2 (docs/c2-slot-ids.md): past world.SLOT_IDS_NARROW every one of them is THREE nibbles -- the cap is the
         # map's Config.SLOT_ID_BITS (MAP_CONFIG), the width the emitter checks (wall_renderer.check_slot_bits)

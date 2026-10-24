@@ -2,7 +2,7 @@
 
 A seg between two movers on DIFFERENT state cells (two lifts) has its constant block baked once per PAIR of states,
 picked by `generate_pair_state_switch_fj`: the one-cell door switch on the first mover's cell, whose landings
-`sim.jump16` on the second's. The emitter calls this exact generator (`wall_renderer._door_blocks`). No current map
+`hex.switch` on the second's. The emitter calls this exact generator (`wall_renderer._door_blocks`). No current map
 reaches it -- E1M2's linedef 1460, which found the need, lies between two floor-switch sectors that move by ONE cell and
 collapse to one mover (`_seg_movers`) -- so this harness is its only proof until a map with two adjacent lifts.
 
@@ -11,7 +11,7 @@ WHAT THE TESTS CHECK, and why each exists:
   * **every pair, twice.** A nested dispatch fails by ALIASING -- (2, 1) quietly running (1, 2)'s block paints a
     plausible wall at the wrong height -- and a dispatch whose clean is wrong looks perfect on the first call only. So
     every (i, j) is dispatched twice in a row: the first SETs its own value, the second CLEARs it back to 0.
-  * **both cells survive.** `sim.jump16` xors the second cell's jump field and must xor it back; the outer switch
+  * **both cells survive.** `hex.switch` xors the second cell's jump field and must xor it back; the outer switch
     xors the first cell into its dispatch op. Both cells are printed after every dispatch.
   * **the padding of the second cell is the last block** (as `_mover_dispatch`'s), not a jump into the table's tail.
   * **CONTROL:** the same program with the landings dispatching on the FIRST cell instead of the second must produce

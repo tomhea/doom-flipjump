@@ -62,7 +62,7 @@ def _wide_slot(rnd, w, act):
 
 
 # M8 C2: the wide map's control -- dm_go's third dispatch level dropped (group 0: every id read as its low byte)
-WIDE_MUTANT = "    sim.jump16 dm_id + 2*dw,"
+WIDE_MUTANT = "    hex.switch dm_id + 2*dw,"
 
 
 def _drop_third_level(text):

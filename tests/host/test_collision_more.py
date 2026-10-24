@@ -623,11 +623,11 @@ def test_the_cell_size_is_the_one_the_trees_nibble_split_describes(lite):
     rows = lite.rows()
     text, _root = collision_cells_fj("e1m1", rows, cell_lists(rows, PLAYER_RADIUS))
     split = collections.Counter((m.group(1), int(m.group(2))) for m in
-                                re.finditer(r"sim\.jump16 (cp[xy]) \+ (\d)\*dw", text))
+                                re.finditer(r"hex\.switch (cp[xy]) \+ (\d)\*dw", text))
     assert set(split) == {(r, n) for r in ("cpx", "cpy") for n in (7, 6, 5)}, sorted(split)
     # the leaves: in every nibble-5 node, entries 2k and 2k+1 (one cell's two halves) agree
     pairs = 0
-    for m in re.finditer(r"sim\.jump16 cp[xy] \+ 5\*dw, (.*)", text):
+    for m in re.finditer(r"hex\.switch cp[xy] \+ 5\*dw, (.*)", text):
         t = [x.strip() for x in m.group(1).split(",")]
         assert all(t[2 * k] == t[2 * k + 1] for k in range(8)), t
         pairs += 1

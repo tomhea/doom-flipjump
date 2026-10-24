@@ -1,7 +1,7 @@
 """M8 F1.3 10b (docs/f1-big-map-widths.md 10): E1M2's ONE line between two state cells -- linedef 1199, blazing lift 47
 (`lstate`) beside S1 floor 206 (its group's `fswitch` cell) -- in the MONSTERS' collision cells on the real engine:
 its opening floor reads 206's cell and its low floor (the drop-off) 47's, through `collision_cells_fj`'s split dispatch
-(three `sim.jump16`s: the opening floor in, the low floor in around the shared test, the opening floor out), against
+(three `hex.switch`s: the opening floor in, the low floor in around the shared test, the opening floor out), against
 the model's `World.try_move_lines` at every pair of the two movers' states.
 
 The cells are `monster_cells_fj`'s construction (`line_rows` with ML_BLOCKMONSTERS, `mover_line_states` max / min,
@@ -78,7 +78,7 @@ class Level:
                                         lowfloor=line_lowfloors(w.lds, w.sds, w.secs))
         if mut == "no_undo":
             import re
-            text, n = re.subn(r"(  e1m2_mc_l%d_mc:\n)    sim\.jump16 [^\n]*\n" % LINE, r"\1    ;e1m2_mc_l%d_mout\n" % LINE,
+            text, n = re.subn(r"(  e1m2_mc_l%d_mc:\n)    hex\.switch [^\n]*\n" % LINE, r"\1    ;e1m2_mc_l%d_mout\n" % LINE,
                               text)
             assert n == 1
         return text, root

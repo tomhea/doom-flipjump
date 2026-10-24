@@ -1,6 +1,6 @@
 [
  {
-  "name": "cell lookup: 6 jump16 levels",
+  "name": "cell lookup: 6 hex.switch levels",
   "mode": "plain",
   "per_call": 117.7578125,
   "ok": true,
@@ -9,7 +9,7 @@
   "stats": {}
  },
  {
-  "name": "cell lookup: 6 jump16 levels",
+  "name": "cell lookup: 6 hex.switch levels",
   "mode": "pool",
   "per_call": 136.96875,
   "ok": true,
@@ -25,7 +25,7 @@
   }
  },
  {
-  "name": "cell lookup: 6 jump16 levels",
+  "name": "cell lookup: 6 hex.switch levels",
   "mode": "pool+",
   "per_call": 45.71875,
   "ok": true,

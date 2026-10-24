@@ -59,7 +59,7 @@ def _want(n: int, ids) -> list:
 
 def test_the_three_level_tree_reaches_every_id(tmp_path):
     tree = _tree(3, N_WIDE)
-    assert tree[0].startswith("    sim.jump16 t_id + 2*dw, t_g0, t_g1, t_none"), tree[0]
+    assert tree[0].startswith("    hex.switch t_id + 2*dw, t_g0, t_g1, t_none"), tree[0]
     got = _run(tmp_path, "wide", 3, N_WIDE, IDS_WIDE, tree)
     assert got == _want(N_WIDE, IDS_WIDE), got
 

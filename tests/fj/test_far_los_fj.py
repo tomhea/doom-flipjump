@@ -195,7 +195,7 @@ def _run(tmp, w, samples, name, mut=None):
         "hex.input 2, mm_x", "hex.input 2, mm_y", "hex.input 4, mt_tqx", "hex.input 4, mt_tqy", "hex.input 1, bl_b",
         "hex.input %d, dstate" % ((nd + 1) // 2), "hex.input %d, lstate" % ((nl + 1) // 2),
         *(["hex.input %d, fswitch" % ((nf + 1) // 2)] if w.floor_wide else ["hex.input 1, rbyte", "hex.mov 1, fswitch, rbyte"]),
-        "sim.jump16 wmagic, out, far, near, blast, out, out, out, out, out, out, out, out, out, out, out, out",
+        "hex.switch wmagic, out, far, near, blast, out, out, out, out, out, out, out, out, out, out, out, out",
         "near:", "hex.mov 8, viewx, mt_tqx", "hex.mov 8, viewy, mt_tqy", "stl.fcall sl_los, sl_ret", ";out",
         "blast:", "hex.mov 4, bl_px, mm_x", "hex.mov 4, bl_py, mm_y", "hex.mov 8, bl_qx, mt_tqx",
         "hex.mov 8, bl_qy, mt_tqy", "stl.fcall bl_los, bl_lret", ";out",

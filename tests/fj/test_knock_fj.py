@@ -254,7 +254,7 @@ def _thrust_program(w, mut=None):
     b = code.index("    stl.fret kb_pzret\n", a) + len("    stl.fret kb_pzret\n")
     code = code[:a] + "kb_pz:\n    hex.input 2, kb_pzv\n    stl.fret kb_pzret\n" + code[b:]     # THE ONE STUB
     if mut == "third_level":                                        # M8 C2: the wide map's control
-        top = [ln for ln in code.split("\n") if ln.startswith("    sim.jump16 kb_tg + 2*dw,")]
+        top = [ln for ln in code.split("\n") if ln.startswith("    hex.switch kb_tg + 2*dw,")]
         assert len(top) == 1, len(top)
         code = code.replace(top[0] + "\n", "    ;kq_g0\n")
     elif mut:

@@ -970,7 +970,7 @@ def fx_lines(*, nt: int, fxn: int = None, exit_guard: bool = True, puffs: bool =
             "    stl.fcall mm_octant, mm_ocret",
             "    hex.zero 4, pw_x", "    hex.mov 4, pw_x + 4*dw, fxs_x",
             "    hex.zero 4, pw_y", "    hex.mov 4, pw_y + 4*dw, fxs_y",
-            "    sim.jump16 mm_fa, " + ", ".join(["fx_o%d" % d for d in range(8)] + ["fx_on"] * 8)]
+            "    hex.switch mm_fa, " + ", ".join(["fx_o%d" % d for d in range(8)] + ["fx_on"] * 8)]
     for d in range(8):
         ox, oy = FX_STEP[d]
         out += ["  fx_o%d:" % d]

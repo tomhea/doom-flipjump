@@ -171,7 +171,7 @@ def _mutate(text, mut):
         return text.replace(old, new)
     if mut == "octant":
         old = ", ".join("fx_o%d" % d for d in range(8))
-        return sub("sim.jump16 mm_fa, " + old, "sim.jump16 mm_fa, " + ", ".join("fx_o%d" % ((d + 1) % 8)
+        return sub("hex.switch mm_fa, " + old, "hex.switch mm_fa, " + ", ".join("fx_o%d" % ((d + 1) % 8)
                                                                                for d in range(8)))
     if mut == "lo9":
         return sub("    hex.set 2, pw_c, 9\n", "    hex.set 2, pw_c, 10\n")
@@ -221,10 +221,10 @@ def _build(tmp_path, name, mut=None):
             body += ["stl.fcall ll_dump, dump_ret"]
     body += ["stl.loop"]
     # the record's dump: the slot's cells (a jump on the slot to its own print stub), the pool, rng_fx
-    dump = ["rec_dump:", "    sim.jump16 dmp_m + 1*dw, " + ", ".join("dmp_h%d" % h if 16 * h < n else "dmp_end"
+    dump = ["rec_dump:", "    hex.switch dmp_m + 1*dw, " + ", ".join("dmp_h%d" % h if 16 * h < n else "dmp_end"
                                                                         for h in range(16))]
     for h in range((n + 15) // 16):
-        dump += ["  dmp_h%d:" % h, "    sim.jump16 dmp_m, " + ", ".join("dmp_s%d" % (16 * h + l) if 16 * h + l < n
+        dump += ["  dmp_h%d:" % h, "    hex.switch dmp_m, " + ", ".join("dmp_s%d" % (16 * h + l) if 16 * h + l < n
                                                                          else "dmp_end" for l in range(16))]
     for m in range(n):
         dump += ["  dmp_s%d:" % m] + ["    hex.print_as_digit %d, %s + %d*dw, 0" % (k, f, k * m) for f, k in CELLS]

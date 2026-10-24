@@ -30,7 +30,7 @@ LEVEL COMPLETE (`digit_lines`, `frame_lines`): the 13 digit slots (`st_dig`, a n
 from the cells, the skill's totals (a block per skill) and the clock -- TIME = lvtime / MAX_FPS seconds, the frame rate
 the program asks the window for, so it is the wall-clock time on a machine that keeps up with the cap -- then the
 baked frame (menu.level_done_stream), then each slot's records for its digit (menu.level_done_digit_records, chosen by
-a `sim.jump16` on the slot). Only LEVEL COMPLETE's frames run it: its divisions cost the world frames nothing.
+a `hex.switch` on the slot). Only LEVEL COMPLETE's frames run it: its divisions cost the world frames nothing.
 """
 from __future__ import annotations
 
@@ -311,7 +311,7 @@ def routine_lines() -> List[str]:
 
 def frame_lines(width: int, height: int, colours, w, label: str = "menu_level_done") -> List[str]:
     """LEVEL COMPLETE's frame after `digit_lines`: the baked frame (no END_CMD: the menu's shared tail ends it), then each
-    slot's records for its digit -- a `sim.jump16` on the slot, a block per digit, nothing for a blank"""
+    slot's records for its digit -- a `hex.switch` on the slot, a block per digit, nothing for a blank"""
     from doomfj.menu import DIGIT_BLANK, level_done_digit_records, level_done_layout, level_done_stream
     nsec = len(w.secret_sectors)
     nd = count_digits(w)                                                         # M8 F1.1
@@ -326,7 +326,7 @@ def frame_lines(width: int, height: int, colours, w, label: str = "menu_level_do
     for i in range(nslot):
         p = f"lvd{i}"
         targets = [f"{p}_{d}" for d in range(10)] + [f"{p}_x"] * 6
-        out.append(f"    sim.jump16 st_dig + {i}*dw, " + ", ".join(targets))
+        out.append(f"    hex.switch st_dig + {i}*dw, " + ", ".join(targets))
         for d in range(10):
             out.append(f"  {p}_{d}:")
             out += ["    stl.output_char %d" % b

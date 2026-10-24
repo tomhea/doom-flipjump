@@ -159,7 +159,7 @@ def nukage_clear_lines(w, out: str = "nk_out") -> List[str]:
     assert len(groups) > 1 or groups[0].sub, "a moving group: the wide fswitch layout (movers.floor_wide)"
     labs = ["nk_keep"] + [f"nk_g{g + 1}" for g in range(max(gs) + 1)]
     lines = ["    nkgrp.lookup nk_g, ptss",
-             "    sim.jump16 nk_g, " + ", ".join(labs + ["nk_keep"] * (16 - len(labs)))]
+             "    hex.switch nk_g, " + ", ".join(labs + ["nk_keep"] * (16 - len(labs)))]
     for g in range(max(gs) + 1):
         lines += [f"  nk_g{g + 1}:"]
         if g in gs:
@@ -498,7 +498,7 @@ def give_kinds(w) -> List[tuple]:
 
 # ---- the pickups ---------------------------------------------------------------------------------------------------
 def _tree(L: str, reg_x: str, reg_y: str, lists: Dict[tuple, str], none: str) -> tuple:
-    """`(lines, root)`: collision.collision_cells_fj's cell tree (jump16 on nibbles 7, 6, 5 of x, then of y; both
+    """`(lines, root)`: collision.collision_cells_fj's cell tree (hex.switch on nibbles 7, 6, 5 of x, then of y; both
     16-unit halves of a 32-unit cell land on the same label), for `lists` = {(cx, cy): label}"""
     from doomfj.collision import _HALVES
     nodes: dict = {}
@@ -537,7 +537,7 @@ def _tree(L: str, reg_x: str, reg_y: str, lists: Dict[tuple, str], none: str) ->
     root = tree(reg_x, x_leaf)
     out = []
     for (reg, nib, targets), lab in nodes.items():
-        out += [f"{lab}:", f"    sim.jump16 {reg} + {nib}*dw, " + ", ".join(targets)]
+        out += [f"{lab}:", f"    hex.switch {reg} + {nib}*dw, " + ", ".join(targets)]
     return out, root
 
 

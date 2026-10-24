@@ -47,7 +47,7 @@ def _world(mapname="E1M1"):
 
 WIDE_MUTS = {      # M8 C2: (the wide map's) the cursor's third level dropped; mt_n in two nibbles
     "third_level": lambda code, n: code.replace(
-        [ln for ln in code.split("\n") if ln.startswith("    sim.jump16 sched_cursor + 2*dw,")][0], "    ;mt_g0"),
+        [ln for ln in code.split("\n") if ln.startswith("    hex.switch sched_cursor + 2*dw,")][0], "    ;mt_g0"),
     "mt_n_two": lambda code, n: code.replace("    hex.set 3, mt_n, %d\n" % n, "    hex.set 2, mt_n, %d\n" % (n & 0xFF)),
 }
 

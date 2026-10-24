@@ -423,7 +423,7 @@ def _select_run(tmp, name, sel):
 
 def test_the_three_level_select_reaches_every_id(tmp_path):
     sel = MC.select_tree_lines(SEL_NTM)
-    assert sel[1].startswith("    sim.jump16 sp_ti + 2*dw, thsel_g0, thsel_g1, thsel_none")
+    assert sel[1].startswith("    hex.switch sp_ti + 2*dw, thsel_g0, thsel_g1, thsel_none")
     got = _select_run(tmp_path, "sel", sel)
     assert got == ["%03x" % t if t < SEL_NTM else "-" for t in SEL_IDS], got
 

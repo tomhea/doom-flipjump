@@ -21,7 +21,7 @@
 // blockmap block held about twenty. The routine collision.collision_cells_fj emits is three calls
 // deep:
 //
-//   a TREE of sim.jump16 on the centre's nibbles 7, 6, 5 (x, then y) reaches the cell's stub;
+//   a TREE of hex.switch on the centre's nibbles 7, 6, 5 (x, then y) reaches the cell's stub;
 //   the CELL STUB calls one LINE STUB per listed line;
 //   a LINE STUB xors its line's constants into the argument cells (ca_*), calls sim.line_test --
 //   ONE shared expansion -- and xors them out again, so every ca_* cell is zero between lines.
@@ -77,55 +77,6 @@ ns sim {
       back:
         hex.set 1, side, 1
       done:
-    }
-}
-
-ns sim {
-    // sim.jump16 x, t0 .. t15 — jump to t<v>, where v is the hex nibble at x (a collision cell's
-    // tree node, collision.collision_cells_fj).
-    //
-    // The table is the shape the BlockPool relocates: `pad 16`, sixteen plain `;r<i>` entries, and
-    // wflips naming the head label. `sim.jump16` is in build_blocked.py's SAFE_TABLE_MACROS for
-    // that reason -- undeclared, the pool pins the cell instead and six levels cost 137 ops against
-    // 46 (S6, MEASURED). Arming xors `switch` into x's jump word and jumps THROUGH x, which is
-    // hex.if_flags' own trick; each trampoline disarms and jumps on, so x is unchanged on every exit.
-    def jump16 x, t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15 \
-            @ switch, r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15 {
-        wflip x+w, switch, x
-        pad 16
-      switch:
-        ;r0
-        ;r1
-        ;r2
-        ;r3
-        ;r4
-        ;r5
-        ;r6
-        ;r7
-        ;r8
-        ;r9
-        ;r10
-        ;r11
-        ;r12
-        ;r13
-        ;r14
-        ;r15
-      r0: wflip x+w, switch, t0
-      r1: wflip x+w, switch, t1
-      r2: wflip x+w, switch, t2
-      r3: wflip x+w, switch, t3
-      r4: wflip x+w, switch, t4
-      r5: wflip x+w, switch, t5
-      r6: wflip x+w, switch, t6
-      r7: wflip x+w, switch, t7
-      r8: wflip x+w, switch, t8
-      r9: wflip x+w, switch, t9
-      r10: wflip x+w, switch, t10
-      r11: wflip x+w, switch, t11
-      r12: wflip x+w, switch, t12
-      r13: wflip x+w, switch, t13
-      r14: wflip x+w, switch, t14
-      r15: wflip x+w, switch, t15
     }
 }
 

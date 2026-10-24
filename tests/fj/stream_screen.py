@@ -43,7 +43,7 @@ UNCLAIMED_FVP = 0xFF               # a column record with fvp == 0xFF paints not
 SPANS_END_X = 0xFF                 # a fillCol record with x == 0xFF terminates the frame
 # P4 (docs/gp-partial-ditto.md): the two 0x0B in-list tokens, mirroring flipjump ScreenIO's
 # COLLINES_PARTIAL_DITTO / COLLINES_KEEP / COLLINES_TOKENS_MAX_HEIGHT (flipjump PR #364, branch
-# 1.5.1). Local copies on purpose: importing them would break every tests/fj gate on a flipjump
+# 1.6.0). Local copies on purpose: importing them would break every tests/fj gate on a flipjump
 # that predates them, and the cross-decoder test is what keeps the two decoders from drifting.
 CL_PARTIAL_DITTO = 0xFD            # [0xFD][y]: rows [cursor, y) copied from column x-1; the list continues
 CL_KEEP = 0xFC                     # [0xFC][y]: rows [cursor, y) left as they are; the list continues

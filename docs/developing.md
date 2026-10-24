@@ -11,11 +11,12 @@ pip install -e ".[dev]"            # flipjump[io], pillow, pytest; Python 3.10 t
 bash scripts/fetch_freedoom.sh     # the Freedoom WADs into assets/ (gitignored, ~28 MB each)
 ```
 
-The game build needs flipjump **1.5.1** (the native engine, the 0x0B screen device, the blocking
-pass). Until 1.5.1 is on PyPI, install it from its branch:
+The game build needs flipjump **1.6.0** (the native engine, the 0x0B screen device, the blocking
+pass). Until 1.6.0 is on PyPI, install it from the commit this branch is built
+and tested on (the CI pins the same one):
 
 ```bash
-pip install "flipjump[io] @ git+https://github.com/tomhea/flipjump@1.5.1"
+pip install "flipjump[io] @ git+https://github.com/tomhea/flipjump@5af5923d1dcf6c9af50534720476a56dacea035e"
 ```
 
 ## Smoke test, tests
@@ -45,7 +46,7 @@ The exact build line of the shipped binary, its hashes and the gate it passed ar
 
 The interpreter runs the program in **flat** storage: the whole address span is one contiguous
 array, 8 bytes per word of span. The game's span is about 118 million words. A release `doom.fjm`
-carries the flat-memory flag and the pc io mode in its header (flipjump 1.5.1's `run_flags` and
+carries the flat-memory flag and the pc io mode in its header (flipjump 1.6.0's `run_flags` and
 `io_mode`, set at assembly), so `fj --run doom.fjm` allocates the flat window by itself. A file
 assembled without those fields needs `fj --run file.fjm --io pc --flat-max-words 134217728`; with a
 smaller limit the interpreter falls back to paged storage, which is correct but much slower. The

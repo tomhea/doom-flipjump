@@ -3,7 +3,7 @@
 `rep(VIEW_W, x) frame.column ... rep(count, row) frame.pixel ...` renders every pixel at a COMPILE-TIME
 address, each pixel running the M11b DDA pipeline (texture-v sample + per-column colormap apply) and
 writing the lit byte DIRECTLY into its register-form (`hex.vec 2`) framebuffer cell — no deposit (the
-hex.vec2 simplification, §2.1). The frame is presented over the 0x06 device (fj 1.5.1) and captured
+hex.vec2 simplification, §2.1). The frame is presented over the 0x06 device (fj 1.6.0) and captured
 headless; it must be bit-exact vs the H5 oracle (D12). The bake-off (ops/frame + assemble + .fjm size at
 full WIDTH scale) is measured by scripts/m11c_evidence.py; these committed tests prove correctness on a
 fast reduced-width slice and that the build runs flat.

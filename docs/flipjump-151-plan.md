@@ -377,7 +377,21 @@ the shipped image (size, write time, load time, round trip):
 
 What ships is decided by the measurement. Load time must not grow noticeably.
 
-### 3g. The review loop on `stl-additions` ⏳
+### 3g. The review loop on `stl-additions` ▶
+
+**Round 1 (2026-10-24): 5 BLOCKING, 14 MINOR, 6 test gaps** (`scratchpad/ioapi/cr/stl_round1.md`).
+
+- **BLOCKING:**
+  - `ptr_index n` with `dst == index` on the wide path: fixed in the code;
+  - n = 0 regressions in add/sub n, the shifted forms and add_mul n (they write before `dst`);
+  - the `fixed_mul_low` test cannot catch a missing write;
+  - `hex.mul.clear_carry` is public but untested;
+  - `fixed_div`'s Complexity line is ~4× high.
+- **Kept by my call:** the top-level `screen` namespace, because fjdoom already uses `screen.*` and it is what the
+  owner asked for.
+- **Taken:** `set_window_title` → `stl.output text`, plus a `draw_raw` header macro.
+
+The implementer is fixing all of it on `stl-additions`, merged into `stl-seq-ptr`.
 
 The owner's five rules (section 6) are applied to the new stl code until a round is clean. Then the PR
 `stl-additions` → 1.5.1, which I merge (phase 5).

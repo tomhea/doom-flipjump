@@ -515,6 +515,25 @@ After acceptance, the accepted lines and every dependent's line are updated, tra
 the whole-stl audit (3g2). That includes the chained ops, part C's pointer ops, the moved macros, and
 the 8 table macros that now declare `__relocatable__` (on `pool-relocatable`).
 
+### 3g1. The complexity table → applied (owner, 2026-10-24) ▶
+
+The owner's conventions, all in force:
+
+- main is the baseline;
+- a wflip costs the popcount of its VALUE (@/2; pad-2^k: @/2 − k/2; init labels: a constant; the chained step: 2);
+- no shared tails; pads not counted;
+- no "~"; n-terms only;
+- old → new derivations in numbers.
+
+The chained ops save about @−2 a hex in time AND space (or n: 4@+52 → 3@+54).
+
+**Order (owner):**
+
+1. Finish the table.
+2. Re-check every number and fix it ourselves (the agent, then an independent checker).
+3. Apply it to the code: the front-line macros AND every macro that uses them, transitively (a dependency closure).
+   Docs only, so every program stays byte-identical (`fjm_identity`).
+
 ### 3g2. The whole-stl audit (owner, 2026-10-24) ⏳ after 3g round 1
 
 Every one of the stl's **382 macros** is checked for:

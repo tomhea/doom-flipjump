@@ -412,6 +412,34 @@ What ships is decided by the measurement. Load time must not grow noticeably.
 
 The implementer is fixing all of it on `stl-additions`, merged into `stl-seq-ptr`.
 
+**Owner addition (2026-10-24), part of this round:** every NEW or MODIFIED macro gets its docs and Complexity lines
+(time AND space) updated from MEASUREMENT. That includes the chained ops, part C's pointer ops, the moved macros, and
+the 8 table macros that now declare `__relocatable__` (on `pool-relocatable`).
+
+### 3g2. The whole-stl audit (owner, 2026-10-24) ⏳ after 3g round 1
+
+Every one of the stl's **382 macros** is checked for:
+
+- bugs;
+- unhandled or undocumented edge cases;
+- an incorrect time/space complexity;
+- untested behaviour (named mutants the tests miss).
+
+The spec is `scratchpad/ioapi/cr/stl_audit_spec.md`.
+
+- **Step 0:** a measurement tool `stl_measure.py`, with time per call from executed ops, space per call from k vs
+  k+1 images, and an R9 selftest.
+- **6 batches**, each a fresh reviewer then the fixer:
+  1. runlib / ptrlib / casting / bit memory;
+  2. bit/;
+  3. hex logics / math / shifts / tables;
+  4. hex mul / div / cond_jumps / memory / io / strings;
+  5. hex pointers;
+  6. screen + cross-cutting checks.
+- **Every fix** comes with its test plus a mutant. Programs not using a changed macro stay byte-identical.
+- **Estimate: ~1–1.5 days.** It runs after 3g round 1, and it moves phase 5 (the merge into 1.5.1) and the stl area
+  of 6 later.
+
 The owner's five rules (section 6) are applied to the new stl code until a round is clean. Then the PR
 `stl-additions` → 1.5.1, which I merge (phase 5).
 

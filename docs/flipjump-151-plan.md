@@ -260,6 +260,29 @@ It has many gaps; find them and fix them, and keep the speedup.
 - **The relocation proof:** plain build vs pooled build, every op at its mapped address with mapped targets, plus a
   negative control.
 
+**Done (2026-10-24):** `pool-relocatable` was pushed in 3 commits (`0f049f6`, `b1363d7`, `97a99bd`).
+
+- **Byte-identical without the pool, 117/117;** every suite passes.
+- **Same placement as the old detector** on all 8 macros, at w=32 and w=64.
+- **Stricter than the spec:** with the pool on, a `wflip` or a `rep` / macro call inside a relocatable is a compile
+  error.
+- **`--pool-tables`:**
+  - it is a one-pass BlockPool based at half the memory;
+  - it refuses a program that reaches the upper half;
+  - it refuses a program that reads cells through `hex.pointers`, because there is no safe default `pin_exclude`.
+- **The relocation proof:**
+  - 74 programs prove equal; its controls catch a corrupted op and a table one op short;
+  - it catches `before + 2*dw`, which really miscompiles;
+  - it found the fjdoom render tier equal (36,033 tables, 0 mismatches).
+  - **Its limits:** it skips operands computed from addresses, and it does NOT verify pinning.
+- **fjdoom follow-ups:**
+  - `wants=` / `--macros` removed from the drivers and tests;
+  - `sim.jump16` → `hex.switch` must be DECLARED on `stl-additions`, or its tables stop moving (speed!);
+  - `lzma_fast` → `lzma_preset` (A10).
+
+**The gap hunt is running:** a fresh adversarial reviewer with crafted programs and a differential fuzzer, plus a
+mutation control. Its findings go to the fixer, and then v4 follows.
+
 Then the rest of the gap hunt below.
 
 **Goal.** The pool's safety holds by CHECKS, not by the whitelist. The whitelist stays as policy, not as the

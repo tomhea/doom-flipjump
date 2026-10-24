@@ -15,7 +15,7 @@ the 2026-10-17 versions listed MISSING / WRONG rows that have all been implement
 MISSING or WRONG row on any map**.
 
 Every binary named below was built on the **old** screen API and before the stl adoption. None of them runs on the
-merged flipjump 1.5.1 without a rebuild (section 1).
+merged flipjump 1.6.0 without a rebuild (section 1).
 
 ---
 
@@ -38,7 +38,7 @@ merged flipjump 1.5.1 without a rebuild (section 1).
 
 ## 1. Work every level needs, in order
 
-The same steps for all seven. They come after the work in `docs/flipjump-151-plan.md`.
+The same steps for all seven. They come after the work in `docs/flipjump-1.6.0-plan.md`.
 
 1. **Merge the paused branches into `m8-episode`**, after `io-api` and `stl-adopt` merge:
    - `w2fix-wip` (`6d940630`): E1M5's door top, E1M9's GR record, E1M8's gate harness;

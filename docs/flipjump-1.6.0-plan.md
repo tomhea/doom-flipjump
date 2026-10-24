@@ -1,4 +1,4 @@
-# The flipjump plan: the new screen/keyboard API, the stl additions, and 1.5.1 → main
+# The flipjump plan: the new screen/keyboard API, the stl additions, and 1.6.0 → main
 
 The owner's plan, agreed over the night of 2026-10-23/24. The executor (Claude) **follows it and updates it as
 work lands**. Each step has a status, what it touches, how it is proven, and when it is done. Every change is
@@ -6,7 +6,7 @@ recorded in the update log at the end.
 
 Status marks: ✅ done · ▶ running · ⏳ next / queued · ⏸ paused · ✖ dropped.
 
-It lives in the doom repo, not in flipjump, so the 1.5.1 → `main` diff the owner reviews stays clean.
+It lives in the doom repo, not in flipjump, so the 1.6.0 → `main` diff the owner reviews stays clean.
 
 ---
 
@@ -27,7 +27,7 @@ committed stl head; it needs `_fjcore.pyd` copied).
 
 ## 0. The goal and the owner's order
 
-**The end point:** the owner's manual review of flipjump `1.5.1` into `main`. By then 1.5.1 holds:
+**The end point:** the owner's manual review of flipjump `1.6.0` into `main`. By then 1.6.0 holds:
 
 - the new screen/keyboard API;
 - the stl additions taken from fjdoom;
@@ -38,16 +38,16 @@ fjdoom must run on all of it, and it must already use every macro that moved int
 **The owner's order (2026-10-24, revised at 00:30):**
 
 1. E1M1 works on the new API, and the other levels follow in parallel. **Phase 1.**
-2. io-api is merged into 1.5.1 after a review loop. **Phase 2, ✅.**
-3. A `stl-additions` branch from 1.5.1 takes every macro we discussed: `fixed_mul` and its family, `read_entry`,
+2. io-api is merged into 1.6.0 after a review loop. **Phase 2, ✅.**
+3. A `stl-additions` branch from 1.6.0 takes every macro we discussed: `fixed_mul` and its family, `read_entry`,
    `hex.switch`, `screen.fj`, the keyboard poll, `write_back` / `read_back`, `ptr_index n`, and the chained table
    dance. It is written to the standard of the classic stl. **Phase 3.**
 4. fjdoom adopts each macro as soon as it lands. **Anything that moves into the stl is removed from fjdoom
    completely:** no copy, no reference to the old name or the old implementation. **Phase 4.**
-5. I merge `stl-additions` into 1.5.1 myself. **Phase 5.**
-6. The review loop 1.5.1 → `main`, **without merging**; the owner reviews it by hand. **Phase 6.** It started on
+5. I merge `stl-additions` into 1.6.0 myself. **Phase 5.**
+6. The review loop 1.6.0 → `main`, **without merging**; the owner reviews it by hand. **Phase 6.** It started on
    Saturday and runs the stl area last.
-7. Part C (faster sequential pointer access) may merge into 1.5.1 **during** the owner's review, after its own
+7. Part C (faster sequential pointer access) may merge into 1.6.0 **during** the owner's review, after its own
    separate testing phase. **Phase 3d–e.**
 
 **The owner's later decisions (2026-10-24, about 01:00):**
@@ -66,8 +66,8 @@ fjdoom must run on all of it, and it must already use every macro that moved int
 
 | worktree | branch | role | state |
 |---|---|---|---|
-| `flipjump-151` | `1.5.1` | the INSTALLED flipjump (pip -e) | at `5af5923`. Not moved yet: blocked63 needs the old device until ship #1's A/B is done. |
-| `flipjump-io` | `io-api` | the API work | fast-forwarded to `9f6119c` (= 1.5.1 after #375); junction `fjio-path` |
+| `flipjump-151` | `1.6.0` | the INSTALLED flipjump (pip -e) | at `5af5923`. Not moved yet: blocked63 needs the old device until ship #1's A/B is done. |
+| `flipjump-io` | `io-api` | the API work | fast-forwarded to `9f6119c` (= 1.6.0 after #375); junction `fjio-path` |
 | `flipjump-cr` | `cr-minimal` | io-api's review loop | `eacc7ee`, pushed, merged by #375; junction `fjcr-path` |
 | `flipjump-chain` | `stl-additions` | phase 3 implementer | part A committed (`691d19f`, `932352e`, `0823543`, `ea823e4`), part B in the working tree; junction `fjstl-path` |
 | `flipjump-stlpin` | detached at the last COMMITTED `stl-additions` commit | what the doom adoption checks run against | `ea823e4`; advanced to each new stl commit; junction `fjstlpin-path`. **Never point a check at the implementer's live working tree:** its uncommitted moves collide with fjdoom's copies, which made 44 fj tests fail on 10-24 |
@@ -90,8 +90,8 @@ package.
 
 **Git rule.**
 
-- Flipjump: `1.5.1` is the integration branch, and every change reaches it through a PR: `stl-additions`,
-  `stl-seq-ptr` and `cr-main` each go into 1.5.1. Then the owner reviews 1.5.1 → `main`.
+- Flipjump: `1.6.0` is the integration branch, and every change reaches it through a PR: `stl-additions`,
+  `stl-seq-ptr` and `cr-main` each go into 1.6.0. Then the owner reviews 1.6.0 → `main`.
 - Doom: `io-api` → `m8-episode` (PR + CI). Then `stl-adopt`, merged up to date with `m8-episode`, goes into
   `m8-episode`. Then the WIP branches.
 - Always: merge commits, no force-push, merged branches deleted, and a stacked PR retargeted before its base is
@@ -132,11 +132,11 @@ The API is `flipjump/interpreter/io_devices/README.md`.
 **Ship #1's rules.** blocked64 is class F: its pixels are blocked63's, but its device bytes differ. msframe runs
 blocked63 on the old installed flipjump and blocked64 on 9f6119c (`--env-a`). The result is recorded as the API's
 price. A tripwire at ~90 ms/frame must be explained before shipping. The installed `flipjump-151` moves to the
-merged 1.5.1 only after this A/B.
+merged 1.6.0 only after this A/B.
 
 ---
 
-## 3. Phase 3: the `stl-additions` branch (flipjump, from 1.5.1)
+## 3. Phase 3: the `stl-additions` branch (flipjump, from 1.6.0)
 
 **The standard (classic stl):**
 
@@ -148,7 +148,7 @@ merged 1.5.1 only after this A/B.
 - Every macro has hexlib tests in `tests/` (`tests/inout/hexlib*` + `conftest` tables, as the existing ones are
   written).
 - `stl/README.md`, `stl/hex/README.md` and `conf.json` are updated.
-- Every change runs `fjm_identity.py --check` against the 1.5.1 baseline:
+- Every change runs `fjm_identity.py --check` against the 1.6.0 baseline:
   - programs that do not use a changed macro must assemble byte-identical;
   - programs that do must change only where expected.
 
@@ -215,7 +215,7 @@ fjdoom's gates and msframe decide (4f).
 - The owner approved it with **a separate, independent testing phase (3e)**: a fresh agent proves correctness
   (exhaustive small widths plus random sequences against a Python model) and measures timings (ops and wall time
   against today's pointer ops).
-- It gets its own short review loop, then a PR into 1.5.1. It may land **during** the owner's review.
+- It gets its own short review loop, then a PR into 1.6.0. It may land **during** the owner's review.
 - **3e, the independent testing phase (2026-10-24): CORRECT.**
   - 22,552 cases (880 random multi-step programs + 21,672 exhaustive carry-boundary windows at w=32/64, n = 1–32),
     all equal to pre-C and to a Python model; every mutation control is caught.
@@ -259,7 +259,7 @@ Expected first: `hex.output`, whose switch has been inline at 41 byte-output sit
 
 ### 3h. `.fjm` version 4: the segment table compressed too (owner, 2026-10-24) ⏳
 
-Branch `fjm-compressed-segments`, taken from `cr-main` after round 1b, with a PR into 1.5.1. It may land during the
+Branch `fjm-compressed-segments`, taken from `cr-main` after round 1b, with a PR into 1.6.0. It may land during the
 owner's review. The spec is `scratchpad/ioapi/cr/fjm_v4_spec.md`.
 
 **Why.** Measured on blocked64:
@@ -505,11 +505,11 @@ The spec is `scratchpad/ioapi/cr/stl_audit_spec.md`.
   5. hex pointers;
   6. screen + cross-cutting checks.
 - **Every fix** comes with its test plus a mutant. Programs not using a changed macro stay byte-identical.
-- **Estimate: ~1–1.5 days.** It runs after 3g round 1, and it moves phase 5 (the merge into 1.5.1) and the stl area
+- **Estimate: ~1–1.5 days.** It runs after 3g round 1, and it moves phase 5 (the merge into 1.6.0) and the stl area
   of 6 later.
 
 The owner's five rules (section 6) are applied to the new stl code until a round is clean. Then the PR
-`stl-additions` → 1.5.1, which I merge (phase 5).
+`stl-additions` → 1.6.0, which I merge (phase 5).
 
 ---
 
@@ -572,17 +572,17 @@ The owner's five rules (section 6) are applied to the new stl code until a round
 
 ---
 
-## 5. Phase 5: `stl-additions` into 1.5.1
+## 5. Phase 5: `stl-additions` into 1.6.0
 
 - I merge it after 3g is clean and 4d is green.
-- Then the installed `flipjump-151` fast-forwards to the merged 1.5.1, after ship #1's A/B has been recorded.
+- Then the installed `flipjump-151` fast-forwards to the merged 1.6.0, after ship #1's A/B has been recorded.
 - The `cr-main` identity baseline is re-saved at this merge point (gap 5).
 
 ---
 
-## 6. Phase 6: the review loop, 1.5.1 → `main` (no merge)
+## 6. Phase 6: the review loop, 1.6.0 → `main` (no merge)
 
-Branch `cr-main` from 1.5.1 (`9f6119c`), worktree `flipjump-crmain`.
+Branch `cr-main` from 1.6.0 (`9f6119c`), worktree `flipjump-crmain`.
 
 **The owner's five rules:**
 
@@ -607,7 +607,7 @@ Branch `cr-main` from 1.5.1 (`9f6119c`), worktree `flipjump-crmain`.
 | 6a | Identity baseline: `pytest --compile --all`, 117 `.fjm` hashed | ✅ | 1263 passed, 1 skipped; R9 control OK |
 | 6b | Assembler + blocking pass | ✅ round 1 (`87bcd35`): 4 BLOCKING + 29 MINOR fixed (S2 skipped, +2.1% slower); round 1b (`37fffc5`): all helpers take all flags, `lzma_fast` gone, `lzma_preset` 7–9 readable (8 MiB, then retry at 64 MiB), the pool moved to `table_pool.py` (preprocessor diff 2,023 → 620). Identity BYTE-IDENTICAL 117/117 | next: `pool-relocatable` (3h0), then the gap hunt, then v4 |
 | 6c | Native engine, interpreter, CLI | ⏳ | — |
-| 6d | IO devices (1.5.1's earlier changes; #375 is already clean) | ⏳ | — |
+| 6d | IO devices (1.6.0's earlier changes; #375 is already clean) | ⏳ | — |
 | 6e | Tests + programs | ⏳ | — |
 | 6f | **stl, last**, after phase 5 | ⏳ | — |
 | 6g | Final proof: every test program byte-identical to the last baseline; the E1M1 shipped binary rebuilt byte-identical | ⏳ | — |
@@ -657,7 +657,7 @@ entry point with `main`.
      round 1b; it refuses with an exact reason where a pool cannot be used, for example a program that reads cells
      through `hex.pointers`).
 
-**The baseline moves (gap 5).** When stl work merges into 1.5.1 and then into `cr-main`, re-save
+**The baseline moves (gap 5).** When stl work merges into 1.6.0 and then into `cr-main`, re-save
 `crmain_base.json` at that merge commit, before the next fixer round.
 
 ---
@@ -668,7 +668,7 @@ entry point with `main`.
   binaries are rebuilt there. What each level needs is `docs/levels/STATUS.md`.
 - **The launch chain (Nov 5):**
   1. the owner's review;
-  2. 1.5.1 → `main`;
+  2. 1.6.0 → `main`;
   3. a flipjump release on PyPI;
   4. E1M1 re-shipped on the released flipjump;
   5. the README's play command updated.
@@ -697,11 +697,11 @@ Every heavy run goes through `scripts/heavy.py` (one at a time; `--build` for as
 
 | # | gap | fix | status |
 |---|---|---|---|
-| 1 | The level chain tested the pre-cleanup device | `flipjump-io` fast-forwarded to merged 1.5.1 after E1M2 | ✅ |
+| 1 | The level chain tested the pre-cleanup device | `flipjump-io` fast-forwarded to merged 1.6.0 after E1M2 | ✅ |
 | 2 | Pin / heat files are keyed by label names that the adoption renames | regenerate them (4b); judge speed by ms/frame, not ops | ⏳ |
 | 3 | 2^27 hard limit vs `pad 16` | size per level right after adoption (4e) | ⏳ |
 | 4 | E1M8/E1M9 have known failures | "no new failure" rule (4d) | ⏳ |
-| 5 | The `cr-main` identity baseline moves when 1.5.1 changes | re-save at each merge point | ⏳ |
+| 5 | The `cr-main` identity baseline moves when 1.6.0 changes | re-save at each merge point | ⏳ |
 | 6 | Frozen op-count baselines break by design | re-freeze with the reason (4c) | ⏳ |
 | 7 | Not enough agent slots (max 2) | implementer + one review-loop agent in parallel; the rest queue | in force |
 | 8 | Every level built twice | phase 1 folded after E1M2 (owner) | ✅ |
@@ -722,9 +722,9 @@ Estimated 2026-10-24 01:00, Sat. Each estimate assumes nothing big breaks; one g
 | 3a–3c stl additions (agent slot 1) | 6 | Sat ~12:00 |
 | 6b–6e review loop, non-stl areas (agent slot 2) | 3, 4 | Sun ~evening |
 | 3g + 4 (A2–A8, 4b–4h) | 6 | Sun ~22:00 – Mon morning |
-| 5 merge `stl-additions` into 1.5.1 | — | Mon ~00:00–06:00 |
+| 5 merge `stl-additions` into 1.6.0 | — | Mon ~00:00–06:00 |
 | 6f stl area, 6g final proof | — | Mon ~10:00 |
-| 3d–3e part C + its testing phase → 1.5.1 | the owner's review | Mon ~14:00+ |
+| 3d–3e part C + its testing phase → 1.6.0 | the owner's review | Mon ~14:00+ |
 | **The owner's manual review can start** | | **non-stl: Sun evening – Mon; whole branch: Mon** |
 
 ---
@@ -733,5 +733,6 @@ Estimated 2026-10-24 01:00, Sat. Each estimate assumes nothing big breaks; one g
 
 | when | change |
 |---|---|
-| 2026-10-24 ~01:30 | written from the night's decisions. Status: #374 + #375 merged (1.5.1 = 9f6119c); E1M1 + E1M2 green on the API; part A committed; A1 text done; byte output closed; area 1 round 1 reviewed (4 BLOCKING / 31 MINOR); ship #1 rebuild running |
+| 2026-10-24 ~01:30 | written from the night's decisions. Status: #374 + #375 merged (1.6.0 = 9f6119c); E1M1 + E1M2 green on the API; part A committed; A1 text done; byte output closed; area 1 round 1 reviewed (4 BLOCKING / 31 MINOR); ship #1 rebuild running |
 | 2026-10-24 ~03:00 | ship #1: rebuild BYTE-IDENTICAL (f52751a2bb846c7a); gamespeed re-run (`--validate` only checks the tours); msframe refused a busy box, so it waits for a quiet window. STATUS.md for E1M3-E1M9 written (30fb0a29). Owner's API decisions 1-4 recorded in 6 (round 1b). lzma question open: `lzma_fast` is the match finder, not a preset; fjdoom builds with it, and the shipped bytes depend on it |
+| 2026-10-24 ~14:00 | **The version is 1.6.0** (owner), not 1.5.1. The branch `1.6.0` is at 87ba7aa (version bump + two comments); `1.5.1` is deleted once no CI clones it. fjdoom: PR #151 (main: CI pinned to 5af5923, docs say 1.6.0); `io-api`: CI pinned to 87ba7aa, `flipjump>=1.6.0`. This plan was renamed from `flipjump-151-plan.md` |

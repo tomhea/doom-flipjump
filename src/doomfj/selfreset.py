@@ -139,7 +139,7 @@ def byte_arrays(bits, words_sorted, view_w, nss, pid_bytes: int = 1, ss_ratio: i
 def capture_labels(paths, out_fjm, lzma_fast=True, run_flags=0, io_mode=0, defines_file=None):
     """Assemble, and return the USER label table without paying for the debug-only families.
 
-    run_flags / io_mode go into the .fjm header (flipjump >= 1.5.1 at 342a3b9): how `fj --run` runs
+    run_flags / io_mode go into the .fjm header (flipjump >= 1.6.0 at 342a3b9): how `fj --run` runs
     the binary when given no options -- see build.standalone_run_header.
 
     `defines_file` (M8 F1.5): the assembler's -D file (config.Config.emit_fj_defines: a wide-list map's

@@ -12,7 +12,7 @@ object 15 seg_pass2_leaf: 4,019,353,662 ops over the run = 4,019,353 per game fr
         60,296   1.50%  f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2677:rep0:frame.lines_spr_step
         57,195   1.42%  f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2676:rep0:frame.lines_steps_step
         56,773   1.41%  f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2451:frame.clip_rows(5)
-        30,356   0.76%  f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2477:rep0:frame.add4_chain(2)
+        30,356   0.76%  f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2477:rep0:hex.add 4(2)
         30,125   0.75%  f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2437:frame.read_hex5(2)
         20,864   0.52%  f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2457:rep0:frame.lines_sky_ceil_ids(9)
 
@@ -56,8 +56,8 @@ $ python analyze.py sub games 18
 object 18 bspcode walk (nodes, pos_leaf, ss code): 1,080,000,579 ops over the run = 1,080,000 per game frame (the run's menu frames included, / 1000 game frames)
        225,093  20.84%  f15:l7:proj.point_on_side_leaf(10)---f4:l1748:hex.mul_low(4)
        204,495  18.93%  f15:l7:proj.point_on_side_leaf(10)---f4:l1749:hex.mul_low(4)
-       139,250  12.89%  f15:l7:proj.point_on_side_leaf(10)---f4:l1722:frame.sub10_chain(2)
-       125,408  11.61%  f15:l7:proj.point_on_side_leaf(10)---f4:l1724:frame.sub10_chain(2)
+       139,250  12.89%  f15:l7:proj.point_on_side_leaf(10)---f4:l1722:hex.sub 10(2)
+       125,408  11.61%  f15:l7:proj.point_on_side_leaf(10)---f4:l1724:hex.sub 10(2)
         24,345   2.25%  f15:l7:proj.point_on_side_leaf(10)---f4:l1721:hex.sparse_mov(4)
         19,703   1.82%  f15:l7:proj.point_on_side_leaf(10)---f4:l1723:hex.sparse_mov(4)
         14,620   1.35%  f15:l7:proj.point_on_side_leaf(10)---f4:l1746:hex.sparse_mov(4)

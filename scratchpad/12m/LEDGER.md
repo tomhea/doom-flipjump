@@ -97,7 +97,7 @@ the tree) are dead. -122 / -196 / -202 executed ops per call.
 | P2-1 | P2 | `hex.ptr_index`: the stl macro with the chained add, 22 sites | -104,166 / -54,902 / -93,042 / -71,704 | **18,697,401** (-57,501, -0.31%) | SHIP | (commit) |
 
 **P2-1 detail.** `hex.ptr_index` is 1,196.8 executed ops per call and runs ~760x per median
-frame; 554.8 of that is one `hex.add w/4`. Swapping it for `frame.add8_chain` needs NO bound on
+frame; 554.8 of that is one `hex.add w/4`. Swapping it for `hex.add 8` needs NO bound on
 anything, applies at every site, and is SIZE-IDENTICAL -- so a 22-site change moved 0 of 781,326
 labels. All four deg viewpoints improved. Predicted -64k, got -57,501.
 The filler carrying P7-1's +192 residual was right: freeze exact.

@@ -262,9 +262,9 @@ ns gpspr {
         hex.read_byte_and_inc gps_last, gps_ptr
         hex.ptr_inc gps_ptr                         // past [n]: at the first (rel, texel)
         hex.mov 4, gps_ybase, gps_y0
-        frame.add4_chain gps_ybase, gps_r0          // y_base = y0 + r0 (signed, 4 nibbles)
+        hex.add 4, gps_ybase, gps_r0          // y_base = y0 + r0 (signed, 4 nibbles)
         hex.mov 4, gps_top, gps_ybase
-        frame.add4_chain gps_top, gps_last          // y_base + last_rel
+        hex.add 4, gps_top, gps_last          // y_base + last_rel
         hex.mov 4, gps_sy1, gps_ybase               // sy1 = clamp(y_base, 0, viewh)
         hex.sign 4, gps_sy1, y1_neg, y1_hi
       y1_neg:
@@ -303,7 +303,7 @@ ns gpspr {
         hex.if0 2, gps_rel, done
         hex.read_byte_and_inc gps_smidx, gps_ptr
         hex.mov 4, gps_yabs, gps_ybase
-        frame.add4_chain gps_yabs, gps_rel
+        hex.add 4, gps_yabs, gps_rel
         hex.print gps_yabs
         cm.emit gps_smidx
         ;fast
@@ -313,7 +313,7 @@ ns gpspr {
         hex.if0 2, gps_rel, done
         hex.read_byte_and_inc gps_smidx, gps_ptr
         hex.mov 4, gps_yabs, gps_ybase
-        frame.add4_chain gps_yabs, gps_rel
+        hex.add 4, gps_yabs, gps_rel
         hex.sign 4, gps_yabs, cl_next, cl_pos      // ends above row 0 -> nothing of it shows
       cl_pos:
         hex.if0 4, gps_yabs, cl_next
@@ -358,7 +358,7 @@ ns gpspr {
         stream.steps_splice_c ecl_ctake, ecl_full_lo, ecl_full_hi, 1, gnrow, ecl_cmidx, cbufa, cbufd, ecl_ccy
       wall:
         hex.mov 2, ecl_wlen, fstart
-        frame.sub2_chain ecl_wlen, ecl_ctake
+        hex.sub 2, ecl_wlen, ecl_ctake
         hex.if0 2, ecl_wlen, floor
         hex.if0 1, w1rslv, w1r_test
         stream.w1_wall fstart, seg_litf
@@ -490,7 +490,7 @@ ns gpspr {
         hex.ptr_add trb_drawn_p, 1
         hex.ptr_add trb_sprflag_p, 1
         hex.inc 2, trb_col_x
-        frame.add8_chain trb_frac_u, trb_tistep
+        hex.add 8, trb_frac_u, trb_tistep
         ;col_loop
       ret:
     }
@@ -559,7 +559,7 @@ ns gpspr {
         hex.zero w/4, gps_boff
         hex.mov 4, gps_boff + 3*dw, blk
         hex.set w/4, dst, base
-        frame.add8_chain dst, gps_boff
+        hex.add 8, dst, gps_boff
     }
 
     def frag_derive2 s, sblk @ fetch, have, y1_neg, y1_hi, y1_clamp, y1_ok, y2_neg, y2_hi, y2_clamp, y2_ok, end \
@@ -585,9 +585,9 @@ ns gpspr {
         .read3_and_inc gps_last, gps_ptr
         hex.add_constant 3, gps_ptr, dw             // past [n]
         hex.mov 4, gps_ybase, gps_y0
-        frame.add4_chain gps_ybase, gps_r0
+        hex.add 4, gps_ybase, gps_r0
         hex.mov 4, gps_top, gps_ybase
-        frame.add4_chain gps_top, gps_last
+        hex.add 4, gps_top, gps_last
         hex.mov 4, gps_sy1, gps_ybase
         hex.sign 4, gps_sy1, y1_neg, y1_hi
       y1_neg:
@@ -634,7 +634,7 @@ ns gpspr {
         hex.if0 2, gps_rel, done
         .read3_and_inc gps_smidx, gps_ptr
         hex.mov 2, gps_yabs, gps_ybase
-        frame.add2_chain gps_yabs, gps_rel
+        hex.add 2, gps_yabs, gps_rel
         hex.print gps_yabs
         cm.emit gps_smidx
         ;fast_loop
@@ -647,7 +647,7 @@ ns gpspr {
         hex.if0 2, gps_rel, done
         .read3_and_inc gps_smidx, gps_ptr
         hex.mov 4, gps_yabs, gps_ybase
-        frame.add4_chain gps_yabs, gps_rel
+        hex.add 4, gps_yabs, gps_rel
         hex.sign 4, gps_yabs, cl_next, cl_pos
       cl_pos:
         hex.if0 4, gps_yabs, cl_next
@@ -691,7 +691,7 @@ ns gpspr {
         stream.steps_splice_c ecl_ctake, ecl_full_lo, ecl_full_hi, 1, gnrow, ecl_cmidx, cbufa, cbufd, ecl_ccy
       wall:
         hex.mov 2, ecl_wlen, fstart
-        frame.sub2_chain ecl_wlen, ecl_ctake
+        hex.sub 2, ecl_wlen, ecl_ctake
         hex.if0 2, ecl_wlen, floor
         hex.if0 1, w1rslv, w1r_test
         stream.w1_wall fstart, seg_litf
@@ -791,7 +791,7 @@ ns gpspr {
         hex.ptr_add trb_drawn_p, 1
         hex.ptr_add trb_sprflag_p, 1
         hex.inc 2, trb_col_x
-        frame.add8_chain trb_frac_u, trb_tistep
+        hex.add 8, trb_frac_u, trb_tistep
         ;col_loop
       ret:
     }

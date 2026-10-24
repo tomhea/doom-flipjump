@@ -25,7 +25,7 @@ BODIES = {
     "read_byte (bank)": ["hex.read_byte gps_rel, gps_ptr"],
     "hex.print": ["hex.print gps_rel"],
     "cm.emit": ["cm.emit gps_smidx"],
-    "mov 4 + add4_chain": ["hex.mov 4, gps_yabs, gps_ybase", "frame.add4_chain gps_yabs, gps_rel"],
+    "mov 4 + hex.add 4": ["hex.mov 4, gps_yabs, gps_ybase", "hex.add 4, gps_yabs, gps_rel"],
     "sign 4 + if0 4 + scmp 4": ["hex.sign 4, gps_yabs, pr_a, pr_a", "pr_a:", "hex.if0 4, gps_yabs, pr_b",
                                 "pr_b:", "hex.scmp 4, gps_yabs, gps_cvh, pr_c, pr_c, pr_c", "pr_c:"],
     "zero 2 + mov 2": ["hex.zero 2, srn_rel_w + 2*dw", "hex.mov 2, srn_rel_w, srn_rel"],

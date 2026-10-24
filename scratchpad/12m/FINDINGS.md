@@ -23,8 +23,8 @@ width doctrine (P1) is the highest-confidence pool.
 | hex.inc 5 | 160 | hex.sign 8 | 27 |
 | hex.sign 5 | 32 | hex.shr_hex 8,4 | 315 |
 | hex.sign_extend 8,4 | 180 | hex.sign_extend 5,4 | 68 |
-| hex.add 8 | 962 | frame.add8_chain | 962 |
-| hex.add 6 | 736 | frame.add6_chain | 738 |
+| hex.add 8 | 962 | hex.add 8 | 962 |
+| hex.add 6 | 736 | hex.add 6 | 738 |
 | hex.read_byte_and_inc | 1590 | xor_byte_from_ptr + ptr_inc | 1520 |
 
 Notes: hex.sign is nearly free and slightly LARGER at width 5 than 8 (27 -> 32) -- do not
@@ -194,7 +194,7 @@ in-comment).
    required; the ~5 extra ops are noise against the mov/sub saving.
 
 **Candidates (⚠ op deltas INTERPOLATED from the section-A table, not measured):**
-`proj.scalestep` sst_diff 8->6 (needs a new `frame.sub6_chain`), per-seg; `proj.project_thing`'s
+`proj.scalestep` sst_diff 8->6 (needs a new `hex.sub 6`), per-seg; `proj.project_thing`'s
 four constant sets -- `pth_c_vieww` and `pth_c_viewh` 8->2, `pth_c_centerxfix` and
 `pth_c_centeryfix` 8->6 -- per-thing.
 
@@ -246,7 +246,7 @@ Full table in ATLAS.md. The headline shape, which is NOT what the stale table sa
   2,383,571; the pointer arm (`set_flip_and_jump_pointers`) 2,022,344.
 - CONCENTRATED, by contrast: `hex.add_mul` 1,832,124 at ONE line (stl-fixedpoint's
   `mul_low.row`), of which 1,186,378 comes from full `hex.fixed_mul_low 8,4` calls;
-  `hex.scmp` 852,998 over just 15 sites; `frame.dance_boundary` 1,290,578 in three lines;
+  `hex.scmp` 852,998 over just 15 sites; `hex.add/sub n (the chain boundary)` 1,290,578 in three lines;
   the four `write_byte_and_inc` of `ts_piece_wr` 795,631.
 
 **Do NOT re-propose:** dropping the fixed_mul row count from 8 to 6 for `scalestep` operands. The
@@ -337,7 +337,7 @@ required. Live at `trb_bucket_h`, `ts_clamp2`/`ts_clamp2_lo`'s `prev_end`/`prev_
 
 TWO INDEPENDENT LEVERS, both measured value-identical for indices 0x42 / 0x1F64 / 0xFFFF:
 
-1. **The final `hex.add w/4` -> `frame.add8_chain`: -84.0 executed ops per call, and ZERO ops of
+1. **The final `hex.add w/4` -> `hex.add 8`: -84.0 executed ops per call, and ZERO ops of
    space** (the chain is size-identical to the stl add, so the swap moves no label). Needs NO
    bound on anything -- it applies to every ptr_index call in the program. The chain is the last
    statement of the macro, so nothing runs inside its hermetic window.
@@ -484,9 +484,9 @@ Median profile 20,204,970 -> 19,307,813 (-897,157, -4.4%).
 | `frame.seg_pass1_leaf_body_ts` | 4,762,279 | 4,466,123 | -296,156 |
 | `frame.ts_step_faces` | 3,563,542 | 3,276,489 | -287,053 |
 | `frame.ts_piece_store` | 1,632,509 | 1,432,304 | -200,205 |
-| `frame.dance_boundary` | 1,290,578 | 1,491,021 | **+200,443** |
+| `hex.add/sub n (the chain boundary)` | 1,290,578 | 1,491,021 | **+200,443** |
 
-dance_boundary went UP because ptr_index now routes through add8_chain -- work MOVED into the
+the chain boundary went UP because ptr_index now routes through hex.add 8 -- work MOVED into the
 chain and the net was -57,501. Do not read that row as a regression.
 
 **THE TOP TEN HAND-WRITTEN LINES NOW** (this is the ranking that matters):
@@ -494,7 +494,7 @@ chain and the net was -57,501. Do not read that row as a regression.
 | site | ops | share | what |
 |---|---:|---:|---|
 | `f2:l104` | **1,844,048** | **9.55%** | `add_mul` in `mul_low.row` -- the multiply |
-| `f5:l1546` | 702,752 | 3.64% | `hex.xor jumper, dst_next` in dance_boundary |
+| `f5:l1546` | 702,752 | 3.64% | `hex.xor jumper, dst_next` in the chain boundary |
 | `f5:l1545` | 685,879 | 3.55% | `hex.xor_zero dst_prev, hex.tables.res` |
 | `f8:l1090` | 653,910 | 3.39% | `w1rpat.walk` |
 | `f8:l607` | 543,429 | 2.81% | `w1rpat.walk_win` |
@@ -507,7 +507,7 @@ chain and the net was -57,501. Do not read that row as a regression.
 So the MULTIPLY FAMILY (add_mul + setup) is **2,337,121 = 12.1%**, the biggest addressable pool
 left, and the arm remainder is 881,786 at the two arm5 lines plus the un-narrowed full arms.
 
-**AN OPEN QUESTION worth someone's time.** `dance_boundary`'s two structurally identical
+**AN OPEN QUESTION worth someone's time.** `the chain boundary`'s two structurally identical
 single-hex xors cost wildly different amounts:
     `hex.xor jumper,   dst_next`  702,752
     `hex.xor jumper+4, src_next`  102,390     <- 6.9x cheaper, same call count
@@ -888,8 +888,8 @@ conservation, attribution (after a label yes / before it no), vacuity.
 |---|---|---:|
 | leaf (`--level inner`) | **`hex.exact_xor`** | **39.86%** (6,827,389 ops, 943,572 issues) |
 | leaf, top three | + double_ (7.10%) + triple_ (5.25%) | **52.2%** |
-| doom caller (`--level doom`) | `frame.dance_boundary` | 6.13% -- flat over 147 macros |
-| exact_xor's callers (`--only`) | `frame.dance_boundary` | 3.71% -- flat over 120 macros |
+| doom caller (`--level doom`) | `hex.add/sub n (the chain boundary)` | 6.13% -- flat over 147 macros |
+| exact_xor's callers (`--only`) | `hex.add/sub n (the chain boundary)` | 3.71% -- flat over 120 macros |
 
 **So there is no caller-side fix at the 4M scale.** exact_xor is two wflips per call, both flipping
 `switch`'s own ~25-bit address: `wflip src+w, switch, src` ... `end: wflip src+w, switch`.
@@ -1181,7 +1181,7 @@ cannot afford 512. Running the knapsack per macro over pads 512..262144:
 **+167,345 ops purely from choosing the width per macro instead of one number for all.**
 
 Chosen widths: 512 x10, 1024 x7, 2048 x5, 4096 x6, 8192 x5, 16384 x3. The big pads land exactly
-where the owner predicted -- on the RARE hot macros: `add6_chain` (4 expansions) 16384,
+where the owner predicted -- on the RARE hot macros: `hex.add 6` (4 expansions) 16384,
 `lines_sky_base` (3) 16384, `read_hex5` (4) 16384, `ts_dda_row_one` (34) 8192, `clip_rows` (62)
 8192 -- while the common ones are held down: `project_thing` (2,607 expansions) 512,
 `thing_record_body` (954) 512.
@@ -1929,7 +1929,7 @@ The 12.14% "dark region" was never real code we could not name. It was the misma
 
 | primitive | share |  | doom macro | share |
 |---|---:|---|---|---:|
-| `hex.exact_xor` | 39.48% |  | `frame.dance_boundary` | 6.72% |
+| `hex.exact_xor` | 39.48% |  | `hex.add/sub n (the chain boundary)` | 6.72% |
 | `hex.sparse_exact_xor` | 11.93% |  | `sim.check_line` | 6.00% |
 | `hex.double_exact_xor` | 8.63% |  | `frame.seg_pass2_leaf_body_lines` | 5.61% |
 | `hex.triple_exact_xor` | 8.55% |  | `proj.wall_x_range_m` | 4.67% |

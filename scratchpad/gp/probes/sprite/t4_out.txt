@@ -4,7 +4,7 @@
   read_byte (bank)                           445 ops
   hex.print                                   55 ops
   cm.emit                                     84 ops
-  mov 4 + add4_chain                         400 ops
+  mov 4 + hex.add 4                         400 ops
   sign 4 + if0 4 + scmp 4                    495 ops
   zero 2 + mov 2                              89 ops
   6 x shl_bit w/4 + set w/4                 1013 ops

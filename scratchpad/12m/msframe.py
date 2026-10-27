@@ -441,10 +441,10 @@ def append_ledger(record):
 
 
 # ---------------------------------------------------------------------------------------------
-def selftest(frames, cpu):
+def selftest(frames, cpu, fjm=None):
     """R9. Negative control: A vs A is not separated. Positive control: a known 20 ms/frame
     delay in B is called SLOWER and measured within tolerance."""
-    fjm = ROOT / "build" / "doom_e1m1_blocked25.fjm"
+    fjm = Path(fjm) if fjm else ROOT / "build" / "doom_e1m1_blocked25.fjm"
     ok = True
 
     def check(name, cond, detail):
@@ -520,7 +520,7 @@ def main():
                   "E1M3..E1M9 (msframe.py --map %s --plan-script)" % (the_map, WORKLOAD_FILE, the_map), flush=True)
 
     if a.selftest:
-        return selftest(min(a.frames, 60), a.cpu)
+        return selftest(min(a.frames, 60), a.cpu, a.a)  # --a: any binary the engine runs
 
     if not a.a:
         raise SystemExit("--a is required")

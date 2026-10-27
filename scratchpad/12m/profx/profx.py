@@ -69,7 +69,7 @@ def selftest(lock=None):
     check("(c) op totals equal: stock %s vs profiler %s" % (format(stock["ops"], ","), format(instr["ops"], ",")),
           stock["ops"] == instr["ops"])
     check("(c) every presented frame's pixels equal (%d frames)" % len(stock["sha"]),
-          stock["sha"] == instr["sha"] and len(stock["sha"]) == 5)
+          stock["sha"] == instr["sha"] and len(stock["sha"]) == stock["want"])   # the menu + 3 frames: 5 at blocked27, 7 since the menu grew
     ws, cs = load_sparse(prefix + ".self.bin")
     wi, ci = load_sparse(prefix + ".incl.bin")
     check("(c) the histograms conserve ops (self = owner-attributed = the op total)",

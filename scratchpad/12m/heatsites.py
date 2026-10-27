@@ -47,7 +47,7 @@ from flipjump.assembler.preprocessor import heat_key                       # noq
 from common import (W, active_map, check_census_map, default_counts_cache, default_fjm, default_labels,  # noqa: E402
                     label_dict, load_sparse, work_dir)
 from fjmimage import FjmImage                                               # noqa: E402
-from pool import KNOBS, eval_key, load_heat, reconstruct                    # noqa: E402
+from pool import KNOBS, eval_key, load_heat, reconstruct, rest_base         # noqa: E402
 
 OP_BITS = 2 * W
 
@@ -91,17 +91,27 @@ def main():
     # the layout, checked against the image (as hotwords.py)
     pool, fr = reconstruct(a.counts_cache, knobs, heat=load_heat(a.heat))
     img = FjmImage(fjm)
-    agree = n = 0
+    # A source word the build did not pin (pin-exclude: the byte cells and the pointer-read cells, 19,306 words since
+    # M7 P1.5) rests with NO base; it is no evidence either way. The control is the words that carry one: none may
+    # carry another base than the reconstructed one, and they must be most of the groups (a layout with nothing
+    # pinned proves nothing). Measured on adopt2: 41,006 at their base (the build's "pins") + 3,733 without; at
+    # --spread 1 (the wrong knob) 41,005 carry a WRONG base.
+    agree = n = nobase = 0
     for g, (base, _e) in pool.groups.items():
         addr = eval_key(g, lab)
         if addr is None:
             continue
-        v = img.word(addr // W)
         n += 1
-        agree += v is not None and (v & ~(pool._block_bits(g) - 1)) == base
-    print("fjm %s (sha256 %s...), %d game frames; CONTROL layout vs image: %d/%d source words at their base"
-          % (fjm.name, hashlib.sha256(fjm.read_bytes()).hexdigest()[:16], F, agree, n), flush=True)
-    if agree < 0.99 * n:
+        rb = rest_base(img, addr)
+        if not rb:
+            nobase += 1
+        else:
+            agree += rb == base
+    print("fjm %s (sha256 %s...), %d game frames; CONTROL layout vs image: %d/%d source words at their base, %d unpinned"
+          " (no base), %d at a WRONG base"
+          % (fjm.name, hashlib.sha256(fjm.read_bytes()).hexdigest()[:16], F, agree, n, nobase, n - nobase - agree),
+          flush=True)
+    if agree < 0.99 * (n - nobase) or agree < 0.5 * n:
         raise SystemExit("the counts cache does not describe this binary -- not written")
 
     # ops per executed table, per group (self counts of pool words inside each block)

@@ -22,8 +22,8 @@ pinning, which is a much smaller thing to search.
 
 Not a copy of the gate -- it patches `flipjump.assemble` and executes deg_gate itself, so whatever
 deg_gate checks, this checks. The patch, the exit status and both --selftest arms live in
-`deg_gate_driver.py`, shared with deg_gate_placed.py so the two cannot drift; the checks below
-`_driver_controls` are this driver's own. The cheap arm does NOT cover the E1M1 program: it runs a
+`deg_gate_driver.py` (it was shared with deg_gate_placed.py, deleted when flipjump 1.6.0 removed the pool's macro filter); the checks
+below `_driver_controls` are this driver's own. The cheap arm does NOT cover the E1M1 program: it runs a
 10-line pointer fixture, which like deg_gate's own visual tier has no self-reset, so the control
 shows the assembler CALLING `_byte_cell_exclusion` and the exclusion taking its no-self-reset
 branch -- and a second control hands it a label table that does carry the arrays, where it names
@@ -56,16 +56,8 @@ def make_assemble(a):
     stub gates CALLS fj.assemble through it -- so the control drives this body, not a copy of it.
     On the fixture, not on E1M1: see the cheap arm's closing note.
     """
-    _wants = None
-    if a.macros:
-        allow = frozenset(a.macros)
-        _wants = lambda macro_name, prefix: macro_name.name in allow      # noqa: E731
-        print("  macros allowed: %s" % ", ".join(sorted(allow)), flush=True)
-    elif a.owners:
-        names = tuple(a.owners)
-        _wants = lambda macro_name, prefix: any(o in prefix for o in names)   # noqa: E731
-        print("  restricted to: %s" % ", ".join(names), flush=True)
-
+    # WHICH TABLES MOVE is the stl's declaration since flipjump 1.6.0 (a macro whose innermost namespace is
+    # `__relocatable__`); the pool's `wants` filter, and this driver's --macros / --owners narrowing of it, are gone.
     frozen = {}
     pools = []
     real_assemble = fj.assemble
@@ -109,7 +101,7 @@ def make_assemble(a):
     def assemble_blocked(*args, **kwargs):
         if not frozen:
             with tempfile.TemporaryDirectory() as td:
-                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits, wants=_wants)
+                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits)
                 probe = dict(kwargs)
                 probe["table_pool"] = counting
                 out_arg = list(args)
@@ -124,7 +116,7 @@ def make_assemble(a):
                       % (format(len(counting.counts), ","),
                          format(sum(counting.counts.values()), ",")), flush=True)
         pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
-                         span_bits=a.span_bits, wants=_wants)
+                         span_bits=a.span_bits)
         # A pinned word cannot be read raw, and the assembler (flipjump 1.5.1, tomhea/flipjump#360)
         # refuses to pin a program that reads through hex.pointers unless the caller names the
         # cells a pointer can reach. Here those are the byte arrays (`hex.read_byte` walks them),
@@ -134,11 +126,6 @@ def make_assemble(a):
         kwargs["table_pool"] = pool
         return real_assemble(*args, **kwargs)
 
-    # "restricted" is decided HERE, where the narrowing is decided, so run() cannot disagree with
-    # it: --macros/--owners is an experiment that may legitimately match nothing, and driver.verdict
-    # warns instead of failing for one (a `bool(a.macros or a.owners)` in run() would be a second
-    # definition of the same condition, free to drift from this one).
-    assemble_blocked._restricted = _wants is not None
     assemble_blocked._pin_exclude = _byte_cell_exclusion    # the controls drive the REAL one
     return assemble_blocked, pools
 
@@ -157,8 +144,7 @@ def run(a):
           % (format(last.allocated, ","), format(len(last.groups), ","),
              format(last.declined, ","), format(last.ungrouped, ","),
              format(getattr(last, "pin_conflicts", 0), ",")), flush=True)
-    return driver.verdict(status, last, no_pin=a.no_pin,
-                          restricted=assemble_blocked._restricted)
+    return driver.verdict(status, last, no_pin=a.no_pin)
 
 
 def _reset_like_labels(nss, view_w):
@@ -186,12 +172,7 @@ def _reset_like_labels(nss, view_w):
 
 def _driver_controls(a, check, tmp, src):
     """The R9 checks only THIS driver can make: the shared arm's fixture is nobody's program, and
-    the frozen counting pass, the pin exclusion and --macros/--owners are machinery
-    deg_gate_placed.py does not have at all."""
-
-    class _Macro:                       # `wants` reads .name; a MacroName is not constructible here
-        def __init__(self, name):
-            self.name = name
+    the frozen counting pass and the pin exclusion are this driver's machinery."""
 
     def call(fn, name):
         """The closure, called the way deg_gate calls it. It may well RAISE -- the fixture is not
@@ -227,46 +208,12 @@ def _driver_controls(a, check, tmp, src):
     outside, _ = driver.capture(lambda: excl((max(cells) + 4) * W, labels))
     check(not outside, "... and a word outside them is still pinnable", "excluded=%s" % outside)
 
-    narrowed, _ = driver.capture(
-        lambda: (make_assemble(argparse.Namespace(**dict(vars(a), macros=["hex.xor"]))),
-                 make_assemble(argparse.Namespace(**dict(vars(a), macros=None,
-                                                         owners=["hex.tables"])))))
-    (by_macro, macro_pools), (by_owner, owner_pools) = narrowed
-    driver.capture(lambda: (call(by_macro, "blk3"), call(by_owner, "blk4")))
-    m, o = macro_pools[-1], owner_pools[-1]
-    check(m.wants(_Macro("hex.xor"), "") and not m.wants(_Macro("hex.add"), ""),
-          "--macros is what its pool relocates by NAME",
-          "hex.xor %s, hex.add %s" % (m.wants(_Macro("hex.xor"), ""),
-                                      m.wants(_Macro("hex.add"), "")))
-    check(o.wants(_Macro("x"), "a.hex.tables.b") and not o.wants(_Macro("x"), "a.stl.loop.b"),
-          "--owners is what its pool relocates by CALL SITE",
-          "hex.tables %s, stl.loop %s" % (o.wants(_Macro("x"), "a.hex.tables.b"),
-                                          o.wants(_Macro("x"), "a.stl.loop.b")))
-    check(fresh._restricted is False and by_macro._restricted is True
-          and by_owner._restricted is True,
-          "... and either of them is what makes a run RESTRICTED for verdict",
-          "plain %s, --macros %s, --owners %s" % (fresh._restricted, by_macro._restricted,
-                                                  by_owner._restricted))
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=1 << 31)
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=None)
-    ap.add_argument("--macros", nargs="*", default=None,
-                    help="only block tables emitted by these MACROS. This is the declaration the "
-                         "assembler cannot infer: FINDINGS BG showed 'a maximal run of a;b ops "
-                         "after a pad' is unsound -- hex.pointers.xor_hex_to_flip_ptr's pad-4 block "
-                         "is selected by ADDRESS-BIT FLIPS and contains a wflip, so the rule splits "
-                         "it. Naming the macros whose tables are verified jump-only replaces the "
-                         "guess with an opt-in. A run narrowed this way that matches nothing WARNS "
-                         "rather than failing: an empty match is this experiment's answer.")
-    ap.add_argument("--owners", nargs="*", default=None,
-                    help="only block tables under these macro names. The PLACEMENT run that passes "
-                         "this gate was restricted to six hot owners; BlockPool relocates "
-                         "EVERYTHING, including hex.tables.*, hex.pointers.* and stl internals. "
-                         "Restricting it the same way tests whether the unsafe tables are outside "
-                         "them -- so, as with --macros, matching nothing is an answer and warns.")
     ap.add_argument("--subsectors", type=int, default=682,
                     help="E1M1's subsector count, for the byte-array exclusion (as build_blocked.py)")
     ap.add_argument("--no-pin", action="store_true",

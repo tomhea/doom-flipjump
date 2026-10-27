@@ -647,11 +647,10 @@ def cell_lookup_probes():
                   tables=d4("gp_px", px, 2, 8) + d4("gp_py", py, 2, 8),
                   prelude=PRELUDE_J16, blob=code_t,
                   data=["gp_x: hex.vec 8", "gp_y: hex.vec 8", "gp_cid: hex.vec 4"],
-                  extra_safe=("hex.switch",),
                   note="x nibbles 7,6,5 then y nibbles 7,6,5 of 16.16 positions; E1M1 extent")
         pv = Probe(name + " [verify]", body=[";gp_cx_0_0", "gp_cdone:"], pre=p.pre,
                    tables=p.tables, prelude=PRELUDE_J16, blob=code_v, data=p.data,
-                   extra_safe=p.extra_safe, verify=["hex.print 2, gp_cid"], expected=exp)
+                   verify=["hex.print 2, gp_cid"], expected=exp)
         p.expected, p._vprobe = None, pv
         out.append(p)
     return out
@@ -747,7 +746,7 @@ def ptloc_probes():
     tables = d4("gp_px", px, 2, 10) + d4("gp_py", py, 2, 10)
     exp = lambda n: b"".join(le_bytes(pts[k & 255][2], 2) for k in range(n))   # noqa: E731
     common = dict(pre=pre, tables=tables, prelude=PRELUDE_J16, data=decls, files=[CONSTS],
-                  verify=["hex.print 2, ptss"], expected=exp, extra_safe=("hex.switch",))
+                  verify=["hex.print 2, ptss"], expected=exp)
     full = Probe("ptloc full descent (ptloc_walk)", body=["stl.fcall ptloc_walk, ptloc_ret"],
                  blob=ptloc + code, **common,
                  note="E1M1, 256 live points; mean depth %.1f" % (sum(p[3] for p in pts) / 256))
@@ -957,14 +956,14 @@ def run_groups(names):
     if "cell" in names:
         print("cell -- 32-unit cell of a 16.16 position by nibble jumps")
         for p in cell_lookup_probes():
-            do(p, modes=("plain", "pool", "pool+"), vprobe=p._vprobe)
+            do(p, vprobe=p._vprobe)
     if "ptloc" in names:
         print("ptloc -- point location: full descent vs a jump on the cell into the BSP")
         ps, (dfull, dres) = ptloc_probes()
         print("  (Python: mean depth full %.2f nodes, residual after the cell start %.2f)"
               % (dfull, dres))
         for p in ps:
-            do(p, modes=("plain", "pool", "pool+"))
+            do(p)
     if "octant" in names:
         print("octant")
         for p in octant_probes():

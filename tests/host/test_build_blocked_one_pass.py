@@ -108,10 +108,9 @@ def test_the_census_goes_to_the_counts_cache(tmp_path, monkeypatch, capsys):
     assert rc == 0, lines[-5:]
     with gzip.open(cache, "rt", encoding="utf-8") as fh:
         blob = json.load(fh)
-    # (3) what a counting assembly of the program reports, under the driver's macro filter
+    # (3) what a counting assembly of the program reports (the stl declares the tables a pool moves: flipjump 1.6.0)
     mod = _driver("build_blocked_census")
-    allow = frozenset(mod.SAFE_TABLE_MACROS)
-    counting = BlockPool(mod.W, POOL_BASE, wants=lambda macro_name, prefix: macro_name.name in allow)
+    counting = BlockPool(mod.W, POOL_BASE)
     src = tmp_path / "count.fj"
     src.write_text(XOR)
     fj.assemble([src], tmp_path / "count.fjm", memory_width=mod.W, print_time=False, table_pool=counting)

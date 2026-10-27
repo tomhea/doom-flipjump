@@ -27,9 +27,10 @@ TABLE POOL. mode "plain" assembles like flipjump 1.5.1 without a pool. mode "poo
 build's two-pass BlockPool with the ship knobs (docs/ship-gate.md 1b: --pool-base 0x60000000
 --span-bits 0x9fffffe0 --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512
 --pin-broken --width-buckets; --pin-state-cells only concerns the M1 restore set, which a probe
-does not have) and the ship's SAFE_TABLE_MACROS, imported from scratchpad/12m/build_blocked.py so
-the list cannot drift. mode "pool+" adds the probe's own `extra_safe` macros to the list (what a
-table would cost IF it were declared SAFE). A probe's groups are SMALL (few sites per source
+does not have). Which tables move is the stl's declaration since flipjump 1.6.0 (a macro whose
+innermost namespace is `__relocatable__`; hex.switch is one), so the "pool+" mode -- the ship's
+list plus a probe's own `extra_safe` macros, through the pool's macro filter -- went with that
+filter: the cell probes' hex.switch it priced is declared now, and "pool" prices it. A probe's groups are SMALL (few sites per source
 word), so its pinned indices are narrow; the game's shared stl words (hundreds of sites) pay wider
 indices. That is the known direction of the probe-vs-game gap; the `calib` probes measure it
 against the plan's in-game MEASURED primitives.
@@ -67,7 +68,6 @@ from flipjump.fjm import fjm_reader                                       # noqa
 from flipjump.interpreter import _fjcore                                  # noqa: E402
 from flipjump.interpreter.fjm_run import IOReadOnEOF                      # noqa: E402
 
-from build_blocked import SAFE_TABLE_MACROS                               # noqa: E402
 from doomfj.harness import FJM_LZMA_PRESET                                  # noqa: E402
 
 W = 32
@@ -99,7 +99,6 @@ class Probe:
     verify_tail: List[str] = field(default_factory=list)  # after the loop, VERIFY build only
     expected: Optional[Callable[[int], bytes]] = None     # output of the VERIFY build for n iters
     mem_check: Optional[Callable[["Mem", int], Tuple[bool, str]]] = None
-    extra_safe: Tuple[str, ...] = ()                  # macros "pool+" declares SAFE
     note: str = ""
     vbody: Optional[List[str]] = None                 # replaces `body` in the VERIFY build
 
@@ -177,8 +176,7 @@ def _assemble_spy(files, out, pool=None):
     return grabbed, pins
 
 
-def assemble(text: str, mode: str, files: Sequence[Path] = (), extra_safe: Sequence[str] = (),
-             tag: str = "p") -> Build:
+def assemble(text: str, mode: str, files: Sequence[Path] = (), tag: str = "p") -> Build:
     tmp = Path(tempfile.mkdtemp(prefix="gpprobe_"))
     src = tmp / (tag + ".fj")
     src.write_text(text, encoding="utf-8")
@@ -187,11 +185,10 @@ def assemble(text: str, mode: str, files: Sequence[Path] = (), extra_safe: Seque
     if mode == "plain":
         labels, _ = _assemble_spy(allf, out)
         return Build(out, labels, mode, {})
-    allow = frozenset(SAFE_TABLE_MACROS) | (frozenset(extra_safe) if mode == "pool+" else frozenset())
-    wants = (lambda macro_name, prefix: macro_name.name in allow)
+    assert mode == "pool", mode
     counting = BlockPool(W, SHIP["pool_base"], span_bits=SHIP["span_bits"], spread=SHIP["spread"],
                          spread_min_count=SHIP["spread_min_count"],
-                         max_slot_ops=SHIP["max_slot_ops"], wants=wants)
+                         max_slot_ops=SHIP["max_slot_ops"])
     counting.pin_exclude = lambda address, labels: False
     seen, _ = _assemble_spy(allf, tmp / (tag + ".count.fjm"), pool=counting)
     counts, widths, hist = counting.counts, counting.widths, counting.width_hist
@@ -210,7 +207,7 @@ def assemble(text: str, mode: str, files: Sequence[Path] = (), extra_safe: Seque
     pool = BlockPool(W, SHIP["pool_base"], counts=counts, widths=widths,
                      span_bits=SHIP["span_bits"], alias=alias, spread=SHIP["spread"],
                      spread_min_count=SHIP["spread_min_count"], max_slot_ops=SHIP["max_slot_ops"],
-                     pin_broken=True, width_hist=hist, width_buckets=True, wants=wants)
+                     pin_broken=True, width_hist=hist, width_buckets=True)
     # No cell of any probe is BOTH pointer-read and an exact_xor source (pointer-read cells are raw
     # `;v*dw` data or byte arrays), so nothing needs vetoing -- but the assembler requires the
     # declaration once any pointer read expands (RAW_READERS).
@@ -299,9 +296,8 @@ class Result:
 
 
 def measure(p: Probe, mode: str, drop_body_when_off=False) -> Tuple[float, Dict[str, object]]:
-    on = assemble(p.program(True), mode, p.files, p.extra_safe, "on")
-    off = assemble(p.program(False, drop_body_when_off=drop_body_when_off), mode, p.files,
-                   p.extra_safe, "off")
+    on = assemble(p.program(True), mode, p.files, "on")
+    off = assemble(p.program(False, drop_body_when_off=drop_body_when_off), mode, p.files, "off")
     moved = {k for k in on.labels if k in off.labels and on.labels[k] != off.labels[k]}
     moved |= set(on.labels) ^ set(off.labels)
     if moved:
@@ -319,7 +315,7 @@ def measure(p: Probe, mode: str, drop_body_when_off=False) -> Tuple[float, Dict[
 def verify(p: Probe, mode: str, n: int = 64) -> Tuple[Optional[bool], str]:
     if p.expected is None and p.mem_check is None:
         return None, "no verifier"
-    b = assemble(p.program(True, verify=True), mode, p.files, p.extra_safe, "v")
+    b = assemble(p.program(True, verify=True), mode, p.files, "v")
     _ops, out, mem = Image(b).run(_limit(n), want_output=p.expected is not None)
     if p.expected is not None:
         want = p.expected(n)
@@ -395,7 +391,7 @@ def selftest() -> int:
         for m in MODES:
             good, why = verify(bad, m)
             say(tag, good is False, "%s: the verifier rejects %s: %s" % (m, bad.note, why[:80]))
-    b = assemble(rng.program(True), "pool", rng.files, (), "e1")
+    b = assemble(rng.program(True), "pool", rng.files, "e1")
     flat_ops = Image(b, flat=1 << 26).run(_limit(HI))[0]
     paged_ops = Image(b, flat=1 << 12).run(_limit(HI))[0]
     say("E1", flat_ops == paged_ops, "flat %d vs paged %d ops, same image" % (flat_ops, paged_ops))

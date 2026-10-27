@@ -134,7 +134,7 @@ def probe_pool(memory_width, counts, widths, width_hist, alias, knobs):
                      span_bits=knobs["span_bits"], alias=alias, spread=knobs["spread"],
                      spread_min_count=knobs["spread_min_count"],
                      max_slot_ops=knobs["max_slot_ops"], width_hist=width_hist,
-                     width_buckets=knobs["width_buckets"], wants=None,
+                     width_buckets=knobs["width_buckets"],
                      **({"heat": knobs["heat_list"]} if knobs.get("heat_list") else {}))
 
 

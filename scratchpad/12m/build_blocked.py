@@ -45,28 +45,19 @@ from doomfj.config import Config                                        # noqa: 
 from doomfj.harness import W, SHIP_LZMA_PRESET                          # noqa: E402
 from doomfj.wall_renderer import TIERS                                  # noqa: E402
 
-# THE DECLARATION the assembler cannot infer (FINDINGS BG). Every one of these emits
-# `pad N; <label>: <entries that all jump explicitly>; end: wflip` -- a table reached only by jump.
-# `hex.pointers.xor_hex_to_flip_ptr` does NOT: its pad-4 block is selected by ADDRESS-BIT FLIPS and
-# contains a wflip, so "a maximal run of a;b ops after a pad" splits it and the program dies.
-# The two shifts qualify by the same shape (2026-09-25): `pad 16; switch:` sixteen entries that all
-# jump explicitly into `xor_by:`, sixteen more that all jump to `end:`, whose wflip disarms `switch`.
-# They dispatch through the SAME source words as the exact_xor family, so left inline they paid
-# A ^ base on a pinned word (1.45 M ops/frame, handoff throughput-plan 15). `hex.inc1` does NOT
-# qualify: its entry 15 falls through into the carry tail, which the assembler's detector refuses.
-# `hex.switch` (M7 P1.2, the collision cells' tree) qualifies the same way: `pad 16; switch:` sixteen
-# `;r<i>` entries, each trampoline `r<i>: wflip x+w, switch, t<i>` disarming `switch` and jumping on.
-# Undeclared, the pool pins its cell instead and six levels cost 137 ops against 46 (S6, MEASURED).
-SAFE_TABLE_MACROS = ("hex.exact_xor", "hex.sparse_exact_xor", "hex.double_exact_xor",
-                     "hex.sparse_double_exact_xor", "hex.triple_exact_xor",
-                     "hex.quadrupled_exact_xor",
-                     "hex.shifts.shl_bit_once", "hex.shifts.shr_bit_once",
-                     "hex.switch")
+# WHICH TABLES MOVE is the stl's declaration since flipjump 1.6.0, not this script's: a pool moves exactly the
+# tables of a macro whose innermost namespace is `__relocatable__` (preprocessor.is_relocatable). The stl declares
+# nine -- hex.exact_xor, sparse_exact_xor, double_exact_xor, sparse_double_exact_xor, triple_exact_xor,
+# quadrupled_exact_xor, shifts.shl_bit_once, shifts.shr_bit_once and hex.switch -- the nine this script used to name in
+# its own allow-list for the pool's macro filter, which 1.6.0 removed. Why those and no other (FINDINGS
+# BG): each emits `pad N; <label>: <entries that all jump explicitly>`, a table reached only by jump.
+# `hex.pointers.xor_hex_to_flip_ptr` is selected by address-bit flips and holds a wflip; `hex.inc1`'s entry 15
+# falls through into its carry tail -- neither is declared.
 
 
 def _counts_sig(a):
-    """What the frozen counts actually depend on: the program, and which macros may be blocked."""
-    # ⚠ THE PROGRAM ITSELF MUST BE IN THE KEY. tier/map/wad/macros do not change when an EMITTER
+    """What the frozen counts actually depend on: the program (and the stl's declared tables)."""
+    # ⚠ THE PROGRAM ITSELF MUST BE IN THE KEY. tier/map/wad do not change when an EMITTER
     # changes, so without this a cache made before (say) FORWARD_MOVE moved would be silently
     # reused for a different program -- wrong counts, wrong block sizes, overflow declines, and no
     # error. Hash the emitter sources and the fj sources that shape what gets emitted.
@@ -75,8 +66,9 @@ def _counts_sig(a):
                     + list((ROOT / "src" / "fj").glob("*.fj"))):
         h.update(f.name.encode())
         h.update(f.read_bytes())
-    return {"tier": a.tier, "map": a.map, "wad": a.wad, "macros": sorted(SAFE_TABLE_MACROS),
-            "src": h.hexdigest()[:16]}
+    # (no "macros" since flipjump 1.6.0: the stl declares the tables that move, and the stl's sources are not
+    # hashed here -- a new stl is a new flipjump checkout, so regenerate the census with it, as 4b does)
+    return {"tier": a.tier, "map": a.map, "wad": a.wad, "src": h.hexdigest()[:16]}
 
 
 def _load_counts(path, a):
@@ -127,7 +119,7 @@ def _pack_kw(a):
     return {"pack": True} if getattr(a, "pack_blocks", False) else {}
 
 
-def _preflight(pool_cls, W, a, frozen, wants, heat=None):
+def _preflight(pool_cls, W, a, frozen, heat=None):
     """Price the configuration BEFORE the 25-minute assembly.
 
     Twice now a config has been launched on an eyeballed span estimate and come back 31 minutes
@@ -139,7 +131,7 @@ def _preflight(pool_cls, W, a, frozen, wants, heat=None):
                      span_bits=a.span_bits, alias=frozen.get("alias"), spread=a.spread,
                      spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops,
                      width_hist=frozen.get("width_hist"), width_buckets=a.width_buckets,
-                     wants=wants, **({"heat": heat} if heat else {}), **_pack_kw(a))
+                     **({"heat": heat} if heat else {}), **_pack_kw(a))
     demand = sum(probe._block_bits(g) for g in frozen["counts"])
     if getattr(a, "pack_blocks", False):
         print("  PREFLIGHT (--pack-blocks): the packed blocks end %s words past the pool base (the demand below is "
@@ -239,7 +231,7 @@ def main():
     ap.add_argument("--counts-cache", default=None,
                     help="reuse the counting assembly's counts/widths/histogram from this file "
                          "(and write it when absent). The counting pass costs ~430s and depends "
-                         "only on the program and the allowed macros, not on pool geometry, so "
+                         "only on the program (and the stl's declared tables), not on pool geometry, so "
                          "every spread/slot/span config can share one.")
     ap.add_argument("--width-buckets", action="store_true",
                     help="give each WIDTH its own sub-block instead of widening every slot in a "
@@ -258,10 +250,6 @@ def main():
                          "instead of letting the biggest-first cursor drop whatever it reaches "
                          "last. A broken group loses its pin for ALL its tables (FINDINGS BQ), so "
                          "which groups get dropped is worth more than how many.")
-    ap.add_argument("--macros", nargs="*", default=list(SAFE_TABLE_MACROS),
-                    help="only block tables emitted by these MACROS -- the declaration the "
-                         "assembler cannot infer (FINDINGS BG). Defaults to the exact_xor family, "
-                         "whose tables are verified jump-only.")
     ap.add_argument("--view-w", type=int, default=160,
                     help="cfg.VIEW_W, needed to derive the byte arrays (build metrics print it)")
     ap.add_argument("--subsectors", type=int, default=None,
@@ -346,10 +334,6 @@ def main():
         print("pin-heat: %s (sha256 %s...): %d hot groups, %s hot sites"
               % (a.pin_heat, hashlib.sha256(raw).hexdigest()[:16], len(heat),
                  format(sum(len(v) for v in heat.values()), ",")), flush=True)
-
-    allow = frozenset(a.macros)
-    wants = (lambda macro_name, prefix: macro_name.name in allow) if allow else None
-    print("macros allowed: %s" % ", ".join(sorted(allow)), flush=True)
 
     # WHICH RESET-OWNED WORDS CAN BE PINNED, and which cannot.
     #
@@ -493,7 +477,7 @@ def main():
         pool = BlockPool(W, a.pool_base, one_pass=True, merge_aliases=a.merge_aliases,
                          span_bits=a.span_bits, spread=a.spread, spread_min_count=a.spread_min_count,
                          max_slot_ops=a.max_slot_ops, evict_by_value=a.evict_by_value,
-                         pin_broken=a.pin_broken, width_buckets=a.width_buckets, wants=wants,
+                         pin_broken=a.pin_broken, width_buckets=a.width_buckets,
                          **({"heat": heat} if heat else {}), **_pack_kw(a))
         pool.pin_exclude = _reset_owned          # NEVER PIN A WORD THE M1 SELF-RESET OWNS (see the placing pool)
         pools.append(pool)
@@ -509,7 +493,7 @@ def main():
                  {k: v for k, v in pool.decline_report().items() if v}, int(time.time() - t0)), flush=True)
         # priced as the two-pass preflight prices its counts, so the logs compare line for line
         _preflight(BlockPool, W, a, {"counts": sized.counts, "widths": sized.widths,
-                                     "width_hist": sized.width_hist, "alias": sized.alias}, wants, heat)
+                                     "width_hist": sized.width_hist, "alias": sized.alias}, heat)
         if a.counts_cache:
             census = pool.census(merge_aliases=a.merge_aliases)
             _save_counts(a.counts_cache, a, {"counts": census.counts, "widths": census.widths,
@@ -529,7 +513,7 @@ def main():
             with tempfile.TemporaryDirectory() as td:
                 counting = (SiteRecorder if a.record_sites else BlockPool)(
                     W, a.pool_base, span_bits=a.span_bits, spread=a.spread,
-                    spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops, wants=wants)
+                    spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops)
                 probe = dict(kwargs)
                 probe["table_pool"] = counting
                 out_arg = list(args)
@@ -599,7 +583,7 @@ def main():
                     raise SystemExit(0)
         if not frozen.get("_preflighted"):
             frozen["_preflighted"] = True
-            _preflight(BlockPool, W, a, frozen, wants, heat)
+            _preflight(BlockPool, W, a, frozen, heat)
             if a.preflight_only:
                 print("  --preflight-only: priced, not built.", flush=True)
                 raise SystemExit(0)
@@ -608,7 +592,7 @@ def main():
                          spread=a.spread, spread_min_count=a.spread_min_count,
                          max_slot_ops=a.max_slot_ops, evict_by_value=a.evict_by_value,
                          pin_broken=a.pin_broken, width_hist=frozen.get("width_hist"),
-                         width_buckets=a.width_buckets, wants=wants,
+                         width_buckets=a.width_buckets,
                          **({"heat": heat} if heat else {}), **_pack_kw(a))
         if heat:
             print("  pin-heat: %s" % pool.heat_report(), flush=True)

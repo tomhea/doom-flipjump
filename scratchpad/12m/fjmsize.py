@@ -34,6 +34,12 @@ The two constants fail in OPPOSITE directions, and only one of them is dangerous
 The header is now parsed with the fjm's own struct formats
 (`flipjump.fjm.fjm_consts`), so both derive.
 
+AND FROM .fjm VERSION 4 (flipjump 1.6.0's default writer, A11) the format is flipjump's to parse, not
+this file's: version 4 compresses the SEGMENT TABLE too (a Q of its compressed size, then its LZMA
+stream, then the data's), so the struct walk above reads compressed bytes as segment records. The
+reader is now `flipjump.fjm.fjm_reader.read_fjm_raw` (header, segments, and the decompressed data,
+without the interpreter's word dict), which every version goes through. C6 is its control.
+
 Two word counts are reported because they answer different questions:
 
   * DATA words  -- the decompressed payload. This is the "word count" the size metric names, and
@@ -53,6 +59,8 @@ from pathlib import Path
 from flipjump.fjm.fjm_consts import (FJ_MAGIC, FJMVersion, _LZMA_DECOMPRESSION_FILTERS,
                                      _LZMA_FORMAT, _header_base_format, _header_base_size,
                                      _header_extension_size, _segment_format, _segment_size)
+from flipjump.fjm.fjm_reader import read_fjm_raw
+from flipjump.utils.exceptions import FlipJumpReadFjmException
 
 
 def ceiling_words(memory_width):
@@ -94,32 +102,33 @@ def read_fjm_size(path):
     dict; on a 125M-word image that is not a thing you can hold. So the header structs come from
     `fjm_consts` (the same definitions Reader unpacks with) and the payload is only measured.
     """
-    raw = Path(path).read_bytes()
-    magic, memory_width, version, segment_num = struct.unpack(
-        _header_base_format, raw[:_header_base_size])
+    path = Path(path)
+    with open(path, "rb") as fh:
+        head = fh.read(_header_base_size)
+    magic = struct.unpack(_header_base_format, head)[0] if len(head) == _header_base_size else None
     if magic != FJ_MAGIC:
-        raise ValueError("%s: bad magic 0x%x (expected 0x%x) -- not an .fjm?"
-                         % (path, magic, FJ_MAGIC))
-    version = FJMVersion(version)
-    off = _header_base_size
-    if version != FJMVersion.BaseVersion:
-        off += _header_extension_size                      # the flags/reserved extension
-    segments = []
-    for _ in range(segment_num):
-        segments.append(struct.unpack(_segment_format, raw[off:off + _segment_size]))
-        off += _segment_size
-
-    payload = raw[off:]
-    if version == FJMVersion.CompressedVersion:
-        payload = lzma.decompress(payload, format=_LZMA_FORMAT,
-                                  filters=_LZMA_DECOMPRESSION_FILTERS)
+        raise ValueError("%s: bad magic %s (expected 0x%x) -- not an .fjm?"
+                         % (path, "none" if magic is None else "0x%x" % magic, FJ_MAGIC))
+    try:
+        header, payload = read_fjm_raw(path)              # every version: v4's table is compressed too
+    except FlipJumpReadFjmException as e:
+        raise ValueError("%s: %s" % (path, e)) from e
+    memory_width = header.memory_width
     word_bytes = memory_width // 8
     if len(payload) % word_bytes:
         raise ValueError("%s: payload of %d bytes is not a whole number of %d-byte words"
                          % (path, len(payload), word_bytes))
     data_words = len(payload) // word_bytes
-    span_words = max((s[0] + s[1] for s in segments), default=0)
-    return FjmSize(memory_width, segment_num, data_words, span_words, len(raw))
+    return FjmSize(memory_width, len(header.segments), data_words, header.span_words, path.stat().st_size)
+
+
+def _v3_segments(raw):
+    """THE PRE-v4 PARSE (what read_fjm_size did until A11), kept only for control C6: the segment
+    records read straight after the header extension"""
+    _magic, _w, version, segment_num = struct.unpack(_header_base_format, raw[:_header_base_size])
+    off = _header_base_size + (_header_extension_size if version != FJMVersion.BaseVersion.value else 0)
+    return [struct.unpack(_segment_format, raw[off + i * _segment_size:off + (i + 1) * _segment_size])
+            for i in range(segment_num)]
 
 
 # ----------------------------------------------------------------------------------------------
@@ -132,12 +141,14 @@ def read_fjm_size(path):
 TINY = "stl.startup_and_init_all\n    stl.loop\n"
 
 
-def _assemble_tiny(tmp, width):
+def _assemble_tiny(tmp, width, version=FJMVersion.CompressedVersion):
+    """version 3 by default: C1..C3 control the pre-v4 reader, whose 64-byte slice assumes version 3.
+    C6 passes version 4 (flipjump 1.6.0's default)."""
     import flipjump as fj
     src = tmp / ("tiny%d.fj" % width)
     src.write_text(TINY, encoding="utf-8")
-    out = tmp / ("tiny%d.fjm" % width)
-    fj.assemble([src], out, memory_width=width, print_time=False)
+    out = tmp / ("tiny%d_v%d.fjm" % (width, version.value))
+    fj.assemble([src], out, memory_width=width, print_time=False, fjm_version=version)
     return out
 
 
@@ -252,6 +263,30 @@ def selftest():
             check("C5 a corrupt payload is rejected", False, "it returned a size!")
         except (lzma.LZMAError, ValueError, struct.error):
             check("C5 a corrupt payload is rejected", True)
+
+        # C6  THE VERSION-4 CONTROL (A11). flipjump 1.6.0 writes version 4 by default, and version 4
+        #     compresses the segment table: the same program must weigh the same as its version-3
+        #     build, the segments must be the header's own (read_fjm_header), and the pre-v4 parse
+        #     -- the records straight after the extension -- must get them WRONG.
+        from flipjump.fjm.fjm_reader import read_fjm_header
+        f4 = _assemble_tiny(tmp, 32, FJMVersion.CompressedSegmentsVersion)
+        g4 = read_fjm_size(f4)
+        h4 = read_fjm_header(f4)
+        check("C6 a version-4 file is version 4 (the control is not vacuous)",
+              h4.version == FJMVersion.CompressedSegmentsVersion, str(h4.version))
+        check("C6 v4 data words == the v3 build's", g4.data_words == got.data_words,
+              "v4=%s v3=%s" % (format(g4.data_words, ","), format(got.data_words, ",")))
+        check("C6 v4 span == the header's span and the v3 build's",
+              g4.span_words == h4.span_words == got.span_words and g4.segment_num == len(h4.segments),
+              "span=%s" % format(g4.span_words, ","))
+        try:
+            old4 = _v3_segments(Path(f4).read_bytes())
+            check("C6 the pre-v4 parse gets the v4 segment table WRONG", old4 != list(h4.segments),
+                  "pre-v4 %r vs %r" % (old4[:1], list(h4.segments)[:1]))
+        except struct.error:
+            check("C6 the pre-v4 parse cannot even unpack the v4 segment table", True, "struct.error")
+        check("... and the pre-v4 parse reads the v3 file right (the control's own check)",
+              _v3_segments(Path(f32).read_bytes()) == list(read_fjm_header(f32).segments))
 
     print("")
     print("SELFTEST %s%s" % ("PASS" if not fails else "FAIL", "" if not fails else ": " + ", ".join(fails)),

@@ -81,7 +81,6 @@ CONTROLS (R9)
      against the PAD line's 45,678,048.
 """
 import argparse
-import struct
 import sys
 import types
 from pathlib import Path
@@ -91,9 +90,8 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from flipjump.assembler.preprocessor import BlockPool                    # noqa: E402
-from flipjump.fjm.fjm_consts import (FJ_MAGIC, FJMVersion,               # noqa: E402
-                                     _header_base_format, _header_base_size,
-                                     _header_extension_size, _segment_format, _segment_size)
+from flipjump.fjm.fjm_reader import read_fjm_header                      # noqa: E402
+from flipjump.utils.exceptions import FlipJumpReadFjmException           # noqa: E402
 
 import fjmsize                                                           # noqa: E402
 from profx.pool import load_heat                                         # noqa: E402
@@ -109,19 +107,14 @@ SHIP_GATE = dict(pool_base=0x80000000, span_bits=0x7FFFFFE0, spread=2, spread_mi
 
 def read_segments(path):
     """the .fjm's segment table as (start, length, data_start, data_length) words -- the header
-    only, so this costs no decompression"""
-    raw = Path(path).read_bytes()
-    magic, memory_width, version, segment_num = struct.unpack(
-        _header_base_format, raw[:_header_base_size])
-    if magic != FJ_MAGIC:
-        raise ValueError("%s: bad magic 0x%x -- not an .fjm?" % (path, magic))
-    off = _header_base_size
-    if FJMVersion(version) != FJMVersion.BaseVersion:
-        off += _header_extension_size
-    segments = [struct.unpack(_segment_format,
-                              raw[off + i * _segment_size:off + (i + 1) * _segment_size])
-                for i in range(segment_num)]
-    return memory_width, segments
+    only, so this costs no data decompression (version 4 decompresses the table's own stream)"""
+    # flipjump's own header reader (A11): .fjm version 4 -- flipjump 1.6.0's default -- compresses the segment
+    # table, so the struct walk this used to do read compressed bytes as segment records
+    try:
+        header = read_fjm_header(Path(path))
+    except FlipJumpReadFjmException as e:
+        raise ValueError("%s: %s -- not an .fjm?" % (path, e)) from e
+    return header.memory_width, [tuple(seg) for seg in header.segments]
 
 
 def split_at(segments, pool_base_words):

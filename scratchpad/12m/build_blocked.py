@@ -42,7 +42,7 @@ import flipjump as fj                                                   # noqa: 
 from flipjump.assembler.preprocessor import BlockPool                   # noqa: E402
 from doomfj.build import build_wall_renderer                            # noqa: E402
 from doomfj.config import Config                                        # noqa: E402
-from doomfj.harness import W                                            # noqa: E402
+from doomfj.harness import W, SHIP_LZMA_PRESET                          # noqa: E402
 from doomfj.wall_renderer import TIERS                                  # noqa: E402
 
 # THE DECLARATION the assembler cannot infer (FINDINGS BG). Every one of these emits
@@ -309,6 +309,12 @@ def main():
                          "do not use (bucket tails, the power-of-two round-up, the slots the cheap-index order skips) "
                          "holds other blocks. E1M2 r4's census: spread 1 56.46M -> 33.37M words of pool, spread 2 "
                          "94.19M -> 64.12M. Needs flipjump with BlockPool(pack=) (branch block-pack).")
+    ap.add_argument("--lzma-preset", type=int, default=SHIP_LZMA_PRESET, choices=range(10), metavar="0-9",
+                    help="the .fjm's LZMA preset (flipjump 1.6.0's lzma_preset). This script makes the SHIP builds "
+                         "(docs/ship-gate.md 1b), so its default is harness.SHIP_LZMA_PRESET (6, the owner's A10: "
+                         "-10.8%% file size); pass 1 (harness.FJM_LZMA_PRESET) for a day-to-day build. Encoder-only: the "
+                         "program image is the same at every preset. The counting assembly's throwaway .fjm keeps the "
+                         "caller's preset.")
     ap.add_argument("--no-pin", action="store_true",
                     help="relocate into blocks but do NOT pin the source words. Splits blocking's "
                          "two halves against the standalone gate, the way --no-pin split them "
@@ -328,8 +334,8 @@ def main():
         if clash:
             ap.error("--one-pass-blocks has no counting assembly and reads no counts: %s" % ", ".join(clash))
 
-    print("blocking: pool base %s, span %s"
-          % (hex(a.pool_base), hex(a.span_bits) if a.span_bits else "unbounded"), flush=True)
+    print("blocking: pool base %s, span %s; .fjm LZMA preset %d"
+          % (hex(a.pool_base), hex(a.span_bits) if a.span_bits else "unbounded", a.lzma_preset), flush=True)
 
     heat = None
     if a.pin_heat:
@@ -492,6 +498,7 @@ def main():
         pool.pin_exclude = _reset_owned          # NEVER PIN A WORD THE M1 SELF-RESET OWNS (see the placing pool)
         pools.append(pool)
         kwargs["table_pool"] = pool
+        kwargs["lzma_preset"] = a.lzma_preset
         out = real_assemble(*args, **kwargs)
         sized = pool.sizing()
         print("  one pass: %s tables deferred, %s in the overflow region, %s alias words unresolved, %s groups "
@@ -613,6 +620,7 @@ def main():
         pool.pin_exclude = _reset_owned
         pools.append(pool)
         kwargs["table_pool"] = pool
+        kwargs["lzma_preset"] = a.lzma_preset
         return real_assemble(*args, **kwargs)
 
     fj.assemble = assemble_blocked

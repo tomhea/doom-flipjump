@@ -28,7 +28,7 @@ import flipjump as fj
 import flipjump.assembler.assembler as _asm
 
 from doomfj import screenwire as SW
-from doomfj.harness import W
+from doomfj.harness import W, FJM_LZMA_PRESET
 
 DW = 2 * W
 VAL_SHIFT = (W + W.bit_length()) - W
@@ -137,7 +137,7 @@ def byte_arrays(bits, words_sorted, view_w, nss, pid_bytes: int = 1, ss_ratio: i
     return out
 
 
-def capture_labels(paths, out_fjm, lzma_fast=True, run_flags=0, io_mode=0, defines_file=None):
+def capture_labels(paths, out_fjm, lzma_preset=FJM_LZMA_PRESET, run_flags=0, io_mode=0, defines_file=None):
     """Assemble, and return the USER label table without paying for the debug-only families.
 
     run_flags / io_mode go into the .fjm header (flipjump >= 1.5.1 at 342a3b9): how `fj --run` runs
@@ -160,7 +160,7 @@ def capture_labels(paths, out_fjm, lzma_fast=True, run_flags=0, io_mode=0, defin
     _asm.save_debugging_labels = hook
     try:
         fj.assemble([Path(p).resolve() for p in paths], Path(out_fjm), memory_width=W,
-                    print_time=False, lzma_fast=lzma_fast, run_flags=run_flags, io_mode=io_mode,
+                    print_time=False, lzma_preset=lzma_preset, run_flags=run_flags, io_mode=io_mode,
                     **({"defines_file": Path(defines_file).resolve()} if defines_file else {}))
     finally:
         _asm.save_debugging_labels = prev

@@ -44,7 +44,7 @@ from doomfj.wireformat import (encode_bindings, encode_feed,
                                encode_visibility)
 from doomfj.fixedpoint import _signed
 import doomfj.wall_renderer as WR
-from doomfj.harness import W, FJM_LZMA_FAST
+from doomfj.harness import W, FJM_LZMA_PRESET
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,
                                     ReferenceModel, spawn_state)
 from doomfj.wad import WadFile
@@ -212,7 +212,7 @@ def main():
         (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
         fj.assemble([consts.resolve(), *[p.resolve() for p in (SRC_SIM if sim else SRC)],
                      (tmp / "m.fj").resolve()], fjm, memory_width=W, print_time=False,
-                    lzma_fast=FJM_LZMA_FAST)
+                    lzma_preset=FJM_LZMA_PRESET)
         print(f"built in {time.perf_counter() - t0:.0f}s (cached as {fjm.name})", flush=True)
     print("loading the program", flush=True)
     runner = FjmRunner(fjm)          # parse + memory-image prep ONCE, not once per frame

@@ -29,7 +29,7 @@ import flipjump as fj                                                     # noqa
 import flipjump.assembler.assembler as _asm                               # noqa: E402
 
 from doomfj.config import RENDER_FLAT_MAX_WORDS                           # noqa: E402
-from doomfj.harness import W                                              # noqa: E402
+from doomfj.harness import W, FJM_LZMA_PRESET                             # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--gen", default="scratchpad/fjmcache/_m1gen")
@@ -80,7 +80,7 @@ th = threading.Thread(target=sampler, daemon=True)
 th.start()
 t0w, t0c = time.perf_counter(), time.process_time()
 fj.assemble([p.resolve() for p in paths], Path(args.out), memory_width=W,
-            print_time=False, lzma_fast=True)
+            print_time=False, lzma_preset=FJM_LZMA_PRESET)
 dtw, dtc = time.perf_counter() - t0w, time.process_time() - t0c
 stop.set()
 th.join(timeout=2)

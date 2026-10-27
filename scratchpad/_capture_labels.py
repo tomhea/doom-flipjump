@@ -39,7 +39,7 @@ for p in paths:
     assert p.exists(), "missing: %s" % p
     print("  %s" % p.name)
 
-labels = selfreset.capture_labels(paths, out, lzma_fast=True)
+labels = selfreset.capture_labels(paths, out)
 
 tsv_path = ROOT / "scratchpad" / "_m1_labels_current.tsv.gz"
 print("\nsaving %d labels to %s..." % (len(labels), tsv_path.name), flush=True)

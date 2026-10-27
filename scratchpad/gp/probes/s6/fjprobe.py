@@ -68,6 +68,7 @@ from flipjump.interpreter import _fjcore                                  # noqa
 from flipjump.interpreter.fjm_run import IOReadOnEOF                      # noqa: E402
 
 from build_blocked import SAFE_TABLE_MACROS                               # noqa: E402
+from doomfj.harness import FJM_LZMA_PRESET                                  # noqa: E402
 
 W = 32
 DW = 2 * W
@@ -166,7 +167,7 @@ def _assemble_spy(files, out, pool=None):
 
     _asm.resolve_pinned = rp
     try:
-        kw = dict(memory_width=W, print_time=False, lzma_fast=True)
+        kw = dict(memory_width=W, print_time=False, lzma_preset=FJM_LZMA_PRESET)
         if pool is not None:
             kw["table_pool"] = pool
         fj.assemble([Path(f).resolve() for f in files], out, **kw)

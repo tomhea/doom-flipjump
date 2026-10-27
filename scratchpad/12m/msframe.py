@@ -307,9 +307,15 @@ def sha256_file(p):
     return h.hexdigest()[:16]
 
 
+def flipjump_root():
+    """the checkout of the flipjump the children import (they inherit PYTHONPATH)"""
+    import flipjump
+    return Path(flipjump.__file__).resolve().parents[1]
+
+
 def engine_hash():
     import glob
-    cands = glob.glob(str(ROOT.parent / "flipjump-151" / "flipjump" / "interpreter" / "_fjcore*.pyd"))
+    cands = glob.glob(str(flipjump_root() / "flipjump" / "interpreter" / "_fjcore*.pyd"))
     return sha256_file(cands[0]) if cands else "?"
 
 
@@ -570,7 +576,7 @@ def main():
               "a": {"binary": str(a_fjm), "sha": sha256_file(a_fjm), "env": env_a},
               "b": ({"binary": str(b_fjm), "sha": sha256_file(b_fjm), "env": env_b} if b_fjm else None),
               "engine_pyd_sha": engine_hash(),
-              "git": {"doom": git_head(ROOT), "flipjump": git_head(ROOT.parent / "flipjump-151")},
+              "git": {"doom": git_head(ROOT), "flipjump": git_head(flipjump_root())},
               "machine": {"power_plan": plan, "busy": busy},
               "summary": s, "rows": rows}
     append_ledger(record)

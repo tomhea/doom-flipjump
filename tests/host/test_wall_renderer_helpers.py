@@ -144,14 +144,13 @@ def test_the_macro_the_prelude_calls_is_the_macro_the_block_defines():
 
 
 def test_the_title_packing_is_what_the_screen_macro_unpacks():
-    """Round-trip through the REAL device. `screen.set_window_title` emits
-    `rep(len, i) stl.output_char (text >> (8*i)) & 0xff`, so the packed integer is
-    least-significant BYTE first and `len` is the utf-8 byte count -- two independent numbers that
-    nothing else pins together."""
+    """Round-trip through the REAL device. `screen.set_window_title` emits `stl.output text`, which is
+    `rep(((#text)+7)>>3, i) stl.output_char (text >> (8*i)) & 0xff`, so the packed integer is
+    least-significant BYTE first and its byte length must be the utf-8 byte count."""
     _macro, calls = window_chrome_fj()
     call = next(c for c in calls if c.startswith("screen.set_window_title"))
-    big, n = call.split(None, 1)[1].split(",")
-    big, n = int(big, 16), int(n)
+    big = int(call.split(None, 1)[1], 16)
+    n = (big.bit_length() + 7) // 8
     assert n == len(WINDOW_TITLE.encode("utf-8"))
     assert bytes((big >> (8 * i)) & 0xFF for i in range(n)).decode("utf-8") == WINDOW_TITLE
 
@@ -174,7 +173,7 @@ def test_the_device_reads_the_emitted_indices_as_the_icon():
 def test_the_screen_macros_the_chrome_calls_exist_with_that_arity():
     """The emitter writes fj text; nothing type-checks it until the assembler does, 30 minutes in."""
     src = SCREEN_FJ.read_text(encoding="utf-8")
-    for name, arity in (("set_window_title", 2), ("set_window_icon_header", 2)):
+    for name, arity in (("set_window_title", 1), ("set_window_icon_header", 2)):
         m = re.search(r"def\s+%s\s+([^{]*)\{" % name, src)
         assert m, "the stl's screen.fj no longer defines %s" % name
         assert len([a for a in m.group(1).split(",") if a.strip()]) == arity

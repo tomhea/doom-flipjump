@@ -26,11 +26,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(Path("C:/Users/tomhe/Documents/flipjump-151")))
 
 import flipjump as fj                                                      # noqa: E402
 from flipjump.interpreter.fjm_run import run as fjm_run                    # noqa: E402
-from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen        # noqa: E402
+from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen, default_palette  # noqa: E402
 from doomfj.config import Config                                           # noqa: E402
 
 W = 32
@@ -73,7 +72,7 @@ def selftest():
     for i, ch in enumerate(text.encode("utf-8")):
         big |= ch << (8 * i)
 
-    scr = build_and_run(PROLOGUE + "    screen.set_window_title %s, %d\n" % (hex(big), len(text))
+    scr = build_and_run(PROLOGUE + "    screen.set_window_title %s\n" % hex(big)
                         + EPILOGUE)
     check("C1 the title arrives intact through assemble+run", scr.window_title == text,
           repr(scr.window_title))
@@ -87,15 +86,15 @@ def selftest():
             + "".join("    stl.output_char %d\n" % v for v in px) + EPILOGUE)
     scr3 = build_and_run(icon)
     check("C3 the icon arrives with the right shape and pixels",
-          scr3.window_icon == (3, 3, px), repr(scr3.window_icon))
+          scr3.window_icon == (3, 3, [default_palette(8)[v] for v in px]), repr(scr3.window_icon))
 
-    both = (PROLOGUE + "    screen.set_window_title %s, %d\n" % (hex(big), len(text))
+    both = (PROLOGUE + "    screen.set_window_title %s\n" % hex(big)
             + "    screen.set_window_icon_header 2, 2\n"
             + "".join("    stl.output_char %d\n" % v for v in (9, 9, 9, 9))
             + "    screen.init_screen W, H, 8\n" + EPILOGUE)
     scr4 = build_and_run(both)
     check("C4 a normal command after both still executes",
-          scr4.window_title == text and scr4.window_icon == (2, 2, [9, 9, 9, 9])
+          scr4.window_title == text and scr4.window_icon == (2, 2, [default_palette(8)[9]] * 4)
           and (scr4.width, scr4.height) == (Config().W, Config().H),
           "%s / %s / %dx%d" % (scr4.window_title, scr4.window_icon,
                                scr4.width, scr4.height))

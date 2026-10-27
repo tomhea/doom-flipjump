@@ -186,10 +186,10 @@ def fj_set_max_fps(fps: int) -> str:
 
 
 def fj_set_window_title(text: str) -> str:
-    """the title as stl.screen's constant: its utf-8 bytes, least-significant first, and their count"""
+    """the title as stl.screen's constant: its utf-8 bytes, least-significant first"""
     data = text.encode("utf-8")
     assert b"\x00" not in data, "a title cannot hold a NUL (it ends the title)"
-    return "screen.set_window_title %s, %d" % (hex(int.from_bytes(data, "little")), len(data))
+    return "screen.set_window_title %s" % hex(int.from_bytes(data, "little"))
 
 
 def fj_set_window_icon_header(width: int, height: int) -> str:

@@ -160,9 +160,9 @@ def main():
             key = heat_key(path)
             occurrence = seen.get(key, 0)
             seen[key] = occurrence + 1
-            got = replay.reserve(align, ops, group=g, group_expr=Expr(g), labels_prefix=path)
+            got = replay.reserve(align, ops, g, Expr(g), path)
             if got is not None:
-                at[got[0]] = (key, occurrence, slot_ops_of(max(ops, align), KNOBS["max_slot_ops"]))
+                at[got] = (key, occurrence, slot_ops_of(max(ops, align), KNOBS["max_slot_ops"]))
         base, bits = pool.groups[g][0], pool._block_bits(g)
         layout, _ = pool._bucket_layout(g)
         tables = {}

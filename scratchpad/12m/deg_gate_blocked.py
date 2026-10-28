@@ -31,7 +31,6 @@ their cells instead.
 """
 import argparse
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -58,7 +57,6 @@ def make_assemble(a):
     """
     # WHICH TABLES MOVE is the stl's declaration since flipjump 1.6.0 (a macro whose innermost namespace is
     # `__relocatable__`); the pool's `wants` filter, and this driver's --macros / --owners narrowing of it, are gone.
-    frozen = {}
     pools = []
     real_assemble = fj.assemble
     excluded = {"words": None}
@@ -99,24 +97,7 @@ def make_assemble(a):
         return (address // W) in excluded["words"]
 
     def assemble_blocked(*args, **kwargs):
-        if not frozen:
-            with tempfile.TemporaryDirectory() as td:
-                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits)
-                probe = dict(kwargs)
-                probe["table_pool"] = counting
-                out_arg = list(args)
-                if len(out_arg) > 1:
-                    out_arg[1] = Path(td) / "count.fjm"
-                else:
-                    probe["output_fjm_path"] = Path(td) / "count.fjm"
-                real_assemble(*out_arg, **probe)
-                frozen["counts"] = counting.counts
-                frozen["widths"] = counting.widths
-                print("  counting pass: %s groups, %s tables"
-                      % (format(len(counting.counts), ","),
-                         format(sum(counting.counts.values()), ",")), flush=True)
-        pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
-                         span_bits=a.span_bits)
+        pool = BlockPool(W, a.pool_base, span_bits=a.span_bits)   # one pass: sized from its own expansion
         # A pinned word cannot be read raw, and the assembler (flipjump 1.5.1, tomhea/flipjump#360)
         # refuses to pin a program that reads through hex.pointers unless the caller names the
         # cells a pointer can reach. Here those are the byte arrays (`hex.read_byte` walks them),
@@ -172,7 +153,7 @@ def _reset_like_labels(nss, view_w):
 
 def _driver_controls(a, check, tmp, src):
     """The R9 checks only THIS driver can make: the shared arm's fixture is nobody's program, and
-    the frozen counting pass and the pin exclusion are this driver's machinery."""
+    the fresh pool per assembly and the pin exclusion are this driver's machinery."""
 
     def call(fn, name):
         """The closure, called the way deg_gate calls it. It may well RAISE -- the fixture is not
@@ -188,9 +169,9 @@ def _driver_controls(a, check, tmp, src):
 
     fresh, pools = make_assemble(a)
     causes, text = driver.capture(lambda: [call(fresh, "blk1"), call(fresh, "blk2")])
-    check(text.count("counting pass:") == 1 and len(pools) == 2,
-          "two assembles, ONE counting pass: the counts are frozen",
-          "%d counting-pass lines, %d pools" % (text.count("counting pass:"), len(pools)))
+    check(len(pools) == 2 and pools[0] is not pools[1],
+          "two assembles, two (one-pass) pools: a pool lays out one assembly",
+          "%d pools" % len(pools))
     check(all(c == "assembled" for c in causes) and text.count("pin-exclude: no self-reset") == 1,
           "the assembler CALLS this driver's pin exclusion, which names no cell without a self-reset",
           "%s; %d pin-exclude lines" % (causes[0], text.count("pin-exclude:")))

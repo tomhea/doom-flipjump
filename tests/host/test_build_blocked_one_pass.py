@@ -1,19 +1,17 @@
-"""ONE PASS (2/2): scratchpad/12m/build_blocked.py `--one-pass-blocks` drives flipjump's BlockPool(one_pass=True)
+"""ONE PASS (2/2): scratchpad/12m/build_blocked.py `--one-pass-blocks` drives flipjump's (one-pass) BlockPool
 (flipjump #369) -- held on a small stl program through the driver's own main(), its build_wall_renderer standing in:
 
   (1) ONE assembly: no counting assembly runs (the driver's fj.assemble is reached once), and the pool deferred tables
       (a vacuous run would pass (2) with nothing blocked);
   (2) the program it builds prints what the same program without a pool prints;
-  (3) `--counts-cache` receives the census, equal to what a counting assembly of the program reports, with the
-      driver's macro filter;
-  (4) the flags that need a counting assembly or a counts cache to read are refused with it;
-  (5) R9: without the flag the same driver runs its counting assembly first -- so (1)'s count tells the two apart;
+  (3) `--counts-cache` receives the census, equal to what a plain BlockPool's assembly of the program reports;
+  (4) the flags that need a counting assembly or a counts cache to read are refused, and so is a build without the
+      flag (flipjump's BlockPool has no two-pass mode); `--record-sites` records every table and exits;
   (6) a pool with a block for every group pins words, and the collapse alarm stays silent; R9: a span too small for
       any block is called out ("PINNING COLLAPSED"), which the one-pass reset's builds never printed (#130).
 """
 import gzip
 import importlib.util
-import inspect
 import json
 import sys
 from pathlib import Path
@@ -25,9 +23,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import flipjump as fj                                                           # noqa: E402
 from flipjump.assembler.preprocessor import BlockPool                           # noqa: E402
-
-pytestmark = pytest.mark.skipif("one_pass" not in inspect.signature(BlockPool.__init__).parameters,
-                                reason="needs flipjump with BlockPool(one_pass=True) (flipjump #369)")
 
 POOL_BASE = 1 << 26                  # above everything the program reaches
 XOR = """
@@ -78,7 +73,7 @@ def _build(tmp_path, monkeypatch, capsys, *flags, name="d"):
     monkeypatch.setattr(mod, "pin_state_veto", lambda *a, **k: set())   # the tiny program has no doom cells
     out = tmp_path / ("%s.fjm" % name)
     monkeypatch.setattr(sys, "argv", ["build_blocked.py", "game", "--out", str(out), "--pool-base", hex(POOL_BASE),
-                                      "--pin-state-cells", *flags])
+                                      "--pin-state-cells", "--width-buckets", "--merge-aliases", *flags])
     try:
         rc = mod.main()                          # --out is absolute, so the driver's ROOT / out is out
     except SystemExit as exc:
@@ -108,28 +103,39 @@ def test_the_census_goes_to_the_counts_cache(tmp_path, monkeypatch, capsys):
     assert rc == 0, lines[-5:]
     with gzip.open(cache, "rt", encoding="utf-8") as fh:
         blob = json.load(fh)
-    # (3) what a counting assembly of the program reports (the stl declares the tables a pool moves: flipjump 1.6.0)
+    # (3) what a plain pool's assembly of the program reports (the stl declares the tables a pool moves)
     mod = _driver("build_blocked_census")
-    counting = BlockPool(mod.W, POOL_BASE)
+    plain = BlockPool(mod.W, POOL_BASE)
     src = tmp_path / "count.fj"
     src.write_text(XOR)
-    fj.assemble([src], tmp_path / "count.fjm", memory_width=mod.W, print_time=False, table_pool=counting)
-    assert blob["counts"] == counting.counts and blob["counts"], (blob["counts"], counting.counts)
-    assert {g: int(w) for g, w in blob["widths"].items()} == counting.widths
+    fj.assemble([src], tmp_path / "count.fjm", memory_width=mod.W, print_time=False, table_pool=plain)
+    census = plain.census()
+    assert blob["counts"] == census.counts and blob["counts"], (blob["counts"], census.counts)
+    assert {g: int(w) for g, w in blob["widths"].items()} == census.widths
 
 
-@pytest.mark.parametrize("flag", [["--counts-trust"], ["--preflight-only"], ["--record-sites", "sites.json.gz"]])
+@pytest.mark.parametrize("flag", [["--counts-trust"], ["--preflight-only"]])
 def test_the_flags_that_need_a_counting_assembly_are_refused(tmp_path, monkeypatch, capsys, flag):
     rc, lines, _out, calls = _build(tmp_path, monkeypatch, capsys, "--one-pass-blocks", *flag)
     assert rc == 2 and calls == []                             # (4) argparse's error, before any assembly
     assert any("has no counting assembly" in ln and flag[0] in ln for ln in lines), lines
 
 
-def test_control_without_the_flag_the_driver_counts_first(tmp_path, monkeypatch, capsys):
-    rc, lines, out, calls = _build(tmp_path, monkeypatch, capsys, name="two")
-    assert rc == 0, lines[-5:]
-    assert calls == ["BlockPool", "BlockPool"], calls          # (5) counting + placing
-    assert any("counting pass:" in ln for ln in lines)
+def test_without_the_flag_the_driver_refuses(tmp_path, monkeypatch, capsys):
+    rc, lines, _out, calls = _build(tmp_path, monkeypatch, capsys, name="two")
+    assert rc == 2 and calls == [] and any("one-pass only" in ln for ln in lines), lines   # (4)
+
+
+def test_record_sites_records_every_table_in_one_assembly(tmp_path, monkeypatch, capsys):
+    sites = tmp_path / "sites.json.gz"
+    rc, lines, _out, calls = _build(tmp_path, monkeypatch, capsys, "--one-pass-blocks", "--record-sites", str(sites))
+    assert rc == 0 and calls == ["SiteRecorder"], (calls, lines[-5:])
+    with gzip.open(sites, "rt", encoding="utf-8") as fh:
+        blob = json.load(fh)
+    deferred = int([ln for ln in lines if "one pass:" in ln][0].split("one pass:")[1].split("tables")[0]
+                   .replace(",", ""))
+    assert blob["tables"] == sum(len(v) for v in blob["groups"].values()) == deferred > 0   # (4) every table
+    assert all(path.endswith(")") for v in blob["groups"].values() for path, _ops, _align in v)
 
 
 def test_the_pins_are_reported_and_a_collapse_is_called_out(tmp_path, monkeypatch, capsys):

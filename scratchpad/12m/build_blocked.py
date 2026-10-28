@@ -31,7 +31,6 @@ import gzip
 import hashlib
 import json
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -119,33 +118,20 @@ def _pack_kw(a):
     return {"pack": True} if getattr(a, "pack_blocks", False) else {}
 
 
-def _preflight(pool_cls, W, a, frozen, heat=None):
-    """Price the configuration BEFORE the 25-minute assembly.
-
-    Twice now a config has been launched on an eyeballed span estimate and come back 31 minutes
-    later with the pool exhausted (blocked10's margin, blocked14's spread=4: 26,945 of 27,032 groups
-    broken). The counting pass already knows every block's exact size, so demand vs capacity is
-    arithmetic, not a guess. Reports; does not decide.
-    """
-    probe = pool_cls(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
-                     span_bits=a.span_bits, alias=frozen.get("alias"), spread=a.spread,
-                     spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops,
-                     width_hist=frozen.get("width_hist"), width_buckets=a.width_buckets,
-                     **({"heat": heat} if heat else {}), **_pack_kw(a))
-    demand = sum(probe._block_bits(g) for g in frozen["counts"])
+def _preflight(pool, a):
+    """Price the layout the one-pass pool placed: its blocks' demand against the pool's capacity (flipjump's
+    BlockPool refuses a pool too small for its blocks, so every group is placed). Reports; does not decide."""
+    demand = sum(pool._block_bits(g) for g in pool.counts)
     if getattr(a, "pack_blocks", False):
         print("  PREFLIGHT (--pack-blocks): the packed blocks end %s words past the pool base (the demand below is "
-              "the blocks' whole sizes, unpacked)" % format(probe._used // W, ","), flush=True)
+              "the blocks' whole sizes, unpacked)" % format(pool._used // W, ","), flush=True)
     limit = (1 << W) if a.span_bits is None else min(1 << W, a.pool_base + a.span_bits)
     capacity = limit - a.pool_base
-    placed = len(probe.groups)
+    placed = len(pool.groups)
     print("  PREFLIGHT: demand %s words, capacity %s words (%.1f%% used); %s of %s groups placed"
           % (format(demand // W, ","), format(capacity // W, ","),
-             100.0 * demand / capacity, format(placed, ","), format(len(frozen["counts"]), ",")),
+             100.0 * demand / capacity, format(placed, ","), format(len(pool.counts), ",")),
           flush=True)
-    if placed < len(frozen["counts"]):
-        print("  *** %s GROUPS GET NO BLOCK -- they lose their pin entirely. This config does not fit."
-              % format(len(frozen["counts"]) - placed, ","), flush=True)
     return demand, capacity, placed
 
 
@@ -316,11 +302,14 @@ def main():
                      % inspect.getfile(_BP))
         if a.evict_by_value:
             ap.error("--pack-blocks and --evict-by-value are not combined (BlockPool refuses it)")
-    if a.one_pass_blocks:
-        clash = [f for f, on in (("--counts-trust", a.counts_trust), ("--preflight-only", a.preflight_only),
-                                 ("--record-sites", a.record_sites)) if on]
-        if clash:
-            ap.error("--one-pass-blocks has no counting assembly and reads no counts: %s" % ", ".join(clash))
+    if not a.one_pass_blocks:
+        ap.error("flipjump's BlockPool is one-pass only: pass --one-pass-blocks")
+    if not (a.width_buckets and a.merge_aliases) or a.evict_by_value:
+        ap.error("flipjump's BlockPool always buckets widths and merges aliases, and never evicts: pass "
+                 "--width-buckets --merge-aliases, and no --evict-by-value")
+    clash = [f for f, on in (("--counts-trust", a.counts_trust), ("--preflight-only", a.preflight_only)) if on]
+    if clash:
+        ap.error("--one-pass-blocks has no counting assembly and reads no counts: %s" % ", ".join(clash))
 
     print("blocking: pool base %s, span %s; .fjm LZMA preset %d"
           % (hex(a.pool_base), hex(a.span_bits) if a.span_bits else "unbounded", a.lzma_preset), flush=True)
@@ -458,154 +447,57 @@ def main():
 
     _selfreset.emit_reset_part = _emit_reset_part
 
-    frozen = {}          # counts/widths from the first counting run, reused by every assembly
     pools = []
     real_assemble = fj.assemble
     recorded = []
 
     class SiteRecorder(BlockPool):
-        """the counting pool, recording each table's group, path and size in encounter order"""
+        """the pool, recording each table's group, path and size at its pad, in encounter order"""
 
-        def reserve(self, ops_alignment, table_ops, group=None, group_expr=None, labels_prefix=''):
+        def defer(self, ops_alignment, table_ops, group, group_expr, labels_prefix):
             if group is not None:
                 recorded.append((group, labels_prefix, table_ops, ops_alignment))
-            return super().reserve(ops_alignment, table_ops, group, group_expr, labels_prefix)
+            return super().defer(ops_alignment, table_ops, group, group_expr, labels_prefix)
 
     def assemble_one_pass(*args, **kwargs):
         """ONE expansion: BlockPool(one_pass=True) sizes its blocks from this expansion's own census (flipjump #369)"""
         t0 = time.time()
-        pool = BlockPool(W, a.pool_base, one_pass=True, merge_aliases=a.merge_aliases,
-                         span_bits=a.span_bits, spread=a.spread, spread_min_count=a.spread_min_count,
-                         max_slot_ops=a.max_slot_ops, evict_by_value=a.evict_by_value,
-                         pin_broken=a.pin_broken, width_buckets=a.width_buckets,
-                         **({"heat": heat} if heat else {}), **_pack_kw(a))
+        pool = (SiteRecorder if a.record_sites else BlockPool)(
+            W, a.pool_base, span_bits=a.span_bits, spread=a.spread, spread_min_count=a.spread_min_count,
+            max_slot_ops=a.max_slot_ops, pin_broken=a.pin_broken, **({"heat": heat} if heat else {}), **_pack_kw(a))
         pool.pin_exclude = _reset_owned          # NEVER PIN A WORD THE M1 SELF-RESET OWNS (see the placing pool)
         pools.append(pool)
         kwargs["table_pool"] = pool
         kwargs["lzma_preset"] = a.lzma_preset
         out = real_assemble(*args, **kwargs)
-        sized = pool.sizing()
-        print("  one pass: %s tables deferred, %s in the overflow region, %s alias words unresolved, %s groups "
-              "left unblocked; the census: %s groups, %s tables; declines %s; %ds"
-              % (format(pool.deferred, ","), format(pool.overflowed, ","), format(pool.alias_unresolved, ","),
-                 format(len(sized.unblocked), ","), format(len(sized.counts), ","),
-                 format(sum(sized.counts.values()), ","),
-                 {k: v for k, v in pool.decline_report().items() if v}, int(time.time() - t0)), flush=True)
-        # priced as the two-pass preflight prices its counts, so the logs compare line for line
-        _preflight(BlockPool, W, a, {"counts": sized.counts, "widths": sized.widths,
-                                     "width_hist": sized.width_hist, "alias": sized.alias}, heat)
+        print("  one pass: %s tables deferred, %s alias words unresolved; the census: %s groups, %s tables; "
+              "%s declined (too wide for any slot); %ds"
+              % (format(pool.deferred, ","), format(pool.alias_unresolved, ","), format(len(pool.counts), ","),
+                 format(sum(pool.counts.values()), ","), format(pool.declined, ","), int(time.time() - t0)),
+              flush=True)
+        _preflight(pool, a)
         if a.counts_cache:
-            census = pool.census(merge_aliases=a.merge_aliases)
+            census = pool.census()
             _save_counts(a.counts_cache, a, {"counts": census.counts, "widths": census.widths,
                                              "width_hist": census.width_hist, "alias": census.alias})
         if heat:
             print("  pin-heat: %s" % pool.heat_report(), flush=True)
+        if a.record_sites:
+            by_group = {}
+            for g, path, ops, align in recorded:
+                by_group.setdefault(pool.alias.get(g, g), []).append([path, ops, align])
+            blob = {"what": "every table the assembly reached, per canonical group, in encounter order: "
+                            "[macro-expansion path, table ops, alignment]",
+                    "program": _counts_sig(a), "tables": len(recorded), "groups": by_group}
+            with gzip.open(a.record_sites, "wt", encoding="utf-8") as fh:
+                json.dump(blob, fh)
+            print("  recorded %s tables in %s groups -> %s"
+                  % (format(len(recorded), ","), format(len(by_group), ","), a.record_sites), flush=True)
+            raise SystemExit(0)
         return out
 
     def assemble_blocked(*args, **kwargs):
-        if a.one_pass_blocks:
-            return assemble_one_pass(*args, **kwargs)
-        if not frozen and not a.record_sites:
-            cached = _load_counts(a.counts_cache, a)
-            if cached:
-                frozen.update(cached)
-        if not frozen:
-            with tempfile.TemporaryDirectory() as td:
-                counting = (SiteRecorder if a.record_sites else BlockPool)(
-                    W, a.pool_base, span_bits=a.span_bits, spread=a.spread,
-                    spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops)
-                probe = dict(kwargs)
-                probe["table_pool"] = counting
-                out_arg = list(args)
-                if len(out_arg) > 1:
-                    out_arg[1] = Path(td) / "count.fjm"
-                else:
-                    probe["output_fjm_path"] = Path(td) / "count.fjm"
-                t0 = time.time()
-                # capture the counting assembly's labels so its group EXPRESSIONS can be resolved
-                import flipjump.assembler.assembler as _asm_mod
-                seen_labels = {}
-                _real_lr = _asm_mod.labels_resolve
-
-                def _lr(ops, labels, memory_width, fjm_writer, **k):
-                    seen_labels.update({kk: int(vv) for kk, vv in labels.items()})
-                    return _real_lr(ops, labels, memory_width, fjm_writer, **k)
-
-                _asm_mod.labels_resolve = _lr
-                try:
-                    real_assemble(*out_arg, **probe)
-                finally:
-                    _asm_mod.labels_resolve = _real_lr
-                frozen["counts"] = counting.counts
-                frozen["widths"] = counting.widths
-                frozen["width_hist"] = counting.width_hist
-                # MERGE ALIASED GROUPS. Two expressions can name one word -- `(x + 32)` and
-                # `(x + w)` at w=32 -- and separate blocks meant resolve_pinned had to UN-PIN both
-                # (3,801 words). Merging keeps the pins.
-                alias = counting.canonical_alias(seen_labels) if a.merge_aliases else {}
-                if alias:
-                    merged_counts, merged_widths = {}, {}
-                    for g, n in counting.counts.items():
-                        c = alias.get(g, g)
-                        merged_counts[c] = merged_counts.get(c, 0) + n
-                        merged_widths[c] = max(merged_widths.get(c, 0), counting.widths.get(g, 16))
-                    merged_hist = {}
-                    for g, h in counting.width_hist.items():
-                        c = alias.get(g, g)
-                        into = merged_hist.setdefault(c, {})
-                        for w, n in h.items():
-                            into[w] = into.get(w, 0) + n
-                    frozen["counts"] = merged_counts
-                    frozen["widths"] = merged_widths
-                    frozen["width_hist"] = merged_hist
-                    print("  alias: %s groups merged into %s (was %s)"
-                          % (format(len(alias), ","), format(len(merged_counts), ","),
-                             format(len(counting.counts), ",")), flush=True)
-                frozen["alias"] = alias
-                _save_counts(a.counts_cache, a, frozen)
-                _report_width_waste(counting)
-                print("  counting pass: %s groups, %s tables, %ds"
-                      % (format(len(counting.counts), ","),
-                         format(sum(counting.counts.values()), ","), int(time.time() - t0)),
-                      flush=True)
-                if a.record_sites:
-                    by_group = {}
-                    for g, path, ops, align in recorded:
-                        by_group.setdefault(alias.get(g, g), []).append([path, ops, align])
-                    blob = {"what": "every table the counting pass reached, per canonical group, in "
-                                    "encounter order: [macro-expansion path, table ops, alignment]",
-                            "program": _counts_sig(a), "tables": len(recorded), "groups": by_group}
-                    with gzip.open(a.record_sites, "wt", encoding="utf-8") as fh:
-                        json.dump(blob, fh)
-                    print("  recorded %s tables in %s groups -> %s"
-                          % (format(len(recorded), ","), format(len(by_group), ","), a.record_sites),
-                          flush=True)
-                    raise SystemExit(0)
-        if not frozen.get("_preflighted"):
-            frozen["_preflighted"] = True
-            _preflight(BlockPool, W, a, frozen, heat)
-            if a.preflight_only:
-                print("  --preflight-only: priced, not built.", flush=True)
-                raise SystemExit(0)
-        pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
-                         span_bits=a.span_bits, alias=frozen.get("alias"),
-                         spread=a.spread, spread_min_count=a.spread_min_count,
-                         max_slot_ops=a.max_slot_ops, evict_by_value=a.evict_by_value,
-                         pin_broken=a.pin_broken, width_hist=frozen.get("width_hist"),
-                         width_buckets=a.width_buckets,
-                         **({"heat": heat} if heat else {}), **_pack_kw(a))
-        if heat:
-            print("  pin-heat: %s" % pool.heat_report(), flush=True)
-        # NEVER PIN A WORD THE M1 SELF-RESET OWNS. emit_reset_part drops a cell from the restore
-        # set when `pristine_word >> VAL_SHIFT > 15`, reading it as a packed LUT -- and a pinned
-        # word holds `base + value`, so every pinned state cell is misclassified and silently
-        # stops being restored. The standalone gate saw exactly that: frame 2 byte-exact, frame 3
-        # stale (FINDINGS BH).
-        pool.pin_exclude = _reset_owned
-        pools.append(pool)
-        kwargs["table_pool"] = pool
-        kwargs["lzma_preset"] = a.lzma_preset
-        return real_assemble(*args, **kwargs)
+        return assemble_one_pass(*args, **kwargs)
 
     fj.assemble = assemble_blocked
     asmmod = _asmmod
@@ -662,16 +554,11 @@ def main():
           % format(getattr(last, "pin_conflicts", 0), ","), flush=True)
     print("runtime-reserved words skipped (stl.IO etc): %s"
           % format(getattr(last, "reserved_words", 0), ","), flush=True)
-    print("declines by reason: no-block %s, too-wide %s, overflow %s"
-          % (format(getattr(last, "declined_no_block", 0), ","),
-             format(getattr(last, "declined_too_wide", 0), ","),
-             format(getattr(last, "declined_overflow", 0), ",")), flush=True)
+    print("declined (too wide for any slot): %s" % format(last.declined, ","), flush=True)
     # BROKEN GROUPS is the number that matters, not the decline count: `pinned_words` excludes a
     # broken group ENTIRELY, so one declined table un-pins every sibling table in its group.
-    print("broken groups: %s of %s (these lose their pin for ALL their tables); evicted %s"
-          % (format(len(getattr(last, "broken_groups", ())), ","),
-             format(len(last.counts), ","),
-             format(getattr(last, "evicted_low_value", 0), ",")), flush=True)
+    print("broken groups: %s of %s (these lose their pin for ALL their tables)"
+          % (format(len(getattr(last, "broken_groups", ())), ","), format(len(last.counts), ",")), flush=True)
     if heat:
         print("pin-heat after the last assembly: %s" % last.heat_report(), flush=True)
     print("blocked: %s tables in %s groups; declined %s; ungrouped %s"

@@ -49,7 +49,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import flipjump as fj                                                   # noqa: E402
 from flipjump import FixedIO                                            # noqa: E402
 from flipjump.assembler import assembler as asmmod                      # noqa: E402
-from flipjump.assembler.preprocessor import BlockPool, TablePool        # noqa: E402
+from flipjump.assembler.preprocessor import BlockPool                   # noqa: E402
 from flipjump.utils.exceptions import FlipJumpException                 # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
 
@@ -330,7 +330,8 @@ def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
     check(inline == FIXTURE_OUTPUT, "fixture: the inline build prints %r" % FIXTURE_OUTPUT,
           "got %r in %d ops (%s)" % (inline, inline_ops, cause))
 
-    relocated = TablePool(W, POOL_BASE)
+    relocated = BlockPool(W, POOL_BASE)          # its tables move to blocks, and a veto keeps every word unpinned
+    relocated.pin_exclude = lambda address, labels: True
     out, ops, cause = build_and_run(src, tmp, "relocated", relocated)
     check(out == inline and relocated.allocated > 0, "relocation alone leaves the output alone",
           "%d tables, %d -> %d ops" % (relocated.allocated, inline_ops, ops))
@@ -341,7 +342,7 @@ def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
           "reads_words_raw=%s, %d groups" % (counting.reads_words_raw, len(counting.counts)))
 
     def blocked(exclude):
-        pool = BlockPool(W, POOL_BASE, counts=counting.counts, widths=counting.widths)
+        pool = BlockPool(W, POOL_BASE)
         pool.pin_exclude = exclude
         return pool
 
@@ -375,7 +376,7 @@ def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
           "output %r (%s)" % (out, cause))
 
     # --- verdict: every branch of it, the BlockPool half included
-    inert = TablePool(W, POOL_BASE, capacity=0)          # relocates nothing (flipjump 1.6.0 has no `wants`)
+    inert = BlockPool(W, POOL_BASE, max_slot_ops=0)      # relocates nothing: no slot holds any table
     build_and_run(src, tmp, "inert", inert)
     status, text = capture(lambda: verdict(0, inert))
     check(status != 0 and "VACUOUS" in text, "MUTANT: a pool that relocated nothing is not a PASS",

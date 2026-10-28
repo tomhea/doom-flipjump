@@ -129,13 +129,13 @@ def split_at(segments, pool_base_words):
 
 
 def probe_pool(memory_width, counts, widths, width_hist, alias, knobs):
-    """a BlockPool that only PRICES: `_preallocate` runs in __init__, nothing is assembled"""
-    return BlockPool(memory_width, knobs["pool_base"], counts=counts, widths=widths,
-                     span_bits=knobs["span_bits"], alias=alias, spread=knobs["spread"],
-                     spread_min_count=knobs["spread_min_count"],
-                     max_slot_ops=knobs["max_slot_ops"], width_hist=width_hist,
-                     width_buckets=knobs["width_buckets"],
+    """a BlockPool that only PRICES: its census laid out (place_deferred's layout step), nothing is assembled"""
+    pool = BlockPool(memory_width, knobs["pool_base"], span_bits=knobs["span_bits"], spread=knobs["spread"],
+                     spread_min_count=knobs["spread_min_count"], max_slot_ops=knobs["max_slot_ops"],
                      **({"heat": knobs["heat_list"]} if knobs.get("heat_list") else {}))
+    pool.alias = dict(alias or {})
+    pool.lay_out(dict(counts), {g: dict(h) for g, h in width_hist.items()})
+    return pool
 
 
 def placed_first(pool, groups):

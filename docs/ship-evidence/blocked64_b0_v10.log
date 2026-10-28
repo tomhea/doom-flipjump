@@ -1,0 +1,17 @@
+  model replays: 11 runs reproduce the set's poses (191 s, outside the lock)
+b0_scenarios: doom_e1m1_io.fjm sha256 f52751a2bb846c7a | set combat_scenarios_v10.json (11 runs, keys 5bb15f59e01c36b8) | startup+menu 269,773 ops (exact)
+  run                   avg (exact)  p50 +-2^18         p80         max  state     pixels    cam  dr sonl
+  R0-west-hall           18,318,674  18,350,080  19,136,512  20,447,232  100/100   100/100     0   0   35
+  R0-aftermath           12,509,773  11,534,336  17,825,792  19,922,944  100/100   100/100     0   0   32
+  R0-south-hall          14,089,186  13,893,632  15,466,496  16,515,072  100/100   100/100     0   0   26
+  R0-imp-court           20,764,575  21,233,664  23,592,960  27,525,120  100/100   100/100     0   0   41
+  R0-northwest            9,727,646   9,961,472  11,010,048  12,058,624  100/100   100/100     0   0   59
+  R0-courtyard           18,864,777  19,136,512  21,233,664  27,787,264  100/100   100/100     0   0   46
+  R2-barrel-hall         15,493,061  15,204,352  17,825,792  21,757,952  100/100   100/100     0   0   15
+  R2-spectre-corridor    12,783,415  12,582,912  14,155,776  18,350,080  100/100   100/100     0   0    8
+  R2-east-yard           14,052,017  13,631,488  15,990,784  19,398,656  100/100   100/100     0   0   11
+  R3-west                11,995,819  11,534,336  14,155,776  18,350,080  100/100   100/100     0   0   42
+  R3-mid                  8,438,296  10,747,904  12,058,624  13,893,632  100/100   100/100     0   0   21
+  B0 BINDING (mean + p80)/2 over 11 runs: 16,297,393 ops/frame   (mean 14,276,113, p80 run R0-west-hall = 18,318,674)
+  per-frame maximum: 27,787,264 ops (+/- 2^18) in R0-courtyard; run averages 8,438,295 .. 20,764,574; headroom to 22M: 5,702,607
+B0 OK

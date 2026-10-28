@@ -1,0 +1,13 @@
+machine : power plan 'Turbo'; busy processes: none
+msframe : A=doom_e1m1_blocked64.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  A         68.0 ms   237.5M fj/s  yard 3.57->3.65G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 1  A         68.2 ms   236.6M fj/s  yard 3.64->3.64G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 2  A         68.9 ms   234.3M fj/s  yard 3.62->3.64G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 3  A         68.0 ms   237.2M fj/s  yard 3.65->3.65G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 4  A         67.9 ms   237.7M fj/s  yard 3.64->3.64G   pin: cpu2 proc=ok thread=ok prio=high
+
+  A        median    68.0 ms/frame  [67.9 .. 68.9]    237.2M fj/s   16,136,442 ops/frame   cell=4 flat
+  engine A: a1c6f87710df10d8 full_span=None C:\Users\tomhe\Documents\fj160-path\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.64G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+  baseline: saved as 'shipped' -> scratchpad\12m\msframe_baselines\shipped.json

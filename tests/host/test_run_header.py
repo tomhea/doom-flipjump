@@ -1,5 +1,5 @@
 """The game binary carries how `fj --run` runs it: the pc window and flat memory (flipjump's .fjm
-run_flags / io_mode, 1.5.1 at 342a3b9). The play command is then just `fj --run build/<name>.fjm`."""
+run_flags / io_mode, 1.6.0 at 342a3b9). The play command is then just `fj --run build/<name>.fjm`."""
 from pathlib import Path
 
 from flipjump.fjm.fjm_consts import IO_MODE_PC, IO_MODE_STANDARD, RUN_FLAG_FLAT_MEMORY, FJMVersion

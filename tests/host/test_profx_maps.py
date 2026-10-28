@@ -41,6 +41,7 @@ def test_heat_list_own_or_e1m1(monkeypatch, tmp_path):
 
 
 def test_default_binary_refused_off_e1m1(monkeypatch):
+    pytest.importorskip("numpy")                                       # profx's common needs it; CI installs none
     import common as C
     monkeypatch.delenv("PROFX_FJM", raising=False)
     monkeypatch.delenv("PROFX_LABELS_TSV", raising=False)
@@ -59,6 +60,7 @@ def test_default_binary_refused_off_e1m1(monkeypatch):
 
 
 def test_census_of_another_map_refused(monkeypatch, tmp_path):
+    pytest.importorskip("numpy")                                       # profx's common needs it; CI installs none
     import common as C
     p = tmp_path / "c.json.gz"
     with gzip.open(p, "wt", encoding="utf-8") as fh:

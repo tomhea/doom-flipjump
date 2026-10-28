@@ -59,13 +59,13 @@ _W = {}
 
 
 def world(m, switch_tex=False):
-    """the map's World (its switch textures on when `switch_tex`: config.MAP_CONFIG patched for the build only)"""
+    """the map's World, its switch textures on exactly when `switch_tex` (config.MAP_CONFIG patched for the build only:
+    since M8 wave 1 E1M3's own config turns them on)"""
     key = (m, switch_tex)
     if key not in _W:
         saved = dict(C.MAP_CONFIG)
         try:
-            if switch_tex:
-                C.MAP_CONFIG[m] = {**C.MAP_CONFIG.get(m, {}), "SWITCH_TEX": 1}
+            C.MAP_CONFIG[m] = {**C.MAP_CONFIG.get(m, {}), "SWITCH_TEX": int(switch_tex)}
             _W[key] = World(episode_wad(WadFile.from_path(str(ART)), m), m, player="final", monsters="final")
         finally:
             C.MAP_CONFIG.clear()

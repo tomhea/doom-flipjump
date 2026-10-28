@@ -33,7 +33,7 @@
 //   0x0F  begin_frame_proj         —                                proj tier
 //   0x12  set_window_title         <bytes> 0x00                  window caption
 //   0x13  set_window_icon_header   w,h (+ w*h indices)           window icon
-//   0x14  set_max_fps              fps (1 byte)                  frame-rate cap (flipjump 1.5.1; P10)
+//   0x14  set_max_fps              fps (1 byte)                  frame-rate cap (flipjump 1.6.0; P10)
 //   (0x04/0x05/0x08 are not emitted by this file. `emit_addr` is a helper, not a command.)
 //
 // ---------- Conventions that hold in this file
@@ -124,7 +124,7 @@ ns present {
 
     // update_screen (present): [0x03][framebuffer_addr: w/8] — the device reads the finished frame.
 
-    // update_screen_reg (present, REGISTER form, fj 1.5.1): [0x06][framebuffer_addr: w/8] — the device
+    // update_screen_reg (present, REGISTER form, fj 1.6.0): [0x06][framebuffer_addr: w/8] — the device
     // reads a `hex.vec 2` framebuffer (each pixel = two ops: low nibble at 2k, high at 2k+1, bpp 8).
     // This is the format a colormap/texture `.lookup` writes DIRECTLY (its result-copy is register-form),
     // so the full-unroll renderer (M11c, D2b) has NO deposit/pack step (the hex.vec2 simplification,

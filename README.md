@@ -48,7 +48,7 @@ flag are in its header), so there is nothing else to type.
 
 Also possible, with nothing to install: `uvx fjdoom`.
 
-Until the 1.0 release is out, none of the three lines works yet: flipjump 1.5.1 is not on PyPI, the
+Until the 1.0 release is out, none of the three lines works yet: flipjump 1.6.0 is not on PyPI, the
 file does not exist and the `fjdoom` package is not published. [docs/developing.md](docs/developing.md)
 says how to build it today.
 
@@ -60,7 +60,7 @@ says how to build it today.
   lists its SHA-256.
 <!-- The quotes around flipjump[io] are for zsh (macOS's default shell), where [io] is a glob.
      The PyPI name `fj` is taken by an unrelated package, so the install line stays `flipjump`. -->
-<!-- Line 3 relies on flipjump 1.5.1's fjm header: io_mode (pc) and run_flags (flat memory) are written
+<!-- Line 3 relies on flipjump 1.6.0's fjm header: io_mode (pc) and run_flags (flat memory) are written
      at assembly (`--io-mode 1 --run-flags 1`, or assemble(io_mode=, run_flags=)) and `fj --run` honours
      them; `--io` / `--run-flags` override. `--run` itself stays: `fj file` assembles. The release's
      doom.fjm must be built WITH those two header fields (docs/launch-plan.md step 5). -->
@@ -93,7 +93,7 @@ for (;;) {
     ip = mem[ip + 1];                   /* jump                          */
 }
 ```
-<!-- TODO: link to the literal loop at the 1.5.1 tag (_fjcore.c, the `for (;;)` at ~line 1089). -->
+<!-- TODO: link to the literal loop at the 1.6.0 tag (_fjcore.c, the `for (;;)` at ~line 1089). -->
 
 The screen is a memory-mapped output device and the keyboard a memory-mapped input device. Nothing
 else runs: no Python, no C game logic, no hidden renderer. The interpreter is open and about two
@@ -208,7 +208,7 @@ the numbers, the dead ends and what Claude did and did not do: **[docs/story.md]
 - The verification contract: [docs/cr-rules.md](docs/cr-rules.md) (rules R1 to R9) and the ship
   gate, [docs/ship-gate.md](docs/ship-gate.md).
 - Why addresses matter: an op costs as many flips as the popcount of what it flips, so flipjump
-  1.5.1's table-placement and blocking passes put lookup tables at low-popcount addresses.
+  1.6.0's table-placement and blocking passes put lookup tables at low-popcount addresses.
 - The generated program's parts, in load order: entry, tables, main, segment constants, the BSP
   walk, state, the sprite and texture banks, reset.
 - Building and testing it yourself: [docs/developing.md](docs/developing.md).

@@ -54,7 +54,7 @@ def test_set_palette_command(tmp_path):
 
 
 def test_update_screen_reg_command(tmp_path):
-    """update_screen_reg (0x06, hex.vec2 register form, fj 1.5.1): [0x06][addr: w/8 LE]."""
+    """update_screen_reg (0x06, hex.vec2 register form, fj 1.6.0): [0x06][addr: w/8 LE]."""
     addr = 0x00000040
     expected = bytes([0x06]) + bytes([(addr >> (8 * i)) & 0xFF for i in range(W // 8)])
     _run(tmp_path, "update_screen_reg", [f"present.update_screen_reg {addr}"], expected)

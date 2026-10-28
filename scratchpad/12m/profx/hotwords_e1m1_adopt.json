@@ -1,14 +1,14 @@
 {
  "what": "the hottest shared words (block-pool groups) by table ops, from profx hotwords.py",
- "fjm": "doom_e1m1_adopt2.fjm",
- "fjm_sha256": "d37b797dce5a6a28b21afe98afbb299118ad5fa67617082df829f54444139d86",
- "labels": "adopt2.labels.tsv.gz",
+ "fjm": "doom_e1m1_adopt4u.fjm",
+ "fjm_sha256": "a0e63b73650142686f1eb6eb87f414b032124a38b6b684189cce1f5a152ca359",
+ "labels": "adopt4u.labels.tsv.gz",
  "counts_cache": "_census_game.json.gz",
  "counts_sig": {
   "tier": "game",
   "map": "E1M1",
   "wad": "tests/fixtures/freedoom_e1m1.wad",
-  "src": "6bd03962141a5e8d"
+  "src": "e821f23964a202fd"
  },
  "knobs": {
   "pool_base": 2147483648,
@@ -18,7 +18,7 @@
   "max_slot_ops": 512,
   "width_buckets": true
  },
- "run": "adopt2_games",
+ "run": "adopt4u_games",
  "game_frames": 1020,
  "pool_ops_per_frame": 1729853.8,
  "words": [

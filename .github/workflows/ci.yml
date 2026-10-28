@@ -26,10 +26,10 @@ jobs:
         with: { python-version: "3.13" }     # pygame-supported (§H); device milestones need it
       # flipjump 1.6.0 is not on PyPI yet: install it editable from the flip-jump repository, pinned to
       # the exact commit this branch's code was proven on (a branch name moves; a commit does not).
-      - name: install flipjump 1.6.0 (87ba7aa)
+      - name: install flipjump 1.6.0 (9877f25)
         run: |
           git init -q "$RUNNER_TEMP/flip-jump"
-          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 87ba7aad8d7223f9a5f5d3fd0bfa48c9c7207b03
+          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 9877f252334d5927b11ad38742e0117edc9a3204
           git -C "$RUNNER_TEMP/flip-jump" checkout -q FETCH_HEAD
           pip install -e "$RUNNER_TEMP/flip-jump[io]"
           python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"
@@ -51,10 +51,10 @@ jobs:
         with: { python-version: "3.13" }     # pygame-supported (§H); device milestones need it
       # flipjump 1.6.0 is not on PyPI yet: install it editable from the flip-jump repository, pinned to
       # the exact commit this branch's code was proven on (a branch name moves; a commit does not).
-      - name: install flipjump 1.6.0 (87ba7aa)
+      - name: install flipjump 1.6.0 (9877f25)
         run: |
           git init -q "$RUNNER_TEMP/flip-jump"
-          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 87ba7aad8d7223f9a5f5d3fd0bfa48c9c7207b03
+          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 9877f252334d5927b11ad38742e0117edc9a3204
           git -C "$RUNNER_TEMP/flip-jump" checkout -q FETCH_HEAD
           pip install -e "$RUNNER_TEMP/flip-jump[io]"
           python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"

@@ -307,13 +307,6 @@ def judge(step: Step, spec: MapSpec, rc: int, text: str) -> tuple[str, dict, str
             t = re.search(r"done in (\d+)s", text)
             if t:
                 met["build_s"] = int(t.group(1))
-        if n == "playthrough":
-            # the owner, 2026-10-29: the level's speed set is its playthrough (playthrough_gate.speed_record)
-            sb = re.search(r"PLAYTHROUGH SPEED binding .*?: ([\d,]+) ops/frame", text)
-            if sb:
-                met["speed_binding"] = _num(sb.group(1))
-            if found and rc == 0 and sb and met["speed_binding"] > CAP_22:
-                return "FAIL", met, "CAP-22: the playthrough's speed binding %s > %s" % (met["speed_binding"], CAP_22)
         return ("PASS", met, "") if rc == 0 and found else (
             "FAIL", met, "rc %d, PASS line %s" % (rc, "found" if found else "MISSING"))
     if n == "b0":
@@ -363,7 +356,13 @@ def judge(step: Step, spec: MapSpec, rc: int, text: str) -> tuple[str, dict, str
             met["passed"] = int(p.group(1))
         bad = re.search(r"\d+ (failed|errors?)\b", text)
         return ("PASS", met, "") if rc == 0 and p and not bad else ("FAIL", met, "rc %d" % rc)
-    # playthrough (its documented contract: the return code)
+    # playthrough (its documented contract: the return code) -- and the owner's speed set (2026-10-29: the level's
+    # playthrough, playthrough_gate.speed_record), held to CAP-22
+    sb = re.search(r"PLAYTHROUGH SPEED binding .*?: ([\d,]+) ops/frame", text)
+    if sb:
+        met["speed_binding"] = _num(sb.group(1))
+    if rc == 0 and sb and met["speed_binding"] > CAP_22:
+        return "FAIL", met, "CAP-22: the playthrough's speed binding %s > %s" % (met["speed_binding"], CAP_22)
     return ("PASS", met, "") if rc == 0 else ("FAIL", met, "rc %d" % rc)
 
 

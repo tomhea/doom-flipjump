@@ -19,6 +19,7 @@ cancelled in `scripts/test.sh` at 6 h 00 m). tests/host/test_shards.py holds the
 balance."""
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -50,14 +51,27 @@ def shard_of(spec: str):
     return i, n
 
 
+# M8 C2 parametrized many tests over the maps (tests/fj/wide_maps.py): `test_x[box_sign]` became `test_x[E1M1-box_sign]`
+# and `test_x[E1M6-box_sign]`. Until the table holds the new ids, such a test takes its map-less id's figure (E1M6's
+# times WIDE_FACTOR, the E1M6 / E1M1 ratio CI measured on #154's heaviest such tests, test_monster_wake's; test_knock
+# and test_death_turn measured 1.3 and 1.4) -- without it the file figure (0.05 s) priced 70 tests of 4-10 min each as
+# nothing and piled them into one shard (#154's shard 9: cancelled at 4 h).
+MAP_PARAM = re.compile(r"\[(E1M\d)-?")
+WIDE_FACTOR = 2.2
+
+
 def estimates(nodeids, table=None) -> list:
     """each node id's estimated seconds (tests/durations.json)"""
     t = table if table is not None else json.loads(DURATIONS.read_text(encoding="utf-8"))
     out = []
     for nid in nodeids:
         f = nid.split("::")[0]
+        m = MAP_PARAM.search(nid)
+        bare = MAP_PARAM.sub("[", nid).replace("[]", "") if m else None
         if nid in t["tests"]:
             out.append(float(t["tests"][nid]))
+        elif bare in t["tests"]:
+            out.append(float(t["tests"][bare]) * (1.0 if m.group(1) == "E1M1" else WIDE_FACTOR))
         elif f in t["files"]:
             out.append(float(t["files"][f]))
         else:

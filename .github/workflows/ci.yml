@@ -19,7 +19,7 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     name: test (shard ${{ matrix.shard }}/20)
-    timeout-minutes: 120
+    timeout-minutes: 240  # shard 9 holds E1M6 tests tests/durations.json has no figure for (it times them as E1M1); rebalance: issue to follow
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,9 +27,13 @@ jobs:
       # flipjump 1.5.1 (the 0x06 hex.vec2 register-screen device, §2.1) is not yet on PyPI — install it
       # editable from the flip-jump 1.5.1 branch. TEMPORARY (M11c): reverts to a pinned PyPI release once
       # 1.5.1 is merged to flip-jump main and published.
-      - name: install flipjump 1.5.1 (0x06 device)
+      # pinned to the exact commit this branch's code was proven on (a branch name moves; a commit does not):
+      # flip-jump's 1.5.1 branch moved on to the new screen API, which m8-episode does not speak yet.
+      - name: install flipjump (the 1.6.0 line at 5af5923)
         run: |
-          git clone --depth 1 --branch 1.5.1 https://github.com/tomhea/flip-jump.git "$RUNNER_TEMP/flip-jump"
+          git init -q "$RUNNER_TEMP/flip-jump"
+          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 5af5923d1dcf6c9af50534720476a56dacea035e
+          git -C "$RUNNER_TEMP/flip-jump" checkout -q FETCH_HEAD
           pip install -e "$RUNNER_TEMP/flip-jump[io]"
           python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"
       - run: pip install -e ".[dev]"
@@ -51,9 +55,13 @@ jobs:
       # flipjump 1.5.1 (the 0x06 hex.vec2 register-screen device, §2.1) is not yet on PyPI — install it
       # editable from the flip-jump 1.5.1 branch. TEMPORARY (M11c): reverts to a pinned PyPI release once
       # 1.5.1 is merged to flip-jump main and published.
-      - name: install flipjump 1.5.1 (0x06 device)
+      # pinned to the exact commit this branch's code was proven on (a branch name moves; a commit does not):
+      # flip-jump's 1.5.1 branch moved on to the new screen API, which m8-episode does not speak yet.
+      - name: install flipjump (the 1.6.0 line at 5af5923)
         run: |
-          git clone --depth 1 --branch 1.5.1 https://github.com/tomhea/flip-jump.git "$RUNNER_TEMP/flip-jump"
+          git init -q "$RUNNER_TEMP/flip-jump"
+          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 5af5923d1dcf6c9af50534720476a56dacea035e
+          git -C "$RUNNER_TEMP/flip-jump" checkout -q FETCH_HEAD
           pip install -e "$RUNNER_TEMP/flip-jump[io]"
           python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"
       - run: pip install -e ".[dev]"

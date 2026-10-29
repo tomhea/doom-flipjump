@@ -24,17 +24,11 @@ def test_a_subprocess_imports_this_checkouts_doomfj():
     assert child_doomfj(os.environ.copy()) == SRC
 
 
-def test_control_the_path_is_what_decides():
+def test_control_the_path_is_what_decides(tmp_path):
     """the control: a child given ANOTHER directory first on PYTHONPATH imports that one's doomfj -- so the check above
-    reads where doomfj came from, and would see a wrong path"""
-    other = SRC.parent / "tests" / "_conftest_src_control"
-    pkg = other / "doomfj"
-    pkg.mkdir(parents=True, exist_ok=True)
+    reads where doomfj came from, and would see a wrong path (in tmp_path: the child's import leaves a __pycache__)"""
+    pkg = tmp_path / "doomfj"
+    pkg.mkdir()
     (pkg / "__init__.py").write_text("")
-    try:
-        env = dict(os.environ, PYTHONPATH=str(other))
-        assert child_doomfj(env) == other
-    finally:
-        (pkg / "__init__.py").unlink()
-        pkg.rmdir()
-        other.rmdir()
+    env = dict(os.environ, PYTHONPATH=str(tmp_path))
+    assert child_doomfj(env) == tmp_path.resolve()

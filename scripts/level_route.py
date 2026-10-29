@@ -777,9 +777,13 @@ PICKUP_ORDER = "nearest"
 # after it is crossed whether it was taken or not (E1M4: a suit detour dropped after 471 frames, the crossing at 25
 # health killed the play)
 MUST_PICKUPS = frozenset({2025})
-# M8 C8: the weapons a boss fight needs (the steering fights with the chaingun and the shotgun, never the launcher):
+# M8 C8: the weapons a boss fight needs (the chaingun, the shotgun, and the launcher -- a kill leg's far boss only):
 # each one the skill spawns and the flood reached is taken before a kill leg, whatever the detour (`must`)
-KILL_ARMS = (2002, 2001)
+KILL_ARMS = (2002, 2001, 2003)
+# ... and its ammo (the clip box, the shell box, the rocket box, the backpack; the single clip / shells / rocket), each
+# worth KILL_AMMO_BUDGET cells of detour on a route with a kill
+KILL_AMMO = (2048, 2049, 2046, 8, 2007, 2008, 2010)
+KILL_AMMO_BUDGET = 100
 PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 8: 40, 2049: 14, 2048: 10, 2008: 8,
                  2025: 60}     # the radiation suit (E1M4 alone: the one at the far end of its nukage channel)
 
@@ -839,15 +843,15 @@ def take_pickups(pl, cur, pred, world, pickups, out):
 
 
 def take_arms(pl, cur, world, pickups, out):
-    """M8 C8: before a kill leg, a `must` leg to every KILL_ARMS weapon not taken yet and reachable in `world`, the
-    nearest first -> the cell the kill leg starts from"""
+    """M8 C8: on a route with a kill, a `must` leg to every KILL_ARMS weapon and KILL_AMMO item not taken yet and
+    reachable in `world`, the nearest first (a weapon and its ammo lie together) -> the cell the next leg starts from"""
     from doomfj.combat import ITEM_RADIUS, PLAYER_R, REACH_DOWN, REACH_UP
     scenes = pl.scenes_for(world)
     bd = ITEM_RADIUS + PLAYER_R - 8
     while True:
         best = None
         for it in pickups:
-            if it["taken"] or it["type"] not in KILL_ARMS:
+            if it["taken"] or it["type"] not in KILL_ARMS + KILL_AMMO:
                 continue
             iz = pl.floor_at(scenes, cell_of(it["x"], it["y"]))
 
@@ -882,6 +886,15 @@ def legs(pl: Planner, order, ecell, exit_i, pickups=None) -> list:
                 and (not pl.mechs["door:%d" % si].key or pl.mechs["door:%d" % si].key in keys)}
     steps = [mid for mid in order if not (pl.mechs[mid].kind == "door" and pl.mechs[mid].trigger == "use")]
     kill_route = any(pl.mechs[mid].trigger == "kill" for mid in order)
+    if kill_route and pickups is not None:
+        # a boss fight is long: the ammo is worth KILL_AMMO_BUDGET cells of detour (and the KILL_ARMS / KILL_AMMO
+        # things PICKUP_BUDGET does not list -- the launcher, the rocket boxes -- join the pickups)
+        have = {(it["type"], it["x"], it["y"]) for it in pickups}
+        pickups += [{"type": t.type, "x": t.x, "y": t.y, "budget": 0, "taken": False} for t in lv.things
+                    if t.type in KILL_ARMS + KILL_AMMO and (t.type, t.x, t.y) not in have]
+        for it in pickups:
+            if it["type"] in KILL_AMMO:
+                it["budget"] = max(it["budget"], KILL_AMMO_BUDGET)
     for mid in steps + [None]:
         if mid is None:
             e = lv.exits[exit_i]

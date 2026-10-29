@@ -18,7 +18,7 @@ when every boss is dead (not before). CONTROLS: the same cells on a non-kill leg
 THE CRITERIA (scratchpad/gp/scenarios_map.py, the owner 2026-10-29): scaled per map; on E1M2..E1M5 and E1M9 every value
 is E1M1's (no patch: their sets validate as they did); on E1M8: kills 0, the kinds melee + fireball, doors 1, no
 aftermath, no infighting. CONTROL: scenarios_v2's own criteria on the same metrics fail where the scaled ones pass.
-THE SETUP FLOORS: an E1M8 checkpoint past the W1 floors starts with them lowered (the Barons' ring at 0); CONTROL: the
+THE SETUP FLOORS: an E1M8 checkpoint past the W1 floors starts with them lowered (the Barons' ring at 16); CONTROL: the
 same setup without `floors` keeps the ring up.
 """
 import importlib.util
@@ -181,7 +181,7 @@ def test_e1m8_criteria_scaled_and_floors_lowered():
     assert got["patched"] and sc["kills"] == 0 and sc["kinds"] == ["melee", "fireball"] and sc["doors"] == 1
     assert not sc["aftermath"] and not sc["infight"] and sc["dodge"] and sc["pickups"] == 6
     assert got["floors"] == [0, 1] and got["boss"] == 2 and got["r0"] is None
-    assert got["ring"] == 0, "the tag-1 ring round the west Barons is lowered by the setup"
+    assert got["ring"] == 16, "the tag-1 ring round the west Barons is lowered by the setup (to its trench, 16)"
     assert got["ring0"] == 128, "CONTROL: without `floors` the ring stays up"
 
 
@@ -221,3 +221,81 @@ def test_scaled_criteria_rows_and_control():
     assert not orig[">= 3 doors opened by the player"]
     assert not next(ok for n, ok in orig.items() if n.startswith("an aftermath run"))
     assert not next(ok for n, ok in orig.items() if n.startswith(">= 1 infighting"))
+
+
+# ---- the oracle mirror the playthrough gate steps (p2a_gate.Mirror / monsters.MonsterPhase.frame) -----------------
+# Before 2026-10-29 the model-only E1M8 play killed both Barons and stood at the W1 exit with no LEVEL COMPLETE: the
+# mirror's mover state never took A_BossDeath's fire (the world fired it inside the monsters' tic, the next `sync`
+# wrote the gate's state back over it), and its lvdone came from the S1 exit's press only.
+MIRROR = r"""
+import os, sys, json
+os.environ["DOOMFJ_MAP"] = "E1M8"
+sys.path[:0] = [r"{root}" + p for p in ("/src", "/scratchpad", "/scratchpad/12m", "/scratchpad/gp", "/tests")]
+import onewalk, p2a_gate as G
+dsim = onewalk.DoorSim()
+out = {{}}
+for ctl in (None, "no_walk_exit"):
+    fr = G.Mirror(dsim, -1, ctl=ctl).run((880 << 16, 288 << 16, 0), [{{"forward": True}}] * 6)
+    out[str(ctl)] = [f["lvdone"] for f in fr]
+print("RESULT " + json.dumps(out))
+"""
+
+
+def test_mirror_w1_exit_ends_the_level():
+    r = subprocess.run([sys.executable, "-c", MIRROR.format(root=ROOT.as_posix())], capture_output=True, text=True,
+                       cwd=str(ROOT), timeout=900)
+    line = [x for x in r.stdout.splitlines() if x.startswith("RESULT ")]
+    assert line, r.stdout[-1000:] + r.stderr[-2000:]
+    got = json.loads(line[0][7:])
+    assert got["None"][0] == 0 and got["None"][-1] == 1, got          # walked east over line 228 (W1 52)
+    assert not any(got["no_walk_exit"]), "CONTROL: the level ended without the mirror's W1 exit rule"
+
+
+def test_mirror_takes_the_boss_floor_back():
+    from doomfj import gamedata as gd
+    from doomfj.config import Config
+    from doomfj.monsters import MonsterPhase
+    from doomfj.reference_model import ReferenceModel
+    from doomfj.wad import WadFile
+    from doomfj.wall_renderer import MONSTER_MODE, PLAYER_MODE
+    from doomfj.world import TicEvents
+    lr = _load("level_route", "scripts/level_route.py")
+    lv = lr.Level("E1M8", None, "easy")
+    ph = MonsterPhase(WadFile.from_path(str(FIX / "freedoom_e1m8.wad")), "E1M8", gd.SK_EASY,
+                      rm=ReferenceModel(Config()), mode=MONSTER_MODE, player=PLAYER_MODE)
+    w = ph.world
+    g, ng = w.boss_group, len(w.floor_groups)
+    for m in (1, 3):                                   # easy's two Barons
+        w.ws.mon_health[m] = 1
+        w.damage_monster(m, 10, ("player", -1), None, TicEvents(0))
+    dps, mps = lv.dp.initial(), lv.mp.initial()
+    for _ in range(40):
+        dps, mps = ph.frame(dps, mps, 2464 << 16, 360 << 16, 0)
+    assert w.boss_log, "A_BossDeath fired in the world"
+    assert mps[2][g] > 0 or mps[2][ng + g] > 0, "the gate's mover state took the boss floor's fire"
+    # CONTROL: the frame as it was (sync, tic, the gate's own sw handed back) loses it -- the world's cells hold it
+    sw = tuple(0 for _ in range(2 * ng))
+    ph.sync(dps[0], mps[0], sw)
+    ph.tic(2464 << 16, 360 << 16, 0)
+    assert sw[g] == 0 and sw[ng + g] == 0
+
+
+def test_kill_leg_takes_the_launcher_only_far_off(steer):
+    _play, st = steer
+    from doomfj import gamedata as gd
+    k = _kill_leg(st)
+    st._leg(k)
+    own = (1 << 4 * 4) | (1 << 4 * 5) | (1 << 4 * 2) | 0x11      # fist, pistol, shotgun, launcher, chaingun
+    far = dict(_cells(st, -320, -700, {}, seen=set(), target=1), wp_own=own, am_misl=5, am_clip=100, am_shell=20,
+               wp_rdy=gd.WP_CHAINGUN, wp_pend=gd.WP_NOCHANGE)      # Baron 3 444 units off
+    kd = set()
+    st._arm(0, far, kd)
+    assert kd == {"w5"}, kd
+    near = dict(far, viewy=((-400 << 16) & 0xFFFFFFFF))         # 144 units off: inside the blast's reach
+    kd = set()
+    st._arm(0, near, kd)
+    assert "w5" not in kd
+    st._leg(0)                                                   # CONTROL: an ordinary leg never takes the launcher
+    kd = set()
+    st._arm(0, far, kd)
+    assert "w5" not in kd

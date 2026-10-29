@@ -304,8 +304,15 @@ class Mirror:
                     wev = mph.weapon(kd, st.x, st.y, st.angle,   # M7 P4.1: the weapon, after the use press (pre-move)
                                      dead=dead if mortal else None)
                     if loots:
+                        gl0 = mph.world.ws.g_leveldone
                         nx, ny, na = mph.move(kd, st.x, st.y, st.angle, dead=dead)
                         mev = mph.last_move
+                        if (mph.world.exit_walk and mph.world.ws.g_leveldone and not gl0 and not lvdone
+                                and self.ctl != "no_walk_exit"):
+                            # M8 C9: the W1 exit (52) crossed by the move (combat._walkover) -- LEVEL COMPLETE, as
+                            # the switch's: the binary's exitcode.walk_lines after the accepted move; the monsters' tic
+                            # below is skipped on lvdone (E1M8: the only map with one)
+                            lvdone, mode, scr = 1, 1, LEVEL_DONE_ENTER
                         new = _SS(nx, ny, na, sim.mapname)
                         ph = (ph[0], ph[1], ph[2], mph.card())
                         taken = card_i is not None and bool(mph.world.ws.pickup_taken[card_i])

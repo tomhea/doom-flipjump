@@ -65,6 +65,25 @@ KEY_SPECIALS = tuple(sorted(KEY_LINE_COLOURS))   # M8: DOOM's every key door (99
 INSTALLED = {"map": "E1M1"}
 _ORIGINALS = {}
 
+# M8 (the owner, 2026-10-29): THE CRITERIA SCALED PER MAP to what the map holds -- E1M1's (scenarios_v2.criteria) where
+# the map can meet them, else the map's own: kills >= min(8, 8/46 of the map's monsters at the set's skill, rounded
+# down: E1M1's 8 are 8/46 of its 46 at hard), the attack kinds its monsters HAVE, doors >= min(3, its usable plain
+# doors), pickups >= min(6, its pickups), and the aftermath / infighting / dodge rows only where the map can produce
+# them (three droppers / imps; two species, a hitscanner or a barrel; a fireball thrower). `map_criteria` computes it,
+# `install` records it (CRITERIA_SCALE) and the plan stores it in the set ("criteria_scaled"). On E1M2..E1M5 / E1M9
+# every value is E1M1's (tests/host/test_e1m8_boss.py): their sets validate as they did
+E1M1_MONSTERS = 46             # E1M1's monsters at hard (the sets' skill): MIN_KILLS 8 is 8/46 of them
+ATTACK_KINDS = {"hitscan": ("MT_POSSESSED", "MT_SHOTGUY"),
+                "melee": ("MT_TROOP", "MT_SERGEANT", "MT_SHADOWS", "MT_BRUISER"),
+                "fireball": ("MT_TROOP", "MT_BRUISER")}
+TRIO_KINDS = ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP")      # suggest's aftermath trio
+CRITERIA_SCALE = {}            # the installed map's (map_criteria); {} on E1M1 and on a map that meets E1M1's
+# M8 (the owner, 2026-10-29): the maps whose checkpoints start with their WALK-OVER floors already lowered -- every W1
+# floor group but the boss's (A_BossDeath's) at its destination, injected for a checkpoint past them (region >= 1, the
+# stage the region flood lowers them at): a run injected at a pose never crosses the W1 lines that free the monsters
+SETUP_FLOORS = {"E1M8": "the Barons wait on floors the tag-1 / tag-3 W1 lines lower (special 19): from region 1 on a "
+                        "run starts with them lowered; the tag-666 floor (A_BossDeath's) stays up"}
+
 
 # ================================================================================================
 # install: the map into scenarios_v2 / census_lib (nothing on E1M1)
@@ -142,6 +161,120 @@ def install(mapname: str, checkpoints=None) -> None:
     CL.WadFile, CL.W = _Wad, _W()
     CL.SimState = lambda x, y, a, name, *r, **kw: RMOD.SimState(x, y, a, m if name == "E1M1" else name, *r, **kw)
     CL.build_scene = lambda a, b, name, *r, **kw: RMOD.build_scene(a, b, m if name == "E1M1" else name, *r, **kw)
+    _install_floors(S, m)
+    _install_criteria(S, m)
+
+
+def setup_floor_groups(w) -> list:
+    """the floor groups a SETUP_FLOORS map's checkpoint starts with lowered: every walk-over group but the boss's"""
+    boss = getattr(w, "boss_group", None)
+    return [g for g, grp in enumerate(w.floor_groups) if not grp.use and g != boss]
+
+
+def lower_floors(w, groups) -> None:
+    """floor groups `groups` at their destination, at rest (state n - 1, no step pending), the scene rebuilt"""
+    for g in groups:
+        w._set_floor(g, w.floor_groups[g].n - 1, 0)
+    if groups:
+        w._door_phase_scene()
+
+
+def _install_floors(S, m) -> None:
+    """SETUP_FLOORS: make_setup adds `floors` (the groups) for a checkpoint past them; apply_setup lowers them before
+    the pose is set (start_world and make_setup's own world go through it); the nav graph's plan scene sees the
+    movers' heights of the moment (its cache key moves with the rule)"""
+    if m not in SETUP_FLOORS:
+        return
+    for n in ("make_setup", "apply_setup", "NAV_RULE"):
+        _ORIGINALS[(S.__name__, n)] = getattr(S, n)
+    groups = setup_floor_groups(S.new_world())
+    make0, apply0 = S.make_setup, S.apply_setup
+
+    def make_setup(cp):
+        st = make0(cp)
+        if cp.get("region", 0) >= 1 and groups:
+            st["floors"] = list(groups)
+        return st
+
+    def apply_setup(w, setup):
+        lower_floors(w, setup.get("floors", ()))
+        apply0(w, {k: v for k, v in setup.items() if k != "floors"})
+    S.make_setup, S.apply_setup = make_setup, apply_setup
+    S.NAV_RULE = S.NAV_RULE + "; %s: the setup's W1 floors lowered (the movers' heights in the plan scene)" % m
+    plan_scene0 = S.NavGraph.plan_scene
+
+    def plan_scene(w):
+        sc = plan_scene0(w)
+        h = dict(w.open_h)
+        h.update(w.mover_heights_now())
+        return S.Scene(w.mw, w.mw, w.mapname, w.cmap, h, sc.blocked_lines) if h != dict(w.open_h) else sc
+    S.NavGraph.plan_scene = staticmethod(plan_scene)
+
+
+def map_criteria(w, reg) -> dict:
+    """the installed map's criteria scaled to what it holds (the module note above): {} when every value is
+    E1M1's, else {"kills", "kinds", "doors", "pickups", "aftermath", "infight", "dodge", "why"}"""
+    import scenarios_v2 as S
+    from doomfj import gamedata as gd
+    ws = w.ws
+    types = [w.mon_info[k].name for k in range(w.layout.nmon) if ws.mon_active[k]]
+    bit = gd.skill_bit(S.SKILL)
+    kills = min(S.MIN_KILLS, len(types) * S.MIN_KILLS // E1M1_MONSTERS)
+    kinds = [k for k, ts in ATTACK_KINDS.items() if any(t in ts for t in types)]
+    doors = [si for si in w.door_order if si not in w.door_cards and si in w.door_boxes]    # suggest's plain doors
+    picks = [t for t in w.pickup_things if t.flags & bit]
+    barrels = [t for t in w.barrel_things if t.flags & bit]
+    out = {"kills": kills, "kinds": kinds, "doors": min(S.MIN_DOORS, len(doors)),
+           "pickups": min(S.MIN_PICKUPS, len(picks)),
+           "aftermath": sum(1 for t in types if t in TRIO_KINDS) >= 3,
+           "infight": len(set(types)) >= 2 or any(t in ATTACK_KINDS["hitscan"] for t in types) or bool(barrels),
+           "dodge": any(t in ATTACK_KINDS["fireball"] for t in types)}
+    if out == {"kills": S.MIN_KILLS, "kinds": list(ATTACK_KINDS), "doors": S.MIN_DOORS, "pickups": S.MIN_PICKUPS,
+               "aftermath": True, "infight": True, "dodge": True}:
+        return {}
+    out["why"] = ("%s at the set's skill: %d monsters (%s), %d usable plain doors, %d pickups, %d barrels"
+                  % (INSTALLED["map"], len(types), dict(collections.Counter(types)), len(doors), len(picks),
+                     len(barrels)))
+    return out
+
+
+def scaled_criteria(S, sc: dict, crit0, ms):
+    """scenarios_v2.criteria (`crit0`) at the scaled floors `sc`, its rows renamed where they scale"""
+    saved = S.MIN_KILLS, S.MIN_DOORS, S.MIN_PICKUPS
+    S.MIN_KILLS, S.MIN_DOORS, S.MIN_PICKUPS = sc["kills"], sc["doors"], sc["pickups"]
+    try:
+        rows = crit0(ms)
+    finally:
+        S.MIN_KILLS, S.MIN_DOORS, S.MIN_PICKUPS = saved
+    na = "N/A on %s" % INSTALLED["map"]
+    out = []
+    for name, ok, det in rows:
+        if name == "all three monster attack kinds":
+            got = {"hitscan": sum(r["totals"]["mon_shots"] for r in ms),
+                   "melee": sum(r["totals"]["mon_melee"] for r in ms),
+                   "fireball": sum(r["totals"]["proj_spawns"] for r in ms)}
+            name = "the map's monster attack kinds (%s)" % ", ".join(sc["kinds"])
+            ok = all(got[k] > 0 for k in sc["kinds"])
+        elif name.startswith("an aftermath run") and not sc["aftermath"]:
+            name, ok = "%s -- %s: fewer than three droppers / imps" % (name, na), True
+        elif name.startswith(">= %d infighting" % S.MIN_INFIGHT) and not sc["infight"]:
+            name, ok = "%s -- %s: one species, no hitscanner, no barrel" % (name, na), True
+        elif name.startswith(">= %d fireball dodge" % S.MIN_DODGES) and not sc["dodge"]:
+            name, ok = "%s -- %s: no fireball thrower" % (name, na), True
+        out.append((name, ok, det))
+    return out
+
+
+def _install_criteria(S, m) -> None:
+    """scenarios_v2.criteria, scaled (map_criteria) -- patched only where the map cannot meet E1M1's"""
+    sc = map_criteria(S.new_world(), regions_map(S.new_world()))
+    CRITERIA_SCALE.clear()
+    CRITERIA_SCALE.update(sc)
+    if not sc:
+        return
+    _ORIGINALS[(S.__name__, "criteria")] = S.criteria
+    crit0 = S.criteria
+    S.criteria = lambda ms: scaled_criteria(S, sc, crit0, ms)
 
 
 def use_doc(doc: dict) -> None:
@@ -190,7 +323,12 @@ def regions_map(w) -> dict:
     # M8 (E1M8: its Barons wait on floors its W1 lines lower -- special 19, tags 1 and 3): a WALK-OVER floor machine's
     # sectors at their destination from the walk-over stage on, as the W1 doors are open there
     from doomfj.movers import floor_groups
-    W1FLOORS = {si: hs[-1] for g in floor_groups(secs, lds, sds) if not g.use for si, hs in g.heights}
+    # ... but not a boss map's A_BossDeath floor (E1M8's tag 666: its own W1 line 894 lies behind it -- it moves when the
+    # Barons die, never by a walk-over first), so the exit pad beyond it is no checkpoint's region
+    from doomfj import gamedata as _gd
+    boss = _gd.BOSS_MAPS.get(str(getattr(w, "mapname", "E1M1")).upper())
+    W1FLOORS = {si: hs[-1] for g in floor_groups(secs, lds, sds) if not g.use
+                and not (boss is not None and g.tag == boss[1]) for si, hs in g.heights}
 
     def side_sec(sd):
         return sds[sd].sector if sd != 0xFFFF and 0 <= sd < len(sds) else None
@@ -558,6 +696,8 @@ def plan(sugg: dict, quiet: bool = False) -> dict:
             "keys_legend": {c: n for n, c in S.LETTERS},
             "checkpoints_from": "scratchpad/gp/scenarios_map.py --suggest-checkpoints (scenarios/%s/checkpoints.json)"
                                 % INSTALLED["map"].lower(),
+            **({"criteria_scaled": dict(CRITERIA_SCALE)} if CRITERIA_SCALE else {}),
+            **({"setup_floors": SETUP_FLOORS[INSTALLED["map"]]} if INSTALLED["map"] in SETUP_FLOORS else {}),
             "runs": runs}
 
 

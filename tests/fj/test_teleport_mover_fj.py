@@ -9,6 +9,10 @@ the same states (its mon_floorz).
 
 R9 (MUTANTS), each must part: the STORED floor (dest_moves off: the pre-C5b baked dest_floor -- parts once the floor
 left), the seed not called (a stale cp_seedf), cp_floor never written (the candidate's floor kept).
+
+M8 soultele: E1M7's LOST SOULS teleport onto the same movers -- `dest_floor_lines(tel, ceil=True)` (a soul map's fire)
+also sets cp_ceil from the seed (cp_seedc), P_TeleportMove's ceilingz: run against the model teleporting a SOUL slot
+(lostsoul._soul_teleported: mon_floorz, sk_z = floor << 16, sk_momz 0, sk_ceil). R9: cp_ceil never written.
 """
 import dataclasses
 import random
@@ -59,7 +63,8 @@ def _group(w, sector):
 
 
 def _cross(w, tel, m):
-    """the model's teleport of slot m crossing `tel` at its middle from its front -> mon_floorz"""
+    """the model's teleport of slot m crossing `tel` at its middle from its front -> mon_floorz (a soul: -> (mon_floorz,
+    sk_ceil), its z and momz checked)"""
     ws = w.ws
     mid = (tel.lo + tel.hi) // 2
     a, b = (tel.coord - 4, tel.coord + 4) if tel.front_le else (tel.coord + 4, tel.coord - 4)
@@ -67,16 +72,22 @@ def _cross(w, tel, m):
     ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, 0x5A5A
     ws.mon_active[m] = ws.mon_shootable[m] = 1
     w._teleported = False
+    k = w.soul_of.get(m)
+    if k is not None:                           # M8 soultele: a soul in the air, falling, under another ceiling
+        ws.sk_z[k], ws.sk_momz[k], ws.sk_ceil[k] = 0x123456, -0x30000, 0x5A5
     assert w._teleport_monster(m, ox, oy, nx, ny) == tel.dest and w._teleported
     ws.mon_active[m] = ws.mon_shootable[m] = 0
+    if k is not None:
+        assert ws.sk_z[k] == ws.mon_floorz[m] << 16 and ws.sk_momz[k] == 0
+        return ws.mon_floorz[m], ws.sk_ceil[k]
     return ws.mon_floorz[m]
 
 
-def _records(w):
+def _records(w, soul=False):
     """[(line, lift states, floor-group states, the model's floorz)] -- the destination's group at every state, the
-    rest random"""
+    rest random. `soul` (M8 soultele): a lost soul's teleport -- the last field (floorz, sk_ceil)"""
     rnd = random.Random(0xC5B)
-    m = [k for k in range(w.layout.nmon) if w.mon_radius[k] == 20][0]
+    m = w.soul_slots[0] if soul else [k for k in range(w.layout.nmon) if w.mon_radius[k] == 20][0]
     out = []
     for r in range(N):
         line = sorted(DEST)[r % len(DEST)]
@@ -91,13 +102,17 @@ def _records(w):
             w.ws.f_switch[k], w.ws.f_sub[k] = v, 0
         w._door_phase_scene()
         z = _cross(w, tel, m)
-        assert z == w.secs_c[DEST[line]].floor_h
+        assert z == ((w.secs_c[DEST[line]].floor_h, w.secs_c[DEST[line]].ceil_h) if soul
+                     else w.secs_c[DEST[line]].floor_h)
         out.append((line, lst, fst, z))
     return out
 
 
-def _piece(w, line, mut=None):
+def _piece(w, line, mut=None, ceil=False):
     tel = _tel(w, line)
+    if ceil:                                    # M8 soultele: a soul map's fire
+        lines = T.dest_floor_lines(tel, ceil=True)
+        return [ln for ln in lines if "cp_ceil" not in ln] if mut == "noceil" else lines
     if mut == "stored":
         return T.dest_floor_lines(dataclasses.replace(tel, dest_moves=False))
     lines = T.dest_floor_lines(tel)
@@ -108,15 +123,17 @@ def _piece(w, line, mut=None):
     return lines
 
 
-def _program(w, recs, mut=None):
+def _program(w, recs, mut=None, ceil=False):
     from doomfj.wall_renderer import DOOR_QUANT
     body = ["stl.startup_and_init_all"]
     for line, lst, fst, _z in recs:
         body += ["hex.set 1, lstate + %d*dw, %d" % (k, v) for k, v in enumerate(lst)]
         body += ["hex.set 1, %s, %d" % (switch_cell(g), v) for g, v in enumerate(fst)]
         body += ["hex.set 8, cp_floor, 0x5A5A5A5A", "hex.set 8, cp_seedf, 0xA5A5A5A5", "hex.set w/4, ptss, 0x777",
-                 *[ln.strip() for ln in _piece(w, line, mut)],
-                 "hex.print_as_digit 8, cp_floor, 0", "hex.print_as_digit 3, ptss, 0", "stl.output 10"]
+                 "hex.set 8, cp_ceil, 0x5A5A5A5A", "hex.set 8, cp_seedc, 0xA5A5A5A5",
+                 *[ln.strip() for ln in _piece(w, line, mut, ceil)],
+                 "hex.print_as_digit 8, cp_floor, 0", "hex.print_as_digit 3, ptss, 0",
+                 *(["hex.print_as_digit 8, cp_ceil, 0"] if ceil else []), "stl.output 10"]
     body += ["stl.loop"]
     kw = MM.world_cell_inputs(w, DOOR_QUANT)
     seed = MM.monster_seed_fj(w.cmap, w.lds, w.sds, kw["secs_open"], kw["msecs"], kw["mcell"])
@@ -126,10 +143,14 @@ def _program(w, recs, mut=None):
     return NL.join(body + decls + seed) + NL
 
 
-def _run(tmp_path, w, recs, name, mut=None):
-    want = "".join("%08x%03x" % (z & 0xFFFFFFFF, _tel(w, line).dest_leaf) + NL for line, _l, _f, z in recs)
+def _run(tmp_path, w, recs, name, mut=None, ceil=False):
+    if ceil:                                    # M8 soultele: (floorz, sk_ceil)
+        want = "".join("%08x%03x%08x" % (z & 0xFFFFFFFF, _tel(w, line).dest_leaf, c & 0xFFFFFFFF) + NL
+                       for line, _l, _f, (z, c) in recs)
+    else:
+        want = "".join("%08x%03x" % (z & 0xFFFFFFFF, _tel(w, line).dest_leaf) + NL for line, _l, _f, z in recs)
     p = tmp_path / ("%s.fj" % name)
-    p.write_text(_program(w, recs, mut), encoding="utf-8")
+    p.write_text(_program(w, recs, mut, ceil), encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     return fj.assemble_and_run_test_output([consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()], b"",
                                            want.encode(), memory_width=W, warning_as_errors=True,
@@ -169,3 +190,25 @@ def test_the_teleports_floor_is_the_models_at_every_mover_state(tmp_path, w, rec
 @pytest.mark.parametrize("mut", ["stored", "noseed", "nowrite"])
 def test_a_broken_mover_destination_is_caught(tmp_path, w, recs, mut):
     assert not _run(tmp_path, w, recs, "tpmv_" + mut, mut), "the mutant %s went unnoticed" % mut
+
+
+# ---- M8 soultele: a lost soul teleporting onto the movers ------------------------------------------------------------
+@pytest.fixture(scope="module")
+def srecs(w):
+    return _records(w, soul=True)
+
+
+def test_e1m7s_souls_teleport_onto_the_movers_and_the_ceilings_are_stored_right(w, srecs):
+    assert w.soul_slots and len(srecs) == N
+    for t in w.teleports:
+        assert t.dest_ceil == w.secs[t.dest_sector].ceil_h
+    for line in DEST:
+        assert len({c for ln, _l, _f, (_z, c) in srecs if ln == line}) >= 1
+
+
+def test_a_souls_teleport_floor_and_ceiling_are_the_models_at_every_mover_state(tmp_path, w, srecs):
+    assert _run(tmp_path, w, srecs, "tpmv_soul", ceil=True), "cp_floor / cp_ceil parted from the soul's teleport"
+
+
+def test_control_a_souls_ceiling_never_written_is_caught(tmp_path, w, srecs):
+    assert not _run(tmp_path, w, srecs, "tpmv_soul_noceil", "noceil", ceil=True)

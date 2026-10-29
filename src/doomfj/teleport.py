@@ -117,6 +117,8 @@ class Teleporter:
     skills: int = ALL_SKILLS          # M8 C5: the MTF_ skill bits on which EV_Teleport finds `dest` (E1M5: hard only)
     dest_moves: bool = False          # M8 C5b: `dest_sector` is a mover (World sets it): floorz is its floor NOW, not
                                       # `dest_floor` (world._teleport_monster's secs_c, teleportcode's ms_seed_leaf)
+    dest_ceil: int = 0                # M8 soultele: that sector's ceiling (P_TeleportMove's ceilingz: a lost soul's
+                                      # sk_ceil -- lostsoul._soul_teleported; on a mover read where it stands)
 
     def on_skill(self, skill: int) -> bool:
         """M8 C5: EV_Teleport finds this destination on `skill` (a gamedata SK_*)"""
@@ -206,6 +208,7 @@ def teleporters(map_wad, mapname: str, *, rm=None, cmap=None) -> List[Teleporter
         angle = ((t.angle // 45) * ANG45) & 0xFFFFFFFF
         out.append(Teleporter(line=li, tag=ld.tag, axis=axis, coord=coord, lo=lo, hi=hi, front_le=front_le,
                               dest=(t.x, t.y), angle=angle, dest_leaf=leaf, dest_sector=s, dest_floor=secs[s].floor_h,
+                              dest_ceil=secs[s].ceil_h,
                               fog=fog_dest((t.x, t.y), angle, rm), monster_only=ld.special in MONSTER_ONLY_SPECIALS,
                               once=ld.special in ONCE_SPECIALS, skills=skills))
     check_one_per_move(out)

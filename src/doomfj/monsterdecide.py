@@ -286,7 +286,7 @@ def attack_leaf_lines(full: bool = False, knock: bool = False, fight: bool = Fal
            "    hex.zero 1, mm_asok",
            "    stl.fcall mm_todist, mm_tdret",
            "    stl.fcall mm_octant, mm_ocret",
-           "    sim.jump16 mm_kind, " + ", ".join(tg)]
+           "    hex.switch mm_kind, " + ", ".join(tg)]
     if not full:
         out += ["  md_pos:", "    hex.add_constant 2, mm_rng, %d" % (BULLETS["A_PosAttack"] * k["bullet"]),
                 "    ;md_out",
@@ -405,7 +405,7 @@ def _fight_attack_lines(knock: bool, bruiser: bool = False, shadow: bool = False
            "    stl.fcall mm_octant, mm_ocret",
            *(["    stl.fcall mm_shj, mm_shjret"] if shadow else []),   # M8 C6: A_FaceTarget at a shadow target
            "    hex.mov 1, md_fa, mm_fa",
-           "    sim.jump16 mm_kind, " + ", ".join(tg)]
+           "    hex.switch mm_kind, " + ", ".join(tg)]
     for lab, act in (("md_pos", "A_PosAttack"), ("md_spos", "A_SPosAttack")):
         out += ["  %s:" % lab, "    stl.fcall md_hs, md_bret"]
         out += ["    stl.fcall md_bul, md_bret"] * BULLETS[act]

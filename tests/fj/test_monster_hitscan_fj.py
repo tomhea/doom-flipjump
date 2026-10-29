@@ -244,7 +244,7 @@ def _program(w, mut=None):
     text = "\n".join(MD.todist_leaf_lines(True) + MD.octant_leaf_lines() + MD.as_leaf_lines(True)
                      + MD.attack_leaf_lines(full=True, fight=True, sn=slot_nibbles(w.layout)) + fp["lines"] + MC.dist_leaf_lines()) + "\n"
     if mut == "third_level":                       # M8 C2: mt_load's third level dropped (the wide map's control)
-        old = [ln for ln in text.split("\n") if ln.startswith("    sim.jump16 mm_tg + 2*dw,")]
+        old = [ln for ln in text.split("\n") if ln.startswith("    hex.switch mm_tg + 2*dw,")]
         assert len(old) == 1, len(old)
         text = text.replace(old[0] + "\n", "    ;mtl_g0\n")
     elif mut and MUTANTS[mut]:
@@ -326,7 +326,7 @@ def _build(tmp_path, name, mut=None, mapname="E1M1"):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    srcs = [consts.resolve(), (FJ / "projection.fj").resolve(),
             (FJ / "frame_render.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return srcs, want
 

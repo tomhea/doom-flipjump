@@ -200,7 +200,7 @@ def _parts(w, mut=None):
                        "    ;mm_dc_yes\n"),
             "nolos": ("    stl.fcall sl_los, sl_ret\n", "    hex.zero 1, sl_hit\n"),
             "nojust": ("    hex.if0 1, mm_ja, mm_dc_m\n", "    ;mm_dc_m\n"),
-            "nodraws": ("    sim.jump16 mm_kind, ", "    sim.jump16 mm_zero, "),
+            "nodraws": ("    hex.switch mm_kind, ", "    hex.switch mm_zero, "),
             # M7 P4.2a: justhit never cleared; the dying monster's A_Fall clears nothing
             "nojhclear": ("    hex.zero 1, mm_jh\n", ""),
             "nofall": ("  mw%d_fall:\n    hex.zero 1, mon_solid + %d*dw\n" % (_dying(w), _dying(w)),
@@ -251,7 +251,7 @@ def _build(tmp_path, name, mut=None, jh=True):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
+    srcs = [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return srcs, _expected(script)
 
 

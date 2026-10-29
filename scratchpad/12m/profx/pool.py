@@ -117,10 +117,11 @@ def reconstruct(counts_path, knobs=None, heat=None):
     k = dict(KNOBS)
     k.update(knobs or {})
     fr = load_counts(counts_path)
-    pool = BlockPool(W, k["pool_base"], counts=fr["counts"], widths=fr["widths"], span_bits=k["span_bits"],
-                     alias=fr["alias"], spread=k["spread"], spread_min_count=k["spread_min_count"],
-                     max_slot_ops=k["max_slot_ops"], width_hist=fr["width_hist"], width_buckets=k["width_buckets"],
+    pool = BlockPool(W, k["pool_base"], span_bits=k["span_bits"], spread=k["spread"],
+                     spread_min_count=k["spread_min_count"], max_slot_ops=k["max_slot_ops"],
                      **({"heat": heat} if heat else {}))
+    pool.alias = dict(fr["alias"])
+    pool.lay_out(dict(fr["counts"]), {g: dict(h) for g, h in fr["width_hist"].items()})   # place_deferred's layout step
     return pool, fr
 
 

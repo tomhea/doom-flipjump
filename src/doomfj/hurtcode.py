@@ -42,8 +42,8 @@ weaponcode's `ammobcd` (the same digits table the ammo uses).
 THE TIC (`hp_tic`, the player phase, after the weapon): damagecount -= 1 when not 0 (combat._player_phase and
 _death_think both run it).
 
-THE PALETTE (`pal_lines`, after the tic and BEFORE `present.draw_collines` -- never inside the record
-stream): palidx[p_dc] against `pal_cur`; only on a change `present.select_palette <k>` and pal_cur = k.
+THE PALETTE (`pal_lines`, after the tic and BEFORE `screen.draw_collines` -- never inside the record
+stream): palidx[p_dc] against `pal_cur`; only on a change `screen.select_palette <k>` and pal_cur = k.
 `pal_menu_lines`: a menu frame forces palette 0 (again only when pal_cur is not 0). ⚠ The change-only test holds
 only if nothing else re-selects the palette per frame: `init_screen` starts the device over (picture, palettes, slot
 0 selected), so it and the boot's palette definitions run ONCE, from the entry part (wall_renderer's `_boot_screen`),
@@ -55,6 +55,7 @@ from typing import Dict, List, Sequence
 
 from doomfj import gamedata as gd
 from doomfj import rng as R
+from doomfj import screenwire as SW
 from doomfj.lut_generator import generate_dispatch_table_fj
 # issue #121 item 11: the damagecount cap and the palette ranges are the MODEL's (combat: P_DamageMobj, st_stuff.c's
 # ST_doPaletteStuff), imported -- not restated (re-exported: hurtcode.DC_CAP etc. keep their readers)
@@ -412,7 +413,7 @@ def hp_bar_lines() -> List[str]:
 
 
 def pal_lines(loot: bool = False, suit: bool = False) -> List[str]:
-    """the frame's palette: palidx[p_dc]; only a change sends `present.select_palette <k>`. `loot` (M7 P6, the
+    """the frame's palette: palidx[p_dc]; only a change sends `screen.select_palette <k>`. `loot` (M7 P6, the
     "full" player): ST_doPaletteStuff with berserk and the bonus -- the red one is the larger of palidx[p_dc] and
     berserk's (`berserk_red`, by p_str's nibbles 2 and 3), else the gold bonpal[p_bc]. M8 C6 (`suit`, a map holding
     the radiation suit: doomfj.powercode.pal_lines): else RADIATIONPAL while `p_rad` shows (PLAYPAL 13)."""
@@ -443,15 +444,15 @@ def pal_lines(loot: bool = False, suit: bool = False) -> List[str]:
     out += ["hex.cmp 1, pal_new, pal_cur, pl_chg, pl_out, pl_chg",
            "pl_chg:",
            "hex.mov 1, pal_cur, pal_new",
-           "sim.jump16 pal_new, " + ", ".join(tg)]
+           "hex.switch pal_new, " + ", ".join(tg)]
     for k in range(npal):
-        out += ["pl_k%d:" % k, "present.select_palette %d" % k, ";pl_out"]
+        out += ["pl_k%d:" % k, SW.fj_select_palette(k), ";pl_out"]
     return out + ["pl_out:"]
 
 
 def pal_menu_lines() -> List[str]:
     """a menu frame: palette 0 (sent only when another one is up)"""
-    return ["hex.if0 1, pal_cur, plm_out", "hex.zero 1, pal_cur", "present.select_palette 0", "plm_out:"]
+    return ["hex.if0 1, pal_cur, plm_out", "hex.zero 1, pal_cur", SW.fj_select_palette(0), "plm_out:"]
 
 
 def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool = False, suit: bool = False,
@@ -462,7 +463,7 @@ def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool 
       * `leaves`: dp_go -- a leaf (every path frets), placed where nothing falls in;
       * `tic`: the damagecount fade, right after the weapon tic (weaponcode's `wp_end`);
       * `bar`: hp_bar, after the monsters' tic (the damage), anywhere before the bar is drawn;
-      * `palette`: after the tic, before `present.draw_collines`; `menu_palette`: in the menu block;
+      * `palette`: after the tic, before `screen.draw_collines`; `menu_palette`: in the menu block;
       * `restart`: NEW GAME's values; `persist`: the cells the M1 reset must leave alone.
     `loot` (M7 P6, lootcode.LOOT_PLAYER_MODES): the palette with berserk and the bonus (pal_bk, bonpal, PLAYPAL 9..12);
     the program must then hold lootcode's p_str and p_bc. `knock` (M7 P8a, world.knockback_on): dp_go thrusts

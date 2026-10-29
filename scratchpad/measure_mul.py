@@ -6,7 +6,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import flipjump as fj
 from doomfj.harness import W
 
-FIXED = Path("src/fj/fixed_point.fj").resolve()
 
 
 def run_ops(body_lines, n, tmp, data=()):
@@ -22,7 +21,7 @@ def run_ops(body_lines, n, tmp, data=()):
     ])
     p = tmp / "m.fj"; p.write_text(main, encoding="utf-8")
     out = tmp / "m.fjm"
-    fj.assemble([FIXED, p], out, memory_width=W, print_time=False)
+    fj.assemble([p], out, memory_width=W, print_time=False)
     return fj.run(out, print_time=False, print_termination=False).op_counter
 
 

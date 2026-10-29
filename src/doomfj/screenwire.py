@@ -2,9 +2,9 @@
 
 This module is the ONE place doom holds the API's numbers (opcodes, the format, the draw_collines tokens) and the
 encoders every baked byte stream goes through (the menu and its screens, the bar, the weapon, the map page, LEVEL
-COMPLETE). The fj side (`src/fj/present.fj`) and the run-time emitters use the same values; the proof that both
-match the device is that every test and gate decodes the program's output with flipjump's own `InMemoryScreen`, which
-refuses anything off the API.
+COMPLETE) and the fj side's calls of the stl's screen macros (flipjump stl/screen.fj; `FJ_*` / `fj_*` below); the
+proof that both match the device is that every test and gate decodes the program's output with flipjump's own
+`InMemoryScreen`, which refuses anything off the API.
 
 THE SHAPE OF A FRAME (what every tier prints, per frame):
     0x11 draw_collines   column records ...   0xFF END_CMD   0x1F present
@@ -162,12 +162,47 @@ def frame(grid: Sequence[int], width: int, height: int) -> bytes:
     return picture(grid, width, height) + bytes([OP_PRESENT])
 
 
-FRAME_TAIL = bytes([END_CMD, OP_PRESENT])     # what `present.end_frame` prints: the end of every frame's command
+# ---- the fj side: flipjump's stl/screen.fj, called with this module's numbers ------------------------------------
+# W and H are fj_consts' screen size (Config.W / Config.H, the screen every tier builds -- R = C = 8, assert_byte_fields).
+# FRAME_END_USED_BITS is `screen.end_frame`'s used_bits: the bits of the current output byte the column records already
+# wrote. THE PROGRAM'S FIELDS ARE BYTES (above): every write into a draw_collines command -- stl.output_char, the byte
+# emits, cm.emit's 8 output_bits -- is a whole byte, so the records end on a byte boundary and it is 0. end_frame then
+# prints C = column_bits(W) = 8 one-bits (END_CMD 0xFF), (8 - (0 + 8) % 8) % 8 = 0 padding bits and present (0x1F):
+# exactly FRAME_TAIL, the bytes the program's frame tail always printed (tests/fj/test_present.py runs it).
+FRAME_END_USED_BITS = 0
+FJ_INIT_SCREEN = "screen.init_screen W, H, %d" % FORMAT
+FJ_DRAW_COLLINES = "screen.draw_collines"
+FJ_END_FRAME = "screen.end_frame W, %d" % FRAME_END_USED_BITS
+
+
+def fj_select_palette(slot: int) -> str:
+    assert 0 <= slot <= 255, slot
+    return "screen.select_palette %d" % slot
+
+
+def fj_set_max_fps(fps: int) -> str:
+    assert 0 <= fps <= 255, fps
+    return "screen.set_max_fps %d" % fps
+
+
+def fj_set_window_title(text: str) -> str:
+    """the title as stl.screen's constant: its utf-8 bytes, least-significant first"""
+    data = text.encode("utf-8")
+    assert b"\x00" not in data, "a title cannot hold a NUL (it ends the title)"
+    return "screen.set_window_title %s" % hex(int.from_bytes(data, "little"))
+
+
+def fj_set_window_icon_header(width: int, height: int) -> str:
+    assert 1 <= width <= 255 and 1 <= height <= 255, (width, height)
+    return "screen.set_window_icon_header %d, %d" % (width, height)
+
+
+FRAME_TAIL = bytes([END_CMD, OP_PRESENT])     # what FJ_END_FRAME prints: the end of every frame's command
 
 
 def strip_frame_tail(data: bytes) -> bytes:
     """a frame's bytes without its END_CMD and present -- for a producer that falls into the program's shared frame
-    tail (`present.end_frame`) instead of ending the frame itself"""
+    tail (FJ_END_FRAME) instead of ending the frame itself"""
     assert data[-2:] == FRAME_TAIL, "not a whole frame: it does not end in END_CMD, present"
     return data[:-2]
 

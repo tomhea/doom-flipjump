@@ -130,7 +130,7 @@ def _srcs(tmp_path, name, prog):
     p = tmp_path / f"{name}.fj"
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
+    return [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
 
 
 def _flood_run(tmp_path, name, mut=None) -> bool:

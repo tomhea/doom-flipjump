@@ -23,7 +23,7 @@
 //
 // ── STATUS: this is the LEGACY FRAMEBUFFER TIER ─────────────────────────────────────────────
 // All four macros here write (directly or via their caller) into the compile-time FRAMEBUFFER that
-// `present.update_screen*` then blits. The SHIPPED renderer is the column-stream / M13-lines path
+// the framebuffer is then blitted. The SHIPPED renderer is the column-stream / M13-lines path
 // (`plane_bands.fj::build_bands` -> `stream_render.fj`), which builds per-column BAND LISTS and
 // emits them as device records — no framebuffer at all. Concretely, in `wall_renderer.py` the
 // list holding `span_leaf:`/`clear_leaf:` (`fb_leaves`) is EMPTY whenever the mode is
@@ -119,7 +119,7 @@ ns plane {
     // basexscale/baseyscale are per-frame (R_ClearPlanes) REGISTERS the caller computes once. The flat texels
     // live in a combined dispatch table read by `flat.sample` (64x64 each, NO downscale; the `&63` wraps),
     // `flatbase` = the seg's flat slice offset. Shared LUTs the includer emits (R6): yslope/distscale/
-    // xtoviewangle (8nib read_tables), zlight (2nib), finesine (read_sin/read_cos), the colormap ns `cm`, and
+    // xtoviewangle (8nib read_entry calls), zlight (2nib), finesine (read_sin/read_cos), the colormap ns `cm`, and
     // the flat ns. VIEW_W is from fj_consts. Returns via stl.fret BEFORE the @-local data (lesson #2).
 // ⚠ LEGACY TIER (see the STATUS note in the file header): not instantiated by the shipped build.
     // @requires hex.init & stl.ptr_init.
@@ -137,23 +137,23 @@ ns plane {
               count, pixofs, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
             < planeheight, light, basexscale, baseyscale, viewx, viewy, viewangle, y, x1, x2, flatbase, \
               yslope, distscale, xtoviewangle, zlight, span_ret {
-        hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
-        hex.fixed_mul_lo 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
-        hex.fixed_mul_lo 8, 4, xstep, dist, basexscale      // xstep = FixedMul(distance, basexscale)
-        hex.fixed_mul_lo 8, 4, ystep, dist, baseyscale      // ystep = FixedMul(distance, baseyscale)
-        hex.read_table 8, dscale, distscale, 2, x1
-        hex.fixed_mul_lo 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[x1])
-        hex.read_table_packed 4, xta, xtoviewangle, 2, x1
+        hex.read_entry 8, ys, yslope, 2, y               // ys = yslope[y]
+        hex.fixed_mul_low 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
+        hex.fixed_mul_low 8, 4, xstep, dist, basexscale      // xstep = FixedMul(distance, basexscale)
+        hex.fixed_mul_low 8, 4, ystep, dist, baseyscale      // ystep = FixedMul(distance, baseyscale)
+        hex.read_entry 8, dscale, distscale, 2, x1
+        hex.fixed_mul_low 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[x1])
+        hex.read_entry_packed 4, xta, xtoviewangle, 2, x1
         hex.mov 8, ang, viewangle
         hex.add 8, ang, xta                              // viewangle + xtoviewangle[x1] (mod 2^32)
         hex.shr_hex 8, 5, ang                            // >> 20 (angle_shift): the fine index
         hex.mov 3, idx, ang                              // idx = (.. >> 20) & 0xFFF (3 nibbles)
         finesine.read_cos fc, idx
-        hex.fixed_mul_lo 8, 4, prod, fc, length
+        hex.fixed_mul_low 8, 4, prod, fc, length
         hex.mov 8, xfrac, viewx
         hex.add 8, xfrac, prod                           // xfrac = viewx + FixedMul(finecos[idx], length)  (seed @8)
         finesine.read_sin fs, idx
-        hex.fixed_mul_lo 8, 4, prod, fs, length
+        hex.fixed_mul_low 8, 4, prod, fs, length
         hex.mov 8, yfrac, viewy
         hex.add 8, yfrac, prod
         hex.neg 8, yfrac                                 // yfrac = -(viewy + FixedMul(finesin[idx], length))
@@ -169,7 +169,7 @@ ns plane {
         hex.shr_hex 2, 1, lvl                            // lvl = light >> 4 (LIGHTSEGSHIFT)
         hex.mul_const 3, zlidx, lvl, 128
         hex.add 3, zlidx, zidx
-        hex.read_table 2, zrow, zlight, 3, zlidx         // row = zlight[lvl*128 + zidx]  (SPAN-constant)
+        hex.read_entry 2, zrow, zlight, 3, zlidx         // row = zlight[lvl*128 + zidx]  (SPAN-constant)
         // --- per-span PRESETS for the per-pixel loop (computed once) ---
         hex.set 2, c3f, 0x3f
         hex.zero 4, cmidx
@@ -255,8 +255,8 @@ ns plane {
             @ ys, dist, zidx, lvl, zlidx, zrow, c127, tmp, cmidx, lit, \
               count, pixofs, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
             < planeheight, light, y, x1, x2, flatbase, yslope, zlight, span_ret {
-        hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
-        hex.fixed_mul_lo 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
+        hex.read_entry 8, ys, yslope, 2, y               // ys = yslope[y]
+        hex.fixed_mul_low 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
         hex.mov 8, tmp, dist
         hex.shr_hex 8, 5, tmp                            // distance >> 20 (LIGHTZSHIFT)
         hex.mov 3, zidx, tmp
@@ -269,7 +269,7 @@ ns plane {
         hex.shr_hex 2, 1, lvl                            // lvl = light >> 4 (LIGHTSEGSHIFT)
         hex.mul_const 3, zlidx, lvl, 128
         hex.add 3, zlidx, zidx
-        hex.read_table 2, zrow, zlight, 3, zlidx         // zrow = zlight[lvl*128 + zidx]
+        hex.read_entry 2, zrow, zlight, 3, zlidx         // zrow = zlight[lvl*128 + zidx]
         hex.zero 2, cmidx + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, cmidx, flatbase                       // low byte = the flat BASE palette index
         hex.mov 2, cmidx + 2*dw, zrow

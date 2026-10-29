@@ -26,7 +26,6 @@ from fjprobe import Probe                                                  # noq
 ROOT = F.ROOT
 from doomfj.lut_generator import generate_dispatch_table_fj  # noqa: E402
 
-FIXED = ROOT / "src" / "fj" / "fixed_point.fj"
 SIM = ROOT / "src" / "fj" / "sim.fj"
 
 
@@ -451,7 +450,7 @@ LINE_VERIFY = [";gp_lv_ok", "gp_lv_blk:", "hex.set 2, gp_vb, 0xB", ";gp_lv_pr",
 PRELUDE_PS = [
     "ns gp {",
     "    // sim.point_side with l's fixed_mul OPERANDS SWAPPED so the baked constant dyi is the",
-    "    // multiplier (fixed_mul_lo runs one row per nonzero nibble of its SECOND operand; the",
+    "    // multiplier (fixed_mul_low runs one row per nonzero nibble of its SECOND operand; the",
     "    // low product commutes, so the value is identical). r already has dxi second. Cheap",
     "    // only for a NON-NEGATIVE constant (a negative one sign-extends to 8 dense nibbles).",
     "    def point_side_k side, x, y, v1x, v1y, dxi, dyi @ ax, ay, l, r, front, back, done, body {",
@@ -465,8 +464,8 @@ PRELUDE_PS = [
     "        hex.sub 8, ax, v1x",
     "        hex.mov 8, ay, y",
     "        hex.sub 8, ay, v1y",
-    "        hex.fixed_mul_lo 8, 4, l, ax, dyi",
-    "        hex.fixed_mul_lo 8, 4, r, dxi, ay",
+    "        hex.fixed_mul_low 8, 4, l, ax, dyi",
+    "        hex.fixed_mul_low 8, 4, r, dxi, ay",
     "        hex.scmp 8, r, l, front, back, back",
     "      front:",
     "        hex.set 1, side, 0",
@@ -534,7 +533,7 @@ def line_probes():
             "line %s cells: sim.line_test" % tag,
             body=xors + ["sim.line_test"] + xors,
             setup=_line_setup(), pre=LINE_PRE + ["hex.set 1, cp_ok, 1"],
-            data=base_data, files=[CONSTS, FIXED, SIM],
+            data=base_data, files=[CONSTS, SIM],
             verify=["hex.if0 1, cp_ok, gp_lv_blk"] + LINE_VERIFY, expected=exp, note=what))
         for swap in ((False, True) if row[8] in (ST_POSITIVE,) else (False,)):
             code, cdata = baked_line("gp_k_", row, "gp_lv_blk", "gp_k_nxt", swap=swap)
@@ -542,7 +541,7 @@ def line_probes():
                 "line %s baked%s" % (tag, " (const multiplier)" if swap else ""),
                 body=code + ["gp_k_nxt:", "gp_lv_blk:"], vbody=code + ["gp_k_nxt:"],
                 setup=_line_setup(), pre=LINE_PRE,
-                prelude=PRELUDE_PS if swap else [], data=base_data + cdata, files=[CONSTS, FIXED, SIM],
+                prelude=PRELUDE_PS if swap else [], data=base_data + cdata, files=[CONSTS, SIM],
                 verify=LINE_VERIFY, expected=exp, note=what))
     return out
 
@@ -551,21 +550,7 @@ def line_probes():
 # 4b. the 32-unit cell of a 16.16 position, by jumps on its coordinate nibbles
 # 5.  point location: a jump on the cell into the deepest safe BSP node, vs the full descent
 # =============================================================================================
-PRELUDE_J16 = [
-    "ns gp {",
-    "    // a 16-way jump on one hex cell, in the table shape the BlockPool can relocate: `pad 16`,",
-    "    // sixteen plain `a;b` entries, then a wflip naming the head label. Each trampoline",
-    "    // disarms the cell and jumps on (so a pinned cell pays only the index both ways).",
-    "    def jump16 x, " + ", ".join("t%d" % i for i in range(16)) +
-    " @ switch, " + ", ".join("r%d" % i for i in range(16)) + " {",
-    "        wflip x+w, switch, x",
-    "        pad 16",
-    "      switch:",
-    *["        ;r%d" % i for i in range(16)],
-    *["      r%d: wflip x+w, switch, t%d" % (i, i) for i in range(16)],
-    "    }",
-    "}",
-]
+PRELUDE_J16 = []     # the 16-way jump on one hex cell is the stl's hex.switch
 
 
 def _nib(v, i):
@@ -578,7 +563,7 @@ def sgn12(p):
 
 
 def jump_tree(tag, cell, nibs, keys, leaf, default):
-    """A tree of gp.jump16 on nibbles `nibs` (most significant first) of `cell`. `keys`: the set of
+    """A tree of hex.switch on nibbles `nibs` (most significant first) of `cell`. `keys`: the set of
     integer values to separate (the tree splits on their nibbles); `leaf(prefix_value) -> label`
     for the value the full path spells. Returns (code lines, root label)."""
     code = []
@@ -593,7 +578,7 @@ def jump_tree(tag, cell, nibs, keys, leaf, default):
             sub = [v for v in vals if _nib(v, nib) == d]
             targets.append(node((prefix << 4) | d, depth + 1, sub) if sub else default)
         code[:0] = []
-        code.extend(["%s:" % lab, "    gp.jump16 %s+%d*dw, %s" % (cell, nib, ", ".join(targets))])
+        code.extend(["%s:" % lab, "    hex.switch %s+%d*dw, %s" % (cell, nib, ", ".join(targets))])
         return lab
     root = node(0, 0, sorted(set(keys)))
     return code, root
@@ -656,17 +641,16 @@ def cell_lookup_probes():
     py = [((y & 0xFFFF) << 16) for x, y in pts]
     exp = lambda n: b"".join(le_bytes(cid(*pts[k & 255]), 2) for k in range(n))   # noqa: E731
     out = []
-    for name, extra in (("cell lookup: 6 jump16 levels", ()),):
+    for name, extra in (("cell lookup: 6 hex.switch levels", ()),):
         p = Probe(name, body=[";gp_cx_0_0", "gp_cdone:"],
                   pre=["gp_px.lookup gp_x, _mcnt", "gp_py.lookup gp_y, _mcnt"],
                   tables=d4("gp_px", px, 2, 8) + d4("gp_py", py, 2, 8),
                   prelude=PRELUDE_J16, blob=code_t,
                   data=["gp_x: hex.vec 8", "gp_y: hex.vec 8", "gp_cid: hex.vec 4"],
-                  extra_safe=("gp.jump16",),
                   note="x nibbles 7,6,5 then y nibbles 7,6,5 of 16.16 positions; E1M1 extent")
         pv = Probe(name + " [verify]", body=[";gp_cx_0_0", "gp_cdone:"], pre=p.pre,
                    tables=p.tables, prelude=PRELUDE_J16, blob=code_v, data=p.data,
-                   extra_safe=p.extra_safe, verify=["hex.print 2, gp_cid"], expected=exp)
+                   verify=["hex.print 2, gp_cid"], expected=exp)
         p.expected, p._vprobe = None, pv
         out.append(p)
     return out
@@ -761,12 +745,12 @@ def ptloc_probes():
     pre = ["gp_px.lookup ptx, _mcnt", "gp_py.lookup pty, _mcnt"]
     tables = d4("gp_px", px, 2, 10) + d4("gp_py", py, 2, 10)
     exp = lambda n: b"".join(le_bytes(pts[k & 255][2], 2) for k in range(n))   # noqa: E731
-    common = dict(pre=pre, tables=tables, prelude=PRELUDE_J16, data=decls, files=[CONSTS, FIXED],
-                  verify=["hex.print 2, ptss"], expected=exp, extra_safe=("gp.jump16",))
+    common = dict(pre=pre, tables=tables, prelude=PRELUDE_J16, data=decls, files=[CONSTS],
+                  verify=["hex.print 2, ptss"], expected=exp)
     full = Probe("ptloc full descent (ptloc_walk)", body=["stl.fcall ptloc_walk, ptloc_ret"],
                  blob=ptloc + code, **common,
                  note="E1M1, 256 live points; mean depth %.1f" % (sum(p[3] for p in pts) / 256))
-    grid = Probe("ptloc grid start (jump16 x3+x3 -> node)", body=["stl.fcall %s, ptloc_ret" % xroot],
+    grid = Probe("ptloc grid start (hex.switch x3+x3 -> node)", body=["stl.fcall %s, ptloc_ret" % xroot],
                  blob=ptloc + code, **common,
                  note="residual depth %.1f" % (sum(res_depth) / 256))
     return [full, grid], (sum(p[3] for p in pts) / 256, sum(res_depth) / 256)
@@ -972,14 +956,14 @@ def run_groups(names):
     if "cell" in names:
         print("cell -- 32-unit cell of a 16.16 position by nibble jumps")
         for p in cell_lookup_probes():
-            do(p, modes=("plain", "pool", "pool+"), vprobe=p._vprobe)
+            do(p, vprobe=p._vprobe)
     if "ptloc" in names:
         print("ptloc -- point location: full descent vs a jump on the cell into the BSP")
         ps, (dfull, dres) = ptloc_probes()
         print("  (Python: mean depth full %.2f nodes, residual after the cell start %.2f)"
               % (dfull, dres))
         for p in ps:
-            do(p, modes=("plain", "pool", "pool+"))
+            do(p)
     if "octant" in names:
         print("octant")
         for p in octant_probes():

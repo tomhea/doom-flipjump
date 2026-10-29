@@ -47,7 +47,7 @@ HERE = Path(__file__).resolve().parent
 # fj_consts, the seven src/fj sources, then the seven generated parts. ritual.py records the real
 # list in <id>.deg.json ("input_files"); this is the fallback and is CHECKED against it when
 # present.
-FALLBACK_FILES = ["fj_consts", "fixed_point", "present", "projection", "frame_render",
+FALLBACK_FILES = ["fj_consts", "projection", "frame_render",
                   "plane_render", "plane_bands", "stream_render", "00_entry", "01_tables",
                   "02_main", "03_segconsts", "04_walk", "05_state", "06_banks"]
 
@@ -141,7 +141,7 @@ def price(counter, names, cover_ops, src_tags=()):
         if hw:
             hand[hw[-1]] += n
             # the CALLER of the deepest hand-written frame, when it is also hand-written.
-            # Without it a macro defined in a .fj file (hex.fixed_mul_lo.row) collapses all
+            # Without it a macro defined in a .fj file (hex.mul_low.row) collapses all
             # of its callers into one row and the caller breakdown is lost.
             pair[(hw[-2][0] if len(hw) > 1 else "-", hw[-1][0], hw[-1][1])] += n
     return inc, exc, site, hand, pair

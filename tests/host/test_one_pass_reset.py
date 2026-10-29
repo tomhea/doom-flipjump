@@ -18,7 +18,7 @@ from doomfj import selfreset
 from doomfj.harness import W
 
 ENTRY = "stl.startup_and_init_all\n;__hot_end\n"
-MAIN = "frame:\n    present.end_frame\nstl.loop\nbad: stl.loop\n"
+MAIN = "frame:\n    screen.end_frame W, 0\nstl.loop\nbad: stl.loop\n"
 STATE = "\n".join([
     "ws_c1: hex.vec 1, 1",
     "ws_cang: hex.vec 8, 0x3FFFFFFF",

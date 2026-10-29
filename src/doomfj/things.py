@@ -32,7 +32,7 @@ THING_ROW_LEN = sum(THING_ROW_BYTES)
 # ── M14-perf: the row is READ IN TWO HALVES, because 94.1% of loads are thrown away ────────────
 #
 # MEASURED (scratchpad/m14_m5_counts.py, 260 frames): of 22,146 things `sim.thing_load` loads,
-# 20,832 are rejected by `proj.project_thing` and only 1,314 (5.9%) ever draw. `read_table_packed`
+# 20,832 are rejected by `proj.project_thing` and only 1,314 (5.9%) ever draw. `read_entry_packed`
 # costs `rep(nb) read_byte_and_inc`, i.e. LINEAR in the row width, so every rejected thing was
 # paying for bytes it never read.
 #
@@ -42,7 +42,7 @@ THING_ROW_LEN = sum(THING_ROW_BYTES)
 # (and the separate `sprlt` lookup) are first touched AFTER `hex.if0 1, vis, ret`. So HOT is
 # everything any reject can reach and COLD is what only a drawn sprite needs.
 #
-# ⚠ TWO TABLES, NOT AN OFFSET READ. `hex.read_table_packed nb, ...` derives its STRIDE from `nb`
+# ⚠ TWO TABLES, NOT AN OFFSET READ. `hex.read_entry_packed nb, ...` derives its STRIDE from `nb`
 # (`mul_const w/4, ptr, ptr, nb*dw`), so it can only read a whole row of exactly `nb` bytes -- a
 # prefix of a wider row would index at the wrong stride. Splitting the table is the only form this
 # accessor supports.

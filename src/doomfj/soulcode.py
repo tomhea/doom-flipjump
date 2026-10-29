@@ -391,7 +391,7 @@ def hitgo_lines(nmon: int, knock: bool = True, sn: int = 2) -> List[str]:
     kb = inflictor_lines("mm_x", "mm_y", z="sw_z + 4*dw") if knock else []
     return ["sk_hitgo:",
             "    hex.inc 2, sw_rng", "    trclaw.lookup dp_dmg, sw_rng",
-            "    sim.jump16 sk_hit, skg_o, skg_mon, skg_pl, skg_bar, %s" % ", ".join(["skg_o"] * 12),
+            "    hex.switch sk_hit, skg_o, skg_mon, skg_pl, skg_bar, %s" % ", ".join(["skg_o"] * 12),
             "  skg_mon:",
             "    hex.mov 2, dm_dmg, dp_dmg", "    hex.set 1, dm_melee, %d" % MONSTER,
             "    hex.mov %d, dm_src, sw_me" % sn,

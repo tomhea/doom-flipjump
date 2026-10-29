@@ -17,7 +17,7 @@ THE INTERFACE (the player's shot is the caller; `weaponcode.shot_decls` declares
 weapon runs before the player moves (combat: the tic-start view).
 
 THE CODE (no per-slot logic -- P3.2b's first build overflowed the table pool when per-slot code was unrolled):
-  * `dm_go`: a two-level `sim.jump16` on dm_id to the slot's stub `dmg<m>`, which copies the slot's cells into the
+  * `dm_go`: a two-level `hex.switch` on dm_id to the slot's stub `dmg<m>`, which copies the slot's cells into the
     window (the `dm_*` registers), its position from thpos_rt, its damage PROFILE index (`dm_type`), calls `dm_leaf`
     and copies the cells back;
   * `dm_leaf`, the model's order (`_line_attack`, then damage_monster): P_AproxDistance(target - player) > reach ->
@@ -349,7 +349,7 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
            "    hex.if0 3, dm_hp, dm_out",                                    # health == 0
            # M8 C8: a flying soul stops (`target->momx = momy = momz = 0`), before the thrust
            *((["    hex.if0 1, dm_skf, dm_nsk",
-               "    sim.jump16 dm_skk, %s" % ", ".join("dmz%d" % k if k < len(souls) else "dm_nsk"
+               "    hex.switch dm_skk, %s" % ", ".join("dmz%d" % k if k < len(souls) else "dm_nsk"
                                                        for k in range(16))]
               + sum((["  dmz%d:" % k,
                       "    hex.zero 8, sk_momz + %d*dw" % (8 * k),
@@ -377,7 +377,7 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
            "    hex.inc 2, dm_rng",                                            # P_Random on the monster's stream:
            "    dmrnd.lookup dm_rr, dm_rng",                                   # v & 3, and the pain bits
            "    hex.zero 1, dm_pn",
-           "    sim.jump16 dm_type, " + ", ".join("dm_p%d" % k if k < len(keys) else "dm_out" for k in range(16))]
+           "    hex.switch dm_type, " + ", ".join("dm_p%d" % k if k < len(keys) else "dm_out" for k in range(16))]
     for k, (pc, pain, death, spawn, see, *gib) in enumerate(keys):
         out += ["  dm_p%d:" % k,
                 "    hex.set 2, dm_dst, %d" % gd.THING_STATE_INDEX[death], "    hex.set 1, dm_dti, %d" % _tics(death)]

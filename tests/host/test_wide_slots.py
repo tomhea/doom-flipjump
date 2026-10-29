@@ -26,9 +26,9 @@ def test_the_width_is_derived_from_the_counts():
 def _old_tree(reg, n, target, none, lab):
     """the two-level text every dispatch had before C2 (ids 0 .. n-1)"""
     nh = (n + 15) // 16
-    out = ["    sim.jump16 %s + 1*dw, " % reg + ", ".join(lab % h if h < nh else none for h in range(16))]
+    out = ["    hex.switch %s + 1*dw, " % reg + ", ".join(lab % h if h < nh else none for h in range(16))]
     for h in range(nh):
-        out += ["  %s:" % (lab % h), "    sim.jump16 %s, " % reg + ", ".join(
+        out += ["  %s:" % (lab % h), "    hex.switch %s, " % reg + ", ".join(
             target(16 * h + k) if 16 * h + k < n else none for k in range(16))]
     return out
 
@@ -39,7 +39,7 @@ def test_the_narrow_tree_is_the_old_text(n):
     assert id_jump_lines("r", 2, n, t, "x", "h%d", "g%d") == _old_tree("r", n, t, "x", "h%d")
     wide = id_jump_lines("r", 3, n, t, "x", "h%d", "g%d")
     assert wide != _old_tree("r", n, t, "x", "h%d")                 # control: the wide tree is another text
-    assert wide[0] == "    sim.jump16 r + 2*dw, g0, " + ", ".join(["x"] * 15)
+    assert wide[0] == "    hex.switch r + 2*dw, g0, " + ", ".join(["x"] * 15)
 
 
 def test_the_narrow_schema_keeps_the_old_widths():

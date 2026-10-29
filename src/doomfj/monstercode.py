@@ -259,7 +259,7 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
       * `view_rows`: one thing row per distinct monster VIEW (lump, mirrored) -- `things.thing_rows`' layout from the
         view's art, dw's bit 7 set for a mirrored view -- appended after the runtime things' own rows;
       * `mview`: the D4 table (view group << 4 | rotation index) -> that view's row;
-      * `select`: the row-select leaf `thsel_leaf` (sp_ti = thing index in, its row out): a two-level `sim.jump16`
+      * `select`: the row-select leaf `thsel_leaf` (sp_ti = thing index in, its row out): a two-level `hex.switch`
         on the index into one stub per runtime thing -- a static thing keeps its own row, a monster's stub runs the
         rotation leaf on its slot's facing and looks up its state's view group (rule 1: the index selects CODE);
       * `rotation`: the rotation leaf; `tic`: the per-slot tic; `decls`: the cells (the boot skill's level start)
@@ -1127,7 +1127,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "  %slight:" % L,
            "    hex.mov 2, %s, mt_nxt" % ST,
            "    hex.mov 1, %s, mt_row + 2*dw" % TI,
-           "    sim.jump16 mt_row + 3*dw, %s" % ", ".join(_action_targets(L, nxt, dc, fall=dmg, boss=bool(boss))),
+           "    hex.switch mt_row + 3*dw, %s" % ", ".join(_action_targets(L, nxt, dc, fall=dmg, boss=bool(boss))),
            # ---- A_Look: threshold 0; no sound before P4; P_LookForPlayers (not all around) -----------------
            "  %slook:" % L,
            "    hex.zero %d, %s" % (nthr, TH),
@@ -1158,7 +1158,7 @@ def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics
            "    hex.if0 1, mt_rj, %s" % lx,
            "  %sbehind:" % L,                                  # behind and beyond 64: not seen
            *(["    hex.if1 1, nz_amb, %swake" % L] if hear else []),   # a heard ambusher in sight: no facing test
-           "    sim.jump16 %s, %s" % (FA, ", ".join(["%sf%d" % (L, k) for k in range(8)] + [lx] * 8))]
+           "    hex.switch %s, %s" % (FA, ", ".join(["%sf%d" % (L, k) for k in range(8)] + [lx] * 8))]
     for k in range(8):
         cell, kind = FACING_BEHIND[k]
         src = {"dx": "mt_dx", "dy": "mt_dy", "sum": "mt_s", "dydx": "mt_s", "dxdy": "mt_s"}[cell]
@@ -1459,7 +1459,7 @@ def p32b_change_sector_lines(w, nmon: int, *, exit_guard: bool) -> list:
                            len(w.secs), nib)
     for si, (cell, floors) in sorted(movers.items()):
         labs = ["mcf_s%d_%d" % (si, k) for k in range(len(floors))]
-        out += ["  mcf_s%d:" % si, "    sim.jump16 %s, %s" % (cell, ", ".join(labs + [labs[-1]] * (16 - len(labs))))]
+        out += ["  mcf_s%d:" % si, "    hex.switch %s, %s" % (cell, ", ".join(labs + [labs[-1]] * (16 - len(labs))))]
         for k, fl in enumerate(floors):
             out += ["  %s:" % labs[k], "    hex.set 4, mcf_val, %d" % (fl & 0xFFFF), "    ;mcf_one"]
     out += ["  mcf_one:", "    hex.set 1, mcf_hit, 1", "  mcf_out:", "    stl.fret mcf_ret", "  mcs_skip:"]
@@ -1548,28 +1548,28 @@ def d3_decls(nib: int = 2) -> tuple:
 
 def select_tree_lines(ntm: int) -> list:
     """the row select's dispatch (`thsel_leaf`, p31_parts) on the runtime thing index sp_ti into the stubs thsel_s<t>
-    for t < ntm (`thsel_none` past them): a `sim.jump16` tree on sp_ti's nibbles -- TWO levels (nibble 1, then 0) while
+    for t < ntm (`thsel_none` past them): a `hex.switch` tree on sp_ti's nibbles -- TWO levels (nibble 1, then 0) while
     ntm <= 256, the text every 8-bit map has; M8 F1.5 (docs/f1-runtime-ids.md): a THIRD, on nibble 2, first when ntm
     passes 256 (a wide-list map) -- thsel_g<g> picks the 256-block, its thsel_h<16g+h> the 16-block as before.
     tests/fj/test_wide_ids_fj.py runs it at ntm = 300."""
     if ntm <= 256:
-        sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
+        sel = ["thsel_leaf:", "    hex.switch sp_ti + 1*dw, " + ", ".join(
             "thsel_h%d" % h if 16 * h < ntm else "thsel_none" for h in range(16))]
     else:
         assert ntm <= 4096, ntm
-        sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 2*dw, " + ", ".join(
+        sel = ["thsel_leaf:", "    hex.switch sp_ti + 2*dw, " + ", ".join(
             "thsel_g%d" % g if 256 * g < ntm else "thsel_none" for g in range(16))]
         for g in range((ntm + 255) // 256):
-            sel += ["  thsel_g%d:" % g, "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
+            sel += ["  thsel_g%d:" % g, "    hex.switch sp_ti + 1*dw, " + ", ".join(
                 "thsel_h%d" % (16 * g + h) if 16 * (16 * g + h) < ntm else "thsel_none" for h in range(16))]
     for h in range((ntm + 15) // 16):
-        sel += ["  thsel_h%d:" % h, "    sim.jump16 sp_ti, " + ", ".join(
+        sel += ["  thsel_h%d:" % h, "    hex.switch sp_ti, " + ", ".join(
             "thsel_s%d" % (16 * h + l) if 16 * h + l < ntm else "thsel_none" for l in range(16))]
     return sel
 
 
 def id_jump_lines(reg: str, nib: int, n: int, target, none: str, lab: str, glab: str) -> list:
-    """M8 C2 (docs/c2-slot-ids.md): a `sim.jump16` tree on the `nib`-nibble id register `reg` -- id i < n jumps to
+    """M8 C2 (docs/c2-slot-ids.md): a `hex.switch` tree on the `nib`-nibble id register `reg` -- id i < n jumps to
     `target(i)`, every other id to `none`. nib 2: TWO levels (nibble 1 to `lab % h` for the 16-blocks that hold an id,
     then nibble 0) -- the text every narrow map's dispatches have (dm_go, kb_go, mt_load, dt_turn, the wake tic's
     cursor); nib 3: a THIRD level first, nibble 2 to `glab % g` for the 256-blocks, each then picking its 16-blocks.
@@ -1577,16 +1577,16 @@ def id_jump_lines(reg: str, nib: int, n: int, target, none: str, lab: str, glab:
     nh = (n + 15) // 16
     if nib == 2:
         assert n <= 256, (reg, n)
-        out = ["    sim.jump16 %s + 1*dw, " % reg + ", ".join(lab % h if h < nh else none for h in range(16))]
+        out = ["    hex.switch %s + 1*dw, " % reg + ", ".join(lab % h if h < nh else none for h in range(16))]
     else:
         assert nib == 3 and n <= 4096, (reg, nib, n)
         ng = (n + 255) // 256
-        out = ["    sim.jump16 %s + 2*dw, " % reg + ", ".join(glab % g if g < ng else none for g in range(16))]
+        out = ["    hex.switch %s + 2*dw, " % reg + ", ".join(glab % g if g < ng else none for g in range(16))]
         for g in range(ng):
-            out += ["  %s:" % (glab % g), "    sim.jump16 %s + 1*dw, " % reg + ", ".join(
+            out += ["  %s:" % (glab % g), "    hex.switch %s + 1*dw, " % reg + ", ".join(
                 lab % (16 * g + h) if 16 * g + h < nh else none for h in range(16))]
     for h in range(nh):
-        out += ["  %s:" % (lab % h), "    sim.jump16 %s, " % reg + ", ".join(
+        out += ["  %s:" % (lab % h), "    hex.switch %s, " % reg + ", ".join(
             target(16 * h + k) if 16 * h + k < n else none for k in range(16))]
     return out
 

@@ -104,10 +104,9 @@ import pytest
 from doomfj import wall_renderer as wr
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.lut_generator import generate_emit_dispatch_table_fj
 
 ROOT = Path(__file__).resolve().parents[2]
-FJ_NAMES = ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
+FJ_NAMES = ("projection.fj", "frame_render.fj", "plane_render.fj",
             "plane_bands.fj", "stream_render.fj")
 EMITTER = "wall_renderer.py"
 # M7 P4.0: the game tier's OWN config -- the emitter rebinds `cfg = tier_cfg(cfg, tier)` (an 84-row view under the bar)
@@ -819,7 +818,7 @@ def bank():
 
 
 def emit(reg, nbytes):
-    return ["    byte.emit %s" % (reg if i == 0 else "%s + %d*dw" % (reg, 2 * i)) for i in range(nbytes)]
+    return ["    hex.print %s" % (reg if i == 0 else "%s + %d*dw" % (reg, 2 * i)) for i in range(nbytes)]
 
 
 DUMP = """def lay_dump arr, n @ loop, done < lay_p, lay_n, lay_v {
@@ -827,7 +826,7 @@ DUMP = """def lay_dump arr, n @ loop, done < lay_p, lay_n, lay_v {
     hex.set 4, lay_n, n
   loop:
     hex.read_byte_and_inc lay_v, lay_p
-    byte.emit lay_v
+    hex.print lay_v
     hex.dec 4, lay_n
     hex.if0 4, lay_n, done
     ;loop
@@ -840,7 +839,7 @@ REGS = ["lay_p: hex.vec w/4", "lay_n: hex.vec 4", "lay_v: hex.vec 2", "lay_x: he
         "ld_sblkb: hex.vec 4", "dv_s: hex.vec 2", "dv_sblk: hex.vec 4", "dv_ybase: hex.vec 4",
         "dv_top: hex.vec 4", "dv_sy1: hex.vec 4", "dv_sy2: hex.vec 4", "dv_smidx: hex.vec 4",
         "dv_ptr: hex.vec w/4", "dv_ridx: hex.vec 4"]
-HEAD = ["stl.startup_and_init_all", generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)]
+HEAD = ["stl.startup_and_init_all", ]
 
 
 def write_program(frame_text, emitter_text):
@@ -1031,7 +1030,7 @@ MUTANTS = [
     ("the record's slot: a step inserted", "write", FR,
      "hex.write_byte_and_inc gps_ptr, trb_shade_row", "hex.ptr_inc gps_ptr" + _W + "hex.write_byte_and_inc gps_ptr, trb_shade_row"),
     ("the record's slot: a prearmed write", "write", FR,
-     "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw", "frame.write_byte_and_inc_prearmed gps_ptr, gps_yb8 + 2*dw"),
+     "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw", "hex.write_back gps_yb8 + 2*dw" + _W + "hex.ptr_inc gps_ptr"),
     ("the slot offset never added", "write", FR,
      "hex.add w/4, trb_tab_idx, trb_slot_ofs", "hex.zero w/4, trb_slot_ofs"),
     ("the slot offset bumped", "write", FR,
@@ -1043,22 +1042,22 @@ MUTANTS = [
     ("the record's column stride", "write", FR,
      "rep(slotstride/16, k) hex.shl_hex w/4, 1, trb_tab_idx", "rep(slotstride/8, k) hex.shl_hex w/4, 1, trb_tab_idx"),
     ("the record's index bound", "write", FR,
-     "frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx" + _W + "// P2-5", "frame.ptr_index4 trb_tbl_p, trb_tbl_b, trb_tab_idx" + _W + "// P2-5"),
+     "hex.ptr_index 5, trb_tbl_p, trb_tbl_b, trb_tab_idx" + _W + "// P2-5", "hex.ptr_index 2, trb_tbl_p, trb_tbl_b, trb_tab_idx" + _W + "// P2-5"),
     ("the slot id one nibble wide", "write", FR, "hex.mov 2, gps_sidx, gps_s_rec", "hex.mov 1, gps_sidx, gps_s_rec"),
     ("the slot index written through r + dw", "write", FR,
      "hex.shl_bit w/4, gps_sidx" + _W + "hex.shl_bit w/4, gps_sidx", "hex.shl_bit w/4, gps_sidx" + _W + "hex.inc 1, gps_sidx + dw" + _W + "hex.shl_bit w/4, gps_sidx"),
     # the review's round-3 edits, exactly as posted
     ("r3: the record's first slot write prearmed", "write", FR,
-     "hex.write_byte_and_inc gps_ptr, gps_yb8" + _W, "frame.write_byte_and_inc_prearmed gps_ptr, gps_yb8" + _W),
+     "hex.write_byte_and_inc gps_ptr, gps_yb8" + _W, "hex.write_back gps_yb8" + _W + "hex.ptr_inc gps_ptr" + _W),
     ("r3: the slot index bumped through r + dw", "write", FR,
-     "hex.set w/4, gps_sbase, gpslot" + _W + "frame.ptr_index gps_ptr", "hex.inc 1, gps_sidx + dw" + _W + "hex.set w/4, gps_sbase, gpslot" + _W + "frame.ptr_index gps_ptr"),
+     "hex.set w/4, gps_sbase, gpslot" + _W + "hex.ptr_index gps_ptr", "hex.inc 1, gps_sidx + dw" + _W + "hex.set w/4, gps_sbase, gpslot" + _W + "hex.ptr_index gps_ptr"),
     ("r3: a one-nibble shift after the slot offset", "write", FR,
      "hex.add w/4, trb_tab_idx, trb_slot_ofs", "hex.add w/4, trb_tab_idx, trb_slot_ofs" + _W + "hex.shr_hex 1, 1, trb_tab_idx"),
     ("r3: slot A's branch taken to slot B", "write", FR, "hex.if0 2, trb_sprflag_v, slot_a", "hex.if0 2, trb_sprflag_v, slot_b"),
     ("r3: the record's column shift two nibbles wide", "write", FR,
      "rep(slotstride/16, k) hex.shl_hex w/4, 1, trb_tab_idx", "rep(slotstride/16, k) hex.shl_hex 2, 1, trb_tab_idx"),
     ("r3: the record's block-lo write prearmed", "write", FR,
-     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W, "frame.write_byte_and_inc_prearmed trb_tbl_p, trb_blk" + _W),
+     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W, "hex.write_back trb_blk" + _W + "hex.ptr_inc trb_tbl_p" + _W),
     ("r3: the seed's column shift two nibbles wide", "read", FR, "hex.shl_hex w/4, 1, sidx ", "hex.shl_hex 2, 1, sidx "),
     # the review's round-4 edits
     ("r4: B allowed whatever ballow says", "write", FR,
@@ -1125,7 +1124,7 @@ MUTANTS = [
     ("r6: the left clip's negation two nibbles wide", "write", FR,
      "hex.neg 8, trb_negx1", "hex.neg 2, trb_negx1"),
     ("r6: the left clip's product five nibbles wide", "write", FR,
-     "hex.mul_lo 8, trb_frac_u, trb_negx1, trb_tistep", "hex.mul_lo 5, trb_frac_u, trb_negx1, trb_tistep"),
+     "hex.mul_low 8, trb_frac_u, trb_negx1, trb_tistep", "hex.mul_low 5, trb_frac_u, trb_negx1, trb_tistep"),
     # the review's round-7 edits
     ("r7: the left clip's negation three nibbles wide", "write", FR, "hex.neg 8, trb_negx1", "hex.neg 3, trb_negx1"),
     ("r7: the left clip's negation four nibbles wide", "write", FR, "hex.neg 8, trb_negx1", "hex.neg 4, trb_negx1"),
@@ -1161,7 +1160,7 @@ MUTANTS = [
      "frame.read0_byte_and_inc sblkb, spslot_p" + _W + "frame.read0_byte_and_inc sblkb + 2*dw, spslot_p",
      "frame.read0_byte_and_inc sblkb + 2*dw, spslot_p" + _W + "frame.read0_byte_and_inc sblkb, spslot_p"),
     ("the seed's column stride", "read", FR, "hex.shl_hex w/4, 1, sidx ", "hex.shl_hex w/4, 2, sidx "),
-    ("the seed's index bound", "read", FR, "frame.ptr_index5 p2_sspp, bteam, sidx", "frame.ptr_index4 p2_sspp, bteam, sidx"),
+    ("the seed's index bound", "read", FR, "hex.ptr_index 4, p2_sspp, bteam, sidx", "hex.ptr_index 2, p2_sspp, bteam, sidx"),
     ("the seed's column one nibble wide", "read", FR,
      "hex.mov 2, sidx, x1" + _W + "hex.shl_hex w/4, 1, sidx ", "hex.mov 1, sidx, x1" + _W + "hex.shl_hex w/4, 1, sidx "),
     ("the step's column stride", "read", FR, "hex.ptr_add p2_sspp, 16", "hex.ptr_add p2_sspp, 8"),

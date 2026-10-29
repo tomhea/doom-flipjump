@@ -422,7 +422,7 @@ def _build(tmp_path, name, records, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
+    srcs = [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return srcs, feed, want
 
 
@@ -710,7 +710,7 @@ def _fbuild(tmp_path, name, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
+    return [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
 
 
 def _frun(tmp_path, name, mut=None) -> bool:
@@ -883,7 +883,7 @@ def _kbuild(tmp_path, name, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
+    return [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
 
 
 def _krun(tmp_path, name, mut=None) -> bool:

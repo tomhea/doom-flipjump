@@ -320,7 +320,7 @@ class Config:
     AUTOMAP: int = 0
     # M8 size (the owner, 2026-10-19: "the 2^27 words-space is a super hard limit"): 1 = the baked point location
     # (`collision.generate_point_location_fj`) keeps each node's CONSTANTS in the node and runs the cross product / the
-    # compare in SHARED subroutines (one hex.mul_lo pair, one hex.scmp per axis) instead of inlining them per node: the
+    # compare in SHARED subroutines (one hex.mul_low pair, one hex.scmp per axis) instead of inlining them per node: the
     # same leaf for every point, for a fcall per node visited. `ptloc_walk` was 19.5M of E1M2 r4's 83.5M words (code,
     # wflip chains and pool tables). 0, the default: the inline walk, byte for byte.
     PTLOC_SHARED: int = 0

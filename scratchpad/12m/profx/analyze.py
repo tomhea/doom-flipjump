@@ -140,18 +140,18 @@ def cmd_sub(prefix, oid):
 
 
 FAMILIES = ["hex.ptr_index", "hex.read_byte", "hex.write_byte", "hex.read_hex", "hex.write_hex",
-            "hex.read_byte_and_inc", "hex.read_table_packed", "hex.mul", "hex.mul_const", "hex.mul_lo",
-            "hex.fixed_mul_lo", "hex.cmp", "hex.scmp", "hex.mov", "hex.sparse_mov", "hex.add", "hex.sub",
+            "hex.read_byte_and_inc", "hex.read_entry_packed", "hex.mul", "hex.mul_const", "hex.mul_low",
+            "hex.fixed_mul_low", "hex.cmp", "hex.scmp", "hex.mov", "hex.sparse_mov", "hex.add", "hex.sub",
             "hex.add_constant", "hex.xor", "hex.zero", "hex.set", "hex.if0", "hex.if_flags", "hex.inc", "hex.dec",
             "hex.shl_hex", "hex.shr_hex", "hex.shl_bit", "hex.shr_bit", "hex.div", "sim.thing_load",
-            "sim.try_move", "sim.check_cells", "sim.line_test", "sim.jump16", "sim.thing_pass",
-            "sim.bind_things", "stream.emit_col_lines", "byte.emit", "m1.zerobyte", "proj.project_thing",
+            "sim.try_move", "sim.check_cells", "sim.line_test", "hex.switch", "sim.thing_pass",
+            "sim.bind_things", "stream.emit_col_lines", "hex.print", "m1.zerobyte", "proj.project_thing",
             "frame.thing_record_body", "hex.sign", "sim.point_side", "finesine.read_cos", "finesine.read_sin",
             "proj.wedge_setup", "stl.fcall", "kb.poll", "hex.input_hex", "hex.input",
             "frame.seg_pass1_leaf_body_lines", "frame.seg_pass1_leaf_body_ts", "frame.seg_pass2_leaf_body_lines",
             "proj.wedge_bbox", "frame.thing_load_cold", "stream.sprite_runs", "stream.sprite_runs_win",
             "frame.lines_spr_load", "frame.lines_spr_seed", "vpb_walk", "frame.read_byte5",
-            "frame.write_byte5", "frame.ptr_index4", "stream.emit_region", "stream.emit_column",
+            "frame.write_byte5", "stream.emit_region", "stream.emit_column",
             # M7 P1.4: the fragment as (slot, block) -- the derive, the two walkers, the bank's
             # 3-nibble read and the whole-nibble block address
             "stream.frag_derive", "stream.frag_runs", "stream.frag_runs_win", "frame.read3_and_inc",
@@ -159,11 +159,11 @@ FAMILIES = ["hex.ptr_index", "hex.read_byte", "hex.write_byte", "hex.read_hex", 
 
 # the label table's file indices (fN) on the game tier, for printing call sites (cosmetic)
 _GEN = "build/generated_" + default_fjm().stem
-FILES = {"f2": "src/fj/fixed_point.fj", "f4": "src/fj/projection.fj", "f5": "src/fj/frame_render.fj",
-         "f8": "src/fj/stream_render.fj", "f9": "src/fj/input.fj", "f10": "src/fj/sim.fj",
-         "f12": _GEN + "/e1m1_01_tables.fj", "f13": _GEN + "/e1m1_02_main.fj",
-         "f14": _GEN + "/e1m1_03_segconsts.fj", "f15": _GEN + "/e1m1_04_walk.fj",
-         "f17": _GEN + "/e1m1_06_banks.fj", "f18": "src/fj/m1_reset.fj", "f19": _GEN + "/e1m1_07_reset.fj"}
+FILES = {"f2": "src/fj/projection.fj", "f3": "src/fj/frame_render.fj",
+         "f6": "src/fj/stream_render.fj", "f7": "src/fj/input.fj", "f8": "src/fj/sim.fj",
+         "f10": _GEN + "/e1m1_01_tables.fj", "f11": _GEN + "/e1m1_02_main.fj",
+         "f12": _GEN + "/e1m1_03_segconsts.fj", "f13": _GEN + "/e1m1_04_walk.fj",
+         "f15": _GEN + "/e1m1_06_banks.fj", "f16": "src/fj/m1_reset.fj", "f17": _GEN + "/e1m1_07_reset.fj"}
 _SRC = {}
 
 

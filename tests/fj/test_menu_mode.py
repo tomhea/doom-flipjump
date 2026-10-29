@@ -28,7 +28,7 @@ VW, VH = CFG.VIEW_W, CFG.VIEW_H
 LINES = ["DOOM ON FLIPJUMP", "", "NEW GAME", "QUIT"]
 COLOURS = (0, 4, 176, 101)          # palette_colours of the E1M1 PLAYPAL (bg, text, hi, credit)
 STUB = 7                     # the world stub paints every column this colour
-SRC = [Path("src/fj") / "present.fj", Path("src/fj") / "input.fj"]
+SRC = [Path("src/fj") / "input.fj"]
 
 
 def _program(mode_init):
@@ -37,7 +37,7 @@ def _program(mode_init):
                         "    ")
     return "\n".join([
         "stl.startup_and_init_all",
-        "present.init_screen",
+        "screen.init_screen W, H, 8",
         # M7 P1.5: the poll records the menu's events (the state machine that acts on them is
         # tests/fj/test_skill_menu.py's); here only the BRANCH on `mode` is under test
         "rep(4, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, kb_sl, kb_sr, kb_fi, kb_w1, kb_w2, kb_w3, kb_w4, kb_w5, kb_now, ev_enter, ev_esc, ev_up, ev_dn, "
@@ -46,10 +46,10 @@ def _program(mode_init):
         menu_fj(VW, VH, LINES, 2, COLOURS, label="menu_frame", end_marker=False),
         "    ;frame_end",
         "do_world:",
-        "    present.draw_collines",
+        "    screen.draw_collines",
         *world,
         "frame_end:",
-        "present.end_frame",
+        "screen.end_frame W, 0",
         "stl.loop",
         "bad: stl.output_char 0x21",
         "     stl.loop",
@@ -103,9 +103,9 @@ def test_the_two_producers_really_differ(tmp):
 
 def test_the_tail_shape_the_reset_asserts_on_is_intact():
     """`selfreset.emit_reset_part` refuses unless the line before the bare `stl.loop` is
-    `present.end_frame`. The menu branch must not disturb that -- so the shared frame-end label
+    `screen.end_frame W, 0`. The menu branch must not disturb that -- so the shared frame-end label
     goes BEFORE the tail, not after it."""
     lines = [l.strip() for l in _program(1).split("\n")]
     loop_at = lines.index("stl.loop")
-    assert lines[loop_at - 1] == "present.end_frame"
+    assert lines[loop_at - 1] == "screen.end_frame W, 0"
     assert lines[loop_at - 2] == "frame_end:"

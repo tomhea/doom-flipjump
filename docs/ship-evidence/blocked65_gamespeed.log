@@ -1,0 +1,23 @@
+SIZE: w=32  segments=542975  data=50,198,748 words (37.40% of 2^27)  span=117,529,408 words (87.57%)  file=17,606,504 bytes
+calibration: startup + 4 menu frames = 390,984 ops (subtracted from every run)
+  run  0: 1,571,537,761 ops / 104 presented -> raw 15,110,940, game-only 15,711,467 ops/frame
+  run  1: 1,367,505,479 ops / 104 presented -> raw 13,149,091, game-only 13,671,144 ops/frame
+  run  2: 1,406,570,383 ops / 104 presented -> raw 13,524,715, game-only 14,061,793 ops/frame
+  run  3: 1,653,972,377 ops / 104 presented -> raw 15,903,580, game-only 16,535,813 ops/frame
+  run  4: 1,485,814,895 ops / 104 presented -> raw 14,286,681, game-only 14,854,239 ops/frame
+  run  5: 1,546,464,016 ops / 104 presented -> raw 14,869,846, game-only 15,460,730 ops/frame
+  run  6: 1,455,891,978 ops / 104 presented -> raw 13,998,961, game-only 14,555,009 ops/frame
+  run  7: 1,393,401,007 ops / 104 presented -> raw 13,398,086, game-only 13,930,100 ops/frame
+  run  8: 1,141,228,843 ops / 104 presented -> raw 10,973,354, game-only 11,408,378 ops/frame
+  run  9: 1,106,362,208 ops / 104 presented -> raw 10,638,098, game-only 11,059,712 ops/frame
+
+==============================================================================
+SPEED  BINDING (mean+p80)/2: 14,792,784 ops/frame   (target <= 22,000,000)  PASS
+SPEED  mean run-average   : 14,124,839 ops/frame
+SPEED  80th-pct run avg   : 15,460,730 ops/frame
+SPEED  spread lo..hi      : 11,059,712 .. 16,535,813 ops/frame
+SPEED  raw (menu included): mean 13,585,335, 80th-pct 14,869,846 ops/frame
+SIZE   words              : 50,198,748 = 37.40% of 2^27   (target <= 43%)  PASS
+SIZE   span / file        : 117,529,408 words (87.57%) / 17,606,504 bytes
+==============================================================================
+[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py (argv0 scratchpad/12m/gamespeed.py)

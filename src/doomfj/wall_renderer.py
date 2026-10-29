@@ -4,7 +4,7 @@ space optimization (M12oo pass-2 trampoline, M12pp/qq xor_by + xor-involution wa
 emitter, so build_doom inherits them for free.
 
 `emit_wall_renderer(wad, mapname, cfg)` returns the renderer `main` fj text; assemble it with the fixed
-include set [fj_consts, fixed_point, present, projection, frame_render, <main>]. The viewpoint is read from
+include set [fj_consts, present, projection, frame_render, <main>]. The viewpoint is read from
 stdin at runtime (`vx vy va`, signed decimal) so ONE assembled binary renders any E1M1 viewpoint — exactly
 the two-pass runtime renderer (B'): a runtime BSP-walk pass 1 fills the per-column param arrays, then the
 unrolled pass 2 rasters them through the shared-compare trampoline.
@@ -22,7 +22,7 @@ from doomfj.lut_generator import (
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
     generate_slopediv_recip8_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
-    generate_emit_dispatch_table_fj, generate_emit_byte_by_nibbles_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
+    generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
 from doomfj.reference_model import STRAFE_MOVE                                   # M7 P4.1
 from doomfj.reference_model import (ANG90, ANGLE_TURN, ANGLE_TURN_TAP, FORWARD_MOVE, MAX_STEP,
@@ -292,13 +292,13 @@ def light_class_fields(tfields, cls: int):
 
 
 def state_dispatch_lines(tag: str, cell: str, blocks) -> list:
-    """`sim.jump16` on the state nibble `cell` into `blocks[k]` (a list of lines) for state k, each ending at
+    """`hex.switch` on the state nibble `cell` into `blocks[k]` (a list of lines) for state k, each ending at
     `<tag>_end`; states past the last reuse the last block. The landings' idiom: plain code, so `hex.set` is legal.
     A mover's leaf (its floor: emit_wall_renderer's `_mover_dispatch`) and, M8, an animated light's leaf (its sprite
     light base) -- the text is the closure's it replaced, line for line."""
     labs = [f"{tag}_{k}" for k in range(len(blocks))]
     assert 0 < len(labs) <= 16, (tag, len(labs))
-    out = [f"    sim.jump16 {cell}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
+    out = [f"    hex.switch {cell}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
     for k, b in enumerate(blocks):
         out += [f"  {labs[k]}:", *b, f"    ;{tag}_end"]
     return out + [f"  {tag}_end:"]
@@ -378,7 +378,7 @@ def _player_sim_lines(collide: bool = False, strafe: bool = False, tap=None) -> 
     Two things are worth stating because they are where a mirror would drift:
       * the angle is modular, so `-= ANGLE_TURN` is emitted as `+= (2**32 - ANGLE_TURN)` -- one
         primitive, and bit-identical to the oracle's `& 0xFFFFFFFF` subtract;
-      * `fixed_mul_lo` is the cheap form of `fixed_mul`, documented bit-identical, and the operands
+      * `fixed_mul_low` is the cheap form of `fixed_mul`, documented bit-identical, and the operands
         are in the oracle's order (move first, trig second).
 
     The key byte's bits are tested with `hex.if_flags`, whose mask is a set of NIBBLE VALUES: bit 0
@@ -436,10 +436,10 @@ def _player_sim_lines(collide: bool = False, strafe: bool = False, tap=None) -> 
         "hex.mov 8, pangt, viewangle", "hex.shr_hex 8, 5, pangt", "hex.mov 3, pangi, pangt",
         "finesine.read_cos pmvc, pangi",
         "finesine.read_sin pmvs, pangi",
-        "hex.fixed_mul_lo 8, 4, pmvdx, pmove, pmvc",
-        "hex.fixed_mul_lo 8, 4, pmvdy, pmove, pmvs",
-        *(["hex.fixed_mul_lo 8, 4, psdx, psid, pmvs", "hex.add 8, pmvdx, psdx",
-           "hex.fixed_mul_lo 8, 4, psdy, psid, pmvc", "hex.sub 8, pmvdy, psdy"] if strafe else []),
+        "hex.fixed_mul_low 8, 4, pmvdx, pmove, pmvc",
+        "hex.fixed_mul_low 8, 4, pmvdy, pmove, pmvs",
+        *(["hex.fixed_mul_low 8, 4, psdx, psid, pmvs", "hex.add 8, pmvdx, psdx",
+           "hex.fixed_mul_low 8, 4, psdy, psid, pmvc", "hex.sub 8, pmvdy, psdy"] if strafe else []),
         # M14-d: with collision on the move is a REQUEST -- `move_with_collision_lines` decides
         # where it actually lands. Without it the delta is applied straight, as M14-c shipped.
         *(["hex.mov 8, cm_dx, pmvdx", "hex.mov 8, cm_dy, pmvdy", ";simcollide"] if collide else
@@ -1056,7 +1056,7 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None, hud=(), st
     dispatch. MEASURED at ~1,172 bytes -> ~2,344 ops against a world frame's ~28,000,000.
 
     ⚠ THE STREAM'S END_CMD IS OMITTED ON PURPOSE. Both producers fall into the SAME tail, whose
-    last line is `present.end_frame` (END_CMD, then present) -- which `selfreset.emit_reset_part`
+    last line is `screenwire.FJ_END_FRAME` (END_CMD, then present) -- which `selfreset.emit_reset_part`
     asserts on when it patches the frame into a loop. Ending the command here as well would leave
     the tail's END_CMD as a stray opcode; jumping past the tail would break that assert. So the
     menu ends where the world ends.
@@ -1697,7 +1697,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
              + ["    hex.vec 16, 0"] * mobiles)
     text = "\n".join([
         # M14-perf: HOT (everything a reject can reach) and COLD (what only a drawn sprite needs).
-        # See doomfj.things -- 94.1% of loads are rejected, and read_table_packed is linear in the
+        # See doomfj.things -- 94.1% of loads are rejected, and read_entry_packed is linear in the
         # row width, so the cold half is now read only by the 5.9% that survive.
         generate_packed_lut_fj("throw", [_pack(hot_row(r), THING_ROW_HOT_BYTES) for r in rows],
                                THING_ROW_HOT_LEN),
@@ -1732,7 +1732,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
 
 
 WINDOW_TITLE = "FlipJump DOOM"
-# P10 (the owner, 2026-10-12): the frame-rate cap the program sends at boot (present.set_max_fps -> the screen API's 0x03).
+# P10 (the owner, 2026-10-12): the frame-rate cap the program sends at boot (screen.set_max_fps -> the screen API's 0x03).
 # 20 (measured on gamespeed's 10 games, blocked54: frames 33..378 ms, median 125): only the cheap views wait -- the
 # world's step is per frame, so this bounds the game's real-time speed from above (the monsters' 2 tics a frame run at
 # <= 40 tics/s, DOOM's own 35 near it); a heavy frame is already slower and is never delayed.
@@ -1812,15 +1812,11 @@ def window_chrome_fj():
     The icon's colours are palette indices, drawn through the palette selected when the command runs -- so it is
     sent after init_screen and the boot palettes (slot 0 selected). The API has no transparency: colour 0 is the
     palette's black, the icon's background."""
-    big = 0
-    for i, ch in enumerate(WINDOW_TITLE.encode("utf-8")):
-        big |= ch << (8 * i)
-    calls = ["present.set_window_title %s, %d"
-             % (hex(big), len(WINDOW_TITLE.encode("utf-8"))),
-             "present.set_max_fps %d" % MAX_FPS]          # P10: the frame-rate cap, once at boot
+    calls = [SW.fj_set_window_title(WINDOW_TITLE),
+             SW.fj_set_max_fps(MAX_FPS)]          # P10: the frame-rate cap, once at boot
 
     n = WINDOW_ICON_SIZE
-    body = ["    present.set_window_icon_header %d, %d" % (n, n)]
+    body = ["    " + SW.fj_set_window_icon_header(n, n)]
     for y in range(n):
         row = WINDOW_ICON_ART[y * n:(y + 1) * n]
         # ⚠ ONE STATEMENT PER LINE. fj has no statement separator, so N `stl.output_char`s joined
@@ -1903,12 +1899,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     wall's fully-constant lit BYTE (`seg_lit`, computed here at Python emit time from the real
     colormap — no runtime lookup needed), storing them in `col_ceil_bands`/`col_ceil_n`/
     `col_floor_bands`/`col_floor_n`/`col_lit`; then, instead of any framebuffer raster, the frame is
-    EMITTED as the device run-stream (`present.begin_frame_stream` + an unrolled
+    EMITTED as the device run-stream (`screen.draw_collines` + an unrolled
     `rep(VIEW_W,x) stream.emit_column ...` — `src/fj/stream_render.fj`, which the assemble include
     list must therefore contain in this mode), decoded by `StreamScreen`. The framebuffer, the pass-2
     wall trampoline, and ALL plane-pass machinery (`render_planes_spans`/`draw_span*`/`clear_planes`)
     are NOT EMITTED in this mode; the `cm`-label table is the EMIT dispatch table (`cm.emit`, run
-    colours) plus the `byte.emit` identity table, replacing `compile_colormap`'s `cm.apply` table
+    colours) -- run lengths go out through the stl's `hex.print` -- replacing `compile_colormap`'s `cm.apply` table
     (same label — they cannot coexist, and nothing calls `cm.apply` here). Requires `wall_mode="W1"`
     and `floor_mode="flat"` (the only combination pS2 targets — W2's per-band wall lighting and
     textured floors are out of scope). ⚠ every column must be CLAIMED by pass-1 (a closed level
@@ -1955,7 +1951,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # Both render wrong on purpose -- measurement only.
     pnear_flag = 1 if (plane_near and "pnearcol" not in ablate) else 0
     # M13-EMIT rung 1 (measurement only): 1 = walk the baked band lists but emit no pairs (prices the
-    # two byte.emit dispatches), 2 = skip the band walks entirely (prices the whole per-pair path:
+    # two hex.print dispatches), 2 = skip the band walks entirely (prices the whole per-pair path:
     # two hex.read_byte_and_inc pointer reads + the loop + the dispatches). Renders wrong on purpose.
     eabl_flag = 2 if "emitnowalk" in ablate else (1 if "emitnopair" in ablate else 0)
     # M13-EMIT rung 3 (measurement only): run each seg's two vertex atans TWICE, the second time
@@ -1971,8 +1967,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     deg_flag = 1                                # 25M-CAP: load-adaptive degradation package
     # M14-b: the state wire. "dec" is the historical three-decimals-on-stdin viewpoint; "bin" is the
     # M14 round-trip format (doomfj.wireformat) -- 16.16 position + BAM + key byte in, state back
-    # out ahead of the frame. The echo goes out through `stream.emit_bytes4`, i.e. `byte.emit`,
-    # which only the run-stream modes bake a table for.
+    # out ahead of the frame. The echo goes out through `stream.emit_bytes4`, i.e. `hex.print`.
     # M14-e: the runtime thing table. Positions arrive on the wire after the player's state, so it
     # needs the binary wire; and there is nothing to re-bind unless sprites are being emitted.
     assert not moving_things or (things and lines), \
@@ -2228,7 +2223,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         return sec_ if sec_ in _msecs else None
 
     def _cell_dispatch(tag, cell, svs, block):
-        """`sim.jump16` on the state nibble `cell` into one block per state -- `block(sv)` gives a state's lines from
+        """`hex.switch` on the state nibble `cell` into one block per state -- `block(sv)` gives a state's lines from
         its sector list `svs[k]` -- each ending at `<tag>_end` (states past the last reuse the last block). The
         landings' idiom: plain code, so `hex.set` is legal. (M8: a mover's and a light thinker's.)"""
         return state_dispatch_lines(tag, cell, [block(sv) for sv in svs])
@@ -2309,7 +2304,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         cell = _seg_cell(seg)
         if isinstance(cell, tuple):
             # M8 L1: two movers (M8: or a machine and a light, or two lights) -- a block per PAIR of states behind a
-            # switch on both cells (the first machine's state switch, whose landings sim.jump16 on the second's)
+            # switch on both cells (the first machine's state switch, whose landings hex.switch on the second's)
             na_, nb_ = (len(m_[2]) for m_ in _seg_machines(seg))
             assert len(variants) == na_ * nb_
             blk = []
@@ -2474,7 +2469,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         return (rm._flat_base(asset_wad, name, flat_basecache))
     cmv = colormap_values(asset_wad, lights=COLORMAP_LIGHTS)
     cm = "\n".join([
-        generate_emit_byte_by_nibbles_fj("byte"),     # P13: two 16-entry nibble dispatches, not one 256-entry
         generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
                                         over_align=True),
     ])
@@ -2487,7 +2481,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     sdrecip = (generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(),
                                           index_nibbles=3, result_nibbles=6))
     # M13-SRDISP: the SAME lever, FOURTH application. `proj.scale_recip_div` opens with a
-    # `read_table_packed 3` of `slopediv_recip` (~247@), and it runs twice per pass-2 seg, twice
+    # `read_entry_packed 3` of `slopediv_recip` (~247@), and it runs twice per pass-2 seg, twice
     # per step-face seg and once per projected thing.
     srdisp = (generate_dispatch_table_fj("srdisp", slopediv_recip_table(),
                                          index_nibbles=3, result_nibbles=6))
@@ -2499,7 +2493,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     xtadisp = (generate_dispatch_table_fj("xtadisp", xtoviewangle_table(cfg.VIEW_W, cfg.TRIG_N),
                                           index_nibbles=2, result_nibbles=8))
     # M13-VTXDISP: the SAME lever, fifth application -- and the largest one left. `proj.angle_to_x`
-    # opens with a `hex.read_table_packed 4` of `viewangletox` and runs TWICE per in-frustum seg
+    # opens with a `hex.read_entry_packed 4` of `viewangletox` and runs TWICE per in-frustum seg
     # inside `wall_x_range_m`. MEASURED on the macro itself with only the `disp` flag changed, both
     # arms vacuity-checked (scratchpad/ca2_price.py): 8,827.7 -> 1,809.5 ops/call, 7,018.2 saved.
     # 2,048 entries at 8 nibbles -> ~41k words, against an 85.5M-word span.
@@ -2910,7 +2904,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
     def _baked_barrel_site(cid, ti, tag, t, tfields, tsec, xorby_blocks):
         """M7 P6 (docs/gp-p67-interface.md 5) -- a BAKED barrel's call site: removed (bar_st 0) draws nothing; else a
-        jump on its state's low nibble (sim.jump16; the seven barrel states' low nibbles are distinct) into its
+        jump on its state's low nibble (hex.switch; the seven barrel states' low nibbles are distinct) into its
         state's block: S_BAR1's xor_by block is the map barrel's own (`tfields`, today's), each other state's
         carries its lump's row (monstercode.barrel_view_rows, the anim bank) -- art, depth bounds, bank regions and
         light class; standing (S_BAR1 / S_BAR2) it sets its aim id 1 + nmon + b and class RC_BARREL and draws with
@@ -2952,7 +2946,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             blocks += [f"    stl.fcall {label}, xb_ret",
                        f"    stl.fcall {'thing_leaf_bb' if stand else _baked_leaf}, thing_ret",
                        f"    stl.fcall {label}, xb_ret", f"    ;{L}_skip"]
-        head.append(f"    sim.jump16 bar_st + {2 * b}*dw, " + ", ".join(lows.get(n, f"{L}_skip") for n in range(16)))
+        head.append(f"    hex.switch bar_st + {2 * b}*dw, " + ", ".join(lows.get(n, f"{L}_skip") for n in range(16)))
         return head + blocks + [f"  {L}_skip:"]
 
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
@@ -3505,7 +3499,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # baked call sites gate themselves individually below.
             # ⚠ the leaf's FLOOR and LIGHT-ROW BASE go with it, as baked constants. Both are
             # properties of this subsector and fixed at level load, so reading them from tables
-            # inside thing_load meant three `read_table_packed`s PER THING for values constant
+            # inside thing_load meant three `read_entry_packed`s PER THING for values constant
             # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
             _m_fl = _leaf_mover(s)
             _l_lt = _leaf_light(s)                     # M8: an animated light's leaf takes its base from the state
@@ -4163,7 +4157,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # (a command byte inside the run-lists would corrupt them); sent only on a change (hurtcode.pal_lines)
     if _hrt:
         pass1 += list(_hrt["palette"])
-    pass1.append("present.draw_collines")
+    pass1.append(SW.FJ_DRAW_COLLINES)
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
     else:
@@ -4174,9 +4168,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     zlight = generate_zlight_lut_fj("zlight", cfg.VIEW_W, COLORMAP_LIGHTS)
     distscale = generate_distscale_lut_fj("distscale", cfg.VIEW_W, cfg.TRIG_N)
 
-    # the frame leaves the program AS the draw_collines records the walk emitted inline; `present.end_frame` closes the
+    # the frame leaves the program AS the draw_collines records the walk emitted inline; `screen.end_frame` closes the
     # command (END_CMD, where a column would start: x is never 0xFF for real, VIEW_W = 160) and presents it (0x1F).
-    present_tail = ["present.end_frame"]
+    present_tail = [SW.FJ_END_FRAME]
     # the framebuffer raster's shared leaves went with `raster_mode`: the lines tier emits none.
     fb_leaves = []
     # M13-hotdata (stream only, R20): pointer-deref/dispatch wflip cost scales with the ADDRESS's
@@ -4274,7 +4268,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # back), so they move no table and no op of the renderer -- the entry keeps the shape it had: startup, chrome, jump.
     _icon_macro, _chrome_calls = window_chrome_fj()
     _boot_rgbs = _hrt["palettes"] if _hrt else [asset_wad.playpal(0)]
-    _boot_screen = (["io_boot:", "    present.init_screen"]
+    _boot_screen = (["io_boot:", "    " + SW.FJ_INIT_SCREEN]
                     + [ln for k, rgb in enumerate(_boot_rgbs) for ln in SW.fj_lines(SW.define_palette(k, rgb), "    ")]
                     + ["    ;io_boot_done"])
     postlude_palette = []
@@ -4335,7 +4329,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
       ("main", [
           *pass1, *pass2, *plane_pass,
           # M3: both frame producers fall into ONE tail. The label goes BEFORE the tail's
-          # `present.end_frame`, so the line preceding `stl.loop` is still that end of frame and
+          # `screenwire.FJ_END_FRAME`, so the line preceding `stl.loop` is still that end of frame and
           # `selfreset.emit_reset_part`'s structural assert is untouched.
           *postlude_palette, *(_hud["tail"] if _hud else []),            # M7 P4.0: the weapon, the bar
           *(["frame_end:"] if menu else []), *present_tail, "stl.loop",

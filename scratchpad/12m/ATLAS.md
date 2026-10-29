@@ -33,15 +33,15 @@ campaign ships on the 260-frame sweep median, so MEDIAN is the column that ranks
 | `stream.emit_col_lines` | 3,813,883 | 509,331 | 13,119,250 | 19.75% |
 | `frame.ts_step_faces` | 3,276,489 | 2 | 3,517,856 | 16.97% |
 | `frame.thing_record_body` | 2,307,796 | 211,124 | 6,273,338 | 11.95% |
-| `hex.fixed_mul_lo.row` | 1,960,903 | 65,086 | 2,271,148 | 10.16% |
-| `hex.fixed_mul_lo` | 1,881,451 | 21,221 | 2,008,149 | 9.74% |
+| `hex.mul_low.row` | 1,960,903 | 65,086 | 2,271,148 | 10.16% |
+| `hex.fixed_mul_low` | 1,881,451 | 21,221 | 2,008,149 | 9.74% |
 | `hex.add_mul` | 1,844,048 | 59,600 | 2,131,681 | 9.55% |
 | `proj.wall_x_range_m` | 1,744,608 | 29,636 | 2,065,818 | 9.04% |
 | `hex.xor_zero` | 1,706,321 | 289,893 | 2,831,549 | 8.84% |
 | `hex.double_exact_xor` | 1,706,321 | 289,893 | 2,831,549 | 8.84% |
 | `hex.double_xor` | 1,706,321 | 289,893 | 2,831,549 | 8.84% |
 | `proj.project_thing` | 1,604,241 | 113,796 | 1,548,433 | 8.31% |
-| `frame.dance_boundary` | 1,491,021 | 330,330 | 2,539,779 | 7.72% |
+| `hex.add/sub n (the chain boundary)` | 1,491,021 | 330,330 | 2,539,779 | 7.72% |
 | `stream.steps_splice_f` | 1,432,716 | 43,372 | 1,966,009 | 7.42% |
 | `frame.ts_piece_store` | 1,432,304 | 0 | 1,525,447 | 7.42% |
 | `hex.triple_exact_xor` | 1,398,329 | 185,779 | 4,839,523 | 7.24% |
@@ -51,9 +51,9 @@ campaign ships on the 260-frame sweep median, so MEDIAN is the column that ranks
 | `hex.cmp` | 1,068,175 | 373,518 | 1,753,585 | 5.53% |
 | `proj.wall_scale_setup_m` | 1,008,820 | 72,716 | 1,726,516 | 5.22% |
 | `frame.arm5` | 989,207 | 139,878 | 1,748,684 | 5.12% |
-| `frame.add8_chain` | 935,662 | 253,620 | 1,784,439 | 4.85% |
+| `hex.add 8` | 935,662 | 253,620 | 1,784,439 | 4.85% |
 | `stream.steps_splice_c` | 913,089 | 27,862 | 816,970 | 4.73% |
-| `frame.sub8_chain` | 881,260 | 187,470 | 921,691 | 4.56% |
+| `hex.sub 8` | 881,260 | 187,470 | 921,691 | 4.56% |
 | `stl.startup_and_init_all` | 837,748 | 81,783 | 1,206,406 | 4.34% |
 | `hex.tables.init_all` | 828,238 | 80,821 | 1,168,858 | 4.29% |
 | `hex.init` | 828,238 | 80,821 | 1,168,858 | 4.29% |
@@ -89,8 +89,8 @@ against this and refuses to credit an op sitting >4096 ops past a bare label.
 | `hex.tables.clean_table_entry__table` | 325,583 | 1.69% |
 | `hex.add.clear_carry` | 301,228 | 1.56% |
 | `hex.add_mul` | 272,517 | 1.41% |
-| `frame.add8_chain` | 265,994 | 1.38% |
-| `frame.sub8_chain` | 258,392 | 1.34% |
+| `hex.add 8` | 265,994 | 1.38% |
+| `hex.sub 8` | 258,392 | 1.34% |
 | `hex.if_flags` | 221,620 | 1.15% |
 | `hex.pointers.xor_hex_to_flip_ptr` | 216,520 | 1.12% |
 | `hex.shifts.shl_bit_once` | 192,100 | 0.99% |
@@ -104,18 +104,18 @@ against this and refuses to credit an op sitting >4096 ops past a bare label.
 | `<top level: hex.add.dst>` | 93,577 | 0.48% |
 | `bit.exact_xor` | 87,973 | 0.46% |
 | `hex.add.init` | 87,813 | 0.45% |
-| `hex.fixed_mul_lo.row` | 83,385 | 0.43% |
+| `hex.mul_low.row` | 83,385 | 0.43% |
 | `<top level: hex.mul.dst>` | 81,405 | 0.42% |
 | `hex.mul.clear_carry` | 71,518 | 0.37% |
-| `frame.sub4_chain` | 67,794 | 0.35% |
+| `hex.sub 4` | 67,794 | 0.35% |
 | `hex.pointers.read_cell_from_inners_ptrs` | 66,212 | 0.34% |
 | `hex.add_constant` | 62,686 | 0.32% |
 | `<top level: hex.mul.add_carry_dst>` | 60,554 | 0.31% |
-| `byte.emit` | 59,218 | 0.31% |
-| `frame.sub10_chain` | 54,373 | 0.28% |
-| `hex.fixed_mul_lo` | 51,937 | 0.27% |
+| `hex.print` | 59,218 | 0.31% |
+| `hex.sub 10` | 54,373 | 0.28% |
+| `hex.fixed_mul_low` | 51,937 | 0.27% |
 | `hex.if1` | 45,332 | 0.23% |
-| `frame.add4_chain` | 43,007 | 0.22% |
+| `hex.add 4` | 43,007 | 0.22% |
 | `hex.if0` | 42,958 | 0.22% |
 | `<top level: hex.sub.dst>` | 42,676 | 0.22% |
 | `stl.comp_if0` | 37,268 | 0.19% |
@@ -163,7 +163,7 @@ stl machinery that this line asked for, so this is the line that has to change.
 | `f8:l893` | `w1rpat.walk_win` | 86,243 | 0 | 381,317 | 0.45% |
 | `f5:l2649` | `hex.write_hex_and_inc` | 83,576 | 81,698 | 84,012 | 0.43% |
 | `f5:l1575` | `hex.shl_hex` | 79,287 | 11,282 | 113,754 | 0.41% |
-| `f5:l1576` | `frame.add8_chain` | 77,686 | 13,956 | 120,436 | 0.40% |
+| `f5:l1576` | `hex.add 8` | 77,686 | 13,956 | 120,436 | 0.40% |
 | `f8:l1008` | `hex.read_byte_and_inc` | 75,455 | 0 | 734,109 | 0.39% |
 | `f5:l1295` | `hex.add` | 71,598 | 0 | 81,434 | 0.37% |
 | `f5:l1284` | `hex.add` | 65,015 | 0 | 58,118 | 0.34% |
@@ -181,7 +181,7 @@ stl machinery that this line asked for, so this is the line that has to change.
 
 ## Per call SITE -- the innermost (caller file:line -> macro) pairs
 
-f<i> is the i-th file passed to the assembler: f1=fj_consts, f2=fixed_point, f3=present, f4=projection, f5=frame_render, f6=plane_render, f7=plane_bands, f8=stream_render, f9=e1m1_00_entry, f10=e1m1_01_tables, f11=e1m1_02_main, f12=e1m1_03_segconsts, f13=e1m1_04_walk, f14=e1m1_05_state, f15=e1m1_06_banks
+f<i> is the i-th file passed to the assembler: f1=fj_consts, f2=stl-fixedpoint, f3=present, f4=projection, f5=frame_render, f6=plane_render, f7=plane_bands, f8=stream_render, f9=e1m1_00_entry, f10=e1m1_01_tables, f11=e1m1_02_main, f12=e1m1_03_segconsts, f13=e1m1_04_walk, f14=e1m1_05_state, f15=e1m1_06_banks
 
 | site | macro | median frame | share |
 |---|---|---:|---:|
@@ -203,30 +203,30 @@ f<i> is the i-th file passed to the assembler: f1=fj_consts, f2=fixed_point, f3=
 | `s5:l9` | `bit.exact_xor` | 87,973 | 0.46% |
 | `s21:l34` | `hex.add.init` | 87,813 | 0.45% |
 | `s24:l92` | `hex.add.clear_carry` | 80,555 | 0.42% |
-| `f5:l1576` | `frame.add8_chain` | 77,686 | 0.40% |
+| `f5:l1576` | `hex.add 8` | 77,686 | 0.40% |
 | `s24:l24` | `hex.mul.clear_carry` | 68,376 | 0.35% |
 | `s28:l45` | `hex.pointers.read_cell_from_inners_ptrs` | 66,212 | 0.34% |
 | `s20:l122` | `hex.cmp` | 65,115 | 0.34% |
 | `f5:l1937` | `frame.arm5` | 54,700 | 0.28% |
-| `f2:l91` | `hex.fixed_mul_lo.row` | 46,974 | 0.24% |
-| `f4:l239` | `frame.add8_chain` | 46,448 | 0.24% |
+| `f2:l91` | `hex.mul_low.row` | 46,974 | 0.24% |
+| `f4:l239` | `hex.add 8` | 46,448 | 0.24% |
 | `s20:l49` | `hex.if1` | 40,601 | 0.21% |
-| `f5:l916` | `frame.sub8_chain` | 32,592 | 0.17% |
+| `f5:l916` | `hex.sub 8` | 32,592 | 0.17% |
 | `s21:l35` | `hex.sub.init` | 30,826 | 0.16% |
 | `s19:l18` | `hex.shifts.shr_bit_once` | 29,428 | 0.15% |
 | `s21:l33` | `hex.cmp.init` | 28,737 | 0.15% |
-| `f5:l918` | `frame.sub8_chain` | 28,487 | 0.15% |
+| `f5:l918` | `hex.sub 8` | 28,487 | 0.15% |
 | `f5:l1950` | `frame.arm5` | 28,075 | 0.15% |
-| `f4:l1714` | `frame.sub10_chain` | 27,367 | 0.14% |
-| `f4:l1716` | `frame.sub10_chain` | 27,006 | 0.14% |
+| `f4:l1714` | `hex.sub 10` | 27,367 | 0.14% |
+| `f4:l1716` | `hex.sub 10` | 27,006 | 0.14% |
 | `s32:l10` | `hex.add_constant` | 26,964 | 0.14% |
-| `f5:l921` | `frame.sub8_chain` | 26,758 | 0.14% |
+| `f5:l921` | `hex.sub 8` | 26,758 | 0.14% |
 | `f10:l108457` | `byte.init` | 26,500 | 0.14% |
-| `f5:l1958` | `frame.add8_chain` | 25,305 | 0.13% |
+| `f5:l1958` | `hex.add 8` | 25,305 | 0.13% |
 | `f10:l190398` | `cm.init` | 24,740 | 0.13% |
 | `s19:l35` | `stl.comp_if0` | 24,315 | 0.13% |
 | `s19:l9` | `hex.shifts.shl_bit_once` | 24,058 | 0.12% |
-| `f4:l1628` | `frame.sub8_chain` | 23,840 | 0.12% |
+| `f4:l1628` | `hex.sub 8` | 23,840 | 0.12% |
 | `s17:l62` | `hex.add_shifted` | 23,766 | 0.12% |
-| `f4:l1617` | `frame.sub8_chain` | 23,410 | 0.12% |
-| `f5:l1107` | `frame.add6_chain` | 22,890 | 0.12% |
+| `f4:l1617` | `hex.sub 8` | 23,410 | 0.12% |
+| `f5:l1107` | `hex.add 6` | 22,890 | 0.12% |

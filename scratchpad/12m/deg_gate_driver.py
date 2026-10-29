@@ -1,7 +1,9 @@
-"""Shared machinery for the two deg_gate wrappers -- and the negative controls (R9) their verdicts
-need before anyone cites them.
+"""Shared machinery for the deg_gate wrappers -- and the negative controls (R9) their verdicts
+need before anyone cites them. (There were two: deg_gate_placed.py relocated the tables of chosen owner macros
+through the pool's macro filter, which flipjump 1.6.0 removed -- the stl now declares the tables that move -- so it
+was deleted.)
 
-`deg_gate_blocked.py` and `deg_gate_placed.py` are not copies of the gate: each installs a table
+`deg_gate_blocked.py` (and, until 1.6.0, `deg_gate_placed.py`) are not copies of the gate: each installs a table
 pool into `flipjump.assemble` and then EXECUTES `scratchpad/deg_gate.py`, so whatever the gate
 checks, the driver checks. That claim rests entirely on the patch-and-restore below, which is why
 it lives here ONCE instead of twice -- the two drivers cannot drift apart on the part that makes
@@ -47,7 +49,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import flipjump as fj                                                   # noqa: E402
 from flipjump import FixedIO                                            # noqa: E402
 from flipjump.assembler import assembler as asmmod                      # noqa: E402
-from flipjump.assembler.preprocessor import BlockPool, TablePool        # noqa: E402
+from flipjump.assembler.preprocessor import BlockPool                   # noqa: E402
 from flipjump.utils.exceptions import FlipJumpException                 # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
 
@@ -97,13 +99,14 @@ def verdict(status, pool, *, no_pin=False, restricted=False):
     `restricted` is for a run whose macro/owner names were narrowed ON PURPOSE (deg_gate_blocked's
     --macros / --owners, whose documented use is "does the fault live outside these names?"): an
     empty match is that experiment's ANSWER, so it warns loudly and keeps the gate's own status
-    rather than turning a run that answered its question into exit 2.
+    rather than turning a run that answered its question into exit 2. (flipjump 1.6.0 removed the
+    pool's macro filter those flags narrowed, and the flags with it: no caller passes it today.)
     """
     if pool is None:                    # the --off baseline: no pass to be vacuous about
         return status
     if pool.allocated == 0:
-        # STATE, not a diagnosis. A pool cannot tell afterwards WHY it holds nothing: `wants`
-        # matching no call site and a capacity of 0 both reach here, and whether the gate called
+        # STATE, not a diagnosis. A pool cannot tell afterwards WHY it holds nothing: a program
+        # with no declared (`__relocatable__`) table and a capacity of 0 both reach here, and whether the gate called
         # fj.assemble at all is something only the driver's call list knows (both drivers keep one
         # and report that case themselves). `declined` is the part that IS knowable here -- 0 means
         # nothing was ever offered to `reserve`, non-zero means it was offered and refused.
@@ -327,7 +330,8 @@ def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
     check(inline == FIXTURE_OUTPUT, "fixture: the inline build prints %r" % FIXTURE_OUTPUT,
           "got %r in %d ops (%s)" % (inline, inline_ops, cause))
 
-    relocated = TablePool(W, POOL_BASE)
+    relocated = BlockPool(W, POOL_BASE)          # its tables move to blocks, and a veto keeps every word unpinned
+    relocated.pin_exclude = lambda address, labels: True
     out, ops, cause = build_and_run(src, tmp, "relocated", relocated)
     check(out == inline and relocated.allocated > 0, "relocation alone leaves the output alone",
           "%d tables, %d -> %d ops" % (relocated.allocated, inline_ops, ops))
@@ -338,17 +342,21 @@ def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
           "reads_words_raw=%s, %d groups" % (counting.reads_words_raw, len(counting.counts)))
 
     def blocked(exclude):
-        pool = BlockPool(W, POOL_BASE, counts=counting.counts, widths=counting.widths)
+        pool = BlockPool(W, POOL_BASE)
         pool.pin_exclude = exclude
         return pool
 
+    # flipjump 1.6.0 (the test this ports, as it is there now): without a declaration of the cells pointers reach,
+    # the assembler no longer REFUSES the program (1.5.1 did) -- it pins NO word, for the pointer runtime's sake, and
+    # the program is the same program, slower. The mutation is caught by that fallback, counted by its reason.
+    unexcluded = blocked(None)
     try:
-        build_and_run(src, tmp, "unexcluded", blocked(None))
-        refused = ""
+        out, ops, cause = build_and_run(src, tmp, "unexcluded", unexcluded)
     except FlipJumpException as e:
-        refused = str(e)
-    check("pin_exclude" in refused, "MUTANT: no exclusion at all -> the assembler refuses",
-          (refused[:56] + "...") if refused else "IT ASSEMBLED ANYWAY")
+        out, cause = None, "%s: %s" % (type(e).__name__, str(e)[:40])
+    check(out == inline and list(unexcluded.unpins) == ["the pointer runtime"],
+          "MUTANT: no exclusion at all -> no word is pinned (the pointer runtime)",
+          "output %r, unpins %s" % (out, dict(unexcluded.unpins)))
 
     # the veto sees the bit address of the cell's JUMP word, `d + w`
     pool = blocked(lambda address, labels: address == labels["d"] + W)
@@ -368,7 +376,7 @@ def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
           "output %r (%s)" % (out, cause))
 
     # --- verdict: every branch of it, the BlockPool half included
-    inert = TablePool(W, POOL_BASE, wants=lambda macro_name, prefix: False)
+    inert = BlockPool(W, POOL_BASE, max_slot_ops=0)      # relocates nothing: no slot holds any table
     build_and_run(src, tmp, "inert", inert)
     status, text = capture(lambda: verdict(0, inert))
     check(status != 0 and "VACUOUS" in text, "MUTANT: a pool that relocated nothing is not a PASS",

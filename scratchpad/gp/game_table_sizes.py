@@ -341,10 +341,10 @@ def p10_rows(top, words, facts=None):
         add("`%s`" % label, "%s: a baked frame, %s x 8 ops, + `;frame_end`" % (what, nbytes(label)), label)
     add("`mf_lv` .. `menu_level_done`", "LEVEL COMPLETE's 13 digit slots from the cells (statcode.digit_lines)",
         "mf_lv", "menu_level_done")
-    add("`menu_level_done` .. `lvd0_0`", "LEVEL COMPLETE's baked frame, %s x 8 ops, + slot 0's `sim.jump16` (its 16 "
+    add("`menu_level_done` .. `lvd0_0`", "LEVEL COMPLETE's baked frame, %s x 8 ops, + slot 0's `hex.switch` (its 16 "
         "trampolines; the switch is in the pool)" % nbytes("menu_level_done"), "menu_level_done", "lvd0_0")
     add("`lvd0_0` .. `%s`" % lab["last_slot_end"], "its 130 digit blocks (column records, 8 ops a byte, + a jump "
-        "each) and slots 1-12's `sim.jump16`", "lvd0_0", lab["last_slot_end"])
+        "each) and slots 1-12's `hex.switch`", "lvd0_0", lab["last_slot_end"])
     add("`lvd_dec` .. `do_world`", "statcode.routine_lines: the shared /10 (`hex.div`) and the unreachable `lvd_div0`",
         "lvd_dec", "do_world")
     add("`sc_go` .. `sc_end`", "the secrets' check, fcall'd from lootcode's `pre` (statcode.secret_lines; its 1-op "

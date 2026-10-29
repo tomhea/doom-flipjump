@@ -1,41 +1,36 @@
 """A light .fjm reader: the segment table plus the decompressed payload as one numpy array.
 
 flipjump's own Reader builds a {address: word} dict of every word (~2.4 GB for the game binary);
-this keeps the payload as uint32/uint64 and resolves a word on demand. Formats and constants come
-from flipjump.fjm.fjm_consts, so the header layout is not re-derived here.
+this keeps the payload as uint32/uint64 and resolves a word on demand. The file is read by flipjump's
+own lean loader, fjm_reader.read_fjm_raw (the header, the segments and the decompressed data, no word
+dict), so no header layout is re-derived here -- which is what lets it read version 4 (flipjump 1.6.0's
+default: the segment table is compressed too), A11.
 
-The at-rest value of a JUMP word (odd offset in its segment) is stored RELATIVE in versions 2 and 3:
+The at-rest value of a JUMP word (odd offset in its segment) is stored RELATIVE in versions 2 to 4:
 value = (stored + address * w) mod 2^w -- the same rule as fjm_reader.Reader._init_memory.
 """
 import bisect
-import lzma
-import struct
 from pathlib import Path
 
 import numpy as np
-from flipjump.fjm.fjm_consts import (FJ_MAGIC, FJMVersion, _LZMA_DECOMPRESSION_FILTERS, _LZMA_FORMAT,
-                                     _header_base_format, _header_base_size, _header_extension_format,
-                                     _header_extension_size, _segment_format, _segment_size)
+from flipjump.fjm.fjm_consts import FJMVersion
+from flipjump.fjm.fjm_reader import read_fjm_raw
+from flipjump.utils.exceptions import FlipJumpReadFjmException
 
 
 class FjmImage:
     def __init__(self, path=None, *, w=None, segments=None, data=None, version=None):
         if path is not None:
-            with open(Path(path), "rb") as fh:
-                magic, w, version, segnum = struct.unpack(_header_base_format, fh.read(_header_base_size))
-                if magic != FJ_MAGIC:
-                    raise ValueError("%s is not an .fjm (magic %#x)" % (path, magic))
-                version = FJMVersion(version)     # a plain Enum: the raw int never compares equal to it
-                if version != FJMVersion.BaseVersion:
-                    struct.unpack(_header_extension_format, fh.read(_header_extension_size))
-                segments = [struct.unpack(_segment_format, fh.read(_segment_size)) for _ in range(segnum)]
-                raw = fh.read()
-            if version == FJMVersion.CompressedVersion:
-                raw = lzma.decompress(raw, format=_LZMA_FORMAT, filters=_LZMA_DECOMPRESSION_FILTERS)
+            try:
+                header, raw = read_fjm_raw(Path(path))
+            except FlipJumpReadFjmException as e:
+                raise ValueError("%s is not a readable .fjm: %s" % (path, e)) from e
+            w, version, segments = header.memory_width, header.version, list(header.segments)
             data = np.frombuffer(raw, dtype={32: "<u4", 64: "<u8"}[w])
         self.w = w
         self.version = version
-        self.relative = version in (FJMVersion.RelativeJumpVersion, FJMVersion.CompressedVersion)
+        self.relative = version in (FJMVersion.RelativeJumpVersion, FJMVersion.CompressedVersion,
+                                    FJMVersion.CompressedSegmentsVersion)
         segs = sorted(segments)
         self.seg = np.array(segs, dtype=np.int64).reshape(-1, 4)     # start, length, data_start, data_length
         self._starts = self.seg[:, 0].tolist()

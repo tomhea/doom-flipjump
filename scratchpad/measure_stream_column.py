@@ -1,6 +1,6 @@
 """M13pS1 -- measure the REAL stream.emit_column body's per-run and per-column ops cost (the
 two-count delta technique, mirroring measure_walk.py/measure_emit.py). Builds a program that loops
-`reps` times over [present.begin_frame_stream + stream.emit_column] for a column with `n` ceiling
+`reps` times over [screen.draw_collines + stream.emit_column] for a column with `n` ceiling
 bands + `n` floor bands + 1 wall run (2n+1 runs total), and derives:
   - per-column cost at a fixed run-count (delta over reps, holding n fixed)
   - per-run marginal cost (two-point diff of per-column cost across two values of n)
@@ -19,15 +19,13 @@ from doomfj.texturecompiler import _index_nibbles, colormap_values
 from doomfj.wad import WadFile
 from flipjump.interpreter.io_devices.FixedIO import FixedIO
 
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj").resolve()
-PRESENT_FJ = Path("src/fj/present.fj").resolve()
 STREAM_RENDER_FJ = Path("src/fj/stream_render.fj").resolve()
 ASSET = "tests/fixtures/freedoom_assets.wad"
 
 
 def _band_list(label, n, base_colour):
     # n bands, 2 rows each, as 3 PACKED bytes/entry (count, cidx-low, cidx-high) -- see
-    # stream.emit_band_list. Row count / colour VALUE don't affect op cost (byte.emit/cm.emit cost
+    # stream.emit_band_list. Row count / colour VALUE don't affect op cost (hex.print/cm.emit cost
     # only depends on the dispatch, R12).
     lines = [f"{label}:"]
     for i in range(n):
@@ -51,11 +49,11 @@ def _data_fj(n, idx_n):
 def run_ops(n, reps, byte_table, cm_table, idx_n, tmp):
     main = "\n".join([
         "stl.startup_and_init_all",
-        "present.init_screen_stream 0",
+        "screen.init_screen W, H, 8",
         "hex.set 8, cnt, 0", f"hex.set 8, lim, {reps}",
         "loop:", "hex.cmp 8, cnt, lim, body, done, done",
         "body:",
-        "present.begin_frame_stream",
+        "screen.draw_collines",
         "stream.emit_column ceil_bands, ceil_n, cexcl, fstart, wall_cidx, floor_bands, floor_n",
         "hex.inc 8, cnt", ";loop",
         "done:", "stl.loop",
@@ -68,7 +66,7 @@ def run_ops(n, reps, byte_table, cm_table, idx_n, tmp):
     p = tmp / "m.fj"
     p.write_text(main, encoding="utf-8")
     out = tmp / "m.fjm"
-    fj.assemble([consts.resolve(), FIXED_POINT_FJ, PRESENT_FJ, STREAM_RENDER_FJ, p],
+    fj.assemble([consts.resolve(), STREAM_RENDER_FJ, p],
                 out, memory_width=W, print_time=False)
     term = fj.run(out, io_device=FixedIO(b""), print_time=False, print_termination=False)
     return term.op_counter
@@ -85,7 +83,7 @@ def main():
     wad = WadFile.from_path(ASSET)
     values = colormap_values(wad, lights=32)
     idx_n = _index_nibbles(len(values))
-    byte_table = generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)
+    byte_table = ""   # the byte emit is the stl\'s hex.print: no table
     cm_table = generate_emit_dispatch_table_fj("cm", values, index_nibbles=idx_n, over_align=True)
 
     points = {}

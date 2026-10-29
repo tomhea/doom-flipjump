@@ -36,7 +36,7 @@ if __name__ == "__main__":                       # M8 G13: `--map E1Mn` before t
 from common import (HERE, ROOT, W, active_map, check_census_map, default_counts_cache, default_fjm,  # noqa: E402
                     default_labels, label_dict, load_sparse, work_dir)
 from fjmimage import FjmImage  # noqa: E402
-from pool import KNOBS, eval_key, load_heat, reconstruct  # noqa: E402
+from pool import KNOBS, eval_key, load_heat, reconstruct, rest_base  # noqa: E402
 
 
 def game_frames(prefix):
@@ -75,24 +75,28 @@ def main():
 
     # every placed group: its block, and its source word in this build
     groups = []
-    agree = disagree = unresolved = 0
+    # a word the build did not pin (pin-exclude: byte and pointer-read cells) rests with NO base -- no evidence either
+    # way; the control is the words that carry one (heatsites.py says why, with its numbers and its wrong-knob control)
+    agree = disagree = unresolved = nobase = 0
     for g, (base, _e) in pool.groups.items():
         bits = pool._block_bits(g)
         addr = eval_key(g, lab)
         if addr is None:
             unresolved += 1
             continue
-        v = img.word(addr // W)
-        rest = (v & ~(bits - 1)) if v is not None else None
-        if rest == base:
+        rb = rest_base(img, addr)
+        if not rb:
+            nobase += 1
+        elif rb == base:
             agree += 1
         else:
             disagree += 1
-        groups.append((base, bits, g, addr, rest == base))
-    n = agree + disagree
+        groups.append((base, bits, g, addr, rb == base))
+    n = agree + disagree + nobase
     print("CONTROL reconstruction vs image: %d of %d resolvable source words rest at their reconstructed base "
-          "(%.2f%%); %d keys unresolved" % (agree, n, 100.0 * agree / max(1, n), unresolved))
-    if agree < 0.99 * n:
+          "(%.2f%%), %d unpinned (no base), %d at a WRONG base; %d keys unresolved"
+          % (agree, n, 100.0 * agree / max(1, n), nobase, disagree, unresolved))
+    if agree < 0.99 * (agree + disagree) or agree < 0.5 * n:
         raise SystemExit("the counts cache does not describe this binary (or the knobs differ) -- not written")
 
     # ops executed in each block: self counts of pool words, bisected into the sorted blocks

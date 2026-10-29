@@ -27,11 +27,11 @@ for q in (ROOT / "src", PROFX):
 
 def test_heat_list_own_or_e1m1(monkeypatch, tmp_path):
     import doomfj.mapprofile as MP
-    assert MP.heat_list("E1M1") == ("scratchpad/12m/heat_blocked27_p10.json.gz", True)
+    assert MP.heat_list("E1M1") == ("scratchpad/12m/heat_e1m1_adopt.json.gz", True)
     assert MP.profile("E1M1").heat == MP.heat_list("E1M1")[0]
     assert MP.profile("E1M5").heat == "scratchpad/12m/heat_e1m5.json.gz"
     if not (ROOT / MP.profile("E1M5").heat).exists():
-        assert MP.heat_list("E1M5") == ("scratchpad/12m/heat_blocked27_p10.json.gz", False)
+        assert MP.heat_list("E1M5") == ("scratchpad/12m/heat_e1m1_adopt.json.gz", False)
     # control: the map's own list, once it exists, is the one used
     own = tmp_path / "heat_e1m5.json.gz"
     own.write_bytes(b"x")

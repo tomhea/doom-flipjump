@@ -109,7 +109,7 @@ def _rec_run(tmp_path, leaf):
     src.write_text(_rec_program(leaf), encoding="utf-8")
     out = tmp_path / "rec.fjm"
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
-    fj.assemble([consts.resolve(), (FJDIR / "fixed_point.fj").resolve(), (FJDIR / "frame_render.fj").resolve(),
+    fj.assemble([consts.resolve(), (FJDIR / "frame_render.fj").resolve(),
                  (FJDIR / "projection.fj").resolve(), src.resolve()], out, memory_width=W, print_time=False)
     recs = _records()
     feed = b""
@@ -275,7 +275,7 @@ def _press_run(tmp_path, gun_mut=None, mel_mut=None, switch=False):
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
     tab = tmp_path / "wpo.fj"
     tab.write_text(WC.shot_table_fj(), encoding="utf-8")
-    fj.assemble([consts.resolve(), (FJDIR / "fixed_point.fj").resolve(), src.resolve(), tab.resolve()], out,
+    fj.assemble([consts.resolve(), src.resolve(), tab.resolve()], out,
                 memory_width=W, print_time=False)
     recs = _press_records(specs, nd)
     slots = sorted({d for _s, sl, _w in specs for d in sl})

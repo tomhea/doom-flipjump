@@ -1,6 +1,6 @@
 # `src/fj/` — the hand-written FlipJump
 
-Read this before opening anything else. **7 of these 11 files are the program.**
+Read this before opening anything else. **5 of these 11 files are the program.** The fixed-point math, the constant-array reads and the screen commands are the stl's (`hex.fixed_mul_low`, `hex.mul_low`, `hex.fixed_div`, `hex.mul_const`, `hex.read_entry*`, `screen.*`; the Python side's numbers are `doomfj/screenwire.py`).
 
 Everything else in the shipped image is machine-written into `build/generated_loop/` — see
 [the generated side](#the-generated-side) at the bottom.
@@ -12,12 +12,10 @@ fj top-level labels are global, so **the order is the contract** — never reord
 
 | file | macros | called from `MAIN` | what it is |
 |---|---:|---|---|
-| `fixed_point.fj` | 10 | `hex.fixed_mul_lo`, `hex.mul_lo` | 16.16 fixed-point + the packed-table reads. Extends the stl's `hex` namespace, so everything uses it. |
-| `present.fj` | 7 | `init_screen`, `select_palette`, `draw_collines`, `end_frame` | drives the screen device: command bytes on the output stream. |
 | `projection.fj` | 32 | `point_on_side_leaf`, `wedge_setup`, `wedge_bbox` | the projection math — angles, scales, column ranges. 12 more macros are called by `frame_render.fj`. |
 | `frame_render.fj` | 78 | `seg_pass1_leaf_body_lines`, `seg_pass1_leaf_body_ts`, `seg_pass2_leaf_body_lines`, `thing_record_body` | the frame. **Only 24 of its 78 macros are called from outside** (other fj files and the emitters); the rest are its internals. |
 | `stream_render.fj` | 29 | `emit_bytes4` | the per-column run emitter — pushes runs to the device. |
-| `sim.fj` | 11 | `check_cells`, `try_move`, `bind_things`, `thing_pass`, `leaf_link`/`leaf_unlink` | the player sim: collision against real linedefs, on 32-unit collision cells (`collision.collision_cells_fj` emits the routine; `line_test` is its one shared line test, `jump16` its tree node); the per-leaf thing lists, rebuilt per frame by `bind_things` in the hosted tiers and relinked per MOVE by `leaf_link`/`leaf_unlink` (M7 P1.3). |
+| `sim.fj` | 11 | `check_cells`, `try_move`, `bind_things`, `thing_pass`, `leaf_link`/`leaf_unlink` | the player sim: collision against real linedefs, on 32-unit collision cells (`collision.collision_cells_fj` emits the routine; `line_test` is its one shared line test, the stl's `hex.switch` its tree node); the per-leaf thing lists, rebuilt per frame by `bind_things` in the hosted tiers and relinked per MOVE by `leaf_link`/`leaf_unlink` (M7 P1.3). |
 | `m1_reset.fj` | 4 | `m1.zerobyte` | M1's self-reset primitives (constant-address byte clear). |
 
 **Where the time goes.** Per frame the four `MAIN` entry points in `frame_render.fj` dominate;

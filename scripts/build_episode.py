@@ -125,17 +125,17 @@ class MapSpec:
 
 REGISTRY: dict[str, MapSpec] = {
     "E1M1": MapSpec(
-        map="E1M1", ready=True, wad=None, spread=2,
+        map="E1M1", ready=True, wad=None, spread=2, heat="scratchpad/12m/heat_e1m1_adopt.json.gz",
         combat_set="scratchpad/gp/scenarios/combat_scenarios_v10.json", baseline="shipped",
         size_cap_pct=43.0, trail_record=False,     # E1M1's trail record is gamespeed.BINARY_ENDS (no scenarios/e1m1)
         feature_tests=("tests/fj/test_key_latch.py", "tests/fj/test_keyboard_input.py",
                        "tests/fj/test_menu_screens.py", "tests/fj/test_skill_menu.py"),
         build_min=45,
-        recorded_out="build/doom_e1m1_blocked63.fjm",
-        recorded_labels="scratchpad/12m/atlas/blocked63.labels.tsv.gz",
+        recorded_out="build/doom_e1m1_blocked65.fjm",
+        recorded_labels="scratchpad/12m/atlas/blocked65.labels.tsv.gz",
         recorded_census="scratchpad/12m/_census_game.json.gz",
-        recorded_sha256="b65e5a97c42adb71dcf22b17f74c74e8713dfdaa862940d29c37a0fec994120c",
-        recorded_ref="docs/ship-gate.md 1 + 1b (blocked63, 2026-10-18)"),
+        recorded_sha256="3a2c9564adbfcb07a1378b6c0045ca2291246c4100abcafad68bae4af3815d3b",
+        recorded_ref="docs/ship-gate.md 1 + 1b (blocked65, ship #2, 2026-10-28)"),
     "E1M2": MapSpec(
         map="E1M2", ready=True, wad="tests/fixtures/freedoom_e1m2.wad", spread=1,
         combat_set="scratchpad/gp/scenarios/combat_scenarios_e1m2_v1.json", baseline="shipped_e1m2",

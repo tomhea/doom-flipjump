@@ -107,8 +107,22 @@ def _run(args, cwd):
         raise SystemExit("failed: %s" % args[0])
 
 
+def default_fjdir():
+    """the git checkout of the flipjump THIS python imports (PYTHONPATH first, as every other tool resolves it); the
+    source is still read at 73e09c0 (`git show`, sha-checked), so only where it is read from follows PYTHONPATH.
+    Falls back to flipjump-151 beside the repo when the imported package is not in a git checkout."""
+    try:
+        import flipjump
+        top = Path(flipjump.__file__).resolve().parents[1]
+        if (top / ".git").exists():
+            return top
+    except ImportError:
+        pass
+    return ROOT.parent / "flipjump-151"
+
+
 def build(out_dir=None, fjdir=None, write_patch=None, compile_=True):
-    fjdir = Path(fjdir or (ROOT.parent / "flipjump-151"))
+    fjdir = Path(fjdir or default_fjdir())
     out = Path(out_dir or (work_dir() / "engX"))
     out.mkdir(parents=True, exist_ok=True)
     src, where = source(fjdir)
@@ -131,7 +145,7 @@ def build(out_dir=None, fjdir=None, write_patch=None, compile_=True):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fj", default=None, help="the flipjump-151 checkout (default: next to the repo)")
+    ap.add_argument("--fj", default=None, help="a flipjump checkout holding 73e09c0 (default: the imported flipjump's, else flipjump-151 next to the repo)")
     ap.add_argument("--out", default=None, help="engine directory (default <WORK>/engX)")
     ap.add_argument("--write-patch", default=None, help="also write the unified diff here")
     ap.add_argument("--no-compile", action="store_true")

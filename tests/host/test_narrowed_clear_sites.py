@@ -65,8 +65,8 @@ CONTROL: cutting the sweep to one assignment, and evaluating the identities at a
 
 WHAT THIS DOES NOT COVER, and none of it is a substitute for the byte-exact gates:
 
-* A width hidden in a macro NAME (`frame.add4_chain`) or in a macro whose first argument is not a
-  width (`cm.apply`, `hex.ptr_index`, `frame.ptr_index`) is invisible to the coverage half. At a
+* A width hidden in a macro NAME or in a macro whose first argument is not a
+  width (`cm.apply`, the three-argument `hex.ptr_index`) is invisible to the coverage half. At a
   site whose only later references are of that shape the fallback is the `hex.vec` declaration,
   which bounds the register, not how wide the code reads it.
 * Only clears written with an OFFSET (`X + M*dw`) are treated as narrowed by the site scan. A clear
@@ -88,7 +88,7 @@ WHAT THIS DOES NOT COVER, and none of it is a substitute for the byte-exact gate
 * It is a text scan, not the assembler: `rep(0, k)` / `stl.comp_if` compile-time guards are not
   evaluated (guards are compared as TEXT), aliasing between neighbouring `hex.vec`s is not
   modelled, and nothing here says the VALUE the mov copies is the right one. That is what
-  `tests/fj/test_table_reader_ptr_clear.py` and the byte-exact gates are for.
+  the byte-exact gates are for.
 """
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ from doomfj.harness import W
 
 FJ = Path("src/fj")
 # every src/fj file `git show --stat 6c82984 c65da95` lists -- the whole blast radius of the passes.
-NARROWED_FILES = ("fixed_point.fj", "frame_render.fj", "plane_bands.fj", "plane_render.fj",
+NARROWED_FILES = ("frame_render.fj", "plane_bands.fj", "plane_render.fj",
                   "projection.fj", "sim.fj", "stream_render.fj")
 # the narrowed clears each file carries TODAY. Pinned, because prose cannot fail: with only "the
 # scan still finds some" asserted, deleting one -- the Z1 bug's own shape -- left this file green.
@@ -117,13 +117,13 @@ NARROWED_FILES = ("fixed_point.fj", "frame_render.fj", "plane_bands.fj", "plane_
 # window nibbles `gps_wlo4`/`gps_whi4` -- the same Z3 shapes on the new registers.
 # P10 G8: frame_render.fj 21 -> 22 -- frame.lines_sky_pair_ids carries lines_sky_ceil_ids's Z3 clear (its sky path,
 # for the sky behind a stacked piece), with the same unconditional `mov 2` after it
-EXPECTED_SITES = {"fixed_point.fj": 3, "frame_render.fj": 24, "plane_bands.fj": 4,   # P11: + ledge_box, ledge_test
+EXPECTED_SITES = {"frame_render.fj": 24, "plane_bands.fj": 4,   # P11: + ledge_box, ledge_test
                   "plane_render.fj": 5, "projection.fj": 7, "sim.fj": 2, "stream_render.fj": 7}
 # P12: project_thing's two bound blocks (T5's for a body without the aim hook, T4's for one with it) are rep-guarded
 # now, so 2 of projection.fj's unguarded sites became 4 rep-guarded ones -- each mov under its clear's own guard
 # and the rep-guarded ones the site scan skips, pinned for the same reason and so that a NEW one
 # cannot appear unnoticed -- being skipped there, it would otherwise be checked by nothing.
-EXPECTED_REPPED = {"fixed_point.fj": 0, "frame_render.fj": 2, "plane_bands.fj": 0,   # P11: the seen probe's box
+EXPECTED_REPPED = {"frame_render.fj": 2, "plane_bands.fj": 0,   # P11: the seen probe's box
                    "plane_render.fj": 0, "projection.fj": 4, "sim.fj": 0, "stream_render.fj": 0}
 # the emitter declares the hoisted scratch registers that the fj macros only name in a `<` list, so
 # the `hex.vec` width of those lives here and in no .fj file (M1-HOIST).
@@ -453,7 +453,6 @@ def _pin_state(text, pinned):
 # in the record, which M7 P1.4 deleted when the emit took the clamp over.) Adding a row here is a
 # claim that the new pair was checked and must stay whole, so do it deliberately, not to go green.
 LIVE_CLEARS_ACROSS_A_BRANCH = {
-    "fixed_point.fj": (),
     # P11: frame.ledge_box -- y0 < 0 clears ylo1 (the clamped -1, + 1), in range it takes y0's low byte + 1
     "frame_render.fj": (((("lo_neg",), "hex.zero 2, ylo1"), "hex.mov 2, ylo1, y0", ("lo_pos", "lo_in")),),
     "plane_bands.fj": (),
@@ -559,14 +558,14 @@ ns demo {
     def narrow_sparse dst, src, other @ end {
         hex.sparse_zero PAD, 3, dst + 5*dw
         hex.sparse_mov PAD, 5, dst, src
-        hex.mul_lo 8, other, dst, src
+        hex.mul_low 8, other, dst, src
         ;end
       end:
     }
 }
 """
 
-# the shape the three `fixed_point.fj` table readers are in: both halves written over a macro
+# a symbolic Z2 shape: both halves written over a macro
 # PARAMETER, and a register declared at a literal width the symbolic clear has to land on exactly.
 GOOD_SYMBOLIC = """
 ns demo {
@@ -724,8 +723,8 @@ HOISTED_DECL = '''        "hz_reg: hex.vec 8",'''
 # `trb_run_w8` clears and the column emit's `srw_rel_w` / `srn_rel_w` -- and none since: the v2
 # column retired all four, and every register its new sites clear is read at a visible width
 # after them. Pinned, so a new one is SEEN (and then the control below has a real site again).
-EXPECTED_HOIST_LEANING = {name: 0 for name in NARROWED_FILES}
-EXPECTED_HOIST_LEANING["frame_render.fj"] = 1      # P11: frame.ledge_box's lb_c, `hex.vec 8` in the hoisted list
+EXPECTED_HOIST_LEANING = {name: 0 for name in NARROWED_FILES}   # frame.ledge_box's lb_c leaned on its hoisted
+# `hex.vec 8` until its add was written `hex.add 8` (the width visible to the scan, not hidden in a macro name)
 
 
 def test_the_hoisted_scratch_declarations_are_load_bearing(monkeypatch):
@@ -750,10 +749,6 @@ def test_the_hoisted_scratch_declarations_are_load_bearing(monkeypatch):
 # never touched. A fixture proves the checker reads its own grammar; only a real file proves it
 # reads THIS tree.
 REAL_MUTANTS = (
-    # Z2's own clear, narrowed by a nibble -- the failure tests/fj/test_table_reader_ptr_clear.py
-    # sees from the other side, as a read of the wrong table entry
-    ("fixed_point.fj", ".zero w/4 - idx_n, ptr + idx_n*dw",
-     ".zero w/4 - idx_n - 1, ptr + (idx_n+1)*dw", "do not meet"),
     # (M7 P1.4 retired `srw_sidx`; the column emit's slot index is the same Z3 shape)
     ("stream_render.fj", "hex.zero w/4 - 2, gps_sidx + 2*dw",
      "hex.zero w/4 - 3, gps_sidx + 3*dw", "do not meet"),

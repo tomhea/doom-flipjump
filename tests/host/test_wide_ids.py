@@ -70,10 +70,10 @@ def test_the_lists_and_their_cells_at_both_widths():
 
 def _old_select(ntm):
     """p31_parts' row select before F1.5, verbatim"""
-    sel = ["thsel_leaf:", "    sim.jump16 sp_ti + 1*dw, " + ", ".join(
+    sel = ["thsel_leaf:", "    hex.switch sp_ti + 1*dw, " + ", ".join(
         "thsel_h%d" % h if 16 * h < ntm else "thsel_none" for h in range(16))]
     for h in range((ntm + 15) // 16):
-        sel += ["  thsel_h%d:" % h, "    sim.jump16 sp_ti, " + ", ".join(
+        sel += ["  thsel_h%d:" % h, "    hex.switch sp_ti, " + ", ".join(
             "thsel_s%d" % (16 * h + l) if 16 * h + l < ntm else "thsel_none" for l in range(16))]
     return sel
 
@@ -82,7 +82,7 @@ def test_the_select_is_the_old_two_levels_through_256():
     for n in (1, 15, 16, 17, 100, 228, 254, 255, 256):
         assert MC.select_tree_lines(n) == _old_select(n), n
     s = MC.select_tree_lines(370)
-    assert s[1] == "    sim.jump16 sp_ti + 2*dw, thsel_g0, thsel_g1" + ", thsel_none" * 14
+    assert s[1] == "    hex.switch sp_ti + 2*dw, thsel_g0, thsel_g1" + ", thsel_none" * 14
     assert "  thsel_g1:" in s and "  thsel_h23:" in s and "  thsel_h24:" not in s
     assert [ln for ln in s if ln.startswith("  thsel_h")] == ["  thsel_h%d:" % h for h in range(24)]
 

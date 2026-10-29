@@ -15,7 +15,7 @@ algorithm in Python, which is what lets the host test it against the oracle in a
 of a build.
 
 WHAT IT REPLACED. M14-d walked the 256-unit blockmap through packed tables: four corners, ~20 lines
-a block, every candidate's row read with `hex.read_table_packed` (~6.8K ops a line, 576K per check,
+a block, every candidate's row read with `hex.read_entry_packed` (~6.8K ops a line, 576K per check,
 MEASURED on blocked27 -- docs/plan-gameplay.md section 3). Before that, baking a copy of every
 line's test into every block that listed it did not assemble in 50 minutes (docs/opt-experiments.md).
 A cell's line stub exists once per LINEDEF and is shared by every cell that lists it, which is what
@@ -381,7 +381,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
 
     `movers`: M7 P2b, `{linedef: (state cell, [openbottom per state])}` for the lines touching a
     mover (`mover_line_openings`). Such a stub xors its constants WITHOUT the opening floor, then
-    `sim.jump16` on the mover's state nibble picks a block that xors that state's floor into
+    `hex.switch` on the mover's state nibble picks a block that xors that state's floor into
     `ca_ob` around the shared test (states past the last reuse the last block).
 
     Entered by `stl.fcall <root>, cc_ret` (`sim.check_cells`) once the box, `cp_ok = 1` and the
@@ -420,7 +420,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
         return nodes[key]
 
     def tree(reg, leaf_of):
-        """jump16 on nibbles 7, 6, 5 of `reg`; `leaf_of`: {12-bit prefix (unsigned): label}"""
+        """hex.switch on nibbles 7, 6, 5 of `reg`; `leaf_of`: {12-bit prefix (unsigned): label}"""
         def sub(keys, depth, prefix):
             if depth == 3:
                 return leaf_of.get(prefix, none)
@@ -449,7 +449,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
            f"{len(used)} lines, {len(nodes)} tree nodes (collision.collision_cells_fj)",
            f";{L}_end"]
     for (reg, nib, targets), lab in nodes.items():
-        out += [f"{lab}:", f"    sim.jump16 {reg} + {nib}*dw, " + ", ".join(targets)]
+        out += [f"{lab}:", f"    hex.switch {reg} + {nib}*dw, " + ", ".join(targets)]
     for key, lab in stubs.items():
         out += [f"{lab}:"] + [f"    stl.fcall {L}_l{li}, cc_lret" if li >= 0 else
                               f"    stl.fcall {L}_t{-li - 1}, cc_lret" for li in key] + \
@@ -480,16 +480,16 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
         lab = f"{L}_l{li}"
         out += [f"{lab}:"] + xors
         if mover_here and movers[li][0] == "pair":
-            # M8 C4: the opening floor (and the low floor) on BOTH cells -- `sim.jump16` on the first cell, then on the
+            # M8 C4: the opening floor (and the low floor) on BOTH cells -- `hex.switch` on the first cell, then on the
             # second, into a block per pair of states that xors its values in around the shared test and out again
             _p, ca, cb, obg, *lfg = movers[li]
             assert bool(lfg) == (lowfloor is not None), "a mover line's low floors come with the drop-off"
             na, nb = len(obg), len(obg[0])
             rowl = [f"{lab}_p{i}" for i in range(na)]
-            out += [f"    sim.jump16 {ca}, " + ", ".join(rowl + [rowl[-1]] * (16 - na))]
+            out += [f"    hex.switch {ca}, " + ", ".join(rowl + [rowl[-1]] * (16 - na))]
             for i in range(na):
                 bl = [f"{lab}_p{i}_{j}" for j in range(nb)]
-                out += [f"  {rowl[i]}:", f"    sim.jump16 {cb}, " + ", ".join(bl + [bl[-1]] * (16 - nb))]
+                out += [f"  {rowl[i]}:", f"    hex.switch {cb}, " + ", ".join(bl + [bl[-1]] * (16 - nb))]
                 for j in range(nb):
                     x_ = _xor_lines([("ca_ob", obg[i][j] & M32)] + ([("ca_lf", lfg[0][i][j] & M32)] if lfg else []))
                     out += [f"  {bl[j]}:", *x_, f"    stl.fcall {L}_test, cc_tret", *x_, f"    ;{lab}_mout"]
@@ -503,7 +503,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
 
             def disp(tag_, c_, vals, arg, body, nxt):
                 labs = [f"{lab}_{tag_}{k}" for k in range(len(vals))]
-                o = [f"    sim.jump16 {c_}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
+                o = [f"    hex.switch {c_}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
                 for k, v_ in enumerate(vals):
                     x_ = _xor_lines([(arg, v_ & M32)])
                     o += [f"  {labs[k]}:", *x_, *body(x_), f"    ;{nxt}"]
@@ -519,7 +519,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
             lfs = lfs[:1]
             assert bool(lfs) == (lowfloor is not None), "a mover line's low floors come with the drop-off"
             blocks = [f"{lab}_m{k}" for k in range(len(obs))]
-            out += [f"    sim.jump16 {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
+            out += [f"    hex.switch {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
             for k, ob in enumerate(obs):
                 obx = _xor_lines([("ca_ob", ob & M32)] + ([("ca_lf", lfs[0][k] & M32)] if lfs else []))
                 out += [f"  {blocks[k]}:", *obx, f"    stl.fcall {L}_test, cc_tret", *obx,
@@ -570,10 +570,10 @@ MONSTER_CELL_RADIUS = 30 << 16
 
 
 def _mover_dispatch(lab: str, cell: str, obs, lfs, test: str) -> list:
-    """M8 C4: `sim.jump16` on a mover's state `cell` into a block per state that xors that state's opening floor and
+    """M8 C4: `hex.switch` on a mover's state `cell` into a block per state that xors that state's opening floor and
     low floor in around `test` and out again (the mover line's own block, for a door-and-mover line's open arm)"""
     blocks = [f"{lab}_m{k}" for k in range(len(obs))]
-    out = [f"    sim.jump16 {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
+    out = [f"    hex.switch {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
     for k, ob in enumerate(obs):
         obx = _xor_lines([("ca_ob", ob & M32), ("ca_lf", lfs[k] & M32)])
         out += [f"  {blocks[k]}:", *obx, test, *obx, f"    ;{lab}_mout"]
@@ -773,12 +773,12 @@ def generate_point_location_fj(cmap, *, label="ptloc", shared: bool = False) -> 
                     f"    hex.mov 10, {label}dx, ptx", f"    hex.sub 10, {label}dx, {label}k",
                     f"    hex.set 10, {label}k, {n.y & M40}",
                     f"    hex.mov 10, {label}dy, pty", f"    hex.sub 10, {label}dy, {label}k",
-                    # the CONSTANT goes second: fixed_mul_lo/mul_lo cost one schoolbook row per
+                    # the CONSTANT goes second: fixed_mul_low/mul_low cost one schoolbook row per
                     # nonzero nibble of the second operand, and a partition delta is small
                     f"    hex.set 10, {label}k, {n.dx & M40}",
-                    f"    hex.mul_lo 10, {label}p, {label}dy, {label}k",
+                    f"    hex.mul_low 10, {label}p, {label}dy, {label}k",
                     f"    hex.set 10, {label}k, {n.dy & M40}",
-                    f"    hex.mul_lo 10, {label}q, {label}dx, {label}k",
+                    f"    hex.mul_low 10, {label}q, {label}dx, {label}k",
                     f"    hex.sub 10, {label}p, {label}q",
                     f"    hex.sign 10, {label}p, {front}, {label}_g{i}",   # < 0 -> front
                     f"  {label}_g{i}:",
@@ -791,7 +791,7 @@ def generate_point_location_fj(cmap, *, label="ptloc", shared: bool = False) -> 
 
 # ── M8 size: the SAME point location, its arithmetic shared ──────────────────────────────────────
 #
-# The inline walk above emits a whole 10-nibble `hex.mul_lo` pair (or a `hex.scmp 10`) PER NODE. Inlined, one
+# The inline walk above emits a whole 10-nibble `hex.mul_low` pair (or a `hex.scmp 10`) PER NODE. Inlined, one
 # multiply is ~15.7K words of the binary (its code, its wflip chains and its tables in the blocked pool): E1M2 r4's
 # `ptloc_walk` was 19.5M of 83.5M words, and it grows with the nodes (E1M7: 2,063). The node's only own data are its
 # four constants, so here a node XORs them into ZERO-AT-REST registers (`hex.xor_by`: a wflip per nonzero nibble, no
@@ -851,8 +851,8 @@ def _shared_point_location_fj(cmap, *, label="ptloc") -> str:
     out += [f"{label}_sd:",
             f"    hex.mov 10, {label}dx, ptx", f"    hex.sub 10, {label}dx, {label}kx",
             f"    hex.mov 10, {label}dy, pty", f"    hex.sub 10, {label}dy, {label}ky",
-            f"    hex.mul_lo 10, {label}p, {label}dy, {label}kdx",
-            f"    hex.mul_lo 10, {label}q, {label}dx, {label}kdy",
+            f"    hex.mul_low 10, {label}p, {label}dy, {label}kdx",
+            f"    hex.mul_low 10, {label}q, {label}dx, {label}kdy",
             f"    hex.sub 10, {label}p, {label}q",
             f"    hex.zero 10, {label}kx", f"    hex.zero 10, {label}ky",
             f"    hex.zero 10, {label}kdx", f"    hex.zero 10, {label}kdy",

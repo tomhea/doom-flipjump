@@ -1,10 +1,9 @@
-"""M12l (F5) — the projection LUTs the fj wall renderer reads, emitted as `.fj` read_table data tables
+"""M12l (F5) — the projection LUTs the fj wall renderer reads, emitted as `.fj` read_entry data tables
 (tantoangle / viewangletox / xtoviewangle / finetangent). Each is the SAME host kernel the H5 oracle uses
 (tables.py, R6 SSOT); here we assemble the emitted table, read a spread of entries TWICE each (R5 #8,
 catches pointer/result-reg cleanup bugs), and assert byte-exact equality with the host value — so the fj
 renderer and the oracle index identical projection data (D12). This is the data layer of the fj renderer.
 """
-from pathlib import Path
 
 import flipjump as fj
 
@@ -19,18 +18,17 @@ from doomfj.tables import (
     tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
 )
 
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table
 
 
 def _read_lut(tmp_path, name, lut_fj, host_values, picks, *, entry_nibbles, idx_nibbles):
-    """Assemble `lut_fj` + a driver that reads each picked index twice via hex.read_table_packed
+    """Assemble `lut_fj` + a driver that reads each picked index twice via hex.read_entry_packed
     (M13-lutpack: the generators emit packed-byte entries), then compare the printed
     entry_nibbles-digit output to the host values (masked to the entry width)."""
     mask = (1 << (4 * entry_nibbles)) - 1
     body, data, expected = [], [], b""
     for k, idx in enumerate(picks):
         for _ in range(2):
-            body += [f"hex.read_table_packed {entry_nibbles // 2}, d, {name}, {idx_nibbles}, q{k}",
+            body += [f"hex.read_entry_packed {entry_nibbles // 2}, d, {name}, {idx_nibbles}, q{k}",
                      f"hex.print_as_digit {entry_nibbles}, d, 0", "stl.output 10"]
             expected += f"{host_values[idx] & mask:0{entry_nibbles}x}\n".encode()
         data.append(f"q{k}: hex.vec {idx_nibbles}, {idx}")
@@ -39,9 +37,9 @@ def _read_lut(tmp_path, name, lut_fj, host_values, picks, *, entry_nibbles, idx_
     p = tmp_path / f"{name}.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), p.resolve()], b"", expected,
+        [p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
-    assert ok, f"{name}: fj read_table output != host table"
+    assert ok, f"{name}: fj read_entry output != host table"
 
 
 def test_tantoangle_lut_byte_exact(tmp_path):

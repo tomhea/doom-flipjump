@@ -67,7 +67,7 @@ def test_the_rule_is_the_final_player_modes_alone():
 
 def test_each_mobile_ranks_by_its_pool():
     """the oracle names a mobile's rank by its LUMP; the fj by its ROW (rows from monstercode.rank_threshold on rank
-    0). They agree because every lump the fireball pool can show is BAL1 (rank 1) and every lump the fx pool can show
+    0). They agree because every lump the fireball pool can show is BAL1 / MISL / BAL7 (rank 1) and every lump the fx pool can show
     (blood, puffs) is BLUD / PUFF (rank 0) -- projcode.pool_states' chains, read here; a drop (z 0) ranks 0"""
     from doomfj import gamedata as gd
     from doomfj.monsters import mobile_lump
@@ -76,6 +76,8 @@ def test_each_mobile_ranks_by_its_pool():
     from doomfj.combat import ROCKET_INFO
     fire = chain(_info().spawnstate) + chain(_info().deathstate)
     fire += chain(ROCKET_INFO.spawnstate) + chain(ROCKET_INFO.deathstate)  # P9: the player's rocket, the same pool
+    from doomfj.combat import BRUISERSHOT_INFO                               # M8 C8: the Baron's fireball, the same pool
+    fire += chain(BRUISERSHOT_INFO.spawnstate) + chain(BRUISERSHOT_INFO.deathstate)
     fx = chain("S_BLOOD1") + chain("S_PUFF1") + chain("S_TFOG")             # M8: the teleport fog, the same pool
     assert fire and fx and not set(fire) & set(fx)
     assert {mobile_rank(mobile_lump(s)) for s in fire} == {1}

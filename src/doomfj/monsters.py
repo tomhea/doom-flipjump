@@ -499,6 +499,12 @@ class MonsterPhase:
         self.sync(ds, lifts, sw)
         self.tic(x16, y16, angle)
         dr, lr = self.requests()
+        w = self.world
+        if mps is not None and w.boss_group is not None and w.floor_wide:
+            # M8 C8: A_BossDeath fired the boss floor group INSIDE the monsters' tic (world.floor_fire, as the fj's
+            # `<L>boss` sets its fswitch cells): the gate's mover state takes the world's floor cells back -- `sync`
+            # wrote the gate's into the world before the tic, so nothing else in the tic can have moved them
+            sw = tuple(w.ws.f_switch) + tuple(w.ws.f_sub)
         return (ds, fired, frozenset(req) | dr, card), ((lifts, frozenset(lreq) | lr, sw) if mps is not None else None)
 
     # ---- M7 P4.1: the weapon half (docs/gp-combat.md section 1) -------------------------------------------------------

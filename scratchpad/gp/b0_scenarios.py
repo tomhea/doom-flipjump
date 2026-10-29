@@ -207,14 +207,18 @@ def setup_fn(run_setup: dict):
     (`start_world`) runs, applied to the phase's world; the set's recorded type and corpse state are checked
     against the slot first. The pose is not here: b0 injects the pose every frame. A setup field b0 does not know
     is refused, so a new kind of setup cannot be dropped silently."""
-    extra = sorted(set(run_setup) - {"pose", "corpses"})
+    extra = sorted(set(run_setup) - {"pose", "corpses", "floors"})
     assert not extra, "a setup field b0 does not inject: %s" % extra
     corpses = list(run_setup.get("corpses") or ())
-    if not corpses:
+    # M8 (E1M8, scenarios_map.SETUP_FLOORS): the walk-over floor groups a checkpoint starts with lowered -- the same
+    # `lower_floors` the set's replay (start_world) runs; their cells (f_switch / f_sub) are poked with the rest
+    floors = list(run_setup.get("floors") or ())
+    if not corpses and not floors:
         return None
 
     def fn(ph):
         w = ph.world
+        SM.lower_floors(w, floors)
         for c in corpses:
             assert w.mon_things[c["slot"]].type == c["type"], c
             assert S.corpse_state(w, c["slot"]) == c["state"], c
@@ -226,7 +230,7 @@ def setup_poke(orc, run_setup: dict, pmode=None):
     """(before, poke): the cells the run's setup moves from the level start -- hurt_gate's frame-0 poke
     (`setup_cells`, the ONE mechanism the gates use) with the leaf lists (a lying drop is linked in its corpse's
     leaf, as drop_link<k> links it) -- and their level-start values, which b0 reads back from the binary before it
-    writes. ({}, {}) for a setup without corpses."""
+    writes. ({}, {}) for a setup without corpses or floors."""
     fn = setup_fn(run_setup)
     if fn is None:
         return {}, {}

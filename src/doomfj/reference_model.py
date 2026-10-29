@@ -562,7 +562,8 @@ def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
 # belongs to, which is what the fj's row ranges are (monstercode.rank_threshold: runtime rows < nt + FIREBALL_POOL
 # rank 1): BAL1* only ever shows in the fireball pool, BLUD* / PUFF* only in the fx pool (test_d3_rules holds it).
 MOBILE_RANK = {"BAL1": 1, "BLUD": 0, "PUFF": 0, "MISL": 1,      # P9: the player's rocket -- a missile, as BAL1
-               "TFOG": 0}                                       # M8: the teleport fog -- an effect (the fx pool)
+               "TFOG": 0,                                       # M8: the teleport fog -- an effect (the fx pool)
+               "BAL7": 1}                                       # M8 C8: the Baron's fireball -- the fireball pool
 # M8: the effects that stand ON the floor (z 0 in `mobiles`) and are not drops: the teleport fog
 FLOOR_EFFECTS = frozenset({"TFOG"})
 

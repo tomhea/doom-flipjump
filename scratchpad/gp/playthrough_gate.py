@@ -63,6 +63,7 @@ DEFAULT_SEED = {("E1M1", "medium"): 1,                                          
                 ("E1M3", "easy"): [(0, 0), (415, 1)],                                       # world 2279 (3143 before 8183305d)
                 ("E1M5", "easy"): [(0, 0), (342, 3), (1630, 11), (3352, 24)],              # world 4253
                 ("E1M6", "easy"): 0,                                                         # world 964
+                ("E1M8", "easy"): 0,                    # world 1709 (the M8 C8 kill leg: both Barons, then the W1 exit)
                 ("E1M9", "easy"): 2}                                                         # world 4659
 CONTROL_FRAMES = 40           # world frames a control runs
 CONTROL_AT = 25               # the world frame a control mutates

@@ -1,0 +1,209 @@
+{
+ "map": "E1M8",
+ "checkpoints": [
+  {
+   "name": "R0-s1",
+   "sector": 1,
+   "want": [
+    320,
+    -544
+   ],
+   "face": [
+    309,
+    -587
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 3 monsters within 640 units (3 MT_BRUISER), the nearest 701 units from the start; 0 pickups within 512"
+  },
+  {
+   "name": "R0-s0",
+   "sector": 0,
+   "want": [
+    80,
+    -176
+   ],
+   "face": [
+    -320,
+    -256
+   ],
+   "region": 0,
+   "style": "collect",
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 407 units from the start; 0 pickups within 512"
+  },
+  {
+   "name": "R0-s23",
+   "sector": 23,
+   "want": [
+    888,
+    -1240
+   ],
+   "face": [
+    1152,
+    -1568
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 421 units from the start; 0 pickups within 512"
+  },
+  {
+   "name": "R0-s27",
+   "sector": 27,
+   "want": [
+    336,
+    -1136
+   ],
+   "face": [
+    96,
+    -1248
+   ],
+   "region": 0,
+   "style": "explore",
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 264 units from the start; 0 pickups within 512"
+  },
+  {
+   "name": "R0-s30",
+   "sector": 30,
+   "want": [
+    880,
+    -1808
+   ],
+   "face": [
+    1152,
+    -1568
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 362 units from the start; 0 pickups within 512"
+  },
+  {
+   "name": "R0-s32",
+   "sector": 32,
+   "want": [
+    912,
+    -1456
+   ],
+   "face": [
+    1152,
+    -1568
+   ],
+   "region": 0,
+   "style": "collect",
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 264 units from the start; 0 pickups within 512"
+  },
+  {
+   "name": "R0-s48",
+   "sector": 48,
+   "want": [
+    1632,
+    -256
+   ],
+   "face": [
+    1152,
+    -256
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 480 units from the start; 5 pickups within 512"
+  },
+  {
+   "name": "R0-door95",
+   "sector": 47,
+   "want": [
+    3392,
+    -576
+   ],
+   "face": [
+    3232,
+    -576
+   ],
+   "region": 0,
+   "style": "explore",
+   "why": "region 0: 0 monsters within 640 units (), the nearest 2262 units from the start; 0 pickups within 512"
+  },
+  {
+   "name": "R1-s36",
+   "sector": 36,
+   "want": [
+    1200,
+    -1520
+   ],
+   "face": [
+    1152,
+    -1568
+   ],
+   "region": 1,
+   "style": "fight",
+   "why": "region 1: 1 monsters within 640 units (1 MT_BRUISER), the nearest 67 units from the start; 0 pickups within 512"
+  },
+  {
+   "name": "R1-s58",
+   "sector": 58,
+   "want": [
+    1696,
+    -256
+   ],
+   "face": [
+    1152,
+    -256
+   ],
+   "region": 1,
+   "style": "collect",
+   "why": "region 1: 1 monsters within 640 units (1 MT_BRUISER), the nearest 544 units from the start; 5 pickups within 512"
+  },
+  {
+   "name": "R0-extra",
+   "sector": 94,
+   "want": [
+    1072,
+    -1936
+   ],
+   "face": [
+    1152,
+    -1568
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 376 units from the start; 0 pickups within 512"
+  }
+ ],
+ "reserve": [
+  {
+   "name": "R0-s31",
+   "sector": 31,
+   "want": [
+    912,
+    -1776
+   ],
+   "face": [
+    1152,
+    -1568
+   ],
+   "region": 0,
+   "style": "fight",
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 317 units from the start; 0 pickups within 512"
+  }
+ ],
+ "regions": {
+  "sectors_per_region": {
+   "0": 53,
+   "1": 12
+  },
+  "monsters_per_region": {
+   "0": 9,
+   "1": 2
+  },
+  "quota": {
+   "0": 8,
+   "1": 2
+  },
+  "rule": "regions_map: v1's stages with the map's lifts, W1 doors, floor switch and key doors (every colour)"
+ },
+ "provenance": {
+  "tool": "scratchpad/gp/scenarios_map.py --suggest-checkpoints",
+  "sight_rule": "seen",
+  "player_mode": "final",
+  "monster_mode": "final",
+  "seconds": 2
+ }
+}

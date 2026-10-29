@@ -18,7 +18,7 @@ when every boss is dead (not before). CONTROLS: the same cells on a non-kill leg
 THE CRITERIA (scratchpad/gp/scenarios_map.py, the owner 2026-10-29): scaled per map; on E1M2..E1M5 and E1M9 every value
 is E1M1's (no patch: their sets validate as they did); on E1M8: kills 0, the kinds melee + fireball, doors 1, no
 aftermath, no infighting. CONTROL: scenarios_v2's own criteria on the same metrics fail where the scaled ones pass.
-THE SETUP FLOORS: an E1M8 checkpoint past the W1 floors starts with them lowered (the Barons' ring at 16); CONTROL: the
+THE SETUP FLOORS: an E1M8 checkpoint starts with its W1 floors lowered (the Barons' ring at 16); CONTROL: the
 same setup without `floors` keeps the ring up.
 """
 import importlib.util
@@ -180,7 +180,7 @@ def test_e1m8_criteria_scaled_and_floors_lowered():
     sc = got["scale"]
     assert got["patched"] and sc["kills"] == 0 and sc["kinds"] == ["melee", "fireball"] and sc["doors"] == 1
     assert not sc["aftermath"] and not sc["infight"] and sc["dodge"] and sc["pickups"] == 6
-    assert got["floors"] == [0, 1] and got["boss"] == 2 and got["r0"] is None
+    assert got["floors"] == [0, 1] and got["boss"] == 2 and got["r0"] == [0, 1]
     assert got["ring"] == 16, "the tag-1 ring round the west Barons is lowered by the setup (to its trench, 16)"
     assert got["ring0"] == 128, "CONTROL: without `floors` the ring stays up"
 

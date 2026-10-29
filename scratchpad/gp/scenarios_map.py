@@ -79,10 +79,10 @@ ATTACK_KINDS = {"hitscan": ("MT_POSSESSED", "MT_SHOTGUY"),
 TRIO_KINDS = ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP")      # suggest's aftermath trio
 CRITERIA_SCALE = {}            # the installed map's (map_criteria); {} on E1M1 and on a map that meets E1M1's
 # M8 (the owner, 2026-10-29): the maps whose checkpoints start with their WALK-OVER floors already lowered -- every W1
-# floor group but the boss's (A_BossDeath's) at its destination, injected for a checkpoint past them (region >= 1, the
-# stage the region flood lowers them at): a run injected at a pose never crosses the W1 lines that free the monsters
-SETUP_FLOORS = {"E1M8": "the Barons wait on floors the tag-1 / tag-3 W1 lines lower (special 19): from region 1 on a "
-                        "run starts with them lowered; the tag-666 floor (A_BossDeath's) stays up"}
+# floor group but the boss's (A_BossDeath's) at its destination, injected into every checkpoint's setup: a run
+# injected at a pose never crosses the W1 lines that free the monsters (E1M8's are fought from the rooms round them)
+SETUP_FLOORS = {"E1M8": "the Barons wait in pits whose rings the tag-1 W1 lines lower (special 19; tag 3 the weapons'): "
+                        "every run starts with them lowered; the tag-666 floor (A_BossDeath's) stays up"}
 
 
 # ================================================================================================
@@ -192,7 +192,7 @@ def _install_floors(S, m) -> None:
 
     def make_setup(cp):
         st = make0(cp)
-        if cp.get("region", 0) >= 1 and groups:
+        if groups:                    # every checkpoint: its monsters wait behind the floors wherever it stands
             st["floors"] = list(groups)
         return st
 
@@ -444,6 +444,11 @@ def suggest(n_runs: int = N_RUNS) -> dict:
         cx = sum(p[0] for p in pts) / len(pts)
         cy = sum(p[1] for p in pts) / len(pts)
         group = [m for m in mons if math.hypot(m[1] - cx, m[2] - cy) <= ENGAGE and reg.get(m[3]) is not None]
+        if sparse and not group:
+            # M8 (E1M8): a sparse map's monsters stand in PITS (the Barons' rings: a pit is the Baron's own cell) and
+            # are fought from the rooms round them -- a sector whose nearest standable point is within ENGAGE of one
+            group = [m for m in mons if reg.get(m[3]) is not None
+                     and min(math.hypot(m[1] - p[0], m[2] - p[1]) for p in pts) <= ENGAGE]
         if len(group) < (1 if sparse else 2):
             continue
         gx = sum(m[1] for m in group) / len(group)
@@ -461,6 +466,9 @@ def suggest(n_runs: int = N_RUNS) -> dict:
     regions_with = sorted(r for r, n in by_region.items() if r is not None and n >= 5)
     if not regions_with:            # M8 (gen_dryrun on E1M8): a sparse map -- every reached region with a monster
         regions_with = sorted(r for r, n in by_region.items() if r is not None and n >= 1)
+    if sparse and cand:             # ... and the runs go where its fights are fought from: the candidates' regions,
+        by_region = collections.Counter(c["region"] for c in cand)       # by their candidate sectors (E1M8)
+        regions_with = sorted(by_region)
     if not regions_with:
         raise SystemExit("suggest: no monster of %s lies in a region the flood from the start reaches (%s)"
                          % (INSTALLED["map"], dict(by_region)))
@@ -645,7 +653,9 @@ def plan(sugg: dict, quiet: bool = False) -> dict:
                 pose = setup["pose"]
                 sec = w0.leaf_sector[w0.rm.point_in_subsector(w0.cmap, pose[0] >> 16, pose[1] >> 16)]
                 assert sec == c["sector"] and reg.get(sec) == c["region"], (c["name"], sec, reg.get(sec))
-                nav = S.NavGraph.build(w0, (pose[0] >> 16, pose[1] >> 16), tag=c["name"])
+                # (SETUP_FLOORS: the nav graph on the world the run starts in -- its W1 floors lowered)
+                nav = S.NavGraph.build(S.start_world(setup) if setup.get("floors") else w0,
+                                       (pose[0] >> 16, pose[1] >> 16), tag=c["name"])
                 # M8 wave 1 (b0 on doom_e1m3_b4: R3-s151 state- and pixel-exact on all 100 frames, but its B0 MIRROR's
                 # player died at frames 97..99 -- "every run survives" holds on the model, whose run the planner
                 # checks, and not on the mirror b0 steps from the injected poses, health and knock): a parameter set

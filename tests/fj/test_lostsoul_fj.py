@@ -628,7 +628,7 @@ def build(tmp_path, name, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    srcs = [consts.resolve(), (FJ / "projection.fj").resolve(),
             (FJ / "frame_render.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return srcs, ("\n".join(want) + "\n").encode()
 

@@ -1242,7 +1242,7 @@
   "source": "results_line.json"
  },
  {
-  "name": "cell lookup: 6 jump16 levels",
+  "name": "cell lookup: 6 hex.switch levels",
   "mode": "plain",
   "per_call": 117.7578125,
   "ok": true,
@@ -1252,7 +1252,7 @@
   "source": "results_octant_dist_aim_cell.json"
  },
  {
-  "name": "cell lookup: 6 jump16 levels",
+  "name": "cell lookup: 6 hex.switch levels",
   "mode": "pool",
   "per_call": 136.96875,
   "ok": true,
@@ -1269,7 +1269,7 @@
   "source": "results_octant_dist_aim_cell.json"
  },
  {
-  "name": "cell lookup: 6 jump16 levels",
+  "name": "cell lookup: 6 hex.switch levels",
   "mode": "pool+",
   "per_call": 45.71875,
   "ok": true,
@@ -1465,7 +1465,7 @@
   "source": "results_ptloc.json"
  },
  {
-  "name": "ptloc grid start (jump16 x3+x3 -> node)",
+  "name": "ptloc grid start (hex.switch x3+x3 -> node)",
   "mode": "plain",
   "per_call": 8252.3828125,
   "ok": true,
@@ -1475,7 +1475,7 @@
   "source": "results_ptloc.json"
  },
  {
-  "name": "ptloc grid start (jump16 x3+x3 -> node)",
+  "name": "ptloc grid start (hex.switch x3+x3 -> node)",
   "mode": "pool",
   "per_call": 5943.6640625,
   "ok": true,
@@ -1492,7 +1492,7 @@
   "source": "results_ptloc.json"
  },
  {
-  "name": "ptloc grid start (jump16 x3+x3 -> node)",
+  "name": "ptloc grid start (hex.switch x3+x3 -> node)",
   "mode": "pool+",
   "per_call": 5868.15625,
   "ok": true,

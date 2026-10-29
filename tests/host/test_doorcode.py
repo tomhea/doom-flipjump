@@ -87,7 +87,8 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     assert list(inspect.signature(doorcode.door_tic_lines).parameters) == \
         ["slots", "nstates", "boxes", "kinds", "contact", "passes", "radius", "mon_press", "mon_contact", "dead",
          "switches", "walked",     # M8 L2: switch boxes and walked doors (both READ only)
-         "keyed", "switch_info", "nwalk", "close"], (   # M8 C3: keyed boxes, switch cards / latches, close strides
+         "keyed", "switch_info", "nwalk", "close",   # M8 C3: keyed boxes, switch cards / latches, close strides
+         "top_clamp"], (     # M8 w2fix: a door reversing at its top clamps there (text only, no cell)
             "door_tic_lines takes collision inputs again")
     secs, lds, sds, verts = level
     slots = sorted(doors)

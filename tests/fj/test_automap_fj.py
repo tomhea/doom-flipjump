@@ -37,7 +37,6 @@ from doomfj import keyboard as KB
 from doomfj.config import Config
 from doomfj import screenwire as SW
 from doomfj.harness import W
-from doomfj.lut_generator import generate_emit_byte_by_nibbles_fj
 from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, MAIN_EXIT_SCR, MAIN_HELP_SCR, MAIN_MAP_SCR,
                          MAIN_RESUME_SCR, MAP_GAME_SCR, MAP_MENU_SCR, menu_keys, menu_step)
 from doomfj.wad import WadFile
@@ -49,7 +48,7 @@ CFG = Config()
 MAP = "E1M2"
 ASSETS = Path("tests/fixtures/freedoom_assets.wad")
 MAP_WAD = Path("tests/fixtures/freedoom_e1m2.wad")
-SRC = [Path("src/fj") / "present.fj", Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
+SRC = [Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
 POLLS = 4
 STUB = 7                                            # the world stub paints every column this colour
 ENTER, ESC, UP, DOWN, H_KEY, M_KEY, W_KEY = 0x0D, 0x1B, KC_UP, KC_DOWN, 0x68, 0x6D, 0x77
@@ -90,13 +89,11 @@ class _Recording(InMemoryScreen):
 def _assemble_run(tmp, name, text, events=(), extra=()):
     src = tmp / f"{name}.fj"
     src.write_text(text, encoding="utf-8")
-    byte_t = tmp / "byte_emit.fj"
-    byte_t.write_text(generate_emit_byte_by_nibbles_fj("byte"), encoding="utf-8")
     consts = CFG.emit_fj_consts(tmp / "fj_consts.fj")
     out = tmp / f"{name}.fjm"
     # the byte table AFTER the program: its file runs its `init` at top level, and the program's first op must be
     # stl.startup's
-    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve(), byte_t.resolve()], out,
+    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve()], out,
                 memory_width=W, print_time=False)
     screen = _Recording()
     io = PcIO(screen, KeyboardIO(ScriptedKeyEventSource([KeyEvent(*e) for e in events])))
@@ -132,10 +129,10 @@ def _poses(p):
 
 
 def _dot_program(p, poses, page_lines):
-    body = ["stl.startup_and_init_all", "present.init_screen"]
+    body = ["stl.startup_and_init_all", "screen.init_screen W, H, 8"]
     for vx, vy in poses:
         body += [f"hex.set 8, viewx, {vx}", f"hex.set 8, viewy, {vy}", "stl.fcall am_page, am_ret",
-                 "present.end_frame"]
+                 "screen.end_frame W, 0"]
     return "\n".join(body + ["stl.loop", "am_page:", *page_lines, "stl.fret am_ret",
                              "bad: stl.loop", "am_ret: hex.vec w/4", "viewx: hex.vec 8", "viewy: hex.vec 8",
                              *A.decls(p)]) + "\n"
@@ -253,16 +250,16 @@ def _menu_program(menu_lines, key_lines, frames, world_tic=True, walk=WALK["E1M2
                         "    ")
     return "\n".join([
         "stl.startup_and_init_all",
-        "present.init_screen",
+        "screen.init_screen W, H, 8",
         "tm_frame:",
         *key_lines,
         *menu_lines,                                # ends at `do_world:`
         # the world STUB's tic: the player walks DX east, DY south -- only a world frame reaches here
         *([f"    hex.add_constant 8, viewx, {dx}", f"    hex.sub_constant 8, viewy, {dy}"] if world_tic else []),
-        "    present.draw_collines",
+        "    screen.draw_collines",
         *world,
         "frame_end:",
-        "    present.end_frame",
+        "    screen.end_frame W, 0",
         "    hex.inc 2, tm_count",
         "    hex.cmp 2, tm_count, tm_frames, tm_frame, tm_done, tm_done",
         "tm_done:", "    stl.loop",

@@ -22,7 +22,7 @@
 ## 3. v2 reads -- constraints on a new layout
 - record: blk_addr(trb_blk, sprbank+dw) then full-arm read of last_rel at op 1; last_rel == 0 -> skip (frame_render.fj:712-714).
 - frag_derive (stream_render.fj:836-888): gpslot fetch full (:840-852); blk_addr (:855); r0 full arm (:856); last_rel read3_and_inc (:857); skip n (:858).
-- frag_runs (:898-944) / frag_runs_win (:951-984): first rel full arm; later rel/texel 3-nibble reads; loop holds only byte.emit/cm.emit dispatch tables; ends on rel == 0; frag_runs_win copies, runs twice per A+B column.
+- frag_runs (:898-944) / frag_runs_win (:951-984): first rel full arm; later rel/texel 3-nibble reads; loop holds only hex.print/cm.emit dispatch tables; ends on rel == 0; frag_runs_win copies, runs twice per A+B column.
 - arm3/read3_and_inc (frame_render.fj:1940-1961): re-arm nibbles 0-2 relative to the last armed pointer; no carry out of nibble 2.
 - KEEP: (a) sprbank 4096-bit aligned; (b) each list header..0 terminator inside one 64-op window (gp-sprite-column.md:377-378); (c) no pointer read between reads of one walk -> the per-run rowmap is a DISPATCH lookup (gp-sprite-column.md:374-376; handoff:290); (d) r0 at op 0, last_rel at op 1 (record hard-codes sprbank+dw), pairs from op 3; (e) rel >= 1, one byte; 2-nibble row math (view h <= 255); texels RAW; (f) list address = 16-bit index at 64-op granularity; spslot [s][lo][hi]; ditto compares (slot, blk).
 - sub-slots of 32/16 ops do not fit blk_addr's nibble-3 placement (need an index scale or sub-offset); the record's last_rel==0 test becomes "empty at this scale".

@@ -213,7 +213,7 @@ def _run(tmp, name, mut=None, rk0=0):
     s.write_text(sim, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
     out = tmp / (name + ".fjm")
-    fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), s.resolve(), p.resolve()], out,
+    fj.assemble([consts.resolve(), s.resolve(), p.resolve()], out,
                 memory_width=W, print_time=False)
     feed = b""
     for px16, py16, pos, stop in records(rk0):

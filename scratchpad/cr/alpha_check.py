@@ -18,7 +18,7 @@ So the gate accepts a consistent renaming of `@`-locals/labels and NOTHING ELSE.
   - a jump target rewired to a different label, INCLUDING a "consistent" rewire that also
     edits the `<` list (both sides are literal here, so the substitution shows up);
   - a global swapped for another global (`slopediv_recip` -> `yslope_packed`);
-  - an op swapped for a same-arity op (`hex.read_table_packed` -> `hex.read_table_by`);
+  - an op swapped for a same-arity op (`hex.read_entry_packed` -> `hex.read_entry_by`);
   - a renamed namespace, or a renamed positional parameter (both forbidden by the pass's
     contract -- emitters bind them by name and position);
   - two locals collapsing onto one name, or one splitting into two.
@@ -176,13 +176,14 @@ def compare(ref, verbose=True):
     return bad
 
 
-# (file, label, old, new). ⚠ fixed_point.fj::fixed_div declares `@ locals` but NO `<` list --
-# exactly the shape that defeated the old signature scan, so it MUST stay in this set.
+# (label, old, new) on plane_bands.fj; EXTRA_MUTATIONS are (file, label, old, new). ⚠ The no-`<`-list fixture
+# (frame.lines_pclm_index2 declares `@ locals` but NO `<` list) is exactly the shape that defeated the old signature
+# scan, so it MUST stay in the set. (Its first anchor was the fixed-point divide, which moved to the stl.)
 MUTATIONS = [
     ("global swapped for another global", "hex.mov 8, denom, bb_recip_ph",
                                           "hex.mov 8, denom, yslope_packed"),
-    ("op swapped for a same-arity op",    "hex.read_table_packed 3, recipv",
-                                          "hex.read_table_by 3, recipv"),
+    ("op swapped for a same-arity op",    "hex.read_entry_packed 3, recipv",
+                                          "hex.read_entry_by 3, recipv"),
     ("namespace renamed",                 "ns plane {", "ns wall {"),
     ("constant changed",                  "hex.set 8, cfff, 0xFFF", "hex.set 8, cfff, 0xFFE"),
     ("jump target rewired (local -> local)",
@@ -193,10 +194,10 @@ MUTATIONS = [
 
 
 EXTRA_MUTATIONS = [
-    ("fixed_point.fj", "op swapped, in a macro with NO < list",
-     ".idiv 2*n, n, quotient", ".idiv2 2*n, n, quotient"),
-    # ⚠ CR-2026-08 — REMOVED: ("fixed_point.fj", "global swapped, in a macro with NO < list").
-    # Its anchor (`hex.read_table_packed 3, recip, slopediv_recip8`) is not in fixed_point.fj and
+    ("frame_render.fj", "op swapped, in a macro with NO < list",
+     "hex.shl_bit w/4, tmp              // idx*2", "hex.shr_bit w/4, tmp              // idx*2"),
+    # ⚠ CR-2026-08 — REMOVED: ("global swapped, in a macro with NO < list").
+    # Its anchor (`hex.read_entry_packed 3, recip, slopediv_recip8`) was not in the table-reader file and
     # by the look of it never was -- the macro takes `table` as a PARAMETER, and in this dialect a
     # macro reaches a global through its `<` list, so "names a global but has no `<` list" may not
     # be a shape that exists. It sat here reporting SKIP while the summary said "all mutations

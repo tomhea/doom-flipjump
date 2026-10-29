@@ -12,7 +12,7 @@ the last picture did not show.
     computed with them in place, ~9k ops a block, 5.4M for E1M1's 593) and the shared test `sl_seg` runs the
     model's bounding-box reject in 16.16, the rest, and zeroes them again.
   * `sl_seg`: `world.segments_touch` on the signs of four orientations, each an exact 48-bit product difference
-    (`hex.mul_lo 12`, one shared leaf). With P the monster, Q the player, A, B the segment's ends, u = Q - P (16.16)
+    (`hex.mul_low 12`, one shared leaf). With P the monster, Q the player, A, B the segment's ends, u = Q - P (16.16)
     and a = A - P, b = B - P, d = B - A (integers):
         o1 = u x a,   o2 = u x b,   o3 = d x (-a) = dy*ax - dx*ay,   o4 = d x u + (o3 << 16)
     -- the model's orientations over a positive 2^16 or 2^32, so the same signs. A touch: o1, o2 straddle (they
@@ -260,7 +260,7 @@ def seg_test_lines(fight: bool = False) -> List[str]:
             "    hex.zero 1, sl_k12", "    hex.zero 1, sl_k34"]
     out += _cross("sl_o", "sl_ux", "sl_uy", "sl_ax", "sl_ay") + _code("sl_o", "sl_k12", 4, "sl_c1")
     out += _cross("sl_o", "sl_ux", "sl_uy", "sl_bx", "sl_by") + _code("sl_o", "sl_k12", 1, "sl_c2")
-    out.append("    sim.jump16 sl_k12, " + ", ".join(
+    out.append("    hex.switch sl_k12, " + ", ".join(
         "sl_q34" if c in STRADDLE or c == 0 else "sl_miss" for c in range(16)))
     out += ["  sl_q34:"]
     out += _cross("sl_o3", "sl_dy", "sl_dx", "sl_ay", "sl_ax")        # dy*ax - dx*ay
@@ -269,7 +269,7 @@ def seg_test_lines(fight: bool = False) -> List[str]:
     out += ["    hex.mov 12, sl_t12, sl_o3", "    hex.shl_hex 12, 4, sl_t12", "    hex.add 12, sl_o, sl_t12"]
     out += _code("sl_o", "sl_k34", 1, "sl_c4")
     out += ["    hex.if0 1, sl_k12, sl_zz",
-            "    sim.jump16 sl_k34, " + ", ".join("sl_touch" if c in STRADDLE else "sl_miss" for c in range(16)),
+            "    hex.switch sl_k34, " + ", ".join("sl_touch" if c in STRADDLE else "sl_miss" for c in range(16)),
             "  sl_zz:",
             "    hex.if0 1, sl_k34, sl_touch",
             "    ;sl_miss",
@@ -279,7 +279,7 @@ def seg_test_lines(fight: bool = False) -> List[str]:
             "    hex.zero 8, sl_cx1", "    hex.zero 8, sl_cx0", "    hex.zero 8, sl_cy1", "    hex.zero 8, sl_cy0",
             "    hex.zero 12, sl_ax", "    hex.zero 12, sl_ay", "    hex.zero 12, sl_bx", "    hex.zero 12, sl_by",
             "    stl.fret sl_sret",
-            "sl_mul:", "    hex.mul_lo 12, sl_r, sl_m1, sl_m2", "    stl.fret sl_mret"]
+            "sl_mul:", "    hex.mul_low 12, sl_r, sl_m1, sl_m2", "    stl.fret sl_mret"]
     return out
 
 
@@ -335,7 +335,7 @@ def near_los_lines(w, fight: bool = False, lists=None) -> List[str]:
         if key not in nodes:
             lab = "sl_n%d" % len(nodes)
             nodes[key] = lab
-            body.extend(["  %s:" % lab, "    sim.jump16 %s, %s" % (reg, ", ".join(targets))])
+            body.extend(["  %s:" % lab, "    hex.switch %s, %s" % (reg, ", ".join(targets))])
         return nodes[key]
 
     have = set(cells)
@@ -376,7 +376,7 @@ def _seg_test_fight() -> List[str]:
             "    hex.zero 1, sl_k12", "    hex.zero 1, sl_k34"]
     out += _cross("sl_o", "sl_ux", "sl_uy", "sl_wax", "sl_way") + _code("sl_o", "sl_k12", 4, "sl_c1")
     out += _cross("sl_o", "sl_ux", "sl_uy", "sl_wbx", "sl_wby") + _code("sl_o", "sl_k12", 1, "sl_c2")
-    out.append("    sim.jump16 sl_k12, " + ", ".join(
+    out.append("    hex.switch sl_k12, " + ", ".join(
         "sl_q34" if c in STRADDLE or c == 0 else "sl_q" for c in range(16)))
     out += ["  sl_q34:"]
     out += _cross("sl_o3", "sl_dy", "sl_dx", "sl_way", "sl_wax")      # dy*ax - dx*ay
@@ -385,14 +385,14 @@ def _seg_test_fight() -> List[str]:
     out += ["    hex.mov 12, sl_t12, sl_o3", "    hex.shl_hex 12, 4, sl_t12", "    hex.add 12, sl_o, sl_t12"]
     out += _code("sl_o", "sl_k34", 1, "sl_c4")
     out += ["    hex.if0 1, sl_k12, sl_zz",
-            "    sim.jump16 sl_k34, " + ", ".join("sl_touch" if c in STRADDLE else "sl_q" for c in range(16)),
+            "    hex.switch sl_k34, " + ", ".join("sl_touch" if c in STRADDLE else "sl_q" for c in range(16)),
             "  sl_zz:",
             "    hex.if0 1, sl_k34, sl_touch",
             "    ;sl_q",
             "  sl_touch:", "    hex.set 1, sl_hit, 1",
             "  sl_q:",
             "    stl.fret sl_tret",
-            "sl_mul:", "    hex.mul_lo 12, sl_r, sl_m1, sl_m2", "    stl.fret sl_mret"]
+            "sl_mul:", "    hex.mul_low 12, sl_r, sl_m1, sl_m2", "    stl.fret sl_mret"]
     return out
 
 
@@ -634,9 +634,9 @@ def blast_los_lines(w, spots, max_radius: int, lists=None, fight: bool = False, 
     if fight:
         out += _bias_box()
     nh = (n - 1) // 16 + 1
-    out += ["    sim.jump16 bl_b + 1*dw, " + ", ".join("bl_lh%d" % h if h < nh else "bl_ldone" for h in range(16))]
+    out += ["    hex.switch bl_b + 1*dw, " + ", ".join("bl_lh%d" % h if h < nh else "bl_ldone" for h in range(16))]
     for h in range(nh):
-        out += ["  bl_lh%d:" % h, "    sim.jump16 bl_b, " + ", ".join(
+        out += ["  bl_lh%d:" % h, "    hex.switch bl_b, " + ", ".join(
             "bl_ls%d" % (16 * h + l) if 16 * h + l < n else "bl_ldone" for l in range(16))]
     for b, idx in enumerate(lists):
         out += ["  bl_ls%d:" % b] + [ln for k in idx for ln in ("    stl.fcall sg%d, sl_sret" % k,

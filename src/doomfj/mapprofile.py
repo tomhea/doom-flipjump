@@ -26,7 +26,7 @@ class MapProfile:
     census: str         # the one-pass build's census (--counts-cache): E1M1 keeps its historical name
     baseline: str       # msframe.py --against / --save-baseline
     scenarios: str      # the generated per-map scenario files (gate roles, gamespeed records, viewpoints)
-    heat: str = ""      # M8 G13: the map's OWN pin-heat list (heatsites.py --map writes it; E1M1: ship-gate 1b's)
+    heat: str = ""      # M8 G13: the map's OWN pin-heat list (heatsites.py --map writes it; E1M1: heat_e1m1_adopt, 4b)
     hotwords: str = ""  # M8 G13: the map's own hot-word list (profx/hotwords.py --map; pinreport.py --map reads it)
 
 
@@ -37,8 +37,8 @@ def profile(mapname: str | None = None) -> MapProfile:
     return MapProfile(map=m, wad="tests/fixtures/freedoom_%s.wad" % lo, prefix="doom_%s" % lo,
                       census="scratchpad/12m/_census_game%s.json.gz" % ("" if e1 else "_" + lo),
                       baseline="shipped" if e1 else "shipped_" + lo, scenarios="scenarios/%s" % lo,
-                      heat="scratchpad/12m/heat_blocked27_p10.json.gz" if e1 else "scratchpad/12m/heat_%s.json.gz" % lo,
-                      hotwords="scratchpad/12m/profx/hotwords_blocked27.json" if e1
+                      heat="scratchpad/12m/heat_e1m1_adopt.json.gz" if e1 else "scratchpad/12m/heat_%s.json.gz" % lo,
+                      hotwords="scratchpad/12m/profx/hotwords_e1m1_adopt.json" if e1
                       else "scratchpad/12m/profx/hotwords_%s.json" % lo)
 
 

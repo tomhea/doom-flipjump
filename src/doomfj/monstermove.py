@@ -30,14 +30,14 @@ def monster_seed_fj(cmap, lds, sds, secs_open, msecs: dict, mcell: dict, *, labe
     out = [f"{L}_leaf:"]
 
     def jump(prefix: int, depth: int) -> list:
-        """sim.jump16 on ptss nibble 2 - depth, into the sixteen next levels (or the leaves' stubs)"""
+        """hex.switch on ptss nibble 2 - depth, into the sixteen next levels (or the leaves' stubs)"""
         nib = 2 - depth
         targets = []
         for d in range(16):
             p = (prefix << 4) | d
             lo = p << (4 * nib)
             targets.append((f"{L}_j{depth + 1}_{p:x}" if depth < 2 else f"{L}_s{p}") if lo < n else f"{L}_none")
-        return [f"    sim.jump16 ptss + {nib}*dw, " + ", ".join(targets)]
+        return [f"    hex.switch ptss + {nib}*dw, " + ", ".join(targets)]
 
     out += jump(0, 0)
     for depth in (1, 2):
@@ -54,7 +54,7 @@ def monster_seed_fj(cmap, lds, sds, secs_open, msecs: dict, mcell: dict, *, labe
         out.append(f"  {L}_s{s}:")
         if si in msecs:                                       # a mover's leaf: its state's heights
             labs = [f"{L}_s{s}_m{k}" for k in range(len(msecs[si]))]
-            out.append(f"    sim.jump16 {mcell[si]}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs))))
+            out.append(f"    hex.switch {mcell[si]}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs))))
             for k, sv in enumerate(msecs[si]):
                 out += [f"  {labs[k]}:", *heights(seg_sector(lds, sds, sv, seg)), f"    stl.fret {L}_ret"]
         else:
@@ -182,7 +182,7 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
            "    hex.if_flags mm_dir, %d, mm_mv_go, mm_mv_out" % (1 << NODIR),
            "  mm_mv_go:",
            "    hex.mov 4, mm_nx, mm_x", "    hex.mov 4, mm_ny, mm_y",
-           "    sim.jump16 mm_dir, " + ", ".join(["mm_st%d" % d for d in range(8)] + ["mm_mv_out"] * 8)]
+           "    hex.switch mm_dir, " + ", ".join(["mm_st%d" % d for d in range(8)] + ["mm_mv_out"] * 8)]
     for d in range(8):
         out.append("  mm_st%d:" % d)
         out.append("    hex.if1 1, mm_spd, mm_st%df" % d)
@@ -367,7 +367,7 @@ def ncd_leaf_lines(*, deadzone: int, max_tries: int, fight: bool = False) -> lis
 def _walk(tag: str) -> list:
     """one P_TryWalk site in mm_ncd: mm_walk on mm_wd; success -> done, the cap -> NODIR (fail), else on"""
     return ["    stl.fcall mm_walk, mm_wret",
-            "    sim.jump16 mm_wres, mm_nw_%s, mm_n_done, mm_n_fail, %s" % (tag, ", ".join(["mm_n_fail"] * 13)),
+            "    hex.switch mm_wres, mm_nw_%s, mm_n_done, mm_n_fail, %s" % (tag, ", ".join(["mm_n_fail"] * 13)),
             "  mm_nw_%s:" % tag]
 
 
@@ -376,7 +376,7 @@ def walk_leaf_lines(*, max_tries: int) -> list:
     P_Random & 15); 2: the cap (`max_tries` distinct directions tried already)."""
     out = ["mm_walk:",
            "    hex.zero 1, mm_wres",
-           "    sim.jump16 mm_wd, " + ", ".join(["mm_wk%d" % d for d in range(8)] + ["mm_wk_out"] * 8)]
+           "    hex.switch mm_wd, " + ", ".join(["mm_wk%d" % d for d in range(8)] + ["mm_wk_out"] * 8)]
     for d in range(8):
         out += ["  mm_wk%d:" % d, "    hex.if1 1, mm_tried + %d*dw, mm_wk_out" % d,
                 "    hex.set 1, mm_tried + %d*dw, 1" % d, "    ;mm_wk_new"]

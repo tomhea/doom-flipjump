@@ -579,22 +579,13 @@ class RunResult:
 def _lean_fjm(path):
     """(width, [(segment_start, segment_length, array('I') of the data words)]) -- flipjump's
     fjm_reader._init_memory, vectorised: jump words of a RelativeJump/Compressed image are stored
-    relative to their own bit address and are rebuilt here the same way."""
-    import lzma
-    import struct
+    relative to their own bit address and are rebuilt here the same way. The file is read by
+    flipjump's own lean loader (fjm_reader.read_fjm_raw: header, segments, decompressed data), so
+    version 4 -- flipjump 1.6.0's default, its segment table compressed too -- reads as 3 did (A11)."""
     import numpy as np
-    from flipjump.fjm import fjm_reader as R
-    from flipjump.fjm.fjm_consts import FJMVersion
-    with open(path, "rb") as fh:
-        _magic, width, version, segnum = struct.unpack(R._header_base_format,
-                                                       fh.read(R._header_base_size))
-        version = FJMVersion(version)
-        if version != FJMVersion.BaseVersion:
-            struct.unpack(R._header_extension_format, fh.read(R._header_extension_size))
-        segs = [struct.unpack(R._segment_format, fh.read(R._segment_size)) for _ in range(segnum)]
-        data = fh.read()
-    if version == FJMVersion.CompressedVersion:
-        data = lzma.decompress(data, format=R._LZMA_FORMAT, filters=R._LZMA_DECOMPRESSION_FILTERS)
+    from flipjump.fjm.fjm_reader import read_fjm_raw
+    header, data = read_fjm_raw(Path(path))
+    width, segs, relative = header.memory_width, header.segments, header.relative_jumps
     if width != 32:
         raise ValueError("the lean loader is written for w=32; use loader='fjmrunner'")
     words = np.frombuffer(data, dtype="<u4")
@@ -602,7 +593,7 @@ def _lean_fjm(path):
     out = []
     for seg_start, seg_len, data_start, data_len in segs:
         chunk = words[data_start:data_start + data_len].astype(np.uint64)
-        if version in (FJMVersion.RelativeJumpVersion, FJMVersion.CompressedVersion):
+        if relative:
             pos = np.arange(1, data_len, 2, dtype=np.uint64) + np.uint64(seg_start)
             chunk[1::2] = (chunk[1::2] + pos * np.uint64(width)) & np.uint64((1 << width) - 1)
         a = array("I")

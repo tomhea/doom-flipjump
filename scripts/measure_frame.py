@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import flipjump as fj
 from doomfj.config import Config
 from doomfj.fixedpoint import _signed
-from doomfj.harness import W, FJM_LZMA_FAST
+from doomfj.harness import W, FJM_LZMA_PRESET
 from doomfj.reference_model import spawn_state
 from doomfj.wad import WadFile
 import doomfj.wall_renderer as WR
@@ -33,7 +33,7 @@ from doomfj.wireformat import encode_feed_mapunits
 from tests.fj.stream_screen import StreamScreen
 
 SRC = [ROOT / "src/fj" / f for f in
-       ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj")]
+       ("projection.fj", "frame_render.fj", "plane_render.fj")]
 # M13pS2: raster_mode="stream" additionally needs the band-list kernel + the run emitter, and the
 # frame decodes through StreamScreen (the run-stream device) instead of the framebuffer screen.
 STREAM_SRC = [ROOT / "src/fj" / f for f in ("plane_bands.fj", "stream_render.fj")]
@@ -71,7 +71,7 @@ def main():
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
     t0 = time.perf_counter()
     fj.assemble([consts.resolve(), *[p.resolve() for p in src], (tmp / "m.fj").resolve()],
-                tmp / "m.fjm", memory_width=W, print_time=False, lzma_fast=FJM_LZMA_FAST)
+                tmp / "m.fjm", memory_width=W, print_time=False, lzma_preset=FJM_LZMA_PRESET)
     assemble_seconds = round(time.perf_counter() - t0, 1)
 
     sp = spawn_state(mw, args.map)

@@ -27,7 +27,7 @@ from doomfj.harness import W
 from doomfj.wad import WadFile
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = [ROOT / "src" / "fj" / "present.fj"]
+SRC = []
 ART = ROOT / "assets" / "freedoom1.wad"
 VH, H, WIDTH = GAME_CFG.VIEW_H, GAME_CFG.H, GAME_CFG.W
 MENU_COLOUR = 77
@@ -81,17 +81,17 @@ def _program(mutate=None):
     if mutate is not None:
         text = mutate(text)
     start = hudcode.slot_codes(hud.slot_values(**_B, blue=False, cards=CARDS), CARDS)
-    lines = ["stl.startup_and_init_all", "present.init_screen", ";frames", *hudcode.hud_decls(start, CARDS),
+    lines = ["stl.startup_and_init_all", "screen.init_screen W, H, 8", ";frames", *hudcode.hud_decls(start, CARDS),
              "pcard: hex.vec 1", "pcard_y: hex.vec 1", "pcard_r: hex.vec 1", "hud_ret: hex.vec w/4",
              "hud_tail_leaf:", text, "stl.fret hud_ret",
              "frames:"]
     for f, cards in enumerate(SCRIPT):
-        lines.append("present.draw_collines")
+        lines.append("screen.draw_collines")
         if cards is None:
             for x in range(WIDTH):
                 lines += [f"stl.output_char {x}", f"stl.output_char {H}", f"stl.output_char {MENU_COLOUR}",
                           "stl.output_char 0xFF"]
-            lines += ["hex.set 1, hud_full, 1", "present.end_frame"]
+            lines += ["hex.set 1, hud_full, 1", "screen.end_frame W, 0"]
             continue
         for x in range(WIDTH):
             rec, _px = _view_column(f, x)
@@ -99,7 +99,7 @@ def _program(mutate=None):
         codes = hudcode.slot_codes(hud.slot_values(**_vals(cards), cards=CARDS), CARDS)
         lines += [f"hex.set {len(codes)}, hud_v, {sum(c << (4 * i) for i, c in enumerate(codes))}"]
         lines += [f"hex.set 1, {cell}, {int(v)}" for cell, v in zip(("pcard", "pcard_y", "pcard_r"), cards)]
-        lines += ["stl.fcall hud_tail_leaf, hud_ret", "present.end_frame"]
+        lines += ["stl.fcall hud_tail_leaf, hud_ret", "screen.end_frame W, 0"]
     lines.append("stl.loop")
     return "\n".join(lines) + "\n", colours, overlay, row
 

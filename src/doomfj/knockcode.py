@@ -47,7 +47,7 @@ THE LEAVES (`leaf_lines`, one expansion each; per-slot code only in the slot stu
   * `kb_th`, the thrust on the window: the reversal's tests in C's order (damage < 40, damage > health, target z -
     inflictor z > 64 -- the player's z by `kb_pz` -- then ONE coin on kb_rng: `mrnd`'s bit v & 1), the angle by
     proj.point_to_angle (inflictor << 16 -> target 16.16; + ANG180 on an odd coin), cos / sin from `finesine`, the
-    product damage * trig by hex.mul_lo, then an arithmetic shift right by 3 (mass 100) or 5 (400), 2 less reversed:
+    product damage * trig by hex.mul_low, then an arithmetic shift right by 3 (mass 100) or 5 (400), 2 less reversed:
     FixedMul(damage * (FRACUNIT >> 3) * 100 / mass [* 4], trig) exactly;
   * `kb_xy`, P_XYMovement on the move window (kb_vx / kb_vy the momentum, kb_px / kb_py the 16.16 position): the clamp,
     one halved try then the rest (the do-while's at most two iterations: after one halving no axis exceeds
@@ -109,7 +109,7 @@ REVERSE_DMG, REVERSE_DZ = 40, 64           # P_DamageMobj: damage < 40, target->
 MASS_SHIFT = {100: 3, 400: 5, 50: 2}       # FixedMul(dmg * (FRACUNIT >> 3) * 100 / mass, trig) == dmg * trig >> this
 MASS_CLASS = {100: 0, 400: 1, 50: 2}       # kb_hv: the target's mass class (M8 C8: 50 the lost soul's, kb_th's soul path)
 # M8 C8: the Baron's mass 1000 is no shift: its thrust T = dmg * (FRACUNIT >> 3) * 100 // 1000 is a table on the damage
-# (`kbm1k`, 5 nibbles), and FixedMul(T [* 4], trig) is hex.fixed_mul_lo 8, 4 -- exactly fixedpoint.fixed_mul(.., 8, 4),
+# (`kbm1k`, 5 nibbles), and FixedMul(T [* 4], trig) is hex.fixed_mul_low 8, 4 -- exactly fixedpoint.fixed_mul(.., 8, 4),
 # the model's (combat._thrust). Only a map with a mass-1000 monster emits any of it (E1M8)
 MASS_TABLE = 1000
 
@@ -126,10 +126,10 @@ def check_model_rules(w=None) -> None:
     assert FRICTION * 32 == 29 << 16, "the friction is the shift-add 29 * mom >> 5"
     assert MAXMOVE % 2 == 0 and STOPSPEED == 0x1000 and CORPSE_QUARTER == 0x4000
     assert gd.MOBJINFO["MT_PLAYER"].mass == 100
-    assert 4 * max(thrust_table_values()) < 1 << 31, "kbm1k * 4 is a positive 32-bit fixed_mul_lo operand"
+    assert 4 * max(thrust_table_values()) < 1 << 31, "kbm1k * 4 is a positive 32-bit fixed_mul_low operand"
     for mass, sh in MASS_SHIFT.items():
         assert all(d * (gd.FRACUNIT >> 3) * 100 // mass == d << (16 - sh) for d in range(256)), mass
-        # M8: the telefrag's damage (thrust_lines(telefrag=True)) by the same shift, its product in mul_lo's 8 nibbles
+        # M8: the telefrag's damage (thrust_lines(telefrag=True)) by the same shift, its product in mul_low's 8 nibbles
         d = _telefrag_damage()
         assert d * (gd.FRACUNIT >> 3) * 100 // mass == d << (16 - sh), (mass, d)
     assert _telefrag_damage() * gd.FRACUNIT < 1 << 31, "10000 * |trig| <= 10000 << 16 must be a signed 32-bit product"
@@ -353,9 +353,9 @@ def thrust_lines(telefrag: bool = False, soul: bool = False, mass1k: bool = Fals
     check_position floorz: `kb_cell` at viewx / viewy).
     M8 (`telefrag`): `kb_tf` 1 (teleportcode's tp_frag sets it around its dm_go) is P_TeleportMove's damage,
     teleport.TELEFRAG_DAMAGE, which kb_dm's two nibbles cannot hold: no reversal (damage < 40 fails) and the product's
-    damage operand is the constant -- 10000 * trig fits mul_lo's 8 nibbles (check_model_rules).
+    damage operand is the constant -- 10000 * trig fits mul_low's 8 nibbles (check_model_rules).
     M8 C8 (`mass1k`, a map with a mass-1000 monster: kb_hk 1 for it): the thrust T = kbm1k[damage] (x4 reversed), and
-    the momentum FixedMul(T, trig) by hex.fixed_mul_lo 8, 4 -- the model's fixed_mul exactly. M8 C8 part 2 (`soul`):
+    the momentum FixedMul(T, trig) by hex.fixed_mul_low 8, 4 -- the model's fixed_mul exactly. M8 C8 part 2 (`soul`):
     mass class 2 (50, the lost soul) shifts by 2, by 0 reversed (the thrust x4)"""
     assert not (telefrag and mass1k), "M8 C8: the telefrag's thrust on a mass-1000 monster is not built"
     k1k = (["    hex.if1 1, kb_hk, kq_k1k"] if mass1k else [])
@@ -365,9 +365,9 @@ def thrust_lines(telefrag: bool = False, soul: bool = False, mass1k: bool = Fals
                   "    hex.shl_bit 8, kb_t1k", "    hex.shl_bit 8, kb_t1k",          # thrust *= 4
                   "  kq_k1a:",
                   "    finesine.read_cos kb_cs, kb_idx",
-                  "    hex.fixed_mul_lo 8, 4, kb_mx, kb_cs, kb_t1k",
+                  "    hex.fixed_mul_low 8, 4, kb_mx, kb_cs, kb_t1k",
                   "    finesine.read_sin kb_cs, kb_idx",
-                  "    hex.fixed_mul_lo 8, 4, kb_my, kb_cs, kb_t1k",
+                  "    hex.fixed_mul_low 8, 4, kb_my, kb_cs, kb_t1k",
                   "    stl.fret kb_tret",
                   "kb_hk: hex.vec 1", "kb_t1k: hex.vec 8"] if mass1k else [])     # (behind the fret: data)
     return ["kb_th:",
@@ -405,9 +405,9 @@ def thrust_lines(telefrag: bool = False, soul: bool = False, mass1k: bool = Fals
                "    hex.set 8, kb_d8, %d" % _telefrag_damage(),
                "  kq_ntf:"] if telefrag else []),
             "    finesine.read_cos kb_cs, kb_idx",
-            "    hex.mul_lo 8, kb_mx, kb_cs, kb_d8",
+            "    hex.mul_low 8, kb_mx, kb_cs, kb_d8",
             "    finesine.read_sin kb_cs, kb_idx",
-            "    hex.mul_lo 8, kb_my, kb_cs, kb_d8",
+            "    hex.mul_low 8, kb_my, kb_cs, kb_d8",
             # >> 3 (mass 100) or 5 (400), 2 less reversed (the thrust x4)
             *(["    hex.if_flags kb_hv, %d, kq_sm, kq_s50" % (1 << MASS_CLASS[50]),   # M8 C8: the soul's 50
                "  kq_s50:", "    hex.if1 1, kb_rev, kq_s3",

@@ -187,7 +187,7 @@ def test_the_screen_init_and_boot_palette_run_once_from_the_entry_part():
     assert "init_screen" not in main and "palette" not in main
     line = next(ln for ln in src.split("\n") if ln.strip().startswith("_boot_screen = "))
     nxt = "\n".join(src[src.index(line):].split("\n")[:4])
-    assert '"io_boot:"' in nxt and "present.init_screen" in nxt and "SW.define_palette" in nxt
+    assert '"io_boot:"' in nxt and "SW.FJ_INIT_SCREEN" in nxt and "SW.define_palette" in nxt
     assert ';io_boot_done"' in nxt
 
 
@@ -200,7 +200,7 @@ def test_the_palette_goes_before_the_record_stream_and_the_phases_after_the_mons
     # M7 P6+P7 E: the two composed into the monsters' world at the tempo (world_tic_lines; tests/fj/test_monster_tempo_fj)
     i_wt = src.index("pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)")
     i_pal = src.index('pass1 += list(_hrt["palette"])')
-    i_begin = src.index('pass1.append("present.draw_collines")')
+    i_begin = src.index('pass1.append(SW.FJ_DRAW_COLLINES)')
     assert i_eye < i_p5 < i_wt < i_pal < i_begin
 
 

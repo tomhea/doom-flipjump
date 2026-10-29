@@ -60,7 +60,7 @@ python drive.py still 75 still --lock <lock>
 
 | number | command | file |
 |---|---|---|
-| ptr_index 846; read/write_byte 260 / 504; read_hex 244 (and per nibble); read_byte_and_inc 404 per packed byte; mul_lo 825; fixed_mul_lo 3,381; hex.div 157,155; hex.cmp 40; scmp 249; check_position 575,975; check_line 6,787; thing_load 19,464; emit_col_lines 15,887 | `python analyze.py calls games` | `an_calls.txt` |
+| ptr_index 846; read/write_byte 260 / 504; read_hex 244 (and per nibble); read_byte_and_inc 404 per packed byte; mul_low 825; fixed_mul_low 3,381; hex.div 157,155; hex.cmp 40; scmp 249; check_position 575,975; check_line 6,787; thing_load 19,464; emit_col_lines 15,887 | `python analyze.py calls games` | `an_calls.txt` |
 | one move try 613,383 (seed walk 35,366) | `phases.py games` | `an_phases.txt` |
 | sprite column ~30K = sprite_runs 10,896 + emit_region 12,930 + 6,403 | `python analyze.py fam games stream.emit_col_lines,stream.sprite_runs,stream.emit_region` | `an_fam.txt` |
 | BSP node 4,147; thing_leaf 30,197 and thing_leaf_b 15,460 per call | `python counts.py games` | `an_counts.txt` |

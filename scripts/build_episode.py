@@ -46,6 +46,7 @@ Never run with `python -O` (a skipped guard costs an assembly): refused, as is P
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import gzip
 import hashlib
 import importlib.util
@@ -125,17 +126,17 @@ class MapSpec:
 
 REGISTRY: dict[str, MapSpec] = {
     "E1M1": MapSpec(
-        map="E1M1", ready=True, wad=None, spread=2,
+        map="E1M1", ready=True, wad=None, spread=2, heat="scratchpad/12m/heat_e1m1_adopt.json.gz",
         combat_set="scratchpad/gp/scenarios/combat_scenarios_v10.json", baseline="shipped",
         size_cap_pct=43.0, trail_record=False,     # E1M1's trail record is gamespeed.BINARY_ENDS (no scenarios/e1m1)
         feature_tests=("tests/fj/test_key_latch.py", "tests/fj/test_keyboard_input.py",
                        "tests/fj/test_menu_screens.py", "tests/fj/test_skill_menu.py"),
         build_min=45,
-        recorded_out="build/doom_e1m1_blocked63.fjm",
-        recorded_labels="scratchpad/12m/atlas/blocked63.labels.tsv.gz",
+        recorded_out="build/doom_e1m1_blocked65.fjm",
+        recorded_labels="scratchpad/12m/atlas/blocked65.labels.tsv.gz",
         recorded_census="scratchpad/12m/_census_game.json.gz",
-        recorded_sha256="b65e5a97c42adb71dcf22b17f74c74e8713dfdaa862940d29c37a0fec994120c",
-        recorded_ref="docs/ship-gate.md 1 + 1b (blocked63, 2026-10-18)"),
+        recorded_sha256="3a2c9564adbfcb07a1378b6c0045ca2291246c4100abcafad68bae4af3815d3b",
+        recorded_ref="docs/ship-gate.md 1 + 1b (blocked65, ship #2, 2026-10-28)"),
     "E1M2": MapSpec(
         map="E1M2", ready=True, wad="tests/fixtures/freedoom_e1m2.wad", spread=1,
         combat_set="scratchpad/gp/scenarios/combat_scenarios_e1m2_v1.json", baseline="shipped_e1m2",
@@ -153,7 +154,33 @@ REGISTRY: dict[str, MapSpec] = {
         recorded_sha256="9a112139f3d35db3f71a9b2c0fb57a9e383b342fd2d42e776e072b97fbb57f45",
         recorded_ref="docs/ship-gate.md 5 (r4, 2026-10-18)"),
 }
-for _m in EPISODE[2:]:                  # E1M3..E1M9: placeholders until their level ships
+# M8 wave 1 + 2 (2026-10-29): the levels in their pipeline -- built and gated by this creator, NO recorded binary yet
+# (no rebuild check until docs/ship-gate.md holds their block). Spread 2 where the pool fits (the small maps: E1M5 and
+# E1M8 at 0.53 / 0.49 of E1M2's segs), else 1 (E1M3 / E1M4 / E1M9 used 79.6 / 83.5 / 77.6% of 2^27 at spread 1);
+# size above 43% is the owner's (2026-10-24: "above 43% size is OK").
+LEVEL_SPREAD = {"E1M3": 1, "E1M4": 1, "E1M5": 2, "E1M8": 2, "E1M9": 1}
+for _m, _spread in LEVEL_SPREAD.items():
+    _p = profile(_m)
+    REGISTRY[_m] = MapSpec(
+        map=_m, ready=True, wad=_p.wad, spread=_spread,
+        combat_set="scratchpad/gp/scenarios/combat_scenarios_%s_v1.json" % _m.lower(), baseline=_p.baseline,
+        size_cap_pct=None, size_note="the owner 2026-10-24: above 43% of 2^27 is OK", trail_record=True,
+        playthrough_skill="easy", build_min=15, recorded_census=_p.census,
+        recorded_ref="none yet: the level is in its pipeline (docs/episode-plan.md 4)")
+# the levels shipped (docs/ship-gate.md 6): their recorded binary -- the creator's build must reproduce it to the byte
+LEVEL_SHIPPED = {
+    "E1M3": ("build/doom_e1m3_v1.fjm", "71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784"),
+    "E1M5": ("build/doom_e1m5_v1.fjm", "4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2"),
+    "E1M9": ("build/doom_e1m9_v1.fjm", "33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48"),
+}
+for _m, (_out, _sha) in LEVEL_SHIPPED.items():
+    _lo = _m.lower()
+    REGISTRY[_m] = dataclasses.replace(
+        REGISTRY[_m], recorded_out=_out, recorded_sha256=_sha,
+        recorded_labels="scratchpad/12m/atlas/%s_v1.labels.tsv.gz" % _lo,
+        recorded_census="scratchpad/12m/_census_game_%s_v1.json.gz" % _lo,
+        recorded_ref="docs/ship-gate.md %s (v1, 2026-10-29)" % ("7" if _m == "E1M9" else "6"))
+for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: placeholders until their level ships
     _p = profile(_m)
     REGISTRY[_m] = MapSpec(
         map=_m, ready=False,
@@ -161,6 +188,8 @@ for _m in EPISODE[2:]:                  # E1M3..E1M9: placeholders until their l
                   "(spread, census, labels, sha256, combat set, feature tests) and set ready=True",
         wad=_p.wad, spread=None, combat_set="scratchpad/gp/scenarios/combat_scenarios_%s_v1.json" % _m.lower(),
         baseline=_p.baseline, trail_record=True, recorded_census=_p.census)
+
+REGISTRY = {m: REGISTRY[m] for m in EPISODE}     # the episode's order, whatever order the rows were made in
 
 
 # ── the plan ─────────────────────────────────────────────────────────────────────────────────────────────────────

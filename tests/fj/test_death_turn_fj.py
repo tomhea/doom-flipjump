@@ -126,7 +126,7 @@ def _run(tmp_path, name, w, cases, leaf):
     p.write_text(_program(cases, w.layout.nmon, leaf, slot_nibbles(w.layout)), encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     out = tmp_path / ("%s.fjm" % name)
-    fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    fj.assemble([consts.resolve(), (FJ / "projection.fj").resolve(),
                  (FJ / "frame_render.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], out,
                 memory_width=W, print_time=False)
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
@@ -192,7 +192,7 @@ MUTANTS = {
 # M8 C2 (the wide map's): the dispatch's third level dropped -- every id jumps by its low byte (group 0); dt_t's row
 # cut to its low two nibbles (the two-nibble dt_t of before)
 WIDE_MUTANTS = {
-    "the third level dropped": lambda lf: [";dtt_g0" if ln.startswith("    sim.jump16 p_atk + 2*dw,") else ln
+    "the third level dropped": lambda lf: [";dtt_g0" if ln.startswith("    hex.switch p_atk + 2*dw,") else ln
                                            for ln in lf],
     "dt_t two nibbles": lambda lf: [ln.replace("hex.mov 3, dt_off + 1*dw, dt_t", "hex.mov 2, dt_off + 1*dw, dt_t")
                                     for ln in lf],

@@ -102,4 +102,4 @@ print("  TOTAL over %d viewpoints    %6d %7d %5.1f%% %10d %12d %13d"
 print("")
 print("  a DITTO column costs 2 bytes ([x][0xFE]); the column it replaces would have cost")
 print("  2 + 2*pairs. So the saving is in PAIRS, and a pair is the unit the protocol charges")
-print("  for -- docs/m13p put byte.emit at 283.6 ops and cm.emit at 329.5 (UNVERIFIED here).")
+print("  for -- docs/m13p put hex.print at 283.6 ops and cm.emit at 329.5 (UNVERIFIED here).")

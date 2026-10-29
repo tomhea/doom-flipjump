@@ -36,6 +36,7 @@ import re
 import struct
 from pathlib import Path
 
+import flipjump
 import pytest
 from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 
@@ -59,7 +60,7 @@ from doomfj.wall_renderer import (DEFAULT_MENU, DEFAULT_MENU_SELECTED, MAX_BANDS
 
 FIX = Path("tests/fixtures")
 ASSETS = FIX / "freedoom_assets.wad"
-PRESENT_FJ = Path("src/fj/present.fj")
+SCREEN_FJ = Path(flipjump.__file__).parent / "stl" / "screen.fj"     # the stl's screen commands
 
 
 # -- window chrome: the baked DOOM wordmark ---------------------------------------------------
@@ -79,7 +80,7 @@ ICON_TEST_PALETTE = [(k, (k * 7) & 0xFF, 255 - k) for k in range(256)]   # disti
 
 
 def _feed_device(payload):
-    """The device the standalone binary presents to, fed the same bytes present.fj emits -- after its boot screen
+    """The device the standalone binary presents to, fed the same bytes the stl's screen macros emit -- after its boot screen
     (init_screen, and a palette in slot 0)."""
     from doomfj import screenwire as SW
     screen = InMemoryScreen()
@@ -103,7 +104,7 @@ def test_the_icon_needs_no_wad_at_all():
     sprites at all. A generated icon cannot be missing."""
     macro, calls = window_chrome_fj()
     assert macro and calls
-    assert calls[0].startswith("present.set_window_title")
+    assert calls[0].startswith("screen.set_window_title")
     assert "doom_window_icon" in calls
 
 
@@ -142,15 +143,14 @@ def test_the_macro_the_prelude_calls_is_the_macro_the_block_defines():
     assert name in calls, (name, calls)
 
 
-def test_the_title_packing_is_what_present_fj_unpacks():
-    """Round-trip through the REAL device. `present.set_window_title` emits
-    `rep(len, i) stl.output_char (text >> (8*i)) & 0xff`, so the packed integer is
-    least-significant BYTE first and `len` is the utf-8 byte count -- two independent numbers that
-    nothing else pins together."""
+def test_the_title_packing_is_what_the_screen_macro_unpacks():
+    """Round-trip through the REAL device. `screen.set_window_title` emits `stl.output text`, which is
+    `rep(((#text)+7)>>3, i) stl.output_char (text >> (8*i)) & 0xff`, so the packed integer is
+    least-significant BYTE first and its byte length must be the utf-8 byte count."""
     _macro, calls = window_chrome_fj()
-    call = next(c for c in calls if c.startswith("present.set_window_title"))
-    big, n = call.split(None, 1)[1].split(",")
-    big, n = int(big, 16), int(n)
+    call = next(c for c in calls if c.startswith("screen.set_window_title"))
+    big = int(call.split(None, 1)[1], 16)
+    n = (big.bit_length() + 7) // 8
     assert n == len(WINDOW_TITLE.encode("utf-8"))
     assert bytes((big >> (8 * i)) & 0xFF for i in range(n)).decode("utf-8") == WINDOW_TITLE
 
@@ -170,12 +170,12 @@ def test_the_device_reads_the_emitted_indices_as_the_icon():
     assert [tuple(c) for c in rgb] == want
 
 
-def test_the_present_macros_the_chrome_calls_exist_with_that_arity():
+def test_the_screen_macros_the_chrome_calls_exist_with_that_arity():
     """The emitter writes fj text; nothing type-checks it until the assembler does, 30 minutes in."""
-    src = PRESENT_FJ.read_text(encoding="utf-8")
-    for name, arity in (("set_window_title", 2), ("set_window_icon_header", 2)):
+    src = SCREEN_FJ.read_text(encoding="utf-8")
+    for name, arity in (("set_window_title", 1), ("set_window_icon_header", 2)):
         m = re.search(r"def\s+%s\s+([^{]*)\{" % name, src)
-        assert m, "present.fj no longer defines %s" % name
+        assert m, "the stl's screen.fj no longer defines %s" % name
         assert len([a for a in m.group(1).split(",") if a.strip()]) == arity
 
 
@@ -587,7 +587,7 @@ def _restart():
 
 def test_the_menu_omits_exactly_the_frame_end_byte():
     """The trap the docstring names: both producers fall into the SAME tail, whose last line is
-    `present.end_frame` (END_CMD, present). A second END_CMD leaves a stray opcode, and jumping past the tail breaks
+    `screen.end_frame W, 0` (END_CMD, present). A second END_CMD leaves a stray opcode, and jumping past the tail breaks
     `selfreset.emit_reset_part`'s assert -- a broken menu that costs a full game build to discover. `doomfj.menu`
     itself is well tested; this wrapper was not tested at all."""
     cfg = Config()

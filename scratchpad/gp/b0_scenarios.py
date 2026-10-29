@@ -90,6 +90,12 @@ class GameOracle(P.Oracle):
     RENDER_KW = dict(P.Oracle.RENDER_KW)       # = reference_model.GAME_RENDER_KW (PR #87)
 
 
+
+def _doors_tuple(ds) -> tuple:
+    """M8 w2fix: the binary's `dstate` as a tuple -- a count-1 cell reads as its value (probe.read_cells; E1M8's one
+    door) where the oracle's door states are a 1-tuple"""
+    return ds if isinstance(ds, tuple) else (ds,)
+
 def game_oracle(doc: dict) -> GameOracle:
     """M8: the oracle on the SET's map (`doc["map"]`, E1M1 when absent) -- its fixture wad by doomfj.mapprofile, so a
     set's B0 never draws another map's oracle whatever DOOMFJ_MAP says (E1M1: the wad probe.DEFAULT_WAD always was)"""
@@ -392,7 +398,7 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
                       and r.palettes[mf + f] == orc.palette_sha(mph.palette() if mph is not None else 0))
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
-            got["viewx"], got["viewy"], got["viewangle"], got["dstate"]) == (
+            got["viewx"], got["viewy"], got["viewangle"], _doors_tuple(got["dstate"])) == (
             P_signed(epose[0]), P_signed(epose[1]), epose[2] & M32, tuple(edoors)))
         c_part = (P_signed(epose[0]), P_signed(epose[1]), epose[2] & M32) != (
             P_signed(fr["post"][0]), P_signed(fr["post"][1]), fr["post"][2] & M32)

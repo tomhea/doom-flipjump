@@ -44,7 +44,7 @@ import psutil                                                             # noqa
 import flipjump as fj                                                     # noqa: E402
 import flipjump.assembler.assembler as _asm                               # noqa: E402
 
-from doomfj.harness import W                                              # noqa: E402
+from doomfj.harness import W, FJM_LZMA_PRESET                             # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--gen", default="scratchpad/fjmcache/_rssgen",
@@ -61,7 +61,7 @@ args = ap.parse_args()
 # program. (R6 says constants have one source; this is not a constant, it is a restatement whose
 # disagreement is the signal.)
 _SRC_FJ = ROOT / "src/fj"
-INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
+INCLUDES = ["projection.fj", "frame_render.fj", "plane_render.fj",
             "plane_bands.fj", "stream_render.fj", "sim.fj"]     # B0: sim.fj LAST (R54)
 
 
@@ -129,7 +129,7 @@ def assemble(paths, out_fjm, label_out):
     t0w, t0c = time.perf_counter(), time.process_time()
     with LabelHook(label_out) as hook:
         fj.assemble([p.resolve() for p in paths], Path(out_fjm), memory_width=W,
-                    print_time=False, lzma_fast=True)
+                    print_time=False, lzma_preset=FJM_LZMA_PRESET)
     dtw, dtc = time.perf_counter() - t0w, time.process_time() - t0c
     stop.set(); th.join(timeout=2)
     sha = hashlib.sha256(Path(out_fjm).read_bytes()).hexdigest()

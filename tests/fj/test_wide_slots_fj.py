@@ -46,7 +46,7 @@ def _run(tmp: Path, name: str, nib: int, n: int, ids, tree) -> list:
     src = tmp / (name + ".fj")
     src.write_text(_prog(nib, n, ids, tree), encoding="utf-8")
     out = tmp / (name + ".fjm")
-    files = [Config().emit_fj_consts(tmp / "fj_consts.fj"), FJ / "fixed_point.fj", FJ / "sim.fj", src]
+    files = [Config().emit_fj_consts(tmp / "fj_consts.fj"), FJ / "sim.fj", src]
     fj.assemble([Path(f).resolve() for f in files], out, memory_width=W, print_time=False)
     io = FixedIO(b"")
     fj.run(out, io_device=io, print_time=False, print_termination=False)
@@ -59,7 +59,7 @@ def _want(n: int, ids) -> list:
 
 def test_the_three_level_tree_reaches_every_id(tmp_path):
     tree = _tree(3, N_WIDE)
-    assert tree[0].startswith("    sim.jump16 t_id + 2*dw, t_g0, t_g1, t_none"), tree[0]
+    assert tree[0].startswith("    hex.switch t_id + 2*dw, t_g0, t_g1, t_none"), tree[0]
     got = _run(tmp_path, "wide", 3, N_WIDE, IDS_WIDE, tree)
     assert got == _want(N_WIDE, IDS_WIDE), got
 

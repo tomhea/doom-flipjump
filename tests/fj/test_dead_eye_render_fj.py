@@ -41,7 +41,7 @@ from tests.fj.stream_screen import StreamScreen
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = [ROOT / "src" / "fj" / f for f in
-       ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
+       ("projection.fj", "frame_render.fj", "plane_render.fj",
         "plane_bands.fj", "stream_render.fj")]
 E1M1_WAD = ROOT / "tests" / "fixtures" / "freedoom_e1m1.wad"
 CFG = GAME_CFG

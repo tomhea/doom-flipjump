@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PARTS = Path(sys.argv[1] if len(sys.argv) > 1 else r"C:\Users\tomhe\AppData\Local\Temp\tmp97fndv92")
 
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj", "sim.fj")]
 files = [PARTS / "fj_consts.fj"] + SRC + sorted(PARTS.glob("e1m1_0*.fj"))

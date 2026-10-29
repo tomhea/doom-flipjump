@@ -27,7 +27,8 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from flipjump.fjm.fjm_consts import (_header_base_format, _header_extension_format,  # noqa: E402
-                                     _segment_format, _LZMA_FORMAT, _lzma_compression_filters)
+                                     _segment_format, _segments_size_format, _LZMA_FORMAT,
+                                     _lzma_compression_filters)
 
 FJM = Path(sys.argv[1] if len(sys.argv) > 1
            else r"C:\Users\tomhe\AppData\Local\Temp\tmp97fndv92\m14.fjm")
@@ -36,7 +37,11 @@ off = calcsize(_header_base_format)
 _magic, word_size, version, segment_num = unpack(_header_base_format, blob[:off])
 if version != 0:
     off += calcsize(_header_extension_format)
-off += calcsize(_segment_format) * segment_num
+if version == 4:                 # .fjm v4 (flipjump 1.6.0's default): the segment table is its own LZMA stream,
+    (table_bytes,) = unpack(_segments_size_format, blob[off:off + calcsize(_segments_size_format)])   # A11
+    off += calcsize(_segments_size_format) + table_bytes
+else:
+    off += calcsize(_segment_format) * segment_num
 
 NICE = 2 * word_size
 READER = _lzma_compression_filters(NICE, lzma.PRESET_DEFAULT)   # what the decoder is handed today

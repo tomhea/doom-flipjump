@@ -254,7 +254,7 @@ def _thrust_program(w, mut=None):
     b = code.index("    stl.fret kb_pzret\n", a) + len("    stl.fret kb_pzret\n")
     code = code[:a] + "kb_pz:\n    hex.input 2, kb_pzv\n    stl.fret kb_pzret\n" + code[b:]     # THE ONE STUB
     if mut == "third_level":                                        # M8 C2: the wide map's control
-        top = [ln for ln in code.split("\n") if ln.startswith("    sim.jump16 kb_tg + 2*dw,")]
+        top = [ln for ln in code.split("\n") if ln.startswith("    hex.switch kb_tg + 2*dw,")]
         assert len(top) == 1, len(top)
         code = code.replace(top[0] + "\n", "    ;kq_g0\n")
     elif mut:
@@ -324,7 +324,7 @@ def _thrust_build(tmp_path, name, mut=None, mapname="E1M1"):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    srcs = [consts.resolve(), (FJ / "projection.fj").resolve(),
             (FJ / "frame_render.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     fin = b"".join((v & 0xFFFF).to_bytes(2, "little") for v in feed)
     return srcs, fin, ("\n".join(want) + "\n").encode()
@@ -907,7 +907,7 @@ def _move_build(tmp_path, name, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
+    srcs = [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return srcs, ("\n".join(want) + "\n").encode()
 
 

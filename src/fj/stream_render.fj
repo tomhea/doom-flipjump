@@ -5,14 +5,15 @@
 // SIZE    29 macros (stream.emit_bytes4 .. stream.entry_append)
 // ==============================================================================================
 // THE STREAM EMITTER — the per-column device-RUN raster. Walks a column's run-lists (ceiling band
-// list, wall run(s), floor band list, sprite fragments) and pushes each run out as `byte.emit` /
-// `cm.emit` through the device-emit dispatch tables (present.fj's `begin_frame_stream` + the tables
-// `doomfj.lut_generator.generate_emit_dispatch_table_fj` emits, named "byte"/"cm" by the includer).
+// list, wall run(s), floor band list, sprite fragments) and pushes each run out as `hex.print` (the
+// stl's: hex.output on the low nibble, then the high) / `cm.emit` through the colormap's device-emit
+// dispatch table (`screen.draw_collines` + the table `doomfj.lut_generator.generate_emit_dispatch_table_fj`
+// emits, named "cm" by the includer).
 // `emit_col_lines` is the shipped per-column entry point. (`flush_frame`, the rung-3b whole-frame
 // assembler, was retired 2026-09-11 having never shipped -- docs/handoff-m13-2s.md keeps its
 // design.) (history: docs/handoff-visual-features.md, docs/m13p-procedural-plan.md)
 // @requires hex.init & stl.ptr_init (ptr_index/read_hex) — stl.startup_and_init_all covers both —
-// plus the includer's "byte"/"cm" emit tables. Each such table self-inits via its `<label>: ;end …
+// plus the includer's "cm" emit table. Such a table self-inits via its `<label>: ;end …
 // end:` header at table-declaration time (see lut_generator's `_per_entry_emit_table`), so there is
 // no separate init call here.
 
@@ -50,22 +51,22 @@
 // `;end` — they are fj ops that must never execute.
 
 ns stream {
-    // M13-raster — emit a RUNTIME 8-nibble (4-byte, little-endian) register as 4 byte.emit calls, for
+    // M13-raster — emit a RUNTIME 8-nibble (4-byte, little-endian) register as 4 hex.print calls, for
     // the device rasterizer's per-seg/per-visplane records (planeheight, scale1, scalestep, wt_ceil,
-    // wt_floor). byte.emit's dispatch reads a 2-nibble-vec cell directly (no dereference through a
+    // wt_floor). hex.print's dispatch reads a 2-nibble-vec cell directly (no dereference through a
     // register — see fj-lessons R21), so each of the 4 bytes is `reg + 2*k*dw` for k in 0..3.
     def emit_bytes4 reg {
-        rep(4, k) byte.emit reg + 2*k*dw
+        rep(4, k) hex.print reg + 2*k*dw
     }
 
     // M13-planesproto — emit ONE visplane bank's band lists for the 0x09 BEGIN_FRAME_PLANES frame.
     // `base` = the bank's buffer label (compile-time), `nvps`/`stride` compile-time; per vp:
-    // [n:1B] then n x ([count:1B] via byte.emit + the (base,zrow) pair collapsed to ONE final
+    // [n:1B] then n x ([count:1B] via hex.print + the (base,zrow) pair collapsed to ONE final
     // colour byte via cm.emit — the colormap lookup now runs once per VISPLANE ENTRY (~dozens),
     // not once per emitted column run). An unbuilt vp's slot0 is still 0-init => emits just [0].
 
     // One column's 5-byte record: [cexcl][fstart][lit][cvp][fvp] — five compile-time-cell reads,
-    // five byte.emits, no loops, no pointer derefs. The device does the rest.
+    // five hex.prints, no loops, no pointer derefs. The device does the rest.
 
     // M13pS2-crush2b — emit a PREFIX of a shared FULL-RANGE band list: the first `take_src` rows.
     // `arr_cell` is a RUNTIME cell (a per-column col array slot) holding the visplane buffer's
@@ -83,13 +84,13 @@ ns stream {
         rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
         hex.cmp 2, cnt, take, p_emit_full, p_emit_full, p_emit_part
       p_emit_full:                                 // cnt <= take: emit the whole band, continue
-        byte.emit cnt
+        hex.print cnt
         cm.emit cidx
-        frame.sub2_chain take, cnt
+        hex.sub 2, take, cnt
         hex.if0 2, take, pdone
         ;ploop
       p_emit_part:                                 // cnt > take: emit the remaining rows, done
-        byte.emit take
+        hex.print take
         cm.emit cidx
         ;pdone
       pdone:
@@ -118,15 +119,15 @@ ns stream {
         hex.if0 2, skip_rows, sread                // done skipping -> read the colour + emit the band
         hex.cmp 2, skip_rows, cnt, spartial, sskipall, sskipall
       sskipall:                                    // skip >= cnt: the band is entirely above the window --
-        frame.sub2_chain skip_rows, cnt                  // HOP its 2 colour bytes without the (expensive)
+        hex.sub 2, skip_rows, cnt                  // HOP its 2 colour bytes without the (expensive)
         hex.ptr_add ptr, 2                         // pointer READS (the skip-scan dominated the emit cost)
         ;scont
       spartial:                                    // 0 < skip < cnt: emit the band's remainder
-        frame.sub2_chain cnt, skip_rows
+        hex.sub 2, cnt, skip_rows
         hex.zero 2, skip_rows
       sread:
         rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
-        byte.emit cnt
+        hex.print cnt
         cm.emit cidx
       scont:
         hex.inc 2, ent_i
@@ -147,11 +148,11 @@ ns stream {
     // ceiling visplane list, ONE wall run [ctake,fstart), floor SUFFIX [fstart,VIEW_H) over the floor
     // list), but instead of implicit column-major run pairs it emits EXPLICIT records
     // [x:1][y1:1][y2:1][colour:1] the device just fills — x is the compile-time column (stl.output_char),
-    // y1/y2 track a running row cursor `ycur`, colour is cm.emit(cidx) for plane bands / byte.emit(lit)
+    // y1/y2 track a running row cursor `ycur`, colour is cm.emit(cidx) for plane bands / hex.print(lit)
     // for the wall. The per-column visplane buffer ADDRESSES are recomputed from the baked cvp/fvp
     // INDICES (planesproto stores indices, not addresses) as base + idx*(1+stride)*dw. An UNCLAIMED
     // column (fvp==0xFF) emits nothing. The frame's trailing 0xFF-x sentinel is emitted by the caller,
-    // once, after all columns. @requires the "byte"/"cm" emit tables + hex.init & stl.ptr_init.
+    // once, after all columns. @requires the "cm" emit table + hex.init & stl.ptr_init.
 
     // One column's 3 windows over the SHARED per-visplane full-range lists (M13pS2-crush2b):
     // ceiling = the ceiling visplane list's PREFIX [0, min(cexcl, fstart)) — the min gives the
@@ -171,10 +172,10 @@ ns stream {
       cok:
         .emit_prefix cbuf_cell, ctake
         hex.mov 2, wlen, fstart   // (hex.mov zeroes dst first)
-        frame.sub2_chain wlen, ctake                    // wlen = fstart - ctake (>= 0 by the clamp)
+        hex.sub 2, wlen, ctake                    // wlen = fstart - ctake (>= 0 by the clamp)
         hex.if0 2, wlen, nowall
-        byte.emit wlen
-        byte.emit wall_lit
+        hex.print wlen
+        hex.print wall_lit
       nowall:
         .emit_suffix fbuf_cell, fstart
         ;skip
@@ -185,8 +186,8 @@ ns stream {
 
     // M13-lines wall tiers. W1: the wall is ONE flat run -> a single [y2][colour] pair.
     def w1_wall fstart, wall_lit {
-        byte.emit fstart
-        byte.emit wall_lit
+        hex.print fstart
+        hex.print wall_lit
     }
 
     // ... and its WINDOWED twin for emit_region's wall piece [wlo, whi): one clamped pair, the same
@@ -197,8 +198,8 @@ ns stream {
     def w1_wall_win wlo, whi, wall_lit @ do_wall, skip {
         hex.cmp 2, wlo, whi, do_wall, skip, skip
       do_wall:
-        byte.emit whi
-        byte.emit wall_lit
+        hex.print whi
+        hex.print wall_lit
       skip:
     }
 
@@ -221,17 +222,17 @@ ns stream {
         hex.read_byte_and_inc y2r, ptr             // cum band index (1..16)
         hex.read_byte_and_inc colr, ptr            // the band's final palette byte
         hex.zero 2, mul_cum + 2*dw   // both operands zero-extended to the mul width
-        hex.mov 2, mul_cum, y2r                    // (mul_lo n reads n nibbles from BOTH sources)
+        hex.mov 2, mul_cum, y2r                    // (mul_low n reads n nibbles from BOTH sources)
         hex.zero 2, mul_wlen + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, mul_wlen, wlen
-        hex.mul_lo 4, mul_out, mul_cum, mul_wlen   // cum * wlen  (<=16 x <=100)
+        hex.mul_low 4, mul_out, mul_cum, mul_wlen   // cum * wlen  (<=16 x <=100)
         hex.shr_hex 4, 1, mul_out                  // >> 4 bits = the 1/16 split
         hex.mov 2, y2r, mul_out
-        frame.add2_chain y2r, ctake                      // y2 = ctake + ((cum*wlen) >> 4)
+        hex.add 2, y2r, ctake                      // y2 = ctake + ((cum*wlen) >> 4)
         hex.cmp 2, y2r, ycur, wsnext, wsnext, wsemit   // no advance -> skip this band
       wsemit:
-        byte.emit y2r
-        byte.emit colr
+        hex.print y2r
+        hex.print colr
         hex.mov 2, ycur, y2r
       wsnext:
         hex.inc 2, ent_i
@@ -278,15 +279,15 @@ ns stream {
         hex.read_byte_and_inc y2r, ptr                 // this run's end row, relative to the top
         hex.if0 2, y2r, wdone                          // rel==0 SENTINEL: every real run ends >=1,
         hex.read_byte_and_inc colr, ptr                // so no counter register, no per-run compare
-        frame.add2_chain y2r, ctake
-        byte.emit y2r
-        rep(1-noise, k) byte.emit colr
+        hex.add 2, y2r, ctake
+        hex.print y2r
+        rep(1-noise, k) hex.print colr
         rep(noise, k) .wpx_grain colr, cmidx
         ;wloop
       wdone:
         hex.read_byte_and_inc colr, ptr                // the last run ends exactly at fstart
-        byte.emit fstart
-        rep(1-noise, k) byte.emit colr
+        hex.print fstart
+        rep(1-noise, k) hex.print colr
         rep(noise, k) .wpx_grain colr, cmidx
         ;end
       ptr: hex.vec w/4
@@ -298,7 +299,7 @@ ns stream {
     // one grained run: cmidx's HIGH byte already holds the column's colormap row (set once per
     // column by the caller), so only the low byte moves. `cm.emit` colormaps AND emits in a single
     // dispatch (indexed by light<<8 | colour) -- the lines tier has no `cm.apply`, and wanting one
-    // would have been the wrong shape anyway: this replaces a byte.emit rather than adding to it.
+    // would have been the wrong shape anyway: this replaces a hex.print rather than adding to it.
     def wpx_grain colr, cmidx {
         hex.mov 2, cmidx, colr
         cm.emit cmidx
@@ -352,11 +353,11 @@ ns stream {
 
 
     // M13-EMIT rung 1 (ablate, measurement only) -- the per-pair OUTPUT, isolated so it can be
-    // switched off while the list walk still runs: the difference prices the two byte.emit
+    // switched off while the list walk still runs: the difference prices the two hex.print
     // dispatches against the two hex.read_byte_and_inc pointer reads that feed them.
     def pair_out a, b {
-        byte.emit a
-        byte.emit b
+        hex.print a
+        hex.print b
     }
 
     // V3 -- ONE half-pair region walk over the window [qlo, qbound). The plane bank keeps a region
@@ -425,7 +426,7 @@ ns stream {
     // shared randomized walker with the face's baked (pre-brightened) colour as the base byte.
     def face_pattern y2f, colf, y1, gnrow, cmidx @ face_h, end {
         hex.mov 2, face_h, y2f
-        frame.sub2_chain face_h, y1
+        hex.sub 2, face_h, y1
         w1rpat.walk face_h, y1, y2f, gnrow, colf, colf, cmidx
         ;end
       face_h: hex.vec 2
@@ -439,7 +440,7 @@ ns stream {
     // but anchored and shaded as the whole face, so the visible rows are pixel-identical to
     // the unfragmented ones). Reject empties/sentinels (y1 > y2 after the clip).
     // M7 P1.4: WINDOW-FIRST. The draw window is computed and tested BEFORE the shade lookup
-    // (frame.step_shade: ptr_index6 + read_byte), so a face that lies wholly outside [rlo, rhi) --
+    // (frame.step_shade: hex.ptr_index 5 + read_byte), so a face that lies wholly outside [rlo, rhi) --
     // every face above the sprite, in the region below it -- costs one compare. Pixel-neutral: both
     // walkers below emit nothing for an empty window (their own `wlo < whi` guards). The shade
     // read's pointer arm is gone on that path too, which no narrow read depends on: every read
@@ -659,7 +660,7 @@ ns stream {
 
     // one run's colour byte: plain, or V1-grained through the single cm.emit dispatch.
     def wcol colr, cmidx, noise {
-        rep(1-noise, k) byte.emit colr
+        rep(1-noise, k) hex.print colr
         rep(noise, k) .wpx_grain colr, cmidx
     }
 
@@ -674,7 +675,7 @@ ns stream {
         hex.cmp 2, wlo, whi, wgo, end, end
       wgo:
         hex.mov 2, wlen, fstart
-        frame.sub2_chain wlen, ctake
+        hex.sub 2, wlen, ctake
         hex.if0 2, wlen, end
         hex.zero w/4 - 2, ptr + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, ptr, wlen
@@ -685,22 +686,22 @@ ns stream {
         hex.read_byte_and_inc y2r, ptr
         hex.if0 2, y2r, wdone
         hex.read_byte_and_inc colr, ptr
-        frame.add2_chain y2r, ctake
+        hex.add 2, y2r, ctake
         hex.cmp 2, y2r, wlo, wskip, wskip, wtest
       wskip:
         ;wloop
       wtest:
         hex.cmp 2, y2r, whi, wemit, wstop, wclamp
       wemit:
-        byte.emit y2r
+        hex.print y2r
         .wcol colr, cmidx, noise
         ;wloop
       wstop:
-        byte.emit y2r
+        hex.print y2r
         .wcol colr, cmidx, noise
         ;end
       wclamp:
-        byte.emit whi
+        hex.print whi
         .wcol colr, cmidx, noise
         ;end
       wdone:
@@ -712,7 +713,7 @@ ns stream {
       last_clamp:
         hex.mov 2, y2r, whi
       last_emit:
-        byte.emit y2r
+        hex.print y2r
         .wcol colr, cmidx, noise
         ;end
       ptr: hex.vec w/4
@@ -853,7 +854,7 @@ ns stream {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx               // x 4 bytes per slot
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index ptr, gps_sbase, gps_sidx    // (ptr is free until the block address below)
+        hex.ptr_index ptr, gps_sbase, gps_sidx    // (ptr is free until the block address below)
         hex.read_byte_and_inc gps_y0, ptr
         hex.read_byte_and_inc gps_y0 + 2*dw, ptr
         hex.read_byte_and_inc gps_lr, ptr
@@ -871,12 +872,12 @@ ns stream {
         rowmap.lookup gps_last, ridx            // -> the row after the last one
         hex.mov 4, ybase, gps_y0                // the runs' base: the bucket top
         hex.mov 4, top, gps_y0
-        frame.add4_chain top, gps_last          // (gps_last's high byte stays 0)
+        hex.add 4, top, gps_last          // (gps_last's high byte stays 0)
         // ⚠ CLAMPED, never REJECTED -- as the record did: the oracle takes the column as soon as the
         // sprite column has any opaque texel, even when the projected run lands off screen. An empty
         // [sy1, sy2) costs nothing: the regions cover the column and every run skips or clamps.
         hex.mov 4, sy1, gps_y0                  // sy1 = clamp(y0 + first row, 0, viewh)
-        frame.add4_chain sy1, gps_r0
+        hex.add 4, sy1, gps_r0
         hex.sign 4, sy1, y1_neg, y1_hi
       y1_neg:
         hex.zero 4, sy1
@@ -930,8 +931,8 @@ ns stream {
         rowmap.lookup gps_rel, ridx             // M7 P1.6: its row below the bucket top
         frame.read3_and_inc smidx, ptr          // the texel, straight into the cm index's low byte
         hex.mov 2, gps_yabs, ybase
-        frame.add2_chain gps_yabs, gps_rel
-        byte.emit gps_yabs
+        hex.add 2, gps_yabs, gps_rel
+        hex.print gps_yabs
         cm.emit smidx
         ;fast_loop
       clipped:
@@ -944,22 +945,22 @@ ns stream {
         rowmap.lookup gps_rel, ridx
         frame.read3_and_inc smidx, ptr
         hex.mov 4, gps_yabs, ybase
-        frame.add4_chain gps_yabs, gps_rel      // (gps_rel's high byte stays 0)
+        hex.add 4, gps_yabs, gps_rel      // (gps_rel's high byte stays 0)
         hex.sign 4, gps_yabs, cl_next, cl_pos   // this run ends above row 0 -> nothing of it shows
       cl_pos:
         hex.if0 4, gps_yabs, cl_next
         hex.scmp 4, gps_yabs, gps_cvh, cl_emit, cl_fin, cl_clamp
       cl_emit:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit smidx
       cl_next:
         ;cl_loop
       cl_fin:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit smidx
         ;done
       cl_clamp:
-        byte.emit gps_cvh
+        hex.print gps_cvh
         cm.emit smidx
       done:
     }
@@ -993,21 +994,21 @@ ns stream {
         rowmap.lookup gps_rel, ridx                 // M7 P1.6
         frame.read3_and_inc smidx, gps_wptr
         hex.mov 4, gps_yabs, ybase
-        frame.add4_chain gps_yabs, gps_rel
+        hex.add 4, gps_yabs, gps_rel
         hex.scmp 4, gps_yabs, gps_wlo4, snext, snext, spos  // ends at or above the window -> skip
       spos:
         hex.scmp 4, gps_yabs, gps_whi4, semit, sfin, sclamp
       semit:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit smidx
       snext:
         ;sloop
       sfin:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit smidx
         ;send
       sclamp:
-        byte.emit whi
+        hex.print whi
         cm.emit smidx
       send:
     }
@@ -1159,7 +1160,7 @@ ns stream {
       ctake_clamp:
         hex.mov 2, ecl_ctake, fstart
       ctake_ok:
-        byte.emit x                              // ONE x header for the whole column
+        hex.print x                              // ONE x header for the whole column
         // V1: this column's grain row, ONCE. `wnoise` is a 161-entry dispatch table baked straight
         // from ReferenceModel.wall_noise, so the hash lives at compile time and costs one lookup
         // (~20@) rather than the shifts and xors it encodes. It lands in ecl_cmidx's HIGH byte because
@@ -1189,7 +1190,7 @@ ns stream {
         rep(stack, k) .steps_splice_c ecl_ctake, ecl_full_lo, ecl_full_hi, w1r, gnrow, ecl_cmidx, cbufa, cbufd, ecl_ccy
       wall:                                      // -- wall run [ecl_ctake, fstart)
         hex.mov 2, ecl_wlen, fstart
-        frame.sub2_chain ecl_wlen, ecl_ctake
+        hex.sub 2, ecl_wlen, ecl_ctake
         hex.if0 2, ecl_wlen, floor
         rep(1-w2s-wpx-w1r, k) .w1_wall fstart, wall_lit
         // M13-W1R: W1's one lit byte as pseudo-random runs, keyed (tier(ecl_wlen), gnrow) -- both

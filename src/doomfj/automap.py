@@ -423,7 +423,7 @@ def fj_lines(p: Pages, prefix: str = "am") -> List[str]:
     (8 nibbles); nibbles q..q+2 of each shifted right b bits, so their low byte is the pixel; the band by comparing
     the row with each threshold; that band's baked frame (no END_CMD / present: the menu's shared tail ends the frame); the row
     plus the band's constant is the dot's top row; then the dot as DOT column records drawn OVER the frame --
-    [x] [KEEP][top][top+DOT][ink] [END] -- KEEP leaving the frame's rows above it. `byte.emit` prints the run-time
+    [x] [KEEP][top][top+DOT][ink] [END] -- KEEP leaving the frame's rows above it. `hex.print` prints the run-time
     bytes. Ends falling through: the caller jumps to the frame's tail"""
     ink = p.inks["you"]
     head = [f"// M8 (doomfj.automap): the map page of {p.mapname} -- {p.nbands} band(s) at {p.units} units a "
@@ -464,7 +464,7 @@ def fj_lines(p: Pages, prefix: str = "am") -> List[str]:
             f"    hex.mov 2, am_y3, {yw}",
             f"    hex.add_constant 2, am_y3, {DOT}"]
     for c in range(DOT):
-        out += [f"    byte.emit {xw}", f"    stl.output_char {KEEP}", f"    byte.emit {yw}", "    byte.emit am_y3",
+        out += [f"    hex.print {xw}", f"    stl.output_char {KEEP}", f"    hex.print {yw}", "    hex.print am_y3",
                 f"    stl.output_char {ink}", f"    stl.output_char {END}"]
         if c + 1 < DOT:
             out += [f"    hex.inc 2, {xw}"]

@@ -168,7 +168,7 @@ def thinker_lines(k: int, th) -> List[str]:
     if all(c is not None for c in consts) and len(set(consts)) == 1:
         return out + [f"    hex.set 1, {S}, {consts[0]}", f"  {p}_end:"]
     labs = [f"{p}_s{s}" for s in range(n)]
-    out.append(f"    sim.jump16 {S}, " + ", ".join(labs + [labs[-1]] * (16 - n)))
+    out.append(f"    hex.switch {S}, " + ", ".join(labs + [labs[-1]] * (16 - n)))
     for s in range(n):
         out += [f"  {labs[s]}:",
                 (f"    hex.set 1, {S}, {consts[s]}" if consts[s] is not None

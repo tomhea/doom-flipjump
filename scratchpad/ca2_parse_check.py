@@ -24,7 +24,7 @@ tmp = Path(tempfile.mkdtemp(prefix="parsecheck_"))
 consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
 
 # the shipped include order (build.py: _RENDERER_INCLUDES + _LINES_INCLUDES + _SIM_INCLUDES)
-ORDER = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
+ORDER = ["projection.fj", "frame_render.fj", "plane_render.fj",
          "plane_bands.fj", "stream_render.fj", "sim.fj"]
 missing = [f for f in ORDER if not (ROOT / "src/fj" / f).exists()]
 assert not missing, "include list names a file that does not exist: %s" % missing

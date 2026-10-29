@@ -27,7 +27,6 @@ from doomfj.things import LEAF_LINK_DECLS, byte_array_decl, spawn_leaf_lists
 from doomfj.world import World
 
 SIM = Path("src/fj/sim.fj")
-FIXP = Path("src/fj/fixed_point.fj")
 NLEAVES, BINDS = 5, [2, 0, 2, 1, 2, 4, 0, 2]          # thing -> leaf, eight things on five leaves
 NT = len(BINDS)
 LINK, UNLINK = 1, 2
@@ -98,7 +97,7 @@ def _assemble(tmp: Path, sim_text: str, name: str) -> Path:
     sim.write_text(sim_text, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")          # sim.fj's pad constants
     out = tmp / f"{name}.fjm"
-    fj.assemble([consts.resolve(), FIXP.resolve(), sim.resolve(), src.resolve()], out,
+    fj.assemble([consts.resolve(), sim.resolve(), src.resolve()], out,
                 memory_width=W, print_time=False)
     return out
 

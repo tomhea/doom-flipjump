@@ -153,6 +153,15 @@ def teleport_mover_destinations(secs, lds, sds, tels) -> dict:
     return {"mover": [(t.line, t.dest_sector) for t in tels if t.dest_sector in mv],
             "door": [(t.line, t.dest_sector) for t in tels if t.dest_sector in dr]}
 
+def top_pass_doors(secs, lds, sds) -> list:
+    """M8 w2fix: the closing doors (doors.door_stay False) whose pass state (doors.pass_state) is their last state --
+    the doors that reverse on a thing AT their top (doorcode.machine_lines' top clamp)"""
+    from doomfj import doors
+    st, kinds = doors.door_states(secs, lds, sds), doors.door_kinds(secs, lds, sds)
+    return [si for si in sorted(st) if not doors.door_stay(kinds[si])
+            and doors.pass_state(secs, lds, sds, si) == len(st[si]) - 1]
+
+
 class Survey:
     def __init__(self, wad, mapname, asset):
         self.wad, self.m, self.asset = wad, mapname, asset
@@ -300,7 +309,7 @@ class Survey:
         self.guard("hanging things on still sectors", self.hanging)
         # M8 C11: THE MONSTER SLOT IDS, from the WAD (the World refuses E1M6 / E1M7 before its own row runs): a slot per
         # monster of EVERY skill plus the barrels -- dm_id, sp_sid, aim_sid, mon_target / bar_src (2 + slot), p_atk are
-        # BYTES in fj with two-level jump16 dispatches (world._code_bits, aim_bits, barrelcode's `dm_id is two nibbles`).
+        # BYTES in fj with two-level hex.switch dispatches (world._code_bits, aim_bits, barrelcode's `dm_id is two nibbles`).
         # DOOM's monsters, the ones gamedata lacks included (3003 the Baron, 3006 the lost soul, ...)
         # M8 C2 (docs/c2-slot-ids.md): past world.SLOT_IDS_NARROW every one of them is THREE nibbles -- the cap is the
         # map's Config.SLOT_ID_BITS (MAP_CONFIG), the width the emitter checks (wall_renderer.check_slot_bits)
@@ -404,6 +413,13 @@ class Survey:
             self.row("INFO", "closing doors a box fits inside (doorcode: the convex centre-inside test)", fit)
         if refused:
             self.row("REFUSED", "closing doors a box fits inside, not convex (doorcode.convex_edges)", refused, "", "")
+        # M8 w2fix (E1M5's door 1, sector 12, found by the auto-gameplay gate): a closing door whose PASS STATE IS ITS
+        # TOP reverses at its top -- OPENING at its last state, which the fj's equality step used to carry past the top.
+        # doorcode.machine_lines clamps it (its reversal mask holds the top state); listed so a map with one is known
+        tops = top_pass_doors(secs, lds, sds) if st else []
+        if tops:
+            self.row("INFO", "closing doors whose pass state is their top (doorcode: the top clamp on a reversal)",
+                     tops)
         # M8 C3: the door rules every map is checked against (each asserts in the model: a refusal names the line)
         mixed = doors.mixed_card_doors(secs, lds, sds) if st else {}
         if mixed:

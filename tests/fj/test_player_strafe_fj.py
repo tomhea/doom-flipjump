@@ -72,7 +72,7 @@ def build(tmp_path_factory):
         src = tmp / ("strafe_%s.fj" % (mut or "ok"))
         src.write_text(_program(mut), encoding="utf-8")
         out = tmp / ("strafe_%s.fjm" % (mut or "ok"))
-        fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), src.resolve()], out, memory_width=W,
+        fj.assemble([consts.resolve(), src.resolve()], out, memory_width=W,
                     print_time=False)
         return out
     return make

@@ -422,7 +422,7 @@ def _abuild(tmp_path, name, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], feed, want
+    return [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()], feed, want
 
 
 def _arun(tmp_path, name, mut=None) -> bool:
@@ -593,7 +593,7 @@ def _bbuild(tmp_path, name, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
+    return [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
 
 
 def _brun(tmp_path, name, mut=None) -> bool:
@@ -1072,7 +1072,7 @@ def _fbuild(tmp_path, name, fire: bool, tics: int):
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     out = tmp_path / ("%s.fjm" % name)
-    fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], out,
+    fj.assemble([consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()], out,
                 memory_width=W, print_time=False)
     io = FixedIO(b"")
     stats = fj.run(out, io_device=io, print_time=False, print_termination=False)

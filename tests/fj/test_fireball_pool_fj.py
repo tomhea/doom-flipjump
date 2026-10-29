@@ -384,7 +384,7 @@ def _build(tmp_path, name, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
+    srcs = [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return srcs, feed, want
 
 
@@ -442,7 +442,7 @@ def _angle_run(tmp_path, name, line) -> bool:
     p = tmp_path / ("%s.fj" % name)
     p.write_text("\n".join(body + data) + "\n" + hoisted_scratch_fj(), encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    srcs = [consts.resolve(), (FJ / "projection.fj").resolve(),
             (FJ / "frame_render.fj").resolve(), p.resolve()]
     return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
                                            should_raise_assertion_error=False)
@@ -593,7 +593,7 @@ def _faim_run(tmp_path, name, mut=None) -> bool:
     p = tmp_path / ("%s.fj" % name)
     p.write_text("\n".join(body + data) + "\n" + hoisted_scratch_fj(), encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    srcs = [consts.resolve(), (FJ / "projection.fj").resolve(),
             (FJ / "frame_render.fj").resolve(), p.resolve()]
     return fj.assemble_and_run_test_output(srcs, b"", want, memory_width=W, warning_as_errors=True,
                                            should_raise_assertion_error=False)
@@ -766,7 +766,7 @@ def _fbuild(tmp_path, name, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
+    return [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
 
 
 def _frun(tmp_path, name, mut=None) -> bool:

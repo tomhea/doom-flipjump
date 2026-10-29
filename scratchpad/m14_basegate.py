@@ -45,7 +45,7 @@ from doomfj.wall_renderer import emit_wall_renderer, write_program_files  # noqa
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
 
 # deg_gate.py's SRC -- no sim.fj, because there is no sim in this build
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 # --nothings: the SAME gated config with things=False. Not a candidate build -- it draws a

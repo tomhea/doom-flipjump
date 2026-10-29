@@ -211,7 +211,13 @@ once per machine state; if A-vs-A separates, the box is too noisy to measure any
 automatically; open it. It holds the standing number with its provenance, the four-step gate a
 new binary must pass, and the ideas already measured (kept or closed) so they are not re-derived.
 
-**`build/doom_e1m1_blocked64.fjm` is the shipped binary since 2026-10-28** (ship #1 of flipjump 1.6.0, class F: blocked63's
+**`build/doom_e1m1_blocked65.fjm` is the shipped binary since 2026-10-28** (ship #2, class S against blocked64: the same
+game on flipjump 1.6.0's own stl at e44ff3f, re-pinned with its own heat list `heat_e1m1_adopt`; sha256 `3a2c9564adbfcb07`,
+rebuilt byte-identical; 1,044/1,044 frames blocked64's; B0 v10 14,249,841, binding 14,792,784 PASS (-12.58%), size 37.40%
+PASS, **63.4 ms/frame against blocked64's 68.3 -- B FASTER x1.076**, the `shipped` baseline re-frozen at 63.6;
+`docs/ship-gate.md` 1). It needs flipjump >= 1.6.0 e44ff3f. Play: `fj --run build/doom_e1m1_blocked65.fjm`.
+
+**`build/doom_e1m1_blocked64.fjm` was the shipped binary (ship #1, 2026-10-28)** (ship #1 of flipjump 1.6.0, class F: blocked63's
 game on 1.6.0's screen / keyboard device API; sha256 `f52751a2bb846c7a`, rebuilt byte-identical; B0 v10 16,297,393, binding
 16,921,550 PASS, size 39.13% PASS, 68.3 ms/frame against blocked63's 67.6 in one A/B run (NOT SEPARATED), the `shipped`
 baseline re-frozen at 68.0 under 1.6.0 e44ff3f; `docs/ship-gate.md` 1). It needs flipjump >= 1.6.0. Play:

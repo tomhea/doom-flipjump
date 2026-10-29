@@ -17,7 +17,7 @@ from flipjump.fjm.fjm_reader import read_fjm_header
 
 from doomfj.config import (DEFAULT_MAP_WAD, FLAT_MAX_WORDS, RENDER_FLAT_MAX_WORDS,
                            Config)
-from doomfj.harness import W, FJM_LZMA_FAST, assemble_fjm, run_fjm
+from doomfj.harness import W, FJM_LZMA_PRESET, assemble_fjm, run_fjm
 from doomfj.lut_generator import (
     generate_dispatch_table_fj, generate_offset_deposit_table_fj, generate_trig_idioms_fj,
 )
@@ -31,7 +31,7 @@ from doomfj.wall_renderer import (BBOX_CULL, DEG, SPR_BLOCK_STRIDE, STACK_STEPS,
 
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
-_RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj"]
+_RENDERER_INCLUDES = ["projection.fj", "frame_render.fj", "plane_render.fj"]
 # ... plus these two for raster_mode="lines" (the shipping tier): the packed-byte ceiling/floor BAND
 # lists pass-1 builds, and the draw_collines present (screenwire) that replaces the framebuffer raster.
 _LINES_INCLUDES = ["plane_bands.fj", "stream_render.fj"]
@@ -443,7 +443,7 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
     out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
     fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
-                lzma_fast=FJM_LZMA_FAST)
+                lzma_preset=FJM_LZMA_PRESET)
     assemble_seconds = round(time.perf_counter() - t, 3)
     term = fj.run(out, print_time=False, print_termination=False, flat_max_words=limit)
 
@@ -609,7 +609,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
             gen, prog, names, cfg.VIEW_W, nss, mapname, persist=_persist, pid_bytes=cfg.PID_BYTES,
             ss_ratio=cfg.SSHEAD_RATIO)
         paths = paths + [part]
-        labels = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST, **_dkw,
+        labels = selfreset.capture_labels(paths, out, lzma_preset=FJM_LZMA_PRESET, **_dkw,
                                           **standalone_run_header(standalone))
         _misaligned = sprbank_misalignment(labels)
         assert _misaligned is None, "build REFUSED: " + str(_misaligned)
@@ -641,7 +641,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things,
                                   extra=_map_persist(wad, mapname, standalone and moving_things)
                                   + automap_persist(cfg, menu))                                       # M8: amap
-        labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST, **_dkw,
+        labels1 = selfreset.capture_labels(paths, out, lzma_preset=FJM_LZMA_PRESET, **_dkw,
                                                 **standalone_run_header(standalone))
         r1 = FjmRunner(out, flat_max_words=limit)
         core1 = _fjcore.Memory(r1.width, flat_max_words=r1.flat_max_words)
@@ -670,7 +670,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         pristine1 = _v1.get
         del core1, r1
         paths = paths + [part]
-        labels2 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST, **_dkw,
+        labels2 = selfreset.capture_labels(paths, out, lzma_preset=FJM_LZMA_PRESET, **_dkw,
                                                 **standalone_run_header(standalone))
         moved = selfreset.verify_labels_unchanged(labels1, labels2, restore_set)
         assert not moved, ("M1 self-reset REFUSED: %d baked addresses moved between passes, e.g. %s"
@@ -707,7 +707,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
                       "view_w": cfg.VIEW_W, "subsectors": nss}
     else:
         fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
-                    lzma_fast=FJM_LZMA_FAST, **_dkw)
+                    lzma_preset=FJM_LZMA_PRESET, **_dkw)
     assemble_seconds = round(time.perf_counter() - t, 3)
     # STAMP THE DOOR GEOMETRY THIS BINARY FROZE, beside the binary. A gate that recomputes door
     # stops from doors.DEFAULT_QUANT compares against whatever that constant says TODAY, which need

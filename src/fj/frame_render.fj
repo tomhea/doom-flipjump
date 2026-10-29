@@ -258,7 +258,7 @@ ns frame {
         hex.xor_zero 3, idx, v3               // idx = base | v = base + v (disjoint bits); v3 -> 0 (kept-zero)
         tex.sample cmidx, idx                 // cmidx low byte = pal (high byte = light, preset per column)
         cm.apply lit, cmidx                   // lit = colormapped palette byte
-        frame.add4_chain frac, step                 // advance the DDA (8.8)
+        hex.add 4, frac, step                 // advance the DDA (8.8)
         stl.fret pixel_ret
     }
 
@@ -274,7 +274,7 @@ ns frame {
         hex.xor_zero 2, idx, v3               // idx = base | v (v < texheight <= 256 => low 2 nibbles); v3 -> 0
         tex.sample cmidx, idx
         cm.apply lit, cmidx
-        frame.add4_chain frac, step
+        hex.add 4, frac, step
         stl.fret pixel_ret
     }
 
@@ -368,7 +368,7 @@ ns frame {
     // and the 11-field col_struct writes are ALL GONE, replaced by two small emitted records: one per
     // NEWLY-referenced visplane ([0xFE/0xFD tag][vp_idx][planeheight:4][light][base] — vp_idx/light/
     // base are the SAME per-seg xorby-baked runtime registers seg_cvpidx/seg_fvpidx/seg_plight/
-    // seg_ceilbase/seg_floorbase already carry today, just byte.emit'd instead of stored; only the
+    // seg_ceilbase/seg_floorbase already carry today, just hex.print'd instead of stored; only the
     // tag is a true compile-time literal since this leaf is SHARED/fcall'd, not unrolled per seg) and
     // one per surviving seg ([x1][x2][scale1:4][scalestep:4][wt_ceil:4 signed][wt_floor:4 signed]
     // [lit][cvp_idx][fvp_idx]). `drawn` is a lone packed byte per column (colstruct-style: ONE
@@ -475,7 +475,7 @@ ns frame {
     // M14-perf: THE COLD HALF of a thing's row, read only once the thing is known to be VISIBLE.
     //
     // MEASURED: 20,832 of 22,146 loads (94.1%) are rejected by proj.project_thing, and
-    // hex.read_table_packed costs one read_byte_and_inc PER BYTE, so a rejected thing used to pay
+    // hex.read_entry_packed costs one read_byte_and_inc PER BYTE, so a rejected thing used to pay
     // for 5 row bytes and a whole second table lookup it never read. Nothing here is reachable
     // from any reject: sp_base/sp_base2/sp_dw are first touched by the bucket/block arithmetic
     // below, and sp_lt by the shade row -- all after `hex.if0 1, vis, ret`.
@@ -497,7 +497,7 @@ ns frame {
       rowc: hex.vec 10                                   // 5 bytes: base, base2, dw
       lti: hex.vec 4
       body:
-        hex.read_table_packed 5, rowc, throwc, n_th, sp_ti
+        hex.read_entry_packed 5, rowc, throwc, n_th, sp_ti
         hex.mov 4, sp_base,  rowc                        // byte 0
         hex.mov 4, sp_base2, rowc + 4*dw                 // byte 2
         hex.mov 2, sp_dw,  rowc + 8*dw                   // byte 4
@@ -506,8 +506,8 @@ ns frame {
         // non-power-of-two (nthings = 251) is where this first went wrong, and a wrong index here
         // does not merely read the wrong class -- it reads off the END of the table.
         hex.mov 4, lti, ss_ltb   // (hex.mov zeroes dst first)
-        frame.add4_chain lti, sp_ti                            // the index needs its OWN cell: a read
-        hex.read_table_packed ltw, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
+        hex.add 4, lti, sp_ti                            // the index needs its OWN cell: a read
+        hex.read_entry_packed ltw, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
     }
 
     // M7 P3.1: a monster VIEW drawn mirrored (the second half of a `TROOA2A8` lump) sets bit 7 of its
@@ -589,7 +589,7 @@ ns frame {
         hex.zero 6, lb_c + 2*dw
         hex.mov 2, lb_c, hb
         hex.mov 8, lb_t, y0
-        .add8_chain lb_t, lb_c                  // the box's end, y0 + hb
+        hex.add 8, lb_t, lb_c                  // the box's end, y0 + hb
         hex.sign 8, lb_t, hi_neg, hi_pos
       hi_neg:
         hex.set 2, yhi1, 1                      // < 0: 0, + 1
@@ -625,7 +625,7 @@ ns frame {
         hex.shl_hex w/4, SLOT_SHIFT, lt_idx             // the column's slot: a power-of-16 stride
         rep(SLOT_BIT, k) hex.shl_bit w/4, lt_idx        // M8 L1: x 2 more for a two-byte pid (SLOT_STRIDE 32)
         hex.set w/4, lt_p, sfslot
-        .ptr_index5 lt_b, lt_p, lt_idx
+        hex.ptr_index 4, lt_b, lt_p, lt_idx
         hex.if_flags cv, 0x0606, l_part, u_some
       u_some:
         hex.mov w/4, lt_p, lt_b
@@ -762,8 +762,8 @@ ns frame {
         hex.zero 6, trb_bucket_h + 2*dw             // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT (idea 20: the mov 2 below covers nibbles 0-1)
         hex.mov 2, trb_bucket_h, trb_bucket + 2*dw      // nibbles of src, so a 2-nibble register would
         hex.mov 8, trb_y0, trb_tytop                    // drag its neighbours in as high nibbles.
-        frame.add8_chain trb_y0, trb_thpx                     // FEET planted: the trb_bucket moves the sprite's TOP
-        frame.sub8_chain trb_y0, trb_bucket_h
+        hex.add 8, trb_y0, trb_thpx                     // FEET planted: the trb_bucket moves the sprite's TOP
+        hex.sub 8, trb_y0, trb_bucket_h
         // M7 P6+P7 E (the owner, 2026-10-05: "monsters should always be shown") -- THE ACTORS RULE, the game tier's
         // alone: its `dsoftm` IS `monbudget` (wall_renderer: the monsters' soft count is the hard budget), and that
         // one equality switches the two lines below on; every other tier expands them to nothing (deg_gate's ops).
@@ -818,7 +818,7 @@ ns frame {
         hex.mov 2*ltw, trb_tab_idx + 2*dw, sp_lt              // M7 P3.1: `ltw` bytes of class
         hex.mov 2, trb_tab_idx, trb_bucket_h
         hex.set w/4, trb_tbl_b, sprlight
-        frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.ptr_index 5, trb_tbl_p, trb_tbl_b, trb_tab_idx
         hex.read_byte trb_shade_row, trb_tbl_p
         // M7 P1.4 -- THE THING'S SLOT. A fragment is recorded as (slot, block): its per-THING
         // constants -- the top row of its bucket, biased, its light row and (M7 P1.6) its bucket,
@@ -836,7 +836,7 @@ ns frame {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx               // x 4 bytes per slot
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.mov 8, gps_yb8, trb_y0
         hex.add_constant 8, gps_yb8, 32768      // two bytes: a tall NEAR sprite's top sits far above
                                                 // row -128, and a one-byte bias WRAPPED (M13-15M)
@@ -852,7 +852,7 @@ ns frame {
         hex.zero 8, trb_col_x
         hex.mov 8, trb_negx1, trb_tx1
         hex.neg 8, trb_negx1
-        hex.mul_lo 8, trb_frac_u, trb_negx1, trb_tistep
+        hex.mul_low 8, trb_frac_u, trb_negx1, trb_tistep
       x1_done:
         hex.set 8, trb_cbound, viewwc              // x2 is INCLUSIVE, so clamp it to VIEW_W-1
         hex.dec 8, trb_cbound
@@ -863,9 +863,9 @@ ns frame {
         hex.mov 2, trb_dw_max, sp_dw
         hex.dec 2, trb_dw_max                       // the last downscaled texture column
         hex.set w/4, trb_drawn_b, drawn
-        frame.ptr_index4 trb_drawn_p, trb_drawn_b, trb_col_x
+        hex.ptr_index 3, trb_drawn_p, trb_drawn_b, trb_col_x
         hex.set w/4, trb_sprflag_b, sprflag
-        frame.ptr_index4 trb_sprflag_p, trb_sprflag_b, trb_col_x
+        hex.ptr_index 3, trb_sprflag_p, trb_sprflag_b, trb_col_x
       col_loop:
         hex.cmp 2, trb_col_x, trb_tx2, col_body, col_body, ret
       col_body:
@@ -943,7 +943,7 @@ ns frame {
         rep(slotstride/16, k) hex.shl_hex w/4, 1, trb_tab_idx   // a power-of-16 stride: whole-nibble shift
         hex.add w/4, trb_tab_idx, trb_slot_ofs          // V4b: slot B lives at byte offset 8
         hex.set w/4, trb_tbl_b, spslot
-        frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.ptr_index 5, trb_tbl_p, trb_tbl_b, trb_tab_idx
         // P2-5: the FIRST write keeps the full arm -- its predecessor is the sprite-bank
         // (high-cluster) read above. Every later write follows it, inside spslot / sprflag, so
         // they take the narrow one. M7 P1.4: three bytes, [s][blk lo][blk hi], where there were
@@ -957,7 +957,7 @@ ns frame {
         hex.ptr_add trb_drawn_p, 1
         hex.ptr_add trb_sprflag_p, 1
         hex.inc 2, trb_col_x
-        frame.add8_chain trb_frac_u, trb_tistep
+        hex.add 8, trb_frac_u, trb_tistep
         ;col_loop
       set_tstop:
         hex.set 1, tstop, 1
@@ -991,11 +991,11 @@ ns frame {
         rep(seen, k) hex.zero 6, trb_bucket_h + 2*dw
         rep(seen, k) hex.mov 2, trb_bucket_h, trb_bucket + 2*dw
         rep(seen, k) hex.mov 8, trb_y0, trb_tytop
-        rep(seen, k) frame.add8_chain trb_y0, trb_thpx
-        rep(seen, k) frame.sub8_chain trb_y0, trb_bucket_h
+        rep(seen, k) hex.add 8, trb_y0, trb_thpx
+        rep(seen, k) hex.sub 8, trb_y0, trb_bucket_h
         rep(seen, k) .ledge_box trb_y0, trb_bucket_h, trb_ylo1, trb_yhi1, viewh
         rep(seen, k) hex.set w/4, trb_drawn_b, drawn
-        rep(seen, k) frame.ptr_index4 trb_drawn_p, trb_drawn_b, trb_col_x
+        rep(seen, k) hex.ptr_index 3, trb_drawn_p, trb_drawn_b, trb_col_x
       seen_loop:
         rep(seen, k) hex.cmp 2, trb_col_x, trb_tx2, seen_col, seen_col, ret
       seen_col:
@@ -1004,7 +1004,7 @@ ns frame {
         rep(seen, k) .rec_goto seen_next
       seen_open:                                // P11 (d): open -- and not FULLY behind its nearer pieces
         rep(seen, k) hex.set w/4, trb_tbl_b, sfflag
-        rep(seen, k) frame.ptr_index4 trb_clip_p, trb_tbl_b, trb_col_x
+        rep(seen, k) hex.ptr_index 3, trb_clip_p, trb_tbl_b, trb_col_x
         rep(seen, k) frame.read_byte5 trb_clip_v, trb_clip_p
         rep(seen, k) .ledge_test trb_clip_v, trb_col_x, trb_ylo1, trb_yhi1, 1, seen_next
         rep(seen, k) .rec_goto seen_hit
@@ -1152,33 +1152,33 @@ ns frame {
         // 2 frac and 2 step multiplies (6+8 rows each) are dead weight. Gate per side.
         hex.if0 1, seg_fmask, u_done
         hex.zero 8, fru1
-        rep(6, j) hex.fixed_mul_lo.row 8, j, fru1, fwu1, fscale
+        rep(6, j) hex.mul_low.row 8, j, fru1, fwu1, fscale + j*dw
         hex.neg 8, fru1
-        frame.add8_chain fru1, ccyfix
+        hex.add 8, fru1, ccyfix
         hex.zero 8, stu1
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stu1, fwu1, fsstep
+        rep(8, j) hex.mul_low.row 8, j, stu1, fwu1, fsstep + j*dw
         hex.if1 1, tsf_lip_u, u_done               // ts-idea 4: a lip's frac2 is dead
         hex.zero 8, fru2
-        rep(6, j) hex.fixed_mul_lo.row 8, j, fru2, fwu2, fscale
+        rep(6, j) hex.mul_low.row 8, j, fru2, fwu2, fscale + j*dw
         hex.neg 8, fru2
-        frame.add8_chain fru2, ccyfix
+        hex.add 8, fru2, ccyfix
         hex.zero 8, stu2
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stu2, fwu2, fsstep
+        rep(8, j) hex.mul_low.row 8, j, stu2, fwu2, fsstep + j*dw
       u_done:
         hex.if0 1, seg_fmask + 1*dw, l_done
         hex.zero 8, frl2
-        rep(6, j) hex.fixed_mul_lo.row 8, j, frl2, fwl2, fscale
+        rep(6, j) hex.mul_low.row 8, j, frl2, fwl2, fscale + j*dw
         hex.neg 8, frl2
-        frame.add8_chain frl2, ccyfix
+        hex.add 8, frl2, ccyfix
         hex.zero 8, stl2
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stl2, fwl2, fsstep
+        rep(8, j) hex.mul_low.row 8, j, stl2, fwl2, fsstep + j*dw
         hex.if1 1, tsf_lip_l, l_done               // ts-idea 4: a lower lip's frac1 is dead
         hex.zero 8, frl1
-        rep(6, j) hex.fixed_mul_lo.row 8, j, frl1, fwl1, fscale
+        rep(6, j) hex.mul_low.row 8, j, frl1, fwl1, fscale + j*dw
         hex.neg 8, frl1
-        frame.add8_chain frl1, ccyfix
+        hex.add 8, frl1, ccyfix
         hex.zero 8, stl1
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stl1, fwl1, fsstep
+        rep(8, j) hex.mul_low.row 8, j, stl1, fwl1, fsstep + j*dw
       l_done:
         ;end
       ccyfix: hex.vec 8
@@ -1206,14 +1206,14 @@ ns frame {
         // ts-idea 2: an absent side's fracs are never read -- skip their advance. The
         // if0 costs ~31; the skipped pair of sub-chains ~190.
         hex.if0 1, seg_fmask, u_done
-        frame.sub8_chain fru1, stu1
+        hex.sub 8, fru1, stu1
         hex.if1 1, tsf_lip_u, u_done               // ts-idea 4: a lip never reads frac2
-        frame.sub8_chain fru2, stu2
+        hex.sub 8, fru2, stu2
       u_done:
         hex.if0 1, seg_fmask + 1*dw, l_done
-        frame.sub8_chain frl2, stl2                // ts-idea 4: frl2 first -- a lip keeps it
+        hex.sub 8, frl2, stl2                // ts-idea 4: frl2 first -- a lip keeps it
         hex.if1 1, tsf_lip_l, l_done               //   and never reads frl1
-        frame.sub8_chain frl1, stl1
+        hex.sub 8, frl1, stl1
       l_done:
     }
 
@@ -1297,16 +1297,16 @@ ns frame {
         // pass 2 hoists wtc8/wtf8. Upper face = [row(front ceil), row(back ceil) - 1]; lower face =
         // [row(back floor), row(front floor)] -- the oracle's wall_screen_span pairs, verbatim.
         hex.mov 4, tsf_wtu1, seg_uh1
-        frame.sub4_chain tsf_wtu1, viewz + 4*dw
+        hex.sub 4, tsf_wtu1, viewz + 4*dw
         hex.sign_extend 8, 4, tsf_wtu1
         hex.mov 4, tsf_wtu2, seg_uh2
-        frame.sub4_chain tsf_wtu2, viewz + 4*dw
+        hex.sub 4, tsf_wtu2, viewz + 4*dw
         hex.sign_extend 8, 4, tsf_wtu2
         hex.mov 4, tsf_wtl1, seg_lh1
-        frame.sub4_chain tsf_wtl1, viewz + 4*dw
+        hex.sub 4, tsf_wtl1, viewz + 4*dw
         hex.sign_extend 8, 4, tsf_wtl1
         hex.mov 4, tsf_wtl2, seg_lh2
-        frame.sub4_chain tsf_wtl2, viewz + 4*dw
+        hex.sub 4, tsf_wtl2, viewz + 4*dw
         hex.sign_extend 8, 4, tsf_wtl2
         hex.set 8, tsf_cviewh1, viewh1
         // ts-idea 1: the lip mode (fmask-1 per side) is PER-SEG -- computed once here,
@@ -1319,15 +1319,15 @@ ns frame {
         hex.zero 6, tsf_col_x + 2*dw            // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, tsf_col_x, x1
         hex.set w/4, tsf_drawn_b, drawn             // the occlusion flag, read but never written here
-        frame.ptr_index4 tsf_drawn_p, tsf_drawn_b, tsf_col_x
+        hex.ptr_index 3, tsf_drawn_p, tsf_drawn_b, tsf_col_x
         hex.set w/4, tsf_sfflag_b, sfflag           // one byte per column: which slots are filled
-        frame.ptr_index4 tsf_sfflag_p, tsf_sfflag_b, tsf_col_x
+        hex.ptr_index 3, tsf_sfflag_p, tsf_sfflag_b, tsf_col_x
         hex.zero w/4 - 2, tsf_slot_idx + 2*dw   // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, tsf_slot_idx, tsf_col_x
         hex.shl_hex w/4, SLOT_SHIFT, tsf_slot_idx            // slotstride = 16 bytes -> a whole-nibble shift
         rep(SLOT_BIT, k) hex.shl_bit w/4, tsf_slot_idx       // M8 L1: 32 for a two-byte pid
         hex.set w/4, tsf_sfslot_b, sfslot
-        frame.ptr_index5 tsf_sfslot_p, tsf_sfslot_b, tsf_slot_idx
+        hex.ptr_index 4, tsf_sfslot_p, tsf_sfslot_b, tsf_slot_idx
       col_loop:
         hex.cmp 2, tsf_col_x, x2, col_body, nofaces, nofaces
       col_body:
@@ -1410,7 +1410,7 @@ ns frame {
         hex.ptr_add tsf_sfflag_p, 1
         hex.ptr_add tsf_sfslot_p, slotstride
         hex.inc 2, tsf_col_x
-        frame.add6_chain tsf_face_scale, tsf_face_scalestep   // ts-idea 5: scale < 0x400000 < 16^6, so nibbles 6-7 stay 0
+        hex.add 6, tsf_face_scale, tsf_face_scalestep   // ts-idea 5: scale < 0x400000 < 16^6, so nibbles 6-7 stay 0
         rep(dda, k) .ts_dda_adv tsf_frac_u1, tsf_frac_u2, tsf_frac_l1, tsf_frac_l2, tsf_step_u1, tsf_step_u2, tsf_step_l1, tsf_step_l2
         ;col_loop
       nofaces:
@@ -1525,7 +1525,7 @@ ns frame {
         hex.sparse_mov HOT_PAD, 2, x, xa                        // the claim scan over the stride-1 pclm[]
         hex.set w/4, pbase, pclm
         // M4: `x` is the LOOP COUNTER as well as the index, so a wide pid cannot scale it in place
-        rep(2-PID_BYTES, k) frame.ptr_index4 pptr, pbase, x  // reads w/4 nibbles of its index (R11)
+        rep(2-PID_BYTES, k) hex.ptr_index 3, pptr, pbase, x  // reads 3 nibbles of its index (R11)
         rep(PID_BYTES-1, k) .lines_pclm_index2 pptr, pbase, x
       col_loop:
         hex.cmp 2, x, xb, col_body, ret, ret
@@ -1537,7 +1537,8 @@ ns frame {
         ;col_next
       claim:
         // pclm[x] = this seg's plane-pair id, and advance. write_byte_and_inc has no n-form.
-        rep(2-PID_BYTES, k) frame.write_byte_and_inc_prearmed pptr, seg_pid
+        rep(2-PID_BYTES, k) hex.write_back seg_pid          // the read above armed pptr (see P2-6)
+        rep(2-PID_BYTES, k) hex.ptr_inc pptr
         rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, pptr, seg_pid
         rep(PID_BYTES-1, k) hex.ptr_add pptr, PID_BYTES
         hex.inc 2, n_claimed
@@ -1663,7 +1664,7 @@ ns frame {
         skypid.lookup issky, pidreg
         rep(1-skyall, k) hex.if0 2, issky, notsky
         skyoff.lookup soff, x
-        frame.add2_chain soff, skb
+        hex.add 2, soff, skb
         hex.zero w/4 - 2, cbufa + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, cbufa, soff
         hex.shl_bit w/4, cbufa                  // u*2: the ids interleave asc,desc
@@ -1681,7 +1682,7 @@ ns frame {
         skypid.lookup issky, pidreg
         rep(1-skyall, k) hex.if0 2, issky, notsky   // skyall=1: force it (bisect probe)
         skyoff.lookup soff, x
-        frame.add2_chain soff, skb
+        hex.add 2, soff, skb
         hex.zero w/4 - 2, cbufa + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, cbufa, soff
         hex.mul_const w/4, cbufa, cbufa, skystride*dw
@@ -1709,9 +1710,9 @@ ns frame {
         hex.zero w/4, sh_idx
         hex.mov 2, sh_idx + 2*dw, cls           // idx = class<<8 | h
         hex.mov 2, sh_idx, y2
-        frame.sub2_chain sh_idx, y1
+        hex.sub 2, sh_idx, y1
         hex.inc 2, sh_idx                       // h = y2 - y1 + 1, in [1, VIEW_H]
-        frame.ptr_index6 sh_p, cpb, sh_idx
+        hex.ptr_index 5, sh_p, cpb, sh_idx
         hex.read_byte cls, sh_p                 // in place: the class byte becomes the colour byte
         ;end
       sh_idx: hex.vec w/4
@@ -1744,7 +1745,7 @@ ns frame {
         hex.zero 2, ly2p1
         hex.zero 2, lcol
         hex.set w/4, sfflag_b, sfflag
-        frame.ptr_index4 sfflag_p, sfflag_b, x
+        hex.ptr_index 3, sfflag_p, sfflag_b, x
         hex.read_byte stv, sfflag_p
         hex.if0 2, stv, end                     // no face in this column -- the common case
         hex.mov 2, ctake, cexcl                 // ctake = min(cexcl, fstart), as the emit computes it
@@ -1757,7 +1758,7 @@ ns frame {
         hex.shl_hex w/4, SLOT_SHIFT, slot_idx            // 16 bytes per column -> a whole-nibble shift
         rep(SLOT_BIT, k) hex.shl_bit w/4, slot_idx       // M8 L1: 32 for a two-byte pid
         hex.set w/4, sfslot_b, sfslot
-        frame.ptr_index5 sfslot_p, sfslot_b, slot_idx
+        hex.ptr_index 4, sfslot_p, sfslot_b, slot_idx
         hex.set w/4, shade_b, stepcol
         // ---- UPPER: [uy1, min(uy2, ctake-1)], inside the ceiling region
         hex.if0 1, stv, up_none
@@ -1832,352 +1833,14 @@ ns frame {
     // scale walk, the same identity the Option-A face DDA relies on.
     def lines_dda_seed scale, scalestep, wtc8, wtf8 < p2_prodc, p2_prodf, p2_stepc, p2_stepf {
         hex.zero 8, p2_prodc
-        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_prodc, wtc8, scale
+        rep(8, j) hex.mul_low.row 8, j, p2_prodc, wtc8, scale + j*dw
         hex.zero 8, p2_stepc
-        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_stepc, wtc8, scalestep
+        rep(8, j) hex.mul_low.row 8, j, p2_stepc, wtc8, scalestep + j*dw
         hex.zero 8, p2_prodf
-        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_prodf, wtf8, scale
+        rep(8, j) hex.mul_low.row 8, j, p2_prodf, wtf8, scale + j*dw
         hex.zero 8, p2_stepf
-        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_stepf, wtf8, scalestep
+        rep(8, j) hex.mul_low.row 8, j, p2_stepf, wtf8, scalestep + j*dw
     }
-    // ==========================================================================================
-    // Idea 14, XOR-delta chained add (2026-09-03). hex.add 8 is TEN dances (carry bracket +
-    // 8 nibbles + bracket), each paying set+clear of hex.tables.ret = 2 x popcount(a leaf-
-    // resident return label, ~10-13 bits) per dance. Fusing every interior [CLEAR r_i]
-    // [SET r_{i+1}] pair into one wflip of r_i^r_{i+1} (adjacent labels, popcount ~2-4) keeps
-    // the data ops bit-identical -- proven by scratchpad/oneshadow/chain_smoke.fj, 8 carry-
-    // stressing vectors vs hex.add 8 -- and the expansion is the same 962 ops, so the swap is
-    // layout-neutral (only the wflip-area chains shrink).
-    // The XOR-of-locals wflip value follows the stl's own precedent (xor_from_pointer.fj:
-    // `wflip ..., read_ptr_and_flip_back^cleanup`).
-    // WARNING - HERMETIC WINDOW: from the first wflip to the last, hex.tables.ret holds a
-    // LIVE label. No other tables.ret-family dance (hex.add/sub/or/and/mul/cmp or their
-    // brackets) may EVER be inserted inside these bodies -- the next dance would arm a stale
-    // ret and wild-jump. exact_xor-family ops (hex.xor, xor_zero, zero, if_flags/if0) are the
-    // only safe interior ops; they wflip their own words, never hex.tables.ret.
-    // one interior boundary of the chained add: finish nibble dst_prev, arm (dst_next,
-    // src_next), and move hex.tables.ret from `prev` to `next` with ONE wflip.
-    def dance_boundary dst_prev, dst_next, src_next, jumper, prev, next \
-            < hex.tables.ret, hex.tables.res {
-        hex.xor_zero dst_prev, hex.tables.res
-        hex.xor jumper,   dst_next
-        hex.xor jumper+4, src_next
-        wflip hex.tables.ret+w, prev^next, jumper
-    }
-
-    //   dst[:8] += src[:8]   == hex.add 8, dst, src  (10 dances: cc + 8 nibbles + cc), with
-    //   the interior [CLEAR ret_i][SET ret_{i+1}] pairs fused into single XOR-delta wflips.
-    // P2-1 (2026-09-04): hex.ptr_index with the repo's own chained add.
-    //   the stl macro is  mov w/4 ; shl_hex ; 3x shr_bit ; shl_hex ; ADD w/4  -- and measured
-    //   1,196.8 executed ops per call, of which the final `hex.add w/4` alone is 554.8. That add
-    //   is exactly what add8_chain replaces more cheaply, and the chain is SIZE-IDENTICAL to the
-    //   stl add, so this swap moves no label at all. Measured: identical pointers for indices
-    //   0x42 / 0x1F64 / 0xFFFF, -84.0 executed ops per call, 0 ops of space.
-    // The chain is the LAST statement, so nothing runs inside its hermetic window.
-    // P2-2 (2026-09-04): the same macro with the SHIFT STAGE at the width the index needs.
-    //   ptr_index computes ptr + index*2w and 2w = 64, so a shift stage of width sw is exact iff
-    //   index < 16^sw / 64:  sw=4 -> index < 1,024;  sw=5 -> < 16,384;  sw=6 -> < 262,144.
-    //   (That rule is MEASURED, not derived: reading the shift sequence as x32 gives 16^sw/32,
-    //   which is wrong by a factor of two -- index 2047 already breaks sw=4. See FINDINGS Q.)
-    //   The mov must stay w/4 -- it clears dst for the 8-nibble add -- and the add8_chain must
-    //   stay w/4 because ptr is a full address.
-    // THE FILLER IS INSIDE THE MACRO, behind the jump, so every expansion is exactly the size of
-    // the width-8 form and nineteen call sites in a dozen macros need no local fillers at all.
-    // Measured size-identical at all three widths; the jump's one op is included in the savings
-    // below (vs 1,103.8 for width 8): sw=6 1,016.8, sw=5 952.8, sw=4 884.8.
-    def ptr_index_fill sw, fill, dst, ptr, index @ end {
-        hex.mov w/4, dst, index
-        hex.shl_hex sw, dst
-        rep(8-#w, i) hex.shr_bit sw, dst
-        hex.shl_hex sw, dst
-        .add8_chain dst, ptr
-        ;end
-        rep(fill, i) stl.fj 0, 0
-      end:
-    }
-    def ptr_index4 dst, ptr, index {    // index < 1,024
-        .ptr_index_fill 4, 767, dst, ptr, index
-    }
-    def ptr_index5 dst, ptr, index {    // index < 16,384
-        .ptr_index_fill 5, 575, dst, ptr, index
-    }
-    def ptr_index6 dst, ptr, index {    // index < 262,144
-        .ptr_index_fill 6, 383, dst, ptr, index
-    }
-    def ptr_index dst, ptr, index {
-        hex.mov w/4, dst, index
-        hex.shl_hex w/4, dst
-        rep(8-#w, i) hex.shr_bit w/4, dst
-        hex.shl_hex w/4, dst
-        .add8_chain dst, ptr
-    }
-    def add8_chain dst, src @ rcc0, r0, r1, r2, r3, r4, r5, r6, r7, rcc1 \
-            < hex.tables.ret, hex.tables.res, hex.add.dst {
-        wflip hex.tables.ret+w, rcc0, hex.add.dst
-      rcc0:
-        hex.zero hex.tables.res
-        hex.xor hex.add.dst,   dst
-        hex.xor hex.add.dst+4, src
-        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
-      r0:
-        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
-      r1:
-        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
-      r2:
-        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
-      r3:
-        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.add.dst, r3, r4
-      r4:
-        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.add.dst, r4, r5
-      r5:
-        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.add.dst, r5, r6
-      r6:
-        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.add.dst, r6, r7
-      r7:
-        hex.xor_zero dst+7*dw, hex.tables.res
-        wflip hex.tables.ret+w, r7^rcc1, hex.add.dst
-      rcc1:
-        wflip hex.tables.ret+w, rcc1
-        hex.zero hex.tables.res
-    }
-    //   dst[:8] -= src[:8]   == hex.sub 8, dst, src.  Same fused skeleton as add8_chain; the
-    //   borrow brackets branch (stl math.fj:227-235) but reconverge without touching
-    //   hex.tables.ret (if0 is exact_xor-family), so every boundary still fuses.
-    def sub8_chain dst, src @ rcc0, cc0_ok, r0, r1, r2, r3, r4, r5, r6, r7, rcc1, done \
-            < hex.tables.ret, hex.tables.res, hex.sub.dst {
-        wflip hex.tables.ret+w, rcc0, hex.sub.dst
-      rcc0:
-        hex.if0 hex.tables.res, cc0_ok         // borrow was 0: res==0, bit already 0
-        hex.sub.not_carry                      // borrow was 1: the entry-0 dance left the bit
-        hex.xor_by hex.tables.res, 0xf         //   SET and res==0xf (math.fj:277-279)
-      cc0_ok:
-        hex.xor hex.sub.dst,   dst
-        hex.xor hex.sub.dst+4, src
-        wflip hex.tables.ret+w, rcc0^r0, hex.sub.dst
-      r0:
-        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.sub.dst, r0, r1
-      r1:
-        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.sub.dst, r1, r2
-      r2:
-        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.sub.dst, r2, r3
-      r3:
-        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.sub.dst, r3, r4
-      r4:
-        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.sub.dst, r4, r5
-      r5:
-        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.sub.dst, r5, r6
-      r6:
-        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.sub.dst, r6, r7
-      r7:
-        hex.xor_zero dst+7*dw, hex.tables.res
-        wflip hex.tables.ret+w, r7^rcc1, hex.sub.dst
-      rcc1:
-        wflip hex.tables.ret+w, rcc1
-        hex.if0 hex.tables.res, done
-        hex.sub.not_carry
-        hex.xor_by hex.tables.res, 0xf
-      done:
-    }
-
-    //   dst[:2] += src[:2]   == hex.add 2, dst, src, boundary-fused (see add8_chain).
-    def add2_chain dst, src @ rcc0, r0, r1, rcc1 \
-            < hex.tables.ret, hex.tables.res, hex.add.dst {
-        wflip hex.tables.ret+w, rcc0, hex.add.dst
-      rcc0:
-        hex.zero hex.tables.res
-        hex.xor hex.add.dst,   dst
-        hex.xor hex.add.dst+4, src
-        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
-      r0:
-        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
-      r1:
-        hex.xor_zero dst+1*dw, hex.tables.res
-        wflip hex.tables.ret+w, r1^rcc1, hex.add.dst
-      rcc1:
-        wflip hex.tables.ret+w, rcc1
-        hex.zero hex.tables.res
-    }
-
-    //   dst[:2] -= src[:2]   == hex.sub 2, dst, src, boundary-fused (see add8_chain).
-    def sub2_chain dst, src @ rcc0, cc0_ok, r0, r1, rcc1, done \
-            < hex.tables.ret, hex.tables.res, hex.sub.dst {
-        wflip hex.tables.ret+w, rcc0, hex.sub.dst
-      rcc0:
-        hex.if0 hex.tables.res, cc0_ok
-        hex.sub.not_carry
-        hex.xor_by hex.tables.res, 0xf
-      cc0_ok:
-        hex.xor hex.sub.dst,   dst
-        hex.xor hex.sub.dst+4, src
-        wflip hex.tables.ret+w, rcc0^r0, hex.sub.dst
-      r0:
-        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.sub.dst, r0, r1
-      r1:
-        hex.xor_zero dst+1*dw, hex.tables.res
-        wflip hex.tables.ret+w, r1^rcc1, hex.sub.dst
-      rcc1:
-        wflip hex.tables.ret+w, rcc1
-        hex.if0 hex.tables.res, done
-        hex.sub.not_carry
-        hex.xor_by hex.tables.res, 0xf
-      done:
-    }
-
-    //   dst[:4] += src[:4]   == hex.add 4, dst, src, boundary-fused (see add8_chain).
-    def add4_chain dst, src @ rcc0, r0, r1, r2, r3, rcc1 \
-            < hex.tables.ret, hex.tables.res, hex.add.dst {
-        wflip hex.tables.ret+w, rcc0, hex.add.dst
-      rcc0:
-        hex.zero hex.tables.res
-        hex.xor hex.add.dst,   dst
-        hex.xor hex.add.dst+4, src
-        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
-      r0:
-        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
-      r1:
-        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
-      r2:
-        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
-      r3:
-        hex.xor_zero dst+3*dw, hex.tables.res
-        wflip hex.tables.ret+w, r3^rcc1, hex.add.dst
-      rcc1:
-        wflip hex.tables.ret+w, rcc1
-        hex.zero hex.tables.res
-    }
-
-    //   dst[:6] += src[:6]   == hex.add 6, dst, src, boundary-fused (see add8_chain).
-    def add6_chain dst, src @ rcc0, r0, r1, r2, r3, r4, r5, rcc1 \
-            < hex.tables.ret, hex.tables.res, hex.add.dst {
-        wflip hex.tables.ret+w, rcc0, hex.add.dst
-      rcc0:
-        hex.zero hex.tables.res
-        hex.xor hex.add.dst,   dst
-        hex.xor hex.add.dst+4, src
-        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
-      r0:
-        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
-      r1:
-        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
-      r2:
-        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
-      r3:
-        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.add.dst, r3, r4
-      r4:
-        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.add.dst, r4, r5
-      r5:
-        hex.xor_zero dst+5*dw, hex.tables.res
-        wflip hex.tables.ret+w, r5^rcc1, hex.add.dst
-      rcc1:
-        wflip hex.tables.ret+w, rcc1
-        hex.zero hex.tables.res
-    }
-
-    //   dst[:4] -= src[:4]   == hex.sub 4, dst, src, boundary-fused (see add8_chain).
-    def sub4_chain dst, src @ rcc0, cc0_ok, r0, r1, r2, r3, rcc1, done \
-            < hex.tables.ret, hex.tables.res, hex.sub.dst {
-        wflip hex.tables.ret+w, rcc0, hex.sub.dst
-      rcc0:
-        hex.if0 hex.tables.res, cc0_ok
-        hex.sub.not_carry
-        hex.xor_by hex.tables.res, 0xf
-      cc0_ok:
-        hex.xor hex.sub.dst,   dst
-        hex.xor hex.sub.dst+4, src
-        wflip hex.tables.ret+w, rcc0^r0, hex.sub.dst
-      r0:
-        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.sub.dst, r0, r1
-      r1:
-        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.sub.dst, r1, r2
-      r2:
-        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.sub.dst, r2, r3
-      r3:
-        hex.xor_zero dst+3*dw, hex.tables.res
-        wflip hex.tables.ret+w, r3^rcc1, hex.sub.dst
-      rcc1:
-        wflip hex.tables.ret+w, rcc1
-        hex.if0 hex.tables.res, done
-        hex.sub.not_carry
-        hex.xor_by hex.tables.res, 0xf
-      done:
-    }
-
-    //   dst[:10] += src[:10]   == hex.add 10, dst, src, boundary-fused (see add8_chain).
-    def add10_chain dst, src @ rcc0, r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, rcc1 \
-            < hex.tables.ret, hex.tables.res, hex.add.dst {
-        wflip hex.tables.ret+w, rcc0, hex.add.dst
-      rcc0:
-        hex.zero hex.tables.res
-        hex.xor hex.add.dst,   dst
-        hex.xor hex.add.dst+4, src
-        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
-      r0:
-        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
-      r1:
-        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
-      r2:
-        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
-      r3:
-        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.add.dst, r3, r4
-      r4:
-        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.add.dst, r4, r5
-      r5:
-        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.add.dst, r5, r6
-      r6:
-        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.add.dst, r6, r7
-      r7:
-        .dance_boundary dst+7*dw, dst+8*dw, src+8*dw, hex.add.dst, r7, r8
-      r8:
-        .dance_boundary dst+8*dw, dst+9*dw, src+9*dw, hex.add.dst, r8, r9
-      r9:
-        hex.xor_zero dst+9*dw, hex.tables.res
-        wflip hex.tables.ret+w, r9^rcc1, hex.add.dst
-      rcc1:
-        wflip hex.tables.ret+w, rcc1
-        hex.zero hex.tables.res
-    }
-
-    //   dst[:10] -= src[:10]   == hex.sub 10, dst, src, boundary-fused (see add8_chain).
-    def sub10_chain dst, src @ rcc0, cc0_ok, r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, rcc1, done \
-            < hex.tables.ret, hex.tables.res, hex.sub.dst {
-        wflip hex.tables.ret+w, rcc0, hex.sub.dst
-      rcc0:
-        hex.if0 hex.tables.res, cc0_ok
-        hex.sub.not_carry
-        hex.xor_by hex.tables.res, 0xf
-      cc0_ok:
-        hex.xor hex.sub.dst,   dst
-        hex.xor hex.sub.dst+4, src
-        wflip hex.tables.ret+w, rcc0^r0, hex.sub.dst
-      r0:
-        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.sub.dst, r0, r1
-      r1:
-        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.sub.dst, r1, r2
-      r2:
-        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.sub.dst, r2, r3
-      r3:
-        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.sub.dst, r3, r4
-      r4:
-        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.sub.dst, r4, r5
-      r5:
-        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.sub.dst, r5, r6
-      r6:
-        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.sub.dst, r6, r7
-      r7:
-        .dance_boundary dst+7*dw, dst+8*dw, src+8*dw, hex.sub.dst, r7, r8
-      r8:
-        .dance_boundary dst+8*dw, dst+9*dw, src+9*dw, hex.sub.dst, r8, r9
-      r9:
-        hex.xor_zero dst+9*dw, hex.tables.res
-        wflip hex.tables.ret+w, r9^rcc1, hex.sub.dst
-      rcc1:
-        wflip hex.tables.ret+w, rcc1
-        hex.if0 hex.tables.res, done
-        hex.sub.not_carry
-        hex.xor_by hex.tables.res, 0xf
-      done:
-    }
-
     // idea 17 (2026-09-03): read a byte into a dst the caller PROVABLY just zeroed --
     // hex.read_byte's own `.zero 2, dst` (~30 executed ops) is redundant there. Only the
     // loaders' piece paths use this, right after their Z-blocks; a dst that can be nonzero
@@ -2215,29 +1878,15 @@ ns frame {
     // every one of them is size-identical to the macro it replaces -- no call site needs a local
     // freeze. Use these ONLY where the census proved every reachable predecessor arm is also in
     // the sub-2^20 hot-data block; hex.* stays for the sprite-bank (high-cluster) pointers.
-    // P2-6 (2026-09-04): a write whose arm is ENTIRELY redundant.
+    // P2-6 (2026-09-04): a write whose arm is ENTIRELY redundant is the stl's `hex.write_back src`.
     //   Three macros share one shape: read pval8 through pptr, branch on it, and on the taken
     //   branch write through the SAME pptr -- which nothing has moved, because only the
     //   not-taken path does the ptr_add. `claim:` and `own:` each have exactly one predecessor
-    //   (that if0), and the read dance restores to_flip before it returns, so on entry the three
-    //   address fields still hold precisely the address the read armed. The write's
-    //   set_flip_and_jump_pointers is then a CLEAR followed by a SET of the identical value.
-    //   Measured: -243.0 executed ops per site, and the byte still lands where it should
-    //   (written through the prearmed form and read back, 0x6D both ways).
-    // This precondition is much WEAKER than arm5's: prearming does not care where the pointer
-    // points, only that the arm already points there -- so it is safe at any address cluster.
-    def write_byte_prearmed src @ end < hex.pointers.read_byte {
-        hex.pointers.read_byte_from_inners_ptrs
-        hex.xor 2, hex.pointers.read_byte, src
-        hex.pointers.xor_byte_to_flip_ptr hex.pointers.read_byte
-        ;end
-        rep(1023, i) stl.fj 0, 0
-      end:
-    }
-    def write_byte_and_inc_prearmed ptr, src {
-        .write_byte_prearmed src
-        hex.ptr_inc ptr
-    }
+    //   (that if0), and no pointer operation (nor any stl.call / stl.return) runs between the
+    //   read and the write, so the armed address is the one the read used -- write_back's
+    //   precondition. Measured: -243.0 executed ops per site against a re-armed write.
+    //   It does not care where the pointer points, only that the arm already points there --
+    //   so it is safe at any address cluster, unlike arm5.
     def read_byte5 dst, ptr < hex.pointers.read_byte {
         hex.zero 2, dst
         .arm5 ptr
@@ -2301,12 +1950,12 @@ ns frame {
     def blk_addr dst, blk, base < gps_boff {
         hex.mov 4, gps_boff + 3*dw, blk
         hex.set w/4, dst, base
-        .add8_chain dst, gps_boff
+        hex.add 8, dst, gps_boff
     }
 
     def lines_dda_step < p2_prodc, p2_prodf, p2_stepc, p2_stepf {
-        .add8_chain p2_prodc, p2_stepc               // idea 14: was hex.add 8 -- same 962 ops
-        .add8_chain p2_prodf, p2_stepf               //   of space, ~170 fewer executed per call
+        hex.add 8, p2_prodc, p2_stepc               // idea 14: was hex.add 8 -- same 962 ops
+        hex.add 8, p2_prodf, p2_stepf               //   of space, ~170 fewer executed per call
     }
 
     // P10 G2: a count nibble of 8..15 carries the side's BASE flag (frame.ts_base_store) -- strip it,
@@ -2376,7 +2025,7 @@ ns frame {
       have:
         hex.if1 2, p2_issky, ids                // the base ceiling is sky: soff is this column's already
         skyoff.lookup soff, x
-        frame.add2_chain soff, skb
+        hex.add 2, soff, skb
       ids:
         .lines_sky_pair_ids sky_base_id, soff, p2_skyca, p2_skycd
       end:
@@ -2397,13 +2046,13 @@ ns frame {
     // idea 11 helpers: seed per seg, step at skipcol, loaders read the shared globals.
     def lines_steps_seed x1 @ sidx, bteam, end_seed < sfflag, sfslot, p2_sffp, p2_sfsp {
         hex.set w/4, bteam, sfflag
-        frame.ptr_index4 p2_sffp, bteam, x1
+        hex.ptr_index 3, p2_sffp, bteam, x1
         hex.zero w/4 - 2, sidx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, sidx, x1
         hex.shl_hex w/4, SLOT_SHIFT, sidx
         rep(SLOT_BIT, k) hex.shl_bit w/4, sidx           // M8 L1: 32 for a two-byte pid
         hex.set w/4, bteam, sfslot
-        frame.ptr_index5 p2_sfsp, bteam, sidx
+        hex.ptr_index 4, p2_sfsp, bteam, sidx
         ;end_seed
       sidx: hex.vec w/4
       bteam: hex.vec w/4
@@ -2411,12 +2060,12 @@ ns frame {
     }
     def lines_spr_seed x1 @ sidx, bteam, end_seed < sprflag, spslot, p2_spfp, p2_sspp {
         hex.set w/4, bteam, sprflag
-        frame.ptr_index4 p2_spfp, bteam, x1
+        hex.ptr_index 3, p2_spfp, bteam, x1
         hex.zero w/4 - 2, sidx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, sidx, x1
         hex.shl_hex w/4, 1, sidx                 // spslot's OWN stride (SPR_SLOT_STRIDE)
         hex.set w/4, bteam, spslot
-        frame.ptr_index5 p2_sspp, bteam, sidx
+        hex.ptr_index 4, p2_sspp, bteam, sidx
         ;end_seed
       sidx: hex.vec w/4
       bteam: hex.vec w/4
@@ -2629,7 +2278,7 @@ ns frame {
         hex.if0 PID_NIBBLES, pval8, own
         ;have
       own:
-        rep(2-PID_BYTES, k) frame.write_byte_prearmed seg_pid
+        rep(2-PID_BYTES, k) hex.write_back seg_pid
         rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, pptr, seg_pid
         hex.mov PID_NIBBLES, pval8, seg_pid
         hex.inc 2, n_claimed
@@ -2662,7 +2311,7 @@ ns frame {
         hex.if0 PID_NIBBLES, pval8, own
         ;have
       own:
-        rep(2-PID_BYTES, k) frame.write_byte_prearmed seg_pid   // claim this column for this seg
+        rep(2-PID_BYTES, k) hex.write_back seg_pid   // claim this column for this seg
         rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, pptr, seg_pid
         hex.mov PID_NIBBLES, pval8, seg_pid
         hex.inc 2, n_claimed
@@ -2701,13 +2350,13 @@ ns frame {
       over:
         hex.mov w/4, tmp, idx
         hex.shl_bit w/4, tmp              // idx*2: two bytes per column
-        frame.ptr_index4 dst, base, tmp
+        hex.ptr_index 3, dst, base, tmp
     }
 
     // per-SEG setup / per-column advance of the pclm[] pointer (the lockstep partner of dptr).
     def lines_plane_ptr x1 < pclm, pbase, pptr {
         hex.set w/4, pbase, pclm
-        rep(2-PID_BYTES, k) frame.ptr_index4 pptr, pbase, x1
+        rep(2-PID_BYTES, k) hex.ptr_index 3, pptr, pbase, x1
         rep(PID_BYTES-1, k) .lines_pclm_index2 pptr, pbase, x1
     }
 
@@ -2788,14 +2437,14 @@ ns frame {
         //
         // ⚠ THE `zero 8` IS LOAD-BEARING, do not drop it. An earlier version of this comment
         // claimed `x` is only read 2-wide here; that is FALSE (CR-2026-09-07).
-        // `frame.lines_step_load` does `frame.ptr_index4 sfflag_p, sfflag_b, x`, and
-        // `ptr_index_fill` opens with `hex.mov w/4, dst, index` -- eight nibbles. The correctness
-        // of this rewrite rests on the `zero 8` clearing all of them, NOT on x being narrow.
+        // `frame.lines_step_load` does `hex.ptr_index 3, sfflag_p, sfflag_b, x` -- three nibbles of x,
+        // one more than the mov below writes. The correctness of this rewrite rests on the `zero 8`
+        // clearing the rest, NOT on x being narrow.
         // Measured: this one call is 1,840,988 ops = 2.34% of the frame.
         hex.sparse_zero HOTTER_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
         hex.sparse_mov HOTTER_PAD, 2, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn
-        frame.ptr_index4 dptr, dbase, x1
+        hex.ptr_index 3, dptr, dbase, x1
         rep(noscan, k) .lines_jmp occproc        // ablate: what does the pre-scan actually buy?
         // M13-lines3: x/x2 are clipped columns in [0,161] here -- 2-nibble unsigned compares and
         // incs replace the 8-nibble signed forms in both hot loops (~2.4x cheaper each, measured).
@@ -2837,7 +2486,7 @@ ns frame {
         // dozens. Ditto-safe: p2_dvalid resets per seg, so a ditto never crosses into this seg.
         rep(deg*w1r, k) hex.set 1, w1rslv, 0
         rep(deg*w1r, k) hex.sparse_mov HOT_PAD, 2, p2_sliver_w, x2
-        rep(deg*w1r, k) frame.sub2_chain p2_sliver_w, x1
+        rep(deg*w1r, k) hex.sub 2, p2_sliver_w, x1
         rep(deg*w1r, k) hex.set 2, p2_sliver_cap, dslvw
         rep(deg*w1r, k) hex.cmp 2, p2_sliver_w, p2_sliver_cap, sliver_yes, sliver_yes, sliver_done
       sliver_yes:
@@ -2846,10 +2495,10 @@ ns frame {
         // M13-paramhoist: the map-unit world heights, once per seg (the per-column subtracts and
         // the 12-nibble fixed_mul width both die; see proj.column_params_m).
         hex.sparse_mov HOT_PAD, 4, p2_wtc8, ceilfix + 4*dw
-        frame.sub4_chain p2_wtc8, viewz + 4*dw
+        hex.sub 4, p2_wtc8, viewz + 4*dw
         hex.sign_extend 8, 4, p2_wtc8
         hex.sparse_mov HOT_PAD, 4, p2_wtf8, floorfix + 4*dw
-        frame.sub4_chain p2_wtf8, viewz + 4*dw
+        hex.sub 4, p2_wtf8, viewz + 4*dw
         hex.sign_extend 8, 4, p2_wtf8
 
         // M13-bakedbands: the four half-list addresses -- pure adds off the per-frame bank
@@ -2860,11 +2509,11 @@ ns frame {
         rep((1-pnear)*(1-ascode), k) .lines_seg_plane half_slots, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         rep((1-pnear)*ascode, k) .lines_seg_plane_ids p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         // W1: see the note at the pass-1 site. Same transform; the `zero 8` is load-bearing
-        // because `x` IS read 8-wide downstream (frame.lines_step_load -> ptr_index4 -> mov w/4).
+        // because `x` IS read wider than 2 downstream (frame.lines_step_load -> hex.ptr_index 3).
         // Measured: 1,059,850 ops = 1.35% of the frame.
         hex.sparse_zero HOT_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
         hex.sparse_mov HOT_PAD, 2, x, x1                        // the claim loop: re-aim drawn[] at x1
-        frame.ptr_index4 dptr, dbase, x1
+        hex.ptr_index 3, dptr, dbase, x1
         // idea 11: the load pointers walk in LOCKSTEP with x, like dptr/pclm above.
         rep(1-noproj, k) .lines_dda_seed scale, scalestep, p2_wtc8, p2_wtf8
         rep(steps*stack, k) .lines_steps_seed x1
@@ -2927,7 +2576,7 @@ ns frame {
         // re-rolling it (the flickering-TV fix's temporal half).
         rep(w1r, k) hex.sparse_zero HOT_PAD, 2, p2_xkey + 2*dw  // idea 20: the mov 2 below covers nibbles 0-1
         rep(w1r, k) hex.sparse_mov HOT_PAD, 2, p2_xkey, x
-        rep(w1r, k) frame.add4_chain p2_xkey, wnoff
+        rep(w1r, k) hex.add 4, p2_xkey, wnoff
         rep(noise*(1-w1r), k) wnoise.lookup p2_gnrow, x   // V1 grain (non-W1R): unanchored
         rep(noise*w1r, k) wnoise.lookup p2_gnrow, p2_xkey
         rep(w1r, k) wnoise2.lookup gnrow2, p2_xkey   // W1R-LOD: the fine + coarse group keys
@@ -2960,7 +2609,7 @@ ns frame {
         // carry a boundary piece/face (faces pick their pattern by their own height): gate
         // the compare so near plain columns keep their 4-px ditto granularity
         rep(w1r, k) hex.sparse_mov HOT_PAD, 2, p2_wlen, p2_fstart
-        rep(w1r, k) frame.sub2_chain p2_wlen, p2_cexcl
+        rep(w1r, k) hex.sub 2, p2_wlen, p2_cexcl
         rep(w1r, k) hex.if0 2, p2_wlen, gate_ucnt
         rep(w1r, k) hex.cmp 2, p2_wlen, p2_cw16, ck_grain2, gate_ucnt, gate_ucnt
       gate_ucnt:
@@ -3079,7 +2728,7 @@ ns frame {
         rep(1-pnear, k) .lines_jmp emit_ditto
         rep(pnear, k) .lines_ditto_plane pval8, p2_dpid, emit_ditto, emit_full
       emit_ditto:
-        byte.emit x
+        hex.print x
         // the ditto is COPY (screenwire.COPY): [0xFD][VIEW_H] copies the VIEW's rows of column x-1 (under a status
         // bar, VIEW_H < H, the left column's bar is never copied), and END closes the record
         stl.output_char 0xFD

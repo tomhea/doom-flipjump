@@ -21,17 +21,17 @@ HOT PRIMITIVES (innermost macro -- what burns the ops)  (attributed 78,662,379 o
   hex.tables.clean_table_entry__table                   954,548    1.21%
   hex.shifts.shr_bit_once                               948,824    1.21%
   hex.add_mul                                           892,816    1.13%
-  frame.sub8_chain                                      834,157    1.06%
-  frame.add8_chain                                      813,362    1.03%
+  hex.sub 8                                      834,157    1.06%
+  hex.add 8                                      813,362    1.03%
   hex.if_flags                                          807,424    1.03%
   hex.cmp                                               529,831    0.67%
   hex.pointers.xor_hex_to_flip_ptr                      523,728    0.67%
   hex.tables.ret                                        499,813    0.64%
   hex.mov                                               474,622    0.60%
-  frame.sub4_chain                                      405,514    0.52%
+  hex.sub 4                                      405,514    0.52%
   hex.tables.res                                        384,880    0.49%
   hex.add.dst                                           346,107    0.44%
-  frame.sub10_chain                                     334,540    0.43%
+  hex.sub 10                                     334,540    0.43%
   hex.add.init                                          327,919    0.42%
   hex.if1                                               313,289    0.40%
   (guard: 13,219 ops sat > 4096 ops past a BARE label and were NOT credited to it)
@@ -39,7 +39,7 @@ HOT PRIMITIVES (innermost macro -- what burns the ops)  (attributed 78,662,379 o
 HOT DOOM MACROS (deepest non-stl caller -- our code)  (attributed 78,662,379 of 78,675,599 ops, 100.0%)
   macro                                                     ops    share
   ----------------------------------------------------------------------
-  frame.dance_boundary                                5,289,252    6.72%
+  hex.add/sub n (the chain boundary)                                5,289,252    6.72%
   sim.check_line                                      4,723,513    6.00%
   frame.seg_pass2_leaf_body_lines                     4,413,349    5.61%
   proj.wall_x_range_m                                 3,672,773    4.67%
@@ -59,8 +59,8 @@ HOT DOOM MACROS (deepest non-stl caller -- our code)  (attributed 78,662,379 of 
   proj.point_to_angle                                 1,228,082    1.56%
   proj.scale_recip_div                                1,220,544    1.55%
   frame.ts_step_faces                                 1,189,139    1.51%
-  frame.ptr_index_fill                                1,140,826    1.45%
+  frame.the filled private ptr_index                                1,140,826    1.45%
   proj.scalestep                                      1,110,366    1.41%
-  frame.add8_chain                                    1,102,425    1.40%
-  frame.sub8_chain                                    1,021,584    1.30%
+  hex.add 8                                    1,102,425    1.40%
+  hex.sub 8                                    1,021,584    1.30%
   hex.tables.clean_table_entry__table                   906,241    1.15%

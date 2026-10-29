@@ -85,23 +85,23 @@ def _fj_frames(tmp_path, name, mut=None):
         pat, new = MUTANTS[mut]
         text, n = re.subn(pat, new, text)
         assert n == 1, "the mutant %s matches the emitted text %d times, not once" % (mut, n)
-    lines = ["stl.startup_and_init_all", "present.init_screen", ";frames", *parts["decls"],
+    lines = ["stl.startup_and_init_all", "screen.init_screen W, H, 8", ";frames", *parts["decls"],
              "pcard: hex.vec 1", "p_dead: hex.vec 1", "hud_ret: hex.vec w/4", "wp_frm: hex.vec 2", "fl_frm: hex.vec 1",
              *PC.decls((P.INVIS_TYPE,)),
              "hud_tail_leaf:", text, "stl.fret hud_ret", "frames:"]
     for f, (wf, ff, inv, sec) in enumerate(FRAMES):
-        lines.append("present.draw_collines")
+        lines.append("screen.draw_collines")
         for x in range(WIDTH):
             lines += [f"stl.output_char {b}" for b in _view_column(f, x)[0]]
         lines += [*hudcode.weapon_row_lines(parts, sec),          # the view's descend leaf in `sec`, verbatim
                   f"hex.set 2, wp_frm, {wf}", f"hex.set 1, fl_frm, {ff}", f"hex.set 3, p_inv, {inv}",
-                  "stl.fcall hud_tail_leaf, hud_ret", "present.end_frame"]
+                  "stl.fcall hud_tail_leaf, hud_ret", "screen.end_frame W, 0"]
     lines.append("stl.loop")
     src = tmp_path / (name + ".fj")
     src.write_text("\n".join(lines) + "\n", encoding="utf-8")
     out = tmp_path / (name + ".fjm")
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
-    fj.assemble([consts.resolve(), (FJ / "present.fj").resolve(), src.resolve()], out, memory_width=W,
+    fj.assemble([consts.resolve(), src.resolve()], out, memory_width=W,
                 print_time=False)
     frames = []
 

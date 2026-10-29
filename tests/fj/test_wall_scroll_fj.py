@@ -54,7 +54,7 @@ def key_lines() -> list:
         m = re.match(r"rep\((w1r|noise\*w1r), k\) (.*p2_xkey.*)$", t)
         if m:
             out.append(m.group(2).strip())
-    assert len(out) == 6 and out[2] == "frame.add4_chain p2_xkey, wnoff", out
+    assert len(out) == 6 and out[2] == "hex.add 4, p2_xkey, wnoff", out
     return out
 
 
@@ -116,7 +116,7 @@ def _assemble_run(tmp_path, name, text):
     p.write_text(text, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
     out = tmp_path / ("%s.fjm" % name)
-    fj.assemble([consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    fj.assemble([consts.resolve(), (FJ / "projection.fj").resolve(),
                  (FJ / "frame_render.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], out,
                 memory_width=W, print_time=False)
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
@@ -162,10 +162,10 @@ def _mut_wrap(old, new):
     return lambda s: _sub(SC.pass2_lines(s), old, new) if s else SC.pass2_lines(s)
 
 
-ADD = "    frame.add4_chain wnoff, wnscr"
+ADD = "    hex.add 4, wnoff, wnscr"
 MUTANTS = {
     "scroll_dropped": (SC.seg_scrolls, _mut_wrap(ADD, None)),
-    "wrong_sign": (SC.seg_scrolls, _mut_wrap(ADD, "    frame.sub4_chain wnoff, wnscr")),
+    "wrong_sign": (SC.seg_scrolls, _mut_wrap(ADD, "    hex.sub 4, wnoff, wnscr")),
     "wrong_seg": (lambda seg, lines: seg.linedef + 1 in lines, SC.pass2_lines),
     "not_restored": (SC.seg_scrolls, _mut_wrap("    hex.mov 4, wnoff, wnsave", None)),
 }

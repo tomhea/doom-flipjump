@@ -1,0 +1,18 @@
+engine: C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4c\profx\engX\_fjcore.pyd
+FJPROFX map: 26 ranges, 17331716 opaque words of 116676416
+FJPROFX labels: 2595541 read, 1979092 flagged in opaque code
+FJPROFX marks: 29
+calibration: 405,468 ops, 4/4 frames, 4.1s
+game0: 1,663,812,565 ops, 104/104 frames, 29.3s
+game1: 1,451,720,703 ops, 104/104 frames, 26.3s
+game2: 1,489,969,039 ops, 104/104 frames, 26.6s
+game3: 1,752,833,673 ops, 104/104 frames, 31.1s
+game4: 1,573,847,065 ops, 104/104 frames, 28.5s
+game5: 1,640,666,598 ops, 104/104 frames, 29.4s
+game6: 1,544,593,176 ops, 104/104 frames, 27.8s
+game7: 1,479,776,251 ops, 104/104 frames, 27.1s
+game8: 1,212,614,501 ops, 104/104 frames, 23.0s
+game9: 1,175,738,980 ops, 104/104 frames, 22.5s
+prof_dump: 1044 present records -> C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4c\profx\adopt4u_games.*
+total 835.7s
+[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py (argv0 C:\Users\tomhe\Documents\doom-stl\scratchpad\12m\profx\drive.py)

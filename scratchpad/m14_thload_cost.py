@@ -83,7 +83,7 @@ def build(k):
     tmp = Path(tempfile.mkdtemp()); src = tmp / "t.fj"
     src.write_text(prog, encoding="utf-8")
     out = tmp / "t.fjm"
-    fj.assemble([(ROOT / "src/fj/fixed_point.fj").resolve(), (ROOT / "src/fj/sim.fj").resolve(),
+    fj.assemble([(ROOT / "src/fj/sim.fj").resolve(),
                  src.resolve()], out, memory_width=W, print_time=False)
     term = fj.run(out, io_device=FixedIO(bytes([0xD0])), print_time=False,
                   print_termination=False)

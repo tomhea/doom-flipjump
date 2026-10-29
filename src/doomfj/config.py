@@ -320,7 +320,7 @@ class Config:
     AUTOMAP: int = 0
     # M8 size (the owner, 2026-10-19: "the 2^27 words-space is a super hard limit"): 1 = the baked point location
     # (`collision.generate_point_location_fj`) keeps each node's CONSTANTS in the node and runs the cross product / the
-    # compare in SHARED subroutines (one hex.mul_lo pair, one hex.scmp per axis) instead of inlining them per node: the
+    # compare in SHARED subroutines (one hex.mul_low pair, one hex.scmp per axis) instead of inlining them per node: the
     # same leaf for every point, for a fcall per node visited. `ptloc_walk` was 19.5M of E1M2 r4's 83.5M words (code,
     # wflip chains and pool tables). 0, the default: the inline walk, byte for byte.
     PTLOC_SHARED: int = 0
@@ -397,6 +397,13 @@ GAME_CFG = Config(VIEW_ROWS=84)
 # M8 L1 (E1M2, its own binary): the widths a map needs beyond the defaults (E1M1's). E1M2 bakes ~411 plane-pair ids
 # (> 255: 3 nibbles, two bytes -- docs/handoff-e1m2.md section 4 (A)) and ~83k band lists (> 65,535: 5 nibbles). The
 # emitter's own asserts (the pid bake, the bands walk) refuse a width a map outgrows, so a missing entry fails loudly.
+# M8 w2fix (E1M5's door 1, found by the auto-gameplay gate): the maps whose emitted doors keep the OLD step past the top
+# -- a closing door whose pass state is its top reverses there on a thing and stepped on past it, where doors.door_tic
+# (and T_VerticalDoor) clamps it at the top with the wait (doorcode.machine_lines' top clamp). E1M1 only, so its
+# emission stays byte-identical: its door 84 is such a door and carries the old step until E1M1 is rebuilt. Every other
+# map clamps (wall_renderer: `top_clamp`)
+DOOR_TOP_STEP_LEGACY = frozenset({"E1M1"})
+
 MAP_CONFIG = {
     # M8 F1.4: SPR_SLOT_CAP -- 305 drawable things over the skills, hard's 295 + 10 pool things + 54 droppers' drops
     # (> 255 slot ids: wall_renderer.check_slot_ids)

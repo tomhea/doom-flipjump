@@ -37,7 +37,6 @@ from doomfj.reference_model import (MAX_STEP, ML_BLOCKING, PLAYER_HEIGHT, PLAYER
 from doomfj.wad import WadFile
 
 E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")
-FIXP = Path("src/fj/fixed_point.fj")
 SIM = Path("src/fj/sim.fj")
 U = 1 << 16
 M32 = 0xFFFFFFFF
@@ -123,7 +122,7 @@ def _assemble(tmp, lvl, body, extra_inputs, lists=None, name="cells"):
     src.write_text(prog, encoding="utf-8")
     out = tmp / f"{name}.fjm"
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")        # sim.fj's pad constants
-    fj.assemble([consts.resolve(), FIXP.resolve(), SIM.resolve(), src.resolve()], out,
+    fj.assemble([consts.resolve(), SIM.resolve(), src.resolve()], out,
                 memory_width=W, print_time=False)
     return out
 
@@ -319,7 +318,7 @@ def ptloc_fjm(tmp_path_factory, level):
     src = d / "p.fj"
     src.write_text(prog, encoding="utf-8")
     out = d / "p.fjm"
-    fj.assemble([FIXP.resolve(), src.resolve()], out, memory_width=W, print_time=False)
+    fj.assemble([src.resolve()], out, memory_width=W, print_time=False)
     return out
 
 
@@ -390,7 +389,7 @@ def mover_fjm(tmp_path_factory, level):
     src.write_text(prog, encoding="utf-8")
     out = tmp / "movers.fjm"
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
-    fj.assemble([consts.resolve(), FIXP.resolve(), SIM.resolve(), src.resolve()], out,
+    fj.assemble([consts.resolve(), SIM.resolve(), src.resolve()], out,
                 memory_width=W, print_time=False)
     return out
 

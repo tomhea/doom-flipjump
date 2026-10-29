@@ -487,7 +487,7 @@ def fj(width, height, lines, selected, colours, label: str = "menu_frame",
 def _fj_text(data: bytes, label: str, end_marker: bool, what: str) -> str:
     """a stream as fj: one `stl.output_char` per byte under `label`"""
     if not end_marker:
-        # the caller supplies END_CMD and the present from a SHARED tail (`present.end_frame`) -- see
+        # the caller supplies END_CMD and the present from a SHARED tail (`screenwire.FJ_END_FRAME`) -- see
         # wall_renderer._menu_lines, where both frame producers fall into one tail
         data = SW.strip_frame_tail(data)
     body = "\n".join(SW.fj_lines(data, "    "))

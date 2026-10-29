@@ -31,7 +31,7 @@ prog = "\n".join([
 ]) + "\n"
 tmp = Path(tempfile.mkdtemp()); src = tmp/"p.fj"; src.write_text(prog, encoding="utf-8")
 out = tmp/"p.fjm"
-fj.assemble([(ROOT/"src/fj/fixed_point.fj").resolve(), src.resolve()], out,
+fj.assemble([src.resolve()], out,
             memory_width=W, print_time=False)
 io = FixedIO(b"")
 t = fj.run(out, io_device=io, print_time=False, print_termination=False)

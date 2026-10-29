@@ -62,7 +62,7 @@ def _wide_slot(rnd, w, act):
 
 
 # M8 C2: the wide map's control -- dm_go's third dispatch level dropped (group 0: every id read as its low byte)
-WIDE_MUTANT = "    sim.jump16 dm_id + 2*dw,"
+WIDE_MUTANT = "    hex.switch dm_id + 2*dw,"
 
 
 def _drop_third_level(text):
@@ -227,7 +227,7 @@ def _build(tmp_path, name, mut=None, mapname="E1M1"):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
+    srcs = [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return srcs, _expected(records, mapname)
 
 
@@ -470,7 +470,7 @@ def _fbuild(tmp_path, name, mut=None, mapname="E1M1"):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    return [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
+    return [consts.resolve(), (FJ / "sim.fj").resolve(), p.resolve()], want
 
 
 def _frun(tmp_path, name, mut=None, mapname="E1M1") -> bool:

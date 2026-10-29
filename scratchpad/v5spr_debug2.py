@@ -30,7 +30,7 @@ if not FJM.exists():
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     p = tmp / "v5d.fj"
     p.write_text(main, encoding="utf-8")
-    SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+    SRC = [ROOT / "src/fj" / f for f in ("projection.fj",
                                          "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                          "stream_render.fj")]
     fj.assemble([consts.resolve(), *[s.resolve() for s in SRC], p.resolve()],

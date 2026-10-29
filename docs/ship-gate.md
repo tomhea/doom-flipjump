@@ -8,7 +8,30 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 ## 1. The standing number
 
-**Since 2026-10-28 the shipped binary is `build/doom_e1m1_blocked64.fjm`** -- class F (flipjump 1.6.0's screen /
+**Since 2026-10-28 (ship #2) the shipped binary is `build/doom_e1m1_blocked65.fjm`** -- class S against blocked64
+(EVERY PIXEL blocked64's): blocked64's game on flipjump 1.6.0's own stl (`stl-adopt`: the stl additions fjdoom moved into
+flipjump, the pool API, `.fjm` v4 with lzma presets, and the stl audit's fixes at 1.6.0 e44ff3f), RE-PINNED with a heat
+list of its own (`heat_e1m1_adopt`: the adoption renamed every label, so blocked27's list no longer matched). Built ONE
+PASS from the 1b command at fa0e7452 with flipjump 1.6.0 e44ff3f (its heat list and census committed in 375b0c64), sha256 `3a2c9564adbfcb07` (full
+`3a2c9564adbfcb07a1378b6c0045ca2291246c4100abcafad68bae4af3815d3b`; built as `adopt4`); REBUILT BYTE-IDENTICAL, the census
+identical too (`blocked65_rebuild.log`). Its gates, each solo (`docs/ship-evidence/blocked65_*.log`):
+
+| what | value |
+|---|---|
+| m2_std_gate / m3_gate | PASS -- 421 / 88 frames byte- and state-exact |
+| p2a / hurt / fight / die | PASS -- 13 of 15 (2 N/A: E1M1 has no yellow / red door) / 7 / 43 / 17, state, pixels and palette exact |
+| class S | the ten gamespeed games + calibration, stock engine: **1,044 of 1,044 frames' sha256 equal to blocked64's** (control: two games share only their 4 menu frames); ops **-11.64 .. -12.98% per game** (`blocked65_frames_compare.log`) |
+| combat set v10 | (mean+p80)/2 = **14,249,841** (blocked64 16,297,393, **-12.56%**); every run state 100/100, pixels 100/100; B0 OK |
+| binding metric | **14,792,784 ops/frame -- PASS** against 22,000,000 (blocked64 16,921,550, **-12.58%**); `gamespeed_trail` PASS (`--validate`'s record equals the binary on every frame of every run) |
+| menu / key tests | key_latch, keyboard_input, menu_screens, skill_menu: 150 passed (`blocked65_menu_tests.log`) |
+| size | **37.40% of 2^27 -- PASS** against 43% (50,198,748 words; file 17,606,504 bytes, .fjm v4); the pool 74.0% of its window, 44,739 of 44,739 groups placed, 20 of 20 hot words pinned, 0 lost |
+| **ms/frame** | **63.4 ms/frame against blocked64's 68.3 -- B FASTER x1.076** (all five pairs, 1.066 .. 1.104; pixels identical; both on 1.6.0 e44ff3f, `blocked65_msframe.log`); 222.8 M fj/s, 14,126,543 ops/frame on msframe's script. The `shipped` baseline is re-frozen on blocked65: **63.6 ms/frame** (`blocked65_msframe_freeze.log`) |
+
+The 12.6% fewer ops come with the adoption itself (`docs/flipjump-1.6.0-plan.md` A1-A8; not attributed per macro):
+adopt3, the same game on the stl before the audit's fixes, ran the same ops to the op in every game and measured
+x1.083 against blocked64 -- the audit's fixes move bytes, not executed ops.
+
+**From 2026-10-28 (ship #1) the shipped binary was `build/doom_e1m1_blocked64.fjm`** -- class F (flipjump 1.6.0's screen /
 keyboard API, the plan's ship #1, `docs/flipjump-1.6.0-plan.md` 1c-1g): blocked63's game with every emitter speaking the
 new device API (7df54d00, the gate harnesses 24621131). Built ONE PASS from the 1b command with flipjump 1.6.0 at 9f6119c,
 sha256 `f52751a2bb846c7a`; REBUILT BYTE-IDENTICAL (`blocked64_rebuild.log`). Its pixels are blocked63's on every gated
@@ -253,12 +276,12 @@ both arms live, and the binary hash is what it checks), so `--against shipped` i
 **The build command of the shipped series** -- ONE PASS since onepass56 (M7 P10, 2026-10-13; below):
 
 ```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game.json.gz --pin-heat scratchpad/12m/heat_e1m1_adopt.json.gz
 ```
 
 `--one-pass-blocks` reads no counts: it WRITES the build's census to `--counts-cache`, the tracked
-`scratchpad/12m/_census_game.json.gz` being the shipped build's (blocked63's since M8, the same census its
-rebuild wrote; blocked62's at P13; blocked58's before) -- the file `tests/host/test_pin_heat.py` fits the heat list against, as it fitted
+`scratchpad/12m/_census_game.json.gz` being the shipped build's (blocked65's since ship #2, the same census its
+rebuild wrote; blocked63's at M8; blocked62's at P13; blocked58's before) -- the file `tests/host/test_pin_heat.py` fits the heat list against, as it fitted
 the two-pass counts cache. **Until P10 the line was the TWO-PASS one** (recovered 2026-09-13 from the session
 transcript that built blocked23 and blocked24, 09-11 11:22 and 13:01 -- the two builds before blocked25 in the same
 series, with the same counts cache; blocked25's own line, 09-11 18:04, was never logged and followed the renderer
@@ -377,6 +400,18 @@ passed against it). Assembled AND run by the installed flipjump-151 at 6711d7a. 
 whole build (the one-pass census 2,227 s). Pinning: 20 of 20 hot words, 0 lost (4 re-keyed by their label), 44,212 groups
 placed, 0 broken, 550,176 tables blocked, the pool 74.2% of its window (`blocked62_pinreport.log`). Class S: VERIFIED by a byte-identical rebuild (`blocked62_rebuild.log`).
 **The play command is `fj --run build/doom_e1m1_blocked62.fjm`.**
+
+**blocked65 (2026-10-28, ship #2: flipjump 1.6.0's stl): ONE PASS -- the line at the top of 1b** with
+`heat_e1m1_adopt`, at fa0e7452 with flipjump 1.6.0 e44ff3f; 1,713 s (the rebuild at 375b0c64). **The heat list is the map's own** (M8 G13,
+`mapprofile.profile("E1M1").heat`), made in three steps the adoption needs once per stl change: (1) the counting pass
+`build_blocked.py game <1b knobs> --record-sites scratchpad/12m/_sites_e1m1_adopt.json.gz` (no `--one-pass-blocks`;
+`blocked65_heat_1a_sites.log`); (2) the one-pass build WITHOUT `--pin-heat` (`blocked65_heat_1b_unpinned.log`), profiled over
+the ten gamespeed games (`profx/drive.py games`, `blocked65_heat_2_games.log`); (3) `heatsites.py` on that profile ->
+20 hot groups, 24,970 hot sites, 0 ops unmapped; its layout control 41,006 words at their base, 3,733 unpinned (byte and
+pointer-read cells), 0 at a wrong base (`blocked65_heat_2_heatsites.log`). Pinning: 20 of 20 hot words, 0 lost, 44,739
+groups placed, 0 broken, 542,974 tables blocked, the pool 74.0% of its window (`blocked65_pinreport.log`). VERIFIED by a
+byte-identical rebuild (`blocked65_rebuild.log`, 1,705 s). Runs on flipjump >= 1.6.0 e44ff3f.
+**The play command is `fj --run build/doom_e1m1_blocked65.fjm`.**
 
 **blocked64 (2026-10-28, flipjump 1.6.0's device API, ship #1): ONE PASS -- the line at the top of 1b** with
 `heat_blocked27_p10`, assembled by flipjump 1.6.0 at 9f6119c (`emit_check.py E1M1 --then` the line). Pinning: 40,529 words
@@ -737,3 +772,60 @@ REBUILD VERIFIED: rebuilt from this command at 71fa53e9 as `build/doom_e1m2_r3b.
 `f18d00c66d211cab26e69585b79ee2a45e52c546a0fbb3cf66d3c037240f574f` both.
 
 </details>
+
+## 6. E1M3 and E1M5 (M8 wave 1): their own binaries, their own numbers
+
+Each level is its OWN binary; E1M1's standing number (section 1) is untouched by them -- E1M1 rebuilt on the same branch
+is BYTE-IDENTICAL to blocked65 (`3a2c9564...`, `build_episode --maps E1M1`, 2026-10-29). Built on branch `m8-adopt`
+(m8-episode + the stl adoption + w2fix-wip; flipjump 1.6.0 at 9877f25) by the final creator (`scripts/build_episode.py`,
+its registry rows `LEVEL_SPREAD`), every gate run solo through `scripts/heavy.py`. Evidence: `docs/ship-evidence/e1m3_v1_*.log`,
+`e1m5_v1_*.log`, `e1m3_e1m5_v1_msframe.log`. The v1 combat sets were frozen from the drafts the day they were built
+(the owner's standing delegation; `scratchpad/gp/scenarios/combat_scenarios_e1m{3,5}_v1.json`).
+
+| gate | **E1M3** (`build/doom_e1m3_v1.fjm`, sha256 `71d56069bb2db8c3`) | **E1M5** (`build/doom_e1m5_v1.fjm`, sha256 `4e8c0ed5e54a85ae`) |
+|---|---|---|
+| `emit_check` (asserts on, no stand-in) | PASS | PASS |
+| the build (spread) | 998 s (spread 1) | 775 s (spread 2: the pool fits) |
+| `p2a_gate` | PASS -- 6 scenarios, 9 N/A | PASS -- 5 scenarios, 9 N/A |
+| `m2_std_gate` | PASS -- 75 frames byte- and state-exact | PASS -- 424 frames |
+| `m3_gate` | PASS -- 88 frames | PASS -- 88 frames |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (8 N/A) / 13 (3 N/A) scenarios | PASS -- 7 / 24 (18 N/A: no barrel, ...) / 13 (3 N/A) |
+| B0 on its v1 combat set | OK -- 11/11 runs exact; binding 15,750,448 | OK -- 11/11; binding 17,074,364 |
+| `gamespeed_trail --record` | PASS, CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m3/gamespeed.json`) | PASS, CONTROL-DOORS N/A (no tour reaches a door) (`scenarios/e1m5/gamespeed.json`) |
+| `gamespeed` | SPEED binding 14,652,491 ops/frame PASS; SIZE 60,373,968 words = **44.98%** of 2^27 (span 79.42%) | SPEED 11,851,855 PASS; SIZE 45,721,482 words = **34.07%** (span 83.58%) |
+| THE PLAYTHROUGH (`playthrough_gate --skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 3147**, byte-, palette- and state-exact on all 3,157 frames (777 s) | **PASS -- LEVEL COMPLETE at frame 4257**, exact on all 4,267 frames (822 s) |
+| `msframe --save-baseline shipped` (the map's timed walk `scenarios/<map>/msframe.json`) | **73.5 ms/frame** [72.8 .. 74.7], 233.5M fj/s, 17,158,103 ops/frame -> `shipped_e1m3` | **58.2 ms/frame** [58.0 .. 58.7], 224.0M fj/s, 13,028,121 ops/frame -> `shipped_e1m5` |
+| REBUILD | **BYTE-IDENTICAL** (`71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784`) | **BYTE-IDENTICAL** (`4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2`) |
+
+Size: E1M3 at 44.98% is over the 43% cap -- the owner, 2026-10-24: "above 43% size is OK".
+The build command (section 1b's, the map's wad and spread; `scripts/build_episode.py --maps E1M3` runs exactly it):
+
+    python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m3_v1.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m3.wad --map E1M3 --out build/doom_e1m3_v1.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m3_v1.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+
+(E1M5: `e1m5` / `E1M5` and `--spread 2`.) Play: `fj --run build/doom_e1m3_v1.fjm`, `fj --run build/doom_e1m5_v1.fjm`.
+
+**Not done yet (recorded, not hidden):** the per-level SPEED PASS (`docs/episode-plan.md` 4.7: a heat list from each
+level's own profile; both build on E1M1's `heat_blocked27_p10`) and the written playtest note (4.6) -- the playthrough
+gate played each level start to exit on the binary. The playthroughs ran on the steering before 2026-10-29's lift rules
+(8183305d); under the current steering E1M3's pin finishes at world 2279 and E1M5's at 4253 (model only).
+
+## 7. E1M9 (M8 wave 2): its own binary, its own numbers
+
+Built and gated as section 6's levels (branch `m8-adopt`, the final creator, every step through `scripts/heavy.py`).
+Evidence: `docs/ship-evidence/e1m9_v1_*.log`. **`build/doom_e1m9_v1.fjm`**, sha256 `33da9dbcc55399a0`, spread 1.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS / 907 s |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 6 scenarios (8 N/A) / 194 frames / 88 frames, byte- and state-exact |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 31 (12 N/A) / 15 (1 N/A) scenarios |
+| B0 on its v1 combat set (keys `97a8a6475101cb0b`) | OK -- 11/11 runs exact; binding 13,649,248 ops/frame. The set was RE-PLANNED before its first pass: the draft's R0-s21 (params aggressive) died in b0's PROXY mirror at frames 98, 99 (`e1m9_v1_b0_before_replan.log`, 2026-10-29); `scenarios_map.mirror_deaths` now refuses a proxy-mirror death too, and R0-s21 is planned steady |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m9/gamespeed.json`) |
+| `gamespeed` | SPEED binding 7,732,082 ops/frame PASS; SIZE 55,452,414 words = **41.32%** of 2^27 PASS (span 77.26%) |
+| THE PLAYTHROUGH (`--skill easy`, seed 2) | **PASS -- LEVEL COMPLETE at frame 4663**, byte-, palette- and state-exact on all 4,673 frames (987 s). Its first run parted at frame 3241 on `p_rad` (binary 2099, mirror 2100): the GATES' MIRROR never counted the timed powers down (`MonsterPhase.weapon`, fixed 00d6ca5e); the binary was right (DOOM's P_PlayerThink order) |
+| `msframe --save-baseline shipped` | **37.7 ms/frame** [37.4 .. 38.8], 208.2M fj/s, 7,849,063 ops/frame -> `shipped_e1m9` (a first measurement, 40.1 [38.8 .. 41.3], ran beside the combat planner and was replaced) |
+| REBUILD | **BYTE-IDENTICAL** (`33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48`) |
+
+The build command: section 6's with `e1m9` / `E1M9`, `--spread 1`. Play: `fj --run build/doom_e1m9_v1.fjm`.
+The playthrough ran on the current steering (8183305d: the lift rules E1M9 needed -- its lift 109 called down from
+its own SR lines). Not done yet, as for section 6: the per-level speed pass and the written playtest note.

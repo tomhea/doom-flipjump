@@ -27,7 +27,8 @@ from pathlib import Path
 import flipjump as fj
 import flipjump.assembler.assembler as _asm
 
-from doomfj.harness import W
+from doomfj import screenwire as SW
+from doomfj.harness import W, FJM_LZMA_PRESET
 
 DW = 2 * W
 VAL_SHIFT = (W + W.bit_length()) - W
@@ -136,7 +137,7 @@ def byte_arrays(bits, words_sorted, view_w, nss, pid_bytes: int = 1, ss_ratio: i
     return out
 
 
-def capture_labels(paths, out_fjm, lzma_fast=True, run_flags=0, io_mode=0, defines_file=None):
+def capture_labels(paths, out_fjm, lzma_preset=FJM_LZMA_PRESET, run_flags=0, io_mode=0, defines_file=None):
     """Assemble, and return the USER label table without paying for the debug-only families.
 
     run_flags / io_mode go into the .fjm header (flipjump >= 1.6.0 at 342a3b9): how `fj --run` runs
@@ -159,7 +160,7 @@ def capture_labels(paths, out_fjm, lzma_fast=True, run_flags=0, io_mode=0, defin
     _asm.save_debugging_labels = hook
     try:
         fj.assemble([Path(p).resolve() for p in paths], Path(out_fjm), memory_width=W,
-                    print_time=False, lzma_fast=lzma_fast, run_flags=run_flags, io_mode=io_mode,
+                    print_time=False, lzma_preset=lzma_preset, run_flags=run_flags, io_mode=io_mode,
                     **({"defines_file": Path(defines_file).resolve()} if defines_file else {}))
     finally:
         _asm.save_debugging_labels = prev
@@ -432,8 +433,8 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
                             "found %d" % len(hits))
     assert sum(1 for l in old_lines if l.strip() == "bad: stl.loop") == 1, \
         "self-reset: bad: stl.loop (the junk-input halt) is not where it was"
-    assert old_lines[hits[0] - 1].strip() == "present.end_frame", \
-        "self-reset: the line before the frame tail is not the end of frame (present.end_frame)"
+    assert old_lines[hits[0] - 1].strip() == SW.FJ_END_FRAME, \
+        "self-reset: the line before the frame tail is not the end of frame (screenwire.FJ_END_FRAME)"
     new_lines = list(old_lines)
     new_lines[hits[0]] = ";m1_reset"          # 1 op -> 1 op: size-neutral, so nothing moves
     assert len(new_lines) == len(old_lines)
@@ -785,8 +786,8 @@ def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1
     m_lines = main.read_text(encoding="utf-8").split("\n")
     hits = [k for k, s in enumerate(m_lines) if s.strip() == "stl.loop"]
     assert len(hits) == 1, "one-pass reset: expected exactly 1 bare stl.loop (the frame tail), found %d" % len(hits)
-    assert m_lines[hits[0] - 1].strip() == "present.end_frame", \
-        "one-pass reset: the line before the frame tail is not the end of frame (present.end_frame)"
+    assert m_lines[hits[0] - 1].strip() == SW.FJ_END_FRAME, \
+        "one-pass reset: the line before the frame tail is not the end of frame (screenwire.FJ_END_FRAME)"
     m_lines[hits[0]] = ";m1_reset"
     main.write_text("\n".join(m_lines), encoding="utf-8")
     entry = gen / ("%s_00_entry.fj" % mapname.lower())

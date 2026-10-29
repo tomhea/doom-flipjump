@@ -61,15 +61,18 @@ def records(n_runs: int):
     # M7 P2b: the DOORS' boxes only -- onewalk's exit guard reads the same name, and "every box,
     # anywhere" put every use press in the exit box (blocked36's first trail run: an AssertionError
     # before the control ran); the exit box keeps the real test
+    # M8 (E1M3's first trail: 'door-wrong rejected on 0 frames'): since M7 P6+P7 the replay is GameSim -- the World, whose
+    # door press reads ITS OWN import of the name (doomfj.world) -- so the world's name is patched too
     import doomfj.doors as _D
-    real_d, real_o = _D.in_use_box_fixed, onewalk.in_use_box_fixed
+    import doomfj.world as _W
+    real_d, real_o, real_w = _D.in_use_box_fixed, onewalk.in_use_box_fixed, _W.in_use_box_fixed
     exits = {tuple(b) for b in onewalk.DoorSim().exits}
-    _D.in_use_box_fixed = onewalk.in_use_box_fixed = (
+    _D.in_use_box_fixed = onewalk.in_use_box_fixed = _W.in_use_box_fixed = (
         lambda box, x, y: tuple(box) not in exits or real_o(box, x, y))
     try:
         GS.validate_scripts(n_runs, quiet=True, trails=wrong)
     finally:
-        _D.in_use_box_fixed, onewalk.in_use_box_fixed = real_d, real_o
+        _D.in_use_box_fixed, onewalk.in_use_box_fixed, _W.in_use_box_fixed = real_d, real_o, real_w
     return doors, shut, wrong
 
 
@@ -136,6 +139,12 @@ def report(lines, ends, opened, trail_ok, pose_parts, door_rejects):
     return 0 if trail_ok and pose_parts and (door_rejects or no_doors) else 1
 
 
+def door_reading(ds) -> tuple:
+    """M8 w2fix: the binary's `dstate` as --validate records it, a tuple -- a count-1 cell reads as its value
+    (probe.read_cells), so on a ONE-door map (E1M8) `verdicts` indexed an int ("'int' object is not subscriptable")"""
+    return ds if isinstance(ds, tuple) else (ds,)
+
+
 def binary_trail(gb, table, orc, run: int, n: int = 100):
     """([(viewx, viewy, viewangle, dstate, mode)] at each game frame's present, frames presented)"""
     import m2_std_gate as gate
@@ -147,7 +156,7 @@ def binary_trail(gb, table, orc, run: int, n: int = 100):
     def present(pr, f):
         if f >= mf:
             c = pr.read_cells(["viewx", "viewy", "viewangle", "dstate", "mode"])
-            got[f - mf] = (c["viewx"], c["viewy"], c["viewangle"], c["dstate"], c["mode"])
+            got[f - mf] = (c["viewx"], c["viewy"], c["viewangle"], door_reading(c["dstate"]), c["mode"])
     p.on_present(present)
     r = gb.run(len(per_frame), GS.events_for(per_frame), p,
                pre_run=lambda pr: pr.verify_known(orc.known_pristine()))

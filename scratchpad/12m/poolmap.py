@@ -81,7 +81,6 @@ CONTROLS (R9)
      against the PAD line's 45,678,048.
 """
 import argparse
-import struct
 import sys
 import types
 from pathlib import Path
@@ -91,9 +90,8 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from flipjump.assembler.preprocessor import BlockPool                    # noqa: E402
-from flipjump.fjm.fjm_consts import (FJ_MAGIC, FJMVersion,               # noqa: E402
-                                     _header_base_format, _header_base_size,
-                                     _header_extension_size, _segment_format, _segment_size)
+from flipjump.fjm.fjm_reader import read_fjm_header                      # noqa: E402
+from flipjump.utils.exceptions import FlipJumpReadFjmException           # noqa: E402
 
 import fjmsize                                                           # noqa: E402
 from profx.pool import load_heat                                         # noqa: E402
@@ -103,25 +101,20 @@ from build_blocked import _counts_sig, _load_counts                      # noqa:
 # ship-gate 1b's build command, plus build_blocked.py's own defaults for what it does not pass
 # M7 P8a: the program outgrew 0x60000000 (blocked52 r0: "the program reached 0x611aa840") -> base 0x80000000
 SHIP_GATE = dict(pool_base=0x80000000, span_bits=0x7FFFFFE0, spread=2, spread_min_count=256,
-                 max_slot_ops=512, width_buckets=True, heat="scratchpad/12m/heat_blocked27_p10.json.gz",
+                 max_slot_ops=512, width_buckets=True, heat="scratchpad/12m/heat_e1m1_adopt.json.gz",
                  tier="game", map="E1M1", wad="tests/fixtures/freedoom_e1m1.wad")
 
 
 def read_segments(path):
     """the .fjm's segment table as (start, length, data_start, data_length) words -- the header
-    only, so this costs no decompression"""
-    raw = Path(path).read_bytes()
-    magic, memory_width, version, segment_num = struct.unpack(
-        _header_base_format, raw[:_header_base_size])
-    if magic != FJ_MAGIC:
-        raise ValueError("%s: bad magic 0x%x -- not an .fjm?" % (path, magic))
-    off = _header_base_size
-    if FJMVersion(version) != FJMVersion.BaseVersion:
-        off += _header_extension_size
-    segments = [struct.unpack(_segment_format,
-                              raw[off + i * _segment_size:off + (i + 1) * _segment_size])
-                for i in range(segment_num)]
-    return memory_width, segments
+    only, so this costs no data decompression (version 4 decompresses the table's own stream)"""
+    # flipjump's own header reader (A11): .fjm version 4 -- flipjump 1.6.0's default -- compresses the segment
+    # table, so the struct walk this used to do read compressed bytes as segment records
+    try:
+        header = read_fjm_header(Path(path))
+    except FlipJumpReadFjmException as e:
+        raise ValueError("%s: %s -- not an .fjm?" % (path, e)) from e
+    return header.memory_width, [tuple(seg) for seg in header.segments]
 
 
 def split_at(segments, pool_base_words):
@@ -136,13 +129,13 @@ def split_at(segments, pool_base_words):
 
 
 def probe_pool(memory_width, counts, widths, width_hist, alias, knobs):
-    """a BlockPool that only PRICES: `_preallocate` runs in __init__, nothing is assembled"""
-    return BlockPool(memory_width, knobs["pool_base"], counts=counts, widths=widths,
-                     span_bits=knobs["span_bits"], alias=alias, spread=knobs["spread"],
-                     spread_min_count=knobs["spread_min_count"],
-                     max_slot_ops=knobs["max_slot_ops"], width_hist=width_hist,
-                     width_buckets=knobs["width_buckets"], wants=None,
+    """a BlockPool that only PRICES: its census laid out (place_deferred's layout step), nothing is assembled"""
+    pool = BlockPool(memory_width, knobs["pool_base"], span_bits=knobs["span_bits"], spread=knobs["spread"],
+                     spread_min_count=knobs["spread_min_count"], max_slot_ops=knobs["max_slot_ops"],
                      **({"heat": knobs["heat_list"]} if knobs.get("heat_list") else {}))
+    pool.alias = dict(alias or {})
+    pool.lay_out(dict(counts), {g: dict(h) for g, h in width_hist.items()})
+    return pool
 
 
 def placed_first(pool, groups):

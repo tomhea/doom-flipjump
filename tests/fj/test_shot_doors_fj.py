@@ -87,7 +87,8 @@ def _rec_program(leaf):
             *["hex.input 1, din\nhex.mov 1, drawn + %d*dw, din" % (AC.FIRST + c) for c in range(AC.NCOLS)],
             *["hex.input 1, aim_sid + %d*dw" % (2 * c) for c in range(AC.NCOLS)],
             *SC.pre_lines(),
-            # the seg's pass 1: the columns it claims (the harness writes them, as seg_pass1_leaf's mark_drawn would)
+            # the seg's columns claimed (the harness writes them, as seg_pass2_leaf's claim loop does -- pass 1 only
+            # reads `drawn`; M8 w2fix: the record sits after PASS 2, wall_renderer.solid_seg_call_lines)
             *["hex.input 1, din\nhex.mov 1, drawn + %d*dw, din" % (AC.FIRST + c) for c in range(AC.NCOLS)]]
     for k in range(4):                                  # post_lines(k), on the record's k
         body += [f"hex.xor_by 1, kin, {k}", f"hex.if0 1, kin, pk{k}", f"hex.xor_by 1, kin, {k}", f";pn{k}",
@@ -109,7 +110,7 @@ def _rec_run(tmp_path, leaf):
     src.write_text(_rec_program(leaf), encoding="utf-8")
     out = tmp_path / "rec.fjm"
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
-    fj.assemble([consts.resolve(), (FJDIR / "fixed_point.fj").resolve(), (FJDIR / "frame_render.fj").resolve(),
+    fj.assemble([consts.resolve(), (FJDIR / "frame_render.fj").resolve(),
                  (FJDIR / "projection.fj").resolve(), src.resolve()], out, memory_width=W, print_time=False)
     recs = _records()
     feed = b""
@@ -275,7 +276,7 @@ def _press_run(tmp_path, gun_mut=None, mel_mut=None, switch=False):
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
     tab = tmp_path / "wpo.fj"
     tab.write_text(WC.shot_table_fj(), encoding="utf-8")
-    fj.assemble([consts.resolve(), (FJDIR / "fixed_point.fj").resolve(), src.resolve(), tab.resolve()], out,
+    fj.assemble([consts.resolve(), src.resolve(), tab.resolve()], out,
                 memory_width=W, print_time=False)
     recs = _press_records(specs, nd)
     slots = sorted({d for _s, sl, _w in specs for d in sl})

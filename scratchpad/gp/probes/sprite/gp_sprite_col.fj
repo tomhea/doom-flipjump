@@ -7,7 +7,7 @@
 // ==============================================================================================
 ns gpspr {
     // stream.steps_face, WINDOW-FIRST. The only change: the draw window [draw_lo, draw_hi) is
-    // computed and tested BEFORE the shade lookup (frame.step_shade = ptr_index6 + read_byte)
+    // computed and tested BEFORE the shade lookup (frame.step_shade = hex.ptr_index 5 + read_byte)
     // and the pattern walk. The original computes the shade for a face that lies wholly outside
     // the region's window and only then lets the walker's own guard emit nothing -- which is what
     // the SECOND region of a sprite-split column does for every face above the sprite.
@@ -245,7 +245,7 @@ ns gpspr {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx                   // x 4 bytes per slot
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.read_byte_and_inc gps_y0, gps_ptr
         hex.read_byte_and_inc gps_y0 + 2*dw, gps_ptr
         hex.read_byte gps_lr, gps_ptr
@@ -257,14 +257,14 @@ ns gpspr {
         hex.mov 4, gps_sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, gps_sidx
         hex.set w/4, gps_sbase, sprbank
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.read_byte_and_inc gps_r0, gps_ptr       // gps_r0 / gps_last are 4 wide, high byte 0
         hex.read_byte_and_inc gps_last, gps_ptr
         hex.ptr_inc gps_ptr                         // past [n]: at the first (rel, texel)
         hex.mov 4, gps_ybase, gps_y0
-        frame.add4_chain gps_ybase, gps_r0          // y_base = y0 + r0 (signed, 4 nibbles)
+        hex.add 4, gps_ybase, gps_r0          // y_base = y0 + r0 (signed, 4 nibbles)
         hex.mov 4, gps_top, gps_ybase
-        frame.add4_chain gps_top, gps_last          // y_base + last_rel
+        hex.add 4, gps_top, gps_last          // y_base + last_rel
         hex.mov 4, gps_sy1, gps_ybase               // sy1 = clamp(y_base, 0, viewh)
         hex.sign 4, gps_sy1, y1_neg, y1_hi
       y1_neg:
@@ -303,8 +303,8 @@ ns gpspr {
         hex.if0 2, gps_rel, done
         hex.read_byte_and_inc gps_smidx, gps_ptr
         hex.mov 4, gps_yabs, gps_ybase
-        frame.add4_chain gps_yabs, gps_rel
-        byte.emit gps_yabs
+        hex.add 4, gps_yabs, gps_rel
+        hex.print gps_yabs
         cm.emit gps_smidx
         ;fast
       clipped:
@@ -313,22 +313,22 @@ ns gpspr {
         hex.if0 2, gps_rel, done
         hex.read_byte_and_inc gps_smidx, gps_ptr
         hex.mov 4, gps_yabs, gps_ybase
-        frame.add4_chain gps_yabs, gps_rel
+        hex.add 4, gps_yabs, gps_rel
         hex.sign 4, gps_yabs, cl_next, cl_pos      // ends above row 0 -> nothing of it shows
       cl_pos:
         hex.if0 4, gps_yabs, cl_next
         hex.scmp 4, gps_yabs, gps_cvh, cl_emit, cl_fin, cl_clamp
       cl_emit:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
       cl_next:
         ;cl_loop
       cl_fin:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
         ;done
       cl_clamp:
-        byte.emit gps_cvh
+        hex.print gps_cvh
         cm.emit gps_smidx
       done:
     }
@@ -343,7 +343,7 @@ ns gpspr {
       ctake_clamp:
         hex.mov 2, ecl_ctake, fstart
       ctake_ok:
-        byte.emit x
+        hex.print x
         stream.wpx_grain_col gnrow, ecl_cmidx
         hex.set 2, ecl_ccy, centery
         hex.zero 2, ecl_full_lo
@@ -358,7 +358,7 @@ ns gpspr {
         stream.steps_splice_c ecl_ctake, ecl_full_lo, ecl_full_hi, 1, gnrow, ecl_cmidx, cbufa, cbufd, ecl_ccy
       wall:
         hex.mov 2, ecl_wlen, fstart
-        frame.sub2_chain ecl_wlen, ecl_ctake
+        hex.sub 2, ecl_wlen, ecl_ctake
         hex.if0 2, ecl_wlen, floor
         hex.if0 1, w1rslv, w1r_test
         stream.w1_wall fstart, seg_litf
@@ -418,7 +418,7 @@ ns gpspr {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx                   // x 4 bytes per slot
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.mov 8, gps_yb8, trb_y0
         hex.add_constant 8, gps_yb8, 32768
         hex.write_byte_and_inc gps_ptr, gps_yb8
@@ -471,7 +471,7 @@ ns gpspr {
         hex.mov w/4, trb_blk_ofs, trb_blk
         rep(blkshift, k) hex.shl_bit w/4, trb_blk_ofs
         hex.set w/4, trb_tbl_b, sprbank
-        frame.ptr_index trb_tbl_p, trb_tbl_b, trb_blk_ofs
+        hex.ptr_index trb_tbl_p, trb_tbl_b, trb_blk_ofs
         hex.ptr_add trb_tbl_p, 1                    // only last_rel: r0 is read in pass 2 now
         hex.read_byte trb_run_last, trb_tbl_p
         hex.if0 2, trb_run_last, col_next           // a fully transparent sprite column
@@ -481,7 +481,7 @@ ns gpspr {
         hex.shl_hex w/4, 1, trb_tab_idx             // 16 bytes per column, as TODAY
         hex.add w/4, trb_tab_idx, trb_slot_ofs
         hex.set w/4, trb_tbl_b, spslot
-        frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.ptr_index 5, trb_tbl_p, trb_tbl_b, trb_tab_idx
         hex.write_byte_and_inc trb_tbl_p, gps_s_rec
         frame.write_byte_and_inc5 trb_tbl_p, trb_blk
         frame.write_byte5 trb_tbl_p, trb_blk + 2*dw
@@ -490,7 +490,7 @@ ns gpspr {
         hex.ptr_add trb_drawn_p, 1
         hex.ptr_add trb_sprflag_p, 1
         hex.inc 2, trb_col_x
-        frame.add8_chain trb_frac_u, trb_tistep
+        hex.add 8, trb_frac_u, trb_tistep
         ;col_loop
       ret:
     }
@@ -554,12 +554,12 @@ ns gpspr {
     }
     // a block ADDRESS by whole-nibble placement: 64 ops x 64 bits = 4096 = 16^3 bits per block,
     // so base + blk*4096 is the four nibbles of blk written at nibble 3, plus the base. TODAY:
-    // six shl_bit w/4 and a frame.ptr_index (the same address, bit-shifted, then scaled by dw).
+    // six shl_bit w/4 and a hex.ptr_index (the same address, bit-shifted, then scaled by dw).
     def blk_addr dst, blk, base < gps_boff {
         hex.zero w/4, gps_boff
         hex.mov 4, gps_boff + 3*dw, blk
         hex.set w/4, dst, base
-        frame.add8_chain dst, gps_boff
+        hex.add 8, dst, gps_boff
     }
 
     def frag_derive2 s, sblk @ fetch, have, y1_neg, y1_hi, y1_clamp, y1_ok, y2_neg, y2_hi, y2_clamp, y2_ok, end \
@@ -572,7 +572,7 @@ ns gpspr {
         hex.shl_bit w/4, gps_sidx
         hex.shl_bit w/4, gps_sidx
         hex.set w/4, gps_sbase, gpslot
-        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.ptr_index gps_ptr, gps_sbase, gps_sidx
         hex.read_byte_and_inc gps_y0, gps_ptr
         hex.read_byte_and_inc gps_y0 + 2*dw, gps_ptr
         hex.read_byte gps_lr, gps_ptr
@@ -585,9 +585,9 @@ ns gpspr {
         .read3_and_inc gps_last, gps_ptr
         hex.add_constant 3, gps_ptr, dw             // past [n]
         hex.mov 4, gps_ybase, gps_y0
-        frame.add4_chain gps_ybase, gps_r0
+        hex.add 4, gps_ybase, gps_r0
         hex.mov 4, gps_top, gps_ybase
-        frame.add4_chain gps_top, gps_last
+        hex.add 4, gps_top, gps_last
         hex.mov 4, gps_sy1, gps_ybase
         hex.sign 4, gps_sy1, y1_neg, y1_hi
       y1_neg:
@@ -618,7 +618,7 @@ ns gpspr {
     // region 1 runs, and its step faces read stepcol through frame.step_shade (hex.read_byte, a
     // full arm to ANOTHER cluster) -- so the first read's predecessor arm is not in this block.
     // (The first version armed it narrow and painted wrong rows on heavy:gate664; t2_emit.py's
-    // PROP2 == TODAY check caught it.) byte.emit / cm.emit / the band and W1R walkers are
+    // PROP2 == TODAY check caught it.) hex.print / cm.emit / the band and W1R walkers are
     // dispatches that never arm, so every LATER read of the column follows a read of this block.
     def runs2 @ fast, fast_loop, fast_have, clipped, cl_loop, cl_have, chk_bot, cl_pos, cl_emit, cl_fin, cl_clamp, cl_next, done \
             < gps_ptr, gps_ybase, gps_top, gps_rel, gps_yabs, gps_smidx, gps_cvh {
@@ -634,8 +634,8 @@ ns gpspr {
         hex.if0 2, gps_rel, done
         .read3_and_inc gps_smidx, gps_ptr
         hex.mov 2, gps_yabs, gps_ybase
-        frame.add2_chain gps_yabs, gps_rel
-        byte.emit gps_yabs
+        hex.add 2, gps_yabs, gps_rel
+        hex.print gps_yabs
         cm.emit gps_smidx
         ;fast_loop
       clipped:
@@ -647,22 +647,22 @@ ns gpspr {
         hex.if0 2, gps_rel, done
         .read3_and_inc gps_smidx, gps_ptr
         hex.mov 4, gps_yabs, gps_ybase
-        frame.add4_chain gps_yabs, gps_rel
+        hex.add 4, gps_yabs, gps_rel
         hex.sign 4, gps_yabs, cl_next, cl_pos
       cl_pos:
         hex.if0 4, gps_yabs, cl_next
         hex.scmp 4, gps_yabs, gps_cvh, cl_emit, cl_fin, cl_clamp
       cl_emit:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
       cl_next:
         ;cl_loop
       cl_fin:
-        byte.emit gps_yabs
+        hex.print gps_yabs
         cm.emit gps_smidx
         ;done
       cl_clamp:
-        byte.emit gps_cvh
+        hex.print gps_cvh
         cm.emit gps_smidx
       done:
     }
@@ -676,7 +676,7 @@ ns gpspr {
       ctake_clamp:
         hex.mov 2, ecl_ctake, fstart
       ctake_ok:
-        byte.emit x
+        hex.print x
         stream.wpx_grain_col gnrow, ecl_cmidx
         hex.set 2, ecl_ccy, centery
         hex.zero 2, ecl_full_lo
@@ -691,7 +691,7 @@ ns gpspr {
         stream.steps_splice_c ecl_ctake, ecl_full_lo, ecl_full_hi, 1, gnrow, ecl_cmidx, cbufa, cbufd, ecl_ccy
       wall:
         hex.mov 2, ecl_wlen, fstart
-        frame.sub2_chain ecl_wlen, ecl_ctake
+        hex.sub 2, ecl_wlen, ecl_ctake
         hex.if0 2, ecl_wlen, floor
         hex.if0 1, w1rslv, w1r_test
         stream.w1_wall fstart, seg_litf
@@ -782,7 +782,7 @@ ns gpspr {
         hex.shl_hex w/4, 1, trb_tab_idx
         hex.add w/4, trb_tab_idx, trb_slot_ofs
         hex.set w/4, trb_tbl_b, spslot
-        frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.ptr_index 5, trb_tbl_p, trb_tbl_b, trb_tab_idx
         hex.write_byte_and_inc trb_tbl_p, gps_s_rec
         frame.write_byte_and_inc5 trb_tbl_p, trb_blk
         frame.write_byte5 trb_tbl_p, trb_blk + 2*dw
@@ -791,7 +791,7 @@ ns gpspr {
         hex.ptr_add trb_drawn_p, 1
         hex.ptr_add trb_sprflag_p, 1
         hex.inc 2, trb_col_x
-        frame.add8_chain trb_frac_u, trb_tistep
+        hex.add 8, trb_frac_u, trb_tistep
         ;col_loop
       ret:
     }

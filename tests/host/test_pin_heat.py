@@ -65,15 +65,16 @@ def heat(shipped):
 
 
 def _pool(k, heat):
+    """the shipped build's layout, from its counts cache (flipjump's BlockPool always buckets widths, never evicts)"""
+    assert k["width_buckets"] and not k["evict_by_value"], k
     with gzip.open(ROOT / k["counts"], "rt", encoding="utf-8") as fh:
         c = json.load(fh)
-    return BlockPool(W, k["pool_base"], counts=c["counts"],
-                     widths={g: int(w) for g, w in c["widths"].items()},
-                     width_hist={g: {int(w): int(n) for w, n in h.items()} for g, h in c["width_hist"].items()},
-                     alias=c.get("alias") or {}, span_bits=k["span_bits"], spread=k["spread"],
+    pool = BlockPool(W, k["pool_base"], span_bits=k["span_bits"], spread=k["spread"],
                      spread_min_count=k["spread_min_count"], max_slot_ops=k["max_slot_ops"],
-                     width_buckets=k["width_buckets"], evict_by_value=k["evict_by_value"],
                      **({"heat": heat} if heat is not None else {}))
+    pool.alias = c.get("alias") or {}
+    pool.lay_out(c["counts"], {g: {int(w): int(n) for w, n in h.items()} for g, h in c["width_hist"].items()})
+    return pool
 
 
 def _placed_first(pool, groups):

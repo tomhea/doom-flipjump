@@ -13,7 +13,6 @@ from doomfj.wall_renderer import hoisted_scratch_fj
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
 FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")
 M = 0xFFFFFFFF
 
 KS = [0, 0x10000, 0xFFFF0000,                      # the fast path: 0, +1.0, -1.0
@@ -47,7 +46,7 @@ def _run(tmp_path, src):
     p = tmp_path / "axis.fj"
     p.write_text(prog, encoding="utf-8")
     return fj.assemble_and_run_test_output(
-        [consts.resolve(), FIXED_POINT_FJ.resolve(), p_src.resolve(), FRAME_RENDER_FJ.resolve(), p.resolve()],
+        [consts.resolve(), p_src.resolve(), FRAME_RENDER_FJ.resolve(), p.resolve()],
         b"", expected, memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
 
 
@@ -59,6 +58,6 @@ def test_axis_add_is_fixed_mul(tmp_path):
 def test_axis_add_negative_control(tmp_path):
     """the -1.0 arm mutated to ADD: the same harness must reject it (else it proves nothing about that arm)"""
     src = PROJECTION_FJ.read_text(encoding="utf-8")
-    old = "      neg:\n        frame.sub8_chain acc, v\n"
+    old = "      neg:\n        hex.sub 8, acc, v\n"
     assert src.count(old) == 1
-    assert not _run(tmp_path, src.replace(old, "      neg:\n        frame.add8_chain acc, v\n"))
+    assert not _run(tmp_path, src.replace(old, "      neg:\n        hex.add 8, acc, v\n"))

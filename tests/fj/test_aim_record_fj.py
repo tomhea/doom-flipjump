@@ -54,7 +54,7 @@ MUTS = {
     # P11 (d)
     "ledge8": ("frame.ledge_test ar_cv, ar_colx, ar_ylo1, ar_yhi1, 0, aimx8", "hex.zero 2, ar_cv"),
     "bucket": ("hex.mov 2, ar_hb, ar_bkt + 2*dw", "hex.mov 2, ar_hb, ar_bkt"),
-    "top": ("hex.mov 8, ar_y0, ar_ytop\nframe.add8_chain ar_y0, ar_hpx\nframe.sub8_chain ar_y0, ar_hb",
+    "top": ("hex.mov 8, ar_y0, ar_ytop\nhex.add 8, ar_y0, ar_hpx\nhex.sub 8, ar_y0, ar_hb",
             "hex.mov 8, ar_y0, ar_ytop"),
 }
 
@@ -212,7 +212,7 @@ def _run(tmp_path, name, mut=None, barrels=False, wide=False):
     consts = GAME_CFG.emit_fj_consts(tmp_path / "fj_consts.fj")
     from pathlib import Path
     fjdir = Path(__file__).resolve().parents[2] / "src" / "fj"
-    fj.assemble([consts.resolve(), (fjdir / "fixed_point.fj").resolve(), (fjdir / "frame_render.fj").resolve(),
+    fj.assemble([consts.resolve(), (fjdir / "frame_render.fj").resolve(),
                  (fjdir / "projection.fj").resolve(), src.resolve()], out, memory_width=W, print_time=False)
     recs = _records(barrels=barrels, wide=wide)
     feed = b""

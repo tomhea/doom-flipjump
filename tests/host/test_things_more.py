@@ -11,7 +11,7 @@ the index spaces and the row layout that every one of those numbers is addressed
   every drawn sprite reads a bogus z-offset, visible only as pixels 40 minutes into a build.
 
 * **The fj mirror reads the same offsets.** `sim.thing_load` and `frame.thing_load_cold` address
-  the row with BAKED constants (`row + 16*dw`, `hex.read_table_packed 17`). Widen or reorder a
+  the row with BAKED constants (`row + 16*dw`, `hex.read_entry_packed 17`). Widen or reorder a
   Python-side field and fj keeps reading the old ones, with no Python-side symptom at all. This is
   the same two-mirror class `test_the_runtime_pass_clears_every_register_the_baked_block_xors`
   guards for the xor_by/zero pair; nothing guarded the row.
@@ -177,17 +177,17 @@ def _macro_body(relpath: str, name: str) -> str:
 def _row_reads(relpath: str, name: str):
     """`(nb, vec_nibbles, {nibble offset})` for the packed row `name` reads.
 
-    Derived from the source, with no name list to go stale: find the `hex.read_table_packed nb,
+    Derived from the source, with no name list to go stale: find the `hex.read_entry_packed nb,
     REG, ...` that fills the row, its `REG: hex.vec n` declaration, then every OTHER mention of
     `REG` -- which is a field read, at `REG` (offset 0) or `REG + k*dw`."""
     body = _macro_body(relpath, name)
-    m = re.search(r"hex\.read_table_packed\s+(\d+),\s*(\w+),", body)
-    assert m, f"{name} no longer fills its row with hex.read_table_packed"
+    m = re.search(r"hex\.read_entry_packed\s+(\d+),\s*(\w+),", body)
+    assert m, f"{name} no longer fills its row with hex.read_entry_packed"
     nb, reg = int(m.group(1)), m.group(2)
     vec = re.search(rf"^\s*{reg}:\s*hex\.vec\s+(\d+)", body, re.M)
     assert vec, f"{name} has no `{reg}: hex.vec` declaration"
     rest = "\n".join(ln for ln in body.splitlines()
-                     if "read_table_packed" not in ln and not ln.strip().startswith(reg + ":"))
+                     if "read_entry_packed" not in ln and not ln.strip().startswith(reg + ":"))
     offs = {int(mm.group(1) or 0)
             for mm in re.finditer(rf"\b{reg}\b(?:\s*\+\s*(\d+)\s*\*\s*dw)?", rest)}
     return nb, int(vec.group(1)), offs
@@ -205,7 +205,7 @@ def _field_starts(widths):
 def test_the_fj_mirror_reads_the_row_at_the_python_field_offsets(relpath, macro, widths, nbytes):
     """⚠ THE TWO-MIRROR CHECK for the row LAYOUT, which nothing else guards.
 
-    `hex.read_table_packed nb, ...` derives its stride from `nb`, and every field read is a baked
+    `hex.read_entry_packed nb, ...` derives its stride from `nb`, and every field read is a baked
     `row + k*dw` constant. So widening or reordering a Python-side field shifts every later byte
     while fj keeps the old constants -- sprite left/width/half-height/depth-bounds come out garbage
     and no Python-side test notices. The fj side is read from source (no assembling), and the

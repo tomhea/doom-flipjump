@@ -4,8 +4,10 @@
 
 THE RECORD (the picture). A GR line is one-sided, so a bullet that reaches it ends there: "the shot reaches the line"
 is "the aim window's nearest target in the shot's column is that wall". The binary records it where the picture
-decides it: around a GR seg's pass-1 call (`seg_pass1_leaf`, which claims the columns the wall wins -- `drawn`), the
-window's 17 `drawn` flags are copied before (`pre_lines`), and after it the shared leaf `shot_rec` writes the line's
+decides it: around a GR seg's two passes (`seg_pass1_leaf` culls and only READS `drawn`; `seg_pass2_leaf`'s claim loop
+claims the columns the wall wins -- `drawn`; M8 w2fix: the record sat after pass 1 and recorded nothing,
+wall_renderer.solid_seg_call_lines), the window's 17 `drawn` flags are copied before pass 1 (`pre_lines`), and after
+pass 2 the shared leaf `shot_rec` writes the line's
 id (`doors.shot_sid`: from 0xFF down) into each window column the seg just claimed whose `aim_sid` is still 0 (no
 nearer thing recorded) and whose horizon row (CENTERY) the nearer pieces leave open (`frame.ledge_test`, the aim
 leaf's own test; the oracle's `ledge_hidden(ups[x], los[x], centery, 1)`). Things later in the walk find the column
@@ -38,12 +40,12 @@ def decls(centery: int) -> List[str]:
 
 
 def pre_lines() -> List[str]:
-    """before a GR seg's pass-1 call: the window's drawn flags"""
+    """before a GR seg's pass-1 call: the window's drawn flags (pass 1 never writes them)"""
     return [f"    hex.mov 1, shr_pre + {c}*dw, drawn + {FIRST + c}*dw" for c in range(NCOLS)]
 
 
 def post_lines(k: int) -> List[str]:
-    """after it: shot line k's record"""
+    """after the seg's pass 2: shot line k's record"""
     return [f"    hex.set 2, shr_sid, {shot_sid(k)}", "    stl.fcall shot_rec, shr_ret"]
 
 

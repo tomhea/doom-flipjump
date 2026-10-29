@@ -53,6 +53,11 @@ NAV_CELL = 16
 # HURT_COST cells for each cell on one (the flood's reachability does not care; the walk does: E1M3's NUKAGE1 pool
 # by the blue card killed every early play that crossed it)
 HURT_SPECIALS = frozenset({4, 5, 7, 11, 16})
+# M8 C8: a boss map's A_BossDeath floor (E1M8: every Baron dead -> tag 666 lowers) is a mechanism the route needs: its
+# trigger is the KILL of every boss the skill spawns, reached when the flood stands within BOSS_REACH units of each
+# boss's spawn spot (BOSS_TRIGGER False: the planner's control -- the floor then moves only by its own W1 line)
+BOSS_TRIGGER = True
+BOSS_REACH = 64
 HURT_COST = 12
 KEY_TYPES = {5: "blue", 40: "blue", 6: "yellow", 39: "yellow", 13: "red", 38: "red"}
 # DOOM's exits (p_spec.c): (trigger, which) -- the normal ones are preferred
@@ -179,6 +184,7 @@ class Level:
         self._teleports()
         self._exits()
         self._solid()
+        self._boss()
         known = model_specials()
         self.unsupported = {}
         for li, ld in enumerate(self.lds):
@@ -239,6 +245,27 @@ class Level:
                 for e, bx in zip(mod, boxes):
                     e["box"] = tuple(bx)
 
+    def _boss(self):
+        """M8 C8: a boss map's A_BossDeath (gamedata.BOSS_MAPS: E1M8's Barons -> the tag-666 floor group,
+        movers.boss_floor_group): `boss_group` the floor group it fires (None: not a boss map, or no boss here) and
+        `bosses` [(monster slot, x, y)] the boss-type monsters THIS skill spawns -- every one of them must die"""
+        from doomfj import gamedata as gd
+        from doomfj.movers import boss_floor_group
+        from doomfj.world import level_things
+        self.boss_group, self.bosses = None, []
+        boss = gd.BOSS_MAPS.get(self.map)
+        if boss is None or self.mp is None:
+            return
+        mons = level_things(self.mw, self.map)[1]
+        types = {gd.MONSTER_DOOMEDNUMS[t.type] for t in mons}
+        self.boss_group = self._try("the boss floor (movers.boss_floor_group)", lambda: boss_floor_group(
+            self.secs, self.lds, self.sds, self.mp.groups, self.map, types))
+        bit = gd.skill_bit(self.sk)
+        self.bosses = [(slot, t.x, t.y) for slot, t in enumerate(mons)
+                       if gd.MONSTER_DOOMEDNUMS[t.type] == boss[0] and t.flags & bit]
+        if self.boss_group is not None and not self.bosses:
+            self.boss_group = None            # (no boss at this skill: A_BossDeath never runs -- DOOM's own rule)
+
     def _solid(self):
         """the model's solid-thing refusal for the things that never move (decor, barrels), at this skill"""
         def build():
@@ -297,6 +324,10 @@ class Planner:
                 self.mechs["lift:%d" % si] = Mech("lift:%d" % si, "lift", [si])
             for g, grp in enumerate(lv.mp.groups):
                 self.mechs["floor:%d" % g] = Mech("floor:%d" % g, "floor", grp.sectors)
+        # M8 C8: A_BossDeath as a mechanism -- its floor group ("floor:<g>", also its own W1 lines' group) is
+        # triggered by KILLING every boss the skill spawns: the flood fires it at the end of the first epoch in which
+        # it has reached every boss's spot (the boss is not shut in: the player can get to him, so fight him)
+        self.boss = ("floor:%d" % lv.boss_group, list(lv.bosses)) if getattr(lv, "boss_group", None) is not None             else None
         self.keyspots = {}
         for col, x, y, typ in lv.keys:
             self.keyspots.setdefault(col, []).append((x, y))
@@ -511,6 +542,12 @@ class Planner:
                     self.keys.add(m.key)
                     m.epoch, m.cell, m.trigger = epoch, cell, kind
                     new.append(m)
+            if self.boss is not None and BOSS_TRIGGER:
+                bid, spots = self.boss
+                if self.mechs[bid].epoch is None and bid not in found:
+                    cells = [self.boss_cell(x, y) for _slot, x, y in spots]
+                    if all(c is not None for c in cells):         # the last one reached is where the fight ends
+                        found[bid] = (max(cells, key=lambda c: self.visit[c][3]), "kill")
             for did, (cell, card) in self.pending_key.items():
                 if card in self.keys and did not in found and self.mechs[did].epoch is None:
                     found[did] = (cell, "use")
@@ -540,6 +577,22 @@ class Planner:
                     if self.edge_ok(scenes, a, b):
                         q.append(a)               # re-expand a in the new world (b and a's other refused edges)
                         break
+
+    def boss_cell(self, x, y):
+        """the visited cell nearest a boss's spawn spot within BOSS_REACH units (Chebyshev), or None: the flood has
+        not got to him (E1M8's Barons stand in pits ringed by floors 104-112 units up until the tag-1 W1 lowers them)"""
+        cx, cy = cell_of(x, y)
+        r = BOSS_REACH // NAV_CELL + 1
+        best = None
+        for i in range(cx - r, cx + r + 1):
+            for j in range(cy - r, cy + r + 1):
+                if (i, j) not in self.visit:
+                    continue
+                px, py = centre((i, j))
+                d = max(abs(px - x), abs(py - y))
+                if d <= BOSS_REACH and (best is None or d < best[0]):
+                    best = (d, (i, j))
+        return best[1] if best else None
 
     def _note(self, trig, cell, found):
         mid, kind = trig[:2]
@@ -571,11 +624,26 @@ class Planner:
         return [(_xy(lv.cmap.vertexes[lv.lds[li].v1]), _xy(lv.cmap.vertexes[lv.lds[li].v2]))
                 for li in lv.lines_of.get(self.mechs[mid].sectors[0], ())]
 
+    def sector_segs(self, sectors):
+        """the lines bordering `sectors` (either side), as point pairs"""
+        lv, ss = self.lv, set(sectors)
+        out = []
+        for ld in lv.lds:
+            sides = [sd for sd in (ld.front, ld.back) if sd not in (-1, 0xFFFF) and sd < len(lv.sds)]
+            if any(lv.sds[sd].sector in ss for sd in sides):
+                out.append((_xy(lv.cmap.vertexes[ld.v1]), _xy(lv.cmap.vertexes[ld.v2])))
+        return out
+
     def needs_of_path(self, path) -> set:
         """the mechanisms a path depends on: the doors whose lines an edge crosses (or whose sector a cell stands
         in), the movers whose sector a cell stands in after they moved"""
         need = set()
         segs = {mid: self.door_segs(mid) for mid in self.active if self.mechs[mid].kind == "door"}
+        # M8 C8: the boss floor is a dependency of an edge that CROSSES its sector too (E1M8's sector 3 is a 16-unit
+        # sill between sectors 2 and 4: no cell centre stands on it). Only the kill floor: a mover crossed in passing
+        # on another map stays what the planner made of it before
+        segs.update({mid: self.sector_segs(self.mechs[mid].sectors) for mid in self.active
+                     if self.mechs[mid].trigger == "kill"})
         for i, c in enumerate(path):
             e, sec = self.visit[c][1], self.sector_of(c)
             for mid in self.active:
@@ -585,6 +653,8 @@ class Planner:
             if i and not self.visit[c][2]:        # (a teleport edge crosses nothing)
                 p = path[i - 1]
                 for mid, ss in segs.items():
+                    if self.mechs[mid].kind != "door" and self.mechs[mid].epoch >= e:
+                        continue                  # (the kill floor: crossed only once it has moved)
                     if mid not in need and any(seg_cross(centre(p), centre(c), a, b) for a, b in ss):
                         need.add(mid)
         return need
@@ -600,6 +670,12 @@ class Planner:
             need.add(mid)
             m = self.mechs[mid]
             todo.append(m.cell)
+            if m.trigger == "kill":
+                # M8 C8: a boss is fought with what the map offers -- the ways to its weapons (KILL_ARMS) the flood
+                # found before the fight are the fight's dependencies too (E1M8: the tag-3 W1 floor that lowers the
+                # ring round the chaingun and the ring round the shotgun)
+                for c in self.arm_cells(m.epoch):
+                    todo.append(c)
             if (m.key or m.need_key) and m.kind != "key":    # a key door: its key
                 k = self.mechs.get("key:%s" % (m.key or m.need_key))
                 if k is not None and k.epoch is not None:
@@ -621,6 +697,30 @@ class Planner:
                 add(mid)
         order = sorted(need, key=lambda mid: (self.mechs[mid].epoch, self.visit[self.mechs[mid].cell][3]))
         return order, ecell
+
+    def arm_cells(self, epoch) -> list:
+        """the visited cells (reached by the end of `epoch`) nearest each KILL_ARMS weapon the skill spawns, within
+        ITEM_RADIUS + PLAYER_R of it"""
+        from doomfj.combat import ITEM_RADIUS, PLAYER_R
+        reach = ITEM_RADIUS + PLAYER_R - 8
+        out = []
+        for t in self.lv.things:
+            if t.type not in KILL_ARMS:
+                continue
+            cx, cy = cell_of(t.x, t.y)
+            best = None
+            for i in range(cx - 3, cx + 4):
+                for j in range(cy - 3, cy + 4):
+                    v = self.visit.get((i, j))
+                    if v is None or v[1] > epoch:
+                        continue
+                    px, py = centre((i, j))
+                    d = max(abs(px - t.x), abs(py - t.y))
+                    if d < reach and (best is None or d < best[0]):
+                        best = (d, (i, j))
+            if best is not None:
+                out.append(best[1])
+        return out
 
     def leg_path(self, frm, goal_pred, active):
         """the cheapest walk from cell `frm` to the first cell with `goal_pred(cell)`, in the world with `active` ->
@@ -677,6 +777,9 @@ PICKUP_ORDER = "nearest"
 # after it is crossed whether it was taken or not (E1M4: a suit detour dropped after 471 frames, the crossing at 25
 # health killed the play)
 MUST_PICKUPS = frozenset({2025})
+# M8 C8: the weapons a boss fight needs (the steering fights with the chaingun and the shotgun, never the launcher):
+# each one the skill spawns and the flood reached is taken before a kill leg, whatever the detour (`must`)
+KILL_ARMS = (2002, 2001)
 PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 8: 40, 2049: 14, 2048: 10, 2008: 8,
                  2025: 60}     # the radiation suit (E1M4 alone: the one at the far end of its nukage channel)
 
@@ -735,6 +838,38 @@ def take_pickups(pl, cur, pred, world, pickups, out):
         cur = tp[-1]
 
 
+def take_arms(pl, cur, world, pickups, out):
+    """M8 C8: before a kill leg, a `must` leg to every KILL_ARMS weapon not taken yet and reachable in `world`, the
+    nearest first -> the cell the kill leg starts from"""
+    from doomfj.combat import ITEM_RADIUS, PLAYER_R, REACH_DOWN, REACH_UP
+    scenes = pl.scenes_for(world)
+    bd = ITEM_RADIUS + PLAYER_R - 8
+    while True:
+        best = None
+        for it in pickups:
+            if it["taken"] or it["type"] not in KILL_ARMS:
+                continue
+            iz = pl.floor_at(scenes, cell_of(it["x"], it["y"]))
+
+            def touch(c, it=it, iz=iz):
+                x, y = centre(c)
+                return (abs(x - it["x"]) < bd and abs(y - it["y"]) < bd
+                        and -REACH_DOWN <= iz - pl.floor_at(scenes, c) <= REACH_UP)
+            tp = pl.leg_path(cur, touch, world)
+            if tp is None or any(c[0] == "teleport" for c in tp):
+                continue
+            if best is None or len(tp) < len(best[1]):
+                best = (it, tp)
+        if best is None:
+            return cur
+        it, tp = best
+        it["taken"] = True
+        out.append({"to": "item:%d" % it["type"], "kind": "item", "action": "touch", "goal": [it["x"], it["y"]],
+                    "key_at": [it["x"], it["y"]], "detour_cells": None, "must": True,
+                    "path": [list(centre(c)) for c in tp]})
+        cur = tp[-1]
+
+
 def legs(pl: Planner, order, ecell, exit_i, pickups=None) -> list:
     """the walk: one leg per trigger to VISIT (keys, switches, walk-over lines, lift and floor triggers), then the
     exit. A door opened by its own use box is not a leg -- the steering opens a door its path meets. Each leg's cells
@@ -746,6 +881,7 @@ def legs(pl: Planner, order, ecell, exit_i, pickups=None) -> list:
         return {"door:%d" % si for si in lv.door_order if lv.dp.boxes.get(si) is not None
                 and (not pl.mechs["door:%d" % si].key or pl.mechs["door:%d" % si].key in keys)}
     steps = [mid for mid in order if not (pl.mechs[mid].kind == "door" and pl.mechs[mid].trigger == "use")]
+    kill_route = any(pl.mechs[mid].trigger == "kill" for mid in order)
     for mid in steps + [None]:
         if mid is None:
             e = lv.exits[exit_i]
@@ -758,9 +894,13 @@ def legs(pl: Planner, order, ecell, exit_i, pickups=None) -> list:
         else:
             m = pl.mechs[mid]
             kind, goal = m.kind, (pl.touch_at.get(mid, m.pos) if m.kind == "key" else centre(m.cell))
-            action = {"touch": "touch", "use": "use", "switch": "use", "walk": "cross"}[m.trigger]
+            action = {"touch": "touch", "use": "use", "switch": "use", "walk": "cross", "kill": "kill"}[m.trigger]
             pred = lambda c, t=m.cell: c == t                                             # noqa: E731
         box = (pl.use_box.get(mid) if mid is not None else lv.exits[exit_i]["box"]) if action == "use" else None
+        if pickups is not None and kill_route:
+            # a route with a boss fight: the weapons first, as soon as the legs' world reaches them -- before the leg
+            # that frees the bosses (E1M8's tag-1 W1 lowers the Barons' rings), not after
+            cur = take_arms(pl, cur, active | doors_openable(), pickups, out)
         if pickups is not None:
             cur = take_pickups(pl, cur, pred, active | doors_openable(), pickups, out)
         path = None
@@ -786,6 +926,8 @@ def legs(pl: Planner, order, ecell, exit_i, pickups=None) -> list:
                 active |= wide
         if mid is not None and pl.mechs[mid].kind == "key":
             row["key_at"] = list(pl.mechs[mid].pos)
+        if action == "kill":                     # M8 C8: the bosses whose deaths fire it (slot, spawn spot)
+            row["bosses"] = [list(b) for b in pl.boss[1]]
         if mid is not None and action == "use" and mid in pl.use_box:
             row["box"] = list(pl.use_box[mid])
         if mid is None and lv.exits[exit_i]["box"] is not None:

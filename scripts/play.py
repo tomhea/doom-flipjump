@@ -514,6 +514,7 @@ class Steer:
         self.best_prog, self.best_f = (-1, -1), 1 << 30
         self.act = 0
         self.sig0 = None
+        self.hunt_f = 1 << 30                        # M8 C8: the kill leg's next re-plan toward a boss
 
     def replan(self, x, y, why, f=None):
         """the rest of the leg from the player's pose, in the world the route has by now"""
@@ -612,10 +613,12 @@ class Steer:
         if self.rt is None or "thseen" not in c:
             return None
         best = None
+        # M8 C8: on a KILL leg the bosses are fought whatever they target (asleep, or not yet turned on the player)
+        bosses = {b[0] for b in self.leg.get("bosses", ())} if self.leg and self.leg.get("action") == "kill" else ()
         for m, row in enumerate(self.rt):
             if not c["mon_active"][m] or signed(c["mon_health"][m]) <= 0 or not c["thseen"][m]:
                 continue
-            if c["mon_target"][m] != 1:              # 0: asleep, 1: the player, 2+: another monster (infighting)
+            if c["mon_target"][m] != 1 and m not in bosses:   # 0: asleep, 1: the player, 2+: another monster
                 continue
             if self.ign.get(m, -1) > f:
                 continue
@@ -704,6 +707,8 @@ class Steer:
         if c.get("p_rct"):                           # a teleport's reaction time: nothing moves
             return kd
         self.leg_frames += 1
+        if self.leg["action"] == "kill" and not self._bosses_alive(c):
+            return self._next(f, "every boss dead")      # M8 C8: A_BossDeath fires (its floor moves on its own)
         if self.retreat_f <= f and (not self.trail or math.hypot(x - self.trail[-1][0], y - self.trail[-1][1]) >= 12):
             self.trail.append((x, y))           # (not while retreating: the retreat indexes the trail)
         if self.retreat_f > f:
@@ -747,7 +752,8 @@ class Steer:
         # stretch is how a worn-down player dies (E1M2's finale); the aim window's hunters are still shot in passing
         left = sum(len(g["path"] or ()) for g in self.legs[self.li + 1:] if g["kind"] != "item")
         left += max(0, len(self.pieces[self.pi]) - self.wi) if self.pieces else 0
-        if left < self.DASH and (foe is None or foe[0] > 64):
+        if left < self.DASH and (foe is None or foe[0] > 64) and self.leg["action"] != "kill":
+            # (never on a KILL leg: the route goes on only once the bosses are dead)
             foe = None
             self.why = "dash"
         hp_now = c.get("p_hp") or 0
@@ -858,6 +864,11 @@ class Steer:
         end = piece[-1] if piece else goal
         # ---- the leg's end
         action = self.leg["action"]
+        if action == "kill" and (f >= self.hunt_f or (last_piece and self.wi >= len(piece) - 3)):
+            if self._hunt(f, c, x, y):               # M8 C8: after the bosses, wherever they are now
+                piece = self.pieces[self.pi] if self.pieces else []
+                last_piece = self.pi == len(self.pieces) - 1
+                end = piece[-1] if piece else goal
         if last_piece and self.wi >= len(piece) - 3:
             self.why = "end %s" % self.leg["action"]
             tx, ty = end
@@ -1001,6 +1012,42 @@ class Steer:
             self.stuck = 0
             self.replan(x, y, "stuck", f)
         return kd
+
+    # ---- M8 C8: the KILL leg (level_route's boss mechanism: every boss the skill spawns must die) ------------------
+    HUNT_EVERY = 40            # frames between re-plans toward the nearest live boss
+
+    def _bosses_alive(self, c) -> list:
+        """[(slot, x, y)] of the kill leg's bosses alive now (their runtime positions)"""
+        out = []
+        for b in self.leg.get("bosses", ()):
+            m = b[0]
+            if c["mon_active"][m] and signed(c["mon_health"][m]) > 0:
+                if self.rt is not None and "thpos_rt" in c:
+                    v = c["thpos_rt"][self.rt[m]]
+                    out.append((m, signed(v & M32) / 65536.0, signed((v >> 32) & M32) / 65536.0))
+                else:
+                    out.append((m, b[1], b[2]))
+        return out
+
+    def _hunt(self, f, c, x, y) -> bool:
+        """the kill leg's path re-planned to the nearest live boss's place now, every HUNT_EVERY frames (or when the
+        path is used up) -> True when the path was replaced"""
+        self.hunt_f = f + self.HUNT_EVERY
+        alive = self._bosses_alive(c)
+        if not alive:
+            return False
+        _m, bx, by = min(alive, key=lambda b: math.hypot(b[1] - x, b[2] - y))
+        LR = self.LR
+        path = self.pl.leg_path(LR.cell_of(x, y), lambda q: max(abs(LR.centre(q)[0] - bx),
+                                                                 abs(LR.centre(q)[1] - by)) <= 48,
+                                self.active | self._openable())
+        if not path or len(path) < 2:
+            self.why = "hunt: wait"
+            return False
+        self.leg["path"] = [list(LR.centre(q)) if q[0] != "teleport" else ["teleport", q[1]] for q in path]
+        self._leg_pieces()
+        self.why = "hunt"
+        return True
 
     def _barrel_near(self, c) -> bool:
         """a live barrel in the last picture's aim window within BARREL_SAFE (Chebyshev) of the player: a shot that

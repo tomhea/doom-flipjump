@@ -46,7 +46,11 @@ LIST_EVERY = 8
 
 
 def _world():
-    return World(monsters="full", player="full")
+    """the harness's shooter is slot 0; since M8 C8 the missile follows the shooter's type (MONSTER_MISSILES), and
+    E1M1's slot 0 is a sergeant (no missile) -- so slot 0 shoots as an imp here, the pool's MT_TROOPSHOT"""
+    w = World(monsters="full", player="full")
+    w.mon_info[0] = gd.MOBJINFO["MT_TROOP"]
+    return w
 
 
 def _s32(v):

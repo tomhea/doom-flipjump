@@ -157,6 +157,23 @@ class Mirror:
             D.door_stride, D.door_stay = saved
             C.CombatMixin._touch = orig_touch
 
+    @staticmethod
+    def _exit_line(mph, st) -> None:
+        """M8 C9 (World._use_lines' exit, mirrored): the FIRST exit box the press is in, as the World tests them -- on a
+        map with more than one exit switch line (E1M3: 11 and the secret 51) that line's own switch cell swaps
+        (World.switch_exit) and a secret one sets g_secretexit; on a one-exit map nothing (its latch is lvdone).
+        The playthrough gate's E1M3 b4 run parted here on its LEVEL COMPLETE frame: the binary set swpr[11], this
+        mirror did not (0 px: the frame shows LEVEL COMPLETE)"""
+        w = getattr(mph, "world", None)
+        if w is None or not getattr(w, "exit_box_lines", None):
+            return
+        for k, box in enumerate(w.exit_boxes):
+            if in_use_box_fixed(box, st.x, st.y):
+                if w.exit_secret[k]:
+                    w.ws.g_secretexit = 1
+                w.switch_exit(w.exit_box_lines[k])
+                return
+
     def run(self, pose, keys: list, pcard: int = 0, fswitch=None) -> list:
         """the whole scenario at once: `steps` listed"""
         return list(self.steps(pose, keys, pcard, fswitch))
@@ -262,6 +279,7 @@ class Mirror:
                             mph.switch_uses(ms, st.x, st.y)   # M8: the floor / lift switches, before the exit
                             if any(in_use_box_fixed(b, st.x, st.y) for b in self.exits):
                                 lvdone, mode, scr = 1, 1, LEVEL_DONE_ENTER   # P10: LEVEL COMPLETE, its hold first
+                                self._exit_line(mph, st)      # M8 C9: the pressed exit line's own cell
                             elif self.ctl != "no_use_lines":  # else the SR lifts and the switch
                                 ms = mp.use_press(ms, st.x, st.y)
                     else:
@@ -1057,8 +1075,8 @@ def main(argv=None) -> int:
         for f, fr in enumerate(want):
             exp = expected_cells(fr, dsim.order, dsim.mp.order)
             got = reads[f] if f < len(reads) else {}
-            if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
-                s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
+            if s_bad is None and any(not P.same_reading(got.get(k), v) for k, v in exp.items()):
+                s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if not P.same_reading(got.get(k), v)})
             if fr["drawn"] == "world":
                 pic = picture(orc, dsim, fr, card_di)
             else:

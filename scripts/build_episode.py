@@ -158,7 +158,7 @@ REGISTRY: dict[str, MapSpec] = {
 # (no rebuild check until docs/ship-gate.md holds their block). Spread 2 where the pool fits (the small maps: E1M5 and
 # E1M8 at 0.53 / 0.49 of E1M2's segs), else 1 (E1M3 / E1M4 / E1M9 used 79.6 / 83.5 / 77.6% of 2^27 at spread 1);
 # size above 43% is the owner's (2026-10-24: "above 43% size is OK").
-LEVEL_SPREAD = {"E1M3": 1, "E1M4": 1, "E1M5": 2, "E1M8": 2, "E1M9": 1}
+LEVEL_SPREAD = {"E1M3": 1, "E1M4": 1, "E1M5": 2, "E1M6": 1, "E1M7": 1, "E1M8": 2, "E1M9": 1}   # E1M6 / E1M7: wave 3
 for _m, _spread in LEVEL_SPREAD.items():
     _p = profile(_m)
     REGISTRY[_m] = MapSpec(

@@ -62,6 +62,7 @@ DEFAULT_SEED = {("E1M1", "medium"): 1,                                          
                 ("E1M2", "easy"): [(0, 1), (1532, 2), (3463, 22), (3992, 32)],             # world 4319
                 ("E1M3", "easy"): [(0, 0), (415, 1)],                                       # world 2279 (3143 before 8183305d)
                 ("E1M5", "easy"): [(0, 0), (342, 3), (1630, 11), (3352, 24)],              # world 4253
+                ("E1M6", "easy"): 0,                                                         # world 964
                 ("E1M9", "easy"): 2}                                                         # world 4659
 CONTROL_FRAMES = 40           # world frames a control runs
 CONTROL_AT = 25               # the world frame a control mutates

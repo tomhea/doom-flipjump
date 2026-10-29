@@ -592,6 +592,21 @@ def poses_facing(dsim, w, x: int, y: int, dists, los: bool = True) -> list:
     return out
 
 
+def statics_clear(w, x16: int, y16: int) -> bool:
+    """no static blocker overlaps the player's box at (x16, y16): the solid barrels and this skill's solid decor -- the
+    invariant the player's move keeps (tests/fj/test_nukage_fj.py's `_statics_clear`)"""
+    from doomfj.combat import BARREL_R, PLAYER_R
+    for b, t in enumerate(w.barrel_things):
+        bd = (BARREL_R + PLAYER_R) << 16
+        if w.ws.bar_solid[b] and abs((t.x << 16) - x16) < bd and abs((t.y << 16) - y16) < bd:
+            return False
+    for t in w._decor_now:
+        bd = (w.decor_radius[t.type] + PLAYER_R) << 16
+        if abs((t.x << 16) - x16) < bd and abs((t.y << 16) - y16) < bd:
+            return False
+    return True
+
+
 def sector_of(w, x: int, y: int) -> int:
     return w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)]
 
@@ -599,7 +614,11 @@ def sector_of(w, x: int, y: int) -> int:
 def poses_in_sector(dsim, w, sec: int, step: int = 16, ledge=None) -> list:
     """standing poses whose centre lies in sector `sec` (its lines' box, every `step` units), facing north; with
     `ledge` True only those whose box stands on a HIGHER floor than the sector's (check_position), False only those on
-    it"""
+    it. M8 w2fix: a pose whose box overlaps a static blocker (a solid decor, a solid barrel) is skipped when the floor
+    is read (`ledge` not None): no move ever stands the player there, and the fj's floor test (lootcode.nukage_lines)
+    runs the player's cells WITH the static blockers -- a refused box reads the seed floor -- where the model's
+    `_on_sector_floor` reads the lines alone (E1M8's F9l at (840, 200) overlapped the firestick at (864, 224) and
+    parted at frame 0)"""
     xs = [w.cmap.vertexes[v][0] for ld in w.lds for side in (ld.front, ld.back)
           if 0 <= side < len(w.sds) and w.sds[side].sector == sec for v in (ld.v1, ld.v2)]
     ys = [w.cmap.vertexes[v][1] for ld in w.lds for side in (ld.front, ld.back)
@@ -610,6 +629,8 @@ def poses_in_sector(dsim, w, sec: int, step: int = 16, ledge=None) -> list:
             if sector_of(w, x, y) != sec or not standing(dsim, x, y):
                 continue
             if ledge is not None:
+                if not statics_clear(w, x << 16, y << 16):
+                    continue
                 fz = w.rm.check_position(w.scene_c, x << 16, y << 16)[1]
                 if (fz != w.secs_c[sec].floor_h) != ledge:
                     continue
@@ -1381,7 +1402,9 @@ NEED = ("pickups", "pickup_items", "pickup_drops", "bonus_frames", "berserk_fram
 _BARREL = ("bexp_frames", "barrel_blasts", "blast_kills", "barrel_hurt", "barrel_hits", "puffs")
 OWNS = {"F5": ("berserk_frames", "gibs"), "F9": ("nukage",), "D6": ("nukage",),
         "F6": _BARREL + ("gibs",), "F6d": _BARREL, "F6p": _BARREL, "F7": _BARREL, "S2": _BARREL, "S4": _BARREL,
-        "D7": ("barrel_hurt",)}
+        "D7": ("barrel_hurt",),
+        # M8 w2fix: the blood (fx_spawns) is I1's and C2's -- E1M8 has neither (no sergeant / imp pair, no candidate)
+        "I1": ("fx_spawns",), "C2": ("fx_spawns",)}
 
 
 # M8 wave 1: why a scenario's candidate list is EMPTY on a map (what the candidates are built from is absent there)
@@ -1399,6 +1422,19 @@ def empty_na(tag: str, w, mapname: str) -> str:
     if tag in BARREL_ROWS and not w.barrel_things:
         return "%s has no barrel" % mapname
     return EMPTY_WHY[tag] % mapname if tag in EMPTY_WHY else "no candidate placed from %s's things" % mapname
+
+
+# M8 w2fix (E1M8's fight / die gates: "every event counter nonzero: NO -- ['pickup_drops', 'drop_frames', ...]" -- its
+# only monsters are four Barons, and a Baron drops nothing): the counters a MAP cannot raise, whatever its scenarios --
+# by what the map's things are, on every skill
+DROP_COUNTERS = ("pickup_drops", "drop_frames")
+
+
+def map_cannot(things) -> set:
+    """the counters no scenario can raise on a map whose things are `things` (the WAD's, every skill): the drops when
+    no monster of it drops an item (gamedata.DROPS: the zombieman's clip, the sergeant's shotgun)"""
+    drops = any(gd.DROPS.get(gd.MONSTER_DOOMEDNUMS.get(t.type)) for t in things)
+    return set() if drops else set(DROP_COUNTERS)
 
 
 def unowed(need, tags, na_tags, declared=None) -> list:
@@ -1528,6 +1564,7 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
         ok &= binary_scenario(gb, cells, table, run, sc, pose, setup or (lambda mph: None), want)
     # --only: the scenarios that ran still owe their own `need` (P9: the R rows' counters)
     na_owns = set(unowed(need, [s["name"].split()[0] for s in scen], set(nas), declared))
+    na_owns |= map_cannot(dsim.mw.things(dsim.mapname))   # M8 w2fix: nor one the map's things cannot raise
     owed = [k for k in need if k not in na_owns]     # M8: a counter only N/A scenarios raise is not owed
     if nas:
         print("\nN/A on %s: %d -- %s; counters no longer owed: %s"

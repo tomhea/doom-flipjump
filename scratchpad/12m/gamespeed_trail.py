@@ -136,6 +136,12 @@ def report(lines, ends, opened, trail_ok, pose_parts, door_rejects):
     return 0 if trail_ok and pose_parts and (door_rejects or no_doors) else 1
 
 
+def door_reading(ds) -> tuple:
+    """M8 w2fix: the binary's `dstate` as --validate records it, a tuple -- a count-1 cell reads as its value
+    (probe.read_cells), so on a ONE-door map (E1M8) `verdicts` indexed an int ("'int' object is not subscriptable")"""
+    return ds if isinstance(ds, tuple) else (ds,)
+
+
 def binary_trail(gb, table, orc, run: int, n: int = 100):
     """([(viewx, viewy, viewangle, dstate, mode)] at each game frame's present, frames presented)"""
     import m2_std_gate as gate
@@ -147,7 +153,7 @@ def binary_trail(gb, table, orc, run: int, n: int = 100):
     def present(pr, f):
         if f >= mf:
             c = pr.read_cells(["viewx", "viewy", "viewangle", "dstate", "mode"])
-            got[f - mf] = (c["viewx"], c["viewy"], c["viewangle"], c["dstate"], c["mode"])
+            got[f - mf] = (c["viewx"], c["viewy"], c["viewangle"], door_reading(c["dstate"]), c["mode"])
     p.on_present(present)
     r = gb.run(len(per_frame), GS.events_for(per_frame), p,
                pre_run=lambda pr: pr.verify_known(orc.known_pristine()))

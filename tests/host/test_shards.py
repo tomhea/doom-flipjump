@@ -103,3 +103,12 @@ def test_control_a_longest_first_plan_is_incoherent(suite):
         s = min(range(n), key=lambda q: (load[q], q))
         shard[k], load[s] = s, load[s] + est[k]
     assert _incoherent(suite, shard)
+
+
+def test_a_map_parametrized_id_takes_its_mapless_figure():
+    """M8 C2's map ids (`t[E1M1-x]`, `t[E1M6]`) priced from the figure recorded before the maps: E1M6 scaled, an id
+    the table never had falls to the default (#154's shard 9 held 70 such tests at 0.05 s each)"""
+    t = {"tests": {"tests/fj/a.py::t[x]": 10.0, "tests/fj/a.py::u": 4.0}, "files": {}, "default_fj": 1.0,
+         "default_host": 0.1}
+    ids = ["tests/fj/a.py::t[E1M1-x]", "tests/fj/a.py::t[E1M6-x]", "tests/fj/a.py::u[E1M6]", "tests/fj/a.py::v[E1M1]"]
+    assert C.estimates(ids, t) == [10.0, 10.0 * C.WIDE_FACTOR, 4.0 * C.WIDE_FACTOR, 1.0]

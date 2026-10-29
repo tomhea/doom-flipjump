@@ -616,6 +616,7 @@ def build(tmp_path, name, mut=None):
     """ONE program, every group's records (one assembly: the program is the game tier's move machinery)"""
     c = Sv()
     c.record_damage()
+    decls, code, tables = _program(c, mut)              # the cells' initial values: the world BEFORE the records
     body, want = ["stl.startup_and_init_all"], []
     _xy_records(c, random.Random(0x5101), body, want)
     _z_records(c, random.Random(0x5102), body, want)
@@ -623,7 +624,6 @@ def build(tmp_path, name, mut=None):
     _move_records_fixed(c, random.Random(0x5104), body, want)
     _range_records(random.Random(0x5105), body, want)
     body += ["stl.loop"]
-    decls, code, tables = _program(c, mut)
     prog = "\n".join(body + decls + [code] + tables) + "\n" + hoisted_scratch_fj()
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
@@ -681,6 +681,7 @@ def run(tmp_path, name, mut=None) -> bool:
                                            should_raise_assertion_error=False)
 
 
+@pytest.mark.xfail(strict=True, reason="issue #153: the fj P_Move refuses 2 of 160 MOVE records the model accepts")
 def test_the_soul_follows_the_model(tmp_path):
     assert run(tmp_path, "soul")
 

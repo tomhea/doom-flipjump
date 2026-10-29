@@ -84,7 +84,7 @@ def _box_test(d: int, box, hit: str, miss: str, regs=("viewx", "viewy"), tag=Non
 
 def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigger: list, *,
                   stride: int = 1, top_wait: int = WAIT, reverse=None, down_stride=None, hold: bool = False,
-                  spress: bool = False) -> list:
+                  spress: bool = False, top_clamp: bool = True) -> list:
     """ONE door machine's frame, after its trigger lines (which fall into `<p>_press` to press and
     jump to `<p>_moved` not to): `doors.door_tic` in fj, on the cells `st`/`dr`/`sub`/`wt` (the
     last a WAIT_NIBBLES counter), `last` = nstates - 1. `top_wait` is the wait set on reaching the
@@ -96,7 +96,11 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
 
     M8 C3 (`doors.door_tic`'s close_stride / hold / stay_press): `down_stride` the closing step's stops (a WR close
     line's); `hold` -- touched, a closing door stays where it is, still closing; `spress` -- the label `<p>_spress`, a
-    STAY PRESS (OPENING with STAY_MARK in the wait), and the top then sets no wait after one."""
+    STAY PRESS (OPENING with STAY_MARK in the wait), and the top then sets no wait after one.
+
+    M8 w2fix: `top_clamp` -- a door that reverses AT its top (its reversal mask holds `last`: its pass state is its top)
+    is OPENING at `last`, and its next step is the top again (`<p>_open`), not the equality step past it. False keeps
+    the old step (config.DOOR_TOP_STEP_LEGACY: E1M1's emission)."""
     set_wait = ([f"    hex.zero {WAIT_NIBBLES}, {wt}"] if not top_wait else
                 [f"    hex.set {WAIT_NIBBLES}, {wt}, {top_wait}"])
     # the top's wait: after a stay press (STAY_MARK in the wait while opening) none, else top_wait
@@ -105,6 +109,13 @@ def machine_lines(p: str, st: str, dr: str, sub: str, wt: str, last: int, trigge
         f"    hex.if0 {WAIT_NIBBLES}, {wt}, {p}_done",
         *set_wait]
     up = []
+    if top_clamp and reverse is not None and reverse[0] >> last & 1:
+        # M8 w2fix (E1M5's door 1, sector 12; E1M3's 167 / 213 / 228): a door whose pass state is its TOP reverses
+        # there -- OPENING at `last` -- and its next step is the top again (doors.door_tic's `state >= nstates - 1`,
+        # T_VerticalDoor: up, at once at its top, the wait): the equality test below would step it past the top
+        up += [f"    hex.xor_by 1, {st}, {last}",
+               f"    hex.if0 1, {st}, {p}_open",
+               f"    hex.xor_by 1, {st}, {last}"]
     for k in range(stride):                             # `state += stride`, clamped at the top
         up += [f"    hex.inc 1, {st}",
                f"    hex.xor_by 1, {st}, {last}",
@@ -326,7 +337,7 @@ def reverse_mask(pass_at: int, stride: int, nstates: int) -> int:
 
 def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None, radius=16, mon_press=frozenset(),
                    mon_contact=(), dead=None, switches=None, walked=None, keyed=None, switch_info=None, nwalk=0,
-                   close=None) -> list:
+                   close=None, top_clamp: bool = True) -> list:
     """One frame of every door. `slots` is the emitter's door order (`sorted(door sectors)`),
     `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units (none for a
     walk-over door), `kinds[si]` its `doors.door_kinds` kind (all "plain" when omitted).
@@ -458,7 +469,7 @@ def door_tic_lines(slots, nstates, boxes, kinds=None, contact=None, passes=None,
         out += [f"  // ---- door {d} (sector {si}, {kind}): {n} states ----",
                 *machine_lines(p, st, dr, sub, wt, last, trigger, stride=stride,
                                top_wait=0 if stay else WAIT, reverse=rev, down_stride=down,
-                               hold=down is not None, spress=spress)]
+                               hold=down is not None, spress=spress, top_clamp=top_clamp)]
     if leaves:                           # the contact leaves and their registers, jumped over
         out += ["    ;dc_leaves_end"]
         for lab, geo, rad in leaves.values():

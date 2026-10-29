@@ -230,6 +230,43 @@ def walkable_cells(rm, scene, sx, sy, goal_pred=None, cell=NAV_CELL, cap=400000,
     return None, seen
 
 
+APPROACH_DIST = 56      # `approach`: this far short of the door's first line, on the side the walk comes from
+
+
+def door_approach(segs, sx, sy, depth=88, far=False):
+    """`(approach, beyond)` for a door whose first line is `segs[0]`: `approach` APPROACH_DIST short of the line's
+    midpoint, `beyond` `depth` past it. The walk's side is the one the spawn `(sx, sy)` lies on by straight line;
+    `far=True` takes the other side (`choose_approach`)."""
+    (ax, ay), (bx, by) = segs[0]
+    mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
+    nx, ny = -(by - ay), (bx - ax)                   # the line's normal
+    nlen = (nx * nx + ny * ny) ** 0.5 or 1.0
+    nx, ny = nx / nlen, ny / nlen
+    sgn = -1.0 if (sx - mx) * nx + (sy - my) * ny > 0 else 1.0
+    if far:
+        sgn = -sgn
+    return ((mx - sgn * nx * APPROACH_DIST, my - sgn * ny * APPROACH_DIST),   # the walk's side of the opening
+            (mx + sgn * nx * depth, my + sgn * ny * depth))                   # through it, and out the far side
+
+
+# M8 wave 3 (E1M6: "no walkable path to the approach" for every candidate at every skill, both passes): the
+# STRAIGHT-LINE side of a door is not always the side the walk reaches -- a walk that leaves the spawn the long way
+# round can arrive at a door from the side facing AWAY from the spawn, and the spawn-side `approach` then lies where
+# no walk enters. A door whose spawn-side approach no walk reaches is therefore tried from its OTHER side. The spawn
+# side is still tried FIRST and kept whenever it is reached, so a candidate the old rule accepted (or rejected for
+# any reason but "no walkable path to the approach") is judged exactly as before.
+def choose_approach(segs, sx, sy, reach):
+    """-> (approach, beyond, far, path): the spawn side if `reach(approach)` finds a path, else the other side if it
+    does; when neither does, the spawn side with `path` None."""
+    for far in (False, True):
+        approach, beyond = door_approach(segs, sx, sy, far=far)
+        path = reach(approach)
+        if path:
+            return approach, beyond, far, path
+    approach, beyond = door_approach(segs, sx, sy)
+    return approach, beyond, False, None
+
+
 def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500, step=None,
                   hold=None, blocked=None, fresh=None):
     """Grid-BFS a walkable path to `goal`, then steer along it. Same contract as `plan_to`.
@@ -744,22 +781,16 @@ def main():
     from doomfj.doors import SPEED as _DSPEED
     spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
 
-    def geometry(target, depth=88):
+    def geometry(target, depth=88, far=False):
         """THE DOORWAY, not the use box. The box is inflated by USE_RANGE and its south edge is 90 units
         clear of the opening, so "reach the box" put the player alongside the door and the walk-through
         leg then went AROUND it. Both legs aim at the gap between the door's own two line segments:
-        `approach` a little short of it on the player's side, `beyond` a little past it on the other.
-        -> (door_segs, approach, beyond)"""
+        `approach` a little short of it on the player's side, `beyond` a little past it on the other
+        (`door_approach`; `far`: the side away from the spawn, which `choose_approach` takes when the
+        spawn's side is not reached). -> (door_segs, approach, beyond)"""
         segs = [(cmap.vertexes[lds[li].v1], cmap.vertexes[lds[li].v2])
                 for li in sorted(lines_of[target])]
-        (ax, ay), (bx, by) = segs[0]
-        mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
-        nx, ny = -(by - ay), (bx - ax)                   # the line's normal
-        nlen = (nx * nx + ny * ny) ** 0.5 or 1.0
-        nx, ny = nx / nlen, ny / nlen
-        sgn = -1.0 if (spx - mx) * nx + (spy - my) * ny > 0 else 1.0
-        return (segs, (mx - sgn * nx * 56, my - sgn * ny * 56),   # the player's side of the opening
-                (mx + sgn * nx * depth, my + sgn * ny * depth))   # through it, and out the far side
+        return (segs,) + door_approach(segs, spx, spy, depth, far)
 
     # ── THE DOOR AND THE SKILL: the first whose ground is clear, tried in order ──────────────────────
     # ⚠ NEAREST REACHABLE, not nearest. Straight-line nearest picks door 48, whose use box sits
@@ -812,11 +843,17 @@ def main():
             return None, None, door_segs, approach, beyond, (
                 "a monster on its ground at this skill: %s" % sorted(set(inbox + near((approach, mid, beyond),
                                                                                        mons, CLEAR))))
-        path, _ = walkable_cells(rm, walk_scene, spx, spy,
-                                 lambda wx, wy: (wx - approach[0]) ** 2 + (wy - approach[1]) ** 2 <= 40 ** 2,
-                                 blocked=blocked)
+        def reach(pt):
+            return walkable_cells(rm, walk_scene, spx, spy,
+                                  lambda wx, wy: (wx - pt[0]) ** 2 + (wy - pt[1]) ** 2 <= 40 ** 2,
+                                  blocked=blocked)[0]
+        approach, beyond, far, path = choose_approach(door_segs, spx, spy, reach)
         if not path:
-            return None, None, door_segs, approach, beyond, "no walkable path to the approach"
+            return None, None, door_segs, approach, beyond, "no walkable path to the approach (either side)"
+        if far and strict and (inbox or near((approach, mid, beyond), mons, CLEAR)):
+            return None, None, door_segs, approach, beyond, (
+                "(the far side) a monster on its ground at this skill: %s"
+                % sorted(set(inbox + near((approach, mid, beyond), mons, CLEAR))))
         onpath = near(path, mons, PATH_CLEAR)
         if strict and onpath:
             return None, None, door_segs, approach, beyond, (
@@ -850,7 +887,7 @@ def main():
         # tried, nearest the far side's back first (E1M1 / E1M2 walk through at 88: their plans are the ones they were)
         for depth in BEYOND_DEPTHS:
             if depth != BEYOND_DEPTHS[0]:
-                beyond = geometry(target, depth)[2]
+                beyond = geometry(target, depth, far)[2]
             through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st1, beyond, 40,
                                     max_tics=600, blocked=blocked,
                                     fresh=lambda: made.append(mirror_stepper(skill, prefix=pre)) or made[-1])

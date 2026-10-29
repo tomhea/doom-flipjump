@@ -92,7 +92,7 @@ def model_specials() -> dict:
         out[s] = "lift"
     for s in MV.FLOOR_SPECIALS:
         out[s] = "floor"
-    for s in D.EXIT_SPECIALS:
+    for s in D.EXIT_SPECIALS | D.WALK_EXIT_SPECIALS:      # M8 C9: the W1 exit (52) is in the model too
         out[s] = "exit"
     try:
         from doomfj.teleport import TELEPORT_SPECIALS
@@ -219,7 +219,7 @@ class Level:
                               lambda: teleporters(self.mw, self.map, rm=self.rm, cmap=self.cmap)) or []
 
     def _exits(self):
-        from doomfj.doors import EXIT_SPECIALS, USE_RANGE
+        from doomfj.doors import EXIT_SPECIALS, USE_RANGE, WALK_EXIT_SPECIALS
         self.exits = []
         for li, ld in enumerate(self.lds):
             if ld.special not in EXIT_KINDS:
@@ -229,8 +229,9 @@ class Level:
             box = (min(a[0], b[0]) - USE_RANGE, min(a[1], b[1]) - USE_RANGE,
                    max(a[0], b[0]) + USE_RANGE, max(a[1], b[1]) + USE_RANGE)
             self.exits.append({"line": li, "special": ld.special, "trigger": trig, "which": which,
-                               "box": box if trig == "S" else None, "seg": (a, b), "model": ld.special in EXIT_SPECIALS})
-        mod = [e for e in self.exits if e["model"]]
+                               "box": box if trig == "S" else None, "seg": (a, b),
+                               "model": ld.special in EXIT_SPECIALS | WALK_EXIT_SPECIALS})
+        mod = [e for e in self.exits if e["model"] and e["trigger"] == "S"]   # (a W1 exit has no box: it is crossed)
         if mod:                     # the model's own boxes (doors.exit_boxes, linedef order): the binary's, to the unit
             from doomfj.doors import exit_boxes
             boxes = self._try("exits (doors.exit_boxes)", lambda: exit_boxes(self.lds, self.cmap.vertexes))

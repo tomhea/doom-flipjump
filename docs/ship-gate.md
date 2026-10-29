@@ -8,7 +8,23 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 ## 1. The standing number
 
-**Since 2026-10-18 the shipped binary is `build/doom_e1m1_blocked63.fjm`** -- class F (M8): blocked62 + THE MAP PAGE
+**Since 2026-10-28 the shipped binary is `build/doom_e1m1_blocked64.fjm`** -- class F (flipjump 1.6.0's screen /
+keyboard API, the plan's ship #1, `docs/flipjump-1.6.0-plan.md` 1c-1g): blocked63's game with every emitter speaking the
+new device API (7df54d00, the gate harnesses 24621131). Built ONE PASS from the 1b command with flipjump 1.6.0 at 9f6119c,
+sha256 `f52751a2bb846c7a`; REBUILT BYTE-IDENTICAL (`blocked64_rebuild.log`). Its pixels are blocked63's on every gated
+frame; class F because the device under them changed (D8). Its gates, each solo (`docs/ship-evidence/blocked64_*.log`):
+
+| what | value |
+|---|---|
+| m2_std_gate / m3_gate | PASS -- 421 / 88 frames byte- and state-exact |
+| p2a / hurt / fight / die | PASS -- 13 of 15 (2 N/A: E1M1 has no yellow / red door) / 7 / 43 / 17, state, pixels and palette exact |
+| window smoke | PASS -- 40 frames through the interactive window and the headless screen, identical; title, icon, max fps |
+| combat set v10 | (mean+p80)/2 = **16,297,393** (blocked63 16,255,310, +0.26%); B0 OK |
+| binding metric | **16,921,550 ops/frame -- PASS** against 22,000,000 (blocked63 16,892,755, +0.17%) |
+| size | **39.13% of 2^27 -- PASS** against 43% (52,522,052 words; file 39,836,502 bytes, .fjm v3) |
+| ms/frame | the price (D8, class F): **68.3 ms/frame** against blocked63's **67.6** in one A/B run, each on its own flipjump (blocked63 on flipjump-151 5af5923, blocked64 on 1.6.0 e44ff3f; `blocked64_msframe.log`): **NOT SEPARATED**, ratio 0.989, pixels identical; 16,136,442 ops/frame (+0.44%). On 1.6.0 at 9f6119c, before area 6d's device speed fix, the same A/B was B SLOWER x0.961, 67.7 -> 70.2 (`blocked64_msframe_9f6119c.log`). The `shipped` baseline is re-frozen on blocked64 under 1.6.0 e44ff3f: **68.0 ms/frame**, 237.2 M fj/s (`blocked64_msframe_freeze.log`) |
+
+**From 2026-10-18 to 2026-10-28 the shipped binary was `build/doom_e1m1_blocked63.fjm`** -- class F (M8): blocked62 + THE MAP PAGE
 (the owner: "Add it to e1m1 too"; `config.MAP_CONFIG["E1M1"] = {"AUTOMAP": 1}`, 17536cad: a MAP menu item and the M key
 show E1M1's lines at 40 units/px with a red dot at the player). Built ONE PASS from the 1b command at 93813efc, sha256
 `b65e5a97c42adb71` (full `b65e5a97c42adb71dcf22b17f74c74e8713dfdaa862940d29c37a0fec994120c`); REBUILT BYTE-IDENTICAL
@@ -361,6 +377,12 @@ passed against it). Assembled AND run by the installed flipjump-151 at 6711d7a. 
 whole build (the one-pass census 2,227 s). Pinning: 20 of 20 hot words, 0 lost (4 re-keyed by their label), 44,212 groups
 placed, 0 broken, 550,176 tables blocked, the pool 74.2% of its window (`blocked62_pinreport.log`). Class S: VERIFIED by a byte-identical rebuild (`blocked62_rebuild.log`).
 **The play command is `fj --run build/doom_e1m1_blocked62.fjm`.**
+
+**blocked64 (2026-10-28, flipjump 1.6.0's device API, ship #1): ONE PASS -- the line at the top of 1b** with
+`heat_blocked27_p10`, assembled by flipjump 1.6.0 at 9f6119c (`emit_check.py E1M1 --then` the line). Pinning: 40,529 words
+pinned, 44,262 groups placed, 0 broken, 550,497 tables blocked, the pool 74.2% of its window. VERIFIED by a byte-identical
+rebuild (`blocked64_rebuild.log`). Runs on flipjump >= 1.6.0 (the new screen / keyboard device; flipjump-151 cannot run it).
+**The play command is `fj --run build/doom_e1m1_blocked64.fjm`.**
 
 **blocked63 (2026-10-18, M8: the MAP page): ONE PASS -- the line at the top of 1b** with `heat_blocked27_p10` at
 93813efc (its census the tracked `_census_game.json.gz`; `tests/host/test_pin_heat.py` 3 passed against it). 2,599 s

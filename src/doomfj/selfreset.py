@@ -139,7 +139,7 @@ def byte_arrays(bits, words_sorted, view_w, nss, pid_bytes: int = 1, ss_ratio: i
 def capture_labels(paths, out_fjm, lzma_fast=True, run_flags=0, io_mode=0, defines_file=None):
     """Assemble, and return the USER label table without paying for the debug-only families.
 
-    run_flags / io_mode go into the .fjm header (flipjump >= 1.5.1 at 342a3b9): how `fj --run` runs
+    run_flags / io_mode go into the .fjm header (flipjump >= 1.6.0 at 342a3b9): how `fj --run` runs
     the binary when given no options -- see build.standalone_run_header.
 
     `defines_file` (M8 F1.5): the assembler's -D file (config.Config.emit_fj_defines: a wide-list map's
@@ -432,8 +432,8 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
                             "found %d" % len(hits))
     assert sum(1 for l in old_lines if l.strip() == "bad: stl.loop") == 1, \
         "self-reset: bad: stl.loop (the junk-input halt) is not where it was"
-    assert old_lines[hits[0] - 1].strip() == "stl.output_char 0xFF", \
-        "self-reset: the line before the frame tail is not the 0xFF end-of-frame marker"
+    assert old_lines[hits[0] - 1].strip() == "present.end_frame", \
+        "self-reset: the line before the frame tail is not the end of frame (present.end_frame)"
     new_lines = list(old_lines)
     new_lines[hits[0]] = ";m1_reset"          # 1 op -> 1 op: size-neutral, so nothing moves
     assert len(new_lines) == len(old_lines)
@@ -785,8 +785,8 @@ def emit_reset_part_by_label(gen, files, reset_names, view_w, nss, mapname="e1m1
     m_lines = main.read_text(encoding="utf-8").split("\n")
     hits = [k for k, s in enumerate(m_lines) if s.strip() == "stl.loop"]
     assert len(hits) == 1, "one-pass reset: expected exactly 1 bare stl.loop (the frame tail), found %d" % len(hits)
-    assert m_lines[hits[0] - 1].strip() == "stl.output_char 0xFF", \
-        "one-pass reset: the line before the frame tail is not the 0xFF end-of-frame marker"
+    assert m_lines[hits[0] - 1].strip() == "present.end_frame", \
+        "one-pass reset: the line before the frame tail is not the end of frame (present.end_frame)"
     m_lines[hits[0]] = ";m1_reset"
     main.write_text("\n".join(m_lines), encoding="utf-8")
     entry = gen / ("%s_00_entry.fj" % mapname.lower())

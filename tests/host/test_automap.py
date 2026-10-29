@@ -91,9 +91,12 @@ def test_e1m1_scale(e1m1):
     assert {"wall", "step", "blue", "exit"} == p.kinds
 
 
-# frozen at m8p-final (925af820): E1M2's page -- the dot's fj, the band streams, the cold block, the decls
-E1M2_FROZEN = {"fj": "8af3bbdae7ca544ed01cdc3b88e16fb7fc342af12f6b6e2bc890c14c3825d4fe",
-               "streams": "c1c42d6ed98bed8533cd6268cf3b86c0c6657a96726f1fb953958e5676b11e1f",
+# frozen at m8p-final (925af820): E1M2's page -- the dot's fj, the band streams, the cold block, the decls;
+# RE-FROZEN at the screen API change (io-api, 2026-10-23): the bands are draw_collines frames (COPY, END closing every
+# column, END_CMD + present) and the dot's KEEP is the API's 0xFE; the decls are m8p-final's. The PIXELS are
+# unchanged: test_each_band_stream_paints_its_picture decodes them through the device against the oracle
+E1M2_FROZEN = {"fj": "284edf9fc4ae9dbb7cc2fcd95ab4a5d13376562d6ae2c310b5afde314a6aa869",
+               "streams": "5a3d268dcafd5282c9cd06a1f7315b1550ed54c7ceb5e24d1ab519bfe19e0336",
                "decls": "909a7e89612060258d9148bdaabc96ec92373984f0fba09072095c30267d7289"}
 
 
@@ -142,7 +145,8 @@ def test_a_reciprocal_one_too_small_is_caught(e1m1, monkeypatch):
 def _decode(stream, w, h):
     """the stream through the REAL screen device (tests/host/test_menu.py's way): exactly one frame, its pixels"""
     scr = InMemoryScreen()
-    for byte in bytes([0x01, w & 0xFF, w >> 8, h & 0xFF, h >> 8, 8, 0, 1]) + stream:
+    from doomfj import screenwire as SW
+    for byte in SW.init_screen(w, h) + stream:
         for k in range(8):
             scr.write_bit(bool((byte >> k) & 1))
     assert scr.frame_count == 1
@@ -151,7 +155,7 @@ def _decode(stream, w, h):
 
 @pytest.mark.parametrize("which", ["e1m1", "e1m2"])
 def test_each_band_stream_paints_its_picture(which, request):
-    """ONE GENERATOR, TWO MIRRORS: each band's 0x0B stream, decoded by the REAL screen device, is its picture"""
+    """ONE GENERATOR, TWO MIRRORS: each band's frame, decoded by the REAL screen device, is its picture"""
     p = request.getfixturevalue(which)
     for k in range(p.nbands):
         assert _decode(A.band_stream(p, k), p.width, p.height) == A.band_pixels(p, k), k

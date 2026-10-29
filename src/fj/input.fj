@@ -27,12 +27,13 @@
 // "this key is currently held" and survive the frame reset, which is what makes holding W walk
 // instead of taking one step per keypress.
 //
-// ACCEPTED KEYCODES -- the SDL codes pygame_window delivers. M7 P4.1: THE OWNER'S KEY MAP (approved 2026-10-02,
+// ACCEPTED KEYCODES -- the keyboard device's (flipjump io_devices/README.md: ASCII below 0x80, Arduino Keyboard.h
+// above it; doomfj/keyboard.py's KC_* names). M7 P4.1: THE OWNER'S KEY MAP (approved 2026-10-02,
 // docs/gp-help.md section 4): A / D STRAFE now and only the arrows turn.
-//     'w' 0x77   up    0x80     forward        left  0x82     turn left
-//     's' 0x73   down  0x81     back           right 0x83     turn right
+//     'w' 0x77   up    0xDA     forward        left  0xD8     turn left
+//     's' 0x73   down  0xD9     back           right 0xD7     turn right
 //     'a' 0x61   ',' 0x2C       strafe left    'd' 0x64   '.' 0x2E     strafe right   (M7 P4.1)
-//     ctrl 0x85                 fire, held                                           (M7 P4.1)
+//     ctrl 0x80 (left) / 0x84 (right)          fire, held                            (M7 P4.1)
 //     '1'..'5' 0x31..0x35       the weapon keys, held (the weapon tic picks the lowest held) (M7 P4.1; P9: '5',
 //                               the rocket launcher)
 //     enter 0x0D  esc 0x1B      the menu's ENTER / ESC events, on the DOWN edge only
@@ -70,7 +71,7 @@ ns kb {
     // M7 P4.1: `sl` / `sr` (strafe), `fi` (fire), `w1`..`w4` (the number keys) -- seven more held flags, persisted
     // P9: `now` -- the press latch, one nibble per held flag in this order (see the header): a down edge sets it
     // P9: `w5` -- the number key '5' (the rocket launcher), a held flag after w4
-    def poll stat, code, f, b, l, r, u, sl, sr, fi, w1, w2, w3, w4, w5, now, ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad @ done, legal, any_dn, any_key, hi1, hi2, hi3, hi6, hi7, lo0, lo1, lo2, lo2_c, lo2_e, lo3, lo3_2, lo3_3, lo3_4, lo3_5, k_enter, enter_dn, k_esc, esc_dn, hi8, k_fwd, k_back, k_left, k_right, k_use, k_sl, k_sr, k_fi, k_w1, k_w2, k_w3, k_w4, k_w5, lo6, lo6_d, lo6_e, lo6_h, k_help, help_dn, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, lo8e, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn, u_up, u_dn, sl_up, sl_dn, sr_up, sr_dn, fi_up, fi_dn, w1_up, w1_dn, w2_up, w2_dn, w3_up, w3_dn, w4_up, w4_dn, w5_up, w5_dn {
+    def poll stat, code, f, b, l, r, u, sl, sr, fi, w1, w2, w3, w4, w5, now, ev_enter, ev_esc, ev_up, ev_dn, ev_help, ev_any, bad @ done, legal, any_dn, any_key, hi1, hi2, hi3, hi6, hi7, lo0, lo1, lo2, lo2_c, lo2_e, lo3, lo3_2, lo3_3, lo3_4, lo3_5, k_enter, enter_dn, k_esc, esc_dn, hi8, k_fwd, k_back, k_left, k_right, k_use, k_sl, k_sr, k_fi, k_w1, k_w2, k_w3, k_w4, k_w5, lo6, lo6_d, lo6_e, lo6_h, k_help, help_dn, lo7, lo7_s, hiD, lo8a, lo8b, loDa, loDb, loDc, loDd, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn, u_up, u_dn, sl_up, sl_dn, sr_up, sr_dn, fi_up, fi_dn, w1_up, w1_dn, w2_up, w2_dn, w3_up, w3_dn, w4_up, w4_dn, w5_up, w5_dn {
         hex.input_hex stat
         // 0x0, 0x8 and 0x9 are the ONLY statuses the keyboard device produces. Anything else means
         // this program is not reading a keyboard -- someone piped a file in, or ran it with the
@@ -100,7 +101,9 @@ ns kb {
       hi7:
         hex.if_flags code+dw, 1<<0x7, hi8, lo7
       hi8:
-        hex.if_flags code+dw, 1<<0x8, done, lo8a
+        hex.if_flags code+dw, 1<<0x8, hiD, lo8a
+      hiD:
+        hex.if_flags code+dw, 1<<0xD, done, loDa
 
       lo0:                                      // 0x0_ : enter (0x0D)
         hex.if_flags code, 1<<0xD, done, k_enter
@@ -137,16 +140,19 @@ ns kb {
       lo7_s:
         hex.if_flags code, 1<<0x3, done, k_back
 
-      lo8a:                                     // 0x8_ : the four arrows, up/down/left/right
-        hex.if_flags code, 1<<0x0, lo8b, k_fwd
+      lo8a:                                     // 0x8_ : the modifiers -- left ctrl (0x80) and right ctrl (0x84) fire
+        hex.if_flags code, 1<<0x0, lo8b, k_fi   //        (M7 P4.1)
       lo8b:
-        hex.if_flags code, 1<<0x1, lo8c, k_back
-      lo8c:
-        hex.if_flags code, 1<<0x2, lo8d, k_left
-      lo8d:
-        hex.if_flags code, 1<<0x3, lo8e, k_right
-      lo8e:                                     // ctrl (0x85): fire (M7 P4.1)
-        hex.if_flags code, 1<<0x5, done, k_fi
+        hex.if_flags code, 1<<0x4, done, k_fi
+
+      loDa:                                     // 0xD_ : the arrows, 0x88 + their HID usage:
+        hex.if_flags code, 1<<0xA, loDb, k_fwd  //        up 0xDA, down 0xD9, left 0xD8, right 0xD7
+      loDb:
+        hex.if_flags code, 1<<0x9, loDc, k_back
+      loDc:
+        hex.if_flags code, 1<<0x8, loDd, k_left
+      loDd:
+        hex.if_flags code, 1<<0x7, done, k_right
 
         // ---- set or clear that key's flag. stat's bit 0 is is_down, and the only two statuses
         // that reach here are 0x8 (up) and 0x9 (down), so the odd-nibble mask separates them.

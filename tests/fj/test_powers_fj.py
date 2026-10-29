@@ -27,7 +27,7 @@ from pathlib import Path
 
 import flipjump as fj
 import pytest
-from flipjump.interpreter.io_devices.ScreenIO import CMD_SET_PALETTE, InMemoryScreen
+from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 from flipjump.utils.exceptions import IOReadOnEOF
 
 from doomfj import gamedata as gd
@@ -42,6 +42,7 @@ from doomfj.harness import W
 from doomfj.lut_generator import generate_dispatch_table_fj
 from doomfj.wad import Thing, WadFile
 from doomfj.world import World
+from tests.fj.palette_device import PalDev, boot_lines
 
 ROOT = Path(__file__).resolve().parents[2]
 FJ = ROOT / "src" / "fj"
@@ -210,35 +211,6 @@ TIC_MUTANTS = {
 }
 
 
-class _PalDev(InMemoryScreen):
-    """the stock screen fed stdin; per frame: (set_palette commands since the last frame, the palette held)"""
-
-    def __init__(self, stdin: bytes):
-        super().__init__()
-        self._inp, self._byte, self._bits = stdin, 0, 0
-        self.sent, self.frames = 0, []
-
-    def read_bit(self) -> bool:
-        if self._bits == 0:
-            if not self._inp:
-                raise IOReadOnEOF("EOF")
-            self._byte, self._inp, self._bits = self._inp[0], self._inp[1:], 8
-        bit = self._byte & 1
-        self._byte >>= 1
-        self._bits -= 1
-        return bool(bit)
-
-    def _execute_command(self, command, payload):
-        if command == CMD_SET_PALETTE:
-            self.sent += 1
-        super()._execute_command(command, payload)
-
-    def _present(self):
-        super()._present()
-        self.frames.append((self.sent, tuple(self.palette)))
-        self.sent = 0
-
-
 def _tic_script():
     """[(dc, strength, bc, take_suit, take_invis, menu)] -- suits taken at fixed frames (the full 2100 and its blinking
     end, one re-taken mid-way), damage and gold flashes over it"""
@@ -274,7 +246,7 @@ def _tic_expected(art):
             w.ws.p_invis = P.TICS[P.INVIS_TYPE]
         w.ws.p_damagecount, w.ws.p_strength, w.ws.p_bonuscount = dc, st, bc
         k = 0 if menu else palette_index(w.ws)
-        want.append((int(k != cur) + int(f == 0), tuple(art.playpal(k))))
+        want.append((int(k != cur), tuple(art.playpal(k))))     # the boot's init_screen selects slot 0
         cur = k
     return want
 
@@ -285,7 +257,7 @@ def _tic_run(tmp_path, name, mut=None):
                       "world_pal:"] + H.pal_lines(loot=True, suit=True) + ["stl.fret pal_ret", "menu_pal:"]
                      + H.pal_menu_lines() + ["stl.fret pal_ret"]) + "\n"
     text = _mutate(text, TIC_MUTANTS, mut)
-    lines = ["stl.startup_and_init_all", "present.init_screen", "present.set_palette playpal0",
+    lines = ["stl.startup_and_init_all", *boot_lines(H.boot_palettes(art, n=H.NPALETTES_SUIT)),
              "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
              "hex.input 1, p_dc", "hex.input 2, p_str", "hex.input 1, p_bc", "hex.input 1, rflags",
              "stl.fcall tic_leaf, pal_ret",
@@ -294,15 +266,14 @@ def _tic_run(tmp_path, name, mut=None):
              "hex.if_flags rflags, 0xF0F0, fw, fm",
              "fm:", "stl.fcall menu_pal, pal_ret", ";fr",
              "fw:", "stl.fcall world_pal, pal_ret",
-             "fr:", "present.begin_frame_collines", "stl.output_char 0xFF", ";loop",
+             "fr:", "present.draw_collines", "present.end_frame", ";loop",
              "done:", "stl.loop",
              "rmagic: hex.vec 2", "rflags: hex.vec 2", "pal_ret: hex.vec w/4",
              "p_dc: hex.vec 2", "p_str: hex.vec 4", "p_bc: hex.vec 2", "pal_cur: hex.vec 1, 0", "pal_new: hex.vec 1",
              "pal_bk: hex.vec 1", *PC.decls((P.INVIS_TYPE, P.SUIT_TYPE)),
              text,
              generate_dispatch_table_fj("palidx", H.palidx_values(), index_nibbles=2, result_nibbles=1),
-             generate_dispatch_table_fj("bonpal", H.bonpal_values(), index_nibbles=2, result_nibbles=1),
-             *H.palette_tables_fj(art, n=H.NPALETTES_SUIT)]
+             generate_dispatch_table_fj("bonpal", H.bonpal_values(), index_nibbles=2, result_nibbles=1)]
     src = tmp_path / (name + ".fj")
     src.write_text("\n".join(lines) + "\n", encoding="utf-8")
     out = tmp_path / (name + ".fjm")
@@ -310,7 +281,7 @@ def _tic_run(tmp_path, name, mut=None):
     fj.assemble([consts.resolve(), (FJ / "present.fj").resolve(), (FJ / "sim.fj").resolve(), src.resolve()], out,
                 memory_width=W, print_time=False)
     script = _tic_script()
-    dev = _PalDev(b"".join(bytes([1, dc, st & 0xFF, st >> 8, bc, ts | ti << 1 | menu << 2])
+    dev = PalDev(b"".join(bytes([1, dc, st & 0xFF, st >> 8, bc, ts | ti << 1 | menu << 2])
                            for dc, st, bc, ts, ti, menu in script) + bytes([0]))
     fj.run(out, io_device=dev, print_time=False, print_termination=False)
     return dev.frames, _tic_expected(art)
@@ -514,12 +485,12 @@ def _shadow_run(tmp_path, name, mut=None):
              *PC.decls((P.INVIS_TYPE,)),
              "hud_tail_leaf:", text, "stl.fret hud_ret", "frames:"]
     for f, (wf, ff, inv) in enumerate(PSP):
-        lines.append("present.begin_frame_collines")
+        lines.append("present.draw_collines")
         for x in range(WIDTH):
             rec, _px = _view_column(f, x)
             lines += [f"stl.output_char {b}" for b in rec]
         lines += [f"hex.set 2, wp_frm, {wf}", f"hex.set 1, fl_frm, {ff}", f"hex.set 3, p_inv, {inv}",
-                  "stl.fcall hud_tail_leaf, hud_ret", "stl.output_char 0xFF"]
+                  "stl.fcall hud_tail_leaf, hud_ret", "present.end_frame"]
     lines.append("stl.loop")
     src = tmp_path / (name + ".fj")
     src.write_text("\n".join(lines) + "\n", encoding="utf-8")

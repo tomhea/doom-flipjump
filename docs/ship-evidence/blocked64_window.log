@@ -1,0 +1,3 @@
+C:\Users\tomhe\Documents\fjio-path\flipjump\interpreter\io_devices\pygame_window.py:150: Warning: no fast renderer available
+  self._screen_surface = pg.display.set_mode((width, height), mode_flags)
+WINDOW SMOKE: PASS -- 40 frames (20 distinct pictures) through the interactive window and the headless screen, identical; title 'FlipJump DOOM', icon 32x32, max fps 20

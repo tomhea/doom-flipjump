@@ -9,7 +9,7 @@ bakes the per-pixel graphics data into the M5 dispatch tables, and completes F3'
 - `compile_colormap` emits the light table as a dispatch table indexed by `(light<<8 | colour)` ->
   lit palette byte, plus `<label>.apply` (the per-pixel colormap apply, D11). Over-align candidate (#3).
 - `compile_palette` emits the 256-colour RGB palette as **device data** (not a dispatch LUT, §1.3) —
-  the present layer hands it to `set_palette`.
+  no longer handed to the screen: the boot defines its palettes in the stream (screenwire.define_palette).
 
 All values come from the WAD (the single source shared with the oracle, R6). flipjump parses `.fj` as
 UTF-8; emitted text is ASCII.
@@ -158,7 +158,7 @@ def compile_colormap(label: str, wad: WadFile, *, lights: int = 32, mode: str = 
 
 def compile_palette(label: str, wad: WadFile, *, index: int = 0) -> str:
     """Emit the 256-colour RGB palette as device data (R,G,B bytes per colour) — read by the present
-    layer's set_palette, not a dispatch LUT (§1.3)."""
+    layer (historic: the boot now defines palettes in the stream, screenwire.define_palette), not a dispatch LUT."""
     pal = wad.playpal(index)
     lines = [f'// palette "{label}": 256 RGB colours, device data (doomfj.texturecompiler)',
              f"{label}:"]

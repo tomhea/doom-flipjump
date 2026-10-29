@@ -7,7 +7,7 @@ name = "doomfj"
 version = "0.0.0"
 description = "DOOM on FlipJump — host tools (WAD/LUT/map/texture compilers, reference model, build, harness)"
 requires-python = ">=3.10,<3.14"          # flipjump abi3 is py3.10+; 3.14 unsupported for pygame (§H)
-dependencies = ["flipjump[io]>=1.5.0", "pillow"]
+dependencies = ["flipjump[io]>=1.6.0", "pillow"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pyflakes"]    # pyflakes: tests/host/test_no_undefined_names.py skips without it

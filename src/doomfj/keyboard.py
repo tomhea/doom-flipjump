@@ -27,6 +27,13 @@ from __future__ import annotations
 
 from typing import Dict, FrozenSet, List, NamedTuple, Optional
 
+# THE KEY CODES the keyboard device delivers (flipjump io_devices/README.md, "Keycodes": Arduino Keyboard.h's) -- the
+# ONE home of the non-ASCII ones in this repo. ASCII below 0x80 is the key itself, unshifted ('w' = 0x77, Enter 0x0D,
+# Esc 0x1B, Space 0x20); the modifiers are 0x80..0x87, left then right; every other key is 0x88 + its USB HID usage.
+KC_LCTRL, KC_LSHIFT, KC_LALT, KC_LGUI = 0x80, 0x81, 0x82, 0x83
+KC_RCTRL, KC_RSHIFT, KC_RALT, KC_RGUI = 0x84, 0x85, 0x86, 0x87
+KC_RIGHT, KC_LEFT, KC_DOWN, KC_UP = 0xD7, 0xD8, 0xD9, 0xDA            # 0x88 + HID 0x4F .. 0x52
+
 # the held keys, in kb.poll's parameter order and `kb_now`'s nibble order -- forward, back, turn left / right (the
 # arrows), use (space, e), strafe left / right, fire (ctrl), the number keys 1..5 (P9: 5, the launcher)
 HELD_KEYS = ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5")   # P9: 5, the launcher
@@ -36,7 +43,7 @@ HELD_KEYS = ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", 
 HELD_KEYS_PLASMA = HELD_KEYS + ("w6",)
 KEY_NOW = "kb_now"
 NOW_DECL = f"{KEY_NOW}: hex.vec {len(HELD_KEYS)}"
-W6_CODE = 0x36                                  # '6', the SDL code pygame_window delivers
+W6_CODE = 0x36                                  # '6' (ASCII)
 
 
 def held_keys(plasma: bool = False) -> tuple:
@@ -48,9 +55,9 @@ def now_decl(plasma: bool = False) -> str:
     """KEY_NOW's declaration: one nibble per held key (M8 C6: 14 on a plasma map)"""
     return f"{KEY_NOW}: hex.vec {len(held_keys(plasma))}"
 
-# keycode -> held key: src/fj/input.fj's table (the SDL codes pygame_window delivers)
-BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b", 0x82: "l", 0x83: "r", 0x20: "u", 0x65: "u",
-           0x61: "sl", 0x2C: "sl", 0x64: "sr", 0x2E: "sr", 0x85: "fi",
+# keycode -> held key: src/fj/input.fj's table (the device's codes, KC_* above; fire is EITHER Ctrl)
+BINDING = {0x77: "f", KC_UP: "f", 0x73: "b", KC_DOWN: "b", KC_LEFT: "l", KC_RIGHT: "r", 0x20: "u", 0x65: "u",
+           0x61: "sl", 0x2C: "sl", 0x64: "sr", 0x2E: "sr", KC_LCTRL: "fi", KC_RCTRL: "fi",
            0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4", 0x35: "w5"}
 BINDING_PLASMA = {**BINDING, W6_CODE: "w6"}     # M8 C6: a plasma map's table
 # held key -> wireformat.KEY_NAMES' name (the dicts the sim and the gates use); the number keys keep theirs

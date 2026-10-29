@@ -1,7 +1,7 @@
 """M3 — the menu, as a BAKED FRAME.
 
 A menu screen is a picture that never changes, and the shipping renderer already presents pictures
-as 0x0B column run-lists. So the menu needs no renderer at all: it is a constant byte stream, and
+as draw_collines column records (doomfj.screenwire). So the menu needs no renderer at all: it is a constant byte stream, and
 "draw the menu" is a run of `stl.output_char`s with compile-time operands. That makes it roughly a
 thousand times cheaper than a world frame and removes the only thing about M3 that looked hard.
 
@@ -127,12 +127,9 @@ def text_width(label: str, font=None) -> int:
     one gap between glyphs"""
     return sum(glyph_width(ch, font) for ch in label) + GLYPH_GAP * max(0, len(label) - 1)
 
-# the protocol's own constants, from the device that decodes them -- NOT a third private copy.
-# (tests/fj/stream_screen.py has the lab decoder's; this file had a second. R6 is one source.)
-from flipjump.interpreter.io_devices.ScreenIO import COLLINES_DITTO as DITTO
-from flipjump.interpreter.io_devices.ScreenIO import COLLINES_END as END
-from flipjump.interpreter.io_devices.ScreenIO import COLLINES_KEEP as KEEP                    # noqa: E402 (P10)
-from flipjump.interpreter.io_devices.ScreenIO import COLLINES_TOKENS_MAX_HEIGHT               # noqa: E402 (P10)
+# the screen API's numbers and encoders: doomfj.screenwire is their one home (R6 is one source)
+from doomfj import screenwire as SW                                                          # noqa: E402
+from doomfj.keyboard import KC_DOWN, KC_LCTRL, KC_LEFT, KC_RIGHT, KC_UP                      # noqa: E402
 
 
 def palette_colours(palette_rgb) -> tuple:
@@ -248,16 +245,17 @@ HELP_ROWS = (
 # codes pygame_window delivers; input.fj's table). tests/fj/test_keyboard_input.py runs kb.poll on
 # each and requires it to DO something -- a held flag or a menu event -- so the screen cannot list a
 # dead key.
-HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEFT": 0x82,
-                 "D": 0x64, "RIGHT": 0x83, "SPACE": 0x20, "E": 0x65, "ENTER": 0x0D, "ESC": 0x1B,
+HELP_KEYCODES = {"W": 0x77, "UP": KC_UP, "S": 0x73, "DOWN": KC_DOWN, "A": 0x61, "LEFT": KC_LEFT,
+                 "D": 0x64, "RIGHT": KC_RIGHT, "SPACE": 0x20, "E": 0x65, "ENTER": 0x0D, "ESC": 0x1B,
                  "H": 0x68,
-                 # M7 P4.1: fire (ctrl -- pygame_window's 0x85), the number keys, the second strafe pair
-                 "CTRL": 0x85, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, ",": 0x2C, ".": 0x2E,
+                 # M7 P4.1: fire (ctrl -- the left one's code; keyboard.BINDING takes either), the number keys, the
+                 # second strafe pair
+                 "CTRL": KC_LCTRL, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, ",": 0x2C, ".": 0x2E,
                  "5": 0x35}                                  # P9: the rocket launcher
 # M8 (doomfj.automap): the MAP key's item -- a third item on the last row, ONLY on a map with the map page
 # (`help_rows(automap=True)`); its keycode joins HELP_KEYCODES there only (`help_keycodes`), so a map without the page
 # lists no key that does nothing
-MAP_KEY = 0x6D                                              # 'm' (pygame_window's SDL code; automap.AUTOMAP_KEY)
+MAP_KEY = 0x6D                                              # 'm' (ASCII; automap.AUTOMAP_KEY)
 HELP_MAP_ITEM = (("M",), ("MAP",))
 HELP_MAP_KEYCODE = {"M": MAP_KEY}
 # M8 C6: on a map with the PLASMA RIFLE (combat.plasma_on) the weapons item lists key 6 too ("1 .. 6 WEAPONS"), and its
@@ -449,7 +447,7 @@ def help_pixels(width, height, colours, automap: bool = False, plasma: bool = Fa
 
 
 def help_stream(width, height, colours, automap: bool = False, plasma: bool = False) -> bytes:
-    """The 0x0B frame that paints exactly `help_pixels()` -- `stream()`'s encoder."""
+    """The draw_collines command that paints exactly `help_pixels()` -- `stream()`'s encoder."""
     return _encode(_help_bitmap(width, height, colours, automap, plasma), width, height)
 
 
@@ -461,42 +459,18 @@ def help_fj(width, height, colours, label: str = "menu_help", end_marker: bool =
 
 
 def stream(width, height, lines, selected, colours) -> bytes:
-    """The 0x0B frame that paints exactly `pixels()`.
-
-    Column-major run-lists, with DITTO (0xFE) for a column identical to its left neighbour — which
-    on a menu is most of them, and which exercises the one compression the protocol has. Column 0
-    is never dittoed: it has no left neighbour, and the device refuses it."""
-    # ⚠ THE PROTOCOL BOUNDS THE RESOLUTION, and R6 forbids assuming it. A column tag must be
-    # distinguishable from DITTO/END, and a run's `y2` is one byte, so this encoder is correct only
-    # while width < 0xFE and height <= 0xFF. At 160x100 that is far off; assert rather than assume,
-    # because a resolution change would otherwise corrupt the stream instead of failing.
+    """The draw_collines command that paints exactly `pixels()` (screenwire.picture): column-major run-lists, with
+    COPY for a column identical to its left neighbour -- which on a menu is most of them. Column 0 is never copied:
+    it has no left neighbour, and the device refuses it. A whole FRAME: it ends in END_CMD, then present."""
+    # ⚠ THE PROTOCOL BOUNDS THE RESOLUTION, and R6 forbids assuming it: the program's fields are bytes, so the
+    # screen must come out at R = C = 8 -- screenwire.picture asserts it rather than corrupting the stream.
     return _encode(_bitmap(width, height, lines, selected, colours), width, height)
 
 
 def _encode(grid, width, height) -> bytes:
-    """a width*height picture -> its 0x0B stream (see `stream`): every baked screen's ONE encoder"""
-    assert width < DITTO, "0x0B column tags must stay below DITTO (0xFE); width=%d" % width
-    assert height <= END, "0x0B run bounds are one byte; height=%d" % height
-    out = bytearray([0x0B])
-    previous = None
-    for x in range(width):
-        column = [grid[y * width + x] for y in range(height)]
-        out.append(x)
-        if previous is not None and column == previous:
-            out.append(DITTO)
-            previous = column
-            continue
-        y = 0
-        while y < height:
-            y2 = y + 1
-            while y2 < height and column[y2] == column[y]:
-                y2 += 1
-            out += bytes([y2, column[y]])
-            y = y2
-        out.append(END)
-        previous = column
-    out.append(END)
-    return bytes(out)
+    """a width*height picture -> its frame (see `stream`: draw_collines, END_CMD, present): every baked screen's ONE
+    encoder"""
+    return SW.frame(grid, width, height)
 
 
 def fj(width, height, lines, selected, colours, label: str = "menu_frame",
@@ -513,12 +487,11 @@ def fj(width, height, lines, selected, colours, label: str = "menu_frame",
 def _fj_text(data: bytes, label: str, end_marker: bool, what: str) -> str:
     """a stream as fj: one `stl.output_char` per byte under `label`"""
     if not end_marker:
-        # the caller supplies the end-of-frame byte from a SHARED tail -- see
+        # the caller supplies END_CMD and the present from a SHARED tail (`present.end_frame`) -- see
         # wall_renderer._menu_lines, where both frame producers fall into one tail
-        assert data[-1] == END
-        data = data[:-1]
-    body = "\n".join("    stl.output_char %d" % b for b in data)
-    return ("// %s -- %d bytes of 0x0B column run-lists, all constants\n"
+        data = SW.strip_frame_tail(data)
+    body = "\n".join(SW.fj_lines(data, "    "))
+    return ("// %s -- %d bytes of draw_collines column records, all constants\n"
             "%s:\n%s\n" % (what, len(data), label, body))
 
 # -------------------------------------------------------------------------------------------------
@@ -641,7 +614,7 @@ def level_done_secret_records(width, height, colours, nsecret: int, count_digits
     """M8 C9: SECRET EXIT as column records drawn after the frame (`level_done_digit_records`' form: per glyph column
     with ink, [x], [KEEP][y][y2][ink] per vertical run, END), in the text colour"""
     _background, text, _highlight, _credit = colours
-    assert height <= COLLINES_TOKENS_MAX_HEIGHT, "KEEP is a token only on a screen of <= 251 rows"
+    SW.assert_byte_fields(width, height)
     x, y0 = secret_exit_origin(width, height, nsecret, count_digits)
     out = bytearray()
     for ch in SECRET_EXIT_TEXT:
@@ -658,10 +631,7 @@ def level_done_secret_records(width, height, colours, nsecret: int, count_digits
                 runs.append((y0 + gy, y0 + e))
                 gy = e
             if runs and 0 <= x + gx < width:
-                out.append(x + gx)
-                for ys, ye in runs:
-                    out += bytes([KEEP, ys, ye, text])
-                out.append(END)
+                out += SW.column(x + gx, _ink_items(runs, text), height)
         x += len(glyph[0]) + GLYPH_GAP
     return bytes(out)
 
@@ -715,7 +685,7 @@ def level_done_digit_records(width, height, colours, nsecret: int, slot: int, di
     [x] then [KEEP][y][y2][ink] per vertical run of ink, then the column's END -- KEEP over the gaps, so the frame's
     background shows between the runs. A blank digit is no records at all"""
     _background, _text, highlight, _credit = colours
-    assert height <= COLLINES_TOKENS_MAX_HEIGHT, "KEEP is a token only on a screen of <= 251 rows"
+    SW.assert_byte_fields(width, height)
     if digit == DIGIT_BLANK:
         return b""
     assert 0 <= digit <= 9, digit
@@ -736,11 +706,17 @@ def level_done_digit_records(width, height, colours, nsecret: int, slot: int, di
             gy = e
         if not runs:
             continue
-        out.append(x0 + gx)
-        for ys, ye in runs:
-            out += bytes([KEEP, ys, ye, highlight])
-        out.append(END)
+        out += SW.column(x0 + gx, _ink_items(runs, highlight), height)
     return bytes(out)
+
+
+def _ink_items(runs, ink) -> list:
+    """a glyph column's vertical runs of ink as column items: KEEP down to each run (the frame shows between them),
+    then the run in `ink` -- [KEEP][y][y2][ink] per run"""
+    out = []
+    for ys, ye in runs:
+        out += [("keep", ys), ("fill", ye, ink)]
+    return out
 
 
 # -------------------------------------------------------------------------------------------------
@@ -754,7 +730,7 @@ def level_done_digit_records(width, height, colours, nsecret: int, slot: int, di
 # M7 P3.4: 'h' as "help" (the device has no F1; docs/gp-help.md).
 # P10: and "any" -- EVERY key's down edge, these and every other (the poll's `ev_any`; keyboard.frame_keys adds it) --
 # which only LEVEL COMPLETE acts on
-MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn",
+MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", KC_UP: "up", 0x73: "dn", KC_DOWN: "dn",
              0x68: "help"}
 ANY_KEY_EVENT = "any"
 # M7 P2a.2 -- `menu_scr`'s third screen: LEVEL COMPLETE, opened by the exit switch (docs/gp-exit.md)

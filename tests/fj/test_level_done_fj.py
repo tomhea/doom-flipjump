@@ -273,7 +273,7 @@ def _frame_text(swap=False, mapname="E1M1") -> tuple:
     for case in cases:
         body += _set(case) + ["stl.fcall dg_go, dg_ret", "stl.fcall fr_go, fr_ret"]
     body += ["stl.loop", "dg_go:", _digit_text(w), "    stl.fret dg_ret",
-             "fr_go:", frame, "    stl.output_char 0xFF", "    stl.fret fr_ret", *SC.routine_lines(), *_decls(w)]
+             "fr_go:", frame, "    present.end_frame", "    stl.fret fr_ret", *SC.routine_lines(), *_decls(w)]
     want = [level_done_pixels(CFG.W, CFG.H, colours, len(w.secret_sectors), _want(c, totals, nd)) for c in cases]
     return "\n".join(body) + "\n", want, cases, totals
 

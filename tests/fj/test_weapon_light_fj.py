@@ -90,12 +90,12 @@ def _fj_frames(tmp_path, name, mut=None):
              *PC.decls((P.INVIS_TYPE,)),
              "hud_tail_leaf:", text, "stl.fret hud_ret", "frames:"]
     for f, (wf, ff, inv, sec) in enumerate(FRAMES):
-        lines.append("present.begin_frame_collines")
+        lines.append("present.draw_collines")
         for x in range(WIDTH):
             lines += [f"stl.output_char {b}" for b in _view_column(f, x)[0]]
         lines += [*hudcode.weapon_row_lines(parts, sec),          # the view's descend leaf in `sec`, verbatim
                   f"hex.set 2, wp_frm, {wf}", f"hex.set 1, fl_frm, {ff}", f"hex.set 3, p_inv, {inv}",
-                  "stl.fcall hud_tail_leaf, hud_ret", "stl.output_char 0xFF"]
+                  "stl.fcall hud_tail_leaf, hud_ret", "present.end_frame"]
     lines.append("stl.loop")
     src = tmp_path / (name + ".fj")
     src.write_text("\n".join(lines) + "\n", encoding="utf-8")

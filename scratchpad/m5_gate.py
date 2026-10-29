@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from doomfj.build import STANDALONE_PERSIST                                    # noqa: E402
+from doomfj.keyboard import KC_DOWN, KC_LEFT, KC_RIGHT, KC_UP             # noqa: E402
 from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.config import Config                                               # noqa: E402
 from doomfj.fastrun import FjmRunner, _fjcore                                  # noqa: E402
@@ -48,8 +49,8 @@ from flipjump.utils.exceptions import IOReadOnEOF                              #
 
 K_FWD, K_BACK, K_LEFT, K_RIGHT = 0x77, 0x73, 0x61, 0x64
 KEY_NAMES = ("forward", "back", "turn_left", "turn_right")
-BINDING = {K_FWD: "forward", 0x80: "forward", K_BACK: "back", 0x81: "back",
-           K_LEFT: "turn_left", 0x82: "turn_left", K_RIGHT: "turn_right", 0x83: "turn_right"}
+BINDING = {K_FWD: "forward", KC_UP: "forward", K_BACK: "back", KC_DOWN: "back",
+           K_LEFT: "turn_left", KC_LEFT: "turn_left", K_RIGHT: "turn_right", KC_RIGHT: "turn_right"}
 
 # (frame, poll-within-frame, is_down, keycode). Chosen so the trajectory turns, WALKS INTO A
 # WALL, backs off and uses the arrow bindings -- a script that only crossed open floor would leave
@@ -64,10 +65,10 @@ SCRIPT = [
     (12, 0, False, K_FWD),
     (12, 1, True, K_BACK),                  # back off
     (15, 0, False, K_BACK),
-    (15, 1, True, 0x82),                    # the ARROW binding for turn-left, same flag as 'a'
-    (19, 0, False, 0x82),
-    (19, 1, True, 0x80),                    # ... and the arrow for forward
-    (23, 0, False, 0x80),
+    (15, 1, True, KC_LEFT),                 # the ARROW binding for turn-left, same flag as 'a'
+    (19, 0, False, KC_LEFT),
+    (19, 1, True, KC_UP),                   # ... and the arrow for forward
+    (23, 0, False, KC_UP),
 ]
 
 

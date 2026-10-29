@@ -37,6 +37,7 @@ from flipjump.interpreter.io_devices.FixedIO import FixedIO
 from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, ScriptedKeyEventSource
 
 from doomfj.config import Config
+from doomfj import keyboard as KB
 from doomfj.harness import W
 from doomfj.keyboard import HELD_KEYS
 from doomfj.menu import HELP_KEYCODES, MENU_KEYS, help_key_names
@@ -53,8 +54,8 @@ DIGITS = len(KEYS) + len(EVENTS) + len(KEYS)      # held flags, events, P9's pre
 
 # keycode -> which flag, mirroring the macro's own comment table. M7 P3.4: space and 'e' are USE. M7 P4.1 (the owner's
 # key map): A / D and ',' / '.' STRAFE, only the arrows turn, ctrl fires, '1'..'4' are the weapon keys.
-BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b", 0x82: "l", 0x83: "r", 0x20: "u", 0x65: "u",
-           0x61: "sl", 0x2C: "sl", 0x64: "sr", 0x2E: "sr", 0x85: "fi",
+BINDING = {0x77: "f", KB.KC_UP: "f", 0x73: "b", KB.KC_DOWN: "b", KB.KC_LEFT: "l", KB.KC_RIGHT: "r", 0x20: "u", 0x65: "u",
+           0x61: "sl", 0x2C: "sl", 0x64: "sr", 0x2E: "sr", KB.KC_LCTRL: "fi", KB.KC_RCTRL: "fi",
            0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4", 0x35: "w5"}          # P9: '5', the launcher
 # keycode -> the event its DOWN edge records (enter, esc, and M7 P3.4's help)
 EVENT_KEYS = {0x0D: "E", 0x1B: "X", 0x68: "H"}
@@ -149,25 +150,36 @@ SCRIPTS = {
     "nothing at all": [],
     "hold w across frames": [(0, True, 0x77)],
     "press and release w": [(0, True, 0x77), (10, False, 0x77)],
-    "every key down, then up": [(0, True, 0x77), (1, True, 0x73), (2, True, 0x82),
-                                (3, True, 0x83), (16, False, 0x77), (17, False, 0x73),
-                                (18, False, 0x82), (19, False, 0x83)],
-    "the arrows bind the same": [(0, True, 0x80), (1, True, 0x82), (12, False, 0x80),
-                                 (13, False, 0x82)],
+    "every key down, then up": [(0, True, 0x77), (1, True, 0x73), (2, True, KB.KC_LEFT),
+                                (3, True, KB.KC_RIGHT), (16, False, 0x77), (17, False, 0x73),
+                                (18, False, KB.KC_LEFT), (19, False, KB.KC_RIGHT)],
+    "the arrows bind the same": [(0, True, KB.KC_UP), (1, True, KB.KC_LEFT), (12, False, KB.KC_UP),
+                                 (13, False, KB.KC_LEFT)],
     # M7 P4.1: the owner's key map -- A / D strafe (not turn), ',' / '.' strafe too, ctrl fires, 1..4 are held
-    "a and d strafe, the arrows turn": [(0, True, 0x61), (1, True, 0x83), (9, False, 0x61), (10, True, 0x64),
-                                        (17, False, 0x64), (18, False, 0x83), (19, True, 0x82), (25, False, 0x82)],
+    "a and d strafe, the arrows turn": [(0, True, 0x61), (1, True, KB.KC_RIGHT), (9, False, 0x61), (10, True, 0x64),
+                                        (17, False, 0x64), (18, False, KB.KC_RIGHT), (19, True, KB.KC_LEFT), (25, False, KB.KC_LEFT)],
     "comma and period strafe like a and d": [(0, True, 0x2C), (9, False, 0x2C), (10, True, 0x2E), (20, False, 0x2E)],
-    "ctrl holds fire": [(0, True, 0x85), (17, False, 0x85)],
+    "ctrl holds fire": [(0, True, KB.KC_LCTRL), (17, False, KB.KC_LCTRL)],
     # P9: '5' (0x35), the rocket launcher, is held like 1..4 -- after 4 in the 0x3_ row
     "5 is held like the other number keys": [(0, True, 0x35), (1, True, 0x34), (9, False, 0x35), (10, True, 0x35),
                                              (18, False, 0x34), (27, False, 0x35)],
     "the number keys are held": [(0, True, 0x31), (1, True, 0x32), (9, False, 0x31), (10, True, 0x33),
                                  (11, True, 0x34), (18, False, 0x32), (19, False, 0x33), (27, False, 0x34)],
-    # the 0x3_ row's unbound digits and the 0x8_ row's shift / alt are read and discarded, in phase
-    "the unbound digits, shift and alt are discarded": [(0, True, 0x30), (1, True, 0x36), (2, True, 0x84),
-                                                        (3, True, 0x86), (4, True, 0x39), (5, True, 0x2D),
-                                                        (6, True, 0x31), (12, False, 0x31)],
+    # the 0x3_ row's unbound digits and the 0x8_ row's shift / alt / gui (left and right) are read and discarded, in
+    # phase -- the 0x8_ row binds only the two ctrls
+    "the unbound digits, shift, alt and gui are discarded": [(0, True, 0x30), (1, True, 0x36), (2, True, KB.KC_LSHIFT),
+                                                             (3, True, KB.KC_LALT), (4, True, 0x39), (5, True, 0x2D),
+                                                             (6, True, KB.KC_RSHIFT), (7, True, KB.KC_RALT),
+                                                             (8, True, KB.KC_LGUI), (9, True, KB.KC_RGUI),
+                                                             (10, True, 0x31), (16, False, 0x31)],
+    # the 0xD_ row binds only the four arrows: Insert (0xD1), Delete (0xD4), Num Lock (0xDB), keypad / (0xDC) and the
+    # 0xE_ row's keypad keys and 0xC_ row's F-keys are read and discarded, in phase
+    "the arrows' row and its neighbours are discarded": [(0, True, 0xD1), (1, True, 0xD4), (2, True, 0xDB),
+                                                         (3, True, 0xDC), (4, True, 0xE1), (5, True, 0xC2),
+                                                         (6, True, 0xD6), (7, True, KB.KC_UP), (14, False, KB.KC_UP)],
+    "right ctrl holds fire like left ctrl": [(0, True, KB.KC_RCTRL), (9, False, KB.KC_RCTRL), (10, True, KB.KC_LCTRL),
+                                             (11, True, KB.KC_RCTRL), (12, False, KB.KC_LCTRL),
+                                             (20, False, KB.KC_RCTRL)],
     # THE PHASE TEST: unrecognised keycodes between real ones. If a poll ever skipped the keycode
     # byte, every event after the first junk key would be read out of phase and the flags would be
     # garbage from there on.
@@ -190,7 +202,7 @@ SCRIPTS = {
     "esc held across frames: no event on its up edge": [(0, True, 0x1B), (9, False, 0x1B)],
     "the menu's events do not disturb the keys": [(0, True, 0x77), (1, True, 0x0D),
                                                   (2, False, 0x0D), (16, False, 0x77)],
-    "forward and back are the menu's up and down": [(0, True, 0x80), (1, False, 0x80),
+    "forward and back are the menu's up and down": [(0, True, KB.KC_UP), (1, False, KB.KC_UP),
                                                     (9, True, 0x73), (10, False, 0x73)],
     # M7 P3.4: 'e' is a second use key -- the SAME held flag as space -- and 'h' the help event
     "space holds use": [(0, True, 0x20), (12, False, 0x20)],
@@ -207,9 +219,9 @@ SCRIPTS = {
                                                   (3, True, 0x69), (4, True, 0x63), (5, True, 0x68),
                                                   (6, True, 0x61), (9, False, 0x61)],
     # P9: THE PRESS LATCH -- a tap inside one frame's polls leaves the held flag where it was and sets the latch
-    "a tap of fire inside one frame latches it": [(0, True, 0x85), (1, False, 0x85)],
+    "a tap of fire inside one frame latches it": [(0, True, KB.KC_LCTRL), (1, False, KB.KC_LCTRL)],
     "a tap of every held key inside one frame each": [
-        (POLLS * (k // 3) + (k % 3) * 2, d, c) for k, c in enumerate((0x77, 0x73, 0x82, 0x83, 0x20, 0x61, 0x64, 0x85,
+        (POLLS * (k // 3) + (k % 3) * 2, d, c) for k, c in enumerate((0x77, 0x73, KB.KC_LEFT, KB.KC_RIGHT, 0x20, 0x61, 0x64, KB.KC_LCTRL,
                                                                   0x31, 0x32, 0x33, 0x34, 0x35))
         for d in (True, False)],
     "a release with no press in its frame latches nothing": [(0, True, 0x32), (9, False, 0x32)],
@@ -217,7 +229,7 @@ SCRIPTS = {
                                                                  (2, True, 0x31), (12, False, 0x31)],
     "a tap spilling into the next frame latches there": [(0, True, 0x61), (0, True, 0x64), (0, True, 0x2C),
                                                          (0, True, 0x2E), (0, True, 0x20), (0, True, 0x65),
-                                                         (0, True, 0x85), (0, True, 0x34), (0, True, 0x33),
+                                                         (0, True, KB.KC_LCTRL), (0, True, 0x34), (0, True, 0x33),
                                                          (0, False, 0x33)],
 }
 
@@ -341,7 +353,9 @@ def test_the_help_screen_lists_exactly_the_keys_that_work(kb_fjm):
     dead = [n for n in named if not _does_something(kb_fjm, HELP_KEYCODES[n])]
     assert not dead, "the help screen names keys kb.poll ignores: %r" % dead
     bound = set(BINDING) | set(EVENT_KEYS)
-    assert bound == set(HELP_KEYCODES.values()), sorted(bound ^ set(HELP_KEYCODES.values()))
+    # the help's CTRL cap is EITHER ctrl: HELP_KEYCODES names the left one's code, the poll binds both
+    assert _does_something(kb_fjm, KB.KC_RCTRL)
+    assert bound == set(HELP_KEYCODES.values()) | {KB.KC_RCTRL}, sorted(bound ^ set(HELP_KEYCODES.values()))
     assert set(MENU_KEYS) <= bound, "a menu key the poll does not bind"
     assert not _does_something(kb_fjm, 0x71) and not _does_something(kb_fjm, 0x67)
 

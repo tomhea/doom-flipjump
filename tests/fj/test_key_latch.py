@@ -28,7 +28,7 @@ from doomfj.wireformat import KEY_FIRE, KEY_USE, keys_byte
 
 SRC = [Path("src/fj") / "input.fj"]
 POLLS, FRAMES = STANDALONE_POLLS, 6
-FIRE, W2, USE, FWD, LEFT = 0x85, 0x32, 0x20, 0x77, 0x82
+FIRE, W2, USE, FWD, LEFT = KB.KC_LCTRL, 0x32, 0x20, 0x77, KB.KC_LEFT
 
 
 def _program(key_lines) -> str:

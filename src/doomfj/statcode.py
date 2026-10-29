@@ -37,6 +37,7 @@ from __future__ import annotations
 from typing import List, Tuple
 
 from doomfj import gamedata as gd
+from doomfj import screenwire as SW
 from doomfj.menu import count_slots
 
 PERSIST = ("st_kill", "st_item", "st_secn", "st_secm")
@@ -309,20 +310,19 @@ def routine_lines() -> List[str]:
 
 
 def frame_lines(width: int, height: int, colours, w, label: str = "menu_level_done") -> List[str]:
-    """LEVEL COMPLETE's frame after `digit_lines`: the baked frame (no END: the menu's shared tail ends it), then each
+    """LEVEL COMPLETE's frame after `digit_lines`: the baked frame (no END_CMD: the menu's shared tail ends it), then each
     slot's records for its digit -- a `sim.jump16` on the slot, a block per digit, nothing for a blank"""
     from doomfj.menu import DIGIT_BLANK, level_done_digit_records, level_done_layout, level_done_stream
     nsec = len(w.secret_sectors)
     nd = count_digits(w)                                                         # M8 F1.1
     nslot = count_slots(nd)
-    data = level_done_stream(width, height, colours, nsec, nd)
-    assert data[-1] == 0xFF
+    data = SW.strip_frame_tail(level_done_stream(width, height, colours, nsec, nd))
     _lines, _sel, _rows, slots = level_done_layout(width, height, nsec, nd)
     assert len(slots) == nslot, len(slots)
     assert DIGIT_BLANK >= 10, "a blank slot jumps past the ten digits' blocks"
     out = ["// P10 (doomfj.statcode): the baked LEVEL COMPLETE frame (%d bytes), then the digit slots"
-           % (len(data) - 1), f"{label}:"]
-    out += ["    stl.output_char %d" % b for b in data[:-1]]
+           % len(data), f"{label}:"]
+    out += ["    stl.output_char %d" % b for b in data]
     for i in range(nslot):
         p = f"lvd{i}"
         targets = [f"{p}_{d}" for d in range(10)] + [f"{p}_x"] * 6

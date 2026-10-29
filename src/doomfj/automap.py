@@ -3,7 +3,8 @@ shows where the player is"): a main-menu item MAP and the key M open a page of t
 red dot at the player's position. The game is paused while it shows, as it is under the help.
 
 ONE GENERATOR, TWO MIRRORS -- the menu's rule (doomfj.menu). The page is a BAKED FRAME like the help: `band_pixels` is
-the oracle's picture of a band, `band_stream` the 0x0B bytes the program prints for it, both from one `_band_bitmap`.
+the oracle's picture of a band, `band_stream` the draw_collines bytes the program prints for it, both from one
+`_band_bitmap`.
 Only the DOT is computed at run time, from `viewx` / `viewy`: `dot` is its oracle side, `fj_lines` its program side,
 the same 32-bit arithmetic step for step (an add, a shift, a compare per band boundary, a byte add).
 
@@ -32,9 +33,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from doomfj.menu import (_GLYPHS, _SMALL_GLYPHS, END, GLYPH_H, KEEP, SMALL_GLYPH_H, _draw, _draw_credit, _encode,
+from doomfj.menu import (_GLYPHS, _SMALL_GLYPHS, GLYPH_H, SMALL_GLYPH_H, _draw, _draw_credit, _encode,
                          credit_box, palette_colours, text_width)
 from doomfj.menu import MAP_KEY
+from doomfj import screenwire as SW
+from doomfj.screenwire import END, KEEP
 
 AUTOMAP_KEY = MAP_KEY                  # 'm': the keyboard device's SDL code -- ONE source, the menu's
 
@@ -296,7 +299,8 @@ def dot(p: Pages, viewx: int, viewy: int) -> Tuple[int, int, int]:
 def check(p: Pages) -> None:
     """ASSERTED: the map fits its area, and the dot of EVERY reachable position -- the bounding box's two extreme
     columns, each row in the band the row picks -- lies on the screen, left of the legend, its run's bytes legal
-    (top >= 0, top + DOT <= height: the device refuses anything else)"""
+    (top >= 0, top + DOT <= height: the device refuses a row past the screen; a KEEP to row 0, the dot on the top
+    row, is a zero-row item, which the device allows)"""
     assert 1 <= p.x0 - DOT // 2 and p.x0 + p.wpx + DOT // 2 <= p.panel_x - 1, ("the map does not fit its area", p.x0)
     assert p.hpx <= 0xFF and p.thresholds == tuple(sorted(p.thresholds)), (p.hpx, p.thresholds)
     if p.shift is None:
@@ -385,7 +389,7 @@ def pixels(p: Pages, viewx: int, viewy: int) -> list:
 
 
 def band_stream(p: Pages, band: int) -> bytes:
-    """the 0x0B frame that paints exactly `band_pixels`, ending in END"""
+    """the frame that paints exactly `band_pixels` (draw_collines, END_CMD, present)"""
     return _encode(_band_bitmap(p, band), p.width, p.height)
 
 
@@ -417,7 +421,7 @@ def _recip_lines(p: Pages, src: str, prod: str) -> List[str]:
 def fj_lines(p: Pages, prefix: str = "am") -> List[str]:
     """THE PROGRAM's map page -- `pixels`' mirror, the same steps: am_x = viewx + x_const and am_y = y_const - viewy
     (8 nibbles); nibbles q..q+2 of each shifted right b bits, so their low byte is the pixel; the band by comparing
-    the row with each threshold; that band's baked frame (no END: the menu's shared tail ends the frame); the row
+    the row with each threshold; that band's baked frame (no END_CMD / present: the menu's shared tail ends the frame); the row
     plus the band's constant is the dot's top row; then the dot as DOT column records drawn OVER the frame --
     [x] [KEEP][top][top+DOT][ink] [END] -- KEEP leaving the frame's rows above it. `byte.emit` prints the run-time
     bytes. Ends falling through: the caller jumps to the frame's tail"""
@@ -450,11 +454,10 @@ def fj_lines(p: Pages, prefix: str = "am") -> List[str]:
         if k + 1 < p.nbands:
             out += [f"  {prefix}_c{k + 1}:"]
     for k in range(p.nbands):
-        data = band_stream(p, k)
-        assert data[-1] == END
+        data = SW.strip_frame_tail(band_stream(p, k))
         out += [f"  {prefix}_b{k}:",
-                f"    // band {k}: {len(data) - 1} bytes of 0x0B column run-lists, all constants",
-                *("    stl.output_char %d" % v for v in data[:-1]),
+                f"    // band {k}: {len(data)} bytes of draw_collines column records, all constants",
+                *("    stl.output_char %d" % v for v in data),
                 *([f"    hex.add_constant 2, {yw}, {top_const(p, k)}"] if top_const(p, k) else []),
                 f"    ;{prefix}_dot"]
     out += [f"  {prefix}_dot:",

@@ -86,12 +86,12 @@ def _program(mutate=None):
              "hud_tail_leaf:", text, "stl.fret hud_ret",
              "frames:"]
     for f, cards in enumerate(SCRIPT):
-        lines.append("present.begin_frame_collines")
+        lines.append("present.draw_collines")
         if cards is None:
             for x in range(WIDTH):
                 lines += [f"stl.output_char {x}", f"stl.output_char {H}", f"stl.output_char {MENU_COLOUR}",
                           "stl.output_char 0xFF"]
-            lines += ["hex.set 1, hud_full, 1", "stl.output_char 0xFF"]
+            lines += ["hex.set 1, hud_full, 1", "present.end_frame"]
             continue
         for x in range(WIDTH):
             rec, _px = _view_column(f, x)
@@ -99,7 +99,7 @@ def _program(mutate=None):
         codes = hudcode.slot_codes(hud.slot_values(**_vals(cards), cards=CARDS), CARDS)
         lines += [f"hex.set {len(codes)}, hud_v, {sum(c << (4 * i) for i, c in enumerate(codes))}"]
         lines += [f"hex.set 1, {cell}, {int(v)}" for cell, v in zip(("pcard", "pcard_y", "pcard_r"), cards)]
-        lines += ["stl.fcall hud_tail_leaf, hud_ret", "stl.output_char 0xFF"]
+        lines += ["stl.fcall hud_tail_leaf, hud_ret", "present.end_frame"]
     lines.append("stl.loop")
     return "\n".join(lines) + "\n", colours, overlay, row
 

@@ -3,10 +3,11 @@
 DOOM's ST_doPaletteStuff (red only: berserk and the bonus flash are P6).
 
 A loop reads, per frame, a damagecount (0..100) and a menu flag; a world frame runs pal_lines, a menu frame
-pal_menu_lines, and each frame is presented as an empty 0x0B frame. The device records, per frame, how many
-set_palette commands arrived and the palette it then holds -- READ FROM THE PROGRAM'S MEMORY at the address the
-command named, so the table, the dispatch and the emitted palette bytes are all under test: every frame must show
-PLAYPAL[red_palette(dc)] (0 on a menu frame), and a palette is sent only when it changes.
+pal_menu_lines, and each frame is presented as an empty draw_collines frame. The boot defines PLAYPAL 0..8 into the
+device's slots 0..8 (as the game's io_boot does); the device records, per frame, how many select_palette commands
+arrived and the palette it then shows (tests/fj/palette_device.py), so the table, the dispatch and the defined
+palette bytes are all under test: every frame must show PLAYPAL[red_palette(dc)] (0 on a menu frame), and a palette
+is selected only when it changes.
 
 R9: `dc >> 3` for `(dc + 7) >> 3` (the table), a palette sent every frame (the change test gone), a menu frame that
 does not force palette 0, and a dispatch that sends the wrong lump (k -> k + 1) must each part.
@@ -16,8 +17,6 @@ from pathlib import Path
 
 import flipjump as fj
 import pytest
-from flipjump.interpreter.io_devices.ScreenIO import CMD_SET_PALETTE, InMemoryScreen
-from flipjump.utils.exceptions import IOReadOnEOF
 
 from doomfj import hurtcode as H
 from doomfj.config import GAME_CFG
@@ -25,9 +24,11 @@ from doomfj.harness import W
 from doomfj.lut_generator import generate_dispatch_table_fj
 from doomfj.wad import WadFile
 
+from tests.fj.palette_device import PalDev as _Dev, boot_lines
+
 ROOT = Path(__file__).resolve().parents[2]
 SRC = [ROOT / "src" / "fj" / "present.fj", ROOT / "src" / "fj" / "sim.fj"]
-ART = ROOT / "assets" / "freedoom1.wad"          # 14 palettes (the map wad holds one: hurtcode.palette_tables_fj)
+ART = ROOT / "assets" / "freedoom1.wad"          # 14 palettes (the map wad holds one: hurtcode.boot_palettes)
 FRAMES = 160
 
 
@@ -45,40 +46,11 @@ def _script():
     return out
 
 
-class _Dev(InMemoryScreen):
-    """the stock screen fed stdin; per frame: (set_palette commands since the last frame, the palette held)"""
-
-    def __init__(self, stdin: bytes):
-        super().__init__()
-        self._inp, self._byte, self._bits = stdin, 0, 0
-        self.sent, self.frames = 0, []
-
-    def read_bit(self) -> bool:
-        if self._bits == 0:
-            if not self._inp:
-                raise IOReadOnEOF("EOF")
-            self._byte, self._inp, self._bits = self._inp[0], self._inp[1:], 8
-        bit = self._byte & 1
-        self._byte >>= 1
-        self._bits -= 1
-        return bool(bit)
-
-    def _execute_command(self, command, payload):
-        if command == CMD_SET_PALETTE:
-            self.sent += 1
-        super()._execute_command(command, payload)
-
-    def _present(self):
-        super()._present()
-        self.frames.append((self.sent, tuple(self.palette)))
-        self.sent = 0
-
-
 MUTANTS = {
     "dcshr3": None,                                                        # the table, below
     "everyframe": ("hex.cmp 1, pal_new, pal_cur, pl_chg, pl_out, pl_chg\n", ""),
-    "menukeeps": ("hex.zero 1, pal_cur\npresent.set_palette playpal0\n", ""),
-    "wronglump": ("pl_k3:\npresent.set_palette playpal3\n", "pl_k3:\npresent.set_palette playpal4\n"),
+    "menukeeps": ("hex.zero 1, pal_cur\npresent.select_palette 0\n", ""),
+    "wronglump": ("pl_k3:\npresent.select_palette 3\n", "pl_k3:\npresent.select_palette 4\n"),
 }
 
 
@@ -91,18 +63,17 @@ def _program(mut=None):
         assert text.count(old) == 1, (mut, text.count(old))
         text = text.replace(old, new)
     vals = H.palidx_values() if mut != "dcshr3" else [0 if not dc else 1 + min(7, dc >> 3) for dc in range(256)]
-    lines = ["stl.startup_and_init_all", "present.init_screen", "present.set_palette playpal0",
+    lines = ["stl.startup_and_init_all", *boot_lines(H.boot_palettes(art)),
              "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
              "hex.input 1, p_dc", "hex.input 1, pmenu",
              "hex.if0 2, pmenu, fw", "stl.fcall menu_pal, pal_ret", ";fr",
              "fw:", "stl.fcall world_pal, pal_ret",
-             "fr:", "present.begin_frame_collines", "stl.output_char 0xFF", ";loop",
+             "fr:", "present.draw_collines", "present.end_frame", ";loop",
              "done:", "stl.loop",
              "rmagic: hex.vec 2", "pmenu: hex.vec 2", "pal_ret: hex.vec w/4",
              "p_dc: hex.vec 2", "pal_cur: hex.vec 1, 0", "pal_new: hex.vec 1",
              text,
-             generate_dispatch_table_fj("palidx", vals, index_nibbles=2, result_nibbles=1),
-             *H.palette_tables_fj(art)]
+             generate_dispatch_table_fj("palidx", vals, index_nibbles=2, result_nibbles=1)]
     return "\n".join(lines) + "\n", art
 
 
@@ -120,7 +91,7 @@ def _run(tmp_path, name, mut=None):
     want, cur = [], 0
     for f, (dc, menu) in enumerate(script):
         k = 0 if menu else H.red_palette(dc)
-        want.append((int(k != cur) + int(f == 0), tuple(art.playpal(k))))     # frame 0: the boot's playpal0 too
+        want.append((int(k != cur), tuple(art.playpal(k))))     # the boot's init_screen selects slot 0 (PLAYPAL 0)
         cur = k
     return dev.frames, want
 
@@ -198,20 +169,19 @@ def _loot_run(tmp_path, name, mut=None):
         old, new = LOOT_MUTANTS[mut]
         assert text.count(old) == 1, (mut, text.count(old))
         text = text.replace(old, new)
-    lines = ["stl.startup_and_init_all", "present.init_screen", "present.set_palette playpal0",
+    lines = ["stl.startup_and_init_all", *boot_lines(H.boot_palettes(art, n=H.NPALETTES_LOOT)),
              "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
              "hex.input 1, p_dc", "hex.input 2, p_str", "hex.input 1, p_bc", "hex.input 1, pmenu",
              "hex.if0 2, pmenu, fw", "stl.fcall menu_pal, pal_ret", ";fr",
              "fw:", "stl.fcall world_pal, pal_ret",
-             "fr:", "present.begin_frame_collines", "stl.output_char 0xFF", ";loop",
+             "fr:", "present.draw_collines", "present.end_frame", ";loop",
              "done:", "stl.loop",
              "rmagic: hex.vec 2", "pmenu: hex.vec 2", "pal_ret: hex.vec w/4",
              "p_dc: hex.vec 2", "p_str: hex.vec 4", "p_bc: hex.vec 2", "pal_cur: hex.vec 1, 0", "pal_new: hex.vec 1",
              "pal_bk: hex.vec 1",
              text,
              generate_dispatch_table_fj("palidx", H.palidx_values(), index_nibbles=2, result_nibbles=1),
-             generate_dispatch_table_fj("bonpal", H.bonpal_values(), index_nibbles=2, result_nibbles=1),
-             *H.palette_tables_fj(art, n=H.NPALETTES_LOOT)]
+             generate_dispatch_table_fj("bonpal", H.bonpal_values(), index_nibbles=2, result_nibbles=1)]
     src = tmp_path / (name + ".fj")
     src.write_text("\n".join(lines) + "\n", encoding="utf-8")
     out = tmp_path / (name + ".fjm")
@@ -224,7 +194,7 @@ def _loot_run(tmp_path, name, mut=None):
     want, cur = [], 0
     for f, (dc, st, bc, menu) in enumerate(script):
         k = 0 if menu else palette_index(SimpleNamespace(p_damagecount=dc, p_strength=st, p_bonuscount=bc))
-        want.append((int(k != cur) + int(f == 0), tuple(art.playpal(k))))
+        want.append((int(k != cur), tuple(art.playpal(k))))
         cur = k
     return dev.frames, want
 

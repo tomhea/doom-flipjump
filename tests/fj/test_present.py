@@ -1,12 +1,13 @@
-"""M12k (F7) — isolated unit tests for the present-layer macros (src/fj/present.fj). Each macro emits a
-byte-exact command stream on the output channel (the screen-device protocol), so we drive the macro and
-compare the captured output to the bytes hand-derived from the protocol + the config SSOT (W/H/BPP/
-NCOLORS from fj_consts). These macros are PURE EMIT (no precondition/@Assumes), so per the test mandate
-there is no should-fail case — only sanity (byte-exact) + the address-byte-order edge case."""
+"""The present-layer macros (src/fj/present.fj) against the screen API (flipjump io_devices/README.md): each macro is
+PURE EMIT, so the program's captured output must be exactly the bytes doomfj.screenwire -- the repo's one copy of the
+API's numbers -- encodes for the same command. And the device itself must accept a whole boot + frame the macros
+print (a stream the API refuses would raise there), which is the check that screenwire and the device agree."""
 from pathlib import Path
 
 import flipjump as fj
+from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 
+from doomfj import screenwire as SW
 from doomfj.config import Config
 from doomfj.harness import W
 
@@ -21,42 +22,53 @@ def _run(tmp_path, name, body, expected: bytes):
     ok = fj.assemble_and_run_test_output(
         [consts.resolve(), PRESENT_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
-    assert ok, f"{name}: present output != protocol bytes"
+    assert ok, f"{name}: present output != the API's bytes"
 
 
 def test_init_screen_command_bytes(tmp_path):
-    """init_screen: [0x01][W:2 LE][H:2 LE][BPP:1][NCOLORS:2 LE] from the config SSOT."""
+    """init_screen: [0x01][W:2 LE][H:2 LE][format = BPP:1] from the config SSOT"""
     c = Config()
-    expected = bytes([0x01, c.W & 0xFF, (c.W >> 8) & 0xFF, c.H & 0xFF, (c.H >> 8) & 0xFF,
-                      c.BPP, c.NCOLORS & 0xFF, (c.NCOLORS >> 8) & 0xFF])
-    _run(tmp_path, "init_screen", ["present.init_screen"], expected)
+    assert c.BPP == SW.FORMAT
+    _run(tmp_path, "init_screen", ["present.init_screen"], SW.init_screen(c.W, c.H))
 
 
-def test_emit_addr_is_little_endian_w_over_8_bytes(tmp_path):
-    """emit_addr writes the low w/8 bytes of the address, little-endian (incl. zero bytes). w=32 ⇒ 4
-    bytes; the edge case is the byte ORDER (LE) and that zero high bytes are still emitted."""
-    addr = 0x12345678
-    expected = bytes([(addr >> (8 * i)) & 0xFF for i in range(W // 8)])      # 78 56 34 12
-    _run(tmp_path, "emit_addr", [f"present.emit_addr {addr}"], expected)
+def test_select_palette_command(tmp_path):
+    _run(tmp_path, "select_palette", ["present.select_palette 0", "present.select_palette 13"],
+         SW.select_palette(0) + SW.select_palette(13))
 
 
-def test_emit_addr_emits_zero_high_bytes(tmp_path):
-    """A small address still emits all w/8 bytes (the device reads a fixed-width address)."""
-    expected = bytes([0x05, 0x00, 0x00, 0x00])
-    _run(tmp_path, "emit_addr_small", ["present.emit_addr 5"], expected)
+def test_draw_collines_and_end_frame(tmp_path):
+    """draw_collines opens the command; end_frame closes it (END_CMD) and presents"""
+    _run(tmp_path, "frame", ["present.draw_collines", "present.end_frame"],
+         bytes([SW.OP_DRAW_COLLINES]) + SW.FRAME_TAIL)
+    assert SW.FRAME_TAIL == bytes([SW.END_CMD, SW.OP_PRESENT])
 
 
-def test_set_palette_command(tmp_path):
-    """set_palette: [0x02][addr: w/8 LE]."""
-    addr = 0x0000ABCD
-    expected = bytes([0x02]) + bytes([(addr >> (8 * i)) & 0xFF for i in range(W // 8)])
-    _run(tmp_path, "set_palette", [f"present.set_palette {addr}"], expected)
+def test_window_chrome_commands(tmp_path):
+    title = "DOOM"
+    big = sum(ch << (8 * i) for i, ch in enumerate(title.encode()))
+    _run(tmp_path, "chrome", [f"present.set_window_title {big}, {len(title)}", "present.set_max_fps 35",
+                              "present.set_window_icon_header 2, 1", "stl.output_char 7", "stl.output_char 0"],
+         SW.set_window_title(title) + SW.set_max_fps(35) + SW.set_window_icon(2, 1, [7, 0]))
 
 
-def test_update_screen_reg_command(tmp_path):
-    """update_screen_reg (0x06, hex.vec2 register form, fj 1.5.1): [0x06][addr: w/8 LE]."""
-    addr = 0x00000040
-    expected = bytes([0x06]) + bytes([(addr >> (8 * i)) & 0xFF for i in range(W // 8)])
-    _run(tmp_path, "update_screen_reg", [f"present.update_screen_reg {addr}"], expected)
-
-
+def test_the_device_accepts_a_boot_and_a_frame_the_macros_print(tmp_path):
+    """the macros' stream through the REAL device: init, a palette, the chrome, one column, end_frame -- presented"""
+    c = Config()
+    pal = [(k, k, k) for k in range(256)]
+    column = SW.column(0, [("fill", c.H, 5)], c.H)
+    body = (["present.init_screen", *SW.fj_lines(SW.define_palette(0, pal)), "present.set_max_fps 35",
+             "present.draw_collines", *SW.fj_lines(column), "present.end_frame", "present.select_palette 0",
+             "present.draw_collines", "present.end_frame"])
+    consts = c.emit_fj_consts(tmp_path / "fj_consts.fj")
+    src = tmp_path / "boot.fj"
+    src.write_text("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n", encoding="utf-8")
+    out = tmp_path / "boot.fjm"
+    fj.assemble([consts.resolve(), PRESENT_FJ.resolve(), src.resolve()], out, memory_width=W, print_time=False)
+    screen = InMemoryScreen()
+    fj.run(out, io_device=screen, print_time=False, print_termination=False)
+    assert screen.frame_count == 2 and screen.max_fps == 35
+    want = [0] * (c.W * c.H)
+    for y in range(c.H):
+        want[y * c.W] = 5
+    assert list(screen.pixel_indices) == want

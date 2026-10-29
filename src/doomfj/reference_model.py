@@ -1866,7 +1866,7 @@ class ReferenceModel:
         Returns None for a fully transparent column.
 
         ⚠ Only the column's OPAQUE EXTENT is painted, and INTERIOR gaps take the nearest opaque
-        texel ABOVE them. That is not an aesthetic choice — the 0x0B column protocol fills forward
+        texel ABOVE them. That is not an aesthetic choice — the draw_collines protocol fills forward
         from a cursor that never moves back, so a transparent run in the MIDDLE of a fragment would
         need background the emit has already passed. The visible cost is small (it fattens holes in
         open sprites like trees); the alternative is a second pass over every column.
@@ -3189,7 +3189,7 @@ class ReferenceModel:
                 # colour per run rather than a 1x1 texture strip, which is the accuracy this rung
                 # trades away. Each run is clipped to the region the claiming wall actually left
                 # open (ceiling above ceil_hi, floor below floor_lo) so the emitted column stays
-                # MONOTONE top-down -- the 0x0B device only moves its cursor forward and silently
+                # MONOTONE top-down -- the draw_collines device only moves its cursor forward and silently
                 # drops a non-monotone pair.
                 c_hi, f_lo = planes[0], planes[1]
 

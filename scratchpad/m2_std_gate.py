@@ -60,6 +60,7 @@ if __name__ == "__main__":          # M8 (CR of #146): `--map E1Mn` before probe
     take_map_arg(keep=True)         # keep: this gate's own parser takes --map too
 
 from doomfj.config import Config                                          # noqa: E402
+from doomfj.keyboard import KC_LCTRL, KC_LEFT, KC_RIGHT                    # noqa: E402
 from doomfj.doorcode import door_line_ids                                 # noqa: E402
 from doomfj.doors import (DEFAULT_QUANT, DoorPhase, compare_stamp,       # noqa: E402
                           door_states, heights_for_states, in_use_box_fixed,
@@ -87,8 +88,8 @@ from flipjump.utils.exceptions import IOReadOnEOF                              #
 ENTER, ESC = 0x0D, 0x1B
 # M7 P4.1 (the owner's key map): only the ARROWS turn now -- A / D strafe -- so the scripts' turns are the arrows', and
 # strafe, fire and the number keys have codes of their own (input.fj's table)
-K_FWD, K_BACK, K_LEFT, K_RIGHT, K_USE = 0x77, 0x73, 0x82, 0x83, 0x20
-K_SL, K_SR, K_FIRE = 0x61, 0x64, 0x85
+K_FWD, K_BACK, K_LEFT, K_RIGHT, K_USE = 0x77, 0x73, KC_LEFT, KC_RIGHT, 0x20
+K_SL, K_SR, K_FIRE = 0x61, 0x64, KC_LCTRL
 BINDING = {K_FWD: "forward", K_BACK: "back", K_LEFT: "turn_left",
            K_RIGHT: "turn_right", K_USE: "use", K_SL: "strafe_left", K_SR: "strafe_right", K_FIRE: "fire",
            0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4", 0x35: "w5"}      # P9: '5', the launcher
@@ -136,13 +137,14 @@ class Recording(InMemoryScreen):
     def __init__(self, **kw):
         super().__init__(**kw)
         self.frames = []
-        self.palettes = []                  # M7 P5: the palette each present showed (probe.ProbeScreen's record)
+        self.shown_palettes = []            # M7 P5: the palette each present showed (probe.ProbeScreen's record;
+                                            # not `palettes`: the device's own slots)
 
     def _present(self):
         super()._present()
         self.frames.append(bytes(self.pixel_indices))
         import hashlib
-        self.palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb)).hexdigest()[:12])
+        self.shown_palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb)).hexdigest()[:12])
 
 
 class Stopper(KeyboardIO):
@@ -1064,16 +1066,17 @@ def main():
             screen = ProbeScreen(probe)
             kb = ProbeKeyboard(ScriptedKeyEventSource(list(events)), screen, frames, probe)
             io = PcIO(screen, kb)
-            io.attach_memory(NativeDeviceMemory(self.core, self.width))
+            dm = NativeDeviceMemory(self.core, self.width)      # the harness's own view (the screen keeps none)
+            io.attach_memory(dm)
             if probe is not None:
-                probe.attach(screen.device_memory, self.core)
+                probe.attach(dm, self.core)
             t = _t.time()
             try:
                 _c, ops, _e, _l, _p = self.core.run(io.read_bit, io.write_bit, IOReadOnEOF, last_ops_length=0)
             except Exception as e:                              # noqa: BLE001
                 print("!! CRASH after %d presented frames: %s %s" % (len(screen.frames), type(e).__name__, e))
                 _c, ops = 0, 0
-            return _P.RunResult(list(screen.frames), list(screen.palettes), int(ops),
+            return _P.RunResult(list(screen.frames), list(screen.shown_palettes), int(ops),
                                 list(probe.readings) if probe is not None else [], _t.time() - t, int(_c))
         _P.GameBinary.run = _tolerant
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,

@@ -398,6 +398,7 @@ class Player:
         out["seconds"] = time.time() - t0
         out["t_binary"] = out["seconds"] - out["t_oracle"]
         out["ops"] = r.ops
+        out["frame_ops"] = p.frame_ops()        # M8 (the owner, 2026-10-29): the playthrough's speed set reads them
         return out
 
 

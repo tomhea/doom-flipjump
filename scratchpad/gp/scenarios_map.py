@@ -57,6 +57,7 @@ E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 ENGAGE = 640               # a checkpoint's group: the monsters within this many units
 SPREAD = 768               # checkpoints at least this far apart
 STANDOFF = 256             # the start spot's wanted distance from the nearest monster
+SPARSE_STANDOFF = 160      # ... on a sparse map (E1M8's Barons: a run must close in to see a claw)
 N_RUNS = 11                # v10's shape: 11 runs x 100 frames
 DOORS_WANTED = 3           # scenarios_v2's MIN_DOORS: usable doors a checkpoint should start near
 AFTER_FACE_MIN = 32        # the aftermath faces a corpse at least this far from its start (else the farthest)
@@ -456,11 +457,16 @@ def suggest(n_runs: int = N_RUNS) -> dict:
 
         def near(p):
             return min(math.hypot(m[1] - p[0], m[2] - p[1]) for m in mons)
-        spot = max(pts, key=lambda p: (min(near(p), STANDOFF), -math.hypot(p[0] - gx, p[1] - gy), p))
+        off = SPARSE_STANDOFF if sparse else STANDOFF
+        spot = max(pts, key=lambda p: (min(near(p), off), -math.hypot(p[0] - gx, p[1] - gy), p))
+        face = (int(round(gx)), int(round(gy)))
+        if sparse:                  # M8 (E1M8): one monster at a time -- face the group's nearest (he wakes seen)
+            m0 = min(group, key=lambda m: (math.hypot(m[1] - spot[0], m[2] - spot[1]), m[0]))
+            face = (m0[1], m0[2])
         items = sum(1 for t in pk if math.hypot(t.x - spot[0], t.y - spot[1]) <= 512)
         kinds = collections.Counter(m[4] for m in group)
         cand.append({"score": len(group), "sector": sec, "region": r, "want": spot,
-                     "face": (int(round(gx)), int(round(gy))), "items": items, "kinds": dict(kinds),
+                     "face": face, "items": items, "kinds": dict(kinds),
                      "nearest": int(near(spot))})
     cand.sort(key=lambda c: (-c["score"], c["sector"]))
     regions_with = sorted(r for r, n in by_region.items() if r is not None and n >= 5)

@@ -9,8 +9,8 @@
     -544
    ],
    "face": [
-    309,
-    -587
+    -320,
+    -256
    ],
    "region": 0,
    "style": "fight",
@@ -50,8 +50,8 @@
    "name": "R0-s27",
    "sector": 27,
    "want": [
-    336,
-    -1136
+    240,
+    -1168
    ],
    "face": [
     96,
@@ -59,7 +59,7 @@
    ],
    "region": 0,
    "style": "explore",
-   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 264 units from the start; 0 pickups within 512"
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 164 units from the start; 0 pickups within 512"
   },
   {
    "name": "R0-s30",
@@ -80,8 +80,8 @@
    "name": "R0-s32",
    "sector": 32,
    "want": [
-    912,
-    -1456
+    1296,
+    -1488
    ],
    "face": [
     1152,
@@ -89,7 +89,7 @@
    ],
    "region": 0,
    "style": "collect",
-   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 264 units from the start; 0 pickups within 512"
+   "why": "region 0: 1 monsters within 640 units (1 MT_BRUISER), the nearest 164 units from the start; 0 pickups within 512"
   },
   {
    "name": "R0-s48",

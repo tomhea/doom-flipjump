@@ -484,7 +484,10 @@ def mirror_deaths(run: dict) -> list:
     if m not in _B0_ORACLE:
         _B0_ORACLE.clear()
         _B0_ORACLE[m] = B0.game_oracle({"map": m})
-    return B0.drive(None, None, _B0_ORACLE[m], B0.model_frames(run))["dead"]
+    # M8 (E1M9's b0 --proxy: R0-s21's PROXY run -- each strafe-only frame given a forward step -- died at frames 98, 99
+    # while the normal run lived; b0 judges the proxy run like the normal one, a death included): both mirrors
+    dead = B0.drive(None, None, _B0_ORACLE[m], B0.model_frames(run))["dead"]
+    return dead or B0.drive(None, None, _B0_ORACLE[m], B0.model_frames(run, proxy=True))["dead"]
 
 
 def plan(sugg: dict, quiet: bool = False) -> dict:

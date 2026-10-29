@@ -441,6 +441,17 @@ class Steer:
     DASH = 160                 # cells of route left under which the player stops fighting and runs for the exit
     LOOK = 3
     GIVE_UP = 35
+    SEEK_FAR = True            # very low health (a HEALTH seek allowing SEEK_FAR_MOST cells): past the 3 nearest, by path
+    SEEK_FAR_MOST = 250
+    # an IGNORED monster (GIVE_UP: shot at far off with no damage) that comes this near AND hurts the player is fought
+    # again: E1M4 seed 0 ignored an imp at 630 units, walked on into it and was clawed from 57 to 3 health (world
+    # 1266..1314). Only one given up on FAR off (2 x IGN_NEAR): near alone is not enough -- an imp behind a sill 117
+    # units off, unhurt by every shot, held E1M4 seed 3 for 8,000 frames
+    IGN_NEAR = 0               # (units; 0: off -- see the E1M4 note above)
+    FLOORS_SEEN = True         # a floor group the game moved joins the steering's world (_floors_seen)
+    ITEM_SEEK_HP = 30          # > 0: under this health a LONG route pickup's leg seeks health too (0: never, as before)
+    ITEM_SEEK_LEN = 200        # ... a leg planned this many cells or more (E1M4's chaingun 239, armor 316; the pinned
+    #                            plays' shorter pickup legs keep the old rule: E1M5 185, E1M9 86 -- both died with it)
 
     def __init__(self, route: dict, lv=None, log=print, seed: int = 0):
         sys.path.insert(0, str(ROOT / "scripts"))
@@ -453,7 +464,7 @@ class Steer:
         self.lv = lv or LR.Level(route["map"], route.get("wad"), route["skill"])
         self.pl = LR.Planner(self.lv)
         self.route = route
-        self.legs = [dict(g) for g in route["legs"]]
+        self.legs = [dict(g, cells0=len(g["path"] or ())) for g in route["legs"]]    # cells0: the planned length
         self.log = log
         self.seed = seed
         self.li = 0
@@ -463,6 +474,7 @@ class Steer:
         self.stuck = 0
         self.wiggle = 0
         self.ign, self.trk, self.covered = {}, {}, {}
+        self.ign_far = {}                            # monster -> it was given up on far off (IGN_NEAR)
         self.active = set()                          # mechanisms the legs done so far triggered (re-plans use them)
         self.keys = set()
         self.use_tap = 0
@@ -562,6 +574,21 @@ class Steer:
         self.pi, self.wi = 0, 0
 
     # ---- helpers -------------------------------------------------------------------------------------------------
+    def _floors_seen(self, f, c):
+        """FLOORS_SEEN: a floor group the game moved to its end (the wide `fswitch` vector: each group's state first)
+        joins the world the re-plans and the health / ammo detours are planned in, whatever moved it -- E1M4's group 0
+        (sector 43) is lowered by the W1 square round the yellow card, which is a key leg, not a floor leg: the two
+        medikits behind it (-1344, 720), (-576, 720) were never in reach of a seek (22 and 27 cells from the card)"""
+        mp = self.lv.mp
+        sw = c.get("fswitch")
+        if mp is None or not getattr(mp, "wide", False) or not isinstance(sw, (tuple, list)):
+            return
+        for g, grp in enumerate(mp.groups):
+            mid = "floor:%d" % g
+            if g < len(sw) and sw[g] >= grp.n - 1 and mid not in self.active:
+                self.active.add(mid)
+                self.log("    f%d: %s moved -- in the world the detours are planned in" % (f, mid))
+
     def _turn_to(self, want, a, kd, tight=4.0):
         """turn toward `want`: a held turn is 7.0 degrees a frame, a TAP (no turn key the frame before) 1.76
         (reference_model.ANGLE_TURN_HELD / _TAP) -- so within 10 degrees, turn every other frame: taps only"""
@@ -639,6 +666,7 @@ class Steer:
         if self.rt is None or "thseen" not in c:
             return None
         best = None
+        hitter = (c.get("p_atk") or 0) - 1 if f - self.hurt_f < 30 else -1     # the monster hurting him now
         # M8 C8: on a KILL leg the bosses are fought whatever they target (asleep, or not yet turned on the player)
         bosses = {b[0] for b in self.leg.get("bosses", ())} if self.leg and self.leg.get("action") == "kill" else ()
         for m, row in enumerate(self.rt):
@@ -648,11 +676,11 @@ class Steer:
                 continue
             if m in bosses and hp12(c["mon_health"][m]) <= 0:   # (a boss's corpse: its 12-bit health below 0)
                 continue
-            if self.ign.get(m, -1) > f:
-                continue
             v = c["thpos_rt"][row]
             mx, my = signed(v & M32) / 65536.0, signed((v >> 32) & M32) / 65536.0
             dd = math.hypot(mx - x, my - y)
+            if self.ign.get(m, -1) > f and not (m == hitter and dd < self.IGN_NEAR and self.ign_far.get(m)):
+                continue                             # (ignored -- unless it came close and hurts him: IGN_NEAR)
             if dd <= self.FIGHT_R - 150 * (self.seed_at(f) % 2) and (best is None or dd < best[0]):
                 best = (dd, mx, my, m)
         atk = (c.get("p_atk") or 0) - 1
@@ -670,6 +698,7 @@ class Steer:
             elif f - t[0] > self.GIVE_UP and m not in bosses:   # shot at with no damage: leave it a while (never
                 # a KILL leg's boss: he is the leg's goal, and he hunts the player whether shot or not)
                 self.ign[m] = f + 150
+                self.ign_far[m] = best[0] >= 2 * self.IGN_NEAR     # given up on far off (IGN_NEAR may lift it)
                 self.trk.pop(m, None)
                 self.log("    f%d: monster %d ignored (no damage in %d frames)" % (f, m, self.GIVE_UP))
                 return None
@@ -730,6 +759,8 @@ class Steer:
             return kd
         if self.f0 is None:
             self.f0 = f
+        if self.FLOORS_SEEN:
+            self._floors_seen(f, c)
         x, y, a = pose_of(c)
         if c.get("p_dead"):
             return kd
@@ -777,6 +808,14 @@ class Steer:
             if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo", most=250 if dry else 70,
                                                            radius=3000 if dry else 900):
                 return kd
+        elif ((foe is None or foe[0] > 100) and not self.use_tap and self.ITEM_SEEK_HP
+              and str(self.leg.get("to")).startswith("item:") and (c.get("p_hp") or 0) < self.ITEM_SEEK_HP
+              and self.leg.get("cells0", 0) >= self.ITEM_SEEK_LEN
+              and self.health and self._seek_health(f, x, y, self.health, "health", most=250, radius=3000)):
+            # a ROUTE pickup's leg (not a detour of the steering's own) at very low health: the health first, as on
+            # any other leg (E1M4: the armor's 316-cell leg crossed the map at 1-6 health and died on it)
+            self.log("    f%d: (the health above: on a route pickup's leg, ITEM_SEEK_HP)" % f)
+            return kd
         # ---- the DASH: when what is left of the route is short, run it -- stopping to fight a crowd on the last
         # stretch is how a worn-down player dies (E1M2's finale); the aim window's hunters are still shot in passing
         left = sum(len(g["path"] or ()) for g in self.legs[self.li + 1:] if g["kind"] != "item")
@@ -1157,19 +1196,41 @@ class Steer:
                        if (hx, hy) not in self.health_taken and math.hypot(hx - x, hy - y) < radius)
         opn = {"door:%d" % si for si in self.dorder if self.lv.dp.boxes.get(si) is not None
                and (not self.pl.mechs["door:%d" % si].key or self.pl.mechs["door:%d" % si].key in self.keys)}
+        def usable(path):
+            return path and not any(q[0] == "teleport" for q in path) and len(path) < most \
+                and not any(self.pl.sector_of(q) in self.lorder for q in path)
         for _d, hx, hy in cands[:3]:
             path = self.pl.leg_path(LR.cell_of(x, y), lambda c, hx=hx, hy=hy: abs(LR.centre(c)[0] - hx) < 24
                                     and abs(LR.centre(c)[1] - hy) < 24, self.active | opn)
-            if path and not any(q[0] == "teleport" for q in path) and len(path) < most \
-                    and not any(self.pl.sector_of(q) in self.lorder for q in path):
-                self.leg["replan"] = True
-                self.legs.insert(self.li, {"to": what, "kind": "item", "action": "touch", "goal": [hx, hy],
-                                           "key_at": [hx, hy], "path": [list(LR.centre(q)) for q in path]})
-                self._leg(self.li)
-                self.log("    f%d: %s low -- a detour to the item at (%d, %d), %d cells" % (f, what, hx, hy, len(path)))
-                return True
+            if usable(path):
+                return self._detour(f, what, hx, hy, path)
+        if self.SEEK_FAR and what == "health" and most >= self.SEEK_FAR_MOST and len(cands) > 3:
+            # VERY LOW, and the three nearest in a straight line have no way to them: the nearest BY PATH of the rest,
+            # one flood to any of them (E1M4 near (274, -254): the three nearest -- the stimpack at (544, -1056), the
+            # medikit at (-640, -192), the stimpack at (-864, 288) -- have no path from there; the stimpacks at
+            # (1192, 632) are 181 cells off. The play sat at 1-17 health and died there)
+            rest = [(hx, hy) for _d, hx, hy in cands[3:]]
+
+            def near(c):
+                cx, cy = LR.centre(c)
+                return any(abs(cx - hx) < 24 and abs(cy - hy) < 24 for hx, hy in rest)
+            path = self.pl.leg_path(LR.cell_of(x, y), near, self.active | opn)
+            if usable(path):
+                cx, cy = LR.centre(path[-1])
+                hx, hy = next((hx, hy) for hx, hy in rest if abs(cx - hx) < 24 and abs(cy - hy) < 24)
+                return self._detour(f, what, hx, hy, path, " (the nearest by path: SEEK_FAR)")
         self.retry[what] = f + 60
         return False
+
+    def _detour(self, f, what, hx, hy, path, how: str = "") -> bool:
+        """the detour leg to the item at (hx, hy) along `path`, inserted before the leg in progress"""
+        LR = self.LR
+        self.leg["replan"] = True
+        self.legs.insert(self.li, {"to": what, "kind": "item", "action": "touch", "goal": [hx, hy],
+                                   "key_at": [hx, hy], "path": [list(LR.centre(q)) for q in path]})
+        self._leg(self.li)
+        self.log("    f%d: %s low -- a detour to the item at (%d, %d), %d cells%s" % (f, what, hx, hy, len(path), how))
+        return True
 
     def _precise(self, c, accept, depth: int = 14, width: int = 30) -> list:
         """a beam search over the model's own player step (ReferenceModel.step_sim, the game tier's strafe and turn

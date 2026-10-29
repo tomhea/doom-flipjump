@@ -796,6 +796,7 @@ its registry rows `LEVEL_SPREAD`), every gate run solo through `scripts/heavy.py
 | THE PLAYTHROUGH (`playthrough_gate --skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 3147**, byte-, palette- and state-exact on all 3,157 frames (777 s) | **PASS -- LEVEL COMPLETE at frame 4257**, exact on all 4,267 frames (822 s) |
 | `msframe --save-baseline shipped` (the map's timed walk `scenarios/<map>/msframe.json`) | **73.5 ms/frame** [72.8 .. 74.7], 233.5M fj/s, 17,158,103 ops/frame -> `shipped_e1m3` | **58.2 ms/frame** [58.0 .. 58.7], 224.0M fj/s, 13,028,121 ops/frame -> `shipped_e1m5` |
 | REBUILD | **BYTE-IDENTICAL** (`71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784`) | **BYTE-IDENTICAL** (`4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2`) |
+| **THE SPEED SET** (the owner, 2026-10-29: the level's own playthrough, 11 windows of 100 world frames from NEW GAME to LEVEL COMPLETE; `playthrough_gate --speed-json`, on the current steering) | **binding 12,781,307** ops/frame (mean 12,106,763, p80 13,455,852) -- LEVEL COMPLETE at world 2279, exact on all 2,293 frames | **binding 12,698,851** (mean 11,826,507, p80 13,571,195) -- LEVEL COMPLETE at world 4253, exact on all 4,267 frames |
 
 Size: E1M3 at 44.98% is over the 43% cap -- the owner, 2026-10-24: "above 43% size is OK".
 The build command (section 1b's, the map's wad and spread; `scripts/build_episode.py --maps E1M3` runs exactly it):
@@ -825,6 +826,7 @@ Evidence: `docs/ship-evidence/e1m9_v1_*.log`. **`build/doom_e1m9_v1.fjm`**, sha2
 | THE PLAYTHROUGH (`--skill easy`, seed 2) | **PASS -- LEVEL COMPLETE at frame 4663**, byte-, palette- and state-exact on all 4,673 frames (987 s). Its first run parted at frame 3241 on `p_rad` (binary 2099, mirror 2100): the GATES' MIRROR never counted the timed powers down (`MonsterPhase.weapon`, fixed 00d6ca5e); the binary was right (DOOM's P_PlayerThink order) |
 | `msframe --save-baseline shipped` | **37.7 ms/frame** [37.4 .. 38.8], 208.2M fj/s, 7,849,063 ops/frame -> `shipped_e1m9` (a first measurement, 40.1 [38.8 .. 41.3], ran beside the combat planner and was replaced) |
 | REBUILD | **BYTE-IDENTICAL** (`33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48`) |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames, as section 6) | **binding 14,577,947** ops/frame (mean 12,711,601, p80 16,444,293: a window at world 2280 heavier than any B0 run) -- LEVEL COMPLETE at world 4659, exact on all 4,673 frames |
 
 The build command: section 6's with `e1m9` / `E1M9`, `--spread 1`. Play: `fj --run build/doom_e1m9_v1.fjm`.
 The playthrough ran on the current steering (8183305d: the lift rules E1M9 needed -- its lift 109 called down from

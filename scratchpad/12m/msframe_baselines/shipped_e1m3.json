@@ -1,0 +1,33 @@
+{
+ "map": "E1M3",
+ "workload": "script 6b400b772729dbda",
+ "binary": "build\\doom_e1m3_v1.fjm",
+ "binary_sha": "71d56069bb2db8c3",
+ "env": {},
+ "when": "2026-10-29 16:42:16",
+ "frames": 200,
+ "reps": 5,
+ "engine_pyd_sha": "1bd844a1affacb2a",
+ "git": {
+  "doom": "00d6ca5e",
+  "flipjump": "9877f25"
+ },
+ "summary": {
+  "a": {
+   "ms_median": 73.48223994759952,
+   "ms_min": 72.78032279482075,
+   "ms_max": 74.68101206947775,
+   "fjs_median": 233500009.42845166,
+   "ops_per_frame": 17158103.720588237,
+   "pix_all_same": true,
+   "ops_all_same": true,
+   "cell_bytes": null,
+   "storage": "flat",
+   "pin": "cpu2 proc=ok thread=ok prio=high",
+   "engine": "C:\\Users\\tomhe\\Documents\\fj160-path\\flipjump\\interpreter\\_fjcore.pyd",
+   "engine_sha": "1bd844a1affacb2a",
+   "full_span": null,
+   "yard_median": 3631031082.079578
+  }
+ }
+}

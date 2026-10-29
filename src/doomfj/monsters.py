@@ -523,7 +523,7 @@ class MonsterPhase:
         fades). None reads `p_dead` now (the modes before P7, where nothing kills the player before the weapon).
         Dead in a mortal mode (world.player_mortal): the model's own `_death_think` -- the psprites, the damage
         fade, and a HELD use asks for the restart (`g_restart`). Alive: the keys, the psprites, then (combat's
-        order) the berserk counter, the damage and the bonus fades."""
+        order) the berserk counter, M8 C6's power countdown (`_power_tic`), the damage and the bonus fades."""
         from doomfj.world import KEYS, TicEvents, player_mortal
         w = self.world
         self._tap_at = len(self.tap.records)          # M7 P8a: the frame's knock records start here (`move`)
@@ -547,6 +547,7 @@ class MonsterPhase:
         # M7 P6: the berserk counter grows before them (zero until a PSTR is taken: always zero before "full")
         if ws.p_strength:
             ws.p_strength = min(ws.p_strength + 1, 0xFFFF)
+        w._power_tic()                    # M8 C6: P_PlayerThink's power countdown, after the strength (combat's order)
         if ws.p_damagecount:
             ws.p_damagecount -= 1
         if ws.p_bonuscount:

@@ -948,8 +948,25 @@ class Steer:
             stops = self.lv.mp.stops[here]
             lift_floor = stops[min(c["lstate"][k], len(stops) - 1)]
             off = next((q for q in ahead if self.pl.sector_of(self.LR.cell_of(*q)) != here), None)
-            if off is not None and self.pl.floor_at(self.pl.scenes_for(self.active - {"lift:%d" % here}),
-                                                    self.LR.cell_of(*off)) - lift_floor > 24:
+            # the way off under a ceiling the lift's floor now meets (E1M9's lift 109 at its top: sector 227's ceiling
+            # 40 = the lift's floor -- a wall until the lift is down): at rest, call it down from its own SR lines
+            # the way off, read from ITS OWN sector when that does not move (the planner's cell test spans the player's
+            # radius, so beside the lift it reads the lift's own floor at the scene's state: E1M9's lift 109 at its
+            # bottom read 40 off its south edge, a 160 step up, and the player rode it up and down for 2,000 frames)
+            osec = self.pl.sector_of(self.LR.cell_of(*off)) if off is not None else None
+            if osec is not None and osec not in self.lorder:
+                off_floor, off_ceil = self.lv.secs[osec].floor_h, self.lv.secs[osec].ceil_h
+            elif off is not None:
+                _ok, off_floor, off_ceil = self.pl.cp(self.pl.scenes_for(self.active - {"lift:%d" % here})[0],
+                                                      self.LR.cell_of(*off))
+            # the way off under a ceiling the lift's floor now meets (E1M9's lift 109 at its top: sector 227's ceiling
+            # 40 = the lift's floor -- a wall until the lift is down): at rest, call it down from its own SR lines
+            low = off is not None and off_ceil - lift_floor < 56
+            if low and c["lstate"][k] == 0:
+                boxes = [box for tag, box in self.lv.mp.use if here in self.lv.mp.lifts_of_tag[tag]]
+                if self._call_lift(f, x, y, here, boxes):
+                    return kd
+            if off is not None and (low or off_floor - lift_floor > 24):
                 self.ride += 1
                 self.last_pose = None
                 self.why = "ride (lift at %d)" % lift_floor

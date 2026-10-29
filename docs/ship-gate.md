@@ -772,3 +772,39 @@ REBUILD VERIFIED: rebuilt from this command at 71fa53e9 as `build/doom_e1m2_r3b.
 `f18d00c66d211cab26e69585b79ee2a45e52c546a0fbb3cf66d3c037240f574f` both.
 
 </details>
+
+## 6. E1M3 and E1M5 (M8 wave 1): their own binaries, their own numbers
+
+Each level is its OWN binary; E1M1's standing number (section 1) is untouched by them -- E1M1 rebuilt on the same branch
+is BYTE-IDENTICAL to blocked65 (`3a2c9564...`, `build_episode --maps E1M1`, 2026-10-29). Built on branch `m8-adopt`
+(m8-episode + the stl adoption + w2fix-wip; flipjump 1.6.0 at 9877f25) by the final creator (`scripts/build_episode.py`,
+its registry rows `LEVEL_SPREAD`), every gate run solo through `scripts/heavy.py`. Evidence: `docs/ship-evidence/e1m3_v1_*.log`,
+`e1m5_v1_*.log`, `e1m3_e1m5_v1_msframe.log`. The v1 combat sets were frozen from the drafts the day they were built
+(the owner's standing delegation; `scratchpad/gp/scenarios/combat_scenarios_e1m{3,5}_v1.json`).
+
+| gate | **E1M3** (`build/doom_e1m3_v1.fjm`, sha256 `71d56069bb2db8c3`) | **E1M5** (`build/doom_e1m5_v1.fjm`, sha256 `4e8c0ed5e54a85ae`) |
+|---|---|---|
+| `emit_check` (asserts on, no stand-in) | PASS | PASS |
+| the build (spread) | 998 s (spread 1) | 775 s (spread 2: the pool fits) |
+| `p2a_gate` | PASS -- 6 scenarios, 9 N/A | PASS -- 5 scenarios, 9 N/A |
+| `m2_std_gate` | PASS -- 75 frames byte- and state-exact | PASS -- 424 frames |
+| `m3_gate` | PASS -- 88 frames | PASS -- 88 frames |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (8 N/A) / 13 (3 N/A) scenarios | PASS -- 7 / 24 (18 N/A: no barrel, ...) / 13 (3 N/A) |
+| B0 on its v1 combat set | OK -- 11/11 runs exact; binding 15,750,448 | OK -- 11/11; binding 17,074,364 |
+| `gamespeed_trail --record` | PASS, CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m3/gamespeed.json`) | PASS, CONTROL-DOORS N/A (no tour reaches a door) (`scenarios/e1m5/gamespeed.json`) |
+| `gamespeed` | SPEED binding 14,652,491 ops/frame PASS; SIZE 60,373,968 words = **44.98%** of 2^27 (span 79.42%) | SPEED 11,851,855 PASS; SIZE 45,721,482 words = **34.07%** (span 83.58%) |
+| THE PLAYTHROUGH (`playthrough_gate --skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 3147**, byte-, palette- and state-exact on all 3,157 frames (777 s) | **PASS -- LEVEL COMPLETE at frame 4257**, exact on all 4,267 frames (822 s) |
+| `msframe --save-baseline shipped` (the map's timed walk `scenarios/<map>/msframe.json`) | **73.5 ms/frame** [72.8 .. 74.7], 233.5M fj/s, 17,158,103 ops/frame -> `shipped_e1m3` | **58.2 ms/frame** [58.0 .. 58.7], 224.0M fj/s, 13,028,121 ops/frame -> `shipped_e1m5` |
+| REBUILD | **BYTE-IDENTICAL** (`71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784`) | **BYTE-IDENTICAL** (`4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2`) |
+
+Size: E1M3 at 44.98% is over the 43% cap -- the owner, 2026-10-24: "above 43% size is OK".
+The build command (section 1b's, the map's wad and spread; `scripts/build_episode.py --maps E1M3` runs exactly it):
+
+    python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m3_v1.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m3.wad --map E1M3 --out build/doom_e1m3_v1.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m3_v1.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+
+(E1M5: `e1m5` / `E1M5` and `--spread 2`.) Play: `fj --run build/doom_e1m3_v1.fjm`, `fj --run build/doom_e1m5_v1.fjm`.
+
+**Not done yet (recorded, not hidden):** the per-level SPEED PASS (`docs/episode-plan.md` 4.7: a heat list from each
+level's own profile; both build on E1M1's `heat_blocked27_p10`) and the written playtest note (4.6) -- the playthrough
+gate played each level start to exit on the binary. The playthroughs ran on the steering before 2026-10-29's lift rules
+(8183305d); under the current steering E1M3's pin finishes at world 2279 and E1M5's at 4253 (model only).

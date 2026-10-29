@@ -1,0 +1,96 @@
+  CONTROL 5: binary and oracle agree on door geometry (quant 16, 21 doors)
+  candidate: skill 3, door 1 -- the mirror walk opens, crosses and keeps it open, no death: TAKEN
+  CONTROL 0: the planned route crosses no solid linedef: yes (19 frames re-simulated)
+fjm    : build/episode/doom_e1m3.fjm
+target : door sector 1, use box (-896, -104, -640, 40), threshold state 4
+skill  : 3 (the boot skill is 3) -- picked on the skill screen: enter, 1 x down, enter (NEW GAME) on frame 4
+script : 4 menu -> NEW GAME -> 19 walk to the door -> 2 use -> 7 open -> 15 through -> enter, down, enter, enter (NEW GAME at skill 3) -> the 19-frame walk again -> 6 idle  (75 frames)
+doorway: line 4 ((-704, -24), (-832, -24)) -> approach (-768, -80), then through to (-768, 64)
+running: 681,035,142 ops -> 75 frames presented
+
+  frame  keys      door1     fj px vs oracle
+      0  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      1  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      2  any,enter       -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+      3  any,dn         -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+      4  f              0   BYTE-EXACT  state ok
+      5  f              0   BYTE-EXACT  state ok
+      6  f              0   BYTE-EXACT  state ok
+      7  t              0   BYTE-EXACT  state ok
+      8  ff             0   BYTE-EXACT  state ok
+      9  ff             0   BYTE-EXACT  state ok
+     10  ft             0   BYTE-EXACT  state ok
+     11  ff             0   BYTE-EXACT  state ok
+     12  ft             0   BYTE-EXACT  state ok
+     13  ff             0   BYTE-EXACT  state ok
+     14  ft             0   BYTE-EXACT  state ok
+     15  ft             0   BYTE-EXACT  state ok
+     16  ft             0   BYTE-EXACT  state ok
+     17  ft             0   BYTE-EXACT  state ok
+     18  ft             0   BYTE-EXACT  state ok
+     19  ft             0   BYTE-EXACT  state ok
+     20  ft             0   BYTE-EXACT  state ok
+     21  ft             0   BYTE-EXACT  state ok
+     22  ff             0   BYTE-EXACT  state ok
+     23  u              1   BYTE-EXACT  state ok
+     24  u              2   BYTE-EXACT  state ok
+     25  -              3   BYTE-EXACT  state ok
+     26  -              4   BYTE-EXACT  state ok
+     27  -              5   BYTE-EXACT  state ok
+     28  -              5   BYTE-EXACT  state ok
+     29  -              5   BYTE-EXACT  state ok
+     30  -              5   BYTE-EXACT  state ok
+     31  -              5   BYTE-EXACT  state ok
+     32  t              5   BYTE-EXACT  state ok
+     33  t              5   BYTE-EXACT  state ok
+     34  t              5   BYTE-EXACT  state ok
+     35  t              5   BYTE-EXACT  state ok
+     36  t              5   BYTE-EXACT  state ok
+     37  t              5   BYTE-EXACT  state ok
+     38  t              5   BYTE-EXACT  state ok
+     39  f              5   BYTE-EXACT  state ok
+     40  f              5   BYTE-EXACT  state ok
+     41  f              5   BYTE-EXACT  state ok
+     42  f              5   BYTE-EXACT  state ok
+     43  f              5   BYTE-EXACT  state ok
+     44  f              5   BYTE-EXACT  state ok
+     45  f              5   BYTE-EXACT  state ok
+     46  f              5   BYTE-EXACT  state ok
+     47  any,enter       -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+     48  any,dn         -   (menu frame, the main menu -- m3_gate judges these)  state ok
+     49  any,enter       -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+     50  f              0   BYTE-EXACT  state ok
+     51  f              0   BYTE-EXACT  state ok
+     52  f              0   BYTE-EXACT  state ok
+     53  t              0   BYTE-EXACT  state ok
+     54  ff             0   BYTE-EXACT  state ok
+     55  ff             0   BYTE-EXACT  state ok
+     56  ft             0   BYTE-EXACT  state ok
+     57  ff             0   BYTE-EXACT  state ok
+     58  ft             0   BYTE-EXACT  state ok
+     59  ff             0   BYTE-EXACT  state ok
+     60  ft             0   BYTE-EXACT  state ok
+     61  ft             0   BYTE-EXACT  state ok
+     62  ft             0   BYTE-EXACT  state ok
+     63  ft             0   BYTE-EXACT  state ok
+     64  ft             0   BYTE-EXACT  state ok
+     65  ft             0   BYTE-EXACT  state ok
+     66  ft             0   BYTE-EXACT  state ok
+     67  ft             0   BYTE-EXACT  state ok
+     68  ff             0   BYTE-EXACT  state ok
+     69  -              0   BYTE-EXACT  state ok
+     70  -              0   BYTE-EXACT  state ok
+     71  -              0   BYTE-EXACT  state ok
+     72  -              0   BYTE-EXACT  state ok
+     73  -              0   BYTE-EXACT  state ok
+     74  -              0   BYTE-EXACT  state ok
+
+  CONTROL 1: door 1 reached 6 distinct states [0, 1, 2, 3, 4, 5] -- carried across the reset
+  CONTROL 2: use was pressed INSIDE the box: yes
+  CONTROL 3: the menu frames of each screen are identical to each other (6 screens): yes
+  CONTROL 4: the player's path crosses door 1's own line SEGMENT ((-704, -24)-(-832, -24) / (-832, -40)-(-704, -40)): yes -- and every frame is byte-exact, so fj walked the same path, which its blocking bit had to clear to allow
+  CONTROL 6: NEW GAME found door 1 open (yes), the 19-frame replay retraced the first walk (yes), and its last frame can tell the shut door from that one (yes)
+  CONTROL 7: every frame's STATE (view, mode, menu_scr, menu_sel, and every door's state, direction, sub-step and timer) equals the oracle's: yes, 75 frames
+  CONTROL 8 (M7 P7): the mirror's player died on 0 frames -- none, as this walk expects
+
+M2 STANDALONE GATE: PASS -- the shipped binary opens a door, KEEPS it open across the M1 reset, and NEW GAME puts it back; byte- and state-exact on all 75 frames

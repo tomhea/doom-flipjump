@@ -73,6 +73,10 @@ def test_the_unshipped_levels_are_not_ready_placeholders():
     assert list(BE.REGISTRY) == BE.EPISODE == ["E1M%d" % i for i in range(1, 10)]
     for m in BE.EPISODE[2:]:
         s = BE.REGISTRY[m]
+        if m in BE.LEVEL_SPREAD:                                               # M8 wave 1 + 2: in their pipeline
+            assert s.ready and s.spread == BE.LEVEL_SPREAD[m]
+            assert bool(s.recorded_sha256) == (m in BE.LEVEL_SHIPPED)          # a hash only once the level ships
+            continue
         assert not s.ready and s.not_ready                                     # a reason is given
         assert s.spread is None and not s.recorded_sha256
     assert BE.REGISTRY["E1M1"].ready and BE.REGISTRY["E1M2"].ready
@@ -312,7 +316,7 @@ def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     r = FakeRunner(out)
     rep = BE.run_episode(BE.EPISODE, BE.Context("s", "e", out), r, dry_run=True, out=lambda *a: None)
     assert r.ran == [] and not out.exists()
-    assert {m for m, v in rep["maps"].items() if not v["ready"]} == set(BE.EPISODE[2:])
+    assert {m for m, v in rep["maps"].items() if not v["ready"]} == set(BE.EPISODE[2:]) - set(BE.LEVEL_SPREAD)
 
 
 def test_the_playthrough_gate_runs_once_it_exists(episode, monkeypatch, tmp_path):

@@ -46,6 +46,7 @@ Never run with `python -O` (a skipped guard costs an assembly): refused, as is P
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import gzip
 import hashlib
 import importlib.util
@@ -166,6 +167,18 @@ for _m, _spread in LEVEL_SPREAD.items():
         size_cap_pct=None, size_note="the owner 2026-10-24: above 43% of 2^27 is OK", trail_record=True,
         playthrough_skill="easy", build_min=15, recorded_census=_p.census,
         recorded_ref="none yet: the level is in its pipeline (docs/episode-plan.md 4)")
+# the levels shipped (docs/ship-gate.md 6): their recorded binary -- the creator's build must reproduce it to the byte
+LEVEL_SHIPPED = {
+    "E1M3": ("build/doom_e1m3_v1.fjm", "71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784"),
+    "E1M5": ("build/doom_e1m5_v1.fjm", "4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2"),
+}
+for _m, (_out, _sha) in LEVEL_SHIPPED.items():
+    _lo = _m.lower()
+    REGISTRY[_m] = dataclasses.replace(
+        REGISTRY[_m], recorded_out=_out, recorded_sha256=_sha,
+        recorded_labels="scratchpad/12m/atlas/%s_v1.labels.tsv.gz" % _lo,
+        recorded_census="scratchpad/12m/_census_game_%s_v1.json.gz" % _lo,
+        recorded_ref="docs/ship-gate.md 6 (v1, 2026-10-29)")
 for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: placeholders until their level ships
     _p = profile(_m)
     REGISTRY[_m] = MapSpec(
@@ -174,6 +187,8 @@ for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: pla
                   "(spread, census, labels, sha256, combat set, feature tests) and set ready=True",
         wad=_p.wad, spread=None, combat_set="scratchpad/gp/scenarios/combat_scenarios_%s_v1.json" % _m.lower(),
         baseline=_p.baseline, trail_record=True, recorded_census=_p.census)
+
+REGISTRY = {m: REGISTRY[m] for m in EPISODE}     # the episode's order, whatever order the rows were made in
 
 
 # ── the plan ─────────────────────────────────────────────────────────────────────────────────────────────────────

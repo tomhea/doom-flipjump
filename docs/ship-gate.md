@@ -808,3 +808,24 @@ The build command (section 1b's, the map's wad and spread; `scripts/build_episod
 level's own profile; both build on E1M1's `heat_blocked27_p10`) and the written playtest note (4.6) -- the playthrough
 gate played each level start to exit on the binary. The playthroughs ran on the steering before 2026-10-29's lift rules
 (8183305d); under the current steering E1M3's pin finishes at world 2279 and E1M5's at 4253 (model only).
+
+## 7. E1M9 (M8 wave 2): its own binary, its own numbers
+
+Built and gated as section 6's levels (branch `m8-adopt`, the final creator, every step through `scripts/heavy.py`).
+Evidence: `docs/ship-evidence/e1m9_v1_*.log`. **`build/doom_e1m9_v1.fjm`**, sha256 `33da9dbcc55399a0`, spread 1.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS / 907 s |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 6 scenarios (8 N/A) / 194 frames / 88 frames, byte- and state-exact |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 31 (12 N/A) / 15 (1 N/A) scenarios |
+| B0 on its v1 combat set (keys `97a8a6475101cb0b`) | OK -- 11/11 runs exact; binding 13,649,248 ops/frame. The set was RE-PLANNED before its first pass: the draft's R0-s21 (params aggressive) died in b0's PROXY mirror at frames 98, 99 (`e1m9_v1_b0_before_replan.log`, 2026-10-29); `scenarios_map.mirror_deaths` now refuses a proxy-mirror death too, and R0-s21 is planned steady |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m9/gamespeed.json`) |
+| `gamespeed` | SPEED binding 7,732,082 ops/frame PASS; SIZE 55,452,414 words = **41.32%** of 2^27 PASS (span 77.26%) |
+| THE PLAYTHROUGH (`--skill easy`, seed 2) | **PASS -- LEVEL COMPLETE at frame 4663**, byte-, palette- and state-exact on all 4,673 frames (987 s). Its first run parted at frame 3241 on `p_rad` (binary 2099, mirror 2100): the GATES' MIRROR never counted the timed powers down (`MonsterPhase.weapon`, fixed 00d6ca5e); the binary was right (DOOM's P_PlayerThink order) |
+| `msframe --save-baseline shipped` | **37.7 ms/frame** [37.4 .. 38.8], 208.2M fj/s, 7,849,063 ops/frame -> `shipped_e1m9` (a first measurement, 40.1 [38.8 .. 41.3], ran beside the combat planner and was replaced) |
+| REBUILD | **BYTE-IDENTICAL** (`33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48`) |
+
+The build command: section 6's with `e1m9` / `E1M9`, `--spread 1`. Play: `fj --run build/doom_e1m9_v1.fjm`.
+The playthrough ran on the current steering (8183305d: the lift rules E1M9 needed -- its lift 109 called down from
+its own SR lines). Not done yet, as for section 6: the per-level speed pass and the written playtest note.

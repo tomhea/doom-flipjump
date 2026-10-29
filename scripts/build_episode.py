@@ -171,6 +171,7 @@ for _m, _spread in LEVEL_SPREAD.items():
 LEVEL_SHIPPED = {
     "E1M3": ("build/doom_e1m3_v1.fjm", "71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784"),
     "E1M5": ("build/doom_e1m5_v1.fjm", "4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2"),
+    "E1M9": ("build/doom_e1m9_v1.fjm", "33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48"),
 }
 for _m, (_out, _sha) in LEVEL_SHIPPED.items():
     _lo = _m.lower()
@@ -178,7 +179,7 @@ for _m, (_out, _sha) in LEVEL_SHIPPED.items():
         REGISTRY[_m], recorded_out=_out, recorded_sha256=_sha,
         recorded_labels="scratchpad/12m/atlas/%s_v1.labels.tsv.gz" % _lo,
         recorded_census="scratchpad/12m/_census_game_%s_v1.json.gz" % _lo,
-        recorded_ref="docs/ship-gate.md 6 (v1, 2026-10-29)")
+        recorded_ref="docs/ship-gate.md %s (v1, 2026-10-29)" % ("7" if _m == "E1M9" else "6"))
 for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: placeholders until their level ships
     _p = profile(_m)
     REGISTRY[_m] = MapSpec(

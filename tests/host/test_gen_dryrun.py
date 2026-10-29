@@ -71,13 +71,15 @@ def test_unknown_things_drops_only_the_unknown():
 
 
 def test_a_map_without_monsters_refuses_by_name(tmp_path):
-    """E1M8's only monsters are four Barons (3003, C8): with them dropped by the stand-in, suggest() raised ValueError
-    (max of nothing). It now refuses by name, and gen_dryrun files the refusal under C8 (a FEATURE, not the tool)"""
+    """E1M8's only monsters are four Barons (3003). Once the stand-in dropped them (unknown before C8), suggest() raised
+    ValueError (max of nothing); it now refuses by name, and gen_dryrun files the refusal under C8 (a FEATURE, not the
+    tool). C8 made the Baron known and the region flood reaches him since 2026-10-29 (walk-over floors), so the Baron is
+    made unknown here and the `unknown-things` stand-in drops all four -- the map without a monster the test needs"""
     out = tmp_path / "cp.json"
-    r = subprocess.run([sys.executable, str(ROOT / "scratchpad" / "gp" / "gen_dryrun.py"), "--one", "E1M8", "--standin",
-                        "unknown-things", "undrawn-pickups", "--", "scratchpad/gp/scenarios_map.py", "--map", "E1M8",
-                        "--suggest-checkpoints", "--checkpoints", str(out)], capture_output=True, text=True,
-                       cwd=str(ROOT), timeout=900)
-    text = r.stdout + r.stderr
-    assert r.returncode == 1 and "suggest: no monster of E1M8" in text and "ValueError" not in text, text[-1500:]
+    code = ("import sys, runpy; sys.path[:0] = [r'%s', r'%s']\n" % (ROOT / "src", ROOT / "scratchpad" / "gp")
+            + "from doomfj import gamedata as gd\ngd.THING_TYPES.pop(3003)\nimport gen_dryrun as G\nG._unknown_things()\n"
+            + "sys.argv = ['scenarios_map.py', '--map', 'E1M8', '--suggest-checkpoints', '--checkpoints', r'%s']\n" % out
+            + "runpy.run_path(r'%s', run_name='__main__')\n" % (ROOT / "scratchpad" / "gp" / "scenarios_map.py"))
+    rc, text = _run(code)
+    assert rc == 1 and "suggest: no monster of E1M8" in text and "ValueError" not in text, text[-1500:]
     assert G.classify(text)[0] == "FEATURE"

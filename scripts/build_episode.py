@@ -153,7 +153,20 @@ REGISTRY: dict[str, MapSpec] = {
         recorded_sha256="9a112139f3d35db3f71a9b2c0fb57a9e383b342fd2d42e776e072b97fbb57f45",
         recorded_ref="docs/ship-gate.md 5 (r4, 2026-10-18)"),
 }
-for _m in EPISODE[2:]:                  # E1M3..E1M9: placeholders until their level ships
+# M8 wave 1 + 2 (2026-10-29): the levels in their pipeline -- built and gated by this creator, NO recorded binary yet
+# (no rebuild check until docs/ship-gate.md holds their block). Spread 2 where the pool fits (the small maps: E1M5 and
+# E1M8 at 0.53 / 0.49 of E1M2's segs), else 1 (E1M3 / E1M4 / E1M9 used 79.6 / 83.5 / 77.6% of 2^27 at spread 1);
+# size above 43% is the owner's (2026-10-24: "above 43% size is OK").
+LEVEL_SPREAD = {"E1M3": 1, "E1M4": 1, "E1M5": 2, "E1M8": 2, "E1M9": 1}
+for _m, _spread in LEVEL_SPREAD.items():
+    _p = profile(_m)
+    REGISTRY[_m] = MapSpec(
+        map=_m, ready=True, wad=_p.wad, spread=_spread,
+        combat_set="scratchpad/gp/scenarios/combat_scenarios_%s_v1.json" % _m.lower(), baseline=_p.baseline,
+        size_cap_pct=None, size_note="the owner 2026-10-24: above 43% of 2^27 is OK", trail_record=True,
+        playthrough_skill="easy", build_min=15, recorded_census=_p.census,
+        recorded_ref="none yet: the level is in its pipeline (docs/episode-plan.md 4)")
+for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: placeholders until their level ships
     _p = profile(_m)
     REGISTRY[_m] = MapSpec(
         map=_m, ready=False,

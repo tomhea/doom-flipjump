@@ -62,7 +62,8 @@ def program(lvl, tic):
                  f"    hex.print_as_digit 1, ddir + {d}*dw, 0", "    stl.output 32",
                  f"    hex.print_as_digit {WAIT_NIBBLES}, dwait + {WAIT_NIBBLES * d}*dw, 0", "    stl.output 32"]
     body += ["stl.fret tic_ret", "done:", "stl.loop", "rmagic: hex.vec 2", "rbyte: hex.vec 2", "tic_ret: hex.vec w/4",
-             "viewx: hex.vec 8", "viewy: hex.vec 8", *door_decls(nd, 2)]
+             "viewx: hex.vec 8", "viewy: hex.vec 8", "pcard_y: hex.vec 1, 0", "pcard_r: hex.vec 1, 0",   # E1M5's key doors
+             *door_decls(nd, 2)]
     return "\n".join(body) + "\n"
 
 

@@ -61,15 +61,18 @@ def records(n_runs: int):
     # M7 P2b: the DOORS' boxes only -- onewalk's exit guard reads the same name, and "every box,
     # anywhere" put every use press in the exit box (blocked36's first trail run: an AssertionError
     # before the control ran); the exit box keeps the real test
+    # M8 (E1M3's first trail: 'door-wrong rejected on 0 frames'): since M7 P6+P7 the replay is GameSim -- the World, whose
+    # door press reads ITS OWN import of the name (doomfj.world) -- so the world's name is patched too
     import doomfj.doors as _D
-    real_d, real_o = _D.in_use_box_fixed, onewalk.in_use_box_fixed
+    import doomfj.world as _W
+    real_d, real_o, real_w = _D.in_use_box_fixed, onewalk.in_use_box_fixed, _W.in_use_box_fixed
     exits = {tuple(b) for b in onewalk.DoorSim().exits}
-    _D.in_use_box_fixed = onewalk.in_use_box_fixed = (
+    _D.in_use_box_fixed = onewalk.in_use_box_fixed = _W.in_use_box_fixed = (
         lambda box, x, y: tuple(box) not in exits or real_o(box, x, y))
     try:
         GS.validate_scripts(n_runs, quiet=True, trails=wrong)
     finally:
-        _D.in_use_box_fixed, onewalk.in_use_box_fixed = real_d, real_o
+        _D.in_use_box_fixed, onewalk.in_use_box_fixed, _W.in_use_box_fixed = real_d, real_o, real_w
     return doors, shut, wrong
 
 

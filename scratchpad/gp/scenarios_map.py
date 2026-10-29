@@ -187,6 +187,10 @@ def regions_map(w) -> dict:
     LIFTS = tuple(sorted(lift_states(secs, lds, sds)))
     W1DOORS = tuple(sorted(si for si, k in kinds.items() if k == "walkover"))
     LOWER = tuple(sorted(switch_sectors(secs, lds, sds)))
+    # M8 (E1M8: its Barons wait on floors its W1 lines lower -- special 19, tags 1 and 3): a WALK-OVER floor machine's
+    # sectors at their destination from the walk-over stage on, as the W1 doors are open there
+    from doomfj.movers import floor_groups
+    W1FLOORS = {si: hs[-1] for g in floor_groups(secs, lds, sds) if not g.use for si, hs in g.heights}
 
     def side_sec(sd):
         return sds[sd].sector if sd != 0xFFFF and 0 <= sd < len(sds) else None
@@ -210,6 +214,8 @@ def regions_map(w) -> dict:
         if "w1" in stage:
             for s in W1DOORS:
                 cl[s] = min(secs[n].ceil_h for n in nb[s]) - 4
+            for s, h in W1FLOORS.items():
+                fl[s] = h
         if "lower" in stage:
             for s in LOWER:
                 fl[s] = min(secs[n].floor_h for n in nb[s])
@@ -289,7 +295,9 @@ def suggest(n_runs: int = N_RUNS) -> dict:
         mons.append((k, x, y, sec, w.mon_info[k].name))
     by_region = collections.Counter(reg.get(s) for _k, _x, _y, s, _n in mons)
     pk = [t for t in w.pickup_things if t.flags & __import__("doomfj.gamedata", fromlist=["x"]).skill_bit(S.SKILL)]
-    # every reached sector with a monster group, scored
+    # every reached sector with a monster group, scored -- on a sparse map (no reached region with >= 5 monsters: E1M8's
+    # four Barons, far apart) a single monster makes a group, as `regions_with` below falls back to one monster
+    sparse = not any(n >= 5 for r, n in by_region.items() if r is not None)
     cand = []
     for sec, r in sorted(reg.items()):
         pts = _sector_points(w, sec)
@@ -298,7 +306,7 @@ def suggest(n_runs: int = N_RUNS) -> dict:
         cx = sum(p[0] for p in pts) / len(pts)
         cy = sum(p[1] for p in pts) / len(pts)
         group = [m for m in mons if math.hypot(m[1] - cx, m[2] - cy) <= ENGAGE and reg.get(m[3]) is not None]
-        if len(group) < 2:
+        if len(group) < (1 if sparse else 2):
             continue
         gx = sum(m[1] for m in group) / len(group)
         gy = sum(m[2] for m in group) / len(group)
@@ -365,7 +373,7 @@ def suggest(n_runs: int = N_RUNS) -> dict:
                 sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)]
                 if sec != si and reg.get(sec) in quota and _standable(w, x, y):
                     spots.append((x, y, sec))
-        if not spots:
+        if not spots or not chosen:
             continue
         x, y, sec = spots[0]
         busiest = max(quota, key=lambda r: (sum(1 for o in chosen if o["region"] == r), r))

@@ -296,6 +296,7 @@ class Cell:
     count: int = 1
     signed: bool = False
     index: int = 0
+    array: bool = False     # a per-map array (count = ndoors, nlift, ...): read_arrays keeps a 1-tuple
 
     def span_cells(self) -> int:
         if self.kind == "hex":
@@ -437,13 +438,20 @@ class Probe:
             out[key] = vals[0] if c.count == 1 else tuple(vals)
         return out
 
+    def read_arrays(self, names=None) -> dict:
+        """read_cells, but a per-map array of ONE element (E1M8's one door) stays a 1-tuple, as the oracle holds it"""
+        out = self.read_cells(names)
+        return {k: (v,) if self.cells.get(k) is not None and self.cells[k].array and not isinstance(v, tuple) else v
+                for k, v in out.items()}
+
     def write_cells(self, values: dict) -> None:
         """`values` may name `absent` cells (an optional group this binary predates): none is written"""
         for key, val in values.items():
             if key in self.absent:
                 continue
             c = self.cells[key]
-            vals = [val] if c.count == 1 else list(val)
+            # a one-door map: the oracle hands its 1-element arrays as 1-tuples (same_reading)
+            vals = list(val) if isinstance(val, (tuple, list)) else [val]
             if len(vals) != c.count:
                 raise ValueError("cell %s takes %d values, got %d" % (key, c.count, len(vals)))
             for e, v in enumerate(vals):
@@ -706,44 +714,44 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
              "amap": Cell("amap", "hex", 1)}
     for k in ("kb_f", "kb_b", "kb_l", "kb_r", "kb_u"):
         cells[k] = Cell(k, "hex", 1)
-    cells["dstate"] = Cell("dstate", "hex", 1, count=ndoors)
-    cells["ddir"] = Cell("ddir", "hex", 1, count=ndoors)
-    cells["dsub"] = Cell("dsub", "hex", 1, count=ndoors)
-    cells["dwait"] = Cell("dwait", "hex", WAIT_NIBBLES, count=ndoors)
-    cells["dreq"] = Cell("dreq", "hex", 1, count=ndoors)
+    cells["dstate"] = Cell("dstate", "hex", 1, count=ndoors, array=True)
+    cells["ddir"] = Cell("ddir", "hex", 1, count=ndoors, array=True)
+    cells["dsub"] = Cell("dsub", "hex", 1, count=ndoors, array=True)
+    cells["dwait"] = Cell("dwait", "hex", WAIT_NIBBLES, count=ndoors, array=True)
+    cells["dreq"] = Cell("dreq", "hex", 1, count=ndoors, array=True)
     cells["pcard"] = Cell("pcard", "hex", 1)
-    cells["wfired"] = Cell("wfired", "hex", 1, count=max(nwalk, 1))
+    cells["wfired"] = Cell("wfired", "hex", 1, count=max(nwalk, 1), array=True)
     cells["lvdone"] = Cell("lvdone", "hex", 1)            # M7 P2a.2: the level is done
     cells["pusedn"] = Cell("pusedn", "hex", 1)            # ...and use held last tic
     # M7 P2b: the movers -- each lift's four door-shaped cells and its trigger, and the switch
     for name in ("lstate", "ldir", "lsub", "lreq"):
-        cells[name] = Cell(name, "hex", 1, count=nlift)
-    cells["lwait"] = Cell("lwait", "hex", WAIT_NIBBLES, count=nlift)
+        cells[name] = Cell(name, "hex", 1, count=nlift, array=True)
+    cells["lwait"] = Cell("lwait", "hex", WAIT_NIBBLES, count=nlift, array=True)
     # M8 F1.3: the fswitch VECTOR on a map in the wide layout (movers.fswitch_nibbles: each floor group's state, then
     # its step timer, a nibble each -- read as a tuple, movers.MoverPhase's `switched`); E1M1's one nibble, an int
     cells["fswitch"] = Cell("fswitch", "hex", 1, count=_fswitch_count())
     # M7 P3.1: the monsters' cells, `nmon` slots (monstercode.monster_decls, the schema's widths)
     if nmon:
-        cells["mon_state"] = Cell("mon_state", "hex", 2, count=nmon)
+        cells["mon_state"] = Cell("mon_state", "hex", 2, count=nmon, array=True)
         for name in ("mon_tics", "mon_facing", "mon_active"):
-            cells[name] = Cell(name, "hex", 1, count=nmon)
+            cells[name] = Cell(name, "hex", 1, count=nmon, array=True)
         # M7 P3.2a: the wake mode's cells; `thseen` is per monster SLOT (nmon), the render's marks
         for name in ("mon_target", "mon_reaction", "mon_movedir"):
-            cells[name] = Cell(name, "hex", 1, count=nmon)
+            cells[name] = Cell(name, "hex", 1, count=nmon, array=True)
         if fight:                       # M7 P8a I: 0 none, 1 the player, 2 + slot (docs/gp-final-plan.md 4.1)
-            cells["mon_target"] = Cell("mon_target", "hex", sn, count=nmon)
-        cells["mon_threshold"] = Cell("mon_threshold", "hex", 2, count=nmon)
+            cells["mon_target"] = Cell("mon_target", "hex", sn, count=nmon, array=True)
+        cells["mon_threshold"] = Cell("mon_threshold", "hex", 2, count=nmon, array=True)
         cells["sched_cursor"] = Cell("sched_cursor", "hex", sn)
-        cells["thseen"] = Cell("thseen", "hex", 1, count=nmon)     # per SLOT, written by the render
+        cells["thseen"] = Cell("thseen", "hex", 1, count=nmon, array=True)     # per SLOT, written by the render
         # M7 P3.2b: the chase's per-slot cells (monstercode.p32b_decls)
         for name, width in (("mon_movecount", 2), ("mon_rng", 2), ("mon_floorz", 4), ("msec", _sec_nibbles())):
-            cells[name] = Cell(name, "hex", width, count=nmon)
-        cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon)   # M7 P3.2c
-        cells["mon_health"] = Cell("mon_health", "hex", 3, count=nmon)               # M7 P4.2a: the damage
-        cells["mon_ambush"] = Cell("mon_ambush", "hex", 1, count=nmon)               # M7 P4.2b: the noise
+            cells[name] = Cell(name, "hex", width, count=nmon, array=True)
+        cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon, array=True)   # M7 P3.2c
+        cells["mon_health"] = Cell("mon_health", "hex", 3, count=nmon, array=True)               # M7 P4.2a: the damage
+        cells["mon_ambush"] = Cell("mon_ambush", "hex", 1, count=nmon, array=True)               # M7 P4.2b: the noise
         cells["snd_alert"] = Cell("snd_alert", "hex", 1, count=_nsound())
         for name in ("mon_shootable", "mon_solid", "mon_justhit"):
-            cells[name] = Cell(name, "hex", 1, count=nmon)
+            cells[name] = Cell(name, "hex", 1, count=nmon, array=True)
     # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
     # M7 P4.1: the player's weapon -- one cell each, `wp_own` the owned flags as one value (P9: five, the launcher's
     # last: weaponcode.WEAPONS), `wp_frm` two nibbles (P9: the launcher's frames made 17 -- weaponcode.FRAME_NIBBLES)
@@ -760,13 +768,13 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells[name] = Cell(name, "hex", width)
     from doomfj.world import FIREBALL_POOL, FX_POOL
     for pool, n in (("pj", FIREBALL_POOL), ("fx", FX_POOL)):
-        cells[pool + "_act"] = Cell(pool + "_act", "hex", 1, count=n)
+        cells[pool + "_act"] = Cell(pool + "_act", "hex", 1, count=n, array=True)
         for name, width in (("_x", 8), ("_y", 8), ("_st", 2), ("_ti", 1)) + ((("_mx", 8), ("_my", 8), ("_src", sn))
                                                                              if pool == "pj" else ()):
-            cells[pool + name] = Cell(pool + name, "hex", width, count=n)
+            cells[pool + name] = Cell(pool + name, "hex", width, count=n, array=True)
     if nrt:
-        cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt)
-        cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt)
+        cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt, array=True)
+        cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt, array=True)
     # M7 P6 / P7 (docs/gp-p67-interface.md 4.5): the loot, the barrels, the drops, the game's cells -- each group an
     # OPTIONAL_GROUP (a binary before P6 has none of them); widths and counts are the cells' units
     # (monsters.MonsterPhase.loot_state / barrel_state / game_state)
@@ -780,14 +788,14 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells[name] = Cell(name, "hex", width)
     cells["st_secm"] = Cell("st_secm", "hex", 1, count=_nsecret())
     ndrop, nbar = _loot_counts()
-    cells["mdrop"] = Cell("mdrop", "hex", 1, count=ndrop)
+    cells["mdrop"] = Cell("mdrop", "hex", 1, count=ndrop, array=True)
     for name, width in (("bar_st", 2), ("bar_ti", 1), ("bar_hp", 2), ("bar_solid", 1)):
-        cells[name] = Cell(name, "hex", width, count=nbar)
+        cells[name] = Cell(name, "hex", width, count=nbar, array=True)
     # M7 P6: `thvis` (every game binary has it -- M14.5 / P1.5 / P2a.1 write it; no gate read it): 2 nibbles a
     # slot, the baked vanishable things' slots, then (P6) one per runtime pickup (monsters.MonsterViews.vis_state).
     # Asked for only with its count (`nthvis`: MonsterViews.nvis), which a binary before P6 does not have
     if nthvis:
-        cells["thvis"] = Cell("thvis", "hex", 2, count=nthvis)
+        cells["thvis"] = Cell("thvis", "hex", 2, count=nthvis, array=True)
     # M7 P8a (V, docs/gp-final-plan.md 4.1; monsters.MonsterPhase.p8a_state documents the units): P6+P7's turn flag,
     # the sink, knockback's cells (the per-slot ones only with `nmon`), infighting's barrel source -- each group an
     # OPTIONAL_GROUP (a binary built without the rule has none of its labels)
@@ -795,9 +803,9 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells[name] = Cell(name, "hex", width)
     if nmon:
         for name, width in (("mkx", 8), ("mky", 8), ("mfx", 4), ("mfy", 4)):
-            cells[name] = Cell(name, "hex", width, count=nmon)
+            cells[name] = Cell(name, "hex", width, count=nmon, array=True)
     cells["pj_z"] = Cell("pj_z", "hex", 4, count=FIREBALL_POOL)
-    cells["bar_src"] = Cell("bar_src", "hex", sn, count=nbar)
+    cells["bar_src"] = Cell("bar_src", "hex", sn, count=nbar, array=True)
     cells["p_rct"] = Cell("p_rct", "hex", 2)          # M8 L4 (monsters.MonsterPhase.p8a_state: 0..18)
     cells["tp_w1"] = Cell("tp_w1", "hex", 1, count=_nonce())   # M8 C5: a W1 monster teleport's latch, 0 / 1
     # M8 (doomfj.lightcode; MonsterPhase.p8a_state's units): a state nibble and a 2-nibble count a thinker, the stream
@@ -807,8 +815,8 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     # M8: the switch textures (MonsterPhase.switch_state's units; a map without them declares neither label: OPTIONAL)
     from doomfj.switches import BUTTON_NIBBLES
     nsw, nsr = _nswitch()
-    cells["swpr"] = Cell("swpr", "hex", 1, count=max(nsw, 1))
-    cells["swtm"] = Cell("swtm", "hex", BUTTON_NIBBLES, count=max(nsr, 1))
+    cells["swpr"] = Cell("swpr", "hex", 1, count=max(nsw, 1), array=True)
+    cells["swtm"] = Cell("swtm", "hex", BUTTON_NIBBLES, count=max(nsr, 1), array=True)
     # M8 C6 (MonsterPhase.p8a_state's units): the timed powers' counters, 3 nibbles each (OPTIONAL: their maps only)
     from doomfj.powers import NIBBLES as _PWN
     cells["p_inv"] = Cell("p_inv", "hex", _PWN)
@@ -817,7 +825,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     # without a soul declares none of them)
     nsk = max(1, len(getattr(_idle_world(), "soul_slots", ())))
     for name, width in (("sk_fly", 1), ("sk_inf", 1), ("sk_z", 8), ("sk_momz", 8), ("sk_ceil", 4)):
-        cells[name] = Cell(name, "hex", width, count=nsk)
+        cells[name] = Cell(name, "hex", width, count=nsk, array=True)
     return cells
 
 

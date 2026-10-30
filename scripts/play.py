@@ -328,8 +328,8 @@ class Player:
                     if missing:
                         raise Mismatch("the oracle names cells the probe cannot read: %s" % missing)
                     state["names"] = sorted(exp)          # the steering sees exactly what the model run sees
-                got = pr.read_cells(state["names"])
-                bad = {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v}
+                got = pr.read_arrays(state["names"])
+                bad = {k: (got.get(k), v) for k, v in exp.items() if not P.same_reading(got.get(k), v)}
                 if fr["drawn"] == "world" and pool is not None:
                     # the world picture in a worker (the same p2a_gate.picture, its own Oracle): compared when it
                     # comes back, a few frames on -- the first parting frame is still the one reported
@@ -349,7 +349,7 @@ class Player:
                                        "palette": None if wpal == pal else [pal, wpal, fr["pal"]]}
                     out["verdict"] = "mismatch"
             else:
-                got = pr.read_cells(names_steer)
+                got = pr.read_arrays(names_steer)
             rec.update(cells=got, pic=pic, pal=pal)
             state["prev"] = got
             out["frames"] = f + 1

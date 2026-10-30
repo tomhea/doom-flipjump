@@ -104,7 +104,8 @@ def test_the_control_a_weapon_before_the_sync_is_refused():
     src = (ROOT / path).read_text(encoding="utf-8")
     old = "                        mph.sync(ph[0], ms[0], ms[2])\n"
     assert src.count(old) == 1
-    anchor = "                    if loots:\n                        nx, ny, na = mph.move("
+    anchor = ("                    if loots:\n                        gl0 = mph.world.ws.g_leveldone\n"
+              "                        nx, ny, na = mph.move(")
     assert src.count(anchor) == 1
     mutated = src.replace(old, "").replace(anchor, anchor.replace(
         "if loots:\n", "if loots:\n                        mph.sync(ph[0], ms[0], ms[2])\n"), 1)

@@ -135,3 +135,28 @@ def test_a_moved_floor_lets_a_short_pickup_leg_seek(mods, window):
     assert st.legs[st.li]["to"] == want, "CONTROL: the short leg sought health with no window" if not window else ""
     if window:
         assert st.legs[st.li]["goal"] in ([-1344, 720], [-576, 720])
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_channel_with_no_health_in_reach_takes_a_suit(mods, on):
+    """CHANNEL_SUIT (E1M4's MAP_TACTICS): a long damaging stretch ahead, too little health for it and no health in
+    reach -> the radiation suit (912, 1520); an 18-leg play went into the channel at 26 health and died of the floor.
+    CONTROL: CHANNEL_SUIT off -> the same cells, no suit leg"""
+    play, st, li = _steer(mods, "item:2018")
+    assert st.CHANNEL_SUIT                                     # E1M4's tactic, from MAP_TACTICS
+    st.CHANNEL_SUIT = on
+    st.health_taken |= set(st.health)                          # every health item gone
+    x, y = 803, 1822
+    st.replan(x, y, "test")
+    st.decide(100, _cells(st, x, y, 26))
+    got = [g["to"] for g in st.legs].count("suit")
+    assert got == (1 if on else 0), "CONTROL: a suit leg with the tactic off" if not on else "no suit leg"
+    if on:
+        assert st.legs[st.li]["to"] == "suit" and st.legs[st.li]["goal"] == [912, 1520]
+
+
+def test_map_tactics_are_e1m4s_alone():
+    """IGN_NEAR and CHANNEL_SUIT are off in the class (every other map's steering unchanged)"""
+    play = _load("play", "scripts/play.py")
+    assert play.Steer.IGN_NEAR == 0 and play.Steer.CHANNEL_SUIT is False
+    assert set(play.Steer.MAP_TACTICS) == {"E1M4"}

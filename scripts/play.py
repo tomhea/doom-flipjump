@@ -456,7 +456,8 @@ class Steer:
     IGN_STUCK = 8
     # per-map overrides of the knobs above (BOT_CFG still overrides both): a tactic that helps one map and moves the other
     # maps' pinned plays is that map's alone
-    MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64}}
+    MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True}}
+    CHANNEL_SUIT = False       # a long damaging stretch ahead, too little health, none in reach: a radiation suit
     FLOORS_SEEN = True         # a floor group the game moved joins the steering's world (_floors_seen)
     ITEM_SEEK_HP = 30          # > 0: under this health a LONG route pickup's leg seeks health too (0: never, as before)
     ITEM_SEEK_LEN = 200        # ... a leg planned this many cells or more (E1M4's chaingun 239, armor 316; the pinned
@@ -504,6 +505,8 @@ class Steer:
                        and self.lv.sector_at(t.x, t.y) not in lifts]
         self.ammo = [(t.x, t.y) for t in self.lv.things if t.type in (2007, 2008, 2048, 2049) and t.flags & bit
                      and self.lv.sector_at(t.x, t.y) not in lifts]
+        self.suits = [(t.x, t.y) for t in self.lv.things if t.type == 2025 and t.flags & bit
+                      and self.lv.sector_at(t.x, t.y) not in lifts]
         from doomfj.world import level_things
         self.mtype = [t.type for t in level_things(self.lv.mw, self.lv.map)[1]]     # monster slot -> its type
         # the barrels (their spawn spots; aim_sid's id 1 + nmon + b, combat.window_aim): never shot close by
@@ -803,7 +806,7 @@ class Steer:
             return set(self.queue.pop(0))
         # ---- low health / no ammo: the nearest item first -- unless a monster is at arm's length
         foe = self._foe(c, x, y, f)
-        if (foe is None or foe[0] > 100) and not self.use_tap and not c.get("p_rad") and self.health                 and self.pieces and self.leg.get("to") != "health":
+        if (foe is None or foe[0] > 100) and not self.use_tap and not c.get("p_rad") and self.health                 and self.pieces and self.leg.get("to") not in ("health", "suit"):
             # (any leg: E1M4's channel is crossed on the way to an item -- the armor beyond it)
             hp = c.get("p_hp") or 0
             ahead = self.pieces[self.pi][self.wi:self.wi + 240]
@@ -811,6 +814,12 @@ class Steer:
             if burn > 20 and hp < min(80, burn * self.BURN + 20) and self._seek_health(
                     f, x, y, self.health, "health", most=150, radius=2500):
                 self.log("    f%d: %d damaging cells ahead at %d health: health first" % (f, burn, hp))
+                return kd
+            if (burn > 20 and hp < min(80, burn * self.BURN + 20) and self.CHANNEL_SUIT and self.suits
+                    and self._seek_health(f, x, y, self.suits, "suit", most=150, radius=2500)):
+                # no health in reach: a radiation suit then (E1M4's near suit (912, 1520): an 18-leg play went into
+                # the channel at 26 health with no health left in reach and died of the floor at (1995, 1437))
+                self.log("    f%d: %d damaging cells ahead at %d health, no health in reach: the suit" % (f, burn, hp))
                 return kd
         if (foe is None or foe[0] > 100) and not self.use_tap and self.leg["kind"] != "item":
             hp = c.get("p_hp") or 0

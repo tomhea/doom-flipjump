@@ -788,13 +788,21 @@ PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 8: 40, 2049
                  2025: 60}     # the radiation suit (E1M4 alone: the one at the far end of its nukage channel)
 
 
+# A MAP'S OWN PICKUPS by position (the steering's health made a route pickup where the bot needs it): E1M4's two stimpacks
+# by the armor leg's corridor (y 808) before the nukage channel, and the medikit at the channel's far end (the way back)
+# -- the bot's own health seeks there went north instead, into the imps round the near suit (800..1000, 1300..1800)
+MAP_PICKUPS = {"E1M4": {(1192, 632): 400, (1832, 632): 400, (2472, 232): 400, (3264, 1216): 40}}
+
+
 def pickup_things(pl) -> list:
     from doomfj.combat import GETTABLE
     lifts = set(pl.lv.mp.order) if pl.lv.mp is not None else set()
+    extra = MAP_PICKUPS.get(str(getattr(pl.lv, "map", "")).upper(), {})
     # not one lying on a LIFT: at rest it is up where the player below cannot reach it, and the lift waits 26 frames
     # at the bottom (E1M3's shells on lift 256: the play died circling under it)
-    return [{"type": t.type, "x": t.x, "y": t.y, "budget": PICKUP_BUDGET[t.type], "taken": False}
-            for t in pl.lv.things if t.type in PICKUP_BUDGET and t.type in GETTABLE
+    return [{"type": t.type, "x": t.x, "y": t.y, "budget": PICKUP_BUDGET.get(t.type, extra.get((t.x, t.y))),
+             "taken": False}
+            for t in pl.lv.things if (t.type in PICKUP_BUDGET or (t.x, t.y) in extra) and t.type in GETTABLE
             and pl.lv.sector_at(t.x, t.y) not in lifts]
 
 

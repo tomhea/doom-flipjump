@@ -457,7 +457,12 @@ class Steer:
     # per-map overrides of the knobs above (BOT_CFG still overrides both): a tactic that helps one map and moves the other
     # maps' pinned plays is that map's alone
     MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True, "AMMO_LOW": 20, "AMMO_TYPES": (8,),
-                            "SAVE_R": 500}}
+                            "SAVE_R": 500, "SEEK_AVOID": ((450, 1250, 1100, 1900),)}}
+    # SEEK_AVOID: boxes (x0, y0, x1, y1) whose items no detour seeks -- E1M4's stimpacks (496, 1840), (816, 1840) and
+    # the near suit (912, 1520) lie among imps: the channel rule's detours there killed every play that reached the
+    # armor leg (deaths at (530..1000, 1300..1840)); the route takes the health by the corridor instead (level_route
+    # MAP_PICKUPS)
+    SEEK_AVOID = ()
     # AMMO (E1M4's tactic; 0 / () off): under AMMO_LOW bullets with no shell, a dead zombieman's clip within DROP_R
     # (DROP_MOST cells) first, then -- under 5 -- the map's ammo up to AMMO_FAR_MOST cells off, AMMO_TYPES joining the
     # list (the backpack (1536, 240) beside the shell box (1424, 240)); SAVE_R: short of ammo, no shot past it and none
@@ -1272,7 +1277,8 @@ class Steer:
             return False
         LR = self.LR
         cands = sorted((math.hypot(hx - x, hy - y), hx, hy) for hx, hy in items
-                       if (hx, hy) not in self.health_taken and math.hypot(hx - x, hy - y) < radius)
+                       if (hx, hy) not in self.health_taken and math.hypot(hx - x, hy - y) < radius
+                       and not any(b[0] <= hx <= b[2] and b[1] <= hy <= b[3] for b in self.SEEK_AVOID))
         opn = {"door:%d" % si for si in self.dorder if self.lv.dp.boxes.get(si) is not None
                and (not self.pl.mechs["door:%d" % si].key or self.pl.mechs["door:%d" % si].key in self.keys)}
         def usable(path):

@@ -26,6 +26,11 @@ WAD = ROOT / "assets" / "freedoom1.wad"
 pytestmark = pytest.mark.skipif(not WAD.exists(), reason="needs assets/freedoom1.wad (E1M4)")
 
 
+# the route's long pickup leg across the nukage channel (MAP_PICKUPS made it the medikit's at (3264, 1216); before
+# them it was the armor's): the leg the long-leg rules are about
+LONG = "item:2012"
+
+
 def _load(name, rel):
     spec = importlib.util.spec_from_file_location(name, ROOT / rel)
     mod = importlib.util.module_from_spec(spec)
@@ -59,29 +64,32 @@ def _cells(st, x, y, hp):
 
 @pytest.mark.parametrize("knob", [30, 0])
 def test_route_pickup_leg_seeks_health_when_very_low(mods, knob):
-    play, st, li = _steer(mods, "item:2018")
+    play, st, li = _steer(mods, LONG)
     st.ITEM_SEEK_HP = knob
     x, y = st.legs[li]["path"][0]
     st.decide(100, _cells(st, x, y, 10))
     if knob:
         assert st.legs[st.li]["to"] == "health", st.legs[st.li]["to"]
-        assert st.legs[st.li + 1]["to"] == "item:2018"
+        assert st.legs[st.li + 1]["to"] == LONG
     else:
-        assert st.legs[st.li]["to"] == "item:2018", "CONTROL: the pickup leg sought health with the rule off"
-    st2 = _steer(mods, "item:2018")[1]                      # and at 60 health the rule leaves the leg alone
+        assert st.legs[st.li]["to"] == LONG, "CONTROL: the pickup leg sought health with the rule off"
+    st2 = _steer(mods, LONG)[1]                      # and at 60 health the rule leaves the leg alone
     st2.decide(100, _cells(st2, x, y, 60))
-    assert st2.legs[st2.li]["to"] == "item:2018"
+    assert st2.legs[st2.li]["to"] == LONG
 
 
 def test_very_low_seek_takes_the_nearest_by_path(mods):
-    play, st, li = _steer(mods, "item:2018")
+    play, st, li = _steer(mods, LONG)
+    st.SEEK_AVOID = ()                                         # (SEEK_FAR alone)
     assert st._seek_health(100, 1768, 920, st.health, "health", most=250, radius=3000)
     assert st.legs[st.li]["to"] == "health" and st.legs[st.li]["goal"] == [816, 1840]
-    play, st, li = _steer(mods, "item:2018")
+    play, st, li = _steer(mods, LONG)
+    st.SEEK_AVOID = ()                                         # (SEEK_FAR alone)
     st.SEEK_FAR = False
     assert not st._seek_health(100, 1768, 920, st.health, "health", most=250, radius=3000), \
         "CONTROL: the three nearest alone found a way (the far rule is not what found it)"
-    play, st, li = _steer(mods, "item:2018")
+    play, st, li = _steer(mods, LONG)
+    st.SEEK_AVOID = ()                                         # (SEEK_FAR alone)
     assert not st._seek_health(100, 1768, 920, st.health, "health", most=70, radius=3000), \
         "CONTROL: a seek that is not very low used the far rule"
 
@@ -142,9 +150,10 @@ def test_channel_with_no_health_in_reach_takes_a_suit(mods, on):
     """CHANNEL_SUIT (E1M4's MAP_TACTICS): a long damaging stretch ahead, too little health for it and no health in
     reach -> the radiation suit (912, 1520); an 18-leg play went into the channel at 26 health and died of the floor.
     CONTROL: CHANNEL_SUIT off -> the same cells, no suit leg"""
-    play, st, li = _steer(mods, "item:2018")
+    play, st, li = _steer(mods, LONG)
     assert st.CHANNEL_SUIT                                     # E1M4's tactic, from MAP_TACTICS
     st.CHANNEL_SUIT = on
+    st.SEEK_AVOID = ()                                         # (the near suit is in E1M4's avoided box: this rule alone)
     st.health_taken |= set(st.health)                          # every health item gone
     x, y = 803, 1822
     st.replan(x, y, "test")
@@ -176,7 +185,7 @@ def _fight_cells(st, x, y, m, mx, clip, shell=0):
 
 
 def test_live_drops_read_the_drop_rows(mods):
-    play, st, li = _steer(mods, "item:2018")
+    play, st, li = _steer(mods, LONG)
     k = next(i for i, kind in enumerate(st.drop_kind) if kind == 2007)
     c = _fight_cells(st, 0, 0, 0, 0, 10)
     c["thpos_rt"][len(c["thpos_rt"]) - len(st.droppers) + k] = ((300 << 16) & 0xFFFFFFFF) | (((-200 << 16) & 0xFFFFFFFF) << 32)
@@ -188,7 +197,7 @@ def test_live_drops_read_the_drop_rows(mods):
 
 @pytest.mark.parametrize("save", [500, 0])
 def test_short_of_ammo_no_far_shot(mods, save):
-    play, st, li = _steer(mods, "item:2018")
+    play, st, li = _steer(mods, LONG)
     st.SAVE_R, st.AMMO_LOW = save, 20
     st.rt = list(range(len(st.mtype)))
     x, y = st.legs[li]["path"][0]
@@ -203,7 +212,7 @@ def test_short_of_ammo_no_far_shot(mods, save):
 def test_short_of_ammo_on_a_long_leg_fetches_ammo_far_off(mods, low):
     """2 bullets on the armor leg (the dry rule needs 0): AMMO_LOW seeks ammo up to AMMO_FAR_MOST cells off;
     CONTROL: AMMO_LOW 0 -> the leg goes on"""
-    play, st, li = _steer(mods, "item:2018")
+    play, st, li = _steer(mods, LONG)
     st.AMMO_LOW = low
     x, y = 987, 1115
     st.replan(x, y, "test")
@@ -211,3 +220,32 @@ def test_short_of_ammo_on_a_long_leg_fetches_ammo_far_off(mods, low):
     c.update({"am_clip": 2, "am_shell": 0})
     st.decide(100, c)
     assert (st.legs[st.li]["to"] == "ammo") == bool(low), st.legs[st.li]["to"]
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_seeks_avoid_the_imps_round_the_near_suit(mods, on):
+    """SEEK_AVOID (E1M4): no detour to the stimpacks (496, 1840), (816, 1840) among the imps; CONTROL: SEEK_AVOID ()
+    -> the same seek takes one"""
+    play, st, li = _steer(mods, LONG)
+    if not on:
+        st.SEEK_AVOID = ()
+    got = st._seek_health(100, 803, 1700, [(496, 1840), (816, 1840)], "health", most=150, radius=2500)
+    assert got == (not on), "CONTROL: no detour with SEEK_AVOID off" if not on else "a detour into the avoided box"
+
+
+def test_e1m4_route_takes_the_health_by_the_corridor(mods):
+    """level_route.MAP_PICKUPS: E1M4's stimpacks (2472, 232), (1832, 632), (1192, 632) and the medikit (3264, 1216) are
+    route pickups before the far suit; CONTROL: without the map's entry no 2011 / 2012 leg"""
+    lr, _play, route = mods
+    to = [(g["to"], tuple(g["goal"])) for g in route["legs"]]
+    for spot in ((2472, 232), (1832, 632), (1192, 632)):
+        assert ("item:2011", spot) in to
+    assert to.index(("item:2012", (3264, 1216))) < [t for t, _g in to].index("item:2025")
+    saved = dict(lr.MAP_PICKUPS)
+    try:
+        lr.MAP_PICKUPS.clear()
+        legs = lr.plan("E1M4", "easy")["legs"]
+    finally:
+        lr.MAP_PICKUPS.update(saved)
+    assert not [g for g in legs if g["to"] in ("item:2011", "item:2012")], "CONTROL: health legs with no map entry"
+    assert set(lr.MAP_PICKUPS) == {"E1M4"}                     # every other map's route is the type budgets' alone

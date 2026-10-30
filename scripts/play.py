@@ -456,7 +456,18 @@ class Steer:
     IGN_STUCK = 8
     # per-map overrides of the knobs above (BOT_CFG still overrides both): a tactic that helps one map and moves the other
     # maps' pinned plays is that map's alone
-    MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True}}
+    MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True, "AMMO_LOW": 20, "AMMO_TYPES": (8,),
+                            "SAVE_R": 500}}
+    # AMMO (E1M4's tactic; 0 / () off): under AMMO_LOW bullets with no shell, a dead zombieman's clip within DROP_R
+    # (DROP_MOST cells) first, then -- under 5 -- the map's ammo up to AMMO_FAR_MOST cells off, AMMO_TYPES joining the
+    # list (the backpack (1536, 240) beside the shell box (1424, 240)); SAVE_R: short of ammo, no shot past it and none
+    # in passing at a monster given up on. E1M4's best plays ran dry for the last 700 frames and died punching
+    AMMO_LOW = 0
+    AMMO_TYPES = ()
+    SAVE_R = 0
+    DROP_MOST = 60
+    DROP_R = 700
+    AMMO_FAR_MOST = 400
     CHANNEL_SUIT = False       # a long damaging stretch ahead, too little health, none in reach: a radiation suit
     FLOORS_SEEN = True         # a floor group the game moved joins the steering's world (_floors_seen)
     ITEM_SEEK_HP = 30          # > 0: under this health a LONG route pickup's leg seeks health too (0: never, as before)
@@ -507,8 +518,14 @@ class Steer:
                      and self.lv.sector_at(t.x, t.y) not in lifts]
         self.suits = [(t.x, t.y) for t in self.lv.things if t.type == 2025 and t.flags & bit
                       and self.lv.sector_at(t.x, t.y) not in lifts]
+        self.ammo += [(t.x, t.y) for t in self.lv.things if t.type in self.AMMO_TYPES and t.flags & bit
+                      and self.lv.sector_at(t.x, t.y) not in lifts]
         from doomfj.world import level_things
         self.mtype = [t.type for t in level_things(self.lv.mw, self.lv.map)[1]]     # monster slot -> its type
+        from doomfj.combat import DROP_ITEM
+        drop = [DROP_ITEM.get(gd.DROPS.get(gd.MONSTER_DOOMEDNUMS.get(t))) for t in self.mtype]
+        self.droppers = [m for m, k in enumerate(drop) if k is not None]     # dropper k: the k-th drop row
+        self.drop_kind = [drop[m] for m in self.droppers]
         # the barrels (their spawn spots; aim_sid's id 1 + nmon + b, combat.window_aim): never shot close by
         self.barrels = [(t.x, t.y) for t in level_things(self.lv.mw, self.lv.map)[2]]
         self.trail = collections.deque(maxlen=400)   # the player's own recent positions: the way back (a retreat)
@@ -847,6 +864,20 @@ class Steer:
                     f, x, y, self.ammo, "ammo", most=250, radius=3000):
                 self.log("    f%d: (the ammo above: dry on a route pickup's leg, ITEM_SEEK_HP)" % f)
                 return kd
+        if (self.AMMO_LOW and (foe is None or foe[0] > 100) and not self.use_tap
+                and self.leg.get("to") not in ("ammo", "drop", "health", "suit")):
+            # AMMO (a map tactic): short of bullets with no shell -- a clip a dead zombieman dropped near by first,
+            # then the map's ammo FAR off when nearly dry (the backpack and shell box east, AMMO_TYPES)
+            clip, shell = c.get("am_clip") or 0, c.get("am_shell") or 0
+            if clip < self.AMMO_LOW and not shell:
+                drops = self._live_drops(c)
+                if drops and self._seek_health(f, x, y, drops, "drop", most=self.DROP_MOST, radius=self.DROP_R):
+                    self.log("    f%d: (the drop above: %d bullets, AMMO_LOW)" % (f, clip))
+                    return kd
+                if clip < 5 and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo", most=self.AMMO_FAR_MOST,
+                                                                radius=4000):
+                    self.log("    f%d: (the ammo above: far off, %d bullets, AMMO_LOW)" % (f, clip))
+                    return kd
         # ---- the DASH: when what is left of the route is short, run it -- stopping to fight a crowd on the last
         # stretch is how a worn-down player dies (E1M2's finale); the aim window's hunters are still shot in passing
         left = sum(len(g["path"] or ()) for g in self.legs[self.li + 1:] if g["kind"] != "item")
@@ -893,8 +924,10 @@ class Steer:
                 mid = win[max(0, len(win) // 2 - 2):len(win) // 2 + 3]
                 if (1 + m) in mid and foe[0] >= self.LAUNCH_KEEP:
                     kd.add("fire")
-            elif aimed and foe[0] < 800 and (hold or (not self.fired and not c.get("wp_rf"))):
-                kd.add("fire")
+            elif aimed and foe[0] < 800 and (hold or (not self.fired and not c.get("wp_rf"))) and not (
+                    self.SAVE_R and foe[0] > self.SAVE_R and (c.get("am_clip") or 0) < self.AMMO_LOW
+                    and not (c.get("am_shell") or 0)):
+                kd.add("fire")                       # (SAVE_R: short of ammo, no far shot -- the spread wastes it)
             if not aimed and abs(d) <= tol:          # lined up, but the window does not hold it: cover between
                 self.covered[m] = self.covered.get(m, 0) + 1
                 if self.covered[m] > 8:              # move on (a moving player is harder to hit); shoot when it shows
@@ -938,7 +971,8 @@ class Steer:
         # no foe to face: still shoot what the aim window holds of the hunters (passing by, or a monster passed by)
         win = c.get("aim_sid") or ()
         hunters = {1 + m for m in range(len(self.rt or ())) if c["mon_target"][m] == 1
-                   and signed(c["mon_health"][m]) > 0}
+                   and signed(c["mon_health"][m]) > 0 and not (self.SAVE_R and self.ign.get(m, -1) > f)}
+        # (SAVE_R: not at a monster given up on -- shot at with no damage -- in passing either)
         middle = range(max(0, len(win) // 2 - 3), min(len(win), len(win) // 2 + 4))
         if any(win[k] in hunters for k in middle) and not self.fired and not c.get("wp_rf"):
             self.opportune = "fire"
@@ -1160,6 +1194,20 @@ class Steer:
         self._leg_pieces()
         self.why = "hunt"
         return True
+
+    def _live_drops(self, c) -> list:
+        """the dropped clips lying now (`mdrop` 1; their drop rows, the last of `thpos_rt`, hold where): [(x, y)]"""
+        md = c.get("mdrop")
+        rows = c.get("thpos_rt")
+        if not md or not rows or len(md) != len(self.droppers):
+            return []
+        base = len(rows) - len(self.droppers)
+        out = []
+        for k, live in enumerate(md):
+            if live == 1 and self.drop_kind[k] == 2007:
+                v = rows[base + k]
+                out.append((signed(v & M32) / 65536.0, signed((v >> 32) & M32) / 65536.0))
+        return [(int(px), int(py)) for px, py in out if (int(px), int(py)) not in self.health_taken]
 
     def _barrel_near(self, c) -> bool:
         """a live barrel in the last picture's aim window within BARREL_SAFE (Chebyshev) of the player: a shot that

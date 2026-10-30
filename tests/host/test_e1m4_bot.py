@@ -160,3 +160,54 @@ def test_map_tactics_are_e1m4s_alone():
     play = _load("play", "scripts/play.py")
     assert play.Steer.IGN_NEAR == 0 and play.Steer.CHANNEL_SUIT is False
     assert set(play.Steer.MAP_TACTICS) == {"E1M4"}
+
+
+# ---- AMMO / SAVE_R (E1M4's map tactics): the best plays ran dry for their last 700 frames and died punching -------
+def _fight_cells(st, x, y, m, mx, clip, shell=0):
+    n = len(st.mtype)
+    rows = [0] * (n + len(st.droppers))
+    rows[m] = ((int(mx) << 16) & 0xFFFFFFFF) | (((int(y) << 16) & 0xFFFFFFFF) << 32)
+    c = _cells(st, x, y, 100)
+    c.update({"mon_active": [1 if k == m else 0 for k in range(n)], "mon_health": [60] * n,
+              "thseen": [1 if k == m else 0 for k in range(n)], "mon_target": [1] * n, "thpos_rt": rows,
+              "p_atk": 0, "am_clip": clip, "am_shell": shell, "aim_sid": (1 + m,) * 17,
+              "mdrop": (0,) * len(st.droppers)})
+    return c
+
+
+def test_live_drops_read_the_drop_rows(mods):
+    play, st, li = _steer(mods, "item:2018")
+    k = next(i for i, kind in enumerate(st.drop_kind) if kind == 2007)
+    c = _fight_cells(st, 0, 0, 0, 0, 10)
+    c["thpos_rt"][len(c["thpos_rt"]) - len(st.droppers) + k] = ((300 << 16) & 0xFFFFFFFF) | (((-200 << 16) & 0xFFFFFFFF) << 32)
+    c["mdrop"] = tuple(1 if i == k else 0 for i in range(len(st.droppers)))
+    assert st._live_drops(c) == [(300, -200)]
+    c["mdrop"] = tuple(2 if i == k else 0 for i in range(len(st.droppers)))      # CONTROL: taken -> none
+    assert st._live_drops(c) == []
+
+
+@pytest.mark.parametrize("save", [500, 0])
+def test_short_of_ammo_no_far_shot(mods, save):
+    play, st, li = _steer(mods, "item:2018")
+    st.SAVE_R, st.AMMO_LOW = save, 20
+    st.rt = list(range(len(st.mtype)))
+    x, y = st.legs[li]["path"][0]
+    kd = st.decide(100, _fight_cells(st, x, y, 3, x + 600, clip=10))
+    assert ("fire" in kd) == (not save), "CONTROL: no far shot with SAVE_R off" if not save else "fired far, short"
+    st.fired = False
+    kd = st.decide(102, _fight_cells(st, x, y, 3, x + 600, clip=60))           # plenty: SAVE_R does not bind
+    assert "fire" in kd and st.why.startswith("fight")
+
+
+@pytest.mark.parametrize("low", [20, 0])
+def test_short_of_ammo_on_a_long_leg_fetches_ammo_far_off(mods, low):
+    """2 bullets on the armor leg (the dry rule needs 0): AMMO_LOW seeks ammo up to AMMO_FAR_MOST cells off;
+    CONTROL: AMMO_LOW 0 -> the leg goes on"""
+    play, st, li = _steer(mods, "item:2018")
+    st.AMMO_LOW = low
+    x, y = 987, 1115
+    st.replan(x, y, "test")
+    c = _cells(st, x, y, 80)
+    c.update({"am_clip": 2, "am_shell": 0})
+    st.decide(100, c)
+    assert (st.legs[st.li]["to"] == "ammo") == bool(low), st.legs[st.li]["to"]

@@ -831,3 +831,34 @@ Evidence: `docs/ship-evidence/e1m9_v1_*.log`. **`build/doom_e1m9_v1.fjm`**, sha2
 The build command: section 6's with `e1m9` / `E1M9`, `--spread 1`. Play: `fj --run build/doom_e1m9_v1.fjm`.
 The playthrough ran on the current steering (8183305d: the lift rules E1M9 needed -- its lift 109 called down from
 its own SR lines). Not done yet, as for section 6: the per-level speed pass and the written playtest note.
+
+## 8. E1M6 and E1M8 (M8 wave 3): their own binaries, their own numbers
+
+Built and gated as section 6's levels, on branch `m8-wave3` (m8-episode + soultele + the E1M8 boss route + the
+playthrough speed set; flipjump 1.6.0 at 9877f25), every step through `scripts/heavy.py`. Evidence:
+`docs/ship-evidence/e1m6_v1_*.log`, `e1m8_v1_*.log`. **B0 is not run**: the owner's 2026-10-29 speed set (the level's
+own playthrough) replaces the checkpoint-planned combat sets, so neither level has one.
+
+| gate | **E1M6** (`build/doom_e1m6_v1.fjm`, sha256 `5f1abfea24b8fa16`, spread 1) | **E1M8** (`build/doom_e1m8_v1.fjm`, sha256 `9311cd67268c7e12`, spread 2) |
+|---|---|---|
+| `emit_check` (asserts on, no stand-in) / the build | PASS (2026-10-29; its emit_check and build logs were not kept -- the rebuild below is the build's evidence) | PASS / 574 s |
+| `p2a_gate` | PASS -- 15 scenarios, 7 N/A | PASS -- **0 run, 14 N/A** (no key door, no switch exit) |
+| `m2_std_gate` | PASS -- 1,684 frames byte- and state-exact (approached from the door's reached side, else the bot's walk: 57c3942d, 6384fa35) | PASS -- 413 frames byte- and state-exact |
+| `m3_gate` | PASS -- 88 frames | PASS -- 88 frames |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (9 N/A) / 16 (1 N/A) scenarios | PASS -- **0 (7 N/A)** / 6 (37 N/A) / 8 (9 N/A): a sparse map (the owner, 2026-10-29: scaled criteria); its player damage is gated by the playthrough (hp 100 -> 13, exact) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m6/gamespeed.json`) | PASS; CONTROL-DOORS N/A (no tour reaches a door) (`scenarios/e1m8/gamespeed.json`) |
+| `gamespeed` (the tours) | SPEED binding **28,609,569** ops/frame **OVER** 22M; SIZE 85,691,848 words = **63.85%** (span 90.73%) | SPEED 11,569,110 PASS; SIZE 27,972,088 words = **20.84%** (span 67.40%) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 968** (world 964), byte-, palette- and state-exact on all 978 frames (336 s) | **PASS -- LEVEL COMPLETE at frame 1713** (world 1709), exact on all 1,723 frames (275 s). Its first run parted on frame 0: E1M8 has ONE door, and the harness read `dstate` as `0` against the oracle's `(0,)` (eefff38b) |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 20,234,657** PASS (mean 18,286,689, p80 22,182,625 at world 259) | **binding 10,015,092** PASS (mean 9,544,425, p80 10,485,760 at world 1609) |
+| `msframe --save-baseline shipped` (`scenarios/<map>/msframe.json`) | **108.5 ms/frame** [106.6 .. 110.1], 209.3M fj/s, 22,712,821 ops/frame -> `shipped_e1m6` | **33.0 ms/frame** [32.8 .. 34.1], 265.8M fj/s, 8,760,845 ops/frame -> `shipped_e1m8` (its timed walk promoted from the draft today: 167 of 200 frames move) |
+| REBUILD (2026-10-29 19:24 and 2026-10-30 00:53, re-hashed today) | **BYTE-IDENTICAL** (`5f1abfea24b8fa162f2aeaece569e0eeaff9ff98507557a5fa193dca3142ac0f`) | **BYTE-IDENTICAL** (`9311cd67268c7e121ff3137e86ff86146888e3b1e6e0ad5b859a4ff64c553737`) |
+
+**E1M6's 108.5 ms/frame is over D8's ~90 ms tripwire, and the reason is ops, not the engine:** its fj/s (209.3M) is
+in the other shipped levels' range (208-266M); its timed walk costs 22.7M ops/frame, the most of any shipped level (E1M3 17.2M). E1M6 is the
+episode's biggest map (63.85% of 2^27). Its playthrough speed set (an average active game) is under CAP-22; its tours
+(10 x 100 frames steered to the farthest points) are 28.6M, over. **Open for the owner:** whether the playthrough
+speed set replaces the tours as the binding number; until then E1M6 ships with the tours recorded OVER. The lever is
+the per-level speed pass (`docs/episode-plan.md` 4.7), not started for any level.
+
+The build command: section 6's with `e1m6` / `E1M6` (`--spread 1`) and `e1m8` / `E1M8` (`--spread 2`).
+Play: `fj --run build/doom_e1m6_v1.fjm`, `fj --run build/doom_e1m8_v1.fjm`.

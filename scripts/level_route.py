@@ -874,12 +874,18 @@ def take_arms(pl, cur, world, pickups, out):
         cur = tp[-1]
 
 
+# a leg the closure left no path for: the mechanisms it needs get legs of their own before it (False: the leg is
+# planned in the flood's world alone, as before -- the host test's control)
+CLOSURE_LEGS = True
+
+
 def legs(pl: Planner, order, ecell, exit_i, pickups=None) -> list:
     """the walk: one leg per trigger to VISIT (keys, switches, walk-over lines, lift and floor triggers), then the
     exit. A door opened by its own use box is not a leg -- the steering opens a door its path meets. Each leg's cells
     are planned in the world as it is then: the earlier legs' mechanisms active, every manual door whose key is held"""
     lv = pl.lv
     out, cur, active, keys = [], pl.start_cell, set(), set()
+    gaps = {}                                    # leg -> the mechanisms the closure missed, given legs
 
     def doors_openable():
         return {"door:%d" % si for si in lv.door_order if lv.dp.boxes.get(si) is not None
@@ -895,7 +901,10 @@ def legs(pl: Planner, order, ecell, exit_i, pickups=None) -> list:
         for it in pickups:
             if it["type"] in KILL_AMMO:
                 it["budget"] = max(it["budget"], KILL_AMMO_BUDGET)
-    for mid in steps + [None]:
+    seq, si, added = steps + [None], 0, set()
+    while si < len(seq):
+        mid = seq[si]
+        si += 1
         if mid is None:
             e = lv.exits[exit_i]
             kind, action, goal = "exit", ("use" if e["trigger"] == "S" else "cross"), centre(ecell)
@@ -928,15 +937,36 @@ def legs(pl: Planner, order, ecell, exit_i, pickups=None) -> list:
         path = path or pl.leg_path(cur, pred, active | doors_openable())
         row = {"to": mid or "exit", "kind": kind, "action": action, "goal": list(goal)}
         if path is None:
-            # the closure missed a dependency (a mechanism no cell of a path stands on): plan the leg in the world the
-            # FLOOD had by then -- every mechanism activated before this one -- and say so
+            # the closure missed a dependency (a mechanism no cell of a path stands on: E1M7's pillar door 439 -- its
+            # S1 switch 283 raises it out of the mouth of the corridor to lift 440's SR switch, and the flood's path
+            # passes beside the pillar, within the player's radius, never across its lines). The mechanisms the leg
+            # NEEDS of the ones the FLOOD had by then (every mechanism activated before this one): drop each in turn
+            # that the leg can do without; what is left becomes legs of its own BEFORE this one (their triggers
+            # visited, planned in the world as it is then), and this leg is planned again after them
             ep = pl.mechs[mid].epoch if mid is not None else 1 << 30
             wide = {o for o in pl.active if pl.mechs[o].epoch < ep}
-            path = pl.leg_path(cur, pred, active | wide | doors_openable())
+            base = active | doors_openable()
+            if pl.leg_path(cur, pred, base | wide) is not None:
+                need = set(wide - base)
+                for o in sorted(need, key=lambda o: (-pl.mechs[o].epoch, o)):     # the latest dropped first
+                    if pl.leg_path(cur, pred, base | (need - {o})) is not None:
+                        need.discard(o)
+                need = sorted(need, key=lambda o: (pl.mechs[o].epoch, pl.visit[pl.mechs[o].cell][3]))
+                if CLOSURE_LEGS and need and not (set(need) & added) and                         all(pl.mechs[o].kind != "door" or pl.mechs[o].trigger != "use" for o in need):
+                    added |= set(need)
+                    gaps[mid] = need
+                    seq[si - 1:si - 1] = need
+                    si -= 1
+                    continue
+            # still none (or a gap the legs cannot close): plan the leg in the flood's world by then, and say so
+            path = pl.leg_path(cur, pred, base | wide)
             if path is not None:
                 extra = sorted(wide - active - doors_openable())
                 row["closure_gap"] = extra
                 active |= wide
+        if mid in gaps:
+            row["closure_gap"] = gaps[mid]
+            row["closure_legs"] = True               # ... and the legs before this one visit their triggers
         if mid is not None and pl.mechs[mid].kind == "key":
             row["key_at"] = list(pl.mechs[mid].pos)
         if action == "kill":                     # M8 C8: the bosses whose deaths fire it (slot, spawn spot)
@@ -1058,7 +1088,10 @@ def summary(r: dict) -> str:
         lines.append("  reached, but the model lacks it: special %d (%s) line %d tag %d at %s" % (
             b["special"], b["doom"], b["line"], b["tag"], tuple(b["at"])))
     for g in r.get("legs", []):
-        if g.get("closure_gap"):
+        if g.get("closure_gap") and g.get("closure_legs"):
+            lines.append("  note: leg -> %s needs %s, which the closure missed: legs to them before it" % (
+                g["to"], g["closure_gap"]))
+        elif g.get("closure_gap"):
             lines.append("  note: leg -> %s planned with the flood's world (the closure missed %s)" % (
                 g["to"], g["closure_gap"]))
     for n in r.get("notes", []):

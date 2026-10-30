@@ -443,19 +443,33 @@ class Steer:
     GIVE_UP = 35
     SEEK_FAR = True            # very low health (a HEALTH seek allowing SEEK_FAR_MOST cells): past the 3 nearest, by path
     SEEK_FAR_MOST = 250
-    # an IGNORED monster (GIVE_UP: shot at far off with no damage) that comes this near AND hurts the player is fought
-    # again: E1M4 seed 0 ignored an imp at 630 units, walked on into it and was clawed from 57 to 3 health (world
-    # 1266..1314). Only one given up on FAR off (2 x IGN_NEAR): near alone is not enough -- an imp behind a sill 117
-    # units off, unhurt by every shot, held E1M4 seed 3 for 8,000 frames
-    IGN_NEAR = 0               # (units; 0: off -- see the E1M4 note above)
+    # an IGNORED monster (GIVE_UP: shot at with no damage, or passed by) that comes this near AND is the one hurting the
+    # player (p_atk, hurt in the last 30 frames) is fought again: E1M4's corridor at (-2005, -600) -- two imps ignored at
+    # world 1558, then clawing him at 40-50 units for 70 frames while the steering walked into them (115 -> 5 health);
+    # seed 0 the same at (-2011, -352) (57 -> 3). Near alone is not enough: an imp behind a sill 117 units off, never
+    # hurt by a shot and never hurting, held E1M4 seed 3 for 8,000 frames when near alone lifted the ignore. And only
+    # in CONTACT (64 units) with the walk BLOCKED (no progress on the path for IGN_STUCK frames). A MAP TACTIC (MAP_TACTICS,
+    # E1M4 only): on every map it moved the pinned plays -- at 128 units E1M5's, E1M6's and E1M9's died, in contact and
+    # blocked E1M9's still died and E1M6's ended at another frame. On E1M4, seeds 0..7: 9.6 legs a play on average
+    # against 8.1 without it (scratchpad evaluation, 2026-10-30)
+    IGN_NEAR = 0
+    IGN_STUCK = 8
+    # per-map overrides of the knobs above (BOT_CFG still overrides both): a tactic that helps one map and moves the other
+    # maps' pinned plays is that map's alone
+    MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64}}
     FLOORS_SEEN = True         # a floor group the game moved joins the steering's world (_floors_seen)
     ITEM_SEEK_HP = 30          # > 0: under this health a LONG route pickup's leg seeks health too (0: never, as before)
     ITEM_SEEK_LEN = 200        # ... a leg planned this many cells or more (E1M4's chaingun 239, armor 316; the pinned
     #                            plays' shorter pickup legs keep the old rule: E1M5 185, E1M9 86 -- both died with it)
+    FLOOR_SEEK_F = 120         # ... or any pickup leg this many frames after a moved floor joined the world: E1M4's
+    #                            yellow card lowers the way to two medikits 22-27 cells off, and the clip-box leg after
+    #                            it (62 cells) walked away from them at 1 health
 
     def __init__(self, route: dict, lv=None, log=print, seed: int = 0):
         sys.path.insert(0, str(ROOT / "scripts"))
         import os
+        for k, v in self.MAP_TACTICS.get(str(route.get("map", "")).upper(), {}).items():
+            setattr(self, k, v)
         for k, v in json.loads(os.environ.get("BOT_CFG") or "{}").items():
             assert hasattr(Steer, k), k
             setattr(self, k, v)
@@ -474,7 +488,7 @@ class Steer:
         self.stuck = 0
         self.wiggle = 0
         self.ign, self.trk, self.covered = {}, {}, {}
-        self.ign_far = {}                            # monster -> it was given up on far off (IGN_NEAR)
+        self.floor_f = -1 << 30                      # the frame a moved floor last joined the world (_floors_seen)
         self.active = set()                          # mechanisms the legs done so far triggered (re-plans use them)
         self.keys = set()
         self.use_tap = 0
@@ -587,6 +601,8 @@ class Steer:
             mid = "floor:%d" % g
             if g < len(sw) and sw[g] >= grp.n - 1 and mid not in self.active:
                 self.active.add(mid)
+                self.floor_f = f                     # a new world: any pickup leg may seek health a while (FLOOR_SEEK_F)
+                self.retry.pop("health", None)
                 self.log("    f%d: %s moved -- in the world the detours are planned in" % (f, mid))
 
     def _turn_to(self, want, a, kd, tight=4.0):
@@ -679,8 +695,9 @@ class Steer:
             v = c["thpos_rt"][row]
             mx, my = signed(v & M32) / 65536.0, signed((v >> 32) & M32) / 65536.0
             dd = math.hypot(mx - x, my - y)
-            if self.ign.get(m, -1) > f and not (m == hitter and dd < self.IGN_NEAR and self.ign_far.get(m)):
-                continue                             # (ignored -- unless it came close and hurts him: IGN_NEAR)
+            if self.ign.get(m, -1) > f and not (m == hitter and dd < self.IGN_NEAR
+                                                and f - self.best_f >= self.IGN_STUCK):
+                continue                             # (ignored -- unless it blocks the way and hurts him: IGN_NEAR)
             if dd <= self.FIGHT_R - 150 * (self.seed_at(f) % 2) and (best is None or dd < best[0]):
                 best = (dd, mx, my, m)
         atk = (c.get("p_atk") or 0) - 1
@@ -698,7 +715,6 @@ class Steer:
             elif f - t[0] > self.GIVE_UP and m not in bosses:   # shot at with no damage: leave it a while (never
                 # a KILL leg's boss: he is the leg's goal, and he hunts the player whether shot or not)
                 self.ign[m] = f + 150
-                self.ign_far[m] = best[0] >= 2 * self.IGN_NEAR     # given up on far off (IGN_NEAR may lift it)
                 self.trk.pop(m, None)
                 self.log("    f%d: monster %d ignored (no damage in %d frames)" % (f, m, self.GIVE_UP))
                 return None
@@ -809,13 +825,19 @@ class Steer:
                                                            radius=3000 if dry else 900):
                 return kd
         elif ((foe is None or foe[0] > 100) and not self.use_tap and self.ITEM_SEEK_HP
-              and str(self.leg.get("to")).startswith("item:") and (c.get("p_hp") or 0) < self.ITEM_SEEK_HP
-              and self.leg.get("cells0", 0) >= self.ITEM_SEEK_LEN
-              and self.health and self._seek_health(f, x, y, self.health, "health", most=250, radius=3000)):
+              and str(self.leg.get("to")).startswith("item:")
+              and (self.leg.get("cells0", 0) >= self.ITEM_SEEK_LEN or f - self.floor_f < self.FLOOR_SEEK_F)):
             # a ROUTE pickup's leg (not a detour of the steering's own) at very low health: the health first, as on
-            # any other leg (E1M4: the armor's 316-cell leg crossed the map at 1-6 health and died on it)
-            self.log("    f%d: (the health above: on a route pickup's leg, ITEM_SEEK_HP)" % f)
-            return kd
+            # any other leg (E1M4: the armor's 316-cell leg crossed the map at 1-6 health and died on it) -- and with
+            # no bullet and no shell left, ammo (E1M4: the same leg emptied the chaingun and died punching)
+            if (c.get("p_hp") or 0) < self.ITEM_SEEK_HP and self.health and self._seek_health(
+                    f, x, y, self.health, "health", most=250, radius=3000):
+                self.log("    f%d: (the health above: on a route pickup's leg, ITEM_SEEK_HP)" % f)
+                return kd
+            if not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0) and self.ammo and self._seek_health(
+                    f, x, y, self.ammo, "ammo", most=250, radius=3000):
+                self.log("    f%d: (the ammo above: dry on a route pickup's leg, ITEM_SEEK_HP)" % f)
+                return kd
         # ---- the DASH: when what is left of the route is short, run it -- stopping to fight a crowd on the last
         # stretch is how a worn-down player dies (E1M2's finale); the aim window's hunters are still shot in passing
         left = sum(len(g["path"] or ()) for g in self.legs[self.li + 1:] if g["kind"] != "item")

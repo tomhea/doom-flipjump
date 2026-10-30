@@ -117,3 +117,21 @@ def test_a_short_pickup_leg_keeps_the_old_rule(mods):
         x, y = st.legs[li]["path"][0]
         st.decide(100, _cells(st, x, y, 10))
         assert st.legs[st.li]["to"] == want, (length, st.legs[st.li]["to"])
+
+
+@pytest.mark.parametrize("window", [120, 0])
+def test_a_moved_floor_lets_a_short_pickup_leg_seek(mods, window):
+    """FLOOR_SEEK_F: for a while after a moved floor joined the world, a short pickup leg seeks health too -- E1M4's
+    yellow card opens the way to two medikits 22-27 cells off, and the clip-box leg after it walked away from them at 1
+    health; CONTROL: FLOOR_SEEK_F 0 -> the leg goes on"""
+    play, st, li = _steer(mods, "item:2048")
+    st.FLOOR_SEEK_F = window
+    st.health_taken |= {(-864, 288), (-1056, 288)}           # the two stimpacks by the card: taken on the way
+    c = _cells(st, -1000, 600, 10)
+    c["fswitch"] = (st.lv.mp.groups[0].n - 1, 0, 0, 0)
+    st.decide(100, c)                                          # the floor joins the world on this frame
+    st.decide(101, c)
+    want = "health" if window else "item:2048"
+    assert st.legs[st.li]["to"] == want, "CONTROL: the short leg sought health with no window" if not window else ""
+    if window:
+        assert st.legs[st.li]["goal"] in ([-1344, 720], [-576, 720])

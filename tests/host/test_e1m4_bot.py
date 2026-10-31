@@ -214,6 +214,7 @@ def test_short_of_ammo_on_a_long_leg_fetches_ammo_far_off(mods, low):
     CONTROL: AMMO_LOW 0 -> the leg goes on"""
     play, st, li = _steer(mods, LONG)
     st.AMMO_LOW = low
+    st.CROSS_HP = 0                                            # (AMMO_LOW alone: the channel lies ahead from here)
     x, y = 987, 1115
     st.replan(x, y, "test")
     c = _cells(st, x, y, 80)
@@ -257,6 +258,7 @@ def test_in_the_channel_no_new_detour(mods, on):
     CHANNEL_COMMIT off -> the same cells start one"""
     play, st, li = _steer(mods, LONG)
     st.CHANNEL_COMMIT = on
+    st.SEEK_MAX_BURN = None                                    # (CHANNEL_COMMIT alone)
     x, y = 2537, 1589
     assert st.pl.hurts(st.LR.cell_of(x, y))
     st.replan(x, y, "test")
@@ -264,3 +266,28 @@ def test_in_the_channel_no_new_detour(mods, on):
     st.decide(100, _cells(st, x, y, 15))
     added = len(st.legs) - n
     assert added == (0 if on else 1), "CONTROL: no detour with the rule off" if not on else "a detour in the channel"
+
+
+def test_channel_seeks_take_no_health_beyond_the_stretch(mods):
+    """SEEK_MAX_BURN (E1M4: 8): the damaging-stretch rule's health is not the medikit at the channel's far end (135
+    cells, through the nukage) -- the seek that sent a 13-health play into the floor; CONTROL: None -> it is taken"""
+    play, st, li = _steer(mods, LONG)
+    assert st.SEEK_MAX_BURN == 8
+    assert not st._seek_health(100, 1787, 897, [(3264, 1216)], "health", most=150, radius=2500, max_burn=8)
+    st.retry.clear()
+    assert st._seek_health(100, 1787, 897, [(3264, 1216)], "health", most=150, radius=2500, max_burn=None), \
+        "CONTROL: no path at all (the cap is not what refused it)"
+
+
+@pytest.mark.parametrize("cross", [50, 0])
+def test_healthy_before_the_channel_no_ammo_detour(mods, cross):
+    """CROSS_HP (E1M4: 50): at 80 health with the channel ahead and no ammo, no ammo detour -- go now (a play spent 5,000
+    frames on ammo detours west at 93 health and crossed at 13); CONTROL: CROSS_HP 0 -> an ammo detour"""
+    play, st, li = _steer(mods, LONG)
+    st.CROSS_HP = cross
+    x, y = 1768, 1096
+    st.replan(x, y, "test")
+    c = _cells(st, x, y, 80)
+    c.update({"am_clip": 0, "am_shell": 0})
+    st.decide(100, c)
+    assert (st.legs[st.li]["to"] == "ammo") == (not cross), st.legs[st.li]["to"]

@@ -457,13 +457,16 @@ class Steer:
     # per-map overrides of the knobs above (BOT_CFG still overrides both): a tactic that helps one map and moves the other
     # maps' pinned plays is that map's alone
     MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True, "AMMO_LOW": 20, "AMMO_TYPES": (8,),
-                            "SAVE_R": 500, "SEEK_AVOID": ((450, 1250, 1100, 1900),), "CHANNEL_COMMIT": True}}
+                            "SAVE_R": 500, "SEEK_AVOID": ((450, 1250, 1100, 1900),), "CHANNEL_COMMIT": True,
+                            "CROSS_HP": 50, "SEEK_MAX_BURN": 8}}
     # SEEK_AVOID: boxes (x0, y0, x1, y1) whose items no detour seeks -- E1M4's stimpacks (496, 1840), (816, 1840) and
     # the near suit (912, 1520) lie among imps: the channel rule's detours there killed every play that reached the
     # armor leg (deaths at (530..1000, 1300..1840)); the route takes the health by the corridor instead (level_route
     # MAP_PICKUPS)
     SEEK_AVOID = ()
     CHANNEL_COMMIT = False     # on a damaging floor no new detour starts (E1M4: see the seeks in _decide)
+    CROSS_HP = 0               # > 0: at this health or more, a damaging stretch ahead -> no ammo detour (go now)
+    SEEK_MAX_BURN = None       # the damaging-stretch rule's health / suit detours: at most this many damaging cells
     # AMMO (E1M4's tactic; 0 / () off): under AMMO_LOW bullets with no shell, a dead zombieman's clip within DROP_R
     # (DROP_MOST cells) first, then -- under 5 -- the map's ammo up to AMMO_FAR_MOST cells off, AMMO_TYPES joining the
     # list (the backpack (1536, 240) beside the shell box (1424, 240)); SAVE_R: short of ammo, no shot past it and none
@@ -833,17 +836,25 @@ class Steer:
         # way back (E1M4: plays that took the medikit died on health / suit detours started mid-channel, (2363..2537,
         # 1534..1596))
         free = (foe is None or foe[0] > 100) and not (self.CHANNEL_COMMIT and self.pl.hurts(self.LR.cell_of(x, y)))
+        # CROSS_HP (a map tactic): healthy, with a long damaging stretch on the way ahead -- no AMMO detour: go now.
+        # E1M4: a play reached the channel's leg at 93 health, then spent 5,000 frames on ammo detours back west and
+        # crossed at 13 (dead of the floor at (2433, 1596))
+        go_now = bool(self.CROSS_HP and (c.get("p_hp") or 0) >= self.CROSS_HP and self.pieces and sum(
+            1 for q in self.pieces[self.pi][self.wi:self.wi + 240] if self.pl.hurts(self.LR.cell_of(*q))) > 20)
         if free and not self.use_tap and not c.get("p_rad") and self.health                 and self.pieces and self.leg.get("to") not in ("health", "suit"):
             # (any leg: E1M4's channel is crossed on the way to an item -- the armor beyond it)
             hp = c.get("p_hp") or 0
             ahead = self.pieces[self.pi][self.wi:self.wi + 240]
             burn = sum(1 for q in ahead if self.pl.hurts(self.LR.cell_of(*q)))
             if burn > 20 and hp < min(80, burn * self.BURN + 20) and self._seek_health(
-                    f, x, y, self.health, "health", most=150, radius=2500):
+                    f, x, y, self.health, "health", most=150, radius=2500, max_burn=self.SEEK_MAX_BURN):
+                # (SEEK_MAX_BURN: not health beyond the stretch itself -- E1M4's seek picked the medikit at the channel's
+                # far end at 13 health and the floor killed him on the way, (2433, 1596))
                 self.log("    f%d: %d damaging cells ahead at %d health: health first" % (f, burn, hp))
                 return kd
             if (burn > 20 and hp < min(80, burn * self.BURN + 20) and self.CHANNEL_SUIT and self.suits
-                    and self._seek_health(f, x, y, self.suits, "suit", most=150, radius=2500)):
+                    and self._seek_health(f, x, y, self.suits, "suit", most=150, radius=2500,
+                                          max_burn=self.SEEK_MAX_BURN)):
                 # no health in reach: a radiation suit then (E1M4's near suit (912, 1520): an 18-leg play went into
                 # the channel at 26 health with no health left in reach and died of the floor at (1995, 1437))
                 self.log("    f%d: %d damaging cells ahead at %d health, no health in reach: the suit" % (f, burn, hp))
@@ -857,8 +868,8 @@ class Steer:
                 return kd
             low_ammo = (c.get("am_clip") or 0) < 5 and not (c.get("am_shell") or 0)
             dry = not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0)
-            if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo", most=250 if dry else 70,
-                                                           radius=3000 if dry else 900):
+            if low_ammo and not go_now and self.ammo and self._seek_health(
+                    f, x, y, self.ammo, "ammo", most=250 if dry else 70, radius=3000 if dry else 900):
                 return kd
         elif (free and not self.use_tap and self.ITEM_SEEK_HP
               and str(self.leg.get("to")).startswith("item:")
@@ -870,7 +881,7 @@ class Steer:
                     f, x, y, self.health, "health", most=250, radius=3000):
                 self.log("    f%d: (the health above: on a route pickup's leg, ITEM_SEEK_HP)" % f)
                 return kd
-            if not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0) and self.ammo and self._seek_health(
+            if not go_now and not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0) and self.ammo and self._seek_health(
                     f, x, y, self.ammo, "ammo", most=250, radius=3000):
                 self.log("    f%d: (the ammo above: dry on a route pickup's leg, ITEM_SEEK_HP)" % f)
                 return kd
@@ -879,7 +890,7 @@ class Steer:
             # AMMO (a map tactic): short of bullets with no shell -- a clip a dead zombieman dropped near by first,
             # then the map's ammo FAR off when nearly dry (the backpack and shell box east, AMMO_TYPES)
             clip, shell = c.get("am_clip") or 0, c.get("am_shell") or 0
-            if clip < self.AMMO_LOW and not shell:
+            if clip < self.AMMO_LOW and not shell and not go_now:
                 drops = self._live_drops(c)
                 if drops and self._seek_health(f, x, y, drops, "drop", most=self.DROP_MOST, radius=self.DROP_R):
                     self.log("    f%d: (the drop above: %d bullets, AMMO_LOW)" % (f, clip))
@@ -1276,7 +1287,7 @@ class Steer:
         return {"door:%d" % si for si in self.dorder if self.lv.dp.boxes.get(si) is not None
                 and (not self.pl.mechs["door:%d" % si].key or self.pl.mechs["door:%d" % si].key in self.keys)}
 
-    def _seek_health(self, f, x, y, items, what, most: int = 70, radius: int = 900) -> bool:
+    def _seek_health(self, f, x, y, items, what, most: int = 70, radius: int = 900, max_burn=None) -> bool:
         """a detour leg to the nearest reachable item of `items` not taken yet (planned in the world the legs made)"""
         if f < self.retry.get(what, 0):
             return False
@@ -1287,8 +1298,9 @@ class Steer:
         opn = {"door:%d" % si for si in self.dorder if self.lv.dp.boxes.get(si) is not None
                and (not self.pl.mechs["door:%d" % si].key or self.pl.mechs["door:%d" % si].key in self.keys)}
         def usable(path):
-            return path and not any(q[0] == "teleport" for q in path) and len(path) < most \
-                and not any(self.pl.sector_of(q) in self.lorder for q in path)
+            return (path and not any(q[0] == "teleport" for q in path) and len(path) < most
+                    and not any(self.pl.sector_of(q) in self.lorder for q in path)
+                    and (max_burn is None or sum(1 for q in path if q[0] != "teleport" and self.pl.hurts(q)) <= max_burn))
         for _d, hx, hy in cands[:3]:
             path = self.pl.leg_path(LR.cell_of(x, y), lambda c, hx=hx, hy=hy: abs(LR.centre(c)[0] - hx) < 24
                                     and abs(LR.centre(c)[1] - hy) < 24, self.active | opn)

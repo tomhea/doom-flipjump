@@ -1,0 +1,270 @@
+FIGHT GATE -- 43 scenarios (MONSTER_MODE final, PLAYER_MODE final) on E1M7, roles from scenarios\e1m7\gates.json, build/wave3/doom_e1m7.fjm
+
+F1 pickups at hard: bonuses over 100, clips, the gold palette -- 42 frames
+  from (-1008, 2112) angle 40000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 5, mon_misses 1, proj_spawns 2, proj_impacts 1, fx_spawns 3, fx_skipped 1, player_hurt 2, max_in_flight 2, explosion_frames 5, pickups 11, pickup_items 11, bonus_frames 32, player_blocked 32, knock_frames 18, mon_knock_frames 14, frac_frames 18, knock_moves 69, infight 2, mon_attacks 4
+  frame 0 pokes: []
+  CONTROL bonus_cap        the oracle without the rule parts at frame 0 (cells)
+  CONTROL bonus_round      the oracle without the rule parts at frame 0 (palette)
+  binary: 42 frames, 628,898,658 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F1r an item out of reach: the card from below -- N/A: no sector beside E1M7's card puts it out of a tried step's reach (tried [184, 187])
+
+F2 refused pickups: a medikit at 100 health, a clip at max ammo -- 8 frames
+  from (240, 1424) angle 00000000: the oracle does what the scenario claims: yes
+  counters: knock_moves 8
+  frame 0 pokes: []
+  CONTROL give_always      the oracle without the rule parts at frame 1 (cells)
+  binary: 8 frames, 30,615,846 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F3 the chainsaw: owned, pending, raised; key 1 keeps it -- 55 frames
+  from (2208, 2272) angle 80000000: the oracle does what the scenario claims: yes
+  counters: pickups 1, pickup_items 1, bonus_frames 6, knock_moves 55
+  frame 0 pokes: []
+  CONTROL no_pending       the oracle without the rule parts at frame 0 (cells)
+  binary: 55 frames, 142,265,146 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F4 drops: shot, drawn on the floor, taken -- 60 frames
+  from (3392, 1872) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 11, mon_melee 2, proj_spawns 2, fx_spawns 5, fx_skipped 2, player_hurt 7, armor_out 1, max_in_flight 2, shots_hit 1, pickups 2, pickup_items 1, pickup_drops 1, drop_frames 31, player_blocked 16, knock_frames 29, mon_knock_frames 29, frac_frames 44, knock_moves 130, knock_walls 2, infight 4, corpse_slides 4, knock_refused 2, mon_knock_refused 3, mon_attacks 14, mkills 1, drop_px 4587, drop_z_px 12560
+  frame 0 pokes: ['mon_health']
+  CONTROL no_drop          the oracle without the rule parts at frame 16 (cells)
+  CONTROL drop_full_clip   the oracle without the rule parts at frame 47 (cells)
+  binary: 60 frames, 1,870,459,590 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F4s the sergeant's shotgun (hard: the only one) owned from its drop -- 60 frames
+  from (-576, 1824) angle 80000000: the oracle does what the scenario claims: yes
+  counters: fx_spawns 1, shots_hit 1, pickups 1, pickup_drops 1, bonus_frames 6, drop_frames 30, mon_knock_frames 17, frac_frames 44, knock_moves 96, corpse_slides 11, mkills 1, drop_z_px 25116
+  frame 0 pokes: ['mon_health']
+  CONTROL no_drop          the oracle without the rule parts at frame 16 (cells)
+  CONTROL drop_z           the oracle without the rule parts at frame 16 (picture)
+  binary: 60 frames, 415,501,735 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F5 berserk at medium: PSTR, the red tint, a punch gibs a zombieman -- N/A: E1M7 has no berserk pack (2023) on any skill
+
+F6 a barrel shot beside a sergeant: a puff, BEXP, a blast gib, the player hurt -- N/A: no candidate placed from E1M7's things
+
+F6d a barrel's non-lethal hit: its pain roll draws rng_world -- N/A: no candidate placed from E1M7's things
+
+F6p a barrel punched: the fist's puff -- 51 frames
+  from (-840, 1488) angle 80000000: the oracle does what the scenario claims: yes
+  counters: fx_spawns 2, shots_hit 2, bexp_frames 6, puffs 2, barrel_hits 2, knock_moves 51
+  frame 0 pokes: ['p_ar', 'p_at']
+  CONTROL puff_melee       the oracle without the rule parts at frame 37 (cells)
+  binary: 51 frames, 429,695,784 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F7 THE CHAIN: the column of barrels set off by one shot -- 46 frames
+  from (2208, 1424) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_melee 1, fx_spawns 1, player_hurt 1, shots_hit 7, bexp_frames 22, barrel_blasts 3, puffs 1, blast_kills 1, barrel_hits 3, knock_frames 1, mon_knock_frames 20, frac_frames 24, knock_moves 93, knock_walls 2, corpse_slides 12, knock_refused 1, mon_knock_refused 2, mon_attacks 1, mkills 1
+  frame 0 pokes: ['bar_hp', 'p_ar', 'p_at']
+  CONTROL chain_same_tic   the oracle without the rule parts at frame 21 (cells)
+  binary: 46 frames, 1,666,019,327 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F8a blocking: a barrel -- 10 frames
+  from (-816, 1488) angle 80000000: the oracle does what the scenario claims: yes
+  counters: player_blocked 20, knock_moves 10
+  frame 0 pokes: []
+  CONTROL walk_through     the oracle without the rule parts at frame 0 (cells)
+  binary: 10 frames, 95,576,708 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F8b blocking: a solid decor -- 10 frames
+  from (-608, 1696) angle 00000000: the oracle does what the scenario claims: yes
+  counters: player_blocked 20, knock_moves 10
+  frame 0 pokes: []
+  CONTROL walk_through     the oracle without the rule parts at frame 0 (cells)
+  binary: 10 frames, 110,964,636 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F8c blocking: a live monster -- 6 frames
+  from (-448, 664) angle 40000000: the oracle does what the scenario claims: yes
+  counters: player_blocked 10, knock_moves 6
+  frame 0 pokes: ['p_ar', 'p_at']
+  CONTROL walk_through     the oracle without the rule parts at frame 1 (cells)
+  binary: 6 frames, 34,841,581 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F8d a corpse lets the player through -- N/A: no candidate of 12 places on E1M7's oracle (gate_targets sweep: the claim is not met without a death)
+
+F9 nukage: 70 frames in sector 161 -- 70 frames
+  from (3368, 416) angle 40000000: the oracle does what the scenario claims: yes
+  counters: player_hurt 3, nukage 3, mon_knock_frames 4, frac_frames 10, knock_moves 79, knock_walls 1, mon_knock_refused 1, mon_attacks 1
+  frame 0 pokes: []
+  CONTROL nuk_period       the oracle without the rule parts at frame 16 (cells)
+  binary: 70 frames, 1,318,519,630 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F9l nukage's rim: the box over a higher floor -- N/A: no candidate placed from E1M7's things
+
+F10 the blue card: pcard 1, the bonus 12, the gold palette -- N/A: no standing pose of E1M7 walks onto its blue card in 4 frames
+
+S2 stress: the chain in view -- 106 frames
+  from (2208, 1424) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_melee 6, proj_spawns 2, fx_spawns 1, player_hurt 6, max_in_flight 1, explosion_frames 7, shots_hit 7, bexp_frames 22, barrel_blasts 3, puffs 1, blast_kills 1, barrel_hits 3, knock_frames 6, mon_knock_frames 25, frac_frames 84, knock_moves 163, knock_walls 7, infight 1, corpse_slides 12, knock_refused 6, mon_knock_refused 2, mon_attacks 8, mkills 1
+  frame 0 pokes: ['bar_hp', 'p_ar', 'p_at']
+  binary: 106 frames, 3,888,379,953 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+K1 knockback: a zombieman's hits push the player away, the push decays and stops -- 64 frames
+  from (3424, 1872) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 10, mon_melee 1, proj_spawns 1, fx_spawns 7, fx_skipped 2, player_hurt 2, max_in_flight 1, explosion_frames 3, pickups 2, pickup_items 2, bonus_frames 8, drop_frames 32, knock_frames 60, mon_knock_frames 48, frac_frames 51, knock_moves 234, infight 8, corpse_slides 3, mon_knock_refused 2, mon_attacks 13, mkills 1
+  frame 0 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'p_ar', 'p_at']
+  CONTROL no_thrust        the oracle without the rule parts at frame 0 (cells)
+  CONTROL thrust_sign      the oracle without the rule parts at frame 0 (cells)
+  CONTROL no_friction      the oracle without the rule parts at frame 1 (cells)
+  CONTROL stopspeed        the oracle without the rule parts at frame 27 (cells)
+  binary: 64 frames, 1,877,127,532 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+K2 knockback into a wall: the knock momentum is zeroed -- N/A: placed, but control wall_keeps never parts there (gate_targets sweep)
+
+K3 a barrel blast throws the player and the monsters from the barrel -- 46 frames
+  from (-806, 1562) angle a0000000: the oracle does what the scenario claims: yes
+  counters: proj_spawns 3, proj_impacts 2, fx_spawns 1, player_hurt 4, max_in_flight 3, explosion_frames 6, shots_hit 4, bexp_frames 22, barrel_blasts 2, puffs 1, barrel_hurt 2, barrel_hits 2, knock_frames 23, mon_knock_frames 12, frac_frames 17, knock_moves 69, knock_walls 3, knock_refused 2, mon_knock_refused 1, mon_attacks 3
+  frame 0 pokes: ['bar_hp', 'p_ar', 'p_at']
+  CONTROL blast_inflictor  the oracle without the rule parts at frame 21 (cells)
+  binary: 46 frames, 628,474,585 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+K4s the shotgun on a sergeant: its fraction cells, a re-test refused, a relink -- 77 frames
+  from (-592, 1824) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 6, fx_spawns 2, fx_skipped 5, player_hurt 6, shots_hit 7, knock_frames 48, mon_knock_frames 2, frac_frames 35, knock_moves 83, knock_walls 1, mon_knock_refused 1, mon_attacks 2
+  frame 0 pokes: ['am_shell', 'mon_health', 'p_ar', 'p_at', 'wp_own']
+  CONTROL frac_drop        the oracle without the rule parts at frame 42 (cells)
+  CONTROL no_retest        the oracle without the rule parts at frame 44 (cells)
+  binary: 77 frames, 585,531,858 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+K4d the shotgun on a demon: mass 400 -- 77 frames
+  from (-448, 656) angle 40000000: the oracle does what the scenario claims: yes
+  counters: mon_melee 2, fx_spawns 2, fx_skipped 5, player_hurt 2, shots_hit 7, player_blocked 1, knock_frames 50, mon_knock_frames 19, frac_frames 35, knock_moves 117, knock_refused 1, mon_attacks 5
+  frame 0 pokes: ['am_shell', 'mon_health', 'p_ar', 'p_at', 'wp_own']
+  CONTROL mass             the oracle without the rule parts at frame 42 (cells)
+  binary: 77 frames, 876,476,297 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+K5 a shotgun kill: the corpse slides, its drop lies (and is drawn) where it died -- 87 frames
+  from (3368, 1872) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 9, mon_melee 2, proj_spawns 1, fx_spawns 7, fx_skipped 6, player_hurt 5, max_in_flight 1, explosion_frames 8, shots_hit 7, pickups 4, pickup_items 1, pickup_drops 3, bonus_frames 4, drop_frames 54, player_blocked 8, knock_frames 47, mon_knock_frames 59, frac_frames 62, knock_moves 290, knock_walls 3, infight 5, corpse_slides 11, knock_refused 1, mon_knock_refused 3, mon_attacks 15, mkills 3, drop_px 5441, drop_z_px 13117
+  frame 0 pokes: ['am_shell', 'mon_health', 'p_ar', 'p_at', 'wp_own']
+  CONTROL drop_follows     the oracle without the rule parts at frame 28 (cells)
+  binary: 87 frames, 2,664,473,721 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+K6 the chainsaw on an imp: no thrust -- 47 frames
+  from (968, 3328) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_melee 3, fx_spawns 3, fx_skipped 3, player_hurt 3, shots_hit 6, knock_frames 36, knock_moves 47, mon_attacks 3
+  frame 0 pokes: ['mon_health', 'p_ar', 'p_at', 'wp_own']
+  CONTROL saw_thrust       the oracle without the rule parts at frame 36 (cells)
+  binary: 47 frames, 401,875,713 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+K7 the falling-forward reversal: a kill from more than 64 below, the coin on the target's stream -- 46 frames
+  from (960, 2008) angle 00000000: the oracle does what the scenario claims: yes
+  counters: fx_spawns 1, player_hurt 2, shots_hit 1, drop_frames 30, nukage 2, mon_knock_frames 17, frac_frames 30, knock_moves 82, corpse_slides 11, mkills 1
+  frame 0 pokes: ['mon_health']
+  CONTROL no_reverse       the oracle without the rule parts at frame 16 (cells)
+  CONTROL reverse_rng      the oracle without the rule parts at frame 16 (cells)
+  binary: 46 frames, 1,489,119,046 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+I1 a sergeant fires through an imp in its line: the imp hit, blood, the imp turns on it -- 40 frames
+  from (3228, 2448) angle bce7e912: the oracle does what the scenario claims: yes
+  counters: mon_hits 2, mon_misses 4, mon_melee 4, proj_spawns 1, fx_spawns 2, player_hurt 4, max_in_flight 1, explosion_frames 7, player_blocked 4, knock_frames 4, mon_knock_frames 10, frac_frames 25, knock_moves 60, knock_walls 1, infight 2, knock_refused 4, mon_knock_refused 1, mon_attacks 7
+  frame 0 pokes: ['mon_health', 'mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'p_ar', 'p_at']
+  CONTROL pass_through     the oracle without the rule parts at frame 15 (cells)
+  CONTROL no_switch        the oracle without the rule parts at frame 15 (cells)
+  CONTROL fx_none          the oracle without the rule parts at frame 15 (cells)
+  binary: 40 frames, 837,293,514 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+I2z an imp's fireball into a zombieman: damaged and switched; the shooter passed -- 40 frames
+  from (1344, 3380) angle 851111d4: the oracle does what the scenario claims: yes
+  counters: mon_hits 1, mon_misses 2, proj_spawns 1, fx_spawns 1, max_in_flight 1, explosion_frames 8, mon_knock_frames 20, frac_frames 20, knock_moves 90, infight 2, mon_attacks 2
+  frame 0 pokes: ['mon_health', 'mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'p_ar', 'p_at']
+  CONTROL hits_shooter     the oracle without the rule parts at frame 4 (cells)
+  binary: 40 frames, 466,644,939 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+I2i an imp's fireball into another imp: it explodes, no damage (the species rule) -- 40 frames
+  from (216, 296) angle 80000000: the oracle does what the scenario claims: yes
+  counters: proj_spawns 2, max_in_flight 1, explosion_frames 15, knock_moves 40, mon_attacks 2
+  frame 0 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'p_ar', 'p_at']
+  CONTROL species          the oracle without the rule parts at frame 9 (cells)
+  binary: 40 frames, 883,490,250 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+I3 a monster's stray shot kills a barrel: the blast's source is that monster -- N/A: no candidate of 22 places on E1M7's oracle (gate_targets sweep: the claim is not met without a death)
+
+I4 the target dies: the monster looks for the player or returns to its spawn state -- 46 frames
+  from (812, 2764) angle 40000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 4, mon_melee 9, fx_spawns 3, fx_skipped 2, player_hurt 9, shots_hit 1, drop_frames 2, player_blocked 6, knock_frames 6, mon_knock_frames 7, frac_frames 30, knock_moves 61, knock_walls 1, corpse_slides 1, knock_refused 6, mon_knock_refused 3, mon_attacks 11, mkills 1
+  frame 0 pokes: ['mon_health', 'mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'p_ar', 'p_at']
+  CONTROL target_stale     the oracle without the rule parts at frame 45 (cells)
+  binary: 46 frames, 724,859,907 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+I5 a monster target behind a wall at range: no attack (the far LOS) -- 40 frames
+  from (0, -232) angle 40000000: the oracle does what the scenario claims: yes
+  counters: knock_moves 40
+  frame 0 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'p_ar', 'p_at']
+  CONTROL los_ignored      the oracle without the rule parts at frame 0 (cells)
+  binary: 40 frames, 876,078,518 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+I6 the threshold: a monster switched to one refuses another inside 100 tics -- N/A: no candidate of 12 places on E1M7's oracle (gate_targets sweep: the claim is not met without a death)
+
+C1 D3 a: a drop in its corpse's leaf drawn in front of the corpse -- 56 frames
+  from (3392, 1872) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 8, mon_melee 2, proj_spawns 2, fx_spawns 4, player_hurt 7, armor_out 1, max_in_flight 2, shots_hit 1, pickups 1, pickup_items 1, drop_frames 40, knock_frames 29, mon_knock_frames 29, frac_frames 40, knock_moves 125, knock_walls 2, infight 3, corpse_slides 4, knock_refused 2, mon_knock_refused 2, mon_attacks 13, mkills 1, drop_px 5462, drop_z_px 14359
+  frame 0 pokes: ['mon_health']
+  CONTROL rank_off         the oracle without the rule parts at frame 54 (picture)
+  CONTROL rank_swap        the oracle without the rule parts at frame 26 (picture)
+  binary: 56 frames, 1,720,004,360 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+C2 D3 a: blood on a monster drawn before it -- 77 frames
+  from (3376, 1872) angle 80000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 10, mon_melee 5, proj_spawns 1, fx_spawns 6, fx_skipped 8, player_hurt 8, max_in_flight 1, explosion_frames 8, shots_hit 7, drop_frames 35, knock_frames 25, mon_knock_frames 42, frac_frames 52, knock_moves 231, knock_walls 6, infight 6, knock_refused 6, mon_knock_refused 3, mon_attacks 16, mkills 1
+  frame 0 pokes: ['am_shell', 'mon_health', 'p_ar', 'p_at', 'wp_own']
+  CONTROL rank_off         the oracle without the rule parts at frame 40 (picture)
+  CONTROL rank_swap        the oracle without the rule parts at frame 36 (picture)
+  binary: 77 frames, 2,354,800,340 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+C3 D3 b: a far barrel past three scenery things is drawn -- 3 frames
+  from (-880, 1936) angle c0000000: the oracle does what the scenario claims: yes
+  counters: knock_moves 3
+  frame 0 pokes: []
+  CONTROL barrel_soft      the oracle without the rule parts at frame 0 (picture)
+  binary: 3 frames, 67,491,156 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S3 stress: a brawl -- the imps firing into the zombiemen, infighting saturated -- 60 frames
+  from (3200, 2400) angle c0000000: the oracle does what the scenario claims: yes
+  counters: mon_hits 88, mon_misses 162, mon_melee 1, proj_spawns 16, proj_walls 7, fizzles 84, fx_spawns 8, fx_skipped 79, player_hurt 1, max_in_flight 8, explosion_frames 29, shots_hit 1, drop_frames 52, bexp_frames 16, barrel_blasts 1, puffs 1, blast_kills 1, player_blocked 1, knock_frames 1, mon_knock_frames 58, frac_frames 58, knock_moves 780, knock_walls 14, infight 23, corpse_slides 19, knock_refused 1, mon_knock_refused 23, mon_attacks 207, mkills 6
+  frame 0 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'p_ar', 'p_at']
+  binary: 60 frames, 1,262,530,389 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S4 stress: a push storm -- a barrel chain inside a crowd, every knock move at once -- N/A: no candidate of 31 places on E1M7's oracle (gate_targets sweep: the claim is not met without a death)
+
+R1 a rocket into an awake crowd by barrels: flight, impact, the blast's many, a chain, knocks -- 58 frames
+  from (0, -232) angle 40000000, late setups at frames [26]: the oracle does what the scenario claims: yes
+  counters: proj_spawns 1, player_hurt 2, max_in_flight 1, shots_hit 7, gibs 1, bexp_frames 22, barrel_blasts 2, barrel_hurt 1, barrel_hits 3, knock_frames 19, mon_knock_frames 25, frac_frames 24, knock_moves 133, knock_walls 2, corpse_slides 23, mon_knock_refused 2, mon_attacks 1, mkills 2, rockets_fired 1, rocket_flight_frames 3, rocket_mon_hits 1, rocket_blasts 1, blast_mon 3, blast_bar 2, blast_things_max 5
+  frame 0 pokes: ['am_misl', 'p_ar', 'p_at', 'wp_own']
+  frame 26 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'viewangle', 'viewx', 'viewy']
+  CONTROL rocket_dmg       the oracle without the rule parts at frame 33 (cells)
+  CONTROL rocket_no_barrels the oracle without the rule parts at frame 33 (cells)
+  binary: 58 frames, 1,214,010,253 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+R2 point blank: the rocket's blast hurts its shooter and throws him -- 48 frames
+  from (0, -232) angle 40000000, late setups at frames [26]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, max_in_flight 1, shots_hit 1, drop_frames 18, knock_frames 18, mon_knock_frames 18, frac_frames 17, knock_moves 116, corpse_slides 17, mkills 1, rockets_fired 1, rocket_mon_hits 1, rocket_blasts 1, blast_mon 1, blast_things_max 1, rocket_self 1
+  frame 0 pokes: ['am_misl', 'p_ar', 'p_at', 'wp_own']
+  frame 26 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'viewangle', 'viewx', 'viewy']
+  CONTROL rocket_spare_shooter the oracle without the rule parts at frame 30 (cells)
+  CONTROL rocket_dmg       the oracle without the rule parts at frame 30 (cells)
+  binary: 48 frames, 1,108,524,760 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+R3 stress: a volley of rockets into the crowd, the trigger held -- 90 frames
+  from (0, -232) angle 40000000, late setups at frames [26]: the oracle does what the scenario claims: yes
+  counters: proj_spawns 5, proj_impacts 4, proj_walls 2, player_hurt 6, max_in_flight 4, explosion_frames 21, shots_hit 8, gibs 1, bexp_frames 22, barrel_blasts 2, barrel_hurt 1, barrel_hits 3, knock_frames 29, mon_knock_frames 31, frac_frames 56, knock_moves 212, knock_walls 6, corpse_slides 24, knock_refused 3, mon_knock_refused 3, mon_attacks 5, mkills 4, rockets_fired 4, rocket_flight_frames 36, rocket_mon_hits 2, rocket_blasts 4, blast_mon 4, blast_bar 2, blast_things_max 5
+  frame 0 pokes: ['am_misl', 'p_ar', 'p_at', 'wp_own']
+  frame 26 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'viewangle', 'viewx', 'viewy']
+  binary: 90 frames, 1,815,084,004 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+CG1 the chaingun held into an awake crowd: both bursts' flashes, accurate then spread rounds, hits -- 50 frames
+  from (0, -232) angle 40000000, late setups at frames [26]: the oracle does what the scenario claims: yes
+  counters: mon_hits 4, fx_spawns 4, fx_skipped 4, player_hurt 3, shots_hit 7, drop_frames 18, knock_frames 1, mon_knock_frames 12, frac_frames 16, knock_moves 82, knock_walls 1, infight 1, corpse_slides 9, mon_knock_refused 6, mon_attacks 2, mkills 3, cgun_shots 8, cgun_acc 3, cgun_held 5, cgun_hits 7, cgun_flash1 8, cgun_flash2 8
+  frame 0 pokes: ['am_clip', 'p_ar', 'p_at', 'wp_own']
+  frame 26 pokes: ['mon_reaction', 'mon_state', 'mon_target', 'mon_tics', 'viewangle', 'viewx', 'viewy']
+  CONTROL cgun_one_flash   the oracle without the rule parts at frame 28 (cells)
+  CONTROL cgun_accurate    the oracle without the rule parts at frame 30 (cells)
+  binary: 50 frames, 973,446,416 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+N/A on E1M7: 11 -- F1r F5 F6 F6d F8d F9l F10 K2 I3 I6 S4; counters no longer owed: ['berserk_frames', 'gibs']
+
+TOTALS: mon_hits 158, mon_misses 169, mon_melee 38, proj_spawns 40, proj_impacts 7, proj_walls 9, fizzles 84, fx_spawns 64, fx_skipped 117, player_hurt 84, armor_out 2, deaths 0, dead_frames 0, max_in_flight 30, explosion_frames 117, shots_hit 83, pickups 22, pickup_items 17, pickup_drops 5, bonus_frames 56, berserk_frames 0, gibs 2, drop_frames 342, bexp_frames 132, barrel_blasts 13, puffs 6, blast_kills 3, barrel_hurt 4, player_blocked 118, nukage 5, restarts 0, restart_requests 0, level_done 0, barrel_hits 16, knock_frames 450, mon_knock_frames 518, frac_frames 792, knock_moves 3665, knock_walls 52, infight 57, sink_max 0, sink_frames 0, corpse_slides 161, dead_slides 0, knock_refused 35, mon_knock_refused 58, mon_attacks 335, mkills 28, rockets_fired 6, rocket_fizzles 0, rocket_flight_frames 39, rocket_mon_hits 4, rocket_bar_hits 0, rocket_stops 0, rocket_blasts 6, blast_mon 8, blast_bar 4, blast_things_max 11, rocket_self 1, cgun_shots 8, cgun_acc 3, cgun_held 5, cgun_hits 7, cgun_flash1 8, cgun_flash2 8, drop_px 15490, drop_z_px 65152
+every event counter nonzero: yes; deaths 0
+
+FIGHT GATE PASS (1754 s)

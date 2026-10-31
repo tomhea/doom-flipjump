@@ -862,3 +862,29 @@ the per-level speed pass (`docs/episode-plan.md` 4.7), not started for any level
 
 The build command: section 6's with `e1m6` / `E1M6` (`--spread 1`) and `e1m8` / `E1M8` (`--spread 2`).
 Play: `fj --run build/doom_e1m6_v1.fjm`, `fj --run build/doom_e1m8_v1.fjm`.
+
+## 9. E1M7 (M8 wave 3): its own binary, its own numbers
+
+Built and gated as section 8's levels (every step through `scripts/heavy.py`); the playthrough on branch `m8-e1m7bot`
+(the route's closure legs 8d0e9f18 -- the pillar door 439 before lift 440 -- and E1M7's bot skipping the chaingun
+detour, 6c4e6717; seed 3 pinned, 99924ea1). Evidence: `docs/ship-evidence/e1m7_v1_*.log`. No B0 (section 8).
+**`build/doom_e1m7_v1.fjm`**, sha256 `77466d1d306acb78`, spread 1.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (2026-10-29; its build log was not kept -- the rebuild below is the build's evidence: 1,435 s, 1,109,014 tables in 98,560 groups) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 8 scenarios (6 N/A) / 116 frames / 75 frames, byte- and state-exact |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 32 (11 N/A) / 16 (1 N/A) scenarios |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m7/gamespeed.json`) |
+| `gamespeed` (the tours) | SPEED binding 20,938,496 ops/frame PASS; SIZE 104,301,282 words = **77.71%** of 2^27 (span **99.22%**: the episode's biggest) |
+| THE PLAYTHROUGH (`--skill easy`, seed 3) | **PASS -- LEVEL COMPLETE at frame 1263** (world 1259), byte-, palette- and state-exact on all 1,273 frames (436 s), 17/17 legs |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 14,947,213** PASS (mean 13,667,712, p80 16,226,714 at world 348) |
+| `msframe --save-baseline shipped` | **94.4 ms/frame** [94.0 .. 108.3], 167.6M fj/s, 15,822,669 ops/frame -> `shipped_e1m7` (rep 4's 108.3 ran with the yardstick falling 3.64 -> 3.40G; reps 0-3: 94.0 .. 96.9) |
+| REBUILD (2026-10-31) | **BYTE-IDENTICAL** (`77466d1d306acb78b48baea01df45820fe0b9a4be6ee4dcfbe2b757cdbd0c0ec`) |
+
+**E1M7's 94.4 ms/frame is over D8's ~90 ms tripwire, and unlike E1M6 the reason is the ENGINE RATE, not ops:** its
+ops/frame (15.8M) is mid-episode (E1M3 17.2M at 73.5 ms), but every rep runs at ~168M fj/s against the other levels'
+208-266M. E1M7 fills 99.22% of the span, the most of any level -- most likely a footprint effect (more of the image
+is touched per frame; not measured). The lever is the same per-level speed pass (`docs/episode-plan.md` 4.7).
+
+The build command: section 6's with `e1m7` / `E1M7`, `--spread 1`. Play: `fj --run build/doom_e1m7_v1.fjm`.

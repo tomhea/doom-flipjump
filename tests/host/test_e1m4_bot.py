@@ -242,6 +242,7 @@ def test_e1m4_route_takes_the_health_by_the_corridor(mods):
     for spot in ((2472, 232), (1832, 632), (1192, 632)):
         assert ("item:2011", spot) in to
     assert to.index(("item:2012", (3264, 1216))) < [t for t, _g in to].index("item:2025")
+    assert all(g.get("must") for g in route["legs"] if g["to"] in ("item:2011", "item:2012"))   # never dropped for time
     saved = dict(lr.MAP_PICKUPS)
     try:
         lr.MAP_PICKUPS.clear()
@@ -315,6 +316,38 @@ def test_a_dropped_clip_is_taken_with_shells_in_hand(mods, low):
     x, y = st.legs[li]["path"][0]
     dx, dy = st.legs[li]["path"][6]
     c = _fight_cells(st, x, y, 0, x, clip=40, shell=5)
+    c["mon_active"] = [0] * len(st.mtype)
+    c["thpos_rt"][len(c["thpos_rt"]) - len(st.droppers) + k] = (((int(dx) << 16) & 0xFFFFFFFF)
+                                                                | (((int(dy) << 16) & 0xFFFFFFFF) << 32))
+    c["mdrop"] = tuple(1 if i == k else 0 for i in range(len(st.droppers)))
+    st.decide(100, c)
+    assert (st.legs[st.li]["to"] == "drop") == bool(low), st.legs[st.li]["to"]
+
+
+@pytest.mark.parametrize("save_low", [40, 0])
+def test_save_r_binds_under_save_low(mods, save_low):
+    """SAVE_LOW (E1M4: 40): 30 bullets, a foe 600 off -> no shot (seed 0 emptied 21 bullets at a demon 374..468 off
+    and entered the channel dry); CONTROL: SAVE_LOW 0 -> AMMO_LOW's 20 binds, and at 30 it fires"""
+    play, st, li = _steer(mods, LONG)
+    st.SAVE_R, st.AMMO_LOW, st.SAVE_LOW = 300, 20, save_low
+    st.rt = list(range(len(st.mtype)))
+    x, y = st.legs[li]["path"][0]
+    kd = st.decide(100, _fight_cells(st, x, y, 3, x + 600, clip=30))
+    assert ("fire" in kd) == (not save_low)
+
+
+@pytest.mark.parametrize("low", [60, 0])
+def test_a_drop_is_taken_before_the_channel(mods, low):
+    """go_now (CROSS_HP) holds back the FAR ammo only: a dropped clip by the channel's mouth is taken (DROP_LOW);
+    CONTROL: DROP_LOW 0 -> go_now holds it back too"""
+    play, st, li = _steer(mods, LONG)
+    st.DROP_LOW = low
+    x, y = 1768, 1096
+    st.replan(x, y, "test")
+    k = next(i for i, kind in enumerate(st.drop_kind) if kind == 2007)
+    dx, dy = st.pieces[0][6]
+    c = _fight_cells(st, x, y, 0, x, clip=0, shell=0)
+    c["p_hp"] = 80
     c["mon_active"] = [0] * len(st.mtype)
     c["thpos_rt"][len(c["thpos_rt"]) - len(st.droppers) + k] = (((int(dx) << 16) & 0xFFFFFFFF)
                                                                 | (((int(dy) << 16) & 0xFFFFFFFF) << 32))

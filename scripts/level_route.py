@@ -800,8 +800,10 @@ def pickup_things(pl) -> list:
     extra = MAP_PICKUPS.get(str(getattr(pl.lv, "map", "")).upper(), {})
     # not one lying on a LIFT: at rest it is up where the player below cannot reach it, and the lift waits 26 frames
     # at the bottom (E1M3's shells on lift 256: the play died circling under it)
+    # (a map's own pickup is a MUST leg: never dropped by the steering's 300-frame detour watchdog -- E1M4's medikit leg,
+    # 444 cells across the channel, was dropped at the channel's mouth and the crossing went on at 62 health)
     return [{"type": t.type, "x": t.x, "y": t.y, "budget": PICKUP_BUDGET.get(t.type, extra.get((t.x, t.y))),
-             "taken": False}
+             "taken": False, **({"must": True} if (t.x, t.y) in extra else {})}
             for t in pl.lv.things if (t.type in PICKUP_BUDGET or (t.x, t.y) in extra) and t.type in GETTABLE
             and pl.lv.sector_at(t.x, t.y) not in lifts]
 
@@ -845,7 +847,7 @@ def take_pickups(pl, cur, pred, world, pickups, out):
         it["taken"] = True
         out.append({"to": "item:%d" % it["type"], "kind": "item", "action": "touch", "goal": [it["x"], it["y"]],
                     "key_at": [it["x"], it["y"]], "detour_cells": detour, "path": [list(centre(c)) for c in tp]})
-        if it["type"] in MUST_PICKUPS:
+        if it["type"] in MUST_PICKUPS or it.get("must"):
             out[-1]["must"] = True
         cur = tp[-1]
 

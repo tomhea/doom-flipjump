@@ -63,6 +63,7 @@ DEFAULT_SEED = {("E1M1", "medium"): 1,                                          
                 ("E1M3", "easy"): [(0, 0), (415, 1)],                                       # world 2279 (3143 before 8183305d)
                 ("E1M5", "easy"): [(0, 0), (342, 3), (1630, 11), (3352, 24)],              # world 4253
                 ("E1M6", "easy"): 0,                                                         # world 964
+                ("E1M7", "easy"): 3,       # world 1259 (8d0e9f18 the pillar door 439 + 6c4e6717 no chaingun)
                 ("E1M8", "easy"): 0,                    # world 1709 (the M8 C8 kill leg: both Barons, then the W1 exit)
                 ("E1M9", "easy"): 2}                                                         # world 4659
 # THE SPEED SET (the owner, 2026-10-29: every level's speed set is "an average active game" -- the level's own

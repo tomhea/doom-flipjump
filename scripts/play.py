@@ -442,10 +442,19 @@ class Steer:
     DASH = 160                 # cells of route left under which the player stops fighting and runs for the exit
     LOOK = 3
     GIVE_UP = 35
+    # the route's pickup legs this map's play skips (item types; () none): E1M7's chaingun (352, 1504) is a 127-cell
+    # detour into a room of imps, demons and sergeants -- every play of the 2026-10-30 model search (seeds 0..4 and their
+    # schedules, 14 attempts) died there or on the health detour beside it, at 23..48 health
+    SKIP_ITEMS = ()
+    # per-map overrides of the knobs above (BOT_CFG still overrides both): a tactic that helps one map and moves the other
+    # maps' pinned plays is that map's alone
+    MAP_TACTICS = {"E1M7": {"SKIP_ITEMS": (2002,)}}
 
     def __init__(self, route: dict, lv=None, log=print, seed: int = 0):
         sys.path.insert(0, str(ROOT / "scripts"))
         import os
+        for k, v in self.MAP_TACTICS.get(str(route.get("map", "")).upper(), {}).items():
+            setattr(self, k, v)
         for k, v in json.loads(os.environ.get("BOT_CFG") or "{}").items():
             assert hasattr(Steer, k), k
             setattr(self, k, v)
@@ -454,7 +463,8 @@ class Steer:
         self.lv = lv or LR.Level(route["map"], route.get("wad"), route["skill"])
         self.pl = LR.Planner(self.lv)
         self.route = route
-        self.legs = [dict(g) for g in route["legs"]]
+        self.legs = [dict(g) for g in route["legs"]
+                     if not (g["kind"] == "item" and int(str(g["to"]).split(":")[-1] or 0) in self.SKIP_ITEMS)]
         self.log = log
         self.seed = seed
         self.li = 0

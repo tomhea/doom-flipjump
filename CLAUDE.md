@@ -34,7 +34,7 @@ of the ceiling, both FAIL) is history in `docs/handoff-fullgame-metrics.md`. No 
 belongs in this file without its `--validate` output. `docs/handoff-m4-nine-levels.md` is still the M4 reference.
 **M1** (the self-resetting loop), **M5** (the standalone `.fjm`), **M3** (the menu — a second
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
-whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:
+whole flag retirement — `build_wall_renderer` is SEVEN parameters and takes a `tier` name:
 `fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu, WASD
 moves, space opens doors. On that (M3) binary's menu enter starts the game; from M7 P1.5's game tier
 on, enter opens the skill screen (w/s pick easy/medium/hard, enter starts a new game at it, esc
@@ -148,9 +148,10 @@ keeps it a registry is: **a new combination is a NEW ROW, never a new parameter.
 independent flags described 256 nominal programs; the repo ever used seven, so the API is now
 
     build_wall_renderer(out_fjm, *, wad_path=..., mapname="E1M1", cfg=None,
-                        tier="game", ablate=frozenset())
+                        tier="game", ablate=frozenset(), assembly=Assembly())
 
-Six parameters, down from ~30 before the retirements. Everything else derives: `generated_dir`
+Seven parameters, down from ~30 before the retirements; `assembly` (`build.Assembly`) carries how flipjump
+assembles it -- the lzma preset and the `BlockPool` keyword arguments, `pin_all_but` among them. Everything else derives: `generated_dir`
 from `out_fjm`, `flat_max_words` from `cfg`, the restore set from the tier (so the two sets cannot
 be crossed), `sprite_wad` resolved internally.
 

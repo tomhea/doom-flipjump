@@ -389,3 +389,22 @@ def test_short_of_ammo_before_the_channel_fetches_first(mods, cross_ammo):
     c.update({"am_clip": 6, "am_shell": 0})
     st.decide(100, c)
     assert (st.legs[st.li]["to"] == "ammo") == bool(cross_ammo), st.legs[st.li]["to"]
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_dry_at_the_end_runs_past(mods, on):
+    """END_DRY_RUN (E1M4): dry on the exit leg 30 cells from the end, an imp 50 units ahead -> no fist fight, a sidestep
+    (seed 7 stood punching it at 28 health and died, (101, 2033)); CONTROL: END_DRY_RUN off -> the fist fight"""
+    play, st, li = _steer(mods, "exit")
+    st.END_DRY_RUN = on
+    st.rt = list(range(len(st.mtype)))
+    x, y = 71, 2023
+    st.replan(x, y, "test")
+    m = next(k for k, t in enumerate(st.mtype) if t == 3001)
+    c = _fight_cells(st, x, y, m, x + 50, clip=0, shell=0)
+    c["p_hp"] = 28
+    kd = st.decide(100, c)
+    if on:                                                    # (a punch in passing may stay: the walk goes on)
+        assert not st.why.startswith("fight") and "forward" in kd and kd & {"strafe_left", "strafe_right"}, (st.why, kd)
+    else:
+        assert st.why.startswith("fight") and "fire" in kd, "CONTROL: no fist fight with the tactic off"

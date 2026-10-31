@@ -788,13 +788,32 @@ PICKUP_BUDGET = {2001: 150, 2002: 150, 2018: 50, 2019: 50, 2013: 50, 8: 40, 2049
                  2025: 60}     # the radiation suit (E1M4 alone: the one at the far end of its nukage channel)
 
 
+# A MAP'S OWN PICKUPS by position, {(x, y): budget} -- a must leg within its budget, 0: never a leg (its type's budget
+# would take it). E1M4 (the route agent, 2026-10-31):
+#   * the WEST armor (-1312, -608), in the building by door 102 at the corridor's top: 95 cells of detour on the
+#     chaingun leg, taken BEFORE the corridor's imps and the closet's demons (its type's 50 never reached it);
+#   * the medikit at the channel's far end (3264, 1216) (budget 40: the channel's leg itself);
+#   * NOT the far suit (3392, 1728) nor the far armor (3264, 1728): both lie in the blue-card room's north half among
+#     four imps and two zombies, and every play that went there before the card died there ((3411, 1560), (3433, 1720));
+#     the card is 23 cells from the medikit (the steering's CHANNEL_SUIT still fetches the suit if the way back needs it);
+#   * NOT the three stimpacks (2472, 232), (1832, 632), (1192, 632) any more: the soulsphere leaves the player above 100
+#     health there, so they gave nothing (seeds 0 / 7: "touch" at 109..128 health, health unchanged) and their 436-cell
+#     loop cost ~1,000 frames, 30 bullets and 20..40 health before the channel
+MAP_PICKUPS = {"E1M4": {(-1312, -608): 250, (3264, 1216): 40, (3392, 1728): 0, (3264, 1728): 0}}
+
+
 def pickup_things(pl) -> list:
     from doomfj.combat import GETTABLE
     lifts = set(pl.lv.mp.order) if pl.lv.mp is not None else set()
+    extra = MAP_PICKUPS.get(str(getattr(pl.lv, "map", "")).upper(), {})
     # not one lying on a LIFT: at rest it is up where the player below cannot reach it, and the lift waits 26 frames
     # at the bottom (E1M3's shells on lift 256: the play died circling under it)
-    return [{"type": t.type, "x": t.x, "y": t.y, "budget": PICKUP_BUDGET[t.type], "taken": False}
-            for t in pl.lv.things if t.type in PICKUP_BUDGET and t.type in GETTABLE
+    # (a map's own pickup is a MUST leg: never dropped by the steering's 300-frame detour watchdog -- E1M4's medikit leg,
+    # 444 cells across the channel, was dropped at the channel's mouth and the crossing went on at 62 health)
+    # (a map's own pickup's budget wins over its type's: E1M4's west armor (-1312, -608) is a 2018 like any other)
+    return [{"type": t.type, "x": t.x, "y": t.y, "budget": extra.get((t.x, t.y), PICKUP_BUDGET.get(t.type)),
+             "taken": False, **({"must": True} if (t.x, t.y) in extra else {})}
+            for t in pl.lv.things if (t.type in PICKUP_BUDGET or (t.x, t.y) in extra) and t.type in GETTABLE
             and pl.lv.sector_at(t.x, t.y) not in lifts]
 
 
@@ -837,7 +856,7 @@ def take_pickups(pl, cur, pred, world, pickups, out):
         it["taken"] = True
         out.append({"to": "item:%d" % it["type"], "kind": "item", "action": "touch", "goal": [it["x"], it["y"]],
                     "key_at": [it["x"], it["y"]], "detour_cells": detour, "path": [list(centre(c)) for c in tp]})
-        if it["type"] in MUST_PICKUPS:
+        if it["type"] in MUST_PICKUPS or it.get("must"):
             out[-1]["must"] = True
         cur = tp[-1]
 

@@ -61,6 +61,7 @@ DEFAULT_SKILL = {"E1M1": "medium", "E1M2": "easy", "E1M3": "easy", "E1M4": "easy
 DEFAULT_SEED = {("E1M1", "medium"): 1,                                                      # world 499
                 ("E1M2", "easy"): [(0, 1), (1532, 2), (3463, 22), (3992, 32)],             # world 4319
                 ("E1M3", "easy"): [(0, 0), (415, 1)],                                       # world 2279 (3143 before 8183305d)
+                ("E1M4", "easy"): 7,       # world 4124 (the middle of three wins: route seed 7, west 0, east 0:6,5800:3,13909:1)
                 ("E1M5", "easy"): [(0, 0), (342, 3), (1630, 11), (3352, 24)],              # world 4253
                 ("E1M6", "easy"): 0,                                                         # world 964
                 ("E1M7", "easy"): 3,       # world 1259 (8d0e9f18 the pillar door 439 + 6c4e6717 no chaingun)

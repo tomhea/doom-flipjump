@@ -459,7 +459,8 @@ class Steer:
     # maps' pinned plays is that map's alone
     MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True, "AMMO_LOW": 20, "AMMO_TYPES": (8,),
                             "SAVE_R": 300, "SEEK_AVOID": ((450, 1250, 1100, 1900),), "CHANNEL_COMMIT": True,
-                            "CROSS_HP": 50, "SEEK_MAX_BURN": 8, "DROP_LOW": 60, "SAVE_LOW": 40, "CROSS_AMMO": 20},
+                            "CROSS_HP": 50, "SEEK_MAX_BURN": 8, "DROP_LOW": 60, "SAVE_LOW": 40, "CROSS_AMMO": 20,
+                            "END_NO_AMMO": True},
                    "E1M7": {"SKIP_ITEMS": (2002,)}}
     # SEEK_AVOID: boxes (x0, y0, x1, y1) whose items no detour seeks -- E1M4's stimpacks (496, 1840), (816, 1840) and
     # the near suit (912, 1520) lie among imps: the channel rule's detours there killed every play that reached the
@@ -496,6 +497,7 @@ class Steer:
     # detour into a room of imps, demons and sergeants -- every play of the 2026-10-30 model search (seeds 0..4 and their
     # schedules, 14 attempts) died there or on the health detour beside it, at 23..48 health
     SKIP_ITEMS = ()
+    END_NO_AMMO = False        # on the last DASH cells of the route no ammo detour (E1M4: see `near_end` in _decide)
 
     def __init__(self, route: dict, lv=None, log=print, seed: int = 0):
         sys.path.insert(0, str(ROOT / "scripts"))
@@ -848,6 +850,12 @@ class Steer:
         # way back (E1M4: plays that took the medikit died on health / suit detours started mid-channel, (2363..2537,
         # 1534..1596))
         free = (foe is None or foe[0] > 100) and not (self.CHANNEL_COMMIT and self.pl.hurts(self.LR.cell_of(x, y)))
+        # END_NO_AMMO (a map tactic): on the route's last stretch (under DASH cells to the end) no ammo detour -- E1M4:
+        # the first play to take the blue card stood 61 cells from the exit at 32 health and 0 ammo, walked 242 cells
+        # back south for a clip and died at door 175 (world 4249)
+        near_end = bool(self.END_NO_AMMO) and self.pieces and (
+            sum(len(g["path"] or ()) for g in self.legs[self.li + 1:] if g["kind"] != "item")
+            + max(0, len(self.pieces[self.pi]) - self.wi)) < self.DASH and self.leg["kind"] != "item"
         # CROSS_HP (a map tactic): healthy, with a long damaging stretch on the way ahead -- no AMMO detour: go now.
         # E1M4: a play reached the channel's leg at 93 health, then spent 5,000 frames on ammo detours back west and
         # crossed at 13 (dead of the floor at (2433, 1596))
@@ -885,7 +893,7 @@ class Steer:
                 return kd
             low_ammo = (c.get("am_clip") or 0) < 5 and not (c.get("am_shell") or 0)
             dry = not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0)
-            if low_ammo and not go_now and self.ammo and self._seek_health(
+            if low_ammo and not go_now and not near_end and self.ammo and self._seek_health(
                     f, x, y, self.ammo, "ammo", most=250 if dry else 70, radius=3000 if dry else 900):
                 return kd
         elif (free and not self.use_tap and self.ITEM_SEEK_HP
@@ -902,7 +910,7 @@ class Steer:
                     f, x, y, self.ammo, "ammo", most=250, radius=3000):
                 self.log("    f%d: (the ammo above: dry on a route pickup's leg, ITEM_SEEK_HP)" % f)
                 return kd
-        if (self.AMMO_LOW and free and not self.use_tap
+        if (self.AMMO_LOW and free and not self.use_tap and not near_end
                 and self.leg.get("to") not in ("ammo", "drop", "health", "suit")):
             # AMMO (a map tactic): short of bullets with no shell -- a clip a dead zombieman dropped near by first,
             # then the map's ammo FAR off when nearly dry (the backpack and shell box east, AMMO_TYPES)

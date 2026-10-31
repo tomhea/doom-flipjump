@@ -24,7 +24,7 @@ import re
 from pathlib import Path
 
 import pytest
-from flipjump.assembler.preprocessor import BlockPool
+from flipjump.assembler.table_pool import BlockPool, HotSite
 
 from doomfj.harness import W
 
@@ -61,7 +61,7 @@ def shipped():
 def heat(shipped):
     with gzip.open(ROOT / shipped["heat"], "rt", encoding="utf-8") as fh:
         doc = json.load(fh)
-    return {g: [tuple(s) for s in sites] for g, sites in doc["groups"].items()}
+    return {g: [HotSite(*s) for s in sites] for g, sites in doc["groups"].items()}
 
 
 def _pool(k, heat):
@@ -69,9 +69,9 @@ def _pool(k, heat):
     assert k["width_buckets"] and not k["evict_by_value"], k
     with gzip.open(ROOT / k["counts"], "rt", encoding="utf-8") as fh:
         c = json.load(fh)
-    pool = BlockPool(W, k["pool_base"], span_bits=k["span_bits"], spread=k["spread"],
-                     spread_min_count=k["spread_min_count"], max_slot_ops=k["max_slot_ops"],
-                     **({"heat": heat} if heat is not None else {}))
+    # the build command's flags, as build_blocked.pool_knobs maps them: --span-bits is a length from --pool-base
+    pool = BlockPool(W, k["pool_base"], pool_end=k["pool_base"] + k["span_bits"], spread_factor=k["spread"],
+                     spread_min_tables=k["spread_min_count"], max_slot_ops=k["max_slot_ops"], heat=heat)
     pool.alias = c.get("alias") or {}
     pool.lay_out(c["counts"], {g: {int(w): int(n) for w, n in h.items()} for g, h in c["width_hist"].items()})
     return pool

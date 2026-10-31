@@ -1,7 +1,7 @@
 // ==============================================================================================
 // sim_wide.fj    M8 F1.5 -- the WIDE-LIST twins: runtime thing ids past 254 (docs/f1-runtime-ids.md, A1)
 // STATUS  LIVE only on a map with Config.LIST_ID_BITS = 12 (build.py includes it after sim.fj then, never
-//         otherwise); assembled with `-D hex.pointers.PTR_WIDE_BITS=12` (config.Config.emit_fj_defines)
+//         otherwise); assembled with `-D hex.pointers.PTR_WIDE_BITS=12` (config.Config.fj_defines)
 // ENTRY   sim.leaf_link_w, sim.leaf_unlink_w, sim.thing_pass_depth_w, sim.rank_key_w, m1.zerocell12
 // NOTE    its OWN file, so sim.fj and m1_reset.fj stay byte-identical to the 8-bit programs' (every test that
 //         mutates sim.fj by text, and every heat key naming its macro paths, sees what it always saw)
@@ -11,7 +11,7 @@ ns sim {
     // (Config.LIST_ID_BITS = 12: E1M3 341, E1M4 345, E1M5 370 things + pools + drops) keeps its per-leaf lists in
     // the SAME cells at the SAME stride -- an entry is id + 1 in bits dbit .. dbit+11 of its jump word -- and reads
     // and writes them through flipjump's DUAL decoder table: hex.read_cell / hex.write_cell, a 4,096-entry table at
-    // op 4,096 that the build lays with `-D hex.pointers.PTR_WIDE_BITS=12` (config.Config.emit_fj_defines). Every
+    // op 4,096 that the build lays with `-D hex.pointers.PTR_WIDE_BITS=12` (config.Config.fj_defines). Every
     // other op is the 8-bit macro's, with an id 3 nibbles wide where it was 2 (ll_enc / ll_v / ll_nxt, td_rk).
     //
     // ⚠ TWINS BY RULE, NOT BY HAND: tests/host/test_wide_list_twins.py derives each body below from its 8-bit macro

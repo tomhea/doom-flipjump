@@ -12,17 +12,18 @@ WHAT IT JOINS.
   * the profile (`profx drive.py games`): self counts of every pool word the ten games executed;
   * the layout: the build's blocks, re-derived from its counts cache (`profx/pool.reconstruct`) and
     checked against the image -- every placed group's source word must rest at its base;
-  * the SITES: `build_blocked.py --record-sites` records every table the counting pass reached --
-    its group, its macro-expansion path, its size -- in the order the program reaches them.
-A table's address says which slot it took, not which code emitted it, so the sites are REPLAYED
-through a fresh placing pool with the build's knobs -- flipjump's own `reserve()`, not a copy of its
-index rule -- and every address it hands out is mapped back to its site. The profile's tables are
+  * the SITES: `build_blocked.py --record-sites` records every table the assembly reached -- its group, its
+    macro-expansion path, its occurrence, its slot and the ADDRESS the pool gave it (flipjump's
+    `pool.report.table_sites`), in the order the program reaches them.
+A table's address says which slot it took, not which code emitted it; the recorded sites say both, so every
+executed table address maps straight back to its site (this used to REPLAY the sites through a second pool's
+`reserve()` to learn the addresses -- flipjump 1.6.0 reports them). The profile's tables are
 then named by site, ranked by the ops they executed, and written as
 {heat_key(group): [[heat_key(site), occurrence, slot_ops], ...]} for the top groups by table ops.
 
-CONTROLS. The replay must reproduce the counts cache's per-width table counts for every hot group
+CONTROLS. The recorded sites must reproduce the counts cache's per-width table counts for every hot group
 (else the sites are another program's), and every executed pool word inside a hot block must map
-to a replayed table (reported, not silently dropped). The per-group arm/disarm estimate it prints
+to a recorded table (reported, not silently dropped). The per-group arm/disarm estimate it prints
 (2 x popcount of the offset, as `profx/heatindex.py`) is arithmetic, not a measurement.
 """
 import argparse
@@ -42,8 +43,7 @@ for q in (HERE / "profx", ROOT / "src"):
 if __name__ == "__main__":                       # M8 G13: `--map E1Mn` before the defaults are read
     from doomfj.mapprofile import take_map_arg
     take_map_arg()
-from flipjump.assembler.inner_classes.expr import Expr                     # noqa: E402
-from flipjump.assembler.preprocessor import heat_key                       # noqa: E402
+from flipjump.assembler.table_pool import heat_key                         # noqa: E402
 from common import (W, active_map, check_census_map, default_counts_cache, default_fjm, default_labels,  # noqa: E402
                     label_dict, load_sparse, work_dir)
 from fjmimage import FjmImage                                               # noqa: E402
@@ -129,14 +129,13 @@ def main():
             per_group.setdefault(g, {})[wv] = c
     ranked = sorted(per_group, key=lambda g: -sum(per_group[g].values()))[:a.top]
 
-    # the sites, replayed through flipjump's own reserve()
+    # the sites, with the addresses the build's own pool gave them (flipjump's report.table_sites)
     with gzip.open(a.sites, "rt", encoding="utf-8") as fh:
         sites = json.load(fh)
     print("sites %s (sha256 %s...): %d groups, %d tables, program %s"
           % (Path(a.sites).name, hashlib.sha256(Path(a.sites).read_bytes()).hexdigest()[:16],
              len(sites["groups"]), sum(len(v) for v in sites["groups"].values()), sites.get("program")),
           flush=True)
-    replay, _ = reconstruct(a.counts_cache, knobs, heat=load_heat(a.heat))
     heat, report, bad = {}, [], []
     for g in ranked:
         recorded = sites["groups"].get(g)
@@ -144,8 +143,8 @@ def main():
             bad.append("%s: no recorded sites" % g)
             continue
         widths = {}
-        for _prefix, ops, align in recorded:
-            s = slot_ops_of(max(ops, align), KNOBS["max_slot_ops"])
+        for _site, _occurrence, slot_ops, _address in recorded:
+            s = slot_ops_of(slot_ops, KNOBS["max_slot_ops"])
             widths[s] = widths.get(s, 0) + 1
         want = {}
         for w, c in fr["width_hist"].get(g, {}).items():
@@ -154,15 +153,8 @@ def main():
         if widths != want:
             bad.append("%s: recorded widths %s != the counts cache's %s" % (g, widths, want))
             continue
-        at = {}
-        seen = {}
-        for path, ops, align in recorded:
-            key = heat_key(path)
-            occurrence = seen.get(key, 0)
-            seen[key] = occurrence + 1
-            got = replay.reserve(align, ops, g, Expr(g), path)
-            if got is not None:
-                at[got] = (key, occurrence, slot_ops_of(max(ops, align), KNOBS["max_slot_ops"]))
+        at = {address: (heat_key(site), occurrence, slot_ops_of(slot_ops, KNOBS["max_slot_ops"]))
+              for site, occurrence, slot_ops, address in recorded if address}
         base, bits = pool.groups[g][0], pool._block_bits(g)
         layout, _ = pool._bucket_layout(g)
         tables = {}

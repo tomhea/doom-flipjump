@@ -10,24 +10,17 @@ the oracle and prints their op counts. If blocking passes here, the renderer is 
 is in game-only code -- the menu, the keyboard, the simulation or the M1 self-reset. If it fails,
 the failure is in the renderer and comes with pixel counts instead of a dead binary.
 
-    python scratchpad/12m/deg_gate_blocked.py            # blocking on
-    python scratchpad/12m/deg_gate_blocked.py --no-pin   # relocation only, pinning suppressed
-    python scratchpad/12m/deg_gate_blocked.py --selftest      # the R9 control: 2.1s, no build
+    python scratchpad/12m/deg_gate_blocked.py                 # blocking on
+    python scratchpad/12m/deg_gate_blocked.py --selftest      # the R9 control: seconds, no build
     python scratchpad/12m/deg_gate_blocked.py --selftest-gate # the R9 control that costs a build
 
-`--no-pin` is the bisect that matters: BlockPool does two separable things -- it MOVES tables into
-per-source-word blocks, and it PINS those words so the arm flips an index. Placement (FINDINGS BE)
-already showed moving tables is safe. If --no-pin passes and the default fails, the fault is in
-pinning, which is a much smaller thing to search.
-
-Not a copy of the gate -- it patches `flipjump.assemble` and executes deg_gate itself, so whatever
-deg_gate checks, this checks. The patch, the exit status and both --selftest arms live in
-`deg_gate_driver.py` (it was shared with deg_gate_placed.py, deleted when flipjump 1.6.0 removed the pool's macro filter); the checks
-below `_driver_controls` are this driver's own. The cheap arm does NOT cover the E1M1 program: it runs a
-10-line pointer fixture, which like deg_gate's own visual tier has no self-reset, so the control
-shows the assembler CALLING `_byte_cell_exclusion` and the exclusion taking its no-self-reset
-branch -- and a second control hands it a label table that does carry the arrays, where it names
-their cells instead.
+Not a copy of the gate: it hands deg_gate's own `run()` a pool factory (`run(table_pool=...)`, flipjump's
+`assemble(table_pool=)`), so whatever deg_gate checks, this checks. Nothing is patched (flipjump 1.6.0's API):
+`--no-pin`, which swapped the assembler's pin resolver, went with the patch. The exit status and both --selftest arms
+live in `deg_gate_driver.py`; the checks below `_driver_controls` are this driver's own. The cheap arm does NOT cover
+the E1M1 program: it runs a 10-line pointer fixture, which like deg_gate's own visual tier has no self-reset, so the
+control shows the factory taking its no-self-reset branch -- and a second control hands it a program that does
+declare the arrays, where it names their cells instead.
 """
 import argparse
 import sys
@@ -39,127 +32,78 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "src"))
 
 import deg_gate_driver as driver                                        # noqa: E402
-import flipjump as fj                                                   # noqa: E402
-from flipjump.assembler.preprocessor import BlockPool                   # noqa: E402
+from flipjump.assembler.table_pool import BlockPool                     # noqa: E402
 from doomfj.config import Config                                        # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
-from doomfj.selfreset import BYTE_ARRAY_NAMES, byte_arrays              # noqa: E402
+from doomfj.selfreset import BYTE_ARRAY_NAMES, check_pin_all_but, declared_names, pin_all_but_cells   # noqa: E402
 
 DRIVER = "deg_gate_blocked"
 
 
-def make_assemble(a):
-    """-> (the `flipjump.assemble` replacement, the list every pool it builds is appended to).
+def make_pool_factory(a):
+    """-> (the pool factory deg_gate's run() takes, the list every pool it builds is appended to, the cell lists).
 
-    One factory, because --selftest installs the SAME closure the gate runs under and one of its
-    stub gates CALLS fj.assemble through it -- so the control drives this body, not a copy of it.
-    On the fixture, not on E1M1: see the cheap arm's closing note.
+    One factory, because --selftest hands the SAME factory to a stub gate that assembles through it -- so the control
+    drives this body, not a copy of it.
+
+    THE CELLS LEFT UNPINNED. On the GAME tier they are the M1 reset's BYTE cells -- `m1.zerobyte` jumps THROUGH one, so
+    a pinned base sends it elsewhere -- named exactly as the shipped build names them (selfreset.pin_all_but_cells,
+    over their reachable cells). deg_gate builds the VISUAL tier, which has no self-reset and therefore none of those
+    arrays, while the renderer still reads cells through `hex.pointers` (every `hex.read_byte` expands the raw
+    reader). So there no cell is named (`pin_all_but=[]`: every word may be pinned), and this driver says so. What
+    stands in its place is the driver's own output: four viewpoints compared BYTE-EXACT against the oracle, which is
+    the check a named set would only be approximating. That argument holds HERE and nowhere else -- a shipped build
+    gets no such comparison, which is why it names its byte AND pointer cells.
     """
-    # WHICH TABLES MOVE is the stl's declaration since flipjump 1.6.0 (a macro whose innermost namespace is
-    # `__relocatable__`); the pool's `wants` filter, and this driver's --macros / --owners narrowing of it, are gone.
-    pools = []
-    real_assemble = fj.assemble
-    excluded = {"words": None}
+    pools, cell_lists = [], []
 
-    def _byte_cell_exclusion(address, labels):
-        """The words a pointer can reach, which the assembler is then free to pin around.
-
-        On the GAME tier they are the M1 reset's BYTE cells -- `m1.zerobyte` jumps THROUGH one, so a
-        pinned base sends it elsewhere -- derived from the label table exactly as
-        `build_blocked.py --pin-state-cells` derives them.
-
-        deg_gate builds the VISUAL tier, which has no self-reset and therefore none of those arrays,
-        while the renderer still reads cells through `hex.pointers` (every `hex.read_byte` expands
-        the raw reader), which is what makes 1.5.1 ask for this callable at all. So here there is no
-        cell set to name, and this driver says so and names none. What stands in its place is the
-        driver's own output: four viewpoints compared BYTE-EXACT against the oracle, which is the
-        check a named set would only be approximating. That argument holds HERE and nowhere else --
-        a shipped build gets no such comparison, which is why build_blocked.py names its cells.
-        (The first version of this borrowed the game-tier set outright and asserted on `sshead`,
-        63 minutes into a gate run.)
-        """
-        if excluded["words"] is None:
-            bits = {k: int(v) for k, v in labels.items()}
-            absent = sorted(n for n in BYTE_ARRAY_NAMES if n not in bits)
-            if absent:
-                excluded["words"] = set()
-                print("  pin-exclude: no self-reset in this program (no %s), so no cell to name -- "
-                      "the gate's four byte-exact viewpoints are the check" % ", ".join(absent),
-                      flush=True)
-            else:
-                words_sorted = sorted(v // W for v in bits.values())
-                out = set()
-                for name, n in byte_arrays(bits, words_sorted, Config().VIEW_W, a.subsectors):
-                    base = bits[name] // W
-                    out.update(base + 2 * k + half for k in range(n) for half in (0, 1))
-                excluded["words"] = out
-                print("  pin-exclude: %s byte-cell words" % format(len(out), ","), flush=True)
-        return (address // W) in excluded["words"]
-
-    def assemble_blocked(*args, **kwargs):
-        pool = BlockPool(W, a.pool_base, span_bits=a.span_bits)   # one pass: sized from its own expansion
-        # A pinned word cannot be read raw, and the assembler (flipjump 1.5.1, tomhea/flipjump#360)
-        # refuses to pin a program that reads through hex.pointers unless the caller names the
-        # cells a pointer can reach. Here those are the byte arrays (`hex.read_byte` walks them),
-        # the same exclusion build_blocked.py's --pin-state-cells uses; LUT cells are never armed.
-        pool.pin_exclude = _byte_cell_exclusion
+    def table_pool(files):
+        declared = declared_names(files, BYTE_ARRAY_NAMES)
+        cells = pin_all_but_cells(declared, Config().VIEW_W, a.subsectors, pointer_cells=False)
+        if cells:
+            print("  pin_all_but: the byte cells %s" % cells, flush=True)
+        else:
+            print("  pin_all_but: no self-reset in this program (no %s), so no cell to name -- "
+                  "the gate's four byte-exact viewpoints are the check" % ", ".join(BYTE_ARRAY_NAMES), flush=True)
+        pool = BlockPool(W, a.pool_base, pool_end=None if a.span_bits is None else a.pool_base + a.span_bits,
+                         pin_all_but=cells)          # one pass: sized from its own expansion
         pools.append(pool)
-        kwargs["table_pool"] = pool
-        return real_assemble(*args, **kwargs)
+        cell_lists.append(cells)
+        return pool
 
-    assemble_blocked._pin_exclude = _byte_cell_exclusion    # the controls drive the REAL one
-    return assemble_blocked, pools
+    return table_pool, pools, cell_lists
 
 
 def run(a):
-    print("BLOCKING ON: pool base %s, pinning %s"
-          % (hex(a.pool_base), "OFF (relocation only)" if a.no_pin else "on"), flush=True)
-    assemble_blocked, pools = make_assemble(a)
-    status = driver.run_gate(assemble_blocked, no_pin=a.no_pin)
+    print("BLOCKING ON: pool base %s" % hex(a.pool_base), flush=True)
+    table_pool, pools, cell_lists = make_pool_factory(a)
+    labels = {}
+    status = driver.run_gate(table_pool, labels_out=labels)
     if not pools:
-        print("*** VACUOUS: the gate never called fj.assemble, so no pool was ever built",
+        print("*** VACUOUS: the gate never assembled through the pool factory, so no pool was ever built",
               flush=True)
         return status or 2
+    # the byte cells named before the assembly agree with the labels it produced (byte_arrays' geometry check)
+    check_pin_all_but(cell_lists[-1], labels, Config().VIEW_W, a.subsectors)
     last = pools[-1]
-    print("blocked: %s tables in %s groups; declined %s; ungrouped %s; pin conflicts %s"
+    print("blocked: %s tables in %s groups; declined %s; ungrouped %s; pin conflicts %s; %s words pinned"
           % (format(last.allocated, ","), format(len(last.groups), ","),
              format(last.declined, ","), format(last.ungrouped, ","),
-             format(getattr(last, "pin_conflicts", 0), ",")), flush=True)
-    return driver.verdict(status, last, no_pin=a.no_pin)
-
-
-def _reset_like_labels(nss, view_w):
-    """A label table shaped like a SELF-RESETTING program's, and the byte-cell words in it.
-
-    `byte_arrays` derives each array's reachable cells from the gap to the next label and refuses a
-    table whose geometry disagrees with (nss, view_w) -- so this lays the three arrays out with
-    exactly the declared cells it demands (sshead is over-allocated 2x, the per-column arrays 1:1)
-    and a sentinel label closing the last one. Building it here rather than mocking `byte_arrays`
-    keeps the control on the real derivation.
-    """
-    # (declared words, REACHABLE words): sshead declares 2 cells per reachable one, so its top half
-    # is over-allocation the exclusion does not name -- which is the part of the derivation worth
-    # controlling, and the reason this returns the two counts separately.
-    sizes = [("sshead", 4 * nss, 2 * nss), ("pclm", 2 * view_w, 2 * view_w),
-             ("sfflag", 2 * view_w, 2 * view_w)]
-    bits, cells, word = {}, [], 1 << 12
-    for name, declared, reachable in sizes:
-        bits[name] = word * W
-        cells.extend(range(word, word + reachable))
-        word += declared
-    bits["_end_of_the_byte_arrays"] = word * W
-    return bits, cells
+             format(last.report.pin_conflicts, ","), format(len(last.report.pinned), ",")), flush=True)
+    return driver.verdict(status, last)
 
 
 def _driver_controls(a, check, tmp, src):
     """The R9 checks only THIS driver can make: the shared arm's fixture is nobody's program, and
-    the fresh pool per assembly and the pin exclusion are this driver's machinery."""
+    the fresh pool per assembly and the cell list are this driver's machinery."""
+    from pathlib import Path as _P
+    import flipjump as fj
 
-    def call(fn, name):
-        """The closure, called the way deg_gate calls it. It may well RAISE -- the fixture is not
-        the program the exclusion is written for -- so the deepest cause comes back instead."""
+    def call(factory, name):
+        """the factory, used the way deg_gate uses it; the deepest cause comes back if it raises"""
         try:
-            fn([src], tmp / (name + ".fjm"), memory_width=W, print_time=False)
+            fj.assemble([src], tmp / (name + ".fjm"), memory_width=W, show_progress=False,
+                        table_pool=factory([src]))
             return "assembled"
         except BaseException as e:
             cause, depth = e, 0
@@ -167,28 +111,29 @@ def _driver_controls(a, check, tmp, src):
                 cause, depth = (cause.__cause__ or cause.__context__), depth + 1
             return "%s: %s" % (type(cause).__name__, cause)
 
-    fresh, pools = make_assemble(a)
+    fresh, pools, _cells = make_pool_factory(a)
     causes, text = driver.capture(lambda: [call(fresh, "blk1"), call(fresh, "blk2")])
     check(len(pools) == 2 and pools[0] is not pools[1],
           "two assembles, two (one-pass) pools: a pool lays out one assembly",
           "%d pools" % len(pools))
-    check(all(c == "assembled" for c in causes) and text.count("pin-exclude: no self-reset") == 1,
-          "the assembler CALLS this driver's pin exclusion, which names no cell without a self-reset",
-          "%s; %d pin-exclude lines" % (causes[0], text.count("pin-exclude:")))
+    check(all(c == "assembled" for c in causes) and text.count("no self-reset in this program") == 2,
+          "the factory names no cell without a self-reset",
+          "%s; %d pin_all_but lines" % (causes[0], text.count("pin_all_but:")))
 
-    # ... and the OTHER branch, which is the one a game-tier program takes: hand the exclusion a
-    # label table that does carry the reset's byte arrays and it must name their cells instead of
-    # excusing itself. Driven through the real closure's own exclusion, not a copy of it.
+    # ... and the OTHER branch, which is the one a game-tier program takes: a program that declares the reset's byte
+    # arrays gets their reachable cells named. Driven through the real factory, on declarations written here.
     nss, view_w = 3, Config().VIEW_W
-    labels, cells = _reset_like_labels(nss, view_w)
-    excl = make_assemble(argparse.Namespace(**dict(vars(a), subsectors=nss)))[0]._pin_exclude
-    named, why = driver.capture(lambda: [excl(w * W, labels) for w in cells])
-    check(all(named) and ("pin-exclude: %s byte-cell words" % format(len(cells), ",")) in why,
+    state = _P(tmp) / "state.fj"
+    state.write_text("sshead: hex.vec %d\npclm: hex.vec %d\nsfflag: hex.vec %d\n" % (2 * nss, view_w, view_w),
+                     encoding="utf-8")
+    import argparse as _ap
+    factory, built, lists = make_pool_factory(_ap.Namespace(**dict(vars(a), subsectors=nss)))
+    _pool, why = driver.capture(lambda: factory([state]))
+    check(lists == [[("sshead", nss), ("pclm", view_w), ("sfflag", view_w)]] and "the byte cells" in why,
           "... and it NAMES the byte cells when the program HAS a self-reset",
           (why.strip().splitlines() or ["(silent)"])[-1][:70])
-    outside, _ = driver.capture(lambda: excl((max(cells) + 4) * W, labels))
-    check(not outside, "... and a word outside them is still pinnable", "excluded=%s" % outside)
-
+    check(built[-1].pin_all_but == tuple(lists[-1]), "... and the pool it builds leaves exactly those unpinned",
+          "pin_all_but=%r" % (built[-1].pin_all_but,))
 
 
 def main():
@@ -196,14 +141,11 @@ def main():
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=1 << 31)
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=None)
     ap.add_argument("--subsectors", type=int, default=682,
-                    help="E1M1's subsector count, for the byte-array exclusion (as build_blocked.py)")
-    ap.add_argument("--no-pin", action="store_true",
-                    help="relocate into blocks but do NOT pin the source words")
+                    help="E1M1's subsector count, for the byte-array cells (as the shipped build derives it)")
     ap.add_argument("--selftest", action="store_true",
-                    help="R9 negative control, 2.1s measured and NO build: mutate the assembler's "
-                         "pin exclusion on a 10-line fj program that reads a cell through "
-                         "hex.pointers, and this driver's own plumbing, and require each "
-                         "mutation to break something. It controls the DEFAULT configuration, so "
+                    help="R9 negative control, seconds and NO build: mutate the pool's raw-cell list on a 10-line fj "
+                         "program that reads a cell through hex.pointers, and this driver's own plumbing, and "
+                         "require each mutation to break something. It controls the DEFAULT configuration, so "
                          "the tuning flags above are not applied to it (and it says which it "
                          "dropped). See deg_gate_driver.py for what it misses.")
     ap.add_argument("--selftest-gate", action="store_true",
@@ -216,9 +158,9 @@ def main():
         # the DEFAULTS, never `a`: the control's subject is this driver's default configuration, so
         # its verdict cannot depend on what else is on the command line (driver.control_args).
         ctl = driver.control_args(ap, a)
-        assemble_blocked, pools = make_assemble(ctl)
+        table_pool, pools, _cells = make_pool_factory(ctl)
         return driver.cheap_selftest(
-            DRIVER, assemble_blocked, body_ran=lambda: len(pools),
+            DRIVER, table_pool, body_ran=lambda: len(pools),
             extra=lambda check, tmp, src: _driver_controls(ctl, check, tmp, src))
     if a.selftest_gate:
         return driver.gate_selftest(DRIVER, lambda: run(a))

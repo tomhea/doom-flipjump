@@ -25,6 +25,14 @@ reaches it and places them all when the expansion ends, sizing the blocks from t
 counts cache is read; `--counts-cache` receives the census (pinreport reads it). Given the same counts it makes the
 two-pass binary byte for byte, except where a table gets no block -- it goes to an overflow region after the blocks
 instead of inline (see BlockPool's docstring).
+
+NO PATCHING (flipjump 1.6.0's API, 2026-10-31). This driver used to replace `flipjump.assemble`, wrap the assembler's
+`resolve_pinned` to learn the pin map, subclass BlockPool to record the table sites, and hand the pool a `pin_exclude`
+callback after construction. Now it only says HOW to assemble: `build_wall_renderer(..., assembly=Assembly(
+lzma_preset, pool=<BlockPool's knobs>))`. The build makes a fresh pool per assembly with `pin_all_but` -- the cells the
+program reads raw, which the BUILD names from the emitted program (selfreset.pin_all_but_cells; the byte cells and the
+pointer-read cells, what `--pin-state-cells` always excluded) -- and returns the pools; their `report` says what each
+did: the FINAL pin map (`report.pinned`), every table's site and address (`report.table_sites`), the census.
 """
 import argparse
 import gzip
@@ -37,9 +45,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-import flipjump as fj                                                   # noqa: E402
-from flipjump.assembler.preprocessor import BlockPool                   # noqa: E402
-from doomfj.build import build_wall_renderer                            # noqa: E402
+from flipjump.assembler.table_pool import HotSite                      # noqa: E402
+from doomfj.build import Assembly, build_wall_renderer                  # noqa: E402
 from doomfj.config import Config                                        # noqa: E402
 from doomfj.harness import W, SHIP_LZMA_PRESET                          # noqa: E402
 from doomfj.wall_renderer import TIERS                                  # noqa: E402
@@ -125,7 +132,7 @@ def _preflight(pool, a):
     if getattr(a, "pack_blocks", False):
         print("  PREFLIGHT (--pack-blocks): the packed blocks end %s words past the pool base (the demand below is "
               "the blocks' whole sizes, unpacked)" % format(pool._used // W, ","), flush=True)
-    limit = (1 << W) if a.span_bits is None else min(1 << W, a.pool_base + a.span_bits)
+    limit = (1 << W) if pool.pool_end is None else min(1 << W, pool.pool_end)
     capacity = limit - a.pool_base
     placed = len(pool.groups)
     print("  PREFLIGHT: demand %s words, capacity %s words (%.1f%% used); %s of %s groups placed"
@@ -181,25 +188,78 @@ def _report_width_waste(counting):
               % (format(cost, ","), g[:44], format(n, ","), common, wmax), flush=True)
 
 
-def pin_state_veto(labels, view_w, subsectors, pid_bytes=1, ss_ratio=2) -> set:
-    """The words `--pin-state-cells` must NOT pin: the BYTE cells (`m1.zerobyte c` jumps THROUGH the
-    cell into the pointer read table, so a base there sends it elsewhere) and every cell the program
-    reads RAW through a pointer (selfreset.POINTER_READ_CELLS: a pinned word holds base + value,
-    which a raw read takes for the value -- M7 P1.5's restart made thpos_rt a pin candidate)."""
-    from doomfj.selfreset import byte_arrays, pointer_read_words
-    bits = {k: int(v) for k, v in labels.items()}
-    words_sorted = sorted(v // W for v in bits.values())
-    out = set()
-    for name, n in byte_arrays(bits, words_sorted, view_w, subsectors, pid_bytes=pid_bytes, ss_ratio=ss_ratio):
-        base = bits[name] // W
-        for k in range(n):
-            out.add(base + 2 * k)
-            out.add(base + 2 * k + 1)
-    return out | pointer_read_words(bits, words_sorted)
+def pool_knobs(a, heat=None) -> dict:
+    """BlockPool's keyword arguments for this command line (build.Assembly.pool). The flags keep their recorded
+    spellings (docs/ship-gate.md 1b): --span-bits is a length from --pool-base (BlockPool's pool_end is the address it
+    ends below), --spread / --spread-min-count / --pin-broken are spread_factor / spread_min_tables /
+    pin_incomplete_groups. No pin_all_but: the build names the cells the program reads raw."""
+    knobs = {"pool_base": a.pool_base, "pool_end": None if a.span_bits is None else a.pool_base + a.span_bits,
+             "max_slot_ops": a.max_slot_ops, "spread_factor": a.spread, "spread_min_tables": a.spread_min_count,
+             "pin_incomplete_groups": a.pin_broken}
+    if heat:
+        knobs["heat"] = heat
+    knobs.update(_pack_kw(a))
+    return knobs
 
 
-def main():
-    ap = argparse.ArgumentParser()
+def load_heat(path):
+    """a heatsites.py list (--pin-heat) as BlockPool's `heat` -> (heat, the list's raw bytes)"""
+    raw = Path(path).read_bytes()
+    if str(path).endswith(".gz"):
+        raw = gzip.decompress(raw)      # the sha printed is the LIST's, in either form
+    heat = {g: [HotSite(*site) for site in sites] for g, sites in json.loads(raw)["groups"].items()}
+    return heat, raw
+
+
+def report_pins(pool, heat, labels=None):
+    """the pool's FINAL pin map (report.pinned: after every pin that could not hold was dropped), the collapse alarm,
+    and the hot words that did not end up pinned"""
+    pinned = pool.report.pinned
+    groups = len(pool.groups)
+    print("  pins: %s words pinned, %s groups blocked" % (format(len(pinned), ","), format(groups, ",")), flush=True)
+    # A COLLAPSE IS SILENT OTHERWISE (spread=4 once fell from 25,701 pinned words to 72, built fine and passed the gate)
+    if groups and len(pinned) < max(1, groups // 10):      # none at all, on a program of < 10 groups
+        print("  *** PINNING COLLAPSED: %s pinned words against %s groups. The pool is almost certainly "
+              "exhausted -- lower --pool-base or reduce --spread." % (format(len(pinned), ","), format(groups, ",")),
+              flush=True)
+    if heat and labels is not None:
+        # a hot word that did not end up pinned: a raw cell (pin_all_but), an alias conflict, or a pin that cannot hold
+        hot = [(g, pool.groups[g][1]) for g in pool.hot_sites if g in pool.groups and pool.groups[g][1] is not None]
+        lost = [g for g, expr in hot if expr.exact_eval(labels) not in pinned]
+        print("  pin-heat: %d of %d hot words pinned%s"
+              % (len(hot) - len(lost), len(hot), "; NOT pinned: %s" % lost[:5] if lost else ""), flush=True)
+
+
+def write_sites(path, a, pool):
+    """--record-sites: every table the pool met, per canonical group, in expansion order -- [site (heat_key), occurrence,
+    slot_ops, address] (flipjump's report.table_sites; address 0: it stayed in place). heatsites.py names a profile's
+    tables by them."""
+    by_group = {}
+    for t in pool.report.table_sites:
+        by_group.setdefault(t.group, []).append([t.site, t.occurrence, t.slot_ops, t.address])
+    blob = {"what": "every table the assembly reached, per canonical group, in expansion order: "
+                    "[macro-expansion path (heat_key), occurrence, slot ops, address (0: in place)]",
+            "program": _counts_sig(a), "tables": len(pool.report.table_sites), "groups": by_group}
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        json.dump(blob, fh)
+    print("  recorded %s tables in %s groups -> %s"
+          % (format(blob["tables"], ","), format(len(by_group), ","), path), flush=True)
+
+
+def write_labels(path, labels):
+    """the build's label table, `name<TAB>bit-address` gzipped -- what the assembler resolved, as flipjump's assemble
+    returned it (build_labeled.py --labels; the gates' --labels)"""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        for name, addr in labels.items():
+            fh.write(f"{name}\t{addr}\n")
+    print(f"labels -> {path}  ({len(labels):,} labels)", flush=True)
+
+
+def main(argv=None, labels_out=None):
+    """`argv`: build_blocked.py's arguments (None: sys.argv); `labels_out`: write the label table there
+    (build_labeled.py)"""
+    ap = argparse.ArgumentParser(prog="build_blocked.py")
     ap.add_argument("tier", choices=sorted(TIERS))
     ap.add_argument("--out", required=True)
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
@@ -236,11 +296,6 @@ def main():
                          "instead of letting the biggest-first cursor drop whatever it reaches "
                          "last. A broken group loses its pin for ALL its tables (FINDINGS BQ), so "
                          "which groups get dropped is worth more than how many.")
-    ap.add_argument("--view-w", type=int, default=160,
-                    help="cfg.VIEW_W, needed to derive the byte arrays (build metrics print it)")
-    ap.add_argument("--subsectors", type=int, default=None,
-                    help="subsector count, needed to derive the byte arrays. M8: DERIVED from --wad/--map (E1M1 "
-                         "682, E1M2 1104); a value given must equal it")
     ap.add_argument("--max-slot-ops", type=int, default=32,
                     help="widest table a block slot may hold. 10,052 tables decline as too-wide at "
                          "32, and hex.tables.* is both the hottest source word and the macro with "
@@ -257,16 +312,16 @@ def main():
                     help="merge groups whose source-word expressions resolve to ONE address into a "
                          "single block, instead of un-pinning both (3,801 words on the game tier)")
     ap.add_argument("--pin-state-cells", action="store_true",
-                    help="pin the M1 reset's NIBBLE state cells too, excluding only the BYTE cells "
-                         "(m1.zerobyte jumps through those). Worth ~10.7%% more on a walk, and the "
-                         "reason it failed before was the base-stripping using the pool's raw pin "
-                         "set instead of the assembler's filtered one (FINDINGS BJ).")
+                    help="REQUIRED (the only mode left): pin the M1 reset's NIBBLE state cells too, leaving unpinned "
+                         "only the cells the program reads raw -- the BYTE cells (m1.zerobyte jumps through those) "
+                         "and the pointer-read cells (selfreset.pin_all_but_cells; FINDINGS BJ). The other mode, "
+                         "which left the whole restore set unpinned, went with flipjump's pin_exclude callback: "
+                         "no recorded build used it.")
     ap.add_argument("--record-sites", default=None, metavar="SITES.json.gz",
-                    help="pin protection (M7 P1.1): run the counting assembly with a pool that also "
-                         "records every table's group, macro-expansion path and size, in the order "
-                         "the program reaches them; write them here (and the counts cache, with "
-                         "--counts-cache) and exit. heatsites.py joins them with a profile into a "
-                         "--pin-heat list. Needs flipjump whose reserve() takes the path.")
+                    help="pin protection (M7 P1.1): write every table the assembly reached -- its group, its "
+                         "macro-expansion path, its occurrence, its slot and its address, in expansion order "
+                         "(flipjump's pool.report.table_sites) -- here. heatsites.py joins them with a profile into "
+                         "a --pin-heat list.")
     ap.add_argument("--pin-heat", default=None, metavar="HEAT.json[.gz]",
                     help="pin protection (M7 P1.1, docs/gp-pin-protection.md): heatsites.py's list of "
                          "hot groups and their hot table sites. Every placing pool protects them: a "
@@ -289,11 +344,7 @@ def main():
                          "-10.8%% file size); pass 1 (harness.FJM_LZMA_PRESET) for a day-to-day build. Encoder-only: the "
                          "program image is the same at every preset. The counting assembly's throwaway .fjm keeps the "
                          "caller's preset.")
-    ap.add_argument("--no-pin", action="store_true",
-                    help="relocate into blocks but do NOT pin the source words. Splits blocking's "
-                         "two halves against the standalone gate, the way --no-pin split them "
-                         "against deg_gate (FINDINGS BG).")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     if a.pack_blocks:
         import inspect
         from flipjump.assembler.preprocessor import BlockPool as _BP
@@ -307,6 +358,9 @@ def main():
     if not (a.width_buckets and a.merge_aliases) or a.evict_by_value:
         ap.error("flipjump's BlockPool always buckets widths and merges aliases, and never evicts: pass "
                  "--width-buckets --merge-aliases, and no --evict-by-value")
+    if not a.pin_state_cells:
+        ap.error("pass --pin-state-cells: the build leaves unpinned exactly the cells the program reads raw "
+                 "(the restore-set mode is gone)")
     clash = [f for f, on in (("--counts-trust", a.counts_trust), ("--preflight-only", a.preflight_only)) if on]
     if clash:
         ap.error("--one-pass-blocks has no counting assembly and reads no counts: %s" % ", ".join(clash))
@@ -316,249 +370,53 @@ def main():
 
     heat = None
     if a.pin_heat:
-        raw = Path(a.pin_heat).read_bytes()
-        if a.pin_heat.endswith(".gz"):
-            raw = gzip.decompress(raw)      # the sha printed below is the LIST's, in either form
-        heat = {g: [tuple(site) for site in sites] for g, sites in json.loads(raw)["groups"].items()}
+        heat, raw = load_heat(a.pin_heat)
         print("pin-heat: %s (sha256 %s...): %d hot groups, %s hot sites"
               % (a.pin_heat, hashlib.sha256(raw).hexdigest()[:16], len(heat),
                  format(sum(len(v) for v in heat.values()), ",")), flush=True)
 
-    # WHICH RESET-OWNED WORDS CAN BE PINNED, and which cannot.
-    #
-    # NIBBLE cells are restored by `hex.set 1, addr, v` / `hex.zero n, addr`, which dispatch THROUGH
-    # the cell and only ever flip its value bits -- so a pinned cell's base survives, and these CAN
-    # be pinned. What broke them was not the restore, it was emit_reset_part READING the pristine
-    # word: `word >> VAL_SHIFT > 15` reads `base + value` as a packed LUT and drops the cell from
-    # the set entirely (FINDINGS BH). Stripping the base before that read fixes it.
-    #
-    # BYTE cells cannot. `m1.zerobyte c` does `c+dbit+8; c` -- it JUMPS THROUGH the cell into the
-    # pointer read table, so the cell's word is a dispatch target whose value the machinery
-    # computes itself. A base there sends it somewhere else.
-    excluded = {"words": None}
-
-    def _reset_owned(address, labels):
-        """Words the M1 self-reset owns. THE WHOLE RESTORE SET, not just the byte cells.
-
-        ⚠ PINNING ONLY THE BYTE CELLS WAS TRIED AND FAILED (FINDINGS BJ). The reasoning looked
-        sound -- byte cells are restored by `m1.zerobyte`, which does `c+dbit+8; c` and JUMPS
-        THROUGH the cell, while nibble cells are restored by `hex.set`/`hex.zero`, which only flip
-        value bits and leave a base intact. Excluding 2,004 byte-cell words instead of 12,400 and
-        stripping the base from 26,305 pinned words before emit_reset_part's LUT test built
-        cleanly, verified the reset (labels_moved 0, values_changed 0) -- and then died on the
-        FIRST frame with a screen-protocol violation:
-
-            IODeviceException: collines run ends at row 37, behind the fill cursor at 50
-
-        Zero byte-exact frames. Something else about a pinned state cell is unsound, and the
-        nibble/byte split is not where the line falls. Until that is understood, the whole restore
-        set stays unpinned -- which is the configuration that PASSES the standalone gate at
-        21,963,752 ops/frame and 34.69% size.
-        """
-        if excluded["words"] is None:
-            if a.pin_state_cells:
-                # M8: the map's subsector count and pid width, derived -- a hard-wired E1M1 682 / one-byte pid
-                # sized E1M2's byte arrays wrong (selfreset.byte_arrays cross-checks and refuses)
-                from doomfj.config import map_cfg
-                from doomfj.mapcompiler import bake_bsp
-                from doomfj.wad import WadFile
-                nss = len(bake_bsp(WadFile.from_path(a.wad), a.map).subsectors)
-                assert a.subsectors in (None, nss), ("--subsectors %s, but %s has %d" % (a.subsectors, a.map, nss))
-                _mc = map_cfg(Config(), a.map)
-                excluded["words"] = pin_state_veto(labels, a.view_w, nss, pid_bytes=_mc.PID_BYTES,
-                                                   ss_ratio=_mc.SSHEAD_RATIO)
-                print("  pin-exclude: %s words -- the BYTE cells (m1.zerobyte jumps through them) "
-                      "and the pointer-read cells (a raw read takes base + value); the other "
-                      "nibble state cells ARE pinned" % format(len(excluded["words"]), ","),
-                      flush=True)
-            else:
-                from doomfj.selfreset import load_restore_set
-                from doomfj.build import STANDALONE_RESTORE_SET
-                excluded["words"] = set(load_restore_set(
-                    STANDALONE_RESTORE_SET, {k: int(v) for k, v in labels.items()},
-                    check_layout=False))
-                print("  pin-exclude: %s restore-set words will NOT be pinned"
-                      % format(len(excluded["words"]), ","), flush=True)
-        return (address // W) in excluded["words"]
-
-    # STRIP THE BASE before emit_reset_part reads a pristine word. The restore code itself is
-    # base-safe; only this read is not.
-    # CAPTURE THE MAP THE ASSEMBLER ACTUALLY USED, not the pool's raw one.
-    #
-    # `pool.pinned_words()` is the set BEFORE resolve_pinned drops aliased words (3,801) and the
-    # caller's exclusions. The BAKE uses the filtered map. Stripping with the raw set therefore
-    # XORs a base into words that never got one -- the value then looks enormous,
-    # emit_reset_part classifies the cell as a packed LUT and SILENTLY DROPS IT from the restore
-    # set. Measured: 4 cells vanished from one `hex.zero 25` run alone, and the binary rendered 37
-    # frames before the missing state showed up as a screen-protocol violation at frame 38.
-    from flipjump.assembler import assembler as _asmmod
-    _real_resolve = _asmmod.resolve_pinned
-    live_pins = {"map": {}}
-
-    def _capture_resolve(pinned_exprs, labels, reserved_below=1024, exclude=None):
-        out, conflicts = _real_resolve(pinned_exprs, labels, reserved_below, exclude)
-        live_pins["map"] = dict(out)
-        # A COLLAPSE IS SILENT OTHERWISE (spread=4 once fell from 25,701 pinned words to 72, built fine and passed
-        # the gate). It was checked in _emit_reset_part, which the one-pass reset never calls (#130): check it here,
-        # where every assembly's pin map passes.
-        if pools:
-            groups = len(pools[-1].groups)
-            print("  pins: %s words pinned, %s groups blocked" % (format(len(out), ","), format(groups, ",")),
-                  flush=True)
-            if groups and len(out) < max(1, groups // 10):      # none at all, on a program of < 10 groups
-                print("  *** PINNING COLLAPSED: %s pinned words against %s groups. The pool is almost certainly "
-                      "exhausted -- lower --pool-base or reduce --spread." % (format(len(out), ","),
-                                                                               format(groups, ",")), flush=True)
-        if heat and pools:
-            # a hot word that did not end up pinned: vetoed by pin_exclude, or an alias conflict
-            hot = [(g, pools[-1].groups[g][1]) for g in pools[-1].hot_sites
-                   if g in pools[-1].groups and pools[-1].groups[g][1] is not None]
-            lost = [g for g, expr in hot if expr.exact_eval(labels) not in out]
-            print("  pin-heat: %d of %d hot words pinned%s"
-                  % (len(hot) - len(lost), len(hot), "; NOT pinned: %s" % lost[:5] if lost else ""),
-                  flush=True)
-        return out, conflicts
-
-    _asmmod.resolve_pinned = _capture_resolve
-
-    import doomfj.selfreset as _selfreset
-    _real_emit = _selfreset.emit_reset_part
-
-    def _emit_reset_part(gen_dir, labels, pristine_get_word, *rest, **kw):
-        pinned_by_word = {addr // W: base for addr, base in live_pins["map"].items()}
-        stripped = len(pinned_by_word)
-
-        def unpinned_word(word_index):
-            value = pristine_get_word(word_index)
-            base = pinned_by_word.get(word_index)
-            return (value ^ base) if base else value
-
-        # A COLLAPSE HERE IS SILENT OTHERWISE. spread=4 exhausted the pool, almost every group got
-        # no block, and pinning fell from 25,701 words to 72 -- which builds fine, passes the gate,
-        # and measures like the un-pinned regression. Say it loudly instead.
-        expected = sum(1 for pool in pools for _ in pool.groups)
-        print("  reset: stripping the block base from %s pinned words before the LUT test"
-              % format(stripped, ","), flush=True)
-        if expected and stripped < expected // 10:
-            print("  *** PINNING COLLAPSED: %s pinned words against %s groups. The pool is almost "
-                  "certainly exhausted -- lower --pool-base or reduce --spread."
-                  % (format(stripped, ","), format(expected, ",")), flush=True)
-        return _real_emit(gen_dir, labels, unpinned_word, *rest, **kw)
-
-    _selfreset.emit_reset_part = _emit_reset_part
-
-    pools = []
-    real_assemble = fj.assemble
-    recorded = []
-
-    class SiteRecorder(BlockPool):
-        """the pool, recording each table's group, path and size at its pad, in encounter order"""
-
-        def defer(self, ops_alignment, table_ops, group, group_expr, labels_prefix):
-            if group is not None:
-                recorded.append((group, labels_prefix, table_ops, ops_alignment))
-            return super().defer(ops_alignment, table_ops, group, group_expr, labels_prefix)
-
-    def assemble_one_pass(*args, **kwargs):
-        """ONE expansion: BlockPool(one_pass=True) sizes its blocks from this expansion's own census (flipjump #369)"""
-        t0 = time.time()
-        pool = (SiteRecorder if a.record_sites else BlockPool)(
-            W, a.pool_base, span_bits=a.span_bits, spread=a.spread, spread_min_count=a.spread_min_count,
-            max_slot_ops=a.max_slot_ops, pin_broken=a.pin_broken, **({"heat": heat} if heat else {}), **_pack_kw(a))
-        pool.pin_exclude = _reset_owned          # NEVER PIN A WORD THE M1 SELF-RESET OWNS (see the placing pool)
-        pools.append(pool)
-        kwargs["table_pool"] = pool
-        kwargs["lzma_preset"] = a.lzma_preset
-        out = real_assemble(*args, **kwargs)
-        print("  one pass: %s tables deferred, %s alias words unresolved; the census: %s groups, %s tables; "
-              "%s declined (too wide for any slot); %ds"
-              % (format(pool.deferred, ","), format(pool.alias_unresolved, ","), format(len(pool.counts), ","),
-                 format(sum(pool.counts.values()), ","), format(pool.declined, ","), int(time.time() - t0)),
-              flush=True)
-        _preflight(pool, a)
-        if a.counts_cache:
-            census = pool.census()
-            _save_counts(a.counts_cache, a, {"counts": census.counts, "widths": census.widths,
-                                             "width_hist": census.width_hist, "alias": census.alias})
-        if heat:
-            print("  pin-heat: %s" % pool.heat_report(), flush=True)
-        if a.record_sites:
-            by_group = {}
-            for g, path, ops, align in recorded:
-                by_group.setdefault(pool.alias.get(g, g), []).append([path, ops, align])
-            blob = {"what": "every table the assembly reached, per canonical group, in encounter order: "
-                            "[macro-expansion path, table ops, alignment]",
-                    "program": _counts_sig(a), "tables": len(recorded), "groups": by_group}
-            with gzip.open(a.record_sites, "wt", encoding="utf-8") as fh:
-                json.dump(blob, fh)
-            print("  recorded %s tables in %s groups -> %s"
-                  % (format(len(recorded), ","), format(len(by_group), ","), a.record_sites), flush=True)
-            raise SystemExit(0)
-        return out
-
-    def assemble_blocked(*args, **kwargs):
-        return assemble_one_pass(*args, **kwargs)
-
-    fj.assemble = assemble_blocked
-    asmmod = _asmmod
-    real_resolve = _real_resolve
-    if a.no_pin:
-        asmmod.resolve_pinned = lambda exprs, labels, reserved_below=1024, exclude=None: ({}, 0)
-        print("PINNING OFF -- relocation only", flush=True)
-    import doomfj.build as build_module
-    assert build_module.fj.assemble is assemble_blocked, "build.py does not call fj.assemble"
-
     t0 = time.time()
-    try:
-        info = build_wall_renderer(ROOT / a.out, wad_path=str(ROOT / a.wad), mapname=a.map,
-                                   cfg=Config(), tier=a.tier)
-    finally:
-        fj.assemble = real_assemble
-        asmmod.resolve_pinned = real_resolve
-
+    info = build_wall_renderer(ROOT / a.out, wad_path=str(ROOT / a.wad), mapname=a.map, cfg=Config(), tier=a.tier,
+                               assembly=Assembly(lzma_preset=a.lzma_preset, pool=pool_knobs(a, heat)))
+    pools = info.pop("table_pools", [])
+    labels = info.pop("labels", None)
+    if labels_out:
+        write_labels(labels_out, labels)
     print(json.dumps(info, indent=2, default=str), flush=True)
     print("", flush=True)
+    assert pools, "the build made no table pool -- build_wall_renderer did not take the Assembly"
+    cells = info.get("pin_all_but") or []
+    print("  pin_all_but: %s cells -- the BYTE cells (m1.zerobyte jumps through them) %s and the pointer-read cells %s;"
+          " every other word may be pinned" % (len(cells), [c for c in cells if not isinstance(c, str)],
+                                               [c for c in cells if isinstance(c, str)]), flush=True)
+    for pool in pools:
+        print("  one pass: %s tables deferred, %s alias words unresolved; the census: %s groups, %s tables; "
+              "%s declined (too wide for any slot)"
+              % (format(pool.deferred, ","), format(pool.alias_unresolved, ","), format(len(pool.counts), ","),
+                 format(sum(pool.counts.values()), ","), format(pool.declined, ",")), flush=True)
+        _preflight(pool, a)
+        report_pins(pool, heat, labels)
+    last = pools[-1]
+    if a.counts_cache:
+        census = last.report.census
+        _save_counts(a.counts_cache, a, {"counts": census.counts, "widths": census.widths,
+                                         "width_hist": census.width_hist, "alias": census.alias})
+    if heat:
+        print("  pin-heat: %s" % last.heat_report(), flush=True)
+    if a.record_sites:
+        write_sites(a.record_sites, a, last)
     print("assemblies: %d; blocked per assembly: %s"
           % (len(pools), ", ".join(format(q.allocated, ",") for q in pools)), flush=True)
-    # ⚠ THIS USED TO COMPARE `allocated` AND CALL A MISMATCH "their addresses cannot agree".
-    # It does not follow, and on the two-pass game tier it cried wolf on every build: pass 2
-    # emits data derived from pass 1, so it legitimately reserves MORE tables than pass 1
-    # (measured 415,184 vs 416,903), while every address still matched -- the restore-set checks
-    # reported 0 labels moved and 0 values changed, and 42 frames came out byte-identical.
-    #
-    # `allocated` is a per-reservation counter (preprocessor.py:201,531,580). What determines an
-    # address is the BLOCK BASE MAP, and `_preallocate` builds that from the FROZEN counts in a
-    # deterministic order precisely so two assemblies agree -- its docstring says so: "allocation
-    # independent of the order macros are reached, which is what two assemblies of the same
-    # program need in order to agree". So compare the thing that decides addresses.
-    if len(pools) > 1:
-        base_maps = [{g: v[0] for g, v in q.groups.items()} for q in pools]
-        first = base_maps[0]
-        drift = []
-        for i, other in enumerate(base_maps[1:], start=1):
-            shared = set(first) & set(other)
-            moved = [g for g in shared if first[g] != other[g]]
-            if moved:
-                drift.append((i, len(moved), len(shared), sorted(moved)[:5]))
-        if drift:
-            for i, nmoved, nshared, sample in drift:
-                print("*** PASS %d MOVED %s OF %s SHARED BLOCK BASES -- addresses disagree: %s"
-                      % (i, format(nmoved, ","), format(nshared, ","), sample), flush=True)
-        else:
-            only = [len(set(m) - set(first)) for m in base_maps[1:]]
-            print("  block bases agree across all %d assemblies (%s shared groups%s)"
-                  % (len(pools), format(len(first), ","),
-                     "" if not any(only) else "; later passes add %s new groups" % only), flush=True)
-    last = pools[-1]
-    print("pin conflicts (aliased source-word expressions, un-pinned): %s"
-          % format(getattr(last, "pin_conflicts", 0), ","), flush=True)
-    print("runtime-reserved words skipped (stl.IO etc): %s"
-          % format(getattr(last, "reserved_words", 0), ","), flush=True)
+    print("pin conflicts (aliased source-word expressions, un-pinned): %s" % format(last.report.pin_conflicts, ","),
+          flush=True)
+    print("runtime-reserved words skipped (stl.IO etc): %s" % format(last.report.runtime_words, ","), flush=True)
     print("declined (too wide for any slot): %s" % format(last.declined, ","), flush=True)
     # BROKEN GROUPS is the number that matters, not the decline count: `pinned_words` excludes a
     # broken group ENTIRELY, so one declined table un-pins every sibling table in its group.
     print("broken groups: %s of %s (these lose their pin for ALL their tables)"
-          % (format(len(getattr(last, "broken_groups", ())), ","), format(len(last.counts), ",")), flush=True)
+          % (format(len(last.broken_groups), ","), format(len(last.counts), ",")), flush=True)
+    if last.report.unpins:
+        print("unpinned (a pin that could not hold), by why: %s" % dict(last.report.unpins), flush=True)
     if heat:
         print("pin-heat after the last assembly: %s" % last.heat_report(), flush=True)
     print("blocked: %s tables in %s groups; declined %s; ungrouped %s"

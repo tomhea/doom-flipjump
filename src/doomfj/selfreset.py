@@ -25,7 +25,6 @@ import json
 from pathlib import Path
 
 import flipjump as fj
-import flipjump.assembler.assembler as _asm
 
 from doomfj import screenwire as SW
 from doomfj.harness import W, FJM_LZMA_PRESET
@@ -137,35 +136,77 @@ def byte_arrays(bits, words_sorted, view_w, nss, pid_bytes: int = 1, ss_ratio: i
     return out
 
 
-def capture_labels(paths, out_fjm, lzma_preset=FJM_LZMA_PRESET, run_flags=0, io_mode=0, defines_file=None):
-    """Assemble, and return the USER label table without paying for the debug-only families.
+def capture_labels(paths, out_fjm, lzma_preset=FJM_LZMA_PRESET, flat_memory=False, io_mode="standard", defines=None,
+                   table_pool=None):
+    """Assemble, and return the USER label table (flipjump's `assemble` returns it; with no debugging file it leaves
+    out the debug-only families -- `:wflips:N` and `---:start:`, 16.1M + 1.7M entries on this program).
 
-    run_flags / io_mode go into the .fjm header (flipjump >= 1.6.0 at 342a3b9): how `fj --run` runs
-    the binary when given no options -- see build.standalone_run_header.
+    flat_memory / io_mode go into the .fjm header: how `fj --run` runs the binary when given no options -- see
+    build.standalone_run_header.
 
-    `defines_file` (M8 F1.5): the assembler's -D file (config.Config.emit_fj_defines: a wide-list map's
-    PTR_WIDE_BITS); None -- every 8-bit map -- makes the call it always made.
-
-    assembler.assemble calls save_debugging_labels unconditionally and it returns early on a None
-    path, so hooking it yields the labels for free while debugging_file_path=None keeps the
-    :wflips:N and ---:start: families (16.1M + 1.7M entries on this program) from being built at
-    all. The .fjm is byte-identical either way.
+    `defines` (M8 F1.5): the assembler's defines (config.Config.fj_defines: a wide-list map's PTR_WIDE_BITS); None --
+    every 8-bit map -- makes the call it always made. `table_pool`: flipjump's BlockPool for a blocked build
+    (build.Assembly), or None; a pool lays out ONE assembly, so pass a fresh one each call.
     """
-    got = {}
+    return fj.assemble([Path(p).resolve() for p in paths], Path(out_fjm), memory_width=W, show_progress=False,
+                       lzma_preset=lzma_preset, flat_memory=flat_memory, io_mode=io_mode, defines=defines,
+                       table_pool=table_pool)
 
-    def hook(_path, labels):
-        got.update(labels)
 
-    prev = _asm.save_debugging_labels
-    _asm.save_debugging_labels = hook
-    try:
-        fj.assemble([Path(p).resolve() for p in paths], Path(out_fjm), memory_width=W,
-                    print_time=False, lzma_preset=lzma_preset, run_flags=run_flags, io_mode=io_mode,
-                    **({"defines_file": Path(defines_file).resolve()} if defines_file else {}))
-    finally:
-        _asm.save_debugging_labels = prev
-    return got
+def declared_names(files, wanted) -> set:
+    """the names of `wanted` that the files declare as a label (`name:` opening a line) -- which global labels a
+    program WILL have, read before it is assembled (scan_declarations reads their extents too, and refuses what it
+    cannot read; this only asks whether they are there)"""
+    wanted = sorted(set(wanted))
+    if not wanted:
+        return set()
+    # _ONE_DECL on a stripped line, as one search over each file (the generated parts run to ~100M characters)
+    decl = re.compile(r"^[ \t]*(%s):" % "|".join(re.escape(n) for n in wanted), re.M)
+    found = set()
+    for f in files:
+        found.update(m.group(1) for m in decl.finditer(Path(f).read_text(encoding="utf-8")))
+    return found
 
+
+def pin_all_but_cells(declared, view_w, nss, pid_bytes: int = 1, ss_ratio: int = 2, pointer_cells: bool = True):
+    """flipjump BlockPool's `pin_all_but` for a program that declares the labels `declared`: the cells it reads or
+    writes RAW, which the blocking pass must never pin (a pinned word holds base + value).
+
+      * the BYTE arrays (BYTE_ARRAY_NAMES), over their REACHABLE cells only -- `(name, n)`, n cells of one op each:
+        `m1.zerobyte c` jumps THROUGH a byte cell into the pointer read table, so a base there sends it elsewhere.
+        sshead's n is nss (declared ss_ratio x), pclm's view_w x pid_bytes, sfflag's view_w; all three or none.
+      * with `pointer_cells`, every POINTER_READ_CELLS label the program declares, each to the next label (flipjump's
+        label-alone form; pointer_read_words' extent): the cells read and written through a pointer.
+
+    A name the program does not declare is never passed (flipjump refuses a pin_all_but label the program lacks).
+    The build cross-checks this list against the assembled labels (check_pin_all_but)."""
+    declared = set(declared)
+    arrays = [n for n in BYTE_ARRAY_NAMES if n in declared]
+    assert not arrays or len(arrays) == len(BYTE_ARRAY_NAMES), (
+        "pin_all_but: the program declares the byte arrays %s but not %s" % (
+            arrays, sorted(set(BYTE_ARRAY_NAMES) - set(arrays))))
+    expect = {"sshead": nss, "pclm": view_w * pid_bytes, "sfflag": view_w}
+    cells = [(n, expect[n]) for n in arrays]
+    if pointer_cells:
+        cells += [n for n in POINTER_READ_CELLS if n in declared]
+    return cells
+
+
+def check_pin_all_but(cells, labels, view_w, nss, pid_bytes: int = 1, ss_ratio: int = 2) -> None:
+    """after the assembly: the pin_all_but list a build passed agrees with the labels it got -- each byte array's
+    reachable cell count is what byte_arrays derives from its label extent (the geometry check), and every
+    POINTER_READ_CELLS label the program has was named (a declaration the scan missed would leave it pinnable)"""
+    bits = {k: int(v) for k, v in labels.items()}
+    byte_cells = {c[0]: c[1] for c in cells if not isinstance(c, str)}
+    if byte_cells:
+        words_sorted = sorted(v // W for v in bits.values())
+        derived = dict(byte_arrays(bits, words_sorted, view_w, nss, pid_bytes=pid_bytes, ss_ratio=ss_ratio))
+        assert derived == byte_cells, "pin_all_but: byte cells %s, the labels derive %s" % (byte_cells, derived)
+    named = {c for c in cells if isinstance(c, str)}
+    if named:
+        have = {n for n in POINTER_READ_CELLS if n in bits}
+        assert have == named, "pin_all_but: the program has the pointer cells %s, the build named %s" % (
+            sorted(have), sorted(named))
 
 
 def load_restore_set(path, labels, check_layout=True):

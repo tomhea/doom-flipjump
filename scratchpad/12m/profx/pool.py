@@ -12,7 +12,7 @@ import gzip
 import json
 import re
 
-from flipjump.assembler.preprocessor import BlockPool
+from flipjump.assembler.table_pool import BlockPool, HotSite
 
 W = 32
 # ship-gate 1b's knobs (docs/ship-gate.md): the ones that enter _block_bits / _preallocate
@@ -107,7 +107,15 @@ def load_heat(path):
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as fh:
         doc = json.load(fh)
-    return {g: [tuple(site) for site in sites] for g, sites in doc["groups"].items()}
+    return {g: [HotSite(*site) for site in sites] for g, sites in doc["groups"].items()}
+
+
+def block_pool(memory_width, k, heat=None):
+    """flipjump's BlockPool for these knobs -- named as the build command names them (build_blocked.py: --span-bits is
+    a length from --pool-base, --spread / --spread-min-count are spread_factor / spread_min_tables)"""
+    return BlockPool(memory_width, k["pool_base"], pool_end=k["pool_base"] + k["span_bits"],
+                     spread_factor=k["spread"], spread_min_tables=k["spread_min_count"],
+                     max_slot_ops=k["max_slot_ops"], heat=heat or None)
 
 
 def reconstruct(counts_path, knobs=None, heat=None):
@@ -117,9 +125,7 @@ def reconstruct(counts_path, knobs=None, heat=None):
     k = dict(KNOBS)
     k.update(knobs or {})
     fr = load_counts(counts_path)
-    pool = BlockPool(W, k["pool_base"], span_bits=k["span_bits"], spread=k["spread"],
-                     spread_min_count=k["spread_min_count"], max_slot_ops=k["max_slot_ops"],
-                     **({"heat": heat} if heat else {}))
+    pool = block_pool(W, k, heat)
     pool.alias = dict(fr["alias"])
     pool.lay_out(dict(fr["counts"]), {g: dict(h) for g, h in fr["width_hist"].items()})   # place_deferred's layout step
     return pool, fr

@@ -2,7 +2,7 @@
 
 A map whose runtime things + pools + drops pass 254 (E1M3 341, E1M4 345, E1M5 370) keeps its per-leaf lists in the
 same cells at 12 bits (Config.LIST_ID_BITS = 12) and reads / writes them through flipjump's DUAL decoder table
-(`-D hex.pointers.PTR_WIDE_BITS=12`, Config.emit_fj_defines). This RUNS every piece a wide map adds, each in its own
+(`-D hex.pointers.PTR_WIDE_BITS=12`, Config.fj_defines). This RUNS every piece a wide map adds, each in its own
 image assembled with that defines file, each against the model's own code -- never a Python model of the fj ops:
 
   1. the relink (`sim.leaf_link_w` / `sim.leaf_unlink_w`) at NT = 300 -- ids 0 .. 299 with 254 / 255 / 256 / 257
@@ -62,7 +62,7 @@ def _src(name: str, mut=None) -> str:
 
 def _assemble(tmp: Path, name: str, prog: str, sim_mut=None, m1_mut=None, wide=True) -> Path:
     """one image: fj_consts, sim, sim_wide (the twins and m1.zerocell12; mutated or not -- `sim_mut` and
-    `m1_mut` both apply to it), the program -- with the wide-list map's defines file (Config.emit_fj_defines at
+    `m1_mut` both apply to it), the program -- with the wide-list map's defines (Config.fj_defines at
     LIST_ID_BITS 12), as build.py assembles a wide map"""
     files = [Config().emit_fj_consts(tmp / "fj_consts.fj"), FJ / "sim.fj"]
     for fname, mut in (("sim_wide.fj", list(sim_mut or ()) + list(m1_mut or ())),):
@@ -73,9 +73,8 @@ def _assemble(tmp: Path, name: str, prog: str, sim_mut=None, m1_mut=None, wide=T
     src.write_text(prog, encoding="utf-8")
     files.append(src)
     out = tmp / (name + ".fjm")
-    defs = WIDE.emit_fj_defines(tmp / "fj_defines.fj") if wide else None
-    fj.assemble([Path(f).resolve() for f in files], out, memory_width=W, print_time=False,
-                **({"defines_file": defs.resolve()} if defs else {}))
+    fj.assemble([Path(f).resolve() for f in files], out, memory_width=W, show_progress=False,
+                defines=WIDE.fj_defines() if wide else None)
     return out
 
 

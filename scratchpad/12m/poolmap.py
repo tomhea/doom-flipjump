@@ -89,12 +89,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from flipjump.assembler.preprocessor import BlockPool                    # noqa: E402
 from flipjump.fjm.fjm_reader import read_fjm_header                      # noqa: E402
 from flipjump.utils.exceptions import FlipJumpReadFjmException           # noqa: E402
 
 import fjmsize                                                           # noqa: E402
-from profx.pool import load_heat                                         # noqa: E402
+from profx.pool import block_pool, load_heat                             # noqa: E402
 # the signature, and what it hashes, must not drift from the builder's -- import it, never copy it
 from build_blocked import _counts_sig, _load_counts                      # noqa: E402
 
@@ -130,9 +129,7 @@ def split_at(segments, pool_base_words):
 
 def probe_pool(memory_width, counts, widths, width_hist, alias, knobs):
     """a BlockPool that only PRICES: its census laid out (place_deferred's layout step), nothing is assembled"""
-    pool = BlockPool(memory_width, knobs["pool_base"], span_bits=knobs["span_bits"], spread=knobs["spread"],
-                     spread_min_count=knobs["spread_min_count"], max_slot_ops=knobs["max_slot_ops"],
-                     **({"heat": knobs["heat_list"]} if knobs.get("heat_list") else {}))
+    pool = block_pool(memory_width, knobs, knobs.get("heat_list"))
     pool.alias = dict(alias or {})
     pool.lay_out(dict(counts), {g: dict(h) for g, h in width_hist.items()})
     return pool

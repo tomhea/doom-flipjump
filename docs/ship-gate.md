@@ -299,7 +299,8 @@ knobs into `build_wall_renderer(..., assembly=build.Assembly(lzma_preset, pool=.
 whose `pin_all_but` is the cells the program reads raw (`selfreset.pin_all_but_cells`: the byte arrays over their
 reachable cells and every `POINTER_READ_CELLS` label the emitted program declares -- the words `--pin-state-cells`
 always left unpinned), and the pins, the census and `--record-sites` are read off `pool.report`. The labels are what
-flipjump's `assemble` returns. It needs flipjump >= 62d93c4.
+flipjump's `assemble` returns. It needs flipjump >= 6167553 (branch `1.6.0-cr-fixes`: `table_pool` moved to
+`flipjump.assembler.inner_classes`; the type fixes changed no output -- E1M8 rebuilt on it BYTE-IDENTICAL, `9311cd67`).
 
 `build_labeled.py` wraps `build_blocked.py` and writes the label table (everything after `--` is
 `build_blocked.py`'s own arguments; `--labels` is the wrapper's). The label table it writes is

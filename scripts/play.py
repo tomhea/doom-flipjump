@@ -457,12 +457,13 @@ class Steer:
     # per-map overrides of the knobs above (BOT_CFG still overrides both): a tactic that helps one map and moves the other
     # maps' pinned plays is that map's alone
     MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True, "AMMO_LOW": 20, "AMMO_TYPES": (8,),
-                            "SAVE_R": 500, "SEEK_AVOID": ((450, 1250, 1100, 1900),)}}
+                            "SAVE_R": 500, "SEEK_AVOID": ((450, 1250, 1100, 1900),), "CHANNEL_COMMIT": True}}
     # SEEK_AVOID: boxes (x0, y0, x1, y1) whose items no detour seeks -- E1M4's stimpacks (496, 1840), (816, 1840) and
     # the near suit (912, 1520) lie among imps: the channel rule's detours there killed every play that reached the
     # armor leg (deaths at (530..1000, 1300..1840)); the route takes the health by the corridor instead (level_route
     # MAP_PICKUPS)
     SEEK_AVOID = ()
+    CHANNEL_COMMIT = False     # on a damaging floor no new detour starts (E1M4: see the seeks in _decide)
     # AMMO (E1M4's tactic; 0 / () off): under AMMO_LOW bullets with no shell, a dead zombieman's clip within DROP_R
     # (DROP_MOST cells) first, then -- under 5 -- the map's ammo up to AMMO_FAR_MOST cells off, AMMO_TYPES joining the
     # list (the backpack (1536, 240) beside the shell box (1424, 240)); SAVE_R: short of ammo, no shot past it and none
@@ -828,7 +829,11 @@ class Steer:
             return set(self.queue.pop(0))
         # ---- low health / no ammo: the nearest item first -- unless a monster is at arm's length
         foe = self._foe(c, x, y, f)
-        if (foe is None or foe[0] > 100) and not self.use_tap and not c.get("p_rad") and self.health                 and self.pieces and self.leg.get("to") not in ("health", "suit"):
+        # CHANNEL_COMMIT (a map tactic): standing on a damaging floor, no new detour -- the way on is shorter than the
+        # way back (E1M4: plays that took the medikit died on health / suit detours started mid-channel, (2363..2537,
+        # 1534..1596))
+        free = (foe is None or foe[0] > 100) and not (self.CHANNEL_COMMIT and self.pl.hurts(self.LR.cell_of(x, y)))
+        if free and not self.use_tap and not c.get("p_rad") and self.health                 and self.pieces and self.leg.get("to") not in ("health", "suit"):
             # (any leg: E1M4's channel is crossed on the way to an item -- the armor beyond it)
             hp = c.get("p_hp") or 0
             ahead = self.pieces[self.pi][self.wi:self.wi + 240]
@@ -843,7 +848,7 @@ class Steer:
                 # the channel at 26 health with no health left in reach and died of the floor at (1995, 1437))
                 self.log("    f%d: %d damaging cells ahead at %d health, no health in reach: the suit" % (f, burn, hp))
                 return kd
-        if (foe is None or foe[0] > 100) and not self.use_tap and self.leg["kind"] != "item":
+        if free and not self.use_tap and self.leg["kind"] != "item":
             hp = c.get("p_hp") or 0
             want = 40 + 10 * (self.seed_at(f) % 3)              # the seed moves the health threshold too
             if hp < want + 25 and self.health and self._seek_health(
@@ -855,7 +860,7 @@ class Steer:
             if low_ammo and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo", most=250 if dry else 70,
                                                            radius=3000 if dry else 900):
                 return kd
-        elif ((foe is None or foe[0] > 100) and not self.use_tap and self.ITEM_SEEK_HP
+        elif (free and not self.use_tap and self.ITEM_SEEK_HP
               and str(self.leg.get("to")).startswith("item:")
               and (self.leg.get("cells0", 0) >= self.ITEM_SEEK_LEN or f - self.floor_f < self.FLOOR_SEEK_F)):
             # a ROUTE pickup's leg (not a detour of the steering's own) at very low health: the health first, as on
@@ -869,7 +874,7 @@ class Steer:
                     f, x, y, self.ammo, "ammo", most=250, radius=3000):
                 self.log("    f%d: (the ammo above: dry on a route pickup's leg, ITEM_SEEK_HP)" % f)
                 return kd
-        if (self.AMMO_LOW and (foe is None or foe[0] > 100) and not self.use_tap
+        if (self.AMMO_LOW and free and not self.use_tap
                 and self.leg.get("to") not in ("ammo", "drop", "health", "suit")):
             # AMMO (a map tactic): short of bullets with no shell -- a clip a dead zombieman dropped near by first,
             # then the map's ammo FAR off when nearly dry (the backpack and shell box east, AMMO_TYPES)

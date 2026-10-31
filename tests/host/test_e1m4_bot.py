@@ -249,3 +249,18 @@ def test_e1m4_route_takes_the_health_by_the_corridor(mods):
         lr.MAP_PICKUPS.update(saved)
     assert not [g for g in legs if g["to"] in ("item:2011", "item:2012")], "CONTROL: health legs with no map entry"
     assert set(lr.MAP_PICKUPS) == {"E1M4"}                     # every other map's route is the type budgets' alone
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_in_the_channel_no_new_detour(mods, on):
+    """CHANNEL_COMMIT (E1M4): standing on the nukage at 15 health, no detour starts -- the way on is shorter; CONTROL:
+    CHANNEL_COMMIT off -> the same cells start one"""
+    play, st, li = _steer(mods, LONG)
+    st.CHANNEL_COMMIT = on
+    x, y = 2537, 1589
+    assert st.pl.hurts(st.LR.cell_of(x, y))
+    st.replan(x, y, "test")
+    n = len(st.legs)
+    st.decide(100, _cells(st, x, y, 15))
+    added = len(st.legs) - n
+    assert added == (0 if on else 1), "CONTROL: no detour with the rule off" if not on else "a detour in the channel"

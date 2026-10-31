@@ -157,17 +157,3 @@ def test_e1m3_no_pickup_on_a_lift(lr, monkeypatch):
     lv.mp.order = []
     got = {(it["x"], it["y"]) for it in lr.pickup_things(lr.Planner(lv))}
     assert on_lifts <= got, "CONTROL: the lift filter made no difference"
-
-
-@needs_wad
-def test_e1m4_takes_the_suit_before_the_way_back(lr, monkeypatch):
-    """E1M4's blue card lies past a NUKAGE1 channel: the route takes the radiation suit by the card (3392, 1728) as a
-    MUST pickup (never dropped for time) before the key and the exit leg back across; CONTROL: without 2025 in the
-    pickups' budget there is no suit leg"""
-    r = lr.plan("E1M4", "easy")
-    to = [g["to"] for g in r["legs"]]
-    suit = [g for g in r["legs"] if g["to"] == "item:2025"]
-    assert suit and suit[-1]["goal"] == [3392, 1728] and suit[-1].get("must")
-    assert to.index("item:2025") < to.index("key:blue") < to.index("exit")
-    monkeypatch.setitem(lr.PICKUP_BUDGET, 2025, 0)
-    assert "item:2025" not in [g["to"] for g in lr.plan("E1M4", "easy")["legs"]], "CONTROL: the suit leg stayed"

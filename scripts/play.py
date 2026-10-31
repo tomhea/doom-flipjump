@@ -458,7 +458,7 @@ class Steer:
     # maps' pinned plays is that map's alone
     MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True, "AMMO_LOW": 20, "AMMO_TYPES": (8,),
                             "SAVE_R": 300, "SEEK_AVOID": ((450, 1250, 1100, 1900),), "CHANNEL_COMMIT": True,
-                            "CROSS_HP": 50, "SEEK_MAX_BURN": 8, "DROP_LOW": 60, "SAVE_LOW": 40}}
+                            "CROSS_HP": 50, "SEEK_MAX_BURN": 8, "DROP_LOW": 60, "SAVE_LOW": 40, "CROSS_AMMO": 20}}
     # SEEK_AVOID: boxes (x0, y0, x1, y1) whose items no detour seeks -- E1M4's stimpacks (496, 1840), (816, 1840) and
     # the near suit (912, 1520) lie among imps: the channel rule's detours there killed every play that reached the
     # armor leg (deaths at (530..1000, 1300..1840)); the route takes the health by the corridor instead (level_route
@@ -466,6 +466,7 @@ class Steer:
     SEEK_AVOID = ()
     CHANNEL_COMMIT = False     # on a damaging floor no new detour starts (E1M4: see the seeks in _decide)
     CROSS_HP = 0               # > 0: at this health or more, a damaging stretch ahead -> no ammo detour (go now)
+    CROSS_AMMO = 0             # > 0: ... but only with this many bullets (or a shell); under it, the far ammo first
     SEEK_MAX_BURN = None       # a detour (any seek) crosses at most this many damaging cells (None: no cap) -- E1M4:
     #                            the damaging-stretch rule sent a 13-health play to the medikit beyond the channel, and
     #                            ammo detours after the medikit crossed the channel back west (dead at (1780, 957))
@@ -843,8 +844,13 @@ class Steer:
         # CROSS_HP (a map tactic): healthy, with a long damaging stretch on the way ahead -- no AMMO detour: go now.
         # E1M4: a play reached the channel's leg at 93 health, then spent 5,000 frames on ammo detours back west and
         # crossed at 13 (dead of the floor at (2433, 1596))
-        go_now = bool(self.CROSS_HP and (c.get("p_hp") or 0) >= self.CROSS_HP and self.pieces and sum(
-            1 for q in self.pieces[self.pi][self.wi:self.wi + 240] if self.pl.hurts(self.LR.cell_of(*q))) > 20)
+        burn_ahead = (sum(1 for q in self.pieces[self.pi][self.wi:self.wi + 240] if self.pl.hurts(self.LR.cell_of(*q)))
+                      if (self.CROSS_HP or self.CROSS_AMMO) and self.pieces else 0)
+        # CROSS_AMMO (a map tactic): not into the stretch short of ammo -- an imp stands in E1M4's channel and blocks it;
+        # seed 7 reached its mouth at 71 health with 6 bullets, stuck against the imp and died (2693, 1497)
+        armed = (c.get("am_clip") or 0) >= self.CROSS_AMMO or bool(c.get("am_shell"))
+        go_now = bool(self.CROSS_HP and (c.get("p_hp") or 0) >= self.CROSS_HP and burn_ahead > 20 and armed)
+        fetch_first = bool(self.CROSS_AMMO and burn_ahead > 20 and not armed)
         if free and not self.use_tap and not c.get("p_rad") and self.health                 and self.pieces and self.leg.get("to") not in ("health", "suit"):
             # (any leg: E1M4's channel is crossed on the way to an item -- the armor beyond it)
             hp = c.get("p_hp") or 0
@@ -903,7 +909,7 @@ class Steer:
                 if drops and self._seek_health(f, x, y, drops, "drop", most=self.DROP_MOST, radius=self.DROP_R):
                     self.log("    f%d: (the drop above: %d bullets, AMMO_LOW)" % (f, clip))
                     return kd
-                if clip < 5 and not shell and not go_now and self.ammo and self._seek_health(
+                if (clip < 5 or fetch_first) and not shell and not go_now and self.ammo and self._seek_health(
                         f, x, y, self.ammo, "ammo", most=self.AMMO_FAR_MOST, radius=4000):
                     self.log("    f%d: (the ammo above: far off, %d bullets, AMMO_LOW)" % (f, clip))
                     return kd

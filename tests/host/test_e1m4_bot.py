@@ -297,7 +297,7 @@ def test_healthy_before_the_channel_no_ammo_detour(mods, cross):
     """CROSS_HP (E1M4: 50): at 80 health with the channel ahead and no ammo, no ammo detour -- go now (a play spent 5,000
     frames on ammo detours west at 93 health and crossed at 13); CONTROL: CROSS_HP 0 -> an ammo detour"""
     play, st, li = _steer(mods, LONG)
-    st.CROSS_HP = cross
+    st.CROSS_HP, st.CROSS_AMMO = cross, 0                      # (CROSS_HP alone)
     x, y = 1768, 1096
     st.replan(x, y, "test")
     c = _cells(st, x, y, 80)
@@ -346,7 +346,7 @@ def test_a_drop_is_taken_before_the_channel(mods, low):
     st.replan(x, y, "test")
     k = next(i for i, kind in enumerate(st.drop_kind) if kind == 2007)
     dx, dy = st.pieces[0][6]
-    c = _fight_cells(st, x, y, 0, x, clip=0, shell=0)
+    c = _fight_cells(st, x, y, 0, x, clip=30, shell=0)  # armed: CROSS_HP's go-now holds
     c["p_hp"] = 80
     c["mon_active"] = [0] * len(st.mtype)
     c["thpos_rt"][len(c["thpos_rt"]) - len(st.droppers) + k] = (((int(dx) << 16) & 0xFFFFFFFF)
@@ -354,3 +354,17 @@ def test_a_drop_is_taken_before_the_channel(mods, low):
     c["mdrop"] = tuple(1 if i == k else 0 for i in range(len(st.droppers)))
     st.decide(100, c)
     assert (st.legs[st.li]["to"] == "drop") == bool(low), st.legs[st.li]["to"]
+
+
+@pytest.mark.parametrize("cross_ammo", [20, 0])
+def test_short_of_ammo_before_the_channel_fetches_first(mods, cross_ammo):
+    """CROSS_AMMO (E1M4: 20): at the channel's mouth with 80 health and 6 bullets, the far ammo first (an imp blocks the
+    channel: seed 7 went in with 6 and died there); CONTROL: CROSS_AMMO 0 -> CROSS_HP's go-now, no detour"""
+    play, st, li = _steer(mods, LONG)
+    st.CROSS_AMMO = cross_ammo
+    x, y = 1768, 1096
+    st.replan(x, y, "test")
+    c = _cells(st, x, y, 80)
+    c.update({"am_clip": 6, "am_shell": 0})
+    st.decide(100, c)
+    assert (st.legs[st.li]["to"] == "ammo") == bool(cross_ammo), st.legs[st.li]["to"]

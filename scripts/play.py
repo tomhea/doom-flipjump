@@ -328,8 +328,8 @@ class Player:
                     if missing:
                         raise Mismatch("the oracle names cells the probe cannot read: %s" % missing)
                     state["names"] = sorted(exp)          # the steering sees exactly what the model run sees
-                got = pr.read_cells(state["names"])
-                bad = {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v}
+                got = pr.read_arrays(state["names"])
+                bad = {k: (got.get(k), v) for k, v in exp.items() if not P.same_reading(got.get(k), v)}
                 if fr["drawn"] == "world" and pool is not None:
                     # the world picture in a worker (the same p2a_gate.picture, its own Oracle): compared when it
                     # comes back, a few frames on -- the first parting frame is still the one reported
@@ -349,7 +349,7 @@ class Player:
                                        "palette": None if wpal == pal else [pal, wpal, fr["pal"]]}
                     out["verdict"] = "mismatch"
             else:
-                got = pr.read_cells(names_steer)
+                got = pr.read_arrays(names_steer)
             rec.update(cells=got, pic=pic, pal=pal)
             state["prev"] = got
             out["frames"] = f + 1
@@ -398,6 +398,7 @@ class Player:
         out["seconds"] = time.time() - t0
         out["t_binary"] = out["seconds"] - out["t_oracle"]
         out["ops"] = r.ops
+        out["frame_ops"] = p.frame_ops()        # M8 (the owner, 2026-10-29): the playthrough's speed set reads them
         return out
 
 
@@ -458,7 +459,8 @@ class Steer:
     # maps' pinned plays is that map's alone
     MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True, "AMMO_LOW": 20, "AMMO_TYPES": (8,),
                             "SAVE_R": 300, "SEEK_AVOID": ((450, 1250, 1100, 1900),), "CHANNEL_COMMIT": True,
-                            "CROSS_HP": 50, "SEEK_MAX_BURN": 8, "DROP_LOW": 60, "SAVE_LOW": 40, "CROSS_AMMO": 20}}
+                            "CROSS_HP": 50, "SEEK_MAX_BURN": 8, "DROP_LOW": 60, "SAVE_LOW": 40, "CROSS_AMMO": 20},
+                   "E1M7": {"SKIP_ITEMS": (2002,)}}
     # SEEK_AVOID: boxes (x0, y0, x1, y1) whose items no detour seeks -- E1M4's stimpacks (496, 1840), (816, 1840) and
     # the near suit (912, 1520) lie among imps: the channel rule's detours there killed every play that reached the
     # armor leg (deaths at (530..1000, 1300..1840)); the route takes the health by the corridor instead (level_route
@@ -490,6 +492,10 @@ class Steer:
     FLOOR_SEEK_F = 120         # ... or any pickup leg this many frames after a moved floor joined the world: E1M4's
     #                            yellow card lowers the way to two medikits 22-27 cells off, and the clip-box leg after
     #                            it (62 cells) walked away from them at 1 health
+    # the route's pickup legs this map's play skips (item types; () none): E1M7's chaingun (352, 1504) is a 127-cell
+    # detour into a room of imps, demons and sergeants -- every play of the 2026-10-30 model search (seeds 0..4 and their
+    # schedules, 14 attempts) died there or on the health detour beside it, at 23..48 health
+    SKIP_ITEMS = ()
 
     def __init__(self, route: dict, lv=None, log=print, seed: int = 0):
         sys.path.insert(0, str(ROOT / "scripts"))
@@ -504,7 +510,8 @@ class Steer:
         self.lv = lv or LR.Level(route["map"], route.get("wad"), route["skill"])
         self.pl = LR.Planner(self.lv)
         self.route = route
-        self.legs = [dict(g, cells0=len(g["path"] or ())) for g in route["legs"]]    # cells0: the planned length
+        self.legs = [dict(g, cells0=len(g["path"] or ())) for g in route["legs"]    # cells0: the planned length
+                     if not (g["kind"] == "item" and int(str(g["to"]).split(":")[-1] or 0) in self.SKIP_ITEMS)]
         self.log = log
         self.seed = seed
         self.li = 0

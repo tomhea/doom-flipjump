@@ -1,0 +1,22 @@
+HURT GATE -- 7 scenarios (MONSTER_MODE final, PLAYER_MODE final), build/wave3/doom_e1m8.fjm
+
+H1 a zombieman's hitscan: hits and misses -- N/A: no candidate from E1M8's monsters (the kind it needs is absent)
+
+H2 an imp's fireball hits the player; the explosion is drawn -- N/A: no candidate from E1M8's monsters (the kind it needs is absent)
+
+H3 an imp's fireball into a wall (the player strafes out of its path) -- N/A: no candidate from E1M8's monsters (the kind it needs is absent)
+
+H4 a demon's bite through blue armor -- N/A: no candidate from E1M8's monsters (the kind it needs is absent)
+
+H5 green armor runs out: the armor type falls to 0 -- N/A: no candidate from E1M8's monsters (the kind it needs is absent)
+
+H6 the shotgun into a close monster: blood, and blood the full pool skips -- N/A: no candidate from E1M8's monsters (the kind it needs is absent)
+
+S1 saturation: every imp fires at once -- 8 in flight, the rest fizzle -- N/A: E1M8 has 0 imp slots; S1 needs 9 to have 8 in flight and a fizzle
+
+N/A on E1M8: 7 -- H1 H2 H3 H4 H5 H6 S1; counters no longer owed: ['mon_hits', 'mon_misses', 'mon_melee', 'proj_spawns', 'proj_impacts', 'proj_walls', 'fizzles', 'fx_spawns', 'fx_skipped', 'player_hurt', 'armor_out', 'explosion_frames', 'explosion_px', 'blood_px']
+
+TOTALS: 
+every event counter nonzero: yes; deaths 0
+
+HURT GATE PASS (5 s)

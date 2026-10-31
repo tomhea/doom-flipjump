@@ -1,0 +1,110 @@
+fjm    : build/wave3/doom_e1m8.fjm
+menu   : ['DOOM ON FLIPJUMP', '', 'NEW GAME', 'HELP', 'EXIT']   colours bg=0 text=4 hi=176 credit=101
+skills : ['EASY', 'MEDIUM', 'HARD'] -- hidden [7, 4, 0]; the boot skill is hard
+script : boot menu (no game): esc@2 no rule, HELP/EXIT @3-4, clamp @7 -> the skill screen @8 (medium), NEW GAME at easy@10 -> walk -> enter@14 (RESUME, W held) -> esc@17 -> the skill screen @22, clamp both ends, back, RESUME @28 (clamp @29), NEW GAME at hard@32, medium@38 -> the help from the world @40 (W held) -> esc@42 -> the menu's help @47, h@49 .. esc@55 -> the world's help @56-57 -> P9: EXIT @62, clamp @63, its help @66-67, esc to the world @69, enter on EXIT @75: the HALT
+  294,416,705 ops -> 88 frames
+  frame  0 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame  1 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame  2 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame  3 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame  4 MENU  main/M  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame  5 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame  6 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame  7 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame  8 MENU  skill 1 (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame  9 MENU  skill 0 (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 10 world easy    (2464.000, 360.000)  NEW GAME  BYTE-EXACT  state ok
+  frame 11 world easy    (2464.000, 344.000)  BYTE-EXACT  state ok
+  frame 12 world easy    (2464.000, 328.000)  BYTE-EXACT  state ok
+  frame 13 world easy    (2464.000, 312.000)  BYTE-EXACT  state ok
+  frame 14 MENU  main/R  (2464.000, 312.000)  BYTE-EXACT  state ok
+  frame 15 MENU  main/R  (2464.000, 312.000)  BYTE-EXACT  state ok
+  frame 16 MENU  main/R  (2464.000, 312.000)  BYTE-EXACT  state ok
+  frame 17 world easy    (2464.000, 296.000)  BYTE-EXACT  state ok
+  frame 18 world easy    (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 19 world easy    (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 20 MENU  main/R  (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 21 MENU  main    (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 22 MENU  skill 0 (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 23 MENU  skill 0 (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 24 MENU  skill 1 (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 25 MENU  skill 2 (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 26 MENU  skill 2 (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 27 MENU  main    (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 28 MENU  main/R  (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 29 MENU  main/R  (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 30 MENU  main    (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 31 MENU  skill 2 (2464.000, 280.000)  BYTE-EXACT  state ok
+  frame 32 world hard    (2464.000, 360.000)  NEW GAME  BYTE-EXACT  state ok
+  frame 33 world hard    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 34 MENU  main/R  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 35 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 36 MENU  skill 2 (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 37 MENU  skill 1 (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 38 world medium  (2464.000, 360.000)  NEW GAME  BYTE-EXACT  state ok
+  frame 39 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 40 MENU  help/g  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 41 MENU  help/g  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 42 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 43 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 44 MENU  main/R  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 45 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 46 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 47 MENU  help/m  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 48 MENU  help/m  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 49 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 50 MENU  help/m  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 51 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 52 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 53 MENU  help/m  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 54 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 55 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 56 MENU  help/g  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 57 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 58 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 59 MENU  main/R  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 60 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 61 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 62 MENU  main/M  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 63 MENU  main/X  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 64 MENU  main/M  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 65 MENU  main/X  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 66 MENU  help/m  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 67 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 68 MENU  main/M  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 69 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 70 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 71 MENU  main/R  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 72 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 73 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 74 MENU  main/M  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 75 MENU  map/m   (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 76 MENU  main/M  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 77 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 78 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 79 MENU  map/g   (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 80 MENU  map/g   (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 81 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 82 world medium  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 83 MENU  main/R  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 84 MENU  main    (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 85 MENU  main/H  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 86 MENU  main/M  (2464.000, 360.000)  BYTE-EXACT  state ok
+  frame 87 MENU  main/X  (2464.000, 360.000)  BYTE-EXACT  state ok
+
+  CONTROL: menu frames 66, world frames 22, frames that moved the player 6
+  CONTROL: the player did NOT move during the 3 menu frames with W held: ok
+  CONTROL: the screens shown: main menu yes, the skill screen at highlights [0, 1, 2] of 3
+  CONTROL (P3.4): the main menu on HELP yes, the help from the menu yes, from the world yes
+  CONTROL (P10): the main menu's pictures without a game yes, with one yes, RESUME highlighted yes
+  CONTROL (M8): the map page from the menu yes, from the world yes, the main menu on MAP yes; the page closed back to the main menu on MAP (frame 76) and to the world (frame 81): yes; the player did NOT move during the 2 page frames with W held: ok
+  CONTROL (P3.4): the player did NOT move during the 2 help frames with W held: ok
+  CONTROL (P3.4): the help closed back to the world (frame 42) and to the main menu on HELP (frame 49): yes
+  CONTROL: the first NEW GAME found the player walked away (yes), and every NEW GAME frame is the spawn view (yes)
+  CONTROL: the three skills' NEW GAME frames are told apart: yes, by the binary's g_skill cell [0, 2, 1]
+  CONTROL: distinct pictures: 19 of 88
+  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, g_live, every door's cells) equals the oracle's: yes, 88 frames
+  M7 P7: the mirror's player died on 0 frames -- none, as this walk expects
+  P9 HALT: the program HALTED after 88 frames (cause [0]); the oracle halts at frame 88
+
+M3 GATE: PASS -- byte- and state-exact on all 88 frames

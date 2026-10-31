@@ -1,0 +1,8 @@
+doomfj from C:\Users\tomhe\Documents\doom-wave3\src\doomfj\__init__.py
+emit_check E1M8 tier game stand-ins none (asserts ON)
+pid bake: 141 pairs baked, 255 addressable at PID_NIBBLES=2
+EMITTED in 350 s: {'entry': 26480, 'tables': 10794151, 'main': 1787992, 'segconsts': 3463946, 'walk': 9795453, 'state': 915967, 'banks': 21300926}
+HOT BLOCK: 8,755 ops of the 16,384-op window (7,629 ops of headroom)
+CONSTANT WIDTHS: every literal fits its register
+RESET composed: 2745 nibble cells, 320 byte cells, 132 persisted names (the map's own: ['mc_don'])
+PEAK working set 0.35 GB, peak private 0.35 GB

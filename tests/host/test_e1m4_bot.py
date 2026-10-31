@@ -168,7 +168,8 @@ def test_map_tactics_are_e1m4s_alone():
     """IGN_NEAR and CHANNEL_SUIT are off in the class (every other map's steering unchanged)"""
     play = _load("play", "scripts/play.py")
     assert play.Steer.IGN_NEAR == 0 and play.Steer.CHANNEL_SUIT is False
-    assert set(play.Steer.MAP_TACTICS) == {"E1M4"}
+    # E1M4's knobs are its own: E1M7's entry (SKIP_ITEMS) sets none of them
+    assert all(not set(play.Steer.MAP_TACTICS["E1M4"]) & set(t) for m, t in play.Steer.MAP_TACTICS.items() if m != "E1M4")
 
 
 # ---- AMMO / SAVE_R (E1M4's map tactics): the best plays ran dry for their last 700 frames and died punching -------

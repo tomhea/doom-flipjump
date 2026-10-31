@@ -48,7 +48,7 @@ def test_the_switch_is_per_map():
     assert map_cfg(Config(), "E1M2").AUTOMAP == 1 and A.has_page("E1M2")
     assert map_cfg(Config(), "E1M1").AUTOMAP == 1 and A.has_page("E1M1")
     assert MAP_CONFIG["E1M1"] == {"AUTOMAP": 1, "DOOR_NEIGHBOURS": "legacy"}
-    assert Config().AUTOMAP == 0 and not A.has_page("E1M6")   # a map MAP_CONFIG gives no page (wave 1 has one)
+    assert Config().AUTOMAP == 0 and not A.has_page("E2M1")   # a map MAP_CONFIG does not list (wave 3 gave E1M6 one)
     e1, base = map_cfg(Config(), "E1M1"), Config()
     assert [f.name for f in fields(Config) if getattr(e1, f.name) != getattr(base, f.name)] == ["AUTOMAP",
                                                                                                 "DOOR_NEIGHBOURS"]

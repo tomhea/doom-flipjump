@@ -167,11 +167,14 @@ for _m, _spread in LEVEL_SPREAD.items():
         size_cap_pct=None, size_note="the owner 2026-10-24: above 43% of 2^27 is OK", trail_record=True,
         playthrough_skill="easy", build_min=15, recorded_census=_p.census,
         recorded_ref="none yet: the level is in its pipeline (docs/episode-plan.md 4)")
-# the levels shipped (docs/ship-gate.md 6): their recorded binary -- the creator's build must reproduce it to the byte
+# the levels shipped (docs/ship-gate.md 6, 7, 8, 9): their recorded binary -- the creator's build must reproduce it to the byte
 LEVEL_SHIPPED = {
     "E1M3": ("build/doom_e1m3_v1.fjm", "71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784"),
     "E1M5": ("build/doom_e1m5_v1.fjm", "4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2"),
     "E1M9": ("build/doom_e1m9_v1.fjm", "33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48"),
+    "E1M6": ("build/doom_e1m6_v1.fjm", "5f1abfea24b8fa162f2aeaece569e0eeaff9ff98507557a5fa193dca3142ac0f"),
+    "E1M8": ("build/doom_e1m8_v1.fjm", "9311cd67268c7e121ff3137e86ff86146888e3b1e6e0ad5b859a4ff64c553737"),
+    "E1M7": ("build/doom_e1m7_v1.fjm", "77466d1d306acb78b48baea01df45820fe0b9a4be6ee4dcfbe2b757cdbd0c0ec"),
 }
 for _m, (_out, _sha) in LEVEL_SHIPPED.items():
     _lo = _m.lower()
@@ -179,7 +182,9 @@ for _m, (_out, _sha) in LEVEL_SHIPPED.items():
         REGISTRY[_m], recorded_out=_out, recorded_sha256=_sha,
         recorded_labels="scratchpad/12m/atlas/%s_v1.labels.tsv.gz" % _lo,
         recorded_census="scratchpad/12m/_census_game_%s_v1.json.gz" % _lo,
-        recorded_ref="docs/ship-gate.md %s (v1, 2026-10-29)" % ("7" if _m == "E1M9" else "6"))
+        recorded_ref="docs/ship-gate.md %s (v1, %s)" % (
+            {"E1M9": "7", "E1M6": "8", "E1M8": "8", "E1M7": "9"}.get(_m, "6"),
+            {"E1M6": "2026-10-30", "E1M8": "2026-10-30", "E1M7": "2026-10-31"}.get(_m, "2026-10-29")))
 for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: placeholders until their level ships
     _p = profile(_m)
     REGISTRY[_m] = MapSpec(
@@ -263,7 +268,8 @@ def plan_map(spec: MapSpec, out_dir: Path) -> list[Step]:
         note="size cap %s" % ("%.0f%%" % spec.size_cap_pct if spec.size_cap_pct is not None
                               else "WAIVED: " + spec.size_note))
     add("playthrough", [PLAYTHROUGH, "--map", m] + bin_args
-        + (["--skill", spec.playthrough_skill] if spec.playthrough_skill else []),
+        + (["--skill", spec.playthrough_skill] if spec.playthrough_skill else [])
+        + ["--speed-json", "%s/%s_speed.json" % (logs, m)],     # the owner 2026-10-29: the level's speed set
         needs_fjm=True, inputs=(ASSET_WAD,), optional=PLAYTHROUGH)
     if spec.feature_tests:
         add("feature_tests", ["-m", "pytest", "-q", "-p", "no:cacheprovider"] + list(spec.feature_tests))
@@ -355,7 +361,13 @@ def judge(step: Step, spec: MapSpec, rc: int, text: str) -> tuple[str, dict, str
             met["passed"] = int(p.group(1))
         bad = re.search(r"\d+ (failed|errors?)\b", text)
         return ("PASS", met, "") if rc == 0 and p and not bad else ("FAIL", met, "rc %d" % rc)
-    # playthrough (its documented contract: the return code)
+    # playthrough (its documented contract: the return code) -- and the owner's speed set (2026-10-29: the level's
+    # playthrough, playthrough_gate.speed_record), held to CAP-22
+    sb = re.search(r"PLAYTHROUGH SPEED binding .*?: ([\d,]+) ops/frame", text)
+    if sb:
+        met["speed_binding"] = _num(sb.group(1))
+    if rc == 0 and sb and met["speed_binding"] > CAP_22:
+        return "FAIL", met, "CAP-22: the playthrough's speed binding %s > %s" % (met["speed_binding"], CAP_22)
     return ("PASS", met, "") if rc == 0 else ("FAIL", met, "rc %d" % rc)
 
 
@@ -651,6 +663,7 @@ def summarize(m: str, mrep: dict) -> dict:
     return {"status": status, "sha256": met("sha256").get("sha256"), "identical": met("sha256").get("identical"),
             "size_pct": met("gamespeed").get("size_pct"), "binding": met("gamespeed").get("binding"),
             "b0_binding": met("b0").get("b0_binding"), "ms_frame": met("msframe").get("ms_frame"),
+            "speed_binding": met("playthrough").get("speed_binding"),
             "base_ms": met("msframe").get("base_ms"), "verdict": met("msframe").get("verdict"),
             "wall_s": round(sum((v.get("wall_s") or 0) for v in st.values()), 1),
             "warnings": [k for k, v in st.items() if v.get("status") == "MISSING"]}
@@ -684,13 +697,13 @@ def write_report(report: dict, ctx: Context) -> None:
             report["est_min_to_run"] / 60, report["est_min_guessed"] / 60), ""]
     if "verdict" in report:
         L += ["**EPISODE: %s**" % report["verdict"], ""]
-    L += ["| map | status | sha256 | byte-identical | size % of 2^27 | binding | B0 binding | ms/frame | wall |",
-          "|---|---|---|---|---|---|---|---|---|"]
+    L += ["| map | status | sha256 | byte-identical | size % of 2^27 | binding | B0 binding | speed (playthrough) "
+          "| ms/frame | wall |", "|---|---|---|---|---|---|---|---|---|---|"]
     for m, mrep in report["maps"].items():
         s = mrep["summary"]
-        L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+        L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
             m, s["status"], f(s["sha256"] and s["sha256"][:16]), f(s["identical"]), f(s["size_pct"], "%.2f"),
-            f(s["binding"], "%d"), f(s["b0_binding"], "%d"), f(s["ms_frame"], "%.1f"),
+            f(s["binding"], "%d"), f(s["b0_binding"], "%d"), f(s.get("speed_binding"), "%d"), f(s["ms_frame"], "%.1f"),
             f(s["wall_s"] and round(s["wall_s"] / 60), "%s min")))
     warn = [(m, k) for m, mrep in report["maps"].items() for k in mrep["summary"]["warnings"]]
     if warn:

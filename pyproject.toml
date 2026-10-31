@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "doomfj"
 version = "0.0.0"
 description = "DOOM on FlipJump — host tools (WAD/LUT/map/texture compilers, reference model, build, harness)"
-requires-python = ">=3.10,<3.14"          # flipjump abi3 is py3.10+; 3.14 unsupported for pygame (§H)
+requires-python = ">=3.11"                # tested on 3.11 - 3.15, 3.15 the main one (CI: the shards + `pythons`)
 dependencies = ["flipjump[io]>=1.6.0", "pillow"]
 
 [project.optional-dependencies]

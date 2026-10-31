@@ -31,7 +31,6 @@ for q in (ROOT / "src", ROOT, ROOT / "scratchpad"):
     sys.path.insert(0, str(q))
 
 import flipjump as fj                                                    # noqa: E402
-import flipjump.assembler.assembler as _asm                              # noqa: E402
 from flipjump.interpreter.io_devices.FixedIO import FixedIO              # noqa: E402
 from doomfj.harness import W                                             # noqa: E402
 
@@ -39,25 +38,13 @@ DEFAULT_FILES = []
 
 
 def _assemble(text, tmp, name, files):
-    """Assemble `text`, returning (fjm_path, labels dict) -- the label table via the same
-    labels_resolve hook popcount_census uses, so `mstart`/`mend` come back resolved."""
+    """Assemble `text`, returning (fjm_path, labels dict) -- the label table flipjump's assemble returns, so
+    `mstart`/`mend` come back resolved."""
     src = tmp / (name + ".fj")
     src.write_text(text, encoding="utf-8")
     out = tmp / (name + ".fjm")
-    grabbed = {}
-    orig = _asm.labels_resolve
-
-    def spy(ops, labels, memory_width, fjm_writer, **kw):
-        grabbed.update({k: v for k, v in labels.items() if ":" not in k})
-        return orig(ops, labels, memory_width, fjm_writer, **kw)
-
-    _asm.labels_resolve = spy
-    try:
-        fj.assemble([Path(f).resolve() for f in files] + [src], out,
-                    memory_width=W, print_time=False)
-    finally:
-        _asm.labels_resolve = orig
-    return out, grabbed
+    labels = fj.assemble([Path(f).resolve() for f in files] + [src], out, memory_width=W, show_progress=False)
+    return out, {k: v for k, v in labels.items() if ":" not in k}
 
 
 def _program(prelude, body, data, n):

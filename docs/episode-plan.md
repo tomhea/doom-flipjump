@@ -155,6 +155,7 @@ step of all nine -- the 1.5-2 day estimate stands until the first real run repla
 | 2026-10-19 | plan approved; C1 started (branch `m8-runtime-ids`); CR follow-ups #149 (branch `m8-cr149`); PR #148 (E1M2 r4 + blocked63) in CI |
 | 2026-10-19 | the owner: no more RAM ("i cant buy more ram"); **2^27 words is a super hard limit** -- "Optimize the levels or even lose unimportant features". Started: ASSEMBLER MEMORY WORK (flipjump, branch `asm-memory`, target <= ~11 GB peak for an E1M2-sized program, output byte-identical) and SIZE WORK (branch `m8-size`: attribution, per-map projection, cuts, feature-loss proposals). Lessons survey: E1M7 projected ~32.8 GB / pool 157% at spread 1, E1M6 ~20.8 GB (estimates) |
 | 2026-10-19 | merged into `m8-episode`: the final creator (`scripts/build_episode.py`), the lessons (`docs/level-lessons.md`, 13 survey checks) |
+| 2026-10-31 | E1M3, E1M5, E1M6, E1M7, E1M8, E1M9 shipped v1 (#158, #159); the owner's plan: section 12 (E1M4's three wins, E1M6's profile and cuts, a placement profile for every level) |
 
 ## 10. Orchestration
 
@@ -185,3 +186,28 @@ step of all nine -- the 1.5-2 day estimate stands until the first real run repla
 | G15 | CI and the gates need per-map fixture wads (`tests/fixtures/freedoom_e1m2.wad` exists; E1M3..E1M9 do not) | the gate-tools agent extracts them the way E1M2's was made, under the Freedoom licence |
 | G16 | PR #148 (E1M2 r4 + blocked63) is not merged; `m8-episode` is built on it | merge #148 on green CI first; every wave PR targets main after it |
 | G17 | an agent can stop mid-work (context, error) | branches are pushed in steps; the integrator re-launches from the pushed branch |
+
+## 12. The owner's plan of 2026-10-31
+
+Where it stands: E1M3, E1M5, E1M6, E1M7, E1M8 and E1M9 ship v1 (`docs/ship-gate.md` 6-9); E1M4 is built and gated but
+no play reaches its exit. In order:
+
+1. **E1M4: three winning plays, ship the middle one.** Three agents in three worktrees play the model at easy:
+   `m8-e1m4bot` (the east: ammo, the nukage channel, health), `m8-e1m4-west` (the imp corridor at x ~ -2008, where 6
+   of 8 seeds die), `m8-e1m4-route` (what the exit requires; other route orders). Each win is a line in
+   `Documents/E1M4_WINS.md`. With three wins, each runs as the binary playthrough (the speed set); the one with the
+   MIDDLE binding ops/frame of the three is pinned (`DEFAULT_SEED`), its branch merged, and E1M4 ships v1. Every
+   steering change is E1M4's alone (`MAP_TACTICS`); the six pinned plays re-checked on the merged code.
+2. **E1M6 alone: profile, then cut the hot spots.** Profile E1M6's playthrough on the binary (where its 22.7M
+   ops/frame on msframe's walk, and its speed set's 20.2M, go); cut what provably changes no pixel (stops, not
+   budgets); every cut byte-exact on the gates, then msframe class S A/B against `shipped_e1m6` -- B SLOWER does not
+   ship. A cut in shared emitter code is checked on every shipped level before it ships anywhere. **E1M6's tours may
+   stay above 22M** (the owner: allowed); its speed set stays under CAP-22.
+3. **After E1M4 ships: EVERY level gets its own placement profile** (section 4, step 7, the speed pass): a profile
+   of the level's own playthrough -> its own pin-heat list (`--pin-heat`) -> a rebuild -> msframe class S A/B against
+   its `shipped_<map>` -> a byte-identical rebuild and a new `LEVEL_SHIPPED` row when it is faster. E1M1 included
+   (its heat list `heat_e1m1_adopt` stays unless the A/B says otherwise).
+
+Machine: until 22:00 on 2026-10-31 the owner uses the RAM -- only model plays (one process per agent, started only
+with >= 3 GB available) and host tests run; builds, binary runs, profiles, msframe and tests/fj wait for 22:00 and then
+go one at a time through `heavy.py`.

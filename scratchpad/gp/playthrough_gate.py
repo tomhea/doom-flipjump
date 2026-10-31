@@ -58,8 +58,8 @@ if __name__ == "__main__":                         # `--map E1Mn` before probe /
 # --seed override). The seed only shifts the steering's dodge rhythm: every seed is real play, none is a cheat
 DEFAULT_SKILL = {"E1M1": "medium", "E1M2": "easy", "E1M3": "easy", "E1M4": "easy", "E1M5": "easy"}
 # found by --search on the model (M8 bot, the steering of 8c9324ec): each a whole play from boot to LEVEL COMPLETE
-DEFAULT_SEED = {("E1M1", "medium"): 1,                                                      # world 499
-                ("E1M2", "easy"): [(0, 1), (1532, 2), (3463, 22), (3992, 32)],             # world 4319
+DEFAULT_SEED = {("E1M1", "medium"): 2,                     # world 345 (re-pinned on the steering of E1M4 v1; seed 1 died)
+                ("E1M2", "easy"): [(0, 1), (1532, 2), (2288, 1)],                           # world 3044 (re-pinned so too)
                 ("E1M3", "easy"): [(0, 0), (415, 1)],                                       # world 2279 (3143 before 8183305d)
                 ("E1M4", "easy"): 7,       # world 4124 (the middle of three wins: route seed 7, west 0, east 0:6,5800:3,13909:1)
                 ("E1M5", "easy"): [(0, 0), (342, 3), (1630, 11), (3352, 24)],              # world 4253

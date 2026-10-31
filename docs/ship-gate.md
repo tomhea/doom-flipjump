@@ -292,7 +292,16 @@ Until blocked51 the line read `--pool-base 0x60000000 --span-bits 0x9fffffe0` (e
 blocked52's first build moved it (blocked53 below). Every tool that reconstructs the pool reads the same two knobs:
 `poolmap.SHIP_GATE`, `profx/pool.KNOBS`, `profx/common.POOL_BASE_WORD` (9070b02) -- change all four places together.
 
-`build_labeled.py` wraps `build_blocked.py` with the label spy on (everything after `--` is
+**flipjump 1.6.0's API (62d93c4, 2026-10-31): the same line, nothing patched.** `build_blocked.py` passes the pool's
+knobs into `build_wall_renderer(..., assembly=build.Assembly(lzma_preset, pool=...))` (its ONE assembler argument;
+`--span-bits` is `pool_end = pool_base + span_bits`, `--spread` / `--spread-min-count` / `--pin-broken` are
+`spread_factor` / `spread_min_tables` / `pin_incomplete_groups`), the build gives each assembly a fresh `BlockPool`
+whose `pin_all_but` is the cells the program reads raw (`selfreset.pin_all_but_cells`: the byte arrays over their
+reachable cells and every `POINTER_READ_CELLS` label the emitted program declares -- the words `--pin-state-cells`
+always left unpinned), and the pins, the census and `--record-sites` are read off `pool.report`. The labels are what
+flipjump's `assemble` returns. It needs flipjump >= 62d93c4.
+
+`build_labeled.py` wraps `build_blocked.py` and writes the label table (everything after `--` is
 `build_blocked.py`'s own arguments; `--labels` is the wrapper's). The label table it writes is
 what every profile joins against -- keep it beside the binary. The counts cache is keyed by the
 emitter sources; a cache MISS runs the counting assembly first (+25 min) and is the expected case

@@ -52,6 +52,7 @@ those stubs. The self_reset body (two full assembles by construction) is deliber
 """
 
 import struct
+import types
 import sys
 from pathlib import Path
 
@@ -199,8 +200,8 @@ def _stub(monkeypatch, *, span=1 << 20, storage_mode="flat", parts=None):
     monkeypatch.setattr(B, "emit_wall_renderer", fake_emit)
     monkeypatch.setattr(B, "_span_words", lambda out: span)
     monkeypatch.setattr(B, "_resolve_sprite_wad", lambda mw, sw: mw)
-    monkeypatch.setattr(B.fj, "assemble", fake_assemble)
-    monkeypatch.setattr(B.fj, "run", fake_run)
+    # build.py's OWN `fj` name, not flipjump's functions: nothing of flipjump is patched
+    monkeypatch.setattr(B, "fj", types.SimpleNamespace(assemble=fake_assemble, run=fake_run))
     return rec
 
 

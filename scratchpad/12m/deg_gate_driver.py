@@ -1,44 +1,40 @@
-"""Shared machinery for the deg_gate wrappers -- and the negative controls (R9) their verdicts
-need before anyone cites them. (There were two: deg_gate_placed.py relocated the tables of chosen owner macros
+"""Shared machinery for the deg_gate wrapper (`deg_gate_blocked.py`) -- and the negative controls (R9) its verdict
+needs before anyone cites it. (There were two wrappers: deg_gate_placed.py relocated the tables of chosen owner macros
 through the pool's macro filter, which flipjump 1.6.0 removed -- the stl now declares the tables that move -- so it
 was deleted.)
 
-`deg_gate_blocked.py` (and, until 1.6.0, `deg_gate_placed.py`) are not copies of the gate: each installs a table
-pool into `flipjump.assemble` and then EXECUTES `scratchpad/deg_gate.py`, so whatever the gate
-checks, the driver checks. That claim rests entirely on the patch-and-restore below, which is why
-it lives here ONCE instead of twice -- the two drivers cannot drift apart on the part that makes
-their verdict mean anything. 35b2fbb ("4/4 byte-exact") and e79d15f cite these drivers; neither
-driver had, until now, a control showing it can still say FAIL.
+`deg_gate_blocked.py` is not a copy of the gate: it hands `scratchpad/deg_gate.py`'s own `run()` a table pool factory
+(`run(table_pool=...)`, which passes the pool to `flipjump.assemble(table_pool=)`) and the gate does the rest, so
+whatever the gate checks, the driver checks. NOTHING IS PATCHED (flipjump 1.6.0's API, 2026-10-31): this used to
+install the driver's closure AS `flipjump.assemble` and swap the assembler's `resolve_pinned` for `--no-pin`; the
+pool now goes in by argument, and `--no-pin` went with the patch (flipjump has no switch that blocks without
+pinning). 35b2fbb ("4/4 byte-exact") and e79d15f cite this driver.
 
-    python scratchpad/12m/deg_gate_blocked.py --selftest        # CHEAP: 2.1s, no E1M1 build
+    python scratchpad/12m/deg_gate_blocked.py --selftest        # CHEAP: seconds, no E1M1 build
     python scratchpad/12m/deg_gate_blocked.py --selftest-gate   # EXPENSIVE: one E1M1 assemble
 
 WHAT THE CHEAP ARM CONTROLS -- and what it only BORROWS. Its fixture half (the first five checks)
-is a port of flipjump-151's own unit test, `tests/unit/test_table_pool.py`
-::test_a_pinned_word_read_through_a_pointer_needs_the_callers_exclusion: same POINTER_PROGRAM, same
-inline / relocated / counting / refused / excluded sequence, same assertions, credited line by line
-below. Those control the ASSEMBLER's pin machinery, not this file; they are here so the checks that
+is a port of flipjump's own unit test, `tests/unit/test_table_pool.py` (a pinned word read through a pointer):
+same POINTER_PROGRAM, same inline / relocated / counting / unexcluded / excluded sequence, now on BlockPool's
+`pin_all_but`. Those control the ASSEMBLER's pin machinery, not this file; they are here so the checks that
 follow stand on a fixture known to still read a cell raw.
 
-What this file's OWN checks control is the plumbing, and each is defeated by a mutation:
-`run_gate` installs the driver's closure, and a gate that calls `fj.assemble` reaches its BODY; a
-gate's FAIL survives; the stock assembler and the real `resolve_pinned` come back; `--no-pin`
-suppresses a pin the real resolver would have granted; `verdict` refuses a vacuous run and only
-WARNS for an explicitly restricted one; and each of `--selftest-gate`'s four checks MISSes ALONE on
-one of seven stub gates -- every shape carries the NUMBER of checks it must defeat (0, 1, 1, 1, 1,
-2, 4), because the shapes are not all single-check and the table is what says which is which. Each
-driver adds checks on the pool IT builds (`cheap_selftest(extra=...)`), because this fixture is
-neither driver's program. The cheap arm is run on the driver's DEFAULT configuration whatever else
-is on the command line (`control_args`): a control whose verdict moves with a tuning flag is a
-control that can say NO for a reason of its own making.
+What this file's OWN checks control is the plumbing, and each is defeated by a mutation: `run_gate` hands the gate
+the driver's pool factory, and a gate that assembles reaches its BODY; a gate's FAIL survives; flipjump's `assemble`
+is left as it was; `verdict` refuses a vacuous run (no table moved, or tables moved and no word pinned) and only
+WARNS for an explicitly restricted one; and each of `--selftest-gate`'s four checks MISSes ALONE on one of seven
+stub gates -- every shape carries the NUMBER of checks it must defeat (0, 1, 1, 1, 1, 2, 4), because the shapes are
+not all single-check and the table is what says which is which. The driver adds checks on the pool IT builds
+(`cheap_selftest(extra=...)`), because this fixture is not its program. The cheap arm is run on the driver's DEFAULT
+configuration whatever else is on the command line (`control_args`): a control whose verdict moves with a tuning
+flag is a control that can say NO for a reason of its own making.
 
-WHAT NEITHER CHEAP ARM COVERS: the E1M1 program. The fixture has no byte arrays, so
-`_byte_cell_exclusion` cannot name a real cell -- blocked's own control shows the assembler CALLING
-it and the call failing on the fixture's label table -- no part of the real program is assembled,
-and the stub gates compare no pixels. Only the expensive arm and the gate itself touch those.
-CLAUDE.md rule 3: a fast pre-gate is for saving 20 minutes, never for replacing the gate.
+WHAT THE CHEAP ARM DOES NOT COVER: the E1M1 program. The fixture has no byte arrays, so the driver's cell list
+cannot name a real cell, no part of the real program is assembled, and the stub gates compare no pixels. Only the
+expensive arm and the gate itself touch those. CLAUDE.md rule 3: a fast pre-gate is for saving 20 minutes, never for
+replacing the gate.
 """
-import runpy
+import importlib.util
 import sys
 import tempfile
 from pathlib import Path
@@ -48,72 +44,46 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import flipjump as fj                                                   # noqa: E402
 from flipjump import FixedIO                                            # noqa: E402
-from flipjump.assembler import assembler as asmmod                      # noqa: E402
-from flipjump.assembler.preprocessor import BlockPool                   # noqa: E402
+from flipjump.assembler.table_pool import BlockPool                     # noqa: E402
 from flipjump.utils.exceptions import FlipJumpException                 # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
 
 DEG_GATE = ROOT / "scratchpad" / "deg_gate.py"
 
 
-def run_gate(assemble_fn, *, no_pin=False, gate=DEG_GATE):
-    """Install `assemble_fn` as `flipjump.assemble`, execute the gate, restore, return its status.
+def run_gate(table_pool, *, gate=DEG_GATE, labels_out=None):
+    """Load the gate module and call its `run(table_pool=..., labels_out=...)`; return its status.
 
-    The patch IS the wrapper: deg_gate.py itself runs, so it cannot fall behind the gate the way a
-    copy would. `assemble_fn` is tagged, so a control can prove the closure the driver built -- and
-    not the stock assembler -- is what the gate ran under; pass None to run the gate unpatched (the
-    placement driver's --off baseline).
-    """
-    if assemble_fn is not None:
-        assemble_fn._pooled = True
-    real_assemble = fj.assemble
-    real_resolve = asmmod.resolve_pinned
-    if assemble_fn is not None:
-        fj.assemble = assemble_fn
-    if no_pin:
-        # KEEP THE ASSEMBLER'S OWN SIGNATURE. `exclude=` has been passed since the pin_exclude hook
-        # landed here in 9a4122c (the stub at 9a4122c^ has no such parameter), and a stub without it
-        # raises TypeError instead of suppressing the pins. The parameter is the assembler's own:
-        # flipjump 1.5.1, tomhea/flipjump#360, merged as dd7ad31 in the flipjump-151 checkout.
-        asmmod.resolve_pinned = lambda exprs, labels, reserved_below=1024, exclude=None: ({}, 0)
+    The gate itself runs, so it cannot fall behind the gate the way a copy would. `table_pool(files) -> BlockPool`
+    is the driver's factory (None: the gate unpooled)."""
+    spec = importlib.util.spec_from_file_location("deg_gate_run", gate)
+    module = importlib.util.module_from_spec(spec)
     try:
-        runpy.run_path(str(gate), run_name="__main__")
+        spec.loader.exec_module(module)
+        status = module.run(table_pool=table_pool, labels_out=labels_out)
     except SystemExit as exit_code:
-        status = exit_code.code or 0
-    else:
-        status = 0
-    finally:
-        fj.assemble = real_assemble
-        asmmod.resolve_pinned = real_resolve
-    return status
+        status = exit_code.code
+    return status or 0
 
 
-def verdict(status, pool, *, no_pin=False, restricted=False):
+def verdict(status, pool, *, restricted=False):
     """The driver's exit status: the gate's verdict, AND non-vacuity of the pass under test.
 
     A pool that relocated nothing assembled the STOCK program, so a green gate says nothing about
-    blocking or placement -- and "4/4 byte-exact with blocking on" would be a false citation.
-    deg_gate_placed.py used to print "*** NOTHING RELOCATED" and still exit 0; that is a FAILURE
-    now. The gate's own non-zero status always wins, so this can only ever add a failure.
+    blocking -- and "4/4 byte-exact with blocking on" would be a false citation. A pool that relocated tables but
+    pinned no word (its final pin map, `report.pinned`) is placement, not blocking. The gate's own non-zero status
+    always wins, so this can only ever add a failure.
 
-    `restricted` is for a run whose macro/owner names were narrowed ON PURPOSE (deg_gate_blocked's
-    --macros / --owners, whose documented use is "does the fault live outside these names?"): an
-    empty match is that experiment's ANSWER, so it warns loudly and keeps the gate's own status
-    rather than turning a run that answered its question into exit 2. (flipjump 1.6.0 removed the
-    pool's macro filter those flags narrowed, and the flags with it: no caller passes it today.)
+    `restricted` is for a run narrowed ON PURPOSE (an empty match is that experiment's ANSWER): it warns loudly and
+    keeps the gate's own status rather than turning a run that answered its question into exit 2.
     """
     if pool is None:                    # the --off baseline: no pass to be vacuous about
         return status
     if pool.allocated == 0:
-        # STATE, not a diagnosis. A pool cannot tell afterwards WHY it holds nothing: a program
-        # with no declared (`__relocatable__`) table and a capacity of 0 both reach here, and whether the gate called
-        # fj.assemble at all is something only the driver's call list knows (both drivers keep one
-        # and report that case themselves). `declined` is the part that IS knowable here -- 0 means
-        # nothing was ever offered to `reserve`, non-zero means it was offered and refused.
         return _vacuous(status, restricted,
                         "the pool relocated NOTHING (0 allocated, %s declined) -- this run is the "
                         "stock program, whatever the gate said" % format(pool.declined, ","))
-    if isinstance(pool, BlockPool) and not no_pin and not pool.pinned_words():
+    if not pool.report.pinned:
         return _vacuous(status, restricted,
                         "%s tables were blocked but NO word was pinned -- the arm still writes an "
                         "address, so this is placement, not blocking" % format(pool.allocated, ","))
@@ -171,7 +141,7 @@ def capture(fn):
 
 POOL_BASE = 1 << 26     # above everything the fixture reaches, as in flipjump's own unit tests
 
-# THE FIXTURE, verbatim from flipjump-151 tests/unit/test_table_pool.py::POINTER_PROGRAM. `hex.xor
+# THE FIXTURE, verbatim from flipjump's tests/unit/test_table_pool.py::POINTER_PROGRAM. `hex.xor
 # e, d` arms d's jump word, so BlockPool pins d; the pointer read then flips a bit of that word and
 # jumps through it expecting `value*dw`, and a pinned word holds `base + value*dw` -- so it lands in
 # the block instead of the pointer decoder. Prints 0xD ^ 6 = 'B'.
@@ -190,62 +160,43 @@ p: hex.vec w/4, d
 """
 FIXTURE_OUTPUT = b"B"
 
+# the stub gates take deg_gate's interface: run(table_pool=None, labels_out=None) -> status
 _STUB_FAIL = """
-import sys
-import flipjump as fj
-print("(stub gate) pooled assemble installed: %s" % getattr(fj.assemble, "_pooled", False))
-print("(664,291,0x18000000): 1,234 ops  !! 7 px DIFFER")
-print("FAIL")
-sys.exit(1)
+def run(table_pool=None, labels_out=None):
+    print("(stub gate) pool factory handed in: %s" % (table_pool is not None))
+    print("(664,291,0x18000000): 1,234 ops  !! 7 px DIFFER")
+    print("FAIL")
+    return 1
 """
 _STUB_PASS = """
-import sys
-print("(stub gate) 4 viewpoints BYTE-EXACT")
-print("PASS")
-sys.exit(0)
+def run(table_pool=None, labels_out=None):
+    print("(stub gate) 4 viewpoints BYTE-EXACT")
+    print("PASS")
+    return 0
 """
 # deg_gate's one call into the assembler, on the fixture instead of on E1M1: `@SRC@` and `@OUT@` are
 # substituted with real paths when the stub is written. This is the stub that makes "--selftest
-# installs the same closure the gate runs under" a run rather than a sentence -- the closure is
+# hands the gate the same factory the gate runs under" a run rather than a sentence -- the factory is
 # ENTERED here; whether the fixture then assembles is the driver's business, not the control's.
 _STUB_ASSEMBLE = """
-import sys
 from pathlib import Path
 import flipjump as fj
 from doomfj.harness import W
 
-print("(stub gate) pooled assemble installed: %s" % getattr(fj.assemble, "_pooled", False))
-try:
-    fj.assemble([Path(@SRC@)], Path(@OUT@), memory_width=W, print_time=False)
-    print("(stub gate) fj.assemble returned")
-except BaseException as e:
-    cause, depth = e, 0
-    while (cause.__cause__ or cause.__context__) is not None and depth < 6:
-        cause, depth = (cause.__cause__ or cause.__context__), depth + 1
-    print("(stub gate) fj.assemble raised %s (%s: %s)"
-          % (type(e).__name__, type(cause).__name__, cause))
-sys.exit(0)
-"""
-# ONE definition of the pin request, because the stub gate puts it to the PATCHED resolver and the
-# control puts it to the real one: a control that built its own request could drift from the stub's
-# and compare two different questions. 4096 is above resolve_pinned's RESERVED_BELOW (1024), so the
-# real resolver pins it; 0x40 is the block base it is pinned to.
-_PIN_REQUEST = """
-class _Pin:
-    def exact_eval(self, labels):
-        return 4096
 
-
-PIN_ARGS = ({_Pin(): 0x40}, {})
-PIN_KW = {"exclude": lambda address, labels: False}
-"""
-_STUB_NO_PIN = _PIN_REQUEST + """
-import sys
-from flipjump.assembler import assembler as asmmod
-
-print("(stub gate) resolve_pinned(1 pin request, exclude=...) -> %r"
-      % (asmmod.resolve_pinned(*PIN_ARGS, **PIN_KW),))
-sys.exit(0)
+def run(table_pool=None, labels_out=None):
+    print("(stub gate) pool factory handed in: %s" % (table_pool is not None))
+    files = [Path(@SRC@)]
+    try:
+        fj.assemble(files, Path(@OUT@), memory_width=W, show_progress=False,
+                    table_pool=None if table_pool is None else table_pool(files))
+        print("(stub gate) fj.assemble returned")
+    except BaseException as e:
+        cause, depth = e, 0
+        while (cause.__cause__ or cause.__context__) is not None and depth < 6:
+            cause, depth = (cause.__cause__ or cause.__context__), depth + 1
+        print("(stub gate) fj.assemble raised %s (%s: %s)" % (type(e).__name__, type(cause).__name__, cause))
+    return 0
 """
 
 
@@ -263,21 +214,14 @@ def _stub_gate_run(lines, status):
     return run_driver
 
 
-def build_and_run(source, tmp, name, pool, assemble=None):
+def build_and_run(source, tmp, name, pool):
     """-> (output, ops, cause). A mutant that DIES is a rejection, not an error, so a broken run
-    comes back as an output that is not the fixture's rather than as an exception.
-
-    `assemble` (a driver's own closure) is called the way deg_gate calls it, i.e. WITHOUT
-    table_pool, so the closure is what chooses the pool.
-    """
+    comes back as an output that is not the fixture's rather than as an exception."""
     out = tmp / (name + ".fjm")
-    if assemble is None:
-        fj.assemble([source], out, memory_width=W, print_time=False, table_pool=pool)
-    else:
-        assemble([source], out, memory_width=W, print_time=False)
+    fj.assemble([source], out, memory_width=W, show_progress=False, table_pool=pool)
     io = FixedIO(b"")
     try:
-        stats = fj.run(out, io_device=io, print_time=False, print_termination=False)
+        stats = fj.run(out, io_device=io, show_progress=False, print_termination=False)
     except FlipJumpException as e:
         return None, 0, type(e).__name__
     return io.get_output(allow_incomplete_output=True), stats.op_counter, str(stats.termination_cause)
@@ -288,13 +232,9 @@ def control_args(parser, a):
 
     The cheap arm is a negative control, so its subject must be the driver's default configuration:
     read the user's own namespace and the control's verdict depends on what else is on the command
-    line. It did. `deg_gate_blocked.py --selftest --macros hex.xor` narrowed the very pool the
-    pin-exclusion check assembles under -- the fixture then ASSEMBLED instead of reaching the
-    exclusion -- and made the "plain" arm of the RESTRICTED check restricted, so the run printed two
-    MISSes that were artefacts of the flag; `--span-bits 0x100` and `deg_gate_placed.py --selftest
-    --top 1` printed one each. A tool whose whole job is to say whether a check has teeth may not
-    have a mode in which it says NO for a reason of its own making. The tuning flags are therefore
-    not applied to the control -- and it says so, rather than ignoring them quietly.
+    line. It did (`--span-bits 0x100` once printed a MISS that was an artefact of the flag). A tool whose whole job
+    is to say whether a check has teeth may not have a mode in which it says NO for a reason of its own making. The
+    tuning flags are therefore not applied to the control -- and it says so, rather than ignoring them quietly.
     """
     ctl = parser.parse_args([])
     ignored = sorted("--" + name.replace("_", "-") for name, default in vars(ctl).items()
@@ -305,13 +245,12 @@ def control_args(parser, a):
     return ctl
 
 
-def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
-    """The DEFAULT --selftest arm: mutate the assembler's pin exclusion, this file's plumbing, the
-    vacuity guard and the expensive arm's accounting, and require every mutation to be rejected.
+def cheap_selftest(driver, table_pool, *, body_ran=None, extra=None):
+    """The DEFAULT --selftest arm: mutate the pool's raw-cell list, this file's plumbing, the vacuity guard and the
+    expensive arm's accounting, and require every mutation to be rejected.
 
-    `body_ran()` -> how many times the driver's closure has run its BODY (not merely been called),
-    so the stub gate that calls `fj.assemble` can prove the closure was ENTERED. `extra(check, tmp,
-    src)` contributes the driver's own checks, on the pool only it builds.
+    `table_pool` is the driver's factory; `body_ran()` -> how many pools it has built, so the stub gate that assembles
+    can prove the factory was ENTERED. `extra(check, tmp, src)` contributes the driver's own checks.
     """
     tmp = Path(tempfile.mkdtemp(prefix="deg_gate_ctl_"))
     src = tmp / "pointer.fj"
@@ -323,60 +262,55 @@ def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
         log.append(bool(ok))
         print("  %-4s %-58s %s" % ("ok" if ok else "MISS", label, detail), flush=True)
 
-    # --- checks 1-5: flipjump-151's own test, ported. They control the ASSEMBLER, not this driver;
-    # they run here because every later check needs a fixture that still reads a cell raw, and
-    # alpha_check's lesson is that a stale fixture is a FAILURE, never a quiet SKIP.
+    # --- checks 1-5: flipjump's own test, ported. They control the ASSEMBLER, not this driver; they run here because
+    # every later check needs a fixture that still reads a cell raw (a stale fixture is a FAILURE, never a SKIP).
     inline, inline_ops, cause = build_and_run(src, tmp, "inline", None)
     check(inline == FIXTURE_OUTPUT, "fixture: the inline build prints %r" % FIXTURE_OUTPUT,
           "got %r in %d ops (%s)" % (inline, inline_ops, cause))
 
-    relocated = BlockPool(W, POOL_BASE)          # its tables move to blocks, and a veto keeps every word unpinned
-    relocated.pin_exclude = lambda address, labels: True
+    # every label of the program, each to the next: a pool told to leave all of them unpinned moves its tables and
+    # pins nothing (the labels: what flipjump's assemble returns)
+    every_cell = sorted(fj.assemble([src], tmp / "labels.fjm", memory_width=W, show_progress=False))
+    relocated = BlockPool(W, POOL_BASE, pin_all_but=every_cell)          # tables move; every cell stays unpinned
     out, ops, cause = build_and_run(src, tmp, "relocated", relocated)
-    check(out == inline and relocated.allocated > 0, "relocation alone leaves the output alone",
-          "%d tables, %d -> %d ops" % (relocated.allocated, inline_ops, ops))
+    check(out == inline and relocated.allocated > 0 and not relocated.report.pinned,
+          "relocation alone leaves the output alone",
+          "%d tables, %d pinned, %d -> %d ops" % (relocated.allocated, len(relocated.report.pinned), inline_ops, ops))
 
     counting = BlockPool(W, POOL_BASE)
-    fj.assemble([src], tmp / "counting.fjm", memory_width=W, print_time=False, table_pool=counting)
+    fj.assemble([src], tmp / "counting.fjm", memory_width=W, show_progress=False, table_pool=counting)
     check(counting.reads_words_raw, "fixture: it still reads a cell through hex.pointers",
           "reads_words_raw=%s, %d groups" % (counting.reads_words_raw, len(counting.counts)))
 
-    def blocked(exclude):
-        pool = BlockPool(W, POOL_BASE)
-        pool.pin_exclude = exclude
-        return pool
-
-    # flipjump 1.6.0 (the test this ports, as it is there now): without a declaration of the cells pointers reach,
-    # the assembler no longer REFUSES the program (1.5.1 did) -- it pins NO word, for the pointer runtime's sake, and
-    # the program is the same program, slower. The mutation is caught by that fallback, counted by its reason.
-    unexcluded = blocked(None)
+    # without pin_all_but the assembler does not know which cells are read raw: it pins NO word, for the pointer
+    # runtime's sake, and the program is the same program, slower. The mutation is caught by that fallback.
+    unexcluded = BlockPool(W, POOL_BASE)
     try:
         out, ops, cause = build_and_run(src, tmp, "unexcluded", unexcluded)
     except FlipJumpException as e:
         out, cause = None, "%s: %s" % (type(e).__name__, str(e)[:40])
     check(out == inline and list(unexcluded.unpins) == ["the pointer runtime"],
-          "MUTANT: no exclusion at all -> no word is pinned (the pointer runtime)",
+          "MUTANT: no raw-cell list at all -> no word is pinned (the pointer runtime)",
           "output %r, unpins %s" % (out, dict(unexcluded.unpins)))
 
-    # the veto sees the bit address of the cell's JUMP word, `d + w`
-    pool = blocked(lambda address, labels: address == labels["d"] + W)
+    # d is the cell the pointer reads: one op
+    pool = BlockPool(W, POOL_BASE, pin_all_but=[("d", 1)])
     out, ops, cause = build_and_run(src, tmp, "blocked", pool)
-    check(out == inline and pool.pinned_words(),
-          "blocking with the pointed-to cell excluded: the same program",
-          "%d pinned words, %d tables, %d ops" % (len(pool.pinned_words()), pool.allocated, ops))
+    check(out == inline and pool.report.pinned,
+          "blocking with the pointed-to cell left unpinned: the same program",
+          "%d pinned words, %d tables, %d ops" % (len(pool.report.pinned), pool.allocated, ops))
 
-    # --- and one mutation of the fixture flipjump's test does not make: an exclusion that names the
-    # WRONG cells, which is the failure mode `_byte_cell_exclusion` can actually have.
+    # --- and one mutation flipjump's test does not make: a list that names the WRONG cells (none), which is the
+    # failure mode the driver's cell list can actually have.
     try:
-        out, ops, cause = build_and_run(src, tmp, "unprotected",
-                                        blocked(lambda address, labels: False))
+        out, ops, cause = build_and_run(src, tmp, "unprotected", BlockPool(W, POOL_BASE, pin_all_but=[]))
     except FlipJumpException as e:
         out, cause = None, type(e).__name__
-    check(out != inline, "MUTANT: an exclusion omitting the pointed-to cell -> not that program",
+    check(out != inline, "MUTANT: a list omitting the pointed-to cell -> not that program",
           "output %r (%s)" % (out, cause))
 
-    # --- verdict: every branch of it, the BlockPool half included
-    inert = BlockPool(W, POOL_BASE, max_slot_ops=0)      # relocates nothing: no slot holds any table
+    # --- verdict: every branch of it
+    inert = BlockPool(W, POOL_BASE, max_slot_ops=0, pin_all_but=[("d", 1)])   # relocates nothing: no slot fits
     build_and_run(src, tmp, "inert", inert)
     status, text = capture(lambda: verdict(0, inert))
     check(status != 0 and "VACUOUS" in text, "MUTANT: a pool that relocated nothing is not a PASS",
@@ -384,87 +318,46 @@ def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
     status, text = capture(lambda: verdict(0, inert, restricted=True))
     check(status == 0 and "WARNING" in text, "... but a run RESTRICTED on purpose only warns",
           "exit %r, %r" % (status, text[4:36]))
-    check(verdict(0, relocated) == 0, "... while a pool that did relocate still passes",
-          "allocated=%d" % relocated.allocated)
-    check(verdict(1, relocated) != 0, "... and the gate's own FAIL is never overridden by it")
+    check(verdict(0, pool) == 0, "... while a pool that did relocate and pin passes",
+          "allocated=%d, %d pinned" % (pool.allocated, len(pool.report.pinned)))
+    check(verdict(1, pool) != 0, "... and the gate's own FAIL is never overridden by it")
     check(verdict(0, None) == 0, "... and --off, which has no pool at all, is not vacuous")
-
-    check(verdict(0, pool) == 0, "a BlockPool that pinned words is not vacuous either",
-          "%d pinned, %d tables" % (len(pool.pinned_words()), pool.allocated))
-    # the assembler's OWN "this group failed to place" state, applied to every group: pin_broken is
-    # False by default, so a broken group is dropped from pinned_words() while its tables stay
-    # allocated, and the arm writes a full address again. That is placement wearing blocking's name.
-    pool.broken_groups = set(pool.groups)
-    status, text = capture(lambda: verdict(0, pool))
+    # tables relocated, nothing pinned: placement wearing blocking's name -- a real pool, not a mutated one
+    status, text = capture(lambda: verdict(0, relocated))
     check(status != 0 and "placement, not blocking" in text,
           "MUTANT: blocked tables but NO pinned word is not a PASS",
-          "%d pinned, %d tables, exit %r" % (len(pool.pinned_words()), pool.allocated, status))
-    check(verdict(0, pool, no_pin=True) == 0, "... unless --no-pin asked for exactly that")
+          "%d pinned, %d tables, exit %r" % (len(relocated.report.pinned), relocated.allocated, status))
 
-    # --- run_gate: the patch, the restore, and the closure's body
+    # --- run_gate: the factory goes in, the gate's status comes out, and flipjump is left alone
     stubs = {}
-    for name, body in (("fail", _STUB_FAIL), ("pass", _STUB_PASS), ("nopin", _STUB_NO_PIN),
+    for name, body in (("fail", _STUB_FAIL), ("pass", _STUB_PASS),
                        ("assemble", _STUB_ASSEMBLE.replace("@SRC@", repr(str(src)))
                                                   .replace("@OUT@", repr(str(tmp / "stub.fjm"))))):
         stubs[name] = tmp / ("stub_%s.py" % name)
         stubs[name].write_bytes(body.encode("ascii"))
 
-    status, text = capture(lambda: run_gate(assemble_fn, gate=stubs["fail"]))
+    stock_assemble = fj.assemble
+    status, text = capture(lambda: run_gate(table_pool, gate=stubs["fail"]))
     check(status == 1, "MUTANT: a gate that FAILs comes back as a non-zero driver status",
           "status=%r" % (status,))
-    check("installed: True" in text, "... and the gate ran under the DRIVER'S closure",
+    check("handed in: True" in text, "... and the gate was handed the DRIVER'S pool factory",
           text.strip().splitlines()[0] if text.strip() else "(the stub printed nothing)")
-    check(fj.assemble is not assemble_fn, "... and the stock assembler is back afterwards")
-    check(run_gate(assemble_fn, gate=stubs["pass"]) == 0, "a gate that passes comes back as 0")
+    check(fj.assemble is stock_assemble, "... and flipjump's assemble is untouched (nothing is patched)")
+    check(capture(lambda: run_gate(table_pool, gate=stubs["pass"]))[0] == 0, "a gate that passes comes back as 0")
 
     before = None if body_ran is None else body_ran()
-    status, text = capture(lambda: run_gate(assemble_fn, gate=stubs["assemble"]))
+    status, text = capture(lambda: run_gate(table_pool, gate=stubs["assemble"]))
     said = [ln for ln in text.splitlines() if "fj.assemble" in ln]
-    # "installed: True" is what makes this the DRIVER'S closure rather than the stock assembler: a
-    # run_gate that installs NOTHING runs this stub perfectly happily and it prints the very same
-    # "fj.assemble raised ..." words out of the stock assembler, so a status and a line mentioning
-    # fj.assemble cannot tell the two apart -- which is what this check is named for.
-    check(status == 0 and bool(said) and "installed: True" in text,
-          "a gate that CALLS fj.assemble reaches the driver's closure",
-          "installed: %s; %s" % ("installed: True" in text,
-                                 said[-1][:44] if said else "the stub never got there"))
+    check(status == 0 and bool(said) and "handed in: True" in text,
+          "a gate that assembles reaches the driver's pool factory",
+          "handed in: %s; %s" % ("handed in: True" in text, said[-1][:44] if said else "the stub never got there"))
     if body_ran is not None:
-        check(body_ran() > before, "... and the closure's BODY ran -- the pool this driver builds",
-              "%r -> %r body runs" % (before, body_ran()))
-
-    # --- --no-pin: the stub must accept the assembler's call AND actually suppress the pin. The
-    # real resolver answers ({}, 0) to an EMPTY request too, so a control that asked it nothing
-    # passes with the stub uninstalled -- which is exactly what this check did until this round.
-    namespace = {}
-    exec(_PIN_REQUEST, namespace)       # the same text the stub gate runs, so neither can drift
-
-    def no_pin_run():
-        """A stub whose signature does not match the assembler's call raises straight out of
-        run_gate -- and a control that DIES reports nothing: a traceback and 0 MISS, a rejection in
-        the exit-status sense only. Catching it here is what lets the mismatch this check is named
-        for (a stub without `exclude=`, the 9a4122c^ regression) print MISS like any other."""
-        try:
-            return run_gate(assemble_fn, no_pin=True, gate=stubs["nopin"]), ""
-        except BaseException as e:
-            return None, "%s: %s" % (type(e).__name__, e)
-
-    (status, blew_up), text = capture(no_pin_run)
-    real_pin = asmmod.resolve_pinned(*namespace["PIN_ARGS"], **namespace["PIN_KW"])
-    check(status == 0 and not blew_up,
-          "the --no-pin stub takes the assembler's call, signature and all",
-          blew_up[:70] or (text.strip().splitlines()[-1][:70] if text.strip()
-                           else "(the stub printed nothing)"))
-    check("-> ({}, 0)" in text and bool(real_pin[0]),
-          "... and SUPPRESSES a pin the real resolver grants", "real resolver: %r" % (real_pin,))
-    check(asmmod.resolve_pinned.__name__ == "resolve_pinned", "... and the real pin resolver is back")
+        check(body_ran() > before, "... and the factory's BODY ran -- the pool this driver builds",
+              "%r -> %r pools" % (before, body_ran()))
 
     # --- the EXPENSIVE arm's accounting, driven over stub gates so --selftest-gate's verdict is not
     # the one claim in this file that nothing controls. No build: the stubs print what deg_gate
     # prints, and every shape below carries the number of that arm's four checks it must defeat.
-    # The middle four defeat ONE EACH -- one per check, so deleting any single check turns that
-    # shape's required 1 into a 0 -- and the last two defeat several at once and are required to
-    # MISS exactly as many. No shape "defeats exactly one check" as a general rule: the table says
-    # which, and the run prints the count next to each.
     from doomfj.reference_model import ReferenceModel
     real_render = ReferenceModel.render_wall_frame
     ok_lines = ["(stub viewpoint %d): 1,234 ops  !! 1 px DIFFER" % vp for vp in range(4)]
@@ -497,9 +390,8 @@ def cheap_selftest(driver, assemble_fn, *, body_ran=None, extra=None):
                             % (len(log), shared, len(log) - shared, driver) if not bad
                             else "!! %d CHECK(S) HAVE NO TEETH" % bad), flush=True)
     print("NOT COVERED by this arm: the E1M1 program itself. The fixture is 10 lines, the stub "
-          "gates compare no pixels, and the exclusion's cell set is exercised on a label table "
-          "built for it here, not on a real self-reset. Use --selftest-gate, and the gate.",
-          flush=True)
+          "gates compare no pixels, and the cell list is exercised on declarations written for it here, not on a "
+          "real self-reset. Use --selftest-gate, and the gate.", flush=True)
     return 1 if bad else 0
 
 
@@ -510,23 +402,16 @@ def gate_selftest(driver, run_driver, quiet=False):
     CORRUPTED BY ONE BYTE -- and require FAIL. -> the NUMBER of its checks that MISSed, so the cheap
     arm can require WHICH one a stub defeats; any non-zero is a failed arm.
 
-    The mutation is on the side the gate compares AGAINST, so the fj program runs exactly as it
-    does in the ordinary run: the arm costs one assemble, always terminates, and every one of the
-    four viewpoints must come back `!! 1 px DIFFER`. That count is the teeth AND most of a positive
-    arm at once -- a wrapper that swallowed the gate's status, or a gate that stopped comparing
-    some viewpoint, exits 0 quite happily; and "exactly one pixel, four times" is the byte-exactness
+    The mutation is on the side the gate compares AGAINST (doom's own oracle, ReferenceModel.render_wall_frame,
+    wrapped for the run and put back), so the fj program runs exactly as it does in the ordinary run: the arm costs
+    one assemble, always terminates, and every one of the four viewpoints must come back `!! 1 px DIFFER`. That count
+    is the teeth AND most of a positive arm at once -- a wrapper that swallowed the gate's status, or a gate that
+    stopped comparing some viewpoint, exits 0 quite happily; and "exactly one pixel, four times" is the byte-exactness
     claim itself, minus the one byte this arm corrupted.
-
-    UNRUN as of this commit (CLAUDE.md rule 1: another heavy job had the box): no --selftest-gate
-    run has been made, so the REQUIRED lines below are this arm's requirement, not a report of what
-    deg_gate printed. What HAS run is the accounting: the cheap arm drives these four checks over
-    seven stub gates and requires each to MISS the number of checks its row names -- four of them
-    defeat one check each, one per check, so no check here is load-bearing for nothing.
 
     THE REST OF THE POSITIVE ARM IS THE DRIVER'S ORDINARY RUN, not a second pass inside this one:
     `python scratchpad/12m/deg_gate_blocked.py` printing 4x BYTE-EXACT, PASS and its op counts is
-    the verdict a commit message cites anyway, and re-running it here would double a build the
-    citation has to show regardless.
+    the verdict a commit message cites anyway.
 
     `quiet` runs it over a stub instead of a build, which is how the cheap arm controls the
     accounting below without paying for a gate.

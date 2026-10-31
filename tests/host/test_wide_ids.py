@@ -37,13 +37,11 @@ def test_the_widths_and_their_bounds():
     assert "LIST_ID_BITS" not in c.constants() and "LIST_WIDE" not in c.constants()
 
 
-def test_only_a_wide_map_gets_a_defines_file(tmp_path):
-    assert Config().emit_fj_defines(tmp_path / "d.fj") is None and not (tmp_path / "d.fj").exists()
+def test_only_a_wide_map_gets_defines():
+    assert Config().fj_defines() is None
     for m in ("E1M1", "E1M2"):                        # the shipped maps assemble with no -D at all
-        assert map_cfg(Config(), m).LIST_ID_BITS == 8 and map_cfg(Config(), m).emit_fj_defines(tmp_path / m) is None
-    p = replace(Config(), LIST_ID_BITS=12).emit_fj_defines(tmp_path / "w.fj")
-    body = [ln.strip() for ln in p.read_text(encoding="utf-8").split("\n") if ln.strip() and not ln.startswith("//")]
-    assert body == ["ns hex {", "ns pointers {", "PTR_WIDE_BITS = 12", "}", "}"]
+        assert map_cfg(Config(), m).LIST_ID_BITS == 8 and map_cfg(Config(), m).fj_defines() is None
+    assert replace(Config(), LIST_ID_BITS=12).fj_defines() == {"hex.pointers.PTR_WIDE_BITS": 12}
 
 
 def test_the_lists_and_their_cells_at_both_widths():

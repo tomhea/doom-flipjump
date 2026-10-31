@@ -235,23 +235,43 @@ def test_seeks_avoid_the_imps_round_the_near_suit(mods, on):
     assert got == (not on), "CONTROL: no detour with SEEK_AVOID off" if not on else "a detour into the avoided box"
 
 
-def test_e1m4_route_takes_the_health_by_the_corridor(mods):
-    """level_route.MAP_PICKUPS: E1M4's stimpacks (2472, 232), (1832, 632), (1192, 632) and the medikit (3264, 1216) are
-    route pickups before the far suit; CONTROL: without the map's entry no 2011 / 2012 leg"""
+def test_e1m4_route_armor_west_card_before_the_north(mods):
+    """level_route.MAP_PICKUPS (E1M4, the route agent): the west armor (-1312, -608) is a route leg before the chaingun
+    (before the corridor's imps); no stimpack loop (the soulsphere keeps the player above 100 there); the medikit
+    (3264, 1216) then the blue card, with no leg to the far suit / armor in the room's north half. CONTROL: without the
+    map's entry the armor's type budget (50) does not reach it, and the far suit and armor are legs again"""
     lr, _play, route = mods
     to = [(g["to"], tuple(g["goal"])) for g in route["legs"]]
-    for spot in ((2472, 232), (1832, 632), (1192, 632)):
-        assert ("item:2011", spot) in to
-    assert to.index(("item:2012", (3264, 1216))) < [t for t, _g in to].index("item:2025")
-    assert all(g.get("must") for g in route["legs"] if g["to"] in ("item:2011", "item:2012"))   # never dropped for time
+    names = [t for t, _g in to]
+    assert to.index(("item:2018", (-1312, -608))) < names.index("item:2002")
+    assert "item:2011" not in names
+    assert names[names.index("item:2012") + 1] == "key:blue"
+    assert ("item:2025", (3392, 1728)) not in to and ("item:2018", (3264, 1728)) not in to
+    assert all(g.get("must") for g in route["legs"] if g["to"] == "item:2012" or tuple(g["goal"]) == (-1312, -608))
     saved = dict(lr.MAP_PICKUPS)
     try:
         lr.MAP_PICKUPS.clear()
         legs = lr.plan("E1M4", "easy")["legs"]
     finally:
         lr.MAP_PICKUPS.update(saved)
-    assert not [g for g in legs if g["to"] in ("item:2011", "item:2012")], "CONTROL: health legs with no map entry"
+    to0 = [(g["to"], tuple(g["goal"])) for g in legs]
+    assert ("item:2018", (-1312, -608)) not in to0, "CONTROL: the west armor a leg with no map entry"
+    assert ("item:2025", (3392, 1728)) in to0 and ("item:2018", (3264, 1728)) in to0, "CONTROL: the far suit / armor"
     assert set(lr.MAP_PICKUPS) == {"E1M4"}                     # every other map's route is the type budgets' alone
+
+
+@pytest.mark.parametrize("on", [True, False])
+def test_near_the_end_no_ammo_detour(mods, on):
+    """END_NO_AMMO (E1M4): on the exit leg 61 cells from the end, dry -> no ammo detour (a play walked 242 cells back
+    for a clip from there and died); CONTROL: END_NO_AMMO off -> the same cells start one"""
+    play, st, li = _steer(mods, "exit")
+    st.END_NO_AMMO = on
+    x, y = -397, 1809
+    st.replan(x, y, "test")
+    c = _cells(st, x, y, 70)                                  # (70: above the health seek's threshold -- ammo alone)
+    c.update({"am_clip": 0, "am_shell": 0})
+    st.decide(100, c)
+    assert (st.legs[st.li]["to"] == "ammo") == (not on), st.legs[st.li]["to"]
 
 
 @pytest.mark.parametrize("on", [True, False])

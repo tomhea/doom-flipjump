@@ -62,7 +62,36 @@ DEFAULT_SEED = {("E1M1", "medium"): 1,                                          
                 ("E1M2", "easy"): [(0, 1), (1532, 2), (3463, 22), (3992, 32)],             # world 4319
                 ("E1M3", "easy"): [(0, 0), (415, 1)],                                       # world 2279 (3143 before 8183305d)
                 ("E1M5", "easy"): [(0, 0), (342, 3), (1630, 11), (3352, 24)],              # world 4253
+                ("E1M6", "easy"): 0,                                                         # world 964
+                ("E1M8", "easy"): 0,                    # world 1709 (the M8 C8 kill leg: both Barons, then the W1 exit)
                 ("E1M9", "easy"): 2}                                                         # world 4659
+# THE SPEED SET (the owner, 2026-10-29: every level's speed set is "an average active game" -- the level's own
+# playthrough, E1M1's included, in place of the checkpoint-planned combat sets): SPEED_WINDOWS windows of SPEED_FRAMES
+# world frames spread evenly from NEW GAME to LEVEL COMPLETE, each window's average from the probe's frame-start
+# readings (a window's sum telescopes between two readings: within 2^18 ops, i.e. +-2,622 ops/frame on its average),
+# and the binding statistic is gamespeed's (mean + p80) / 2 over the windows -- B0's, so CAP-22 reads the same way.
+SPEED_WINDOWS, SPEED_FRAMES = 11, 100
+
+
+def speed_windows(frame_ops, start: int, end: int, n: int = SPEED_WINDOWS, w: int = SPEED_FRAMES):
+    """[(the window's first frame, its average ops/frame)] -- n windows of w frames spread evenly over [start, end)
+    (overlapping when the play is shorter than n * w frames: E1M1's)"""
+    span = end - start
+    assert span >= w and len(frame_ops) >= end, (span, w, len(frame_ops), end)
+    starts = [start + round(k * (span - w) / (n - 1)) for k in range(n)]
+    return [(s, sum(frame_ops[s:s + w]) / w) for s in starts]
+
+
+def speed_record(frame_ops, start: int, end: int) -> dict:
+    """the speed set's numbers: the windows, their mean and p80, the binding (gamespeed.binding_speed)"""
+    import gamespeed as GS
+    win = speed_windows(frame_ops, start, end)
+    avgs = [v for _s, v in win]
+    return {"windows": [[s - start, round(v)] for s, v in win], "world_frames": end - start,
+            "mean": sum(avgs) / len(avgs), "p80": GS.percentile_run(avgs), "binding": GS.binding_speed(avgs),
+            "target": GS.SPEED_TARGET, "window_frames": SPEED_FRAMES}
+
+
 CONTROL_FRAMES = 40           # world frames a control runs
 CONTROL_AT = 25               # the world frame a control mutates
 
@@ -99,6 +128,7 @@ def main(argv=None) -> int:
     ap.add_argument("--controls-only", action="store_true")
     ap.add_argument("--no-controls", action="store_true", help="skip the R9 controls (a dev run; never PASS evidence)")
     ap.add_argument("--keys-out", default=None, help="write the played key log (JSON) here")
+    ap.add_argument("--speed-json", default=None, help="a binary PASS: write the speed set's record (JSON) here")
     ap.add_argument("--workers", type=int, default=3, help="processes rendering the oracle's world pictures")
     ap.add_argument("--trace", action="store_true", help="one line a world frame: pose, health, keys, the steering")
     a = ap.parse_args(argv)
@@ -181,6 +211,17 @@ def main(argv=None) -> int:
              "PASS (no controls -- NOT evidence)" if a.no_controls else "PASS")
     print("\nPLAYTHROUGH GATE %s -- %s LEVEL COMPLETE at frame %d (world %d) at %s, %s%.0f s"
           % (label, mapname, st["done"], st["done"] - pl.mf, skill, exact, wall))
+    if not a.model_only and r.get("frame_ops"):
+        sp = speed_record(r["frame_ops"], pl.mf, st["done"])
+        p80w = next(wv for wv in sp["windows"] if round(sp["p80"]) == wv[1])
+        print("PLAYTHROUGH SPEED binding (mean + p80)/2 over %d windows of %d world frames: %s ops/frame (mean %s, p80 "
+              "window at world %d = %s; target <= %s) %s" % (
+                  len(sp["windows"]), sp["window_frames"], format(int(round(sp["binding"])), ","),
+                  format(int(round(sp["mean"])), ","), p80w[0], format(p80w[1], ","), format(sp["target"], ","),
+                  "PASS" if sp["binding"] <= sp["target"] else "OVER"))
+        if a.speed_json:
+            sp.update(map=mapname, skill=skill, fjm=a.fjm, seed=seed_text(seed), level_complete_world=st["done"] - pl.mf)
+            Path(a.speed_json).write_text(json.dumps(sp, indent=1) + "\n", encoding="ascii")
     return 0
 
 

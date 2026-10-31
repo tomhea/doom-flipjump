@@ -796,6 +796,7 @@ its registry rows `LEVEL_SPREAD`), every gate run solo through `scripts/heavy.py
 | THE PLAYTHROUGH (`playthrough_gate --skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 3147**, byte-, palette- and state-exact on all 3,157 frames (777 s) | **PASS -- LEVEL COMPLETE at frame 4257**, exact on all 4,267 frames (822 s) |
 | `msframe --save-baseline shipped` (the map's timed walk `scenarios/<map>/msframe.json`) | **73.5 ms/frame** [72.8 .. 74.7], 233.5M fj/s, 17,158,103 ops/frame -> `shipped_e1m3` | **58.2 ms/frame** [58.0 .. 58.7], 224.0M fj/s, 13,028,121 ops/frame -> `shipped_e1m5` |
 | REBUILD | **BYTE-IDENTICAL** (`71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784`) | **BYTE-IDENTICAL** (`4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2`) |
+| **THE SPEED SET** (the owner, 2026-10-29: the level's own playthrough, 11 windows of 100 world frames from NEW GAME to LEVEL COMPLETE; `playthrough_gate --speed-json`, on the current steering) | **binding 12,781,307** ops/frame (mean 12,106,763, p80 13,455,852) -- LEVEL COMPLETE at world 2279, exact on all 2,293 frames | **binding 12,698,851** (mean 11,826,507, p80 13,571,195) -- LEVEL COMPLETE at world 4253, exact on all 4,267 frames |
 
 Size: E1M3 at 44.98% is over the 43% cap -- the owner, 2026-10-24: "above 43% size is OK".
 The build command (section 1b's, the map's wad and spread; `scripts/build_episode.py --maps E1M3` runs exactly it):
@@ -825,7 +826,39 @@ Evidence: `docs/ship-evidence/e1m9_v1_*.log`. **`build/doom_e1m9_v1.fjm`**, sha2
 | THE PLAYTHROUGH (`--skill easy`, seed 2) | **PASS -- LEVEL COMPLETE at frame 4663**, byte-, palette- and state-exact on all 4,673 frames (987 s). Its first run parted at frame 3241 on `p_rad` (binary 2099, mirror 2100): the GATES' MIRROR never counted the timed powers down (`MonsterPhase.weapon`, fixed 00d6ca5e); the binary was right (DOOM's P_PlayerThink order) |
 | `msframe --save-baseline shipped` | **37.7 ms/frame** [37.4 .. 38.8], 208.2M fj/s, 7,849,063 ops/frame -> `shipped_e1m9` (a first measurement, 40.1 [38.8 .. 41.3], ran beside the combat planner and was replaced) |
 | REBUILD | **BYTE-IDENTICAL** (`33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48`) |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames, as section 6) | **binding 14,577,947** ops/frame (mean 12,711,601, p80 16,444,293: a window at world 2280 heavier than any B0 run) -- LEVEL COMPLETE at world 4659, exact on all 4,673 frames |
 
 The build command: section 6's with `e1m9` / `E1M9`, `--spread 1`. Play: `fj --run build/doom_e1m9_v1.fjm`.
 The playthrough ran on the current steering (8183305d: the lift rules E1M9 needed -- its lift 109 called down from
 its own SR lines). Not done yet, as for section 6: the per-level speed pass and the written playtest note.
+
+## 8. E1M6 and E1M8 (M8 wave 3): their own binaries, their own numbers
+
+Built and gated as section 6's levels, on branch `m8-wave3` (m8-episode + soultele + the E1M8 boss route + the
+playthrough speed set; flipjump 1.6.0 at 9877f25), every step through `scripts/heavy.py`. Evidence:
+`docs/ship-evidence/e1m6_v1_*.log`, `e1m8_v1_*.log`. **B0 is not run**: the owner's 2026-10-29 speed set (the level's
+own playthrough) replaces the checkpoint-planned combat sets, so neither level has one.
+
+| gate | **E1M6** (`build/doom_e1m6_v1.fjm`, sha256 `5f1abfea24b8fa16`, spread 1) | **E1M8** (`build/doom_e1m8_v1.fjm`, sha256 `9311cd67268c7e12`, spread 2) |
+|---|---|---|
+| `emit_check` (asserts on, no stand-in) / the build | PASS (2026-10-29; its emit_check and build logs were not kept -- the rebuild below is the build's evidence) | PASS / 574 s |
+| `p2a_gate` | PASS -- 15 scenarios, 7 N/A | PASS -- **0 run, 14 N/A** (no key door, no switch exit) |
+| `m2_std_gate` | PASS -- 1,684 frames byte- and state-exact (approached from the door's reached side, else the bot's walk: 57c3942d, 6384fa35) | PASS -- 413 frames byte- and state-exact |
+| `m3_gate` | PASS -- 88 frames | PASS -- 88 frames |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (9 N/A) / 16 (1 N/A) scenarios | PASS -- **0 (7 N/A)** / 6 (37 N/A) / 8 (9 N/A): a sparse map (the owner, 2026-10-29: scaled criteria); its player damage is gated by the playthrough (hp 100 -> 13, exact) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m6/gamespeed.json`) | PASS; CONTROL-DOORS N/A (no tour reaches a door) (`scenarios/e1m8/gamespeed.json`) |
+| `gamespeed` (the tours) | SPEED binding **28,609,569** ops/frame **OVER** 22M; SIZE 85,691,848 words = **63.85%** (span 90.73%) | SPEED 11,569,110 PASS; SIZE 27,972,088 words = **20.84%** (span 67.40%) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 968** (world 964), byte-, palette- and state-exact on all 978 frames (336 s) | **PASS -- LEVEL COMPLETE at frame 1713** (world 1709), exact on all 1,723 frames (275 s). Its first run parted on frame 0: E1M8 has ONE door, and the harness read `dstate` as `0` against the oracle's `(0,)` (eefff38b) |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 20,234,657** PASS (mean 18,286,689, p80 22,182,625 at world 259) | **binding 10,015,092** PASS (mean 9,544,425, p80 10,485,760 at world 1609) |
+| `msframe --save-baseline shipped` (`scenarios/<map>/msframe.json`) | **108.5 ms/frame** [106.6 .. 110.1], 209.3M fj/s, 22,712,821 ops/frame -> `shipped_e1m6` | **33.0 ms/frame** [32.8 .. 34.1], 265.8M fj/s, 8,760,845 ops/frame -> `shipped_e1m8` (its timed walk promoted from the draft today: 167 of 200 frames move) |
+| REBUILD (2026-10-29 19:24 and 2026-10-30 00:53, re-hashed today) | **BYTE-IDENTICAL** (`5f1abfea24b8fa162f2aeaece569e0eeaff9ff98507557a5fa193dca3142ac0f`) | **BYTE-IDENTICAL** (`9311cd67268c7e121ff3137e86ff86146888e3b1e6e0ad5b859a4ff64c553737`) |
+
+**E1M6's 108.5 ms/frame is over D8's ~90 ms tripwire, and the reason is ops, not the engine:** its fj/s (209.3M) is
+in the other shipped levels' range (208-266M); its timed walk costs 22.7M ops/frame, the most of any shipped level (E1M3 17.2M). E1M6 is the
+episode's biggest map (63.85% of 2^27). Its playthrough speed set (an average active game) is under CAP-22; its tours
+(10 x 100 frames steered to the farthest points) are 28.6M, over. **Open for the owner:** whether the playthrough
+speed set replaces the tours as the binding number; until then E1M6 ships with the tours recorded OVER. The lever is
+the per-level speed pass (`docs/episode-plan.md` 4.7), not started for any level.
+
+The build command: section 6's with `e1m6` / `E1M6` (`--spread 1`) and `e1m8` / `E1M8` (`--spread 2`).
+Play: `fj --run build/doom_e1m6_v1.fjm`, `fj --run build/doom_e1m8_v1.fjm`.

@@ -578,7 +578,7 @@ class Survey:
         (gamedata.EXT_ALIAS_CODES: a new monster's states take weapon-only states' indices -- check_thing_aliases proves
         each; a later monster can run out of them), damagecode's pain classes (one nibble of dmrnd: at most 4
         painchances on a map), and a map's souls -- their 16.16 heights (soulcode.check_model_rules) and a teleport line
-        beside them (EV_Teleport's z: the model's, not yet the fj's)"""
+        beside them (EV_Teleport's z: both mirrors since M8 soultele)"""
         bad = gd.check_thing_aliases()
         self.row("OK" if not bad else "REFUSED",
                  "extension states' borrowed thing indices (gamedata.EXT_ALIAS_CODES, check_thing_aliases)",
@@ -594,8 +594,15 @@ class Survey:
         self.guard("lost souls: soulcode.check_model_rules (16.16 heights, radius 16)",
                    lambda: soulcode.check_model_rules(w))
         tels = getattr(w, "teleports", ())
-        self.row("REFUSED" if tels else "OK", "lost souls beside teleport lines (fj: EV_Teleport's soul z unwired)",
-                 len(tels), "", "wall_renderer refuses a map with both until soulcode wires tp_hit's z" if tels else "")
+        # M8 soultele: EV_Teleport of a soul (z = the destination floor, momz 0, ceilingz the destination's) is wired in
+        # both fj copies -- mm_move's (teleportcode.monster_lines soul="walk") and sk_try's (soul="knock")
+        # what stays a limit: the fj's crossing tests and its stomp know the radii 16 / 20 / 30 only (a Baron's 24
+        # beside a teleport line is refused by teleportcode.stomp_leaf_lines' assert)
+        bad = sorted(set(w.mon_radius[:w.layout.nmon]) - {16, 20, 30}) if tels else []
+        self.row("REFUSED" if bad else "OK",
+                 "lost souls beside teleport lines (EV_Teleport's soul z, momz, ceilingz; teleportcode radii 16/20/30)",
+                 len(tels), "", ("monster radii %s: teleportcode tests 16 / 20 / 30 only" % bad) if bad else
+                 ("teleportcode's soul walk / knock copies (tests/fj/test_soul_teleport_fj)" if tels else ""))
 
     def monsters_c8(self, w):
         """M8 C8 (the Baron): what the fj bakes per map about its monsters -- A_BossDeath's floor group (E1M8's tag 666),

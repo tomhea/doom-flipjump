@@ -1,0 +1,61 @@
+PLAYTHROUGH GATE -- E1M8 at easy, build/wave3/doom_e1m8.fjm
+E1M8 easy: ROUTE (52 s)
+  flood: 17045 cells, 2 epochs, keys -
+  exit: line 228 special 52 (normal, W)
+  keys in order: none
+    floor:1    floor  by walk   at (2488, -184)   epoch 0
+    floor:0    floor  by walk   at (440, -264)    epoch 0
+    floor:2    floor  by kill   at (-328, -264)   epoch 1
+    leg -> item:2018  touch    46 cells
+    leg -> floor:1    cross     2 cells
+    leg -> item:2046  touch    44 cells
+    leg -> item:2003  touch     2 cells
+    leg -> item:2046  touch     3 cells
+    leg -> item:8     touch    79 cells
+    leg -> item:2048  touch    62 cells
+    leg -> item:2002  touch     2 cells
+    leg -> item:2048  touch     3 cells
+    leg -> item:2001  touch   101 cells
+    leg -> item:2049  touch     2 cells
+    leg -> item:2049  touch     3 cells
+    leg -> floor:0    cross   313 cells
+    leg -> floor:2    kill     49 cells
+    leg -> exit       cross    86 cells
+setup 58 s (NEW GAME on frame 4)
+  CONTROL keys  the oracle's keys mutated on frame 30: parted there (3 cells: ['p_tnh', 'viewangle', 'viewx']) -- the check sees it
+  CONTROL pixel the binary's picture changed (1 px) on frame 30: parted there (1 px) -- the check sees it
+  CONTROL clean the same 45 frames unmutated: exact
+steering seed 0
+  f71: leg 0 -> item:2018 touch (in its touch box (bonus count 6)) after 67 frames
+  f87: leg 1 -> floor:1 cross (reached) after 16 frames
+  f155: leg 2 -> item:2046 touch (in its touch box (bonus count 12)) after 68 frames
+  f156: leg 3 -> item:2003 touch (in its touch box (bonus count 11)) after 1 frames
+  f162: leg 4 -> item:2046 touch (in its touch box (bonus count 11)) after 6 frames
+  f200 (w196): (3014, -589) hp 100 ar 100, leg 5/15 -> item:8, kills 0, 21 s
+  f273: leg 5 -> item:8 touch (in its touch box (bonus count 6)) after 111 frames
+  f358: leg 6 -> item:2048 touch (in its touch box (bonus count 6)) after 85 frames
+  f365: leg 7 -> item:2002 touch (in its touch box (bonus count 6)) after 7 frames
+  f368: leg 8 -> item:2048 touch (in its touch box (bonus count 9)) after 3 frames
+  f400 (w396): (1894, -386) hp 100 ar 100, leg 9/15 -> item:2001, kills 0, 43 s
+  f515: leg 9 -> item:2001 touch (in its touch box (bonus count 6)) after 147 frames
+  f521: leg 10 -> item:2049 touch (in its touch box (bonus count 6)) after 6 frames
+  f528: leg 11 -> item:2049 touch (in its touch box (bonus count 6)) after 7 frames
+  f600 (w596): (2644, -2066) hp 103 ar 100, leg 12/15 -> floor:0, kills 0, 61 s
+  f800 (w796): (1051, -2125) hp 103 ar 100, leg 12/15 -> floor:0, kills 0, 74 s
+  f951: leg 12 -> floor:0 cross (reached) after 423 frames
+  f1000 (w996): (-28, -404) hp 103 ar 100, leg 13/15 -> floor:2, kills 0, 91 s
+    re-plan (no progress in 50 frames) from (218, -531): 35 cells
+  f1200 (w1196): (-297, -227) hp 51 ar 76, leg 13/15 -> floor:2, kills 1, 110 s
+    re-plan (no progress in 50 frames) from (-242, -146): 58 cells
+  f1400 (w1396): (-136, -399) hp 51 ar 76, leg 13/15 -> floor:2, kills 1, 139 s
+  f1595: leg 13 -> floor:2 kill (every boss dead) after 644 frames
+    re-plan (the leg starts elsewhere) from (-362, -193): 88 cells
+  f1600 (w1596): (-348, -201) hp 13 ar 58, leg 14/15 -> exit, kills 2, 183 s
+    f1604: monster 3 ignored (no damage in 35 frames)
+  f1713: leg 14 -> exit cross (LEVEL COMPLETE) after 118 frames
+
+frames: 1723 presented (4 menu, 1719 world), legs done 15/15: item:2018@w67, floor:1@w83, item:2046@w151, item:2003@w152, item:2046@w158, item:8@w269, item:2048@w354, item:2002@w361, item:2048@w364, item:2001@w511, item:2049@w517, item:2049@w524, floor:0@w947, floor:2@w1591, exit@w1709
+time: 275 s wall; the binary 92 s (53.7 ms/frame), the oracle 108 s (63 ms/frame); 16,486,603,355 ops; seed 0
+
+PLAYTHROUGH GATE PASS -- E1M8 LEVEL COMPLETE at frame 1713 (world 1709) at easy, byte-, palette- and state-exact on all 1723 frames, 275 s
+PLAYTHROUGH SPEED binding (mean + p80)/2 over 11 windows of 100 world frames: 10,015,092 ops/frame (mean 9,544,425, p80 window at world 1609 = 10,485,760; target <= 22,000,000) PASS

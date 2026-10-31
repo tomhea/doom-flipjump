@@ -48,7 +48,10 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "tp_w1",                                                             # M8 C5: the W1 teleports
                "ltst", "ltct", "rng_lt",                                            # M8: the light thinkers
                "swpr", "swtm",                                                      # M8: the switch textures
-               "p_inv", "p_rad")                                                    # M8 C6: the timed powers
+               "p_inv", "p_rad",                                                    # M8 C6: the timed powers
+               # M8 C8 (the lost souls' cells, OPTIONAL: a map with a soul only) -- the oracle's state has had them since
+               # C8 and this list had not, so E1M6's m3 read 'fj None' on every one at frame 0
+               "sk_fly", "sk_inf", "sk_z", "sk_momz", "sk_ceil")
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int | None = None,

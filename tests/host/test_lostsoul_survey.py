@@ -2,8 +2,9 @@
 
 Three traps the soul found, each a survey row: (1) a new monster's states take THING-DOMAIN indices borrowed from
 weapon-only states (gamedata.EXT_ALIAS_CODES, check_thing_aliases) -- a later monster can run out of them; (2) damagecode's pain classes are one
-nibble of dmrnd -- at most 4 painchances on a map; (3) a soul beside a teleport line (EV_Teleport's soul z is the
-model's, not yet the fj's: wall_renderer refuses the pair).
+nibble of dmrnd -- at most 4 painchances on a map; (3) a soul beside a teleport line -- since M8 soultele both mirrors
+teleport a soul (EV_Teleport's z, momz, ceilingz), so the row is OK; what it still refuses is a monster radius the fj's
+teleport tests do not know (teleportcode: 16 / 20 / 30; a Baron's 24 beside a teleport line).
 
 R9: each row is shown OK on E1M1 + three souls, then each CONTROL shrinks the bound (or adds the teleport) and the row
 must turn OVER / REFUSED -- a survey that checks nothing cannot pass.
@@ -79,10 +80,21 @@ def test_control_a_fifth_pain_class(ls, world, monkeypatch):
     assert _rows(ls, *world)["monster pain classes"][0] == "OVER"
 
 
-def test_control_a_teleport_beside_the_souls(ls, world, monkeypatch):
+def test_a_teleport_beside_the_souls_is_ok(ls, world, monkeypatch):
+    """M8 soultele: the pair is wired in both mirrors (tests/fj/test_soul_teleport_fj)"""
     mw, w = world
     monkeypatch.setattr(w, "teleports", ("a teleport line",), raising=False)
-    assert _rows(ls, mw, w)["lost souls beside teleport lines"][0] == "REFUSED"
+    assert _rows(ls, mw, w)["lost souls beside teleport lines"][0] == "OK"
+
+
+def test_control_a_radius_24_beside_a_teleport_is_refused(ls, world, monkeypatch):
+    mw, w = world
+    monkeypatch.setattr(w, "teleports", ("a teleport line",), raising=False)
+    r = list(w.mon_radius)
+    r[0] = 24
+    monkeypatch.setattr(w, "mon_radius", r)
+    row = _rows(ls, mw, w)["lost souls beside teleport lines"]
+    assert row[0] == "REFUSED" and "24" in row[4], row
 
 
 def test_control_a_soul_of_radius_20_is_refused(ls, world, monkeypatch):

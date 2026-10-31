@@ -559,7 +559,10 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                       see_tics=gd.STATES[w.mon_info[m].seestate].tics,
                       **({"mv": dict(rt=slot_t[m], radius=w.mon_radius[m], speed=w.mon_speed[m],
                                      **({"r0": r0} if r0 != 20 else {}),               # M8 C8
-                                     **({"tp": dict(knock=knock)} if tele else {}),
+                                     **({"tp": dict(knock=knock, **(
+                                         # M8 soultele: a soul's teleport zeroes its momz (the walk context has none)
+                                         {"momz": "sk_momz + %d*dw" % (8 * w.soul_of[m])}
+                                         if souls and m in w.soul_of else {}))} if tele else {}),
                                      **({"sk": (_sk_ctx(w, m, False), _sk_ctx(w, m, True))} if souls else {}))}
                          if chase else {}),
                       **({"boss": boss_of[m]} if m in boss_of else {}),              # M8 C8
@@ -1292,7 +1295,8 @@ def _tele_back(m: int, schema, tp: dict) -> list:
     """M8 L4: slot m's write-back after its move (teleportcode.slot_back_lines, the walk's)"""
     from doomfj.teleportcode import slot_back_lines
     return slot_back_lines(m, facing="mon_facing + %d*dw" % (cell_nibbles(schema, "mon_facing") * m),
-                           knock=bool(tp.get("knock")), walk=True, tag="tpb")
+                           knock=bool(tp.get("knock")), walk=True, tag="tpb",
+                           extra=["    hex.zero 8, %s" % tp["momz"]] if tp.get("momz") else ())   # M8 soultele
 
 
 # ---- M7 P3.2c "decide" -----------------------------------------------------------------------------------------

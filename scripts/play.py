@@ -48,13 +48,20 @@ NAME_LET = {v: k for k, v in LET.items()}
 # the cells the steering and the session log read (every frame, with or without the oracle)
 STEER_CELLS = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "lvdone", "p_hp", "p_ar", "p_dead", "dstate",
                "lstate", "mon_active", "mon_health", "mon_target", "thseen", "thpos_rt", "am_clip", "am_shell",
-               "wp_own", "p_rct", "lvtime", "st_kill", "st_item")
+               "wp_own", "p_rct", "lvtime", "st_kill", "st_item", "am_misl")
 M32 = 0xFFFFFFFF
 
 
 def signed(v: int) -> int:
     v &= M32
     return v - (1 << 32) if v >> 31 else v
+
+
+def hp12(v: int) -> int:
+    """a monster's health cell as the number it holds: `mon_health` is 12 bits, signed (World's schema) -- a Baron
+    killed to -1 reads 4095"""
+    v &= 0xFFF
+    return v - 0x1000 if v >> 11 else v
 
 
 def pose_of(c: dict):
@@ -321,8 +328,8 @@ class Player:
                     if missing:
                         raise Mismatch("the oracle names cells the probe cannot read: %s" % missing)
                     state["names"] = sorted(exp)          # the steering sees exactly what the model run sees
-                got = pr.read_cells(state["names"])
-                bad = {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v}
+                got = pr.read_arrays(state["names"])
+                bad = {k: (got.get(k), v) for k, v in exp.items() if not P.same_reading(got.get(k), v)}
                 if fr["drawn"] == "world" and pool is not None:
                     # the world picture in a worker (the same p2a_gate.picture, its own Oracle): compared when it
                     # comes back, a few frames on -- the first parting frame is still the one reported
@@ -342,7 +349,7 @@ class Player:
                                        "palette": None if wpal == pal else [pal, wpal, fr["pal"]]}
                     out["verdict"] = "mismatch"
             else:
-                got = pr.read_cells(names_steer)
+                got = pr.read_arrays(names_steer)
             rec.update(cells=got, pic=pic, pal=pal)
             state["prev"] = got
             out["frames"] = f + 1
@@ -391,6 +398,7 @@ class Player:
         out["seconds"] = time.time() - t0
         out["t_binary"] = out["seconds"] - out["t_oracle"]
         out["ops"] = r.ops
+        out["frame_ops"] = p.frame_ops()        # M8 (the owner, 2026-10-29): the playthrough's speed set reads them
         return out
 
 
@@ -514,6 +522,7 @@ class Steer:
         self.best_prog, self.best_f = (-1, -1), 1 << 30
         self.act = 0
         self.sig0 = None
+        self.hunt_f = 1 << 30                        # M8 C8: the kill leg's next re-plan toward a boss
 
     def replan(self, x, y, why, f=None):
         """the rest of the leg from the player's pose, in the world the route has by now"""
@@ -592,7 +601,10 @@ class Steer:
         own = c.get("wp_own") or 0
         has = lambda nib: (own >> (4 * nib)) & 1                                  # noqa: E731 -- wp_own's nibbles
         clip, shell = c.get("am_clip") or 0, c.get("am_shell") or 0
-        if has(5) and clip >= 20:
+        rdy = c.get("wp_rdy")
+        if self._launch(c, has(4), rdy == gd.WP_MISSILE):
+            want, key = gd.WP_MISSILE, "w5"          # M8 C8: a KILL leg's boss far off -- the launcher
+        elif has(5) and clip >= 20:
             want, key = gd.WP_CHAINGUN, "w4"
         elif has(2) and shell:
             want, key = gd.WP_SHOTGUN, "w3"
@@ -605,17 +617,37 @@ class Steer:
         rdy = c.get("wp_rdy")
         if rdy is not None and rdy != want and c.get("wp_pend") in (None, gd.WP_NOCHANGE, want) and f % 4 == 0                 and not (want == gd.WP_FIST and rdy == gd.WP_CHAINSAW):
             kd.add(key)
-        return {gd.WP_CHAINGUN: "chaingun", gd.WP_SHOTGUN: "shotgun", gd.WP_PISTOL: "pistol"}.get(rdy, "melee")
+        return {gd.WP_CHAINGUN: "chaingun", gd.WP_SHOTGUN: "shotgun", gd.WP_PISTOL: "pistol",
+                gd.WP_MISSILE: "launcher"}.get(rdy, "melee")
+
+    # M8 C8: on a KILL leg the launcher is the weapon while the nearest live boss is far: up from LAUNCH_R units, kept
+    # down to LAUNCH_KEEP (its blast reaches 128 round the boss; the switch costs frames, so no flapping between)
+    LAUNCH_R = 224
+    LAUNCH_KEEP = 176
+
+    def _launch(self, c, owned, up) -> bool:
+        if not owned or not (c.get("am_misl") or 0) or not self.leg or self.leg.get("action") != "kill":
+            return False
+        x, y, _a = pose_of(c)
+        alive = self._bosses_alive(c)
+        if not alive:
+            return False
+        d = min(math.hypot(bx - x, by - y) for _m, bx, by in alive)
+        return d >= (self.LAUNCH_KEEP if up else self.LAUNCH_R)
 
     def _foe(self, c, x, y, f):
         """the nearest monster to fight: seen by the last picture, alive, hunting the player, within FIGHT_R"""
         if self.rt is None or "thseen" not in c:
             return None
         best = None
+        # M8 C8: on a KILL leg the bosses are fought whatever they target (asleep, or not yet turned on the player)
+        bosses = {b[0] for b in self.leg.get("bosses", ())} if self.leg and self.leg.get("action") == "kill" else ()
         for m, row in enumerate(self.rt):
             if not c["mon_active"][m] or signed(c["mon_health"][m]) <= 0 or not c["thseen"][m]:
                 continue
-            if c["mon_target"][m] != 1:              # 0: asleep, 1: the player, 2+: another monster (infighting)
+            if c["mon_target"][m] != 1 and m not in bosses:   # 0: asleep, 1: the player, 2+: another monster
+                continue
+            if m in bosses and hp12(c["mon_health"][m]) <= 0:   # (a boss's corpse: its 12-bit health below 0)
                 continue
             if self.ign.get(m, -1) > f:
                 continue
@@ -636,7 +668,8 @@ class Steer:
             t = self.trk.get(m)
             if t is None or h < t[1]:
                 self.trk[m] = (f, h)
-            elif f - t[0] > self.GIVE_UP:            # shot at with no damage: leave it a while
+            elif f - t[0] > self.GIVE_UP and m not in bosses:   # shot at with no damage: leave it a while (never
+                # a KILL leg's boss: he is the leg's goal, and he hunts the player whether shot or not)
                 self.ign[m] = f + 150
                 self.trk.pop(m, None)
                 self.log("    f%d: monster %d ignored (no damage in %d frames)" % (f, m, self.GIVE_UP))
@@ -704,6 +737,8 @@ class Steer:
         if c.get("p_rct"):                           # a teleport's reaction time: nothing moves
             return kd
         self.leg_frames += 1
+        if self.leg["action"] == "kill" and not self._bosses_alive(c):
+            return self._next(f, "every boss dead")      # M8 C8: A_BossDeath fires (its floor moves on its own)
         if self.retreat_f <= f and (not self.trail or math.hypot(x - self.trail[-1][0], y - self.trail[-1][1]) >= 12):
             self.trail.append((x, y))           # (not while retreating: the retreat indexes the trail)
         if self.retreat_f > f:
@@ -747,12 +782,15 @@ class Steer:
         # stretch is how a worn-down player dies (E1M2's finale); the aim window's hunters are still shot in passing
         left = sum(len(g["path"] or ()) for g in self.legs[self.li + 1:] if g["kind"] != "item")
         left += max(0, len(self.pieces[self.pi]) - self.wi) if self.pieces else 0
-        if left < self.DASH and (foe is None or foe[0] > 64):
+        if left < self.DASH and (foe is None or foe[0] > 64) and self.leg["action"] != "kill":
+            # (never on a KILL leg: the route goes on only once the bosses are dead)
             foe = None
             self.why = "dash"
         hp_now = c.get("p_hp") or 0
         self.hp_hist.append(hp_now)
-        if self.RUN_HURT and hp_now < 70 and max(self.hp_hist) - hp_now >= self.RUN_HURT and f >= self.run_until + 120:
+        kill_leg = self.leg["action"] == "kill"
+        if (self.RUN_HURT and hp_now < 70 and max(self.hp_hist) - hp_now >= self.RUN_HURT and f >= self.run_until + 120
+                and not kill_leg):           # (a KILL leg's route runs AT the boss: no run there)
             self.run_until = f + 60                  # hurt fast: run the route a while (most hunters are slower)
             self.log("    f%d: run (lost %d in 60 frames)" % (f, max(self.hp_hist) - hp_now))
         if f < self.run_until and foe is not None and foe[0] > 80:
@@ -782,7 +820,11 @@ class Steer:
             # the trigger: HELD close in, and with the shotgun / chaingun / saw (the pellets and the burst spread
             # anyway); far off with the pistol, a fresh press each shot (P_GunShot: the first shot of a pull is accurate)
             hold = foe[0] < 320 or wp in ("shotgun", "chaingun", "melee")
-            if aimed and foe[0] < 800 and (hold or (not self.fired and not c.get("wp_rf"))):
+            if wp == "launcher":                     # M8 C8: a rocket flies straight -- the window's middle, far off
+                mid = win[max(0, len(win) // 2 - 2):len(win) // 2 + 3]
+                if (1 + m) in mid and foe[0] >= self.LAUNCH_KEEP:
+                    kd.add("fire")
+            elif aimed and foe[0] < 800 and (hold or (not self.fired and not c.get("wp_rf"))):
                 kd.add("fire")
             if not aimed and abs(d) <= tol:          # lined up, but the window does not hold it: cover between
                 self.covered[m] = self.covered.get(m, 0) + 1
@@ -794,6 +836,7 @@ class Steer:
                 self.covered[m] = 0
             self.fired = "fire" in kd
             typ = self.mtype[m] if m < len(self.mtype) else 0
+            boss = kill_leg and m in self._boss_slots()
             hp = c.get("p_hp") or 0
             low = hp < 35 + 10 * (self.seed_at(f) % 2)
             if self.RETREAT and hp < 25 + 10 * (self.seed_at(f) % 2) and f - self.hurt_f < 8 and f >= self.retreat_next                     and len(self.trail) > 8 and typ not in self.MELEE:
@@ -803,7 +846,9 @@ class Steer:
                 self.log("    f%d: retreat (hp %d, hit by m%d)" % (f, hp, m))
             if wp == "melee" and abs(d) < 20 and foe[0] > 40:
                 kd.add("forward")                    # the fist / saw: close in
-            elif typ in self.MELEE and foe[0] < 200 and abs(d) < 45 and self._safe(x, y, a + 180):
+            elif ((typ in self.MELEE or boss) and foe[0] < (self.LAUNCH_R if boss else self.BACK_R)
+                  and abs(d) < 45 and self._safe(x, y, a + 180)):
+                # (a KILL leg's boss too, kept LAUNCH_R off: out of his claw, in the launcher's range)
                 kd.add("back")                       # a demon: back away shooting (it is faster, but the gap buys shots)
             elif self.LOW_BACK and low and foe[0] < 260 and abs(d) < 45 and self._safe(x, y, a + 180):
                 kd.add("back")                       # hurt: open the distance -- a hitscanner's spread is an angle
@@ -858,6 +903,11 @@ class Steer:
         end = piece[-1] if piece else goal
         # ---- the leg's end
         action = self.leg["action"]
+        if action == "kill" and (f >= self.hunt_f or (last_piece and self.wi >= len(piece) - 3)):
+            if self._hunt(f, c, x, y):               # M8 C8: after the bosses, wherever they are now
+                piece = self.pieces[self.pi] if self.pieces else []
+                last_piece = self.pi == len(self.pieces) - 1
+                end = piece[-1] if piece else goal
         if last_piece and self.wi >= len(piece) - 3:
             self.why = "end %s" % self.leg["action"]
             tx, ty = end
@@ -1001,6 +1051,46 @@ class Steer:
             self.stuck = 0
             self.replan(x, y, "stuck", f)
         return kd
+
+    # ---- M8 C8: the KILL leg (level_route's boss mechanism: every boss the skill spawns must die) ------------------
+    HUNT_EVERY = 40            # frames between re-plans toward the nearest live boss
+    BACK_R = 200               # a demon (and on a KILL leg a boss) this near is backed away from while shooting
+
+    def _boss_slots(self):
+        return {b[0] for b in self.leg.get("bosses", ())} if self.leg else set()
+
+    def _bosses_alive(self, c) -> list:
+        """[(slot, x, y)] of the kill leg's bosses alive now (their runtime positions)"""
+        out = []
+        for b in self.leg.get("bosses", ()):
+            m = b[0]
+            if c["mon_active"][m] and hp12(c["mon_health"][m]) > 0:
+                if self.rt is not None and "thpos_rt" in c:
+                    v = c["thpos_rt"][self.rt[m]]
+                    out.append((m, signed(v & M32) / 65536.0, signed((v >> 32) & M32) / 65536.0))
+                else:
+                    out.append((m, b[1], b[2]))
+        return out
+
+    def _hunt(self, f, c, x, y) -> bool:
+        """the kill leg's path re-planned to the nearest live boss's place now, every HUNT_EVERY frames (or when the
+        path is used up) -> True when the path was replaced"""
+        self.hunt_f = f + self.HUNT_EVERY
+        alive = self._bosses_alive(c)
+        if not alive:
+            return False
+        _m, bx, by = min(alive, key=lambda b: math.hypot(b[1] - x, b[2] - y))
+        LR = self.LR
+        path = self.pl.leg_path(LR.cell_of(x, y), lambda q: max(abs(LR.centre(q)[0] - bx),
+                                                                 abs(LR.centre(q)[1] - by)) <= 48,
+                                self.active | self._openable())
+        if not path or len(path) < 2:
+            self.why = "hunt: wait"
+            return False
+        self.leg["path"] = [list(LR.centre(q)) if q[0] != "teleport" else ["teleport", q[1]] for q in path]
+        self._leg_pieces()
+        self.why = "hunt"
+        return True
 
     def _barrel_near(self, c) -> bool:
         """a live barrel in the last picture's aim window within BARREL_SAFE (Chebyshev) of the player: a shot that

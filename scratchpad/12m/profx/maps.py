@@ -21,16 +21,16 @@ import re
 
 import numpy as np
 
-from common import POOL_BASE_WORD, ROOT, default_fjm, default_labels, labels, work_dir
+from common import POOL_BASE_WORD, ROOT, active_map, default_fjm, default_labels, labels, work_dir
 
 PART_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_.]*):")
 ELEM_RE = re.compile(r"^(f\d+):l(\d+):")
 
 
-def part_starts(gen_dir, byname):
+def part_starts(gen_dir, byname, prefix):
     """{part file stem: lowest word of a top-level label it defines}"""
     out = {}
-    for f in sorted(gen_dir.glob("e1m1_0*.fj")):
+    for f in sorted(gen_dir.glob(prefix + "_0*.fj")):
         lo = None
         with open(f, encoding="utf-8") as fh:
             for line in fh:
@@ -49,8 +49,9 @@ def build(labels_path=None, gen_dir=None):
     for a, n in zip(la.tolist(), ln):
         byname.setdefault(n, a)
     gen_dir = gen_dir or (ROOT / "build" / ("generated_" + default_fjm().stem))
-    parts = part_starts(gen_dir, byname)
-    need = ["e1m1_03_segconsts", "e1m1_05_state", "e1m1_06_banks"]
+    p = active_map().lower()                    # the map's generated names: <map>_bspcode_walk, <map>_03_segconsts.fj
+    parts = part_starts(gen_dir, byname, p)
+    need = [p + "_03_segconsts", p + "_05_state", p + "_06_banks"]
     missing = [p for p in need if p not in parts]
     if missing:
         raise SystemExit("generated parts not found in %s: %s" % (gen_dir, missing))
@@ -95,17 +96,17 @@ def build(labels_path=None, gen_dir=None):
         ("thing_pass_leaf", byname["thing_pass_leaf"]),
         ("seg_pass2_leaf", byname["seg_pass2_leaf"]),
         ("bbgate_leaf", byname["bbgate_leaf"]),
-        ("segconsts (per-seg/thing const blocks)", parts["e1m1_03_segconsts"]),
-        ("bspcode walk (nodes, pos_leaf, ss code)", byname["e1m1_bspcode_walk"]),
-        ("dsc walk (eye point-location)", byname["e1m1_dsc_walk"]),
-        ("dsccs walk (collision point-location)", byname["e1m1_dsccs_walk"]),
+        ("segconsts (per-seg/thing const blocks)", parts[p + "_03_segconsts"]),
+        ("bspcode walk (nodes, pos_leaf, ss code)", byname[p + "_bspcode_walk"]),
+        ("dsc walk (eye point-location)", byname[p + "_dsc_walk"]),
+        ("dsccs walk (collision point-location)", byname[p + "_dsccs_walk"]),
         # M7 P1.2's collision cells sit between the seed descent and ptloc; a build before P1.2 has
         # none, and its profile keeps the old boundaries
-        *([("collision cells (tree, stubs, sim.line_test)", byname["e1m1_cc_n0"])]
-          if "e1m1_cc_n0" in byname else []),
+        *([("collision cells (tree, stubs, sim.line_test)", byname[p + "_cc_n0"])]
+          if p + "_cc_n0" in byname else []),
         ("ptloc_walk (M14-e point location)", byname["ptloc_walk"]),
-        (None, parts["e1m1_05_state"]),                     # the state part: transparent
-        ("banks head (vars, sprbkt tables)", parts["e1m1_06_banks"]),
+        (None, parts[p + "_05_state"]),                     # the state part: transparent
+        ("banks head (vars, sprbkt tables)", parts[p + "_06_banks"]),
         ("vpb bands-as-code (plane bands)", byname["vpb_blk__"]),
         ("banks tail (vql/vqh, yslope, zlight)", byname["vql_blk__"]),
         ("m1_reset code", byname["m1_reset"]),
@@ -139,19 +140,19 @@ def build(labels_path=None, gen_dir=None):
     M = [(1, "__hot_end", "frame start (input)"), (2, "sa_nf", "key decode"), (3, "menu_frame", "menu"),
          (4, "do_world", "doors"), (5, "dr12_done", "turn/move"), (6, "simcollide", "collision start"),
          (7, "cmh_vyd", "try H"), (8, "cma_vyd", "try A"), (9, "cmb_vyd", "try B"), (10, "cmc_vyd", "try C"),
-         (11, "e1m1_dsccs_walk", "dsccs walk"), (12, "e1m1_cs_seeded", "dsccs done"),
+         (11, p + "_dsccs_walk", "dsccs walk"), (12, p + "_cs_seeded", "dsccs done"),
          (13, "cmv_done", "collision done"), (14, "simmv_done", "post-move vx/vy"),
          *([(15, "simcollide_skip", "bind_things"), (16, after_bind, "view setup")] if bind else
            [(16, "simcollide_skip", "view setup (no bind_things: M7 P1.3)")]),
-         (17, "e1m1_dsc_walk", "dsc walk"), (18, "dsc_done", "dsc done"),
-         (19, "e1m1_bspcode_walk", "render walk"), (20, "bsp_done", "render done"), (21, "m1_reset", "reset"),
+         (17, p + "_dsc_walk", "dsc walk"), (18, "dsc_done", "dsc done"),
+         (19, p + "_bspcode_walk", "render walk"), (20, "bsp_done", "render done"), (21, "m1_reset", "reset"),
          (22, "ptloc_walk", "ptloc walk"), (23, after_ptloc, "ptloc done (write_hex)"),
          *([(24, B + "dirty", "bind dirty"), (25, B + "clean", "bind clean"),
             (26, B + "bl", "bind loop head")] if bind else []),
          (30, "seg_pass1_leaf", "seg_pass1 call"), (31, "seg_pass1_ts_leaf", "seg_pass1_ts call"),
          (32, "thing_leaf", "thing_leaf call"), (33, "thing_leaf_b", "thing_leaf_b call"),
          (34, "thing_pass_leaf", "thing_pass call"), (35, "seg_pass2_leaf", "seg_pass2 call"),
-         (36, "bbgate_leaf", "bbgate call"), (37, "e1m1_bspcode_pos_leaf", "pos_leaf call"),
+         (36, "bbgate_leaf", "bbgate call"), (37, p + "_bspcode_pos_leaf", "pos_leaf call"),
          (38, min(alive) if alive else None, "thing_pass alive (thing loaded)")]
     out, meta = [], {}
     for i, lab, nm in M:

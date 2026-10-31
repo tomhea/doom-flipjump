@@ -460,7 +460,7 @@ class Steer:
     MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True, "AMMO_LOW": 20, "AMMO_TYPES": (8,),
                             "SAVE_R": 300, "SEEK_AVOID": ((450, 1250, 1100, 1900),), "CHANNEL_COMMIT": True,
                             "CROSS_HP": 50, "SEEK_MAX_BURN": 8, "DROP_LOW": 60, "SAVE_LOW": 40, "CROSS_AMMO": 20,
-                            "END_NO_AMMO": True},
+                            "END_NO_AMMO": True, "END_DRY_RUN": True},
                    "E1M7": {"SKIP_ITEMS": (2002,)}}
     # SEEK_AVOID: boxes (x0, y0, x1, y1) whose items no detour seeks -- E1M4's stimpacks (496, 1840), (816, 1840) and
     # the near suit (912, 1520) lie among imps: the channel rule's detours there killed every play that reached the
@@ -498,6 +498,7 @@ class Steer:
     # schedules, 14 attempts) died there or on the health detour beside it, at 23..48 health
     SKIP_ITEMS = ()
     END_NO_AMMO = False        # on the last DASH cells of the route no ammo detour (E1M4: see `near_end` in _decide)
+    END_DRY_RUN = False        # ... and dry there, no fist fight: run for the end (E1M4)
 
     def __init__(self, route: dict, lv=None, log=print, seed: int = 0):
         sys.path.insert(0, str(ROOT / "scripts"))
@@ -814,6 +815,7 @@ class Steer:
 
     def _decide(self, f, c):
         kd = set()
+        self.dry_foe = None
         if c is None or c.get("mode", 0) != 0 or self.leg is None:
             return kd
         if self.f0 is None:
@@ -949,6 +951,13 @@ class Steer:
         if foe is not None and foe[0] > 64 and not (c.get("am_clip") or 0) and not (c.get("am_shell") or 0):
             foe = None                               # dry (no bullet, no shell): run, punch only what is at arm's length
             self.why = "dry"
+        if foe is not None and near_end and self.END_DRY_RUN and not (c.get("am_clip") or 0)                 and not (c.get("am_shell") or 0):
+            # END_DRY_RUN (a map tactic): dry on the route's last stretch -- no fist fight even at arm's length, run for
+            # the end. E1M4: the first play to carry the blue card that far stood punching an imp 30 cells from the
+            # exit at 28 health and died there, (101, 2033) world 4120
+            self.dry_foe = foe                       # (the walk sidesteps it: an imp in contact blocks the way)
+            foe = None
+            self.why = "dry run"
         if foe is not None and foe[0] > 100 and self.pl.hurts(self.LR.cell_of(x, y)):
             foe = None                               # on a damaging floor: walk on (shooting in passing), fight off it
         # ---- combat
@@ -1189,6 +1198,16 @@ class Steer:
         d = self._turn_to(want, a, kd, tight=6)
         if abs(d) < 35:
             kd.add("forward")
+        if self.dry_foe is not None and self.dry_foe[0] < 96:
+            # END_DRY_RUN: past the monster in contact -- strafe away from its side of the way ahead (E1M4's exit hall:
+            # an imp 50 units ahead held the walk still while it clawed, (71..87, 2018))
+            rel = (math.degrees(math.atan2(self.dry_foe[2] - y, self.dry_foe[1] - x)) - a + 540) % 360 - 180
+            if abs(rel) < 90:
+                sides = ("strafe_right", "strafe_left") if rel >= 0 else ("strafe_left", "strafe_right")
+                for side in sides:
+                    if self._safe(x, y, a + (90 if side == "strafe_left" else -90)):
+                        kd.add(side)
+                        break
         self._stuck(f, x, y, kd)
         prog = (self.pi, self.wi)
         if prog > self.best_prog:

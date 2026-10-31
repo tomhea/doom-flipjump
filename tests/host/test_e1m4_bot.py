@@ -303,3 +303,21 @@ def test_healthy_before_the_channel_no_ammo_detour(mods, cross):
     c.update({"am_clip": 0, "am_shell": 0})
     st.decide(100, c)
     assert (st.legs[st.li]["to"] == "ammo") == (not cross), st.legs[st.li]["to"]
+
+
+@pytest.mark.parametrize("low", [60, 0])
+def test_a_dropped_clip_is_taken_with_shells_in_hand(mods, low):
+    """DROP_LOW (E1M4: 60): 40 bullets and 5 shells, a zombieman's clip lying a few cells along the way -> a drop
+    detour; CONTROL: DROP_LOW 0 -> AMMO_LOW's rule alone (no shells only) leaves it"""
+    play, st, li = _steer(mods, "item:2048")
+    st.DROP_LOW = low
+    k = next(i for i, kind in enumerate(st.drop_kind) if kind == 2007)
+    x, y = st.legs[li]["path"][0]
+    dx, dy = st.legs[li]["path"][6]
+    c = _fight_cells(st, x, y, 0, x, clip=40, shell=5)
+    c["mon_active"] = [0] * len(st.mtype)
+    c["thpos_rt"][len(c["thpos_rt"]) - len(st.droppers) + k] = (((int(dx) << 16) & 0xFFFFFFFF)
+                                                                | (((int(dy) << 16) & 0xFFFFFFFF) << 32))
+    c["mdrop"] = tuple(1 if i == k else 0 for i in range(len(st.droppers)))
+    st.decide(100, c)
+    assert (st.legs[st.li]["to"] == "drop") == bool(low), st.legs[st.li]["to"]

@@ -458,7 +458,7 @@ class Steer:
     # maps' pinned plays is that map's alone
     MAP_TACTICS = {"E1M4": {"IGN_NEAR": 64, "CHANNEL_SUIT": True, "AMMO_LOW": 20, "AMMO_TYPES": (8,),
                             "SAVE_R": 500, "SEEK_AVOID": ((450, 1250, 1100, 1900),), "CHANNEL_COMMIT": True,
-                            "CROSS_HP": 50, "SEEK_MAX_BURN": 8}}
+                            "CROSS_HP": 50, "SEEK_MAX_BURN": 8, "DROP_LOW": 60}}
     # SEEK_AVOID: boxes (x0, y0, x1, y1) whose items no detour seeks -- E1M4's stimpacks (496, 1840), (816, 1840) and
     # the near suit (912, 1520) lie among imps: the channel rule's detours there killed every play that reached the
     # armor leg (deaths at (530..1000, 1300..1840)); the route takes the health by the corridor instead (level_route
@@ -474,6 +474,7 @@ class Steer:
     # list (the backpack (1536, 240) beside the shell box (1424, 240)); SAVE_R: short of ammo, no shot past it and none
     # in passing at a monster given up on. E1M4's best plays ran dry for the last 700 frames and died punching
     AMMO_LOW = 0
+    DROP_LOW = 0               # > 0: dropped clips are sought under this many bullets, shells or not
     AMMO_TYPES = ()
     SAVE_R = 0
     DROP_MOST = 60
@@ -892,13 +893,15 @@ class Steer:
             # AMMO (a map tactic): short of bullets with no shell -- a clip a dead zombieman dropped near by first,
             # then the map's ammo FAR off when nearly dry (the backpack and shell box east, AMMO_TYPES)
             clip, shell = c.get("am_clip") or 0, c.get("am_shell") or 0
-            if clip < self.AMMO_LOW and not shell and not go_now:
+            if clip < max(self.AMMO_LOW, self.DROP_LOW) and (self.DROP_LOW or not shell) and not go_now:
+                # (DROP_LOW: the dropped clips are picked up below it, shells or not -- E1M4's best new-route play
+                # reached the channel's mouth with 0 bullets and 0 shells and died there, world 5762)
                 drops = self._live_drops(c)
                 if drops and self._seek_health(f, x, y, drops, "drop", most=self.DROP_MOST, radius=self.DROP_R):
                     self.log("    f%d: (the drop above: %d bullets, AMMO_LOW)" % (f, clip))
                     return kd
-                if clip < 5 and self.ammo and self._seek_health(f, x, y, self.ammo, "ammo", most=self.AMMO_FAR_MOST,
-                                                                radius=4000):
+                if clip < 5 and not shell and self.ammo and self._seek_health(
+                        f, x, y, self.ammo, "ammo", most=self.AMMO_FAR_MOST, radius=4000):
                     self.log("    f%d: (the ammo above: far off, %d bullets, AMMO_LOW)" % (f, clip))
                     return kd
         # ---- the DASH: when what is left of the route is short, run it -- stopping to fight a crowd on the last

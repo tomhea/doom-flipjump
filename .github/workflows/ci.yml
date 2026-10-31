@@ -26,10 +26,10 @@ jobs:
         with: { python-version: "3.15" }     # the main Python (the owner, 2026-10-29); 3.11 - 3.14 in `pythons`
       # flipjump 1.6.0 is not on PyPI yet: install it editable from the flip-jump repository, pinned to
       # the exact commit this branch's code was proven on (a branch name moves; a commit does not).
-      - name: install flipjump 1.6.0 (62d93c4)
+      - name: install flipjump 1.6.0 (6167553, branch 1.6.0-cr-fixes)
         run: |
           git init -q "$RUNNER_TEMP/flip-jump"
-          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 62d93c4ce2b4744143e65bf204816634d4853ffc
+          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 61675539746e10c3043581f077c556b6c0660fcf
           git -C "$RUNNER_TEMP/flip-jump" checkout -q FETCH_HEAD
           pip install -e "$RUNNER_TEMP/flip-jump[io]"
           python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"
@@ -57,10 +57,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "${{ matrix.python }}" }
-      - name: install flipjump 1.6.0 (62d93c4)
+      - name: install flipjump 1.6.0 (6167553, branch 1.6.0-cr-fixes)
         run: |
           git init -q "$RUNNER_TEMP/flip-jump"
-          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 62d93c4ce2b4744143e65bf204816634d4853ffc
+          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 61675539746e10c3043581f077c556b6c0660fcf
           git -C "$RUNNER_TEMP/flip-jump" checkout -q FETCH_HEAD
           pip install -e "$RUNNER_TEMP/flip-jump[io]"
           python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"
@@ -77,10 +77,10 @@ jobs:
         with: { python-version: "3.15" }     # the main Python (the owner, 2026-10-29); 3.11 - 3.14 in `pythons`
       # flipjump 1.6.0 is not on PyPI yet: install it editable from the flip-jump repository, pinned to
       # the exact commit this branch's code was proven on (a branch name moves; a commit does not).
-      - name: install flipjump 1.6.0 (62d93c4)
+      - name: install flipjump 1.6.0 (6167553, branch 1.6.0-cr-fixes)
         run: |
           git init -q "$RUNNER_TEMP/flip-jump"
-          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 62d93c4ce2b4744143e65bf204816634d4853ffc
+          git -C "$RUNNER_TEMP/flip-jump" fetch -q --depth 1 https://github.com/tomhea/flip-jump.git 61675539746e10c3043581f077c556b6c0660fcf
           git -C "$RUNNER_TEMP/flip-jump" checkout -q FETCH_HEAD
           pip install -e "$RUNNER_TEMP/flip-jump[io]"
           python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"

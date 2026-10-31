@@ -45,7 +45,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from flipjump.assembler.table_pool import HotSite                      # noqa: E402
+from flipjump.assembler.inner_classes.table_pool import HotSite                      # noqa: E402
 from doomfj.build import Assembly, build_wall_renderer                  # noqa: E402
 from doomfj.config import Config                                        # noqa: E402
 from doomfj.harness import W, SHIP_LZMA_PRESET                          # noqa: E402

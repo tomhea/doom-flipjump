@@ -43,7 +43,7 @@ for q in (HERE / "profx", ROOT / "src"):
 if __name__ == "__main__":                       # M8 G13: `--map E1Mn` before the defaults are read
     from doomfj.mapprofile import take_map_arg
     take_map_arg()
-from flipjump.assembler.table_pool import heat_key                         # noqa: E402
+from flipjump.assembler.inner_classes.table_pool import heat_key                         # noqa: E402
 from common import (W, active_map, check_census_map, default_counts_cache, default_fjm, default_labels,  # noqa: E402
                     label_dict, load_sparse, work_dir)
 from fjmimage import FjmImage                                               # noqa: E402

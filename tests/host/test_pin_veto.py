@@ -14,7 +14,7 @@ leaves unpinned, not to a model of it. R9: the same list with POINTER_READ_CELLS
 pinnable, and the check says so; a pointer label the program lacks is never named.
 """
 import pytest
-from flipjump.assembler.table_pool import BlockPool
+from flipjump.assembler.inner_classes.table_pool import BlockPool
 
 from doomfj import selfreset
 from doomfj.harness import W

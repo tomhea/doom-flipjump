@@ -32,7 +32,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "src"))
 
 import deg_gate_driver as driver                                        # noqa: E402
-from flipjump.assembler.table_pool import BlockPool                     # noqa: E402
+from flipjump.assembler.inner_classes.table_pool import BlockPool                     # noqa: E402
 from doomfj.config import Config                                        # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
 from doomfj.selfreset import BYTE_ARRAY_NAMES, check_pin_all_but, declared_names, pin_all_but_cells   # noqa: E402

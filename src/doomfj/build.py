@@ -519,7 +519,7 @@ def _table_pool(assembly: Assembly, pin_cells):
     """a fresh BlockPool for one assembly of a blocked build, or None"""
     if assembly.pool is None:
         return None
-    from flipjump.assembler.table_pool import BlockPool
+    from flipjump.assembler.inner_classes.table_pool import BlockPool
     assert "pin_all_but" not in assembly.pool, "Assembly.pool names no pin_all_but: the build derives it"
     return BlockPool(W, **dict(assembly.pool), pin_all_but=pin_cells)
 

@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 import flipjump as fj                                                           # noqa: E402
-from flipjump.assembler.table_pool import BlockPool                             # noqa: E402
+from flipjump.assembler.inner_classes.table_pool import BlockPool                             # noqa: E402
 
 from doomfj import build as B                                                   # noqa: E402
 

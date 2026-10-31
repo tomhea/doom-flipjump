@@ -24,7 +24,7 @@ import re
 from pathlib import Path
 
 import pytest
-from flipjump.assembler.table_pool import BlockPool, HotSite
+from flipjump.assembler.inner_classes.table_pool import BlockPool, HotSite
 
 from doomfj.harness import W
 

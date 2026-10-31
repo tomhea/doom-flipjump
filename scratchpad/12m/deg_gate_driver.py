@@ -44,7 +44,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import flipjump as fj                                                   # noqa: E402
 from flipjump import FixedIO                                            # noqa: E402
-from flipjump.assembler.table_pool import BlockPool                     # noqa: E402
+from flipjump.assembler.inner_classes.table_pool import BlockPool                     # noqa: E402
 from flipjump.utils.exceptions import FlipJumpException                 # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
 

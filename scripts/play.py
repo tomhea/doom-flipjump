@@ -466,7 +466,9 @@ class Steer:
     SEEK_AVOID = ()
     CHANNEL_COMMIT = False     # on a damaging floor no new detour starts (E1M4: see the seeks in _decide)
     CROSS_HP = 0               # > 0: at this health or more, a damaging stretch ahead -> no ammo detour (go now)
-    SEEK_MAX_BURN = None       # the damaging-stretch rule's health / suit detours: at most this many damaging cells
+    SEEK_MAX_BURN = None       # a detour (any seek) crosses at most this many damaging cells (None: no cap) -- E1M4:
+    #                            the damaging-stretch rule sent a 13-health play to the medikit beyond the channel, and
+    #                            ammo detours after the medikit crossed the channel back west (dead at (1780, 957))
     # AMMO (E1M4's tactic; 0 / () off): under AMMO_LOW bullets with no shell, a dead zombieman's clip within DROP_R
     # (DROP_MOST cells) first, then -- under 5 -- the map's ammo up to AMMO_FAR_MOST cells off, AMMO_TYPES joining the
     # list (the backpack (1536, 240) beside the shell box (1424, 240)); SAVE_R: short of ammo, no shot past it and none
@@ -1297,6 +1299,8 @@ class Steer:
                        and not any(b[0] <= hx <= b[2] and b[1] <= hy <= b[3] for b in self.SEEK_AVOID))
         opn = {"door:%d" % si for si in self.dorder if self.lv.dp.boxes.get(si) is not None
                and (not self.pl.mechs["door:%d" % si].key or self.pl.mechs["door:%d" % si].key in self.keys)}
+        if max_burn is None:
+            max_burn = self.SEEK_MAX_BURN            # (every detour: E1M4's ammo detours crossed the channel BACK)
         def usable(path):
             return (path and not any(q[0] == "teleport" for q in path) and len(path) < most
                     and not any(self.pl.sector_of(q) in self.lorder for q in path)

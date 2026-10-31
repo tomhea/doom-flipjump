@@ -275,8 +275,20 @@ def test_channel_seeks_take_no_health_beyond_the_stretch(mods):
     assert st.SEEK_MAX_BURN == 8
     assert not st._seek_health(100, 1787, 897, [(3264, 1216)], "health", most=150, radius=2500, max_burn=8)
     st.retry.clear()
-    assert st._seek_health(100, 1787, 897, [(3264, 1216)], "health", most=150, radius=2500, max_burn=None), \
+    st.SEEK_MAX_BURN = None
+    assert st._seek_health(100, 1787, 897, [(3264, 1216)], "health", most=150, radius=2500), \
         "CONTROL: no path at all (the cap is not what refused it)"
+
+
+@pytest.mark.parametrize("cap", [8, None])
+def test_no_ammo_detour_back_across_the_channel(mods, cap):
+    """SEEK_MAX_BURN caps EVERY detour (any `what`, no max_burn passed): a play past the channel crossed it back west
+    for ammo and died at (1780, 957). Here the same crossing the other way: an "ammo" detour to a spot beyond the channel
+    (135 cells through the nukage) is refused; CONTROL: no cap -> the detour is taken"""
+    play, st, li = _steer(mods, LONG)
+    st.SEEK_MAX_BURN = cap
+    got = st._seek_health(100, 1787, 897, [(3264, 1216)], "ammo", most=400, radius=4000)
+    assert got == (cap is None), "CONTROL: no ammo in reach at all" if cap is None else "crossed the channel back"
 
 
 @pytest.mark.parametrize("cross", [50, 0])

@@ -8,7 +8,7 @@ as build.py does (`build._table_pool`), and the driver reads what the pool did o
   (2) the program it builds prints what the same program without a pool prints;
   (3) `--counts-cache` receives the census, equal to what a plain BlockPool's assembly of the program reports;
   (4) the flags that need a counting assembly or a counts cache to read are refused, and so is a build without the
-      flag (flipjump's BlockPool has no two-pass mode); `--record-sites` records every table (report.table_sites);
+      flag (flipjump's BlockPool has no two-pass mode); `--record-sites` records every table (BlockPool.table_sites);
   (6) a pool with a block for every group pins words, and the collapse alarm stays silent; R9: a span too small for
       any block is called out ("PINNING COLLAPSED"), which the one-pass reset's builds never printed (#130).
 """
@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 import flipjump as fj                                                           # noqa: E402
-from flipjump.assembler.table_pool import BlockPool                             # noqa: E402
+from flipjump.assembler.inner_classes.table_pool import BlockPool                             # noqa: E402
 
 from doomfj import build as B                                                   # noqa: E402
 

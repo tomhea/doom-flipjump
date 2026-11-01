@@ -44,7 +44,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import flipjump as fj                                                   # noqa: E402
 from flipjump import FixedIO                                            # noqa: E402
-from flipjump.assembler.table_pool import BlockPool                     # noqa: E402
+from flipjump.assembler.inner_classes.table_pool import BlockPool                     # noqa: E402
 from flipjump.utils.exceptions import FlipJumpException                 # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
 
@@ -71,7 +71,7 @@ def verdict(status, pool, *, restricted=False):
 
     A pool that relocated nothing assembled the STOCK program, so a green gate says nothing about
     blocking -- and "4/4 byte-exact with blocking on" would be a false citation. A pool that relocated tables but
-    pinned no word (its final pin map, `report.pinned`) is placement, not blocking. The gate's own non-zero status
+    pinned no word (its final pin map, `pinned`) is placement, not blocking. The gate's own non-zero status
     always wins, so this can only ever add a failure.
 
     `restricted` is for a run narrowed ON PURPOSE (an empty match is that experiment's ANSWER): it warns loudly and
@@ -83,7 +83,7 @@ def verdict(status, pool, *, restricted=False):
         return _vacuous(status, restricted,
                         "the pool relocated NOTHING (0 allocated, %s declined) -- this run is the "
                         "stock program, whatever the gate said" % format(pool.declined, ","))
-    if not pool.report.pinned:
+    if not pool.pinned:
         return _vacuous(status, restricted,
                         "%s tables were blocked but NO word was pinned -- the arm still writes an "
                         "address, so this is placement, not blocking" % format(pool.allocated, ","))
@@ -273,9 +273,9 @@ def cheap_selftest(driver, table_pool, *, body_ran=None, extra=None):
     every_cell = sorted(fj.assemble([src], tmp / "labels.fjm", memory_width=W, show_progress=False))
     relocated = BlockPool(W, POOL_BASE, pin_all_but=every_cell)          # tables move; every cell stays unpinned
     out, ops, cause = build_and_run(src, tmp, "relocated", relocated)
-    check(out == inline and relocated.allocated > 0 and not relocated.report.pinned,
+    check(out == inline and relocated.allocated > 0 and not relocated.pinned,
           "relocation alone leaves the output alone",
-          "%d tables, %d pinned, %d -> %d ops" % (relocated.allocated, len(relocated.report.pinned), inline_ops, ops))
+          "%d tables, %d pinned, %d -> %d ops" % (relocated.allocated, len(relocated.pinned), inline_ops, ops))
 
     counting = BlockPool(W, POOL_BASE)
     fj.assemble([src], tmp / "counting.fjm", memory_width=W, show_progress=False, table_pool=counting)
@@ -296,9 +296,9 @@ def cheap_selftest(driver, table_pool, *, body_ran=None, extra=None):
     # d is the cell the pointer reads: one op
     pool = BlockPool(W, POOL_BASE, pin_all_but=[("d", 1)])
     out, ops, cause = build_and_run(src, tmp, "blocked", pool)
-    check(out == inline and pool.report.pinned,
+    check(out == inline and pool.pinned,
           "blocking with the pointed-to cell left unpinned: the same program",
-          "%d pinned words, %d tables, %d ops" % (len(pool.report.pinned), pool.allocated, ops))
+          "%d pinned words, %d tables, %d ops" % (len(pool.pinned), pool.allocated, ops))
 
     # --- and one mutation flipjump's test does not make: a list that names the WRONG cells (none), which is the
     # failure mode the driver's cell list can actually have.
@@ -319,14 +319,14 @@ def cheap_selftest(driver, table_pool, *, body_ran=None, extra=None):
     check(status == 0 and "WARNING" in text, "... but a run RESTRICTED on purpose only warns",
           "exit %r, %r" % (status, text[4:36]))
     check(verdict(0, pool) == 0, "... while a pool that did relocate and pin passes",
-          "allocated=%d, %d pinned" % (pool.allocated, len(pool.report.pinned)))
+          "allocated=%d, %d pinned" % (pool.allocated, len(pool.pinned)))
     check(verdict(1, pool) != 0, "... and the gate's own FAIL is never overridden by it")
     check(verdict(0, None) == 0, "... and --off, which has no pool at all, is not vacuous")
     # tables relocated, nothing pinned: placement wearing blocking's name -- a real pool, not a mutated one
     status, text = capture(lambda: verdict(0, relocated))
     check(status != 0 and "placement, not blocking" in text,
           "MUTANT: blocked tables but NO pinned word is not a PASS",
-          "%d pinned, %d tables, exit %r" % (len(relocated.report.pinned), relocated.allocated, status))
+          "%d pinned, %d tables, exit %r" % (len(relocated.pinned), relocated.allocated, status))
 
     # --- run_gate: the factory goes in, the gate's status comes out, and flipjump is left alone
     stubs = {}

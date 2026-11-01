@@ -32,7 +32,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "src"))
 
 import deg_gate_driver as driver                                        # noqa: E402
-from flipjump.assembler.table_pool import BlockPool                     # noqa: E402
+from flipjump.assembler.inner_classes.table_pool import BlockPool                     # noqa: E402
 from doomfj.config import Config                                        # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
 from doomfj.selfreset import BYTE_ARRAY_NAMES, check_pin_all_but, declared_names, pin_all_but_cells   # noqa: E402
@@ -86,10 +86,10 @@ def run(a):
     # the byte cells named before the assembly agree with the labels it produced (byte_arrays' geometry check)
     check_pin_all_but(cell_lists[-1], labels, Config().VIEW_W, a.subsectors)
     last = pools[-1]
-    print("blocked: %s tables in %s groups; declined %s; ungrouped %s; pin conflicts %s; %s words pinned"
+    print("blocked: %s tables in %s groups; declined %s; ungrouped %s; %s words pinned"
           % (format(last.allocated, ","), format(len(last.groups), ","),
              format(last.declined, ","), format(last.ungrouped, ","),
-             format(last.report.pin_conflicts, ","), format(len(last.report.pinned), ",")), flush=True)
+             format(len(last.pinned), ",")), flush=True)
     return driver.verdict(status, last)
 
 

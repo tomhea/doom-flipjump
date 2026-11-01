@@ -12,7 +12,7 @@ import gzip
 import json
 import re
 
-from flipjump.assembler.table_pool import BlockPool, HotSite
+from flipjump.assembler.inner_classes.table_pool import BlockPool, HotSite
 
 W = 32
 # ship-gate 1b's knobs (docs/ship-gate.md): the ones that enter _block_bits / _preallocate

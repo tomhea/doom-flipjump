@@ -1,0 +1,34 @@
+  model replays: 11 runs reproduce the set's poses (274 s, outside the lock)
+b0_scenarios: doom_e1m6.fjm sha256 bb208c1985af855f | set combat_scenarios_e1m6_v1.json (11 runs, keys 6ef1f9c8d227dcff) | startup+menu 346,782 ops (exact)
+  run                   avg (exact)  p50 +-2^18         p80         max  state     pixels    cam  dr sonl
+  R0-s131                16,955,290  17,563,648  20,971,520  23,855,104  100/100   100/100     2   0   50
+  R0-aftermath           27,382,297  27,525,120  31,719,424  34,865,152  100/100   100/100     5   0   66
+  R0-s263                20,790,220  21,495,808  25,690,112  38,797,312  100/100   100/100     2   0   26
+  R0-s40                 32,670,012  29,097,984  48,758,784  53,477,376  100/100   100/100     5   0   30
+  R0-s67                 21,571,165  23,068,672  24,641,536  26,476,544  100/100   100/100     0   0   47
+  R0-s45                 24,613,861  20,971,520  36,700,160  43,515,904  100/100   100/100     0   0   53
+  R0-s62                 40,130,105  41,680,896  45,088,768  48,496,640  100/100   100/100     2   0   77
+  R0-s369                31,022,053  31,981,568  36,175,872  42,205,184  100/100   100/100     0   0   42
+  R0-s174                24,773,929  24,641,536  25,952,256  28,049,408  100/100   100/100     0   0   19
+  R0-s0                  28,572,845  28,049,408  33,292,288  41,418,752  100/100   100/100     0   0   51
+  R3-s199                11,493,292  13,107,200  15,204,352  16,515,072  100/100   100/100     0   0   25
+  B0 BINDING (mean + p80)/2 over 11 runs: 28,237,166 ops/frame   (mean 25,452,279, p80 run R0-s369 = 31,022,053)
+  per-frame maximum: 53,477,376 ops (+/- 2^18) in R0-s40; run averages 11,493,291 .. 40,130,104; headroom to 22M: -6,237,166
+  STRAFE UNDERCOUNT (--proxy: each strafe-only frame given a forward step into the same landing):
+    R0-s131              +19,938,507 ops over 50 strafe-only frames = 398,770 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 95 (a strafe-only frame): the pose ((-66382324, -9928032, 3873949304) vs (-65526884, -10534432, 3873949304)); 2 frames' expectations differ, 2 pictures
+    R0-aftermath         +28,328,344 ops over 66 strafe-only frames = 429,217 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 63 (a strafe-only frame): the picture alone (the monsters or effects part); 14 frames' expectations differ, 14 pictures
+    R0-s263              +13,446,392 ops over 26 strafe-only frames = 517,169 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-s40               +13,692,755 ops over 30 strafe-only frames = 456,425 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 50 (a strafe-only frame): the picture alone (the monsters or effects part); 31 frames' expectations differ, 31 pictures
+    R0-s67               +15,292,380 ops over 47 strafe-only frames = 325,370 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 0 (a strafe-only frame): a PICKUP the proxy's step touched at the landing -- item 99 (type 2010 at 1440, 224); the normal run's strafe-only frame does not move, so it never takes it (am_misl 0 -> 1, p_bc 0 -> 6); 100 frames' expectations differ, 33 pictures
+    R0-s45               +21,936,728 ops over 53 strafe-only frames = 413,901 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-s62               +39,941,313 ops over 77 strafe-only frames = 518,718 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-s369              +17,991,248 ops over 42 strafe-only frames = 428,363 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-s174              +7,862,867 ops over 19 strafe-only frames = 413,835 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-s0                +20,992,096 ops over 51 strafe-only frames = 411,610 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R3-s199              +10,557,560 ops over 25 strafe-only frames = 422,302 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    binding with the collision tic on strafe-only frames: 28,422,568 (B0 + 185,402); 432,058 ops per strafe-only frame over 486 frames
+B0 OK

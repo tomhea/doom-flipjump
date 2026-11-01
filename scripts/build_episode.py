@@ -172,20 +172,21 @@ LEVEL_SHIPPED = {
     "E1M3": ("build/doom_e1m3_v1.fjm", "71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784"),
     "E1M5": ("build/doom_e1m5_v1.fjm", "4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2"),
     "E1M9": ("build/doom_e1m9_v1.fjm", "33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48"),
-    "E1M6": ("build/doom_e1m6_v1.fjm", "5f1abfea24b8fa162f2aeaece569e0eeaff9ff98507557a5fa193dca3142ac0f"),
+    "E1M6": ("build/doom_e1m6_v2.fjm", "bb208c1985af855ff3feb6b41e01bfc340e5af724d21de902477c0c32057b0ae"),
     "E1M8": ("build/doom_e1m8_v1.fjm", "9311cd67268c7e121ff3137e86ff86146888e3b1e6e0ad5b859a4ff64c553737"),
     "E1M7": ("build/doom_e1m7_v1.fjm", "77466d1d306acb78b48baea01df45820fe0b9a4be6ee4dcfbe2b757cdbd0c0ec"),
     "E1M4": ("build/doom_e1m4_v1.fjm", "21b08396c53bd2080326711351b8c32bef27ff4298238544a740a657429dd851"),
 }
+LEVEL_VERSION = {"E1M6": "v2"}       # docs/ship-gate.md 12: E1M6 v2 (the mm_things windows); the others v1
 for _m, (_out, _sha) in LEVEL_SHIPPED.items():
-    _lo = _m.lower()
+    _lo, _v = _m.lower(), LEVEL_VERSION.get(_m, "v1")
     REGISTRY[_m] = dataclasses.replace(
         REGISTRY[_m], recorded_out=_out, recorded_sha256=_sha,
-        recorded_labels="scratchpad/12m/atlas/%s_v1.labels.tsv.gz" % _lo,
-        recorded_census="scratchpad/12m/_census_game_%s_v1.json.gz" % _lo,
-        recorded_ref="docs/ship-gate.md %s (v1, %s)" % (
-            {"E1M9": "7", "E1M6": "8", "E1M8": "8", "E1M7": "9", "E1M4": "10"}.get(_m, "6"),
-            {"E1M6": "2026-10-30", "E1M8": "2026-10-30", "E1M7": "2026-10-31", "E1M4": "2026-10-31"}.get(_m, "2026-10-29")))
+        recorded_labels="scratchpad/12m/atlas/%s_%s.labels.tsv.gz" % (_lo, _v),
+        recorded_census="scratchpad/12m/_census_game_%s_%s.json.gz" % (_lo, _v),
+        recorded_ref="docs/ship-gate.md %s (%s, %s)" % (
+            {"E1M9": "7", "E1M6": "12", "E1M8": "8", "E1M7": "9", "E1M4": "10"}.get(_m, "6"), _v,
+            {"E1M6": "2026-11-01", "E1M8": "2026-10-30", "E1M7": "2026-10-31", "E1M4": "2026-10-31"}.get(_m, "2026-10-29")))
 for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: placeholders until their level ships
     _p = profile(_m)
     REGISTRY[_m] = MapSpec(
@@ -227,6 +228,7 @@ def outputs(spec: MapSpec, out_dir: Path) -> dict:
     return {"fjm": "%s/doom_%s.fjm" % (rel, lo),
             "labels": "%s/doom_%s.labels.tsv.gz" % (rel, lo),
             "census": "%s/census_%s.json.gz" % (rel, lo),
+            "sites": "%s/sites_%s.json.gz" % (rel, lo),        # --record-sites: the level's own heat list joins them
             "logs": "%s/logs" % rel,
             "generated": "%s/generated_doom_%s" % (rel, lo)}    # build.py: out_fjm.parent / ("generated_" + stem)
 
@@ -252,7 +254,7 @@ def plan_map(spec: MapSpec, out_dir: Path) -> list[Step]:
 
     add("emit_check", ["scripts/emit_check.py", m, "--json", "%s/%s_emit_check.json" % (logs, m)],
         inputs=(wad, ASSET_WAD))
-    add("build", build_args(spec, fjm, lab, o["census"]), inputs=(wad, ASSET_WAD, spec.heat), est_min=spec.build_min,
+    add("build", build_args(spec, fjm, lab, o["census"]) + ["--record-sites", o["sites"]], inputs=(wad, ASSET_WAD, spec.heat), est_min=spec.build_min,
         build=True)
     add("sha256", [], heavy=False, needs_fjm=True, note="recorded %s" % (spec.recorded_sha256[:16] or "none"))
     add("p2a", ["scratchpad/gp/p2a_gate.py"] + bin_args, needs_fjm=True, inputs=(ASSET_WAD,))

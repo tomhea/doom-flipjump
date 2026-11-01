@@ -156,6 +156,7 @@ step of all nine -- the 1.5-2 day estimate stands until the first real run repla
 | 2026-10-19 | the owner: no more RAM ("i cant buy more ram"); **2^27 words is a super hard limit** -- "Optimize the levels or even lose unimportant features". Started: ASSEMBLER MEMORY WORK (flipjump, branch `asm-memory`, target <= ~11 GB peak for an E1M2-sized program, output byte-identical) and SIZE WORK (branch `m8-size`: attribution, per-map projection, cuts, feature-loss proposals). Lessons survey: E1M7 projected ~32.8 GB / pool 157% at spread 1, E1M6 ~20.8 GB (estimates) |
 | 2026-10-19 | merged into `m8-episode`: the final creator (`scripts/build_episode.py`), the lessons (`docs/level-lessons.md`, 13 survey checks) |
 | 2026-10-31 | E1M3, E1M5, E1M6, E1M7, E1M8, E1M9 shipped v1 (#158, #159); the owner's plan: section 12 (E1M4's three wins, E1M6's profile and cuts, a placement profile for every level) |
+| 2026-11-01 | E1M4 v1 shipped (#162); E1M2 v2 (#165: r4 refused by flipjump 1.6.0's screen); step 2: E1M6 profiled (`mm_things` 9.5% of the frame) and its monster-move test cut -- E1M6 v2 (`docs/ship-gate.md` 12), speed set 20,234,657 -> 19,413,074 (-4.06%); msframe waits for the machine. Step 3 started: the creator records each build's table sites (`--record-sites`), what a level's own heat list joins |
 
 ## 10. Orchestration
 

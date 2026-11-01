@@ -2,14 +2,15 @@
 
     python profx.py engine                   build the instrumented engine into <WORK>/engX
     python profx.py maps                     derive the object map, label words and phase markers
-    python profx.py --selftest [--lock PATH] the three checks below, on blocked27 (runs the binary:
+    python profx.py --selftest [--lock PATH] the three checks below, on PROFX_FJM (blocked27 by default; runs the binary:
                                              take the binary lock when other streams exist)
 
 SELFTEST (R9). One idle run of the shipped binary -- menu + 3 game frames, 60M ops -- twice:
   (c) on the INSTALLED engine and on the profiler: the op totals and every frame's pixels must be
       identical, the histogram must sum to the op total, and the trace must be exactly the run's
       ops (its per-word counts equal the histogram's) -- the instrument changes nothing it measures;
-  (a) the OWNER attribution against the op-by-op trace of that same run, per bind_things statement:
+  (a) the OWNER attribution against the op-by-op trace of that same run, per statement of the checked
+      expansion (validate_trace.MACROS: bind_things, else since M7 P1.3 sim.thing_pass_depth_w):
       within 5% on every statement >= 200 ops/call and 1% on the whole paired sequence, >= 5
       statements checked;
   (b) the NEGATIVE CONTROL: ADDRESS-ONLY attribution (every op charged to the word it runs at) put

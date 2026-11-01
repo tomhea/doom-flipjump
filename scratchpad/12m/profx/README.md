@@ -6,7 +6,7 @@ op counts between phase labels. It produced `docs/plan-gameplay.md` section 3. I
 checks the attribution against an op-by-op trace, with an address-only negative control (R9).
 
 Nothing here touches the shipped engine. The instrumented engine is built from flipjump-151's
-`_fjcore.c` at `73e09c0` (the source is checked by sha256) and loaded by path.
+`_fjcore.c` at `62d93c4` (flipjump 1.6.0; the source is checked by sha256) and loaded by path.
 
 ## Where things go
 

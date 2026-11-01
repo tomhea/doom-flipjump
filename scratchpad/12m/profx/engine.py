@@ -1,8 +1,8 @@
-"""Build the FJPROFX instrumented engine: flipjump-151's _fjcore.c at 73e09c0, patched, compiled.
+"""Build the FJPROFX instrumented engine: flipjump 1.6.0's _fjcore.c at 62d93c4, patched, compiled.
 
 The installed engine is never touched: the patched source is written to <WORK>/engX and loaded by
 path. The patch is ANCHORED -- each insertion point must occur exactly once in the source, or the
-build stops -- and the source must be byte-identical (LF text) to _fjcore.c at 73e09c0, checked by
+build stops -- and the source must be byte-identical (LF text) to _fjcore.c at 62d93c4, checked by
 sha256, so the patch never lands on a source it was not written for.
 
 What the patch adds, per op, in the FLAT loop only (at `jump_word_ready`, before `ops++`):
@@ -15,7 +15,7 @@ What the patch adds, per op, in the FLAT loop only (at `jump_word_ready`, before
     runtime, data reads, far unlabelled ops living in pad holes -- is charged to the owner;
   * incl[owner] += 1, obj[map(owner)] += 1           inclusive attribution;
   * output-bit ops are counted.
-The IO callbacks remember the op count so `prof_mark()` (called at each present) can log it.
+The flat loop's IO blocks remember the op count, once per bit, so `prof_mark()` (called at each present) can log it.
 
     python engine.py                       # -> <WORK>/engX/_fjcore.pyd
     python engine.py --write-patch fjcore_profx.patch --no-compile
@@ -30,9 +30,9 @@ from pathlib import Path
 
 from common import HERE, ROOT, work_dir
 
-FJ_COMMIT = "73e09c0"
+FJ_COMMIT = "62d93c4"
 SRC_REL = "flipjump/interpreter/_fjcore.c"
-SRC_SHA256 = "51b5561674cfa53c93c82d7541a3efef5a525609d4843e3115b4d0c39e7a7a70"   # LF text at 73e09c0
+SRC_SHA256 = "78c29111af7b1ff7f9796fe67d3695bc76ad1c7ae995605b6b48442c672388a8"   # LF text at 62d93c4
 VCVARS = r"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
 PY = Path(sys.executable).parent
 CL_FLAGS = ["/c", "/nologo", "/O2", "/W3", "/GL", "/DNDEBUG", "/MD", "-I%s" % (PY / "include")]
@@ -46,7 +46,7 @@ def sha(text):
 
 
 def source(fjdir):
-    """_fjcore.c at 73e09c0 as LF text: the working copy if it matches, else `git show` (read-only)"""
+    """_fjcore.c at FJ_COMMIT as LF text: the working copy if it matches, else `git show` (read-only)"""
     wc = Path(fjdir) / SRC_REL
     if wc.exists():
         text = wc.read_text(encoding="utf-8")        # universal newlines: CRLF checkouts normalise
@@ -82,18 +82,16 @@ def patch(s):
                    s, count=1)
     if n != 1:
         raise SystemExit("op anchor not found")
-    old_out = ("        double io_start = monotonic_seconds();\n"
-               "        PyObject* result = PyObject_CallFunctionObjArgs(write_bit, (f == dw + 1) ? Py_True : Py_False, NULL);")
+    # the IO ops: the FIRST cold_output / cold_input blocks are the flat loop's (the paged loop's come later)
+    old_out = "        if (out_bit(self, write_bit, f == dw + 1, paused_seconds_out) < 0) {"
     if s.count(old_out) < 1:
         raise SystemExit("output anchor not found")
-    s = s.replace(old_out, "        double io_start = monotonic_seconds();\n        PyObject* result;\n"
-                  "        gx_ops_io = ops;\n"
-                  "        result = PyObject_CallFunctionObjArgs(write_bit, (f == dw + 1) ? Py_True : Py_False, NULL);", 1)
-    old_in = "        double io_start = monotonic_seconds();\n        result = PyObject_CallNoArgs(read_bit);"
+    s = s.replace(old_out, "        gx_ops_io = ops;\n" + old_out, 1)
+    old_in = "        int bit_value = in_bit(self, read_bit, write_bit, eof_exception_type, paused_seconds_out);"
     if s.count(old_in) < 1:
         raise SystemExit("input anchor not found")
-    s = s.replace(old_in, "        double io_start = monotonic_seconds();\n        gx_ops_io = ops;\n"
-                  "        result = PyObject_CallNoArgs(read_bit);", 1)
+    s = s.replace(old_in, "        int bit_value;\n        gx_ops_io = ops;\n"
+                  "        bit_value = in_bit(self, read_bit, write_bit, eof_exception_type, paused_seconds_out);", 1)
     s = sub1(s, "static PyMethodDef module_methods[] = {", funcs, "module methods")
     return s
 
@@ -109,7 +107,7 @@ def _run(args, cwd):
 
 def default_fjdir():
     """the git checkout of the flipjump THIS python imports (PYTHONPATH first, as every other tool resolves it); the
-    source is still read at 73e09c0 (`git show`, sha-checked), so only where it is read from follows PYTHONPATH.
+    source is still read at FJ_COMMIT (`git show`, sha-checked), so only where it is read from follows PYTHONPATH.
     Falls back to flipjump-151 beside the repo when the imported package is not in a git checkout."""
     try:
         import flipjump
@@ -145,7 +143,7 @@ def build(out_dir=None, fjdir=None, write_patch=None, compile_=True):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fj", default=None, help="a flipjump checkout holding 73e09c0 (default: the imported flipjump's, else flipjump-151 next to the repo)")
+    ap.add_argument("--fj", default=None, help="a flipjump checkout holding 62d93c4 (default: the imported flipjump's, else flipjump-151 next to the repo)")
     ap.add_argument("--out", default=None, help="engine directory (default <WORK>/engX)")
     ap.add_argument("--write-patch", default=None, help="also write the unified diff here")
     ap.add_argument("--no-compile", action="store_true")

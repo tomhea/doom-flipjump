@@ -847,6 +847,8 @@ its own SR lines). Not done yet, as for section 6: the per-level speed pass and 
 
 ## 8. E1M6 and E1M8 (M8 wave 3): their own binaries, their own numbers
 
+**E1M6 v1 is superseded by E1M6 v2 (section 12, 2026-11-01: the monster-move test cut).**
+
 Built and gated as section 6's levels, on branch `m8-wave3` (m8-episode + soultele + the E1M8 boss route + the
 playthrough speed set; flipjump 1.6.0 at 9877f25), every step through `scripts/heavy.py`. Evidence:
 `docs/ship-evidence/e1m6_v1_*.log`, `e1m8_v1_*.log`. **B0 is not run**: the owner's 2026-10-29 speed set (the level's
@@ -980,3 +982,43 @@ The build line, in the recorded paths (the creator's own, `build/e1m2_v2/...`, c
 | `msframe` | **NOT RUN**: the owner's machine is under load ("wait with future runs that rely on times"); `shipped_e1m2` stays r4's 70.2 ms until it runs |
 
 Play: `fj --run build/doom_e1m2_v2.fjm`.
+
+## 12. E1M6 v2: the episode plan's step 2 -- E1M6 profiled, its monster-move test cut
+
+**The profile** (profx on flipjump 1.6.0, `scratchpad/12m/profx/play_profile.py`, v1's playthrough, 965 game frames;
+a measurement, not gate evidence): mean frame 18,094,270 ops; the render walk 81.92% (seg_pass2 4.93M, seg_pass1_ts
+3.74M, seg_pass1 2.39M, the thing passes 2.87M -- the renderer every level shares); the glue 2.88M, of which the
+monster-move collision cells 2.25M and `mm_things` alone 1,726,865 ops/frame (9.5%): every moving monster's every
+try tested every slot of the level's thing table, |dx| < bd and |dy| < bd by subtraction.
+
+**The cut** (`monstermove.things_leaf_lines(window=True)`, branch `m8-e1m6-mmwin`): per call, a window per radius
+class and axis, `[nx - bd, nx + bd]`; when neither end of a window straddles zero, unsigned order is signed order and
+each slot's test is two early-exit `hex.cmp` an axis (most slots leave on the first digit); a window that straddles
+zero falls back to the slot loop. Exact while the map's extent is < 16000 (asserted at emit). Only the maps in
+`wall_renderer.MM_WINDOW_MAPS` (E1M6) emit it, so every other shipped level keeps its recorded sha256.
+`tests/fj/test_mm_window_fj.py` runs both leaves on the real engine against `World._thing_blocker`'s tests (160
+records: both sides of both axes, windows straddling zero, things on the box edges); its two R9 mutants (no straddle
+test; |dx| = bd let through the high end) each part. 6 passed.
+
+**E1M6 v2** -- **`build/doom_e1m6_v2.fjm`**, sha256 `bb208c1985af855f`, built by the creator
+(`build_episode.py --maps E1M6 --out-dir build/e1m6_v2`, every step through `scripts/heavy.py`) at a8751494 with
+flipjump 1.6.0 at b1365b5, spread 1, `heat_blocked27_p10` (as v1). Evidence `docs/ship-evidence/e1m6_v2_*.log`.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (519 s) / PASS (1,221 s; 982,442 tables in 87,051 groups, 0 broken) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 15 scenarios (7 N/A) / 1,684 frames / 88 frames, byte- and state-exact (as v1) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (9 N/A) / 16 (1 N/A) scenarios (as v1) |
+| B0, `combat_scenarios_e1m6_v1.json` (first run on E1M6) | B0 OK -- 11/11 runs state- and pixel-exact; binding **28,237,166** OVER CAP-22 (mean 25,452,279); v1 on the same set (run today, `e1m6_v1_b0.log`): binding 30,124,699, mean 27,148,975 -- v2 **-6.27%** (-1,696,696 ops/frame on the mean) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; the record's ends, doors and keys equal v1's (only the binary fields moved; `scenarios/e1m6/gamespeed.json`, never committed for v1, is committed now) |
+| `gamespeed` (the tours) | SPEED binding **28,007,374** OVER (v1 28,609,569: **-2.10%**); SIZE 86,156,578 words = **64.19%** (v1 63.85%; the owner: above 43% is OK) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 968** (world 964), byte-, palette- and state-exact on all 978 frames (as v1) |
+| **THE SPEED SET** | **binding 19,413,074** PASS (v1 20,234,657: **-4.06%**); mean 17,469,276 (v1 18,286,689: -817,413 ops/frame), p80 21,356,872 at world 259 (v1 22,182,625) |
+| REBUILD (2026-11-01, `build/e1m6_v2b`) | **BYTE-IDENTICAL** (`bb208c1985af855ff3feb6b41e01bfc340e5af724d21de902477c0c32057b0ae`; the labels and the census identical in content; `e1m6_v2_rebuild.log`, 1,072 s) |
+| `msframe` | **NOT RUN**: the owner's machine is under load; `shipped_e1m6` stays v1's 108.5 ms until it runs (class S: B SLOWER does not ship) |
+
+B0's runs (crowds awake) gain more than the playthrough. The speed set's -817K ops/frame is about half of `mm_things`' 1.73M: the slots still cost two compares each, and
+the window setup is paid per call. The tours stay OVER (the owner: allowed for E1M6); what binds them is the
+renderer, which this cut does not touch.
+
+Play: `fj --run build/doom_e1m6_v2.fjm`.

@@ -110,7 +110,36 @@ def _add_const(n: int, cell: str, v: int) -> list:
     return ["    hex.add_constant %d, %s, %d" % (n, cell, v)] if v else []
 
 
-def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> list:
+def _window_lines(slots, solid: str, classes) -> list:
+    """`window` (E1M6 v2's cut): the slots' box test against per-call WINDOWS. |x - nx| < bd is nx - bd < x < nx + bd,
+    and when the window's ends have one sign, the unsigned order of the raw int16 words is the signed order -- so each
+    axis is two early-exit `hex.cmp`s (a far thing parts at its top digit) instead of mov + sub + abs + scmp. A window
+    whose low end is negative and high end is not (the mover within bd of an axis) takes the slot loop as before
+    (mm_slow). Exact while no difference passes int16 (wall_renderer asserts the map's extent)."""
+    out = []
+    for c in classes:
+        for ax in "xy":
+            out += ["    hex.mov 4, mm_wl%d%s, mm_n%s" % (c, ax, ax), "    hex.sub 4, mm_wl%d%s, mm_bd%d" % (c, ax, c),
+                    "    hex.mov 4, mm_wh%d%s, mm_n%s" % (c, ax, ax), "    hex.add 4, mm_wh%d%s, mm_bd%d" % (c, ax, c),
+                    "    hex.sign 4, mm_wl%d%s, mm_ws%d%s, mm_wk%d%s" % (c, ax, c, ax, c, ax),
+                    "  mm_ws%d%s:" % (c, ax),
+                    "    hex.sign 4, mm_wh%d%s, mm_wk%d%s, mm_slow" % (c, ax, c, ax),
+                    "  mm_wk%d%s:" % (c, ax)]
+    for j, (t, rad) in enumerate(slots):
+        nj = "mm_f%d_n" % j
+        out += ["    hex.if0 1, %s + %d*dw, %s" % (solid, j, nj)]
+        for k, (ax, off) in enumerate((("x", 4), ("y", 12))):
+            ok = "mm_f%d_%s" % (j, "xy"[k]) if k == 0 else "mm_hit"
+            out += ["    hex.cmp 4, thpos_rt + %d*dw, mm_wl%d%s, %s, %s, mm_f%d_%sl" % (16 * t + off, rad, ax, nj, nj, j, ax),
+                    "  mm_f%d_%sl:" % (j, ax),
+                    "    hex.cmp 4, thpos_rt + %d*dw, mm_wh%d%s, %s, %s, %s" % (16 * t + off, rad, ax, ok, nj, nj)]
+            if k == 0:
+                out.append("  %s:" % ok)
+        out.append("  %s:" % nj)
+    return out + ["    ;mm_player", "  mm_slow:"]
+
+
+def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False, window: bool = False) -> list:
     """`mm_things`: mm_blk = 1 when a SOLID thing's box overlaps the candidate (world._thing_blocker's monsters and
     player; the static blockers are in the cells). `slots`: [(runtime thing, radius)] per monster slot. `solid`: the
     per-slot flag a monster blocks by -- M7 P4.2a: `mon_solid`, MF_SOLID, which A_Fall clears (a corpse stops
@@ -118,7 +147,9 @@ def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> l
     call (monstercode.p32b_move_lines, the same `solid`). The player is tested at 16.16: |px - (nx << 16)| <
     (r + 16) << 16. `hurt` (M7 P5, doomfj.hurtcode): a dead player (`p_dead`) is not MF_SOLID and blocks nothing;
     off, the player is always alive and the text is P4's to the byte. M8 C8: the radius classes are the slots'
-    (world.radius_classes: E1M8's Barons r0 24, `mm_bd24`), and a lost soul's 16 its own (`mm_bd16`)."""
+    (world.radius_classes: E1M8's Barons r0 24, `mm_bd24`), and a lost soul's 16 its own (`mm_bd16`). `window`
+    (_window_lines): the slots tested against per-call windows first, the loop below only when a window straddles
+    zero; off, the text is unchanged."""
     from doomfj.world import radius_classes
     soul = any(rad == 16 for _t, rad in slots)          # M8 C8: a lost soul (radius 16) among the slots
     r0, _r1 = radius_classes([rad for _t, rad in slots])
@@ -129,6 +160,8 @@ def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> l
            *(["    hex.mov 4, mm_bd16, %s" % b0] if soul else []),
            *_add_const(4, b0, r0), *_add_const(4, "mm_bd30", 30),
            *(_add_const(4, "mm_bd16", 16) if soul else [])]
+    if window:
+        out += _window_lines(slots, solid, sorted({rad for _t, rad in slots}))
     for j, (t, rad) in enumerate(slots):
         bd = "mm_bd%d" % rad
         assert rad in (r0, 30) + ((16,) if soul else ()), rad
@@ -143,12 +176,16 @@ def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> l
                 "    hex.scmp 4, ct_a, %s, mm_hit, %s, %s" % (bd, nj, nj),
                 "  %s:" % nj]
     # the player, 16.16: cpx / cpy already hold the candidate << 16 (the caller sets them first)
+    out += (["  mm_player:"] if window else [])
     out += (["    hex.if1 1, p_dead, mm_things_out"] if hurt else [])
     out += ["    hex.zero 8, mm_bdp", "    hex.mov 2, mm_bdp + 4*dw, mm_r", *_add_const(4, "mm_bdp + 4*dw", 16)]
     for ax, reg, c in (("x", "viewx", "cpx"), ("y", "viewy", "cpy")):
         out += ["    hex.mov 8, mm_c, %s" % reg, "    hex.sub 8, mm_c, %s" % c, "    hex.abs 8, mm_c",
                 "    hex.scmp 8, mm_c, mm_bdp, mm_pl%s, mm_things_out, mm_things_out" % ax, "  mm_pl%s:" % ax]
     out += ["  mm_hit:", "    hex.set 1, mm_blk, 1", "  mm_things_out:", "    stl.fret mm_tret"]
+    if window:
+        out += ["mm_w%s%d%s: hex.vec 4" % (e, c, ax) for c in sorted({rad for _t, rad in slots}) for ax in "xy"
+                for e in "lh"]
     return out
 
 

@@ -89,6 +89,14 @@ BLOCK_FLAGS = ["--spread-min-count", "256", "--max-slot-ops", "512", "--pin-brok
                "--one-pass-blocks"]
 HEAT_P10 = "scratchpad/12m/heat_blocked27_p10.json.gz"
 
+
+def level_heat(m: str) -> str:
+    """episode plan 12 step 3: a level builds with its OWN pin-heat list once its playthrough profile made one
+    (heatsites.py --map: mapprofile's heat_<map>.json.gz), else with E1M1's p10 list (keyed before the stl adoption:
+    on E1M6 only 2,610 of its 35,860 sites still matched)"""
+    own = profile(m).heat
+    return own if (ROOT / own).exists() else HEAT_P10
+
 # the contract's order (docs/episode-plan.md 4); BLOCKING steps stop the map when they fail
 STEP_ORDER = ["emit_check", "build", "sha256", "p2a", "m2_std", "m3", "hurt", "fight", "die", "b0",
               "gamespeed_trail", "gamespeed", "playthrough", "feature_tests", "msframe"]
@@ -138,7 +146,7 @@ REGISTRY: dict[str, MapSpec] = {
         recorded_sha256="3a2c9564adbfcb07a1378b6c0045ca2291246c4100abcafad68bae4af3815d3b",
         recorded_ref="docs/ship-gate.md 1 + 1b (blocked65, ship #2, 2026-10-28)"),
     "E1M2": MapSpec(
-        map="E1M2", ready=True, wad="tests/fixtures/freedoom_e1m2.wad", spread=1,
+        map="E1M2", ready=True, wad="tests/fixtures/freedoom_e1m2.wad", spread=1, heat=level_heat("E1M2"),
         combat_set="scratchpad/gp/scenarios/combat_scenarios_e1m2_v1.json", baseline="shipped_e1m2",
         size_cap_pct=None, size_note="60.58% of 2^27 at v2 (r4 62.19%) -- the owner: \"Size is ok\" (docs/ship-gate.md 5)",
         trail_record=True,
@@ -164,6 +172,7 @@ for _m, _spread in LEVEL_SPREAD.items():
     REGISTRY[_m] = MapSpec(
         map=_m, ready=True, wad=_p.wad, spread=_spread,
         combat_set="scratchpad/gp/scenarios/combat_scenarios_%s_v1.json" % _m.lower(), baseline=_p.baseline,
+        heat=level_heat(_m),
         size_cap_pct=None, size_note="the owner 2026-10-24: above 43% of 2^27 is OK", trail_record=True,
         playthrough_skill="easy", build_min=15, recorded_census=_p.census,
         recorded_ref="none yet: the level is in its pipeline (docs/episode-plan.md 4)")

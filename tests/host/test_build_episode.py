@@ -33,14 +33,14 @@ BE = _load()
 # ── the registry against the record ──────────────────────────────────────────────────────────────────────────────
 def recorded_line(mapname: str) -> list:
     """the recorded build command's tokens from `scratchpad/12m/build_labeled.py` on: E1M1's is section 1b's line
-    (its `<name>` = blocked65), E1M2's the first `emit_check.py E1M2 --then` line of section 5 (r4's)"""
+    (its `<name>` = blocked65), E1M2's the `emit_check.py E1M2 --then` line of section 11 (v2's)"""
     text = SHIP_GATE.read_text(encoding="utf-8")
     if mapname == "E1M1":
         sec = text[text.index("## 1b."):text.index("## 2.")]
         line = next(ln for ln in sec.splitlines() if ln.startswith("python scratchpad/12m/build_labeled.py"))
         line = line.replace("<name>", "blocked65")
     else:
-        sec = text[text.index("## 5. E1M2"):]
+        sec = text[text.index("## 11. E1M1 and E1M2"):]
         line = next(ln.strip() for ln in sec.splitlines() if "emit_check.py E1M2 --then" in ln)
     tok = shlex.split(line)
     return tok[tok.index("scratchpad/12m/build_labeled.py"):]

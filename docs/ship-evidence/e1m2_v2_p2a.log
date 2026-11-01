@@ -1,0 +1,103 @@
+P2A GATE -- 21 scenarios (MONSTER_MODE final, PLAYER_MODE final) on E1M2, roles from scenarios\e1m2\gates.json, build/e1m2_v2/doom_e1m2.fjm
+
+S1 blue door 54, no card: stays shut -- 15 frames from (904, -1408) angle 00000000
+  the oracle does what the scenario claims: yes
+  CONTROL card     the oracle without the rule parts at frame 0
+  binary: 15 frames, 33,265,618 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S3 blue door 54 with the card: opens -- 13 frames from (904, -1408) angle 00000000, pcard poked 1
+  the oracle does what the scenario claims: yes
+  CONTROL no_card  the oracle without the rule parts at frame 0
+  binary: 13 frames, 212,618,904 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S2 onto the card: taken -- N/A: no standing pose of E1M2 walks onto its blue card in 4 frames -- the card lies on sector 45, a floor switch's floor ((240, 304)), out of reach until it moves (the level survey's 'pickups on a door or mover floor' row)
+
+S1y / S3y a yellow door -- N/A: door 100: the gate has no yellow-card scenario yet (M8 F2 adds the kind)
+
+S1r / S3r a red door -- N/A: door 29: the gate has no red-card scenario yet (M8 F2 adds the kind)
+
+S4 from sector 48 in the card's box: out of reach -- 3 frames from (1568, -936) angle 8e9e1d24
+  the oracle does what the scenario claims: yes
+  CONTROL reach    the oracle without the rule parts at frame 1
+  binary: 3 frames, 38,241,463 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S5 blazing door 155: opens and closes in strides -- 49 frames from (128, -1648) angle 00000000
+  the oracle does what the scenario claims: yes
+  CONTROL stride   the oracle without the rule parts at frame 0
+  binary: 49 frames, 1,013,163,098 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S6 over tag 1's trigger: door 27 opens, stays; back over: nothing -- 65 frames from (760, -1032) angle 00000000
+  the oracle does what the scenario claims: yes
+  CONTROL stay     the oracle without the rule parts at frame 9
+  CONTROL w1       the oracle without the rule parts at frame 7
+  binary: 65 frames, 664,575,901 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S7 over tag 16's trigger: door 30 opens, stays; back over: nothing -- 67 frames from (920, -2272) angle 00000000
+  the oracle does what the scenario claims: yes
+  CONTROL stay     the oracle without the rule parts at frame 5
+  CONTROL w1       the oracle without the rule parts at frame 7
+  binary: 67 frames, 877,938,378 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S7b over tag 16's trigger: door 266 opens, stays; back over: nothing -- 67 frames from (920, -2272) angle 00000000
+  the oracle does what the scenario claims: yes
+  CONTROL stay     the oracle without the rule parts at frame 5
+  CONTROL w1       the oracle without the rule parts at frame 7
+  binary: 67 frames, 877,938,378 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S7c over tag 7's trigger: door 318 opens, stays; back over: nothing -- 66 frames from (808, -2784) angle 00000000
+  the oracle does what the scenario claims: yes
+  CONTROL stay     the oracle without the rule parts at frame 9
+  CONTROL w1       the oracle without the rule parts at frame 7
+  binary: 66 frames, 1,472,925,221 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S9 over lift 44's WR line: it rides down, waits, comes back up -- 53 frames from (1440, -1368) angle 40000000
+  the oracle does what the scenario claims: yes
+  CONTROL no_wr    the oracle without the rule parts at frame 1
+  binary: 53 frames, 496,820,117 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S10 an SR press at lift 44: it rides -- 52 frames from (1344, -1408) angle 00000000
+  the oracle does what the scenario claims: yes
+  CONTROL no_use_lines the oracle without the rule parts at frame 1
+  binary: 52 frames, 632,847,561 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S11 the floor switch: a press lowers the pillars at once -- 4 frames from (1664, -944) angle 00000000
+  the oracle does what the scenario claims: yes
+  CONTROL no_use_lines the oracle without the rule parts at frame 1
+  binary: 4 frames, 21,530,848 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S12 NEW GAME puts a riding lift back -- 14 frames from (1440, -1368) angle 40000000
+  the oracle does what the scenario claims: yes
+  CONTROL restart_movers the oracle without the rule parts at frame 10
+  binary: 14 frames, 140,951,503 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S13 standing in a door as it closes: it goes back up -- N/A: no plain door of E1M2 verifies S13 (tried [258])
+
+S14a two-cell line 1199 (lift 47 / floor 206): in view with the lift down, the floor unlowered -- 37 frames from (1421, -1134) angle ed94db42
+  the oracle does what the scenario claims: yes
+  CONTROL no_wr    the oracle without the rule parts at frame 2
+  binary: 37 frames, 332,270,627 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S14b two-cell line 1199 (lift 47 / floor 206): in view with the floor unlowered, then lowered -- 30 frames from (1890, -1258) angle 900f43d0
+  the oracle does what the scenario claims: yes
+  CONTROL no_use_lines the oracle without the rule parts at frame 1
+  binary: 30 frames, 674,267,915 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S15 closed line 2033 (moving 24 / shut 72, floor group 4 tag 10): solid while the floor lowers -- 48 frames from (2240, -2536) angle 80000000
+  the oracle does what the scenario claims: yes
+  CONTROL floors_still the oracle without the rule parts at frame 0
+  binary: 48 frames, 630,706,017 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S15 closed line 2075 (moving 317 / shut 126, floor group 10 tag 41): solid while the floor lowers -- 28 frames from (2240, -2328) angle 80000000
+  the oracle does what the scenario claims: yes
+  CONTROL floors_still the oracle without the rule parts at frame 0
+  binary: 28 frames, 391,448,209 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+S8 the exit: a press ends the level; LEVEL COMPLETE (its hold); any key: the menu; NEW GAME -- 17 frames from (1840, 1280) angle c0000000
+  the oracle does what the scenario claims: yes
+  CONTROL edge     the oracle without the rule parts at frame 0
+  CONTROL restart  the oracle without the rule parts at frame 14
+  binary: 17 frames, 85,001,855 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+N/A on E1M2: 4 -- S2 onto the card: taken; S1y / S3y a yellow door; S1r / S3r a red door; S13 standing in a door as it closes: it goes back up
+
+P2A GATE PASS (318 s)

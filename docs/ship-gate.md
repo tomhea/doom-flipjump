@@ -719,6 +719,8 @@ straight-line code once per frame. Restore fewer cells (a dirty set) is the only
 ## 5. E1M2 (M8): the second level's binary, its own numbers
 
 E1M2 is its OWN binary (`build/doom_e1m2_<id>.fjm`); E1M1's standing number (section 1) is untouched by it.
+**Since 2026-11-01 the standing E1M2 binary is v2 (`build/doom_e1m2_v2.fjm`, section 11)**: r4 below writes the screen's
+old opcode, which flipjump 1.6.0 refuses. What follows is r4's record.
 **`build/doom_e1m2_r4.fjm`** (2026-10-18, branch `m8p-final` at 925af820; sha256 `9a112139f3d35db3`) is the
 standing E1M2 binary: r3 + THE PLAYTEST'S POLISH (`docs/playtest-e1m2.md`; the owner 2026-10-18: "if you can implement
 it at +0.5% speed penalty, go for it") -- the door heights (`doors.door_neighbours`: two-sided neighbours on every map
@@ -955,7 +957,31 @@ of 100 frames overlap; the first three (the start room's fight, 13.9-16.2M) weig
 **E1M2** cannot be checked on its shipped binary: `doom_e1m2_r4.fjm` (sha256 `9a112139f3d35db3`, 2026-10-18) writes the
 screen's old opcode 0x12, which flipjump 1.6.0's screen device refuses at output byte 0 ("opcode 0x12 is not a command").
 r4 predates the io API (E1M1 re-shipped for it as blocked64 / blocked65); E1M2 is rebuilt on the current source and
-re-ships through the whole gate (its own block below, when it passes).
+re-ships through the whole gate (its block below).
+
+**E1M2 v2** -- **`build/doom_e1m2_v2.fjm`**, sha256 `93af128a9caef3ce`, built by the creator on branch `m8-fj-crfixes` at
+2be40a17 (r4's polish plus everything since: the stl adoption, the io API, flipjump 1.6.0 at b1365b5), spread 1. Every
+step through `scripts/heavy.py` (`build_episode.py --maps E1M2 --out-dir build/e1m2_v2`); evidence
+`docs/ship-evidence/e1m2_v2_*.log`.
+The build line, in the recorded paths (the creator's own, `build/e1m2_v2/...`, copied to them):
+
+    python scripts/emit_check.py E1M2 --then scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m2_v2.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m2.wad --map E1M2 --out build/doom_e1m2_v2.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m2_v2.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+
+| gate | result |
+|---|---|
+| the build | PASS (2026-11-01, 1,013 s; 837,931 tables in 63,720 groups) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 21 scenarios (4 N/A) / 258 frames / 88 frames, byte- and state-exact |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 43 (13 N/A) / 17 (3 N/A) scenarios |
+| B0, `combat_scenarios_e1m2_v1.json` | OK -- 11/11 runs state- and pixel-exact; **binding 18,105,174** ops/frame (r4 20,058,861: -9.74%) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE PASS (CONTROL-DOORS N/A, as before); the record's binary fields re-written, its ends unchanged |
+| `gamespeed` (the tours) | SPEED binding **18,709,294** ops/frame PASS (r4 20,591,876: -9.14%); SIZE 81,314,132 words = **60.58%** of 2^27 (r4 62.19%; span 91.91%; the owner: "Size is ok") |
+| THE PLAYTHROUGH (`--skill easy`, `0:1,1532:2,2288:1`) | **PASS -- LEVEL COMPLETE at frame 3048** (world 3044), byte-, palette- and state-exact on all 3,058 frames |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 15,843,864** PASS (mean 14,637,883, p80 17,049,846 at world 2650) |
+| the feature tests (section 5's nine files) | 111 passed |
+| REBUILD (2026-11-01) | **BYTE-IDENTICAL** (`93af128a9caef3cec91f840e66312d2cf074d50bf976351df543a54fdcc2be11`; the labels and the census identical in content) |
+| `msframe` | **NOT RUN**: the owner's machine is under load ("wait with future runs that rely on times"); `shipped_e1m2` stays r4's 70.2 ms until it runs |
+
+Play: `fj --run build/doom_e1m2_v2.fjm`.
 
 ## 12. E1M6 v2: the episode plan's step 2 -- E1M6 profiled, its monster-move test cut
 

@@ -214,6 +214,21 @@ def _pfx(mapname: str) -> str:
     return mapname.lower().replace("-", "_")
 
 
+# E1M6 v2's cut: the maps whose mm_things tests the slots against per-call windows (monstermove._window_lines). A map
+# joins when it re-ships: its binary changes, so its recorded sha256 would no longer be reproduced.
+MM_WINDOW_MAPS = frozenset({"E1M6"})
+
+
+def _mm_window(mapname: str, verts) -> bool:
+    """whether mm_things is windowed on this map; the windows are exact only while every coordinate difference (and
+    nx +- bd) stays inside int16, so the map's extent is asserted with room for the step and the widest box"""
+    if mapname.upper() not in MM_WINDOW_MAPS:
+        return False
+    extent = max(max(abs(v.x), abs(v.y)) for v in verts)
+    assert extent < 16000, "mm_things window: %s reaches %d (the int16 windows need < 16000)" % (mapname, extent)
+    return True
+
+
 # ⚠ CR-2026-08 (TS-3/ST-7) — the sprite registers a BAKED thing's `hex.xor_by` block writes, in
 # emission order with their declared widths. `sim.thing_pass` must clear every one of them at least
 # this wide, because `hex.xor_by` is self-restoring ONLY from a zero register and the runtime
@@ -3920,7 +3935,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 ["    ;mm_block_end", _mcells]
                 + monster_seed_fj(cmap, lds, sds, _dsecs_open, _msecs, _mcell)
                 + things_leaf_lines(_chase["slots_rt"], solid=_chase["solid"],   # M7 P4.2a: mon_solid
-                                    hurt=bool(_chase.get("hurt")))                # M7 P5: a dead player blocks nothing
+                                    hurt=bool(_chase.get("hurt")),                # M7 P5: a dead player blocks nothing
+                                    window=_mm_window(mapname, verts))           # E1M6 v2: the windowed thing test
                 # M8 L4: P_TeleportMove's stomp test (tp_stomp, jumping over itself)
                 + (_teleportcode.stomp_leaf_lines(_chase["slots_rt"], hurt=bool(_chase.get("hurt")), knock=_KNOCK,
                                                   sn=_SN)

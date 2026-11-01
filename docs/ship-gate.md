@@ -961,6 +961,9 @@ re-ships through the whole gate (its block below).
 2be40a17 (r4's polish plus everything since: the stl adoption, the io API, flipjump 1.6.0 at b1365b5), spread 1. Every
 step through `scripts/heavy.py` (`build_episode.py --maps E1M2 --out-dir build/e1m2_v2`); evidence
 `docs/ship-evidence/e1m2_v2_*.log`.
+The build line, in the recorded paths (the creator's own, `build/e1m2_v2/...`, copied to them):
+
+    python scripts/emit_check.py E1M2 --then scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m2_v2.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m2.wad --map E1M2 --out build/doom_e1m2_v2.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m2_v2.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
 
 | gate | result |
 |---|---|

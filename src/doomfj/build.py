@@ -812,8 +812,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         "self_reset": reset_info,
     }
     if pools:
-        # the blocked build's pools, one per assembly (flipjump's BlockPool: `.report` is what each did -- its final
-        # pinned words, its table sites, its census), the cells the last left unpinned, and the labels flipjump's
+        # the blocked build's pools, one per assembly (flipjump's BlockPool: what each did -- its final pinned
+        # words, its table sites, its census), the cells the last left unpinned, and the labels flipjump's
         # assemble returned for it (name -> bit address; the label table build_labeled.py writes). The pools and the
         # labels are objects, not JSON -- a caller that dumps the metrics pops them (build_blocked.py does)
         metrics["table_pools"] = pools

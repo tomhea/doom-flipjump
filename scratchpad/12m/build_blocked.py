@@ -32,7 +32,7 @@ callback after construction. Now it only says HOW to assemble: `build_wall_rende
 lzma_preset, pool=<BlockPool's knobs>))`. The build makes a fresh pool per assembly with `pin_all_but` -- the cells the
 program reads raw, which the BUILD names from the emitted program (selfreset.pin_all_but_cells; the byte cells and the
 pointer-read cells, what `--pin-state-cells` always excluded) -- and returns the pools; their `report` says what each
-did: the FINAL pin map (`report.pinned`), every table's site and address (`report.table_sites`), the census.
+did: the FINAL pin map (`pinned`), every table's site and address (`table_sites`), the census.
 """
 import argparse
 import gzip
@@ -212,9 +212,9 @@ def load_heat(path):
 
 
 def report_pins(pool, heat, labels=None):
-    """the pool's FINAL pin map (report.pinned: after every pin that could not hold was dropped), the collapse alarm,
+    """the pool's FINAL pin map (pinned: after every pin that could not hold was dropped), the collapse alarm,
     and the hot words that did not end up pinned"""
-    pinned = pool.report.pinned
+    pinned = pool.pinned
     groups = len(pool.groups)
     print("  pins: %s words pinned, %s groups blocked" % (format(len(pinned), ","), format(groups, ",")), flush=True)
     # A COLLAPSE IS SILENT OTHERWISE (spread=4 once fell from 25,701 pinned words to 72, built fine and passed the gate)
@@ -232,14 +232,14 @@ def report_pins(pool, heat, labels=None):
 
 def write_sites(path, a, pool):
     """--record-sites: every table the pool met, per canonical group, in expansion order -- [site (heat_key), occurrence,
-    slot_ops, address] (flipjump's report.table_sites; address 0: it stayed in place). heatsites.py names a profile's
+    slot_ops, address] (flipjump's BlockPool.table_sites; address 0: it stayed in place). heatsites.py names a profile's
     tables by them."""
     by_group = {}
-    for t in pool.report.table_sites:
+    for t in pool.table_sites:
         by_group.setdefault(t.group, []).append([t.site, t.occurrence, t.slot_ops, t.address])
     blob = {"what": "every table the assembly reached, per canonical group, in expansion order: "
                     "[macro-expansion path (heat_key), occurrence, slot ops, address (0: in place)]",
-            "program": _counts_sig(a), "tables": len(pool.report.table_sites), "groups": by_group}
+            "program": _counts_sig(a), "tables": len(pool.table_sites), "groups": by_group}
     with gzip.open(path, "wt", encoding="utf-8") as fh:
         json.dump(blob, fh)
     print("  recorded %s tables in %s groups -> %s"
@@ -320,7 +320,7 @@ def main(argv=None, labels_out=None):
     ap.add_argument("--record-sites", default=None, metavar="SITES.json.gz",
                     help="pin protection (M7 P1.1): write every table the assembly reached -- its group, its "
                          "macro-expansion path, its occurrence, its slot and its address, in expansion order "
-                         "(flipjump's pool.report.table_sites) -- here. heatsites.py joins them with a profile into "
+                         "(flipjump's pool.table_sites) -- here. heatsites.py joins them with a profile into "
                          "a --pin-heat list.")
     ap.add_argument("--pin-heat", default=None, metavar="HEAT.json[.gz]",
                     help="pin protection (M7 P1.1, docs/gp-pin-protection.md): heatsites.py's list of "
@@ -398,7 +398,7 @@ def main(argv=None, labels_out=None):
         report_pins(pool, heat, labels)
     last = pools[-1]
     if a.counts_cache:
-        census = last.report.census
+        census = last.census()
         _save_counts(a.counts_cache, a, {"counts": census.counts, "widths": census.widths,
                                          "width_hist": census.width_hist, "alias": census.alias})
     if heat:
@@ -407,16 +407,13 @@ def main(argv=None, labels_out=None):
         write_sites(a.record_sites, a, last)
     print("assemblies: %d; blocked per assembly: %s"
           % (len(pools), ", ".join(format(q.allocated, ",") for q in pools)), flush=True)
-    print("pin conflicts (aliased source-word expressions, un-pinned): %s" % format(last.report.pin_conflicts, ","),
-          flush=True)
-    print("runtime-reserved words skipped (stl.IO etc): %s" % format(last.report.runtime_words, ","), flush=True)
     print("declined (too wide for any slot): %s" % format(last.declined, ","), flush=True)
     # BROKEN GROUPS is the number that matters, not the decline count: `pinned_words` excludes a
     # broken group ENTIRELY, so one declined table un-pins every sibling table in its group.
     print("broken groups: %s of %s (these lose their pin for ALL their tables)"
           % (format(len(last.broken_groups), ","), format(len(last.counts), ",")), flush=True)
-    if last.report.unpins:
-        print("unpinned (a pin that could not hold), by why: %s" % dict(last.report.unpins), flush=True)
+    if last.unpins:
+        print("unpinned (a pin that could not hold), by why: %s" % dict(last.unpins), flush=True)
     if heat:
         print("pin-heat after the last assembly: %s" % last.heat_report(), flush=True)
     print("blocked: %s tables in %s groups; declined %s; ungrouped %s"

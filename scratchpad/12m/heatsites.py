@@ -14,7 +14,7 @@ WHAT IT JOINS.
     checked against the image -- every placed group's source word must rest at its base;
   * the SITES: `build_blocked.py --record-sites` records every table the assembly reached -- its group, its
     macro-expansion path, its occurrence, its slot and the ADDRESS the pool gave it (flipjump's
-    `pool.report.table_sites`), in the order the program reaches them.
+    `pool.table_sites`), in the order the program reaches them.
 A table's address says which slot it took, not which code emitted it; the recorded sites say both, so every
 executed table address maps straight back to its site (this used to REPLAY the sites through a second pool's
 `reserve()` to learn the addresses -- flipjump 1.6.0 reports them). The profile's tables are
@@ -129,7 +129,7 @@ def main():
             per_group.setdefault(g, {})[wv] = c
     ranked = sorted(per_group, key=lambda g: -sum(per_group[g].values()))[:a.top]
 
-    # the sites, with the addresses the build's own pool gave them (flipjump's report.table_sites)
+    # the sites, with the addresses the build's own pool gave them (flipjump's BlockPool.table_sites)
     with gzip.open(a.sites, "rt", encoding="utf-8") as fh:
         sites = json.load(fh)
     print("sites %s (sha256 %s...): %d groups, %d tables, program %s"

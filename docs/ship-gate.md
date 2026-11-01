@@ -847,7 +847,7 @@ its own SR lines). Not done yet, as for section 6: the per-level speed pass and 
 
 ## 8. E1M6 and E1M8 (M8 wave 3): their own binaries, their own numbers
 
-**E1M6 v1 is superseded by E1M6 v2 (section 12, 2026-11-01: the monster-move test cut).**
+**E1M6 v1 is superseded by E1M6 v2 (section 12, 2026-11-01: the monster-move test cut), and v2 by E1M6 v3 (section 12, the same day: v2 on its own heat list).**
 
 Built and gated as section 6's levels, on branch `m8-wave3` (m8-episode + soultele + the E1M8 boss route + the
 playthrough speed set; flipjump 1.6.0 at 9877f25), every step through `scripts/heavy.py`. Evidence:
@@ -1021,4 +1021,39 @@ B0's runs (crowds awake) gain more than the playthrough. The speed set's -817K o
 the window setup is paid per call. The tours stay OVER (the owner: allowed for E1M6); what binds them is the
 renderer, which this cut does not touch.
 
-Play: `fj --run build/doom_e1m6_v2.fjm`.
+v2 is superseded by v3 (below).
+
+### E1M6 v3: v2 on its own heat list -- the episode plan's step 3, its first level
+
+**The heat list.** Every level but E1M1 built with `heat_blocked27_p10`, E1M1's list from before the stl adoption: on
+E1M6 v2 only 2,610 of its 35,860 hot sites still matched a table. A level's own list: the creator's build of the
+recorded line with `--record-sites` (the binary is byte-identical to v2's; the sites file is the build's table-site
+map), its playthrough profiled on that binary (profx, `play_profile.py`, 965 game frames -- the frame count from the
+markers, #166), and `heatsites.py --map E1M6 --spread 1` -> **`scratchpad/12m/heat_e1m6.json.gz`**: 20 hot groups,
+33,785 hot sites, sha256 `6a43f3e8ccfb43c7`; its CONTROL (every executed hot table mapped to a replayed site) PASS.
+`build_episode.level_heat` builds a level with its own list once one is committed, else with p10;
+`test_a_level_builds_with_its_own_heat_list_only_where_one_is_committed` holds the registry to it.
+
+**E1M6 v3** -- **`build/doom_e1m6_v3.fjm`**, sha256 `a59dad606f8ab9b2`, built by the creator
+(`build_episode.py --maps E1M6 --out-dir build/e1m6_v3`, every step through `scripts/heavy.py`) on v2's source with
+flipjump 1.6.0 at b1365b5, spread 1, `heat_e1m6`: 20 of 20 hot words pinned, **33,785 of 33,785 hot sites matched**,
+982,442 tables in 87,051 groups, 0 broken. The program is v2's; only the placement moved. Evidence
+`docs/ship-evidence/e1m6_v3_*.log`.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (402 s) / PASS (1,067 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 15 scenarios (7 N/A) / 1,684 frames / 88 frames, byte- and state-exact (as v2) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (9 N/A) / 16 (1 N/A) scenarios, state, pixels and palette exact (as v2) |
+| B0, `combat_scenarios_e1m6_v1.json` | B0 OK -- 11/11 runs state- and pixel-exact; binding **25,737,929** OVER CAP-22 (mean 23,162,009; v2 28,237,166: **-8.85%**; v1 30,124,699: -14.56%) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; only the binary fields of `scenarios/e1m6/gamespeed.json` moved |
+| `gamespeed` (the tours) | SPEED binding **25,479,320** OVER (v2 28,007,374: **-9.03%**); SIZE 85,990,364 words = **64.07%** (v2 64.19%) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 968** (world 964), byte-, palette- and state-exact on all 978 frames (as v2) |
+| **THE SPEED SET** | **binding 17,749,651** PASS (v2 19,413,074: **-8.57%**; v1 20,234,657: -12.28%); mean 15,964,331, p80 19,534,971 at world 259 |
+| REBUILD (`build/e1m6_v3b`) | **BYTE-IDENTICAL** (`a59dad606f8ab9b29d2a6b3111d2de207febec50323fafa3aa8795d7e19b015b`; the labels and the census identical in content; `e1m6_v3_rebuild.log`, 1,077 s) |
+| `msframe` | **NOT RUN**: the owner's machine is under load; class S against `shipped_e1m6` when it runs (B SLOWER does not ship) |
+
+The placement alone moves 8.6-9.0% of the executed ops on every measure, twice v2's cut; the tours stay OVER (the
+owner: allowed for E1M6).
+
+Play: `fj --run build/doom_e1m6_v3.fjm`.

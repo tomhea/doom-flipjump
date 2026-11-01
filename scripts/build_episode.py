@@ -181,12 +181,12 @@ LEVEL_SHIPPED = {
     "E1M3": ("build/doom_e1m3_v1.fjm", "71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784"),
     "E1M5": ("build/doom_e1m5_v1.fjm", "4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2"),
     "E1M9": ("build/doom_e1m9_v1.fjm", "33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48"),
-    "E1M6": ("build/doom_e1m6_v2.fjm", "bb208c1985af855ff3feb6b41e01bfc340e5af724d21de902477c0c32057b0ae"),
+    "E1M6": ("build/doom_e1m6_v3.fjm", "a59dad606f8ab9b29d2a6b3111d2de207febec50323fafa3aa8795d7e19b015b"),
     "E1M8": ("build/doom_e1m8_v1.fjm", "9311cd67268c7e121ff3137e86ff86146888e3b1e6e0ad5b859a4ff64c553737"),
     "E1M7": ("build/doom_e1m7_v1.fjm", "77466d1d306acb78b48baea01df45820fe0b9a4be6ee4dcfbe2b757cdbd0c0ec"),
     "E1M4": ("build/doom_e1m4_v1.fjm", "21b08396c53bd2080326711351b8c32bef27ff4298238544a740a657429dd851"),
 }
-LEVEL_VERSION = {"E1M6": "v2"}       # docs/ship-gate.md 12: E1M6 v2 (the mm_things windows); the others v1
+LEVEL_VERSION = {"E1M6": "v3"}       # docs/ship-gate.md 12: E1M6 v3 (v2 + its own heat list); the others v1
 for _m, (_out, _sha) in LEVEL_SHIPPED.items():
     _lo, _v = _m.lower(), LEVEL_VERSION.get(_m, "v1")
     REGISTRY[_m] = dataclasses.replace(

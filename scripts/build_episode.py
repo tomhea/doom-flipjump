@@ -140,7 +140,7 @@ REGISTRY: dict[str, MapSpec] = {
     "E1M2": MapSpec(
         map="E1M2", ready=True, wad="tests/fixtures/freedoom_e1m2.wad", spread=1,
         combat_set="scratchpad/gp/scenarios/combat_scenarios_e1m2_v1.json", baseline="shipped_e1m2",
-        size_cap_pct=None, size_note="62.19% of 2^27 at r4 -- the owner: \"Size is ok\" (docs/ship-gate.md 5)",
+        size_cap_pct=None, size_note="60.58% of 2^27 at v2 (r4 62.19%) -- the owner: \"Size is ok\" (docs/ship-gate.md 5)",
         trail_record=True,
         feature_tests=("tests/fj/test_automap_fj.py", "tests/fj/test_change_sector_e1m2_fj.py",
                        "tests/fj/test_doors_e1m2_fj.py", "tests/fj/test_lights_fj.py",
@@ -148,11 +148,11 @@ REGISTRY: dict[str, MapSpec] = {
                        "tests/fj/test_telefrag_fj.py", "tests/fj/test_teleport_fj.py",
                        "tests/fj/test_fog_pool_fj.py"),
         build_min=120,
-        recorded_out="build/doom_e1m2_r4.fjm",
-        recorded_labels="scratchpad/12m/atlas/e1m2_r4.labels.tsv.gz",
-        recorded_census="scratchpad/12m/_census_game_e1m2_r4.json.gz",
-        recorded_sha256="9a112139f3d35db3f71a9b2c0fb57a9e383b342fd2d42e776e072b97fbb57f45",
-        recorded_ref="docs/ship-gate.md 5 (r4, 2026-10-18)"),
+        recorded_out="build/doom_e1m2_v2.fjm",
+        recorded_labels="scratchpad/12m/atlas/e1m2_v2.labels.tsv.gz",
+        recorded_census="scratchpad/12m/_census_game_e1m2_v2.json.gz",
+        recorded_sha256="93af128a9caef3cec91f840e66312d2cf074d50bf976351df543a54fdcc2be11",
+        recorded_ref="docs/ship-gate.md 11 (v2, 2026-11-01; r4 refused by flipjump 1.6.0's screen)"),
 }
 # M8 wave 1 + 2 (2026-10-29): the levels in their pipeline -- built and gated by this creator, NO recorded binary yet
 # (no rebuild check until docs/ship-gate.md holds their block). Spread 2 where the pool fits (the small maps: E1M5 and

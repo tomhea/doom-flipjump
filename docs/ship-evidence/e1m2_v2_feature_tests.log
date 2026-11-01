@@ -1,0 +1,9 @@
+.............
+[automap] the dot on a map frame: E1M1 (reciprocal) 6467 ops, E1M2 (shift) 1653 ops
+......
+[automap] world frame, no key, 4 polls: 6700 ops with the page, 6651 without -> +49.0 ops a frame
+.
+[automap] world frame, no key, 8 polls: 7114 ops with the page, 6956 without -> +157.3 ops a frame
+.................................................... [ 64%]
+.......................................                                  [100%]
+111 passed in 507.92s (0:08:27)

@@ -167,7 +167,7 @@ for _m, _spread in LEVEL_SPREAD.items():
         size_cap_pct=None, size_note="the owner 2026-10-24: above 43% of 2^27 is OK", trail_record=True,
         playthrough_skill="easy", build_min=15, recorded_census=_p.census,
         recorded_ref="none yet: the level is in its pipeline (docs/episode-plan.md 4)")
-# the levels shipped (docs/ship-gate.md 6, 7, 8, 9): their recorded binary -- the creator's build must reproduce it to the byte
+# the levels shipped (docs/ship-gate.md 6, 7, 8, 9, 10): their recorded binary -- the creator's build must reproduce it to the byte
 LEVEL_SHIPPED = {
     "E1M3": ("build/doom_e1m3_v1.fjm", "71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784"),
     "E1M5": ("build/doom_e1m5_v1.fjm", "4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2"),
@@ -175,6 +175,7 @@ LEVEL_SHIPPED = {
     "E1M6": ("build/doom_e1m6_v1.fjm", "5f1abfea24b8fa162f2aeaece569e0eeaff9ff98507557a5fa193dca3142ac0f"),
     "E1M8": ("build/doom_e1m8_v1.fjm", "9311cd67268c7e121ff3137e86ff86146888e3b1e6e0ad5b859a4ff64c553737"),
     "E1M7": ("build/doom_e1m7_v1.fjm", "77466d1d306acb78b48baea01df45820fe0b9a4be6ee4dcfbe2b757cdbd0c0ec"),
+    "E1M4": ("build/doom_e1m4_v1.fjm", "21b08396c53bd2080326711351b8c32bef27ff4298238544a740a657429dd851"),
 }
 for _m, (_out, _sha) in LEVEL_SHIPPED.items():
     _lo = _m.lower()
@@ -183,8 +184,8 @@ for _m, (_out, _sha) in LEVEL_SHIPPED.items():
         recorded_labels="scratchpad/12m/atlas/%s_v1.labels.tsv.gz" % _lo,
         recorded_census="scratchpad/12m/_census_game_%s_v1.json.gz" % _lo,
         recorded_ref="docs/ship-gate.md %s (v1, %s)" % (
-            {"E1M9": "7", "E1M6": "8", "E1M8": "8", "E1M7": "9"}.get(_m, "6"),
-            {"E1M6": "2026-10-30", "E1M8": "2026-10-30", "E1M7": "2026-10-31"}.get(_m, "2026-10-29")))
+            {"E1M9": "7", "E1M6": "8", "E1M8": "8", "E1M7": "9", "E1M4": "10"}.get(_m, "6"),
+            {"E1M6": "2026-10-30", "E1M8": "2026-10-30", "E1M7": "2026-10-31", "E1M4": "2026-10-31"}.get(_m, "2026-10-29")))
 for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: placeholders until their level ships
     _p = profile(_m)
     REGISTRY[_m] = MapSpec(

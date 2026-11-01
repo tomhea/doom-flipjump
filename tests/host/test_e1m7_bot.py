@@ -51,4 +51,6 @@ def test_control_no_skip(mods, monkeypatch):
 
 def test_map_tactics_are_e1m7s_alone(mods):
     _lr, play, _route = mods
-    assert set(play.Steer.MAP_TACTICS) == {"E1M7"} and play.Steer.SKIP_ITEMS == ()
+    # E1M7's tactic is its own: no other map skips an item (E1M4 has tactics of its own, none of them SKIP_ITEMS)
+    assert play.Steer.MAP_TACTICS["E1M7"] == {"SKIP_ITEMS": (2002,)} and play.Steer.SKIP_ITEMS == ()
+    assert all("SKIP_ITEMS" not in t for m, t in play.Steer.MAP_TACTICS.items() if m != "E1M7")

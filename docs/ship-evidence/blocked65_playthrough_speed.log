@@ -1,0 +1,32 @@
+PLAYTHROUGH GATE -- E1M1 at medium, C:/Users/tomhe/Documents/doom-stl/build/doom_e1m1_blocked65.fjm
+E1M1 medium: ROUTE (5 s)
+  flood: 12827 cells, 3 epochs, keys -
+  exit: line 407 special 11 (normal, S)
+  keys in order: none
+    door:10    door   by use    at (712, 456)     epoch 0
+    door:34    door   by use    at (616, 920)     epoch 1
+    door:64    door   by use    at (-136, 1464)   epoch 2
+    leg -> exit       use     176 cells
+setup 18 s (NEW GAME on frame 3)
+  CONTROL keys  the oracle's keys mutated on frame 29: parted there (5 cells: ['aim_sid', 'p_tnh', 'viewangle', 'viewx']) -- the check sees it
+  CONTROL pixel the binary's picture changed (1 px) on frame 29: parted there (1 px) -- the check sees it
+  CONTROL clean the same 44 frames unmutated: exact
+steering seed 2
+    f56: monster 22 ignored (no damage in 35 frames)
+    f77: monster 21 ignored (no damage in 35 frames)
+    f168: health low -- a detour to the item at (464, 1232), 18 cells
+  f190: leg 0 -> health touch (in its touch box (bonus count 6)) after 22 frames
+    re-plan (the leg starts elsewhere) from (477, 1208): 60 cells
+    re-plan (back on the route) from (477, 1208): 60 cells
+  f200 (w197): (462, 1214) hp 100 ar 0, leg 1/2 -> exit, kills 1, 56 s
+    f234: monster 9 passed by (lined up, not in the aim window)
+    f273: run (lost 33 in 60 frames)
+    f285: monster 11 ignored (no damage in 35 frames)
+    f341: monster 51 passed by (lined up, not in the aim window)
+  f348: leg 1 -> exit use (LEVEL COMPLETE) after 158 frames
+
+frames: 358 presented (3 menu, 355 world), legs done 2/2: health@w187, exit@w345
+time: 123 s wall; the binary 31 s (86.0 ms/frame), the oracle 45 s (126 ms/frame); 3,705,288,617 ops; seed 2
+
+PLAYTHROUGH GATE PASS -- E1M1 LEVEL COMPLETE at frame 348 (world 345) at medium, byte-, palette- and state-exact on all 358 frames, 123 s
+PLAYTHROUGH SPEED binding (mean + p80)/2 over 11 windows of 100 world frames: 12,266,909 ops/frame (mean 10,569,408, p80 window at world 24 = 13,964,411; target <= 22,000,000) PASS

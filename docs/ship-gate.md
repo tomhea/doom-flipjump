@@ -899,3 +899,58 @@ ops/frame (15.8M) is mid-episode (E1M3 17.2M at 73.5 ms), but every rep runs at 
 is touched per frame; not measured). The lever is the same per-level speed pass (`docs/episode-plan.md` 4.7).
 
 The build command: section 6's with `e1m7` / `E1M7`, `--spread 1`. Play: `fj --run build/doom_e1m7_v1.fjm`.
+
+## 10. E1M4 (M8): its own binary, its own numbers -- the middle of three wins
+
+Built and gated as section 8's levels (every step through `scripts/heavy.py`; flipjump 1.6.0 at 9877f25). The owner
+(2026-10-31): get three bot plays that reach the exit, run each on the binary, and ship the one with the MIDDLE
+playthrough ops/frame. The three, each byte-, palette- and state-exact on every frame of the binary:
+
+| play (branch @ commit) | seed / schedule | LEVEL COMPLETE | frames | speed-set binding | evidence |
+|---|---|---|---|---|---|
+| west (`m8-e1m4-west` @ 6db3ba3b) | 0 | world 7875 | 7,889 | 14,704,729 | `e1m4_v1_playthrough_west.log` |
+| **route (`m8-e1m4-route`, this branch)** | **7** | **world 4124** | **4,138** | **15,386,065** | `e1m4_v1_playthrough.log` |
+| east (`m8-e1m4bot` @ 167a93f4) | 0:6,5800:3,13909:1 | world 15236 | 15,250 | 16,642,331 | `e1m4_v1_playthrough_east.log` |
+
+Route is the middle and ships: its steering is this branch's (E1M4's MAP_TACTICS, MAP_PICKUPS and END_NO_AMMO /
+END_DRY_RUN), seed 7 pinned in `playthrough_gate.DEFAULT_SEED`. One binary served all three plays (the bot branches
+touch no `src/` and no build script). Evidence: `docs/ship-evidence/e1m4_v1_*.log`. No B0 (section 8).
+**`build/doom_e1m4_v1.fjm`**, sha256 `21b08396c53bd208`, spread 1.
+
+| gate | result |
+|---|---|
+| the build | PASS (2026-10-31, 1,731 s; 740,131 tables in 70,079 groups) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 14 scenarios (9 N/A) / 73 frames / 88 frames, byte- and state-exact |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 43 (9 N/A) / 17 (1 N/A) scenarios |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m4/gamespeed.json`) |
+| `gamespeed` (the tours) | SPEED binding 12,513,144 ops/frame PASS; SIZE 65,181,636 words = **48.56%** of 2^27 (span 83.41%; the size cap is waived for the levels, the owner 2026-10-24) |
+| THE PLAYTHROUGH (`--skill easy`, seed 7) | **PASS -- LEVEL COMPLETE at frame 4128** (world 4124), byte-, palette- and state-exact on all 4,138 frames |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 15,386,065** PASS (mean 13,226,833, p80 17,545,298 at world 1610) |
+| REBUILD (2026-10-31) | **BYTE-IDENTICAL** (`21b08396c53bd2080326711351b8c32bef27ff4298238544a740a657429dd851`; the census identical in content) |
+| `msframe` | **NOT RUN**: the owner's machine is under load (2026-10-31: "wait with future runs that rely on times"). No `shipped_e1m4` baseline yet; the playthrough logs' ms/frame figures ran on the loaded box and are not a speed result |
+
+The other pins re-played on the model with this branch's bot: E1M3 2279, E1M5 4253, E1M6 964, E1M7 1259, E1M8 1709,
+E1M9 4659 -- unchanged, all LEVEL COMPLETE. E1M1 (medium, seed 1) and E1M2 die on the model -- E1M1 at world 345 and
+E1M2 at world 2528 on `m8-episode`'s bot itself (639c4382; its steering unchanged at d6485cdf), so those two pins were stale before this
+branch; their re-pin is its own task.
+
+The build command: section 6's with `e1m4` / `E1M4`, `--spread 1`. Play: `fj --run build/doom_e1m4_v1.fjm`.
+
+## 11. E1M1 and E1M2: the plays re-pinned, E1M1's playthrough speed set
+
+The bot's steering moved since E1M1's and E1M2's seeds were pinned (M8 bot work for E1M3..E1M9), and both pinned plays
+died on the model (E1M1 at world 345, E1M2 at world 2528; section 10). Re-searched on the model
+(`playthrough_gate.py --model-only --search`, 2 workers) on the steering of E1M4 v1:
+**E1M1 medium: seed 2** (LEVEL COMPLETE at world 345); **E1M2 easy: `0:1,1532:2,2288:1`** (world 3044).
+
+**E1M1** on its shipped binary (`build/doom_e1m1_blocked65.fjm`, sha256 `3a2c9564adbfcb07`, flipjump 1.6.0 at 9877f25):
+**PASS -- LEVEL COMPLETE at frame 348** (world 345), byte-, palette- and state-exact on all 358 frames. **Its speed set**
+(the owner, 2026-10-29: E1M1's standing number starts a new series from its own playthrough): **binding 12,266,909**
+ops/frame PASS (mean 10,569,408, p80 13,964,411 at world 24). The play is short -- 345 world frames, so the 11 windows
+of 100 frames overlap; the first three (the start room's fight, 13.9-16.2M) weigh most. Evidence:
+`docs/ship-evidence/blocked65_playthrough_speed.log`.
+
+**E1M2** cannot be checked on its shipped binary: `doom_e1m2_r4.fjm` (sha256 `9a112139f3d35db3`, 2026-10-18) writes the
+screen's old opcode 0x12, which flipjump 1.6.0's screen device refuses at output byte 0 ("opcode 0x12 is not a command").
+r4 predates the io API (E1M1 re-shipped for it as blocked64 / blocked65); E1M2 is rebuilt on the current source and
+re-ships through the whole gate (its own block below, when it passes).

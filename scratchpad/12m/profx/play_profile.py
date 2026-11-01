@@ -5,11 +5,13 @@
 The play is the gate's own (its pinned seed, its steering, the oracle beside the binary), so the profile is of the
 level's speed set's game, op for op. The engine's counters cover the whole process, so the gate's R9 controls --
 binary runs of their own -- are off (`--no-controls`): this is a measurement, never the gate's evidence. Writes
-<prefix>.log.bin / .marks.bin / .self.bin / .incl.bin (as drive.py), <prefix> relative to <WORK>.
+<prefix>.log.bin / .marks.bin / .self.bin / .incl.bin and .runs.json (as drive.py; heatsites.py reads them),
+<prefix> relative to <WORK>.
 
 Run `maps.py` for the same binary first (PROFX_LABELS_TSV, --gen-dir): the engine reads its maps from <WORK>.
 """
 import importlib.util
+import json
 import os
 import runpy
 import subprocess
@@ -40,7 +42,12 @@ def main(argv):
     except SystemExit as e:
         rc = e.code if isinstance(e.code, int) else 1
     prefix.parent.mkdir(parents=True, exist_ok=True)
-    print("prof_dump: %d present records -> %s.*" % (core.prof_dump(str(prefix)), prefix), flush=True)
+    n = core.prof_dump(str(prefix))
+    print("prof_dump: %d present records -> %s.*" % (n, prefix), flush=True)
+    # heatsites.py reads the run list for its per-frame divisor (drive.py's shape: one run, its presented frames)
+    fjm = argv[argv.index("--fjm") + 1] if "--fjm" in argv else ""
+    Path(str(prefix) + ".runs.json").write_text(
+        json.dumps({"mode": "playthrough", "fjm": fjm, "runs": [{"name": "playthrough", "frames": n}]}), encoding="ascii")
     return rc
 
 

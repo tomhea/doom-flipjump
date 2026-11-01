@@ -224,7 +224,7 @@ def _mm_window(mapname: str, verts) -> bool:
     nx +- bd) stays inside int16, so the map's extent is asserted with room for the step and the widest box"""
     if mapname.upper() not in MM_WINDOW_MAPS:
         return False
-    extent = max(max(abs(v.x), abs(v.y)) for v in verts)
+    extent = max(max(abs(x), abs(y)) for x, y in verts)        # cmap.vertexes: (x, y)
     assert extent < 16000, "mm_things window: %s reaches %d (the int16 windows need < 16000)" % (mapname, extent)
     return True
 

@@ -933,3 +933,22 @@ E1M2 at world 2528 on `m8-episode`'s bot itself (639c4382; its steering unchange
 branch; their re-pin is its own task.
 
 The build command: section 6's with `e1m4` / `E1M4`, `--spread 1`. Play: `fj --run build/doom_e1m4_v1.fjm`.
+
+## 11. E1M1 and E1M2: the plays re-pinned, E1M1's playthrough speed set
+
+The bot's steering moved since E1M1's and E1M2's seeds were pinned (M8 bot work for E1M3..E1M9), and both pinned plays
+died on the model (E1M1 at world 345, E1M2 at world 2528; section 10). Re-searched on the model
+(`playthrough_gate.py --model-only --search`, 2 workers) on the steering of E1M4 v1:
+**E1M1 medium: seed 2** (LEVEL COMPLETE at world 345); **E1M2 easy: `0:1,1532:2,2288:1`** (world 3044).
+
+**E1M1** on its shipped binary (`build/doom_e1m1_blocked65.fjm`, sha256 `3a2c9564adbfcb07`, flipjump 1.6.0 at 9877f25):
+**PASS -- LEVEL COMPLETE at frame 348** (world 345), byte-, palette- and state-exact on all 358 frames. **Its speed set**
+(the owner, 2026-10-29: E1M1's standing number starts a new series from its own playthrough): **binding 12,266,909**
+ops/frame PASS (mean 10,569,408, p80 13,964,411 at world 24). The play is short -- 345 world frames, so the 11 windows
+of 100 frames overlap; the first three (the start room's fight, 13.9-16.2M) weigh most. Evidence:
+`docs/ship-evidence/blocked65_playthrough_speed.log`.
+
+**E1M2** cannot be checked on its shipped binary: `doom_e1m2_r4.fjm` (sha256 `9a112139f3d35db3`, 2026-10-18) writes the
+screen's old opcode 0x12, which flipjump 1.6.0's screen device refuses at output byte 0 ("opcode 0x12 is not a command").
+r4 predates the io API (E1M1 re-shipped for it as blocked64 / blocked65); E1M2 is rebuilt on the current source and
+re-ships through the whole gate (its own block below, when it passes).

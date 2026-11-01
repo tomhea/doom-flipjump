@@ -20,7 +20,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from common import ROOT, engine_env, engine_pyd, work_dir  # noqa: E402
+from common import ROOT, engine_env, engine_pyd, load_marks, work_dir  # noqa: E402
 
 
 def main(argv):
@@ -42,12 +42,14 @@ def main(argv):
     except SystemExit as e:
         rc = e.code if isinstance(e.code, int) else 1
     prefix.parent.mkdir(parents=True, exist_ok=True)
-    n = core.prof_dump(str(prefix))
-    print("prof_dump: %d present records -> %s.*" % (n, prefix), flush=True)
-    # heatsites.py reads the run list for its per-frame divisor (drive.py's shape: one run, its presented frames)
+    print("prof_dump: %d present records -> %s.*" % (core.prof_dump(str(prefix)), prefix), flush=True)
+    # heatsites.py reads the run list for its per-frame divisor (drive.py's shape: a run's frames, of which it takes
+    # all but 2 as game frames); the play's game frames are phases.py's, marker 1 to marker 1
+    from phases import frames
+    games = sum(1 for _ in frames(load_marks(str(prefix) + ".marks.bin")))
     fjm = argv[argv.index("--fjm") + 1] if "--fjm" in argv else ""
-    Path(str(prefix) + ".runs.json").write_text(
-        json.dumps({"mode": "playthrough", "fjm": fjm, "runs": [{"name": "playthrough", "frames": n}]}), encoding="ascii")
+    Path(str(prefix) + ".runs.json").write_text(json.dumps(
+        {"mode": "playthrough", "fjm": fjm, "runs": [{"name": "playthrough", "frames": games + 2}]}), encoding="ascii")
     return rc
 
 

@@ -48,7 +48,11 @@ def build(labels_path=None, gen_dir=None):
     byname = {}
     for a, n in zip(la.tolist(), ln):
         byname.setdefault(n, a)
-    gen_dir = gen_dir or (ROOT / "build" / ("generated_" + default_fjm().stem))
+    # the build's generated parts, else emit_parts.py's (<WORK>/gen_<map>: the creator removes a build's, G8)
+    if gen_dir is None:
+        gen_dir = ROOT / "build" / ("generated_" + default_fjm().stem)
+        if not gen_dir.exists():
+            gen_dir = work_dir() / ("gen_" + active_map().lower())
     p = active_map().lower()                    # the map's generated names: <map>_bspcode_walk, <map>_03_segconsts.fj
     parts = part_starts(gen_dir, byname, p)
     need = [p + "_03_segconsts", p + "_05_state", p + "_06_banks"]

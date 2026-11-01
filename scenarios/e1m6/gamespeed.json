@@ -1,8 +1,8 @@
 {
  "map": "E1M6",
- "fjm": "build/doom_e1m6_v2.fjm",
- "sha16": "bb208c1985af855f",
- "labels": "scratchpad/12m/atlas/e1m6_v2.labels.tsv.gz",
+ "fjm": "build/doom_e1m6_v3.fjm",
+ "sha16": "a59dad606f8ab9b2",
+ "labels": "scratchpad/12m/atlas/e1m6_v3.labels.tsv.gz",
  "binary_ends": [
   [
    -138,

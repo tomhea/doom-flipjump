@@ -157,6 +157,7 @@ step of all nine -- the 1.5-2 day estimate stands until the first real run repla
 | 2026-10-19 | merged into `m8-episode`: the final creator (`scripts/build_episode.py`), the lessons (`docs/level-lessons.md`, 13 survey checks) |
 | 2026-10-31 | E1M3, E1M5, E1M6, E1M7, E1M8, E1M9 shipped v1 (#158, #159); the owner's plan: section 12 (E1M4's three wins, E1M6's profile and cuts, a placement profile for every level) |
 | 2026-11-01 | E1M4 v1 shipped (#162); E1M2 v2 (#165: r4 refused by flipjump 1.6.0's screen); step 2: E1M6 profiled (`mm_things` 9.5% of the frame) and its monster-move test cut -- E1M6 v2 (`docs/ship-gate.md` 12), speed set 20,234,657 -> 19,413,074 (-4.06%); msframe waits for the machine. Step 3 started: the creator records each build's table sites (`--record-sites`), what a level's own heat list joins |
+| 2026-11-01 | step 3's first level: E1M6 v3 = v2 on its own heat list (`heat_e1m6`, 33,785 of 33,785 sites matched where p10 matched 2,610; `docs/ship-gate.md` 12): speed set 19,413,074 -> 17,749,651 (-8.57%), B0 -8.85%, tours -9.03%, every gate PASS, rebuild byte-identical. E1M7's own list does not fit (its code and wflip area reach the table pool at 0x80000000); E1M7 stays on p10. The other levels' lists in work |
 
 ## 10. Orchestration
 

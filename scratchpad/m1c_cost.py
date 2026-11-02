@@ -69,7 +69,7 @@ def variant_set(n):
 
 
 def variant_byteclear(n):
-    """The 8-bit clear: point at the cell and use hex.zero_ptr, which reads the byte and xors it
+    """The 8-bit clear: point at the cell and use hex.zero_byte (hex.zero_ptr until flipjump 1.6.0), which reads the byte and xors it
     back -- the only value-independent way to clear all 8 bits of one cell."""
     body = [f"rep({n}, i) hex.xor_by arr + i*dw, 0xA5",
             "hex.set w/4, p, arr",
@@ -78,14 +78,14 @@ def variant_byteclear(n):
     return body, tail
 
 
-PRE = ["def zp < p {", "    hex.zero_ptr p", "    hex.ptr_inc p", "}"]
+PRE = ["def zp < p {", "    hex.zero_byte p", "    hex.ptr_inc p", "}"]
 
 print(f"W={W}, dw={DW}. Each variant pre-loads every cell with 0xA5 (a BYTE), then restores it.")
 print(f"{'variant':<22}{'n=64':>12}{'n=192':>12}{'per cell':>12}   result of cell 0")
 print("-" * 84)
 for name, mk, extra in (("hex.zero 1 (nibble)", variant_zero, []),
                         ("hex.set 1, v (nibble)", variant_set, []),
-                        ("hex.zero_ptr (byte)", variant_byteclear, PRE)):
+                        ("hex.zero_byte (byte)", variant_byteclear, PRE)):
     res = {}
     for n in (64, 192):
         body, tail = mk(n)

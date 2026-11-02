@@ -1,0 +1,18 @@
+  (--validate's records made in 598 s, outside the binary lock)
+gamespeed_trail: doom_e1m6.fjm sha256 a59dad606f8ab9b2, labels doom_e1m6.labels.tsv.gz
+  run 0: the binary ends (-138, 554) [16.16: -8994874, 36326815], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 1: the binary ends (-107, 425) [16.16: -6975838, 27902024], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 2: the binary ends (-105, 345) [16.16: -6879806, 22658584], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 3: the binary ends (-81, 426) [16.16: -5254931, 27919708], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 4: the binary ends (-64, 349) [16.16: -4139276, 22896542], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 5: the binary ends (-77, 233) [16.16: -4989581, 15325309], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 6: the binary ends (70, 342) [16.16: 4608544, 22441280], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 7: the binary ends (-65, 232) [16.16: -4235243, 15232857], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 8: the binary ends (-56, 232) [16.16: -3657899, 15230809], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 9: the binary ends (-9, 239) [16.16: -579920, 15686080], 1 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 0/100 (parts at game frame 0); door-wrong rejected on 71 frames, 71 with its pose equal; 100/100 frames presented
+BINARY_ENDS = ((-138, 554), (-107, 425), (-105, 345), (-81, 426), (-64, 349), (-77, 233), (70, 342), (-65, 232), (-56, 232), (-9, 239))
+BINARY_DOORS = (0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+TRAIL         --validate's record equals the binary on every frame of every run: PASS
+CONTROL-POSE  the doors-shut replay parts from the binary: PASS (runs [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+CONTROL-DOORS the door-wrong replay is rejected where its pose is right: PASS (runs [9])
+RECORDED C:\Users\tomhe\Documents\doom-mmwin\scenarios\e1m6\gamespeed.json

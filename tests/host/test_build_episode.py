@@ -353,6 +353,15 @@ def test_estimate_comes_from_measured_times():
     assert BE.estimate(st, refused) == (120.0, "guess")
 
 
+
+def test_a_level_builds_with_its_own_heat_list_only_where_one_is_committed():
+    """episode plan 12 step 3: E1M6 v3 ships on its own list (docs/ship-gate.md 12); a level without one keeps p10"""
+    assert BE.REGISTRY["E1M6"].heat == "scratchpad/12m/heat_e1m6.json.gz"
+    for m in BE.LEVEL_SPREAD:
+        own = BE.profile(m).heat
+        assert BE.REGISTRY[m].heat == (own if (ROOT / own).exists() else BE.HEAT_P10), m
+    assert BE.REGISTRY["E1M1"].heat == "scratchpad/12m/heat_e1m1_adopt.json.gz"
+
 # ── the guards ───────────────────────────────────────────────────────────────────────────────────────────────────
 def test_python_O_is_refused():
     script = str(ROOT / "scripts" / "build_episode.py")

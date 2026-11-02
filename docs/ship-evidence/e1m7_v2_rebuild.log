@@ -1,0 +1,17 @@
+build_episode: maps E1M7; source 5ec9d61bbc04d6c9; flipjump b1365b5cde780df9ec93f2918d18cc5d6be2df28; out build/e1m7_heatb
+
+== E1M7
+  [RUN      ] emit_check      ~  12 min (guess)  key 4a21b5f25119
+      DOOMFJ_MAP=E1M7 python scripts/heavy.py heatb-e1m7 --prio 8 --log build/e1m7_heatb/logs/E1M7_emit_check.log -- python scripts/emit_check.py E1M7 --json build/e1m7_heatb/logs/E1M7_emit_check.json
+      -> PASS (417 s)
+  [RUN      ] build           ~  15 min (guess)  key 73ccfdb4881e
+      DOOMFJ_MAP=E1M7 python scripts/heavy.py heatb-e1m7 --prio 8 --build --log build/e1m7_heatb/logs/E1M7_build.log -- python scratchpad/12m/build_labeled.py --labels build/e1m7_heatb/doom_e1m7.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m7.wad --map E1M7 --out build/e1m7_heatb/doom_e1m7.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache build/e1m7_heatb/census_e1m7.json.gz --pin-heat scratchpad/12m/heat_e1m7.json.gz --record-sites build/e1m7_heatb/sites_e1m7.json.gz
+      -> PASS (1406 s)
+  [RUN      ] sha256          ~   0 min (guess)  key 02b58cd065ef  -- recorded 77466d1d306acb78
+      (in this process) sha256 of the binary
+      -> FAIL -- NOT byte-identical: 49b38d76c4fc7052 != recorded 77466d1d306acb78 (0 s)
+
+plan: ~27 min (0.5 h) of steps to run; 27 min of it a GUESS (steps never measured by this creator)
+every step of these maps from scratch (NOT READY ones included): ~0.5 h
+EPISODE: FAIL
+report: build/e1m7_heatb/report.md

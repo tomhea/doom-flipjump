@@ -1123,3 +1123,30 @@ broken. The build command: section 6's with `e1m8` / `E1M8`, `--spread 2`, the `
 | `msframe` | **NOT RUN** (above; against `shipped_e1m8`, v1's 33.0 ms/frame) |
 
 Play: `fj --run build/doom_e1m8_v2.fjm`.
+
+### E1M9 v2: v1 on its own heat list
+
+**The heat list** `scratchpad/12m/heat_e1m9.json.gz` (sha256 `59612853d4f68c7d`): 20 hot groups, 35,902 hot sites,
+from v1's playthrough (4,660 game frames); CONTROL PASS (0 ops unmapped). The sites build is v1 byte for byte
+(`33da9dbcc55399a0`).
+
+**E1M9 v2** -- **`build/doom_e1m9_v2.fjm`**, sha256 `1171afc3d845e1f4`, built by the creator on v1's source, spread 1,
+`heat_e1m9`: 20 of 20 hot words pinned, **35,902 of 35,902 hot sites matched**, 515,276 tables in 46,479 groups, 0
+broken. The build command: section 6's with `e1m9` / `E1M9`, `--spread 1`, the `_v2` names and
+`--pin-heat scratchpad/12m/heat_e1m9.json.gz`. Evidence `docs/ship-evidence/e1m9_v2_*.log`
+(`e1m9_v2_b0_v1base.log`: v1's B0 re-run on the sites build).
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (387 s) / PASS (831 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 6 scenarios (9 N/A) / 194 frames / 88 frames, byte- and state-exact (as v1: the logs equal v1's but for op counts, times and paths) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 31 (13 N/A) / 16 (2 N/A) scenarios, state, pixels and palette exact (as v1) |
+| B0, `combat_scenarios_e1m9_v1.json` | B0 OK -- 11/11 runs state- and pixel-exact; binding **12,564,575** PASS (mean 12,277,399; v1 re-run 13,649,248: **-7.95%**); per-frame maximum 24,379,392 in R0-s21 |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; only the binary fields of `scenarios/e1m9/gamespeed.json` moved |
+| `gamespeed` (the tours) | SPEED binding **7,138,830** PASS (v1 recorded 7,732,082: **-7.67%**); SIZE 55,428,628 words = **41.30%** (v1 41.32%) |
+| THE PLAYTHROUGH (`--skill easy`, seed 2) | **PASS -- LEVEL COMPLETE at frame 4663** (world 4659), byte-, palette- and state-exact on all 4,673 frames (as v1) |
+| **THE SPEED SET** | **binding 13,424,871** PASS (v1 re-run 14,577,947: **-7.91%**); mean 11,710,926, p80 15,138,816 at world 2280 |
+| REBUILD (`build/e1m9_heatb`) | **BYTE-IDENTICAL** (`1171afc3d845e1f426d624f4db26a01e472adbb1f60e5c9766778740c0eca01d`; the labels and the census identical in content; `e1m9_v2_rebuild.log`, 399 + 869 s) |
+| `msframe` | **NOT RUN** (above; against `shipped_e1m9`, v1's 37.7 ms/frame) |
+
+Play: `fj --run build/doom_e1m9_v2.fjm`.

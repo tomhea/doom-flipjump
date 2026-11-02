@@ -1,33 +1,33 @@
 {
  "map": "E1M9",
  "workload": "script 274502e5622aa9fe",
- "binary": "build\\doom_e1m9_v1.fjm",
- "binary_sha": "33da9dbcc55399a0",
+ "binary": "build\\doom_e1m9_v2.fjm",
+ "binary_sha": "1171afc3d845e1f4",
  "env": {},
- "when": "2026-10-29 18:19:46",
+ "when": "2026-11-02 12:24:27",
  "frames": 200,
  "reps": 5,
  "engine_pyd_sha": "1bd844a1affacb2a",
  "git": {
-  "doom": "1c25d96a",
-  "flipjump": "9877f25"
+  "doom": "22392006",
+  "flipjump": "b1365b5"
  },
  "summary": {
   "a": {
-   "ms_median": 37.70329087388282,
-   "ms_min": 37.422044604432344,
-   "ms_max": 38.843707711088896,
-   "fjs_median": 208179809.37308088,
-   "ops_per_frame": 7849063.906862745,
+   "ms_median": 36.5646014026567,
+   "ms_min": 36.11011014265173,
+   "ms_max": 37.003567405775485,
+   "fjs_median": 197969086.2941066,
+   "ops_per_frame": 7238660.730392157,
    "pix_all_same": true,
    "ops_all_same": true,
    "cell_bytes": null,
    "storage": "flat",
    "pin": "cpu2 proc=ok thread=ok prio=high",
-   "engine": "C:\\Users\\tomhe\\Documents\\fj160-path\\flipjump\\interpreter\\_fjcore.pyd",
+   "engine": "C:\\Users\\tomhe\\Documents\\fjpin-path\\flipjump\\interpreter\\_fjcore.pyd",
    "engine_sha": "1bd844a1affacb2a",
    "full_span": null,
-   "yard_median": 3634040319.5412493
+   "yard_median": 3625775302.677189
   }
  }
 }

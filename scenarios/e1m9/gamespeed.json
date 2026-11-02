@@ -1,8 +1,8 @@
 {
  "map": "E1M9",
- "fjm": "build/episode/doom_e1m9.fjm",
- "sha16": "33da9dbcc55399a0",
- "labels": "build/episode/doom_e1m9.labels.tsv.gz",
+ "fjm": "build/doom_e1m9_v2.fjm",
+ "sha16": "1171afc3d845e1f4",
+ "labels": "scratchpad/12m/atlas/e1m9_v2.labels.tsv.gz",
  "binary_ends": [
   [
    -709,

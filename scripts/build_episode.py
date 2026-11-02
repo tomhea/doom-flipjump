@@ -148,7 +148,7 @@ REGISTRY: dict[str, MapSpec] = {
     "E1M2": MapSpec(
         map="E1M2", ready=True, wad="tests/fixtures/freedoom_e1m2.wad", spread=1, heat=level_heat("E1M2"),
         combat_set="scratchpad/gp/scenarios/combat_scenarios_e1m2_v1.json", baseline="shipped_e1m2",
-        size_cap_pct=None, size_note="60.58% of 2^27 at v2 (r4 62.19%) -- the owner: \"Size is ok\" (docs/ship-gate.md 5)",
+        size_cap_pct=None, size_note="60.45% of 2^27 at v3 (v2 60.58%, r4 62.19%) -- the owner: \"Size is ok\" (docs/ship-gate.md 5)",
         trail_record=True,
         feature_tests=("tests/fj/test_automap_fj.py", "tests/fj/test_change_sector_e1m2_fj.py",
                        "tests/fj/test_doors_e1m2_fj.py", "tests/fj/test_lights_fj.py",
@@ -156,11 +156,11 @@ REGISTRY: dict[str, MapSpec] = {
                        "tests/fj/test_telefrag_fj.py", "tests/fj/test_teleport_fj.py",
                        "tests/fj/test_fog_pool_fj.py"),
         build_min=120,
-        recorded_out="build/doom_e1m2_v2.fjm",
-        recorded_labels="scratchpad/12m/atlas/e1m2_v2.labels.tsv.gz",
-        recorded_census="scratchpad/12m/_census_game_e1m2_v2.json.gz",
-        recorded_sha256="93af128a9caef3cec91f840e66312d2cf074d50bf976351df543a54fdcc2be11",
-        recorded_ref="docs/ship-gate.md 11 (v2, 2026-11-01; r4 refused by flipjump 1.6.0's screen)"),
+        recorded_out="build/doom_e1m2_v3.fjm",
+        recorded_labels="scratchpad/12m/atlas/e1m2_v3.labels.tsv.gz",
+        recorded_census="scratchpad/12m/_census_game_e1m2_v3.json.gz",
+        recorded_sha256="96b738ecc2039b3c80f4598b1643f9c38aac69b09ee3eea18b46726e1eebf3ec",
+        recorded_ref="docs/ship-gate.md 13 (v3, 2026-11-02: v2 on its own heat list)"),
 }
 # M8 wave 1 + 2 (2026-10-29): the levels in their pipeline -- built and gated by this creator, NO recorded binary yet
 # (no rebuild check until docs/ship-gate.md holds their block). Spread 2 where the pool fits (the small maps: E1M5 and
@@ -178,24 +178,28 @@ for _m, _spread in LEVEL_SPREAD.items():
         recorded_ref="none yet: the level is in its pipeline (docs/episode-plan.md 4)")
 # the levels shipped (docs/ship-gate.md 6, 7, 8, 9, 10): their recorded binary -- the creator's build must reproduce it to the byte
 LEVEL_SHIPPED = {
-    "E1M3": ("build/doom_e1m3_v1.fjm", "71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784"),
-    "E1M5": ("build/doom_e1m5_v1.fjm", "4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2"),
-    "E1M9": ("build/doom_e1m9_v1.fjm", "33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48"),
+    "E1M3": ("build/doom_e1m3_v2.fjm", "1feb6db9fb21acc0d89a18879437d06f100740ed51ba34a895edf64514cb5199"),
+    "E1M5": ("build/doom_e1m5_v2.fjm", "1bd109d61d0780b57647fb4bd76cf271733080778ea208e187c2f5db92d31b32"),
+    "E1M9": ("build/doom_e1m9_v2.fjm", "1171afc3d845e1f426d624f4db26a01e472adbb1f60e5c9766778740c0eca01d"),
     "E1M6": ("build/doom_e1m6_v3.fjm", "a59dad606f8ab9b29d2a6b3111d2de207febec50323fafa3aa8795d7e19b015b"),
-    "E1M8": ("build/doom_e1m8_v1.fjm", "9311cd67268c7e121ff3137e86ff86146888e3b1e6e0ad5b859a4ff64c553737"),
+    "E1M8": ("build/doom_e1m8_v2.fjm", "b8aa2750e95f0a07d8439cd08ebd1cd5d685a6beb4ea7710a1811b71cea1944e"),
     "E1M7": ("build/doom_e1m7_v1.fjm", "77466d1d306acb78b48baea01df45820fe0b9a4be6ee4dcfbe2b757cdbd0c0ec"),
-    "E1M4": ("build/doom_e1m4_v1.fjm", "21b08396c53bd2080326711351b8c32bef27ff4298238544a740a657429dd851"),
+    "E1M4": ("build/doom_e1m4_v2.fjm", "ed6075e2eeea0ca34812f69ce56fc691513a5f9f0a9c166a8dabbc346bd1751b"),
 }
-LEVEL_VERSION = {"E1M6": "v3"}       # docs/ship-gate.md 12: E1M6 v3 (v2 + its own heat list); the others v1
+# ship-gate 12: E1M6 v3 (v2 + its own heat list); 13: the levels' own heat lists (E1M3, E1M4, E1M5, E1M8, E1M9
+# v2); E1M7 v1 (its own list does not fit the table pool)
+LEVEL_VERSION = {"E1M6": "v3", "E1M8": "v2", "E1M9": "v2", "E1M5": "v2", "E1M3": "v2",
+                 "E1M4": "v2"}
+LEVEL_REF = {"E1M3": ("13", "2026-11-02"), "E1M5": ("13", "2026-11-02"), "E1M9": ("13", "2026-11-02"),
+             "E1M6": ("12", "2026-11-01"), "E1M8": ("13", "2026-11-02"), "E1M7": ("9", "2026-10-31"),
+             "E1M4": ("13", "2026-11-02")}      # the ship-gate section and the date of the version LEVEL_SHIPPED holds
 for _m, (_out, _sha) in LEVEL_SHIPPED.items():
     _lo, _v = _m.lower(), LEVEL_VERSION.get(_m, "v1")
     REGISTRY[_m] = dataclasses.replace(
         REGISTRY[_m], recorded_out=_out, recorded_sha256=_sha,
         recorded_labels="scratchpad/12m/atlas/%s_%s.labels.tsv.gz" % (_lo, _v),
         recorded_census="scratchpad/12m/_census_game_%s_%s.json.gz" % (_lo, _v),
-        recorded_ref="docs/ship-gate.md %s (%s, %s)" % (
-            {"E1M9": "7", "E1M6": "12", "E1M8": "8", "E1M7": "9", "E1M4": "10"}.get(_m, "6"), _v,
-            {"E1M6": "2026-11-01", "E1M8": "2026-10-30", "E1M7": "2026-10-31", "E1M4": "2026-10-31"}.get(_m, "2026-10-29")))
+        recorded_ref="docs/ship-gate.md %s (%s, %s)" % (LEVEL_REF[_m][0], _v, LEVEL_REF[_m][1]))
 for _m in [m for m in EPISODE[2:] if m not in LEVEL_SPREAD]:   # E1M6, E1M7: placeholders until their level ships
     _p = profile(_m)
     REGISTRY[_m] = MapSpec(

@@ -1,6 +1,6 @@
 """M1 -- a BYTE clear with NO pointer arithmetic, for a cell at a CONSTANT address.
 
-THE IDEA (owner's). `hex.zero_ptr` costs 943 ops/cell and almost all of it is
+THE IDEA (owner's). `hex.zero_byte` (`hex.zero_ptr` until flipjump 1.6.0) costs 943 ops/cell and almost all of it is
 `set_flip_and_jump_pointers` -- copying an 8-nibble ADDRESS into `to_flip`/`to_jump` so the machine
 can reach a cell it only knows at runtime. But the reset knows every address at EMIT time. Nothing
 has to be computed: the address is baked straight into the ops.
@@ -129,7 +129,7 @@ o2, _g = build_run(192, [(i * 4 + 1) & 0xFF for i in range(192)])
 per = (o2 - o1) / (192 - 64)
 print("  n=64 %s ops   n=192 %s ops   -> %.1f ops/cell" % (format(o1, ","), format(o2, ","), per))
 print("")
-print("  hex.zero_ptr (pointer path)       943.0 ops/cell   [measured earlier]")
+print("  hex.zero_byte (pointer path)      943.0 ops/cell   [measured earlier]")
 print("  m1.zbyte     (constant address)  %6.1f ops/cell   -> %.1fx cheaper" % (per, 943 / per))
 print("")
 print("PASS" if ok else "FAIL")

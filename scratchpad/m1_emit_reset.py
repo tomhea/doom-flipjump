@@ -19,7 +19,7 @@ THE PRIMITIVE PER CELL IS NOT A DETAIL, IT IS THE WHOLE CORRECTNESS ARGUMENT (M1
     all: `hex.zero` on one does not merely fail, it CORRUPTS -- measured 0xA5 -> 0x22A5, because
     `hex.xor`'s dispatch jumps out of its own 16-entry table. It is cleared by `m1.zerobyte`,
     which needs NO POINTER because the address is a compile-time constant: 91.1 ops/cell measured
-    against `hex.zero_ptr`'s 943 (scratchpad/m1_zbyte.py).
+    against `hex.zero_byte`'s 943 (scratchpad/m1_zbyte.py).
   * everything is UNROLLED with `rep`, and the generator ASSERTS that no cell it treats as a
     nibble has a pristine value above 15.
 
@@ -213,7 +213,7 @@ hdr = [
     "// =========================================================================",
     "ns m1 {",
     "    // Clear all 8 bits of the byte cell at the CONSTANT address C -- NO POINTER AT ALL.",
-    "    // MEASURED 91.1 ops/cell against hex.zero_ptr's 943 (scratchpad/m1_zbyte.py),",
+    "    // MEASURED 91.1 ops/cell against hex.zero_byte's 943 (scratchpad/m1_zbyte.py),",
     "    // a 10.3x saving, because the pointer path's cost is almost entirely",
     "    // `set_flip_and_jump_pointers` copying an 8-nibble address at RUNTIME -- and these",
     "    // addresses are compile-time constants.",

@@ -1230,3 +1230,10 @@ Evidence `docs/ship-evidence/e1m4_v2_*.log`.
 | `msframe` | **NOT RUN** (above; E1M4 has no `shipped_e1m4` baseline yet: the A/B is against the sites build, v1 byte for byte) |
 
 Play: `fj --run build/doom_e1m4_v2.fjm`.
+
+### E1M7: stays v1 (on p10)
+
+Its own list (39,602 hot sites from v1's playthrough; kept untracked as `heat_e1m7_nofit.json.gz`) does not fit:
+the heat build stops in the assembler -- `table-placement: the segment at 0x0 and its wflip area reach 0x88164840,
+inside the table pool at 0x80000000. Raise pool_base.` Raising the pool base shrinks the pool's span (0x7fffffe0 from
+0x80000000 is the whole upper half); that was not tried. E1M7 ships v1 (section 9).

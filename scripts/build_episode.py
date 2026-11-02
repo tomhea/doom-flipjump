@@ -178,7 +178,7 @@ for _m, _spread in LEVEL_SPREAD.items():
         recorded_ref="none yet: the level is in its pipeline (docs/episode-plan.md 4)")
 # the levels shipped (docs/ship-gate.md 6, 7, 8, 9, 10): their recorded binary -- the creator's build must reproduce it to the byte
 LEVEL_SHIPPED = {
-    "E1M3": ("build/doom_e1m3_v1.fjm", "71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784"),
+    "E1M3": ("build/doom_e1m3_v2.fjm", "1feb6db9fb21acc0d89a18879437d06f100740ed51ba34a895edf64514cb5199"),
     "E1M5": ("build/doom_e1m5_v2.fjm", "1bd109d61d0780b57647fb4bd76cf271733080778ea208e187c2f5db92d31b32"),
     "E1M9": ("build/doom_e1m9_v2.fjm", "1171afc3d845e1f426d624f4db26a01e472adbb1f60e5c9766778740c0eca01d"),
     "E1M6": ("build/doom_e1m6_v3.fjm", "a59dad606f8ab9b29d2a6b3111d2de207febec50323fafa3aa8795d7e19b015b"),
@@ -186,9 +186,9 @@ LEVEL_SHIPPED = {
     "E1M7": ("build/doom_e1m7_v1.fjm", "77466d1d306acb78b48baea01df45820fe0b9a4be6ee4dcfbe2b757cdbd0c0ec"),
     "E1M4": ("build/doom_e1m4_v1.fjm", "21b08396c53bd2080326711351b8c32bef27ff4298238544a740a657429dd851"),
 }
-LEVEL_VERSION = {"E1M6": "v3", "E1M8": "v2", "E1M9": "v2", "E1M5": "v2"}   # ship-gate 12: E1M6 v3 (v2 + its own heat list);
-#                                                              13: the levels' own heat lists (E1M5, E1M8, E1M9 v2); the others v1
-LEVEL_REF = {"E1M3": ("6", "2026-10-29"), "E1M5": ("13", "2026-11-02"), "E1M9": ("13", "2026-11-02"),
+# ship-gate 12: E1M6 v3 (v2 + its own heat list); 13: the levels' own heat lists (E1M3, E1M5, E1M8, E1M9 v2); the others v1
+LEVEL_VERSION = {"E1M6": "v3", "E1M8": "v2", "E1M9": "v2", "E1M5": "v2", "E1M3": "v2"}
+LEVEL_REF = {"E1M3": ("13", "2026-11-02"), "E1M5": ("13", "2026-11-02"), "E1M9": ("13", "2026-11-02"),
              "E1M6": ("12", "2026-11-01"), "E1M8": ("13", "2026-11-02"), "E1M7": ("9", "2026-10-31"),
              "E1M4": ("10", "2026-10-31")}      # the ship-gate section and the date of the version LEVEL_SHIPPED holds
 for _m, (_out, _sha) in LEVEL_SHIPPED.items():

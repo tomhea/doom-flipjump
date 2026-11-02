@@ -1285,7 +1285,7 @@ committed for E1M7, so the creator's `b0` step fails on the missing file).
 | `msframe` | **91.3 ms/frame against v1's 97.0 in one run, B FASTER x1.061** (all five pairs; pixels identical; `e1m7_v2_msframe.log`, its own `--selftest` first: A-vs-A 1.003, the 20 ms delay measured 23.4, `e1m7_v2_msframe_selftest.log`); `shipped_e1m7` re-frozen at 90.9 (`e1m7_v2_msframe_freeze.log`) |
 
 The A arm is the noisy one ([93.9 .. 102.2]; v1's own freeze was 94.4, section 9); B's five reps sit inside 0.1 ms.
-Both arms run at ~162M fj/s, the episode's lowest rate (the biggest map: 77.6% of 2^27). Over D8's ~90 ms tripwire
-for the same reason as E1M6 (section 8): ops on the biggest map, not the engine.
+Both arms run at ~162M fj/s, the episode's lowest rate; v2 stays over D8's ~90 ms tripwire for v1's reason (section
+9): the engine rate, not ops (v2 fills 97.59% of the span, v1 99.22%).
 
 Play: `fj --run build/doom_e1m7_v2.fjm`.

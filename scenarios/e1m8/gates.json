@@ -1,0 +1,322 @@
+{
+ "map": "E1M8",
+ "what": "the gates' ROLES on E1M8 (scratchpad/gp/gate_roles.py reads them; gate_targets.py writes them)",
+ "roles": {
+  "key_doors": {
+   "blue": [],
+   "yellow": [],
+   "red": []
+  },
+  "cards": {},
+  "pickup_walks": [
+   [
+    2776,
+    -1824,
+    0
+   ],
+   [
+    2920,
+    -1824,
+    2147483648
+   ]
+  ],
+  "nukage_sector": 10,
+  "teleports": [],
+  "exit": [
+   [
+    164,
+    52
+   ],
+   [
+    165,
+    52
+   ],
+   [
+    166,
+    52
+   ],
+   [
+    167,
+    52
+   ],
+   [
+    227,
+    52
+   ],
+   [
+    228,
+    52
+   ],
+   [
+    230,
+    52
+   ],
+   [
+    232,
+    52
+   ]
+  ]
+ },
+ "na": {
+  "blue_door": "E1M8 has no blue card (type 5)",
+  "yellow_door": "E1M8 has no yellow key door",
+  "red_door": "E1M8 has no red key door",
+  "below_card_sector": "E1M8 has no blue card",
+  "blaze_door": "E1M8 has no blazing door",
+  "walkovers": "E1M8 has no W1 walk-over door",
+  "wr_lift": "E1M8 has no WR lift line",
+  "sr_lift": "E1M8 has no SR lift line",
+  "floor_switch": "E1M8 has no floor switch",
+  "reversal_door": "no plain door of E1M8 verifies S13 (tried [])",
+  "lift_leaf_sector": "E1M8 has no lift",
+  "chain": "E1M8 has no barrel",
+  "block_barrel": "E1M8 has no barrel",
+  "court": "no imp within 512 units of a zombieman or sergeant on E1M8",
+  "F3": "E1M8 has no chainsaw (2005)",
+  "F5": "E1M8 has no berserk pack (2023) on any skill",
+  "D4": "placed, but control restart_pickup never parts there (gate_targets sweep)"
+ },
+ "candidates": {
+  "blue_door": [],
+  "pickup_walks": [
+   {
+    "value": [
+     2776,
+     -1824,
+     0
+    ],
+    "items_on_the_ray": 4,
+    "refused": null
+   },
+   {
+    "value": [
+     2920,
+     -1824,
+     2147483648
+    ],
+    "items_on_the_ray": 4,
+    "refused": null
+   },
+   {
+    "value": [
+     1728,
+     -328,
+     1073741824
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1728,
+     -280,
+     1073741824
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     3128,
+     -1568,
+     0
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     3176,
+     -1568,
+     0
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     3200,
+     -328,
+     1073741824
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     3200,
+     -280,
+     1073741824
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1656,
+     -256,
+     0
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1670,
+     -290,
+     536870912
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1670,
+     -222,
+     3758096384
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1694,
+     -266,
+     536870912
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1694,
+     -246,
+     3758096384
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1704,
+     -304,
+     1073741824
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1704,
+     -256,
+     0
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1718,
+     -290,
+     536870912
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1718,
+     -222,
+     3758096384
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1728,
+     -232,
+     3221225472
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1728,
+     -184,
+     3221225472
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1738,
+     -290,
+     1610612736
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1738,
+     -222,
+     2684354560
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1752,
+     -304,
+     1073741824
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1752,
+     -256,
+     2147483648
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1762,
+     -314,
+     1610612736
+    ],
+    "items_on_the_ray": 4,
+    "refused": "claim not met"
+   }
+  ],
+  "nukage_sector": [
+   {
+    "value": 10,
+    "refused": null
+   }
+  ]
+ },
+ "provenance": {
+  "generator": "scratchpad/gp/gate_targets.py",
+  "generator_sha16": "316e9d41527e77a7",
+  "wad": "tests/fixtures/freedoom_e1m8.wad",
+  "wad_sha16": "e90428651be0cf48",
+  "model_sha16": {
+   "src/doomfj/doors.py": "b70d42ab7e602a47",
+   "src/doomfj/movers.py": "fb0c329dc1661725",
+   "src/doomfj/world.py": "c1f109b94ea5be48",
+   "src/doomfj/combat.py": "f56b8d0f96d3eb55",
+   "scratchpad/gp/p2a_gate.py": "4cab31ec0b796a4c",
+   "scratchpad/gp/fight_gate.py": "d421f4e82e88c6f3"
+  },
+  "fight_verified": true,
+  "seconds": 131
+ }
+}

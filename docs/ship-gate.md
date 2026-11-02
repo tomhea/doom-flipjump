@@ -1204,3 +1204,29 @@ broken. The build command: section 6's with `--spread 1`, the `_v2` names and
 | `msframe` | **NOT RUN** (above; against `shipped_e1m3`, v1's 73.5 ms/frame) |
 
 Play: `fj --run build/doom_e1m3_v2.fjm`.
+
+### E1M4 v2: v1 on its own heat list
+
+**The heat list** `scratchpad/12m/heat_e1m4.json.gz` (sha256 `af7666baac42b4ba`): 20 hot groups, 37,002 hot sites,
+from v1's playthrough (4,125 game frames, seed 7); CONTROL PASS (0 ops unmapped). The sites build is v1 byte for byte
+(`21b08396c53bd208`).
+
+**E1M4 v2** -- **`build/doom_e1m4_v2.fjm`**, sha256 `ed6075e2eeea0ca3`, built by the creator on v1's source, spread 1,
+`heat_e1m4`: 20 of 20 hot words pinned, **37,002 of 37,002 hot sites matched**, 740,131 tables in 70,079 groups, 0
+broken. The build command: section 10's with the `_v2` names and `--pin-heat scratchpad/12m/heat_e1m4.json.gz`.
+Evidence `docs/ship-evidence/e1m4_v2_*.log`.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (377 s) / PASS (882 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 14 scenarios (9 N/A) / 73 frames / 88 frames, byte- and state-exact (as v1: the logs equal v1's but for op counts, times and paths) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 43 (9 N/A) / 17 (1 N/A) scenarios, state, pixels and palette exact (as v1) |
+| B0, `combat_scenarios_e1m4_v1.json` (v1 recorded none, section 10; both binaries measured here for the first time) | B0 OK -- 11/11 runs state- and pixel-exact; binding **19,342,561** PASS (mean 18,021,624; v1 on the sites build 21,223,504, also 11/11 exact, `e1m4_v2_b0_v1base.log`: **-8.86%**); per-frame maximum 55,836,672 in R0-s79 (v1 61,603,840) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; only the binary fields of `scenarios/e1m4/gamespeed.json` moved |
+| `gamespeed` (the tours) | SPEED binding **11,291,909** PASS (v1 recorded 12,513,144: **-9.76%**); SIZE 64,593,636 words = **48.13%** (v1 48.56%; the levels' waiver, as v1) |
+| THE PLAYTHROUGH (`--skill easy`, seed 7) | **PASS -- LEVEL COMPLETE at frame 4128** (world 4124), byte-, palette- and state-exact on all 4,138 frames (as v1) |
+| **THE SPEED SET** | **binding 13,898,994** PASS (v1 recorded 15,386,065, re-run equal: **-9.67%**); mean 11,972,355, p80 15,825,633 at world 1610 |
+| REBUILD (`build/e1m4_heatb`) | **BYTE-IDENTICAL** (`ed6075e2eeea0ca34812f69ce56fc691513a5f9f0a9c166a8dabbc346bd1751b`; the labels and the census identical in content; `e1m4_v2_rebuild.log`, 374 + 880 s) |
+| `msframe` | **NOT RUN** (above; E1M4 has no `shipped_e1m4` baseline yet: the A/B is against the sites build, v1 byte for byte) |
+
+Play: `fj --run build/doom_e1m4_v2.fjm`.

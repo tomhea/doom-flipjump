@@ -184,13 +184,15 @@ LEVEL_SHIPPED = {
     "E1M6": ("build/doom_e1m6_v3.fjm", "a59dad606f8ab9b29d2a6b3111d2de207febec50323fafa3aa8795d7e19b015b"),
     "E1M8": ("build/doom_e1m8_v2.fjm", "b8aa2750e95f0a07d8439cd08ebd1cd5d685a6beb4ea7710a1811b71cea1944e"),
     "E1M7": ("build/doom_e1m7_v1.fjm", "77466d1d306acb78b48baea01df45820fe0b9a4be6ee4dcfbe2b757cdbd0c0ec"),
-    "E1M4": ("build/doom_e1m4_v1.fjm", "21b08396c53bd2080326711351b8c32bef27ff4298238544a740a657429dd851"),
+    "E1M4": ("build/doom_e1m4_v2.fjm", "ed6075e2eeea0ca34812f69ce56fc691513a5f9f0a9c166a8dabbc346bd1751b"),
 }
-# ship-gate 12: E1M6 v3 (v2 + its own heat list); 13: the levels' own heat lists (E1M3, E1M5, E1M8, E1M9 v2); the others v1
-LEVEL_VERSION = {"E1M6": "v3", "E1M8": "v2", "E1M9": "v2", "E1M5": "v2", "E1M3": "v2"}
+# ship-gate 12: E1M6 v3 (v2 + its own heat list); 13: the levels' own heat lists (E1M3, E1M4, E1M5, E1M8, E1M9
+# v2); E1M7 v1 (its own list does not fit the table pool)
+LEVEL_VERSION = {"E1M6": "v3", "E1M8": "v2", "E1M9": "v2", "E1M5": "v2", "E1M3": "v2",
+                 "E1M4": "v2"}
 LEVEL_REF = {"E1M3": ("13", "2026-11-02"), "E1M5": ("13", "2026-11-02"), "E1M9": ("13", "2026-11-02"),
              "E1M6": ("12", "2026-11-01"), "E1M8": ("13", "2026-11-02"), "E1M7": ("9", "2026-10-31"),
-             "E1M4": ("10", "2026-10-31")}      # the ship-gate section and the date of the version LEVEL_SHIPPED holds
+             "E1M4": ("13", "2026-11-02")}      # the ship-gate section and the date of the version LEVEL_SHIPPED holds
 for _m, (_out, _sha) in LEVEL_SHIPPED.items():
     _lo, _v = _m.lower(), LEVEL_VERSION.get(_m, "v1")
     REGISTRY[_m] = dataclasses.replace(

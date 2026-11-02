@@ -1097,3 +1097,29 @@ Evidence `docs/ship-evidence/e1m2_v3_*.log` (`e1m2_v3_b0_v2base.log`: v2's B0 re
 | `msframe` | **NOT RUN** (above) |
 
 Play: `fj --run build/doom_e1m2_v3.fjm`.
+
+### E1M8 v2: v1 on its own heat list
+
+**The heat list** `scratchpad/12m/heat_e1m8.json.gz` (sha256 `25c47012090babac`): 20 hot groups, 23,748 hot sites,
+from v1's playthrough (1,710 game frames); CONTROL PASS (0 ops unmapped). The sites build is v1 byte for byte
+(`9311cd67268c7e12`).
+
+**E1M8 v2** -- **`build/doom_e1m8_v2.fjm`**, sha256 `b8aa2750e95f0a07`, built by the creator on v1's source, spread 2,
+`heat_e1m8`: 20 of 20 hot words pinned, **23,748 of 23,748 hot sites matched**, 229,538 tables in 19,468 groups, 0
+broken. The build command: section 6's with `e1m8` / `E1M8`, `--spread 2`, the `_v2` names and
+`--pin-heat scratchpad/12m/heat_e1m8.json.gz`. Evidence `docs/ship-evidence/e1m8_v2_*.log`.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (328 s) / PASS (544 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 0 run (14 N/A) / 413 frames / 88 frames, byte- and state-exact (as v1: the same scenarios and verdicts, fewer ops) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 0 (7 N/A) / 6 (37 N/A) / 8 (9 N/A) scenarios, state, pixels and palette exact (as v1) |
+| B0 | **N/A, as v1** (section 8: the owner's playthrough speed set replaces a combat set; none is committed for E1M8, so the creator's `b0` step fails on the missing file) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE PASS (CONTROL-DOORS N/A, as v1); only the binary fields of `scenarios/e1m8/gamespeed.json` moved against v1's record (committed here for the first time) |
+| `gamespeed` (the tours) | SPEED binding **10,715,756** PASS (v1 recorded 11,569,110: **-7.38%**); SIZE 27,993,760 words = **20.86%** (v1 20.84%) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 1713** (world 1709), byte-, palette- and state-exact on all 1,723 frames (as v1) |
+| **THE SPEED SET** | **binding 9,256,781** PASS (v1 re-run 10,015,092: **-7.57%**); mean 8,816,856, p80 9,696,707 at world 1609 |
+| REBUILD (`build/e1m8_heatb`) | **BYTE-IDENTICAL** (`b8aa2750e95f0a07d8439cd08ebd1cd5d685a6beb4ea7710a1811b71cea1944e`; the labels and the census identical in content; `e1m8_v2_rebuild.log`, 325 + 542 s) |
+| `msframe` | **NOT RUN** (above; against `shipped_e1m8`, v1's 33.0 ms/frame) |
+
+Play: `fj --run build/doom_e1m8_v2.fjm`.

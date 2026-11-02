@@ -1,0 +1,20 @@
+machine : power plan 'Turbo'; busy processes: none
+msframe : A=doom_e1m6_v1.fjm B=doom_e1m6_v2.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  A        105.5 ms   215.3M fj/s  yard 3.65->3.65G   |  B        102.7 ms   211.2M fj/s  yard 3.65->3.64G
+  rep 1  A        105.8 ms   214.7M fj/s  yard 3.64->3.48G   |  B        103.3 ms   210.0M fj/s  yard 3.63->3.65G
+  rep 2  A        106.1 ms   214.1M fj/s  yard 3.65->3.56G   |  B        102.9 ms   210.8M fj/s  yard 3.65->3.47G
+  rep 3  A        105.7 ms   214.9M fj/s  yard 3.63->3.48G   |  B        102.7 ms   211.2M fj/s  yard 3.63->3.65G
+  rep 4  A        105.2 ms   216.0M fj/s  yard 3.66->3.64G   |  B        104.6 ms   207.4M fj/s  yard 3.65->3.65G
+
+  A        median   105.7 ms/frame  [105.2 .. 106.1]    214.9M fj/s   22,712,821 ops/frame   cell=None flat
+  B        median   102.9 ms/frame  [102.7 .. 104.6]    210.8M fj/s   21,692,135 ops/frame   cell=None flat
+
+  pixels identical across arms and reps : YES
+  ops identical across arms             : no   (expected when the arms are different binaries; not when they are one engine A/B)
+  per-pair A/B ms ratio                 : 1.027 1.024 1.031 1.029 1.005
+  median ratio                          : 1.027  (>1 = B faster)
+  VERDICT: NOT SEPARATED   (rule: all 5 pairs agree in sign AND |median ratio - 1| > 3%)
+  engine A: 1bd844a1affacb2a full_span=None C:\Users\tomhe\Documents\fjpin-path\flipjump\interpreter\_fjcore.pyd
+  engine B: 1bd844a1affacb2a full_span=None C:\Users\tomhe\Documents\fjpin-path\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.64G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl

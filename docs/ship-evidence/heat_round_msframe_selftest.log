@@ -1,0 +1,17 @@
+selftest: 60 game frames per arm, 3 pairs, cpu 2
+--- negative control: A vs the same A ---
+  rep 0  A         85.8 ms   163.5M fj/s  yard 3.64->3.64G   |  A'        88.8 ms   158.0M fj/s  yard 3.60->3.46G
+  rep 1  A         86.5 ms   162.2M fj/s  yard 3.51->3.43G   |  A'        88.4 ms   158.8M fj/s  yard 3.43->3.55G
+  rep 2  A         85.7 ms   163.7M fj/s  yard 3.59->3.64G   |  A'        85.2 ms   164.6M fj/s  yard 3.64->3.63G
+  C1 the same program presents the same pixels         PASS  
+  C2 identical arms are NOT called separated           PASS  verdict NOT SEPARATED, median ratio 0.979
+      (machine noise this run: worst pair 3.3% -- the instrument cannot resolve effects smaller than this)
+--- positive control: A vs A + 20 ms/frame known delay ---
+  rep 0  A         85.7 ms   163.8M fj/s  yard 3.66->3.61G   |  A+20ms   107.9 ms   130.0M fj/s  yard 3.64->3.63G
+  rep 1  A         85.2 ms   164.6M fj/s  yard 3.65->3.63G   |  A+20ms   107.8 ms   130.1M fj/s  yard 3.65->3.63G
+  rep 2  A         85.3 ms   164.5M fj/s  yard 3.65->3.62G   |  A+20ms   107.8 ms   130.1M fj/s  yard 3.65->3.64G
+  C3 the delayed arm is called SLOWER                  PASS  B SLOWER
+  C4 the delta is measured within 30% of the injected 20 ms PASS  measured 22.6 ms/frame
+  C5 pixels still identical (the delay must not touch the program) PASS  
+
+SELFTEST PASS

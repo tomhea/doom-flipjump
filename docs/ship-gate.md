@@ -931,7 +931,7 @@ touch no `src/` and no build script). Evidence: `docs/ship-evidence/e1m4_v1_*.lo
 | THE PLAYTHROUGH (`--skill easy`, seed 7) | **PASS -- LEVEL COMPLETE at frame 4128** (world 4124), byte-, palette- and state-exact on all 4,138 frames |
 | **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 15,386,065** PASS (mean 13,226,833, p80 17,545,298 at world 1610) |
 | REBUILD (2026-10-31) | **BYTE-IDENTICAL** (`21b08396c53bd2080326711351b8c32bef27ff4298238544a740a657429dd851`; the census identical in content) |
-| `msframe` | **NOT RUN**: the owner's machine is under load (2026-10-31: "wait with future runs that rely on times"). No `shipped_e1m4` baseline yet; the playthrough logs' ms/frame figures ran on the loaded box and are not a speed result |
+| `msframe` | **NOT RUN** on 2026-10-31 (the owner's machine was under load); timed 2026-11-02 as the A arm of v2's run (section 13): **86.4 ms/frame** [85.5 .. 86.4], 236.2M fj/s, 20,405,185 ops/frame (`e1m4_v2_msframe.log`). `shipped_e1m4` was first frozen on v2 |
 
 The other pins re-played on the model with this branch's bot: E1M3 2279, E1M5 4253, E1M6 964, E1M7 1259, E1M8 1709,
 E1M9 4659 -- unchanged, all LEVEL COMPLETE. E1M1 (medium, seed 1) and E1M2 die on the model -- E1M1 at world 345 and
@@ -979,7 +979,7 @@ The build line, in the recorded paths (the creator's own, `build/e1m2_v2/...`, c
 | **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 15,843,864** PASS (mean 14,637,883, p80 17,049,846 at world 2650) |
 | the feature tests (section 5's nine files) | 111 passed |
 | REBUILD (2026-11-01) | **BYTE-IDENTICAL** (`93af128a9caef3cec91f840e66312d2cf074d50bf976351df543a54fdcc2be11`; the labels and the census identical in content) |
-| `msframe` | **NOT RUN**: the owner's machine is under load ("wait with future runs that rely on times"); `shipped_e1m2` stays r4's 70.2 ms until it runs |
+| `msframe` | not timed against r4; timed 2026-11-02 as the A arm of v3's run (section 13): **64.7 ms/frame** [63.8 .. 68.7], 193.3M fj/s, 12,509,938 ops/frame (`e1m2_v3_msframe.log`). r4's 70.2 ms baseline was frozen on another day's box, so the two are not an A/B |
 
 Play: `fj --run build/doom_e1m2_v2.fjm`.
 
@@ -1015,7 +1015,7 @@ flipjump 1.6.0 at b1365b5, spread 1, `heat_blocked27_p10` (as v1). Evidence `doc
 | THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 968** (world 964), byte-, palette- and state-exact on all 978 frames (as v1) |
 | **THE SPEED SET** | **binding 19,413,074** PASS (v1 20,234,657: **-4.06%**); mean 17,469,276 (v1 18,286,689: -817,413 ops/frame), p80 21,356,872 at world 259 (v1 22,182,625) |
 | REBUILD (2026-11-01, `build/e1m6_v2b`) | **BYTE-IDENTICAL** (`bb208c1985af855ff3feb6b41e01bfc340e5af724d21de902477c0c32057b0ae`; the labels and the census identical in content; `e1m6_v2_rebuild.log`, 1,072 s) |
-| `msframe` | **NOT RUN**: the owner's machine is under load; `shipped_e1m6` stays v1's 108.5 ms until it runs (class S: B SLOWER does not ship) |
+| `msframe` (2026-11-02, v1 against v2 in one run) | **102.9 ms/frame** [102.7 .. 104.6] against v1's **105.7** [105.2 .. 106.1] -- **NOT SEPARATED** (median ratio 1.027, pairs 1.027 1.024 1.031 1.029 1.005: all B faster, under the 3% floor); pixels identical across arms and reps; 210.8M fj/s, 21,692,135 ops/frame (v1 22,712,821) (`e1m6_v2_msframe.log`). Class S: not SLOWER, so it ships |
 
 B0's runs (crowds awake) gain more than the playthrough. The speed set's -817K ops/frame is about half of `mm_things`' 1.73M: the slots still cost two compares each, and
 the window setup is paid per call. The tours stay OVER (the owner: allowed for E1M6); what binds them is the
@@ -1051,7 +1051,7 @@ flipjump 1.6.0 at b1365b5, spread 1, `heat_e1m6`: 20 of 20 hot words pinned, **3
 | THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 968** (world 964), byte-, palette- and state-exact on all 978 frames (as v2) |
 | **THE SPEED SET** | **binding 17,749,651** PASS (v2 19,413,074: **-8.57%**; v1 20,234,657: -12.28%); mean 15,964,331, p80 19,534,971 at world 259 |
 | REBUILD (`build/e1m6_v3b`) | **BYTE-IDENTICAL** (`a59dad606f8ab9b29d2a6b3111d2de207febec50323fafa3aa8795d7e19b015b`; the labels and the census identical in content; `e1m6_v3_rebuild.log`, 1,077 s) |
-| `msframe` | **NOT RUN**: the owner's machine is under load; class S against `shipped_e1m6` when it runs (B SLOWER does not ship) |
+| `msframe` (2026-11-02, v2 against v3 in one run) | **99.9 ms/frame** [99.5 .. 102.1] against v2's **102.7** [102.3 .. 103.7] -- **NOT SEPARATED** (median ratio 1.030, pairs 1.030 1.029 1.002 1.032 1.038: all B faster, at the 3% floor); pixels identical; 197.5M fj/s, 19,735,024 ops/frame (`e1m6_v3_msframe.log`). `shipped_e1m6` re-frozen on v3: **101.0 ms/frame** [99.7 .. 102.3], 195.3M fj/s (`e1m6_v3_msframe_freeze.log`; v1's 108.5 retired) |
 
 The placement alone moves 8.6-9.0% of the executed ops on every measure, twice v2's cut; the tours stay OVER (the
 owner: allowed for E1M6).
@@ -1066,8 +1066,28 @@ binary (`play_profile.py`), `heatsites.py --map <M>` -> `scratchpad/12m/heat_<m>
 hot table mapped to a replayed site), and the creator's build with that list (`build_episode.level_heat`). The program
 is the shipped one's; only the placement moves. Every number below was measured on 2026-11-01..02 with flipjump 1.6.0
 at b1365b5 (`fjpin-path`); the base binary's B0 and speed set were re-run beside the new one's, the base's tours are
-its recorded ones. msframe is NOT RUN for any of them: the owner's machine is under load (class S against the level's
-`shipped_<m>` baseline when it runs; B SLOWER does not ship).
+its recorded ones. msframe ran on 2026-11-02, one level at a time through `heavy.py` on a quiet box (its `--selftest`
+first: A-vs-A NOT SEPARATED at 0.979, a 20 ms delay called SLOWER and measured 22.6 ms, `heat_round_msframe_selftest.log`).
+Each level's A/B is the base binary (the sites build, byte for byte the shipped one) against the new one in one run; class S,
+so a B SLOWER verdict does not ship. None was SLOWER: E1M3 and E1M4 B FASTER, the rest NOT SEPARATED (median ratios
+1.008 .. 1.030, all on the faster side). Each level's `shipped_<m>` baseline is re-frozen on the new binary
+(`scratchpad/12m/msframe_baselines/`, the ledger rows in `scratchpad/12m/msframe_ledger.jsonl`).
+
+| level | A (base) ms/frame | B (own heat) ms/frame | median ratio (pairs) | verdict | `shipped_<m>` re-frozen |
+|---|---|---|---|---|---|
+| E1M2 v3 | 64.7 [63.8 .. 68.7] | 63.9 [63.5 .. 64.7] | 1.017 (0.995 0.987 1.062 1.076 1.017) | NOT SEPARATED | 63.5 [63.0 .. 63.8] |
+| E1M3 v2 | 73.6 [72.4 .. 77.8] | 70.4 [70.1 .. 75.3] | 1.035 (1.030 1.044 1.035 1.033 1.045) | **B FASTER** | 70.3 [70.1 .. 70.5] |
+| E1M4 v2 | 86.4 [85.5 .. 86.4] | 83.4 [83.0 .. 84.3] | 1.034 (1.040 1.034 1.041 1.025 1.025) | **B FASTER** | 83.2 [82.8 .. 83.9] (the first `shipped_e1m4`) |
+| E1M5 v2 | 57.6 [57.2 .. 58.5] | 56.3 [56.1 .. 61.4] | 1.021 (1.017 1.028 1.026 1.021 0.937) | NOT SEPARATED | 61.2 [60.7 .. 61.9] |
+| E1M6 v3 (section 12) | 102.7 [102.3 .. 103.7] | 99.9 [99.5 .. 102.1] | 1.030 (1.030 1.029 1.002 1.032 1.038) | NOT SEPARATED | 101.0 [99.7 .. 102.3] |
+| E1M8 v2 | 32.6 [32.4 .. 33.3] | 32.4 [32.1 .. 32.5] | 1.008 (0.998 1.002 1.023 1.014 1.008) | NOT SEPARATED | 32.4 [32.1 .. 33.1] |
+| E1M9 v2 | 36.7 [36.7 .. 37.0] | 36.1 [36.0 .. 37.2] | 1.020 (1.023 1.014 1.020 0.989 1.025) | NOT SEPARATED | 36.6 [36.1 .. 37.0] |
+
+Every run: pixels identical across arms and reps, `busy processes: none`, cpu 2 pinned, yardstick median 3.59-3.64G,
+flipjump b1365b5 (engine `1bd844a1affacb2a`). The placement cuts 7-10% of msframe's ops and 0.6-4% of its time: fj/s falls
+4-7% in every B arm (consistent with the P13 lesson: the ops a cheaper address removes are the cheap, hot ones). E1M5's freeze (61.2) reads slower
+than its own B arm (56.3) on the same binary: a box state between the runs (yardstick 3.45-3.55G), not the binary;
+only an A/B inside one run is a number about the binary. The logs: `<m>_v<n>_msframe.log` and `_msframe_freeze.log`.
 
 ### E1M2 v3: v2 on its own heat list
 
@@ -1094,7 +1114,7 @@ Evidence `docs/ship-evidence/e1m2_v3_*.log` (`e1m2_v3_b0_v2base.log`: v2's B0 re
 | THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 3048** (world 3044), byte-, palette- and state-exact on all 3,058 frames (as v2) |
 | **THE SPEED SET** | **binding 14,710,806** PASS (v2 re-run 15,843,864: **-7.15%**); mean 13,569,765, p80 15,851,848 at world 2650 |
 | REBUILD (`build/e1m2_heatb`) | **BYTE-IDENTICAL** (`96b738ecc2039b3c80f4598b1643f9c38aac69b09ee3eea18b46726e1eebf3ec`; the labels and the census identical in content; `e1m2_v3_rebuild.log`, 384 + 1,040 s) |
-| `msframe` | **NOT RUN** (above) |
+| `msframe` | 63.9 ms/frame against v2's 64.7 in one run, **NOT SEPARATED** (1.017); `shipped_e1m2` re-frozen at 63.5 (above; `e1m2_v3_msframe.log`) |
 
 Play: `fj --run build/doom_e1m2_v3.fjm`.
 
@@ -1120,7 +1140,7 @@ broken. The build command: section 6's with `e1m8` / `E1M8`, `--spread 2`, the `
 | THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 1713** (world 1709), byte-, palette- and state-exact on all 1,723 frames (as v1) |
 | **THE SPEED SET** | **binding 9,256,781** PASS (v1 re-run 10,015,092: **-7.57%**); mean 8,816,856, p80 9,696,707 at world 1609 |
 | REBUILD (`build/e1m8_heatb`) | **BYTE-IDENTICAL** (`b8aa2750e95f0a07d8439cd08ebd1cd5d685a6beb4ea7710a1811b71cea1944e`; the labels and the census identical in content; `e1m8_v2_rebuild.log`, 325 + 542 s) |
-| `msframe` | **NOT RUN** (above; against `shipped_e1m8`, v1's 33.0 ms/frame) |
+| `msframe` | 32.4 ms/frame against v1's 32.6 in one run, **NOT SEPARATED** (1.008); `shipped_e1m8` re-frozen at 32.4 (above; `e1m8_v2_msframe.log`) |
 
 Play: `fj --run build/doom_e1m8_v2.fjm`.
 
@@ -1147,7 +1167,7 @@ broken. The build command: section 6's with `e1m9` / `E1M9`, `--spread 1`, the `
 | THE PLAYTHROUGH (`--skill easy`, seed 2) | **PASS -- LEVEL COMPLETE at frame 4663** (world 4659), byte-, palette- and state-exact on all 4,673 frames (as v1) |
 | **THE SPEED SET** | **binding 13,424,871** PASS (v1 re-run 14,577,947: **-7.91%**); mean 11,710,926, p80 15,138,816 at world 2280 |
 | REBUILD (`build/e1m9_heatb`) | **BYTE-IDENTICAL** (`1171afc3d845e1f426d624f4db26a01e472adbb1f60e5c9766778740c0eca01d`; the labels and the census identical in content; `e1m9_v2_rebuild.log`, 399 + 869 s) |
-| `msframe` | **NOT RUN** (above; against `shipped_e1m9`, v1's 37.7 ms/frame) |
+| `msframe` | 36.1 ms/frame against v1's 36.7 in one run, **NOT SEPARATED** (1.020); `shipped_e1m9` re-frozen at 36.6 (above; `e1m9_v2_msframe.log`) |
 
 Play: `fj --run build/doom_e1m9_v2.fjm`.
 
@@ -1174,7 +1194,7 @@ broken. The build command: section 6's with `e1m5` / `E1M5`, `--spread 2`, the `
 | THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 4257** (world 4253), byte-, palette- and state-exact on all 4,267 frames (as v1) |
 | **THE SPEED SET** | **binding 11,639,313** PASS (v1 12,698,851, re-run equal: **-8.34%**); mean 10,866,107, p80 12,412,518 at world 831 |
 | REBUILD (`build/e1m5_heatb`) | **BYTE-IDENTICAL** (`1bd109d61d0780b57647fb4bd76cf271733080778ea208e187c2f5db92d31b32`; the labels and the census identical in content; `e1m5_v2_rebuild.log`, 1,151 + 717 s) |
-| `msframe` | **NOT RUN** (above; against `shipped_e1m5`, v1's 58.2 ms/frame) |
+| `msframe` | 56.3 ms/frame against v1's 57.6 in one run, **NOT SEPARATED** (1.021); `shipped_e1m5` re-frozen at 61.2 (above; `e1m5_v2_msframe.log`) |
 
 Play: `fj --run build/doom_e1m5_v2.fjm`.
 
@@ -1201,7 +1221,7 @@ broken. The build command: section 6's with `--spread 1`, the `_v2` names and
 | THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 2283** (world 2279), byte-, palette- and state-exact on all 2,293 frames (as v1 on the current steering; section 6) |
 | **THE SPEED SET** | **binding 11,746,196** PASS (v1 12,781,307, re-run equal: **-8.10%**); mean 11,100,845, p80 12,391,547 at world 654 |
 | REBUILD (`build/e1m3_heatb`) | **BYTE-IDENTICAL** (`1feb6db9fb21acc0d89a18879437d06f100740ed51ba34a895edf64514cb5199`; the labels and the census identical in content; `e1m3_v2_rebuild.log`; its 5,004 + 17,628 s are wall time including the heavy lock's queue) |
-| `msframe` | **NOT RUN** (above; against `shipped_e1m3`, v1's 73.5 ms/frame) |
+| `msframe` | **70.4 ms/frame against v1's 73.6 in one run, B FASTER x1.035** (all five pairs); `shipped_e1m3` re-frozen at 70.3 (above; `e1m3_v2_msframe.log`) |
 
 Play: `fj --run build/doom_e1m3_v2.fjm`.
 
@@ -1227,7 +1247,7 @@ Evidence `docs/ship-evidence/e1m4_v2_*.log`.
 | THE PLAYTHROUGH (`--skill easy`, seed 7) | **PASS -- LEVEL COMPLETE at frame 4128** (world 4124), byte-, palette- and state-exact on all 4,138 frames (as v1) |
 | **THE SPEED SET** | **binding 13,898,994** PASS (v1 recorded 15,386,065, re-run equal: **-9.67%**); mean 11,972,355, p80 15,825,633 at world 1610 |
 | REBUILD (`build/e1m4_heatb`) | **BYTE-IDENTICAL** (`ed6075e2eeea0ca34812f69ce56fc691513a5f9f0a9c166a8dabbc346bd1751b`; the labels and the census identical in content; `e1m4_v2_rebuild.log`, 374 + 880 s) |
-| `msframe` | **NOT RUN** (above; E1M4 has no `shipped_e1m4` baseline yet: the A/B is against the sites build, v1 byte for byte) |
+| `msframe` | **83.4 ms/frame against v1's 86.4 in one run, B FASTER x1.034** (all five pairs); the first `shipped_e1m4` frozen at 83.2 (above; `e1m4_v2_msframe.log`) |
 
 Play: `fj --run build/doom_e1m4_v2.fjm`.
 

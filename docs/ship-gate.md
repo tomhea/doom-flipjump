@@ -1069,7 +1069,7 @@ at b1365b5 (`fjpin-path`); the base binary's B0 and speed set were re-run beside
 its recorded ones. msframe ran on 2026-11-02, one level at a time through `heavy.py` on a quiet box (its `--selftest`
 first: A-vs-A NOT SEPARATED at 0.979, a 20 ms delay called SLOWER and measured 22.6 ms, `heat_round_msframe_selftest.log`).
 Each level's A/B is the base binary (the sites build, byte for byte the shipped one) against the new one in one run; class S,
-so a B SLOWER verdict does not ship. None was SLOWER: E1M3 and E1M4 B FASTER, the rest NOT SEPARATED (median ratios
+so a B SLOWER verdict does not ship. None was SLOWER: E1M3, E1M4 and E1M7 B FASTER, the rest NOT SEPARATED (median ratios
 1.008 .. 1.030, all on the faster side). Each level's `shipped_<m>` baseline is re-frozen on the new binary
 (`scratchpad/12m/msframe_baselines/`, the ledger rows in `scratchpad/12m/msframe_ledger.jsonl`).
 
@@ -1082,6 +1082,7 @@ so a B SLOWER verdict does not ship. None was SLOWER: E1M3 and E1M4 B FASTER, th
 | E1M6 v3 (section 12) | 102.7 [102.3 .. 103.7] | 99.9 [99.5 .. 102.1] | 1.030 (1.030 1.029 1.002 1.032 1.038) | NOT SEPARATED | 101.0 [99.7 .. 102.3] |
 | E1M8 v2 | 32.6 [32.4 .. 33.3] | 32.4 [32.1 .. 32.5] | 1.008 (0.998 1.002 1.023 1.014 1.008) | NOT SEPARATED | 32.4 [32.1 .. 33.1] |
 | E1M9 v2 | 36.7 [36.7 .. 37.0] | 36.1 [36.0 .. 37.2] | 1.020 (1.023 1.014 1.020 0.989 1.025) | NOT SEPARATED | 36.6 [36.1 .. 37.0] |
+| E1M7 v2 (its own run, below) | 97.0 [93.9 .. 102.2] | 91.3 [91.3 .. 91.4] | 1.061 (1.083 1.028 1.038 1.061 1.119) | **B FASTER** | 90.9 [90.4 .. 93.5] |
 
 Every run: pixels identical across arms and reps, `busy processes: none`, cpu 2 pinned, yardstick median 3.59-3.64G,
 flipjump b1365b5 (engine `1bd844a1affacb2a`). The placement cuts 7-10% of msframe's ops and 0.6-4% of its time: fj/s falls
@@ -1251,9 +1252,40 @@ Evidence `docs/ship-evidence/e1m4_v2_*.log`.
 
 Play: `fj --run build/doom_e1m4_v2.fjm`.
 
-### E1M7: stays v1 (on p10)
+### E1M7 v2: v1 on its list's hottest group
 
-Its own list (39,602 hot sites from v1's playthrough; kept untracked as `heat_e1m7_nofit.json.gz`) does not fit:
-the heat build stops in the assembler -- `table-placement: the segment at 0x0 and its wflip area reach 0x88164840,
-inside the table pool at 0x80000000. Raise pool_base.` Raising the pool base shrinks the pool's span (0x7fffffe0 from
-0x80000000 is the whole upper half); that was not tried. E1M7 ships v1 (section 9).
+**The whole list does not fit.** E1M7's own list (20 hot groups, 39,602 hot sites from v1's playthrough, 1,260 game
+frames; kept untracked as `heat_e1m7_nofit.json.gz`) stops the heat build in the assembler -- `table-placement: the
+segment at 0x0 and its wflip area reach 0x88164840, inside the table pool at 0x80000000. Raise pool_base.` Raising the
+pool base shrinks the pool's span (0x7fffffe0 from 0x80000000 is the whole upper half), and the pool is 95% full
+already; that was not tried. Why the 20-group placement grows the code's wflip area by ~0x84 M bits is NOT explained:
+on E1M4, E1M6 and on E1M7's one-group list below the own list SHRANK segment 0 (v1's ends at bit 0x7fdbbe40, v2's at
+0x7f7896c0).
+
+**The heat list** `scratchpad/12m/heat_e1m7.json.gz` (sha256 `07a9a2910f4afd7e`): `heatsites.py --top 1`, the hottest
+group alone -- `hex.tables.res`, 17,562 hot sites, 259,505 table ops/frame of the 20 groups' 443,537 (58.5%); CONTROL
+PASS (0 ops unmapped; `e1m7_v2_heatsites.log`). The sites build is v1 byte for byte (`77466d1d306acb78`).
+
+**E1M7 v2** -- **`build/doom_e1m7_v2.fjm`**, sha256 `49b38d76c4fc7052`, built by the creator on v1's source, spread 1,
+`heat_e1m7`: 1 of 1 hot words pinned, **17,562 of 17,562 hot sites matched**, 1,109,014 tables in 98,560 groups
+(PREFLIGHT 95.2% of the pool), 0 broken. The build command: section 9's with the `_v2` names and `--pin-heat
+scratchpad/12m/heat_e1m7.json.gz`. Evidence `docs/ship-evidence/e1m7_v2_*.log`. No B0 (as v1, section 8: none is
+committed for E1M7, so the creator's `b0` step fails on the missing file).
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (411 s) / PASS (1,430 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 8 scenarios (6 N/A) / 116 frames / 75 frames, byte- and state-exact (as v1: the logs equal v1's but for numbers, times and paths) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 32 (11 N/A) / 16 (1 N/A) scenarios, state, pixels and palette exact (as v1, the same normalization) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; only the binary fields of `scenarios/e1m7/gamespeed.json` moved (committed here for the first time: v1's tours, checkpoints and timed walk were never tracked) |
+| `gamespeed` (the tours) | SPEED binding **19,461,121** PASS (v1 recorded 20,938,496: **-7.06%**); SIZE 104,098,214 words = **77.56%** (v1 77.71%; span 97.59%, v1 99.22%; the levels' waiver, as v1) |
+| THE PLAYTHROUGH (`--skill easy`, seed 3) | **PASS -- LEVEL COMPLETE at frame 1263** (world 1259), byte-, palette- and state-exact on all 1,273 frames (as v1) |
+| **THE SPEED SET** | **binding 13,965,960** PASS (v1 re-run 14,947,213: **-6.56%**); mean 12,764,268, p80 15,167,652 at world 348 |
+| REBUILD (`build/e1m7_heatb`) | **BYTE-IDENTICAL** (`49b38d76c4fc7052ae01627c265788b1c5c609f5e6305d265223c17a9735b8fd`; the labels and the census identical in content; `e1m7_v2_rebuild.log`, 417 + 1,406 s; its `sha256` step reads FAIL against v1's recorded hash, which this section replaces) |
+| `msframe` | **91.3 ms/frame against v1's 97.0 in one run, B FASTER x1.061** (all five pairs; pixels identical; `e1m7_v2_msframe.log`, its own `--selftest` first: A-vs-A 1.003, the 20 ms delay measured 23.4, `e1m7_v2_msframe_selftest.log`); `shipped_e1m7` re-frozen at 90.9 (`e1m7_v2_msframe_freeze.log`) |
+
+The A arm is the noisy one ([93.9 .. 102.2]; v1's own freeze was 94.4, section 9); B's five reps sit inside 0.1 ms.
+Both arms run at ~162M fj/s, the episode's lowest rate (the biggest map: 77.6% of 2^27). Over D8's ~90 ms tripwire
+for the same reason as E1M6 (section 8): ops on the biggest map, not the engine.
+
+Play: `fj --run build/doom_e1m7_v2.fjm`.

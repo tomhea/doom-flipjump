@@ -1,0 +1,8 @@
+fjm doom_e1m7.fjm (sha256 77466d1d306acb78...), 1260 game frames; CONTROL layout vs image: 83551/98560 source words at their base, 15009 unpinned (no base), 0 at a WRONG base
+sites sites_e1m7.json.gz (sha256 ac8c9ed8ac25a1b4...): 98560 groups, 1109014 tables, program {'tier': 'game', 'map': 'E1M7', 'wad': 'tests/fixtures/freedoom_e1m7.wad', 'src': 'e318b7b688332caa'}
+
+hot group                                                  table ops/fr   tables unmapped/fr
+(hex.tables.res + 32)                                           259,505   17,562          0
+
+wrote scratchpad/12m/heat_e1m7_top1.json.gz: 1 hot groups, 17562 hot sites (sha256 07a9a2910f4afd7e...)
+CONTROL every executed hot table mapped to a replayed site: PASS (0 ops unmapped)

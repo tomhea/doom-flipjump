@@ -45,8 +45,13 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                # P10 (docs/gp-p10-plan.md): a game in progress (the menu's RESUME), and LEVEL COMPLETE's counters
                "g_live", "st_kill", "st_item", "st_secn", "st_secm",
                "p_rct",                                                             # M8 L4: the reactiontime
+               "tp_w1",                                                             # M8 C5: the W1 teleports
                "ltst", "ltct", "rng_lt",                                            # M8: the light thinkers
-               "swpr", "swtm")                                                      # M8: the switch textures
+               "swpr", "swtm",                                                      # M8: the switch textures
+               "p_inv", "p_rad",                                                    # M8 C6: the timed powers
+               # M8 C8 (the lost souls' cells, OPTIONAL: a map with a soul only) -- the oracle's state has had them since
+               # C8 and this list had not, so E1M6's m3 read 'fj None' on every one at frame 0
+               "sk_fly", "sk_inf", "sk_z", "sk_momz", "sk_ceil")
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int | None = None,
@@ -128,7 +133,10 @@ def diff(got, want: dict) -> dict:
     """{cell: (the binary's value, the oracle's)} for every cell that disagrees; a missing reading
     (the binary presented fewer frames) disagrees in every cell"""
     got = got or {}
-    return {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
+    # M8 (E1M8: ONE door): the probe reads a count-1 cell as its value, the oracle builds a 1-tuple -- the same reading
+    def one(v):
+        return v[0] if isinstance(v, tuple) and len(v) == 1 else v
+    return {k: (got.get(k), v) for k, v in want.items() if one(got.get(k)) != one(v)}
 
 
 def palette_diff(palettes: list, f: int, wad, index: int) -> dict:

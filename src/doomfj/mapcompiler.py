@@ -169,8 +169,13 @@ def seg_sector(lds, sds, secs, seg):
     """The sector a seg fronts: seg -> linedef -> (front|back) sidedef -> sector. `lds/sds/secs` are
     the level's parsed LINEDEFS/SIDEDEFS/SECTORS. `ReferenceModel._seg_sector` delegates here so the
     oracle, the emitter and `thing_live_subsectors` cannot drift on the rule."""
+    return secs[seg_sector_index(lds, sds, seg)]
+
+
+def seg_sector_index(lds, sds, seg) -> int:
+    """`seg_sector`'s sector INDEX (M8: the player's sector picks the weapon's light row in both mirrors)"""
     ld = lds[seg.linedef]
-    return secs[sds[ld.front if seg.side == 0 else ld.back].sector]
+    return sds[ld.front if seg.side == 0 else ld.back].sector
 
 
 def thing_live_subsectors(cmap: "CompiledMap", lds, sds, secs) -> frozenset:

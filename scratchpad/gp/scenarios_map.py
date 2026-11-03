@@ -51,15 +51,39 @@ if __name__ == "__main__":
     from doomfj.mapprofile import take_map_arg
     take_map_arg()
 
+from doomfj.mapprofile import check_checkout                                    # noqa: E402
+check_checkout(__file__)            # M8: this checkout's doomfj (the installed one is the main repo's)
 E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 ENGAGE = 640               # a checkpoint's group: the monsters within this many units
 SPREAD = 768               # checkpoints at least this far apart
 STANDOFF = 256             # the start spot's wanted distance from the nearest monster
+SPARSE_STANDOFF = 160      # ... on a sparse map (E1M8's Barons: a run must close in to see a claw)
 N_RUNS = 11                # v10's shape: 11 runs x 100 frames
 DOORS_WANTED = 3           # scenarios_v2's MIN_DOORS: usable doors a checkpoint should start near
-KEY_SPECIALS = (26, 27, 28, 32, 33, 34)
+AFTER_FACE_MIN = 32        # the aftermath faces a corpse at least this far from its start (else the farthest)
+from gate_roles import KEY_LINE_COLOURS                                     # noqa: E402
+KEY_SPECIALS = tuple(sorted(KEY_LINE_COLOURS))   # M8: DOOM's every key door (99, 133 .. 137 too: no E1M1 / E1M2 line)
 INSTALLED = {"map": "E1M1"}
 _ORIGINALS = {}
+
+# M8 (the owner, 2026-10-29): THE CRITERIA SCALED PER MAP to what the map holds -- E1M1's (scenarios_v2.criteria) where
+# the map can meet them, else the map's own: kills >= min(8, 8/46 of the map's monsters at the set's skill, rounded
+# down: E1M1's 8 are 8/46 of its 46 at hard), the attack kinds its monsters HAVE, doors >= min(3, its usable plain
+# doors), pickups >= min(6, its pickups), and the aftermath / infighting / dodge rows only where the map can produce
+# them (three droppers / imps; two species, a hitscanner or a barrel; a fireball thrower). `map_criteria` computes it,
+# `install` records it (CRITERIA_SCALE) and the plan stores it in the set ("criteria_scaled"). On E1M2..E1M5 / E1M9
+# every value is E1M1's (tests/host/test_e1m8_boss.py): their sets validate as they did
+E1M1_MONSTERS = 46             # E1M1's monsters at hard (the sets' skill): MIN_KILLS 8 is 8/46 of them
+ATTACK_KINDS = {"hitscan": ("MT_POSSESSED", "MT_SHOTGUY"),
+                "melee": ("MT_TROOP", "MT_SERGEANT", "MT_SHADOWS", "MT_BRUISER"),
+                "fireball": ("MT_TROOP", "MT_BRUISER")}
+TRIO_KINDS = ("MT_POSSESSED", "MT_SHOTGUY", "MT_TROOP")      # suggest's aftermath trio
+CRITERIA_SCALE = {}            # the installed map's (map_criteria); {} on E1M1 and on a map that meets E1M1's
+# M8 (the owner, 2026-10-29): the maps whose checkpoints start with their WALK-OVER floors already lowered -- every W1
+# floor group but the boss's (A_BossDeath's) at its destination, injected into every checkpoint's setup: a run
+# injected at a pose never crosses the W1 lines that free the monsters (E1M8's are fought from the rooms round them)
+SETUP_FLOORS = {"E1M8": "the Barons wait in pits whose rings the tag-1 W1 lines lower (special 19; tag 3 the weapons'): "
+                        "every run starts with them lowered; the tag-666 floor (A_BossDeath's) stays up"}
 
 
 # ================================================================================================
@@ -82,7 +106,8 @@ def install(mapname: str, checkpoints=None) -> None:
         return
     wad = profile(m).wad
     INSTALLED["map"] = m
-    for mod, names in ((S, ("MODEL_FILES", "CENSUS_FILES", "new_world", "regions", "CHECKPOINTS", "plan_set")),
+    for mod, names in ((S, ("MODEL_FILES", "CENSUS_FILES", "new_world", "regions", "CHECKPOINTS", "plan_set",
+                            "REGION_NAMES")),
                        (CL, ("WadFile", "W", "SimState", "build_scene"))):
         for n in names:
             _ORIGINALS[(mod.__name__, n)] = getattr(mod, n)
@@ -94,8 +119,10 @@ def install(mapname: str, checkpoints=None) -> None:
         return S.apply_sight_rule(W.World(mw, m, skill=S.SKILL, player=S.PLAYER_MODE, monsters=S.MONSTER_MODE))
     S.new_world = new_world
     S.regions = regions_map
-    if checkpoints is not None:
-        S.CHECKPOINTS = tuple(checkpoints)
+    # M8 (the gate-tool audit): the map's checkpoints, or NONE -- never E1M1's (a set whose map has no checkpoints file
+    # kept E1M1's 11 hand-placed ones in this process); and R3 is every colour's key doors here (regions_map)
+    S.CHECKPOINTS = tuple(checkpoints) if checkpoints is not None else ()
+    S.REGION_NAMES = tuple("R3 behind the key doors" if n.startswith("R3 ") else n for n in S.REGION_NAMES)
     plan_set0 = S.plan_set
 
     def plan_set(quiet=False):
@@ -135,6 +162,120 @@ def install(mapname: str, checkpoints=None) -> None:
     CL.WadFile, CL.W = _Wad, _W()
     CL.SimState = lambda x, y, a, name, *r, **kw: RMOD.SimState(x, y, a, m if name == "E1M1" else name, *r, **kw)
     CL.build_scene = lambda a, b, name, *r, **kw: RMOD.build_scene(a, b, m if name == "E1M1" else name, *r, **kw)
+    _install_floors(S, m)
+    _install_criteria(S, m)
+
+
+def setup_floor_groups(w) -> list:
+    """the floor groups a SETUP_FLOORS map's checkpoint starts with lowered: every walk-over group but the boss's"""
+    boss = getattr(w, "boss_group", None)
+    return [g for g, grp in enumerate(w.floor_groups) if not grp.use and g != boss]
+
+
+def lower_floors(w, groups) -> None:
+    """floor groups `groups` at their destination, at rest (state n - 1, no step pending), the scene rebuilt"""
+    for g in groups:
+        w._set_floor(g, w.floor_groups[g].n - 1, 0)
+    if groups:
+        w._door_phase_scene()
+
+
+def _install_floors(S, m) -> None:
+    """SETUP_FLOORS: make_setup adds `floors` (the groups) for a checkpoint past them; apply_setup lowers them before
+    the pose is set (start_world and make_setup's own world go through it); the nav graph's plan scene sees the
+    movers' heights of the moment (its cache key moves with the rule)"""
+    if m not in SETUP_FLOORS:
+        return
+    for n in ("make_setup", "apply_setup", "NAV_RULE"):
+        _ORIGINALS[(S.__name__, n)] = getattr(S, n)
+    groups = setup_floor_groups(S.new_world())
+    make0, apply0 = S.make_setup, S.apply_setup
+
+    def make_setup(cp):
+        st = make0(cp)
+        if groups:                    # every checkpoint: its monsters wait behind the floors wherever it stands
+            st["floors"] = list(groups)
+        return st
+
+    def apply_setup(w, setup):
+        lower_floors(w, setup.get("floors", ()))
+        apply0(w, {k: v for k, v in setup.items() if k != "floors"})
+    S.make_setup, S.apply_setup = make_setup, apply_setup
+    S.NAV_RULE = S.NAV_RULE + "; %s: the setup's W1 floors lowered (the movers' heights in the plan scene)" % m
+    plan_scene0 = S.NavGraph.plan_scene
+
+    def plan_scene(w):
+        sc = plan_scene0(w)
+        h = dict(w.open_h)
+        h.update(w.mover_heights_now())
+        return S.Scene(w.mw, w.mw, w.mapname, w.cmap, h, sc.blocked_lines) if h != dict(w.open_h) else sc
+    S.NavGraph.plan_scene = staticmethod(plan_scene)
+
+
+def map_criteria(w, reg) -> dict:
+    """the installed map's criteria scaled to what it holds (the module note above): {} when every value is
+    E1M1's, else {"kills", "kinds", "doors", "pickups", "aftermath", "infight", "dodge", "why"}"""
+    import scenarios_v2 as S
+    from doomfj import gamedata as gd
+    ws = w.ws
+    types = [w.mon_info[k].name for k in range(w.layout.nmon) if ws.mon_active[k]]
+    bit = gd.skill_bit(S.SKILL)
+    kills = min(S.MIN_KILLS, len(types) * S.MIN_KILLS // E1M1_MONSTERS)
+    kinds = [k for k, ts in ATTACK_KINDS.items() if any(t in ts for t in types)]
+    doors = [si for si in w.door_order if si not in w.door_cards and si in w.door_boxes]    # suggest's plain doors
+    picks = [t for t in w.pickup_things if t.flags & bit]
+    barrels = [t for t in w.barrel_things if t.flags & bit]
+    out = {"kills": kills, "kinds": kinds, "doors": min(S.MIN_DOORS, len(doors)),
+           "pickups": min(S.MIN_PICKUPS, len(picks)),
+           "aftermath": sum(1 for t in types if t in TRIO_KINDS) >= 3,
+           "infight": len(set(types)) >= 2 or any(t in ATTACK_KINDS["hitscan"] for t in types) or bool(barrels),
+           "dodge": any(t in ATTACK_KINDS["fireball"] for t in types)}
+    if out == {"kills": S.MIN_KILLS, "kinds": list(ATTACK_KINDS), "doors": S.MIN_DOORS, "pickups": S.MIN_PICKUPS,
+               "aftermath": True, "infight": True, "dodge": True}:
+        return {}
+    out["why"] = ("%s at the set's skill: %d monsters (%s), %d usable plain doors, %d pickups, %d barrels"
+                  % (INSTALLED["map"], len(types), dict(collections.Counter(types)), len(doors), len(picks),
+                     len(barrels)))
+    return out
+
+
+def scaled_criteria(S, sc: dict, crit0, ms):
+    """scenarios_v2.criteria (`crit0`) at the scaled floors `sc`, its rows renamed where they scale"""
+    saved = S.MIN_KILLS, S.MIN_DOORS, S.MIN_PICKUPS
+    S.MIN_KILLS, S.MIN_DOORS, S.MIN_PICKUPS = sc["kills"], sc["doors"], sc["pickups"]
+    try:
+        rows = crit0(ms)
+    finally:
+        S.MIN_KILLS, S.MIN_DOORS, S.MIN_PICKUPS = saved
+    na = "N/A on %s" % INSTALLED["map"]
+    out = []
+    for name, ok, det in rows:
+        if name == "all three monster attack kinds":
+            got = {"hitscan": sum(r["totals"]["mon_shots"] for r in ms),
+                   "melee": sum(r["totals"]["mon_melee"] for r in ms),
+                   "fireball": sum(r["totals"]["proj_spawns"] for r in ms)}
+            name = "the map's monster attack kinds (%s)" % ", ".join(sc["kinds"])
+            ok = all(got[k] > 0 for k in sc["kinds"])
+        elif name.startswith("an aftermath run") and not sc["aftermath"]:
+            name, ok = "%s -- %s: fewer than three droppers / imps" % (name, na), True
+        elif name.startswith(">= %d infighting" % S.MIN_INFIGHT) and not sc["infight"]:
+            name, ok = "%s -- %s: one species, no hitscanner, no barrel" % (name, na), True
+        elif name.startswith(">= %d fireball dodge" % S.MIN_DODGES) and not sc["dodge"]:
+            name, ok = "%s -- %s: no fireball thrower" % (name, na), True
+        out.append((name, ok, det))
+    return out
+
+
+def _install_criteria(S, m) -> None:
+    """scenarios_v2.criteria, scaled (map_criteria) -- patched only where the map cannot meet E1M1's"""
+    sc = map_criteria(S.new_world(), regions_map(S.new_world()))
+    CRITERIA_SCALE.clear()
+    CRITERIA_SCALE.update(sc)
+    if not sc:
+        return
+    _ORIGINALS[(S.__name__, "criteria")] = S.criteria
+    crit0 = S.criteria
+    S.criteria = lambda ms: scaled_criteria(S, sc, crit0, ms)
 
 
 def use_doc(doc: dict) -> None:
@@ -180,6 +321,15 @@ def regions_map(w) -> dict:
     LIFTS = tuple(sorted(lift_states(secs, lds, sds)))
     W1DOORS = tuple(sorted(si for si, k in kinds.items() if k == "walkover"))
     LOWER = tuple(sorted(switch_sectors(secs, lds, sds)))
+    # M8 (E1M8: its Barons wait on floors its W1 lines lower -- special 19, tags 1 and 3): a WALK-OVER floor machine's
+    # sectors at their destination from the walk-over stage on, as the W1 doors are open there
+    from doomfj.movers import floor_groups
+    # ... but not a boss map's A_BossDeath floor (E1M8's tag 666: its own W1 line 894 lies behind it -- it moves when the
+    # Barons die, never by a walk-over first), so the exit pad beyond it is no checkpoint's region
+    from doomfj import gamedata as _gd
+    boss = _gd.BOSS_MAPS.get(str(getattr(w, "mapname", "E1M1")).upper())
+    W1FLOORS = {si: hs[-1] for g in floor_groups(secs, lds, sds) if not g.use
+                and not (boss is not None and g.tag == boss[1]) for si, hs in g.heights}
 
     def side_sec(sd):
         return sds[sd].sector if sd != 0xFFFF and 0 <= sd < len(sds) else None
@@ -203,6 +353,8 @@ def regions_map(w) -> dict:
         if "w1" in stage:
             for s in W1DOORS:
                 cl[s] = min(secs[n].ceil_h for n in nb[s]) - 4
+            for s, h in W1FLOORS.items():
+                fl[s] = h
         if "lower" in stage:
             for s in LOWER:
                 fl[s] = min(secs[n].floor_h for n in nb[s])
@@ -282,7 +434,9 @@ def suggest(n_runs: int = N_RUNS) -> dict:
         mons.append((k, x, y, sec, w.mon_info[k].name))
     by_region = collections.Counter(reg.get(s) for _k, _x, _y, s, _n in mons)
     pk = [t for t in w.pickup_things if t.flags & __import__("doomfj.gamedata", fromlist=["x"]).skill_bit(S.SKILL)]
-    # every reached sector with a monster group, scored
+    # every reached sector with a monster group, scored -- on a sparse map (no reached region with >= 5 monsters: E1M8's
+    # four Barons, far apart) a single monster makes a group, as `regions_with` below falls back to one monster
+    sparse = not any(n >= 5 for r, n in by_region.items() if r is not None)
     cand = []
     for sec, r in sorted(reg.items()):
         pts = _sector_points(w, sec)
@@ -291,21 +445,39 @@ def suggest(n_runs: int = N_RUNS) -> dict:
         cx = sum(p[0] for p in pts) / len(pts)
         cy = sum(p[1] for p in pts) / len(pts)
         group = [m for m in mons if math.hypot(m[1] - cx, m[2] - cy) <= ENGAGE and reg.get(m[3]) is not None]
-        if len(group) < 2:
+        if sparse and not group:
+            # M8 (E1M8): a sparse map's monsters stand in PITS (the Barons' rings: a pit is the Baron's own cell) and
+            # are fought from the rooms round them -- a sector whose nearest standable point is within ENGAGE of one
+            group = [m for m in mons if reg.get(m[3]) is not None
+                     and min(math.hypot(m[1] - p[0], m[2] - p[1]) for p in pts) <= ENGAGE]
+        if len(group) < (1 if sparse else 2):
             continue
         gx = sum(m[1] for m in group) / len(group)
         gy = sum(m[2] for m in group) / len(group)
 
         def near(p):
             return min(math.hypot(m[1] - p[0], m[2] - p[1]) for m in mons)
-        spot = max(pts, key=lambda p: (min(near(p), STANDOFF), -math.hypot(p[0] - gx, p[1] - gy), p))
+        off = SPARSE_STANDOFF if sparse else STANDOFF
+        spot = max(pts, key=lambda p: (min(near(p), off), -math.hypot(p[0] - gx, p[1] - gy), p))
+        face = (int(round(gx)), int(round(gy)))
+        if sparse:                  # M8 (E1M8): one monster at a time -- face the group's nearest (he wakes seen)
+            m0 = min(group, key=lambda m: (math.hypot(m[1] - spot[0], m[2] - spot[1]), m[0]))
+            face = (m0[1], m0[2])
         items = sum(1 for t in pk if math.hypot(t.x - spot[0], t.y - spot[1]) <= 512)
         kinds = collections.Counter(m[4] for m in group)
         cand.append({"score": len(group), "sector": sec, "region": r, "want": spot,
-                     "face": (int(round(gx)), int(round(gy))), "items": items, "kinds": dict(kinds),
+                     "face": face, "items": items, "kinds": dict(kinds),
                      "nearest": int(near(spot))})
     cand.sort(key=lambda c: (-c["score"], c["sector"]))
     regions_with = sorted(r for r, n in by_region.items() if r is not None and n >= 5)
+    if not regions_with:            # M8 (gen_dryrun on E1M8): a sparse map -- every reached region with a monster
+        regions_with = sorted(r for r, n in by_region.items() if r is not None and n >= 1)
+    if sparse and cand:             # ... and the runs go where its fights are fought from: the candidates' regions,
+        by_region = collections.Counter(c["region"] for c in cand)       # by their candidate sectors (E1M8)
+        regions_with = sorted(by_region)
+    if not regions_with:
+        raise SystemExit("suggest: no monster of %s lies in a region the flood from the start reaches (%s)"
+                         % (INSTALLED["map"], dict(by_region)))
     total = sum(by_region[r] for r in regions_with) or 1
     quota = {r: max(1, round((n_runs - 1) * by_region[r] / total)) for r in regions_with}
     while sum(quota.values()) > n_runs - 1:
@@ -353,7 +525,7 @@ def suggest(n_runs: int = N_RUNS) -> dict:
                 sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)]
                 if sec != si and reg.get(sec) in quota and _standable(w, x, y):
                     spots.append((x, y, sec))
-        if not spots:
+        if not spots or not chosen:
             continue
         x, y, sec = spots[0]
         busiest = max(quota, key=lambda r: (sum(1 for o in chosen if o["region"] == r), r))
@@ -389,23 +561,43 @@ def suggest(n_runs: int = N_RUNS) -> dict:
         sec = w.leaf_sector[w.rm.point_in_subsector(w.cmap, int(cx), int(cy))]
         key = (spread, a[0])
         if reg.get(sec) is not None and (best is None or key < best[0]):
-            best = (key, near3, (int(round(cx)), int(round(cy))), sec)
+            look = _aftermath_look(w, near3, round(cx), round(cy))
+            if look is not None:             # M8: a trio whose start sees none of its corpses is no aftermath
+                best = (key, near3, (int(round(cx)), int(round(cy))), sec, look)
     if best is not None:
-        _key, trio, (cx, cy), sec = best
+        _key, trio, (cx, cy), sec, look = best
         out.insert(1, {"name": "R%d-aftermath" % reg[sec], "sector": sec, "want": (cx, cy),
-                       "face": (trio[0][1], trio[0][2]), "region": reg[sec], "style": "collect",
+                       "face": (look[1], look[2]), "region": reg[sec], "style": "collect",
                        "corpses": tuple(m[0] for m in trio),
                        "why": "AFTERMATH: %s (slots %s) injected as corpses at their spawns, the player among "
                               "them -- the post-kill drawing (corpses, drops)"
                               % (", ".join(m[4] for m in trio), [m[0] for m in trio])})
-    else:
-        out.append(_cp(reserve.pop(0), "R%d-extra" % reserve[0]["region"], "fight"))
+    elif reserve:                    # M8: the popped checkpoint's own region (it named the NEXT one's, and an
+        c = reserve.pop(0)           # IndexError with one in reserve)
+        out.append(_cp(c, "R%d-extra" % c["region"], "fight"))
     return {"map": INSTALLED["map"], "checkpoints": out,
             "reserve": [_cp(c, "R%d-s%d" % (c["region"], c["sector"]), "fight") for c in reserve[:30]],
             "regions": {"sectors_per_region": dict(collections.Counter(reg.values())),
                         "monsters_per_region": {str(k): v for k, v in by_region.items()},
                         "quota": quota, "rule": "regions_map: v1's stages with the map's lifts, W1 doors, floor "
                                                 "switch and key doors (every colour)"}}
+
+
+def _aftermath_look(w, trio, cx, cy):
+    """the corpse the aftermath faces from its start (cx, cy), or None: the trio's first, else the others farthest first
+    -- one at least AFTER_FACE_MIN away (E1M3's first lay 21 units off, inside the near clip) and in sight of the start
+    (E1M9's farthest, 114 units off, stood behind a wall): either way frame 0 drew no corpse and the planned set FAILED
+    "one drawn on its first frame". E1M2's first, 48 units off and in sight, is still the one faced"""
+    order = [trio[0]] + sorted(trio[1:], key=lambda m: (-math.hypot(m[1] - cx, m[2] - cy), m[0]))
+
+    def floor(x, y):
+        return w.secs[w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)]].floor_h
+    f0 = floor(cx, cy)
+    for m in order:              # ... and on a floor within a step of the start's (E1M9's lay 64 below, past a ledge)
+        if (math.hypot(m[1] - cx, m[2] - cy) >= AFTER_FACE_MIN and abs(floor(m[1], m[2]) - f0) <= 24
+                and w.los_points((cx << 16, cy << 16), (m[1] << 16, m[2] << 16))):
+            return m
+    return None
 
 
 def _cp(c, name, style):
@@ -419,6 +611,37 @@ def _cp(c, name, style):
 # ================================================================================================
 # the plan: scenarios_v2's plan_set, a refused checkpoint replaced from the reserve
 # ================================================================================================
+def _plan_run_without(S, cp: dict, setup: dict, nav, refused: list):
+    """scenarios_v2.plan_run (the hashed checker, untouched) with the parameter sets named in `refused` left out:
+    its own loop over `cp["params"] + PARAMS`, PARAMS swapped in its namespace for the call (as `install` does)"""
+    if not refused:
+        return S.plan_run(cp, setup, nav)
+    orig = S.PARAMS
+    S.PARAMS = tuple(p for p in orig if p["name"] not in refused)
+    try:
+        return S.plan_run(dict(cp, params=tuple(p for p in cp.get("params", ()) if p["name"] not in refused)),
+                          setup, nav)
+    finally:
+        S.PARAMS = orig
+
+
+_B0_ORACLE = {}
+
+
+def mirror_deaths(run: dict) -> list:
+    """the frames on which b0's MIRROR of planned run `run` has a dead player (b0_scenarios --oracle-only's check:
+    `drive` with no binary steps the expectation from the injected poses, health and knock; a death FAILS b0)"""
+    import b0_scenarios as B0
+    m = INSTALLED["map"]
+    if m not in _B0_ORACLE:
+        _B0_ORACLE.clear()
+        _B0_ORACLE[m] = B0.game_oracle({"map": m})
+    # M8 (E1M9's b0 --proxy: R0-s21's PROXY run -- each strafe-only frame given a forward step -- died at frames 98, 99
+    # while the normal run lived; b0 judges the proxy run like the normal one, a death included): both mirrors
+    dead = B0.drive(None, None, _B0_ORACLE[m], B0.model_frames(run))["dead"]
+    return dead or B0.drive(None, None, _B0_ORACLE[m], B0.model_frames(run, proxy=True))["dead"]
+
+
 def plan(sugg: dict, quiet: bool = False) -> dict:
     import scenarios_v2 as S
     w0 = S.new_world()
@@ -436,20 +659,40 @@ def plan(sugg: dict, quiet: bool = False) -> dict:
                 pose = setup["pose"]
                 sec = w0.leaf_sector[w0.rm.point_in_subsector(w0.cmap, pose[0] >> 16, pose[1] >> 16)]
                 assert sec == c["sector"] and reg.get(sec) == c["region"], (c["name"], sec, reg.get(sec))
-                nav = S.NavGraph.build(w0, (pose[0] >> 16, pose[1] >> 16), tag=c["name"])
-                keys, pname, tried = S.plan_run(c, setup, nav)
+                # (SETUP_FLOORS: the nav graph on the world the run starts in -- its W1 floors lowered)
+                nav = S.NavGraph.build(S.start_world(setup) if setup.get("floors") else w0,
+                                       (pose[0] >> 16, pose[1] >> 16), tag=c["name"])
+                # M8 wave 1 (b0 on doom_e1m3_b4: R3-s151 state- and pixel-exact on all 100 frames, but its B0 MIRROR's
+                # player died at frames 97..99 -- "every run survives" holds on the model, whose run the planner
+                # checks, and not on the mirror b0 steps from the injected poses, health and knock): a parameter set
+                # whose run the mirror sees die is refused like a death (`mirror_deaths`), the next set planned, and
+                # with none left the region's next suggestion. E1M2's set: no mirror died there (b0 PASS), so its
+                # plan is the one it was
+                refused = []
+                while True:
+                    keys, pname, tried = _plan_run_without(S, c, setup, nav, refused)
+                    # M8 (gen_dryrun on E1M4: R3-s219's checkpoint faced a group centred on itself, and the autopilot
+                    # turned for all 100 frames -- the set FAILED "every run moves"): a run with no movement key is
+                    # refused like a placement, and the region's next suggestion planned (E1M2's runs all move)
+                    assert any(kd.get(k) for kd in keys for k in S.MOVE_KEYS), "the plan presses no movement key"
+                    run = {"name": c["name"], "region": S.REGION_NAMES[c["region"]], "sector": sec,
+                           "why": c["why"], "style": c.get("style", "fight"), "params": pname, "setup": setup,
+                           "checkpoint": {"x16": pose[0], "y16": pose[1], "angle": pose[2], "x": pose[0] >> 16,
+                                          "y": pose[1] >> 16, "skill": S.SKILL, "face": list(c["face"])},
+                           "keys": [S.keys_to_str(k) for k in keys]}
+                    rep = S.replay(run)
+                    run.update({"poses": rep["poses"], "model_final_digest": rep["digest"], "totals": rep["totals"]})
+                    dead = mirror_deaths(run)
+                    if not dead:
+                        break
+                    print("  %-22s params %-10s REFUSED: b0's mirror dies at frames %s -- the next parameter set"
+                          % (c["name"], pname, dead[:3]), flush=True)
+                    refused.append(pname)
             except AssertionError as e:
                 print("  %-22s REFUSED (%s) -- the region's next suggestion" % (c["name"], str(e)[:120]), flush=True)
                 used.append(c["name"])
                 continue
             used.append(c["name"])
-            run = {"name": c["name"], "region": S.REGION_NAMES[c["region"]], "sector": sec,
-                   "why": c["why"], "style": c.get("style", "fight"), "params": pname, "setup": setup,
-                   "checkpoint": {"x16": pose[0], "y16": pose[1], "angle": pose[2], "x": pose[0] >> 16,
-                                  "y": pose[1] >> 16, "skill": S.SKILL, "face": list(c["face"])},
-                   "keys": [S.keys_to_str(k) for k in keys]}
-            rep = S.replay(run)
-            run.update({"poses": rep["poses"], "model_final_digest": rep["digest"], "totals": rep["totals"]})
             if not quiet:
                 print("  %-22s sector %3d params %-10s tried %-40s %5.1f s  kills %d picks %d doors %s hp %d "
                       "move %d%% strafe %d%%" % (c["name"], sec, pname, [t for t in tried], time.time() - t0,
@@ -469,6 +712,8 @@ def plan(sugg: dict, quiet: bool = False) -> dict:
             "keys_legend": {c: n for n, c in S.LETTERS},
             "checkpoints_from": "scratchpad/gp/scenarios_map.py --suggest-checkpoints (scenarios/%s/checkpoints.json)"
                                 % INSTALLED["map"].lower(),
+            **({"criteria_scaled": dict(CRITERIA_SCALE)} if CRITERIA_SCALE else {}),
+            **({"setup_floors": SETUP_FLOORS[INSTALLED["map"]]} if INSTALLED["map"] in SETUP_FLOORS else {}),
             "runs": runs}
 
 
@@ -520,6 +765,8 @@ def main(argv=None) -> int:
     ap.add_argument("--file")
     ap.add_argument("--runs", type=int, default=N_RUNS)
     ap.add_argument("--only", help="--plan: only the checkpoints whose name starts with this (a trial)")
+    ap.add_argument("--checkpoints", help="the checkpoints file --suggest-checkpoints writes and --plan reads (default "
+                                          "scenarios/<map>/checkpoints.json; gen_dryrun.py: a DRAFT path)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -543,7 +790,7 @@ def main(argv=None) -> int:
     S.use_sight_rule({"sight_rule": "seen", "monster_tics": W.MONSTER_TICS_PER_FRAME, "player_mode": PM,
                       "monster_mode": MM})
     install(m)
-    cpath = checkpoints_path(m)
+    cpath = Path(a.checkpoints) if a.checkpoints else checkpoints_path(m)
     if a.suggest_checkpoints:
         t0 = time.time()
         sug = suggest(a.runs)

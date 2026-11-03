@@ -50,7 +50,7 @@ MUTATIONS -- each must turn its test file RED
    lut_generator: the emit handler stride loses the jump op CAUGHT
    nodebuilder: a split fragment's offset restarts at zero CAUGHT
    reference_model: the step-up rule compares map units to 16.16 CAUGHT
-   fixed_point: the narrowed pointer clear is one nibble short CAUGHT
+   stl-fixedpoint: the narrowed pointer clear is one nibble short CAUGHT
 
 R9 -- the control mutation, which must NOT be caught
    control: a comment-only edit must NOT be caught REJECTED (still green)
@@ -76,7 +76,7 @@ C3 -- source restored
    src/doomfj/things.py                           identical
    src/doomfj/wall_renderer.py                    identical
    src/doomfj/wireformat.py                       identical
-   src/fj/fixed_point.fj                          identical
+   stl-fixedpoint                          identical
 
 MUTCHECK PASS
 exit=0

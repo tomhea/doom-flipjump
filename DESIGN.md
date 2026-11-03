@@ -188,10 +188,12 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **blocked30 = blocked29 with persistent leaf lists** (`doom_e1m1_blocked30.fjm`, shipped 2026-09-27) | **90,399,040** (data 36,208,972) | 1.347× OVER | **0.674×** (data 0.270×) | **flat** (asserted) |
 | **blocked31 = blocked30 with the v2 sprite column** (`doom_e1m1_blocked31.fjm`, shipped 2026-09-27; +2,048 words of `gpslot` -- 256 slots x 4 bytes, one op each -- and `sprbank`'s `pad 64`, 0..63 ops) | **90,569,312** (data 36,657,086) | 1.350× OVER | **0.675×** (data 0.273×) | **flat** (asserted) |
 | **blocked32 = blocked31 with the skill filter and the skill menu** (`doom_e1m1_blocked32.fjm`, shipped 2026-09-28; 26 multiplayer-only things and 5 sprite kinds out of the image) | **90,671,968** (data 36,410,172) | 1.351× OVER | **0.676×** (data 0.271×) | **flat** (asserted) |
-| **blocked33 = blocked32 with the native-list sprite bank** (**the shipped `doom_e1m1_blocked33.fjm` today**; one native run list per patch column and tier, the `rowmap` dispatch, every monster frame and rotation) | **90,641,792** (data 36,179,196) | 1.351× OVER | **0.675×** (data 0.270×) | **flat** (asserted) |
+| **blocked33 = blocked32 with the native-list sprite bank** (`doom_e1m1_blocked33.fjm`, shipped 2026-09-28; one native run list per patch column and tier, the `rowmap` dispatch, every monster frame and rotation) | **90,641,792** (data 36,179,196) | 1.351× OVER | **0.675×** (data 0.270×) | **flat** (asserted) |
+| **blocked63 = blocked62 + the MAP page** (**the shipped `doom_e1m1_blocked63.fjm` today**, shipped 2026-10-18; M8: E1M1 + the menu's MAP item, the M key and the map page; the rows from blocked34 to blocked62 are not ledgered here -- `docs/ship-gate.md` and `docs/gp-ledger.md` carry them; measured by `gamespeed.py`'s SIZE line, `docs/ship-evidence/blocked63_gamespeed.log`) | **117,658,720** (data 52,323,960) | 1.753× OVER | **0.877×** (data 0.390×) | **flat** (asserted) |
+| **E1M2 r4 = E1M2's own binary, polished** (`doom_e1m2_r4.fjm`, the standing E1M2 binary from 2026-10-18; its own map, not the E1M1 image; `docs/ship-evidence/e1m2_r4_gamespeed.log`) | **123,567,424** (data 83,467,260) | 1.841× OVER | **0.921×** (data 0.622×) | **flat** (asserted) |
 
 ⚠ Updated 2026-09-07 (M6 rung 0 + S2 + W1) — **and its "now" is the PRE-BLOCKING binary; today's
-shipped binary is the blocked33 row, see the 2026-09-15, 2026-09-25 and 2026-09-27 notes below**: the shipped binary was
+shipped binary is the blocked63 row (#149), see the 2026-09-15, 2026-09-25 and 2026-09-27 notes below**: the shipped binary was
 89,494,606 words when this table was written and is **51,094,744** now — 0.761× of 2^26 and
 **0.381× of 2^27**, i.e. 38.07% of the w=32 ceiling, no longer OVER. Measured with
 `scratchpad/12m/fjmsize.py`; `m2_std_gate` PASS.
@@ -1141,13 +1143,22 @@ Per handoff §H / §3.5. Top to bottom:
 
 #### F7 — Present layer
 - **Purpose:** Drive the screen device over the output stream (init/palette/present/input).
-- **Supplies:** `init_screen`, `set_palette`, `present` (`update_screen` 0x03), input-poll helpers; `update_rectangle` (0x04) reserved for status-bar/menu rects.
-- **Depends/related:** F4 (framebuffer base), H4 (palette); the device (below).
-- **Assumes / Device contract (read from `ScreenIO.py`, authoritative):**
-  - `[0x01][w:2][h:2][bpp:1][palette_size:2]` init (bpp ∈ {4,8}); `[0x02][palette_addr:w/8]` set_palette; `[0x03][screen_addr:w/8]` update_screen (primary present, memory-hook, ~free); `[0x04][x,y,rw,rh:2 each][screen_addr:w/8]` update_rectangle (reads the *full-screen* base with screen stride — status-bar/menu only); `[0x05]` raw in-stream — **don't use**.
-  - **Framebuffer:** pixel `(px,py)` = packed byte at `screen_addr + (px + py·W)·dw`, masked to bpp. One byte/op, stride `dw`, row-major.
-  - **Palette:** entry `k` = 3 packed bytes R,G,B at `palette_addr + 3k·dw`.
-  - Keyboard (input side of `pc`): non-blocking, tic-based — one status poll (`0x0` none / `0x8` up / `0x9` down) then one keycode byte on events; keycodes ASCII-like `<0x80`, arrows/shift/ctrl/alt `0x80–0x86` (§1.1).
+- **Supplies (today, `src/fj/present.fj`):** `init_screen`, `select_palette`, `draw_collines`, `end_frame` (END_CMD +
+  present), the window's title / icon / frame-rate cap; the palettes are defined in the stream at boot
+  (`doomfj.screenwire.define_palette`). Input: `src/fj/input.fj`'s `kb.poll`.
+- **Device contract (authoritative: flipjump `flipjump/interpreter/io_devices/README.md`; this repo's one copy of its
+  numbers is `doomfj.screenwire`, of the key codes `doomfj.keyboard`'s `KC_*`):**
+  - every frame is `[0x11] draw_collines` -- column records `[x]` then `[y2][colour]` runs top-down, `[0xFE][y]` KEEP,
+    `[0xFD][y]` COPY (column x-1), `[0xFF]` END (always: it closes every column; an item may leave the cursor where
+    it is, painting nothing) -- then `[0xFF]` END_CMD and `[0x1F]` present. The screen never reads program memory.
+  - once at boot (`wall_renderer`'s cold `io_boot`): `[0x01][w:2][h:2][format=8]` init_screen, then PLAYPAL 0..n-1 into
+    palette slots 0..n-1 (`[0x02][slot][first][last][RGB...]`); a damage / bonus / suit flash is `[0x06][slot]`.
+  - Keyboard (input side of `pc`): non-blocking, tic-based -- one status poll (`0x0` none / `0x8` up / `0x9` down)
+    then one keycode byte on events; keycodes are Arduino `Keyboard.h`'s: ASCII below `0x80` (the key, unshifted),
+    modifiers `0x80-0x87` (left Ctrl/Shift/Alt/GUI, then right), every other key `0x88` + its USB HID usage (the arrows
+    Right `0xD7`, Left `0xD8`, Down `0xD9`, Up `0xDA`).
+  - *History:* the framebuffer present below (0x03, read from memory) and the 0x0B column frames it led to are gone --
+    the API keeps only in-stream commands.
 - **Present-path rationale — memory-hook (0x03) over raw-stream (0x05):** *decisive reason = render order ≠ scan order.* The raw stream demands W·H bytes in **row-major** order; DOOM/BSP renders **column-major + front-to-back** with overdraw and multi-segment columns, so pixels are produced out of scan order. The framebuffer decouples render order from scan order; 0x03 then scans out the finished buffer for ~free (~70 ops/frame). *Per byte (@-invariant comparison):* raw output ≈ **~2@** vs deposit ≈ **~4@** — so raw output *is* ~2× cheaper per pixel, BUT that only helps if you emit directly row-major with **no** framebuffer (forfeits incremental `frac+=step` column sampling, and is impossible for multi-segment BSP columns). *With* a framebuffer (which BSP requires), 0x03 (deposit + ~70/frame) beats 0x05 (deposit + ~2@/px ⇒ **+~0.8M/frame at @ = 25**). So 0x03 is strictly better here.
 - **Data & layout:** command bytes only; reads F4's framebuffer + H4's palette in memory.
 - **Time:** present ~70 fj-ops/frame; poll ~tens — negligible.

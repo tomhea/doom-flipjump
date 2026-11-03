@@ -2,7 +2,7 @@
 bit-identical to the oracle now that the view position has a fraction?
 
 THE CLAIM (scratchpad/cr2/findings/fj-projection.md, PJ-2): fj computes
-`sgn = -(fixed_mul_lo(a, |viewx|))` while the oracle computes `fixed_mul(a, viewx, 8, 4)` on the
+`sgn = -(fixed_mul_low(a, |viewx|))` while the oracle computes `fixed_mul(a, viewx, 8, 4)` on the
 SIGNED value. With P = a*|viewx|:
 
     fj     = -floor(P / 2^16)          (negate AFTER truncating)
@@ -79,17 +79,17 @@ def main():
                  f"vxa{i}: hex.vec 8, {vxa}"]
         # FORM 1 -- what ships: multiply the ABS, then negate iff viewx was negative. The sign flag
         # is a per-frame constant, so branching on it here is exactly what `viewxs` does at runtime.
-        body.append(f"hex.fixed_mul_lo 8, 4, r1, a{i}, vxa{i}")
+        body.append(f"hex.fixed_mul_low 8, 4, r1, a{i}, vxa{i}")
         if vs < 0:
             body.append("hex.neg 8, r1")
         # FORM 2 -- the proposed fix: multiply the SIGNED value, as the oracle does.
-        body.append(f"hex.fixed_mul_lo 8, 4, r2, a{i}, vx{i}")
+        body.append(f"hex.fixed_mul_low 8, 4, r2, a{i}, vx{i}")
         # FORM 3 -- the fix AS IT WILL SHIP: same signed multiply, operands SWAPPED so the sparse
         # baked constant `a` is the SECOND operand (the ROW RULE -- cost is one schoolbook row per
         # nonzero nibble of the second operand). The row rule asserts this swap is bit-identical.
         # ⚠ THAT ASSERTION IS EXACTLY THE KIND THIS REPO HAS BEEN WRONG ABOUT, so it is MEASURED
         # here rather than assumed: control 6 requires form 3 == form 2 on every case.
-        body.append(f"hex.fixed_mul_lo 8, 4, r3, vx{i}, a{i}")
+        body.append(f"hex.fixed_mul_low 8, 4, r3, vx{i}, a{i}")
         body += ["hex.print_as_digit 8, r1, 0", "stl.output 32",
                  "hex.print_as_digit 8, r2, 0", "stl.output 32",
                  "hex.print_as_digit 8, r3, 0", "stl.output 10"]
@@ -100,7 +100,7 @@ def main():
     p = tmp / "pj2.fj"
     p.write_text(prog, encoding="utf-8")
     out = tmp / "pj2.fjm"
-    fj.assemble([(ROOT / "src/fj/fixed_point.fj").resolve(), p.resolve()],
+    fj.assemble([p.resolve()],
                 out, memory_width=W, warning_as_errors=True, print_time=False)
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
     io = FixedIO(b"")

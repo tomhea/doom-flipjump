@@ -81,7 +81,6 @@ CONTROLS (R9)
      against the PAD line's 45,678,048.
 """
 import argparse
-import struct
 import sys
 import types
 from pathlib import Path
@@ -90,38 +89,31 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from flipjump.assembler.preprocessor import BlockPool                    # noqa: E402
-from flipjump.fjm.fjm_consts import (FJ_MAGIC, FJMVersion,               # noqa: E402
-                                     _header_base_format, _header_base_size,
-                                     _header_extension_size, _segment_format, _segment_size)
+from flipjump.fjm.fjm_reader import read_fjm_header                      # noqa: E402
+from flipjump.utils.exceptions import FlipJumpReadFjmException           # noqa: E402
 
 import fjmsize                                                           # noqa: E402
-from profx.pool import load_heat                                         # noqa: E402
+from profx.pool import block_pool, load_heat                             # noqa: E402
 # the signature, and what it hashes, must not drift from the builder's -- import it, never copy it
 from build_blocked import _counts_sig, _load_counts                      # noqa: E402
 
 # ship-gate 1b's build command, plus build_blocked.py's own defaults for what it does not pass
 # M7 P8a: the program outgrew 0x60000000 (blocked52 r0: "the program reached 0x611aa840") -> base 0x80000000
 SHIP_GATE = dict(pool_base=0x80000000, span_bits=0x7FFFFFE0, spread=2, spread_min_count=256,
-                 max_slot_ops=512, width_buckets=True, heat="scratchpad/12m/heat_blocked27_p10.json.gz",
+                 max_slot_ops=512, width_buckets=True, heat="scratchpad/12m/heat_e1m1_adopt.json.gz",
                  tier="game", map="E1M1", wad="tests/fixtures/freedoom_e1m1.wad")
 
 
 def read_segments(path):
     """the .fjm's segment table as (start, length, data_start, data_length) words -- the header
-    only, so this costs no decompression"""
-    raw = Path(path).read_bytes()
-    magic, memory_width, version, segment_num = struct.unpack(
-        _header_base_format, raw[:_header_base_size])
-    if magic != FJ_MAGIC:
-        raise ValueError("%s: bad magic 0x%x -- not an .fjm?" % (path, magic))
-    off = _header_base_size
-    if FJMVersion(version) != FJMVersion.BaseVersion:
-        off += _header_extension_size
-    segments = [struct.unpack(_segment_format,
-                              raw[off + i * _segment_size:off + (i + 1) * _segment_size])
-                for i in range(segment_num)]
-    return memory_width, segments
+    only, so this costs no data decompression (version 4 decompresses the table's own stream)"""
+    # flipjump's own header reader (A11): .fjm version 4 -- flipjump 1.6.0's default -- compresses the segment
+    # table, so the struct walk this used to do read compressed bytes as segment records
+    try:
+        header = read_fjm_header(Path(path))
+    except FlipJumpReadFjmException as e:
+        raise ValueError("%s: %s -- not an .fjm?" % (path, e)) from e
+    return header.memory_width, [tuple(seg) for seg in header.segments]
 
 
 def split_at(segments, pool_base_words):
@@ -136,13 +128,11 @@ def split_at(segments, pool_base_words):
 
 
 def probe_pool(memory_width, counts, widths, width_hist, alias, knobs):
-    """a BlockPool that only PRICES: `_preallocate` runs in __init__, nothing is assembled"""
-    return BlockPool(memory_width, knobs["pool_base"], counts=counts, widths=widths,
-                     span_bits=knobs["span_bits"], alias=alias, spread=knobs["spread"],
-                     spread_min_count=knobs["spread_min_count"],
-                     max_slot_ops=knobs["max_slot_ops"], width_hist=width_hist,
-                     width_buckets=knobs["width_buckets"], wants=None,
-                     **({"heat": knobs["heat_list"]} if knobs.get("heat_list") else {}))
+    """a BlockPool that only PRICES: its census laid out (place_deferred's layout step), nothing is assembled"""
+    pool = block_pool(memory_width, knobs, knobs.get("heat_list"))
+    pool.alias = dict(alias or {})
+    pool.lay_out(dict(counts), {g: dict(h) for g, h in width_hist.items()})
+    return pool
 
 
 def placed_first(pool, groups):
@@ -494,20 +484,20 @@ def selftest(fjm_path, cache_path, knobs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fjm", default="build/doom_e1m1_blocked28.fjm")
-    ap.add_argument("--counts-cache", default="scratchpad/12m/_counts_game.json.gz")
+    ap.add_argument("--fjm", default=None, help="default: E1M1's blocked28 (another map: required)")
+    ap.add_argument("--counts-cache", default=None, help="default: E1M1 _counts_game.json.gz, another map its census")
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=SHIP_GATE["pool_base"])
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=SHIP_GATE["span_bits"])
     ap.add_argument("--spread", type=int, default=SHIP_GATE["spread"])
     ap.add_argument("--spread-min-count", type=int, default=SHIP_GATE["spread_min_count"])
     ap.add_argument("--max-slot-ops", type=int, default=SHIP_GATE["max_slot_ops"])
     ap.add_argument("--no-width-buckets", action="store_true")
-    ap.add_argument("--heat", default=SHIP_GATE["heat"],
-                    help="the build's --pin-heat list (default: ship-gate 1b's)")
+    ap.add_argument("--heat", default=None,
+                    help="the build's --pin-heat list (default: ship-gate 1b's; another map its own, else E1M1's)")
     ap.add_argument("--no-heat", action="store_true", help="price the placement without a heat list")
     ap.add_argument("--tier", default=SHIP_GATE["tier"])
-    ap.add_argument("--map", default=SHIP_GATE["map"])
-    ap.add_argument("--wad", default=SHIP_GATE["wad"])
+    ap.add_argument("--map", default=None, help="default: DOOMFJ_MAP, else E1M1 (ship-gate 1b's)")
+    ap.add_argument("--wad", default=None, help="default: the map's fixture (doomfj.mapprofile)")
     ap.add_argument("--allow-stale", action="store_true",
                     help="price a counts cache whose signature no longer matches the working tree. "
                          "The signature hashes the emitter sources' bytes, so a line-ending sweep "
@@ -515,6 +505,17 @@ def main():
                          "block sizes are then the CACHED program's, and the run says so.")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
+    # M8 G13: the map's own wad, census and heat list by default (a --map with E1M1's --wad priced the wrong program)
+    from doomfj.mapprofile import ACTIVE, heat_list, profile
+    a.map = (a.map or ACTIVE).upper()
+    e1 = a.map == SHIP_GATE["map"]
+    a.wad = a.wad or (SHIP_GATE["wad"] if e1 else profile(a.map).wad)
+    a.heat = a.heat or (SHIP_GATE["heat"] if e1 else heat_list(a.map)[0])
+    a.counts_cache = a.counts_cache or ("scratchpad/12m/_counts_game.json.gz" if e1 else profile(a.map).census)
+    if a.fjm is None:
+        if not e1:
+            ap.error("--fjm is required off E1M1")
+        a.fjm = "build/doom_e1m1_blocked28.fjm"
     knobs = dict(pool_base=a.pool_base, span_bits=a.span_bits, spread=a.spread,
                  spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops,
                  width_buckets=not a.no_width_buckets, tier=a.tier, map=a.map, wad=a.wad,

@@ -85,16 +85,21 @@ def main():
     acc = defaultdict(int)
     hits = defaultdict(int)
     render_obj = None
+    glue_obj = None     # the frame's per-object delta minus its top-level phases': what the glue ran
     tot = []
     F = 0
     for a, b in frames(M):
         F += 1
         tot.append(int(M[b, 1] - M[a, 1]))
+        g = (M[b, 2:] - M[a, 2:]).astype(np.int64)
         for name, (ops, dsnap, h) in spans(M, a, b).items():
+            if not name.startswith("  ") and dsnap is not None:
+                g = g - dsnap
             acc[name] += ops
             hits[name] += h
             if name == "render walk, all" and dsnap is not None:
                 render_obj = dsnap if render_obj is None else render_obj + dsnap
+        glue_obj = g if glue_obj is None else glue_obj + g
     tot = np.array(tot)
     print("game frames: %d   mean frame %s ops (marker 1 to marker 1)" % (F, format(int(tot.mean()), ",")))
     print("")
@@ -124,6 +129,15 @@ def main():
                 continue
             nm = obj[k]["name"] if k in obj else "obj%d" % k
             print("   %12s %6.2f%%  %s" % (format(int(render_obj[k] / F), ","), 100.0 * render_obj[k] / rsum, nm))
+    if glue_obj is not None:
+        print("")
+        print("glue split by owner object (ops/frame):")
+        gsum = glue_obj[glue_obj > 0].sum()
+        for k in np.argsort(-glue_obj)[:15]:
+            if glue_obj[k] <= 0:
+                continue
+            nm = obj[k]["name"] if k in obj else "obj%d" % k
+            print("   %12s %6.2f%%  %s" % (format(int(glue_obj[k] / F), ","), 100.0 * glue_obj[k] / gsum, nm))
 
 
 if __name__ == "__main__":

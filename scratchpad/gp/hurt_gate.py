@@ -231,6 +231,12 @@ def control(name: str | None):
             orig_init(self, *a, **k)
             t = self.fireball_mom
             self.fireball_mom = [t[(i + 1) % len(t)] for i in range(len(t))]
+            # M8 C8 (64ffb8f) made the spawn read `missile_mom[name]`, a dict built in _combat_init holding the
+            # ORIGINAL list: rebinding `fireball_mom` alone mutated nothing and H2's control was VACUOUS on every map
+            # (E1M3 / E1M4 / E1M5 b4's hurt gates: "parts at frame None"). The table the spawn reads is moved too
+            mm = getattr(self, "missile_mom", None)
+            if mm is not None and C.FIREBALL_INFO.name in mm:
+                mm[C.FIREBALL_INFO.name] = self.fireball_mom
         patch(CM, "_combat_init", off)
     elif name == "explode_draw":                 # the explosion is not drawn
         orig_mob = MS.MonsterPhase.mobiles
@@ -344,6 +350,9 @@ def scenario_list(dsim, w) -> list:
         "cands": [((dsim.spawn.x, dsim.spawn.y, dsim.spawn.angle),
                    (lambda mph: [attack(mph, m, "S_TROO_ATK2") for m in slots_of(mph.world, "MT_TROOP")]))],
         "claim": lambda c: c["max_in_flight"] == 8 and c["fizzles"] >= 1})
+    if dsim.mapname != "E1M1" and len(imps) < S1_IMPS:       # M8: S1's claim needs nine imps
+        out[-1] = {"name": out[-1]["name"], "na": "%s has %d imp slots; S1 needs %d to have 8 in flight and a fizzle"
+                   % (dsim.mapname, len(imps), S1_IMPS)}
     return out
 
 
@@ -453,8 +462,8 @@ def main(argv=None) -> int:
     orc = P.Oracle()
     dsim = onewalk.DoorSim()
     assert dsim.order == orc.door_order
-    card_di = [di for di, t in enumerate(drawable_things(orc.rm, orc.mw.things(orc.mapname), orc.art)[0])
-               if t.type == G.CARD_TYPE][0]
+    card_di = ([di for di, t in enumerate(drawable_things(orc.rm, orc.mw.things(orc.mapname), orc.art)[0])
+                if t.type == G.CARD_TYPE] or [-1])[0]           # M8: -1 on a map with no blue card (as fight_gate)
     run = Run(orc, dsim, card_di)
     from doomfj.monsters import MonsterPhase
     from doomfj.wall_renderer import BOOT_SKILL
@@ -479,12 +488,19 @@ def main(argv=None) -> int:
         assert not table.absent & {"p_hp", "pj_act", "fx_act"}, (
             "the label table has no %s: a binary before P5" % sorted(table.absent))
     totals = {}
+    nas = []
     for sc in scen:
-        got = place(run, sc)
+        why = na_why(sc, dsim.mapname)
+        if why:
+            nas.append(sc["name"].split()[0])
+            print("\n%s -- N/A: %s" % (sc["name"], why))
+            continue
+        lim = place_limit(dsim.mapname)
+        got = place(run, sc, lim)
         print("\n%s -- %d frames" % (sc["name"], len(sc["keys"])))
         if got is None:
             ok = False
-            print("  the oracle does what the scenario claims: NO candidate of %d -- FAIL" % len(sc["cands"][:12]))
+            print("  the oracle does what the scenario claims: NO candidate of %d -- FAIL" % len(sc["cands"][:lim]))
             continue
         pose, setup, want, c = got
         print("  from (%.0f, %.0f) angle %08x: the oracle does what the scenario claims: yes"
@@ -505,7 +521,11 @@ def main(argv=None) -> int:
         ok &= binary_scenario(gb, cells, table, run, sc, pose, setup, want)
     need = ("mon_hits", "mon_misses", "mon_melee", "proj_spawns", "proj_impacts", "proj_walls", "fizzles",
             "fx_spawns", "fx_skipped", "player_hurt", "armor_out", "explosion_frames", "explosion_px", "blood_px")
-    zero = [k for k in need if not totals.get(k)] if not a.only else []
+    free = unowed(need, [s["name"].split()[0] for s in scen], set(nas))
+    if nas:
+        print("\nN/A on %s: %d -- %s; counters no longer owed: %s" % (dsim.mapname, len(nas), " ".join(nas),
+                                                                     free or "none"))
+    zero = [k for k in need if not totals.get(k) and k not in free] if not a.only else []
     ok &= not zero and totals.get("deaths", 0) == 0 and totals.get("dead_frames", 0) == 0
     print("\nTOTALS: " + ", ".join("%s %d" % kv for kv in totals.items()))
     print("every event counter nonzero: %s; deaths %d"
@@ -514,6 +534,50 @@ def main(argv=None) -> int:
     print("\nHURT GATE %s%s (%.0f s)" % ("PASS" if ok else "FAIL", " (oracle only)" if a.oracle_only else "",
                                          time.time() - t0))
     return 0 if ok else 1
+
+
+# M8 (gen_dryrun's audit): the counters each scenario raises -- a counter is not owed when every scenario raising it is
+# N/A on the map (a map with no imp, no demon ...). E1M1 hosts every scenario: nothing changes there
+OWNS = {"H1": ("mon_hits", "mon_misses", "player_hurt"), "H2": ("proj_spawns", "proj_impacts", "explosion_frames",
+                                                                "explosion_px", "player_hurt"),
+        "H3": ("proj_spawns", "proj_walls", "explosion_frames"), "H4": ("mon_melee", "player_hurt"),
+        "H5": ("armor_out", "player_hurt", "mon_hits"), "H6": ("fx_spawns", "fx_skipped", "blood_px"),
+        "S1": ("proj_spawns", "fizzles")}
+S1_IMPS = 9                     # S1's claim: 8 in flight and a fizzle -- nine imps poked to fire at once
+
+
+def place_limit(mapname: str) -> int:
+    """how many of a scenario's candidates `place` tries: E1M1's 12 (every scenario places within them), deeper off
+    it -- M8 wave 1: E1M5's H3 first places at candidate 13 and E1M4's at 64 (of 523: from most poses the imp's
+    second fireball hits the strafing player), both "NO candidate of 12" at b4. The first candidate that places is
+    taken, so a map whose scenarios place within 12 (E1M2) places exactly as before"""
+    return 12 if mapname == "E1M1" else DEEP_LIMIT
+
+
+DEEP_LIMIT = 128
+
+
+def na_why(sc, mapname):
+    """why scenario `sc` is N/A on `mapname` (None: it runs). Never on E1M1, where every scenario places (an empty
+    candidate list FAILS there): off it, a scenario with no candidate from the map's monsters, or S1 with fewer imps
+    than its claim needs"""
+    if mapname == "E1M1":
+        return None
+    if sc.get("na"):
+        return sc["na"]
+    if "cands" in sc and not sc["cands"]:
+        return "no candidate from %s's monsters (the kind it needs is absent)" % mapname
+    return None
+
+
+def unowed(need, tags, na_tags) -> list:
+    """the `need` counters every present owner of is N/A (a counter no present scenario owns stays owed)"""
+    out = []
+    for k in need:
+        owners = [t for t in tags if k in OWNS.get(t, ())]
+        if owners and all(t in na_tags for t in owners):
+            out.append(k)
+    return out
 
 
 def frame_ops_report(name: str, ops: list) -> None:
@@ -566,7 +630,8 @@ def leaf_list_cells(orc, ph, skill) -> dict:
     the skill spawns and the game has not removed (`MonsterViews.hidden`), a live mobile, a lying drop (mdrop 1).
     At the level start this is the restart block's own `things.skill_level_start` (tests/host hold the two equal)."""
     from doomfj.monsters import drop_rows, droppers, mobile_rows
-    from doomfj.things import skill_absent, spawn_leaf_lists
+    from doomfj.config import Config, map_cfg
+    from doomfj.things import list_max, skill_absent, spawn_leaf_lists
     from doomfj.world import FIREBALL_POOL, FX_POOL
     mv, ws = orc._mv(ph.world), ph.world.ws
     thss = orc.monster_rt(ph)["thss_rt"]
@@ -578,7 +643,8 @@ def leaf_list_cells(orc, ph, skill) -> dict:
     if drop_rows(ph.world):
         present += [ws.mon_drop[m] == 1 for m in droppers(ph.world)]
     assert len(present) == len(thss), (len(present), len(thss))
-    head, nxt = spawn_leaf_lists(thss, len(mv.cmap.subsectors), present)
+    head, nxt = spawn_leaf_lists(thss, len(mv.cmap.subsectors), present,      # M8 F1.5: the map's list width
+                                 max_things=list_max(map_cfg(Config(), orc.mapname).LIST_ID_BITS))
     return {"sshead": tuple(head), "thnext": tuple(nxt)}
 
 
@@ -606,8 +672,8 @@ def binary_scenario(gb, cells, table, run: Run, sc, pose, setup, want) -> bool:
     for f, fr in enumerate(want):
         exp = G.expected_cells(fr, order, morder)
         got = reads[f] if f < len(reads) else {}
-        if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
-            s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
+        if s_bad is None and any(not P.same_reading(got.get(k), v) for k, v in exp.items()):
+            s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if not P.same_reading(got.get(k), v)})
         if x_bad is None and (f >= len(r.frames) or r.frames[f] != run.picture(fr)):
             x_bad = (f, P.px_diff(r.frames[f], run.picture(fr)) if f < len(r.frames) else -1)
         if p_bad is None and (f >= len(r.palettes) or r.palettes[f] != run.orc.palette_sha(fr["pal"])):

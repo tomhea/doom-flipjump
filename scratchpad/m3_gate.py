@@ -74,7 +74,7 @@ if __name__ == "__main__":          # M8 (CR of #146): `--map E1Mn` before probe
     take_map_arg(keep=True)         # keep: this gate's own parser takes --map too
 
 from doomfj.config import Config                                          # noqa: E402
-from doomfj.doors import door_states, initial_states, walkover_triggers   # noqa: E402
+from doomfj.doors import door_states, initial_states, wfired_count       # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.menu import (HELP_GAME_SCR, HELP_MENU_SCR, MAIN_EXIT_SCR,    # noqa: E402
                          MAIN_HELP_SCR, MAIN_RESUME_SCR, MENU_HALTED, menu_step, palette_colours)
@@ -87,7 +87,7 @@ from doomfj.wad import WadFile                                            # noqa
 from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.wall_renderer import (BOOT_MENU_SKILL, BOOT_SKILL, DEFAULT_MENU,               # noqa: E402
                                   SKILL_MENU, SKILL_MENU_FIRST, SKILLS, STANDALONE_POLLS,
-                                  menu_screen_pixels)
+                                  menu_screen_pixels, plasma_game_on)
 from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent               # noqa: E402
 
 ENTER, ESC, K_FWD, K_BACK = 0x0D, 0x1B, 0x77, 0x73
@@ -206,6 +206,26 @@ def _screen_key(scr, sel, live):
     return (scr, sel if scr == 1 else None, live if scr in _MAIN + (MAIN_RESUME_SCR, MAIN_MAP_SCR) else None)
 
 
+def special_crossings(mw, mapname, states) -> list:
+    """(line, special) of every special linedef the path through `states` (SimStates, frame by frame) crosses"""
+    vs, lds = mw.vertexes(mapname), mw.linedefs(mapname)
+    pts = [(_signed(s.x, 32) / 65536, _signed(s.y, 32) / 65536) for s in states]
+
+    def o(u, v, w):
+        return (v[0] - u[0]) * (w[1] - u[1]) - (v[1] - u[1]) * (w[0] - u[0])
+    out = set()
+    for p, q in zip(pts, pts[1:]):
+        if p == q:
+            continue
+        for i, ld in enumerate(lds):
+            if not ld.special:
+                continue
+            a, b = (vs[ld.v1].x, vs[ld.v1].y), (vs[ld.v2].x, vs[ld.v2].y)
+            if o(a, b, p) * o(a, b, q) < 0 and o(p, q, a) * o(p, q, b) < 0:
+                out.add((i, ld.special))
+    return sorted(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fjm", default="build/doom_e1m1_menu.fjm")
@@ -252,11 +272,15 @@ def main():
     from doomfj.hud import GameScreen
     cfg = GAME_CFG
     rm = ReferenceModel(cfg)
-    gscreen = GameScreen(rm, mw, art, mw.sectors(args.map))
+    # M8 C6: a map with the plasma rifle (E1M6, E1M9) -- the help lists key 6, the overlays hold its frames (the emitter's
+    # `_PLASMA`, plasma_game_on: ONE rule). Missing here, E1M9's help-from-the-world frame parted by 1,031 px (the "6")
+    plasma = plasma_game_on(mw, args.map)
+    gscreen = GameScreen(rm, mw, art, mw.sectors(args.map), plasma=plasma)
     scene = build_scene(mw, mw, args.map)
     colours = palette_colours(bytes(b for rgb in mw.playpal(0) for b in rgb))
     # M7 P3.4: the menu's pictures through the ONE mapping from its state (the help joined them)
-    screens = {key: bytes(menu_screen_pixels(cfg, colours, key[0], key[1] or 0, key[2] or 0, automap=pages))
+    screens = {key: bytes(menu_screen_pixels(cfg, colours, key[0], key[1] or 0, key[2] or 0, automap=pages,
+                                                     plasma=plasma))
                for key in ALL_SCREENS if key[0] not in MAP_SCREENS}        # M8: a page is drawn at its frame's pose
     render_kw = dict(GAME_RENDER_KW, sprite_wad=art)
     hidden = {s: skill_hidden(rm, mw.things(args.map), art, s) for s in SKILLS}
@@ -283,7 +307,7 @@ def main():
     doors0 = [init[si] for si in order]          # this script never presses use: shut and idle
     # M7 P2a.1: ...and never reaches a walk-over trigger or the blue card: no press pending, no
     # card, no trigger fired (doors.DoorPhase's initial state)
-    nwalk = len(walkover_triggers(secs, lds, sds, mw.vertexes(args.map)))
+    nwalk = wfired_count(secs, lds, sds, mw.vertexes(args.map))       # M8 C3: the triggers' W1 bits + the latches'
     phase0 = (init, (0,) * nwalk, frozenset(), 0)
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
     import gatestate as GST
@@ -469,6 +493,13 @@ def main():
     else:
         map_frozen = map_both_ways = True
     walked = (rows[WALKED_NEW_GAME]["before"].x, rows[WALKED_NEW_GAME]["before"].y) != (spawn.x, spawn.y)
+    # M8 (gates-ready): the mirror holds the doors and movers at their level start, so a walk that crossed a SPECIAL line
+    # (a W1 trigger, a WR lift, a teleport, a walk-over exit) would fire it in the binary alone -- a confusing FAIL far
+    # from its cause. Refused by name instead. (E1M1..E1M9: the walk crosses none -- 80 to 160 units from the spawn.)
+    crossed = special_crossings(mw, args.map, [r["state"] for r in rows])
+    if crossed:
+        raise SystemExit("m3_gate: on %s the scripted walk crosses special line(s) %s (line, special) -- the mirror "
+                         "holds doors and movers still; this map needs another walk" % (args.map, crossed))
     reset = all((rows[f]["state"].x, rows[f]["state"].y, rows[f]["state"].angle)
                 == (spawn.x, spawn.y, spawn.angle) for f in NEW_GAMES)
     # the three NEW GAME frames as the oracle drew them -- distinct only if the skills can be TOLD

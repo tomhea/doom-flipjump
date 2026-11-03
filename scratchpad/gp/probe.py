@@ -3,7 +3,7 @@
     python scratchpad/gp/probe.py --selftest            # R9: controls C0..C4 (takes the binary lock)
     python scratchpad/gp/probe.py --demo                # read a walk, inject a viewpoint (blocked27)
 
-WHAT IT IS. The screen device holds `device_memory` (NativeDeviceMemory: read_word/write_word) for
+WHAT IT IS. The harness holds a `device_memory` view (NativeDeviceMemory: read_word/write_word) for
 the whole run, and the frame loop calls back into Python on every input bit and every present. So a
 gate can READ any cell of the running program by LABEL, and WRITE one, at a known point of the frame
 -- with no change to the program at all. That is what makes gates state-exact (plan section 9) and
@@ -72,6 +72,8 @@ DEFAULT_FJM = ROOT / "build" / "doom_e1m1_blocked27.fjm"
 DEFAULT_LABELS = ROOT / "scratchpad" / "12m" / "atlas" / "blocked27.labels.tsv.gz"
 # M8 (docs/level-pipeline.md 3): the map from doomfj.mapprofile (DOOMFJ_MAP; E1M1 when unset)
 from doomfj.mapprofile import profile as _map_profile                       # noqa: E402
+from doomfj.mapprofile import check_checkout as _check_checkout            # noqa: E402
+_check_checkout(__file__)       # M8: this checkout's doomfj (the installed one is the main repo's)
 DEFAULT_WAD = _map_profile().wad
 DEFAULT_ASSET = "assets/freedoom1.wad"
 DEFAULT_MAP = _map_profile().map
@@ -191,11 +193,17 @@ OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcar
                    frozenset({"st_kill", "st_item", "st_secn", "st_secm"}),
                    # M8 L4: the player's reactiontime after a teleport (doomfj.teleportcode; a map with a WR teleport)
                    frozenset({"p_rct"}),
+                   # M8 C5: the W1 monster teleports' latches (doomfj.teleportcode; a map with a 125 line: E1M7)
+                   frozenset({"tp_w1"}),
                    # M8: the sector light thinkers' cells (doomfj.lightcode; a map whose lights animate: E1M2)
                    frozenset({"ltst", "ltct", "rng_lt"}),
                    # M8: the switch textures (doomfj.switchcode; a SWITCH_TEX map: MonsterPhase.switch_state) -- two
                    # groups: a map with no SR switch line (E1M2) declares `swpr` alone
-                   frozenset({"swpr"}), frozenset({"swtm"}))
+                   frozenset({"swpr"}), frozenset({"swtm"}),
+                   # M8 C6: the timed powers' counters (doomfj.powercode; a map holding 2024 / 2025, each its own)
+                   frozenset({"p_inv"}), frozenset({"p_rad"}),
+                   # M8 C8: the lost souls' cells (doomfj.soulcode; a map with a soul only)
+                   frozenset({"sk_fly", "sk_inf", "sk_z", "sk_momz", "sk_ceil"}))
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -257,6 +265,14 @@ class CellLayoutError(ValueError):
     """a word that is not laid out the way the cell kind says (see the module docstring)"""
 
 
+def same_reading(a, b) -> bool:
+    """a cell read off the binary and the oracle's value are the same reading -- a count-1 cell reads as its value
+    (read_cells) while an oracle array of one element is a 1-tuple (E1M8 has ONE door: (0,) vs 0)"""
+    def one(v):
+        return v[0] if isinstance(v, tuple) and len(v) == 1 else v
+    return one(a) == one(b)
+
+
 class LabelTableRejected(RuntimeError):
     """the known-value check failed: this label table does not describe this binary"""
 
@@ -269,6 +285,8 @@ class Cell:
                     viewx = Cell('viewx', 'hex', 8, signed=True); dstate = Cell('dstate', 'hex', 1,
                     count=13); dwait = Cell('dwait', 'hex', 2, count=13).
       kind 'byte' : `count` BYTE cells at a one-cell stride (the write_byte arrays).
+      kind 'cell' : `count` cells at a one-cell stride, each holding ONE number of `n` nibbles in its jump word
+                    (M8 F1.5: a wide-list map's 12-bit sshead / thnext, n = 3 -- Config.LIST_NIB; 'byte' is n = 2).
       kind 'raw'  : `count` raw memory words from word (label // w) + index.
     `index` offsets the first element: in CELLS for hex (nibble cells) and byte, in WORDS for raw.
     A count of 1 reads as an int; more reads as a tuple."""
@@ -278,11 +296,12 @@ class Cell:
     count: int = 1
     signed: bool = False
     index: int = 0
+    array: bool = False     # a per-map array (count = ndoors, nlift, ...): read_arrays keeps a 1-tuple
 
     def span_cells(self) -> int:
         if self.kind == "hex":
             return self.index + self.n * self.count
-        if self.kind == "byte":
+        if self.kind in ("byte", "cell"):
             return self.index + self.count
         return 0
 
@@ -308,7 +327,7 @@ class Probe:
         self.frame = -1
         self.bases = {}               # jump-word address -> the cell's base (see _field)
         for key, c in self.cells.items():
-            if c.kind not in ("hex", "byte", "raw"):
+            if c.kind not in ("hex", "byte", "cell", "raw"):
                 raise ValueError("cell %s: unknown kind %r" % (key, c.kind))
             if c.kind != "raw":
                 need, have = c.span_cells() * self.dw, labels.extent_bits(c.label)
@@ -329,7 +348,7 @@ class Probe:
         for key, c in self.cells.items():
             if c.kind == "raw":
                 continue
-            fbits = 4 if c.kind == "hex" else 8
+            fbits = 4 if c.kind == "hex" else 8 if c.kind == "byte" else 4 * c.n
             mask = ((1 << fbits) - 1) << self.dshift
             for e in range(c.count):
                 for i in range(c.n if c.kind == "hex" else 1):
@@ -352,7 +371,7 @@ class Probe:
         base = self.labels[c.label]
         if c.kind == "hex":
             return base + (c.index + element * c.n + nib) * self.dw
-        if c.kind == "byte":
+        if c.kind in ("byte", "cell"):
             return base + (c.index + element) * self.dw
         raise ValueError("raw cells have word addresses: use word_of")
 
@@ -411,11 +430,19 @@ class Probe:
                         v -= 1 << (4 * c.n)
                 elif c.kind == "byte":
                     v = self._field(self.cell_bits(key, e), 8)
+                elif c.kind == "cell":
+                    v = self._field(self.cell_bits(key, e), 4 * c.n)
                 else:
                     v = self.read_word(self.word_of(key, e))
                 vals.append(v)
             out[key] = vals[0] if c.count == 1 else tuple(vals)
         return out
+
+    def read_arrays(self, names=None) -> dict:
+        """read_cells, but a per-map array of ONE element (E1M8's one door) stays a 1-tuple, as the oracle holds it"""
+        out = self.read_cells(names)
+        return {k: (v,) if self.cells.get(k) is not None and self.cells[k].array and not isinstance(v, tuple) else v
+                for k, v in out.items()}
 
     def write_cells(self, values: dict) -> None:
         """`values` may name `absent` cells (an optional group this binary predates): none is written"""
@@ -423,7 +450,8 @@ class Probe:
             if key in self.absent:
                 continue
             c = self.cells[key]
-            vals = [val] if c.count == 1 else list(val)
+            # a one-door map: the oracle hands its 1-element arrays as 1-tuples (same_reading)
+            vals = list(val) if isinstance(val, (tuple, list)) else [val]
             if len(vals) != c.count:
                 raise ValueError("cell %s takes %d values, got %d" % (key, c.count, len(vals)))
             for e, v in enumerate(vals):
@@ -433,6 +461,8 @@ class Probe:
                         self._set_field(self.cell_bits(key, e, i), 4, (v >> (4 * i)) & 0xF)
                 elif c.kind == "byte":
                     self._set_field(self.cell_bits(key, e), 8, v & 0xFF)
+                elif c.kind == "cell":
+                    self._set_field(self.cell_bits(key, e), 4 * c.n, v & ((1 << 4 * c.n) - 1))
                 else:
                     self.write_word(self.word_of(key, e), v & ((1 << self.w) - 1))
 
@@ -449,7 +479,7 @@ class Probe:
             except CellLayoutError as e:
                 bad.append((key, want, "LAYOUT %s" % e))
                 continue
-            if got != want:
+            if not same_reading(got, want):
                 bad.append((key, want, got))
         return bad
 
@@ -509,12 +539,13 @@ def _devices():
 
         def __init__(self, probe=None, **kw):
             super().__init__(**kw)
-            self.frames, self.palettes, self._probe = [], [], probe
+            # `shown_palettes`, not `palettes`: that is the device's own (its 256 slots, reset by init_screen)
+            self.frames, self.shown_palettes, self._probe = [], [], probe
 
         def _present(self):
             super()._present()
             self.frames.append(bytes(self.pixel_indices))
-            self.palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb))
+            self.shown_palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb))
                                  .hexdigest()[:12])
             if self._probe is not None:
                 self._probe._present(len(self.frames) - 1)
@@ -556,22 +587,13 @@ class RunResult:
 def _lean_fjm(path):
     """(width, [(segment_start, segment_length, array('I') of the data words)]) -- flipjump's
     fjm_reader._init_memory, vectorised: jump words of a RelativeJump/Compressed image are stored
-    relative to their own bit address and are rebuilt here the same way."""
-    import lzma
-    import struct
+    relative to their own bit address and are rebuilt here the same way. The file is read by
+    flipjump's own lean loader (fjm_reader.read_fjm_raw: header, segments, decompressed data), so
+    version 4 -- flipjump 1.6.0's default, its segment table compressed too -- reads as 3 did (A11)."""
     import numpy as np
-    from flipjump.fjm import fjm_reader as R
-    from flipjump.fjm.fjm_consts import FJMVersion
-    with open(path, "rb") as fh:
-        _magic, width, version, segnum = struct.unpack(R._header_base_format,
-                                                       fh.read(R._header_base_size))
-        version = FJMVersion(version)
-        if version != FJMVersion.BaseVersion:
-            struct.unpack(R._header_extension_format, fh.read(R._header_extension_size))
-        segs = [struct.unpack(R._segment_format, fh.read(R._segment_size)) for _ in range(segnum)]
-        data = fh.read()
-    if version == FJMVersion.CompressedVersion:
-        data = lzma.decompress(data, format=R._LZMA_FORMAT, filters=R._LZMA_DECOMPRESSION_FILTERS)
+    from flipjump.fjm.fjm_reader import read_fjm_raw
+    header, data = read_fjm_raw(Path(path))
+    width, segs, relative = header.memory_width, header.segments, header.relative_jumps
     if width != 32:
         raise ValueError("the lean loader is written for w=32; use loader='fjmrunner'")
     words = np.frombuffer(data, dtype="<u4")
@@ -579,7 +601,7 @@ def _lean_fjm(path):
     out = []
     for seg_start, seg_len, data_start, data_len in segs:
         chunk = words[data_start:data_start + data_len].astype(np.uint64)
-        if version in (FJMVersion.RelativeJumpVersion, FJMVersion.CompressedVersion):
+        if relative:
             pos = np.arange(1, data_len, 2, dtype=np.uint64) + np.uint64(seg_start)
             chunk[1::2] = (chunk[1::2] + pos * np.uint64(width)) & np.uint64((1 << width) - 1)
         a = array("I")
@@ -600,6 +622,9 @@ class GameBinary:
 
     def __init__(self, fjm=DEFAULT_FJM, flat_max_words: int | None = None, loader: str = "lean"):
         from doomfj.config import RENDER_FLAT_MAX_WORDS
+        # M8 (gates-ready): a binary NAMED for another map than the one this process's oracles measure is refused
+        from doomfj.mapprofile import check_binary
+        check_binary(fjm, _counts_map()[1])
         from doomfj.fastrun import _fjcore
         t = time.time()
         self.fjm = Path(fjm)
@@ -644,15 +669,18 @@ class GameBinary:
         screen = ProbeScreen(probe)
         kb = ProbeKeyboard(ScriptedKeyEventSource(list(events)), screen, frames, probe)
         io = PcIO(screen, kb)
-        io.attach_memory(NativeDeviceMemory(self.core, self.width))
+        # the probe's view of memory is the harness's own: the screen never reads program memory (flipjump
+        # io_devices/README.md), so it no longer keeps the view it is attached
+        dm = NativeDeviceMemory(self.core, self.width)
+        io.attach_memory(dm)
         if probe is not None:
-            probe.attach(screen.device_memory, self.core)
+            probe.attach(dm, self.core)
         if pre_run is not None:
             pre_run(probe)                       # e.g. the known-value check on the pristine image
         t = time.time()
         _c, ops, _e, _l, _p = self.core.run(io.read_bit, io.write_bit, IOReadOnEOF,
                                             last_ops_length=0)
-        return RunResult(list(screen.frames), list(screen.palettes), int(ops),
+        return RunResult(list(screen.frames), list(screen.shown_palettes), int(ops),
                          list(probe.readings) if probe is not None else [], time.time() - t, int(_c))
 
 
@@ -675,6 +703,7 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         modes = (PLAYER_MODE, MONSTER_MODE)
     from doomfj.world import infighting_on
     fight = infighting_on(modes[1])
+    sn, cn = _slot_nibbles(), _count_nibbles()        # M8 C2: slot ids and LEVEL COMPLETE's counters, by the map
     cells = {"viewx": Cell("viewx", "hex", 8, signed=True),
              "viewy": Cell("viewy", "hex", 8, signed=True),
              "viewangle": Cell("viewangle", "hex", 8),
@@ -685,44 +714,44 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
              "amap": Cell("amap", "hex", 1)}
     for k in ("kb_f", "kb_b", "kb_l", "kb_r", "kb_u"):
         cells[k] = Cell(k, "hex", 1)
-    cells["dstate"] = Cell("dstate", "hex", 1, count=ndoors)
-    cells["ddir"] = Cell("ddir", "hex", 1, count=ndoors)
-    cells["dsub"] = Cell("dsub", "hex", 1, count=ndoors)
-    cells["dwait"] = Cell("dwait", "hex", WAIT_NIBBLES, count=ndoors)
-    cells["dreq"] = Cell("dreq", "hex", 1, count=ndoors)
+    cells["dstate"] = Cell("dstate", "hex", 1, count=ndoors, array=True)
+    cells["ddir"] = Cell("ddir", "hex", 1, count=ndoors, array=True)
+    cells["dsub"] = Cell("dsub", "hex", 1, count=ndoors, array=True)
+    cells["dwait"] = Cell("dwait", "hex", WAIT_NIBBLES, count=ndoors, array=True)
+    cells["dreq"] = Cell("dreq", "hex", 1, count=ndoors, array=True)
     cells["pcard"] = Cell("pcard", "hex", 1)
-    cells["wfired"] = Cell("wfired", "hex", 1, count=max(nwalk, 1))
+    cells["wfired"] = Cell("wfired", "hex", 1, count=max(nwalk, 1), array=True)
     cells["lvdone"] = Cell("lvdone", "hex", 1)            # M7 P2a.2: the level is done
     cells["pusedn"] = Cell("pusedn", "hex", 1)            # ...and use held last tic
     # M7 P2b: the movers -- each lift's four door-shaped cells and its trigger, and the switch
     for name in ("lstate", "ldir", "lsub", "lreq"):
-        cells[name] = Cell(name, "hex", 1, count=nlift)
-    cells["lwait"] = Cell("lwait", "hex", WAIT_NIBBLES, count=nlift)
+        cells[name] = Cell(name, "hex", 1, count=nlift, array=True)
+    cells["lwait"] = Cell("lwait", "hex", WAIT_NIBBLES, count=nlift, array=True)
     # M8 F1.3: the fswitch VECTOR on a map in the wide layout (movers.fswitch_nibbles: each floor group's state, then
     # its step timer, a nibble each -- read as a tuple, movers.MoverPhase's `switched`); E1M1's one nibble, an int
     cells["fswitch"] = Cell("fswitch", "hex", 1, count=_fswitch_count())
     # M7 P3.1: the monsters' cells, `nmon` slots (monstercode.monster_decls, the schema's widths)
     if nmon:
-        cells["mon_state"] = Cell("mon_state", "hex", 2, count=nmon)
+        cells["mon_state"] = Cell("mon_state", "hex", 2, count=nmon, array=True)
         for name in ("mon_tics", "mon_facing", "mon_active"):
-            cells[name] = Cell(name, "hex", 1, count=nmon)
+            cells[name] = Cell(name, "hex", 1, count=nmon, array=True)
         # M7 P3.2a: the wake mode's cells; `thseen` is per monster SLOT (nmon), the render's marks
         for name in ("mon_target", "mon_reaction", "mon_movedir"):
-            cells[name] = Cell(name, "hex", 1, count=nmon)
+            cells[name] = Cell(name, "hex", 1, count=nmon, array=True)
         if fight:                       # M7 P8a I: 0 none, 1 the player, 2 + slot (docs/gp-final-plan.md 4.1)
-            cells["mon_target"] = Cell("mon_target", "hex", 2, count=nmon)
-        cells["mon_threshold"] = Cell("mon_threshold", "hex", 2, count=nmon)
-        cells["sched_cursor"] = Cell("sched_cursor", "hex", 2)
-        cells["thseen"] = Cell("thseen", "hex", 1, count=nmon)     # per SLOT, written by the render
+            cells["mon_target"] = Cell("mon_target", "hex", sn, count=nmon, array=True)
+        cells["mon_threshold"] = Cell("mon_threshold", "hex", 2, count=nmon, array=True)
+        cells["sched_cursor"] = Cell("sched_cursor", "hex", sn)
+        cells["thseen"] = Cell("thseen", "hex", 1, count=nmon, array=True)     # per SLOT, written by the render
         # M7 P3.2b: the chase's per-slot cells (monstercode.p32b_decls)
         for name, width in (("mon_movecount", 2), ("mon_rng", 2), ("mon_floorz", 4), ("msec", _sec_nibbles())):
-            cells[name] = Cell(name, "hex", width, count=nmon)
-        cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon)   # M7 P3.2c
-        cells["mon_health"] = Cell("mon_health", "hex", 3, count=nmon)               # M7 P4.2a: the damage
-        cells["mon_ambush"] = Cell("mon_ambush", "hex", 1, count=nmon)               # M7 P4.2b: the noise
+            cells[name] = Cell(name, "hex", width, count=nmon, array=True)
+        cells["mon_justattacked"] = Cell("mon_justattacked", "hex", 1, count=nmon, array=True)   # M7 P3.2c
+        cells["mon_health"] = Cell("mon_health", "hex", 3, count=nmon, array=True)               # M7 P4.2a: the damage
+        cells["mon_ambush"] = Cell("mon_ambush", "hex", 1, count=nmon, array=True)               # M7 P4.2b: the noise
         cells["snd_alert"] = Cell("snd_alert", "hex", 1, count=_nsound())
         for name in ("mon_shootable", "mon_solid", "mon_justhit"):
-            cells[name] = Cell(name, "hex", 1, count=nmon)
+            cells[name] = Cell(name, "hex", 1, count=nmon, array=True)
     # M7 P3.2b: the runtime things' positions and leaves (THING_PERSIST), `nrt` of them, 16 nibbles each
     # M7 P4.1: the player's weapon -- one cell each, `wp_own` the owned flags as one value (P9: five, the launcher's
     # last: weaponcode.WEAPONS), `wp_frm` two nibbles (P9: the launcher's frames made 17 -- weaponcode.FRAME_NIBBLES)
@@ -730,22 +759,22 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     for name, width in (("wp_rdy", 1), ("wp_pend", 1), ("wp_st", 2), ("wp_tics", 1), ("wp_sy", 2), ("fl_st", 2), ("fl_tics", 1), ("wp_rf", 2), ("wp_ad", 1), ("am_clip", 3), ("am_shell", 3), ("wp_own", len(_WC.WEAPONS)), ("rng_pl", 2), ("wp_frm", _WC.FRAME_NIBBLES), ("fl_frm", 1)):
         cells[name] = Cell(name, "hex", width)
     from doomfj.world import AIM_COLUMNS                             # issue #119 item 6: ONE definition
-    cells["aim_sid"] = Cell("aim_sid", "hex", 2, count=AIM_COLUMNS)  # M7 P4.2a: the aim window (doomfj.aimcode)
+    cells["aim_sid"] = Cell("aim_sid", "hex", sn, count=AIM_COLUMNS)  # M7 P4.2a: the aim window (doomfj.aimcode)
     # M7 P5 (docs/gp-p5-interface.md, "the cells' units"; monsters.MonsterPhase.hurt_state / proj_state / fx_state):
     # the player's health (12 bits, read unsigned -- the oracle masks), armor, armor type, damage count, death, and
     # the palette the last present showed (hurtcode); the fireball pool and the blood pool (projcode), rng_fx
     for name, width in (("p_hp", 3), ("p_ar", 2), ("p_at", 1), ("p_dc", 2), ("p_dead", 1), ("pal_cur", 1),
-                        ("rng_fx", 2), ("p_atk", 2)):                      # M7 P7: p_atk, 0 or 1 + the slot
+                        ("rng_fx", 2), ("p_atk", sn)):                     # M7 P7: p_atk, 0 or 1 + the slot
         cells[name] = Cell(name, "hex", width)
     from doomfj.world import FIREBALL_POOL, FX_POOL
     for pool, n in (("pj", FIREBALL_POOL), ("fx", FX_POOL)):
-        cells[pool + "_act"] = Cell(pool + "_act", "hex", 1, count=n)
-        for name, width in (("_x", 8), ("_y", 8), ("_st", 2), ("_ti", 1)) + ((("_mx", 8), ("_my", 8), ("_src", 2))
+        cells[pool + "_act"] = Cell(pool + "_act", "hex", 1, count=n, array=True)
+        for name, width in (("_x", 8), ("_y", 8), ("_st", 2), ("_ti", 1)) + ((("_mx", 8), ("_my", 8), ("_src", sn))
                                                                              if pool == "pj" else ()):
-            cells[pool + name] = Cell(pool + name, "hex", width, count=n)
+            cells[pool + name] = Cell(pool + name, "hex", width, count=n, array=True)
     if nrt:
-        cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt)
-        cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt)
+        cells["thpos_rt"] = Cell("thpos_rt", "hex", 16, count=nrt, array=True)
+        cells["thss_rt"] = Cell("thss_rt", "hex", 16, count=nrt, array=True)
     # M7 P6 / P7 (docs/gp-p67-interface.md 4.5): the loot, the barrels, the drops, the game's cells -- each group an
     # OPTIONAL_GROUP (a binary before P6 has none of them); widths and counts are the cells' units
     # (monsters.MonsterPhase.loot_state / barrel_state / game_state)
@@ -754,29 +783,31 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
         cells[name] = Cell(name, "hex", width)
     # P10: the menu's `g_live`, and the stats (statcode.PERSIST; MonsterPhase.game_state's units)
     cells["g_live"] = Cell("g_live", "hex", 1)
-    for name, width in (("st_kill", 2), ("st_item", 2), ("st_secn", 1)):
+    # M8 (gates-ready): the emitter's width, never a copied literal -- M8 C2: statcode.count_nibbles, by the map
+    for name, width in (("st_kill", cn), ("st_item", cn), ("st_secn", 1)):
         cells[name] = Cell(name, "hex", width)
     cells["st_secm"] = Cell("st_secm", "hex", 1, count=_nsecret())
     ndrop, nbar = _loot_counts()
-    cells["mdrop"] = Cell("mdrop", "hex", 1, count=ndrop)
+    cells["mdrop"] = Cell("mdrop", "hex", 1, count=ndrop, array=True)
     for name, width in (("bar_st", 2), ("bar_ti", 1), ("bar_hp", 2), ("bar_solid", 1)):
-        cells[name] = Cell(name, "hex", width, count=nbar)
+        cells[name] = Cell(name, "hex", width, count=nbar, array=True)
     # M7 P6: `thvis` (every game binary has it -- M14.5 / P1.5 / P2a.1 write it; no gate read it): 2 nibbles a
     # slot, the baked vanishable things' slots, then (P6) one per runtime pickup (monsters.MonsterViews.vis_state).
     # Asked for only with its count (`nthvis`: MonsterViews.nvis), which a binary before P6 does not have
     if nthvis:
-        cells["thvis"] = Cell("thvis", "hex", 2, count=nthvis)
+        cells["thvis"] = Cell("thvis", "hex", 2, count=nthvis, array=True)
     # M7 P8a (V, docs/gp-final-plan.md 4.1; monsters.MonsterPhase.p8a_state documents the units): P6+P7's turn flag,
     # the sink, knockback's cells (the per-slot ones only with `nmon`), infighting's barrel source -- each group an
     # OPTIONAL_GROUP (a binary built without the rule has none of its labels)
-    for name, width in (("p_tnh", 1), ("p_vd", 2), ("p_kmx", 8), ("p_kmy", 8), ("kb_live", 2)):
+    for name, width in (("p_tnh", 1), ("p_vd", 2), ("p_kmx", 8), ("p_kmy", 8), ("kb_live", sn)):
         cells[name] = Cell(name, "hex", width)
     if nmon:
         for name, width in (("mkx", 8), ("mky", 8), ("mfx", 4), ("mfy", 4)):
-            cells[name] = Cell(name, "hex", width, count=nmon)
+            cells[name] = Cell(name, "hex", width, count=nmon, array=True)
     cells["pj_z"] = Cell("pj_z", "hex", 4, count=FIREBALL_POOL)
-    cells["bar_src"] = Cell("bar_src", "hex", 2, count=nbar)
+    cells["bar_src"] = Cell("bar_src", "hex", sn, count=nbar, array=True)
     cells["p_rct"] = Cell("p_rct", "hex", 2)          # M8 L4 (monsters.MonsterPhase.p8a_state: 0..18)
+    cells["tp_w1"] = Cell("tp_w1", "hex", 1, count=_nonce())   # M8 C5: a W1 monster teleport's latch, 0 / 1
     # M8 (doomfj.lightcode; MonsterPhase.p8a_state's units): a state nibble and a 2-nibble count a thinker, the stream
     cells["ltst"] = Cell("ltst", "hex", 1, count=_nlight())
     cells["ltct"] = Cell("ltct", "hex", 2, count=_nlight())
@@ -784,8 +815,17 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0, nrt: 
     # M8: the switch textures (MonsterPhase.switch_state's units; a map without them declares neither label: OPTIONAL)
     from doomfj.switches import BUTTON_NIBBLES
     nsw, nsr = _nswitch()
-    cells["swpr"] = Cell("swpr", "hex", 1, count=max(nsw, 1))
-    cells["swtm"] = Cell("swtm", "hex", BUTTON_NIBBLES, count=max(nsr, 1))
+    cells["swpr"] = Cell("swpr", "hex", 1, count=max(nsw, 1), array=True)
+    cells["swtm"] = Cell("swtm", "hex", BUTTON_NIBBLES, count=max(nsr, 1), array=True)
+    # M8 C6 (MonsterPhase.p8a_state's units): the timed powers' counters, 3 nibbles each (OPTIONAL: their maps only)
+    from doomfj.powers import NIBBLES as _PWN
+    cells["p_inv"] = Cell("p_inv", "hex", _PWN)
+    cells["p_rad"] = Cell("p_rad", "hex", _PWN)
+    # M8 C8 (doomfj.soulcode.PERSIST; MonsterPhase.soul_state's units): the lost souls, one row each (OPTIONAL: a map
+    # without a soul declares none of them)
+    nsk = max(1, len(getattr(_idle_world(), "soul_slots", ())))
+    for name, width in (("sk_fly", 1), ("sk_inf", 1), ("sk_z", 8), ("sk_momz", 8), ("sk_ceil", 4)):
+        cells[name] = Cell(name, "hex", width, count=nsk, array=True)
     return cells
 
 
@@ -851,9 +891,28 @@ def _nlight() -> int:
     return max(1, len(_idle_world().light_thinkers))
 
 
+def _nonce() -> int:
+    """M8 C5: the W1 monster teleports (World.tele_once) -- `tp_w1`'s count (one at least: a map without them has no
+    such label, an OPTIONAL group)"""
+    return max(1, len(_idle_world().tele_once))
+
+
 def _nsecret() -> int:
     """P10: the secret sectors (World.secret_sectors) -- `st_secm`'s count"""
     return max(1, len(_idle_world().secret_sectors))
+
+
+def _slot_nibbles() -> int:
+    """M8 C2 (docs/c2-slot-ids.md): a monster / barrel slot id's width (world.slot_nibbles) -- aim_sid, mon_target
+    (infighting), sched_cursor, p_atk, pj_src, kb_live, bar_src: 2 on E1M1 / E1M2, 3 past 254 slots"""
+    from doomfj.world import slot_nibbles
+    return slot_nibbles(_idle_world().layout)
+
+
+def _count_nibbles() -> int:
+    """M8 C2: st_kill / st_item's width (statcode.count_nibbles: 3 when the map's monsters or pickups pass a byte)"""
+    from doomfj.statcode import count_nibbles
+    return count_nibbles(_idle_world())
 
 
 def _sec_nibbles() -> int:
@@ -950,9 +1009,10 @@ class Oracle:
 
     @property
     def nwalk(self):
-        """M7 P2a.1: the walk-over triggers (doors.walkover_triggers), one wfired bit each"""
-        from doomfj.doors import walkover_triggers
-        return len(walkover_triggers(self.secs, self.lds, self.sds, self.mw.vertexes(self.mapname)))
+        """M7 P2a.1: the walk-over triggers (doors.walkover_triggers), one wfired bit each -- M8 C3: and the S1
+        switch latches' after them (doors.wfired_count: the cell's count, as the emitter declares it)"""
+        from doomfj.doors import wfired_count
+        return wfired_count(self.secs, self.lds, self.sds, self.mw.vertexes(self.mapname))
 
     def known_pristine(self) -> dict:
         """what the game tier BAKES, from sources independent of the binary: the WAD's player
@@ -1055,7 +1115,8 @@ class Oracle:
         """M7 P4.0: the oracle's game screen (built once: it bakes the weapon's runs)"""
         if getattr(self, "_screen", None) is None:
             from doomfj.hud import GameScreen
-            self._screen = GameScreen(self.rm, self.mw, self.art, self.secs)   # the palette the build bakes: the map wad's
+            from doomfj.wall_renderer import plasma_game_on      # M8 C6: the rifle's frames (E1M6, E1M9)
+            self._screen = GameScreen(self.rm, self.mw, self.art, self.secs, plasma=plasma_game_on(self.mw, self.mapname))   # the palette the build bakes: the map wad's
         return self._screen
 
     # -- M7 P3.1: the monsters' views (doomfj.monsters.MonsterViews, the one mapping) -------------
@@ -1136,10 +1197,11 @@ class Oracle:
         """P10: any menu state's picture -- wall_renderer.menu_screen_pixels, the one mapping (the main menu by
         `live`'s variant; LEVEL COMPLETE's `stats` = (nsecret, digits))"""
         from doomfj.menu import palette_colours
-        from doomfj.wall_renderer import menu_screen_pixels
+        from doomfj.wall_renderer import menu_screen_pixels, plasma_game_on
         colours = palette_colours(bytes(b for rgb in self.mw.playpal(0) for b in rgb))
         return bytes(menu_screen_pixels(self.rm.cfg, colours, scr, sel, live, stats,
-                                        automap=self.automap))                         # M8: MAP, the help's M
+                                        automap=self.automap,                          # M8: MAP, the help's M
+                                        plasma=plasma_game_on(self.mw, self.mapname)))   # M8 C6: the help's key 6
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""
@@ -1180,7 +1242,7 @@ def codec_selftest(check) -> None:
     (a nibble v at jump word `v << 6`, a byte b at `b << 6`, flip words 0)"""
     dw = 64
     img = _FakeMemory()
-    base = {"num": 100 * dw, "one": 108 * dw, "arr": 109 * dw, "byt": 112 * dw, "end": 116 * dw}
+    base = {"num": 100 * dw, "one": 108 * dw, "arr": 109 * dw, "byt": 112 * dw, "wid": 116 * dw, "end": 118 * dw}
     val = 0xFE600000
 
     def pin(i):                                           # a blocked cell's BASE (bits 16+)
@@ -1192,7 +1254,20 @@ def codec_selftest(check) -> None:
         img.words[(base["arr"] + i * dw) // 32 + 1] = v << 6
     for i, v in enumerate((0xA5, 0x00, 0xFF, 0x3C)):      # byt: four byte cells
         img.words[(base["byt"] + i * dw) // 32 + 1] = v << 6
+    for i, v in enumerate((0xABC, 0x100)):                # wid: two 12-bit list cells (M8 F1.5, kind 'cell' n=3)
+        img.words[(base["wid"] + i * dw) // 32 + 1] = v << 6
     table = LabelTable(base, array("Q", sorted(base.values())), "<synthetic>")
+    wide = Probe({"wid": Cell("wid", "cell", 3, count=2)}, table, strict=False)
+    wide.attach(img, core=None)
+    check("C-1 codec: a 12-bit cell ('cell', n=3) reads its planted 0xABC / 0x100",
+          wide.read_cells() == {"wid": (0xABC, 0x100)}, str(wide.read_cells()))
+    as_byte = Probe({"wid": Cell("wid", "byte", count=2)}, table, strict=False)
+    as_byte.attach(img, core=None)
+    check("C-1 codec negative: the same cells read as 'byte' are NOT those values (0xBC / 0x00)",
+          as_byte.read_cells() == {"wid": (0xBC, 0x00)}, str(as_byte.read_cells()))
+    wide.write_cells({"wid": (0x123, 0xFFF)})
+    check("C-1 codec: a 12-bit cell written lands at value << 6 and reads back",
+          wide.read_cells() == {"wid": (0x123, 0xFFF)} and img.words[base["wid"] // 32 + 1] == 0x123 << 6)
     cells = {"num": Cell("num", "hex", 8, signed=True), "one": Cell("one", "hex", 1),
              "arr": Cell("arr", "hex", 1, count=3), "byt": Cell("byt", "byte", count=4),
              "raw": Cell("one", "raw", index=1)}
@@ -1339,6 +1414,8 @@ def selftest(fjm: Path, labels_path: Path) -> int:
     # ---- C2 PLANTED VALUES read back, sit where the layout says, and do what the program says ----
     # C2a WORD kind (an 8-nibble 16.16 number): plant a far, fractional viewpoint.
     tx, ty, ta = (1272 << 16) + 0x8000, (-724 << 16) + 0x4000, 0x2E000000   # inside E1M1
+    if orc.mapname != "E1M1":       # M8 (the gate-tool audit): another map's own spawn, fractional (E1M1's pose may be void)
+        tx, ty = (orc.spawn.x & 0xFFFF0000) + 0x8000, (orc.spawn.y & 0xFFFF0000) + 0x4000
     got = {}
 
     def plant_view(pr, f):
@@ -1483,6 +1560,9 @@ def selftest(fjm: Path, labels_path: Path) -> int:
         rr2 = gb.run(len(per_run), GS.events_for(GS.full_script(RECORDED_RUN + 1, 100)))
         check("C5 negative: a DIFFERENT run's script does not reproduce it",
               rr2.ops != RECORDED_RUN_OPS, format(rr2.ops, ","))
+    elif orc.mapname != "E1M1":     # M8: the recorded totals are E1M1 blocked27's -- another map has none to replay
+        print("  C5 SKIPPED on %s: the recorded totals are E1M1 blocked27's (sha256 %s...)"
+              % (orc.mapname, RECORDED_SHA16), flush=True)
     else:
         check("C5 recorded totals exist only for sha256 %s..." % RECORDED_SHA16, False,
               "this binary is %s" % gb.sha[:16])

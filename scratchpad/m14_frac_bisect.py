@@ -38,7 +38,6 @@ from doomfj.reference_model import ReferenceModel, SLOPERANGE
 from doomfj.wad import WadFile
 
 PROJ = ROOT / "src/fj/projection.fj"
-FIXP = ROOT / "src/fj/fixed_point.fj"
 U = 1 << 16
 M32 = 0xFFFFFFFF
 cmap = bake_bsp(WadFile.from_path(str(ROOT / "tests/fixtures/square_room.wad")), "MAP01")
@@ -95,7 +94,7 @@ def run_wall_x_range(tmp: Path):
     src.write_text("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n"
                    + "\n".join(data) + "\n", encoding="utf-8")
     out = tmp / "wxr.fjm"
-    fj.assemble([FIXP.resolve(), PROJ.resolve(), src.resolve()], out, memory_width=W,
+    fj.assemble([PROJ.resolve(), src.resolve()], out, memory_width=W,
                 print_time=False)
     io = FixedIO(b"")
     fj.run(out, io_device=io, print_time=False, print_termination=False)
@@ -122,7 +121,7 @@ def run_wall_setup(tmp: Path):
     src.write_text("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n"
                    + "\n".join(data) + "\n", encoding="utf-8")
     out = tmp / "wsetup.fjm"
-    fj.assemble([FIXP.resolve(), PROJ.resolve(), src.resolve()], out, memory_width=W,
+    fj.assemble([PROJ.resolve(), src.resolve()], out, memory_width=W,
                 print_time=False)
     io = FixedIO(b"")
     fj.run(out, io_device=io, print_time=False, print_termination=False)
@@ -191,7 +190,7 @@ def run_e1m1_segs(tmp: Path):
     src.write_text("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n"
                    + "\n".join(data) + "\n", encoding="utf-8")
     out = tmp / "e1seg.fjm"
-    fj.assemble([FIXP.resolve(), PROJ.resolve(), src.resolve()], out, memory_width=W,
+    fj.assemble([PROJ.resolve(), src.resolve()], out, memory_width=W,
                 print_time=False)
     io = FixedIO(b"")
     fj.run(out, io_device=io, print_time=False, print_termination=False)
@@ -268,7 +267,6 @@ def run_head_to_kernel(tmp: Path):
         f"p: hex.vec 8, {(v1x << 16) & M32}", f"q: hex.vec 8, {(v1y << 16) & M32}",
         f"r: hex.vec 8, {(v2x << 16) & M32}", f"s: hex.vec 8, {(v2y << 16) & M32}",
         f"ga: hex.vec 8, {fa}", f"gb: hex.vec 8, {fb}", f"gc: hex.vec 8, {fc}",
-        generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
         generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
         generate_slopediv_recip_lut_fj("slopediv_recip"),
         generate_slopediv_recip8_lut_fj("slopediv_recip8"),
@@ -283,8 +281,7 @@ def run_head_to_kernel(tmp: Path):
     src.write_text(prog, encoding="utf-8")
     out = tmp / "head.fjm"
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
-    fj.assemble([consts.resolve(), FIXP.resolve(), (ROOT / "src/fj/present.fj").resolve(),
-                 PROJ.resolve(), (ROOT / "src/fj/stream_render.fj").resolve(), src.resolve()],
+    fj.assemble([consts.resolve(), PROJ.resolve(), (ROOT / "src/fj/stream_render.fj").resolve(), src.resolve()],
                 out, memory_width=W, print_time=False)
     print("\nEMITTER HEAD -> wall_x_range, seg 424, via the real wire:")
     ok = True

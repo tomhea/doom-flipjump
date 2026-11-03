@@ -85,9 +85,12 @@ def door_phase_lines(switches, door_slot: dict, dead: str | None = None) -> List
     out += ["    hex.if0 1, duse, swd_end"]
     if dead is not None:
         out += [f"    hex.if1 1, {dead}, swd_end"]
+    from doomfj.doors import SWITCH_DOOR_CARDS, door_card_cell
     for k, s in doors:
         p = f"swd{k}"
         out += [f"    hex.if1 1, {cell(k)}, {p}_no"]
+        if s.special in SWITCH_DOOR_CARDS:            # M8 C3: a locked switch (S1 133) needs its card
+            out += [f"    hex.if0 1, {door_card_cell(SWITCH_DOOR_CARDS[s.special])}, {p}_no"]
         for t, si in enumerate(s.targets):          # EV_DoDoor: one of its doors at rest (doors.switch_ready)
             d = door_slot[si]
             nxt = f"{p}_t{t + 1}" if t + 1 < len(s.targets) else f"{p}_no"
@@ -107,7 +110,7 @@ def use_press_lines(switches, groups, wide: bool) -> List[str]:
     ng = len(groups)
     out = ["// == M8: the switch textures on a use press (doomfj.switches.use_presses), before the exit =="]
     for k, s in enumerate(lat):
-        if s.kind not in ("floor", "lift"):
+        if s.kind not in ("floor", "lift", "light"):
             continue
         p = f"swu{k}"
         out += [f"    hex.if1 1, {cell(k)}, {p}_no"]
@@ -115,8 +118,9 @@ def use_press_lines(switches, groups, wide: bool) -> List[str]:
             g = s.targets[0]
             if wide and groups[g].sub:
                 out += [f"    hex.if1 1, {floor_sub_cell(g, ng)}, {p}_no"]
-        else:                                       # EV_DoPlat: one of its lifts at rest at the top (state 0)
+        elif s.kind == "lift":                      # EV_DoPlat: one of its lifts at rest at the top (state 0)
             out += [f"    hex.if0 1, lstate + {slot}*dw, {p}_box" for slot in s.targets] + [f"    ;{p}_no"]
+        # M8 C4: a light switch ("light") always changes -- straight to its box
         out += [f"  {p}_box:", *_box_test(0, s.box, f"{p}_hit", f"{p}_no", tag=f"{p}_b"),
                 f"  {p}_hit:", *_press(k, sr), f"  {p}_no:"]
     return out

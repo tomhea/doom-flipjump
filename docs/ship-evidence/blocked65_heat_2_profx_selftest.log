@@ -1,0 +1,18 @@
+profx selftest -- (b) is the negative control; WORK = C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4c\profx
+  marker 23 (ptloc done (write_hex)) not found -- skipped
+  marker 38 (thing_pass alive (thing loaded)) not found -- skipped
+maps -> C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4c\profx: 26 objects, 2595541 label words, 29 markers, reset code ends at word 18731500
+  $ python drive.py still 3 selftest_stock --stock
+    engine: C:\Users\tomhe\Documents\fj160-path\flipjump\interpreter\_fjcore.pyd
+    still: 50,263,116 ops, 7/7 frames, 4.3s
+  $ python drive.py still 3 selftest --trace 0 50263116
+    engine: C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4c\profx\engX\_fjcore.pyd
+    still: 50,263,116 ops, 7/7 frames, 4.9s
+    prof_dump: 7 present records -> C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4c\profx\selftest.*
+(c) the instrument changes nothing it measures
+  (c) op totals equal: stock 50,263,116 vs profiler 50,263,116             ok
+  (c) every presented frame's pixels equal (7 frames)                      ok
+  (c) the histograms conserve ops (self = owner-attributed = the op total) ok  50,263,116 / 50,263,116
+  (c) the trace is exactly the run's ops (its per-word counts = the histogram) ok
+(a) owner attribution vs the op trace
+no sim.bind_things expansion in the label table

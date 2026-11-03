@@ -49,6 +49,12 @@ ROOT = P.ROOT
 # poses
 # ------------------------------------------------------------------------------------------------
 
+
+def _doors_tuple(ds) -> tuple:
+    """M8 w2fix: the binary's `dstate` as a tuple -- a count-1 cell reads as its value (probe.read_cells; E1M8's one
+    door) where the oracle's door states are a 1-tuple"""
+    return ds if isinstance(ds, tuple) else (ds,)
+
 def gamespeed_poses(run: int, n: int = 100) -> list:
     """every frame of gamespeed run `run` as the binary plays it: onewalk.DoorSim steps the oracle
     in m2_std_gate's order (doors tic, then the player), so doors a run opens are opened here too"""
@@ -135,7 +141,7 @@ def _collect(gb, orc, poses, r, p, readback, pixels, check_every, expect, mode, 
         doors = tuple(pose.get("doors") or (0,) * orc.ndoors)
         want = (pose["x"], pose["y"], pose["angle"], doors)
         state_ok.append(got is not None and (got["viewx"], got["viewy"], got["viewangle"],
-                                             got["dstate"]) == want and got["mode"] == 0)
+                                             _doors_tuple(got["dstate"])) == want and got["mode"] == 0)
         if pixels and f % check_every == 0:
             tgt = (expect or poses)[f]
             want_px = orc.render(tgt["x"], tgt["y"], tgt["angle"],

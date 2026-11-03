@@ -227,7 +227,7 @@ def _parse(text):
             elif not re.fullmatch(r"e1m1_cc_l\d+_(shut|go|out|d\d+)", cur):
                 body = None
             continue
-        mj = re.fullmatch(r"sim\.jump16 (cp[xy]) \+ (\d)\*dw, (.*)", s)
+        mj = re.fullmatch(r"hex\.switch (cp[xy]) \+ (\d)\*dw, (.*)", s)
         if mj:
             nodes[cur] = (mj.group(1), int(mj.group(2)), [t.strip() for t in mj.group(3).split(",")])
             continue
@@ -444,6 +444,6 @@ def test_a_mover_lines_stub_dispatches_on_its_movers_state(lvl):
     text, _root = collision_cells_fj("e1m1", lvl.rows, lvl.lists, doors=lvl.doors,
                                      movers={li: ("lstate + 0*dw", obs[li])})
     body = text.split(f"e1m1_cc_l{li}:")[1].split("stl.fret cc_lret")[0]
-    assert "sim.jump16 lstate + 0*dw, " in body
+    assert "hex.switch lstate + 0*dw, " in body
     assert body.count("stl.fcall e1m1_cc_test, cc_tret") == len(obs[li])
-    assert "ca_ob" not in body.split("sim.jump16")[0], "the static constants must not carry the floor"
+    assert "ca_ob" not in body.split("hex.switch")[0], "the static constants must not carry the floor"

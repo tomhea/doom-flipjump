@@ -108,7 +108,7 @@ def _run(tmp, name, program, feed, consts=False):
     out = tmp / (name + ".fjm")
     paths = [src.resolve()]
     if consts:
-        paths = [CFG.emit_fj_consts(tmp / "fj_consts.fj").resolve(), (FJ / "fixed_point.fj").resolve()] + paths
+        paths = [CFG.emit_fj_consts(tmp / "fj_consts.fj").resolve()] + paths
     fj.assemble(paths, out, memory_width=W, print_time=False)
     io = FixedIO(feed + bytes([0]))
     fj.run(out, io_device=io, print_time=False, print_termination=False)

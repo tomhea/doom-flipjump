@@ -14,7 +14,8 @@ THE PIECES (each spliced by the emitter where the model runs the rule):
     position is taken: monstermove.move_leaf_lines (P_Move: mm_ox16 / mm_oy16 -> cpx / cpy) and knockcode.mtry_lines
     (a knock step); a fire overwrites the candidate's mm_nx / mm_ny, its floor cp_floor and its leaf ptss -- the
     lines after take the destination as the move (the position, floorz, the relink, the sector) -- and leaves the
-    facing in `tp_fa` with `tp_hit` 1 for the slot's write-back.
+    facing in `tp_fa` with `tp_hit` 1 for the slot's write-back. M8 C5b: a destination on a mover (E1M7's 516) reads
+    its floor where the mover stands (`dest_floor_lines`: ms_seed_leaf), as world._teleport_monster's secs_c.
   * `slot_back_lines(m, ...)` -- per slot, after its move (monstercode.p32b_move_lines) or its knock move (the stub
     kbs<m>): tp_hit -> the facing, and on the walk the knock momentum and the position's fraction 0, tp_hit 0.
   * `stomp_leaf_lines(slots)` -- `tp_stomp` (stl.fcall tp_stomp, tp_sret): PIT_StompThing at (tp_dx, tp_dy) for
@@ -34,6 +35,15 @@ THE PIECES (each spliced by the emitter where the model runs the rule):
 The fire of one teleporter is ONE move's: the tests run in line order and the first front crossing decides -- a
 refused (stomped) monster teleport ends the tests too (the model's `break`).
 
+M8 C5 -- THE MONSTER-ONLY LINES (125 W1, 126 WR; doomfj.teleport): `player_lines` leaves them out (the player never
+fires one); `monster_lines` runs them as 97, and
+  * a W1 line (125, `Teleporter.once`) tests its latch `tp_w1 + j*dw` first (set: no test at all), and a crossing
+    from EITHER side sets it before the side decides (`cross_once_lines`; world._teleport_monster's `tp_fired`);
+  * a line whose destination some skill lacks (E1M5's 126: hard only, `Teleporter.skills`) tests `g_skill` (the
+    SKILLS index, restartcode's) after the crossing and goes on to the next line on a skill without it
+    (`skill_lines`); a line on every skill emits no test (E1M2's text is unchanged).
+`decls(tels)` / `level_start_lines(tels)` / `map_persist` carry `tp_w1` on a map with a W1 line (E1M7) only.
+
 THE REGISTERS a telefrag's dm_go touches inside the move it runs in: dm_leaf's window (dm_*), the thrust's (kb_tx ..
 kb_rr, kb_vx / kb_vy -- the victim's momentum through kbt<m> / kb_gm), drop_link's (dr_*, pw_t / pw_leaf), st_kill.
 In the walk's after_accept none is live; in the knock move's (kb_ptry) kb_vx / kb_vy are, and the fire zeroes them
@@ -49,11 +59,20 @@ from doomfj.teleport import REACTION_TICS, check_one_per_move
 M32 = 0xFFFFFFFF
 REACTION_NIBBLES = 2                    # p_rct: 0..18
 PERSIST = ("p_rct",)
+ONCE_PERSIST = ("tp_w1",)               # M8 C5: the W1 monster teleports' latches
 
 
-def decls() -> List[str]:
-    """the persisted `p_rct` (0 at boot: the level start) and the scratch"""
-    return [f"p_rct: hex.vec {REACTION_NIBBLES}, 0",
+def _n_once(tels) -> int:
+    from doomfj.teleport import once_lines
+    return len(once_lines(tels))
+
+
+def decls(tels=(), souls: bool = False) -> List[str]:
+    """the persisted `p_rct` (0 at boot: the level start) and the scratch; M8 C5: `tels` with a W1 line -- its
+    latches `tp_w1` (0 at boot); M8 soultele (`souls`, a map with a lost soul): the stomp's radius-16 bound tp_b16"""
+    n = _n_once(tels)
+    return ([f"tp_w1: hex.vec {n}, 0"] if n else []) + (["tp_b16: hex.vec 4"] if souls else []) + [
+            f"p_rct: hex.vec {REACTION_NIBBLES}, 0",
             "tp_c: hex.vec 8", "tp_dx: hex.vec 4", "tp_dy: hex.vec 4", "tp_r: hex.vec 2", "tp_pl: hex.vec 1",
             "tp_blk: hex.vec 1", "tp_hit: hex.vec 1", "tp_fa: hex.vec 1", "tp_a: hex.vec 4", "tp_b20: hex.vec 4",
             "tp_b30: hex.vec 4", "tp_e: hex.vec 8", "tp_g: hex.vec 8", "tp_bp: hex.vec 8", "tp_sret: hex.vec w/4",
@@ -64,12 +83,14 @@ def map_persist(map_wad, mapname: str) -> tuple:
     """the map-dependent persisted names (build._map_persist, the game tier's): `p_rct` on a map with a WR teleport --
     the reset leaves it to NEW GAME / the restart, like mc_don -- nothing on E1M1 (its image stays byte-identical)"""
     from doomfj.teleport import teleporters
-    return PERSIST if teleporters(map_wad, mapname) else ()
+    tels = teleporters(map_wad, mapname)
+    return (PERSIST + (ONCE_PERSIST if _n_once(tels) else ())) if tels else ()
 
 
-def level_start_lines() -> List[str]:
-    """NEW GAME / the restart: no reactiontime (the level start's, every skill)"""
-    return [f"    hex.zero {REACTION_NIBBLES}, p_rct"]
+def level_start_lines(tels=()) -> List[str]:
+    """NEW GAME / the restart: no reactiontime (the level start's, every skill); M8 C5: every W1 line armed"""
+    n = _n_once(tels)
+    return [f"    hex.zero {REACTION_NIBBLES}, p_rct"] + ([f"    hex.zero {n}, tp_w1"] if n else [])
 
 
 def reaction_lines(skip: str = "simmv_done") -> List[str]:
@@ -105,6 +126,51 @@ def cross_front_lines(p: str, tel, radius: int, regs: Sequence[str], fire: str) 
     return out
 
 
+def skill_lines(p: str, tel, go: str, no: str) -> List[str]:
+    """M8 C5: on to `go` when EV_Teleport finds `tel`'s destination on this game's skill (`g_skill`, the SKILLS index:
+    restartcode.skill_dispatch's shape), else on to `no`; [] (falling into `go`, which the caller places next) for a
+    line on every skill"""
+    from doomfj.teleport import ALL_SKILLS
+    from doomfj.restartcode import skill_dispatch
+    from doomfj.wall_renderer import SKILLS
+    from doomfj import gamedata as gd
+    if tel.skills == ALL_SKILLS:
+        return []
+    out = skill_dispatch(f"{p}_k", "g_skill", len(SKILLS))
+    on = [k for k, sk in enumerate(SKILLS) if tel.on_skill(sk)]
+    off = [k for k in range(len(SKILLS)) if k not in on]
+    assert on and off, tel.skills
+    out += [f"  {p}_k{k}:" for k in off] + [f"    ;{no}"] + [f"  {p}_k{k}:" for k in on] + [f"    ;{go}"]
+    assert gd.skill_bit(SKILLS[on[0]]) & tel.skills
+    return out
+
+
+def cross_once_lines(p: str, tel, j: int, radius: int, regs: Sequence[str], fire: str) -> List[str]:
+    """M8 C5: a W1 monster teleport (125) -- latch j (`tp_w1 + j*dw`) set: on to `<p>_no`; else a crossing either way
+    (the old centre on one side of `coord`, the new one on the other, the new centre strictly inside the extent
+    inflated by `radius` -- `teleport.crossed_side`) sets the latch, then the FRONT crossing goes on to the skill test
+    and `fire`, the back one to `<p>_no`"""
+    ox, oy, nx, ny = regs
+    a_old, a_new, o_new = (oy, ny, nx) if tel.axis == "y" else (ox, nx, ny)
+    L = tel.coord << 16
+    no, cell = f"{p}_no", f"tp_w1 + {j}*dw"
+    out = [f"    hex.if1 1, {cell}, {no}"]
+    out += _scmp(a_old, L, f"{p}_le", f"{p}_le", f"{p}_gt")
+    out += [f"  {p}_le:"] + _scmp(a_new, L, no, no, f"{p}_x")         # old <= L, new > L
+    out += [f"  {p}_gt:"] + _scmp(a_new, L, f"{p}_x", f"{p}_x", no)   # old > L, new <= L
+    out += [f"  {p}_x:"]
+    out += _scmp(o_new, (tel.lo - radius) << 16, no, no, f"{p}_x1")
+    out += [f"  {p}_x1:"]
+    out += _scmp(o_new, (tel.hi + radius) << 16, f"{p}_hit", no, no)
+    out += [f"  {p}_hit:", f"    hex.set 1, {cell}, 1"]
+    # the front: the old centre on the `c <= coord` side when front_le, else on the other
+    front, back = (f"{p}_ok", no)
+    out += _scmp(a_old, L, *((front, front, back) if tel.front_le else (back, back, front)))
+    out += [f"  {p}_ok:"] + skill_lines(p, tel, fire, no) + [f"    ;{fire}"]
+    out += [f"  {no}:"]
+    return out
+
+
 def _stomp_call(tel, radius_lines: List[str], player: int, end: str) -> List[str]:
     """the stomp at `tel`'s destination: a monster's (`player` 1: the living player tested too) refused on a hit; the
     player's (0) telefrags and goes on"""
@@ -134,11 +200,15 @@ def player_lines(tels, *, prefix: str, knock_cells: bool, knock_ctx: bool = Fals
     momentum 0. `knock_ctx`: the knock move's copy -- the loop's position (kb_px, kb_py) is the destination and its
     momentum (kb_vx, kb_vy) 0 (after the stomp: a telefrag's thrust runs through kb_vx / kb_vy)"""
     from doomfj.combat import PLAYER_R
+    from doomfj.teleport import player_teleporters
     check_one_per_move(tels)
+    tels = player_teleporters(tels)               # M8 C5: the monster-only lines are not his
+    if not tels:
+        return []
     end = f"{prefix}_end"
     out = [f"  // M8 L4: the WR teleports (doomfj.teleport, combat._teleport_player) -- {prefix}"]
     for k, tel in enumerate(tels):
-        out += cross_front_lines(f"{prefix}{k}", tel, PLAYER_R, regs, f"{prefix}_f{k}")
+        out += _front_gated(f"{prefix}{k}", tel, PLAYER_R, regs, f"{prefix}_f{k}")
     out += [f"    ;{end}"]
     for k, tel in enumerate(tels):
         X, Y = (tel.dest[0] << 16) & M32, (tel.dest[1] << 16) & M32
@@ -156,22 +226,45 @@ def player_lines(tels, *, prefix: str, knock_cells: bool, knock_ctx: bool = Fals
     return out
 
 
+SOUL_CTX = (None, "walk", "knock")
+
+
 def monster_lines(tels, *, prefix: str, knock_ctx: bool = False,
-                  regs=("mm_ox16", "mm_oy16", "cpx", "cpy")) -> List[str]:
+                  regs=("mm_ox16", "mm_oy16", "cpx", "cpy"), soul=None) -> List[str]:
     """world._teleport_monster after a monster's accepted move (regs: the old whole units << 16, the candidate, 16.16;
     the radius by mm_r30): the first teleporter crossed from its front -- unless a shootable thing (another monster,
     the living player) stands at its destination -- makes the destination the move: mm_nx / mm_ny, cp_floor (its
     sector's floor), ptss (its leaf), and tp_fa / tp_hit for the slot's write-back. `knock_ctx` (knockcode.mtry_lines):
-    the candidate kb_cx / kb_cy is the destination (kq_mfr copies it, fraction 0) and the momentum kb_vx / kb_vy 0"""
+    the candidate kb_cx / kb_cy is the destination (kq_mfr copies it, fraction 0) and the momentum kb_vx / kb_vy 0.
+
+    M8 soultele -- A LOST SOUL TELEPORTS (lostsoul._soul_teleported: EV_Teleport's z = floorz and momz 0,
+    P_TeleportMove's ceilingz the destination sector's ceiling), `soul` on a map with one (None: the text unchanged):
+      * "walk" (monstermove.mm_move, every slot's P_Move): the radius-16 tests too (mm_r16: the soul's own class) and
+        each fire sets cp_ceil (the destination's ceiling: mm_move's soul accept takes it into mm_skc) and mm_skz =
+        cp_floor << 16 (the soul context's z, read for a soul only); the momz is the slot's write-back's
+        (slot_back_lines' `extra`: the walk context holds none);
+      * "knock" (soulcode.try_lines, the soul's own P_TryMove of an XY step, a soul's only): radius 16 alone, and each
+        fire sets cp_ceil (sk_try's accept takes it into sw_c), sw_z = cp_floor << 16 and sw_mz 0 (the stub writes
+        both back)."""
+    from doomfj.teleport import once_lines
+    assert soul in SOUL_CTX, soul
+    assert soul != "knock" or knock_ctx, "the soul's XY try is a knock move"
     check_one_per_move(tels)
+    once = once_lines(tels)
     end = f"{prefix}_end"
-    out = [f"  // M8 L4: the WR teleports, a monster's move (doomfj.teleport, world._teleport_monster) -- {prefix}",
-           f"    hex.if1 1, mm_r30, {prefix}_r30"]
-    for rad in (20, 30):
-        if rad == 30:
-            out += [f"  {prefix}_r30:"]
+    radii = (16,) if soul == "knock" else (20, 30, 16) if soul == "walk" else (20, 30)
+    out = [f"  // M8 L4: the WR teleports, a monster's move (doomfj.teleport, world._teleport_monster) -- {prefix}"]
+    out += [f"    hex.if1 1, mm_r16, {prefix}_r16"] if soul == "walk" else []
+    out += [f"    hex.if1 1, mm_r30, {prefix}_r30"] if 30 in radii else []
+    for rad in radii:
+        if rad != radii[0]:
+            out += [f"  {prefix}_r{rad}:"]
         for k, tel in enumerate(tels):
-            out += cross_front_lines(f"{prefix}{rad}_{k}", tel, rad, regs, f"{prefix}_f{k}")
+            p = f"{prefix}{rad}_{k}"
+            if tel.once:                           # M8 C5: W1 125 -- its latch, set by a crossing either way
+                out += cross_once_lines(p, tel, once.index(tel), rad, regs, f"{prefix}_f{k}")
+            else:
+                out += _front_gated(p, tel, rad, regs, f"{prefix}_f{k}")
         out += [f"    ;{end}"]
     for k, tel in enumerate(tels):
         dx, dy = tel.dest
@@ -180,8 +273,10 @@ def monster_lines(tels, *, prefix: str, knock_ctx: bool = False,
                 *_stomp_call(tel, ["    hex.zero 2, tp_r", "    hex.mov 2, tp_r, mm_r"], 1, end),
                 *_fog_lines(f"{regs[2]} + 4*dw", f"{regs[3]} + 4*dw", tel),       # M8: the fogs (before ptss)
                 f"    hex.set 4, mm_nx, {dx & 0xFFFF:#x}", f"    hex.set 4, mm_ny, {dy & 0xFFFF:#x}",
-                f"    hex.set 8, cp_floor, {tel.dest_floor & M32:#x}",
-                "    hex.zero w/4, ptss", f"    hex.set 3, ptss, {tel.dest_leaf:#x}",
+                *dest_floor_lines(tel, ceil=bool(soul)),
+                *(["    hex.zero 4, mm_skz", "    hex.mov 4, mm_skz + 4*dw, cp_floor"] if soul == "walk" else []),
+                *(["    hex.zero 4, sw_z", "    hex.mov 4, sw_z + 4*dw, cp_floor", "    hex.zero 8, sw_mz"]
+                  if soul == "knock" else []),
                 f"    hex.set 1, tp_fa, {tel.facing}", "    hex.set 1, tp_hit, 1",
                 *([f"    hex.set 8, kb_cx, {(dx << 16) & M32:#x}", f"    hex.set 8, kb_cy, {(dy << 16) & M32:#x}",
                    "    hex.zero 8, kb_vx", "    hex.zero 8, kb_vy"] if knock_ctx else []),
@@ -190,35 +285,68 @@ def monster_lines(tels, *, prefix: str, knock_ctx: bool = False,
     return out
 
 
-def slot_back_lines(m: int, *, facing: str, knock: bool, walk: bool, tag: str) -> List[str]:
+def dest_floor_lines(tel, ceil: bool = False) -> List[str]:
+    """a monster fire's floorz and leaf: `cp_floor` = the destination sector's floor, `ptss` = its leaf. M8 C5b: on a
+    mover's sector (`Teleporter.dest_moves`, E1M7's 516) the floor NOW -- `ms_seed_leaf` on the leaf, its mover state
+    cell -> `cp_seedf` (it writes cp_seedf / cp_seedc only, neither read again before the next seed) -- as the model's
+    `secs_c`; else the stored floor, baked (the pre-C5b text). M8 soultele (`ceil`, a map with a lost soul): `cp_ceil`
+    = that sector's ceiling too (P_TeleportMove's ceilingz, a soul's sk_ceil) -- cp_seedc on a mover, else baked"""
+    if tel.dest_moves:
+        return ["    hex.zero w/4, ptss", f"    hex.set 3, ptss, {tel.dest_leaf:#x}",
+                "    stl.fcall ms_seed_leaf, ms_seed_ret", "    hex.mov 8, cp_floor, cp_seedf",
+                *(["    hex.mov 8, cp_ceil, cp_seedc"] if ceil else [])]
+    return [f"    hex.set 8, cp_floor, {tel.dest_floor & M32:#x}",
+            *([f"    hex.set 8, cp_ceil, {tel.dest_ceil & M32:#x}"] if ceil else []),
+            "    hex.zero w/4, ptss", f"    hex.set 3, ptss, {tel.dest_leaf:#x}"]
+
+
+def _front_gated(p: str, tel, radius: int, regs: Sequence[str], fire: str) -> List[str]:
+    """M8 C5: `cross_front_lines` into `fire`, through the skill test (`skill_lines`) when some skill lacks the
+    destination; a line on every skill is cross_front_lines exactly (E1M2's text)"""
+    from doomfj.teleport import ALL_SKILLS
+    if tel.skills == ALL_SKILLS:
+        return cross_front_lines(p, tel, radius, regs, fire)
+    no = f"{p}_no"
+    cross = cross_front_lines(p, tel, radius, regs, f"{p}_s")
+    assert cross[-1].strip() == no + ":"
+    return cross[:-1] + [f"  {p}_s:"] + skill_lines(p, tel, fire, no) + [f"  {no}:"]
+
+
+def slot_back_lines(m: int, *, facing: str, knock: bool, walk: bool, tag: str,
+                    extra: Sequence[str] = ()) -> List[str]:
     """slot m's write-back after its move (`walk`: monstercode.p32b_move_lines) or its knock move (the stub kbs<m>,
     which writes its momentum and fraction back itself): a teleport (tp_hit) -> the facing cell `facing` = tp_fa and,
-    on the walk with knockback on, mkx / mky / mfx / mfy 0 (world._teleport_monster); tp_hit 0"""
+    on the walk with knockback on, mkx / mky / mfx / mfy 0 (world._teleport_monster); tp_hit 0. M8 soultele: `extra`
+    -- lines run on a teleport too (a lost soul's walk: its sk_momz 0)"""
     skip = f"{tag}{m}_n"
     return [f"    hex.if0 1, tp_hit, {skip}",
             "    hex.zero 1, tp_hit",
             f"    hex.mov 1, {facing}, tp_fa",
             *([f"    hex.zero 8, mkx + {8 * m}*dw", f"    hex.zero 8, mky + {8 * m}*dw",
                f"    hex.zero 4, mfx + {4 * m}*dw", f"    hex.zero 4, mfy + {4 * m}*dw"] if (knock and walk) else []),
+            *extra,
             f"  {skip}:"]
 
 
-def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True, knock: bool = True) -> List[str]:
+def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True, knock: bool = True, sn: int = 2) -> List[str]:
     """`tp_stomp`, jumping over itself: PIT_StompThing at the destination (tp_dx, tp_dy) for radius tp_r over each
     shootable monster's box (`slots`: [(runtime thing, radius)] per slot -- slot j is dm_go's id j + 1;
     mon_shootable) -- |thing - dest| < r + r', strict, whole units -- and, with tp_pl 1, the living player's (`hurt`:
     p_dead is not shootable), 16.16. tp_pl 1 (a monster teleporting): the first hit sets tp_blk 1 and returns. tp_pl 0
     (the player): each hit is a TELEFRAG -- `tp_frag` (dm_go, dm_melee TELEFRAG; `knock`: kb_tf 1 around it) -- and
-    the loop goes on; tp_blk stays 0"""
+    the loop goes on; tp_blk stays 0. M8 C2: `sn` (world.slot_nibbles) -- dm_id's width"""
     from doomfj.damagecode import TELEFRAG
     from doomfj.combat import PLAYER_R
     from doomfj.monstermove import _add_const
+    b16 = any(rad == 16 for _t, rad in slots)          # M8 soultele: a lost soul (radius 16) at the destination
     out = [";tp_stomp_end", "tp_stomp:",
            "    hex.zero 1, tp_blk",
            "    hex.zero 4, tp_b20", "    hex.mov 2, tp_b20, tp_r", "    hex.mov 4, tp_b30, tp_b20",
-           *_add_const(4, "tp_b20", 20), *_add_const(4, "tp_b30", 30)]
+           *(["    hex.mov 4, tp_b16, tp_b20"] if b16 else []),
+           *_add_const(4, "tp_b20", 20), *_add_const(4, "tp_b30", 30),
+           *(_add_const(4, "tp_b16", 16) if b16 else [])]
     for j, (t, rad) in enumerate(slots):
-        assert rad in (20, 30), rad
+        assert rad in (20, 30, 16), rad
         bd, nj = f"tp_b{rad}", f"tp_s{j}_n"
         out += [f"    hex.if0 1, mon_shootable + {j}*dw, {nj}",
                 f"    hex.mov 4, tp_a, thpos_rt + {16 * t + 4}*dw",
@@ -230,7 +358,7 @@ def stomp_leaf_lines(slots: Sequence[tuple], *, hurt: bool = True, knock: bool =
                 f"    hex.scmp 4, tp_a, {bd}, tp_s{j}_h, {nj}, {nj}",
                 f"  tp_s{j}_h:",                                             # a hit: refused, or a telefrag
                 "    hex.if1 1, tp_pl, tp_stk",
-                f"    hex.set 2, dm_id, {j + 1}",
+                f"    hex.set {sn}, dm_id, {j + 1}",
                 "    stl.fcall tp_frag, tp_fret",
                 f"  {nj}:"]
     out += ["    hex.if0 1, tp_pl, tp_out"]

@@ -60,7 +60,7 @@ from doomfj.texturecompiler import _index_nibbles
 from doomfj.wad import WadFile
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 CFG = Config()
@@ -220,7 +220,6 @@ def _program(lists, cases, wcases, ecases=()):
         body = wr.sprite_block_body(bl, SPRITE_HEIGHT_BUCKETS)
         bank += [";%#x * dw" % v for v in body] + [";0 * dw"] * (wr.SPR_BLOCK_STRIDE - len(body))
     main = ["stl.startup_and_init_all",
-            generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
             generate_emit_dispatch_table_fj("cm", CMV, index_nibbles=_index_nibbles(len(CMV)),
                                             over_align=True),
             wr.sprite_rowmap_fj(CFG),
@@ -231,7 +230,7 @@ def _program(lists, cases, wcases, ecases=()):
                  "    hex.set 4, t_blk, %d" % i,
                  "    stream.frag_derive t_s, t_blk, gps_ybase, gps_top, gps_sy1, gps_sy2, "
                  "gps_smidx, gps_ptr, gps_ridx",
-                 "    byte.emit gps_sy1",                          # a filler down to the fragment
+                 "    hex.print gps_sy1",                          # a filler down to the fragment
                  "    stl.output_char %d" % FILLER,
                  "    stream.frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx",
                  "    stl.output_char %d" % H,                     # ... and one to the bottom
@@ -594,9 +593,9 @@ def _record_program(src, cases, seen_on=False, ledges=None):
                      "    hex.set 8, trb_frac_u, %d" % (u << 16), "    hex.set 8, trb_tistep, 0",
                      "    hex.set 2, trb_dw_max, %d" % (DW_REC - 1),
                      "    hex.set w/4, trb_drawn_b, drawn",
-                     "    frame.ptr_index4 trb_drawn_p, trb_drawn_b, trb_col_x",
+                     "    hex.ptr_index 3, trb_drawn_p, trb_drawn_b, trb_col_x",
                      "    hex.set w/4, trb_sprflag_b, sprflag",
-                     "    frame.ptr_index4 trb_sprflag_p, trb_sprflag_b, trb_col_x",
+                     "    hex.ptr_index 3, trb_sprflag_p, trb_sprflag_b, trb_col_x",
                      "    stl.fcall t_col_leaf, t_ret"]
     ncol = N_COLS * len(cases)
     for base, n in (("gpslot", wr.SPR_THING_SLOT_BYTES * (len(cases) + 1)),

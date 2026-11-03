@@ -1,4 +1,5 @@
-"""Host mirror of src/fj/fixed_point.fj — host math == fj math, bit-for-bit (D12/R6).
+"""Host mirror of the stl's fixed-point macros (flipjump hex/mul.fj: hex.fixed_mul, hex.fixed_mul_low, hex.mul_low,
+hex.mul_const; hex/div.fj: hex.fixed_div) — host math == fj math, bit-for-bit (D12/R6).
 
 Values are raw unsigned n-nibble integers (n nibbles = 4n bits). The signed Q-format
 interpretation is two's-complement over those 4n bits. These functions reproduce exactly what

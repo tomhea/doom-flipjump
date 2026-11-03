@@ -1,0 +1,518 @@
+{
+ "map": "E1M6",
+ "what": "the gates' ROLES on E1M6 (scratchpad/gp/gate_roles.py reads them; gate_targets.py writes them)",
+ "roles": {
+  "key_doors": {
+   "blue": [
+    78
+   ],
+   "yellow": [
+    163
+   ],
+   "red": [
+    138,
+    207
+   ]
+  },
+  "cards": {
+   "blue": [
+    -2000,
+    544,
+    240
+   ],
+   "yellow": [
+    144,
+    -480,
+    16
+   ],
+   "red": [
+    -1600,
+    -1504,
+    -488
+   ]
+  },
+  "yellow_door": 163,
+  "red_door": 138,
+  "below_card_sector": 272,
+  "blaze_door": 47,
+  "wr_lift": {
+   "sector": 374,
+   "pose": [
+    -224,
+    745,
+    1073741824
+   ]
+  },
+  "sr_lift": {
+   "sector": 363,
+   "tag": 14
+  },
+  "reversal_door": 156,
+  "lift_leaf_sector": 374,
+  "pickup_walks": [
+   [
+    -704,
+    1968,
+    2147483648
+   ],
+   [
+    -864,
+    1968,
+    0
+   ],
+   [
+    -736,
+    1968,
+    2147483648
+   ]
+  ],
+  "chain": {
+   "barrels": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "west_of": null
+  },
+  "block_barrel": 0,
+  "nukage_sector": 44,
+  "court": {
+   "points": [
+    [
+     -718,
+     74
+    ],
+    [
+     -701,
+     91
+    ]
+   ],
+   "angle": 2684354560,
+   "facing_slot": 114
+  },
+  "teleports": [
+   [
+    1361,
+    97,
+    10,
+    367
+   ],
+   [
+    2318,
+    126,
+    7,
+    245
+   ],
+   [
+    2321,
+    126,
+    6,
+    13
+   ],
+   [
+    2672,
+    97,
+    11,
+    368
+   ]
+  ],
+  "exit": [
+   1546,
+   11
+  ]
+ },
+ "na": {
+  "blue_door": "E1M6 has no door the model calls blue",
+  "card_pose": "no standing pose of E1M6 walks onto its blue card in 4 frames",
+  "walkovers": "E1M6 has no W1 walk-over door",
+  "floor_switch": "E1M6 has no floor switch",
+  "I3": "no candidate of 15 places on E1M6's oracle (gate_targets sweep: the claim is not met without a death)",
+  "I5": "no candidate of 10 places on E1M6's oracle (gate_targets sweep: the claim is not met without a death)",
+  "I6": "no candidate of 12 places on E1M6's oracle (gate_targets sweep: the claim is not met without a death)",
+  "C2": "no candidate of 12 places on E1M6's oracle (gate_targets sweep: the claim is not met without a death)",
+  "S4": "no candidate of 40 places on E1M6's oracle (gate_targets sweep: the claim is not met without a death)",
+  "CG1": "no candidate of 40 places on E1M6's oracle (gate_targets sweep: the claim is not met without a death)",
+  "D2": "no candidate of 1 places on E1M6's oracle (gate_targets sweep: the claim is not met)"
+ },
+ "candidates": {
+  "blue_door": [],
+  "card_pose": [
+   {
+    "value": [
+     -1976,
+     544,
+     2147483648
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -1978,
+     553,
+     2412924840
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -1983,
+     561,
+     2684354560
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -1991,
+     566,
+     2955784280
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -2000,
+     568,
+     3221225472
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -2009,
+     566,
+     3486666664
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -2017,
+     561,
+     3758096384
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -2022,
+     553,
+     4029526104
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -2024,
+     544,
+     0
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -2022,
+     535,
+     265441192
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -2017,
+     527,
+     536870912
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -2009,
+     522,
+     808300632
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -2000,
+     520,
+     1073741824
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -1991,
+     522,
+     1339183016
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -1983,
+     527,
+     1610612736
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   },
+   {
+    "value": [
+     -1978,
+     535,
+     1882042456
+    ],
+    "refused": "S2: the oracle does not do what it claims"
+   }
+  ],
+  "below_card_sector": [
+   {
+    "value": 53,
+    "refused": "S4: the oracle does not do what it claims"
+   },
+   {
+    "value": 272,
+    "refused": null
+   }
+  ],
+  "blaze_door": [
+   {
+    "value": 4,
+    "refused": "placing it: KeyError: 4"
+   },
+   {
+    "value": 47,
+    "refused": null
+   }
+  ],
+  "wr_lift": [
+   {
+    "value": {
+     "sector": 374,
+     "pose": [
+      -224,
+      745,
+      1073741824
+     ]
+    },
+    "refused": null
+   }
+  ],
+  "sr_lift": [
+   {
+    "value": {
+     "sector": 363,
+     "tag": 14
+    },
+    "refused": null
+   }
+  ],
+  "reversal_door": [
+   {
+    "value": 156,
+    "refused": null
+   }
+  ],
+  "pickup_walks": [
+   {
+    "value": [
+     1328,
+     -936,
+     0
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1360,
+     -936,
+     0
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1584,
+     -936,
+     2147483648
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1616,
+     -936,
+     2147483648
+    ],
+    "items_on_the_ray": 7,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -928,
+     1968,
+     0
+    ],
+    "items_on_the_ray": 6,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -704,
+     1968,
+     2147483648
+    ],
+    "items_on_the_ray": 6,
+    "refused": null
+   },
+   {
+    "value": [
+     -672,
+     1968,
+     2147483648
+    ],
+    "items_on_the_ray": 6,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -596,
+     36,
+     3221225472
+    ],
+    "items_on_the_ray": 6,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -576,
+     -208,
+     1073741824
+    ],
+    "items_on_the_ray": 6,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -576,
+     48,
+     3221225472
+    ],
+    "items_on_the_ray": 6,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1392,
+     -936,
+     0
+    ],
+    "items_on_the_ray": 6,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     1552,
+     -936,
+     2147483648
+    ],
+    "items_on_the_ray": 6,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -1792,
+     -1504,
+     0
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -1792,
+     -1472,
+     0
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -864,
+     1968,
+     0
+    ],
+    "items_on_the_ray": 5,
+    "refused": null
+   },
+   {
+    "value": [
+     -736,
+     -160,
+     0
+    ],
+    "items_on_the_ray": 5,
+    "refused": "claim not met"
+   },
+   {
+    "value": [
+     -736,
+     1968,
+     2147483648
+    ],
+    "items_on_the_ray": 5,
+    "refused": null
+   }
+  ],
+  "chain": [
+   {
+    "value": {
+     "barrels": [
+      0,
+      1,
+      2,
+      3,
+      4
+     ],
+     "west_of": null
+    },
+    "refused": null
+   }
+  ],
+  "block_barrel": [
+   {
+    "value": 0,
+    "refused": null
+   }
+  ],
+  "nukage_sector": [
+   {
+    "value": 44,
+    "refused": null
+   }
+  ]
+ },
+ "provenance": {
+  "generator": "scratchpad/gp/gate_targets.py",
+  "generator_sha16": "316e9d41527e77a7",
+  "wad": "tests/fixtures/freedoom_e1m6.wad",
+  "wad_sha16": "d4963e463e2cd367",
+  "model_sha16": {
+   "src/doomfj/doors.py": "b70d42ab7e602a47",
+   "src/doomfj/movers.py": "fb0c329dc1661725",
+   "src/doomfj/world.py": "c1f109b94ea5be48",
+   "src/doomfj/combat.py": "f56b8d0f96d3eb55",
+   "scratchpad/gp/p2a_gate.py": "7f4aed53123d1f45",
+   "scratchpad/gp/fight_gate.py": "d421f4e82e88c6f3"
+  },
+  "fight_verified": true,
+  "seconds": 3070
+ }
+}

@@ -38,7 +38,6 @@ from doomfj.movers import lift_states, switch_sectors
 from doomfj.reference_model import ML_BLOCKING, apply_sector_heights
 from doomfj.world import DROPOFF_MAX, OK, STEP_UP, World
 
-FIXP = Path("src/fj/fixed_point.fj")
 SIM = Path("src/fj/sim.fj")
 M32 = 0xFFFFFFFF
 N = 700
@@ -131,7 +130,7 @@ def _assemble(tmp, lvl, text, root, name, seed=None):
     src.write_text(prog, encoding="utf-8")
     out = tmp / ("%s.fjm" % name)
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
-    fj.assemble([consts.resolve(), FIXP.resolve(), SIM.resolve(), src.resolve()], out, memory_width=W,
+    fj.assemble([consts.resolve(), SIM.resolve(), src.resolve()], out, memory_width=W,
                 print_time=False)
     return out
 

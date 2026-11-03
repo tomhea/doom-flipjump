@@ -72,9 +72,9 @@ def rec_setup(i):
     s = fr.slot_of[i]
     return ["hex.set 8, trb_col_x, %d" % c["x"], "hex.set 8, trb_tx2, %d" % c["x"],
             "hex.set 8, trb_frac_u, 0", "hex.set 8, trb_tistep, 0", "hex.set 2, trb_dw_max, 20",
-            "hex.set w/4, trb_drawn_b, drawn", "frame.ptr_index4 trb_drawn_p, trb_drawn_b, trb_col_x",
+            "hex.set w/4, trb_drawn_b, drawn", "hex.ptr_index 3, trb_drawn_p, trb_drawn_b, trb_col_x",
             "hex.set w/4, trb_sprflag_b, sprflag",
-            "frame.ptr_index4 trb_sprflag_p, trb_sprflag_b, trb_col_x",
+            "hex.ptr_index 3, trb_sprflag_p, trb_sprflag_b, trb_col_x",
             "hex.set w/4, trb_blk_const, %d" % i, "hex.set 1, hdfl, 1", "hex.set 1, ballow, 1",
             "hex.set 8, trb_y0, %d" % (fr.slot_y0[s - 1] & 0xFFFFFFFF),
             "hex.set 2, trb_shade_row, %d" % c["lr"]]

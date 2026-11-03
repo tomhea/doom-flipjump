@@ -21,7 +21,7 @@ def msec_value(secs: Sequence[int], nib: int) -> int:
 
 def sector_dispatch(prefix: str, cell: str, target: Callable[[int], Optional[str]], miss: str, nsec: int,
                     nib: int) -> List[str]:
-    """jump to `target(s)` for the sector s in the `nib`-nibble `cell` -- a `sim.jump16` per nibble, the top nibble
+    """jump to `target(s)` for the sector s in the `nib`-nibble `cell` -- a `hex.switch` per nibble, the top nibble
     first; `target(s)` None, or s >= nsec, goes to `miss`. A node exists only where some sector below it has a target.
     The node above the leaves for the sectors 16v..16v+15 is `<prefix>h<v>`; at 3 nibbles the top level's nodes (the
     sectors 256v..256v+255) are `<prefix>hh<v>`. The first line has no label (the caller's own precedes it)."""
@@ -43,10 +43,10 @@ def sector_dispatch(prefix: str, cell: str, target: Callable[[int], Optional[str
             return leaf[v] if v < nsec and leaf[v] is not None else miss
         return lab(level, v) if live(level, v) else miss
 
-    out = ["    sim.jump16 %s, %s" % (at(nib - 1), ", ".join(entry(nib - 1, d) for d in range(16)))]
+    out = ["    hex.switch %s, %s" % (at(nib - 1), ", ".join(entry(nib - 1, d) for d in range(16)))]
     for level in range(nib - 1, 0, -1):
         for v in range(-(-nsec // 16 ** level)):
             if live(level, v):
-                out += ["  %s:" % lab(level, v), "    sim.jump16 %s, %s" % (
+                out += ["  %s:" % lab(level, v), "    hex.switch %s, %s" % (
                     at(level - 1), ", ".join(entry(level - 1, 16 * v + d) for d in range(16)))]
     return out

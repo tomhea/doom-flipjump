@@ -19,7 +19,27 @@ cancelled in `scripts/test.sh` at 6 h 00 m). tests/host/test_shards.py holds the
 balance."""
 import json
 import os
+import re
+import sys
 from pathlib import Path
+
+# THIS checkout's src first, for the run and for every subprocess it starts (M8 lesson, the C3 agent 2026-10-19):
+# the installed `doomfj` points at the main repo, so a worktree's pytest without PYTHONPATH=src silently tested the
+# MAIN repo's code. tests/host/test_conftest_src.py holds it.
+SRC = str(Path(__file__).resolve().parents[1] / "src")
+# an EXPLICIT PYTHONPATH whose first entry holds a doomfj package is honoured: the mutation tests run this suite on a
+# mutated copy of src that way (test_slot_cap_oracle and friends) -- only a missing / relative "src" one is replaced
+_first = os.environ.get("PYTHONPATH", "").split(os.pathsep)[0]
+if _first and os.path.isabs(_first) and os.path.isfile(os.path.join(_first, "doomfj", "__init__.py")):
+    SRC = os.path.abspath(_first)
+if sys.path[:1] != [SRC]:
+    sys.path.insert(0, SRC)
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    [SRC] + [x for x in os.environ.get("PYTHONPATH", "").split(os.pathsep) if x and x != "src" and os.path.abspath(x) != SRC])
+if "doomfj" in sys.modules:
+    assert os.path.dirname(os.path.dirname(os.path.abspath(sys.modules["doomfj"].__file__))) == SRC, (
+        "doomfj was imported from %s before conftest ran, not from this checkout's %s"
+        % (sys.modules["doomfj"].__file__, SRC))
 
 DURATIONS = Path(__file__).resolve().parent / "durations.json"
 
@@ -31,14 +51,27 @@ def shard_of(spec: str):
     return i, n
 
 
+# M8 C2 parametrized many tests over the maps (tests/fj/wide_maps.py): `test_x[box_sign]` became `test_x[E1M1-box_sign]`
+# and `test_x[E1M6-box_sign]`. Until the table holds the new ids, such a test takes its map-less id's figure (E1M6's
+# times WIDE_FACTOR, the E1M6 / E1M1 ratio CI measured on #154's heaviest such tests, test_monster_wake's; test_knock
+# and test_death_turn measured 1.3 and 1.4) -- without it the file figure (0.05 s) priced 70 tests of 4-10 min each as
+# nothing and piled them into one shard (#154's shard 9: cancelled at 4 h).
+MAP_PARAM = re.compile(r"\[(E1M\d)-?")
+WIDE_FACTOR = 2.2
+
+
 def estimates(nodeids, table=None) -> list:
     """each node id's estimated seconds (tests/durations.json)"""
     t = table if table is not None else json.loads(DURATIONS.read_text(encoding="utf-8"))
     out = []
     for nid in nodeids:
         f = nid.split("::")[0]
+        m = MAP_PARAM.search(nid)
+        bare = MAP_PARAM.sub("[", nid).replace("[]", "") if m else None
         if nid in t["tests"]:
             out.append(float(t["tests"][nid]))
+        elif bare in t["tests"]:
+            out.append(float(t["tests"][bare]) * (1.0 if m.group(1) == "E1M1" else WIDE_FACTOR))
         elif f in t["files"]:
             out.append(float(t["files"][f]))
         else:

@@ -60,6 +60,7 @@ import probe as P                                                            # n
 import onewalk                                                               # noqa: E402
 import gate_roles                                                            # noqa: E402  (M8)
 from doomfj import doors as D                                                # noqa: E402
+from doomfj.keyboard import KC_DOWN, KC_UP                                    # noqa: E402
 from doomfj.doors import in_use_box_fixed                                    # noqa: E402
 from doomfj.fixedpoint import _signed                                        # noqa: E402
 from doomfj.reference_model import SimState                                  # noqa: E402
@@ -69,7 +70,7 @@ from doomfj.automap import has_page                                       # noqa
 from doomfj.menu import (LEVEL_DONE_ENTER, LEVEL_DONE_SCR, LEVEL_DONE_SCREENS, menu_step,  # noqa: E402
                          palette_colours, stats_digits)
 from doomfj.wall_renderer import (BOOT_MENU_SKILL, BOOT_SKILL, SKILLS, STANDALONE_POLLS,     # noqa: E402
-                                  menu_screen_pixels)
+                                  menu_screen_pixels, plasma_game_on)
 from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent             # noqa: E402
 
 M32 = 0xFFFFFFFF
@@ -82,7 +83,7 @@ READ = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "dstate", "ddir", "ds
         "mon_target", "mon_reaction", "mon_threshold", "mon_movedir", "sched_cursor", "thseen",   # M7 P3.2a
         "mon_movecount", "mon_rng", "mon_floorz", "msec", "thpos_rt", "thss_rt",                   # M7 P3.2b
         "mon_justattacked")                                                                       # M7 P3.2c
-MENU_CODES = {"enter": 0x0D, "esc": 0x1B, "up": 0x80, "dn": 0x81}     # M7 P6: up / down (F5's NEW GAME medium)
+MENU_CODES = {"enter": 0x0D, "esc": 0x1B, "up": KC_UP, "dn": KC_DOWN}     # M7 P6: up / down (F5's NEW GAME medium)
 CARD_TYPE = 5
 # M7 P6: the player mode a Mirror steps when its caller names none -- None is the game tier's
 # (wall_renderer.PLAYER_MODE); `--player-mode` sets it for an --oracle-only run (the rung's target before the
@@ -157,7 +158,28 @@ class Mirror:
             D.door_stride, D.door_stay = saved
             C.CombatMixin._touch = orig_touch
 
+    @staticmethod
+    def _exit_line(mph, st) -> None:
+        """M8 C9 (World._use_lines' exit, mirrored): the FIRST exit box the press is in, as the World tests them -- on a
+        map with more than one exit switch line (E1M3: 11 and the secret 51) that line's own switch cell swaps
+        (World.switch_exit) and a secret one sets g_secretexit; on a one-exit map nothing (its latch is lvdone).
+        The playthrough gate's E1M3 b4 run parted here on its LEVEL COMPLETE frame: the binary set swpr[11], this
+        mirror did not (0 px: the frame shows LEVEL COMPLETE)"""
+        w = getattr(mph, "world", None)
+        if w is None or not getattr(w, "exit_box_lines", None):
+            return
+        for k, box in enumerate(w.exit_boxes):
+            if in_use_box_fixed(box, st.x, st.y):
+                if w.exit_secret[k]:
+                    w.ws.g_secretexit = 1
+                w.switch_exit(w.exit_box_lines[k])
+                return
+
     def run(self, pose, keys: list, pcard: int = 0, fswitch=None) -> list:
+        """the whole scenario at once: `steps` listed"""
+        return list(self.steps(pose, keys, pcard, fswitch))
+
+    def steps(self, pose, keys, pcard: int = 0, fswitch=None, boot: bool = False):
         """-> per frame {"pose", "phase", "taken", "mode", "scr", "sel", "lvdone", "pusedn",
         "drawn"}: the state after the frame, and what it drew ("world", or the menu screen). The
         binary's order: the menu's state machine on the frame's events, then -- on a world frame,
@@ -178,8 +200,9 @@ class Mirror:
         ph = dp.initial()
         ph = (ph[0], ph[1], ph[2], pcard)
         taken, out = False, []
-        # poked into the world with a game in progress (P10: `g_live` 1, poked too); sel baked (P10: medium)
-        mode, scr, sel, live = 0, 0, SKILLS.index(BOOT_MENU_SKILL), 1
+        # poked into the world with a game in progress (P10: `g_live` 1, poked too); sel baked (P10: medium) -- or M8
+        # (playthrough_gate.py, `boot`): the BOOT MENU, as the binary boots (no game: `g_live` 0), the world at BOOT_SKILL
+        mode, scr, sel, live = (1, 0, SKILLS.index(BOOT_MENU_SKILL), 0) if boot else (0, 0, SKILLS.index(BOOT_MENU_SKILL), 1)
         pusedn, lvdone = 1, 0                                  # baked: G_PlayerReborn's usedown
         mp, ms = self.mp, self.mp.initial()                    # M7 P2b: every lift at its top
         if fswitch is not None:                                # M8 F1.3: the scenario's POKED fswitch vector (S15)
@@ -257,6 +280,7 @@ class Mirror:
                             mph.switch_uses(ms, st.x, st.y)   # M8: the floor / lift switches, before the exit
                             if any(in_use_box_fixed(b, st.x, st.y) for b in self.exits):
                                 lvdone, mode, scr = 1, 1, LEVEL_DONE_ENTER   # P10: LEVEL COMPLETE, its hold first
+                                self._exit_line(mph, st)      # M8 C9: the pressed exit line's own cell
                             elif self.ctl != "no_use_lines":  # else the SR lifts and the switch
                                 ms = mp.use_press(ms, st.x, st.y)
                     else:
@@ -280,8 +304,15 @@ class Mirror:
                     wev = mph.weapon(kd, st.x, st.y, st.angle,   # M7 P4.1: the weapon, after the use press (pre-move)
                                      dead=dead if mortal else None)
                     if loots:
+                        gl0 = mph.world.ws.g_leveldone
                         nx, ny, na = mph.move(kd, st.x, st.y, st.angle, dead=dead)
                         mev = mph.last_move
+                        if (mph.world.exit_walk and mph.world.ws.g_leveldone and not gl0 and not lvdone
+                                and self.ctl != "no_walk_exit"):
+                            # M8 C9: the W1 exit (52) crossed by the move (combat._walkover) -- LEVEL COMPLETE, as
+                            # the switch's: the binary's exitcode.walk_lines after the accepted move; the monsters' tic
+                            # below is skipped on lvdone (E1M8: the only map with one)
+                            lvdone, mode, scr = 1, 1, LEVEL_DONE_ENTER
                         new = _SS(nx, ny, na, sim.mapname)
                         ph = (ph[0], ph[1], ph[2], mph.card())
                         taken = card_i is not None and bool(mph.world.ws.pickup_taken[card_i])
@@ -350,7 +381,7 @@ class Mirror:
                             "mxy": tuple(zip(mph.world.ws.mon_x, mph.world.ws.mon_y)),
                             "views": self.viewfn(mph, st.x, st.y) if self.viewfn else None,
                             "positions": self.posfn(mph) if self.posfn else None})
-        return out
+                yield out.pop()                       # M8 playthrough: a step at a time, nothing kept
 
 
 def seen_of(orc, dsim, card_di):
@@ -431,7 +462,8 @@ def screen(orc, scr: int, sel: int, live: int = 0, stats=None) -> bytes:
     the main menu's variant, `stats` is LEVEL COMPLETE's (nsecret, digits)"""
     colours = palette_colours(bytes(b for rgb in orc.mw.playpal(0) for b in rgb))
     return bytes(menu_screen_pixels(orc.rm.cfg, colours, scr, sel, live, stats,
-                                    automap=orc.automap))                                # M8: MAP, the help's M
+                                    automap=orc.automap,                                 # M8: MAP, the help's M
+                                    plasma=plasma_game_on(orc.mw, orc.mapname)))         # M8 C6: the help's key 6
 
 
 def menu_events(keys: list) -> list:
@@ -511,11 +543,26 @@ def below_card_pose(dsim, card, sector: int = 124, frames: int = 3):
     raise AssertionError("no pose in sector %d whose step reaches the card's box" % sector)
 
 
+def exit_na(dsim):
+    """M8 (gen_dryrun's audit): why the map cannot host the exit scenarios (p2a S8, die D3x), or None -- they need
+    exactly one SWITCH exit (doors.EXIT_SPECIALS, special 11): E1M8 has only W1 exits (52), which the model does not
+    end the level on yet (C9); a map with two switch exits would need a role naming one"""
+    n = len(exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname)))
+    if n == 1:
+        return None
+    other = sorted({ld.special for ld in dsim.lds if ld.special in (51, 52, 124)})
+    return "%s has %d switch exits (special %s)%s" % (
+        dsim.mapname, n, sorted(D.EXIT_SPECIALS), "; its exit lines %s are C9's (no level end in the model)" % other
+        if other else "")
+
+
 def exit_pose(dsim):
-    """a standing pose inside the exit box, off the exit line, facing it"""
-    (x0, y0, x1, y1), = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))
+    """a standing pose inside the exit box, off the exit line, facing it. M8 C9: a map with several exit switch lines
+    (E1M3's 11 + secret 51, E1M7's two 11s): the first PLAIN exit's (doors.secret_exits 0)"""
+    k = D.secret_exits(dsim.lds).index(0)
+    x0, y0, x1, y1 = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))[k]
     verts = dsim.mw.vertexes(dsim.mapname)
-    ld = [ld for ld in dsim.lds if ld.special in D.EXIT_SPECIALS][0]
+    ld = dsim.lds[D.exit_lines(dsim.lds)[k]]
     v1, v2 = verts[ld.v1], verts[ld.v2]
     mx, my = (v1.x + v2.x) / 2, (v1.y + v2.y) / 2
     nx, ny = -(v2.y - v1.y), (v2.x - v1.x)
@@ -727,12 +774,18 @@ def _in_box(dsim, box):
 
 
 def trigger_pose(dsim, trig, back: int = 40):
-    """`back` units before the trigger line's middle, facing across it"""
+    """`back` units before the trigger line's middle, facing across it. M8 (gen_dryrun on E1M3: tag 11's W1 lines ring
+    the blue card's platform, a floor switch's floor): never a pose ON a mover's or a door's floor -- the static check
+    takes it, the player cannot walk off it at the level start"""
     _si, axis, coord, lo, hi = trig
+    assert axis in ("x", "y"), "a diagonal trigger has no axis pose: %s" % (trig,)
     mid = (lo + hi) // 2
+    moving = set(dsim.mp.stops) | set(dsim.mp.switch) | set(dsim.order)
     for side in (-1, 1):
         a = coord + side * back
         x, y = (mid, a) if axis == "y" else (a, mid)
+        if _sector(dsim, x, y) in moving:
+            continue
         if _ok(dsim, x << 16, y << 16):
             ang = bam(0, -side) if axis == "y" else bam(-side, 0)
             return (x << 16, y << 16, ang)
@@ -758,6 +811,13 @@ def scenarios(dsim, card) -> list:
     R = gate_roles.roles(dsim.mapname)
     kinds = dsim.dp.kinds
     trig = {t[0]: t for t in dsim.dp.triggers}
+    # M8: a door's LAST trigger, as always -- unless it is diagonal (no axis pose: E1M3's ring of W1 lines): then its
+    # last axis-aligned one
+    for _si in list(trig):
+        if trig[_si][1] not in ("x", "y"):
+            ax = [t for t in dsim.dp.triggers if t[0] == _si and t[1] in ("x", "y")]
+            if ax:
+                trig[_si] = ax[-1]
     n = dsim.nstates
     F, B, U, I = {"forward": True}, {"back": True}, {"use": True}, {}
     out = []
@@ -912,6 +972,10 @@ def scenarios(dsim, card) -> list:
     # P10: LEVEL COMPLETE holds eight frames (an enter among them ignored), then any key leaves for the boot's menu
     # (no game in progress: esc there is no rule, and the frozen world is never drawn again -- P2a.2's "frozen"
     # control parted on the frozen world's frame, which no play reaches now), and NEW GAME starts the level over
+    if exit_na(dsim):                                # M8: E1M8 (W1 exits only) -- N/A, named
+        out.append(na("S8 the exit: a press ends the level; LEVEL COMPLETE (its hold); any key: the menu; NEW GAME",
+                      exit_na(dsim)))
+        return out
     out.append({
         "name": "S8 the exit: a press ends the level; LEVEL COMPLETE (its hold); any key: the menu; NEW GAME",
         "pose": exit_pose(dsim),
@@ -1019,8 +1083,8 @@ def main(argv=None) -> int:
         for f, fr in enumerate(want):
             exp = expected_cells(fr, dsim.order, dsim.mp.order)
             got = reads[f] if f < len(reads) else {}
-            if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
-                s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
+            if s_bad is None and any(not P.same_reading(got.get(k), v) for k, v in exp.items()):
+                s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if not P.same_reading(got.get(k), v)})
             if fr["drawn"] == "world":
                 pic = picture(orc, dsim, fr, card_di)
             else:

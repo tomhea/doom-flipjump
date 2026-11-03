@@ -1,0 +1,69 @@
+PLAYTHROUGH GATE -- E1M6 at easy, build/wave3/doom_e1m6.fjm
+E1M6 easy: ROUTE (54 s)
+  specials the model lacks: 48 (scroll, 9 lines), 107 (door, 1 lines)
+  flood: 14975 cells, 0 epochs, keys -
+  exit: line 1546 special 11 (normal, S)
+  keys in order: none
+    leg -> item:2001  touch    36 cells
+    leg -> item:2001  touch    48 cells
+    leg -> item:2008  touch    27 cells
+    leg -> item:2008  touch     3 cells
+    leg -> item:2002  touch    59 cells
+    leg -> item:2008  touch   118 cells
+    leg -> item:2008  touch     3 cells
+    leg -> item:2008  touch    13 cells
+    leg -> item:2008  touch     7 cells
+    leg -> item:2002  touch    12 cells
+    leg -> item:2018  touch    23 cells
+    leg -> item:2008  touch     2 cells
+    leg -> item:2048  touch     3 cells
+    leg -> item:8     touch    30 cells
+    leg -> exit       use      43 cells
+setup 75 s (NEW GAME on frame 4)
+  CONTROL keys  the oracle's keys mutated on frame 30: parted there (5 cells: ['aim_sid', 'p_tnh', 'viewangle', 'viewx']) -- the check sees it
+  CONTROL pixel the binary's picture changed (1 px) on frame 30: parted there (1 px) -- the check sees it
+  CONTROL clean the same 45 frames unmutated: exact
+steering seed 0
+    f45: monster 1 passed by (lined up, not in the aim window)
+  f56: leg 0 -> item:2001 touch (in its touch box (bonus count 6)) after 52 frames
+    f57: monster 2 ignored (no damage in 35 frames)
+    f106: monster 7 ignored (no damage in 35 frames)
+    f121: monster 6 ignored (no damage in 35 frames)
+  f135: leg 1 -> item:2001 touch (in its touch box (bonus count 5)) after 79 frames
+  f174: leg 2 -> item:2008 touch (in its touch box (bonus count 6)) after 39 frames
+  f178: leg 3 -> item:2008 touch (in its touch box (bonus count 8)) after 4 frames
+    f181: monster 9 ignored (no damage in 35 frames)
+  f200 (w196): (-393, 1371) hp 76 ar 0, leg 4/15 -> item:2002, kills 3, 46 s
+    f214: monster 24 passed by (lined up, not in the aim window)
+    f268: monster 193 ignored (no damage in 35 frames)
+  f275: leg 4 -> item:2002 touch (in its touch box (bonus count 6)) after 97 frames
+    f357: monster 184 ignored (no damage in 35 frames)
+    f380: monster 189 passed by (lined up, not in the aim window)
+    f393: monster 20 ignored (no damage in 35 frames)
+  f400 (w396): (283, 1441) hp 76 ar 2, leg 5/15 -> item:2008, kills 10, 95 s
+    f455: monster 12 passed by (lined up, not in the aim window)
+    f456: monster 24 ignored (no damage in 35 frames)
+    f543: monster 30 ignored (no damage in 35 frames)
+    f600: monster 38 passed by (lined up, not in the aim window)
+  f600 (w596): (-669, 1328) hp 66 ar 0, leg 5/15 -> item:2008, kills 14, 144 s
+  f612: leg 5 -> item:2008 touch (the detour took 300 frames: dropped) after 337 frames
+    re-plan (the leg starts elsewhere) from (-712, 1308): 24 cells
+  f650: leg 6 -> item:2008 touch (in its touch box (bonus count 8)) after 38 frames
+  f686: leg 7 -> item:2008 touch (in its touch box (bonus count 6)) after 36 frames
+  f697: leg 8 -> item:2008 touch (in its touch box (bonus count 5)) after 11 frames
+  f722: leg 9 -> item:2002 touch (in its touch box (bonus count 6)) after 25 frames
+  f752: leg 10 -> item:2018 touch (in its touch box (bonus count 12)) after 30 frames
+  f765: leg 11 -> item:2008 touch (in its touch box (bonus count 0)) after 13 frames
+  f773: leg 12 -> item:2048 touch (in its touch box (bonus count 6)) after 8 frames
+  f800 (w796): (-1566, 633) hp 66 ar 100, leg 13/15 -> item:8, kills 16, 191 s
+    f804: monster 66 ignored (no damage in 35 frames)
+  f840: leg 13 -> item:8 touch (in its touch box (bonus count 5)) after 67 frames
+    f865: monster 65 ignored (no damage in 35 frames)
+    f968: monster 112 ignored (no damage in 35 frames)
+  f968: leg 14 -> exit use (LEVEL COMPLETE) after 128 frames
+
+frames: 978 presented (4 menu, 974 world), legs done 15/15: item:2001@w52, item:2001@w131, item:2008@w170, item:2008@w174, item:2002@w271, item:2008@w608, item:2008@w646, item:2008@w682, item:2008@w693, item:2002@w718, item:2018@w748, item:2008@w761, item:2048@w769, item:8@w836, exit@w964
+time: 336 s wall; the binary 86 s (88.3 ms/frame), the oracle 147 s (150 ms/frame); 17,462,494,620 ops; seed 0
+
+PLAYTHROUGH GATE PASS -- E1M6 LEVEL COMPLETE at frame 968 (world 964) at easy, byte-, palette- and state-exact on all 978 frames, 336 s
+PLAYTHROUGH SPEED binding (mean + p80)/2 over 11 windows of 100 world frames: 20,234,657 ops/frame (mean 18,286,689, p80 window at world 259 = 22,182,625; target <= 22,000,000) PASS

@@ -38,7 +38,7 @@ from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_
 from doomfj.wad import WadFile                                            # noqa: E402
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
 
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 ap = argparse.ArgumentParser()

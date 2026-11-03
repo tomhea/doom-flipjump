@@ -1,3 +1,7 @@
+freedoom_e1m1.wad .. freedoom_e1m9.wad are TRIMMED per-map subsets of the same freedoom1.wad: one map's
+geometry + the textures, flats, patches, palette and COLORMAP it uses. Rebuilt by
+`python tests/fixtures/make_e1m1_wad.py E1Mn` (tests/host/test_map_fixtures.py checks each is its output).
+
 freedoom_assets.wad is a TRIMMED subset of Freedoom (freedoom1.wad, v0.13.0):
 palette + COLORMAP + 2 textures (A-YELLOW, STEP4) + their patches (YELLOW, STEP06) + 2 flats
 (CEIL1_2, FLOOR4_8). Rebuilt by tests/fixtures/make_assets_wad.py. Freedoom is BSD-licensed

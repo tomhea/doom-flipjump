@@ -129,10 +129,10 @@ def _hook(w, log):
     w._spawn_fx_at_target = lambda *a: None
     base = type(w)._mon_hitscan
 
-    def hitscan(m, bullets, ev):
+    def hitscan(m, bullets, ev, *jit):                          # M8 C6: a shadow target's turn, if any
         mode["v"] = 4
         try:
-            base(w, m, bullets, ev)
+            base(w, m, bullets, ev, *jit)
         finally:
             mode["v"] = 3
     w._mon_hitscan = hitscan
@@ -305,7 +305,7 @@ def _build(tmp_path, name, mut=None):
     p = tmp_path / ("%s.fj" % name)
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
-    srcs = [consts.resolve(), (FJ / "fixed_point.fj").resolve(), (FJ / "projection.fj").resolve(),
+    srcs = [consts.resolve(), (FJ / "projection.fj").resolve(),
             (FJ / "frame_render.fj").resolve(), (FJ / "sim.fj").resolve(), p.resolve()]
     return srcs, _expected(script)
 

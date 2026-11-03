@@ -1,0 +1,8 @@
+doomfj from C:\Users\tomhe\Documents\doom-episode\src\doomfj\__init__.py
+emit_check E1M5 tier game stand-ins none (asserts ON)
+pid bake: 166 pairs baked, 255 addressable at PID_NIBBLES=2
+EMITTED in 387 s: {'entry': 26480, 'tables': 13830001, 'main': 4047247, 'segconsts': 2091985, 'walk': 10742662, 'state': 873589, 'banks': 24448481}
+HOT BLOCK: 14,646 ops of the 16,384-op window (1,738 ops of headroom)
+CONSTANT WIDTHS: every literal fits its register
+RESET composed: 2745 nibble cells, 320 byte cells, 133 persisted names (the map's own: ['pcard_r', 'p_rct'])
+PEAK working set 0.43 GB, peak private 0.43 GB

@@ -172,19 +172,23 @@ def _src():
     return inspect.getsource(WR.emit_wall_renderer)
 
 
-def test_the_screen_init_and_boot_palette_run_once_in_the_entry_part():
+def test_the_screen_init_and_boot_palette_run_once_from_the_entry_part():
+    """every tier: the entry jumps to the cold `io_boot` (init_screen + the palettes) and comes back BEFORE the chrome
+    and the `;__hot_end` jump -- once per run, never on the M1 reset's per-frame path -- and the main part holds no
+    init or palette at all"""
     src = _src()
     entry = src[src.index('("entry", ['):]
     entry = entry[:entry.index('("tables", [')]
-    assert "*(_boot_screen if _boot_screen else [])," in entry
-    assert entry.index("*(_boot_screen if _boot_screen else []),") < entry.index("*hotdata[:1],")
+    assert entry.index('";io_boot",') < entry.index('"io_boot_done:",') < entry.index("*_chrome_calls,") \
+        < entry.index("*hotdata[:1],")
+    assert "*_boot_screen," in src[src.index('("banks", ['):]
     main = src[src.index('("main", ['):]
     main = main[:main.index("*pass1,")]
-    assert "*([] if _boot_screen else" in main and "*([] if _boot_screen else prelude)," in main
-    # ... and only the game-screen tier (the bar, the palette) moves them: every other tier keeps its per-frame ones
+    assert "init_screen" not in main and "palette" not in main
     line = next(ln for ln in src.split("\n") if ln.strip().startswith("_boot_screen = "))
-    nxt = src[src.index(line):].split("\n")[1]
-    assert "if _hud else None" in line + nxt
+    nxt = "\n".join(src[src.index(line):].split("\n")[:4])
+    assert '"io_boot:"' in nxt and "SW.FJ_INIT_SCREEN" in nxt and "SW.define_palette" in nxt
+    assert ';io_boot_done"' in nxt
 
 
 def test_the_palette_goes_before_the_record_stream_and_the_phases_after_the_monsters():
@@ -196,7 +200,7 @@ def test_the_palette_goes_before_the_record_stream_and_the_phases_after_the_mons
     # M7 P6+P7 E: the two composed into the monsters' world at the tempo (world_tic_lines; tests/fj/test_monster_tempo_fj)
     i_wt = src.index("pass1 += world_tic_lines(_wt_tic, _wt_pools, _WT_TICS if (_wt_tic and _hrt) else 1)")
     i_pal = src.index('pass1 += list(_hrt["palette"])')
-    i_begin = src.index('pass1.append("present.begin_frame_collines")')
+    i_begin = src.index('pass1.append(SW.FJ_DRAW_COLLINES)')
     assert i_eye < i_p5 < i_wt < i_pal < i_begin
 
 
@@ -214,7 +218,7 @@ def test_the_hurt_tic_menu_palette_restart_and_leaves_are_spliced():
     i_leaves = src.index('(list(_hrt["leaves"]) + list(_proj["lines"]) + [_proj["cells"]])')
     assert src.index('["    ;mm_block_end", _mcells]') < i_leaves < src.index('["mm_block_end:"]) + BSn')
     assert "full=bool(_chase.get(\"hurt\"))" in src and "hurt=bool(_chase.get(\"hurt\"))" in src
-    assert "hurt=_P5," in src and "loot=_LOOT) if menu else None" in src and "_P5 = _P5 and _p31 is not None" in src
+    assert "hurt=_P5," in src and "loot=_LOOT, shots=_shot_spec or None, plasma=_PLASMA) if menu else None" in src and "_P5 = _P5 and _p31 is not None" in src
     assert "_p5_assert_labels(_texts)" in src and "_p5_model_asserts(_p31, _proj, _hrt)" in src
 
 

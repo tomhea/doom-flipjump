@@ -19,7 +19,8 @@ def test_every_monster_state_row_is_gamedata():
     groups = MC.view_groups()
     for s in MC.monster_states():
         st, row = gd.STATES[s], _unpack(vals[gd.STATE_INDEX[s]])
-        assert gd.STATE_NAMES[row["next"]] == st.next, s
+        # the row holds the NEXT state's index (M8 C6: a raise "ghost" index decodes to the plasma state that took it)
+        assert row["next"] == gd.THING_STATE_INDEX[st.next], s
         assert row["tics"] == (15 if st.tics < 0 else st.tics), s
         act = MC.MON_ACTIONS[row["action"]]
         assert act == (None if st.action in MC.SOUND_ACTIONS else st.action), s

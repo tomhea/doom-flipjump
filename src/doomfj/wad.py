@@ -131,6 +131,14 @@ class Picture:
     columns: tuple    # tuple[list[tuple[int, int]], ...], one per column
 
 
+class MapRecords(list):
+    """a typed map accessor's records (WadFile.sectors / linedefs / ...): a plain list that also knows the MAP it was
+    read from, `.mapname` (upper case). #149: a rule that is per map -- the doors' neighbour rule,
+    `config.MAP_CONFIG` DOOR_NEIGHBOURS (doomfj.doors.door_neighbours) -- reads it here instead of recognising the map
+    by its record counts. A copy (`list(x)`, a slice) is a plain list without it, so such a rule refuses one loudly."""
+    mapname: str = ""
+
+
 def _records(data: bytes, fmt: str):
     """Yield struct-unpacked tuples for each fixed-size record packed in data."""
     size = struct.calcsize(fmt)
@@ -157,7 +165,9 @@ class WadFile:
         got = self._record_cache.get(ck)
         if got is None:
             got = self._record_cache[ck] = tuple(build())
-        return list(got)
+        out = MapRecords(got)
+        out.mapname = mapname.upper()           # #149: the map a per-map rule is read for (doors.door_neighbours)
+        return out
 
     # ── container ──
     @classmethod

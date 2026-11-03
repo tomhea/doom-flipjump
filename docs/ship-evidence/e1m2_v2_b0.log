@@ -1,0 +1,36 @@
+  model replays: 11 runs reproduce the set's poses (260 s, outside the lock)
+b0_scenarios: doom_e1m2.fjm sha256 93af128a9caef3ce | set combat_scenarios_e1m2_v1.json (11 runs, keys cfec92103602fc05) | startup+menu 326,528 ops (exact)
+  run                   avg (exact)  p50 +-2^18         p80         max  state     pixels    cam  dr sonl
+  R0-door172             10,683,110  11,010,048  13,369,344  17,039,360  100/100   100/100     0   0   36
+  R0-aftermath            6,160,317   6,029,312   7,077,888   9,961,472  100/100   100/100     0   0   27
+  R0-s19                 21,439,622  22,282,240  24,903,680  31,457,280  100/100   100/100     0   0    8
+  R0-s56                 13,426,085  12,845,056  15,466,496  21,495,808  100/100   100/100     0   0   45
+  R2-s64                 20,622,094  19,922,944  25,427,968  30,408,704  100/100   100/100     0   0   10
+  R3-s61                 20,408,457  20,447,232  21,757,952  26,214,400  100/100   100/100     1   0   20
+  R3-s82                 13,229,210  13,631,488  17,563,648  19,660,800  100/100   100/100     0   0   19
+  R3-s94                 20,307,599  20,185,088  21,495,808  27,262,976  100/100   100/100     0   0   31
+  R3-s150                10,737,692  11,272,192  12,058,624  14,155,776  100/100   100/100     0   0   61
+  R3-s77                 13,410,922  13,893,632  16,777,216  23,068,672  100/100   100/100     0   0   39
+  R3-s361                21,045,693  21,495,808  23,330,816  25,427,968  100/100   100/100     9   0   43
+  B0 BINDING (mean + p80)/2 over 11 runs: 18,105,174 ops/frame   (mean 15,588,255, p80 run R2-s64 = 20,622,094)
+  per-frame maximum: 31,457,280 ops (+/- 2^18) in R0-s19; run averages 6,160,317 .. 21,439,621; headroom to 22M: 3,894,826
+  STRAFE UNDERCOUNT (--proxy: each strafe-only frame given a forward step into the same landing):
+    R0-door172           +-3,371,765 ops over 36 strafe-only frames = -93,660 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 1 (a strafe-only frame): a PICKUP the proxy's step touched at the landing -- item 71 (type 2007 at 1056, -992); the normal run's strafe-only frame does not move, so it never takes it (p_bc 0 -> 6, bar ammo 50 -> 60); 60 frames' expectations differ, 54 pictures
+    R0-aftermath         +9,327,295 ops over 27 strafe-only frames = 345,455 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-s19               +1,933,362 ops over 8 strafe-only frames = 241,670 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R0-s56               +10,214,412 ops over 45 strafe-only frames = 226,987 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R2-s64               +2,198,250 ops over 10 strafe-only frames = 219,825 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R3-s61               +5,047,916 ops over 20 strafe-only frames = 252,396 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R3-s82               +4,492,923 ops over 19 strafe-only frames = 236,470 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R3-s94               +7,150,976 ops over 31 strafe-only frames = 230,677 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R3-s150              +13,672,420 ops over 61 strafe-only frames = 224,138 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: True
+    R3-s77               +9,080,328 ops over 39 strafe-only frames = 232,829 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 1 (a strafe-only frame): a PICKUP the proxy's step touched at the landing -- item 77 (type 2007 at 1560, -2256); the normal run's strafe-only frame does not move, so it never takes it (p_bc 0 -> 6, bar ammo 50 -> 60); 7 frames' expectations differ, 1 pictures
+    R3-s361              +20,830,508 ops over 43 strafe-only frames = 484,430 per frame; against its own oracle: state 100/100 pixels 100/100; picture identical to the normal run: False (NOTE, not a failure)
+      note: the expectations part first at frame 66 (a strafe-only frame): the pose ((125951288, 41256638, 2886712986) vs (125457000, 40331870, 2886712986)); 15 frames' expectations differ, 15 pictures
+      !! 8 proxy step(s) REFUSED at frames [78, 81, 91, 92, 93, 94, 95, 96]: there the proxy ran a refused move from one step short of the landing and drew that pose -- not the collision tic at the landing; this run's delta is not the strafe's price on those frames
+    binding with the collision tic on strafe-only frames: 18,152,791 (B0 + 47,617); 237,689 ops per strafe-only frame over 339 frames
+    !! 8 strafe-only frame(s) priced by a REFUSED proxy step (listed above): the delta over them is not the strafe's collision tic
+    note: a RECORDED deviation of the proxy (issue #123 L4; v6: R2-spectre-corridor frame 0, 1 of 324 strafe-only frames) -- a refused proxy frame is priced from one step short, never judged
+B0 OK

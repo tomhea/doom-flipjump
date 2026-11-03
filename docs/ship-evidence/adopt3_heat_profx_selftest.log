@@ -1,0 +1,24 @@
+engine source: git show 73e09c0:flipjump/interpreter/_fjcore.c (sha256 51b5561674cfa53c..., flipjump 73e09c0)
+built C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4b\profx\engX\_fjcore.pyd (sha256 7984a0aeeafe0e73...)
+[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py (argv0 scratchpad/12m/profx/profx.py)
+  marker 23 (ptloc done (write_hex)) not found -- skipped
+  marker 38 (thing_pass alive (thing loaded)) not found -- skipped
+maps -> C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4b\profx: 26 objects, 2595541 label words, 29 markers, reset code ends at word 18731500
+profx selftest -- (b) is the negative control; WORK = C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4b\profx
+  marker 23 (ptloc done (write_hex)) not found -- skipped
+  marker 38 (thing_pass alive (thing loaded)) not found -- skipped
+maps -> C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4b\profx: 26 objects, 2595541 label words, 29 markers, reset code ends at word 18731500
+  $ python drive.py still 3 selftest_stock --stock
+    engine: C:\Users\tomhe\Documents\fj160-path\flipjump\interpreter\_fjcore.pyd
+    still: 50,263,116 ops, 7/7 frames, 2.5s
+  $ python drive.py still 3 selftest --trace 0 50263116
+    engine: C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4b\profx\engX\_fjcore.pyd
+    still: 50,263,116 ops, 7/7 frames, 3.0s
+    prof_dump: 7 present records -> C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\ioapi\adopt4b\profx\selftest.*
+(c) the instrument changes nothing it measures
+  (c) op totals equal: stock 50,263,116 vs profiler 50,263,116             ok
+  (c) every presented frame's pixels equal (7 frames)                      FAIL
+  (c) the histograms conserve ops (self = owner-attributed = the op total) ok  50,263,116 / 50,263,116
+  (c) the trace is exactly the run's ops (its per-word counts = the histogram) ok
+(a) owner attribution vs the op trace
+no sim.bind_things expansion in the label table

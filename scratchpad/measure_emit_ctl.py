@@ -21,7 +21,6 @@ from doomfj.texturecompiler import colormap_values, _index_nibbles        # noqa
 from doomfj.wad import WadFile                                            # noqa: E402
 from flipjump.interpreter.io_devices.FixedIO import FixedIO               # noqa: E402
 
-FIXED_POINT_FJ = (ROOT / "src/fj/fixed_point.fj").resolve()
 
 
 def run_ops(table_text, call_lines, idx_width, n, tmp, tag):
@@ -36,7 +35,7 @@ def run_ops(table_text, call_lines, idx_width, n, tmp, tag):
     ])
     p = tmp / ("%s.fj" % tag); p.write_text(main, encoding="utf-8")
     out = tmp / ("%s.fjm" % tag)
-    fj.assemble([FIXED_POINT_FJ, p], out, memory_width=W, print_time=False)
+    fj.assemble([p], out, memory_width=W, print_time=False)
     term = fj.run(out, io_device=FixedIO(b""), print_time=False, print_termination=False)
     return term.op_counter
 
@@ -51,7 +50,7 @@ tmp = Path(tempfile.mkdtemp())
 art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 cmv = colormap_values(art, lights=32)
 tables = {
-    "byte.emit (256 entries, 2-nibble index)":
+    "hex.print (256 entries, 2-nibble index)":
         (generate_emit_dispatch_table_fj("bytetbl", list(range(256)), index_nibbles=2),
          "bytetbl.emit idx", 2),
     "cm.emit (%d entries, %d-nibble index)" % (len(cmv), _index_nibbles(len(cmv))):

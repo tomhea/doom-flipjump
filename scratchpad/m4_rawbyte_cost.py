@@ -30,7 +30,7 @@ import flipjump as fj                                                     # noqa
 from flipjump.fjm.fjm_reader import Reader                                # noqa: E402
 
 from doomfj.config import Config                                          # noqa: E402
-from doomfj.harness import W, FJM_LZMA_FAST                               # noqa: E402
+from doomfj.harness import W, FJM_LZMA_PRESET                             # noqa: E402
 from doomfj.lut_generator import _raw_byte_out                            # noqa: E402
 
 
@@ -44,7 +44,7 @@ def build(tmp, name, body):
     p.write_text("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n", encoding="utf-8")
     out = tmp / (name + ".fjm")
     fj.assemble([consts.resolve(), p.resolve()], out, memory_width=W, print_time=False,
-                lzma_fast=FJM_LZMA_FAST)
+                lzma_preset=FJM_LZMA_PRESET)
     return span(out)
 
 

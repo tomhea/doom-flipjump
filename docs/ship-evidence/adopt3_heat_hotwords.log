@@ -1,0 +1,29 @@
+fjm doom_e1m1_adopt2.fjm (sha256 d37b797dce5a6a28...), 1020 game frames in adopt2_games
+counts cache _census_game.json.gz: 44739 groups, 542974 tables; reconstructed blocks: 44739 placed, 0 without room
+CONTROL reconstruction vs image: 41006 of 44739 resolvable source words rest at their reconstructed base (91.66%), 3733 unpinned (no base), 0 at a WRONG base; 0 keys unresolved
+ops executed in the pool: 1,764,450,925 over the run (1,729,853 per game frame); 100.00% of them inside a placed block
+
+rank table ops/fr dispatch/fr  pc(b) pin value   tables source word
+   1      315,014     150,319      1   300,639   70,362 (hex.tables.res + 32)
+   2       32,319       5,987      8    95,804      335 ((hex.pointers.to_ptr_var + 128) + 32)
+   3       26,691       5,449      5    54,495      301 ((hex.pointers.to_ptr_var + 192) + 32)
+   4       20,320       5,416      6    65,002      301 ((hex.pointers.to_ptr_var + 256) + 32)
+   5       18,214       6,794      6    81,533      335 ((hex.pointers.to_ptr_var + 64) + 32)
+   6       17,719      17,797      2    71,189    2,900 ((hex.pointers.read_byte + 0) + 32)
+   7       13,871      15,122      3    90,732    2,816 ((hex.pointers.read_byte + 64) + 32)
+   8       10,748       2,324      7    32,549      215 ((hex.pointers.to_ptr_var + 320) + 32)
+   9        5,793       2,821      4    22,571    3,302 ((ecl_cmidx + 0) + 32)
+  10        5,634       5,634      7    78,887      335 ((hex.pointers.to_ptr_var + 0) + 32)
+  11        5,302       1,697     10    33,956       34 ((tsf_sfslot_p + 128) + 32)
+  12        4,742       1,185      8    18,971       14 ((dptr + 128) + 32)
+  13        4,584       2,821      4    22,571    3,302 ((ecl_cmidx + 64) + 32)
+  14        4,490         933      9    16,804       13 ((tsf_sfflag_p + 128) + 32)
+  15        4,422       2,570      4    20,562    2,863 (((ecl_cmidx + 128) + 0) + 32)
+  16        4,356         877      7    12,290       24 ((tsf_sfslot_p + 192) + 32)
+  17        4,264       1,092      7    15,290       19 ((f11:l107837:frame.seg_pass2_leaf_body_lines(26)---f3:l2551:rep0:fram
+  18        4,258       1,086      8    17,383       14 (((dptr + 192) + 64) + 32)
+  19        4,247         799      8    12,785       17 ((f11:l107837:frame.seg_pass2_leaf_body_lines(26)---f3:l2551:rep0:fram
+  20        4,216       1,296      9    23,340       16 ((td_p + 256) + 32)
+the top 20 carry 511,213 table ops/frame = 29.6% of all pool ops
+wrote scratchpad\12m\profx\hotwords_e1m1_adopt.json
+[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py (argv0 scratchpad/12m/profx/hotwords.py)

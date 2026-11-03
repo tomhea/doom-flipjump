@@ -1,0 +1,167 @@
+PLAYTHROUGH GATE -- E1M3 at easy, build/episode/doom_e1m3.fjm
+E1M3 easy: ROUTE (88 s)
+  specials the model lacks: 138 (light, 1 lines)
+  flood: 14234 cells, 15 epochs, keys ['blue']
+  exit: line 1367 special 11 (normal, S)
+  keys in order: blue
+    door:1     door   by use    at (-792, -104)   epoch 0
+    door:23    door   by use    at (-1112, 664)   epoch 1
+    door:30    door   by use    at (-1080, 1192)  epoch 2
+    door:86    door   by switch at (-1048, 1832)  epoch 3
+    door:108   door   by use    at (120, 2568)    epoch 4
+    lift:138   lift   by walk   at (488, 2440)    epoch 5
+    floor:0    floor  by use    at (1000, 2536)   epoch 6
+    door:150   door   by use    at (-1080, 8)     epoch 7 (needs the blue key)
+    key:blue   key    by touch  at (472, 2584)    epoch 7
+    door:167   door   by use    at (-1784, 328)   epoch 8
+    lift:178   lift   by use    at (-1880, 1000)  epoch 9
+    door:132   door   by use    at (-2104, 1336)  epoch 10
+    floor:3    floor  by use    at (-2312, 1432)  epoch 11
+    door:192   door   by use    at (-1720, 1816)  epoch 12
+    lift:256   lift   by use    at (-1784, 2408)  epoch 13
+    door:197   door   by use    at (-2024, 2104)  epoch 14
+    leg -> item:2008  touch    77 cells
+    leg -> item:2001  touch    22 cells
+    leg -> item:2008  touch     2 cells
+    leg -> door:86    use      33 cells
+    leg -> item:2008  touch   112 cells
+    leg -> lift:138   cross    16 cells
+    leg -> item:2008  touch    32 cells
+    leg -> floor:0    use       2 cells
+    leg -> item:2048  touch    36 cells
+    leg -> key:blue   touch     4 cells
+    leg -> item:2008  touch   303 cells
+    leg -> item:2049  touch    33 cells
+    leg -> lift:178   use      64 cells
+    leg -> item:2008  touch     4 cells
+    leg -> item:2008  touch    29 cells
+    leg -> floor:3    use      28 cells
+    leg -> item:2048  touch     7 cells
+    leg -> item:2008  touch    16 cells
+    leg -> lift:256   use      72 cells
+    leg -> item:2008  touch    41 cells
+    leg -> exit       use       5 cells
+setup 103 s (NEW GAME on frame 4)
+  CONTROL keys  the oracle's keys mutated on frame 30: parted there (3 cells: ['p_tnh', 'viewangle', 'viewx']) -- the check sees it
+  CONTROL pixel the binary's picture changed (1 px) on frame 30: parted there (1 px) -- the check sees it
+  CONTROL clean the same 45 frames unmutated: exact
+steering seed 0:0,415:1
+    re-plan (no progress in 50 frames) from (-843, -173): 74 cells
+    f79: monster 0 ignored (no damage in 35 frames)
+    f166: monster 13 passed by (lined up, not in the aim window)
+    f193: monster 2 passed by (lined up, not in the aim window)
+    re-plan (no progress in 50 frames) from (-1109, 694): 20 cells
+  f200 (w196): (-1106, 774) hp 100 ar 1, leg 0/21 -> item:2008, kills 3, 50 s
+  f215: leg 0 -> item:2008 touch (in its touch box (bonus count 6)) after 211 frames
+    f264: monster 12 passed by (lined up, not in the aim window)
+    f271: monster 151 ignored (no damage in 35 frames)
+    re-plan (no progress in 50 frames) from (-1101, 1174): 11 cells
+    f324: monster 12 ignored (no damage in 35 frames)
+  f342: leg 1 -> item:2001 touch (in its touch box (bonus count 12)) after 127 frames
+  f343: leg 2 -> item:2008 touch (in its touch box (bonus count 11)) after 1 frames
+  f393: leg 3 -> door:86 use (used: its effect seen) after 50 frames
+    f396: monster 76 ignored (no damage in 35 frames)
+  f400 (w396): (-1034, 1849) hp 98 ar 0, leg 4/21 -> item:2008, kills 6, 94 s
+    f443: monster 89 passed by (lined up, not in the aim window)
+    f521: monster 78 ignored (no damage in 35 frames)
+    f538: monster 31 passed by (lined up, not in the aim window)
+  f600 (w596): (121, 2566) hp 92 ar 0, leg 4/21 -> item:2008, kills 9, 127 s
+  f629: leg 4 -> item:2008 touch (in its touch box (bonus count 6)) after 236 frames
+    re-plan (the leg starts elsewhere) from (334, 2632): 19 cells
+    f656: monster 9 ignored (no damage in 35 frames)
+  f689: leg 5 -> lift:138 cross (reached) after 60 frames
+    f788: run (lost 33 in 60 frames)
+  f800 (w796): (678, 2435) hp 44 ar 0, leg 6/21 -> item:2008, kills 9, 160 s
+  f827: leg 6 -> item:2008 touch (in its touch box (bonus count 6)) after 138 frames
+    f828: health low -- a detour to the item at (468, 2512), 33 cells
+    f916: monster 6 ignored (no damage in 35 frames)
+    re-plan (no progress in 50 frames) from (789, 2509): 22 cells
+  f1000 (w996): (572, 2586) hp 44 ar 3, leg 7/22 -> health, kills 11, 206 s
+  f1013: leg 7 -> health touch (in its touch box (bonus count 6)) after 185 frames
+    re-plan (the leg starts elsewhere) from (487, 2534): 34 cells
+    re-plan (back on the route) from (487, 2534): 34 cells
+  f1076: leg 8 -> floor:0 use (used: its effect seen) after 63 frames
+    f1102: monster 9 ignored (no damage in 35 frames)
+    f1108: monster 4 ignored (no damage in 35 frames)
+    f1113: monster 6 passed by (lined up, not in the aim window)
+    f1173: monster 6 ignored (no damage in 35 frames)
+    re-plan (no progress in 50 frames) from (755, 2619): 24 cells
+  f1200 (w1196): (742, 2604) hp 48 ar 0, leg 9/22 -> item:2048, kills 11, 252 s
+    re-plan (no progress in 50 frames) from (769, 2642): 22 cells
+    f1334: monster 6 passed by (lined up, not in the aim window)
+  f1355: leg 9 -> item:2048 touch (in its touch box (bonus count 6)) after 279 frames
+  f1400 (w1396): (454, 2548) hp 30 ar 0, leg 10/22 -> key:blue, kills 13, 299 s
+    f1419: monster 133 ignored (no damage in 35 frames)
+    f1435: monster 6 ignored (no damage in 35 frames)
+    f1435: a precise approach to (432, 2608): NONE FOUND
+  f1456: leg 10 -> key:blue touch (in its touch box (bonus count 12)) after 101 frames
+    re-plan (no progress in 50 frames) from (1021, 2522): 288 cells
+    f1590: monster 133 passed by (lined up, not in the aim window)
+  f1600 (w1596): (532, 2407) hp 31 ar 0, leg 11/22 -> item:2008, kills 15, 351 s
+    f1669: monster 31 ignored (no damage in 35 frames)
+    f1686: monster 78 ignored (no damage in 35 frames)
+  f1800 (w1796): (-1034, 2061) hp 43 ar 0, leg 11/22 -> item:2008, kills 15, 396 s
+    f1821: monster 12 passed by (lined up, not in the aim window)
+    f1883: monster 2 ignored (no damage in 35 frames)
+    f1884: monster 13 ignored (no damage in 35 frames)
+  f2000 (w1996): (-1101, 43) hp 43 ar 0, leg 11/22 -> item:2008, kills 16, 437 s
+    f2015: monster 28 ignored (no damage in 35 frames)
+    re-plan (no progress in 50 frames) from (-1071, 196): 31 cells
+  f2021: leg 11 -> item:2008 touch (the detour took 300 frames: dropped) after 565 frames
+    re-plan (the leg starts elsewhere) from (-1087, 191): 62 cells
+    f2133: monster 81 ignored (no damage in 35 frames)
+  f2144: leg 12 -> item:2049 touch (in its touch box (bonus count 11)) after 123 frames
+    f2145: health low -- a detour to the item at (-1904, 136), 13 cells
+  f2166: leg 13 -> health touch (in its touch box (bonus count 5)) after 21 frames
+    re-plan (the leg starts elsewhere) from (-1886, 161): 65 cells
+    re-plan (back on the route) from (-1886, 161): 65 cells
+  f2200 (w2196): (-1877, 399) hp 53 ar 1, leg 14/23 -> lift:178, kills 18, 470 s
+    f2236: monster 7 ignored (no damage in 35 frames)
+    f2236: health low -- a detour to the item at (-1882, 862), 11 cells
+    f2275: monster 146 ignored (no damage in 35 frames)
+    f2289: run (lost 41 in 60 frames)
+    re-plan (no progress in 50 frames) from (-2035, 765): 11 cells
+  f2326: leg 14 -> health touch (in its touch box (bonus count 6)) after 90 frames
+    re-plan (the leg starts elsewhere) from (-1899, 828): 38 cells
+    re-plan (back on the route) from (-1899, 828): 38 cells
+  f2400 (w2396): (-1966, 1032) hp 27 ar 0, leg 15/24 -> lift:178, kills 21, 508 s
+  f2410: leg 15 -> lift:178 use (used: its effect seen) after 84 frames
+  f2423: leg 16 -> item:2008 touch (in its touch box (bonus count 6)) after 13 frames
+  f2500: leg 17 -> item:2008 touch (in its touch box (bonus count 6)) after 77 frames
+    f2501: health low -- a detour to the item at (-2368, 1648), 35 cells
+    f2556: monster 10 passed by (lined up, not in the aim window)
+  f2572: leg 18 -> health touch (in its touch box (bonus count 10)) after 71 frames
+    re-plan (the leg starts elsewhere) from (-2334, 1627): 7 cells
+    re-plan (back on the route) from (-2334, 1627): 7 cells
+  f2600 (w2596): (-2314, 1539) hp 52 ar 0, leg 19/25 -> floor:3, kills 23, 545 s
+  f2604: leg 19 -> floor:3 use (used: its effect seen) after 32 frames
+  f2630: leg 20 -> item:2048 touch (in its touch box (bonus count 0)) after 26 frames
+    f2656: monster 8 ignored (no damage in 35 frames)
+  f2668: leg 21 -> item:2008 touch (in its touch box (bonus count 6)) after 38 frames
+    f2729: health low -- a detour to the item at (-1876, 1946), 24 cells
+    f2755: run (lost 33 in 60 frames)
+  f2770: leg 22 -> health touch (in its touch box (bonus count 6)) after 41 frames
+    re-plan (the leg starts elsewhere) from (-1853, 1973): 29 cells
+    re-plan (back on the route) from (-1853, 1973): 29 cells
+    f2788: monster 5 ignored (no damage in 35 frames)
+  f2800 (w2796): (-1842, 2161) hp 29 ar 0, leg 23/26 -> lift:256, kills 25, 591 s
+  f2821: leg 23 -> lift:256 use (used: its effect seen) after 51 frames
+    f2879: lift 256 at rest -- a detour to its switch, 11 cells
+  f2910: leg 24 -> lift:256 use (used: its effect seen) after 31 frames
+    f2910: race back to lift 256 (216 units from its switch)
+    re-plan (back on the route) from (-1803, 2415): 40 cells
+    f2956: monster 88 ignored (no damage in 35 frames)
+  f3000 (w2996): (-2160, 2058) hp 14 ar 0, leg 25/27 -> item:2008, kills 27, 624 s
+  f3008: leg 25 -> item:2008 touch (in its touch box (bonus count 12)) after 98 frames
+    f3009: health low -- a detour to the item at (-2168, 2176), 2 cells
+  f3010: leg 26 -> health touch (in its touch box (bonus count 10)) after 1 frames
+    f3011: health low -- a detour to the item at (-1992, 2300), 30 cells
+  f3079: leg 27 -> health touch (in its touch box (bonus count 6)) after 68 frames
+    re-plan (the leg starts elsewhere) from (-2023, 2275): 34 cells
+    re-plan (back on the route) from (-2023, 2275): 34 cells
+  f3147: leg 28 -> exit use (LEVEL COMPLETE) after 68 frames
+
+frames: 3157 presented (4 menu, 3153 world), legs done 29/29: item:2008@w211, item:2001@w338, item:2008@w339, door:86@w389, item:2008@w625, lift:138@w685, item:2008@w823, health@w1009, floor:0@w1072, item:2048@w1351, key:blue@w1452, item:2008@w2017, item:2049@w2140, health@w2162, health@w2322, lift:178@w2406, item:2008@w2419, item:2008@w2496, health@w2568, floor:3@w2600, item:2048@w2626, item:2008@w2664, health@w2766, lift:256@w2817, lift:256@w2906, item:2008@w3004, health@w3006, health@w3075, exit@w3143
+time: 777 s wall; the binary 236 s (74.8 ms/frame), the oracle 415 s (131 ms/frame); 39,187,300,286 ops; seed 0:0,415:1
+
+PLAYTHROUGH GATE PASS -- E1M3 LEVEL COMPLETE at frame 3147 (world 3143) at easy, byte-, palette- and state-exact on all 3157 frames, 777 s

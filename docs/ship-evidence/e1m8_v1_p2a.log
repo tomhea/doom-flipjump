@@ -1,0 +1,33 @@
+P2A GATE -- 14 scenarios (MONSTER_MODE final, PLAYER_MODE final) on E1M8, roles from scenarios\e1m8\gates.json, build/wave3/doom_e1m8.fjm
+
+S1 a blue door, no card: stays shut -- N/A: E1M8 has no blue card (type 5)
+
+S3 a blue door with the card: opens -- N/A: E1M8 has no blue card (type 5)
+
+S2 onto the card: taken -- N/A: the map has no blue card
+
+S1y / S3y a yellow door -- N/A: E1M8 has no yellow key door
+
+S1r / S3r a red door -- N/A: E1M8 has no red key door
+
+S4 below the card: out of reach -- N/A: E1M8 has no blue card
+
+S5 a blazing door: opens and closes in strides -- N/A: E1M8 has no blazing door
+
+S6 over a walk-over trigger -- N/A: E1M8 has no W1 walk-over door
+
+S9 over a lift's WR line: it rides -- N/A: E1M8 has no WR lift line
+
+S12 NEW GAME puts a riding lift back -- N/A: E1M8 has no WR lift line
+
+S10 an SR press at a lift: it rides -- N/A: E1M8 has no SR lift line
+
+S11 the floor switch: a press lowers the pillars at once -- N/A: E1M8 has no floor switch
+
+S13 standing in a door as it closes: it goes back up -- N/A: no plain door of E1M8 verifies S13 (tried [])
+
+S8 the exit: a press ends the level; LEVEL COMPLETE (its hold); any key: the menu; NEW GAME -- N/A: E1M8 has 0 switch exits (special [11, 51]); its exit lines [52] are C9's (no level end in the model)
+
+N/A on E1M8: 14 -- S1 a blue door, no card: stays shut; S3 a blue door with the card: opens; S2 onto the card: taken; S1y / S3y a yellow door; S1r / S3r a red door; S4 below the card: out of reach; S5 a blazing door: opens and closes in strides; S6 over a walk-over trigger; S9 over a lift's WR line: it rides; S12 NEW GAME puts a riding lift back; S10 an SR press at a lift: it rides; S11 the floor switch: a press lowers the pillars at once; S13 standing in a door as it closes: it goes back up; S8 the exit: a press ends the level; LEVEL COMPLETE (its hold); any key: the menu; NEW GAME
+
+P2A GATE PASS (5 s)

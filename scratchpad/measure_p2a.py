@@ -10,7 +10,6 @@ import flipjump as fj
 from doomfj.harness import W
 from doomfj.lut_generator import generate_tantoangle_lut_fj, generate_slopediv_recip_lut_fj
 
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")
 
 # a spread of (x2,y2) 16.16 vertices around the fixed view point, one per call (all octants)
 VIEW = (-416 << 16) & 0xFFFFFFFF, (256 << 16) & 0xFFFFFFFF
@@ -20,7 +19,7 @@ VERTS = [((-416 + dx) << 16) & 0xFFFFFFFF for dx in (100, -173, 55, -31, 220, -9
 SNIPPETS = {
     "p2a": "proj.point_to_angle ang, viewx, viewy, vgx, vgy, 0",
     "slope_div": "proj.slope_div sidx3, num8, den8, 0",
-    "read_table8_3": "hex.read_table 8, r8, tantoangle, 3, sidx3",
+    "read_entry8_3": "hex.read_entry 8, r8, tantoangle, 3, sidx3",
     "affine_cull": ("hex.fixed_mul 8, 4, sg, ca, viewx\n"
                     "        hex.fixed_mul 8, 4, sgt, cb, viewy\n"
                     "        hex.add 8, sg, sgt\n"
@@ -53,7 +52,7 @@ def run(name: str, proj_fj: Path, k: int) -> int:
     tmp = Path(tempfile.mkdtemp())
     (tmp / "p.fj").write_text(_prog(name, k), encoding="utf-8")
     out = tmp / "p.fjm"
-    fj.assemble([FIXED_POINT_FJ.resolve(), proj_fj.resolve(), (tmp / "p.fj").resolve()], out,
+    fj.assemble([proj_fj.resolve(), (tmp / "p.fj").resolve()], out,
                 memory_width=W, print_time=False, warning_as_errors=False)
     term = fj.run(out, print_time=False, print_termination=False)
     return term.op_counter

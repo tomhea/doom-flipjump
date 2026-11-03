@@ -1,6 +1,6 @@
 """How often does check_line's BBOX test actually reject? C5's entire value rides on this.
 
-`hex.read_table_packed nb` pays a fixed per-call staging preamble (zero w/4 + mov + mul_const w/4 +
+`hex.read_entry_packed nb` pays a fixed per-call staging preamble (zero w/4 + mov + mul_const w/4 +
 add w/4) BEFORE any byte is read. Splitting the 22-byte linedef row into an 8-byte bbox half and a
 14-byte remainder therefore trades:
 

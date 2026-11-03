@@ -8,7 +8,46 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 ## 1. The standing number
 
-**Since 2026-10-18 the shipped binary is `build/doom_e1m1_blocked63.fjm`** -- class F (M8): blocked62 + THE MAP PAGE
+**Since 2026-10-28 (ship #2) the shipped binary is `build/doom_e1m1_blocked65.fjm`** -- class S against blocked64
+(EVERY PIXEL blocked64's): blocked64's game on flipjump 1.6.0's own stl (`stl-adopt`: the stl additions fjdoom moved into
+flipjump, the pool API, `.fjm` v4 with lzma presets, and the stl audit's fixes at 1.6.0 e44ff3f), RE-PINNED with a heat
+list of its own (`heat_e1m1_adopt`: the adoption renamed every label, so blocked27's list no longer matched). Built ONE
+PASS from the 1b command at fa0e7452 with flipjump 1.6.0 e44ff3f (its heat list and census committed in 375b0c64), sha256 `3a2c9564adbfcb07` (full
+`3a2c9564adbfcb07a1378b6c0045ca2291246c4100abcafad68bae4af3815d3b`; built as `adopt4`); REBUILT BYTE-IDENTICAL, the census
+identical too (`blocked65_rebuild.log`). Its gates, each solo (`docs/ship-evidence/blocked65_*.log`):
+
+| what | value |
+|---|---|
+| m2_std_gate / m3_gate | PASS -- 421 / 88 frames byte- and state-exact |
+| p2a / hurt / fight / die | PASS -- 13 of 15 (2 N/A: E1M1 has no yellow / red door) / 7 / 43 / 17, state, pixels and palette exact |
+| class S | the ten gamespeed games + calibration, stock engine: **1,044 of 1,044 frames' sha256 equal to blocked64's** (control: two games share only their 4 menu frames); ops **-11.64 .. -12.98% per game** (`blocked65_frames_compare.log`) |
+| combat set v10 | (mean+p80)/2 = **14,249,841** (blocked64 16,297,393, **-12.56%**); every run state 100/100, pixels 100/100; B0 OK |
+| binding metric | **14,792,784 ops/frame -- PASS** against 22,000,000 (blocked64 16,921,550, **-12.58%**); `gamespeed_trail` PASS (`--validate`'s record equals the binary on every frame of every run) |
+| menu / key tests | key_latch, keyboard_input, menu_screens, skill_menu: 150 passed (`blocked65_menu_tests.log`) |
+| size | **37.40% of 2^27 -- PASS** against 43% (50,198,748 words; file 17,606,504 bytes, .fjm v4); the pool 74.0% of its window, 44,739 of 44,739 groups placed, 20 of 20 hot words pinned, 0 lost |
+| **ms/frame** | **63.4 ms/frame against blocked64's 68.3 -- B FASTER x1.076** (all five pairs, 1.066 .. 1.104; pixels identical; both on 1.6.0 e44ff3f, `blocked65_msframe.log`); 222.8 M fj/s, 14,126,543 ops/frame on msframe's script. The `shipped` baseline is re-frozen on blocked65: **63.6 ms/frame** (`blocked65_msframe_freeze.log`) |
+
+The 12.6% fewer ops come with the adoption itself (`docs/flipjump-1.6.0-plan.md` A1-A8; not attributed per macro):
+adopt3, the same game on the stl before the audit's fixes, ran the same ops to the op in every game and measured
+x1.083 against blocked64 -- the audit's fixes move bytes, not executed ops.
+
+**From 2026-10-28 (ship #1) the shipped binary was `build/doom_e1m1_blocked64.fjm`** -- class F (flipjump 1.6.0's screen /
+keyboard API, the plan's ship #1, `docs/flipjump-1.6.0-plan.md` 1c-1g): blocked63's game with every emitter speaking the
+new device API (7df54d00, the gate harnesses 24621131). Built ONE PASS from the 1b command with flipjump 1.6.0 at 9f6119c,
+sha256 `f52751a2bb846c7a`; REBUILT BYTE-IDENTICAL (`blocked64_rebuild.log`). Its pixels are blocked63's on every gated
+frame; class F because the device under them changed (D8). Its gates, each solo (`docs/ship-evidence/blocked64_*.log`):
+
+| what | value |
+|---|---|
+| m2_std_gate / m3_gate | PASS -- 421 / 88 frames byte- and state-exact |
+| p2a / hurt / fight / die | PASS -- 13 of 15 (2 N/A: E1M1 has no yellow / red door) / 7 / 43 / 17, state, pixels and palette exact |
+| window smoke | PASS -- 40 frames through the interactive window and the headless screen, identical; title, icon, max fps |
+| combat set v10 | (mean+p80)/2 = **16,297,393** (blocked63 16,255,310, +0.26%); B0 OK |
+| binding metric | **16,921,550 ops/frame -- PASS** against 22,000,000 (blocked63 16,892,755, +0.17%) |
+| size | **39.13% of 2^27 -- PASS** against 43% (52,522,052 words; file 39,836,502 bytes, .fjm v3) |
+| ms/frame | the price (D8, class F): **68.3 ms/frame** against blocked63's **67.6** in one A/B run, each on its own flipjump (blocked63 on flipjump-151 5af5923, blocked64 on 1.6.0 e44ff3f; `blocked64_msframe.log`): **NOT SEPARATED**, ratio 0.989, pixels identical; 16,136,442 ops/frame (+0.44%). On 1.6.0 at 9f6119c, before area 6d's device speed fix, the same A/B was B SLOWER x0.961, 67.7 -> 70.2 (`blocked64_msframe_9f6119c.log`). The `shipped` baseline is re-frozen on blocked64 under 1.6.0 e44ff3f: **68.0 ms/frame**, 237.2 M fj/s (`blocked64_msframe_freeze.log`) |
+
+**From 2026-10-18 to 2026-10-28 the shipped binary was `build/doom_e1m1_blocked63.fjm`** -- class F (M8): blocked62 + THE MAP PAGE
 (the owner: "Add it to e1m1 too"; `config.MAP_CONFIG["E1M1"] = {"AUTOMAP": 1}`, 17536cad: a MAP menu item and the M key
 show E1M1's lines at 40 units/px with a red dot at the player). Built ONE PASS from the 1b command at 93813efc, sha256
 `b65e5a97c42adb71` (full `b65e5a97c42adb71dcf22b17f74c74e8713dfdaa862940d29c37a0fec994120c`); REBUILT BYTE-IDENTICAL
@@ -237,12 +276,12 @@ both arms live, and the binary hash is what it checks), so `--against shipped` i
 **The build command of the shipped series** -- ONE PASS since onepass56 (M7 P10, 2026-10-13; below):
 
 ```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game.json.gz --pin-heat scratchpad/12m/heat_e1m1_adopt.json.gz
 ```
 
 `--one-pass-blocks` reads no counts: it WRITES the build's census to `--counts-cache`, the tracked
-`scratchpad/12m/_census_game.json.gz` being the shipped build's (blocked63's since M8, the same census its
-rebuild wrote; blocked62's at P13; blocked58's before) -- the file `tests/host/test_pin_heat.py` fits the heat list against, as it fitted
+`scratchpad/12m/_census_game.json.gz` being the shipped build's (blocked65's since ship #2, the same census its
+rebuild wrote; blocked63's at M8; blocked62's at P13; blocked58's before) -- the file `tests/host/test_pin_heat.py` fits the heat list against, as it fitted
 the two-pass counts cache. **Until P10 the line was the TWO-PASS one** (recovered 2026-09-13 from the session
 transcript that built blocked23 and blocked24, 09-11 11:22 and 13:01 -- the two builds before blocked25 in the same
 series, with the same counts cache; blocked25's own line, 09-11 18:04, was never logged and followed the renderer
@@ -253,7 +292,18 @@ Until blocked51 the line read `--pool-base 0x60000000 --span-bits 0x9fffffe0` (e
 blocked52's first build moved it (blocked53 below). Every tool that reconstructs the pool reads the same two knobs:
 `poolmap.SHIP_GATE`, `profx/pool.KNOBS`, `profx/common.POOL_BASE_WORD` (9070b02) -- change all four places together.
 
-`build_labeled.py` wraps `build_blocked.py` with the label spy on (everything after `--` is
+**flipjump 1.6.0's API (62d93c4, 2026-10-31): the same line, nothing patched.** `build_blocked.py` passes the pool's
+knobs into `build_wall_renderer(..., assembly=build.Assembly(lzma_preset, pool=...))` (its ONE assembler argument;
+`--span-bits` is `pool_end = pool_base + span_bits`, `--spread` / `--spread-min-count` / `--pin-broken` are
+`spread_factor` / `spread_min_tables` / `pin_incomplete_groups`), the build gives each assembly a fresh `BlockPool`
+whose `pin_all_but` is the cells the program reads raw (`selfreset.pin_all_but_cells`: the byte arrays over their
+reachable cells and every `POINTER_READ_CELLS` label the emitted program declares -- the words `--pin-state-cells`
+always left unpinned), and the pins, the census and `--record-sites` are read off the pool (`pinned`, `census()`,
+`table_sites`). The labels are what flipjump's `assemble` returns. It needs flipjump >= b1365b5 (1.6.0 with #394:
+`table_pool` in `flipjump.assembler.inner_classes`, `BlockPool.report` gone; neither changed an output -- E1M8 rebuilt
+on it BYTE-IDENTICAL, `9311cd67`, 809 s).
+
+`build_labeled.py` wraps `build_blocked.py` and writes the label table (everything after `--` is
 `build_blocked.py`'s own arguments; `--labels` is the wrapper's). The label table it writes is
 what every profile joins against -- keep it beside the binary. The counts cache is keyed by the
 emitter sources; a cache MISS runs the counting assembly first (+25 min) and is the expected case
@@ -361,6 +411,24 @@ passed against it). Assembled AND run by the installed flipjump-151 at 6711d7a. 
 whole build (the one-pass census 2,227 s). Pinning: 20 of 20 hot words, 0 lost (4 re-keyed by their label), 44,212 groups
 placed, 0 broken, 550,176 tables blocked, the pool 74.2% of its window (`blocked62_pinreport.log`). Class S: VERIFIED by a byte-identical rebuild (`blocked62_rebuild.log`).
 **The play command is `fj --run build/doom_e1m1_blocked62.fjm`.**
+
+**blocked65 (2026-10-28, ship #2: flipjump 1.6.0's stl): ONE PASS -- the line at the top of 1b** with
+`heat_e1m1_adopt`, at fa0e7452 with flipjump 1.6.0 e44ff3f; 1,713 s (the rebuild at 375b0c64). **The heat list is the map's own** (M8 G13,
+`mapprofile.profile("E1M1").heat`), made in three steps the adoption needs once per stl change: (1) the counting pass
+`build_blocked.py game <1b knobs> --record-sites scratchpad/12m/_sites_e1m1_adopt.json.gz` (no `--one-pass-blocks`;
+`blocked65_heat_1a_sites.log`); (2) the one-pass build WITHOUT `--pin-heat` (`blocked65_heat_1b_unpinned.log`), profiled over
+the ten gamespeed games (`profx/drive.py games`, `blocked65_heat_2_games.log`); (3) `heatsites.py` on that profile ->
+20 hot groups, 24,970 hot sites, 0 ops unmapped; its layout control 41,006 words at their base, 3,733 unpinned (byte and
+pointer-read cells), 0 at a wrong base (`blocked65_heat_2_heatsites.log`). Pinning: 20 of 20 hot words, 0 lost, 44,739
+groups placed, 0 broken, 542,974 tables blocked, the pool 74.0% of its window (`blocked65_pinreport.log`). VERIFIED by a
+byte-identical rebuild (`blocked65_rebuild.log`, 1,705 s). Runs on flipjump >= 1.6.0 e44ff3f.
+**The play command is `fj --run build/doom_e1m1_blocked65.fjm`.**
+
+**blocked64 (2026-10-28, flipjump 1.6.0's device API, ship #1): ONE PASS -- the line at the top of 1b** with
+`heat_blocked27_p10`, assembled by flipjump 1.6.0 at 9f6119c (`emit_check.py E1M1 --then` the line). Pinning: 40,529 words
+pinned, 44,262 groups placed, 0 broken, 550,497 tables blocked, the pool 74.2% of its window. VERIFIED by a byte-identical
+rebuild (`blocked64_rebuild.log`). Runs on flipjump >= 1.6.0 (the new screen / keyboard device; flipjump-151 cannot run it).
+**The play command is `fj --run build/doom_e1m1_blocked64.fjm`.**
 
 **blocked63 (2026-10-18, M8: the MAP page): ONE PASS -- the line at the top of 1b** with `heat_blocked27_p10` at
 93813efc (its census the tracked `_census_game.json.gz`; `tests/host/test_pin_heat.py` 3 passed against it). 2,599 s
@@ -651,6 +719,8 @@ straight-line code once per frame. Restore fewer cells (a dirty set) is the only
 ## 5. E1M2 (M8): the second level's binary, its own numbers
 
 E1M2 is its OWN binary (`build/doom_e1m2_<id>.fjm`); E1M1's standing number (section 1) is untouched by it.
+**Since 2026-11-01 the standing E1M2 binary is v2 (`build/doom_e1m2_v2.fjm`, section 11)**: r4 below writes the screen's
+old opcode, which flipjump 1.6.0 refuses. What follows is r4's record.
 **`build/doom_e1m2_r4.fjm`** (2026-10-18, branch `m8p-final` at 925af820; sha256 `9a112139f3d35db3`) is the
 standing E1M2 binary: r3 + THE PLAYTEST'S POLISH (`docs/playtest-e1m2.md`; the owner 2026-10-18: "if you can implement
 it at +0.5% speed penalty, go for it") -- the door heights (`doors.door_neighbours`: two-sided neighbours on every map
@@ -715,3 +785,574 @@ REBUILD VERIFIED: rebuilt from this command at 71fa53e9 as `build/doom_e1m2_r3b.
 `f18d00c66d211cab26e69585b79ee2a45e52c546a0fbb3cf66d3c037240f574f` both.
 
 </details>
+
+## 6. E1M3 and E1M5 (M8 wave 1): their own binaries, their own numbers
+
+Each level is its OWN binary; E1M1's standing number (section 1) is untouched by them -- E1M1 rebuilt on the same branch
+is BYTE-IDENTICAL to blocked65 (`3a2c9564...`, `build_episode --maps E1M1`, 2026-10-29). Built on branch `m8-adopt`
+(m8-episode + the stl adoption + w2fix-wip; flipjump 1.6.0 at 9877f25) by the final creator (`scripts/build_episode.py`,
+its registry rows `LEVEL_SPREAD`), every gate run solo through `scripts/heavy.py`. Evidence: `docs/ship-evidence/e1m3_v1_*.log`,
+`e1m5_v1_*.log`, `e1m3_e1m5_v1_msframe.log`. The v1 combat sets were frozen from the drafts the day they were built
+(the owner's standing delegation; `scratchpad/gp/scenarios/combat_scenarios_e1m{3,5}_v1.json`).
+
+| gate | **E1M3** (`build/doom_e1m3_v1.fjm`, sha256 `71d56069bb2db8c3`) | **E1M5** (`build/doom_e1m5_v1.fjm`, sha256 `4e8c0ed5e54a85ae`) |
+|---|---|---|
+| `emit_check` (asserts on, no stand-in) | PASS | PASS |
+| the build (spread) | 998 s (spread 1) | 775 s (spread 2: the pool fits) |
+| `p2a_gate` | PASS -- 6 scenarios, 9 N/A | PASS -- 5 scenarios, 9 N/A |
+| `m2_std_gate` | PASS -- 75 frames byte- and state-exact | PASS -- 424 frames |
+| `m3_gate` | PASS -- 88 frames | PASS -- 88 frames |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (8 N/A) / 13 (3 N/A) scenarios | PASS -- 7 / 24 (18 N/A: no barrel, ...) / 13 (3 N/A) |
+| B0 on its v1 combat set | OK -- 11/11 runs exact; binding 15,750,448 | OK -- 11/11; binding 17,074,364 |
+| `gamespeed_trail --record` | PASS, CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m3/gamespeed.json`) | PASS, CONTROL-DOORS N/A (no tour reaches a door) (`scenarios/e1m5/gamespeed.json`) |
+| `gamespeed` | SPEED binding 14,652,491 ops/frame PASS; SIZE 60,373,968 words = **44.98%** of 2^27 (span 79.42%) | SPEED 11,851,855 PASS; SIZE 45,721,482 words = **34.07%** (span 83.58%) |
+| THE PLAYTHROUGH (`playthrough_gate --skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 3147**, byte-, palette- and state-exact on all 3,157 frames (777 s) | **PASS -- LEVEL COMPLETE at frame 4257**, exact on all 4,267 frames (822 s) |
+| `msframe --save-baseline shipped` (the map's timed walk `scenarios/<map>/msframe.json`) | **73.5 ms/frame** [72.8 .. 74.7], 233.5M fj/s, 17,158,103 ops/frame -> `shipped_e1m3` | **58.2 ms/frame** [58.0 .. 58.7], 224.0M fj/s, 13,028,121 ops/frame -> `shipped_e1m5` |
+| REBUILD | **BYTE-IDENTICAL** (`71d56069bb2db8c313c38b6775d90e1dad2a283c9d5919092164410b13adc784`) | **BYTE-IDENTICAL** (`4e8c0ed5e54a85ae4f7b9329b0bff7f698f3a63faaac3b19b753ffeb001593b2`) |
+| **THE SPEED SET** (the owner, 2026-10-29: the level's own playthrough, 11 windows of 100 world frames from NEW GAME to LEVEL COMPLETE; `playthrough_gate --speed-json`, on the current steering) | **binding 12,781,307** ops/frame (mean 12,106,763, p80 13,455,852) -- LEVEL COMPLETE at world 2279, exact on all 2,293 frames | **binding 12,698,851** (mean 11,826,507, p80 13,571,195) -- LEVEL COMPLETE at world 4253, exact on all 4,267 frames |
+
+Size: E1M3 at 44.98% is over the 43% cap -- the owner, 2026-10-24: "above 43% size is OK".
+The build command (section 1b's, the map's wad and spread; `scripts/build_episode.py --maps E1M3` runs exactly it):
+
+    python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m3_v1.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m3.wad --map E1M3 --out build/doom_e1m3_v1.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m3_v1.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+
+(E1M5: `e1m5` / `E1M5` and `--spread 2`.) Play: `fj --run build/doom_e1m3_v1.fjm`, `fj --run build/doom_e1m5_v1.fjm`.
+
+**Not done yet (recorded, not hidden):** the per-level SPEED PASS (`docs/episode-plan.md` 4.7: a heat list from each
+level's own profile; both build on E1M1's `heat_blocked27_p10`) and the written playtest note (4.6) -- the playthrough
+gate played each level start to exit on the binary. The playthroughs ran on the steering before 2026-10-29's lift rules
+(8183305d); under the current steering E1M3's pin finishes at world 2279 and E1M5's at 4253 (model only).
+
+## 7. E1M9 (M8 wave 2): its own binary, its own numbers
+
+Built and gated as section 6's levels (branch `m8-adopt`, the final creator, every step through `scripts/heavy.py`).
+Evidence: `docs/ship-evidence/e1m9_v1_*.log`. **`build/doom_e1m9_v1.fjm`**, sha256 `33da9dbcc55399a0`, spread 1.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS / 907 s |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 6 scenarios (8 N/A) / 194 frames / 88 frames, byte- and state-exact |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 31 (12 N/A) / 15 (1 N/A) scenarios |
+| B0 on its v1 combat set (keys `97a8a6475101cb0b`) | OK -- 11/11 runs exact; binding 13,649,248 ops/frame. The set was RE-PLANNED before its first pass: the draft's R0-s21 (params aggressive) died in b0's PROXY mirror at frames 98, 99 (`e1m9_v1_b0_before_replan.log`, 2026-10-29); `scenarios_map.mirror_deaths` now refuses a proxy-mirror death too, and R0-s21 is planned steady |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m9/gamespeed.json`) |
+| `gamespeed` | SPEED binding 7,732,082 ops/frame PASS; SIZE 55,452,414 words = **41.32%** of 2^27 PASS (span 77.26%) |
+| THE PLAYTHROUGH (`--skill easy`, seed 2) | **PASS -- LEVEL COMPLETE at frame 4663**, byte-, palette- and state-exact on all 4,673 frames (987 s). Its first run parted at frame 3241 on `p_rad` (binary 2099, mirror 2100): the GATES' MIRROR never counted the timed powers down (`MonsterPhase.weapon`, fixed 00d6ca5e); the binary was right (DOOM's P_PlayerThink order) |
+| `msframe --save-baseline shipped` | **37.7 ms/frame** [37.4 .. 38.8], 208.2M fj/s, 7,849,063 ops/frame -> `shipped_e1m9` (a first measurement, 40.1 [38.8 .. 41.3], ran beside the combat planner and was replaced) |
+| REBUILD | **BYTE-IDENTICAL** (`33da9dbcc55399a09d4a6e2db476c02a9f0715273f3f31a7f860093c4c930a48`) |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames, as section 6) | **binding 14,577,947** ops/frame (mean 12,711,601, p80 16,444,293: a window at world 2280 heavier than any B0 run) -- LEVEL COMPLETE at world 4659, exact on all 4,673 frames |
+
+The build command: section 6's with `e1m9` / `E1M9`, `--spread 1`. Play: `fj --run build/doom_e1m9_v1.fjm`.
+The playthrough ran on the current steering (8183305d: the lift rules E1M9 needed -- its lift 109 called down from
+its own SR lines). Not done yet, as for section 6: the per-level speed pass and the written playtest note.
+
+## 8. E1M6 and E1M8 (M8 wave 3): their own binaries, their own numbers
+
+**E1M6 v1 is superseded by E1M6 v2 (section 12, 2026-11-01: the monster-move test cut), and v2 by E1M6 v3 (section 12, the same day: v2 on its own heat list).**
+
+Built and gated as section 6's levels, on branch `m8-wave3` (m8-episode + soultele + the E1M8 boss route + the
+playthrough speed set; flipjump 1.6.0 at 9877f25), every step through `scripts/heavy.py`. Evidence:
+`docs/ship-evidence/e1m6_v1_*.log`, `e1m8_v1_*.log`. **B0 is not run**: the owner's 2026-10-29 speed set (the level's
+own playthrough) replaces the checkpoint-planned combat sets, so neither level has one. (E1M6's v1 set was frozen
+with its v2, section 12; E1M8's on 2026-11-03, section 13, from its draft byte for byte.)
+
+| gate | **E1M6** (`build/doom_e1m6_v1.fjm`, sha256 `5f1abfea24b8fa16`, spread 1) | **E1M8** (`build/doom_e1m8_v1.fjm`, sha256 `9311cd67268c7e12`, spread 2) |
+|---|---|---|
+| `emit_check` (asserts on, no stand-in) / the build | PASS (2026-10-29; its emit_check and build logs were not kept -- the rebuild below is the build's evidence) | PASS / 574 s |
+| `p2a_gate` | PASS -- 15 scenarios, 7 N/A | PASS -- **0 run, 14 N/A** (no key door, no switch exit) |
+| `m2_std_gate` | PASS -- 1,684 frames byte- and state-exact (approached from the door's reached side, else the bot's walk: 57c3942d, 6384fa35) | PASS -- 413 frames byte- and state-exact |
+| `m3_gate` | PASS -- 88 frames | PASS -- 88 frames |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (9 N/A) / 16 (1 N/A) scenarios | PASS -- **0 (7 N/A)** / 6 (37 N/A) / 8 (9 N/A): a sparse map (the owner, 2026-10-29: scaled criteria); its player damage is gated by the playthrough (hp 100 -> 13, exact) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m6/gamespeed.json`) | PASS; CONTROL-DOORS N/A (no tour reaches a door) (`scenarios/e1m8/gamespeed.json`) |
+| `gamespeed` (the tours) | SPEED binding **28,609,569** ops/frame **OVER** 22M; SIZE 85,691,848 words = **63.85%** (span 90.73%) | SPEED 11,569,110 PASS; SIZE 27,972,088 words = **20.84%** (span 67.40%) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 968** (world 964), byte-, palette- and state-exact on all 978 frames (336 s) | **PASS -- LEVEL COMPLETE at frame 1713** (world 1709), exact on all 1,723 frames (275 s). Its first run parted on frame 0: E1M8 has ONE door, and the harness read `dstate` as `0` against the oracle's `(0,)` (eefff38b) |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 20,234,657** PASS (mean 18,286,689, p80 22,182,625 at world 259) | **binding 10,015,092** PASS (mean 9,544,425, p80 10,485,760 at world 1609) |
+| `msframe --save-baseline shipped` (`scenarios/<map>/msframe.json`) | **108.5 ms/frame** [106.6 .. 110.1], 209.3M fj/s, 22,712,821 ops/frame -> `shipped_e1m6` | **33.0 ms/frame** [32.8 .. 34.1], 265.8M fj/s, 8,760,845 ops/frame -> `shipped_e1m8` (its timed walk promoted from the draft today: 167 of 200 frames move) |
+| REBUILD (2026-10-29 19:24 and 2026-10-30 00:53, re-hashed today) | **BYTE-IDENTICAL** (`5f1abfea24b8fa162f2aeaece569e0eeaff9ff98507557a5fa193dca3142ac0f`) | **BYTE-IDENTICAL** (`9311cd67268c7e121ff3137e86ff86146888e3b1e6e0ad5b859a4ff64c553737`) |
+
+**E1M6's 108.5 ms/frame is over D8's ~90 ms tripwire, and the reason is ops, not the engine:** its fj/s (209.3M) is
+in the other shipped levels' range (208-266M); its timed walk costs 22.7M ops/frame, the most of any shipped level (E1M3 17.2M). E1M6 is the
+episode's biggest map (63.85% of 2^27). Its playthrough speed set (an average active game) is under CAP-22; its tours
+(10 x 100 frames steered to the farthest points) are 28.6M, over. **Open for the owner:** whether the playthrough
+speed set replaces the tours as the binding number; until then E1M6 ships with the tours recorded OVER. The lever is
+the per-level speed pass (`docs/episode-plan.md` 4.7), not started for any level.
+
+The build command: section 6's with `e1m6` / `E1M6` (`--spread 1`) and `e1m8` / `E1M8` (`--spread 2`).
+Play: `fj --run build/doom_e1m6_v1.fjm`, `fj --run build/doom_e1m8_v1.fjm`.
+
+## 9. E1M7 (M8 wave 3): its own binary, its own numbers
+
+Built and gated as section 8's levels (every step through `scripts/heavy.py`); the playthrough on branch `m8-e1m7bot`
+(the route's closure legs 8d0e9f18 -- the pillar door 439 before lift 440 -- and E1M7's bot skipping the chaingun
+detour, 6c4e6717; seed 3 pinned, 99924ea1). Evidence: `docs/ship-evidence/e1m7_v1_*.log`. No B0 (section 8; its v1 combat set was frozen on 2026-11-03 and v1's
+B0 run then, section 13).
+**`build/doom_e1m7_v1.fjm`**, sha256 `77466d1d306acb78`, spread 1.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (2026-10-29; its build log was not kept -- the rebuild below is the build's evidence: 1,435 s, 1,109,014 tables in 98,560 groups) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 8 scenarios (6 N/A) / 116 frames / 75 frames, byte- and state-exact |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 32 (11 N/A) / 16 (1 N/A) scenarios |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m7/gamespeed.json`) |
+| `gamespeed` (the tours) | SPEED binding 20,938,496 ops/frame PASS; SIZE 104,301,282 words = **77.71%** of 2^27 (span **99.22%**: the episode's biggest) |
+| THE PLAYTHROUGH (`--skill easy`, seed 3) | **PASS -- LEVEL COMPLETE at frame 1263** (world 1259), byte-, palette- and state-exact on all 1,273 frames (436 s), 17/17 legs |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 14,947,213** PASS (mean 13,667,712, p80 16,226,714 at world 348) |
+| `msframe --save-baseline shipped` | **94.4 ms/frame** [94.0 .. 108.3], 167.6M fj/s, 15,822,669 ops/frame -> `shipped_e1m7` (rep 4's 108.3 ran with the yardstick falling 3.64 -> 3.40G; reps 0-3: 94.0 .. 96.9) |
+| REBUILD (2026-10-31) | **BYTE-IDENTICAL** (`77466d1d306acb78b48baea01df45820fe0b9a4be6ee4dcfbe2b757cdbd0c0ec`) |
+
+**E1M7's 94.4 ms/frame is over D8's ~90 ms tripwire, and unlike E1M6 the reason is the ENGINE RATE, not ops:** its
+ops/frame (15.8M) is mid-episode (E1M3 17.2M at 73.5 ms), but every rep runs at ~168M fj/s against the other levels'
+208-266M. E1M7 fills 99.22% of the span, the most of any level -- most likely a footprint effect (more of the image
+is touched per frame; not measured). The lever is the same per-level speed pass (`docs/episode-plan.md` 4.7).
+
+The build command: section 6's with `e1m7` / `E1M7`, `--spread 1`. Play: `fj --run build/doom_e1m7_v1.fjm`.
+
+## 10. E1M4 (M8): its own binary, its own numbers -- the middle of three wins
+
+Built and gated as section 8's levels (every step through `scripts/heavy.py`; flipjump 1.6.0 at 9877f25). The owner
+(2026-10-31): get three bot plays that reach the exit, run each on the binary, and ship the one with the MIDDLE
+playthrough ops/frame. The three, each byte-, palette- and state-exact on every frame of the binary:
+
+| play (branch @ commit) | seed / schedule | LEVEL COMPLETE | frames | speed-set binding | evidence |
+|---|---|---|---|---|---|
+| west (`m8-e1m4-west` @ 6db3ba3b) | 0 | world 7875 | 7,889 | 14,704,729 | `e1m4_v1_playthrough_west.log` |
+| **route (`m8-e1m4-route`, this branch)** | **7** | **world 4124** | **4,138** | **15,386,065** | `e1m4_v1_playthrough.log` |
+| east (`m8-e1m4bot` @ 167a93f4) | 0:6,5800:3,13909:1 | world 15236 | 15,250 | 16,642,331 | `e1m4_v1_playthrough_east.log` |
+
+Route is the middle and ships: its steering is this branch's (E1M4's MAP_TACTICS, MAP_PICKUPS and END_NO_AMMO /
+END_DRY_RUN), seed 7 pinned in `playthrough_gate.DEFAULT_SEED`. One binary served all three plays (the bot branches
+touch no `src/` and no build script). Evidence: `docs/ship-evidence/e1m4_v1_*.log`. No B0 (section 8).
+**`build/doom_e1m4_v1.fjm`**, sha256 `21b08396c53bd208`, spread 1.
+
+| gate | result |
+|---|---|
+| the build | PASS (2026-10-31, 1,731 s; 740,131 tables in 70,079 groups) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 14 scenarios (9 N/A) / 73 frames / 88 frames, byte- and state-exact |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 43 (9 N/A) / 17 (1 N/A) scenarios |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS (`scenarios/e1m4/gamespeed.json`) |
+| `gamespeed` (the tours) | SPEED binding 12,513,144 ops/frame PASS; SIZE 65,181,636 words = **48.56%** of 2^27 (span 83.41%; the size cap is waived for the levels, the owner 2026-10-24) |
+| THE PLAYTHROUGH (`--skill easy`, seed 7) | **PASS -- LEVEL COMPLETE at frame 4128** (world 4124), byte-, palette- and state-exact on all 4,138 frames |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 15,386,065** PASS (mean 13,226,833, p80 17,545,298 at world 1610) |
+| REBUILD (2026-10-31) | **BYTE-IDENTICAL** (`21b08396c53bd2080326711351b8c32bef27ff4298238544a740a657429dd851`; the census identical in content) |
+| `msframe` | **NOT RUN** on 2026-10-31 (the owner's machine was under load); timed 2026-11-02 as the A arm of v2's run (section 13): **86.4 ms/frame** [85.5 .. 86.4], 236.2M fj/s, 20,405,185 ops/frame (`e1m4_v2_msframe.log`). `shipped_e1m4` was first frozen on v2 |
+
+The other pins re-played on the model with this branch's bot: E1M3 2279, E1M5 4253, E1M6 964, E1M7 1259, E1M8 1709,
+E1M9 4659 -- unchanged, all LEVEL COMPLETE. E1M1 (medium, seed 1) and E1M2 die on the model -- E1M1 at world 345 and
+E1M2 at world 2528 on `m8-episode`'s bot itself (639c4382; its steering unchanged at d6485cdf), so those two pins were stale before this
+branch; their re-pin is its own task.
+
+The build command: section 6's with `e1m4` / `E1M4`, `--spread 1`. Play: `fj --run build/doom_e1m4_v1.fjm`.
+
+## 11. E1M1 and E1M2: the plays re-pinned, E1M1's playthrough speed set
+
+The bot's steering moved since E1M1's and E1M2's seeds were pinned (M8 bot work for E1M3..E1M9), and both pinned plays
+died on the model (E1M1 at world 345, E1M2 at world 2528; section 10). Re-searched on the model
+(`playthrough_gate.py --model-only --search`, 2 workers) on the steering of E1M4 v1:
+**E1M1 medium: seed 2** (LEVEL COMPLETE at world 345); **E1M2 easy: `0:1,1532:2,2288:1`** (world 3044).
+
+**E1M1** on its shipped binary (`build/doom_e1m1_blocked65.fjm`, sha256 `3a2c9564adbfcb07`, flipjump 1.6.0 at 9877f25):
+**PASS -- LEVEL COMPLETE at frame 348** (world 345), byte-, palette- and state-exact on all 358 frames. **Its speed set**
+(the owner, 2026-10-29: E1M1's standing number starts a new series from its own playthrough): **binding 12,266,909**
+ops/frame PASS (mean 10,569,408, p80 13,964,411 at world 24). The play is short -- 345 world frames, so the 11 windows
+of 100 frames overlap; the first three (the start room's fight, 13.9-16.2M) weigh most. Evidence:
+`docs/ship-evidence/blocked65_playthrough_speed.log`.
+
+**E1M2** cannot be checked on its shipped binary: `doom_e1m2_r4.fjm` (sha256 `9a112139f3d35db3`, 2026-10-18) writes the
+screen's old opcode 0x12, which flipjump 1.6.0's screen device refuses at output byte 0 ("opcode 0x12 is not a command").
+r4 predates the io API (E1M1 re-shipped for it as blocked64 / blocked65); E1M2 is rebuilt on the current source and
+re-ships through the whole gate (its block below).
+
+**E1M2 v2** -- **`build/doom_e1m2_v2.fjm`**, sha256 `93af128a9caef3ce`, built by the creator on branch `m8-fj-crfixes` at
+2be40a17 (r4's polish plus everything since: the stl adoption, the io API, flipjump 1.6.0 at b1365b5), spread 1. Every
+step through `scripts/heavy.py` (`build_episode.py --maps E1M2 --out-dir build/e1m2_v2`); evidence
+`docs/ship-evidence/e1m2_v2_*.log`.
+The build line, in the recorded paths (the creator's own, `build/e1m2_v2/...`, copied to them):
+
+    python scripts/emit_check.py E1M2 --then scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m2_v2.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m2.wad --map E1M2 --out build/doom_e1m2_v2.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m2_v2.json.gz --pin-heat scratchpad/12m/heat_blocked27_p10.json.gz
+
+| gate | result |
+|---|---|
+| the build | PASS (2026-11-01, 1,013 s; 837,931 tables in 63,720 groups) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 21 scenarios (4 N/A) / 258 frames / 88 frames, byte- and state-exact |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 43 (13 N/A) / 17 (3 N/A) scenarios |
+| B0, `combat_scenarios_e1m2_v1.json` | OK -- 11/11 runs state- and pixel-exact; **binding 18,105,174** ops/frame (r4 20,058,861: -9.74%) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE PASS (CONTROL-DOORS N/A, as before); the record's binary fields re-written, its ends unchanged |
+| `gamespeed` (the tours) | SPEED binding **18,709,294** ops/frame PASS (r4 20,591,876: -9.14%); SIZE 81,314,132 words = **60.58%** of 2^27 (r4 62.19%; span 91.91%; the owner: "Size is ok") |
+| THE PLAYTHROUGH (`--skill easy`, `0:1,1532:2,2288:1`) | **PASS -- LEVEL COMPLETE at frame 3048** (world 3044), byte-, palette- and state-exact on all 3,058 frames |
+| **THE SPEED SET** (the playthrough's 11 windows of 100 world frames) | **binding 15,843,864** PASS (mean 14,637,883, p80 17,049,846 at world 2650) |
+| the feature tests (section 5's nine files) | 111 passed |
+| REBUILD (2026-11-01) | **BYTE-IDENTICAL** (`93af128a9caef3cec91f840e66312d2cf074d50bf976351df543a54fdcc2be11`; the labels and the census identical in content) |
+| `msframe` | not timed against r4; timed 2026-11-02 as the A arm of v3's run (section 13): **64.7 ms/frame** [63.8 .. 68.7], 193.3M fj/s, 12,509,938 ops/frame (`e1m2_v3_msframe.log`). r4's 70.2 ms baseline was frozen on another day's box, so the two are not an A/B |
+
+Play: `fj --run build/doom_e1m2_v2.fjm`.
+
+## 12. E1M6 v2: the episode plan's step 2 -- E1M6 profiled, its monster-move test cut
+
+**The profile** (profx on flipjump 1.6.0, `scratchpad/12m/profx/play_profile.py`, v1's playthrough, 965 game frames;
+a measurement, not gate evidence): mean frame 18,094,270 ops; the render walk 81.92% (seg_pass2 4.93M, seg_pass1_ts
+3.74M, seg_pass1 2.39M, the thing passes 2.87M -- the renderer every level shares); the glue 2.88M, of which the
+monster-move collision cells 2.25M and `mm_things` alone 1,726,865 ops/frame (9.5%): every moving monster's every
+try tested every slot of the level's thing table, |dx| < bd and |dy| < bd by subtraction.
+
+**The cut** (`monstermove.things_leaf_lines(window=True)`, branch `m8-e1m6-mmwin`): per call, a window per radius
+class and axis, `[nx - bd, nx + bd]`; when neither end of a window straddles zero, unsigned order is signed order and
+each slot's test is two early-exit `hex.cmp` an axis (most slots leave on the first digit); a window that straddles
+zero falls back to the slot loop. Exact while the map's extent is < 16000 (asserted at emit). Only the maps in
+`wall_renderer.MM_WINDOW_MAPS` (E1M6) emit it, so every other shipped level keeps its recorded sha256.
+`tests/fj/test_mm_window_fj.py` runs both leaves on the real engine against `World._thing_blocker`'s tests (160
+records: both sides of both axes, windows straddling zero, things on the box edges); its two R9 mutants (no straddle
+test; |dx| = bd let through the high end) each part. 6 passed.
+
+**E1M6 v2** -- **`build/doom_e1m6_v2.fjm`**, sha256 `bb208c1985af855f`, built by the creator
+(`build_episode.py --maps E1M6 --out-dir build/e1m6_v2`, every step through `scripts/heavy.py`) at a8751494 with
+flipjump 1.6.0 at b1365b5, spread 1, `heat_blocked27_p10` (as v1). Evidence `docs/ship-evidence/e1m6_v2_*.log`.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (519 s) / PASS (1,221 s; 982,442 tables in 87,051 groups, 0 broken) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 15 scenarios (7 N/A) / 1,684 frames / 88 frames, byte- and state-exact (as v1) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (9 N/A) / 16 (1 N/A) scenarios (as v1) |
+| B0, `combat_scenarios_e1m6_v1.json` (first run on E1M6) | B0 OK -- 11/11 runs state- and pixel-exact; binding **28,237,166** OVER CAP-22 (mean 25,452,279); v1 on the same set (run today, `e1m6_v1_b0.log`): binding 30,124,699, mean 27,148,975 -- v2 **-6.27%** (-1,696,696 ops/frame on the mean) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; the record's ends, doors and keys equal v1's (only the binary fields moved; `scenarios/e1m6/gamespeed.json`, never committed for v1, is committed now) |
+| `gamespeed` (the tours) | SPEED binding **28,007,374** OVER (v1 28,609,569: **-2.10%**); SIZE 86,156,578 words = **64.19%** (v1 63.85%; the owner: above 43% is OK) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 968** (world 964), byte-, palette- and state-exact on all 978 frames (as v1) |
+| **THE SPEED SET** | **binding 19,413,074** PASS (v1 20,234,657: **-4.06%**); mean 17,469,276 (v1 18,286,689: -817,413 ops/frame), p80 21,356,872 at world 259 (v1 22,182,625) |
+| REBUILD (2026-11-01, `build/e1m6_v2b`) | **BYTE-IDENTICAL** (`bb208c1985af855ff3feb6b41e01bfc340e5af724d21de902477c0c32057b0ae`; the labels and the census identical in content; `e1m6_v2_rebuild.log`, 1,072 s) |
+| `msframe` (2026-11-02, v1 against v2 in one run) | **102.9 ms/frame** [102.7 .. 104.6] against v1's **105.7** [105.2 .. 106.1] -- **NOT SEPARATED** (median ratio 1.027, pairs 1.027 1.024 1.031 1.029 1.005: all B faster, under the 3% floor); pixels identical across arms and reps; 210.8M fj/s, 21,692,135 ops/frame (v1 22,712,821) (`e1m6_v2_msframe.log`). Class S: not SLOWER, so it ships |
+
+B0's runs (crowds awake) gain more than the playthrough. The speed set's -817K ops/frame is about half of `mm_things`' 1.73M: the slots still cost two compares each, and
+the window setup is paid per call. The tours stay OVER (the owner: allowed for E1M6); what binds them is the
+renderer, which this cut does not touch.
+
+v2 is superseded by v3 (below).
+
+### E1M6 v3: v2 on its own heat list -- the episode plan's step 3, its first level
+
+**The heat list.** Every level but E1M1 built with `heat_blocked27_p10`, E1M1's list from before the stl adoption: on
+E1M6 v2 only 2,610 of its 35,860 hot sites still matched a table. A level's own list: the creator's build of the
+recorded line with `--record-sites` (the binary is byte-identical to v2's; the sites file is the build's table-site
+map), its playthrough profiled on that binary (profx, `play_profile.py`, 965 game frames -- the frame count from the
+markers, #166), and `heatsites.py --map E1M6 --spread 1` -> **`scratchpad/12m/heat_e1m6.json.gz`**: 20 hot groups,
+33,785 hot sites, sha256 `6a43f3e8ccfb43c7`; its CONTROL (every executed hot table mapped to a replayed site) PASS.
+`build_episode.level_heat` builds a level with its own list once one is committed, else with p10;
+`test_a_level_builds_with_its_own_heat_list_only_where_one_is_committed` holds the registry to it.
+
+**E1M6 v3** -- **`build/doom_e1m6_v3.fjm`**, sha256 `a59dad606f8ab9b2`, built by the creator
+(`build_episode.py --maps E1M6 --out-dir build/e1m6_v3`, every step through `scripts/heavy.py`) on v2's source with
+flipjump 1.6.0 at b1365b5, spread 1, `heat_e1m6`: 20 of 20 hot words pinned, **33,785 of 33,785 hot sites matched**,
+982,442 tables in 87,051 groups, 0 broken. The program is v2's; only the placement moved. Evidence
+`docs/ship-evidence/e1m6_v3_*.log`.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (402 s) / PASS (1,067 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 15 scenarios (7 N/A) / 1,684 frames / 88 frames, byte- and state-exact (as v2) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (9 N/A) / 16 (1 N/A) scenarios, state, pixels and palette exact (as v2) |
+| B0, `combat_scenarios_e1m6_v1.json` | B0 OK -- 11/11 runs state- and pixel-exact; binding **25,737,929** OVER CAP-22 (mean 23,162,009; v2 28,237,166: **-8.85%**; v1 30,124,699: -14.56%) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; only the binary fields of `scenarios/e1m6/gamespeed.json` moved |
+| `gamespeed` (the tours) | SPEED binding **25,479,320** OVER (v2 28,007,374: **-9.03%**); SIZE 85,990,364 words = **64.07%** (v2 64.19%) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 968** (world 964), byte-, palette- and state-exact on all 978 frames (as v2) |
+| **THE SPEED SET** | **binding 17,749,651** PASS (v2 19,413,074: **-8.57%**; v1 20,234,657: -12.28%); mean 15,964,331, p80 19,534,971 at world 259 |
+| REBUILD (`build/e1m6_v3b`) | **BYTE-IDENTICAL** (`a59dad606f8ab9b29d2a6b3111d2de207febec50323fafa3aa8795d7e19b015b`; the labels and the census identical in content; `e1m6_v3_rebuild.log`, 1,077 s) |
+| `msframe` (2026-11-02, v2 against v3 in one run) | **99.9 ms/frame** [99.5 .. 102.1] against v2's **102.7** [102.3 .. 103.7] -- **NOT SEPARATED** (median ratio 1.030, pairs 1.030 1.029 1.002 1.032 1.038: all B faster, at the 3% floor); pixels identical; 197.5M fj/s, 19,735,024 ops/frame (`e1m6_v3_msframe.log`). `shipped_e1m6` re-frozen on v3: **101.0 ms/frame** [99.7 .. 102.3], 195.3M fj/s (`e1m6_v3_msframe_freeze.log`; v1's 108.5 retired) |
+
+The placement alone moves 8.6-9.0% of the executed ops on every measure, twice v2's cut; the tours stay OVER (the
+owner: allowed for E1M6).
+
+Play: `fj --run build/doom_e1m6_v3.fjm`.
+
+## 13. Every level on its own heat list -- the episode plan's step 3
+
+E1M6 v3 (section 12) was the first level; this section holds the rest, each made the same way: the creator's build of
+the level's recorded line with `--record-sites` (byte-identical to the shipped binary), its playthrough profiled on that
+binary (`play_profile.py`), `heatsites.py --map <M>` -> `scratchpad/12m/heat_<m>.json.gz` (its CONTROL: every executed
+hot table mapped to a replayed site), and the creator's build with that list (`build_episode.level_heat`). The program
+is the shipped one's; only the placement moves. Every number below was measured on 2026-11-01..02 with flipjump 1.6.0
+at b1365b5 (`fjpin-path`); the base binary's B0 and speed set were re-run beside the new one's, the base's tours are
+its recorded ones. msframe ran on 2026-11-02, one level at a time through `heavy.py` on a quiet box (its `--selftest`
+first: A-vs-A NOT SEPARATED at 0.979, a 20 ms delay called SLOWER and measured 22.6 ms, `heat_round_msframe_selftest.log`).
+Each level's A/B is the base binary (the sites build, byte for byte the shipped one) against the new one in one run; class S,
+so a B SLOWER verdict does not ship. None was SLOWER: E1M3, E1M4 and E1M7 B FASTER, the rest NOT SEPARATED (median ratios
+1.008 .. 1.030, all on the faster side). Each level's `shipped_<m>` baseline is re-frozen on the new binary
+(`scratchpad/12m/msframe_baselines/`, the ledger rows in `scratchpad/12m/msframe_ledger.jsonl`).
+
+| level | A (base) ms/frame | B (own heat) ms/frame | median ratio (pairs) | verdict | `shipped_<m>` re-frozen |
+|---|---|---|---|---|---|
+| E1M2 v3 | 64.7 [63.8 .. 68.7] | 63.9 [63.5 .. 64.7] | 1.017 (0.995 0.987 1.062 1.076 1.017) | NOT SEPARATED | 63.5 [63.0 .. 63.8] |
+| E1M3 v2 | 73.6 [72.4 .. 77.8] | 70.4 [70.1 .. 75.3] | 1.035 (1.030 1.044 1.035 1.033 1.045) | **B FASTER** | 70.3 [70.1 .. 70.5] |
+| E1M4 v2 | 86.4 [85.5 .. 86.4] | 83.4 [83.0 .. 84.3] | 1.034 (1.040 1.034 1.041 1.025 1.025) | **B FASTER** | 83.2 [82.8 .. 83.9] (the first `shipped_e1m4`) |
+| E1M5 v2 | 57.6 [57.2 .. 58.5] | 56.3 [56.1 .. 61.4] | 1.021 (1.017 1.028 1.026 1.021 0.937) | NOT SEPARATED | 61.2 [60.7 .. 61.9] |
+| E1M6 v3 (section 12) | 102.7 [102.3 .. 103.7] | 99.9 [99.5 .. 102.1] | 1.030 (1.030 1.029 1.002 1.032 1.038) | NOT SEPARATED | 101.0 [99.7 .. 102.3] |
+| E1M8 v2 | 32.6 [32.4 .. 33.3] | 32.4 [32.1 .. 32.5] | 1.008 (0.998 1.002 1.023 1.014 1.008) | NOT SEPARATED | 32.4 [32.1 .. 33.1] |
+| E1M9 v2 | 36.7 [36.7 .. 37.0] | 36.1 [36.0 .. 37.2] | 1.020 (1.023 1.014 1.020 0.989 1.025) | NOT SEPARATED | 36.6 [36.1 .. 37.0] |
+| E1M7 v2 (its own run, below) | 97.0 [93.9 .. 102.2] | 91.3 [91.3 .. 91.4] | 1.061 (1.083 1.028 1.038 1.061 1.119) | **B FASTER** | 90.9 [90.4 .. 93.5] |
+
+Every run: pixels identical across arms and reps, `busy processes: none`, cpu 2 pinned, yardstick median 3.59-3.64G,
+flipjump b1365b5 (engine `1bd844a1affacb2a`). The placement cuts 7-10% of msframe's ops and 0.6-4% of its time: fj/s falls
+4-7% in every B arm (consistent with the P13 lesson: the ops a cheaper address removes are the cheap, hot ones). E1M5's freeze (61.2) reads slower
+than its own B arm (56.3) on the same binary: a box state between the runs (yardstick 3.45-3.55G), not the binary;
+only an A/B inside one run is a number about the binary. The logs: `<m>_v<n>_msframe.log` and `_msframe_freeze.log`.
+
+### E1M2 v3: v2 on its own heat list
+
+**The heat list** `scratchpad/12m/heat_e1m2.json.gz` (sha256 `0953b50ad78705c1`): 20 hot groups, 49,137 hot sites,
+from v2's playthrough (3,045 game frames); CONTROL PASS (0 ops unmapped). The sites build is v2 byte for byte
+(`93af128a9caef3ce`).
+
+**E1M2 v3** -- **`build/doom_e1m2_v3.fjm`**, sha256 `96b738ecc2039b3c`, built by the creator on v2's source, spread 1,
+`heat_e1m2`: 20 of 20 hot words pinned, **49,137 of 49,137 hot sites matched**, 837,931 tables in 63,720 groups, 0
+broken. Its line (the registry's; `test_registry_row_is_the_recorded_build_line` reads it here):
+
+    python scripts/emit_check.py E1M2 --then scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/e1m2_v3.labels.tsv.gz -- game --wad tests/fixtures/freedoom_e1m2.wad --map E1M2 --out build/doom_e1m2_v3.fjm --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 1 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game_e1m2_v3.json.gz --pin-heat scratchpad/12m/heat_e1m2.json.gz
+
+Evidence `docs/ship-evidence/e1m2_v3_*.log` (`e1m2_v3_b0_v2base.log`: v2's B0 re-run on the sites build).
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (386 s) / PASS (1,029 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 21 scenarios (4 N/A) / 258 frames / 88 frames, byte- and state-exact (as v2) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 43 (13 N/A) / 17 (3 N/A) scenarios, state, pixels and palette exact (as v2) |
+| B0, `combat_scenarios_e1m2_v1.json` | B0 OK -- 11/11 runs state- and pixel-exact; binding **16,806,922** PASS (mean 14,496,013; v2 re-run 18,105,174: **-7.17%**) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE PASS (CONTROL-DOORS N/A, as v2); only the binary fields of `scenarios/e1m2/gamespeed.json` moved |
+| `gamespeed` (the tours) | SPEED binding **17,283,193** PASS (v2 recorded 18,709,294: **-7.62%**); SIZE 81,131,558 words = **60.45%** (v2 60.58%; the owner: "Size is ok") |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 3048** (world 3044), byte-, palette- and state-exact on all 3,058 frames (as v2) |
+| **THE SPEED SET** | **binding 14,710,806** PASS (v2 re-run 15,843,864: **-7.15%**); mean 13,569,765, p80 15,851,848 at world 2650 |
+| REBUILD (`build/e1m2_heatb`) | **BYTE-IDENTICAL** (`96b738ecc2039b3c80f4598b1643f9c38aac69b09ee3eea18b46726e1eebf3ec`; the labels and the census identical in content; `e1m2_v3_rebuild.log`, 384 + 1,040 s) |
+| `msframe` | 63.9 ms/frame against v2's 64.7 in one run, **NOT SEPARATED** (1.017); `shipped_e1m2` re-frozen at 63.5 (above; `e1m2_v3_msframe.log`) |
+
+Play: `fj --run build/doom_e1m2_v3.fjm`.
+
+### E1M8 v2: v1 on its own heat list
+
+**The heat list** `scratchpad/12m/heat_e1m8.json.gz` (sha256 `25c47012090babac`): 20 hot groups, 23,748 hot sites,
+from v1's playthrough (1,710 game frames); CONTROL PASS (0 ops unmapped). The sites build is v1 byte for byte
+(`9311cd67268c7e12`).
+
+**E1M8 v2** -- **`build/doom_e1m8_v2.fjm`**, sha256 `b8aa2750e95f0a07`, built by the creator on v1's source, spread 2,
+`heat_e1m8`: 20 of 20 hot words pinned, **23,748 of 23,748 hot sites matched**, 229,538 tables in 19,468 groups, 0
+broken. The build command: section 6's with `e1m8` / `E1M8`, `--spread 2`, the `_v2` names and
+`--pin-heat scratchpad/12m/heat_e1m8.json.gz`. Evidence `docs/ship-evidence/e1m8_v2_*.log`.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (328 s) / PASS (544 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 0 run (14 N/A) / 413 frames / 88 frames, byte- and state-exact (as v1: the same scenarios and verdicts, fewer ops) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 0 (7 N/A) / 6 (37 N/A) / 8 (9 N/A) scenarios, state, pixels and palette exact (as v1) |
+| B0, `combat_scenarios_e1m8_v1.json` (frozen 2026-11-03 from the draft, byte for byte) | B0 OK -- 11/11 runs state- and pixel-exact; binding **9,313,030** PASS (mean 9,272,613; v1 on the same set 10,089,498: **-7.70%**; `e1m8_v2_b0.log`, `e1m8_v1_b0.log`) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE PASS (CONTROL-DOORS N/A, as v1); only the binary fields of `scenarios/e1m8/gamespeed.json` moved against v1's record (committed here for the first time) |
+| `gamespeed` (the tours) | SPEED binding **10,715,756** PASS (v1 recorded 11,569,110: **-7.38%**); SIZE 27,993,760 words = **20.86%** (v1 20.84%) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 1713** (world 1709), byte-, palette- and state-exact on all 1,723 frames (as v1) |
+| **THE SPEED SET** | **binding 9,256,781** PASS (v1 re-run 10,015,092: **-7.57%**); mean 8,816,856, p80 9,696,707 at world 1609 |
+| REBUILD (`build/e1m8_heatb`) | **BYTE-IDENTICAL** (`b8aa2750e95f0a07d8439cd08ebd1cd5d685a6beb4ea7710a1811b71cea1944e`; the labels and the census identical in content; `e1m8_v2_rebuild.log`, 325 + 542 s) |
+| `msframe` | 32.4 ms/frame against v1's 32.6 in one run, **NOT SEPARATED** (1.008); `shipped_e1m8` re-frozen at 32.4 (above; `e1m8_v2_msframe.log`) |
+
+Play: `fj --run build/doom_e1m8_v2.fjm`.
+
+### E1M9 v2: v1 on its own heat list
+
+**The heat list** `scratchpad/12m/heat_e1m9.json.gz` (sha256 `59612853d4f68c7d`): 20 hot groups, 35,902 hot sites,
+from v1's playthrough (4,660 game frames); CONTROL PASS (0 ops unmapped). The sites build is v1 byte for byte
+(`33da9dbcc55399a0`).
+
+**E1M9 v2** -- **`build/doom_e1m9_v2.fjm`**, sha256 `1171afc3d845e1f4`, built by the creator on v1's source, spread 1,
+`heat_e1m9`: 20 of 20 hot words pinned, **35,902 of 35,902 hot sites matched**, 515,276 tables in 46,479 groups, 0
+broken. The build command: section 6's with `e1m9` / `E1M9`, `--spread 1`, the `_v2` names and
+`--pin-heat scratchpad/12m/heat_e1m9.json.gz`. Evidence `docs/ship-evidence/e1m9_v2_*.log`
+(`e1m9_v2_b0_v1base.log`: v1's B0 re-run on the sites build).
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (387 s) / PASS (831 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 6 scenarios (9 N/A) / 194 frames / 88 frames, byte- and state-exact (as v1: the logs equal v1's but for op counts, times and paths) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 31 (13 N/A) / 16 (2 N/A) scenarios, state, pixels and palette exact (as v1) |
+| B0, `combat_scenarios_e1m9_v1.json` | B0 OK -- 11/11 runs state- and pixel-exact; binding **12,564,575** PASS (mean 12,277,399; v1 re-run 13,649,248: **-7.95%**); per-frame maximum 24,379,392 in R0-s21 |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; only the binary fields of `scenarios/e1m9/gamespeed.json` moved |
+| `gamespeed` (the tours) | SPEED binding **7,138,830** PASS (v1 recorded 7,732,082: **-7.67%**); SIZE 55,428,628 words = **41.30%** (v1 41.32%) |
+| THE PLAYTHROUGH (`--skill easy`, seed 2) | **PASS -- LEVEL COMPLETE at frame 4663** (world 4659), byte-, palette- and state-exact on all 4,673 frames (as v1) |
+| **THE SPEED SET** | **binding 13,424,871** PASS (v1 re-run 14,577,947: **-7.91%**); mean 11,710,926, p80 15,138,816 at world 2280 |
+| REBUILD (`build/e1m9_heatb`) | **BYTE-IDENTICAL** (`1171afc3d845e1f426d624f4db26a01e472adbb1f60e5c9766778740c0eca01d`; the labels and the census identical in content; `e1m9_v2_rebuild.log`, 399 + 869 s) |
+| `msframe` | 36.1 ms/frame against v1's 36.7 in one run, **NOT SEPARATED** (1.020); `shipped_e1m9` re-frozen at 36.6 (above; `e1m9_v2_msframe.log`) |
+
+Play: `fj --run build/doom_e1m9_v2.fjm`.
+
+### E1M5 v2: v1 on its own heat list
+
+**The heat list** `scratchpad/12m/heat_e1m5.json.gz` (sha256 `704fe62b929c2a78`): 20 hot groups, 29,123 hot sites,
+from v1's playthrough (4,254 game frames); CONTROL PASS (0 ops unmapped). The sites build is v1 byte for byte
+(`4e8c0ed5e54a85ae`).
+
+**E1M5 v2** -- **`build/doom_e1m5_v2.fjm`**, sha256 `1bd109d61d0780b5`, built by the creator on v1's source, spread 2,
+`heat_e1m5`: 20 of 20 hot words pinned, **29,123 of 29,123 hot sites matched**, 542,365 tables in 49,435 groups, 0
+broken. The build command: section 6's with `e1m5` / `E1M5`, `--spread 2`, the `_v2` names and
+`--pin-heat scratchpad/12m/heat_e1m5.json.gz`. Evidence `docs/ship-evidence/e1m5_v2_*.log`
+(`e1m5_v2_b0_v1base.log`: v1's B0 re-run on the sites build, equal to v1's record to the op).
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (369 s) / PASS (720 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 5 scenarios (9 N/A) / 424 frames / 88 frames, byte- and state-exact (as v1: the logs equal v1's but for op counts, times and paths) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 24 (18 N/A) / 13 (3 N/A) scenarios, state, pixels and palette exact (as v1) |
+| B0, `combat_scenarios_e1m5_v1.json` | B0 OK -- 11/11 runs state- and pixel-exact; binding **15,745,927** PASS (mean 14,152,887; v1 17,074,364: **-7.78%**); per-frame maximum 25,952,256 in R0-s118 (v1 28,049,408) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE PASS (CONTROL-DOORS N/A, as v1); only the binary fields of `scenarios/e1m5/gamespeed.json` moved |
+| `gamespeed` (the tours) | SPEED binding **10,933,961** PASS (v1 recorded 11,851,855: **-7.74%**); SIZE 45,553,672 words = **33.94%** (v1 34.07%) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 4257** (world 4253), byte-, palette- and state-exact on all 4,267 frames (as v1) |
+| **THE SPEED SET** | **binding 11,639,313** PASS (v1 12,698,851, re-run equal: **-8.34%**); mean 10,866,107, p80 12,412,518 at world 831 |
+| REBUILD (`build/e1m5_heatb`) | **BYTE-IDENTICAL** (`1bd109d61d0780b57647fb4bd76cf271733080778ea208e187c2f5db92d31b32`; the labels and the census identical in content; `e1m5_v2_rebuild.log`, 1,151 + 717 s) |
+| `msframe` | 56.3 ms/frame against v1's 57.6 in one run, **NOT SEPARATED** (1.021); `shipped_e1m5` re-frozen at 61.2 (above; `e1m5_v2_msframe.log`) |
+
+Play: `fj --run build/doom_e1m5_v2.fjm`.
+
+### E1M3 v2: v1 on its own heat list
+
+**The heat list** `scratchpad/12m/heat_e1m3.json.gz` (sha256 `3aed8051a42b1898`): 20 hot groups, 33,373 hot sites,
+from v1's playthrough (2,280 game frames); CONTROL PASS (0 ops unmapped). The sites build is v1 byte for byte
+(`71d56069bb2db8c3`).
+
+**E1M3 v2** -- **`build/doom_e1m3_v2.fjm`**, sha256 `1feb6db9fb21acc0`, built by the creator on v1's source, spread 1,
+`heat_e1m3`: 20 of 20 hot words pinned, **33,373 of 33,373 hot sites matched**, 618,258 tables in 61,002 groups, 0
+broken. The build command: section 6's with `--spread 1`, the `_v2` names and
+`--pin-heat scratchpad/12m/heat_e1m3.json.gz`. Evidence `docs/ship-evidence/e1m3_v2_*.log`
+(`e1m3_v2_b0_v1base.log`: v1's B0 re-run on the sites build, equal to v1's record to the op).
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (379 s) / PASS (853 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 6 scenarios (9 N/A) / 75 frames / 88 frames, byte- and state-exact (as v1: the logs equal v1's but for op counts, times and paths) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 34 (8 N/A) / 13 (3 N/A) scenarios, state, pixels and palette exact (as v1) |
+| B0, `combat_scenarios_e1m3_v1.json` | B0 OK -- 11/11 runs state- and pixel-exact; binding **14,476,506** PASS (mean 13,807,876; v1 15,750,448: **-8.09%**); per-frame maximum 33,554,432 in R0-s109 (v1 36,700,160) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; only the binary fields of `scenarios/e1m3/gamespeed.json` moved |
+| `gamespeed` (the tours) | SPEED binding **13,427,447** PASS (v1 recorded 14,652,491: **-8.36%**); SIZE 60,154,850 words = **44.82%** (v1 44.98%; over 43%, waived by the owner 2026-10-24, as v1) |
+| THE PLAYTHROUGH (`--skill easy`, the pinned seed) | **PASS -- LEVEL COMPLETE at frame 2283** (world 2279), byte-, palette- and state-exact on all 2,293 frames (as v1 on the current steering; section 6) |
+| **THE SPEED SET** | **binding 11,746,196** PASS (v1 12,781,307, re-run equal: **-8.10%**); mean 11,100,845, p80 12,391,547 at world 654 |
+| REBUILD (`build/e1m3_heatb`) | **BYTE-IDENTICAL** (`1feb6db9fb21acc0d89a18879437d06f100740ed51ba34a895edf64514cb5199`; the labels and the census identical in content; `e1m3_v2_rebuild.log`; its 5,004 + 17,628 s are wall time including the heavy lock's queue) |
+| `msframe` | **70.4 ms/frame against v1's 73.6 in one run, B FASTER x1.035** (all five pairs); `shipped_e1m3` re-frozen at 70.3 (above; `e1m3_v2_msframe.log`) |
+
+Play: `fj --run build/doom_e1m3_v2.fjm`.
+
+### E1M4 v2: v1 on its own heat list
+
+**The heat list** `scratchpad/12m/heat_e1m4.json.gz` (sha256 `af7666baac42b4ba`): 20 hot groups, 37,002 hot sites,
+from v1's playthrough (4,125 game frames, seed 7); CONTROL PASS (0 ops unmapped). The sites build is v1 byte for byte
+(`21b08396c53bd208`).
+
+**E1M4 v2** -- **`build/doom_e1m4_v2.fjm`**, sha256 `ed6075e2eeea0ca3`, built by the creator on v1's source, spread 1,
+`heat_e1m4`: 20 of 20 hot words pinned, **37,002 of 37,002 hot sites matched**, 740,131 tables in 70,079 groups, 0
+broken. The build command: section 10's with the `_v2` names and `--pin-heat scratchpad/12m/heat_e1m4.json.gz`.
+Evidence `docs/ship-evidence/e1m4_v2_*.log`.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (377 s) / PASS (882 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 14 scenarios (9 N/A) / 73 frames / 88 frames, byte- and state-exact (as v1: the logs equal v1's but for op counts, times and paths) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 43 (9 N/A) / 17 (1 N/A) scenarios, state, pixels and palette exact (as v1) |
+| B0, `combat_scenarios_e1m4_v1.json` (v1 recorded none, section 10; both binaries measured here for the first time) | B0 OK -- 11/11 runs state- and pixel-exact; binding **19,342,561** PASS (mean 18,021,624; v1 on the sites build 21,223,504, also 11/11 exact, `e1m4_v2_b0_v1base.log`: **-8.86%**); per-frame maximum 55,836,672 in R0-s79 (v1 61,603,840) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; only the binary fields of `scenarios/e1m4/gamespeed.json` moved |
+| `gamespeed` (the tours) | SPEED binding **11,291,909** PASS (v1 recorded 12,513,144: **-9.76%**); SIZE 64,593,636 words = **48.13%** (v1 48.56%; the levels' waiver, as v1) |
+| THE PLAYTHROUGH (`--skill easy`, seed 7) | **PASS -- LEVEL COMPLETE at frame 4128** (world 4124), byte-, palette- and state-exact on all 4,138 frames (as v1) |
+| **THE SPEED SET** | **binding 13,898,994** PASS (v1 recorded 15,386,065, re-run equal: **-9.67%**); mean 11,972,355, p80 15,825,633 at world 1610 |
+| REBUILD (`build/e1m4_heatb`) | **BYTE-IDENTICAL** (`ed6075e2eeea0ca34812f69ce56fc691513a5f9f0a9c166a8dabbc346bd1751b`; the labels and the census identical in content; `e1m4_v2_rebuild.log`, 374 + 880 s) |
+| `msframe` | **83.4 ms/frame against v1's 86.4 in one run, B FASTER x1.034** (all five pairs); the first `shipped_e1m4` frozen at 83.2 (above; `e1m4_v2_msframe.log`) |
+
+Play: `fj --run build/doom_e1m4_v2.fjm`.
+
+### E1M7 v2: v1 on its list's hottest group
+
+**The whole list does not fit.** E1M7's own list (20 hot groups, 39,602 hot sites from v1's playthrough, 1,260 game
+frames; kept untracked as `heat_e1m7_nofit.json.gz`) stops the heat build in the assembler -- `table-placement: the
+segment at 0x0 and its wflip area reach 0x88164840, inside the table pool at 0x80000000. Raise pool_base.` Raising the
+pool base shrinks the pool's span (0x7fffffe0 from 0x80000000 is the whole upper half), and the pool is 95% full
+already; that was not tried. Why the 20-group placement grows the code's wflip area by ~0x84 M bits is NOT explained:
+on E1M4, E1M6 and on E1M7's one-group list below the own list SHRANK segment 0 (v1's ends at bit 0x7fdbbe40, v2's at
+0x7f7896c0).
+
+**The heat list** `scratchpad/12m/heat_e1m7.json.gz` (sha256 `07a9a2910f4afd7e`): `heatsites.py --top 1`, the hottest
+group alone -- `hex.tables.res`, 17,562 hot sites, 259,505 table ops/frame of the 20 groups' 443,537 (58.5%); CONTROL
+PASS (0 ops unmapped; `e1m7_v2_heatsites.log`). The sites build is v1 byte for byte (`77466d1d306acb78`).
+
+**E1M7 v2** -- **`build/doom_e1m7_v2.fjm`**, sha256 `49b38d76c4fc7052`, built by the creator on v1's source, spread 1,
+`heat_e1m7`: 1 of 1 hot words pinned, **17,562 of 17,562 hot sites matched**, 1,109,014 tables in 98,560 groups
+(PREFLIGHT 95.2% of the pool), 0 broken. The build command: section 9's with the `_v2` names and `--pin-heat
+scratchpad/12m/heat_e1m7.json.gz`. Evidence `docs/ship-evidence/e1m7_v2_*.log`. B0 was not run at the ship (none
+was committed for E1M7, section 8); its v1 set was frozen on 2026-11-03 and v1's and v2's B0 run then (the row below).
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (411 s) / PASS (1,430 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 8 scenarios (6 N/A) / 116 frames / 75 frames, byte- and state-exact (as v1: the logs equal v1's but for numbers, times and paths) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 32 (11 N/A) / 16 (1 N/A) scenarios, state, pixels and palette exact (as v1, the same normalization) |
+| B0, `combat_scenarios_e1m7_v1.json` (frozen 2026-11-03 from the draft, byte for byte; run after the ship) | B0 OK -- 11/11 runs state- and pixel-exact; binding **21,711,026** PASS, under CAP-22 by 288,974 (mean 20,079,617; v1 on the same set 23,217,411, OVER: **-6.49%**; `e1m7_v2_b0.log`, `e1m7_v1_b0.log`) |
+| `gamespeed_trail --record` | PASS; CONTROL-POSE and CONTROL-DOORS PASS; only the binary fields of `scenarios/e1m7/gamespeed.json` moved (committed here for the first time: v1's tours, checkpoints and timed walk were never tracked) |
+| `gamespeed` (the tours) | SPEED binding **19,461,121** PASS (v1 recorded 20,938,496: **-7.06%**); SIZE 104,098,214 words = **77.56%** (v1 77.71%; span 97.59%, v1 99.22%; the levels' waiver, as v1) |
+| THE PLAYTHROUGH (`--skill easy`, seed 3) | **PASS -- LEVEL COMPLETE at frame 1263** (world 1259), byte-, palette- and state-exact on all 1,273 frames (as v1) |
+| **THE SPEED SET** | **binding 13,965,960** PASS (v1 re-run 14,947,213: **-6.56%**); mean 12,764,268, p80 15,167,652 at world 348 |
+| REBUILD (`build/e1m7_heatb`) | **BYTE-IDENTICAL** (`49b38d76c4fc7052ae01627c265788b1c5c609f5e6305d265223c17a9735b8fd`; the labels and the census identical in content; `e1m7_v2_rebuild.log`, 417 + 1,406 s; its `sha256` step reads FAIL against v1's recorded hash, which this section replaces) |
+| `msframe` | **91.3 ms/frame against v1's 97.0 in one run, B FASTER x1.061** (all five pairs; pixels identical; `e1m7_v2_msframe.log`, its own `--selftest` first: A-vs-A 1.003, the 20 ms delay measured 23.4, `e1m7_v2_msframe_selftest.log`); `shipped_e1m7` re-frozen at 90.9 (`e1m7_v2_msframe_freeze.log`) |
+
+The A arm is the noisy one ([93.9 .. 102.2]; v1's own freeze was 94.4, section 9); B's five reps sit inside 0.1 ms.
+Both arms run at ~162M fj/s, the episode's lowest rate; v2 stays over D8's ~90 ms tripwire for v1's reason (section
+9): the engine rate, not ops (v2 fills 97.59% of the span, v1 99.22%).
+
+Play: `fj --run build/doom_e1m7_v2.fjm`.
+
+### E1M7 v3 (tried, 2026-11-03): v1 on its own list without the pointer groups -- fewer ops, not faster; v2 stays
+
+**What stops the whole list** (v2 above left it unexplained), found by builds rather than by the assembler's
+arithmetic: the seven `hex.pointers.to_ptr_var` groups (+0 .. +384; 215-329 hot sites each, 2,007 together). The
+20-group list without them (`scratchpad/12m/heat_e1m7_noptr.json.gz`, sha256 `8a1008b012f99804`: `heat_e1m7_nofit`'s
+groups and sites minus those seven, checked equal; 13 groups, 37,595 sites) builds, and segment 0 then ends LOWER than
+v2's; one pointer group added back (`+192`, the `ptr1` list, 14 groups) moves the end up by 0x481bc0 bits and buys
+nothing. Segment 0's end (code + wflip area; the table pool starts at bit 0x80000000; `segs.py`, header only):
+
+| build | heat list | segment 0 ends at bit | playthrough speed set |
+|---|---|---|---|
+| v1 | p10 | 0x7fdbbe40 | 14,947,213 |
+| v2 | top 1 (`hex.tables.res`) | 0x7f7896c0 | 13,965,960 |
+| **v3** | the 13 groups without `to_ptr_var` | **0x7f598e00** | **13,715,255** |
+| `ptr1` | v3's + `to_ptr_var + 192` | 0x7fa1a9c0 | 13,716,208 (`e1m7_ptr1_*.log`) |
+| `nofit` | all 20 | 0x88164840 (the assembler's refusal) | -- |
+
+Why the pointer groups grow the wflip area this much (one group ~4.7M bits, seven past the pool) is still not derived
+from the assembler; the measured fact is that they are the whole of it and are worth nothing on the playthrough.
+
+**E1M7 v3** -- `build/doom_e1m7_v3.fjm`, sha256 `1af684fb996826f8`, built twice: in isolation (`e1m7_v3_isolation_build.log`,
+1,445 s) and by the creator (`build_episode.py --maps E1M7` with `heat_e1m7` = the noptr list; 1,646 s) -- **BYTE-IDENTICAL**
+(`1af684fb996826f8c1b5af7521027bba1b719b2444460c92c08c5a36435739d2`). 13 of 13 hot words pinned, **37,595 of 37,595 hot
+sites matched**, 1,109,014 tables in 98,560 groups (PREFLIGHT 97.6% of the pool), 0 broken. Evidence
+`docs/ship-evidence/e1m7_v3_*.log`.
+
+| gate | result |
+|---|---|
+| `emit_check` / the build | PASS (440 s) / PASS (1,646 s) |
+| `p2a_gate` / `m2_std_gate` / `m3_gate` | PASS -- 8 scenarios (6 N/A) / 116 frames / 75 frames, byte- and state-exact (as v2) |
+| `hurt_gate` / `fight_gate` / `die_gate` | PASS -- 7 / 32 (11 N/A) / 16 (1 N/A) scenarios, state, pixels and palette exact (as v2) |
+| B0, `combat_scenarios_e1m7_v1.json` | B0 OK -- 11/11; binding **21,395,153** PASS (v2 21,711,026: -1.45%; v1 23,217,411: -7.85%) |
+| `gamespeed_trail --record` / `gamespeed` | PASS, both controls; only the binary fields moved / binding **19,198,927** PASS (v2 19,461,121: -1.35%); SIZE 77.51% (span 99.10%) |
+| THE PLAYTHROUGH (easy, seed 3) | PASS -- LEVEL COMPLETE at frame 1263, all 1,273 frames exact; **the speed set 13,715,255** (v2 13,965,960: **-1.80%**) |
+| `msframe` (class S, A = v2, one run, its `--selftest` first: A-vs-A 1.005, the 20 ms delay measured 20.0) | 93.8 ms/frame against v2's 92.3, **NOT SEPARATED** (median ratio **0.977**; pairs 1.014 1.004 0.961 0.976 0.977; pixels identical; v3 runs at 154.8M fj/s, v2 at 160.3M; `e1m7_v3_msframe.log`, `_msframe_selftest.log`) |
+
+**Not shipped: E1M7 stays v2.** The verdict is not B SLOWER, so the rule alone would allow it, but the median sits on
+the SLOWER side (every NOT SEPARATED level above shipped with its median on the faster side): the 1.8% of ops v3 removes
+is paid back by a lower op rate, as P13 warned. ms/frame is the metric; v3 offers none, and v2 is already under CAP-22
+on its B0 (above). `shipped_e1m7` stays v2's 90.9 (the chain's single-arm run on v3, 92.9 ms/frame, is in the ledger and
+`e1m7_v3_msframe_single.log`, not a baseline). The creator's `sha256` step reads FAIL on the v3 build against the
+registry's recorded hash, as it should for a candidate (`e1m7_v3_build.log` is the creator's build).
+
+### E1M1: its own playthrough's list -- tried, blocked65 stays
+
+Step 3 included E1M1 with "its heat list `heat_e1m1_adopt` stays unless the A/B says otherwise" (`docs/episode-plan.md`
+12). blocked65's list is already E1M1's own (made from the ten gamespeed games, 1b); this is the playthrough's.
+
+**The heat list** `scratchpad/12m/heat_e1m1_play.json.gz` (sha256 `e15be0b2146e4728`): 20 hot groups, 28,529 hot sites,
+from blocked65's playthrough (seed 2 at medium, 346 game frames, section 11); CONTROL PASS (0 ops unmapped;
+`e1m1_heatplay_heatsites.log`). The sites build is blocked65 byte for byte (`3a2c9564adbfcb07`).
+
+**The candidate** -- `build/e1m1_play/doom_e1m1.fjm`, sha256 `7eebb2474fb1e694`, built by the creator: the 1b command with
+`--pin-heat scratchpad/12m/heat_e1m1_play.json.gz` in place of `heat_e1m1_adopt` (740 s; `e1m1_heatplay_build.log`).
+
+| check | result |
+|---|---|
+| B0, `combat_scenarios_v10.json` | B0 OK -- 11/11 runs state- and pixel-exact; binding 14,278,282 against blocked65's 14,249,841 re-run beside it: **+0.20%** (`e1m1_heatplay_b0.log`, `_b0_base.log`) |
+| THE PLAYTHROUGH (medium, seed 2) | PASS -- LEVEL COMPLETE at frame 348, byte-, palette- and state-exact on all 358 frames; **the speed set 12,260,237** against blocked65's 12,266,909 (**-0.05%**; `e1m1_heatplay_playthrough.log`) |
+| `msframe` (class S, one run, A = the sites build) | 62.7 ms/frame against 63.2, **NOT SEPARATED** (median ratio 1.007; pairs 1.028 0.999 1.027 1.007 1.005; pixels identical; `e1m1_heatplay_msframe.log`) |
+
+No gain on any of the three, so **E1M1 stays blocked65 on `heat_e1m1_adopt`** and no baseline moves. The other levels'
+lists replaced a list made for a different map (p10, E1M1's); E1M1's list was already its own.

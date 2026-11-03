@@ -49,10 +49,12 @@ if __name__ == "__main__":                       # `--map E1Mn` before probe / g
     take_map_arg()
 
 import gate_roles                                                            # noqa: E402
+from doomfj.mapprofile import check_checkout                                # noqa: E402
+check_checkout(__file__)        # M8: this checkout's doomfj (the installed one is the main repo's)
 from doomfj import doors as D                                               # noqa: E402
 from doomfj import gamedata as gd                                           # noqa: E402
 
-KEY_COLOURS = {26: "blue", 32: "blue", 27: "yellow", 34: "yellow", 28: "red", 33: "red"}
+KEY_COLOURS = gate_roles.KEY_LINE_COLOURS     # M8: every key-door special (the blazing ones too), by colour
 CARD_THINGS = {"blue": (5, 40), "yellow": (6, 39), "red": (13, 38)}       # card, skull key
 TELEPORT_SPECIALS = (39, 97, 125, 126)
 EXIT_LINE_SPECIALS = (11, 51, 52, 124)
@@ -146,11 +148,14 @@ def p2a_roles(ctx: Ctx, roles: dict, na: dict, tried: dict) -> None:
     doors = D.door_sectors(secs, lds, sds)
     # ---- the key doors by their LINE special, every colour (the model's kinds lag the WAD until M8 F2)
     key_doors = {c: [] for c in ("blue", "yellow", "red")}
-    for ld in lds:
+    not_doors = {c: [] for c in ("blue", "yellow", "red")}   # M8: key LINES whose sector the model makes no door
+    for i, ld in enumerate(lds):
         c = KEY_COLOURS.get(ld.special)
         if c and ld.back not in (-1, 0xFFFF) and ld.back < len(sds) and sds[ld.back].sector in doors:
             if sds[ld.back].sector not in key_doors[c]:
                 key_doors[c].append(sds[ld.back].sector)
+        elif c:
+            not_doors[c].append((i, ld.special))
     key_doors = {c: sorted(v) for c, v in key_doors.items()}
     roles["key_doors"] = key_doors
     # ---- the cards per colour (the blue one where DoorPhase takes it: its floor)
@@ -206,6 +211,9 @@ def p2a_roles(ctx: Ctx, roles: dict, na: dict, tried: dict) -> None:
     for c in ("yellow", "red"):
         if key_doors[c]:
             roles[c + "_door"] = key_doors[c][0]
+        elif not_doors[c]:      # M8 (gen_dryrun on E1M5: its red D1 doors, special 33, are walls in the model -- C3)
+            na[c + "_door"] = ("%s's %s key lines %s make no door in the model (doors.door_sectors: the special "
+                               "is C3's)" % (M, c, not_doors[c][:4]))
         else:
             na[c + "_door"] = "%s has no %s key door" % (M, c)
     # ---- S4: a sector below the card, out of reach

@@ -374,7 +374,9 @@ def test_the_checks_catch_a_broken_launcher(tmp_path, mut, monkeypatch):
         return text.rstrip("\n").split("\n")
     monkeypatch.setattr(WC, "weapon_lines", broken)
     got, want = _run(tmp_path, "wpl_" + mut)
-    bad = _first_bad(got, want)
+    # a mutant may also stop printing (on 1.6.0's stl, mislcheck ends at tic 532 of 600): caught where it parts
+    bad = _first_bad(got, want) if len(got) == len(want) else next(
+        (t for t, (g, w) in enumerate(zip(got, want)) if g != w), len(got))
     assert bad is not None, "the launcher mutant %s went unnoticed" % mut
     print("launcher mutant %s caught at tic %d" % (mut, bad))
 

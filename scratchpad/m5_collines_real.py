@@ -6,7 +6,7 @@ actually emits, tapped byte for byte out of a real multi-frame run.
 
 The tap is reshaped into what a STANDALONE build will emit, and only in ways that are mechanical
 and asserted:
-  * the extended 9-byte 0x01 loses its trailing `flush_mode` byte (stock `present.init_screen`);
+  * the extended 9-byte 0x01 loses its trailing `flush_mode` byte (stock `screen.init_screen W, H, 8`);
   * the 0x10 STATE and 0x11 THINGS blocks are dropped (a standalone build has no host to echo to).
 Every dropped span is asserted to start with the command byte it claims, so a mis-sliced tap
 fails here rather than quietly producing a stream that "happens to decode".

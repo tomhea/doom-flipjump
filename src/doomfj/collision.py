@@ -15,7 +15,7 @@ algorithm in Python, which is what lets the host test it against the oracle in a
 of a build.
 
 WHAT IT REPLACED. M14-d walked the 256-unit blockmap through packed tables: four corners, ~20 lines
-a block, every candidate's row read with `hex.read_table_packed` (~6.8K ops a line, 576K per check,
+a block, every candidate's row read with `hex.read_entry_packed` (~6.8K ops a line, 576K per check,
 MEASURED on blocked27 -- docs/plan-gameplay.md section 3). Before that, baking a copy of every
 line's test into every block that listed it did not assemble in 50 minutes (docs/opt-experiments.md).
 A cell's line stub exists once per LINEDEF and is shared by every cell that lists it, which is what
@@ -280,11 +280,27 @@ def mover_line_states(lds, sds, mover_secs: dict, mcell: dict, fn) -> dict:
             return fn(sa[i][f].floor_h, sb[j][b].floor_h)
         if all(v(i, j) == v(i, 0) for i in range(len(sa)) for j in range(len(sb))):
             out[li] = (mcell[f], [v(i, 0) for i in range(len(sa))])
-        else:
-            assert all(v(i, j) == v(0, j) for i in range(len(sa)) for j in range(len(sb))), (
-                "line %d between movers %d, %d on two cells: its %s needs both states" % (li, f, b, fn.__name__))
+        elif all(v(i, j) == v(0, j) for i in range(len(sa)) for j in range(len(sb))):
             out[li] = (mcell[b], [v(0, j) for j in range(len(sb))])
+        else:
+            # M8 C4 (E1M6's lines 512 / 1058 / 2574 / 2799: SR lift 363 lowering into the pool 142 its 20 / 22 raises):
+            # the value needs BOTH states -- a PAIR entry, ("pair", front cell, back cell, [[value at (i, j)]]), read
+            # by `collision_cells_fj` through a two-level dispatch
+            out[li] = ("pair", mcell[f], mcell[b], [[v(i, j) for j in range(len(sb))] for i in range(len(sa))])
     return out
+
+
+def _pair_entry(e, other_cells):
+    """M8 C4: a `mover_line_states` value as a PAIR grid over `other_cells` = (cell a, cell b, na, nb) -- a one-cell
+    value broadcast over the other cell's states"""
+    ca, cb, na, nb = other_cells
+    if e[0] == "pair":
+        return e[3]
+    cell, vals = e
+    if cell == ca:
+        return [[vals[i]] * nb for i in range(na)]
+    assert cell == cb, (cell, other_cells)
+    return [list(vals) for _i in range(na)]
 
 
 # the line under test's argument cells and their widths in nibbles, in declaration order -- ONE
@@ -365,7 +381,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
 
     `movers`: M7 P2b, `{linedef: (state cell, [openbottom per state])}` for the lines touching a
     mover (`mover_line_openings`). Such a stub xors its constants WITHOUT the opening floor, then
-    `sim.jump16` on the mover's state nibble picks a block that xors that state's floor into
+    `hex.switch` on the mover's state nibble picks a block that xors that state's floor into
     `ca_ob` around the shared test (states past the last reuse the last block).
 
     Entered by `stl.fcall <root>, cc_ret` (`sim.check_cells`) once the box, `cp_ok = 1` and the
@@ -404,7 +420,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
         return nodes[key]
 
     def tree(reg, leaf_of):
-        """jump16 on nibbles 7, 6, 5 of `reg`; `leaf_of`: {12-bit prefix (unsigned): label}"""
+        """hex.switch on nibbles 7, 6, 5 of `reg`; `leaf_of`: {12-bit prefix (unsigned): label}"""
         def sub(keys, depth, prefix):
             if depth == 3:
                 return leaf_of.get(prefix, none)
@@ -433,7 +449,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
            f"{len(used)} lines, {len(nodes)} tree nodes (collision.collision_cells_fj)",
            f";{L}_end"]
     for (reg, nib, targets), lab in nodes.items():
-        out += [f"{lab}:", f"    sim.jump16 {reg} + {nib}*dw, " + ", ".join(targets)]
+        out += [f"{lab}:", f"    hex.switch {reg} + {nib}*dw, " + ", ".join(targets)]
     for key, lab in stubs.items():
         out += [f"{lab}:"] + [f"    stl.fcall {L}_l{li}, cc_lret" if li >= 0 else
                               f"    stl.fcall {L}_t{-li - 1}, cc_lret" for li in key] + \
@@ -444,8 +460,18 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
         # M8 L1: a mover line that BLOCKS (E1M2's lift line 1143 carries ML_BLOCKMONSTERS: for the monsters' cells it
         # blocks at every state -- P_CheckPosition tests the flag before any opening) is a static blocking line
         mover_here = li in movers and row[9] == 0
+        door_mover = mover_here and li in doors
+        if door_mover:
+            # M8 C4: a DOOR line with a mover on its other side (E1M3's 519 / 1077: a DR door in front of a lift). Its
+            # opening floor never moves with the mover there (the door's floor is the higher) -- asserted; without the
+            # drop-off (the player's cells) it is a plain door line; with it (the monsters') the low floor does move:
+            # the door's gate, and on its open arm the mover's per-state block (`_mover_dispatch`)
+            assert len(movers[li]) <= 3, "door line %d beside a two-cell mover line" % li
+            assert set(movers[li][1]) == {row[11]}, ("door line %d: its opening floor moves with the mover %s"
+                                                     % (li, movers[li][1]))
+            if lowfloor is None:
+                mover_here = door_mover = False
         if mover_here:                    # M7 P2b: the opening floor comes from the mover's state
-            assert li not in doors, "mover line %d is a door line" % li
             row = row[:11] + (0,)
         consts = line_constants(row)
         if lowfloor is not None and row[9] == 0 and not mover_here:   # M7 P3.2b: the drop-off
@@ -453,7 +479,22 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
         xors = _xor_lines(consts)
         lab = f"{L}_l{li}"
         out += [f"{lab}:"] + xors
-        if mover_here and len(movers[li]) == 4 and movers[li][3] != movers[li][0]:
+        if mover_here and movers[li][0] == "pair":
+            # M8 C4: the opening floor (and the low floor) on BOTH cells -- `hex.switch` on the first cell, then on the
+            # second, into a block per pair of states that xors its values in around the shared test and out again
+            _p, ca, cb, obg, *lfg = movers[li]
+            assert bool(lfg) == (lowfloor is not None), "a mover line's low floors come with the drop-off"
+            na, nb = len(obg), len(obg[0])
+            rowl = [f"{lab}_p{i}" for i in range(na)]
+            out += [f"    hex.switch {ca}, " + ", ".join(rowl + [rowl[-1]] * (16 - na))]
+            for i in range(na):
+                bl = [f"{lab}_p{i}_{j}" for j in range(nb)]
+                out += [f"  {rowl[i]}:", f"    hex.switch {cb}, " + ", ".join(bl + [bl[-1]] * (16 - nb))]
+                for j in range(nb):
+                    x_ = _xor_lines([("ca_ob", obg[i][j] & M32)] + ([("ca_lf", lfg[0][i][j] & M32)] if lfg else []))
+                    out += [f"  {bl[j]}:", *x_, f"    stl.fcall {L}_test, cc_tret", *x_, f"    ;{lab}_mout"]
+            out += [f"  {lab}_mout:"]
+        elif mover_here and len(movers[li]) == 4 and movers[li][3] != movers[li][0]:
             # M8 F1.3: the opening floor on one cell and the low floor on another (mover_line_states: E1M2's line
             # 1199) -- three dispatches in a row: xor the opening floor in (cell), the low floor in (lfcell) around
             # the shared test, then the opening floor out (cell)
@@ -462,7 +503,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
 
             def disp(tag_, c_, vals, arg, body, nxt):
                 labs = [f"{lab}_{tag_}{k}" for k in range(len(vals))]
-                o = [f"    sim.jump16 {c_}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
+                o = [f"    hex.switch {c_}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
                 for k, v_ in enumerate(vals):
                     x_ = _xor_lines([(arg, v_ & M32)])
                     o += [f"  {labs[k]}:", *x_, *body(x_), f"    ;{nxt}"]
@@ -473,18 +514,22 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
             out += [f"  {lab}_mc:"]
             out += disp("c", cell, obs, "ca_ob", lambda x_: [], f"{lab}_mout")
             out += [f"  {lab}_mout:"]
-        elif mover_here:
+        elif mover_here and not door_mover:
             cell, obs, *lfs = movers[li]
             lfs = lfs[:1]
             assert bool(lfs) == (lowfloor is not None), "a mover line's low floors come with the drop-off"
             blocks = [f"{lab}_m{k}" for k in range(len(obs))]
-            out += [f"    sim.jump16 {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
+            out += [f"    hex.switch {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
             for k, ob in enumerate(obs):
                 obx = _xor_lines([("ca_ob", ob & M32)] + ([("ca_lf", lfs[0][k] & M32)] if lfs else []))
                 out += [f"  {blocks[k]}:", *obx, f"    stl.fcall {L}_test, cc_tret", *obx,
                         f"    ;{lab}_mout"]
             out += [f"  {lab}_mout:"]
         elif li in doors:
+            # M8 C4: the open arm's test -- a door-and-mover line's per-state block, else the shared test
+            go_test = ([f"    stl.fcall {L}_test, cc_tret"] if not door_mover
+                       else _mover_dispatch(f"{lab}_g", movers[li][0], movers[li][1], movers[li][2],
+                                            f"    stl.fcall {L}_test, cc_tret"))
             assert rows[li][9] == 0, (
                 "door line %d carries static flags %d -- xoring FLAG_BLOCKING would clear them"
                 % (li, rows[li][9]))
@@ -500,7 +545,7 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
                     f"    hex.xor_by ca_flags, {FLAG_BLOCKING}",
                     f"    ;{lab}_out",
                     f"  {lab}_go:",
-                    f"    stl.fcall {L}_test, cc_tret",
+                    *go_test,
                     f"  {lab}_out:"]
         else:
             out.append(f"    stl.fcall {L}_test, cc_tret")
@@ -524,6 +569,17 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None, movers=None, *, tag: s
 MONSTER_CELL_RADIUS = 30 << 16
 
 
+def _mover_dispatch(lab: str, cell: str, obs, lfs, test: str) -> list:
+    """M8 C4: `hex.switch` on a mover's state `cell` into a block per state that xors that state's opening floor and
+    low floor in around `test` and out again (the mover line's own block, for a door-and-mover line's open arm)"""
+    blocks = [f"{lab}_m{k}" for k in range(len(obs))]
+    out = [f"    hex.switch {cell}, " + ", ".join(blocks + [blocks[-1]] * (16 - len(blocks)))]
+    for k, ob in enumerate(obs):
+        obx = _xor_lines([("ca_ob", ob & M32), ("ca_lf", lfs[k] & M32)])
+        out += [f"  {blocks[k]}:", *obx, test, *obx, f"    ;{lab}_mout"]
+    return out + [f"  {lab}_mout:"]
+
+
 def monster_cells_fj(pfx: str, lds, verts, secs, sds, *, secs_open, door_line_ids, doors, msecs: dict,
                      mcell: dict, ml_blocking: int, ml_blockmonsters: int, things=()) -> tuple:
     """M7 P3.2b: `(fj text, root label)` -- the MONSTERS' cell routine (docs/gp-monsters.md 8.4): the player's
@@ -536,8 +592,15 @@ def monster_cells_fj(pfx: str, lds, verts, secs, sds, *, secs_open, door_line_id
     # M8 F1.3: each value through the cell it depends on (mover_line_states; one cell for both on every E1M1 line)
     obs = mover_line_states(lds, sds, msecs, mcell, max)
     lfs = mover_line_states(lds, sds, msecs, mcell, min)
-    movers = {li: (obs[li][0], obs[li][1], lfs[li][1]) + ((lfs[li][0],) if lfs[li][0] != obs[li][0] else ())
-              for li in obs}
+    movers = {}
+    for li in obs:
+        pair = [e for e in (obs[li], lfs[li]) if e[0] == "pair"]
+        if pair:                # M8 C4: a value on both cells -- both values as grids over the PAIR
+            _p, ca, cb, grid = pair[0]
+            dims = (ca, cb, len(grid), len(grid[0]))
+            movers[li] = ("pair", ca, cb, _pair_entry(obs[li], dims), _pair_entry(lfs[li], dims))
+            continue
+        movers[li] = (obs[li][0], obs[li][1], lfs[li][1]) + ((lfs[li][0],) if lfs[li][0] != obs[li][0] else ())
     lists = dict(cell_lists(rows, MONSTER_CELL_RADIUS))
     for c, ks in thing_cell_lists(things, MONSTER_CELL_RADIUS).items():
         lists[c] = lists.get(c, ()) + tuple(-k - 1 for k in ks)
@@ -674,10 +737,15 @@ def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, heigh
 # and a descent visits ~13 nodes. Exact, not a grid approximation, so it costs no fidelity and
 # needs no decision about which leaf owns a thing near a boundary.
 
-def generate_point_location_fj(cmap, *, label="ptloc") -> str:
+def generate_point_location_fj(cmap, *, label="ptloc", shared: bool = False) -> str:
     """`{label}_walk` reads `ptx`/`pty` (10-nibble SIGNED map units) and leaves the containing
     subsector index in `ptss`, then `stl.fret {label}_ret`. Mirrors `mapcompiler._point_side`'s
-    convention exactly: side = dx*(y - py) - dy*(x - px), and side > 0 is the BACK (left) child."""
+    convention exactly: side = dx*(y - py) - dy*(x - px), and side > 0 is the BACK (left) child.
+
+    `shared` (config PTLOC_SHARED, M8 size): the same descent, with every node's arithmetic in a
+    shared subroutine (`_shared_point_location_fj`)."""
+    if shared:
+        return _shared_point_location_fj(cmap, label=label)
     from doomfj.mapcompiler import NF_SUBSECTOR
     M40 = (1 << 40) - 1
     out = [f"// M14-e point location as code: {len(cmap.nodes)} nodes, {len(cmap.subsectors)} leaves",
@@ -705,12 +773,12 @@ def generate_point_location_fj(cmap, *, label="ptloc") -> str:
                     f"    hex.mov 10, {label}dx, ptx", f"    hex.sub 10, {label}dx, {label}k",
                     f"    hex.set 10, {label}k, {n.y & M40}",
                     f"    hex.mov 10, {label}dy, pty", f"    hex.sub 10, {label}dy, {label}k",
-                    # the CONSTANT goes second: fixed_mul_lo/mul_lo cost one schoolbook row per
+                    # the CONSTANT goes second: fixed_mul_low/mul_low cost one schoolbook row per
                     # nonzero nibble of the second operand, and a partition delta is small
                     f"    hex.set 10, {label}k, {n.dx & M40}",
-                    f"    hex.mul_lo 10, {label}p, {label}dy, {label}k",
+                    f"    hex.mul_low 10, {label}p, {label}dy, {label}k",
                     f"    hex.set 10, {label}k, {n.dy & M40}",
-                    f"    hex.mul_lo 10, {label}q, {label}dx, {label}k",
+                    f"    hex.mul_low 10, {label}q, {label}dx, {label}k",
                     f"    hex.sub 10, {label}p, {label}q",
                     f"    hex.sign 10, {label}p, {front}, {label}_g{i}",   # < 0 -> front
                     f"  {label}_g{i}:",
@@ -721,7 +789,97 @@ def generate_point_location_fj(cmap, *, label="ptloc") -> str:
     return "\n".join(out) + "\n"
 
 
-def point_location_decls(label="ptloc") -> list:
+# ── M8 size: the SAME point location, its arithmetic shared ──────────────────────────────────────
+#
+# The inline walk above emits a whole 10-nibble `hex.mul_low` pair (or a `hex.scmp 10`) PER NODE. Inlined, one
+# multiply is ~15.7K words of the binary (its code, its wflip chains and its tables in the blocked pool): E1M2 r4's
+# `ptloc_walk` was 19.5M of 83.5M words, and it grows with the nodes (E1M7: 2,063). The node's only own data are its
+# four constants, so here a node XORs them into ZERO-AT-REST registers (`hex.xor_by`: a wflip per nonzero nibble, no
+# table) and calls ONE subroutine per kind:
+#
+#   * a diagonal node: `{label}_sd` -- dx = x - px, dy = y - py, p = dy*ndx - dx*ndy, exactly the inline order
+#     (the constant second); r = 1 iff p > 0 (BACK), else 0 (FRONT: p < 0, and p == 0 on the line);
+#   * a vertical / horizontal node: `{label}_sx` / `{label}_sy` -- r = 0 / 1 / 2 for x <, ==, > px (y, py);
+#
+# and every subroutine zeroes the registers it read before it returns (the invariant the next node's XOR needs; they
+# are declared zero, and no other code writes them, so no reset entry is needed). The node then branches on the
+# one-nibble `{label}r`. The leaf zeroes nothing: `ptss` is zeroed once at the walk's entry and the leaf XORs its
+# index in. The answer is the inline walk's for every point (tests/fj/test_collision_fj.py runs both), for a fcall
+# per node visited.
+
+def _shared_point_location_fj(cmap, *, label="ptloc") -> str:
+    from doomfj.mapcompiler import NF_SUBSECTOR
+    M40 = (1 << 40) - 1
+
+    def xor_const(reg, value):
+        v = value & M40
+        return [f"    hex.xor_by {reg} + {i}*dw, {(v >> 4 * i) & 15}" for i in range(10) if (v >> 4 * i) & 15]
+
+    def target(child):
+        return (f"{label}_l{child & (NF_SUBSECTOR - 1)}" if child & NF_SUBSECTOR
+                else f"{label}_n{child}")
+
+    out = [f"// M14-e point location as code, its arithmetic SHARED (config PTLOC_SHARED): {len(cmap.nodes)} nodes, "
+           f"{len(cmap.subsectors)} leaves",
+           f"{label}_walk:",
+           "    hex.zero w/4, ptss",
+           f"    ;{target(cmap.root)}"]
+    for i, n in enumerate(cmap.nodes):
+        back, front = target(n.left), target(n.right)      # left = back, right = front
+        out.append(f"  {label}_n{i}:")
+        if n.dx == 0 or n.dy == 0:
+            # the inline walk's compare: lt -> lo, eq -> front, gt -> hi, with front one of lo / hi
+            if n.dx == 0:
+                lo, hi = (back, front) if n.dy > 0 else (front, back)
+                out += xor_const(f"{label}kx", n.x) + [f"    stl.fcall {label}_sx, {label}_sret"]
+            else:
+                lo, hi = (front, back) if n.dx > 0 else (back, front)
+                out += xor_const(f"{label}ky", n.y) + [f"    stl.fcall {label}_sy, {label}_sret"]
+            if hi == front:                                # r 0 (lt) -> lo; 1, 2 -> front
+                out += [f"    hex.if0 1, {label}r, {lo}", f"    ;{front}"]
+            else:                                          # r 2 (gt) -> hi; 0, 1 -> front
+                out += [f"    hex.xor_by {label}r, 2", f"    hex.if0 1, {label}r, {hi}", f"    ;{front}"]
+        else:
+            out += (xor_const(f"{label}kx", n.x) + xor_const(f"{label}ky", n.y)
+                    + xor_const(f"{label}kdx", n.dx) + xor_const(f"{label}kdy", n.dy)
+                    + [f"    stl.fcall {label}_sd, {label}_sret",
+                       f"    hex.if0 1, {label}r, {front}", f"    ;{back}"])
+    for s in range(len(cmap.subsectors)):
+        out += [f"  {label}_l{s}:"] + [f"    hex.xor_by ptss + {i}*dw, {(s >> 4 * i) & 15}"
+                                       for i in range(8) if (s >> 4 * i) & 15] + [f"    stl.fret {label}_ret"]
+    # the shared subroutines (each leaves {label}r and zeroes the registers it read)
+    out += [f"{label}_sd:",
+            f"    hex.mov 10, {label}dx, ptx", f"    hex.sub 10, {label}dx, {label}kx",
+            f"    hex.mov 10, {label}dy, pty", f"    hex.sub 10, {label}dy, {label}ky",
+            f"    hex.mul_low 10, {label}p, {label}dy, {label}kdx",
+            f"    hex.mul_low 10, {label}q, {label}dx, {label}kdy",
+            f"    hex.sub 10, {label}p, {label}q",
+            f"    hex.zero 10, {label}kx", f"    hex.zero 10, {label}ky",
+            f"    hex.zero 10, {label}kdx", f"    hex.zero 10, {label}kdy",
+            f"    hex.zero 1, {label}r",
+            f"    hex.sign 10, {label}p, {label}_sdq, {label}_sdg",     # < 0 -> front (r 0)
+            f"  {label}_sdg:",
+            f"    hex.if0 10, {label}p, {label}_sdq",                   # == 0 -> front (on the line)
+            f"    hex.xor_by {label}r, 1",                              # > 0 -> back
+            f"  {label}_sdq:",
+            f"    stl.fret {label}_sret"]
+    for ax, coord in (("x", "ptx"), ("y", "pty")):
+        k = f"{label}k{ax}"
+        out += [f"{label}_s{ax}:",
+                f"    hex.zero 1, {label}r",
+                f"    hex.scmp 10, {coord}, {k}, {label}_s{ax}q, {label}_s{ax}e, {label}_s{ax}g",
+                f"  {label}_s{ax}g:",
+                f"    hex.xor_by {label}r, 2",
+                f"    ;{label}_s{ax}q",
+                f"  {label}_s{ax}e:",
+                f"    hex.xor_by {label}r, 1",
+                f"  {label}_s{ax}q:",
+                f"    hex.zero 10, {k}",
+                f"    stl.fret {label}_sret"]
+    return "\n".join(out) + "\n"
+
+
+def point_location_decls(label="ptloc", shared: bool = False) -> list:
     # ⚠ ptss is w/4 wide, not 4: `hex.ptr_index` does `mov w/4` OUT of its index register, so a
     # narrower cell drags its neighbour in and yields a wild pointer (fj-lessons: an n-nibble
     # op reads n nibbles of its SOURCE).
@@ -733,4 +891,7 @@ def point_location_decls(label="ptloc") -> list:
             f"{label}dx: hex.vec 10", f"{label}dy: hex.vec 10",
             f"{label}p: hex.vec 10", f"{label}q: hex.vec 10",
             "ptp: hex.vec w/4", "ptq: hex.vec w/4",
-            "bhv: hex.vec 2", "btv: hex.vec 2", "bdv: hex.vec 4"]
+            "bhv: hex.vec 2", "btv: hex.vec 2", "bdv: hex.vec 4"] + (
+        # PTLOC_SHARED: the zero-at-rest constant registers, the subroutines' return and their one-nibble answer
+        [f"{label}kx: hex.vec 10", f"{label}ky: hex.vec 10", f"{label}kdx: hex.vec 10", f"{label}kdy: hex.vec 10",
+         f"{label}_sret: hex.vec w/4", f"{label}r: hex.vec 1"] if shared else [])

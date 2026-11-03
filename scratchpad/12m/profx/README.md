@@ -6,7 +6,7 @@ op counts between phase labels. It produced `docs/plan-gameplay.md` section 3. I
 checks the attribution against an op-by-op trace, with an address-only negative control (R9).
 
 Nothing here touches the shipped engine. The instrumented engine is built from flipjump-151's
-`_fjcore.c` at `73e09c0` (the source is checked by sha256) and loaded by path.
+`_fjcore.c` at `62d93c4` (flipjump 1.6.0; the source is checked by sha256) and loaded by path.
 
 ## Where things go
 
@@ -60,7 +60,7 @@ python drive.py still 75 still --lock <lock>
 
 | number | command | file |
 |---|---|---|
-| ptr_index 846; read/write_byte 260 / 504; read_hex 244 (and per nibble); read_byte_and_inc 404 per packed byte; mul_lo 825; fixed_mul_lo 3,381; hex.div 157,155; hex.cmp 40; scmp 249; check_position 575,975; check_line 6,787; thing_load 19,464; emit_col_lines 15,887 | `python analyze.py calls games` | `an_calls.txt` |
+| ptr_index 846; read/write_byte 260 / 504; read_hex 244 (and per nibble); read_byte_and_inc 404 per packed byte; mul_low 825; fixed_mul_low 3,381; hex.div 157,155; hex.cmp 40; scmp 249; check_position 575,975; check_line 6,787; thing_load 19,464; emit_col_lines 15,887 | `python analyze.py calls games` | `an_calls.txt` |
 | one move try 613,383 (seed walk 35,366) | `phases.py games` | `an_phases.txt` |
 | sprite column ~30K = sprite_runs 10,896 + emit_region 12,930 + 6,403 | `python analyze.py fam games stream.emit_col_lines,stream.sprite_runs,stream.emit_region` | `an_fam.txt` |
 | BSP node 4,147; thing_leaf 30,197 and thing_leaf_b 15,460 per call | `python counts.py games` | `an_counts.txt` |
@@ -96,3 +96,21 @@ The run is recorded in `an_selftest.txt`.
 - **Per-call costs carry boundary noise.** A statement's first op sits a few ops before its first
   label, so statements under about 200 ops/call carry ±10-30% (see the selftest rows).
 - **`analyze.py`'s `fN` file map is blocked27's.** It only prints call sites.
+
+## Another map's heat list (M8 G13)
+
+Each level gets its OWN pin-heat list (`docs/episode-plan.md` 4.7). Every step takes `--map E1Mn` (or
+`DOOMFJ_MAP`); off E1M1 the binary and label table must be named (the defaults are E1M1's blocked27 and are
+refused), the census defaults to the map's one-pass census (`doomfj.mapprofile`), a census of another map is
+refused, and `--spread` must be the build's (E1M2 built at 1; the layout control rejects a wrong one):
+
+    python scratchpad/12m/build_blocked.py ... --map E1Mn --record-sites <sites.json.gz>     # the sites (heavy)
+    python scratchpad/12m/profx/drive.py --map E1Mn --fjm build/doom_e1mn_<x>.fjm games e1mn_games   # the map's tours
+    python scratchpad/12m/profx/hotwords.py --map E1Mn e1mn_games --fjm ... --labels ... --spread 1  # -> hotwords_e1mn.json
+    python scratchpad/12m/heatsites.py --map E1Mn e1mn_games --sites <sites> --fjm ... --labels ... --spread 1
+                                                                                  # -> scratchpad/12m/heat_e1mn.json.gz
+    python scratchpad/12m/pinreport.py --map E1Mn --fjm ... --labels ...          # its own hot list, else E1M1's (said)
+
+`mapprofile.heat_list(map)` is the one rule for which list a build or report uses: the map's own when it exists,
+else E1M1's (map-free macro-path keys -- how E1M2 shipped), never another map's. `drive.py --poke` is E1M1-only (it
+writes E1M1's 75 thss_rt rows). Host test: `tests/host/test_profx_maps.py`.

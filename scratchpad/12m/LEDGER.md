@@ -94,10 +94,10 @@ the tree) are dead. -122 / -196 / -202 executed ops per call.
 > sweep MAX went +164 while the median improved -- that is the placement de-tuning a -192 shift
 > causes. **The next filler carries +192.**
 
-| P2-1 | P2 | `frame.ptr_index`: the stl macro with the chained add, 22 sites | -104,166 / -54,902 / -93,042 / -71,704 | **18,697,401** (-57,501, -0.31%) | SHIP | (commit) |
+| P2-1 | P2 | `hex.ptr_index`: the stl macro with the chained add, 22 sites | -104,166 / -54,902 / -93,042 / -71,704 | **18,697,401** (-57,501, -0.31%) | SHIP | (commit) |
 
 **P2-1 detail.** `hex.ptr_index` is 1,196.8 executed ops per call and runs ~760x per median
-frame; 554.8 of that is one `hex.add w/4`. Swapping it for `frame.add8_chain` needs NO bound on
+frame; 554.8 of that is one `hex.add w/4`. Swapping it for `hex.add 8` needs NO bound on
 anything, applies at every site, and is SIZE-IDENTICAL -- so a 22-site change moved 0 of 781,326
 labels. All four deg viewpoints improved. Predicted -64k, got -57,501.
 The filler carrying P7-1's +192 residual was right: freeze exact.
@@ -173,7 +173,7 @@ All four deg viewpoints moved by exactly -61,600: a fixed number of claims per f
 
 ### Running total after 11 ideas: 18,982,338 -> 18,171,018 = **-811,320 (-4.27%)**
 
-| P3-1 | P3 | `fixed_mul_lo` drives its rows off `b` in place; `wide_b` deleted | -450,083 / -478,242 / -467,052 / -462,600 | **17,919,032** (-251,986, -1.39%) | SHIP | (commit) |
+| P3-1 | P3 | `fixed_mul_low` drives its rows off `b` in place; `wide_b` deleted | -450,083 / -478,242 / -467,052 / -462,600 | **17,919,032** (-251,986, -1.39%) | SHIP | (commit) |
 
 **P3-1 detail -- the biggest idea of the campaign.** The macro copied BOTH operands into
 12-nibble scratch vectors, but `wide_b` existed only to be read one nibble at a time as the row
@@ -196,7 +196,7 @@ status, and the comment says so.
 
 ### Running total after 12 ideas: 18,982,338 -> 17,919,032 = **-1,063,306 (-5.60%)**
 
-| P3-2 | P3 | `fixed_mul_lo` reads `a` in place; `wide_a` deleted | -514,968 / -411,759 / -460,255 / -464,279 | **17,673,906** (-245,126, -1.37%) | SHIP | (commit) |
+| P3-2 | P3 | `fixed_mul_low` reads `a` in place; `wide_a` deleted | -514,968 / -411,759 / -460,255 / -464,279 | **17,673,906** (-245,126, -1.37%) | SHIP | (commit) |
 
 **P3-2 detail.** `wide_a` was only [a's n nibbles, then f copies of its sign], so rows read `a`
 directly and take the tail from a 4-nibble all-sign vector written before it is read.
@@ -211,7 +211,7 @@ same commit rather than left to break in a later session.
 
 > ⚠ **FREEZE MISS: +16,320 ops, AND IT WAS AN ARITHMETIC ERROR, not tool drift.** micro.py
 > measured 1203 as the TOTAL filler for the new macro to match the current one -- and I added it
-> to P3-1's existing 795, double-counting. The label table settles it: `fixed_mul_lo` has 12 call
+> to P3-1's existing 795, double-counting. The label table settles it: `fixed_mul_low` has 12 call
 > sites but **20 EXPANSIONS** (some sit inside `rep`), and 20 x (1998 - 1182) = 16,320 exactly.
 > **The correct filler is 1182.** Count EXPANSIONS, not call sites, and remember that a measured
 > filler is a TOTAL, never an increment on the one already there.
@@ -368,9 +368,9 @@ Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two re
 | S1 | M6 | sparse_ pad 128 at 44 sites in 5 macros, chosen by ops/INSTANCE. Coverage measured AFTERWARDS at 29.7% of xor ops (I claimed 51.8%): only zero/mov/xor were converted, xor_zero/cmp/add/set left at 16, and the largest consumer `seg_pass2_leaf_body_lines` was missed entirely | -- | bind 23,905,040 (-0.29%) | marginal; a WEAK TEST, not a refutation | 51,133,526 w (38.10%), -244,198 vs rung 0. Predicted +1.8M words; absorption made it NEGATIVE. |
 | S2 | M6 | **tiered pads by measured execution frequency** (owner's rule: >99 ops/frame -> pad more, >1k -> larger). 89 sites: pad 4096 on point_on_side_leaf/seg_pass1_leaf_body_lines/bind_things (median 1.3k-2.6k ops/frame), pad 1024 on thing_pass/wedge_bbox/seg_pass2_leaf_body_lines/seg_pass1_leaf_body_ts. Coverage 77.4% of xor ops | 14,882,559 .. 29,141,756 | **bind 23,493,681 (-2.00%)**, mean -1.29%, p80 -2.60% | **WIN on every dimension** | 51,095,972 w (38.07%), **-281,752 vs rung 0**. m2_std_gate PASS (43 byte-exact of 45 presented). Naive size estimate was +33M words; actual -0.23 points. |
 | S3 | M6 | KILLED. S2 + every tier widened one step (1024->4096, 4096->16384) + the three sites excluded on instance-count grounds (thing_record_body, try_move, check_position = 20.66% of xor ops). 133 sites, ~98% coverage | 15,412,456 .. 29,458,909 | bind 23,709,974 (**+0.92% vs S2**) | **WORSE THAN S2 ON BOTH METRICS -- reverted** | 53,619,374 w (39.95%), +2,523,402 vs S2. m2_std_gate PASS. Padding is NOT monotonic: the shift pushes all later code up, raising popcount for every downstream wflip. Absorption knee sits between S2 and S3. |
-| D1 | M6 | KILLED. `distscale` LUT 8 -> 5 nibbles (values max 0x168EE) + `read_table 5` in plane_render. Correct and byte-exact, worth NOTHING | 14,884,585 .. 29,143,782 | bind 23,495,707 (**+2,026 vs S2**) | **NULL -- reverted.** Premise was a profiler artifact | 51,099,046 w (+3,074). m2_std_gate PASS. AY's "12.14% of the frame" was 100% misattributed: `distscale` is the LAST top-level label, so all following code was credited to it -- 0 of 9,726,044 ops were inside the table. See FINDINGS BA; hotpath now guards against it. |
+| D1 | M6 | KILLED. `distscale` LUT 8 -> 5 nibbles (values max 0x168EE) + `read_entry 5` in plane_render. Correct and byte-exact, worth NOTHING | 14,884,585 .. 29,143,782 | bind 23,495,707 (**+2,026 vs S2**) | **NULL -- reverted.** Premise was a profiler artifact | 51,099,046 w (+3,074). m2_std_gate PASS. AY's "12.14% of the frame" was 100% misattributed: `distscale` is the LAST top-level label, so all following code was credited to it -- 0 of 9,726,044 ops were inside the table. See FINDINGS BA; hotpath now guards against it. |
 | W1 | M6 | width narrowing: the two 8-nibble `sparse_mov 8, x, x1` calls -> `sparse_zero 8` + `sparse_mov 2` (x1 is a clipped column in [0,161], so identical final state). Found via the MATCHED-label profile | 14,908,548 .. 29,094,739 | **bind 23,447,960 (-0.19%)** | small WIN, byte-exact | 51,094,744 w (38.07%), -1,228. m2_std_gate PASS. ⚠ Predicted ~362k ops/frame, measured 45,721 -- **7.9x short**. Attributed ops are not removable ops (FINDINGS BC). |
 | C5b | M6 | KILLED. Lazy bbox: split `lnbox` (8 bytes) into `lnboxx`/`lnboxy` (4+4) and read y only on surviving the two x rejects. Both halves reassemble into the same `cl_box`, so no state label moved and the restore set was untouched | 15,258,053 .. 29,488,903 | **bind 23,783,743 (+1.43% vs W1)** | **WORSE on both -- reverted** | 51,311,232 w (38.23%), +216,488. m2_std_gate PASS, overflow FITS. The second pointer setup on the SURVIVAL path costs more than the saved byte reads => most candidates SURVIVE the x rejects. A 4-way split would be worse (more setups). |
 | Z1 | M6 | **call elimination**: `hex.mov n` already zeroes its destination, so `hex.zero N,X` + `hex.mov M,X,Y` zeroes the low M nibbles TWICE. 33 sites rewritten to clear only the high part (`hex.zero N-M, X + M*dw`); one dropped entirely (zero 8 + mov 8). Proven value-equivalent with a negative control | 14,783,994 .. 28,590,588 | **bind 23,042,367 (-1.73%)**, mean -1.63%, p80 -1.81% | **WIN on every dimension** | 51,154,934 w (38.11%), +60,190 (layout shift). m2_std_gate PASS. Found from a CALL census, not an ops census: mov is 29.5% of all 1,037,045 xor-family calls/frame and half of that is redundant zeroing. |
-| Z2 | M6 | the three table readers (`read_table_packed`/`read_table`/`read_table_byte`) open with `.zero w/4, ptr` + `.mov idx_n, ptr, idx` -- Z1's regex missed them because they are namespace-relative (`.zero`, not `hex.zero`). Also RESTORES the zero Z1 wrongly deleted at projection.fj:1111 | 14,817,708 .. 28,652,159 | bind 23,044,103 (+1,736 vs Z1) | **flat** -- the narrowing paid for the bugfix | 51,145,042 w (38.11%). m2_std_gate PASS. |
+| Z2 | M6 | the three table readers (`read_entry_packed`/`read_entry`/`read_entry_byte`) open with `.zero w/4, ptr` + `.mov idx_n, ptr, idx` -- Z1's regex missed them because they are namespace-relative (`.zero`, not `hex.zero`). Also RESTORES the zero Z1 wrongly deleted at projection.fj:1111 | 14,817,708 .. 28,652,159 | bind 23,044,103 (+1,736 vs Z1) | **flat** -- the narrowing paid for the bugfix | 51,145,042 w (38.11%). m2_std_gate PASS. |
 | Z3 | M6 | 17 more clear-before-write sites, symbolic widths (`zero w/4` -> `zero w/4 - M, X + M*dw`). Z1's regex required a NUMERIC width so `w/4` and `PID_NIBBLES` were invisible. Hot sites: cbufa/fbufa in the plane path, sidx, stream_render | 14,795,842 .. 28,590,182 | **bind 22,988,275 (-0.24% vs Z2)** | **WIN** | 51,136,940 w (38.10%). m2_std_gate PASS. Control-flow audit built into the scan after the Z1 bug. |

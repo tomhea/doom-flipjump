@@ -1,9 +1,10 @@
 --- a/flipjump/interpreter/_fjcore.c
 +++ b/flipjump/interpreter/_fjcore.c
-@@ -149,6 +149,146 @@
- #endif
- }
- 
+@@ -24,6 +24,146 @@
+ #include <stdint.h>
+ #include <string.h>
+ #include <time.h>
++
 +
 +/* ==== FJPROFX (instrumented build only) ===================================================== */
 +static uint64_t* gx_self = NULL;
@@ -143,19 +144,18 @@
 +    if ((fv) - (dwv) <= 1) gx_out++; \
 +} while (0)
 +/* ==== end FJPROFX state ===================================================================== */
-+
+ 
  /* force-inline so run_flat_loop's literal width/ww arguments constant-fold per width */
  #if defined(_MSC_VER)
- #  define FJ_ALWAYS_INLINE __forceinline
-@@ -778,6 +918,7 @@
+@@ -612,6 +752,7 @@
      }
      m->flat_count = low_max_end;
      m->flat_covers_all = (max_end <= low_max_end);
 +    gx_alloc(low_max_end);
      {
-         /* GARBAGE_SENTINEL is bit 63 and truncates to zero in a 4-byte cell -- holes would
-            read back as a legal 0 and out-of-segment reads would go silently undetected. */
-@@ -1158,6 +1299,7 @@
+         const uint64_t garbage_fill = (m->w <= 32) ? FLAT_GARBAGE_MAGIC32 : FLAT_GARBAGE_MAGIC;
+         for (i = 0; i < low_max_end; i++) {
+@@ -1174,6 +1315,7 @@
                  goto cold_jump_word_garbage;
              }
          jump_word_ready:
@@ -163,26 +163,26 @@
              ops++;
  
              /* check finish? */
-@@ -1208,7 +1350,9 @@
-         /* time the output callback as paused, exactly like the input callback below - so the
-            reported run-time is net fj-compute, excluding the cost of the IO device's writes */
-         double io_start = monotonic_seconds();
--        PyObject* result = PyObject_CallFunctionObjArgs(write_bit, (f == dw + 1) ? Py_True : Py_False, NULL);
-+        PyObject* result;
+@@ -1223,6 +1365,7 @@
+     {
+         /* the device's callbacks are timed as paused (out_bit), exactly like the input callback below - so
+            the reported run-time is net fj-compute, excluding the cost of the IO device's writes */
 +        gx_ops_io = ops;
-+        result = PyObject_CallFunctionObjArgs(write_bit, (f == dw + 1) ? Py_True : Py_False, NULL);
-         *paused_seconds_out += monotonic_seconds() - io_start;
-         if (!result) {
+         if (out_bit(self, write_bit, f == dw + 1, paused_seconds_out) < 0) {
              goto done;
-@@ -1222,6 +1366,7 @@
-         PyObject* result;
-         int bit_value;
-         double io_start = monotonic_seconds();
+         }
+@@ -1232,7 +1375,9 @@
+     cold_input:
+     {
+         /* the device's callbacks are timed as paused (in_bit) -- the reported run-time is net fj-compute */
+-        int bit_value = in_bit(self, read_bit, write_bit, eof_exception_type, paused_seconds_out);
++        int bit_value;
 +        gx_ops_io = ops;
-         result = PyObject_CallNoArgs(read_bit);
-         *paused_seconds_out += monotonic_seconds() - io_start;
-         if (!result) {
-@@ -1918,7 +2063,83 @@
++        bit_value = in_bit(self, read_bit, write_bit, eof_exception_type, paused_seconds_out);
+         if (bit_value == IN_EOF) {
+             cause = TERM_EOF;
+             goto done;
+@@ -1930,7 +2075,83 @@
                           "seconds", seconds);
  }
  

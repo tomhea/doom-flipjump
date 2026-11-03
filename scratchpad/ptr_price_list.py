@@ -1,7 +1,7 @@
 """A MEASURED ops/call price list for every POINTER primitive the program uses,
 plus the CONSTANT-ADDRESS alternative where one exists or can be written.
 
-WHY. M1 replaced `hex.zero_ptr` (clears a byte cell at a RUNTIME address) with `m1.zerobyte`
+WHY. M1 replaced `hex.zero_ptr` (flipjump 1.6.0: `hex.zero_byte`) (clears a byte cell at a RUNTIME address) with `m1.zerobyte`
 (clears a byte cell at a CONSTANT address). Almost the whole bill of the pointer form is
 `set_flip_and_jump_pointers` -- copying an 8-nibble address into the stl's to_flip/to_jump
 registers so the machine can reach a cell it only knows at runtime. When the address is known at
@@ -260,8 +260,8 @@ def tests():
          lambda i: ["hex.write_byte_and_inc gp2, srcb"], chk_write_walk, None),
         ("hex.write_byte ptr,src",
          lambda i: ["hex.write_byte pfx, srcb"], chk_write_fixed, None),
-        ("hex.zero_ptr ptr + hex.ptr_inc",
-         lambda i: ["hex.zero_ptr gp", "hex.ptr_inc gp"], chk_zero_walk, None),
+        ("hex.zero_byte ptr + hex.ptr_inc",
+         lambda i: ["hex.zero_byte gp", "hex.ptr_inc gp"], chk_zero_walk, None),
         ("hex.ptr_inc ptr",
          lambda i: ["hex.ptr_inc gp"], _ptr_chk("gp", 1), _ptr_chk("gp", 0)),
         ("hex.ptr_add ptr,1",
@@ -341,12 +341,12 @@ def main():
         print("%-32s %9.1f %9.1f %9.1f   %-7s %s"
               % (label, mid, min(slopes), max(slopes), "OK" if ok else "FAIL", note))
 
-    # zero_ptr is measured together with the ptr_inc that walks it; subtract the measured inc.
-    zp = res["hex.zero_ptr ptr + hex.ptr_inc"][0] - res["hex.ptr_inc ptr"][0]
+    # zero_byte is measured together with the ptr_inc that walks it; subtract the measured inc.
+    zp = res["hex.zero_byte ptr + hex.ptr_inc"][0] - res["hex.ptr_inc ptr"][0]
     print("")
-    print("derived: hex.zero_ptr alone = %.1f - %.1f = %.1f ops/call"
-          % (res["hex.zero_ptr ptr + hex.ptr_inc"][0], res["hex.ptr_inc ptr"][0], zp))
-    res["hex.zero_ptr ptr"] = (zp, zp, zp, True)
+    print("derived: hex.zero_byte alone = %.1f - %.1f = %.1f ops/call"
+          % (res["hex.zero_byte ptr + hex.ptr_inc"][0], res["hex.ptr_inc ptr"][0], zp))
+    res["hex.zero_byte ptr"] = (zp, zp, zp, True)
 
     # ---- where the pointer money actually goes ------------------------------------------------
     print("")
@@ -392,7 +392,7 @@ def main():
         ("hex.read_byte dst,ptr", 32, "m1.readbyte dst,c"),
         ("hex.write_byte ptr,src", 14, "m1.writebyte c,src"),
         ("hex.ptr_sub ptr,1", 12, "ELIMINATED"),
-        ("hex.zero_ptr ptr", 2, "m1.zerobyte c"),
+        ("hex.zero_byte ptr", 2, "m1.zerobyte c"),
     ]
     print("")
     print("UPPER BOUND on the saving if EVERY call site could be const-addressed")

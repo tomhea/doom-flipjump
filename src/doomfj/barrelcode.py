@@ -60,6 +60,13 @@ P9 (`rockets`, the owner's ROCKET LAUNCHER; projcode's `rk_blast` is the caller)
 target floored to whole units -- combat._rocket_blast's whole-unit ends) instead of the barrel's static per-spot list;
 the knock's inflictor z is `bl_z` -- the barrel's floor (`kbbz` by bl_b, at bl_leaf's top) or the rocket's z (the
 caller's); `bl_mon10` (BARREL_R) is the barrels' distance and LOS entry the rocket's barrel loop calls.
+
+M8 wave 1 (E1M3's barrel on a lift): a barrel on a MOVER's floor rides it (P_ChangeSector; the model's
+`combat._knock_z` reads `_floor_at`, the live `secs_c`), so its z is not kbbz's stored floor: its stub sets `ptss` to
+its leaf, calls `ms_seed_leaf` (mover-aware: the mover's state cell -> that state's floor in `cp_seedf`), writes the
+floor's low half to `bl_z` and sets `bl_mv`; bl_leaf's top takes bl_z as it is while bl_mv is 1 (and clears it)
+instead of looking kbbz up (`mover_barrel_leaves`, `mover_z_lines`; a map with no barrel on a mover -- E1M1, E1M2 --
+emits exactly what it did).
 """
 from typing import Dict, List, Sequence, Tuple
 
@@ -184,8 +191,11 @@ def check_model_rules(w, skills: Sequence[int] = ()) -> None:
     assert 0 < info.spawnhealth < 128 and BARREL_HEALTH_MIN == -128, "bar_hp is 8-bit two's complement"
     assert BOMB_DAMAGE <= DP_MAX and BOMB_DAMAGE <= DM_MAX_FULL and BOMB_DAMAGE < 256
     assert PLAYER_R < 256 and all(r < 256 for r in w.mon_radius[:w.layout.nmon])
-    assert 0 < len(w.barrel_things) <= 255
-    assert w.layout.nmon + len(w.barrel_things) < 255, "dm_id is two nibbles"
+    assert 0 <= len(w.barrel_things) <= 255      # M8 C10: a map with no barrel (E1M5, E1M8) -- `no_barrels`
+    from doomfj.world import SLOT_IDS_WIDE, slot_nibbles
+    # M8 C2 (docs/c2-slot-ids.md): dm_id is two nibbles to 254 slots, three past (world.slot_nibbles)
+    assert w.layout.nmon + len(w.barrel_things) < (255 if slot_nibbles(w.layout) == 2 else SLOT_IDS_WIDE), \
+        "dm_id is %d nibbles" % slot_nibbles(w.layout)
     # M8 F1.2 (docs/f1-big-map-widths.md 7a): the barrels' level start MAY differ by skill (E1M2, E1M9) -- NEW GAME's
     # lines are per skill (`restart_lines(w, skill)`, barrel_parts' "restart"), the leaf lists and thvis per skill
     # (things.skill_level_start), bar_solid per skill (monstercode); the image boots at boot_skill's
@@ -210,21 +220,26 @@ def _vec(name: str, nib: int, vals: Sequence[int]) -> str:
 
 
 def fight_decls(w, values: dict = None) -> List[str]:
-    """M7 P8a I: `bar_src` (all 0 at level start; `values` overrides: the harness) and the source registers"""
+    """M7 P8a I: `bar_src` (all 0 at level start; `values` overrides: the harness) and the source registers. M8 C2:
+    every code at the map's slot-id width (world.slot_nibbles)"""
+    from doomfj.world import slot_nibbles
+    sn = slot_nibbles(w.layout)
     v = (values or {}).get("bar_src", [0] * len(w.barrel_things))
-    return [_vec("bar_src", 2, v), "bd_src: hex.vec 2", "bl_src: hex.vec 2", "bw_sr: hex.vec 2",
+    return [_vec("bar_src", sn, v), "bd_src: hex.vec %d" % sn, "bl_src: hex.vec %d" % sn, "bw_sr: hex.vec %d" % sn,
             "dmb_sret: hex.vec w/4", "bl_sp: hex.vec 1"]          # bl_sp: M7 P8a K x I, the blast's kb_sp
 
 
-def decls(w, boot_skill: int, values: dict = None) -> List[str]:
+def decls(w, boot_skill: int, values: dict = None, list_bits: int = 8) -> List[str]:
     """the barrels' and drops' cells at `boot_skill`'s level start (`values` overrides: the harness), the LOS entry's
-    registers, the scratch and the return registers"""
+    registers, the scratch and the return registers. M8 F1.5: `list_bits` 12 -- dr_t (a drop's runtime thing) at
+    3 nibbles (Config.LIST_NIB)"""
     from doomfj.monstersight import BL_LOS_DECLS
     v = dict(level_start_values(w, boot_skill), mdrop=[0] * len(droppers(w)), dr_live=0)
     v.update(values or {})
     out = [_vec(name, nib, v[name]) for name, nib in BAR_FIELDS]
     out += ["rng_wd: hex.vec 2, %d" % v["rng_wd"], _vec("mdrop", 1, v["mdrop"]), "dr_live: hex.vec 2, %d" % v["dr_live"]]
-    return out + BL_LOS_DECLS + SCRATCH + RET_DECLS
+    scratch = [("dr_t: hex.vec %d" % (list_bits // 4)) if d == "dr_t: hex.vec 2" else d for d in SCRATCH]
+    return out + BL_LOS_DECLS + scratch + RET_DECLS
 
 
 # ---- the code ----------------------------------------------------------------------------------------------------
@@ -239,14 +254,15 @@ def _cell(name: str, nib: int, i: int) -> str:
     return "%s + %d*dw" % (name, nib * i)
 
 
-def damage_lines(nbar: int, fight: bool = False) -> List[str]:
+def damage_lines(nbar: int, fight: bool = False, sn: int = 2) -> List[str]:
     """`bdm<c>` (stl.fcall bdm<c>, bdm_ret; bw_dmg the damage): barrel c's cells through `bd_leaf`, damage_barrel.
-    `fight` (M7 P8a I): bar_src rides the window (bw_sr), and a non-lethal hit records `bd_src` while it is 0"""
+    `fight` (M7 P8a I): bar_src rides the window (bw_sr), and a non-lethal hit records `bd_src` while it is 0.
+    M8 C2: `sn` (world.slot_nibbles) -- the codes' width"""
     out = []
     for c in range(nbar):
         cells = [(_cell(name, nib, c), "bw_" + name[4:], nib) for name, nib in BAR_FIELDS]
         if fight:
-            cells.append((_cell("bar_src", 2, c), "bw_sr", 2))
+            cells.append((_cell("bar_src", sn, c), "bw_sr", sn))
         out += ["bdm%d:" % c] + ["    hex.mov %d, %s, %s" % (nib, reg, cell) for cell, reg, nib in cells]
         out += ["    stl.fcall bd_leaf, bd_ret"] + ["    hex.mov %d, %s, %s" % (nib, cell, reg) for cell, reg, nib in cells]
         out += ["    stl.fret bdm_ret"]
@@ -268,8 +284,8 @@ def damage_lines(nbar: int, fight: bool = False) -> List[str]:
         "    hex.sign 3, bw_t, bd_kill, bd_zp",
         "  bd_zp:",
         "    hex.if0 3, bw_t, bd_kill",
-        *(["    hex.if1 2, bw_sr, bd_out",                                # M7 P8a I: the first non-lethal source
-           "    hex.mov 2, bw_sr, bd_src"] if fight else []),
+        *(["    hex.if1 %d, bw_sr, bd_out" % sn,                          # M7 P8a I: the first non-lethal source
+           "    hex.mov %d, bw_sr, bd_src" % sn] if fight else []),
         "    ;bd_out",                                                     # the pain roll: painchance 0, never
         "  bd_kill:",                                                      # S_BEXP, tics -= P_Random() & 3
         "    fxrnd.lookup bw_rr, rng_wd",
@@ -280,6 +296,33 @@ def damage_lines(nbar: int, fight: bool = False) -> List[str]:
         "    stl.fret bd_ret"]
 
 
+def mover_barrel_leaves(w) -> Dict[int, int]:
+    """M8 wave 1: `{barrel: its leaf}` for every barrel standing in a MOVER's sector (`World.mover_order`, the rule of
+    `World.pickup_on_mover`): its z is its leaf's floor NOW (the module docstring). E1M1, E1M2: none"""
+    out = {}
+    for b, t in enumerate(w.barrel_things):
+        leaf = w.rm.point_in_subsector(w.cmap, t.x, t.y)
+        if w.leaf_sector[leaf] in w.mover_order:
+            out[b] = leaf
+    return out
+
+
+def mover_z_lines(leaf: int) -> List[str]:
+    """a mover barrel's stub, before `stl.fcall bl_leaf`: its z = its leaf's floor now (`ms_seed_leaf` -> `cp_seedf`,
+    whole units; the low four nibbles, as kbbz's `floor & 0xFFFF`) into `bl_z`, and `bl_mv` 1 (bl_leaf keeps it)"""
+    return ["    hex.set w/4, ptss, %d" % leaf, "    stl.fcall ms_seed_leaf, ms_seed_ret",
+            "    hex.mov 4, bl_z, cp_seedf", "    hex.set 1, bl_mv, 1"]
+
+
+def blast_z_lines(mover: bool) -> List[str]:
+    """bl_leaf's top (P9, `rockets`): `bl_z` -- the rocket's own (bl_dyn 1), a mover barrel's from its stub (bl_mv 1,
+    cleared here), else kbbz by bl_b. `mover` False (no barrel on a mover): the pre-M8 text"""
+    if not mover:
+        return ["    hex.if1 1, bl_dyn, bl_zd", "    kbbz.lookup bl_z, bl_b", "  bl_zd:"]
+    return ["    hex.if1 1, bl_dyn, bl_zd", "    hex.if1 1, bl_mv, bl_zm", "    kbbz.lookup bl_z, bl_b",
+            "  bl_zm:", "    hex.zero 1, bl_mv", "  bl_zd:"]
+
+
 def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool = False,
                 rockets: bool = False) -> List[str]:
     """`bl_leaf` (stl.fcall bl_leaf, bl_ret; bl_b, bl_px, bl_py the barrel) -- the player, then the monster slots --
@@ -287,8 +330,11 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
     world.knockback_on; doomfj.knockcode): THE BARREL is the inflictor (kb_on, kb_ix / kb_iy = bl_px / bl_py) of
     every damage the blast deals -- set before dp_go and before each slot's dmg<m> (each damage leaf zeroes kb_on).
     `fight` (M7 P8a I): the blast's SOURCE is `bl_src` (the barrel's bar_src, its stub's): the player's attacker
-    (dp_src: a monster's 1 + slot, else 0) and each slot's dm_src"""
+    (dp_src: a monster's 1 + slot, else 0) and each slot's dm_src. M8 C2: the codes at the map's slot-id width
+    (world.slot_nibbles): bl_src's "a monster" test reads its high nibbles"""
     from doomfj.combat import BOMB_DAMAGE, PLAYER_R
+    from doomfj.world import slot_nibbles
+    sn = slot_nibbles(w.layout)
     from doomfj.knockcode import inflictor_lines
     # package K: the barrel's z (its floor, knockcode's `kbbz` by bl_b); the source the player who set it off (every
     # barrel before package I's bar_src). With infighting (`fight`) the source is the barrel's bar_src: kb_sp is
@@ -297,6 +343,8 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
     zl = ["    hex.mov 4, kb_iz, bl_z"] if rockets else ["    kbbz.lookup kb_iz, bl_b"]
     kb = inflictor_lines("bl_px", "bl_py", z_lines=zl, src_player=not fight) if knock else []
     assert not rockets or (knock and fight), "P9: the rocket's blast is the final modes' (its z, its source)"
+    mover = bool(mover_barrel_leaves(w))
+    assert not (mover and knock and not rockets), "M8: a barrel on a mover's z is bl_z's (the rockets' modes)"
     if knock and fight:
         assert kb[-1] == "    hex.zero 1, kb_sp", kb
         kb[-1] = "    hex.mov 1, kb_sp, bl_sp"                         # M7 P8a K x I: the player set it off?
@@ -306,8 +354,9 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
     assert len(slot_rt) == n
     hn = cell_nibbles(w.schema, "mon_health")
     out = ["bl_leaf:",
-           *(["    hex.if1 1, bl_dyn, bl_zd", "    kbbz.lookup bl_z, bl_b", "  bl_zd:"] if rockets else []),
+           *(blast_z_lines(mover) if rockets else []),
            *(["    hex.zero 1, bl_sp",                                       # M7 P8a K x I: bl_sp = bl_src == 1
+              *(["    hex.if_flags bl_src + 2*dw, 1, bl_sp0, bl_sp2", "  bl_sp2:"] if sn == 3 else []),   # M8 C2
               "    hex.if_flags bl_src + 1*dw, 1, bl_sp0, bl_sph",          # (the high nibble 0 ...
               "  bl_sph:",
               "    hex.if_flags bl_src, 2, bl_sp0, bl_sp1",                 # ... and the low nibble 1)
@@ -337,12 +386,14 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
            "    hex.if1 1, sl_hit, bl_mons",
            "    hex.mov 2, dp_dmg, bl_dmg",
            *kb,                                                             # M7 P8a: the barrel inflicts
-           *(["    hex.zero 2, dp_src",                                    # M7 P8a I: a monster source names it
+           *(["    hex.zero %d, dp_src" % sn,                              # M7 P8a I: a monster source names it
+              *(["    hex.if_flags bl_src + 2*dw, 1, bl_pss, bl_ps1"] if sn == 3 else []),   # M8 C2: >= 256
+              *(["  bl_ps1:"] if sn == 3 else []),
               "    hex.if_flags bl_src + 1*dw, 1, bl_pss, bl_psm",         # (bl_src >= 16: a monster)
               "  bl_psm:",
               "    hex.if_flags bl_src, 3, bl_pss, bl_psg",                # 0 none, 1 the player: no attacker
               "  bl_pss:",
-              "    hex.mov 2, dp_src, bl_src", "    hex.dec 2, dp_src",
+              "    hex.mov %d, dp_src, bl_src" % sn, "    hex.dec %d, dp_src" % sn,
               "  bl_psg:"] if fight else []),
            "    stl.fcall dp_go, dp_ret",
            # 2. the monsters by slot: active, shootable, health > 0
@@ -361,7 +412,7 @@ def blast_lines(w, *, slot_rt: Sequence[int], knock: bool = False, fight: bool =
                 "    hex.if0 1, bl_ok, %sn" % L,
                 "    hex.mov 2, dm_dmg, bl_dmg", "    hex.set 1, dm_melee, %d" % BLAST,
                 *kb,                                                        # M7 P8a: the barrel inflicts
-                *(["    hex.mov 2, dm_src, bl_src"] if fight else []),     # M7 P8a I: the blast's source
+                *(["    hex.mov %d, dm_src, bl_src" % sn] if fight else []),   # M7 P8a I: the blast's source
                 "    stl.fcall dmg%d, dm_ret" % m,
                 "  %sn:" % L]
     out += ["    stl.fret bl_ret"]
@@ -415,10 +466,13 @@ def phase_lines(w, *, barrel_rt: Dict[int, int] = None, exit_guard: bool = True,
     tier gives its type (things.vanishable_slots), and package A's thvis layout reads it as `bar_state != 0`
     (monsters.MonsterViews.vis_state) -- so S_NULL zeroes it too. The baked call site itself hides the barrel by
     its state (wall_renderer's `_baked_barrel_site`). `fight` (M7 P8a I): the blast's source is the barrel's bar_src
-    (bl_src for bl_leaf, bd_src for the chain)."""
+    (bl_src for bl_leaf, bd_src for the chain) -- M8 C2: at the map's slot-id width (world.slot_nibbles)."""
+    from doomfj.world import slot_nibbles
+    sn = slot_nibbles(w.layout)
     chains = chain_pairs(w) if chains is None else chains
     barrel_rt = barrel_rt or {}
     barrel_vis = barrel_vis or {}
+    mleaf = mover_barrel_leaves(w)                                   # M8: a barrel on a mover (bl_z, bl_mv)
     out = ["bar_phase:"]
     if exit_guard:
         out.append("    hex.if1 1, lvdone, bar_ph_out")                     # a finished level: the world is frozen
@@ -436,11 +490,12 @@ def phase_lines(w, *, barrel_rt: Dict[int, int] = None, exit_guard: bool = True,
                 "  %sx:" % L,                                                 # A_Explode: P_RadiusAttack
                 "    hex.set 2, bl_b, %d" % b,
                 "    hex.set 4, bl_px, %d" % (t.x & 0xFFFF), "    hex.set 4, bl_py, %d" % (t.y & 0xFFFF),
-                *(["    hex.mov 2, bl_src, bar_src + %d*dw" % (2 * b)] if fight else []),   # M7 P8a I
+                *(["    hex.mov %d, bl_src, bar_src + %d*dw" % (sn, sn * b)] if fight else []),   # M7 P8a I
+                *(mover_z_lines(mleaf[b]) if b in mleaf else []),             # M8: its floor now
                 "    stl.fcall bl_leaf, bl_ret"]
         for c, dmg in chains[b]:                                              # 3. the other barrels, static
             out += ["    hex.set 2, bw_dmg, %d" % dmg,
-                    *(["    hex.mov 2, bd_src, bar_src + %d*dw" % (2 * b)] if fight else []),
+                    *(["    hex.mov %d, bd_src, bar_src + %d*dw" % (sn, sn * b)] if fight else []),
                     "    stl.fcall bdm%d, bdm_ret" % c]
         out += ["    ;%sn" % L,
                 "  %srm:" % L,                                                # S_NULL: P_RemoveMobj
@@ -460,8 +515,10 @@ def shot_lines(w, fight: bool = False) -> List[str]:
     """`dmb<b>` (damagecode's dm_go jumps here; it returns through dm_ret) and `dmb_leaf`: combat._line_attack on a
     barrel -- the reach to its centre, the PUFF (the fist's: S_PUFF3), then damage_barrel (`bdm<b>`). `fight` (M7 P8a
     I): a monster's hit (dm_melee MONSTER / BULLET) skips the reach and only its bullet puffs; the source (bd_src) is
-    the player for a shot, dm_src for a monster's hit"""
+    the player for a shot, dm_src for a monster's hit. M8 C2: the codes at the map's slot-id width"""
     from doomfj.combat import MISSILERANGE_U, PUNCH_REACH, SAW_REACH
+    from doomfj.world import slot_nibbles
+    sn = slot_nibbles(w.layout)
     from doomfj.projcode import FX_KINDS
     assert PUNCH_REACH != SAW_REACH
     out = []
@@ -475,14 +532,14 @@ def shot_lines(w, fight: bool = False) -> List[str]:
                 *(["    stl.fcall dmb_src, dmb_sret"] if fight else []),             # M7 P8a I: bd_src
                 "    stl.fcall bdm%d, bdm_ret" % b,
                 "  dmb%d_r:" % b,
-                *(["    hex.zero 2, dm_src"] if fight else []),                  # M7 P8a I: as dm_leaf's dm_out
+                *(["    hex.zero %d, dm_src" % sn] if fight else []),            # M7 P8a I: as dm_leaf's dm_out
                 "    stl.fret dm_ret"]
     return out + [
         *(["dmb_src:",                                                         # M7 P8a I: the hit's source
-           "    hex.set 2, bd_src, 1",                                         # a shot: the player
+           "    hex.set %d, bd_src, 1" % sn,                                   # a shot: the player
            "    hex.if_flags dm_melee, %d, dmb_s_out, dmb_s_m" % ((1 << MONSTER) | (1 << BULLET)),
            "  dmb_s_m:",
-           "    hex.mov 2, bd_src, dm_src",
+           "    hex.mov %d, bd_src, dm_src" % sn,
            "  dmb_s_out:",
            "    stl.fret dmb_sret"] if fight else []),
         "dmb_leaf:",
@@ -520,41 +577,46 @@ def shot_lines(w, fight: bool = False) -> List[str]:
         "    stl.fret dmb_lret"]
 
 
-def drop_lines(w, *, nt: int, slot_rt: Sequence[int]) -> List[str]:
+def drop_lines(w, *, nt: int, slot_rt: Sequence[int], list_bits: int = 8) -> List[str]:
     """`drop_link<k>` (damagecode's slot stub, after a kill: dm_x / dm_y still hold the corpse's whole-unit position,
     the stub loaded them from its row) and `drop_take<k>` (the pickup): dropper k's row nt + nmob + k. A drop row is
     ZERO whenever it is not live (level start, and drop_take clears what drop_link wrote), so the link writes only
     the position's integer nibbles and the leaf, and the take clears only those. The leaf-list work is shared
-    (`dr_link` / `dr_take`: projcode's pw_link / pw_unlink on dr_t, dr_leaf)."""
+    (`dr_link` / `dr_take`: projcode's pw_link / pw_unlink on dr_t, dr_leaf).
+
+    M8 F1.5 (docs/f1-runtime-ids.md): `list_bits` -- the lists' id width (Config.LIST_ID_BITS); dr_t is that many bits
+    (3 nibbles at 12: E1M5's drops are rows 249 .. 369). `dr_live` counts the live drops in 2 nibbles."""
     from doomfj.world import FIREBALL_POOL, FX_POOL
     nmob = FIREBALL_POOL + FX_POOL
+    nib = list_bits // 4
+    assert list_bits in (8, 12) and len(droppers(w)) < 256, (list_bits, len(droppers(w)), "dr_live is two nibbles")
     out = []
     for k, m in enumerate(droppers(w)):
         d, rt = nt + nmob + k, slot_rt[m]
-        assert d < 256, "dr_t is two nibbles"
+        assert d < 16 ** nib - 1, "dr_t is %d nibbles (Config.LIST_ID_BITS)" % nib
         out += ["drop_link%d:" % k,
                 "    hex.set 1, mdrop + %d*dw, 1" % k,
                 "    hex.mov 4, thpos_rt + %d*dw, dm_x" % (16 * d + 4),
                 "    hex.mov 4, thpos_rt + %d*dw, dm_y" % (16 * d + 12),
                 "    hex.mov 3, dr_leaf, thss_rt + %d*dw" % (16 * rt),
                 "    hex.mov 3, thss_rt + %d*dw, dr_leaf" % (16 * d),
-                "    hex.set 2, dr_t, %d" % d,
+                "    hex.set %d, dr_t, %d" % (nib, d),
                 "    ;dr_link",
                 "drop_take%d:" % k,
                 "    hex.set 1, mdrop + %d*dw, 2" % k,
                 "    hex.mov 3, dr_leaf, thss_rt + %d*dw" % (16 * d),
                 "    hex.zero 4, thpos_rt + %d*dw" % (16 * d + 4), "    hex.zero 4, thpos_rt + %d*dw" % (16 * d + 12),
                 "    hex.zero 3, thss_rt + %d*dw" % (16 * d),
-                "    hex.set 2, dr_t, %d" % d,
+                "    hex.set %d, dr_t, %d" % (nib, d),
                 "    ;dr_take"]
     return out + ["dr_link:",
-                  "    hex.zero w/4, pw_t", "    hex.mov 2, pw_t, dr_t",
+                  "    hex.zero w/4, pw_t", "    hex.mov %d, pw_t, dr_t" % nib,
                   "    hex.zero w/4, pw_leaf", "    hex.mov 3, pw_leaf, dr_leaf",
                   "    stl.fcall pw_link, pw_lkret",
                   "    hex.inc 2, dr_live",
                   "    stl.fret drl_ret",
                   "dr_take:",
-                  "    hex.zero w/4, pw_t", "    hex.mov 2, pw_t, dr_t",
+                  "    hex.zero w/4, pw_t", "    hex.mov %d, pw_t, dr_t" % nib,
                   "    hex.zero w/4, pw_leaf", "    hex.mov 3, pw_leaf, dr_leaf",
                   "    stl.fcall pw_unlink, pw_ulret",
                   "    hex.dec 2, dr_live",
@@ -574,7 +636,7 @@ def restart_lines(w, skill: int, *, nt: int) -> List[str]:
     first = nt + FIREBALL_POOL + FX_POOL
     out = ["    hex.set %d, %s, %d" % (nib * len(v[name]), name, sum((x & (16 ** nib - 1)) << (4 * nib * i)
                                                                        for i, x in enumerate(v[name])))
-           for name, nib in BAR_FIELDS]
+           for name, nib in BAR_FIELDS if v[name]]                      # M8 C10: no barrel, no cell to set
     return out + ["    hex.set 2, rng_wd, %d" % v["rng_wd"], "    hex.zero %d, mdrop" % max(1, nd),
                   "    hex.zero 2, dr_live",
                   "    hex.zero %d, thpos_rt + %d*dw" % (16 * nd, 16 * first),
@@ -583,7 +645,7 @@ def restart_lines(w, skill: int, *, nt: int) -> List[str]:
 
 def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills: Sequence[int] = (),
                  barrel_rt: Dict[int, int] = None, exit_guard: bool = True, barrel_vis: Dict[int, int] = None,
-                 knock: bool = False, fight: bool = False, rockets: bool = False) -> dict:
+                 knock: bool = False, fight: bool = False, rockets: bool = False, list_bits: int = 8) -> dict:
     """everything package C's sim adds, for the World `w` (the player mode "full"):
       * `decls`: the cells at `boot_skill`'s level start, the scratch, the LOS entry's registers;
       * `lines`: bar_phase / bar_next, bdm<c> / bd_leaf, bl_leaf / bl_mon / bl_dist, monstersight's bl_los, dmb<b> /
@@ -601,19 +663,24 @@ def barrel_parts(w, *, nt: int, slot_rt: Sequence[int], boot_skill: int, skills:
     from doomfj.combat import PLAYER_R
     from doomfj.monstersight import blast_los_lines
     check_model_rules(w, tuple(skills) or (boot_skill,))
+    mover = bool(mover_barrel_leaves(w))
+    assert not mover or rockets, "M8: a barrel on a mover's z is bl_z's: the rockets' modes (P9) only"
     spots = [(t.x, t.y) for t in w.barrel_things]
     maxr = max([PLAYER_R] + list(w.mon_radius[:w.layout.nmon]))
-    from doomfj.world import FIREBALL_POOL, FX_POOL
-    return {"decls": (decls(w, boot_skill) + (fight_decls(w) if fight else [])
-                      + (["bl_dyn: hex.vec 1", "bl_z: hex.vec 4"] if rockets else [])),   # P9: the rocket's entry
+    from doomfj.world import FIREBALL_POOL, FX_POOL, slot_nibbles
+    _sn = slot_nibbles(w.layout)                       # M8 C2: bar_src's width
+    return {"decls": (decls(w, boot_skill, list_bits=list_bits) + (fight_decls(w) if fight else [])
+                      + (["bl_dyn: hex.vec 1", "bl_z: hex.vec 4"] if rockets else [])   # P9: the rocket's entry
+                      + (["bl_mv: hex.vec 1"] if mover else [])),                      # M8: a barrel on a mover
             "lines": (phase_lines(w, barrel_rt=barrel_rt, exit_guard=exit_guard, barrel_vis=barrel_vis, fight=fight)
-                      + damage_lines(len(spots), fight=fight)
+                      + damage_lines(len(spots), fight=fight, sn=_sn)
                       + blast_lines(w, slot_rt=slot_rt, knock=knock, fight=fight, rockets=rockets)
                       + blast_los_lines(w, spots, maxr, fight=fight, dyn=rockets)
                       + shot_lines(w, fight=fight)
-                      + drop_lines(w, nt=nt, slot_rt=slot_rt)),
+                      + drop_lines(w, nt=nt, slot_rt=slot_rt, list_bits=list_bits)),   # M8 F1.5: dr_t
             "tables": tables_fj(),
-            "restart": [restart_lines(w, sk, nt=nt) + (["    hex.zero %d, bar_src" % (2 * len(spots))] if fight else [])
+            "restart": [restart_lines(w, sk, nt=nt) + (["    hex.zero %d, bar_src" % (_sn * len(spots))]
+                                                       if fight and spots else [])      # M8 C10: no barrel, no cell
                         for sk in skills],
             "persist": BARREL_PERSIST + DROP_PERSIST + (FIGHT_PERSIST if fight else ()),
             "nbar": len(spots), "drops": {m: k for k, m in enumerate(droppers(w))}, "ndrop": len(droppers(w)),

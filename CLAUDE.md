@@ -34,7 +34,7 @@ of the ceiling, both FAIL) is history in `docs/handoff-fullgame-metrics.md`. No 
 belongs in this file without its `--validate` output. `docs/handoff-m4-nine-levels.md` is still the M4 reference.
 **M1** (the self-resetting loop), **M5** (the standalone `.fjm`), **M3** (the menu — a second
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
-whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:
+whole flag retirement — `build_wall_renderer` is SEVEN parameters and takes a `tier` name:
 `fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu, WASD
 moves, space opens doors. On that (M3) binary's menu enter starts the game; from M7 P1.5's game tier
 on, enter opens the skill screen (w/s pick easy/medium/hard, enter starts a new game at it, esc
@@ -148,9 +148,10 @@ keeps it a registry is: **a new combination is a NEW ROW, never a new parameter.
 independent flags described 256 nominal programs; the repo ever used seven, so the API is now
 
     build_wall_renderer(out_fjm, *, wad_path=..., mapname="E1M1", cfg=None,
-                        tier="game", ablate=frozenset())
+                        tier="game", ablate=frozenset(), assembly=Assembly())
 
-Six parameters, down from ~30 before the retirements. Everything else derives: `generated_dir`
+Seven parameters, down from ~30 before the retirements; `assembly` (`build.Assembly`) carries how flipjump
+assembles it -- the lzma preset and the `BlockPool` keyword arguments, `pin_all_but` among them. Everything else derives: `generated_dir`
 from `out_fjm`, `flat_max_words` from `cfg`, the restore set from the tier (so the two sets cannot
 be crossed), `sprite_wad` resolved internally.
 
@@ -211,7 +212,19 @@ once per machine state; if A-vs-A separates, the box is too noisy to measure any
 automatically; open it. It holds the standing number with its provenance, the four-step gate a
 new binary must pass, and the ideas already measured (kept or closed) so they are not re-derived.
 
-**`build/doom_e1m1_blocked63.fjm` is the shipped binary since 2026-10-18** (M8, class F: blocked62 + the MAP page --
+**`build/doom_e1m1_blocked65.fjm` is the shipped binary since 2026-10-28** (ship #2, class S against blocked64: the same
+game on flipjump 1.6.0's own stl at e44ff3f, re-pinned with its own heat list `heat_e1m1_adopt`; sha256 `3a2c9564adbfcb07`,
+rebuilt byte-identical; 1,044/1,044 frames blocked64's; B0 v10 14,249,841, binding 14,792,784 PASS (-12.58%), size 37.40%
+PASS, **63.4 ms/frame against blocked64's 68.3 -- B FASTER x1.076**, the `shipped` baseline re-frozen at 63.6;
+`docs/ship-gate.md` 1). It needs flipjump >= 1.6.0 e44ff3f. Play: `fj --run build/doom_e1m1_blocked65.fjm`.
+
+**`build/doom_e1m1_blocked64.fjm` was the shipped binary (ship #1, 2026-10-28)** (ship #1 of flipjump 1.6.0, class F: blocked63's
+game on 1.6.0's screen / keyboard device API; sha256 `f52751a2bb846c7a`, rebuilt byte-identical; B0 v10 16,297,393, binding
+16,921,550 PASS, size 39.13% PASS, 68.3 ms/frame against blocked63's 67.6 in one A/B run (NOT SEPARATED), the `shipped`
+baseline re-frozen at 68.0 under 1.6.0 e44ff3f; `docs/ship-gate.md` 1). It needs flipjump >= 1.6.0. Play:
+`fj --run build/doom_e1m1_blocked64.fjm`. What follows is blocked63's record.
+
+**`build/doom_e1m1_blocked63.fjm` was the shipped binary from 2026-10-18** (M8, class F: blocked62 + the MAP page --
 a menu item and the M key, E1M1's lines and a red dot; sha256 `b65e5a97c42adb71`, rebuilt byte-identical; B0 v10
 16,255,310, binding 16,892,755 PASS, size 38.98% PASS, 68.4 ms/frame against blocked62's 68.7 in one A/B run, the
 `shipped` baseline re-frozen at 69.1; `docs/ship-gate.md` 1). Play: `fj --run build/doom_e1m1_blocked63.fjm`. What follows is blocked62's record, the binary it extends.

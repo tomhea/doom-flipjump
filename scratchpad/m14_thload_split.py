@@ -1,14 +1,14 @@
 """WHERE inside sim.thing_load do the 68,181 ops go?
 
 Lever B is "make thing_load lazy", and its shape depends entirely on this: if the four
-`read_table_packed` / `ptr_index` reads dominate, splitting the ROW is the fix; if the dozen little
+`read_entry_packed` / `ptr_index` reads dominate, splitting the ROW is the fix; if the dozen little
 `hex.mov`s dominate, splitting it buys nothing and lever B is not worth doing.
 
 Each variant is the same k-sweep as m14_thload_cost.py (marginal cost over k = 1/17/33, so startup
 and the table bakes cancel), with one group of the macro's work removed:
 
   full     everything, as shipped
-  norow    minus `read_table_packed 22` and every field derived from the row
+  norow    minus `read_entry_packed 22` and every field derived from the row
   nopos    minus the position accessor (shl + ptr_index + read_hex 16)
   nozlt    minus the sp_z / sp_lt derivation (three more table reads)
 
@@ -57,7 +57,7 @@ sprlt = sprite_light_table(spr_cls, rows, lns)
 NT, NSS = len(rows), len(cmap.subsectors)
 # ⚠ THE INDEX WIDTHS MUST BE THE EMITTER'S. The first run of this probe hard-coded 4 nibbles
 # for every read while the emitter passes _index_nibbles(251)=2 and _index_nibbles(682)=3. If
-# read_table_packed's cost scales with the index width, that measured a program nobody builds.
+# read_entry_packed's cost scales with the index width, that measured a program nobody builds.
 from doomfj.texturecompiler import _index_nibbles
 NTH, NSSN, NLTI = _index_nibbles(NT), _index_nibbles(NSS), _index_nibbles(len(lns) * NT)
 print(f'index widths: n_th={NTH} ssnss={NSSN} sprlt={NLTI}', flush=True)
@@ -69,7 +69,7 @@ def pack(v, ws):
     return o
 
 
-ROW = [f"hex.read_table_packed 22, row, throw, {NTH}, ti",
+ROW = [f"hex.read_entry_packed 22, row, throw, {NTH}, ti",
        "sim.fix16 sp_left, row", "sim.fix16 sp_w, row + 4*dw", "sim.fix16 sp_hh, row + 8*dw",
        "hex.mov 8, sp_tzmax,  row + 16*dw", "hex.mov 8, sp_tzmax2, row + 24*dw",
        "hex.zero 4, sp_base", "hex.mov 4, sp_base,  row + 32*dw",
@@ -79,11 +79,11 @@ ROW = [f"hex.read_table_packed 22, row, throw, {NTH}, ti",
 POS = ["hex.mov w/4, poff, ti", "hex.shl_hex w/4, 1, poff", "hex.set w/4, pbase, thpos",
        "hex.ptr_index pptr, pbase, poff", "hex.read_hex 16, pos, pptr",
        "hex.mov 8, sp_x, pos", "hex.mov 8, sp_y, pos + 8*dw"]
-ZLT = [f"hex.read_table_packed 2, zt, ssflr, {NSSN}, ssi", "hex.add 4, zt, row + 12*dw",
+ZLT = [f"hex.read_entry_packed 2, zt, ssflr, {NSSN}, ssi", "hex.add 4, zt, row + 12*dw",
        "sim.fix16 sp_z, zt",
-       f"hex.read_table_packed 1, zt, sslgt, {NSSN}, ssi",
-       "hex.read_table_packed 2, lti, ltbase, 2, zt", "hex.add 4, lti, ti",
-       f"hex.read_table_packed 1, sp_lt, sprlt, {NLTI}, lti"]
+       f"hex.read_entry_packed 1, zt, sslgt, {NSSN}, ssi",
+       "hex.read_entry_packed 2, lti, ltbase, 2, zt", "hex.add 4, lti, ti",
+       f"hex.read_entry_packed 1, sp_lt, sprlt, {NLTI}, lti"]
 
 VARIANTS = {"full": ROW + POS + ZLT, "norow": POS + ZLT, "nopos": ROW + ZLT, "nozlt": ROW + POS}
 
@@ -112,7 +112,7 @@ def build(body, k):
     tmp = Path(tempfile.mkdtemp()); src = tmp / "t.fj"
     src.write_text(prog, encoding="utf-8")
     out = tmp / "t.fjm"
-    fj.assemble([(ROOT / "src/fj/fixed_point.fj").resolve(), (ROOT / "src/fj/sim.fj").resolve(),
+    fj.assemble([(ROOT / "src/fj/sim.fj").resolve(),
                  src.resolve()], out, memory_width=W, print_time=False)
     return fj.run(out, io_device=FixedIO(bytes([0xD0])), print_time=False,
                   print_termination=False).op_counter

@@ -10,14 +10,16 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Mapping, Optional
 
 import flipjump as fj
-from flipjump.fjm.fjm_reader import Reader
+from flipjump.fjm.fjm_reader import read_fjm_header
 
 from doomfj.config import (DEFAULT_MAP_WAD, FLAT_MAX_WORDS, RENDER_FLAT_MAX_WORDS,
                            Config)
-from doomfj.harness import W, FJM_LZMA_FAST, assemble_fjm, run_fjm
+from doomfj.harness import W, FJM_LZMA_PRESET, assemble_fjm, run_fjm
 from doomfj.lut_generator import (
     generate_dispatch_table_fj, generate_offset_deposit_table_fj, generate_trig_idioms_fj,
 )
@@ -31,14 +33,17 @@ from doomfj.wall_renderer import (BBOX_CULL, DEG, SPR_BLOCK_STRIDE, STACK_STEPS,
 
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
-_RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj"]
+_RENDERER_INCLUDES = ["projection.fj", "frame_render.fj", "plane_render.fj"]
 # ... plus these two for raster_mode="lines" (the shipping tier): the packed-byte ceiling/floor BAND
-# lists pass-1 builds, and the 0x0B column-stream present that replaces the framebuffer raster.
+# lists pass-1 builds, and the draw_collines present (screenwire) that replaces the framebuffer raster.
 _LINES_INCLUDES = ["plane_bands.fj", "stream_render.fj"]
 # B0 (2026-08-18): the player sim. ⚠ LAST in the list -- fj top-level labels are global, so the
 # ordered file list is equivalent to its concatenation and the order is the contract (R54). This is
 # the same position m14_gate.py and scripts/walk_e1m1.py put it in.
 _SIM_INCLUDES = ["sim.fj"]
+# M8 F1.5 (docs/f1-runtime-ids.md): a wide-list map's list macros (Config.LIST_ID_BITS 12) -- after sim.fj, and only
+# then: the 8-bit programs never include it, so their sources are what they were
+_SIM_WIDE_INCLUDES = ["sim_wide.fj"]
 # M5: the standalone tier's keyboard poll. BEFORE sim.fj, which stays last (R54).
 _STANDALONE_INCLUDES = ["input.fj"]
 # M5: the labels the self-reset must NOT restore. A hosted frame is handed its whole world state
@@ -66,6 +71,9 @@ STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
 # -- the menu's own memory, persisted for the reason `menu_scr` is: a page that reset every frame could never be left.
 # Registered and persisted through the map's `extra` names (`automap_persist`), as F1.2's map cells are.
 AUTOMAP_PERSIST = ("amap",)
+# M8 C6: key 6's held flag `kb_w6` on a map with the plasma rifle (wall_renderer.plasma_game_on) -- a held key, persisted
+# for the reason kb_w5 is (STANDALONE_PERSIST), through the map's `extra` names
+PLASMA_PERSIST = ("kb_w6",)
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it
@@ -176,10 +184,10 @@ def p8a_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     not) -- `game_screen_persisted_decls`' candidates for VIEW_PERSIST / KNOCK_PERSIST / FIGHT_PERSIST. Candidates
     only: a name is persisted by `p8a_persist`, behind its rule. Package A: p_vd; package K: knockcode's (p_kmx ..
     pj_z, at the map's slot count); package I: bar_src (barrelcode.fight_decls)"""
-    from doomfj.world import World
+    from doomfj.world import World, slot_nibbles
     w = World(map_wad, mapname)
     return (list(_restartcode_p8a.view_decls())                                  # package A: p_vd
-            + _knockcode.persisted_decls(w.layout.nmon)                          # package K
+            + _knockcode.persisted_decls(w.layout.nmon, sn=slot_nibbles(w.layout))   # package K (M8 C2: kb_live)
             + [d for d in _barrelcode.fight_decls(w) if d.split(":")[0] in FIGHT_PERSIST])   # package I
 
 
@@ -206,7 +214,8 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
     M8 F4: + the map's new card cells (lootcode.map_persist: pcard_y / pcard_r, the game tier's loot; none on E1M1);
     M8 L4: + the player's reactiontime on a map with a WR teleport (teleportcode.map_persist: `p_rct`);
     M8: + the sector light thinkers' cells on a map whose lights animate (lightcode.map_persist: ltst, ltct, rng_lt);
-    M8: + the switch textures' cells on a map that animates its switches (switchcode.map_persist: `swpr`, `swtm`)"""
+    M8: + the switch textures' cells on a map that animates its switches (switchcode.map_persist: `swpr`, `swtm`);
+    M8 C6: + the timed powers' counters on a map holding them (powercode.map_persist: `p_inv`, `p_rad`)"""
     if not on:
         return ()
     from doomfj.lightcode import map_persist as _light_persist
@@ -214,9 +223,17 @@ def _map_persist(wad, mapname: str, on: bool) -> tuple:
     from doomfj.monstermove import map_persist
     from doomfj.switchcode import map_persist as _switch_persist
     from doomfj.teleportcode import map_persist as _tele_persist
+    from doomfj.soulcode import map_persist as _soul_persist              # M8 C8: the lost souls' cells
+    from doomfj.exitcode import map_persist as _exit_persist
+    from doomfj.powercode import map_persist as _power_persist
+    from doomfj.wall_renderer import plasma_game_on
     return (map_persist(wad, mapname) + card_persist(wad, mapname) + _tele_persist(wad, mapname)
             + _light_persist(wad, mapname)
-            + _switch_persist(wad, mapname))
+            + _switch_persist(wad, mapname)
+            + _exit_persist(wad, mapname)                   # M8 C9: lvsec on a map with a secret exit
+            + _power_persist(wad, mapname)                  # M8 C6: the timed powers
+            + (PLASMA_PERSIST if plasma_game_on(wad, mapname) else ())    # M8 C6: key 6's held flag
+            + _soul_persist(wad, mapname))                  # M8 C8: the lost souls' cells
 
 
 def automap_persist(cfg, menu: bool) -> tuple:
@@ -232,7 +249,7 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
     from doomfj import aimcode, hud, hudcode, hurtcode, projcode
     from doomfj import weaponcode as WC
     from doomfj.selfreset import decl_words
-    from doomfj.world import World
+    from doomfj.world import World, slot_nibbles
     # M7 P7: GAME_PERSIST's cells are NOT here -- they are standalone globals (wall_renderer.MENU_STATE_DECLS), which
     # m5_setfile adds through STANDALONE_SCRATCH_DECLS; listing them twice would declare them twice.
     # M7 P6: + LOOT_PERSIST + BARREL_PERSIST, their modules' decl lists in `cand`
@@ -242,11 +259,12 @@ def game_screen_persisted_decls(map_wad, mapname: str = "E1M1") -> list:
              + STAT_PERSIST                                           # P10: the stats (statcode.decls)
              + p8a_persist())                                         # M7 P8a: the hooks at the game tier's modes
     _cards = lootcode.hud_cards(map_wad, mapname)                    # M8 F4: the map's extra key icons' slots
+    _sn = slot_nibbles(World(map_wad, mapname).layout)               # M8 C2: aim_sid, p_atk, pj_src's widths
     cand = (hudcode.hud_decls(hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START, cards=_cards), _cards), _cards)
             + WC.weapon_decls(WC.level_start(map_wad, mapname), WC.weapon_states(), WC.overlay_frames())
-            + WC.weapon_const_decls() + aimcode.decls()
-            + hurtcode.hurt_decls(hurtcode.level_start(World(map_wad, mapname)))   # M7 P5
-            + projcode.pool_decls()
+            + WC.weapon_const_decls() + aimcode.decls(sn=_sn)
+            + hurtcode.hurt_decls(hurtcode.level_start(World(map_wad, mapname)), _sn)   # M7 P5
+            + projcode.pool_decls(sn=_sn)
             + barrelcode.decls(World(map_wad, mapname), BOOT_SKILL)      # M7 P6: barrels, drops
             + lootcode.loot_decls(lootcode.level_start(World(map_wad, mapname)))   # M7 P6: the player's loot
             + p8a_persisted_decls(map_wad, mapname)                                # M7 P8a: the hooks' modules
@@ -344,7 +362,9 @@ def _safe(prefix: str, name: str) -> str:
 def _span_words(fjm_path: Path) -> int:
     """The assembled program's flat address-span in words = max(segment_start + segment_length).
     Compared against flat_max_words: storage_mode flips flat->hybrid when the limit drops below it."""
-    return max(s.segment_start + s.segment_length for s in Reader(fjm_path).memory_segments)
+    # the header alone (M8, the assembler-memory work): a full Reader is a dict of every word -- +4.7 GB after an E1M1
+    # assembly, the build's peak (12.29 -> 4.00 GB with flipjump#373)
+    return read_fjm_header(Path(fjm_path)).span_words
 
 
 def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
@@ -424,10 +444,10 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
     out = Path(out_fjm)
     out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
-    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
-                lzma_fast=FJM_LZMA_FAST)
+    fj.assemble([p.resolve() for p in paths], out, memory_width=W, show_progress=False,
+                lzma_preset=FJM_LZMA_PRESET)
     assemble_seconds = round(time.perf_counter() - t, 3)
-    term = fj.run(out, print_time=False, print_termination=False, flat_max_words=limit)
+    term = fj.run(out, show_progress=False, print_termination=False, flat_max_words=limit)
 
     span = _span_words(out)
     metrics = {
@@ -469,20 +489,44 @@ ONE_PASS_TIERS = frozenset({"game", "hosted-loop"})
 
 
 def standalone_run_header(standalone: bool) -> dict:
-    """The .fjm header's defaults for how `fj --run` runs the binary (flipjump >= 1.6.0 at 342a3b9).
+    """The .fjm header's defaults for how `fj --run` runs the binary (flipjump 1.6.0's `assemble(flat_memory=,
+    io_mode=)`).
 
     A standalone binary (the game) is played in the pc window and wants flat memory -- one array for its
     whole span (~119M words, ~0.5 GB at w=32), the fast native path -- so both are compiled in and the
-    play command is just `fj --run build/<name>.fjm` (`--io` / `--run-flags 0` still override). A hosted
-    tier is driven over stdin by a Python host, so it keeps the defaults (standard io, no run flags)."""
-    from flipjump.fjm.fjm_consts import IO_MODE_PC, RUN_FLAG_FLAT_MEMORY
+    play command is just `fj --run build/<name>.fjm` (`--io` / `--no-flat-memory` still override). A hosted
+    tier is driven over stdin by a Python host, so it keeps the defaults (standard io, no flat memory)."""
     if not standalone:
-        return {"run_flags": 0, "io_mode": 0}
-    return {"run_flags": RUN_FLAG_FLAT_MEMORY, "io_mode": IO_MODE_PC}
+        return {"flat_memory": False, "io_mode": "standard"}
+    return {"flat_memory": True, "io_mode": "pc"}
+
+
+@dataclass(frozen=True)
+class Assembly:
+    """HOW build_wall_renderer assembles -- its ONE assembler argument (flipjump 1.6.0's API, no patching).
+
+    `lzma_preset`: the .fjm's LZMA preset (encoder-only: the program image is the same at every preset; the ship
+    builds use harness.SHIP_LZMA_PRESET). `pool`: flipjump BlockPool's keyword arguments for a BLOCKED build
+    (scratchpad/12m/build_blocked.py; docs/ship-gate.md 1b) -- pool_base, pool_end, max_slot_ops, spread_factor,
+    spread_min_tables, pin_incomplete_groups, heat -- or None for no pool. Never `pin_all_but`: which cells the
+    program reads raw is the BUILD's to say (selfreset.pin_all_but_cells, from the emitted program), and a fresh pool
+    is made for every assembly (a pool lays out one). The pools come back in the metrics' `table_pools`."""
+    lzma_preset: int = FJM_LZMA_PRESET
+    pool: Optional[Mapping[str, Any]] = None
+
+
+def _table_pool(assembly: Assembly, pin_cells):
+    """a fresh BlockPool for one assembly of a blocked build, or None"""
+    if assembly.pool is None:
+        return None
+    from flipjump.assembler.inner_classes.table_pool import BlockPool
+    assert "pin_all_but" not in assembly.pool, "Assembly.pool names no pin_all_but: the build derives it"
+    return BlockPool(W, **dict(assembly.pool), pin_all_but=pin_cells)
 
 
 def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=None,
-                        tier: str = "game", ablate: frozenset = frozenset()) -> dict:
+                        tier: str = "game", ablate: frozenset = frozenset(),
+                        assembly: Assembly = Assembly()) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
@@ -558,18 +602,47 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
     parts = emit_wall_renderer(wad, mapname, cfg, sprite_wad=spr, tier=tier, ablate=ablate,
                                return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
+    # M8 F1.5 (docs/f1-runtime-ids.md): a wide-list map's defines (PTR_WIDE_BITS = 12: the dual decoder table its list
+    # macros read through) -- passed to EVERY assembly of the program; None on an 8-bit map, whose calls are unchanged
+    _defines = cfg.fj_defines()
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
     # dispatch tables, per-seg constant blocks, the BSP walk, the baked banks) no longer share a
     # file with the ~50-line program. ⚠ Order is load-bearing -- see write_program_files.
     prog = write_program_files(parts, gen, mapname)
     includes = (_RENDERER_INCLUDES + _LINES_INCLUDES
                 + (_STANDALONE_INCLUDES if standalone else [])   # M5: kb.poll
-                + (_SIM_INCLUDES if player_sim else []))   # B0: sim.fj LAST (R54)
+                + (_SIM_INCLUDES if player_sim else [])    # B0: sim.fj LAST (R54)
+                + (_SIM_WIDE_INCLUDES if player_sim and cfg.LIST_WIDE else []))   # M8 F1.5: the wide twins
     paths = [consts] + [_SRC_FJ / f for f in includes] + prog
 
     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
+    # the byte arrays' reachable cells (sshead's): the reset's, and a blocked build's pin_all_but
+    nss = len(bake_bsp(wad, mapname).subsectors) if (self_reset or assembly.pool is not None) else None
     t = time.perf_counter()
     reset_info = None
+    pools, pin_cells = [], []                  # a blocked build's pool per assembly, and the cells it left unpinned
+    pooled_labels = {}                         # ...and the labels of its last assembly
+
+    def pool_for(files):
+        """a blocked build's pool for ONE assembly of `files`: pin every word but the cells the program reads raw"""
+        if assembly.pool is None:
+            return None
+        from doomfj import selfreset as _sr
+        declared = _sr.declared_names(files, set(_sr.BYTE_ARRAY_NAMES) | set(_sr.POINTER_READ_CELLS))
+        pin_cells.append(_sr.pin_all_but_cells(declared, cfg.VIEW_W, nss, pid_bytes=cfg.PID_BYTES,
+                                               ss_ratio=cfg.SSHEAD_RATIO))
+        pools.append(_table_pool(assembly, pin_cells[-1]))
+        return pools[-1]
+
+    def check_pool(labels):
+        """after a blocked assembly: the cells it named agree with the labels it got (byte_arrays' geometry check)"""
+        if pools:
+            from doomfj import selfreset as _sr
+            _sr.check_pin_all_but(pin_cells[-1], labels, cfg.VIEW_W, nss, pid_bytes=cfg.PID_BYTES,
+                                  ss_ratio=cfg.SSHEAD_RATIO)
+            pooled_labels.clear()
+            pooled_labels.update(labels)
+
     if self_reset and tier in ONE_PASS_TIERS:
         # ONE PASS: the reset names its cells by LABEL (every restore-set label is a global since M1's hoist), the
         # registered cells are declared ZERO and set by the reset at BOOT and after every frame, so nothing needs a
@@ -578,7 +651,6 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         paths = paths + [_SRC_FJ / "m1_reset.fj"]
         _extra = _map_persist(wad, mapname, standalone and moving_things) + automap_persist(cfg, menu)   # M8: amap
         _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things, extra=_extra)
-        nss = len(bake_bsp(wad, mapname).subsectors)
         # M8 F1.2: the map's own state cells (mc_don) are registered too -- the restore sets were recorded on E1M1,
         # which has none; registered and persisted, the reset leaves them to NEW GAME
         names = selfreset.registered_reset_names(restore_set, cfg, standalone, mapname) | set(_extra)
@@ -586,8 +658,9 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
             gen, prog, names, cfg.VIEW_W, nss, mapname, persist=_persist, pid_bytes=cfg.PID_BYTES,
             ss_ratio=cfg.SSHEAD_RATIO)
         paths = paths + [part]
-        labels = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
-                                          **standalone_run_header(standalone))
+        labels = selfreset.capture_labels(paths, out, lzma_preset=assembly.lzma_preset, defines=_defines,
+                                          table_pool=pool_for(paths), **standalone_run_header(standalone))
+        check_pool(labels)
         _misaligned = sprbank_misalignment(labels)
         assert _misaligned is None, "build REFUSED: " + str(_misaligned)
         _straddle = hot_window_violation(labels)
@@ -604,6 +677,9 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         # the same address. That is ASSERTED below, not assumed: a reset writing shifted addresses
         # does not produce a wrong pixel, it produces a different program.
         assert restore_set, "self_reset=True requires restore_set (see docs/handoff-m1-reset.md)"
+        # a blocked build's pinned words hold base + value, so pass 1's pristine words would need their bases stripped
+        # before emit_reset_part reads them; no tier is two-pass any more (test_build_more), so it is refused instead
+        assert assembly.pool is None, "the two-pass reset is not built with a table pool (no tier is two-pass)"
         from doomfj import selfreset
         from doomfj.fastrun import FjmRunner, _fjcore
         # ⚠ m1_reset.fj goes LAST, AFTER the emitted parts -- not into `includes`. A macro-expansion
@@ -618,8 +694,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         _persist = persist_labels(standalone=standalone, doors=doors, moving_things=moving_things,
                                   extra=_map_persist(wad, mapname, standalone and moving_things)
                                   + automap_persist(cfg, menu))                                       # M8: amap
-        labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
-                                                **standalone_run_header(standalone))
+        labels1 = selfreset.capture_labels(paths, out, lzma_preset=assembly.lzma_preset, defines=_defines,
+                                           **standalone_run_header(standalone))
         r1 = FjmRunner(out, flat_max_words=limit)
         core1 = _fjcore.Memory(r1.width, flat_max_words=r1.flat_max_words)
         for _s, _n in r1._segments:
@@ -629,7 +705,6 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         # view_w/nss are the SECOND source the byte-array cell counts are checked against; the
         # first is each array's label extent in this build's own table. Both must agree, so a
         # resolution or map change cannot silently nibble-clear a byte cell (see selfreset.py).
-        nss = len(bake_bsp(wad, mapname).subsectors)
         part, n_nib, n_byte = selfreset.emit_reset_part(
             gen, labels1, core1.get_word, restore_set, cfg.VIEW_W, nss, mapname,
             persist=_persist, pid_bytes=cfg.PID_BYTES, ss_ratio=cfg.SSHEAD_RATIO)
@@ -647,8 +722,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         pristine1 = _v1.get
         del core1, r1
         paths = paths + [part]
-        labels2 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST,
-                                                **standalone_run_header(standalone))
+        labels2 = selfreset.capture_labels(paths, out, lzma_preset=assembly.lzma_preset, defines=_defines,
+                                           **standalone_run_header(standalone))
         moved = selfreset.verify_labels_unchanged(labels1, labels2, restore_set)
         assert not moved, ("M1 self-reset REFUSED: %d baked addresses moved between passes, e.g. %s"
                            % (len(moved), sorted(moved)[:3]))
@@ -683,8 +758,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
                       "values_changed_in_set": 0, "baked_cells_value_checked": len(_v1),
                       "view_w": cfg.VIEW_W, "subsectors": nss}
     else:
-        fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
-                    lzma_fast=FJM_LZMA_FAST)
+        check_pool(fj.assemble([p.resolve() for p in paths], out, memory_width=W, show_progress=False,
+                               lzma_preset=assembly.lzma_preset, defines=_defines, table_pool=pool_for(paths)))
     assemble_seconds = round(time.perf_counter() - t, 3)
     # STAMP THE DOOR GEOMETRY THIS BINARY FROZE, beside the binary. A gate that recomputes door
     # stops from doors.DEFAULT_QUANT compares against whatever that constant says TODAY, which need
@@ -694,7 +769,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         _write_door_stamp(out, wad.sectors(mapname), wad.linedefs(mapname), wad.sidedefs(mapname))
     except Exception as _e:                      # a stamp must never fail a build
         print("  (door stamp not written: %s)" % _e, flush=True)
-    term = fj.run(out, io_device=FixedIO(b"q\n"), print_time=False, print_termination=False,
+    term = fj.run(out, io_device=FixedIO(b"q\n"), show_progress=False, print_termination=False,
                   flat_max_words=limit)                    # 'q' is not a digit -> input parser -> bad: -> halt
     span = _span_words(out)
     metrics = {
@@ -736,99 +811,17 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
                      "menu": menu},
         "self_reset": reset_info,
     }
+    if pools:
+        # the blocked build's pools, one per assembly (flipjump's BlockPool: what each did -- its final pinned
+        # words, its table sites, its census), the cells the last left unpinned, and the labels flipjump's
+        # assemble returned for it (name -> bit address; the label table build_labeled.py writes). The pools and the
+        # labels are objects, not JSON -- a caller that dumps the metrics pops them (build_blocked.py does)
+        metrics["table_pools"] = pools
+        metrics["pin_all_but"] = pin_cells[-1]
+        metrics["labels"] = pooled_labels
     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
     assert span < limit, f"R4: span {span} >= flat limit {limit}"
     return metrics
-
-
-def build_unroll_frame(wad_path, texname, *, cfg=None, light, width=None, count=None, step, frac0=0,
-                       downscale=None, lights=None, out_fjm, generated_dir, run=True):
-    """M11c (F5 / D2b — the D2 bake-off): assemble (+ optionally run) the FULL-UNROLL renderer —
-    `rep(width, x) frame.column ... rep(count, row) frame.pixel ...` writing each pixel DIRECTLY into its
-    hex.vec2 framebuffer cell (no deposit, §2.1). With `run=True` it also presents over the 0x06 register
-    device and captures the frame headless (pixel_indices + per-frame sha256 + op_counter/per_pixel_ops).
-
-    `run=False` assembles ONLY — returns assemble_seconds + fjm_bytes + span_words (the R-2/R-4 gate
-    numbers) without executing. Executing a full 160x100 frame is ~24M ops through the headless
-    interpreter (minutes); the gate needs only the ASSEMBLE time + span, and ops/frame is extrapolated
-    from a small run's per_pixel_ops — so the full-scale measurement uses run=False.
-
-    `width`/`count` default to the full viewport (VIEW_W x VIEW_H = the bake-off scale); pass smaller for
-    the fast committed golden. The synthetic frame splats texcol = x % texwidth across the screen at a
-    constant `light`/`step` (matching the oracle). The two per-pixel tables are over-aligned (§2.1)."""
-    cfg = cfg or Config()
-    factor = downscale if downscale is not None else cfg.TEXTURE_DOWNSCALE
-    width = width if width is not None else cfg.VIEW_W
-    count = count if count is not None else cfg.VIEW_H
-    wad = WadFile.from_path(wad_path)
-    defs = {d.name: d for d in wad.texture_defs()}
-    texheight = defs[texname].height // factor
-    texwidth = defs[texname].width // factor
-    lights = lights if lights is not None else max(32, light + 1)
-    gen = Path(generated_dir)
-    gen.mkdir(parents=True, exist_ok=True)
-
-    consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
-    # §2.1: over-align both very-hot per-pixel dispatch tables (texture + colormap).
-    tex = compile_texture("tex", wad, texname, over_align=True, downscale=factor)
-    cm = compile_colormap("cm", wad, lights=lights, over_align=True)
-    palette = compile_palette("palette", wad)
-
-    stride = cfg.W
-    render = []
-    for x in range(width):
-        render.append(f"frame.setup_col {(x % texwidth) * texheight}, {light}, {step}, {frac0}")
-        for row in range(count):
-            render.append(f"frame.pixel framebuffer + {2 * (row * stride + x)}*dw")
-    main = "\n".join([
-        "stl.startup_and_init_all",
-        "present.init_screen",
-        *render,
-        "present.set_palette palette",
-        "present.update_screen_reg framebuffer",
-        "stl.loop",
-        "pixel_leaf:",                                # the shared per-pixel leaf (emitted ONCE)
-        "frame.leaf_body",
-        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",   # register form: 2 ops/pixel (low, high nibble)
-        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
-        "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
-        f"heightmask: hex.vec 3, {texheight - 1}",
-        "pixel_ret: ;0",                             # the stl.fcall return-register (one op)
-        tex, cm, palette,
-    ])
-    (gen / "main.fj").write_text(main, encoding="utf-8")
-
-    paths = [consts, Path("src/fj/present.fj"), Path("src/fj/frame_render.fj"), gen / "main.fj"]
-    out = Path(out_fjm)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    t = time.perf_counter()
-    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
-                lzma_fast=FJM_LZMA_FAST)
-    assemble_seconds = round(time.perf_counter() - t, 3)
-
-    pixels = width * count
-    m = {
-        "span_words": _span_words(out),
-        "assemble_seconds": assemble_seconds,
-        "fjm_bytes": out.stat().st_size,
-        "width": width,
-        "count": count,
-        "pixels": pixels,
-    }
-    if not run:
-        return m
-
-    from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
-    screen = InMemoryScreen()
-    term = fj.run(out, io_device=screen, print_time=False, print_termination=False)
-    m.update({
-        "storage_mode": str(term.storage_mode),
-        "op_counter": term.op_counter,
-        "per_pixel_ops": term.op_counter // pixels if pixels else 0,
-        "pixel_indices": screen.pixel_indices,
-        "frame_hash": screen.frame_hashes[-1][1] if screen.frame_hashes else None,
-    })
-    return m
 
 
 if __name__ == "__main__":

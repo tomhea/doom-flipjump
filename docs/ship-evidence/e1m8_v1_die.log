@@ -1,0 +1,90 @@
+DIE GATE -- 17 scenarios (MONSTER_MODE final, PLAYER_MODE final) on E1M8, roles from scenarios\e1m8\gates.json, build/wave3/doom_e1m8.fjm
+
+D1 killed by a zombieman; every key held after: nothing moves -- N/A: no candidate placed from E1M8's things
+
+D2 killed in a door as it closes: it does not go back up -- N/A: no plain door of E1M8 verifies S13 (tried [])
+
+D3d dead before a door, use: no press, the restart -- N/A: no plain door of E1M8 verifies S13 (tried [])
+
+D3x dead in the exit's box, use: no level end, the restart -- N/A: E1M8 has 0 switch exits (special [11, 51]); its exit lines [52] are C9's (no level end in the model)
+
+D4 the restart: the level start, a taken pickup and a gone barrel back (E1M8: no baked barrel) -- N/A: placed, but control restart_pickup never parts there (gate_targets sweep)
+
+D4m the restart takes a lying drop back -- N/A: no candidate placed from E1M8's things
+
+D4s NEW GAME medium, dead, use: the restart is medium's -- 8 frames
+  from (2464, 360) angle c0000000, late setups at frames [4]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 2, restarts 1, restart_requests 1, knock_moves 5, sink_max 2, sink_frames 2
+  frame 0 pokes: []
+  frame 4 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL restart_skill    the oracle without the rule parts at frame 6 (cells)
+  binary: 8 frames, 67,397,898 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D5 NEW GAME after death: easy's level start -- 10 frames
+  from (2464, 360) angle c0000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 6, knock_moves 6, sink_max 2, sink_frames 6
+  frame 0 pokes: []
+  frame 0 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL ng_skill         the oracle without the rule parts at frame 6 (cells)
+  binary: 10 frames, 80,556,955 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D6 death by nukage: that tic still runs the keys and the move -- 7 frames
+  from (1064, 264) angle 40000000: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 7, nukage 1, knock_moves 7, sink_max 6, sink_frames 6
+  frame 0 pokes: ['p_hp']
+  CONTROL latch            the oracle without the rule parts at frame 0 (cells)
+  binary: 7 frames, 71,063,572 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D7 death by a barrel's blast -- N/A: no candidate placed from E1M8's things
+
+D8 death during the gold flash: the bonus frozen, gold after the red -- 12 frames
+  from (2464, 360) angle c0000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 12, bonus_frames 9, knock_moves 12, sink_max 12, sink_frames 12
+  frame 0 pokes: []
+  frame 0 pokes: ['p_bc', 'p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL dead_bonus_fade  the oracle without the rule parts at frame 0 (cells)
+  binary: 12 frames, 160,894,862 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D9 the dying view sinks: p_vd 1..35 then 35, the picture exact at every step -- 40 frames
+  from (2464, 360) angle c0000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 40, knock_moves 40, sink_max 35, sink_frames 40
+  frame 0 pokes: []
+  frame 0 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL no_sink          the oracle without the rule parts at frame 0 (cells)
+  CONTROL sink_fast        the oracle without the rule parts at frame 0 (cells)
+  CONTROL sink_floor       the oracle without the rule parts at frame 34 (cells)
+  CONTROL band_eye         the oracle without the rule parts at frame 0 (picture)
+  binary: 40 frames, 527,530,326 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D10l die in a lift's leaf: the sink exact there -- N/A: E1M8 has no lift
+
+D10s die beside a 24-unit step: the sink exact there -- 38 frames
+  from (960, 420) angle c0000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 38, knock_moves 38, sink_max 35, sink_frames 38
+  frame 0 pokes: []
+  frame 0 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  binary: 38 frames, 451,667,420 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D10c die under a low ceiling: the sink exact there -- 38 frames
+  from (360, -832) angle 40000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 38, knock_moves 38, sink_max 35, sink_frames 38
+  frame 0 pokes: []
+  frame 0 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  binary: 38 frames, 338,607,113 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+D11 killed by a hitscan burst at a ledge: the corpse slides while sinking, onto another floor -- N/A: no candidate placed from E1M8's things
+
+D4' the restart after the sink: p_vd 0 at the level start -- 42 frames
+  from (2464, 360) angle c0000000, late setups at frames [0]: the oracle does what the scenario claims: yes
+  counters: player_hurt 1, deaths 1, dead_frames 39, restarts 1, restart_requests 1, knock_moves 42, sink_max 35, sink_frames 39
+  frame 0 pokes: []
+  frame 0 pokes: ['p_dc', 'p_dead', 'p_hp', 'rng_pl', 'wp_st', 'wp_sy']
+  CONTROL sink_restart     the oracle without the rule parts at frame 39 (cells)
+  binary: 42 frames, 554,864,543 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+N/A on E1M8: 9 -- D1 D2 D3d D3x D4 D4m D7 D10l D11; counters no longer owed: ['barrel_hurt', 'drop_frames']
+
+TOTALS: mon_hits 0, mon_misses 0, mon_melee 0, proj_spawns 0, proj_impacts 0, proj_walls 0, fizzles 0, fx_spawns 0, fx_skipped 0, player_hurt 8, armor_out 0, deaths 8, dead_frames 182, max_in_flight 0, explosion_frames 0, shots_hit 0, pickups 0, pickup_items 0, pickup_drops 0, bonus_frames 9, berserk_frames 0, gibs 0, drop_frames 0, bexp_frames 0, barrel_blasts 0, puffs 0, blast_kills 0, barrel_hurt 0, player_blocked 0, nukage 1, restarts 2, restart_requests 2, level_done 0, barrel_hits 0, knock_frames 0, mon_knock_frames 0, frac_frames 0, knock_moves 188, knock_walls 0, infight 0, sink_max 162, sink_frames 181, corpse_slides 0, dead_slides 0, knock_refused 0, mon_knock_refused 0, mon_attacks 0, mkills 0, rockets_fired 0, rocket_fizzles 0, rocket_flight_frames 0, rocket_mon_hits 0, rocket_bar_hits 0, rocket_stops 0, rocket_blasts 0, blast_mon 0, blast_bar 0, blast_things_max 0, rocket_self 0, cgun_shots 0, cgun_acc 0, cgun_held 0, cgun_hits 0, cgun_flash1 0, cgun_flash2 0
+every event counter nonzero: yes; deaths 8
+
+DIE GATE PASS (72 s)

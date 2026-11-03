@@ -23,7 +23,7 @@ from doomfj.wall_renderer import _lines_sprite_bank, _lines_sprite_light
 def thpos_vec(name, positions):
     """The runtime position array: a hex.vec of 16 nibbles per thing, which is what the
     shl-by-one-nibble + ptr_index + read_hex accessor addresses (a packed table is one BYTE
-    per slot and read_table_packed cannot address this)."""
+    per slot and read_entry_packed cannot address this)."""
     out = [name + ":"]
     for x, y in positions:
         out.append("    hex.vec 16, %d" % (((y & 0xFFFFFFFF) << 32) | (x & 0xFFFFFFFF)))
@@ -71,7 +71,7 @@ prog = "\n".join([
     f"sshead: hex.vec {2*NSS}", f"thnext: hex.vec {2*NT}",
     *point_location_decls(),
     generate_point_location_fj(cmap),
-    # M14-perf: thing_load reads the HOT half only (17 bytes), and read_table_packed takes its
+    # M14-perf: thing_load reads the HOT half only (17 bytes), and read_entry_packed takes its
     # STRIDE from that count -- a 22-byte table here would index every row but the first wrongly.
     generate_packed_lut_fj("throw", [pack(hot_row(r), THING_ROW_HOT_BYTES) for r in rows],
                            THING_ROW_HOT_LEN),
@@ -80,7 +80,7 @@ prog = "\n".join([
 ]) + "\n"
 tmp = Path(tempfile.mkdtemp()); src = tmp/"t.fj"; src.write_text(prog, encoding="utf-8")
 out = tmp/"t.fjm"
-fj.assemble([(ROOT/"src/fj/fixed_point.fj").resolve(), (ROOT/"src/fj/sim.fj").resolve(),
+fj.assemble([(ROOT/"src/fj/sim.fj").resolve(),
              src.resolve()], out, memory_width=W, print_time=False)
 print("assembled", f"{out.stat().st_size:,}", flush=True)
 import struct

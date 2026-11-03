@@ -14,7 +14,6 @@ from doomfj.lut_generator import (
 from doomfj.reference_model import COLORMAP_LIGHTS, ReferenceModel
 from doomfj.config import Config
 
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")
 PROJECTION_FJ = Path("src/fj/projection.fj")
 FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")   # projection.fj uses its frame.*_chain macros
 PLANE_BANDS_FJ = Path("src/fj/plane_bands.fj")
@@ -35,7 +34,7 @@ def _run(tmp_path, name, body, data, expected: bytes):
     p.write_text(prog, encoding="utf-8")
     consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")  # projection.fj's pad constants
     ok = fj.assemble_and_run_test_output(
-        [consts.resolve(), FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PLANE_BANDS_FJ.resolve(), p.resolve()],
+        [consts.resolve(), PROJECTION_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PLANE_BANDS_FJ.resolve(), p.resolve()],
         b"", expected, memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, f"{name}: fj output != host mirror"
 

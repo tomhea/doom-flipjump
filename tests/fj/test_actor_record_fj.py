@@ -8,7 +8,7 @@ MONSTER_BUDGET as the game tier's monster soft count; every other tier DEG_SOFT_
       a thing with a seen flag goes to the seen probe, one without returns;
   (3) an ACTOR (sp_mon != 0) is never B-gated: `ballow` 1 at any bucket height (a scenery thing keeps hb >= sprbminh).
 
-This harness TRANSPLANTS the macro's lines from after `frame.sub8_chain trb_y0, trb_bucket_h` to `bslot_done:`
+This harness TRANSPLANTS the macro's lines from after `hex.sub 8, trb_y0, trb_bucket_h` to `bslot_done:`
 verbatim into a harness macro, binds them as the emitter binds the game tier and as it binds every other tier, and
 runs a grid of (ytop_b, hb, sp_mon, seen) against the oracle's two lines (`_oracle`). R9: a game-tier binding with the
 old soft count (a monster dropped by the B-gate again), the exemption line deleted, and both off-view bounds moved by
@@ -47,7 +47,7 @@ def _section(src):
     body = src[a:src.index("\n    def ", a + 1)]
     params = body[len("    def thing_record_body "):body.index(" \\\n")].split(", ")
     lines = body.split("\n")
-    s0 = next(n for n, ln in enumerate(lines) if "frame.sub8_chain trb_y0, trb_bucket_h" in ln) + 1
+    s0 = next(n for n, ln in enumerate(lines) if "hex.sub 8, trb_y0, trb_bucket_h" in ln) + 1
     s1 = lines.index("      bslot_done:") + 1
     # P11: minus frame.ledge_box (the box the ledge test reads later -- tests/fj/test_sprite_bank_fj.py runs it; this
     # harness assembles the section alone, without frame_render.fj)

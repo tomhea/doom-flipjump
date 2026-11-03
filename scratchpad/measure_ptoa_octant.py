@@ -10,7 +10,6 @@ from doomfj.harness import W
 from doomfj.lut_generator import generate_slopediv_recip_lut_fj, generate_tantoangle_lut_fj
 from doomfj.reference_model import SLOPERANGE
 PROJ = ROOT / "scratchpad/projection_noslopediv.fj"
-FIXED = ROOT / "src/fj/fixed_point.fj"
 D = json.load(open(ROOT / "scratchpad/real_ptoa_pts.json"))
 def measure(k):
     pts = D["pts"][:k]
@@ -21,7 +20,7 @@ def measure(k):
     data += [generate_slopediv_recip_lut_fj("slopediv_recip"), generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)]
     prog = "stl.startup_and_init_all\n"+"\n".join(body)+"\nstl.loop\n"+"\n".join(data)+"\n"
     tmp = Path(tempfile.mkdtemp()); p = tmp/"m.fj"; p.write_text(prog, encoding="utf-8")
-    fj.assemble([FIXED.resolve(), PROJ.resolve(), p.resolve()], tmp/"m.fjm", memory_width=W, print_time=False)
+    fj.assemble([PROJ.resolve(), p.resolve()], tmp/"m.fjm", memory_width=W, print_time=False)
     return fj.run(tmp/"m.fjm", print_time=False, print_termination=False).op_counter
 K=20; t0=time.perf_counter()
 o1=measure(K); o2=measure(2*K); per=(o2-o1)/K

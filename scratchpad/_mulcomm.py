@@ -1,4 +1,4 @@
-"""IS `hex.fixed_mul_lo 8, 4` ACTUALLY COMMUTATIVE? A direct test, seconds not minutes.
+"""IS `hex.fixed_mul_low 8, 4` ACTUALLY COMMUTATIVE? A direct test, seconds not minutes.
 
 The M14-perf row-rule swaps assumed it is -- the macro sign-extends BOTH operands to n+f and the
 truncated schoolbook rows compute (a*b) mod 16^(n+f), which is symmetric on paper. The gate says
@@ -7,7 +7,7 @@ otherwise (1766 / 17 / 8 px differ), so the assumption gets tested rather than r
 Feeds real operand pairs of the shape the swapped call sites use:
   world_h = ceil_h<<16 - viewz   (integer<<16, low 4 nibbles zero, often NEGATIVE)
   scale                          (a dense positive 16.16)
-and prints fixed_mul_lo(a,b) vs fixed_mul_lo(b,a) for each.
+and prints fixed_mul_low(a,b) vs fixed_mul_low(b,a) for each.
 """
 import struct
 import sys
@@ -37,8 +37,8 @@ PAIRS = [
 lines = ["stl.startup_and_init_all", "hex.input 1, wmagic"]
 for i, (a, b) in enumerate(PAIRS):
     lines += [f"hex.set 8, ca{i}, {a}", f"hex.set 8, cb{i}, {b}",
-              f"hex.fixed_mul_lo 8, 4, r{i}, ca{i}, cb{i}",     # as written today
-              f"hex.fixed_mul_lo 8, 4, s{i}, cb{i}, ca{i}",     # operands swapped
+              f"hex.fixed_mul_low 8, 4, r{i}, ca{i}, cb{i}",     # as written today
+              f"hex.fixed_mul_low 8, 4, s{i}, cb{i}, ca{i}",     # operands swapped
               f"hex.print_as_digit 8, r{i}, 0", "stl.output 10",
               f"hex.print_as_digit 8, s{i}, 0", "stl.output 10"]
 lines.append("stl.loop")
@@ -50,7 +50,7 @@ tmp = Path(tempfile.mkdtemp())
 src = tmp / "m.fj"
 src.write_text("\n".join(lines) + "\n", encoding="utf-8")
 out = tmp / "m.fjm"
-fj.assemble([(ROOT / "src/fj/fixed_point.fj").resolve(), src.resolve()], out,
+fj.assemble([src.resolve()], out,
             memory_width=W, print_time=False)
 io = FixedIO(bytes([0xD0]))
 fj.run(out, io_device=io, print_time=False, print_termination=False)

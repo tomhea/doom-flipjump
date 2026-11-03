@@ -127,8 +127,7 @@ def main():
     p = tmp / "pj1.fj"
     p.write_text(prog, encoding="utf-8")
     out = tmp / "pj1.fjm"
-    fj.assemble([(ROOT / "src/fj/fixed_point.fj").resolve(),
-                 (ROOT / "src/fj/projection.fj").resolve(), p.resolve()],
+    fj.assemble([(ROOT / "src/fj/projection.fj").resolve(), p.resolve()],
                 out, memory_width=W, warning_as_errors=True, print_time=False)
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
     io = FixedIO(b"")

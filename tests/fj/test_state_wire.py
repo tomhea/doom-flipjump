@@ -26,13 +26,13 @@ from flipjump.interpreter.io_devices.FixedIO import FixedIO
 
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.lut_generator import generate_emit_dispatch_table_fj, generate_trig_idioms_fj
+from doomfj.lut_generator import generate_trig_idioms_fj
 from doomfj.reference_model import ReferenceModel, SimState
 from doomfj.wall_renderer import _state_wire_lines
 from doomfj.wireformat import (MAGIC, STATE_BYTES, STATE_CMD, decode_state, encode_feed,
                                keys_dict)
 
-SRC = [Path("src/fj") / f for f in ("fixed_point.fj", "present.fj", "stream_render.fj")]
+SRC = [Path("src/fj") / f for f in ("stream_render.fj",)]
 CFG = Config()
 RM = ReferenceModel(CFG)
 
@@ -52,7 +52,6 @@ def _program(sim: bool) -> str:
         "vx: hex.vec 10", "vy: hex.vec 10",
         *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3", "pmvc: hex.vec 8",
            "pmvs: hex.vec 8", "pmvdx: hex.vec 8", "pmvdy: hex.vec 8"] if sim else []),
-        generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
         # the sim's trig comes from the SAME generator the renderer bakes (R6) -- a private sine
         # table here would prove the fj matches itself, not that it matches the oracle
         *([generate_trig_idioms_fj("finesine", CFG.TRIG_N, 16)] if sim else []),
@@ -63,7 +62,7 @@ def _assemble(tmp_path, sim: bool) -> Path:
     src = tmp_path / f"wire{'_sim' if sim else ''}.fj"
     src.write_text(_program(sim), encoding="utf-8")
     out = tmp_path / f"wire{'_sim' if sim else ''}.fjm"
-    consts = CFG.emit_fj_consts(tmp_path / "fj_consts.fj")     # present.fj reads W/H/BPP/NCOLORS
+    consts = CFG.emit_fj_consts(tmp_path / "fj_consts.fj")     # the screen calls read W/H
     fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve()],
                 out, memory_width=W, print_time=False)
     return out

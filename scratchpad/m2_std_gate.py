@@ -60,6 +60,7 @@ if __name__ == "__main__":          # M8 (CR of #146): `--map E1Mn` before probe
     take_map_arg(keep=True)         # keep: this gate's own parser takes --map too
 
 from doomfj.config import Config                                          # noqa: E402
+from doomfj.keyboard import KC_LCTRL, KC_LEFT, KC_RIGHT                    # noqa: E402
 from doomfj.doorcode import door_line_ids                                 # noqa: E402
 from doomfj.doors import (DEFAULT_QUANT, DoorPhase, compare_stamp,       # noqa: E402
                           door_states, heights_for_states, in_use_box_fixed,
@@ -87,8 +88,8 @@ from flipjump.utils.exceptions import IOReadOnEOF                              #
 ENTER, ESC = 0x0D, 0x1B
 # M7 P4.1 (the owner's key map): only the ARROWS turn now -- A / D strafe -- so the scripts' turns are the arrows', and
 # strafe, fire and the number keys have codes of their own (input.fj's table)
-K_FWD, K_BACK, K_LEFT, K_RIGHT, K_USE = 0x77, 0x73, 0x82, 0x83, 0x20
-K_SL, K_SR, K_FIRE = 0x61, 0x64, 0x85
+K_FWD, K_BACK, K_LEFT, K_RIGHT, K_USE = 0x77, 0x73, KC_LEFT, KC_RIGHT, 0x20
+K_SL, K_SR, K_FIRE = 0x61, 0x64, KC_LCTRL
 BINDING = {K_FWD: "forward", K_BACK: "back", K_LEFT: "turn_left",
            K_RIGHT: "turn_right", K_USE: "use", K_SL: "strafe_left", K_SR: "strafe_right", K_FIRE: "fire",
            0x31: "w1", 0x32: "w2", 0x33: "w3", 0x34: "w4", 0x35: "w5"}      # P9: '5', the launcher
@@ -136,13 +137,14 @@ class Recording(InMemoryScreen):
     def __init__(self, **kw):
         super().__init__(**kw)
         self.frames = []
-        self.palettes = []                  # M7 P5: the palette each present showed (probe.ProbeScreen's record)
+        self.shown_palettes = []            # M7 P5: the palette each present showed (probe.ProbeScreen's record;
+                                            # not `palettes`: the device's own slots)
 
     def _present(self):
         super()._present()
         self.frames.append(bytes(self.pixel_indices))
         import hashlib
-        self.palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb)).hexdigest()[:12])
+        self.shown_palettes.append(hashlib.sha1(bytes(b for rgb in self.palette for b in rgb)).hexdigest()[:12])
 
 
 class Stopper(KeyboardIO):
@@ -226,6 +228,43 @@ def walkable_cells(rm, scene, sx, sy, goal_pred=None, cell=NAV_CELL, cap=400000,
             seen.add(nc)
             q.append((nc, path + [nc]))
     return None, seen
+
+
+APPROACH_DIST = 56      # `approach`: this far short of the door's first line, on the side the walk comes from
+
+
+def door_approach(segs, sx, sy, depth=88, far=False):
+    """`(approach, beyond)` for a door whose first line is `segs[0]`: `approach` APPROACH_DIST short of the line's
+    midpoint, `beyond` `depth` past it. The walk's side is the one the spawn `(sx, sy)` lies on by straight line;
+    `far=True` takes the other side (`choose_approach`)."""
+    (ax, ay), (bx, by) = segs[0]
+    mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
+    nx, ny = -(by - ay), (bx - ax)                   # the line's normal
+    nlen = (nx * nx + ny * ny) ** 0.5 or 1.0
+    nx, ny = nx / nlen, ny / nlen
+    sgn = -1.0 if (sx - mx) * nx + (sy - my) * ny > 0 else 1.0
+    if far:
+        sgn = -sgn
+    return ((mx - sgn * nx * APPROACH_DIST, my - sgn * ny * APPROACH_DIST),   # the walk's side of the opening
+            (mx + sgn * nx * depth, my + sgn * ny * depth))                   # through it, and out the far side
+
+
+# M8 wave 3 (E1M6: "no walkable path to the approach" for every candidate at every skill, both passes): the
+# STRAIGHT-LINE side of a door is not always the side the walk reaches -- a walk that leaves the spawn the long way
+# round can arrive at a door from the side facing AWAY from the spawn, and the spawn-side `approach` then lies where
+# no walk enters. A door whose spawn-side approach no walk reaches is therefore tried from its OTHER side. The spawn
+# side is still tried FIRST and kept whenever it is reached, so a candidate the old rule accepted (or rejected for
+# any reason but "no walkable path to the approach") is judged exactly as before.
+def choose_approach(segs, sx, sy, reach):
+    """-> (approach, beyond, far, path): the spawn side if `reach(approach)` finds a path, else the other side if it
+    does; when neither does, the spawn side with `path` None."""
+    for far in (False, True):
+        approach, beyond = door_approach(segs, sx, sy, far=far)
+        path = reach(approach)
+        if path:
+            return approach, beyond, far, path
+    approach, beyond = door_approach(segs, sx, sy)
+    return approach, beyond, False, None
 
 
 def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500, step=None,
@@ -500,7 +539,8 @@ def main():
     from doomfj.config import GAME_CFG
     from doomfj.hud import GameScreen
     rm = ReferenceModel(GAME_CFG)
-    screen = GameScreen(rm, mw, art, mw.sectors(args.map))
+    from doomfj.wall_renderer import plasma_game_on
+    screen = GameScreen(rm, mw, art, mw.sectors(args.map), plasma=plasma_game_on(mw, args.map))   # M8 C6: the rifle
     cmap = bake_bsp(mw, args.map)
     secs, lds, sds = mw.sectors(args.map), mw.linedefs(args.map), mw.sidedefs(args.map)
     # ── CONTROL 5, BEFORE 4.5 BILLION OPS ───────────────────────────────────────────────────
@@ -741,22 +781,16 @@ def main():
     from doomfj.doors import SPEED as _DSPEED
     spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
 
-    def geometry(target):
+    def geometry(target, depth=88, far=False):
         """THE DOORWAY, not the use box. The box is inflated by USE_RANGE and its south edge is 90 units
         clear of the opening, so "reach the box" put the player alongside the door and the walk-through
         leg then went AROUND it. Both legs aim at the gap between the door's own two line segments:
-        `approach` a little short of it on the player's side, `beyond` a little past it on the other.
-        -> (door_segs, approach, beyond)"""
+        `approach` a little short of it on the player's side, `beyond` a little past it on the other
+        (`door_approach`; `far`: the side away from the spawn, which `choose_approach` takes when the
+        spawn's side is not reached). -> (door_segs, approach, beyond)"""
         segs = [(cmap.vertexes[lds[li].v1], cmap.vertexes[lds[li].v2])
                 for li in sorted(lines_of[target])]
-        (ax, ay), (bx, by) = segs[0]
-        mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
-        nx, ny = -(by - ay), (bx - ax)                   # the line's normal
-        nlen = (nx * nx + ny * ny) ** 0.5 or 1.0
-        nx, ny = nx / nlen, ny / nlen
-        sgn = -1.0 if (spx - mx) * nx + (spy - my) * ny > 0 else 1.0
-        return (segs, (mx - sgn * nx * 56, my - sgn * ny * 56),   # the player's side of the opening
-                (mx + sgn * nx * 88, my + sgn * ny * 88))         # through it, and out the far side
+        return (segs,) + door_approach(segs, spx, spy, depth, far)
 
     # ── THE DOOR AND THE SKILL: the first whose ground is clear, tried in order ──────────────────────
     # ⚠ NEAREST REACHABLE, not nearest. Straight-line nearest picks door 48, whose use box sits
@@ -774,6 +808,7 @@ def main():
     # does not open, cross and keep the door open into NEW GAME, or in which the player dies, is skipped.
     CLEAR = 128
     PATH_CLEAR = 40
+    BEYOND_DEPTHS = (88, 72, 56, 40)     # `beyond`'s distance past the opening: 88 first, shallower when it is walled off
 
     def ground(skill):
         """`skill`'s level start in the model: (the static blocker test, the monsters' positions)"""
@@ -789,8 +824,10 @@ def main():
     def near(pts, mons, r):
         return [m for m in mons for p in pts if (m[0] - p[0]) ** 2 + (m[1] - p[1]) ** 2 <= r * r]
 
-    def attempt(skill, target, blocked, mons, strict=True):
-        """the whole walk planned in the mirror -> (route, through, door_segs, approach, beyond, why)"""
+    def attempt(skill, target, blocked, mons, strict=True, given=None):
+        """the whole walk planned in the mirror -> (route, through, door_segs, approach, beyond, why). `given`: (a
+        route to the door's use box, the map point it ends at) -- `bot_walk`'s, in place of the planned walk; the
+        press, the wait, the walk through and every check after them are the planned walk's"""
         door_segs, approach, beyond = geometry(target)
         x0, y0, x1, y1 = boxes[target]
         mid = ((door_segs[0][0][0] + door_segs[0][1][0]) / 2.0, (door_segs[0][0][1] + door_segs[0][1][1]) / 2.0)
@@ -804,35 +841,46 @@ def main():
             c, ws_ = made[-1].state, made[-1].mirror[0].world.ws
             return ("(the last attempt: %d frames, ended at %s, health %d, %d dead frames)"
                     % (c["n"], c["trk"][-1], ws_.p_health, c["dead"]))
-        if strict and (inbox or near((approach, mid, beyond), mons, CLEAR)):
-            return None, None, door_segs, approach, beyond, (
-                "a monster on its ground at this skill: %s" % sorted(set(inbox + near((approach, mid, beyond),
-                                                                                       mons, CLEAR))))
-        path, _ = walkable_cells(rm, walk_scene, spx, spy,
-                                 lambda wx, wy: (wx - approach[0]) ** 2 + (wy - approach[1]) ** 2 <= 40 ** 2,
-                                 blocked=blocked)
-        if not path:
-            return None, None, door_segs, approach, beyond, "no walkable path to the approach"
-        onpath = near(path, mons, PATH_CLEAR)
-        if strict and onpath:
-            return None, None, door_segs, approach, beyond, (
-                "a monster beside the walked path at this skill: %s" % sorted(set(onpath)))
-        # ⚠ arriving near the approach POINT is not the same as standing where use works: the first
-        # version ended 27 units from it and 15 units OUTSIDE the use box, so the press did nothing and
-        # the door never moved. The acceptance test is the box itself.
-        # ⚠ IN THE USE BOX IS NOT AT THE DOORWAY. Door 10's box is 256x160 units and wraps a corner,
-        # so "first frame inside the box" ended the walk at (720,449) -- in the box, but around a wall
-        # from the opening, which made the walk-through leg detour 84 waypoints to x=168 and back.
-        # Require BOTH: the box (where `use` actually works) and the threshold (where walking through
-        # is one short straight leg, which matters because the door is only passable for WAIT frames).
-        route = plan_walkable(rm, walk_scene, sp, approach, 40,
-                              accept=lambda st: in_use_box_fixed(boxes[target], st.x, st.y)
-                              and ((st.x >> 16) - approach[0]) ** 2
-                              + ((st.y >> 16) - approach[1]) ** 2 <= 72 ** 2,
-                              max_tics=600, blocked=blocked,
-                              fresh=lambda: made.append(mirror_stepper(skill, trig=trig)) or made[-1])
-        if not route:
-            return None, None, door_segs, approach, beyond, "the mirror walk never reached the threshold " + why_not()
+        if given is not None:                            # the bot's walk: through the door from where it stands
+            route, (ex, ey) = given
+            far = door_approach(door_segs, ex, ey)[0] != door_approach(door_segs, spx, spy)[0]
+            approach, beyond = door_approach(door_segs, spx, spy, far=far)
+        else:
+            if strict and (inbox or near((approach, mid, beyond), mons, CLEAR)):
+                return None, None, door_segs, approach, beyond, (
+                    "a monster on its ground at this skill: %s" % sorted(set(inbox + near((approach, mid, beyond),
+                                                                                           mons, CLEAR))))
+            def reach(pt):
+                return walkable_cells(rm, walk_scene, spx, spy,
+                                      lambda wx, wy: (wx - pt[0]) ** 2 + (wy - pt[1]) ** 2 <= 40 ** 2,
+                                      blocked=blocked)[0]
+            approach, beyond, far, path = choose_approach(door_segs, spx, spy, reach)
+            if not path:
+                return None, None, door_segs, approach, beyond, "no walkable path to the approach (either side)"
+            if far and strict and (inbox or near((approach, mid, beyond), mons, CLEAR)):
+                return None, None, door_segs, approach, beyond, (
+                    "(the far side) a monster on its ground at this skill: %s"
+                    % sorted(set(inbox + near((approach, mid, beyond), mons, CLEAR))))
+            onpath = near(path, mons, PATH_CLEAR)
+            if strict and onpath:
+                return None, None, door_segs, approach, beyond, (
+                    "a monster beside the walked path at this skill: %s" % sorted(set(onpath)))
+            # ⚠ arriving near the approach POINT is not the same as standing where use works: the first
+            # version ended 27 units from it and 15 units OUTSIDE the use box, so the press did nothing and
+            # the door never moved. The acceptance test is the box itself.
+            # ⚠ IN THE USE BOX IS NOT AT THE DOORWAY. Door 10's box is 256x160 units and wraps a corner,
+            # so "first frame inside the box" ended the walk at (720,449) -- in the box, but around a wall
+            # from the opening, which made the walk-through leg detour 84 waypoints to x=168 and back.
+            # Require BOTH: the box (where `use` actually works) and the threshold (where walking through
+            # is one short straight leg, which matters because the door is only passable for WAIT frames).
+            route = plan_walkable(rm, walk_scene, sp, approach, 40,
+                                  accept=lambda st: in_use_box_fixed(boxes[target], st.x, st.y)
+                                  and ((st.x >> 16) - approach[0]) ** 2
+                                  + ((st.y >> 16) - approach[1]) ** 2 <= 72 ** 2,
+                                  max_tics=600, blocked=blocked,
+                                  fresh=lambda: made.append(mirror_stepper(skill, trig=trig)) or made[-1])
+            if not route:
+                return None, None, door_segs, approach, beyond, "the mirror walk never reached the threshold " + why_not()
         wait = args.open_wait or _DSPEED * (nstates[target] - 1) + 2
         s1 = mirror_stepper(skill, prefix=route + press + [{} for _ in range(wait)])
         if s1.state["d"][0][target][0] != nstates[target] - 1:
@@ -840,9 +888,18 @@ def main():
                 "door %d is at state %d, not open, after %d frames of waiting"
                 % (target, s1.state["d"][0][target][0], wait))
         st1, pre = s1.state["st"], route + press + [{} for _ in range(wait)]
-        through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st1, beyond, 40,
-                                max_tics=600, blocked=blocked,
-                                fresh=lambda: made.append(mirror_stepper(skill, prefix=pre)) or made[-1])
+        # M8 wave 2 (E1M8: its only door, 95, opens on a 56-unit secret closet, sector 51 -- `beyond`, 88 units past
+        # the opening, lay in the room BEHIND the closet's back wall, and every through-walk failed "no mirror walk
+        # through the opening"): when the 88-unit point cannot be walked to, shallower points on the same normal are
+        # tried, nearest the far side's back first (E1M1 / E1M2 walk through at 88: their plans are the ones they were)
+        for depth in BEYOND_DEPTHS:
+            if depth != BEYOND_DEPTHS[0]:
+                beyond = geometry(target, depth, far)[2]
+            through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st1, beyond, 40,
+                                    max_tics=600, blocked=blocked,
+                                    fresh=lambda: made.append(mirror_stepper(skill, prefix=pre)) or made[-1])
+            if through:
+                break
         if not through:
             return route, None, door_segs, approach, beyond, "no mirror walk through the opening " + why_not()
         s2 = s1                                          # on from the door open: the through leg, stepped
@@ -861,11 +918,69 @@ def main():
         args.open_wait = wait
         return route, through, door_segs, approach, beyond, None
 
+    BOT_BUDGET = 3000        # world frames the bot plays looking for its first door
+
+    def bot_walk(cands):
+        """the playthrough bot's play (`playthrough_gate.play`'s, on the model alone: its route, skill and seed) up to
+        the first door of `cands` that ITS use press starts -> (skill, door, (route, the point the route ends at),
+        a note) or (None, why). The route is the gate's: frame 0 the NEW GAME frame (the bot's log starts a frame
+        later), the press not in it (the gate adds `press`)."""
+        for q in (ROOT / "scripts", ROOT / "scratchpad" / "gp", ROOT / "scratchpad" / "12m", ROOT / "scratchpad"):
+            if str(q) not in sys.path:
+                sys.path.insert(0, str(q))
+        import level_route as LR
+        import play as PLAY
+        import playthrough_gate as PT
+        from doomfj import gamedata as gd
+        name = PT.DEFAULT_SKILL.get(args.map, "easy")
+        seed = PT.DEFAULT_SEED.get((args.map, name), 0)
+        lroute = LR.plan(args.map, name)
+        if not lroute.get("ok") or not all(g.get("path") for g in lroute.get("legs", ())):
+            return None, "no level route at %s (%s)" % (name, lroute.get("why", "a leg has no path"))
+        pl = PT._model_player(PLAY, name)
+        pl.workers = 0
+        steer = PLAY.Steer(lroute, lv=LR.Level(args.map, lroute.get("wad"), name), log=lambda s: None, seed=seed)
+        steer.rt = pl.monster_rows()
+        dorder = list(pl.dsim.order)
+        hit, hp, pose, ignored, keys = {}, [None], {}, set(), {}
+
+        def on_frame(rec):                            # playthrough_gate.play's, to the steering's hurt_f
+            c, f = rec["cells"], rec["f"]
+            if f < pl.mf:
+                return None
+            if hp[0] is not None and c.get("p_hp") is not None and c["p_hp"] < hp[0]:
+                steer.hurt_f = f
+            hp[0] = c.get("p_hp")
+            pose[f], keys[f] = PLAY.pose_of(c)[:2], rec["keys"]       # rec's keys: frame f's (run_model's own log)
+            if c.get("p_dead"):
+                hit["dead"] = (f, pose[f])
+                return "stop"
+            for k, si in enumerate(dorder):
+                if si in cands and si not in ignored and c["dstate"][k] != 0:
+                    uses = [g for g in range(max(pl.mf + 1, f - 3), f + 1) if "use" in keys.get(g, ())]
+                    if not uses:                      # a monster opened it: not the player's press
+                        ignored.add(si)
+                        continue
+                    hit["door"] = (si, uses[-1])
+                    return "stop"
+            return None
+        pl.run_model([], pl.mf + 1 + BOT_BUDGET, decide=steer.decide, on_frame=on_frame)
+        if "door" not in hit:
+            return None, ("the bot died at frame %d at %s before opening a door" % hit["dead"] if "dead" in hit
+                          else "the bot opened no door of %s in %d frames" % (sorted(cands), BOT_BUDGET))
+        si, fu = hit["door"]
+        route = [{}] + [{n: True for n in keys[g]} for g in range(pl.mf + 1, fu)]
+        return (gd.SKILL_NAMES[name], si, (route, pose[fu - 1]),
+                "%s, seed %s: %d frames, the press on world frame %d" % (name, seed, len(route), fu - pl.mf))
+
     _cands_tried = []
     picked = None
     from doomfj.combat import KEY_DOOR_CARDS      # M8: the key doors by their line special (the candidates skip them)
+    # M8: DOOM's every key-door special (gp/gate_roles.KEY_LINE_COLOURS: the blazing 99, 133..137 too, which
+    # the model's KEY_DOOR_CARDS lacks until C3) -- never a key door the walk would press use at, shut
+    KEY_LINES = set(KEY_DOOR_CARDS) | {99, 133, 134, 135, 136, 137}
     _keyed = {sds[ld.back].sector for ld in lds
-              if ld.special in KEY_DOOR_CARDS and ld.back not in (-1, 0xFFFF) and ld.back < len(sds)}
+              if ld.special in KEY_LINES and ld.back not in (-1, 0xFFFF) and ld.back < len(sds)}
     # M8 (E1M2: every door the start reaches has a monster on its ground or beside its path, at every skill): when no
     # clear-ground candidate exists, the candidates are tried AGAIN with the monster pre-filter off -- the mirror steps
     # the world's real monsters, so a walk it accepts (opened, crossed, kept open, no death) is still exact; the
@@ -884,7 +999,10 @@ def main():
                                           for cx, cy in _cells))
             # M7 P2a.1: a door the player can open with no card, by use (the walk-over doors have no box). M8: and no
             # key door by its LINE special -- until M8 F2 the model calls E1M2's yellow and red doors plain (E1M1: none)
-            _cands = sorted((si for si in order if si in boxes and dp.kinds[si] in ("plain", "blaze")
+            # M8 wave 1 (E1M5: no plain door the start reaches): the open-stay kinds (D1 31 / 118) are walked too, after
+            # the plain ones -- they open, are crossed and stay open across the M1 reset as the subject asks
+            _kinds = ("plain", "blaze") if strict else ("plain", "blaze", "stay", "blazestay")
+            _cands = sorted((si for si in order if si in boxes and dp.kinds[si] in _kinds
                              and si not in _keyed and _walkable_door(si)),
                             key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - spx) ** 2
                             + ((boxes[si][1] + boxes[si][3]) // 2 - spy) ** 2)
@@ -900,6 +1018,29 @@ def main():
                 break
         if picked is not None:
             break
+    # M8 wave 3 (E1M6: 125 monsters at easy; the start's only doors a walk reaches, 393 and 180, lie 275 and 525 cells
+    # away through rooms of them -- every planned walk in both passes died on the way, at every skill): when no planned
+    # walk opens a door, the walk to the door is the PLAYTHROUGH BOT's (scripts/play.py's Steer -- it fights, takes
+    # the level's items and presses the doors on its path), played on the model alone at the playthrough's own skill
+    # and seed, up to the press that starts the first door it opens. The press, the wait, the walk through, NEW GAME
+    # and the replay are the planned walk's, and the mirror decides every one of them as before. The trigger is NOT
+    # laid over the bot's keys (it would change its play: the fist from frame 30): its own shots are the walk's.
+    walk_trig = trig
+    if picked is None:
+        _bot = bot_walk({si for si in order if si in boxes and dp.kinds[si] in ("plain", "blaze", "stay", "blazestay")
+                         and si not in _keyed})
+        if _bot[0] is None:
+            print("  no planned walk opens a door; the playthrough bot's walk: %s" % _bot[1])
+            _cands_tried.append(("bot", None, _bot[1]))
+        else:
+            bskill, target, given, note = _bot
+            blocked, mons = ground(bskill)
+            route, through, door_segs, approach, beyond, why = attempt(bskill, target, blocked, mons, False, given)
+            print("  no planned walk opens a door; the playthrough bot's walk (%s): skill %d, door %d -- %s"
+                  % (note, bskill, target, why or "the mirror walk opens, crosses and keeps it open, no death: TAKEN"))
+            _cands_tried.append((bskill, target, "(the bot's walk) " + str(why)))
+            if why is None:
+                picked, walk_trig = bskill, {}
     assert picked is not None, ("no (skill, door) whose ground is clear and whose mirror walk opens it: %s"
                                 % _cands_tried)
     walk_skill = picked
@@ -944,7 +1085,7 @@ def main():
     # the trigger is in the route already (laid during the plan); laid again here, idempotently, so the
     # script says what it carries whatever the planner did
     route = [dict(kd) for kd in route]
-    for f, names in trig.items():
+    for f, names in walk_trig.items():
         if f < len(route):
             for n in names:
                 route[f][n] = True
@@ -1032,11 +1173,43 @@ def main():
     mph, mviews = new_mirror(BOOT_SKILL)
     pals = []                                           # M7 P5: the palette each present showed
     deaths = 0                                          # M7 P7: the frames the mirror's player was dead
+    # debugging aid (M8 wave 1): M2_MAX_FRAMES cuts the run (and so the comparison) to its first N frames
+    frames = min(frames, int(__import__("os").environ.get("M2_MAX_FRAMES", frames)))
+    if __import__("os").environ.get("M2_TOLERATE_CRASH"):      # debugging aid: compare the frames before a crash
+        _P = GST.P
+
+        def _tolerant(self, frames, events=(), probe=None, pre_run=None):
+            import time as _t
+            from flipjump.interpreter.io_devices.KeyboardIO import ScriptedKeyEventSource
+            from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
+            from flipjump.interpreter.io_devices.pygame_window import PcIO
+            ProbeScreen, ProbeKeyboard, IOReadOnEOF = _P._devices()
+            self.core.reset()
+            screen = ProbeScreen(probe)
+            kb = ProbeKeyboard(ScriptedKeyEventSource(list(events)), screen, frames, probe)
+            io = PcIO(screen, kb)
+            dm = NativeDeviceMemory(self.core, self.width)      # the harness's own view (the screen keeps none)
+            io.attach_memory(dm)
+            if probe is not None:
+                probe.attach(dm, self.core)
+            t = _t.time()
+            try:
+                _c, ops, _e, _l, _p = self.core.run(io.read_bit, io.write_bit, IOReadOnEOF, last_ops_length=0)
+            except Exception as e:                              # noqa: BLE001
+                print("!! CRASH after %d presented frames: %s %s" % (len(screen.frames), type(e).__name__, e))
+                _c, ops = 0, 0
+            return _P.RunResult(list(screen.frames), list(screen.shown_palettes), int(ops),
+                                list(probe.readings) if probe is not None else [], _t.time() - t, int(_c))
+        _P.GameBinary.run = _tolerant
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
-                                            len(order), len(dp.triggers), len(mp.order),
+                                            len(order), dp.nfired, len(mp.order),   # M8 C3: + the latches
                                             nmon=mph.world.layout.nmon, nrt=mviews.nrows(mph),
                                             palettes_out=pals,
                                             nthvis=mviews.nvis if player_loots(PLAYER_MODE) else 0)   # M7 P6
+    if __import__("os").environ.get("M2_TOLERATE_CRASH") and len(got) < frames:
+        print("!! comparing only the %d frames presented before the crash" % len(got))
+        frames = len(got)
+        reads = reads[:frames]
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")

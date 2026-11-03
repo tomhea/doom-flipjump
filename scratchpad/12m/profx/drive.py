@@ -7,6 +7,7 @@
                                                 so bind_things runs its dirty path -> ptloc_walk
   options: --stock (installed engine: a control, no dumps)  --trace LO N (record ops [LO, LO+N))
            --fjm PATH  --lock PATH (take the binary lock)  --lock-name NAME
+           --map E1Mn (M8 G13; or DOOMFJ_MAP): `games` plays THAT map's gamespeed tours; --fjm is then required
 
 <prefix> is relative to <WORK> unless absolute. Writes <prefix>.runs.json (per run: ops, presented
 frames, the op count at each present, frame sha256s, things poked) and, on the FJPROFX engine,
@@ -61,7 +62,13 @@ def out_prefix(p):
 
 
 def main(argv):
+    if str(ROOT / "src") not in sys.path:
+        sys.path.insert(0, str(ROOT / "src"))
+    from doomfj.mapprofile import take_map_arg
+    m = take_map_arg(argv)                   # M8 G13: before gamespeed is imported (its tours are the map's)
     pos, opt = parse(argv)
+    if m != "E1M1" and opt["poke"]:
+        raise SystemExit("--poke writes E1M1's 75 thss_rt rows: E1M1 only")
     need_env = os.environ.get("FJPROFX_MAP") is None or (
         opt["trace"] is not None and os.environ.get("FJPROFX_TRACE_LO") is None)
     if not opt["stock"] and need_env:

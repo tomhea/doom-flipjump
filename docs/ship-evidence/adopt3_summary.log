@@ -1,0 +1,47 @@
+adopt3 -- E1M1 on the adopted stl (flipjump 1.6.0 at 287f28b, PYTHONPATH fj160-path; every python process logged
+"[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py").
+Source: stl-adopt at cae3517e (src/ identical at 58bd73af and 4f0a90c2). Box shared with another agent's light jobs:
+the gate DURATIONS are not speed numbers. msframe NOT run (the owner runs it in a quiet window).
+
+STEP 1  pin inputs (2026-10-27)
+  1a  build_blocked.py game --out build/doom_e1m1_adopt2sites.fjm <1b knobs, no --one-pass-blocks: it refuses
+      --record-sites> --counts-cache scratchpad/12m/_counts_e1m1_adopt_sites.json.gz --record-sites
+      scratchpad/12m/_sites_e1m1_adopt.json.gz                                       714 s (counting pass 316 s)
+      -> 59,960 groups, 44,739 after alias merging, 542,974 tables recorded             adopt3_heat_sites.log
+  1b  build_labeled.py --labels scratchpad/12m/atlas/adopt2.labels.tsv.gz -- game --out build/doom_e1m1_adopt2.fjm
+      <1b knobs> --one-pass-blocks --counts-cache scratchpad/12m/_census_game.json.gz   (NO --pin-heat)   882 s
+      -> sha256 d37b797dce5a6a28b21afe98afbb299118ad5fa67617082df829f54444139d86; labels 6ec2fecb18368db9...
+      CONTROL: the recording pass's counts == the one-pass census (alias, counts, widths, width_hist, sig)
+STEP 2  profile (PROFX_WORK outside the repo; the profiler engine = 73e09c0's _fjcore.c patched)
+  profx.py engine 7 s; maps 6 s; --selftest (c): ops 50,263,116 = 50,263,116, 7/7 frame sha equal, histogram
+      conserved, trace = histogram [(a)/(b) stale since M7 P1.3: no sim.bind_things in the game tier]
+  drive.py games adopt2_games --fjm build/doom_e1m1_adopt2.fjm                          536 s, 1,020 game frames
+  heatsites.py ... --out scratchpad/12m/heat_e1m1_adopt.json.gz --counts-cache scratchpad/12m/_census_game.json.gz
+      --spread 2: layout 41,006 at base / 3,733 unpinned / 0 WRONG (--spread 1 control: 41,005 WRONG, refused);
+      replayed widths = census for all 20 hot groups; 0 hot-table ops unmapped (PASS); 20 groups, 24,970 sites,
+      gz sha256 00ddcfe8c42550c0
+  hotwords.py ... --out scratchpad/12m/profx/hotwords_e1m1_adopt.json: top 20 = 29.6% of pool ops
+STEP 3  build_labeled.py --labels scratchpad/12m/atlas/adopt3.labels.tsv.gz -- game --out build/doom_e1m1_adopt3.fjm
+      --pool-base 0x80000000 --span-bits 0x7fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256
+      --max-slot-ops 512 --pin-broken --width-buckets --one-pass-blocks --counts-cache scratchpad/12m/_census_game.json.gz
+      --pin-heat scratchpad/12m/heat_e1m1_adopt.json.gz                                    893 s
+  sha256 e306d58d60b815010cbbb4a78124feac0ca94f234d55a1c20bf0631659994d42 (17,646,202 bytes, .fjm v4 lzma 6)
+  labels scratchpad/12m/atlas/adopt3.labels.tsv.gz sha256 bc78fce014d6e30fe7ca8b208688e0395c054393e1784558eb63041c66180eae
+  pin-heat: 20 hot groups, 0 missing, 0 ambiguous, 24,970 of 24,970 sites matched, 0 width-changed; 0 broken groups;
+  preflight 74.0% of the pool window; census identical in content to adopt2's
+  pinreport: 20 of 20 pinned; lost 0; unresolved 0; base moved 19; mismatch 0
+STEP 4  gates on adopt3
+  m3_gate        M3 GATE: PASS -- byte- and state-exact on all 88 frames
+  m2_std_gate    M2 STANDALONE GATE: PASS -- ... byte- and state-exact on all 421 frames
+  p2a_gate       P2A GATE PASS
+  hurt_gate      HURT GATE PASS
+  fight_gate     FIGHT GATE PASS
+  die_gate       DIE GATE PASS
+  gamespeed      BINDING (mean+p80)/2: 14,792,784 ops/frame (target <= 22,000,000) PASS; mean 14,124,839, p80 15,460,730
+                 SIZE 50,198,748 words = 37.40% of 2^27 (target <= 43%) PASS
+  b0 v10 --proxy B0 OK: binding 14,249,841 (mean 12,520,028, p80 run R0-west-hall 15,979,654); every run state 100/100,
+                 pixels 100/100; per-frame maximum 24,117,248 (R0-courtyard); headroom to 22M 7,750,159
+STEP 5  class: S -- adopt3_frames_vs_blocked64.log: the calibration + ten gamespeed games on adopt3 and on blocked64
+  (doom-io/build/doom_e1m1_blocked64.fjm, sha256 f52751a2bb846c7a), FRAMES EQUAL 1044 of 1044 (control: 4 of 104);
+  adopt3 ops -11.64 .. -12.98% a game. m2 / m3 are byte-exact against the oracle, whose sources
+  (reference_model, monsters, world, combat, gamedata) did not change since blocked64's base 2462113.

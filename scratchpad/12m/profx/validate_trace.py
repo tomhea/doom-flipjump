@@ -27,18 +27,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import labels, load_sparse, load_trace, objects, work_dir  # noqa: E402
 
 TOL, SUM_TOL, MIN_OPS, MIN_CHECKED = 0.05, 0.01, 200, 5
+# the checked expansion: bind_things (75 runs a frame) until M7 P1.3 removed it; since, the thing pass's depth
+# sort (sim.thing_pass_depth_w, every frame on every map)
+MACROS = ("sim.bind_things(", "sim.thing_pass_depth_w(")
 ELEM = re.compile(r"^f\d+:l\d+:")
+# a statement followed by a call is not checked: the call's first label is where it RETURNS, so the trace's span
+# from the statement to it holds the callee's labelled code, which owner attribution charges to the callee
+# (thing_pass_depth_w's fcall into the thing pass's leaf: 1,335 traced vs 313 attributed ops a call)
+CALLS = re.compile(r":stl\.f?call\(")
 
 
 def statements():
-    """bind_things' child statements that have code labels: [(key, first label word)], address order"""
+    """the checked expansion's child statements that have code labels: [(key, first label word)], address order"""
     la, ln = labels()
     obj = objects()
     lo = min(v["lo"] for v in obj.values())
     hi = max(v["hi"] for v in obj.values())
-    heads = [n.split("---")[0] for n in ln if "sim.bind_things(" in n.split("---")[0]]
+    heads = []
+    for macro in MACROS:
+        heads = [n.split("---")[0] for n in ln if macro in n.split("---")[0]]
+        if heads:
+            break
     if not heads:
-        raise SystemExit("no sim.bind_things expansion in the label table")
+        raise SystemExit("none of %s expands in the label table" % ", ".join(MACROS))
     B = heads[0] + "---"
     first = {}
     for a, n in zip(la.tolist(), ln):
@@ -67,7 +78,9 @@ def check(prefix, hist="incl", quiet=False):
     cum = np.concatenate([[0], np.cumsum(c)])
     rows = []
     tsum = asum = 0.0
-    for (k, a), (_k2, b) in zip(st, st[1:]):
+    for (k, a), (k2, b) in zip(st, st[1:]):
+        if CALLS.search(k2):
+            continue                # a call's first label is its return point: the span holds the callee's own code
         pa, pb = pos.get(a, []), pos.get(b, [])
         calls = selfc.get(a, 0)
         if not pa or len(pa) != len(pb) or calls != len(pa):
@@ -87,7 +100,7 @@ def check(prefix, hist="incl", quiet=False):
     passed = (len(chk) >= MIN_CHECKED and all(abs(r[4]) <= TOL for r in chk)
               and tsum > 0 and abs(asum - tsum) / tsum <= SUM_TOL)
     if not quiet:
-        print("  %-34s %7s %11s %11s %8s" % ("bind_things statement", "calls", "trace/call", "attr/call", "error"))
+        print("  %-34s %7s %11s %11s %8s" % ("statement", "calls", "trace/call", "attr/call", "error"))
         for k, calls, tpc, apc, err, checked in rows:
             print("  %-34s %7d %11.1f %11.1f %+7.1f%%%s" % (k.split(":", 2)[2][:34], calls, tpc, apc, 100 * err,
                                                           "" if checked else "  (not checked: < %d ops)" % MIN_OPS))

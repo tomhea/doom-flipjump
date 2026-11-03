@@ -48,6 +48,18 @@ THE APPROVED SIMPLIFICATIONS (owner, D5) this file implements:
         floored too: the fj's exact far LOS needs whole-unit ends);
       - the blame: the rocket's source is the player for its hit and its blast (infighting: a monster hit turns on the
         player; a barrel hit names the player in bar_src); a blast on the player names no attacker (himself).
+  * M8 C6 (E1M6, E1M9): THE PLASMA RIFLE -- DOOM's MT_PLASMA in the same pool, by the rocket's conventions
+    (`_a_fire_plasma`, `_spawn_plasma`; `_rocket_things` with the plasma's damage):
+      - A_FirePlasma: one cell, the flash S_PLASMAFLASH1 + (P_Random() & 1) on rng_player (DOOM's one global stream:
+        the player's draw here), then P_SpawnPlayerMissile -- no autoaim, along the tic-start view, momentum
+        25 * finecos / finesine, the tics roll on rng_fx (S_PLASBALL's 6 - (P_Random() & 3)), the half step, the try;
+      - a full pool FIZZLES the ball (the cell is spent), as the rocket's;
+      - PLASMA_R: the fireball's 6 (DOOM's is 13) -- the missile cells' one radius; its height 8 is DOOM's;
+      - its shooter passed, no species rule, a monster or a barrel takes ((P_Random()%8)+1)*5 on rng_fx (the source
+        the player, the inflictor the ball); a solid corpse or an exploding barrel stops it with no damage;
+      - P_ExplodeMissile: S_PLASEXP (no action: no blast), `tics -= P_Random() & 3` (4 - 0..3: the clamp never binds);
+      - S_PLASMA2's 20 tics are two states of 10 (gamedata: the tics nibble), the same picture and timing;
+      - only on a map that holds a plasma rifle (`plasma_on`: thing 2004): key 6's cell `kb_w6` exists there alone.
 
 MODEL CONVENTIONS, named so an fj mirror can copy them:
   * THE AIM IS A CALLBACK, `aim(world, col) -> None | ("mon", slot) | ("bar", index)`: the
@@ -94,11 +106,14 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from doomfj import gamedata as gd
+from doomfj import powers as _PW                       # M8 C6: the timed powers' rules
 from doomfj import rng as R
 from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
 from doomfj.movers import crossed_shape as _crossed_shape          # M8 F1.3: the W1 floor lines (slanted too)
 from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
+from doomfj.doors import KIND_CARD as _KIND_CARD                    # M8 C3: a key door by its kind
+from doomfj import doors as _D                                      # M8 C3: the WR door lines
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, STRAFE_MOVE, turn_step   # STRAFE_MOVE: M7 P4.1, the ONE value
 from doomfj.reference_model import ANG180 as _ANG180                       # M7 P7: P_DeathThink's turn
 from doomfj.reference_model import VIEW_DROP_MAX                          # M7 P8a A: P_DeathThink's view drop
@@ -143,6 +158,13 @@ FIREBALL_H = FIREBALL_INFO.height >> 16     # 8
 ROCKET_INFO = gd.MOBJINFO["MT_ROCKET"]
 ROCKET_R = FIREBALL_R                       # the 2D convention: the fireball's radius (DOOM's rocket is 11)
 assert ROCKET_INFO.height >> 16 == FIREBALL_H, "the rocket's lines are the fireball's missile cells (height 8)"
+# M8 C8: the Baron's green fireball -- a MONSTER missile as the imp's (the pool, the missile cells, the box rules), with
+# its own speed 15, damage 8 and states (BAL7). Its radius and height are the imp fireball's: every box and cell rule
+# that reads FIREBALL_R / FIREBALL_H holds for it unchanged (asserted)
+BRUISERSHOT_INFO = gd.MOBJINFO["MT_BRUISERSHOT"]
+assert (BRUISERSHOT_INFO.radius >> 16, BRUISERSHOT_INFO.height >> 16) == (FIREBALL_R, FIREBALL_H)
+# a monster's missile, by its shooter's type (gamedata.MISSILE_OF)
+MONSTER_MISSILES = {mt: gd.MOBJINFO[gd.MISSILE_OF[mt]] for mt in gd.MISSILE_OF}
 
 
 def _state_chain(start: str) -> Tuple[str, ...]:
@@ -154,6 +176,26 @@ def _state_chain(start: str) -> Tuple[str, ...]:
 
 
 ROCKET_STATES = frozenset(_state_chain(ROCKET_INFO.spawnstate) + _state_chain(ROCKET_INFO.deathstate))
+BRUISERSHOT_STATES = frozenset(_state_chain(BRUISERSHOT_INFO.spawnstate)        # M8 C8
+                               + _state_chain(BRUISERSHOT_INFO.deathstate))
+# M8 C8: the claw-or-missile attacks (A_TroopAttack, A_BruisAttack) and their claw's site (Sites' attribute)
+CLAW_SITES = {"A_TroopAttack": "troop_claw", "A_BruisAttack": "bruis_claw"}
+NO_FACE_ATTACKS = frozenset({"A_BruisAttack"})     # p_enemy.c: A_BruisAttack never calls A_FaceTarget
+# M8 C6: the plasma rifle's ball (the module docstring's conventions)
+PLASMA_INFO = gd.MOBJINFO["MT_PLASMA"]
+PLASMA_R = FIREBALL_R                       # the 2D convention: the fireball's radius (DOOM's ball is 13)
+assert PLASMA_INFO.height >> 16 == FIREBALL_H, "the ball's lines are the fireball's missile cells (height 8)"
+PLASMA_STATES = frozenset(_state_chain(PLASMA_INFO.spawnstate) + _state_chain(PLASMA_INFO.deathstate))
+PLASMA_RIFLE = 2004                         # its editor number (MT_MISC28)
+PLASMA_FLASHES = ("S_PLASMAFLASH1", "S_PLASMAFLASH2")   # A_FirePlasma: flashstate + (P_Random() & 1)
+
+
+def plasma_on(things) -> bool:
+    """M8 C6: THE ONE RULE "this map has the plasma rifle" -- a single-player thing 2004 among `things` (a WAD's raw
+    list or a World's): key 6, its cell `kb_w6`, the rifle's psprites, A_FirePlasma's spawn and the ball's sprites
+    exist exactly there (E1M1 and E1M2 hold none: their text does not move)"""
+    from doomfj.things import single_player
+    return any(t.type == PLASMA_RIFLE and single_player(t) for t in things)
 FOG_STATES = frozenset(_state_chain(gd.MOBJINFO["MT_TFOG"].spawnstate))      # M8: the teleport fog's
 BARREL_INFO = gd.MOBJINFO["MT_BARREL"]
 BARREL_R = BARREL_INFO.radius >> 16         # 10
@@ -173,7 +215,11 @@ KEY_DOOR_CARDS = {26: (gd.IT_BLUECARD, gd.IT_BLUESKULL), 32: (gd.IT_BLUECARD, gd
                   27: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
                   34: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
                   28: (gd.IT_REDCARD, gd.IT_REDSKULL), 33: (gd.IT_REDCARD, gd.IT_REDSKULL)}
-WEAPON_KEYS = ("w1", "w2", "w3", "w4", "w5")   # DOOM's number keys 1..5 -> WP_FIST..WP_MISSILE (P9: 5, the launcher)
+CARD_ITEMS = {"blue": (gd.IT_BLUECARD, gd.IT_BLUESKULL), "yellow": (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
+              "red": (gd.IT_REDCARD, gd.IT_REDSKULL)}       # M8 C3: a card colour's items (KEY_DOOR_CARDS' pairs)
+# DOOM's number keys 1..5 -> WP_FIST..WP_MISSILE (P9: 5, the launcher); M8 C6: 6 -> WP_PLASMA (its held flag kb_w6 is
+# declared on a plasma map alone; a "w6" key elsewhere names a weapon nobody owns, and changes nothing)
+WEAPON_KEYS = ("w1", "w2", "w3", "w4", "w5", "w6")
 # P10: A_FireCGun's flash frame per burst frame (flashstate + (state - S_CHAIN1))
 CGUN_FLASH = {"S_CHAIN1": "S_CHAINFLASH1", "S_CHAIN2": "S_CHAINFLASH2"}
 # The restart block (plan 6.7) writes every schema field back to its level-start value EXCEPT
@@ -181,6 +227,7 @@ CGUN_FLASH = {"S_CHAIN1": "S_CHAINFLASH1", "S_CHAIN2": "S_CHAINFLASH2"}
 # menu mode and the held-key flags are input state, not level state.
 RESTART_KEEP = ("skill", "mode", "kb_f", "kb_b", "kb_l", "kb_r", "kb_u",
                 "kb_sl", "kb_sr", "kb_fi", "kb_w1", "kb_w2", "kb_w3", "kb_w4", "kb_w5")      # M7 P4.1; P9: 5
+RESTART_KEEP_PLASMA = ("kb_w6",)            # M8 C6: on a plasma map (plasma_on), key 6's held flag is input state too
 SUBRANDOM_MAX = 255                         # |P_SubRandom()| <= 255
 DROP_ITEM = {"MT_CLIP": 2007, "MT_SHOTGUN": 2001}   # the dropped thing's editor number
 RUN_STATES = ("S_PLAY_RUN1", "S_PLAY_RUN2", "S_PLAY_RUN3", "S_PLAY_RUN4")
@@ -189,7 +236,9 @@ ANGLE_MASK32 = 0xFFFFFFFF
 # P_TouchSpecialThing's cases for every gettable thing E1M1 holds (sprite name in the comment)
 GETTABLE = frozenset({2018, 2019, 2014, 2015, 5, 2011, 2012, 2023, 2007, 2048, 2010, 2046, 2047,
                       17, 2008, 2049, 8, 2005, 2001, 2003, 2002,     # P9: 2003, the rocket launcher; P10: 2002
-                      13, 6, 2013, 2026})            # M8 L0 (E1M2): the red and yellow cards, the soulsphere, the map
+                      13, 6, 2013, 2026,             # M8 L0 (E1M2): the red and yellow cards, the soulsphere, the map
+                      2024, 2025,                    # M8 C6: partial invisibility, the radiation suit (doomfj.powers)
+                      PLASMA_RIFLE})                 # M8 C6: the plasma rifle
 SOUL_HEALTH, MAX_SOUL = 100, 200            # p_inter.c: the soulsphere's give and cap (deh_soul_health, deh_max_soul)
 
 
@@ -249,13 +298,23 @@ class Sites:
         self.mon_bullet = (3, outcome_table_k(lambda a, b, c: (a - b, (c % 5 + 1) * 3), 3))
         # A_TroopAttack's claw: damage = (P_Random()%8+1)*3
         self.troop_claw = (1, one(lambda v: (v % 8 + 1) * 3))
+        # M8 C8: A_BruisAttack's claw: damage = (P_Random()%8+1)*10
+        self.bruis_claw = (1, one(lambda v: (v % 8 + 1) * 10))
         # A_SargAttack: damage = ((P_Random()%10)+1)*4
         self.sarg_bite = (1, one(lambda v: (v % 10 + 1) * 4))
         # PIT_CheckThing, a missile hitting: damage = ((P_Random()%8)+1)*tmthing->info->damage
         self.fireball_hit = (1, one(lambda v: (v % 8 + 1) * FIREBALL_INFO.damage))
         self.rocket_hit = (1, one(lambda v: (v % 8 + 1) * ROCKET_INFO.damage))            # P9: the rocket's 20
+        self.bruiser_hit = (1, one(lambda v: (v % 8 + 1) * BRUISERSHOT_INFO.damage))      # M8 C8: the Baron's 8
+        self.plasma_hit = (1, one(lambda v: (v % 8 + 1) * PLASMA_INFO.damage))            # M8 C6: the ball's 5
+        self.plasma_flash = (1, one(lambda v: v & 1))                                      # M8 C6: A_FirePlasma's
         # `tics -= P_Random()&3`: P_KillMobj, P_ExplodeMissile, P_CheckMissileSpawn, puff, blood
         self.tics_roll = (1, one(lambda v: v & 3))
+        # M8 C6 (doomfj.powers): A_FaceTarget at a shadow target (`<< 21`, in the spread's 2^20 unit), P_SpawnMissile
+        # at one (`<< 20`, BAM), the suit's leak on a 20-damage floor (`P_Random() < 5`)
+        self.shadow_face = (2, outcome_table_k(_PW.face_jitter, 2))
+        self.shadow_missile = (2, outcome_table_k(_PW.missile_jitter, 2))
+        self.suit_leak = (1, one(lambda v: int(_PW.suit_leaks(v))))
         # P_DamageMobj: P_Random () < target->info->painchance -- one table per painchance value
         self.pain: Dict[int, Tuple[int, List]] = {}
         for info in gd.MOBJINFO.values():
@@ -282,10 +341,17 @@ def site_formulas(col: Callable[[int], int]) -> Dict[str, Tuple[int, Callable]]:
         "saw": (3, lambda a, b, c: (2 * (a % 10 + 1), col(b - c))),
         "mon_bullet": (3, lambda a, b, c: (a - b, (c % 5 + 1) * 3)),
         "troop_claw": (1, lambda v: (v % 8 + 1) * 3),
+        "bruis_claw": (1, lambda v: (v % 8 + 1) * 10),                     # M8 C8
         "sarg_bite": (1, lambda v: (v % 10 + 1) * 4),
         "fireball_hit": (1, lambda v: (v % 8 + 1) * 3),
         "rocket_hit": (1, lambda v: (v % 8 + 1) * 20),                     # P9
+        "bruiser_hit": (1, lambda v: (v % 8 + 1) * 8),                     # M8 C8
+        "plasma_hit": (1, lambda v: (v % 8 + 1) * 5),                      # M8 C6
+        "plasma_flash": (1, lambda v: v & 1),                              # M8 C6
         "tics_roll": (1, lambda v: v & 3),
+        "shadow_face": (2, lambda a, b: (a - b) << 1),                        # M8 C6: P_SubRandom() << 21, in 2^20
+        "shadow_missile": (2, lambda a, b: (a - b) << 20),                    # M8 C6: P_SubRandom() << 20
+        "suit_leak": (1, lambda v: int(v < 5)),                               # M8 C6: P_Random() < 5
         **pains,
     }
 
@@ -328,7 +394,7 @@ def fireball_momentum_table(rm, info=None) -> List[Tuple[int, int]]:
 STARTREDPALS, NUMREDPALS = 1, 8             # the damage flash: palettes 1..8
 STARTBONUSPALS, NUMBONUSPALS = 9, 4         # the pickup flash: palettes 9..12
 DC_CAP = 100                                # P_DamageMobj: player->damagecount capped at 100 (hurtcode imports it)
-# (RADIATIONPAL 13: pw_ironfeet -- E1M1 holds no radiation suit, and the schema no powers[pw_ironfeet])
+# (RADIATIONPAL 13: pw_ironfeet -- M8 C6, doomfj.powers: only a map holding the suit has the `p_ironfeet` field)
 
 
 def palette_index(ws) -> int:
@@ -343,6 +409,8 @@ def palette_index(ws) -> int:
         return min(NUMREDPALS - 1, (cnt + 7) >> 3) + STARTREDPALS
     if ws.p_bonuscount:
         return min(NUMBONUSPALS - 1, (ws.p_bonuscount + 7) >> 3) + STARTBONUSPALS
+    if _PW.blinking(getattr(ws, "p_ironfeet", 0)):        # M8 C6: the suit's green, flickering out at the end
+        return _PW.RADIATIONPAL
     return 0
 
 
@@ -392,8 +460,16 @@ class CombatMixin:
         assert self.hwt_r[PLAYER_R] == self.hwt
         self.fireball_mom = fireball_momentum_table(rm)
         self.rocket_mom = fireball_momentum_table(rm, ROCKET_INFO)          # P9
-        self.restart_fields = tuple(f.name for f in self.schema if f.name not in RESTART_KEEP)
-        assert set(RESTART_KEEP) <= {f.name for f in self.schema}
+        # M8 C8: each monster missile's momentum table and impact site, by the missile's mobjtype name
+        self.missile_mom = {FIREBALL_INFO.name: self.fireball_mom}
+        self.missile_hit = {FIREBALL_INFO.name: self.sites.fireball_hit, BRUISERSHOT_INFO.name: self.sites.bruiser_hit}
+        if any(mi.name == "MT_BRUISER" for mi in self.mon_info):
+            self.missile_mom[BRUISERSHOT_INFO.name] = fireball_momentum_table(rm, BRUISERSHOT_INFO)
+        self.missile_hit[PLASMA_INFO.name] = self.sites.plasma_hit           # M8 C6: the ball's site
+        self.plasma_mom = fireball_momentum_table(rm, PLASMA_INFO)          # M8 C6
+        keep = RESTART_KEEP + (RESTART_KEEP_PLASMA if self.layout.plasma else ())
+        self.restart_fields = tuple(f.name for f in self.schema if f.name not in keep)
+        assert set(keep) <= {f.name for f in self.schema}
         self._level_starts: Dict[int, object] = {}
         self.pickup_z = [self._floor_at(t.x, t.y) for t in self.pickup_things]
         # M8 F1.3 (docs/f1-big-map-widths.md 9): an item on a MOVER's floor rides it (P_ChangeSector carries it): its
@@ -408,13 +484,15 @@ class CombatMixin:
                         for t in self.mon_things]
         # the exit switch: the door-style proximity box around each exit line (plan 6.7)
         self.exit_boxes = exit_boxes(self.lds, self.cmap.vertexes, W.USE_RANGE)
-        # key doors: the cards that open each door sector (EV_VerticalDoor)
-        self.door_cards: Dict[int, Tuple[int, int]] = {}
-        for ld in self.lds:
-            if ld.special in KEY_DOOR_CARDS and 0 <= ld.back < len(self.sds):
-                si = self.sds[ld.back].sector
-                if si in self.door_order:
-                    self.door_cards[si] = KEY_DOOR_CARDS[ld.special]
+        # M8 C9: box k's line (doors.exit_lines) and whether it is the secret exit (51)
+        from doomfj.doors import exit_lines as _exit_lines, secret_exits as _secret_exits
+        self.exit_box_lines = _exit_lines(self.lds)
+        self.exit_secret = _secret_exits(self.lds)
+        # key doors: the cards that open each door sector (EV_VerticalDoor) -- M8 C3: by the door's KIND (its card,
+        # doors.KIND_CARD), so a door whose lines need different cards (E1M3 150: D1 31 and D1 32) keeps its keyless
+        # kind on its main box and the keyed lines their own (World.door_keyed); every E1M1 / E1M2 door as before
+        self.door_cards: Dict[int, Tuple[int, int]] = {
+            si: CARD_ITEMS[_KIND_CARD[k]] for si, k in self.door_kind.items() if k in _KIND_CARD}
         self.decor_radius = {t.type: gd.THING_TYPES[t.type].radius for t in self.decor_solid}
 
     def _floor_at(self, x: int, y: int) -> int:
@@ -501,6 +579,7 @@ class CombatMixin:
             self._weapon_tics(keys, ev)
         if ws.p_strength:
             ws.p_strength = min(ws.p_strength + 1, 0xFFFF)
+        self._power_tic()                         # M8 C6: P_PlayerThink's power countdown (invisibility, ironfeet)
         if ws.p_damagecount:
             ws.p_damagecount -= 1
         if ws.p_bonuscount:
@@ -569,10 +648,38 @@ class CombatMixin:
         dmg = SECTOR_HURT.get(special)
         if dmg is None or ws.leveltime & HURT_PERIOD_MASK:
             return
+        if self.floor_special_cleared(sec):      # M8 C4: a texture-change floor fired (EV_DoPlat clears the special)
+            return
         if not self._on_sector_floor(sec):
             return                               # "Falling, not all the way down yet?"
+        if self._suit_stops(dmg):                # M8 C6: the radiation suit (doomfj.powers)
+            return
         ev.nukage += 1
         self.damage_player(dmg, ("sector", sec), None, ev)       # no inflictor: sector damage thrusts nothing
+
+    def _power_tic(self) -> None:
+        """M8 C6 (doomfj.powers): P_PlayerThink's countdown of the map's timed powers, each running counter one less
+        (the fj: powercode.countdown_lines)"""
+        ws = self.ws
+        for k in self.powers:
+            f = _PW.FIELD[k]
+            if getattr(ws, f):
+                setattr(ws, f, getattr(ws, f) - 1)
+
+    def _suit_stops(self, dmg: int) -> bool:
+        """M8 C6 (doomfj.powers): P_PlayerInSpecialSector's suit test at a hurt -- True when the suit stops the damage
+        `dmg`: worn, and the floor is not a 20-damage one, or it is and `P_Random() < 5` fails (one draw on rng_player,
+        on the hurt tic only: powers.py's recorded convention). The fj: powercode.suit_lines"""
+        if not getattr(self.ws, "p_ironfeet", 0):
+            return False
+        return dmg != _PW.SUIT_LEAK_DAMAGE or not self._roll("rng_player", self.sites.suit_leak)
+
+    def _shadow_missile_turn(self, m: int, an: int) -> int:
+        """M8 C6 (doomfj.powers): P_SpawnMissile's `an += P_SubRandom() << 20` at a shadow target (two draws on the
+        shooter's stream), else `an`. The fj: powercode.missile_lines"""
+        if self.shadow_target(m):
+            return (an + self._roll("mon_rng", self.sites.shadow_missile, m)) & M32
+        return an
 
     def _on_sector_floor(self, sec: int) -> bool:
         """P_PlayerInSpecialSector's "Falling, not all the way down yet?": the player box's floorz is sector `sec`'s
@@ -601,10 +708,13 @@ class CombatMixin:
         # M8 (doomfj.switches): the S1 floor and SR lift switch lines this press changes -- their EV_* read on the
         # machines BEFORE the press fires them, and before the exit (whose own latch is g_leveldone)
         self.switch_uses(ws.px, ws.py, lambda k: ws.l_state[k] == 0, lambda g: self.floor_sub(g) == 0)
-        for box in self.exit_boxes:
+        for k, box in enumerate(self.exit_boxes):
             if W.in_use_box_fixed(box, ws.px, ws.py):
                 ws.g_leveldone = 1
                 ev.level_done = True
+                if self.exit_secret[k]:              # M8 C9: the secret exit (51) -- LEVEL COMPLETE says so
+                    ws.g_secretexit = 1
+                self.switch_exit(self.exit_box_lines[k])     # M8 C9: a map with two exit lines: this one swaps
                 return
         for tag, box in self.lift_use:
             if W.in_use_box_fixed(box, ws.px, ws.py):
@@ -615,11 +725,16 @@ class CombatMixin:
         for g, box in self.floor_use:
             if W.in_use_box_fixed(box, ws.px, ws.py):
                 self.floor_fire(g)
+        self.light_presses(ws.px, ws.py)          # M8 C4: the light switches (138)
 
     def player_can_open(self, si: int) -> bool:
         """EV_VerticalDoor's key check: a key door needs its card or skull; other doors nothing."""
         cards = self.door_cards.get(si)
         return cards is None or any(self.ws.p_cards[c] for c in cards)
+
+    def player_has_card(self, colour: str) -> bool:
+        """M8 C3: the player holds the card or the skull of `colour` ("blue" / "yellow" / "red": doors.KIND_CARD's)"""
+        return any(self.ws.p_cards[c] for c in CARD_ITEMS[colour])
 
     # -- the player thing's own state (first person never shows it; kept DOOM-shaped)
     def _set_player_mobj(self, name: str) -> None:
@@ -715,6 +830,8 @@ class CombatMixin:
             self._a_fire_missile(ev)
         elif action == "A_FireCGun":                 # P10: the chaingun
             self._a_fire_cgun(keys, ev)
+        elif action == "A_FirePlasma":               # M8 C6: the plasma rifle
+            self._a_fire_plasma(keys, ev)
         elif action in ("A_Light0", "A_Light1", "A_Light2"):
             pass                                 # extralight: dropped (plan section 2, C)
         else:
@@ -872,6 +989,17 @@ class CombatMixin:
         if self._p_full:
             self._spawn_rocket(ev)
 
+    def _a_fire_plasma(self, keys: dict, ev) -> None:
+        """M8 C6 -- A_FirePlasma: one cell, the flash flashstate + (P_Random() & 1) (the player's stream), then
+        P_SpawnPlayerMissile (MT_PLASMA) in the modes that have the pools; before them the ammo and the flash alone.
+        DOOM's A_FirePlasma sets no player-thing state (P_FireWeapon's S_PLAY_ATK1 stands)"""
+        ws = self.ws
+        ws.p_ammo[gd.WEAPONINFO[ws.p_ready].ammo] -= 1
+        k = self._roll("rng_player", self.sites.plasma_flash)
+        self._set_psprite("flash", PLASMA_FLASHES[k], keys, ev)
+        if self._p_full:
+            self._spawn_plasma(ev)
+
     def _a_melee(self, weapon: str, ev) -> None:
         """A_Punch (berserk x10, reach 64) and A_Saw (reach 65). Neither turns the view to the
         target, and the saw's MF_JUSTATTACKED forward pull is not modelled."""
@@ -895,6 +1023,16 @@ class CombatMixin:
             ev.shots.append((weapon, col, None, dmg))
             return
         tgt = self.aim(self, col)
+        if tgt is not None and tgt[0] == "shot":
+            # M8 C3: the column's nearest target is a GR 46 line (the picture's record): a BULLET reaching it opens
+            # its doors (P_ShootSpecialLine -> EV_DoDoor(open)); a melee swing is treated as reaching nothing (the
+            # record holds no depth: the fist would otherwise open it from across the room). No puff, no damage.
+            if reach < MISSILERANGE_U:
+                tgt = None
+            else:
+                ev.shots.append((weapon, col, tgt, dmg))
+                self.shot_press(tgt[1])
+                return
         if tgt is not None:
             x, y = self._target_xy(tgt)
             if W.aprox_distance(x - (ws.px >> 16), y - (ws.py >> 16)) > reach:
@@ -911,6 +1049,21 @@ class CombatMixin:
         else:
             self.damage_barrel(i, dmg, ("player", -1), ev)
         ev.hits.append((weapon, kind, i, dmg))
+
+    def shot_press(self, k: int) -> None:
+        """M8 C3: shot line k (`World.door_shots`) was hit: EV_DoDoor(open) on each door its tag names that is at rest
+        (doors.switch_ready) -- a request (`d_monreq`) its next door tic presses, as a walk-over line's"""
+        ws = self.ws
+        for si in self.door_shots[k][1]:
+            d = self.door_order.index(si)
+            if _D.switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d])):
+                ws.d_monreq[d] = 1
+        if self.switch_cells:                 # a SWITCH_TEX map: the line's texture swaps (switches.shot_presses)
+            from doomfj import switches as _SWI
+            on, tm = list(ws.sw_on), list(ws.sw_time) if self.switch_sr else []
+            for j in _SWI.shot_presses(self.switch_cells, self.door_shots[k][0]):
+                _SWI.press(on, tm, self.switch_sr, j)
+            self._switch_store(on, tm)
 
     def _target_xy(self, tgt) -> Tuple[int, int]:
         kind, i = tgt
@@ -957,6 +1110,8 @@ class CombatMixin:
         sid = world.ws.aim_sid[col - world.aim_lo]
         if sid == 0:
             return None
+        if world.layout.nshot and sid > _D.SHOT_SID_TOP - world.layout.nshot:   # (M8 C2: a wide map's ids pass 0xFF)          # M8 C3: a GR 46 line (doors.shot_sid)
+            return ("shot", _D.SHOT_SID_TOP - sid)
         nmon = world.layout.nmon
         return ("mon", sid - 1) if sid <= nmon else ("bar", sid - 1 - nmon)
 
@@ -1009,6 +1164,9 @@ class CombatMixin:
         ws = self.ws
         if not ws.mon_shootable[m] or ws.mon_health[m] <= 0:
             return
+        soul = m in self.soul_of
+        if soul:                                  # M8 C8: a charging soul stops (doomfj.lostsoul)
+            self._soul_damaged(m, ev)
         if self._p_knock:                         # M7 P8a: DOOM's order -- the thrust, then the health
             self._thrust(("mon", m), inflictor, source, dmg)
         # M8 (the telefrag's 10000): the health is held at the 12-bit cell's floor, as a barrel's at BARREL_HEALTH_MIN --
@@ -1019,7 +1177,8 @@ class CombatMixin:
             self._kill_monster(m, ev)
             return
         info = self.mon_info[m]
-        if self._roll("mon_rng", self.sites.pain[info.painchance], m):
+        # M8 C8: `P_Random() < painchance && !(flags & MF_SKULLFLY)` -- the roll is drawn, a charging soul feels no pain
+        if self._roll("mon_rng", self.sites.pain[info.painchance], m) and not (soul and ws.sk_fly[self.soul_of[m]]):
             ws.mon_justhit[m] = 1
             self._set_state(m, info.painstate, True, ev)
         ws.mon_reaction[m] = 0
@@ -1031,12 +1190,12 @@ class CombatMixin:
                 ws.mon_target[m] = code
                 ws.mon_threshold[m] = gd.BASETHRESHOLD
                 ev.retargets.append((m, code))
-                if ws.mon_state[m] == gd.STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
+                if ws.mon_state[m] == gd.THING_STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
                     self._set_state(m, info.seestate, False, ev)
         elif not ws.mon_threshold[m] and source[0] == "player":
             ws.mon_target[m] = 1
             ws.mon_threshold[m] = gd.BASETHRESHOLD
-            if ws.mon_state[m] == gd.STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
+            if ws.mon_state[m] == gd.THING_STATE_INDEX[info.spawnstate] and info.seestate != gd.S_NULL:
                 self._set_state(m, info.seestate, False, ev)
 
     @staticmethod
@@ -1062,6 +1221,8 @@ class CombatMixin:
         ws = self.ws
         info = self.mon_info[m]
         ws.mon_shootable[m] = 0
+        if m in self.soul_of:                    # M8 C8: P_KillMobj clears MF_SKULLFLY (and MF_FLOAT: not shootable)
+            ws.sk_fly[self.soul_of[m]] = 0
         gib = ws.mon_health[m] < -info.spawnhealth and info.xdeathstate != gd.S_NULL
         self._set_state(m, info.xdeathstate if gib else info.deathstate, True, ev)
         v = self._roll("mon_rng", self.sites.tics_roll, m)
@@ -1146,7 +1307,7 @@ class CombatMixin:
     #     (mon_x << 16) + mon_fx), the INFLICTOR's WHOLE UNITS << 16 (the integer half of its 16.16: the player's,
     #     a fireball's, a monster's and a barrel's -- what knockcode's kb_ix / kb_iy carry);
     #   * a thing's Z (2D: a thing stands on its floor): the player's check_position floorz at his position, a
-    #     monster's mon_floorz, a barrel's sector floor (static), a fireball's proj_z (its shooter's mon_floorz + 32 at
+    #     monster's mon_floorz, a barrel's sector floor (now: M8, a barrel on a mover rides it), a fireball's proj_z (its shooter's mon_floorz + 32 at
     #     the spawn: P_SpawnMissile's z + 4*8*FRACUNIT, no gravity);
     #   * the reversal's coin draws on the TARGET's stream (rng_player / mon_rng[slot]), only when its three other
     #     conditions hold (C's short circuit), before the armor and the pain or death draw;
@@ -1184,6 +1345,8 @@ class CombatMixin:
         if kind == "player":
             return self.rm.check_position(self.scene_c, ws.px, ws.py)[1]
         if kind == "mon":
+            if i in self.soul_of:                  # M8 C8: a soul's own z, whole units
+                return ws.sk_z[self.soul_of[i]] >> 16
             return ws.mon_floorz[i]
         if kind == "bar":
             t = self.barrel_things[i]
@@ -1296,7 +1459,9 @@ class CombatMixin:
                 xmove = ymove = 0
             px, py = _signed(px, 32), _signed(py, 32)
             self._teleported = False
-            ok = self._player_knock_try(px, py, ev) if player else self._monster_knock_try(m, px, py, ev)
+            ok = (self._player_knock_try(px, py, ev) if player else
+                  self._soul_try(m, px, py, ev) if m in self.soul_of else      # M8 C8: doomfj.lostsoul's TRY
+                  self._monster_knock_try(m, px, py, ev))
             ev.knocks.append((thing, ok))
             if not ok:
                 mx = my = 0
@@ -1305,7 +1470,9 @@ class CombatMixin:
                 self._teleported = False
             if not (xmove or ymove):
                 break
-        if self._knock_slides(thing, mx, my):
+        if not player and m in self.soul_of and (ws.sk_fly[self.soul_of[m]] or self.soul_airborne(m)):
+            pass                                           # M8 C8: no friction for SKULLFLY, nor when airborne
+        elif self._knock_slides(thing, mx, my):
             pass                                           # "do not stop sliding if halfway off a step"
         elif -gd.STOPSPEED < mx < gd.STOPSPEED and -gd.STOPSPEED < my < gd.STOPSPEED:
             mx = my = 0
@@ -1369,15 +1536,16 @@ class CombatMixin:
         ev.attacks.append((m, action))
         if not self.ws.mon_target[m]:
             return
-        self._a_face_target(m)
+        # M8 C8: A_BruisAttack does not face (its ATK1 / ATK2 did); M8 C6: a shadow target's turn (0 when none)
+        jit = self._a_face_target(m) if action not in NO_FACE_ATTACKS else 0
         if self.monsters == "decide":                    # M7 P3.2c: the rolls without their effects (P5)
             self._attack_rolls(m, action)
             return
         if action in BULLETS:
-            self._mon_hitscan(m, BULLETS[action], ev)
-        elif action == "A_TroopAttack":
+            self._mon_hitscan(m, BULLETS[action], ev, *((jit,) if jit else ()))   # M8 C6: a turn only when one
+        elif action in CLAW_SITES:                       # the imp's and (M8 C8) the Baron's: claw, else the missile
             if self._check_melee_range(m):
-                self._mon_melee(m, self.sites.troop_claw, ev)
+                self._mon_melee(m, getattr(self.sites, CLAW_SITES[action]), ev)
             else:
                 self._spawn_fireball(m, ev)
         elif action == "A_SargAttack":
@@ -1393,9 +1561,9 @@ class CombatMixin:
         if action in BULLETS:
             for _ in range(BULLETS[action]):
                 self._roll("mon_rng", self.sites.mon_bullet, m)
-        elif action == "A_TroopAttack":
+        elif action in CLAW_SITES:
             if self._check_melee_range(m):
-                self._roll("mon_rng", self.sites.troop_claw, m)
+                self._roll("mon_rng", getattr(self.sites, CLAW_SITES[action]), m)
         elif action == "A_SargAttack":
             if self._check_melee_range(m):
                 self._roll("mon_rng", self.sites.sarg_bite, m)
@@ -1407,12 +1575,12 @@ class CombatMixin:
         ev.mon_melee.append((m, dmg))
         t = self.ws.mon_target[m]
         if self._fight and t >= 2:               # M7 P8a I: the claw / the bite on a MONSTER target: no blood (DOOM's
-            ev.mon_hits.append((m, "claw" if site is self.sites.troop_claw else "bite", "mon", t - 2, dmg))
+            ev.mon_hits.append((m, "bite" if site is self.sites.sarg_bite else "claw", "mon", t - 2, dmg))
             self.damage_monster(t - 2, dmg, ("mon", m), ("mon", m), ev)      # A_TroopAttack calls P_DamageMobj)
             return
         self.damage_player(dmg, ("mon", m), ("mon", m), ev)
 
-    def _mon_hitscan(self, m: int, bullets: int, ev) -> None:
+    def _mon_hitscan(self, m: int, bullets: int, ev, jit: int = 0) -> None:
         """A_PosAttack / A_SPosAttack: one aim (sight and range), then each bullet's spread against
         the player's width at that distance. Every bullet draws, hit or not.
 
@@ -1421,14 +1589,15 @@ class CombatMixin:
         (`_bullet_victim`: the player, monsters, barrels; never the shooter or the target) within that thing's width
         of the bullet's line; else the target by the rule above; else nothing. A target the shooter does not see is
         missed, and so is everything in front of it (the shooter fires along the line it sees). A monster hit
-        bleeds and a barrel puffs (toward the player, as a player's shot's effect: `_spawn_fx_at_target`)."""
+        bleeds and a barrel puffs (toward the player, as a player's shot's effect: `_spawn_fx_at_target`).
+        M8 C6 (doomfj.powers): `jit` -- A_FaceTarget's turn at an invisible player -- adds to every bullet's spread."""
         W = _W()
         if not self._fight:
             seen = self.player_alive() and self.attack_sight(self, m)   # M7 P3.2
             dist = W.aprox_distance(*self._to_player(m))
             for _ in range(bullets):
                 spread, dmg = self._roll("mon_rng", self.sites.mon_bullet, m)
-                hit = seen and dist < MISSILERANGE_U and abs(spread) <= self.hwt[dist >> HWT_SHIFT]
+                hit = seen and dist < MISSILERANGE_U and abs(spread + jit) <= self.hwt[dist >> HWT_SHIFT]
                 ev.mon_shots.append((m, spread, dmg, hit))
                 if hit:
                     self.damage_player(dmg, ("mon", m), ("mon", m), ev)
@@ -1443,8 +1612,8 @@ class CombatMixin:
             spread, dmg = self._roll("mon_rng", self.sites.mon_bullet, m)
             victim = None
             if seen:
-                victim = self._bullet_victim(m, spread, a_t, dist)
-                if victim is None and dist < MISSILERANGE_U and abs(spread) <= hwt_t[dist >> HWT_SHIFT]:
+                victim = self._bullet_victim(m, spread + jit, a_t, dist)
+                if victim is None and dist < MISSILERANGE_U and abs(spread + jit) <= hwt_t[dist >> HWT_SHIFT]:
                     victim = ("mon", t - 2) if t >= 2 else ("player", -1)
             ev.mon_shots.append((m, spread, dmg, victim is not None))
             if victim is None:
@@ -1503,9 +1672,19 @@ class CombatMixin:
     def _leaf16(self, x16: int, y16: int) -> int:
         return self.rm.point_in_subsector(self.cmap, x16 >> 16, y16 >> 16)
 
+    def _missile_info(self, s: int):
+        """M8 C8: the missile in pool slot s -- the rocket, the Baron's fireball or the imp's -- by its state"""
+        name = gd.THING_STATE_NAMES[self.ws.proj_state[s]]
+        if name in ROCKET_STATES:
+            return ROCKET_INFO
+        if name in PLASMA_STATES:                                          # M8 C6: the player's plasma ball
+            return PLASMA_INFO
+        return BRUISERSHOT_INFO if name in BRUISERSHOT_STATES else FIREBALL_INFO
+
     def _spawn_fireball(self, m: int, ev) -> None:
-        """P_SpawnMissile (MT_TROOPSHOT) + P_CheckMissileSpawn, 2D, into the lowest free slot; a
-        full pool fizzles."""
+        """P_SpawnMissile (the shooter's missile: MT_TROOPSHOT, M8 C8 MT_BRUISERSHOT) + P_CheckMissileSpawn, 2D, into
+        the lowest free slot; a full pool fizzles."""
+        info = MONSTER_MISSILES[self.mon_info[m].name]
         ws = self.ws
         slot = next((s for s in range(_W().FIREBALL_POOL) if not ws.proj_active[s]), None)
         if slot is None:
@@ -1515,12 +1694,13 @@ class CombatMixin:
         # M7 P8a I: P_SpawnMissile aims at the TARGET (the player before infighting; `_target_pos16`). Convention: a
         # spectre target's MF_SHADOW jitter (an += P_SubRandom() << 20) is not drawn -- nor A_FaceTarget's on it
         an = self.rm.point_to_angle(sx, sy, *self._target_pos16(m))
-        momx, momy = self.fireball_mom[an >> self.rm.angle_shift]
+        an = self._shadow_missile_turn(m, an)    # M8 C6: P_SpawnMissile at an invisible player (doomfj.powers)
+        momx, momy = self.missile_mom[info.name][an >> self.rm.angle_shift]
         ws.proj_active[slot], ws.proj_src[slot] = 1, m
         ws.proj_momx[slot], ws.proj_momy[slot] = momx, momy
         if self._p_knock:                        # M7 P8a: the missile's z, for the thrust's reversal (z + 4*8)
             ws.proj_z[slot] = ws.mon_floorz[m] + 32
-        self._proj_set_state(slot, FIREBALL_INFO.spawnstate)
+        self._proj_set_state(slot, info.spawnstate)
         v = self._roll("rng_fx", self.sites.tics_roll)
         ws.proj_tics[slot] = max(1, ws.proj_tics[slot] - v)
         ws.proj_x[slot] = _signed(sx + (momx >> 1), 32)        # "move a little forward"
@@ -1534,7 +1714,7 @@ class CombatMixin:
 
     def _proj_set_state(self, s: int, name: str) -> None:
         ws = self.ws
-        ws.proj_state[s], ws.proj_tics[s] = gd.STATE_INDEX[name], gd.STATES[name].tics
+        ws.proj_state[s], ws.proj_tics[s] = gd.THING_STATE_INDEX[name], gd.STATES[name].tics
 
     def missile_lines_block(self, x16: int, y16: int) -> bool:
         """PIT_CheckLine for a 2D missile: its box straddles a one-sided line, or a two-sided line
@@ -1560,14 +1740,14 @@ class CombatMixin:
         the lines; on success it moves and re-links when its leaf changes. P9: a ROCKET passes its shooter, the player,
         and meets the monsters and the barrels (`_rocket_things`), then the same lines."""
         ws = self.ws
-        rocket = self._is_rocket(s)
+        rocket = self._is_player_missile(s)        # P9: a rocket; M8 C6: or a plasma ball
         if rocket:
             if self._rocket_things(s, nx, ny, ev):
                 return False
         elif self.player_alive():
             bd = (FIREBALL_R + PLAYER_R) << 16
             if abs(ws.px - nx) < bd and abs(ws.py - ny) < bd:
-                dmg = self._roll("rng_fx", self.sites.fireball_hit)
+                dmg = self._roll("rng_fx", self.missile_hit[self._missile_info(s).name])
                 ev.proj_impacts.append((s, dmg))
                 self.damage_player(dmg, ("mon", ws.proj_src[s]), ("proj", s), ev)   # the MISSILE inflicts
                 return False
@@ -1612,7 +1792,7 @@ class CombatMixin:
             if not shoot:
                 ev.mon_hits.append((src, "fireball", "corpse", j, 0))
                 return True                                # solid, not shootable: explode, no damage
-            dmg = self._roll("rng_fx", self.sites.fireball_hit)
+            dmg = self._roll("rng_fx", self.missile_hit[self._missile_info(s).name])
             ev.mon_hits.append((src, "fireball", "mon", j, dmg))
             self.damage_monster(j, dmg, ("mon", src), ("proj", s), ev)
             return True
@@ -1625,7 +1805,7 @@ class CombatMixin:
             if not (ws.bar_state[b] and ws.bar_health[b] > 0):
                 ev.mon_hits.append((src, "fireball", "corpse", -1 - b, 0))
                 return True                                # exploding: solid, not shootable
-            dmg = self._roll("rng_fx", self.sites.fireball_hit)
+            dmg = self._roll("rng_fx", self.missile_hit[self._missile_info(s).name])
             ev.mon_hits.append((src, "fireball", "bar", b, dmg))
             self.damage_barrel(b, dmg, ("mon", src), ev)
             return True
@@ -1637,7 +1817,7 @@ class CombatMixin:
         ws = self.ws
         rocket = self._is_rocket(s)
         ws.proj_momx[s] = ws.proj_momy[s] = 0
-        self._proj_set_state(s, (ROCKET_INFO if rocket else FIREBALL_INFO).deathstate)
+        self._proj_set_state(s, self._missile_info(s).deathstate)          # M8 C8 / C6: the missile's own death
         if rocket:
             self._rocket_blast(s, ev)
         v = self._roll("rng_fx", self.sites.tics_roll)
@@ -1646,7 +1826,43 @@ class CombatMixin:
     # -------------------------------------------------------------------------------- P9: the rocket
     def _is_rocket(self, s: int) -> bool:
         """pool slot s holds the player's rocket: its state is one of MT_ROCKET's (the pool's other missile is the imp's)"""
-        return gd.STATE_NAMES[self.ws.proj_state[s]] in ROCKET_STATES
+        return gd.THING_STATE_NAMES[self.ws.proj_state[s]] in ROCKET_STATES
+
+    def _is_plasma(self, s: int) -> bool:
+        """M8 C6: pool slot s holds a plasma ball (its state is one of MT_PLASMA's)"""
+        return gd.STATE_NAMES[self.ws.proj_state[s]] in PLASMA_STATES
+
+    def _is_player_missile(self, s: int) -> bool:
+        """the player's missile -- P9's rocket or M8 C6's plasma ball (`proj_src` 0, unread): it passes the player and
+        meets the things by `_rocket_things`"""
+        return self._is_rocket(s) or self._is_plasma(s)
+
+    def _spawn_plasma(self, ev) -> None:
+        """M8 C6 -- P_SpawnPlayerMissile (MT_PLASMA) + P_CheckMissileSpawn, as `_spawn_rocket` (the docstring's
+        conventions): the lowest free slot (full: the ball fizzles), momentum 25 * finecos / finesine along the
+        tic-start view, S_PLASBALL with tics 6 - (P_Random() & 3) on rng_fx, the half step, the try (a failure explodes
+        it)"""
+        ws = self.ws
+        slot = next((s for s in range(_W().FIREBALL_POOL) if not ws.proj_active[s]), None)
+        if slot is None:
+            ev.plasma_spawns.append(-1)
+            return
+        momx, momy = self.plasma_mom[ws.pangle >> self.rm.angle_shift]
+        ws.proj_active[slot], ws.proj_src[slot] = 1, 0
+        ws.proj_momx[slot], ws.proj_momy[slot] = momx, momy
+        if self._p_knock:                        # the missile's z (the thrust's reversal): the player's z + 4*8
+            ws.proj_z[slot] = self._knock_z(("player", -1)) + 32
+        self._proj_set_state(slot, PLASMA_INFO.spawnstate)
+        v = self._roll("rng_fx", self.sites.tics_roll)
+        ws.proj_tics[slot] = max(1, ws.proj_tics[slot] - v)       # 6 - 0..3: the clamp never binds
+        ws.proj_x[slot] = _signed(ws.px + (momx >> 1), 32)        # "move a little forward"
+        ws.proj_y[slot] = _signed(ws.py + (momy >> 1), 32)
+        leaf = self._leaf16(ws.proj_x[slot], ws.proj_y[slot])
+        ws.proj_leaf[slot] = leaf
+        self._list_insert(self._mobile_proj(slot), leaf)
+        ev.plasma_spawns.append(slot)
+        if not self._missile_try(slot, ws.proj_x[slot], ws.proj_y[slot], ev):
+            self._explode(slot, ev)
 
     def _spawn_rocket(self, ev) -> None:
         """P_SpawnPlayerMissile (MT_ROCKET) + P_CheckMissileSpawn, 2D, no autoaim (the docstring's conventions), into
@@ -1677,8 +1893,14 @@ class CombatMixin:
         """PIT_CheckThing for the rocket in slot s at (nx, ny): the monsters by slot, then the barrels by index (as
         `_missile_things`); the FIRST thing whose box overlaps (|dx| < r + ROCKET_R on both axes, 16.16) and that is
         solid or shootable stops it -- a solid corpse or an exploding barrel with no damage, anything else shootable
-        with ((P_Random()%8)+1)*20 on rng_fx (the source the player, the inflictor the rocket). True: it stopped."""
+        with ((P_Random()%8)+1)*20 on rng_fx (the source the player, the inflictor the rocket). True: it stopped.
+        M8 C6: a PLASMA BALL meets them by the same rule, with ((P_Random()%8)+1)*5 (`plasma_hit`), its events in
+        `plasma_hits`."""
         ws = self.ws
+        if self._is_plasma(s):
+            site, hits = self.sites.plasma_hit, ev.plasma_hits
+        else:
+            site, hits = self.sites.rocket_hit, ev.rocket_hits
         for j in range(self.layout.nmon):
             if not ws.mon_active[j]:
                 continue
@@ -1689,10 +1911,10 @@ class CombatMixin:
             if abs((ws.mon_x[j] << 16) - nx) >= bd or abs((ws.mon_y[j] << 16) - ny) >= bd:
                 continue
             if not shoot:
-                ev.rocket_hits.append(("corpse", j, 0))
+                hits.append(("corpse", j, 0))
                 return True
-            dmg = self._roll("rng_fx", self.sites.rocket_hit)
-            ev.rocket_hits.append(("mon", j, dmg))
+            dmg = self._roll("rng_fx", site)
+            hits.append(("mon", j, dmg))
             self.damage_monster(j, dmg, ("player", -1), ("proj", s), ev)
             return True
         for b, t in enumerate(self.barrel_things):
@@ -1702,10 +1924,10 @@ class CombatMixin:
             if abs((t.x << 16) - nx) >= bd or abs((t.y << 16) - ny) >= bd:
                 continue
             if not (ws.bar_state[b] and ws.bar_health[b] > 0):
-                ev.rocket_hits.append(("corpse", -1 - b, 0))
+                hits.append(("corpse", -1 - b, 0))
                 return True
-            dmg = self._roll("rng_fx", self.sites.rocket_hit)
-            ev.rocket_hits.append(("bar", b, dmg))
+            dmg = self._roll("rng_fx", site)
+            hits.append(("bar", b, dmg))
             self.damage_barrel(b, dmg, ("player", -1), ev)
             return True
         return False
@@ -1761,7 +1983,7 @@ class CombatMixin:
             ws.proj_tics[s] -= 1
             if ws.proj_tics[s]:
                 continue
-            nxt = gd.STATES[gd.STATE_NAMES[ws.proj_state[s]]].next
+            nxt = gd.STATES[gd.THING_STATE_NAMES[ws.proj_state[s]]].next
             if nxt != gd.S_NULL:
                 self._proj_set_state(s, nxt)
                 continue
@@ -1964,12 +2186,27 @@ class CombatMixin:
             if not ws.w_fired[k] and crossed(trig, (x, y), (cx, cy), PLAYER_R):
                 ws.w_fired[k] = 1
                 ws.d_monreq[self.door_order.index(trig[0])] = 1
+        for trig in self.door_repeats:                # M8 C3: the WR door lines (doors.repeat_act), every crossing
+            if crossed(_D.repeat_shape(trig), (x, y), (cx, cy), PLAYER_R):
+                d = self.door_order.index(trig[0])
+                act = _D.repeat_act(trig, (ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))
+                if act == "press":
+                    ws.d_monreq[d] = 1
+                elif act == "close":
+                    ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = _D.close_state(
+                        (ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))
         for trig in self.lift_walk:                   # M7 P2b: the WR lifts, every crossing
             if crossed(trig, (x, y), (cx, cy), PLAYER_R):
                 ws.l_req[self.lift_order.index(trig[0])] = 1
         for g, shape in self.floor_walk:              # M8 F1.3: the W1 floor lines (each group fires once)
             if _crossed_shape(shape, (x, y), (cx, cy), PLAYER_R):
                 self.floor_fire(g)
+        for trig in self.exit_walk:                   # M8 C9: the W1 exit (52) -- either side, the player only
+            if crossed(trig, (x, y), (cx, cy), PLAYER_R):
+                ws.g_leveldone = 1
+                if ev is not None:
+                    ev.level_done = True
+                break
         if self.teleports:                            # M8 L4: the WR teleports -- LAST (they move him)
             self._teleport_player(x, y, cx, cy, ev)
 
@@ -1988,7 +2225,8 @@ class CombatMixin:
         ws = self.ws
         ev = _W().TicEvents(0) if ev is None else ev
         for tel in self.teleports:
-            if not crossed_front(tel, (x, y), (cx, cy), PLAYER_R):
+            # M8 C5: the monster-only lines (125 / 126) are not his; a skill without the destination finds none
+            if tel.monster_only or not tel.on_skill(ws.skill) or not crossed_front(tel, (x, y), (cx, cy), PLAYER_R):
                 continue
             me = ("player", -1)                       # PIT_StompThing: tmthing is the inflictor AND the source
             for kind, i in stomp_victims(self, tel.dest, PLAYER_R):
@@ -2094,6 +2332,9 @@ class CombatMixin:
         elif kind == 2013:                                            # SOUL (M8 L0): +100, capped at 200
             ws.p_health = min(ws.p_health + SOUL_HEALTH, MAX_SOUL)
             taken = True
+        elif kind in _PW.POWER_TYPES:                                 # PINS / SUIT (M8 C6): P_GivePower, always
+            setattr(ws, _PW.FIELD[kind], _PW.TICS[kind])              # taken (the counter restarts)
+            taken = True
         elif kind == 2026:                                            # PMAP (M8 L0): P_GivePower(pw_allmap) --
             taken = True                                              # refused only when held (one map a level)
         elif kind == 2011:                                            # STIM
@@ -2131,6 +2372,8 @@ class CombatMixin:
             taken = self._give_weapon(gd.WP_CHAINSAW, False)
         elif kind == 2003:                                            # LAUN (P9)
             taken = self._give_weapon(gd.WP_MISSILE, False)
+        elif kind == 2004:                                            # PLAS (M8 C6): P_GiveWeapon, 2 x 20 cells
+            taken = self._give_weapon(gd.WP_PLASMA, False)
         elif kind == 2002:                                            # MGUN (P10): 2 clips, a dropped one 1
             taken = self._give_weapon(gd.WP_CHAINGUN, dropped)
         else:                                                         # SHOT (2001)

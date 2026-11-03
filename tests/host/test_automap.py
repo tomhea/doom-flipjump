@@ -41,15 +41,33 @@ def e1m1():
 
 def test_the_switch_is_per_map():
     """E1M1's and E1M2's MAP_CONFIG turn the page on; the default Config (a map not listed) leaves it off. E1M1's
-    entry is AUTOMAP alone: every other field is the default it had with no entry"""
+    entry is AUTOMAP and (#149) DOOR_NEIGHBOURS "legacy", host-side only: every other field is the default it had with
+    no entry, and its fj constants are the default's"""
     from dataclasses import fields
     from doomfj.config import MAP_CONFIG
     assert map_cfg(Config(), "E1M2").AUTOMAP == 1 and A.has_page("E1M2")
-    assert map_cfg(Config(), "E1M1").AUTOMAP == 1 and A.has_page("E1M1") and MAP_CONFIG["E1M1"] == {"AUTOMAP": 1}
-    assert Config().AUTOMAP == 0 and not A.has_page("E1M3")
+    assert map_cfg(Config(), "E1M1").AUTOMAP == 1 and A.has_page("E1M1")
+    assert MAP_CONFIG["E1M1"] == {"AUTOMAP": 1, "DOOR_NEIGHBOURS": "legacy"}
+    assert Config().AUTOMAP == 0 and not A.has_page("E2M1")   # a map MAP_CONFIG does not list (wave 3 gave E1M6 one)
     e1, base = map_cfg(Config(), "E1M1"), Config()
-    assert [f.name for f in fields(Config) if getattr(e1, f.name) != getattr(base, f.name)] == ["AUTOMAP"]
+    assert [f.name for f in fields(Config) if getattr(e1, f.name) != getattr(base, f.name)] == ["AUTOMAP",
+                                                                                                "DOOR_NEIGHBOURS"]
     assert e1.constants() == base.constants()
+
+
+def test_build_takes_the_screen_size_from_its_caller(e1m1):
+    """#149 (R6): `build` has no 160 x 100 of its own -- width and height are required, and `pages_for` passes the
+    config's W x H. CONTROL: a different screen size gives a different page (the arguments are used)"""
+    import inspect
+    params = inspect.signature(A.build).parameters
+    assert all(params[k].default is inspect.Parameter.empty for k in ("width", "height"))
+    c = map_cfg(Config(), "E1M1")
+    assert (e1m1.width, e1m1.height) == (c.W, c.H)
+    mw = WadFile.from_path("tests/fixtures/freedoom_e1m1.wad")
+    assert A.build(mw, "E1M1", _palette(), c.W, c.H) == e1m1
+    assert A.build(mw, "E1M1", _palette(), c.W + 64, c.H) != e1m1
+    with pytest.raises(TypeError):
+        A.build(mw, "E1M1", _palette())
 
 
 def test_e1m2_scale_and_bands(e1m2):
@@ -73,9 +91,13 @@ def test_e1m1_scale(e1m1):
     assert {"wall", "step", "blue", "exit"} == p.kinds
 
 
-# frozen at m8p-final (925af820): E1M2's page -- the dot's fj, the band streams, the cold block, the decls
-E1M2_FROZEN = {"fj": "8af3bbdae7ca544ed01cdc3b88e16fb7fc342af12f6b6e2bc890c14c3825d4fe",
-               "streams": "c1c42d6ed98bed8533cd6268cf3b86c0c6657a96726f1fb953958e5676b11e1f",
+# frozen at m8p-final (925af820): E1M2's page -- the dot's fj, the band streams, the cold block, the decls;
+# RE-FROZEN at the screen API change (io-api, 2026-10-23): the bands are draw_collines frames (COPY, END closing every
+# column, END_CMD + present) and the dot's KEEP is the API's 0xFE; the decls are m8p-final's. The PIXELS are
+# unchanged: test_each_band_stream_paints_its_picture decodes them through the device against the oracle
+E1M2_FROZEN = {"fj": "aff880c48eed4b6d386c77d28f45adb7997330607bafad4d332cf4d868cdf383",   # stl-adopt A8: the byte
+               # emits are hex.print; with them spelled by the old name the text hashes to m8p-final's 284edf9f...
+               "streams": "5a3d268dcafd5282c9cd06a1f7315b1550ed54c7ceb5e24d1ab519bfe19e0336",
                "decls": "909a7e89612060258d9148bdaabc96ec92373984f0fba09072095c30267d7289"}
 
 
@@ -124,7 +146,8 @@ def test_a_reciprocal_one_too_small_is_caught(e1m1, monkeypatch):
 def _decode(stream, w, h):
     """the stream through the REAL screen device (tests/host/test_menu.py's way): exactly one frame, its pixels"""
     scr = InMemoryScreen()
-    for byte in bytes([0x01, w & 0xFF, w >> 8, h & 0xFF, h >> 8, 8, 0, 1]) + stream:
+    from doomfj import screenwire as SW
+    for byte in SW.init_screen(w, h) + stream:
         for k in range(8):
             scr.write_bit(bool((byte >> k) & 1))
     assert scr.frame_count == 1
@@ -133,7 +156,7 @@ def _decode(stream, w, h):
 
 @pytest.mark.parametrize("which", ["e1m1", "e1m2"])
 def test_each_band_stream_paints_its_picture(which, request):
-    """ONE GENERATOR, TWO MIRRORS: each band's 0x0B stream, decoded by the REAL screen device, is its picture"""
+    """ONE GENERATOR, TWO MIRRORS: each band's frame, decoded by the REAL screen device, is its picture"""
     p = request.getfixturevalue(which)
     for k in range(p.nbands):
         assert _decode(A.band_stream(p, k), p.width, p.height) == A.band_pixels(p, k), k

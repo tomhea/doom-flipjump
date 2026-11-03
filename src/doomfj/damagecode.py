@@ -17,7 +17,7 @@ THE INTERFACE (the player's shot is the caller; `weaponcode.shot_decls` declares
 weapon runs before the player moves (combat: the tic-start view).
 
 THE CODE (no per-slot logic -- P3.2b's first build overflowed the table pool when per-slot code was unrolled):
-  * `dm_go`: a two-level `sim.jump16` on dm_id to the slot's stub `dmg<m>`, which copies the slot's cells into the
+  * `dm_go`: a two-level `hex.switch` on dm_id to the slot's stub `dmg<m>`, which copies the slot's cells into the
     window (the `dm_*` registers), its position from thpos_rt, its damage PROFILE index (`dm_type`), calls `dm_leaf`
     and copies the cells back;
   * `dm_leaf`, the model's order (`_line_attack`, then damage_monster): P_AproxDistance(target - player) > reach ->
@@ -58,6 +58,8 @@ first, as a shot's) -- whose SOURCE is `dm_src` (mon_target's code: 0 none, 1 th
 it, dm_out zeroes it); a player's shot (modes 0, 1) names the player, as before; a BLAST names `dm_src` too (the
 barrel's bar_src: barrelcode). The switch is DOOM's (combat.damage_monster): threshold 0, a source, not the target
 itself (`dm_me`, set by the slot's stub) -> the target is the source; mon_target is two nibbles (`dm_tg`).
+M8 C2 (docs/c2-slot-ids.md): on a map past 254 monster + barrel slots (world.slot_nibbles 3) every id and code here is
+THREE nibbles -- dm_id (a third dispatch level), dm_src, dm_me, dm_tg, kb_tg.
 
 M8 (`telefrag`, a map with a WR teleport; doomfj.teleport, combat._teleport_player): dm_melee TELEFRAG (5) is
 P_TeleportMove's P_DamageMobj(thing, player, player, 10000) -- teleportcode's stomp leaf calls dm_go with it (through
@@ -85,6 +87,11 @@ FX_PLAYER_MODES = tuple(m for m in _PLAYER_MODES if _player_bleeds(m))
 DM_MAX = 20                          # the largest damage a shot deals in P4.2a (the fist and the saw: 20)
 MONSTER, BULLET = 3, 4               # M7 P8a I: dm_melee for a monster's hit (monsterdecide.DM_MONSTER / DM_BULLET)
 FIGHT_DECLS = ["dm_src: hex.vec 2", "dm_me: hex.vec 2"]     # M7 P8a I: the hit's source; the hit slot's own code
+
+
+def fight_decls(sn: int = 2) -> List[str]:
+    """FIGHT_DECLS at M8 C2's slot-id width `sn` (world.slot_nibbles)"""
+    return ["dm_src: hex.vec %d" % sn, "dm_me: hex.vec %d" % sn]
 DM_MAX_FULL = 200                    # M7 P6: the berserk fist (A_Punch x10); a barrel's blast deals <= 128
 BLAST = 2                            # M7 P6: dm_melee's value for a barrel's blast (no reach, no blood)
 TELEFRAG = 5                         # M8: dm_melee's value for P_TeleportMove's 10000 (no reach, no blood)
@@ -174,7 +181,7 @@ def check_model_rules(w, *, max_dmg: int = DM_MAX, gib: bool = False) -> None:
             x = info.xdeathstate
             if x != gd.S_NULL:
                 st = gd.STATES[x]
-                assert 4 <= st.tics < TICS_FOREVER and gd.STATE_INDEX[x] < 256, (x, st.tics)
+                assert 4 <= st.tics < TICS_FOREVER and gd.THING_STATE_INDEX[x] < 256, (x, st.tics)
                 assert st.action is None or st.action in SOUND_ACTIONS, (x, st.action)
                 _death_chain_ok(x)
             assert info.spawnhealth < (1 << 11), info.spawnhealth
@@ -189,9 +196,9 @@ def check_model_rules(w, *, max_dmg: int = DM_MAX, gib: bool = False) -> None:
             st = gd.STATES[s]
             assert 0 < st.tics < TICS_FOREVER, (s, st.tics, "a zero-tic or forever state: _set_state would chain")
             assert not run or st.action is None or st.action in SOUND_ACTIONS, (s, st.action)
-            assert gd.STATE_INDEX[s] < 256
+            assert gd.THING_STATE_INDEX[s] < 256
         assert gd.STATES[death].tics >= 4, (death, "tics - (P_Random() & 3) could clamp at 1")
-        assert gd.STATE_INDEX[spawn] < 256 and see != gd.S_NULL
+        assert gd.THING_STATE_INDEX[spawn] < 256 and see != gd.S_NULL
         _death_chain_ok(death)
     assert 0 < gd.BASETHRESHOLD < 128, "mon_threshold is 7 bits"
 
@@ -230,25 +237,26 @@ WINDOW = (("dm_hp", "mon_health"), ("dm_sh", "mon_shootable"), ("dm_st", "mon_st
 
 
 def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int], *, nbar: int = 0,
-             drops: Dict[int, int] = None, knock: bool = False, fight: bool = False) -> List[str]:
+             drops: Dict[int, int] = None, knock: bool = False, fight: bool = False, souls=None,
+             sn: int = 2) -> List[str]:
     """`dm_go` and the per-slot stubs `dmg<m>`: copy the slot's cells in, `dm_leaf`, copy them back. M7 P6: ids
     n + 1 .. n + nbar jump to barrelcode's `dmb<b>`; `drops` {slot: dropper k}: a kill on slot m calls
     `drop_link<k>` after the copy-back. `knock` (M7 P8a, world.knockback_on): each stub names its slot as the
     thrust's target (kb_tg = 1 + m: doomfj.knockcode) -- the blast calls the stubs directly, so the stub, not dm_go.
     `fight` (M7 P8a I): each
-    stub names its slot's own code (dm_me = 2 + m: the switch refuses the target itself as its source)"""
-    from doomfj.monstercode import cell_nibbles
+    stub names its slot's own code (dm_me = 2 + m: the switch refuses the target itself as its source).
+    M8 C8 (`souls` {slot: soul index}, a map with a lost soul): a soul's stub carries its MF_SKULLFLY in and back
+    (`dm_skf`) and its soul index (`dm_skk`); every other stub clears dm_skf.
+    M8 C2 (`sn`, world.slot_nibbles): the ids' width -- 3 past 254 slots: dm_id, kb_tg, dm_me, and a third dispatch
+    level (monstercode.id_jump_lines)"""
+    from doomfj.monstercode import cell_nibbles, id_jump_lines
     n = len(slot_rt)
     nid = n + nbar
-    assert len(slot_profile) == n and 0 < n and nid < 255, (n, nbar)
-    nh = nid // 16 + 1                                 # ids 1 .. nid (id 0: nothing)
+    assert len(slot_profile) == n and 0 < n and nid < 16 ** sn - 1, (n, nbar, sn)
 
     def target(i):
         return "dm_none" if not 1 <= i <= nid else "dmg%d" % (i - 1) if i <= n else "dmb%d" % (i - 1 - n)
-    out = ["dm_go:",
-           "    sim.jump16 dm_id + 1*dw, " + ", ".join("dm_h%d" % h if h < nh else "dm_none" for h in range(16))]
-    for h in range(nh):
-        out += ["  dm_h%d:" % h, "    sim.jump16 dm_id, " + ", ".join(target(16 * h + l) for l in range(16))]
+    out = ["dm_go:"] + id_jump_lines("dm_id", sn, nid + 1, target, "dm_none", "dm_h%d", "dm_g%d")  # ids 1 .. nid
     for m in range(n):
         cells = [(reg, "%s + %d*dw" % (f, cell_nibbles(schema, f) * m), cell_nibbles(schema, f)) for reg, f in WINDOW]
         out += ["  dmg%d:" % m]
@@ -256,10 +264,16 @@ def go_lines(schema, slot_rt: Sequence[int], slot_profile: Sequence[int], *, nba
         out += ["    hex.mov 4, dm_x, thpos_rt + %d*dw" % (16 * slot_rt[m] + 4),
                 "    hex.mov 4, dm_y, thpos_rt + %d*dw" % (16 * slot_rt[m] + 12),
                 "    hex.set 1, dm_type, %d" % slot_profile[m],
-                *(["    hex.set 2, kb_tg, %d" % (m + 1)] if knock else []),   # M7 P8a: the thrust's target
-                *(["    hex.set 2, dm_me, %d" % (m + 2)] if fight else []),   # M7 P8a I: the slot's own code
+                *(["    hex.set %d, kb_tg, %d" % (sn, m + 1)] if knock else []),   # M7 P8a: the thrust's target
+                *(["    hex.set %d, dm_me, %d" % (sn, m + 2)] if fight else []),   # M7 P8a I: the slot's own code
+                *((["    hex.mov 1, dm_skf, sk_fly + %d*dw" % souls[m], "    hex.set 1, dm_skk, %d" % souls[m],
+                    "    hex.set 1, dm_sk, 1"]
+                   if m in souls else ["    hex.zero 1, dm_skf", "    hex.zero 1, dm_sk"])
+                  if souls else []),                                   # M8 C8: a soul's flight, a soul
                 "    stl.fcall dm_leaf, dm_lret"]
         out += ["    hex.mov %d, %s, %s" % (nib, cell, reg) for reg, cell, nib in cells]
+        if souls and m in souls:
+            out += ["    hex.mov 1, sk_fly + %d*dw, dm_skf" % souls[m]]
         if drops and m in drops:                       # M7 P6: this call's kill drops the slot's item
             out += ["    hex.if0 1, dm_kd, dmg%d_r" % m, "    stl.fcall drop_link%d, drl_ret" % drops[m],
                     "  dmg%d_r:" % m]
@@ -276,7 +290,8 @@ FX_CALL_FULL = ["    hex.zero 1, fxs_kind"] + FX_CALL
 
 
 def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knock: bool = False,
-               fight: bool = False, stats: bool = False, telefrag: bool = False) -> List[str]:
+               fight: bool = False, stats: bool = False, telefrag: bool = False, souls=None, sn: int = 2,
+               count_nib: int = 2) -> List[str]:
     """`dm_leaf` (stl.fcall dm_leaf, dm_lret) on the window -- the module docstring's order. `keys`: the profiles
     (`profiles(w)[0]`); mt_dist_leaf (monstercode.dist_leaf_lines) computes P_AproxDistance. `fx` (M7 P5): a hit in
     reach spawns blood (FX_CALL) before the target's own checks. `full` (M7 P6; `keys` are then
@@ -287,7 +302,13 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
     `fight` (M7 P8a I; the module docstring): the MONSTER and BULLET modes (their inflictor is the caller's, as a
     BLAST's), the source `dm_src` and DOOM's switch on it; dm_out zeroes dm_src.
     `telefrag` (M8; the module docstring): the TELEFRAG mode -- no reach, no blood, the player's thrust, the health
-    set to MON_HEALTH_MIN"""
+    set to MON_HEALTH_MIN.
+    M8 C8 (`souls` {slot: soul index}, a map with a lost soul; doomfj.lostsoul): P_DamageMobj's MF_SKULLFLY rules --
+    after the "not shootable / dead" returns and before the thrust, a flying soul's momentum and momz are zeroed
+    (`dmz<k>`, kb_live less one if it was moving); the pain roll is drawn but no pain state while it flies; the kill
+    clears the flight (P_KillMobj).
+    M8 C2: `sn` (world.slot_nibbles) -- the source and the target codes' width (dm_src, dm_me, dm_tg: 3 past 254
+    slots); `count_nib` -- st_kill's (statcode.count_nibbles)"""
     from doomfj.combat import MISSILERANGE_U, MON_HEALTH_MIN
     classes = pain_classes(keys)
     assert not telefrag or full, "M8: the telefrag gibs: it rides the full leaf"
@@ -326,6 +347,18 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
            "    hex.if_flags dm_hp + 2*dw, 0xFF00, dm_pos, dm_out",            # health < 0
            "  dm_pos:",
            "    hex.if0 3, dm_hp, dm_out",                                    # health == 0
+           # M8 C8: a flying soul stops (`target->momx = momy = momz = 0`), before the thrust
+           *((["    hex.if0 1, dm_skf, dm_nsk",
+               "    hex.switch dm_skk, %s" % ", ".join("dmz%d" % k if k < len(souls) else "dm_nsk"
+                                                       for k in range(16))]
+              + sum((["  dmz%d:" % k,
+                      "    hex.zero 8, sk_momz + %d*dw" % (8 * k),
+                      "    hex.if1 8, mkx + %d*dw, dmz%d_l" % (8 * m, k), "    hex.if0 8, mky + %d*dw, dm_nsk" % (8 * m),
+                      "  dmz%d_l:" % k,
+                      "    hex.zero 8, mkx + %d*dw" % (8 * m), "    hex.zero 8, mky + %d*dw" % (8 * m),
+                      "    hex.dec %d, kb_live" % sn, "    ;dm_nsk"]
+                     for m, k in sorted(souls.items(), key=lambda x: x[1])), [])
+              + ["  dm_nsk:"]) if souls else []),
            # M7 P8a: the thrust -- a shot's inflictor is the player; a BLAST's, the barrel the blast named
            *(["    hex.if_flags dm_melee, %d, dm_kbp, dm_kbgo"
               % ((1 << BLAST) | ((1 << MONSTER) | (1 << BULLET) if fight else 0)),
@@ -344,18 +377,18 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
            "    hex.inc 2, dm_rng",                                            # P_Random on the monster's stream:
            "    dmrnd.lookup dm_rr, dm_rng",                                   # v & 3, and the pain bits
            "    hex.zero 1, dm_pn",
-           "    sim.jump16 dm_type, " + ", ".join("dm_p%d" % k if k < len(keys) else "dm_out" for k in range(16))]
+           "    hex.switch dm_type, " + ", ".join("dm_p%d" % k if k < len(keys) else "dm_out" for k in range(16))]
     for k, (pc, pain, death, spawn, see, *gib) in enumerate(keys):
         out += ["  dm_p%d:" % k,
-                "    hex.set 2, dm_dst, %d" % gd.STATE_INDEX[death], "    hex.set 1, dm_dti, %d" % _tics(death)]
+                "    hex.set 2, dm_dst, %d" % gd.THING_STATE_INDEX[death], "    hex.set 1, dm_dti, %d" % _tics(death)]
         if full:                                 # M7 P6: the gib -- below -spawnhealth, the xdeath state
             hp0, xd = gib
             xd = death if xd == gd.S_NULL else xd   # none: the gib test's both outcomes are the death
             out += ["    hex.set 3, dm_nsh, %d" % (-hp0 & 0xFFF),
-                    "    hex.set 2, dm_xst, %d" % gd.STATE_INDEX[xd], "    hex.set 1, dm_xti, %d" % _tics(xd)]
-        out += ["    hex.set 2, dm_pst, %d" % gd.STATE_INDEX[pain], "    hex.set 1, dm_pti, %d" % _tics(pain),
-                "    hex.set 2, dm_sp, %d" % gd.STATE_INDEX[spawn],
-                "    hex.set 2, dm_se, %d" % gd.STATE_INDEX[see], "    hex.set 1, dm_seti, %d" % _tics(see),
+                    "    hex.set 2, dm_xst, %d" % gd.THING_STATE_INDEX[xd], "    hex.set 1, dm_xti, %d" % _tics(xd)]
+        out += ["    hex.set 2, dm_pst, %d" % gd.THING_STATE_INDEX[pain], "    hex.set 1, dm_pti, %d" % _tics(pain),
+                "    hex.set 2, dm_sp, %d" % gd.THING_STATE_INDEX[spawn],
+                "    hex.set 2, dm_se, %d" % gd.THING_STATE_INDEX[see], "    hex.set 1, dm_seti, %d" % _tics(see),
                 "    hex.if_flags dm_rr + 1*dw, %d, dm_typed, dm_p%dy" % (pain_mask(classes.index(pc)), k),
                 "  dm_p%dy:" % k,
                 "    hex.set 1, dm_pn, 1",
@@ -366,6 +399,7 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
             "    hex.if0 3, dm_hp, dm_kill",                                    # health == 0: dead
             # ---- hurt: the pain roll; reactiontime 0; threshold 0 -> the player becomes the target --------------
             "    hex.if0 1, dm_pn, dm_nopain",
+            *(["    hex.if1 1, dm_skf, dm_nopain"] if souls else []),     # M8 C8: no pain while it flies
             "    hex.set 1, dm_jh, 1",
             "    hex.mov 2, dm_st, dm_pst", "    hex.mov 1, dm_ti, dm_pti",
             "  dm_nopain:",
@@ -373,12 +407,12 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
             "    hex.if1 2, dm_th, dm_out",
             *(["    hex.if_flags dm_melee, 3, dm_swsrc, dm_swpl",          # M7 P8a I: a shot names the player
                "  dm_swpl:",
-               "    hex.set 2, dm_tg, 1", "    ;dm_swset",
+               "    hex.set %d, dm_tg, 1" % sn, "    ;dm_swset",
                "  dm_swsrc:",                                                # else dm_src: none, itself -> no switch
-               "    hex.if0 2, dm_src, dm_out",
-               "    hex.cmp 2, dm_src, dm_me, dm_swok, dm_out, dm_swok",
+               "    hex.if0 %d, dm_src, dm_out" % sn,
+               "    hex.cmp %d, dm_src, dm_me, dm_swok, dm_out, dm_swok" % sn,
                "  dm_swok:",
-               "    hex.mov 2, dm_tg, dm_src",
+               "    hex.mov %d, dm_tg, dm_src" % sn,
                "  dm_swset:"] if fight else
               ["    hex.set 1, dm_tg, 1"]),
             "    hex.set 2, dm_th, %d" % gd.BASETHRESHOLD,
@@ -389,7 +423,11 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
             # ---- P_KillMobj: not shootable, the death state, tics -= P_Random() & 3 (>= 4 tics: no clamp) -----
             "  dm_kill:",
             "    hex.zero 1, dm_sh",
-            *(_statcode.kill_lines() if stats else [])]                  # P10: LEVEL COMPLETE's KILLS
+            *(["    hex.zero 1, dm_skf"] if souls else []),               # M8 C8: P_KillMobj ends the flight
+            # M8 C8: MT_SKULL is not MF_COUNTKILL -- a soul's death is not counted
+            *((["    hex.if1 1, dm_sk, dm_kc_n"] if (stats and souls) else [])
+              + (_statcode.kill_lines(count_nib) if stats else [])
+              + (["  dm_kc_n:"] if (stats and souls) else []))]          # P10: LEVEL COMPLETE's KILLS
     if full:                                     # M7 P6: the drop's flag; the gib (health < -spawnhealth)
         out += ["    hex.set 1, dm_kd, 1",
                 "    hex.scmp 3, dm_hp, dm_nsh, dm_gib, dm_ngib, dm_ngib",
@@ -401,14 +439,14 @@ def leaf_lines(keys: Sequence[tuple], fx: bool = False, full: bool = False, knoc
             "    hex.sub 1, dm_ti, dm_rr",
             "  dm_out:",
             *(["    hex.zero 1, kb_on"] if knock else []),             # M7 P8a: the next site names its own
-            *(["    hex.zero 2, dm_src"] if fight else []),            # M7 P8a I: ... and its own source
+            *(["    hex.zero %d, dm_src" % sn] if fight else []),      # M7 P8a I: ... and its own source
             "    stl.fret dm_lret"]
     return out
 
 
 def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = DM_MAX, fx: bool = False,
                  full: bool = False, nbar: int = 0, drops: Dict[int, int] = None, knock: bool = False,
-                 fight: bool = False, stats: bool = False, telefrag: bool = False) -> dict:
+                 fight: bool = False, stats: bool = False, telefrag: bool = False, souls=None) -> dict:
     """everything P4.2a's damage adds, for the World `w` (any monster mode; the emitter's needs P3.2c "decide"):
       * `decls`: the P42 cells at `boot_skill`'s level start, the interface, the window and the scratch;
       * `lines`: dm_go, the per-slot stubs, dm_leaf -- leaves (each ends in a fret), placed where nothing falls in;
@@ -423,7 +461,8 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     which the caller adds). `fight` (M7 P8a I): a monster's hits (the module docstring) -- `w`'s schema must have
     the wide mon_target (a World in the "final" modes).
     `stats` (P10, doomfj.statcode): `dm_kill` counts the kill in `st_kill` (statcode declares it: the game tier's).
-    `telefrag` (M8, a map with a WR teleport): dm_melee's TELEFRAG mode (the module docstring)."""
+    `telefrag` (M8, a map with a WR teleport): dm_melee's TELEFRAG mode (the module docstring).
+    `souls` (M8 C8, a map with a lost soul: {slot: soul index}): leaf_lines' and go_lines' soul rules"""
     if stats:
         _statcode.check_world(w)
     if full:
@@ -431,7 +470,9 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     else:
         assert not nbar and not drops, "M7 P6: barrels and drops are the full mode's"
     from doomfj.monstercode import cell_nibbles
-    assert cell_nibbles(w.schema, "mon_target") == (2 if fight else 1), "M7 P8a I: the target's width is the fight's"
+    from doomfj.world import slot_nibbles
+    sn = slot_nibbles(w.layout)                         # M8 C2: 3 past 254 monster + barrel slots
+    assert cell_nibbles(w.schema, "mon_target") == (sn if fight else 1), "M7 P8a I: the target's width is the fight's"
     check_model_rules(w, max_dmg=max_dmg, gib=full)
     n = w.layout.nmon
     assert len(slot_rt) == n
@@ -440,9 +481,13 @@ def damage_parts(w, *, slot_rt: Sequence[int], boot_skill: int, max_dmg: int = D
     vals = {f: list(getattr(snap, f)[:n]) for f in P42_FIELDS}
     return {"fields": P42_FIELDS,
             "decls": field_decls(w.schema, n, vals) + DM_INTERFACE
-            + [("dm_tg: hex.vec 2" if fight and d == "dm_tg: hex.vec 1" else d) for d in DM_WINDOW] + DM_SCRATCH
-            + (DM_FULL_SCRATCH if full else []) + (FIGHT_DECLS if fight else []),
-            "lines": (go_lines(w.schema, slot_rt, of, nbar=nbar, drops=drops, knock=knock, fight=fight)
-                      + leaf_lines(keys, fx=fx, full=full, knock=knock, fight=fight, stats=stats, telefrag=telefrag)),
+            + [("dm_tg: hex.vec %d" % sn if fight and d == "dm_tg: hex.vec 1" else d) for d in DM_WINDOW] + DM_SCRATCH
+            + (DM_FULL_SCRATCH if full else []) + (fight_decls(sn) if fight else [])
+            + (["dm_skf: hex.vec 1", "dm_skk: hex.vec 1", "dm_sk: hex.vec 1"] if souls else []),   # M8 C8
+            "lines": (go_lines(w.schema, slot_rt, of, nbar=nbar, drops=drops, knock=knock, fight=fight, sn=sn,
+                               **({"souls": souls} if souls else {}))
+                      + leaf_lines(keys, fx=fx, full=full, knock=knock, fight=fight, stats=stats, telefrag=telefrag,
+                                   sn=sn, count_nib=_statcode.count_nibbles(w),
+                                   **({"souls": souls} if souls else {}))),
             "tables": [generate_dispatch_table_fj("dmrnd", dmrnd_values(pain_classes(keys)),
                                                   index_nibbles=2, result_nibbles=2)]}

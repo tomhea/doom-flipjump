@@ -59,7 +59,14 @@ def drop_lump(kind: int) -> str:
 # P9: a mobile frame with NO single-rotation lump is drawn at ONE fixed rotation -- the player's rocket in flight
 # (MISLA has rotations 1..8 only): rotation 5, the rocket SEEN FROM BEHIND, as the player who fired it mostly sees it
 # (a convention: DOOM picks the rotation by the viewer's angle to the rocket's flight)
-MOBILE_ROTATION = {("MISL", 0): 5}
+MOBILE_ROTATION = {("MISL", 0): 5,
+                   # M8 C8: the Baron's green fireball in flight (BAL7A / BAL7B have rotations 1..8 only): rotation 1,
+                   # the fireball SEEN FROM THE FRONT, as its target mostly sees it (the rocket's convention, mirrored);
+                   # its explosion BAL7C0 .. E0 is single-rotation
+                   ("BAL7", 0): 1, ("BAL7", 1): 1}
+# M8 C8: a fixed rotation whose lump also holds a MIRRORED one is named by both (BAL7A1A5: rotation 1, 5 mirrored) --
+# the lump a mobile is drawn from, its first (unmirrored) rotation
+MOBILE_LUMP_NAMES = {("BAL7", "A", 1): "BAL7A1A5", ("BAL7", "B", 1): "BAL7B1B5"}
 
 
 def mobile_view(state_name: str) -> Tuple[str, str, int]:
@@ -75,7 +82,7 @@ def mobile_lump(state_name: str) -> str:
     single-rotation `...0` lump (BAL1A0 .. BAL1E0, BLUDA0 .. BLUDC0, PUFFA0 .. PUFFD0); P9: the rocket's MISLA5 (in
     flight, MOBILE_ROTATION) and MISLB0 .. MISLD0 (its explosion)"""
     sprite, letter, rot = mobile_view(state_name)
-    return "%s%s%d" % (sprite, letter, rot)
+    return MOBILE_LUMP_NAMES.get((sprite, letter, rot), "%s%s%d" % (sprite, letter, rot))
 
 
 def rotation(rm, view_x16: int, view_y16: int, thing_x16: int, thing_y16: int, facing: int) -> int:
@@ -347,8 +354,10 @@ class MonsterPhase:
     def switch_uses(self, movers: tuple, x16: int, y16: int) -> None:
         """a use PRESS's switch step, called by a gate on the press edge BEFORE its exit test and its
         `movers.MoverPhase.use_press`: `movers` the gate's mover state (lifts, req, switched) -- World.switch_uses on
-        the lifts' states and the floor groups' timers (the wide fswitch vector's second half; E1M1's layout has none)"""
+        the lifts' states and the floor groups' timers (the wide fswitch vector's second half; E1M1's layout has none).
+        M8 C4: and the light switches' presses (World.light_presses: none on E1M1 / E1M2)"""
         w = self.world
+        w.light_presses(x16, y16)                 # M8 C4: the light switches (138) -- the World's own cells
         if not w.switch_cells:
             return
         lifts, _req, sw = movers
@@ -460,7 +469,9 @@ class MonsterPhase:
         doors' requests, the lifts' -- M8 F1.3: and, in the wide layout, the floor groups' states and timers"""
         ws = self.world.ws
         return ((ws.w_fired, ws.d_monreq, ws.l_req)
-                + ((ws.f_switch, ws.f_sub) if self.world.floor_wide else ()))
+                + ((ws.f_switch, ws.f_sub) if self.world.floor_wide else ())
+                # M8 C3: a WR close line starts its door closing in the move (doors.close_state)
+                + ((ws.d_dir, ws.d_sub) if any(t[1] == "close" for t in self.world.door_repeats) else ()))
 
     def _walk_keep(self) -> tuple:
         return tuple(list(a) for a in self._walk_arrays())
@@ -488,6 +499,12 @@ class MonsterPhase:
         self.sync(ds, lifts, sw)
         self.tic(x16, y16, angle)
         dr, lr = self.requests()
+        w = self.world
+        if mps is not None and w.boss_group is not None and w.floor_wide:
+            # M8 C8: A_BossDeath fired the boss floor group INSIDE the monsters' tic (world.floor_fire, as the fj's
+            # `<L>boss` sets its fswitch cells): the gate's mover state takes the world's floor cells back -- `sync`
+            # wrote the gate's into the world before the tic, so nothing else in the tic can have moved them
+            sw = tuple(w.ws.f_switch) + tuple(w.ws.f_sub)
         return (ds, fired, frozenset(req) | dr, card), ((lifts, frozenset(lreq) | lr, sw) if mps is not None else None)
 
     # ---- M7 P4.1: the weapon half (docs/gp-combat.md section 1) -------------------------------------------------------
@@ -512,7 +529,7 @@ class MonsterPhase:
         fades). None reads `p_dead` now (the modes before P7, where nothing kills the player before the weapon).
         Dead in a mortal mode (world.player_mortal): the model's own `_death_think` -- the psprites, the damage
         fade, and a HELD use asks for the restart (`g_restart`). Alive: the keys, the psprites, then (combat's
-        order) the berserk counter, the damage and the bonus fades."""
+        order) the berserk counter, M8 C6's power countdown (`_power_tic`), the damage and the bonus fades."""
         from doomfj.world import KEYS, TicEvents, player_mortal
         w = self.world
         self._tap_at = len(self.tap.records)          # M7 P8a: the frame's knock records start here (`move`)
@@ -536,6 +553,7 @@ class MonsterPhase:
         # M7 P6: the berserk counter grows before them (zero until a PSTR is taken: always zero before "full")
         if ws.p_strength:
             ws.p_strength = min(ws.p_strength + 1, 0xFFFF)
+        w._power_tic()                    # M8 C6: P_PlayerThink's power countdown, after the strength (combat's order)
         if ws.p_damagecount:
             ws.p_damagecount -= 1
         if ws.p_bonuscount:
@@ -687,17 +705,18 @@ class MonsterPhase:
         from doomfj import weaponcode as WC
         from doomfj.world import player_resolves
         ws, gd = self.world.ws, self.gd
-        idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(WC.weapon_states())}
+        pl = bool(self.world.layout.plasma)            # M8 C6: a map with the plasma rifle (its seventh weapon)
+        idx = {gd.STATE_INDEX[s]: i for i, s in enumerate(WC.weapon_states(pl))}
         wst, fst = gd.STATE_NAMES[ws.p_wpn_state], gd.STATE_NAMES[ws.p_flash_state]
         return {"wp_rdy": ws.p_ready, "wp_pend": ws.p_pending, "wp_st": idx[ws.p_wpn_state], "wp_tics": ws.p_wpn_tics,
                 "wp_sy": ws.p_wpn_sy, "fl_st": idx[ws.p_flash_state], "fl_tics": ws.p_flash_tics,
                 "wp_rf": ws.p_refire, "wp_ad": ws.p_attackdown, "am_clip": ws.p_ammo[gd.AM_CLIP],
                 "am_shell": ws.p_ammo[gd.AM_SHELL],
-                "wp_own": sum(int(bool(ws.p_owned[w])) << (4 * i) for i, w in enumerate(WC.WEAPONS)),
+                "wp_own": sum(int(bool(ws.p_owned[w])) << (4 * i) for i, w in enumerate(WC.weapons(pl))),
                 **({"aim_sid": tuple(ws.aim_sid)} if player_resolves(self.world.player) else {}),
-                "rng_pl": ws.rng_player, "wp_frm": WC.overlay_frames().index(WC.psprite_lump(wst)),
+                "rng_pl": ws.rng_player, "wp_frm": WC.overlay_frames(plasma=pl).index(WC.psprite_lump(wst)),
                 "fl_frm": 0 if fst == gd.S_NULL or gd.STATES[fst].tics == 0
-                else 1 + WC.flash_frames().index(WC.psprite_lump(fst))}
+                else 1 + WC.flash_frames(pl).index(WC.psprite_lump(fst))}
 
     def screen_kw(self) -> dict:
         """`hud.GameScreen.frame`'s keywords for the player's weapon and bar: the psprites' lumps and the values"""
@@ -709,15 +728,19 @@ class MonsterPhase:
         fst = gd.STATE_NAMES[ws.p_flash_state]
         ammo = {gd.WP_PISTOL: ws.p_ammo[gd.AM_CLIP], gd.WP_SHOTGUN: ws.p_ammo[gd.AM_SHELL],
                 gd.WP_MISSILE: ws.p_ammo[gd.AM_MISL],                             # P9: the launcher's rockets
-                gd.WP_CHAINGUN: ws.p_ammo[gd.AM_CLIP]}.get(ws.p_ready)            # P10: the chaingun's bullets
+                gd.WP_CHAINGUN: ws.p_ammo[gd.AM_CLIP],                            # P10: the chaingun's bullets
+                gd.WP_PLASMA: ws.p_ammo[gd.AM_CELL]}.get(ws.p_ready)              # M8 C6: the rifle's cells
         from doomfj.hud import NO_PSPRITE
+        from doomfj.powers import INVIS_TYPE as _INVIS, blinking as _blinking
         dead = bool(ws.p_dead)                          # P10: a dead player draws no weapon (hudcode's `dead_cell`)
         return {"weapon": NO_PSPRITE if dead else WC.psprite_lump(gd.STATE_NAMES[ws.p_wpn_state]),
                 "flash": None if dead or fst == gd.S_NULL or gd.STATES[fst].tics == 0 else WC.psprite_lump(fst),
                 "values": {"ammo": ammo, "health": max(0, ws.p_health), "armor": ws.p_armor,
                            "owned": arms_owned(ws.p_owned),             # P9: DOOM's six ARMS digits 2..7
                            # M8 F4: the yellow and red cards' icons (never held on E1M1: its bar is unchanged)
-                           "yellow": bool(ws.p_cards[gd.IT_YELLOWCARD]), "red": bool(ws.p_cards[gd.IT_REDCARD])}}
+                           "yellow": bool(ws.p_cards[gd.IT_YELLOWCARD]), "red": bool(ws.p_cards[gd.IT_REDCARD])},
+                # M8 C6: an invisible player's psprites are the shadow weapon (R_DrawPSprite; a map holding 2024 only)
+                **({"shadow": _blinking(ws.p_invis)} if _INVIS in self.world.powers else {})}
 
     def boxes(self) -> list:
         """[(x16, y16, r16)] of every live monster -- a closing door reverses on them (World.door_touched)"""
@@ -794,7 +817,9 @@ class MonsterPhase:
           p_rct   2 nibbles  M8 L4: the player's reactiontime after a teleport, 0..18 (a map with a WR teleport
                              in a looting mode: doomfj.teleportcode)
           ltst    1 nibble a thinker, ltct 2 nibbles a thinker, rng_lt 2 nibbles -- M8: the sector light thinkers'
-                  states, counts (a glow's direction) and stream (a map whose flag is on: doomfj.lightcode)"""
+                  states, counts (a glow's direction) and stream (a map whose flag is on: doomfj.lightcode)
+          p_inv / p_rad   3 nibbles each -- M8 C6: the timed powers' counters (a map holding 2024 / 2025:
+                  doomfj.powercode)"""
         from doomfj.world import infighting_on, knockback_on, player_loots, player_sinks
         w, ws, n = self.world, self.world.ws, self.world.layout.nmon
         out = {}
@@ -814,12 +839,34 @@ class MonsterPhase:
             out["bar_src"] = tuple(ws.bar_src)
         if getattr(w, "teleports", None) and player_loots(w.player):
             out["p_rct"] = ws.p_reaction
+            if getattr(w, "tele_once", None):        # M8 C5: the W1 monster teleports' latches (E1M7)
+                out["tp_w1"] = ws.tp_fired[0] if len(w.tele_once) == 1 else tuple(ws.tp_fired)
+        from doomfj import powers as _PW                     # M8 C6: the timed powers' counters
+        for k in getattr(w, "powers", ()):
+            out[_PW.CELL[k]] = getattr(ws, _PW.FIELD[k])
         if getattr(w, "light_thinkers", None):   # M8 (doomfj.lightcode): the light thinkers' cells
             one = len(w.light_thinkers) == 1         # the probe reads a count-1 cell as an int
             out.update({"ltst": ws.lt_state[0] if one else tuple(ws.lt_state),
                         "ltct": ws.lt_count[0] if one else tuple(ws.lt_count), "rng_lt": ws.rng_light})
         out.update(self.switch_state())                      # M8: the switch textures (a SWITCH_TEX map)
+        out.update(self.soul_state())                        # M8 C8: the lost souls (doomfj.soulcode)
         return out
+
+    def soul_state(self) -> Dict[str, object]:
+        """M8 C8 (doomfj.soulcode.PERSIST): the lost souls' cells in their fj units -- sk_fly, sk_inf (1 nibble a
+        soul), sk_z, sk_momz (16.16 as 32 bits unsigned), sk_ceil (16 bits); {} on a map without a soul. A probe
+        reads a count-1 cell as an int"""
+        w = self.world
+        souls = getattr(w, "soul_slots", ())
+        if not souls or w.monsters not in ("push", "final"):
+            return {}
+        ws, n = w.ws, len(souls)
+
+        def cell(vals):
+            return vals[0] if n == 1 else tuple(vals)
+        return {"sk_fly": cell(list(ws.sk_fly)), "sk_inf": cell(list(ws.sk_inf)),
+                "sk_z": cell([v & MASK32 for v in ws.sk_z]), "sk_momz": cell([v & MASK32 for v in ws.sk_momz]),
+                "sk_ceil": cell([v & 0xFFFF for v in ws.sk_ceil])}
 
     # ---- M7 P5: the monsters' attacks (docs/gp-p5-interface.md, "the cells' units") -----------------------------------
     def hurt_state(self) -> Dict[str, int]:
@@ -844,7 +891,7 @@ class MonsterPhase:
                 # M7 P7: the shooter, 1 + its slot while the slot is live (P_RemoveMobj zeroes proj_src too).
                 # P9: a ROCKET's slot holds 0 -- the player's, which projcode stores (its state is what marks it); the
                 # model's proj_src of 0 for it is not monster slot 0 (fight_gate R1-R3 found the export saying 1)
-                "pj_src": tuple(0 if not ws.proj_active[s] or self.world._is_rocket(s) else ws.proj_src[s] + 1
+                "pj_src": tuple(0 if not ws.proj_active[s] or self.world._is_player_missile(s) else ws.proj_src[s] + 1
                                 for s in range(len(ws.proj_src)))}
 
     def fx_state(self) -> Dict[str, object]:
@@ -910,7 +957,7 @@ class MonsterPhase:
         ws, gd, out = self.world.ws, self.gd, []
         for s in range(FIREBALL_POOL):
             if ws.proj_active[s]:
-                out.append((ws.proj_x[s] >> 16, ws.proj_y[s] >> 16, mobile_lump(gd.STATE_NAMES[ws.proj_state[s]])))
+                out.append((ws.proj_x[s] >> 16, ws.proj_y[s] >> 16, mobile_lump(gd.THING_STATE_NAMES[ws.proj_state[s]])))
         for s in range(FX_POOL):
             if ws.fx_active[s]:
                 lump = mobile_lump(gd.STATE_NAMES[ws.fx_state[s]])
@@ -928,7 +975,7 @@ class MonsterPhase:
         for m in range(self.world.layout.nmon):
             if not ws.mon_active[m]:
                 continue
-            st = gd.STATES[gd.STATE_NAMES[ws.mon_state[m]]]
+            st = gd.STATES[gd.THING_STATE_NAMES[ws.mon_state[m]]]
             rot = rotation(rm, view_x16, view_y16, ws.mon_x[m] << 16, ws.mon_y[m] << 16, ws.mon_facing[m])
             out[m] = view_of(patches, st.sprite, st.frame_index, rot)
         return out
@@ -982,8 +1029,11 @@ class MonsterViews:
         the phase has moved them (map units)"""
         ws = phase.world.ws
         out = [(t.x, t.y) for t in self.drawable]
+        souls = getattr(phase.world, "soul_of", {})
         for m, di in enumerate(self.mdi):
             out[di] = (ws.mon_x[m], ws.mon_y[m])
+            if m in souls:                     # M8 C8: a lost soul stands at its own z (map units: z >> 16)
+                out[di] += (ws.sk_z[souls[m]] >> 16,)
         return out
 
     def rt_state(self, phase: "MonsterPhase") -> dict:
@@ -997,7 +1047,7 @@ class MonsterViews:
         M = 0xFFFFFFFF
         thpos, thss = [], []
         for di in self.rt_drawable:
-            x, y = pos[di]
+            x, y = pos[di][:2]
             thpos.append(((x << 16) & M) | (((y << 16) & M) << 32))
             thss.append(self.rm.point_in_subsector(self.cmap, x, y))
         for m, t in enumerate(self.rt):                   # a monster's leaf is the model's own
@@ -1053,7 +1103,17 @@ class MonsterViews:
         """M7 P6: `render_wall_frame(thing_removed=)` -- the drawable indices of what the game removed (the pickups
         taken, the barrels gone; `MonsterPhase.taken`)"""
         picks, bars = phase.taken()
-        return sorted([self.pdi[i] for i in picks] + [self.bdi[b] for b in bars])
+        # M8 C8: a lost soul REMOVED at the end of its death (S_NULL: inactive, though its skill spawned it)
+        w = phase.world
+        bit = self.gd_skill_bit(w.ws.skill)
+        souls = [self.mdi[m] for m in getattr(w, "soul_slots", ())
+                 if not w.ws.mon_active[m] and w.mon_things[m].flags & bit]
+        return sorted([self.pdi[i] for i in picks] + [self.bdi[b] for b in bars] + souls)
+
+    @staticmethod
+    def gd_skill_bit(skill: int) -> int:
+        from doomfj.gamedata import skill_bit
+        return skill_bit(skill)
 
     def barrel_views(self, phase: "MonsterPhase") -> Dict[int, str]:
         """M7 P6: `render_wall_frame(barrel_views=)` -- {drawable index: lump} of every standing barrel, its state's

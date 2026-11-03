@@ -41,7 +41,7 @@
   }
  },
  {
-  "name": "ptloc grid start (jump16 x3+x3 -> node)",
+  "name": "ptloc grid start (hex.switch x3+x3 -> node)",
   "mode": "plain",
   "per_call": 8252.3828125,
   "ok": true,
@@ -50,7 +50,7 @@
   "stats": {}
  },
  {
-  "name": "ptloc grid start (jump16 x3+x3 -> node)",
+  "name": "ptloc grid start (hex.switch x3+x3 -> node)",
   "mode": "pool",
   "per_call": 5943.6640625,
   "ok": true,
@@ -66,7 +66,7 @@
   }
  },
  {
-  "name": "ptloc grid start (jump16 x3+x3 -> node)",
+  "name": "ptloc grid start (hex.switch x3+x3 -> node)",
   "mode": "pool+",
   "per_call": 5868.15625,
   "ok": true,

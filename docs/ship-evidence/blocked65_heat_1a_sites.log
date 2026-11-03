@@ -1,0 +1,14 @@
+blocking: pool base 0x80000000, span 0x7fffffe0; .fjm LZMA preset 6
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+  alias: 15,221 groups merged into 44,739 (was 59,960)
+  counts cached to scratchpad/12m/_counts_e1m1_adopt_sites.json.gz
+  width waste: 15,413,936 ops allocated = 9,766,994 real + 852,430 width-pad + 4,794,512 count-pad
+  MIXED groups (widest > 2x most-common): 378 groups, 5,708 tables; splitting them by width would free up to 273,984 ops of pool
+             8,112 ops  ((lt_p + 64) + 32)                           n=169     common=16    widest=48
+             8,112 ops  ((lt_p + 128) + 32)                          n=169     common=16    widest=48
+             6,096 ops  ((lt_p + 256) + 32)                          n=127     common=16    widest=48
+             6,096 ops  ((lt_p + 192) + 32)                          n=127     common=16    widest=48
+             5,712 ops  ((lt_p + 448) + 32)                          n=119     common=16    widest=48
+  counting pass: 59,960 groups, 542,974 tables, 572s
+  recorded 542,974 tables in 44,739 groups -> scratchpad/12m/_sites_e1m1_adopt.json.gz
+[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py (argv0 scratchpad/12m/build_blocked.py)

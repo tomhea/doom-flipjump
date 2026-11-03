@@ -1,0 +1,61 @@
+PLAYTHROUGH GATE -- E1M5 at easy, build/doom_e1m5_b4.fjm
+E1M5 easy: ROUTE (26 s)
+  flood: 19369 cells, 5 epochs, keys ['red']
+  exit: line 634 special 11 (normal, S)
+  keys in order: red
+    door:211   door   by use    at (-3496, 1432)  epoch 0
+    door:12    door   by use    at (-1784, 1368)  epoch 1
+    door:11    door   by use    at (-184, 1400)   epoch 2
+    lift:105   lift   by walk   at (1512, 1736)   epoch 3
+    door:30    door   by use    at (-2248, 1080)  epoch 4 (needs the red key)
+    key:red    key    by touch  at (1416, 2584)   epoch 4
+    leg -> item:8     touch    27 cells
+    leg -> item:2049  touch     4 cells
+    leg -> item:2048  touch     5 cells
+    leg -> item:2001  touch    53 cells
+    leg -> item:2008  touch   185 cells
+    leg -> item:2002  touch    60 cells
+    leg -> item:2049  touch    41 cells
+    leg -> lift:105   cross   151 cells
+    leg -> key:red    touch    62 cells
+    leg -> exit       use     378 cells
+setup 39 s (NEW GAME on frame 4)
+  CONTROL keys  the oracle's keys mutated on frame 30: parted there (3 cells: ['p_tnh', 'viewangle', 'viewy']) -- the check sees it
+  CONTROL pixel the binary's picture changed (1 px) on frame 30: parted there (1 px) -- the check sees it
+  CONTROL clean the same 45 frames unmutated: exact
+steering seed 0:0,342:3,1630:11,3352:24
+  f39: leg 0 -> item:8 touch (in its touch box (bonus count 6)) after 35 frames
+  f46: leg 1 -> item:2049 touch (in its touch box (bonus count 6)) after 7 frames
+  f53: leg 2 -> item:2048 touch (in its touch box (bonus count 6)) after 7 frames
+    f98: monster 23 passed by (lined up, not in the aim window)
+    f167: monster 181 ignored (no damage in 35 frames)
+  f179: leg 3 -> item:2001 touch (in its touch box (bonus count 11)) after 126 frames
+  f200 (w196): (-4452, 1156) hp 88 ar 0, leg 4/10 -> item:2008, kills 1, 40 s
+    f229: monster 44 ignored (no damage in 35 frames)
+    f279: monster 41 ignored (no damage in 35 frames)
+    re-plan (no progress in 50 frames) from (-4552, 1104): 177 cells
+    f355: monster 50 ignored (no damage in 35 frames)
+    re-plan (no progress in 50 frames) from (-4637, 1121): 173 cells
+    f371: monster 45 ignored (no damage in 35 frames)
+  f400 (w396): (-4496, 1417) hp 73 ar 0, leg 4/10 -> item:2008, kills 5, 74 s
+    f554: monster 54 ignored (no damage in 35 frames)
+    f569: monster 55 ignored (no damage in 35 frames)
+    f570: monster 169 ignored (no damage in 35 frames)
+    f574: monster 170 ignored (no damage in 35 frames)
+    f594: monster 168 ignored (no damage in 35 frames)
+  f600 (w596): (-3603, 1637) hp 46 ar 0, leg 4/10 -> item:2008, kills 10, 134 s
+    re-plan (no progress in 50 frames) from (-3587, 1730): 98 cells
+  f620: leg 4 -> item:2008 touch (the detour took 300 frames: dropped) after 441 frames
+    re-plan (the leg starts elsewhere) from (-3587, 1730): 157 cells
+    f632: monster 57 ignored (no damage in 35 frames)
+    f675: monster 86 ignored (no damage in 35 frames)
+    f702: monster 62 passed by (lined up, not in the aim window)
+    f762: monster 62 ignored (no damage in 35 frames)
+  f800 (w796): (-2377, 1700) hp 25 ar 0, leg 5/10 -> item:2002, kills 18, 196 s
+    f885: monster 106 passed by (lined up, not in the aim window)
+
+frames: 889 presented (4 menu, 885 world), legs done 5/10: item:8@w35, item:2049@w42, item:2048@w49, item:2001@w175, item:2008@w616
+time: 290 s wall; the binary 68 s (76.8 ms/frame), the oracle 151 s (170 ms/frame); 10,746,313,521 ops; seed 0:0,342:3,1630:11,3352:24
+  wrote C:\Users\tomhe\Documents\doom-bot\scratchpad\gp\playthrough_mismatch_f888.png (binary | oracle | diff)
+
+PLAYTHROUGH GATE FAIL -- the binary parted from the oracle at frame 888 (world 884): 3 cells {'dstate': ['(0, 5, 0, 0, 8, 0)', '(0, 4, 0, 0, 8, 0)'], 'ddir': ['(0, 1, 0, 0, 0, 0)', '(0, 0, 0, 0, 0, 0)'], 'dwait': ['(0, 0, 0, 0, 0, 0)', '(0, 37, 0, 0, 0, 0)']}, 0 px, palette None

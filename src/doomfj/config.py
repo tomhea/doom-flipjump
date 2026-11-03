@@ -104,6 +104,65 @@ class Config:
     # frame.arm5, and at 2 it ran 96 ops past it (16,480 of 16,384) -- the binary jumped to op 0 on its first frame.
     SSHEAD_RATIO: int = 2
 
+    # M8 wave 1 -- `thss_rt` (a runtime thing's leaf, 16 cells a row) declared PAST the hot data block instead of inside
+    # it (the game tier: wall_renderer's hot block; lootcode.pk_drop, its one pointer reader, re-arms into the window
+    # after it). E1M4's block was 17,482 ops of the 16,384-op window (346 runtime things: thss_rt 5,536 of them); with
+    # it out, 11,946 (E1M3: 17,061 -> 11,605). 0 keeps E1M1's / E1M2's text
+    THSS_COLD: int = 0
+
+    # M8 F1.5 (docs/f1-runtime-ids.md, option A1) -- HOW WIDE A RUNTIME THING ID IS in the per-leaf lists (`sshead` /
+    # `thnext`), in bits: 8 (E1M1's, E1M2's: an id + 1 in one byte, at most 254 ids) or 12 (at most 4,094: E1M3 341,
+    # E1M4 345, E1M5 370 runtime things + pools + drops). A list entry stays ONE cell at the same stride either way --
+    # the id sits in bits dbit .. dbit+11 of its jump word -- and only the accessors widen: the wide map reads and writes
+    # it through flipjump's DUAL decoder table (`-D hex.pointers.PTR_WIDE_BITS=12`, `fj_defines`; hex.read_cell /
+    # hex.write_cell), and its emitter calls the `_w` twins of sim.fj's list macros. 8 lays no table and emits the text
+    # it always did (not an fj constant: `constants()` leaves it out, so fj_consts.fj is unchanged too).
+    LIST_ID_BITS: int = 8
+    # M8 C2 (docs/c2-slot-ids.md) -- HOW WIDE A MONSTER / BARREL SLOT ID IS in the fj registers and cells (aim_sid,
+    # dm_id, the codes mon_target / bar_src / dm_src, p_atk, kb_tg, pj_src, the scheduler's): 8 bits (two nibbles,
+    # nmon + nbarrel <= 254: E1M1, E1M2) or 12 (three: E1M6's 298, E1M7's 297). The width itself is DERIVED from the
+    # map's counts (world.slot_nibbles, as World.sec_nibbles); this names what the map's emission expects, and the
+    # emitter refuses a mismatch (wall_renderer) -- so a big map without its entry fails at emission, never in a
+    # gate. Not an fj constant (constants() leaves it out: fj_consts.fj is unchanged).
+    SLOT_ID_BITS: int = 8
+
+    @property
+    def LIST_WIDE(self) -> int:
+        """M8 F1.5: 1 when the lists are 12-bit (the dual table, the `_w` macros), 0 at 8 bits"""
+        assert self.LIST_ID_BITS in (8, 12), ("LIST_ID_BITS %d: the lists are 8 or 12 bits (docs/f1-runtime-ids.md)"
+                                              % self.LIST_ID_BITS)
+        return 1 if self.LIST_ID_BITS == 12 else 0
+
+    @property
+    def LIST_NIB(self) -> int:
+        """M8 F1.5: a list id's width in nibbles (2 or 3) -- the relink's registers, the rank, the drop link's dr_t"""
+        return 2 + self.LIST_WIDE
+
+    def fj_defines(self) -> "dict | None":
+        """M8 F1.5: the assembler's defines for this config (flipjump's `assemble(defines=)`, `fj -D`), or None when it
+        needs none (every 8-bit map: E1M1's and E1M2's assemblies take no defines, as before). A wide-list map lays
+        flipjump's second decoder table: `hex.pointers.PTR_WIDE_BITS = 12` (stl/runlib.fj declares it 0; the define
+        overrides the declaration)."""
+        if not self.LIST_WIDE:
+            return None
+        return {"hex.pointers.PTR_WIDE_BITS": self.LIST_ID_BITS}
+
+    # M8 C11 (E1M7) -- `n_tsv`'s width in nibbles: the per-frame count of MARKING two-sided segs that reach
+    # frame.seg_pass1_leaf_body_ts, against the deg attribution budget TSV_BUDGET (16^n - 1, the counter's max). The
+    # budget must provably NEVER bind (a binding one paints the smudged columns: reference_model.DEG_PNEAR), so the
+    # emitter asserts the map's marking-seg count stays below it (wall_renderer._assert_pnear_unbound). 3 (4,095) is
+    # E1M1's and every map's up to E1M6 (2,550); E1M7 marks 4,183 -> 4. Not an fj constant: the macro derives its
+    # width from the budget it is passed (`(#budget + 3) / 4`), so the two cannot drift.
+    TSV_NIBBLES: int = 3
+
+    @property
+    def TSV_BUDGET(self) -> int:
+        """M8 C11: the deg attribution budget the fj and the oracle share -- the `n_tsv` counter's max (DEG_PNEAR = 4095
+        at the default 3 nibbles)"""
+        assert 1 <= self.TSV_NIBBLES <= 6, ("TSV_NIBBLES %d: 1 .. 6 (E1M1 3; below 3 only a test's binding budget)"
+                                            % self.TSV_NIBBLES)
+        return 16 ** self.TSV_NIBBLES - 1
+
     @property
     def PID_BYTES(self) -> int:
         """Bytes of `pclm[]` storage per column: ceil(PID_NIBBLES/2).
@@ -255,6 +314,24 @@ class Config:
     # M, the level's lines baked as a frame and the player's dot computed at run time. Per map (MAP_CONFIG), so E1M1's
     # emission is untouched while the page is off there (0, the default: not one line differs).
     AUTOMAP: int = 0
+    # M8 size (the owner, 2026-10-19: "the 2^27 words-space is a super hard limit"): 1 = the baked point location
+    # (`collision.generate_point_location_fj`) keeps each node's CONSTANTS in the node and runs the cross product / the
+    # compare in SHARED subroutines (one hex.mul_low pair, one hex.scmp per axis) instead of inlining them per node: the
+    # same leaf for every point, for a fcall per node visited. `ptloc_walk` was 19.5M of E1M2 r4's 83.5M words (code,
+    # wflip chains and pool tables). 0, the default: the inline walk, byte for byte.
+    PTLOC_SHARED: int = 0
+    # M8 size: 1 = the plane bands' per-id thunk cleans its id out of `vpb_dsp` FIRST and tail-jumps into the shared
+    # body, which returns through hex.tables.ret (`lut_generator.generate_bands_walk_fj(direct=True)`): no fcall per
+    # walk and no 2^k-entry clean table. The bands bank is 14.4M of E1M2 r4's words and grows with the band lists
+    # (viewz classes x plane pairs: E1M7 ~2.5x E1M2). 0, the default: the fcall thunks, byte for byte.
+    VPB_DIRECT: int = 0
+
+    # #149 (the CR of #148, R6): the rule a door's open height is found among (doomfj.doors.door_neighbours,
+    # P_FindLowestCeilingSurrounding's neighbours). "two_sided" (the default): DOOM's getNextSector -- only a line with a
+    # back side and ML_TWOSIDED has a next sector. "legacy": every linedef, a one-sided line's missing back read as
+    # the LAST sidedef's sector (issue #104 F1) -- E1M1's, whose door stops its one-byte pid budget froze (PR #103).
+    # A per-map flag, not the map's record counts: another wad's E1M1 is still E1M1. Host-side only: NOT an fj constant.
+    DOOR_NEIGHBOURS: str = "two_sided"
 
     @property
     def SPR_SLOT_CAP_ON(self) -> int:
@@ -316,6 +393,13 @@ GAME_CFG = Config(VIEW_ROWS=84)
 # M8 L1 (E1M2, its own binary): the widths a map needs beyond the defaults (E1M1's). E1M2 bakes ~411 plane-pair ids
 # (> 255: 3 nibbles, two bytes -- docs/handoff-e1m2.md section 4 (A)) and ~83k band lists (> 65,535: 5 nibbles). The
 # emitter's own asserts (the pid bake, the bands walk) refuse a width a map outgrows, so a missing entry fails loudly.
+# M8 w2fix (E1M5's door 1, found by the auto-gameplay gate): the maps whose emitted doors keep the OLD step past the top
+# -- a closing door whose pass state is its top reverses there on a thing and stepped on past it, where doors.door_tic
+# (and T_VerticalDoor) clamps it at the top with the wait (doorcode.machine_lines' top clamp). E1M1 only, so its
+# emission stays byte-identical: its door 84 is such a door and carries the old step until E1M1 is rebuilt. Every other
+# map clamps (wall_renderer: `top_clamp`)
+DOOR_TOP_STEP_LEGACY = frozenset({"E1M1"})
+
 MAP_CONFIG = {
     # M8 F1.4: SPR_SLOT_CAP -- 305 drawable things over the skills, hard's 295 + 10 pool things + 54 droppers' drops
     # (> 255 slot ids: wall_renderer.check_slot_ids)
@@ -326,14 +410,59 @@ MAP_CONFIG = {
     # M8: AUTOMAP -- the map page (doomfj.automap)
     "E1M2": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "SECTOR_LIGHTS": 1,
              "WALL_SCROLL": 1, "SWITCH_TEX": 1, "AUTOMAP": 1},
-    # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): E1M1's ONLY entry -- the map page, at 40 units a pixel (doomfj.
-    # automap). Every other field keeps its default, which is what E1M1 had with no entry at all
-    "E1M1": {"AUTOMAP": 1},
+    # M8 C11 (E1M7, 1.9x E1M2): the WIDTHS only (its features are other clusters'): TSV_NIBBLES -- 4,183 marking
+    # two-sided segs past the 3-nibble n_tsv's 4,095 (wall_renderer._assert_pnear_unbound); PID_NIBBLES / BAND_NIBBLES
+    # -- ~545 plane pairs before directions (E1M2: 329 -> 411 baked), the band lists past E1M2's (> 65,535 there);
+    # SSHEAD_RATIO 1 -- the hot data block (pclm .. wrej) inside frame.arm5's window, as E1M2; SPR_SLOT_CAP -- 606
+    # drawable things over the skills (wall_renderer.check_slot_ids)
+    # M8 C2 (docs/c2-slot-ids.md): LIST_ID_BITS 12 -- 337 runtime ids (F1.5); SLOT_ID_BITS 12 -- 281 monster + 16 barrel
+    # slots (+ 8 lost souls) past 254: three-nibble slot ids
+    # M8 soultele: THSS_COLD -- emit_check's hot block was 20,264 ops of frame.arm5's 16,384 with SSHEAD_RATIO 1
+    "E1M7": {"PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "SPR_SLOT_CAP": 255, "TSV_NIBBLES": 4,
+             "LIST_ID_BITS": 12, "SLOT_ID_BITS": 12, "THSS_COLD": 1},
+    # M8 C11 (E1M9): SPR_SLOT_CAP -- 293 drawable things over the skills (wall_renderer.check_slot_ids). M8 wlight:
+    # PID_NIBBLES 3 -- ~264 plane pairs before directions (level_survey's estimate; 474 baked); BAND_NIBBLES 5 -- 114,528
+    # band lists (emit_check: past 4 nibbles' 65,536); SSHEAD_RATIO 1 -- the hot data block was 16,416 ops of
+    # frame.arm5's 16,384 at 2 (emit_check); the MAP page and the switch textures as the other maps
+    "E1M9": {"SPR_SLOT_CAP": 255, "PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1, "AUTOMAP": 1,
+             "SWITCH_TEX": 1},
+    # M8 wave 2: E1M8 (123 things, the four Barons) -- the defaults fit its counts; the MAP page and switch textures
+    "E1M8": {"AUTOMAP": 1, "SWITCH_TEX": 1},
+    # M8 C11: SPR_SLOT_CAP for the wave-1 / wave-3 maps past a byte of drawable things over the skills (level_survey:
+    # E1M3 352, E1M4 340, E1M5 330, E1M6 461) -- a per-map entry their own level rungs extend with their widths
+    # M8 wave 1 (docs/episode-plan.md 3): LIST_ID_BITS 12 -- 341 / 346 / 370 runtime ids (F1.5); E1M3 / E1M4 take E1M2's
+    # widths (plane pairs 249 / 237 estimated, the band lists, the hot block: the lessons survey); the MAP page and the
+    # switch textures as E1M2; the animated lights only where the survey has none on a mover / past a byte (E1M3)
+    # E1M3 / E1M4: THSS_COLD -- their hot blocks were 677 / 1,098 ops past frame.arm5's window with thss_rt inside
+    # (17,061 / 17,482 of 16,384 ops; thss_rt 5,456 / 5,536 of them: Config.THSS_COLD)
+    "E1M3": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1,
+             "AUTOMAP": 1, "SWITCH_TEX": 1, "SECTOR_LIGHTS": 1, "THSS_COLD": 1},
+    "E1M4": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "PID_NIBBLES": 3, "BAND_NIBBLES": 5, "SSHEAD_RATIO": 1,
+             "AUTOMAP": 1, "SWITCH_TEX": 1, "THSS_COLD": 1},
+    "E1M5": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "AUTOMAP": 1, "SWITCH_TEX": 1},
+    # M8 C2 (docs/c2-slot-ids.md): LIST_ID_BITS 12 -- 345 runtime ids (F1.5); SLOT_ID_BITS 12 -- 291 monster + 7 barrel
+    # slots (+ 3 lost souls) past 254: three-nibble slot ids
+    # M8 soultele: PID_NIBBLES / BAND_NIBBLES -- level_survey's 328 plane pairs before directions (E1M2's 329 needed
+    # them) and ~176K band lists past BAND_NIBBLES 4's 65,535; the MAP page and switch textures as every episode map;
+    # SSHEAD_RATIO 1 + THSS_COLD -- emit_check's hot block was 22,140 ops of frame.arm5's 16,384 (E1M3 / E1M4's fix)
+    "E1M6": {"SPR_SLOT_CAP": 255, "LIST_ID_BITS": 12, "SLOT_ID_BITS": 12, "PID_NIBBLES": 3, "BAND_NIBBLES": 5,
+             "AUTOMAP": 1, "SWITCH_TEX": 1, "SSHEAD_RATIO": 1, "THSS_COLD": 1},
+    # M8 (the owner, 2026-10-18: "Add it to e1m1 too"): the map page, at 40 units a pixel (doomfj.automap).
+    # #149: DOOR_NEIGHBOURS "legacy" -- the door rule E1M1 shipped with (its stops are frozen, PR #103); it was the
+    # default before E1M2, picked by the map's record counts until #149. Every other field keeps its default
+    "E1M1": {"AUTOMAP": 1, "DOOR_NEIGHBOURS": "legacy"},
 }
 
 
+# M8 size: the 2^27-word cuts, per map -- kept apart from MAP_CONFIG so the feature branches' MAP_CONFIG rows merge
+# cleanly (map_cfg applies both; MAP_CONFIG wins a key in both, so `emit_check --map-config PTLOC_SHARED=0` measures a
+# map without a cut). E1M1 / E1M2 have none: their emission is untouched.
+MAP_SIZE_CONFIG = {m: {"PTLOC_SHARED": 1, "VPB_DIRECT": 1}
+                   for m in ("E1M3", "E1M4", "E1M5", "E1M6", "E1M7", "E1M8", "E1M9")}
+
+
 def map_cfg(cfg: "Config", mapname: str) -> "Config":
-    """`cfg` with `mapname`'s MAP_CONFIG widths (unchanged for a map not listed, E1M1's)"""
+    """`cfg` with `mapname`'s MAP_CONFIG widths and MAP_SIZE_CONFIG cuts (unchanged for a map in neither: E1M1's)"""
     from dataclasses import replace
-    over = MAP_CONFIG.get(mapname.upper(), {})
+    over = dict(MAP_SIZE_CONFIG.get(mapname.upper(), {}), **MAP_CONFIG.get(mapname.upper(), {}))
     return replace(cfg, **over) if over else cfg

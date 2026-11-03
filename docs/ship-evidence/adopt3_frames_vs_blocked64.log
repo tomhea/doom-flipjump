@@ -1,0 +1,48 @@
+class S check: scratchpad/12m/profx/drive.py games <prefix> --stock --fjm <binary> on each (flipjump 1.6.0 287f28b, stock engine),
+the calibration + gamespeed's ten 100-frame games; per presented frame the sha256 of the frame's bytes
+
+engine: C:\Users\tomhe\Documents\fj160-path\flipjump\interpreter\_fjcore.pyd
+calibration: 390,984 ops, 4/4 frames, 4.4s
+game0: 1,571,537,761 ops, 104/104 frames, 17.2s
+game1: 1,367,505,479 ops, 104/104 frames, 15.7s
+game2: 1,406,570,383 ops, 104/104 frames, 15.3s
+game3: 1,653,972,377 ops, 104/104 frames, 17.3s
+game4: 1,485,814,895 ops, 104/104 frames, 15.8s
+game5: 1,546,464,016 ops, 104/104 frames, 16.1s
+game6: 1,455,891,978 ops, 104/104 frames, 14.7s
+game7: 1,393,401,007 ops, 104/104 frames, 14.3s
+game8: 1,141,228,843 ops, 104/104 frames, 13.6s
+game9: 1,106,362,208 ops, 104/104 frames, 14.1s
+total 744.1s
+[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py (argv0 scratchpad/12m/profx/drive.py)
+
+engine: C:\Users\tomhe\Documents\fj160-path\flipjump\interpreter\_fjcore.pyd
+calibration: 398,774 ops, 4/4 frames, 4.3s
+game0: 1,804,771,200 ops, 104/104 frames, 18.3s
+game1: 1,562,984,296 ops, 104/104 frames, 16.5s
+game2: 1,615,315,619 ops, 104/104 frames, 17.6s
+game3: 1,900,742,415 ops, 104/104 frames, 19.4s
+game4: 1,704,565,703 ops, 104/104 frames, 18.4s
+game5: 1,769,561,248 ops, 104/104 frames, 20.2s
+game6: 1,662,393,376 ops, 104/104 frames, 19.2s
+game7: 1,588,771,580 ops, 104/104 frames, 16.3s
+game8: 1,294,181,958 ops, 104/104 frames, 14.7s
+game9: 1,252,176,246 ops, 104/104 frames, 14.3s
+total 919.9s
+[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py (argv0 scratchpad/12m/profx/drive.py)
+
+A build\doom_e1m1_adopt3.fjm
+B C:\Users\tomhe\Documents\doom-io\build\doom_e1m1_blocked64.fjm
+calibration  frames 4/4 equal 4   ops adopt3 390,984  blocked64 398,774  (-1.95%)
+game0        frames 104/104 equal 104   ops adopt3 1,571,537,761  blocked64 1,804,771,200  (-12.92%)
+game1        frames 104/104 equal 104   ops adopt3 1,367,505,479  blocked64 1,562,984,296  (-12.51%)
+game2        frames 104/104 equal 104   ops adopt3 1,406,570,383  blocked64 1,615,315,619  (-12.92%)
+game3        frames 104/104 equal 104   ops adopt3 1,653,972,377  blocked64 1,900,742,415  (-12.98%)
+game4        frames 104/104 equal 104   ops adopt3 1,485,814,895  blocked64 1,704,565,703  (-12.83%)
+game5        frames 104/104 equal 104   ops adopt3 1,546,464,016  blocked64 1,769,561,248  (-12.61%)
+game6        frames 104/104 equal 104   ops adopt3 1,455,891,978  blocked64 1,662,393,376  (-12.42%)
+game7        frames 104/104 equal 104   ops adopt3 1,393,401,007  blocked64 1,588,771,580  (-12.30%)
+game8        frames 104/104 equal 104   ops adopt3 1,141,228,843  blocked64 1,294,181,958  (-11.82%)
+game9        frames 104/104 equal 104   ops adopt3 1,106,362,208  blocked64 1,252,176,246  (-11.64%)
+FRAMES EQUAL 1044 of 1044; first difference: None
+CONTROL (R9) game0 of adopt3 against game1 of blocked64: equal 4 of 104 (the menu frames only)

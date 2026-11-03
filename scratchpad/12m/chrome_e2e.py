@@ -5,8 +5,8 @@ proves the right fj TEXT is generated. Neither proves the two meet: a wrong oper
 miscounted string length or a macro that emits nothing at all would pass both and still ship a
 window called "FlipJump".
 
-This assembles a ~10-line fj program that calls `present.set_window_title` and
-`present.set_window_icon_header`, runs it on the stock interpreter with a headless InMemoryScreen,
+This assembles a ~10-line fj program that calls `screen.set_window_title` and
+`screen.set_window_icon_header`, runs it on the stock interpreter with a headless InMemoryScreen,
 and asserts what the screen received. Seconds, not a 35-minute game build.
 
     python scratchpad/12m/chrome_e2e.py --selftest
@@ -26,11 +26,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(Path("C:/Users/tomhe/Documents/flipjump-151")))
 
 import flipjump as fj                                                      # noqa: E402
 from flipjump.interpreter.fjm_run import run as fjm_run                    # noqa: E402
-from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen        # noqa: E402
+from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen, default_palette  # noqa: E402
 from doomfj.config import Config                                           # noqa: E402
 
 W = 32
@@ -43,8 +42,7 @@ def build_and_run(body):
         src = t / "s.fj"
         src.write_text(body, encoding="utf-8")
         out = t / "o.fjm"
-        fj.assemble([consts.resolve(), (ROOT / "src" / "fj" / "present.fj").resolve(),
-                     src.resolve()], out, memory_width=W, print_time=False)
+        fj.assemble([consts.resolve(), src.resolve()], out, memory_width=W, print_time=False)
         screen = InMemoryScreen()
         fjm_run(out, io_device=screen, print_time=False)
         return screen
@@ -52,7 +50,7 @@ def build_and_run(body):
 
 PROLOGUE = """
 stl.startup_and_init_all
-    present.init_screen
+    screen.init_screen W, H, 8
 """
 EPILOGUE = """
     stl.loop
@@ -74,7 +72,7 @@ def selftest():
     for i, ch in enumerate(text.encode("utf-8")):
         big |= ch << (8 * i)
 
-    scr = build_and_run(PROLOGUE + "    present.set_window_title %s, %d\n" % (hex(big), len(text))
+    scr = build_and_run(PROLOGUE + "    screen.set_window_title %s\n" % hex(big)
                         + EPILOGUE)
     check("C1 the title arrives intact through assemble+run", scr.window_title == text,
           repr(scr.window_title))
@@ -84,19 +82,19 @@ def selftest():
           repr(bare.window_title))
 
     px = [0, 1, 2, 3, 4, 5, 6, 7, 8]
-    icon = (PROLOGUE + "    present.set_window_icon_header 3, 3\n"
+    icon = (PROLOGUE + "    screen.set_window_icon_header 3, 3\n"
             + "".join("    stl.output_char %d\n" % v for v in px) + EPILOGUE)
     scr3 = build_and_run(icon)
     check("C3 the icon arrives with the right shape and pixels",
-          scr3.window_icon == (3, 3, px), repr(scr3.window_icon))
+          scr3.window_icon == (3, 3, [default_palette(8)[v] for v in px]), repr(scr3.window_icon))
 
-    both = (PROLOGUE + "    present.set_window_title %s, %d\n" % (hex(big), len(text))
-            + "    present.set_window_icon_header 2, 2\n"
+    both = (PROLOGUE + "    screen.set_window_title %s\n" % hex(big)
+            + "    screen.set_window_icon_header 2, 2\n"
             + "".join("    stl.output_char %d\n" % v for v in (9, 9, 9, 9))
-            + "    present.init_screen\n" + EPILOGUE)
+            + "    screen.init_screen W, H, 8\n" + EPILOGUE)
     scr4 = build_and_run(both)
     check("C4 a normal command after both still executes",
-          scr4.window_title == text and scr4.window_icon == (2, 2, [9, 9, 9, 9])
+          scr4.window_title == text and scr4.window_icon == (2, 2, [default_palette(8)[9]] * 4)
           and (scr4.width, scr4.height) == (Config().W, Config().H),
           "%s / %s / %dx%d" % (scr4.window_title, scr4.window_icon,
                                scr4.width, scr4.height))

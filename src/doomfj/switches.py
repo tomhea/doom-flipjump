@@ -28,8 +28,8 @@ THE PICTURE: the game picture's wall tones (reference_model.wall_tone_names) -- 
 "#EXIT") while it shows an SW1 texture and "#SWITCHON" while it shows an SW2 one.
 
 KNOWN SIMPLIFICATIONS: a press on an SR line whose button is still out changes nothing (DOOM swaps the texture back early
-and keeps the first button's timer); a tic is a frame, as the doors' WAIT; the exit's latch is the level's, so a map
-with two exit switch lines is refused (`map_switches`). A switch line whose special starts nothing here (an unsupported
+and keeps the first button's timer); a tic is a frame, as the doors' WAIT; the exit's latch is the level's (M8 C9: on a map
+with two exit switch lines each has its own cell, `latched`). A switch line whose special starts nothing here (an unsupported
 special, or a tag naming no machine) keeps its texture.
 """
 from __future__ import annotations
@@ -43,18 +43,20 @@ SWITCH_PREFIXES = ("SW1", "SW2")          # DOOM's switch textures (alphSwitchLi
 BUTTON_FRAMES = 35                        # BUTTONTIME (35 tics): a tic is a frame here
 BUTTON_NIBBLES = 2                        # the countdown's cell
 assert 0 < BUTTON_FRAMES < 16 ** BUTTON_NIBBLES
-EXIT_SWITCH_SPECIALS = frozenset({11})    # S1 exit (doors.EXIT_SPECIALS)
-DOOR_SWITCH_SPECIALS = frozenset({63, 103})          # doors.SWITCH_DOOR_KINDS
-FLOOR_SWITCH_SPECIALS = frozenset({23, 71, 102})     # movers.FLOOR_USE_SPECIALS
+EXIT_SWITCH_SPECIALS = frozenset({11, 51})    # S1 exit, M8 C9 S1 secret exit (doors.EXIT_SPECIALS)
+DOOR_SWITCH_SPECIALS = frozenset({63, 103, 61, 112, 114, 133})   # doors.SWITCH_DOOR_KINDS (M8 C3: 61 112 114 133)
+FLOOR_SWITCH_SPECIALS = frozenset({23, 71, 102, 7, 20})     # movers.FLOOR_USE_SPECIALS (M8 C4: + 7 stairs, 20 plat)
 LIFT_SWITCH_SPECIALS = frozenset({62, 123})          # movers.LIFT_USE_SPECIALS
-REPEAT_SPECIALS = frozenset({62, 123, 63})           # SR: the texture comes back after BUTTONTIME
+LIGHT_SWITCH_SPECIALS = frozenset({138})             # M8 C4: lights.SWITCH_LIGHT_SPECIALS (EV_LightTurnOn: always)
+REPEAT_SPECIALS = frozenset({62, 123, 63, 61, 114, 46, 138})   # SR (and GR 46): the texture comes back after BUTTONTIME
+SHOT_SWITCH_SPECIALS = frozenset({46})               # M8 C3: GR 46 (doors.SHOOT_DOOR_KINDS) -- a shot swaps it
 
 
 @dataclass(frozen=True)
 class Switch:
     """one animated switch line. `kind` "exit" / "door" / "floor" / "lift"; `sw2` its level-start texture is an SW2
     one; `box` (x0, y0, x1, y1) map units; `targets` -- a door switch's door SECTORS, a lift line's lift SLOTS (the lifts'
-    sector order), a floor line's (group index,); the exit's ()"""
+    sector order), a floor line's (group index,); the exit's (); M8 C4 a light switch's ("light") tagged sectors"""
     line: int
     special: int
     kind: str
@@ -105,10 +107,16 @@ def map_switches(secs, lds, sds, verts, rng: int = USE_RANGE) -> List[Switch]:
             kind, targets = "exit", ()
         elif sp in DOOR_SWITCH_SPECIALS and ld.tag:
             kind, targets = "door", tuple(si for si, sec in enumerate(secs) if sec.tag == ld.tag and si in doors)
+        elif sp in SHOT_SWITCH_SPECIALS and ld.tag:
+            # M8 C3: P_ShootSpecialLine's 46 changes its texture on EVERY shot that reaches it (no EV_* test)
+            kind, targets = "shot", tuple(si for si, sec in enumerate(secs) if sec.tag == ld.tag and si in doors)
         elif sp in FLOOR_SWITCH_SPECIALS and ld.tag in group_of:
             kind, targets = "floor", (group_of[ld.tag],)
         elif sp in LIFT_SWITCH_SPECIALS and ld.tag:
             kind, targets = "lift", tuple(lift_slots.get(ld.tag, ()))
+        elif sp in LIGHT_SWITCH_SPECIALS and ld.tag:
+            # M8 C4: P_UseSpecialLine 138 -- EV_LightTurnOn, then P_ChangeSwitchTexture(line, 1) whatever it found
+            kind, targets = "light", tuple(si for si, sec in enumerate(secs) if sec.tag == ld.tag)
         else:
             continue                                   # no special a use starts here: the texture stays
         if kind != "exit" and not targets:
@@ -116,14 +124,16 @@ def map_switches(secs, lds, sds, verts, rng: int = USE_RANGE) -> List[Switch]:
         (ax, ay), (bx, by) = _xy(verts[ld.v1]), _xy(verts[ld.v2])
         out.append(Switch(i, sp, kind, sp in REPEAT_SPECIALS, tex.startswith("SW2"),
                           (min(ax, bx) - rng, min(ay, by) - rng, max(ax, bx) + rng, max(ay, by) + rng), targets))
-    assert sum(s.kind == "exit" for s in out) <= 1, (
-        "two exit switch lines: the exit's latch is the level's (lvdone), one line's")
     return out
 
 
 def latched(switches: Sequence[Switch]) -> List[Switch]:
-    """the switches with a cell of their own (all but the exit), in order: switch k is cell `swpr + k*dw`"""
-    return [s for s in switches if s.kind != "exit"]
+    """the switches with a cell of their own (all but the exit), in order: switch k is cell `swpr + k*dw`. M8 C9: a
+    map with MORE THAN ONE exit switch line (E1M3: 11 and the secret 51; E1M7: two 11s) gives each its own cell too
+    -- `lvdone` says the level ended, not which line was pressed; the press sets the pressed line's cell (World.
+    switch_exit, the fj exit's per-box hit). One exit line keeps `lvdone` as its latch (E1M2's text unchanged)"""
+    shared = sum(s.kind == "exit" for s in switches) <= 1
+    return [s for s in switches if s.kind != "exit" or not shared]
 
 
 def repeating(switches: Sequence[Switch]) -> List[int]:
@@ -156,12 +166,17 @@ def press(on: list, time: list, sr: Sequence[int], k: int) -> None:
         time[list(sr).index(k)] = BUTTON_FRAMES
 
 
-def door_presses(lat: Sequence[Switch], used: bool, x16: int, y16: int, ready: Callable[[int], bool]) -> List[int]:
+def door_presses(lat: Sequence[Switch], used: bool, x16: int, y16: int, ready: Callable[[int], bool],
+                 has_card: Callable[[str], bool] | None = None) -> List[int]:
     """the door switches a held use presses this tic (`used`: the use key, the player alive): EV_DoDoor finds one of
-    the line's doors at rest (`ready(sector)`, the tic-start state) and the player stands in the line's box"""
+    the line's doors at rest (`ready(sector)`, the tic-start state) and the player stands in the line's box. M8 C3: a
+    LOCKED switch (doors.SWITCH_DOOR_CARDS: S1 133) also needs its card -- `has_card(colour)` (EV_DoLockedDoor returns
+    0 without it: no texture change)"""
     if not used:
         return []
+    from doomfj.doors import SWITCH_DOOR_CARDS
     return [k for k, s in enumerate(lat) if s.kind == "door"
+            and (s.special not in SWITCH_DOOR_CARDS or has_card(SWITCH_DOOR_CARDS[s.special]))
             and any(ready(si) for si in s.targets) and in_box_fixed(s.box, x16, y16)]
 
 
@@ -177,11 +192,18 @@ def use_presses(lat: Sequence[Switch], x16: int, y16: int, lift_rest: Callable[[
             ok = floor_still(s.targets[0])
         elif s.kind == "lift":
             ok = any(lift_rest(t) for t in s.targets)
+        elif s.kind == "light":                  # M8 C4: EV_LightTurnOn's switch always changes
+            ok = True
         else:
             continue
         if ok and in_box_fixed(s.box, x16, y16):
             out.append(k)
     return out
+
+
+def shot_presses(lat: Sequence[Switch], line: int) -> List[int]:
+    """M8 C3: the latched switches a gun's shot on GR line `line` swaps (doors.shot_lines; combat.shot_press)"""
+    return [k for k, s in enumerate(lat) if s.kind == "shot" and s.line == line]
 
 
 def pressed_lines(switches: Sequence[Switch], on: Sequence[int], leveldone: bool) -> frozenset:
@@ -190,5 +212,5 @@ def pressed_lines(switches: Sequence[Switch], on: Sequence[int], leveldone: bool
     lat = latched(switches)
     out = {s.line for k, s in enumerate(lat) if on[k]}
     if leveldone:
-        out |= {s.line for s in switches if s.kind == "exit"}
+        out |= {s.line for s in switches if s.kind == "exit" and s not in lat}
     return frozenset(out)

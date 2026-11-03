@@ -6,7 +6,7 @@ program sizes at two rep counts, so startup, table init and the tail cannot ente
 number.
 
 ARMS
-  A  proj.angle_to_x   -- as shipped (hex.read_table_packed 4 on viewangletox)
+  A  proj.angle_to_x   -- as shipped (hex.read_entry_packed 4 on viewangletox)
   B  proj.angle_to_x, disp=1 (the SAME macro, viewangletox as a per-entry DISPATCH)
   C  finesine.read_sin -- as shipped (mode=per_result_nibble, 8 dispatches)
   D  finesine.read_sin -- mode=per_entry (1 dispatch)
@@ -65,7 +65,6 @@ def run(lines, want_name, want_nib, want_val):
     consts = tmp / "fj_consts.fj"
     cfg.emit_fj_consts(consts)
     files = [consts.resolve(),
-             (ROOT / "src/fj/fixed_point.fj").resolve(),
              (ROOT / "src/fj/projection.fj").resolve(),
              src.resolve()]
     fj.assemble(files, out, memory_width=W, print_time=False, debugging_file_path=dbg)
@@ -162,7 +161,7 @@ def sin_expect(n):
 
 BAD = args.selftest
 ARMS = [
-    ("A  proj.angle_to_x (read_table_packed 4, as shipped)",
+    ("A  proj.angle_to_x (read_entry_packed 4, as shipped)",
      lambda n: lines_atx_table(n, BAD), "dstv", 8, atx_expect),
     ("B  proj.angle_to_x, disp=1 (same macro, viewangletox as a DISPATCH)",
      lambda n: lines_atx_disp(n, BAD), "dstv", 8, atx_expect),

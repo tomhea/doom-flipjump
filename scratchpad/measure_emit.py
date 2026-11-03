@@ -1,4 +1,4 @@
-"""M13pS0 -- measure byte.emit/cm.emit per-call op cost (the two-count delta technique, mirroring
+"""M13pS0 -- measure hex.print/cm.emit per-call op cost (the two-count delta technique, mirroring
 scratchpad/measure_walk.py). Run: python scratchpad/measure_emit.py"""
 import sys
 import tempfile
@@ -12,7 +12,6 @@ from doomfj.texturecompiler import colormap_values, _index_nibbles
 from doomfj.wad import WadFile
 from flipjump.interpreter.io_devices.FixedIO import FixedIO
 
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj").resolve()
 
 
 def run_ops(table_text, call_line, idx_width, n, tmp):
@@ -28,7 +27,7 @@ def run_ops(table_text, call_line, idx_width, n, tmp):
     p = tmp / "m.fj"
     p.write_text(main, encoding="utf-8")
     out = tmp / "m.fjm"
-    fj.assemble([FIXED_POINT_FJ, p], out, memory_width=W, print_time=False)
+    fj.assemble([p], out, memory_width=W, print_time=False)
     term = fj.run(out, io_device=FixedIO(b""), print_time=False, print_termination=False)
     return term.op_counter
 
@@ -44,7 +43,7 @@ def main():
 
     byte_table = generate_emit_dispatch_table_fj("bytetbl", list(range(256)), index_nibbles=2)
     byte_ops = per_call(byte_table, "bytetbl.emit idx", 2, tmp)
-    print(f"byte.emit (identity 256-table): {byte_ops:.1f} ops/call")
+    print(f"hex.print (identity 256-table): {byte_ops:.1f} ops/call")
 
     wad = WadFile.from_path("tests/fixtures/freedoom_assets.wad")
     values = colormap_values(wad, lights=32)

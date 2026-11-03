@@ -40,6 +40,7 @@ import pytest
 from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, ScriptedKeyEventSource
 
 from doomfj.config import Config
+from doomfj.keyboard import KC_DOWN, KC_UP                                    # noqa: E402
 from doomfj.doorcode import WAIT_NIBBLES
 from doomfj.harness import W
 from doomfj.menu import (ANY_KEY_EVENT, HELP_GAME_SCR, HELP_MENU_SCR, LEVEL_DONE_ENTER, LEVEL_DONE_SCR,
@@ -59,7 +60,7 @@ SRC = [Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
 # machine is run as E1M1 emits it, `amap` printed beside `menu_scr` (menu.program_cells: the oracle's map states)
 AUTOMAP = has_page("E1M1")
 POLLS, FRAMES = 4, 8 + AUTOMAP          # M8: one more frame for the extra down to EXIT past MAP
-ENTER, ESC, UP, DOWN, W_KEY, S_KEY = 0x0D, 0x1B, 0x80, 0x81, 0x77, 0x73
+ENTER, ESC, UP, DOWN, W_KEY, S_KEY = 0x0D, 0x1B, KC_UP, KC_DOWN, 0x77, 0x73
 H_KEY = 0x68                                        # M7 P3.4: help
 Q_KEY = 0x71                                        # P10: a key the poll's table discards -- still "any key"
 M32 = 0xFFFFFFFF

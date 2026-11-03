@@ -19,7 +19,7 @@ from doomfj.wall_renderer import _lines_sprite_bank, _lines_sprite_light, _thing
 def thpos_vec(name, positions):
     """The runtime position array: a hex.vec of 16 nibbles per thing, which is what the
     shl-by-one-nibble + ptr_index + read_hex accessor addresses (a packed table is one BYTE
-    per slot and read_table_packed cannot address this)."""
+    per slot and read_entry_packed cannot address this)."""
     out = [name + ":"]
     for x, y in positions:
         out.append("    hex.vec 16, %d" % (((y & 0xFFFFFFFF) << 32) | (x & 0xFFFFFFFF)))
@@ -75,7 +75,7 @@ prog = "\n".join([
 prog = prog.replace("hex.write_hex 8, thpos_p, px\n", "")
 tmp = Path(tempfile.mkdtemp()); src = tmp/"t.fj"; src.write_text(prog, encoding="utf-8")
 out = tmp/"t.fjm"
-fj.assemble([(ROOT/"src/fj/fixed_point.fj").resolve(), (ROOT/"src/fj/sim.fj").resolve(),
+fj.assemble([(ROOT/"src/fj/sim.fj").resolve(),
              src.resolve()], out, memory_width=W, print_time=False)
 print("assembled", f"{out.stat().st_size:,}")
 cache = {}

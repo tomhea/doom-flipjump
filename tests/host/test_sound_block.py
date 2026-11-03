@@ -142,7 +142,9 @@ def test_block_door_edges_are_p_recursivesound_at_every_door_state():
 
 def test_e1m1_noise_text_is_frozen():
     """E1M1 has no ML_SOUNDBLOCK line: noisecode emits its one-level flood, byte for byte the text before M8 L5
-    (sha256 of noise_leaf_lines + noise_decls + noise_restart_lines). CONTROL: the marked world's text differs."""
+    (sha256 of noise_leaf_lines + noise_decls + noise_restart_lines; since stl-adopt A5 its 16-way jumps are spelled
+    hex.switch -- with them spelled by their old private name the text hashes to the pre-L5 5127550c...). CONTROL: the marked world's
+    text differs."""
     import hashlib
     from doomfj import noisecode as NZ
 
@@ -150,5 +152,5 @@ def test_e1m1_noise_text_is_frozen():
         t = "\n".join(NZ.noise_leaf_lines(w) + ["#"] + NZ.noise_decls(w) + ["#"] + NZ.noise_restart_lines(w)) + "\n"
         return hashlib.sha256(t.encode()).hexdigest()
     w = World(WadFile.from_path(FIX / "freedoom_e1m1.wad"), "E1M1", monsters="idle")
-    assert digest(w) == "5127550cd3048c78de7efc12e9d21aa657b3bc4ed38d5571191aea74ee5880ed"
+    assert digest(w) == "f1006cf64f0229799a68b03c48cddb069ff1c46bd44d2f255c775cefbf0700df"
     assert digest(_marked()) != digest(w)

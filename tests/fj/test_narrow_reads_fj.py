@@ -5,8 +5,8 @@
 3-nibble arm (`frame.read3_and_inc`). Three 64-op blocks of distinct bytes -- blocks 0, 1 and 0x1003,
 past the index's fourth nibble as the shipped bank's are (22,837 blocks) -- follow
 `wall_renderer.sprite_bank_header()` (the `pad` that puts `sprbank` on a 4096-bit block), zero blocks
-between them, and all 192 bytes must come out as baked, through `byte.emit` (a dispatch through
-`hex.tables`, which leaves the pointer arm alone, like the walkers' own emits).
+between them, and all 192 bytes must come out as baked, through `hex.print` (the stl's hex.output
+switch, which leaves the pointer arm alone, like the walkers' own emits).
 
 R9: the same program with the header's `pad` dropped and the bank pushed off a block must read WRONG
 -- so the passing test is the alignment's doing, which is exactly what a narrow read assumes and what
@@ -20,10 +20,9 @@ from flipjump.interpreter.io_devices.FixedIO import FixedIO
 from doomfj import wall_renderer as wr
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.lut_generator import generate_emit_dispatch_table_fj
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
+SRC = [ROOT / "src/fj" / f for f in ("projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 CFG = Config()
@@ -34,13 +33,13 @@ BLOCKS = [[(k * 97 + i * 13 + 5) & 0xFF for i in range(STRIDE)] for k in range(l
 
 def _program(header, lead_ops=0):
     main = ["stl.startup_and_init_all",
-            generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)]
+            ]
     for k in range(len(BLOCKS)):
         main += ["    hex.set 4, t_blk, %d" % INDICES[k],
                  "    frame.blk_addr t_ptr, t_blk, sprbank",
                  "    hex.read_byte_and_inc t_v, t_ptr",        # the block's first read: the full arm
-                 "    byte.emit t_v"]
-        main += ["    frame.read3_and_inc t_v, t_ptr", "    byte.emit t_v"] * (STRIDE - 1)
+                 "    hex.print t_v"]
+        main += ["    frame.read3_and_inc t_v, t_ptr", "    hex.print t_v"] * (STRIDE - 1)
     main += ["    stl.loop",
              "t_blk: hex.vec 4", "t_ptr: hex.vec w/4", "t_v: hex.vec 2",
              wr.hoisted_scratch_fj(CFG)]

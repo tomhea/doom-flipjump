@@ -107,7 +107,8 @@ def test_control_an_exit_box_by_a_stimpack_or_on_the_nukage_is_refused(mapwad):
 # ---- #123 R5a ---------------------------------------------------------------------------------------------------
 def test_nukage_floor_compare_reads_equality_only():
     src = (ROOT / "src" / "doomfj" / "lootcode.py").read_text(encoding="utf-8")
-    m = re.search(r'_nk_lt, _nk_eq, _nk_gt = "(\w+)", "(\w+)", "(\w+)"', src)
+    # M8 C6: the equal arm is the suit's or the hit's (the radiation suit); lt and gt stay the out arm
+    m = re.search(r'_nk_lt, _nk_eq, _nk_gt = "(\w+)", (.+?), "(\w+)"\n', src)
     assert m and m.group(1) == m.group(3) != m.group(2), "nukage's hex.cmp must take its lt and gt arms alike"
     assert '"    hex.cmp 8, cp_floor, cp_seedf, %s, %s, %s" % (_nk_lt, _nk_eq, _nk_gt)' in src
 

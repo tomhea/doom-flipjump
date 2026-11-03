@@ -1,0 +1,29 @@
+pin report: doom_e1m1_adopt4.fjm against the hot list of doom_e1m1_adopt4u.fjm (20 words, profiled on adopt4u_games)
+rank status               pc(b)   ref pc        tables dispatch/fr  source word
+   1 PINNED                   1        1 70,362/70,362     150,320  (hex.tables.res + 32)
+   2 PINNED, BASE MOVED       2        8       335/335       5,987  ((hex.pointers.to_ptr_var + 128) + 32)
+   3 PINNED, BASE MOVED       3        5       301/301       5,449  ((hex.pointers.to_ptr_var + 192) + 32)
+   4 PINNED, BASE MOVED       3        6       301/301       5,416  ((hex.pointers.to_ptr_var + 256) + 32)
+   5 PINNED, BASE MOVED       4        6       335/335       6,794  ((hex.pointers.to_ptr_var + 64) + 32)
+   6 PINNED, BASE MOVED       3        2   2,900/2,900      17,797  ((hex.pointers.read_byte + 0) + 32)
+   7 PINNED, BASE MOVED       3        3   2,816/2,816      15,122  ((hex.pointers.read_byte + 64) + 32)
+   8 PINNED, BASE MOVED       4        7       215/215       2,325  ((hex.pointers.to_ptr_var + 320) + 32)
+   9 PINNED, BASE MOVED       5        4   3,302/3,302       2,821  ((ecl_cmidx + 0) + 32)
+  10 PINNED, BASE MOVED       3        7       335/335       5,634  ((hex.pointers.to_ptr_var + 0) + 32)
+  11 PINNED, BASE MOVED       4       10         34/34       1,697  ((tsf_sfslot_p + 128) + 32)
+  12 PINNED, BASE MOVED       5        8         14/14       1,185  ((dptr + 128) + 32)
+  13 PINNED, BASE MOVED       4        4   3,302/3,302       2,821  ((ecl_cmidx + 64) + 32)
+  14 PINNED, BASE MOVED       4        9         13/13         933  ((tsf_sfflag_p + 128) + 32)
+  15 PINNED, BASE MOVED       5        4   2,863/2,863       2,570  (((ecl_cmidx + 128) + 0) + 32)
+  16 PINNED, BASE MOVED       4        7         24/24         877  ((tsf_sfslot_p + 192) + 32)
+  17 PINNED, BASE MOVED       5        7         19/19       1,092  ((f11:l107837:frame.seg_pass2_leaf_body_lines(26)---f3:l2551:rep
+  18 PINNED, BASE MOVED       6        8         14/14       1,086  (((dptr + 192) + 64) + 32)
+  19 PINNED, BASE MOVED       5        8         17/17         799  ((f11:l107837:frame.seg_pass2_leaf_body_lines(26)---f3:l2551:rep
+  20 PINNED, BASE MOVED       6        9         16/16       1,296  ((td_p + 256) + 32)
+
+hot words pinned: 20 of 20; lost 0; unresolved 0; base moved 19; mismatch vs the counts cache 0
+pool (build log): declines no-block 0, too-wide 0, overflow 0
+pool (build log): broken groups 0 of 44,739 (a broken group un-pins every table in it unless --pin-broken)
+pool (build log): blocked 542,974 tables in 44,739 groups; declined 0; ungrouped 0
+pool (build log): preflight demand 49,632,064 of 67,108,863 words (74.0% used); 44,739 of 44,739 groups placed
+[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py (argv0 scratchpad/12m/pinreport.py)

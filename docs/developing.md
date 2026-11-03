@@ -16,7 +16,7 @@ pass). Until 1.6.0 is on PyPI, install it from the commit this branch is built
 and tested on (the CI pins the same one):
 
 ```bash
-pip install "flipjump[io] @ git+https://github.com/tomhea/flipjump@5af5923d1dcf6c9af50534720476a56dacea035e"
+pip install "flipjump[io] @ git+https://github.com/tomhea/flipjump@b1365b5cde780df9ec93f2918d18cc5d6be2df28"
 ```
 
 ## Smoke test, tests

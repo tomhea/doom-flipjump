@@ -2,7 +2,7 @@
 
 The whole point of `doomfj.menu` is that ONE generator feeds both mirrors. These tests prove it by
 decoding the stream through the REAL device the standalone binary presents to
-(`flipjump.interpreter.io_devices.ScreenIO.InMemoryScreen`, which learned 0x0B in M5a) and
+(`flipjump.interpreter.io_devices.ScreenIO.InMemoryScreen`, the screen API's own decoder) and
 comparing pixel for pixel — so a menu that fj paints differently from what the oracle expects
 fails here, in milliseconds, instead of after an 80-minute build.
 """
@@ -10,6 +10,7 @@ import pytest
 from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 from flipjump.utils.exceptions import IODeviceException
 
+from doomfj import screenwire as SW
 from doomfj.config import Config
 from doomfj.menu import CELL_W, fj, palette_colours, pixels, stream
 
@@ -30,7 +31,7 @@ def _feed(device, data: bytes):
 
 def _present(data: bytes, width=W, height=H):
     screen = InMemoryScreen()
-    _feed(screen, bytes([0x01, width & 0xFF, width >> 8, height & 0xFF, height >> 8, 8, 0, 1]))
+    _feed(screen, SW.init_screen(width, height))
     _feed(screen, data)
     return screen
 
@@ -62,19 +63,19 @@ def test_a_selected_row_uses_the_highlight_colour():
     assert pixels(W, H, LINES, 2, COLOURS).count(COLOURS[2]) > 0
 
 
-def test_ditto_is_actually_used():
+def test_copy_is_actually_used():
     """The menu is mostly background, so most columns repeat. If the encoder stopped emitting
-    DITTO the picture would still be right and the stream would be several times larger — worth
-    knowing, since the stream's size IS the frame's op cost."""
+    COPY (a whole column from x-1: [x][COPY][H]) the picture would still be right and the stream would be several
+    times larger — worth knowing, since the stream's size IS the frame's op cost."""
     data = stream(W, H, LINES, 0, COLOURS)
-    assert 0xFE in data
+    assert data.count(bytes([SW.COPY, H])) >= 20, data.count(bytes([SW.COPY, H]))
 
 
-def test_column_zero_is_never_dittoed():
-    """The device refuses a DITTO for column 0 (no left neighbour), and would raise."""
+def test_column_zero_is_never_copied():
+    """The device refuses a COPY in column 0 (no left neighbour), and would raise."""
     for selected in range(len(LINES)):
         data = stream(W, H, LINES, selected, COLOURS)
-        assert data[1] == 0 and data[2] != 0xFE
+        assert data[0] == SW.OP_DRAW_COLLINES and data[1] == 0 and data[2] != SW.COPY
 
 
 def test_the_frame_is_cheap():
@@ -199,7 +200,9 @@ def test_the_skill_dispatch_refuses_a_fourth_skill(monkeypatch):
 def test_the_menu_keys_are_the_devices():
     """the keycodes kb.poll turns into the menu's events (src/fj/input.fj's table)"""
     from doomfj.menu import MENU_KEYS
-    assert MENU_KEYS == {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn",
+    from doomfj.keyboard import KC_DOWN, KC_UP
+    assert (KC_UP, KC_DOWN) == (0xDA, 0xD9)                # the device's arrows (Arduino Keyboard.h: 0x88 + HID)
+    assert MENU_KEYS == {0x0D: "enter", 0x1B: "esc", 0x77: "up", KC_UP: "up", 0x73: "dn", KC_DOWN: "dn",
                          0x68: "help"}                     # M7 P3.4: 'h'
 
 
@@ -748,12 +751,13 @@ def test_the_stats_digits():
 
 
 def _level_done_stream(nsecret, digits):
-    """the program's LEVEL COMPLETE: the baked frame without its END, each slot's records, then END"""
+    """the program's LEVEL COMPLETE: the baked frame without its END_CMD + present, each slot's records, then the
+    frame's tail (END_CMD, present) -- what statcode.frame_lines and the shared tail print"""
     from doomfj.menu import level_done_digit_records, level_done_stream
-    data = bytearray(level_done_stream(W, H, COLOURS, nsecret)[:-1])
+    data = bytearray(SW.strip_frame_tail(level_done_stream(W, H, COLOURS, nsecret)))
     for slot, d in enumerate(digits):
         data += level_done_digit_records(W, H, COLOURS, nsecret, slot, d)
-    return bytes(data) + bytes([0xFF])
+    return bytes(data) + SW.FRAME_TAIL
 
 
 @pytest.mark.parametrize("stats", [(7, 46, 12, 48, 2, 83), (0, 17, 0, 53, 0, 0), (46, 46, 48, 48, 4, 3599),

@@ -69,7 +69,7 @@ def mirror_win(ctake, fstart, wlo, whi, xcol, wl):
 
 
 def build_program():
-    byte_tbl = generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)
+    byte_tbl = ""   # the byte emit is the stl\'s hex.print: no table
     cm_tbl = generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
                                              over_align=True)
     pat = generate_w1r_walls_fj(ReferenceModel.W1R_TIER_BOUNDS, ReferenceModel.W1R_PATTERNS)

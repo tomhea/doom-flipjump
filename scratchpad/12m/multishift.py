@@ -4,10 +4,10 @@ popcount_census.simulate_shift models one insertion point: everything at or afte
 filler_ops*dw, and only the popcounts of the shifted VALUES change the executed cost (a site's
 visits move with the site). That is the right model for the campaign's inter-leaf fillers.
 
-It is the WRONG model for a filler inside a macro. frame.arm5's filler and fixed_mul_lo's sit in
-the macro body, so changing that one number inserts ops at EVERY expansion -- 20 of them for
-fixed_mul_lo -- and a value late in the program shifts by the sum of every insertion before it.
-That compound shift is what accidentally bought 139,917 ops on P3-2, at a knob nobody had tuned.
+It is the WRONG model for a filler inside a macro. frame.arm5's filler sits in the macro body, so
+changing that one number inserts ops at EVERY expansion, and a value late in the program shifts by
+the sum of every insertion before it. That compound shift is what accidentally bought 139,917 ops on
+P3-2 (a fixed-point multiply's filler, since moved to the stl without one), at a knob nobody had tuned.
 
 This generalises the model: given the expansion addresses A_1..A_K and a per-expansion delta d,
 a value v shifts by d * dw * |{A_i <= v}|.
@@ -17,7 +17,7 @@ region -- an XOR of two labels, a dbit+k constant, a number that merely happens 
 mis-modelled. This is the free search rung. Only the gate certifies.
 
     python scratchpad/12m/multishift.py --census C.json.gz --hist H.json \
-        --macro "hex.fixed_mul_lo" --labels L.tsv.gz --current 1998 --try 1182-2600
+        --macro "frame.arm5" --labels L.tsv.gz --current 383 --try 0-1000
 """
 import argparse
 import bisect

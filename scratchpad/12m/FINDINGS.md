@@ -23,8 +23,8 @@ width doctrine (P1) is the highest-confidence pool.
 | hex.inc 5 | 160 | hex.sign 8 | 27 |
 | hex.sign 5 | 32 | hex.shr_hex 8,4 | 315 |
 | hex.sign_extend 8,4 | 180 | hex.sign_extend 5,4 | 68 |
-| hex.add 8 | 962 | frame.add8_chain | 962 |
-| hex.add 6 | 736 | frame.add6_chain | 738 |
+| hex.add 8 | 962 | hex.add 8 | 962 |
+| hex.add 6 | 736 | hex.add 6 | 738 |
 | hex.read_byte_and_inc | 1590 | xor_byte_from_ptr + ptr_inc | 1520 |
 
 Notes: hex.sign is nearly free and slightly LARGER at width 5 than 8 (27 -> 32) -- do not
@@ -194,7 +194,7 @@ in-comment).
    required; the ~5 extra ops are noise against the mov/sub saving.
 
 **Candidates (⚠ op deltas INTERPOLATED from the section-A table, not measured):**
-`proj.scalestep` sst_diff 8->6 (needs a new `frame.sub6_chain`), per-seg; `proj.project_thing`'s
+`proj.scalestep` sst_diff 8->6 (needs a new `hex.sub 6`), per-seg; `proj.project_thing`'s
 four constant sets -- `pth_c_vieww` and `pth_c_viewh` 8->2, `pth_c_centerxfix` and
 `pth_c_centeryfix` 8->6 -- per-thing.
 
@@ -220,7 +220,7 @@ nibble (mov 8 = 202.4, mov 5 = 118.8, measured).
 **Reading the atlas' per-hand-site table.** It attributes each op to the DEEPEST hand-written call
 site. So a file whose macros only call other hand-written macros shows ZERO -- plane_render.fj and
 plane_bands.fj price at 0 not because they are dead but because their work is attributed down into
-fixed_point.fj. Use the `pair` table (the two deepest hand frames) to see the caller.
+stl-fixedpoint. Use the `pair` table (the two deepest hand frames) to see the caller.
 
 ## K. THE UNREACHABLE-SLOT RULE (the freeze technique this campaign runs on)
 
@@ -244,9 +244,9 @@ Full table in ATLAS.md. The headline shape, which is NOT what the stale table sa
   sites, biggest 130k) -- they are a sweep, not one idea.
 - `stream.emit_col_lines` 3,812,820; `frame.ts_step_faces` 3,563,542; `frame.thing_record_body`
   2,383,571; the pointer arm (`set_flip_and_jump_pointers`) 2,022,344.
-- CONCENTRATED, by contrast: `hex.add_mul` 1,832,124 at ONE line (fixed_point.fj's
-  `fixed_mul_lo.row`), of which 1,186,378 comes from full `hex.fixed_mul_lo 8,4` calls;
-  `hex.scmp` 852,998 over just 15 sites; `frame.dance_boundary` 1,290,578 in three lines;
+- CONCENTRATED, by contrast: `hex.add_mul` 1,832,124 at ONE line (stl-fixedpoint's
+  `mul_low.row`), of which 1,186,378 comes from full `hex.fixed_mul_low 8,4` calls;
+  `hex.scmp` 852,998 over just 15 sites; `hex.add/sub n (the chain boundary)` 1,290,578 in three lines;
   the four `write_byte_and_inc` of `ts_piece_wr` 795,631.
 
 **Do NOT re-propose:** dropping the fixed_mul row count from 8 to 6 for `scalestep` operands. The
@@ -299,11 +299,11 @@ de-tunes placement only marginally, and the next idea's build absorbs it for fre
 
 ## O. hex.zero / hex.mov redundant-work audit (subagent, 2026-09-04): 46 pairs, 5 dead, 0 unsure
 
-Full census of adjacent `hex.zero N,X` / `hex.mov m,X[+k*dw]` in fixed_point / projection /
-frame_render / stream_render / present.fj. Three shipped as P7-1 (independently agreed by the
+Full census of adjacent `hex.zero N,X` / `hex.mov m,X[+k*dw]` in stl-fixedpoint / projection /
+frame_render / stream_render / stl-screen. Three shipped as P7-1 (independently agreed by the
 audit). **Two more verified dead, not yet shipped:** `proj.slope_div`'s and `proj.slope_div_m`'s
 `recip_wide` -- each a separate macro-local, `zero 8` + `mov 6,k=0`, and the uncovered nibbles
-6..7 are read only as a zero-extended `fixed_mul_lo.row` operand and written by nothing.
+6..7 are read only as a zero-extended `mul_low.row` operand and written by nothing.
 
 **THE TWO PATTERNS THAT MAKE ~90% OF THESE ZEROS LOOK REDUNDANT BUT AREN'T** -- read this before
 proposing any further zero deletion:
@@ -311,7 +311,7 @@ proposing any further zero deletion:
    no matter how narrow the caller's data is (R37/R11). Live at `seg_pass1_leaf_body_ts`'s `x`,
    `step_shade`'s `sh_idx`, `lines_step_load`'s `slot_idx`, `lines_steps_seed`/`lines_spr_seed`'s
    `sidx`, `sprite_runs(_win)`'s `srw_sidx`/`srn_sidx`. All KEEP.
-2. **shr_hex / shl_hex / shl_bit / add_chain / mul_lo / mul_const rewrite the full width they
+2. **shr_hex / shl_hex / shl_bit / add_chain / mul_low / mul_const rewrite the full width they
    declare**, so a zero followed by a narrower mov is CONSUMED, not redundant, whenever one of
    those is the next instruction. That is ~30 of the 41 KEEPs.
 3. Self-dirtying: `slope_div_m`'s `den_norm`/`num_norm` are re-zeroed every call because that same
@@ -337,7 +337,7 @@ required. Live at `trb_bucket_h`, `ts_clamp2`/`ts_clamp2_lo`'s `prev_end`/`prev_
 
 TWO INDEPENDENT LEVERS, both measured value-identical for indices 0x42 / 0x1F64 / 0xFFFF:
 
-1. **The final `hex.add w/4` -> `frame.add8_chain`: -84.0 executed ops per call, and ZERO ops of
+1. **The final `hex.add w/4` -> `hex.add 8`: -84.0 executed ops per call, and ZERO ops of
    space** (the chain is size-identical to the stl add, so the swap moves no label). Needs NO
    bound on anything -- it applies to every ptr_index call in the program. The chain is the last
    statement of the macro, so nothing runs inside its hermetic window.
@@ -352,7 +352,7 @@ width-4 shift stage may be available at ~11 of the 22 sites -- unmeasured, worth
 `hex.ptr_index` call sites: 22 live ones (20 in frame_render.fj, 2 in stream_render.fj); the 8 in
 sim.fj and 3 in plane_render.fj are not in the visual tier. None is emitted from Python.
 
-## Q. frame.ptr_index's shift stage: the exact bound, measured (2026-09-04)
+## Q. hex.ptr_index's shift stage: the exact bound, measured (2026-09-04)
 
 ptr_index computes `ptr + index * 2w`, and **2w = 64**. So a shift stage of width `sw` is exact
 iff **index < 16^sw / 64**:
@@ -372,7 +372,7 @@ table above is the authority.** Evidence: 159 -> all widths agree; 2047 and 8036
 A column index (< VIEW_W = 160) is comfortably sw=4. `sh_idx = (cls<<8)|h` < 65,536 needs sw=6.
 This is the second lever on the ~760 ptr_index calls per median frame; P2-1 took the first.
 
-### Q2. The per-site bound census for frame.ptr_index (subagent, 2026-09-04) -- all 22 PROVEN
+### Q2. The per-site bound census for hex.ptr_index (subagent, 2026-09-04) -- all 22 PROVEN
 
 Nobody should re-derive these. Reusable emitter constants found in the process: SLOT_SHIFT = 1
 nibble (because PID_BYTES = 1), PIECE_BYTES = 4, SPRITE_HEIGHT_BUCKETS = 32,
@@ -484,17 +484,17 @@ Median profile 20,204,970 -> 19,307,813 (-897,157, -4.4%).
 | `frame.seg_pass1_leaf_body_ts` | 4,762,279 | 4,466,123 | -296,156 |
 | `frame.ts_step_faces` | 3,563,542 | 3,276,489 | -287,053 |
 | `frame.ts_piece_store` | 1,632,509 | 1,432,304 | -200,205 |
-| `frame.dance_boundary` | 1,290,578 | 1,491,021 | **+200,443** |
+| `hex.add/sub n (the chain boundary)` | 1,290,578 | 1,491,021 | **+200,443** |
 
-dance_boundary went UP because ptr_index now routes through add8_chain -- work MOVED into the
+the chain boundary went UP because ptr_index now routes through hex.add 8 -- work MOVED into the
 chain and the net was -57,501. Do not read that row as a regression.
 
 **THE TOP TEN HAND-WRITTEN LINES NOW** (this is the ranking that matters):
 
 | site | ops | share | what |
 |---|---:|---:|---|
-| `f2:l104` | **1,844,048** | **9.55%** | `add_mul` in `fixed_mul_lo.row` -- the multiply |
-| `f5:l1546` | 702,752 | 3.64% | `hex.xor jumper, dst_next` in dance_boundary |
+| `f2:l104` | **1,844,048** | **9.55%** | `add_mul` in `mul_low.row` -- the multiply |
+| `f5:l1546` | 702,752 | 3.64% | `hex.xor jumper, dst_next` in the chain boundary |
 | `f5:l1545` | 685,879 | 3.55% | `hex.xor_zero dst_prev, hex.tables.res` |
 | `f8:l1090` | 653,910 | 3.39% | `w1rpat.walk` |
 | `f8:l607` | 543,429 | 2.81% | `w1rpat.walk_win` |
@@ -502,12 +502,12 @@ chain and the net was -57,501. Do not read that row as a regression.
 | `f5:l1890` | 422,090 | 2.19% | arm5's SET pass |
 | `f5:l1940` | 244,750 | 1.27% | `xor_byte_to_flip_ptr` (the write dance) |
 | `f5:l949` | 178,684 | 0.93% | `hex.scmp 5` in ts_piece_store |
-| `f2:l86/88/90/92` | 493,073 | 2.55% | fixed_mul_lo's setup movs + zero |
+| `f2:l86/88/90/92` | 493,073 | 2.55% | fixed_mul_low's setup movs + zero |
 
 So the MULTIPLY FAMILY (add_mul + setup) is **2,337,121 = 12.1%**, the biggest addressable pool
 left, and the arm remainder is 881,786 at the two arm5 lines plus the un-narrowed full arms.
 
-**AN OPEN QUESTION worth someone's time.** `dance_boundary`'s two structurally identical
+**AN OPEN QUESTION worth someone's time.** `the chain boundary`'s two structurally identical
 single-hex xors cost wildly different amounts:
     `hex.xor jumper,   dst_next`  702,752
     `hex.xor jumper+4, src_next`  102,390     <- 6.9x cheaper, same call count
@@ -590,7 +590,7 @@ is absurd. A realistic round is a fraction of the 2^8 row.
 best available move is -5,286 (thing_leaf, 256 ops); every other size at every point is WORSE.
 Five placement rounds in earlier campaigns tuned exactly these.
 
-**AND THE ONE NEW KNOB IS TOO.** `fixed_mul_lo`'s in-macro filler shifts at 20 expansions at once
+**AND THE ONE NEW KNOB IS TOO.** `fixed_mul_low`'s in-macro filler shifts at 20 expansions at once
 (the compound shift that accidentally bought 139,917 on P3-2). `scratchpad/12m/multishift.py`
 generalises the predictor to that case and searched 1182..3000 at step 16: **1998 -- the accidental
 value -- is the best in the range**, everything else is worse. Saved a 20-minute gate by predicting.
@@ -888,8 +888,8 @@ conservation, attribution (after a label yes / before it no), vacuity.
 |---|---|---:|
 | leaf (`--level inner`) | **`hex.exact_xor`** | **39.86%** (6,827,389 ops, 943,572 issues) |
 | leaf, top three | + double_ (7.10%) + triple_ (5.25%) | **52.2%** |
-| doom caller (`--level doom`) | `frame.dance_boundary` | 6.13% -- flat over 147 macros |
-| exact_xor's callers (`--only`) | `frame.dance_boundary` | 3.71% -- flat over 120 macros |
+| doom caller (`--level doom`) | `hex.add/sub n (the chain boundary)` | 6.13% -- flat over 147 macros |
+| exact_xor's callers (`--only`) | `hex.add/sub n (the chain boundary)` | 3.71% -- flat over 120 macros |
 
 **So there is no caller-side fix at the 4M scale.** exact_xor is two wflips per call, both flipping
 `switch`'s own ~25-bit address: `wflip src+w, switch, src` ... `end: wflip src+w, switch`.
@@ -1006,7 +1006,7 @@ ratio always favours the smallest useful pad, and the budget favours breadth ove
 
 ⚠ Top sites are deep stl chains -- `hex.zero/hex.zero/hex.xor/hex.exact_xor`,
 `hex.cmp/hex.cmp_eq_next/hex.cmp/hex.xor/hex.exact_xor` -- so reaching them means threading a PAD
-parameter through `hex.zero`, `hex.mov`, `hex.xor`, `hex.cmp`, `byte.emit`. That is an stl ABI
+parameter through `hex.zero`, `hex.mov`, `hex.xor`, `hex.cmp`, `hex.print`. That is an stl ABI
 change (CLAUDE.md rule 4) and a CR into flipjump-151.
 
 **HONEST BOUND: this idea is worth ~0.8-1.1M (5-6.4%), not 3.2M.** It takes 16,038,392 to about
@@ -1181,7 +1181,7 @@ cannot afford 512. Running the knapsack per macro over pads 512..262144:
 **+167,345 ops purely from choosing the width per macro instead of one number for all.**
 
 Chosen widths: 512 x10, 1024 x7, 2048 x5, 4096 x6, 8192 x5, 16384 x3. The big pads land exactly
-where the owner predicted -- on the RARE hot macros: `add6_chain` (4 expansions) 16384,
+where the owner predicted -- on the RARE hot macros: `hex.add 6` (4 expansions) 16384,
 `lines_sky_base` (3) 16384, `read_hex5` (4) 16384, `ts_dda_row_one` (34) 8192, `clip_rows` (62)
 8192 -- while the common ones are held down: `project_thing` (2,607 expansions) 512,
 `thing_record_body` (954) 512.
@@ -1929,7 +1929,7 @@ The 12.14% "dark region" was never real code we could not name. It was the misma
 
 | primitive | share |  | doom macro | share |
 |---|---:|---|---|---:|
-| `hex.exact_xor` | 39.48% |  | `frame.dance_boundary` | 6.72% |
+| `hex.exact_xor` | 39.48% |  | `hex.add/sub n (the chain boundary)` | 6.72% |
 | `hex.sparse_exact_xor` | 11.93% |  | `sim.check_line` | 6.00% |
 | `hex.double_exact_xor` | 8.63% |  | `frame.seg_pass2_leaf_body_lines` | 5.61% |
 | `hex.triple_exact_xor` | 8.55% |  | `proj.wall_x_range_m` | 4.67% |

@@ -33,7 +33,7 @@ from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-f
 from doomfj.fixedpoint import aprox_distance                   # P_AproxDistance, ONE definition (M7 P3.3)
 from doomfj.mapcompiler import (  # shared geometry (R6)
     NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side, seg_affine_coeffs,
-    bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector,
+    bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector, seg_sector_index,
     thing_live_subsectors, blockmap_candidates,
 )
 from doomfj.spritebank import bank_list_of, strip_at   # M7 P1.6: the native-list bank (R6)
@@ -285,18 +285,36 @@ THING_SPRITE = {
     13: "RKEY", 6: "YKEY",        # M8 L0 (E1M2): the red and yellow cards, frame A as the blue
     2014: "BON1", 2015: "BON2", 2035: "BAR1", 47: "SMIT", 3001: "TROO", 2008: "SHEL",
     54: "TRE2", 9: "SPOS", 43: "TRE1", 3004: "POSS", 3002: "SARG", 2010: "ROCK",
+    3003: "BOSS",                 # M8 C8: the Baron of Hell (E1M8)
     2028: "COLU", 2011: "STIM", 2012: "MEDI", 2018: "ARM1", 2019: "ARM2", 2001: "SHOT",
     2002: "MGUN", 2005: "CSAW", 2006: "BFUG", 2003: "LAUN", 2004: "PLAS", 2013: "SOUL",
     2022: "PINV", 2023: "PSTR", 2024: "PINS", 2025: "SUIT", 2026: "PMAP", 2045: "PVIS",
     2007: "CLIP", 2048: "AMMO", 2046: "BROK", 2047: "CELL", 2049: "SBOX", 8: "BPAK",
+    17: "CELP",                   # M8 C6: the cell charge pack (E1M8; E1M1's two are multiplayer-only, never drawn)
     34: "CAND", 35: "CBRA", 44: "TBLU", 45: "TGRN", 46: "TRED", 55: "SMBT", 56: "SMGT",
     57: "SMRT", 48: "ELEC", 30: "COL1", 31: "COL2", 32: "COL3", 33: "COL4", 36: "COL5",
     37: "COL6", 41: "CEYE", 42: "FSKU", 49: "GOR1", 50: "GOR2",
+    # M8 C7: the hanging bodies E1M9 adds (drawn from the ceiling down: gamedata.spawn_dz) and its dead cacodemon,
+    # whose frame is not A (THING_SPRITE_FRAME)
+    53: "GOR5", 59: "GOR2", 62: "GOR5", 63: "GOR1", 22: "HEAD",
+    3006: "SKUL",                 # M8 C8: the lost soul (doomfj.lostsoul) -- drawn at its own z
     58: "SARG",                   # the SPECTRE. DOOM draws it as a fuzzed SARG; there is no fuzz
                                   # here, so it renders as a plain demon -- which is a great deal
                                   # better than the previous behaviour, where the one spectre in
                                   # E1M1 had no sprite mapping at all and was silently invisible.
 }
+def _GD():
+    """doomfj.gamedata, imported late: it imports this module (M8 C7's spawn_dz is read inside the frame)"""
+    from doomfj import gamedata
+    return gamedata
+
+
+# M8 C7: the frame a type is drawn with when it is not A -- its spawn state's (info.c): the dead cacodemon's
+# S_HEAD_DIE6 is HEAD frame L (K + 1). One picture a type, as every other decoration: an ANIMATED decoration (the
+# torches, the floating skull, the heart column, the twitching body) shows its first frame; nothing animates a
+# decoration in either mirror (stated deviation, as the blue card's blink); and a sprite takes its sector's light,
+# so the FF_FULLBRIGHT frames (torches, the skull, the candelabra since E1M2) are lit as the room is.
+THING_SPRITE_FRAME = {22: "L"}
 SPRITE_HEIGHT_BUCKETS = 32        # V4: on-screen heights the sprite bank bakes a run-list for.
                                   # ~700 (sprite, downscaled column) blocks x 101 EXACT heights (the
                                   # WPX wall bank's shape) would be ~17M characters against a program
@@ -362,10 +380,14 @@ VANISHABLE_TYPES = frozenset({
     2022, 2023, 2024, 2025, 2026, 2045,     # PINV PSTR PINS SUIT PMAP PVIS  powerups
     2001, 2002, 2003, 2004, 2005, 2006,     # SHOT MGUN LAUN PLAS CSAW BFUG  weapons
     2007, 2008, 2010, 2046, 2047, 2048, 2049, 8,   # CLIP SHEL ROCK BROK CELL AMMO SBOX BPAK
+    17,                                     # CELP (M8 C6: E1M8's cell charge pack)
     5, 6, 13, 38, 39, 40,                   # the keys (none drawable on E1M1 today; harmless)
     2035,                                   # BAR1  the barrel -- destroyed, not picked up
 })
 BARREL_TYPE = 2035                          # M7 P6: the barrel (`render_wall_frame(barrel_views=)`)
+# M8 C8: the monsters the GAME removes (their death states end in S_NULL: the lost soul) -- `thing_removed` may name
+# them (a runtime thing: the fj unlinks it, doomfj.soulcode.remove_lines); they have no visibility flag
+REMOVABLE_MONSTER_TYPES = frozenset({3006})
 
 # ── THE 25M PACKAGE (owner goal, 2026-08-14) — A DELIBERATE PICTURE CHANGE ─────────────────────
 #
@@ -540,7 +562,8 @@ def aprox_depth_key(viewx: int, viewy: int, tx: int, ty: int) -> int:
 # belongs to, which is what the fj's row ranges are (monstercode.rank_threshold: runtime rows < nt + FIREBALL_POOL
 # rank 1): BAL1* only ever shows in the fireball pool, BLUD* / PUFF* only in the fx pool (test_d3_rules holds it).
 MOBILE_RANK = {"BAL1": 1, "BLUD": 0, "PUFF": 0, "MISL": 1,      # P9: the player's rocket -- a missile, as BAL1
-               "TFOG": 0}                                       # M8: the teleport fog -- an effect (the fx pool)
+               "TFOG": 0,                                       # M8: the teleport fog -- an effect (the fx pool)
+               "BAL7": 1}                                       # M8 C8: the Baron's fireball -- the fireball pool
 # M8: the effects that stand ON the floor (z 0 in `mobiles`) and are not drops: the teleport fog
 FLOOR_EFFECTS = frozenset({"TFOG"})
 
@@ -724,8 +747,13 @@ def scene_sectors(scene: Scene):
     ⚠ With no override this returns the wad's own list UNCHANGED -- we add no copy and no
     allocation, so the door-free path is exactly what it was. (It is not the identical OBJECT
     across calls: `WadFile.sectors()` builds a fresh list each time. Checked, because the first
-    version of this comment claimed identity and was wrong.)"""
-    return apply_sector_heights(scene.map_wad.sectors(scene.mapname), scene.sector_heights)
+    version of this comment claimed identity and was wrong.)
+    M8 C4: and the texture-change floors (20 / 22: `movers.apply_change_flats`) wearing their new flat once they moved
+    -- read off the heights, so every scene a gate or the world builds carries it; a map without such a line gets its
+    list back from the same call, unchanged."""
+    from doomfj.movers import apply_change_flats, map_change_table
+    secs = apply_sector_heights(scene.map_wad.sectors(scene.mapname), scene.sector_heights)
+    return apply_change_flats(secs, map_change_table(scene.map_wad, scene.mapname))
 
 
 def build_scene(map_wad: WadFile, asset_wad: WadFile, mapname: str,
@@ -1787,7 +1815,8 @@ class ReferenceModel:
         pre = THING_SPRITE.get(kind)
         pic = None
         if pre is not None:
-            for suffix in ("A0", "A1", "A2A8", "A1D1"):
+            fr = THING_SPRITE_FRAME.get(kind)                # M8 C7: a frame other than A (rotation 0 or 1)
+            for suffix in ((fr + "0", fr + "1") if fr else ("A0", "A1", "A2A8", "A1D1")):
                 try:
                     pic = decode_picture(sprite_wad.get_data(pre + suffix))
                     break
@@ -1838,7 +1867,7 @@ class ReferenceModel:
         Returns None for a fully transparent column.
 
         ⚠ Only the column's OPAQUE EXTENT is painted, and INTERIOR gaps take the nearest opaque
-        texel ABOVE them. That is not an aesthetic choice — the 0x0B column protocol fills forward
+        texel ABOVE them. That is not an aesthetic choice — the draw_collines protocol fills forward
         from a cursor that never moves back, so a transparent run in the MIDDLE of a fragment would
         need background the emit has already passed. The visible cost is small (it fattens holes in
         open sprites like trees); the alternative is a second pass over every column.
@@ -2263,6 +2292,16 @@ class ReferenceModel:
             aim_reff: dict = {}                  # radius class -> this frame's r_eff
             from doomfj.combat import MISSILERANGE_U, CombatMixin as _CM   # lazy: combat imports this
             aim_tzmax = MISSILERANGE_U << 16
+            # M8 C3: the GR 46 shot lines record into the same window (doors.shot_sid) -- none on E1M1 / E1M2
+            from doomfj.doors import shot_lines as _shot_lines, shot_sid as _shot_sid
+            _mw, _mn = scene.map_wad, scene.mapname          # the map's STORED sectors: which sectors are doors
+            _sc = self.__dict__.setdefault("_shot_cache", {})
+            if (_mw, _mn) not in _sc:
+                _sc[_mw, _mn] = {li: _shot_sid(k) for k, (li, _ts) in enumerate(
+                    _shot_lines(_mw.sectors(_mn), _mw.linedefs(_mn), _mw.sidedefs(_mn)))}
+            aim_shot = _sc[_mw, _mn]
+        else:
+            aim_shot = {}
         # 25M-CAP: `degrade=True` turns on the whole certified adaptive-degradation package;
         # the individual deg_* kwargs stay as research overrides (any explicit value wins --
         # CR-2026-08: the sentinel is None, not falsiness, so an explicit 0 = "this lever OFF").
@@ -2275,7 +2314,8 @@ class ReferenceModel:
             if deg_stack_scale is None:
                 deg_stack_scale = DEG_STACK_SCALE
             if deg_mark is None:
-                deg_mark = DEG_PNEAR
+                # M8 C11: the map's budget (Config.TSV_BUDGET through MAP_CONFIG: the fj's n_tsv max; DEG_PNEAR on E1M1)
+                deg_mark = map_cfg(cfg, scene.mapname).TSV_BUDGET
             if deg_lip_scale is None:
                 deg_lip_scale = DEG_LIP_SCALE
         # M7 P6+P7 E (the owner, 2026-10-05): `exempt_actors` -- THE ACTORS (the monsters, live or dead, and the
@@ -2337,6 +2377,8 @@ class ReferenceModel:
         # the eye z = the player's own sector floor + VIEWHEIGHT
         pss = scene.cmap.subsectors[self.point_in_subsector(scene.cmap, px, py)]
         viewz = self.view_z(self._seg_sector(lds, sds, secs, scene.cmap.segs[pss.firstseg]).floor_h)
+        # M8 (E1M9): the player's sector INDEX -- the weapon's light row on a map of several (hud.GameScreen.frame)
+        self.view_sector = seg_sector_index(lds, sds, scene.cmap.segs[pss.firstseg])
         # M7 P8a (S0): the planes' band lists keep the STANDING eye; the geometry takes the sunk one
         assert 0 <= view_drop <= VIEW_DROP_MAX, f"view_drop={view_drop}: 0..{VIEW_DROP_MAX}"
         assert not view_drop or floor_mode_ft1, "view_drop is the FT1 tier's split (the band lists it keeps)"
@@ -2441,19 +2483,23 @@ class ReferenceModel:
                                       **mover_mask_kw(self, scene.cmap, _drawable,
                                                       mover_leaves(scene.map_wad, scene.mapname, scene.cmap)))
             _drawable_spawn = _drawable          # the classification's own (pre-override) list
+            # M8 C8 (doomfj.lostsoul): a thing whose `thing_positions` entry carries a THIRD value, its z (map units,
+            # absolute), is drawn standing there instead of on its leaf's floor -- a lost soul (MonsterViews.positions)
+            _tz_abs = {}
             if thing_positions is not None:
                 assert len(thing_positions) == len(_drawable), (
                     f"thing_positions has {len(thing_positions)} entries, "
                     f"{scene.mapname} has {len(_drawable)} drawable things")
                 # ⚠ A BAKED thing is CODE inside its leaf: fj cannot move it, and the wire does not
                 # even carry its position. Moving one here would compare two different worlds.
-                _moved = [i for i, (t, (px, py)) in enumerate(zip(_drawable, thing_positions))
-                          if _baked[i] and (px, py) != (t.x, t.y)]
+                _moved = [i for i, (t, _p) in enumerate(zip(_drawable, thing_positions))
+                          if _baked[i] and (_p[0], _p[1]) != (t.x, t.y)]
                 assert not _moved, (
                     f"thing_positions moves BAKED things {_moved[:8]} -- they are baked into their "
                     f"leaf's code and cannot move (see doomfj.things.baked_thing_mask)")
-                _drawable = [replace(t, x=px, y=py)
-                             for t, (px, py) in zip(_drawable, thing_positions)]
+                _drawable = [replace(t, x=_p[0], y=_p[1])
+                             for t, _p in zip(_drawable, thing_positions)]
+                _tz_abs = {i: _p[2] for i, _p in enumerate(thing_positions) if len(_p) > 2}
             # M14.5 §3.3: the visibility flags. `thing_hidden` is a set of DRAWABLE indices the
             # host has removed from the world (picked up, destroyed). A baked thing can be hidden
             # only through its flag, so only a baked VANISHABLE one may be named; asking to hide
@@ -2482,7 +2528,8 @@ class ReferenceModel:
                 _views[_bdi] = (_blump, False)
             # M7 P6: what the game removed (a pickup taken, a barrel gone) -- checked here, joined below
             _removed = frozenset(thing_removed or ())
-            _rbad = sorted(di for di in _removed if _drawable_spawn[di].type not in VANISHABLE_TYPES)
+            _rbad = sorted(di for di in _removed if _drawable_spawn[di].type not in VANISHABLE_TYPES
+                           and _drawable_spawn[di].type not in REMOVABLE_MONSTER_TYPES)   # M8 C8: a removed soul
             assert not _rbad, (f"thing_removed names drawables {_rbad[:8]} whose types cannot vanish "
                                f"(VANISHABLE_TYPES: the pickups and the barrel)")
             _hidden = frozenset(thing_hidden or ())
@@ -2606,7 +2653,7 @@ class ReferenceModel:
                             _sss = scene.cmap.subsectors[ss_first[seg_i]]
                             _ssec = self._seg_sector(lds, sds, secs, scene.cmap.segs[_sss.firstseg])
                             _spr = self.project_thing(viewx, viewy, viewangle, viewz, t.x, t.y,
-                                                      _ssec.floor_h, _sart, MIN_SPRITE_H_MONSTER)
+                                                      _tz_abs.get(t_di, _ssec.floor_h), _sart, MIN_SPRITE_H_MONSTER)
                             # P11 (d): and its bucket box is not FULLY behind that column's nearer pieces
                             if _spr is not None:
                                 _shb = sprite_bucket_height(sprite_bucket(_spr[3], H), H)
@@ -2671,7 +2718,8 @@ class ReferenceModel:
                                 _ass = scene.cmap.subsectors[ss_first[seg_i]]
                                 _asec = self._seg_sector(lds, sds, secs, scene.cmap.segs[_ass.firstseg])
                                 _aty, _ath = self.thing_rows(
-                                    viewz, _asec.floor_h + (((MISSILE_Z if t.z is None else t.z) if mob else 0)),
+                                    viewz, _tz_abs.get(t_di, _asec.floor_h)
+                                    + (((MISSILE_Z if t.z is None else t.z) if mob else 0)),
                                     _aart, _axs)
                                 _ahb = sprite_bucket_height(sprite_bucket(_ath, H), H)
                                 _ayb = _aty + _ath - _ahb
@@ -2696,9 +2744,12 @@ class ReferenceModel:
                     tss = scene.cmap.subsectors[ss_first[seg_i]]
                     tsec = self._seg_sector(lds, sds, secs, scene.cmap.segs[tss.firstseg])
                     # (minh_: the graduated acceptance's bound, decided above the aim window)
+                    # M8 C7: a map thing hung from the ceiling sits at ceiling - height (gamedata.spawn_dz; 0 for the rest)
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
-                                            t.x, t.y, tsec.floor_h + (((MISSILE_Z if t.z is None else t.z)
-                                                                       if mob else 0)), art, minh_)
+                                            t.x, t.y, _tz_abs.get(t_di, tsec.floor_h) + (((MISSILE_Z if t.z is None else t.z)
+                                                                       if mob else _GD().spawn_dz(t.type, tsec.floor_h,
+                                                                                                  tsec.ceil_h))),
+                                            art, minh_)
                     if pr is None:
                         if slot_trace is not None:
                             slot_trace.append((t_di, act, bar_ex, "V"))
@@ -3115,6 +3166,11 @@ class ReferenceModel:
                         col_cf[x], col_ff[x] = sec.ceil_tex, sec.floor_tex
                         pclaim[x] = 1
                         n_claimed += 1
+                    if aim_shot and seg.linedef in aim_shot and aim_lo <= x <= aim_hi and not aim_out[x - aim_lo] \
+                            and not (stack_steps and ledge_hidden(ups[x], los[x], centery, 1)):
+                        # M8 C3: a GR 46 line claims this window column, nothing nearer recorded, its horizon row
+                        # open past the nearer pieces: the shot's nearest target here (doomfj.shotcode, the fj)
+                        aim_out[x - aim_lo] = aim_shot[seg.linedef]
                     drawn[x] = 1
                     n_wdrawn += 1                # fj's n_drawn/full mirror (M13opt-P1 counter)
                 scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed
@@ -3134,7 +3190,7 @@ class ReferenceModel:
                 # colour per run rather than a 1x1 texture strip, which is the accuracy this rung
                 # trades away. Each run is clipped to the region the claiming wall actually left
                 # open (ceiling above ceil_hi, floor below floor_lo) so the emitted column stays
-                # MONOTONE top-down -- the 0x0B device only moves its cursor forward and silently
+                # MONOTONE top-down -- the draw_collines device only moves its cursor forward and silently
                 # drops a non-monotone pair.
                 c_hi, f_lo = planes[0], planes[1]
 

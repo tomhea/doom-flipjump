@@ -1,0 +1,120 @@
+FIGHT GATE -- 43 scenarios (MONSTER_MODE final, PLAYER_MODE final) on E1M8, roles from scenarios\e1m8\gates.json, build/wave3/doom_e1m8.fjm
+
+F1 pickups at hard: bonuses over 100, clips, the gold palette -- 42 frames
+  from (2776, -1824) angle 00000000: the oracle does what the scenario claims: yes
+  counters: pickups 4, pickup_items 4, bonus_frames 24, knock_moves 42
+  frame 0 pokes: []
+  CONTROL bonus_cap        the oracle without the rule parts at frame 0 (cells)
+  CONTROL bonus_round      the oracle without the rule parts at frame 0 (palette)
+  binary: 42 frames, 240,668,078 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F1r an item out of reach: the card from below -- N/A: E1M8 has no blue card
+
+F2 refused pickups: a medikit at 100 health, a clip at max ammo -- 8 frames
+  from (3264, -144) angle 80000000: the oracle does what the scenario claims: yes
+  counters: knock_moves 8
+  frame 0 pokes: []
+  CONTROL give_always      the oracle without the rule parts at frame 1 (cells)
+  binary: 8 frames, 30,645,412 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F3 the chainsaw: owned, pending, raised; key 1 keeps it -- N/A: E1M8 has no chainsaw (2005)
+
+F4 drops: shot, drawn on the floor, taken -- N/A: no candidate placed from E1M8's things
+
+F4s the sergeant's shotgun (hard: the only one) owned from its drop -- N/A: no candidate placed from E1M8's things
+
+F5 berserk at medium: PSTR, the red tint, a punch gibs a zombieman -- N/A: E1M8 has no berserk pack (2023) on any skill
+
+F6 a barrel shot beside a sergeant: a puff, BEXP, a blast gib, the player hurt -- N/A: no candidate placed from E1M8's things
+
+F6d a barrel's non-lethal hit: its pain roll draws rng_world -- N/A: no candidate placed from E1M8's things
+
+F6p a barrel punched: the fist's puff -- N/A: no candidate placed from E1M8's things
+
+F7 THE CHAIN: barrels set off by one shot -- N/A: E1M8 has no barrel
+
+F8a blocking: a barrel -- N/A: E1M8 has no barrel
+
+F8b blocking: a solid decor -- 10 frames
+  from (2864, 368) angle 80000000: the oracle does what the scenario claims: yes
+  counters: player_blocked 16, knock_moves 10
+  frame 0 pokes: []
+  CONTROL walk_through     the oracle without the rule parts at frame 2 (cells)
+  binary: 10 frames, 95,315,872 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F8c blocking: a live monster -- N/A: no candidate placed from E1M8's things
+
+F8d a corpse lets the player through -- N/A: no candidate placed from E1M8's things
+
+F9 nukage: 70 frames in sector 10 -- 70 frames
+  from (904, 424) angle 40000000: the oracle does what the scenario claims: yes
+  counters: player_hurt 3, nukage 3, knock_moves 70
+  frame 0 pokes: []
+  CONTROL nuk_period       the oracle without the rule parts at frame 16 (cells)
+  binary: 70 frames, 493,455,368 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F9l nukage's rim: the box over a higher floor -- 40 frames
+  from (840, 256) angle 40000000: the oracle does what the scenario claims: yes
+  counters: knock_moves 40
+  frame 0 pokes: []
+  CONTROL nuk_floor        the oracle without the rule parts at frame 0 (cells)
+  binary: 40 frames, 350,538,417 ops -- STATE exact on every frame, PIXELS byte-exact on every frame, PALETTE exact on every frame
+
+F10 the blue card: pcard 1, the bonus 12, the gold palette -- N/A: the map has no blue card
+
+S2 stress: the chain in view -- N/A: E1M8 has no barrel
+
+K1 knockback: a zombieman's hits push the player away, the push decays and stops -- N/A: no candidate placed from E1M8's things
+
+K2 knockback into a wall: the knock momentum is zeroed -- N/A: no candidate placed from E1M8's things
+
+K3 a barrel blast throws the player and the monsters from the barrel -- N/A: E1M8 has no barrel
+
+K4s the shotgun on a sergeant: its fraction cells, a re-test refused, a relink -- N/A: no candidate placed from E1M8's things
+
+K4d the shotgun on a demon: mass 400 -- N/A: no candidate placed from E1M8's things
+
+K5 a shotgun kill: the corpse slides, its drop lies (and is drawn) where it died -- N/A: no candidate placed from E1M8's things
+
+K6 the chainsaw on an imp: no thrust -- N/A: no candidate placed from E1M8's things
+
+K7 the falling-forward reversal: a kill from more than 64 below, the coin on the target's stream -- N/A: no E1M8 position puts a shootable monster > 64 above a standing player with line of sight: test_knock_fj carries the reversal on a forced state (docs/gp-final-plan.md 5.2)
+
+I1 a sergeant fires through an imp in its line: the imp hit, blood, the imp turns on it -- N/A: no candidate placed from E1M8's things
+
+I2z an imp's fireball into a zombieman: damaged and switched; the shooter passed -- N/A: no candidate placed from E1M8's things
+
+I2i an imp's fireball into another imp: it explodes, no damage (the species rule) -- N/A: no candidate placed from E1M8's things
+
+I3 a monster's stray shot kills a barrel: the blast's source is that monster -- N/A: E1M8 has no barrel
+
+I4 the target dies: the monster looks for the player or returns to its spawn state -- N/A: no candidate placed from E1M8's things
+
+I5 a monster target behind a wall at range: no attack (the far LOS) -- N/A: no candidate placed from E1M8's things
+
+I6 the threshold: a monster switched to one refuses another inside 100 tics -- N/A: no imp of E1M8 has a zombieman or sergeant 64..800 units away and a third shooter in line of sight of it (I6's pair and its second attacker)
+
+C1 D3 a: a drop in its corpse's leaf drawn in front of the corpse -- N/A: no candidate placed from E1M8's things
+
+C2 D3 a: blood on a monster drawn before it -- N/A: no candidate placed from E1M8's things
+
+C3 D3 b: a far barrel past three scenery things is drawn -- N/A: E1M8 has no barrel
+
+S3 stress: a brawl -- the imps firing into the zombiemen, infighting saturated -- N/A: no imp within 512 units of a zombieman or sergeant on E1M8
+
+S4 stress: a push storm -- a barrel chain inside a crowd -- N/A: E1M8 has no barrel
+
+R1 a rocket into an awake crowd by barrels: flight, impact, the blast's many, a chain, knocks -- N/A: no candidate placed from E1M8's things
+
+R2 point blank: the rocket's blast hurts its shooter and throws him -- N/A: no candidate placed from E1M8's things
+
+R3 stress: a volley of rockets into the crowd, the trigger held -- N/A: no candidate placed from E1M8's things
+
+CG1 the chaingun held into an awake crowd: both bursts' flashes, accurate then spread rounds, hits -- N/A: no candidate placed from E1M8's things
+
+N/A on E1M8: 37 -- F1r F3 F4 F4s F5 F6 F6d F6p F7 F8a F8c F8d F10 S2 K1 K2 K3 K4s K4d K5 K6 I1 I2z I2i I3 I4 I5 I6 C1 C2 C3 S3 S4 R1 R2 R3 CG1; counters no longer owed: ['barrel_blasts', 'barrel_hits', 'barrel_hurt', 'berserk_frames', 'bexp_frames', 'blast_kills', 'drop_frames', 'fx_spawns', 'gibs', 'pickup_drops', 'puffs']
+
+TOTALS: mon_hits 0, mon_misses 0, mon_melee 0, proj_spawns 0, proj_impacts 0, proj_walls 0, fizzles 0, fx_spawns 0, fx_skipped 0, player_hurt 3, armor_out 0, deaths 0, dead_frames 0, max_in_flight 0, explosion_frames 0, shots_hit 0, pickups 4, pickup_items 4, pickup_drops 0, bonus_frames 24, berserk_frames 0, gibs 0, drop_frames 0, bexp_frames 0, barrel_blasts 0, puffs 0, blast_kills 0, barrel_hurt 0, player_blocked 16, nukage 3, restarts 0, restart_requests 0, level_done 0, barrel_hits 0, knock_frames 0, mon_knock_frames 0, frac_frames 0, knock_moves 170, knock_walls 0, infight 0, sink_max 0, sink_frames 0, corpse_slides 0, dead_slides 0, knock_refused 0, mon_knock_refused 0, mon_attacks 0, mkills 0, rockets_fired 0, rocket_fizzles 0, rocket_flight_frames 0, rocket_mon_hits 0, rocket_bar_hits 0, rocket_stops 0, rocket_blasts 0, blast_mon 0, blast_bar 0, blast_things_max 0, rocket_self 0, cgun_shots 0, cgun_acc 0, cgun_held 0, cgun_hits 0, cgun_flash1 0, cgun_flash2 0
+every event counter nonzero: yes; deaths 0
+
+FIGHT GATE PASS (27 s)

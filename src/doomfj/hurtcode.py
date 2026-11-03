@@ -42,14 +42,12 @@ weaponcode's `ammobcd` (the same digits table the ammo uses).
 THE TIC (`hp_tic`, the player phase, after the weapon): damagecount -= 1 when not 0 (combat._player_phase and
 _death_think both run it).
 
-THE PALETTE (`pal_lines`, after the tic and BEFORE `present.begin_frame_collines` -- never inside the record
-stream): palidx[p_dc] against `pal_cur`; only on a change `present.set_palette playpal<k>` and pal_cur = k.
+THE PALETTE (`pal_lines`, after the tic and BEFORE `screen.draw_collines` -- never inside the record
+stream): palidx[p_dc] against `pal_cur`; only on a change `screen.select_palette <k>` and pal_cur = k.
 `pal_menu_lines`: a menu frame forces palette 0 (again only when pal_cur is not 0). ⚠ The change-only test holds
-only if nothing else re-sends the palette per frame: the M1 reset re-enters at `__hot_end`, ahead of the main
-part's `present.init_screen` / `present.set_palette palette` -- and `init_screen` ZEROES the device's palette
-(ScreenIO._init_screen). Those two lines must move to the boot-only entry part (beside the window chrome) when
-these lines are spliced, or the device shows playpal 0 again every frame after the first change. (M7 P5 integration:
-done -- wall_renderer's `_boot_screen`, for the game-screen tier.)
+only if nothing else re-selects the palette per frame: `init_screen` starts the device over (picture, palettes, slot
+0 selected), so it and the boot's palette definitions run ONCE, from the entry part (wall_renderer's `_boot_screen`),
+above `__hot_end`, where the M1 reset re-enters.
 """
 from __future__ import annotations
 
@@ -57,6 +55,7 @@ from typing import Dict, List, Sequence
 
 from doomfj import gamedata as gd
 from doomfj import rng as R
+from doomfj import screenwire as SW
 from doomfj.lut_generator import generate_dispatch_table_fj
 # issue #121 item 11: the damagecount cap and the palette ranges are the MODEL's (combat: P_DamageMobj, st_stuff.c's
 # ST_doPaletteStuff), imported -- not restated (re-exported: hurtcode.DC_CAP etc. keep their readers)
@@ -67,6 +66,8 @@ HURT_PLAYER_MODES = ("fx", "full", "final")      # M7 P8a: "final" is "full" and
 DP_MAX = 155                        # the largest damage dp_go takes: damagecount + dmg stays one byte
 NPALETTES = STARTREDPALS + NUMREDPALS          # playpal0 .. playpal8: the game palette and the red ones (P5)
 NPALETTES_LOOT = STARTBONUSPALS + NUMBONUSPALS  # playpal0 .. playpal12 (lootcode: the "full" player)
+NPALETTES_SUIT = NPALETTES_LOOT + 1             # M8 C6: playpal13, RADIATIONPAL (a map holding the suit)
+assert NPALETTES_SUIT == __import__("doomfj.powers", fromlist=["RADIATIONPAL"]).RADIATIONPAL + 1
 # (cell, schema field, nibbles): the player's hurt cells (world.build_schema's widths, asserted in hurt_decls)
 CELLS = (("p_hp", "p_health", 3), ("p_ar", "p_armor", 2), ("p_at", "p_armortype", 1), ("p_dc", "p_damagecount", 2),
          ("p_dead", "p_dead", 1),
@@ -75,6 +76,11 @@ CELLS = (("p_hp", "p_health", 3), ("p_ar", "p_armor", 2), ("p_at", "p_armortype"
          ("p_atk", "p_attacker", 2))
 # the PERSISTENT cells (the M1 reset must leave them alone -- like weaponcode.PERSIST)
 PERSIST = tuple(c for c, _f, _n in CELLS) + ("pal_cur",)
+
+
+def cells(sn: int = 2) -> tuple:
+    """CELLS at M8 C2's slot-id width `sn` (world.slot_nibbles): p_atk (0 or 1 + a monster slot) is `sn` nibbles"""
+    return tuple((c, f, sn if c == "p_atk" else n) for c, f, n in CELLS)
 assert DC_CAP + DP_MAX < 256
 
 
@@ -173,12 +179,14 @@ def one_draw_values(site: str) -> List[int]:
 
 
 ATTACK_TABLES = {"trclaw": "troop_claw", "sgbite": "sarg_bite"}
+BRUISER_TABLES = {"brclaw": "bruis_claw"}          # M8 C8: A_BruisAttack's claw, on a map with a Baron
 
 
-def tables_fj(hwt: Sequence[int], loot: bool = False) -> List[str]:
-    """every D4 table P5's hurt code reads: mbul, trclaw, sgbite, dpsav, palidx; `loot` (M7 P6): and bonpal"""
+def tables_fj(hwt: Sequence[int], loot: bool = False, bruiser: bool = False) -> List[str]:
+    """every D4 table P5's hurt code reads: mbul, trclaw, sgbite, dpsav, palidx; `loot` (M7 P6): and bonpal; `bruiser`
+    (M8 C8, a map with a Baron): brclaw"""
     out = [generate_dispatch_table_fj("mbul", mbul_values(hwt), index_nibbles=2, result_nibbles=3)]
-    for label, site in ATTACK_TABLES.items():
+    for label, site in list(ATTACK_TABLES.items()) + (list(BRUISER_TABLES.items()) if bruiser else []):
         vals = one_draw_values(site)
         assert max(vals) <= DP_MAX
         out.append(generate_dispatch_table_fj(label, vals, index_nibbles=2, result_nibbles=2))
@@ -189,25 +197,26 @@ def tables_fj(hwt: Sequence[int], loot: bool = False) -> List[str]:
     return out
 
 
-def palette_tables_fj(sprite_wad, boot_wad=None, n: int = NPALETTES) -> List[str]:
-    """PLAYPAL 0..n-1 as device data `playpal<k>` (texturecompiler.compile_palette). The shipped `palette` comes from
-    the map wad, which holds ONE palette; the sprite wad holds all 14 -- `boot_wad`'s palette 0 must equal it. M7 P6:
-    `n` = NPALETTES_LOOT adds the gold ones, 9..12."""
-    from doomfj.texturecompiler import compile_palette
+def boot_palettes(sprite_wad, boot_wad=None, n: int = NPALETTES) -> List[list]:
+    """PLAYPAL 0..n-1 as RGB lists -- the boot defines them into the device's palette slots 0..n-1 (screenwire.
+    define_palette, in the stream), and a frame SELECTS slot k (`pal_lines`). The boot palette comes from the asset
+    wad; the sprite wad holds all 14 -- `boot_wad`'s palette 0 must equal its. M7 P6: `n` = NPALETTES_LOOT adds the
+    gold ones, 9..12."""
     if boot_wad is not None:
         assert boot_wad.playpal(0) == sprite_wad.playpal(0), "playpal0 is not the boot palette"
     assert len(sprite_wad.get_data("PLAYPAL")) >= 768 * n, (
         "the wad holds fewer than 9 palettes" if n == NPALETTES else "the wad holds fewer than %d palettes" % n)
-    return [compile_palette("playpal%d" % k, sprite_wad, index=k) for k in range(n)]
+    return [sprite_wad.playpal(k) for k in range(n)]
 
 
 # ---- the cells --------------------------------------------------------------------------------------------------
 def level_start(w) -> Dict[str, int]:
     """the hurt cells' level-start values from a World (any skill: the player's start does not depend on it)"""
     from doomfj.monstercode import cell_nibbles
+    from doomfj.world import slot_nibbles
     ws = w.ws
     out = {}
-    for cell, field, nib in CELLS:
+    for cell, field, nib in cells(slot_nibbles(w.layout)):         # M8 C2: p_atk 3 nibbles past 254 slots
         # p_attacker (unsigned, 1 + a monster slot) is as wide as the map's slot count asks; the fj's p_atk is always
         # two nibbles (dt_turn's two-level dispatch) -- so on a map of < 15 monsters the cell is WIDER than the field
         # (M7 P6+P7: the one-room maps of test_slot_layouts_fj / test_emit_every_tier); every other cell is exact
@@ -218,9 +227,11 @@ def level_start(w) -> Dict[str, int]:
     return out
 
 
-def hurt_decls(start: Dict[str, int]) -> List[str]:
-    """the cells (at `start`, `level_start`'s dict), the interface and the scratch"""
-    return ([f"{cell}: hex.vec {nib}, {start[cell]}" for cell, _f, nib in CELLS]
+def hurt_decls(start: Dict[str, int], sn: int = 2, rn: int = 2) -> List[str]:
+    """the cells (at `start`, `level_start`'s dict), the interface and the scratch. M8 C2: `sn` (world.slot_nibbles)
+    -- p_atk, dp_src and md_src (0 or 1 + a monster slot) at the map's slot-id width; `rn` -- the death turn's `dt_t`
+    (a monster's runtime row: `row_nibbles`)"""
+    return ([f"{cell}: hex.vec {nib}, {start[cell]}" for cell, _f, nib in cells(sn)]
             + [f"pal_cur: hex.vec 1, {start['pal_cur']}", "pal_new: hex.vec 1",
                "dp_dmg: hex.vec 2", "dp_ret: hex.vec w/4", "dp_si: hex.vec 3", "dp_sv: hex.vec 2", "dp_d: hex.vec 2",
                "dp_c100: hex.vec 2, %d" % DC_CAP, "hp_v: hex.vec 3", "hp_bcd: hex.vec 3",
@@ -229,23 +240,23 @@ def hurt_decls(start: Dict[str, int]) -> List[str]:
                "md_row: hex.vec 4", "md_seen: hex.vec 1", "md_bret: hex.vec w/4",
                # M7 P7: the hit's source (dp_go's input, 0 after every call) and the attacking monster's id (the
                # slot stubs set it before md_attack), 1 + slot; the dead view's turn (`turn_lines`)
-               "dp_src: hex.vec 2", "md_src: hex.vec 2"] + TURN_DECLS)
+               f"dp_src: hex.vec {sn}", f"md_src: hex.vec {sn}"] + turn_decls(rn))
 
 
-def restart_lines(start: Dict[str, int]) -> List[str]:
+def restart_lines(start: Dict[str, int], sn: int = 2) -> List[str]:
     """NEW GAME and the restart on use after death (M7 P7): every persistent hurt cell back to its level start --
     NEVER `pal_cur`, the palette the device SHOWS (restartcode.DEVICE_SHADOWS): a death restart goes world frame ->
     world frame with no menu frame between, and zeroed while the device shows red the palette lines would never
     re-send it (NEW GAME's menu frame has already set palette 0 and pal_cur with it, `pal_menu_lines`)"""
-    return [f"hex.set {nib}, {cell}, {start[cell]}" for cell, _f, nib in CELLS]
+    return [f"hex.set {nib}, {cell}, {start[cell]}" for cell, _f, nib in cells(sn)]
 
 
 # ---- the code ---------------------------------------------------------------------------------------------------
-def dp_lines(knock: bool = False) -> List[str]:
+def dp_lines(knock: bool = False, sn: int = 2) -> List[str]:
     """`dp_go` (stl.fcall dp_go, dp_ret): combat.damage_player -- the module docstring's order. `knock` (M7 P8a,
     world.knockback_on; doomfj.knockcode's interface): after the "dead / health <= 0" returns and BEFORE the armor,
     P_DamageMobj's thrust on the player with the RAW damage (kb_tg 0, kb_dm, `kb_go`); dp_out zeroes kb_on (the site's
-    inflictor). Off, the text is P7's to the byte"""
+    inflictor). Off, the text is P7's to the byte. M8 C2: `sn` -- kb_tg, p_atk and dp_src at the slot-id width"""
     from doomfj import weaponcode as WC
     states, frames = WC.weapon_states(), WC.overlay_frames()
     idx = {s: i for i, s in enumerate(states)}
@@ -255,10 +266,10 @@ def dp_lines(knock: bool = False) -> List[str]:
            "    hex.sign 3, p_hp, dp_out, dp_pos",                  # health < 0
            "  dp_pos:",
            "    hex.if0 3, p_hp, dp_out",                          # health == 0
-           *(["    hex.zero 2, kb_tg",                             # M7 P8a: the thrust's target, the player
+           *(["    hex.zero %d, kb_tg" % sn,                       # M7 P8a: the thrust's target, the player
               "    hex.mov 2, kb_dm, dp_dmg",                      # the RAW damage (before the armor)
               "    stl.fcall kb_go, kb_ret"] if knock else []),
-           "    hex.mov 2, p_atk, dp_src",                         # M7 P7: player->attacker = source
+           "    hex.mov %d, p_atk, dp_src" % sn,                   # M7 P7: player->attacker = source
            "    hex.mov 2, dp_d, dp_dmg",
            "    hex.if0 1, p_at, dp_dc",
            "    hex.mov 2, dp_si, dp_dmg", "    hex.mov 1, dp_si + 2*dw, p_at",
@@ -296,7 +307,7 @@ def dp_lines(knock: bool = False) -> List[str]:
             "  dpk_bt:",
             "    hex.set 2, wp_sy, %d" % WC.BOTTOM,                   # the dead player's weapon stays down
             "  dp_out:",
-            "    hex.zero 2, dp_src",                              # M7 P7: a caller that names none is "no attacker"
+            "    hex.zero %d, dp_src" % sn,                        # M7 P7: a caller that names none is "no attacker"
             *(["    hex.zero 1, kb_on"] if knock else []),         # M7 P8a: ... and "no inflictor"
             "    stl.fret dp_ret"]
     return out
@@ -315,7 +326,19 @@ def sink_decls() -> List[str]:
     return ["dt_vmx: hex.vec 2, %d" % VIEW_DROP_MAX]
 
 
-def turn_lines(slot_rows: Sequence[int], sink: bool = False) -> List[str]:
+def row_nibbles(slot_rows: Sequence[int]) -> int:
+    """M8 C2: dt_t's width -- 2 while every monster's runtime row is < 256 (E1M1, E1M2), else 3"""
+    top = max(slot_rows, default=0)
+    assert top < 0x1000, top
+    return 2 if top < 0x100 else 3
+
+
+def turn_decls(rn: int = 2) -> List[str]:
+    """TURN_DECLS with M8 C2's `dt_t` (a monster's runtime ROW) `rn` nibbles wide (`row_nibbles`)"""
+    return [("dt_t: hex.vec %d" % rn) if d == "dt_t: hex.vec 2" else d for d in TURN_DECLS]
+
+
+def turn_lines(slot_rows: Sequence[int], sink: bool = False, sn: int = 2) -> List[str]:
     """`dt_turn` (stl.fcall dt_turn, dt_tret): the death think's turn and damage-flash fade, for a dead player.
     `slot_rows[m]` = monster slot m's runtime thing: its thpos_rt row holds the whole-unit 16.16 position (the
     model's mon_x / mon_y << 16). No attacker (p_atk 0): the flash fades. Else the attacker's row -- p_atk's two-level
@@ -328,30 +351,32 @@ def turn_lines(slot_rows: Sequence[int], sink: bool = False) -> List[str]:
     M7 P8a A (`sink`, world.player_sinks; docs/gp-final-plan.md 1.1): P_DeathThink's VIEW DROP first -- after the
     psprites (the caller's weapon tic), before the turn: p_vd += 1 while p_vd < VIEW_DROP_MAX (`dt_vmx`, sink_decls):
     viewheight 41 - p_vd lowered one unit a dead tic, never below 6 (combat.CombatMixin._death_think). The landing
-    applies it to the eye (wall_renderer.landing_drop_lines). Off: P7's text, byte for byte."""
+    applies it to the eye (wall_renderer.landing_drop_lines). Off: P7's text, byte for byte.
+    M8 C2 (docs/c2-slot-ids.md): `sn` (world.slot_nibbles) -- p_atk's width (3 past 254 slots: a third dispatch level,
+    monstercode.id_jump_lines), and dt_t's (`row_nibbles`: a monster's runtime row past 255 -- E1M6's 345 things;
+    hurt_decls' `rn`)"""
     from doomfj.combat import ANG5 as MODEL_ANG5
+    from doomfj.monstercode import id_jump_lines
     assert ANG5 == MODEL_ANG5
     n = len(slot_rows)
+    rn = row_nibbles(slot_rows)
     # M8 F1.1: the byte p_atk holds (two nibbles, two dispatch levels of 16): was 0x80, the model's old 7-bit field
-    assert 0 < n + 1 <= 0xFF and all(0 <= t < 0x100 for t in slot_rows), (n, max(slot_rows))
-    hi = (n + 1 + 15) // 16
+    assert 0 < n + 1 <= 16 ** sn - 1 and all(0 <= t for t in slot_rows), (n, sn)
     out = ["dt_turn:"]
     if sink:                                   # M7 P8a A: the view drop, 1 unit a dead tic to VIEW_DROP_MAX
         out += ["    hex.cmp 2, p_vd, dt_vmx, dtt_vinc, dtt_vend, dtt_vend",
                 "  dtt_vinc:", "    hex.inc 2, p_vd",
                 "  dtt_vend:"]
-    out += ["    hex.if0 2, p_atk, dtt_fade",
-           "    sim.jump16 p_atk + 1*dw, " + ", ".join("dtt_h%d" % h if h < hi else "dtt_fade" for h in range(16))]
-    for h in range(hi):
-        out += ["  dtt_h%d:" % h, "    sim.jump16 p_atk, " + ", ".join(
-            "dtt_m%d" % (16 * h + k - 1) if 0 < 16 * h + k <= n else "dtt_fade" for k in range(16))]
+    out += ["    hex.if0 %d, p_atk, dtt_fade" % sn]
+    out += id_jump_lines("p_atk", sn, n + 1, lambda i: "dtt_m%d" % (i - 1) if i else "dtt_fade", "dtt_fade",
+                         "dtt_h%d", "dtt_g%d")
     for m, t in enumerate(slot_rows):
-        out += ["  dtt_m%d:" % m, "    hex.set 2, dt_t, %d" % t, "    ;dtt_go"]
+        out += ["  dtt_m%d:" % m, "    hex.set %d, dt_t, %d" % (rn, t), "    ;dtt_go"]
     out += ["  dtt_go:",
             # the row's two INTEGER halves (nibbles 4-7 and 12-15 of thpos_rt + 16 * t: a monster's row has no
             # fraction, the model's mon_x << 16) straight into mr_tx / mr_ty's, their fractions zeroed -- 8 pointer
             # reads, not the row's 16 (each read is ~3K words of code: MEASURED, read_hex 16 = 48K)
-            "    hex.zero w/4, dt_off", "    hex.mov 2, dt_off + 1*dw, dt_t",
+            "    hex.zero w/4, dt_off", "    hex.mov %d, dt_off + 1*dw, dt_t" % rn,
             "    hex.set w/4, dt_base, thpos_rt + 4*dw",
             "    hex.ptr_index dt_p, dt_base, dt_off",
             "    hex.zero 4, mr_tx", "    hex.read_hex 4, mr_tx + 4*dw, dt_p",
@@ -387,11 +412,13 @@ def hp_bar_lines() -> List[str]:
             "ammobcd.lookup hp_bcd, hp_v", "hex.mov 3, hud_v + 6*dw, hp_bcd"]
 
 
-def pal_lines(loot: bool = False) -> List[str]:
-    """the frame's palette: palidx[p_dc]; only a change sends `present.set_palette playpal<k>`. `loot` (M7 P6, the
+def pal_lines(loot: bool = False, suit: bool = False) -> List[str]:
+    """the frame's palette: palidx[p_dc]; only a change sends `screen.select_palette <k>`. `loot` (M7 P6, the
     "full" player): ST_doPaletteStuff with berserk and the bonus -- the red one is the larger of palidx[p_dc] and
-    berserk's (`berserk_red`, by p_str's nibbles 2 and 3), else the gold bonpal[p_bc]."""
-    npal = NPALETTES_LOOT if loot else NPALETTES
+    berserk's (`berserk_red`, by p_str's nibbles 2 and 3), else the gold bonpal[p_bc]. M8 C6 (`suit`, a map holding
+    the radiation suit: doomfj.powercode.pal_lines): else RADIATIONPAL while `p_rad` shows (PLAYPAL 13)."""
+    assert not suit or loot
+    npal = NPALETTES_SUIT if suit else NPALETTES_LOOT if loot else NPALETTES
     tg = ["pl_k%d" % k if k < npal else "pl_out" for k in range(16)]
     out = ["palidx.lookup pal_new, p_dc"]
     if loot:
@@ -411,35 +438,44 @@ def pal_lines(loot: bool = False) -> List[str]:
                 "hex.if0 1, pal_new, pl_gold", ";pl_have",
                 "pl_gold:", "bonpal.lookup pal_new, p_bc",
                 "pl_have:"]
+        if suit:
+            from doomfj.powercode import pal_lines as _suit_pal
+            out += _suit_pal()
     out += ["hex.cmp 1, pal_new, pal_cur, pl_chg, pl_out, pl_chg",
            "pl_chg:",
            "hex.mov 1, pal_cur, pal_new",
-           "sim.jump16 pal_new, " + ", ".join(tg)]
+           "hex.switch pal_new, " + ", ".join(tg)]
     for k in range(npal):
-        out += ["pl_k%d:" % k, "present.set_palette playpal%d" % k, ";pl_out"]
+        out += ["pl_k%d:" % k, SW.fj_select_palette(k), ";pl_out"]
     return out + ["pl_out:"]
 
 
 def pal_menu_lines() -> List[str]:
     """a menu frame: palette 0 (sent only when another one is up)"""
-    return ["hex.if0 1, pal_cur, plm_out", "hex.zero 1, pal_cur", "present.set_palette playpal0", "plm_out:"]
+    return ["hex.if0 1, pal_cur, plm_out", "hex.zero 1, pal_cur", SW.fj_select_palette(0), "plm_out:"]
 
 
-def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool = False) -> dict:
+def hurt_parts(w, *, sprite_wad, boot_wad=None, loot: bool = False, knock: bool = False, suit: bool = False,
+               slot_rows: Sequence[int] = ()) -> dict:
     """everything P5's hurt code adds, for the World `w` (the level start of the player cells):
       * `decls`: the cells, interface and scratch (`hurt_decls`);
-      * `tables`: mbul, trclaw, sgbite, dpsav, palidx, and playpal0..8 (device data);
+      * `tables`: mbul, trclaw, sgbite, dpsav, palidx; `palettes`: PLAYPAL 0..8 as RGB (the boot defines them);
       * `leaves`: dp_go -- a leaf (every path frets), placed where nothing falls in;
       * `tic`: the damagecount fade, right after the weapon tic (weaponcode's `wp_end`);
       * `bar`: hp_bar, after the monsters' tic (the damage), anywhere before the bar is drawn;
-      * `palette`: after the tic, before `present.begin_frame_collines`; `menu_palette`: in the menu block;
+      * `palette`: after the tic, before `screen.draw_collines`; `menu_palette`: in the menu block;
       * `restart`: NEW GAME's values; `persist`: the cells the M1 reset must leave alone.
-    `loot` (M7 P6, lootcode.LOOT_PLAYER_MODES): the palette with berserk and the bonus (pal_bk, bonpal, playpal9..12);
+    `loot` (M7 P6, lootcode.LOOT_PLAYER_MODES): the palette with berserk and the bonus (pal_bk, bonpal, PLAYPAL 9..12);
     the program must then hold lootcode's p_str and p_bc. `knock` (M7 P8a, world.knockback_on): dp_go thrusts
-    (`dp_lines(knock=True)`); the program must then hold doomfj.knockcode's interface and `kb_go`."""
+    (`dp_lines(knock=True)`); the program must then hold doomfj.knockcode's interface and `kb_go`.
+    M8 C2 (`slot_rows`, the monsters' runtime rows `turn_lines` is given): dt_t's width (`row_nibbles`)"""
+    from doomfj.world import slot_nibbles
+    sn = slot_nibbles(w.layout)                     # M8 C2: p_atk, dp_src, md_src, kb_tg past 254 slots
     start = level_start(w)
-    return {"decls": hurt_decls(start) + (["pal_bk: hex.vec 1"] if loot else []),
-            "tables": tables_fj(w.hwt, loot) + palette_tables_fj(sprite_wad, boot_wad,
-                                                                 NPALETTES_LOOT if loot else NPALETTES),
-            "leaves": dp_lines(knock), "tic": hp_tic_lines(), "bar": hp_bar_lines(), "palette": pal_lines(loot),
-            "menu_palette": pal_menu_lines(), "restart": restart_lines(start), "persist": PERSIST, "start": start}
+    return {"decls": hurt_decls(start, sn, row_nibbles(slot_rows)) + (["pal_bk: hex.vec 1"] if loot else []),
+            "tables": tables_fj(w.hwt, loot, any(mi.name == "MT_BRUISER" for mi in w.mon_info)),  # M8 C8: brclaw
+            "palettes": boot_palettes(sprite_wad, boot_wad,
+                                      NPALETTES_SUIT if suit else NPALETTES_LOOT if loot else NPALETTES),
+            "leaves": dp_lines(knock, sn), "tic": hp_tic_lines(), "bar": hp_bar_lines(),
+            "palette": pal_lines(loot, suit),                   # M8 C6: `suit` -- the radiation palette
+            "menu_palette": pal_menu_lines(), "restart": restart_lines(start, sn), "persist": PERSIST, "start": start}

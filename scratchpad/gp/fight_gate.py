@@ -592,6 +592,21 @@ def poses_facing(dsim, w, x: int, y: int, dists, los: bool = True) -> list:
     return out
 
 
+def statics_clear(w, x16: int, y16: int) -> bool:
+    """no static blocker overlaps the player's box at (x16, y16): the solid barrels and this skill's solid decor -- the
+    invariant the player's move keeps (tests/fj/test_nukage_fj.py's `_statics_clear`)"""
+    from doomfj.combat import BARREL_R, PLAYER_R
+    for b, t in enumerate(w.barrel_things):
+        bd = (BARREL_R + PLAYER_R) << 16
+        if w.ws.bar_solid[b] and abs((t.x << 16) - x16) < bd and abs((t.y << 16) - y16) < bd:
+            return False
+    for t in w._decor_now:
+        bd = (w.decor_radius[t.type] + PLAYER_R) << 16
+        if abs((t.x << 16) - x16) < bd and abs((t.y << 16) - y16) < bd:
+            return False
+    return True
+
+
 def sector_of(w, x: int, y: int) -> int:
     return w.leaf_sector[w.rm.point_in_subsector(w.cmap, x, y)]
 
@@ -599,7 +614,11 @@ def sector_of(w, x: int, y: int) -> int:
 def poses_in_sector(dsim, w, sec: int, step: int = 16, ledge=None) -> list:
     """standing poses whose centre lies in sector `sec` (its lines' box, every `step` units), facing north; with
     `ledge` True only those whose box stands on a HIGHER floor than the sector's (check_position), False only those on
-    it"""
+    it. M8 w2fix: a pose whose box overlaps a static blocker (a solid decor, a solid barrel) is skipped when the floor
+    is read (`ledge` not None): no move ever stands the player there, and the fj's floor test (lootcode.nukage_lines)
+    runs the player's cells WITH the static blockers -- a refused box reads the seed floor -- where the model's
+    `_on_sector_floor` reads the lines alone (E1M8's F9l at (840, 200) overlapped the firestick at (864, 224) and
+    parted at frame 0)"""
     xs = [w.cmap.vertexes[v][0] for ld in w.lds for side in (ld.front, ld.back)
           if 0 <= side < len(w.sds) and w.sds[side].sector == sec for v in (ld.v1, ld.v2)]
     ys = [w.cmap.vertexes[v][1] for ld in w.lds for side in (ld.front, ld.back)
@@ -610,6 +629,8 @@ def poses_in_sector(dsim, w, sec: int, step: int = 16, ledge=None) -> list:
             if sector_of(w, x, y) != sec or not standing(dsim, x, y):
                 continue
             if ledge is not None:
+                if not statics_clear(w, x << 16, y << 16):
+                    continue
                 fz = w.rm.check_position(w.scene_c, x << 16, y << 16)[1]
                 if (fz != w.secs_c[sec].floor_h) != ledge:
                     continue
@@ -764,7 +785,7 @@ def scenario_list(dsim, w, card) -> list:
     menu = [{"menu": ["esc"]}, {"menu": ["dn"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
     keys5 = menu + [F] * 3 + [I] * 40 + [FIRE] * 3 + [I] * 12
     f5 = []
-    wm = _world_at(gd.SK_MEDIUM)
+    wm = _world_at(gd.SK_MEDIUM, w)
     for i in pstr:
         for p in poses_facing(dsim, w, pk[i].x, pk[i].y, (40, 48, 32)):
             for m in first_live(wm, "MT_POSSESSED", near=(pk[i].x, pk[i].y))[:2]:
@@ -1338,12 +1359,14 @@ def mon_moved_(tr, m: int) -> bool:
 _WORLDS = {}
 
 
-def _world_at(skill):
-    """a World at `skill`'s level start (the placing of a scenario that starts with NEW GAME there)"""
-    if skill not in _WORLDS:
+def _world_at(skill, w):
+    """a World at `skill`'s level start on `w`'s map (the placing of a scenario that starts with NEW GAME there).
+    M8: it was World(skill=...) -- E1M1's level start whatever the map (gen_dryrun's audit)"""
+    key = (w.mapname, skill)
+    if key not in _WORLDS:
         from doomfj.world import World
-        _WORLDS[skill] = World(skill=skill, monsters="idle")
-    return _WORLDS[skill]
+        _WORLDS[key] = World(w.mw, w.mapname, skill=skill, monsters="idle")
+    return _WORLDS[key]
 
 
 def _touched_box(w, tr, items) -> bool:
@@ -1370,9 +1393,60 @@ def _passed(tr) -> bool:
 NEED = ("pickups", "pickup_items", "pickup_drops", "bonus_frames", "berserk_frames", "gibs", "drop_frames",
         "bexp_frames", "barrel_blasts", "puffs", "blast_kills", "barrel_hurt", "player_blocked", "nukage",
         "barrel_hits", "fx_spawns")
-# M8: the NEED counters a scenario is the only one to raise (by its tag): when the map cannot host it (N/A) they are
-# not owed. F5's punch is the only berserk and its gib (F6's blast gibs too: gibs stays owed); F9 / D6 the nukage
-OWNS = {"F5": ("berserk_frames",), "F9": ("nukage",), "D6": ("nukage",)}
+# M8: the NEED counters each scenario (by its tag) raises: a counter is not owed when EVERY scenario of this gate that
+# raises it is N/A on the map. F5's punch is the only berserk; the gibs are F5's and F6's blast; F9 / D6 the nukage;
+# gen_dryrun's audit: the barrel counters are the barrel rows' (E1M5 / E1M8 have no barrel -- they FAILed "every event
+# counter nonzero" with every barrel row N/A), D7's the barrel's hurt in die_gate
+# M8 wave 1 (E1M5 b4's fight gate: "every event counter nonzero: NO -- ['puffs']" with every barrel row N/A): a puff is
+# the shot on a BARREL on this engine (combat: "puff" if the target is a barrel, else blood) -- a barrel counter too
+_BARREL = ("bexp_frames", "barrel_blasts", "blast_kills", "barrel_hurt", "barrel_hits", "puffs")
+OWNS = {"F5": ("berserk_frames", "gibs"), "F9": ("nukage",), "D6": ("nukage",),
+        "F6": _BARREL + ("gibs",), "F6d": _BARREL, "F6p": _BARREL, "F7": _BARREL, "S2": _BARREL, "S4": _BARREL,
+        "D7": ("barrel_hurt",),
+        # M8 w2fix: the blood (fx_spawns) is I1's and C2's -- E1M8 has neither (no sergeant / imp pair, no candidate)
+        "I1": ("fx_spawns",), "C2": ("fx_spawns",)}
+
+
+# M8 wave 1: why a scenario's candidate list is EMPTY on a map (what the candidates are built from is absent there)
+EMPTY_WHY = {
+    "K3": "no barrel of %s has a zombieman, sergeant or imp within 96 units at the level start (K3's crowd to throw)",
+    "I3": "no zombieman or sergeant of %s stands 64..320 units from a barrel with line of sight to it (I3's shooter)",
+    "I6": "no imp of %s has a zombieman or sergeant 64..800 units away and a third shooter in line of sight of it "
+          "(I6's pair and its second attacker)",
+    "C3": "no standing pose of %s faces a barrel from 320..704 units (C3's far barrel)"}
+BARREL_ROWS = ("K3", "I3", "C3")              # their candidates are built on the map's barrels
+
+
+def empty_na(tag: str, w, mapname: str) -> str:
+    """the reason scenario `tag` has no candidate on `mapname` (world `w`: the level start's)"""
+    if tag in BARREL_ROWS and not w.barrel_things:
+        return "%s has no barrel" % mapname
+    return EMPTY_WHY[tag] % mapname if tag in EMPTY_WHY else "no candidate placed from %s's things" % mapname
+
+
+# M8 w2fix (E1M8's fight / die gates: "every event counter nonzero: NO -- ['pickup_drops', 'drop_frames', ...]" -- its
+# only monsters are four Barons, and a Baron drops nothing): the counters a MAP cannot raise, whatever its scenarios --
+# by what the map's things are, on every skill
+DROP_COUNTERS = ("pickup_drops", "drop_frames")
+
+
+def map_cannot(things) -> set:
+    """the counters no scenario can raise on a map whose things are `things` (the WAD's, every skill): the drops when
+    no monster of it drops an item (gamedata.DROPS: the zombieman's clip, the sergeant's shotgun)"""
+    drops = any(gd.DROPS.get(gd.MONSTER_DOOMEDNUMS.get(t.type)) for t in things)
+    return set() if drops else set(DROP_COUNTERS)
+
+
+def unowed(need, tags, na_tags, declared=None) -> list:
+    """the `need` counters every present owner of is N/A (tags: this gate's scenario tags; declared: {tag: owns} a
+    scenario named itself) -- a counter no present scenario owns stays owed"""
+    owns = dict(OWNS, **(declared or {}))
+    out = []
+    for k in need:
+        owners = [t for t in tags if k in owns.get(t, ())]
+        if owners and all(t in na_tags for t in owners):
+            out.append(k)
+    return out
 
 
 def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_cls=None, doc=None) -> int:
@@ -1423,7 +1497,7 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
             "the label table has no %s: a binary before P6/P7" % sorted(table.absent))
     totals = {}
     awaiting, ran_need = [], set()                    # M7 P8a: what waits for a package; the P8a counters owed
-    nas, na_owns = [], set()                          # M8: the scenarios this map cannot host, the counters they own
+    nas, declared = [], {}                            # M8: the scenarios this map cannot host, the counters they own
     for sc in scen:
         why = sc.get("na")
         if not why and dsim.mapname != "E1M1":
@@ -1431,13 +1505,16 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
             # or a control never parts) -- N/A by its tag, with that reason
             why = R.na_reasons.get(sc["name"].split()[0])
         if not why and not sc.get("cands") and "cands" in sc and dsim.mapname != "E1M1" \
-                and not sc.get("na_if_no_cands") and not sc.get("rule"):
+                and not sc.get("na_if_no_cands") and (not sc.get("rule") or P8.status(sc, PMODE, MMODE) == "run"):
             # M8: a scenario whose candidates come from the map's things (a chainsaw, a berserk, a monster kind) and
-            # the map has none: N/A, named -- never on E1M1, where every scenario places (an empty list FAILS there)
-            why = R.na_reasons.get(sc["name"].split()[0], "no candidate placed from %s's things" % dsim.mapname)
+            # the map has none: N/A, named -- never on E1M1, where every scenario places (an empty list FAILS there).
+            # M8 wave 1 (E1M4 / E1M5 b4: K3 I3 I6 C3 "NO candidate of 0 -- FAIL"): a RULE scenario whose rule runs at
+            # these modes too (one still awaiting its package says so below, as before); its reason by `empty_na`
+            why = R.na_reasons.get(sc["name"].split()[0]) or empty_na(sc["name"].split()[0], w0.world, dsim.mapname)
         if why:
             nas.append(sc["name"].split()[0])
-            na_owns |= set(sc.get("owns", OWNS.get(sc["name"].split()[0], ())))
+            if sc.get("owns"):
+                declared[sc["name"].split()[0]] = tuple(sc["owns"])
             print("\n%s -- N/A: %s" % (sc["name"], why), flush=True)
             continue
         stat = P8.status(sc, PMODE, MMODE)            # M7 P8a: the scenario's rule at these modes, its packages
@@ -1486,7 +1563,9 @@ def main(argv=None, gate="FIGHT", scen_fn=None, need=NEED, deaths_ok=False, run_
             continue
         ok &= binary_scenario(gb, cells, table, run, sc, pose, setup or (lambda mph: None), want)
     # --only: the scenarios that ran still owe their own `need` (P9: the R rows' counters)
-    owed = [k for k in need if k not in na_owns]     # M8: a counter only an N/A scenario raises is not owed
+    na_owns = set(unowed(need, [s["name"].split()[0] for s in scen], set(nas), declared))
+    na_owns |= map_cannot(dsim.mw.things(dsim.mapname))   # M8 w2fix: nor one the map's things cannot raise
+    owed = [k for k in need if k not in na_owns]     # M8: a counter only N/A scenarios raise is not owed
     if nas:
         print("\nN/A on %s: %d -- %s; counters no longer owed: %s"
               % (dsim.mapname, len(nas), " ".join(nas), sorted(set(need) - set(owed)) or "none"))
@@ -1531,8 +1610,8 @@ def binary_scenario(gb, cells, table, run, sc, pose, setup, want) -> bool:
     for f, fr in enumerate(want):
         exp = G.expected_cells(fr, order, morder)
         got = reads[f] if f < len(reads) else {}
-        if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
-            s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
+        if s_bad is None and any(not P.same_reading(got.get(k), v) for k, v in exp.items()):
+            s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if not P.same_reading(got.get(k), v)})
         pic = (run.picture(fr) if fr["drawn"] == "world" else
                G.screen(run.orc, fr["drawn"][1], fr["drawn"][2], fr["live"], fr["stats"]))     # P10: live, stats
         if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):

@@ -56,3 +56,19 @@ def test_e1m2_b3s_text_counts_its_labels():
     with contextlib.redirect_stdout(out):
         _ec().hot_block_check({"tables": f.read_text(encoding="utf-8")})
     assert "15,376 ops" in out.getvalue()
+
+
+# ---- M8 l12fix: constant_width_check -- a literal wider than its register (E1M3 / E1M4 / E1M5's pk_t) -----------------
+def test_a_constant_that_fits_its_register_passes():
+    _ec().constant_width_check({"walk": NL.join(["    hex.set 2, pk_t, 255", "    hex.set 3, pk_t, 0xFFF",
+                                                  "    hex.xor_by w/4, cur_ssp, sshead + 5*dw",
+                                                  "    hex.set 1, x + 2*dw, 15  // a comment"])})
+
+
+def test_control_a_constant_past_its_register_is_refused():
+    """R9: the E1M5 line itself, and a 1-nibble xor_by of 16"""
+    ec = _ec()
+    with pytest.raises(AssertionError, match="pk_t, 275"):
+        ec.constant_width_check({"walk": "    hex.set 2, pk_t, 275"})
+    with pytest.raises(AssertionError, match="wider than their registers"):
+        ec.constant_width_check([("main", "    hex.xor_by 1, f, 16")])

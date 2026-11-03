@@ -90,6 +90,12 @@ class GameOracle(P.Oracle):
     RENDER_KW = dict(P.Oracle.RENDER_KW)       # = reference_model.GAME_RENDER_KW (PR #87)
 
 
+
+def _doors_tuple(ds) -> tuple:
+    """M8 w2fix: the binary's `dstate` as a tuple -- a count-1 cell reads as its value (probe.read_cells; E1M8's one
+    door) where the oracle's door states are a 1-tuple"""
+    return ds if isinstance(ds, tuple) else (ds,)
+
 def game_oracle(doc: dict) -> GameOracle:
     """M8: the oracle on the SET's map (`doc["map"]`, E1M1 when absent) -- its fixture wad by doomfj.mapprofile, so a
     set's B0 never draws another map's oracle whatever DOOMFJ_MAP says (E1M1: the wad probe.DEFAULT_WAD always was)"""
@@ -201,14 +207,18 @@ def setup_fn(run_setup: dict):
     (`start_world`) runs, applied to the phase's world; the set's recorded type and corpse state are checked
     against the slot first. The pose is not here: b0 injects the pose every frame. A setup field b0 does not know
     is refused, so a new kind of setup cannot be dropped silently."""
-    extra = sorted(set(run_setup) - {"pose", "corpses"})
+    extra = sorted(set(run_setup) - {"pose", "corpses", "floors"})
     assert not extra, "a setup field b0 does not inject: %s" % extra
     corpses = list(run_setup.get("corpses") or ())
-    if not corpses:
+    # M8 (E1M8, scenarios_map.SETUP_FLOORS): the walk-over floor groups a checkpoint starts with lowered -- the same
+    # `lower_floors` the set's replay (start_world) runs; their cells (f_switch / f_sub) are poked with the rest
+    floors = list(run_setup.get("floors") or ())
+    if not corpses and not floors:
         return None
 
     def fn(ph):
         w = ph.world
+        SM.lower_floors(w, floors)
         for c in corpses:
             assert w.mon_things[c["slot"]].type == c["type"], c
             assert S.corpse_state(w, c["slot"]) == c["state"], c
@@ -220,7 +230,7 @@ def setup_poke(orc, run_setup: dict, pmode=None):
     """(before, poke): the cells the run's setup moves from the level start -- hurt_gate's frame-0 poke
     (`setup_cells`, the ONE mechanism the gates use) with the leaf lists (a lying drop is linked in its corpse's
     leaf, as drop_link<k> links it) -- and their level-start values, which b0 reads back from the binary before it
-    writes. ({}, {}) for a setup without corpses."""
+    writes. ({}, {}) for a setup without corpses or floors."""
     fn = setup_fn(run_setup)
     if fn is None:
         return {}, {}
@@ -240,8 +250,12 @@ def setup_cell_specs(orc) -> dict:
     from doomfj.wall_renderer import BOOT_SKILL, MONSTER_MODE
     cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon, orc.nrt, orc.nthvis)
     ph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode=MONSTER_MODE, player=orc.player_mode)
-    cells["sshead"] = P.Cell("sshead", "byte", count=len(orc._mv(ph.world).cmap.subsectors))
-    cells["thnext"] = P.Cell("thnext", "byte", count=orc.nrt)
+    # M8 F1.5: at the map's list width (Config.LIST_ID_BITS: a 12-bit list cell is probe kind 'cell', 3 nibbles)
+    from doomfj.config import Config, map_cfg
+    nib = map_cfg(Config(), orc.mapname).LIST_NIB
+    kind = dict(kind="byte") if nib == 2 else dict(kind="cell", n=nib)
+    cells["sshead"] = P.Cell("sshead", count=len(orc._mv(ph.world).cmap.subsectors), **kind)
+    cells["thnext"] = P.Cell("thnext", count=orc.nrt, **kind)
     return cells
 
 
@@ -388,7 +402,7 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None, 
                       and r.palettes[mf + f] == orc.palette_sha(mph.palette() if mph is not None else 0))
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
-            got["viewx"], got["viewy"], got["viewangle"], got["dstate"]) == (
+            got["viewx"], got["viewy"], got["viewangle"], _doors_tuple(got["dstate"])) == (
             P_signed(epose[0]), P_signed(epose[1]), epose[2] & M32, tuple(edoors)))
         c_part = (P_signed(epose[0]), P_signed(epose[1]), epose[2] & M32) != (
             P_signed(fr["post"][0]), P_signed(fr["post"][1]), fr["post"][2] & M32)
@@ -657,6 +671,12 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
     M7 P6+P7: T7 a run's SETUP poke (v6's aftermath corpses) takes effect and a binary not poked is rejected (SKIPPED
     on a set without a setup); T8 a proxy run is judged against its own oracle, and a broken one FAILS `judge`."""
     global setup_poke
+    # M8 (the gate-tool audit): the selftest's runs are E1M1's v2 set BY NAME (R0-courtyard, R0-northwest ...) and its
+    # world is built before any set is installed -- an E1M1 instrument check; refused on another map's set, which the
+    # driver's main path (b0) runs by the set's own "map"
+    _m = json.loads(Path(doc_path).read_text(encoding="ascii")).get("map", "E1M1").upper()
+    if _m != "E1M1":
+        raise SystemExit("b0_scenarios --selftest checks the driver on E1M1's v2 set; %s names %s" % (doc_path, _m))
     import m2_std_gate as gate
     import b0 as B
     fails = []

@@ -1,0 +1,14 @@
+class S check: profx drive.py games --stock (flipjump 1.6.0 e44ff3f): blocked65 (= adopt4) vs blocked64 and adopt3
+calibration  ops blocked65       390,984 adopt3       390,984 blocked64       398,774  vs blocked64 -1.95%
+game0        ops blocked65 1,571,537,761 adopt3 1,571,537,761 blocked64 1,804,771,200  vs blocked64 -12.92%
+game1        ops blocked65 1,367,505,479 adopt3 1,367,505,479 blocked64 1,562,984,296  vs blocked64 -12.51%
+game2        ops blocked65 1,406,570,383 adopt3 1,406,570,383 blocked64 1,615,315,619  vs blocked64 -12.92%
+game3        ops blocked65 1,653,972,377 adopt3 1,653,972,377 blocked64 1,900,742,415  vs blocked64 -12.98%
+game4        ops blocked65 1,485,814,895 adopt3 1,485,814,895 blocked64 1,704,565,703  vs blocked64 -12.83%
+game5        ops blocked65 1,546,464,016 adopt3 1,546,464,016 blocked64 1,769,561,248  vs blocked64 -12.61%
+game6        ops blocked65 1,455,891,978 adopt3 1,455,891,978 blocked64 1,662,393,376  vs blocked64 -12.42%
+game7        ops blocked65 1,393,401,007 adopt3 1,393,401,007 blocked64 1,588,771,580  vs blocked64 -12.30%
+game8        ops blocked65 1,141,228,843 adopt3 1,141,228,843 blocked64 1,294,181,958  vs blocked64 -11.82%
+game9        ops blocked65 1,106,362,208 adopt3 1,106,362,208 blocked64 1,252,176,246  vs blocked64 -11.64%
+frames 1044 | sha256 equal to blocked64: 1044 | equal to adopt3: 1044
+control: game0 vs game1 equal on 4 of 104 (the menu frames)

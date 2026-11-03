@@ -20,6 +20,7 @@ package's OWN reader filters and requires bit-identical decompressed images. R9 
     python scratchpad/12m/repack.py --selftest <in.fjm>
 """
 import lzma
+import struct
 import sys
 import time
 from pathlib import Path
@@ -33,6 +34,13 @@ FILTERS_9E = [{"id": lzma.FILTER_LZMA2, "preset": 9 | lzma.PRESET_EXTREME}]
 
 def read_image(path):
     data = Path(path).read_bytes()
+    # HEADER = 64 is a version-3 file of ONE segment. Anything else -- a blocked binary's many segments, or .fjm
+    # version 4 (flipjump 1.6.0's default writer, whose segment table is compressed too; A11) -- is refused rather
+    # than sliced wrong. (A10 also made this tool moot for ships: they write preset 6; 7-9 measured no real gain.)
+    _magic, _w, version, segment_num = struct.unpack("<HHQQ", data[:20])
+    if (version, segment_num) != (3, 1):
+        raise SystemExit("!! %s is .fjm version %d with %d segments: repack reads only a version-3 file of one "
+                         "segment (HEADER = 64)" % (path, version, segment_num))
     return data[:HEADER], lzma.decompress(data[HEADER:], format=_LZMA_FORMAT,
                                           filters=_LZMA_DECOMPRESSION_FILTERS)
 

@@ -30,14 +30,14 @@ def monster_seed_fj(cmap, lds, sds, secs_open, msecs: dict, mcell: dict, *, labe
     out = [f"{L}_leaf:"]
 
     def jump(prefix: int, depth: int) -> list:
-        """sim.jump16 on ptss nibble 2 - depth, into the sixteen next levels (or the leaves' stubs)"""
+        """hex.switch on ptss nibble 2 - depth, into the sixteen next levels (or the leaves' stubs)"""
         nib = 2 - depth
         targets = []
         for d in range(16):
             p = (prefix << 4) | d
             lo = p << (4 * nib)
             targets.append((f"{L}_j{depth + 1}_{p:x}" if depth < 2 else f"{L}_s{p}") if lo < n else f"{L}_none")
-        return [f"    sim.jump16 ptss + {nib}*dw, " + ", ".join(targets)]
+        return [f"    hex.switch ptss + {nib}*dw, " + ", ".join(targets)]
 
     out += jump(0, 0)
     for depth in (1, 2):
@@ -54,7 +54,7 @@ def monster_seed_fj(cmap, lds, sds, secs_open, msecs: dict, mcell: dict, *, labe
         out.append(f"  {L}_s{s}:")
         if si in msecs:                                       # a mover's leaf: its state's heights
             labs = [f"{L}_s{s}_m{k}" for k in range(len(msecs[si]))]
-            out.append(f"    sim.jump16 {mcell[si]}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs))))
+            out.append(f"    hex.switch {mcell[si]}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs))))
             for k, sv in enumerate(msecs[si]):
                 out += [f"  {labs[k]}:", *heights(seg_sector(lds, sds, sv, seg)), f"    stl.fret {L}_ret"]
         else:
@@ -76,8 +76,9 @@ def monster_seed_decls(label: str = "ms_seed") -> list:
 # `mon_active` (M7 P4.2a: `mon_solid`) around the call.
 # ================================================================================================================
 
-def p32b_context(nib: int) -> list:
-    """the move's context cells; `nib`: a sector id's width (World.sec_nibbles: `mm_sec`)"""
+def p32b_context(nib: int, r0: int = 20) -> list:
+    """the move's context cells; `nib`: a sector id's width (World.sec_nibbles: `mm_sec`); `r0` (M8 C8): radius class 0
+    (world.radius_classes: 20, E1M8's 24) -- `mm_bd<r0>`"""
     return [
         "mm_x: hex.vec 4", "mm_y: hex.vec 4",          # the mover's integer position (int16)
         "mm_nx: hex.vec 4", "mm_ny: hex.vec 4",        # the candidate
@@ -89,7 +90,7 @@ def p32b_context(nib: int) -> list:
         "mm_sec: hex.vec %d" % nib,                    # its sector (the REJECT row; P_ChangeSector)
         "mm_ok: hex.vec 1", "mm_blk: hex.vec 1",
         "mm_ox16: hex.vec 8", "mm_oy16: hex.vec 8",    # the position before the step, 16.16 (the crossings, boxes)
-        "mm_bd20: hex.vec 4", "mm_bd30: hex.vec 4", "mm_bdp: hex.vec 8",   # r + 20, r + 30; (r + 16) << 16
+        "mm_bd%d: hex.vec 4" % r0, "mm_bd30: hex.vec 4", "mm_bdp: hex.vec 8",   # r + r0, r + 30; (r + 16) << 16
         "mm_rr: hex.vec 4",                            # an mrnd row
         "mm_dx: hex.vec 4", "mm_dy: hex.vec 4", "mm_adx: hex.vec 4", "mm_ady: hex.vec 4",
         "mm_d1: hex.vec 1", "mm_d2: hex.vec 1", "mm_ta: hex.vec 1", "mm_od: hex.vec 1",   # NewChaseDir's
@@ -109,21 +110,61 @@ def _add_const(n: int, cell: str, v: int) -> list:
     return ["    hex.add_constant %d, %s, %d" % (n, cell, v)] if v else []
 
 
-def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> list:
+def _window_lines(slots, solid: str, classes) -> list:
+    """`window` (E1M6 v2's cut): the slots' box test against per-call WINDOWS. |x - nx| < bd is nx - bd < x < nx + bd,
+    and when the window's ends have one sign, the unsigned order of the raw int16 words is the signed order -- so each
+    axis is two early-exit `hex.cmp`s (a far thing parts at its top digit) instead of mov + sub + abs + scmp. A window
+    whose low end is negative and high end is not (the mover within bd of an axis) takes the slot loop as before
+    (mm_slow). Exact while no difference passes int16 (wall_renderer asserts the map's extent)."""
+    out = []
+    for c in classes:
+        for ax in "xy":
+            out += ["    hex.mov 4, mm_wl%d%s, mm_n%s" % (c, ax, ax), "    hex.sub 4, mm_wl%d%s, mm_bd%d" % (c, ax, c),
+                    "    hex.mov 4, mm_wh%d%s, mm_n%s" % (c, ax, ax), "    hex.add 4, mm_wh%d%s, mm_bd%d" % (c, ax, c),
+                    "    hex.sign 4, mm_wl%d%s, mm_ws%d%s, mm_wk%d%s" % (c, ax, c, ax, c, ax),
+                    "  mm_ws%d%s:" % (c, ax),
+                    "    hex.sign 4, mm_wh%d%s, mm_wk%d%s, mm_slow" % (c, ax, c, ax),
+                    "  mm_wk%d%s:" % (c, ax)]
+    for j, (t, rad) in enumerate(slots):
+        nj = "mm_f%d_n" % j
+        out += ["    hex.if0 1, %s + %d*dw, %s" % (solid, j, nj)]
+        for k, (ax, off) in enumerate((("x", 4), ("y", 12))):
+            ok = "mm_f%d_%s" % (j, "xy"[k]) if k == 0 else "mm_hit"
+            out += ["    hex.cmp 4, thpos_rt + %d*dw, mm_wl%d%s, %s, %s, mm_f%d_%sl" % (16 * t + off, rad, ax, nj, nj, j, ax),
+                    "  mm_f%d_%sl:" % (j, ax),
+                    "    hex.cmp 4, thpos_rt + %d*dw, mm_wh%d%s, %s, %s, %s" % (16 * t + off, rad, ax, ok, nj, nj)]
+            if k == 0:
+                out.append("  %s:" % ok)
+        out.append("  %s:" % nj)
+    return out + ["    ;mm_player", "  mm_slow:"]
+
+
+def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False, window: bool = False) -> list:
     """`mm_things`: mm_blk = 1 when a SOLID thing's box overlaps the candidate (world._thing_blocker's monsters and
     player; the static blockers are in the cells). `slots`: [(runtime thing, radius)] per monster slot. `solid`: the
     per-slot flag a monster blocks by -- M7 P4.2a: `mon_solid`, MF_SOLID, which A_Fall clears (a corpse stops
     blocking); `mon_active` before monsters die, where the two are equal. The mover's own flag is clear during the
     call (monstercode.p32b_move_lines, the same `solid`). The player is tested at 16.16: |px - (nx << 16)| <
     (r + 16) << 16. `hurt` (M7 P5, doomfj.hurtcode): a dead player (`p_dead`) is not MF_SOLID and blocks nothing;
-    off, the player is always alive and the text is P4's to the byte."""
+    off, the player is always alive and the text is P4's to the byte. M8 C8: the radius classes are the slots'
+    (world.radius_classes: E1M8's Barons r0 24, `mm_bd24`), and a lost soul's 16 its own (`mm_bd16`). `window`
+    (_window_lines): the slots tested against per-call windows first, the loop below only when a window straddles
+    zero; off, the text is unchanged."""
+    from doomfj.world import radius_classes
+    soul = any(rad == 16 for _t, rad in slots)          # M8 C8: a lost soul (radius 16) among the slots
+    r0, _r1 = radius_classes([rad for _t, rad in slots])
+    b0 = "mm_bd%d" % r0
     out = ["mm_things:",
            "    hex.zero 1, mm_blk",
-           "    hex.zero 2, mm_bd20 + 2*dw", "    hex.mov 2, mm_bd20, mm_r", "    hex.mov 4, mm_bd30, mm_bd20",
-           *_add_const(4, "mm_bd20", 20), *_add_const(4, "mm_bd30", 30)]
+           "    hex.zero 2, %s + 2*dw" % b0, "    hex.mov 2, %s, mm_r" % b0, "    hex.mov 4, mm_bd30, %s" % b0,
+           *(["    hex.mov 4, mm_bd16, %s" % b0] if soul else []),
+           *_add_const(4, b0, r0), *_add_const(4, "mm_bd30", 30),
+           *(_add_const(4, "mm_bd16", 16) if soul else [])]
+    if window:
+        out += _window_lines(slots, solid, sorted({rad for _t, rad in slots}))
     for j, (t, rad) in enumerate(slots):
         bd = "mm_bd%d" % rad
-        assert rad in (20, 30), rad
+        assert rad in (r0, 30) + ((16,) if soul else ()), rad
         nj = "mm_th%d_n" % j
         out += ["    hex.if0 1, %s + %d*dw, %s" % (solid, j, nj),
                 "    hex.mov 4, ct_a, thpos_rt + %d*dw" % (16 * t + 4),
@@ -135,17 +176,21 @@ def things_leaf_lines(slots, solid: str = "mon_active", hurt: bool = False) -> l
                 "    hex.scmp 4, ct_a, %s, mm_hit, %s, %s" % (bd, nj, nj),
                 "  %s:" % nj]
     # the player, 16.16: cpx / cpy already hold the candidate << 16 (the caller sets them first)
+    out += (["  mm_player:"] if window else [])
     out += (["    hex.if1 1, p_dead, mm_things_out"] if hurt else [])
     out += ["    hex.zero 8, mm_bdp", "    hex.mov 2, mm_bdp + 4*dw, mm_r", *_add_const(4, "mm_bdp + 4*dw", 16)]
     for ax, reg, c in (("x", "viewx", "cpx"), ("y", "viewy", "cpy")):
         out += ["    hex.mov 8, mm_c, %s" % reg, "    hex.sub 8, mm_c, %s" % c, "    hex.abs 8, mm_c",
                 "    hex.scmp 8, mm_c, mm_bdp, mm_pl%s, mm_things_out, mm_things_out" % ax, "  mm_pl%s:" % ax]
     out += ["  mm_hit:", "    hex.set 1, mm_blk, 1", "  mm_things_out:", "    stl.fret mm_tret"]
+    if window:
+        out += ["mm_w%s%d%s: hex.vec 4" % (e, c, ax) for c in sorted({rad for _t, rad in slots}) for ax in "xy"
+                for e in "lh"]
     return out
 
 
 def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: int, height: int,
-                    teleport=()) -> list:
+                    teleport=(), list_bits: int = 8, r0: int = 20, soul: bool = False) -> list:
     """`mm_move`: P_Move for the context's monster (world._p_move): no direction -> mm_ok 0; else one step
     (step_delta: `speed` on an axis, 6 / 7 on both for a diagonal), P_TryMove (the things, then the seed at the
     candidate and the monster cells), and
@@ -157,15 +202,24 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
         `dreq`, and movedir = NODIR -> mm_ok 1 (the move counts as made); else mm_ok 0.
     M8 L4 (`teleport`: doomfj.teleportcode.monster_lines): the WR teleports, after the lifts and before the move is
     taken -- a fire makes the destination the move (mm_nx / mm_ny, cp_floor, ptss). () on a map without one: the
-    text is unchanged."""
+    text is unchanged. `r0` (M8 C8): radius class 0 (world.radius_classes) -- the lifts crossed at r0 or 30. M8 C8
+    (`soul`, a map with a lost soul: doomfj.soulcode): a soul's (mm_sk) P_TryMove at its z (sk_hts), the WR lifts at
+    radius 16 (mm_r16), its accept (not floating, its ceiling) and P_Move's float on a refusal with FLOATOK -- before the
+    doors; off, the text is unchanged. M8 F1.5: `list_bits` 12 -- the relink is the wide twins
+    (things.list_macros)."""
+    from doomfj.things import list_macros
+    mac = list_macros(list_bits)
     from doomfj.doorcode import _box_test, _crossed_lines
     from doomfj.world import DIAG_STEP
+    if soul:
+        from doomfj import soulcode as _SC
     out = ["mm_move:",
            "    hex.zero 1, mm_ok",
+           *(["    hex.zero 1, sk_fok"] if soul else []),
            "    hex.if_flags mm_dir, %d, mm_mv_go, mm_mv_out" % (1 << NODIR),
            "  mm_mv_go:",
            "    hex.mov 4, mm_nx, mm_x", "    hex.mov 4, mm_ny, mm_y",
-           "    sim.jump16 mm_dir, " + ", ".join(["mm_st%d" % d for d in range(8)] + ["mm_mv_out"] * 8)]
+           "    hex.switch mm_dir, " + ", ".join(["mm_st%d" % d for d in range(8)] + ["mm_mv_out"] * 8)]
     for d in range(8):
         out.append("  mm_st%d:" % d)
         out.append("    hex.if1 1, mm_spd, mm_st%df" % d)
@@ -187,15 +241,18 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
             "    stl.fcall ptloc_walk, ptloc_ret",
             "    stl.fcall ms_seed_leaf, ms_seed_ret",
             "    hex.zero 8, cprad", "    hex.mov 2, cprad + 4*dw, mm_r",
+            *(_SC.move_try_lines(root) if soul else []),               # M8 C8: a soul's try at its z
             "    sim.try_move_mon %s, %d, %d, mm_z, %d" % (root, height, stepup, dropmax),
+            *(["  mm_tdone:"] if soul else []),
             "    hex.if0 1, mv_ok, mm_refused",
             # ---- accepted: the WR lifts the step crosses (old: mm_ox16 / mm_oy16; new: cpx / cpy) ----------
             "    hex.zero 4, mm_ox16", "    hex.mov 4, mm_ox16 + 4*dw, mm_x",
             "    hex.zero 4, mm_oy16", "    hex.mov 4, mm_oy16 + 4*dw, mm_y",
+            *(["    hex.if1 1, mm_r16, mm_lw16"] if soul else []),          # M8 C8: a soul's radius
             "    hex.if1 1, mm_r30, mm_lw30"]
-    for rad in (20, 30):
-        if rad == 30:
-            out.append("  mm_lw30:")
+    for rad in (r0, 30) + ((16,) if soul else ()):
+        if rad != r0:
+            out.append("  mm_lw%d:" % rad)
         for k, (slot, axis, coord, lo, hi) in enumerate(lift_trigs):
             out += _crossed_lines("mm_lw%d_%d" % (rad, k), axis, coord, lo, hi, rad,
                                   ["    hex.set 1, lreq + %d*dw, 1" % slot],
@@ -209,15 +266,17 @@ def move_leaf_lines(*, root: str, lift_trigs, door_boxes, dropmax: int, stepup: 
             "    hex.zero w/4, mm_c", "    hex.mov 3, mm_c, ptss",
             "    hex.cmp 3, mm_c, mm_leafw, mm_relink, mm_same, mm_relink",
             "  mm_relink:",
-            "    sim.leaf_unlink mm_tw, mm_leafw",
+            "    %s mm_tw, mm_leafw" % mac["unlink"],
             "    hex.zero w/4, mm_leafw", "    hex.mov 3, mm_leafw, ptss",
-            "    sim.leaf_link mm_tw, mm_leafw",
+            "    %s mm_tw, mm_leafw" % mac["link"],
             "    lfsec.lookup mm_sec, mm_leafw",
             "  mm_same:",
+            *(_SC.move_accept_lines() if soul else []),              # M8 C8: not floating, the ceiling
             "    hex.set 1, mm_ok, 1",
             "    ;mm_mv_out",
             # ---- refused: a monster door's use box --------------------------------------------------------
             "  mm_refused:",
+            *(_SC.move_float_lines() if soul else []),               # M8 C8: P_Move's float, before the doors
             "    hex.zero 4, mm_ox16", "    hex.mov 4, mm_ox16 + 4*dw, mm_x",
             "    hex.zero 4, mm_oy16", "    hex.mov 4, mm_oy16 + 4*dw, mm_y"]
     for k, (slot, box) in enumerate(door_boxes):
@@ -345,7 +404,7 @@ def ncd_leaf_lines(*, deadzone: int, max_tries: int, fight: bool = False) -> lis
 def _walk(tag: str) -> list:
     """one P_TryWalk site in mm_ncd: mm_walk on mm_wd; success -> done, the cap -> NODIR (fail), else on"""
     return ["    stl.fcall mm_walk, mm_wret",
-            "    sim.jump16 mm_wres, mm_nw_%s, mm_n_done, mm_n_fail, %s" % (tag, ", ".join(["mm_n_fail"] * 13)),
+            "    hex.switch mm_wres, mm_nw_%s, mm_n_done, mm_n_fail, %s" % (tag, ", ".join(["mm_n_fail"] * 13)),
             "  mm_nw_%s:" % tag]
 
 
@@ -354,7 +413,7 @@ def walk_leaf_lines(*, max_tries: int) -> list:
     P_Random & 15); 2: the cap (`max_tries` distinct directions tried already)."""
     out = ["mm_walk:",
            "    hex.zero 1, mm_wres",
-           "    sim.jump16 mm_wd, " + ", ".join(["mm_wk%d" % d for d in range(8)] + ["mm_wk_out"] * 8)]
+           "    hex.switch mm_wd, " + ", ".join(["mm_wk%d" % d for d in range(8)] + ["mm_wk_out"] * 8)]
     for d in range(8):
         out += ["  mm_wk%d:" % d, "    hex.if1 1, mm_tried + %d*dw, mm_wk_out" % d,
                 "    hex.set 1, mm_tried + %d*dw, 1" % d, "    ;mm_wk_new"]

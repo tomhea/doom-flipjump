@@ -1,0 +1,14 @@
+engine: C:\Users\tomhe\Documents\fj160-path\flipjump\interpreter\_fjcore.pyd
+calibration: 398,774 ops, 4/4 frames, 4.3s
+game0: 1,804,771,200 ops, 104/104 frames, 16.9s
+game1: 1,562,984,296 ops, 104/104 frames, 14.9s
+game2: 1,615,315,619 ops, 104/104 frames, 15.2s
+game3: 1,900,742,415 ops, 104/104 frames, 17.5s
+game4: 1,704,565,703 ops, 104/104 frames, 15.9s
+game5: 1,769,561,248 ops, 104/104 frames, 16.6s
+game6: 1,662,393,376 ops, 104/104 frames, 15.8s
+game7: 1,588,771,580 ops, 104/104 frames, 15.4s
+game8: 1,294,181,958 ops, 104/104 frames, 13.5s
+game9: 1,252,176,246 ops, 104/104 frames, 13.2s
+total 729.2s
+[4b sitecustomize] OK fj160: flipjump.__file__ = C:\Users\tomhe\Documents\fj160-path\flipjump\__init__.py (argv0 scratchpad/12m/profx/drive.py)

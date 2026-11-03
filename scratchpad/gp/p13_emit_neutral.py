@@ -39,7 +39,7 @@ def probe(wad, mapname):
         pass
     seen = {}
 
-    def stop_at_first_assembly(paths, out, lzma_fast=True):
+    def stop_at_first_assembly(paths, out, **_kw):
         seen["persist"] = sys._getframe(1).f_locals["_persist"]
         seen["paths"] = [Path(p) for p in paths]
         raise Stop

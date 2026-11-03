@@ -9,7 +9,7 @@ bakes the per-pixel graphics data into the M5 dispatch tables, and completes F3'
 - `compile_colormap` emits the light table as a dispatch table indexed by `(light<<8 | colour)` ->
   lit palette byte, plus `<label>.apply` (the per-pixel colormap apply, D11). Over-align candidate (#3).
 - `compile_palette` emits the 256-colour RGB palette as **device data** (not a dispatch LUT, §1.3) —
-  the present layer hands it to `set_palette`.
+  no longer handed to the screen: the boot defines its palettes in the stream (screenwire.define_palette).
 
 All values come from the WAD (the single source shared with the oracle, R6). flipjump parses `.fj` as
 UTF-8; emitted text is ASCII.
@@ -127,7 +127,7 @@ def generate_colormap_packed_table_fj(label: str, wad: WadFile, *, lights: int =
     """M13-raster: the colormap as a RAW packed-byte array (NOT a dispatch table) -- one byte per
     entry, row-major [light_row][colour], addressable at `label + (light*256+colour)*dw`. This is
     the device rasterizer's third static table (alongside yslope_packed/zlight): the device DMA-reads
-    it directly (an address handoff via `present.load_raster_tables`, zero fj ops) to do its own
+    it directly (an address handoff, zero fj ops) to do its own
     distance-light shade lookup, instead of fj baking every (light,colour) combo into a compile-time
     cm.emit dispatch jump target. SAME values as `colormap_values` (R6 SSOT) -- guaranteed to match
     whatever cm.emit/cm.apply bake elsewhere, since both draw from the identical wad.colormap()."""
@@ -158,7 +158,7 @@ def compile_colormap(label: str, wad: WadFile, *, lights: int = 32, mode: str = 
 
 def compile_palette(label: str, wad: WadFile, *, index: int = 0) -> str:
     """Emit the 256-colour RGB palette as device data (R,G,B bytes per colour) — read by the present
-    layer's set_palette, not a dispatch LUT (§1.3)."""
+    layer (historic: the boot now defines palettes in the stream, screenwire.define_palette), not a dispatch LUT."""
     pal = wad.playpal(index)
     lines = [f'// palette "{label}": 256 RGB colours, device data (doomfj.texturecompiler)',
              f"{label}:"]

@@ -113,6 +113,8 @@ def tables(ths) -> List[str]:
 def thinker_lines(k: int, th) -> List[str]:
     """one tic of thinker k (`th`): the block the phase runs, ending at `lt{k}_end`"""
     p, S, C = f"lt{k}", state_cell(k), _count_cell(k)
+    if th.kind == "switch":                 # M8 C4: a light switch's sector never tics (the use press sets its state)
+        return []
     if th.kind == "glow":
         last = len(th.levels) - 1
         assert last >= 1, th
@@ -166,7 +168,7 @@ def thinker_lines(k: int, th) -> List[str]:
     if all(c is not None for c in consts) and len(set(consts)) == 1:
         return out + [f"    hex.set 1, {S}, {consts[0]}", f"  {p}_end:"]
     labs = [f"{p}_s{s}" for s in range(n)]
-    out.append(f"    sim.jump16 {S}, " + ", ".join(labs + [labs[-1]] * (16 - n)))
+    out.append(f"    hex.switch {S}, " + ", ".join(labs + [labs[-1]] * (16 - n)))
     for s in range(n):
         out += [f"  {labs[s]}:",
                 (f"    hex.set 1, {S}, {consts[s]}" if consts[s] is not None
@@ -184,6 +186,18 @@ def phase_lines(ths) -> List[str]:
     for k, th in enumerate(ths):
         out += thinker_lines(k, th)
     return out + ["  lt_out:", "    stl.fret lt_pret"]
+
+
+def switch_use_lines(uses) -> List[str]:
+    """M8 C4: a use PRESS (inside `ex_press`, with the lifts' and floors' use lines): each light-switch line's box
+    holding the player sets its sectors' thinkers to the bright state (1) -- again and again for an SR line, a no-op
+    once lit. `uses` = `lights.light_switch_uses`. Labels `lsw<j>_`"""
+    from doomfj.doorcode import _box_test
+    out = ["// == M8 C4: the light switches (lights.SWITCH_LIGHT_SPECIALS: EV_LightTurnOn) on a use press =="] if uses else []
+    for j, (box, ks) in enumerate(uses):
+        out += _box_test(0, box, f"lsw{j}_hit", f"lsw{j}_miss", tag=f"lsw{j}_b")
+        out += [f"  lsw{j}_hit:", *[f"    hex.set 1, {state_cell(k)}, 1" for k in ks], f"  lsw{j}_miss:"]
+    return out
 
 
 TIC_CALL = "stl.fcall lt_phase, lt_pret"

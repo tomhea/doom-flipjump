@@ -305,10 +305,71 @@ def psprite_columns(lump: bytes, *, view_w: int = SCREEN_W, view_rows: int = VIE
     return out
 
 
+# M8 C6 (doomfj.powers, partial invisibility): THE SHADOW WEAPON. DOOM draws the psprites of an invisible player with
+# R_DrawFuzzColumn -- each pixel is `colormaps[6][screen[y +- 1]]`, the FRAME's neighbour darkened, the row picked by the
+# 50-entry `fuzzoffset` table that a global `fuzzpos` walks pixel by pixel. This renderer cannot do that exactly: the fj
+# STREAMS the view to the device and keeps no frame to read back (the device has no darken-a-pixel token), so the
+# neighbour is unknown to both mirrors. THE CLOSEST EXACT ALTERNATIVE (the oracle and the fj bake the same pixels): the
+# weapon's pixels are walked in DOOM's order (column by column, top down) with DOOM's own fuzzoffset table; a pixel
+# whose entry is +FUZZOFF (28 of 50) is drawn -- the weapon's colour through COLORMAP 6, the fuzz's darkening -- and a
+# -FUZZOFF one is left transparent (the world shows through). The walk restarts every frame (DOOM's fuzzpos runs on),
+# so the stipple stands still where DOOM's shimmers.
+FUZZ_SIGNS = (+1, -1, +1, -1, +1, +1, -1,                 # r_draw.c fuzzoffset[], FUZZOFF's sign
+              +1, +1, -1, +1, +1, +1, -1,
+              +1, +1, +1, -1, -1, -1, -1,
+              +1, -1, -1, +1, +1, +1, +1, -1,
+              +1, -1, +1, +1, -1, -1, +1,
+              +1, -1, -1, -1, -1, +1, +1,
+              +1, +1, -1, +1, +1, -1, +1)
+FUZZ_COLORMAP = 6                                         # R_DrawFuzzColumn's `colormaps + 6*256`
+assert len(FUZZ_SIGNS) == 50
+
+
+def shadow_columns(columns: Dict[int, List[Tuple[int, int, int]]]) -> Dict[int, List[Tuple[int, int, int]]]:
+    """M8 C6: `psprite_columns`' runs as the shadow weapon draws them (see FUZZ_SIGNS): the pixels whose fuzz entry is
+    positive, in DOOM's pixel order, as runs again"""
+    out: Dict[int, List[Tuple[int, int, int]]] = {}
+    k = 0
+    for x in sorted(columns):
+        runs: List[Tuple[int, int, int]] = []
+        for y0, y1, texel in columns[x]:
+            for y in range(y0, y1):
+                if FUZZ_SIGNS[k % len(FUZZ_SIGNS)] > 0:
+                    if runs and runs[-1][1] == y and runs[-1][2] == texel:
+                        runs[-1] = (runs[-1][0], y + 1, texel)
+                    else:
+                        runs.append((y, y + 1, texel))
+                k += 1
+        if runs:
+            out[x] = runs
+    return out
+
+
+def shadow_row(colormap, row: Sequence[int]) -> List[int]:
+    """M8 C6: the shadow weapon's colour per texel -- the lit colour (`row`) darkened by COLORMAP 6"""
+    return [colormap[FUZZ_COLORMAP][row[t]] for t in range(256)]
+
+
 def psprite_light_row(rm, sector_light: int) -> int:
     """the colormap row DOOM lights a psprite with: `scalelight[lightnum][MAXLIGHTSCALE - 1]` of the player's sector"""
     from doomfj.tables import MAXLIGHTSCALE
     return rm.scalelight[rm.wall_lightnum(sector_light, 0)][MAXLIGHTSCALE - 1]
+
+
+# M8 (E1M9's dark sector): R_DrawPSprite lights a FF_FULLBRIGHT frame with `colormaps` -- row 0, whatever the sector.
+# Every flash frame is fullbright and no weapon frame is (hudcode.game_hud_parts asserts it from gamedata), so the
+# flash bakes once at this row and only the weapon follows the player's sector.
+FULLBRIGHT_ROW = 0
+
+
+def weapon_light_rows(rm, sectors) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    """M8: (rows, of_sector) -- the DISTINCT colormap rows `psprite_light_row` gives the map's sectors, ascending, and
+    each sector's index into them. One row (E1M1..E1M8): the weapon bakes that row alone, as it always did; more
+    (E1M9): one baked weapon drawing per row, picked per frame by the player's sector (hudcode's `hud_lrow`)."""
+    per = [psprite_light_row(rm, s.light) for s in sectors]
+    rows = tuple(sorted(set(per)))
+    assert 1 <= len(rows) <= 16, ("the weapon's light rows are one nibble's choice", rows)
+    return rows, tuple(rows.index(r) for r in per)
 
 
 # --------------------------------------------------------------------------------------------- the picture
@@ -327,36 +388,72 @@ class GameScreen:
     """THE ORACLE'S GAME SCREEN (M7 P4.0): the view `render_wall_frame` draws at VIEW_ROWS rows, with the weapon over
     it and the bar below -- the 160x100 picture the game binary presents. Every gate that compares a game-tier world
     frame builds one of these and passes the view through `frame` (ONE composition, R6). The weapon and its light row
-    are `hudcode.game_hud_parts`' choices (the same frame, the same single row), read from there."""
+    are `hudcode.game_hud_parts`' choices (the same frames, the same rows), read from there: M8, the weapon's row is
+    the player's sector's (one per distinct row, `weapon_light_rows`), the flash's FULLBRIGHT_ROW."""
 
-    def __init__(self, rm, asset_wad, sprite_wad, sectors):
+    def __init__(self, rm, asset_wad, sprite_wad, sectors, plasma: bool = False):
         from doomfj import hudcode
         assert rm.cfg.VIEW_H == VIEW_ROWS, ("the game screen needs the game tier's 84-row config "
                                            "(config.GAME_CFG), not %d rows" % rm.cfg.VIEW_H)
         from doomfj import weaponcode as WC
-        parts = hudcode.game_hud_parts(rm, asset_wad, sprite_wad, sectors)
+        # M8 C6: `plasma` -- a map with the rifle (combat.plasma_on): its psprites join the overlays
+        parts = hudcode.game_hud_parts(rm, asset_wad, sprite_wad, sectors, plasma=plasma)
         self.cfg = rm.cfg
         self.colours, self.row = parts["colours"], parts["colormap_row"]
         weapons, flashes = parts["overlay"]
-        self.overlays = dict(zip(WC.overlay_frames(), weapons)) | dict(zip(WC.flash_frames(), flashes))
+        self.overlays = (dict(zip(WC.overlay_frames(plasma=plasma), weapons))
+                         | dict(zip(WC.flash_frames(plasma), flashes)))
+        # M8 C6: the shadow weapon (partial invisibility) -- the same frames, stippled and darkened (shadow_columns)
+        self.shadows = {k: shadow_columns(v) for k, v in self.overlays.items()}
+        self.shadow_row = shadow_row(asset_wad.colormap(), self.row)
         self.level_start = dict(hudcode.LEVEL_START)
+        # M8 (E1M9): the weapon's colormap row is the PLAYER'S SECTOR's (R_DrawPSprite's spritelights); the flash's is
+        # FULLBRIGHT_ROW (its frames are FF_FULLBRIGHT). One-row maps: both are `self.row`, as before.
+        self.set_light_rows(asset_wad.colormap(), [asset_wad.colormap()[r] for r in parts["light_rows"]],
+                            parts["sector_rows"], WC.flash_frames(plasma), rm)
+
+    def set_light_rows(self, colormap, rows, sector_rows, flash_lumps, rm=None):
+        """the weapon's lit colour rows (one per distinct sector row), each sector's index into them, the flash's
+        lumps (drawn FULLBRIGHT_ROW) and the renderer whose last `render_wall_frame` names the player's sector"""
+        self.rows, self.sector_rows, self.flash_lumps, self._rm = list(rows), tuple(sector_rows), set(flash_lumps), rm
+        self.shadow_rows = [shadow_row(colormap, r) for r in self.rows]
+        self.bright = colormap[FULLBRIGHT_ROW]
+        self.shadow_bright = shadow_row(colormap, self.bright)
+
+    def _row_index(self, sector: Optional[int]) -> int:
+        if len(self.rows) == 1:
+            return 0
+        if sector is None:                   # the sector the renderer's last frame stood in (render_wall_frame)
+            assert self._rm is not None and getattr(self._rm, "view_sector", None) is not None, (
+                "a map whose sectors light the weapon with %d rows needs the player's sector" % len(self.rows))
+            sector = self._rm.view_sector
+        return self.sector_rows[sector]
 
     def frame(self, view: bytes, *, card: bool = False, values: Optional[dict] = None,
-              weapon: Optional[str] = None, flash: Optional[str] = None) -> bytes:
+              weapon: Optional[str] = None, flash: Optional[str] = None, shadow: bool = False,
+              sector: Optional[int] = None) -> bytes:
         """the game screen for a rendered view (W x H bytes whose rows >= VIEW_ROWS are unused), the bar's values, and
         (M7 P4.1) the psprites' lumps -- the weapon's (the ready pistol at the level start when None) and the flash's,
-        drawn in DOOM's order, the flash over the weapon"""
+        drawn in DOOM's order, the flash over the weapon. M8 C6 (`shadow`): an invisible player's psprites, the shadow
+        weapon's stipple (shadow_columns). M8 (`sector`): the player's sector, whose light row lights the weapon on a
+        map of several rows (None: the sector of the renderer's last frame -- `ReferenceModel.view_sector`)"""
         from doomfj import hudcode
         w = self.cfg.W
         rows = [list(view[y * w:(y + 1) * w]) for y in range(VIEW_ROWS)]
         vals = dict(self.level_start if values is None else values, blue=bool(card))
         bar = bar_pixels(self.colours, **vals)
         out = rows
+        k = self._row_index(sector)
         for lump in (weapon or hudcode.READY_WEAPON, flash):
             if lump is None or lump == NO_PSPRITE:          # P10: a dead player's empty hands
                 continue
-            for x, runs in self.overlays[lump].items():
+            bright = lump in self.flash_lumps               # M8: a flash frame is FF_FULLBRIGHT
+            if shadow:
+                over, row = self.shadows, (self.shadow_bright if bright else self.shadow_rows[k])
+            else:
+                over, row = self.overlays, (self.bright if bright else self.rows[k])
+            for x, runs in over[lump].items():
                 for y0, y1, texel in runs:
                     for y in range(y0, y1):
-                        out[y][x] = self.row[texel]
+                        out[y][x] = row[texel]
         return bytes(c for row in out + bar for c in row)

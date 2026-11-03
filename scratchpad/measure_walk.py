@@ -9,7 +9,6 @@ from doomfj.config import Config
 from doomfj.harness import W
 
 PROJ = Path("src/fj/projection.fj").resolve()
-FIXED = Path("src/fj/fixed_point.fj").resolve()
 
 
 def run_ops(body_lines, n, tmp):
@@ -41,7 +40,7 @@ def run_ops(body_lines, n, tmp):
     p = tmp / "m.fj"
     p.write_text(main, encoding="utf-8")
     out = tmp / "m.fjm"
-    fj.assemble([FIXED, PROJ, p], out, memory_width=W, print_time=False)
+    fj.assemble([PROJ, p], out, memory_width=W, print_time=False)
     term = fj.run(out, print_time=False, print_termination=False)
     return term.op_counter
 

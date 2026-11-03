@@ -110,3 +110,65 @@ differs); one game build at the rung's end equal to the previous binary; recomme
   (8, 16) and (12, 16) configs, not (8, 12) -- the new harness is its first run; `build_blocked` must forward the
   defines; `thnext`'s `2*nt` extent fits E1M5 (370 <= 478), but a map with small nt and many drops needs
   `max(2*nt, nt + nmob)` (identical on E1M1).
+
+## 6. As built (F1.5, branch m8-runtime-ids, 2026-10-19)
+
+A1, with one change of shape: the 8-bit macros are NOT edited. A `rep(LIST_WIDE, ...)` wrapper (3's `sim.lread`) would
+have renamed every macro path through the lists' reads -- the pin-heat list's keys (`sim.thing_pass_depth(9)---
+hex.read_byte(2)---...`) -- so E1M1's blocking would have moved with no op changed. Instead:
+
+- **`src/fj/sim_wide.fj`** (NEW; sim.fj and m1_reset.fj are byte-identical to before): the wide TWINS --
+  `sim.leaf_link_w` / `leaf_unlink_w`, `sim.thing_pass_depth_w` (7 and 9 parameters), `sim.rank_key_w`: the 8-bit
+  bodies with `hex.read_cell` / `hex.write_cell` and 3-nibble ids, nothing else -- and `m1.zerocell12`. Its own file
+  because ~30 tests/fj files mutate sim.fj by TEXT (appended twins made test_thing_pass_depth_fj's controls match
+  twice); build_wall_renderer includes it after sim.fj only for a LIST_WIDE config. `tests/host/test_wide_list_twins.py`
+  derives each twin from its narrow macro by rule and requires the file to equal it (5 R9 mutants). Each opens with a
+  guard: assembled without the wide table it is an assembly error, not an 8-bit read.
+- **`config.py`**: `LIST_ID_BITS` (8 / 12), `LIST_WIDE`, `LIST_NIB`, `emit_fj_defines` (the -D file, namespaced as the
+  CLI writes it; None at 8). Not an fj constant: fj_consts.fj is unchanged. No MAP_CONFIG entry sets it yet.
+- **`things.py`**: `list_max`, `list_bits`, `list_macros` (the ONE place naming the macros a width calls),
+  `leaf_link_decls(nib)`, `spawn_leaf_lists` / `skill_level_start(max_things=)`, `byte_array_decl(bits=)`.
+- **Emitters**: `monstercode.select_tree_lines` (the third level only past 256), `td_key_rows` / `p33_decls` /
+  `d3_decls`, `p31_parts(list_bits=)`; `barrelcode` dr_t at `list_bits // 4`; `projcode.pool_tic_lines` and
+  `monstermove.move_leaf_lines` name `list_macros`; `wall_renderer.list_restart_lines` (m1.zerocell12 + 12 flips),
+  the walk's macro, the lists' decls, `thnext` at `max(2 * nt, nt + nmob)`, and an assert that a wide map is the game
+  tier with the depth walk (bind_things and the index-order thing_pass stay 8-bit).
+- **Build**: `build_wall_renderer` writes `fj_defines.fj` for a wide config and passes `defines_file=` to all four
+  assemblies (`selfreset.capture_labels(defines_file=)`); build_blocked's wrappers forward kwargs.
+- **Model / gates**: `world.build_schema` widens the model's lists past 254 MOBILES (8 bits on every surveyed map: the
+  schema is unchanged); `probe.Cell` kind `'cell'` (n nibbles; offline selftest plants 0xABC, a 'byte' read differs);
+  `b0_scenarios.setup_cell_specs` and `hurt_gate.leaf_list_cells` at the map's width.
+- **Survey**: the two rows cap against `list_max(map_cfg(..).LIST_ID_BITS)`, plus INFO "list id bits needed".
+
+Proof: `tests/fj/test_wide_ids_fj.py` RUNS (1) the relink at NT 300 against `World._list_insert` / `_list_remove`
+(every cell, every op), (2) the depth walk on rows 250..262 at rk0 0, 0xFE, 0x102, (3) the 3-level select at ntm 300,
+(4) the restart fragment on planted 0xFFF / 0x100 / 0x0FF / 0x123 cells, (5) drop_link / drop_take on rows 260+, with
+controls nib2, narrow, rank2, rk_set2, select2, zero8, flip8, drt2 and the no-table guard.
+
+**The first real build failed (fixed by m8-l12fix, 2026-10-22).** The harness above declared the relink's scratch with
+`leaf_link_decls(3)`, but the EMITTER (`monstercode.p31_parts`, the chase block) still declared `LEAF_LINK_DECLS` -- 2
+nibbles -- at every width. Under the 3-nibble twins each of `ll_enc` / `ll_v` / `ll_nxt` then had the NEXT register's
+first nibble as its top one, so a relink compared and indexed through garbage even with every id below 256: E1M1 built
+at 12 bits ran m2_std_gate byte- and state-exact for 210 frames and died presenting frame 210 ("collines run ends at
+row 131"); E1M3 / E1M4 / E1M5 failed the same way. Not the arm5 window, not the table placement: a declaration. The
+emitter now declares `leaf_link_decls(list_bits // 4)` (8 bits: LEAF_LINK_DECLS' text). Held by
+`tests/host/test_wide_relink_decls.py` (the game tier's emitted widths against what sim_wide.fj's twins use, with the
+old declaration as its R9 control) and `tests/fj/test_wide_ids_fj.py` 1b (the relink RUN with the list width's
+scratch, ids below and past 256; the 2-nibble scratch as the control). ⚠ The lesson: a twin's harness that declares its
+own registers proves the macro, not the program's declarations of them -- test the EMITTED decls too.
+
+**The second leftover (m8-l12fix, 2026-10-22): the drop row `pk_t`.** lootcode's pickup sets `pk_t` to a dropper's
+runtime row and `pk_drop` reads thpos_rt / thss_rt there; it was 2 nibbles, so `hex.set 2, pk_t, 275` kept 0x13 --
+SILENTLY (fj takes the low nibbles of a literal). E1M3 (85 sets past 255), E1M4 (90) and E1M5 (114) all carried it;
+only E1M5's m2_std_gate walked over such a drop (frame 94: p_bc / mdrop / dr_live / thpos_rt[275]). `pk_t` is now
+`lootcode.pk_row_nibbles(drop_rows(..))` wide in the declaration, the set and the move (2 on every 8-bit map). Held by
+`tests/host/test_pk_row_width.py`, `tests/fj/test_pk_drop_wide_rows_fj.py` (rows 0 .. 299 read, 2-nibble control), and
+a new emit_check refusal for the whole CLASS: `constant_width_check` -- any `hex.set n, reg, v` / `hex.xor_by n, reg, v`
+with v >= 16**n in the emitted text (tests/host/test_emit_check_hot.py).
+
+Open for the level rungs: MAP_CONFIG `LIST_ID_BITS: 12` per map (E1M3 / E1M4 / E1M5); a wide map's first build (the
+table placement risk of 5); **C2 (runtime THINGS past 254, E1M6 / E1M7)** is covered by the lists, but
+`hurtcode.turn_lines`' `dt_t` (a monster's runtime row, 2 nibbles, asserted < 256) still refuses a monster row past
+255 -- a one-register widening -- and those maps' MONSTER-SLOT ids are a separate cap: the survey refuses E1M6's
+World on `aim_sid` (298 monster and barrel slots past the fj byte; dm_id / p_atk are 2 nibbles too). The lists are
+not what limits C2.

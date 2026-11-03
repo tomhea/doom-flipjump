@@ -19,7 +19,7 @@ n = len(fr.cases)
 PRO = ["hex.mov 2, ecl_ctake, c_cexcl",
        "hex.cmp 2, ecl_ctake, c_fstart, bd_ok, bd_ok, bd_clamp",
        "bd_clamp:", "hex.mov 2, ecl_ctake, c_fstart", "bd_ok:",
-       "byte.emit c_x", "stream.wpx_grain_col c_gnrow, ecl_cmidx",
+       "hex.print c_x", "stream.wpx_grain_col c_gnrow, ecl_cmidx",
        "hex.set 2, ecl_ccy, %d" % plib.cfg.CENTERY, "hex.zero 2, ecl_full_lo",
        "hex.set 2, ecl_full_hi, %d" % plib.H]
 REG = ("stream.emit_region %s, %d, 0, 0, 1, 1, 1, %d, 0, 1, 1, ecl_ctake, c_fstart, c_wlit, c_wlit2, "
@@ -52,7 +52,7 @@ variants = [("BASE", [], ()),
              (plib.PROP_FJ,)),
             ("SR_NIB", ["hex.set 4, gps_cvh, %d" % plib.H, "gpspr.blk_addr gps_ptr, c_sblk, sprbank"], (plib.PROP_FJ,)),
             ("SR_SHL", ["hex.zero w/4, gps_sidx", "hex.mov 4, gps_sidx, c_sblk", "rep(6, k) hex.shl_bit w/4, gps_sidx",
-                        "hex.set w/4, gps_sbase, sprbank", "frame.ptr_index gps_ptr, gps_sbase, gps_sidx"], (plib.PROP_FJ,))]
+                        "hex.set w/4, gps_sbase, sprbank", "hex.ptr_index gps_ptr, gps_sbase, gps_sidx"], (plib.PROP_FJ,))]
 res = {}
 for name, leaf, xfj in variants:
     t0 = time.time()

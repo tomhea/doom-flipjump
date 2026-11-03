@@ -15,6 +15,14 @@ point: after a deletion, that value is the only one the emitter has, so the text
     python scratchpad/cr/emit_baseline.py --check         # after each stage
     python scratchpad/cr/emit_baseline.py --check --selftest   # R9: a mutated tree must FAIL
 
+M8 F1.5 (docs/f1-runtime-ids.md 4): `--map E1Mn` emits another map's fixture wad at its MAP_CONFIG widths
+(`config.map_cfg`, as the build and scripts/emit_check.py do; E1M1 keeps its historical `Config()`), `--baseline FILE`
+names the JSON (the default is E1M1's tracked one) and `--configs NAME ...` picks configs -- a map's emission frozen
+before a change and checked after it with the same emitter call:
+
+    python scratchpad/cr/emit_baseline.py --save  --map E1M2 --configs standalone --baseline e1m2.json
+    python scratchpad/cr/emit_baseline.py --check --map E1M2 --configs standalone --baseline e1m2.json
+
 ⚠ IT ONLY GUARDS THE CONFIGS IT WAS SAVED WITH. A part that changes for a config not listed here is
 invisible to it. The three listed are the ones that matter: what the M14 gates certify, what
 `build_wall_renderer` actually ships, and the hosted+doors binary the M2 gates build.
@@ -58,6 +66,9 @@ def drop_unaccepted(kw):
             sorted(k for k in kw if k not in accepted))
 
 
+MAP = "E1M1"                     # --map: the map emit_parts emits (its fixture wad; E1M1's Config() kept as it was)
+
+
 def emit_parts(kw, mutate=False):
     """Emit one config through the CURRENT signature, dropping kwargs it no longer accepts.
 
@@ -71,7 +82,7 @@ def emit_parts(kw, mutate=False):
     from doomfj import reference_model, wall_renderer
     from doomfj.wall_renderer import emit_wall_renderer
     kw, dropped = drop_unaccepted(kw)
-    mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
+    mw = WadFile.from_path(str(ROOT / ("tests/fixtures/freedoom_%s.wad" % MAP.lower())))
     aw = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
     # ⚠ WHICH constant matters, and the first two guesses were both wrong. `WALL_BG` moves the
     # synthetic W1R texel, so it reaches `segconsts` and `tables` -- and NOT `banks`, which is
@@ -86,7 +97,8 @@ def emit_parts(kw, mutate=False):
     elif mutate == "banks":
         wall_renderer.SPR_BLOCK_STRIDE = _saved["stride"] * 2
     try:
-        parts = emit_wall_renderer(mw, "E1M1", Config(), asset_wad=aw,
+        from doomfj.config import map_cfg
+        parts = emit_wall_renderer(mw, MAP, Config() if MAP == "E1M1" else map_cfg(Config(), MAP), asset_wad=aw,
                                    sprite_wad=aw, return_parts=True, **kw)
     finally:
         wall_renderer.WALL_BG = _saved["wr_bg"]
@@ -149,8 +161,19 @@ def main():
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--selftest", action="store_true",
                     help="R9: perturb the emitted text and require --check to FAIL")
+    ap.add_argument("--map", default="E1M1", help="the map to emit (its fixture wad, its MAP_CONFIG widths)")
+    ap.add_argument("--baseline", default=None, help="the JSON to save / check (default: E1M1's tracked one)")
+    ap.add_argument("--configs", nargs="*", default=None, choices=sorted(CONFIGS),
+                    help="the configs to emit (default: all three)")
     args = ap.parse_args()
     assert args.save or args.check, "pass --save or --check"
+    global MAP, BASELINE
+    MAP = args.map.upper()
+    if args.baseline:
+        BASELINE = Path(args.baseline).resolve()
+    assert MAP == "E1M1" or args.baseline, "another map's hashes go to their own --baseline file"
+    configs = {k: v for k, v in CONFIGS.items() if args.configs is None or k in args.configs}
+    print("emit_baseline: map %s, configs %s, baseline %s" % (MAP, sorted(configs), BASELINE), flush=True)
 
     if args.selftest:
         print("CONTROL 2 (a dropped kwarg is REPORTED, not silently ignored): %s"
@@ -161,7 +184,7 @@ def main():
     got = {}
     # The mutation control needs TEETH, not coverage: one config proves the check can see a real
     # emitter change, and three emissions of it would cost 30 minutes to say the same thing.
-    for name, kw in list(CONFIGS.items()):
+    for name, kw in list(configs.items()):
         t = time.perf_counter()
         parts, dropped = emit_parts(kw)
         got[name] = parts

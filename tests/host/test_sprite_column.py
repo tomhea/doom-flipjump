@@ -108,9 +108,10 @@ def test_a_capped_map_passes_and_the_cap_is_one_byte():
     from doomfj.config import MAP_CONFIG, map_cfg
     e1m2 = map_cfg(Config(), "E1M2")
     assert e1m2.SPR_SLOT_CAP == 255 and e1m2.SPR_SLOT_CAP_ON == 1
-    # (M8: E1M1's MAP_CONFIG entry is the map page alone -- AUTOMAP -- so its cap is the default's)
+    # (M8: E1M1's MAP_CONFIG entry is the map page -- AUTOMAP -- and, #149, its door rule DOOR_NEIGHBOURS, both
+    # host-side: no cap of its own, so its cap is the default's)
     assert map_cfg(Config(), "E1M1").SPR_SLOT_CAP == 0 == Config().SPR_SLOT_CAP_ON
-    assert set(MAP_CONFIG.get("E1M1", {})) <= {"AUTOMAP"}
+    assert set(MAP_CONFIG.get("E1M1", {})) <= {"AUTOMAP", "DOOR_NEIGHBOURS"}
     check_slot_ids(295, 10, 54, e1m2)
     with pytest.raises(AssertionError, match="SPR_SLOT_CAP"):
         check_slot_ids(295, 10, 54, Config())            # R9: the same map without its cap is refused

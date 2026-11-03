@@ -1,0 +1,26 @@
+machine : power plan 'Turbo'; busy processes: none
+msframe : A=doom_e1m3_v1.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  A         73.3 ms   234.2M fj/s  yard 3.43->3.64G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 1  A         74.1 ms   231.7M fj/s  yard 3.62->3.64G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 2  A         73.5 ms   233.5M fj/s  yard 3.62->3.61G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 3  A         72.8 ms   235.8M fj/s  yard 3.63->3.64G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 4  A         74.7 ms   229.8M fj/s  yard 3.65->3.65G   pin: cpu2 proc=ok thread=ok prio=high
+
+  A        median    73.5 ms/frame  [72.8 .. 74.7]    233.5M fj/s   17,158,103 ops/frame   cell=None flat
+  engine A: 1bd844a1affacb2a full_span=None C:\Users\tomhe\Documents\fj160-path\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.63G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+  baseline: saved as 'shipped_e1m3' -> scratchpad\12m\msframe_baselines\shipped_e1m3.json
+machine : power plan 'Turbo'; busy processes: none
+msframe : A=doom_e1m5_v1.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  A         58.4 ms   223.1M fj/s  yard 3.45->3.58G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 1  A         58.7 ms   221.9M fj/s  yard 3.64->3.65G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 2  A         58.0 ms   224.5M fj/s  yard 3.64->3.58G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 3  A         58.1 ms   224.4M fj/s  yard 3.66->3.63G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 4  A         58.2 ms   224.0M fj/s  yard 3.64->3.65G   pin: cpu2 proc=ok thread=ok prio=high
+
+  A        median    58.2 ms/frame  [58.0 .. 58.7]    224.0M fj/s   13,028,121 ops/frame   cell=None flat
+  engine A: 1bd844a1affacb2a full_span=None C:\Users\tomhe\Documents\fj160-path\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.64G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+  baseline: saved as 'shipped_e1m5' -> scratchpad\12m\msframe_baselines\shipped_e1m5.json

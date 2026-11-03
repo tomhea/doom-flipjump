@@ -1,7 +1,7 @@
 """M3 — the menu, as a BAKED FRAME.
 
 A menu screen is a picture that never changes, and the shipping renderer already presents pictures
-as 0x0B column run-lists. So the menu needs no renderer at all: it is a constant byte stream, and
+as draw_collines column records (doomfj.screenwire). So the menu needs no renderer at all: it is a constant byte stream, and
 "draw the menu" is a run of `stl.output_char`s with compile-time operands. That makes it roughly a
 thousand times cheaper than a world frame and removes the only thing about M3 that looked hard.
 
@@ -127,12 +127,9 @@ def text_width(label: str, font=None) -> int:
     one gap between glyphs"""
     return sum(glyph_width(ch, font) for ch in label) + GLYPH_GAP * max(0, len(label) - 1)
 
-# the protocol's own constants, from the device that decodes them -- NOT a third private copy.
-# (tests/fj/stream_screen.py has the lab decoder's; this file had a second. R6 is one source.)
-from flipjump.interpreter.io_devices.ScreenIO import COLLINES_DITTO as DITTO
-from flipjump.interpreter.io_devices.ScreenIO import COLLINES_END as END
-from flipjump.interpreter.io_devices.ScreenIO import COLLINES_KEEP as KEEP                    # noqa: E402 (P10)
-from flipjump.interpreter.io_devices.ScreenIO import COLLINES_TOKENS_MAX_HEIGHT               # noqa: E402 (P10)
+# the screen API's numbers and encoders: doomfj.screenwire is their one home (R6 is one source)
+from doomfj import screenwire as SW                                                          # noqa: E402
+from doomfj.keyboard import KC_DOWN, KC_LCTRL, KC_LEFT, KC_RIGHT, KC_UP                      # noqa: E402
 
 
 def palette_colours(palette_rgb) -> tuple:
@@ -248,18 +245,22 @@ HELP_ROWS = (
 # codes pygame_window delivers; input.fj's table). tests/fj/test_keyboard_input.py runs kb.poll on
 # each and requires it to DO something -- a held flag or a menu event -- so the screen cannot list a
 # dead key.
-HELP_KEYCODES = {"W": 0x77, "UP": 0x80, "S": 0x73, "DOWN": 0x81, "A": 0x61, "LEFT": 0x82,
-                 "D": 0x64, "RIGHT": 0x83, "SPACE": 0x20, "E": 0x65, "ENTER": 0x0D, "ESC": 0x1B,
+HELP_KEYCODES = {"W": 0x77, "UP": KC_UP, "S": 0x73, "DOWN": KC_DOWN, "A": 0x61, "LEFT": KC_LEFT,
+                 "D": 0x64, "RIGHT": KC_RIGHT, "SPACE": 0x20, "E": 0x65, "ENTER": 0x0D, "ESC": 0x1B,
                  "H": 0x68,
-                 # M7 P4.1: fire (ctrl -- pygame_window's 0x85), the number keys, the second strafe pair
-                 "CTRL": 0x85, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, ",": 0x2C, ".": 0x2E,
+                 # M7 P4.1: fire (ctrl -- the left one's code; keyboard.BINDING takes either), the number keys, the
+                 # second strafe pair
+                 "CTRL": KC_LCTRL, "1": 0x31, "2": 0x32, "3": 0x33, "4": 0x34, ",": 0x2C, ".": 0x2E,
                  "5": 0x35}                                  # P9: the rocket launcher
 # M8 (doomfj.automap): the MAP key's item -- a third item on the last row, ONLY on a map with the map page
 # (`help_rows(automap=True)`); its keycode joins HELP_KEYCODES there only (`help_keycodes`), so a map without the page
 # lists no key that does nothing
-MAP_KEY = 0x6D                                              # 'm' (pygame_window's SDL code; automap.AUTOMAP_KEY)
+MAP_KEY = 0x6D                                              # 'm' (ASCII; automap.AUTOMAP_KEY)
 HELP_MAP_ITEM = (("M",), ("MAP",))
 HELP_MAP_KEYCODE = {"M": MAP_KEY}
+# M8 C6: on a map with the PLASMA RIFLE (combat.plasma_on) the weapons item lists key 6 too ("1 .. 6 WEAPONS"), and its
+# keycode joins the table there only -- a map without the rifle lists no key that does nothing
+HELP_PLASMA_KEYCODE = {"6": 0x36}
 # THE GEOMETRY, px. A cap is a 1-px box in the credit's dim gray with 1 px of padding round its
 # legend, the legend centred; every cap of a cluster is as wide as its widest legend's cap (all 9: W and the arrows
 # are five columns), and each cap of a key row fits its own legend.
@@ -292,23 +293,29 @@ HELP_ITEM_GAP = 8                        # the least gutter between a row's firs
 HELP_LINE_PITCH = HELP_TEXT_H + 1        # one description line to the next
 
 
-def help_rows(automap: bool = False) -> tuple:
+def help_rows(automap: bool = False, plasma: bool = False) -> tuple:
     """the help's key rows: HELP_ROWS, and M8's MAP item after the last row's (`HELP_MAP_ITEM`) on a map with the map
-    page"""
+    page; M8 C6: key 6 after the weapons' 5 on a map with the plasma rifle"""
+    rows = HELP_ROWS
+    if plasma:
+        (keys, lines), *rest = rows[1]
+        assert keys[-1] == "5", keys
+        rows = rows[:1] + ((((*keys, "6"), lines), *rest),) + rows[2:]
     if not automap:
-        return HELP_ROWS
-    return HELP_ROWS[:-1] + (HELP_ROWS[-1] + (HELP_MAP_ITEM,),)
+        return rows
+    return rows[:-1] + (rows[-1] + (HELP_MAP_ITEM,),)
 
 
-def help_keycodes(automap: bool = False) -> dict:
-    """the keycode of every key the help shows (HELP_KEYCODES; M8: and M's on a map with the map page)"""
-    return {**HELP_KEYCODES, **(HELP_MAP_KEYCODE if automap else {})}
+def help_keycodes(automap: bool = False, plasma: bool = False) -> dict:
+    """the keycode of every key the help shows (HELP_KEYCODES; M8: and M's on a map with the map page; M8 C6: and 6's
+    on a map with the plasma rifle)"""
+    return {**HELP_KEYCODES, **(HELP_MAP_KEYCODE if automap else {}), **(HELP_PLASMA_KEYCODE if plasma else {})}
 
 
-def help_key_names(automap: bool = False) -> list:
+def help_key_names(automap: bool = False, plasma: bool = False) -> list:
     """every key name the help screen shows, in screen order: the clusters', then the rows'"""
     return ([k for cluster in HELP_CLUSTERS for k in cluster]
-            + [k for row in help_rows(automap) for keys, _lines in row for k in keys])
+            + [k for row in help_rows(automap, plasma) for keys, _lines in row for k in keys])
 
 
 def help_cap_legend(key: str) -> str:
@@ -337,7 +344,7 @@ def _help_item_width(keys, lines) -> int:
     return caps + HELP_DESC_GAP + max(help_text_width(line) for line in lines)
 
 
-def help_layout(width, height, automap: bool = False) -> tuple:
+def help_layout(width, height, automap: bool = False, plasma: bool = False) -> tuple:
     """THE help screen's layout: `(caps, texts)` -- `caps` the keycaps as `(key, x, y, w)`, each an
     outer box HELP_CAP_H high; `texts` every string drawn, as `(label, x, y, role)`, role
     "title" (the highlight colour, the 5x7 font) or "text" (the text colour, HELP_FONT), the caps' legends among them.
@@ -351,7 +358,7 @@ def help_layout(width, height, automap: bool = False) -> tuple:
     caps).
 
     M8: `automap` -- the rows are `help_rows(automap)`: on a map with the map page, the last row's third item is M MAP"""
-    rows_ = help_rows(automap)
+    rows_ = help_rows(automap, plasma)                  # M8 C6: `plasma` -- the weapons' key 6
     caps, texts = [], [(HELP_TITLE, (width - help_text_width(HELP_TITLE, "title")) // 2, HELP_TITLE_Y, "title")]
 
     def cap(key, x, y, w):
@@ -412,7 +419,7 @@ def _draw_box(out, width, x0, y0, w, h, ink):
         out[y * width + x0] = out[y * width + x0 + w - 1] = ink
 
 
-def _help_bitmap(width, height, colours, automap: bool = False):
+def _help_bitmap(width, height, colours, automap: bool = False, plasma: bool = False):
     """The help screen as a width*height list of palette indices -- THE picture, for both mirrors:
     `help_layout` drawn -- the caps' boxes in the credit's dim gray, the title in the highlight
     colour, every other string (the caps' legends among them) in the text colour -- and the credit.
@@ -420,7 +427,7 @@ def _help_bitmap(width, height, colours, automap: bool = False):
     bottom-right and the H cap reaches as low on the left, so a whole-row rule would be wrong)."""
     background, text, highlight, credit = colours
     out = [background] * (width * height)
-    caps, texts = help_layout(width, height, automap)
+    caps, texts = help_layout(width, height, automap, plasma)
     for _key, x, y, w in caps:
         _draw_box(out, width, x, y, w, HELP_CAP_H, credit)
     for label, x, y, role in texts:
@@ -433,59 +440,37 @@ def _help_bitmap(width, height, colours, automap: bool = False):
     return out
 
 
-def help_pixels(width, height, colours, automap: bool = False):
-    """What the ORACLE expects on screen while the help is up (M8: `automap` -- the map's M MAP item)."""
-    return _help_bitmap(width, height, colours, automap)
+def help_pixels(width, height, colours, automap: bool = False, plasma: bool = False):
+    """What the ORACLE expects on screen while the help is up (M8: `automap` -- the map's M MAP item; M8 C6: `plasma`
+    -- the rifle's key 6)."""
+    return _help_bitmap(width, height, colours, automap, plasma)
 
 
-def help_stream(width, height, colours, automap: bool = False) -> bytes:
-    """The 0x0B frame that paints exactly `help_pixels()` -- `stream()`'s encoder."""
-    return _encode(_help_bitmap(width, height, colours, automap), width, height)
+def help_stream(width, height, colours, automap: bool = False, plasma: bool = False) -> bytes:
+    """The draw_collines command that paints exactly `help_pixels()` -- `stream()`'s encoder."""
+    return _encode(_help_bitmap(width, height, colours, automap, plasma), width, height)
 
 
-def help_fj(width, height, colours, label: str = "menu_help", end_marker: bool = True, automap: bool = False) -> str:
+def help_fj(width, height, colours, label: str = "menu_help", end_marker: bool = True, automap: bool = False,
+            plasma: bool = False) -> str:
     """The baked help frame as fj -- `fj()`'s shape: one `stl.output_char` per stream byte."""
-    return _fj_text(help_stream(width, height, colours, automap), label, end_marker,
+    return _fj_text(help_stream(width, height, colours, automap, plasma), label, end_marker,
                     "M7 P3.4: the baked help frame")
 
 
 def stream(width, height, lines, selected, colours) -> bytes:
-    """The 0x0B frame that paints exactly `pixels()`.
-
-    Column-major run-lists, with DITTO (0xFE) for a column identical to its left neighbour — which
-    on a menu is most of them, and which exercises the one compression the protocol has. Column 0
-    is never dittoed: it has no left neighbour, and the device refuses it."""
-    # ⚠ THE PROTOCOL BOUNDS THE RESOLUTION, and R6 forbids assuming it. A column tag must be
-    # distinguishable from DITTO/END, and a run's `y2` is one byte, so this encoder is correct only
-    # while width < 0xFE and height <= 0xFF. At 160x100 that is far off; assert rather than assume,
-    # because a resolution change would otherwise corrupt the stream instead of failing.
+    """The draw_collines command that paints exactly `pixels()` (screenwire.picture): column-major run-lists, with
+    COPY for a column identical to its left neighbour -- which on a menu is most of them. Column 0 is never copied:
+    it has no left neighbour, and the device refuses it. A whole FRAME: it ends in END_CMD, then present."""
+    # ⚠ THE PROTOCOL BOUNDS THE RESOLUTION, and R6 forbids assuming it: the program's fields are bytes, so the
+    # screen must come out at R = C = 8 -- screenwire.picture asserts it rather than corrupting the stream.
     return _encode(_bitmap(width, height, lines, selected, colours), width, height)
 
 
 def _encode(grid, width, height) -> bytes:
-    """a width*height picture -> its 0x0B stream (see `stream`): every baked screen's ONE encoder"""
-    assert width < DITTO, "0x0B column tags must stay below DITTO (0xFE); width=%d" % width
-    assert height <= END, "0x0B run bounds are one byte; height=%d" % height
-    out = bytearray([0x0B])
-    previous = None
-    for x in range(width):
-        column = [grid[y * width + x] for y in range(height)]
-        out.append(x)
-        if previous is not None and column == previous:
-            out.append(DITTO)
-            previous = column
-            continue
-        y = 0
-        while y < height:
-            y2 = y + 1
-            while y2 < height and column[y2] == column[y]:
-                y2 += 1
-            out += bytes([y2, column[y]])
-            y = y2
-        out.append(END)
-        previous = column
-    out.append(END)
-    return bytes(out)
+    """a width*height picture -> its frame (see `stream`: draw_collines, END_CMD, present): every baked screen's ONE
+    encoder"""
+    return SW.frame(grid, width, height)
 
 
 def fj(width, height, lines, selected, colours, label: str = "menu_frame",
@@ -502,12 +487,11 @@ def fj(width, height, lines, selected, colours, label: str = "menu_frame",
 def _fj_text(data: bytes, label: str, end_marker: bool, what: str) -> str:
     """a stream as fj: one `stl.output_char` per byte under `label`"""
     if not end_marker:
-        # the caller supplies the end-of-frame byte from a SHARED tail -- see
+        # the caller supplies END_CMD and the present from a SHARED tail (`screenwire.FJ_END_FRAME`) -- see
         # wall_renderer._menu_lines, where both frame producers fall into one tail
-        assert data[-1] == END
-        data = data[:-1]
-    body = "\n".join("    stl.output_char %d" % b for b in data)
-    return ("// %s -- %d bytes of 0x0B column run-lists, all constants\n"
+        data = SW.strip_frame_tail(data)
+    body = "\n".join(SW.fj_lines(data, "    "))
+    return ("// %s -- %d bytes of draw_collines column records, all constants\n"
             "%s:\n%s\n" % (what, len(data), label, body))
 
 # -------------------------------------------------------------------------------------------------
@@ -613,13 +597,55 @@ def stats_digits(kills: int, total_kills: int, items: int, total_items: int, sec
             + count_codes(total_items, count_digits) + [secrets] + _two_digits(mm) + _two_digits(ss, lead_blank=False))
 
 
-def _level_done_bitmap(width, height, colours, nsecret: int, digits=None, count_digits: int = 2):
+# M8 C9: the line LEVEL COMPLETE shows under its title when the level ended by its SECRET exit (special 51; a single
+# level's binary ends there too -- the episode plan's G11). Drawn in the text colour on the blank line 1, AFTER the
+# frame (the program: `level_done_secret_records`, behind its `lvsec` cell; statcode.frame_lines)
+SECRET_EXIT_TEXT = "SECRET EXIT"
+
+
+def secret_exit_origin(width, height, nsecret: int, count_digits: int = 2) -> tuple:
+    """M8 C9: SECRET EXIT's top-left: centred on LEVEL COMPLETE's line 1 (the blank line under the title)"""
+    lines, _sel, _rows, _slots = level_done_layout(width, height, nsecret, count_digits)
+    assert lines[1] == "", lines
+    return max(0, (width - text_width(SECRET_EXIT_TEXT)) // 2), _line_y(height, len(lines), 1)
+
+
+def level_done_secret_records(width, height, colours, nsecret: int, count_digits: int = 2) -> bytes:
+    """M8 C9: SECRET EXIT as column records drawn after the frame (`level_done_digit_records`' form: per glyph column
+    with ink, [x], [KEEP][y][y2][ink] per vertical run, END), in the text colour"""
+    _background, text, _highlight, _credit = colours
+    SW.assert_byte_fields(width, height)
+    x, y0 = secret_exit_origin(width, height, nsecret, count_digits)
+    out = bytearray()
+    for ch in SECRET_EXIT_TEXT:
+        glyph = _GLYPHS.get(ch, _GLYPHS[" "]).split("|")
+        for gx in range(len(glyph[0])):
+            runs, gy = [], 0
+            while gy < len(glyph):
+                if glyph[gy][gx] != "#":
+                    gy += 1
+                    continue
+                e = gy + 1
+                while e < len(glyph) and glyph[e][gx] == "#":
+                    e += 1
+                runs.append((y0 + gy, y0 + e))
+                gy = e
+            if runs and 0 <= x + gx < width:
+                out += SW.column(x + gx, _ink_items(runs, text), height)
+        x += len(glyph[0]) + GLYPH_GAP
+    return bytes(out)
+
+
+def _level_done_bitmap(width, height, colours, nsecret: int, digits=None, count_digits: int = 2,
+                       secret: bool = False):
     """LEVEL COMPLETE: `_bitmap`'s title, prompt and credit, the labels in the text colour, the values -- their fixed
     glyphs and, with `digits`, each slot's digit -- in the highlight colour. `digits` None: the slots left empty (the
-    program's baked frame)"""
+    program's baked frame). M8 C9: `secret` -- SECRET EXIT under the title (`secret_exit_origin`)"""
     _background, text, highlight, _credit = colours
     lines, selected, rows, slots = level_done_layout(width, height, nsecret, count_digits)
     out = _bitmap(width, height, lines, selected, colours)
+    if secret:
+        _draw(out, width, height, SECRET_EXIT_TEXT, *secret_exit_origin(width, height, nsecret, count_digits), text)
     for x_label, y, label, glyphs in rows:
         _draw(out, width, height, label, x_label, y, text)
         for x, ch in glyphs:
@@ -632,11 +658,12 @@ def _level_done_bitmap(width, height, colours, nsecret: int, digits=None, count_
     return out
 
 
-def level_done_pixels(width, height, colours, nsecret: int, digits) -> list:
+def level_done_pixels(width, height, colours, nsecret: int, digits, secret: bool = False) -> list:
     """What the ORACLE expects on LEVEL COMPLETE, the slots showing `digits` (`stats_digits`) -- M8 F1.1: their count
-    names the layout (count_slots: 13 two-digit counts, 17 three)"""
+    names the layout (count_slots: 13 two-digit counts, 17 three). M8 C9: `secret` -- the level ended by its secret
+    exit (the world's g_secretexit): SECRET EXIT under the title"""
     nd = 2 if digits is None else {count_slots(2): 2, count_slots(3): 3}[len(digits)]
-    return _level_done_bitmap(width, height, colours, nsecret, digits, nd)
+    return _level_done_bitmap(width, height, colours, nsecret, digits, nd, secret)
 
 
 def level_done_stream(width, height, colours, nsecret: int, count_digits: int = 2) -> bytes:
@@ -658,7 +685,7 @@ def level_done_digit_records(width, height, colours, nsecret: int, slot: int, di
     [x] then [KEEP][y][y2][ink] per vertical run of ink, then the column's END -- KEEP over the gaps, so the frame's
     background shows between the runs. A blank digit is no records at all"""
     _background, _text, highlight, _credit = colours
-    assert height <= COLLINES_TOKENS_MAX_HEIGHT, "KEEP is a token only on a screen of <= 251 rows"
+    SW.assert_byte_fields(width, height)
     if digit == DIGIT_BLANK:
         return b""
     assert 0 <= digit <= 9, digit
@@ -679,11 +706,17 @@ def level_done_digit_records(width, height, colours, nsecret: int, slot: int, di
             gy = e
         if not runs:
             continue
-        out.append(x0 + gx)
-        for ys, ye in runs:
-            out += bytes([KEEP, ys, ye, highlight])
-        out.append(END)
+        out += SW.column(x0 + gx, _ink_items(runs, highlight), height)
     return bytes(out)
+
+
+def _ink_items(runs, ink) -> list:
+    """a glyph column's vertical runs of ink as column items: KEEP down to each run (the frame shows between them),
+    then the run in `ink` -- [KEEP][y][y2][ink] per run"""
+    out = []
+    for ys, ye in runs:
+        out += [("keep", ys), ("fill", ye, ink)]
+    return out
 
 
 # -------------------------------------------------------------------------------------------------
@@ -697,7 +730,7 @@ def level_done_digit_records(width, height, colours, nsecret: int, slot: int, di
 # M7 P3.4: 'h' as "help" (the device has no F1; docs/gp-help.md).
 # P10: and "any" -- EVERY key's down edge, these and every other (the poll's `ev_any`; keyboard.frame_keys adds it) --
 # which only LEVEL COMPLETE acts on
-MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn",
+MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", KC_UP: "up", 0x73: "dn", KC_DOWN: "dn",
              0x68: "help"}
 ANY_KEY_EVENT = "any"
 # M7 P2a.2 -- `menu_scr`'s third screen: LEVEL COMPLETE, opened by the exit switch (docs/gp-exit.md)

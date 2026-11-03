@@ -95,9 +95,11 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.combat import CombatMixin, STRAFE_MOVE, WEAPON_KEYS  # noqa: F401 (re-export)
+from doomfj.combat import plasma_on                               # M8 C6
 from doomfj.doorcode import door_line_ids
 from doomfj.fixedpoint import aprox_distance  # noqa: F401 -- P_AproxDistance, ONE definition (M7 P3.3); re-exported
 from doomfj.doors import crossed                                   # M7 P2b: WR lifts
+from doomfj.doors import secret_exits as _secret_exits             # M8 C9: the secret exit's field
 from doomfj.doors import door_contact_geo, touches_door            # M7 P2b: reversal
 from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states,  # M7 P2b
                            lift_tic, lift_walk_triggers, mover_heights, switch_sectors,
@@ -108,8 +110,10 @@ from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heigh
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
 from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers   # M7 P2a.1
 from doomfj.doors import switch_boxes as door_switch_boxes, switch_ready          # M8 L2: SR / S1 door switches
+from doomfj import doors as _D                                                     # M8 C3: the door kinds of E1M3..9
 from doomfj.reference_model import (ReferenceModel, Scene, apply_sector_heights, spawn_state)
 from doomfj.things import single_player
+from doomfj.lostsoul import SKULL_INFO, SKULL_TYPE, SoulMixin, soul_fields          # M8 C8: the lost soul
 
 # ================================================================================================
 # RULES -- the approved simplifications (D5) and the model's conventions. ONE definition each; the
@@ -152,7 +156,8 @@ MISSILE_BIAS, MISSILE_NOMELEE_BIAS, MISSILE_CAP = 64, 128, 200      # P_CheckMis
 STEP_UP = gd.MAX_STEP_UP >> 16     # 24: the highest step up a thing can take
 DROPOFF_MAX = 24                   # P_TryMove: a non-DROPOFF thing may not stand over a drop > 24
 PLAYER_R = gd.PLAYERRADIUS >> 16   # 16
-# the tic's input: the four moves, use, fire, and the weapon number keys 1..5 (w1..w5; P9: 5 the launcher)
+# the tic's input: the four moves, use, fire, and the weapon number keys 1..6 (w1..w6; P9: 5 the launcher; M8 C6: 6 the
+# plasma rifle)
 KEYS = ("forward", "back", "turn_left", "turn_right", "strafe_left", "strafe_right", "use",
         "fire") + WEAPON_KEYS
 
@@ -283,10 +288,16 @@ class Layout:
     nlift: int = 0     # M7 P2b: lifts (doomfj.movers)
     nsecret: int = 0   # P10: secret sectors (special 9) -- LEVEL COMPLETE's SECRETS
     ntele: int = 0     # M8 L4: WR teleport lines (doomfj.teleport); 0 on E1M1 -- no field, no cell
+    ntonce: int = 0    # M8 C5: the W1 monster teleports (125, teleport.once_lines); 0 -- no field, no cell
     nfloor: int = 0    # M8 F1.3: the floor groups in the WIDE layout (movers.floor_wide); 0: E1M1's one 1-bit switch
     nlight: int = 0    # M8: the animated sector light thinkers (doomfj.lights); 0 on E1M1 -- no field, no cell
     nswitch: int = 0   # M8: the switch lines with a cell (doomfj.switches.latched; a SWITCH_TEX map) -- 0: no field
     nswsr: int = 0     # M8: the SR ones among them (switches.repeating) -- 0: no countdown field
+    nshot: int = 0     # M8 C3: the GR 46 shot lines (doors.shot_lines): their aim ids from the top of aim_sid's byte
+    secexit: int = 0   # M8 C9: 1 on a map with a secret exit line (51): the g_secretexit field
+    powers: tuple = ()  # M8 C6: the timed power kinds the map holds (powers.map_powers: 2024, 2025) -- () no field
+    plasma: int = 0    # M8 C6: 1 on a map with the plasma rifle (combat.plasma_on) -- key 6's held flag `kb_w6`
+    nsoul: int = 0     # M8 C8: the lost souls among the monster slots (doomfj.lostsoul) -- 0: no soul cell
 
     @property
     def nmobile(self) -> int:
@@ -297,21 +308,93 @@ def _index_bits(n: int) -> int:
     return max(1, (n - 1).bit_length())
 
 
-def _code_bits(nmon: int) -> int:
+# M8 C2 (docs/c2-slot-ids.md): the most monster + barrel slots whose ids fit the fj's TWO-nibble registers -- the
+# tightest of them is the bullets' scan code 2 + nmon + b (monsterdecide.scan_lines) and dm_go's id space (damagecode:
+# nid < 255), so nmon + nbarrel <= 254; past it every slot-id register and cell is THREE nibbles (`slot_nibbles`)
+SLOT_IDS_NARROW = 254
+SLOT_IDS_WIDE = 0xFFF - 2           # three nibbles: the code 2 + nmon - 1 and the scan code 1 + nmon + nbarrel
+
+
+def slot_nibbles(lay: Layout) -> int:
+    """M8 C2 (docs/c2-slot-ids.md): the fj width of a monster / barrel SLOT ID -- aim_sid, sp_sid, dm_id, the codes
+    (mon_target, bar_src, dm_src, dm_me, mm_tg, hs_*, pt_*: 0 none, 1 the player, 2 + slot), p_atk, kb_tg, pj_src,
+    md_src, the scheduler's cursor and counts (sched_cursor, mt_fdef, mt_n) and kb_live -- 2 while nmon + nbarrel <=
+    SLOT_IDS_NARROW (E1M1 75, E1M2 138: their text), else 3 (E1M6 298, E1M7 297). DERIVED from the counts, never set
+    (as World.sec_nibbles); config.SLOT_ID_BITS names the width a map's emission expects and the emitter asserts the
+    two agree (wall_renderer)"""
+    n = lay.nmon + lay.nbarrel
+    if n <= SLOT_IDS_NARROW:
+        return 2
+    assert n <= SLOT_IDS_WIDE, ("%d monster and barrel slots past three nibbles of slot id" % n)
+    return 3
+
+
+def level_things(mw, mapname: str) -> tuple:
+    """(things, monster things, barrel things) of a level -- the union of every single-player skill, in WAD order,
+    without gamedata.NOT_THINGS: World's own lists (`_build_level`), and the survey's when the World refuses for
+    another reason (M8 C2: the slot-id rows of E1M7, whose World refuses on a teleport)"""
+    things = [t for t in mw.things(mapname) if t.type not in gd.NOT_THINGS and single_player(t)]
+    return (things, [t for t in things if t.type in gd.MONSTER_DOOMEDNUMS], [t for t in things if t.type == 2035])
+
+
+def schema_slot_nibbles(schema) -> int:
+    """`slot_nibbles` from a schema (the emitters that hold only it): `p_attacker` is 4 * slot_nibbles bits on a wide
+    map (build_schema) and at most 8 on a narrow one"""
+    f = next(x for x in schema if x.name == "p_attacker")
+    return 3 if f.bits > 8 else 2
+
+
+def _code_bits(nmon: int, wide: bool = False) -> int:
     """M7 P8a I: `mon_target` / `bar_src`'s width -- a code 0 none, 1 the player, 2 + slot -- at least 5 bits: the fj
     reads these cells as TWO nibbles (monstercode's slots, mt_load, damagecode's dm_src, barrelcode's bar_src), so a
-    map with <= 14 monsters (test_slot_layouts_fj's rooms) keeps the 2-nibble layout; E1M1's 53 slots need 6 either way"""
+    map with <= 14 monsters (test_slot_layouts_fj's rooms) keeps the 2-nibble layout; E1M1's 53 slots need 6 either way.
+    M8 C2 (`wide`, slot_nibbles 3): THREE nibbles, 12 bits"""
+    if wide:
+        return 12
     assert nmon + 2 <= 0x100, ("a code 0 none, 1 the player, 2 + slot: %d slots past the fj cells' byte" % nmon)
     return max(5, _index_bits(nmon + 2))
+
+
+# M8 C8: THE MONSTER RADIUS CLASSES the fj bakes a monster's box by (its move's lift crossings and thing boxes, the
+# player's blocking, the knock move, the aim window's r_eff, the bullets' widths): class 1 is radius 30 (mm_r30), class
+# 0 radius 20 -- or, on a map whose other monsters have ONE other radius (E1M8's Barons: 24), that radius. Every core
+# map's classes are (20, 30): its text is unchanged.
+def radius_classes(radii) -> Tuple[int, int]:
+    # M8 C8 part 2: the lost soul's 16 (MT_SKULL, the only 16 in Doom 1) is a class of its own -- aimcode's RC_SOUL,
+    # mm_things' / pb_mon's mm_bd16 / pb_bd16, knock's soul path -- so it never takes a slot of these two (E1M6 / E1M7:
+    # 16 + 20 + 30 -> classes (20, 30) and the soul's)
+    rs = set(radii) - {30, SKULL_INFO.radius >> 16}
+    if rs <= {20}:
+        return 20, 30
+    assert len(rs) == 1 and 20 not in rs, (
+        "M8 C8: monster radii %s -- the fj's two radius classes hold 30 and ONE other (level_survey's radius row)"
+        % sorted(set(radii)))
+    return rs.pop(), 30
 
 
 def aim_bits(lay: Layout) -> int:
     """M8 F1.1 (docs/f1-big-map-widths.md 2): `aim_sid`'s width -- 0 none, 1 + slot for the monsters and the barrels,
     so at most nmon + nbarrel -- at least the 7 bits every frozen digest was recorded with (E1M1: 53 + 22 < 128). The
-    fj reads the cell as TWO nibbles (aimcode), so the value is held to a byte"""
+    fj reads the cell as TWO nibbles (aimcode), so the value is held to a byte. M8 C2: on a map past SLOT_IDS_NARROW
+    (slot_nibbles 3) three nibbles, 12 bits"""
+    if slot_nibbles(lay) == 3:
+        # the shot lines' ids count down from doors.SHOT_SID_TOP, the top of a BYTE: a wide map's monster ids pass it
+        assert not lay.nshot, ("aim_sid: GR 46 shot lines (ids from 0xFF down) on a map with %d slot ids past a byte"
+                               % (lay.nmon + lay.nbarrel))
+        return 12
     n = lay.nmon + lay.nbarrel
     assert n <= 0xFF, ("aim_sid: %d monster and barrel slots past the fj cell's byte" % n)
+    if lay.nshot:                    # M8 C3: the shot lines' ids count down from 0xFF (doors.shot_sid): the whole byte
+        assert n < 0xFF - lay.nshot + 1, ("aim_sid: %d monster and barrel ids meet the %d shot-line ids" % (n, lay.nshot))
+        return 8
     return max(7, n.bit_length())
+
+
+def count_bits(n: int) -> int:
+    """M8 C2: LEVEL COMPLETE's kill / item counters (p_killcount / p_itemcount: st_kill / st_item) -- 8 bits while the
+    map's monster and pickup counts fit a byte (every frozen digest's), else 12 (statcode.count_nibbles: three)"""
+    assert n <= 0xFFF, n
+    return 8 if n <= 0xFF else 12
 
 
 def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight: bool = False) -> Tuple[Field, ...]:
@@ -321,8 +404,11 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     (infighting_on) add each feature's cells -- phase "P8a", declared by package 0 and written by its package (A, K,
     I) -- and `fight` widens `mon_target`. All three off (`p8a_schema` of any pre-P8a mode pair) is the schema every
     frozen set's digests were recorded with, field for field and width for width."""
-    from doomfj.things import LIST_MAX_THINGS
-    assert lay.nmobile <= LIST_MAX_THINGS, "leaf lists store mobile index + 1 in a byte"
+    # M8 F1.5 (docs/f1-runtime-ids.md 1-2): the model's lists hold the MOBILE index (monsters + the pools), not the fj's
+    # runtime ids -- 8 bits on every surveyed map (E1M5: 199 mobiles), the schema every frozen set was recorded with;
+    # a map past 254 mobiles would widen them to things.list_bits' 12 (the fj's wide-list width) rather than refuse
+    from doomfj.things import list_bits
+    lbits = list_bits(lay.nmobile)
     fs: List[Field] = []
 
     def f(name, bits, count=None, signed=False, kind="persist", group="", phase="S3a", label="",
@@ -331,18 +417,31 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
                         array=count is not None))
 
     leaf_bits, mon_bits = _index_bits(lay.nleaf), _index_bits(lay.nmon)
+    # M8 C2 (docs/c2-slot-ids.md): a map past SLOT_IDS_NARROW holds every slot id and code in THREE nibbles -- the fields
+    # the fj keeps as slot ids (aim_sid, mon_target, bar_src, p_attacker, sched_cursor, proj_src) are 12 bits there;
+    # a narrow map's widths are untouched (E1M1, E1M2: the schema every frozen set was recorded with)
+    wide = slot_nibbles(lay) == 3
+    sid_bits = mon_bits if not wide else 12
     # -- game ------------------------------------------------------------------------------------
     f("skill", 2, group="game", doc="DOOM gameskill: 1 easy, 2 medium, 3 hard (D7, menu)")
     f("leveltime", LEVELTIME_BITS, group="game",
       doc="tics since level start, wraps (nukage timing, S3b; P10: LEVEL COMPLETE's TIME, 16 -> 20 bits)")
-    f("sched_cursor", mon_bits, group="game", doc="the K-slot scheduler's first slot this tic")
+    # M8 C8: at least 5 bits -- the fj's tic reads and writes the cursor (and mt_fdef, declared at its width) as TWO
+    # nibbles (monstercode.p32a_tic_lines), so a map with <= 16 monster slots (E1M8's 4 Barons) keeps the 2-nibble
+    # layout, as _code_bits keeps mon_target's; every map with more (E1M1 53, E1M2) is unchanged. M8 C2: 12 bits (three
+    # nibbles) on a wide map
+    f("sched_cursor", max(5, mon_bits) if not wide else 12, group="game", doc="the K-slot scheduler's first slot this tic")
     f("g_restart", 1, group="game", phase="S3b",
       doc="restart asked (use while dead, NEW GAME): the frame tail runs the restart block")
     f("g_leveldone", 1, group="game", phase="S3b", doc="the exit switch was used: world frozen")
+    if lay.secexit:  # M8 C9 (doors.SECRET_EXIT_SPECIALS): which exit ended the level (LEVEL COMPLETE shows SECRET EXIT)
+        f("g_secretexit", 1, group="game", phase="C9", label="lvsec", doc="the level ended by its secret exit (51)")
     # -- input and mode (existing standalone persist set) ----------------------------------------
     f("mode", 1, group="input", phase="existing", label="mode", doc="1 = menu frame producer")
     for k in ("f", "b", "l", "r", "u", "sl", "sr", "fi", "w1", "w2", "w3", "w4", "w5"):   # M7 P4.1; P9: 5
         f("kb_" + k, 1, group="input", phase="existing", label="kb_" + k, doc="held key flag")
+    if lay.plasma:   # M8 C6: key 6, the plasma rifle -- on a map that holds one (combat.plasma_on); E1M1: no field
+        f("kb_w6", 1, group="input", phase="C6", label="kb_w6", doc="held key flag")
     # -- player --------------------------------------------------------------------------------
     f("px", 32, signed=True, group="player", phase="existing", label="viewx", doc="16.16")
     f("py", 32, signed=True, group="player", phase="existing", label="viewy", doc="16.16")
@@ -353,6 +452,9 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
         from doomfj.teleport import REACTION_BITS
         f("p_reaction", REACTION_BITS, group="player", phase="L4", label="p_rct",
           doc="0..18: the tics P_PlayerThink skips P_MovePlayer (turn and walk) after a teleport")
+    if lay.ntonce:  # M8 C5 (doomfj.teleport): the W1 monster teleports' latches (P_CrossSpecialLine: special = 0)
+        f("tp_fired", 1, count=lay.ntonce, group="door", phase="C5", label="tp_w1",
+          doc="W1 monster teleport j (teleport.once_lines) was crossed by a monster: its special is gone")
     f("p_health", 12, signed=True, group="player", phase="S3b", doc="health; < 0 after a kill")
     f("p_armor", 8, group="player", phase="S3b", doc="armor points, 0..200")
     f("p_armortype", 2, group="player", phase="S3b", doc="0 none, 1 green, 2 blue")
@@ -382,17 +484,25 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     # M7 P7 (owner, 2026-10-05: the dead view turns to the killer): player->attacker -- the source of the last hit
     # that landed (P_DamageMobj), as 0 (none: sector damage, or the player himself -- a barrel he set off) or
     # 1 + the monster slot; P_DeathThink turns the dead view toward it
-    f("p_attacker", _index_bits(lay.nmon + 1), group="player", phase="P7", doc="0 or 1 + monster slot")
+    f("p_attacker", _index_bits(lay.nmon + 1) if not wide else 12, group="player", phase="P7", doc="0 or 1 + monster slot")
     # P10 (the owner's play-test, 2026-10-12): LEVEL COMPLETE's stats -- player_t's killcount, itemcount and
     # secretcount, and which secret sectors were entered (DOOM zeroes the sector's special; this level data is static,
     # so the found set is the player's). All four are 0 at the level start and the restart (combat.RESTART_KEEP
     # leaves them out). doomfj.statcode is their fj side
-    f("p_killcount", 8, group="player", phase="P10", label="st_kill",
+    cbits = count_bits(max(lay.nmon, lay.npickup))     # M8 C2: both counters 12 bits when either count passes a byte
+    f("p_killcount", cbits, group="player", phase="P10", label="st_kill",
       doc="P_KillMobj's killcount: every COUNTKILL death (a single player counts the monsters' kills too)")
-    f("p_itemcount", 8, group="player", phase="P10", label="st_item", doc="COUNTITEM pickups taken")
+    f("p_itemcount", cbits, group="player", phase="P10", label="st_item",
+      doc="COUNTITEM pickups taken")
     f("p_secretcount", 4, group="player", phase="P10", label="st_secn", doc="secret sectors entered")
     f("p_secret", 1, count=max(1, lay.nsecret), group="player", phase="P10", label="st_secm",
       doc="secret sector k (special 9, sector order) was entered")
+    # M8 C6 (doomfj.powers): the timed powers' counters -- only on a map holding the power (E1M1, E1M2: none)
+    from doomfj import powers as _PW
+    for k in lay.powers:
+        f(_PW.FIELD[k], _PW.BITS, group="player", phase="C6", label=_PW.CELL[k],
+          doc="powers[pw_%s]: 0 .. %d, P_GivePower's 60 * TICRATE counted down a player tic"
+              % ("invisibility" if k == _PW.INVIS_TYPE else "ironfeet", _PW.TICS[k]))
     if sinks:   # M7 P8a A (docs/gp-final-plan.md 1.1): P_DeathThink's view drop
         f("p_vdrop", 6, group="player", phase="P8a", label="p_vd",
           doc="0..35: viewheight = 41 - it; +1 a death-think tic after the psprites, capped at 35; 0 at the level "
@@ -469,7 +579,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("mon_reaction", 4, count=n, group="monster", doc="reactiontime")
     f("mon_threshold", 7, count=n, group="monster", doc="threshold, <= BASETHRESHOLD")
     if fight:   # M7 P8a I (docs/gp-final-plan.md 1.2.2): a target names a thing
-        f("mon_target", _code_bits(n), count=n, group="monster", phase="P8a",
+        f("mon_target", _code_bits(n, wide), count=n, group="monster", phase="P8a",
           doc="0 none, 1 the player, 2 + slot a monster")
     else:
         f("mon_target", 1, count=n, group="monster", doc="has a target (always the player)")
@@ -482,21 +592,25 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("mon_seen", 1, count=n, group="monster", phase="P3",
       doc="drawn last frame: sight from the picture (plan section 5), written by the renderer")
     f("mon_drop", 2, count=n, group="monster", phase="S3b", doc="0 none, 1 dropped, 2 taken")
-    if knock:   # M7 P8a K (1.2.2, G-B2 / G-B5): momentum, the position's fraction, the drop's own position
+    if knock or lay.nsoul:   # M7 P8a K (1.2.2, G-B2 / G-B5): momentum, the position's fraction, the drop's own position
+        # M8 C8: a map with a lost soul has the momentum and the fraction knockback or not (its charge flies on them)
         f("mon_momx", 32, count=n, signed=True, group="monster", phase="P8a", label="mkx", doc="16.16 a tic")
         f("mon_momy", 32, count=n, signed=True, group="monster", phase="P8a", label="mky", doc="16.16 a tic")
         f("mon_fx", 16, count=n, group="monster", phase="P8a", label="mfx",
           doc="the fraction of the 16.16 x (mon_x keeps the integer part: drawing, AI and collision read it)")
         f("mon_fy", 16, count=n, group="monster", phase="P8a", label="mfy", doc="the fraction of the 16.16 y")
+    if knock:
         f("drop_x", 16, count=n, signed=True, group="monster", phase="P8a", label="thpos_rt",
           doc="the slot's drop, whole units: the corpse's position AT THE KILL (fj: drop row nt + 10 + k)")
         f("drop_y", 16, count=n, signed=True, group="monster", phase="P8a", label="thpos_rt", doc="map units")
+    for name, bits, sg, doc in (soul_fields() if lay.nsoul else ()):   # M8 C8: the lost souls (doomfj.lostsoul)
+        f(name, bits, count=lay.nsoul, signed=sg, group="soul", phase="M8", doc=doc)
     f("mon_leaf", leaf_bits, count=n, kind="derived", group="monster",
       doc="point location of (mon_x, mon_y)")
     # -- leaf lists -------------------------------------------------------------------------------
-    f("leaf_head", 8, count=lay.nleaf, kind="derived", group="lists", label="sshead",
+    f("leaf_head", lbits, count=lay.nleaf, kind="derived", group="lists", label="sshead",
       doc="first mobile in the leaf, +1 (0 = empty), ascending order")
-    f("mob_next", 8, count=lay.nmobile, kind="derived", group="lists", label="thnext",
+    f("mob_next", lbits, count=lay.nmobile, kind="derived", group="lists", label="thnext",
       doc="next mobile in the same leaf, +1; mobiles = monsters, then fireballs, then fx")
     # -- fireball pool (S3b) ----------------------------------------------------------------------
     p = FIREBALL_POOL
@@ -507,7 +621,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
     f("proj_y", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16")
     f("proj_momx", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16 per tic")
     f("proj_momy", 32, count=p, signed=True, group="proj", phase="S3b", doc="16.16 per tic")
-    f("proj_src", mon_bits, count=p, group="proj", phase="S3b",
+    f("proj_src", sid_bits, count=p, group="proj", phase="S3b",
       doc="shooter's monster slot (P9: 0 and unread for the player's rocket -- its state names it)")
     if knock:   # M7 P8a K (1.2.2, G-B4): the missile's z for the thrust's reversal
         f("proj_z", 16, count=p, signed=True, group="proj", phase="P8a", label="pj_z",
@@ -532,7 +646,7 @@ def build_schema(lay: Layout, *, sinks: bool = False, knock: bool = False, fight
       doc="health (20 at spawn)")
     f("bar_solid", 1, count=lay.nbarrel, group="barrel", phase="S3b", doc="blocks things")
     if fight:   # M7 P8a I (1.2.2, G-I7): the blast's source
-        f("bar_src", _code_bits(lay.nmon), count=lay.nbarrel, group="barrel", phase="P8a",
+        f("bar_src", _code_bits(lay.nmon, wide), count=lay.nbarrel, group="barrel", phase="P8a",
           doc="0 none, 1 the player, 2 + slot: the FIRST thing that damaged it (DOOM's barrel target)")
     names = [x.name for x in fs]
     assert len(names) == len(set(names)), "duplicate schema field"
@@ -672,6 +786,9 @@ class TicEvents:
     rocket_spawns: List[int] = field(default_factory=list)  # pool slot, or -1: a full pool fizzled it
     rocket_hits: List[tuple] = field(default_factory=list)  # ("mon"|"bar"|"corpse", index, damage): what stopped it
     rocket_blasts: List[int] = field(default_factory=list)  # pool slot whose S_EXPLODE1 ran A_Explode
+    # -- M8 C6: the player's plasma balls (combat._spawn_plasma / _rocket_things)
+    plasma_spawns: List[int] = field(default_factory=list)  # pool slot, or -1: a full pool fizzled it
+    plasma_hits: List[tuple] = field(default_factory=list)  # ("mon"|"bar"|"corpse", index, damage): what stopped it
     fx_spawns: List[tuple] = field(default_factory=list)    # (pool slot, "puff"|"blood")
     fx_skipped: int = 0                                     # effects dropped: the pool was full
     player_blocked: int = 0                                 # tried positions a solid thing refused
@@ -688,6 +805,9 @@ class TicEvents:
     mon_hits: List[tuple] = field(default_factory=list)     # (shooter slot, "bullet"|"claw"|"bite"|"fireball",
     #                                                         "mon"|"bar"|"species"|"corpse", index, damage)
     retargets: List[tuple] = field(default_factory=list)    # (slot, new mon_target: 1 the player, 2 + slot)
+    # -- M8 C8: the lost souls (doomfj.lostsoul): ("charge", slot, angle, momz) | ("slam", slot, kind, index, damage)
+    #    | ("stop", slot) | ("float", slot) | ("bounce", slot) | ("flyhit", slot): a charging soul hit
+    souls: List[tuple] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -822,7 +942,7 @@ def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:
 # ================================================================================================
 # THE WORLD
 # ================================================================================================
-class World(CombatMixin):
+class World(SoulMixin, CombatMixin):
     """E1M1's game state plus the static level data it is simulated against.
 
     `World(skill=gd.SK_HARD)` spawns the level; `tic(keys)` advances one tic and returns its
@@ -842,6 +962,13 @@ class World(CombatMixin):
                  seen_hook: Optional[Callable[["World"], None]] = None,
                  monster_tics: int = MONSTER_TICS_PER_FRAME):
         if map_wad is None:
+            # M8 (docs/level-pipeline.md 3): the default is E1M1's fixture -- REFUSED while the process measures another
+            # map (DOOMFJ_MAP / --map: doomfj.mapprofile.ACTIVE), so a gate cannot silently measure E1M1 (fight_gate's F5
+            # medium world did, gen_dryrun's audit). Pass the map's wad; a deliberate E1M1 world passes E1M1's.
+            from doomfj import mapprofile as _mp
+            assert _mp.ACTIVE == "E1M1", (
+                "World() with no map wad builds E1M1's, but this process measures %s (DOOMFJ_MAP): pass the map's wad"
+                % _mp.ACTIVE)
             from doomfj.config import DEFAULT_MAP_WAD
             from doomfj.wad import WadFile
             map_wad = WadFile.from_path(DEFAULT_MAP_WAD)
@@ -870,14 +997,21 @@ class World(CombatMixin):
         self.cursor_policy = cursor_policy
         self.strict = strict
         self._build_level()
+        self._soul_init()                           # M8 C8: the lost souls among the slots (doomfj.lostsoul)
         self.layout = Layout(nmon=len(self.mon_things), ndoor=len(self.door_order),
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
-                             nwalk=len(self.walk_triggers), nlift=len(self.lift_order),
+                             nwalk=len(self.walk_triggers) + self.door_nlatch, nlift=len(self.lift_order),
                              nsecret=len(self.secret_sectors), ntele=len(self.teleports),
+                             ntonce=len(self.tele_once),
                              nfloor=len(self.floor_groups) if self.floor_wide else 0,
                              nlight=len(self.light_thinkers),
-                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr))
+                             nswitch=len(self.switch_cells), nswsr=len(self.switch_sr),
+                             nshot=len(self.door_shots),
+                             secexit=int(any(_secret_exits(self.mw.linedefs(self.mapname)))),
+                             powers=self.powers,                  # M8 C6
+                             plasma=int(plasma_on(self.things)),                  # M8 C6
+                             nsoul=len(self.soul_slots))
         self.schema = build_schema(self.layout, **p8a_schema(player, monsters))   # M7 P8a: "full" adds nothing
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -918,14 +1052,13 @@ class World(CombatMixin):
         self.secret_sectors = [s for s, sec in enumerate(self.secs) if sec.special == SECRET_SPECIAL]
         lds, sds, secs, cmap = self.lds, self.sds, self.secs, self.cmap
         # -- things: the union of every single-player skill, in WAD order ----------------------
-        self.things = [t for t in mw.things(M)
-                       if t.type not in gd.NOT_THINGS and single_player(t)]
+        self.things, self.mon_things, self.barrel_things = level_things(mw, M)
         unknown = sorted({t.type for t in self.things} - set(gd.THING_TYPES))
         assert not unknown, "thing types missing from gamedata.THING_TYPES: %s" % unknown
-        self.mon_things = [t for t in self.things if t.type in gd.MONSTER_DOOMEDNUMS]
-        self.barrel_things = [t for t in self.things if t.type == 2035]
         self.pickup_things = [t for t in self.things
                               if gd.THING_TYPES[t.type].flags & gd.MF_SPECIAL]
+        from doomfj.powers import map_powers
+        self.powers = map_powers(self.things)          # M8 C6: the timed powers the map holds (E1M1, E1M2: none)
         self.decor_solid = [t for t in self.things
                             if t.type not in gd.MONSTER_DOOMEDNUMS and t.type != 2035
                             and gd.THING_TYPES[t.type].solid]
@@ -957,6 +1090,14 @@ class World(CombatMixin):
         # M8 L2: the switch boxes that press each door (SR 63 / S1 103: EV_DoDoor on the doors their tag names)
         self.door_switches = door_switch_boxes(secs, lds, sds, cmap.vertexes)
         self.walk_triggers = walkover_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
+        # M8 C3 (doomfj.doors): each switch box's card / latch / stay press (the S1 latches are W1 bits after the
+        # triggers': `w_fired[nwalk + latch]`), a mixed door's keyed front boxes, the WR lines, the close strides
+        self.door_switch_info = _D.switch_entries(secs, lds, sds, cmap.vertexes)
+        self.door_nlatch = len(_D.switch_latches(secs, lds, sds))
+        self.door_keyed = _D.keyed_boxes_xy(secs, lds, sds, cmap.vertexes)
+        self.door_repeats = _D.repeat_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
+        self.door_close = _D.close_strides(secs, lds, sds)
+        self.door_shots = _D.shot_lines(secs, lds, sds)        # M8 C3: GR 46 -- (linedef, its doors), aim ids shot_sid
         self.door_lines = door_line_ids(secs, lds, sds, tbl)
         self.open_h = {si: (secs[si].floor_h, tbl[si][-1]) for si in self.door_order}
         self.secs_c = apply_sector_heights(secs, self.open_h)   # the collision map: doors open
@@ -965,10 +1106,14 @@ class World(CombatMixin):
         self.lift_stops = lift_states(secs, lds, sds)
         self.lift_order = sorted(self.lift_stops)
         self.lift_walk = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
+        # M8 C9: the W1 exit lines (52; E1M8), fused -- the player's crossing ends the level ([] on E1M1 / E1M2)
+        from doomfj.doors import exit_walk_triggers
+        self.exit_walk = exit_walk_triggers(lds, self.mw.vertexes(self.mapname))
         # M8 F1.3: the WR lines a MONSTER triggers (88, not the blazing 120), each lift's stride, a tag's lifts
         self.lift_walk_mon = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname),
                                                 _MV.LIFT_MONSTER_SPECIALS)
         self.lift_stride = [_MV.lift_stride(secs, lds, si) for si in self.lift_order]
+        self.lift_perp = [_MV.lift_perpetual(secs, lds, si) for si in self.lift_order]    # M8 C4: 53's machine
         self.lift_use = use_line_boxes(secs, lds, cmap.vertexes, LIFT_USE_SPECIALS)
         self.lift_of_tag = _MV.lift_slots_of_tag(secs, self.lift_order)       # M8 F1.3: tag -> (slot, ...)
         self.switch = switch_sectors(secs, lds, sds)
@@ -980,18 +1125,37 @@ class World(CombatMixin):
         self.floor_wide = _MV.floor_wide(self.floor_groups)
         self.floor_walk = _MV.floor_walk_triggers(lds, self.mw.vertexes(self.mapname), self.floor_groups)
         self.floor_use = _MV.floor_use_boxes(lds, cmap.vertexes, self.floor_groups)
+        # M8 C8: A_BossDeath's floor group on a boss map whose boss is here (E1M8: tag 666), else None
+        self.boss_group = _MV.boss_floor_group(secs, lds, sds, self.floor_groups, M,
+                                               {gd.MONSTER_DOOMEDNUMS[t.type] for t in self.things
+                                                if t.type in gd.MONSTER_DOOMEDNUMS})
         self.mover_table = _MV.mover_table(secs, lds, sds)
+        # M8 C4: the texture-change floors (20 / 22): {sector: (stored floor, new flat, group)} -- their special (the
+        # nukage's damage) is cleared once their group fired (`floor_special_cleared`)
+        self.floor_change = _MV.change_table(self.floor_groups)
         assert set(self.switch) <= {si for g in self.floor_groups for si in g.sectors}
         self.mover_order = sorted(set(self.lift_order) | {si for g in self.floor_groups for si in g.sectors})
         # M8 (doomfj.lights): the animated sector light thinkers, in sector order ([] unless the map's flag is on).
         # A light sector that is also a door or a mover would need its states crossed with theirs: refused
         self.light_thinkers = _LT.map_thinkers(mw, M)
+        # M8 C4: the light-switch lines (138): [(use box, (thinker index, ...))] -- a use press sets them bright
+        self.light_uses = _LT.light_switch_uses(secs, lds, cmap.vertexes, self.light_thinkers)
+        from doomfj.doors import exit_boxes as _exit_boxes
+        for _b, _k in self.light_uses:
+            for (x0, y0, x1, y1) in _exit_boxes(lds, cmap.vertexes):
+                assert _b[2] < x0 or _b[0] > x1 or _b[3] < y0 or _b[1] > y1, ("M8 C4: a light switch box meets the "
+                                                                              "exit's", _b)
         _lsx = {th.sector for th in self.light_thinkers} & (set(self.door_order) | set(self.mover_order))
         assert not _lsx, "M8: animated light sectors %r are doors or movers" % sorted(_lsx)
         # M8 L4 (doomfj.teleport): the WR teleport lines and their destinations ([] on E1M1). P_TeleportMove's floorz
-        # is the destination sector's floor, baked: it must not be a door or a mover
+        # is the destination sector's floor: baked on a still sector, read where it stands on a mover (M8 C5b); not a door
         from doomfj.teleport import teleporters
         self.teleports = teleporters(mw, M, rm=self.rm, cmap=cmap)
+        # M8 C5b: a destination on a mover reads its floor where the mover stands (E1M7's 516 on sector 89)
+        self.teleports = [dataclasses.replace(t, dest_moves=True) if t.dest_sector in set(self.mover_order) else t
+                          for t in self.teleports]
+        from doomfj.teleport import once_lines
+        self.tele_once = once_lines(self.teleports)  # M8 C5: the W1 (125) lines, latch j = tp_fired[j]
         self._teleported = False
         # M8 (doomfj.switches, the map's SWITCH_TEX): the switch lines a use changes -- `switch_cells` the ones with a
         # `sw_on` cell (all but the exit, whose latch is g_leveldone), `switch_sr` the SR ones' indices among them
@@ -1000,8 +1164,10 @@ class World(CombatMixin):
         self.switch_cells = _SWI.latched(self.switches)
         self.switch_sr = _SWI.repeating(self.switches)
         for tel in self.teleports:
-            assert tel.dest_sector not in set(self.door_order) | set(self.mover_order), (
-                "M8 L4: teleport destination sector %d moves" % tel.dest_sector)
+            # M8 C5b: a destination on a MOVER (a lift / a floor) is read where the mover stands (`_teleport_monster`'s
+            # secs_c; the fj's teleportcode.monster_lines by `ms_seed_leaf`); a door's is still refused
+            assert tel.dest_sector not in set(self.door_order), (
+                "M8 L4: teleport destination sector %d is a door" % tel.dest_sector)
         self._mh_last = {}
         self.mon_door_boxes = {}
         for si in self.door_order:
@@ -1091,6 +1257,7 @@ class World(CombatMixin):
         self._reset_state(skill)
         self.tic_count = 0
         self.events: List[TicEvents] = []
+        self.boss_log: List[Tuple[int, int]] = []    # M8 C8: (tic, slot) of every A_BossDeath that fired
         self._door_phase_scene()
 
     def _decor_for(self, skill: int) -> list:
@@ -1128,13 +1295,15 @@ class World(CombatMixin):
             ws.mon_x[m], ws.mon_y[m] = t.x, t.y
             ws.mon_facing[m] = _c_div(t.angle, 45) & 7        # ANG45 * (angle / 45)
             ws.mon_ambush[m] = 1 if t.flags & gd.MTF_AMBUSH else 0
-            ws.mon_state[m] = gd.STATE_INDEX[info.spawnstate]
+            ws.mon_state[m] = gd.THING_STATE_INDEX[info.spawnstate]
             ws.mon_health[m] = info.spawnhealth
             ws.mon_reaction[m] = info.reactiontime             # skill != nightmare
             ws.mon_movedir[m] = gd.DI_EAST                     # P_SpawnMobj memsets the mobj
             leaf = self.rm.point_in_subsector(self.cmap, t.x, t.y)
             ws.mon_leaf[m] = leaf
             ws.mon_floorz[m] = self.secs_c[self.leaf_sector[leaf]].floor_h
+            if m in self.soul_of:
+                self._soul_reset(m)                            # M8 C8: z on the floor, its ceiling
             if not t.flags & bit:
                 ws.mon_active[m] = 0
                 ws.mon_tics[m] = TICS_FOREVER
@@ -1254,14 +1423,26 @@ class World(CombatMixin):
         # doors' tic-start states, before the doors tic
         self.switch_doors(bool(keys["use"] and alive), ws.px, ws.py,
                           lambda si: switch_ready(self.door_state(si)))
+        nw = len(self.walk_triggers)
         for d, si in enumerate(self.door_order):
             box = self.door_boxes.get(si)             # none for a walk-over door
             pressed = (keys["use"] and alive and box is not None and self.player_can_open(si)
                        and in_use_box_fixed(box, ws.px, ws.py))
-            # M8 L2: a door switch's box (P_UseSpecialLine -> EV_DoDoor): presses a door at rest only
-            pressed = pressed or (keys["use"] and alive and self.door_switches.get(si)
-                                  and switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))
-                                  and any(in_use_box_fixed(b, ws.px, ws.py) for b in self.door_switches[si]))
+            # M8 C3: a mixed door's keyed lines (E1M3 150's D1 32), each its front box and its card
+            pressed = pressed or (keys["use"] and alive and any(
+                self.player_has_card(c) and in_use_box_fixed(b, ws.px, ws.py) for b, c in self.door_keyed.get(si, ())))
+            # M8 L2: a door switch's box (P_UseSpecialLine -> EV_DoDoor): presses a door at rest only. M8 C3: a locked
+            # switch needs its card (EV_DoLockedDoor), a latched S1 one fires once, a stay switch's press is a stay press
+            spress = False
+            if (not pressed and keys["use"] and alive and self.door_switches.get(si)
+                    and switch_ready((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]))):
+                for b, c, lt, sp in self.door_switch_info[si]:
+                    if ((c is None or self.player_has_card(c)) and (lt is None or not ws.w_fired[nw + lt])
+                            and in_use_box_fixed(b, ws.px, ws.py)):
+                        pressed, spress = True, sp
+                        if lt is not None:
+                            ws.w_fired[nw + lt] = 1
+                        break
             kind = self.door_kind[si]
             # M7 P2b: reversal -- asked only of a closing door at its pass step (door_tic's rule)
             blocked = (ws.d_dir[d] == CLOSING and ws.d_state[d] >= self.door_pass[si]
@@ -1269,7 +1450,8 @@ class World(CombatMixin):
             st = door_tic((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]),
                           self.door_nstates[si], bool(pressed or ws.d_monreq[d]),
                           stride=door_stride(kind), stay=door_stay(kind), blocked=blocked,
-                          pass_at=self.door_pass[si])
+                          pass_at=self.door_pass[si], close_stride=self.door_close.get(si),
+                          hold=si in self.door_close, stay_press=spress)
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = st
             ws.d_monreq[d] = 0
         self._door_phase_scene()
@@ -1290,7 +1472,7 @@ class World(CombatMixin):
         ws = self.ws
         on, tm = list(ws.sw_on), list(ws.sw_time) if self.switch_sr else []
         _SWI.countdown(on, tm, self.switch_sr)
-        for k in _SWI.door_presses(self.switch_cells, used, x16, y16, ready):
+        for k in _SWI.door_presses(self.switch_cells, used, x16, y16, ready, self.player_has_card):
             _SWI.press(on, tm, self.switch_sr, k)
         self._switch_store(on, tm)
 
@@ -1304,6 +1486,13 @@ class World(CombatMixin):
         for k in _SWI.use_presses(self.switch_cells, x16, y16, lift_rest, floor_still):
             _SWI.press(on, tm, self.switch_sr, k)
         self._switch_store(on, tm)
+
+    def switch_exit(self, line: int) -> None:
+        """M8 C9: exit line `line` was pressed -- on a map with more than one exit switch line each has its own cell
+        (switches.latched), which swaps; a single exit line's latch is g_leveldone itself (nothing to do)"""
+        for k, s in enumerate(self.switch_cells):
+            if s.kind == "exit" and s.line == line:
+                self.ws.sw_on[k] = 1
 
     def _switch_store(self, on, tm) -> None:
         ws = self.ws
@@ -1341,8 +1530,10 @@ class World(CombatMixin):
         the scenes again"""
         ws = self.ws
         for k, si in enumerate(self.lift_order):
-            st = lift_tic((ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k]),
-                          len(self.lift_stops[si]), bool(ws.l_req[k]), self.lift_stride[k])
+            st = _MV.lift_machine_tic((ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k]),
+                                      len(self.lift_stops[si]), bool(ws.l_req[k]), self.lift_stride[k],
+                                      self.lift_perp[k])          # M8 C4: or a perpetual lift's
+
             ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k] = st
             ws.l_req[k] = 0
         # M8 F1.3: then every moving floor group, in group order (movers.floor_tic)
@@ -1374,6 +1565,22 @@ class World(CombatMixin):
         if self.floor_state(g) != before:
             self._door_phase_scene()
 
+    def light_presses(self, x16: int, y16: int) -> None:
+        """M8 C4: a use PRESS at (x16, y16) on the light switches (138: EV_LightTurnOn) -- the thinkers of each line
+        whose box holds it go to their bright state. The model's `_use_lines` and the gates (`MonsterPhase.switch_uses`,
+        on every press edge) call this; no light-switch box meets an exit box (asserted at load), so the exit's early
+        return in `_use_lines` cannot order them differently"""
+        for box, ks in self.light_uses:
+            if in_use_box_fixed(box, x16, y16):
+                for k in ks:
+                    self.ws.lt_state[k] = 1
+
+    def floor_special_cleared(self, sec: int) -> bool:
+        """M8 C4: is sector `sec`'s special cleared -- a texture-change floor (20 / 22) whose group fired (EV_DoPlat:
+        `sec->special = 0` at the trigger)"""
+        hit = self.floor_change.get(sec)
+        return hit is not None and _MV.floor_fired(self.floor_state(hit[2]), self.floor_sub(hit[2]))
+
     def mover_heights_now(self) -> dict:
         """M7 P2b: `{sector: (floor, ceil)}` of every mover off its stored floor, from the cells"""
         ws = self.ws
@@ -1404,6 +1611,8 @@ class World(CombatMixin):
             for m in range(self.layout.nmon):
                 sec = self.leaf_sector[ws.mon_leaf[m]]
                 if ws.mon_active[m] and sec in movers:
+                    if m in self.soul_of and ws.sk_z[self.soul_of[m]] == ws.mon_floorz[m] << 16:
+                        ws.sk_z[self.soul_of[m]] = self.secs_c[sec].floor_h << 16   # M8 C8: a soul ON the lift
                     ws.mon_floorz[m] = self.secs_c[sec].floor_h
 
     # -- 2. the player: `CombatMixin._player_phase` (doomfj.combat)
@@ -1424,7 +1633,9 @@ class World(CombatMixin):
                 continue
             # M7 P8a (package K): P_MobjThinker's P_XYMovement before the state's tics -- a live monster's slide and
             # a corpse's (its last state lasts forever: it still slides)
-            if self._p_knock and (ws.mon_momx[m] or ws.mon_momy[m]):
+            if m in self.soul_of:                  # M8 C8: the soul's P_XYMovement / P_ZMovement (doomfj.lostsoul)
+                self._soul_think(m, ev)
+            elif self._p_knock and (ws.mon_momx[m] or ws.mon_momy[m]):
                 self._monster_knock_move(m, ev)
             if ws.mon_tics[m] == TICS_FOREVER:
                 continue
@@ -1432,7 +1643,7 @@ class World(CombatMixin):
                 ws.mon_tics[m] -= 1
                 if ws.mon_tics[m] > 0:
                     continue
-            nxt = gd.STATES[gd.STATE_NAMES[ws.mon_state[m]]].next
+            nxt = gd.STATES[gd.THING_STATE_NAMES[ws.mon_state[m]]].next
             act = gd.STATES[nxt].action
             if act is not None and gd.ACTIONS[act].cls == "heavy":
                 if used >= self.k_heavy:
@@ -1459,7 +1670,7 @@ class World(CombatMixin):
                 self._list_remove(m, ws.mon_leaf[m])
                 return False
             st = gd.STATES[name]
-            ws.mon_state[m] = gd.STATE_INDEX[name]
+            ws.mon_state[m] = gd.THING_STATE_INDEX[name]
             ws.mon_tics[m] = TICS_FOREVER if st.tics < 0 else st.tics
             if run_action and st.action is not None:
                 self._run_action(m, st.action, ev)
@@ -1476,14 +1687,36 @@ class World(CombatMixin):
             self._a_chase(m, ev)
         elif action == "A_FaceTarget":
             self._a_face_target(m)
-        elif action in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack"):
-            self._monster_attack(m, action, ev)          # doomfj.combat: A_FaceTarget + effect
+        elif action in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack", "A_BruisAttack"):
+            self._monster_attack(m, action, ev)          # doomfj.combat: A_FaceTarget (not the Baron's) + effect
+        elif action == "A_SkullAttack":
+            self._a_skull_attack(m, ev)                  # M8 C8: doomfj.lostsoul
         elif action == "A_Fall":
             self.ws.mon_solid[m] = 0
+        elif action == "A_BossDeath":
+            self._a_boss_death(m, ev)                    # M8 C8
         elif a.phase == "sound":
             pass
         else:
             raise NotImplementedError("%s on a monster (phase %s)" % (action, a.phase))
+
+    def _a_boss_death(self, m: int, ev: TicEvents) -> None:
+        """M8 C8: A_BossDeath (p_enemy.c, Doom 1): on a boss map (`gamedata.BOSS_MAPS`: E1M8, CheckBossEnd's
+        MT_BRUISER) with the player's health > 0 and no OTHER monster of the dead one's type alive (spawned -- a monster
+        of another skill is not a thinker -- with health > 0), EV_DoFloor(tag 666, lowerFloorToLowest): the tag's floor
+        group fires (`boss_group`, movers.boss_floor_group). Nothing else on a non-boss map or type."""
+        boss = gd.BOSS_MAPS.get(self.mapname.upper())
+        info = self.mon_info[m]
+        if boss is None or info.name != boss[0]:
+            return
+        ws = self.ws
+        if ws.p_health <= 0:
+            return                                       # "no one left alive, so do not end game"
+        for j in range(self.layout.nmon):
+            if j != m and ws.mon_active[j] and self.mon_info[j].name == info.name and ws.mon_health[j] > 0:
+                return                                   # "other boss not dead"
+        self.boss_log.append((self.tic_count, m))         # (not a TicEvents field: the frozen event logs keep theirs)
+        self.floor_fire(self.boss_group)
 
     # ---------------------------------------------------------------------------- AI
     def player_alive(self) -> bool:
@@ -1564,12 +1797,22 @@ class World(CombatMixin):
         self.ws.mon_target[m] = 1
         return True
 
-    def _a_face_target(self, m: int) -> None:
+    def _a_face_target(self, m: int) -> int:
+        """A_FaceTarget -> M8 C6: the turn a SHADOW target adds (doomfj.powers: `P_SubRandom() << 21` on the shooter's
+        stream, in the bullets' spread unit), 0 when none; the facing octant does not take it (powers.py)"""
         ws = self.ws
         if not ws.mon_target[m]:
-            return
+            return 0
         ws.mon_ambush[m] = 0
         ws.mon_facing[m] = octant_of(*self._to_target(m))     # M7 P8a I: the target (the player before)
+        if self.shadow_target(m):
+            return self._roll("mon_rng", self.sites.shadow_face, m)
+        return 0
+
+    def shadow_target(self, m: int) -> bool:
+        """M8 C6: monster m's target has MF_SHADOW -- the player while his invisibility counter runs (a map holding
+        2024 only; a spectre target stays undrawn, powers.py)"""
+        return self.ws.mon_target[m] == 1 and bool(getattr(self.ws, "p_invis", 0))
 
     def _a_chase(self, m: int, ev: TicEvents) -> None:
         """A_Chase (p_enemy.c), single player, skill < nightmare. M7 P8a I: the TARGET's (`target_alive`,
@@ -1634,6 +1877,8 @@ class World(CombatMixin):
         dist = aprox_distance(*self._to_target(m)) - MISSILE_BIAS
         if self.mon_info[m].meleestate == gd.S_NULL:
             dist -= MISSILE_NOMELEE_BIAS
+        if self.mon_things[m].type == SKULL_TYPE:        # M8 C8: P_CheckMissileRange's MT_SKULL `dist >>= 1`
+            dist >>= 1
         dist = min(dist, MISSILE_CAP)
         return not self._rand(m) < dist
 
@@ -1708,9 +1953,13 @@ class World(CombatMixin):
         sx, sy = step_delta(self.mon_speed[m], d)
         nx, ny = ws.mon_x[m] + sx, ws.mon_y[m] + sy
         ev.tries += 1
-        verdict, floorz = self.try_move_monster(m, nx, ny)
+        if m in self.soul_of:                            # M8 C8: MF_FLOAT's P_TryMove and P_Move (doomfj.lostsoul)
+            verdict, floorz = (OK, None) if self._soul_p_move(m, nx, ny, ev) else ("soul", None)
+        else:
+            verdict, floorz = self.try_move_monster(m, nx, ny)
         if verdict != OK:
-            ev.blocked[verdict] += 1
+            if verdict != "soul":
+                ev.blocked[verdict] += 1
             door = self._monster_door(m)
             if door is None:
                 return False
@@ -1718,7 +1967,8 @@ class World(CombatMixin):
             ws.mon_movedir[m] = gd.DI_NODIR
             ev.door_uses.append((m, door))
             return True
-        self._move_monster(m, nx, ny, floorz, ev)
+        if m not in self.soul_of:                        # (a soul's accepted step has moved it)
+            self._move_monster(m, nx, ny, floorz, ev)
         return True
 
     def _monster_door(self, m: int) -> Optional[int]:
@@ -1849,18 +2099,32 @@ class World(CombatMixin):
         ahead of the destination: combat._teleport_fogs) and the destination: position, floorz, facing (its angle's
         octant), momentum and the position's fraction 0 (knockback). -> the position now (the relink's).
         `self._teleported` says it happened (the knock move's momentum stops: combat._xy_move)"""
-        from doomfj.teleport import crossed_front, stomped
+        from doomfj.teleport import crossed_side, stomped
         ws = self.ws
         r = self.mon_radius[m]
         for tel in self.teleports:
-            if not crossed_front(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r):
+            if tel.once:                             # M8 C5: W1 125 -- a crossing either way clears it for the level
+                j = [t.line for t in self.tele_once].index(tel.line)
+                if ws.tp_fired[j]:
+                    continue
+                side = crossed_side(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r)
+                if side is not None:
+                    ws.tp_fired[j] = 1
+            else:
+                side = crossed_side(tel, (ox << 16, oy << 16), (nx << 16, ny << 16), r)
+            # the front only; M8 C5: a skill whose search finds no destination (E1M5's easy / medium) teleports nothing
+            if not side or not tel.on_skill(ws.skill):
                 continue
             if stomped(self, tel.dest, r, mover=m):
                 break
             self._teleport_fogs(tel, nx, ny, TicEvents(0) if ev is None else ev)
             nx, ny = tel.dest
-            ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, tel.dest_floor
+            # M8 C5b: P_TeleportMove's floorz is the destination sector's floor NOW (`secs_c`: a mover where it stands
+            # -- E1M7's 516 lands on sector 89, which W1 36 lowers); on a still sector it is the stored `dest_floor`
+            ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, self.secs_c[tel.dest_sector].floor_h
             ws.mon_facing[m] = tel.facing
+            if m in self.soul_of:
+                self._soul_teleported(m, tel)              # M8 C8: z on the destination floor, momz 0
             if self._p_knock:
                 ws.mon_momx[m] = ws.mon_momy[m] = 0
                 ws.mon_fx[m] = ws.mon_fy[m] = 0
@@ -2037,6 +2301,8 @@ class World(CombatMixin):
         ws.mon_x[m], ws.mon_y[m] = x, y
         ws.mon_floorz[m] = self.secs_c[self.leaf_sector[leaf]].floor_h
         ws.mon_leaf[m] = leaf
+        if m in self.soul_of:                              # M8 C8: on that floor, under that ceiling
+            self._soul_reset(m)
         if ws.mon_active[m]:
             self._list_insert(m, leaf)
 
@@ -2097,7 +2363,7 @@ class World(CombatMixin):
     def monster_view(self, m: int) -> dict:
         ws = self.ws
         return {"slot": m, "type": self.mon_things[m].type, "active": ws.mon_active[m],
-                "state": gd.STATE_NAMES[ws.mon_state[m]], "tics": ws.mon_tics[m],
+                "state": gd.THING_STATE_NAMES[ws.mon_state[m]], "tics": ws.mon_tics[m],
                 "x": ws.mon_x[m], "y": ws.mon_y[m], "floorz": ws.mon_floorz[m],
                 "movedir": ws.mon_movedir[m], "facing": ws.mon_facing[m],
                 "movecount": ws.mon_movecount[m], "reaction": ws.mon_reaction[m],

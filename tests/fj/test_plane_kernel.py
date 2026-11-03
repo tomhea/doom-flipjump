@@ -18,7 +18,6 @@ from doomfj.texturecompiler import compile_colormap
 from doomfj.wad import WadFile
 
 PLANE_FJ = Path("src/fj/plane_render.fj")
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")     # hex.read_table / hex.fixed_mul
 ASSET = Path("tests/fixtures/freedoom_assets.wad")
 COLORMAP_LIGHTS = 32
 U = 1 << 16
@@ -102,7 +101,7 @@ def test_plane_clear_planes_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "clear_planes.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [PLANE_FJ.resolve(), FIXED_POINT_FJ.resolve(), p.resolve()], b"", expected,
+        [PLANE_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "plane.clear_planes: fj seeds != oracle basexscale/baseyscale"
 
@@ -156,6 +155,6 @@ def test_plane_draw_span_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "draw_span.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [PLANE_FJ.resolve(), FIXED_POINT_FJ.resolve(), p.resolve()], b"", expected,
+        [PLANE_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "plane.draw_span: fj output != oracle _draw_span"

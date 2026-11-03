@@ -1,0 +1,34 @@
+{
+ "configs": {
+  "standalone": {
+   "entry": [
+    "fca132478fb1b4a2f5ad5f511c7a37f2012aa5586e284bddc82b5b35809388d4",
+    26502
+   ],
+   "tables": [
+    "7c9ee8a5a42f8cdcaf203999769ed12c2db54b48a5122d3df8f8f70570fcc9b1",
+    23484159
+   ],
+   "main": [
+    "396a35208b756e2ef729f265700568dac0fc1f960080b338f7ae8ca2837a7586",
+    3601577
+   ],
+   "segconsts": [
+    "cd5489e9bb20d1eabea5df7af68b27b8defc3a7b3c1bf21482690c9d58257935",
+    7154034
+   ],
+   "walk": [
+    "fa0ad25e2a07659a3a9766295baf0884b8d1e2204be5c78cbcbe076fbbcca36e",
+    20608678
+   ],
+   "state": [
+    "40274c16a7004f356b9d691dc2eb496408b586c2783ca223cc4c5ab582adcd0d",
+    1232963
+   ],
+   "banks": [
+    "299ba745e23075e8b307e23039fee78fc4dfba4279692d6b49013fb7a3acf206",
+    54444622
+   ]
+  }
+ }
+}

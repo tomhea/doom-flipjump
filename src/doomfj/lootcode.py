@@ -64,6 +64,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 from doomfj import gamedata as gd
 from doomfj.lut_generator import generate_dispatch_table_fj
 from doomfj import statcode as _statcode                          # P10: the item counter, the secrets
+from doomfj import powercode as _powercode                        # M8 C6: the timed powers (2024, 2025)
+from doomfj.powers import POWER_TYPES as _POWER_TYPES
 
 M32 = 0xFFFFFFFF
 # the player modes whose player LOOTS (world.PLAYER_MODES): P6 + P7 ship as "full"
@@ -81,7 +83,8 @@ REACH_UP, REACH_DOWN = 56, 8          # combat.REACH_UP / REACH_DOWN
 # the dropped variants' give routines (DROP_ITEM's types, `dropped=True`)
 DROPPED = {2007: "give_2007d", 2001: "give_2001d"}
 WEAPON_OWN = {gd.WP_FIST: 0, gd.WP_PISTOL: 1, gd.WP_SHOTGUN: 2, gd.WP_CHAINSAW: 3,
-              gd.WP_MISSILE: 4, gd.WP_CHAINGUN: 5}                     # weaponcode.OWN (P9: 4; P10: the chaingun 5)
+              gd.WP_MISSILE: 4, gd.WP_CHAINGUN: 5,                     # weaponcode.OWN (P9: 4; P10: the chaingun 5)
+              gd.WP_PLASMA: 6}                                        # M8 C6: the plasma rifle (a plasma map's)
 # M8 F4 (E1M2): THE CARD CELLS, one nibble each, 0 / 1 -- the contract with the door code, which reads them.
 # `pcard` (the blue card, doorcode.door_decls', P2a.1) is unchanged; the yellow and the red card's cells are this
 # module's: declared in the game tier only when the map has the card (`map_cards`: E1M1 has none), persisted across the
@@ -130,6 +133,42 @@ def nkleaf_values(w) -> List[int]:
     return [SECTOR_HURT.get(w.secs[w.leaf_sector[s]].special, 0) for s in range(len(w.cmap.subsectors))]
 
 
+def nkgrp_values(w) -> List[int]:
+    """M8 C4: `nkgrp`, by leaf: 1 + the texture-change floor group (movers.FLOOR_CHANGE_SPECIALS) whose DAMAGING sector
+    the leaf lies in -- its damage stops once the group fired (`World.floor_special_cleared`) -- else 0. [] when the
+    map has no such sector (no table, no text: E1M1 / E1M2)"""
+    from doomfj.combat import SECTOR_HURT
+    grp = {si: g for si, (_h, _f, g) in getattr(w, "floor_change", {}).items() if w.secs[si].special in SECTOR_HURT}
+    if not grp:
+        return []
+    out = [grp[w.leaf_sector[s]] + 1 if w.leaf_sector[s] in grp else 0 for s in range(len(w.cmap.subsectors))]
+    assert max(out) < 16, "nkgrp is one nibble"
+    return out
+
+
+def nukage_clear_lines(w, out: str = "nk_out") -> List[str]:
+    """M8 C4: after `nkleaf` found a damage at leaf `ptss` -- `nkgrp`'s group, and when that texture-change group FIRED
+    (its state off 0 or its timer running: `movers.floor_fired`) on to `out` (no damage), else on to `nk_keep`. [] on a
+    map without such a sector (E1M1 / E1M2: nukage's text unchanged)"""
+    ng = nkgrp_values(w)
+    if not ng:
+        return []
+    from doomfj.movers import floor_sub_cell, switch_cell
+    groups = w.floor_groups
+    gs = sorted({v - 1 for v in ng if v})
+    assert len(groups) > 1 or groups[0].sub, "a moving group: the wide fswitch layout (movers.floor_wide)"
+    labs = ["nk_keep"] + [f"nk_g{g + 1}" for g in range(max(gs) + 1)]
+    lines = ["    nkgrp.lookup nk_g, ptss",
+             "    hex.switch nk_g, " + ", ".join(labs + ["nk_keep"] * (16 - len(labs)))]
+    for g in range(max(gs) + 1):
+        lines += [f"  nk_g{g + 1}:"]
+        if g in gs:
+            lines += [f"    hex.if1 1, {switch_cell(g)}, {out}",
+                      f"    hex.if1 1, {floor_sub_cell(g, len(groups))}, {out}"]
+        lines += ["    ;nk_keep"]
+    return lines + ["  nk_keep:"]
+
+
 def bk10_values() -> List[int]:
     """`bk10`: the berserk fist's damage x10 (A_Punch's `damage *= 10`), by the melee damage; 0 past one byte"""
     return [v * 10 if v * 10 < 256 else 0 for v in range(256)]
@@ -139,9 +178,11 @@ def tables_fj(w) -> List[str]:
     """every D4 table the loot code reads: amcap, nkleaf, pkxyz (bk10 is weaponcode's, bonpal hurtcode's)"""
     nk = nkleaf_values(w)
     assert max(nk) < 256
-    return [generate_dispatch_table_fj("amcap", amcap_values(), index_nibbles=2, result_nibbles=3),
-            generate_dispatch_table_fj("nkleaf", nk, index_nibbles=3, result_nibbles=2),
-            pickup_table_fj(w)]
+    ng = nkgrp_values(w)                  # M8 C4: the texture-change floors' cleared damage (none: no table)
+    return ([generate_dispatch_table_fj("amcap", amcap_values(), index_nibbles=2, result_nibbles=3),
+             generate_dispatch_table_fj("nkleaf", nk, index_nibbles=3, result_nibbles=2),
+             pickup_table_fj(w)]
+            + ([generate_dispatch_table_fj("nkgrp", ng, index_nibbles=3, result_nibbles=1)] if ng else []))
 
 
 # ---- which cell each pickup lives in ---------------------------------------------------------------------------
@@ -251,8 +292,23 @@ def level_start(w) -> Dict[str, int]:
     return out
 
 
-def loot_decls(start: Dict[str, int]) -> List[str]:
-    """the persisted cells (at `start`), the latch, the interfaces and the scratch"""
+def drop_rows(w, mon_rt: Sequence[int], drop_rt: Sequence[int] = None) -> List[int]:
+    """the runtime row the pickup reads dropper k's drop at (`pk_t`): its monster's (mon_rt) or, M7 P8a, its own"""
+    return [mon_rt[m] if drop_rt is None else drop_rt[k] for k, m in enumerate(droppers(w))]
+
+
+def pk_row_nibbles(rows: Sequence[int]) -> int:
+    """M8 l12fix: `pk_t`'s width -- 2 nibbles while every drop row fits a byte (every 8-bit map: E1M1 / E1M2's text),
+    3 past it (a wide-list map: E1M5's drop rows reach 275). At 2, `hex.set 2, pk_t, 275` kept 0x13 and the player
+    read row 19 for the drop at row 275: E1M5's m2_std_gate parted at frame 94 (the drop not taken)"""
+    nib = max(2, (max(rows, default=0).bit_length() + 3) // 4)
+    assert nib <= 3, ("a drop row past 4,095", max(rows))
+    return nib
+
+
+def loot_decls(start: Dict[str, int], pk_nib: int = 2) -> List[str]:
+    """the persisted cells (at `start`), the latch, the interfaces and the scratch; `pk_nib`: pk_t's width
+    (pk_row_nibbles)"""
     return ([f"{cell}: hex.vec {nib}, {start[cell]}" for cell, _f, nib, _a in CELLS]
             + ["p_dd0: hex.vec 1",                                          # the TIC-START p_dead (P7-a)
                "gv_ok: hex.vec 1", "gv_ret: hex.vec w/4", "gv_c: hex.vec 3",
@@ -261,7 +317,7 @@ def loot_decls(start: Dict[str, int]) -> List[str]:
                "pk_nret: hex.vec w/4", "pk_d: hex.vec 8", "pk_bd: hex.vec 8, %d" % (PK_RADIUS << 16),
                "pk_cup: hex.vec 8, %d" % REACH_UP, "pk_cdn: hex.vec 8, %d" % (-REACH_DOWN & M32),
                "pk_i: hex.vec 2", "pk_r: hex.vec 12", "pk_tx: hex.vec 8", "pk_ty: hex.vec 8", "pk_tz: hex.vec 8",
-               "pk_in: hex.vec 1", "pk_t: hex.vec 2", "pk_off: hex.vec w/4", "pk_base: hex.vec w/4",
+               "pk_in: hex.vec 1", "pk_t: hex.vec %d" % pk_nib, "pk_off: hex.vec w/4", "pk_base: hex.vec w/4",
                "pk_ptr: hex.vec w/4", "pk_pos: hex.vec 16",
                "pb_ret: hex.vec w/4", "pb_tret: hex.vec w/4", "pb_hit: hex.vec 1", "pb_c: hex.vec 8",
                "pb_tx: hex.vec 8", "pb_ty: hex.vec 8",
@@ -292,9 +348,10 @@ def _if_ready(p: str, weapons, yes: str, no: str) -> List[str]:
 
 
 # ---- the give routines ------------------------------------------------------------------------------------------
-def give_ammo_lines(a: int) -> List[str]:
+def give_ammo_lines(a: int, plasma: bool = False) -> List[str]:
     """`ga<a>` (stl.fcall ga<a>, ga_ret): P_GiveAmmo for ammo a with `ga_n` rounds already scaled (num * clipammo,
-    or half a clip) -> `gv_ok` 1 taken, 0 refused (at the cap). From empty, DOOM's auto-switch."""
+    or half a clip) -> `gv_ok` 1 taken, 0 refused (at the cap). From empty, DOOM's auto-switch. M8 C6 (`plasma`, a map
+    with the rifle): the cells' switch -- the fist or the pistol up, the rifle owned -> the rifle."""
     cell = AMMO_CELL[a]
     p = f"ga{a}"
     out = [f"{p}:",
@@ -325,7 +382,11 @@ def give_ammo_lines(a: int) -> List[str]:
         out += _if_ready(p + "m", (gd.WP_FIST,), f"{p}_sw", f"{p}_out")
         out += [f"  {p}_sw:", f"    hex.if0 1, wp_own + {WEAPON_OWN[gd.WP_MISSILE]}*dw, {p}_out",
                 f"    hex.set 1, wp_pend, {gd.WP_MISSILE}"]
-    # AM_CELL (the plasma rifle): never owned on E1M1 -- no switch
+    elif a == gd.AM_CELL and plasma:  # M8 C6: the fist or the pistol up, the rifle owned -> the rifle
+        out += _if_ready(p + "l", (gd.WP_FIST, gd.WP_PISTOL), f"{p}_sw", f"{p}_out")
+        out += [f"  {p}_sw:", f"    hex.if0 1, wp_own + {WEAPON_OWN[gd.WP_PLASMA]}*dw, {p}_out",
+                f"    hex.set 1, wp_pend, {gd.WP_PLASMA}"]
+    # AM_CELL without the rifle (E1M1, E1M2, ...): never owned -- no switch
     out += [f"  {p}_out:", "    stl.fret ga_ret"]
     return out
 
@@ -344,7 +405,7 @@ def _give_body(p: str, n: int, done: str, refused: Optional[str]) -> List[str]:
             f"  {p}gc:", f"    hex.mov 3, p_hp, gv_c", f"    ;{done}"]
 
 
-def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[str]:
+def give_lines(kind: int, dropped: bool = False, stats: bool = False, count_nib: int = 2) -> List[str]:
     """`give_<kind>` (`give_<kind>d` for a dropped one): combat._touch's case for `kind` after the reach test ->
     `gv_ok`. Leaves through `stl.fret gv_ret` on every path. P10 (`stats`, doomfj.statcode): a COUNTITEM kind's
     taken exit counts the item in `st_item` (combat._touch_specials' itemcount)."""
@@ -371,6 +432,8 @@ def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[st
     elif kind == 2013:                                                # SOUL (M8 F4): health + 100, cap 200
         out += [f"    hex.add_constant 3, p_hp, {SOUL_HEALTH}", f"    hex.set 3, gv_c, {MAX_SOUL}",
                 f"    hex.cmp 3, p_hp, gv_c, {ok}, {ok}, {p}_c", f"  {p}_c:", "    hex.mov 3, p_hp, gv_c", f"    ;{ok}"]
+    elif kind in _POWER_TYPES:                                        # PINS / SUIT (M8 C6): P_GivePower, the
+        out += _powercode.give_lines(kind, ok)                        # counter set, always taken
     elif kind == 2026:                                                # PMAP (M8 F4): P_GivePower(pw_allmap), no
         out += [f"    ;{ok}"]                                         # automap; taken (one map a level, combat's)
     elif kind in (2011, 2012):                                        # STIM / MEDI: P_GiveBody
@@ -394,6 +457,11 @@ def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[st
         out += _ga_call(gd.AM_MISL, gd.CLIPAMMO[gd.AM_MISL] * 2)
         out += [f"    hex.if0 1, {own}, {p}_new", "    stl.fret gv_ret",       # owned: taken iff ammo was given
                 f"  {p}_new:", f"    hex.set 1, {own}, 1", f"    hex.set 1, wp_pend, {gd.WP_MISSILE}", f"    ;{ok}"]
+    elif kind == 2004:                                                # PLAS (M8 C6): P_GiveWeapon, 2 x 20 cells
+        own = f"wp_own + {WEAPON_OWN[gd.WP_PLASMA]}*dw"
+        out += _ga_call(gd.AM_CELL, gd.CLIPAMMO[gd.AM_CELL] * 2)
+        out += [f"    hex.if0 1, {own}, {p}_new", "    stl.fret gv_ret",       # owned: taken iff ammo was given
+                f"  {p}_new:", f"    hex.set 1, {own}, 1", f"    hex.set 1, wp_pend, {gd.WP_PLASMA}", f"    ;{ok}"]
     elif kind == 2002:                                                # MGUN (P10): P_GiveWeapon (2 clips, 1 dropped)
         own = f"wp_own + {WEAPON_OWN[gd.WP_CHAINGUN]}*dw"
         out += _ga_call(gd.AM_CLIP, gd.CLIPAMMO[gd.AM_CLIP] * (1 if dropped else 2))
@@ -414,7 +482,7 @@ def give_lines(kind: int, dropped: bool = False, stats: bool = False) -> List[st
         out += _ga_call(a, num * gd.CLIPAMMO[a] if num else gd.CLIPAMMO[a] // 2)
         out += ["    stl.fret gv_ret"]
     out += [f"  {no}:", "    hex.zero 1, gv_ok", "    stl.fret gv_ret",
-            f"  {ok}:", *(_statcode.item_lines() if stats and _statcode.counts_item(kind, dropped) else []),
+            f"  {ok}:", *(_statcode.item_lines(count_nib) if stats and _statcode.counts_item(kind, dropped) else []),
             "    hex.set 1, gv_ok, 1", "    stl.fret gv_ret"]
     return out
 
@@ -430,7 +498,7 @@ def give_kinds(w) -> List[tuple]:
 
 # ---- the pickups ---------------------------------------------------------------------------------------------------
 def _tree(L: str, reg_x: str, reg_y: str, lists: Dict[tuple, str], none: str) -> tuple:
-    """`(lines, root)`: collision.collision_cells_fj's cell tree (jump16 on nibbles 7, 6, 5 of x, then of y; both
+    """`(lines, root)`: collision.collision_cells_fj's cell tree (hex.switch on nibbles 7, 6, 5 of x, then of y; both
     16-unit halves of a 32-unit cell land on the same label), for `lists` = {(cx, cy): label}"""
     from doomfj.collision import _HALVES
     nodes: dict = {}
@@ -469,7 +537,7 @@ def _tree(L: str, reg_x: str, reg_y: str, lists: Dict[tuple, str], none: str) ->
     root = tree(reg_x, x_leaf)
     out = []
     for (reg, nib, targets), lab in nodes.items():
-        out += [f"{lab}:", f"    sim.jump16 {reg} + {nib}*dw, " + ", ".join(targets)]
+        out += [f"{lab}:", f"    hex.switch {reg} + {nib}*dw, " + ", ".join(targets)]
     return out, root
 
 
@@ -549,17 +617,23 @@ def mbox_decls(w) -> List[str]:
     return ["pk_mret: hex.vec w/4"] if mover_pickup_leaves(w) else []
 
 
-def _drop_leaf() -> List[str]:
+def _drop_leaf(thss_cold: bool = False, pk_nib: int = 2) -> List[str]:
     """`pk_drop` (stl.fcall pk_drop, pk_dret): the drop of runtime row `pk_t` (its monster's thpos_rt / thss_rt row):
     its 16.16 position, its leaf's floor now (`ms_seed_leaf`: mover-aware, the model's `_floor_at`), then `pk_boxz`
-    (sim.thing_pos_read's row read)"""
+    (sim.thing_pos_read's row read).
+    M8 wave 1 (`thss_cold`, config.Config.THSS_COLD: thss_rt past the hot data block): the read arms the pointer library
+    OUTSIDE frame.arm5's window, where the in-window thss_rt left it; a full arm at `thnext` (in the window) puts it
+    back -- frame_render's rec_seen_mark re-arm, so whatever narrow arm comes next sees an in-window predecessor as
+    before (arm5 reads only the high hexes, the same anywhere in the window)"""
+    rearm = (["    hex.set w/4, pk_base, thnext", "    hex.pointers.set_flip_and_jump_pointers pk_base"]
+             if thss_cold else [])
     return ["pk_drop:",
-            "    hex.zero w/4, pk_off", "    hex.mov 2, pk_off, pk_t", "    hex.shl_hex w/4, 1, pk_off",   # 16 a row
+            "    hex.zero w/4, pk_off", "    hex.mov %d, pk_off, pk_t" % pk_nib, "    hex.shl_hex w/4, 1, pk_off",   # 16 a row
             "    hex.set w/4, pk_base, thpos_rt", "    hex.ptr_index pk_ptr, pk_base, pk_off",
             "    hex.read_hex 16, pk_pos, pk_ptr",
             "    hex.mov 8, pk_tx, pk_pos", "    hex.mov 8, pk_ty, pk_pos + 8*dw",
             "    hex.set w/4, pk_base, thss_rt", "    hex.ptr_index pk_ptr, pk_base, pk_off",
-            "    hex.zero w/4, ptss", "    hex.read_hex 3, ptss, pk_ptr",
+            "    hex.zero w/4, ptss", "    hex.read_hex 3, ptss, pk_ptr", *rearm,
             "    stl.fcall ms_seed_leaf, ms_seed_ret",
             "    hex.mov 8, pk_tz, cp_seedf",
             "    stl.fcall pk_boxz, pk_bret",
@@ -568,7 +642,7 @@ def _drop_leaf() -> List[str]:
 
 def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable = _default_rt_unlink,
                  drop_take: Callable = _default_drop_take, lists=None, drop_rt: Sequence[int] = None,
-                 stats: bool = False) -> List[str]:
+                 stats: bool = False, plasma: bool = False, thss_cold: bool = False) -> List[str]:
     """`pk_go` (stl.fcall pk_go, pk_ret): `combat._touch_specials` at the candidate (`cpx`, `cpy`) with the floor
     `cm_hf` (the module docstring). `slots`: `pickup_slots`; `mon_rt[m]`: monster slot m's runtime thing (its
     thpos_rt / thss_rt row). `lists` overrides the cell lists (the host control's mutated grid). Jumps over itself.
@@ -611,11 +685,13 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
         out += [f"  {p}_n:", "    stl.fret pk_iret"]
     # ---- the drops, in slot order ----
     out += ["pk_drops:", "    hex.if0 2, dr_live, pk_out"]
+    rows = drop_rows(w, mon_rt, drop_rt)
+    pk_nib = pk_row_nibbles(rows)                    # M8 l12fix: 3 nibbles once a drop row passes 255
     for k, m in enumerate(droppers(w)):
         p = f"pkd{k}"
         kind = DROP_ITEM[gd.DROPS[gd.MONSTER_DOOMEDNUMS[w.mon_things[m].type]]]
         out += [f"    hex.if_flags mdrop + {k}*dw, {1 << 1:#06x}, {p}_n, {p}_t", f"  {p}_t:",
-                f"    hex.set 2, pk_t, {mon_rt[m] if drop_rt is None else drop_rt[k]}",
+                f"    hex.set {pk_nib}, pk_t, {rows[k]}",
                 "    stl.fcall pk_drop, pk_dret", f"    hex.if0 1, pk_in, {p}_n",
                 f"    stl.fcall {DROPPED[kind]}, gv_ret", f"    hex.if0 1, gv_ok, {p}_n",
                 "    stl.fcall pk_bonus, pk_nret"]
@@ -623,12 +699,15 @@ def pickup_lines(w, slots: dict, mon_rt: Sequence[int], *, rt_unlink: Callable =
         out += [f"  {p}_n:"]
     out += ["pk_out:", "    stl.fret pk_ret"]
     # ---- the shared leaves and the give routines ----
-    out += _box_leaf() + _drop_leaf() + (_mbox_leaf() if mleaf else [])
+    out += _box_leaf() + _drop_leaf(thss_cold, pk_nib) + (_mbox_leaf() if mleaf else [])
     out += ["pk_bonus:"] + _bonus_lines("pkb") + ["    stl.fret pk_nret"]
-    for kind, dropped in give_kinds(w):
-        out += give_lines(kind, dropped, stats)
+    kinds = give_kinds(w)
+    assert plasma or (2004, False) not in kinds, ("M8 C6: a plasma rifle on the map, and no rifle in the weapon code "
+                                                 "(wall_renderer.plasma_game_on: the tier's modes)")
+    for kind, dropped in kinds:
+        out += give_lines(kind, dropped, stats, _statcode.count_nibbles(w) if stats else 2)   # M8 C2: st_item's width
     for a in range(gd.NUMAMMO):
-        out += give_ammo_lines(a)
+        out += give_ammo_lines(a, plasma)                                  # M8 C6: the cells' switch to the rifle
     out += ["pk_end:"]
     return out
 
@@ -642,9 +721,12 @@ def pb_mon_lines(w, mon_rt: Sequence[int]) -> List[str]:
     itself."""
     out = ["// M7 P6 (doomfj.lootcode): the player blocked by a solid monster", ";pb_end",
            "pb_mon:", "    hex.zero 1, pb_hit"]
+    from doomfj.world import radius_classes
+    r0, _r1 = radius_classes(w.mon_radius[:w.layout.nmon])         # M8 C8: radius class 0 (E1M8's Barons 24)
+    radii = (r0, 30) + ((16,) if 16 in w.mon_radius else ())      # M8 C8: the lost soul (pb_bd16: soulcode.SCRATCH)
     for m in range(w.layout.nmon):
         r = w.mon_radius[m]
-        assert r in (20, 30), r
+        assert r in radii, r
         n = f"pb{m}_n"
         t = mon_rt[m]
         out += [f"    hex.if0 1, mon_solid + {m}*dw, {n}",
@@ -653,7 +735,9 @@ def pb_mon_lines(w, mon_rt: Sequence[int]) -> List[str]:
                 f"    stl.fcall pb_t{r}, pb_tret", "    hex.if1 1, pb_hit, pb_out",
                 f"  {n}:"]
     out += ["  pb_out:", "    stl.fret pb_ret"]
-    for r in (20, 30):
+    if r0 != 20:                                    # M8 C8: radius class 0's bound, a constant behind the jump-over
+        out += ["pb_bd%d: hex.vec 8, %d" % (r0, (r0 + 16) << 16)]
+    for r in radii:
         out += [f"pb_t{r}:",
                 "    hex.mov 8, pb_c, pb_tx", "    hex.sub 8, pb_c, cpx", "    hex.abs 8, pb_c",
                 f"    hex.scmp 8, pb_c, pb_bd{r}, pbt{r}_y, pbt{r}_n, pbt{r}_n",
@@ -720,10 +804,17 @@ def nukage_lines(w, cell_root: str) -> List[str]:
     from doomfj.reference_model import PLAYER_RADIUS
     assert HURT_PERIOD_MASK == 0x1F
     # the use lines run BEFORE this in fj and after it in the model: a floor switch fired this tic must not move a
-    # floor this query can read -- no mover line within the box's reach of any damaging sector (E1M1: none)
+    # floor this query can read -- no INSTANT floor group's line within the box's reach of a damaging sector (E1M1:
+    # none). M8 C4: only an instant group moves a floor at the press (a lift's request and a moving group's timer move
+    # nothing before the next mover tic, in both mirrors), so only its sectors are kept apart -- from each damaging
+    # sector's own box (the union box of them all refused every lift of E1M3 / E1M4)
+    from doomfj.movers import FLOOR_CHANGE_SPECIALS, FLOOR_USE_SPECIALS, use_line_boxes
     hurt = [s for s, v in enumerate(nkleaf_values(w)) if v]
     hsec = {w.leaf_sector[s] for s in hurt}
-    assert not hsec & set(w.mover_order), hsec
+    chg = set(getattr(w, "floor_change", {}))
+    # M8 C4: a DAMAGING mover is a texture-change floor alone (its damage stops when its group fires; at state 0 its
+    # floor is the stored one, so `ms_seed_leaf` and the box's floorz read what the model's do)
+    assert not (hsec & set(w.mover_order)) - chg, hsec & set(w.mover_order)
     V = w.cmap.vertexes
 
     def box(secset):
@@ -734,16 +825,31 @@ def nukage_lines(w, cell_root: str) -> List[str]:
                 xs += [V[ld.v1][0], V[ld.v2][0]]
                 ys += [V[ld.v1][1], V[ld.v2][1]]
         return min(xs), max(xs), min(ys), max(ys)
-    hb = box(hsec) if hsec else None      # a map with no damaging floor (the one-room fixtures): nothing to keep apart
+    hboxes = [box({s}) for s in sorted(hsec)]   # a map with no damaging floor (the one-room fixtures): none
     # issue #123 R5a: cp_floor and cp_seedf are SIGNED floor heights and `hex.cmp` compares unsigned -- exact here
     # because only EQUALITY is read ("Falling, not all the way down yet?": floorz != the sector's floor -> no damage),
     # and equality is sign-agnostic. Asserted: the compare's lt and gt arms are the same label, so no order is ever taken
-    _nk_lt, _nk_eq, _nk_gt = "nk_out", "nk_hit", "nk_out"
+    suit = _powercode.P.SUIT_TYPE in getattr(w, "powers", ())       # M8 C6: the radiation suit (none on E1M1)
+    _nk_lt, _nk_eq, _nk_gt = "nk_out", ("nk_suit" if suit else "nk_hit"), "nk_out"
     assert _nk_lt == _nk_gt != _nk_eq, "nukage's unsigned floor compare may read equality only (issue #123 R5a)"
-    for mv in (w.mover_order if hb else ()):
+    r = (PLAYER_RADIUS >> 16) + 1
+
+    def apart(a, b, m):
+        return a[1] < b[0] - m or a[0] > b[1] + m or a[3] < b[2] - m or a[2] > b[3] + m
+    instant = sorted({si for g in getattr(w, "floor_groups", ()) if not g.sub for si in g.sectors})
+    for mv in instant:
         mb = box({mv})
-        r = (PLAYER_RADIUS >> 16) + 1
-        assert mb[1] < hb[0] - r or mb[0] > hb[1] + r or mb[3] < hb[2] - r or mb[2] > hb[3] + r, (mv, mb, hb)
+        for hb in hboxes:
+            assert apart(mb, hb, r), (mv, mb, hb)
+    # M8 C4: an S1 texture-change line fires its group -- and stops its sectors' damage -- at the press, which the fj
+    # runs before this query and the model after it: the player's CENTRE (the leaf this reads) cannot be in a damaging
+    # change sector while inside such a line's use box (E1M3's 933: the switch stands on a ledge 240 above the pool)
+    s1 = [b for _t, b in use_line_boxes(w.secs, w.lds, V, FLOOR_CHANGE_SPECIALS & FLOOR_USE_SPECIALS)]
+    for si in sorted(chg & hsec):
+        sb = box({si})
+        for (x0, y0, x1, y1) in s1:
+            assert apart((x0, x1, y0, y1), sb, 1), ("an S1 texture-change line's use box meets damaging sector", si)
+    clear = nukage_clear_lines(w)
     return ["// M7 P6 (doomfj.lootcode): nukage -- P_PlayerInSpecialSector's damaging floors", ";nk_end",
             "nk_go:",
             "    hex.if0 1, lvtime, nk_a", "    ;nk_out",
@@ -755,17 +861,20 @@ def nukage_lines(w, cell_root: str) -> List[str]:
             "    stl.fcall ptloc_walk, ptloc_ret",
             "    nkleaf.lookup nk_dmg, ptss",
             "    hex.if0 2, nk_dmg, nk_out",
+            *clear,
             "    stl.fcall ms_seed_leaf, ms_seed_ret",                     # the sector's floor now (cp_seedf)
             "    hex.mov 8, cpx, viewx", "    hex.mov 8, cpy, viewy",
             "    hex.set 8, cprad, %d" % PLAYER_RADIUS,
             "    sim.check_cells %s" % cell_root,                          # the box's floorz (cp_floor)
             "    hex.cmp 8, cp_floor, cp_seedf, %s, %s, %s" % (_nk_lt, _nk_eq, _nk_gt),   # "Falling, not all the way
             # down yet?" -- equality only (see the assert above)
+            *(["  nk_suit:"] + _powercode.suit_lines("nk_hit", "nk_out") if suit else []),   # M8 C6: the suit
             "  nk_hit:",
             "    hex.mov 2, dp_dmg, nk_dmg",
             "    stl.fcall dp_go, dp_ret",
             "  nk_out:",
             "    stl.fret nk_ret",
+            *(["nk_g: hex.vec 1"] if clear else []),                  # M8 C4: nkgrp's result (never executed)
             "nk_end:"]
 
 
@@ -782,11 +891,12 @@ def pre_lines(stats: bool = False) -> List[str]:
             + ["stl.fcall nk_go, nk_ret", "lt_pre_end:"])
 
 
-def post_lines(skip_move: str = "simmv_done") -> List[str]:
+def post_lines(skip_move: str = "simmv_done", powers: Sequence[int] = ()) -> List[str]:
     """after the weapon tic and the damagecount fade (hurtcode's `tic`), before the move. Dead at the tic's start:
     `_death_think`'s use -> g_restart (use HELD: the key byte's use bit) and on past the move to `skip_move` (the
     label right after `wall_renderer._player_sim_lines`, turning included). Alive: the strength grows while it runs
-    (saturating), the bonus count fades."""
+    (saturating), the bonus count fades. M8 C6 (`powers`, doomfj.powercode): the timed powers count down after the
+    strength (P_PlayerThink's order; none on E1M1)."""
     from doomfj.wireformat import KEY_USE_MASK
     return ["hex.if0 1, p_dd0, lt_alive",
             f"hex.if_flags pkeys + dw, {KEY_USE_MASK:#06x}, lt_dead_out, lt_rs",
@@ -798,11 +908,13 @@ def post_lines(skip_move: str = "simmv_done") -> List[str]:
             "hex.if0 4, p_str, lt_str_sat", ";lt_str_end",
             "lt_str_sat:", f"hex.set 4, p_str, {STRENGTH_CAP}",
             "lt_str_end:",
+            *_powercode.countdown_lines(powers),
             "hex.if0 2, p_bc, lt_bc_end", "hex.dec 2, p_bc",
             "lt_bc_end:"]
 
 
-def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = True, stats: bool = False) -> List[str]:
+def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = True, stats: bool = False,
+              powers: Sequence[int] = ()) -> List[str]:
     """the player's tic between the use lines and the move, in the model's order (`_player_phase` / `_death_think`):
     `pre` (nukage, alive), the weapon tic (`weaponcode.weapon_lines(loot=True)`: its keys skipped on `p_dd0`, the
     psprites always), the damagecount fade -- hurtcode's `tic` alive; dead at the tic's start (`p_dd0`), `turn`:
@@ -813,7 +925,7 @@ def tic_lines(weapon_tic: Sequence[str], hurt_tic: Sequence[str], turn: bool = T
     if turn:
         fade = (["hex.if0 1, p_dd0, lt_fade", "stl.fcall dt_turn, dt_tret", ";lt_fade_end", "lt_fade:"]
                 + fade + ["lt_fade_end:"])
-    return pre_lines(stats) + list(weapon_tic) + fade + post_lines()
+    return pre_lines(stats) + list(weapon_tic) + fade + post_lines(powers=powers)
 
 
 def use_guard() -> tuple:
@@ -825,7 +937,8 @@ def use_guard() -> tuple:
 # ---- the splice ------------------------------------------------------------------------------------------------------
 def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int], cell_root: str,
                rt_unlink: Callable = _default_rt_unlink, drop_take: Callable = _default_drop_take,
-               drop_rt: Sequence[int] = None, stats: bool = False) -> dict:
+               drop_rt: Sequence[int] = None, stats: bool = False, plasma: bool = False,
+               thss_cold: bool = False) -> dict:
     """everything package B adds to the game tier, for the World `w` (its level start; any skill):
       * `decls`: the persisted cells (p_bc, p_str, p_bp, am_misl, am_cell), p_dd0, the interfaces and scratch;
       * `tables`: amcap, nkleaf;
@@ -848,17 +961,24 @@ def loot_parts(w, *, rm, map_wad, mapname: str, sprite_wad, mon_rt: Sequence[int
     P10 (`stats`, doomfj.statcode): the COUNTITEM gives count the item, `pre` checks the secrets, and the leaves
     carry `sc_go` (statcode declares the cells: the game tier's).
     M8 F4: `decls` also declares the map's new card cells (`card_decls`: pcard_y / pcard_r, E1M1 none) and `cards`
-    names them -- build._map_persist persists them, p6_restart_parts zeroes them."""
+    names them -- build._map_persist persists them, p6_restart_parts zeroes them.
+    M8 C6: `plasma` -- the tier has the rifle (wall_renderer.plasma_game_on): its give and the cells' switch to it.
+    M8 wave 1: `thss_cold` -- thss_rt is past the hot data block (config.Config.THSS_COLD): pk_drop re-arms."""
     start = level_start(w)
     slots = pickup_slots(w, rm, map_wad, mapname, sprite_wad)
-    leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt, stats=stats)
+    leaves = (pickup_lines(w, slots, mon_rt, rt_unlink=rt_unlink, drop_take=drop_take, drop_rt=drop_rt, stats=stats,
+                           plasma=plasma, **({"thss_cold": True} if thss_cold else {}))   # M8 wave 1
               + pb_mon_lines(w, mon_rt) + nukage_lines(w, cell_root)
               + (_statcode.secret_lines(w, cell_root) if stats else []))
-    return {"decls": loot_decls(start) + card_decls(w) + mbox_decls(w), "tables": tables_fj(w), "leaves": leaves,   # M8 F4 + F1.3
-            "latch": latch_lines(), "pre": pre_lines(stats), "post": post_lines(), "use_guard": use_guard(),
-            "tic": (lambda weapon_tic, hurt_tic, turn=True: tic_lines(weapon_tic, hurt_tic, turn, stats)),
+    pw = tuple(getattr(w, "powers", ()))                            # M8 C6: the map's timed powers (E1M1: none)
+    # M8 l12fix: pk_t declared at the width pickup_lines sets and moves it (pk_row_nibbles of the same rows)
+    return {"decls": loot_decls(start, pk_row_nibbles(drop_rows(w, mon_rt, drop_rt))) + card_decls(w) + mbox_decls(w)
+            + _powercode.decls(pw), "tables": tables_fj(w) + _powercode.tables_fj(pw), "leaves": leaves,
+            "latch": latch_lines(), "pre": pre_lines(stats), "post": post_lines(powers=pw), "use_guard": use_guard(),
+            "tic": (lambda weapon_tic, hurt_tic, turn=True: tic_lines(weapon_tic, hurt_tic, turn, stats, pw)),
             "pickup": pickup_call, "block": block_lines, "cells": player_cell_things, "thing_test": THING_TEST16,
             "slots": slots,
             "extra_vis": {sk: extra_vis(w, slots, sk) for sk in (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD)},
             "restart": restart_lines(start), "persist": PERSIST, "start": start,
-            "cards": card_cells(w)}                         # M8 F4: the map's new card cells (persisted per map)
+            "cards": card_cells(w),                         # M8 F4: the map's new card cells (persisted per map)
+            "powers": pw}                                   # M8 C6: the map's timed powers (powercode)

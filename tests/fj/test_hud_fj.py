@@ -21,12 +21,13 @@ import pytest
 from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 
 from doomfj import hud, hudcode
+from doomfj import screenwire as SW
 from doomfj.config import GAME_CFG
 from doomfj.harness import W
 from doomfj.wad import WadFile
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = [ROOT / "src" / "fj" / "present.fj"]
+SRC = []
 VH, H, WIDTH = GAME_CFG.VIEW_H, GAME_CFG.H, GAME_CFG.W
 MENU_COLOUR = 77
 
@@ -74,17 +75,17 @@ def _program(mutate=None):
     if mutate is not None:
         text = mutate(text)
     start = hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))
-    lines = ["stl.startup_and_init_all", "present.init_screen", ";frames", *hudcode.hud_decls(start),
+    lines = ["stl.startup_and_init_all", "screen.init_screen W, H, 8", ";frames", *hudcode.hud_decls(start),
              "pcard: hex.vec 1", "hud_ret: hex.vec w/4",
              "hud_tail_leaf:", text, "stl.fret hud_ret",
              "frames:"]
     for f, vals in enumerate(SCRIPT):
-        lines.append("present.begin_frame_collines")
+        lines.append("screen.draw_collines")
         if vals is None:
             for x in range(WIDTH):
                 lines += [f"stl.output_char {x}", f"stl.output_char {H}", f"stl.output_char {MENU_COLOUR}",
                           "stl.output_char 0xFF"]
-            lines += ["hex.set 1, hud_full, 1", "stl.output_char 0xFF"]
+            lines += ["hex.set 1, hud_full, 1", "screen.end_frame W, 0"]
             continue
         for x in range(WIDTH):
             rec, _px = _view_column(f, x)
@@ -92,7 +93,7 @@ def _program(mutate=None):
         codes = hudcode.slot_codes(hud.slot_values(**vals))
         lines += [f"hex.set {len(codes)}, hud_v, {sum(c << (4 * i) for i, c in enumerate(codes))}",
                   f"hex.set 1, pcard, {int(vals['blue'])}",
-                  "stl.fcall hud_tail_leaf, hud_ret", "stl.output_char 0xFF"]
+                  "stl.fcall hud_tail_leaf, hud_ret", "screen.end_frame W, 0"]
     lines.append("stl.loop")
     return "\n".join(lines) + "\n", colours, overlay, row
 
@@ -157,8 +158,8 @@ def test_every_frame_is_the_oracle_picture(tmp_path):
                                      "hex.cmp 1, hud_v + 0*dw, hud_s + 0*dw, hud_n0, hud_d0, hud_n0"), 0),
     ("noinval", lambda t: t.replace("hex.set %d, hud_s, " % len(hud.bar_slots()), "hex.xor_by %d, hud_s, 0 // " %
                                     len(hud.bar_slots()), 1), 6),
-    ("keepshort", lambda t: t.replace("stl.output_char 0xFC\nstl.output_char %d\n" % VH,
-                                      "stl.output_char 0xFC\nstl.output_char %d\n" % (VH - 1)), 0),
+    ("keepshort", lambda t: t.replace("stl.output_char %d\nstl.output_char %d\n" % (SW.KEEP, VH),
+                                      "stl.output_char %d\nstl.output_char %d\n" % (SW.KEEP, VH - 1)), 0),
 ])
 def test_the_checks_catch_a_broken_tail(tmp_path, name, mutate, frame):
     text, *_ = _program()
@@ -186,16 +187,16 @@ def _psprite_program(mutate=None):
     if mutate is not None:
         text = mutate(text)
     start = hudcode.slot_codes(hud.slot_values(**hudcode.LEVEL_START))
-    lines = ["stl.startup_and_init_all", "present.init_screen", ";frames", *hudcode.hud_decls(start),
+    lines = ["stl.startup_and_init_all", "screen.init_screen W, H, 8", ";frames", *hudcode.hud_decls(start),
              "pcard: hex.vec 1", "hud_ret: hex.vec w/4", "wp_frm: hex.vec 2", "fl_frm: hex.vec 1",
              "hud_tail_leaf:", text, "stl.fret hud_ret", "frames:"]
     for f, (wf, ff) in enumerate(PSPRITES):
-        lines.append("present.begin_frame_collines")
+        lines.append("screen.draw_collines")
         for x in range(WIDTH):
             rec, _px = _view_column(f, x)
             lines += [f"stl.output_char {b}" for b in rec]
         lines += [f"hex.set 2, wp_frm, {wf}", f"hex.set 1, fl_frm, {ff}",
-                  "stl.fcall hud_tail_leaf, hud_ret", "stl.output_char 0xFF"]
+                  "stl.fcall hud_tail_leaf, hud_ret", "screen.end_frame W, 0"]
     lines.append("stl.loop")
     return "\n".join(lines) + "\n", colours, weapons, flashes, row
 

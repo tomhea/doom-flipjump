@@ -31,7 +31,10 @@ from __future__ import annotations
 import struct
 
 MAGIC = 0xD0            # first byte of every state feed; anything else -> the program's `bad:` halt
-STATE_CMD = 0x10        # the present-protocol command byte carrying the state block back out
+# the HOST CHANNEL's command bytes. They share the output stream with the screen's commands, so they sit OUTSIDE the
+# screen API's opcodes (flipjump io_devices/README.md: 0x01-0x07, 0x10, 0x11, 0x1F) -- 0x80 and up. Only the hosted
+# tiers print them; the harness (tests/fj/stream_screen.py) takes them out before the screen device sees the rest.
+STATE_CMD = 0x80        # the host-channel command byte carrying the state block back out
 STATE_BYTES = 12        # x, y, angle -- three little-endian 32-bit words
 FEED_BYTES = 1 + STATE_BYTES + 1
 
@@ -119,7 +122,7 @@ def decode_state(payload: bytes) -> tuple:
 # nothing and destroys nothing), so it bakes; and `sp_z`/`sp_lt` are derived from the leaf the thing
 # binds to, which only fj knows. See `doomfj.things`.
 
-THING_CMD = 0x11        # the present-protocol command carrying the thing BINDINGS back out
+THING_CMD = 0x81        # the host-channel command carrying the thing BINDINGS back out
 
 # M14-e perf: the thing->subsector binding round-trips too, and for the same reason the position
 # does -- it is world state, and fj has none between frames. Re-locating all 251 things every frame

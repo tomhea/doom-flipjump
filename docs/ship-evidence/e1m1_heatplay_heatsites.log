@@ -1,0 +1,27 @@
+fjm doom_e1m1.fjm (sha256 3a2c9564adbfcb07...), 346 game frames; CONTROL layout vs image: 41006/44739 source words at their base, 3733 unpinned (no base), 0 at a WRONG base
+sites sites_e1m1.json.gz (sha256 c82d64d17bc3b82e...): 44739 groups, 542974 tables, program {'tier': 'game', 'map': 'E1M1', 'wad': 'tests/fixtures/freedoom_e1m1.wad', 'src': 'e318b7b688332caa'}
+
+hot group                                                  table ops/fr   tables unmapped/fr
+(hex.tables.res + 32)                                           238,111   17,777          0
+((hex.pointers.to_ptr_var + 128) + 32)                           26,302      296          0
+((hex.pointers.to_ptr_var + 192) + 32)                           21,768      268          0
+((hex.pointers.to_ptr_var + 64) + 32)                            15,811      296          0
+((hex.pointers.to_ptr_var + 256) + 32)                           15,571      268          0
+((hex.pointers.read_byte + 0) + 32)                              14,874    2,816          0
+((hex.pointers.read_byte + 64) + 32)                             11,536    2,742          0
+((hex.pointers.to_ptr_var + 320) + 32)                            7,173      185          0
+((ecl_cmidx + 0) + 32)                                            6,525    1,114          0
+((hex.pointers.to_ptr_var + 0) + 32)                              4,888      296          0
+((ecl_cmidx + 64) + 32)                                           4,345    1,114          0
+(((ecl_cmidx + 128) + 0) + 32)                                    3,907      960          0
+((dptr + 128) + 32)                                               3,706       14          0
+((tsf_sfflag_p + 128) + 32)                                       3,633       13          0
+(((dptr + 192) + 64) + 32)                                        3,384       14          0
+((p2_fstart + 64) + 32)                                           3,327       96          0
+((hex.pointers.to_ptr_var + 384) + 32)                            3,122      185          0
+((tsf_sfslot_p + 128) + 32)                                       3,055       34          0
+((tsf_sfslot_p + 192) + 32)                                       2,914       24          0
+((f11:l107837:frame.seg_pass2_leaf_body_lines(26)---f3:l25        2,899       17          0
+
+wrote scratchpad/12m/heat_e1m1_play.json.gz: 20 hot groups, 28529 hot sites (sha256 e15be0b2146e4728...)
+CONTROL every executed hot table mapped to a replayed site: PASS (0 ops unmapped)
